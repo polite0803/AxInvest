@@ -35,11 +35,6 @@ impl MootdxVendor {
         Self { host: host.to_string(), port, current_server_idx: AtomicUsize::new(0) }
     }
 
-    #[allow(dead_code)]
-    pub fn with_server(host: &str, port: u16) -> Self {
-        Self { host: host.to_string(), port, current_server_idx: AtomicUsize::new(0) }
-    }
-
     async fn connect(&self) -> Result<TdxConnection, DataError> {
         let stream = tokio::time::timeout(
             std::time::Duration::from_secs(5),
@@ -417,6 +412,7 @@ impl TdxConnection {
 }
 
 struct QuoteResult {
+    /// tdx 行情协议响应字段：解析时消费该字节保持 wire 契约完整，Rust 侧暂未读取
     #[allow(dead_code)]
     market: u8,
     code: String,

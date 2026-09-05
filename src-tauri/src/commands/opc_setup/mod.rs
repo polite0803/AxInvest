@@ -186,12 +186,7 @@ pub async fn ensure_opc_company_seeded(db: &DatabaseConnection) -> Result<(), St
         .parent()
         .unwrap_or(std::path::Path::new("."));
     let experts_path = project_root.join("agency-agents-src");
-    match crate::commands::agency_expert::import_agency_experts_from_dir(
-        db,
-        &experts_path.to_string_lossy(),
-    )
-    .await
-    {
+    match crate::commands::agency_expert::import_experts_impl(db, &experts_path).await {
         Ok(result) => tracing::info!("[opc-company] 已导入 {} 个专家", result.count),
         Err(e) => tracing::warn!("[opc-company] 专家导入跳过: {}", e),
     }

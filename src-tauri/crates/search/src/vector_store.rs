@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(clippy::disallowed_types)]
-
 use std::collections::HashMap;
 // SAFETY: parking_lot::Mutex (别名 StdMutex) 用于保护 HashMap 的查找操作，
 // 仅用于快速获取集合级别的 tokio::sync::Mutex 引用，不跨越 await 点。
 // 实际的临界区由 tokio::sync::Mutex 保护，cross-await 安全。
 use parking_lot::Mutex as StdMutex;
-#[allow(clippy::disallowed_types)]
 use std::sync::Arc;
 
 use sea_orm::{
@@ -160,7 +157,6 @@ impl Default for HnswConfig {
 #[derive(Debug, Clone)]
 // SAFETY: VectorStore 中的 StdMutex 仅用于保护 HashMap 的查找操作，
 // 不跨越 await 点。实际的临界区由 tokio::sync::Mutex 保护，cross-await 安全。
-#[allow(clippy::disallowed_types)]
 pub struct VectorStore {
     db: DatabaseConnection,
     /// Per-collection serialization locks for upsert operations.

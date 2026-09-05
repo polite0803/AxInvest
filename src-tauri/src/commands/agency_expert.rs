@@ -313,7 +313,7 @@ pub async fn import_agency_experts(
 }
 
 /// 核心导入实现：从目录扫描 .md 文件并 UPSERT 到 agency_experts 表。
-async fn import_experts_impl(
+pub(crate) async fn import_experts_impl(
     db: &sea_orm::DatabaseConnection,
     path: &Path,
 ) -> Result<ImportResult, String> {

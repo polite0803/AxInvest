@@ -412,7 +412,7 @@ impl WalkForward {
 }
 
 /// 仅在测试中使用的日期加法
-#[allow(dead_code)]
+#[cfg_attr(not(test), allow(dead_code))]
 fn add_days(date: &str, days: i64) -> String {
     use chrono::{Duration, NaiveDate};
     match NaiveDate::parse_from_str(date, "%Y-%m-%d") {

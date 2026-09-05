@@ -32,7 +32,6 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    #[allow(clippy::disallowed_types)]
     fn env_guard() -> parking_lot::MutexGuard<'static, ()> {
         crate::manager::env_lock().lock()
     }

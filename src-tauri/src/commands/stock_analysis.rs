@@ -1,3 +1,7 @@
+// SAFETY: 本文件的 std::sync 锁仅在同步临界区使用，guard 不跨 await（无死锁 / 毒化风险）。
+// [2026-09-03] 由 crate 级 disallowed_types 豁免局部化到具体触发点（不含字面量，便于 grep 审计）。
+#![allow(clippy::disallowed_types)]
+
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
@@ -48,6 +52,8 @@ pub struct WhatIfRequest {
     pub catalyst_level: String,
     pub consensus_score: f64,
     /// 机构痕迹（龙虎榜/大宗交易/北上资金等汇总描述）
+    /// 前端契约字段：ExperimentSidebar/WhatIfBacktest UI 会采集该参数传入 compute_what_if，
+    /// 简化版计算暂不读取（完整版接入后移除 allow）
     #[serde(default)]
     #[allow(dead_code)]
     pub institutional_trace: String,
@@ -1722,26 +1728,9 @@ pub async fn execute_stock_mcp_tool(
         );
     }
 
-    // 为 compute_valuation 工具注入估值参数配置
-    let arguments = if tool_name == "compute_valuation" {
-        let params = get_valuation_params_inner(&state).await;
-        let config = serde_json::json!({
-            "perpetualGrowth": params.perpetual_growth,
-            "discountRate": params.discount_rate,
-            "defaultGrowth": params.default_growth,
-            "minGrowth": params.min_growth,
-            "maxGrowth": params.max_growth,
-            "forecastYears": params.forecast_years,
-            "bondYield": params.bond_yield,
-        });
-        let mut args = arguments;
-        if let Some(obj) = args.as_object_mut() {
-            obj.insert("valuation_config".to_string(), config);
-        }
-        args
-    } else {
-        arguments
-    };
+    // 为 compute_valuation 工具注入估值参数配置（复用可导出的注入函数）
+    let arguments =
+        inject_valuation_config_for_tool(&tool_name, state.harness.db(), arguments).await;
 
     axagent_astock_data::mcp_tools::execute_mcp_tool(&state.astock_client, &tool_name, &arguments)
         .await
@@ -2410,9 +2399,9 @@ pub async fn toggle_trading_enabled(
 }
 
 /// 获取最近分析记录（用于 Dashboard）
+/// 接线：register_commands.rs 注册 IPC handler + agent_command 宏注册 agent 工具索引
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取最近分析记录")]
 #[tauri::command]
-#[allow(dead_code)] // 暂未在 frontend 调起，预留给 Dashboard "历史" 区块
 pub async fn get_recent_analyses(
     state: State<'_, AppState>,
     limit: Option<u32>,
@@ -5611,7 +5600,7 @@ impl Default for ValuationParams {
 const VALUATION_PARAMS_KEY: &str = "valuation_params";
 
 /// 从数据库加载估值参数，失败时返回默认值
-/// 可供其他模块（如 init/services.rs 中的工具回调）复用
+/// 供 inject_valuation_config_for_tool 复用
 pub async fn load_valuation_params(db: &sea_orm::DatabaseConnection) -> ValuationParams {
     match axagent_dao::repo::settings::get_setting(db, VALUATION_PARAMS_KEY).await {
         Ok(Some(json_str)) => {
@@ -5657,16 +5646,9 @@ pub async fn get_valuation_params(state: State<'_, AppState>) -> Result<Valuatio
     Ok(params)
 }
 
-/// 内部函数：从数据库加载估值参数，失败时返回默认值
+/// 内部函数：从数据库加载估值参数，失败时返回默认值（复用 load_valuation_params）
 async fn get_valuation_params_inner(state: &State<'_, AppState>) -> ValuationParams {
-    let db = state.harness.db();
-    match axagent_dao::repo::settings::get_setting(db, VALUATION_PARAMS_KEY).await {
-        Ok(Some(json_str)) => {
-            serde_json::from_str(&json_str).unwrap_or_else(|_| ValuationParams::default())
-        },
-        Ok(None) => ValuationParams::default(),
-        Err(_) => ValuationParams::default(),
-    }
+    load_valuation_params(state.harness.db()).await
 }
 
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "保存估值参数配置")]

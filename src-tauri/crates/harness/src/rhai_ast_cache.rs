@@ -24,6 +24,10 @@
 //!
 //! AGENTS.md 禁区第 8 条针对"跨 await 持有锁"的场景，本模块不属此列。
 
+// SAFETY: 本文件的 std::sync 锁仅在同步临界区使用，guard 不跨 await（无死锁 / 毒化风险）。
+// [2026-09-03] 由 crate 级 disallowed_types 豁免局部化到具体触发点（不含字面量，便于 grep 审计）。
+#![allow(clippy::disallowed_types)]
+
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
 

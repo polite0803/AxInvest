@@ -12,6 +12,7 @@ pub mod image_gen;
 pub mod kimi;
 pub mod llama_cpp;
 pub mod managed_tool_adapter;
+pub mod multi_mode;
 pub mod ollama;
 pub mod openai;
 pub mod openai_responses;

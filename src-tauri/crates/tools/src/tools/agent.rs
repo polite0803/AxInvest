@@ -4,8 +4,6 @@
 //! 内置 6 个 Agent 类型 + 支持从 `.axagent/agents/*.md` 动态加载自定义 agent
 //! 经 `agent.loop` 接缝（`CapabilityRegistry::get_agent_turn_runner`）真执行子任务
 
-#![allow(clippy::disallowed_types)]
-
 use crate::agent_def_loader::load_all_agents;
 use crate::agent_def_types::{AgentDefSource, AgentDefinition};
 use crate::registry::UnifiedToolRegistry;

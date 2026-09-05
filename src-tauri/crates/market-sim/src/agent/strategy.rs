@@ -24,9 +24,6 @@ pub struct StrategyAgent {
     target_price: Price,
     /// 止损价（分）
     stop_loss: Price,
-    /// 参考价（分）
-    #[allow(dead_code)]
-    reference_price: Price,
     /// 仓位大小（股）
     position_size: Quantity,
     /// 当前持仓（正=多, 负=空）
@@ -60,7 +57,6 @@ impl StrategyAgent {
         action: impl Into<String>,
         target_price: Price,
         stop_loss: Price,
-        reference_price: Price,
         position_size: Quantity,
         wakeup_interval_ns: SimTimestamp,
     ) -> Self {
@@ -69,7 +65,6 @@ impl StrategyAgent {
             action: action.into(),
             target_price,
             stop_loss,
-            reference_price,
             position_size,
             current_position: 0,
             entry_submitted: false,
@@ -294,7 +289,7 @@ mod tests {
         )));
         kernel.register(Box::new(NoiseAgent::new("noise", 500_000, 0.5, 100, 50, ref_price, 42)));
         kernel.register(Box::new(StrategyAgent::new(
-            "strategy", action, target, stop, ref_price, 500, 1_000_000,
+            "strategy", action, target, stop, 500, 1_000_000,
         )));
         kernel.run().unwrap()
     }

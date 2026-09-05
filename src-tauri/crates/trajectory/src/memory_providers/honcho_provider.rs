@@ -36,10 +36,7 @@ pub(crate) struct HonchoProvider {
 
 impl HonchoProvider {
     pub(crate) fn new(config: HonchoConfig) -> Self {
-        Self {
-            config,
-            local_cache: Arc::new(RwLock::new(HashMap::new())),
-        }
+        Self { config, local_cache: Arc::new(RwLock::new(HashMap::new())) }
     }
 }
 
@@ -57,10 +54,7 @@ impl MemoryProvider for HonchoProvider {
         }
 
         let cache_key = format!("{}:{}", self.config.user_id, session_id);
-        self.local_cache
-            .write()
-            .await
-            .insert(cache_key.clone(), entries);
+        self.local_cache.write().await.insert(cache_key.clone(), entries);
         tracing::debug!("Synced memory entries for session {} via Honcho", session_id);
         Ok(())
     }
@@ -84,13 +78,7 @@ impl MemoryProvider for HonchoProvider {
         }
 
         let cache_key = format!("{}:{}", self.config.user_id, session_id);
-        let cached = self
-            .local_cache
-            .read()
-            .await
-            .get(&cache_key)
-            .cloned()
-            .unwrap_or_default();
+        let cached = self.local_cache.read().await.get(&cache_key).cloned().unwrap_or_default();
         let filtered: Vec<MemoryEntry> = cached
             .into_iter()
             .filter(|e| {
@@ -119,11 +107,7 @@ impl MemoryProvider for HonchoProvider {
             .take(query.limit)
             .collect();
         let total = filtered.len();
-        Ok(MemoryQueryResult {
-            entries: filtered,
-            scores: vec![1.0; total],
-            total,
-        })
+        Ok(MemoryQueryResult { entries: filtered, scores: vec![1.0; total], total })
     }
 
     async fn shutdown(&self) -> Result<(), String> {
@@ -213,10 +197,8 @@ impl HonchoProvider {
             return Err(format!("Honcho search API returned {}", resp.status()));
         }
 
-        let json: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse Honcho response: {}", e))?;
+        let json: serde_json::Value =
+            resp.json().await.map_err(|e| format!("Failed to parse Honcho response: {}", e))?;
 
         let memories = json.as_array().cloned().unwrap_or_default();
 
@@ -224,11 +206,7 @@ impl HonchoProvider {
             .iter()
             .filter_map(|m| {
                 let content = m.get("content")?.as_str()?.to_string();
-                let id = m
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let metadata = m.get("metadata").cloned();
                 let memory_type_str = metadata
                     .as_ref()
@@ -280,10 +258,6 @@ impl HonchoProvider {
             .collect();
 
         let total = entries.len();
-        Ok(MemoryQueryResult {
-            entries,
-            scores: vec![1.0; total],
-            total,
-        })
+        Ok(MemoryQueryResult { entries, scores: vec![1.0; total], total })
     }
 }

@@ -44,7 +44,9 @@
 //!   顶层 `fixes[]` 经 `dedup_fixes` 去重后由 `apply_diagnostic_fixes` 批应用
 //! - `validate_report` / `validate_issue` 在 `llm_diagnose_workflow` 入口校验协议
 //! - `validate_code` 在 `apply_edit_asset_file` 入口校验
-//! - `InjectContextMarker` 由 `apply_diagnostic_fixes` 透传(供未来 chat 路径消费)
+//! - `InjectContextMarker` 协议类型定义于本文件（2026-09-03 从历史快照
+//!   `workflow_ai_protocol.rs` 收口移植）；解析测试已入 tests 模块。
+//!   真实消费场景在 chat 路径（`[[inject:...]]` marker），待 chat 实现接入。
 
 use serde::{Deserialize, Serialize};
 
@@ -257,6 +259,38 @@ pub struct DiagnosticReportV2 {
     /// (无 hook 则由系统降级为 `false`)
     #[serde(default)]
     pub auto_apply: bool,
+}
+
+// ============================================================
+// 上下文注入 marker
+// ============================================================
+
+/// 调用方在 user message 末尾追加的 JSON 块
+/// 已知 key:`version_history` / `diagnostic`;未知 key 走 `Custom` 透传到注入处理器
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "inject_context", rename_all = "snake_case")]
+// 真实消费场景在 chat 路径(解析 user message 末尾的 `[[inject:...]]` marker)，当前仅测试消费；
+// chat 接入后移除 cfg_attr
+#[cfg_attr(not(test), allow(dead_code))]
+pub enum InjectContextMarker {
+    /// 注入最近 N 个版本的 diff 摘要
+    VersionHistory {
+        template_id: String,
+        #[serde(default = "default_history_limit")]
+        limit: u32,
+    },
+    /// 注入诊断结果
+    Diagnostic { template_id: String },
+    /// 其它 caller_defined 的 marker,透传
+    #[serde(untagged)]
+    Custom(serde_json::Value),
+}
+
+// 仅 serde default 字符串路径引用（非 test 构建下 derive 展开不构成可达性根）；
+// chat 接入后与上方 enum 一并移除 cfg_attr
+#[cfg_attr(not(test), allow(dead_code))]
+fn default_history_limit() -> u32 {
+    5
 }
 
 // ============================================================
@@ -580,5 +614,28 @@ mod tests {
         let s = r#"{"summary":"ok","issues":[],"suggestions":[],"fixes":[],"auto_apply":true}"#;
         let r: DiagnosticReportV2 = serde_json::from_str(s).expect("测试：JSON反序列化应成功");
         assert!(validate_report(&r).is_err());
+    }
+
+    // ── InjectContextMarker ────────────────────────────────
+
+    #[test]
+    fn parse_inject_version_history() {
+        let s = r#"{"inject_context":"version_history","template_id":"t","limit":3}"#;
+        let m: InjectContextMarker = serde_json::from_str(s).unwrap();
+        assert!(matches!(m, InjectContextMarker::VersionHistory { limit: 3, .. }));
+    }
+
+    #[test]
+    fn parse_inject_diagnostic() {
+        let s = r#"{"inject_context":"diagnostic","template_id":"t"}"#;
+        let m: InjectContextMarker = serde_json::from_str(s).unwrap();
+        assert!(matches!(m, InjectContextMarker::Diagnostic { .. }));
+    }
+
+    #[test]
+    fn parse_inject_unknown_passes_through() {
+        let s = r#"{"inject_context":"reflection","reflection_id":"u-1"}"#;
+        let m: InjectContextMarker = serde_json::from_str(s).unwrap();
+        assert!(matches!(m, InjectContextMarker::Custom(_)));
     }
 }

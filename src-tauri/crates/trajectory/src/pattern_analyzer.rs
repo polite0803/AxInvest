@@ -3,7 +3,7 @@
 use crate::behavior_tracker::{BehaviorEvent, BehaviorEventType};
 use crate::user_profile::{
     CodingStyleProfile, CommentStyle, CommunicationProfile, DetailLevel, IndentationStyle,
-    NamingConvention, TimeRange, Tone, ToolUsagePattern,
+    NamingConvention, TimeRange, Tone, ToolUsagePattern, WorkHabitProfile,
 };
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -24,6 +24,11 @@ pub(crate) struct CodingPatternMatch {
     pub occurrences: u32,
 }
 
+// [2026-09-03] `ModuleStructure` / `ErrorHandling` 两种代码模式尚未实现提取逻辑：
+// `extract_coding_patterns` 目前只产出 Naming / Indentation / Comment 三类。
+// 属「功能未实现」而非死代码——模块对外声明支持 5 类（见文件头与 CodingPatternSummary 文档），
+// 补提取逻辑时直接消费这两个 variant 即可，勿删。
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum PatternType {
     Naming,
@@ -59,6 +64,9 @@ pub(crate) struct ToolPreferencePattern {
 pub(crate) struct TopicPattern {
     pub topic: String,
     pub frequency: u32,
+    // [2026-09-03] 提取时按最近出现时间写入，`TopicPatternSummary` 暂只带 frequency。
+    // 排序/衰减若需要「越近越重要」时消费此字段，勿删。
+    #[allow(dead_code)]
     pub recency: DateTime<Utc>,
 }
 
@@ -495,6 +503,25 @@ pub struct PatternAnalysisSummary {
     pub tool_preference_patterns: Vec<ToolPreferenceSummary>,
     /// 主题模式（按频率排序）
     pub topic_patterns: Vec<TopicPatternSummary>,
+    /// 由上述模式推断出的用户画像
+    ///
+    /// [2026-09-03 接线恢复] `infer_coding_profile` / `infer_communication_profile` /
+    /// `infer_work_habit_profile` 三个方法此前零调用——模式提取完就丢了，从未升级为画像。
+    /// 现于 [`analyze_trajectories`] 中接回。
+    pub inferred_profile: InferredUserProfile,
+}
+
+/// 由跨会话行为模式推断出的用户画像（[`PatternAnalysisSummary::inferred_profile`]）
+///
+/// 三个子画像均为 `axagent_harness::profile` 的权威类型（经 `crate::user_profile` re-export）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InferredUserProfile {
+    /// 编码风格画像（命名约定 / 缩进 / 注释密度等）
+    pub coding_style: CodingStyleProfile,
+    /// 沟通风格画像（语气 / 详细程度 / 反馈倾向等）
+    pub communication: CommunicationProfile,
+    /// 工作习惯画像（活跃时段 / 工具使用模式等）
+    pub work_habit: WorkHabitProfile,
 }
 
 /// 代码风格模式摘要
@@ -571,6 +598,16 @@ pub fn analyze_trajectories(
 
     let extracted = analyzer.analyze(&events);
 
+    // [2026-09-03 接线恢复] 把提取出的模式升级为用户画像（这三个方法此前从未被调用）。
+    let inferred_profile = InferredUserProfile {
+        coding_style: analyzer.infer_coding_profile(&extracted.coding_patterns),
+        communication: analyzer.infer_communication_profile(&events),
+        work_habit: analyzer.infer_work_habit_profile(
+            &extracted.temporal_patterns,
+            &extracted.tool_preference_patterns,
+        ),
+    };
+
     PatternAnalysisSummary {
         trajectories_analyzed: trajectories.len(),
         total_events_analyzed: events.len(),
@@ -621,6 +658,7 @@ pub fn analyze_trajectories(
             .iter()
             .map(|p| TopicPatternSummary { topic: p.topic.clone(), frequency: p.frequency })
             .collect(),
+        inferred_profile,
     }
 }
 

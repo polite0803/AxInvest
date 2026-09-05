@@ -9,7 +9,6 @@
 // ServiceRegistry 在初始化阶段同步注入 repository 实例，运行时读取不跨越 await 点，
 // 因此不会触发 parking_lot::RwLock guard 跨 await 的 UB 风险。
 use parking_lot::RwLock;
-#[allow(clippy::disallowed_types)]
 use std::sync::{Arc, OnceLock};
 
 use crate::repositories::{
@@ -29,7 +28,6 @@ use crate::repositories::{
 /// 相同的线程安全语义。
 // SAFETY: ServiceRegistry 中的 RwLock 用于全局服务注册表的同步读写，
 // 初始化阶段同步注入 repository 实例，运行时读取不跨越 await 点。
-#[allow(clippy::disallowed_types)]
 pub struct ServiceRegistry {
     pub note_repo: OnceLock<RwLock<Option<Arc<dyn NoteRepository>>>>,
     pub wiki_repo: OnceLock<RwLock<Option<Arc<dyn WikiRepository>>>>,

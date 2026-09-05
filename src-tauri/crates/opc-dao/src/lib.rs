@@ -6,7 +6,6 @@
 //! 包含 Entity ↔ DTO 转换、状态机验证、JSON 字段序列化。
 
 pub mod analytics_service;
-pub mod audit_log_service;
 pub mod automation_service;
 pub mod customer_service;
 pub mod data_service;
@@ -17,7 +16,6 @@ pub mod rules;
 pub mod site_service;
 
 pub use analytics_service::DefaultAnalyticsService;
-pub use audit_log_service::AuditLogService;
 pub use automation_service::DbAutomationService;
 pub use customer_service::DefaultCustomerService;
 pub use data_service::DefaultDataService;

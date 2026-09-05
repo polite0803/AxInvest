@@ -721,7 +721,6 @@ mod tests_conversation {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[allow(clippy::disallowed_types)]
     async fn persist_attachments_registers_stored_files_for_files_page() {
         use base64::Engine;
 
@@ -827,6 +826,23 @@ mod tests_conversation {
             skill_watcher_shutdown: std::sync::OnceLock::new(),
             vector_store: vector_store.clone(),
             indexing_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
+            astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
+            stock_monitor: std::sync::OnceLock::new(),
+            stock_workflow_t0_semaphore: Arc::new(tokio::sync::Semaphore::new(5)),
+            stock_workflow_t0_per_stock_locks: Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashMap::new(),
+            )),
+            quote_watcher: std::sync::OnceLock::new(),
+            trading_engine: Arc::new(tokio::sync::RwLock::new(
+                axagent_analysis_engine::trading::TradingEngine::new(
+                    std::sync::Arc::new(db.clone()),
+                    std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+                ),
+            )),
+            cross_stock_aggregator: std::sync::OnceLock::new(),
+            stock_adaptive_engine: Arc::new(
+                axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new(),
+            ),
             stream_cancel_flags: Arc::new(DashMap::new()),
             agent_permission_senders: Arc::new(Mutex::new(std::collections::HashMap::new())),
             agent_ask_senders: Arc::new(Mutex::new(std::collections::HashMap::new())),

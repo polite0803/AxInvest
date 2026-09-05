@@ -10,6 +10,10 @@
 //!
 //! 复用 hit_rate_backtest 中的 Spearman IC 计算（compute_factor_ic）。
 
+// ⚠️ 本文件当前未参与编译（analysis-engine/lib.rs 未声明，勿删）。
+// 与 crates/stock-analysis/src/serenity_hit_rate_backtest.rs 完全相同（diff 为空）。
+// 现行接线在 stock-analysis（已声明编译）。本文件是复制副本，待用户裁决后删除或保留。
+
 use std::collections::HashMap;
 
 use chrono::Utc;

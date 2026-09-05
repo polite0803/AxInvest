@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
+// [2026-09-03] 本模块曾因 skill_decomposition/mod.rs 缺 `pub mod` 声明而从未编译。
+// 工作流 DAG 校验器（2 个测试已随本模块首次跑通）。仅 `apply_corrections` 零调用：
+// 校验发现问题后自动修正的分支尚未接入调用方（当前调用方只读取校验结果，不做自动修复）。
+// 属「功能未接线」而非死代码，待接入自动修复链路时消费，勿删。
+
 use serde::{Deserialize, Serialize};
 
 const VALID_NODE_TYPES: &[&str] = &[

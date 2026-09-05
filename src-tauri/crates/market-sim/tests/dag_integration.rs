@@ -205,9 +205,7 @@ fn run_validation_sim(
 
     kernel.register(Box::new(ExchangeAgent::with_tick_size("exchange", 1)));
     kernel.register(Box::new(MarketMakerAgent::new("mm", 35, 500, 5000, 0.1, 500_000, price)));
-    kernel.register(Box::new(StrategyAgent::new(
-        "strategy", action, target, stop, price, pos, 1_000_000,
-    )));
+    kernel.register(Box::new(StrategyAgent::new("strategy", action, target, stop, pos, 1_000_000)));
     kernel.register(Box::new(NoiseAgent::new("noise", 500_000, 0.27, 50, 32, price, 42)));
     kernel.register(Box::new(MomentumAgent::new(
         "momentum",

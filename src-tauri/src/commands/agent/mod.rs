@@ -46,10 +46,9 @@ mod payloads;
 pub use payloads::*;
 
 pub mod pricing;
-#[allow(unused_imports)]
+// lib.rs startup 异步初始化块经 `commands::agent::init_pricing_config` 调用（lib.rs:405）
 pub use pricing::init_pricing_config;
 // 供本模块内其他函数调用（pricing.rs 中为 pub(super)，对本模块可见）
-#[allow(unused_imports)]
 use pricing::{check_token_budget, estimate_cost_usd};
 
 pub mod skill_execution;
@@ -1400,6 +1399,33 @@ pub async fn agent_query(
         }
         info!("[agent] Added {} Tauri command tools to chat_tools", tauri_tool_count);
         info!("[agent] Registered {} Tauri command handlers", handler_count);
+
+        // ── AxInvest 专属工具桥接：股票分析 + OPC 行业命令注册为 Agent 工具 ──
+        // 设计对齐上方 command_bridge 模式：chat_tools 暴露给 LLM，
+        // SkillToolHandler 负责实际执行（含写操作门控）。
+        let stock_tools = crate::commands::stock_analysis_bridge::build_stock_chat_tools();
+        let stock_tool_count = stock_tools.len();
+        chat_tools.extend(stock_tools);
+        let stock_handlers = crate::commands::stock_analysis_bridge::build_stock_command_handlers(
+            app_state.astock_client.clone(),
+            app_state.harness.db().clone(),
+            app_state.cron_job_store.clone(),
+            app.clone(),
+        );
+        for (tool_name, handler) in stock_handlers {
+            tool_registry.register_skill_tool(tool_name, handler);
+        }
+        info!("[agent] Added {} stock analysis tools to chat_tools", stock_tool_count);
+
+        let opc_tools = crate::commands::opc_industry_bridge::build_opc_industry_chat_tools();
+        let opc_tool_count = opc_tools.len();
+        chat_tools.extend(opc_tools);
+        let opc_handlers =
+            crate::commands::opc_industry_bridge::build_opc_industry_handlers(app.clone());
+        for (tool_name, handler) in opc_handlers {
+            tool_registry.register_skill_tool(tool_name, handler);
+        }
+        info!("[agent] Added {} OPC industry tools to chat_tools", opc_tool_count);
     } else {
         info!("[agent] execution_mode={:?} — 跳过 Tauri 命令桥接工具", request.execution_mode);
     }
@@ -2218,7 +2244,12 @@ pub async fn agent_query(
             PermissionPolicy::new(runtime_permission_mode).with_permission_rules_from_lists(
                 Vec::new(),
                 Vec::new(),
-                Vec::new(),
+                // 股票写命令（watchlist/持仓/价格告警/cron 等变更类）强制走 ask 审批：
+                // ChannelPermissionPrompter emit agent-permission-request → 前端弹窗 → agent_approve
+                crate::commands::stock_analysis_bridge::STOCK_WRITE_TOOLS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
             ),
             system_prompt,
             runtime_feature_config,

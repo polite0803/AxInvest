@@ -35,9 +35,9 @@ pub const DEFAULT_KLINE_LIMIT: u32 = 504;
 /// - 日期区间内无任何 K 线 → `QuantError::Data`
 /// - Quote 拉取失败 → 降级为 `Bar::from_kline`（涨跌停 None, is_st=false），不回错
 ///
-/// # 示例
-/// ```no_run
-/// # use axagent_quant::kline_provider::load_bars_with_quote;
+/// # 示例（语义示意：模块为 M2 私有基建，doctest 无法引用私有路径）
+/// ```text
+/// use axagent_quant::kline_provider::load_bars_with_quote;
 /// # use axagent_harness::market_data::MarketDataProvider;
 /// # async fn demo(client: &dyn MarketDataProvider) -> Result<(), axagent_quant::QuantError> {
 /// let bars = load_bars_with_quote(client, "600519", "2023-01-01", "2024-12-31", 504).await?;

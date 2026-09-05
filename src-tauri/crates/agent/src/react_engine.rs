@@ -536,8 +536,6 @@ impl LlmReasoningProvider for LlmDrivenReasoningProvider {
     }
 }
 
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，goal_evaluator 仅在同步 evaluate() 调用期间持有。
-#[allow(clippy::disallowed_types)]
 pub struct ReActEngine {
     executor: Arc<ActionExecutor>,
     verifier: Arc<SelfVerifier>,
@@ -563,8 +561,6 @@ pub struct ReActEngine {
     cancel_flag: Option<Arc<AtomicBool>>,
 }
 
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，goal_evaluator 的 lock 不跨 await。
-#[allow(clippy::disallowed_types)]
 impl ReActEngine {
     /// 辅助：让一个 LLM future 和 per-session cancel flag 竞争。
     ///

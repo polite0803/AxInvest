@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// SAFETY: harness crate 中的 std::sync 锁用于同步上下文，不跨 await。
-#![allow(clippy::disallowed_types)]
-
 //! axagent-harness — Harness 契约层
 //!
 //! 自底而上：本 crate 是 AxAgent 架构中最底层的非数据层，
@@ -16,6 +13,8 @@
 //! - 无运行时行为：所有实现都在下游 crate
 
 // ── 国际化 ──
+pub mod context_engine;
+pub mod delegation;
 pub mod i18n;
 pub use i18n::{I18nKey, Locale, fmt_msg, fmt_msg_with, msg};
 
@@ -28,6 +27,7 @@ pub mod confidence;
 pub use confidence::{ConfidenceAction, ConfidenceConfig, ConfidenceOutput};
 pub mod channel_adapter;
 pub mod ir_renderer;
+pub mod narrative;
 pub mod notification_channel;
 pub use notification_channel::{
     AlertPayload, AlertSeverity, NotificationChannel, NotificationDispatchResult,
@@ -74,6 +74,10 @@ pub use market_data::{
     AdjType, FinancialReport, KLine, MarketDataProvider, StockQuote, StockSearchResult,
     detect_market_type, get_price_limit_pct, get_st_price_limit_pct,
 };
+
+// ── 股票分析/自选股存储契约（消除 gateway → entities 违规）──
+pub mod stock_service;
+pub use stock_service::StockStore;
 
 // ── P2-C7: 技术指标纯函数（SMA/EMA/RSI/stddev）──
 // P3-C8: 追加 Sharpe ratio 统一实现（收口 stock-analysis/astock-data/tools/quant 的 6 处重复）。

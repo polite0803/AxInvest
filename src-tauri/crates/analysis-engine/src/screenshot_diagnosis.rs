@@ -32,7 +32,6 @@
 //!
 //! 全部读写均经过 SeaORM，无副作用，可幂等调用。
 
-use sea_orm::sea_query::Expr;
 use sea_orm::ActiveModelTrait;
 use sea_orm::ColumnTrait;
 use sea_orm::DatabaseConnection;
@@ -553,12 +552,6 @@ pub async fn mark_failed(
         },
     )
     .await
-}
-
-/// 显式触发 [`Expr`] 引用，避免未使用警告
-#[allow(dead_code)]
-fn _touch_expr() {
-    let _ = Expr::value(0i64);
 }
 
 // ── 测试 ───────────────────────────────────────────────────────────────────

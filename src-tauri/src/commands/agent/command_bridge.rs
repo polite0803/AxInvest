@@ -36,8 +36,9 @@ pub struct TauriCommandToolDef {
     pub description: &'static str,
     /// 输入参数的 JSON Schema
     pub input_schema: Value,
-    /// 是否只读操作（供运行时安全过滤查询使用；当前消费方走 ToolInfo.is_read_only）
-    #[allow(dead_code)]
+    /// 是否只读操作（测试守卫消费：stock_analysis_bridge_tests 校验写命令
+    /// 与 STOCK_WRITE_TOOLS ask 名单对齐；运行时安全分类走 ToolInfo.is_read_only）
+    #[cfg_attr(not(test), allow(dead_code))]
     pub is_read_only: bool,
 }
 

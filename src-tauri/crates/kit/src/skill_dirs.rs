@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// SAFETY: 本文件中 RwLock 用于技能目录路径缓存，纯同步读写不跨 await（铁律 #8 例外）
-#![allow(clippy::disallowed_types)]
 
 use parking_lot::RwLock;
 use std::path::PathBuf;

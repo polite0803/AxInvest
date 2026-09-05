@@ -14,10 +14,7 @@ pub fn matches_glob(pattern: &str, text: &str) -> bool {
     let pattern_trim = pattern.trim_end_matches(['/', '\\']);
 
     // 手动 split 而非依赖 Path::components()，确保 Linux CI 上也能正确识别 \ 为分隔符
-    let p_segs: Vec<&str> = pattern_trim
-        .split(['/', '\\'])
-        .filter(|s| !s.is_empty())
-        .collect();
+    let p_segs: Vec<&str> = pattern_trim.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
     let t_segs: Vec<&str> = text.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
 
     if p_segs.len() > t_segs.len() {

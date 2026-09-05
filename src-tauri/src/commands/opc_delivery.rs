@@ -19,6 +19,7 @@
 use crate::AppState;
 use crate::commands::error_code::common as common_err;
 use crate::commands::error_code::opc_setup as opc_setup_err;
+use axagent_agent_macro::agent_command;
 use axagent_dao::repo::opc_delivery;
 use axagent_harness::types::{CreateInvoiceFromLeadInput, DeliveryInvoiceDto, DeliverySummary};
 use axagent_harness::util_fns::now_ts;
@@ -83,6 +84,7 @@ pub async fn opc_create_invoice_from_lead(
 }
 
 /// 发票列表（可按状态过滤）
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出发票")]
 #[tauri::command]
 pub async fn opc_list_invoices(
     state: State<'_, AppState>,
@@ -110,6 +112,7 @@ pub async fn opc_update_invoice_status(
 }
 
 /// 删除发票（作废用删除代替 —— 简单账本，不造第二种终态）
+#[agent_command(domain = "automation", safety = Dangerous, call_mode = StateInput, description = "删除发票")]
 #[tauri::command]
 pub async fn opc_delete_invoice(
     state: State<'_, AppState>,

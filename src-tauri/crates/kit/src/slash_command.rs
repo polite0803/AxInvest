@@ -80,8 +80,6 @@ pub fn process_slash_command(text: &str) -> Option<SlashCommandAction> {
 }
 
 type BundleCache = Option<(Vec<String>, Instant)>;
-// SAFETY: BUNDLE_NAMES_CACHE 中的 Mutex 用于同步缓存访问，所有访问点均为同步函数，不跨 await。
-#[allow(clippy::disallowed_types)]
 static BUNDLE_NAMES_CACHE: LazyLock<parking_lot::Mutex<BundleCache>> =
     LazyLock::new(|| parking_lot::Mutex::new(None));
 

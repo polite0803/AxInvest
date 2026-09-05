@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
+// [2026-09-03] 本模块曾因 lib.rs 缺 `mod` 声明而从未编译。
+// `TrajectoryError` 当前零引用：trajectory 各模块历史上直接返回 anyhow/String。
+// 保留作统一错误类型，待各模块错误签名收敛后接入——勿删（是契约基建不是死代码）。
+
 use std::fmt;
 
 #[derive(Debug)]
@@ -58,25 +64,37 @@ impl std::error::Error for TrajectoryError {
 }
 
 impl From<sea_orm::DbErr> for TrajectoryError {
-    fn from(e: sea_orm::DbErr) -> Self { Self::SeaOrm(e) }
+    fn from(e: sea_orm::DbErr) -> Self {
+        Self::SeaOrm(e)
+    }
 }
 
 impl From<rusqlite::Error> for TrajectoryError {
-    fn from(e: rusqlite::Error) -> Self { Self::Rusqlite(e) }
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Rusqlite(e)
+    }
 }
 
 impl From<serde_json::Error> for TrajectoryError {
-    fn from(e: serde_json::Error) -> Self { Self::SerdeJson(e) }
+    fn from(e: serde_json::Error) -> Self {
+        Self::SerdeJson(e)
+    }
 }
 
 impl From<std::io::Error> for TrajectoryError {
-    fn from(e: std::io::Error) -> Self { Self::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
 }
 
 impl From<uuid::Error> for TrajectoryError {
-    fn from(e: uuid::Error) -> Self { Self::Uuid(e) }
+    fn from(e: uuid::Error) -> Self {
+        Self::Uuid(e)
+    }
 }
 
 impl From<tokio::task::JoinError> for TrajectoryError {
-    fn from(e: tokio::task::JoinError) -> Self { Self::TokioJoin(e) }
+    fn from(e: tokio::task::JoinError) -> Self {
+        Self::TokioJoin(e)
+    }
 }

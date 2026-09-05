@@ -226,6 +226,30 @@ pub struct AppState {
     pub shutdown_token: CancellationToken,
     pub vector_store: Arc<axagent_search::vector_store::VectorStore>,
     pub indexing_semaphore: Arc<tokio::sync::Semaphore>,
+    /// A 股数据客户端（行情/K线/财报/自选等，axinvest 投资域命令使用）
+    pub astock_client: Arc<axagent_astock_data::AStockClient>,
+    /// 实时行情监视器（OnceLock 惰性初始化，未初始化时相关命令返回友好错误）
+    pub stock_monitor:
+        std::sync::OnceLock<std::sync::Arc<axagent_analysis_engine::monitor::RealtimeMonitor>>,
+    /// T+0 重跑全局并发闸（最大并发 5）
+    pub stock_workflow_t0_semaphore: Arc<tokio::sync::Semaphore>,
+    /// T+0 重跑 per-stock 串行锁（同股票串行，不同股票并行）
+    pub stock_workflow_t0_per_stock_locks: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
+        >,
+    >,
+    /// 实时行情流监视器（OnceLock 惰性初始化）
+    pub quote_watcher: std::sync::OnceLock<axagent_astock_data::RealTimeQuoteWatcher>,
+    /// 模拟交易引擎（依赖 DB + astock_client，启动时构造）
+    pub trading_engine: Arc<tokio::sync::RwLock<axagent_analysis_engine::trading::TradingEngine>>,
+    /// 跨股聚合器（OnceLock 惰性初始化）
+    pub cross_stock_aggregator: std::sync::OnceLock<
+        std::sync::Arc<axagent_analysis_engine::cross_stock_aggregator::CrossStockSignalAggregator>,
+    >,
+    /// 股票自适应引擎（反思+进化+编排闭环）
+    pub stock_adaptive_engine:
+        Arc<axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine>,
     pub stream_cancel_flags: Arc<DashMap<String, Arc<AtomicBool>>>,
     pub agent_permission_senders:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<String>>>>,

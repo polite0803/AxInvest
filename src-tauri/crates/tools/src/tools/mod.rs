@@ -29,6 +29,7 @@ pub mod file_edit;
 pub mod file_read;
 pub mod file_system;
 pub mod file_write;
+pub mod finance;
 pub mod git;
 pub mod github_discussions_scanner;
 pub mod github_issue_scanner;
@@ -50,6 +51,7 @@ pub mod multi_agent;
 pub mod network;
 pub mod obsidian;
 pub mod ocr;
+pub mod opc;
 pub mod package_ecosystem_scanner;
 pub mod personality;
 pub mod plan;
@@ -61,6 +63,7 @@ pub mod rpc;
 pub mod save_as_workflow;
 pub mod scan_policy;
 pub mod scanner_common;
+pub mod shared_path;
 pub mod skill;
 pub mod stackoverflow_scanner;
 pub mod storage;
@@ -302,6 +305,37 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(rpc::RpcCallTool),
         // ── 迁移工具 ──
         std::sync::Arc::new(migration_tool::MigrationTool),
+        // ── 金融分析（finance.rs，29 个：风险模型 / 信号 / 数据清洗 / 技术指标 / 蒙特卡洛 / 行情 API）──
+        // [2026-09-03 接线恢复] finance.rs 此前无 mod 声明 + 未挂 register_all，整模块从未编译。
+        std::sync::Arc::new(finance::CalcMaxDrawdownTool),
+        std::sync::Arc::new(finance::CalcSharpeRatioTool),
+        std::sync::Arc::new(finance::CalcVarTool),
+        std::sync::Arc::new(finance::CalcPEPercentileTool),
+        std::sync::Arc::new(finance::CalcPEGTool),
+        std::sync::Arc::new(finance::CalcKellyTool),
+        std::sync::Arc::new(finance::CalcRiskParityTool),
+        std::sync::Arc::new(finance::DetectMACrossTool),
+        std::sync::Arc::new(finance::DetectBreakoutTool),
+        std::sync::Arc::new(finance::CleanOutliersTool),
+        std::sync::Arc::new(finance::CleanFillMissingTool),
+        std::sync::Arc::new(finance::AdjustPricesTool),
+        std::sync::Arc::new(finance::ComputeATRTool),
+        std::sync::Arc::new(finance::ComputeKDJTool),
+        std::sync::Arc::new(finance::ComputeOBVTool),
+        std::sync::Arc::new(finance::CalcBetaTool),
+        std::sync::Arc::new(finance::DetectEarningsTool),
+        std::sync::Arc::new(finance::DetectPledgeRiskTool),
+        std::sync::Arc::new(finance::CalcCorrMatrixTool),
+        std::sync::Arc::new(finance::RunMonteCarloTool),
+        std::sync::Arc::new(finance::AnalyzeIndustryTool),
+        std::sync::Arc::new(finance::DetectLimitUpTool),
+        std::sync::Arc::new(finance::DetectCandlestickPatternsTool),
+        std::sync::Arc::new(finance::DetectDivergenceTool),
+        std::sync::Arc::new(finance::ResearchReportsTool),
+        std::sync::Arc::new(finance::ConceptBlocksTool),
+        std::sync::Arc::new(finance::NorthBoundFlowTool),
+        std::sync::Arc::new(finance::DragonTigerTool),
+        std::sync::Arc::new(finance::ClsFlashTool),
     ]);
 
     let available_toolsets: HashSet<String> =

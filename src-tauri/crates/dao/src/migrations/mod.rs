@@ -56,9 +56,33 @@ pub mod v136_opc_invoices;
 pub mod v137_governance_disable_platforms;
 pub mod v138_demand_lead_dedupe_fingerprint;
 pub mod v139_create_session_events;
+pub mod v200_axinvest_stock_tables;
+pub mod v201_lesson_application_tracking;
+pub mod v202_stock_analyses_parent_version;
+pub mod v203_price_alerts_align_monitor;
+pub mod v204_paper_portfolio;
+pub mod v205_market_mainline;
+pub mod v206_screenshot_diagnosis;
+pub mod v207_chat_run;
+pub mod v208_backfill_wiki_sync_queue_columns;
+pub mod v209_opc_tables;
+pub mod v210_opc_ext;
+pub mod v211_opc_industries;
+pub mod v212_opc_work_items;
+pub mod v213_opc_orgs;
+pub mod v214_opc_experience;
+pub mod v215_opc_rl_experience;
+pub mod v216_opc_content_assets;
+pub mod v217_opc_publish_schedules;
+pub mod v218_extend_agent_roles;
+pub mod v219_trade_intent_audit;
+pub mod v220_narrative_structure;
+pub mod v221_demand_discovery;
+pub mod v222_demand_lead_evaluation;
+pub mod v223_heal_stale_schema;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 139;
+pub const CURRENT_VERSION: i32 = 223;
 
 /// P2-10: Schema 版本追踪表名。
 ///
@@ -290,6 +314,126 @@ const MIGRATIONS: &[Migration] = &[
         version: 139,
         description: "v139_create_session_events: 创建 session_events 表（跨进程 Resume 事件流）—— session_id + seq 唯一索引 + session_id+event_type 查询索引，支撑 agent_resume_from_events 从事件流重放 ThoughtChain + 识别 Interrupted 点",
         up: |db| Box::pin(v139_create_session_events::up(db)),
+    },
+    Migration {
+        version: 200,
+        description: "v200_axinvest_stock_tables: AxInvest 独有股票业务表（stock_analyses / price_alerts / portfolio_holdings / financial_snapshots / news_archive 等）",
+        up: |db| Box::pin(v200_axinvest_stock_tables::up(db)),
+    },
+    Migration {
+        version: 201,
+        description: "v201_lesson_application_tracking: lesson 应用追踪闭环（lesson_applications 表，精确统计 times_applied / success_count）",
+        up: |db| Box::pin(v201_lesson_application_tracking::up(db)),
+    },
+    Migration {
+        version: 202,
+        description: "v202_stock_analyses_parent_version: stock_analyses 新增 parent_analysis_id（分析重跑版本链）",
+        up: |db| Box::pin(v202_stock_analyses_parent_version::up(db)),
+    },
+    Migration {
+        version: 203,
+        description: "v203_price_alerts_align_monitor: price_alerts 与 RealtimeMonitor 告警模型对齐（alert_type / condition_type / threshold，列存在性守卫）",
+        up: |db| Box::pin(v203_price_alerts_align_monitor::up(db)),
+    },
+    Migration {
+        version: 204,
+        description: "v204_paper_portfolio: G2 模拟观察组合（paper_portfolios / paper_positions）",
+        up: |db| Box::pin(v204_paper_portfolio::up(db)),
+    },
+    Migration {
+        version: 205,
+        description: "v205_market_mainline: G4 市场主线自动提炼（market_mainlines 表）",
+        up: |db| Box::pin(v205_market_mainline::up(db)),
+    },
+    Migration {
+        version: 206,
+        description: "v206_screenshot_diagnosis: G6 截图持仓诊断闭环",
+        up: |db| Box::pin(v206_screenshot_diagnosis::up(db)),
+    },
+    Migration {
+        version: 207,
+        description: "v207_chat_run: G8 /api/chat/runs 后台 Run Lifecycle 持久化（chat_runs / chat_run_events）",
+        up: |db| Box::pin(v207_chat_run::up(db)),
+    },
+    Migration {
+        version: 208,
+        description: "v208_backfill_wiki_sync_queue_columns: 补全 wiki_sync_queue 缺失的 created_at / processed_at 列",
+        up: |db| Box::pin(v208_backfill_wiki_sync_queue_columns::up(db)),
+    },
+    Migration {
+        version: 209,
+        description: "v209_opc_tables: OPC 业务领域表（发票、客户、项目、交付）",
+        up: |db| Box::pin(v209_opc_tables::up(db)),
+    },
+    Migration {
+        version: 210,
+        description: "v210_opc_ext: OPC 扩展表（站点、分析、自动化）",
+        up: |db| Box::pin(v210_opc_ext::up(db)),
+    },
+    Migration {
+        version: 211,
+        description: "v211_opc_industries: OPC 行业注册表（Industry Pack 扫描/启用/禁用/版本追踪）",
+        up: |db| Box::pin(v211_opc_industries::up(db)),
+    },
+    Migration {
+        version: 212,
+        description: "v212_opc_work_items: OPC 工作项表（Self-Run 状态机持久层，P3）",
+        up: |db| Box::pin(v212_opc_work_items::up(db)),
+    },
+    Migration {
+        version: 213,
+        description: "v213_opc_orgs: OPC 组织抽象表（Self-Built，P3-2）",
+        up: |db| Box::pin(v213_opc_orgs::up(db)),
+    },
+    Migration {
+        version: 214,
+        description: "v214_opc_experience: OPC 经验闭环表（Self-Grown，P3-5）",
+        up: |db| Box::pin(v214_opc_experience::up(db)),
+    },
+    Migration {
+        version: 215,
+        description: "v215_opc_rl_experience: OPC 强化学习经验持久化表",
+        up: |db| Box::pin(v215_opc_rl_experience::up(db)),
+    },
+    Migration {
+        version: 216,
+        description: "v216_opc_content_assets: OPC 内容资产表",
+        up: |db| Box::pin(v216_opc_content_assets::up(db)),
+    },
+    Migration {
+        version: 217,
+        description: "v217_opc_publish_schedules: OPC 发布计划表",
+        up: |db| Box::pin(v217_opc_publish_schedules::up(db)),
+    },
+    Migration {
+        version: 218,
+        description: "v218_extend_agent_roles: agent_roles 补齐 8 个扩展字段（列存在性守卫 + backend 分支）",
+        up: |db| Box::pin(v218_extend_agent_roles::up(db)),
+    },
+    Migration {
+        version: 219,
+        description: "v219_trade_intent_audit: stock_analyses 交易意图审核流转扩展（7 列，ADD COLUMN IF NOT EXISTS）",
+        up: |db| Box::pin(v219_trade_intent_audit::up(db)),
+    },
+    Migration {
+        version: 220,
+        description: "v220_narrative_structure: 叙事结构持久化表",
+        up: |db| Box::pin(v220_narrative_structure::up(db)),
+    },
+    Migration {
+        version: 221,
+        description: "v221_demand_discovery: OPC 需求发现表（opc_demand_lead 单数版：平台来源/内容/预算/状态流转 + opc_delivery 等）",
+        up: |db| Box::pin(v221_demand_discovery::up(db)),
+    },
+    Migration {
+        version: 222,
+        description: "v222_demand_lead_evaluation: opc_demand_lead 价值评估字段（pain/market_gap/commercial_value 评分 + duplicate column 容错）",
+        up: |db| Box::pin(v222_demand_lead_evaluation::up(db)),
+    },
+    Migration {
+        version: 223,
+        description: "v223_heal_stale_schema: 自愈迁移——修复存量库缺失的列与 CHECK 约束（information_schema/pragma 守卫，重跑安全）",
+        up: |db| Box::pin(v223_heal_stale_schema::up(db)),
     },
 ];
 

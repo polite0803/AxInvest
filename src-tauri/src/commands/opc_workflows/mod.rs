@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! OPC 业务工作流种子化（代码驱动 + 数据资产包）
+//!
+//! 启动接线：init/services.rs 的 spawn_opc_workflows_seeding 在应用启动后
+//! 调用 ensure_opc_workflows_seeded，激活全部行业/领域/生产/内容媒体模板种子。
 
 use axagent_entities::workflow_template;
 use axagent_harness::workflow_types::*;
@@ -27,7 +30,6 @@ mod seed_domain_specialized;
 mod seed_domain_strategy;
 mod seed_domain_support;
 mod seed_domain_testing;
-mod seed_domain_utils;
 mod seed_industry_accounting;
 mod seed_industry_ai_research;
 mod seed_industry_content_media;
@@ -46,8 +48,8 @@ mod seed_production;
 
 pub use industry_pack::INDUSTRIES_DIR;
 pub use industry_pack::IndustryManifest;
-#[allow(unused_imports)]
-pub use industry_pack::analysis_schema::{AnalysisDataSource, IndustryAnalysisConfig};
+// AnalysisDataSource 不在此 re-export：opc_industry_runtime 经 axagent_analysis_engine::opc glob 获取
+pub use industry_pack::analysis_schema::IndustryAnalysisConfig;
 pub use industry_pack::export_industry_pack;
 pub use industry_pack::import_industry_pack;
 pub use industry_pack::{local_tool_defs, opc_tool_defs, stock_tool_defs};

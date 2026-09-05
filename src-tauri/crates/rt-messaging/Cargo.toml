@@ -23,7 +23,16 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha1 = "0.11"
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["io-std", "io-util", "macros", "process", "rt", "rt-multi-thread", "sync", "time"] }
+tokio = { workspace = true, features = [
+  "io-std",
+  "io-util",
+  "macros",
+  "process",
+  "rt",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
 tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
 tracing = { workspace = true }
 url = "2"

@@ -2,8 +2,6 @@
 //
 // Agent 执行进度追踪器
 
-#![allow(clippy::disallowed_types)]
-
 use parking_lot::Mutex;
 use std::time::Instant;
 

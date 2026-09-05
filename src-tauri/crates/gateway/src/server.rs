@@ -41,6 +41,17 @@ pub struct GatewayAppState {
     pub mcp_client: Arc<dyn axagent_harness::mcp_service::McpClientService>,
     /// Marketplace review service（消除 gateway→kit→dao 违规链）。
     pub marketplace_service: Arc<dyn axagent_harness::marketplace::MarketplaceService>,
+    /// 记忆外溢存储（消除 gateway→dao/main-crate 违规链；由 wiring 层注入 DAO 实现）。
+    pub memory_store: Arc<dyn axagent_harness::memory::MemoryStore>,
+    /// 行情查询接缝（`/api/stock/search|quote|kline` 消费）。
+    /// `None` 时对应端点返回 503（实现方 = astock-data `AStockClient`，wiring 注入）。
+    pub market_data: Option<Arc<dyn axagent_harness::market_data::MarketDataProvider>>,
+    /// 行情流式推送接缝（`/v1/stock/quote/stream` WS 消费）。
+    /// `None` 时 WS 升级返回 503（实现方 = astock-data `HttpPollingStreamer`）。
+    pub market_data_streamer: Option<Arc<dyn axagent_harness::market_data::MarketDataStreamer>>,
+    /// 股票分析/自选股存储接缝（消除 gateway→axagent-entities 违规；JSON 返回）。
+    /// `None` 时 analysis/watchlist 端点返回 503（实现方 = 主 crate `DaoStockStore`）。
+    pub stock_store: Option<Arc<dyn axagent_harness::stock_service::StockStore>>,
     /// In-memory store of single-use tickets for `/v1/realtime` WS auth
     /// (SECURITY P0-2.2). One per gateway instance.
     pub ticket_store: Arc<TicketStore>,
@@ -203,6 +214,10 @@ impl GatewayServer {
         marketplace_service: Arc<dyn axagent_harness::marketplace::MarketplaceService>,
         mcp_store: Arc<dyn axagent_harness::mcp_service::McpServerStore>,
         mcp_client: Arc<dyn axagent_harness::mcp_service::McpClientService>,
+        memory_store: Arc<dyn axagent_harness::memory::MemoryStore>,
+        market_data: Option<Arc<dyn axagent_harness::market_data::MarketDataProvider>>,
+        market_data_streamer: Option<Arc<dyn axagent_harness::market_data::MarketDataStreamer>>,
+        stock_store: Option<Arc<dyn axagent_harness::stock_service::StockStore>>,
         acp_enabled: bool,
     ) -> Result<Self> {
         let started_at = axagent_harness::util_fns::now_ts();
@@ -220,6 +235,10 @@ impl GatewayServer {
             marketplace_service,
             mcp_store,
             mcp_client,
+            memory_store,
+            market_data,
+            market_data_streamer,
+            stock_store,
             ticket_store: crate::realtime::default_ticket_store(),
             qr_bind_store: crate::qr_bind::QrBindStore::new(),
             // SECURITY (Phase 2 Task 2.3): 5 失败 → 60s 冷却。

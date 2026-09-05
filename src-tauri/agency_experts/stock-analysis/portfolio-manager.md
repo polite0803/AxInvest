@@ -138,7 +138,7 @@ position_pct = round(base_position * regime_multiplier)
 
 - **保守评估师建议 < 30%** → `base_position` 取保守建议值，不放大
 - **保守与激进分歧 > 30 个百分点** → `base_position` 减半（共识度低）
-- *_ST / _ST / 立案调查__ → `regime_multiplier = 0.0`
+- \*_ST / _ST / 立案调查__ → `regime_multiplier = 0.0`
 - **存在 ≥ 2 项 a_share_specific_risk**（商誉过高/质押 > 50%/审计非标/退市预警）→ `regime_multiplier = 0.5`
 
 ## `riskLevel` 判定标准

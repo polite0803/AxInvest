@@ -675,6 +675,24 @@ pub async fn list_high_importance_items(
     Ok(items.into_iter().map(model_to_item).collect())
 }
 
+/// 按 tier 过滤记忆条目（gateway MemoryStore 接缝用：working 层记忆外溢查询）。
+pub async fn list_items_by_tier(
+    db: &DatabaseConnection,
+    tier: &str,
+    limit: Option<u32>,
+) -> Result<Vec<MemoryItem>> {
+    let lim = limit.unwrap_or(50) as u64;
+
+    let items = memory_items::Entity::find()
+        .filter(memory_items::Column::Tier.eq(tier))
+        .order_by_desc(memory_items::Column::Importance)
+        .limit(lim)
+        .all(db)
+        .await?;
+
+    Ok(items.into_iter().map(model_to_item).collect())
+}
+
 /// v110: Agent 工具调用结果 → Memory 自动沉淀
 ///
 /// 扫描最近的对话消息，提取工具调用结果（WebSearch、CodeInterpreter、

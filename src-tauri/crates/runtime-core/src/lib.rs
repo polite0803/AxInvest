@@ -40,6 +40,7 @@ pub mod conversation;
 pub mod cron_job;
 pub mod execution_progress;
 pub mod feature_flags;
+pub mod fork_bridge;
 pub mod guard_traits;
 pub mod hook_chain;
 pub mod hooks;

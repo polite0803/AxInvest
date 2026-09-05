@@ -8,8 +8,6 @@
 //! 3. 输出内容敏感信息扫描
 //! 4. 调用审计日志
 
-#![allow(clippy::disallowed_types)]
-
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

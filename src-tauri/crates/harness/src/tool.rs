@@ -12,7 +12,6 @@ use serde_json::Value;
 use std::sync::Arc;
 // SAFETY: parking_lot::Mutex 用于回滚栈的同步访问，该字段在同步上下文中使用，
 // 不跨越任何 await 点，因此不会触发 parking_lot::Mutex guard 跨 await 的 UB 风险。
-#[allow(clippy::disallowed_types)]
 use parking_lot::Mutex;
 use tracing::warn;
 
@@ -140,7 +139,6 @@ pub trait AskUserBridge: Send + Sync + std::fmt::Debug {
 #[derive(Debug, Clone)]
 // SAFETY: ToolContext 中的 Mutex 用于回滚栈的同步访问，该结构体在同步上下文中使用，
 // 不跨越任何 await 点，因此不会触发 parking_lot::Mutex guard 跨 await 的 UB 风险。
-#[allow(clippy::disallowed_types)]
 pub struct ToolContext {
     /// 工作目录
     pub working_dir: String,

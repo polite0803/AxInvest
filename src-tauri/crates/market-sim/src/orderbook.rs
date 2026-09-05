@@ -35,15 +35,13 @@ const MAX_TRADE_HISTORY: usize = 100_000;
 /// 价格档位：同一价位上的所有挂单（FIFO 时间优先队列）
 #[derive(Debug, Clone)]
 struct PriceLevel {
-    #[allow(dead_code)]
-    price: Price,
     orders: VecDeque<LimitOrder>,
     total_quantity: Quantity,
 }
 
 impl PriceLevel {
-    fn new(price: Price) -> Self {
-        Self { price, orders: VecDeque::new(), total_quantity: 0 }
+    fn new() -> Self {
+        Self { orders: VecDeque::new(), total_quantity: 0 }
     }
 
     fn push(&mut self, order: LimitOrder) {
@@ -865,13 +863,12 @@ impl OrderBook {
 
         match side {
             OrderSide::Buy => {
-                let level =
-                    self.bids.entry(Reverse(price)).or_insert_with(|| PriceLevel::new(price));
+                let level = self.bids.entry(Reverse(price)).or_insert_with(PriceLevel::new);
                 level.push(order);
                 self.order_index.insert(new_id, OrderLocator::Bid(price));
             },
             OrderSide::Sell => {
-                let level = self.asks.entry(price).or_insert_with(|| PriceLevel::new(price));
+                let level = self.asks.entry(price).or_insert_with(PriceLevel::new);
                 level.push(order);
                 self.order_index.insert(new_id, OrderLocator::Ask(price));
             },

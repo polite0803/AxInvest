@@ -7,10 +7,10 @@
 //   4. 与 portfolio-mgr.rhai 的 decision_trail 互补：decision_trail 记录规则裁决，
 //      divergence_log 记录 Agent 间意见分歧
 
-use rusqlite::{params, Connection, Result as SqliteResult};
-use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
 use chrono::Utc;
+use rusqlite::{Connection, Result as SqliteResult, params};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// 分歧日志三元组
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,7 +59,7 @@ impl DivergenceLogDao {
             CREATE INDEX IF NOT EXISTS idx_divergence_entity
                 ON divergence_logs(entity, dimension);
             CREATE INDEX IF NOT EXISTS idx_divergence_timestamp
-                ON divergence_logs(timestamp DESC);"
+                ON divergence_logs(timestamp DESC);",
         )?;
         Ok(Self { conn })
     }
@@ -86,7 +86,7 @@ impl DivergenceLogDao {
         hasher.update(prev_hash.as_bytes());
         hasher.update(b"||");
         hasher.update(content_json.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>()
     }
 
     /// CREATE：写入分歧日志（唯一允许的写操作）
@@ -95,7 +95,7 @@ impl DivergenceLogDao {
         let content_json = serde_json::to_string(&log).unwrap_or_default();
         let mut hasher = Sha256::new();
         hasher.update(content_json.as_bytes());
-        let content_hash = format!("{:x}", hasher.finalize());
+        let content_hash = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect::<String>();
 
         // 获取前一条日志的哈希
         let prev_hash = self.get_last_hash()?;
@@ -108,9 +108,17 @@ impl DivergenceLogDao {
               row_hash, read_only)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'PENDING', 1)",
             params![
-                log.entity, log.dimension, log.source_a, log.source_b,
-                log.magnitude, log.direction, log.resolution,
-                log.timestamp, log.session_id, prev_hash, content_hash,
+                log.entity,
+                log.dimension,
+                log.source_a,
+                log.source_b,
+                log.magnitude,
+                log.direction,
+                log.resolution,
+                log.timestamp,
+                log.session_id,
+                prev_hash,
+                content_hash,
             ],
         )?;
 
@@ -128,34 +136,35 @@ impl DivergenceLogDao {
 
     /// READ：读取分歧日志列表
     pub fn read(&self, entity: Option<&str>, limit: i64) -> SqliteResult<Vec<DivergenceLog>> {
-        let mut stmt = if let Some(e) = entity {
-            self.conn.prepare(
-                "SELECT id, entity, dimension, source_a, source_b, magnitude, direction,
-                        resolution, timestamp, session_id, prev_hash, content_hash, row_hash, read_only
-                 FROM divergence_logs
-                 WHERE entity = ?1
-                 ORDER BY timestamp DESC
-                 LIMIT ?2",
-            )?
-        } else {
-            self.conn.prepare(
-                "SELECT id, entity, dimension, source_a, source_b, magnitude, direction,
-                        resolution, timestamp, session_id, prev_hash, content_hash, row_hash, read_only
-                 FROM divergence_logs
-                 ORDER BY timestamp DESC
-                 LIMIT ?1",
-            )?
-        };
-
-        let rows = if let Some(e) = entity {
-            stmt.query_map(params![e, limit], |row| Self::row_to_log(row))?
-        } else {
-            stmt.query_map(params![limit], |row| Self::row_to_log(row))?
-        };
-
         let mut logs = Vec::new();
-        for row in rows {
-            logs.push(row?);
+        match entity {
+            Some(e) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, entity, dimension, source_a, source_b, magnitude, direction,
+                            resolution, timestamp, session_id, prev_hash, content_hash, row_hash, read_only
+                     FROM divergence_logs
+                     WHERE entity = ?1
+                     ORDER BY timestamp DESC
+                     LIMIT ?2",
+                )?;
+                let rows = stmt.query_map(params![e, limit], Self::row_to_log)?;
+                for row in rows {
+                    logs.push(row?);
+                }
+            },
+            None => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, entity, dimension, source_a, source_b, magnitude, direction,
+                            resolution, timestamp, session_id, prev_hash, content_hash, row_hash, read_only
+                     FROM divergence_logs
+                     ORDER BY timestamp DESC
+                     LIMIT ?1",
+                )?;
+                let rows = stmt.query_map(params![limit], Self::row_to_log)?;
+                for row in rows {
+                    logs.push(row?);
+                }
+            },
         }
         Ok(logs)
     }
@@ -272,12 +281,19 @@ mod tests {
         let dao = DivergenceLogDao::init(conn).unwrap();
 
         let log = DivergenceLog {
-            id: 0, entity: "300285".into(), dimension: "risk_assessment".into(),
-            source_a: "prior=0.65".into(), source_b: "risk_downgrade=R-200".into(),
-            magnitude: 0.5, direction: "opposing".into(),
+            id: 0,
+            entity: "300285".into(),
+            dimension: "risk_assessment".into(),
+            source_a: "prior=0.65".into(),
+            source_b: "risk_downgrade=R-200".into(),
+            magnitude: 0.5,
+            direction: "opposing".into(),
             resolution: Some("高风险风控否决:买入→持有".into()),
-            timestamp: 1751457600.0, session_id: "sess-001".into(),
-            prev_hash: "".into(), content_hash: "".into(), row_hash: "".into(),
+            timestamp: 1751457600.0,
+            session_id: "sess-001".into(),
+            prev_hash: "".into(),
+            content_hash: "".into(),
+            row_hash: "".into(),
             read_only: true,
         };
 

@@ -2,15 +2,16 @@
 
 //! PatternAnalyzerTask — 跨会话模式分析任务（后台周期执行）
 //!
-//! ## 当前状态（2026-07-27）
+//! ## 历史状态（2026-07-27，已失效）
 //!
-//! `pattern_analyzer` 模块已删除（原 `axagent_trajectory::analyze_trajectories`
-//! 函数与 `PatternAnalysisSummary` 等类型已不存在）。本任务暂时降级为
-//! 「只统计轨迹数量,不进行模式分析」,等待后续恢复或重写。
+//! 曾记录「`pattern_analyzer` 模块已删除」，本任务降级为「只统计轨迹数量」。
+//! **该判断是误判**：模块并未删除，`crates/trajectory/src/pattern_analyzer.rs`
+//! 一直存在于磁盘，只是 `trajectory/src/lib.rs` 缺少 `mod pattern_analyzer;` 声明，
+//! 导致整文件从未参与编译——从 crate 外观察与"被删除"无法区分。
 //!
-//! ## 历史职责（待恢复）
+//! ## 当前状态（2026-09-03 接线恢复）
 //!
-//! 在定时触发时,执行以下操作：
+//! `analyze_trajectories` / `PatternAnalysisSummary` 已重新导出，本任务恢复完整职责：
 //! - 从 trajectory 存储读取最近的会话轨迹
 //! - 调用 PatternAnalyzer 提取跨会话行为模式
 //!   （代码风格 / 时间分布 / 工具偏好 / 主题）
@@ -63,9 +64,10 @@ pub struct PatternAnalyzerTaskExecutor;
 impl PatternAnalyzerTaskExecutor {
     /// 执行模式分析任务并返回结果
     ///
-    /// **降级模式**：`pattern_analyzer` 模块已删除,本任务当前只统计
-    /// 轨迹数量,不进行实际模式分析。原 `analyze_trajectories` 调用
-    /// 已移除,等待后续重写后恢复。
+    /// 跨会话模式分析：从近期轨迹提取代码风格 / 时间分布 / 工具偏好 / 主题四类模式。
+    ///
+    /// （2026-09-03 前的降级分支已移除——`pattern_analyzer` 实为孤儿文件而非被删除，
+    /// 详见本文件头部说明。）
     pub async fn execute(ctx: &PatternAnalyzerTaskContext) -> PatternAnalyzerTaskResult {
         let start = std::time::Instant::now();
         let mut result = PatternAnalyzerTaskResult {
@@ -104,11 +106,25 @@ impl PatternAnalyzerTaskExecutor {
             return result;
         }
 
-        // TODO: pattern_analyzer 模块已删除,需重新实现或恢复 analyze_trajectories 函数
-        // 临时跳过分析,避免编译错误,不影响其他后台任务执行
-        tracing::warn!("[PatternAnalyzerTask] pattern_analyzer 模块已删除,跳过分析 (待恢复)");
-        result.errors.push("pattern_analyzer 模块已删除,分析跳过".to_string());
-        result.trajectories_analyzed = trajectories.len();
+        // [2026-09-03 接线恢复] `pattern_analyzer` 从未被删除——它是孤儿文件
+        // （crates/trajectory/src/lib.rs 缺 `mod` 声明 → 整文件从未编译），
+        // 从 crate 外看就像"模块不存在"，本任务因此长期降级。现已重新导出并接回。
+        let summary = axagent_trajectory::analyze_trajectories(&trajectories);
+        result.trajectories_analyzed = summary.trajectories_analyzed;
+        result.total_events_analyzed = summary.total_events_analyzed;
+        result.coding_patterns_count = summary.coding_patterns.len();
+        result.temporal_patterns_count = summary.temporal_patterns.len();
+        result.tool_preference_patterns_count = summary.tool_preference_patterns.len();
+        result.topic_patterns_count = summary.topic_patterns.len();
+        tracing::info!(
+            "[PatternAnalyzerTask] 分析 {} 条轨迹 / {} 个事件 → 代码风格 {}、时间分布 {}、工具偏好 {}、主题 {}",
+            result.trajectories_analyzed,
+            result.total_events_analyzed,
+            result.coding_patterns_count,
+            result.temporal_patterns_count,
+            result.tool_preference_patterns_count,
+            result.topic_patterns_count,
+        );
         result.duration_ms = start.elapsed().as_millis() as u64;
         result
     }

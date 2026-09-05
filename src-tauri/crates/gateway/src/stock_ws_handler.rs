@@ -9,6 +9,10 @@
 //! - `HttpPollingStreamer`：HTTP 轮询（当前默认，2s 间隔）
 //! - `WebSocketStreamer`：真实 WS 数据源（未来，无需改 consumer 代码）
 
+// 接缝架构：数据源由 wiring 层注入的 `GatewayAppState.market_data_streamer`
+//（harness `MarketDataStreamer` trait，实现方 = astock-data `HttpPollingStreamer`）
+// 决定；未注入时返回 503。
+
 use std::sync::Arc;
 
 use axum::{

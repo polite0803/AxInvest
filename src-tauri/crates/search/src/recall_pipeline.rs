@@ -18,13 +18,9 @@
 //!   producing a hybrid score (AST * 0.4 + Vector * 0.6) and final top-K ranking.
 //!
 
-#![allow(clippy::disallowed_types)]
-
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，execute() 为同步方法。
-#[allow(clippy::disallowed_types)]
-use parking_lot::Mutex;
 
 use crate::ast_index::AstIndex;
 use crate::file_index::FileIndex;
@@ -72,8 +68,6 @@ pub struct RecallResult {
 }
 
 #[derive(Debug, Clone)]
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，execute() 为同步方法。
-#[allow(clippy::disallowed_types)]
 pub struct RecallPipeline<'a> {
     file_index: &'a FileIndex,
     ast_index: &'a AstIndex,

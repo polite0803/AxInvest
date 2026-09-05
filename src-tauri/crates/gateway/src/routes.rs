@@ -16,6 +16,10 @@ use tower_http::cors::CorsLayer;
 
 use crate::auth::{AuthState, auth_middleware};
 use crate::handlers::mcp_proxy::{call_mcp_tool, discover_mcp_tools, list_mcp_servers};
+use crate::handlers::memory::{
+    add_memory, delete_memory_handler, memory_feedback, memory_grouped, memory_tree,
+    memory_working, search_memory, update_memory,
+};
 use crate::handlers::platform_bridge::{
     Platform, direct_message, platform_health, receive_webhook,
 };
@@ -64,6 +68,11 @@ use crate::native::{
 use crate::qr_bind_handlers::{consume_qr_token, generate_qr_token};
 use crate::realtime::{issue_realtime_ticket, realtime_handler};
 use crate::server::GatewayAppState;
+use crate::stock_handlers::{
+    add_watchlist, delete_watchlist, get_analysis, get_kline, get_quote, get_watchlist,
+    list_analyses, search_stock,
+};
+use crate::stock_ws_handler::stock_quote_stream_handler;
 
 // ACP handler imports
 use crate::handlers::acp::{
@@ -136,6 +145,24 @@ pub fn create_router(state: GatewayAppState) -> Router {
         .route("/api/chat/runs/{run_id}", delete(delete_chat_run))
         .route("/api/chat/runs/{run_id}/events", get(get_chat_run_events))
         .route("/api/chat/runs/{run_id}/cancel", post(cancel_chat_run))
+        // Memory（记忆外溢；后端 = memory_store 接缝，主 crate 注入 DaoMemoryStore）
+        .route("/api/memory", post(add_memory).patch(update_memory))
+        .route("/api/memory/search", post(search_memory))
+        .route("/api/memory/tree", get(memory_tree))
+        .route("/api/memory/working", get(memory_working))
+        .route("/api/memory/grouped", get(memory_grouped))
+        .route("/api/memory/{id}/feedback", post(memory_feedback))
+        .route("/api/memory/{id}", delete(delete_memory_handler))
+        // Stock（行情 + 分析记录/自选股；后端 = market_data / stock_store 接缝）
+        .route("/api/stock/search", get(search_stock))
+        .route("/api/stock/quote", get(get_quote))
+        .route("/api/stock/kline", get(get_kline))
+        .route("/api/stock/analyses", get(list_analyses))
+        .route("/api/stock/analysis/{id}", get(get_analysis))
+        .route("/api/stock/watchlist", get(get_watchlist).post(add_watchlist))
+        .route("/api/stock/watchlist/{id}", delete(delete_watchlist))
+        // P3: 行情 WebSocket 推送（market_data_streamer 接缝）
+        .route("/v1/stock/quote/stream", get(stock_quote_stream_handler))
         // Marketplace reviews
         .route(
             "/api/marketplace/{marketplace_id}/reviews",
@@ -357,6 +384,10 @@ mod tests {
             marketplace_service: axagent_harness::test_support::empty_marketplace_service(),
             mcp_store: std::sync::Arc::new(axagent_harness::test_support::NoopMcpServerStore),
             mcp_client: std::sync::Arc::new(axagent_harness::test_support::NoopMcpClientService),
+            memory_store: std::sync::Arc::new(axagent_harness::test_support::NoopMemoryStore),
+            market_data: None,
+            market_data_streamer: None,
+            stock_store: None,
             ticket_store: crate::realtime::default_ticket_store(),
             // SECURITY (Phase 2 Task 2.3): 路由层测试用宽阈值 limiter，
             // 避免和限流本身的目的混在一起。
@@ -418,6 +449,20 @@ mod tests {
     async fn realtime_requires_auth() {
         // SECURITY (H3): realtime 必须鉴权
         assert_protected_route_exists(Method::GET, "/v1/realtime").await;
+    }
+
+    #[tokio::test]
+    async fn stock_routes_require_auth() {
+        // Stock 接缝路由全部受 auth_middleware 保护
+        assert_protected_route_exists(Method::GET, "/api/stock/search?keyword=茅台").await;
+        assert_protected_route_exists(Method::GET, "/api/stock/quote?code=600519").await;
+        assert_protected_route_exists(Method::GET, "/api/stock/kline?code=600519").await;
+        assert_protected_route_exists(Method::GET, "/api/stock/analyses").await;
+        assert_protected_route_exists(Method::GET, "/api/stock/analysis/abc").await;
+        assert_protected_route_exists(Method::GET, "/api/stock/watchlist").await;
+        assert_protected_route_exists(Method::POST, "/api/stock/watchlist").await;
+        assert_protected_route_exists(Method::DELETE, "/api/stock/watchlist/abc").await;
+        assert_protected_route_exists(Method::GET, "/v1/stock/quote/stream?codes=600519").await;
     }
 
     #[tokio::test]

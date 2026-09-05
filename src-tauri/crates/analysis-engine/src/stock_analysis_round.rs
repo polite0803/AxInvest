@@ -21,20 +21,6 @@ impl std::fmt::Display for AnalysisError {
 
 impl std::error::Error for AnalysisError {}
 
-/// 股票分析的领域评估配置
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct StockAnalysisConfig {
-    /// 是否输出详细 trace（默认 true）
-    pub detailed_trace: bool,
-}
-
-impl Default for StockAnalysisConfig {
-    fn default() -> Self {
-        Self { detailed_trace: true }
-    }
-}
-
 /// 自改进分析循环的股票领域实现
 ///
 /// 执行流程（每轮）：

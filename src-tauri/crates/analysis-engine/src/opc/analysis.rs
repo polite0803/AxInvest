@@ -47,6 +47,12 @@ pub enum RiskLevel {
 // ── OpcRiskGate ─────────────────────────────────────────────────
 
 /// 行业风控门控（对齐 position_limits）
+///
+/// ⚠️ 已知契约缺陷（P1，待用户裁决）：`check()` 匹配的 KPI 键（expense_ratio /
+/// customer_satisfaction / project_overdue 类）在 `industry_kpi_service` 的产出清单
+/// （total_revenue / collection_rate / portfolio_value 等 15 键）中均不存在——
+/// 三条风控规则当前恒不触发，risk_level 恒为 Low。修复需先对齐两层 KPI 键语义，
+/// 不宜猜测接线。
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct OpcRiskGate {

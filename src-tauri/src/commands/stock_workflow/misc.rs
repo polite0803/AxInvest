@@ -213,12 +213,16 @@ pub async fn get_sector_coherence_report(
     state: State<'_, AppState>,
     concept_id: String,
 ) -> Result<serde_json::Value, String> {
-    use axagent_analysis_engine::concept_index::{build_sample_index, seed_ashare_ontology};
     use axagent_analysis_engine::sector_coherence::compute_sector_coherence;
 
-    // 构建概念索引（A 股本体）
-    let mut idx = build_sample_index();
-    seed_ashare_ontology(&mut idx);
+    // 构建概念索引：本体 + DB 加载 lemonhu 成员关系（完整版，
+    // 替换原 build_sample_index 简化版，成员覆盖更全）
+    let db = state.harness.db().clone();
+    let app_dir = state.app_data_dir.clone();
+    let idx = crate::commands::stock_analysis_setup::seed_concept_index::ensure_concept_index(
+        &db, &app_dir,
+    )
+    .await;
 
     let members = idx.members(&concept_id);
     if members.is_empty() {

@@ -1135,8 +1135,6 @@ pub struct ChannelPermissionPrompter {
     inner: Arc<ChannelPermissionPrompterInner>,
 }
 
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，所有方法均为同步操作。
-#[allow(clippy::disallowed_types)]
 struct ChannelPermissionPrompterInner {
     /// Maps request_id → Sender that agent_approve will use to unblock.
     pending_senders: parking_lot::Mutex<
@@ -1148,8 +1146,6 @@ struct ChannelPermissionPrompterInner {
     workspace_root: parking_lot::Mutex<String>,
 }
 
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，所有方法均为同步操作。
-#[allow(clippy::disallowed_types)]
 impl ChannelPermissionPrompter {
     pub fn new(
         app_handle: AppHandle,
@@ -1691,7 +1687,6 @@ impl axagent_harness::AgentSessionBroker for SessionManager {
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_types)]
 // SAFETY: 测试模块使用 parking_lot::Mutex 保护测试桩数据，仅在同步测试场景中使用，无跨 await 风险。
 mod tests {
     use super::*;

@@ -28,7 +28,6 @@
 //!
 //! 全部读写均经过 SeaORM，无副作用，可幂等调用。
 
-use sea_orm::sea_query::Expr;
 use sea_orm::ActiveModelTrait;
 use sea_orm::ColumnTrait;
 use sea_orm::DatabaseConnection;
@@ -356,12 +355,6 @@ pub async fn delete_mainlines_by_date(
         .exec(db)
         .await?;
     Ok(res.rows_affected)
-}
-
-/// 显式触发 [`Expr`] 引用，避免未使用警告（更新语句中用到）
-#[allow(dead_code)]
-fn _touch_expr() {
-    let _ = Expr::value(0i64);
 }
 
 // ── 测试 ───────────────────────────────────────────────────────────────────

@@ -232,19 +232,3 @@ pub const APPROVAL_ROLES: &[OpcRoleDef] = &[
         timeout_seconds: 300,
     },
 ];
-
-#[allow(dead_code)]
-/// 行业专属角色（可选）
-///
-/// 注意：角色对应岗位，在 agent 节点中可以为空。
-/// 专家（Expert）是核心，Profile 可以只绑定专家，不绑定角色。
-pub const INDUSTRY_ROLES: &[OpcRoleDef] = &[OpcRoleDef {
-    id: "ai_researcher",
-    name: "AI 研究分析师",
-    description: "AI 技术调研、模型评测、报告输出",
-    system_prompt: "你是 OPC 的 AI 研究分析师。\
-        \n\n职责：AI 技术调研、模型评测、研究报告输出。\
-        \n输出：结构化研究报告，含数据、分析、结论和建议。",
-    max_concurrent: 2,
-    timeout_seconds: 600,
-}];

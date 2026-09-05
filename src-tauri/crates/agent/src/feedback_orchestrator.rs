@@ -29,8 +29,6 @@ pub enum OrchestratorAction {
 /// - 达到阈值时触发对应的优化动作
 /// - 支持可选定时检查
 /// - 桥接 tracer FeedbackRecord → orchestrator（process_feedback_record）
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，所有方法均为同步操作。
-#[allow(clippy::disallowed_types)]
 pub struct FeedbackOrchestrator {
     /// 负反馈阈值（默认 5）
     negative_threshold: usize,
@@ -48,8 +46,6 @@ pub struct FeedbackOrchestrator {
     seen_traces: parking_lot::Mutex<std::collections::HashSet<String>>,
 }
 
-// SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，所有方法均为同步操作。
-#[allow(clippy::disallowed_types)]
 impl FeedbackOrchestrator {
     pub fn new() -> Self {
         Self {

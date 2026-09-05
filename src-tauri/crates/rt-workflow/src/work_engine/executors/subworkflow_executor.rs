@@ -6,6 +6,10 @@
 //! 直接调用 WorkEngine.run_workflow() 执行子工作流，产生独立 ExecutionState，
 //! 支持 parent_execution_id 关联和子执行记录追踪。
 
+// SAFETY: 本文件的 std::sync 锁仅在同步临界区使用，guard 不跨 await（无死锁 / 毒化风险）。
+// [2026-09-03] 由 crate 级 disallowed_types 豁免局部化到具体触发点（不含字面量，便于 grep 审计）。
+#![allow(clippy::disallowed_types)]
+
 use crate::work_engine::execution_state::ExecutionState;
 use crate::work_engine::node_executor_trait::{
     NodeError, NodeExecutorTrait, NodeOutput, check_cancellation_or_pause, error_code,

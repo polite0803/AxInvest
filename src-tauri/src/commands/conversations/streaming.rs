@@ -100,7 +100,7 @@ fn spawn_stream_task(
                 if let Err(e) = (axagent_entities::messages::ActiveModel {
                     id: Set(assistant_message_id.clone()),
                     conversation_id: Set(conversation_id.clone()),
-                    role: Set("assistant".to_string()),
+                    role: Set(crate::commands::constants::role::ASSISTANT.to_string()),
                     content: Set(String::new()),
                     provider_id: Set(Some(provider.id.clone())),
                     model_id: Set(Some(model_id.clone())),
@@ -264,7 +264,7 @@ fn spawn_stream_task(
                 // Strip <think> tags from the assistant content sent to the provider
                 let stripped_content = strip_think_tags(&content);
                 chat_messages.push(ChatMessage {
-                    role: "assistant".to_string(),
+                    role: crate::commands::constants::role::ASSISTANT.to_string(),
                     content: ChatContent::Text(stripped_content),
                     tool_calls: Some(tool_calls.clone()),
                     tool_call_id: None,
@@ -426,7 +426,7 @@ fn spawn_stream_task(
 
                     // Add tool result to in-memory chat messages for next provider call
                     chat_messages.push(ChatMessage {
-                        role: "tool".to_string(),
+                        role: crate::commands::constants::role::TOOL.to_string(),
                         content: ChatContent::Text(result_content.to_string()),
                         tool_calls: None,
                         tool_call_id: Some(tc.id.clone()),
@@ -2251,7 +2251,7 @@ pub async fn regenerate_with_model(
         if let Err(e) = (axagent_entities::messages::ActiveModel {
             id: Set(assistant_message_id.clone()),
             conversation_id: Set(conversation_id.clone()),
-            role: Set("assistant".to_string()),
+            role: Set(crate::commands::constants::role::ASSISTANT.to_string()),
             content: Set(String::new()),
             provider_id: Set(Some(provider.id.clone())),
             model_id: Set(Some(conversation.model_id.clone())),

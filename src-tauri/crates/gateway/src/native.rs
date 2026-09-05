@@ -1079,7 +1079,6 @@ pub async fn gemini_model_operation(
     handle_native_request(protocol, state, gateway_key, request, Some(parsed.model)).await
 }
 #[cfg(test)]
-#[allow(clippy::disallowed_types)]
 // SAFETY: 测试模块使用 parking_lot::Mutex 保护 mock 状态，仅在同步测试场景中使用，无跨 await 风险。
 mod tests {
     use super::*;
@@ -1384,6 +1383,10 @@ mod tests {
                 keys,
             }),
             marketplace_service: axagent_harness::test_support::empty_marketplace_service(),
+            memory_store: std::sync::Arc::new(axagent_harness::test_support::NoopMemoryStore),
+            market_data: None,
+            market_data_streamer: None,
+            stock_store: None,
             mcp_store: std::sync::Arc::new(axagent_harness::test_support::NoopMcpServerStore),
             mcp_client: std::sync::Arc::new(axagent_harness::test_support::NoopMcpClientService),
             ticket_store: crate::realtime::default_ticket_store(),

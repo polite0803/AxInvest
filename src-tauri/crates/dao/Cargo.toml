@@ -30,4 +30,4 @@ uuid = { workspace = true }
 walkdir = "2"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(mobile)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(mobile)"] }

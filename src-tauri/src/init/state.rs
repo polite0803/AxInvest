@@ -1011,17 +1011,24 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
 
     // ── M1: 新子状态分解 — 学习引擎与工具创建器 ──
     // 初始化 OPC 行业适配器注册表（P0-1-A：行业包驱动，替代 create_all_adapters 硬编码）
-    let industry_registry = IndustryAdapterRegistry::new();
-    // NOTE: opc_workflows 已随 AxAgent 清理移除，行业适配器暂空注册表
-    // for adapter in crate::commands::opc_workflows::load_industry_adapters_from_packs(Some(&app_dir))
-    // {
-    //     industry_registry.register(adapter);
-    // }
+    // 先把仓库根 config/opc 增量同步到 app_dir（生产模式 CWD 非仓库根，
+    // resolve_industries_dir 的仓库根 fallback 必然失败，app_dir 分支必须可用）
+    crate::commands::opc_workflows::ensure_opc_config_synced(&app_dir);
+    let mut industry_registry = IndustryAdapterRegistry::new();
+    for adapter in crate::commands::opc_workflows::load_industry_adapters_from_packs(Some(&app_dir))
+    {
+        industry_registry.register(adapter);
+    }
+    tracing::info!("[init] OPC 行业适配器注册完成: {} 个", industry_registry.count());
     let industry_adapter_registry = Arc::new(Mutex::new(industry_registry));
 
     // 初始化行业学习引擎（LLM 端口可选，未配置时使用规则回退；
     // RL 持久化存储已随 AxInvest 清理移除，使用内置内存存储）
-    let industry_learning_engine = Arc::new(IndustryLearningEngine::new());
+    // 接线 OpcLlmBridge：行业学习（反思/进化/自我改进）从规则打分升级为真实 LLM 推理，
+    // 失败自动回退规则评估（LlmInferencePort 契约），不阻塞行业工作流。
+    let industry_learning_engine = Arc::new(IndustryLearningEngine::new().with_llm_port(Arc::new(
+        crate::commands::opc_llm_bridge::OpcLlmBridge::new(harness.clone()),
+    )));
 
     let learning_state = LearningEngineState::new(
         text_grad_engine.clone(),
@@ -1278,6 +1285,11 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         "[startup] create_app_state 关键路径完成（首帧可渲染）"
     );
 
+    let astock_client = Arc::new(axagent_astock_data::AStockClient::new());
+    // [2026-09-03 接线恢复] finance.rs 的 5 个 api_tool（研报/概念板块/北向资金/龙虎榜/财联社快讯）
+    // 经 tools::global_state 取客户端，AppState 构造时注入一次。
+    axagent_tools::global_state::set_astock_client(astock_client.clone());
+
     Ok(AppState {
         harness,
         gateway: gateway_server,
@@ -1292,6 +1304,23 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         shutdown_token,
         vector_store: vector_store_arc,
         indexing_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
+        astock_client: astock_client.clone(),
+        stock_monitor: std::sync::OnceLock::new(),
+        stock_workflow_t0_semaphore: Arc::new(tokio::sync::Semaphore::new(5)),
+        stock_workflow_t0_per_stock_locks: Arc::new(tokio::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
+        quote_watcher: std::sync::OnceLock::new(),
+        trading_engine: Arc::new(tokio::sync::RwLock::new(
+            axagent_analysis_engine::trading::TradingEngine::new(
+                std::sync::Arc::new(sea_db.clone()),
+                astock_client,
+            ),
+        )),
+        cross_stock_aggregator: std::sync::OnceLock::new(),
+        stock_adaptive_engine: Arc::new(
+            axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new(),
+        ),
         stream_cancel_flags,
         agent_permission_senders,
         agent_ask_senders,
@@ -2295,6 +2324,23 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
             Err(e) => {
                 tracing::warn!("[startup] SemanticCache 文件缓存初始化失败 (保持内存占位): {}", e);
             },
+        }
+    }
+
+    // ── OPC 需求发现 cron 种子化（upsert 幂等；失败不阻塞启动） ──
+    if let Err(e) = crate::commands::opc_setup::seed_opc_cron::seed_demand_discovery_crons(
+        &app_state.cron_job_store,
+    )
+    .await
+    {
+        tracing::warn!("[startup] OPC 需求发现 cron 种子化失败（不阻塞）: {}", e);
+    }
+
+    // ── OPC 公司种子化（幂等：seed 对存量跳过；失败不阻塞启动） ──
+    {
+        let db = app_state.harness.db();
+        if let Err(e) = crate::commands::opc_setup::ensure_opc_company_seeded(&db).await {
+            tracing::warn!("[startup] OPC 公司种子化失败（不阻塞）: {}", e);
         }
     }
 

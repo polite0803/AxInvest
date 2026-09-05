@@ -573,6 +573,11 @@ pub async fn start_gateway(state: State<'_, AppState>, app: AppHandle) -> Result
         force_ssl: settings.force_ssl,
     };
 
+    // 进程级共享 AStockClient（init/state.rs 启动时注入 tools global_state）。
+    // None 时行情/WS 端点按接缝约定返回 503 兜底。
+    let astock_client: Option<std::sync::Arc<axagent_astock_data::AStockClient>> =
+        axagent_tools::global_state::get_astock_client();
+
     let server = axagent_gateway::server::GatewayServer::start_with_registry(
         state.harness.db().clone(),
         state.harness.master_key_owned(),
@@ -588,6 +593,24 @@ pub async fn start_gateway(state: State<'_, AppState>, app: AppHandle) -> Result
         std::sync::Arc::new(axagent_dao::marketplace_service::MarketplaceServiceImpl),
         axagent_dao::platform_adapter_impl::build_mcp_server_store(state.harness.db().clone()),
         axagent_mcp::client_service_impl::build_mcp_client_service(),
+        // 记忆外溢接缝：DAO 后端 MemoryStore（gateway /api/memory 消费）
+        std::sync::Arc::new(crate::gateway_memory_store::DaoMemoryStore::new(
+            state.harness.db().clone(),
+        )),
+        // 行情/股票接缝：复用进程级共享 AStockClient（init 时经 tools global_state 注入）。
+        // - market_data：/api/stock/{search,quote,kline} 同步查询
+        // - market_data_streamer：/v1/stock/quote/stream WS 推送（HTTP 轮询 2s）
+        // - stock_store：/api/stock/{analysis,watchlist} CRUD（entities 后端）
+        astock_client
+            .clone()
+            .map(|c| c as std::sync::Arc<dyn axagent_harness::market_data::MarketDataProvider>),
+        astock_client.map(|c| {
+            std::sync::Arc::new(axagent_astock_data::HttpPollingStreamer::new(c))
+                as std::sync::Arc<dyn axagent_harness::market_data::MarketDataStreamer>
+        }),
+        Some(std::sync::Arc::new(crate::gateway_stock_store::DaoStockStore::new(
+            state.harness.db().clone(),
+        )) as std::sync::Arc<dyn axagent_harness::stock_service::StockStore>),
         // ACP 协议默认启用（前端已集成契约），如需禁用可通过 `ACP_PROTOCOL=false` 环境变量
         std::env::var("ACP_PROTOCOL").ok().as_deref() != Some("false"),
     )

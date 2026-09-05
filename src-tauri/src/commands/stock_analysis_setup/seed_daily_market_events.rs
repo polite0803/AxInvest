@@ -23,10 +23,9 @@ use axagent_entities::workflow_template;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
 use axagent_harness::workflow_types::{
-    AgentNode, AgentNodeConfig, CodeNode, CodeNodeConfig, EdgeType, EndNode, EndNodeConfig,
-    JsonSchema, JsonSchemaProperty, OutputMode, Position, RetryConfig, ScheduleTriggerConfig,
-    StorageNode, StorageNodeConfig, ToolDef, TriggerConfig, TriggerNode, TriggerType, Variable,
-    WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+    AgentNode, AgentNodeConfig, EdgeType, EndNode, EndNodeConfig, JsonSchema, JsonSchemaProperty,
+    OutputMode, Position, RetryConfig, ScheduleTriggerConfig, ToolDef, TriggerConfig, TriggerNode,
+    TriggerType, Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
 };
 
 const TEMPLATE_ID: &str = "daily-market-events";
@@ -337,53 +336,4 @@ pub async fn seed_daily_market_events_template(
         "[stock_analysis_setup] G4 daily-market-events 模板已创建 (v{TEMPLATE_VERSION})"
     );
     Ok(())
-}
-
-/// 抑制未使用警告（StorageNode 等 import 暂未使用，保留供后续扩展）
-#[allow(dead_code)]
-fn _touch_unused() {
-    let _ = StorageNode {
-        base: WorkflowNodeBase {
-            id: String::new(),
-            title: String::new(),
-            description: None,
-            position: Position { x: 0.0, y: 0.0 },
-            retry: RetryConfig::default(),
-            timeout: None,
-            enabled: true,
-            parent_id: None,
-            compensation: None,
-            continue_on_fail: false,
-        },
-        config: StorageNodeConfig {
-            backend: String::new(),
-            operation: String::new(),
-            input_var: String::new(),
-            collection: String::new(),
-            key_var: None,
-            output_var: String::new(),
-        },
-    };
-    let _ = CodeNode {
-        base: WorkflowNodeBase {
-            id: String::new(),
-            title: String::new(),
-            description: None,
-            position: Position { x: 0.0, y: 0.0 },
-            retry: RetryConfig::default(),
-            timeout: None,
-            enabled: true,
-            parent_id: None,
-            compensation: None,
-            continue_on_fail: false,
-        },
-        config: CodeNodeConfig {
-            language: String::new(),
-            code: String::new(),
-            output_var: String::new(),
-            tool_name: None,
-            execute_directly: false,
-            input_mapping: std::collections::HashMap::new(),
-        },
-    };
 }

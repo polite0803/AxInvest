@@ -771,7 +771,10 @@ dependencies = [
  "axagent-agent",
  "axagent-agent-command-types",
  "axagent-agent-macro",
+ "axagent-analysis-engine",
+ "axagent-astock-data",
  "axagent-cache",
+ "axagent-company-runtime",
  "axagent-credential",
  "axagent-crypto",
  "axagent-dao",
@@ -782,13 +785,16 @@ dependencies = [
  "axagent-gateway",
  "axagent-harness",
  "axagent-kit",
+ "axagent-market-sim",
  "axagent-mcp",
  "axagent-migration",
+ "axagent-notification",
  "axagent-npm",
  "axagent-orchestrator",
  "axagent-plugins",
  "axagent-prompt-guard",
  "axagent-providers",
+ "axagent-quant",
  "axagent-rt-dashboard",
  "axagent-rt-messaging",
  "axagent-rt-theme",
@@ -865,6 +871,7 @@ version = "2.9.9"
 dependencies = [
  "async-trait",
  "axagent-harness",
+ "axagent-runtime-core",
  "backon",
  "base64 0.22.1",
  "chrono",
@@ -1779,28 +1786,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "axagent-stock-analysis"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "axagent-astock-data",
- "axagent-dao",
- "axagent-entities",
- "axagent-harness",
- "axagent-orchestrator",
- "axagent-trajectory",
- "chrono",
- "csv",
- "futures",
- "sea-orm",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "axagent-storage"
 version = "2.9.9"
 dependencies = [
@@ -1852,6 +1837,8 @@ name = "axagent-tools"
 version = "2.9.9"
 dependencies = [
  "async-trait",
+ "axagent-analysis-engine",
+ "axagent-astock-data",
  "axagent-dao",
  "axagent-document-parser",
  "axagent-harness",

@@ -65,11 +65,7 @@ pub(crate) struct BehaviorLearner {
 
 impl BehaviorLearner {
     pub(crate) fn new(user_id: &str) -> Self {
-        Self {
-            behaviors: Vec::new(),
-            style_profile: None,
-            user_id: user_id.into(),
-        }
+        Self { behaviors: Vec::new(), style_profile: None, user_id: user_id.into() }
     }
 
     pub(crate) fn record_behavior(&mut self, behavior: UserBehavior) {
@@ -200,10 +196,7 @@ impl BehaviorLearner {
             }
         }
 
-        let max = *[camel_case, snake_case, pascal_case]
-            .iter()
-            .max()
-            .unwrap_or(&0);
+        let max = *[camel_case, snake_case, pascal_case].iter().max().unwrap_or(&0);
         if max == snake_case {
             "snake_case".into()
         } else if max == pascal_case {

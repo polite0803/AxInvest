@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(clippy::disallowed_types)]
-
 use crate::exporter::TraceExport;
 use crate::span::{Span, TraceMetadata};
 use chrono::{DateTime, Utc};

@@ -3,6 +3,10 @@
 //! 需求发现（Demand Discovery）领域 Tauri 命令层
 //!
 //! 暴露能力扫描、市场线索发现、需求确认、交付工作流执行等核心命令。
+//!
+//! 启动接线：init/services.rs 的 start_demand_discovery_cron 每 12 小时调用
+//! run_demand_discovery_cron 扫描已启用平台。opc_* 命令的新实现位于
+//! opc_demand_discovery/opc_delivery（此处旧函数体已被取代，见文件尾部说明）。
 
 use axagent_agent_macro::agent_command;
 use sea_orm::sea_query::Expr;
@@ -287,125 +291,6 @@ pub async fn opc_discover_leads(
     })
 }
 
-/// 一体化需求发现：扫描 → 智能评估 → 入库
-///
-/// 扫描多平台需求线索，自动进行价值评估（规则引擎 + 可选 LLM），
-/// 将评估结果直接写入 opc_demand_lead 表。
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "扫描并评估需求线索")]
-#[tauri::command]
-pub async fn opc_discover_and_evaluate_leads(
-    state: State<'_, AppState>,
-    query: String,
-    min_score: Option<f64>,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_demand_lead;
-    use axagent_entities::opc_market_platform;
-    use axagent_tools::tools::marketplace_scanner::AggregateMarketplaceScanner;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    // 1) 从平台配置加载已启用的平台连接器
-    let mut scanner = AggregateMarketplaceScanner::new();
-    let platforms = opc_market_platform::Entity::find()
-        .filter(opc_market_platform::Column::Enabled.eq(1))
-        .all(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?;
-
-    for p in platforms {
-        let config: serde_json::Value =
-            serde_json::from_str(&p.config_json).unwrap_or(serde_json::json!({}));
-        scanner.add_platform(&p.name, &p.platform_type, p.base_url.as_deref(), &config);
-    }
-
-    // 2) 执行「扫描 + 评估」一体化流水线
-    let evaluated = scanner.search_and_evaluate(&query, None).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    // 3) 可选：按价值分阈值筛选
-    let min_threshold = min_score.unwrap_or(0.0);
-    let filtered: Vec<_> =
-        evaluated.into_iter().filter(|e| e.value_score() >= min_threshold).collect();
-
-    // 4) 将评估结果入库
-    let mut saved_leads: Vec<opc_demand_lead::Model> = Vec::new();
-    for el in &filtered {
-        let demand_type_str = el.evaluation.demand_type.as_str().to_string();
-        let entity = opc_demand_lead::ActiveModel {
-            id: Set(el.lead.id.clone()),
-            platform: Set(el.lead.platform.clone()),
-            title: Set(el.lead.title.clone()),
-            description: Set(el.lead.description.clone()),
-            budget_min: Set(el.lead.budget_min),
-            budget_max: Set(el.lead.budget_max),
-            budget_currency: Set(el.lead.budget_currency.clone()),
-            contact_name: Set(el.lead.contact_name.clone()),
-            contact_email: Set(el.lead.contact_email.clone()),
-            contact_phone: Set(el.lead.contact_phone.clone()),
-            source_url: Set(el.lead.source_url.clone()),
-            raw_snapshot_json: Set(serde_json::to_string(&el.lead.raw_snapshot).unwrap_or_default()),
-            matched_capabilities_json: Set("[]".to_string()),
-            ai_analysis_json: Set(serde_json::to_string(&el.evaluation).unwrap_or_default()),
-            recommended_workflow_id: Set(None),
-            status: Set("new".to_string()),
-            priority: Set(3),
-            confidence: Set(el.evaluation.confidence),
-            notes: Set(String::new()),
-            project_id: Set(None),
-            customer_id: Set(None),
-            expires_at: Set(None),
-            claimed_by: Set(None),
-            // 需求价值评估字段
-            pain_score: Set(el.evaluation.pain_score),
-            market_gap_score: Set(el.evaluation.market_gap_score),
-            commercial_value_score: Set(el.evaluation.commercial_value_score),
-            opportunity_level: Set(el.evaluation.opportunity_level.clone()),
-            demand_type: Set(demand_type_str),
-            evaluated_at: Set(Some(now)),
-            created_at: Set(now),
-            updated_at: Set(now),
-        };
-
-        match entity.insert(db).await {
-            Ok(model) => saved_leads.push(model),
-            Err(e) => {
-                tracing::warn!("[opc_discover_and_evaluate_leads] 入库失败 {}: {}", el.lead.id, e);
-            },
-        }
-    }
-
-    // 5) 记录平台最近同步时间
-    let _ = opc_market_platform::Entity::update_many()
-        .col_expr(opc_market_platform::Column::LastSyncAt, Expr::value(now))
-        .col_expr(opc_market_platform::Column::Status, Expr::value("synced"))
-        .col_expr(opc_market_platform::Column::UpdatedAt, Expr::value(now))
-        .exec(db)
-        .await;
-
-    // 6) 返回结果（含统计信息）
-    let total_scanned = filtered.len();
-    let high_value_count = saved_leads.iter().filter(|l| l.commercial_value_score >= 70.0).count();
-
-    let result = serde_json::json!({
-        "total_scanned": total_scanned,
-        "saved_count": saved_leads.len(),
-        "high_value_count": high_value_count,
-        "leads": saved_leads,
-    });
-
-    serde_json::to_value(&result).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
 /// 主动评估入库：基于配置的领域关键词自动扫描、评估并入库
 ///
 /// 无需用户输入关键词，系统自动从配置中提取 domain_* 关键词，
@@ -452,7 +337,7 @@ pub async fn opc_proactive_evaluate_and_save_leads(
     let mut query_stats = Vec::new();
 
     for query in &queries {
-        match scanner.search_and_evaluate(query, None).await {
+        match scanner.search_and_evaluate(query).await {
             Ok(evaluated) => {
                 let count = evaluated.len();
                 total_scanned += count;
@@ -461,8 +346,8 @@ pub async fn opc_proactive_evaluate_and_save_leads(
                     evaluated.into_iter().filter(|e| e.value_score() >= min_threshold).collect();
 
                 for el in &filtered {
-                    let demand_type_str = el.evaluation.demand_type.as_str().to_string();
-                    let is_high_value = el.evaluation.commercial_value_score >= 70.0;
+                    let demand_type_str = el.evaluation.demand_type().as_str().to_string();
+                    let is_high_value = el.evaluation.commercial_value_score() >= 70.0;
 
                     let entity = opc_demand_lead::ActiveModel {
                         id: Set(el.lead.id.clone()),
@@ -486,16 +371,16 @@ pub async fn opc_proactive_evaluate_and_save_leads(
                         recommended_workflow_id: Set(None),
                         status: Set(if is_high_value { "high_value" } else { "new" }.to_string()),
                         priority: Set(if is_high_value { 1 } else { 3 }),
-                        confidence: Set(el.evaluation.confidence),
+                        confidence: Set(el.evaluation.confidence()),
                         notes: Set(String::new()),
                         project_id: Set(None),
                         customer_id: Set(None),
                         expires_at: Set(None),
                         claimed_by: Set(None),
-                        pain_score: Set(el.evaluation.pain_score),
-                        market_gap_score: Set(el.evaluation.market_gap_score),
-                        commercial_value_score: Set(el.evaluation.commercial_value_score),
-                        opportunity_level: Set(el.evaluation.opportunity_level.clone()),
+                        pain_score: Set(el.evaluation.pain_score()),
+                        market_gap_score: Set(el.evaluation.market_gap_score()),
+                        commercial_value_score: Set(el.evaluation.commercial_value_score()),
+                        opportunity_level: Set(el.evaluation.opportunity_level().to_string()),
                         demand_type: Set(demand_type_str),
                         evaluated_at: Set(Some(now)),
                         created_at: Set(now),
@@ -619,14 +504,14 @@ pub async fn run_demand_discovery_cron(
     let mut high_value_leads: Vec<(String, f64, String)> = Vec::new();
 
     for query in &queries {
-        match scanner.search_and_evaluate(query, None).await {
+        match scanner.search_and_evaluate(query).await {
             Ok(evaluated) => {
                 let count = evaluated.len();
                 total_scanned += count;
 
                 for el in &evaluated {
-                    let demand_type_str = el.evaluation.demand_type.as_str().to_string();
-                    let is_high_value = el.evaluation.commercial_value_score >= 70.0;
+                    let demand_type_str = el.evaluation.demand_type().as_str().to_string();
+                    let is_high_value = el.evaluation.commercial_value_score() >= 70.0;
 
                     let entity = opc_demand_lead::ActiveModel {
                         id: Set(el.lead.id.clone()),
@@ -650,16 +535,16 @@ pub async fn run_demand_discovery_cron(
                         recommended_workflow_id: Set(None),
                         status: Set(if is_high_value { "high_value" } else { "new" }.to_string()),
                         priority: Set(if is_high_value { 1 } else { 3 }),
-                        confidence: Set(el.evaluation.confidence),
+                        confidence: Set(el.evaluation.confidence()),
                         notes: Set(String::new()),
                         project_id: Set(None),
                         customer_id: Set(None),
                         expires_at: Set(None),
                         claimed_by: Set(None),
-                        pain_score: Set(el.evaluation.pain_score),
-                        market_gap_score: Set(el.evaluation.market_gap_score),
-                        commercial_value_score: Set(el.evaluation.commercial_value_score),
-                        opportunity_level: Set(el.evaluation.opportunity_level.clone()),
+                        pain_score: Set(el.evaluation.pain_score()),
+                        market_gap_score: Set(el.evaluation.market_gap_score()),
+                        commercial_value_score: Set(el.evaluation.commercial_value_score()),
+                        opportunity_level: Set(el.evaluation.opportunity_level().to_string()),
                         demand_type: Set(demand_type_str),
                         evaluated_at: Set(Some(now)),
                         created_at: Set(now),
@@ -673,7 +558,7 @@ pub async fn run_demand_discovery_cron(
                                 high_value_count += 1;
                                 high_value_leads.push((
                                     el.lead.id.clone(),
-                                    el.evaluation.commercial_value_score,
+                                    el.evaluation.commercial_value_score(),
                                     el.lead.title.clone(),
                                 ));
                             }
@@ -774,151 +659,6 @@ async fn send_high_value_notification(
 
 // ── 需求线索 CRUD ──────────────────────────────────────────────
 
-/// 创建需求线索（手动补录或从平台线索转化）
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建需求线索")]
-#[tauri::command]
-pub async fn opc_create_lead(
-    state: State<'_, AppState>,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_demand_lead;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    let id = input
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&format!("dl-{}", uuid::Uuid::new_v4().simple()))
-        .to_string();
-
-    let title = input.get("title").and_then(|v| v.as_str()).unwrap_or("未命名需求").to_string();
-
-    let description = input.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-
-    let platform = input.get("platform").and_then(|v| v.as_str()).unwrap_or("manual").to_string();
-
-    let status = input.get("status").and_then(|v| v.as_str()).unwrap_or("new").to_string();
-
-    let raw_snapshot = input.get("raw_snapshot").cloned().unwrap_or(serde_json::json!({}));
-
-    let ai_analysis = input.get("ai_analysis").cloned().unwrap_or(serde_json::json!({}));
-
-    let matched_capabilities =
-        input.get("matched_capabilities").cloned().unwrap_or(serde_json::json!([]));
-
-    let entity = opc_demand_lead::ActiveModel {
-        id: Set(id),
-        platform: Set(platform),
-        title: Set(title),
-        description: Set(description),
-        budget_min: Set(input.get("budget_min").and_then(|v| v.as_f64())),
-        budget_max: Set(input.get("budget_max").and_then(|v| v.as_f64())),
-        budget_currency: Set(input
-            .get("budget_currency")
-            .and_then(|v| v.as_str())
-            .unwrap_or("CNY")
-            .to_string()),
-        contact_name: Set(input
-            .get("contact_name")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())),
-        contact_email: Set(input
-            .get("contact_email")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())),
-        contact_phone: Set(input
-            .get("contact_phone")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())),
-        source_url: Set(input.get("source_url").and_then(|v| v.as_str()).map(|s| s.to_string())),
-        raw_snapshot_json: Set(serde_json::to_string(&raw_snapshot).unwrap_or_default()),
-        matched_capabilities_json: Set(
-            serde_json::to_string(&matched_capabilities).unwrap_or_default()
-        ),
-        ai_analysis_json: Set(serde_json::to_string(&ai_analysis).unwrap_or_default()),
-        recommended_workflow_id: Set(input
-            .get("recommended_workflow_id")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())),
-        status: Set(status),
-        priority: Set(input.get("priority").and_then(|v| v.as_i64()).unwrap_or(3) as i32),
-        confidence: Set(input.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0)),
-        notes: Set(input.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string()),
-        project_id: Set(input.get("project_id").and_then(|v| v.as_str()).map(|s| s.to_string())),
-        customer_id: Set(input.get("customer_id").and_then(|v| v.as_str()).map(|s| s.to_string())),
-        expires_at: Set(input.get("expires_at").and_then(|v| v.as_i64())),
-        claimed_by: Set(input.get("claimed_by").and_then(|v| v.as_str()).map(|s| s.to_string())),
-        // 需求价值评估字段（v222 新增）
-        pain_score: Set(input.get("pain_score").and_then(|v| v.as_f64()).unwrap_or(0.0)),
-        market_gap_score: Set(input
-            .get("market_gap_score")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0)),
-        commercial_value_score: Set(input
-            .get("commercial_value_score")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0)),
-        opportunity_level: Set(input
-            .get("opportunity_level")
-            .and_then(|v| v.as_str())
-            .unwrap_or("low")
-            .to_string()),
-        demand_type: Set(input
-            .get("demand_type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string()),
-        evaluated_at: Set(input.get("evaluated_at").and_then(|v| v.as_i64())),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-
-    let saved = entity.insert(db).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    serde_json::to_value(&saved).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-/// 列出所有需求线索（支持按状态/平台过滤）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出需求线索")]
-#[tauri::command]
-pub async fn opc_list_leads(
-    state: State<'_, AppState>,
-    status: Option<String>,
-    platform: Option<String>,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_demand_lead;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let mut qs = opc_demand_lead::Entity::find();
-
-    if let Some(ref s) = status {
-        qs = qs.filter(opc_demand_lead::Column::Status.eq(s));
-    }
-    if let Some(ref p) = platform {
-        qs = qs.filter(opc_demand_lead::Column::Platform.eq(p));
-    }
-
-    let results =
-        qs.order_by_desc(opc_demand_lead::Column::CreatedAt).all(db).await.map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?;
-
-    serde_json::to_value(&results).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
 /// 确认需求线索（标记为 qualified，进入执行管道）
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "确认需求线索")]
 #[tauri::command]
@@ -951,256 +691,6 @@ pub async fn opc_confirm_lead(
     })?;
 
     serde_json::to_value(&saved).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-/// 为需求线索匹配能力（调用 AnalysisEngine 进行匹配）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "为需求匹配能力")]
-#[tauri::command]
-pub async fn opc_match_lead_capabilities(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_demand_lead;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    let result = opc_demand_lead::Entity::find_by_id(&id)
-        .one(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?
-        .ok_or_else(|| format!("需求线索不存在: {id}"))?;
-
-    // 复用上游能力发现管线（RAR 语义匹配），以需求描述为查询输入
-    let user_input = format!("{} {}", result.title, result.description);
-    let query =
-        axagent_harness::CapabilityQuery { user_input: user_input.clone(), ..Default::default() };
-    let discovery_request = axagent_harness::CapabilityDiscoveryRequest {
-        user_input,
-        filter_context: axagent_harness::FilterContext::default(),
-        query,
-        weights: axagent_harness::DiscoveryWeights::default(),
-        budget: axagent_harness::SessionBudget::default(),
-        enable_completion: false,
-        enable_circuit_breaker: true,
-        enable_rar: true,
-        rar_top_k: 10,
-        task_shape: None,
-    };
-
-    let discovery_result = axagent_harness::CapabilityRouter::discover(
-        state.capability_router.as_ref(),
-        &discovery_request,
-    )
-    .await
-    .map_err(|e| format!("能力匹配失败: {e}"))?;
-
-    // 将上游排序结果映射为前端期望的 {id, name, source, score}
-    let mut matched: Vec<serde_json::Value> = Vec::new();
-    if let Some(primary) = &discovery_result.primary_match {
-        matched.push(serde_json::json!({
-            "id": primary.passport.capability_id,
-            "name": primary.passport.name,
-            "source": primary.passport.kind.as_str(),
-            "score": primary.final_score,
-        }));
-    }
-    for alt in &discovery_result.alternatives {
-        matched.push(serde_json::json!({
-            "id": alt.passport.capability_id,
-            "name": alt.passport.name,
-            "source": alt.passport.kind.as_str(),
-            "score": alt.final_score,
-        }));
-    }
-
-    let hit_count = matched.len();
-    let score_sum: f64 = matched.iter().filter_map(|m| m["score"].as_f64()).sum();
-    let confidence = if hit_count > 0 {
-        (score_sum / hit_count as f64).min(1.0)
-    } else {
-        0.0
-    };
-
-    // 能力缺口落库：热门/高价值需求但匹配能力不足时，记录缺口
-    if hit_count == 0 {
-        let gap_id = format!("gap-{}", uuid::Uuid::new_v4().simple());
-        let _ = axagent_entities::opc_capability_gap::ActiveModel {
-            id: Set(gap_id),
-            lead_id: Set(Some(id.clone())),
-            title: Set(format!("能力缺口: {}", result.title)),
-            description: Set(format!("需求『{}』未匹配到任何现有能力", result.title)),
-            missing_capability: Set(result.title.clone()),
-            gap_type: Set("capability".to_string()),
-            suggested_action: Set("为该需求新增对应工具/技能或工作流模板，再重新匹配".to_string()),
-            priority: Set(result.priority),
-            status: Set("open".to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
-            closed_at: Set(None),
-        }
-        .insert(db)
-        .await;
-    }
-
-    let mut am: opc_demand_lead::ActiveModel = result.into();
-    am.matched_capabilities_json = Set(serde_json::to_string(&matched).unwrap_or_default());
-    am.confidence = Set(confidence);
-    am.updated_at = Set(now);
-
-    let saved = am.update(db).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    serde_json::to_value(&saved).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-// ── 平台配置 CRUD ──────────────────────────────────────────────
-
-/// 列出所有平台连接器配置（自动确保预置平台存在）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "列出市场平台配置")]
-#[tauri::command]
-pub async fn opc_list_platforms(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_market_platform;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-
-    // 确保预置平台种子数据存在（如果失败则返回错误）
-    axagent_dao::repo::market_platform::ensure_preset_platforms(db).await.map_err(|e| {
-        tracing::error!("[opc_list_platforms] 种子数据初始化失败: {}", e);
-        e
-    })?;
-
-    let results = opc_market_platform::Entity::find()
-        .order_by_desc(opc_market_platform::Column::Enabled)
-        .order_by_asc(opc_market_platform::Column::Name)
-        .all(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?;
-
-    tracing::info!("[opc_list_platforms] 返回 {} 个平台", results.len());
-
-    serde_json::to_value(&results).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-/// 保存（新增或更新）平台连接器配置
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "保存平台配置")]
-#[tauri::command]
-pub async fn opc_save_platform(
-    state: State<'_, AppState>,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_market_platform;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    let id = input
-        .get("id")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(&format!("mp-{}", uuid::Uuid::new_v4().simple()))
-        .to_string();
-
-    let existing = opc_market_platform::Entity::find_by_id(&id).one(db).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    let name = input.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let platform_type =
-        input.get("platform_type").and_then(|v| v.as_str()).unwrap_or("manual").to_string();
-    let enabled = input.get("enabled").and_then(|v| v.as_i64()).unwrap_or(1) as i32;
-    let base_url = input.get("base_url").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let config = input.get("config").cloned().unwrap_or(serde_json::json!({}));
-
-    if let Some(existing) = existing {
-        let mut am: opc_market_platform::ActiveModel = existing.into();
-        am.name = Set(name);
-        am.platform_type = Set(platform_type);
-        am.enabled = Set(enabled);
-        am.base_url = Set(base_url);
-        am.config_json = Set(serde_json::to_string(&config).unwrap_or_default());
-        am.updated_at = Set(now);
-        let saved = am.update(db).await.map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?;
-        return serde_json::to_value(&saved).map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        });
-    }
-
-    let entity = opc_market_platform::ActiveModel {
-        id: Set(id),
-        name: Set(name),
-        platform_type: Set(platform_type),
-        enabled: Set(enabled),
-        base_url: Set(base_url),
-        config_json: Set(serde_json::to_string(&config).unwrap_or_default()),
-        last_sync_at: Set(None),
-        status: Set("idle".to_string()),
-        created_at: Set(now),
-        updated_at: Set(now),
-    };
-
-    let saved = entity.insert(db).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    serde_json::to_value(&saved).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-/// 删除平台连接器配置
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "删除平台配置")]
-#[tauri::command]
-pub async fn opc_delete_platform(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_market_platform;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let result = opc_market_platform::Entity::find_by_id(&id)
-        .one(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?
-        .ok_or_else(|| format!("平台配置不存在: {id}"))?;
-
-    result.delete(db).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    serde_json::to_value(serde_json::json!({ "deleted": true, "id": id })).map_err(|e| {
         ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
             .to_string()
     })

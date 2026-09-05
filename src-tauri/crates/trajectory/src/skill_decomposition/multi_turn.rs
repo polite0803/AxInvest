@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
+// [2026-09-03] 本模块曾因 skill_decomposition/mod.rs 缺 `pub mod` 声明而从未编译。
+// 这是一整套「多轮对话式技能分解」的数据模型（会话轮次 / 消息 / 技能包 / 文件结构 /
+// 工作流设计 / 分解事件）。实现完整但零消费方——decomposer.rs 走的是单轮路径，
+// 未使用本模块。接入需要新增多轮分解的交互流程（UI + 命令层），属新功能，待用户裁决。
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#![allow(clippy::disallowed_types)]
-
 use std::collections::HashSet;
 
 use crate::{Tool, ToolCategory, ToolContext, ToolDomain, ToolError, ToolResult};
 use async_trait::async_trait;
 
 pub mod env_config;
+pub mod prompt_cache;
 use axagent_kit::secure_store::SecureStore;
 pub use env_config::{SkillConfigTool, SkillEnvCheckTool};
 use parking_lot::Mutex;

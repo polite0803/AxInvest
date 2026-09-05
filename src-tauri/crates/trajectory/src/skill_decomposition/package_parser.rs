@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
+// [2026-09-03] 本模块曾因 skill_decomposition/mod.rs 缺 `pub mod` 声明而从未编译。
+// `FileGraph` / `FileNode` / `FileEdge` + `build_file_graph` / `infer_content_type` 是
+// 技能包的文件依赖图构建能力，实现完整但零消费方（decomposer.rs 未走包解析路径）。
+// 随 multi_turn.rs 一并待消费方落地，勿删。
+
 use super::multi_turn::{CodeBlock, FileReference, FileType, ReferenceType, SkillFile};
 use regex::Regex;
 use std::path::Path;

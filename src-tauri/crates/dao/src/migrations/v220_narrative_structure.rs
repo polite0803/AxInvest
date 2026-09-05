@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! v220 — 叙事结构持久化表
+//! v220 — 叙事结构表冗余保护（NO-OP，真实建表 = v126）
 //!
-//! ## 背景
+//! ## ⚠️ 事实澄清（2026-09-03 死代码审计第 12 轮修正）
 //!
-//! 为支持文学创作工作流中叙事结构（角色弧线、交汇点、伏笔网络）的
-//! 跨会话保存与恢复，新增 `narrative_structures` 表。
+//! 本 migration 自称「建表」，实为**冗余 no-op**：
+//! - `narrative_structures` 表由 **v126** 首建，现行 schema 为 `structure`
+//!   单列 JSON（消费方 `repo/narrative.rs` + `commands/narrative.rs`）。
+//! - 本文件下方 DDL 是**旧三列 schema**（arcs/confluences/foreshadows）的
+//!   残留草稿，依赖 v126 先建表 + `IF NOT EXISTS` 才不会生效。
+//! - 正常执行顺序（v126 seq < v220）下本 DDL 永远 no-op。
 //!
-//! ## 功能
+//! ## 保留原因
 //!
-//! - 保存完整的叙事结构设计（arcs/confluences/foreshadows 以 JSON 存储）
-//! - 支持模板标记（is_template），便于用户复用预设结构
-//! - 支持版本号，便于后续扩展
+//! 保留注册条目以维持 migration 序列连续（seq 220 不能留空洞），
+//! 真正的 schema 权威是 v126。勿在此追加任何 DDL。
 //!
 //! ## 幂等性
 //!

@@ -16,6 +16,7 @@ use axagent_analysis_engine::knowledge_loader::load_concept_index_from_db;
 ///
 /// 注册基线本体（行业 + 概念），从数据库加载 lemonhu 的成员关系。
 /// 若知识库为空或加载失败，返回仅含本体的空索引（成员数据由动态搜索兜底）。
+/// 接线：stock_workflow/misc.rs 的 get_sector_coherence_report 调用。
 pub(crate) async fn ensure_concept_index(db: &DatabaseConnection, _app_dir: &Path) -> ConceptIndex {
     let mut idx = ConceptIndex::new();
 

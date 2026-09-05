@@ -9,8 +9,6 @@
 //!
 //! 替代原先散落在各处的裸 `tokio::spawn` 模式。
 
-#![allow(clippy::disallowed_types)]
-
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::time::Duration;

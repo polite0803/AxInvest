@@ -95,41 +95,6 @@ async fn upsert_cron_job(store: &Arc<CronJobStore>, job: CronJob) -> Result<(), 
     Ok(())
 }
 
-/// 获取默认的需求发现 Cron 表达式选项
-#[allow(dead_code)]
-pub fn get_default_cron_options() -> Vec<CronOption> {
-    vec![
-        CronOption {
-            label: "每日凌晨 2:00".to_string(),
-            schedule: "0 2 * * *".to_string(),
-            description: "每天凌晨执行一次全平台扫描".to_string(),
-        },
-        CronOption {
-            label: "每日早上 9:00".to_string(),
-            schedule: "0 9 * * *".to_string(),
-            description: "每天早上执行一次扫描".to_string(),
-        },
-        CronOption {
-            label: "每周一 9:00".to_string(),
-            schedule: "0 9 * * 1".to_string(),
-            description: "每周一执行周度汇总".to_string(),
-        },
-        CronOption {
-            label: "每小时".to_string(),
-            schedule: "0 * * * *".to_string(),
-            description: "每小时执行一次（测试用）".to_string(),
-        },
-    ]
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[allow(dead_code)]
-pub struct CronOption {
-    pub label: String,
-    pub schedule: String,
-    pub description: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,13 +146,5 @@ mod tests {
 
         // 应该还是 2 个任务（幂等更新）
         assert_eq!(demand_jobs.len(), 2);
-    }
-
-    #[test]
-    fn test_get_default_cron_options() {
-        let options = get_default_cron_options();
-        assert_eq!(options.len(), 4);
-        assert!(options.iter().any(|o| o.schedule == "0 2 * * *"));
-        assert!(options.iter().any(|o| o.schedule == "0 9 * * 1"));
     }
 }

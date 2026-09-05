@@ -18,10 +18,23 @@
 #![allow(clippy::manual_strip)]
 
 mod adaptation;
+// [2026-09-03 接线恢复] 本文件曾长期缺少 `mod` 声明 → 整文件从未编译，
+// 从 crate 外观察与「已删除」无法区分（`runtime::tasks::pattern_task` 因此误记
+// 「pattern_analyzer 模块已删除」并降级运行）。以下 5 个模块已重新接线：
+//   arch_search          — ADAS 架构自动搜索（1176 行，24 个测试已首次跑通）。
+//                          注意：内部实现无一 `pub` 项，尚未暴露对外入口，待接入。
+//   behavior_tracker     — 被 pattern_analyzer 真实消费（Trajectory→BehaviorEvent 转换），已生效。
+//   behavior_learner     — 零消费方。与 tracker 同源，上游在 behavior_tracker.rs 顶部留了
+//                          ABANDONED(2026-07-05) 标记（理由：无实际事件源），本模块同族待裁决。
+//   error                — TrajectoryError 定义，当前零引用，随上述模块一起恢复编译。
+//   pattern_analyzer     — 已接回 runtime::tasks::pattern_task（见该文件头部说明）。
+mod arch_search;
 mod auto_memory;
 mod auto_tool;
 mod awareness;
 mod batch;
+mod behavior_learner;
+mod behavior_tracker;
 mod causal;
 mod coevolution;
 mod compactor;
@@ -30,6 +43,7 @@ mod context;
 mod context_predictor;
 mod dream_consolidation;
 mod dream_data_provider;
+mod error;
 mod evidence;
 mod fts5;
 mod insight;
@@ -42,6 +56,7 @@ mod nudge;
 pub mod numeric_evolution;
 mod parallel_execution;
 mod pattern;
+mod pattern_analyzer;
 mod proactive_assistant;
 mod process_reward;
 mod reminder_manager;
@@ -156,6 +171,9 @@ pub use parallel_execution::{
 };
 
 pub use pattern::{CrossSessionLearner, PatternConfig, PatternLearner, PatternType};
+// [2026-09-03 接线恢复] pattern_analyzer 是孤儿文件（无 mod 声明导致从未编译），
+// runtime::tasks::pattern_task 因此长期降级为「只统计数量不分析」。此处重新导出其公开入口。
+pub use pattern_analyzer::{PatternAnalysisSummary, analyze_trajectories};
 
 pub use process_reward::ProcessRewardModel;
 

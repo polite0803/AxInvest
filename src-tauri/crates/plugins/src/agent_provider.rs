@@ -57,7 +57,6 @@ pub fn global_plugin_agents() -> &'static PluginAgentRegistry {
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_types)]
 static TEST_PLUGIN_AGENTS: parking_lot::Mutex<Option<&'static PluginAgentRegistry>> =
     parking_lot::Mutex::new(None);
 

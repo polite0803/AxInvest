@@ -5,8 +5,6 @@
 //! 管理所有已注册工具的生命周期：注册、查找、列举、启用/禁用。
 //! 集成 MCP 执行、DB 审计记录、使用统计、安全沙箱、权限检查、Hook。
 
-#![allow(clippy::disallowed_types)]
-
 use crate::audit::{AuditEntry, ToolAuditor};
 use crate::group_manager::ToolGroupManager;
 use crate::hooks::executors::execute_hook;
@@ -531,7 +529,6 @@ pub struct UnifiedToolRegistry {
     /// 搜索/网络配置（通过 ToolContext.extra 传递给工具）
     pub tool_extra: HashMap<String, String>,
     /// 注册的 Skill 工具：name → handler（register_skill_tool 填充）
-    #[allow(clippy::disallowed_types)]
     pub skill_handlers: HashMap<String, SkillToolHandler>,
     /// 用户提问桥接器（AskUserQuestion 工具阻塞等待用户输入）
     pub ask_user_bridge: Option<Arc<dyn axagent_harness::AskUserBridge>>,

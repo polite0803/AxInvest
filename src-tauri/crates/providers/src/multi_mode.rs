@@ -13,10 +13,9 @@
 //! 与本 crate 其他 adapter 统一返回 `AxAgentError::Provider(...)` 的约定不一致。
 //! 统一为 `Result<String>` + 内部用 `AxAgentError::Provider` 包裹。
 
-use async_trait::async_trait;
-use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::ProviderAdapter;
 use axagent_harness::ProviderRequestContext;
+use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::types::*;
 use futures::Stream;
 use std::pin::Pin;
@@ -109,9 +108,9 @@ impl MultiModeAdapter {
         mode: ApiMode,
     ) -> Result<ChatResponse> {
         match mode {
-            ApiMode::ChatCompletions => self.chat_completions.chat(ctx, request).await,
-            ApiMode::CodexResponses => self.codex_responses.chat(ctx, request).await,
-            ApiMode::AnthropicMessages => self.anthropic.chat(ctx, request).await,
+            ApiMode::ChatCompletions => self.chat_completions.chat(ctx, Arc::new(request)).await,
+            ApiMode::CodexResponses => self.codex_responses.chat(ctx, Arc::new(request)).await,
+            ApiMode::AnthropicMessages => self.anthropic.chat(ctx, Arc::new(request)).await,
         }
     }
 
@@ -124,8 +123,7 @@ impl MultiModeAdapter {
     ) -> Pin<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
         match mode {
             ApiMode::ChatCompletions => {
-                self.chat_completions
-                    .chat_stream(ctx, request, cancel_token)
+                self.chat_completions.chat_stream(ctx, request, cancel_token)
             },
             ApiMode::CodexResponses => self.codex_responses.chat_stream(ctx, request, cancel_token),
             ApiMode::AnthropicMessages => self.anthropic.chat_stream(ctx, request, cancel_token),

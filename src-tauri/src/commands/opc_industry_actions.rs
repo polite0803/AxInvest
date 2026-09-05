@@ -1995,6 +1995,7 @@ pub fn get_action_config(industry_id: &str, action_key: &str) -> Option<Industry
 ///
 /// 为 Agent 提供真正的执行能力，返回一个包含完整执行上下文的 "执行包"。
 /// Agent 可以将此包作为当前任务的 System Prompt 和初始 User Prompt。
+/// 接线：opc_industry_bridge 的 opc_execute_industry_action 工具 handler 调用。
 pub fn execute_industry_action(
     industry_id: &str,
     action_key: &str,
@@ -2025,6 +2026,7 @@ pub fn execute_industry_action(
 ///
 /// 允许 Agent 根据行业模板创建一个新的工作流实例。
 /// 在实际项目中，这将涉及数据库写入和工作流引擎初始化。
+// 接线：opc_industry_bridge 的 opc_create_industry_workflow 工具 handler 调用
 pub fn create_industry_workflow(
     industry_id: &str,
     workflow_id: &str,

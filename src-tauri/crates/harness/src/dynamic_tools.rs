@@ -20,6 +20,10 @@
 //!
 //! 因此不存在跨会话串扰：不同会话持有不同 `Arc`，天然隔离。
 
+// SAFETY: 本文件的 std::sync 锁仅在同步临界区使用，guard 不跨 await（无死锁 / 毒化风险）。
+// [2026-09-03] 由 crate 级 disallowed_types 豁免局部化到具体触发点（不含字面量，便于 grep 审计）。
+#![allow(clippy::disallowed_types)]
+
 use crate::types::ChatTool;
 use std::sync::{Arc, RwLock};
 

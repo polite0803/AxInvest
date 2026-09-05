@@ -97,6 +97,8 @@ pub async fn run_stock_workflow(
 ///   * `stock-t0-queue-entered`：进入队列等待（含队列深度）
 ///   * `stock-t0-rerun-started`：获取 permit + per-stock 锁，开始执行
 ///   * `stock-t0-rerun-completed`：执行结束（含 success / error 信息）
+///
+/// 接线：RealtimeMonitor 的 TZeroCallback 回调（init/services.rs start_realtime_monitor）
 pub(crate) async fn trigger_t0_rerun(
     app: tauri::AppHandle,
     stock_code: String,
@@ -1667,7 +1669,6 @@ pub async fn cancel_stock_workflow(
 /// - 不需要 `as_of_date` 参数（使用当前时间，非回放模式）
 /// - 不需要 `dry_run`（总是完整执行）
 /// - 参数是独立引用而非 Tauri State
-#[allow(dead_code)]
 pub async fn run_single_stock_analysis(
     db: &DatabaseConnection,
     client: &axagent_astock_data::AStockClient,

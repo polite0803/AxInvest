@@ -383,42 +383,6 @@ pub fn apply_risk_veto(action: &str, risk_level: &str) -> (String, bool, String)
     (action.to_string(), false, String::new())
 }
 
-// ── P0: 统计置信度（假设检验）──
-
-/// 标准正态分布 CDF（Abramowitz & Stegun 26.2.17 有理逼近，精度 ~1e-6）。
-#[allow(dead_code)]
-fn normal_cdf(z: f64) -> f64 {
-    if z.is_nan() || z.is_infinite() {
-        return if z > 0.0 {
-            1.0
-        } else if z < 0.0 {
-            0.0
-        } else {
-            0.5
-        };
-    }
-    let z_abs = z.abs();
-    let k = 1.0 / (1.0 + 0.2316419 * z_abs);
-    let phi = std::f64::consts::FRAC_1_SQRT_2
-        * std::f64::consts::FRAC_2_SQRT_PI
-        * (-0.5 * z_abs * z_abs).exp();
-    let cdf_abs = 1.0
-        - phi
-            * k
-            * (0.31938153
-                + k * (-0.356563782 + k * (1.781477937 + k * (-1.821255978 + k * 1.330274429))));
-    if z >= 0.0 {
-        cdf_abs
-    } else {
-        1.0 - cdf_abs
-    }
-}
-
-/// 基于单样本 t 检验的统计置信度。
-///
-/// 原假设 H₀: 加权平均信号 = 0（无方向性信号，应该观望）
-/// 备择假设 H₁: 加权平均信号 ≠ 0（存在方向性信号）
-///
 /// 基于贝叶斯因子的统计置信度。
 ///
 /// 定义：置信度反映 posterior(后验概率) 相对于 prior(先验概率) 的证据强度。

@@ -138,21 +138,21 @@
 **أكثر من 163 أداة مدمجة**، تُسجَّل جميعها عبر trait `Tool`، وتغطي 15 فئة رئيسية:
 
 | الفئة           | أمثلة على الأدوات                                                                                                                                                             |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| عمليات الملفات  | `file_read`, `file_write`, `file_edit`, `glob`, `grep`, 11 أداة (الدليل/الحذف/النقل وغيرها)                                                                                   |
-| Shell/Web       | `bash`, `web_fetch`, `web_search`                                                                                                                                             |
-| الشبكة          | `http_request`, `ping`, `dns_lookup`, `json_api`, `rss_reader`, `graphql`, `websocket`                                                                                        |
-| المتصفح         | `browser_navigate`, `browser_click`, `browser_fill`, `browser_screenshot` و10 أدوات أخرى (CDP)                                                                                |
-| التحكم بالحاسوب | `computer_use` (الماوس/لوحة المفاتيح/لقطة الشاشة)                                                                                                                             |
-| Git             | `git_status`, `git_diff`, `git_commit`, `git_log`, `git_branch`, `git_review`                                                                                                 |
-| قاعدة المعرفة   | `list_knowledge_bases`, `search_knowledge`, `add_knowledge_document` و6 أدوات أخرى                                                                                            |
-| إدارة المهام    | `todo_write`, `task_*` (6 أدوات), `cron_*` (3 أدوات), ما يتعلق بـ `plan`                                                                                                      |
-| دفع الرسائل     | `push_notification`, `send_message`, أدوات التعاون الجماعي                                                                                                                    |
-| قاعدة البيانات  | `database_query`, `database_list_tables`, `database_migration_status`                                                                                                         |
-| التخزين         | `get_storage_info`, `upload_storage_file`, `download_storage_file` و5 أدوات أخرى                                                                                              |
-| التصدير/التنسيق | `export_word`, `export_pdf`, `export_xlsx`, `export_pptx`, `render_markdown` و9 أدوات أخرى                                                                                    |
-| OCR             | `ocr_image`, `ocr_detect_langs`                                                                                                                                               |
-| Obsidian        | `obsidian_search`, `obsidian_read`, `obsidian_backlinks` و9 أدوات أخرى                                                                                                        |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| عمليات الملفات  | `file_read`, `file_write`, `file_edit`, `glob`, `grep`, 11 أداة (الدليل/الحذف/النقل وغيرها)                                                                                  |
+| Shell/Web       | `bash`, `web_fetch`, `web_search`                                                                                                                                            |
+| الشبكة          | `http_request`, `ping`, `dns_lookup`, `json_api`, `rss_reader`, `graphql`, `websocket`                                                                                       |
+| المتصفح         | `browser_navigate`, `browser_click`, `browser_fill`, `browser_screenshot` و10 أدوات أخرى (CDP)                                                                               |
+| التحكم بالحاسوب | `computer_use` (الماوس/لوحة المفاتيح/لقطة الشاشة)                                                                                                                            |
+| Git             | `git_status`, `git_diff`, `git_commit`, `git_log`, `git_branch`, `git_review`                                                                                                |
+| قاعدة المعرفة   | `list_knowledge_bases`, `search_knowledge`, `add_knowledge_document` و6 أدوات أخرى                                                                                           |
+| إدارة المهام    | `todo_write`, `task_*` (6 أدوات), `cron_*` (3 أدوات), ما يتعلق بـ `plan`                                                                                                     |
+| دفع الرسائل     | `push_notification`, `send_message`, أدوات التعاون الجماعي                                                                                                                   |
+| قاعدة البيانات  | `database_query`, `database_list_tables`, `database_migration_status`                                                                                                        |
+| التخزين         | `get_storage_info`, `upload_storage_file`, `download_storage_file` و5 أدوات أخرى                                                                                             |
+| التصدير/التنسيق | `export_word`, `export_pdf`, `export_xlsx`, `export_pptx`, `render_markdown` و9 أدوات أخرى                                                                                   |
+| OCR             | `ocr_image`, `ocr_detect_langs`                                                                                                                                              |
+| Obsidian        | `obsidian_search`, `obsidian_read`, `obsidian_backlinks` و9 أدوات أخرى                                                                                                       |
 | أخرى            | `agent`, `delegate_task`, `skills_*`, `lsp`, `repl`, `monitor`, `workspace_*`, `session_search`, `generate_image`, `sequential_thinking`, CI/CD وDevOps وRPC والاختبار وغيرها |
 
 ### بروتوكول MCP
@@ -233,28 +233,28 @@
 
 ### حزمة التقنيات
 
-| الطبقة                | التقنية                                  | الإصدار |
-| --------------------- | ---------------------------------------- | ------- |
-| إطار سطح المكتب       | Tauri                                    | 2.11    |
-| إطار الواجهة الأمامية | React                                    | 19      |
-| نظام الأنواع          | TypeScript                               | 7       |
-| مكتبة واجهة المستخدم  | Ant Design                               | 6       |
-| إطار CSS              | TailwindCSS                              | 4       |
-| إدارة الحالة          | Zustand                                  | 5       |
-| التوجيه               | React Router                             | 7       |
-| محرر الأكواد          | Monaco Editor                            | 0.55    |
-| الطرفية               | xterm.js                                 | 6       |
-| محرر سير العمل        | ReactFlow                                | 12      |
-| الرسوم البيانية       | D2 + Mermaid + Recharts + Sigma          |         |
-| الرسوم المتحركة       | Framer Motion                            | 12      |
-| التمرير الافتراضي     | @tanstack/react-virtual + react-virtuoso |         |
-| السحب والإفلات        | @dnd-kit                                 | 6       |
-| عرض Markdown          | markstream-react + stream-markdown       |         |
-| التدويل               | i18next + react-i18next                  |         |
-| أداة البناء           | Vite                                     | 8       |
-| الاختبار              | Vitest + Playwright                      |         |
-| التنسيق               | dprint (TS/JSON/Markdown/TOML) + rustfmt |         |
-| Lint                  | ESLint + Oxlint + Clippy                 |         |
+| الطبقة               | التقنية                                  | الإصدار |
+| -------------------- | ---------------------------------------- | ------ |
+| إطار سطح المكتب      | Tauri                                    | 2.11   |
+| إطار الواجهة الأمامية | React                                    | 19     |
+| نظام الأنواع          | TypeScript                               | 7      |
+| مكتبة واجهة المستخدم | Ant Design                               | 6      |
+| إطار CSS             | TailwindCSS                              | 4      |
+| إدارة الحالة         | Zustand                                  | 5      |
+| التوجيه              | React Router                             | 7      |
+| محرر الأكواد          | Monaco Editor                            | 0.55   |
+| الطرفية              | xterm.js                                 | 6      |
+| محرر سير العمل       | ReactFlow                                | 12     |
+| الرسوم البيانية      | D2 + Mermaid + Recharts + Sigma          |        |
+| الرسوم المتحركة      | Framer Motion                            | 12     |
+| التمرير الافتراضي     | @tanstack/react-virtual + react-virtuoso |        |
+| السحب والإفلات         | @dnd-kit                                 | 6      |
+| عرض Markdown         | markstream-react + stream-markdown       |        |
+| التدويل              | i18next + react-i18next                  |        |
+| أداة البناء          | Vite                                     | 8      |
+| الاختبار              | Vitest + Playwright                      |        |
+| التنسيق              | dprint (TS/JSON/Markdown/TOML) + rustfmt |        |
+| Lint                 | ESLint + Oxlint + Clippy                 |        |
 
 ### البنية الخلفية: نمط حقن التبعيات Harness
 
@@ -393,9 +393,9 @@ src/
 
 ### إضافات Tauri
 
-| الإضافة             | الغرض                               |
+| الإضافة              | الغرض                               |
 | ------------------- | ----------------------------------- |
-| `autostart`         | التشغيل التلقائي عند الإقلاع        |
+| `autostart`         | التشغيل التلقائي عند الإقلاع          |
 | `clipboard-manager` | قراءة وكتابة الحافظة                |
 | `dialog`            | مربع حوار اختيار الملفات            |
 | `fs`                | الوصول إلى نظام الملفات             |
@@ -478,12 +478,12 @@ npm run ci:check
 
 ### السكربتات الشائعة
 
-| الأمر                    | الغرض                      |
-| ------------------------ | -------------------------- |
+| الأمر                     | الغرض                     |
+| ------------------------ | ------------------------- |
 | `npm run bump`           | ترقية رقم الإصدار (تفاعلي) |
-| `npm run docs`           | توليد وثائق TypeDoc        |
-| `npm run skill:create`   | إنشاء هيكل مهارة جديدة     |
-| `npm run skill:validate` | التحقق من تعريف المهارة    |
+| `npm run docs`           | توليد وثائق TypeDoc       |
+| `npm run skill:create`   | إنشاء هيكل مهارة جديدة    |
+| `npm run skill:validate` | التحقق من تعريف المهارة   |
 | `npm run check:types`    | فحص اتساق الأنواع          |
 
 ---

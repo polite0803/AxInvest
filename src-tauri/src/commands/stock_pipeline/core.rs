@@ -1,21 +1,18 @@
 //! 股票管道核心编排逻辑
 //!
 //! 编排流程：
-//! 1. 发现：调 `recommend_stocks` 获取候选股
-//! 2. 分析：对候选股并发调 `run_single_stock_analysis`（自动写 stock_reflections pending row）
-//! 3. 持仓再评估：查 `portfolio_holdings`，对持仓股调 `run_single_stock_analysis`
-//! 4. 汇总：写入 `stock_pipeline_runs` 表
+//! 编排由 seed_stock_pipeline.rs 的工作流模板经 WorkEngine 执行（run_stock_pipeline_inner
+//! 加载模板），旧的 Rust 手写编排层（discover_candidates / analyze_stocks_batch /
+//! build_summary）已于 2026-09-03 删除（被模板机制取代，见 output/backup-2026-09-03）。
 //!
 //! 反思阶段由现有 6h cron 接力（hindsight_date = analysis_date + expected_holding_days）。
 
-#![allow(dead_code)]
 #![allow(clippy::type_complexity)]
 
 use axagent_agent_macro::agent_command;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
 
-use axagent_entities::{portfolio_holdings, reco_picks, stock_analyses, stock_pipeline_runs};
+use axagent_entities::stock_pipeline_runs;
 use axagent_harness::workflow_types::{Variable, WorkflowEdge, WorkflowNode};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::{
@@ -28,81 +25,6 @@ use tauri::{AppHandle, Emitter, State};
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
-use crate::commands::stock_workflow::core::run_single_stock_analysis;
-
-/// 从 reco_picks 表读取历史推荐构造种子池
-///
-/// 数据来源：
-/// - 最近 3 天的 `style='serenity'` 且 `synthetic=0`（瓶颈掘金真实推荐）
-/// - 最近 2 天的其他风格且 `synthetic=0`（智能荐股真实推荐，非兜底合成）
-///
-/// 返回 None 表示数据库无历史推荐，调用方应回退到默认 build_seed_pool。
-async fn load_preseed_from_db(
-    db: &sea_orm::DatabaseConnection,
-) -> Option<Vec<(String, String, Option<String>)>> {
-    // 取最近 3 天的 serenity 推荐
-    let now = chrono::Utc::now();
-    let serenity_cutoff =
-        (now - chrono::Duration::days(3)).format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-    let other_cutoff =
-        (now - chrono::Duration::days(2)).format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-
-    // serenity 推荐（最近 3 天，非合成）
-    let serenity_picks = reco_picks::Entity::find()
-        .filter(reco_picks::Column::Style.eq("serenity"))
-        .filter(reco_picks::Column::Synthetic.eq(0))
-        .filter(reco_picks::Column::GeneratedAt.gt(&serenity_cutoff))
-        .order_by_desc(reco_picks::Column::GeneratedAt)
-        .all(db)
-        .await;
-
-    // 其他风格推荐（最近 2 天，非合成）
-    let other_picks = reco_picks::Entity::find()
-        .filter(reco_picks::Column::Synthetic.eq(0))
-        .filter(reco_picks::Column::Style.ne("serenity"))
-        .filter(reco_picks::Column::GeneratedAt.gt(&other_cutoff))
-        .order_by_desc(reco_picks::Column::GeneratedAt)
-        .all(db)
-        .await;
-
-    let serenity_picks = match serenity_picks {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("[stock_pipeline] 查询 serenity reco_picks 失败: {e}");
-            return None;
-        },
-    };
-    let other_picks = match other_picks {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("[stock_pipeline] 查询其他 reco_picks 失败: {e}");
-            return None;
-        },
-    };
-
-    if serenity_picks.is_empty() && other_picks.is_empty() {
-        tracing::info!("[stock_pipeline] reco_picks 表无近期历史推荐，回退到默认种子池");
-        return None;
-    }
-
-    // 合并去重：serenity 优先（排在前），其他风格排后
-    let mut seen = std::collections::HashSet::new();
-    let mut seed: Vec<(String, String, Option<String>)> = Vec::new();
-
-    for p in serenity_picks.iter().chain(other_picks.iter()) {
-        if seen.insert(p.stock_code.clone()) {
-            seed.push((p.stock_code.clone(), p.stock_name.clone(), None));
-        }
-    }
-
-    tracing::info!(
-        "[stock_pipeline] 从 reco_picks 构造种子池: serenity={}, other={}, 合计去重={}",
-        serenity_picks.len(),
-        other_picks.len(),
-        seed.len()
-    );
-    Some(seed)
-}
 
 /// 管道执行结果
 #[derive(Debug, Clone, Serialize)]
@@ -140,21 +62,11 @@ pub struct PipelineConfig {
     pub new_analysis_concurrency: usize,
     /// 持仓再评估并发数
     pub holdings_reassess_concurrency: usize,
-    /// 新候选股分析冷却期（天）— 排除该天数内已分析的股票
-    pub new_analysis_cooldown_days: i64,
-    /// 持仓再评估冷却期（天）— 排除该天数内已分析的持仓股
-    pub holdings_reassess_cooldown_days: i64,
 }
 
 impl Default for PipelineConfig {
     fn default() -> Self {
-        Self {
-            max_candidates: 5,
-            new_analysis_concurrency: 2,
-            holdings_reassess_concurrency: 2,
-            new_analysis_cooldown_days: 7,
-            holdings_reassess_cooldown_days: 3,
-        }
+        Self { max_candidates: 5, new_analysis_concurrency: 2, holdings_reassess_concurrency: 2 }
     }
 }
 
@@ -174,6 +86,10 @@ impl PipelineConfig {
     ///
     /// 返回 `(actual_new_concurrency, actual_reassess_concurrency, healthy_ratio)`。
     /// 调用方可记录日志反映调节情况。
+    ///
+    /// 当前唯一调用方在 mod tests（8 场景测试套件）；生产管线走 WorkEngine 模板执行，
+    /// 待批量分析接入 vendor 健康度自适应后移除豁免。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn resolve_concurrency_with_vendor_health(
         &self,
         health_snapshot: &[axagent_astock_data::vendor_health::VendorHealth],
@@ -506,240 +422,6 @@ async fn update_pipeline_run_success(
         .await;
 }
 
-/// 步骤 1: 股票发现 — 从 reco_picks 历史推荐构造种子池 + 调 `recommend_stocks` + 排除持仓 + 冷却去重
-///
-/// 种子池来源（优先级）：
-/// 1. reco_picks 表中最近 3 天的 serenity（瓶颈掘金）真实推荐
-/// 2. reco_picks 表中最近 2 天的其他风格智能荐股真实推荐
-/// 3. 若 reco_picks 表无数据（如全新安装），回退到默认 build_seed_pool
-///
-/// 失败时返回空 vec（不报错），让后续步骤继续执行。
-async fn discover_candidates(
-    db: &sea_orm::DatabaseConnection,
-    client: &Arc<axagent_astock_data::AStockClient>,
-    config: &PipelineConfig,
-) -> Vec<String> {
-    // 从 reco_picks 表读取历史推荐作为种子池
-    let preseed = load_preseed_from_db(db).await;
-
-    // 调 recommend_stocks（Mid 周期），传入 preseed
-    let template_vars: Vec<(String, serde_json::Value)> = vec![];
-    let reco = match axagent_analysis_engine::recommender::recommend_stocks(
-        client.clone(),
-        axagent_analysis_engine::recommender::Period::Mid,
-        &template_vars,
-        preseed,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!("[stock_pipeline] recommend_stocks 失败: {e}");
-            return vec![];
-        },
-    };
-
-    // 收集所有候选股（从所有风格中，去重）
-    let mut candidates: Vec<String> = vec![];
-    for picks in reco.picks.values() {
-        for pick in picks {
-            if !candidates.contains(&pick.stock_code) {
-                candidates.push(pick.stock_code.clone());
-            }
-        }
-    }
-
-    // 排除已持仓股
-    let holding_codes = get_all_holding_codes(db).await;
-    candidates.retain(|c| !holding_codes.contains(c));
-
-    // 排除冷却期内的股票（近期已分析的）
-    let cooldown_codes = get_recently_analyzed_codes(db, config.new_analysis_cooldown_days).await;
-    candidates.retain(|c| !cooldown_codes.contains(c));
-
-    // 截断到 max_candidates
-    candidates.truncate(config.max_candidates);
-    candidates
-}
-
-/// 获取所有持仓股代码（shares > 0）
-async fn get_all_holding_codes(db: &sea_orm::DatabaseConnection) -> Vec<String> {
-    match portfolio_holdings::Entity::find()
-        .filter(portfolio_holdings::Column::Shares.gt(0.0))
-        .all(db)
-        .await
-    {
-        Ok(holdings) => holdings.into_iter().map(|h| h.stock_code).collect(),
-        Err(e) => {
-            tracing::warn!("[stock_pipeline] 查询持仓失败: {e}");
-            vec![]
-        },
-    }
-}
-
-/// 获取持仓股代码（带冷却期排除）
-async fn get_holding_codes_with_cooldown(
-    db: &sea_orm::DatabaseConnection,
-    cooldown_days: i64,
-) -> Vec<String> {
-    let holding_codes = get_all_holding_codes(db).await;
-    let cooldown_codes = get_recently_analyzed_codes(db, cooldown_days).await;
-    holding_codes.into_iter().filter(|c| !cooldown_codes.contains(c)).collect()
-}
-
-/// 获取最近 N 天内已分析的股票代码（去重）
-async fn get_recently_analyzed_codes(db: &sea_orm::DatabaseConnection, days: i64) -> Vec<String> {
-    let cutoff_ms = chrono::Utc::now().timestamp_millis() - days * 24 * 3600 * 1000;
-    match stock_analyses::Entity::find()
-        .filter(stock_analyses::Column::UpdatedAt.gt(cutoff_ms))
-        .all(db)
-        .await
-    {
-        Ok(analyses) => analyses
-            .into_iter()
-            .map(|a| a.stock_code)
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect(),
-        Err(e) => {
-            tracing::warn!("[stock_pipeline] 查询近期分析失败: {e}");
-            vec![]
-        },
-    }
-}
-
-/// 批量分析股票（Semaphore 控制并发）
-///
-/// 每只股票 `tokio::spawn` 调 `run_single_stock_analysis`，失败记录 error 不影响其他。
-async fn analyze_stocks_batch(
-    db: &sea_orm::DatabaseConnection,
-    client: &Arc<axagent_astock_data::AStockClient>,
-    engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
-    stock_codes: &[String],
-    max_concurrent: usize,
-    as_of_date: Option<&str>,
-    emit_step: &(dyn Fn(&str, &str) + Sync),
-) -> Vec<AnalysisSummary> {
-    if stock_codes.is_empty() {
-        return vec![];
-    }
-
-    let semaphore = Arc::new(Semaphore::new(max_concurrent));
-    let mut handles = vec![];
-
-    for code in stock_codes {
-        let code = code.clone();
-        let sem = semaphore.clone();
-        let db = db.clone();
-        let client = client.clone();
-        let engine = engine.clone();
-        let as_of = as_of_date.map(String::from);
-
-        handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.unwrap();
-            tracing::info!("[stock_pipeline] 开始分析 {code}");
-
-            // 获取 stock_name（行情失败时用 code 兜底）
-            let stock_name = match client.get_quote(&code).await {
-                Ok(q) => q.name,
-                Err(_) => code.clone(),
-            };
-
-            // as_of_date 当前仅用于日志，run_single_stock_analysis 内部用 live 模式
-            // （批量场景不传 as_of_date，保留参数为未来扩展）
-            let _ = as_of;
-
-            match run_single_stock_analysis(&db, &client, &engine, &code, &stock_name).await {
-                Ok(analysis_id) => {
-                    // 读取分析结果获取 action/confidence
-                    let (action, confidence) =
-                        match stock_analyses::Entity::find_by_id(&analysis_id).one(&db).await {
-                            Ok(Some(a)) => (a.decision_action, a.decision_position_pct),
-                            _ => (None, None),
-                        };
-                    AnalysisSummary {
-                        stock_code: code,
-                        stock_name,
-                        status: "completed".to_string(),
-                        analysis_id: Some(analysis_id),
-                        action,
-                        confidence,
-                        error: None,
-                    }
-                },
-                Err(e) => {
-                    tracing::error!("[stock_pipeline] 分析 {code} 失败: {e}");
-                    AnalysisSummary {
-                        stock_code: code,
-                        stock_name,
-                        status: "failed".to_string(),
-                        analysis_id: None,
-                        action: None,
-                        confidence: None,
-                        error: Some(e),
-                    }
-                },
-            }
-        }));
-    }
-
-    let mut results = vec![];
-    for handle in handles {
-        match handle.await {
-            Ok(summary) => {
-                emit_step(
-                    "analyze_progress",
-                    &format!("{}: {}", summary.stock_code, summary.status),
-                );
-                results.push(summary);
-            },
-            Err(e) => {
-                tracing::error!("[stock_pipeline] task panic: {e}");
-            },
-        }
-    }
-    results
-}
-
-/// 生成汇总报告
-fn build_summary(
-    candidates: &[String],
-    new_analyses: &[AnalysisSummary],
-    reassessed: &[AnalysisSummary],
-    run_date: &str,
-) -> serde_json::Value {
-    let new_success = new_analyses.iter().filter(|a| a.status == "completed").count();
-    let new_failed = new_analyses.iter().filter(|a| a.status == "failed").count();
-    let reassess_success = reassessed.iter().filter(|a| a.status == "completed").count();
-    let reassess_failed = reassessed.iter().filter(|a| a.status == "failed").count();
-
-    let buy_count = new_analyses.iter().filter(|a| a.action.as_deref() == Some("买入")).count();
-    let hold_count = new_analyses.iter().filter(|a| a.action.as_deref() == Some("增持")).count();
-    let watch_count = new_analyses.iter().filter(|a| a.action.as_deref() == Some("观望")).count();
-    let sell_count = reassessed.iter().filter(|a| a.action.as_deref() == Some("卖出")).count();
-
-    json!({
-        "pipeline_date": run_date,
-        "discovery": {
-            "candidates_found": candidates.len()
-        },
-        "analysis": {
-            "new_analyzed": new_success,
-            "new_failed": new_failed,
-            "reassessed": reassess_success,
-            "reassess_failed": reassess_failed
-        },
-        "decisions": {
-            "buy": buy_count,
-            "hold": hold_count,
-            "watch": watch_count,
-            "sell": sell_count
-        },
-        "reflection_scheduled": new_success + reassess_success,
-        "note": "反思由现有6h cron自动接力,28天后执行"
-    })
-}
-
 // ── Tauri 命令 ──
 
 /// 手动触发股票管道
@@ -866,8 +548,6 @@ mod tests {
             max_candidates: 5,
             new_analysis_concurrency: 4,
             holdings_reassess_concurrency: 4,
-            new_analysis_cooldown_days: 7,
-            holdings_reassess_cooldown_days: 3,
         }
     }
 
@@ -986,8 +666,6 @@ mod tests {
             max_candidates: 5,
             new_analysis_concurrency: 1,
             holdings_reassess_concurrency: 1,
-            new_analysis_cooldown_days: 7,
-            holdings_reassess_cooldown_days: 3,
         };
         let health = vec![
             make_health("tencent", VendorStatus::Healthy),

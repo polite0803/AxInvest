@@ -8,8 +8,6 @@
 //! This requires updating all tool implementations to accept db via context,
 //! which is a significant refactor tracked separately.
 
-#![allow(clippy::disallowed_types)]
-
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -45,4 +43,20 @@ pub fn set_sea_db(db: Arc<DatabaseConnection>) {
 
 pub fn get_sea_db() -> Option<Arc<DatabaseConnection>> {
     GLOBAL_SEA_DB.read().clone()
+}
+
+// ── A 股行情客户端 ────────────────────────────────────────────────────────
+
+static GLOBAL_ASTOCK_CLIENT: LazyLock<RwLock<Option<Arc<axagent_astock_data::AStockClient>>>> =
+    LazyLock::new(|| RwLock::new(None));
+
+/// [2026-09-03 接线恢复] finance.rs 的 api_tool! 宏（研报/概念板块/北向资金/龙虎榜/财联社快讯）
+/// 依赖此客户端；由 init/state.rs 构造 AppState 时注入。
+pub fn set_astock_client(client: Arc<axagent_astock_data::AStockClient>) {
+    let mut guard = GLOBAL_ASTOCK_CLIENT.write();
+    *guard = Some(client);
+}
+
+pub fn get_astock_client() -> Option<Arc<axagent_astock_data::AStockClient>> {
+    GLOBAL_ASTOCK_CLIENT.read().clone()
 }

@@ -18,11 +18,10 @@ use axagent_analysis_engine::opc::{
     CreateKpiInput, CreateLandingPageInput, CreateProjectInput, CreatePublishScheduleInput,
     Customer, CustomerFilter, CustomerService, DashboardSummary, DefaultAnalyticsService,
     DefaultCustomerService, DefaultFinanceService, DefaultInvoiceService, DefaultProjectService,
-    DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice, Invoice, InvoiceFilter,
-    InvoiceService, InvoiceStatus, KpiRecord, LandingPage, Milestone, Project, ProjectFilter,
-    ProjectService, PublishSchedule, PublishScheduleService, RevenueRecord, SiteService,
-    UpdateContentAssetInput, UpdateCustomerInput, UpdateInvoiceInput, UpdateProjectInput,
-    UpdatePublishScheduleInput,
+    DefaultSiteService, FinanceService, FinancialReport, InvestmentAdvice, Invoice, InvoiceService,
+    InvoiceStatus, KpiRecord, LandingPage, Milestone, Project, ProjectFilter, ProjectService,
+    PublishSchedule, PublishScheduleService, RevenueRecord, SiteService, UpdateContentAssetInput,
+    UpdateCustomerInput, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
 };
 
 /// 记录 OPC 操作轨迹到 trajectory 系统供学习
@@ -79,7 +78,6 @@ async fn record_opc_success(
 }
 
 /// 失败轨迹的简便封装
-#[allow(dead_code)]
 async fn record_opc_failure(
     storage: &axagent_trajectory::TrajectoryStorage,
     op: &str,
@@ -129,21 +127,6 @@ pub async fn opc_get_invoice(state: State<'_, AppState>, id: String) -> Result<I
     })
 }
 
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出发票")]
-#[tauri::command]
-pub async fn opc_list_invoices(
-    state: State<'_, AppState>,
-    filter: InvoiceFilter,
-) -> Result<Vec<Invoice>, String> {
-    let svc = DefaultInvoiceService::new(state.harness.db().clone());
-    svc.list_invoices(filter).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "更新发票")]
 #[tauri::command]
 pub async fn opc_update_invoice(
@@ -153,18 +136,6 @@ pub async fn opc_update_invoice(
 ) -> Result<Invoice, String> {
     let svc = DefaultInvoiceService::new(state.harness.db().clone());
     svc.update_invoice(&id, input).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })
-}
-
-#[agent_command(domain = "automation", safety = Dangerous, call_mode = StateInput, description = "删除发票")]
-#[tauri::command]
-pub async fn opc_delete_invoice(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let svc = DefaultInvoiceService::new(state.harness.db().clone());
-    svc.delete_invoice(&id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,
             crate::commands::error::ErrorCategory::Unrecoverable,
@@ -196,6 +167,9 @@ pub async fn opc_transition_invoice(
             &format!("status={}", inv.status.as_str()),
         )
         .await;
+    } else if let Err(ref e) = result {
+        // 失败轨迹记录：状态机非法跳转等失败用于复盘
+        record_opc_failure(&state.trajectory_storage, "transition_invoice", &id, e).await;
     }
     result
 }

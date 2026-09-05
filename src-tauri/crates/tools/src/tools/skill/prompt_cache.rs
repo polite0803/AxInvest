@@ -12,21 +12,15 @@
 //! - 工作流 Agent 节点：根据 model_role 自动加载对应 skill
 //! - MCP 工具 `skill_view`：直接返回缓存内容，避免重复 I/O
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 use std::time::Instant;
 
-/// 缓存条目：skill 内容 + 来源路径 + 加载时间
+/// 缓存条目：SKILL.md 完整内容
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 struct CacheEntry {
-    /// SKILL.md 完整内容
     content: String,
-    /// 来源路径（用于 invalidate 时重建）
-    skill_dir: PathBuf,
-    /// 加载时间
-    loaded_at: Instant,
 }
 
 /// 全局 SkillPromptCache（单例）
@@ -61,7 +55,8 @@ impl SkillPromptCache {
     /// - `Some(content)`: skill 内容字符串
     /// - `None`: skill 不存在或读取失败
     pub fn get_skill_prompt(name: &str) -> Option<String> {
-        let mut cache = SKILL_PROMPT_CACHE.lock().ok()?;
+        // 同步短临界区（不跨 await），按项目先例使用 parking_lot::Mutex
+        let mut cache = SKILL_PROMPT_CACHE.lock();
         cache.ensure_built();
         cache.entries.get(name).map(|e| e.content.clone())
     }
@@ -70,10 +65,7 @@ impl SkillPromptCache {
     ///
     /// 任一 skill 不存在则跳过（不返回错误）。返回拼接后的字符串，每条 skill 之间用分隔符隔开。
     pub fn get_skills_prompts_combined(names: &[&str]) -> String {
-        let mut cache = match SKILL_PROMPT_CACHE.lock() {
-            Ok(c) => c,
-            Err(_) => return String::new(),
-        };
+        let mut cache = SKILL_PROMPT_CACHE.lock();
         cache.ensure_built();
 
         let mut parts = Vec::with_capacity(names.len());
@@ -87,25 +79,19 @@ impl SkillPromptCache {
 
     /// 失效缓存（外部修改 skill 文件后调用）
     pub fn invalidate() {
-        if let Ok(mut cache) = SKILL_PROMPT_CACHE.lock() {
-            cache.entries.clear();
-            cache.last_rebuild = None;
-        }
+        let mut cache = SKILL_PROMPT_CACHE.lock();
+        cache.entries.clear();
+        cache.last_rebuild = None;
     }
 
     /// 设置自定义 TTL（秒）
     pub fn set_ttl(ttl_secs: u64) {
-        if let Ok(mut cache) = SKILL_PROMPT_CACHE.lock() {
-            cache.ttl_secs = ttl_secs;
-        }
+        SKILL_PROMPT_CACHE.lock().ttl_secs = ttl_secs;
     }
 
     /// 列出当前缓存的所有 skill 名称
     pub fn list_cached_skills() -> Vec<String> {
-        let mut cache = match SKILL_PROMPT_CACHE.lock() {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
+        let mut cache = SKILL_PROMPT_CACHE.lock();
         cache.ensure_built();
         cache.entries.keys().cloned().collect()
     }
@@ -144,13 +130,9 @@ impl SkillPromptCache {
                     }
                     seen.insert(name.clone());
 
-                    let skill_dir = entry.path();
-                    let skill_md = skill_dir.join("SKILL.md");
+                    let skill_md = entry.path().join("SKILL.md");
                     if let Ok(content) = std::fs::read_to_string(&skill_md) {
-                        self.entries.insert(
-                            name,
-                            CacheEntry { content, skill_dir, loaded_at: Instant::now() },
-                        );
+                        self.entries.insert(name, CacheEntry { content });
                     }
                 }
             }

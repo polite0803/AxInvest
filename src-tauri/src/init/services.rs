@@ -54,10 +54,18 @@ pub async fn start_background_services(
     start_index_job_service(app, state);
     start_plugins(state);
 
-    // [AxAgent 残留移除] 原 AxAgent 专属调用已删除：
-    //   - start_batch_reflection / start_lesson_validation
-    //   - start_stock_pipeline / start_vendor_health_prober
-    //   - start_realtime_monitor / start_realtime_quote_watcher / start_risk_inspection
+    // [2026-09-03 投资域接线恢复] 以下为 AxInvest 业务专属后台服务，
+    // 此前被标记为「AxAgent 残留移除」，但它们是 AxInvest 投资域的核心功能：
+    //   - start_realtime_monitor：价格告警轮询 + T+0 自动重跑触发（trigger_t0_rerun）
+    //   - start_realtime_quote_watcher：实时行情推送（前端 stock-quote-update 事件）
+    //   - start_batch_reflection：股票分析批量反思 cron（run_batch_reflection_inner）
+    //   - start_demand_discovery_cron：OPC 需求发现定时扫描（run_demand_discovery_cron）
+    //   - spawn_opc_workflows_seeding：OPC 行业/领域工作流模板种子化（ensure_opc_workflows_seeded）
+    start_realtime_monitor(app);
+    start_realtime_quote_watcher(app, state);
+    start_batch_reflection(state);
+    start_demand_discovery_cron(app, state);
+    spawn_opc_workflows_seeding(state);
     // register_dojo_sdk_executor 中的 DojoSdkExecutorImpl 注册（依赖 astock_client）已移除，
     // 仅保留 Plan 三件套正常后台任务——PLANS_REGISTRY TTL 清理
     crate::commands::dojo_sdk::spawn_plan_ttl_cleanup(state.shutdown_token.clone());
@@ -1972,6 +1980,7 @@ async fn start_cron_scheduler(state: &AppState) {
     let work_engine = state.work_engine.clone();
     let cron_store = state.cron_job_store.clone();
     let sync_db = state.harness.db().clone();
+    let astock_client = state.astock_client.clone();
     // G17 delivery：此前 create_cron_delivery_sink 建好了 sink 却从未接进
     // executor，导致所有定时任务的 delivery 配置都是死配置。这里接上后，
     // 任务可通过 CronDeliveryConfig 把执行结果推送到 webhook / 文件 / 通知渠道。
@@ -2090,6 +2099,96 @@ async fn start_cron_scheduler(state: &AppState) {
         }
         // [AxAgent 残留移除] opc-demand-discovery 和 stock-recommendation 两个 cron
         // 分支已移除（demand_discovery 模块和 recommendation_cron 函数已整体删除）
+        // 自选股定时扫描：task_type = watchlist-scan（前端 ScheduledAnalysisTab 创建/管理）。
+        // [2026-09-03 接线恢复] 此前 CronExecutor 无此分支，UI 创建的任务到点后不执行任何分析。
+        // 执行：遍历 watchlist_items → 逐只 run_single_stock_analysis（写 stock_analyses
+        // 并落 stock_reflections pending row，由 6h batch reflection 消费）。
+        if job.task_type.as_deref() == Some("watchlist-scan") {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let engine = work_engine.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                use sea_orm::EntityTrait;
+                let items = axagent_entities::watchlist_items::Entity::find()
+                    .all(&db)
+                    .await
+                    .unwrap_or_default();
+                if items.is_empty() {
+                    tracing::info!("[CronScheduler] 自选股扫描 '{job_name}': 自选股为空，跳过");
+                    let result = axagent_runtime_core::TaskRunResult {
+                        success: true,
+                        output: Some("自选股为空，未执行分析".to_string()),
+                        error: None,
+                        duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
+                            as u64,
+                        executed_at: started,
+                    };
+                    store.record_run(&job_id, result).await;
+                    if !recurring {
+                        let _ = store
+                            .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                            .await;
+                    }
+                    return;
+                }
+                let mut ok = 0usize;
+                let mut fail = 0usize;
+                let mut first_err: Option<String> = None;
+                for item in &items {
+                    match crate::commands::stock_workflow::run_single_stock_analysis(
+                        &db,
+                        &client,
+                        &engine,
+                        &item.stock_code,
+                        &item.stock_name,
+                    )
+                    .await
+                    {
+                        Ok(id) => {
+                            ok += 1;
+                            tracing::info!(
+                                "[CronScheduler] 自选股扫描 '{}' {} 分析完成: {id}",
+                                job_name,
+                                item.stock_code
+                            );
+                        },
+                        Err(e) => {
+                            fail += 1;
+                            if first_err.is_none() {
+                                first_err = Some(e.clone());
+                            }
+                            tracing::warn!(
+                                "[CronScheduler] 自选股扫描 '{}' {} 分析失败: {e}",
+                                job_name,
+                                item.stock_code
+                            );
+                        },
+                    }
+                }
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: fail == 0,
+                    output: Some(format!(
+                        "自选股扫描完成: {} 只, 成功 {ok}, 失败 {fail}",
+                        items.len()
+                    )),
+                    error: first_err,
+                    duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
+                    executed_at: started,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
         if let Some(ref wf_id) = job.workflow_id {
             let engine = work_engine.clone();
             let store = cron_store.clone();
@@ -2485,4 +2584,266 @@ fn start_retrieval_feedback_tick(state: &AppState) {
         }
     });
     tracing::info!("[retrieval_feedback] 反馈应用定时任务已启动（每小时）");
+}
+
+// ── [2026-09-03 投资域接线恢复] ──────────────────────────────────────────
+// 以下 5 个服务此前随「另一分支」重构被移除启动接线，本次恢复。
+// 功能组件本身一直存在（commands/stock_analysis.rs、stock_workflow、opc_workflows），
+// 缺失的只是本文件的启动调用。
+
+/// 前端事件推送桥接：把 RealtimeMonitor 告警桥接到 Tauri 前端事件
+struct AppMonitorEmitter {
+    app: tauri::AppHandle,
+}
+
+impl axagent_analysis_engine::monitor::MonitorEventEmitter for AppMonitorEmitter {
+    fn emit(&self, event: &str, payload: serde_json::Value) {
+        let _ = self.app.emit(event, payload);
+    }
+}
+
+/// 启动实时价格监控：恢复 DB 中的价格告警 → RealtimeMonitor 轮询 →
+/// 前端 `stock-monitor-alert` 事件 + P2-6 T+0 自动重跑（trigger_t0_rerun）+
+/// P3-3 跨股票信号聚合器（组合级告警）。
+fn start_realtime_monitor(app: &tauri::AppHandle) {
+    use axagent_analysis_engine::alert_mapping::{alert_types, db_model_to_config_field};
+    use axagent_analysis_engine::monitor::{MonitorConfig, RealtimeMonitor, TZeroCallback};
+    use axagent_harness::market_data::MarketDataProvider;
+
+    // astock_client 依赖 AppState，但在同步段通过 Manager::state 拿引用克隆即可
+    {
+        use tauri::Manager;
+        let state = app.state::<AppState>();
+        let client: std::sync::Arc<dyn MarketDataProvider> = state.astock_client.clone();
+
+        // P3-3: 跨股票聚合器（OnceLock 注入，组合级告警）——同步段完成
+        let aggregator = std::sync::Arc::new(
+            axagent_analysis_engine::cross_stock_aggregator::CrossStockSignalAggregator::new(
+                axagent_analysis_engine::cross_stock_aggregator::AggregatorConfig::default(),
+            ),
+        );
+        if state.cross_stock_aggregator.set(aggregator.clone()).is_err() {
+            tracing::warn!("[startup] cross_stock_aggregator 已初始化，跳过重复注入");
+        }
+        // state 守卫（State<'_, AppState> 无 Drop）在本同步块结束时释放
+        // monitor 构造（同步，仅依赖 client，无 state 依赖）
+        let monitor = RealtimeMonitor::new(client);
+
+        let app_for_spawn = app.clone();
+        tauri::async_runtime::spawn(async move {
+            use tauri::Manager;
+            // 短借 state：只克隆 db，State 守卫不跨 await 持有
+            let db = {
+                let state = app_for_spawn.state::<AppState>();
+                state.harness.db().clone()
+            };
+
+            // 事件桥接（stock-monitor-alert）
+            monitor
+                .set_event_emitter(std::sync::Arc::new(AppMonitorEmitter {
+                    app: app_for_spawn.clone(),
+                }))
+                .await;
+            // 组合级告警
+            monitor.set_aggregator(aggregator).await;
+
+            // P2-6: T+0 自动重跑回调（异常行情 → 重跑股票分析工作流）
+            let app_for_t0 = app_for_spawn.clone();
+            let t0_callback: TZeroCallback = std::sync::Arc::new(move |stock_code: String| {
+                let app = app_for_t0.clone();
+                Box::pin(async move {
+                    crate::commands::stock_workflow::core::trigger_t0_rerun(app, stock_code).await
+                })
+            });
+            monitor.set_t0_callback(t0_callback).await;
+
+            // 从 DB 恢复未触发的价格告警 → MonitorConfig（重启后监控不丢）
+            use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+            match axagent_entities::price_alerts::Entity::find()
+                .filter(axagent_entities::price_alerts::Column::IsTriggered.eq(0))
+                .all(&db)
+                .await
+            {
+                Ok(alerts) => {
+                    let mut restored = 0usize;
+                    for alert in &alerts {
+                        let Some((field, value)) = db_model_to_config_field(
+                            alert.alert_type.as_deref(),
+                            alert.condition_type.as_deref(),
+                            alert.threshold,
+                            &alert.condition,
+                            alert.target_price,
+                        ) else {
+                            continue;
+                        };
+                        let mut config = MonitorConfig {
+                            stock_code: alert.stock_code.clone(),
+                            stock_name: alert.stock_name.clone(),
+                            stop_loss: None,
+                            take_profit: None,
+                            resistance_break: None,
+                            support_break: None,
+                            change_pct_alert: None,
+                            turnover_rate_alert: None,
+                            enabled: true,
+                        };
+                        match field {
+                            alert_types::STOP_LOSS => config.stop_loss = Some(value),
+                            alert_types::TAKE_PROFIT => config.take_profit = Some(value),
+                            alert_types::RESISTANCE => config.resistance_break = Some(value),
+                            alert_types::SUPPORT => config.support_break = Some(value),
+                            alert_types::CHANGE => config.change_pct_alert = Some(value),
+                            alert_types::VOLUME => config.turnover_rate_alert = Some(value),
+                            _ => continue,
+                        }
+                        monitor.add_config(config).await;
+                        restored += 1;
+                    }
+                    tracing::info!("[startup] 价格告警恢复完成：{restored} 条已注入实时监控");
+                },
+                Err(e) => {
+                    tracing::warn!("[startup] 恢复价格告警失败（监控将从空配置启动）: {e}");
+                },
+            }
+
+            let monitor_arc = std::sync::Arc::new(monitor);
+            let injected = {
+                let state = app_for_spawn.state::<AppState>();
+                state.stock_monitor.set(monitor_arc.clone()).is_ok()
+            };
+            if !injected {
+                tracing::warn!("[startup] stock_monitor 已初始化，跳过重复注入");
+                return;
+            }
+            // 启动轮询（内部永久循环，进程退出即结束）
+            monitor_arc.start().await;
+        });
+    }
+}
+
+/// 启动实时行情推送：RealTimeQuoteWatcher 轮询 → 前端 `stock-quote-update` 事件
+fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
+    use axagent_astock_data::realtime_quote::{QuoteCallback, RealTimeQuoteWatcher};
+
+    let callback: QuoteCallback = {
+        let app = app.clone();
+        std::sync::Arc::new(move |event: axagent_astock_data::realtime_quote::QuoteChangeEvent| {
+            let app = app.clone();
+            // QuoteChangeEvent 未实现 Serialize，手动构造 camelCase payload
+            let payload = serde_json::json!({
+                "stockCode": event.stock_code,
+                "changePct": event.change_pct,
+                "trigger": event.trigger,
+                "price": event.current.price,
+                "name": event.current.name,
+                "volume": event.current.volume,
+                "turnoverRate": event.current.turnover_rate,
+                "timestamp": event.current.timestamp,
+            });
+            Box::pin(async move {
+                let _ = app.emit("stock-quote-update", payload);
+            })
+        })
+    };
+
+    let watcher = RealTimeQuoteWatcher::new(state.astock_client.clone(), Some(callback));
+    if state.quote_watcher.set(watcher).is_err() {
+        tracing::warn!("[startup] quote_watcher 已初始化，跳过重复注入");
+        return;
+    }
+    if let Some(w) = state.quote_watcher.get() {
+        w.start();
+        tracing::info!("[startup] 实时行情推送已启动（stock-quote-update 事件）");
+    }
+}
+
+/// 启动批量反思 cron（每 6 小时）：扫 pending 反思队列 → LLM 反思 → 回测验证
+fn start_batch_reflection(state: &AppState) {
+    let db = state.harness.db().clone();
+    let client = state.astock_client.clone();
+    let engine = state.work_engine.clone();
+    let vector_store = state.vector_store.clone();
+    let master_key = state.harness.master_key_owned();
+    let trajectory_storage = state.trajectory_storage.clone();
+
+    tauri::async_runtime::spawn(async move {
+        // 启动延迟 5 分钟，避开启动高峰
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 3600));
+        loop {
+            interval.tick().await;
+            match crate::commands::stock_workflow::run_batch_reflection_inner(
+                &db,
+                &client,
+                &engine,
+                &vector_store,
+                &master_key,
+                None,
+                Some(&trajectory_storage),
+            )
+            .await
+            {
+                Ok(summary) => {
+                    tracing::info!("[batch-reflection] 批量反思完成: {summary}");
+                },
+                Err(e) => {
+                    tracing::warn!("[batch-reflection] 批量反思失败: {e}");
+                },
+            }
+        }
+    });
+    tracing::info!("[startup] 批量反思定时任务已启动（每 6 小时）");
+}
+
+/// 启动 OPC 需求发现 cron（每 12 小时）：扫描已启用平台 → 评估线索 → 高价值推送
+fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
+    let db = state.harness.db().clone();
+    let app = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        // 首轮延迟 10 分钟（等平台凭证配置完成后再扫）
+        tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(12 * 3600));
+        loop {
+            interval.tick().await;
+            match crate::commands::demand_discovery::run_demand_discovery_cron(
+                &db,
+                None,
+                Some(&app),
+            )
+            .await
+            {
+                Ok(summary) => {
+                    tracing::info!("[demand-discovery] 定时扫描完成: {summary}");
+                },
+                Err(e) => {
+                    tracing::warn!("[demand-discovery] 定时扫描失败: {e}");
+                },
+            }
+        }
+    });
+    tracing::info!("[startup] 需求发现定时任务已启动（每 12 小时）");
+}
+
+/// OPC 行业/领域工作流模板种子化（后台异步，幂等 upsert）
+///
+/// 激活 opc_workflows 全部 seed 模块：14 行业 + 17 领域 + 生产/内容媒体模板 +
+/// route_path 回填。TEMPLATE_VERSION 校验在 seed 函数内部完成。
+fn spawn_opc_workflows_seeding(state: &AppState) {
+    let db = state.harness.db().clone();
+    let app_dir = state.app_data_dir.clone();
+
+    tauri::async_runtime::spawn(async move {
+        // 延迟 3 秒，确保 migration 完成后再种子化
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        match crate::commands::opc_workflows::ensure_opc_workflows_seeded(&db, Some(&app_dir)).await
+        {
+            Ok(()) => {
+                tracing::info!("[opc-workflows] 工作流模板种子化完成");
+            },
+            Err(e) => {
+                tracing::warn!("[opc-workflows] 工作流模板种子化失败: {e}");
+            },
+        }
+    });
 }

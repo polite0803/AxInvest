@@ -1290,7 +1290,7 @@ pub async fn run_lesson_validation_command(
 // P3-#11 修复：`_engine` 参数类型从 `&WorkEngine` 改为 `&Arc<WorkEngine>`，
 // 避免循环内 `Arc::new(_engine.clone())` 克隆整个 WorkEngine（可能包含大量状态）。
 // Arc::clone 只是原子引用计数加一，O(1)。
-// 已接入 start_background_services 的 start_batch_reflection 定时任务。
+// 接线：init/services.rs 的 start_batch_reflection 定时任务（每 6 小时）调用。
 pub async fn run_batch_reflection_inner(
     db: &sea_orm::DatabaseConnection,
     _client: &axagent_astock_data::AStockClient,

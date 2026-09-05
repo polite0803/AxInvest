@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // 运行时执行态 DTO 复用 harness(阶段 2 上移)
+// SAFETY: 本文件的 std::sync 锁仅在同步临界区使用，guard 不跨 await（无死锁 / 毒化风险）。
+// [2026-09-03] 由 crate 级 disallowed_types 豁免局部化到具体触发点（不含字面量，便于 grep 审计）。
+#![allow(clippy::disallowed_types)]
+
 pub use axagent_harness::workflow_types::{
     ExecutionStatus, NodeExecutionRecord, NodeHeartbeatEvent, NodeTimeoutWarningEvent,
     PartialResultEvent,

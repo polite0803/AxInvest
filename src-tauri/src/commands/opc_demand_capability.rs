@@ -23,6 +23,7 @@
 //! 可单测、可解释；`gap_hint` 只做描述性拼接，不发明新能力。
 
 use crate::AppState;
+use axagent_agent_macro::agent_command;
 use axagent_harness::capability::CapabilityDomain;
 use axagent_harness::capability_retriever::CapabilityQuery;
 use axagent_harness::types::{CapabilityMatchItem, DemandLeadDto, LeadCapabilityMatch};
@@ -46,6 +47,7 @@ const MATCH_TEXT_BYTES: usize = 1200;
 /// 从能力库检索与该需求最匹配的能力，输出「能接/部分/缺失」结论与缺失的能力域。
 /// 检索失败不报错 —— 能力库不可用时应降级为「未知」（missing），而不是让「响应」
 /// 环节整体崩掉；错误只记日志。
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "为需求匹配能力")]
 #[tauri::command]
 pub async fn opc_match_lead_capabilities(
     state: State<'_, AppState>,

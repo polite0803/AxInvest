@@ -10,7 +10,7 @@
 
 #![allow(dead_code)]
 
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
@@ -78,11 +78,7 @@ pub(crate) struct AgentEdge {
 
 impl AgentEdge {
     pub(crate) fn new(source_id: impl Into<String>, target_id: impl Into<String>) -> Self {
-        Self {
-            source_id: source_id.into(),
-            target_id: target_id.into(),
-            condition: None,
-        }
+        Self { source_id: source_id.into(), target_id: target_id.into(), condition: None }
     }
 
     pub(crate) fn with_condition(mut self, condition: impl Into<String>) -> Self {
@@ -136,35 +132,21 @@ impl AgentArchitecture {
     }
 
     pub(crate) fn successors(&self, node_id: &str) -> Vec<&str> {
-        self.edges
-            .iter()
-            .filter(|e| e.source_id == node_id)
-            .map(|e| e.target_id.as_str())
-            .collect()
+        self.edges.iter().filter(|e| e.source_id == node_id).map(|e| e.target_id.as_str()).collect()
     }
 
     pub(crate) fn predecessors(&self, node_id: &str) -> Vec<&str> {
-        self.edges
-            .iter()
-            .filter(|e| e.target_id == node_id)
-            .map(|e| e.source_id.as_str())
-            .collect()
+        self.edges.iter().filter(|e| e.target_id == node_id).map(|e| e.source_id.as_str()).collect()
     }
 
     pub(crate) fn root_nodes(&self) -> Vec<&AgentNode> {
         let has_incoming: HashSet<&str> = self.edges.iter().map(|e| e.target_id.as_str()).collect();
-        self.nodes
-            .iter()
-            .filter(|n| !has_incoming.contains(n.id.as_str()))
-            .collect()
+        self.nodes.iter().filter(|n| !has_incoming.contains(n.id.as_str())).collect()
     }
 
     pub(crate) fn leaf_nodes(&self) -> Vec<&AgentNode> {
         let has_outgoing: HashSet<&str> = self.edges.iter().map(|e| e.source_id.as_str()).collect();
-        self.nodes
-            .iter()
-            .filter(|n| !has_outgoing.contains(n.id.as_str()))
-            .collect()
+        self.nodes.iter().filter(|n| !has_outgoing.contains(n.id.as_str())).collect()
     }
 
     pub(crate) fn connected_components(&self) -> Vec<HashSet<String>> {
@@ -270,9 +252,7 @@ pub(crate) struct DefaultArchitectureEvaluator {
 
 impl DefaultArchitectureEvaluator {
     pub(crate) fn new() -> Self {
-        Self {
-            optimal_node_range: (3, 8),
-        }
+        Self { optimal_node_range: (3, 8) }
     }
 
     pub(crate) fn with_optimal_range(mut self, min: usize, max: usize) -> Self {
@@ -323,9 +303,7 @@ impl DefaultArchitectureEvaluator {
         let root_has_llm_or_seq = roots
             .iter()
             .any(|n| matches!(n.node_type, AgentNodeType::LlmCall | AgentNodeType::Sequential));
-        let leaf_has_llm = leaves
-            .iter()
-            .any(|n| matches!(n.node_type, AgentNodeType::LlmCall));
+        let leaf_has_llm = leaves.iter().any(|n| matches!(n.node_type, AgentNodeType::LlmCall));
         let mut score = 0.0;
         if has_root {
             score += 0.25;
@@ -382,22 +360,21 @@ impl RandomMetaAgent {
         search_space: &ArchitectureSearchSpace,
         generation: u32,
     ) -> AgentArchitecture {
-        let mut rng = rand::thread_rng();
-        let node_count = rng.gen_range(2..=search_space.max_nodes.min(8));
+        let mut rng = rand::rng();
+        let node_count = rng.random_range(2..=search_space.max_nodes.min(8));
         let mut arch = AgentArchitecture::new(format!("arch_gen{}", generation));
         arch.generation = generation;
 
         let mut node_ids: Vec<String> = Vec::new();
         for _ in 0..node_count {
-            let node_type_idx = rng.gen_range(0..search_space.allowed_node_types.len());
+            let node_type_idx = rng.random_range(0..search_space.allowed_node_types.len());
             let node_type = search_space.allowed_node_types[node_type_idx].clone();
             let mut node = AgentNode::new(node_type);
             if !search_space.available_tools.is_empty()
                 && matches!(node.node_type, AgentNodeType::ToolInvocation)
             {
-                let tool_idx = rng.gen_range(0..search_space.available_tools.len());
-                node.config
-                    .insert("tool".into(), search_space.available_tools[tool_idx].clone());
+                let tool_idx = rng.random_range(0..search_space.available_tools.len());
+                node.config.insert("tool".into(), search_space.available_tools[tool_idx].clone());
             }
             let id = node.id.clone();
             arch.add_node(node);
@@ -406,13 +383,13 @@ impl RandomMetaAgent {
 
         if node_ids.len() > 1 {
             for i in 0..node_ids.len() - 1 {
-                if rng.gen_bool(0.7) {
+                if rng.random_bool(0.7) {
                     arch.add_edge(AgentEdge::new(&node_ids[i], &node_ids[i + 1]));
                 }
             }
             for i in 0..node_ids.len() {
                 for j in (i + 2)..node_ids.len() {
-                    if rng.gen_bool(0.15) {
+                    if rng.random_bool(0.15) {
                         arch.add_edge(AgentEdge::new(&node_ids[i], &node_ids[j]));
                     }
                 }
@@ -488,22 +465,22 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
     }
 
     pub(crate) fn mutate_architecture(&self, arch: &AgentArchitecture) -> AgentArchitecture {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut mutant = arch.clone();
         mutant.id = Uuid::new_v4().to_string();
         mutant.generation = self.generation;
         mutant.fitness = 0.0;
 
-        let mutation_type: f64 = rng.r#gen();
+        let mutation_type: f64 = rng.random();
 
         if mutation_type < 0.33 && mutant.nodes.len() < self.config.max_nodes {
-            let node_type_idx = rng.gen_range(0..self.search_space.allowed_node_types.len());
+            let node_type_idx = rng.random_range(0..self.search_space.allowed_node_types.len());
             let node_type = self.search_space.allowed_node_types[node_type_idx].clone();
             let mut node = AgentNode::new(node_type);
             if !self.search_space.available_tools.is_empty()
                 && matches!(node.node_type, AgentNodeType::ToolInvocation)
             {
-                let tool_idx = rng.gen_range(0..self.search_space.available_tools.len());
+                let tool_idx = rng.random_range(0..self.search_space.available_tools.len());
                 node.config
                     .insert("tool".into(), self.search_space.available_tools[tool_idx].clone());
             }
@@ -511,29 +488,27 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
             mutant.add_node(node);
             if !mutant.nodes.is_empty() {
                 let existing_ids: Vec<String> = mutant.nodes.iter().map(|n| n.id.clone()).collect();
-                let target_idx = rng.gen_range(0..existing_ids.len());
-                if rng.gen_bool(0.5) {
+                let target_idx = rng.random_range(0..existing_ids.len());
+                if rng.random_bool(0.5) {
                     mutant.add_edge(AgentEdge::new(&new_id, &existing_ids[target_idx]));
                 } else {
                     mutant.add_edge(AgentEdge::new(&existing_ids[target_idx], &new_id));
                 }
             }
         } else if mutation_type < 0.66 && !mutant.nodes.is_empty() {
-            let remove_idx = rng.gen_range(0..mutant.nodes.len());
+            let remove_idx = rng.random_range(0..mutant.nodes.len());
             let removed_id = mutant.nodes[remove_idx].id.clone();
             mutant.nodes.remove(remove_idx);
-            mutant
-                .edges
-                .retain(|e| e.source_id != removed_id && e.target_id != removed_id);
+            mutant.edges.retain(|e| e.source_id != removed_id && e.target_id != removed_id);
         } else if !mutant.nodes.is_empty() {
-            let modify_idx = rng.gen_range(0..mutant.nodes.len());
-            let node_type_idx = rng.gen_range(0..self.search_space.allowed_node_types.len());
+            let modify_idx = rng.random_range(0..mutant.nodes.len());
+            let node_type_idx = rng.random_range(0..self.search_space.allowed_node_types.len());
             mutant.nodes[modify_idx].node_type =
                 self.search_space.allowed_node_types[node_type_idx].clone();
             if !self.search_space.available_tools.is_empty()
                 && matches!(mutant.nodes[modify_idx].node_type, AgentNodeType::ToolInvocation)
             {
-                let tool_idx = rng.gen_range(0..self.search_space.available_tools.len());
+                let tool_idx = rng.random_range(0..self.search_space.available_tools.len());
                 mutant.nodes[modify_idx]
                     .config
                     .insert("tool".into(), self.search_space.available_tools[tool_idx].clone());
@@ -548,7 +523,7 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
         parent1: &AgentArchitecture,
         parent2: &AgentArchitecture,
     ) -> AgentArchitecture {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut child =
             AgentArchitecture::new(format!("cross_{}_{}", parent1.generation, parent2.generation));
         child.generation = self.generation;
@@ -560,12 +535,12 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
         let split1 = if parent1.nodes.is_empty() {
             0
         } else {
-            rng.gen_range(0..=parent1.nodes.len())
+            rng.random_range(0..=parent1.nodes.len())
         };
         let split2 = if parent2.nodes.is_empty() {
             0
         } else {
-            rng.gen_range(0..=parent2.nodes.len())
+            rng.random_range(0..=parent2.nodes.len())
         };
 
         let mut id_map: HashMap<String, String> = HashMap::new();
@@ -623,10 +598,10 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
         if self.population.is_empty() {
             return None;
         }
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let mut best: Option<&AgentArchitecture> = None;
         for _ in 0..tournament_size.min(self.population.len()) {
-            let idx = rng.gen_range(0..self.population.len());
+            let idx = rng.random_range(0..self.population.len());
             let candidate = &self.population[idx];
             if best.is_none()
                 || candidate.fitness > best.expect("best is set after first iteration").fitness
@@ -641,11 +616,8 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
         self.generation += 1;
 
         let mut sorted = self.population.clone();
-        sorted.sort_by(|a, b| {
-            b.fitness
-                .partial_cmp(&a.fitness)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        sorted
+            .sort_by(|a, b| b.fitness.partial_cmp(&a.fitness).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut new_pop: Vec<AgentArchitecture> = Vec::new();
 
@@ -656,10 +628,10 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
             new_pop.push(elite);
         }
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         while new_pop.len() < self.config.population_size {
-            let r: f64 = rng.r#gen();
+            let r: f64 = rng.random();
 
             if r < self.config.crossover_rate {
                 let p1 = self.tournament_select(3);
@@ -725,26 +697,19 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
             self.evolve_generation().await;
         }
 
-        self.get_best()
-            .cloned()
-            .unwrap_or_else(|| AgentArchitecture::new("empty"))
+        self.get_best().cloned().unwrap_or_else(|| AgentArchitecture::new("empty"))
     }
 
     pub(crate) fn get_best(&self) -> Option<&AgentArchitecture> {
-        self.population.iter().max_by(|a, b| {
-            a.fitness
-                .partial_cmp(&b.fitness)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        self.population
+            .iter()
+            .max_by(|a, b| a.fitness.partial_cmp(&b.fitness).unwrap_or(std::cmp::Ordering::Equal))
     }
 
     pub(crate) fn get_statistics(&self) -> SearchStatistics {
         let pop_len = self.population.len();
-        let best_fitness = self
-            .population
-            .iter()
-            .map(|a| a.fitness)
-            .fold(f64::NEG_INFINITY, f64::max);
+        let best_fitness =
+            self.population.iter().map(|a| a.fitness).fold(f64::NEG_INFINITY, f64::max);
         let avg_fitness = if pop_len > 0 {
             self.population.iter().map(|a| a.fitness).sum::<f64>() / pop_len as f64
         } else {
@@ -755,9 +720,7 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
                 .population
                 .iter()
                 .flat_map(|a| {
-                    a.nodes
-                        .iter()
-                        .map(|n| serde_json::to_string(&n.node_type).unwrap_or_default())
+                    a.nodes.iter().map(|n| serde_json::to_string(&n.node_type).unwrap_or_default())
                 })
                 .collect();
             if all_types.is_empty() {
@@ -768,11 +731,7 @@ impl<E: ArchitectureEvaluator, M: MetaAgentProvider> ArchitectureSearchEngine<E,
                     *counts.entry(t.clone()).or_insert(0) += 1;
                 }
                 let total = all_types.len() as f64;
-                counts
-                    .values()
-                    .map(|&c| c as f64 / total)
-                    .map(|p| -p * p.ln())
-                    .sum::<f64>()
+                counts.values().map(|&c| c as f64 / total).map(|p| -p * p.ln()).sum::<f64>()
             }
         } else {
             0.0

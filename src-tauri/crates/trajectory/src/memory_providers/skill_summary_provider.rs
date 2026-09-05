@@ -24,6 +24,14 @@
 //! `MemoryProviderRegistry`，与 `Mem0Provider` / `HonchoProvider` 并列。
 //! Agent 推理前调用 `registry.prefetch()` 时会自动检索相关技能摘要。
 
+#![allow(dead_code)]
+
+// [2026-09-03] 本模块曾因 memory_providers/mod.rs 缺 `pub mod` 声明而从未编译。
+// 断链原因在消费侧而非本模块：`MemoryProvider` trait（memory_provider.rs:63）
+// 全仓只有定义、零调用方，连已接线的 closed_loop / memory_hook_provider 都不是它的实现。
+// → 三个 provider（mem0 / honcho / skill_summary）要真正运转，需先落地 MemoryProvider
+//   运行时（注册中心 + prefetch/sync_turn 调用链）。属新功能开发，非接线，待用户裁决。
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

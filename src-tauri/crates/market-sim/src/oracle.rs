@@ -70,7 +70,6 @@ pub trait Oracle: Send + Sync {
 /// 修复 P0-M5: 原实现用 `(time * 1.618).sin()` 确定性函数冒充随机游走，
 /// 导致所有 Monte Carlo path 完全相同。改为用 StdRng 生成真随机步进。
 pub struct BaselineOracle {
-    #[allow(dead_code)]
     reference_price: Price,
     /// 当前累积信号
     current_fv: f64,
@@ -145,7 +144,6 @@ impl Oracle for BaselineOracle {
 ///
 /// 修复 P0-M5: 原 noise 用 `(time * PI).sin()` 确定性函数，改为 StdRng。
 pub struct DriftOracle {
-    #[allow(dead_code)]
     reference_price: Price,
     /// 日漂移率（基点，正=看涨，负=看跌）
     drift_per_day_bps: i64,

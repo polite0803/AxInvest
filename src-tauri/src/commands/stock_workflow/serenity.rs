@@ -112,8 +112,8 @@ pub(crate) async fn extract_agent_output(raw: serde_json::Value) -> serde_json::
 /// 文本块拼接后走 `axagent_kit::utils::extract_json_from_llm_response` 兜底。
 ///
 /// 注意：`extract_agent_output` 不再调用此函数（改用 `extract_json_from_llm_response` 直接提取）。
-/// 此函数保留供测试和未来工具调用场景复用。
-#[allow(dead_code)]
+/// 此函数保留供测试和未来工具调用场景复用（当前唯一调用方在 mod tests）。
+#[cfg_attr(not(test), allow(dead_code))]
 async fn extract_via_normalizer(content: &str) -> Option<serde_json::Value> {
     if content.trim().is_empty() {
         return None;
@@ -403,7 +403,8 @@ fn extract_outer_json(text: &str) -> Option<serde_json::Value> {
 }
 
 /// 宽松 JSON 解析：处理模型在 `input` 字段里偶尔出现的轻微格式问题。
-#[allow(dead_code)]
+/// 生产路径仅被 extract_via_normalizer（test-only）调用，测试独立消费。
+#[cfg_attr(not(test), allow(dead_code))]
 fn parse_loose_json(s: &str) -> Option<serde_json::Value> {
     let trimmed = s.trim();
     if trimmed.is_empty() {

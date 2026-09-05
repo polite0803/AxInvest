@@ -235,7 +235,6 @@ mod tests {
 
     /// D4 测试桩：收集上报的真实执行反馈（会话 id / tool_id / 成败）。
     #[derive(Default)]
-    #[allow(clippy::disallowed_types)]
     // SAFETY: 测试桩使用 parking_lot::Mutex 保护内部数据，仅在同步测试场景中使用，无跨 await 风险。
     struct MockSink(parking_lot::Mutex<Vec<(Option<String>, String, bool)>>);
 

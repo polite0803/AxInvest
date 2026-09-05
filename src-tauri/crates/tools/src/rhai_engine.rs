@@ -5,8 +5,6 @@
 //! 编译（工作流创建时）→ 缓存 AST → 执行时注册为 tool_handler
 //! 脚本中可通过 `tool("name", args_map)` 调用已注册的工具
 
-#![allow(clippy::disallowed_types)]
-
 use parking_lot::Mutex;
 use rhai::{AST, Engine, Scope};
 use serde_json::Value as JsonValue;

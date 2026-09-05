@@ -14,9 +14,11 @@ pub mod agent_profile;
 pub mod agent_role;
 pub mod agent_session;
 pub mod analyst_evolution;
+pub mod analyst_feedback;
 pub mod app_config;
 pub mod artifacts;
 pub mod background_tasks;
+pub mod backtest_validation;
 pub mod backup;
 pub mod branches;
 #[cfg(not(mobile))]
@@ -28,6 +30,8 @@ pub mod cloud_workspace;
 pub mod cognitive;
 #[cfg(not(mobile))]
 pub mod computer_control;
+pub mod conditional_order;
+pub mod constants;
 pub mod context_breakdown;
 pub mod context_sources;
 pub mod conversation_categories;
@@ -36,6 +40,7 @@ pub mod conversations_search;
 pub mod crash_report;
 pub mod dashboard;
 pub mod db_config;
+pub mod demand_discovery;
 #[cfg(not(mobile))]
 pub mod desktop;
 pub mod device_sync;
@@ -89,6 +94,8 @@ pub mod opc_demand_capability;
 pub mod opc_demand_discovery;
 pub mod opc_demand_implement;
 pub mod opc_demand_subscription;
+pub mod opc_llm_bridge;
+pub mod opc_setup;
 pub mod orchestrator;
 pub mod paper;
 pub mod parallel_execution;
@@ -144,6 +151,29 @@ pub mod webhook;
 pub mod wiki;
 // P0-5: 错误分类与故障转移
 pub mod error_classification;
+pub mod market_sim;
+pub mod opc;
+pub mod opc_data;
+pub mod opc_industry_actions;
+pub mod opc_industry_bridge;
+pub mod opc_industry_logic;
+pub mod opc_industry_runtime;
+pub mod opc_learning_hook;
+pub mod opc_workflows;
+pub mod paper_portfolio;
+pub mod quant_backtest;
+pub mod screenshot_diagnosis;
+pub mod stock_analysis;
+pub mod stock_analysis_bridge;
+// 孤儿测试恢复挂载：P4 验证 20 个股票桥接工具（读/写闭环 + STOCK_WRITE_TOOLS 对账）
+#[cfg(test)]
+mod stock_analysis_bridge_tests;
+pub mod stock_analysis_setup;
+pub mod stock_pipeline;
+pub mod stock_workflow;
+pub mod strategy_pack;
+pub mod trade_intent;
+pub mod wf_des;
 // 工作流执行引擎命令:含审批(HITL)命令 list_pending_approvals/resume_approval/cancel_approval、
 // Loop 节点人工审查 resume_loop_after_review、节点执行白名单校验等。
 // 注:历史规划中曾设想独立 approval.rs,实际审批命令统一位于此模块。

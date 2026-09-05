@@ -30,10 +30,16 @@ pub mod knowledge;
 pub mod knowledge_graph;
 pub mod local_tool;
 pub mod loop_checkpoint;
+pub mod market_platform;
 pub mod mcp_server;
 pub mod memory;
 pub mod message;
 pub mod narrative;
+// [2026-09-03] `narrative_structure` repo 暂缓接线（勿删文件）：依赖 entities::narrative_structure
+// （单数，arcs/confluences/foreshadows 三字段旧 schema）。现行链是 narrative.rs +
+// entities::narrative_structures（复数，structure 单字段，同表 narrative_structures 已收敛）。
+// 同表双 entity 且列不一致，接线会复活旧 schema 与现行表冲突。属「被取代旧链」，待用户裁决。
+pub mod news_archive;
 pub mod opc_delivery;
 pub mod opc_demand;
 pub mod paper_overviews;
@@ -45,6 +51,7 @@ pub mod provider_key;
 pub mod reading_list_items;
 pub mod reading_lists;
 pub mod retrieval_hit;
+pub mod rl_experience;
 pub mod search_provider;
 pub mod session_state;
 pub mod settings;

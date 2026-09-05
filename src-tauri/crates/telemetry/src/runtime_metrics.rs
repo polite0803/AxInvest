@@ -9,8 +9,6 @@
 //! Export:
 //!   `RuntimeMetrics::export_json()`      — returns a `serde_json::Value` JSON snapshot
 
-#![allow(clippy::disallowed_types)]
-
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use prometheus::{

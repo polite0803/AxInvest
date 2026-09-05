@@ -32,6 +32,10 @@ pub mod health;
 pub mod images;
 pub mod jobs;
 pub mod mcp_proxy;
+// [2026-09-03 已接线] memory handler 依赖 GatewayAppState.memory_store 接缝：
+// harness 已定义 MemoryStore trait，主 crate wiring 层提供 DaoMemoryStore 实现
+// （src/gateway_memory_store.rs）并在 start_with_registry 注入。
+pub mod memory;
 pub mod models;
 pub mod platform_bridge;
 pub mod responses;

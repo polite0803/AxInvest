@@ -47,7 +47,7 @@ AI 对话、知识库、记忆、配置文件均存储在本地 SQLite 中。API
 | **🤖 模型基础设施**  | 8 家 Provider 适配器 · 多 Key 轮换 · 智能路由 · 健康监控 · 自动降级  |
 | **🧩 智能体推理**    | ReAct 引擎 · 层级规划 · 深度研究 · 思维树 · 反思 · 自验证 · 错误恢复 |
 | **👥 多 Agent 协作** | 主从协调 · 共享黑板 · 对抗辩论 · Swarm 集群 · CRDT                   |
-| **🛠️ 工具生态**       | MCP 协议 · 47+ 内置工具 · 沙箱隔离 · 自动注册                        |
+| **🛠️ 工具生态**      | MCP 协议 · 47+ 内置工具 · 沙箱隔离 · 自动注册                        |
 
 ### 能力层级二：学习与知识
 
@@ -63,7 +63,7 @@ AI 对话、知识库、记忆、配置文件均存储在本地 SQLite 中。API
 | --------------- | ------------------------------------------------------------------------ |
 | **🌐 API 网关** | Axum HTTP/WS 服务器 · OpenAI 兼容端点 · Key 管理 · 用量追踪 · Prometheus |
 | **💬 消息平台** | 钉钉/飞书/QQ/Slack/微信/WhatsApp/Telegram/Discord — 9 平台统一接入       |
-| **🛡️ 安全防护**  | Prompt-Guard L1-L4 · AES-256-GCM · SSRF 防护 · 熔断器 · 沙箱隔离         |
+| **🛡️ 安全防护** | Prompt-Guard L1-L4 · AES-256-GCM · SSRF 防护 · 熔断器 · 沙箱隔离         |
 
 ### 能力层级四：开发者体验
 
@@ -199,7 +199,7 @@ AxAgent (AI OS 基座)
 AGPL-3.0 — 开放源代码，欢迎贡献。
 
 <p align="center">
-<a href="https://github.com/polite0803/AxAgent">⭐ Star on GitHub — polite0803/AxAgent</a>
+  <a href="https://github.com/polite0803/AxAgent">⭐ Star on GitHub — polite0803/AxAgent</a>
 </p>
 
 ---

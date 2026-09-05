@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![allow(dead_code)]
+
+// [2026-09-03] 同上：本模块曾因缺 `pub mod` 声明而从未编译。
+// `LlmClient` trait + `MultiTurnDecomposer` 是 multi_turn.rs 数据模型的执行器。
+// 随 multi_turn.rs 一并待消费方落地。
+
 use super::multi_turn::DecompositionEvent;
 use super::package_parser::SkillPackageParser;
 use super::prompt_templates::PromptTemplates;

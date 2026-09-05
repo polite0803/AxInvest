@@ -16,6 +16,7 @@
 use crate::AppState;
 use crate::commands::error_code::common as common_err;
 use crate::commands::error_code::opc_setup as opc_setup_err;
+use axagent_agent_macro::agent_command;
 use axagent_harness::types::{
     DemandLeadDto, DemandPlatform, DiscoverLeadsSummary, SaveDemandLeadInput,
     SaveDemandPlatformInput,
@@ -32,6 +33,7 @@ const HIGH_VALUE_THRESHOLD: f64 = 60.0;
 const SUMMARY_LEADS_LIMIT: usize = 20;
 
 /// 列出需求平台配置（表空时自动填充内置默认平台）
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "列出市场平台配置")]
 #[tauri::command]
 pub async fn opc_list_platforms(state: State<'_, AppState>) -> Result<Vec<DemandPlatform>, String> {
     let db = state.harness.db();
@@ -40,6 +42,7 @@ pub async fn opc_list_platforms(state: State<'_, AppState>) -> Result<Vec<Demand
 }
 
 /// 保存（新增或更新）需求平台配置
+#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "保存平台配置")]
 #[tauri::command]
 pub async fn opc_save_platform(
     state: State<'_, AppState>,
@@ -49,12 +52,14 @@ pub async fn opc_save_platform(
 }
 
 /// 删除需求平台配置
+#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "删除平台配置")]
 #[tauri::command]
 pub async fn opc_delete_platform(state: State<'_, AppState>, id: String) -> Result<(), String> {
     axagent_dao::repo::opc_demand::delete_platform(state.harness.db(), &id).await.map_err(err)
 }
 
 /// 列出需求线索（按商业价值分降序，可按生命周期状态过滤）
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "列出需求线索")]
 #[tauri::command]
 pub async fn opc_list_leads(
     state: State<'_, AppState>,
@@ -107,6 +112,7 @@ pub async fn opc_save_scan_policy(
 /// 核心逻辑在 [`run_discovery_for_query`]，本命令只是 Tauri 薄壳 —— 订阅定时
 /// 扫描（`commands::opc_demand_subscription`）复用同一份逻辑，避免扫描器装配
 /// 与去重入库规则在两处漂移。
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "扫描并评估需求线索")]
 #[tauri::command]
 pub async fn opc_discover_and_evaluate_leads(
     state: State<'_, AppState>,
@@ -318,6 +324,7 @@ const MANUAL_PLATFORM: &str = "manual";
 /// 复用扫描管线的归一化/评分/去重逻辑：`RawLead → new_from_raw → evaluate_lead
 /// → upsert_lead_within_window`。手动填写的预算与 URL 覆盖自动提取结果；
 /// 去重命中（窗口内同指纹/同 URL）时返回既有生效行而非报错。
+#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "创建需求线索")]
 #[tauri::command]
 pub async fn opc_create_lead(
     state: State<'_, AppState>,

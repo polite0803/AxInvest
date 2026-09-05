@@ -94,7 +94,7 @@ impl LlmInferencePort for OpcLlmBridge {
         let mut messages = Vec::with_capacity(2);
         if let Some(sys) = system_prompt {
             messages.push(ChatMessage {
-                role: "system".to_string(),
+                role: crate::commands::constants::role::SYSTEM.to_string(),
                 content: ChatContent::Text(sys.to_string()),
                 tool_calls: None,
                 tool_call_id: None,
@@ -102,7 +102,7 @@ impl LlmInferencePort for OpcLlmBridge {
             });
         }
         messages.push(ChatMessage {
-            role: "user".to_string(),
+            role: crate::commands::constants::role::USER.to_string(),
             content: ChatContent::Text(prompt.to_string()),
             tool_calls: None,
             tool_call_id: None,

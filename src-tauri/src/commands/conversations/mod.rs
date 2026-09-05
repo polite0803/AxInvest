@@ -8,20 +8,26 @@ pub mod compress;
 pub mod streaming;
 
 use crate::AppState;
+use crate::app_state::SemanticCacheState;
 use crate::commands::agent::cancel_agent_internal;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code;
 use crate::commands::error_code::thinking as thinking_err;
 use crate::commands::error_code::title as title_err;
+use crate::commands::proactive::ProactiveService;
 use crate::commands::spawn_guard::catch_unwind_logged;
 use axagent_agent_macro::agent_command;
+use axagent_dao::repo::agent_session_repo::DaoAgentSessionRepository;
+use axagent_harness::AgentSessionRepository;
 use axagent_harness::types::*;
 use axagent_harness::url_utils::resolve_base_url_for_type;
 use axagent_providers::{ProviderRequestContext, extract_reasoning_from_text};
+use axagent_runtime_core::PromptCache;
 use base64::Engine;
 use dashmap::DashMap;
 use futures::FutureExt;
 use sea_orm::*;
+use std::collections::HashMap;
 #[cfg(test)]
 use std::fs;
 use std::sync::Arc;
@@ -3020,6 +3026,23 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
         skill_watcher_shutdown: std::sync::OnceLock::new(),
         vector_store: vector_store.clone(),
         indexing_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
+        astock_client: Arc::new(axagent_astock_data::AStockClient::new()),
+        stock_monitor: std::sync::OnceLock::new(),
+        stock_workflow_t0_semaphore: Arc::new(tokio::sync::Semaphore::new(5)),
+        stock_workflow_t0_per_stock_locks: Arc::new(tokio::sync::Mutex::new(
+            std::collections::HashMap::new(),
+        )),
+        quote_watcher: std::sync::OnceLock::new(),
+        trading_engine: Arc::new(tokio::sync::RwLock::new(
+            axagent_analysis_engine::trading::TradingEngine::new(
+                std::sync::Arc::new(db.clone()),
+                std::sync::Arc::new(axagent_astock_data::AStockClient::new()),
+            ),
+        )),
+        cross_stock_aggregator: std::sync::OnceLock::new(),
+        stock_adaptive_engine: Arc::new(
+            axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new(),
+        ),
         stream_cancel_flags: Arc::new(DashMap::new()),
         agent_permission_senders: Arc::new(tokio::sync::Mutex::new(
             std::collections::HashMap::new(),

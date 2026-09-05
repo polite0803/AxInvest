@@ -55,9 +55,10 @@ pub mod v135_demand_subscriptions;
 pub mod v136_opc_invoices;
 pub mod v137_governance_disable_platforms;
 pub mod v138_demand_lead_dedupe_fingerprint;
+pub mod v139_create_session_events;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 138;
+pub const CURRENT_VERSION: i32 = 139;
 
 /// P2-10: Schema 版本追踪表名。
 ///
@@ -284,6 +285,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 138,
         description: "v138_demand_lead_dedupe_fingerprint: 需求线索去重键从 (platform, source_url) 迁移为内容指纹 content_fingerprint（标题+描述归一化哈希，16 位 hex）",
         up: |db| Box::pin(v138_demand_lead_dedupe_fingerprint::up(db)),
+    },
+    Migration {
+        version: 139,
+        description: "v139_create_session_events: 创建 session_events 表（跨进程 Resume 事件流）—— session_id + seq 唯一索引 + session_id+event_type 查询索引，支撑 agent_resume_from_events 从事件流重放 ThoughtChain + 识别 Interrupted 点",
+        up: |db| Box::pin(v139_create_session_events::up(db)),
     },
 ];
 

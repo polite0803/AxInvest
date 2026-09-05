@@ -144,7 +144,18 @@
     "thoughtChain": "思考チェーンの可視化",
     "errorRecovery": "エラー自動復旧",
     "screenPerception": "画面認識（デスクトップ操作ツール）",
-    "tot": "思考の木（ToT、高コスト）"
+    "tot": "思考の木（ToT、高コスト）",
+    "sandboxMode": "OS サンドボックスモード",
+    "sandboxModeHint": "シェルコマンドを制限付きサブプロセスで実行します。読み取り専用=書き込み禁止+ネットワーク遮断。ワークスペース書き込み可=ワークスペースのみ書き込み可。フルアクセス=サンドボックス無効。",
+    "sandboxReadOnly": "読み取り専用",
+    "sandboxWorkspaceWrite": "ワークスペース書き込み可",
+    "sandboxDangerFullAccess": "フルアクセス",
+    "approvalPolicy": "承認ポリシー",
+    "approvalPolicyHint": "機密性の高いコマンド実行前にユーザーの承認を求めるタイミング。Bash など実行系ツールに適用され、危険なコマンドはどのポリシーでも拒否されます。",
+    "approvalUntrusted": "最も厳格：すべてのコマンドで事前確認",
+    "approvalOnFailure": "サンドボックス内で失敗した後、サンドボックス外での再試行前に確認",
+    "approvalOnRequest": "機密操作の実行前に確認（デフォルト）",
+    "approvalNever": "確認せず直接実行"
   },
   "agent": {
     "answerSubmitted": "回答が送信されました",
@@ -2601,6 +2612,8 @@
     "GATEWAY_SSL_NO_CERT": "SSL証明書が不足しています",
     "GATEWAY_SSL_NO_KEY": "SSL鍵が不足しています",
     "GATEWAY_TEMPLATE_NOT_FOUND": "ゲートウェイテンプレートが見つかりません",
+    "MCP_AGENT_SESSION_NOT_FOUND": "Agent セッションが見つかりません：{{sessionId}}",
+    "MCP_AGENT_SESSION_CANCEL_FAILED": "Agent セッションのキャンセルに失敗しました：{{error}}",
     "MCP_CONNECT_FAILED": "MCP接続に失敗しました：{{error}}",
     "MCP_SERVER_CONFIG_FAILED": "MCPサーバーの設定に失敗しました",
     "MCP_SERVER_CREATE_FAILED": "MCPサーバーの作成に失敗しました",
@@ -2748,6 +2761,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "ワークフロー計画が見つかりません",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "ワークフローリフレクションの適用に失敗しました",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "ワークフローリフレクションの進化に失敗しました",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "ワークフロー機能シームが未登録です（リフレクション/進化/オプティマイザーが利用できません）",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "無効なワークフローリフレクション記録です",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "ワークフローリフレクションに失敗しました",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "ワークフローリフレクションの提案に失敗しました",
@@ -2884,8 +2898,7 @@
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
     "proxyTestFailed": "代理测试失败",
-    "message": "错误",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "ワークフロー機能シームが未登録です（リフレクション/進化/オプティマイザーが利用できません）"
+    "message": "错误"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -7766,6 +7779,8 @@
       "fileUploaded": "ファイルがアップロードされました",
       "ingestError": "インポート失敗",
       "ingestSuccess": "インポート成功",
+      "indexingProgress": "インデックス中 {{indexed}}/{{total}}",
+      "stageIngest": "コンテンツを取り込みノートを生成中…",
       "uploadError": "アップロード失敗",
       "importError": "インポートに失敗しました",
       "previewError": "プレビューに失敗しました",
@@ -7779,9 +7794,7 @@
       "folderImportSuccess": "导入成功",
       "folderPathRequired": "请选择文件夹",
       "importedCount": "已导入 {{count}}",
-      "previewFound": "发现 {{count}} 个文档",
-      "indexingProgress": "インデックス中 {{indexed}}/{{total}}",
-      "stageIngest": "コンテンツを取り込みノートを生成中…"
+      "previewFound": "发现 {{count}} 个文档"
     },
     "llmNote": "LLM ノート",
     "localGraph": "ローカルグラフ",
@@ -13421,9 +13434,6 @@
       "formPlatformType": "Connector Type",
       "formPlatformTypePlaceholder": "manual / browser",
       "formBaseUrl": "Base URL",
-      "formApiToken": "API トークン",
-      "formApiTokenPlaceholder": "例: ghp_xxxxxxxxxxxx",
-      "formApiTokenTip": "プラットフォーム設定に保存され、スキャナーが優先使用します。空にすると保存済みトークンを削除し、未設定時は環境変数にフォールバックします",
       "formEnabled": "Enabled",
       "formConfig": "Config (JSON)",
       "colPainScore": "Pain Score",
@@ -13446,12 +13456,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "Unknown",
         "operations": "Operations",
         "enterprise_service": "Enterprise service",
-        "outsourcing": "Outsourcing",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "Outsourcing"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Scheduled Task",
@@ -13483,6 +13493,9 @@
       },
       "formCronNamePlaceholder": "e.g.: Daily Demand Scan",
       "formCronPromptPlaceholder": "Describe the scheduled task objective...",
+      "formApiToken": "API トークン",
+      "formApiTokenPlaceholder": "例: ghp_xxxxxxxxxxxx",
+      "formApiTokenTip": "プラットフォーム設定に保存され、スキャナーが優先使用します。空にすると保存済みトークンを削除し、未設定時は環境変数にフォールバックします",
       "pageTitle": "Demand Discovery",
       "minScore": "Min value score",
       "scanning": "Scanning…",
@@ -17398,6 +17411,29 @@
   "store": {
     "read": "读取",
     "write": "写入"
+  },
+  "awareness": {
+    "title": "システム覚知",
+    "noData": "データなし",
+    "arousal": "覚醒度",
+    "cognitiveLoad": "認知負荷",
+    "selfEfficacy": "自己効力感",
+    "dominantFocus": "支配的な焦点",
+    "calibration": "信頼度校正",
+    "bias": "平均バイアス",
+    "overconfident": "過信",
+    "calibrated": "校正良好",
+    "underconfident": "過小信頼",
+    "lastBroadcast": "直近のブロードキャスト",
+    "loadFailed": "読み込み失敗"
+  },
+  "suggestion": {
+    "accept": "受け入れる",
+    "causalInsight": "因果インサイト",
+    "dismiss": "却下",
+    "noSuggestions": "提案はありません",
+    "snooze": "後で",
+    "title": "プロアクティブ提案"
   },
   "ui": {
     "getLocale": "获取语言",

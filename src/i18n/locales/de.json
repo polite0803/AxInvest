@@ -144,7 +144,18 @@
     "thoughtChain": "Gedankenkette anzeigen",
     "errorRecovery": "Automatische Fehlerwiederherstellung",
     "screenPerception": "Bildschirmwahrnehmung (Desktop-Steuerung)",
-    "tot": "Tree of Thoughts (ToT, teuer)"
+    "tot": "Tree of Thoughts (ToT, teuer)",
+    "sandboxMode": "OS-Sandbox-Modus",
+    "sandboxModeHint": "Shell-Befehle werden in einem eingeschränkten Unterprozess ausgeführt. Nur lesen = keine Schreibvorgänge + kein Netz; Arbeitsbereich schreiben = nur im Arbeitsbereich; Voller Zugriff = Sandbox deaktiviert.",
+    "sandboxReadOnly": "Nur lesen",
+    "sandboxWorkspaceWrite": "Arbeitsbereich schreiben",
+    "sandboxDangerFullAccess": "Voller Zugriff",
+    "approvalPolicy": "Genehmigungsrichtlinie",
+    "approvalPolicyHint": "Wann vor der Ausführung sensibler Befehle die Genehmigung des Benutzers eingeholt wird. Gilt für Ausführungswerkzeuge wie Bash; gefährliche Befehle werden unter jeder Richtlinie abgelehnt.",
+    "approvalUntrusted": "Am strengsten: vor jedem Befehl fragen",
+    "approvalOnFailure": "Nach Sandbox-Fehlschlag fragen, bevor außerhalb der Sandbox wiederholt wird",
+    "approvalOnRequest": "Vor sensiblen Operationen fragen (Standard)",
+    "approvalNever": "Nie fragen, direkt ausführen"
   },
   "agent": {
     "answerSubmitted": "Antwort eingereicht",
@@ -2601,6 +2612,8 @@
     "GATEWAY_SSL_NO_CERT": "SSL-Zertifikat fehlt",
     "GATEWAY_SSL_NO_KEY": "SSL-Schlüssel fehlt",
     "GATEWAY_TEMPLATE_NOT_FOUND": "Gateway-Vorlage nicht gefunden",
+    "MCP_AGENT_SESSION_NOT_FOUND": "Agent-Sitzung nicht gefunden: {{sessionId}}",
+    "MCP_AGENT_SESSION_CANCEL_FAILED": "Agent-Sitzung konnte nicht abgebrochen werden: {{error}}",
     "MCP_CONNECT_FAILED": "MCP-Verbindung fehlgeschlagen: {{error}}",
     "MCP_SERVER_CONFIG_FAILED": "Konfiguration des MCP-Servers fehlgeschlagen",
     "MCP_SERVER_CREATE_FAILED": "Erstellen des MCP-Servers fehlgeschlagen",
@@ -2748,6 +2761,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "Workflow-Plan nicht gefunden",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "Anwenden der Workflow-Reflexion fehlgeschlagen",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "Workflow-Reflexionsevolution fehlgeschlagen",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Workflow-Fähigkeitsschnittstelle nicht registriert (Reflexion/Evolution/Optimierer nicht verfügbar)",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "Ungültiger Workflow-Reflexionseintrag",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "Workflow-Reflexion fehlgeschlagen",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "Workflow-Reflexionsvorschlag fehlgeschlagen",
@@ -2884,8 +2898,7 @@
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
     "proxyTestFailed": "代理测试失败",
-    "message": "错误",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Workflow-Fähigkeitsschnittstelle nicht registriert (Reflexion/Evolution/Optimierer nicht verfügbar)"
+    "message": "错误"
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -7766,6 +7779,8 @@
       "fileUploaded": "Datei hochgeladen",
       "ingestError": "Import fehlgeschlagen",
       "ingestSuccess": "Erfolgreich importiert",
+      "indexingProgress": "Indizierung {{indexed}}/{{total}}",
+      "stageIngest": "Inhalte werden aufgenommen und Notizen erstellt…",
       "uploadError": "Hochladen fehlgeschlagen",
       "importError": "Import fehlgeschlagen",
       "previewError": "Vorschau fehlgeschlagen",
@@ -7779,9 +7794,7 @@
       "folderImportSuccess": "导入成功",
       "folderPathRequired": "请选择文件夹",
       "importedCount": "已导入 {{count}}",
-      "previewFound": "发现 {{count}} 个文档",
-      "indexingProgress": "Indizierung {{indexed}}/{{total}}",
-      "stageIngest": "Inhalte werden aufgenommen und Notizen erstellt…"
+      "previewFound": "发现 {{count}} 个文档"
     },
     "llmNote": "LLM-Notiz",
     "localGraph": "Lokaler Graph",
@@ -13421,9 +13434,6 @@
       "formPlatformType": "Connector Type",
       "formPlatformTypePlaceholder": "manual / browser",
       "formBaseUrl": "Base URL",
-      "formApiToken": "API-Token",
-      "formApiTokenPlaceholder": "z. B. ghp_xxxxxxxxxxxx",
-      "formApiTokenTip": "Wird in der Plattformkonfiguration gespeichert und vom Scanner bevorzugt verwendet; leer lassen, um den gespeicherten Token zu löschen, sonst Fallback auf Umgebungsvariablen",
       "formEnabled": "Enabled",
       "formConfig": "Config (JSON)",
       "colPainScore": "Pain Score",
@@ -13446,12 +13456,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "Unknown",
         "operations": "Operations",
         "enterprise_service": "Enterprise service",
-        "outsourcing": "Outsourcing",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "Outsourcing"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Scheduled Task",
@@ -13483,6 +13493,9 @@
       },
       "formCronNamePlaceholder": "e.g.: Daily Demand Scan",
       "formCronPromptPlaceholder": "Describe the scheduled task objective...",
+      "formApiToken": "API-Token",
+      "formApiTokenPlaceholder": "z. B. ghp_xxxxxxxxxxxx",
+      "formApiTokenTip": "Wird in der Plattformkonfiguration gespeichert und vom Scanner bevorzugt verwendet; leer lassen, um den gespeicherten Token zu löschen, sonst Fallback auf Umgebungsvariablen",
       "pageTitle": "Demand Discovery",
       "minScore": "Min value score",
       "scanning": "Scanning…",
@@ -17398,6 +17411,29 @@
   "store": {
     "read": "读取",
     "write": "写入"
+  },
+  "awareness": {
+    "title": "Systembewusstsein",
+    "noData": "Keine Daten",
+    "arousal": "Aktivierung",
+    "cognitiveLoad": "Kognitive Last",
+    "selfEfficacy": "Selbstwirksamkeit",
+    "dominantFocus": "Dominanter Fokus",
+    "calibration": "Konfidenz-Kalibrierung",
+    "bias": "Durchschn. Verzerrung",
+    "overconfident": "Selbstüberschätzung",
+    "calibrated": "Kalibriert",
+    "underconfident": "Selbstunterschätzung",
+    "lastBroadcast": "Letzte Übertragung",
+    "loadFailed": "Laden fehlgeschlagen"
+  },
+  "suggestion": {
+    "accept": "Akzeptieren",
+    "causalInsight": "Kausaler Einblick",
+    "dismiss": "Verwerfen",
+    "noSuggestions": "Keine Vorschläge",
+    "snooze": "Später",
+    "title": "Proaktive Vorschläge"
   },
   "ui": {
     "getLocale": "获取语言",

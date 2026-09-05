@@ -144,7 +144,18 @@
     "thoughtChain": "Thought chain visualization (<think> blocks)",
     "errorRecovery": "Automatic error recovery",
     "screenPerception": "Screen perception (desktop control tools)",
-    "tot": "Tree of Thoughts (ToT, expensive)"
+    "tot": "Tree of Thoughts (ToT, expensive)",
+    "sandboxMode": "OS Sandbox Mode",
+    "sandboxModeHint": "Run shell commands in a restricted subprocess. Read-only = no writes + no network; Workspace write = writes limited to the workspace; Full access = sandbox disabled.",
+    "sandboxReadOnly": "Read-only",
+    "sandboxWorkspaceWrite": "Workspace write",
+    "sandboxDangerFullAccess": "Full access",
+    "approvalPolicy": "Approval policy",
+    "approvalPolicyHint": "When to ask for user approval before running sensitive commands. Applies to execution tools like Bash; dangerous commands are denied under every policy.",
+    "approvalUntrusted": "Strictest: ask before every command",
+    "approvalOnFailure": "Ask after sandboxed execution fails, before retrying outside sandbox",
+    "approvalOnRequest": "Ask before sensitive operations (default)",
+    "approvalNever": "Never ask, run directly"
   },
   "agent": {
     "answerSubmitted": "Answer submitted",
@@ -2601,6 +2612,8 @@
     "GATEWAY_SSL_NO_CERT": "SSL certificate missing",
     "GATEWAY_SSL_NO_KEY": "SSL key missing",
     "GATEWAY_TEMPLATE_NOT_FOUND": "Gateway template not found",
+    "MCP_AGENT_SESSION_NOT_FOUND": "Agent session not found: {{sessionId}}",
+    "MCP_AGENT_SESSION_CANCEL_FAILED": "Failed to cancel agent session: {{error}}",
     "MCP_CONNECT_FAILED": "MCP connection failed: {{error}}",
     "MCP_SERVER_CONFIG_FAILED": "MCP server configuration failed",
     "MCP_SERVER_CREATE_FAILED": "Failed to create MCP server",
@@ -2748,6 +2761,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "Workflow plan not found",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "Failed to apply workflow reflection",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "Workflow reflection evolution failed",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Workflow capability seam not registered (reflection/evolution/optimizer unavailable)",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "Invalid workflow reflection record",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "Workflow reflection failed",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "Workflow reflection suggestion failed",
@@ -2884,8 +2898,7 @@
     "proxyTestFailed": "Proxy test failed",
     "message": "Error",
     "STOCK_SETUP_INTERNAL": "Stock setup internal error",
-    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "Workflow capability seam not registered (reflection/evolution/optimizer unavailable)"
+    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error"
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -7767,6 +7780,8 @@
       "importError": "Import failed",
       "ingestError": "Import failed",
       "ingestSuccess": "Imported successfully",
+      "indexingProgress": "Indexing {{indexed}}/{{total}}",
+      "stageIngest": "Ingesting content and generating notes…",
       "previewError": "Preview failed",
       "uploadError": "Upload failed",
       "failedCount": "{{count}} failed",
@@ -7779,9 +7794,7 @@
       "folderImportSuccess": "Import succeeded",
       "folderPathRequired": "Please select a folder",
       "importedCount": "{{count}} imported",
-      "previewFound": "{{count}} documents found",
-      "indexingProgress": "Indexing {{indexed}}/{{total}}",
-      "stageIngest": "Ingesting content and generating notes…"
+      "previewFound": "{{count}} documents found"
     },
     "llmNote": "LLM Note",
     "localGraph": "Local Graph",
@@ -13296,9 +13309,6 @@
       "formPlatformType": "Platform Type",
       "formPlatformTypePlaceholder": "manual / browser",
       "formBaseUrl": "Base URL",
-      "formApiToken": "API Token",
-      "formApiTokenPlaceholder": "e.g. ghp_xxxxxxxxxxxx",
-      "formApiTokenTip": "Stored in the platform config and preferred by the scanner; leave empty to clear the saved token. Falls back to environment variables.",
       "formEnabled": "Enabled",
       "formConfig": "Config (JSON)",
       "formTitle": "Demand Title",
@@ -13433,12 +13443,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "Unknown",
         "operations": "Operations",
         "enterprise_service": "Enterprise service",
-        "outsourcing": "Outsourcing",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "Outsourcing"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Task",
@@ -13477,6 +13487,9 @@
       "colCronToolsetsPlaceholder": "opc_scanner, opc_evaluator",
       "configDefaultWorkflowName": "Demand Discovery Workflow",
       "configDefaultWorkflowDesc": "Demand Discovery & Delivery Workflow Config",
+      "formApiToken": "API Token",
+      "formApiTokenPlaceholder": "e.g. ghp_xxxxxxxxxxxx",
+      "formApiTokenTip": "Stored in the platform config and preferred by the scanner; leave empty to clear the saved token. Falls back to environment variables.",
       "pageTitle": "Demand Discovery",
       "minScore": "Min value score",
       "scanning": "Scanning…",
@@ -17384,6 +17397,29 @@
     "subtitle": "Global market linkage watch",
     "title": "Cross-Market Quotes",
     "totalMv": "Total Market Cap"
+  },
+  "awareness": {
+    "title": "System Awareness",
+    "noData": "No data yet",
+    "arousal": "Arousal",
+    "cognitiveLoad": "Cognitive Load",
+    "selfEfficacy": "Self-Efficacy",
+    "dominantFocus": "Dominant Focus",
+    "calibration": "Confidence Calibration",
+    "bias": "Avg Bias",
+    "overconfident": "Overconfident",
+    "calibrated": "Calibrated",
+    "underconfident": "Underconfident",
+    "lastBroadcast": "Last Broadcast",
+    "loadFailed": "Load failed"
+  },
+  "suggestion": {
+    "accept": "Accept",
+    "causalInsight": "Causal Insight",
+    "dismiss": "Dismiss",
+    "noSuggestions": "No suggestions",
+    "snooze": "Later",
+    "title": "Proactive Suggestions"
   },
   "ui": {
     "getLocale": "Get Locale",

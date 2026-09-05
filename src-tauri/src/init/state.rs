@@ -534,6 +534,31 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         } else {
             None
         };
+        // ── OS 级沙箱策略（PLAN-codex-parity P0-1c）──
+        // 从 Settings 的 sandbox_mode 构造全局策略：此后所有 ToolRegistry（含
+        // 每次请求临时 new() 的实例）构建 ToolContext 时自动回退读取。
+        // 默认 "danger-full-access" → 受限子进程不启用，行为与既往一致。
+        let sandbox_workspace = app_settings
+            .default_workspace_dir
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+        axagent_tools::registry::set_global_sandbox_policy(
+            axagent_harness::SandboxPolicy::from_mode_str(
+                &app_settings.sandbox_mode,
+                sandbox_workspace,
+            ),
+        );
+        axagent_tools::registry::set_global_approval_policy(
+            axagent_harness::ApprovalPolicy::from_policy_str(&app_settings.approval_policy),
+        );
+        tracing::info!(
+            "[startup] 沙箱/审批策略已注入: sandbox_mode={} approval_policy={}",
+            app_settings.sandbox_mode,
+            app_settings.approval_policy
+        );
         // ── 阶段二 T2.3：注册自指工具（system_evolution_*）──
         // 自指工具走 system_* 系统能力回调通道：不暴露给 LLM（注册后默认禁用，
         // 仅系统内部按名回调执行），动态部署/卸载等高权限操作不被 Agent 直接触发。
@@ -708,6 +733,11 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // (解决 experience_pipeline.rs:243 注释的 "Reflector::reflect() 目前零调用" 问题)
     agent_session_manager.set_reflector(reflector.clone()).await;
 
+    // P0-3: 注入 session_events 持久化 sink
+    let session_event_sink: Arc<dyn axagent_harness::SessionEventSink> =
+        Arc::new(DbSessionEventSink::new(sea_db.clone()));
+    agent_session_manager.set_session_event_sink(session_event_sink).await;
+
     // 缺陷1修复:从 DB 读取前端 FeatureFlag,注入 SessionManager,
     // 使 finalOutputReflection / selfImprovingLoop 开关真正影响后端复盘行为:
     // - finalOutputReflection=true:turn 完成后同步等待 Reflector 评估
@@ -715,6 +745,21 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     let self_improvement_flags =
         crate::commands::app_config::read_self_improvement_flags(&sea_db).await;
     agent_session_manager.set_self_improvement_flags(self_improvement_flags).await;
+
+    // P2 集成: McpAgentServer wiring。
+    // - Agent trait 由 HarnessAgentAdapter 提供 (agent crate)
+    // - AgentSessionBroker trait 由 SessionManager 提供 (Arc cast 到 dyn)
+    // McpAgentServer 构造在 create_app_state 同步阶段完成，不阻塞首帧渲染。
+    let mcp_agent_server: Arc<axagent_mcp::McpAgentServer> = Arc::new(
+        axagent_mcp::McpAgentServer::new(
+            Some(Arc::new(
+                axagent_agent::harness_adapter::HarnessAgentAdapter::new("default")
+                    .with_runtime(Arc::clone(&agent_session_manager)),
+            ) as Arc<dyn axagent_harness::Agent>),
+            Some(Arc::clone(&agent_session_manager) as Arc<dyn axagent_harness::AgentSessionBroker>),
+        ),
+    );
+
     work_engine.set_event_bus(Arc::clone(&event_bus));
     let skill_decomposer: Arc<tokio::sync::RwLock<axagent_trajectory::SkillDecomposer>> =
         Arc::new(tokio::sync::RwLock::new(axagent_trajectory::SkillDecomposer::new()));
@@ -1262,6 +1307,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         running_agents,
         steer_queue,
         reflector,
+        mcp_agent_server,
         shared_memory,
         sub_agent_registry,
         memory_service: memory_service.clone(),
@@ -2341,4 +2387,74 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
         elapsed = %t0.elapsed().as_millis(),
         "[startup] 后台延迟初始化全部完成"
     );
+}
+
+// ── P0-3: DbSessionEventSink ──────────────────────────────────────────────
+
+use async_trait::async_trait;
+use sea_orm::ConnectionTrait;
+
+struct DbSessionEventSink {
+    db: sea_orm::DatabaseConnection,
+}
+
+impl DbSessionEventSink {
+    fn new(db: sea_orm::DatabaseConnection) -> Self {
+        Self { db }
+    }
+
+    /// 查询某 session 当前最大 seq，返回 +1。
+    async fn next_seq(&self, session_id: &str) -> i64 {
+        let row = self.db
+            .query_one_raw(sea_orm::Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                format!(
+                    "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq FROM session_events WHERE session_id = '{session_id}'"
+                ),
+            ))
+            .await;
+        match row.ok().flatten() {
+            Some(r) => r.try_get::<i64>("", "next_seq").unwrap_or(1),
+            None => 1,
+        }
+    }
+}
+
+#[async_trait]
+impl axagent_harness::SessionEventSink for DbSessionEventSink {
+    async fn emit(
+        &self,
+        session_id: &str,
+        event_type: axagent_harness::SessionEventType,
+        payload: Option<serde_json::Value>,
+    ) {
+        let seq = self.next_seq(session_id).await;
+        let payload_str = payload
+            .as_ref()
+            .and_then(|v| serde_json::to_string(v).ok())
+            .unwrap_or_else(|| "NULL".to_string());
+        let now = chrono::Utc::now();
+        let ts = now.to_rfc3339();
+
+        let sql = format!(
+            "INSERT INTO session_events (session_id, seq, event_type, payload, created_at) \
+             VALUES ('{session_id}', {seq}, '{evt_type}', {payload_str}, '{ts}')",
+            evt_type = event_type.as_str(),
+        );
+
+        match self.db.execute_unprepared(&sql).await {
+            Ok(_) => {},
+            Err(e) => {
+                tracing::warn!(
+                    "[session_events] emit failed session_id={session_id} type={:?}: {e}",
+                    event_type
+                );
+            },
+        }
+    }
+
+    async fn clear(&self, session_id: &str) {
+        let sql = format!("DELETE FROM session_events WHERE session_id = '{session_id}'");
+        let _ = self.db.execute_unprepared(&sql).await;
+    }
 }

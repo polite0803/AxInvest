@@ -144,7 +144,18 @@
     "thoughtChain": "思維鏈視覺化（<think> 區塊）",
     "errorRecovery": "錯誤自動恢復",
     "screenPerception": "螢幕感知（桌面控制工具）",
-    "tot": "思維樹多路徑推理（ToT，開銷大）"
+    "tot": "思維樹多路徑推理（ToT，開銷大）",
+    "sandboxMode": "OS 沙箱模式",
+    "sandboxModeHint": "以受限子程序執行 Shell 命令。唯讀=禁寫+斷網；工作區可寫=僅工作區可寫；完全存取=不啟用沙箱。",
+    "sandboxReadOnly": "唯讀",
+    "sandboxWorkspaceWrite": "工作區可寫",
+    "sandboxDangerFullAccess": "完全存取",
+    "approvalPolicy": "審批策略",
+    "approvalPolicyHint": "敏感命令執行前詢問使用者的時機。僅在 Bash 等執行類工具生效，危險操作任何策略下都會拒絕。",
+    "approvalUntrusted": "最嚴格：所有命令預設先詢問",
+    "approvalOnFailure": "沙箱內執行失敗後再詢問是否沙箱外重試",
+    "approvalOnRequest": "敏感操作執行前詢問（預設）",
+    "approvalNever": "從不詢問，直接執行"
   },
   "agent": {
     "answerSubmitted": "答案已提交",
@@ -2601,6 +2612,8 @@
     "GATEWAY_SSL_NO_CERT": "缺少 SSL 憑證",
     "GATEWAY_SSL_NO_KEY": "缺少 SSL 金鑰",
     "GATEWAY_TEMPLATE_NOT_FOUND": "閘道模板未找到",
+    "MCP_AGENT_SESSION_NOT_FOUND": "Agent 會話不存在：{{sessionId}}",
+    "MCP_AGENT_SESSION_CANCEL_FAILED": "Agent 會話取消失敗：{{error}}",
     "MCP_CONNECT_FAILED": "MCP 連線失敗：{{error}}",
     "MCP_SERVER_CONFIG_FAILED": "MCP 伺服器設定失敗",
     "MCP_SERVER_CREATE_FAILED": "建立 MCP 伺服器失敗",
@@ -2748,6 +2761,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "工作流程計畫未找到",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "套用工作流程反思失敗",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "工作流程反思演化失敗",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接縫未註冊（反思/進化/優化服務不可用）",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "無效的工作流程反思記錄",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "工作流程反思失敗",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "工作流程反思建議失敗",
@@ -2884,8 +2898,7 @@
     "proxyTestFailed": "代理測試失敗",
     "message": "錯誤",
     "STOCK_SETUP_INTERNAL": "Stock setup internal error",
-    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接縫未註冊（反思/進化/優化服務不可用）"
+    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -7764,6 +7777,8 @@
       "fileUploaded": "文件已上傳",
       "ingestError": "導入失敗",
       "ingestSuccess": "導入成功",
+      "indexingProgress": "索引中 {{indexed}}/{{total}}",
+      "stageIngest": "正在擷取內容並產生筆記…",
       "uploadError": "上傳失敗",
       "importError": "導入失敗",
       "previewError": "預覽失敗",
@@ -7777,9 +7792,7 @@
       "folderImportSuccess": "导入成功",
       "folderPathRequired": "请选择文件夹",
       "importedCount": "已导入 {{count}}",
-      "previewFound": "发现 {{count}} 个文档",
-      "indexingProgress": "索引中 {{indexed}}/{{total}}",
-      "stageIngest": "正在擷取內容並產生筆記…"
+      "previewFound": "发现 {{count}} 个文档"
     },
     "llmNote": "LLM 筆記",
     "localGraph": "本地圖譜",
@@ -13421,9 +13434,6 @@
       "formPlatformType": "Connector Type",
       "formPlatformTypePlaceholder": "manual / browser",
       "formBaseUrl": "Base URL",
-      "formApiToken": "API Token",
-      "formApiTokenPlaceholder": "如 ghp_xxxxxxxxxxxx",
-      "formApiTokenTip": "保存在平台設定中，掃描器優先使用；留空清除已儲存的 Token，未設定時回退環境變數",
       "formEnabled": "Enabled",
       "formConfig": "Config (JSON)",
       "colPainScore": "Pain Score",
@@ -13446,12 +13456,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "未知",
         "operations": "營運",
         "enterprise_service": "企業服務",
-        "outsourcing": "外包",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "外包"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Scheduled Task",
@@ -13483,6 +13493,9 @@
       },
       "formCronNamePlaceholder": "e.g.: Daily Demand Scan",
       "formCronPromptPlaceholder": "Describe the scheduled task objective...",
+      "formApiToken": "API Token",
+      "formApiTokenPlaceholder": "如 ghp_xxxxxxxxxxxx",
+      "formApiTokenTip": "保存在平台設定中，掃描器優先使用；留空清除已儲存的 Token，未設定時回退環境變數",
       "pageTitle": "需求發現",
       "minScore": "最低商業價值分",
       "scanning": "掃描中…",
@@ -17398,6 +17411,29 @@
   "store": {
     "read": "读取",
     "write": "写入"
+  },
+  "awareness": {
+    "title": "系統覺知",
+    "noData": "暫無資料",
+    "arousal": "激活度",
+    "cognitiveLoad": "認知負荷",
+    "selfEfficacy": "效能感",
+    "dominantFocus": "主導關注點",
+    "calibration": "信心校準",
+    "bias": "平均偏差",
+    "overconfident": "過度自信",
+    "calibrated": "校準良好",
+    "underconfident": "信心不足",
+    "lastBroadcast": "最近廣播",
+    "loadFailed": "載入失敗"
+  },
+  "suggestion": {
+    "accept": "接受",
+    "causalInsight": "因果洞察",
+    "dismiss": "忽略",
+    "noSuggestions": "暫無建議",
+    "snooze": "稍後",
+    "title": "主動建議"
   },
   "ui": {
     "getLocale": "获取语言",

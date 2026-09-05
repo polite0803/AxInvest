@@ -144,7 +144,18 @@
     "thoughtChain": "思维链可视化（<think> 块）",
     "errorRecovery": "错误自动恢复",
     "screenPerception": "屏幕感知（桌面控制工具）",
-    "tot": "思维树多路径推理（ToT，开销大）"
+    "tot": "思维树多路径推理（ToT，开销大）",
+    "sandboxMode": "OS 沙箱模式",
+    "sandboxModeHint": "以受限子进程执行 Shell 命令。只读=禁写+断网；工作区可写=仅工作区可写；完全访问=不启用沙箱。",
+    "sandboxReadOnly": "只读",
+    "sandboxWorkspaceWrite": "工作区可写",
+    "sandboxDangerFullAccess": "完全访问",
+    "approvalPolicy": "审批策略",
+    "approvalPolicyHint": "敏感命令执行前询问用户的时机。仅在 Bash 等执行类工具生效，危险操作任何策略下都会拒绝。",
+    "approvalUntrusted": "最严格：所有命令默认先询问",
+    "approvalOnFailure": "沙箱内执行失败后再询问是否沙箱外重试",
+    "approvalOnRequest": "敏感操作执行前询问（默认）",
+    "approvalNever": "从不询问，直接执行"
   },
   "agent": {
     "answerSubmitted": "回答已提交",
@@ -2601,6 +2612,8 @@
     "GATEWAY_SSL_NO_CERT": "缺少 SSL 证书",
     "GATEWAY_SSL_NO_KEY": "缺少 SSL 密钥",
     "GATEWAY_TEMPLATE_NOT_FOUND": "网关模板未找到",
+    "MCP_AGENT_SESSION_NOT_FOUND": "Agent 会话不存在：{{sessionId}}",
+    "MCP_AGENT_SESSION_CANCEL_FAILED": "Agent 会话取消失败：{{error}}",
     "MCP_CONNECT_FAILED": "MCP 连接失败：{{error}}",
     "MCP_SERVER_CONFIG_FAILED": "MCP 服务器配置失败",
     "MCP_SERVER_CREATE_FAILED": "创建 MCP 服务器失败",
@@ -2748,6 +2761,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "工作流计划未找到",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "应用工作流反思失败",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "工作流反思进化失败",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接缝未注册（反思/进化/优化服务不可用）",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "无效的工作流反思记录",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "工作流反思失败",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "工作流反思建议失败",
@@ -2884,8 +2898,7 @@
     "proxyTestFailed": "代理测试失败",
     "message": "错误",
     "STOCK_WORKFLOW_INTERNAL": "股票分析工作流内部错误",
-    "STOCK_SETUP_INTERNAL": "股票模块初始化错误",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接缝未注册（反思/进化/优化服务不可用）"
+    "STOCK_SETUP_INTERNAL": "股票模块初始化错误"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -7767,6 +7780,8 @@
       "importError": "导入失败",
       "ingestError": "导入失败",
       "ingestSuccess": "导入成功",
+      "indexingProgress": "索引中 {{indexed}}/{{total}}",
+      "stageIngest": "正在摄取内容并生成笔记…",
       "previewError": "预览失败",
       "uploadError": "上传失败",
       "failedCount": "失败 {{count}}",
@@ -7779,9 +7794,7 @@
       "folderImportSuccess": "导入成功",
       "folderPathRequired": "请选择文件夹",
       "importedCount": "已导入 {{count}}",
-      "previewFound": "发现 {{count}} 个文档",
-      "indexingProgress": "索引中 {{indexed}}/{{total}}",
-      "stageIngest": "正在摄取内容并生成笔记…"
+      "previewFound": "发现 {{count}} 个文档"
     },
     "llmNote": "LLM 笔记",
     "localGraph": "本地图谱",
@@ -13279,9 +13292,6 @@
       "formPlatformType": "连接器类型",
       "formPlatformTypePlaceholder": "manual / browser",
       "formBaseUrl": "基础地址",
-      "formApiToken": "API Token",
-      "formApiTokenPlaceholder": "如 ghp_xxxxxxxxxxxx",
-      "formApiTokenTip": "保存在平台配置中，扫描器优先使用；留空清除已保存的 Token，未配置时回退环境变量",
       "formEnabled": "启用",
       "formConfig": "配置 (JSON)",
       "colTitle": "标题",
@@ -13435,12 +13445,12 @@
         "marketing": "营销",
         "consulting": "咨询",
         "education": "教育",
+        "finance": "金融",
+        "other": "其他",
         "unknown": "未知",
         "operations": "运营",
         "enterprise_service": "企业服务",
-        "outsourcing": "外包",
-        "finance": "金融",
-        "other": "其他"
+        "outsourcing": "外包"
       },
       "crons": "定时任务",
       "cronCreate": "创建定时任务",
@@ -13479,6 +13489,9 @@
       "colCronToolsetsPlaceholder": "opc_scanner, opc_evaluator",
       "configDefaultWorkflowName": "需求发现工作流",
       "configDefaultWorkflowDesc": "需求发现与交付工作流配置",
+      "formApiToken": "API Token",
+      "formApiTokenPlaceholder": "如 ghp_xxxxxxxxxxxx",
+      "formApiTokenTip": "保存在平台配置中，扫描器优先使用；留空清除已保存的 Token，未配置时回退环境变量",
       "pageTitle": "需求发现",
       "minScore": "最低商业价值分",
       "scanning": "扫描中…",
@@ -17394,6 +17407,29 @@
   "store": {
     "read": "读取",
     "write": "写入"
+  },
+  "awareness": {
+    "title": "系统觉知",
+    "noData": "暂无数据",
+    "arousal": "激活度",
+    "cognitiveLoad": "认知负荷",
+    "selfEfficacy": "效能感",
+    "dominantFocus": "主导关注点",
+    "calibration": "置信度校准",
+    "bias": "平均偏差",
+    "overconfident": "过度自信",
+    "calibrated": "校准良好",
+    "underconfident": "信心不足",
+    "lastBroadcast": "最近广播",
+    "loadFailed": "加载失败"
+  },
+  "suggestion": {
+    "accept": "接受",
+    "causalInsight": "因果洞察",
+    "dismiss": "忽略",
+    "noSuggestions": "暂无建议",
+    "snooze": "稍后",
+    "title": "主动建议"
   },
   "ui": {
     "getLocale": "获取语言",

@@ -29,6 +29,7 @@ const NP: &NoopPromptProvider = &NoopPromptProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock};
 use tracing::info;
@@ -251,6 +252,12 @@ pub struct SessionManager {
     /// 未注入时保持原有行为,不影响现有功能。
     /// 用 RwLock 包裹以支持在 `Arc<SessionManager>` 上运行时注入。
     event_bus: tokio::sync::RwLock<Option<Arc<dyn axagent_harness::EventBus>>>,
+    /// session_events 事件持久化 sink（PLAN-codex-parity P0-3）。
+    ///
+    /// 注入后,SessionManager 在 turn 开始 / 结束时同时发事件到 session_events 表,
+    /// 为 agent_resume_from_events 提供事件流。未注入时保持零开销。
+    /// 由 wiring 层(src/init/state.rs)构造 DbSessionEventSink 后注入。
+    session_event_sink: tokio::sync::RwLock<Option<Arc<dyn axagent_harness::SessionEventSink>>>,
     /// 可选反思器。注入后每个 turn 完成时自动 spawn 复盘任务(不阻塞主流程)。
     ///
     /// 未注入时保持原行为(零调用 Reflector::reflect())。
@@ -266,6 +273,12 @@ pub struct SessionManager {
     ///
     /// 未注入时保持原行为(异步 fire-and-forget 复盘)。
     self_improvement_flags: tokio::sync::RwLock<SelfImprovementFlags>,
+    /// Per-session 运行时取消信号。
+    ///
+    /// 每个 session 在 create_session 时注册一个独立 Arc<AtomicBool>，
+    /// HarnessAgentAdapter.execute → ReActEngine::run 检查这个 flag。
+    /// cancel_session(id) 先 store(true) 唤醒 run 循环，再清理内存 HashMap。
+    cancel_tokens: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
 }
 
 /// 自改进循环相关开关(对应前端 FeatureFlag)。
@@ -297,8 +310,10 @@ impl SessionManager {
             trajectory: None,
             agent_session_repo,
             event_bus: tokio::sync::RwLock::new(None),
+            session_event_sink: tokio::sync::RwLock::new(None),
             reflector: tokio::sync::RwLock::new(None),
             self_improvement_flags: tokio::sync::RwLock::new(SelfImprovementFlags::default()),
+            cancel_tokens: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
@@ -310,6 +325,15 @@ impl SessionManager {
     pub async fn set_event_bus(&self, bus: Arc<dyn axagent_harness::EventBus>) {
         let mut guard = self.event_bus.write().await;
         *guard = Some(bus);
+    }
+
+    /// 注入 session_events 事件持久化 sink（P0-3）。
+    ///
+    /// 注入后,SessionManager 在 TurnStarted/TurnCompleted 时同时发事件到
+    /// session_events 表,供 agent_resume_from_events 读取。
+    pub async fn set_session_event_sink(&self, sink: Arc<dyn axagent_harness::SessionEventSink>) {
+        let mut guard = self.session_event_sink.write().await;
+        *guard = Some(sink);
     }
 
     /// 注入反思器。启用后每个 turn 完成时自动 spawn 复盘任务(不阻塞主流程)。
@@ -333,9 +357,9 @@ impl SessionManager {
         *guard = flags;
     }
 
-    /// 发布一个 agent 领域事件到统一总线(若已注入)。
+    /// 发布一个 agent 领域事件到统一总线(若已注入),同时落 session_events 表(若已注入)。
     ///
-    /// 未注入 event_bus 时静默返回,不影响原有逻辑。
+    /// 未注入时静默返回,不影响原有逻辑。
     /// `kind` 对应 `AgentEventType::to_string()`(如 `"TurnStarted"`)。
     async fn publish_agent_event(&self, kind: &str, payload: serde_json::Value) {
         let bus_clone = {
@@ -346,10 +370,29 @@ impl SessionManager {
             let event = axagent_harness::DomainEvent::new(
                 axagent_harness::EventCategory::Agent,
                 kind,
-                payload,
+                payload.clone(),
                 "agent",
             );
             bus.publish(event).await;
+        }
+
+        // P0-3: 同时落 session_events 事件表（若已注入 sink）。
+        // 映射: "TurnStarted" → SessionEventType::TurnStarted
+        //       "TurnCompleted" → SessionEventType::TurnEnded
+        if let Some(sink) = self.session_event_sink.read().await.as_ref().map(Arc::clone) {
+            let mapped = match kind {
+                "TurnStarted" => axagent_harness::SessionEventType::TurnStarted,
+                "TurnCompleted" | "TurnEnded" => axagent_harness::SessionEventType::TurnEnded,
+                _ => return,
+            };
+            // 从 payload 里取 conversationId 作为 session_id
+            let session_id = payload
+                .get("conversationId")
+                .and_then(|v| v.as_str())
+                .or_else(|| payload.get("sessionId").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_string();
+            sink.emit(&session_id, mapped, Some(payload)).await;
         }
     }
 
@@ -410,6 +453,53 @@ impl SessionManager {
         self.create_session(provider_id, conversation_id).await
     }
 
+    /// 跨进程上下文重建（PLAN-codex-parity P0-3）。
+    ///
+    /// 进程重启或 Session 被 LRU 驱逐后内存会话为空，用 DB 消息历史回灌
+    /// `Session.messages`（含已完成 turn 的 tool_use / tool_result 观察块），
+    /// 使下一次 `agent_query` 携带完整对话上下文。
+    ///
+    /// 幂等：仅当目标 Session 是全新空会话（`messages` 为空）时才填充。
+    /// 尾部截断保护：seed 时当前 turn 的用户输入行已落库（agent_query 先写
+    /// 消息再建 Session），`run_turn` 会再次追加，故去掉结尾的 user 行防止
+    /// 当前输入被计入两次。
+    ///
+    /// 返回是否实际填充。
+    pub async fn seed_session_history(
+        &self,
+        conversation_id: &str,
+        mut history: Vec<ConversationMessage>,
+    ) -> bool {
+        let mut sessions = self.sessions.lock().await;
+        let conv_index = self.conversation_index.lock().await;
+        let Some(session_id) = conv_index.get(conversation_id) else {
+            return false;
+        };
+        let Some(agent_session) = sessions.get_mut(session_id) else {
+            return false;
+        };
+        if !agent_session.session().messages.is_empty() {
+            return false;
+        }
+        while matches!(
+            history.last().map(|m| m.role),
+            Some(axagent_harness::conversation_model::MessageRole::User)
+        ) {
+            history.pop();
+        }
+        if history.is_empty() {
+            return false;
+        }
+        let count = history.len();
+        agent_session.session_mut().messages = history;
+        agent_session.session_mut().touch();
+        info!(
+            "[session_manager] Seeded {} historical messages into session {} (conversation {})",
+            count, session_id, conversation_id
+        );
+        true
+    }
+
     pub async fn create_session(
         &self,
         provider_id: String,
@@ -462,9 +552,23 @@ impl SessionManager {
         }
 
         let mut conv_index = self.conversation_index.lock().await;
-        conv_index.insert(conversation_id, session_id);
+        conv_index.insert(conversation_id, session_id.clone());
+
+        // 注册 per-session 运行时取消 token（初始 false）
+        {
+            let mut tokens = self.cancel_tokens.lock().await;
+            tokens.insert(session_id.clone(), Arc::new(AtomicBool::new(false)));
+        }
 
         Ok(session)
+    }
+
+    /// 获取指定 session 的运行时取消 token（create_session 时注册）。
+    ///
+    /// 供 HarnessAgentAdapter.execute → ReActEngine::run 检查取消信号。
+    pub async fn get_cancel_token(&self, session_id: &str) -> Option<Arc<AtomicBool>> {
+        let tokens = self.cancel_tokens.lock().await;
+        tokens.get(session_id).cloned()
     }
 
     /// Update the session in memory after a turn completes, preserving conversation history.
@@ -602,7 +706,7 @@ impl SessionManager {
     /// - Session state persistence and DB updates
     ///
     /// The caller is responsible for:
-    /// - Creating the base runtime via `axagent_runtime_core::create_conversation_runtime`
+    /// - Creating the base runtime via platform runtime builder
     /// - Persisting user/assistant messages to the DB
     /// - Emitting Tauri events
     #[allow(clippy::too_many_arguments)]
@@ -1416,6 +1520,176 @@ impl HookProgressReporter for TauriHookProgressReporter {
     }
 }
 
+// ── AgentSessionBroker 实现（供 MCP / CLI 查询 agent 会话状态） ──────────
+
+impl std::fmt::Debug for SessionManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 同步 Debug impl 禁止 .await，parking_lot::Mutex::try_lock 可用
+        let session_count = self.sessions.try_lock().map(|g| g.len()).unwrap_or(0);
+        f.debug_struct("SessionManager").field("sessions", &session_count).finish()
+    }
+}
+
+#[async_trait::async_trait]
+impl axagent_harness::AgentSessionBroker for SessionManager {
+    /// 查询会话状态：两级查找。
+    ///
+    /// 1. 优先查内存 HashMap（活跃运行中的会话）
+    /// 2. 内存未命中时，用 conversation_index 反查 conversation_id →
+    ///    AgentSessionRepository::get_by_conversation_id 查 DB（进程重启后仍可查询）
+    async fn get_session_status(
+        &self,
+        session_id: &str,
+    ) -> Result<axagent_harness::AgentSessionStatusView, String> {
+        // ── 第一级：内存 HashMap ──────────────────────────────────────
+        if let Some(agent_session) = self.get_session(session_id).await {
+            // 简化语义：内存中有会话 = Running；空 messages = Initializing
+            let status = if agent_session.session.messages.is_empty() {
+                axagent_harness::types::session_state::SessionStatus::Initializing
+            } else {
+                axagent_harness::types::session_state::SessionStatus::Running
+            };
+            let is_active = status.is_active();
+
+            let turn_count = (agent_session.session.messages.len() / 2) as u32;
+            let last_access = self.session_last_access.lock().await;
+
+            return Ok(axagent_harness::AgentSessionStatusView {
+                session_id: session_id.to_string(),
+                status,
+                provider_id: agent_session.provider_id.clone(),
+                conversation_id: Some(agent_session.conversation_id.clone()),
+                turn_count: Some(turn_count),
+                is_active,
+                last_access_ms: last_access.get(session_id).copied(),
+                last_error: None,
+            });
+        }
+
+        // ── 第二级：DB 回退（进程重启后会话仍可查）────────────────────
+        // 尝试用 conversation_index 反查 conversation_id
+        let conversation_id_opt = {
+            let conv_index = self.conversation_index.lock().await;
+            conv_index
+                .iter()
+                .find(|(_, sid)| sid.as_str() == session_id)
+                .map(|(cid, _)| cid.clone())
+        };
+
+        if let Some(conv_id) = conversation_id_opt
+            && let Ok(Some(db_session)) =
+                self.agent_session_repo.get_by_conversation_id(&conv_id).await
+        {
+            // 从 runtime_status 字符串解析状态；解析失败回退 Idle
+            let status = db_session
+                .runtime_status
+                .parse::<axagent_harness::types::session_state::SessionStatus>()
+                .unwrap_or(axagent_harness::types::session_state::SessionStatus::Idle);
+            let is_active = status.is_active();
+
+            return Ok(axagent_harness::AgentSessionStatusView {
+                session_id: session_id.to_string(),
+                status,
+                provider_id: "unknown".to_string(),
+                conversation_id: Some(db_session.conversation_id),
+                turn_count: None,
+                is_active,
+                last_access_ms: Some(db_session.updated_at as u64),
+                last_error: None,
+            });
+        }
+
+        Err(format!("session_not_found: {session_id}"))
+    }
+
+    /// 取消会话：幂等处理。
+    ///
+    /// - 不存在 → Err(session_not_found)
+    /// - 非活跃 terminal 状态 → Ok（no-op）
+    /// - 活跃会话 → 从 sessions HashMap 和 conversation_index 清理
+    async fn cancel_session(&self, session_id: &str) -> Result<(), String> {
+        let view = self.get_session_status(session_id).await?;
+
+        // 幂等：非活跃态直接返回
+        if !view.is_active {
+            return Ok(());
+        }
+
+        // 先唤醒 per-session 取消 token：让正在 run 的 ReActEngine 在下一次
+        // 迭代开头立即退出，返回 ReActResult::failure("Cancelled by user")。
+        // 此处先 store(true) 再清理 HashMap，保证 run 循环能看到 token 为 true。
+        {
+            let mut tokens = self.cancel_tokens.lock().await;
+            if let Some(token) = tokens.get(session_id) {
+                token.store(true, Ordering::SeqCst);
+                tracing::info!("[SessionManager] cancel_token set for session {session_id}");
+            }
+            // 清理 token（即使无注册也尝试 remove，幂等）
+            tokens.remove(session_id);
+        }
+
+        // 从内存 HashMap 移除
+        {
+            let mut sessions = self.sessions.lock().await;
+            sessions.remove(session_id);
+        }
+
+        // 从 conversation_index 清理反向索引
+        {
+            let mut conv_index = self.conversation_index.lock().await;
+            conv_index.retain(|_, sid| sid != session_id);
+        }
+
+        // 从 session_last_access 清理
+        {
+            let mut last_access = self.session_last_access.lock().await;
+            last_access.remove(session_id);
+        }
+
+        Ok(())
+    }
+
+    async fn list_session_ids(&self) -> Result<Vec<String>, String> {
+        use std::collections::HashSet;
+
+        let mut ids = HashSet::new();
+
+        // 第一级：内存活跃会话
+        {
+            let sessions = self.sessions.lock().await;
+            ids.extend(sessions.keys().cloned());
+        }
+
+        // 第二级：DB 回退（含已完成的历史会话）
+        // conversation_index 反查 conversation_id → 有没有对应的 runtime session_id
+        let conv_to_session = {
+            let conv_index = self.conversation_index.lock().await;
+            conv_index.clone()
+        };
+
+        match self.agent_session_repo.list_all().await {
+            Ok(db_sessions) => {
+                for db in db_sessions {
+                    // 优先用 conversation_index 反查出 runtime session_id
+                    if let Some(sid) = conv_to_session.get(&db.conversation_id) {
+                        ids.insert(sid.clone());
+                    } else {
+                        // 内存已淘汰但 DB 还在：用 conversation_id 作为 fallback id
+                        ids.insert(db.conversation_id);
+                    }
+                }
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "[SessionManager] list_all DB fallback failed: {e}, returning only memory sessions"
+                );
+            },
+        }
+
+        Ok(ids.into_iter().collect())
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::disallowed_types)]
 // SAFETY: 测试模块使用 parking_lot::Mutex 保护测试桩数据，仅在同步测试场景中使用，无跨 await 风险。
@@ -1777,6 +2051,115 @@ mod tests {
         assert_eq!(session.conversation_id(), "conv-1");
         assert!(session.axagent_session_id().is_some());
         assert_eq!(mgr.session_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn test_seed_session_history_fills_empty_session() {
+        use axagent_harness::conversation_model::ContentBlock;
+
+        let mgr =
+            SessionManager::new_for_test(axagent_harness::test_support::empty_agent_session_repo());
+        mgr.create_session("provider-1".to_string(), "conv-1".to_string())
+            .await
+            .expect("测试：异步操作应成功");
+
+        let history = vec![
+            axagent_harness::ConversationMessage {
+                role: axagent_harness::conversation_model::MessageRole::User,
+                blocks: vec![ContentBlock::Text { text: "你好".to_string() }],
+                usage: None,
+            },
+            axagent_harness::ConversationMessage {
+                role: axagent_harness::conversation_model::MessageRole::Assistant,
+                blocks: vec![ContentBlock::Text { text: "答复".to_string() }],
+                usage: None,
+            },
+            // 尾部 user 行应被截断（模拟当前 turn 输入已落库的场景）
+            axagent_harness::ConversationMessage {
+                role: axagent_harness::conversation_model::MessageRole::User,
+                blocks: vec![ContentBlock::Text { text: "当前输入".to_string() }],
+                usage: None,
+            },
+        ];
+
+        assert!(mgr.seed_session_history("conv-1", history).await);
+
+        let session = mgr
+            .get_or_create_session("provider-1".to_string(), "conv-1".to_string())
+            .await
+            .expect("测试：异步操作应成功");
+        // 尾部 user 行被截掉，只保留前两条
+        assert_eq!(session.session().messages.len(), 2);
+        assert_eq!(
+            session.session().messages[0].blocks,
+            vec![ContentBlock::Text { text: "你好".to_string() }]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_seed_session_history_skips_non_empty_session() {
+        use axagent_harness::conversation_model::ContentBlock;
+
+        let mgr =
+            SessionManager::new_for_test(axagent_harness::test_support::empty_agent_session_repo());
+        mgr.create_session("provider-1".to_string(), "conv-1".to_string())
+            .await
+            .expect("测试：异步操作应成功");
+        // 先 seed 一次（尾部 user 行会被截掉，需带一条 assistant 回复才能入库）
+        assert!(
+            mgr.seed_session_history(
+                "conv-1",
+                vec![
+                    axagent_harness::ConversationMessage {
+                        role: axagent_harness::conversation_model::MessageRole::User,
+                        blocks: vec![ContentBlock::Text { text: "第一轮".to_string() }],
+                        usage: None,
+                    },
+                    axagent_harness::ConversationMessage {
+                        role: axagent_harness::conversation_model::MessageRole::Assistant,
+                        blocks: vec![ContentBlock::Text { text: "第一轮回复".to_string() }],
+                        usage: None,
+                    },
+                ],
+            )
+            .await
+        );
+        // 第二次 seed 应幂等跳过（会话已有上下文）
+        assert!(
+            !mgr.seed_session_history(
+                "conv-1",
+                vec![axagent_harness::ConversationMessage {
+                    role: axagent_harness::conversation_model::MessageRole::User,
+                    blocks: vec![ContentBlock::Text { text: "第二轮".to_string() }],
+                    usage: None,
+                }],
+            )
+            .await
+        );
+        let session = mgr
+            .get_or_create_session("provider-1".to_string(), "conv-1".to_string())
+            .await
+            .expect("测试：异步操作应成功");
+        assert_eq!(session.session().messages.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_seed_session_history_unknown_conversation() {
+        let mgr =
+            SessionManager::new_for_test(axagent_harness::test_support::empty_agent_session_repo());
+        assert!(
+            !mgr.seed_session_history(
+                "conv-missing",
+                vec![axagent_harness::ConversationMessage {
+                    role: axagent_harness::conversation_model::MessageRole::User,
+                    blocks: vec![axagent_harness::conversation_model::ContentBlock::Text {
+                        text: "孤儿".to_string()
+                    }],
+                    usage: None,
+                }],
+            )
+            .await
+        );
     }
 
     #[tokio::test]

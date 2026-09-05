@@ -13,6 +13,7 @@ use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest};
 use axagent_harness::util_fns::{estimate_tokens, truncate_to_char_boundary};
 use axagent_harness::{ProviderAdapter, ProviderRequestContext};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
@@ -557,11 +558,51 @@ pub struct ReActEngine {
     /// 与本字段同时为 true 时才生效。本字段由 `with_self_improvement()` 设置，
     /// 配置字段由前端 FeatureFlag 驱动，二者解耦便于单元测试。
     enable_self_improvement: bool,
+    /// 运行时取消信号。置 true 后 while 循环在下一次迭代开头立即退出，
+    /// 返回 failure 结果（error = "Cancelled by user"）。
+    cancel_flag: Option<Arc<AtomicBool>>,
 }
 
 // SAFETY: 此处 parking_lot::Mutex 不跨 await 使用，goal_evaluator 的 lock 不跨 await。
 #[allow(clippy::disallowed_types)]
 impl ReActEngine {
+    /// 辅助：让一个 LLM future 和 per-session cancel flag 竞争。
+    ///
+    /// - 没 cancel flag 或 flag 初始已 false（正常路径）：直接 await future
+    /// - flag 已置 true（进程重启后残留）：立即返回 Cancelled
+    /// - LLM 调用中被取消：每 20ms 轮询一次 flag，检测到 true 返回 Cancelled
+    ///
+    /// 用 tokio::select! 包，不阻塞 LLM 请求的同时对取消信号快速响应。
+    async fn race_with_cancel<F, T>(
+        cancel_flag: Option<&Arc<AtomicBool>>,
+        fut: F,
+    ) -> Result<T, ReActError>
+    where
+        F: std::future::Future<Output = Result<T, ReActError>>,
+    {
+        let Some(flag) = cancel_flag else {
+            return fut.await;
+        };
+
+        // 先快速检查一次，flag 已置 true 就不等了
+        if flag.load(Ordering::SeqCst) {
+            tracing::info!("[ReActEngine] cancel already signalled before LLM call");
+            return Err(ReActError::Cancelled);
+        }
+
+        tokio::select! {
+            result = fut => result,
+            _ = async {
+                while !flag.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            } => {
+                tracing::info!("[ReActEngine] LLM call cancelled mid-flight");
+                Err(ReActError::Cancelled)
+            }
+        }
+    }
+
     pub fn new() -> Self {
         let executor = Arc::new(ActionExecutor::new());
         let verifier = Arc::new(SelfVerifier::new());
@@ -582,7 +623,18 @@ impl ReActEngine {
             goal_evaluator: None,
             reflector: None,
             enable_self_improvement: false,
+            cancel_flag: None,
         }
+    }
+
+    pub fn with_cancel_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.cancel_flag = Some(flag);
+        self
+    }
+
+    /// 运行时注入/替换取消信号（不消费 self，供已构造好的 engine 在每次 run 前重置）。
+    pub fn set_cancel_flag(&mut self, flag: Arc<AtomicBool>) {
+        self.cancel_flag = Some(flag);
     }
 
     pub fn with_config(mut self, config: ReActConfig) -> Self {
@@ -689,6 +741,20 @@ impl ReActEngine {
         while !state.is_terminal() {
             context.increment_iteration();
 
+            // 运行时取消检查（每次迭代开头）
+            if let Some(ref flag) = self.cancel_flag
+                && flag.load(Ordering::SeqCst)
+            {
+                tracing::info!("[ReActEngine] iteration {} cancelled by user", context.iteration);
+                return ReActResult::failure(
+                    "Cancelled by user".to_string(),
+                    chain.to_summary(),
+                    context.iteration,
+                    start.elapsed(),
+                    context,
+                );
+            }
+
             if context.iteration >= self.config.max_iterations {
                 return ReActResult::failure(
                     format!("Max iterations ({}) reached", self.config.max_iterations),
@@ -762,6 +828,22 @@ impl ReActEngine {
                                         ThoughtStep::new(ReasoningState::Reflecting, nudge_message);
                                     chain.add_step(step);
                                 }
+                            },
+                            KitTokenBudgetDecision::Compact {
+                                nudge_message,
+                                preserve_recent_steps,
+                                pct_used,
+                                budget,
+                            } => {
+                                let drained = chain.compact_keep_recent(preserve_recent_steps);
+                                tracing::info!(
+                                    "[token_budget] compact triggered: {drained} steps drained, kept {preserve_recent_steps} recent, {pct_used}% of {budget} tokens"
+                                );
+                                self.emit(ThoughtEvent::CompactionSuggested {
+                                    compacted_steps: drained,
+                                    keep_recent: preserve_recent_steps,
+                                    nudge_message,
+                                });
                             },
                             KitTokenBudgetDecision::Stop { completion_event } => {
                                 if let Some(event) = completion_event {
@@ -995,6 +1077,20 @@ impl ReActEngine {
         while !state.is_terminal() {
             context.increment_iteration();
 
+            // 运行时取消检查（每次迭代开头）
+            if let Some(ref flag) = self.cancel_flag
+                && flag.load(Ordering::SeqCst)
+            {
+                tracing::info!("[ReActEngine] iteration {} cancelled by user", context.iteration);
+                return ReActResult::failure(
+                    "Cancelled by user".to_string(),
+                    chain.to_summary(),
+                    context.iteration,
+                    start.elapsed(),
+                    context,
+                );
+            }
+
             if context.iteration >= self.config.max_iterations {
                 return ReActResult::failure(
                     format!("Max iterations ({}) reached", self.config.max_iterations),
@@ -1132,7 +1228,11 @@ impl ReActEngine {
             ReasoningState::Idle => Ok((ReasoningState::Analyzing, true)),
 
             ReasoningState::Analyzing => {
-                let reasoning = self.reasoning_provider.analyze(user_input, context).await?;
+                let reasoning = Self::race_with_cancel(
+                    self.cancel_flag.as_ref(),
+                    self.reasoning_provider.analyze(user_input, context),
+                )
+                .await?;
                 let step = ThoughtStep::new(ReasoningState::Analyzing, reasoning.clone());
                 chain.add_step(step);
 
@@ -1165,8 +1265,11 @@ impl ReActEngine {
                     )
                 };
 
-                let reasoning =
-                    self.reasoning_provider.think(&effective_input, context, chain).await?;
+                let reasoning = Self::race_with_cancel(
+                    self.cancel_flag.as_ref(),
+                    self.reasoning_provider.think(&effective_input, context, chain),
+                )
+                .await?;
                 let step = ThoughtStep::new(ReasoningState::Thinking, reasoning);
                 chain.add_step(step);
 
@@ -1178,7 +1281,11 @@ impl ReActEngine {
             },
 
             ReasoningState::Planning => {
-                let action = self.reasoning_provider.plan(user_input, context, chain).await?;
+                let action = Self::race_with_cancel(
+                    self.cancel_flag.as_ref(),
+                    self.reasoning_provider.plan(user_input, context, chain),
+                )
+                .await?;
                 let reasoning = format!(
                     "Creating plan: {}",
                     action.llm_prompt.as_deref().unwrap_or("execute action")
@@ -1291,7 +1398,11 @@ impl ReActEngine {
                     context.extend_reflection_hints(&r.improvement_suggestions);
                     r.overall_summary.clone()
                 } else {
-                    self.reasoning_provider.reflect(chain, context).await?
+                    Self::race_with_cancel(
+                        self.cancel_flag.as_ref(),
+                        self.reasoning_provider.reflect(chain, context),
+                    )
+                    .await?
                 };
 
                 let step = ThoughtStep::new(ReasoningState::Reflecting, reflection_text);
@@ -1342,7 +1453,11 @@ impl ReActEngine {
             },
 
             ReasoningState::Synthesizing => {
-                let synthesis = self.reasoning_provider.synthesize(chain, context).await?;
+                let synthesis = Self::race_with_cancel(
+                    self.cancel_flag.as_ref(),
+                    self.reasoning_provider.synthesize(chain, context),
+                )
+                .await?;
                 let step = ThoughtStep::new(ReasoningState::Synthesizing, synthesis.clone());
                 chain.add_step(step);
 

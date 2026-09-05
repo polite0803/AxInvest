@@ -144,7 +144,18 @@
     "thoughtChain": "사고 체인 시각화",
     "errorRecovery": "오류 자동 복구",
     "screenPerception": "화면 인식 (데스크톱 제어)",
-    "tot": "생각의 나무 (ToT, 비용 높음)"
+    "tot": "생각의 나무 (ToT, 비용 높음)",
+    "sandboxMode": "OS 샌드박스 모드",
+    "sandboxModeHint": "셸 명령을 제한된 하위 프로세스로 실행합니다. 읽기 전용=쓰기 금지+네트워크 차단, 워크스페이스 쓰기=워크스페이스만 쓰기 허용, 전체 허용=샌드박스 비활성화.",
+    "sandboxReadOnly": "읽기 전용",
+    "sandboxWorkspaceWrite": "워크스페이스 쓰기",
+    "sandboxDangerFullAccess": "전체 허용",
+    "approvalPolicy": "승인 정책",
+    "approvalPolicyHint": "민감한 명령 실행 전 사용자 승인을 요청하는 시점. Bash 등 실행 도구에 적용되며, 위험한 명령은 어떤 정책에서도 거부됩니다.",
+    "approvalUntrusted": "가장 엄격: 모든 명령 실행 전 확인",
+    "approvalOnFailure": "샌드박스 실행 실패 후 샌드박스 외부 재시도 전 확인",
+    "approvalOnRequest": "민감한 작업 실행 전 확인(기본값)",
+    "approvalNever": "확인 없이 바로 실행"
   },
   "agent": {
     "answerSubmitted": "답변이 제출되었습니다",
@@ -2601,6 +2612,8 @@
     "GATEWAY_SSL_NO_CERT": "SSL 인증서가 없습니다",
     "GATEWAY_SSL_NO_KEY": "SSL 키가 없습니다",
     "GATEWAY_TEMPLATE_NOT_FOUND": "게이트웨이 템플릿을 찾을 수 없습니다",
+    "MCP_AGENT_SESSION_NOT_FOUND": "Agent 세션을 찾을 수 없습니다: {{sessionId}}",
+    "MCP_AGENT_SESSION_CANCEL_FAILED": "Agent 세션 취소 실패: {{error}}",
     "MCP_CONNECT_FAILED": "MCP 연결에 실패했습니다: {{error}}",
     "MCP_SERVER_CONFIG_FAILED": "MCP 서버 구성에 실패했습니다",
     "MCP_SERVER_CREATE_FAILED": "MCP 서버 생성에 실패했습니다",
@@ -2748,6 +2761,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "워크플로우 계획을 찾을 수 없습니다",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "워크플로우 반영 적용에 실패했습니다",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "워크플로우 반영 진화에 실패했습니다",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "워크플로 기능 시임이 등록되지 않았습니다(리플렉션/진화/옵티마이저 사용 불가)",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "유효하지 않은 워크플로우 반영 기록입니다",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "워크플로우 반영에 실패했습니다",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "워크플로우 반영 제안에 실패했습니다",
@@ -2884,8 +2898,7 @@
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
     "proxyTestFailed": "代理测试失败",
-    "message": "错误",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "워크플로 기능 시임이 등록되지 않았습니다(리플렉션/진화/옵티마이저 사용 불가)"
+    "message": "错误"
   },
   "errorBoundary": {
     "copied": "복사됨",
@@ -7764,6 +7777,8 @@
       "fileUploaded": "파일이 업로드되었습니다",
       "ingestError": "가져오기 실패",
       "ingestSuccess": "가져오기에 성공했습니다",
+      "indexingProgress": "인덱싱 중 {{indexed}}/{{total}}",
+      "stageIngest": "콘텐츠를 가져와 노트를 생성하는 중…",
       "uploadError": "업로드 실패",
       "importError": "가져오기 실패",
       "previewError": "미리보기 실패",
@@ -7777,9 +7792,7 @@
       "folderImportSuccess": "导入成功",
       "folderPathRequired": "请选择文件夹",
       "importedCount": "已导入 {{count}}",
-      "previewFound": "发现 {{count}} 个文档",
-      "indexingProgress": "인덱싱 중 {{indexed}}/{{total}}",
-      "stageIngest": "콘텐츠를 가져와 노트를 생성하는 중…"
+      "previewFound": "发现 {{count}} 个文档"
     },
     "llmNote": "LLM 노트",
     "localGraph": "로컬 그래프",
@@ -13421,9 +13434,6 @@
       "formPlatformType": "Connector Type",
       "formPlatformTypePlaceholder": "manual / browser",
       "formBaseUrl": "Base URL",
-      "formApiToken": "API 토큰",
-      "formApiTokenPlaceholder": "예: ghp_xxxxxxxxxxxx",
-      "formApiTokenTip": "플랫폼 설정에 저장되며 스캐너가 우선 사용합니다. 비우면 저장된 토큰이 삭제되고, 미설정 시 환경 변수로 폴백합니다",
       "formEnabled": "Enabled",
       "formConfig": "Config (JSON)",
       "colPainScore": "Pain Score",
@@ -13446,12 +13456,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "Unknown",
         "operations": "Operations",
         "enterprise_service": "Enterprise service",
-        "outsourcing": "Outsourcing",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "Outsourcing"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Scheduled Task",
@@ -13483,6 +13493,9 @@
       },
       "formCronNamePlaceholder": "e.g.: Daily Demand Scan",
       "formCronPromptPlaceholder": "Describe the scheduled task objective...",
+      "formApiToken": "API 토큰",
+      "formApiTokenPlaceholder": "예: ghp_xxxxxxxxxxxx",
+      "formApiTokenTip": "플랫폼 설정에 저장되며 스캐너가 우선 사용합니다. 비우면 저장된 토큰이 삭제되고, 미설정 시 환경 변수로 폴백합니다",
       "pageTitle": "Demand Discovery",
       "minScore": "Min value score",
       "scanning": "Scanning…",
@@ -17398,6 +17411,29 @@
   "store": {
     "read": "读取",
     "write": "写入"
+  },
+  "awareness": {
+    "title": "시스템 인지",
+    "noData": "데이터 없음",
+    "arousal": "각성도",
+    "cognitiveLoad": "인지 부하",
+    "selfEfficacy": "자기 효능감",
+    "dominantFocus": "우세 초점",
+    "calibration": "신뢰도 보정",
+    "bias": "평균 편차",
+    "overconfident": "과신",
+    "calibrated": "보정 양호",
+    "underconfident": "과소 신뢰",
+    "lastBroadcast": "최근 브로드캐스트",
+    "loadFailed": "로드 실패"
+  },
+  "suggestion": {
+    "accept": "수락",
+    "causalInsight": "인과 인사이트",
+    "dismiss": "무시",
+    "noSuggestions": "제안 없음",
+    "snooze": "다음에",
+    "title": "능동적 제안"
   },
   "ui": {
     "getLocale": "获取语言",

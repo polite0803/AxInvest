@@ -1254,6 +1254,7 @@ dependencies = [
  "sha2 0.11.0",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "urlencoding",
 ]
 
@@ -1731,6 +1732,7 @@ dependencies = [
  "hex",
  "insta",
  "parking_lot",
+ "regex",
  "reqwest",
  "sea-orm",
  "serde",

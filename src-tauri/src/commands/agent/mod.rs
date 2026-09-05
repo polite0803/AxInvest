@@ -32,7 +32,7 @@ use axagent_tools::registry::{
 };
 use base64::Engine;
 use dashmap::DashMap;
-use sea_orm::EntityTrait;
+use sea_orm::{ConnectionTrait, EntityTrait};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -1581,6 +1581,46 @@ pub async fn agent_query(
             ))
         })?;
 
+    // P0-3 跨进程上下文重建：进程重启 / Session 被 LRU 驱逐后内存会话为空，
+    // 从 DB 消息历史回灌（含已完成 turn 的 tool_use / tool_result 观察块）。
+    // 仅对全新空会话生效（seed 内部幂等）；尾部 user 行由 seed 截断，
+    // 避免本 turn 的输入（上方 L1533 已落库）被计入两次。
+    {
+        const SEED_HISTORY_MAX_MESSAGES: usize = 40;
+        let history_rows =
+            axagent_dao::repo::message::list_messages(app_state.harness.db(), &conversation_id)
+                .await
+                .unwrap_or_default();
+        let mut history: Vec<axagent_harness::ConversationMessage> = history_rows
+            .iter()
+            .flat_map(|m| {
+                axagent_harness::conversation_model::history_to_conversation_messages(
+                    m.role,
+                    &m.content,
+                    m.parts.as_deref(),
+                )
+            })
+            .collect();
+        let total = history.len();
+        if total > SEED_HISTORY_MAX_MESSAGES {
+            history.drain(..total - SEED_HISTORY_MAX_MESSAGES);
+            // 截断不能留下孤立的 tool 观察行（配对的 tool_use 已在前段被丢弃）
+            while matches!(
+                history.first().map(|m| m.role),
+                Some(axagent_harness::conversation_model::MessageRole::Tool)
+            ) {
+                history.remove(0);
+            }
+        }
+        let seeded = session_manager.seed_session_history(&conversation_id, history).await;
+        if seeded {
+            info!(
+                "[agent_query] Restored cross-process session context for conversation: {}",
+                conversation_id
+            );
+        }
+    }
+
     // RAG retrieval: search enabled knowledge bases and memory namespaces
     let kb_ids = request.enabled_knowledge_base_ids.clone().unwrap_or_default();
     // Auto-inherit memory namespace IDs from conversation settings if not explicitly provided
@@ -2267,22 +2307,23 @@ pub async fn agent_query(
             }
 
             // Serialize structured content blocks as parts JSON
+            // 统一经 `types::ContentBlock`（tagged，camelCase 字段）序列化，
+            // 保证 DB parts 可被 `history_to_conversation_messages` 原样解析回。
+            // assistant(tool_use) 与 tool(tool_result) 观察都落库——
+            // P0-3 跨进程上下文重建依赖观察数据。
             let parts_json = {
                 let all_blocks: Vec<serde_json::Value> = summary
                     .assistant_messages
                     .iter()
+                    .chain(summary.tool_results.iter())
                     .flat_map(|msg| &msg.blocks)
-                    .map(|block| match block {
-                        axagent_runtime::ContentBlock::Text { text } => {
-                            serde_json::json!({ "type": "text", "text": text })
-                        }
-                        axagent_runtime::ContentBlock::ToolUse { id, name, input } => {
-                            serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input })
-                        }
-                        axagent_runtime::ContentBlock::ToolResult { tool_use_id, tool_name, output, is_error } => {
-                            serde_json::json!({ "type": "tool_result", "toolUseId": tool_use_id, "toolName": tool_name, "output": output, "isError": is_error })
-                        }
+                    .map(|block| {
+                        serde_json::to_value(axagent_harness::types::ContentBlock::from(
+                            block.clone(),
+                        ))
+                        .unwrap_or(serde_json::Value::Null)
                     })
+                    .filter(|value| !value.is_null())
                     .collect();
                 if all_blocks.is_empty() {
                     None
@@ -3130,6 +3171,99 @@ pub async fn agent_resume(
     );
 
     Ok(())
+}
+
+/// 从 session_events 事件流诊断跨进程中断的会话（PLAN-codex-parity P0-3e）。
+///
+/// 只读诊断命令：读取 `session_events` 表，按 seq 排序后判断最后一个
+/// TurnStarted 是否有配对的 TurnEnded。返回 JSON 含事件摘要 + 是否可恢复。
+///
+/// 注：实际恢复逻辑（重建 ThoughtChain + 续跑 run_turn）在 SessionManager
+/// 内部实现，此命令是前端诊断入口。
+#[tauri::command]
+pub async fn agent_resume_from_events(
+    app_state: State<'_, AppState>,
+    conversation_id: String,
+) -> Result<serde_json::Value, String> {
+    let db = app_state.harness.persistence().connection();
+
+    // 1. 读 session_events
+    let sql = format!(
+        "SELECT seq, event_type, payload, created_at FROM session_events \
+         WHERE session_id = '{conversation_id}' ORDER BY seq ASC"
+    );
+    let rows = db
+        .query_all_raw(sea_orm::Statement::from_string(sea_orm::DbBackend::Sqlite, sql))
+        .await
+        .map_err(|e| format!("query session_events failed: {e}"))?;
+
+    if rows.is_empty() {
+        return Ok(serde_json::json!({
+            "conversationId": conversation_id,
+            "hasEvents": false,
+            "canResume": false,
+            "reason": "no_events",
+            "eventCount": 0,
+        }));
+    }
+
+    // 2. 解析事件流
+    let mut events: Vec<serde_json::Value> = Vec::new();
+    for row in &rows {
+        let seq: i64 = row.try_get("", "seq").unwrap_or(0);
+        let event_type: String = row.try_get("", "event_type").unwrap_or_default();
+        let payload: Option<String> = row.try_get("", "payload").ok();
+        let created_at: String = row.try_get("", "created_at").unwrap_or_default();
+
+        let payload_json: serde_json::Value = payload
+            .as_ref()
+            .and_then(|p| serde_json::from_str(p).ok())
+            .unwrap_or(serde_json::Value::Null);
+
+        events.push(serde_json::json!({
+            "seq": seq,
+            "eventType": event_type,
+            "payload": payload_json,
+            "createdAt": created_at,
+        }));
+    }
+
+    // 3. 判断是否需要恢复
+    let last_event = events.last().unwrap();
+    let last_type = last_event.get("eventType").and_then(|v| v.as_str()).unwrap_or("");
+    let total_turn_started = events
+        .iter()
+        .filter(|e| e.get("eventType").and_then(|v| v.as_str()) == Some("turn_started"))
+        .count();
+    let total_turn_ended = events
+        .iter()
+        .filter(|e| e.get("eventType").and_then(|v| v.as_str()) == Some("turn_ended"))
+        .count();
+
+    let can_resume = total_turn_started > total_turn_ended;
+    let reason = if can_resume {
+        match last_type {
+            "turn_started" => "turn_started_no_ended",
+            "tool_call" | "tool_result" => "tool_execution_interrupted",
+            "compacted" => "compacted_no_ended",
+            _ => "incomplete_turn",
+        }
+    } else {
+        "all_turns_completed"
+    };
+
+    Ok(serde_json::json!({
+        "conversationId": conversation_id,
+        "hasEvents": true,
+        "canResume": can_resume,
+        "reason": reason,
+        "eventCount": events.len(),
+        "turnStartedCount": total_turn_started,
+        "turnEndedCount": total_turn_ended,
+        "lastEventType": last_type,
+        "lastEventSeq": last_event.get("seq").cloned(),
+        "events": events,
+    }))
 }
 
 /// Check if an agent is paused. An agent is only considered paused if it is

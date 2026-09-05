@@ -27,6 +27,7 @@ pub use cache_interceptor::{HarnessCache, LlmCacheKey};
 pub mod confidence;
 pub use confidence::{ConfidenceAction, ConfidenceConfig, ConfidenceOutput};
 pub mod channel_adapter;
+pub mod ir_renderer;
 pub mod notification_channel;
 pub use notification_channel::{
     AlertPayload, AlertSeverity, NotificationChannel, NotificationDispatchResult,
@@ -126,10 +127,18 @@ pub mod json_schema;
 pub mod serialization;
 
 // ── 工具系统模块 ──
+pub mod approval_policy;
 pub mod output_sanitizer;
+pub mod sandbox_policy;
+pub mod session_events;
 pub mod tool;
 pub mod tool_permissions;
 pub mod tool_validation;
+pub use approval_policy::ApprovalPolicy;
+pub use sandbox_policy::{SandboxMode, SandboxPolicy};
+pub use session_events::{
+    NullSessionEventSink, SessionEvent, SessionEventPayload, SessionEventSink, SessionEventType,
+};
 
 // ── Agent 单轮 ReAct 执行器契约(2.5 P1)──
 // trait 定义在 foundation 层,由 wiring 把 SessionManager 适配器注入到 WorkEngine,
@@ -486,6 +495,8 @@ pub use prompt_provider::{PromptLang, PromptProvider, StaticPromptProvider};
 // ── AgentSession 持久化契约（让 agent 不依赖 dao） ──
 pub mod agent_session_repo;
 pub use agent_session_repo::AgentSessionRepository;
+pub mod agent_session_broker;
+pub use agent_session_broker::{AgentSessionBroker, AgentSessionStatusView};
 
 pub mod runtime_types;
 
@@ -896,6 +907,10 @@ pub use execution_trace::{
     SchemaDiffType, TimelinePosition, TokenUsageTrace, ToolCallStatus, ToolCallTrace,
     TraceErrorSummary, TraceStatistics, TraceStatus,
 };
+
+// ── 纯文本后处理（LLM 输出清理，上移自 runtime-core，供所有 consumer 共享）──
+pub mod text_clean;
+pub use text_clean::clean_output;
 
 // ── 类型驱动设计：DTO 尺寸锁定（编译时断言） ──
 pub mod dto_locks;

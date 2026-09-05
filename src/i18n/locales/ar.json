@@ -144,7 +144,18 @@
     "thoughtChain": "عرض سلسلة التفكير",
     "errorRecovery": "الاسترداد التلقائي من الأخطاء",
     "screenPerception": "إدراك الشاشة (أداة التحكم في سطح المكتب)",
-    "tot": "شجرة الأفكار (ToT، مكلفة)"
+    "tot": "شجرة الأفكار (ToT، مكلفة)",
+    "sandboxMode": "وضع صندوق الحماية للنظام",
+    "sandboxModeHint": "تُنفَّذ أوامر الصدفة في عملية فرعية مقيَّدة. للقراءة فقط = بدون كتابة وبدون شبكة؛ كتابة مساحة العمل = الكتابة في مساحة العمل فقط؛ وصول كامل = تعطيل صندوق الحماية.",
+    "sandboxReadOnly": "للقراءة فقط",
+    "sandboxWorkspaceWrite": "كتابة مساحة العمل",
+    "sandboxDangerFullAccess": "وصول كامل",
+    "approvalPolicy": "سياسة الموافقة",
+    "approvalPolicyHint": "متى يتم طلب موافقة المستخدم قبل تنفيذ الأوامر الحساسة. تنطبق على أدوات التنفيذ مثل Bash؛ يتم رفض الأوامر الخطرة في كل السياسات.",
+    "approvalUntrusted": "الأكثر صرامة: السؤال قبل كل أمر",
+    "approvalOnFailure": "السؤال بعد فشل التنفيذ في البيئة المعزولة قبل إعادة المحاولة خارجها",
+    "approvalOnRequest": "السؤال قبل العمليات الحساسة (افتراضي)",
+    "approvalNever": "عدم السؤال مطلقًا والتنفيذ مباشرة"
   },
   "agent": {
     "answerSubmitted": "تم إرسال الإجابة",
@@ -2601,6 +2612,8 @@
     "GATEWAY_SSL_NO_CERT": "شهادة SSL مفقودة",
     "GATEWAY_SSL_NO_KEY": "مفتاح SSL مفقود",
     "GATEWAY_TEMPLATE_NOT_FOUND": "قالب البوابة غير موجود",
+    "MCP_AGENT_SESSION_NOT_FOUND": "لم يتم العثور على جلسة الوكيل: {{sessionId}}",
+    "MCP_AGENT_SESSION_CANCEL_FAILED": "فشل إلغاء جلسة الوكيل: {{error}}",
     "MCP_CONNECT_FAILED": "فشل اتصال MCP: {{error}}",
     "MCP_SERVER_CONFIG_FAILED": "فشل تكوين خادم MCP",
     "MCP_SERVER_CREATE_FAILED": "فشل إنشاء خادم MCP",
@@ -2748,6 +2761,7 @@
     "WORKFLOW_PLAN_NOT_FOUND": "خطة سير العمل غير موجودة",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "فشل تطبيق انعكاس سير العمل",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "فشل تطور انعكاس سير العمل",
+    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "لم يتم تسجيل وصل قدرة سير العمل (الانعكاس/التطور/المحسّن غير متاحة)",
     "WORKFLOW_REFLECTION_RECORD_INVALID": "سجل انعكاس سير عمل غير صالح",
     "WORKFLOW_REFLECTION_REFLECT_FAILED": "فشل انعكاس سير العمل",
     "WORKFLOW_REFLECTION_SUGGEST_FAILED": "فشل اقتراح انعكاس سير العمل",
@@ -2884,8 +2898,7 @@
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
     "proxyTestFailed": "代理测试失败",
-    "message": "错误",
-    "WORKFLOW_REFLECTION_SEAM_NOT_READY": "لم يتم تسجيل وصل قدرة سير العمل (الانعكاس/التطور/المحسّن غير متاحة)"
+    "message": "错误"
   },
   "errorBoundary": {
     "copied": "تم النسخ",
@@ -7764,6 +7777,8 @@
       "fileUploaded": "تم رفع الملف",
       "ingestError": "فشل الاستيراد",
       "ingestSuccess": "تم الاستيراد بنجاح",
+      "indexingProgress": "جارٍ الفهرسة {{indexed}}/{{total}}",
+      "stageIngest": "جارٍ استيعاب المحتوى وإنشاء الملاحظات…",
       "uploadError": "فشل الرفع",
       "importError": "فشل الاستيراد",
       "previewError": "فشل المعاينة",
@@ -7777,9 +7792,7 @@
       "folderImportSuccess": "导入成功",
       "folderPathRequired": "请选择文件夹",
       "importedCount": "已导入 {{count}}",
-      "previewFound": "发现 {{count}} 个文档",
-      "indexingProgress": "جارٍ الفهرسة {{indexed}}/{{total}}",
-      "stageIngest": "جارٍ استيعاب المحتوى وإنشاء الملاحظات…"
+      "previewFound": "发现 {{count}} 个文档"
     },
     "llmNote": "ملاحظة LLM",
     "localGraph": "رسم بياني محلي",
@@ -13421,9 +13434,6 @@
       "formPlatformType": "Connector Type",
       "formPlatformTypePlaceholder": "manual / browser",
       "formBaseUrl": "Base URL",
-      "formApiToken": "رمز API",
-      "formApiTokenPlaceholder": "مثال: ghp_xxxxxxxxxxxx",
-      "formApiTokenTip": "يُحفظ في إعدادات المنصة ويستخدمه الماسح أولاً؛ اتركه فارغاً لمسح الرمز المحفوظ، وإلا يُرجع إلى متغيرات البيئة",
       "formEnabled": "Enabled",
       "formConfig": "Config (JSON)",
       "colPainScore": "Pain Score",
@@ -13446,12 +13456,12 @@
         "marketing": "Marketing",
         "consulting": "Consulting",
         "education": "Education",
+        "finance": "Finance",
+        "other": "Other",
         "unknown": "Unknown",
         "operations": "Operations",
         "enterprise_service": "Enterprise service",
-        "outsourcing": "Outsourcing",
-        "finance": "Finance",
-        "other": "Other"
+        "outsourcing": "Outsourcing"
       },
       "crons": "Scheduled Tasks",
       "cronCreate": "Create Scheduled Task",
@@ -13483,6 +13493,9 @@
       },
       "formCronNamePlaceholder": "e.g.: Daily Demand Scan",
       "formCronPromptPlaceholder": "Describe the scheduled task objective...",
+      "formApiToken": "رمز API",
+      "formApiTokenPlaceholder": "مثال: ghp_xxxxxxxxxxxx",
+      "formApiTokenTip": "يُحفظ في إعدادات المنصة ويستخدمه الماسح أولاً؛ اتركه فارغاً لمسح الرمز المحفوظ، وإلا يُرجع إلى متغيرات البيئة",
       "pageTitle": "Demand Discovery",
       "minScore": "Min value score",
       "scanning": "Scanning…",
@@ -17398,6 +17411,29 @@
   "store": {
     "read": "读取",
     "write": "写入"
+  },
+  "awareness": {
+    "title": "وعي النظام",
+    "noData": "لا توجد بيانات",
+    "arousal": "الإثارة",
+    "cognitiveLoad": "الحمل المعرفي",
+    "selfEfficacy": "الكفاءة الذاتية",
+    "dominantFocus": "التركيز المهيمن",
+    "calibration": "معايرة الثقة",
+    "bias": "متوسط التحيز",
+    "overconfident": "ثقة زائدة",
+    "calibrated": "معايَر",
+    "underconfident": "ثقة ناقصة",
+    "lastBroadcast": "آخر بث",
+    "loadFailed": "فشل التحميل"
+  },
+  "suggestion": {
+    "accept": "قبول",
+    "causalInsight": "تحليل سببي",
+    "dismiss": "تجاهل",
+    "noSuggestions": "لا توجد اقتراحات",
+    "snooze": "لاحقًا",
+    "title": "اقتراحات استباقية"
   },
   "ui": {
     "getLocale": "获取语言",

@@ -66,7 +66,8 @@ async fn async_main() {
 
     // ── 同步 OPC 资产到用户数据目录（CWD 无关） ──
     // 与 Tauri 模式启动流程保持一致，保证行业包/领域包可读
-    axagent_lib::commands::opc_workflows::ensure_opc_config_synced(&app_dir);
+    // ensure_opc_config_synced 由 axagent_lib 公开 re-export（commands 模块为私有）
+    axagent_lib::ensure_opc_config_synced(&app_dir);
 
     // ── 创建 AppState（复用 Tauri 版本的全部业务逻辑） ──
     let _state = axagent_lib::init::state::create_app_state(db_result)

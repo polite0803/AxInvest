@@ -54,6 +54,7 @@ mod config_validator;
 use tauri::{Emitter, Manager};
 
 pub use app_state::AppState;
+pub use commands::opc_workflows::ensure_opc_config_synced;
 
 /// 在独立线程中创建 current_thread tokio runtime 并执行 async 任务（阻塞等待完成）。
 ///

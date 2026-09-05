@@ -8,25 +8,31 @@ pub mod compress;
 pub mod streaming;
 
 use crate::AppState;
+#[cfg(test)]
 use crate::app_state::SemanticCacheState;
 use crate::commands::agent::cancel_agent_internal;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code;
 use crate::commands::error_code::thinking as thinking_err;
 use crate::commands::error_code::title as title_err;
+#[cfg(test)]
 use crate::commands::proactive::ProactiveService;
 use crate::commands::spawn_guard::catch_unwind_logged;
 use axagent_agent_macro::agent_command;
+#[cfg(test)]
 use axagent_dao::repo::agent_session_repo::DaoAgentSessionRepository;
+#[cfg(test)]
 use axagent_harness::AgentSessionRepository;
 use axagent_harness::types::*;
 use axagent_harness::url_utils::resolve_base_url_for_type;
 use axagent_providers::{ProviderRequestContext, extract_reasoning_from_text};
+#[cfg(test)]
 use axagent_runtime_core::PromptCache;
 use base64::Engine;
 use dashmap::DashMap;
 use futures::FutureExt;
 use sea_orm::*;
+#[cfg(test)]
 use std::collections::HashMap;
 #[cfg(test)]
 use std::fs;

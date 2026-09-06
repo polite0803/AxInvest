@@ -38,6 +38,69 @@ const LazyDomainHubPage = lazy(() => import("@/pages/DomainHubPage").then((m) =>
 const LazyDemandDiscoveryPage = lazy(() =>
   import("@/pages/DemandDiscoveryPage").then((m) => ({ default: m.DemandDiscoveryPage }))
 );
+const LazyInvestPage = lazy(() => import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage })));
+const LazyOpcPage = lazy(() => import("@/pages/OpcPage").then((m) => ({ default: m.OpcPage })));
+// ── 行业页（OPC 9+ 行业包，2026-09-06 按能力域恢复接线） ──
+const LazyFinanceInvestIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.FinanceInvestPage }))
+);
+const LazyAccountingIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.AccountingPage }))
+);
+const LazySalesGrowthIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.SalesGrowthPage }))
+);
+const LazyProjectManagementIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.ProjectManagementPage }))
+);
+const LazyIndustryConsultingIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.IndustryConsultingPage }))
+);
+const LazyEcommerceIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.EcommercePage }))
+);
+const LazySoftwareDevIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.SoftwareDevPage }))
+);
+const LazySecurityIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.SecurityPage }))
+);
+const LazyGeospatialIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.GeospatialPage }))
+);
+const LazyAiResearchIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.AiResearchPage }))
+);
+const LazyContentMediaIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.ContentMediaPage }))
+);
+const LazyDesignIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.DesignPage }))
+);
+const LazyEducationIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.EducationPage }))
+);
+const LazyGameDevIndustryPage = lazy(() =>
+  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.GameDevPage }))
+);
+
+/** 行业页路由表：[BuiltinPageKey（即能力域导航 key）, 页面组件] */
+const INDUSTRY_ROUTES: ReadonlyArray<[string, React.LazyExoticComponent<React.ComponentType>]> = [
+  ["finance-analysis", LazyFinanceInvestIndustryPage],
+  ["finance-accounting", LazyAccountingIndustryPage],
+  ["automation-sales", LazySalesGrowthIndustryPage],
+  ["automation-projects", LazyProjectManagementIndustryPage],
+  ["automation-consulting", LazyIndustryConsultingIndustryPage],
+  ["automation-ecommerce", LazyEcommerceIndustryPage],
+  ["devops-software", LazySoftwareDevIndustryPage],
+  ["devops-security", LazySecurityIndustryPage],
+  ["data-geospatial", LazyGeospatialIndustryPage],
+  ["data-ai-research", LazyAiResearchIndustryPage],
+  ["content-media", LazyContentMediaIndustryPage],
+  ["content-design", LazyDesignIndustryPage],
+  ["content-education", LazyEducationIndustryPage],
+  ["ai-media-game", LazyGameDevIndustryPage],
+];
 
 function PageLoader() {
   return (
@@ -139,6 +202,42 @@ export const ContentArea = memo(function ContentArea() {
           <Route path={BUILTIN_PAGE_PATH.knowledge} element={redirectToChat("knowledge")} />
           <Route path={BUILTIN_PAGE_PATH.multiAgent} element={redirectToChat("multiAgent")} />
           <Route path={BUILTIN_PAGE_PATH.marketplace} element={redirectToChat("workflow")} />
+          <Route
+            path={BUILTIN_PAGE_PATH["finance-investment"]}
+            element={
+              <PageContextProvider page="finance-investment">
+                <SafeLazyPage Page={LazyInvestPage} />
+              </PageContextProvider>
+            }
+          />
+          <Route
+            path={`${BUILTIN_PAGE_PATH["automation-operations"]}/:tab`}
+            element={
+              <PageContextProvider page="automation-operations">
+                <SafeLazyPage Page={LazyOpcPage} />
+              </PageContextProvider>
+            }
+          />
+          <Route
+            path={BUILTIN_PAGE_PATH["automation-operations"]}
+            element={
+              <PageContextProvider page="automation-operations">
+                <SafeLazyPage Page={LazyOpcPage} />
+              </PageContextProvider>
+            }
+          />
+          {/* ── AxInvest 行业页（OPC 行业包，路径 /opc/industry/:id，按能力域归位） ── */}
+          {INDUSTRY_ROUTES.map(([pageKey, Page]) => (
+            <Route
+              key={pageKey}
+              path={BUILTIN_PAGE_PATH[pageKey]}
+              element={
+                <PageContextProvider page={pageKey}>
+                  <SafeLazyPage Page={Page} />
+                </PageContextProvider>
+              }
+            />
+          ))}
           <Route
             path={BUILTIN_PAGE_PATH["demand-discovery"]}
             element={

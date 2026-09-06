@@ -33,6 +33,19 @@ export function WorkspaceHub() {
   // 残留的同一 state 引用不再消费；新导航必然产生新引用（即使 tab 值相同）也会正常消费。
   const handledStateRef = useRef<unknown>(null);
 
+  // chat 专属查询参数：由各业务页跳转携带（OPC 行业页、投资面板等），仅 ChatPage 消费。
+  // 这些参数出现时必须渲染 ChatPage——否则 activeTab 残留 workflow 等值时，
+  // 跳转会落到工作流列表/编辑器，conversationId/prompt 参数被静默无视。
+  const CHAT_ONLY_PARAMS = ["conversationId", "prompt", "workflow", "code"];
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const hasChatParam = CHAT_ONLY_PARAMS.some((k) => params.has(k));
+    if (hasChatParam && activeTab !== "chat") {
+      setActiveTab("chat");
+    }
+  }, [location.search, activeTab, setActiveTab]);
+
   useEffect(() => {
     const state = location.state as { tab?: WorkspaceTab } | null;
     console.warn("[WorkspaceHub] useEffect: location.state=", state, "activeTab=", activeTab);

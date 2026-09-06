@@ -31,6 +31,25 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   // ── 能力域聚合入口路径（8 个业务域，路径来源 domainMeta 单一真相源） ──
   ...Object.fromEntries(CAPABILITY_DOMAIN_META.map((d) => [d.id, d.path])),
 
+  // ── AxInvest 本地业务页（2026-09-01 上游合并时路由被覆盖，09-06 按能力域恢复） ──
+  "finance-investment": "/invest",
+  "automation-operations": "/opc",
+  // 行业页（IndustryPages.tsx 固定组件，路径沿用 IndustryNavigator 的 /opc/industry/:id 约定）
+  "finance-analysis": "/opc/industry/finance-invest",
+  "finance-accounting": "/opc/industry/accounting",
+  "automation-sales": "/opc/industry/sales-growth",
+  "automation-projects": "/opc/industry/project-management",
+  "automation-consulting": "/opc/industry/industry-consulting",
+  "automation-ecommerce": "/opc/industry/ecommerce",
+  "devops-software": "/opc/industry/software-dev",
+  "devops-security": "/opc/industry/security",
+  "data-geospatial": "/opc/industry/geospatial",
+  "data-ai-research": "/opc/industry/ai-research",
+  "content-media": "/opc/industry/content-media",
+  "content-design": "/opc/industry/design",
+  "content-education": "/opc/industry/education",
+  "ai-media-game": "/opc/industry/game-dev",
+
   // ── 通用功能（general 域） ──
   chat: "/chat",
   dashboard: "/dashboard",

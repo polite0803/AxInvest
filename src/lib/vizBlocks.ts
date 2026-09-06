@@ -40,7 +40,7 @@
  *     { name: "光模块", value: 78 },
  *   ],
  *   options: { orientation: "vertical", showLegend: true },
- *   meta: { scene: "market-mainline", generatedAt: Date.now() },
+ *   meta: { scene: "paper-portfolio", generatedAt: Date.now() },
  * };
  * renderVizBlock(block);
  * ```
@@ -270,7 +270,7 @@ export interface VizBlock {
 }
 
 export interface VizBlockMeta {
-  /** 来源场景：market-mainline / paper-portfolio / screenshot-diagnosis / ... */
+  /** 来源场景：paper-portfolio / screenshot-diagnosis / ... */
   scene?: string;
   /** 生成时间戳（ms） */
   generatedAt?: number;
@@ -306,7 +306,6 @@ export interface VisualizationPolicyEntry {
 
 /** 内置场景 ID 矩阵（与 G2/G3/G4/G6 场景对齐） */
 export const VIZ_POLICY_SCENE_IDS = {
-  MARKET_MAINLINE: "market-mainline",
   PAPER_PORTFOLIO: "paper-portfolio",
   SCREENSHOT_DIAGNOSIS: "screenshot-diagnosis",
   INDUSTRY_CHAIN: "industry-chain",
@@ -318,16 +317,6 @@ export type VizPolicySceneId = (typeof VIZ_POLICY_SCENE_IDS)[keyof typeof VIZ_PO
 
 /** 内置 VisualizationPolicy 默认矩阵 */
 export const DEFAULT_VIZ_POLICIES: Record<string, VisualizationPolicyEntry> = {
-  [VIZ_POLICY_SCENE_IDS.MARKET_MAINLINE]: {
-    sceneId: VIZ_POLICY_SCENE_IDS.MARKET_MAINLINE,
-    sceneName: "viz.scene.market-mainline",
-    recommendedKinds: ["bar_chart", "line_chart", "table"],
-    defaultOptions: {
-      bar_chart: { orientation: "horizontal", showLegend: true },
-      line_chart: { smooth: true, showLegend: true },
-    },
-    maxBlocks: 3,
-  },
   [VIZ_POLICY_SCENE_IDS.PAPER_PORTFOLIO]: {
     sceneId: VIZ_POLICY_SCENE_IDS.PAPER_PORTFOLIO,
     sceneName: "viz.scene.paper-portfolio",

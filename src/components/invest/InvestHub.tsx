@@ -11,9 +11,6 @@ import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 const { Title } = Typography;
 
 // 各业务子页面懒加载（复用现有页面入口）
-const LazyMarketMainline = lazy(() =>
-  import("@/pages/MarketMainlinePage").then((m) => ({ default: m.MarketMainlinePage }))
-);
 const LazyScreener = lazy(() => import("@/pages/ScreenerPage").then((m) => ({ default: m.ScreenerPage })));
 const LazyStockWorkspace = lazy(() =>
   import("@/pages/StockWorkspacePage").then((m) => ({ default: m.StockWorkspacePage }))
@@ -27,9 +24,8 @@ const LazyPaperPortfolio = lazy(() =>
 const LazyQuantLab = lazy(() => import("@/pages/QuantLabPage").then((m) => ({ default: m.QuantLabPage })));
 const LazyPipeline = lazy(() => import("@/pages/PipelinePage").then((m) => ({ default: m.PipelinePage })));
 
-/** 投资业务 tab key — 按操作逻辑排序：全局视角 → 发现 → 单股深度 → 外部导入 → 持仓跟踪 → 策略验证 → 流程编排 */
+/** 投资业务 tab key — 按操作逻辑排序：发现 → 单股深度 → 外部导入 → 持仓跟踪 → 策略验证 → 流程编排 */
 export type InvestTabKey =
-  | "market-mainline"
   | "screener"
   | "workspace"
   | "screenshot-diagnosis"
@@ -38,11 +34,10 @@ export type InvestTabKey =
   | "pipeline";
 
 /** tab 默认值 */
-const DEFAULT_TAB: InvestTabKey = "market-mainline";
+const DEFAULT_TAB: InvestTabKey = "screener";
 
 /** 合法 tab key 集合（用于校验 URL 参数） */
 const VALID_TABS: Set<InvestTabKey> = new Set([
-  "market-mainline",
   "screener",
   "workspace",
   "screenshot-diagnosis",
@@ -109,15 +104,6 @@ export function InvestHub() {
 
   const items: TabsProps["items"] = useMemo(
     () => [
-      {
-        key: "market-mainline",
-        label: t("invest.tab.marketMainline"),
-        children: (
-          <SafeTab>
-            <LazyMarketMainline />
-          </SafeTab>
-        ),
-      },
       {
         key: "screener",
         label: t("invest.tab.screener"),

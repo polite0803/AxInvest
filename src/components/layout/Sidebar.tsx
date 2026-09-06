@@ -35,6 +35,11 @@ function pathToPageKey(path: string): PageKey {
   if (path in pathToPageKeyMap) {
     return pathToPageKeyMap[path];
   }
+  // 再按 L1 段反查（/opc/:tab 的 tab 段不改变页面归属）
+  const l1 = `/${path.slice(1).split("/")[0]}`;
+  if (l1 in pathToPageKeyMap) {
+    return pathToPageKeyMap[l1];
+  }
   const key = path.slice(1);
   if (key in pageKeyToPath) {
     return key as PageKey;

@@ -84,6 +84,19 @@ export function IndustryTabContent({ industryId, config, tabKey }: IndustryTabCo
 
     if (action.type === "workflow") {
       const templateId = resolveTemplateId(action, tab);
+      // 优先在当前 tab 的 workflows 中匹配定义 → 走向导弹窗（与 workflows 区「开始」一致），
+      // 避免行业 action 落到全局工作流编辑器
+      const wf = tab?.workflows?.find(
+        (w) =>
+          w.id === action.key
+          || w.template_id === action.key
+          || (templateId !== undefined && (w.id === templateId || w.template_id === templateId)),
+      );
+      if (wf) {
+        setActiveWorkflow(wf);
+        setWizardOpen(true);
+        return;
+      }
       if (templateId) {
         navigate(`/workflow/new?industry=${industryId}&template=${templateId}`);
       } else {

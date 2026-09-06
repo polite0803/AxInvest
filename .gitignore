@@ -137,6 +137,9 @@ output/
 knowledge-sources/lemonhu/
 !knowledge-sources/sample/
 .codebuddy
+# agency-agents 专家源仓库（junction 指向 ../AxOPC/agency-agents-src，本体在 AxOPC 仓库，不入库）
+agency-agents-src/
+
 # Local test data
 data/
 

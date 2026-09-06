@@ -632,11 +632,17 @@ pub async fn repair_schema(db: &sea_orm::DatabaseConnection) -> Result<(usize, u
 }
 
 /// 安全网：确保 agency_experts / agent_profiles 的 category CHECK 约束
-/// 包含所有 AxAgent 通用业务值。
+/// 包含所有业务值。
 ///
-/// 背景：v200 曾错误地在重写 CHECK 约束时引入了下游 AxInvest 专用值
-/// （opc-* / stock-analysis）。清理下游后，本函数只保留通用值，
-/// 并可在启动种子化前调用作为独立于迁移框架的安全保障。
+/// ⚠️ AxInvest fork 分歧点（upstream merge 时必须保留，勿被上游版本覆盖）：
+/// 上游 AxAgent 的同名函数只含 9 个通用值，因为上游没有 OPC/荐股业务；
+/// AxInvest 的 opc_setup 种子（opc_setup/mod.rs seed_opc_experts 等）与
+/// stock profile 会写入 `opc-company`/`opc-experts`/`opc-industry`/
+/// `opc-domain`/`stock-analysis`，v200 PHASE 3 与 v223 自愈迁移的约束
+/// 列表也包含这些值。2026-08-18 后某次上游合并把本函数覆盖回 9 值版，
+/// 导致 ADD CONSTRAINT 被存量 opc-* 行顶回（EXPERT_READ_DIR_FAILED 同期
+/// 日志：check constraint "agency_experts_category_check" is violated），
+/// 且 DROP 先行执行 → 表约束整个缺失。列表必须与 v200 PHASE 3 保持一致。
 pub async fn ensure_category_check_constraints(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<(), DbErr> {
@@ -647,7 +653,30 @@ pub async fn ensure_category_check_constraints(
 
     let backend = db.get_database_backend();
     let categories = "'general','development','security','data','finance',\
-        'devops','design','writing','business'";
+        'devops','design','writing','business',\
+        'opc-company','opc-experts','opc-industry','opc-domain','stock-analysis'";
+
+    // 防护：先校验存量数据再动约束。若先 DROP 后 ADD 失败，表会落得
+    // 「无任何 category 约束」的裸奔状态（2026-09-06 实测发生过）。
+    for table in ["agency_experts", "agent_profiles"] {
+        let sql = format!(
+            "SELECT category, count(*)::int AS n FROM {table} \
+             WHERE category NOT IN ({categories}) GROUP BY category"
+        );
+        let rows = db.query_all_raw(Statement::from_string(backend, sql)).await?;
+        if !rows.is_empty() {
+            let mut parts: Vec<String> = Vec::new();
+            for r in &rows {
+                let cat: String = r.try_get("", "category").unwrap_or_default();
+                let n: i32 = r.try_get("", "n").unwrap_or_default();
+                parts.push(format!("{cat}({n})"));
+            }
+            return Err(DbErr::Custom(format!(
+                "{table} 存在不被 category CHECK 允许的值，已保留原约束未替换: {}",
+                parts.join(", ")
+            )));
+        }
+    }
 
     // agency_experts
     let _ = db

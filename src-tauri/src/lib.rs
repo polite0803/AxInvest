@@ -175,7 +175,11 @@ pub fn run() {
             .init();
     }
 
-    // ── 全局 panic hook ──
+    // ── 全局 panic hook（仅 Android）──
+    // 桌面版的 panic hook 在 main.rs 中设置（crash log 落盘 + stderr + tracing）。
+    // 此处此前无条件 set_hook 会覆盖 main.rs 的完整版 hook，导致桌面版丢失
+    // crash log 兜底（2026-09-06 嵌套 panic 事故：第一现场全丢、crash log 从未生成）。
+    #[cfg(target_os = "android")]
     std::panic::set_hook(Box::new(|info| {
         let msg = match (
             info.payload().downcast_ref::<&str>(),

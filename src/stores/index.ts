@@ -102,7 +102,6 @@ export { useWorkflowStore } from "./feature/workflowStore";
 export { useCrossMarketStore } from "./feature/crossMarketStore";
 export { useExecutionBridgeStore } from "./feature/executionBridgeStore";
 export { useIndustryLearningStore } from "./feature/industryLearningStore";
-export { useMarketMainlineStore } from "./feature/marketMainlineStore";
 export { usePaperPortfolioStore } from "./feature/paperPortfolioStore";
 export { usePipelineStore } from "./feature/pipelineStore";
 export { useBacktestStore, useStrategyStore } from "./feature/quant";

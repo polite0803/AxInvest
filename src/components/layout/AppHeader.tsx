@@ -22,6 +22,23 @@ const PAGE_LABELS: Record<string, string> = {
   "/dynamic-ui": "nav.dynamicUI",
   "/wiki": "nav.wiki",
   "/terminal": "nav.terminal",
+  "/invest": "nav.financeInvestment",
+  "/opc": "nav.automationOperations",
+  // 行业页（/opc/industry/:id）— 顶栏标签与页面大标题（IndustryHub industryTitle）保持一致
+  "/opc/industry/finance-invest": "opc.industries.finance_invest",
+  "/opc/industry/accounting": "opc.industries.accounting",
+  "/opc/industry/sales-growth": "opc.industries.sales_growth",
+  "/opc/industry/project-management": "opc.industries.project_management",
+  "/opc/industry/industry-consulting": "opc.industries.industry_consulting",
+  "/opc/industry/ecommerce": "opc.industries.ecommerce",
+  "/opc/industry/software-dev": "opc.industries.software_dev",
+  "/opc/industry/security": "opc.industries.security",
+  "/opc/industry/geospatial": "opc.industries.geospatial",
+  "/opc/industry/ai-research": "opc.industries.ai_research",
+  "/opc/industry/content-media": "opc.industries.content_media",
+  "/opc/industry/design": "opc.industries.design",
+  "/opc/industry/education": "opc.industries.education",
+  "/opc/industry/game-dev": "opc.industries.game_dev",
 };
 
 function resolvePageLabel(pathname: string): string | null {
@@ -43,6 +60,10 @@ function resolvePageLabel(pathname: string): string | null {
   }
   if (pathname.startsWith("/wiki/")) {
     return "nav.wiki";
+  }
+  // OPC 管理面板多段路径（/opc/invoices 等）— 与 /opc 同标签
+  if (pathname === "/opc" || pathname.startsWith("/opc/")) {
+    return "nav.automationOperations";
   }
   if (
     pathname.startsWith("/stock-analysis") || pathname.startsWith("/screener") || pathname.startsWith("/watchlist")

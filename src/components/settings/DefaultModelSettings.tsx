@@ -396,7 +396,7 @@ export function DefaultModelSettings() {
     if (!providerLoading && providers.length > 0) {
       validateAndCleanModels(providers).then((result) => {
         if (result.changed) {
-          console.info("[DefaultModelSettings] 已清理无效模型引用", result.invalidFields);
+          console.info("[DefaultModelSettings] cleaned invalid model references", result.invalidFields);
         }
       });
     }

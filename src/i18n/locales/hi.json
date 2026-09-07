@@ -2035,7 +2035,9 @@
         "orchestratorDag": "ऑर्केस्ट्रेटर DAG",
         "approvalGate": "अनुमोदन द्वार"
       }
-    }
+    },
+    "executing": "निष्पादित हो रहा है",
+    "failed": "रूटिंग विफल"
   },
   "continuation": {
     "continueFromHere": "यहाँ से जारी रखें",

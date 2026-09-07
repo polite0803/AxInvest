@@ -2035,7 +2035,9 @@
         "orchestratorDag": "Orquestador DAG",
         "approvalGate": "Puerta de aprobación"
       }
-    }
+    },
+    "executing": "Ejecutando",
+    "failed": "Fallo de enrutamiento"
   },
   "continuation": {
     "continueFromHere": "Continuar desde aquí",

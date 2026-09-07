@@ -29,7 +29,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //       Option 参数注册不可调用（Rhai 1.25 多 Option 参数闭包 Function not found）→ Dynamic 参数
     //   P1-1: money_flow/lockup_bundle/announcements 注入为 map 的 type_of 判断修复
     //   P2-2: trader_direction 类型防御；P2-3: n 动态推导；P3-1/2/4: count_chars/consistency_bonus/diag_for
-    const TEMPLATE_VERSION: i32 = 3;
+    //   v4: 移除 bear-r3 → t-dragon-tiger-data 入边——与 t-dragon-tiger-data → a-hot-money
+    //       构成回环（a-hot-money 在辩论链上游），Kahn 检测拒绝启动（"Cycle detected"）。
+    //       龙虎榜取数改为入度 0 启动节点，天然先于 a-hot-money 完成。
+    const TEMPLATE_VERSION: i32 = 4;
 
     tracing::info!(
         "[stock_analysis_setup] seed_stock_analysis_workflow_template 开始: TEMPLATE_ID={TEMPLATE_ID}, TEMPLATE_VERSION={TEMPLATE_VERSION}"
@@ -1805,7 +1808,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         840.0,  // x: 接在 t-risk (660) 之后
         2700.0, // y: 与 algo_tools 同行
     ));
-    edges.push(edge(&format!("e-bear-r3-{dragon_tiger_id}"), "bear-r3", dragon_tiger_id));
+    // ⚠️ 不给 t-dragon-tiger-data 挂 bear-r3 入边（v4 修复 Cycle detected）：
+    //   它的消费方 a-hot-money 在辩论链上游（a-hot-money → debate-bull-bear → … → bear-r3），
+    //   若再挂 bear-r3 → t-dragon-tiger-data 入边就构成回环
+    //   a-hot-money → debate 链 → bear-r3 → t-dragon-tiger-data → a-hot-money，
+    //   引擎 create_workflow 的 Kahn 检测直接拒绝启动（"Cycle detected in workflow"）。
+    //   作为入度 0 的启动节点（与其他 t-* 数据工具一致），它天然先于 a-hot-money 完成，
+    //   数据依赖（a-hot-money 的 context_sources 消费 dragon_tiger 变量）由出边保证。
 
     // ── P3 (real-nodes): raw-data 聚合节点 ──
     // 把 13 个 t-* / algo 工具节点的输出聚合成单个 raw 对象，供 portfolio-mgr 决策时

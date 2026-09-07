@@ -1275,12 +1275,24 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
                   -> RunFuture {
                 let engine = engine_for_run.clone();
                 Box::pin(async move {
-                    // 与 workflow_execute 同口径：模板不存在先显式失败
-                    let exists = engine
-                        .get_workflow(&workflow_id)
-                        .await
-                        .map_err(|e| e.to_string())?
-                        .is_some();
+                    // 与 workflow_execute 同口径：模板不存在先显式失败。
+                    // 懒加载兜底：启动期仅 cognitive_router_main 常驻内存，
+                    // 其余模板未命中时先从 DB 模板库加载一次再校验。
+                    let exists =
+                        match engine.get_workflow(&workflow_id).await.map_err(|e| e.to_string())? {
+                            Some(_) => true,
+                            None => {
+                                if engine.load_workflow_template(&workflow_id).await.is_err() {
+                                    false
+                                } else {
+                                    engine
+                                        .get_workflow(&workflow_id)
+                                        .await
+                                        .map_err(|e| e.to_string())?
+                                        .is_some()
+                                }
+                            },
+                        };
                     if !exists {
                         return Err(format!(
                             "工作流模板 '{workflow_id}' 不存在（RunWorkflow 执行器校验失败）"

@@ -1,0 +1,436 @@
+/* SPDX-License-Identifier: AGPL-3.0-only
+ *
+ * 股票分析页（stock-analysis）历史样式恢复。
+ *
+ * 背景：分析页原为独立路由 /stock-analysis，配套本套 sa-* 样式；迁入投资中心
+ * 工作区（StockWorkspaceShell 内嵌）时样式文件被误删，JSX 中 class 全部裸奔，
+ * 典型症状是 sa-tabs 一行按钮图标文字全部挤在一起（无 flex / 无 padding）。
+ *
+ * 本文件内容从旧构建产物 dist/assets/index-r9zJ5Ftn.css 中逐条提取还原，
+ * 未做任何视觉改动；后续如需调整样式请直接改这里。
+ */
+
+/* ── 布局骨架 ── */
+
+.sa-layout {
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  overflow: hidden auto;
+}
+
+/* 长内容防溢出：布局容器与其子孙统一允许任意断行、允许收缩 */
+.sa-layout,
+.sa-layout *,
+.sa-main,
+.sa-main *,
+.sa-body,
+.sa-body *,
+.sa-tabs,
+.sa-tab,
+.sa-panel-body,
+.sa-markdown-content,
+.sa-markdown-content *,
+.ax-stock-workspace,
+.ax-stock-workspace * {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  min-width: 0;
+}
+
+.sa-body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* ── 独立模式顶栏（工作区内嵌时由 Shell 渲染，不显示） ── */
+
+.sa-header {
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 12px;
+  display: flex;
+}
+
+.sa-header-title {
+  color: var(--fg);
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.sa-header-meta {
+  color: var(--muted);
+  margin-right: auto;
+  font-size: 11px;
+}
+
+.sa-header-back {
+  color: var(--muted);
+  cursor: pointer;
+  background: 0 0;
+  border: none;
+  border-radius: 4px;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-family: inherit;
+  font-size: 11.5px;
+  transition: all 0.12s;
+  display: inline-flex;
+}
+
+.sa-header-back:hover {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+/* ── 主体两栏 ── */
+
+.sa-body {
+  flex-direction: column;
+  flex: 1;
+  max-width: 100%;
+  min-height: 0;
+  display: flex;
+  overflow: hidden auto;
+}
+
+.sa-body-inner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: visible;
+}
+
+.sa-main {
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden auto;
+}
+
+.sa-sidebar {
+  border-left: 1px solid var(--border);
+  flex-direction: column;
+  gap: 8px;
+  width: 280px;
+  min-width: 280px;
+  padding: 8px;
+  display: flex;
+  overflow-y: auto;
+}
+
+/* ── 内容 Tab 行 ── */
+
+.sa-tabs {
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 10px;
+  display: flex;
+  overflow-y: auto;
+}
+
+.sa-tab {
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  background: 0 0;
+  border: none;
+  border-radius: 4px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  transition: all 0.12s;
+  display: inline-flex;
+}
+
+.sa-tab:hover {
+  background: var(--accent-bg);
+  color: var(--fg);
+}
+
+.sa-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ── 移动端底部滑出面板（仅独立模式） ── */
+
+.sa-bottom-sheet {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  max-height: 0;
+  z-index: var(--z-overlay);
+  transition: max-height 0.25s;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
+.sa-bottom-sheet.open {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.sa-sheet-handle {
+  cursor: pointer;
+  justify-content: center;
+  padding: 6px;
+  display: flex;
+}
+
+.sa-sheet-handle-bar {
+  background: var(--border);
+  border-radius: 2px;
+  width: 32px;
+  height: 4px;
+}
+
+.sa-sheet-tabs {
+  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  padding: 4px 12px;
+  display: flex;
+  overflow-x: auto;
+}
+
+.sa-sheet-tab {
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  background: 0 0;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.sa-sheet-tab:hover {
+  background: var(--accent-bg);
+  color: var(--fg);
+}
+
+.sa-sheet-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.sa-sheet-body {
+  padding: 8px 12px;
+}
+
+.sa-sheet-toggle {
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  width: 36px;
+  height: 36px;
+  z-index: var(--z-overlay);
+  border: none;
+  border-radius: 50%;
+  place-items: center;
+  font-size: 18px;
+  display: grid;
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  box-shadow: 0 2px 8px #0003;
+}
+
+/* ── 加载态 / 面板 ── */
+
+.sa-loading {
+  padding: 24px 16px;
+}
+
+.sa-panel-body {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* ── Markdown 报告内容 ── */
+
+.sa-markdown-content {
+  color: var(--color-text-base, inherit);
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.sa-markdown-content h1,
+.sa-markdown-content h2,
+.sa-markdown-content h3,
+.sa-markdown-content h4,
+.sa-markdown-content h5,
+.sa-markdown-content h6 {
+  margin: 0.6em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.sa-markdown-content h1 {
+  font-size: 16px;
+}
+
+.sa-markdown-content h2 {
+  font-size: 15px;
+}
+
+.sa-markdown-content h3 {
+  font-size: 14px;
+}
+
+.sa-markdown-content h4 {
+  font-size: 13px;
+}
+
+.sa-markdown-content h5,
+.sa-markdown-content h6 {
+  font-size: 12px;
+}
+
+.sa-markdown-content p {
+  margin: 0.4em 0;
+}
+
+.sa-markdown-content ul,
+.sa-markdown-content ol {
+  margin: 0.4em 0;
+  padding-left: 1.4em;
+}
+
+.sa-markdown-content li {
+  margin: 0.15em 0;
+}
+
+.sa-markdown-content blockquote {
+  border-left: 3px solid var(--border, #d9d9d9);
+  color: var(--muted, #6b7280);
+  background: var(--surface, #00000005);
+  margin: 0.5em 0;
+  padding: 4px 10px;
+}
+
+.sa-markdown-content code {
+  background: var(--surface, #0000000a);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.sa-markdown-content pre {
+  background: var(--surface, #0000000a);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+
+.sa-markdown-content pre code {
+  font-size: inherit;
+  background: 0 0;
+  padding: 0;
+}
+
+.sa-markdown-content table {
+  border-collapse: collapse;
+  font-size: inherit;
+  margin: 0.4em 0;
+}
+
+.sa-markdown-content th,
+.sa-markdown-content td {
+  border: 1px solid var(--border, #d9d9d9);
+  text-align: left;
+  padding: 4px 8px;
+}
+
+.sa-markdown-content th {
+  background: var(--surface, #00000005);
+  font-weight: 600;
+}
+
+.sa-markdown-content hr {
+  border: none;
+  border-top: 1px solid var(--border, #d9d9d9);
+  margin: 0.8em 0;
+}
+
+.sa-markdown-content a {
+  color: var(--ant-color-link, #1677ff);
+  text-decoration: none;
+}
+
+.sa-markdown-content a:hover {
+  text-decoration: underline;
+}
+
+.sa-markdown-content strong {
+  font-weight: 600;
+}
+
+.sa-markdown-content em {
+  font-style: italic;
+}
+
+/* ── 内联设置面板 ── */
+
+.sa-settings-inline {
+  flex-direction: column;
+  height: 100%;
+  display: flex;
+}
+
+.sa-settings-header {
+  border-bottom: 1px solid var(--border);
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  display: flex;
+}
+
+.sa-settings-title {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sa-settings-body {
+  flex: 1;
+  padding: 8px 12px;
+  overflow-y: auto;
+}
+
+/* ── 移动端：侧栏改为上下堆叠 ── */
+
+@media (width <= 768px) {
+  .sa-body-inner {
+    flex-direction: column;
+  }
+
+  .sa-sidebar {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    width: 100%;
+    min-width: 0;
+  }
+}

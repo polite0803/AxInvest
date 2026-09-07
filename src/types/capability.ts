@@ -652,6 +652,36 @@ export interface CognitiveSelectedAgentProfile {
   expert?: string | null;
 }
 
+/**
+ * 认知编排路由观测事件（对应后端 `cognitive-route-event`，T6 三时点 emit）。
+ *
+ * 公共字段：phase / emittedAtMs / conversationId（可选）；
+ * 按 phase 携带各自字段：route_decision / dispatch / completed / failed。
+ */
+export interface CognitiveRouteEventPayload {
+  /** 事件阶段 */
+  phase: "route_decision" | "dispatch" | "completed" | "failed";
+  /** 发射时间（毫秒时间戳） */
+  emittedAtMs?: number;
+  /** 所属会话（后端缺失时缺省） */
+  conversationId?: string;
+
+  // ── route_decision ──
+  routePath?: string;
+  domain?: string;
+  cluster?: string;
+  capabilityId?: string;
+  confidence?: number;
+  isLlmFallback?: boolean;
+  executionMode?: CognitiveExecutionMode;
+  stageRecords?: CognitiveRouteStageView[] | null;
+
+  // ── failed ──
+  errorCode?: string;
+  errorCategory?: string;
+  errorDetail?: string | null;
+}
+
 /** 认知编排统一入口响应（对应后端 CognitiveQueryResponse，camelCase） */
 export interface CognitiveQueryResponse {
   /** 三层路由地址（确定性路径），如 "invest/stock_analysis/tech" */

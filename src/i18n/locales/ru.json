@@ -2035,7 +2035,9 @@
         "orchestratorDag": "Оркестратор DAG",
         "approvalGate": "Шлюз утверждения"
       }
-    }
+    },
+    "executing": "Выполняется",
+    "failed": "Ошибка маршрутизации"
   },
   "continuation": {
     "continueFromHere": "Продолжить отсюда",

@@ -2035,7 +2035,9 @@
         "orchestratorDag": "Orchestrator DAG",
         "approvalGate": "Genehmigungsgate"
       }
-    }
+    },
+    "executing": "Wird ausgeführt",
+    "failed": "Routing fehlgeschlagen"
   },
   "continuation": {
     "continueFromHere": "Von hier fortfahren",

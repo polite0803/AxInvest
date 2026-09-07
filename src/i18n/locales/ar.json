@@ -2035,7 +2035,9 @@
         "orchestratorDag": "منسق DAG",
         "approvalGate": "بوابة الموافقة"
       }
-    }
+    },
+    "executing": "جارٍ التنفيذ",
+    "failed": "فشل التوجيه"
   },
   "continuation": {
     "continueFromHere": "المتابعة من هنا",

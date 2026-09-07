@@ -2035,7 +2035,9 @@
         "orchestratorDag": "編排器 DAG",
         "approvalGate": "審批門"
       }
-    }
+    },
+    "executing": "執行中",
+    "failed": "路由失敗"
   },
   "continuation": {
     "continueFromHere": "從此處繼續",

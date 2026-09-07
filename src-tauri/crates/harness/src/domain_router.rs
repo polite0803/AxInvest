@@ -745,7 +745,10 @@ pub fn default_domain_rules() -> Vec<DomainRoutingRule> {
                 "比特币",
             ],
         )
-        .with_priority(78)
+        // 优先级必须高于数据分析规则（80）：「股票/基金/投资/行情」是无歧义金融信号，
+        // 而「分析/数据」是泛化词——否则「分析股票301302」会被数据分析域（80）抢先命中，
+        // L2 簇路由进 data_analysis_query，金融工作流（finance/general 簇）永远进不了 L3 候选集。
+        .with_priority(88)
         .with_description("金融相关关键词"),
         // ── 自动化域（业务标签 axopc）──
         DomainRoutingRule::new(
@@ -910,5 +913,38 @@ impl DomainRouter for DomainRouterImpl {
             next_priority -= 10;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 回归测试：「分析股票301302」必须路由到 Finance 域。
+    ///
+    /// 背景：金融规则优先级曾低于数据分析规则（78 < 80），而「分析/数据」是
+    /// 泛化词——导致含「股票」的输入被数据分析域抢先命中，L2 簇路由进
+    /// data_analysis_query，金融工作流（finance/general 簇）永远进不了 L3 候选集。
+    /// 金融关键词（股票/基金/投资/行情等）是无歧义强信号，优先级必须更高。
+    #[tokio::test]
+    async fn test_stock_analysis_input_routes_to_finance() {
+        let router = DomainRouterImpl::new();
+        for query in ["分析股票301302", "分析股票600519", "股票301302行情如何"] {
+            let result = router.route(query).await;
+            assert_eq!(
+                result.domain,
+                CapabilityDomain::Finance,
+                "输入「{query}」应路由到 finance 域，实际路由到 {}",
+                result.domain.as_str()
+            );
+        }
+    }
+
+    /// 数据分析域规则仍然生效：不含金融信号的「分析」输入照常进 DataAnalysis。
+    #[tokio::test]
+    async fn test_generic_analysis_still_routes_to_data_analysis() {
+        let router = DomainRouterImpl::new();
+        let result = router.route("帮我把这份销售数据做个透视分析").await;
+        assert_eq!(result.domain, CapabilityDomain::DataAnalysis);
     }
 }

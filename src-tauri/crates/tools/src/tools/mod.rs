@@ -9,6 +9,7 @@ pub mod agent;
 pub mod agent_memory;
 pub mod apply_patch;
 pub mod arxiv_scanner;
+pub mod astock_data;
 pub mod bash;
 pub mod batch_missing;
 pub mod browser;
@@ -340,6 +341,12 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(finance::DragonTigerTool),
         std::sync::Arc::new(finance::ClsFlashTool),
     ]);
+
+    // ── astock 数据工具（L1）：批量注册 stock_mcp_tools 定义 ──
+    // 注册后 register_all_capabilities 的通用逻辑自动派生 tool:{name} 护照
+    // （domain=Finance + tool_ref），DiscoverSkills / extra_tools 注入链路即刻生效。
+    // 内部跳过与 finance.rs 重名的 3 个工具，避免 HashMap 静默覆盖。
+    registry.register_all(astock_data::stock_mcp_tool_instances());
 
     let available_toolsets: HashSet<String> =
         registry.list_all().iter().map(|t| format!("{:?}", t.category).to_lowercase()).collect();

@@ -36,6 +36,7 @@ import { ExperimentSidebar } from "./ExperimentSidebar";
 import { ExperimentTrail } from "./ExperimentTrail";
 import { resolveTimelineJump } from "./timelineJump";
 import "./dual-view";
+import "./stock-analysis.css";
 import { AnalysisHistoryButton } from "./AnalysisHistoryButton";
 import { DualViewRenderer } from "./dual-view";
 import { EventCalendarPanel } from "./EventCalendarPanel";

@@ -1717,7 +1717,16 @@ async fn cognitive_query_inner(
         // 守卫：会话已加载能力与命中模板 domain 交集时（F3），不直发模板，
         // 落到下方通配分支转 agent 路径（LLM 在已加载能力上下文中编排）。
         ExecutionMode::Workflow | ExecutionMode::Direct if !defer_to_agent => {
-            let workflow_id = response.capability_id.clone();
+            // 护照 capability_id 形如 "workflow:stock-analysis"，而 WorkEngine 的
+            // workflows HashMap key 是裸模板 ID（load_workflow_template(template_id)）。
+            // 与 RunWorkflow 工具（run_workflow.rs 的 strip_prefix）对齐，剥前缀再执行，
+            // 否则 get_workflow 精确匹配失败 → WORKFLOW_NOT_FOUND → 降级 LLM。
+            // （"evolution:workflow:x" 不以 "workflow:" 开头，不受影响）
+            let workflow_id = response
+                .capability_id
+                .strip_prefix("workflow:")
+                .unwrap_or(&response.capability_id)
+                .to_string();
             // ── T1：直执行前把文本可抽取参数（如 stock_code）合并进执行选项 ──
             // 与 workflow_execute 内部的对话驱动合并逻辑同源（workflows::extract_params_from_text），
             // 显式透传保证「判据用哪套规则、执行就用哪套规则」。

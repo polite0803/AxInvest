@@ -2035,7 +2035,9 @@
         "orchestratorDag": "오케스트레이터 DAG",
         "approvalGate": "승인 게이트"
       }
-    }
+    },
+    "executing": "실행 중",
+    "failed": "라우팅 실패"
   },
   "continuation": {
     "continueFromHere": "여기서 계속",

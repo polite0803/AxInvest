@@ -107,17 +107,40 @@ pub async fn workflow_execute(
     // 验证工作流存在，并预构建节点元信息（node_id → (title, node_type)）。
     // 供 progress_callback 组装步骤事件使用；回调内不再访问 engine 锁，
     // 避免 progress_callback 与 run_workflow 主循环产生死锁。
-    let workflow = app_state
-        .work_engine
-        .get_workflow(&workflow_id)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?
-        .ok_or_else(|| ErrorResponse::err(agent_err::WORKFLOW_NOT_FOUND))?;
+    //
+    // 懒加载兜底：启动期只有 cognitive_router_main 被显式 load 进引擎内存，
+    // 其余模板（如 stock-analysis）默认不在 self.workflows HashMap 中。
+    // 认知编排直执行 / RunWorkflow 执行器等「按模板 ID 直接执行」的调用方
+    // 首跳必未命中 → WORKFLOW_NOT_FOUND → 认知编排降级为纯 LLM 回答
+    // （表现为"对话分析秒回但没跑完整工作流"）。此处未命中时自动从
+    // DB 模板库加载一次再重试，执行方无需各自感知内存加载状态。
+    let workflow = match app_state.work_engine.get_workflow(&workflow_id).await.map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })? {
+        Some(wf) => wf,
+        None => {
+            app_state.work_engine.load_workflow_template(&workflow_id).await.map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
+            app_state
+                .work_engine
+                .get_workflow(&workflow_id)
+                .await
+                .map_err(|e| {
+                    String::from(crate::commands::error::ErrorResponse::from_error(
+                        e,
+                        crate::commands::error::ErrorCategory::Unrecoverable,
+                    ))
+                })?
+                .ok_or_else(|| ErrorResponse::err(agent_err::WORKFLOW_NOT_FOUND))?
+        },
+    };
 
     let goal_map: HashMap<String, (String, String)> = workflow
         .nodes

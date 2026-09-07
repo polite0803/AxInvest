@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { useCognitiveRouteStore } from "@/stores";
+import { ensureRouteEventListening } from "@/stores/feature/cognitiveRouteStore";
 import { Empty, Tag, theme, Typography } from "antd";
 import {
   AlertTriangle,
@@ -13,6 +14,7 @@ import {
   Route,
   Shuffle,
 } from "lucide-react";
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
@@ -33,6 +35,11 @@ export function CognitiveRoutePanel() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const observation = useCognitiveRouteStore((s) => s.observation);
+
+  // T6 事件通道：挂载即订阅 cognitive-route-event（决策即达，不等执行完成）
+  useEffect(() => {
+    void ensureRouteEventListening();
+  }, []);
 
   if (!observation) {
     return (
@@ -119,7 +126,28 @@ export function CognitiveRoutePanel() {
               {t("cognitiveRoute.filteredCount")}: {observation.filteredCount}
             </Tag>
           )}
+          {observation.executing && !observation.failed && (
+            <Tag color="processing" icon={<Clock size={11} />}>
+              {t("cognitiveRoute.executing")}
+            </Tag>
+          )}
+          {observation.failed && (
+            <Tag color="error" icon={<AlertTriangle size={11} />}>
+              {t("cognitiveRoute.failed")}
+              {observation.errorCode ? `: ${observation.errorCode}` : ""}
+            </Tag>
+          )}
         </div>
+
+        {/* 失败详情（failed 事件写入，错误路径观测不再丢失） */}
+        {observation.failed && observation.errorDetail && (
+          <Text
+            type="danger"
+            style={{ fontSize: 12, display: "block", lineHeight: 1.5, wordBreak: "break-all" }}
+          >
+            {observation.errorDetail}
+          </Text>
+        )}
       </div>
 
       {/* 执行决策：命中的工作流 / 选中的执行专家（模式中文映射） */}

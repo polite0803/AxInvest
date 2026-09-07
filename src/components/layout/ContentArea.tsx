@@ -11,7 +11,7 @@ import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
 import { Button, Result, Spin } from "antd";
 import { lazy, memo, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 // ── 页面 lazy 导入 ──
 const LazyWorkspaceHub = lazy(() =>
@@ -157,6 +157,34 @@ function RedirectToChatWithParams({ tab }: { tab: string }) {
   const qs = location.search;
   const to = qs ? `${BUILTIN_PAGE_PATH.chat}${qs}` : BUILTIN_PAGE_PATH.chat;
   return <Navigate to={to} replace state={{ tab }} />;
+}
+
+/** 旧股票业务路由 → 投资中心 /invest?tab=…。
+ * 分析/交易/回测等独立页已内嵌进 StockWorkspaceShell 或 InvestHub Tab，
+ * 旧路由已移除，但全项目仍有大量调用方（历史记录按钮 / 复盘面板 / 行情表格 /
+ * 时间旅行工作台等）在跳旧地址，不重定向会落入 * 通配路由报 404。
+ * 参数映射（query 全量保留）：
+ *   - code → stockCode（工作区切换器同步选中该股票）
+ *   - from="id"：/stock-analysis/:id 的 :id → analysisId + view=analysis
+ *     （与 StockAnalysisPage 既有的工作区入口参数约定一致）
+ *   - from="stockCode"：/workspace/:stockCode 的 :stockCode → stockCode */
+function RedirectToInvest({ tab, view, from }: { tab: string; view?: string; from?: "id" | "stockCode" }) {
+  const location = useLocation();
+  const params = useParams<{ id?: string; stockCode?: string }>();
+  const qs = new URLSearchParams(location.search);
+  const code = (from === "stockCode" ? params.stockCode : undefined) ?? qs.get("code");
+  if (code && !qs.get("stockCode")) {
+    qs.set("stockCode", code);
+  }
+  if (from === "id" && params.id) {
+    qs.set("view", "analysis");
+    qs.set("analysisId", params.id);
+  }
+  if (view) {
+    qs.set("view", view);
+  }
+  qs.set("tab", tab);
+  return <Navigate to={`/invest?${qs.toString()}`} replace />;
 }
 
 export const ContentArea = memo(function ContentArea() {
@@ -341,6 +369,17 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
+
+          {/* 旧股票业务路由 → 投资中心（历史记录/复盘/行情表格/时间旅行等调用方仍指向旧地址） */}
+          <Route path="/stock-analysis" element={<RedirectToInvest tab="workspace" />} />
+          <Route path="/stock-analysis/:id" element={<RedirectToInvest tab="workspace" from="id" />} />
+          <Route path="/trade" element={<RedirectToInvest tab="workspace" view="trade" />} />
+          <Route path="/watchlist" element={<RedirectToInvest tab="workspace" view="monitor" />} />
+          <Route path="/backtest" element={<RedirectToInvest tab="workspace" view="backtest" />} />
+          <Route path="/compare" element={<RedirectToInvest tab="workspace" view="compare" />} />
+          <Route path="/screener" element={<RedirectToInvest tab="screener" />} />
+          <Route path="/quant" element={<RedirectToInvest tab="quant" />} />
+          <Route path="/workspace/:stockCode" element={<RedirectToInvest tab="workspace" from="stockCode" />} />
 
           <Route path="*" element={<NotFoundRoute />} />
         </Routes>

@@ -269,6 +269,7 @@ export function DataVendorsTab() {
   const [iwencaiKey, setIwencaiKey] = useState("");
   const [xueqiuToken, setXueqiuToken] = useState("");
   const [neodataToken, setNeodataToken] = useState("");
+  const [emProxy, setEmProxy] = useState("");
   const [health, setHealth] = useState<Record<string, HealthStatus>>({});
   const [checkingAll, setCheckingAll] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -295,21 +296,24 @@ export function DataVendorsTab() {
         let key = "";
         let xqToken = "";
         let ndToken = "";
+        let emProxyUrl = "";
         for (const v of vars) {
           if (
             v.name.startsWith("vendor_") && v.name !== "vendor_iwencai_key" && v.name !== "vendor_xueqiu_token"
-            && v.name !== "vendor_neodata_token"
+            && v.name !== "vendor_neodata_token" && v.name !== "vendor_eastmoney_proxy"
           ) {
             vals[v.name] = !!v.value;
           }
           if (v.name === "vendor_iwencai_key") { key = typeof v.value === "string" ? v.value : ""; }
           if (v.name === "vendor_xueqiu_token") { xqToken = typeof v.value === "string" ? v.value : ""; }
           if (v.name === "vendor_neodata_token") { ndToken = typeof v.value === "string" ? v.value : ""; }
+          if (v.name === "vendor_eastmoney_proxy") { emProxyUrl = typeof v.value === "string" ? v.value : ""; }
         }
         setVendorValues(vals);
         setIwencaiKey(key);
         setXueqiuToken(xqToken);
         setNeodataToken(ndToken);
+        setEmProxy(emProxyUrl);
         setLoaded(true);
       })
       .catch(() => {
@@ -323,6 +327,8 @@ export function DataVendorsTab() {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
+      // 东财代理：先校验+热更新+持久化（非法 URL 会在后端报错并中止保存）
+      await invoke("save_eastmoney_proxy", { proxyUrl: emProxy.trim() });
       // 先加载全量模板，只更新 vendor_ 变量值，保留 varType/isSecret 等字段
       const tmpl = await invoke("get_workflow_template", { id: "stock-analysis" }) as Record<string, unknown>;
       const allVars = (tmpl?.variables as Record<string, unknown>[]) ?? [];
@@ -360,6 +366,14 @@ export function DataVendorsTab() {
         value: neodataToken,
         isSecret: true,
       });
+      const emProxyExisting = varMap.get("vendor_eastmoney_proxy");
+      varMap.set("vendor_eastmoney_proxy", {
+        ...(emProxyExisting && typeof emProxyExisting === "object" ? emProxyExisting : {}),
+        name: "vendor_eastmoney_proxy",
+        varType: "string",
+        value: emProxy.trim(),
+        isSecret: false,
+      });
       const merged = Array.from(varMap.values());
       await invoke("update_workflow_template", {
         id: "stock-analysis",
@@ -388,7 +402,7 @@ export function DataVendorsTab() {
     } finally {
       setSaving(false);
     }
-  }, [vendorValues, iwencaiKey, xueqiuToken, neodataToken, t, message]);
+  }, [vendorValues, iwencaiKey, xueqiuToken, neodataToken, emProxy, t, message]);
 
   const checkOne = useCallback(async (vendorName: string) => {
     setHealth((prev) => ({ ...prev, [vendorName]: "pending" }));
@@ -524,6 +538,16 @@ export function DataVendorsTab() {
                     placeholder={t("stockAnalysis.settings.vendors.apiKey")}
                     value={xueqiuToken}
                     onChange={(e) => setXueqiuToken(e.target.value)}
+                  />
+                )}
+                {v.key === "vendor_eastmoney" && (
+                  <Input
+                    style={{ width: 220 }}
+                    size="small"
+                    allowClear
+                    placeholder={t("stockAnalysis.settings.vendors.proxyPlaceholder")}
+                    value={emProxy}
+                    onChange={(e) => setEmProxy(e.target.value)}
                   />
                 )}
                 {v.key === "vendor_neodata" && (

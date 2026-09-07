@@ -1348,10 +1348,38 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         "[startup] create_app_state 关键路径完成（首帧可渲染）"
     );
 
-    let astock_client = Arc::new(axagent_astock_data::AStockClient::new());
+    // [2026-09-07 接线恢复] browser_eastmoney vendor 的浏览器 fetch 兜底（klines/financials
+    // 链尾级）。09-03 init 重构恢复了 init/browser_fetcher.rs 适配器文件，但注入调用点被
+    // 裁掉，导致 with_browser_fetcher 全仓零调用、vendor 持 fetcher=None、所有方法直接
+    // Err——链尾兜底空转。此处按适配器注释的原始约定重新接线（懒启动，不增加启动开销）。
+    // 移动端无 Playwright，注入 NoopBrowserFetcher 保持 trait 路径一致。
+    let astock_client = {
+        #[cfg(not(mobile))]
+        let client = axagent_astock_data::AStockClient::new().with_browser_fetcher(Arc::new(
+            crate::init::browser_fetcher::PlaywrightBrowserFetcher::new(browser_client.clone()),
+        ));
+        #[cfg(mobile)]
+        let client = axagent_astock_data::AStockClient::new()
+            .with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher));
+        Arc::new(client)
+    };
     // [2026-09-03 接线恢复] finance.rs 的 5 个 api_tool（研报/概念板块/北向资金/龙虎榜/财联社快讯）
     // 经 tools::global_state 取客户端，AppState 构造时注入一次。
     axagent_tools::global_state::set_astock_client(astock_client.clone());
+
+    // ── stock-analysis 生命周期钩子注册（对话直执行与业务封装路径统一执行语义）──
+    // precheck（数据质量预检，仅对话路径） / enhance（业务变量增强，所有路径） /
+    // persist（结果持久化，仅对话路径）。业务封装路径通过 opts.input 携带的
+    // analysis_id 标记跳过 precheck/persist，避免双重执行。
+    {
+        let db_for_hooks = harness.db().clone();
+        crate::commands::stock_workflow::hooks::register_stock_analysis_hooks(
+            &work_engine,
+            db_for_hooks,
+            astock_client.clone(),
+        )
+        .await;
+    }
 
     Ok(AppState {
         harness,

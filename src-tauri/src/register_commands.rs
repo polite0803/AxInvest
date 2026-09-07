@@ -1302,6 +1302,7 @@ macro_rules! register_all_commands {
             commands::stock_analysis::run_reflection_now,
             commands::stock_analysis::run_replay_backtest,
             commands::stock_analysis::run_self_improving_stock_analysis,
+            commands::stock_analysis::save_eastmoney_proxy,
             commands::stock_analysis::save_neodata_token,
             commands::stock_analysis::save_valuation_params,
             commands::stock_analysis::screen_stocks,

@@ -15387,6 +15387,7 @@
         "checking": "检测中...",
         "notChecked": "未检测",
         "apiKey": "API Key",
+        "proxyPlaceholder": "代理地址，如 http://127.0.0.1:7890，留空直连",
         "depActive": "为以下固定工具提供数据：",
         "depInactive": "关闭后以下工具将降级到下一 vendor：",
         "noDeps": "无固定工具依赖此数据源",

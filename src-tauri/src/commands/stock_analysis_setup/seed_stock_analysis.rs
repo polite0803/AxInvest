@@ -32,7 +32,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   v4: 移除 bear-r3 → t-dragon-tiger-data 入边——与 t-dragon-tiger-data → a-hot-money
     //       构成回环（a-hot-money 在辩论链上游），Kahn 检测拒绝启动（"Cycle detected"）。
     //       龙虎榜取数改为入度 0 启动节点，天然先于 a-hot-money 完成。
-    const TEMPLATE_VERSION: i32 = 4;
+    //   v5: 声明 hooks_config（precheck/enhance/persist 三钩子）——变量增强统一由
+    //       stock-analysis-enhance 钩子执行，对话直执行路径与业务封装路径变量零漂移。
+    const TEMPLATE_VERSION: i32 = 5;
 
     tracing::info!(
         "[stock_analysis_setup] seed_stock_analysis_workflow_template 开始: TEMPLATE_ID={TEMPLATE_ID}, TEMPLATE_VERSION={TEMPLATE_VERSION}"
@@ -3351,7 +3353,18 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
     // 先删再插，避免 SeaORM .save() 对已存在记录的 update 失败
     let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
     workflow_template::ActiveModel {
-        hooks_config: Set(None),
+        hooks_config: Set(Some(
+            // 生命周期钩子声明（v5）：precheck/enhance 由引擎在 DAG 主循环前调用，
+            // persist 在终态后调用。见 stock_workflow/hooks.rs。
+            serde_json::to_string(&serde_json::json!({
+                "pre_exec": ["stock-analysis-precheck", "stock-analysis-enhance"],
+                "post_exec": ["stock-analysis-persist"],
+            }))
+            .map_err(|e| {
+                ErrorResponse::new(stock_setup::INTERNAL)
+                    .with_detail(format!("序列化 hooks_config 失败: {e}"))
+            })?,
+        )),
         id: Set(TEMPLATE_ID.to_string()),
         cluster_id: Set(Some("equity".to_string())),
         route_path: Set(Some("/finance/equity/multi-dim-analysis".to_string())),

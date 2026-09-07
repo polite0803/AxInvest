@@ -9,28 +9,40 @@ use tokio::time::sleep;
 
 pub struct EastMoneyVendor {
     pub http: reqwest::Client,
-    /// 可选代理客户端（EASTMONEY_PROXY 环境变量配置），用于绕过 IP 封锁
-    pub proxy_http: Option<reqwest::Client>,
+    /// 可选代理客户端，用于绕过直连链路故障（如本机到 push2his 被 RST）。
+    /// 运行时可通过 AStockClient::set_eastmoney_proxy 热更新（设置页配置），
+    /// 启动时从 EASTMONEY_PROXY 环境变量读取初始值（向后兼容）。
+    /// Arc+RwLock 共享句柄：vendor 注册进 AStockClient 后外界无法按名定位，
+    /// 用共享句柄让设置命令能原地更新代理而无需重建整个 client。
+    pub proxy_http: std::sync::Arc<tokio::sync::RwLock<Option<reqwest::Client>>>,
 }
 
 impl EastMoneyVendor {
-    /// 从环境变量 EASTMONEY_PROXY 构建代理客户端（如 socks5://192.168.0.235:1080）
+    /// 从环境变量 EASTMONEY_PROXY 读取初始代理（如 http://127.0.0.1:12026）
     pub fn build_proxy_client() -> Option<reqwest::Client> {
         let proxy_url = std::env::var("EASTMONEY_PROXY").ok()?;
-        if proxy_url.is_empty() {
-            return None;
-        }
-        // 修复 M-RES-2: 原 `reqwest::Proxy::all(&proxy_url).ok()?` 把代理构建
-        // 错误（URL 格式错误、协议不支持等）静默吞为 None，调用方无法感知。
-        // 改为显式 match，记录 warn 日志便于诊断。
-        let proxy = match reqwest::Proxy::all(&proxy_url) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("[eastmoney] 代理 URL 解析失败 (url={proxy_url}): {e}");
-                return None;
+        match Self::try_build_proxy_client(proxy_url.trim()) {
+            Ok(c) => {
+                tracing::info!("[eastmoney] 已配置代理（来自 EASTMONEY_PROXY 环境变量）");
+                Some(c)
             },
-        };
-        match reqwest::Client::builder()
+            Err(e) => {
+                tracing::warn!("[eastmoney] EASTMONEY_PROXY 环境变量无效: {e}");
+                None
+            },
+        }
+    }
+
+    /// 从 URL 构建并校验代理客户端。空 URL 返回 Err（调用方决定语义）。
+    /// 原 `reqwest::Proxy::all(&proxy_url).ok()?` 把代理构建错误（URL 格式错误、
+    /// 协议不支持等）静默吞为 None，调用方无法感知。改为显式 Result。
+    pub fn try_build_proxy_client(proxy_url: &str) -> Result<reqwest::Client, String> {
+        if proxy_url.is_empty() {
+            return Err("代理地址为空".into());
+        }
+        let proxy =
+            reqwest::Proxy::all(proxy_url).map_err(|e| format!("代理 URL 解析失败: {e}"))?;
+        reqwest::Client::builder()
             .proxy(proxy)
             .timeout(std::time::Duration::from_secs(15))
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -39,29 +51,24 @@ impl EastMoneyVendor {
             .pool_max_idle_per_host(8)
             .min_tls_version(reqwest::tls::Version::TLS_1_2)
             .build()
-        {
-            Ok(c) => {
-                tracing::info!("[eastmoney] 已配置代理: {proxy_url}");
-                Some(c)
-            },
-            Err(e) => {
-                tracing::warn!("[eastmoney] 代理客户端创建失败: {e}");
-                None
-            },
-        }
+            .map_err(|e| format!("代理客户端创建失败: {e}"))
     }
 
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     /// 429 限流时使用更长等待（2s → 4s → 8s）
-    /// IncompleteMessage 时若配置了代理，自动走代理重试
+    /// 连接级断裂（IncompleteMessage / TLS EOF / RST）时若配置了代理，
+    /// 不退避立即切代理重试；无代理则快速失败交给路由层 fallback
     async fn em_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
         let max_retries = 3;
         let mut delay = Duration::from_secs(1);
         let mut last_err = None;
+        // 克隆代理句柄快照（reqwest::Client 内部是 Arc，克隆廉价）；
+        // 不跨 await 持有锁 guard。
+        let proxy_client = self.proxy_http.read().await.clone();
         for attempt in 0..max_retries {
             let http_client = if attempt == 0 {
                 &self.http
-            } else if let Some(ref p) = self.proxy_http {
+            } else if let Some(ref p) = proxy_client {
                 // 第1次失败后走代理重试（仅当配置了代理）
                 p
             } else {
@@ -99,17 +106,29 @@ impl EastMoneyVendor {
                     }
                 },
                 Err(e) => {
-                    let is_incomplete = format!("{e:?}").contains("IncompleteMessage");
-                    if is_incomplete && attempt == 0 && self.proxy_http.is_some() {
-                        // IncompleteMessage + 有代理 → 不走指数退避，立即走代理重试
-                        tracing::warn!("[eastmoney] IncompleteMessage，切换代理重试({url})");
+                    // 连接级断裂识别：IncompleteMessage（响应中途断流）+ TLS EOF /
+                    // SendRequest / ConnectionReset 等（对端 RST 掐断连接）。
+                    // 实证背景（2026-08-01 / 2026-09-07 两次复发）：本机直连
+                    // push2his.eastmoney.com 的 IPv4 链路会被服务器 RST（所有镜像
+                    // CDN 节点一致），属持续性坏链路而非抖动——同链路退避重试无意义，
+                    // 应立即切代理（有代理）或快速失败交给路由层 fallback 到腾讯源。
+                    let err_repr = format!("{e:?}");
+                    let is_conn_break = err_repr.contains("IncompleteMessage")
+                        || err_repr.contains("UnexpectedEof")
+                        || err_repr.contains("ConnectionReset")
+                        || err_repr.contains("ConnectionAborted")
+                        || err_repr.contains("BrokenPipe")
+                        || err_repr.contains("SendRequest");
+                    if is_conn_break && attempt == 0 && proxy_client.is_some() {
+                        // 连接断裂 + 有代理 → 不走指数退避，立即走代理重试
+                        tracing::warn!("[eastmoney] 直连被掐断，立即切换代理重试({url})");
                         last_err = Some(e.into());
                         continue; // 直接用 attempt=1 走代理
                     }
-                    if is_incomplete {
-                        // IncompleteMessage + 无代理 → 快速失败让路由层 fallback
+                    if is_conn_break {
+                        // 连接断裂 + 无代理 → 快速失败让路由层 fallback
                         tracing::warn!(
-                            "[eastmoney] IncompleteMessage({url})，快速失败→路由层 fallback"
+                            "[eastmoney] 连接被掐断且无代理({url})，快速失败→路由层 fallback"
                         );
                         return Err(e.into());
                     }
@@ -2888,7 +2907,10 @@ mod asof_capability_tests {
     use super::*;
 
     fn make_vendor() -> EastMoneyVendor {
-        EastMoneyVendor { http: reqwest::Client::new(), proxy_http: None }
+        EastMoneyVendor {
+            http: reqwest::Client::new(),
+            proxy_http: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        }
     }
 
     #[test]

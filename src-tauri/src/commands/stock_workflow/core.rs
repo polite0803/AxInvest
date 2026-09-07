@@ -14,7 +14,6 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::price_alerts;
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
-use axagent_harness::workflow_types::Variable;
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::Expr;
@@ -460,6 +459,22 @@ pub(crate) async fn run_stock_workflow_inner(
                     }
                 }
             }
+            if v.name == "vendor_eastmoney_proxy" {
+                if let serde_json::Value::String(ref url) = v.value {
+                    // 空 = 显式清除代理回退直连；非空 = 校验并启用
+                    state
+                        .astock_client
+                        .set_eastmoney_proxy(if url.is_empty() {
+                            None
+                        } else {
+                            Some(url.as_str())
+                        })
+                        .await
+                        .map_err(|e| {
+                            ErrorResponse::new(wf_err::INTERNAL).with_detail(e.to_string())
+                        })?;
+                }
+            }
         }
     }
 
@@ -559,87 +574,15 @@ pub(crate) async fn run_stock_workflow_inner(
     let sc_name_for_spawn = sc_name.clone();
     let vector_store = state.vector_store.clone();
     let master_key = state.harness.master_key_owned();
-    // 在 spawn 前拉取市场状态（沪深300判断牛/熊/震荡），捕获到闭包中
-    let market_regime_json: Option<serde_json::Value> =
-        state.astock_client.get_klines("000300", "daily", 60).await.ok().and_then(|klines| {
-            if klines.is_empty() {
-                return None;
-            }
-            let r = axagent_analysis_engine::market_regime::classify_regime(&klines);
-            Some(serde_json::json!({
-                "regime": r.regime,
-                "confidence": r.confidence,
-                "volatility": r.volatility,
-                "description": r.description,
-            }))
-        });
-    // 注入市场模拟指标（sim_stability/sim_liquidity/sim_impact）
-    // 从个股 K 线计算轻量版，无需额外 API 调用
-    let sim_metrics: serde_json::Value = state
-        .astock_client
-        .get_klines(&stock_code, "daily", 30)
-        .await
-        .ok()
-        .and_then(|klines| {
-            if klines.len() < 5 {
-                return None;
-            }
-            // 计算日收益率序列 → 年化波动率 → sim_stability
-            let mut returns = Vec::with_capacity(klines.len() - 1);
-            let mut total_volume: f64 = 0.0;
-            for pair in klines.windows(2) {
-                let prev_close = pair[0].close;
-                let cur = &pair[1];
-                if prev_close > 0.0 {
-                    returns.push((cur.close - prev_close) / prev_close);
-                }
-                total_volume += cur.volume;
-            }
-            let avg_price = klines.last()?.close;
-            let n = returns.len() as f64;
-            if n < 3.0 {
-                return None;
-            }
-            let mean = returns.iter().sum::<f64>() / n;
-            let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
-            let annual_vol = variance.sqrt() * (252.0_f64).sqrt();
-            // sim_stability: 0~1, 年化波动率 0%→1.0, 60%→0.5, 100%+→0.3
-            let sim_stability = 1.0 / (1.0 + annual_vol * 3.0).clamp(0.3, 1.0);
-            // sim_liquidity: 0~1, 从日均成交额估算
-            let avg_daily_volume = total_volume / (klines.len() as f64);
-            let daily_volume_val = avg_daily_volume * avg_price;
-            // 日均成交额 ≥ 1亿 → 0.8, 1000万→0.5, 100万→0.2
-            let sim_liquidity = (daily_volume_val / 100_000_000.0 * 0.7 + 0.1).clamp(0.1, 0.95);
-            // sim_impact: bps, 从波动率和流动性估算
-            let sim_impact =
-                (annual_vol * 100.0 * (1.0 - sim_liquidity) * 50.0 + 5.0).clamp(1.0, 200.0);
-            Some(serde_json::json!({
-                "sim_stability": (sim_stability * 100.0).round() / 100.0,
-                "sim_liquidity": (sim_liquidity * 100.0).round() / 100.0,
-                "sim_impact": (sim_impact * 10.0).round() / 10.0,
-                "sim_regime": if annual_vol > 0.4 { "high_vol" }
-                    else if annual_vol > 0.2 { "normal" } else { "low_vol" },
-            }))
-        })
-        .unwrap_or_else(|| {
-            serde_json::json!({
-                "sim_stability": serde_json::Value::Null,
-                "sim_liquidity": serde_json::Value::Null,
-                "sim_impact": serde_json::Value::Null,
-                "sim_regime": serde_json::Value::Null,
-            })
-        });
+    // 市场状态（market_regime）与市场模拟指标（sim_stability/sim_liquidity/sim_impact）
+    // 的计算已迁移至 stock_workflow::hooks::build_stock_analysis_variables，
+    // 由 stock-analysis-enhance 生命周期钩子在 DAG 主循环前统一注入——
+    // 对话直执行路径与工作区路径共享同一实现，业务变量零漂移。
     // 在 spawn 前捕获 as-of 上下文（tokio::task_local 不跨 tokio::spawn 传播）
     let captured_asof = as_of::current_as_of();
     // H4.2 修复：捕获 shutdown_token，使 spawn 任务在应用关闭时能协作取消，
     // 避免 AppState::drop 后后台任务仍阻塞 run_workflow 等待 LLM 响应。
     let shutdown_token = state.shutdown_token.clone();
-    // P1-E13: 在 spawn 前克隆 astock_client，供组合风控门查询股票行业信息。
-    // state 是借用引用，不能逃逸到 tokio::spawn 内部，必须在此克隆后 move 进去。
-    let astock_for_sector = state.astock_client.clone();
-    // P2-F15: 克隆 analysis_id 供 spawn 内部使用（record_lesson_applications），
-    // 保留原始 analysis_id 供函数返回值使用。
-    let analysis_id_for_spawn = analysis_id.clone();
     // P0: 克隆 RealtimeMonitor，供决策落库后自动创建价格告警
     let monitor_for_spawn = state.stock_monitor.get().cloned();
     // P2-1: 克隆 TriggerManager，供决策落库后发布 decision.completed 事件
@@ -664,299 +607,26 @@ pub(crate) async fn run_stock_workflow_inner(
             tool_timeout: std::time::Duration::from_secs(tool_timeout_secs),
             max_concurrent_by_type: Some(type_limits),
             progress_callback: Some(progress_cb),
-            input: Some(json!({"stock_code": &stock_code})),
+            // analysis_id 标记：生命周期钩子据此识别业务封装路径并跳过
+            // precheck/persist（钩子只服务对话直执行路径）；stock_name/
+            // screening_source/as_of_date 供 enhance 钩子免重复计算。
+            input: Some(json!({
+                "stock_code": &stock_code,
+                "analysis_id": &aid,
+                "stock_name": &sc_name_for_spawn,
+                "screening_source": &screening_source,
+                "as_of_date": &as_of_date,
+            })),
             input_schema: input_schema.clone(),
             output_schema: output_schema.clone(),
             dry_run: dry_run.unwrap_or(false),
             ..Default::default()
         };
-        let mut merged_vars: Vec<axagent_harness::workflow_types::Variable> = vec![
-            axagent_harness::workflow_types::Variable {
-                name: "stock_code".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(stock_code.clone()),
-                description: Some("当前分析的股票代码".into()),
-                is_secret: false,
-            },
-            axagent_harness::workflow_types::Variable {
-                name: "stock_name".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(sc_name_for_spawn.clone()),
-                description: Some("当前分析的股票名称".into()),
-                is_secret: false,
-            },
-        ];
-        if let Some(d) = as_of_date.as_deref() {
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "as_of_date".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(d.to_string()),
-                description: Some("时间旅行模式截止日 (YYYY-MM-DD)；live 模式为空".into()),
-                is_secret: false,
-            });
-        }
-        if let Some(v) = template_vars {
-            for tv in v {
-                if !merged_vars.iter().any(|mv| mv.name == tv.name) {
-                    merged_vars.push(tv);
-                }
-            }
-        }
-        // V53: 调用方指定 screening_source 时覆盖模板默认值
-        // 使瓶颈掘金→股票分析的上下文可传递到 portfolio-mgr
-        if let Some(ref source) = screening_source {
-            if !source.is_empty() {
-                if let Some(existing) = merged_vars.iter_mut().find(|mv| mv.name == "screening_source") {
-                    existing.value = serde_json::Value::String(source.clone());
-                } else {
-                    merged_vars.push(axagent_harness::workflow_types::Variable {
-                        name: "screening_source".into(),
-                        var_type: "string".into(),
-                        value: serde_json::Value::String(source.clone()),
-                        description: Some("筛选来源标记".into()),
-                        is_secret: false,
-                    });
-                }
-            }
-        }
-        // X1 修复: 当 screening_source = serenity 时，从候选缓存注入瓶颈分析数据
-        // 使 portfolio-mgr.rhai 能感知 Serenity 瓶颈分析结果，增加因子 6: 瓶颈置信度
-        if let Some(ref source) = screening_source {
-            if source == "serenity" {
-                if let Some(detail) = axagent_analysis_engine::recommender::get_serenity_candidate_detail(&stock_code) {
-                    merged_vars.push(axagent_harness::workflow_types::Variable {
-                        name: "serenity_context".into(),
-                        var_type: "object".into(),
-                        value: detail.clone(),
-                        description: Some("Serenity 瓶颈分析上下文（serenity_score / bottleneck_product / catalysts 等）".into()),
-                        is_secret: false,
-                    });
-                    tracing::info!("[stock-analysis] 注入 serenity_context: score={}, bottleneck={}",
-                        detail["serenity_score"].as_f64().unwrap_or(0.0),
-                        detail["bottleneck_product"].as_str().unwrap_or(""));
-                } else {
-                    tracing::warn!("[stock-analysis] screening_source=serenity 但候选缓存为空: {}", stock_code);
-                }
-            }
-        }
-        // 注入相似历史决策案例（失败案例优先，最多 5 条）
-        let similar_cases_str = fetch_similar_cases(&stock_code, &db).await;
-        if let Some(ref cases) = similar_cases_str {
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "similar_cases".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(cases.clone()),
-                description: Some("相似历史决策（失败案例，供避免重复错误）".into()),
-                is_secret: false,
-            });
-        }
-        // 注入市场状态（沪深300判断牛/熊/震荡），兜底防止模板变量缺失
-        let regime_value = market_regime_json.unwrap_or_else(|| {
-            serde_json::json!({
-                "regime": "unknown",
-                "confidence": null,
-                "volatility": null,
-                "description": "⚠️ 市场状态数据暂不可用（沪深300 K线拉取失败），请勿据此做多空判断，基于个股自身数据完成分析"
-            })
-        });
-        merged_vars.push(axagent_harness::workflow_types::Variable {
-            name: "market_regime".into(),
-            var_type: "object".into(),
-            value: regime_value.clone(),
-            description: Some("当前市场状态(bull/bear/sideways)+波动率+描述".into()),
-            is_secret: false,
-        });
-        // 注入市场模拟指标（DES 轻量版，从个股 K 线估算）
-        if let Some(stab) = sim_metrics["sim_stability"].as_f64() {
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "sim_stability".into(),
-                var_type: "number".into(),
-                value: serde_json::json!(stab),
-                description: Some("市场模拟：价格稳定性(0~1, 越高越稳定)".into()),
-                is_secret: false,
-            });
-        }
-        if let Some(liq) = sim_metrics["sim_liquidity"].as_f64() {
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "sim_liquidity".into(),
-                var_type: "number".into(),
-                value: serde_json::json!(liq),
-                description: Some("市场模拟：流动性深度(0~1, 越高流动性越好)".into()),
-                is_secret: false,
-            });
-        }
-        if let Some(impact) = sim_metrics["sim_impact"].as_f64() {
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "sim_impact".into(),
-                var_type: "number".into(),
-                value: serde_json::json!(impact),
-                description: Some("市场模拟：大单冲击成本(bps)".into()),
-                is_secret: false,
-            });
-        }
-        // ── P1-E13: 注入组合风控门所需的持仓/现金/行业变量 ──
-        // portfolio-risk-gate CodeNode 读取这些变量做组合层约束检查
-        {
-            use axagent_entities::portfolio_holdings;
-            // 1. 查询当前持仓，构造 PositionSummary JSON
-            //    用 avg_cost 估值 market_value（避免逐个调 get_quote 造成延迟）
-            let holdings = portfolio_holdings::Entity::find()
-                .all(&db)
-                .await
-                .unwrap_or_default();
-            let holdings_json: Vec<serde_json::Value> = holdings
-                .iter()
-                .map(|h| {
-                    let mv = h.shares * h.avg_cost;
-                    serde_json::json!({
-                        "stockCode": h.stock_code,
-                        "stockName": h.stock_name,
-                        "totalShares": h.shares as i32,
-                        "avgCost": h.avg_cost,
-                        "currentPrice": h.avg_cost,
-                        "marketValue": mv,
-                        "unrealizedPnl": 0.0,
-                        "unrealizedPnlPct": 0.0,
-                        "totalRealizedPnl": 0.0,
-                        "sectorName": null,
-                    })
-                })
-                .collect();
-            let holdings_json_str =
-                serde_json::to_string(&holdings_json).unwrap_or_else(|_| "[]".into());
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "holdings_json".into(),
-                var_type: "string".into(),
-                value: serde_json::Value::String(holdings_json_str),
-                description: Some("当前持仓 JSON 数组（供组合风控门检查仓位/行业暴露）".into()),
-                is_secret: false,
-            });
-            // 2. portfolio_cash（暂时注入 0.0，后续可扩展为从账户设置读取）
-            merged_vars.push(axagent_harness::workflow_types::Variable {
-                name: "portfolio_cash".into(),
-                var_type: "number".into(),
-                value: serde_json::json!(0.0),
-                description: Some("可用现金（供组合风控门计算组合总价值）".into()),
-                is_secret: false,
-            });
-            // 3. stock_sector（当前股票的申万一级行业，供行业暴露检查）
-            //    astock_for_sector 已在 spawn 前克隆，避免借用 state（生命周期安全）
-            let stock_sector = astock_for_sector
-                .get_sector_info(&stock_code)
-                .await
-                .ok()
-                .flatten()
-                .map(|s| s.sector_name)
-                .unwrap_or_default();
-            if !stock_sector.is_empty() {
-                merged_vars.push(axagent_harness::workflow_types::Variable {
-                    name: "stock_sector".into(),
-                    var_type: "string".into(),
-                    value: serde_json::Value::String(stock_sector.clone()),
-                    description: Some(
-                        "当前股票的申万一级行业（供组合风控门检查行业暴露）".into(),
-                    ),
-                    is_secret: false,
-                });
-            }
-            tracing::info!(
-                "[stock-analysis] P1-E13 注入: holdings={}条, sector={}",
-                holdings.len(),
-                if stock_sector.is_empty() { "(空)" } else { &stock_sector }
-            );
-        }
-        // 从 market_regime 派生 prompt 偏向 + 触发规则
-        let regime_str = regime_value["regime"].as_str().unwrap_or("unknown");
-        let vol_str = regime_value["volatility"].as_str().unwrap_or("low");
-        let (regime_prompt_bias, regime_triggered_rules) = match (regime_str, vol_str) {
-            ("bull", "high") => (
-                "顺势偏多但高波动环境：关注业绩超预期+资金流入，同时警惕短期大幅回撤",
-                "1. 侧重成长性指标（营收增速、ROE趋势）；2. 估值容忍度可适当放宽；3. 关注大单资金流向；4. 高波动环境需关注最大回撤",
-            ),
-            ("bull", _) => (
-                "顺势偏多：关注业绩超预期+资金流入，警惕追高",
-                "1. 侧重成长性指标（营收增速、ROE趋势）；2. 估值容忍度可适当放宽；3. 关注大单资金流向",
-            ),
-            ("bear", "high") => (
-                "防御为主+高波动环境：严格关注低估值+稳健现金流，警惕杀估值+踩踏风险",
-                "1. 侧重防御性指标（现金流、负债率）；2. 估值要求更严格；3. 关注避险资金流向；4. 高波动环境建议降低仓位",
-            ),
-            ("bear", _) => (
-                "防御为主：关注低估值+稳健现金流，警惕杀估值",
-                "1. 侧重防御性指标（现金流、负债率）；2. 估值要求更严格；3. 关注避险资金流向",
-            ),
-            ("sideways", _) => (
-                "精选个股：关注催化剂+预期差，警惕无主线行情",
-                "1. 侧重个股α；2. 关注催化剂事件；3. 估值锚定历史中枢",
-            ),
-            _ => (
-                "市场状态未知，不预设多空偏向，仅基于个股自身基本面完成分析",
-                "无触发规则，全维度中性分析",
-            ),
-        };
-        merged_vars.push(axagent_harness::workflow_types::Variable {
-            name: "regime_prompt_bias".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(regime_prompt_bias.to_string()),
-            description: Some("按当前市场状态(regime)匹配的分析偏向指令".into()),
-            is_secret: false,
-        });
-        merged_vars.push(axagent_harness::workflow_types::Variable {
-            name: "regime_triggered_rules".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(regime_triggered_rules.to_string()),
-            description: Some("当前市场状态触发的分析规则清单".into()),
-            is_secret: false,
-        });
-        // 注入历史反思教训（从 stock_reflections 表取最近的结构化反思结果）
-        // 必须始终注入，即使为空，否则 value-investor/research-mgr/trader 等节点
-        // 的 input_mapping 引用 {{stock_lessons}} 会报 VARIABLE_NOT_FOUND。
-        //
-        // P2-F15 切入点 3：fetch_stock_lessons 同时返回被引用的 lesson_ids，
-        // 在此批量写入 lesson_applications 表，用于后续 run_lesson_validation
-        // 精确统计 times_applied / success_count（替代旧的模糊匹配）。
-        let (lessons_str, applied_lesson_ids) = fetch_stock_lessons(&stock_code, &db).await;
-        let default_lessons = "（暂无历史反思）".to_string();
-        let lessons_val = lessons_str.unwrap_or_else(|| default_lessons.clone());
-        merged_vars.push(axagent_harness::workflow_types::Variable {
-            name: "stock_lessons".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(lessons_val.clone()),
-            description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
-            is_secret: false,
-        });
-        // P2-F15: 批量写入 lesson_applications（失败不阻塞主流程）
-        if !applied_lesson_ids.is_empty() {
-            record_lesson_applications(
-                &db,
-                &applied_lesson_ids,
-                &analysis_id_for_spawn,
-                &stock_code,
-            )
-            .await;
-        }
-        // P1: 注入 per-role 经验和教训到辩论角色 prompt
-        merged_vars.push(axagent_harness::workflow_types::Variable {
-            name: "bull_lessons".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(format!(
-                "你作为多方研究员的过往经验教训：{}",
-                lessons_val
-            )),
-            description: Some("该股多方视角的历史反思教训".into()),
-            is_secret: false,
-        });
-        merged_vars.push(axagent_harness::workflow_types::Variable {
-            name: "bear_lessons".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(format!(
-                "你作为空方研究员的过往经验教训：{}",
-                lessons_val
-            )),
-            description: Some("该股空方视角的历史反思教训".into()),
-            is_secret: false,
-        });
-        opts.variables = Some(merged_vars);
+        // 变量增强（market_regime/sim_metrics/holdings/sector/regime 偏向/
+        // lessons/similar_cases 等）已迁移至 stock-analysis-enhance 生命周期
+        // 钩子（hooks::build_stock_analysis_variables），在 DAG 主循环前由引擎
+        // 统一注入；此处仅保留模板变量（vendor key/token 注入已在此前完成）。
+        opts.variables = template_vars;
 
         // P0-T5: 整体超时兜底。step_timeout 只限单步，多步累计可能很久；
         // 超时后调 cancel_workflow 让 WorkEngine 协作取消，避免分析永久挂起。
@@ -1765,49 +1435,10 @@ pub async fn run_single_stock_analysis(
     let (max_concurrent, step_timeout, _total_timeout) =
         resolve_runtime_options(loaded.variables.as_deref());
 
-    // 5.5 [A1 借鉴] 注入历史反思教训(TradingAgents past_context 机制):
-    //   批量/定时分析场景下,trader/research-mgr/value-investor 节点能看到
-    //   该股最近 90 天的反思教训(lesson_summary),避免重蹈覆辙。前端触发场景下
-    //   run_stock_workflow_inner 同样会注入,这里是补齐 cron / batch 入口。
-    //   必须始终注入,即使为空（否则 VARIABLE_NOT_FOUND）。
-    //
-    //   P2-F15 切入点 3：同时收集被引用的 lesson_ids，写入 lesson_applications 表。
-    let (lessons_str, applied_lesson_ids) = fetch_stock_lessons(stock_code, db).await;
-    let default_lessons = "（暂无历史反思）".to_string();
-    let lessons_val = lessons_str.unwrap_or_else(|| default_lessons.clone());
-    // P2-F15: 批量写入 lesson_applications（失败不阻塞主流程）
-    if !applied_lesson_ids.is_empty() {
-        record_lesson_applications(db, &applied_lesson_ids, &analysis_id, stock_code).await;
-    }
-    let variables = vec![
-        Variable {
-            name: "stock_lessons".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(lessons_val.clone()),
-            description: Some("A1: 该股最近 90 天的反思教训".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "bull_lessons".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(format!(
-                "你作为多方研究员的过往经验教训：{}",
-                lessons_val
-            )),
-            description: Some("该股多方视角的历史反思教训".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "bear_lessons".into(),
-            var_type: "string".into(),
-            value: serde_json::Value::String(format!(
-                "你作为空方研究员的过往经验教训：{}",
-                lessons_val
-            )),
-            description: Some("该股空方视角的历史反思教训".into()),
-            is_secret: false,
-        },
-    ];
+    // 5.5 [A1 借鉴] 历史反思教训注入已迁移至 stock-analysis-enhance 生命周期钩子
+    //   （hooks::build_stock_analysis_variables），由引擎在 DAG 主循环前统一注入。
+    //   批量路径通过 input 携带 analysis_id 标记：钩子据此写 lesson_applications
+    //   （P2-F15 切入点 3），且跳过 precheck/persist（本函数已同步完成）。
 
     // 6. 创建并运行工作流
     let wf_name = format!("stock-analysis-{stock_code}-batch");
@@ -1843,15 +1474,13 @@ pub async fn run_single_stock_analysis(
                 .unwrap_or(30),
         ),
         progress_callback: None,
-        input: Some(json!({"stock_code": stock_code})),
+        // analysis_id 标记：生命周期钩子据此跳过 precheck/persist（本函数已同步完成），
+        // 但 enhance 钩子仍然生效（写 lesson_applications 需要 analysis_id）
+        input: Some(json!({"stock_code": &stock_code, "analysis_id": &analysis_id})),
         input_schema: loaded.input_schema.clone(),
         output_schema: loaded.output_schema.clone(),
         dry_run: false,
-        variables: if variables.is_empty() {
-            None
-        } else {
-            Some(variables)
-        },
+        variables: None,
         ..Default::default()
     };
 

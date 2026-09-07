@@ -15171,6 +15171,7 @@
         "checking": "Checking...",
         "notChecked": "Not checked",
         "apiKey": "API Key",
+        "proxyPlaceholder": "프록시 URL(예: http://127.0.0.1:7890), 비우면 직접 연결",
         "depActive": "Provides data for these tools:",
         "depInactive": "When disabled, these tools fall back to next vendor:",
         "noDeps": "No tools depend on this vendor",

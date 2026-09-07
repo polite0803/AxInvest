@@ -13,6 +13,7 @@
 
 pub mod core;
 pub mod decision;
+pub mod hooks;
 pub mod misc;
 pub mod reco_history;
 pub mod reflection;

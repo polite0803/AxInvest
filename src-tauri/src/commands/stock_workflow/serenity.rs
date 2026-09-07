@@ -157,13 +157,20 @@ async fn extract_via_normalizer(content: &str) -> Option<serde_json::Value> {
 
 /// 轻量 JSON 修复：处理 LLM 偶发的括号不匹配和引号未闭合。
 ///
-/// 只做两种统计级修复（不解析语义）：
+/// 修复层（按执行顺序）：
+/// 0. **内部引号转义** — 字符串值内部未转义的 ASCII `"`（如 `"凯盛"科技""`）
+///    会让 serde_json 把字符串提前截断、后续 token 被误认为 key，
+///    表现为 "expected `:`" 类解析错误。启发式：in_string 时遇到 `"`，
+///    看其后第一个非空白字符——是 `,` `}` `]` `:` `"` 或 EOF 视为合法闭合，
+///    其他（如中文字符）视为内部引号，转义为 `\"`
 /// 1. **括号平衡** — 跳过字符串内部，统计 `{`/`[` vs `}`/`]`，补/删尾部括号
 /// 2. **引号闭合** — 奇数个未转义 `"` 时末尾补一个
 ///
 /// 对合法 JSON 零开销（不改变原文）；只在 `serde_json::from_str` 已失败后调用。
 fn repair_json(s: &str) -> String {
-    let mut result = s.to_string();
+    // 第 0 层必须先执行：后续括号统计依赖引号状态追踪，
+    // 未转义的内部引号会让追踪提前脱轨，导致补括号位置全错。
+    let mut result = escape_inner_quotes(s);
 
     // LLM 高频手滑："nulll"→"null"
     result = result.replace("nulll", "null");
@@ -261,6 +268,96 @@ fn repair_json(s: &str) -> String {
     }
 
     result
+}
+
+/// 修复字符串值内部的未转义 ASCII 双引号（repair_json 第 0 层）。
+///
+/// 从第一个 `{` 或 `[` 开始处理（前导的非 JSON 文本原样保留，避免
+/// markdown 叙述文字里的成对引号被误当作字符串起点导致级联错乱）。
+/// 合法 JSON 中已转义的 `\"` 与结构引号不受影响（零改动）。
+fn escape_inner_quotes(s: &str) -> String {
+    let Some(start) = s.find(['{', '[']) else {
+        return s.to_string();
+    };
+    let mut out = String::with_capacity(s.len() + 16);
+    out.push_str(&s[..start]);
+
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut chars = s[start..].chars().peekable();
+    while let Some(c) = chars.next() {
+        if !in_string {
+            if c == '"' {
+                in_string = true;
+            }
+            out.push(c);
+            continue;
+        }
+        // in_string
+        if escaped {
+            escaped = false;
+            out.push(c);
+            continue;
+        }
+        match c {
+            '\\' => {
+                escaped = true;
+                out.push(c);
+            },
+            '"' => {
+                // 向后看第一个非空白字符，判断是合法闭合还是内部引号
+                let mut ws_buf = Vec::new();
+                let mut next = None;
+                while let Some(&nc) = chars.peek() {
+                    if nc.is_whitespace() {
+                        ws_buf.push(nc);
+                        chars.next();
+                    } else {
+                        next = Some(nc);
+                        break;
+                    }
+                }
+                // 合法闭合引号后面只会是 `,` `}` `]`（值/键结尾）、
+                // `:`（键结尾，状态已脱轨时的自愈路径）、`"`（缺逗号场景，
+                // 无法与内部引号区分，保守按闭合处理）或 EOF（截断场景）
+                let is_close = matches!(
+                    next,
+                    None | Some(',') | Some('}') | Some(']') | Some(':') | Some('"')
+                );
+                if is_close {
+                    in_string = false;
+                    out.push('"');
+                } else {
+                    // 内部引号：转义，字符串继续
+                    out.push_str("\\\"");
+                }
+                for w in ws_buf {
+                    out.push(w);
+                }
+            },
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// 提取 serde_json 解析失败位置附近的诊断窗口（±`width` 字节），
+/// 用于在日志中直接看到损坏点原文，替代"只知道报错不知道内容"的黑盒。
+fn parse_error_window(text: &str, err: &serde_json::Error, width: usize) -> String {
+    let line = err.line().saturating_sub(1);
+    let col = err.column().saturating_sub(1);
+    // 定位失败行起始字节偏移
+    let mut offset = 0usize;
+    for (i, l) in text.split('\n').enumerate() {
+        if i >= line {
+            break;
+        }
+        offset += l.len() + 1; // +1 为换行符本身
+    }
+    offset = offset.saturating_add(col).min(text.len());
+    let start = text.floor_char_boundary(offset.saturating_sub(width));
+    let end = text.ceil_char_boundary((offset + width).min(text.len()));
+    format!("[…{}…]", &text[start..end])
 }
 
 /// 用裸括号追踪从文本中提取指定 key 的 JSON 数组（容忍引号错乱）。
@@ -607,7 +704,16 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
     let parsed: serde_json::Value = match serde_json::from_str(extracted) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("[serenity] JSON 解析失败: {e}, 尝试修复链");
+            // 2026-09-07 诊断增强：解析失败必须能看到失败点附近原文，
+            // 否则修复链全败后无法定位 LLM 输出的具体语法损坏。
+            tracing::warn!(
+                extracted_len = extracted.len(),
+                content_len = content.len(),
+                err_line = e.line(),
+                err_col = e.column(),
+                window = %parse_error_window(extracted, &e, 160),
+                "[serenity] JSON 解析失败: {e}, 尝试修复链"
+            );
             // 第一层：repair_json 修复括号/引号 → 重新解析
             let repaired = repair_json(extracted);
             if let Ok(v) = serde_json::from_str(&repaired) {
@@ -1742,5 +1848,48 @@ mod serenity_extract_tests {
     fn parse_loose_json_empty_string() {
         assert!(parse_loose_json("").is_none());
         assert!(parse_loose_json("   ").is_none());
+    }
+
+    // ── 11) repair_json 第 0 层：字符串值内部未转义引号（2026-09-07 生产故障类别）──
+    //     复现 "expected `:`" 场景：内部引号截断字符串，后续 token 被误认为 key
+    #[test]
+    fn repair_json_escapes_unescaped_inner_quotes() {
+        let raw =
+            r#"{"candidates": [{"stock_code": "600552", "name": "凯盛"科技"股份", "score": 80}]}"#;
+        let repaired = repair_json(raw);
+        let v: serde_json::Value = serde_json::from_str(&repaired).expect("内部引号转义后应可解析");
+        assert_eq!(v["candidates"][0]["stock_code"], "600552");
+        assert_eq!(v["candidates"][0]["name"], "凯盛\"科技\"股份");
+        assert_eq!(v["candidates"][0]["score"], 80);
+    }
+
+    // ── 12) repair_json 对合法 JSON 零改动（转义过的引号不受影响）──
+    #[test]
+    fn repair_json_keeps_valid_json_untouched() {
+        let raw = r#"{"a": "正常\"转义\"", "b": [1, 2], "c": "说"x"话"}"#;
+        let v: serde_json::Value = serde_json::from_str(&repair_json(raw)).expect("修复后应可解析");
+        assert_eq!(v["a"], "正常\"转义\"");
+        assert_eq!(v["c"], "说\"x\"话");
+    }
+
+    // ── 13) 前导 markdown 文本 + 内部引号：组合场景 ──
+    #[test]
+    fn extract_named_arrays_with_inner_quotes() {
+        let text = r#"分析结果如下：
+```json
+{"summary": "基于"瓶颈"逻辑筛选", "candidates": [{"stock_code": "600552"}]}
+```"#;
+        let extracted = axagent_kit::utils::extract_json_from_llm_response(text);
+        let v = extract_named_arrays(extracted).expect("应提取出 candidates");
+        assert_eq!(v["candidates"][0]["stock_code"], "600552");
+    }
+
+    // ── 14) parse_error_window：失败点附近原文可见 ──
+    #[test]
+    fn parse_error_window_shows_context() {
+        let text = r#"{"a": 1, "b": ??}"#;
+        let e = serde_json::from_str::<serde_json::Value>(text).unwrap_err();
+        let w = parse_error_window(text, &e, 10);
+        assert!(w.contains("??"), "窗口应包含损坏点，实际: {w}");
     }
 }

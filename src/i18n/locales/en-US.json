@@ -15534,6 +15534,7 @@
         "checking": "Checking...",
         "notChecked": "Not checked",
         "apiKey": "API Key",
+        "proxyPlaceholder": "Proxy URL, e.g. http://127.0.0.1:7890, leave empty for direct",
         "depActive": "Provides data for these tools:",
         "depInactive": "When disabled, these tools fall back to next vendor:",
         "noDeps": "No tools depend on this vendor",

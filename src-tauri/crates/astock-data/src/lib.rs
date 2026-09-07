@@ -385,6 +385,10 @@ pub struct AStockClient {
     pub xq_token: Option<Arc<RwLock<String>>>,
     /// NeoData token 共享引用（前端设置页写入，vendor 自动读取）
     pub neodata_token: Option<Arc<RwLock<String>>>,
+    /// 东财代理客户端共享句柄（前端设置页热更新，EastMoneyVendor 持有同一 Arc）。
+    /// 启动时从 EASTMONEY_PROXY 环境变量读取初始值，运行时通过
+    /// set_eastmoney_proxy() 覆盖（None = 清除代理走直连）。
+    pub eastmoney_proxy: Arc<RwLock<Option<reqwest::Client>>>,
     /// P6:本地新闻语料库 sink(None 表示不写库,as-of 模式 search_news 降级)
     /// 通过 with_news_archive_sink() 注入。
     news_archive_sink: Option<Arc<dyn NewsArchiveSink>>,
@@ -573,6 +577,7 @@ impl AStockClient {
                     iwencai_key: RwLock::new(String::new()),
                     xq_token: None,
                     neodata_token: None,
+                    eastmoney_proxy: Arc::new(RwLock::new(EastMoneyVendor::build_proxy_client())),
                     news_archive_sink: None,
                     browser_fetcher: None,
                     enabled_vendors: parking_lot::RwLock::new(None),
@@ -591,7 +596,7 @@ impl AStockClient {
             "eastmoney",
             Box::new(EastMoneyVendor {
                 http: http.clone(),
-                proxy_http: EastMoneyVendor::build_proxy_client(),
+                proxy_http: self.eastmoney_proxy.clone(),
             }),
         );
         self.register_vendor("sina", Box::new(SinaVendor { http: http.clone() }));
@@ -661,6 +666,7 @@ impl AStockClient {
             iwencai_key: RwLock::new(String::new()),
             xq_token: None,
             neodata_token: None,
+            eastmoney_proxy: Arc::new(RwLock::new(EastMoneyVendor::build_proxy_client())),
             news_archive_sink: None, // P6:默认不写入,调用方通过 with_news_archive_sink 注入
             browser_fetcher: None,   // 浏览器 fetch 通过 with_browser_fetcher() 注入
             enabled_vendors: parking_lot::RwLock::new(None), // 默认全部启用
@@ -680,6 +686,26 @@ impl AStockClient {
     /// 传入空 set 等效于全部禁用；传入 None 等效于全部启用（向后兼容）
     pub fn set_enabled_vendors(&self, vendors: Option<HashSet<String>>) {
         *self.enabled_vendors.write() = vendors;
+    }
+
+    /// 运行时设置东财代理（设置页热更新，无需重启）。
+    /// - `Some(url)`：构建代理客户端并启用；URL 非法时返回 Err 且不修改现有状态
+    /// - `None`：清除代理，回退直连
+    pub async fn set_eastmoney_proxy(&self, proxy_url: Option<&str>) -> Result<(), DataError> {
+        let client = match proxy_url {
+            Some(url) if !url.trim().is_empty() => {
+                Some(EastMoneyVendor::try_build_proxy_client(url.trim()).map_err(|e| {
+                    DataError::VendorError { vendor: "eastmoney".into(), message: e }
+                })?)
+            },
+            _ => None,
+        };
+        *self.eastmoney_proxy.write().await = client;
+        tracing::info!(
+            "[astock-data] 东财代理已{}（运行时热更新）",
+            proxy_url.map(|u| format!("设置为 {u}")).unwrap_or_else(|| "清除".into())
+        );
+        Ok(())
     }
 
     /// 检查 vendor 是否启用（用于 find_vendor 过滤）
@@ -5284,7 +5310,10 @@ mod asof_realtime_degrade_tests {
         use crate::vendors::StockVendor;
         // 用一个 EastMoneyVendor 实例调 asof_capability
         // (EastMoneyVendor 还没 override,所以默认是 Fallthrough,等 P1 改完后变其他变体)
-        let vendor = EastMoneyVendor { http: reqwest::Client::new(), proxy_http: None };
+        let vendor = EastMoneyVendor {
+            http: reqwest::Client::new(),
+            proxy_http: Arc::new(RwLock::new(None)),
+        };
         let cap = vendor.asof_capability("get_quote");
         assert!(
             cap == AsOfCapability::Fallthrough

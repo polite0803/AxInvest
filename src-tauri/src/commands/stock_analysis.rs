@@ -3680,7 +3680,8 @@ pub async fn delete_portfolio_scan_cron(
 #[tauri::command]
 pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> Result<(), String> {
     // 对需要 token/密钥的 vendor，先从数据库加载凭据到内存
-    if vendor == "xueqiu" || vendor == "iwencai" || vendor == "neodata" {
+    // eastmoney：加载代理配置（直连 push2his 被本机链路 RST 时的 remedy）
+    if vendor == "xueqiu" || vendor == "iwencai" || vendor == "neodata" || vendor == "eastmoney" {
         let template = axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
             .one(state.harness.db())
             .await
@@ -3713,6 +3714,22 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
                                 *nd.write().await = token.clone();
                             }
                         }
+                    }
+                }
+                if name == "vendor_eastmoney_proxy" {
+                    if let serde_json::Value::String(url) = value {
+                        // 空 = 显式清除代理回退直连；非空 = 校验并启用
+                        state
+                            .astock_client
+                            .set_eastmoney_proxy(if url.is_empty() {
+                                None
+                            } else {
+                                Some(url.as_str())
+                            })
+                            .await
+                            .map_err(|e| {
+                                ErrorResponse::new(wf_err::INTERNAL).with_detail(e.to_string())
+                            })?;
                     }
                 }
             }
@@ -3836,6 +3853,75 @@ pub async fn save_neodata_token(state: State<'_, AppState>, token: String) -> Re
         am.update(state.harness.db()).await.map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!("持久化 NeoData token 失败: {e}"))
+        })?;
+    }
+
+    Ok(())
+}
+
+/// 保存东财代理地址（设置页配置，运行时热更新，无需重启）
+///
+/// 背景：本机直连 push2his.eastmoney.com 的 IPv4 链路会被服务器 RST
+/// （2026-08-01 / 2026-09-07 两次复发，所有 CDN 镜像节点一致），配置本地
+/// 代理后 em_get 在连接被掐断时自动切换代理重试。
+/// - 空字符串 = 清除代理（回退直连）
+/// - 非空 = 校验并启用（URL 非法返回错误，不修改现有状态）
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "保存东财代理地址")]
+#[tauri::command]
+pub async fn save_eastmoney_proxy(
+    state: State<'_, AppState>,
+    proxy_url: String,
+) -> Result<(), String> {
+    let proxy_url = proxy_url.trim().to_string();
+
+    // 1) 校验 + 热更新内存（非法 URL 在 set 内部返回错误，状态不被破坏）
+    state
+        .astock_client
+        .set_eastmoney_proxy(if proxy_url.is_empty() {
+            None
+        } else {
+            Some(&proxy_url)
+        })
+        .await
+        .map_err(|e| ErrorResponse::new(wf_err::INTERNAL).with_detail(e.to_string()))?;
+
+    // 2) 持久化到 stock-analysis 模板变量（设置页下次加载时自动读取）
+    use axagent_entities::workflow_template;
+    use sea_orm::EntityTrait;
+    if let Some(t) = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(state.harness.db())
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询模板失败: {e}"))
+        })?
+    {
+        let mut vars = t
+            .variables
+            .as_ref()
+            .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
+            .unwrap_or_default();
+        let var_val = serde_json::json!({
+            "name": "vendor_eastmoney_proxy",
+            "is_secret": false,
+            "defaultValue": null,
+            "value": proxy_url,
+            "type": "string",
+        });
+        if let Some(pos) = vars
+            .iter()
+            .position(|v| v.get("name").and_then(|n| n.as_str()) == Some("vendor_eastmoney_proxy"))
+        {
+            vars[pos] = var_val;
+        } else {
+            vars.push(var_val);
+        }
+        let json_str = serde_json::to_string(&vars).unwrap_or_default();
+        use axagent_entities::workflow_template::ActiveModel;
+        use sea_orm::ActiveModelTrait;
+        let mut am: ActiveModel = t.into();
+        am.variables = sea_orm::ActiveValue::Set(Some(json_str));
+        am.update(state.harness.db()).await.map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("持久化东财代理配置失败: {e}"))
         })?;
     }
 

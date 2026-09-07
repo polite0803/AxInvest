@@ -477,6 +477,64 @@ pub(crate) fn extract_decision_fields(
 /// 来源节点），导致 `filter_by_schema` 退化为整个 results map。前端
 /// normalizeDecision 拿到 results map 后会判定为"全零空壳"返回 null，
 /// store.decision 保持空 → DecisionBanner 显示"决策信息缺失"误报。
+/// 将 rt-workflow 节点错误里的错误码资源键转为可读中文。
+///
+/// 节点错误的统一格式是 "{CODE}: {detail}"（见 rt-workflow
+/// node_executor_trait::NodeError 的 Display），其中 CODE 是前端 i18n
+/// 资源键（node_executor_trait::error_code 常量），直接透传给用户会显示成
+/// 资源键而非可读文案。此处按已知码翻译前缀，未匹配时原样返回
+/// （Rhai 执行错误等本身已是可读中文）。错误码与 rt-workflow 的
+/// error_code 常量逐一对齐（引用常量而非字面量），上游增删码时
+/// cargo 会在此处报错提示同步。
+fn humanize_node_error(error_msg: &str) -> String {
+    use axagent_rt_workflow::work_engine::node_executor_trait::error_code as code;
+
+    /// (错误码常量, 可读中文文案) 对照表
+    const CODE_LABELS: &[(&str, &str)] = &[
+        (code::PROVIDER_QUERY_FAILED, "数据供应商查询失败"),
+        (code::NO_AVAILABLE_PROVIDER, "无可用数据供应商"),
+        (code::API_KEY_DECRYPT_FAILED, "API 密钥解密失败"),
+        (code::UNSUPPORTED_PROVIDER, "不支持的数据供应商"),
+        (code::LLM_CALL_FAILED, "LLM 调用失败"),
+        (code::AGENT_PROFILE_NOT_FOUND, "Agent 配置未找到"),
+        (code::TOOL_CALL_FAILED, "工具调用失败"),
+        (code::TOOL_NOT_CONFIGURED, "工具未配置"),
+        (code::SUBWORKFLOW_FAILED, "子工作流执行失败"),
+        (code::SUBWORKFLOW_NOT_CONFIGURED, "子工作流未配置"),
+        (code::VECTOR_RETRIEVE_FAILED, "向量检索失败"),
+        (code::VECTOR_NOT_CONFIGURED, "向量检索未配置"),
+        (code::VARIABLE_NOT_FOUND, "变量未找到"),
+        (code::VALIDATION_FAILED, "输入校验失败"),
+        (code::PERMISSION_DENIED, "权限不足"),
+        (code::TIMEOUT, "节点执行超时"),
+        (code::CIRCUIT_BREAKER_OPEN, "熔断器开启（连续失败已暂停）"),
+        (code::NODE_TYPE_MISMATCH, "节点类型不匹配"),
+        (code::UNSUPPORTED_NODE_TYPE, "不支持的节点类型"),
+        (code::IO_ERROR, "IO 错误"),
+        (code::CACHE_DESERIALIZE_FAILED, "缓存反序列化失败"),
+        (code::MODEL_NOT_CONFIGURED, "模型未配置"),
+        (code::NODE_NOT_FOUND, "节点未找到"),
+        (code::EXECUTION_CANCELLED, "执行已取消"),
+    ];
+
+    // 引擎侧英文兜底文案（engine/mod.rs 超时/熔断路径不走 NodeError Display）
+    // 超时消息可能带 "(degraded: skip)" / "(degraded: useDefault)" 降级标记，用前缀匹配保留
+    if let Some(rest) = error_msg.strip_prefix("Node execution timeout") {
+        return format!("节点执行超时{rest}");
+    }
+    if error_msg == "Circuit breaker open" {
+        return "熔断器开启（连续失败已暂停）".to_string();
+    }
+
+    for (code_const, label) in CODE_LABELS {
+        let prefix = format!("{code_const}: ");
+        if let Some(detail) = error_msg.strip_prefix(&prefix) {
+            return format!("{label}：{detail}（错误码 {code_const}）");
+        }
+    }
+    error_msg.to_string()
+}
+
 pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
     if let Some(pm) = wf.results.get("portfolio-mgr") {
         // CodeNode 包装: { status, result, input_params, node_id, params }
@@ -543,6 +601,9 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
                 NodeStatus::Failed => "portfolio-mgr 节点执行失败（无错误详情）".to_string(),
                 _ => "portfolio-mgr 节点未完成（状态非 Completed）".to_string(),
             });
+            // 错误码资源键转可读文案：reasoning 内联可读错误，不再让用户翻
+            // JSON 子字段；原始错误串（含资源键码）保留在 diagnostics.errorCode。
+            let humanized = humanize_node_error(&error_msg);
             let mut fallback = serde_json::Map::new();
             fallback.insert("action".to_string(), json!("观望"));
             fallback.insert("positionPct".to_string(), json!(0));
@@ -551,12 +612,13 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
             fallback.insert("timeHorizon".to_string(), json!("短期"));
             fallback.insert(
                 "reasoning".to_string(),
-                json!("组合管理节点未产出有效决策，已降级为保守观望。详见 diagnostics.nodeError。"),
+                json!(format!("组合管理节点未产出有效决策，已降级为保守观望。原因：{humanized}")),
             );
             let mut diag = serde_json::Map::new();
             diag.insert("node".to_string(), json!("portfolio-mgr"));
             diag.insert("nodeStatus".to_string(), json!(format!("{:?}", state.status)));
-            diag.insert("nodeError".to_string(), json!(error_msg.clone()));
+            diag.insert("nodeError".to_string(), json!(humanized));
+            diag.insert("errorCode".to_string(), json!(error_msg.clone()));
             let hint = if state.status == NodeStatus::Skipped {
                 "portfolio-mgr 被 Skipped：检查其上游依赖节点（trader/research-mgr/a-catalyst/t-risk 等）是否失败或超时，错误在对应 node_states[上游].error。"
             } else {
@@ -1290,6 +1352,7 @@ mod tests {
                 "portfolio-mgr": { "status": "executed", "result": { "action": "买入" } },
                 "end-output": { "status": "ok" },
             })),
+            hooks_config: None,
             error_config: None,
             error_workflow_id: None,
         };
@@ -1328,6 +1391,7 @@ mod tests {
             results,
             node_states: HashMap::new(),
             output: None,
+            hooks_config: None,
             error_config: None,
             error_workflow_id: None,
         };
@@ -1354,6 +1418,7 @@ mod tests {
             results,
             node_states: HashMap::new(),
             output: Some(json!({ "action": "BUY", "confidence": 60.0 })),
+            hooks_config: None,
             error_config: None,
             error_workflow_id: None,
         };
@@ -1390,6 +1455,7 @@ mod tests {
             results,
             node_states,
             output: None,
+            hooks_config: None,
             error_config: None,
             error_workflow_id: None,
         };
@@ -1401,6 +1467,90 @@ mod tests {
         assert_eq!(parsed["diagnostics"]["node"], "portfolio-mgr");
         assert_eq!(parsed["diagnostics"]["nodeStatus"], "Failed");
         assert_eq!(parsed["diagnostics"]["nodeError"], "Rhai 执行失败: Variable not found: foo");
+    }
+
+    /// 资源键治理：节点错误里的 rt-workflow 错误码资源键（"{CODE}: {detail}"）
+    /// 必须转为可读中文，且 reasoning 内联可读错误（不再出现"详见 diagnostics.nodeError"
+    /// 指向一串资源键的死胡同）。
+    #[test]
+    pub(crate) fn humanize_node_error_translates_code_prefix() {
+        use axagent_rt_workflow::work_engine::node_executor_trait::error_code as code;
+
+        // 已知码前缀 → 可读中文 + 保留 detail 与原始码
+        assert_eq!(
+            humanize_node_error(&format!("{}: 东财 kline 接口超时", code::TIMEOUT)),
+            "节点执行超时：东财 kline 接口超时（错误码 TIMEOUT）"
+        );
+        assert_eq!(
+            humanize_node_error(&format!("{}: 所有供应商均失败", code::PROVIDER_QUERY_FAILED)),
+            "数据供应商查询失败：所有供应商均失败（错误码 PROVIDER_QUERY_FAILED）"
+        );
+
+        // 引擎侧英文兜底文案
+        assert_eq!(humanize_node_error("Node execution timeout"), "节点执行超时");
+        assert_eq!(humanize_node_error("Circuit breaker open"), "熔断器开启（连续失败已暂停）");
+
+        // 带降级标记的超时（engine 超时路径 "(degraded: skip)" 拼接）
+        assert_eq!(
+            humanize_node_error("Node execution timeout (degraded: skip)"),
+            "节点执行超时 (degraded: skip)"
+        );
+
+        // 非"码前缀"形态（Rhai 错误等已可读）原样透传
+        assert_eq!(
+            humanize_node_error("Rhai 执行失败: Variable not found: foo"),
+            "Rhai 执行失败: Variable not found: foo"
+        );
+        // 大小写不匹配的伪码不误翻
+        assert_eq!(humanize_node_error("timeout: foo"), "timeout: foo");
+    }
+
+    /// V57 兜底 + 资源键治理联动：节点错误为错误码资源键形态时，
+    /// nodeError 必须是可读中文、errorCode 保留原始串、reasoning 内联可读错误。
+    #[test]
+    pub(crate) fn extract_decision_json_hardened_node_error_is_humanized() {
+        use axagent_rt_workflow::work_engine::node_executor_trait::error_code as code;
+        use std::collections::HashMap;
+        let results = HashMap::new();
+        let mut node_states = HashMap::new();
+        node_states.insert(
+            "portfolio-mgr".to_string(),
+            NodeRuntimeState {
+                status: NodeStatus::Failed,
+                attempts: 1,
+                error: Some(format!("{}: 上游 LLM 无响应", code::LLM_CALL_FAILED)),
+                started_at: None,
+                completed_at: None,
+            },
+        );
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::WorkflowStatus::Failed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states,
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        let dj = extract_decision_json(&wf).expect("失败节点也必须返回最小有效决策");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        assert_eq!(
+            parsed["diagnostics"]["nodeError"],
+            "LLM 调用失败：上游 LLM 无响应（错误码 LLM_CALL_FAILED）"
+        );
+        assert_eq!(
+            parsed["diagnostics"]["errorCode"],
+            format!("{}: 上游 LLM 无响应", code::LLM_CALL_FAILED)
+        );
+        let reasoning = parsed["reasoning"].as_str().unwrap();
+        assert!(reasoning.contains("LLM 调用失败：上游 LLM 无响应"));
+        assert!(!reasoning.contains("详见 diagnostics.nodeError"));
     }
 
     /// V57 硬化：portfolio-mgr 因上游失败被 Skipped 时同样兜底，
@@ -1431,6 +1581,7 @@ mod tests {
             results,
             node_states,
             output: None,
+            hooks_config: None,
             error_config: None,
             error_workflow_id: None,
         };
@@ -1469,6 +1620,7 @@ mod tests {
                 "trader": { "status": "Completed", "content": "{...}" },
                 // 注意:portfolio-mgr 缺位(节点未运行)
             })),
+            hooks_config: None,
             error_config: None,
             error_workflow_id: None,
         };

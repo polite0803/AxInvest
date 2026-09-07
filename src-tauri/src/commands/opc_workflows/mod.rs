@@ -558,6 +558,7 @@ pub(crate) async fn upsert_template(
     let error_json = data.error_config.as_ref().and_then(|e| serde_json::to_string(e).ok());
 
     let am = workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(data.id.clone()),
         cluster_id: Set(None),
         // 显式 route_path 优先（如既有特例模板），否则走权威行业/能力映射

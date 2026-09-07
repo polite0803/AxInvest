@@ -331,6 +331,7 @@ pub async fn seed_screenshot_portfolio_diagnosis_template(
     // 先删再插
     let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
     workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(TEMPLATE_ID.into()),
         cluster_id: Set(Some("portfolio".to_string())),
         route_path: Set(Some("/finance/portfolio/diagnosis".to_string())),

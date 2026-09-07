@@ -199,6 +199,7 @@ fn generate_lead_workflow_template(lead: &DemandLeadDto) -> WorkflowTemplateData
     };
 
     WorkflowTemplateData {
+        hooks_config: None,
         id: format!("demand:lead:{}", lead.id),
         name: format!("需求实现: {title}"),
         description: Some(truncate_to_char_boundary(&lead.description, MAX_TEXT_BYTES).to_string()),

@@ -458,6 +458,7 @@ pub fn build_domain_template_rich(
         .collect();
 
     WorkflowTemplateData {
+        hooks_config: None,
         id: id.to_string(),
         name: name.to_string(),
         description: Some(description.to_string()),

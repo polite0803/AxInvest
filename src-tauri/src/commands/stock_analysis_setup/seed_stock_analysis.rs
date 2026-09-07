@@ -3351,6 +3351,7 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
     // 先删再插，避免 SeaORM .save() 对已存在记录的 update 失败
     let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
     workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(TEMPLATE_ID.to_string()),
         cluster_id: Set(Some("equity".to_string())),
         route_path: Set(Some("/finance/equity/multi-dim-analysis".to_string())),

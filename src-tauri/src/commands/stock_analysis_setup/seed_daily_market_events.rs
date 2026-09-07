@@ -302,6 +302,7 @@ pub async fn seed_daily_market_events_template(
     // 先删再插
     let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
     workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(TEMPLATE_ID.into()),
         cluster_id: Set(Some("market".to_string())),
         route_path: Set(Some("/finance/market/mainlines".to_string())),

@@ -150,6 +150,7 @@ pub async fn seed_industry_finance_invest_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "金融投资流程".to_string(),
         description: Some(

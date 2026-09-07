@@ -113,6 +113,7 @@ pub async fn seed_industry_industry_consulting_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "产业咨询流程".to_string(),
         description: Some("行业扫描 → 进入评估 → 战略制定。产业咨询全流程。".to_string()),

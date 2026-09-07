@@ -118,6 +118,7 @@ pub async fn seed_industry_ai_research_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "AI 研究流程".to_string(),
         description: Some(

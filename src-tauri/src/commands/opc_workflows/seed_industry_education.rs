@@ -105,6 +105,7 @@ pub async fn seed_industry_education_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "教育内容流程".to_string(),
         description: Some(

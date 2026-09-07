@@ -233,6 +233,7 @@ pub async fn seed_landing_page_workflow(db: &DatabaseConnection) -> Result<(), S
     edges.push(edge("a-revise", "end"));
 
     let data = WorkflowTemplateData {
+        hooks_config: None,
         id: id.into(),
         name: "Landing Page Sprint".into(),
         description: Some("OpenOPC 定义的 4-agent 协作工作流：Content Creator + UI Designer(并行) → Frontend Developer → Growth Hacker(转化审查) → 反馈循环。1天交付可部署落地页。".into()),
@@ -436,6 +437,7 @@ pub async fn seed_startup_mvp_workflow(db: &DatabaseConnection) -> Result<(), St
     ];
 
     let data = WorkflowTemplateData {
+        hooks_config: None,
         id: id.into(),
         name: "Startup MVP 构建".into(),
         description: Some("OpenOPC 定义的 7-agent 4周 MVP 工作流：Sprint规划+UX研究(并行)→后端架构→前端开发→质量检查→增长策略→最终质量门→GO/NO-GO决策。含 ParallelNode 并行执行、ConditionNode 质量门、SwitchNode GO/NO-GO 决策。".into()),

@@ -129,6 +129,7 @@ pub async fn seed_industry_accounting_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "会计财务流程".to_string(),
         description: Some(

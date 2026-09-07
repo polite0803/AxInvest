@@ -430,6 +430,7 @@ pub fn generate_industry_template_data(
         error_workflow_id: None,
         mission_hash: None,
         tool_defs: Vec::new(),
+        hooks_config: None, // 上游新增（v134 hooks_config 列）：行业标准工作流暂无生命周期钩子
         created_at: now,
         updated_at: now,
     }

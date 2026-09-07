@@ -105,6 +105,7 @@ pub async fn seed_industry_ecommerce_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "电商运营流程".to_string(),
         description: Some("爆品挖掘 → 竞品监控 → 营销策划。电商运营全流程。".to_string()),

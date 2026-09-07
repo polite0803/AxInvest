@@ -1063,6 +1063,7 @@ pub(crate) async fn seed_opc_workflow_template(db: &DatabaseConnection) -> Resul
 
     // ── 写入数据库 ──
     workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(TEMPLATE_ID.to_string()),
         cluster_id: Set(Some("opc".to_string())),
         route_path: Set(Some("/automation/opc/demand-discovery".to_string())),

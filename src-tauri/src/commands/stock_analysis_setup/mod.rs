@@ -1664,6 +1664,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     // 先删再插，避免 SeaORM .save() 对已存在记录的 update 失败
     let _ = workflow_template::Entity::delete_by_id("stock-reflection").exec(db).await;
     workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set("stock-reflection".to_string()),
         cluster_id: Set(None),
         route_path: Set(None),
@@ -1965,6 +1966,7 @@ async fn seed_event_triggered_decision_template(
     // 先删再插，避免 .save() 对已存在记录的 update 失败
     let _ = workflow_template::Entity::delete_by_id(spec.template_id).exec(db).await;
     workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(spec.template_id.to_string()),
         cluster_id: Set(None),
         route_path: Set(None),

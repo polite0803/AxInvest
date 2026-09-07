@@ -105,6 +105,7 @@ pub async fn seed_industry_geospatial_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "地理空间流程".to_string(),
         description: Some("空间分析 → 地图制作 → GIS 应用开发。地理信息服务全流程。".to_string()),

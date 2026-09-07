@@ -142,6 +142,7 @@ pub async fn seed_industry_game_dev_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "游戏开发流程".to_string(),
         description: Some(

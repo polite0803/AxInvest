@@ -124,6 +124,7 @@ pub async fn seed_industry_project_management_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "项目管理流程".to_string(),
         description: Some("项目启动 → 进度报告 → 项目收尾。项目管理全流程。".to_string()),

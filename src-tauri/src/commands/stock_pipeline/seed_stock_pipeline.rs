@@ -525,6 +525,7 @@ pub async fn seed_stock_pipeline_template(db: &sea_orm::DatabaseConnection) -> R
 
     // ── 构建 WorkflowTemplateData ──
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "股票全业务管道".to_string(),
         description: Some("Agent 驱动的每日自动发现 + 筛选 + 分析 + 决策管道".to_string()),
@@ -576,6 +577,7 @@ async fn upsert_template(
     let output_json = data.output_schema.as_ref().and_then(|s| serde_json::to_string(s).ok());
 
     let am = workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(data.id.clone()),
         cluster_id: Set(data.cluster_id.clone()),
         route_path: Set(data.route_path.clone()),

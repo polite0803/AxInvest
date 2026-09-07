@@ -105,6 +105,7 @@ pub async fn seed_industry_security_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "安全运营流程".to_string(),
         description: Some("安全审计 → 合规检查 → 应急响应。安全运营全流程。".to_string()),

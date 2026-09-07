@@ -118,6 +118,7 @@ pub async fn seed_content_media_workflows(
         };
 
         let template_data = WorkflowTemplateData {
+            hooks_config: None,
             id: template_id.to_string(),
             name,
             description: Some(description),
@@ -187,6 +188,7 @@ async fn upsert_template_safe(
     let trigger_json = data.trigger_config.as_ref().and_then(|t| serde_json::to_string(t).ok());
 
     let am = workflow_template::ActiveModel {
+        hooks_config: Set(None),
         id: Set(data.id.clone()),
         cluster_id: Set(data.cluster_id.clone()),
         // 显式 route_path 优先，否则走权威行业/能力映射（与 upsert_template 一致）

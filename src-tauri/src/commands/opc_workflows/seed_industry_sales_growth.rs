@@ -105,6 +105,7 @@ pub async fn seed_industry_sales_growth_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "销售增长流程".to_string(),
         description: Some("获客策略 → 转化优化 → 留存提升。销售增长全流程。".to_string()),

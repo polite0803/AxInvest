@@ -150,6 +150,7 @@ pub async fn seed_industry_content_media_workflow_template(
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "内容媒体流程".to_string(),
         description: Some(

@@ -91,6 +91,7 @@ pub async fn seed_industry_design_workflow_template(db: &DatabaseConnection) -> 
 
     let now = chrono::Utc::now().timestamp_millis();
     let template_data = WorkflowTemplateData {
+        hooks_config: None,
         id: TEMPLATE_ID.to_string(),
         name: "设计流程".to_string(),
         description: Some(

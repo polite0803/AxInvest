@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "Modelo de conversación predeterminado",
       "titleSummaryModel": "Modelo de resumen de título",
-      "compressionModel": "Modelo de compresión"
+      "compressionModel": "Modelo de compresión",
+      "fallbackModel": "Modelo de respaldo",
+      "imageModel": "Modelo de imagen",
+      "videoModel": "Modelo de video",
+      "voiceModel": "Modelo de voz"
     },
     "activeProfile": "Perfil activo",
     "addKey": "Añadir clave",
@@ -6473,7 +6477,15 @@
       "title": "Conocimiento"
     },
     "stockAnalysis": "Stock Analysis",
-    "title": "设置"
+    "title": "设置",
+    "fallbackModel": "Modelo de respaldo",
+    "fallbackModelDesc": "Reintenta automáticamente una vez con este modelo cuando la solicitud del modelo principal falla antes de producir contenido; si no se configura, se muestra el error directamente",
+    "imageModel": "Modelo de imagen",
+    "imageModelDesc": "Modelo predeterminado para tareas de comprensión y generación de imágenes",
+    "videoModel": "Modelo de video",
+    "videoModelDesc": "Modelo predeterminado para tareas de comprensión de video",
+    "voiceModel": "Modelo de voz",
+    "voiceModelDesc": "Modelo predeterminado para tareas de reconocimiento y síntesis de voz"
   },
   "settingsPage": {
     "refreshPage": "Actualizar página"

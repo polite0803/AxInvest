@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "Standard-Konversationsmodell",
       "titleSummaryModel": "Titel-Zusammenfassungsmodell",
-      "compressionModel": "Kompressionsmodell"
+      "compressionModel": "Kompressionsmodell",
+      "fallbackModel": "Fallback-Modell",
+      "imageModel": "Bildmodell",
+      "videoModel": "Videomodell",
+      "voiceModel": "Sprachmodell"
     },
     "activeProfile": "Aktives Profil",
     "addKey": "Schlüssel hinzufügen",
@@ -6473,7 +6477,15 @@
       "title": "Wissen"
     },
     "stockAnalysis": "Stock Analysis",
-    "title": "设置"
+    "title": "设置",
+    "fallbackModel": "Fallback-Modell",
+    "fallbackModelDesc": "Wiederholt den Versuch automatisch einmal mit diesem Modell, wenn die Anfrage des Hauptmodells fehlschlägt, bevor Inhalte erzeugt wurden; andernfalls wird der Fehler direkt angezeigt",
+    "imageModel": "Bildmodell",
+    "imageModelDesc": "Standardmodell für Bildverständnis und Bildgenerierung",
+    "videoModel": "Videomodell",
+    "videoModelDesc": "Standardmodell für Videoverständnis",
+    "voiceModel": "Sprachmodell",
+    "voiceModelDesc": "Standardmodell für Spracherkennung und Sprachsynthese"
   },
   "settingsPage": {
     "refreshPage": "Seite aktualisieren"

@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "默认对话模型",
       "titleSummaryModel": "标题摘要模型",
-      "compressionModel": "压缩模型"
+      "compressionModel": "压缩模型",
+      "fallbackModel": "回退模型",
+      "imageModel": "图片模型",
+      "videoModel": "视频模型",
+      "voiceModel": "语音模型"
     },
     "activeProfile": "当前配置",
     "addKey": "添加密钥",
@@ -6473,7 +6477,15 @@
     "knowledgeSettings": {
       "title": "知识库"
     },
-    "stockAnalysis": "股票分析"
+    "stockAnalysis": "股票分析",
+    "fallbackModel": "回退模型",
+    "fallbackModelDesc": "主模型请求失败且尚未产出内容时，自动切换到该模型重试一次，未设置则直接报错",
+    "imageModel": "图片模型",
+    "imageModelDesc": "图像理解与图片生成任务使用的默认模型",
+    "videoModel": "视频模型",
+    "videoModelDesc": "视频理解任务使用的默认模型",
+    "voiceModel": "语音模型",
+    "voiceModelDesc": "语音转写与语音合成任务使用的默认模型"
   },
   "settingsPage": {
     "refreshPage": "刷新页面"

@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "デフォルト対話モデル",
       "titleSummaryModel": "タイトル要約モデル",
-      "compressionModel": "圧縮モデル"
+      "compressionModel": "圧縮モデル",
+      "fallbackModel": "フォールバックモデル",
+      "imageModel": "画像モデル",
+      "videoModel": "動画モデル",
+      "voiceModel": "音声モデル"
     },
     "activeProfile": "現在の設定",
     "addKey": "キーを追加",
@@ -6473,7 +6477,15 @@
       "title": "ナレッジ"
     },
     "stockAnalysis": "Stock Analysis",
-    "title": "设置"
+    "title": "设置",
+    "fallbackModel": "フォールバックモデル",
+    "fallbackModelDesc": "メインモデルのリクエストが失敗し、まだ内容が出力されていない場合、このモデルで自動的に 1 回再試行します。未設定の場合はそのままエラーになります",
+    "imageModel": "画像モデル",
+    "imageModelDesc": "画像理解・画像生成タスクで使用するデフォルトモデル",
+    "videoModel": "動画モデル",
+    "videoModelDesc": "動画理解タスクで使用するデフォルトモデル",
+    "voiceModel": "音声モデル",
+    "voiceModelDesc": "音声認識・音声合成タスクで使用するデフォルトモデル"
   },
   "settingsPage": {
     "refreshPage": "ページを更新"

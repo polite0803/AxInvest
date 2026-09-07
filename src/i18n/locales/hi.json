@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "डिफ़ॉल्ट कंversेशन मॉडल",
       "titleSummaryModel": "शीर्षक सारांश मॉडल",
-      "compressionModel": "संपीड़न मॉडल"
+      "compressionModel": "संपीड़न मॉडल",
+      "fallbackModel": "फ़ॉलबैक मॉडल",
+      "imageModel": "छवि मॉडल",
+      "videoModel": "वीडियो मॉडल",
+      "voiceModel": "वॉइस मॉडल"
     },
     "activeProfile": "सक्रिय प्रोफ़ाइल",
     "addKey": "कुंजी जोड़ें",
@@ -6473,7 +6477,15 @@
       "title": "ज्ञान"
     },
     "stockAnalysis": "Stock Analysis",
-    "title": "设置"
+    "title": "设置",
+    "fallbackModel": "फ़ॉलबैक मॉडल",
+    "fallbackModelDesc": "जब मुख्य मॉडल अनुरोध सामग्री बनाने से पहले विफल हो जाता है, तो इस मॉडल से स्वतः एक बार पुनः प्रयास होता है; सेट न होने पर त्रुटि सीधे दिखती है",
+    "imageModel": "छवि मॉडल",
+    "imageModelDesc": "छवि समझ और छवि निर्माण कार्यों के लिए डिफ़ॉल्ट मॉडल",
+    "videoModel": "वीडियो मॉडल",
+    "videoModelDesc": "वीडियो समझ कार्यों के लिए डिफ़ॉल्ट मॉडल",
+    "voiceModel": "वॉइस मॉडल",
+    "voiceModelDesc": "स्पीच-टू-टेक्स्ट और टेक्स्ट-टू-स्पीच कार्यों के लिए डिफ़ॉल्ट मॉडल"
   },
   "settingsPage": {
     "refreshPage": "पृष्ठ रीफ़्रेश करें"

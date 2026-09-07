@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "Default Conversation Model",
       "titleSummaryModel": "Title Summary Model",
-      "compressionModel": "Compression Model"
+      "compressionModel": "Compression Model",
+      "fallbackModel": "Fallback Model",
+      "imageModel": "Image Model",
+      "videoModel": "Video Model",
+      "voiceModel": "Voice Model"
     },
     "activeProfile": "Active Profile",
     "addKey": "Add Key",
@@ -6473,7 +6477,15 @@
     "knowledgeSettings": {
       "title": "Knowledge"
     },
-    "stockAnalysis": "Stock Analysis"
+    "stockAnalysis": "Stock Analysis",
+    "fallbackModel": "Fallback Model",
+    "fallbackModelDesc": "Automatically retries once with this model when the primary model request fails before producing any content; if unset, the error is shown directly",
+    "imageModel": "Image Model",
+    "imageModelDesc": "Default model for image understanding and image generation tasks",
+    "videoModel": "Video Model",
+    "videoModelDesc": "Default model for video understanding tasks",
+    "voiceModel": "Voice Model",
+    "voiceModelDesc": "Default model for speech-to-text and text-to-speech tasks"
   },
   "settingsPage": {
     "refreshPage": "Refresh Page"

@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "預設對話模型",
       "titleSummaryModel": "標題摘要模型",
-      "compressionModel": "壓縮模型"
+      "compressionModel": "壓縮模型",
+      "fallbackModel": "備援模型",
+      "imageModel": "圖片模型",
+      "videoModel": "影片模型",
+      "voiceModel": "語音模型"
     },
     "activeProfile": "當前配置",
     "addKey": "新增金鑰",
@@ -6473,7 +6477,15 @@
     "knowledgeSettings": {
       "title": "知識庫"
     },
-    "stockAnalysis": "股票分析"
+    "stockAnalysis": "股票分析",
+    "fallbackModel": "備援模型",
+    "fallbackModelDesc": "主要模型請求失敗且尚未產出內容時，自動切換到該模型重試一次，未設定則直接報錯",
+    "imageModel": "圖片模型",
+    "imageModelDesc": "圖像理解與圖片生成任務使用的預設模型",
+    "videoModel": "影片模型",
+    "videoModelDesc": "影片理解任務使用的預設模型",
+    "voiceModel": "語音模型",
+    "voiceModelDesc": "語音轉寫與語音合成任務使用的預設模型"
   },
   "settingsPage": {
     "refreshPage": "刷新頁面"

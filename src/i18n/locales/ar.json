@@ -4833,7 +4833,11 @@
     "modelLabels": {
       "defaultModel": "نموذج المحادثة الافتراضي",
       "titleSummaryModel": "نموذج تلخيص العنوان",
-      "compressionModel": "نموذج ضغط"
+      "compressionModel": "نموذج ضغط",
+      "fallbackModel": "النموذج الاحتياطي",
+      "imageModel": "نموذج الصور",
+      "videoModel": "نموذج الفيديو",
+      "voiceModel": "النموذج الصوتي"
     },
     "activeProfile": "الملف النشط",
     "addKey": "إضافة مفتاح",
@@ -6473,7 +6477,15 @@
       "title": "المعرفة"
     },
     "stockAnalysis": "Stock Analysis",
-    "title": "设置"
+    "title": "设置",
+    "fallbackModel": "النموذج الاحتياطي",
+    "fallbackModelDesc": "يعيد المحاولة تلقائيًا مرة واحدة بهذا النموذج عند فشل طلب النموذج الأساسي قبل إنتاج أي محتوى؛ إذا لم يُضبط يظهر الخطأ مباشرة",
+    "imageModel": "نموذج الصور",
+    "imageModelDesc": "النموذج الافتراضي لمهام فهم الصور وتوليدها",
+    "videoModel": "نموذج الفيديو",
+    "videoModelDesc": "النموذج الافتراضي لمهام فهم الفيديو",
+    "voiceModel": "النموذج الصوتي",
+    "voiceModelDesc": "النموذج الافتراضي لمهام التعرف على الكلام وتحويل النص إلى كلام"
   },
   "settingsPage": {
     "refreshPage": "تحديث الصفحة"

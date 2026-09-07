@@ -80,9 +80,12 @@ pub mod v220_narrative_structure;
 pub mod v221_demand_discovery;
 pub mod v222_demand_lead_evaluation;
 pub mod v223_heal_stale_schema;
+// 上游新 migration：为 workflow_templates 表添加 hooks_config 列（模板级生命周期钩子）。
+// 上游编号 v134 与本地 v134_lead_workflow_link 冲突，故作为本地序列下一个版本 v224 追加。
+pub mod v134_add_workflow_template_hooks;
 
 /// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 223;
+pub const CURRENT_VERSION: i32 = 224;
 
 /// P2-10: Schema 版本追踪表名。
 ///
@@ -434,6 +437,11 @@ const MIGRATIONS: &[Migration] = &[
         version: 223,
         description: "v223_heal_stale_schema: 自愈迁移——修复存量库缺失的列与 CHECK 约束（information_schema/pragma 守卫，重跑安全）",
         up: |db| Box::pin(v223_heal_stale_schema::up(db)),
+    },
+    Migration {
+        version: 224,
+        description: "v224_add_workflow_template_hooks: 为 workflow_templates 添加 hooks_config 列（模板级生命周期钩子声明 JSON，NULL 合法）——通用引擎按声明查运行时注册表，业务侧经 register_lifecycle_hook 注入实现（上游原编号 v134，与本地 v134_lead_workflow_link 冲突，重编号追加）",
+        up: |db| Box::pin(v134_add_workflow_template_hooks::up(db)),
     },
 ];
 

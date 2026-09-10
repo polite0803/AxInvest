@@ -176,12 +176,11 @@ pub fn compute_kelly_odds(
         }
     }
     // trader 缺失或存在但无效（看空/止损倒挂/垃圾数据）→ 与 rhai 一致走 fallback
+    // 0.50 偏多档与 0.42 试探档（V59）数值同为 1.5，合并为一个档位
     let odds = if posterior >= 0.70 {
         2.5
     } else if posterior >= 0.60 {
         2.0
-    } else if posterior >= 0.50 {
-        1.5
     } else if posterior >= 0.42 {
         1.5
     } else {

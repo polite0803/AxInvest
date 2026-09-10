@@ -130,9 +130,9 @@ let events = [];
 // a-catalyst 输出不是事件数组，而是综合评估 JSON，需要从中提取事件信息
 // V69 防御(2026-09-10): input_mapping 在部分执行里产出 {content:"..."} 包装对象而非
 // 纯字符串（301302 实证 pace_degraded=true, reason="无有效事件输入"）。统一解包。
-let llm_events_str = if type_of(llm_events) == "map" && type_of(llm_events["content"]) == "string" {
+let llm_events_str = if present(llm_events) && type_of(llm_events) == "map" && type_of(llm_events["content"]) == "string" {
     llm_events["content"]
-} else if type_of(llm_events) == "string" {
+} else if present(llm_events) && type_of(llm_events) == "string" {
     llm_events
 } else {
     ""
@@ -210,9 +210,9 @@ if llm_events_str != "" {
 
 // 如果无 LLM 事件但有 announcement events，回退使用公告数据
 // V69: 同样兼容 {content:"..."} 包装（与上方 llm_events 防御一致）
-let ann_events_str = if type_of(announcement_events) == "map" && type_of(announcement_events["content"]) == "string" {
+let ann_events_str = if present(announcement_events) && type_of(announcement_events) == "map" && type_of(announcement_events["content"]) == "string" {
     announcement_events["content"]
-} else if type_of(announcement_events) == "string" {
+} else if present(announcement_events) && type_of(announcement_events) == "string" {
     announcement_events
 } else {
     ""

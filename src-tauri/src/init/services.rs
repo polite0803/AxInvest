@@ -16,7 +16,16 @@ pub async fn start_background_services(
     app_dir: std::path::PathBuf,
     _tray_language: String,
 ) {
-    // [AxAgent 残留移除] register_portfolio_mgr_rhai_functions 已移除
+    // [2026-09-09 修复] 恢复被误删的共享 Rhai Engine pm_* 注册（原
+    // register_portfolio_mgr_rhai_functions，fork 清理「AxAgent 残留」时连调用带实现
+    // 一起移除，只留下下方 doc 注释）。workflow code_executor 的 shared_rhai_engine
+    // 仅通过此回调获得 pm_* 函数；缺失会导致 data-quality.rhai /
+    // portfolio-mgr.rhai / portfolio-risk-gate.rhai 全部报
+    // Function not found（2026-09-09 data-quality 节点 VALIDATION_FAILED 实证）。
+    // 必须在任何工作流执行前调用（shared_rhai_engine 是 OnceLock 单例）。
+    axagent_rt_workflow::work_engine::executors::register_shared_engine_initializer(Box::new(
+        crate::commands::stock_workflow::rhai_pm::register_pm_functions,
+    ));
     init_mcp_oauth(state);
     start_auto_backup(app, state, app_dir.clone());
     start_webdav_sync(app, state, app_dir.clone());
@@ -438,28 +447,14 @@ fn start_pty_event_forwarder(app: &tauri::AppHandle, state: &AppState) {
     });
 }
 
-/// P1-D10: 注册 portfolio-mgr.rhai 依赖的 pm_* 函数到共享 Rhai Engine。
+/// 初始化 MCP OAuth 全局凭据存储。
 ///
-/// rt-workflow（hybrid 层）不能依赖 AxAgent 专属 crate `axagent-stock-analysis`，
-/// 但主 crate（wiring 层）可以同时依赖两者。此函数在应用启动时调用
-/// `register_shared_engine_initializer`，把 pm_* 函数注入到
-/// `code_executor::shared_rhai_engine()` 的初始化流程中。
-///
-/// 注册的函数（与 `stock_workflow/decision.rs` Rerun Decision 路径保持对称）：
-/// - `pm_evidence_scale`: 非线性证据缩放（sqrt 曲线）
-/// - `pm_kelly_position`: 凯利仓位计算（半凯利 + 成本扣减 + 风险上限）
-/// - `pm_classify_risk`: 基于量化指标的算法风险分类
-/// - `pm_risk_bias`: 风险等级对应的行为阈值偏移
-/// - `pm_risk_veto`: 风控否决（高风险禁止加仓 / 极高风险禁止持仓）
-/// - `pm_covariance_decay`: 因子协方差衰减（减少信号重复计数）
-/// - `pm_portfolio_risk_gate`: 组合风控门（P1-E13）
-/// - `pm_compute_news_sentiment`: 统一新闻情感分（P2-B4，[-1.0, 1.0]）
-/// - `pm_compute_text_sentiment`: 单文本情感分（P2-B4，[-1.0, 1.0]）
-/// - `pm_compute_bayes_confidence`: 贝叶斯因子置信度（P0，基于 prior→posterior 证据强度）
-/// - `pm_compute_factor_completeness`: 因子数据完整度（供 data-quality.rhai 使用）
-///
-/// 必须在 `shared_rhai_engine()` 首次调用前注册（即任何工作流执行前）。
-/// 后续注册不会生效（`OnceLock::set` 在已初始化后返回 Err，仅记 warn）。
+/// （历史备注）本函数头上曾挂着一段 P1-D10 的 doc 注释，描述
+/// 「在应用启动时调用 register_shared_engine_initializer 注入 pm_* 函数」，
+/// 但对应的调用在 fork 清理「AxAgent 残留」时被整体移除，只剩注释——
+/// 2026-09-09 已在 `start_background_services` 开头恢复该调用，
+/// pm_* 注册的权威实现见
+/// `crate::commands::stock_workflow::rhai_pm::register_pm_functions`。
 fn init_mcp_oauth(state: &AppState) {
     let master_key = state.harness.master_key_owned();
     let crypto = std::sync::Arc::new(
@@ -965,6 +960,25 @@ fn start_rl_reward_computation(state: &AppState, app_dir: std::path::PathBuf) {
                         continue;
                     },
                 };
+            // P0 修复（2026-09-08）：只评「未评分且已结束」的轨迹，并限制单轮上限。
+            //
+            // 此前每轮无条件对最近 15 条轨迹全量重评分（每步每工具调用一次 LLM judge
+            // + PRM 也是 LLM 调用），同一批轨迹每 20 分钟被重复判一遍 —— 纯浪费。
+            // judge 从 64 token 修复为 512 后，每条 judge 需生成完整思维链（数秒），
+            // 整个 sweep 长时间持续抢占 LLM provider，与前台工作流（股票分析等）
+            // 争抢配额，导致工作流阶段更新极慢、后台请求日志刷屏。
+            //
+            // 两条过滤规则：
+            // 1. rewards 非空 = 已评过分，跳过（storage 事务化持久化 rewards，回读可信）
+            // 2. created_at 距今不足 15 分钟 = 轨迹可能仍属于进行中的工作流执行，
+            //    此时评分会与该工作流抢 LLM 配额，等下一轮再评
+            // 3. 单轮最多评 5 条：兜底控制最坏情况下的 LLM 用量
+            let now = chrono::Utc::now();
+            trajectories.retain(|t| {
+                t.rewards.is_empty()
+                    && now.signed_duration_since(t.created_at) > chrono::Duration::minutes(15)
+            });
+            trajectories.truncate(5);
             if trajectories.is_empty() {
                 continue;
             }

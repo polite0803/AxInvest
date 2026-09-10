@@ -110,6 +110,7 @@ fn make_state(execution_id: &str) -> ExecutionState {
         loop_body_dispatch: None,
         loop_checkpoint: None,
         debate_body_dispatch: None,
+        stream_progress: None,
     });
     s
 }
@@ -350,4 +351,62 @@ async fn loop_partial_results_arrive_in_order() {
     }
     assert_eq!(got, vec![0, 1, 2], "事件应按 iter_index 0/1/2 到达");
     assert_eq!(cumulative_lengths, vec![1, 2, 3], "cumulative_partial 应递增：1/2/3");
+}
+
+// ── 测试 4：点路径输入（上游节点输出内的数组）─────────────────────────
+
+#[tokio::test]
+async fn loop_foreach_reads_dot_path_input() {
+    // 模拟 demand-discovery 模板的实际场景：上游 CodeNode 的输出是包装对象
+    // {status, result: [...]}，Loop 用点路径 "wrapper.result" 直取其中数组。
+    // 修复前 iter_input_var 只支持平键直查，动态数组无法从上游节点流入 Loop。
+    let mut state = make_state("exec4");
+    state.variables.insert(
+        "wrapper".to_string(),
+        serde_json::json!({"status": "executed", "result": ["AI", "软件", "设计"]}),
+    );
+
+    let seen: Arc<tokio::sync::Mutex<Vec<String>>> = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    let seen_for_body = seen.clone();
+    let body_fn: Arc<dyn Fn(String, ExecutionState) -> NodeOutput + Send + Sync> =
+        Arc::new(move |_step_id, ctx| {
+            let item =
+                ctx.variables.get("__loop_iteratee__").cloned().unwrap_or(serde_json::Value::Null);
+            if let Ok(mut g) = seen_for_body.try_lock() {
+                g.push(item.as_str().unwrap_or("").to_string());
+            }
+            NodeOutput {
+                output: serde_json::json!({"scanned": item}),
+                output_var: Some("step_out".to_string()),
+                control: None,
+            }
+        });
+    state.callbacks.as_mut().expect("测试应成功").loop_body_dispatch =
+        Some(make_body_dispatch(body_fn));
+
+    let (cp_ops, _cp_store) = in_memory_checkpoint_ops();
+    state.callbacks.as_mut().expect("测试应成功").loop_checkpoint = Some(cp_ops);
+
+    let node = make_loop_node(LoopNodeConfig {
+        loop_type: LoopType::ForEach,
+        items_var: None,
+        iter_input_var: Some("wrapper.result".to_string()),
+        iteratee_var: Some("__loop_iteratee__".to_string()),
+        iter_output_var: Some("iter_output".to_string()),
+        partial_result_var: None,
+        max_iterations: None,
+        continue_condition: None,
+        continue_on_error: false,
+        body_steps: vec!["scan_step".to_string()],
+        sub_graph: None,
+        interrupt_after_each: false,
+        interrupt_nodes: vec![],
+    });
+
+    let executor = LoopExecutor::new();
+    let out = executor.execute(&node, &state).await.expect("execute");
+
+    assert_eq!(out.output.get("iter_count").and_then(|v| v.as_u64()), Some(3));
+    let got = seen.try_lock().expect("body 已结束").clone();
+    assert_eq!(got, vec!["AI".to_string(), "软件".to_string(), "设计".to_string()]);
 }

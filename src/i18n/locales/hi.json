@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "कोई क्षमता अंतराल नहीं",
+      "deliveriesEmpty": "कोई डिलीवरी नहीं; लीड क्रियाओं में \"डिलीवरी निष्पादित करें\" से बनाएँ",
+      "executeDelivery": "डिलीवरी निष्पादित करें",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "प्रोएक्टिव स्कैन",
       "btnAnalyzeGaps": "गैप का विश्लेषण",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "स्थिति बदलें",
+      "delivery": "डिलिवरी",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "अधिकतम क्षमता कैश",
         "dbCleanupDays": "डेटाबेस सफ़ाई दिन",
         "logLevel": "लॉग स्तर: debug/info/warn/error",
-        "enableAnalytics": "विश्लेषण सक्षम करें"
+        "enableAnalytics": "विश्लेषण सक्षम करें",
+        "scanLlmEvalEnabled": "LLM परिष्करण (उच्च-स्कोर लीड्स का पुनर्मूल्यांकन)",
+        "scanLlmEvalMaxLeads": "प्रति बैच अधिकतम लीड्स",
+        "scanLlmEvalMinRuleScore": "परिष्करण प्री-फ़िल्टर (नियम स्कोर ≥)"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "अनुपालन हेतु छोड़ा गया"
       },
+      "platformSkippedHint": "आधिकारिक API क्रेडेंशियल कॉन्फ़िगर नहीं हैं; अनुपालन नीति के अनुसार स्कैन छोड़ दिया गया। स्कैन के लिए टोकन कॉन्फ़िगर करें और प्लेटफ़ॉर्म सक्षम करें।",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13571,6 +13565,14 @@
       "subscriptions": "सदस्यताएँ",
       "addSubscription": "सदस्यता जोड़ें",
       "manualEntry": "मैनुअल प्रविष्टि",
+      "capabilityScan": "क्षमता-संचालित स्कैन",
+      "capabilityScanDesc": "स्थानीय क्षमता सूची से खोज क्वेरी जेनरेट करता है और मांग बाज़ारों को शब्द-दर-शब्द स्कैन करता है (वर्कफ़्लो: क्षमता स्कैन → क्वेरी योजना → लूप स्कैन)।",
+      "capabilityFocus": "फ़ोकस (वैकल्पिक)",
+      "capabilityFocusPlaceholder": "उदा. AI ऐप विकास, डेटा सेवाएँ; खाली छोड़ने पर क्षमता सूची तय करेगी",
+      "capabilityMaxKeywords": "अधिकतम खोज क्वेरी",
+      "capabilityScanStart": "स्कैन शुरू करें",
+      "capabilityScanComplete": "क्षमता-संचालित स्कैन पूर्ण, लीड रिफ़्रेश हो गए",
+      "capabilityScanFailed": "क्षमता-संचालित स्कैन विफल: {{error}}",
       "leadCreateFailed": "लीड बनाने में विफल: {{error}}",
       "leadFormTitle": "शीर्षक",
       "leadFormTitleRequired": "शीर्षक आवश्यक है",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "जारी किया गया चिह्नित करें",
       "delivMarkPaid": "भुगतान चिह्नित करें",
       "delivDelete": "हटाएँ"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14372,7 +14383,8 @@
     "boolYes": "हाँ",
     "boolNo": "नहीं",
     "backendCallFailed": "बैकएंड कॉल विफल",
-    "emptyHistoryWarning": "Serenity इतिहास खाली है: list_reco_history ने 0 पंक्तियाँ लौटाईं (संभव है कि DB में serenity/bottleneck शैली का कोई इतिहास न हो, या बैकएंड कमांड विफलता को चुपचाप अनदेखा कर दिया गया हो)"
+    "emptyHistoryWarning": "Serenity इतिहास खाली है: list_reco_history ने 0 पंक्तियाँ लौटाईं (संभव है कि DB में serenity/bottleneck शैली का कोई इतिहास न हो, या बैकएंड कमांड विफलता को चुपचाप अनदेखा कर दिया गया हो)",
+    "timeBasis": "समय आधार: {{date}} · सुझाई गई अवधि ~{{days}} दिन ({{until}} तक)"
   },
   "trade": {
     "title": "Trading Log",
@@ -14963,7 +14975,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "मुख्य मूल्यांकन मैट्रिक्स (t-valuation)",
+      "currentPriceLabel": "मूल्य",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "मोट स्कोर",
+      "oeYieldLabel": "OE उपज",
+      "grahamUpsideLabel": "ग्राहम अपसाइड",
+      "valueSignalLabel": "समग्र संकेत",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "ऋण अनुपात",
+      "grossMarginLabel": "सकल मार्जिन",
+      "revenueGrowthLabel": "राजस्व वृद्धि"
     },
     "workflow": {
       "analyst": {
@@ -15016,6 +15039,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "सहायक नोड्स",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15077,7 +15101,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析师",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "विश्लेषण छोड़ने में त्रुटि: {{reason}}"
     },
     "debugPanel": {
       "show": "🔍 Show",
@@ -15601,6 +15625,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "ट्रेंड पिक बनाम विश्लेषण · क्रॉस-सिस्टम विचलन",
+      "timeBasis": "पिक {{recoDate}} · विश्लेषण {{decisionDate}} (~{{gapDays}} दिन का अंतर)",
+      "recoSays": "ट्रेंड पिक {{score}} अंक, {{position}}% परीक्षण पोजीशन सुझाई ({{strategy}} रणनीति)",
+      "attentionHeat": "ध्यान: {{heat}}",
+      "workflowSays": "विश्लेषण वर्कफ़्लो निर्णय: {{action}}, पोजीशन {{position}}%",
+      "divergenceNote": "दो घड़ियाँ अलग — पिक उत्प्रेरकों पर दांव लगाता है (~{{recoDays}} दिन), वर्कफ़्लो वर्तमान ऑड्स का मूल्यांकन करता है (~{{decisionDays}} दिन)",
+      "catalystLabel": "उत्प्रेरक ({{confidence}})"
     },
     "compare": {
       "title": "Compare",
@@ -16355,7 +16388,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

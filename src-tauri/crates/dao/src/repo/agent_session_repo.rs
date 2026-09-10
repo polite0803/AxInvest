@@ -76,9 +76,28 @@ impl AgentSessionRepository for DaoAgentSessionRepository {
                 .is_some();
             if !conv_exists {
                 let now_ts = chrono::Utc::now().timestamp();
+                // INSERT OR IGNORE 是 SQLite 专有语法，PG 上报"语法错误 在 OR 或附近"，
+                // 必须按后端分支（与 memory.rs 同模式）：PG 用 ON CONFLICT DO NOTHING。
+                // 占位标题统一走 AUTO_PLACEHOLDER_TITLE（列表层过滤 + cleanup 的匹配依据）
+                let (sql, backend) = match self.db.get_database_backend() {
+                    sea_orm::DbBackend::Postgres => (
+                        format!(
+                            "INSERT INTO conversations (id, title, model_id, provider_id, created_at, updated_at) VALUES ($1, '{}', 'unknown', 'unknown', $2, $2) ON CONFLICT (id) DO NOTHING",
+                            super::conversation::AUTO_PLACEHOLDER_TITLE
+                        ),
+                        sea_orm::DatabaseBackend::Postgres,
+                    ),
+                    _ => (
+                        format!(
+                            "INSERT OR IGNORE INTO conversations (id, title, model_id, provider_id, created_at, updated_at) VALUES (?1, '{}', 'unknown', 'unknown', ?2, ?2)",
+                            super::conversation::AUTO_PLACEHOLDER_TITLE
+                        ),
+                        sea_orm::DatabaseBackend::Sqlite,
+                    ),
+                };
                 let stmt = sea_orm::Statement::from_sql_and_values(
-                    sea_orm::DatabaseBackend::Sqlite,
-                    "INSERT OR IGNORE INTO conversations (id, title, model_id, provider_id, created_at, updated_at) VALUES ($1, '[auto]', 'unknown', 'unknown', $2, $2)",
+                    backend,
+                    &sql,
                     [conversation_id.to_string().into(), now_ts.into()],
                 );
                 self.db.as_ref().execute_raw(stmt).await?;

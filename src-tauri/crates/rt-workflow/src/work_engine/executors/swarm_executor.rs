@@ -138,9 +138,10 @@ impl NodeExecutorTrait for SwarmExecutor {
 
             round_outputs.push(round_results.clone());
 
-            // 收敛检测（从第 2 轮开始）
+            // 收敛检测（从第 2 轮开始）。check_round_convergence 是纯文本相似度
+            // 比较，不依赖 convergence_prompt；旧门控导致未配置该变量的模板
+            // 永远跑满 max_rounds 轮（与 debate_executor 同步修复 2026-09-08）。
             if round > 0
-                && convergence_prompt.is_some()
                 && super::check_round_convergence(
                     &round_results,
                     &round_outputs[round.saturating_sub(1) as usize],

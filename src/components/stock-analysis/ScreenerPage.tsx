@@ -1,8 +1,8 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { Collapse, Grid, Tabs } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { PageHeader } from "./_shared/PageHeader";
 import { DragonTigerPanel } from "./DragonTigerPanel";
 import { HotStocksPanel } from "./HotStocksPanel";
 import { LimitUpPanel } from "./LimitUpPanel";
@@ -23,6 +23,11 @@ const { useBreakpoint } = Grid;
  *
  * 设计原则:系统被动推荐 与 用户主动筛选 走同一个入口,消除
  * "今日荐股 / 全市场发现" 这种重复暴露。
+ *
+ * 头部说明:本页只作为 InvestHub 的 "选股" tab 渲染(/screener 独立路由已
+ * 重定向到 /invest?tab=screener),页内不再渲染 PageHeader 的返回按钮 +
+ * 标题(与 InvestHub 的 "投资中心" 标题 + tab 名重复且挤压换行),
+ * 仅保留右对齐的 PageTimeAnchor(实时分析 / 历史回放切换)。
  */
 export function ScreenerPage() {
   const { t } = useTranslation();
@@ -34,7 +39,10 @@ export function ScreenerPage() {
   return (
     <PageErrorBoundary title={t("stockAnalysis.page.screener")}>
       <div className="flex h-full flex-col">
-        <PageHeader titleKey="screener.title" backTo="/stock-analysis" />
+        {/* 精简头部:只保留时间锚点,右对齐,单行不换行 */}
+        <div className="flex flex-shrink-0 items-center justify-end gap-2 px-4 pt-2">
+          <PageTimeAnchor />
+        </div>
         <div className={["flex-1 overflow-auto space-y-4", isMobile ? "p-2" : "p-4"].join(" ")}>
           {/* 顶部:统一入口的"智能荐股 / 我的筛选"切换 */}
           <div>

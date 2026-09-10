@@ -91,7 +91,19 @@ function extractContentField(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") { return raw; }
   const r = raw as Record<string, unknown>;
   // CodeNode 包装：{status, result, params, ...} → 取 result
-  if (r.result != null && typeof r.result === "object") { return r.result; }
+  if (r.result != null && typeof r.result === "object") {
+    // ToolNode 双层包装（2026-09-09 对齐）：result = {content: "<json字符串>", tool_name}
+    // 数据在 content 字符串里，与后端 resolve_var_path 穿透 .content 的语义一致
+    const inner = r.result as Record<string, unknown>;
+    if (typeof inner.content === "string") {
+      try {
+        return JSON.parse(inner.content);
+      } catch {
+        return inner.content;
+      }
+    }
+    return r.result;
+  }
   // AgentNode 包装：{content, model, role, ...} → content 可能是 JSON 字符串
   if (typeof r.content === "string") {
     try {
@@ -155,9 +167,10 @@ function diagnoseNode(nodeId: string, raw: unknown): NodeDiagResult {
       };
     }
     case "a-catalyst": {
+      // 2026-09-09 对齐: content parse 后为 {report, verdict}，机读字段在 verdict 层
       const verdict = getPath(content, "verdict");
       const conf = toConf(getPath(verdict, "confidence") ?? getPath(content, "confidence"));
-      const level = getPath(content, "catalyst_level");
+      const level = getPath(verdict, "catalyst_level") ?? getPath(content, "catalyst_level");
       return {
         confidence: conf,
         stance: typeof level === "string" ? String(level) : "",
@@ -208,16 +221,19 @@ function diagnoseNode(nodeId: string, raw: unknown): NodeDiagResult {
       };
     }
     case "trader": {
+      // 2026-09-09 对齐: content parse 后为 {report, verdict}，机读字段在 verdict 层
       const verdict = getPath(content, "verdict");
-      const conf = toConf(getPath(content, "confidence"));
+      const innerVerdict = getPath(verdict, "verdict");
+      const conf = toConf(getPath(verdict, "confidence") ?? getPath(content, "confidence"));
       return {
         confidence: conf,
-        stance: typeof verdict === "string" ? String(verdict) : "",
+        stance: typeof innerVerdict === "string" ? String(innerVerdict) : "",
         note: verdict ? "VERDICT 已输出" : "verdict 字段缺失",
       };
     }
     case "t-hotmoney-data": {
-      const main = getPath(content, "main_net_inflow");
+      // MoneyFlow serde 输出 camelCase（mainNetInflow），snake_case 保留兜底
+      const main = getPath(content, "mainNetInflow") ?? getPath(content, "main_net_inflow");
       return {
         confidence: null,
         stance: typeof main === "number" ? `主力净流入=${main.toFixed(0)}` : "",

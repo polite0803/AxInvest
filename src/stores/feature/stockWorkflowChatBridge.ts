@@ -185,7 +185,13 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
   const DEBATE_ROUNDS = 3;
   const debatesMap = new Map<
     string,
-    { key: string; label: string; status: "pending" | "running" | "done" | "failed"; rounds: string[] }
+    {
+      key: string;
+      label: string;
+      status: "pending" | "running" | "done" | "failed";
+      rounds: string[];
+      preview?: string;
+    }
   >();
   for (let r = 1; r <= DEBATE_ROUNDS; r++) {
     debatesMap.set(`bull-r${r}`, {
@@ -239,6 +245,18 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       label: i18next.t("stockAnalysis.workflow.notification"),
       status: "pending" as "pending" | "running" | "done" | "failed",
     }],
+    // 2026-09-08 修复：两个长 LLM 收敛节点此前在聊天卡片完全不可见
+    // （completedNodes 计数外无任何状态显示），运行期间 UI 无反馈
+    ["risk-convergence", {
+      key: "risk-convergence",
+      label: i18next.t("stockAnalysis.workflow.riskConvergence"),
+      status: "pending" as "pending" | "running" | "done" | "failed",
+    }],
+    ["debate-convergence", {
+      key: "debate-convergence",
+      label: i18next.t("stockAnalysis.analysisDebug.debateConvergence"),
+      status: "pending" as "pending" | "running" | "done" | "failed",
+    }],
   ]);
 
   const dataSourcesMap = new Map<string, DataSourceEntry>();
@@ -260,8 +278,9 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       const bearEntry = debatesMap.get(`bear-r${r}`);
       debates.push({
         round: r,
-        bull: bullEntry?.rounds[0],
-        bear: bearEntry?.rounds[0],
+        // 生成中优先显示流式预览（rounds 仅在 completed 后有值）
+        bull: bullEntry?.rounds[0] ?? bullEntry?.preview,
+        bear: bearEntry?.rounds[0] ?? bearEntry?.preview,
         status: (bullEntry?.rounds[0] && bearEntry?.rounds[0])
           ? "done" as const
           : (bullEntry?.status === "running" || bearEntry?.status === "running")
@@ -301,7 +320,10 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       appendMessageToStore(conversationId, m);
       return m.id;
     } catch (e) {
-      console.error("[StockWorkflowChatBridge] 创建聚合消息失败，将在首个节点完成时重试:", e);
+      console.error(
+        "[StockWorkflowChatBridge] failed to create aggregate message, will retry on first node completion:",
+        e,
+      );
       return null;
     }
   };
@@ -371,6 +393,14 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       const analyst = analystsMap.get(nodeId)!;
       if (status === "running") {
         analyst.status = "running";
+      } else if (status === "streaming") {
+        // 流式增量（2026-09-08 修复）：分析师单次 LLM 调用 1-5 分钟，
+        // 聊天聚合卡片实时填充"生成中"预览，completed 后被正式报告覆盖。
+        analyst.status = "running";
+        if (output != null) {
+          const text = extractContent(output);
+          if (text) { analyst.report = text.length > 2000 ? text.slice(-2000) : text; }
+        }
       } else if (status === "completed") {
         analyst.status = "done";
         if (output != null) {
@@ -392,8 +422,18 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       const debater = debatesMap.get(debateNodeId)!;
       if (status === "running") {
         debater.status = "running";
+      } else if (status === "streaming") {
+        // 流式增量（2026-09-08 修复）：辩手单次 LLM 调用 1-5 分钟，preview 独立
+        // 字段实时填充（不污染 rounds，避免 reconcileFromResults / 轮次计数误判），
+        // completed 后清空 preview、正式文本进 rounds。
+        debater.status = "running";
+        if (output != null) {
+          const text = extractContent(output);
+          if (text) { debater.preview = text.length > 2000 ? text.slice(-2000) : text; }
+        }
       } else if (status === "completed") {
         debater.status = "done";
+        debater.preview = undefined;
         if (output != null) {
           debater.rounds.push(extractContent(output));
         }
@@ -407,6 +447,15 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
       const risk = risksMap.get(nodeId)!;
       if (status === "running") {
         risk.status = "running";
+      } else if (status === "streaming") {
+        // 流式增量（2026-09-08 修复）：AgentExecutor 每 2s 推送累积文本，
+        // 风险评估师单次 LLM 调用 1-5 分钟，聊天聚合卡片实时填充"生成中"预览。
+        // 只保留末尾 ~2000 字符：预览关注"正在生成什么"，避免长输出撑爆状态。
+        risk.status = "running";
+        if (output != null) {
+          const text = extractContent(output);
+          if (text) { risk.content = text.length > 2000 ? text.slice(-2000) : text; }
+        }
       } else if (status === "completed") {
         risk.status = "done";
         if (output != null) {

@@ -146,7 +146,14 @@ pub(crate) fn resolve_var_path(
             }
         }
         if navigated {
-            return Some(auto_parse_value(current));
+            // 终值不做 auto_parse（2026-09-09 修复）：中间层穿透需要 parse（上方
+            // 显式 from_str），但终值必须保留原样。data-quality / portfolio-mgr /
+            // pace-calc 的 rhai 消费端契约是「ToolNode 输出为 JSON 字符串，脚本内
+            // json_parse/safe_parse 解析」（type_of(x)=="string" 判断）。终值 parse
+            // 会把字符串偷偷转成 map/array，导致 rhai 的 string 分支全部失效、
+            // 因子信号恒 0（f9/f10/ann=0 实证）。模板作者写 `x.result.content`
+            // 期望拿到的就是 content 字符串本身。
+            return Some(current);
         }
     }
     // fallback：整路径作为模板变量名直查（向后兼容）。

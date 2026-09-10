@@ -156,12 +156,16 @@ impl NodeExecutorTrait for LoopExecutor {
         let node_id = node.base_id().to_string();
 
         // ── 解析输入数组 ──
+        // 与 tool/code 等 executor 的 input_mapping 同口径：走 resolve_var_path
+        // 点路径解析（如 "c-keywords.result" 直取上游 CodeNode 输出内的数组，
+        // 并自动 JSON.parse 字符串包裹）。平键（如 "tx_list"）行为与旧版一致
+        // —— resolve_var_path 对无点号路径的 fallback 就是平键直查。
         let input_var =
             axagent_harness::workflow_types::LoopNodeConfigResolver::effective_input_var(c);
         let items: Vec<serde_json::Value> = if let Some(var_name) = input_var {
-            match context.variables.get(var_name) {
-                Some(serde_json::Value::Array(arr)) => arr.clone(),
-                Some(other) => vec![other.clone()],
+            match super::resolve_var_path(var_name, &context.variables) {
+                Some(serde_json::Value::Array(arr)) => arr,
+                Some(other) => vec![other],
                 None => Vec::new(),
             }
         } else {

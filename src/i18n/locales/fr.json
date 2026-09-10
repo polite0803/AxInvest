@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "Aucun écart de capacité",
+      "deliveriesEmpty": "Aucune livraison ; créez-en une via « Exécuter la livraison » dans les actions de piste",
+      "executeDelivery": "Exécuter la livraison",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "Analyse proactive",
       "btnAnalyzeGaps": "Analyser les écarts",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "Changer le statut",
+      "delivery": "Livraison",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "Cache maximum des capacités",
         "dbCleanupDays": "Jours de nettoyage de la base de données",
         "logLevel": "Niveau de journal: debug/info/warn/error",
-        "enableAnalytics": "Activer les analyses"
+        "enableAnalytics": "Activer les analyses",
+        "scanLlmEvalEnabled": "Affinage LLM (réévaluation des pistes prometteuses)",
+        "scanLlmEvalMaxLeads": "Pistes max par lot d'affinage",
+        "scanLlmEvalMinRuleScore": "Préfiltre d'affinage (score de règle ≥)"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "Ignoré (conformité)"
       },
+      "platformSkippedHint": "Aucune donnée d'identification API officielle configurée ; analyse ignorée conformément à la politique de conformité. Configurez un jeton et activez la plateforme pour analyser.",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13571,6 +13565,14 @@
       "subscriptions": "Abonnements",
       "addSubscription": "Ajouter un abonnement",
       "manualEntry": "Saisie manuelle",
+      "capabilityScan": "Scan piloté par les capacités",
+      "capabilityScanDesc": "Génère des requêtes à partir de l'inventaire local des capacités et scanne les places de demande mot à mot (workflow : scan des capacités → planification des requêtes → scan en boucle).",
+      "capabilityFocus": "Axe de focalisation (optionnel)",
+      "capabilityFocusPlaceholder": "ex. développement d'applications IA, services de données ; laisser vide pour laisser l'inventaire décider",
+      "capabilityMaxKeywords": "Nombre max de requêtes",
+      "capabilityScanStart": "Lancer le scan",
+      "capabilityScanComplete": "Scan piloté par les capacités terminé, pistes actualisées",
+      "capabilityScanFailed": "Échec du scan piloté par les capacités : {{error}}",
       "leadCreateFailed": "Échec de la création de la piste : {{error}}",
       "leadFormTitle": "Titre",
       "leadFormTitleRequired": "Le titre est obligatoire",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "Marquer comme émise",
       "delivMarkPaid": "Marquer comme payée",
       "delivDelete": "Supprimer"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14372,7 +14383,8 @@
     "boolYes": "Oui",
     "boolNo": "Non",
     "backendCallFailed": "Échec de l'appel backend",
-    "emptyHistoryWarning": "L'historique Serenity est vide : list_reco_history a renvoyé 0 ligne (peut-être aucun historique de style serenity/bottleneck dans la BD, ou l'échec de la commande backend a été silencieusement ignoré)"
+    "emptyHistoryWarning": "L'historique Serenity est vide : list_reco_history a renvoyé 0 ligne (peut-être aucun historique de style serenity/bottleneck dans la BD, ou l'échec de la commande backend a été silencieusement ignoré)",
+    "timeBasis": "Base temporelle : {{date}} · fenêtre suggérée ~{{days}} jours (jusqu'au {{until}})"
   },
   "trade": {
     "title": "Trading Log",
@@ -14963,7 +14975,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "Indicateurs de valorisation clés (t-valuation)",
+      "currentPriceLabel": "Prix",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "Score de douve",
+      "oeYieldLabel": "Rendement OE",
+      "grahamUpsideLabel": "Potentiel Graham",
+      "valueSignalLabel": "Signal global",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "Ratio d'endettement",
+      "grossMarginLabel": "Marge brute",
+      "revenueGrowthLabel": "Croissance du CA"
     },
     "workflow": {
       "analyst": {
@@ -15016,6 +15039,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "Nœuds auxiliaires",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15077,7 +15101,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析师",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "Erreur lors du saut de l'analyse : {{reason}}"
     },
     "debugPanel": {
       "show": "🔍 Show",
@@ -15601,6 +15625,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "Sélection de tendance vs Analyse · Divergence inter-systèmes",
+      "timeBasis": "Choix du {{recoDate}} · analyse du {{decisionDate}} (~{{gapDays}} jours d'écart)",
+      "recoSays": "Sélection de tendance : {{score}} pts, position sonde suggérée {{position}} % (stratégie {{strategy}})",
+      "attentionHeat": "Attention : {{heat}}",
+      "workflowSays": "Verdict du workflow d'analyse : {{action}}, position {{position}} %",
+      "divergenceNote": "Deux horloges différentes — la sélection parie sur les catalyseurs (~{{recoDays}} j), le workflow évalue les cotes actuelles (~{{decisionDays}} j)",
+      "catalystLabel": "Catalyseur ({{confidence}})"
     },
     "compare": {
       "title": "Compare",
@@ -16355,7 +16388,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

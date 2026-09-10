@@ -218,7 +218,10 @@ impl NodeExecutorTrait for SwitchExecutor {
                             }],
                             stream: false,
                             temperature: Some(0.0),
-                            max_tokens: Some(64),
+                            // P0 FIX (2026-09-08): 64 → 512，与 llm_classifier_executor.rs
+                            // 同语义。思考型模型思维链即可耗尽 64 tokens，case label 还没
+                            // 输出就被截断 (finish_reason=length)，路由恒失败。
+                            max_tokens: Some(512),
                             top_p: None,
                             tools: None,
                             thinking_budget: None,

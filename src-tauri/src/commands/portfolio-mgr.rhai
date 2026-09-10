@@ -558,11 +558,22 @@ let f9_default = 0.08;
 let f9_signal = if present(money_flow) && type_of(money_flow) == "string" && money_flow != "" {
     let mf = safe_parse(money_flow);
     if type_of(mf) == "map" {
-        // 提取主力/超大单净流入
-        let main_in = mf["main_net_inflow"];
-        let super_large_in = mf["super_large_net"];
-        let large_in = mf["large_net"];
-        let medium_in = mf["medium_net"];
+        // V60 字段名兼容修复(2026-09-10): get_stock_money_flow 实际输出 camelCase
+        // (mainNetInflow/superLargeNet/largeNet/mediumNet)，原代码按 snake_case
+        // 读取 → 恒 () → f9 恒 0。DB 实证: 002837 主力净流入 +5010 万在场，f9=0。
+        // 兼容两种命名。
+        let main_in = if type_of(mf["mainNetInflow"]) == "f64" { mf["mainNetInflow"] }
+            else if type_of(mf["main_net_inflow"]) == "f64" { mf["main_net_inflow"] }
+            else { () };
+        let super_large_in = if type_of(mf["superLargeNet"]) == "f64" { mf["superLargeNet"] }
+            else if type_of(mf["super_large_net"]) == "f64" { mf["super_large_net"] }
+            else { () };
+        let large_in = if type_of(mf["largeNet"]) == "f64" { mf["largeNet"] }
+            else if type_of(mf["large_net"]) == "f64" { mf["large_net"] }
+            else { () };
+        let medium_in = if type_of(mf["mediumNet"]) == "f64" { mf["mediumNet"] }
+            else if type_of(mf["medium_net"]) == "f64" { mf["medium_net"] }
+            else { () };
         // 如果有主力净流入数据
         if type_of(main_in) == "f64" {
             // 用主力净流入/总成交额估算信号强度
@@ -726,6 +737,40 @@ let f11_signal = if pace_is_degraded {
 } else { 0.0 };
 let f11_weight = if f11_signal != 0.0 { get_weight(f_weights, "pace", f11_default) } else { 0.0 };
 
+// ── f12 动量因子（v19 新增 2026-09-10）──
+// 热点股最强的正向证据是价格动量本身，但此前因子集无动量通道（90 天审计 + 601231 涨停板实测）：
+//   f1 技术评分 totalScore 0-100 压缩了动量信息（涨停日 totalScore 常仅 55-65 → 信号仅 +0.1），
+//   RSI/MACD 仅用于 R-40x 否决（纯负向门），涨幅/量比数据未注入 portfolio-mgr。
+// v19 用已注入的 macd_dif/macd_dea/rsi_14 构建趋势状态因子（零数据管线改动）：
+//   dif>0 且 dif>dea（零上多头）    → +0.7
+//   dif>0 且 dif≤dea（多头回调）    → +0.3
+//   dif≤0 且 dif>dea（零下金叉修复） → +0.3
+//   dif≤0 且 dif≤dea（零下空头）    → -0.7
+//   RSI 调制: 50~75 动量健康 +0.2; >75 过热 -0.2（>80 已被 R-401 否决）
+// 数据缺失 → 信号 0（权重归零，不占证据覆盖）。
+let f12_default = 0.10;
+let f12_signal = 0.0;
+if present(macd_dif) && type_of(macd_dif) == "f64" && present(macd_dea) && type_of(macd_dea) == "f64" {
+    if macd_dif > 0.0 && macd_dif > macd_dea {
+        f12_signal = 0.7;
+    } else if macd_dif > 0.0 {
+        f12_signal = 0.3;
+    } else if macd_dif > macd_dea {
+        f12_signal = 0.3;
+    } else {
+        f12_signal = -0.7;
+    }
+    if present(rsi_14) && type_of(rsi_14) == "f64" {
+        if rsi_14 >= 50.0 && rsi_14 <= 75.0 {
+            f12_signal = f12_signal + 0.2;
+        } else if rsi_14 > 75.0 {
+            f12_signal = f12_signal - 0.2;
+        }
+    }
+    f12_signal = clamp(f12_signal, -1.0, 1.0);
+}
+let f12_weight = if f12_signal != 0.0 { get_weight(f_weights, "momentum", f12_default) } else { 0.0 };
+
 // ── P1-1: 因子协方差衰减（消除高相关因子的信号重复计数）──
 // 贝叶斯因子融合隐含朴素独立假设（Naïve Bayes: P(E1,E2|H) = P(E1|H)×P(E2|H)），
 // 但现实中 f3(催化剂)与f11(PACE情绪)都依赖 t-catalyst-data 公告数据，约 70% 信息重叠；
@@ -743,6 +788,10 @@ if f3_weight > 0.0 && f11_weight > 0.0 {
 //   根因: 主力资金流入是趋势上涨的伴随现象，并非独立证据源。趋势向上时主力必然流入。
 if f1_weight > 0.0 && f9_weight > 0.0 {
     f9_weight = f9_weight * 0.75;  // 减掉 25% 的趋势-资金共振重复
+}
+// f1 ↔ f12: 技术评分与动量因子同源（行情数据） → 次要因子(f12)降权 25%
+if f1_weight > 0.0 && f12_weight > 0.0 {
+    f12_weight = f12_weight * 0.75;
 }
 
 // ── P1 新增: 技术面硬约束否决（内联计算，从 t-scoring.indicators 注入 rsi_14/macd_dif/macd_dea）──
@@ -853,20 +902,22 @@ if !trader_data_valid {
 // ── 贝叶斯融合 ──
 // V51: 因子数 7（f1~f7），P1 扩展至 10 因子（新增 f9 资金面 + f10 筹码面）
 // PACE 集成: 新增 f11 情绪因子 → 11 因子, total_weight 包含 f11
-let total_weight = f1_weight + f2_weight + f3_weight + f4_weight + f5_weight + f6_weight + f7_weight + f9_weight + f10_weight + f11_weight;
+// v19(2026-09-10): 新增 f12 动量因子 → 12 因子
+let total_weight = f1_weight + f2_weight + f3_weight + f4_weight + f5_weight + f6_weight + f7_weight + f9_weight + f10_weight + f11_weight + f12_weight;
 let weighted_signal = f1_weight*f1_signal + f2_weight*f2_signal
                     + f3_weight*f3_signal + f4_weight*f4_adjusted
                     + f5_weight*f5_signal + f6_weight*f6_signal
                     + f7_weight*f7_signal + f9_weight*f9_signal + f10_weight*f10_signal
-                    + f11_weight*f11_signal;
+                    + f11_weight*f11_signal + f12_weight*f12_signal;
 let avg_signal = if total_weight > 0.0 { weighted_signal / total_weight } else { 0.0 };
 
-// 理论最大权重和（10 个活跃因子的默认权重之和）
+// 理论最大权重和（活跃因子的默认权重之和）
 // 用于 weights_collapsed 比例阈值和 evidence_pct 计算
 // V66 修复(2026-07-29): f7 已在 V65 降权至 0.10，此处同步更新，避免
 //   total_weight/max_weight 比例偏低约 3.5% 而在边界误触发 weights_collapsed。
 //   f1=0.15 + f2=0.25 + f3=0.20 + f4=0.15 + f5=0.15 + f6=0.15 + f7=0.10 + f9=0.08 + f10=0.08 + f11=0.08 = 1.39
-let max_weight = 0.15 + 0.25 + 0.20 + 0.15 + 0.15 + 0.15 + 0.10 + 0.08 + 0.08 + 0.08;
+//   v19: + f12=0.10 → 1.49
+let max_weight = 0.15 + 0.25 + 0.20 + 0.15 + 0.15 + 0.15 + 0.10 + 0.08 + 0.08 + 0.08 + 0.10;
 // ── P2-1+P3-1: 证据缩放 — 调用 Rust 函数（非线性 sqrt 曲线）──
 let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	// V49 修复: trader 否决权 — 技术面（滞后指标）不应覆盖 LLM trader 的实时判断
@@ -943,10 +994,14 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	//   posterior≥0.70(强看多) → 2.5x (典型 A 股趋势突破后的盈亏比分布中位数)
 	//   posterior≥0.60(看多)   → 2.0x (中性偏优, 对应大盘股震荡上行行情)
 	//   posterior≥0.50(偏多)   → 1.5x (保守, 适合低波动/底部盘整标的)
-	//   posterior<0.50         → 0.0x (凯利不适用)
+	// V59(2026-09-10): 新增试探档 posterior∈[0.42,0.50) → 1.5x
+	//   原设计该区间 odds=0 → 凯利与试探仓双双归零 → 全市场 100% 观望 0%
+	//   (近 30 天 41 次分析 41 次 0%, DB 实证)。试探仓激活条件见下方 V59 块。
+	//   posterior<0.42         → 0.0x (凯利不适用)
 	let odds_fallback = if posterior >= 0.70 { 2.5 }
 	    else if posterior >= 0.60 { 2.0 }
 	    else if posterior >= 0.50 { 1.5 }
+	    else if posterior >= 0.42 { 1.5 }
 	    else { 0.0 };
 	let odds = if present(trader_target_price) && present(trader_stop_loss) && present(current_price)
 	    && trader_stop_loss > 0.0 && current_price > trader_stop_loss
@@ -967,7 +1022,12 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	// 内部处理: 半凯利 + 交易成本扣减 + 风险等级上限
 	// 当 posterior<0.50 或 odds≤0.001 时返回 0.0（凯利不适用）
 	let base_position_pct = pm_kelly_position(posterior, odds, COST_PCT, overall_risk);
-	let position_pct = if !trader_data_valid { 0.0 } else { base_position_pct };
+	// V59(2026-09-10): trader 数据异常从「清零」改为「降级」——仓位上限 10%。
+	//   原代码 !trader_data_valid → position 0，单点 LLM 价格异常就全盘空仓，
+	//   与 V56「单点失败不应全盘观望」的分级降级理念自相矛盾。
+	//   odds 已走 fallback 路径（trader 异常时不满足看多条件 → odds_fallback），
+	//   凯利值本身已经是无 trader 数据的保守估计，只需加护栏而非归零。
+	let position_pct = if !trader_data_valid { clamp(base_position_pct, 0.0, 10.0) } else { base_position_pct };
 	// ── 置信度 = P(决策正确 | 证据) = posterior × 100 ──
 	// 权威定义 (Nature Neurosci 2016, "Confidence and certainty: distinct probabilistic quantities"):
 	//   confidence = P(decision correct | evidence), 是后验概率, 与特定决策绑定。
@@ -1132,6 +1192,21 @@ let weights_collapsed = !dqi_a_level && (
 	    });
 	}
 
+	// ── V59(2026-09-10): 试探仓机制 ──
+	// 背景: DB 实证近 30 天 41 次分析 100% 观望 0%。死锁链:
+	//   prior(sideways)=0.528 + 信号微负 → posterior 0.40-0.46 恒 <0.50
+	//   → 凯利硬门(posterior≥0.50)归零 → odds_fallback 也要求 ≥0.50 → 观望 0%。
+	//   pre-takeoff 成长股(高PE/高波动/未突破)的 f4/f5 天然为负, 永远过不了 0.50。
+	// 设计: posterior∈[0.42,0.50) 且赔率为正时给 3% 试探上限(与趋势智选 5% 试探仓
+	//   语义对齐)——「不确定但值得跟踪验证」而非「一刀切拒绝」。
+	// 护栏: 坍缩/单点不可信/空头预测/无赔率 均不激活; 极高风险仍被 R-200 风控否决
+	//   (持有→观望→仓位清零), 高风险封顶不受影响。
+	let probe_position_pct = if !weights_collapsed && untrusted_count == 0 && !trader_bearish
+	    && posterior >= 0.42 && posterior < 0.50 && odds > 0.001 { 3.0 } else { 0.0 };
+	if probe_position_pct > 0.0 && position_pct <= 0.0 {
+	    position_pct = probe_position_pct;
+	}
+
 	// ── V42 重构: action 阈值使用 effective_posterior(=posterior+risk_bias) ──
 	// 买入 ← 0.63+仓位15%+
 	// 增持 ← 0.53+仓位10%+
@@ -1157,6 +1232,17 @@ let weights_collapsed = !dqi_a_level && (
 	    base_action = "减持";
 	}
 
+	// V59: 试探仓激活 → 观望升级为持有（仓位>0 必须与行动对齐，否则 V42 对齐段清零）
+	if probe_position_pct > 0.0 && base_action == "观望" {
+	    base_action = "持有";
+	    decision_trail.push(#{
+	        "rule_id": "R-207",
+	        "status": "ACTIVATED",
+	        "detail": `试探仓激活:posterior=${(posterior*1000.0).to_int()/1000.0}∈[0.42,0.50),odds=${(odds*100.0).to_int()/100.0},仓位${probe_position_pct}%`,
+	        "timestamp": 0.0,
+	    });
+	}
+
 	// P0-1 修复: R-204 移至 position_pct 与 base_action 都定义之后（原位置前向引用为死代码）
 	// 记录零仓位修正
 	if position_pct <= 0.0 && (base_action == "买入" || base_action == "增持" || base_action == "持有") {
@@ -1170,16 +1256,19 @@ let weights_collapsed = !dqi_a_level && (
 
 	// ── 最终 action：sanity 不通过则强制降级 ──
 	// V54 修复: weights_collapsed 不再强制"观望"，让 posterior 自然决定 action
-	let final_action = if !trader_data_valid {
-	    // 数据异常时：根据 posterior 决定是"观望"还是"卖出"
-	    if posterior < 0.45 { "卖出" } else { "观望" }
-	} else if partial_low_confidence && (base_action == "买入" || base_action == "增持") {
-	    // 分支 C: 单点不可信+低置信 — 禁止加仓，降级为"持有"（可继续持仓但不追加）
-	    "持有"
-	} else if position_pct <= 0.0 && (base_action == "买入" || base_action == "增持" || base_action == "持有") {
+	// V59 重构: 零仓位对齐检查提前到首位（trader 异常分支同样适用）；
+	//   trader 数据异常从「观望/卖出二选一」改为「激进动作封顶为持有」——
+	//   原逻辑 posterior<0.45 强制卖出是过度反应（数据异常≠基本面恶化）。
+	let final_action = if position_pct <= 0.0 && (base_action == "买入" || base_action == "增持" || base_action == "持有") {
 	    // V42: 仓位为 0 时不应给出持仓性建议。若 base_action 暗示持仓但实际空仓，
 	    // 降级为"观望"（后验仍可保留，但行动上有零仓位匹配）
 	    "观望"
+	} else if !trader_data_valid {
+	    // 数据异常时：激进动作封顶为持有，观望/减持/卖出按后验自然分档
+	    if base_action == "买入" || base_action == "增持" { "持有" } else { base_action }
+	} else if partial_low_confidence && (base_action == "买入" || base_action == "增持") {
+	    // 分支 C: 单点不可信+低置信 — 禁止加仓，降级为"持有"（可继续持仓但不追加）
+	    "持有"
 	} else { base_action };
 
 	// ── P3-1: 风控否决 — 调用 Rust 函数 ──
@@ -1319,7 +1408,10 @@ if present(sim_stability) && type_of(sim_stability) == "f64"
         sim_veto_reason = `市场模拟显示流动性不足(${(sim_liquidity*100.0).round()}%), 仓位从${old_pos}%降至${position_pct}%`;
     }
     // S-503: 大单冲击过大 → 仓位上限减半 + 提示
-    if !sim_vetoed && present(sim_impact) && type_of(sim_impact) == "f64" && sim_impact > 50.0 {
+    // v19(2026-09-10): 阈值 50→150bps。实测 A 股主流票冲击成本常态 100~200bps
+    //   （603290=123.7 / 601231=168.1 / 002837≈200），50bps 阈值下几乎必触发，
+    //   一旦上游出现非零仓位就立刻砍半，与「热点股 0 仓位」死锁叠加。150bps 只惩罚真正的流动性危机。
+    if !sim_vetoed && present(sim_impact) && type_of(sim_impact) == "f64" && sim_impact > 150.0 {
         sim_vetoed = true;
         sim_veto_rule = "S-503";
         let old_pos = position_pct;
@@ -1425,6 +1517,7 @@ let disagreement_note = if present(risk_disagreement) && risk_disagreement > 50 
         "f9_money_flow_signal": (f9_signal*100.0).round()/100.0,
         "f10_chip_signal": (f10_signal*100.0).round()/100.0,
         "f11_pace_signal": (f11_signal*100.0).round()/100.0,
+        "f12_momentum_signal": (f12_signal*100.0).round()/100.0,
         "announcement_signal": (announcement_modifier*100.0).round()/100.0,
     },
     "risk_quant": #{
@@ -1451,7 +1544,7 @@ let disagreement_note = if present(risk_disagreement) && risk_disagreement > 50 
         "sim_liquidity": if present(sim_liquidity) { (sim_liquidity*100.0).round()/100.0 } else { () },
         "sim_impact": if present(sim_impact) { sim_impact } else { () },
     },
-    "computation_logs": `prior=${prior}${prior_src} post=${(posterior*100.0).round()/100.0} sig=${(avg_signal*100.0).round()/10.0} w=${total_weight} odds=${(odds*10.0).round()/10.0} k=${(kelly_raw*1000.0).round()/1000.0} pos=${position_pct} f9=${(f9_signal*100.0).round()/100.0} f10=${(f10_signal*100.0).round()/100.0} f11=${(f11_signal*100.0).round()/100.0} ann=${(announcement_modifier*100.0).round()/100.0}`,
+    "computation_logs": `prior=${prior}${prior_src} post=${(posterior*100.0).round()/100.0} sig=${(avg_signal*100.0).round()/10.0} w=${total_weight} odds=${(odds*10.0).round()/10.0} k=${(kelly_raw*1000.0).round()/1000.0} pos=${position_pct} f9=${(f9_signal*100.0).round()/100.0} f10=${(f10_signal*100.0).round()/100.0} f11=${(f11_signal*100.0).round()/100.0} f12=${(f12_signal*100.0).round()/100.0} ann=${(announcement_modifier*100.0).round()/100.0}`,
     "f7_free": #{
         "posterior": posterior_no_f7,
         "action": f7_free_action,

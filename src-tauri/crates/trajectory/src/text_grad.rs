@@ -545,7 +545,7 @@ impl TextGradEngine {
                 )?;
 
             let truncated = if gradient.len() > self.config.max_gradient_length {
-                gradient[..self.config.max_gradient_length].to_string()
+                truncate_to_char_boundary(&gradient, self.config.max_gradient_length).to_string()
             } else {
                 gradient
             };

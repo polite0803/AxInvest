@@ -180,6 +180,7 @@ interface MarketPlatform {
   config: Record<string, unknown> | null;
   lastSyncAt: number | null;
   status: string;
+  lastError: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -216,6 +217,7 @@ function buildMockPlatform(id: string, name: string, baseUrl: string | null): Ma
     config: { description: `${name} 扫描器`, auto_sync: true },
     lastSyncAt: null,
     status: "idle",
+    lastError: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -244,7 +246,6 @@ let MOCK_DEMAND_LEADS: DemandLead[] = [
     painScore: 88,
     marketGapScore: 64,
     commercialValueScore: 76,
-    opportunityLevel: "high",
     demandType: "content_creation",
     linkedWorkflowId: null,
     implementedAt: null,
@@ -268,7 +269,6 @@ let MOCK_DEMAND_LEADS: DemandLead[] = [
     painScore: 92,
     marketGapScore: 55,
     commercialValueScore: 81,
-    opportunityLevel: "very_high",
     demandType: "development",
     linkedWorkflowId: null,
     implementedAt: null,
@@ -293,7 +293,6 @@ let MOCK_DEMAND_LEADS: DemandLead[] = [
     painScore: 70,
     marketGapScore: 72,
     commercialValueScore: 61,
-    opportunityLevel: "high",
     demandType: "development",
     linkedWorkflowId: null,
     implementedAt: null,
@@ -5288,6 +5287,9 @@ async function executeCommand<T>(
         timeoutSecs: 15,
         dedupWindowHours: 168,
         maxLeadsPerScan: 200,
+        llmEvalEnabled: true,
+        llmEvalMaxLeads: 20,
+        llmEvalMinRuleScore: 30,
       } as T;
 
     case "opc_save_scan_policy":
@@ -5490,13 +5492,6 @@ async function executeCommand<T>(
         painScore,
         marketGapScore: 50,
         commercialValueScore,
-        opportunityLevel: commercialValueScore >= 80
-          ? "very_high"
-          : commercialValueScore >= 60
-          ? "high"
-          : commercialValueScore >= 40
-          ? "medium"
-          : "low",
         demandType: "custom_development",
         linkedWorkflowId: null,
         implementedAt: null,

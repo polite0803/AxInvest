@@ -52,7 +52,9 @@ pub use capability_indexer_impl::CapabilityIndexerImpl;
 pub use capability_ranker_impl::CapabilityRankerImpl;
 pub use capability_retriever_impl::CapabilityRetrieverImpl;
 pub use capability_router_impl::{build_default_router, build_router, discover};
-pub use global_state::{get_db_path, get_sea_db, set_db_path, set_sea_db};
+pub use global_state::{
+    get_db_path, get_demand_llm, get_sea_db, set_db_path, set_demand_llm, set_sea_db,
+};
 pub use mock_embedding::MockEmbeddingProvider;
 pub use plugin_sdk::{
     AxAgentPlugin, PluginBuilder, PluginCategory, PluginContext, PluginManifest, PluginPermission,

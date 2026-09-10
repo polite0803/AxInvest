@@ -337,8 +337,12 @@ mod tests {
 
     #[test]
     fn resolve_var_path_v48_auto_parse_final_json_string() {
-        // V48: 路径终点是 JSON 字符串时也应自动解析
-        // 例如 t-baseline-semi.result 应返回解析后的对象，而非原始字符串
+        // 2026-09-09 语义修正（v11 包装对齐）：终值不再 auto-parse。
+        // data-quality / portfolio-mgr / pace-calc 的 rhai 消费端契约是
+        // 「ToolNode 输出为 JSON 字符串，脚本内 json_parse/safe_parse 解析」
+        // （type_of(x)=="string" 判断）。终值 parse 会把字符串偷偷转成
+        // map/array，导致 rhai string 分支全部失效、因子信号恒 0。
+        // 中途穿透 parse（x.result.content.field）行为不变。
         let mut vars = HashMap::new();
         vars.insert(
             "t-baseline".into(),
@@ -348,16 +352,68 @@ mod tests {
                 "node_id": "t-baseline"
             }),
         );
-        // 路径 = "t-baseline.result" → 应返回解析后的 map，非 JSON 字符串
+        // 路径 = "t-baseline.result" → 终值为 JSON 字符串，原样返回（不 parse）
         let result = resolve_var_path("t-baseline.result", &vars);
         assert!(result.is_some());
         let val = result.unwrap();
-        assert!(val.is_object(), "应返回 Object，而非: {val:?}");
-        assert_eq!(val["sector"], json!("半导体"));
-        assert_eq!(val["competitive_position"]["gross_margin_pct"], json!(45.0));
+        assert!(val.is_string(), "终值应保留字符串原样，而非: {val:?}");
+        assert!(val.as_str().unwrap().contains("半导体"));
+
+        // 中途穿透仍正常：下钻字符串内字段返回具体值
+        let deep =
+            resolve_var_path("t-baseline.result.competitive_position.gross_margin_pct", &vars);
+        assert_eq!(deep, Some(json!(45.0)));
 
         // 同时验证非 JSON 字符串不受影响
         vars.insert("note".into(), json!({"text": "普通文本"}));
         assert_eq!(resolve_var_path("note.text", &vars), Some(json!("普通文本")));
+    }
+
+    // 回归测试（2026-09-09 pace-calc 实证）：Rhai 脚本函数不捕获任何调用作用域
+    // —— 顶层 `let` 和顶层 `const` 对函数均不可见（实测 const 同样报
+    // ErrorVariableNotFound，勿想当然「const 全局可见」），只有函数内局部变量或
+    // Rust 侧 register_static_module 注册的全局常量可用。
+    // pace-calc.rhai 的 base_score_map/source_weight_map 原为顶层 let，被
+    // classify_event/classify_source 引用 → 运行时 "Variable not found:
+    // source_weight_map"。修复 = 挪进函数体。此测试固化该行为契约。
+    #[test]
+    fn rhai_fn_scope_contract() {
+        let engine = rhai::Engine::new();
+
+        // 顶层 let / const + 函数引用 → 均必须失败（记录预期失败形态）
+        for decl in ["let", "const"] {
+            let script = format!(
+                r#"
+                {decl} M = #{{a: 1}};
+                fn get_a() {{ M.a }}
+                get_a()
+            "#
+            );
+            let msg = format!(
+                "{}",
+                engine.eval::<rhai::Dynamic>(&script).expect_err("顶层变量不应被函数捕获")
+            );
+            assert!(
+                msg.contains("Variable not found") || msg.contains("ErrorVariableNotFound"),
+                "decl={decl} 实际错误: {msg}"
+            );
+        }
+
+        // 函数内局部 map → 正常工作（pace-calc.rhai 的修复形态）
+        let ok = engine
+            .eval::<rhai::Dynamic>(
+                r#"
+                fn classify(src) {
+                    let weight_map = #{official: 1.0, media: 0.6};
+                    for key in weight_map.keys() {
+                        if src.contains(key) { return weight_map[key]; }
+                    }
+                    0.3
+                }
+                classify("official_news")
+            "#,
+            )
+            .expect("函数内局部 map 应可用");
+        assert_eq!(ok.as_float().unwrap(), 1.0);
     }
 }

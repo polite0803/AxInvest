@@ -329,13 +329,42 @@ fn config_token(config: &serde_json::Value) -> Option<String> {
 
 /// 按平台名返回内置扫描器实例（带凭证与端点透传）
 ///
-/// 平台名与各扫描器 `platform()` 返回值一致；无匹配时返回 `None`，
+/// 平台标识经 [`normalize_platform_key`] 归一化，兼容三种形态：
+/// snake_case id（"github_issue"）、连字符 id（"github-issues"）、
+/// 显示名（"GitHub Issues" / "猪八戒"）。无匹配时返回 `None`，
 /// 由调用方决定回退策略（如手动补录）。
 ///
 /// 凭证来源优先级：`config.api_token`（前端平台配置）> 环境变量（各扫描器
 /// `with_config` 内部兜底）。`base_url` 来自 DB 平台配置，覆盖扫描器默认端点。
 /// 此前本函数不接收任何配置，DB/前端配的 token 全被扔掉，桌面 GUI 进程
 /// 几乎不带环境变量 → 11 个需凭证平台永远「合规跳过」。
+/// 平台标识归一化：显示名 / snake_case id / 连字符 id 统一映射到内置路由键
+///
+/// 背景：DB 平台表同时存在 `name`（"GitHub Issues" 显示名，demand_discovery
+/// 命令层传的是它）与 `id`（"github-issues" 连字符，工作流链路传的是它）两种
+/// 标识，而路由 match 只认 snake_case（"github_issue"），导致全部平台回退
+/// 手动补录、真实扫描器永不装配。归一化规则：去空白/连字符/下划线/斜杠 +
+/// 小写 + 别名表；中文显示名直接查别名。
+fn normalize_platform_key(raw: &str) -> String {
+    let stripped: String = raw
+        .chars()
+        .filter(|c| !matches!(c, ' ' | '-' | '_' | '/'))
+        .flat_map(char::to_lowercase)
+        .collect();
+    match stripped.as_str() {
+        "githubissues" | "githubissue" => "github_issue",
+        "githubdiscussions" | "githubdiscussion" => "github_discussion",
+        "packageecosystem" => "package_ecosystem",
+        "twitterx" | "x" => "twitter",
+        "猪八戒" => "zhubajie",
+        "闲鱼" => "xianyu",
+        "知乎" => "zhihu",
+        "掘金" => "juejin",
+        other => other,
+    }
+    .to_string()
+}
+
 fn builtin_scanner_for(
     platform: &str,
     base_url: Option<&str>,
@@ -354,7 +383,8 @@ fn builtin_scanner_for(
     };
     let token = config_token(config);
     let base = base_url.map(str::to_string);
-    let scanner: Box<dyn MarketplaceScanner> = match platform {
+    let key = normalize_platform_key(platform);
+    let scanner: Box<dyn MarketplaceScanner> = match key.as_str() {
         // 免费公开 API，无需凭证；端点固定，不透传配置
         "arxiv" => Box::new(ArxivScanner::new()),
         "hackernews" => Box::new(HackerNewsScanner::new()),
@@ -1563,6 +1593,64 @@ pub(crate) fn is_network_env_error(err: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_normalize_platform_key() {
+        // snake_case id
+        assert_eq!(normalize_platform_key("github_issue"), "github_issue");
+        // 连字符 id（DB 种子形态）
+        assert_eq!(normalize_platform_key("github-issues"), "github_issue");
+        assert_eq!(normalize_platform_key("package-ecosystem"), "package_ecosystem");
+        // 显示名（demand_discovery 命令层传 DB name）
+        assert_eq!(normalize_platform_key("GitHub Issues"), "github_issue");
+        assert_eq!(normalize_platform_key("HackerNews"), "hackernews");
+        assert_eq!(normalize_platform_key("Product Hunt"), "producthunt");
+        assert_eq!(normalize_platform_key("Twitter/X"), "twitter");
+        assert_eq!(normalize_platform_key("StackOverflow"), "stackoverflow");
+        // 中文显示名
+        assert_eq!(normalize_platform_key("猪八戒"), "zhubajie");
+        assert_eq!(normalize_platform_key("闲鱼"), "xianyu");
+        assert_eq!(normalize_platform_key("知乎"), "zhihu");
+        assert_eq!(normalize_platform_key("掘金"), "juejin");
+        // 未知平台保持原样（小写去符号），由调用方回退
+        assert_eq!(normalize_platform_key("Foo Bar"), "foobar");
+    }
+
+    #[test]
+    fn test_builtin_scanner_accepts_display_names_and_ids() {
+        let empty = serde_json::json!({});
+        // DB name 形态（此前全部回退手动补录的根因）
+        for name in [
+            "Reddit",
+            "HackerNews",
+            "GitHub Issues",
+            "GitHub Discussions",
+            "StackOverflow",
+            "Product Hunt",
+            "HuggingFace",
+            "Package Ecosystem",
+            "arXiv",
+            "Twitter/X",
+            "猪八戒",
+            "闲鱼",
+            "LinkedIn",
+            "知乎",
+            "CSDN",
+            "掘金",
+            "Dribbble",
+            "Upwork",
+        ] {
+            let s = builtin_scanner_for(name, None, &empty);
+            assert!(s.is_some(), "显示名 {name} 应命中内置扫描器");
+        }
+        // DB id 形态（含连字符）
+        for id in ["github-issues", "github-discussions", "package-ecosystem", "reddit"] {
+            let s = builtin_scanner_for(id, None, &empty);
+            assert!(s.is_some(), "id {id} 应命中内置扫描器");
+        }
+        // 未知平台仍回退 None
+        assert!(builtin_scanner_for("nonexistent", None, &empty).is_none());
+    }
 
     #[test]
     fn test_new_aggregate_scanner() {

@@ -89,6 +89,14 @@ pub struct ExecutionContextCallbacks {
     /// 签名与 `loop_body_dispatch` 一致（按 step_id + ctx 调度单节点），
     /// 单独命名字段以区分语义：Loop 是迭代驱动，Swarm/Debate 是多轮协作驱动。
     pub debate_body_dispatch: Option<LoopBodyDispatchFn>,
+    /// 流式增量转发回调（2026-09-08 修复）。
+    ///
+    /// 由引擎从 `RunOptions.progress_callback` 派生注入。AgentExecutor 在 LLM
+    /// 流式响应期间按节流间隔（默认 2s）发出 `status="streaming"` 的
+    /// StepProgressEvent（output 携带累积文本），commands 层转发为
+    /// `workflow-step-delta` 前端事件，实现辩论等长节点"边生成边显示"。
+    /// None = 未注入（executor 静默跳过流式转发）。
+    pub stream_progress: Option<super::engine::ProgressCallback>,
 }
 
 impl std::fmt::Debug for ExecutionContextCallbacks {
@@ -105,6 +113,7 @@ impl std::fmt::Debug for ExecutionContextCallbacks {
             .field("loop_body_dispatch", &self.loop_body_dispatch.is_some())
             .field("loop_checkpoint", &self.loop_checkpoint.is_some())
             .field("debate_body_dispatch", &self.debate_body_dispatch.is_some())
+            .field("stream_progress", &self.stream_progress.is_some())
             .finish()
     }
 }

@@ -28,21 +28,26 @@ const ANALYST_NODE_IDS = [
 type AnalystEntry =
   | { nodeId: string; expertId: string; status: "done"; report: string }
   | { nodeId: string; expertId: string; status: "pending" }
+  | { nodeId: string; expertId: string; status: "streaming"; preview: string }
   | { nodeId: string; expertId: string; status: "failed"; error?: string };
 
 /**
  * 分析师占位卡片：工作流运行中或节点失败时显示，让用户看到"分析师 tab 在同步工作流状态"
  *  - pending: ⏳ 等待中
+ *  - streaming: ⚙️ 生成中 + 流式预览（2026-09-08 修复：分析师单次 LLM 调用 1-5 分钟，
+ *    此前整个分析师阶段只有纯占位，无任何实时输出）
  *  - failed:  ❌ 失败 + 错误信息
  */
 function AnalystPlaceholderCard({
   expertId,
   status,
   error,
+  preview,
 }: {
   expertId: string;
-  status: "pending" | "failed";
+  status: "pending" | "streaming" | "failed";
   error?: string;
+  preview?: string;
 }) {
   const { t } = useTranslation();
   const name = t(`stockAnalysis.workflow.analyst.${expertId}`, expertId);
@@ -54,6 +59,13 @@ function AnalystPlaceholderCard({
       bg: "var(--muted-bg, #e5e7eb)",
       label: t("stockAnalysis.workflow.pending"),
       tagColor: "default" as const,
+    },
+    streaming: {
+      icon: "⚙️",
+      color: "var(--muted, #6b7280)",
+      bg: "var(--muted-bg, #e5e7eb)",
+      label: t("stockAnalysis.workflow.running"),
+      tagColor: "processing" as const,
     },
     failed: {
       icon: "❌",
@@ -75,6 +87,14 @@ function AnalystPlaceholderCard({
         <span className="font-medium text-sm" style={{ color: "var(--color-text-base)" }}>{name}</span>
       </div>
       <Tag color={config.tagColor}>{config.label}</Tag>
+      {status === "streaming" && preview && (
+        <pre
+          className="mt-2 text-xs leading-relaxed whitespace-pre-wrap"
+          style={{ maxHeight: 140, overflow: "auto", color: "var(--muted)", margin: 0 }}
+        >
+          {preview}
+        </pre>
+      )}
       {status === "failed" && error && (
         <div
           className="mt-2 text-xs"
@@ -162,6 +182,7 @@ function deriveConsensus(
 export function AnalystReportGrid() {
   const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
+  const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
   const failedNodeErrors = useStockAnalysisStore((s) => s.failedNodeErrors);
   const workflowStatus = useStockAnalysisStore((s) => s.status);
@@ -221,6 +242,11 @@ export function AnalystReportGrid() {
         result.push({ nodeId, expertId, status: "done", report: reportRaw });
       } else if (failedNodes.includes(nodeId)) {
         result.push({ nodeId, expertId, status: "failed", error: failedNodeErrors[nodeId] });
+      } else if (isRunning && streamingPreviews[nodeId]) {
+        // 流式预览（2026-09-08 修复）：节点生成中且后端已推送增量文本，
+        // 占位卡片升级为"生成中"实时预览（completed 后由 done 分支接管）
+        const preview = streamingPreviews[nodeId];
+        result.push({ nodeId, expertId, status: "streaming", preview });
       } else if (isRunning) {
         result.push({ nodeId, expertId, status: "pending" });
       } else {
@@ -242,7 +268,7 @@ export function AnalystReportGrid() {
     }
 
     return result;
-  }, [analystReports, failedNodes, failedNodeErrors, workflowStatus, t]);
+  }, [analystReports, streamingPreviews, failedNodes, failedNodeErrors, workflowStatus, t]);
 
   // 空态：工作流未启动 / 无任何分析师数据 → 不渲染（保持原行为）
   if (entries.length === 0) { return null; }
@@ -667,6 +693,9 @@ export function AnalystReportGrid() {
               expertId={entry.expertId}
               status={entry.status}
               error={isFailed ? entry.error : undefined}
+              preview={entry.status === "streaming"
+                ? (entry.preview.length > 600 ? entry.preview.slice(-600) : entry.preview)
+                : undefined}
             />
           );
         })}

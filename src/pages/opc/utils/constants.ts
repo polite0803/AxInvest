@@ -184,41 +184,6 @@ export interface CapabilityInventory {
   total_count: number;
 }
 
-export interface DemandLead {
-  id: string;
-  platform: string;
-  title: string;
-  description: string;
-  status: string;
-  priority: number;
-  budget_min: number | null;
-  budget_max: number | null;
-  contact_name: string | null;
-  contact_email: string | null;
-  contact_phone: string | null;
-  source_url: string | null;
-  raw_snapshot: Record<string, unknown>;
-  ai_analysis: Record<string, unknown>;
-  matched_capabilities: Array<{ id: string; name: string; source: string; score: number }>;
-  recommended_workflow: string | null;
-  confidence_score: number;
-  // 后端实体原始字段（_json 为 JSON 字符串，由 mapLead 解析到上面的对象字段）
-  confidence: number | null;
-  raw_snapshot_json: string | null;
-  ai_analysis_json: string | null;
-  matched_capabilities_json: string | null;
-  recommended_workflow_id: string | null;
-  // 需求价值评估字段
-  pain_score: number | null;
-  market_gap_score: number | null;
-  commercial_value_score: number | null;
-  opportunity_level: string | null;
-  demand_type: string | null;
-  evaluated_at: number | null;
-  created_at: number;
-  updated_at: number;
-}
-
 export interface Delivery {
   id: string;
   lead_id: string;
@@ -236,18 +201,6 @@ export interface Delivery {
   updated_at: number;
 }
 
-export const LEAD_STATUS_COLOR_MAP: Record<string, string> = {
-  new: "default",
-  qualified: "blue",
-  executing: "orange",
-  running: "cyan",
-  delivered: "green",
-  failed: "red",
-  cancelled: "default",
-  expired: "red",
-  claimed: "purple",
-};
-
 export const DELIVERY_STATUS_COLOR_MAP: Record<string, string> = {
   pending: "default",
   running: "blue",
@@ -262,7 +215,8 @@ export interface MarketPlatform {
   id: string;
   name: string;
   platform_type: string;
-  enabled: number;
+  /** 后端 DemandPlatform DTO 的 enabled 是 bool（PG 存 INTEGER，DAO 层已 != 0 转换） */
+  enabled: boolean;
   base_url: string | null;
   config: Record<string, unknown>;
   last_sync_at: number | null;

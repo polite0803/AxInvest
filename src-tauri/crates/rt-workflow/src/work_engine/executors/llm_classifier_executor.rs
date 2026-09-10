@@ -179,15 +179,46 @@ impl NodeExecutorTrait for LlmClassifierExecutor {
         };
 
         let llm_config = axagent_harness::LlmCallConfig::default();
+        // v9 补丁(2026-09-08 死锁实证)：LLM 调用失败（超时/供应商 500）时，
+        // 配置了 fallback_label 的分类器应降级输出而非节点 Failed ——
+        // retry 耗尽后 Failed 仍会经 Direct 边阻塞下游（cls-risk-level →
+        // portfolio-mgr 实证死锁整条决策链）。降级输出与低置信度路径同构，
+        // 携带 degraded=true 供下游区分。
         let response =
-            axagent_harness::execute_llm(&*adapter, &req_ctx, request.clone(), &llm_config)
+            match axagent_harness::execute_llm(&*adapter, &req_ctx, request.clone(), &llm_config)
                 .await
-                .map_err(|e| {
-                NodeError::exec_failed(
-                    error_code::UNSUPPORTED_PROVIDER,
-                    format!("LLM classifier call failed: {e}"),
-                )
-            })?;
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    if let Some(fb) = c.fallback_label.as_deref() {
+                        tracing::warn!(
+                            node_id = %node.base_id(),
+                            fallback_label = %fb,
+                            error = %e,
+                            "[LlmClassifier] LLM 调用失败，降级为 fallback_label（避免下游死锁）"
+                        );
+                        let mut output_obj = serde_json::Map::new();
+                        output_obj.insert("category".to_string(), serde_json::json!(fb));
+                        output_obj.insert("model".to_string(), serde_json::json!(model));
+                        output_obj.insert("input_var".to_string(), serde_json::json!(c.input_var));
+                        output_obj.insert("node_id".to_string(), serde_json::json!(node.base_id()));
+                        output_obj.insert("degraded".to_string(), serde_json::json!(true));
+                        return Ok(NodeOutput {
+                            output: serde_json::Value::Object(output_obj),
+                            output_var: if c.output_var.is_empty() {
+                                None
+                            } else {
+                                Some(c.output_var.clone())
+                            },
+                            control: None,
+                        });
+                    }
+                    return Err(NodeError::exec_failed(
+                        error_code::UNSUPPORTED_PROVIDER,
+                        format!("LLM classifier call failed: {e}"),
+                    ));
+                },
+            };
 
         // ── P0 FIX: 内容归一化 ──
         // 1. 剥掉 ```json ``` markdown fence

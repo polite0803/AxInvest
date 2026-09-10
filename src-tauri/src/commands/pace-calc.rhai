@@ -10,67 +10,11 @@
 
 fn present(x) { type_of(x) != "()" }
 
-// ── 硬编码基础分符号表 ──
-let base_score_map = #{
-    // 利好事件 → 正分
-    "增持": 2.0,
-    "回购": 2.5,
-    "中标": 1.5,
-    "重大合同": 2.0,
-    "业绩预增": 2.5,
-    "扭亏为盈": 3.0,
-    "股权激励": 1.5,
-    "分红": 1.0,
-    "送转": 0.8,
-    "新产品发布": 1.2,
-    "技术突破": 1.8,
-    "政策利好": 1.5,
-    "行业景气": 1.2,
-    "评级上调": 1.5,
-    "纳入指数": 1.0,
-    "并购重组": 2.0,
-    "业绩超预期": 3.0,
-    // 利空事件 → 负分
-    "减持": -3.0,
-    "业绩预亏": -3.0,
-    "亏损": -2.5,
-    "立案调查": -4.0,
-    "监管函": -3.0,
-    "警示函": -2.5,
-    "退市": -5.0,
-    "ST": -4.0,
-    "*ST": -4.5,
-    "风险提示": -2.0,
-    "异常波动": -1.5,
-    "强制平仓": -4.0,
-    "违约": -3.5,
-    "评级下调": -2.0,
-    "商誉减值": -3.5,
-    "诉讼": -2.5,
-    "处罚": -3.0,
-    "被动减持": -3.0,
-    "股东减持": -2.5,
-    // 中性
-    "股东大会": 0.0,
-    "定期报告": 0.0,
-    "人事变动": -0.2,
-    "停牌": -0.5,
-    "复牌": 0.0,
-};
-
-// ── 来源权重硬编码 ──
-let source_weight_map = #{
-    "official": 1.0,       // 官方公告/交易所披露
-    "regulatory": 1.0,     // 监管机构
-    "exchange": 0.9,       // 交易所
-    "media_major": 0.7,    // 主流财经媒体
-    "media": 0.6,          // 一般媒体
-    "research": 0.7,       // 券商研报
-    "self_media": 0.2,     // 自媒体
-    "social": 0.15,        // 社交媒体
-    "unknown": 0.3,        // 未知来源
-};
-
+// ── 硬编码符号表说明 ──
+// base_score_map / source_weight_map 定义在 classify_event / classify_source
+// 函数体内（2026-09-09）：Rhai 脚本函数不捕获任何调用作用域——顶层 let AND
+// 顶层 const 对函数均不可见（实测 ErrorVariableNotFound），只有函数内局部
+// 变量或引擎侧注册的全局常量可用。放顶层必然运行时 Variable not found。
 // ── 时效衰减函数（24h 半衰期）──
 fn time_decay(hours_elapsed) {
     if hours_elapsed < 0.0 { return 1.0; }
@@ -83,6 +27,53 @@ fn time_decay(hours_elapsed) {
 // ── 分类器：从 event_type 文本中匹配基础分 ──
 fn classify_event(event_type) {
     if !present(event_type) || type_of(event_type) != "string" { return 0.0; }
+    // 基础分符号表（必须在函数体内：顶层变量对 Rhai 函数不可见，见文件头说明）
+    let base_score_map = #{
+        // 利好事件 → 正分
+        "增持": 2.0,
+        "回购": 2.5,
+        "中标": 1.5,
+        "重大合同": 2.0,
+        "业绩预增": 2.5,
+        "扭亏为盈": 3.0,
+        "股权激励": 1.5,
+        "分红": 1.0,
+        "送转": 0.8,
+        "新产品发布": 1.2,
+        "技术突破": 1.8,
+        "政策利好": 1.5,
+        "行业景气": 1.2,
+        "评级上调": 1.5,
+        "纳入指数": 1.0,
+        "并购重组": 2.0,
+        "业绩超预期": 3.0,
+        // 利空事件 → 负分
+        "减持": -3.0,
+        "业绩预亏": -3.0,
+        "亏损": -2.5,
+        "立案调查": -4.0,
+        "监管函": -3.0,
+        "警示函": -2.5,
+        "退市": -5.0,
+        "ST": -4.0,
+        "*ST": -4.5,
+        "风险提示": -2.0,
+        "异常波动": -1.5,
+        "强制平仓": -4.0,
+        "违约": -3.5,
+        "评级下调": -2.0,
+        "商誉减值": -3.5,
+        "诉讼": -2.5,
+        "处罚": -3.0,
+        "被动减持": -3.0,
+        "股东减持": -2.5,
+        // 中性
+        "股东大会": 0.0,
+        "定期报告": 0.0,
+        "人事变动": -0.2,
+        "停牌": -0.5,
+        "复牌": 0.0,
+    };
     let et = event_type;
     // 按 specificity 从高到低匹配
     let ordered_keys = [
@@ -110,6 +101,18 @@ fn classify_event(event_type) {
 // ── 分类器：来源权重 ──
 fn classify_source(source_type) {
     if !present(source_type) || type_of(source_type) != "string" { return 0.3; }
+    // 来源权重表（必须在函数体内：顶层变量对 Rhai 函数不可见，见文件头说明）
+    let source_weight_map = #{
+        "official": 1.0,       // 官方公告/交易所披露
+        "regulatory": 1.0,     // 监管机构
+        "exchange": 0.9,       // 交易所
+        "media_major": 0.7,    // 主流财经媒体
+        "media": 0.6,          // 一般媒体
+        "research": 0.7,       // 券商研报
+        "self_media": 0.2,     // 自媒体
+        "social": 0.15,        // 社交媒体
+        "unknown": 0.3,        // 未知来源
+    };
     let st = source_type.to_lower();
     for key in source_weight_map.keys() {
         if st.contains(key) { return source_weight_map[key]; }
@@ -125,8 +128,17 @@ let events = [];
 // 解析输入事件（来自 LLM a-catalyst / a-news 节点）
 // P0 修复(2026-07-22): 支持 a-catalyst 的输出格式（含 catalyst_level/confidence/verdict）
 // a-catalyst 输出不是事件数组，而是综合评估 JSON，需要从中提取事件信息
-if present(llm_events) && type_of(llm_events) == "string" && llm_events != "" {
-    let parsed = json_parse(llm_events);
+// V69 防御(2026-09-10): input_mapping 在部分执行里产出 {content:"..."} 包装对象而非
+// 纯字符串（301302 实证 pace_degraded=true, reason="无有效事件输入"）。统一解包。
+let llm_events_str = if type_of(llm_events) == "map" && type_of(llm_events["content"]) == "string" {
+    llm_events["content"]
+} else if type_of(llm_events) == "string" {
+    llm_events
+} else {
+    ""
+};
+if llm_events_str != "" {
+    let parsed = json_parse(llm_events_str);
     if type_of(parsed) == "array" {
         for item in parsed {
             if type_of(item) == "map" {
@@ -134,13 +146,18 @@ if present(llm_events) && type_of(llm_events) == "string" && llm_events != "" {
             }
         }
     } else if type_of(parsed) == "map" {
+        // V68 修复(2026-09-10): V62 通用 VERDICT 重构后 a-catalyst 的 content 为
+        // {"report", "verdict":{catalyst_level, confidence, verdict, ...}} 嵌套格式，
+        // 顶层 catalyst_level 恒缺失 → 原代码走"直接作为事件"兜底，事件语义
+        // （event_type/置信度）静默丢失。先解包嵌套 verdict map 再提取。
+        let inner = if type_of(parsed["verdict"]) == "map" { parsed["verdict"] } else { parsed };
         // 检查是否是 a-catalyst 的输出格式（含 catalyst_level 字段）
-        if type_of(parsed["catalyst_level"]) == "string" {
-            let level = parsed["catalyst_level"];
-            let confidence_val = if type_of(parsed["confidence"]) == "f64" {
-                parsed["confidence"] / 100.0
-            } else if type_of(parsed["confidence"]) == "int" {
-                parsed["confidence"] * 1.0 / 100.0
+        if type_of(inner["catalyst_level"]) == "string" {
+            let level = inner["catalyst_level"];
+            let confidence_val = if type_of(inner["confidence"]) == "f64" {
+                inner["confidence"] / 100.0
+            } else if type_of(inner["confidence"]) == "int" {
+                inner["confidence"] * 1.0 / 100.0
             } else {
                 0.5
             };
@@ -161,8 +178,12 @@ if present(llm_events) && type_of(llm_events) == "string" && llm_events != "" {
                 "定期报告"
             };
 
-            // 从 verdict 提取方向（看多/看空/中性）
-            let verdict = if type_of(parsed["verdict"]) == "string" { parsed["verdict"] } else { "" };
+            // 从 verdict 提取方向（看多/看空/中性）——顶层或嵌套 verdict map 内
+            let verdict = if type_of(parsed["verdict"]) == "string" {
+                parsed["verdict"]
+            } else if type_of(inner["verdict"]) == "string" {
+                inner["verdict"]
+            } else { "" };
 
             // 如果 verdict 是看空，但 catalyst_level 是利好，说明有分歧，降低 confidence
             let adjusted_confidence = if verdict == "看空" && (level.contains("L2") || level.contains("L3")) {
@@ -188,8 +209,16 @@ if present(llm_events) && type_of(llm_events) == "string" && llm_events != "" {
 }
 
 // 如果无 LLM 事件但有 announcement events，回退使用公告数据
-if events.len() == 0 && present(announcement_events) && type_of(announcement_events) == "string" && announcement_events != "" {
-    let ann_parsed = json_parse(announcement_events);
+// V69: 同样兼容 {content:"..."} 包装（与上方 llm_events 防御一致）
+let ann_events_str = if type_of(announcement_events) == "map" && type_of(announcement_events["content"]) == "string" {
+    announcement_events["content"]
+} else if type_of(announcement_events) == "string" {
+    announcement_events
+} else {
+    ""
+};
+if events.len() == 0 && ann_events_str != "" {
+    let ann_parsed = json_parse(ann_events_str);
     if type_of(ann_parsed) == "array" {
         for item in ann_parsed {
             if type_of(item) == "map" {
@@ -385,7 +414,11 @@ let p_normalized = if valid_event_count > 0 {
     let denom = if count_f > 1.0 { count_f } else { 1.0 };
     let tanh_input = p_score / denom / 1.5;
     let tanh_val = (tanh_input.exp() - (-tanh_input).exp()) / (tanh_input.exp() + (-tanh_input).exp());
-    clamp(tanh_val * p_score.sign(), -1.0, 1.0)
+    // V70 符号翻转修复(2026-09-10): 原代码 tanh_val * p_score.sign() 二次应用符号 ——
+    //   tanh 已保号(负输入→负输出)，再乘 sign(-1) 把所有负极性翻成正。
+    //   603290 实证: p_raw=-0.88(L-2业绩暴雷) → P=+0.53(利好!)。
+    //   利好路径不受影响(正×1=正)故从未暴露。
+    clamp(tanh_val, -1.0, 1.0)
 } else { 0.0 };
 
 // ── 输出 ──

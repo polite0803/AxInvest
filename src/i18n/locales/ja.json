@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "能力ギャップはありません",
+      "deliveriesEmpty": "納品記録はありません。リード操作の「納品を実行」から作成できます",
+      "executeDelivery": "納品を実行",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "プロアクティブスキャン",
       "btnAnalyzeGaps": "ギャップ分析",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "ステータス変更",
+      "delivery": "デリバリー",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "最大機能キャッシュ",
         "dbCleanupDays": "データベースクリーンアップ日",
         "logLevel": "ログレベル: debug/info/warn/error",
-        "enableAnalytics": "分析を有効化"
+        "enableAnalytics": "分析を有効化",
+        "scanLlmEvalEnabled": "LLM精密評価（高スコア候補の再評価）",
+        "scanLlmEvalMaxLeads": "1回の精評候選上限",
+        "scanLlmEvalMinRuleScore": "精評プリフィルタ閾値（ルールスコア ≥）"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "スキップ（コンプライアンス）"
       },
+      "platformSkippedHint": "公式 API 認証情報が未設定のため、コンプライアンスポリシーによりスキャンをスキップしました。トークンを設定して有効化するとスキャンされます。",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13571,6 +13565,14 @@
       "subscriptions": "購読",
       "addSubscription": "購読を追加",
       "manualEntry": "手動登録",
+      "capabilityScan": "能力駆動スキャン",
+      "capabilityScanDesc": "ローカル能力リポジトリから検索語を自動生成し、需要マーケットを語単位でスキャンします（ワークフロー：能力スキャン → 検索語計画 → ループスキャン）。",
+      "capabilityFocus": "フォーカス（任意）",
+      "capabilityFocusPlaceholder": "例：AI アプリ開発、データサービス。空欄なら能力リポジトリが決定",
+      "capabilityMaxKeywords": "検索語の上限数",
+      "capabilityScanStart": "スキャン開始",
+      "capabilityScanComplete": "能力駆動スキャンが完了し、リードを更新しました",
+      "capabilityScanFailed": "能力駆動スキャンに失敗しました：{{error}}",
       "leadCreateFailed": "リードの登録に失敗しました: {{error}}",
       "leadFormTitle": "タイトル",
       "leadFormTitleRequired": "タイトルは必須です",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "発行済みにする",
       "delivMarkPaid": "入金済みにする",
       "delivDelete": "削除"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14372,7 +14383,8 @@
     "boolYes": "はい",
     "boolNo": "いいえ",
     "backendCallFailed": "バックエンド呼び出しに失敗しました",
-    "emptyHistoryWarning": "セレニティ履歴が空です：list_reco_history が 0 行を返しました（DB に serenity/bottleneck スタイルの履歴がないか、バックエンドコマンドの失敗が静かに無視された可能性があります）"
+    "emptyHistoryWarning": "セレニティ履歴が空です：list_reco_history が 0 行を返しました（DB に serenity/bottleneck スタイルの履歴がないか、バックエンドコマンドの失敗が静かに無視された可能性があります）",
+    "timeBasis": "時間基準: {{date}} · 推奨期間約{{days}}日（〜{{until}}）"
   },
   "trade": {
     "title": "Trading Log",
@@ -14963,7 +14975,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "主要評価指標（t-valuation）",
+      "currentPriceLabel": "現在価格",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "堀スコア",
+      "oeYieldLabel": "OE利回り",
+      "grahamUpsideLabel": "グレアム上振れ",
+      "valueSignalLabel": "総合判断",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "負債比率",
+      "grossMarginLabel": "粗利率",
+      "revenueGrowthLabel": "売上成長率"
     },
     "workflow": {
       "analyst": {
@@ -15016,6 +15039,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "激进风险评估",
       "riskClassification": "Risk Classification",
+      "auxNodes": "補助ノード",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15077,7 +15101,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析师",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "分析のスキップ中にエラーが発生しました: {{reason}}"
     },
     "debugPanel": {
       "show": "表示",
@@ -15601,6 +15625,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "トレンド選択 vs 分析ワークフロー · システム間の乖離",
+      "timeBasis": "推奨時点 {{recoDate}} · 分析時点 {{decisionDate}}（約{{gapDays}}日差）",
+      "recoSays": "トレンド選択 {{score}} 点、試験ポジション {{position}}% を提案（{{strategy}} 戦略）",
+      "attentionHeat": "注目度: {{heat}}",
+      "workflowSays": "分析ワークフロー判定: {{action}}、ポジション {{position}}%",
+      "divergenceNote": "2つの時計が異なる——選択側は触媒の実現に賭け（約{{recoDays}}日）、ワークフローは現在のオッズで評価（約{{decisionDays}}日）",
+      "catalystLabel": "触媒({{confidence}}点)"
     },
     "compare": {
       "title": "Compare",
@@ -16355,7 +16388,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

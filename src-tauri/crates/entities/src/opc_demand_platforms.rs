@@ -27,8 +27,10 @@ pub struct Model {
     pub config_json: String,
     /// 最近一次扫描成功时间戳（秒）
     pub last_sync_at: Option<i64>,
-    /// 连接器状态：idle / ok / error
+    /// 连接器状态：idle / ok / error / skipped（合规跳过）
     pub status: String,
+    /// 最近一次扫描失败原因；NULL = 最近一次成功 / 从未扫描 / 合规跳过
+    pub last_error: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }

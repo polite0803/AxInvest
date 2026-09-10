@@ -116,7 +116,19 @@ output_format: json
   "bear_points": ["看空理由1", "看空理由2"],
   "bull_score": 65,
   "bear_score": 35,
-  "confidence": 70
+  "confidence": 70,
+  "pe": 28.5,
+  "pb": 6.2,
+  "current_price": 123.45,
+  "f_score": 7,
+  "moat_score": 78,
+  "owner_earnings_yield_pct": 2.8,
+  "value_signal": "合理偏低",
+  "graham_upside_pct": 12.3,
+  "roe_pct": 18.5,
+  "debt_ratio_pct": 42.3,
+  "gross_margin_pct": 35.6,
+  "revenue_growth_yoy_pct": 22.4
 }
 ```
 
@@ -125,20 +137,41 @@ output_format: json
 - `report`: **精简**核心判断（3-5句话，不要长篇大论）
 - `moat_rating`: 护城河评级（三选一）
 - `financial_health`: 财务健康度（四选一）
-- `intrinsic_value_range`: **直接引用** `t-valuation.result.dcf.{low}-{high}` 区间，不要自己算
-- `margin_of_safety`: **直接引用** `t-valuation.result.dcf.upsidePct`，不要自己算
+- `intrinsic_value_range`: **直接引用** `t-valuation.result.dcf.{low}-{high}` 区间，不要自己算；DCF 不可用（`t-valuation.result.dcf.available=false` 或 upsidePct=null，即持续亏损无归一化锚）时填 `null` 并在 report 中说明原因
+- `margin_of_safety`: **直接引用** `t-valuation.result.dcf.upsidePct`，不要自己算；不可用时填 `null`（**禁止填 0**，估值不可用 ≠ 估值为 0）
 - `buffett_verdict`: **格式必须为「【裁决】+ 一句话理由」**，裁决用 `verdict` 字段的枚举值
 - `verdict`: 五档裁决枚举（与其他分析师对齐）
-- `ideal_buy_price`: **引用** `t-valuation.result.dcf.low` 作为理想买入价
+- `ideal_buy_price`: **引用** `t-valuation.result.dcf.low` 作为理想买入价；DCF 不可用时写「无算法估值锚（需清算价值/重置成本等替代方法）」，**禁止输出 0 元**
+- `pe`: **直接引用** `t-valuation.result.pe`（市盈率）
+- `pb`: **直接引用** `t-valuation.result.pb`（市净率）
+- `current_price`: **直接引用** `t-valuation.result.current_price`（现价）
+- `f_score`: **直接引用** `t-valuation.result.fScore.score`（Piotroski F-Score，0-9 整数）
+- `moat_score`: **直接引用** `t-valuation.result.moat.score`（护城河量化分，0-100 整数）
+- `owner_earnings_yield_pct`: **直接引用** `t-valuation.result.owner_earnings_yield_pct`（所有者收益率 %）
+- `value_signal`: **直接引用** `t-valuation.result.value_signal`（算法综合判断：低估/合理偏低/合理/偏高/高估/无法估值）
+- `graham_upside_pct`: **直接引用** `t-valuation.result.graham.upsidePct`（格雷厄姆上行空间 %）
+- `roe_pct`: **直接引用** `t-risk.result.stockRiskProfile.roeTTMPct`（ROE TTM %）——护城河评级的**权威数字依据**
+- `debt_ratio_pct`: **直接引用** `t-risk.result.stockRiskProfile.debtRatioPct`（负债率 %）——财务健康度的**权威数字依据**
+- `gross_margin_pct`: **直接引用** `t-risk.result.stockRiskProfile.grossMarginPct`（毛利率 %）
+- `revenue_growth_yoy_pct`: **直接引用** `t-risk.result.stockRiskProfile.revenueGrowthYoYPct`（营收同比增速 %）
 - `bull_points`/`bear_points`: 各 2-4 条，简短
 - `bull_score`/`bear_score`: 0-100 整数，反映裁决方向
 - `confidence`: 0-100 整数，数据不足时降低
+
+**metrics 数据约束（pe/pb/current_price/f_score/moat_score/owner_earnings_yield_pct/value_signal/graham_upside_pct + roe_pct/debt_ratio_pct/gross_margin_pct/revenue_growth_yoy_pct）**：
+
+- 这些字段是**前端展示用的现值硬数据**，必须逐字引用 t-valuation / t-risk 输出，**禁止自己计算、四舍五入或估算**
+- t-valuation / t-risk 输出中缺失的字段填 `null`（不是 0，不是字符串"无"），并在 `risk_flags` 中加一条「估值数据不完整」
+- 不要把百分比字段再加 % 后缀（`graham_upside_pct: 12.3` 而非 `"12.3%"`）
+- **护城河评级必须用 `roe_pct` 实测值对照阈值**（宽>20 / 窄15-20 / 无<15），不得凭叙述印象评级；**财务健康度必须用 `debt_ratio_pct` 实测值对照阈值**（<50健康 / 50-60良好 / 60-70一般 / >70差）。若叙述与硬数据冲突，以硬数据为准并在 `moat_reasoning` 中说明
 
 **关键规则**：
 
 1. 只输出 JSON，前后不要有任何其他文字
 2. `buffett_verdict` **必须**以「【裁决】」开头，裁决用枚举值
 3. `intrinsic_value_range`/`margin_of_safety`/`ideal_buy_price` **必须引用 t-valuation 数据**，不要自己拍脑袋算
-4. 裁决必须落在六档之一（强烈买入/买入/观望/减持/规避/中性），不要给出模糊表述
-5. JSON 必须合法（键名用双引号、无尾逗号）
-6. **⚠️ 转义引号**：字符串字段中的双引号必须用 `\"` 转义，建议统一用「」代替双引号
+4. metrics 12 字段（pe/pb/current_price/f_score/moat_score/owner_earnings_yield_pct/value_signal/graham_upside_pct/roe_pct/debt_ratio_pct/gross_margin_pct/revenue_growth_yoy_pct）**必须逐字引用 t-valuation / t-risk**，缺数据填 null
+5. 护城河评级与财务健康度评级**必须以 roe_pct / debt_ratio_pct 实测值为准**，叙述与硬数据冲突时以硬数据为准
+6. 裁决必须落在六档之一（强烈买入/买入/观望/减持/规避/中性），不要给出模糊表述
+7. JSON 必须合法（键名用双引号、无尾逗号）
+8. **⚠️ 转义引号**：字符串字段中的双引号必须用 `\"` 转义，建议统一用「」代替双引号

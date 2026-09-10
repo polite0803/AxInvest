@@ -71,6 +71,18 @@ describe("workflowLayout", () => {
       expect(result.edges).toEqual([]);
     });
 
+    it("does not mutate a frozen parentRefs (zustand immer 冻结对象)", () => {
+      const nodes = [
+        makeNode("p", "parallel", { x: 0, y: 0 }),
+        makeNode("c1", "agent", { x: 0, y: 0 }),
+      ];
+      const parentRefs = Object.freeze({ c1: "p" });
+
+      // 回归： immer store 的 parentRefs 在 dev 下被冻结，
+      // autoLayoutWorkflow 内部不得变异调用方对象（否则 TypeError: read only）
+      expect(() => autoLayoutWorkflow(nodes, [], parentRefs)).not.toThrow();
+    });
+
     it("falls back to flat layout when no parentRefs provided", () => {
       const nodes = [
         makeNode("a", "agent", { x: 0, y: 0 }),

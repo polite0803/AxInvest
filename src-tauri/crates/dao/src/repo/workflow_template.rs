@@ -94,8 +94,14 @@ pub async fn update_workflow_template(
     let template = workflow_template::Entity::find_by_id(id).one(db).await?;
 
     if let Some(t) = template {
-        // D9: save old version as a snapshot before updating
-        let version_snapshot = workflow_template_version::ActiveModel {
+        // 快照写入 + 主表更新必须在同一事务内：否则快照落库后主表更新失败，
+        // 下次保存会对同一主键 `{id}_v{version}` 再次裸插 → 主键冲突，保存永久失败。
+        let txn = db.begin().await?;
+
+        // D9: save old version as a snapshot before updating。
+        // 幂等写入：同主键快照已存在（历史重置/并发双保存/上次半提交）时跳过，
+        // 保留既有历史快照，不阻塞本次保存。
+        workflow_template_version::Entity::insert(workflow_template_version::ActiveModel {
             id: Set(format!("{}_v{}", t.id, t.version)),
             template_id: Set(t.id.clone()),
             name: Set(t.name.clone()),
@@ -114,8 +120,10 @@ pub async fn update_workflow_template(
             variables: Set(t.variables.clone()),
             error_config: Set(t.error_config.clone()),
             created_at: Set(chrono::Utc::now().timestamp_millis()),
-        };
-        version_snapshot.insert(db).await?;
+        })
+        .on_conflict_do_nothing()
+        .exec_without_returning(&txn)
+        .await?;
 
         let mut active_model: workflow_template::ActiveModel = t.clone().into();
         active_model.name = Set(name);
@@ -135,7 +143,8 @@ pub async fn update_workflow_template(
             Set(tool_defs.as_ref().map(|tds| serde_json::to_string(tds).unwrap_or_default()));
         active_model.version = Set(t.version + 1);
         active_model.updated_at = Set(chrono::Utc::now().timestamp_millis());
-        active_model.update(db).await?;
+        active_model.update(&txn).await?;
+        txn.commit().await?;
         Ok(true)
     } else {
         Ok(false)

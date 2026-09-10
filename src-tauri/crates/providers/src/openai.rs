@@ -11,6 +11,7 @@ use axagent_harness::constants::default_url;
 use axagent_harness::core_error::{AxAgentError, Result};
 use axagent_harness::speech::{AudioChunkStream, SpeakRequest, SpeechCapabilities, SpeechInput};
 use axagent_harness::types::*;
+use axagent_harness::util_fns::truncate_to_char_boundary;
 use futures::Stream;
 use futures::StreamExt;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -260,6 +261,27 @@ fn extract_primary_content(
     None
 }
 
+// V69 修复(2026-09-10): 校验并归一化 tool_call arguments。
+// 上游模型（agnes 免费档等）可能吐出截断/畸形 JSON 参数（finish_reason=length
+// 截断、网关抖动丢 delta 等）。坏参数一旦写入会话历史，下一轮请求必被上游
+// 以 400 "Assistant tool call .arguments must be valid JSON" 拒绝，且重试时
+// 历史不变 → 确定性失败，烧完全部重试次数。返回 None 表示参数非法。
+pub(crate) fn validate_tool_call_arguments(args: &str) -> Option<String> {
+    let trimmed = args.trim();
+    if trimmed.is_empty() {
+        // 无参调用归一化为 "{}"，部分上游对空字符串参数同样报 400
+        return Some("{}".to_string());
+    }
+    if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
+        return Some(args.to_string());
+    }
+    tracing::warn!(
+        args_preview = %&trimmed[..trimmed.len().min(200)],
+        "[openai] tool_call arguments 非法 JSON（上游截断或畸形），拒绝写入会话历史"
+    );
+    None
+}
+
 fn extract_gemini_compat_chunk(data: &str) -> Option<ChatStreamChunk> {
     let parsed = serde_json::from_str::<GeminiCompatChunk>(data).ok()?;
     let content = parsed
@@ -440,14 +462,17 @@ fn convert_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
             match msg.role.as_str() {
                 "tool" => OpenAIMessage {
                     role: "tool".to_string(),
-                    content: Some(serde_json::Value::String(crate::extract_text_content(&msg.content))),
+                    content: Some(serde_json::Value::String(crate::extract_text_content(
+                        &msg.content,
+                    ))),
                     tool_calls: None,
                     tool_call_id: msg.tool_call_id.clone(),
                     reasoning_content: None,
                 },
                 "assistant" => {
                     let content_text = crate::extract_text_content(&msg.content);
-                    let (visible_text, reasoning_from_text) = crate::extract_reasoning_from_text(&content_text);
+                    let (visible_text, reasoning_from_text) =
+                        crate::extract_reasoning_from_text(&content_text);
                     // Priority: msg.thinking (dedicated field from API reasoning_content)
                     // > <think> tag parsing from visible text
                     // This ensures providers that return reasoning_content as a separate API field
@@ -469,12 +494,16 @@ fn convert_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
                                         );
                                         if let Some(text) = &part.text {
                                             let (v, _) = crate::extract_reasoning_from_text(text);
-                                            value.insert("text".to_string(), serde_json::Value::String(v));
+                                            value.insert(
+                                                "text".to_string(),
+                                                serde_json::Value::String(v),
+                                            );
                                         }
                                         if let Some(image_url) = &part.image_url {
                                             value.insert(
                                                 "image_url".to_string(),
-                                                serde_json::to_value(image_url).unwrap_or(serde_json::Value::Null),
+                                                serde_json::to_value(image_url)
+                                                    .unwrap_or(serde_json::Value::Null),
                                             );
                                         }
                                         serde_json::Value::Object(value)
@@ -487,16 +516,27 @@ fn convert_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
                         role: "assistant".to_string(),
                         content,
                         tool_calls: msg.tool_calls.as_ref().map(|tcs| {
-                            tcs.iter().map(|tc| serde_json::json!({
-                                "id": tc.id,
-                                "type": tc.call_type,
-                                "function": { "name": tc.function.name, "arguments": tc.function.arguments }
-                            })).collect()
+                            tcs.iter().map(|tc| {
+                                // V69 修复(2026-09-10): 回传历史兜底净化。流式路径已在
+                                // [DONE] 终结时拦截非法参数，此处覆盖非流式/其他来源：
+                                // 非法 JSON 替换为 "{}"，避免整个请求被上游 400 拒绝。
+                                let arguments = validate_tool_call_arguments(&tc.function.arguments)
+                                    .unwrap_or_else(|| "{}".to_string());
+                                serde_json::json!({
+                                    "id": tc.id,
+                                    "type": tc.call_type,
+                                    "function": { "name": tc.function.name, "arguments": arguments }
+                                })
+                            }).collect()
                         }),
                         tool_call_id: None,
-                        reasoning_content: if msg.thinking.is_some() { reasoning } else { None },
+                        reasoning_content: if msg.thinking.is_some() {
+                            reasoning
+                        } else {
+                            None
+                        },
                     }
-                }
+                },
                 _ => {
                     let content = match &msg.content {
                         ChatContent::Text(text) => serde_json::Value::String(text.clone()),
@@ -510,12 +550,16 @@ fn convert_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
                                         serde_json::Value::String(part.r#type.clone()),
                                     );
                                     if let Some(text) = &part.text {
-                                        value.insert("text".to_string(), serde_json::Value::String(text.clone()));
+                                        value.insert(
+                                            "text".to_string(),
+                                            serde_json::Value::String(text.clone()),
+                                        );
                                     }
                                     if let Some(image_url) = &part.image_url {
                                         value.insert(
                                             "image_url".to_string(),
-                                            serde_json::to_value(image_url).unwrap_or(serde_json::Value::Null),
+                                            serde_json::to_value(image_url)
+                                                .unwrap_or(serde_json::Value::Null),
                                         );
                                     }
                                     serde_json::Value::Object(value)
@@ -530,7 +574,7 @@ fn convert_messages(messages: &[ChatMessage]) -> Vec<OpenAIMessage> {
                         tool_call_id: None,
                         reasoning_content: None,
                     }
-                }
+                },
             }
         })
         .collect()
@@ -808,12 +852,21 @@ impl ProviderAdapter for OpenAIAdapter {
             .as_ref()
             .ok_or_else(|| AxAgentError::Provider("No message in choice".into()))?;
 
+        // P0 FIX (2026-09-08): thinking 提取提前到日志之前。
+        // 旧日志 has_thinking = msg.thinking.is_some() 只检查专用 thinking 字段，
+        // 漏判 reasoning_content（DeepSeek/Agnes 等），日志输出假 false 误导排障。
+        let thinking = extract_thinking(
+            &msg.reasoning_content,
+            &msg.thinking,
+            &msg.reasoning,
+            &msg.reasoning_details,
+        );
         tracing::info!(
             target: "axagent.providers.resp",
             provider_id = %ctx.provider_id,
             model = %body.model,
             content_len = msg.content.as_deref().map(|c| c.len()).unwrap_or(0),
-            has_thinking = msg.thinking.is_some(),
+            has_thinking = thinking.is_some(),
             tool_calls_count = msg.tool_calls.as_ref().map(|t| t.len()).unwrap_or(0),
             "[PROVIDER.chat] 收到响应"
         );
@@ -841,12 +894,7 @@ impl ProviderAdapter for OpenAIAdapter {
             id: oai.id.unwrap_or_default(),
             model: oai.model.unwrap_or_else(|| request.model.clone()),
             content: extract_primary_content(&msg.content, &msg.extra).unwrap_or_default(),
-            thinking: extract_thinking(
-                &msg.reasoning_content,
-                &msg.thinking,
-                &msg.reasoning,
-                &msg.reasoning_details,
-            ),
+            thinking,
             usage,
             tool_calls,
         })
@@ -886,8 +934,11 @@ impl ProviderAdapter for OpenAIAdapter {
                 None => 0,
             })
             .sum();
-        // P0 DIAG: 逐条消息分析 — 定位哪条消息撑爆了 context
-        tracing::info!(
+        // P0 DIAG: 逐条消息分析 — 定位哪条消息撑爆了 context。
+        // 2026-09-08: info → debug。每次请求逐条 dump 所有消息，工作流 8 并发
+        // agent × 多轮工具调用场景每分钟数百行，与 SSE-DIAG 同类刷屏源。
+        // 排障时用 RUST_LOG=axagent.providers.req=debug 单独开启。
+        tracing::debug!(
             target: "axagent.providers.req",
             "[PROVIDER.chat_stream] 逐条消息分析 (共 {} 条):",
             body.messages.len()
@@ -912,7 +963,7 @@ impl ProviderAdapter for OpenAIAdapter {
                 None => String::from("(无内容)"),
             };
             let tool_calls = m.tool_calls.as_ref().map(|tcs| tcs.len()).unwrap_or(0);
-            tracing::info!(
+            tracing::debug!(
                 target: "axagent.providers.req",
                 "  [msg#{}] role={} chars={} tool_calls={} preview=\"{}\"",
                 i, m.role, chars, tool_calls, preview
@@ -936,17 +987,29 @@ impl ProviderAdapter for OpenAIAdapter {
         let (mut tx, rx) = futures::channel::mpsc::channel(256);
 
         tokio::spawn(async move {
-            let resp = match crate::apply_stream_headers_to_request(
+            // 响应头超时（2026-09-08，2026-09-10 改为随体积缩放）：上游网关 hang 住时
+            // （Agnes 500 do_request_failed 实证挂 82s 才返回），reqwest 只受 client
+            // 总超时(300s)约束，工作流每个节点白等 1-2 分钟。HTTP 响应头正常 <5s 返回
+            // （LLM 生成发生在 body 流中，不受此超时影响）。
+            //
+            // 固定 10s 的问题（2026-09-09/10 实测）：大 prompt 请求（聚合节点
+            // portfolio-mgr 308KB / candidate-mapper 149KB / data-quality 142KB）的
+            // 上游 prefill/排队时间远超 10s，头超时对其必然触发——而固定调大（30s
+            // 实测）会把小请求节点（a-news）推过 step_timeout(120s) 触发整节点重跑。
+            // 故改为随请求体积缩放：base 10s + 每 64KB 递增 5s，封顶 60s。
+            // 小请求（<64KB，绝大多数分析师/辩手节点）维持 10s 快速失败语义不变。
+            let header_timeout_secs: u64 = (10 + (body_size / (64 * 1024)) as u64 * 5).min(60);
+            let response_headers_timeout = std::time::Duration::from_secs(header_timeout_secs);
+            let send_fut = crate::apply_stream_headers_to_request(
                 client
                     .post(&url)
                     .header("Authorization", format!("Bearer {}", api_key))
                     .json(&body),
                 &custom_headers,
             )
-            .send()
-            .await
-            {
-                Ok(r) if r.status().is_success() => {
+            .send();
+            let resp = match tokio::time::timeout(response_headers_timeout, send_fut).await {
+                Ok(Ok(r)) if r.status().is_success() => {
                     let ct = r
                         .headers()
                         .get("content-type")
@@ -964,7 +1027,7 @@ impl ProviderAdapter for OpenAIAdapter {
                     );
                     r
                 },
-                Ok(r) => {
+                Ok(Ok(r)) => {
                     let s = r.status();
                     let t = r.text().await.unwrap_or_default();
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
@@ -973,10 +1036,34 @@ impl ProviderAdapter for OpenAIAdapter {
                     )));
                     return;
                 },
-                Err(e) => {
+                Ok(Err(e)) => {
                     let _ = tx.try_send(Err(AxAgentError::execution_with_source(
                         super::diagnose_reqwest_error(&e),
                         e,
+                    )));
+                    return;
+                },
+                Err(_) => {
+                    tracing::warn!(
+                        url = %url,
+                        provider_id = %provider_id,
+                        model = %body.model,
+                        timeout_secs = response_headers_timeout.as_secs(),
+                        "[SSE-DIAG] 响应头超时：上游网关挂起，中止等待以快速切换 fallback"
+                    );
+                    let _ = tx.try_send(Err(AxAgentError::execution_with_source(
+                        format!(
+                            "OpenAI API error 504: response headers not received within {}s. \
+                             The upstream gateway is likely hung. This timeout only covers \
+                             the HTTP response headers (normally arrives in seconds; LLM \
+                             generation happens in the body stream and is NOT affected). \
+                             Retrying or switching to a fallback provider is recommended.",
+                            response_headers_timeout.as_secs()
+                        ),
+                        anyhow::anyhow!(
+                            "response headers timeout after {}s (gateway hung)",
+                            response_headers_timeout.as_secs()
+                        ),
                     )));
                     return;
                 },
@@ -991,28 +1078,51 @@ impl ProviderAdapter for OpenAIAdapter {
             let mut total_data_events: usize = 0;
 
             let mut process_event = |data: &str| -> bool {
-                tracing::info!(
+                // P0 修复（2026-09-08）：info → debug。这是每个 SSE data 事件（字符级
+                // delta）都会走的路径，思考型模型（agnes 等）单次流式响应产生数百个
+                // 分片，info 级会刷屏。需要排障时开 debug 级即可看到原始事件。
+                tracing::debug!(
                     target: "axagent.providers.sse",
                     raw = %data[..data.len().min(300)].replace('\n', " "),
                     "[SSE-DIAG] 收到 data 事件"
                 );
                 if data.trim() == "[DONE]" {
-                    let tool_calls = if pending_tool_calls.is_empty() {
-                        None
-                    } else {
-                        Some(
-                            pending_tool_calls
-                                .iter()
-                                .map(|(id, ct, name, args)| axagent_harness::types::ToolCall {
+                    // V69 修复(2026-09-10): 终结时校验每个 tool_call 的 arguments。
+                    // 非法 JSON 不写入会话历史，改发流错误（引擎按 retryable 重新
+                    // 生成本轮对话，而非带着坏历史重放必 400 的请求）。
+                    let mut finalized: Vec<axagent_harness::types::ToolCall> = Vec::new();
+                    for (id, ct, name, args) in &pending_tool_calls {
+                        match validate_tool_call_arguments(args) {
+                            Some(valid_args) => {
+                                finalized.push(axagent_harness::types::ToolCall {
                                     id: id.clone(),
                                     call_type: ct.clone(),
                                     function: axagent_harness::types::ToolCallFunction {
                                         name: name.clone(),
-                                        arguments: args.clone(),
+                                        arguments: valid_args,
                                     },
-                                })
-                                .collect(),
-                        )
+                                });
+                            },
+                            None => {
+                                let _ = tx.try_send(Err(AxAgentError::execution_with_source(
+                                    format!(
+                                        "OpenAI API error 400: assistant tool_call `{name}` produced \
+                                         invalid JSON arguments (upstream truncated or malformed). \
+                                         Retrying to regenerate this turn is recommended; the malformed \
+                                         call was NOT written into conversation history."
+                                    ),
+                                    anyhow::anyhow!(
+                                        "malformed tool_call arguments at stream finalization: {name}"
+                                    ),
+                                )));
+                                return true;
+                            },
+                        }
+                    }
+                    let tool_calls = if finalized.is_empty() {
+                        None
+                    } else {
+                        Some(finalized)
                     };
                     let _ = tx.try_send(Ok(ChatStreamChunk {
                         content: None,
@@ -1030,7 +1140,7 @@ impl ProviderAdapter for OpenAIAdapter {
                     Err(e) => {
                         tracing::warn!(
                             "Failed to parse SSE event JSON: {e}. Data: {}",
-                            &data[..data.len().min(200)]
+                            truncate_to_char_boundary(data, 200)
                         );
                         return false;
                     },
@@ -1046,7 +1156,10 @@ impl ProviderAdapter for OpenAIAdapter {
                         });
                     if let Some(tc_deltas) = tool_call_deltas {
                         for tc in tc_deltas {
-                            tracing::info!(
+                            // P0 修复（2026-09-08）：info → debug。思考型模型把工具调用参数
+                            // 切成极碎的 delta 分片，每个分片一条 info 会在工具调用密集的
+                            // 工作流阶段（分析师并行节点）刷屏。需要排查时开 debug 级即可。
+                            tracing::debug!(
                                 target: "axagent.providers.toolcall",
                                 index = tc.index,
                                 id = ?tc.id,
@@ -1126,7 +1239,8 @@ impl ProviderAdapter for OpenAIAdapter {
                             })
                         });
 
-                    tracing::info!(
+                    // P0 修复（2026-09-08）：info → debug，同上，per-chunk 路径禁止 info。
+                    tracing::debug!(
                         target: "axagent.providers.sse",
                         has_content = content.is_some(),
                         has_thinking = thinking.is_some(),

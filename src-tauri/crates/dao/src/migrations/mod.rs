@@ -16,6 +16,7 @@
 use sea_orm::{ConnectionTrait, DbBackend, DbErr, Statement};
 
 pub mod pg_ddl;
+pub mod schema_diff;
 pub mod v100_consolidated;
 pub mod v101_consolidate_knowledge_memory;
 pub mod v102_create_fleets;
@@ -625,6 +626,25 @@ pub async fn repair_schema(db: &sea_orm::DatabaseConnection) -> Result<(usize, u
             "[repair_schema] 部分迁移失败，不强制写入 CURRENT_VERSION，\
              下次启动 run_migrations 将重试失败的迁移"
         );
+    }
+
+    // schema diff 层：迁移重跑只能修「缺表/缺数据」，修不了「有表缺列」
+    // （CREATE TABLE IF NOT EXISTS 对已存在的表是 no-op）。这里以实体定义
+    // 为权威对照实际库列集，缺失即补；同时修类型错配（如 SQLite 方言
+    // 迁移在 PG 上产出的 real 列 vs 实体 f64 的 DOUBLE PRECISION）。
+    // 失败不阻塞版本号写入——迁移仍是建表权威，diff 是列级自愈。
+    match schema_diff::heal_all(db).await {
+        Ok(report) => {
+            tracing::info!(
+                "[repair_schema] schema diff: {} 张实体表对照，补列 {} 个，类型修复 {} 个",
+                report.tables_scanned,
+                report.columns_added.len(),
+                report.types_healed.len()
+            );
+        },
+        Err(e) => {
+            tracing::warn!("[repair_schema] schema diff 失败（不阻塞修复流程）: {}", e);
+        },
     }
 
     // 验证：读取当前最大版本号

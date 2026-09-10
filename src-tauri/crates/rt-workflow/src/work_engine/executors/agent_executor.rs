@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use axagent_harness::types::{ChatContent, ChatMessage, ChatRequest, RagContextResult};
-use axagent_harness::workflow_types::WorkflowNode;
+use axagent_harness::workflow_types::{StepProgressEvent, WorkflowNode};
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -229,16 +229,15 @@ impl AgentExecutor {
         node: &WorkflowNode,
         an: &axagent_harness::workflow_types::AgentNode,
         context: &ExecutionState,
+        user_input: String,
     ) -> Result<NodeOutput, String> {
         // 构造 system_prompt — 节点 inline prompt(未做模板渲染,简化处理)
         let system_prompt = an.config.system_prompt.clone();
 
-        // 构造 user_input — 从 input_params 提取
-        let user_input = if let Some(obj) = context.input_params.as_object() {
-            obj.values().filter_map(|v| v.as_str().map(String::from)).collect::<Vec<_>>().join("\n")
-        } else {
-            context.input_params.to_string()
-        };
+        // 委托资格判定（context_sources 非空 / user_input 为空）已上移到调用方
+        // execute()（2026-09-08）：预期分流走 debug 日志静默跳过，不经过
+        // Err → WARN 链（此前每个分析师节点每轮都刷一条 WARN，属日志噪音）。
+        // 本方法只保留真正的委托执行失败（run_turn Err → WARN fallback）。
 
         // 构造 tools — 用 harness 提供的转换函数
         let tools = axagent_harness::agent_turn_runner::tool_defs_to_chat_tools(&an.config.tools);
@@ -399,15 +398,39 @@ impl NodeExecutorTrait for AgentExecutor {
         if let Some(runner) = runner
             && runner.is_available()
         {
-            match self.try_delegate_to_turn_runner(&runner, node, an, context).await {
-                Ok(output) => return Ok(output),
-                Err(e) => {
-                    tracing::warn!(
-                        node_id = %node.base_id(),
-                        error = %e,
-                        "AgentTurnRunner 委托失败,fallback 到 inline ReAct"
-                    );
-                },
+            // 委托资格判定（2026-09-08 上移自 try_delegate_to_turn_runner）：
+            // ① 带 context_sources 的节点真实输入在 context.variables（经 input_mapping
+            //    渲染），委托路径只能从 input_params 提取 → 构建不出正确 user_prompt；
+            // ② input_params 无字符串值时 user_input 为空 → 空 user 消息被上游
+            //    「message content cannot be empty」400 拒绝（确定性错误）。
+            // 两者都属预期分流，直接走 inline ReAct（debug 级日志，非失败）；
+            // 只有真正的 run_turn 执行失败才记 WARN。
+            let user_input = if let Some(obj) = context.input_params.as_object() {
+                obj.values()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                context.input_params.to_string()
+            };
+            if an.config.context_sources.is_empty() && !user_input.trim().is_empty() {
+                match self.try_delegate_to_turn_runner(&runner, node, an, context, user_input).await
+                {
+                    Ok(output) => return Ok(output),
+                    Err(e) => {
+                        tracing::warn!(
+                            node_id = %node.base_id(),
+                            error = %e,
+                            "AgentTurnRunner 委托失败,fallback 到 inline ReAct"
+                        );
+                    },
+                }
+            } else {
+                tracing::debug!(
+                    node_id = %node.base_id(),
+                    context_sources = an.config.context_sources.len(),
+                    "Agent 节点不满足委托条件(context_sources 非空或 input_params 无字符串值),走 inline ReAct"
+                );
             }
         }
 
@@ -1021,7 +1044,9 @@ impl NodeExecutorTrait for AgentExecutor {
 
             // 流式调用 LLM（经统一入口 execute_llm_stream，获得 PromptGuard/截断/缓存/审计）
             let llm_config = axagent_harness::LlmCallConfig::default();
-            let mut stream = axagent_harness::execute_llm_stream(
+            // H4.3: 初始化失败（429/503/网络）时先试 fallback 流，fallback 也失败才返回原错误。
+            // 旧逻辑直接 map_err(?) 返回，引擎用同一限流 provider 重试，回退模型形同虚设。
+            let mut stream = match axagent_harness::execute_llm_stream(
                 adapter.as_ref(),
                 &req_ctx,
                 request,
@@ -1029,12 +1054,42 @@ impl NodeExecutorTrait for AgentExecutor {
                 None,
             )
             .await
-            .map_err(|e| {
-                NodeError::exec_failed(
-                    error_code::UNSUPPORTED_PROVIDER,
-                    format!("Agent LLM stream 初始化失败: {e}"),
-                )
-            })?;
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    match self
+                        .try_fallback_stream(
+                            an.config.fallback_model.as_deref(),
+                            &prov.id,
+                            &model,
+                            session_model,
+                            session_provider_id,
+                            profile_suggested,
+                            &messages,
+                            runtime_temp,
+                            runtime_max_tokens,
+                        )
+                        .await
+                    {
+                        Some((fb_stream, fb_model)) => {
+                            tracing::warn!(
+                                node_id = %an.base.id,
+                                primary_model = %model,
+                                fallback_model = %fb_model,
+                                primary_error = %e,
+                                "Agent LLM stream 初始化失败，已切换 fallback 流继续"
+                            );
+                            fb_stream
+                        },
+                        None => {
+                            return Err(NodeError::exec_failed(
+                                error_code::UNSUPPORTED_PROVIDER,
+                                format!("Agent LLM stream 初始化失败: {e}"),
+                            ));
+                        },
+                    }
+                },
+            };
             let mut stream_content = String::new();
             let mut stream_thinking: Option<String> = None;
             let mut stream_tool_calls: Option<Vec<axagent_harness::types::ToolCall>> = None;
@@ -1051,26 +1106,119 @@ impl NodeExecutorTrait for AgentExecutor {
             // 配置 stream_chunk_timeout_secs=300 后单 chunk 等待可达 5 分钟。
             let chunk_timeout =
                 Duration::from_secs(an.config.stream_chunk_timeout_secs.unwrap_or(120));
-            while let Some(chunk) =
-                tokio::time::timeout(chunk_timeout, stream.next()).await.map_err(|_| {
-                    NodeError::exec_failed(
-                        error_code::TIMEOUT,
-                        format!(
-                            "Agent LLM stream chunk timeout after {}s (round {}/{}), node={}",
-                            chunk_timeout.as_secs(),
-                            round + 1,
-                            max_rounds,
-                            node.base_id(),
-                        ),
-                    )
-                })?
-            {
-                let chunk = chunk.map_err(|e| {
-                    NodeError::exec_failed(
-                        error_code::UNSUPPORTED_PROVIDER,
-                        format!("Agent LLM stream error: {e}"),
-                    )
-                })?;
+
+            // 流式增量转发（2026-09-08 修复）：每 2s 发一次 status="streaming" 的
+            // StepProgressEvent（output 携带累积文本），经外层 progress_cb 转成
+            // workflow-step-delta 前端事件。此前 chunk 只本地累积，辩论等长节点
+            // （单次 LLM 调用 1-5 分钟）执行期间前端完全无输出可见性。
+            // 节流间隔 2s：兼顾 IPC 频率与"打字机"体验；payload 为累积全文
+            // （本地 IPC，单次最大 ~数十 KB，可接受）。
+            let stream_delta_cb =
+                context.callbacks.as_ref().and_then(|c| c.stream_progress.clone());
+            let mut last_delta_emit = tokio::time::Instant::now();
+            const STREAM_DELTA_INTERVAL: Duration = Duration::from_secs(2);
+
+            // chunk 超时/错误 fallback 守卫：每次流只允许切换一次 fallback，防止
+            // fallback 流也持续无 chunk/持续报错时陷入「超时→换流→再超时」或
+            // 「错误→换流→再错误」的死循环（2026-09-09 实证：24 路回退洪水足以把
+            // 备用 provider 也打到限流，无守卫时无限循环重试并反复刷 ERROR）。
+            let mut chunk_timeout_fallback_used = false;
+            let mut chunk_err_fallback_used = false;
+
+            while let Some(chunk) = loop {
+                match tokio::time::timeout(chunk_timeout, stream.next()).await {
+                    // 超时（默认 120s 无新 chunk）：与下方 H4.3 chunk Err 同语义，
+                    // 尚未累积任何内容时尝试 fallback 流替换主流；已有内容时换模型
+                    // 会割裂上下文，直接返回 TIMEOUT 走引擎重试。
+                    // 此前超时直接 return Err，是 fallback 的盲区——即使配置了
+                    // 节点级/系统级回退模型也不会切换（2026-09-09 a-chain-trend1 实证）。
+                    Err(_) => {
+                        let nothing_accumulated = stream_content.is_empty()
+                            && stream_thinking.is_none()
+                            && stream_tool_calls.is_none();
+                        if nothing_accumulated && !chunk_timeout_fallback_used {
+                            if let Some((fb_stream, fb_model)) = self
+                                .try_fallback_stream(
+                                    an.config.fallback_model.as_deref(),
+                                    &prov.id,
+                                    &model,
+                                    session_model,
+                                    session_provider_id,
+                                    profile_suggested,
+                                    &messages,
+                                    runtime_temp,
+                                    runtime_max_tokens,
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    node_id = %an.base.id,
+                                    primary_model = %model,
+                                    fallback_model = %fb_model,
+                                    timeout_secs = chunk_timeout.as_secs(),
+                                    "Agent LLM stream chunk 超时，已切换 fallback 流继续"
+                                );
+                                chunk_timeout_fallback_used = true;
+                                stream = fb_stream;
+                                continue;
+                            }
+                        }
+                        return Err(NodeError::exec_failed(
+                            error_code::TIMEOUT,
+                            format!(
+                                "Agent LLM stream chunk timeout after {}s (round {}/{}), node={}",
+                                chunk_timeout.as_secs(),
+                                round + 1,
+                                max_rounds,
+                                node.base_id(),
+                            ),
+                        ));
+                    },
+                    Ok(next) => break next,
+                }
+            } {
+                // H4.3: chunk 错误（429/503 通常在首个 chunk 爆出）且内容尚未累积时，
+                // 尝试用 fallback 流替换主流继续消费；已有部分内容时不宜换模型
+                // （前后文割裂），直接返回原错误走引擎重试。
+                let chunk = match chunk {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let nothing_accumulated = stream_content.is_empty()
+                            && stream_thinking.is_none()
+                            && stream_tool_calls.is_none();
+                        if nothing_accumulated && !chunk_err_fallback_used {
+                            if let Some((fb_stream, fb_model)) = self
+                                .try_fallback_stream(
+                                    an.config.fallback_model.as_deref(),
+                                    &prov.id,
+                                    &model,
+                                    session_model,
+                                    session_provider_id,
+                                    profile_suggested,
+                                    &messages,
+                                    runtime_temp,
+                                    runtime_max_tokens,
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    node_id = %an.base.id,
+                                    primary_model = %model,
+                                    fallback_model = %fb_model,
+                                    primary_error = %e,
+                                    "Agent LLM stream chunk 错误，已切换 fallback 流继续"
+                                );
+                                chunk_err_fallback_used = true;
+                                stream = fb_stream;
+                                continue;
+                            }
+                        }
+                        return Err(NodeError::exec_failed(
+                            error_code::UNSUPPORTED_PROVIDER,
+                            format!("Agent LLM stream error: {e}"),
+                        ));
+                    },
+                };
 
                 if let Some(ref content) = chunk.content {
                     stream_content.push_str(content);
@@ -1088,6 +1236,24 @@ impl NodeExecutorTrait for AgentExecutor {
                 }
                 if chunk.tool_calls.is_some() {
                     stream_tool_calls = chunk.tool_calls;
+                }
+
+                // 节流发送流式增量（内容非空且距上次 ≥2s）
+                if let Some(cb) = &stream_delta_cb
+                    && !stream_content.is_empty()
+                    && last_delta_emit.elapsed() >= STREAM_DELTA_INTERVAL
+                {
+                    last_delta_emit = tokio::time::Instant::now();
+                    cb(StepProgressEvent {
+                        node_id: node.base_id().to_string(),
+                        status: "streaming".to_string(),
+                        total_nodes: 0,
+                        completed_nodes: 0,
+                        execution_id: Some(context.execution_id.clone()),
+                        error: None,
+                        output: Some(serde_json::json!(stream_content)),
+                    })
+                    .await;
                 }
             }
 
@@ -1625,6 +1791,34 @@ impl NodeExecutorTrait for AgentExecutor {
                     })
                     .or_else(|| try_fix_truncated_json(&trimmed));
 
+                // 2026-09-08 修复: OutputMode::Json 节点（a-catalyst 等）的输出契约要求
+                // 含 report 正文（schema 明确 report 长度>50字）。LLM 输出流中断时，
+                // try_fix_truncated_json 会把半截 JSON 补括号"修复"成只剩前几个数字
+                // 字段的合法 JSON（实测：军工股分析只剩 verdict/bull_score/bear_score，
+                // report/catalyst_level 全丢），节点被标记成功——前端卡片只剩分数标签、
+                // 无任何陈述性文本且无失败信号。
+                // 修复策略：Json 模式下修复结果若不含任何 ≥50 字符的字符串字段，
+                // 视为语义不完整、拒绝本次修复，让流程进入 H4.1 fallback 重试 /
+                // 降级 JSON（report=原始文本 + 数据不足 + __untrusted，诚实暴露失败）。
+                let fixed = fixed.filter(|content| {
+                    if !matches!(
+                        an.config.output_mode,
+                        axagent_harness::workflow_types::OutputMode::Json
+                    ) {
+                        return true;
+                    }
+                    serde_json::from_str::<serde_json::Value>(content)
+                        .ok()
+                        .and_then(|v| {
+                            v.as_object().map(|o| {
+                                o.values().any(|val| {
+                                    val.as_str().is_some_and(|s| s.chars().count() >= 50)
+                                })
+                            })
+                        })
+                        .unwrap_or(false)
+                });
+
                 if let Some(ref fixed_content) = fixed {
                     if fixed_content != &trimmed {
                         tracing::warn!(
@@ -1664,18 +1858,24 @@ impl NodeExecutorTrait for AgentExecutor {
                             // 避免再次进入工具调用循环；成功则替换 final_content，
                             // 失败则继续走原降级 JSON 路径。
                             let mut fallback_remedied = false;
-                            if let Some(ref fb) = an.config.fallback_model
-                                && fb != &model
+                            if let Some((ref fb, ref fb_provider)) = resolve_effective_fallback(
+                                an.config.fallback_model.as_deref(),
+                                &prov.id,
+                                &model,
+                            )
+                            .await
                             {
                                 tracing::info!(
                                     node_id = %an.base.id,
                                     fallback_model = %fb,
+                                    fallback_source = if fb_provider.is_some() { "system" } else { "node" },
                                     primary_model = %model,
                                     "H4.1: 主模型输出无效，尝试用 fallback_model 重试",
                                 );
                                 match self
-                                    .resolve_provider(
-                                        Some(fb.as_str()),
+                                    .resolve_fallback_provider(
+                                        fb,
+                                        fb_provider.as_deref(),
                                         session_model,
                                         session_provider_id,
                                         profile_suggested,
@@ -1919,6 +2119,37 @@ impl NodeExecutorTrait for AgentExecutor {
                         );
                         final_content = combined;
                     }
+                } else if let Some(recovered) = extract_loose_json_output(&trimmed) {
+                    // 分支 A2: VERDICT 标签缺失/畸形 → 从 markdown 代码块或花括号范围
+                    // 兜底提取 JSON（辩手/分析师字段白名单守卫，防误提取正文零散 {}）。
+                    // bear-r1 实证（2026-09-08）：9631 字符正文 + 无标签，下游 consensus_score
+                    // 解析全断，analyst-brief 标记"数据不可用"。
+                    // report 保留正文全文，机读字段进 verdict，与分支 A/B 产出形态对齐。
+                    tracing::info!(
+                        node_id = %node.base_id(),
+                        recovered_len = recovered.len(),
+                        "通用后处理: VERDICT 标签缺失，从代码块/花括号兜底提取 JSON 输出"
+                    );
+                    let obj =
+                        serde_json::from_str::<serde_json::Value>(&recovered).unwrap_or_default();
+                    final_content = match obj.get("verdict") {
+                        // 已是嵌套结构（verdict 为 map）→ 原样使用
+                        Some(v) if v.is_object() => recovered,
+                        // 扁平 verdict(字符串) 或无 verdict 字段（典型辩手
+                        // {stance, strength_score, confidence}）→ report 用提取对象的
+                        // report 或正文全文，机读字段包装进 verdict（与分支 A 产出对齐）
+                        Some(_) | None => {
+                            let m = obj.as_object().cloned().unwrap_or_default();
+                            let report = m
+                                .get("report")
+                                .cloned()
+                                .unwrap_or_else(|| serde_json::Value::String(trimmed.clone()));
+                            let verdict_map: serde_json::Map<String, serde_json::Value> =
+                                m.into_iter().filter(|(k, _)| k != "report").collect();
+                            serde_json::json!({ "report": report, "verdict": verdict_map })
+                                .to_string()
+                        },
+                    };
                 } else {
                     tracing::warn!(
                         node_id = %node.base_id(),
@@ -2045,28 +2276,32 @@ impl NodeExecutorTrait for AgentExecutor {
         //       会被误判为非空，导致前端清理后显示空内容、UI 卡片一直"等待中"
         let content_after_clean = clean_inline_tool_tags(&final_content);
         if content_after_clean.trim().is_empty() {
+            // H4.2: 节点级 fallback_model 优先，未配置时回落系统级回退模型
+            let effective_fb =
+                resolve_effective_fallback(an.config.fallback_model.as_deref(), &prov.id, &model)
+                    .await;
             tracing::error!(
                 node_id = %node.base_id(),
                 primary_model = %model,
-                has_fallback = %an.config.fallback_model.is_some(),
+                has_fallback = %effective_fb.is_some(),
                 "Agent LLM 返回完全空内容，启动 fallback 补救流程"
             );
 
             let mut fallback_remedied = false;
 
             // 步骤 1: 尝试 fallback_model 重试（不带 tools，避免重复工具调用循环）
-            if let Some(ref fb) = an.config.fallback_model
-                && fb != &model
-            {
+            if let Some((ref fb, ref fb_provider)) = effective_fb {
                 tracing::info!(
                     node_id = %an.base.id,
                     fallback_model = %fb,
+                    fallback_source = if fb_provider.is_some() { "system" } else { "node" },
                     primary_model = %model,
                     "通用空内容保护: 用 fallback_model 重试"
                 );
                 if let Ok((fb_prov, fb_key, fb_model, fb_adapter, fb_api_key)) = self
-                    .resolve_provider(
-                        Some(fb.as_str()),
+                    .resolve_fallback_provider(
+                        fb,
+                        fb_provider.as_deref(),
                         session_model,
                         session_provider_id,
                         profile_suggested,
@@ -2201,7 +2436,7 @@ impl NodeExecutorTrait for AgentExecutor {
                      - 节点: {}\n\n\
                      本节点结论不可信，已标记为低置信度。建议降低并行度后重试。",
                     model,
-                    an.config.fallback_model.as_deref().unwrap_or("(未配置)"),
+                    effective_fb.as_ref().map(|(m, _)| m.as_str()).unwrap_or("(未配置)"),
                     node.base_id(),
                 );
                 let report_escaped =
@@ -2660,9 +2895,28 @@ impl AgentExecutor {
             || profile_suggested_provider.is_some()
             || node_model.is_some();
         if !has_override {
-            let cache = self.default_provider_cache.lock().await;
-            if let Some(ref cached) = *cache {
-                return Ok(cached.clone());
+            let cached = { self.default_provider_cache.lock().await.clone() };
+            if let Some((prov, _stale_key, model, adapter, _stale_api)) = cached {
+                // key 不复用缓存：多 API key 轮询要求每节点重新取号，否则并行节点
+                // 全部打同一把 key → 429 集中。provider/model/adapter 变更频率低，仍走缓存。
+                let key = axagent_harness::repositories::provider_repository()
+                    .get_active_key(&prov.id)
+                    .await
+                    .map_err(|e| {
+                        NodeError::exec_failed(
+                            error_code::PROVIDER_QUERY_FAILED,
+                            format!("轮询取 key 失败（provider {}）: {e}", prov.id),
+                        )
+                    })?;
+                let api_key =
+                    axagent_crypto::crypto::decrypt_key(&key.key_encrypted, &self.master_key)
+                        .map_err(|e| {
+                            NodeError::exec_failed(
+                                error_code::API_KEY_DECRYPT_FAILED,
+                                format!("API key decryption failed: {e}"),
+                            )
+                        })?;
+                return Ok((prov, key, model, adapter, api_key));
             }
         }
 
@@ -2684,6 +2938,131 @@ impl AgentExecutor {
 
         Ok(result)
     }
+
+    /// H4.2: 解析 fallback 重试的 provider + adapter（两处 fallback 重试点共用）。
+    ///
+    /// fb_provider 为 Some（系统级回退模型）时，以 (provider_id, model_id) 精确解析，
+    /// 不走 session/default provider 链——系统级回退通常与主模型不同供应商。
+    /// fb_provider 为 None（节点级 fallback_model）时，保持原有解析链语义。
+    async fn resolve_fallback_provider(
+        &self,
+        fb_model: &str,
+        fb_provider: Option<&str>,
+        session_model: Option<&str>,
+        session_provider_id: Option<&str>,
+        profile_suggested: Option<&str>,
+    ) -> Result<
+        (
+            axagent_harness::types::ProviderConfig,
+            axagent_harness::types::ProviderKey,
+            String,
+            Arc<dyn axagent_harness::ProviderAdapter>,
+            String,
+        ),
+        NodeError,
+    > {
+        match fb_provider {
+            Some(pid) => {
+                super::resolve_provider_and_adapter(
+                    &self.master_key,
+                    self.provider_registry.as_ref(),
+                    Some(fb_model),
+                    None,
+                    Some(pid),
+                    None,
+                    "AgentExecutor",
+                )
+                .await
+            },
+            None => {
+                self.resolve_provider(
+                    Some(fb_model),
+                    session_model,
+                    session_provider_id,
+                    profile_suggested,
+                )
+                .await
+            },
+        }
+    }
+
+    /// H4.3: provider 错误（429/503/网络失败）时的 fallback 流重试。
+    ///
+    /// 此前 fallback 只挂在「输出为空 / strict_mode 格式错」两处（H4.1/H4.2），
+    /// 而限流类错误在流初始化或首个 chunk 直接 Err 返回，引擎按 retryable
+    /// 分类用同一个限流 provider 指数退避重试，回退模型全程缺席——
+    /// 429 恰是最需要换供应商的场景。PG 实证（2026-09-08）：分析师波
+    /// 9 个节点全部 UNSUPPORTED_PROVIDER 429 重试，fallback 零触发。
+    ///
+    /// 返回 Some((stream, fb_model)) 表示 fallback 流已建立，调用方以它
+    /// 替换主流继续消费；None 表示无可用 fallback 或 fallback 也失败
+    /// （调用方沿用原错误路径）。fallback 请求不带 tools：限流场景下
+    /// 直接要求模型输出结论文本，避免再次进入工具调用循环。
+    #[allow(clippy::too_many_arguments)]
+    async fn try_fallback_stream(
+        &self,
+        node_fallback: Option<&str>,
+        primary_provider_id: &str,
+        primary_model: &str,
+        session_model: Option<&str>,
+        session_provider_id: Option<&str>,
+        profile_suggested: Option<&str>,
+        messages: &[ChatMessage],
+        temperature: Option<f64>,
+        max_tokens: Option<u32>,
+    ) -> Option<(
+        Pin<
+            Box<
+                dyn futures::Stream<Item = Result<axagent_harness::types::ChatStreamChunk, String>>
+                    + Send,
+            >,
+        >,
+        String,
+    )> {
+        let (fb, fb_provider) =
+            resolve_effective_fallback(node_fallback, primary_provider_id, primary_model).await?;
+        let (fb_prov, fb_key, fb_model, fb_adapter, fb_api_key) = self
+            .resolve_fallback_provider(
+                &fb,
+                fb_provider.as_deref(),
+                session_model,
+                session_provider_id,
+                profile_suggested,
+            )
+            .await
+            .ok()?;
+        let fb_req_ctx =
+            axagent_harness::build_provider_request_context(&fb_prov, &fb_key, fb_api_key);
+        let fb_request = ChatRequest {
+            model: fb_model.clone(),
+            messages: messages.to_vec(),
+            stream: true,
+            temperature,
+            max_tokens,
+            top_p: None,
+            tools: None, // fallback 不带 tools，直接要求输出结果
+            thinking_budget: None,
+            use_max_completion_tokens: None,
+            thinking_param_style: None,
+            api_mode: None,
+            instructions: None,
+            conversation: None,
+            previous_response_id: None,
+            store: None,
+            response_format: None,
+        };
+        let llm_config = axagent_harness::LlmCallConfig::default();
+        let stream = axagent_harness::execute_llm_stream(
+            fb_adapter.as_ref(),
+            &fb_req_ctx,
+            fb_request,
+            &llm_config,
+            None,
+        )
+        .await
+        .ok()?;
+        Some((stream, fb_model))
+    }
 }
 
 // ── 自由函数 ──
@@ -2698,6 +3077,42 @@ fn resolve_role(profile: Option<&axagent_harness::types::AgentProfile>) -> Strin
         return role.clone();
     }
     "executor".to_string()
+}
+
+/// H4.2: 解析生效的回退模型（两处 fallback 重试点共用）。
+///
+/// 优先级：
+/// 1. 节点级 `AgentNodeConfig.fallback_model`（provider 沿用既有解析链）
+/// 2. 系统级回退（AppSettings.fallback_provider_id + fallback_model_id）——
+///    原本只接线聊天流（conversations/streaming），工作流节点此前只能逐节点
+///    手配且所有 seed 均为 fallback_model: None，H4.1 重试从未触发过
+///
+/// 返回 (fallback_model, fallback_provider)。回退模型与当前主模型
+/// （provider+model）完全相同时返回 None——重试无意义。
+async fn resolve_effective_fallback(
+    node_fallback: Option<&str>,
+    current_provider_id: &str,
+    current_model: &str,
+) -> Option<(String, Option<String>)> {
+    // 节点级显式配置优先
+    if let Some(fb) = node_fallback {
+        return if fb == current_model {
+            None
+        } else {
+            Some((fb.to_string(), None))
+        };
+    }
+    // 回落系统级回退模型（SettingsRepository 未注册/读取失败时静默跳过）
+    let repo = axagent_harness::repositories::try_settings_repository()?;
+    let settings = repo.get_settings().await.ok()?;
+    let (pid, mid) = match (&settings.fallback_provider_id, &settings.fallback_model_id) {
+        (Some(p), Some(m)) if !p.is_empty() && !m.is_empty() => (p.clone(), m.clone()),
+        _ => return None,
+    };
+    if pid == current_provider_id && mid == current_model {
+        return None;
+    }
+    Some((mid, Some(pid)))
 }
 
 /// 将上下文源格式化为自然语言章节（替代 raw JSON dump）。
@@ -3385,44 +3800,70 @@ fn try_fix_truncated_json(s: &str) -> Option<String> {
         return None;
     }
 
-    // flat JSON: 只有 1-2 层嵌套，简单计数即可修复
-    let mut result = s.to_string();
-    let mut added = false;
-
-    // 补全未闭合引号
-    let open_quotes = result.matches('"').count();
-    if open_quotes & 1 == 1 {
-        result.push('"');
-        added = true;
+    // v2.9.10(2026-09-10 trader 实证): 原实现全局计数 {} 与 [] 并先补 } 后补 ]，
+    // 对「对象内数组」截断（如 data_gaps 数组中途断流）产生逆序闭合 `}]`
+    // （正确序 `]}`），修复候选非法被丢弃 → strict_mode 仍然报 EOF。
+    // 改为栈式修复：
+    //   1) 单趟扫描跟踪字符串字面量与括号栈，记录最后一个「安全截断点」
+    //      （任意栈外逗号/完整闭合括号/开括号之后）；
+    //   2) 截断点之后的不完整 token（半截键名/孤值/悬挂冒号）直接丢弃；
+    //   3) 若截断发生在字符串字面量内部（引号未闭合）则放弃——无法安全修复；
+    //   4) 按栈逆序追加闭合符，闭合序天然正确。
+    let chars: Vec<char> = s.chars().collect();
+    let mut stack: Vec<char> = Vec::new();
+    let mut in_str = false;
+    let mut esc = false;
+    let mut last_safe: Option<usize> = None;
+    for (i, ch) in chars.iter().enumerate() {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if *ch == '\\' {
+                esc = true;
+            } else if *ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_str = true,
+            '{' => {
+                stack.push('}');
+                last_safe = Some(i + 1);
+            },
+            '[' => {
+                stack.push(']');
+                last_safe = Some(i + 1);
+            },
+            '}' | ']' => {
+                stack.pop();
+                last_safe = Some(i + 1);
+            },
+            ',' => last_safe = Some(i + 1),
+            _ => {},
+        }
     }
-
-    // 补全缺失的闭括号
-    let open_curly = result.chars().filter(|&c| c == '{').count();
-    let close_curly = result.chars().filter(|&c| c == '}').count();
-    for _ in 0..open_curly.saturating_sub(close_curly) {
-        result.push('}');
-        added = true;
-    }
-
-    let open_sq = result.chars().filter(|&c| c == '[').count();
-    let close_sq = result.chars().filter(|&c| c == ']').count();
-    for _ in 0..open_sq.saturating_sub(close_sq) {
-        result.push(']');
-        added = true;
-    }
-
-    if !added {
+    // 引号未闭合 = 截断在字符串值中间，内容不可恢复
+    if in_str {
         return None;
     }
-
-    let repaired = repair_json(&result);
-    if serde_json::from_str::<serde_json::Value>(&repaired).is_ok() {
-        return Some(repaired);
+    let cut = last_safe?;
+    let mut base: String = chars[..cut].iter().collect();
+    // 丢弃悬空尾逗号（在逗号后截断的场景）
+    while base.ends_with(',') {
+        base.pop();
     }
-    if repaired != result && serde_json::from_str::<serde_json::Value>(&result).is_ok() {
-        return Some(result);
+    // 按栈逆序闭合
+    for c in stack.iter().rev() {
+        base.push(*c);
     }
-    None
+    if base == s {
+        return None;
+    }
+    if serde_json::from_str::<serde_json::Value>(&base).is_err() {
+        return None;
+    }
+    Some(base)
 }
 
 /// 检测 LLM 输出是否为纯文本拒绝（模型安全机制触发）。
@@ -3586,6 +4027,91 @@ fn extract_verdict_tag(text: &str) -> Option<String> {
             if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() {
                 return Some(trimmed.to_string());
             }
+            // 标签内 JSON 带垃圾字符（前后缀文本/尾注释）时，从首个 { 截到最后一个 } 再试
+            if let (Some(s), Some(e)) = (trimmed.find('{'), trimmed.rfind('}')) {
+                if s < e
+                    && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&trimmed[s..=e])
+                {
+                    return Some(parsed.to_string());
+                }
+            }
+        }
+    }
+    // 宽松匹配：LLM 常见畸形变体（<!--VERDICT:{...}--> / <!--  VERDICT :  ... --> /
+    // 大小写混排），逐个 HTML 注释起点扫描。所有偏移都在 ASCII 标记边界上，无中文截断风险。
+    let mut search = 0usize;
+    while let Some(rel) = text[search..].find("<!--") {
+        let abs = search + rel;
+        let after = &text[abs + 4..]; // 越过 "<!--"
+        let ws1 = after.len() - after.trim_start().len();
+        let rest = &after[ws1..];
+        if rest.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("verdict")) {
+            let after_kw = &rest[7..];
+            let ws2 = after_kw.len() - after_kw.trim_start().len();
+            let rest2 = &after_kw[ws2..];
+            if rest2.starts_with(':') {
+                let json_start = abs + 4 + ws1 + 7 + ws2 + 1;
+                if let Some(end_offset) = text[json_start..].find(end_marker) {
+                    let verdict_str = text[json_start..json_start + end_offset].trim();
+                    if serde_json::from_str::<serde_json::Value>(verdict_str).is_ok() {
+                        return Some(verdict_str.to_string());
+                    }
+                    if let (Some(s), Some(e)) = (verdict_str.find('{'), verdict_str.rfind('}')) {
+                        if s < e
+                            && let Ok(parsed) =
+                                serde_json::from_str::<serde_json::Value>(&verdict_str[s..=e])
+                        {
+                            return Some(parsed.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        search = abs + 4;
+    }
+    None
+}
+
+/// VERDICT 标签缺失时的 JSON 兜底提取（分支 A2）。
+/// 提取顺序：
+/// 1. markdown 代码块（```json ... ``` / ``` ... ```）内的 JSON
+/// 2. 全文首个 `{` 到最后一个 `}` 的范围
+///
+/// 两路均要求：解析成功、顶层为 object、且包含辩手/分析师机读字段白名单之一，
+/// 防止把正文中零散的 JSON 示例/表格误当结构化输出。
+fn extract_loose_json_output(text: &str) -> Option<String> {
+    const FIELD_WHITELIST: [&str; 5] =
+        ["stance", "strength_score", "confidence", "verdict", "report"];
+
+    let candidates: Vec<&str> = {
+        let mut v = Vec::new();
+        // 代码块内容（跳过围栏行，取到闭合围栏前）
+        if let Some(fence) = text.find("```") {
+            let rest = &text[fence + 3..];
+            let body_start = rest.find('\n').map(|i| i + 1).unwrap_or(0);
+            let body = &rest[body_start..];
+            if let Some(end) = body.find("```") {
+                let inner = body[..end].trim();
+                if !inner.is_empty() {
+                    v.push(inner);
+                }
+            }
+        }
+        // 花括号范围
+        if let (Some(s), Some(e)) = (text.find('{'), text.rfind('}')) {
+            if s < e {
+                v.push(&text[s..=e]);
+            }
+        }
+        v
+    };
+
+    for candidate in candidates {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(candidate)
+            && parsed.is_object()
+            && FIELD_WHITELIST.iter().any(|k| parsed.get(k).is_some_and(|v| !v.is_null()))
+        {
+            return Some(parsed.to_string());
         }
     }
     None
@@ -3951,4 +4477,102 @@ fn validate_strict_mode_output(
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod verdict_extract_tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_verdict_tag_strict() {
+        let text = "分析正文...\n\n<!-- VERDICT: {\"stance\":\"bearish\",\"strength_score\":72,\"confidence\":65} -->";
+        let got = extract_verdict_tag(text).expect("应命中严格标签");
+        assert!(got.contains("bearish"));
+    }
+
+    #[test]
+    fn test_fix_truncated_json_array_in_object() {
+        // trader 实证(2026-09-10): 对象内数组中途断流，原全局计数实现产生逆序 `}]` 修复失败
+        let s = r#"{"action": "观望", "data_gaps": ["a", "b","#;
+        let fixed = try_fix_truncated_json(s).expect("对象内数组截断应可修复");
+        let v: serde_json::Value = serde_json::from_str(&fixed).expect("修复结果应为合法 JSON");
+        assert_eq!(v["action"], "观望");
+        assert_eq!(v["data_gaps"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_fix_truncated_json_mid_string_unrecoverable() {
+        // 截断在字符串值内部 → 无法安全修复，应返回 None
+        let s = r#"{"action": "观"#;
+        assert!(try_fix_truncated_json(s).is_none());
+    }
+
+    #[test]
+    fn test_fix_truncated_json_dangling_key() {
+        // 截断在键名/冒号处 → 丢弃不完整 token 后闭合
+        let s = r#"{"action": "观望", "verdict""#;
+        let fixed = try_fix_truncated_json(s).expect("悬挂键名截断应可修复");
+        let v: serde_json::Value = serde_json::from_str(&fixed).expect("修复结果应为合法 JSON");
+        assert_eq!(v["action"], "观望");
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_no_space_variant() {
+        // LLM 常见畸形：冒号后无空格
+        let text = "正文\n<!-- VERDICT:{\"stance\":\"bullish\",\"strength_score\":60} -->";
+        let got = extract_verdict_tag(text).expect("无空格变体应命中宽松匹配");
+        assert!(got.contains("bullish"));
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_no_space_after_comment() {
+        // <!--VERDICT:{...}--> 无内部空格
+        let text = "正文\n<!--VERDICT: {\"stance\":\"bearish\",\"strength_score\":80} -->";
+        let got = extract_verdict_tag(text).expect("紧凑变体应命中宽松匹配");
+        assert!(got.contains("bearish"));
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_json_with_trailing_text() {
+        // 标签内 JSON 后带垃圾文本 → { 到 } 截取兜底
+        let text = "正文\n<!-- VERDICT: {\"stance\":\"bullish\",\"strength_score\":55} 请参考 -->";
+        let got = extract_verdict_tag(text).expect("垃圾文本容错应命中");
+        assert!(got.contains("55"));
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_miss() {
+        assert_eq!(extract_verdict_tag("完全没有标签的正文"), None);
+        assert_eq!(extract_verdict_tag("<!-- VERDICT: 非json -->"), None);
+    }
+
+    #[test]
+    fn test_extract_loose_json_from_code_block() {
+        let text = "## 空方观点\n正文很长...\n\n```json\n{\"stance\":\"bearish\",\"strength_score\":70,\"confidence\":60}\n```";
+        let got = extract_loose_json_output(text).expect("代码块 JSON 应被提取");
+        assert!(got.contains("bearish"));
+    }
+
+    #[test]
+    fn test_extract_loose_json_from_braces() {
+        // 已知局限：正文中零散 {} 会污染首尾花括号范围（解析失败），此用例仅覆盖无污染场景
+        let text = "正文论述完毕。最终结论：{\"stance\":\"bearish\",\"strength_score\":70}";
+        let got = extract_loose_json_output(text).expect("花括号范围应提取");
+        assert!(got.contains("70"));
+    }
+
+    #[test]
+    fn test_extract_loose_json_whitelist_guard() {
+        // 白名单字段全缺失 → 拒绝（防误提取正文零散 JSON）
+        let text = "配置示例 {\"name\":\"foo\",\"value\":1} 结束";
+        assert_eq!(extract_loose_json_output(text), None);
+    }
+
+    #[test]
+    fn test_extract_loose_json_chinese_body_no_panic() {
+        // 中文多字节正文字节截断安全（find 返回字符边界）
+        let text = "空头论证：估值过高，盈利承压。{\"strength_score\":75}";
+        let got = extract_loose_json_output(text).expect("中文正文不 panic 且应提取");
+        assert!(got.contains("75"));
+    }
 }

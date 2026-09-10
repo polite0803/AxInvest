@@ -30,7 +30,6 @@ pub mod knowledge;
 pub mod knowledge_graph;
 pub mod local_tool;
 pub mod loop_checkpoint;
-pub mod market_platform;
 pub mod mcp_server;
 pub mod memory;
 pub mod message;

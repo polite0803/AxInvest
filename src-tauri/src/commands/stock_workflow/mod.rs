@@ -17,7 +17,23 @@ pub mod hooks;
 pub mod misc;
 pub mod reco_history;
 pub mod reflection;
+pub mod rhai_pm;
 pub mod serenity;
+
+/// 构造严格模式工具权限：激活 AgentExecutor 的严格输出契约三道防线
+/// （4f 尾部约束注入 / VERDICT 缺失兜底重试 / VERDICT tag 重构 + strict JSON 校验与降级）。
+///
+/// 2026-09-08 接线修复：历史上 `ExecutionState.tool_permissions` 从未被注入（恒 None），
+/// 上述防线全部为死代码——分析师（a-market-analyst 等）漏发 `<!-- VERDICT -->` 标签时，
+/// 无兜底重试、无降级 JSON，content 保持纯 Markdown，
+/// analyst-brief.rhai 的 `content.verdict` 解析失败 → 摘要恒显「解析失败，数据不可用」。
+/// 所有 stock workflow 执行入口（core/serenity/reflection）统一通过本函数启用。
+pub(crate) fn strict_tool_permissions() -> std::sync::Arc<axagent_harness::tool::ToolPermissions> {
+    std::sync::Arc::new(axagent_harness::tool::ToolPermissions {
+        strict_mode: true,
+        ..Default::default()
+    })
+}
 
 // Re-export all #[tauri::command] functions so they remain accessible via stock_workflow::
 pub use core::run_single_stock_analysis;

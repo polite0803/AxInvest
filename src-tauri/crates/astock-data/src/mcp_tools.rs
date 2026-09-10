@@ -1276,8 +1276,12 @@ pub async fn execute_mcp_tool(
             let pe = quote.pe;
             let pb = quote.pb;
             let total_mv = quote.total_mv;
+            // V-fix(2026-09-10): 原式 mv/current_price/1e8 是双重错误——total_mv 单位为亿元,
+            // mv/price 已得亿股, 再除 1e8 使股数缩小 1e8 倍 → fcf_per_share 放大 1e8 倍,
+            // DCF 输出「3.86 亿元/股」级垃圾值(002837 实证), 安全边际恒 100%「充足」。
+            // 正确: 总股本(股) = mv(亿元) × 1e8 / price(元/股)
             let total_shares = if current_price > 0.0 {
-                total_mv.map(|mv| mv / current_price / 1_0000_0000.0)
+                total_mv.map(|mv| mv * 1_0000_0000.0 / current_price)
             } else {
                 None
             };
@@ -1295,41 +1299,48 @@ pub async fn execute_mcp_tool(
             let (moat_score, moat_level) = compute_moat_score(&financials, pe, pb);
 
             // ── DCF 两阶段估值 ──
-            let (dcf_low, dcf_mid, dcf_high) =
+            // V74(2026-09-10): 原实现 FCF≤0 / 股本缺失时返回 (0,0,0)，「无法估值」被
+            // 编码成「估值为0」，value-investor 据此输出「理想买入价0元」、f5 吃到
+            // 0% 上行空间——全是退化垃圾。改为 Option + 归一化 FCF fallback：
+            // 当期亏损（周期底部）用近 5 年报正净利均值×0.90 锚定，持续亏损才返回 None。
+            let (dcf_tiers, dcf_note) =
                 compute_dcf(&financials, total_shares, current_price, valuation_config.as_ref());
+            let (dcf_low, dcf_mid, dcf_high) = match dcf_tiers {
+                Some((l, m, h)) => (Some(l), Some(m), Some(h)),
+                None => (None, None, None),
+            };
 
             // ── 格雷厄姆内在价值（先计算，作为 DCF fallback） ──
+            // V74: EPS≤0 时同样走归一化 EPS fallback，均不可用才返回 None
             let graham_value =
                 compute_graham_value(&financials, current_price, valuation_config.as_ref());
 
-            // ── 安全边际：优先使用 DCF，不可用时 fallback 到格雷厄姆 ──
-            let (mos_pct, mos_level) = if dcf_mid > 0.0 && current_price > 0.0 {
-                let mos = ((dcf_mid - current_price) / dcf_mid) * 100.0;
-                let level = if mos > 30.0 {
-                    "充足"
-                } else if mos > 15.0 {
-                    "适中"
-                } else if mos > 0.0 {
-                    "不足"
-                } else {
-                    "无（高估风险）"
-                };
-                (mos, level)
-            } else if graham_value > 0.0 && current_price > 0.0 {
-                // DCF 不可用时，使用格雷厄姆估值作为 fallback
-                let mos = ((graham_value - current_price) / graham_value) * 100.0;
-                let level = if mos > 30.0 {
-                    "充足(格雷厄姆)"
-                } else if mos > 15.0 {
-                    "适中(格雷厄姆)"
-                } else if mos > 0.0 {
-                    "不足(格雷厄姆)"
-                } else {
-                    "无（高估风险）"
-                };
-                (mos, level)
-            } else {
-                (0.0, "无法计算")
+            // ── 安全边际：优先使用 DCF，不可用时 fallback 到格雷厄姆，均不可用为 None ──
+            let mos_pct: Option<f64> = match (dcf_mid, graham_value) {
+                (Some(mid), _) if current_price > 0.0 => {
+                    Some(((mid - current_price) / mid) * 100.0)
+                },
+                (None, Some(g)) if current_price > 0.0 => Some(((g - current_price) / g) * 100.0),
+                _ => None,
+            };
+            let mos_level: String = match mos_pct {
+                Some(mos) => {
+                    let base = if mos > 30.0 {
+                        "充足"
+                    } else if mos > 15.0 {
+                        "适中"
+                    } else if mos > 0.0 {
+                        "不足"
+                    } else {
+                        "无（高估风险）"
+                    };
+                    if dcf_mid.is_none() {
+                        format!("{}(格雷厄姆)", base)
+                    } else {
+                        base.to_string()
+                    }
+                },
+                None => "无法计算（DCF与格雷厄姆均不适用）".to_string(),
             };
 
             // ── 所有者收益率 ──
@@ -1347,14 +1358,18 @@ pub async fn execute_mcp_tool(
                 };
 
             // ── 综合估值判断 ──
-            let value_signal = {
+            // V74: DCF 与格雷厄姆均不可用时输出「无法估值」——无估值锚 ≠ 高估，
+            // 旧逻辑会因 score 兜底恒为「高估」污染下游 value-investor 判断
+            let valuation_unavailable = dcf_mid.is_none() && graham_value.is_none();
+            let value_signal: String = if valuation_unavailable {
+                "无法估值".to_string()
+            } else {
                 let mut score = 0u32;
-                if mos_pct > 20.0 {
-                    score += 30;
-                } else if mos_pct > 10.0 {
-                    score += 20;
-                } else if mos_pct > 0.0 {
-                    score += 10;
+                match mos_pct {
+                    Some(p) if p > 20.0 => score += 30,
+                    Some(p) if p > 10.0 => score += 20,
+                    Some(p) if p > 0.0 => score += 10,
+                    _ => {},
                 }
                 score += f_score.min(9) * 5;
                 score += moat_score.min(100) / 5;
@@ -1370,6 +1385,33 @@ pub async fn execute_mcp_tool(
                     15.. => "偏高",
                     _ => "高估",
                 }
+                .to_string()
+            };
+
+            // V74: 估值不可用时输出 null 而非 0。
+            // 下游 portfolio-mgr.rhai 的 present() 对 null（Rhai unit）返回 false，
+            // f5 估值因子自动降权为 0（估值维度不参与），data-quality 会正确上报
+            // 「估值上行空间缺失」，不会把 0 当成真实估值。
+            let num_or_null = |v: Option<f64>, round: fn(f64) -> f64| -> serde_json::Value {
+                match v {
+                    Some(x) => json!(round(x)),
+                    None => serde_json::Value::Null,
+                }
+            };
+
+            let summary = if valuation_unavailable {
+                format!(
+                    "内在价值: 不可用({}) | 格雷厄姆值: 不可用 | 安全边际: {} | F-Score={}/9({}) | 护城河{}/100({}) | OE收益率{:.1}% | 综合判断:{}",
+                    dcf_note, mos_level, f_score, f_score_level, moat_score, moat_level, oe_yield, value_signal
+                )
+            } else {
+                format!(
+                    "内在价值(DCF中性)≈{}元 | 格雷厄姆值≈{}元 | 安全边际{}%({}) | F-Score={}/9({}) | 护城河{}/100({}) | OE收益率{:.1}% | 综合判断:{}",
+                    dcf_mid.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "不可用".into()),
+                    graham_value.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "不可用".into()),
+                    mos_pct.map(|p| format!("{:.0}", p)).unwrap_or_else(|| "无法计算".into()),
+                    mos_level, f_score, f_score_level, moat_score, moat_level, oe_yield, value_signal
+                )
             };
 
             let result = json!({
@@ -1379,13 +1421,15 @@ pub async fn execute_mcp_tool(
                 "pb": pb,
                 "total_mv": total_mv,
                 "dcf_valuation": {
-                    "low": round2(dcf_low),
-                    "mid": round2(dcf_mid),
-                    "high": round2(dcf_high),
+                    "low": num_or_null(dcf_low, round2),
+                    "mid": num_or_null(dcf_mid, round2),
+                    "high": num_or_null(dcf_high, round2),
+                    "available": dcf_mid.is_some(),
+                    "note": dcf_note,
                 },
-                "graham_intrinsic_value": round2(graham_value),
+                "graham_intrinsic_value": num_or_null(graham_value, round2),
                 "margin_of_safety": {
-                    "pct": round1(mos_pct),
+                    "pct": num_or_null(mos_pct, round1),
                     "level": mos_level,
                 },
                 "piotroski_f_score": {
@@ -1397,13 +1441,39 @@ pub async fn execute_mcp_tool(
                     "score": moat_score,
                     "max": 100,
                     "level": moat_level,
+                    // 别名: 供 input_mapping 引用(与旧模板 moat.label 对齐)
+                    "label": moat_level,
+                },
+                // ── camelCase 别名块(2026-09-09) ──
+                // 模板 input_mapping 引用 dcf.upsidePct / graham.upsidePct /
+                // fScore.score（上行空间百分比语义，±30% 饱和），原实现缺这些
+                // 键导致 f5 估值因子恒缺失。upsidePct = (估值-现价)/现价*100。
+                // V74: 估值不可用时为 null（下游 present() 视为缺失），不再输出 0
+                "dcf": {
+                    "low": num_or_null(dcf_low, round2),
+                    "mid": num_or_null(dcf_mid, round2),
+                    "high": num_or_null(dcf_high, round2),
+                    "available": dcf_mid.is_some(),
+                    "note": dcf_note,
+                    "upsidePct": match dcf_mid {
+                        Some(mid) if current_price > 0.0 => json!(round1((mid - current_price) / current_price * 100.0)),
+                        _ => serde_json::Value::Null,
+                    },
+                },
+                "graham": {
+                    "intrinsicValue": num_or_null(graham_value, round2),
+                    "upsidePct": match graham_value {
+                        Some(g) if current_price > 0.0 => json!(round1((g - current_price) / current_price * 100.0)),
+                        _ => serde_json::Value::Null,
+                    },
+                },
+                "fScore": {
+                    "score": f_score,
+                    "level": f_score_level,
                 },
                 "owner_earnings_yield_pct": round1(oe_yield),
                 "value_signal": value_signal,
-                "summary": format!(
-                    "内在价值(DCF中性)≈{:.2}元 | 格雷厄姆值≈{:.2}元 | 安全边际{:.0}%({}) | F-Score={}/9({}) | 护城河{}/100({}) | OE收益率{:.1}% | 综合判断:{}",
-                    dcf_mid, graham_value, mos_pct, mos_level, f_score, f_score_level, moat_score, moat_level, oe_yield, value_signal
-                ),
+                "summary": summary,
             });
             serde_json::to_string(&result).map_err(|e| e.to_string())
         },
@@ -1850,14 +1920,58 @@ impl ValuationConfig {
     }
 }
 
+/// 近 N 个年报（report_date 含 "-12-31"，兼容 "2025-12-31" 与 "2025-12-31 00:00:00" 两种格式）
+/// 中的正净利润均值。用于亏损期（周期底部）的归一化估值锚定。
+///
+/// 背景：vendor 返回的 reports 按报告期倒序（[0] 为最新），季报净利润为累计值，
+/// 直接对全部报告期取均值会混淆季度口径；过滤年报天然规避该问题。
+fn normalized_annual_profit(financials: &[FinancialReport], max_years: usize) -> Option<f64> {
+    let vals: Vec<f64> = financials
+        .iter()
+        .filter(|r| r.report_date.contains("-12-31"))
+        .take(max_years)
+        .filter_map(|r| r.net_profit)
+        .filter(|np| *np > 0.0)
+        .collect();
+    if vals.is_empty() {
+        None
+    } else {
+        Some(vals.iter().sum::<f64>() / vals.len() as f64)
+    }
+}
+
+/// 近 N 个年报中的正 EPS 均值（元/股），用于亏损期格雷厄姆公式的归一化锚定
+fn normalized_annual_eps(financials: &[FinancialReport], max_years: usize) -> Option<f64> {
+    let vals: Vec<f64> = financials
+        .iter()
+        .filter(|r| r.report_date.contains("-12-31"))
+        .take(max_years)
+        .filter_map(|r| r.eps)
+        .filter(|e| *e > 0.0)
+        .collect();
+    if vals.is_empty() {
+        None
+    } else {
+        Some(vals.iter().sum::<f64>() / vals.len() as f64)
+    }
+}
+
+/// DCF 两阶段估值（保守/中性/乐观三档）
+///
+/// V74(2026-09-10) 返回值语义变更：
+/// - `Some((三档值, 口径说明))`：估值有效
+/// - `None` + 原因：估值不可用（无股本 / 当期FCF≤0 且近5年报无正净利年度）
+///
+/// 旧实现把「不可用」编码成 `(0,0,0)`，下游把 0 当成真实估值，
+/// 产出「理想买入价 0 元 / 安全边际 0% / DCF 三档全 0」级退化输出。
 fn compute_dcf(
     financials: &[FinancialReport],
     total_shares: Option<f64>,
     _current_price: f64,
     config: Option<&ValuationConfig>,
-) -> (f64, f64, f64) {
+) -> (Option<(f64, f64, f64)>, String) {
     if financials.is_empty() {
-        return (0.0, 0.0, 0.0);
+        return (None, "无财务数据，DCF不可用".to_string());
     }
     let cfg = config.copied().unwrap_or_default();
     let perpetual_growth = cfg.perpetual_growth();
@@ -1868,25 +1982,39 @@ fn compute_dcf(
     let forecast_years = cfg.forecast_years();
 
     let latest = &financials[0];
+    let shares = match total_shares {
+        Some(s) if s > 0.0 => s,
+        _ => return (None, "总股本不可用，DCF不可用".to_string()),
+    };
+
     // vendor 返回的财务数据单位均为"元"，无需缩放
-    // 优先用 free_cash_flow；其次 operating_cash_flow - capex；最后用 net_profit * 0.90 估算
-    let fcf = latest
-        .free_cash_flow
-        .or_else(|| {
+    // V74 FCF 取值链:
+    //   ① 当期 FCF > 0 → 直接使用（free_cash_flow / ocf-capex）
+    //   ② 当期 FCF ≤ 0（亏损期/周期底部）→ 近 5 年报正净利均值 × 0.90 归一化锚定
+    //      （沿用原 net_profit×0.90 估算惯例，季报为累计值故只取年报口径）
+    //   ③ 近 5 年报无正净利年度（持续亏损）→ 返回 None，DCF 不适用
+    let (fcf, fcf_basis) = {
+        let direct = latest.free_cash_flow.or_else(|| {
             latest
                 .operating_cash_flow
                 .and_then(|ocf| latest.capital_expenditure.map(|capex| ocf - capex))
-        })
-        .unwrap_or_else(|| latest.net_profit.unwrap_or(0.0) * 0.90);
-
-    let shares = match total_shares {
-        Some(s) if s > 0.0 => s,
-        _ => return (0.0, 0.0, 0.0),
+        });
+        match direct {
+            Some(v) if v > 0.0 => (v, "当期FCF".to_string()),
+            _ => match normalized_annual_profit(financials, 5) {
+                Some(avg_np) => (
+                    avg_np * 0.90,
+                    "当期FCF≤0，改用近5年报正净利均值×0.90归一化锚定（周期底部）".to_string(),
+                ),
+                None => {
+                    return (
+                        None,
+                        "当期FCF≤0且近5年报无正净利年度（持续亏损），DCF模型不适用".to_string(),
+                    )
+                },
+            },
+        }
     };
-
-    if fcf <= 0.0 {
-        return (0.0, 0.0, 0.0);
-    }
     let fcf_per_share = fcf / shares; // 元/股
 
     // 用营收同比增速作为 growth_rate 参考；默认 8%
@@ -1923,32 +2051,35 @@ fn compute_dcf(
     let high_perpetual = (perpetual_growth * 1.3_f64).min(0.05);
     let high = dcf_two_stage(fcf_per_share, high_growth, high_perpetual, discount_rate);
 
-    (low, mid, high)
+    (Some((low, mid, high)), fcf_basis)
 }
 
 /// 格雷厄姆内在价值公式：V = EPS × (8.5 + 2g) × 4.4 / Y
 /// g 为未来7-10年预期增长率，Y 为AAA企业债收益率基准
+///
+/// V74(2026-09-10): 返回 `Option<f64>`——EPS≤0 且近 5 年报无正 EPS 年度时
+/// 返回 None（公式不适用），不再用 0 冒充估值。当期 EPS≤0 但历史存在正 EPS
+/// 年报时，用正 EPS 均值归一化（周期底部锚定）。
 fn compute_graham_value(
     financials: &[FinancialReport],
     current_price: f64,
     config: Option<&ValuationConfig>,
-) -> f64 {
+) -> Option<f64> {
     if financials.is_empty() || current_price <= 0.0 {
-        return 0.0;
+        return None;
     }
     let cfg = config.copied().unwrap_or_default();
     let bond_yield = cfg.bond_yield();
 
     let latest = &financials[0];
-    let eps = latest.eps.unwrap_or(0.0);
-    if eps <= 0.0 {
-        return 0.0;
-    }
+    let eps = match latest.eps {
+        Some(e) if e > 0.0 => e,
+        _ => normalized_annual_eps(financials, 5)?,
+    };
     // profit_yoy 是百分比值（如 15.0 表示 15%），需要转换为小数形式
     // 格雷厄姆公式中 g 应为小数（如 0.15），封顶 30% = 0.30
     let g = latest.profit_yoy.map(|y| (y / 100.0).clamp(0.0, 0.30)).unwrap_or(0.05);
-    let value = eps * (8.5 + 2.0 * g) * 4.4 / bond_yield;
-    value.max(0.0)
+    Some((eps * (8.5 + 2.0 * g) * 4.4 / bond_yield).max(0.0))
 }
 
 /// 巴菲特所有者收益（元）
@@ -2700,4 +2831,129 @@ fn optimize_attention_weights_impl(samples: &Vec<serde_json::Value>) -> serde_js
             "样本:{sample_count} | 低关注度组均值收益:{low_avg:.2}% | 高关注度组:{high_avg:.2}% | 假说验证:{hypothesis_valid}"
         )
     })
+}
+
+#[cfg(test)]
+mod valuation_tests {
+    use super::*;
+
+    /// 构造财报: report_date 含 "-12-31" 视为年报（与 normalized_*_helper 口径一致）
+    fn report(date: &str, np: Option<f64>, eps: Option<f64>) -> FinancialReport {
+        FinancialReport {
+            stock_code: "600000".into(),
+            report_date: date.into(),
+            revenue: None,
+            net_profit: np,
+            eps,
+            bps: None,
+            roe: None,
+            debt_ratio: None,
+            gross_margin: None,
+            net_margin: None,
+            revenue_yoy: None,
+            profit_yoy: None,
+            total_assets: None,
+            operating_cash_flow: None,
+            capital_expenditure: None,
+            free_cash_flow: None,
+            current_ratio: None,
+            quick_ratio: None,
+            goodwill: None,
+            accounts_receivable: None,
+            estimated: Some(false),
+        }
+    }
+
+    fn shares_of(shares: f64) -> Option<f64> {
+        Some(shares)
+    }
+
+    /// V74: 当期亏损但近5年报有正净利 → 归一化锚定，DCF 不再退化 0
+    #[test]
+    fn dcf_normalizes_when_latest_loss_but_history_positive() {
+        let financials = vec![
+            report("2026-06-30", Some(-8.38e8), Some(-0.5)),
+            report("2025-12-31", Some(5.0e8), Some(0.30)),
+            report("2024-12-31", Some(8.0e8), Some(0.48)),
+            report("2023-12-31", Some(6.5e8), Some(0.39)),
+            report("2022-12-31", Some(7.2e8), Some(0.43)),
+        ];
+        let (tiers, note) = compute_dcf(&financials, shares_of(20.0e8), 7.91, None);
+        let (low, mid, high) = tiers.expect("归一化锚定后 DCF 应可用");
+        assert!(low > 0.0 && mid > 0.0 && high > 0.0);
+        assert!(low < mid && mid < high, "三档应单调: {low} < {mid} < {high}");
+        assert!(note.contains("归一化"), "口径说明应标注归一化: {note}");
+    }
+
+    /// V74: 持续亏损（近5年报无正净利）→ None + 原因，不再输出 (0,0,0) 冒充估值
+    #[test]
+    fn dcf_returns_none_for_persistent_loss() {
+        let financials = vec![
+            report("2026-06-30", Some(-8.38e8), Some(-0.5)),
+            report("2025-12-31", Some(-3.0e8), Some(-0.18)),
+            report("2024-12-31", Some(-1.5e8), Some(-0.09)),
+        ];
+        let (tiers, note) = compute_dcf(&financials, shares_of(20.0e8), 7.91, None);
+        assert!(tiers.is_none(), "持续亏损应返回 None");
+        assert!(note.contains("不适用"), "原因说明: {note}");
+    }
+
+    /// V74: 当期盈利（直接 FCF 口径）路径不受影响
+    #[test]
+    fn dcf_direct_fcf_path_unchanged() {
+        let mut financials = vec![report("2025-12-31", Some(10.0e8), Some(0.6))];
+        financials[0].free_cash_flow = Some(6.0e8);
+        let (tiers, note) = compute_dcf(&financials, shares_of(10.0e8), 15.0, None);
+        let (_, mid, _) = tiers.expect("正常 FCF 应可用");
+        assert!(mid > 0.0);
+        assert_eq!(note, "当期FCF");
+    }
+
+    /// V74: 股本缺失 → None，不再输出 (0,0,0)
+    #[test]
+    fn dcf_none_when_shares_missing() {
+        let financials = vec![report("2025-12-31", Some(5.0e8), Some(0.3))];
+        let (tiers, note) = compute_dcf(&financials, None, 7.91, None);
+        assert!(tiers.is_none());
+        assert!(note.contains("股本"));
+    }
+
+    /// V74: 当期 EPS≤0 但历史有正 EPS → 归一化，格雷厄姆值不再恒 0
+    #[test]
+    fn graham_normalizes_when_latest_eps_negative() {
+        let financials = vec![
+            report("2026-06-30", Some(-8.38e8), Some(-0.5)),
+            report("2025-12-31", Some(5.0e8), Some(0.30)),
+            report("2024-12-31", Some(8.0e8), Some(0.48)),
+        ];
+        let v = compute_graham_value(&financials, 7.91, None).expect("归一化后格雷厄姆值应可用");
+        assert!(v > 0.0);
+        // 均值 EPS=0.39, g=0(亏损年 profit_yoy 缺省 0.05→clamp) → v = 0.39*(8.5+0.1)*4.4/4.4
+        let expected = 0.39 * (8.5 + 2.0 * 0.05);
+        assert!((v - expected).abs() < 1e-6, "v={v}, expected={expected}");
+    }
+
+    /// V74: 全历史 EPS≤0 → None
+    #[test]
+    fn graham_none_when_no_positive_eps() {
+        let financials = vec![
+            report("2026-06-30", Some(-8.38e8), Some(-0.5)),
+            report("2025-12-31", Some(-3.0e8), Some(-0.18)),
+        ];
+        assert!(compute_graham_value(&financials, 7.91, None).is_none());
+    }
+
+    /// 年报口径过滤: 季报（累计值）不参与均值，避免季度口径污染
+    #[test]
+    fn annual_filter_excludes_quarterly_reports() {
+        let financials = vec![
+            report("2026-06-30", Some(-8.38e8), Some(-0.5)), // H1 累计
+            report("2026-03-31", Some(-2.0e8), Some(-0.12)), // Q1 累计
+            report("2025-12-31", Some(5.0e8), Some(0.30)),
+        ];
+        let avg = normalized_annual_profit(&financials, 5).expect("应有正年报净利");
+        assert!((avg - 5.0e8).abs() < 1e-6, "只统计年报, avg={avg}");
+        let eps = normalized_annual_eps(&financials, 5).expect("应有正年报 EPS");
+        assert!((eps - 0.30).abs() < 1e-6);
+    }
 }

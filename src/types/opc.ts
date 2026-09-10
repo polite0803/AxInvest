@@ -21,8 +21,10 @@ export interface DemandPlatform {
   config: Record<string, unknown> | null;
   /** 最近一次扫描成功时间戳（秒），null 表示从未扫描 */
   lastSyncAt: number | null;
-  /** 连接器状态：idle / ok / error */
+  /** 连接器状态：idle / ok / error / skipped（合规跳过） */
   status: string;
+  /** 最近一次扫描失败原因；null = 成功 / 从未扫描 / 合规跳过 */
+  lastError: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -62,8 +64,6 @@ export interface DemandLead {
   marketGapScore: number;
   /** 商业价值综合分 0-100（veryHigh ≥ 80） */
   commercialValueScore: number;
-  /** 等级：low / medium / high / very_high */
-  opportunityLevel: string;
   /** 需求类型（snake_case 标识） */
   demandType: string;
   /** 转化生成的实现工作流模板 ID（null = 未转化） */
@@ -259,4 +259,10 @@ export interface ScanPolicy {
   dedupWindowHours: number;
   /** 单次扫描保留的线索数上限（1-5000） */
   maxLeadsPerScan: number;
+  /** 是否启用 LLM 精评（规则评分入库后对候选批量重打分） */
+  llmEvalEnabled: boolean;
+  /** 单轮送入 LLM 精评的候选数上限（1-100，按规则分降序截断） */
+  llmEvalMaxLeads: number;
+  /** LLM 精评预筛阈值：规则商业价值分 ≥ 此值才送评（0-100） */
+  llmEvalMinRuleScore: number;
 }

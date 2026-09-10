@@ -230,8 +230,20 @@ impl ProviderLlmBridge {
         self.call_with_temp(system, user, 0.7, 2048).await
     }
 
+    /// 低温度、大 token 预算的结构化调用（JSON 契约场景，如需求线索批量精评）。
+    ///
+    /// 0.2 温度压随机性；4096 tokens 覆盖 20 条候选的 JSON 数组输出
+    /// （与 `call_llm_low_temp` 的 512 不同——那类场景输出是单值/短文本）。
+    pub async fn call_llm_structured(&self, system: &str, user: &str) -> Result<String, String> {
+        self.call_with_temp(system, user, 0.2, 4096).await
+    }
+
     async fn call_llm_low_temp(&self, system: &str, user: &str) -> Result<String, String> {
-        self.call_with_temp(system, user, 0.3, 64).await
+        // P0 FIX (2026-09-08): 64 → 512，与 llm_classifier_executor.rs 的修复同语义。
+        // 思考型模型（agnes-3.0-flash 等）的思维链即可耗尽 64 tokens，
+        // 导致 finish_reason=length、content 恒为空串，评分函数拿到空输入。
+        // 512 足够思维链 + 「0.85」这类单值输出。
+        self.call_with_temp(system, user, 0.3, 512).await
     }
 
     /// 统一的 LLM 调用 + fallback 编排

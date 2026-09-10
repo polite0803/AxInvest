@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { invoke } from "@/lib/invoke";
+import { invoke, listen } from "@/lib/invoke";
+import { openExternal } from "@/lib/openExternal";
 import type {
   CapabilityMatchItem,
   DeliveryInvoice,
@@ -23,13 +24,16 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
   Dropdown,
   Empty,
   Flex,
   Form,
   Input,
   InputNumber,
+  List,
   Modal,
+  Progress,
   Row,
   Segmented,
   Select,
@@ -39,28 +43,31 @@ import {
   Table,
   Tag,
   theme,
+  Timeline,
+  Tooltip,
   Typography,
 } from "antd";
 import type { MenuProps } from "antd";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ColumnsType } from "antd/es/table";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  type CapabilityEntry,
+  type CapabilityGap,
+  type CapabilityInventory,
+  type Delivery,
+  DELIVERY_STATUS_COLOR_MAP,
+} from "./opc/utils/constants";
 
 /** 连接器类型（与后端 add_platform 的 platform_type 一致） */
 const PLATFORM_TYPES = ["scanner", "api", "mock", "manual"] as const;
-
-/** 机会等级 → Tag 颜色：热度越高越暖 */
-const LEVEL_COLOR: Record<string, string> = {
-  very_high: "red",
-  high: "volcano",
-  medium: "gold",
-  low: "default",
-};
 
 /** 连接器状态 → Tag 颜色 */
 const STATUS_COLOR: Record<string, string> = {
   ok: "green",
   error: "red",
   idle: "default",
+  skipped: "orange",
 };
 
 /** 线索生命周期 → Tag 颜色 */
@@ -203,10 +210,11 @@ export function DemandDiscoveryPage() {
   const { message } = App.useApp();
 
   const [tab, setTab] = useState<
-    "leads" | "platforms" | "subscriptions" | "delivery"
+    "leads" | "platforms" | "subscriptions" | "delivery" | "capabilities" | "deliveries"
   >("leads");
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [proactiveScanning, setProactiveScanning] = useState(false);
 
   const [query, setQuery] = useState("");
   const [minScore, setMinScore] = useState<number>(0);
@@ -245,6 +253,21 @@ export function DemandDiscoveryPage() {
   const [scanPolicy, setScanPolicy] = useState<ScanPolicy | null>(null);
   const [policySaving, setPolicySaving] = useState(false);
   const [capMatching, setCapMatching] = useState(false);
+
+  // ── 能力驱动扫描（原方案 workflow 形态：能力集扫描 → Agent 检索词 → Loop 逐词扫描）──
+  const [capScanOpen, setCapScanOpen] = useState(false);
+  const [capFocus, setCapFocus] = useState("");
+  const [capMaxKeywords, setCapMaxKeywords] = useState<number>(5);
+  const [capScanning, setCapScanning] = useState(false);
+  /** 完成事件监听的反注册（页面卸载 / 重复触发时清理） */
+  const capUnlistenRef = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      capUnlistenRef.current?.();
+      capUnlistenRef.current = null;
+    },
+    [],
+  );
 
   const loadLeads = useCallback(async () => {
     setLoading(true);
@@ -394,6 +417,101 @@ export function DemandDiscoveryPage() {
       setScanning(false);
     }
   }, [loadLeads, loadPlatforms, message, query, t]);
+
+  /**
+   * 能力驱动扫描：执行 opc-demand-discovery 工作流（v5）。
+   * 引擎在 tokio::spawn 中异步执行，完成以 workflow:execution-completed 事件为准；
+   * 扫描产物（线索）落库后由 loadLeads / loadPlatforms 刷新。
+   */
+  const runCapabilityScan = useCallback(async () => {
+    if (capScanning) {
+      return;
+    }
+    // 防重复触发：先清掉上一次的监听
+    capUnlistenRef.current?.();
+    capUnlistenRef.current = null;
+    setCapScanning(true);
+    setCapScanOpen(false);
+    try {
+      const executionId = await invoke<string>("workflow_execute", {
+        workflowId: "opc-demand-discovery",
+        // Variable 字段为后端 snake_case serde（无 rename_all），与 workflowStore 先例一致
+        variables: [
+          { name: "focus", var_type: "string", value: capFocus.trim(), is_secret: false },
+          { name: "max_keywords", var_type: "number", value: capMaxKeywords, is_secret: false },
+        ],
+      });
+      const unlisten = await listen<{
+        workflow_id: string;
+        execution_id: string | null;
+        status: string;
+        total_time_ms: number;
+        error?: string;
+      }>("workflow:execution-completed", (event) => {
+        const payload = event.payload;
+        if (!payload || payload.workflow_id !== "opc-demand-discovery") {
+          return;
+        }
+        // panic 兜底路径 execution_id 为 null，此时按 workflow_id 匹配即可
+        if (payload.execution_id !== null && payload.execution_id !== executionId) {
+          return;
+        }
+        capUnlistenRef.current?.();
+        capUnlistenRef.current = null;
+        setCapScanning(false);
+        void loadLeads();
+        void loadPlatforms();
+        if (payload.status === "failed") {
+          message.error(
+            t("opc.demand.capabilityScanFailed", { error: payload.error ?? "" }),
+          );
+        } else {
+          message.success(t("opc.demand.capabilityScanComplete"));
+        }
+      });
+      capUnlistenRef.current = unlisten;
+    } catch (e) {
+      setCapScanning(false);
+      message.error(t("opc.demand.capabilityScanFailed", { error: String(e) }));
+    }
+  }, [capScanning, capFocus, capMaxKeywords, loadLeads, loadPlatforms, message, t]);
+
+  /** 主动评估：对现有线索批量重跑规则打分并落库（原 OPC 面板入口，合并至此） */
+  const runProactiveScan = useCallback(async () => {
+    setProactiveScanning(true);
+    try {
+      const result = await invoke<{
+        total_queries: number;
+        total_scanned: number;
+        total_saved: number;
+        high_value_count: number;
+      }>("opc_proactive_evaluate_and_save_leads", { min_score: 0.0 });
+      message.success(
+        t("opc.demand.proactiveScanComplete", {
+          saved: result.total_saved,
+          highValue: result.high_value_count,
+        }),
+      );
+      void loadLeads();
+    } catch (e) {
+      message.error(t("opc.demand.scanFailed", { error: String(e) }));
+    } finally {
+      setProactiveScanning(false);
+    }
+  }, [loadLeads, message, t]);
+
+  /** 执行需求交付：为线索创建交付记录并触发交付工作流（产出 Delivery，交付记录页查看） */
+  const executeDelivery = useCallback(
+    async (row: DemandLead) => {
+      try {
+        await invoke<Delivery>("opc_execute_demand_workflow", { lead_id: row.id });
+        message.success(t("opc.demand.deliveryStarted"));
+      } catch (e) {
+        message.error(String(e));
+      }
+    },
+    [message, t],
+  );
 
   const openCreate = useCallback(() => {
     setEditing(null);
@@ -721,15 +839,29 @@ export function DemandDiscoveryPage() {
         title: t("opc.demand.colTitle"),
         dataIndex: "title",
         key: "title",
-        width: 320,
+        width: "45%",
         render: (title: string, row: DemandLead) => (
-          <Flex vertical gap={2}>
-            <Typography.Text strong ellipsis={{ tooltip: title }}>
+          <Flex vertical gap={2} style={{ minWidth: 0, width: "100%" }}>
+            <Typography.Text
+              strong
+              ellipsis={{ tooltip: title }}
+              style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >
               {title}
             </Typography.Text>
             {row.description
               ? (
-                <Typography.Text type="secondary" ellipsis={{ tooltip: row.description }} style={{ fontSize: 12 }}>
+                <Typography.Text
+                  type="secondary"
+                  ellipsis={{ tooltip: row.description }}
+                  style={{
+                    fontSize: 12,
+                    display: "block",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
                   {row.description}
                 </Typography.Text>
               )
@@ -772,17 +904,6 @@ export function DemandDiscoveryPage() {
         width: 100,
         responsive: ["xl" as const],
         render: (score: number) => score.toFixed(0),
-      },
-      {
-        title: t("opc.demand.colOpportunityLevel"),
-        dataIndex: "opportunityLevel",
-        key: "opportunityLevel",
-        width: 110,
-        render: (level: string) => (
-          <Tag color={LEVEL_COLOR[level] ?? "default"}>
-            {t(`opc.demand.opportunityLevel.${level}`, { defaultValue: level })}
-          </Tag>
-        ),
       },
       {
         title: t("opc.demand.colDemandType"),
@@ -828,7 +949,16 @@ export function DemandDiscoveryPage() {
         render: (url: string | null) =>
           url
             ? (
-              <Typography.Link href={url} target="_blank" rel="noreferrer">
+              <Typography.Link
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(e) => {
+                  // Tauri WebView 会吞掉 target="_blank" 原生跳转，接管为 opener
+                  e.preventDefault();
+                  void openExternal(url);
+                }}
+              >
                 {t("opc.demand.openSource")}
               </Typography.Link>
             )
@@ -845,12 +975,16 @@ export function DemandDiscoveryPage() {
       {
         title: t("opc.demand.colActions"),
         key: "actions",
-        width: 280,
+        width: 340,
         render: (_: unknown, row: DemandLead) => (
           <Space size={4}>
             {/* 能力匹配永远可用：先看能不能接，再决定要不要转化 */}
             <Button type="link" size="small" onClick={() => void matchCapabilities(row)}>
               {t("opc.demand.capMatch")}
+            </Button>
+            {/* 交付线：创建交付记录并触发交付工作流（与转化实现线互补） */}
+            <Button type="link" size="small" onClick={() => void executeDelivery(row)}>
+              {t("opc.demand.executeDelivery")}
             </Button>
             {row.linkedWorkflowId
               ? (
@@ -877,7 +1011,7 @@ export function DemandDiscoveryPage() {
               ? (
                 <Dropdown menu={statusMenuItems(row)}>
                   <Button size="small">
-                    {t("opc.demand.status")}
+                    {t("opc.demand.changeStatus")}
                     <DownOutlined style={{ fontSize: 10 }} />
                   </Button>
                 </Dropdown>
@@ -887,7 +1021,7 @@ export function DemandDiscoveryPage() {
         ),
       },
     ],
-    [t, token, statusMenuItems, convertLead, runLeadWorkflow, matchCapabilities, createInvoice],
+    [t, token, statusMenuItems, convertLead, runLeadWorkflow, matchCapabilities, createInvoice, executeDelivery],
   );
 
   const platformColumns = useMemo(
@@ -940,11 +1074,32 @@ export function DemandDiscoveryPage() {
         title: t("opc.demand.colStatus"),
         dataIndex: "status",
         key: "status",
-        width: 100,
-        render: (status: string) => (
-          <Tag color={STATUS_COLOR[status] ?? "default"}>
-            {t(`opc.demand.platformStatus.${status}`, { defaultValue: status })}
-          </Tag>
+        width: 170,
+        render: (status: string, row: DemandPlatform) => (
+          <Flex vertical gap={2}>
+            <Tooltip
+              title={status === "error" && row.lastError
+                ? row.lastError
+                : status === "skipped"
+                ? t("opc.demand.platformSkippedHint")
+                : undefined}
+            >
+              <Tag color={STATUS_COLOR[status] ?? "default"}>
+                {t(`opc.demand.platformStatus.${status}`, { defaultValue: status })}
+              </Tag>
+            </Tooltip>
+            {status === "error" && row.lastError
+              ? (
+                <Typography.Text
+                  type="danger"
+                  style={{ fontSize: 12 }}
+                  ellipsis={{ tooltip: row.lastError }}
+                >
+                  {row.lastError}
+                </Typography.Text>
+              )
+              : null}
+          </Flex>
         ),
       },
       {
@@ -1232,12 +1387,14 @@ export function DemandDiscoveryPage() {
               { label: t("opc.demand.platforms"), value: "platforms" },
               { label: t("opc.demand.subscriptions"), value: "subscriptions" },
               { label: t("opc.demand.delivery"), value: "delivery" },
+              { label: t("opc.demand.capabilities"), value: "capabilities" },
+              { label: t("opc.demand.deliveries"), value: "deliveries" },
             ]}
           />
         </Flex>
 
         {/* 关键词扫描工具栏只服务于「线索 / 平台」两页；订阅/交付页有自己的内容区 */}
-        {tab === "subscriptions" || tab === "delivery"
+        {tab === "subscriptions" || tab === "delivery" || tab === "capabilities" || tab === "deliveries"
           ? null
           : (
             <Card size="small">
@@ -1284,11 +1441,17 @@ export function DemandDiscoveryPage() {
                   {t("opc.demand.btnRefresh")}
                 </Button>
                 <Button onClick={openCreateLead}>{t("opc.demand.manualEntry")}</Button>
+                <Button loading={capScanning} onClick={() => setCapScanOpen(true)}>
+                  {t("opc.demand.capabilityScan")}
+                </Button>
+                <Button loading={proactiveScanning} onClick={() => void runProactiveScan()}>
+                  {t("opc.demand.btnProactiveScan")}
+                </Button>
               </Flex>
             </Card>
           )}
 
-        {summary && tab !== "subscriptions" && tab !== "delivery"
+        {summary && tab !== "subscriptions" && tab !== "delivery" && tab !== "capabilities" && tab !== "deliveries"
           ? (
             <Card size="small">
               <Row gutter={16}>
@@ -1394,7 +1557,7 @@ export function DemandDiscoveryPage() {
                   loading={loading}
                   columns={subscriptionColumns}
                   dataSource={subscriptions}
-                  scroll={{ x: 1120 }}
+                  tableLayout="fixed"
                   locale={{
                     emptyText: <Empty description={t("opc.demand.noSubscriptions")} />,
                   }}
@@ -1465,7 +1628,7 @@ export function DemandDiscoveryPage() {
                   loading={loading}
                   columns={invoiceColumns}
                   dataSource={invoices}
-                  scroll={{ x: 1240 }}
+                  tableLayout="fixed"
                   locale={{
                     emptyText: <Empty description={t("opc.demand.delivNoInvoices")} />,
                   }}
@@ -1474,6 +1637,10 @@ export function DemandDiscoveryPage() {
               </Flex>
             </Card>
           )
+          : tab === "capabilities"
+          ? <CapabilitiesPanel />
+          : tab === "deliveries"
+          ? <DeliveriesPanel />
           : (
             <Card size="small">
               {tab === "leads"
@@ -1484,7 +1651,7 @@ export function DemandDiscoveryPage() {
                     loading={loading}
                     columns={leadColumns}
                     dataSource={leads}
-                    scroll={{ x: 1580 }}
+                    tableLayout="fixed"
                     locale={{ emptyText: <Empty description={t("opc.demand.noLeadsFound")} /> }}
                     pagination={{ pageSize: 20, showSizeChanger: true }}
                   />
@@ -1502,7 +1669,7 @@ export function DemandDiscoveryPage() {
                       loading={loading}
                       columns={platformColumns}
                       dataSource={platforms}
-                      scroll={{ x: 1040 }}
+                      tableLayout="fixed"
                       pagination={false}
                     />
                     {scanPolicy && (
@@ -1571,6 +1738,30 @@ export function DemandDiscoveryPage() {
                             min={1}
                             max={5000}
                             onChange={(v) => setScanPolicy({ ...scanPolicy, maxLeadsPerScan: v ?? 200 })}
+                          />
+                          <Flex vertical gap={4}>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {t("opc.demand.configDescriptions.scanLlmEvalEnabled")}
+                            </Typography.Text>
+                            <Switch
+                              size="small"
+                              checked={scanPolicy.llmEvalEnabled}
+                              onChange={(v) => setScanPolicy({ ...scanPolicy, llmEvalEnabled: v })}
+                            />
+                          </Flex>
+                          <PolicyField
+                            label={t("opc.demand.configDescriptions.scanLlmEvalMaxLeads")}
+                            value={scanPolicy.llmEvalMaxLeads}
+                            min={1}
+                            max={100}
+                            onChange={(v) => setScanPolicy({ ...scanPolicy, llmEvalMaxLeads: v ?? 20 })}
+                          />
+                          <PolicyField
+                            label={t("opc.demand.configDescriptions.scanLlmEvalMinRuleScore")}
+                            value={scanPolicy.llmEvalMinRuleScore}
+                            min={0}
+                            max={100}
+                            onChange={(v) => setScanPolicy({ ...scanPolicy, llmEvalMinRuleScore: v ?? 30 })}
                           />
                         </Flex>
                       </Card>
@@ -1837,6 +2028,538 @@ export function DemandDiscoveryPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 能力驱动扫描配置（原方案 workflow 形态入口） */}
+      <Modal
+        open={capScanOpen}
+        title={t("opc.demand.capabilityScan")}
+        okText={t("opc.demand.capabilityScanStart")}
+        cancelText={t("common.cancel")}
+        confirmLoading={capScanning}
+        onOk={() => void runCapabilityScan()}
+        onCancel={() => setCapScanOpen(false)}
+        destroyOnHidden
+      >
+        <Flex vertical gap={12}>
+          <Typography.Text type="secondary">
+            {t("opc.demand.capabilityScanDesc")}
+          </Typography.Text>
+          <Flex vertical gap={4}>
+            <Typography.Text type="secondary">
+              {t("opc.demand.capabilityFocus")}
+            </Typography.Text>
+            <Input
+              allowClear
+              value={capFocus}
+              placeholder={t("opc.demand.capabilityFocusPlaceholder")}
+              onChange={(e) => setCapFocus(e.target.value)}
+              onPressEnter={() => void runCapabilityScan()}
+            />
+          </Flex>
+          <Flex vertical gap={4}>
+            <Typography.Text type="secondary">
+              {t("opc.demand.capabilityMaxKeywords")}
+            </Typography.Text>
+            <InputNumber
+              min={1}
+              max={10}
+              step={1}
+              style={{ width: 120 }}
+              value={capMaxKeywords}
+              onChange={(value) => setCapMaxKeywords(value ?? 5)}
+            />
+          </Flex>
+        </Flex>
+      </Modal>
     </div>
+  );
+}
+
+// ── 能力与缺口面板（自 OPC 面板 DemandDiscoveryTab 合并，能力库 + 缺口一页两区） ──
+
+function CapabilitiesPanel() {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [inventory, setInventory] = useState<CapabilityInventory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [gaps, setGaps] = useState<CapabilityGap[]>([]);
+  const [gapsLoading, setGapsLoading] = useState(false);
+  const [analyzingGaps, setAnalyzingGaps] = useState(false);
+
+  const loadInventory = useCallback(async () => {
+    setLoading(true);
+    try {
+      setInventory(await invoke<CapabilityInventory>("opc_scan_capabilities"));
+    } catch (e) {
+      message.error(t("opc.common.loadFailed", { error: String(e) }));
+      setInventory(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  const loadGaps = useCallback(async () => {
+    setGapsLoading(true);
+    try {
+      setGaps(await invoke<CapabilityGap[]>("opc_list_capability_gaps", {}));
+    } catch (e) {
+      message.error(t("opc.common.loadFailed", { error: String(e) }));
+      setGaps([]);
+    } finally {
+      setGapsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void loadInventory();
+    void loadGaps();
+  }, [loadInventory, loadGaps]);
+
+  const analyzeGaps = useCallback(async () => {
+    setAnalyzingGaps(true);
+    try {
+      const result = await invoke<{
+        auto_created_gaps: string[];
+        missing_keywords_count: number;
+      }>("opc_analyze_capability_gaps", {});
+      if (result.auto_created_gaps.length > 0) {
+        message.success(
+          t("opc.demand.gapsAnalyzedCreated", { count: result.auto_created_gaps.length }),
+        );
+      } else {
+        message.info(t("opc.demand.gapsAnalyzedNoNew"));
+      }
+      void loadGaps();
+    } catch (e) {
+      message.error(String(e));
+    } finally {
+      setAnalyzingGaps(false);
+    }
+  }, [loadGaps, message, t]);
+
+  const closeGap = useCallback(
+    async (id: string) => {
+      try {
+        await invoke("opc_close_capability_gap", { id });
+        message.success(t("opc.demand.gapClosed"));
+        void loadGaps();
+      } catch (e) {
+        message.error(String(e));
+      }
+    },
+    [loadGaps, message, t],
+  );
+
+  const renderTable = (title: string, data: CapabilityEntry[]) => {
+    const cols: ColumnsType<CapabilityEntry> = [
+      { title: t("opc.demand.colName"), dataIndex: "name", key: "name", width: 150 },
+      { title: t("opc.demand.colDescription"), dataIndex: "description", key: "description", ellipsis: true },
+      {
+        title: t("opc.demand.colSource"),
+        dataIndex: "source",
+        key: "source",
+        width: 100,
+        render: (v: string) => <Tag>{v}</Tag>,
+      },
+      { title: t("opc.demand.colType"), dataIndex: "capability_type", key: "type", width: 100 },
+    ];
+    return (
+      <Card title={`${title} (${data.length})`} size="small" style={{ marginBottom: 16 }}>
+        <Table
+          rowKey="id"
+          size="small"
+          dataSource={data}
+          columns={cols}
+          pagination={{ pageSize: 5 }}
+          tableLayout="fixed"
+        />
+      </Card>
+    );
+  };
+
+  const gapColumns: ColumnsType<CapabilityGap> = [
+    { title: t("opc.demand.colTitle"), dataIndex: "title", key: "title", width: 200, ellipsis: true },
+    { title: t("opc.demand.colDescription"), dataIndex: "description", key: "description", ellipsis: true },
+    {
+      title: t("opc.demand.colGapType"),
+      dataIndex: "gap_type",
+      key: "gap_type",
+      width: 110,
+      render: (v: string) => <Tag color="orange">{v}</Tag>,
+    },
+    {
+      title: t("opc.demand.colSuggestedAction"),
+      dataIndex: "suggested_action",
+      key: "suggested_action",
+      ellipsis: true,
+    },
+    {
+      title: t("opc.demand.colPriority"),
+      dataIndex: "priority",
+      key: "priority",
+      width: 90,
+      render: (v: number) => <Tag color={v <= 2 ? "red" : v === 3 ? "orange" : "default"}>{v}</Tag>,
+    },
+    {
+      title: t("opc.demand.colStatus"),
+      dataIndex: "status",
+      key: "status",
+      width: 100,
+      render: (v: string) => <Tag color={v === "open" ? "orange" : "green"}>{t(`opc.demand.gapStatus.${v}`)}</Tag>,
+    },
+    {
+      title: t("opc.demand.colActions"),
+      key: "actions",
+      width: 120,
+      render: (_: unknown, r: CapabilityGap) =>
+        r.status === "open"
+          ? (
+            <Button size="small" onClick={() => void closeGap(r.id)}>
+              {t("opc.demand.actionCloseGap")}
+            </Button>
+          )
+          : null,
+    },
+  ];
+
+  return (
+    <Flex vertical gap={12}>
+      <Card size="small">
+        <Space wrap>
+          <Button loading={loading} onClick={() => void loadInventory()}>
+            {t("opc.demand.btnScanCapabilities")}
+          </Button>
+          <Button danger loading={analyzingGaps} onClick={() => void analyzeGaps()}>
+            {t("opc.demand.btnAnalyzeGaps")}
+          </Button>
+          <Button onClick={() => void loadGaps()}>{t("opc.demand.btnRefresh")}</Button>
+          {inventory && (
+            <Tag color="blue">
+              {t("opc.demand.totalCapabilities", { count: inventory.total_count })}
+            </Tag>
+          )}
+        </Space>
+      </Card>
+
+      {inventory
+        ? (
+          <>
+            {renderTable(t("opc.demand.categoryTools"), inventory.tools)}
+            {renderTable(t("opc.demand.categorySkills"), inventory.skills)}
+            {renderTable(t("opc.demand.categoryMcpTools"), inventory.mcp_tools)}
+            {renderTable(t("opc.demand.categoryWorkflows"), inventory.workflows)}
+            {renderTable(t("opc.demand.categoryAgents"), inventory.agents)}
+          </>
+        )
+        : <Empty description={t("opc.demand.capNoResult")} />}
+
+      <Card title={t("opc.demand.gaps")} size="small">
+        <Table<CapabilityGap>
+          rowKey="id"
+          size="small"
+          loading={gapsLoading}
+          dataSource={gaps}
+          columns={gapColumns}
+          pagination={{ pageSize: 10 }}
+          tableLayout="fixed"
+          locale={{ emptyText: <Empty description={t("opc.demand.gapsEmpty")} /> }}
+        />
+      </Card>
+    </Flex>
+  );
+}
+
+// ── 交付记录面板（自 OPC 面板 DemandDiscoveryTab 合并；记录由线索「执行交付」产生） ──
+
+function DeliveriesPanel() {
+  const { t } = useTranslation();
+  const { message } = App.useApp();
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [currentDelivery, setCurrentDelivery] = useState<Delivery | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setDeliveries(await invoke<Delivery[]>("opc_list_deliveries", {}));
+    } catch (e) {
+      message.error(t("opc.common.loadFailed", { error: String(e) }));
+      setDeliveries([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleRetry = useCallback(
+    async (id: string) => {
+      try {
+        await invoke("opc_retry_delivery", { id });
+        message.success(t("opc.demand.deliveryRetried"));
+        void load();
+      } catch (e) {
+        message.error(String(e));
+      }
+    },
+    [load, message, t],
+  );
+
+  const handleCancel = useCallback(
+    async (id: string) => {
+      try {
+        await invoke("opc_cancel_delivery", { id });
+        message.success(t("opc.demand.deliveryCancelled"));
+        void load();
+      } catch (e) {
+        message.error(String(e));
+      }
+    },
+    [load, message, t],
+  );
+
+  const columns: ColumnsType<Delivery> = [
+    { title: t("opc.demand.colTitle"), dataIndex: "title", key: "title", width: 200, ellipsis: true },
+    {
+      title: t("opc.demand.colStatus"),
+      dataIndex: "status",
+      key: "status",
+      width: 120,
+      render: (v: string) => (
+        <Tag color={DELIVERY_STATUS_COLOR_MAP[v] || "default"}>
+          {t(`opc.delivery.status.${v}`)}
+        </Tag>
+      ),
+    },
+    {
+      title: t("opc.demand.colProgress"),
+      dataIndex: "progress",
+      key: "progress",
+      width: 150,
+      render: (v: number) => <Progress percent={Math.round(v * 100)} size="small" />,
+    },
+    {
+      title: t("opc.demand.colTemplate"),
+      dataIndex: "workflow_template_id",
+      key: "template",
+      width: 180,
+      ellipsis: true,
+    },
+    {
+      title: t("opc.demand.colStartedAt"),
+      dataIndex: "started_at",
+      key: "started_at",
+      width: 160,
+      render: (v: number | null) => (v ? new Date(v * 1000).toLocaleString() : "-"),
+    },
+    {
+      title: t("opc.demand.colResult"),
+      dataIndex: "result_summary",
+      key: "result",
+      ellipsis: true,
+    },
+    {
+      title: t("opc.demand.colActions"),
+      key: "actions",
+      width: 200,
+      render: (_: unknown, r: Delivery) => (
+        <Space size="small">
+          <Button
+            size="small"
+            onClick={() => {
+              setCurrentDelivery(r);
+              setDetailOpen(true);
+            }}
+          >
+            {t("opc.demand.actionViewDetail")}
+          </Button>
+          {r.status === "failed" && (
+            <Button size="small" type="primary" onClick={() => void handleRetry(r.id)}>
+              {t("opc.demand.actionRetry")}
+            </Button>
+          )}
+          {["pending", "running"].includes(r.status) && (
+            <Button
+              size="small"
+              danger
+              onClick={() => void handleCancel(r.id)}
+            >
+              {t("opc.demand.actionCancel")}
+            </Button>
+          )}
+        </Space>
+      ),
+    },
+  ];
+
+  const delivery = currentDelivery;
+  const timelineSteps = delivery
+    ? [
+      {
+        title: t("opc.demand.deliverySteps.initiated"),
+        time: delivery.started_at ? new Date(delivery.started_at * 1000).toLocaleString() : "-",
+        color: "green",
+      },
+      {
+        title: t("opc.demand.deliverySteps.processing"),
+        time: delivery.progress > 0 ? t("opc.demand.deliverySteps.inProgress") : "-",
+        color: delivery.progress > 0 ? "blue" : "gray",
+      },
+      {
+        title: t("opc.demand.deliverySteps.completed"),
+        time: delivery.completed_at
+          ? new Date(delivery.completed_at * 1000).toLocaleString()
+          : "-",
+        color: delivery.status === "completed" || delivery.status === "delivered"
+          ? "green"
+          : delivery.status === "failed"
+          ? "red"
+          : "gray",
+      },
+    ]
+    : [];
+
+  return (
+    <Flex vertical gap={12}>
+      <Card size="small">
+        <Button onClick={() => void load()} loading={loading}>
+          {t("opc.demand.btnRefresh")}
+        </Button>
+      </Card>
+
+      <Card size="small">
+        <Table<Delivery>
+          rowKey="id"
+          loading={loading}
+          dataSource={deliveries}
+          columns={columns}
+          pagination={{ pageSize: 10 }}
+          tableLayout="fixed"
+          locale={{ emptyText: <Empty description={t("opc.demand.deliveriesEmpty")} /> }}
+        />
+      </Card>
+
+      <Modal
+        title={delivery ? `${t("opc.demand.deliveryDetail")}: ${delivery.title}` : null}
+        open={detailOpen}
+        onCancel={() => setDetailOpen(false)}
+        footer={delivery && (
+          <Space>
+            {(delivery.status === "failed" || delivery.status === "cancelled") && (
+              <Button
+                type="primary"
+                onClick={() => void handleRetry(delivery.id)}
+              >
+                {t("opc.demand.actionRetry")}
+              </Button>
+            )}
+            {["pending", "running"].includes(delivery.status) && (
+              <Button
+                danger
+                onClick={() => void handleCancel(delivery.id)}
+              >
+                {t("opc.demand.actionCancel")}
+              </Button>
+            )}
+            <Button onClick={() => setDetailOpen(false)}>{t("opc.demand.actionClose")}</Button>
+          </Space>
+        )}
+        width={720}
+      >
+        {delivery && (
+          <Flex vertical gap={12}>
+            <Card size="small" title={t("opc.demand.deliveryInfo")}>
+              <Descriptions column={2} size="small">
+                <Descriptions.Item label={t("opc.demand.colStatus")}>
+                  <Tag color={DELIVERY_STATUS_COLOR_MAP[delivery.status] || "default"}>
+                    {t(`opc.delivery.status.${delivery.status}`)}
+                  </Tag>
+                </Descriptions.Item>
+                <Descriptions.Item label={t("opc.demand.colProgress")}>
+                  <Progress percent={Math.round(delivery.progress * 100)} />
+                </Descriptions.Item>
+                <Descriptions.Item label={t("opc.demand.colTemplate")}>
+                  {delivery.workflow_template_id || "-"}
+                </Descriptions.Item>
+                <Descriptions.Item label={t("opc.demand.leadId")}>
+                  {delivery.lead_id}
+                </Descriptions.Item>
+                <Descriptions.Item label={t("opc.demand.colStartedAt")}>
+                  {delivery.started_at
+                    ? new Date(delivery.started_at * 1000).toLocaleString()
+                    : "-"}
+                </Descriptions.Item>
+                <Descriptions.Item label={t("opc.demand.colCompletedAt")}>
+                  {delivery.completed_at
+                    ? new Date(delivery.completed_at * 1000).toLocaleString()
+                    : "-"}
+                </Descriptions.Item>
+              </Descriptions>
+            </Card>
+
+            <Card size="small" title={t("opc.demand.deliveryTimeline")}>
+              <Timeline
+                items={timelineSteps.map((s) => ({
+                  color: s.color,
+                  children: (
+                    <div>
+                      <div className="font-medium">{s.title}</div>
+                      <div className="text-xs text-gray-500">{s.time}</div>
+                    </div>
+                  ),
+                }))}
+              />
+            </Card>
+
+            {delivery.result_summary && (
+              <Card size="small" title={t("opc.demand.deliveryResult")}>
+                <Typography.Paragraph
+                  ellipsis={{ rows: 3, expandable: true, symbol: t("opc.demand.expand") }}
+                >
+                  {delivery.result_summary}
+                </Typography.Paragraph>
+              </Card>
+            )}
+
+            {delivery.deliverables && delivery.deliverables.length > 0 && (
+              <Card size="small" title={t("opc.demand.deliverables")}>
+                <List
+                  size="small"
+                  dataSource={delivery.deliverables}
+                  renderItem={(d, idx) => (
+                    <List.Item key={idx}>
+                      <Space>
+                        <Tag color="blue">
+                          {(d.name as string) || t("opc.demand.deliverable")}
+                        </Tag>
+                        <span>{(d.type as string) || ""}</span>
+                      </Space>
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            )}
+
+            {delivery.errors && delivery.errors.length > 0 && (
+              <Card size="small" title={t("opc.demand.errors")}>
+                <Alert
+                  type="error"
+                  showIcon
+                  message={t("opc.demand.deliveryError")}
+                  description={
+                    <ul>
+                      {delivery.errors.map((e, idx) => <li key={idx}>{(e.message as string) || JSON.stringify(e)}</li>)}
+                    </ul>
+                  }
+                />
+              </Card>
+            )}
+          </Flex>
+        )}
+      </Modal>
+    </Flex>
   );
 }

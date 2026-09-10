@@ -76,24 +76,37 @@ interface RecoDetailItem {
 /// 失败时用基础列构造兜底候选（智能荐股 bottleneck 行的 seed_pool_json 是
 /// 推荐池 [[code,name]] 数组，无法解析为单个候选，必须走 fallback）。
 function restoreCandidate(item: RecoDetailItem): SerenityCandidate | null {
+  // 时间基线回填：行级 generated_at + pick_data.holdingDays（否则卡片
+  // 时间基线兜底为渲染当日，历史记录显示的推荐日失真）
+  const withBaseline = (c: SerenityCandidate): SerenityCandidate => {
+    let holdingDays: number | undefined;
+    if (item.pickData) {
+      try {
+        holdingDays = (JSON.parse(item.pickData) as { holdingDays?: number })?.holdingDays;
+      } catch {
+        // pick_data 损坏时缺省，卡片自行兜底 20 天
+      }
+    }
+    return { ...c, generated_at: item.generatedAt, holding_days: holdingDays };
+  };
   if (item.seedPoolJson) {
     try {
       const parsed = JSON.parse(item.seedPoolJson) as unknown;
       // 只接受单个对象（serenity workflow 写的 candidate）—— 数组（推荐池快照）
       // 和其它 shape 一律走 fallback，否则 SerenityCandidate 字段全是 undefined
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as SerenityCandidate;
+        return withBaseline(parsed as SerenityCandidate);
       }
     } catch {
       // seed_pool_json 损坏时降级到基础字段
     }
   }
   if (!item.stockCode) { return null; }
-  return {
+  return withBaseline({
     stockCode: item.stockCode,
     stockName: item.stockName,
     confidence: item.confidence,
-  };
+  });
 }
 
 /// 从多种可能的 candidates 结构中提取候选数组。

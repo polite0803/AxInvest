@@ -1200,7 +1200,10 @@ impl WikiCompiler {
             ],
             stream: false,
             temperature: Some(0.1),
-            max_tokens: Some(16),
+            // P0 FIX (2026-09-08): 16 → 512。思考型模型思维链即可耗尽 16 tokens，
+            // finish_reason=length、content 恒为空，评分恒失败。
+            // 与 llm_classifier_executor.rs 同语义修复。
+            max_tokens: Some(512),
             top_p: None,
             tools: None,
             thinking_budget: None,

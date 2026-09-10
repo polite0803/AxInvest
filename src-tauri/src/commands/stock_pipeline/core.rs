@@ -177,8 +177,11 @@ pub async fn run_stock_pipeline_inner(
 
     // 创建工作流
     let wf_name = format!("stock-pipeline-{run_id}");
-    let workflow =
-        engine.create_workflow(&wf_name, loaded.nodes, loaded.edges).await.map_err(|e| {
+    // 统一 with_hooks 模式：模板未来声明钩子时不会静默丢失
+    let workflow = engine
+        .create_workflow_with_hooks(&wf_name, loaded.nodes, loaded.edges, loaded.hooks_config)
+        .await
+        .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("创建工作流失败: {e}"))
         })?;
     let wf_id = workflow.id.clone();
@@ -270,6 +273,9 @@ async fn load_pipeline_template(
     let input_schema = template.input_schema.as_ref().and_then(|s| serde_json::from_str(s).ok());
     let output_schema = template.output_schema.as_ref().and_then(|s| serde_json::from_str(s).ok());
     let variables = template.variables.as_ref().and_then(|v| serde_json::from_str(v).ok());
+    // NULL → None；解析失败降级 None（与 rt-workflow parse_hooks_config 同语义）
+    let hooks_config: Option<axagent_harness::WorkflowHooksConfig> =
+        template.hooks_config.as_ref().and_then(|s| serde_json::from_str(s).ok());
 
     Ok(crate::commands::stock_workflow::decision::LoadedTemplate {
         nodes,
@@ -277,6 +283,7 @@ async fn load_pipeline_template(
         input_schema,
         output_schema,
         variables,
+        hooks_config,
     })
 }
 

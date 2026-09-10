@@ -56,6 +56,12 @@ export interface SerenityCandidate {
   exitSignals?: ExitSignals;
   attention_metrics?: AttentionMetrics;
   attentionMetrics?: AttentionMetrics;
+  /** 推荐生成时间（历史记录回填时携带；实时候选缺省，前端按当前时间兜底） */
+  generated_at?: string;
+  generatedAt?: string;
+  /** 建议持有天数（缺省 20，serenity 固定 mid 周期） */
+  holding_days?: number;
+  holdingDays?: number;
 }
 
 export interface TrendInfo {

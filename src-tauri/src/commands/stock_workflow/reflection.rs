@@ -128,8 +128,11 @@ pub async fn run_reflection_workflow(
 
     // 3. 创建嵌套工作流
     let wf_name = format!("stock-reflection-{stock_code}");
-    let workflow =
-        engine.create_workflow(&wf_name, loaded.nodes, loaded.edges).await.map_err(|e| {
+    // 统一 with_hooks 模式：模板未来声明钩子时不会静默丢失
+    let workflow = engine
+        .create_workflow_with_hooks(&wf_name, loaded.nodes, loaded.edges, loaded.hooks_config)
+        .await
+        .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("创建反思工作流失败: {e}"))
         })?;
     let wf_id = workflow.id.clone();
@@ -328,6 +331,8 @@ pub async fn run_reflection_workflow(
         output_schema: loaded.output_schema,
         dry_run: false,
         variables: Some(variables),
+        // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
+        tool_permissions: Some(super::strict_tool_permissions()),
         ..Default::default()
     };
 

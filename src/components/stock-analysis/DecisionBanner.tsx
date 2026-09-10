@@ -1668,6 +1668,76 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   )}
                 </div>
               )}
+              {/* 跨系统互证：趋势智选推荐 vs 工作流决策 分歧报告 */}
+              {decision?.crossCheck && decision.crossCheck.divergent && (
+                <div
+                  className="pt-0.5 space-y-1"
+                  style={{ borderTop: "1px solid var(--border)" }}
+                >
+                  <div className="text-[11px]" style={{ color: "#f59e0b" }}>
+                    🔀 {t("stockAnalysis.crossCheck.title")}
+                  </div>
+                  {decision.crossCheck.recoGeneratedAt && decision.crossCheck.decisionGeneratedAt && (
+                    <div className="text-[11px]" style={{ color: "var(--muted)" }}>
+                      {(() => {
+                        const recoMs = new Date(decision.crossCheck.recoGeneratedAt).getTime();
+                        const decMs = new Date(decision.crossCheck.decisionGeneratedAt).getTime();
+                        const gapDays = Number.isFinite(recoMs) && Number.isFinite(decMs)
+                          ? Math.abs(Math.round((decMs - recoMs) / 86400000))
+                          : null;
+                        return t("stockAnalysis.crossCheck.timeBasis", {
+                          recoDate: decision.crossCheck.recoGeneratedAt.slice(0, 10),
+                          decisionDate: decision.crossCheck.decisionGeneratedAt.slice(0, 10),
+                          gapDays: gapDays ?? "?",
+                        });
+                      })()}
+                    </div>
+                  )}
+                  <div className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+                    {t("stockAnalysis.crossCheck.recoSays", {
+                      score: Math.round(decision.crossCheck.recoConfidence),
+                      position: decision.crossCheck.recoPositionPct,
+                      strategy: decision.crossCheck.recoStrategyType,
+                    })}
+                    {decision.crossCheck.attentionHeat
+                      && ` · ${
+                        t("stockAnalysis.crossCheck.attentionHeat", {
+                          heat: decision.crossCheck.attentionHeat,
+                        })
+                      }`}
+                  </div>
+                  <div className="text-[11px]" style={{ color: "var(--color-text-secondary)" }}>
+                    {t("stockAnalysis.crossCheck.workflowSays", {
+                      action: decision.crossCheck.decisionAction,
+                      position: decision.crossCheck.decisionPositionPct,
+                    })}
+                  </div>
+                  <div className="text-[11px]" style={{ color: "var(--muted)" }}>
+                    {t("stockAnalysis.crossCheck.divergenceNote", {
+                      recoDays: decision.crossCheck.recoHoldingDays,
+                      decisionDays: decision.expectedHoldingDays ?? 7,
+                    })}
+                  </div>
+                  {decision.crossCheck.catalysts.length > 0 && (
+                    <div className="space-y-0.5">
+                      {decision.crossCheck.catalysts.slice(0, 2).map((cat, i) => (
+                        <div
+                          key={i}
+                          className="line-clamp-1 text-[11px]"
+                          style={{ color: "var(--muted)" }}
+                        >
+                          <span style={{ color: "#10b981" }}>
+                            {t("stockAnalysis.crossCheck.catalystLabel", {
+                              confidence: Math.round(cat.confidence),
+                            })}
+                          </span>{" "}
+                          {cat.description}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>

@@ -60,3 +60,19 @@ pub fn set_astock_client(client: Arc<axagent_astock_data::AStockClient>) {
 pub fn get_astock_client() -> Option<Arc<axagent_astock_data::AStockClient>> {
     GLOBAL_ASTOCK_CLIENT.read().clone()
 }
+
+// ── 需求精评 LLM 桥 ──────────────────────────────────────────────────────
+
+static GLOBAL_DEMAND_LLM: LazyLock<
+    RwLock<Option<Arc<dyn crate::tools::demand_llm::DemandLlmBridge>>>,
+> = LazyLock::new(|| RwLock::new(None));
+
+/// 注册需求精评 LLM 桥（由 init 层在 provider 配置就绪后注入；未注册 = 精评跳过）
+pub fn set_demand_llm(bridge: Arc<dyn crate::tools::demand_llm::DemandLlmBridge>) {
+    let mut guard = GLOBAL_DEMAND_LLM.write();
+    *guard = Some(bridge);
+}
+
+pub fn get_demand_llm() -> Option<Arc<dyn crate::tools::demand_llm::DemandLlmBridge>> {
+    GLOBAL_DEMAND_LLM.read().clone()
+}

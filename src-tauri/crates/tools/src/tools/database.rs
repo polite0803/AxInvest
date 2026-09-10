@@ -85,7 +85,7 @@ impl Tool for DatabaseQueryTool {
         }
         let db = get_db()?;
 
-        let stmt = Statement::from_string(DatabaseBackend::Sqlite, sql);
+        let stmt = Statement::from_string(db.get_database_backend(), sql);
         match db.query_one_raw(stmt).await {
             Ok(Some(row)) => Ok(ToolResult::success(format!("## 查询结果\n\n```\n{:?}\n```", row))),
             Ok(None) => Ok(ToolResult::success("查询返回空结果集")),
@@ -127,10 +127,15 @@ impl Tool for DatabaseListTablesTool {
     async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         let db = get_db()?;
 
-        let stmt = Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
-        );
+        // 表清单探查按后端分支：sqlite_master 是 SQLite 专有，PG 用 information_schema
+        let backend = db.get_database_backend();
+        let sql = match backend {
+            DatabaseBackend::Postgres => {
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"
+            },
+            _ => "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name",
+        };
+        let stmt = Statement::from_string(backend, sql);
         let row = db
             .query_one_raw(stmt)
             .await
@@ -177,7 +182,7 @@ impl Tool for DatabaseMigrationStatusTool {
         let db = get_db()?;
 
         let stmt = Statement::from_string(
-            DatabaseBackend::Sqlite,
+            db.get_database_backend(),
             "SELECT version, name FROM seaql_migrations ORDER BY version DESC LIMIT 10",
         );
         match db.query_one_raw(stmt).await {

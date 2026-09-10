@@ -22,15 +22,13 @@ use axagent_harness::types::{
     SaveDemandPlatformInput,
 };
 use axagent_tools::tools::marketplace_scanner::{
-    AggregateMarketplaceScanner, DemandLead, EvaluatedDemandLead, RawLead, evaluate_lead,
+    DemandLead, EvaluatedDemandLead, RawLead, evaluate_lead,
 };
 use axagent_tools::tools::scan_policy::{SCAN_POLICY_SETTING_KEY, ScanPolicy};
 use tauri::State;
 
-/// 高价值门槛（与 opportunity_level 的 "high" 档对齐）
-const HIGH_VALUE_THRESHOLD: f64 = 60.0;
-/// 摘要中返回的高价值线索明细上限
-const SUMMARY_LEADS_LIMIT: usize = 20;
+// 高价值门槛 / 摘要明细上限 / 扫描核心逻辑均已下沉到
+// `axagent_tools::tools::opc_demand_scan`（单一权威来源，工作流工具节点共用）。
 
 /// 列出需求平台配置（表空时自动填充内置默认平台）
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "列出市场平台配置")]
@@ -104,14 +102,11 @@ pub async fn opc_save_scan_policy(
     Ok(normalized)
 }
 
-/// 按关键词扫描全部启用平台并评估入库
+/// 扫描核心的 Tauri 薄壳 —— 逻辑在 [`axagent_tools::tools::opc_demand_scan::
+/// run_discovery_scan`]（装配扫描器 → 并发扫描 → 评估 → 入库 → 回写平台状态）。
 ///
-/// 流程：读取 DB 平台配置 + 扫描策略 → 装配聚合扫描器 → 并发扫描（受并发/限流/
-/// 重试/超时约束）→ 逐条评估 → 按去重窗口入库 → 回写平台同步状态 → 返回摘要。
-///
-/// 核心逻辑在 [`run_discovery_for_query`]，本命令只是 Tauri 薄壳 —— 订阅定时
-/// 扫描（`commands::opc_demand_subscription`）复用同一份逻辑，避免扫描器装配
-/// 与去重入库规则在两处漂移。
+/// 订阅定时扫描（`commands::opc_demand_subscription`）复用同一入口，
+/// 避免扫描器装配与去重入库规则在两处漂移。
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "扫描并评估需求线索")]
 #[tauri::command]
 pub async fn opc_discover_and_evaluate_leads(
@@ -128,192 +123,20 @@ pub async fn opc_discover_and_evaluate_leads(
     run_discovery_for_query(state.harness.db(), &query, &[]).await
 }
 
-/// 扫描核心：装配扫描器 → 并发扫描 → 评估 → 入库 → 回写平台状态
-///
-/// 供手动扫描命令与订阅定时扫描共用。`platform_filter` 非空时只装配这些平台
-/// （订阅可限定平台），为空则装配全部启用平台。
+/// 扫描核心委托（供本命令与订阅定时扫描共用）
 pub(crate) async fn run_discovery_for_query(
     db: &sea_orm::DatabaseConnection,
     query: &str,
     platform_filter: &[String],
 ) -> Result<DiscoverLeadsSummary, String> {
-    let policy = load_scan_policy(db).await?;
-    let dedup_window_secs = policy.dedup_window_secs();
-    let max_leads = policy.max_leads_per_scan;
-
-    axagent_dao::repo::opc_demand::seed_default_platforms_if_empty(db).await.map_err(err)?;
-    let all_platforms =
-        axagent_dao::repo::opc_demand::list_enabled_platforms(db).await.map_err(err)?;
-    // 订阅限定了平台时只装配这些平台（过滤掉未启用的，避免绕过全局开关）
-    let platforms: Vec<DemandPlatform> = if platform_filter.is_empty() {
-        all_platforms
-    } else {
-        all_platforms.into_iter().filter(|p| platform_filter.contains(&p.id)).collect()
-    };
-
-    // 装配扫描器：无配置行时回退默认（全部内置扫描器）
-    let mut scanner = AggregateMarketplaceScanner::with_policy(policy.clone());
-    if platforms.is_empty() {
-        let mut default_scanner = AggregateMarketplaceScanner::default();
-        default_scanner.set_policy(policy);
-        scanner = default_scanner;
-    } else {
-        for p in &platforms {
-            let base_url = p.base_url.as_deref();
-            let config = &p.config;
-            // DemandPlatform.config 是 Value；add_platform 接受引用。
-            // 空配置需绑定到具名变量 —— 直接内联 &Value::Object(..) 是临时值，语句结束即 drop（E0716）。
-            let empty_config = serde_json::Value::Object(Default::default());
-            let cfg = if config.is_null() {
-                &empty_config
-            } else {
-                config
-            };
-            scanner.add_platform(&p.id, &p.platform_type, base_url, cfg);
-        }
-    }
-
-    let results = scanner.scan_and_evaluate_platforms(query).await;
-    let mut summary = DiscoverLeadsSummary::default();
-    // 逐平台的同步状态：platform → 是否成功
-    let mut platform_status: Vec<(String, bool, bool)> = Vec::new(); // (platform, ok, compliance_skipped)
-    // 本轮实际评估到的线索 ID（用于回填 round_leads，供订阅按 min_score 推送）
-    let mut round_ids: Vec<String> = Vec::new();
-
-    'outer: for result in results {
-        platform_status.push((
-            result.platform.clone(),
-            result.error.is_none(),
-            result.compliance_skipped,
-        ));
-
-        if let Some(e) = &result.error {
-            tracing::warn!(
-                platform = result.platform,
-                attempts = result.attempts,
-                error = %e,
-                "[opc_demand] 平台扫描失败"
-            );
-        }
-
-        for evaluated in result.leads {
-            // max_leads 截断必须终止整轮扫描：旧实现只 break 单平台循环，
-            // 后续平台照扫照耗请求配额（P1-5）
-            if summary.total_scanned as usize >= max_leads {
-                break 'outer;
-            }
-            summary.total_scanned += 1;
-            // 计数口径（P1-5）：Skipped（窗口内重复）不算评估产出 —— 否则
-            // total_evaluated ≫ 实际入库量，摘要失真；round_leads 只含真实
-            // 入库/刷新的线索，订阅推送也不会把窗口内重复再推一遍。
-            match persist_evaluated(db, &evaluated, dedup_window_secs).await? {
-                axagent_dao::repo::opc_demand::LeadWriteOutcome::Inserted => {
-                    summary.total_saved += 1;
-                    summary.total_evaluated += 1;
-                    round_ids.push(evaluated.lead.id.clone());
-                    if evaluated.value_score() >= HIGH_VALUE_THRESHOLD {
-                        summary.high_value_count += 1;
-                    }
-                },
-                axagent_dao::repo::opc_demand::LeadWriteOutcome::Refreshed => {
-                    summary.total_refreshed += 1;
-                    summary.total_evaluated += 1;
-                    round_ids.push(evaluated.lead.id.clone());
-                    if evaluated.value_score() >= HIGH_VALUE_THRESHOLD {
-                        summary.high_value_count += 1;
-                    }
-                },
-                axagent_dao::repo::opc_demand::LeadWriteOutcome::Skipped => {},
-            }
-        }
-    }
-
-    // 本轮线索明细（一次查询回填，供订阅扫描按 min_score 过滤推送）
-    summary.round_leads = if round_ids.is_empty() {
-        Vec::new()
-    } else {
-        axagent_dao::repo::opc_demand::list_leads_by_ids(db, &round_ids).await.map_err(err)?
-    };
-
-    // 高价值明细（P1-6 语义修正）：旧实现回填**全局历史**高价值榜（全表 ≥60
-    // 分查询），本轮 0 命中时摘要也会显示一堆历史线索，误导"本轮扫描很成功"。
-    // 现在直接从本轮 round_leads 过滤，口径与 high_value_count 一致。
-    summary.leads = summary
-        .round_leads
-        .iter()
-        .filter(|l| l.commercial_value_score >= HIGH_VALUE_THRESHOLD)
-        .take(SUMMARY_LEADS_LIMIT)
-        .cloned()
-        .collect();
-
-    // 回写平台同步状态（单平台失败不阻断整体结果）
-    // 合规跳过不算失败：无凭证是配置状态，不是运行故障。
-    for (platform_id, ok, compliance_skipped) in &platform_status {
-        let final_ok = *ok || *compliance_skipped;
-        if let Err(e) =
-            axagent_dao::repo::opc_demand::mark_platform_synced(db, platform_id, final_ok).await
-        {
-            tracing::warn!(platform = platform_id, error = %e, "[opc_demand] 更新同步状态失败");
-        }
-    }
-
-    tracing::info!(
-        scanned = summary.total_scanned,
-        saved = summary.total_saved,
-        refreshed = summary.total_refreshed,
-        high_value = summary.high_value_count,
-        "[opc_demand] 扫描评估完成"
-    );
-    Ok(summary)
-}
-
-/// 从通用设置表读取扫描策略；缺失或解析失败时返回默认策略
-async fn load_scan_policy(db: &sea_orm::DatabaseConnection) -> Result<ScanPolicy, String> {
-    match axagent_dao::repo::settings::get_setting(db, SCAN_POLICY_SETTING_KEY)
-        .await
-        .map_err(err)?
-    {
-        Some(json) => Ok(ScanPolicy::from_json(&json)),
-        None => Ok(ScanPolicy::default()),
-    }
-}
-
-/// 持久化一条评估后的线索，返回写入结果（新入库 / 刷新 / 跳过）
-async fn persist_evaluated(
-    db: &sea_orm::DatabaseConnection,
-    evaluated: &EvaluatedDemandLead,
-    dedup_window_secs: Option<i64>,
-) -> Result<axagent_dao::repo::opc_demand::LeadWriteOutcome, String> {
-    let row = evaluated_to_row(evaluated);
-    axagent_dao::repo::opc_demand::upsert_lead_within_window(db, row, dedup_window_secs)
+    axagent_tools::tools::opc_demand_scan::run_discovery_scan(db, query, platform_filter)
         .await
         .map_err(err)
 }
 
-/// 评估结果 → DAO 写入行（扫描入库与手动补录共用同一字段映射，避免漂移）
-fn evaluated_to_row(evaluated: &EvaluatedDemandLead) -> axagent_dao::repo::opc_demand::NewLeadRow {
-    let lead = &evaluated.lead;
-    let evaluation = &evaluated.evaluation;
-    axagent_dao::repo::opc_demand::NewLeadRow {
-        id: lead.id.clone(),
-        platform: lead.platform.clone(),
-        title: lead.title.clone(),
-        description: lead.description.clone(),
-        budget_min: lead.budget_min,
-        budget_max: lead.budget_max,
-        budget_currency: lead.budget_currency.clone(),
-        contact_name: lead.contact_name.clone(),
-        contact_email: lead.contact_email.clone(),
-        contact_phone: lead.contact_phone.clone(),
-        source_url: lead.source_url.clone(),
-        content_fingerprint: lead.content_fingerprint.clone(),
-        raw_snapshot: lead.raw_snapshot.clone(),
-        confidence: evaluation.confidence(),
-        pain_score: evaluation.pain_score(),
-        market_gap_score: evaluation.market_gap_score(),
-        commercial_value_score: evaluation.commercial_value_score(),
-        demand_type: evaluation.demand_type().as_str().to_string(),
-    }
+/// 从通用设置表读取扫描策略（逻辑在 tools 层，此处仅做错误映射）
+async fn load_scan_policy(db: &sea_orm::DatabaseConnection) -> Result<ScanPolicy, String> {
+    axagent_tools::tools::opc_demand_scan::load_scan_policy(db).await.map_err(err)
 }
 
 /// 手动补录平台的固定 platform 标识
@@ -374,7 +197,7 @@ pub async fn opc_create_lead(
     let evaluated = EvaluatedDemandLead { lead, evaluation };
     axagent_dao::repo::opc_demand::create_manual_lead(
         db,
-        evaluated_to_row(&evaluated),
+        axagent_tools::tools::opc_demand_scan::evaluated_to_row(&evaluated),
         policy.dedup_window_secs(),
     )
     .await

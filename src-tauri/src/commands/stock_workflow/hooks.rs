@@ -40,6 +40,120 @@ use std::sync::Arc;
 
 // ── 公共辅助 ──────────────────────────────────────────────────────
 
+// ── 跨系统互证（智选推荐 vs 工作流决策）────────────────────────────
+
+/// 查询某股票近 `max_age_days` 天内的智选推荐（趋势智选面板同源的
+/// serenity / bottleneck 风格记录），返回融合先验 JSON（camelCase）。
+///
+/// 两处消费：
+/// 1. [`build_stock_analysis_variables`] 注入 `reco_prior` 变量（黑板可见，
+///    供 rhai/LLM 节点后续消费）
+/// 2. 决策持久化时构建 `crossCheck` 字段（跨系统互证）
+pub(crate) async fn fetch_reco_prior(
+    db: &DatabaseConnection,
+    stock_code: &str,
+    max_age_days: i64,
+) -> Option<serde_json::Value> {
+    use axagent_entities::reco_picks;
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+
+    // created_at 是 ISO 8601 字符串列（"%Y-%m-%dT%H:%M:%S%.3f"），字典序即时间序
+    let cutoff = (chrono::Local::now() - chrono::Duration::days(max_age_days))
+        .format("%Y-%m-%dT%H:%M:%S")
+        .to_string();
+    let pick = match reco_picks::Entity::find()
+        .filter(reco_picks::Column::StockCode.eq(stock_code))
+        .filter(reco_picks::Column::Style.is_in(["serenity", "bottleneck"]))
+        .filter(reco_picks::Column::CreatedAt.gte(cutoff))
+        .order_by_desc(reco_picks::Column::CreatedAt)
+        .one(db)
+        .await
+    {
+        Ok(p) => p?,
+        Err(e) => {
+            tracing::warn!("[reco_prior] 查询智选推荐失败 ({}): {e}", stock_code);
+            return None;
+        },
+    };
+    let pick_data: serde_json::Value = pick
+        .pick_data
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let seed: serde_json::Value = pick
+        .seed_pool_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let catalysts: Vec<serde_json::Value> = seed["catalysts"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .take(3)
+                .map(|c| {
+                    json!({
+                        "description": c["description"].as_str().unwrap_or(""),
+                        "timeframe": c["expected_timeframe"].as_str().unwrap_or(""),
+                        "confidence": c["confidence"].as_f64().unwrap_or(0.0),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(json!({
+        "recoConfidence": pick.confidence,
+        "recoStyle": pick.style,
+        "recoStrategyType": pick_data["strategy_type"].as_str().unwrap_or("bottleneck"),
+        "recoPeriod": pick.period,
+        "recoPositionPct": pick_data["positionPct"].as_f64().unwrap_or(0.0),
+        "recoHoldingDays": pick_data["holdingDays"].as_i64().unwrap_or(20),
+        "recoPrice": pick_data["price"].as_f64().unwrap_or(0.0),
+        "recoGeneratedAt": pick.generated_at,
+        "attentionHeat": seed["attention_metrics"]["search_heat"].as_str().unwrap_or(""),
+        "catalysts": catalysts,
+    }))
+}
+
+/// 将智选推荐先验与工作流决策做跨系统互证，把 `crossCheck` 就地写入决策 JSON。
+///
+/// 分歧判定：智选 confidence≥60 且建议仓位>0，而工作流 action=观望/卖出 或仓位≤0
+/// ——此时前端展示「智选推荐 vs 工作流否决」分歧报告。
+/// 本函数纯结构化注入、不做叙述文本（叙事由前端 i18n 渲染）。
+pub(crate) fn inject_reco_crosscheck(
+    decision_value: &mut serde_json::Value,
+    reco_prior: &serde_json::Value,
+) {
+    let Some(obj) = decision_value.as_object_mut() else {
+        return;
+    };
+    let decision_action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let decision_pos = obj.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let reco_conf = reco_prior["recoConfidence"].as_f64().unwrap_or(0.0);
+    let reco_pos = reco_prior["recoPositionPct"].as_f64().unwrap_or(0.0);
+    let divergent = reco_conf >= 60.0
+        && reco_pos > 0.0
+        && (decision_pos <= 0.0 || matches!(decision_action.as_str(), "观望" | "卖出"));
+    obj.insert(
+        "crossCheck".into(),
+        json!({
+            "recoConfidence": reco_prior["recoConfidence"],
+            "recoStyle": reco_prior["recoStyle"],
+            "recoStrategyType": reco_prior["recoStrategyType"],
+            "recoPeriod": reco_prior["recoPeriod"],
+            "recoPositionPct": reco_prior["recoPositionPct"],
+            "recoHoldingDays": reco_prior["recoHoldingDays"],
+            "recoPrice": reco_prior["recoPrice"],
+            "recoGeneratedAt": reco_prior["recoGeneratedAt"],
+            "decisionGeneratedAt": chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string(),
+            "attentionHeat": reco_prior["attentionHeat"],
+            "catalysts": reco_prior["catalysts"],
+            "decisionAction": decision_action,
+            "decisionPositionPct": decision_pos,
+            "divergent": divergent,
+        }),
+    );
+}
+
 /// `input` 是否带业务封装路径标记（Object 且含 `analysis_id` 字段）。
 /// 工作区 / 批量 / 重跑入口在 `opts.input` 中写入该字段；对话直执行路径
 /// 的 input 是纯文本字符串，无此标记。
@@ -151,6 +265,28 @@ pub(crate) async fn build_stock_analysis_variables(
                 stock_code
             );
         }
+    }
+
+    // ── 跨系统互证：注入近 14 天智选推荐先验（reco_prior）──
+    // 无论 screening_source 是什么，只要该股近期被趋势智选命中过就注入。
+    // 决策持久化时据此构建 crossCheck（互证字段），rhai/LLM 节点后续也可消费。
+    if let Some(prior) = fetch_reco_prior(db, stock_code, 14).await {
+        tracing::info!(
+            "[stock-analysis] 注入 reco_prior: code={} conf={} strategy={}",
+            stock_code,
+            prior["recoConfidence"].as_f64().unwrap_or(0.0),
+            prior["recoStrategyType"].as_str().unwrap_or(""),
+        );
+        merged_vars.push(Variable {
+            name: "reco_prior".into(),
+            var_type: "object".into(),
+            value: prior,
+            description: Some(
+                "近 14 天智选推荐先验（confidence/strategyType/catalysts 等），用于跨系统互证"
+                    .into(),
+            ),
+            is_secret: false,
+        });
     }
 
     // 注入相似历史决策案例（失败案例优先，最多 5 条）

@@ -170,6 +170,7 @@ export interface WorkflowCardData {
   >;
   debates?: Array<{ round: number; bull?: string; bear?: string; status: "pending" | "running" | "done" | "failed" }>;
   risks?: Array<{ key: string; content?: string; status: "pending" | "running" | "done" | "failed" }>;
+  extraNodes?: Array<{ key: string; label: string; status: "pending" | "running" | "done" | "failed" }>;
   dataSources?: Array<{
     nodeId: string;
     toolName: string;
@@ -538,7 +539,7 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                           : t("stockAnalysis.workflow.pending")}
                       </Tag>
                     </div>
-                    {a.status === "done" && a.report && (
+                    {a.status !== "pending" && a.report && (
                       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
                         {extractAgentBrief(a.report, t, 500)}
                       </div>
@@ -569,40 +570,44 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                       {d.status === "done" ? "✅" : d.status === "running" ? "⚙️" : "⏳"}{" "}
                       {t("stockAnalysis.workflow.debateRound")} {d.round}
                     </div>
-                    {d.status === "done" && d.bull && d.bear && (
+                    {(d.bull || d.bear) && (
                       <div style={{ display: "flex", gap: 8 }}>
-                        <div
-                          style={{
-                            flex: 1,
-                            background: "var(--sa-red-glass)",
-                            padding: 8,
-                            borderRadius: 6,
-                            border: "1px solid var(--sa-red-soft)",
-                          }}
-                        >
-                          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
-                            🐂 {t("stockAnalysis.workflow.bullCase")}
+                        {d.bull && (
+                          <div
+                            style={{
+                              flex: 1,
+                              background: "var(--sa-red-glass)",
+                              padding: 8,
+                              borderRadius: 6,
+                              border: "1px solid var(--sa-red-soft)",
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-red)" }}>
+                              🐂 {t("stockAnalysis.workflow.bullCase")}
+                            </div>
+                            <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
+                              {extractAgentBrief(d.bull, t, 200)}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                            {extractAgentBrief(d.bull ?? "", t, 200)}
+                        )}
+                        {d.bear && (
+                          <div
+                            style={{
+                              flex: 1,
+                              background: "var(--sa-green-glass)",
+                              padding: 8,
+                              borderRadius: 6,
+                              border: "1px solid var(--sa-green-soft)",
+                            }}
+                          >
+                            <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
+                              🐻 {t("stockAnalysis.workflow.bearCase")}
+                            </div>
+                            <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
+                              {extractAgentBrief(d.bear, t, 200)}
+                            </div>
                           </div>
-                        </div>
-                        <div
-                          style={{
-                            flex: 1,
-                            background: "var(--sa-green-glass)",
-                            padding: 8,
-                            borderRadius: 6,
-                            border: "1px solid var(--sa-green-soft)",
-                          }}
-                        >
-                          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4, color: "var(--sa-green)" }}>
-                            🐻 {t("stockAnalysis.workflow.bearCase")}
-                          </div>
-                          <div style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.5 }}>
-                            {extractAgentBrief(d.bear ?? "", t, 200)}
-                          </div>
-                        </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -650,12 +655,39 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
                           : t("stockAnalysis.workflow.pending")}
                       </Tag>
                     </div>
-                    {r.status === "done" && r.content && (
+                    {r.status !== "pending" && r.content && (
                       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
                         {extractAgentBrief(r.content, t, 400)}
                       </div>
                     )}
                   </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.extraNodes && data.extraNodes.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "var(--text)" }}>
+                🔧 {t("stockAnalysis.workflow.auxNodes")}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {data.extraNodes.map((n) => (
+                  <Tag
+                    key={n.key}
+                    color={n.status === "done"
+                      ? "success"
+                      : n.status === "running"
+                      ? "processing"
+                      : n.status === "failed"
+                      ? "error"
+                      : "default"}
+                    style={{ fontSize: 11, marginInlineEnd: 0 }}
+                  >
+                    {n.status === "done" ? "✅" : n.status === "running" ? "⚙️" : n.status === "failed" ? "❌" : "⏳"}
+                    {" "}
+                    {n.label}
+                  </Tag>
                 ))}
               </div>
             </div>

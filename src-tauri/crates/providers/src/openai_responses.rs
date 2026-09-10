@@ -9,6 +9,8 @@ use axagent_harness::types::*;
 use futures::Stream;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+// V69 修复(2026-09-10): 复用 openai.rs 的 tool_call arguments 校验（终结时拦截非法 JSON）
+use crate::openai::validate_tool_call_arguments;
 use std::pin::Pin;
 
 use crate::url_utils::resolve_chat_url;
@@ -881,6 +883,55 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
                                         Some(extra_tool_calls)
                                     } else {
                                         None
+                                    };
+
+                                    // V69 修复(2026-09-10): 与 openai.rs [DONE] 终结校验同源——
+                                    // 非法 JSON 参数不写入会话历史，改发流错误让引擎重新生成本轮
+                                    let tool_calls = match tool_calls {
+                                        Some(tcs) => {
+                                            let mut malformed = false;
+                                            let validated: Vec<ToolCall> = tcs
+                                                .into_iter()
+                                                .filter_map(
+                                                    |tc| match validate_tool_call_arguments(
+                                                        &tc.function.arguments,
+                                                    ) {
+                                                        Some(args) => Some(ToolCall {
+                                                            function: ToolCallFunction {
+                                                                arguments: args,
+                                                                ..tc.function
+                                                            },
+                                                            ..tc
+                                                        }),
+                                                        None => {
+                                                            malformed = true;
+                                                            None
+                                                        },
+                                                    },
+                                                )
+                                                .collect();
+                                            if malformed {
+                                                let _ = tx.try_send(Err(
+                                                    AxAgentError::execution_with_source(
+                                                        "OpenAI API error 400: assistant tool_call \
+                                                         produced invalid JSON arguments (upstream \
+                                                         truncated or malformed). Retrying to regenerate \
+                                                         this turn is recommended."
+                                                            .to_string(),
+                                                        anyhow::anyhow!(
+                                                            "malformed tool_call arguments at responses-api finalization"
+                                                        ),
+                                                    ),
+                                                ));
+                                                return;
+                                            }
+                                            if validated.is_empty() {
+                                                None
+                                            } else {
+                                                Some(validated)
+                                            }
+                                        },
+                                        other => other,
                                     };
 
                                     let _ = tx.try_send(Ok(ChatStreamChunk {

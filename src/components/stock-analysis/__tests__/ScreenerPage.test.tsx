@@ -34,18 +34,17 @@ describe("ScreenerPage", () => {
     expect(container).toBeTruthy();
   });
 
-  it("renders back button with chat label", () => {
+  it("renders no legacy page header (embedded in InvestHub)", () => {
     const { container } = renderWithRouter();
-    const backButton = container.querySelector(".sa-header-back");
-    expect(backButton).toBeTruthy();
-    expect(backButton?.textContent).toContain("nav.chat");
+    // 内嵌 InvestHub 后不再渲染 PageHeader 的返回按钮和标题
+    expect(container.querySelector(".sa-header-back")).toBeNull();
+    expect(container.querySelector(".sa-header-title")).toBeNull();
   });
 
-  it("renders the page title via i18n key", () => {
+  it("renders the time anchor in a single slim header row", () => {
     const { container } = renderWithRouter();
-    const title = container.querySelector(".sa-header-title");
-    expect(title).toBeTruthy();
-    expect(title?.textContent).toBe("screener.title");
+    // 精简头部只保留 PageTimeAnchor(实时分析/历史回放切换)
+    expect(container.querySelector('[data-testid="page-time-anchor"]')).toBeTruthy();
   });
 
   it("renders a single Tabs container with smart-reco as default", () => {

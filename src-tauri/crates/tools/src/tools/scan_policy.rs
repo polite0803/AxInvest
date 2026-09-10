@@ -43,6 +43,12 @@ pub struct ScanPolicy {
     pub dedup_window_hours: u32,
     /// 单次扫描保留的线索数上限（防御扫描器异常返回海量数据）
     pub max_leads_per_scan: usize,
+    /// 是否启用 LLM 精评（规则评分入库后，对通过预筛的候选做一轮批量 LLM 重新打分）
+    pub llm_eval_enabled: bool,
+    /// 单轮送入 LLM 精评的候选数上限（控制 token 成本；按规则分降序截断）
+    pub llm_eval_max_leads: usize,
+    /// LLM 精评预筛阈值：规则商业价值分 ≥ 此值的候选才送评（0 = 全送）
+    pub llm_eval_min_rule_score: f64,
 }
 
 impl Default for ScanPolicy {
@@ -55,6 +61,9 @@ impl Default for ScanPolicy {
             timeout_secs: 15,
             dedup_window_hours: 24 * 7,
             max_leads_per_scan: 200,
+            llm_eval_enabled: true,
+            llm_eval_max_leads: 20,
+            llm_eval_min_rule_score: 30.0,
         }
     }
 }
@@ -120,6 +129,8 @@ impl ScanPolicy {
         self.timeout_secs = self.timeout_secs.clamp(1, 120);
         self.dedup_window_hours = self.dedup_window_hours.min(24 * 365);
         self.max_leads_per_scan = self.max_leads_per_scan.clamp(1, 5_000);
+        self.llm_eval_max_leads = self.llm_eval_max_leads.clamp(1, 100);
+        self.llm_eval_min_rule_score = self.llm_eval_min_rule_score.clamp(0.0, 100.0);
         self
     }
 }
@@ -146,6 +157,7 @@ mod tests {
             timeout_secs: 0,
             dedup_window_hours: 0,
             max_leads_per_scan: 0,
+            ..Default::default()
         }
         .normalized();
 
@@ -198,5 +210,29 @@ mod tests {
         assert_eq!(p.concurrency, 32);
         assert_eq!(p.retry_max, 5);
         assert_eq!(p.timeout_secs, 120);
+    }
+
+    #[test]
+    fn llm_eval_fields_have_defaults_and_clamps() {
+        let p = ScanPolicy::default();
+        assert!(p.llm_eval_enabled);
+        assert_eq!(p.llm_eval_max_leads, 20);
+        assert_eq!(p.llm_eval_min_rule_score, 30.0);
+
+        // 旧策略 JSON 缺精评字段 → serde(default) 生效，不整体回落
+        let legacy = ScanPolicy::from_json(r#"{"concurrency":6}"#);
+        assert_eq!(legacy.concurrency, 6);
+        assert!(legacy.llm_eval_enabled);
+        assert_eq!(legacy.llm_eval_max_leads, 20);
+
+        // 越界钳制
+        let clamped = ScanPolicy {
+            llm_eval_max_leads: 0,
+            llm_eval_min_rule_score: 999.0,
+            ..Default::default()
+        }
+        .normalized();
+        assert_eq!(clamped.llm_eval_max_leads, 1);
+        assert_eq!(clamped.llm_eval_min_rule_score, 100.0);
     }
 }

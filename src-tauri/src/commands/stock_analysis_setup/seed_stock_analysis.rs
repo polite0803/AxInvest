@@ -34,7 +34,73 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //       龙虎榜取数改为入度 0 启动节点，天然先于 a-hot-money 完成。
     //   v5: 声明 hooks_config（precheck/enhance/persist 三钩子）——变量增强统一由
     //       stock-analysis-enhance 钩子执行，对话直执行路径与业务封装路径变量零漂移。
-    const TEMPLATE_VERSION: i32 = 5;
+    // v6: 强制重种子，落库 a-fundamentals 的 market_regime input_mapping。
+    //   背景：fundamentals-analyst.md（运行时从磁盘加载）引用 {{market_regime}}，
+    //   而 DB 模板 v5 的 inputMapping 只有 stock_lessons，导致运行期
+    //   VARIABLE_NOT_FOUND → a-fundamentals 4 次重试全失败 → 辩论链/t-scoring/
+    //   t-valuation/portfolio-mgr 全部停摆 → 决策降级为观望（2026-09-08 实证）。
+    //   种子代码 963-967 行的映射逻辑早已存在，但 v5>=v5 跳过重种子，静默失效。
+    // v7: a-fundamentals 失败降级而非断链——debate-bull-bear / data-quality
+    //   开 continue_on_fail（2026-09-08）；引擎侧同步新增确定性错误不可重试分类。
+    // v8: max_concurrent 3→8（2026-09-08）——DB 存量 v7 实际值仍为 3（旧种子遗留），
+    //   3 个并发槽被 429 重试节点占住不放时其余分析师排队等待，事实串行化。
+    // v9: cls-risk-level 死锁修复（2026-09-08 实证）——① timeout 30→60s + 重试 +
+    //   fallback_label；② v-validate 改依赖 t-risk（拆除 cls-risk-level→v-validate
+    //   死锁边）。data-quality/portfolio-mgr/portfolio-risk-gate 的 continue_on_fail=true
+    //   已在 v7/v8 落库，本版本递增确保上述改动重种子生效。
+    // v10: 决策尾链全链容错（2026-09-08 遗留风险排查）——v-validate/research-mgr/
+    //   trader/quality-gate/quality-fallback/decision-explainer/notify-result/
+    //   store-result/end-output 全部开 continue_on_fail：尾链任一上游失败不再死锁，
+    //   已产出的决策必达 notify/store/end。失败降级依据：Agent context_sources 缺失
+    //   静默跳过、Rhai present() 守卫 + Null 注入。例外：rule-check 保持 false——
+    //   portfolio-risk-gate（硬裁决）失败时决策本身不存在，尾链继续跑只会产出
+    //   垃圾解释，死锁 halted 是诚实语义。
+    // v11: input_mapping 包装对齐（2026-09-09）——ToolNode 输出结构已变为
+    //   {node_id, result: {content: <json_string>, tool_name}}，数据在 result.content
+    //   字符串里；AgentNode content parse 后为 {report, verdict}，结构化字段在 verdict
+    //   层。全部 data-quality/trader/portfolio-mgr/pace-calc/portfolio-risk-gate 的
+    //   input_mapping 穿透 .content / .verdict；resolve_var_path 终值恢复「不 auto-parse」
+    //   语义（JSON 字符串原样到达 rhai，契合消费端 type_of=="string" 契约）；
+    //   compute_valuation 补 dcf/graham/fScore camelCase 别名块（上行空间百分比语义）。
+    // v12 (2026-09-09 晚): pace-calc.rhai 两个顶层 map（base_score_map/source_weight_map）
+    //   挪进 classify_event/classify_source 函数体 —— Rhai 脚本函数不捕获任何调用
+    //   作用域，顶层 let AND 顶层 const 对函数均不可见（实测 const 同样报
+    //   ErrorVariableNotFound）。此前资金流/公告数据为空时脚本提前降级未触达
+    //   两个分类函数，v11 修好数据链后首次走到 → Variable not found:
+    //   source_weight_map（line 114 in classify_source, called at line 247）。
+    // v13(2026-09-10): cat_verdict 映射 a-catalyst.content → a-catalyst.content.verdict
+    //   （终值不 auto-parse 导致 rhai 收到 JSON 字符串，extract_conf 恒 -1 → 催化剂恒 missing）
+    // v14(2026-09-10): portfolio-mgr.rhai 决策死锁修复（DB 实证近 30 天 41 次分析 100% 观望 0%）:
+    //   ① odds_fallback 新增试探档 posterior∈[0.42,0.50) → 1.5x（原 <0.50 恒 0）
+    //   ② 新增试探仓机制 R-207：posterior∈[0.42,0.50) 且 odds>0 时给 3% 试探仓位，
+    //      观望升级为持有（与趋势智选试探仓语义对齐）
+    // v15(2026-09-10): a-catalyst 从 OutputMode::Json 改回默认 Text 模式（与其他 9 个
+    //   分析师统一「报告文本在前 + 末尾 VERDICT 标签」）。根因：Json schema 注入要求
+    //   纯 JSON 禁止标签，与 catalyst-analyst.md 第 7 步残留的 Text 指令自相矛盾，
+    //   模型两头都执行 → JSON+标签混合体（用户实测）。催化剂特有字段改由 VERDICT
+    //   标签承载（executor 分支 A 原样进 verdict map），下游映射路径全部不变。
+    //   ③ trader 数据异常从「清零/强制卖出」改为「降级」：仓位上限 10%，激进动作封顶持有
+    // v16(2026-09-10): 信号层激活修复（90 天审计实证 30 条决策 29 观望 1 卖出 0 买入，仓位全 0）:
+    //   ① portfolio-mgr.rhai f9 资金流字段名兼容：get_stock_money_flow 实际输出
+    //      camelCase(mainNetInflow/superLargeNet/largeNet/mediumNet)，原代码按
+    //      snake_case 读取恒 () → f9 恒 0。DB 实证 002837 主力净流入 +5010 万在场，
+    //      f9=0 —— 唯一稳定的正信号源被字段名错配杀死。
+    //   ② pace-calc.rhai 输入防御解包：{content:"..."} 包装对象统一解包后再解析
+    //      （301302 实证 pace_degraded=true, reason="无有效事件输入"，而
+    //      t-catalyst-data 公告数据明明在场）。
+    // v17(2026-09-10 晚): pace-calc.rhai P 维度符号翻转修复。tanh 归一化后错误地
+    //   再乘 p_score.sign() 二次应用符号 → 所有负极性(L-1/L-2/L-3 利空)被翻成
+    //   正 P 值。603290 实证: p_raw=-0.88(L-2业绩暴雷) → P=+0.53。利好路径
+    //   (正×1=正)不受影响故从未暴露。修复: clamp(tanh_val) 保号。
+    // v18(2026-09-10): value-investor 接入 t-risk 结构化基本面硬数据
+    //   (context_sources+显式边+数据约束 prompt)，护城河/财务健康 60% 权重
+    //   从 LLM 叙述改为真实财报锚定。
+    // v19(2026-09-10 深夜): 热点股动量通道（601231 涨停板实测 0% 复盘）:
+    //   ① portfolio-mgr.rhai 新增 f12 动量因子（MACD 趋势状态 + RSI 调制，
+    //      权重 0.10，f1↔f12 协方差衰减 25%）——此前因子集无正向动量通道，
+    //      涨停/趋势动能只能通过 totalScore(+0.1 上限)微量表达；
+    //   ② S-503 冲击成本阈值 50→150bps（实测常态 100~200bps，50bps 必触发）。
+    const TEMPLATE_VERSION: i32 = 20;
 
     tracing::info!(
         "[stock_analysis_setup] seed_stock_analysis_workflow_template 开始: TEMPLATE_ID={TEMPLATE_ID}, TEMPLATE_VERSION={TEMPLATE_VERSION}"
@@ -980,40 +1046,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             a.config.tools =
                 tool_names.iter().filter_map(|&tn| tool_def_map.get(tn).cloned()).collect();
             a.config.exposed_tools = vec![];
-            // a-catalyst 改用 Json 输出模式，prompt 已改为纯 JSON 格式
-            if *id == "a-catalyst" {
-                a.config.output_mode = OutputMode::Json;
-                // P1 修复(2.2): 强制纯 JSON 输出，字段必须与 catalyst-analyst.md 的
-                // 输出格式完全一致——前端 AnalystReportCard.extractSummary/extractTags
-                // 与下游 portfolio-mgr 的 catalyst_level 映射都依赖这套字段，
-                // 之前误写成 target_entity/event_type 等孤儿字段导致卡片恒显
-                // "分析完成，但未返回结构化内容"且催化剂信号丢失。
-                a.config.system_prompt = format!(
-                    "{}\n{}\n{}",
-                    a.config.system_prompt,
-                    tool_prompt(&a.config.tools),
-                    "【强制 JSON Schema 约束】\n\
-                     输出必须是纯 JSON，字段名须与以下完全一致（不要增删、不要改名）:\n\
-                     {\n\
-                       \"verdict\": \"方向结论，必须三选一：看多 | 看空 | 中性\",\n\
-                       \"bull_score\": \"看多评分 0-100 的整数，与 bear_score 之和接近 100\",\n\
-                       \"bear_score\": \"看空评分 0-100 的整数，与 bull_score 之和接近 100\",\n\
-                       \"report\": \"你的完整分析报告文本（自然语言，可含结构化分析，长度>50字）\",\n\
-                       \"catalyst_level\": \"无 | L1普通消息 | L2业绩拐点级 | L3估值体系级 | L-1普通利空 | L-2业绩暴雷级 | L-3退市/造假级\",\n\
-                       \"institutional_trace\": \"无 | 疑似建仓 | 有建仓痕迹 | 明显建仓\",\n\
-                       \"narrative_completeness\": \"叙事完整度评分 0-100 的整数\",\n\
-                       \"confidence\": \"置信度评分 0-100 的整数\",\n\
-                       \"reasoning\": \"简短的推理过程摘要\"\n\
-                     }\n\
-                     只输出上述 JSON 对象，前后不要有任何其他文字（不要用 markdown 代码块包裹）。\n\
-                     verdict/bull_score/bear_score 判定规则：L2/L3 利好催化剂 + 有建仓痕迹 + 叙事完整度≥60 → verdict=看多, bull_score≥60；\n\
-                     L-2/L-3 利空催化剂 + 叙事破位 → verdict=看空, bear_score≥60；\n\
-                     其它情况 → verdict=中性, bull_score/bear_score 均在 40-60 区间。"
-                );
-            } else {
-                a.config.system_prompt =
-                    format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
-            }
+            // V70 修复(2026-09-10): a-catalyst 从 OutputMode::Json 改回默认 Text 模式，
+            // 与其他 9 个分析师统一为「自然语言报告在前 + 末尾 <!-- VERDICT: {...} --> 标签」。
+            // 根因：Json 模式的 schema 注入（要求纯 JSON、禁止 VERDICT 标签）与
+            // catalyst-analyst.md 工作流程第 7 步残留的 Text 模式指令（"末尾追加 VERDICT
+            // 机读标签"）自相矛盾，模型两头都执行 → 输出 JSON + 标签的混合体。
+            // Text 模式下 agent_executor 分支 A 将标签 JSON 原样放入 verdict map，
+            // catalyst_level/institutional_trace/narrative_completeness 等特有字段不丢失
+            // （portfolio-mgr 与 pace-calc 的映射路径不变）。
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
             // 环 A: 注入历史反思教训，让分析师看到该股之前的错因和改进建议
             a.config.input_mapping =
                 std::collections::HashMap::from([("stock_lessons".into(), "stock_lessons".into())]);
@@ -1112,19 +1154,14 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // resolve_var_path 会自动解析 content JSON 字符串并提取 verdict map。
                 // 避免 Rhai 脚本中 json_parse 字符串解析的不可靠性。
                 //
-                // V60 修复(2026-07-23): a-catalyst 例外——它用 OutputMode::Json +
-                // 扁平 JSON schema（bull_score/bear_score 在顶层，verdict 字段是字符串
-                // "看多/看空/中性"），不是嵌套的 verdict map。用 .content.verdict 会
-                // 拿到字符串而非 map，analyst-brief 触发"数据不可用"。
-                // 改用 .content 让 Rhai 拿到整个对象，format_analyst 从顶层读
-                // bull_score/bear_score（其他字段如 bull_points 缺失时 Rhai 返回 ()，
-                // present() 检查会自然跳过）。
-                let path = if *id == "a-catalyst" {
-                    format!("{id}.content")
-                } else {
-                    format!("{id}.content.verdict")
-                };
-                (short.to_string(), path)
+                // V68 修复(2026-09-10): 删除 a-catalyst 的 `.content` 特例（V60 引入）。
+                // V60 时代 a-catalyst 是扁平 JSON（verdict 为字符串）；V62 通用 VERDICT
+                // 重构后所有分析师 content 统一为 {"report", "verdict":{...}} 嵌套，
+                // `.content` 终值不 auto-parse → rhai 收到 JSON 字符串 → format_analyst
+                // 判"数据不可用"，辩论阶段催化剂维度恒缺失（002837 实证）。
+                // 统一走 .content.verdict（中途穿透 parse），与 data-quality 的
+                // cat_verdict 同批修复。
+                (short.to_string(), format!("{id}.content.verdict"))
             })
             .collect();
         nodes.push(WorkflowNode::Code(CodeNode {
@@ -1244,7 +1281,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v7: 容错降级。2026-09-08 实证：a-fundamentals 失败时本节点作为
+            // 调度枢纽被上游 Failed 边阻塞 → 整条辩论链/t-scoring/portfolio-mgr
+            // 全部停摆 → 决策降级观望。辩手只消费 analyst-brief（自带降级标注，
+            // 缺基本面时显示"数据不可用"），本容器仅做调度转发，可安全放行。
+            continue_on_fail: true,
         },
         config: DebateNodeConfig {
             debater_steps: (0..debate_max_rounds)
@@ -1483,6 +1524,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // result.graham.upsidePct、result.fScore.score、result.moat.label 等
                 // 客观算法估值，作为 LLM 估值的锚点。
                 "t-valuation".into(),
+                // V73(2026-09-10): 接入 t-risk 结构化基本面硬数据。
+                // value-investor 的护城河(35%)/财务健康(25%)两维度依赖 ROE/负债率/
+                // 毛利率阈值判断，此前只能靠 a-fundamentals 的 LLM 叙述转述，
+                // 幻觉直接污染 60% 权重的评分。t-risk(compute_portfolio_risk)
+                // 的 stockRiskProfile.{roeTTMPct,debtRatioPct,grossMarginPct,
+                // revenueGrowthYoYPct} 来自真实财报提取，使三维度全部硬数据锚定。
+                "t-risk".into(),
             ];
             a.config.model_role = Some("stock-analyst".into());
             // P0 修复(2026-07-22): 移除所有工具，改为纯决策节点。
@@ -1502,17 +1550,31 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  - 行业数据: 来自 a-sector\n\
                  - 辩论共识: 来自 debate-convergence\n\
                  - **客观估值数据**: 来自 t-valuation（结构化算法结果）\n\
-                   - result.dcf.{{low,mid,high}}: DCF 内在价值区间\n\
-                   - result.dcf.upsidePct: DCF 上行空间百分比（正值=低估，负值=高估）\n\
+                   - result.dcf.{{low,mid,high}}: DCF 内在价值区间（不可用时为 null）\n\
+                   - result.dcf.available / result.dcf.note: DCF 可用性与估值口径说明\n\
+                   - result.dcf.upsidePct: DCF 上行空间百分比（正值=低估，负值=高估；不可用时为 null）\n\
                    - result.graham.upsidePct: 格雷厄姆上行空间\n\
                    - result.fScore.score: Piotrosky F-Score（0-9，越高越好）\n\
                    - result.moat.label: 护城河评级\n\
+                 - **结构化基本面硬数据**: 来自 t-risk（真实财报提取，V73 接入）\n\
+                   - result.stockRiskProfile.roeTTMPct: ROE(TTM)百分比——护城河评级的权威依据（宽>20/窄15-20/无<15）\n\
+                   - result.stockRiskProfile.debtRatioPct: 负债率百分比——财务健康度权威依据（<50健康/50-60良好/60-70一般/>70差）\n\
+                   - result.stockRiskProfile.grossMarginPct: 毛利率百分比\n\
+                   - result.stockRiskProfile.revenueGrowthYoYPct: 营收同比增速百分比\n\
                  \n\
                  **关键**: t-valuation 是客观算法估值，作为你的估值锚点。\n\
                  你的 intrinsic_value_range 应参考 result.dcf.{{low,mid,high}} 区间，\n\
                  margin_of_safety 应参考 result.dcf.upsidePct。\n\
                  对成长股，参考 result.dcf.upsidePct 判断是否「合理偏低」，\n\
-                 不要一味给出低于现价的保守估值。",
+                 不要一味给出低于现价的保守估值。\n\
+                 \n\
+                 **估值不可用处理（V74）**: 当 result.dcf.available=false 或\n\
+                 result.dcf.upsidePct=null 时，表示当期FCF≤0且近5年报无正净利年度\n\
+                 （持续亏损），DCF/格雷厄姆算法估值均不适用（value_signal=「无法估值」）。\n\
+                 此时：① intrinsic_value_range 与 margin_of_safety 填 null；\n\
+                 ② 理想买入价写「无算法估值锚，需采用清算价值/重置成本等替代方法」；\n\
+                 ③ **禁止输出 0 元买入价、0.00 元 DCF 或 0% 安全边际冒充算法估值**——\n\
+                 估值不可用 ≠ 估值为 0，把 null 当 0 是数据语义污染。",
                 a.config.system_prompt
             );
             // 环 A: 注入历史反思教训
@@ -1528,6 +1590,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         // 否则 t-valuation 的输出不会进入 value-investor 的变量池。
         // 拓扑链：bear-r3 → t-scoring → t-valuation → value-investor
         edges.push(edge("e-valuation-value-investor", "t-valuation", vi_id));
+        // V73: t-risk 同理——context_sources 里的节点必须显式边等待，
+        // 否则 compute_portfolio_risk 的输出不进变量池。
+        // 拓扑链：t-valuation → t-risk → value-investor（无回环，t-risk 仅依赖 t-valuation）
+        edges.push(edge("e-t-risk-value-investor", "t-risk", vi_id));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -1888,8 +1954,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 x: 300.0,
                 y: 3000.0,
             },
-            retry: RetryConfig::default(),
-            timeout: Some(30),
+            // v9 修复(2026-09-08 死锁实证)：默认 RetryConfig enabled=false 导致超时零重试，
+            // agnes-3.0-flash 分类调用 34.95s > 30s 超时 → Failed → v-validate 被阻塞 →
+            // data-quality/research-mgr/trader/portfolio-mgr 全链 Pending → 决策不执行。
+            // timeout 30→60s + 开启重试 + fallback_label 兜底，三重防线。
+            retry: RetryConfig { enabled: true, max_retries: 2, ..Default::default() },
+            timeout: Some(60),
             enabled: true,
             parent_id: None,
             compensation: None,
@@ -1954,7 +2024,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             input_var: "t-risk".into(),
             output_var: "risk-level".into(),
             confidence_threshold: None,
-            fallback_label: None,
+            // v9 修复: 低置信度时兜底到"中风险"而非报错（A股大多数股票应落在中风险档，
+            // 与 prompt 判定规则一致），避免分类器失败阻断下游。
+            fallback_label: Some("中风险".into()),
             consistency_check: None,
             categories_var: None,
         },
@@ -1973,7 +2045,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v10: 上游 t-risk（ToolNode）失败时仍派发本节点——断言 exists 失败走
+            // on_fail=skip → Skipped（计入完成集），下游 data-quality/research-mgr
+            // 不被阻塞。cof=false 时 t-risk Failed 会永久阻塞 v-validate（死锁）。
+            continue_on_fail: true,
         },
         config: ValidationNodeConfig {
             assertions: vec![ValidationAssertion {
@@ -1986,7 +2061,14 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             max_retries: 1,
         },
     }));
-    edges.push(edge("e-cls-risk-v-validate", "cls-risk-level", "v-validate"));
+    // v9 修复(2026-09-08 死锁实证)：原边 cls-risk-level → v-validate 是死锁根源——
+    // v-validate 的 continue_on_fail=false，cls-risk-level 一旦 Failed，该 Direct 边
+    // 永久阻塞 v-validate，进而锁死 data-quality/research-mgr/trader/portfolio-mgr
+    // 整条决策链（引擎死锁检测只做单遍 Skipped 传播后直接 break）。
+    // v-validate 校验的是 t-risk.output（断言 exists），改为依赖 t-risk 语义更正确：
+    // cls-risk-level 只是 portfolio-mgr.rhai 确定性风险分类的 LLM 兜底（overall_risk_llm），
+    // 其失败不应有任何阻断性代价（research-mgr 的 context_sources 缺失会静默跳过）。
+    edges.push(edge("e-t-risk-v-validate", "t-risk", "v-validate"));
 
     // ── P1-4 修复: data-quality 确定性评分（CodeNode + Rhai，替代原 LLM Agent）──
     // 原 LLM Agent 需 5-10 秒 + token 消耗，改为 Rhai 确定性脚本 <10ms。
@@ -2007,7 +2089,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 enabled: true,
                 parent_id: None,
                 compensation: None,
-                continue_on_fail: false,
+                // v7: 容错降级。input_mapping 引用 10 个分析师输出，其中任一失败
+                // （如 a-fundamentals）时缺失路径注入 Null（code_executor 语义），
+                // data-quality.rhai 有 present() 守卫按缺失计分，可安全降级运行，
+                // 不应因单个分析师失败而阻塞 portfolio-mgr/trader。
+                continue_on_fail: true,
             },
             config: CodeNodeConfig {
                 language: "rhai".into(),
@@ -2027,11 +2113,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("lk_verdict", "a-lockup.content.verdict"),
                     ("res_verdict", "a-research.content.verdict"),
                     ("sec_verdict", "a-sector.content.verdict"),
-                    // P2 修复(2026-07-23): a-catalyst 的 cat_verdict 映射缺失 → Rhai 报
-                    // "Variable not found: cat_verdict"。a-catalyst 走 OutputMode::Json +
-                    // 扁平 JSON schema，confidence 在顶层（不在 verdict map 内），
-                    // 所以用 .content 拿到完整 JSON 对象，extract_conf(v["confidence"]) 可正确提取。
-                    ("cat_verdict", "a-catalyst.content"),
+                    // V68 修复(2026-09-10): cat_verdict 映射从 .content 改为 .content.verdict。
+                    // 原映射是 P2 修复(2026-07-23)按「OutputMode::Json 扁平 schema + 终值
+                    // auto-parse」的现实写的；但 agent_executor 后来加了 V62 通用 VERDICT
+                    // 标签重构，a-catalyst 的 content 现为 {"report", "verdict":{...}} 嵌套
+                    // JSON **字符串**（resolve_var_path 终值不 auto-parse）。rhai 收到的是
+                    // string，extract_conf(type_of != "map") 恒返回 -1.0 → 催化剂分析师被
+                    // data-quality 恒判 missing（2026-09-08 002837 实证）。改映射到
+                    // .content.verdict 后中途穿透 parse，rhai 收到 map，与其他 9 个分析师一致。
+                    // V70(2026-09-10): a-catalyst 已改回 Text 模式，此映射与其他 9 个完全同构。
+                    ("cat_verdict", "a-catalyst.content.verdict"),
                     // P1-B3 新增(2026-07-24): 拿 10 个分析师的报告正文，算法化 report_quality_score。
                     // AgentExecutor OutputMode::Text 把 LLM 输出包装为 {report, verdict} JSON，
                     // 因此 .content.report 直接是字符串正文（含自然语言分析，不含 VERDICT 标签）。
@@ -2060,16 +2151,27 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("sec_untrusted", "a-sector.__untrusted"),
                     ("cat_untrusted", "a-catalyst.__untrusted"),
                     // ── 因子数据完整度评估（供 pm_compute_factor_completeness 使用）──
-                    // 这些因子数据来自 ToolNode，用于评估因子层数据完整度
-                    ("total_score", "t-scoring.result.totalScore"),
+                    // 2026-09-09 包装对齐修复：ToolNode 输出结构为
+                    //   {node_id, result: {content: <json_string>, tool_name}}
+                    // 数据在 result.content 字符串里，路径必须穿透 .content；
+                    // resolve_var_path 终值不再 auto-parse，rhai 收到 JSON 字符串
+                    // 后按原契约 json_parse/safe_parse 解析。
+                    ("total_score", "t-scoring.result.content.totalScore"),
                     ("consensus_score", "debate-convergence.content.consensus_score"),
-                    ("catalyst_level", "a-catalyst.content.catalyst_level"),
-                    ("risk_volatility", "t-risk.result.stockRiskProfile.annualizedVolatilityPct"),
-                    ("valuation_dcf_upside", "t-valuation.result.dcf.upsidePct"),
-                    ("trader_direction", "trader.content.verdict"),
-                    ("money_flow", "t-hotmoney-data.result"),
-                    ("lockup_bundle", "t-lockup-data.result"),
-                    ("announcements", "t-catalyst-data.result"),
+                    // a-catalyst 是 AgentNode，content parse 后为 {report, verdict}，
+                    // catalyst_level 在 verdict 层（实测值 "L1普通消息"）
+                    ("catalyst_level", "a-catalyst.content.verdict.catalyst_level"),
+                    (
+                        "risk_volatility",
+                        "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
+                    ),
+                    ("valuation_dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
+                    // trader 是 AgentNode，content parse 后为 {report, verdict}，
+                    // 方向词（看多/看空/中性）在 verdict.verdict
+                    ("trader_direction", "trader.content.verdict.verdict"),
+                    ("money_flow", "t-hotmoney-data.result.content"),
+                    ("lockup_bundle", "t-lockup-data.result.content"),
+                    ("announcements", "t-catalyst-data.result.content"),
                     ("pace_signal", "pace-calc.result.pace_signal"),
                 ]
                 .into_iter()
@@ -2109,6 +2211,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         3600.0,
     );
     if let WorkflowNode::Agent(ref mut a) = rm {
+        // v10: 上游辩论/收敛节点（LLM）失败时仍派发——context_sources 缺失静默跳过，
+        // input_mapping 的 consensus_score 缺失降级为空。cof=false 时 debate-convergence
+        // 等 LLM 节点失败会让 research-mgr 卡 Pending，进而锁死 trader/portfolio-mgr。
+        a.base.continue_on_fail = true;
         a.config.context_sources = vec![
             "value-investor".into(),
             "t-scoring".into(),
@@ -2183,6 +2289,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         3900.0,
     );
     if let WorkflowNode::Agent(ref mut a) = trader {
+        // v10: 上游 research-mgr/data-quality 失败时仍派发——research-mgr 仅在
+        // context_sources（缺失静默跳过），input_mapping 不引用它；dqi_score 缺失
+        // 时 prompt 槽位降级为空，LLM 按保守方向决策。下游 portfolio-mgr.rhai /
+        // portfolio-risk-gate.rhai 对 trader_* 缺失均有 present() 守卫 + 波动率 fallback。
+        a.base.continue_on_fail = true;
         // P2 修复: 扩展 context_sources 覆盖所有 input_mapping 引用的上游节点
         // （显式依赖原则：input_mapping 引用的上游节点必须有关联边或 context_sources）
         // t-scoring: factor_weights 因子权重 | risk-convergence: risk_disagreement 风险分歧度
@@ -2225,13 +2336,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // P1 修复: 注入标准参考价，确保 trader 与 portfolio-mgr 使用相同的 currentPrice
             // 避免 trader 自行调用 get_stock_quote 获取的实时价与 t-scoring 缓存的 currentPrice
             // 不一致导致的系统性分歧。
-            ("reference_price", "t-scoring.result.currentPrice"),
+            // 2026-09-09: ToolNode result 为 {content: <json_string>, tool_name}，穿透 .content
+            ("reference_price", "t-scoring.result.content.currentPrice"),
             // P2 修复: 注入因子权重，使 trader 知道哪些因子在公式中权重更高
             // factor_weights 是 JSON 对象 {trend:{weight}, macd:{weight}, ...}
-            ("factor_weights", "t-scoring.result.factor_backtest.factors"),
+            ("factor_weights", "t-scoring.result.content.factor_backtest.factors"),
             // P2 修复: 注入风险分歧度，使 trader 知道三位风险评估师的分歧程度
             // 分歧高(>50)时 trader 应避免过度自信
-            ("risk_disagreement", "risk-convergence.content.disagreement_score"),
+            // 2026-09-09: risk-convergence content parse 后为 {report, verdict}，分歧度在 verdict 层
+            ("risk_disagreement", "risk-convergence.content.verdict.disagreement_score"),
             // P2 修复: 注入数据质量评分，使 trader 知道当前数据覆盖度
             // dqi_score 0-100，低分时 trader 应保守操作
             // V58 修复: data-quality 是 CodeNode，score 在 .result 里
@@ -2239,8 +2352,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // P0 修复(2026-07-22): 注入 t-scoring 完整技术指标，替代 get_stock_quote/kline。
             // 包含 ma5/ma20/bias_ma5/macd_dif/macd_dea/rsi14/boll_upper/boll_lower 等，
             // trader 可直接读取指标制定交易方案，无需重新调用行情工具。
-            ("technical_indicators", "t-scoring.result.indicators"),
-            ("total_score", "t-scoring.result.totalScore"),
+            ("technical_indicators", "t-scoring.result.content.indicators"),
+            ("total_score", "t-scoring.result.content.totalScore"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -2284,8 +2397,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             tool_name: None,
             execute_directly: true,
             input_mapping: [
-                // ToolNode 输出包裹在 {tool_name, result: <json_string>, ...} 中
-                ("totalScore", "t-scoring.result.totalScore"),
+                // 2026-09-09 包装对齐修复：ToolNode 输出 result 为
+                // {content: <json_string>, tool_name}，数据穿透 .content 取；
+                // AgentNode（trader/a-catalyst）content parse 后为 {report, verdict}，
+                // 结构化字段在 verdict 层。
+                ("totalScore", "t-scoring.result.content.totalScore"),
                 // AgentNode 输出包裹在 {role, content: <json_string>, ...} 中
                 // V29 修复: data-quality 是 AgentNode，无 .result 字段，必须走 .content.
                 // V58 修复: data-quality 实为 CodeNode（Rhai），输出结构为
@@ -2295,7 +2411,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 //   下降触发 weights_collapsed 误坍缩。
                 ("dqi_score", "data-quality.result.score"),
                 // P1/P2: 因子回测数据（compute_scoring 工具附加输出）
-                ("factor_weights", "t-scoring.result.factor_backtest.factors"),
+                ("factor_weights", "t-scoring.result.content.factor_backtest.factors"),
                 // P1-1: 市场状态权重调节（regime-weights.rhai）替代纯回测权重
                 // 牛市→趋势↑, 熊市→估值/风险↑, 高波动→全降权
                 // V58 修复: regime-weights 是 CodeNode，factor_weights 在 .result 里
@@ -2310,50 +2426,57 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // 边与 input_mapping 必须以节点 id 为准，否则 context.variables 查不到。
                 ("overall_risk_llm", "cls-risk-level.category"),
                 // AgentNode(Json mode) 输出包裹在 {role, content: <json_string>, ...} 中
-                ("catalyst_level", "a-catalyst.content.catalyst_level"),
+                // 2026-09-09: content parse 后为 {report, verdict}，catalyst_level 在 verdict 层
+                ("catalyst_level", "a-catalyst.content.verdict.catalyst_level"),
                 ("consensusScore", "debate-convergence.content.consensus_score"),
                 // V65: trader 输出完整 6 维度字段（与 portfolio-mgr 同维度对齐用于双视角对比）
                 // 旧字段保留: trader_direction/trader_target_price/trader_stop_loss 供 f7 兼容路径
-                // trader Json 模式输出：{action, verdict, positionPct, confidence, riskLevel, currentPrice,
-                //   targetPrice, stopLoss, stopLossPct, takeProfitPct, timeHorizon, expectedHoldingDays,
-                //   data_gaps, evidence_cited, risk_factors, decision_trail, lessons_applied, reasoning}
-                ("trader_action", "trader.content.action"),
-                ("trader_direction", "trader.content.verdict"),
-                ("trader_confidence", "trader.content.confidence"),
+                // 2026-09-09: trader content parse 后为 {report, verdict:{action, confidence, ...}}，
+                // 结构化字段全部在 verdict 层
+                ("trader_action", "trader.content.verdict.action"),
+                ("trader_direction", "trader.content.verdict.verdict"),
+                ("trader_confidence", "trader.content.verdict.confidence"),
                 // currentPrice: 从 t-scoring 工具节点（get_stock_quote）获取，可靠数据源。
                 // 不用 trader.content.currentPrice，因为 LLM 不一定输出该字段。
-                ("current_price", "t-scoring.result.currentPrice"),
-                ("trader_target_price", "trader.content.targetPrice"),
-                ("trader_stop_loss", "trader.content.stopLoss"),
-                ("trader_time_horizon", "trader.content.timeHorizon"),
-                ("trader_holding_days", "trader.content.expectedHoldingDays"),
+                ("current_price", "t-scoring.result.content.currentPrice"),
+                ("trader_target_price", "trader.content.verdict.targetPrice"),
+                ("trader_stop_loss", "trader.content.verdict.stopLoss"),
+                ("trader_time_horizon", "trader.content.verdict.timeHorizon"),
+                ("trader_holding_days", "trader.content.verdict.expectedHoldingDays"),
                 // V65 新增: trader 6 维度对比字段（f7 可消费更丰富的 LLM 信号）
-                ("trader_position_pct", "trader.content.positionPct"),
-                ("trader_risk_level", "trader.content.riskLevel"),
-                ("trader_stop_loss_pct", "trader.content.stopLossPct"),
-                ("trader_take_profit_pct", "trader.content.takeProfitPct"),
-                ("trader_data_gaps", "trader.content.data_gaps"),
-                ("trader_evidence_count", "trader.content.evidence_cited"),
+                ("trader_position_pct", "trader.content.verdict.positionPct"),
+                ("trader_risk_level", "trader.content.verdict.riskLevel"),
+                ("trader_stop_loss_pct", "trader.content.verdict.stopLossPct"),
+                ("trader_take_profit_pct", "trader.content.verdict.takeProfitPct"),
+                ("trader_data_gaps", "trader.content.verdict.data_gaps"),
+                ("trader_evidence_count", "trader.content.verdict.evidence_cited"),
                 // V50 修复: 接入 risk-convergence 的三方风险分歧度
                 // 避免该 LLM 节点（约5-10s）的输出被浪费
-                ("risk_disagreement", "risk-convergence.content.disagreement_score"),
+                ("risk_disagreement", "risk-convergence.content.verdict.disagreement_score"),
                 // V51 新增: 估值因子数据源
                 // t-valuation 输出 DCF/格雷厄姆上行空间，用于 f5_signal 估值因子
-                ("valuation_dcf_upside", "t-valuation.result.dcf.upsidePct"),
-                ("valuation_graham_upside", "t-valuation.result.graham.upsidePct"),
-                ("valuation_fscore", "t-valuation.result.fScore.score"),
-                ("valuation_moat", "t-valuation.result.moat.label"),
+                // 2026-09-09: 穿透 .content（工具端已补 dcf/graham/fScore camelCase 别名块）
+                ("valuation_dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
+                ("valuation_graham_upside", "t-valuation.result.content.graham.upsidePct"),
+                ("valuation_fscore", "t-valuation.result.content.fScore.score"),
+                ("valuation_moat", "t-valuation.result.content.moat.label"),
                 // V52 新增: t-risk 算法风险分类数据源
                 // 用确定性算法替代 cls-risk-level 的 LLM 分类器（消除 LLM 不一致性）
-                // t-risk 是 ToolNode, stockRiskProfile 在 result 中
-                ("risk_volatility", "t-risk.result.stockRiskProfile.annualizedVolatilityPct"),
-                ("risk_drawdown", "t-risk.result.stockRiskProfile.maxDrawdownPct"),
-                ("risk_sharpe", "t-risk.result.stockRiskProfile.sharpeRatio"),
-                ("risk_roe", "t-risk.result.stockRiskProfile.roeTTMPct"),
-                ("risk_gross_margin", "t-risk.result.stockRiskProfile.grossMarginPct"),
-                ("risk_debt_ratio", "t-risk.result.stockRiskProfile.debtRatioPct"),
-                ("risk_revenue_growth", "t-risk.result.stockRiskProfile.revenueGrowthYoYPct"),
-                ("risk_pe", "t-risk.result.stockRiskProfile.peTTM"),
+                // t-risk 是 ToolNode, stockRiskProfile 在 result.content 中
+                (
+                    "risk_volatility",
+                    "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
+                ),
+                ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
+                ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
+                ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
+                ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
+                ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
+                (
+                    "risk_revenue_growth",
+                    "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
+                ),
+                ("risk_pe", "t-risk.result.content.stockRiskProfile.peTTM"),
                 // V53 修复: 从瓶颈掘金工作流传入的上下文标记
                 // 告诉 portfolio-mgr"当前分析的股票来自 Serenity 筛选",
                 // 允许风险分类器对瓶颈股特征（高波动/扩张期）做评分修正
@@ -2364,19 +2487,20 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // ── P1 新增: 资金面因子 f9 数据源 ──
                 // t-hotmoney-data 输出 get_stock_money_flow 的 JSON 字符串
                 // Rhai 中用 json_parse() 解析后提取主力净流入占比
-                ("money_flow", "t-hotmoney-data.result"),
+                // 2026-09-09: 数据在 result.content 字符串中，终值保持字符串原样
+                ("money_flow", "t-hotmoney-data.result.content"),
                 // ── P1 新增: 筹码面因子 f10 数据源 ──
                 // t-lockup-data 输出 get_stock_lockup_bundle 的 JSON 字符串
                 // 含解禁/增减持/大宗交易三方信息
-                ("lockup_bundle", "t-lockup-data.result"),
+                ("lockup_bundle", "t-lockup-data.result.content"),
                 // ── P2 新增: 龙虎榜数据源（f10 筹码面增强）──
                 // t-dragon-tiger-data 输出 get_stock_dragon_tiger 的 JSON 字符串
                 // 含机构席位买卖、游资动向、上榜原因等
-                ("dragon_tiger", "t-dragon-tiger-data.result"),
+                ("dragon_tiger", "t-dragon-tiger-data.result.content"),
                 // ── P2 新增: 公告风险信号（f3 催化剂增强）──
                 // t-catalyst-data 输出 get_stock_announcements 的 JSON 字符串
                 // 含公告标题/类型/日期，用于关键词风险检测
-                ("announcements", "t-catalyst-data.result"),
+                ("announcements", "t-catalyst-data.result.content"),
                 // ── V55 新增: 上游 strict_mode 兜底哨兵 ──
                 // 每个 AgentNode 在 strict_mode 降级时会在顶层注入 __untrusted=true。
                 // portfolio-mgr.rhai 累加这些哨兵，任意一个为 true 即触发 weights_collapsed
@@ -2394,9 +2518,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // P2-2: pace 降级标志（valid_event_count==0 时 pace-calc 设置）
                 ("pace_degraded", "pace-calc.result.pace_degraded"),
                 // ── 技术否决（technical-veto）输入：从 t-scoring 的完整指标获取 ──
-                ("rsi_14", "t-scoring.result.indicators.rsi14"),
-                ("macd_dif", "t-scoring.result.indicators.macdDif"),
-                ("macd_dea", "t-scoring.result.indicators.macdDea"),
+                ("rsi_14", "t-scoring.result.content.indicators.rsi14"),
+                ("macd_dif", "t-scoring.result.content.indicators.macdDif"),
+                ("macd_dea", "t-scoring.result.content.indicators.macdDea"),
                 // ── 市场模拟门（S-501~503）：core.rs 从个股 K 线注入的模拟指标 ──
                 ("sim_stability", "sim_stability"),
                 ("sim_liquidity", "sim_liquidity"),
@@ -2470,9 +2594,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // portfolio-mgr 的完整 result 对象（保留所有字段，覆盖调整字段）
                 ("pm_result", "portfolio-mgr.result"),
                 // 当前价（用于计算新增仓位市值 + 空头检测）
-                ("current_price", "t-scoring.result.currentPrice"),
+                // 2026-09-09: ToolNode result 为 {content: <json_string>, tool_name}，穿透 .content
+                ("current_price", "t-scoring.result.content.currentPrice"),
                 // 目标价（用于空头检测：target < current × 0.85 → 强制卖出）
-                ("target_price", "trader.content.targetPrice"),
+                // trader content parse 后为 {report, verdict}，targetPrice 在 verdict 层
+                ("target_price", "trader.content.verdict.targetPrice"),
                 // 工作流变量（core.rs 注入）
                 ("stock_code", "stock_code"),
                 ("stock_sector", "stock_sector"),
@@ -2617,12 +2743,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 execute_directly: true,
                 input_mapping: [
                     // 主事件源：公告数据（fallback 路径，pace-calc 会从中提取 event_type）
-                    ("announcement_events", "t-catalyst-data.result"),
+                    // 2026-09-09: 数据在 result.content 字符串中（终值保持字符串原样，
+                    // pace-calc.rhai 按契约 json_parse）
+                    ("announcement_events", "t-catalyst-data.result.content"),
                     // 资金流向数据（用于背离修正）
-                    // t-hotmoney-data.result 的 JSON 结构含 main_net_inflow / history（近5日）
-                    ("money_flow_net", "t-hotmoney-data.result.main_net_inflow"),
+                    // 2026-09-09: MoneyFlow 序列化为 camelCase（mainNetInflow），
+                    // 且数据在 result.content 字符串层
+                    ("money_flow_net", "t-hotmoney-data.result.content.mainNetInflow"),
                     // 资金流向历史序列（近5日，含当日），用于趋势背离判断
-                    ("money_flow_history", "t-hotmoney-data.result.history"),
+                    // 注：当前 get_money_flow 实现只返回最新一日（无 history 字段），
+                    // 此映射取不到值时 pace-calc 按缺失降级
+                    ("money_flow_history", "t-hotmoney-data.result.content.history"),
                     // 板块 ETF 资金流向（用于协同增强）- 暂未接入
                     ("sector_etf_direction", ""),
                     // 历史 P 值 - 暂未接入（需要 upstream LLM 长期输出）
@@ -2714,7 +2845,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v10: rule-check（LLM）失败时仍派发 switch——其 input_var 是
+            // data-quality.result.grade（确定性节点输出），与 rule-check 无关，
+            // 可正常路由；rule-check 输出缺失由下游 context_sources 静默跳过兜底。
+            continue_on_fail: true,
         },
         config: SwitchNodeConfig {
             // data-quality 是 CodeNode（Rhai），输出结构为
@@ -2744,6 +2878,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         let fq_y = 4500.0;
         let mut fq = agent(fq_id, fq_title, "quality-fallback", None, 20.0, fq_y);
         if let WorkflowNode::Agent(ref mut a) = fq {
+            // v10: quality-gate 自身失败（如 data-quality 失败致 grade 缺失）时，
+            // switch 的两条出边依赖 source Failed + target cof 才能放行——本节点与
+            // decision-explainer 必须同时 cof=true，否则 default 分支永久 Pending。
+            a.base.continue_on_fail = true;
             a.config.context_sources = vec![
                 "rule-check".into(),
                 "data-quality".into(),
@@ -2804,6 +2942,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         let de_title = "决策解释：将硬裁决结果翻译为自然语言说明书，附带规则追溯码";
         let mut de = agent(de_id, de_title, "explainer", None, 700.0, 4400.0);
         if let WorkflowNode::Agent(ref mut a) = de {
+            // v10: explainer 是全链失败率最高的节点（LLM + input_mapping 依赖
+            // portfolio-risk-gate），其失败绝不能阻断 notify/store/end——决策已由
+            // portfolio-risk-gate 硬裁决产出，explainer 只是"翻译说明书"（增强信息）。
+            // 同时与 quality-fallback cof=true 配对，覆盖 switch 失败场景（见上）。
+            a.base.continue_on_fail = true;
             a.config.context_sources = vec![
                 "portfolio-risk-gate".into(),
                 "rule-check".into(),
@@ -2891,7 +3034,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v10: 通知发送失败不应阻断 store-result/end-output（消息固定文本，
+            // 无下游消费其输出）。
+            continue_on_fail: true,
         },
         config: NotificationNodeConfig {
             channel: "system".into(),
@@ -2918,7 +3063,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v10: 持久化失败（已带 retry 2）不应阻断 end-output——最终输出直接取
+            // portfolio-risk-gate，不消费 storage-result。
+            continue_on_fail: true,
         },
         config: StorageNodeConfig {
             backend: "sqlite".into(),
@@ -2945,7 +3092,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             enabled: true,
             parent_id: None,
             compensation: None,
-            continue_on_fail: false,
+            // v10: store-result 失败时仍提升 portfolio-risk-gate 输出为顶层结果，
+            // 保证工作流正常 Completed 且决策可达前端。
+            continue_on_fail: true,
         },
         config: EndNodeConfig { output_var: Some("portfolio-risk-gate".into()) },
     }));

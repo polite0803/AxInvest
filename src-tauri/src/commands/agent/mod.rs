@@ -925,7 +925,10 @@ pub async fn agent_query(
             if fb_prov.id == prov.id || !fb_prov.enabled {
                 continue;
             }
-            if let Some(fb_key) = fb_prov.keys.iter().find(|k| k.enabled) {
+            // 2026-09-10：改走 get_active_key 轮询，与全局取 key 语义一致——
+            // 此前固定取第一把启用 key，多账号备用 provider 退化时不轮换。
+            if let Ok(fb_key) = provider::get_active_key(app_state.harness.db(), &fb_prov.id).await
+            {
                 if let Ok(fb_api_key) = axagent_crypto::decrypt_key(
                     &fb_key.key_encrypted,
                     app_state.harness.master_key(),

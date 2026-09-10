@@ -902,7 +902,10 @@ impl LlmReasoningProvider for ProviderAdapterBridge {
             ],
             stream: false,
             temperature: Some(0.3),
-            max_tokens: Some(64),
+            // P0 FIX (2026-09-08): 64 → 512。思考型模型（agnes-3.0-flash 等）思维链
+            // 即可耗尽 64 tokens，finish_reason=length、content 恒为空，评分恒失败。
+            // 与 llm_classifier_executor.rs / llm_bridge.rs 同语义修复。
+            max_tokens: Some(512),
             top_p: None,
             tools: None,
             thinking_budget: None,

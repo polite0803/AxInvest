@@ -753,62 +753,47 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
-        // 修复(2026-07-22): 原 push2.eastmoney.com/api/qt/stock/fflow/kline/get
-        // 已失效(IncompleteMessage)。改用 datacenter-web.eastmoney.com 的
-        // RPT_F10_HOMEPAGE_FUND_FLOW 报表(东方财富 F10 资金流向页面数据源)。
+        // 修复(2026-09-10): RPT_F10_HOMEPAGE_FUND_FLOW 报表已从 datacenter-web 下线
+        // (返回 data:null)，f9 资金流信号因此断粮 3 个月。
+        // 改回 push2his.eastmoney.com/api/qt/stock/fflow/daykline/get —— 2026-09-10 实测可用
+        // (2026-07-22 弃用时的 IncompleteMessage 故障已消失，push2his 现走 IPv4 直连正常)。
         //
-        // 字段映射:
-        //   - TRADE_DATE: 交易日期
-        //   - MAIN_NET_INFLOW: 主力净流入
-        //   - SUPER_LARGE_NET_INFLOW: 超大单净流入
-        //   - LARGE_NET_INFLOW: 大单净流入
-        //   - MEDIUM_NET_INFLOW: 中单净流入
-        //   - SMALL_NET_INFLOW: 小单净流入
-        let code =
-            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        // klines CSV 字段映射(fields2=f51..f56，单位: 元):
+        //   f51=日期 f52=主力净流入 f53=小单净流入 f54=中单净流入 f55=大单净流入 f56=超大单净流入
+        //   自洽校验: 主力(f52) = 超大单(f56) + 大单(f55)，全单和为零
+        let secid = to_em_secid(stock_code);
         let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-            reportName=RPT_F10_HOMEPAGE_FUND_FLOW&columns=ALL&\
-            filter=(SECURITY_CODE%3D%22{code}%22)&\
-            pageSize=5&pageNumber=1&source=WEB&\
-            sortColumns=TRADE_DATE&sortTypes=-1"
+            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?\
+            lmt=5&klt=101&fields1=f1,f2,f3,f7&\
+            fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65&\
+            secid={secid}"
         );
 
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
 
-        let rows = match json["result"]["data"].as_array() {
+        let klines = match json["data"]["klines"].as_array() {
             Some(arr) if !arr.is_empty() => arr,
+            // data:null = 该股无资金流数据（如北交所部分标的），显式区分于网络错误
             _ => return Ok(None),
         };
 
-        // 第一条为最新交易日数据，其余 4 条为历史数据（已按 TRADE_DATE 降序排列）。
-        // 旧实现只取 rows[0] 丢弃了 4 天数据，但 prompt 要求"连续 3-5 日趋势"分析，
-        // 因此把所有行都映射到 history 字段（第 0 条同时映射到顶层字段，保持兼容）。
-        let parse_row = |r: &Value| -> MoneyFlowDaily {
-            let date = r["TRADE_DATE"]
-                .as_str()
-                .unwrap_or("")
-                .split_whitespace()
-                .next()
-                .unwrap_or("")
-                .to_string();
-            let f = |key: &str| -> f64 {
-                r[key]
-                    .as_f64()
-                    .or_else(|| r[key].as_str().and_then(|s| s.parse().ok()))
-                    .unwrap_or(0.0)
-            };
+        // 按 f51 日期降序（最新在前）。第 0 条映射到顶层字段，全部 5 条入 history
+        // （prompt 要求"连续 3-5 日趋势"分析）。
+        let parse_row = |line: &str| -> MoneyFlowDaily {
+            let parts: Vec<&str> = line.split(',').collect();
+            let f = |i: usize| -> f64 { parts.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0) };
             MoneyFlowDaily {
-                date,
-                main_net_inflow: f("MAIN_NET_INFLOW"),
-                super_large_net: f("SUPER_LARGE_NET_INFLOW"),
-                large_net: f("LARGE_NET_INFLOW"),
-                medium_net: f("MEDIUM_NET_INFLOW"),
-                small_net: f("SMALL_NET_INFLOW"),
+                date: parts.first().unwrap_or(&"").to_string(),
+                main_net_inflow: f(1),
+                small_net: f(2),
+                medium_net: f(3),
+                large_net: f(4),
+                super_large_net: f(5),
             }
         };
-        let history: Vec<MoneyFlowDaily> = rows.iter().map(parse_row).collect();
+        let history: Vec<MoneyFlowDaily> =
+            klines.iter().filter_map(|v| v.as_str()).map(parse_row).collect();
         let latest = &history[0];
         Ok(Some(MoneyFlow {
             date: latest.date.clone(),
@@ -1709,6 +1694,15 @@ impl StockVendor for EastMoneyVendor {
                     for n in news {
                         let key = n.title.trim().to_string();
                         if !key.is_empty() && seen_titles.insert(key) {
+                            // 噪声过滤(2026-09-08): 行业名搜索(如"信息技术")会命中
+                            // ETF/基金类行情资讯(如"港股通信息技术ETF")。这类内容
+                            // 永远不是政策新闻,必须在收集阶段剔除——否则政策关键词
+                            // 过滤失败后,兜底路径会把基金资讯当"政策新闻"喂给
+                            // a-policy 分析师(实测缺陷)。
+                            let hay = format!("{} {}", n.title, n.summary);
+                            if NOISE_KEYWORDS.iter().any(|kw| hay.contains(kw)) {
+                                continue;
+                            }
                             all_news.push(n);
                         }
                     }
@@ -1750,6 +1744,10 @@ impl StockVendor for EastMoneyVendor {
             "常务会议",
         ];
 
+        // 噪声关键词(2026-09-08): ETF/基金类资讯永远不是政策新闻,
+        // 在收集阶段直接剔除(见上方循环内注释)。
+        const NOISE_KEYWORDS: &[&str] = &["ETF", "etf", "基金", "净值", "份额折算", "LOF"];
+
         let is_policy_related = |n: &NewsItem| {
             let haystack = format!("{} {}", n.title, n.summary);
             POLICY_KEYWORDS.iter().any(|kw| haystack.contains(kw))
@@ -1764,12 +1762,26 @@ impl StockVendor for EastMoneyVendor {
             filtered
         } else if !all_news.is_empty() {
             // 兜底:无政策相关但行业新闻非空 → 返回全部行业新闻让 LLM 判断
-            // (避免工具返回空导致 a-policy 节点无数据可用)
+            // (避免工具返回空导致 a-policy 节点无数据可用)。
+            // 2026-09-08 修复:每条打上兜底标记,让下游分析师明确知道这些是
+            // "未命中政策关键词的行业资讯",不是政策新闻命中——防止把行业资讯
+            // 误当成政策原文引用导致上游数据偏差(实测缺陷:军工股收到
+            // "港股通信息技术ETF"资讯被当作政策数据分析)。
             tracing::debug!(
-                "[get_policy_news] 政策关键词过滤后为空,返回全部行业新闻({}条)供 LLM 判断",
+                "[get_policy_news] 政策关键词过滤后为空,返回带兜底标记的行业新闻({}条)供 LLM 判断",
                 all_news.len()
             );
             all_news
+                .iter()
+                .map(|n| {
+                    let mut marked = n.clone();
+                    marked.summary = format!(
+                        "【兜底数据·未命中政策关键词,仅为该行业近期资讯】{}",
+                        marked.summary
+                    );
+                    marked
+                })
+                .collect()
         } else {
             vec![]
         };
@@ -2638,17 +2650,54 @@ impl StockVendor for EastMoneyVendor {
         };
         Ok(reports
             .iter()
-            .map(|r| ResearchReport {
-                title: r["title"].as_str().unwrap_or("").to_string(),
-                institution: r["orgSName"].as_str().unwrap_or("").to_string(),
-                analyst: r["researcher"].as_str().map(|s| s.to_string()),
-                rating: r["emRatingName"].as_str().map(|s| s.to_string()),
-                target_price: None,
-                eps_forecast: Vec::new(),
-                publish_date: r["publishDate"].as_str().unwrap_or("").to_string(),
-                pdf_url: r["infoCode"]
-                    .as_str()
-                    .map(|s| format!("https://pdf.dfcfw.com/pdf/H3_{}_1.pdf", s)),
+            .map(|r| {
+                // 2026-09-08 修复: as-of 路径原先硬编码 eps_forecast: Vec::new() +
+                // target_price: None,与 live 路径(get_research_reports)不对齐,
+                // 导致回放模式下所有研报 epsForecast 全空、目标价恒 null,
+                // 下游 a-research 分析师报"数据缺口"。此处解析逻辑必须与
+                // live 路径保持一致(predictThisYearEps/NextYear/NextTwoYearEps
+                // + 目标价 = 预测PE × 预测EPS)。上游字段变更时两处同步改。
+                let mut eps_forecast = Vec::new();
+                let mut this_year_eps: Option<f64> = None;
+                if let Some(eps) = r["predictThisYearEps"].as_str() {
+                    if let Ok(val) = eps.parse::<f64>() {
+                        eps_forecast.push(EpsForecast { year: "今年".into(), eps: Some(val) });
+                        this_year_eps = Some(val);
+                    }
+                }
+                if let Some(eps) = r["predictNextYearEps"].as_str() {
+                    if let Ok(val) = eps.parse::<f64>() {
+                        eps_forecast.push(EpsForecast { year: "明年".into(), eps: Some(val) });
+                    }
+                }
+                if let Some(eps) = r["predictNextTwoYearEps"].as_str() {
+                    if let Ok(val) = eps.parse::<f64>() {
+                        eps_forecast.push(EpsForecast { year: "后年".into(), eps: Some(val) });
+                    }
+                }
+                let target_price = if let (Some(eps), Some(pe_str)) =
+                    (this_year_eps, r["predictThisYearPe"].as_str())
+                {
+                    pe_str
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|&pe| pe > 0.0 && eps > 0.0)
+                        .map(|pe| pe * eps)
+                } else {
+                    None
+                };
+                ResearchReport {
+                    title: r["title"].as_str().unwrap_or("").to_string(),
+                    institution: r["orgSName"].as_str().unwrap_or("").to_string(),
+                    analyst: r["researcher"].as_str().map(|s| s.to_string()),
+                    rating: r["emRatingName"].as_str().map(|s| s.to_string()),
+                    target_price,
+                    eps_forecast,
+                    publish_date: r["publishDate"].as_str().unwrap_or("").to_string(),
+                    pdf_url: r["infoCode"]
+                        .as_str()
+                        .map(|s| format!("https://pdf.dfcfw.com/pdf/H3_{}_1.pdf", s)),
+                }
             })
             .collect())
     }

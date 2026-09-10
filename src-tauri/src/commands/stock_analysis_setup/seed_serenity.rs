@@ -80,7 +80,10 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //      a-candidate-mapper 原始输出。
     // v47: 对话式主题荐股——新增 user_themes 变量 + a-trend-scanner 输入分支
     //      + prompt 增加用户主题优先指令
-    const TEMPLATE_VERSION: i32 = 47;
+    // v48: 全部 Agent 节点 stream_chunk_timeout_secs 120s→300s（对齐 stock-analysis 模板）。
+    //      a-chain-trend1 等大上下文节点 TTFB 偶发 >120s，默认值导致 TIMEOUT 失败
+    //      （2026-09-09 实证：chunk timeout after 120s, round 2/8）。
+    const TEMPLATE_VERSION: i32 = 48;
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -571,7 +574,10 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
                 }),
                 fallback_model: None,
                 task_scene: None,
-                stream_chunk_timeout_secs: None,
+                // stream_chunk_timeout_secs: 300s（5 分钟）— 默认 120s 在大上下文
+                // （产业链拆解 5 路并行 context）下偶发 TTFB >120s 触发 TIMEOUT，
+                // 与 stock-analysis 模板（seed_stock_analysis.rs agent 闭包）保持一致。
+                stream_chunk_timeout_secs: Some(300),
             },
         })
     };

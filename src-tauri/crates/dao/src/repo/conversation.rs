@@ -87,9 +87,24 @@ async fn attach_workspace_dirs(
     Ok(convs)
 }
 
+/// 内部占位会话的固定标题。
+///
+/// `agent_sessions.conversation_id` 有 FK 指向 conversations 表，工作流节点 /
+/// MCP agent_run / subagent 等内部执行没有真实用户会话，upsert 时会以本标题
+/// 兜底插入占位行。这类行零消息、对用户不可见：列表层过滤（list_conversations），
+/// 物理清理交给 cleanup_placeholder_conversations（启动时 + 节点 turn 结束时）。
+pub const AUTO_PLACEHOLDER_TITLE: &str = "[auto]";
+
 pub async fn list_conversations(db: &DatabaseConnection) -> Result<Vec<Conversation>> {
     let rows = conversations::Entity::find()
         .filter(conversations::Column::IsArchived.eq(0))
+        // 排除内部占位会话：标题为 '[auto]' 且零消息（真实用户会话标题由用户/自动命名产生，
+        // 不会是这个值；一旦占位行产生了消息则视为有效会话，不再过滤）
+        .filter(
+            Condition::any()
+                .add(conversations::Column::Title.ne(AUTO_PLACEHOLDER_TITLE))
+                .add(conversations::Column::MessageCount.gt(0)),
+        )
         .order_by_desc(conversations::Column::IsPinned)
         .order_by_desc(conversations::Column::UpdatedAt)
         .all(db)
@@ -97,6 +112,34 @@ pub async fn list_conversations(db: &DatabaseConnection) -> Result<Vec<Conversat
 
     let convs: Vec<Conversation> = rows.into_iter().map(conversation_from_entity).collect();
     attach_workspace_dirs(db, convs).await
+}
+
+/// 删除指定 id 的内部占位会话（仅当 title='[auto]' 时生效，防误删真实会话）。
+///
+/// FK `agent_sessions.conversation_id → conversations.id` 为 ON DELETE CASCADE，
+/// 删除会话行会联动清理对应 agent_sessions 行。供工作流节点 turn 结束后
+/// 即时清理占位行（防止每节点一条空会话无限堆积）。
+pub async fn delete_placeholder_conversation(db: &DatabaseConnection, id: &str) -> Result<u64> {
+    let res = conversations::Entity::delete_many()
+        .filter(conversations::Column::Id.eq(id))
+        .filter(conversations::Column::Title.eq(AUTO_PLACEHOLDER_TITLE))
+        .filter(conversations::Column::MessageCount.eq(0))
+        .exec(db)
+        .await?;
+    Ok(res.rows_affected)
+}
+
+/// 物理清理全部内部占位会话（title='[auto]' 且零消息），返回删除条数。
+///
+/// 启动时调用一次，兜底清理运行期残留（如进程在节点执行中途退出）。
+/// 注意：SQLite 需连接开启 foreign_keys 才会级联删 agent_sessions（PG 默认生效）。
+pub async fn cleanup_placeholder_conversations(db: &DatabaseConnection) -> Result<u64> {
+    let res = conversations::Entity::delete_many()
+        .filter(conversations::Column::Title.eq(AUTO_PLACEHOLDER_TITLE))
+        .filter(conversations::Column::MessageCount.eq(0))
+        .exec(db)
+        .await?;
+    Ok(res.rows_affected)
 }
 
 pub async fn list_archived_conversations(db: &DatabaseConnection) -> Result<Vec<Conversation>> {

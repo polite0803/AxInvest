@@ -2319,6 +2319,18 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
     tracing::info!("[startup] 开始后台延迟初始化（首帧已显示）...");
     let t0 = std::time::Instant::now();
 
+    // ── 0. 清理内部占位空会话（工作流节点/MCP/subagent 的 '[auto]' FK 兜底行）──
+    // 兜底上次运行期残留（正常路径由 agent_turn_adapter 在节点 turn 结束时即时清理）
+    match axagent_dao::repo::conversation::cleanup_placeholder_conversations(app_state.harness.db())
+        .await
+    {
+        Ok(n) if n > 0 => {
+            tracing::info!(count = n, "[startup] 已清理 {n} 条内部占位空会话")
+        },
+        Ok(_) => {},
+        Err(e) => tracing::warn!("[startup] 占位会话清理失败（不阻塞）: {e}"),
+    }
+
     // ── 1. MemoryService FTS5 初始化 ──
     match app_state.memory_service.write().await.initialize().await {
         Ok(_) => {

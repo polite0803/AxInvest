@@ -46,17 +46,22 @@ fn safe_parse(raw) {
 }
 
 // extract_conf: 从 verdict map 中提取 confidence 数值
-// 支持两种格式：
+// 支持三种格式：
 //   扁平: {"verdict":"看多", "confidence":70, ...}
 //   嵌套: {"report":"...", "verdict":{"confidence":85, ...}}
+//   JSON 字符串: 上述任一格式的字符串形式（V68 修复(2026-09-10)：
+//     resolve_var_path 终值不 auto-parse，若上游映射到 .content 终值，
+//     rhai 收到的是 JSON 字符串而非 map，原实现恒返回 -1.0 导致
+//     催化剂分析师被恒判 missing。现先 safe_parse 再走 map 分支）
 // Rhai 1.25 64-bit: type_of(i64) == "i64"，不是 "int"
 fn extract_conf(v) {
-    if type_of(v) == "map" {
-        let c = v["confidence"];
+    let m = if type_of(v) == "string" { safe_parse(v) } else { v };
+    if type_of(m) == "map" {
+        let c = m["confidence"];
         if type_of(c) == "f64" { return c; }
         if type_of(c) == "i64" || type_of(c) == "int" { return c.to_float(); }
-        // 嵌套格式 fallback: v.verdict.confidence
-        let inner = v["verdict"];
+        // 嵌套格式 fallback: m.verdict.confidence
+        let inner = m["verdict"];
         if type_of(inner) == "map" {
             let ic = inner["confidence"];
             if type_of(ic) == "f64" { return ic; }
@@ -68,12 +73,13 @@ fn extract_conf(v) {
 
 // extract_dir: 从 verdict map 中提取方向分值
 // 返回 -1（看空/偏空）/ 0（中性/未知）/ +1（看多/偏多）
-// 支持两种格式：
+// 支持三种格式（V68 同 extract_conf：JSON 字符串先 safe_parse）：
 //   扁平: {"verdict":"看多", ...}
 //   嵌套: {"report":"...", "verdict":{"verdict":"偏空"}} 或 {"direction":"多"}
 fn extract_dir(v) {
-    if type_of(v) != "map" { return 0; }
-    let d = v["verdict"];
+    let m = if type_of(v) == "string" { safe_parse(v) } else { v };
+    if type_of(m) != "map" { return 0; }
+    let d = m["verdict"];
     if type_of(d) == "string" {
         if d.contains("看多") || d.contains("偏多") { return 1; }
         if d.contains("看空") || d.contains("偏空") { return -1; }

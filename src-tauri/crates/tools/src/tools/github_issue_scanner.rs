@@ -36,6 +36,27 @@ impl GitHubIssueScanner {
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .unwrap_or_default();
+        // DB 种子把 HTML 站点（https://github.com）存成了 base_url，会覆盖默认
+        // API 端点 → 请求打到 /search/issues 的网页版返回 404 HTML。只接受
+        // api.github.com（或其 http 变体），其余一律回退默认并告警。
+        let base_url = match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
+            Some(u)
+                if {
+                    let host = u.trim_start_matches("https://").trim_start_matches("http://");
+                    host.starts_with("api.github.com")
+                } =>
+            {
+                Some(u.to_string())
+            },
+            Some(u) => {
+                tracing::warn!(
+                    base_url = %u,
+                    "[GitHubIssueScanner] base_url 不是 API 端点，回退默认 api.github.com"
+                );
+                None
+            },
+            None => None,
+        };
         let token = token.or_else(|| std::env::var("GITHUB_TOKEN").ok());
         Self {
             http,
@@ -268,6 +289,24 @@ mod tests {
         let scanner_with_token = GitHubIssueScanner::with_token("test_token".to_string());
         let headers = scanner_with_token.build_headers();
         assert!(headers.contains_key("Authorization"));
+    }
+
+    #[test]
+    fn test_with_config_base_url_sanitized() {
+        // DB 种子存的 HTML 站点 base_url 必须回退到 API 端点（404 HTML 根因）
+        let scanner = GitHubIssueScanner::with_config(None, Some("https://github.com".to_string()));
+        assert_eq!(scanner.base_url, "https://api.github.com");
+
+        // 合法 API 端点透传
+        let scanner =
+            GitHubIssueScanner::with_config(None, Some("https://api.github.com".to_string()));
+        assert_eq!(scanner.base_url, "https://api.github.com");
+
+        // 空串 / None 同样回退默认
+        let scanner = GitHubIssueScanner::with_config(None, Some("  ".to_string()));
+        assert_eq!(scanner.base_url, "https://api.github.com");
+        let scanner = GitHubIssueScanner::with_config(None, None);
+        assert_eq!(scanner.base_url, "https://api.github.com");
     }
 
     #[tokio::test]

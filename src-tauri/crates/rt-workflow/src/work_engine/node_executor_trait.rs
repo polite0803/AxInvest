@@ -131,6 +131,32 @@ impl From<NodeError> for serde_json::Value {
     }
 }
 
+/// 判断错误是否为不可重试的确定性失败。
+///
+/// 这些错误码代表模板/配置/权限类的确定性问题：同样的输入重试必然复现同样的失败，
+/// 重试只会拉长整体耗时并放大供应商限流（2026-09-08 实证：a-fundamentals 因
+/// `{{market_regime}}` 变量缺失连续 4 次重试全废，浪费 ~90s 并把分析师波拉长到 182s）。
+///
+/// 匹配规则：错误消息形如 `"CODE: detail"`，取首个 `:` 前的码段精确比对。
+/// 超时（TIMEOUT）与网络/供应商类错误（LLM_CALL_FAILED 等）不在清单内，仍可重试。
+pub fn is_non_retryable_error(err_msg: &str) -> bool {
+    const NON_RETRYABLE: &[&str] = &[
+        error_code::VARIABLE_NOT_FOUND,
+        error_code::VALIDATION_FAILED,
+        error_code::PERMISSION_DENIED,
+        error_code::AGENT_PROFILE_NOT_FOUND,
+        error_code::MODEL_NOT_CONFIGURED,
+        error_code::API_KEY_DECRYPT_FAILED,
+        error_code::TOOL_NOT_CONFIGURED,
+        error_code::NODE_NOT_FOUND,
+        error_code::NODE_TYPE_MISMATCH,
+        error_code::UNSUPPORTED_NODE_TYPE,
+        error_code::EXECUTION_CANCELLED,
+    ];
+    let code = err_msg.split(':').next().unwrap_or("").trim();
+    NON_RETRYABLE.contains(&code)
+}
+
 // ── Trait ──
 
 /// 检查执行是否被取消或暂停。

@@ -27,6 +27,7 @@ fn platform_from_entity(m: opc_demand_platforms::Model) -> DemandPlatform {
         config: serde_json::from_str(&m.config_json).unwrap_or(serde_json::Value::Null),
         last_sync_at: m.last_sync_at,
         status: m.status,
+        last_error: m.last_error,
         created_at: m.created_at,
         updated_at: m.updated_at,
     }
@@ -135,6 +136,7 @@ pub async fn seed_default_platforms_if_empty(db: &DatabaseConnection) -> Result<
             .to_string()),
             last_sync_at: Set(None),
             status: Set("idle".to_string()),
+            last_error: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
         };
@@ -200,6 +202,7 @@ pub async fn save_platform(
                     .to_string()),
                 last_sync_at: Set(None),
                 status: Set("idle".to_string()),
+                last_error: Set(None),
                 created_at: Set(now),
                 updated_at: Set(now),
             };
@@ -215,23 +218,45 @@ pub async fn delete_platform(db: &DatabaseConnection, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// 扫描结束后更新平台同步状态
-pub async fn mark_platform_synced(
+/// 单平台一轮扫描的回写结果
+#[derive(Debug, Clone)]
+pub enum PlatformScanOutcome {
+    /// 扫描成功：status=ok，清空 last_error，刷新 last_sync_at
+    Ok,
+    /// 合规跳过（无官方凭证等配置态，不是运行故障）：仅置 status=skipped，
+    /// 不动 last_error / last_sync_at
+    Skipped,
+    /// 扫描失败：status=error 并持久化失败原因（供前端平台配置页展示）
+    Error(Option<String>),
+}
+
+/// 扫描结束后按结果回写平台同步状态与异常原因
+pub async fn mark_platform_result(
     db: &DatabaseConnection,
     platform_id: &str,
-    ok: bool,
+    outcome: PlatformScanOutcome,
 ) -> Result<()> {
-    if let Some(existing) = opc_demand_platforms::Entity::find_by_id(platform_id).one(db).await? {
-        let mut am: opc_demand_platforms::ActiveModel = existing.into();
-        am.last_sync_at = Set(Some(now_ts()));
-        am.status = Set(if ok {
-            "ok".to_string()
-        } else {
-            "error".to_string()
-        });
-        am.updated_at = Set(now_ts());
-        am.update(db).await?;
+    let Some(existing) = opc_demand_platforms::Entity::find_by_id(platform_id).one(db).await?
+    else {
+        return Ok(());
+    };
+    let mut am: opc_demand_platforms::ActiveModel = existing.into();
+    match outcome {
+        PlatformScanOutcome::Ok => {
+            am.status = Set("ok".to_string());
+            am.last_error = Set(None);
+            am.last_sync_at = Set(Some(now_ts()));
+        },
+        PlatformScanOutcome::Skipped => {
+            am.status = Set("skipped".to_string());
+        },
+        PlatformScanOutcome::Error(err) => {
+            am.status = Set("error".to_string());
+            am.last_error = Set(err);
+        },
     }
+    am.updated_at = Set(now_ts());
+    am.update(db).await?;
     Ok(())
 }
 
@@ -377,6 +402,57 @@ pub async fn upsert_lead_within_window(
     };
     am.insert(db).await?;
     Ok(LeadWriteOutcome::Inserted)
+}
+
+/// LLM 精评结果（单条线索的评分覆盖载荷）
+#[derive(Debug, Clone)]
+pub struct LeadScoreRefinement {
+    pub pain_score: f64,
+    pub market_gap_score: f64,
+    pub commercial_value_score: f64,
+    pub confidence: f64,
+    pub demand_type: String,
+    /// 一句中文评估理由，写入 `raw_snapshot.llm_analysis`
+    pub llm_analysis: String,
+}
+
+/// LLM 精评结果回写：覆盖规则评分五列，并把评估理由合并进 `raw_snapshot`
+///
+/// 只更新评分维度，不动状态机（new/evaluated/...）与去重键。`llm_analysis`
+/// 写入 `raw_snapshot` JSON 的 `llm_analysis` 字段（增量字段进快照，不加列）。
+pub async fn refine_lead_scores(
+    db: &DatabaseConnection,
+    id: &str,
+    refinement: LeadScoreRefinement,
+) -> Result<()> {
+    let now = now_ts();
+    let existing = opc_demand_leads::Entity::find_by_id(id)
+        .one(db)
+        .await?
+        .ok_or_else(|| AxAgentError::Internal(format!("线索不存在: {id}")))?;
+
+    // raw_snapshot 是 JSON 字符串列：解析出对象合并 llm_analysis 后写回
+    //（解析失败 = 非对象快照，保持原值不动，评分照常覆盖）
+    let merged_snapshot =
+        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&existing.raw_snapshot)
+            .ok()
+            .map(|mut obj| {
+                obj.insert("llm_analysis".to_string(), serde_json::json!(refinement.llm_analysis));
+                serde_json::Value::Object(obj).to_string()
+            });
+
+    let mut am: opc_demand_leads::ActiveModel = existing.into();
+    am.pain_score = Set(refinement.pain_score);
+    am.market_gap_score = Set(refinement.market_gap_score);
+    am.commercial_value_score = Set(refinement.commercial_value_score);
+    am.confidence = Set(refinement.confidence);
+    am.demand_type = Set(refinement.demand_type);
+    am.updated_at = Set(now);
+    if let Some(snapshot) = merged_snapshot {
+        am.raw_snapshot = Set(snapshot);
+    }
+    am.update(db).await?;
+    Ok(())
 }
 
 /// 手动录入需求线索（P1-4：此前「手动补录」只有提示日志，`opc_create_lead`

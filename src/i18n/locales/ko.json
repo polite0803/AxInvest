@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "역량 격차 없음",
+      "deliveriesEmpty": "납품 기록이 없습니다. 리드 작업의 \"납품 실행\"으로 생성하세요",
+      "executeDelivery": "납품 실행",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "능동 스캔",
       "btnAnalyzeGaps": "갭 분석",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "상태 변경",
+      "delivery": "납품",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "최대 기능 캐시",
         "dbCleanupDays": "데이터베이스 정리 일수",
         "logLevel": "로그 수준: debug/info/warn/error",
-        "enableAnalytics": "분석 활성화"
+        "enableAnalytics": "분석 활성화",
+        "scanLlmEvalEnabled": "LLM 정밀 평가(고점 후보 재평가)",
+        "scanLlmEvalMaxLeads": "회당 정밀 평가 후보 상한",
+        "scanLlmEvalMinRuleScore": "정밀 평가 사전 필터(규칙 점수 ≥)"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "규정 준수 건너뜀"
       },
+      "platformSkippedHint": "공식 API 자격 증명이 구성되지 않아 규정 준수 정책에 따라 스캔을 건너뛰었습니다. 토큰을 구성하고 활성화하면 스캔됩니다.",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13571,6 +13565,14 @@
       "subscriptions": "구독",
       "addSubscription": "구독 추가",
       "manualEntry": "수동 등록",
+      "capabilityScan": "역량 기반 스캔",
+      "capabilityScanDesc": "로컬 역량 목록에서 검색어를 자동 생성하고 수요 마켓을 단어별로 스캔합니다(워크플로: 역량 스캔 → 검색어 계획 → 루프 스캔).",
+      "capabilityFocus": "집중 방향(선택)",
+      "capabilityFocusPlaceholder": "예: AI 앱 개발, 데이터 서비스. 비워 두면 역량 목록이 결정",
+      "capabilityMaxKeywords": "검색어 최대 수",
+      "capabilityScanStart": "스캔 시작",
+      "capabilityScanComplete": "역량 기반 스캔 완료, 리드가 새로 고침되었습니다",
+      "capabilityScanFailed": "역량 기반 스캔 실패: {{error}}",
       "leadCreateFailed": "리드 등록 실패: {{error}}",
       "leadFormTitle": "제목",
       "leadFormTitleRequired": "제목은 필수입니다",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "발행됨으로 표시",
       "delivMarkPaid": "결제됨으로 표시",
       "delivDelete": "삭제"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14372,7 +14383,8 @@
     "boolYes": "예",
     "boolNo": "아니오",
     "backendCallFailed": "백엔드 호출 실패",
-    "emptyHistoryWarning": "세레니티 히스토리가 비어 있습니다: list_reco_history가 0개 행을 반환했습니다 (DB에 serenity/bottleneck 스타일 히스토리가 없거나 백엔드 명령 실패가 조용히 무시되었을 수 있습니다)"
+    "emptyHistoryWarning": "세레니티 히스토리가 비어 있습니다: list_reco_history가 0개 행을 반환했습니다 (DB에 serenity/bottleneck 스타일 히스토리가 없거나 백엔드 명령 실패가 조용히 무시되었을 수 있습니다)",
+    "timeBasis": "시간 기준: {{date}} · 권장 기간 약 {{days}}일 (~{{until}})"
   },
   "trade": {
     "title": "Trading Log",
@@ -14963,7 +14975,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "핵심 밸류에이션 지표 (t-valuation)",
+      "currentPriceLabel": "현재가",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "해자 점수",
+      "oeYieldLabel": "OE 수익률",
+      "grahamUpsideLabel": "그레이엄 상승 여력",
+      "valueSignalLabel": "종합 판단",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "부채 비율",
+      "grossMarginLabel": "매출총이익률",
+      "revenueGrowthLabel": "매출 성장률"
     },
     "workflow": {
       "analyst": {
@@ -15016,6 +15039,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "보조 노드",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15077,7 +15101,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析师",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "분석 건너뛰기 중 오류 발생: {{reason}}"
     },
     "debugPanel": {
       "show": "표시",
@@ -15601,6 +15625,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "트렌드 픽 vs 분석 워크플로 · 시스템 간 불일치",
+      "timeBasis": "추천 시점 {{recoDate}} · 분석 시점 {{decisionDate}} (약 {{gapDays}}일 차이)",
+      "recoSays": "트렌드 픽 {{score}}점, 소량 포지션 {{position}}% 제안 ({{strategy}} 전략)",
+      "attentionHeat": "관심도: {{heat}}",
+      "workflowSays": "분석 워크플로 판정: {{action}}, 포지션 {{position}}%",
+      "divergenceNote": "두 시계가 다름 — 픽은 촉매 실현에 베팅(약 {{recoDays}}일), 워크플로는 현재 배당률로 평가(약 {{decisionDays}}일)",
+      "catalystLabel": "촉매({{confidence}}점)"
     },
     "compare": {
       "title": "Compare",
@@ -16355,7 +16388,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

@@ -1149,13 +1149,17 @@ pub async fn list_stock_analyses(
 }
 
 /// 获取单个分析详情
+///
+/// 返回 stock_analyses 行（camelCase 扁平结构）+ 附加 `dashboardReport`/`dashboardMd`
+/// 字段：DashboardReport 不持久化，此处从 blackboard_snapshot + decision_json 现场重建，
+/// 使重开历史分析时仪表盘 Tab 有数据（与 rerun_decision / workflow-completed 同源同构）。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取单个分析详情")]
 #[tauri::command]
 pub async fn get_stock_analysis(
     state: State<'_, AppState>,
     analysis_id: String,
-) -> Result<stock_analyses::Model, String> {
-    stock_analyses::Entity::find_by_id(&analysis_id)
+) -> Result<serde_json::Value, String> {
+    let model = stock_analyses::Entity::find_by_id(&analysis_id)
         .one(state.harness.db())
         .await
         .map_err(|e| {
@@ -1165,7 +1169,25 @@ pub async fn get_stock_analysis(
             ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!("分析记录不存在: {}", analysis_id))
                 .to_string()
-        })
+        })?;
+
+    let mut value = serde_json::to_value(&model).map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("序列化分析详情失败: {e}"))
+    })?;
+
+    // 重建 DashboardReport（失败静默降级为不附加字段，前端保持空态兜底）
+    if let Some((report, md)) =
+        crate::commands::stock_workflow::decision::build_dashboard_from_analysis_record(&model)
+    {
+        if let Some(obj) = value.as_object_mut() {
+            if let Ok(report_val) = serde_json::to_value(&report) {
+                obj.insert("dashboardReport".to_string(), report_val);
+            }
+            obj.insert("dashboardMd".to_string(), serde_json::Value::String(md));
+        }
+    }
+
+    Ok(value)
 }
 
 /// 删除历史分析记录

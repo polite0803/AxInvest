@@ -366,6 +366,18 @@ impl WorkEngine {
             .map(|(id, _)| id.as_str())
             .collect();
 
+        // 构建 Failed 状态节点集合与 continue_on_fail 索引（与非 typed 版
+        // compute_ready_nodes 的容错语义保持一致：source Failed 且 target
+        // 配置 continue_on_fail=true 时，该依赖边不阻塞下游调度）。
+        let failed_nodes: HashSet<&str> = workflow
+            .node_states
+            .iter()
+            .filter(|(_, s)| matches!(s.status, NodeStatus::Failed))
+            .map(|(id, _)| id.as_str())
+            .collect();
+        let continue_on_fail_map: HashMap<&str, bool> =
+            workflow.nodes.iter().map(|n| (n.base_id(), n.base_continue_on_fail())).collect();
+
         // ====== 第一遍扫描：标记"被激活控制边选中的 target" ======
         let mut selected_targets: HashSet<&str> = HashSet::new();
         for edge in &workflow.edges {
@@ -423,6 +435,14 @@ impl WorkEngine {
                 if selected_targets.contains(target_id)
                     && !matches!(edge.edge_type, EdgeType::ConditionTrue | EdgeType::ConditionFalse)
                 {
+                    continue;
+                }
+                // continue_on_fail 容错：source Failed 且 target 允许容错 → 不计入依赖
+                // （与非 typed 版 compute_ready_nodes 语义一致）
+                let source_failed = failed_nodes.contains(edge.source.as_str());
+                let target_continue_on_fail =
+                    continue_on_fail_map.get(target_id).copied().unwrap_or(false);
+                if source_failed && target_continue_on_fail {
                     continue;
                 }
                 *remaining_deps.entry(target_id).or_insert(0) += 1;

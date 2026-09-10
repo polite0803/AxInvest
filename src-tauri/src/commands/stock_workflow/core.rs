@@ -490,8 +490,12 @@ pub(crate) async fn run_stock_workflow_inner(
         resolve_runtime_options(loaded.variables.as_deref());
 
     let wf_name = format!("stock-analysis-{stock_code}");
-    let workflow =
-        engine.create_workflow(&wf_name, loaded.nodes, loaded.edges).await.map_err(|e| {
+    // 必须用 with_hooks 变体携带模板 hooks_config：否则 pre_exec 的
+    // stock-analysis-enhance 钩子不执行，market_regime 等业务变量永不注入
+    let workflow = engine
+        .create_workflow_with_hooks(&wf_name, loaded.nodes, loaded.edges, loaded.hooks_config)
+        .await
+        .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("创建工作流失败: {e}"))
         })?;
     let wf_id = workflow.id.clone();
@@ -533,6 +537,16 @@ pub(crate) async fn run_stock_workflow_inner(
                         // 修复: 透传 StepProgressEvent.error 真实错误，而非占位符 "Step failed"
                         "error": event.error.clone()
                             .unwrap_or_else(|| format!("Step {}", event.status)),
+                    }),
+                ),
+                // 流式增量（2026-09-08 修复）：AgentExecutor 每 2s 发一次，output 携带
+                // 累积文本。转发为 workflow-step-delta 供前端"边生成边显示"（辩论等长节点）。
+                "streaming" => (
+                    "workflow-step-delta",
+                    serde_json::json!({
+                        "conversationId": format!("wf-{}", wf_id),
+                        "stepId": event.node_id,
+                        "output": event.output,
                     }),
                 ),
                 _ => return, // 未知状态，忽略
@@ -620,6 +634,8 @@ pub(crate) async fn run_stock_workflow_inner(
             input_schema: input_schema.clone(),
             output_schema: output_schema.clone(),
             dry_run: dry_run.unwrap_or(false),
+            // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
+            tool_permissions: Some(super::strict_tool_permissions()),
             ..Default::default()
         };
         // 变量增强（market_regime/sim_metrics/holdings/sector/regime 偏向/
@@ -731,6 +747,23 @@ pub(crate) async fn run_stock_workflow_inner(
                         // 修复"决策信息缺失"误报:优先从 portfolio-mgr 节点本身
                         // 提取决策(见 extract_decision_json 注释),回退到 wf.output。
                         let decision_json = extract_decision_json(&result);
+                        // ── 跨系统互证（crossCheck）：Failed 降级路径同语义注入 ──
+                        // 与 completed 分支一致：部分节点失败不代表决策无效，
+                        // 互证字段照常生成，避免降级结论丢失智选对照信息。
+                        let decision_json =
+                            match super::hooks::fetch_reco_prior(&db, &stock_code, 14).await {
+                                Some(prior) => decision_json.map(|dj| {
+                                    let mut v: serde_json::Value = serde_json::from_str(&dj)
+                                        .unwrap_or(serde_json::Value::Null);
+                                    if v.is_object() {
+                                        super::hooks::inject_reco_crosscheck(&mut v, &prior);
+                                        v.to_string()
+                                    } else {
+                                        dj
+                                    }
+                                }),
+                                None => decision_json,
+                            };
                         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
                             extract_decision_fields(&decision_json);
                         let degradation_report = as_of::take_asof_degradation_report();
@@ -986,6 +1019,22 @@ pub(crate) async fn run_stock_workflow_inner(
                                 } else { dj }
                             })
                         } else { decision_json };
+                        // ── 跨系统互证（crossCheck）：与近 14 天智选推荐对照 ──
+                        // 该股近期被趋势智选命中（serenity/bottleneck）时，把推荐先验
+                        // 与本次工作流决策并列写入 crossCheck，前端渲染「分歧报告」。
+                        let decision_json = match super::hooks::fetch_reco_prior(&db, &stock_code, 14).await {
+                            Some(prior) => decision_json.map(|dj| {
+                                let mut v: serde_json::Value =
+                                    serde_json::from_str(&dj).unwrap_or(serde_json::Value::Null);
+                                if v.is_object() {
+                                    super::hooks::inject_reco_crosscheck(&mut v, &prior);
+                                    v.to_string()
+                                } else {
+                                    dj
+                                }
+                            }),
+                            None => decision_json,
+                        };
                         let (
                             action,
                             position_pct,
@@ -1442,8 +1491,11 @@ pub async fn run_single_stock_analysis(
 
     // 6. 创建并运行工作流
     let wf_name = format!("stock-analysis-{stock_code}-batch");
-    let workflow =
-        engine.create_workflow(&wf_name, loaded.nodes, loaded.edges).await.map_err(|e| {
+    // 同上：必须携带 hooks_config，pre_exec 钩子（enhance）才会注入业务变量
+    let workflow = engine
+        .create_workflow_with_hooks(&wf_name, loaded.nodes, loaded.edges, loaded.hooks_config)
+        .await
+        .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("创建工作流失败: {e}"))
         })?;
     let wf_id = workflow.id.clone();
@@ -1481,6 +1533,8 @@ pub async fn run_single_stock_analysis(
         output_schema: loaded.output_schema.clone(),
         dry_run: false,
         variables: None,
+        // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
+        tool_permissions: Some(super::strict_tool_permissions()),
         ..Default::default()
     };
 

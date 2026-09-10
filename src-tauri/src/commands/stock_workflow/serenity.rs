@@ -893,8 +893,11 @@ pub async fn run_serenity_screening(
 
     // 2. 创建 Workflow
     let wf_name = format!("serenity-screening-{}", chrono::Utc::now().timestamp_millis());
-    let workflow =
-        engine.create_workflow(&wf_name, loaded.nodes, loaded.edges).await.map_err(|e| {
+    // 统一 with_hooks 模式：模板未来声明钩子时不会静默丢失
+    let workflow = engine
+        .create_workflow_with_hooks(&wf_name, loaded.nodes, loaded.edges, loaded.hooks_config)
+        .await
+        .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("创建工作流失败: {e}"))
         })?;
     let wf_id = workflow.id.clone();
@@ -908,6 +911,11 @@ pub async fn run_serenity_screening(
         let app = progress_app.clone();
         let wf_id = progress_wf_id.clone();
         Box::pin(async move {
+            // 过滤 streaming 增量（AgentExecutor 每 2s 一次）：Serenity 执行日志
+            // 只关心节点级状态切换，透传会以全量文本刷屏。
+            if event.status == "streaming" {
+                return;
+            }
             let payload = serde_json::json!({
                 "workflowId": wf_id,
                 "type": "serenity-screening",
@@ -943,6 +951,8 @@ pub async fn run_serenity_screening(
         output_schema: loaded.output_schema.clone(),
         variables: serenity_vars,
         dry_run: false,
+        // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
+        tool_permissions: Some(super::strict_tool_permissions()),
         ..Default::default()
     };
 
@@ -1234,18 +1244,30 @@ pub async fn run_serenity_screening(
                         continue;
                     }
                     // 构造完整 RecoPick JSON（与 types.rs 中 camelCase 一致）
-                    // 候选数据不保证有价格/入场/止损等字段,缺失时填 0 或默认值
+                    // 价格修复（2026-09-10）：工作流候选由 LLM 产出，不保证有价格/入场/止损字段
+                    // （LLM 不产价格，此前一律填 0，前端展示残缺）。落库前抓实时行情，
+                    // 按 SerenityStrategy::scan_one 的默认参数（entry ±5% / stop 0.80 /
+                    // target 1.30）计算，行情失败时保持 0 并告警。
+                    let client = &state.astock_client;
+                    let quote = client.get_quote(code).await.ok();
+                    let price = quote.as_ref().map(|q| q.price).unwrap_or(0.0);
+                    let (entry_low, entry_high, stop_loss, target_price) = if price > 0.0 {
+                        (price * 0.95, price * 1.05, price * 0.80, price * 1.30)
+                    } else {
+                        tracing::warn!("[serenity] {}: 行情获取失败，价格字段保持 0", code);
+                        (0.0, 0.0, 0.0, 0.0)
+                    };
                     let pick_data_val = serde_json::json!({
                         "stockCode": code,
                         "stockName": name,
                         "style": "serenity",
                         "strategy_type": c.get("strategy_type").and_then(|v| v.as_str()).unwrap_or("bottleneck"),
                         "period": "mid",
-                        "price": c.get("price").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        "entryLow": c.get("entryLow").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        "entryHigh": c.get("entryHigh").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        "stopLoss": c.get("stopLoss").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        "targetPrice": c.get("targetPrice").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        "price": price,
+                        "entryLow": entry_low,
+                        "entryHigh": entry_high,
+                        "stopLoss": stop_loss,
+                        "targetPrice": target_price,
                         "positionPct": c.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(5.0),
                         "holdingDays": c.get("holdingDays").and_then(|v| v.as_i64()).unwrap_or(20),
                         "confidence": conf,

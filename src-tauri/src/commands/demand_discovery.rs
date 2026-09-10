@@ -2,11 +2,27 @@
 
 //! 需求发现（Demand Discovery）领域 Tauri 命令层
 //!
-//! 暴露能力扫描、市场线索发现、需求确认、交付工作流执行等核心命令。
+//! 暴露能力扫描、主动扫描入库、高价值通知、能力缺口分析、交付工作流执行等命令。
 //!
-//! 启动接线：init/services.rs 的 start_demand_discovery_cron 每 12 小时调用
-//! run_demand_discovery_cron 扫描已启用平台。opc_* 命令的新实现位于
-//! opc_demand_discovery/opc_delivery（此处旧函数体已被取代，见文件尾部说明）。
+//! ## 链路统一（2026-09-09）
+//!
+//! 本文件原为 B 链路（废弃表 `opc_demand_lead` 单数）：自带扫描装配+评估+
+//! 裸 insert（无去重），与 A 链路（`opc_demand_leads` 复数表，指纹去重）
+//! 并行漂移。现已收敛为 A 链路薄壳：
+//! - 扫描入库：`opc_proactive_evaluate_and_save_leads` / `run_demand_discovery_cron`
+//!   → `axagent_tools::tools::opc_demand_scan::run_discovery_scan`（与订阅、
+//!   工作流工具节点同源）
+//! - 线索读写：`axagent_dao::repo::opc_demand`（get_lead/update_lead_status/list_leads）
+//! - 交付进度：单一事实来源 `opc_delivery` 表，不回写 lead 状态
+//! - 线索状态机：new/evaluated/contacted/won/lost（销售转化线，见 repo 状态机）
+//!
+//! 已删除的 B 链路命令：opc_proactive_discover_leads / opc_discover_leads /
+//! opc_confirm_lead / opc_mark_lead_status / opc_test_platform_connection
+//! （连同废弃实体 opc_demand_lead / opc_market_platform；线上孤儿表由
+//! 运维侧手动 DROP，不走迁移）。
+//!
+//! 启动接线：init/services.rs 的 start_demand_discovery_cron 调用
+//! run_demand_discovery_cron 扫描已启用平台。
 
 use axagent_agent_macro::agent_command;
 use sea_orm::sea_query::Expr;
@@ -155,267 +171,35 @@ async fn extract_domain_queries(db: &sea_orm::DatabaseConnection) -> Result<Vec<
     Ok(queries)
 }
 
-/// 主动需求发现：基于配置的领域关键词自动扫描市场
+/// 主动扫描流水线（统一走 A 链路 [`axagent_tools::tools::opc_demand_scan::
+/// run_discovery_scan`]，与订阅定时扫描/工作流工具节点共用去重入库规则）
 ///
-/// 无需用户输入关键词，系统自动从配置中提取 domain_* 关键词，
-/// 依次扫描各平台，聚合所有发现的需求线索。
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "主动需求发现")]
-#[tauri::command]
-pub async fn opc_proactive_discover_leads(
-    state: State<'_, AppState>,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_market_platform;
-    use axagent_tools::tools::marketplace_scanner::AggregateMarketplaceScanner;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    // 1) 从配置提取领域关键词
-    let queries = extract_domain_queries(db).await?;
-
-    // 2) 加载已启用的平台连接器
-    let mut scanner = AggregateMarketplaceScanner::new();
-    let platforms = opc_market_platform::Entity::find()
-        .filter(opc_market_platform::Column::Enabled.eq(1))
-        .all(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?;
-
-    for p in &platforms {
-        let config: serde_json::Value =
-            serde_json::from_str(&p.config_json).unwrap_or(serde_json::json!({}));
-        scanner.add_platform(&p.name, &p.platform_type, p.base_url.as_deref(), &config);
-    }
-
-    // 3) 遍历所有领域关键词，聚合扫描结果
-    let mut all_leads: Vec<serde_json::Value> = Vec::new();
+/// 逐关键词调用扫描核心并聚合统计。此前本命令在 B 链路自实现了一遍
+/// 扫描装配+评估+裸 insert（无去重、写到废弃的 `opc_demand_lead` 表），
+/// 已收敛为薄壳 —— 扫描器装配与去重入库规则不再有第二份拷贝。
+async fn run_proactive_scan_pipeline(
+    db: &sea_orm::DatabaseConnection,
+    queries: &[String],
+) -> (u32, u32, u32, Vec<serde_json::Value>) {
+    let mut total_scanned = 0u32;
+    let mut total_saved = 0u32;
+    let mut high_value_count = 0u32;
     let mut query_stats = Vec::new();
-
-    for query in &queries {
-        match scanner.search_all(query).await {
-            Ok(leads) => {
-                let count = leads.len();
+    for query in queries {
+        match axagent_tools::tools::opc_demand_scan::run_discovery_scan(db, query, &[]).await {
+            Ok(summary) => {
+                total_scanned += summary.total_scanned;
+                total_saved += summary.total_saved;
+                high_value_count += summary.high_value_count;
                 query_stats.push(serde_json::json!({
                     "query": query,
-                    "found": count,
-                }));
-                for lead in leads {
-                    all_leads.push(serde_json::to_value(&lead).unwrap_or_default());
-                }
-            },
-            Err(e) => {
-                tracing::warn!("[opc_proactive_discover_leads] 关键词 '{}' 扫描失败: {}", query, e);
-                query_stats.push(serde_json::json!({
-                    "query": query,
-                    "found": 0,
-                    "error": e.to_string(),
-                }));
-            },
-        }
-    }
-
-    // 4) 记录平台同步时间
-    let _ = opc_market_platform::Entity::update_many()
-        .col_expr(opc_market_platform::Column::LastSyncAt, Expr::value(now))
-        .col_expr(opc_market_platform::Column::Status, Expr::value("synced"))
-        .col_expr(opc_market_platform::Column::UpdatedAt, Expr::value(now))
-        .exec(db)
-        .await;
-
-    // 5) 返回统计信息
-    let result = serde_json::json!({
-        "total_queries": queries.len(),
-        "total_found": all_leads.len(),
-        "query_stats": query_stats,
-        "queries": queries,
-        "leads": all_leads,
-    });
-
-    serde_json::to_value(&result).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-/// 按关键词搜索市场平台需求线索（闲鱼、猪八戒等）—— 保留用于精确检索场景
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "搜索市场需求线索")]
-#[tauri::command]
-pub async fn opc_discover_leads(
-    state: State<'_, AppState>,
-    query: String,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_market_platform;
-    use axagent_tools::tools::marketplace_scanner::AggregateMarketplaceScanner;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-
-    // 从平台配置加载已启用的平台连接器
-    let mut scanner = AggregateMarketplaceScanner::new();
-    let platforms = opc_market_platform::Entity::find()
-        .filter(opc_market_platform::Column::Enabled.eq(1))
-        .all(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?;
-
-    for p in platforms {
-        let config: serde_json::Value =
-            serde_json::from_str(&p.config_json).unwrap_or(serde_json::json!({}));
-        scanner.add_platform(&p.name, &p.platform_type, p.base_url.as_deref(), &config);
-    }
-
-    let leads = scanner.search_all(&query).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    // 记录平台最近同步时间
-    let now = chrono::Utc::now().timestamp();
-    let _ = opc_market_platform::Entity::update_many()
-        .col_expr(opc_market_platform::Column::LastSyncAt, Expr::value(now))
-        .col_expr(opc_market_platform::Column::Status, Expr::value("synced"))
-        .col_expr(opc_market_platform::Column::UpdatedAt, Expr::value(now))
-        .exec(db)
-        .await;
-
-    serde_json::to_value(&leads).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-/// 主动评估入库：基于配置的领域关键词自动扫描、评估并入库
-///
-/// 无需用户输入关键词，系统自动从配置中提取 domain_* 关键词，
-/// 对每个领域执行「扫描 + 评估 + 入库」完整流水线。
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "主动评估并入库需求")]
-#[tauri::command]
-pub async fn opc_proactive_evaluate_and_save_leads(
-    state: State<'_, AppState>,
-    min_score: Option<f64>,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_demand_lead;
-    use axagent_entities::opc_market_platform;
-    use axagent_tools::tools::marketplace_scanner::AggregateMarketplaceScanner;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    // 1) 从配置提取领域关键词
-    let queries = extract_domain_queries(db).await?;
-
-    // 2) 加载已启用的平台连接器
-    let mut scanner = AggregateMarketplaceScanner::new();
-    let platforms = opc_market_platform::Entity::find()
-        .filter(opc_market_platform::Column::Enabled.eq(1))
-        .all(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?;
-
-    for p in &platforms {
-        let config: serde_json::Value =
-            serde_json::from_str(&p.config_json).unwrap_or(serde_json::json!({}));
-        scanner.add_platform(&p.name, &p.platform_type, p.base_url.as_deref(), &config);
-    }
-
-    // 3) 遍历所有领域关键词，执行「扫描 + 评估 + 入库」
-    let min_threshold = min_score.unwrap_or(0.0);
-    let mut total_scanned = 0usize;
-    let mut total_saved = 0usize;
-    let mut high_value_count = 0usize;
-    let mut query_stats = Vec::new();
-
-    for query in &queries {
-        match scanner.search_and_evaluate(query).await {
-            Ok(evaluated) => {
-                let count = evaluated.len();
-                total_scanned += count;
-
-                let filtered: Vec<_> =
-                    evaluated.into_iter().filter(|e| e.value_score() >= min_threshold).collect();
-
-                for el in &filtered {
-                    let demand_type_str = el.evaluation.demand_type().as_str().to_string();
-                    let is_high_value = el.evaluation.commercial_value_score() >= 70.0;
-
-                    let entity = opc_demand_lead::ActiveModel {
-                        id: Set(el.lead.id.clone()),
-                        platform: Set(el.lead.platform.clone()),
-                        title: Set(el.lead.title.clone()),
-                        description: Set(el.lead.description.clone()),
-                        budget_min: Set(el.lead.budget_min),
-                        budget_max: Set(el.lead.budget_max),
-                        budget_currency: Set(el.lead.budget_currency.clone()),
-                        contact_name: Set(el.lead.contact_name.clone()),
-                        contact_email: Set(el.lead.contact_email.clone()),
-                        contact_phone: Set(el.lead.contact_phone.clone()),
-                        source_url: Set(el.lead.source_url.clone()),
-                        raw_snapshot_json: Set(
-                            serde_json::to_string(&el.lead.raw_snapshot).unwrap_or_default()
-                        ),
-                        matched_capabilities_json: Set("[]".to_string()),
-                        ai_analysis_json: Set(
-                            serde_json::to_string(&el.evaluation).unwrap_or_default()
-                        ),
-                        recommended_workflow_id: Set(None),
-                        status: Set(if is_high_value { "high_value" } else { "new" }.to_string()),
-                        priority: Set(if is_high_value { 1 } else { 3 }),
-                        confidence: Set(el.evaluation.confidence()),
-                        notes: Set(String::new()),
-                        project_id: Set(None),
-                        customer_id: Set(None),
-                        expires_at: Set(None),
-                        claimed_by: Set(None),
-                        pain_score: Set(el.evaluation.pain_score()),
-                        market_gap_score: Set(el.evaluation.market_gap_score()),
-                        commercial_value_score: Set(el.evaluation.commercial_value_score()),
-                        opportunity_level: Set(el.evaluation.opportunity_level().to_string()),
-                        demand_type: Set(demand_type_str),
-                        evaluated_at: Set(Some(now)),
-                        created_at: Set(now),
-                        updated_at: Set(now),
-                    };
-
-                    match entity.insert(db).await {
-                        Ok(_) => {
-                            total_saved += 1;
-                            if is_high_value {
-                                high_value_count += 1;
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                "[opc_proactive_evaluate_and_save_leads] 入库失败 {}: {}",
-                                el.lead.id,
-                                e
-                            );
-                        },
-                    }
-                }
-
-                query_stats.push(serde_json::json!({
-                    "query": query,
-                    "scanned": count,
-                    "saved": filtered.len(),
+                    "scanned": summary.total_scanned,
+                    "saved": summary.total_saved,
+                    "refreshed": summary.total_refreshed,
                 }));
             },
             Err(e) => {
-                tracing::warn!(
-                    "[opc_proactive_evaluate_and_save_leads] 关键词 '{}' 评估失败: {}",
-                    query,
-                    e
-                );
+                tracing::warn!("[proactive_scan] 关键词 '{query}' 扫描失败: {e}");
                 query_stats.push(serde_json::json!({
                     "query": query,
                     "scanned": 0,
@@ -425,16 +209,29 @@ pub async fn opc_proactive_evaluate_and_save_leads(
             },
         }
     }
+    (total_scanned, total_saved, high_value_count, query_stats)
+}
 
-    // 4) 记录平台同步时间
-    let _ = opc_market_platform::Entity::update_many()
-        .col_expr(opc_market_platform::Column::LastSyncAt, Expr::value(now))
-        .col_expr(opc_market_platform::Column::Status, Expr::value("synced"))
-        .col_expr(opc_market_platform::Column::UpdatedAt, Expr::value(now))
-        .exec(db)
-        .await;
+/// 主动评估入库：基于配置的领域关键词自动扫描、评估并入库
+///
+/// 无需用户输入关键词，系统自动从配置中提取 domain_* 关键词，
+/// 对每个领域执行「扫描 + 评估 + 去重入库」完整流水线。
+///
+/// `min_score` 为历史遗留参数：A 链路全量入库（评估分随行存储），
+/// 阈值过滤由订阅推送侧按 `min_score` 承担，此处不再截断。
+#[agent_command(domain = "automation", safety = Safe, call_mode = StateOnly, description = "主动评估并入库需求")]
+#[tauri::command]
+pub async fn opc_proactive_evaluate_and_save_leads(
+    state: State<'_, AppState>,
+    min_score: Option<f64>,
+) -> Result<serde_json::Value, String> {
+    let _ = min_score;
+    let db = state.harness.db();
 
-    // 5) 返回统计信息
+    let queries = extract_domain_queries(db).await?;
+    let (total_scanned, total_saved, high_value_count, query_stats) =
+        run_proactive_scan_pipeline(db, &queries).await;
+
     let result = serde_json::json!({
         "total_queries": queries.len(),
         "total_scanned": total_scanned,
@@ -449,12 +246,11 @@ pub async fn opc_proactive_evaluate_and_save_leads(
     })
 }
 
-// ── Cron 路由辅助函数 ───────────────────────────────────────────
-
-/// 需求发现定时任务执行函数
+/// 主动需求发现 Cron：扫描 → 评估 → 去重入库 → 高价值通知
 ///
-/// 供 CronExecutor 调用，执行「扫描 → 评估 → 入库」完整流水线。
-/// 当 query 为 None 或空字符串时，自动从配置中提取领域关键词进行主动扫描。
+/// 供 CronExecutor 调用。当 query 为 None 或空字符串时，自动从配置中
+/// 提取领域关键词进行主动扫描。入库与去重统一走 A 链路
+/// `run_discovery_scan`（订阅定时扫描同源，无第二份实现）。
 ///
 /// # 参数
 /// - `db`: 数据库连接
@@ -465,141 +261,38 @@ pub async fn run_demand_discovery_cron(
     query: Option<&str>,
     app_handle: Option<&tauri::AppHandle>,
 ) -> Result<String, String> {
-    use axagent_entities::opc_demand_lead;
-    use axagent_entities::opc_market_platform;
-    use axagent_tools::tools::marketplace_scanner::AggregateMarketplaceScanner;
-    use sea_orm::*;
-
-    let now = chrono::Utc::now().timestamp();
-
     // 1) 确定查询关键词列表
-    let queries = if let Some(q) = query {
-        if !q.trim().is_empty() {
-            vec![q.to_string()]
-        } else {
-            extract_domain_queries(db).await?
-        }
-    } else {
-        extract_domain_queries(db).await?
+    let queries: Vec<String> = match query {
+        Some(q) if !q.trim().is_empty() => vec![q.to_string()],
+        _ => extract_domain_queries(db).await?,
     };
 
-    // 2) 加载已启用的平台连接器
-    let mut scanner = AggregateMarketplaceScanner::new();
-    let platforms = opc_market_platform::Entity::find()
-        .filter(opc_market_platform::Column::Enabled.eq(1))
-        .all(db)
-        .await
-        .map_err(|e| format!("加载平台配置失败: {e}"))?;
-
-    for p in platforms {
-        let config: serde_json::Value =
-            serde_json::from_str(&p.config_json).unwrap_or(serde_json::json!({}));
-        scanner.add_platform(&p.name, &p.platform_type, p.base_url.as_deref(), &config);
-    }
-
-    // 3) 遍历所有关键词，执行「扫描 + 评估 + 入库」
-    let mut total_scanned = 0usize;
-    let mut total_saved = 0usize;
-    let mut high_value_count = 0usize;
+    // 2) 逐关键词扫描入库（去重规则与订阅/工作流同源）
     let mut high_value_leads: Vec<(String, f64, String)> = Vec::new();
-
-    for query in &queries {
-        match scanner.search_and_evaluate(query).await {
-            Ok(evaluated) => {
-                let count = evaluated.len();
-                total_scanned += count;
-
-                for el in &evaluated {
-                    let demand_type_str = el.evaluation.demand_type().as_str().to_string();
-                    let is_high_value = el.evaluation.commercial_value_score() >= 70.0;
-
-                    let entity = opc_demand_lead::ActiveModel {
-                        id: Set(el.lead.id.clone()),
-                        platform: Set(el.lead.platform.clone()),
-                        title: Set(el.lead.title.clone()),
-                        description: Set(el.lead.description.clone()),
-                        budget_min: Set(el.lead.budget_min),
-                        budget_max: Set(el.lead.budget_max),
-                        budget_currency: Set(el.lead.budget_currency.clone()),
-                        contact_name: Set(el.lead.contact_name.clone()),
-                        contact_email: Set(el.lead.contact_email.clone()),
-                        contact_phone: Set(el.lead.contact_phone.clone()),
-                        source_url: Set(el.lead.source_url.clone()),
-                        raw_snapshot_json: Set(
-                            serde_json::to_string(&el.lead.raw_snapshot).unwrap_or_default()
-                        ),
-                        matched_capabilities_json: Set("[]".to_string()),
-                        ai_analysis_json: Set(
-                            serde_json::to_string(&el.evaluation).unwrap_or_default()
-                        ),
-                        recommended_workflow_id: Set(None),
-                        status: Set(if is_high_value { "high_value" } else { "new" }.to_string()),
-                        priority: Set(if is_high_value { 1 } else { 3 }),
-                        confidence: Set(el.evaluation.confidence()),
-                        notes: Set(String::new()),
-                        project_id: Set(None),
-                        customer_id: Set(None),
-                        expires_at: Set(None),
-                        claimed_by: Set(None),
-                        pain_score: Set(el.evaluation.pain_score()),
-                        market_gap_score: Set(el.evaluation.market_gap_score()),
-                        commercial_value_score: Set(el.evaluation.commercial_value_score()),
-                        opportunity_level: Set(el.evaluation.opportunity_level().to_string()),
-                        demand_type: Set(demand_type_str),
-                        evaluated_at: Set(Some(now)),
-                        created_at: Set(now),
-                        updated_at: Set(now),
-                    };
-
-                    match entity.insert(db).await {
-                        Ok(_) => {
-                            total_saved += 1;
-                            if is_high_value {
-                                high_value_count += 1;
-                                high_value_leads.push((
-                                    el.lead.id.clone(),
-                                    el.evaluation.commercial_value_score(),
-                                    el.lead.title.clone(),
-                                ));
-                            }
-                        },
-                        Err(e) => {
-                            tracing::warn!(
-                                "[run_demand_discovery_cron] 入库失败 {}: {}",
-                                el.lead.id,
-                                e
-                            );
-                        },
-                    }
-                }
-            },
-            Err(e) => {
-                tracing::warn!("[run_demand_discovery_cron] 关键词 '{}' 扫描失败: {}", query, e);
-            },
+    for q in &queries {
+        if let Ok(summary) =
+            axagent_tools::tools::opc_demand_scan::run_discovery_scan(db, q, &[]).await
+        {
+            for lead in &summary.leads {
+                high_value_leads.push((
+                    lead.id.clone(),
+                    lead.commercial_value_score,
+                    lead.title.clone(),
+                ));
+            }
         }
     }
+    let high_value_count = high_value_leads.len() as u32;
 
-    // 4) 更新平台同步时间
-    let _ = opc_market_platform::Entity::update_many()
-        .col_expr(opc_market_platform::Column::LastSyncAt, Expr::value(now))
-        .col_expr(opc_market_platform::Column::Status, Expr::value("synced"))
-        .col_expr(opc_market_platform::Column::UpdatedAt, Expr::value(now))
-        .exec(db)
-        .await;
-
-    // 5) 发送高价值需求通知
+    // 3) 发送高价值需求通知
     if high_value_count > 0 {
         send_high_value_notification(app_handle, &high_value_leads).await;
     }
 
-    Ok(format!(
-        "主动需求发现完成: {} 个关键词, 扫描 {} 条, 入库 {} 条, 高价值 {} 条",
-        queries.len(),
-        total_scanned,
-        total_saved,
-        high_value_count
-    ))
+    Ok(format!("主动需求发现完成: {} 个关键词, 高价值 {} 条", queries.len(), high_value_count))
 }
+
+// ── Cron 路由辅助函数 ───────────────────────────────────────────
 
 /// 发送高价值需求通知
 ///
@@ -655,45 +348,6 @@ async fn send_high_value_notification(
             title
         );
     }
-}
-
-// ── 需求线索 CRUD ──────────────────────────────────────────────
-
-/// 确认需求线索（标记为 qualified，进入执行管道）
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "确认需求线索")]
-#[tauri::command]
-pub async fn opc_confirm_lead(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_demand_lead;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    let result = opc_demand_lead::Entity::find_by_id(&id)
-        .one(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?
-        .ok_or_else(|| format!("需求线索不存在: {id}"))?;
-
-    let mut am: opc_demand_lead::ActiveModel = result.into();
-    am.status = Set("qualified".to_string());
-    am.updated_at = Set(now);
-
-    let saved = am.update(db).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    serde_json::to_value(&saved).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
 }
 
 // ── 能力缺口 ──────────────────────────────────────────────────
@@ -776,7 +430,6 @@ pub async fn opc_analyze_capability_gaps(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     use axagent_entities::opc_capability_gap;
-    use axagent_entities::opc_demand_lead;
     use sea_orm::*;
     use std::collections::HashMap;
 
@@ -799,14 +452,13 @@ pub async fn opc_analyze_capability_gaps(
         keywords
     };
 
-    // 2) 统计高价值需求中的高频关键词
-    let leads = opc_demand_lead::Entity::find()
-        .filter(opc_demand_lead::Column::CommercialValueScore.gte(50.0))
-        .filter(opc_demand_lead::Column::Status.ne("delivered"))
-        .filter(opc_demand_lead::Column::Status.ne("failed"))
-        .all(db)
+    // 2) 统计高价值需求中的高频关键词（统一读 A 链路 opc_demand_leads；
+    //    交付终态 delivered/failed 已随 B 链路废弃，won/lost 为销售终态）
+    let all_leads = axagent_dao::repo::opc_demand::list_leads(db, 10_000, Some(50.0), None)
         .await
         .map_err(|e| format!("读取需求线索失败: {e}"))?;
+    let leads: Vec<_> =
+        all_leads.iter().filter(|l| l.status != "won" && l.status != "lost").collect();
 
     let mut keyword_freq: HashMap<String, (usize, f64)> = HashMap::new(); // (出现次数, 累计评分)
     for lead in &leads {
@@ -926,50 +578,12 @@ pub async fn opc_analyze_capability_gaps(
     })
 }
 
-// ── 状态标记 ──────────────────────────────────────────────────
-
-/// 标记需求线索状态（expired 过期 / claimed 他人承接 / cancelled 取消等）
-#[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "标记需求线索状态")]
-#[tauri::command]
-pub async fn opc_mark_lead_status(
-    state: State<'_, AppState>,
-    id: String,
-    status: String,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_demand_lead;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-    let now = chrono::Utc::now().timestamp();
-
-    let result = opc_demand_lead::Entity::find_by_id(&id)
-        .one(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?
-        .ok_or_else(|| format!("需求线索不存在: {id}"))?;
-
-    let mut am: opc_demand_lead::ActiveModel = result.into();
-    am.status = Set(status.clone());
-    if status == "claimed" {
-        am.claimed_by = Set(Some("other".to_string()));
-    }
-    am.updated_at = Set(now);
-
-    let saved = am.update(db).await.map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })?;
-
-    serde_json::to_value(&saved).map_err(|e| {
-        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-            .to_string()
-    })
-}
-
-/// 执行需求交付工作流（为 confirmed 需求创建交付记录并触发工作流）
+/// 执行需求交付工作流（为线索创建交付记录并触发工作流）
+///
+/// 线索读取统一走 A 链路 repo（`opc_demand_leads` 表）。交付进度单一事实
+/// 来源是 `opc_delivery` 表自身（pending → completed/failed/cancelled），
+/// 不再回写 lead 状态 —— lead 表状态机（new/evaluated/contacted/won/lost）
+/// 属销售转化线，与交付执行线解耦。
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "执行需求交付")]
 #[tauri::command]
 pub async fn opc_execute_demand_workflow(
@@ -978,35 +592,29 @@ pub async fn opc_execute_demand_workflow(
     workflow_template_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     use axagent_entities::opc_delivery;
-    use axagent_entities::opc_demand_lead;
     use sea_orm::*;
 
     let db_owned = state.harness.db().clone();
     let db = &db_owned;
     let now = chrono::Utc::now().timestamp();
 
-    let lead = opc_demand_lead::Entity::find_by_id(&lead_id)
-        .one(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?
-        .ok_or_else(|| format!("需求线索不存在: {lead_id}"))?;
+    let lead = axagent_dao::repo::opc_demand::get_lead(db, &lead_id).await.map_err(|e| {
+        ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
+            .to_string()
+    })?;
 
     let delivery_id = format!("dv-{}", uuid::Uuid::new_v4().simple());
 
     let template_id = workflow_template_id.unwrap_or_else(|| {
-        lead.recommended_workflow_id
-            .clone()
-            .unwrap_or_else(|| "default_demand_delivery".to_string())
+        lead.linked_workflow_id.clone().unwrap_or_else(|| "default_demand_delivery".to_string())
     });
 
     let entity = opc_delivery::ActiveModel {
         id: Set(delivery_id.clone()),
         lead_id: Set(Some(lead_id.clone())),
-        project_id: Set(lead.project_id.clone()),
-        customer_id: Set(lead.customer_id.clone()),
+        // A 表无 project/customer 归属（B 链路遗留字段，随表废弃）
+        project_id: Set(None),
+        customer_id: Set(None),
         title: Set(format!("交付: {}", lead.title)),
         workflow_template_id: Set(template_id.clone()),
         description: Set(lead.description.clone()),
@@ -1027,18 +635,11 @@ pub async fn opc_execute_demand_workflow(
             .to_string()
     })?;
 
-    // 将 lead 状态置为 executing
-    let mut lead_am: opc_demand_lead::ActiveModel = lead.into();
-    lead_am.status = Set("executing".to_string());
-    lead_am.updated_at = Set(now);
-    let _ = lead_am.update(db).await;
-
     // 真正调用工作流引擎下发（异步后台执行，不阻塞交付记录创建）
     let engine = std::sync::Arc::clone(&state.work_engine);
     let delivery_id_for_task = delivery_id.clone();
     let lead_title = saved.title.clone();
     let lead_desc = saved.description.clone();
-    let lead_id_for_task = lead_id.clone();
 
     use axagent_harness::workflow_types::Variable;
     use axagent_rt_workflow::work_engine::RunOptions;
@@ -1047,7 +648,7 @@ pub async fn opc_execute_demand_workflow(
         Variable {
             name: "lead_id".into(),
             var_type: "string".into(),
-            value: serde_json::Value::String(lead_id_for_task.clone()),
+            value: serde_json::Value::String(lead_id.clone()),
             description: Some("需求线索 ID".into()),
             is_secret: false,
         },
@@ -1105,20 +706,6 @@ pub async fn opc_execute_demand_workflow(
                     .exec(&db_for_task)
                     .await
                     .ok();
-                // lead 状态同步 delivered
-                let _ = axagent_entities::opc_demand_lead::Entity::update_many()
-                    .col_expr(
-                        axagent_entities::opc_demand_lead::Column::Status,
-                        Expr::value("delivered"),
-                    )
-                    .col_expr(
-                        axagent_entities::opc_demand_lead::Column::UpdatedAt,
-                        Expr::value(task_now),
-                    )
-                    .filter(axagent_entities::opc_demand_lead::Column::Id.eq(&lead_id_for_task))
-                    .exec(&db_for_task)
-                    .await
-                    .ok();
             },
             Err(e) => {
                 use axagent_entities::opc_delivery;
@@ -1132,20 +719,6 @@ pub async fn opc_execute_demand_workflow(
                         Expr::value(serde_json::json!([{ "workflow": e.to_string() }]).to_string()),
                     )
                     .filter(opc_delivery::Column::Id.eq(&delivery_id_for_task))
-                    .exec(&db_for_task)
-                    .await
-                    .ok();
-                // lead 状态同步 failed
-                let _ = axagent_entities::opc_demand_lead::Entity::update_many()
-                    .col_expr(
-                        axagent_entities::opc_demand_lead::Column::Status,
-                        Expr::value("failed"),
-                    )
-                    .col_expr(
-                        axagent_entities::opc_demand_lead::Column::UpdatedAt,
-                        Expr::value(task_now),
-                    )
-                    .filter(axagent_entities::opc_demand_lead::Column::Id.eq(&lead_id_for_task))
                     .exec(&db_for_task)
                     .await
                     .ok();
@@ -1268,25 +841,6 @@ pub async fn opc_update_delivery(
             .to_string()
     })?;
 
-    // 同步更新 lead 状态
-    if let Some(ref lead_id) = saved.lead_id {
-        let lead_result = axagent_entities::opc_demand_lead::Entity::find_by_id(lead_id)
-            .one(db)
-            .await
-            .ok()
-            .flatten();
-        if let Some(lead) = lead_result {
-            let mut lead_am: axagent_entities::opc_demand_lead::ActiveModel = lead.into();
-            lead_am.status = Set(if status == "completed" {
-                "delivered".to_string()
-            } else {
-                status.clone()
-            });
-            lead_am.updated_at = Set(now);
-            let _ = lead_am.update(db).await;
-        }
-    }
-
     serde_json::to_value(&saved).map_err(|e| {
         ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
             .to_string()
@@ -1366,94 +920,8 @@ pub async fn opc_cancel_delivery(
             .to_string()
     })?;
 
-    // 同步更新 lead 状态
-    if let Some(ref lead_id) = saved.lead_id {
-        let lead_result = axagent_entities::opc_demand_lead::Entity::find_by_id(lead_id)
-            .one(db)
-            .await
-            .ok()
-            .flatten();
-        if let Some(lead) = lead_result {
-            let mut lead_am: axagent_entities::opc_demand_lead::ActiveModel = lead.into();
-            lead_am.status = Set("cancelled".to_string());
-            lead_am.updated_at = Set(now);
-            let _ = lead_am.update(db).await;
-        }
-    }
-
     serde_json::to_value(&saved).map_err(|e| {
         ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
             .to_string()
     })
-}
-
-/// 测试平台连接器连接（验证 API Token 和认证是否有效）
-#[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "测试平台连接")]
-#[tauri::command]
-pub async fn opc_test_platform_connection(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<serde_json::Value, String> {
-    use axagent_entities::opc_market_platform;
-    use axagent_tools::tools::marketplace_scanner::AggregateMarketplaceScanner;
-    use sea_orm::*;
-
-    let db = state.harness.db();
-
-    let platform = opc_market_platform::Entity::find_by_id(&id)
-        .one(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::from_error(e, crate::commands::error::ErrorCategory::Unrecoverable)
-                .to_string()
-        })?
-        .ok_or_else(|| format!("平台配置不存在: {id}"))?;
-
-    let config: serde_json::Value =
-        serde_json::from_str(&platform.config_json).unwrap_or(serde_json::json!({}));
-
-    let mut scanner = AggregateMarketplaceScanner::new();
-    scanner.add_platform(
-        &platform.name,
-        &platform.platform_type,
-        platform.base_url.as_deref(),
-        &config,
-    );
-
-    let test_query = "test";
-    match scanner.search_all(test_query).await {
-        Ok(leads) => {
-            let now = chrono::Utc::now().timestamp();
-            let _ = opc_market_platform::Entity::update_many()
-                .col_expr(opc_market_platform::Column::Status, Expr::value("connected"))
-                .col_expr(opc_market_platform::Column::LastSyncAt, Expr::value(now))
-                .col_expr(opc_market_platform::Column::UpdatedAt, Expr::value(now))
-                .filter(opc_market_platform::Column::Id.eq(&id))
-                .exec(db)
-                .await;
-
-            Ok(serde_json::json!({
-                "success": true,
-                "platform_id": id,
-                "message": format!("连接成功，测试查询返回 {} 条结果", leads.len()),
-                "lead_count": leads.len(),
-            }))
-        },
-        Err(e) => {
-            let now = chrono::Utc::now().timestamp();
-            let _ = opc_market_platform::Entity::update_many()
-                .col_expr(opc_market_platform::Column::Status, Expr::value("error"))
-                .col_expr(opc_market_platform::Column::UpdatedAt, Expr::value(now))
-                .filter(opc_market_platform::Column::Id.eq(&id))
-                .exec(db)
-                .await;
-
-            Ok(serde_json::json!({
-                "success": false,
-                "platform_id": id,
-                "message": format!("连接失败: {}", e),
-                "error": e,
-            }))
-        },
-    }
 }

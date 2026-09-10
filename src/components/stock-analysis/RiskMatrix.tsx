@@ -186,6 +186,7 @@ export function RiskMatrix() {
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const riskAssessments = useStockAnalysisStore((s) => s.riskAssessments);
+  const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const workflowStatus = useStockAnalysisStore((s) => s.status);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
@@ -361,6 +362,20 @@ export function RiskMatrix() {
   // 风险评估加载中状态：工作流运行中且无风险数据时显示
   const isWorkflowRunning = workflowStatus === "running" || workflowStatus === "loading";
 
+  // 风险阶段流式预览（2026-09-08 修复）：后端 AgentExecutor 每 2s 推送累积文本
+  // （workflow-step-delta → streamingPreviews），风险评估师（risk-agg/risk-con/
+  // risk-neu/risk-convergence/research-mgr）单次 LLM 调用 1-5 分钟，此前面板在
+  // 首个节点 completed 前只渲染纯 Spin，整个风险阶段无任何实时输出。
+  // 过滤：仅风险链路节点，且尚未在 riskAssessments 中落地的（completed 后由
+  // routeNodeOutput 接管展示，流式预览自动消失）。
+  const runningRiskPreviews = useMemo(() => {
+    if (!isWorkflowRunning) { return []; }
+    return Object.entries(streamingPreviews).filter(([nodeId]) =>
+      (nodeId.startsWith("risk-") || nodeId === "research-mgr")
+      && riskAssessments[nodeId] === undefined
+    );
+  }, [streamingPreviews, riskAssessments, isWorkflowRunning]);
+
   if (Object.keys(riskAssessments).length === 0) {
     if (isWorkflowRunning) {
       return (
@@ -374,6 +389,27 @@ export function RiskMatrix() {
             <div className="text-sm" style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.riskMatrix.loading")}
             </div>
+            {/* 流式实时预览：显示正在生成的风险评估师输出的最新片段 */}
+            {runningRiskPreviews.map(([nodeId, text]) => {
+              const color = RISK_COLORS[nodeId] ?? "oklch(55% 0.16 250)";
+              const label = RISK_LABEL_KEYS[nodeId] ? t(RISK_LABEL_KEYS[nodeId]) : nodeId;
+              return (
+                <div key={`streaming-${nodeId}`} className="w-full px-2">
+                  <div className="flex items-center gap-1">
+                    <Tag color={color}>{label}</Tag>
+                    <Tag color="processing" style={{ fontSize: 10 }}>
+                      {t("stockAnalysis.workflow.running")}
+                    </Tag>
+                  </div>
+                  <pre
+                    className="text-xs leading-relaxed whitespace-pre-wrap mt-1 px-2 py-1 rounded"
+                    style={{ maxHeight: 160, overflow: "auto", color: "var(--muted)", margin: 0 }}
+                  >
+                    {text.length > 600 ? text.slice(-600) : text}
+                  </pre>
+                </div>
+              );
+            })}
           </div>
         </Card>
       );
@@ -440,6 +476,27 @@ export function RiskMatrix() {
                       : <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.noRiskData")}</span>;
                   })()}
                 </div>
+              </div>
+            );
+          })}
+          {/* 仍在生成中的风险节点：部分完成后其余评估师继续实时预览 */}
+          {runningRiskPreviews.map(([nodeId, text]) => {
+            const color = RISK_COLORS[nodeId] ?? "oklch(55% 0.16 250)";
+            const label = RISK_LABEL_KEYS[nodeId] ? t(RISK_LABEL_KEYS[nodeId]) : nodeId;
+            return (
+              <div key={`streaming-${nodeId}`} className="p-1.5 rounded" style={{ background: "var(--surface)" }}>
+                <div className="text-sm font-medium mb-0.5 flex items-center gap-1">
+                  <Tag color={color} style={{ marginRight: 4 }}>{label}</Tag>
+                  <Tag color="processing" style={{ fontSize: 10, marginRight: 0 }}>
+                    {t("stockAnalysis.workflow.running")}
+                  </Tag>
+                </div>
+                <pre
+                  className="text-xs leading-relaxed whitespace-pre-wrap"
+                  style={{ maxHeight: 160, overflow: "auto", color: "var(--muted)", margin: 0 }}
+                >
+                  {text.length > 600 ? text.slice(-600) : text}
+                </pre>
               </div>
             );
           })}

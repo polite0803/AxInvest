@@ -1383,6 +1383,9 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
         //    改由 run_reflection_workflow 从 stock_analyses.blackboard_snapshot 加载记忆，
         //    构造名为 "sub-analysis" 的变量注入工作流（context_sources / input_mapping 路径不变）。
         comparator_node,
+        // V68 修复(2026-09-10): reflection-agent 提示词中原引用 get_announcement_content，
+        // 该工具未实现且不在白名单，LLM 调用必报 Unknown MCP tool 浪费反思轮次
+        // （同 P0 2026-07-22 对其他提示词的同类清理，此处为漏网点）。
         WorkflowNode::Agent(AgentNode {
             base: WorkflowNodeBase {
                 id: "reflection-agent".into(),
@@ -1413,14 +1416,11 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     历史反思教训（避免重蹈覆辙）:\n\
                     {{stock_lessons}}\n\n\
                     可用工具：\n\
-                    - get_stock_kline: 获取实际操作期间的K线数据，对比预测走势与实际价格运动\n\
-                    - get_announcement_content: 获取分析日期之后发布的新公告PDF全文，\n\
-                      用于检查是否有影响走势的关键公告被遗漏\n\n\
+                    - get_stock_kline: 获取实际操作期间的K线数据，对比预测走势与实际价格运动\n\n\
                     使用工具的原则：\n\
                     1. 先分析 deviation_report 中的定量发现，确认方向是否一致\n\
                     2. 如有必要，调用 get_stock_kline 查看实际K线走势验证\n\
-                    3. 如果公告数据在原始分析后发生变化，调用 get_announcement_content 查阅\n\
-                    4. 工具调用结论应与定量对比报告交叉验证\n\n\
+                    3. 工具调用结论应与定量对比报告交叉验证\n\n\
                     重要原则：\n\
                     1. 必须严格基于 actual_outcome 提供的实际走势与上游分析结论做对比，识别错因。\n\
                     2. 结合 deviation_report 的定量发现验证而非替代 LLM 判断。\n\

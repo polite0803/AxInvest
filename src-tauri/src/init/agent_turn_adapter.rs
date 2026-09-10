@@ -193,6 +193,22 @@ impl AgentTurnRunner for WorkflowAgentTurnRunner {
             .await
             .map_err(|e| AxAgentError::execution(e.to_string()))?;
 
+        // 占位会话即时清理：工作流节点以随机 execution_id 为 conversation_id 懒创建
+        // `[auto]` 占位行（FK 兜底），节点 turn 结束后即无保留价值，不删会每节点一条
+        // 空会话无限堆积进数据库（侧栏已过滤，此处防物理堆积）。仅删 title='[auto]'
+        // 且零消息的行，误删真实会话不可能；失败不阻塞 turn 结果。
+        if let Err(e) = axagent_dao::repo::conversation::delete_placeholder_conversation(
+            self.harness.db(),
+            &request.execution_id,
+        )
+        .await
+        {
+            tracing::warn!(
+                execution_id = %request.execution_id,
+                "清理工作流占位会话失败（不阻塞）: {e}"
+            );
+        }
+
         // 结果映射：content = assistant 文本；tool_calls = ToolResult 记录。
         let mut content = String::new();
         for msg in &summary.assistant_messages {

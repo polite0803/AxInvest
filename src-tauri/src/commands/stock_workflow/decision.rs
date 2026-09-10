@@ -286,6 +286,11 @@ pub(crate) struct LoadedTemplate {
     pub input_schema: Option<JsonSchema>,
     pub output_schema: Option<JsonSchema>,
     pub variables: Option<Vec<Variable>>,
+    /// 模板声明的生命周期钩子（pre_exec/post_exec）。
+    /// 必须随 create_workflow_with_hooks 传入引擎，否则 pre_exec 的
+    /// stock-analysis-enhance 钩子不执行 → market_regime 等业务变量
+    /// 永不注入 → a-fundamentals 等节点 VARIABLE_NOT_FOUND（2026-09-08 实证）。
+    pub hooks_config: Option<axagent_harness::WorkflowHooksConfig>,
 }
 
 /// 从模板变量解析 vendor_* 布尔开关，注入到 astock_client 的启用状态过滤器。
@@ -378,6 +383,14 @@ pub(crate) async fn load_and_inject_template(
 ) -> Result<LoadedTemplate, String> {
     use axagent_entities::workflow_template;
 
+    // 运行前确保模板为最新版（幂等：版本已是最新则跳过）。
+    // 与 serenity.rs 同款兜底：启动链路无 stock_analysis_setup 种子调用，
+    // DB 版本可能停留在旧版（实证：代码 v13-v15 期间 DB 停在 v12，V59 修复
+    // 静默失效三天）。每次运行前查一次版本，旧版自动升级。
+    crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(db)
+        .await
+        .map_err(|e| format!("模板版本兜底重种子化失败: {e}"))?;
+
     let template = workflow_template::Entity::find_by_id(template_id)
         .one(db)
         .await
@@ -425,8 +438,19 @@ pub(crate) async fn load_and_inject_template(
         template.output_schema.as_ref().and_then(|s| serde_json::from_str(s).ok());
     let variables: Option<Vec<Variable>> =
         template.variables.as_ref().and_then(|v| serde_json::from_str(v).ok());
+    // 与 rt-workflow parse_hooks_config 同语义：NULL 合法 → None；解析失败降级 None
+    let hooks_config: Option<axagent_harness::WorkflowHooksConfig> =
+        template.hooks_config.as_ref().and_then(|s| match serde_json::from_str(s) {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                tracing::warn!(
+                    "[stock_workflow] 模板 {template_id} hooks_config 解析失败，按无钩子处理: {e}"
+                );
+                None
+            },
+        });
 
-    Ok(LoadedTemplate { nodes, edges, input_schema, output_schema, variables })
+    Ok(LoadedTemplate { nodes, edges, input_schema, output_schema, variables, hooks_config })
 }
 
 /// 工作流结果 → blackboard_snapshot — 现已委托给 axagent-stock-analysis::blackboard 模块
@@ -1241,6 +1265,36 @@ mod tests {
     use axagent_harness::workflow_types::Variable;
     use serde_json::json;
 
+    /// 回归测试：t-scoring 三种真实包装形态必须能剥到 {total, signal}（600089 实证）。
+    #[test]
+    fn unwrap_tool_node_content_peels_real_tscoring_shapes() {
+        let scoring = json!({"total": 62, "signal": "hold", "currentPrice": 19.01});
+        let scoring_str = serde_json::to_string(&scoring).unwrap();
+
+        // 形态 1：顶层 t-scoring = JSON 字符串 {"node_id","result":{"content":"<scoring>"}}
+        let top_level_string = json!({
+            "node_id": "t-scoring",
+            "result": { "content": scoring_str.clone() }
+        })
+        .to_string();
+        // 形态 2：_raw.t-scoring = {node_id, result:{content}, tool_name}
+        let raw_form = json!({
+            "node_id": "t-scoring",
+            "result": { "content": scoring_str.clone() },
+            "tool_name": "compute_scoring"
+        });
+        // 形态 3：result.t-scoring = {content: "<scoring>"}
+        let remapped_form = json!({ "content": scoring_str.clone() });
+        // 形态 4：已解包的业务对象原样返回
+        for shape in
+            [serde_json::Value::String(top_level_string), raw_form, remapped_form, scoring.clone()]
+        {
+            let got = unwrap_tool_node_content(&shape);
+            assert_eq!(got.get("total").and_then(|v| v.as_u64()), Some(62));
+            assert_eq!(got.get("signal").and_then(|v| v.as_str()), Some("hold"));
+        }
+    }
+
     #[test]
     fn resolve_runtime_options_uses_defaults_when_missing() {
         let (mc, to, total_to) = resolve_runtime_options(None);
@@ -1786,116 +1840,10 @@ pub async fn rerun_decision(
     engine.set_max_expr_depths(256, 256);
     axagent_rt_workflow::work_engine::executors::register_common_functions(&mut engine);
     // ── P3-1: 注册 portfolio 公式函数（替代 Rhai 内联计算）──
-    // 这些函数定义在 stock-analysis::portfolio_formula，纯数学、无副作用。
-    use axagent_analysis_engine::portfolio_formula;
-    engine.register_fn("pm_evidence_scale", |total_weight: f64, max_weight: f64| -> f64 {
-        portfolio_formula::compute_evidence_scale(total_weight, max_weight)
-    });
-    engine.register_fn(
-        "pm_kelly_position",
-        |posterior: f64, odds: f64, cost_pct: f64, risk_level: &str| -> f64 {
-            portfolio_formula::compute_kelly_position(posterior, odds, cost_pct, risk_level)
-        },
-    );
-    engine.register_fn(
-        "pm_classify_risk",
-        |vol: rhai::Dynamic,
-         sharpe: rhai::Dynamic,
-         dd: rhai::Dynamic,
-         roe: rhai::Dynamic,
-         debt: rhai::Dynamic,
-         growth: rhai::Dynamic|
-         -> String {
-            // P0 修复(2026-08-09): 原 6 个 Option<f64> 参数注册后不可调用（Rhai 1.25
-            // 多 Option 参数闭包 Function not found），改为 Dynamic 参数内部转换。
-            let f = |v: &rhai::Dynamic| -> Option<f64> {
-                v.clone()
-                    .try_cast::<f64>()
-                    .or_else(|| v.clone().try_cast::<i64>().map(|x| x as f64))
-            };
-            portfolio_formula::classify_risk(
-                f(&vol),
-                f(&sharpe),
-                f(&dd),
-                f(&roe),
-                f(&debt),
-                f(&growth),
-            )
-        },
-    );
-    engine.register_fn("pm_risk_bias", |risk_level: &str| -> f64 {
-        portfolio_formula::compute_risk_bias(risk_level)
-    });
-    engine.register_fn("pm_risk_veto", |action: &str, risk_level: &str| -> String {
-        let (new_action, _, _) = portfolio_formula::apply_risk_veto(action, risk_level);
-        new_action
-    });
-    engine.register_fn(
-        "pm_covariance_decay",
-        |f1_w: f64, f3_w: f64, f9_w: f64, f11_w: f64, decay_target: &str| -> f64 {
-            let (f9, f11) = portfolio_formula::apply_covariance_decay(f1_w, f3_w, f9_w, f11_w);
-            match decay_target {
-                "f9" => f9,
-                "f11" => f11,
-                _ => 0.0,
-            }
-        },
-    );
-    // P0: 贝叶斯因子置信度（基于 prior→posterior 的证据强度）
-    engine.register_fn("pm_compute_bayes_confidence", |prior: f64, posterior: f64| -> f64 {
-        portfolio_formula::compute_bayes_confidence(prior, posterior)
-    });
-    // 因子数据完整度：供 data-quality.rhai 评估因子层数据完整度
-    // P0 修复(2026-08-09): Rhai 1.25 的 register_fn 对含多个 Option<T> 参数的闭包
-    // 注册后无法调用（全 Some/全 None/混合均报 Function not found，已实测确认），
-    // 原 10 个 Option 参数的 pm_compute_factor_completeness 从未被成功调用过
-    // （data-quality.rhai 此前因 count_chars 的 replace 崩溃未执行到此行）。
-    // 改为 10 个 Dynamic 参数（万能类型，接受 f64/i64/&str/unit），闭包内转 Option。
-    engine.register_fn(
-        "pm_compute_factor_completeness",
-        |total_score: rhai::Dynamic,
-         consensus_score: rhai::Dynamic,
-         catalyst_level: rhai::Dynamic,
-         risk_volatility: rhai::Dynamic,
-         valuation_dcf_upside: rhai::Dynamic,
-         trader_direction: rhai::Dynamic,
-         money_flow_main_net_inflow: rhai::Dynamic,
-         lockup_shareholder_trades_len: rhai::Dynamic,
-         announcements_len: rhai::Dynamic,
-         pace_signal: rhai::Dynamic|
-         -> f64 {
-            // Rhai Dynamic 数值提取：f64/i64 均接受，unit/其他 → None
-            let f = |v: &rhai::Dynamic| -> Option<f64> {
-                v.clone()
-                    .try_cast::<f64>()
-                    .or_else(|| v.clone().try_cast::<i64>().map(|x| x as f64))
-            };
-            // into_string: ImmutableString/String → String，unit 报错 → None
-            let s = |v: &rhai::Dynamic| v.clone().into_string().ok();
-            let i = |v: &rhai::Dynamic| v.clone().try_cast::<i64>();
-            portfolio_formula::compute_factor_completeness(
-                f(&total_score),
-                f(&consensus_score),
-                s(&catalyst_level).as_deref(),
-                f(&risk_volatility),
-                f(&valuation_dcf_upside),
-                s(&trader_direction).as_deref(),
-                f(&money_flow_main_net_inflow),
-                i(&lockup_shareholder_trades_len),
-                i(&announcements_len),
-                f(&pace_signal),
-            )
-        },
-    );
-    // V66 修复(2026-07-29): 补齐与 init/services.rs 主注册点的对称性。
-    // 当前 portfolio-mgr.rhai 虽用本地词典未实际调用这两个函数，但保持注册
-    // 对称可避免未来启用调用时 rerun 路径 panic。
-    engine.register_fn("pm_compute_news_sentiment", |title: &str, summary: &str| -> f64 {
-        axagent_astock_data::sentiment::compute_news_sentiment(title, summary).unwrap_or(0.0)
-    });
-    engine.register_fn("pm_compute_text_sentiment", |text: &str| -> f64 {
-        axagent_astock_data::sentiment::compute_text_sentiment(text).unwrap_or(0.0)
-    });
+    // pm_* 注册已抽取到 rhai_pm::register_pm_functions（与共享 Engine 注册点共用，
+    // 禁止重复定义）。2026-09-09 起 data-quality / portfolio-risk-gate 等脚本
+    // 也依赖 pm_*，函数集必须与本文件历史版本完全一致。
+    super::rhai_pm::register_pm_functions(&mut engine);
     let mut scope = Scope::new();
 
     // ── Gap 2: 注入近期 lessons（reflection_lessons 活跃规则）──
@@ -2179,6 +2127,13 @@ pub async fn rerun_decision(
         }
     });
 
+    // 跨系统互证（crossCheck）：与近 14 天智选推荐对照（与 run_stock_workflow
+    // 持久化路径同语义，重跑决策后互证字段不丢失）
+    let mut decision_value = decision_value;
+    if let Some(prior) = super::hooks::fetch_reco_prior(db, &analysis.stock_code, 14).await {
+        super::hooks::inject_reco_crosscheck(&mut decision_value, &prior);
+    }
+
     let decision_json_str = serde_json::to_string(&decision_value).unwrap_or_default();
 
     // 6. 更新分析记录
@@ -2205,21 +2160,19 @@ pub async fn rerun_decision(
     );
 
     // 7. 构建 DashboardReport（借鉴 daily_stock_analysis 决策仪表盘格式）
-    // 从 snapshot 提取评分节点输出和专家报告
-    let score_json = snapshot
-        .get("t-scoring")
-        .or_else(|| snapshot.get("t-scoring.result"))
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
+    // 从 snapshot 提取评分节点输出和专家报告（穿透 ToolNode content 包装）
+    let score_json = extract_score_json(&snapshot);
 
     let analyst_reports = extract_analyst_reports_from_snapshot(&snapshot);
     let stock_code = analysis.stock_code.clone();
     let stock_name = analysis.stock_name.clone();
     let analysis_date = analysis.analysis_date.clone();
 
+    let dashboard_value =
+        merge_price_fields_from_llm(&decision_value, analysis.llm_decision_json.as_deref());
     let dashboard_report =
         axagent_analysis_engine::dashboard_report::build_dashboard_report_from_workflow(
-            &decision_value,
+            &dashboard_value,
             &score_json,
             &stock_code,
             &stock_name,
@@ -2313,21 +2266,18 @@ pub(crate) fn build_dashboard_from_workflow_result(
         serde_json::json!({"action": "观望", "positionPct": 0, "confidence": 0.0, "reasoning": ""}),
     );
 
-    // 2. 提取评分 JSON（与 rerun_decision 一致：优先 t-scoring，回退 t-scoring.result）
-    let score_json = wf
-        .results
-        .get("t-scoring")
-        .or_else(|| wf.results.get("t-scoring.result"))
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
+    // 2. 提取评分 JSON（穿透 ToolNode content 包装，取真实 {total, signal, ...}）
+    let score_json = extract_score_json(&wf.results);
 
     // 3. 提取分析师报告
     let analyst_reports = extract_analyst_reports_from_snapshot(&wf.results);
 
-    // 4. 构建 DashboardReport
+    // 4. 构建 DashboardReport（目标价/止损价缺键时从 trader LLM 决策兜底）
+    let dashboard_value =
+        merge_price_fields_from_llm(&decision_value, extract_llm_decision_json(wf).as_deref());
     let dashboard_report =
         axagent_analysis_engine::dashboard_report::build_dashboard_report_from_workflow(
-            &decision_value,
+            &dashboard_value,
             &score_json,
             stock_code,
             stock_name,
@@ -2340,6 +2290,162 @@ pub(crate) fn build_dashboard_from_workflow_result(
     tracing::info!(
         "[build_dashboard_from_workflow_result] DashboardReport 构建完成: \
          integrity_passed={}, risk_alerts={}, catalysts={}",
+        dashboard_report.integrity_passed,
+        dashboard_report.risk_alerts.len(),
+        dashboard_report.catalysts.len()
+    );
+
+    Some((dashboard_report, dashboard_md))
+}
+
+/// 节点输出深度穿透：剥掉评分类节点输出的多层包装，直到拿到业务 JSON。
+///
+/// 600089 实测的三种真实包装形态（评分 JSON 最深被包了三层）：
+/// - 顶层 `t-scoring`：**字符串** `{"node_id","result":{"content":"<评分JSON字符串>"}}`
+/// - `_raw.t-scoring`：`{node_id, result: {content: "<评分JSON字符串>"}, tool_name}`
+/// - `result.t-scoring`：`{content: "<评分JSON字符串>"}`
+///
+/// 剥壳规则（最多 6 层防失控）：字符串可 parse → parse 继续；对象含 `content` →
+/// 下钻 content；否则对象含 `result` → 下钻 result；拿到既无 content 也无 result
+/// 的对象（如 {total, signal, ...}）即为目标。
+pub(crate) fn unwrap_tool_node_content(val: &serde_json::Value) -> serde_json::Value {
+    let mut cur = val.clone();
+    for _ in 0..6 {
+        cur = match cur {
+            serde_json::Value::String(ref s) => {
+                match serde_json::from_str::<serde_json::Value>(s) {
+                    Ok(parsed) => parsed,
+                    Err(_) => return cur,
+                }
+            },
+            serde_json::Value::Object(ref obj) => {
+                if let Some(content) = obj.get("content") {
+                    content.clone()
+                } else if let Some(result) = obj.get("result") {
+                    result.clone()
+                } else {
+                    return cur;
+                }
+            },
+            _ => return cur,
+        };
+    }
+    cur
+}
+
+/// 从 snapshot / workflow results map 中提取 t-scoring 评分 JSON。
+///
+/// 兼容三种 key（remapped / _raw 提升 / 旧版 `.result` 后缀）并穿透 ToolNode 的
+/// `{content, tool_name}` 包装。此前三处 dashboard 构建直接在包装层上 `.get("total")`，
+/// 恒为 Null → 评分恒 0/100、趋势恒「震荡」（2026-09-11 科华数据实证）。
+pub(crate) fn extract_score_json(
+    map: &std::collections::HashMap<String, serde_json::Value>,
+) -> serde_json::Value {
+    let raw = map
+        .get("t-scoring")
+        .or_else(|| map.get("_raw.t-scoring"))
+        .or_else(|| map.get("t-scoring.result"));
+    match raw {
+        Some(v) => unwrap_tool_node_content(v),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// dashboard 显示兜底：portfolio-mgr 的 decision_json 只输出百分比（stopLossPct/takeProfitPct），
+/// 无绝对价格的 targetPrice/stopLoss 键 → dashboard 构建端 get 不到，目标价/止损价恒显示「—」
+/// （2026-09-11 科华数据实证）。trader 的 llm_decision_json（content 解析后，verdict 层）含
+/// 绝对价格，decision_json 缺失这两个键时用其补齐。只影响 dashboard 显示，不改决策本体。
+pub(crate) fn merge_price_fields_from_llm(
+    decision_value: &serde_json::Value,
+    llm_json: Option<&str>,
+) -> serde_json::Value {
+    let Some(s) = llm_json else { return decision_value.clone() };
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(s) else {
+        return decision_value.clone();
+    };
+    let mut dv = decision_value.clone();
+    let Some(obj) = dv.as_object_mut() else { return dv };
+    // llm 决策字段可能在顶层，也可能在 verdict 对象内（trader content = {report, verdict:{...}}）
+    let find_field = |root: &serde_json::Value, key: &str| -> Option<serde_json::Value> {
+        root.get(key).filter(|v| !v.is_null()).cloned().or_else(|| {
+            root.get("verdict").and_then(|v| v.get(key)).filter(|v| !v.is_null()).cloned()
+        })
+    };
+    if obj.get("targetPrice").map_or(true, |v| v.is_null()) {
+        if let Some(v) = find_field(&parsed, "targetPrice") {
+            obj.insert("targetPrice".to_string(), v);
+        }
+    }
+    if obj.get("stopLoss").map_or(true, |v| v.is_null()) {
+        if let Some(v) = find_field(&parsed, "stopLoss") {
+            obj.insert("stopLoss".to_string(), v);
+        }
+    }
+    dv
+}
+
+/// 从已有分析记录（DB 行）重建 DashboardReport + Markdown 文本。
+///
+/// DashboardReport 不持久化（stock_analyses 无 dashboard 列），只在 workflow-completed
+/// 事件和 rerun_decision 返回时现场生成，导致重开历史分析时仪表盘 Tab 永远空态。
+/// 本函数补上"加载历史时重建"的路径：DashboardReport 的三个输入
+/// （decision + t-scoring 评分 + 分析师报告）全部在 `blackboard_snapshot` 里，
+/// 无需重跑 Rhai 公式即可零成本恢复。
+///
+/// 返回 None 的情形：decision_json 为空/解析失败，或 blackboard_snapshot 解析失败
+/// （旧记录 snapshot 损坏）—— 此时前端保持空态兜底。
+pub(crate) fn build_dashboard_from_analysis_record(
+    analysis: &stock_analyses::Model,
+) -> Option<(axagent_harness::DashboardReport, String)> {
+    // 1. 决策 JSON 必须存在且可解析（portfolio-mgr 输出）
+    let decision_str = analysis.decision_json.as_deref()?;
+    let decision_value: serde_json::Value =
+        match serde_json::from_str::<serde_json::Value>(decision_str) {
+            Ok(v) if !v.is_null() => v,
+            _ => return None,
+        };
+
+    // 2. 解析 blackboard_snapshot → variables map，并将 _raw.{nodeId} 提升到顶层
+    //    （与 rerun_decision 的解析逻辑保持一致）
+    let snapshot_str = analysis.blackboard_snapshot.as_deref().unwrap_or("");
+    let mut snapshot: std::collections::HashMap<String, serde_json::Value> =
+        serde_json::from_str(snapshot_str).ok()?;
+    let raw_keys: Vec<String> =
+        snapshot.keys().filter(|k| k.starts_with("_raw.")).cloned().collect();
+    for raw_key in raw_keys {
+        if let Some(key) = raw_key.strip_prefix("_raw.") {
+            if let Some(val) = snapshot.remove(&raw_key) {
+                // 不覆盖已有 key（remapped key 优先，与 rerun_decision 一致）
+                snapshot.entry(key.to_string()).or_insert(val);
+            }
+        }
+    }
+
+    // 3. 提取评分 JSON（穿透 ToolNode content 包装，取真实 {total, signal, ...}）
+    let score_json = extract_score_json(&snapshot);
+
+    // 4. 提取分析师报告
+    let analyst_reports = extract_analyst_reports_from_snapshot(&snapshot);
+
+    // 5. 构建 DashboardReport（目标价/止损价缺键时从 trader LLM 决策兜底）
+    let dashboard_value =
+        merge_price_fields_from_llm(&decision_value, analysis.llm_decision_json.as_deref());
+    let dashboard_report =
+        axagent_analysis_engine::dashboard_report::build_dashboard_report_from_workflow(
+            &dashboard_value,
+            &score_json,
+            &analysis.stock_code,
+            &analysis.stock_name,
+            &analysis.analysis_date,
+            &analyst_reports,
+        );
+    let dashboard_md =
+        axagent_analysis_engine::dashboard_report::render_dashboard_md(&dashboard_report);
+
+    tracing::info!(
+        "[build_dashboard_from_analysis_record] DashboardReport 重建完成: \
+         analysis_id={}, integrity_passed={}, risk_alerts={}, catalysts={}",
+        analysis.id,
         dashboard_report.integrity_passed,
         dashboard_report.risk_alerts.len(),
         dashboard_report.catalysts.len()

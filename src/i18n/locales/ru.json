@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "Нет пробелов в способностях",
+      "deliveriesEmpty": "Нет поставок; создайте через «Выполнить поставку» в действиях лида",
+      "executeDelivery": "Выполнить поставку",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "Проактивный поиск",
       "btnAnalyzeGaps": "Анализ пробелов",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "Изменить статус",
+      "delivery": "Доставка",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "Максимальный кэш возможностей",
         "dbCleanupDays": "Дни очистки базы данных",
         "logLevel": "Уровень журнала: debug/info/warn/error",
-        "enableAnalytics": "Включить аналитику"
+        "enableAnalytics": "Включить аналитику",
+        "scanLlmEvalEnabled": "LLM-уточнение (переоценка перспективных лидов)",
+        "scanLlmEvalMaxLeads": "Макс. лидов за пакет уточнения",
+        "scanLlmEvalMinRuleScore": "Предфильтр уточнения (балл правила ≥)"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "Пропущено (комплаенс)"
       },
+      "platformSkippedHint": "Официальные учётные данные API не настроены; сканирование пропущено по политике комплаенса. Настройте токен и включите платформу для сканирования.",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13571,6 +13565,14 @@
       "subscriptions": "Подписки",
       "addSubscription": "Добавить подписку",
       "manualEntry": "Ручной ввод",
+      "capabilityScan": "Сканирование по способностям",
+      "capabilityScanDesc": "Формирует поисковые запросы из локального реестра способностей и сканирует рынки спроса по каждому запросу (воркфлоу: скан способностей → планирование запросов → циклическое сканирование).",
+      "capabilityFocus": "Фокус (необязательно)",
+      "capabilityFocusPlaceholder": "напр. разработка ИИ-приложений, сервисы данных; оставьте пустым, чтобы решил реестр",
+      "capabilityMaxKeywords": "Максимум запросов",
+      "capabilityScanStart": "Начать сканирование",
+      "capabilityScanComplete": "Сканирование по способностям завершено, лиды обновлены",
+      "capabilityScanFailed": "Ошибка сканирования по способностям: {{error}}",
       "leadCreateFailed": "Не удалось создать лид: {{error}}",
       "leadFormTitle": "Заголовок",
       "leadFormTitleRequired": "Заголовок обязателен",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "Отметить выставленным",
       "delivMarkPaid": "Отметить оплаченным",
       "delivDelete": "Удалить"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14372,7 +14383,8 @@
     "boolYes": "Да",
     "boolNo": "Нет",
     "backendCallFailed": "Ошибка вызова бэкенда",
-    "emptyHistoryWarning": "История Serenity пуста: list_reco_history вернул 0 строк (возможно, в БД нет истории со стилем serenity/bottleneck, или сбой backend-команды был тихо проигнорирован)"
+    "emptyHistoryWarning": "История Serenity пуста: list_reco_history вернул 0 строк (возможно, в БД нет истории со стилем serenity/bottleneck, или сбой backend-команды был тихо проигнорирован)",
+    "timeBasis": "Временная база: {{date}} · рекомендуемое окно ~{{days}} дн. (до {{until}})"
   },
   "trade": {
     "title": "Trading Log",
@@ -14963,7 +14975,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "Ключевые показатели оценки (t-valuation)",
+      "currentPriceLabel": "Цена",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "Оценка рва",
+      "oeYieldLabel": "Доходность OE",
+      "grahamUpsideLabel": "Потенциал Грэма",
+      "valueSignalLabel": "Итоговый сигнал",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "Долговая нагрузка",
+      "grossMarginLabel": "Валовая маржа",
+      "revenueGrowthLabel": "Рост выручки"
     },
     "workflow": {
       "analyst": {
@@ -15016,6 +15039,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "Вспомогательные узлы",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15077,7 +15101,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析师",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "Ошибка при пропуске анализа: {{reason}}"
     },
     "debugPanel": {
       "show": "🔍 Show",
@@ -15601,6 +15625,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "Тренд-подбор vs Анализ · Межсистемное расхождение",
+      "timeBasis": "Подбор от {{recoDate}} · анализ от {{decisionDate}} (~{{gapDays}} дн. разницы)",
+      "recoSays": "Тренд-подбор: {{score}} балл., предложена пробная позиция {{position}}% (стратегия {{strategy}})",
+      "attentionHeat": "Внимание: {{heat}}",
+      "workflowSays": "Вердикт рабочего процесса: {{action}}, позиция {{position}}%",
+      "divergenceNote": "Двое часов — подбор ставит на катализаторы (~{{recoDays}} дн.), процесс оценивает текущие шансы (~{{decisionDays}} дн.)",
+      "catalystLabel": "Катализатор ({{confidence}})"
     },
     "compare": {
       "title": "Compare",
@@ -16355,7 +16388,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

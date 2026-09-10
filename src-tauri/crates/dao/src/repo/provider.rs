@@ -114,7 +114,7 @@ pub async fn list_providers(db: &DatabaseConnection) -> Result<Vec<ProviderConfi
     Ok(result)
 }
 
-/// 解析系统默认 LLM 调用配置：第一个启用的 provider + 第一个启用的 key + 第一个启用的 model。
+/// 解析系统默认 LLM 调用配置：第一个启用的 provider + round-robin 轮询 key + 第一个启用的 model。
 /// 工作流 Llm/Agent 执行器调用此函数自动获取模型，无需每个节点手动配置。
 pub async fn resolve_default_provider(
     db: &DatabaseConnection,
@@ -124,12 +124,9 @@ pub async fn resolve_default_provider(
         .into_iter()
         .find(|p| p.enabled)
         .ok_or_else(|| "无可用 LLM provider".to_string())?;
-    let key = prov
-        .keys
-        .iter()
-        .find(|k| k.enabled)
-        .cloned()
-        .ok_or_else(|| "provider 无可用 API key".to_string())?;
+    // 多 API key 轮询：同 resolve_model_for_node，并行节点必须逐节点换 key
+    let key =
+        get_active_key(db, &prov.id).await.map_err(|e| format!("provider 无可用 API key: {e}"))?;
     let model = prov
         .models
         .iter()
@@ -154,12 +151,10 @@ pub async fn resolve_project_default(
     {
         let providers = list_providers(db).await.map_err(|e| e.to_string())?;
         if let Some(prov) = providers.into_iter().find(|p| p.id == *pid && p.enabled) {
-            let key = prov
-                .keys
-                .iter()
-                .find(|k| k.enabled)
-                .cloned()
-                .ok_or_else(|| "项目默认 provider 无可用 API key".to_string())?;
+            // 多 API key 轮询：同 resolve_model_for_node，并行节点必须逐节点换 key
+            let key = get_active_key(db, pid)
+                .await
+                .map_err(|e| format!("项目默认 provider 无可用 API key: {e}"))?;
             let model_exists = prov.models.iter().any(|m| m.model_id == *mid && m.enabled);
             if model_exists {
                 return Ok((prov, key, mid.clone()));
@@ -191,12 +186,11 @@ pub async fn resolve_model_for_node(
     if let Some(pid) = effective_provider_id {
         let providers = list_providers(db).await.map_err(|e| e.to_string())?;
         if let Some(prov) = providers.into_iter().find(|p| p.id == pid && p.enabled) {
-            let key = prov
-                .keys
-                .iter()
-                .find(|k| k.enabled)
-                .cloned()
-                .ok_or_else(|| format!("provider '{}' 无可用 API key", pid))?;
+            // 多 API key 轮询：工作流并行节点共享同一 provider 时必须逐节点轮换 key，
+            // 否则全部并发打第一把 key → 429 集中（round-robin 见 get_active_key）。
+            let key = get_active_key(db, pid)
+                .await
+                .map_err(|e| format!("provider '{}' 无可用 API key: {e}", pid))?;
             let default_model = prov
                 .models
                 .iter()

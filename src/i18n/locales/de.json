@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "Keine Fähigkeitslücken",
+      "deliveriesEmpty": "Keine Lieferungen; über „Lieferung ausführen“ in den Lead-Aktionen erstellen",
+      "executeDelivery": "Lieferung ausführen",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "Proaktive Suche",
       "btnAnalyzeGaps": "Lücken analysieren",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "Status ändern",
+      "delivery": "Lieferung",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "Maximaler Fähigkeits-Cache",
         "dbCleanupDays": "Datenbank-Aufräumtage",
         "logLevel": "Protokollebene: debug/info/warn/error",
-        "enableAnalytics": "Analyse aktivieren"
+        "enableAnalytics": "Analyse aktivieren",
+        "scanLlmEvalEnabled": "LLM-Verfeinerung (Neubewertung vielversprechender Leads)",
+        "scanLlmEvalMaxLeads": "Max. Leads pro Verfeinerungslauf",
+        "scanLlmEvalMinRuleScore": "Verfeinerungs-Vorfilter (Regelpunktzahl ≥)"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "Übersprungen (Compliance)"
       },
+      "platformSkippedHint": "Keine offiziellen API-Anmeldeinformationen konfiguriert; Scan gemäß Compliancerichtlinie übersprungen. Token konfigurieren und Plattform aktivieren, um zu scannen.",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13571,6 +13565,14 @@
       "subscriptions": "Abos",
       "addSubscription": "Abo hinzufügen",
       "manualEntry": "Manueller Eintrag",
+      "capabilityScan": "Fähigkeitsgestützter Scan",
+      "capabilityScanDesc": "Erzeugt Suchbegriffe aus dem lokalen Fähigkeitsinventar und durchsucht Nachfragemärkte begriffsweise (Workflow: Fähigkeitsscan → Suchbegriffsplanung → Schleifenscan).",
+      "capabilityFocus": "Fokus (optional)",
+      "capabilityFocusPlaceholder": "z. B. KI-App-Entwicklung, Datendienste; leer lassen, um das Inventar entscheiden zu lassen",
+      "capabilityMaxKeywords": "Maximale Suchbegriffe",
+      "capabilityScanStart": "Scan starten",
+      "capabilityScanComplete": "Fähigkeitsgestützter Scan abgeschlossen, Leads aktualisiert",
+      "capabilityScanFailed": "Fähigkeitsgestützter Scan fehlgeschlagen: {{error}}",
       "leadCreateFailed": "Lead konnte nicht erstellt werden: {{error}}",
       "leadFormTitle": "Titel",
       "leadFormTitleRequired": "Titel ist erforderlich",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "Als ausgestellt markieren",
       "delivMarkPaid": "Als bezahlt markieren",
       "delivDelete": "Löschen"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14372,7 +14383,8 @@
     "boolYes": "Ja",
     "boolNo": "Nein",
     "backendCallFailed": "Backend-Aufruf fehlgeschlagen",
-    "emptyHistoryWarning": "Serenity-Verlauf ist leer: list_reco_history hat 0 Zeilen zurückgegeben (möglicherweise keine Historie mit Stil serenity/bottleneck in DB oder Backend-Befehlsfehler wurde stillschweigend ignoriert)"
+    "emptyHistoryWarning": "Serenity-Verlauf ist leer: list_reco_history hat 0 Zeilen zurückgegeben (möglicherweise keine Historie mit Stil serenity/bottleneck in DB oder Backend-Befehlsfehler wurde stillschweigend ignoriert)",
+    "timeBasis": "Zeitbasis: {{date}} · vorgeschlagenes Fenster ~{{days}} Tage (bis {{until}})"
   },
   "trade": {
     "title": "Trading Log",
@@ -14963,7 +14975,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "Kennzahlenschätzung (t-valuation)",
+      "currentPriceLabel": "Kurs",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "Burggraben-Score",
+      "oeYieldLabel": "OE-Rendite",
+      "grahamUpsideLabel": "Graham-Aufwärtspotenzial",
+      "valueSignalLabel": "Gesamtsignal",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "Verschuldungsquote",
+      "grossMarginLabel": "Bruttomarge",
+      "revenueGrowthLabel": "Umsatzwachstum"
     },
     "workflow": {
       "analyst": {
@@ -15016,6 +15039,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "Hilfsknoten",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15077,7 +15101,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析师",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "Fehler beim Überspringen der Analyse: {{reason}}"
     },
     "debugPanel": {
       "show": "🔍 Show",
@@ -15601,6 +15625,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "Trendauswahl vs Analyse · Systemübergreifende Abweichung",
+      "timeBasis": "Auswahl vom {{recoDate}} · Analyse vom {{decisionDate}} (~{{gapDays}} Tage Abstand)",
+      "recoSays": "Trendauswahl: {{score}} Pkt., sondierende Position {{position}} % vorgeschlagen ({{strategy}}-Strategie)",
+      "attentionHeat": "Aufmerksamkeit: {{heat}}",
+      "workflowSays": "Analyse-Workflow-Urteil: {{action}}, Position {{position}} %",
+      "divergenceNote": "Zwei Uhren — die Auswahl setzt auf Katalysatoren (~{{recoDays}} T.), der Workflow bewertet aktuelle Quoten (~{{decisionDays}} T.)",
+      "catalystLabel": "Katalysator ({{confidence}})"
     },
     "compare": {
       "title": "Compare",
@@ -16355,7 +16388,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

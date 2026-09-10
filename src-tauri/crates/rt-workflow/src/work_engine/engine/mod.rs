@@ -139,6 +139,11 @@ pub struct RunOptions {
     pub heartbeat_callback: Option<HeartbeatCallback>,
     /// 超时预警回调：节点接近超时时发出警告。
     pub timeout_warning_callback: Option<TimeoutWarningCallback>,
+    /// 工具权限（含 strict_mode）。注入后 AgentExecutor 启用严格输出契约：
+    /// 4f 尾部约束注入（agent_executor.rs 4f）+ VERDICT 缺失兜底重试 +
+    /// VERDICT tag 重构/strict JSON 校验/降级三道防线。
+    /// None = 不启用（保持历史默认行为，所有 strict 代码路径不激活）。
+    pub tool_permissions: Option<Arc<axagent_harness::tool::ToolPermissions>>,
 }
 
 /// 心跳回调类型
@@ -188,6 +193,7 @@ impl std::fmt::Debug for RunOptions {
             .field("heartbeat_interval", &self.heartbeat_interval)
             .field("heartbeat_callback", &self.heartbeat_callback.is_some())
             .field("timeout_warning_callback", &self.timeout_warning_callback.is_some())
+            .field("tool_permissions", &self.tool_permissions.is_some())
             .finish()
     }
 }
@@ -222,6 +228,7 @@ impl Default for RunOptions {
             heartbeat_interval: Duration::from_secs(30),
             heartbeat_callback: None,
             timeout_warning_callback: None,
+            tool_permissions: None,
         }
     }
 }
@@ -258,6 +265,14 @@ impl RunOptions {
     /// G12: 注入任务契约，启用 SLA/验收/状态机
     pub fn with_task_contract(mut self, contract: TaskContract) -> Self {
         self.task_contract = Some(contract);
+        self
+    }
+    /// 注入工具权限（strict_mode 等），透传到每个节点的 ExecutionState
+    pub fn with_tool_permissions(
+        mut self,
+        perms: Arc<axagent_harness::tool::ToolPermissions>,
+    ) -> Self {
+        self.tool_permissions = Some(perms);
         self
     }
     /// 设置心跳间隔
@@ -2083,6 +2098,8 @@ impl WorkEngine {
             };
             if let Some(mut wf) = template {
                 wf.status = WorkflowStatus::Running;
+                // V71: 容器体步骤顺序错位防护（见 sanitize_container_step_orders 文档）
+                sanitize_container_step_orders(&mut wf);
                 let mut exec_wfs = self.execution_workflows.write().await;
                 exec_wfs.insert(execution_id.clone(), wf);
             } else {
@@ -2110,7 +2127,8 @@ impl WorkEngine {
                             .iter()
                             .map(|n| (n.base_id().to_string(), NodeRuntimeState::default()))
                             .collect();
-                        let wf = Workflow {
+                        // V71: 容器体步骤顺序错位防护（同上）
+                        let mut wf = Workflow {
                             id: workflow_id.to_string(),
                             name: tpl.name.clone(),
                             nodes,
@@ -2125,6 +2143,7 @@ impl WorkEngine {
                             error_workflow_id: None,
                             hooks_config: parse_hooks_config(&tpl.hooks_config, workflow_id),
                         };
+                        sanitize_container_step_orders(&mut wf);
                         // 以模板 ID 为 key 写入注册表（幂等：下次触发直接命中上方 if 分支）
                         self.workflows.write().await.insert(workflow_id.to_string(), wf.clone());
                         self.execution_workflows.write().await.insert(execution_id.clone(), wf);
@@ -2541,6 +2560,7 @@ impl WorkEngine {
         let sub_progress_cb = progress_cb.clone();
         let sub_dry_run = options.dry_run;
         let sub_system_capability_cb = options.system_capability_callback.clone();
+        let sub_tool_permissions = options.tool_permissions.clone();
 
         let sub_cb: SubWorkflowCallback = Arc::new(
             move |sub_workflow_id: String,
@@ -2553,6 +2573,7 @@ impl WorkEngine {
                 let progress_cb = sub_progress_cb.clone();
                 let dry_run = sub_dry_run;
                 let system_capability_cb = sub_system_capability_cb.clone();
+                let tool_permissions = sub_tool_permissions.clone();
                 let child_execution_id = uuid::Uuid::new_v4().to_string();
                 let child_eid_for_result = child_execution_id.clone();
                 // 供超时路径取消孤儿子执行：子执行 ID 在同步阶段即确定，
@@ -2612,6 +2633,8 @@ impl WorkEngine {
                                     step_timeout: sub_step_timeout,
                                     parent_cancel_token: Some(cancel_token),
                                     system_capability_callback: system_capability_cb,
+                                    // 子工作流继承父执行的严格模式等工具权限
+                                    tool_permissions,
                                     ..Default::default()
                                 };
                                 if let Some(cb) = progress_cb {
@@ -2800,31 +2823,46 @@ impl WorkEngine {
                         .values()
                         .any(|s| matches!(s.status, NodeStatus::Pending | NodeStatus::Ready));
                     if has_blocked {
-                        // 先收集需要标记为 Skipped 的节点 key，避免 mutable + immutable
-                        // 双重借用 wf.node_states。
-                        let keys_to_skip: Vec<String> = wf
-                            .node_states
-                            .iter()
-                            .filter_map(|(state_key, state)| {
-                                if !matches!(state.status, NodeStatus::Pending | NodeStatus::Ready)
-                                {
-                                    return None;
-                                }
-                                let upstream_terminal = wf.edges.iter().all(|e| {
-                                    if e.target != *state_key {
-                                        return true;
+                        // 迭代式 Skipped 传播（2026-09-08 死锁实证修复）：
+                        // 旧实现单遍收集后标记——收集发生在标记之前，纯线性链
+                        // （A Failed → B Pending → C Pending）的 C 因收集时 B 还是
+                        // Pending 而漏标，终态记录不完整。改为每轮标记后重新收集，
+                        // 直到无新节点可标（每轮至少标记 1 个或退出，必然终止）。
+                        // 注意：对本分支下游存在 Completed 上游的节点（如本次事件的
+                        // data-quality）永远不会命中该规则——那是调度语义，由
+                        // compute_ready_nodes 的 continue_on_fail 处理，不在此处。
+                        loop {
+                            // 先收集需要标记为 Skipped 的节点 key，避免 mutable + immutable
+                            // 双重借用 wf.node_states。
+                            let keys_to_skip: Vec<String> = wf
+                                .node_states
+                                .iter()
+                                .filter_map(|(state_key, state)| {
+                                    if !matches!(
+                                        state.status,
+                                        NodeStatus::Pending | NodeStatus::Ready
+                                    ) {
+                                        return None;
                                     }
-                                    matches!(
-                                        wf.node_states.get(&e.source).map(|s| &s.status),
-                                        Some(NodeStatus::Skipped | NodeStatus::Failed)
-                                    )
-                                });
-                                upstream_terminal.then(|| state_key.clone())
-                            })
-                            .collect();
-                        for key in keys_to_skip {
-                            if let Some(state) = wf.node_states.get_mut(&key) {
-                                state.status = NodeStatus::Skipped;
+                                    let upstream_terminal = wf.edges.iter().all(|e| {
+                                        if e.target != *state_key {
+                                            return true;
+                                        }
+                                        matches!(
+                                            wf.node_states.get(&e.source).map(|s| &s.status),
+                                            Some(NodeStatus::Skipped | NodeStatus::Failed)
+                                        )
+                                    });
+                                    upstream_terminal.then(|| state_key.clone())
+                                })
+                                .collect();
+                            if keys_to_skip.is_empty() {
+                                break;
+                            }
+                            for key in keys_to_skip {
+                                if let Some(state) = wf.node_states.get_mut(&key) {
+                                    state.status = NodeStatus::Skipped;
+                                }
                             }
                         }
                         wf.status = WorkflowStatus::PartiallyCompleted;
@@ -3040,32 +3078,51 @@ impl WorkEngine {
                     serde_json::to_value(&deps_results).unwrap_or(serde_json::json!({}));
                 let started_at = Utc::now().timestamp_millis();
 
-                self.update_node_status_for_execution(
-                    &execution_id,
-                    node_id,
-                    NodeStatus::Running,
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                .map(|_| {
-                    tracing::info!(
-                        execution_id = %execution_id,
-                        node_id = %node_id,
-                        "[NODE] Ready → Running OK"
-                    );
-                })
-                .map_err(|e| {
-                    tracing::error!(
-                        execution_id = %execution_id,
-                        node_id = %node_id,
-                        error = %e,
-                        "[NODE] Ready → Running FAILED"
-                    );
-                    e
-                })
-                .ok();
+                let mut skip_rerun = false;
+                match self
+                    .update_node_status_for_execution(
+                        &execution_id,
+                        node_id,
+                        NodeStatus::Running,
+                        None,
+                        None,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            execution_id = %execution_id,
+                            node_id = %node_id,
+                            "[NODE] Ready → Running OK"
+                        );
+                    },
+                    // 终态节点被主循环再次调度（如 Debate 容器 body 先跑完的辩手，
+                    // 主循环又按 DAG 就绪入队）：跳过重复执行。旧行为吞掉状态机
+                    // 拒绝后照样 dispatch → 同一 LLM 节点跑两遍（2026-09-08 实证）。
+                    Err(WorkEngineError::InvalidStateTransition { from, .. })
+                        if matches!(from.as_str(), "Completed" | "Failed" | "Skipped") =>
+                    {
+                        tracing::info!(
+                            execution_id = %execution_id,
+                            node_id = %node_id,
+                            from = %from,
+                            "[NODE] 节点已处于终态，主循环跳过重复执行"
+                        );
+                        skip_rerun = true;
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            execution_id = %execution_id,
+                            node_id = %node_id,
+                            error = %e,
+                            "[NODE] Ready → Running FAILED"
+                        );
+                    },
+                }
+                if skip_rerun {
+                    continue;
+                }
 
                 if let Some(ref cb) = progress_cb {
                     let completed = {
@@ -3168,6 +3225,9 @@ impl WorkEngine {
                 exec_ctx.variables = merged_vars;
                 exec_ctx.cancel_token = Some(cancel_token.clone());
                 exec_ctx.dry_run = options.dry_run;
+                // 透传调用方注入的工具权限（strict_mode 等），激活 AgentExecutor
+                // 严格输出契约（VERDICT 兜底重试 / strict JSON 校验 / 降级 JSON）
+                exec_ctx.tool_permissions = options.tool_permissions.clone();
                 {
                     let bp = self.breakpoints.lock().await;
                     exec_ctx.breakpoints = bp.clone();
@@ -3225,6 +3285,7 @@ impl WorkEngine {
                         loop_body_dispatch: None,
                         loop_checkpoint: None,
                         debate_body_dispatch: None,
+                        stream_progress: progress_cb.clone(),
                     });
 
                     let engine_clone = self.clone();
@@ -3234,6 +3295,7 @@ impl WorkEngine {
                     let sub_cancel_token = cancel_token.clone();
                     let sub_progress_cb = progress_cb.clone();
                     let sub_dry_run = options.dry_run;
+                    let sub_tool_permissions = options.tool_permissions.clone();
                     // h3-r4-2：透传系统能力回调到子工作流 RunOptions，
                     // 使孙级 `system_*` 节点（如 L3 内的 system_rar_retriever）也能命中。
                     let sub_system_capability_cb = options.system_capability_callback.clone();
@@ -3253,6 +3315,7 @@ impl WorkEngine {
                                 let progress_cb = sub_progress_cb.clone();
                                 let dry_run = sub_dry_run;
                                 let system_capability_cb = sub_system_capability_cb.clone();
+                                let tool_permissions = sub_tool_permissions.clone();
                                 let child_execution_id = uuid::Uuid::new_v4().to_string();
                                 let child_eid_for_result = child_execution_id.clone();
                                 // 供超时路径取消孤儿子执行：子执行 ID 在同步阶段即确定，
@@ -3331,6 +3394,8 @@ impl WorkEngine {
                                                     parent_cancel_token: Some(cancel_token),
                                                     system_capability_callback:
                                                         system_capability_cb,
+                                                    // 子工作流继承父执行的严格模式等工具权限
+                                                    tool_permissions,
                                                     ..Default::default()
                                                 };
                                                 if let Some(cb) = progress_cb {
@@ -3385,7 +3450,9 @@ impl WorkEngine {
                         debate_body_dispatch: Some(build_debate_body_dispatch(
                             self.clone(),
                             execution_id.clone(),
+                            progress_cb.clone(),
                         )),
+                        stream_progress: progress_cb.clone(),
                     });
                 }
 
@@ -3927,7 +3994,20 @@ impl WorkEngine {
                             })
                         };
 
+                        // 确定性错误（模板变量缺失/配置缺失/权限等）不可重试：
+                        // 重试必然复现同样的失败，只拉长耗时（见 is_non_retryable_error 文档）。
+                        let non_retryable =
+                            super::node_executor_trait::is_non_retryable_error(&err_msg);
+                        if non_retryable {
+                            tracing::info!(
+                                workflow_id = %workflow_id,
+                                node_id = %nr.node_id,
+                                "Skip retry: deterministic (non-retryable) error"
+                            );
+                        }
+
                         if let Some(ref retry_cfg) = effective_retry
+                            && !non_retryable
                             && current_attempts < retry_cfg.max_retries
                         {
                             tracing::info!(
@@ -4386,6 +4466,8 @@ impl WorkEngine {
                         exec_ctx.cancel_token = Some(cancel_token.clone());
                         exec_ctx.dry_run = options.dry_run;
                         exec_ctx.business_rule_engine = seam_business_rule();
+                        // 与首批节点路径一致：透传调用方注入的工具权限（strict_mode 等）
+                        exec_ctx.tool_permissions = options.tool_permissions.clone();
                         {
                             let bp = self.breakpoints.lock().await;
                             exec_ctx.breakpoints = bp.clone();
@@ -4416,7 +4498,9 @@ impl WorkEngine {
                                     debate_body_dispatch: Some(build_debate_body_dispatch(
                                         self.clone(),
                                         execution_id.clone(),
+                                        progress_cb.clone(),
                                     )),
+                                    stream_progress: progress_cb.clone(),
                                 });
                         }
                         let dispatcher = Arc::clone(&self.dispatcher);
@@ -5680,6 +5764,89 @@ pub fn build_loop_body_dispatch(
 
             let started_at = Utc::now().timestamp_millis();
 
+            // Typestate 约束：Running 只能从 Ready 进入；loop 体子节点不经主循环调度，
+            // 首轮执行时仍为 Pending，需先推进为 Ready（同 debate 闭包修复，2026-09-08）。
+            {
+                let current = {
+                    let wfs = engine.execution_workflows.read().await;
+                    wfs.get(&execution_id)
+                        .and_then(|w| w.node_states.get(&node_id))
+                        .map(|s| s.status)
+                };
+                match current {
+                    Some(NodeStatus::Pending) => {
+                        engine
+                            .update_node_status_for_execution(
+                                &execution_id,
+                                &node_id,
+                                NodeStatus::Ready,
+                                None,
+                                None,
+                                None,
+                            )
+                            .await
+                            .ok();
+                    },
+                    // 容器体（Debate/Swarm/Loop）按轮次重复驱动同一批 body 节点：
+                    // 第 2+ 轮 dispatch 时节点已是终态，状态机「终态不变性」会拒绝
+                    // Running/Completed 写入 → 输出进不了 results，且 LLM 被重复调用
+                    // （stock-analysis 实证 2026-09-08：3 轮 × 6 辩手 = 18 次调用中
+                    //  12 次纯浪费，20+ 分钟耗在无信息增量的重跑上——辩手 prompt 不
+                    //  消费 __debate_history__/__debate_round__，重跑输入与第 1 轮相同）。
+                    // 处理：Completed 且已有输出 → 直接复用返回（不重跑 LLM）；
+                    //       其他终态（Failed/Skipped）或无输出 → 重置为 Ready 重跑。
+                    Some(NodeStatus::Completed) => {
+                        let existing = {
+                            let wfs = engine.execution_workflows.read().await;
+                            wfs.get(&execution_id).and_then(|w| w.results.get(&node_id)).cloned()
+                        };
+                        if let Some(existing) = existing {
+                            tracing::info!(
+                                workflow_id = %workflow_id,
+                                node_id = %node_id,
+                                "Debate/Swarm/Loop 容器体重跑：body 节点已有输出，复用跳过（不重复调用 LLM）"
+                            );
+                            return Ok(super::node_executor_trait::NodeOutput {
+                                output: existing,
+                                output_var: None,
+                                control: None,
+                            });
+                        }
+                        // Completed 但 results 无输出（异常态）→ 落入下方重置逻辑
+                        {
+                            let mut wfs = engine.execution_workflows.write().await;
+                            if let Some(wf) = wfs.get_mut(&execution_id) {
+                                if let Some(st) = wf.node_states.get_mut(&node_id) {
+                                    st.status = NodeStatus::Ready;
+                                }
+                            }
+                        }
+                        tracing::info!(
+                            workflow_id = %workflow_id,
+                            node_id = %node_id,
+                            "容器体重跑：Completed 无输出，状态重置为 Ready 重跑"
+                        );
+                    },
+                    Some(s) if s.is_terminal() => {
+                        {
+                            let mut wfs = engine.execution_workflows.write().await;
+                            if let Some(wf) = wfs.get_mut(&execution_id) {
+                                if let Some(st) = wf.node_states.get_mut(&node_id) {
+                                    st.status = NodeStatus::Ready;
+                                }
+                            }
+                        }
+                        tracing::info!(
+                            workflow_id = %workflow_id,
+                            node_id = %node_id,
+                            prev_status = ?s,
+                            "Debate/Swarm/Loop 容器体重跑：body 节点状态重置为 Ready"
+                        );
+                    },
+                    _ => {},
+                }
+            }
+
             // 标记节点为 Running
             engine
                 .update_node_status_for_execution(
@@ -5788,6 +5955,96 @@ pub fn build_loop_body_dispatch(
 ///
 /// 签名与 `build_loop_body_dispatch` 完全一致（按 step_id + ctx 调度单节点），
 /// 单独工厂仅为语义清晰：Loop 是迭代 body_steps，Swarm/Debate 是多轮协作
+/// V71（2026-09-10）：单个容器步骤列表的稳定拓扑排序。
+/// `pairs` 仅包含两端都在 `steps` 内的依赖边 (source, target)。
+/// Kahn 算法 + 原序列号做稳定 tie-break：无边约束时保持原相对顺序（模板的
+/// 正确列表经排序后不变）；存在环（不该发生）时返回 None，调用方保留原列表。
+fn topo_sort_step_list(steps: &[String], pairs: &[(String, String)]) -> Option<Vec<String>> {
+    let idx: HashMap<&str, usize> =
+        steps.iter().enumerate().map(|(i, s)| (s.as_str(), i)).collect();
+    let mut indegree = vec![0usize; steps.len()];
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); steps.len()];
+    for (s, t) in pairs {
+        let (Some(si), Some(ti)) = (idx.get(s.as_str()), idx.get(t.as_str())) else {
+            continue;
+        };
+        adj[*si].push(*ti);
+        indegree[*ti] += 1;
+    }
+    // ready 队列按原序列号升序（稳定：无约束时维持原相对顺序）
+    let mut ready: Vec<usize> = (0..steps.len()).filter(|&i| indegree[i] == 0).collect();
+    let mut out = Vec::with_capacity(steps.len());
+    while !ready.is_empty() {
+        let i = ready.remove(0);
+        out.push(steps[i].clone());
+        for &j in &adj[i] {
+            indegree[j] -= 1;
+            if indegree[j] == 0 {
+                let pos = ready.partition_point(|&x| x < j);
+                ready.insert(pos, j);
+            }
+        }
+    }
+    (out.len() == steps.len()).then_some(out)
+}
+
+/// V71（2026-09-10）：容器体步骤顺序 sanitizer。
+///
+/// Debate/Swarm 容器执行器严格按 `debater_steps` / `agent_steps` 列表顺序驱动
+/// 子节点，不感知容器内依赖边（debate_executor.rs 顺序驱动语义）。uuid 工作流
+/// 副本在编辑 / AI 生成 / 旧模板拷贝链路中列表顺序被打乱时（execution cb80a95f
+/// 实证：bear-r2 被排到 bear-r3 之后执行，bull-r3/bear-r3 缺失 bear-r2 上下文，
+/// 报「context_sources 变量未在 context.variables 中找到」且辩论质量降级），
+/// 按列表执行会违反依赖序。
+///
+/// 此处在运行时副本进入调度前，用「两端都在步骤集内的依赖边」对列表做稳定
+/// 拓扑排序：正确列表（链式依赖）排序结果不变，零影响；错位列表被自动修正并
+/// 打 WARN 留痕。修的是运行时副本，不回写模板。
+pub(crate) fn sanitize_container_step_orders(workflow: &mut Workflow) {
+    for node in &mut workflow.nodes {
+        let steps: Vec<String> = match node {
+            WorkflowNode::Debate(d) => d.config.debater_steps.clone(),
+            WorkflowNode::Swarm(s) => s.config.agent_steps.clone(),
+            _ => continue,
+        };
+        if steps.len() < 2 {
+            continue;
+        }
+        let step_set: std::collections::HashSet<&str> = steps.iter().map(|s| s.as_str()).collect();
+        let pairs: Vec<(String, String)> = workflow
+            .edges
+            .iter()
+            .filter(|e| {
+                step_set.contains(e.source.as_str())
+                    && step_set.contains(e.target.as_str())
+                    && e.source != e.target
+            })
+            .map(|e| (e.source.clone(), e.target.clone()))
+            .collect();
+        let Some(ordered) = topo_sort_step_list(&steps, &pairs) else {
+            tracing::warn!(
+                container = %node.base_id(),
+                "容器体步骤列表存在循环依赖，保留原顺序"
+            );
+            continue;
+        };
+        if ordered == steps {
+            continue;
+        }
+        tracing::warn!(
+            container = %node.base_id(),
+            before = ?steps,
+            after = ?ordered,
+            "容器体步骤顺序与依赖边不一致，已按拓扑序修正（顺序错位防护）"
+        );
+        match node {
+            WorkflowNode::Debate(d) => d.config.debater_steps = ordered,
+            WorkflowNode::Swarm(s) => s.config.agent_steps = ordered,
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// 驱动 agent_steps / debater_steps。两者底层走同一 dispatcher 路径，
 /// 保留 progress_callback / 节点状态切换 / node_records 统一埋点。
 ///
@@ -5800,13 +6057,25 @@ pub fn build_loop_body_dispatch(
 /// `parent_execution_id` 回退方案。`ctx.execution_id` 是 per-node 随机 UUID
 /// （`format!("node_{uuid})`），不是真实的工作流 execution_id，导致查
 /// `execution_workflows` 不命中。由主调度循环在调用时传入真实 `execution_id`。
+/// progress_cb 透传（2026-09-08 修复）：此前 Debate 容器内部辩手子节点只更新引擎
+/// 内存状态 + DB 记录 + tracing 日志，不触发任何 StepProgressEvent，导致
+/// stock-analysis 等使用辩论阶段的工作流在整个辩论期间（6 辩手 × 多轮 × 每次
+/// LLM 调用 TTFB 可 >120s）前端完全无进度事件（UI 卡在"等待中"）。
+/// 现在子节点 Running/Completed/Failed 边界逐个发出 StepProgressEvent，
+/// 由外层 progress_cb（commands 层）转成 workflow-step-start/complete/error 等
+/// 事件，前端 stockAnalysisStore 的 updateDebateRound
+/// 即可实时填充辩论轮次。
+/// 注意：子节点事件的 total_nodes/completed_nodes 填 0 —— 前端对 totalNodes=0
+/// 有守卫（保留原 progressPct），避免容器内计数污染主图进度条。
 pub fn build_debate_body_dispatch(
     engine: WorkEngine,
     run_execution_id: String,
+    progress_cb: Option<ProgressCallback>,
 ) -> super::execution_state::LoopBodyDispatchFn {
     Arc::new(move |step_id: String, mut ctx: super::execution_state::ExecutionState| {
         let engine = engine.clone();
         let eid = run_execution_id.clone();
+        let progress_cb = progress_cb.clone();
         Box::pin(async move {
             // V60（上游对齐）：使用 run_execution_id（真实 workflow execution_id，
             // 非 per-node UUID）来查 execution_workflows 和写回结果。
@@ -5873,6 +6142,91 @@ pub fn build_debate_body_dispatch(
 
             let started_at = Utc::now().timestamp_millis();
 
+            // Typestate 约束：Running 只能从 Ready 进入；容器体子节点不经主循环调度，
+            // 若仍为 Pending 需先推进为 Ready（与 mark_ready_nodes_for_execution 的推进一致）。
+            // 否则 Running/Completed 均被状态机拒绝 → output 不写入 workflow.results →
+            // 下游节点 context_sources 查不到上游输出（bull/bear 辩手断链实证 2026-09-08）。
+            {
+                let current = {
+                    let wfs = engine.execution_workflows.read().await;
+                    wfs.get(&execution_id)
+                        .and_then(|w| w.node_states.get(&node_id))
+                        .map(|s| s.status)
+                };
+                match current {
+                    Some(NodeStatus::Pending) => {
+                        engine
+                            .update_node_status_for_execution(
+                                &execution_id,
+                                &node_id,
+                                NodeStatus::Ready,
+                                None,
+                                None,
+                                None,
+                            )
+                            .await
+                            .ok();
+                    },
+                    // 容器体（Debate/Swarm/Loop）按轮次重复驱动同一批 body 节点：
+                    // 第 2+ 轮 dispatch 时节点已是终态，状态机「终态不变性」会拒绝
+                    // Running/Completed 写入 → 输出进不了 results，且 LLM 被重复调用
+                    // （stock-analysis 实证 2026-09-08：3 轮 × 6 辩手 = 18 次调用中
+                    //  12 次纯浪费，20+ 分钟耗在无信息增量的重跑上——辩手 prompt 不
+                    //  消费 __debate_history__/__debate_round__，重跑输入与第 1 轮相同）。
+                    // 处理：Completed 且已有输出 → 直接复用返回（不重跑 LLM）；
+                    //       其他终态（Failed/Skipped）或无输出 → 重置为 Ready 重跑。
+                    Some(NodeStatus::Completed) => {
+                        let existing = {
+                            let wfs = engine.execution_workflows.read().await;
+                            wfs.get(&execution_id).and_then(|w| w.results.get(&node_id)).cloned()
+                        };
+                        if let Some(existing) = existing {
+                            tracing::info!(
+                                workflow_id = %workflow_id,
+                                node_id = %node_id,
+                                "Debate/Swarm/Loop 容器体重跑：body 节点已有输出，复用跳过（不重复调用 LLM）"
+                            );
+                            return Ok(super::node_executor_trait::NodeOutput {
+                                output: existing,
+                                output_var: None,
+                                control: None,
+                            });
+                        }
+                        // Completed 但 results 无输出（异常态）→ 落入下方重置逻辑
+                        {
+                            let mut wfs = engine.execution_workflows.write().await;
+                            if let Some(wf) = wfs.get_mut(&execution_id) {
+                                if let Some(st) = wf.node_states.get_mut(&node_id) {
+                                    st.status = NodeStatus::Ready;
+                                }
+                            }
+                        }
+                        tracing::info!(
+                            workflow_id = %workflow_id,
+                            node_id = %node_id,
+                            "容器体重跑：Completed 无输出，状态重置为 Ready 重跑"
+                        );
+                    },
+                    Some(s) if s.is_terminal() => {
+                        {
+                            let mut wfs = engine.execution_workflows.write().await;
+                            if let Some(wf) = wfs.get_mut(&execution_id) {
+                                if let Some(st) = wf.node_states.get_mut(&node_id) {
+                                    st.status = NodeStatus::Ready;
+                                }
+                            }
+                        }
+                        tracing::info!(
+                            workflow_id = %workflow_id,
+                            node_id = %node_id,
+                            prev_status = ?s,
+                            "Debate/Swarm/Loop 容器体重跑：body 节点状态重置为 Ready"
+                        );
+                    },
+                    _ => {},
+                }
+            }
+
             // 标记节点为 Running
             engine
                 .update_node_status_for_execution(
@@ -5885,6 +6239,20 @@ pub fn build_debate_body_dispatch(
                 )
                 .await
                 .ok();
+
+            // 进度事件：辩手子节点开始（total_nodes=0 让前端保留主图进度）
+            if let Some(cb) = &progress_cb {
+                cb(StepProgressEvent {
+                    node_id: node_id.clone(),
+                    status: "running".to_string(),
+                    total_nodes: 0,
+                    completed_nodes: 0,
+                    execution_id: Some(execution_id.clone()),
+                    error: None,
+                    output: None,
+                })
+                .await;
+            }
 
             let dispatch_result = engine.dispatcher.read().await.dispatch(&node, &ctx).await;
 
@@ -5947,6 +6315,20 @@ pub fn build_debate_body_dispatch(
                         .await
                         .ok();
 
+                    // 进度事件：辩手子节点完成（携带输出，前端实时填充辩论轮次）
+                    if let Some(cb) = &progress_cb {
+                        cb(StepProgressEvent {
+                            node_id: node_id.clone(),
+                            status: "completed".to_string(),
+                            total_nodes: 0,
+                            completed_nodes: 0,
+                            execution_id: Some(execution_id.clone()),
+                            error: None,
+                            output: Some(output.output.clone()),
+                        })
+                        .await;
+                    }
+
                     Ok(output)
                 },
                 Err(e) => {
@@ -5970,6 +6352,20 @@ pub fn build_debate_body_dispatch(
                         )
                         .await
                         .ok();
+
+                    // 进度事件：辩手子节点失败（携带真实错误，前端可即时提示）
+                    if let Some(cb) = &progress_cb {
+                        cb(StepProgressEvent {
+                            node_id: node_id.clone(),
+                            status: "failed".to_string(),
+                            total_nodes: 0,
+                            completed_nodes: 0,
+                            execution_id: Some(execution_id.clone()),
+                            error: Some(e.to_string()),
+                            output: None,
+                        })
+                        .await;
+                    }
 
                     Err(e)
                 },
@@ -6068,5 +6464,133 @@ mod tests {
         let stored = engine.domain_constraints().expect("应已注册");
         // 通过指针等价性确认最新注册的是 cb2（cb1 已被覆盖）
         assert!(Arc::ptr_eq(&stored, &cb2));
+    }
+
+    // ── V71: 容器体步骤顺序 sanitizer ──
+
+    use super::{Workflow, sanitize_container_step_orders, topo_sort_step_list};
+    use axagent_harness::workflow_types::{
+        DebateNode, DebateNodeConfig, EdgeType, Position, RetryConfig, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase, WorkflowStatus,
+    };
+
+    fn debate_container(steps: Vec<String>) -> WorkflowNode {
+        WorkflowNode::Debate(DebateNode {
+            base: WorkflowNodeBase {
+                id: "debate-bull-bear".into(),
+                title: "多空辩论".into(),
+                description: None,
+                position: Position { x: 0.0, y: 0.0 },
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: false,
+            },
+            config: DebateNodeConfig {
+                debater_steps: steps,
+                max_rounds: 3,
+                convergence_prompt: None,
+                convergence_model: None,
+                convergence_model_role: None,
+                topic_var: "trigger.output".into(),
+                output_var: String::new(),
+                sub_graph: None,
+            },
+        })
+    }
+
+    fn edge(source: &str, target: &str) -> WorkflowEdge {
+        WorkflowEdge {
+            id: format!("e-{source}-{target}"),
+            source: source.into(),
+            source_handle: None,
+            target: target.into(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        }
+    }
+
+    #[test]
+    fn topo_sort_unconstrained_keeps_original_order() {
+        let steps = vec!["b".into(), "a".into(), "c".into()];
+        assert_eq!(topo_sort_step_list(&steps, &[]).unwrap(), steps);
+    }
+
+    #[test]
+    fn topo_sort_cycle_returns_none() {
+        let steps = vec!["a".into(), "b".into()];
+        let pairs = vec![("a".into(), "b".into()), ("b".into(), "a".into())];
+        assert!(topo_sort_step_list(&steps, &pairs).is_none());
+    }
+
+    /// cb80a95f 实证形态：列表被错位为 [bull-r1, bear-r1, bull-r2, bull-r3,
+    /// bear-r3, bear-r2]（bear-r2 排最后），依赖边是链式 bull-r1→bear-r1→…。
+    /// sanitizer 应按拓扑序还原正确执行序，避免 R3 辩手缺失 R2 上下文。
+    #[test]
+    fn sanitize_fixes_scrambled_debater_steps() {
+        let correct = vec!["bull-r1", "bear-r1", "bull-r2", "bear-r2", "bull-r3", "bear-r3"];
+        let scrambled = vec!["bull-r1", "bear-r1", "bull-r2", "bull-r3", "bear-r3", "bear-r2"];
+        let mut wf = Workflow {
+            id: "wf_test".into(),
+            name: "test".into(),
+            nodes: vec![debate_container(scrambled.iter().map(|s| s.to_string()).collect())],
+            edges: correct.windows(2).map(|w| edge(w[0], w[1])).collect(),
+            status: WorkflowStatus::Running,
+            created_at: 0,
+            completed_at: None,
+            results: Default::default(),
+            node_states: Default::default(),
+            output: None,
+            error_config: None,
+            error_workflow_id: None,
+            hooks_config: None,
+        };
+        sanitize_container_step_orders(&mut wf);
+        let dn = wf
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Debate(d) => Some(d),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            dn.config.debater_steps,
+            correct.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    /// 正确列表（链式依赖）经 sanitizer 后必须原样保留——模板零影响。
+    #[test]
+    fn sanitize_keeps_correct_order_untouched() {
+        let correct = vec!["bull-r1", "bear-r1", "bull-r2", "bear-r2", "bull-r3", "bear-r3"];
+        let mut wf = Workflow {
+            id: "wf_test".into(),
+            name: "test".into(),
+            nodes: vec![debate_container(correct.iter().map(|s| s.to_string()).collect())],
+            edges: correct.windows(2).map(|w| edge(w[0], w[1])).collect(),
+            status: WorkflowStatus::Running,
+            created_at: 0,
+            completed_at: None,
+            results: Default::default(),
+            node_states: Default::default(),
+            output: None,
+            error_config: None,
+            error_workflow_id: None,
+            hooks_config: None,
+        };
+        sanitize_container_step_orders(&mut wf);
+        let dn = wf
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Debate(d) => Some(d),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(dn.config.debater_steps, correct);
     }
 }

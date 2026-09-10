@@ -32,6 +32,20 @@ interface ValueReportData {
   buffett_verdict?: string;
   ideal_buy_price?: string;
   risk_flags?: string[];
+  // V72(2026-09-10): 现值硬数据（value-investor 直接引用 t-valuation 输出）
+  pe?: number | string | null;
+  pb?: number | string | null;
+  current_price?: number | string | null;
+  f_score?: number | string | null;
+  moat_score?: number | string | null;
+  owner_earnings_yield_pct?: number | string | null;
+  value_signal?: string;
+  graham_upside_pct?: number | string | null;
+  // V73: 结构化基本面硬数据（value-investor 从 t-risk 引用）
+  roe_pct?: number | string | null;
+  debt_ratio_pct?: number | string | null;
+  gross_margin_pct?: number | string | null;
+  revenue_growth_yoy_pct?: number | string | null;
   [key: string]: unknown;
 }
 
@@ -69,6 +83,24 @@ function extractReadableText(report: string, t: (key: string) => string): string
       parts.push(`## ${t("stockAnalysis.valueAssessment.valuationConclusion")}\n\n${parsed.intrinsic_value_range}`);
     }
     if (parsed.margin_of_safety) { parts.push(parsed.margin_of_safety); }
+    // V72: 现值硬数据行
+    const metricParts: string[] = [];
+    if (parsed.current_price != null) { metricParts.push(`现价 ${parsed.current_price}`); }
+    if (parsed.pe != null) { metricParts.push(`PE ${parsed.pe}`); }
+    if (parsed.pb != null) { metricParts.push(`PB ${parsed.pb}`); }
+    if (parsed.f_score != null) { metricParts.push(`F-Score ${parsed.f_score}/9`); }
+    if (parsed.moat_score != null) { metricParts.push(`护城河 ${parsed.moat_score}/100`); }
+    if (parsed.owner_earnings_yield_pct != null) { metricParts.push(`OE收益率 ${parsed.owner_earnings_yield_pct}%`); }
+    if (parsed.graham_upside_pct != null) { metricParts.push(`格雷厄姆上行 ${parsed.graham_upside_pct}%`); }
+    if (parsed.value_signal) { metricParts.push(`综合判断: ${parsed.value_signal}`); }
+    // V73: 结构化基本面硬数据
+    if (parsed.roe_pct != null) { metricParts.push(`ROE ${parsed.roe_pct}%`); }
+    if (parsed.debt_ratio_pct != null) { metricParts.push(`负债率 ${parsed.debt_ratio_pct}%`); }
+    if (parsed.gross_margin_pct != null) { metricParts.push(`毛利率 ${parsed.gross_margin_pct}%`); }
+    if (parsed.revenue_growth_yoy_pct != null) { metricParts.push(`营收增速 ${parsed.revenue_growth_yoy_pct}%`); }
+    if (metricParts.length > 0) {
+      parts.push(`## ${t("stockAnalysis.valueAssessment.metricsTitle")}\n\n${metricParts.join(" | ")}`);
+    }
     if (Array.isArray(parsed.risk_flags) && parsed.risk_flags.length > 0) {
       parts.push(`## ${t("stockAnalysis.valueAssessment.riskFlags")}\n\n${parsed.risk_flags.join("、")}`);
     }
@@ -130,6 +162,20 @@ function extractFieldsByRegex(text: string): ValueReportData | null {
     { key: "margin_of_safety", pattern: /"margin_of_safety"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
     { key: "buffett_verdict", pattern: /"buffett_verdict"\s*:\s*"((?:(?!",\s*"|\n").)+)"/ },
     { key: "ideal_buy_price", pattern: /"ideal_buy_pricee?"\s*:\s*"([^"]+)"/ },
+    // V72: 现值硬数据（数字或 null；值可能是数字不带引号）
+    { key: "pe", pattern: /"pe"\s*:\s*"?([\d.]+)"?/ },
+    { key: "pb", pattern: /"pb"\s*:\s*"?([\d.]+)"?/ },
+    { key: "current_price", pattern: /"current_price"\s*:\s*"?([\d.]+)"?/ },
+    { key: "f_score", pattern: /"f_score"\s*:\s*"?([\d.]+)"?/ },
+    { key: "moat_score", pattern: /"moat_score"\s*:\s*"?([\d.]+)"?/ },
+    { key: "owner_earnings_yield_pct", pattern: /"owner_earnings_yield_pct"\s*:\s*"?(-?[\d.]+)"?/ },
+    { key: "graham_upside_pct", pattern: /"graham_upside_pct"\s*:\s*"?(-?[\d.]+)"?/ },
+    { key: "value_signal", pattern: /"value_signal"\s*:\s*"([^"]+)"/ },
+    // V73: 结构化基本面硬数据（数字或 null）
+    { key: "roe_pct", pattern: /"roe_pct"\s*:\s*"?(-?[\d.]+)"?/ },
+    { key: "debt_ratio_pct", pattern: /"debt_ratio_pct"\s*:\s*"?(-?[\d.]+)"?/ },
+    { key: "gross_margin_pct", pattern: /"gross_margin_pct"\s*:\s*"?(-?[\d.]+)"?/ },
+    { key: "revenue_growth_yoy_pct", pattern: /"revenue_growth_yoy_pct"\s*:\s*"?(-?[\d.]+)"?/ },
   ];
   for (const { key, pattern } of patterns) {
     const m = text.match(pattern);
@@ -370,6 +416,72 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
               <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
                 <ReportMarkdown content={data.margin_of_safety} isDark={isDark} />
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* V72: 现值硬数据（value-investor 从 t-valuation 引用） */}
+      {(data.pe != null || data.pb != null || data.current_price != null || data.f_score != null
+        || data.moat_score != null || data.owner_earnings_yield_pct != null
+        || data.value_signal || data.graham_upside_pct != null
+        || data.roe_pct != null || data.debt_ratio_pct != null
+        || data.gross_margin_pct != null || data.revenue_growth_yoy_pct != null) && (
+        <div>
+          <div className="text-xs font-medium mb-1" style={{ color: "var(--muted)" }}>
+            {t("stockAnalysis.valueAssessment.metricsTitle")}
+          </div>
+          <div className="flex gap-1 flex-wrap">
+            {data.current_price != null && (
+              <Tag color="blue">{t("stockAnalysis.valueAssessment.currentPriceLabel")}: {data.current_price}</Tag>
+            )}
+            {data.pe != null && <Tag color="blue">PE: {data.pe}</Tag>}
+            {data.pb != null && <Tag color="blue">PB: {data.pb}</Tag>}
+            {data.f_score != null && (
+              <Tag color={Number(data.f_score) >= 7 ? "green" : "orange"}>
+                {t("stockAnalysis.valueAssessment.fScoreLabel")}: {data.f_score}/9
+              </Tag>
+            )}
+            {data.moat_score != null && (
+              <Tag color="gold">{t("stockAnalysis.valueAssessment.moatScoreLabel")}: {data.moat_score}/100</Tag>
+            )}
+            {data.owner_earnings_yield_pct != null && (
+              <Tag color="cyan">
+                {t("stockAnalysis.valueAssessment.oeYieldLabel")}: {data.owner_earnings_yield_pct}%
+              </Tag>
+            )}
+            {data.graham_upside_pct != null && (
+              <Tag color={Number(data.graham_upside_pct) > 0 ? "red" : "green"}>
+                {t("stockAnalysis.valueAssessment.grahamUpsideLabel")}: {data.graham_upside_pct}%
+              </Tag>
+            )}
+            {data.value_signal && (
+              <Tag color="purple">{t("stockAnalysis.valueAssessment.valueSignalLabel")}: {data.value_signal}</Tag>
+            )}
+            {/* V73: 结构化基本面硬数据（t-risk） */}
+            {data.roe_pct != null && (
+              <Tag color={Number(data.roe_pct) >= 15 ? "green" : "orange"}>
+                {t("stockAnalysis.valueAssessment.roeLabel")}: {data.roe_pct}%
+              </Tag>
+            )}
+            {data.debt_ratio_pct != null && (
+              <Tag
+                color={Number(data.debt_ratio_pct) > 70
+                  ? "red"
+                  : Number(data.debt_ratio_pct) <= 50
+                  ? "green"
+                  : "orange"}
+              >
+                {t("stockAnalysis.valueAssessment.debtRatioLabel")}: {data.debt_ratio_pct}%
+              </Tag>
+            )}
+            {data.gross_margin_pct != null && (
+              <Tag color="blue">{t("stockAnalysis.valueAssessment.grossMarginLabel")}: {data.gross_margin_pct}%</Tag>
+            )}
+            {data.revenue_growth_yoy_pct != null && (
+              <Tag color={Number(data.revenue_growth_yoy_pct) > 0 ? "red" : "green"}>
+                {t("stockAnalysis.valueAssessment.revenueGrowthLabel")}: {data.revenue_growth_yoy_pct}%
+              </Tag>
             )}
           </div>
         </div>

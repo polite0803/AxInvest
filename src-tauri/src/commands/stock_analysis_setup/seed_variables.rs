@@ -33,7 +33,9 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "max_concurrent".into(),
             var_type: "number".into(),
-            value: serde_json::json!(5),
+            // 2026-09-08: 3→8。DB 存量 v7 实际值仍为 3（旧种子遗留），3 个并发槽被
+            // 429 重试节点占住不放时其余分析师排队等待，事实串行化（PG 时间线实证）。
+            value: serde_json::json!(8),
             description: Some("并行分析的 Agent 数量上限".into()),
             is_secret: false,
         },

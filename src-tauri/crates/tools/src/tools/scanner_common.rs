@@ -114,14 +114,24 @@ pub fn build_headers(token: Option<&str>, accept: &str) -> HeaderMap {
 
 /// 构造统一配置的 HTTP 客户端
 ///
-/// 统一设置超时，避免某个平台挂起拖垮整轮 `search_all`。
+/// 统一设置超时与真实身份 UA，避免某个平台挂起拖垮整轮 `search_all`。
+/// GitHub 会对无 UA 请求直接 403（"Please make sure your request has a
+/// User-Agent header"），Stack Exchange 也会拦截裸 UA —— 各 scanner 若
+/// 未自设 UA，统一从这里兜底。
 ///
 /// # 已知环境坑
 /// 本机网络走 IPv6 时访问部分站点（如东方财富行情接口）会被 RST。
 /// 需求发现各平台目前未复现该问题，若后续出现连接类失败，
 /// 应在此处统一加 IPv4-only 的 DNS resolver，而不是在各 scanner 里各改一遍。
+/// 另：reddit / arxiv / huggingface 在无代理网络下连接层直接失败
+/// （error sending request），reqwest 默认读环境变量与系统代理，
+/// 属网络环境问题、非代码缺陷。
 pub fn build_http_client(timeout_secs: u64) -> reqwest::Client {
-    match reqwest::Client::builder().timeout(std::time::Duration::from_secs(timeout_secs)).build() {
+    match reqwest::Client::builder()
+        .user_agent(SCANNER_USER_AGENT)
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+    {
         Ok(client) => client,
         Err(e) => {
             tracing::warn!(error = %e, "[scanner_common] HTTP 客户端构造失败，回退默认配置");

@@ -162,6 +162,40 @@ export interface StockDecision {
   adjustedConfidence?: number;
   /** V50: 双视角一致性分维度诊断 */
   agreementBreakdown?: AgreementBreakdown;
+  /** 跨系统互证：近 14 天趋势智选推荐 vs 本次工作流决策（后端在决策持久化时注入） */
+  crossCheck?: RecoCrossCheck;
+}
+
+/** 跨系统互证字段（后端 stock_workflow::hooks::inject_reco_crosscheck 注入，camelCase 对齐） */
+export interface RecoCrossCheck {
+  /** 智选推荐置信度 (0-100) */
+  recoConfidence: number;
+  /** 智选风格: "serenity" | "bottleneck" 等 */
+  recoStyle: string;
+  /** 策略类型: bottleneck / policy / earnings / capital / event / technical */
+  recoStrategyType: string;
+  /** 推荐周期: "mid" | "long" 等 */
+  recoPeriod: string;
+  /** 智选建议仓位 (%) */
+  recoPositionPct: number;
+  /** 智选建议持有天数 */
+  recoHoldingDays: number;
+  /** 智选落库时价格（行情获取失败时为 0） */
+  recoPrice: number;
+  /** 推荐生成时间（ISO 8601） */
+  recoGeneratedAt: string;
+  /** 本次决策生成时间（ISO 8601）——两侧时钟基线显式化 */
+  decisionGeneratedAt: string;
+  /** 关注热度（冷门/热门等，来自智选 attention_metrics） */
+  attentionHeat: string;
+  /** 催化剂摘要（最多 3 条） */
+  catalysts: { description: string; timeframe: string; confidence: number }[];
+  /** 本次工作流决策动作 */
+  decisionAction: string;
+  /** 本次工作流决策仓位 (%) */
+  decisionPositionPct: number;
+  /** 是否构成跨系统分歧（智选推荐 vs 工作流否决/观望） */
+  divergent: boolean;
 }
 
 // ── 决策仪表盘报告（借鉴 daily_stock_analysis 推送格式）──

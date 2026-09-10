@@ -314,6 +314,12 @@ interface StockAnalysisState {
   klineLoading: boolean;
   analystReports: Record<string, string>;
   debateRounds: Array<{ round: number; bull: string; bear: string }>;
+  /**
+   * 流式增量预览（2026-09-08 修复）：nodeId → 当前累积输出文本。
+   * 由 workflow-step-delta 事件（后端每 2s 节流）填充，节点完成后清除。
+   * 辩论面板用它显示辩手"生成中…"的实时预览，解决辩论阶段 UI 长时间无输出。
+   */
+  streamingPreviews: Record<string, string>;
   riskAssessments: Record<string, string>;
   // 决策后处理阶段新增字段（修复 #7）
   valueAssessments: Record<string, string>;
@@ -540,6 +546,7 @@ const initialState = {
   klineLoading: false,
   analystReports: {},
   debateRounds: [],
+  streamingPreviews: {},
   riskAssessments: {},
   valueAssessments: {},
   ruleCheckResults: {},
@@ -761,6 +768,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       chatIndicatorDismissed: false,
       analystReports: {},
       debateRounds: [],
+      streamingPreviews: {},
       riskAssessments: {},
       valueAssessments: {},
       ruleCheckResults: {},
@@ -906,6 +914,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     set({
       analystReports: {},
       debateRounds: [],
+      streamingPreviews: {},
       riskAssessments: {},
       valueAssessments: {},
       ruleCheckResults: {},
@@ -931,6 +940,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         decisionJson: string | null;
         llmDecisionJson: string | null;
         blackboardSnapshot: string | null;
+        // 后端从 blackboard_snapshot + decision_json 现场重建的仪表盘报告（不持久化）
+        dashboardReport?: DashboardReport | null;
+        dashboardMd?: string | null;
       }
     >("get_stock_analysis", { analysisId });
 
@@ -970,7 +982,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       }
     }
 
-    set({ analysisId: record.id, stockCode: record.stockCode, stockName: resolvedName, status: "completed" });
+    set({
+      analysisId: record.id,
+      stockCode: record.stockCode,
+      stockName: resolvedName,
+      status: "completed",
+      // 仪表盘报告由后端加载历史时从 snapshot 重建（V60：修复重开历史仪表盘永远空态）
+      dashboardReport: record.dashboardReport ?? null,
+      dashboardMd: record.dashboardMd ?? null,
+    });
 
     // 如果是 replay 分析且有 asOfDate，同步设置全局时间锚点，
     // 确保后续 getStockQuote / getStockKline 拉取的是分析时刻的数据而非当前实时数据
@@ -1984,6 +2004,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const pct = totalNodes > 0
           ? Math.round((completedNodes / totalNodes) * 100)
           : get().progressPct;
+        // EXECUTION_CANCELLED 是运行级取消（手动停止/应用关闭）波及的节点事件，
+        // 不代表节点质量问题，不计入 failedNodes，避免 Debug 面板误报
+        // （2026-09-10 bear-r3 实证：节点实际 completed，被取消事件污染为 failed）
+        const isRunLevelCancel = status === "failed"
+          && typeof error === "string"
+          && error.startsWith("EXECUTION_CANCELLED");
         set({
           progressPct: Math.max(pct, get().progressPct),
           progressMessage: status === "completed"
@@ -1991,10 +2017,21 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             : status === "failed"
             ? i18n.t("stockAnalysis.progress.stepRetrying", { name: nodeId })
             : i18n.t("stockAnalysis.progress.stepRunning", { name: nodeId }),
-          failedNodes: status === "failed"
+          // 节点重试成功（failed 后再次收到 completed）时摘除失败标记，
+          // 否则 Debug 面板会用 failed 覆盖已有的完成报告
+          failedNodes: status === "completed"
+            ? get().failedNodes.filter((id) => id !== nodeId)
+            : status === "failed" && !isRunLevelCancel
             ? [...get().failedNodes, nodeId]
             : get().failedNodes,
-          failedNodeErrors: status === "failed" && error
+          failedNodeErrors: status === "completed"
+            ? (() => {
+              if (!(nodeId in get().failedNodeErrors)) { return get().failedNodeErrors; }
+              const next = { ...get().failedNodeErrors };
+              delete next[nodeId];
+              return next;
+            })()
+            : status === "failed" && !isRunLevelCancel && error
             ? { ...get().failedNodeErrors, [nodeId]: error }
             : get().failedNodeErrors,
         });
@@ -2062,10 +2099,39 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
           routeNodeOutput(nodeId, text, output);
         }
+
+        // 流式预览清理：节点到达终态（completed/failed/timeout）后移除其实时预览
+        if (status !== "streaming" && status !== "running") {
+          const s = get();
+          if (s.streamingPreviews[nodeId] !== undefined) {
+            const { [nodeId]: _removed, ...rest } = s.streamingPreviews;
+            set({ streamingPreviews: rest });
+          }
+        }
       });
       unlisteners.push(u1);
     } catch (e) {
       console.error("[StockAnalysis] Failed to listen workflow-step-done:", e);
+    }
+
+    // 流式增量（2026-09-08 修复）：后端 AgentExecutor 每 2s 发一次累积文本
+    // （workflow-step-delta 事件），辩论面板用它显示辩手"生成中"实时预览，
+    // 解决辩论阶段单次 LLM 调用 1-5 分钟期间 UI 无输出可见性的问题。
+    try {
+      const u4 = await listen<{ stepId: string; output?: unknown }>(
+        "workflow-step-delta",
+        (event) => {
+          const { stepId, output } = event.payload;
+          if (typeof output !== "string" || !output) { return; }
+          const s = get();
+          // 只保留末尾 ~2000 字符：流式预览关注"正在生成什么"，且避免长输出撑爆状态
+          const preview = output.length > 2000 ? output.slice(-2000) : output;
+          set({ streamingPreviews: { ...s.streamingPreviews, [stepId]: preview } });
+        },
+      );
+      unlisteners.push(u4);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to listen workflow-step-delta:", e);
     }
 
     try {

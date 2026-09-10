@@ -68,8 +68,16 @@ pub async fn get_metrics(db: &DatabaseConnection) -> Result<GatewayMetrics> {
         total_cost_usd: Some(0.0),
     };
 
+    // 原生 SQL 必须按实际 backend 声明（SQLite 用 ?，PG 用 $N），
+    // 硬编码 Sqlite 在 PG 数据源上会因占位符风格不匹配直接报语法错误
+    let backend = db.get_database_backend();
+    let ph1 = match backend {
+        DatabaseBackend::Postgres => "$1",
+        _ => "?",
+    };
+
     let all = MetricsRow::find_by_statement(Statement::from_string(
-        DatabaseBackend::Sqlite,
+        backend,
         "SELECT COUNT(*) as total_requests, \
          COALESCE(SUM(request_tokens), 0) as total_request_tokens, \
          COALESCE(SUM(response_tokens), 0) as total_response_tokens, \
@@ -81,12 +89,15 @@ pub async fn get_metrics(db: &DatabaseConnection) -> Result<GatewayMetrics> {
     .unwrap_or_else(default_row);
 
     let today = MetricsRow::find_by_statement(Statement::from_sql_and_values(
-        DatabaseBackend::Sqlite,
+        backend,
         "SELECT COUNT(*) as total_requests, \
          COALESCE(SUM(request_tokens), 0) as total_request_tokens, \
          COALESCE(SUM(response_tokens), 0) as total_response_tokens, \
          COALESCE(SUM(cost), 0.0) as total_cost_usd \
-         FROM gateway_usage WHERE created_at >= ?",
+         FROM gateway_usage WHERE created_at >= \
+         "
+        .to_string()
+            + ph1,
         [today_start.into()],
     ))
     .one(db)
@@ -111,7 +122,7 @@ pub async fn get_metrics(db: &DatabaseConnection) -> Result<GatewayMetrics> {
 pub async fn get_usage_by_key(db: &DatabaseConnection) -> Result<Vec<UsageByKey>> {
     let rows = db
         .query_all_raw(Statement::from_string(
-            DatabaseBackend::Sqlite,
+            db.get_database_backend(),
             "SELECT gu.key_id, gk.name as key_name, \
              COUNT(*) as request_count, \
              COALESCE(SUM(gu.request_tokens + gu.response_tokens), 0) as token_count, \
@@ -142,7 +153,7 @@ pub async fn get_usage_by_key(db: &DatabaseConnection) -> Result<Vec<UsageByKey>
 pub async fn get_usage_by_provider(db: &DatabaseConnection) -> Result<Vec<UsageByProvider>> {
     let rows = db
         .query_all_raw(Statement::from_string(
-            DatabaseBackend::Sqlite,
+            db.get_database_backend(),
             "SELECT gu.provider_id, COALESCE(p.name, gu.provider_id) as provider_name, \
              COUNT(*) as request_count, \
              COALESCE(SUM(gu.request_tokens + gu.response_tokens), 0) as token_count, \
@@ -173,16 +184,27 @@ pub async fn get_usage_by_provider(db: &DatabaseConnection) -> Result<Vec<UsageB
 pub async fn get_usage_by_day(db: &DatabaseConnection, days: u32) -> Result<Vec<UsageByDay>> {
     let since = now_ts() - (days as i64 * 86400);
 
+    // 日期分桶函数按后端分支：date(...,'unixepoch') 是 SQLite 专有函数，
+    // PG 上报 "function does not exist"
+    let (day_expr, ph1) = match db.get_database_backend() {
+        DatabaseBackend::Postgres => ("to_char(to_timestamp(created_at), 'YYYY-MM-DD')", "$1"),
+        _ => ("date(created_at, 'unixepoch')", "?"),
+    };
+
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Sqlite,
-            "SELECT date(created_at, 'unixepoch') as date, \
+            db.get_database_backend(),
+            "SELECT ".to_string()
+                + day_expr
+                + " as date, \
              COUNT(*) as request_count, \
              COALESCE(SUM(request_tokens + response_tokens), 0) as token_count, \
              COALESCE(SUM(request_tokens), 0) as request_tokens, \
              COALESCE(SUM(response_tokens), 0) as response_tokens \
              FROM gateway_usage \
-             WHERE created_at >= ? \
+             WHERE created_at >= "
+                + ph1
+                + " \
              GROUP BY date \
              ORDER BY date ASC",
             vec![since.into()],
@@ -207,9 +229,14 @@ pub async fn get_connected_programs(db: &DatabaseConnection) -> Result<Vec<Conne
     let today_start = today_start_local_ts();
     let active_threshold = now_ts() - 300;
 
+    let ph1 = match db.get_database_backend() {
+        DatabaseBackend::Postgres => "$1",
+        _ => "?",
+    };
+
     let rows = db
         .query_all_raw(Statement::from_sql_and_values(
-            DatabaseBackend::Sqlite,
+            db.get_database_backend(),
             concat!(
                 "SELECT gk.id as key_id, gk.name as key_name, gk.key_prefix, ",
                 "COALESCE(t.cnt, 0) as today_requests, ",
@@ -223,12 +250,15 @@ pub async fn get_connected_programs(db: &DatabaseConnection) -> Result<Vec<Conne
                 "SUM(request_tokens + response_tokens) as tokens, ",
                 "SUM(request_tokens) as request_tokens, ",
                 "SUM(response_tokens) as response_tokens ",
-                "FROM gateway_usage WHERE created_at >= ? ",
-                "GROUP BY key_id ",
-                ") t ON t.key_id = gk.id ",
-                "WHERE gk.enabled = 1 ",
-                "ORDER BY gk.created_at DESC",
-            ),
+                "FROM gateway_usage WHERE created_at >= ",
+            )
+            .to_string()
+                + ph1
+                + " \
+                GROUP BY key_id \
+                ) t ON t.key_id = gk.id \
+                WHERE gk.enabled = 1 \
+                ORDER BY gk.created_at DESC",
             vec![today_start.into()],
         ))
         .await?;

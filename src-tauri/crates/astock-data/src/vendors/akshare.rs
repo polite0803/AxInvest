@@ -33,15 +33,23 @@ impl StockVendor for AkshareVendor {
     }
 
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
+        // 修复(2026-09-10): 同步 eastmoney.rs 2026-07-22 的前缀修复——
+        // 先去除 sh/sz/bj 前缀，否则 starts_with('6') 判断失效（原"sh600887"被当深圳票）。
+        // 注: 本 vendor 实际复用东财 ZYZBAjaxNew 接口（独立 HTTP 客户端配置），
+        // 作为 eastmoney 主源同接口的第二通道。
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        let em_code = if code.starts_with('6') || code.starts_with('9') {
+            format!("SH{code}")
+        } else if code.starts_with('8') || code.starts_with('4') {
+            format!("BJ{code}")
+        } else {
+            format!("SZ{code}")
+        };
+
         let url = format!(
             "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=0&code={}",
-            if stock_code.starts_with('6') || stock_code.starts_with('9') {
-                format!("SH{}", stock_code)
-            } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
-                format!("BJ{}", stock_code)
-            } else {
-                format!("SZ{}", stock_code)
-            }
+            em_code
         );
 
         let resp = self

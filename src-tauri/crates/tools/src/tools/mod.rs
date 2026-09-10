@@ -23,6 +23,7 @@ pub mod computer_use;
 pub mod context;
 pub mod cron;
 pub mod database;
+pub mod demand_llm;
 pub mod devops;
 pub mod document;
 pub mod export;
@@ -53,6 +54,7 @@ pub mod network;
 pub mod obsidian;
 pub mod ocr;
 pub mod opc;
+pub mod opc_demand_scan;
 pub mod package_ecosystem_scanner;
 pub mod personality;
 pub mod plan;
@@ -137,6 +139,8 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(run_workflow::RunWorkflowTool),
         // ── 能力渐进式披露 L0：导航层（能力树逐层下钻）──
         std::sync::Arc::new(capability_browse::CapabilityBrowseTool),
+        // ── OPC 需求发现：按关键词扫描平台并评估入库（demand-discovery 模板 Loop 体）──
+        std::sync::Arc::new(opc_demand_scan::OpcDiscoverLeadsTool),
         std::sync::Arc::new(skill::SkillBundleListTool),
         std::sync::Arc::new(skill::SkillBundleCreateTool),
         std::sync::Arc::new(skill::SkillBundleLoadTool),

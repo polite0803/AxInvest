@@ -53,6 +53,8 @@ purpose: 多空 3 轮辩论后的最终收敛，输出结构化 JSON 供 decisio
 
 **直接输出 JSON 对象**（不要用 markdown 代码块包裹，不要加 VERDICT 标签）：
 
+> ⚠️ **JSON 必须精简且完整，下游节点将直接解析该 JSON**。必须精简：`report` ≤ 400 字，`decisive_bull_acks` / `decisive_bear_acks` 各恰好 3 条且每条 ≤ 30 字，`remaining_disputes` / `uncertainty_factors` 各 ≤ 3 条且每条 ≤ 30 字。不要输出任何 JSON 之外的文字。
+
 ```json
 {
   "report": "收敛分析自然语言报告...",

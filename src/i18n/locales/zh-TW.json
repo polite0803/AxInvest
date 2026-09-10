@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "暫無能力缺口",
+      "deliveriesEmpty": "暫無交付記錄，在線索操作列點「執行交付」建立",
+      "executeDelivery": "執行交付",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "主動掃描",
       "btnAnalyzeGaps": "分析缺口",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "變更狀態",
+      "delivery": "交付",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "最大能力快取",
         "dbCleanupDays": "資料庫清理天數",
         "logLevel": "日誌層級: debug/info/warn/error",
-        "enableAnalytics": "啟用分析統計"
+        "enableAnalytics": "啟用分析統計",
+        "scanLlmEvalEnabled": "LLM 精評（高分線索二次評估）",
+        "scanLlmEvalMaxLeads": "單輪精評候選上限",
+        "scanLlmEvalMinRuleScore": "精評預篩閾值（規則分 ≥）"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "極高價值"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "閒置",
         "ok": "正常",
-        "error": "異常"
+        "error": "異常",
+        "skipped": "合規跳過"
       },
+      "platformSkippedHint": "未配置官方 API 憑證，已按合規策略跳過掃描；配置 Token 並啟用後即可掃描。",
       "platformType": {
         "api": "官方 API",
         "scanner": "內建掃描器",
@@ -13571,6 +13565,14 @@
       "subscriptions": "訂閱",
       "addSubscription": "新增訂閱",
       "manualEntry": "手動錄入",
+      "capabilityScan": "能力驅動掃描",
+      "capabilityScanDesc": "根據本地能力庫自動產生檢索詞並逐詞掃描需求市場（原方案工作流：能力集掃描 → 檢索詞規劃 → 迴圈掃描）。",
+      "capabilityFocus": "聚焦方向（可選）",
+      "capabilityFocusPlaceholder": "例如：AI 應用開發、資料服務，留空則由能力庫決定",
+      "capabilityMaxKeywords": "檢索詞數量上限",
+      "capabilityScanStart": "開始掃描",
+      "capabilityScanComplete": "能力驅動掃描完成，線索已重新整理",
+      "capabilityScanFailed": "能力驅動掃描失敗：{{error}}",
       "leadCreateFailed": "線索錄入失敗: {{error}}",
       "leadFormTitle": "標題",
       "leadFormTitleRequired": "標題不能為空",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "標記已開出",
       "delivMarkPaid": "標記已回款",
       "delivDelete": "刪除"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14488,7 +14499,8 @@
     "boolYes": "是",
     "boolNo": "否",
     "backendCallFailed": "後端呼叫失敗",
-    "emptyHistoryWarning": "趨勢智選歷史為空：list_reco_history 傳回 0 行（可能是 DB 暫無風格為 serenity/bottleneck 的歷史，或後端命令失敗被靜默）"
+    "emptyHistoryWarning": "趨勢智選歷史為空：list_reco_history 傳回 0 行（可能是 DB 暫無風格為 serenity/bottleneck 的歷史，或後端命令失敗被靜默）",
+    "timeBasis": "時間基線: {{date}} · 建議窗口約 {{days}} 天（至 {{until}}）"
   },
   "tray": {
     "hide": "隱藏",
@@ -15120,7 +15132,18 @@
       "moatLabel": "护城河",
       "outlookVerdict": "展望说明 / 巴菲特裁决",
       "riskFlags": "风险标志",
-      "valuationConclusion": "估值结论"
+      "valuationConclusion": "估值结论",
+      "metricsTitle": "關鍵估值指標（t-valuation）",
+      "currentPriceLabel": "現價",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "護城河分",
+      "oeYieldLabel": "OE收益率",
+      "grahamUpsideLabel": "格雷厄姆上行",
+      "valueSignalLabel": "綜合判斷",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "負債率",
+      "grossMarginLabel": "毛利率",
+      "revenueGrowthLabel": "營收增速"
     },
     "workflow": {
       "analyst": {
@@ -15173,6 +15196,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "輔助節點",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15234,7 +15258,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析師",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "跳過分析時發生錯誤：{{reason}}"
     },
     "debugPanel": {
       "show": "显示",
@@ -15829,6 +15853,15 @@
       "opposite": "反向",
       "sameDirection": "同向"
     },
+    "crossCheck": {
+      "title": "趨勢智選 vs 股票分析 · 跨系統分歧",
+      "timeBasis": "推薦時點 {{recoDate}} · 分析時點 {{decisionDate}}（相隔約 {{gapDays}} 天）",
+      "recoSays": "趨勢智選 {{score}} 分，建議試探倉 {{position}}%（{{strategy}} 策略）",
+      "attentionHeat": "關注度: {{heat}}",
+      "workflowSays": "股票分析工作流判定: {{action}}，倉位 {{position}}%",
+      "divergenceNote": "兩個時鐘不同——智選賭催化劑兌現（約 {{recoDays}} 天），工作流按當下賠率定價（約 {{decisionDays}} 天）",
+      "catalystLabel": "催化劑({{confidence}}分)"
+    },
     "compare": {
       "title": "多股對比",
       "pe": "市盈率",
@@ -16409,7 +16442,7 @@
       "totalNodes": "总节点",
       "totalReport": "总报告",
       "statusLabel": "状态",
-      "failedQualityWarning": "⚠️ {count} 个节点失败，可能影响决策质量",
+      "failedQualityWarning": "⚠️ {{count}} 个节点失败，可能影响决策质量",
       "upstreamTip": "💡 上游节点失败会导致决策引擎收到默认值（score=50），从而产生相同结论。",
       "upstreamTipDetail": "请重点排查上方红色标记节点的失败原因。",
       "waitingAnalysis": "等待分析开始...",

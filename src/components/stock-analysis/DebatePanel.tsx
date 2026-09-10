@@ -260,7 +260,12 @@ function processDebateInput(raw: string): DebateContent {
     const jsonStr = trimmed.slice(verdictIdx + "<!-- VERDICT:".length);
     const jsonEnd = jsonStr.indexOf("-->");
     if (jsonEnd !== -1) {
-      const report = trimmed.slice(0, verdictIdx).trim();
+      // 2026-09-10 修复：辩手 prompt 已改为「VERDICT 标签前置」（第一行输出标签，正文在后），
+      // 原因：agnes 网关把输出钳制在 4096 token，超长正文截断时末尾标签丢失 → 结论字段全丢。
+      // 标签前置后截断只丢正文尾部。此处 report 取「标签前」或「标签后」非空者，两种位置都兼容。
+      const reportBefore = trimmed.slice(0, verdictIdx).trim();
+      const reportAfter = jsonStr.slice(jsonEnd + "-->".length).trim();
+      const report = reportBefore.length > 0 ? reportBefore : reportAfter;
       try {
         const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim()) as Record<string, unknown>;
         const parsed = {
@@ -843,6 +848,7 @@ export function DebatePanel() {
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
+  const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const workflowStatus = useStockAnalysisStore((s) => s.status);
   // 阶段 6: 重跑辩论:在 early-return 之前声明 hook,保持 hooks 调用顺序一致
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
@@ -921,6 +927,10 @@ export function DebatePanel() {
   // 辩论加载中状态：工作流运行中且无辩论数据时显示
   const isWorkflowRunning = workflowStatus === "running" || workflowStatus === "loading";
 
+  // 流式预览条目（2026-09-08 修复）：后端 AgentExecutor 每 2s 推送累积文本，
+  // 辩论单次 LLM 调用 1-5 分钟期间 UI 不再是纯 Spin 空转。
+  const streamingEntries = Object.entries(streamingPreviews);
+
   if (debateRounds.length === 0) {
     if (isWorkflowRunning) {
       return (
@@ -934,6 +944,26 @@ export function DebatePanel() {
             <div className="text-sm" style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.debate.loading")}
             </div>
+            {/* 流式实时预览：显示正在生成的辩手/收敛输出的最新片段 */}
+            {streamingEntries.map(([nodeId, text]) => (
+              <div key={nodeId} className="w-full px-2">
+                <Tag color={nodeId.startsWith("bear") ? "green" : "red"}>
+                  {t("stockAnalysis.progress.stepRunning", { name: nodeId })}
+                </Tag>
+                <pre
+                  className="text-xs leading-relaxed whitespace-pre-wrap mt-1 px-2 py-1 rounded"
+                  style={{
+                    color: "var(--text-primary)",
+                    fontFamily: "inherit",
+                    maxHeight: 160,
+                    overflow: "hidden",
+                    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                  }}
+                >
+                  {text.slice(-400)}
+                </pre>
+              </div>
+            ))}
           </div>
         </Card>
       );

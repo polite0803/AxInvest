@@ -13232,6 +13232,9 @@
       "platforms": "Platform Settings",
       "gaps": "Capability Gaps",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "No capability gaps",
+      "deliveriesEmpty": "No deliveries yet; create one via \"Execute delivery\" in the lead actions",
+      "executeDelivery": "Execute delivery",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "Proactive Scan",
       "btnAnalyzeGaps": "Analyze Gaps",
@@ -13266,19 +13269,12 @@
         "expired": "Expired",
         "claimed": "Claimed by Others"
       },
+      "changeStatus": "Change status",
       "actionMark": "Mark",
       "markExpired": "Mark as Expired",
       "markClaimed": "Mark as Claimed",
       "markCancelled": "Mark as Cancelled",
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "delivery": "Delivery",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13437,20 +13433,16 @@
         "maxCapabilitiesCache": "Max capabilities cache",
         "dbCleanupDays": "DB cleanup days",
         "logLevel": "Log level: debug/info/warn/error",
-        "enableAnalytics": "Enable analytics"
+        "enableAnalytics": "Enable analytics",
+        "scanLlmEvalEnabled": "LLM refinement (re-score high-value leads)",
+        "scanLlmEvalMaxLeads": "Max leads per refinement batch",
+        "scanLlmEvalMinRuleScore": "Refinement pre-filter (rule score ≥)"
       },
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool/Software",
         "content_creation": "Content Creation",
@@ -13527,8 +13519,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "Skipped (compliance)"
       },
+      "platformSkippedHint": "No official API credentials configured; scan skipped by compliance policy. Configure a token and enable the platform to scan.",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13565,6 +13559,14 @@
       "subscriptions": "Subscriptions",
       "addSubscription": "Add Subscription",
       "manualEntry": "Manual entry",
+      "capabilityScan": "Capability-driven scan",
+      "capabilityScanDesc": "Generates search queries from the local capability inventory and scans demand marketplaces word by word (workflow: capability scan → query planning → loop scan).",
+      "capabilityFocus": "Focus (optional)",
+      "capabilityFocusPlaceholder": "e.g. AI app development, data services; leave empty to let the capability inventory decide",
+      "capabilityMaxKeywords": "Max search queries",
+      "capabilityScanStart": "Start scan",
+      "capabilityScanComplete": "Capability-driven scan finished, leads refreshed",
+      "capabilityScanFailed": "Capability-driven scan failed: {{error}}",
       "leadCreateFailed": "Failed to create lead: {{error}}",
       "leadFormTitle": "Title",
       "leadFormTitleRequired": "Title is required",
@@ -13654,6 +13656,15 @@
       "delivMarkSent": "Mark as issued",
       "delivMarkPaid": "Mark as paid",
       "delivDelete": "Delete"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14571,7 +14582,8 @@
     "boolYes": "Yes",
     "boolNo": "No",
     "backendCallFailed": "Backend call failed",
-    "emptyHistoryWarning": "Serenity history is empty: list_reco_history returned 0 rows (possibly no serenity/bottleneck style history in DB, or backend command failure was silently ignored)"
+    "emptyHistoryWarning": "Serenity history is empty: list_reco_history returned 0 rows (possibly no serenity/bottleneck style history in DB, or backend command failure was silently ignored)",
+    "timeBasis": "Time basis: {{date}} · suggested window ~{{days}} days (until {{until}})"
   },
   "trade": {
     "agentRole": {
@@ -15185,7 +15197,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "Key valuation metrics (t-valuation)",
+      "currentPriceLabel": "Price",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "Moat score",
+      "oeYieldLabel": "OE yield",
+      "grahamUpsideLabel": "Graham upside",
+      "valueSignalLabel": "Signal",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "Debt ratio",
+      "grossMarginLabel": "Gross margin",
+      "revenueGrowthLabel": "Revenue growth"
     },
     "workflow": {
       "analyst": {
@@ -15238,6 +15261,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "Auxiliary Nodes",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15299,7 +15323,7 @@
       "title": "A-Share Multi-Dimension Analysis",
       "vValidate": "验证",
       "insufficientDataQuality": "Insufficient data quality, skipping analysis",
-      "skipAnalysisError": "Error while skipping analysis"
+      "skipAnalysisError": "Analysis skipped: {{reason}}"
     },
     "debugPanel": {
       "show": "🔍 Show",
@@ -15887,6 +15911,15 @@
       "directionConflict": "Direction Conflict",
       "opposite": "Opposite",
       "sameDirection": "Same Direction"
+    },
+    "crossCheck": {
+      "title": "Trend Pick vs Workflow · Cross-System Divergence",
+      "timeBasis": "Pick made {{recoDate}} · analysis made {{decisionDate}} (~{{gapDays}} days apart)",
+      "recoSays": "Trend Pick scored {{score}}, suggested probe position {{position}}% ({{strategy}} strategy)",
+      "attentionHeat": "Attention: {{heat}}",
+      "workflowSays": "Analysis workflow verdict: {{action}}, position {{position}}%",
+      "divergenceNote": "Two clocks differ — the pick bets on catalysts (~{{recoDays}}d), the workflow prices current odds (~{{decisionDays}}d)",
+      "catalystLabel": "Catalyst ({{confidence}})"
     },
     "empty": {
       "_fallback": "No recommendation data",
@@ -16569,7 +16602,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

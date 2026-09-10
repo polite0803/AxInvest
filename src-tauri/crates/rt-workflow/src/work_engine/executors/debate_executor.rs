@@ -147,9 +147,12 @@ impl NodeExecutorTrait for DebateExecutor {
 
             round_outputs.push(round_results.clone());
 
-            // 收敛检测（从第 2 轮开始）
+            // 收敛检测（从第 2 轮开始）。注意：check_round_convergence 是纯文本
+            // 相似度比较，不依赖 convergence_prompt——后者只是注入给辩手的参考
+            // 变量。旧代码用 convergence_prompt.is_some() 门控收敛检测，导致
+            // 未配置该变量的模板（如 stock-analysis）永远跑满 max_rounds 轮、
+            // 同一批辩手被重复调用 N 倍次数（2026-09-08 实证 18 次调用）。
             if round > 0
-                && convergence_prompt.is_some()
                 && super::check_round_convergence(
                     &round_results,
                     &round_outputs[round.saturating_sub(1) as usize],

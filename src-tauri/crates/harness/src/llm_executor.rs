@@ -550,19 +550,37 @@ impl Stream for ExecuteLlmStream {
                         // inner 提前结束（无 done），进入后置阶段
                         this.phase = StreamPhase::Post;
                     },
-                    // P0 修复(2026-08-29): 流式运行期 provider 错误补 tracing::error + 审计
+                    // P0 修复(2026-08-29): 流式运行期 provider 错误补 tracing 日志 + 审计
                     // 此前直接透传，运行日志里完全搜不到网络中断 / chunk 解析失败的详细信息
+                    // 2026-09-10 降级：本地合成的「10s 响应头超时」是设计的快速失败
+                    // （openai.rs），切 fallback/重试是预期路径，按 ERROR 记录会造成
+                    // 「回退已兜住仍在刷 ERROR」的日志噪音（2026-09-09 实证），降为 WARN；
+                    // 其余真实运行期错误维持 ERROR。
                     Poll::Ready(Some(Err(e))) => {
                         let detail = format!("LLM 流式运行期错误: {e}");
-                        tracing::error!(
-                            target: "axagent.providers",
-                            model = %this.prepared.request.model,
-                            elapsed_ms = this.start.elapsed().as_millis() as u64,
-                            content_bytes = this.content.len(),
-                            thinking_bytes = this.thinking.len(),
-                            "[execute_llm_stream] {}",
-                            &detail
-                        );
+                        let is_header_timeout =
+                            detail.contains("response headers not received within");
+                        if is_header_timeout {
+                            tracing::warn!(
+                                target: "axagent.providers",
+                                model = %this.prepared.request.model,
+                                elapsed_ms = this.start.elapsed().as_millis() as u64,
+                                content_bytes = this.content.len(),
+                                thinking_bytes = this.thinking.len(),
+                                "[execute_llm_stream] {}（设计的快速失败，重试/回退预期路径）",
+                                &detail
+                            );
+                        } else {
+                            tracing::error!(
+                                target: "axagent.providers",
+                                model = %this.prepared.request.model,
+                                elapsed_ms = this.start.elapsed().as_millis() as u64,
+                                content_bytes = this.content.len(),
+                                thinking_bytes = this.thinking.len(),
+                                "[execute_llm_stream] {}",
+                                &detail
+                            );
+                        }
                         record_failure_audit(&this.config, &detail, this.start);
                         return Poll::Ready(Some(Err(e)));
                     },

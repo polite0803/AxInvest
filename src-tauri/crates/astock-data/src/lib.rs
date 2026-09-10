@@ -246,9 +246,12 @@ impl VendorRouting {
                 "akshare".into(),
                 "neodata".into(), // 末位兜底（docData 文章）
             ],
+            // 修复(2026-09-10): tencent ff_ 接口全面废弃(实测 002837/600519 均返回
+            // v_pv_none_match)，每次 money_flow 调用都白白浪费一次请求再 fallback。
+            // eastmoney push2his fflow/daykline 实测恢复可用，提到首位。
             money_flow: vec![
-                "tencent".into(),
                 "eastmoney".into(),
+                "tencent".into(),
                 "sina".into(),
                 "browser_eastmoney".into(),
                 "baidu_stock".into(),
@@ -796,6 +799,21 @@ impl AStockClient {
                 let expires_at = chrono::Utc::now().timestamp() + 3600;
                 self.cache.insert(key.to_string(), (expires_at, val.clone())).await;
                 tracing::debug!("[astock-data] 缓存命中(L2): key={key}");
+                return Some(val);
+            }
+        }
+        None
+    }
+
+    /// 读陈旧缓存（忽略 TTL）— 仅用于 vendor 全挂时的兜底。
+    /// L1 moka 条目在 time_to_idle(1h) 内即使 TTL 过期仍可取回；
+    /// L2 磁盘无 TTL 元数据，直接返回。财报等低频变化数据可安全使用。
+    async fn cache_get_stale(&self, key: &str) -> Option<String> {
+        if let Some((_, val)) = self.cache.get(key).await {
+            return Some(val);
+        }
+        if let Some(l2) = &self.l2 {
+            if let Some(val) = l2.get(key) {
                 return Some(val);
             }
         }
@@ -2145,11 +2163,13 @@ impl AStockClient {
             }
         }
         // 使用通用 try_vendors_retry 完成 vendor 遍历 + 健康追踪 + 指数退避重试
+        // v2.9.10: financials 重试 2→3 次——东财 IncompleteMessage 类瞬态故障
+        //   通常秒级恢复，且 financials 是 precheck 硬门（失败=整单跳过），值得多等一轮。
         let vendor_names: Vec<String> =
             self.routing.financials.iter().map(|n| n.to_string()).collect();
         let sc = stock_code.to_string();
         match self
-            .try_vendors_retry(stock_code, "financials", &vendor_names, 2, |name, vendor| {
+            .try_vendors_retry(stock_code, "financials", &vendor_names, 3, |name, vendor| {
                 let sc = sc.clone();
                 Box::pin(async move {
                     let result = vendor.get_financials(&sc).await?;
@@ -2177,8 +2197,25 @@ impl AStockClient {
                 Ok(result)
             },
             Err(e) => {
-                // C: fallback — 全部数据源失败时返回错误，不包装估算数据
-                // 估算数据不应被 Ok 包装，否则下游无法区分真实财报和估算值
+                // C: fallback — 全部数据源失败时先试陈旧缓存，仍无才返回错误。
+                // v2.9.10(2026-09-10 600876 事故): financials 实际只有 eastmoney 单点
+                //   （baidu opendata 已失效返回"参数错误"、xueqiu WAF、neodata token、
+                //   akshare 与 eastmoney 同接口），东财抖一下 = 整条分析被 precheck 跳过。
+                //   财报是季度数据，几小时陈旧度无害，缓存兜底优先于硬失败。
+                // 估算数据不应被 Ok 包装，否则下游无法区分真实财报和估算值；
+                // 但「上次真实拉取的缓存」不是估算，可安全兜底。
+                let cache_key = Self::cache_key_for("financials", stock_code);
+                if let Some(stale) = self.cache_get_stale(&cache_key).await {
+                    if let Ok(data) = serde_json::from_str::<Vec<FinancialReport>>(&stale) {
+                        if !data.is_empty() {
+                            tracing::warn!(
+                                "[C-fallback] {stock_code} 所有财务数据源失败，回退陈旧缓存({}条): {e}",
+                                data.len()
+                            );
+                            return Ok(data);
+                        }
+                    }
+                }
                 tracing::warn!("[C-fallback] {stock_code} 所有财务数据源失败: {e}");
                 Err(DataError::VendorError {
                     vendor: "all".into(),

@@ -41,6 +41,7 @@ pub mod crash_report;
 pub mod dashboard;
 pub mod db_config;
 pub mod demand_discovery;
+pub mod demand_llm_refine;
 #[cfg(not(mobile))]
 pub mod desktop;
 pub mod device_sync;

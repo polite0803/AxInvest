@@ -1065,7 +1065,9 @@ export function autoLayoutWorkflow(
   edges: Edge[],
   parentRefs: Record<string, string> = {},
 ): { nodes: Node[]; edges: Edge[] } {
-  const childOf = parentRefs;
+  // 注意：parentRefs 可能来自 zustand immer store（dev 下被深度冻结），
+  // 不能直接变异调用方对象，这里浅拷贝作为内部工作表。
+  const childOf = { ...parentRefs };
   const layoutNodes = nodes.filter((n) => !isLayoutExcluded(n as NodeLike));
   const excludedNodes = nodes.filter((n) => isLayoutExcluded(n as NodeLike));
 

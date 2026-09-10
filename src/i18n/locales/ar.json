@@ -13236,6 +13236,9 @@
       "leads": "Demand Leads",
       "capabilities": "Capability Library",
       "deliveries": "Delivery Records",
+      "gapsEmpty": "لا توجد فجوات في القدرات",
+      "deliveriesEmpty": "لا توجد عمليات تسليم؛ أنشئ واحدة عبر «تنفيذ التسليم» في إجراءات العميل المحتمل",
+      "executeDelivery": "تنفيذ التسليم",
       "btnDiscover": "Discover Demands",
       "btnProactiveScan": "مسح استباقي",
       "btnAnalyzeGaps": "تحليل الفجوات",
@@ -13269,15 +13272,8 @@
         "expired": "Expired",
         "claimed": "Claimed by others"
       },
-      "delivery": {
-        "status": {
-          "pending": "Pending",
-          "running": "Running",
-          "completed": "Completed",
-          "failed": "Failed",
-          "cancelled": "Cancelled"
-        }
-      },
+      "changeStatus": "تغيير الحالة",
+      "delivery": "التسليم",
       "colTitle": "Title",
       "colDescription": "Description",
       "colPlatform": "Source Platform",
@@ -13407,7 +13403,10 @@
         "maxCapabilitiesCache": "أقصى تخزين للقدرات",
         "dbCleanupDays": "أيام تنظيف قاعدة البيانات",
         "logLevel": "مستوى السجل: debug/info/warn/error",
-        "enableAnalytics": "تمكين التحليلات"
+        "enableAnalytics": "تمكين التحليلات",
+        "scanLlmEvalEnabled": "تحسين LLM (إعادة تقييم العملاء المحتملين الواعدين)",
+        "scanLlmEvalMaxLeads": "الحد الأقصى للعملاء المحتملين لكل دفعة",
+        "scanLlmEvalMinRuleScore": "مرشح مسبق للتحسين (درجة القاعدة ≥)"
       },
       "formBaseUrlPlaceholder": "https://www.reddit.com",
       "colCronWorkflowPlaceholder": "opc-demand-discovery",
@@ -13455,15 +13454,8 @@
       "colPainScore": "Pain Score",
       "colMarketGap": "Market Gap",
       "colCommercialValue": "Commercial Value",
-      "colOpportunityLevel": "Opportunity Level",
       "colDemandType": "Demand Type",
       "colEvaluatedAt": "Evaluated At",
-      "opportunityLevel": {
-        "high": "High Value",
-        "medium": "Medium Value",
-        "low": "Low Value",
-        "very_high": "Very high value"
-      },
       "demandType": {
         "tool_software": "Tool Software",
         "content_creation": "Content Creation",
@@ -13533,8 +13525,10 @@
       "platformStatus": {
         "idle": "Idle",
         "ok": "OK",
-        "error": "Error"
+        "error": "Error",
+        "skipped": "تم التخطي (الامتثال)"
       },
+      "platformSkippedHint": "لم يتم تكوين بيانات اعتماد API الرسمية؛ تم تخطي الفحص وفق سياسة الامتثال. قم بتكوين الرمز المميز وتمكين المنصة للفحص.",
       "platformType": {
         "api": "Official API",
         "scanner": "Built-in scanner",
@@ -13571,6 +13565,14 @@
       "subscriptions": "الاشتراكات",
       "addSubscription": "إضافة اشتراك",
       "manualEntry": "إدخال يدوي",
+      "capabilityScan": "مسح قائم على القدرات",
+      "capabilityScanDesc": "يولّد استعلامات البحث من مخزون القدرات المحلي ويمسح أسواق الطلب كلمة بكلمة (سير العمل: مسح القدرات → تخطيط الاستعلامات → مسح حلقي).",
+      "capabilityFocus": "محور التركيز (اختياري)",
+      "capabilityFocusPlaceholder": "مثال: تطوير تطبيقات الذكاء الاصطناعي، خدمات البيانات؛ اتركه فارغًا ليقرر المخزون",
+      "capabilityMaxKeywords": "الحد الأقصى للاستعلامات",
+      "capabilityScanStart": "بدء المسح",
+      "capabilityScanComplete": "اكتمل المسح القائم على القدرات وتم تحديث العملاء المحتملين",
+      "capabilityScanFailed": "فشل المسح القائم على القدرات: {{error}}",
       "leadCreateFailed": "فشل إنشاء العميل المحتمل: {{error}}",
       "leadFormTitle": "العنوان",
       "leadFormTitleRequired": "العنوان مطلوب",
@@ -13660,6 +13662,15 @@
       "delivMarkSent": "وضع علامة مُصدرة",
       "delivMarkPaid": "وضع علامة مسددة",
       "delivDelete": "حذف"
+    },
+    "delivery": {
+      "status": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     }
   },
   "demandDiscovery": {
@@ -14372,7 +14383,8 @@
     "boolYes": "نعم",
     "boolNo": "لا",
     "backendCallFailed": "فشل استدعاء الواجهة الخلفية",
-    "emptyHistoryWarning": "سجل Serenity فارغ: أعاد list_reco_history 0 صفوف (ربما لا يوجد سجل بنمط serenity/bottleneck في قاعدة البيانات، أو تم تجاهل فشل أمر الواجهة الخلفية بصمت)"
+    "emptyHistoryWarning": "سجل Serenity فارغ: أعاد list_reco_history 0 صفوف (ربما لا يوجد سجل بنمط serenity/bottleneck في قاعدة البيانات، أو تم تجاهل فشل أمر الواجهة الخلفية بصمت)",
+    "timeBasis": "الأساس الزمني: {{date}} · نافذة مقترحة ~{{days}} يومًا (حتى {{until}})"
   },
   "trade": {
     "title": "Trading Log",
@@ -14963,7 +14975,18 @@
       "moatLabel": "Moat",
       "outlookVerdict": "Outlook / Buffett Verdict",
       "riskFlags": "Risk Flags",
-      "valuationConclusion": "Valuation Conclusion"
+      "valuationConclusion": "Valuation Conclusion",
+      "metricsTitle": "مقاييس التقييم الرئيسية (t-valuation)",
+      "currentPriceLabel": "السعر",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "درجة الخندق",
+      "oeYieldLabel": "عائد OE",
+      "grahamUpsideLabel": "إمكانات غراهام",
+      "valueSignalLabel": "الإشارة الشاملة",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "نسبة الدين",
+      "grossMarginLabel": "هامش الربح الإجمالي",
+      "revenueGrowthLabel": "نمو الإيرادات"
     },
     "workflow": {
       "analyst": {
@@ -15016,6 +15039,7 @@
       "riskAggregation": "风险聚合",
       "riskAggressive": "Aggressive Risk Assessment",
       "riskClassification": "Risk Classification",
+      "auxNodes": "العقد المساعدة",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15077,7 +15101,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "Analyst",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "حدث خطأ أثناء تخطي التحليل: {{reason}}"
     },
     "debugPanel": {
       "show": "🔍 Show",
@@ -15601,6 +15625,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "الانتقاء الاتجاهي مقابل التحليل · تباعد بين الأنظمة",
+      "timeBasis": "الانتقاء في {{recoDate}} · التحليل في {{decisionDate}} (~{{gapDays}} يومًا فرقًا)",
+      "recoSays": "الانتقاء الاتجاهي: {{score}} نقطة، يقترح مركزًا استكشافيًا {{position}}% (استراتيجية {{strategy}})",
+      "attentionHeat": "الاهتمام: {{heat}}",
+      "workflowSays": "حكم سير عمل التحليل: {{action}}، المركز {{position}}%",
+      "divergenceNote": "ساعتان مختلفتان — الانتقاء يراهن على تحقق المحفزات (~{{recoDays}} يوم)، وسير العمل يقيّم الاحتمالات الحالية (~{{decisionDays}} يوم)",
+      "catalystLabel": "محفز ({{confidence}})"
     },
     "compare": {
       "title": "Compare",
@@ -16355,7 +16388,7 @@
       "totalNodes": "Total Nodes",
       "totalReport": "Total Report",
       "statusLabel": "Status",
-      "failedQualityWarning": "⚠️ {count} nodes failed, may impact decision quality",
+      "failedQualityWarning": "⚠️ {{count}} nodes failed, may impact decision quality",
       "upstreamTip": "💡 Upstream node failures cause the decision engine to receive defaults (score=50).",
       "upstreamTipDetail": "Check the red-marked nodes above.",
       "waitingAnalysis": "Waiting for analysis...",

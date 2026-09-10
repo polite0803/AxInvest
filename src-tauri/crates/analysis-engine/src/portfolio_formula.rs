@@ -152,13 +152,19 @@ pub fn compute_evidence_scale(total_weight: f64, max_weight: f64) -> f64 {
 ///
 /// P0-1 新增：当 trader 数据缺失时，基于 posterior 强度使用保守赔率 fallback。
 /// fallback 设计依据：A 股趋势突破后的盈亏比经验分布，posterior≥0.70 时对应 2.5x。
+///
+/// V59 对齐(2026-09-10)：与 portfolio-mgr.rhai 语义完全一致——
+/// 1. trader 数据存在但不满足看多条件（看空/止损倒挂/垃圾值）不再返回 0，
+///    而是与缺失一样走 fallback（rhai 侧 odds 仅在满足看多条件时用 trader 计算）；
+/// 2. fallback 新增试探档 posterior∈[0.42,0.50) → 1.5x（DB 实证原设计导致
+///    近 30 天 41 次分析 100% 观望 0%）。
 pub fn compute_kelly_odds(
     trader_target_price: Option<f64>,
     trader_stop_loss: Option<f64>,
     current_price: Option<f64>,
     posterior: f64,
 ) -> (f64, &'static str) {
-    // 优先使用 trader 数据
+    // trader 满足看多条件（sl>0 且 cp>sl 且 tp>cp）→ 用 trader 数据计算
     if let (Some(tp), Some(sl), Some(cp)) = (trader_target_price, trader_stop_loss, current_price) {
         if sl > 0.0 && cp > sl && tp > cp {
             let profit = tp - cp;
@@ -168,19 +174,15 @@ pub fn compute_kelly_odds(
                 return (odds, "trader");
             }
         }
-        // trader 数据存在但不满足看多条件：
-        // - targetPrice <= currentPrice（空头预测，不应做多）
-        // - stopLoss >= currentPrice（无效止损，数据异常）
-        // - stopLoss <= 0.0（垃圾数据）
-        // → odds=0，不使用 fallback（trader 已给出明确信息）
-        return (0.0, "trader_看空");
     }
-    // 真正缺失 trader 数据时才使用波动率 fallback
+    // trader 缺失或存在但无效（看空/止损倒挂/垃圾数据）→ 与 rhai 一致走 fallback
     let odds = if posterior >= 0.70 {
         2.5
     } else if posterior >= 0.60 {
         2.0
     } else if posterior >= 0.50 {
+        1.5
+    } else if posterior >= 0.42 {
         1.5
     } else {
         0.0
@@ -1014,25 +1016,34 @@ mod tests {
 
     #[test]
     fn kelly_odds_no_trader_low_posterior() {
+        // V59: posterior∈[0.42,0.50) 新增试探档 1.5x（原为 0.0）
         let (odds, source) = compute_kelly_odds(None, None, None, 0.45);
-        assert!((odds - 0.0).abs() < 0.01, "fallback low: got {odds}");
+        assert!((odds - 1.5).abs() < 0.01, "fallback probe tier: got {odds}");
+        assert_eq!(source, "波动率fallback");
+    }
+
+    #[test]
+    fn kelly_odds_below_probe_floor() {
+        // posterior<0.42 → 0.0（凯利不适用，正确保守）
+        let (odds, source) = compute_kelly_odds(None, None, None, 0.40);
+        assert!((odds - 0.0).abs() < 0.01, "below probe floor: got {odds}");
         assert_eq!(source, "波动率fallback");
     }
 
     #[test]
     fn kelly_odds_bearish_case() {
-        // targetPrice < currentPrice → trader 看空，odds=0，不用 fallback
+        // V59 对齐: targetPrice < currentPrice（trader 看空）→ 走 fallback 而非归零
         let (odds, source) = compute_kelly_odds(Some(8.0), Some(7.0), Some(20.0), 0.6);
-        assert!((odds - 0.0).abs() < 0.01, "bearish odds: got {odds}");
-        assert_eq!(source, "trader_看空");
+        assert!((odds - 2.0).abs() < 0.01, "bearish fallback: got {odds}");
+        assert_eq!(source, "波动率fallback");
     }
 
     #[test]
     fn kelly_odds_stop_loss_greater_than_price() {
-        // stopLoss >= currentPrice → 无效数据，odds=0
+        // V59 对齐: stopLoss >= currentPrice（无效数据）→ 走 fallback 而非归零
         let (odds, source) = compute_kelly_odds(Some(25.0), Some(22.0), Some(20.0), 0.6);
-        assert!((odds - 0.0).abs() < 0.01, "invalid stop loss: got {odds}");
-        assert_eq!(source, "trader_看空");
+        assert!((odds - 2.0).abs() < 0.01, "invalid stop loss fallback: got {odds}");
+        assert_eq!(source, "波动率fallback");
     }
 
     // ── 凯利仓位 ──

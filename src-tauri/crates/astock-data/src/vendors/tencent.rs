@@ -331,6 +331,9 @@ impl StockVendor for TencentVendor {
     }
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
+        // 注意(2026-09-10): 腾讯 ff_ 接口已全面废弃(实测 002837/600519 均返回
+        // v_pv_none_match="1")。保留实现仅作兜底(接口若复活可直接用)，
+        // 实际由 eastmoney(push2his fflow/daykline) 承担首选。
         let symbol = to_tencent_code(stock_code);
         let url = format!("https://qt.gtimg.cn/q=ff_{symbol}");
         let resp = self.tencent_get(&url).await?;

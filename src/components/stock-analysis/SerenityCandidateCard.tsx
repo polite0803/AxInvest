@@ -1,6 +1,6 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import type { AttentionMetrics, Catalyst, ExitSignals, SerenityCandidate } from "@/stores/feature/serenityStore";
-import { AimOutlined, AlertOutlined, FireOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { AimOutlined, AlertOutlined, ClockCircleOutlined, FireOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { Card, Progress, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -125,6 +125,18 @@ export function SerenityCandidateCard({ candidate }: Props) {
   const exitSignals: ExitSignals | undefined = candidate.exit_signals ?? candidate.exitSignals;
   const attention: AttentionMetrics | undefined = candidate.attention_metrics ?? candidate.attentionMetrics;
 
+  // 时间基线显式化：推荐时点 + 建议窗口（与其他算法对照的前提是时钟一致）
+  const holdingDays = candidate.holdingDays ?? candidate.holding_days ?? 20;
+  const basisRaw = candidate.generatedAt ?? candidate.generated_at;
+  const basisDate = basisRaw && !Number.isNaN(new Date(basisRaw).getTime())
+    ? basisRaw.slice(0, 10)
+    : new Date().toISOString().slice(0, 10);
+  const basisUntil = new Date(
+    new Date(basisDate).getTime() + holdingDays * 86400000,
+  )
+    .toISOString()
+    .slice(0, 10);
+
   const tier = scoreTier(score);
   const tierColor = TIER_COLOR[tier];
 
@@ -160,6 +172,14 @@ export function SerenityCandidateCard({ candidate }: Props) {
       </div>
 
       <div className="px-3 py-2 flex flex-col gap-2">
+        {/* ── 时间基线 ── */}
+        <div className="flex items-center gap-1 text-[10px] text-gray-400">
+          <ClockCircleOutlined />
+          <span>
+            {t("serenityPanel.timeBasis", { date: basisDate, days: holdingDays, until: basisUntil })}
+          </span>
+        </div>
+
         {/* ── 瓶颈产品 + 主要风险 ── */}
         {(bottleneckProduct || primaryRisk) && (
           <div className="grid grid-cols-2 gap-2 text-xs">

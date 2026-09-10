@@ -260,6 +260,12 @@ pub async fn init_database_with_dir(app_dir: PathBuf) -> Result<DatabaseInitResu
     // 供 consumer crate（rt-workflow 等）通过 trait 访问器获取，避免直接依赖 axagent-entities。
     axagent_dao::agent_repositories::register_repositories(&db_handle.conn);
 
+    // 需求精评 LLM 桥：把首个启用的 provider 注入 tools 全局态，
+    // 供 run_discovery_scan 对高分候选做 LLM 精评（未配置 provider 时精评静默跳过）。
+    // 必须在 register_repositories 之后 —— build_llm_bridge_from_db 走
+    // provider_repository() 全局访问器，ServiceRegistry 未注册时会 panic。
+    crate::commands::demand_llm_refine::register_demand_llm_bridge(&master_key).await;
+
     Ok(DatabaseInitResult { db_handle, db_path: db_url, master_key, app_dir })
 }
 

@@ -13232,6 +13232,9 @@
       "leads": "需求线索",
       "capabilities": "能力库",
       "deliveries": "交付记录",
+      "gapsEmpty": "暂无能力缺口",
+      "deliveriesEmpty": "暂无交付记录，在线索操作列点「执行交付」创建",
+      "executeDelivery": "执行交付",
       "btnDiscover": "发现需求",
       "btnProactiveScan": "主动扫描",
       "btnAnalyzeGaps": "分析缺口",
@@ -13265,15 +13268,8 @@
         "expired": "已过期",
         "claimed": "他人承接"
       },
-      "delivery": {
-        "status": {
-          "pending": "待执行",
-          "running": "执行中",
-          "completed": "已完成",
-          "failed": "失败",
-          "cancelled": "已取消"
-        }
-      },
+      "changeStatus": "变更状态",
+      "delivery": "交付",
       "platforms": "平台配置",
       "gaps": "能力缺口",
       "actionMark": "标记",
@@ -13439,20 +13435,16 @@
         "maxCapabilitiesCache": "最大能力缓存数",
         "dbCleanupDays": "数据库清理天数",
         "logLevel": "日志级别: debug/info/warn/error",
-        "enableAnalytics": "启用分析统计"
+        "enableAnalytics": "启用分析统计",
+        "scanLlmEvalEnabled": "LLM 精评（高分线索二次评估）",
+        "scanLlmEvalMaxLeads": "单轮精评候选上限",
+        "scanLlmEvalMinRuleScore": "精评预筛阈值（规则分 ≥）"
       },
       "colPainScore": "痛点强度",
       "colMarketGap": "市场缺口",
       "colCommercialValue": "商业价值",
-      "colOpportunityLevel": "机会等级",
       "colDemandType": "需求类型",
       "colEvaluatedAt": "评估时间",
-      "opportunityLevel": {
-        "high": "高价值",
-        "medium": "中价值",
-        "low": "低价值",
-        "very_high": "极高价值"
-      },
       "demandType": {
         "tool_software": "工具软件",
         "content_creation": "内容创作",
@@ -13529,8 +13521,10 @@
       "platformStatus": {
         "idle": "空闲",
         "ok": "正常",
-        "error": "异常"
+        "error": "异常",
+        "skipped": "合规跳过"
       },
+      "platformSkippedHint": "未配置官方 API 凭证，已按合规策略跳过扫描；配置 Token 并启用后即可扫描。",
       "platformType": {
         "api": "官方 API",
         "scanner": "内置扫描器",
@@ -13567,6 +13561,14 @@
       "subscriptions": "订阅",
       "addSubscription": "新增订阅",
       "manualEntry": "手动录入",
+      "capabilityScan": "能力驱动扫描",
+      "capabilityScanDesc": "根据本地能力库自动生成检索词并逐词扫描需求市场（原方案工作流：能力集扫描 → 检索词规划 → 循环扫描）。",
+      "capabilityFocus": "聚焦方向（可选）",
+      "capabilityFocusPlaceholder": "例如：AI 应用开发、数据服务，留空则由能力库决定",
+      "capabilityMaxKeywords": "检索词数量上限",
+      "capabilityScanStart": "开始扫描",
+      "capabilityScanComplete": "能力驱动扫描完成，线索已刷新",
+      "capabilityScanFailed": "能力驱动扫描失败：{{error}}",
       "leadCreateFailed": "线索录入失败: {{error}}",
       "leadFormTitle": "标题",
       "leadFormTitleRequired": "标题不能为空",
@@ -13656,6 +13658,15 @@
       "delivMarkSent": "标记已开出",
       "delivMarkPaid": "标记已回款",
       "delivDelete": "删除"
+    },
+    "delivery": {
+      "status": {
+        "pending": "待执行",
+        "running": "执行中",
+        "completed": "已完成",
+        "failed": "失败",
+        "cancelled": "已取消"
+      }
     }
   },
   "demandDiscovery": {
@@ -14540,7 +14551,8 @@
     "boolYes": "是",
     "boolNo": "否",
     "backendCallFailed": "后端调用失败",
-    "emptyHistoryWarning": "趋势智选历史为空：list_reco_history 返回 0 行（可能是 DB 暂无风格为 serenity/bottleneck 的历史，或后端命令失败被静默）"
+    "emptyHistoryWarning": "趋势智选历史为空：list_reco_history 返回 0 行（可能是 DB 暂无风格为 serenity/bottleneck 的历史，或后端命令失败被静默）",
+    "timeBasis": "时间基线: {{date}} · 建议窗口约 {{days}} 天（至 {{until}}）"
   },
   "tool": {
     "common": {
@@ -15179,7 +15191,18 @@
       "moatLabel": "护城河",
       "outlookVerdict": "展望说明 / 巴菲特裁决",
       "riskFlags": "风险标志",
-      "valuationConclusion": "估值结论"
+      "valuationConclusion": "估值结论",
+      "metricsTitle": "关键估值指标（t-valuation）",
+      "currentPriceLabel": "现价",
+      "fScoreLabel": "F-Score",
+      "moatScoreLabel": "护城河分",
+      "oeYieldLabel": "OE收益率",
+      "grahamUpsideLabel": "格雷厄姆上行",
+      "valueSignalLabel": "综合判断",
+      "roeLabel": "ROE",
+      "debtRatioLabel": "负债率",
+      "grossMarginLabel": "毛利率",
+      "revenueGrowthLabel": "营收增速"
     },
     "workflow": {
       "analyst": {
@@ -15233,6 +15256,7 @@
       "riskConvergence": "风险收敛",
       "riskAggressive": "激进风险评估",
       "riskClassification": "风险分类",
+      "auxNodes": "辅助节点",
       "riskConservative": "保守风险评估",
       "riskLevel": "风险",
       "riskNeutral": "中性风险评估",
@@ -15293,7 +15317,7 @@
       "notifyResult": "通知结果",
       "analystFallback": "分析师",
       "insufficientDataQuality": "数据质量不足，跳过分析",
-      "skipAnalysisError": "跳过分析时发生错误"
+      "skipAnalysisError": "跳过分析时发生错误：{{reason}}"
     },
     "debugPanel": {
       "show": "🔍 显示",
@@ -15812,6 +15836,15 @@
       "directionConflict": "方向冲突",
       "opposite": "反向",
       "sameDirection": "同向"
+    },
+    "crossCheck": {
+      "title": "趋势智选 vs 股票分析 · 跨系统分歧",
+      "timeBasis": "推荐时点 {{recoDate}} · 分析时点 {{decisionDate}}（相隔约 {{gapDays}} 天）",
+      "recoSays": "趋势智选 {{score}} 分，建议试探仓 {{position}}%（{{strategy}} 策略）",
+      "attentionHeat": "关注度: {{heat}}",
+      "workflowSays": "股票分析工作流判定: {{action}}，仓位 {{position}}%",
+      "divergenceNote": "两个时钟不同——智选赌催化剂兑现（约 {{recoDays}} 天），工作流按当下赔率定价（约 {{decisionDays}} 天）",
+      "catalystLabel": "催化剂({{confidence}}分)"
     },
     "compare": {
       "title": "多股对比",
@@ -16619,7 +16652,7 @@
       "totalNodes": "总节点",
       "totalReport": "总报告",
       "statusLabel": "状态",
-      "failedQualityWarning": "⚠️ {count} 个节点失败，可能影响决策质量",
+      "failedQualityWarning": "⚠️ {{count}} 个节点失败，可能影响决策质量",
       "upstreamTip": "💡 上游节点失败会导致决策引擎收到默认值（score=50），从而产生相同结论。",
       "upstreamTipDetail": "请重点排查上方红色标记节点的失败原因。",
       "waitingAnalysis": "等待分析开始...",

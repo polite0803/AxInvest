@@ -230,6 +230,9 @@
       "description": "LLM Catalyst Agent 输出格式（与 catalyst-analyst.md 及 seed a-catalyst 强制约束保持一致）",
       "type": "object",
       "required": [
+        "verdict",
+        "bull_score",
+        "bear_score",
         "report",
         "catalyst_level",
         "institutional_trace",
@@ -238,6 +241,23 @@
         "reasoning"
       ],
       "properties": {
+        "verdict": {
+          "type": "string",
+          "enum": ["看多", "看空", "中性"],
+          "description": "方向结论（analyst-brief.rhai 消费该对象的多空评分做共识计算）"
+        },
+        "bull_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "看多评分 0-100 整数，与 bear_score 之和接近 100"
+        },
+        "bear_score": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "看空评分 0-100 整数，与 bull_score 之和接近 100"
+        },
         "report": {
           "type": "string",
           "description": "完整分析报告文本（自然语言，可含结构化分析）"

@@ -68,6 +68,21 @@ export type ImportDirectoryResult = {
   errors: ImportDirectoryError[];
 };
 
+/** 目录增量同步结果（对齐后端 `SyncDirectoryResult`：base_id + added/updated/deleted/skipped 计数） */
+export type SyncDirectoryResult = {
+  baseId: string;
+  addedCount: number;
+  updatedCount: number;
+  deletedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  added: string[];
+  updated: string[];
+  deleted: string[];
+  skipped: string[];
+  errors: ImportDirectoryError[];
+};
+
 export type RetrievalHit = {
   id: string;
   conversationId: string;

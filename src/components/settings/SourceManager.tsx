@@ -9,7 +9,7 @@ import { useProviderStore, useSourceStore } from "@/stores";
 import { useLlmWikiStore, type Wiki } from "@/stores/feature/llmWikiStore";
 import { useMemoryStore } from "@/stores/feature/memoryStore";
 import type { SourceConfig, UnifiedSource } from "@/stores/feature/sourceStore";
-import type { KnowledgeBase } from "@/types";
+import type { ImportDirectoryResult, KnowledgeBase, SyncDirectoryResult } from "@/types";
 import {
   App as AntdApp,
   Button,
@@ -428,8 +428,10 @@ function CreateSourceModal({
   );
 }
 
-/// 导入/更新项目知识源的 Modal：支持自定义目录、知识源名称、模式（新增/更新）。
-function ImportProjectSourcesModal({
+/// 从目录导入/同步通用知识源的 Modal：
+/// - create：创建知识库（create_source）→ 导入所选目录全部文档（import_knowledge_directory）
+/// - update：增量同步目录内容到已有知识库（sync_project_knowledge_sources）
+function ImportDirectoryModal({
   open,
   initialMode,
   onClose,
@@ -441,7 +443,7 @@ function ImportProjectSourcesModal({
   const { t } = useTranslation();
   const { fetchSources } = useSourceStore();
   const allSources = useSourceStore((s) => s.sources);
-  const wikiSources = allSources.filter((s) => s.containerType === "wiki" && s.name);
+  const knowledgeSources = allSources.filter((s) => s.containerType === "knowledge" && s.name);
   const [form] = Form.useForm();
   const [importing, setImporting] = useState(false);
   const [dirPath, setDirPath] = useState("");
@@ -454,7 +456,8 @@ function ImportProjectSourcesModal({
       setDirPath("");
       form.setFieldsValue({
         mode: initialMode,
-        sourceName: t("sourceManager.importProjectModal.defaultSourceName"),
+        sourceName: "",
+        targetBaseId: undefined,
         sourcePath: "",
       });
     }
@@ -481,40 +484,43 @@ function ImportProjectSourcesModal({
       }
       const values = await form.validateFields();
       setImporting(true);
-      const result = await invoke<{
-        wikiId: string;
-        wikiName: string;
-        wikiImported: number;
-        wikiFailed: number;
-        wikiSkipped: number;
-        kbId: string;
-        kbName: string;
-        entityCount: number;
-        relationCount: number;
-        bridgedNotes: number;
-        bridgedSkipped: number;
-        embeddingProvider: string | null;
-        embeddingChanged: boolean;
-      }>("import_project_knowledge_sources", {
-        sourcePath: dirPath,
-        sourceName: values.sourceName || undefined,
-        mode: values.mode,
-        embeddingProvider: values.embeddingProvider || undefined,
-      });
-      messageApi.success(t("sourceManager.importSuccess", {
-        imported: result.wikiImported,
-        skipped: result.wikiFailed + result.wikiSkipped,
-        entities: result.entityCount,
-        relations: result.relationCount,
-        bridged: result.bridgedNotes,
-        wikiName: result.wikiName,
-        kbName: result.kbName,
-      }));
-      // 向量模型变更或新配置时提示用户重建索引
-      if (result.embeddingChanged) {
-        messageApi.warning(t("sourceManager.importProjectModal.embeddingChanged"));
-      } else if (!result.embeddingProvider) {
-        messageApi.info(t("sourceManager.importNoEmbedding"));
+      if (mode === "create") {
+        // 通用流程：创建知识库 → 导入所选目录下的全部文档
+        const created = await invoke<UnifiedSource>("create_source", {
+          input: {
+            name: values.sourceName,
+            sourceType: "knowledge",
+            description: null,
+            embeddingProvider: values.embeddingProvider ?? null,
+          },
+        });
+        const result = await invoke<ImportDirectoryResult>("import_knowledge_directory", {
+          baseId: created.id,
+          directoryPath: dirPath,
+          recursive: true,
+        });
+        messageApi.success(t("sourceManager.importSuccess", {
+          imported: result.importedCount,
+          skipped: result.skippedCount,
+          errors: result.errorCount,
+          name: created.name,
+        }));
+        if (!created.embeddingProvider) {
+          messageApi.info(t("sourceManager.importNoEmbedding"));
+        }
+      } else {
+        // 通用流程：增量同步目录内容到已有知识库
+        const result = await invoke<SyncDirectoryResult>("sync_project_knowledge_sources", {
+          baseId: values.targetBaseId,
+          sourcePath: dirPath,
+          recursive: true,
+        });
+        messageApi.success(t("sourceManager.syncSuccess", {
+          added: result.addedCount,
+          updated: result.updatedCount,
+          deleted: result.deletedCount,
+          skipped: result.skippedCount,
+        }));
       }
       await fetchSources();
       form.resetFields();
@@ -559,19 +565,23 @@ function ImportProjectSourcesModal({
           </Space.Compact>
         </Form.Item>
         <Form.Item
-          name="sourceName"
+          name={mode === "update" ? "targetBaseId" : "sourceName"}
           label={mode === "update"
             ? t("sourceManager.importProjectModal.existingSources")
             : t("sourceManager.importProjectModal.sourceName")}
-          rules={[{ required: true, message: t("sourceManager.importProjectModal.sourceNameRequired") }]}
+          rules={[{
+            required: true,
+            message: mode === "update"
+              ? t("sourceManager.importProjectModal.selectRequired")
+              : t("sourceManager.importProjectModal.sourceNameRequired"),
+          }]}
           extra={mode === "create" ? t("sourceManager.importProjectModal.sourceNameHint") : undefined}
         >
           {mode === "update"
             ? (
               <Select
-                allowClear
                 placeholder={t("sourceManager.importProjectModal.selectExisting")}
-                options={wikiSources.map((s) => ({ label: s.name, value: s.name }))}
+                options={knowledgeSources.map((s) => ({ label: s.name, value: s.id }))}
               />
             )
             : <Input placeholder={t("sourceManager.importProjectModal.sourceNamePlaceholder")} />}
@@ -1954,7 +1964,7 @@ function SourceManager() {
         onClose={() => setCreateOpen(false)}
       />
 
-      <ImportProjectSourcesModal
+      <ImportDirectoryModal
         open={importOpen}
         initialMode={importMode}
         onClose={() => setImportOpen(false)}

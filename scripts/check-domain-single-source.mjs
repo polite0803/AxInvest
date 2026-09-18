@@ -523,7 +523,7 @@ export function classifyPromptDomainSite(src) {
  * 但诊断消息当时只说「两张表须都存在且非空」，没点名缺哪个常量，排查要回读源码。
  * ⇒ 常量名集中在这里 + 报错消息列出期望名，改名时一眼可见。
  */
-export const OPC_MAPPING_TABLE_CONSTS = ["OPC_DOMAIN_PACK_DOMAIN", "OPC_WF_SEGMENT_DOMAIN"];
+export const OPC_MAPPING_TABLE_CONSTS = ["OPC_CAPABILITY_PACK_DOMAIN", "OPC_WF_SEGMENT_DOMAIN"];
 
 /** OPC 两张映射表的**第二个元素**（目标能力域） */
 export function parseOpcMappingTargets(src, constNames = OPC_MAPPING_TABLE_CONSTS) {
@@ -1503,12 +1503,12 @@ export const CAPABILITY_DOMAIN_META: readonly CapabilityDomainMeta[] = NAV_ORDER
     return v.kind === "derived" ? true : `真实文件被判为 ${v.kind}：${JSON.stringify(v)}`;
   });
   t("parseOpcMappingTargets 正：取每对第二个元素", () => {
-    const src = `const OPC_DOMAIN_PACK_DOMAIN: &[(&str, &str)] = &[\n    ("accounting", "finance"),\n    ("security", "devops"),\n];\nconst OPC_WF_SEGMENT_DOMAIN: &[(&str, &str)] = &[\n    ("fin", "finance"),\n];`;
+    const src = `const OPC_CAPABILITY_PACK_DOMAIN: &[(&str, &str)] = &[\n    ("accounting", "finance"),\n    ("security", "devops"),\n];\nconst OPC_WF_SEGMENT_DOMAIN: &[(&str, &str)] = &[\n    ("fin", "finance"),\n];`;
     const v = parseOpcMappingTargets(src);
     return v && v.join(",") === "finance,devops,finance" ? true : `得到 ${JSON.stringify(v)}`;
   });
   t("parseOpcMappingTargets 负：少一张表 ⇒ null（不得只报半张）", () => {
-    const v = parseOpcMappingTargets('const OPC_DOMAIN_PACK_DOMAIN = &[("a", "finance")];');
+    const v = parseOpcMappingTargets('const OPC_CAPABILITY_PACK_DOMAIN = &[("a", "finance")];');
     return v === null ? true : `得到 ${JSON.stringify(v)}`;
   });
   t("parseI18nDomainKeys 正：取命名空间 key", () => {
@@ -1734,7 +1734,7 @@ impl DomainNode {
   });
   t("端到端：OPC 映射目标拼错 ⇒ 检出幽灵域", () => {
     const authority = parseAuthorityPairs(AUTH).map(([, s]) => s);
-    const targets = parseOpcMappingTargets('const OPC_DOMAIN_PACK_DOMAIN = &[("a", "finace")];\nconst OPC_WF_SEGMENT_DOMAIN = &[("b", "finance")];');
+    const targets = parseOpcMappingTargets('const OPC_CAPABILITY_PACK_DOMAIN = &[("a", "finace")];\nconst OPC_WF_SEGMENT_DOMAIN = &[("b", "finance")];');
     const ghost = [...new Set(targets.filter((x) => !authority.includes(x)))];
     return ghost.join(",") === "finace" ? true : `得到 ${JSON.stringify(ghost)}`;
   });

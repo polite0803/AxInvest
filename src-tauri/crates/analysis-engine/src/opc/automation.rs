@@ -103,9 +103,9 @@ impl AutomationRule {
     }
 }
 
-// ── 行业自动化条件与动作（与 opc-types 兼容的 enum 版本） ───────
+// ── 域包自动化条件与动作（与 opc-types 兼容的 enum 版本） ───────
 
-/// 行业自动化条件（enum 版本，供行业规则引擎使用）
+/// 域包自动化条件（enum 版本，供域包规则引擎使用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AutomationCondition {
@@ -125,7 +125,7 @@ pub enum AutomationCondition {
     Custom { expression: String },
 }
 
-/// 行业自动化动作（enum 版本，供行业规则引擎使用）
+/// 域包自动化动作（enum 版本，供域包规则引擎使用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AutomationAction {
@@ -141,9 +141,9 @@ pub enum AutomationAction {
     CreateRecord { entity_type: String, data: serde_json::Value },
 }
 
-/// 行业自动化规则
+/// 域包自动化规则
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndustryAutomationRule {
+pub struct DomainPackAutomationRule {
     pub id: String,
     pub name: String,
     pub conditions: Vec<AutomationCondition>,
@@ -151,7 +151,7 @@ pub struct IndustryAutomationRule {
     pub enabled: bool,
 }
 
-impl IndustryAutomationRule {
+impl DomainPackAutomationRule {
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,

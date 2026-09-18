@@ -19,7 +19,7 @@ use axagent_analysis_engine::portfolio_monitor::{
 };
 use axagent_analysis_engine::portfolio_risk::{PortfolioRiskManager, PortfolioRiskMetrics};
 use axagent_analysis_engine::position_limits::PositionLimits;
-use axagent_analysis_engine::recommender::{self, RecoResponse};
+use axagent_analysis_engine::recommender::{self, RecoPick, RecoResponse};
 use axagent_analysis_engine::review::{DailyReview, PostCloseReview};
 use axagent_analysis_engine::screener::{ScreenCriteria, ScreenResult, StockScreener};
 use axagent_analysis_engine::stock_analysis_round::StockAnalysisRound;
@@ -62,6 +62,17 @@ pub struct WhatIfRequest {
     /// 缺失时仅根据 6 个显式参数运行（简化模式）。
     #[serde(default)]
     pub blackboard_snapshot: Option<String>,
+    /// 决策层参数覆盖（key = portfolio-mgr.rhai 可调参数名，value = 新值）。
+    ///
+    /// **优先级最高**：在 `blackboard_snapshot` 注入之后应用，同名 key 覆盖快照值；
+    /// 快照注入时会主动跳过此处已声明的 key，避免同一 scope 内重复压栈产生歧义。
+    /// 参数名权威源 = `PORTFOLIO_MGR_TUNABLE_PARAMS`（28 项，见 seed_stock_analysis.rs）。
+    ///
+    /// 用途：What-If 回测面板让用户在不修改工作流模板的前提下试算决策阈值
+    /// （`action_*_threshold` / `pos_cap_*` / `regime_prior_*` 等）。此前这些参数
+    /// 只能经快照被动注入，面板滑块传什么都不影响决策层。
+    #[serde(default)]
+    pub param_overrides: HashMap<String, serde_json::Value>,
 }
 
 /// What-If 回测结果
@@ -141,6 +152,39 @@ pub struct SimulationGateInfo {
     pub sim_impact: Option<f64>,
 }
 
+/// 把 `serde_json` 值按类型压入 Rhai scope。
+///
+/// 从 `compute_what_if` 的注入循环提取，供「快照注入」与「显式覆盖注入」两处共用，
+/// 避免同一套类型分派逻辑写两遍（AGENTS.md 铁律 12）。Object/Array 序列化为 JSON
+/// 字符串（由脚本侧 `safe_parse` 还原），Null 不注入（使脚本中 `present(x)` 为 false
+/// ⟶ 走脚本内置兜底分支）。
+fn push_json_to_scope(scope: &mut rhai::Scope<'_>, key: &str, val: &serde_json::Value) {
+    match val {
+        serde_json::Value::Number(n) => {
+            if let Some(f) = n.as_f64() {
+                scope.push_constant(key, f);
+            }
+        },
+        serde_json::Value::String(s) => {
+            scope.push_constant(key, s.clone());
+        },
+        serde_json::Value::Bool(b) => {
+            scope.push_constant(key, *b);
+        },
+        serde_json::Value::Object(map) => {
+            if let Ok(json_str) = serde_json::to_string(map) {
+                scope.push_constant(key, json_str);
+            }
+        },
+        serde_json::Value::Array(arr) => {
+            if let Ok(json_str) = serde_json::to_string(arr) {
+                scope.push_constant(key, json_str);
+            }
+        },
+        serde_json::Value::Null => { /* 不注入，Rhai 中 present()=false */ },
+    }
+}
+
 /// 执行 portfolio-mgr 确定性公式（Rhai 引擎）。
 /// 修复 D2: 从文件加载完整 portfolio-mgr.rhai，通过 blackboard_snapshot 提供完整参数。
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "执行What-If回测计算")]
@@ -193,32 +237,14 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
                     {
                         continue;
                     }
-                    // 根据值类型注入 Rhai scope
-                    match val {
-                        serde_json::Value::Number(n) => {
-                            if let Some(f) = n.as_f64() {
-                                scope.push_constant(key.as_str(), f);
-                            }
-                        },
-                        serde_json::Value::String(s) => {
-                            scope.push_constant(key.as_str(), s.clone());
-                        },
-                        serde_json::Value::Bool(b) => {
-                            scope.push_constant(key.as_str(), *b);
-                        },
-                        // Map 和 Array 通过 JSON 字符串传递，safe_parse 在 Rhai 中处理
-                        serde_json::Value::Object(map) => {
-                            if let Ok(json_str) = serde_json::to_string(map) {
-                                scope.push_constant(key.as_str(), json_str);
-                            }
-                        },
-                        serde_json::Value::Array(arr) => {
-                            if let Ok(json_str) = serde_json::to_string(arr) {
-                                scope.push_constant(key.as_str(), json_str);
-                            }
-                        },
-                        serde_json::Value::Null => { /* 不注入，Rhai 中 present()=false */ },
+                    // 跳过 param_overrides 已声明的 key：两处都压栈会让 scope 出现同名
+                    // 重复条目、`present()` 语义随之变形。此处让位，由下方第 3 步以
+                    // 最高优先级统一注入。
+                    if params.param_overrides.contains_key(key) {
+                        continue;
                     }
+                    // 根据值类型注入 Rhai scope
+                    push_json_to_scope(&mut scope, key, val);
                 }
             }
             // 若 _raw.portfolio-mgr.input_params 不存在，快照可能为旧版。
@@ -227,7 +253,14 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
         // 解析失败不报错，静默降级（只有 5 个显式参数可用）
     }
 
-    // 3. 从文件加载完整 portfolio-mgr.rhai 公式
+    // 3. 应用显式参数覆盖（最高优先级，可覆盖快照中的同名值）
+    //    参数名权威源 = PORTFOLIO_MGR_TUNABLE_PARAMS（28 项）。快照循环已跳过这些 key，
+    //    故 scope 内同名参数唯一，脚本中 `present()` 的语义确定。
+    for (key, val) in &params.param_overrides {
+        push_json_to_scope(&mut scope, key, val);
+    }
+
+    // 4. 从文件加载完整 portfolio-mgr.rhai 公式
     //    使用 include_str! 编译时嵌入，与 DAG 中实际使用的文件保持同步
     let code = include_str!("portfolio-mgr.rhai");
 
@@ -241,7 +274,7 @@ pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("Rhai 执行失败: {e}"))
     })?;
 
-    // 4. 转换结果为 WhatIfResult
+    // 5. 转换结果为 WhatIfResult
     let result_map = result
         .clone()
         .try_cast::<rhai::Map>()
@@ -355,6 +388,31 @@ pub struct ReplayToolChainResult {
     /// 评分权重推演仍可运行，但估值/支撑位等依赖实时行情的结果仅供参考。
     pub data_degraded: bool,
 }
+
+/// `replay_tool_chain` **自身消费**的覆盖项清单。
+///
+/// 这些 key 已用于回放链的 Rust 简化计算（评分权重 / F-Score 阈值 / 风险上限 /
+/// 凯利与催化剂入参），无需再透传给 `compute_what_if` —— 否则同一参数会同时影响
+/// 「简化评分链」与「决策层公式」两处，调试时无法归因。
+///
+/// **不在本清单中的 key**（如 `action_*_threshold` / `pos_cap_*` / `regime_prior_*` /
+/// `cost_pct` 等 `PORTFOLIO_MGR_TUNABLE_PARAMS` 成员）会被透传进 Rhai scope，
+/// 使 What-If 面板能真正试算决策层参数（此前它们只存在于面板里，传了也不生效）。
+const REPLAY_CONSUMED_OVERRIDE_KEYS: [&str; 13] = [
+    "scoring_trend",
+    "scoring_deviation",
+    "scoring_macd",
+    "scoring_volume",
+    "scoring_rsi",
+    "scoring_support",
+    "catalyst_analyst_score",
+    "value_fscore_buy",
+    "risk_max_drawdown_limit",
+    "risk_hhi_concentrated",
+    "kelly_fraction",
+    "catalyst_level",
+    "institutional_trace",
+];
 
 /// 进程级「最近一次成功获取」的实时数据缓存，供数据源临时不可用时降级回放。
 /// key = 股票代码；value = (K线, 实时行情, 缓存时间戳)。
@@ -577,7 +635,10 @@ pub async fn replay_tool_chain(
     });
 
     // ── 2. compute_valuation（简化版：基于 F-Score 和 PE 的基本估值判断）──
-    let fscore = tv("fscore_buy_threshold", 7.0) as i64;
+    // 参数名对齐变量表权威名 `value_fscore_buy`（seed_variables.rs 与设置面板同名）。
+    // 此前写作 `fscore_buy_threshold`，导致面板传 `value_fscore_buy` 永远无法命中，
+    // 恒走默认 7.0 —— 又一处「命名错配型空接线」。
+    let fscore = tv("value_fscore_buy", 7.0) as i64;
     let pe_pct = quote
         .pe
         .as_ref()
@@ -598,7 +659,9 @@ pub async fn replay_tool_chain(
     });
 
     // ── 3. compute_portfolio_risk（简化版）──
-    let max_dd = tv("risk_max_drawdown_limit", 20.0);
+    // 默认值对齐变量表 / 设置面板的 15.0。此前此处写 20.0，与面板默认分叉，
+    // 用户不动滑块时后端按 20 判风险档、面板显示 15，同一参数两处语义不一致。
+    let max_dd = tv("risk_max_drawdown_limit", 15.0);
     let hhi_limit = tv("risk_hhi_concentrated", 0.25);
     let kelly_f = tv("kelly_fraction", 0.5);
     let overall_risk = if max_dd > 25.0 {
@@ -622,6 +685,14 @@ pub async fn replay_tool_chain(
         institutional_trace: tv_str("institutional_trace", "无异常"),
         consensus_score: 50.0,
         blackboard_snapshot: None,
+        // 其余覆盖项（决策层参数：action 阈值 / 仓位上限 / 市况先验 / 交易成本等）
+        // 透传给 Rhai，使面板滑块能真正影响 decision。回放链自消费的项已排除。
+        param_overrides: params
+            .config_overrides
+            .iter()
+            .filter(|(k, _)| !REPLAY_CONSUMED_OVERRIDE_KEYS.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
     };
     let decision = compute_what_if(what_if)?;
 
@@ -1092,6 +1163,9 @@ pub struct StockAnalysisListItem {
     pub analysis_date: String,
     pub status: String,
     pub decision_action: Option<String>,
+    /// 决策持仓状态轴（v228）。与 `decision_action` 正交；历史行为 `None`。
+    /// 前端据 `decision_position_state` + `decision_position_pct` 派生「持有/观望」文案。
+    pub decision_position_state: Option<String>,
     pub decision_position_pct: Option<f64>,
     pub decision_json: Option<String>,
     pub analysis_kind: String,
@@ -1127,6 +1201,7 @@ pub async fn list_stock_analyses(
         .column(stock_analyses::Column::AnalysisDate)
         .column(stock_analyses::Column::Status)
         .column(stock_analyses::Column::DecisionAction)
+        .column(stock_analyses::Column::DecisionPositionState)
         .column(stock_analyses::Column::DecisionPositionPct)
         .column(stock_analyses::Column::DecisionJson)
         .column(stock_analyses::Column::AnalysisKind)
@@ -1412,7 +1487,13 @@ pub async fn extract_evidence_citations(
     report.stock_code = analysis.stock_code;
     report.stock_name = analysis.stock_name;
     report.analysis_date = analysis.analysis_date;
-    report.decision_action = analysis.decision_action.unwrap_or_default();
+    // P0-5(2026-09-14): 决策缺失统一下发显式哨兵。
+    // 原实现 `unwrap_or_default()` 得到空串，前端 `parseAction("")` 退化成「观望」——
+    // 把「没有决策」伪装成一条业务结论。空串/纯空白同样按缺失处理。
+    report.decision_action =
+        analysis.decision_action.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
+            axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string()
+        });
     report.decision_confidence = 0.0; // 从 decision_json 解析
 
     // 尝试从 decision_json 解析置信度
@@ -1698,26 +1779,6 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
     Ok(enriched)
 }
 
-/// 从 settings 表加载估值参数（ValueConfig），仅提取需要的部分
-async fn load_value_config(
-    db: &sea_orm::DatabaseConnection,
-) -> axagent_analysis_engine::decision::ValueConfig {
-    if let Ok(Some(v)) = axagent_dao::repo::settings::get_setting(db, "stock_analysis_config").await
-    {
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&v) {
-            if let Some(value_section) = parsed.get("value") {
-                if let Ok(cfg) = serde_json::from_value::<
-                    axagent_analysis_engine::decision::ValueConfig,
-                >(value_section.clone())
-                {
-                    return cfg;
-                }
-            }
-        }
-    }
-    axagent_analysis_engine::decision::ValueConfig::default()
-}
-
 // ── MCP Stock Data Tools ──
 
 /// 返回 stock data MCP 工具定义列表（供前端 MCP 管理页面注册）
@@ -1765,14 +1826,20 @@ pub async fn execute_stock_mcp_tool(
 /// 之前在 backtest_analysis 里 inline 写死了 5 行 match,既无法测试,
 /// 改策略时容易漏改。这里抽成 free function,接受标准化后的 action_token
 /// (大写英文,前后空白已 trim),所有未识别的 action 都回退到 "watchlist"。
+///
+/// ⚠️ P0-4(2026-09-14): 判定改走 `decision_action::normalize_action` 统一归一化。
+/// 历史实现是手写 match，**缺 `WAIT` 分支** —— 同义的英文 `WAIT` 落到
+/// `watchlist`，而中文「观望」落到 `capital`：同一语义经两条入口得到两个策略。
+/// 归一化后各档穷举，新增值域由编译器报错提醒。
 pub(crate) fn map_action_to_strategy_id(action: &str) -> &'static str {
-    // 注意大小写不敏感(既支持中文,也支持 BUY/Hold 等英文)
-    match action.trim().to_ascii_uppercase().as_str() {
-        "买入" | "BUY" | "增持" | "INCREASE" => "trend",
-        "卖出" | "SELL" | "减持" | "REDUCE" => "reversion",
-        "持有" | "HOLD" => "value",
-        "观望" | "UNCERTAIN" => "capital",
-        _ => "watchlist",
+    use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
+    match normalize_action(action) {
+        Some(ActionKind::Buy | ActionKind::Increase) => "trend",
+        Some(ActionKind::Sell | ActionKind::Reduce) => "reversion",
+        Some(ActionKind::Hold) => "value",
+        Some(ActionKind::Wait | ActionKind::Uncertain) => "capital",
+        // 决策缺失 / 未识别值域：无策略可回放，与「观望」区分开（观望是结论，缺失不是）
+        Some(ActionKind::Unavailable) | None => "watchlist",
     }
 }
 
@@ -1872,7 +1939,13 @@ pub async fn backtest_all_history(
             HistoricalAnalysis {
                 stock_code: a.stock_code.clone(),
                 analysis_date: a.analysis_date.clone(),
-                decision_action: a.decision_action.clone().unwrap_or_else(|| "持有".to_string()),
+                // P0-5(2026-09-14): 原 `unwrap_or_else(|| "持有")` 把「决策缺失」
+                //   吸收成「持有」这一**结论** —— 缺失不是结论。改为显式哨兵；
+                //   下游 backtest_decision 对无方向结论的样本返回 Err，
+                //   由 backtest_history 的 Err 分支剔除并告警，不再污染统计。
+                decision_action: a.decision_action.clone().unwrap_or_else(|| {
+                    axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string()
+                }),
                 decision_confidence: confidence,
                 time_horizon: a.decision_time_horizon.clone(),
                 expected_holding_days: a.decision_expected_holding_days,
@@ -2301,9 +2374,33 @@ pub async fn generate_stock_report(
         .and_then(|snap| serde_json::from_str(snap).ok())
         .unwrap_or(serde_json::Value::Object(Default::default()));
 
-    // 辅助：从 Value 中取字符串（空值视为缺失）
-    let bb_str =
-        |k: &str| -> String { bb_value.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string() };
+    // 辅助：解出 bb 中某键的「节点输出本体」。
+    //
+    // 2026-09-12 修（P0-H）：`stock_analyses.blackboard_snapshot` 里同一个 key 有**三种形态**，
+    // 旧实现只有 `as_str()`（只覆盖形态①）⇒ 形态②③ 一律得到 `""` ⇒ 下游 `parse_or_warn`
+    // 解析空串 ⇒ 退化为 `serde_json::Value::Null` ⇒ **报告整块恒空 / 恒 0**，
+    // 且只在日志留一条 warn，UI 完全无感（静默失效）。
+    //   ① 裸字符串：`report.*`（11 个分析师报告）、`quality-gate-result`
+    //   ② 信封对象：`value.assessment` = `{content, model, node_id, role, thinking, ...}`，
+    //      真正载荷在 `content`（其本身是 JSON 字符串）
+    //   ③ 扁平直接对象：`result.data-quality`（`grade`/`score`/`summary` 直接挂顶层）
+    let bb_node = |k: &str| -> Option<serde_json::Value> {
+        match bb_value.get(k)? {
+            serde_json::Value::String(s) => Some(
+                serde_json::from_str::<serde_json::Value>(s)
+                    .unwrap_or_else(|_| serde_json::Value::String(s.clone())),
+            ),
+            serde_json::Value::Object(o) => match o.get("content") {
+                Some(serde_json::Value::String(c)) => Some(
+                    serde_json::from_str::<serde_json::Value>(c)
+                        .unwrap_or_else(|_| serde_json::Value::String(c.clone())),
+                ),
+                _ => Some(serde_json::Value::Object(o.clone())),
+            },
+            other => Some(other.clone()),
+        }
+    };
+    let bb_json = |k: &str| -> String { bb_node(k).map(|v| v.to_string()).unwrap_or_default() };
 
     // 分析师报告：所有 report.* 前缀的键
     let analyst_reports: std::collections::HashMap<String, String> = bb_value
@@ -2316,7 +2413,93 @@ pub async fn generate_stock_report(
         })
         .unwrap_or_default();
 
-    let value_assessment_json = bb_str("value.assessment");
+    // value-investor 输出。P0-H：原为 `bb_str("value.assessment")`，因形态②恒为 `""`，
+    // 导致报告里「巴菲特判定 / 安全边际 / F-Score·护城河」三张卡恒为 `-` / `0.0%` / `0/9 · 0/100`。
+    let value_assessment_json = bb_json("value.assessment");
+
+    // 数据质量摘要 + 质量门禁。P0-H：原调用点**硬编码传 `""`**（见下方实参列表），
+    // 但这两份数据一直在 bb 里（`result.data-quality.summary`、`quality-gate-result`）。
+    let quality_summary = bb_node("result.data-quality")
+        .and_then(|v| v.get("summary").and_then(|s| s.as_str()).map(str::to_string))
+        .unwrap_or_default();
+    let rule_check_result = bb_json("quality-gate-result");
+
+    // ── P0-H L3 落地（2026-09-12）─────────────────────────────────────────
+    // 报告里「大宗交易 / 机构调研 / 大盘指数」三个板块此前恒空，真因不是「数据未落库」，
+    // 而是本命令读的是**扁平点号键**（`raw.block_trades` / `raw.institutional_visits` /
+    // `market.index_quotes`），而当前模板只产出**聚合器信封** `raw.combined`：
+    //
+    //   {"node_id":"raw-data","strategy":"all","source_count":14,"wait_for_all":true,
+    //    "result":[{"node_id":"t-scoring","result":{"content":"<JSON 字符串>"}}, …]}
+    //
+    // ⇒ 属「旧命令 vs 新模板」的**契约漂移**（既不是取数失败，也不是数据未落库）。
+    //
+    // 实测（603353, 2026-09-12, v35）三个板块的真实落点：
+    //   · 大宗交易 → `t-lockup-data`.result.content.block_trades（8 条真实记录，
+    //                该节点用 `get_stock_lockup_bundle`，是「解禁+增减持+大宗交易」聚合）
+    //   · 机构调研 → 模板此前未抓，本轮新增节点 `t-institutional-visits`
+    //   · 大盘指数 → 模板此前未抓，本轮新增节点 `t-index-quotes`
+    //
+    // 每个 ToolNode 的载荷都包一层 `{"content": "<JSON 字符串>"}` ⇒ 须解两层
+    // （外层 `result`，内层 `content` 字符串再 parse 一次）。
+    let bb_raw_nodes: std::collections::HashMap<String, serde_json::Value> = bb_value
+        .get("raw.combined")
+        .and_then(|v| match v {
+            // raw.combined 在 bb 里是**字符串**（同 bb 其他键的形态），须先 parse
+            serde_json::Value::String(s) => serde_json::from_str::<serde_json::Value>(s).ok(),
+            other => Some(other.clone()),
+        })
+        .and_then(|env| env.get("result").and_then(|r| r.as_array()).cloned())
+        .map(|arr| {
+            arr.into_iter()
+                .filter_map(|item| {
+                    let node_id = item.get("node_id")?.as_str()?.to_string();
+                    let payload = item.get("result")?;
+                    let value = match payload.get("content") {
+                        Some(serde_json::Value::String(s)) => {
+                            // 内层可能是 JSON（对象/数组），也可能是 markdown 等纯文本
+                            serde_json::from_str::<serde_json::Value>(s)
+                                .unwrap_or_else(|_| serde_json::Value::String(s.clone()))
+                        },
+                        Some(other) => other.clone(),
+                        None => payload.clone(),
+                    };
+                    Some((node_id, value))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // 只对「**节点不存在**」告警；节点存在但取数为空（如该股无大宗交易记录、无机构调研）
+    // 是正常业务态，不是缺陷 —— 两者必须区分，否则告警会被噪声淹没。
+    const REPORT_REQUIRED_NODES: [&str; 3] =
+        ["t-lockup-data", "t-institutional-visits", "t-index-quotes"];
+    let missing_nodes: Vec<&str> =
+        REPORT_REQUIRED_NODES.iter().copied().filter(|k| !bb_raw_nodes.contains_key(*k)).collect();
+    if !missing_nodes.is_empty() {
+        tracing::warn!(
+            stock_code = %record.stock_code,
+            missing = ?missing_nodes,
+            note = "模板版本早于 v37 时后两个节点必然缺失；重跑一次分析即升版落库",
+            "[stock-report] raw.combined 缺少以下 ToolNode，导出报告对应板块为空"
+        );
+    }
+
+    // 大宗交易：从 `t-lockup-data` 的 `block_trades` 子字段取出（该节点是聚合输出）
+    let block_trades_json = bb_raw_nodes
+        .get("t-lockup-data")
+        .and_then(|v| v.get("block_trades"))
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "[]".to_string());
+    // 机构调研 / 大盘指数：节点载荷本身即数组
+    let institutional_visits_json = bb_raw_nodes
+        .get("t-institutional-visits")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "[]".to_string());
+    let index_quotes_json = bb_raw_nodes
+        .get("t-index-quotes")
+        .map(|v| v.to_string())
+        .unwrap_or_else(|| "[]".to_string());
 
     let html = axagent_analysis_engine::report::generate_html_report(
         &record.stock_code,
@@ -2327,14 +2510,12 @@ pub async fn generate_stock_report(
         &score_json,
         &analyst_reports,
         &decision_json,
-        "",
-        "",
+        &quality_summary,
+        &rule_check_result,
         &value_assessment_json,
-        &bb_str("raw.block_trades"),
-        &bb_str("raw.institutional_visits"),
-        &bb_str("market.index_quotes"),
-        &bb_str("raw.peers"),
-        &bb_str("raw.option_pcr"),
+        &block_trades_json,
+        &institutional_visits_json,
+        &index_quotes_json,
     );
 
     std::fs::write(&filepath, &html).map_err(|e| {
@@ -3014,8 +3195,12 @@ pub async fn get_portfolio_dashboard(
     let mut dashboard = portfolio_monitor::get_dashboard(state.harness.db(), as_of).await?;
     // 当天实时数据叠加：当前持仓/总市值（历史快照保留）
     if as_of.is_none() {
-        let engine = state.trading_engine.read().await;
-        let positions = engine.get_positions().await?;
+        // 作用域收紧：下文的 `estimate_betas` 会发 N+1 次网络取数，**绝不能握着
+        // `trading_engine` 的读锁做**（读锁跨 await 虽非 UB，但会把写入方阻塞数秒）。
+        let positions = {
+            let engine = state.trading_engine.read().await;
+            engine.get_positions().await?
+        };
         let (top, _sector, max_sec) = portfolio_monitor::compute_concentration(&positions);
         let n = positions.len();
         dashboard.top_concentration_pct = top;
@@ -3035,9 +3220,17 @@ pub async fn get_portfolio_dashboard(
         dashboard.concentration_warning =
             portfolio_monitor::compute_concentration_warning(top, max_sec, n);
         dashboard.sector_exposure = portfolio_monitor::compute_concentration(&positions).1;
-        // 实时 stress test
+        // 实时 stress test：β 取各股对沪深300的**真实历史回归**（`estimate_betas`），
+        // 不可得时回退中性 1.0 并在 `betaProvenance` 里记账 —— 不再按 `sector_name`
+        // 查固定 beta 表（那张表实测口径落空、基本没生效，见 analysis-engine 内注释）。
+        let betas = portfolio_monitor::estimate_betas(
+            &*state.astock_client,
+            &positions,
+            portfolio_monitor::BETA_LOOKBACK_DAYS,
+        )
+        .await;
         dashboard.stress_test =
-            portfolio_monitor::run_all_scenarios(&positions, &dashboard.sector_exposure);
+            portfolio_monitor::run_all_scenarios(&positions, &dashboard.sector_exposure, &betas);
         dashboard.snapshot_at = chrono::Utc::now().timestamp_millis();
     }
     Ok(dashboard)
@@ -3055,10 +3248,21 @@ pub async fn refresh_portfolio_metrics(
     drop(engine);
     let as_of = as_of_date.as_deref();
 
+    // β 必须与实时面板（`get_portfolio_dashboard`）**同源同口径**：否则落库快照恒用
+    // 回退 1.0，而面板用真实历史 beta ⇒ 按 `as_of_date` 做时间旅行对比时，
+    // 等于在比两套不同的方法。
+    let betas = portfolio_monitor::estimate_betas(
+        &*state.astock_client,
+        &positions,
+        portfolio_monitor::BETA_LOOKBACK_DAYS,
+    )
+    .await;
+
     let (id, count) = portfolio_monitor::refresh_metrics(
         state.harness.db(),
         &positions,
         &PositionLimits::default(),
+        &betas,
         None,
         None,
         None,
@@ -3099,11 +3303,20 @@ pub async fn get_portfolio_correlations(
 pub async fn run_portfolio_stress_test(
     state: State<'_, AppState>,
 ) -> Result<StressTestBundle, String> {
-    let engine = state.trading_engine.read().await;
-    let positions = engine.get_positions().await?;
+    // 先取持仓并**释放读锁**，再做 N+1 次网络取数（不持锁跨 await）
+    let positions = {
+        let engine = state.trading_engine.read().await;
+        engine.get_positions().await?
+    };
     let (top, sector, _max) = portfolio_monitor::compute_concentration(&positions);
     let _ = top;
-    Ok(portfolio_monitor::run_all_scenarios(&positions, &sector))
+    let betas = portfolio_monitor::estimate_betas(
+        &*state.astock_client,
+        &positions,
+        portfolio_monitor::BETA_LOOKBACK_DAYS,
+    )
+    .await;
+    Ok(portfolio_monitor::run_all_scenarios(&positions, &sector, &betas))
 }
 
 /// 校验能否新开仓（position_limits）
@@ -3148,77 +3361,6 @@ pub async fn check_position_limits(
             "newPositionValue": new_position_value,
         })),
     }
-}
-
-// ── Value Investing ──
-
-/// 获取巴菲特式价值投资评估
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取价值投资评估")]
-#[tauri::command]
-pub async fn get_value_assessment(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<axagent_analysis_engine::value::ValueAssessment, String> {
-    let client = &state.astock_client;
-    let quote = client.get_quote(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取实时行情失败: {e}"))
-    })?;
-    let financials = client.get_financials(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取财务数据失败: {e}"))
-    })?;
-    let shares = quote.total_mv.and_then(|mv| {
-        if quote.price > 0.0 {
-            Some(mv / quote.price / 1_0000_0000.0)
-        } else {
-            None
-        }
-    });
-    let value_config = load_value_config(state.harness.db()).await;
-    Ok(match shares {
-        Some(s) if s > 0.0 => axagent_analysis_engine::value::ValueEngine::assess(
-            quote.price,
-            &financials,
-            s,
-            Some(&value_config),
-        ),
-        _ => axagent_analysis_engine::value::ValueEngine::assess_no_shares(
-            quote.price,
-            &financials,
-            Some(&value_config),
-        ),
-    })
-}
-
-/// 计算巴菲特式价值投资综合指标（DCF + F-Score + 护城河量化 + 安全边际 + 所有者收益）
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "计算价值投资综合指标")]
-#[tauri::command]
-pub async fn compute_value_metrics(
-    state: State<'_, AppState>,
-    stock_code: String,
-) -> Result<axagent_analysis_engine::value_investing::ValueMetrics, String> {
-    let quote = state.astock_client.get_quote(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取实时行情失败: {e}"))
-    })?;
-    let financials = state.astock_client.get_financials(&stock_code).await.map_err(|e| {
-        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取财务数据失败: {e}"))
-    })?;
-    let total_shares = quote.total_mv.and_then(|mv| {
-        if quote.price > 0.0 {
-            Some(mv / quote.price / 1_0000_0000.0)
-        } else {
-            None
-        }
-    });
-    let value_config = load_value_config(state.harness.db()).await;
-    Ok(axagent_analysis_engine::value_investing::ValueInvestingEngine::compute(
-        &stock_code,
-        quote.price,
-        total_shares,
-        &financials,
-        quote.pe,
-        quote.pb,
-        Some(&value_config),
-    ))
 }
 
 // ── Position Limits ──
@@ -3312,7 +3454,6 @@ pub async fn compute_valuation_band(
     years: Option<u32>,
 ) -> Result<axagent_astock_data::ValuationBand, String> {
     use axagent_astock_data::valuation_band::FinancialSnapshotLike;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
     let years = years.unwrap_or(5);
     let since_date = chrono::Local::now()
@@ -3322,17 +3463,41 @@ pub async fn compute_valuation_band(
         .unwrap_or_else(|| "0000-00-00".to_string());
 
     let db = state.harness.db();
-    let stock_code_c = stock_code.clone();
-    let since_date_c = since_date.clone();
-    let historical: Vec<financial_snapshots::Model> = financial_snapshots::Entity::find()
-        .filter(financial_snapshots::Column::StockCode.eq(stock_code_c.clone()))
-        .filter(financial_snapshots::Column::SnapshotDate.gte(since_date_c.clone()))
-        .order_by_asc(financial_snapshots::Column::SnapshotDate)
-        .all(db)
+
+    // 估值带的数据源是本机 financial_snapshots 表，但该表此前只有"建表迁移 + 两个读命令"
+    // ——全项目没有任何写入路径，样本恒为 0，图表永远空白（verdict=insufficient）。
+    // 故本地样本不足时先从数据源回填历史估值日序列，再重查一次。
+    let mut historical = load_financial_snapshots(db, &stock_code, &since_date).await?;
+    // 陈旧判定：本地最新快照早于 3 天前（覆盖周末）即重拉。
+    // 因为 current 取自窗口内最新快照，数据陈旧会让"当前分位"长期停在旧值。
+    // 不采用"每交易日都重拉"：一次回填是 ~1200 行 DELETE+INSERT，日频刷新得不偿失。
+    let stale_before = chrono::Local::now()
+        .date_naive()
+        .checked_sub_signed(chrono::Duration::days(3))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| since_date.clone());
+    let stale =
+        historical.last().map(|m| m.snapshot_date.as_str() < stale_before.as_str()).unwrap_or(true);
+    if historical.len() < VALUATION_MIN_SAMPLES || stale {
+        match backfill_financial_snapshots(
+            db,
+            &state.astock_client,
+            &stock_code,
+            years,
+            &since_date,
+        )
         .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询财务快照失败: {e}"))
-        })?;
+        {
+            Ok(0) => {},
+            Ok(n) => {
+                tracing::info!("[valuation_band] {stock_code} 回填 {n} 条历史估值快照");
+                historical = load_financial_snapshots(db, &stock_code, &since_date).await?;
+            },
+            // 回填失败不阻断：仍返回现有样本（可能为空 → verdict=insufficient），
+            // 前端显示"历史样本不足"比整页报错更可用。
+            Err(e) => tracing::warn!("[valuation_band] {stock_code} 历史估值回填失败: {e}"),
+        }
+    }
 
     // 把 ORM Model 转换为本地 struct 实现 trait
     struct SnapAdapter {
@@ -3360,12 +3525,103 @@ pub async fn compute_valuation_band(
         .map(|m| SnapAdapter { date: m.snapshot_date, pe: m.pe_ttm, pb: m.pb, ps: m.ps_ttm })
         .collect();
 
+    // current 取窗口内最新一条快照 —— 图表据此画"当前值"红点并展示当前分位。
+    // 原实现传 None，导致前端 ValuationBandChart 的 markPoint 与分位文字两处永不显示。
     let band = axagent_astock_data::valuation_band::compute_valuation_band(
         &stock_code,
         &samples,
-        None, // 不传 current,让 UI 调用方自行叠加最新值
+        samples.last(),
     );
     Ok(band)
+}
+
+/// 估值带最小样本数：与 astock-data `compute_valuation_band` 的 verdict 阈值保持一致
+/// （低于此值时 verdict = "insufficient"）。
+const VALUATION_MIN_SAMPLES: usize = 20;
+
+/// 读取指定股票在 `[since_date, +∞)` 内的估值快照（按交易日升序）。
+async fn load_financial_snapshots(
+    db: &impl sea_orm::ConnectionTrait,
+    stock_code: &str,
+    since_date: &str,
+) -> Result<Vec<financial_snapshots::Model>, String> {
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    financial_snapshots::Entity::find()
+        .filter(financial_snapshots::Column::StockCode.eq(stock_code.to_string()))
+        .filter(financial_snapshots::Column::SnapshotDate.gte(since_date.to_string()))
+        .order_by_asc(financial_snapshots::Column::SnapshotDate)
+        .all(db)
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("查询财务快照失败: {e}"))
+                .to_string()
+        })
+}
+
+/// 从数据源回填历史估值日序列到本机 `financial_snapshots` 表，返回实际写入行数。
+///
+/// 写入策略：**先删窗口内旧行，再逐条插入**。该表主键是随机 UUID（非业务键），
+/// 重复插入只会累积重复行，使同一交易日被多次计入分位。
+/// 逐条插入而非 `insert_many`：单次回填约 1200 行，本地库开销可接受，
+/// 且规避批量插入的参数上限/分块问题。
+async fn backfill_financial_snapshots(
+    db: &impl sea_orm::ConnectionTrait,
+    client: &axagent_astock_data::AStockClient,
+    stock_code: &str,
+    years: u32,
+    since_date: &str,
+) -> Result<usize, String> {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+
+    let snaps = client
+        .get_valuation_history(stock_code, years)
+        .await
+        .map_err(|e| format!("获取历史估值序列失败: {e}"))?;
+    // 接口返回全量历史（降序），这里按窗口裁剪；YYYY-MM-DD 格式可直接字符串比较
+    let rows: Vec<_> = snaps
+        .into_iter()
+        .filter(|s| !s.trade_date.is_empty() && s.trade_date.as_str() >= since_date)
+        .collect();
+    if rows.is_empty() {
+        return Ok(0);
+    }
+
+    financial_snapshots::Entity::delete_many()
+        .filter(financial_snapshots::Column::StockCode.eq(stock_code.to_string()))
+        .filter(financial_snapshots::Column::SnapshotDate.gte(since_date.to_string()))
+        .exec(db)
+        .await
+        .map_err(|e| format!("清除旧估值快照失败: {e}"))?;
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut written = 0usize;
+    for r in &rows {
+        let am = financial_snapshots::ActiveModel {
+            id: Set(uuid::Uuid::new_v4().to_string()),
+            stock_code: Set(stock_code.to_string()),
+            snapshot_date: Set(r.trade_date.clone()),
+            pe_ttm: Set(r.pe_ttm),
+            pb: Set(r.pb),
+            ps_ttm: Set(r.ps_ttm),
+            pcf: Set(r.pcf),
+            ev_ebitda: Set(None),
+            roe: Set(None),
+            gross_margin: Set(None),
+            debt_ratio: Set(None),
+            revenue_yoy: Set(None),
+            profit_yoy: Set(None),
+            source: Set(Some("eastmoney:RPT_VALUEANALYSIS_DET".to_string())),
+            created_at: Set(now_ms),
+        };
+        match am.insert(db).await {
+            Ok(_) => written += 1,
+            Err(e) => {
+                tracing::warn!("[valuation_band] 写入快照失败({stock_code} {}): {e}", r.trade_date)
+            },
+        }
+    }
+    Ok(written)
 }
 
 /// 列估值快照原始行(R3-C 辅助):返回 financial_snapshots 表中某只股票在区间内的全部快照。
@@ -3617,82 +3873,6 @@ pub async fn toggle_stock_cron(
 #[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除股票定时任务")]
 #[tauri::command]
 pub async fn delete_stock_cron(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.cron_job_store.remove(&id).await;
-    Ok(())
-}
-
-// ── P1-1: 持仓定时扫描 ──
-
-/// 创建持仓自动扫描定时任务
-///
-/// 定时扫描所有持仓股，自动执行完整分析并携带持仓上下文。
-/// task_type = "portfolio-scan"
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "创建持仓扫描定时任务")]
-#[tauri::command]
-pub async fn create_portfolio_scan_cron(
-    state: State<'_, AppState>,
-    cron_expression: String,
-    enabled: Option<bool>,
-) -> Result<CronJobResponse, String> {
-    let id =
-        format!("pfscan-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
-    let mut job = CronJob::new(
-        &id,
-        &cron_expression,
-        "持仓自动扫描",
-        "定时扫描持仓列表，对每只持仓股执行完整分析，关联持仓上下文",
-    )
-    .with_task_type("portfolio-scan");
-    if !enabled.unwrap_or(true) {
-        job.status = CronJobStatus::Paused;
-    }
-    state.cron_job_store.add(job.clone()).await;
-    Ok(CronJobResponse::from(&job))
-}
-
-/// 列出所有持仓扫描定时任务
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出持仓扫描定时任务")]
-#[tauri::command]
-pub async fn list_portfolio_scan_crons(
-    state: State<'_, AppState>,
-) -> Result<Vec<CronJobResponse>, String> {
-    let jobs = state.cron_job_store.list().await;
-    Ok(jobs
-        .iter()
-        .filter(|j| j.task_type.as_deref() == Some("portfolio-scan"))
-        .map(CronJobResponse::from)
-        .collect())
-}
-
-/// 启停持仓扫描定时任务
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description = "开关持仓扫描定时任务")]
-#[tauri::command]
-pub async fn toggle_portfolio_scan_cron(
-    state: State<'_, AppState>,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
-    state
-        .cron_job_store
-        .set_status(
-            &id,
-            if enabled {
-                CronJobStatus::Active
-            } else {
-                CronJobStatus::Paused
-            },
-        )
-        .await;
-    Ok(())
-}
-
-/// 删除持仓扫描定时任务
-#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "删除持仓扫描定时任务")]
-#[tauri::command]
-pub async fn delete_portfolio_scan_cron(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<(), String> {
     state.cron_job_store.remove(&id).await;
     Ok(())
 }
@@ -4076,6 +4256,67 @@ pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String,
     Ok(format!("快照采集完成: 全市场 {} 项, 个股 {} 条", market_count, stock_count))
 }
 
+/// 把一次荐股扫描的 picks 持久化到 `reco_picks`。返回成功写入行数。
+///
+/// **为什么必须是 pub 共享函数**：此前落库代码只写在 Tauri 命令 `recommend_stocks`
+/// 里（即「只有前端点刷新才落库」），而定时任务走 `run_recommendation_scan`
+/// 拿到的 pick 从不落库 ⇒ 定时荐股虽有通知，却**永远不写候选池**，
+/// 下游「候选池→逐只分析→反思」整条链因此断在入口（见
+/// `AUDIT-scheduled-tasks-2026-09-13.md` 诉求①）。
+///
+/// 现在命令层（`recommend_stocks`）与定时层（cron executor 的
+/// `stock-recommendation` / `pool-scan` 分支）共用本函数，保证两条入口写的是
+/// 同一张表、同一套字段。
+///
+/// - `seed_pool_json`：本次扫描实际使用的候选池快照（回测负向样本的来源）
+/// - `strategy_weights_json`：策略权重快照（回溯某次荐股时的权重配置）
+/// - `generated_at`：本次扫描的批次标识（同批次所有行共用一个值，供
+///   `get_cached_recommendation` 按 `generated_at` 取回整批）
+pub async fn persist_reco_picks(
+    db: &sea_orm::DatabaseConnection,
+    picks: &[RecoPick],
+    seed_pool_json: Option<String>,
+    strategy_weights_json: Option<String>,
+    generated_at: &str,
+) -> usize {
+    use sea_orm::ActiveModelTrait;
+    let mut written = 0usize;
+    for pick in picks {
+        // 序列化完整 pick 到 pick_data —— get_cached_recommendation 会读这一列
+        // 还原 cache，与实时拉取结果 schema 完全等价。
+        let pick_data = serde_json::to_string(pick).ok();
+        let am = reco_picks::ActiveModel {
+            id: sea_orm::Set(uuid::Uuid::new_v4().to_string()),
+            generated_at: sea_orm::Set(generated_at.to_string()),
+            period: sea_orm::Set(pick.period.as_str().to_string()),
+            stock_code: sea_orm::Set(pick.stock_code.clone()),
+            stock_name: sea_orm::Set(pick.stock_name.clone()),
+            style: sea_orm::Set(pick.style.as_str().to_string()),
+            confidence: sea_orm::Set(pick.confidence as i32),
+            synthetic: sea_orm::Set(if pick.synthetic { 1 } else { 0 }),
+            seed_pool_json: sea_orm::Set(seed_pool_json.clone()),
+            strategy_weights_json: sea_orm::Set(strategy_weights_json.clone()),
+            pick_data: sea_orm::Set(pick_data),
+            created_at: sea_orm::Set(generated_at.to_string()),
+        };
+        // 插入失败不静默：此前 `let _ = insert(...)` 失败无感知，
+        // 前端表现为"无缓存"，定时链路表现为"候选池为空"。
+        match am.insert(db).await {
+            Ok(_) => written += 1,
+            Err(e) => {
+                tracing::warn!(
+                    "[persist_reco_picks] 写入 reco_picks 失败 ({} {} {}): {}",
+                    pick.period.as_str(),
+                    pick.stock_code,
+                    pick.style.as_str(),
+                    e
+                );
+            },
+        }
+    }
+    written
+}
+
 /// 拉取智能荐股结果（按周期）
 ///
 /// 前端传 period 序列化为 [Period] 枚举（"short" | "mid" | "long"）
@@ -4120,7 +4361,6 @@ pub async fn recommend_stocks(
     // ── 持久化荐股结果（仅 live 模式） ──
     if as_of_date.is_none() {
         let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-        let created_at = generated_at.clone();
 
         // 构建策略权重快照（用于回溯某次荐股时的权重配置）
         let strategy_weights_json: Option<String> = {
@@ -4142,39 +4382,22 @@ pub async fn recommend_stocks(
         let seed_pool_json =
             response.seed_pool_snapshot.clone().unwrap_or_else(|| "[]".to_string());
 
-        for picks in response.picks.values() {
-            for pick in picks {
-                use sea_orm::ActiveModelTrait;
-                // 序列化完整 pick 到 pick_data —— get_cached_recommendation 会
-                // 读这一列还原 cache,与实时拉取结果 schema 完全等价。
-                let pick_data = serde_json::to_string(pick).ok();
-                let am = reco_picks::ActiveModel {
-                    id: sea_orm::Set(uuid::Uuid::new_v4().to_string()),
-                    generated_at: sea_orm::Set(generated_at.clone()),
-                    period: sea_orm::Set(pick.period.as_str().to_string()),
-                    stock_code: sea_orm::Set(pick.stock_code.clone()),
-                    stock_name: sea_orm::Set(pick.stock_name.clone()),
-                    style: sea_orm::Set(pick.style.as_str().to_string()),
-                    confidence: sea_orm::Set(pick.confidence as i32),
-                    synthetic: sea_orm::Set(if pick.synthetic { 1 } else { 0 }),
-                    seed_pool_json: sea_orm::Set(Some(seed_pool_json.clone())),
-                    strategy_weights_json: sea_orm::Set(strategy_weights_json.clone()),
-                    pick_data: sea_orm::Set(pick_data),
-                    created_at: sea_orm::Set(created_at.clone()),
-                };
-                // P2 修复(2026-08-01): 插入失败不再静默吞错，记 warn 日志便于排查
-                // （此前 `let _ = insert(...)` 失败无感知，前端表现为"无缓存"）
-                if let Err(e) = am.insert(state.harness.db()).await {
-                    tracing::warn!(
-                        "[recommend_stocks] 写入 reco_picks 失败 ({} {} {}): {}",
-                        pick.period.as_str(),
-                        pick.stock_code,
-                        pick.style.as_str(),
-                        e
-                    );
-                }
-            }
-        }
+        // 展平 picks（BTreeMap<Style, Vec<RecoPick>>）后交共享落库函数，
+        // 保证与定时任务链路写的是同一张表、同一套字段。
+        let flat: Vec<RecoPick> = response.picks.values().flat_map(|v| v.iter().cloned()).collect();
+        let written = persist_reco_picks(
+            state.harness.db(),
+            &flat,
+            Some(seed_pool_json),
+            strategy_weights_json,
+            &generated_at,
+        )
+        .await;
+        tracing::info!(
+            "[recommend_stocks] 落库 reco_picks: {written}/{} 行 (period={})",
+            flat.len(),
+            period.as_str()
+        );
     }
 
     Ok(response)
@@ -4317,7 +4540,13 @@ pub fn invalidate_recommendation_cache() {
 pub struct LatestAnalysisSummary {
     pub analysis_id: String,
     pub analysis_date: String,
-    pub decision_action: String, // BUY / HOLD / SELL / uncertain
+    /// 决策动作。值域权威定义见 `analysis_engine::decision_action`；
+    /// 记录缺失时为显式哨兵 `UNAVAILABLE`（**不是** `uncertain`，也不是空串）。
+    pub decision_action: String,
+    /// 决策持仓状态轴（v228，EMPTY/OPENING/HOLDING/TRIMMING）。
+    /// `None` = 记录早于 v228（采集时点无此信息），**不是** EMPTY；
+    /// 消费端应按 `decision_position_pct` 派生展示。
+    pub decision_position_state: Option<String>,
     pub decision_position_pct: Option<f64>,
     pub confidence: Option<i32>, // 加权置信度 0-100，从 decision_json 提取
     pub status: String,          // completed / running / failed
@@ -4373,7 +4602,12 @@ pub async fn get_latest_analysis_for_stock(
     Ok(Some(LatestAnalysisSummary {
         analysis_id: model.id,
         analysis_date: model.analysis_date,
-        decision_action: model.decision_action.unwrap_or_else(|| "uncertain".into()),
+        // P0-5: 与 extract_evidence_citations 共用同一哨兵（原先此处是硬编码 "uncertain"，
+        // 与另一处的空串构成「同一缺失两种语义」）。
+        decision_action: model.decision_action.filter(|s| !s.trim().is_empty()).unwrap_or_else(
+            || axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string(),
+        ),
+        decision_position_state: model.decision_position_state,
         decision_position_pct: model.decision_position_pct,
         confidence,
         status: model.status,
@@ -4431,7 +4665,16 @@ pub async fn get_latest_analyses_for_stocks(
             LatestAnalysisSummary {
                 analysis_id: model.id,
                 analysis_date: model.analysis_date,
-                decision_action: model.decision_action.unwrap_or_else(|| "uncertain".into()),
+                // P0-5 遗漏修复(2026-09-14): 此处原为硬编码 "uncertain"，与单数版
+                // （ACTION_UNAVAILABLE）构成「同一缺失两种语义」；且 "uncertain" 本身
+                // 是「有数据但判不了」的语义，用它表达「无记录」是语义挪用。
+                decision_action: model
+                    .decision_action
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| {
+                        axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string()
+                    }),
+                decision_position_state: model.decision_position_state,
                 decision_position_pct: model.decision_position_pct,
                 confidence,
                 status: model.status,
@@ -4448,7 +4691,11 @@ pub async fn get_latest_analyses_for_stocks(
 }
 
 /// 从 workflow_template 实体提取 (name, value) 列表
-fn extract_template_vars(
+///
+/// `pub(crate)`：`init/services.rs` 的荐股 cron handler 需要同一份解析逻辑
+/// （荐股扫描的开关与各策略阈值全部来自模板变量，不读它就会退回硬编码默认值）。
+/// 这里保持单一实现，禁止在调用侧再写一份。
+pub(crate) fn extract_template_vars(
     t: &axagent_entities::workflow_template::Model,
 ) -> Vec<(String, serde_json::Value)> {
     use axagent_harness::workflow_types::Variable;
@@ -4540,13 +4787,18 @@ pub async fn delete_watchlist_scan_cron(
 
 /// 创建决策校验+反思复盘定时任务
 ///
-/// 每天扫描 30 天前的分析结果，判定 win/loss。
-/// loss 自动触发 `run_reflection_workflow`（嵌套原股票分析工作流的 as-of 重放 + hindsight 注入）。
+/// [2026-09-13 语义修正] 该任务**不再**自己扫描 30 天前的分析做 win/loss 判定，
+/// 而是消费「分析落盘时写入的 `stock_reflections` pending 队列」（两阶段协议）：
+/// 按 `min_confidence` 筛掉低置信度的 pending，再逐条跑 `run_reflection_workflow`
+/// （嵌套原工作流的 as-of 重放 + hindsight 注入）。
+/// 到期与否由 pending row 自身的 `hindsight_date` 决定
+/// （= 分析日 + 期望持有期，缺失兜底 28 天），不是固定的 30 天。
 ///
 /// 参数：
 /// - `cron_expression`: cron 表达式，默认 "0 6 * * *"
-/// - `min_confidence_threshold`: 触发反思的最低置信度（0=全部触发）
-/// - `reflection_depth`: "light"(简要) 或 "deep"(详细推理链)
+/// - `min_confidence_threshold`: 只反思 `stock_reflections.min_confidence_threshold >= 此值` 的 pending
+///   （0 = 全部；pending row 由分析链路写入，默认 70）
+/// - `reflection_depth`: "light"(简要) 或 "deep"(详细推理链)，覆盖 pending row 自带的深度
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建决策校验定时任务")]
 #[tauri::command]
 pub async fn create_validate_decisions_cron(
@@ -4560,12 +4812,18 @@ pub async fn create_validate_decisions_cron(
     let expr = cron_expression.unwrap_or_else(|| "0 6 * * *".to_string());
     let threshold = min_confidence_threshold.unwrap_or(0);
     let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
-    let desc = format!(
-        "扫描30天前的分析结果判定win/loss，loss自动触发反思工作流（阈值:{}, 深度:{})",
-        threshold, depth
-    );
-    let mut job =
-        CronJob::new(&id, &expr, "决策校验 + 反思复盘", &desc).with_task_type("validate-decisions");
+    let desc = format!("反思复盘：按待办队列逐条复盘（最低置信度:{}, 深度:{}）", threshold, depth);
+    // [2026-09-13] 配置必须序列化进 `prompt`。
+    // executor 的 `validate-decisions` 分支从 `prompt` 反序列化
+    // `ValidateDecisionsConfig`；此前 prompt 写的是「决策校验 + 反思复盘」这句中文，
+    // 反序列化必然失败 ⇒ 即便补上分支，任务到点也会立刻报配置解析失败。
+    let config = crate::commands::stock_workflow::ValidateDecisionsConfig {
+        min_confidence: threshold,
+        reflection_depth: Some(depth.clone()),
+        max_count: None,
+    };
+    let prompt = config.to_json()?;
+    let mut job = CronJob::new(&id, &expr, &prompt, &desc).with_task_type("validate-decisions");
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
@@ -4622,25 +4880,46 @@ pub async fn delete_validate_decisions_cron(
 
 /// 创建批量反思定时任务（D1 借鉴：定期 resolve pending reflections）
 ///
-/// 收市后 18:00 执行: `0 18 * * *`
-/// 每个 pending row 到达持仓期后自动 resolve，无需手动触发。
+/// [2026-09-13] 支持 **4 周期间隔分档**：传 `period` 即只处理该档位的 pending，
+/// 各档的持有期天数来自权威映射 `Period::default_holding_days()`：
+/// 超短线 2 天 / 短线 5 天 / 中线 28 天 / 长线 90 天。
+/// 配合各自的 cron 表达式，即「以超短/短/中/长为时间间隔自动反思」。
+///
+/// - `cron_expression`: 默认 "0 18 * * *"（收市后）
+/// - `period`: `ultra_short` | `short` | `mid` | `long`；None = 不限档位（处理全部）
+/// - `due_only`: true 时只在计划评估时点（hindsight_date）已到时反思
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建批量反思定时任务")]
 #[tauri::command]
 pub async fn create_batch_reflection_cron(
     state: State<'_, AppState>,
     cron_expression: Option<String>,
+    period: Option<axagent_analysis_engine::recommender::Period>,
+    due_only: Option<bool>,
+    max_count: Option<u32>,
     enabled: Option<bool>,
 ) -> Result<CronJobResponse, String> {
     let id =
         format!("batchref-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
     let expr = cron_expression.unwrap_or_else(|| "0 18 * * *".to_string());
-    let mut job = CronJob::new(
-        &id,
-        &expr,
-        "批量反思复盘",
-        "扫描所有 pending reflection row，到达持仓期的自动 resolve",
-    )
-    .with_task_type("batch-reflection");
+    // 配置序列化进 prompt（executor 从 prompt 反序列化 BatchReflectionConfig）
+    let config = crate::commands::stock_workflow::BatchReflectionConfig {
+        period,
+        due_only: due_only.unwrap_or(false),
+        max_count,
+    };
+    let prompt = config.to_json()?;
+    let period_label = config.period.map(|p| p.as_str()).unwrap_or("全部周期");
+    let desc = format!(
+        "批量反思复盘（档位 {}，{}，最多 {} 条）",
+        period_label,
+        if config.due_only {
+            "到期才反思"
+        } else {
+            "未到期做期中观察"
+        },
+        config.max_count.unwrap_or(20)
+    );
+    let mut job = CronJob::new(&id, &expr, &prompt, &desc).with_task_type("batch-reflection");
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
@@ -4762,6 +5041,20 @@ pub async fn delete_reflection(
 }
 
 /// 手动触发反思复盘工作流（在前端复盘 tab 点击"开始反思"时调用）
+///
+/// # 实际行情自动对比（2026-09-13 改造）
+///
+/// 原实现要求调用方传入 `actual_outcome`（前端表单让用户手填「如 30天跌8% → 失败」），
+/// 本质是让用户**代替行情接口编数据**；同时 `raw_return_pct` / `alpha_return_pct`
+/// 长期传 `None`，导致 `reflection-comparator.rhai` 里 `actual_direction` 恒为
+/// 「横盘」、`direction_match` 恒为 `false` —— 反思 agent 是在对着假数据写结论。
+///
+/// 现在改为：后端按「分析日 → 最新交易日」自动拉取前复权 K 线，确定性算出入场基准价、
+/// 最新价、涨跌幅、区间高低、最大回撤、相对沪深300 超额收益，构造 `MarketSnapshot`
+/// 注入工作流（供 comparator 与反思 agent 共同消费）。
+///
+/// `actual_outcome` 因此降级为**可选人工覆盖**：仅用于停牌、重组等行情无法反映的
+/// 特殊情形；留空 / 不传时完全由自动行情生成。
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "手动触发反思复盘")]
 #[tauri::command]
 pub async fn run_reflection_now(
@@ -4769,7 +5062,8 @@ pub async fn run_reflection_now(
     stock_code: String,
     stock_name: String,
     as_of_date: String,
-    actual_outcome: String,
+    // [实际行情] 可选人工覆盖；留空 ⇒ 后端自动拉取真实行情生成
+    actual_outcome: Option<String>,
     reflection_depth: Option<String>,
 ) -> Result<String, String> {
     let db = state.harness.db();
@@ -4799,6 +5093,51 @@ pub async fn run_reflection_now(
         stock_name.clone()
     };
 
+    // ── [实际行情] 自动拉取「分析日 → 最新交易日」真实行情 ──
+    // 无行情 ⇒ 直接失败并告知用户（不允许"凭空反思"，更不伪造 0% 收益）。
+    let snapshot = match crate::commands::stock_workflow::compute_market_snapshot(
+        client,
+        &stock_code,
+        &as_of_date,
+        None, // 手动触发无原始决策记录 ⇒ 不校验期望持有期
+        None, // 无原始分析 ⇒ 无目标价可对比
+    )
+    .await
+    {
+        Ok(s) if s.trading_days >= 1 => s,
+        Ok(s) => {
+            return Err(ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!(
+                    "{stock_code} 在 {as_of_date} 之后仅 {} 个交易日的新行情，\
+                     不足以构成「分析结论 vs 实际行情」对比",
+                    s.trading_days
+                ))
+                .to_string());
+        },
+        Err(e) => {
+            return Err(ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("{stock_code} 实际行情获取失败，无法反思: {e}"))
+                .to_string());
+        },
+    };
+    tracing::info!(
+        "[run_reflection_now] {} 行情快照: {} → {} 涨跌 {:+.2}%（净 {:+.2}%）回撤 {:.2}%",
+        stock_code,
+        snapshot.entry_date,
+        snapshot.latest_date,
+        snapshot.price_change_pct,
+        snapshot.net_return_pct,
+        snapshot.max_drawdown_pct
+    );
+
+    // 人工覆盖优先（停牌/重组等行情无法反映的情形），否则用行情事实描述
+    let outcome_text = actual_outcome
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| snapshot.render_outcome_short());
+
     crate::commands::stock_workflow::run_reflection_workflow(
         db,
         client,
@@ -4808,13 +5147,12 @@ pub async fn run_reflection_now(
         &stock_code,
         &resolved_name,
         "", // original_analysis_id — 手动触发时无原始决策,run_reflection_workflow 已处理跳过
-        &actual_outcome,
-        // v008 (C3 借鉴): 4 个结构化 outcome 变量
-        // 手动反思场景: 用户没传 raw/alpha,留 None 走 fallback 显示 "n/a"
-        None,
-        None,
-        None,
-        None,
+        &outcome_text,
+        // [实际行情] 三个结构化 outcome 变量改由行情快照供给（原固定 None）
+        Some(snapshot.net_return_pct),
+        snapshot.alpha_pct,
+        Some(snapshot.trading_days as i32),
+        snapshot.benchmark_code.as_deref().map(|_| "沪深300"),
         &as_of_date,
         &today,
         0u8, // min_confidence_threshold — 手动触发时全量
@@ -4823,6 +5161,8 @@ pub async fn run_reflection_now(
         None,
         // [方向3] 手动反思也持久化 trajectory，为 ExperiencePipeline 提供数据源
         Some(&state.trajectory_storage),
+        // [实际行情] 价格层事实（入场价/最新价/回撤/目标价实现度）
+        Some(&snapshot),
     )
     .await
 }
@@ -4871,13 +5211,95 @@ pub async fn list_param_suggestions(
     Ok(result)
 }
 
+/// 参数名别名映射：反思/演进侧的输出名 → 模板变量名。
+///
+/// 背景（2026-09-11）：反思与 WFO 校准输出的参数名来自
+/// `analysis_engine::portfolio_formula::PortfolioMgrParamSet`（字段为
+/// `buy_threshold` / `cap_high` 等短名，`EvolutionDriftPanel` 再把 camelCase
+/// 转成 snake_case），而模板变量表与 `portfolio-mgr.rhai` 用的是
+/// `action_buy_threshold` / `pos_cap_high` 全名。两侧命名不一致会让
+/// `apply_param_suggestions` 找不到变量而静默丢弃全部建议 —— 反思优化链路
+/// 在本表落地之前 100% 失效。此处负责把短名归一到全名。
+const PARAM_ALIASES: &[(&str, &str)] = &[
+    // action 决策阈值
+    ("buy_threshold", "action_buy_threshold"),
+    ("increase_threshold", "action_increase_threshold"),
+    ("hold_threshold", "action_hold_threshold"),
+    ("watch_threshold", "action_watch_threshold"),
+    ("reduce_threshold", "action_reduce_threshold"),
+    // 风险仓位上限
+    ("cap_extreme", "pos_cap_extreme"),
+    ("cap_high", "pos_cap_high"),
+    ("cap_mid", "pos_cap_mid"),
+    // risk_ 前缀省略写法（LLM 反思时常漏前缀）
+    ("debt_extreme", "risk_debt_extreme"),
+    ("vol_extreme", "risk_vol_extreme"),
+    ("sharpe_extreme", "risk_sharpe_extreme"),
+    ("vol_high", "risk_vol_high"),
+    ("dd_high", "risk_dd_high"),
+    ("roe_high", "risk_roe_high"),
+    ("debt_high", "risk_debt_high"),
+    ("vol_low", "risk_vol_low"),
+    ("sharpe_low", "risk_sharpe_low"),
+    ("dd_low", "risk_dd_low"),
+    ("roe_low", "risk_roe_low"),
+    ("debt_low", "risk_debt_low"),
+    ("growth_low", "risk_growth_low"),
+    // 仓位阈值
+    ("buy_min", "pos_buy_min"),
+    ("increase_min", "pos_increase_min"),
+    // 市况先验（反思可直接校准先验）
+    ("prior_bull", "regime_prior_bull"),
+    ("prior_sideways", "regime_prior_sideways"),
+    ("prior_bear", "regime_prior_bear"),
+];
+
+/// 把 camelCase / kebab-case / 空格分隔的参数名归一化为 snake_case。
+fn to_snake_case(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for (i, ch) in s.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if i > 0 {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+        } else if ch == '-' || ch == ' ' {
+            out.push('_');
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// 把外部（反思 / WFO 校准）传入的参数名解析为模板变量表中的真实名字。
+///
+/// 解析顺序：① 精确命中变量表 → ② snake_case 归一后命中变量表
+/// → ③ 别名表（先原样、再 snake_case）。全部失败返回 `None`，
+/// 由调用方记录为 skipped 明细而不是静默丢弃。
+fn resolve_param_name(raw: &str, known: &std::collections::HashSet<String>) -> Option<String> {
+    if known.contains(raw) {
+        return Some(raw.to_string());
+    }
+    let snake = to_snake_case(raw);
+    if known.contains(&snake) {
+        return Some(snake);
+    }
+    for (alias, canonical) in PARAM_ALIASES {
+        if raw == *alias || snake == *alias {
+            return Some((*canonical).to_string());
+        }
+    }
+    None
+}
+
 /// 应用用户选中的参数调整建议到 stock-analysis 模板变量
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "应用参数调整建议")]
 #[tauri::command]
 pub async fn apply_param_suggestions(
     state: State<'_, AppState>,
     updates: Vec<serde_json::Value>,
-) -> Result<(), String> {
+) -> Result<serde_json::Value, String> {
     use axagent_entities::workflow_template;
     use sea_orm::sea_query::Expr;
     use sea_orm::{EntityTrait, QueryFilter};
@@ -4898,9 +5320,18 @@ pub async fn apply_param_suggestions(
     let mut vars: Vec<serde_json::Value> =
         tmpl.variables.as_deref().and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default();
 
-    // 2. 逐个更新
+    // 变量表已知名字集合：用于别名解析与「变量不存在」的显式判定
+    let known: std::collections::HashSet<String> = vars
+        .iter()
+        .filter_map(|v| v.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+        .collect();
+
+    // 2. 逐个更新（结果分 applied / skipped 两类，便于前端与反思侧观测）
+    let mut applied: Vec<serde_json::Value> = Vec::new();
+    let mut skipped: Vec<serde_json::Value> = Vec::new();
+
     for update in &updates {
-        let param_name = update
+        let raw_name = update
             .get("param")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ErrorResponse::new(wf_err::INTERNAL).with_detail("缺少 param"))?;
@@ -4908,28 +5339,86 @@ pub async fn apply_param_suggestions(
             .get("value")
             .ok_or_else(|| ErrorResponse::new(wf_err::INTERNAL).with_detail("缺少 value"))?;
 
+        // 名字解析：支持精确名 / snake_case 归一 / 别名表
+        let param_name = match resolve_param_name(raw_name, &known) {
+            Some(n) => n,
+            None => {
+                tracing::warn!(
+                    "[param_suggestions] 参数 {raw_name} 不在模板变量表中（含别名解析后），跳过"
+                );
+                skipped.push(serde_json::json!({
+                    "param": raw_name,
+                    "reason": "unknown_param",
+                }));
+                continue;
+            },
+        };
+
         // 找到匹配的变量并更新 value
-        let mut found = false;
+        let mut outcome: Option<&str> = None;
         for v in &mut vars {
-            if v.get("name").and_then(|n| n.as_str()) == Some(param_name) {
+            if v.get("name").and_then(|n| n.as_str()) == Some(param_name.as_str()) {
                 if let Some(val_field) = v.as_object_mut() {
-                    // 只允许修改 number 类型的变量，跳过 secret
-                    if val_field.get("var_type").and_then(|t| t.as_str()) == Some("number")
-                        && val_field.get("is_secret") != Some(&serde_json::Value::Bool(true))
-                    {
-                        val_field.insert("value".into(), new_value.clone());
-                        found = true;
+                    let is_number =
+                        val_field.get("var_type").and_then(|t| t.as_str()) == Some("number");
+                    let is_secret =
+                        val_field.get("is_secret") == Some(&serde_json::Value::Bool(true));
+                    // 仅允许改动 number 类型且非 secret 的变量；数值须有限（挡 NaN/Inf）
+                    if is_number && !is_secret {
+                        let finite = new_value.as_f64().map(f64::is_finite).unwrap_or(false);
+                        if finite {
+                            val_field.insert("value".into(), new_value.clone());
+                            outcome = Some("ok");
+                        } else {
+                            outcome = Some("not_finite_number");
+                        }
+                    } else {
+                        outcome = Some("not_editable");
                     }
                 }
                 break;
             }
         }
-        if !found {
-            tracing::warn!("[param_suggestions] 参数 {param_name} 不存在或不可修改，跳过");
+
+        match outcome {
+            Some("ok") => {
+                applied.push(serde_json::json!({
+                    "param": raw_name,
+                    "resolved": param_name,
+                    "value": new_value,
+                }));
+            },
+            Some(reason) => {
+                tracing::warn!(
+                    "[param_suggestions] 参数 {raw_name}（→{param_name}）不可应用: {reason}"
+                );
+                skipped.push(serde_json::json!({
+                    "param": raw_name,
+                    "resolved": param_name,
+                    "reason": reason,
+                }));
+            },
+            None => {
+                skipped.push(serde_json::json!({
+                    "param": raw_name,
+                    "resolved": param_name,
+                    "reason": "not_found",
+                }));
+            },
         }
     }
 
-    // 3. 持久化
+    // 3. 持久化（无任何成功项时不写库，避免无谓的 updated_at 漂移）
+    if applied.is_empty() {
+        tracing::warn!("[param_suggestions] 无任何参数被应用（{} 项全部跳过）", skipped.len());
+        return Ok(serde_json::json!({
+            "applied": applied,
+            "skipped": skipped,
+            "appliedCount": 0,
+            "persisted": false,
+        }));
+    }
+
     let vars_json = serde_json::to_string(&vars).map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("序列化失败: {e}"))
     })?;
@@ -4944,7 +5433,11 @@ pub async fn apply_param_suggestions(
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("更新模板变量失败: {e}"))
         })?;
 
-    tracing::info!("[param_suggestions] 已应用 {} 项参数调整到 stock-analysis 模板", updates.len());
+    tracing::info!(
+        "[param_suggestions] 已应用 {} 项参数调整到 stock-analysis 模板（跳过 {} 项）",
+        applied.len(),
+        skipped.len()
+    );
 
     // 4. 同时触发策略权重重新计算，使 params_suggestion 间接影响荐股权重
     let _ = axagent_analysis_engine::evolution_drift::recalc_and_persist(db, "manual", None, None)
@@ -4954,7 +5447,12 @@ pub async fn apply_param_suggestions(
         })
         .map_err(|e| tracing::warn!("[param_suggestions] 策略权重重算失败: {e}"));
 
-    Ok(())
+    Ok(serde_json::json!({
+        "applied": applied,
+        "skipped": skipped,
+        "appliedCount": applied.len(),
+        "persisted": true,
+    }))
 }
 
 // ── Path 1: WFO 参数校准 ──
@@ -5011,6 +5509,10 @@ pub async fn calibrate_portfolio_mgr_params(
                 "capExtreme": params.cap_extreme,
                 "capHigh": params.cap_high,
                 "capMid": params.cap_mid,
+                // 市况先验（可被反思建议、被网格扫描）
+                "priorBull": params.prior_bull,
+                "priorSideways": params.prior_sideways,
+                "priorBear": params.prior_bear,
                 "score": (score * 10000.0).round() / 100.0,
             })
         })
@@ -5771,4 +6273,88 @@ pub async fn save_valuation_params(
     axagent_dao::repo::settings::set_setting(db, VALUATION_PARAMS_KEY, &json_str)
         .await
         .map_err(|e| format!("保存估值参数失败: {}", e))
+}
+
+#[cfg(test)]
+mod param_name_resolution_tests {
+    use super::{resolve_param_name, to_snake_case};
+    use std::collections::HashSet;
+
+    /// 变量表中的真实名字（stock-analysis v30 中与决策相关的子集）
+    fn known() -> HashSet<String> {
+        [
+            "action_buy_threshold",
+            "action_increase_threshold",
+            "action_hold_threshold",
+            "action_watch_threshold",
+            "action_reduce_threshold",
+            "pos_cap_extreme",
+            "pos_cap_high",
+            "pos_cap_mid",
+            "pos_buy_min",
+            "pos_increase_min",
+            "regime_prior_bull",
+            "regime_prior_sideways",
+            "regime_prior_bear",
+            "risk_vol_high",
+            "risk_growth_low",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    #[test]
+    fn snake_case_normalization() {
+        assert_eq!(to_snake_case("buyThreshold"), "buy_threshold");
+        assert_eq!(to_snake_case("buy-threshold"), "buy_threshold");
+        assert_eq!(to_snake_case("buy threshold"), "buy_threshold");
+        assert_eq!(to_snake_case("action_buy_threshold"), "action_buy_threshold");
+        assert_eq!(to_snake_case("CapHigh"), "cap_high");
+    }
+
+    #[test]
+    fn resolves_exact_name() {
+        let k = known();
+        assert_eq!(
+            resolve_param_name("action_buy_threshold", &k).as_deref(),
+            Some("action_buy_threshold")
+        );
+    }
+
+    #[test]
+    fn resolves_reflection_short_names() {
+        let k = known();
+        // EvolutionDriftPanel 把 PortfolioMgrParamSet 的 camelCase 转成 snake_case 后传入
+        assert_eq!(
+            resolve_param_name("buy_threshold", &k).as_deref(),
+            Some("action_buy_threshold")
+        );
+        assert_eq!(
+            resolve_param_name("increase_threshold", &k).as_deref(),
+            Some("action_increase_threshold")
+        );
+        assert_eq!(resolve_param_name("cap_high", &k).as_deref(), Some("pos_cap_high"));
+        assert_eq!(resolve_param_name("cap_mid", &k).as_deref(), Some("pos_cap_mid"));
+        assert_eq!(resolve_param_name("buy_min", &k).as_deref(), Some("pos_buy_min"));
+    }
+
+    #[test]
+    fn resolves_camel_case_and_dropped_prefix() {
+        let k = known();
+        // camelCase 原样传入（未经过前端转换）
+        assert_eq!(resolve_param_name("buyThreshold", &k).as_deref(), Some("action_buy_threshold"));
+        assert_eq!(resolve_param_name("capHigh", &k).as_deref(), Some("pos_cap_high"));
+        // LLM 反思时漏掉 risk_ / regime_ 前缀
+        assert_eq!(resolve_param_name("vol_high", &k).as_deref(), Some("risk_vol_high"));
+        assert_eq!(resolve_param_name("growth_low", &k).as_deref(), Some("risk_growth_low"));
+        assert_eq!(resolve_param_name("prior_bear", &k).as_deref(), Some("regime_prior_bear"));
+    }
+
+    #[test]
+    fn rejects_unknown_names() {
+        let k = known();
+        assert!(resolve_param_name("nonsense_param", &k).is_none());
+        assert!(resolve_param_name("", &k).is_none());
+    }
 }

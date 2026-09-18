@@ -14,8 +14,8 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, Qu
 
 mod domain_agents;
 mod domain_experts;
-mod industry_agents;
-mod industry_experts;
+mod domain_pack_agents;
+mod domain_pack_experts;
 mod roles;
 pub mod seed_opc_cron;
 mod seed_opc_workflow_template;
@@ -194,9 +194,9 @@ pub async fn ensure_opc_company_seeded(db: &DatabaseConnection) -> Result<(), St
     // 3. 为所有导入的专家批量创建 agent_profiles
     seed_bulk_expert_profiles(db).await?;
 
-    // 4. 行业专属 agent（ai-research + 12 个新行业）
-    industry_agents::seed_ai_research_agents(db).await?;
-    industry_agents::seed_all_industry_agents(db).await?;
+    // 4. 域包专属 agent（ai-research + 12 个新域包）
+    domain_pack_agents::seed_ai_research_agents(db).await?;
+    domain_pack_agents::seed_all_domain_pack_agents(db).await?;
 
     // 5. 领域专属 agent（17 个领域，72 个专家）
     domain_agents::seed_all_domain_agents(db).await?;

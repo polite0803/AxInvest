@@ -19,6 +19,8 @@ use std::collections::HashMap;
 ///   - `degraded`                时间锚定降级报告（spec §4.1）
 ///   - `_meta`                   元数据：mode / as_of_date / source / built_at
 ///   - `params.<nodeId>`         结构化参数（Agent 节点的 .params + CodeNode 的 .result）
+///   - `decision-explainer`      决策依据说明书（保留 JSON 结构：summary / explanation /
+///     rule_trace[] / risk_comment / confidence_note）
 ///   - 其余节点（debate/risk/research-mgr/portfolio-mgr 等）按 nodeId 存
 ///
 /// `degradation` 由调用方在 workflow 完成时通过 `as_of::take_asof_degradation_report()`
@@ -67,7 +69,15 @@ pub fn build_blackboard_snapshot(
             // 需保留JSON结构而非用extract_node_text提取纯文本。
             || *node_id == "data-quality"
             || *node_id == "rule-check"
-            || *node_id == "quality-fallback";
+            || *node_id == "quality-fallback"
+            // 2026-09-14: decision-explainer（决策依据说明书）输出为
+            // {summary, explanation, rule_trace[], risk_comment, confidence_note}。
+            // 若走下面的 extract_node_text 分支会被压成纯文本，前端拿不到
+            // `rule_trace` 数组（规则追溯码无法逐条渲染）⇒ 必须保留 JSON 结构。
+            // 该节点是 AgentNode 包装（{role, content: <json_string>, ...}），
+            // 三个 if 分支都不命中，value_to_store 保持包装对象原样，
+            // 前端用 extractContent 取 content 后再解析（与 risk-* 同款处理）。
+            || *node_id == "decision-explainer";
         if is_structured {
             // 结构化节点：优先用 report + verdict 重构带 VERDICT 标签的文本
             let mut value_to_store = raw_output.clone();

@@ -100,11 +100,11 @@ export { useWorkflowStore } from "./feature/workflowStore";
 
 // ── AxInvest 投资域 ──
 export { useCrossMarketStore } from "./feature/crossMarketStore";
+export { useDomainLearningStore } from "./feature/domainLearningStore";
 export { useExecutionBridgeStore } from "./feature/executionBridgeStore";
-export { useIndustryLearningStore } from "./feature/industryLearningStore";
 export { usePaperPortfolioStore } from "./feature/paperPortfolioStore";
 export { usePipelineStore } from "./feature/pipelineStore";
 export { useBacktestStore, useStrategyStore } from "./feature/quant";
 export { useStockAnalysisStore } from "./feature/stockAnalysisStore";
-export type { PortfolioStressResult } from "./feature/stockAnalysisStore";
+export type { PortfolioStressResult, SimulationScenarioRow, SimulationSnapshot } from "./feature/stockAnalysisStore";
 export { useWorkspaceStore, type WorkspaceView } from "./feature/workspaceStore";

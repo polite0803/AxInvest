@@ -1,4 +1,4 @@
-// OPC 行业数据接入层 —— Vendor 体系
+// OPC 域包数据接入层 —— Vendor 体系
 // 对齐 astock-data 的 StockVendor + FallbackChain 降级模式
 
 use parking_lot::Mutex;
@@ -12,21 +12,21 @@ use serde::{Deserialize, Serialize};
 use super::data_service::{OpcDataService, TimeRange};
 use super::error::OpcResult;
 
-// ── OpIndustryVendor trait（对齐 StockVendor） ─────────────────
+// ── OpDomainPackVendor trait（对齐 StockVendor） ─────────────────
 
-/// 行业数据供应商 trait
+/// 域包数据供应商 trait
 #[async_trait]
-pub trait OpIndustryVendor: Send + Sync {
+pub trait OpDomainPackVendor: Send + Sync {
     fn name(&self) -> &str;
 
     async fn fetch(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         data_domain: &str,
         query: &serde_json::Value,
     ) -> OpcResult<Option<serde_json::Value>>;
 
-    async fn health_check(&self, industry_id: &str) -> OpcResult<bool>;
+    async fn health_check(&self, domain_pack_id: &str) -> OpcResult<bool>;
 }
 
 // ── Vendor 健康状态 ─────────────────────────────────────────────
@@ -53,14 +53,14 @@ impl DbVendor {
 }
 
 #[async_trait]
-impl OpIndustryVendor for DbVendor {
+impl OpDomainPackVendor for DbVendor {
     fn name(&self) -> &str {
         "db"
     }
 
     async fn fetch(
         &self,
-        _industry_id: &str,
+        _domain_pack_id: &str,
         data_domain: &str,
         _query: &serde_json::Value,
     ) -> OpcResult<Option<serde_json::Value>> {
@@ -82,14 +82,14 @@ impl OpIndustryVendor for DbVendor {
         Ok(Some(serde_json::json!({ "domain": data_domain, "value": value })))
     }
 
-    async fn health_check(&self, _industry_id: &str) -> OpcResult<bool> {
+    async fn health_check(&self, _domain_pack_id: &str) -> OpcResult<bool> {
         Ok(true)
     }
 }
 
 // ── CacheVendor ─────────────────────────────────────────────────
 
-/// CacheVendor：磁盘缓存（JSON 文件，key 带 `opc:{industry_id}:` 前缀）
+/// CacheVendor：磁盘缓存（JSON 文件，key 带 `opc:{domain_pack_id}:` 前缀）
 pub struct CacheVendor {
     cache_dir: PathBuf,
 }
@@ -99,31 +99,31 @@ impl CacheVendor {
         Self { cache_dir }
     }
 
-    fn cache_path(&self, industry_id: &str, data_domain: &str) -> PathBuf {
-        self.cache_dir.join(format!("opc:{industry_id}:{data_domain}.json"))
+    fn cache_path(&self, domain_pack_id: &str, data_domain: &str) -> PathBuf {
+        self.cache_dir.join(format!("opc:{domain_pack_id}:{data_domain}.json"))
     }
 }
 
 #[async_trait]
-impl OpIndustryVendor for CacheVendor {
+impl OpDomainPackVendor for CacheVendor {
     fn name(&self) -> &str {
         "cache"
     }
 
     async fn fetch(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         data_domain: &str,
         _query: &serde_json::Value,
     ) -> OpcResult<Option<serde_json::Value>> {
-        let path = self.cache_path(industry_id, data_domain);
+        let path = self.cache_path(domain_pack_id, data_domain);
         let Ok(raw) = std::fs::read_to_string(&path) else {
             return Ok(None);
         };
         Ok(serde_json::from_str(&raw).ok())
     }
 
-    async fn health_check(&self, _industry_id: &str) -> OpcResult<bool> {
+    async fn health_check(&self, _domain_pack_id: &str) -> OpcResult<bool> {
         Ok(true)
     }
 }
@@ -134,21 +134,21 @@ impl OpIndustryVendor for CacheVendor {
 pub struct WebVendor;
 
 #[async_trait]
-impl OpIndustryVendor for WebVendor {
+impl OpDomainPackVendor for WebVendor {
     fn name(&self) -> &str {
         "web"
     }
 
     async fn fetch(
         &self,
-        _industry_id: &str,
+        _domain_pack_id: &str,
         _data_domain: &str,
         _query: &serde_json::Value,
     ) -> OpcResult<Option<serde_json::Value>> {
         Ok(None)
     }
 
-    async fn health_check(&self, _industry_id: &str) -> OpcResult<bool> {
+    async fn health_check(&self, _domain_pack_id: &str) -> OpcResult<bool> {
         Ok(false)
     }
 }
@@ -159,26 +159,26 @@ impl OpIndustryVendor for WebVendor {
 pub struct FileVendor;
 
 #[async_trait]
-impl OpIndustryVendor for FileVendor {
+impl OpDomainPackVendor for FileVendor {
     fn name(&self) -> &str {
         "file"
     }
 
     async fn fetch(
         &self,
-        _industry_id: &str,
+        _domain_pack_id: &str,
         _data_domain: &str,
         _query: &serde_json::Value,
     ) -> OpcResult<Option<serde_json::Value>> {
         Ok(None)
     }
 
-    async fn health_check(&self, _industry_id: &str) -> OpcResult<bool> {
+    async fn health_check(&self, _domain_pack_id: &str) -> OpcResult<bool> {
         Ok(false)
     }
 }
 
-// ── OpIndustryClient ────────────────────────────────────────────
+// ── OpDomainPackClient ────────────────────────────────────────────
 
 /// 数据源配置（对应 analysis.yaml 中的 data_sources）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,21 +189,21 @@ pub struct AnalysisDataSource {
     pub quality_precheck: bool,
 }
 
-/// 行业数据客户端：按行业包 data_sources 路由 + 降级 + 健康追踪
-pub struct OpIndustryClient {
-    industry_id: String,
+/// 域包数据客户端：按域包 data_sources 路由 + 降级 + 健康追踪
+pub struct OpDomainPackClient {
+    domain_pack_id: String,
     sources: Vec<AnalysisDataSource>,
-    vendors: HashMap<String, Arc<dyn OpIndustryVendor>>,
+    vendors: HashMap<String, Arc<dyn OpDomainPackVendor>>,
     health: Mutex<HashMap<String, VendorHealthState>>,
 }
 
-impl OpIndustryClient {
+impl OpDomainPackClient {
     pub fn new(
-        industry_id: String,
+        domain_pack_id: String,
         sources: Vec<AnalysisDataSource>,
-        vendors: HashMap<String, Arc<dyn OpIndustryVendor>>,
+        vendors: HashMap<String, Arc<dyn OpDomainPackVendor>>,
     ) -> Self {
-        Self { industry_id, sources, vendors, health: Mutex::new(HashMap::new()) }
+        Self { domain_pack_id, sources, vendors, health: Mutex::new(HashMap::new()) }
     }
 
     /// 取某数据源的数据：按 chain 依次尝试（降级），首个命中返回
@@ -222,11 +222,11 @@ impl OpIndustryClient {
             if self.is_degraded(&vname) {
                 continue;
             }
-            if !vendor.health_check(&self.industry_id).await.unwrap_or(false) {
+            if !vendor.health_check(&self.domain_pack_id).await.unwrap_or(false) {
                 self.record_failure(&vname);
                 continue;
             }
-            match vendor.fetch(&self.industry_id, data_domain, query).await {
+            match vendor.fetch(&self.domain_pack_id, data_domain, query).await {
                 Ok(Some(value)) => {
                     self.record_success(&vname);
                     return Ok(value);
@@ -257,7 +257,7 @@ impl OpIndustryClient {
                     vendors.push(serde_json::json!({ "vendor": vname, "reachable": false, "degraded": true }));
                     continue;
                 }
-                let reachable = vendor.health_check(&self.industry_id).await.unwrap_or(false);
+                let reachable = vendor.health_check(&self.domain_pack_id).await.unwrap_or(false);
                 if reachable {
                     passed = true;
                 }
@@ -310,8 +310,8 @@ impl OpIndustryClient {
         if entry.consecutive_failures >= DEGRADE_THRESHOLD {
             entry.degraded = true;
             tracing::warn!(
-                "[opc-data] 行业 {} vendor {vendor_name} 连续 {} 次失败，已降级",
-                self.industry_id,
+                "[opc-data] 域包 {} vendor {vendor_name} 连续 {} 次失败，已降级",
+                self.domain_pack_id,
                 entry.consecutive_failures
             );
         }

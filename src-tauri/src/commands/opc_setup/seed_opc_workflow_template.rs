@@ -409,6 +409,14 @@ pub(crate) async fn seed_opc_workflow_template(db: &DatabaseConnection) -> Resul
     // 先删再插（幂等；版本比对只决定是否重写）
     let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
 
+    // P0 软门禁（C1，2026-09-14）：种子的端口公理 —— 结构性死链在此被记录（不阻断启动）。
+    // 判据复用 harness 的 `warn_port_axioms_json`，不在本文件另写一份。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("opc-setup:seed_opc_workflow_template:{TEMPLATE_ID}"),
+        &nodes_json,
+        &edges_json,
+    );
+
     workflow_template::ActiveModel {
         hooks_config: Set(None),
         id: Set(TEMPLATE_ID.to_string()),

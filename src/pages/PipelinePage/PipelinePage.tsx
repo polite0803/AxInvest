@@ -21,6 +21,18 @@ const STATUS_TAG_COLOR: Record<string, string> = {
   cancelled: "default",
 };
 
+/**
+ * 节点状态 → i18n key。**必须显式映射**，不要用 ``t(`pipeline.step${status}`)`` 拼 key ——
+ * 拼接型 key 在状态枚举新增时会静默落到未命中分支，且 i18n 硬编码检查无法静态解析。
+ * 未登记的状态回退显示原始值（见下方渲染处），不显示空白。
+ */
+const STEP_STATUS_KEY: Record<string, string> = {
+  running: "pipeline.stepRunning",
+  completed: "pipeline.stepCompleted",
+  failed: "pipeline.stepFailed",
+  timeout: "pipeline.stepTimeout",
+};
+
 function StatusTag({ status }: { status: string }) {
   const color = STATUS_TAG_COLOR[status?.toLowerCase()] ?? "default";
   return <Tag color={color}>{status}</Tag>;
@@ -203,15 +215,24 @@ function PipelinePageInner() {
               )
               : (
                 <ul style={{ margin: 0, paddingLeft: 20 }}>
-                  {stepEvents.map((ev, idx) => (
-                    <li key={`${ev.timestamp}-${idx}`}>
-                      <Typography.Text strong>{ev.step}</Typography.Text>
-                      <Typography.Text type="secondary">
-                        {" — "}
-                        {ev.detail}
-                      </Typography.Text>
-                    </li>
-                  ))}
+                  {stepEvents.map((ev, idx) => {
+                    // 文案由前端按 i18n 组装：后端只发 nodeId + status，不再 `format!` 拼中文。
+                    // 未知状态 → 显示原始值；nodeId/status 都缺失（旧载荷）→ 回退 detail 兜底。
+                    const rawStatus = ev.status ?? "";
+                    const statusKey = rawStatus ? STEP_STATUS_KEY[rawStatus] : undefined;
+                    const statusText = statusKey
+                      ? t(statusKey, { defaultValue: rawStatus })
+                      : (rawStatus || (ev.detail ?? ""));
+                    return (
+                      <li key={`${ev.timestamp}-${idx}`}>
+                        <Typography.Text strong>{ev.step}</Typography.Text>
+                        <Typography.Text type="secondary">
+                          {" — "}
+                          {ev.nodeId ? `${ev.nodeId}: ${statusText}` : statusText}
+                        </Typography.Text>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
           </Card>

@@ -1,5 +1,5 @@
 import { invoke } from "@/lib/invoke";
-import { getActionTagStyle, getActionTKey, parseAction } from "@/lib/stock-analysis-utils";
+import { getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { App, Button, Dropdown, Input, Tag } from "antd";
 import { Check, History, Pencil, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,6 +15,8 @@ interface AnalysisRecord {
   decisionAction: string | null;
   /** 决策仓位百分比（后端直返，0-100） */
   decisionPositionPct: number | null;
+  /** 决策持仓状态轴（后端直返，v228）；null = 记录早于 v228，非 EMPTY */
+  decisionPositionState: string | null;
   /** 完整决策 JSON（含 confidence 等，部分旧数据可能为 null） */
   decisionJson: string | null;
   /** 列表场景不返回，详情页通过 get_stock_analysis 单独获取 */
@@ -130,15 +132,23 @@ export function AnalysisHistoryButton() {
     positionPct?: number;
     confidence?: number;
   } | null => {
+    // P1-2(2026-09-14) / V76: 展示档统一由 (action, positionState, positionPct) 派生。
+    // 后端已移除「观望 ⇄ 持有」互改，action 只表达方向强度，持仓状态由独立轴下发 ⇒
+    // 此处**优先用 decisionPositionState**，仅当其为 null（v228 之前的历史行）才退回 pct。
+    const displayOf = (a: string, state?: string | null, pct?: number | null) =>
+      resolveDisplayAction(a, state ?? undefined, pct == null ? null : pct);
     // 优先使用后端直返字段
-    const action = r.decisionAction ? parseAction(r.decisionAction) : null;
+    const action = r.decisionAction
+      ? displayOf(r.decisionAction, r.decisionPositionState, r.decisionPositionPct)
+      : null;
     if (!action) {
       // 旧数据：从 decisionJson 解析
       if (!r.decisionJson) { return null; }
       try {
         const d = JSON.parse(r.decisionJson) as Record<string, unknown>;
-        const a = parseAction(d.action as string);
         const positionPct = typeof d.positionPct === "number" ? d.positionPct : undefined;
+        const state = typeof d.positionState === "string" ? d.positionState : null;
+        const a = displayOf(d.action as string, state, positionPct);
         const confidence = typeof d.confidence === "number" ? d.confidence : undefined;
         return { action: a, positionPct, confidence };
       } catch {

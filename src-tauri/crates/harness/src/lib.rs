@@ -18,6 +18,15 @@ pub mod delegation;
 pub mod i18n;
 pub use i18n::{I18nKey, Locale, fmt_msg, fmt_msg_with, msg};
 
+pub mod decision_action;
+pub use decision_action::{
+    ACTION_ALIASES, ACTION_UNAVAILABLE, ActionKind, is_unavailable, normalize_action,
+    normalize_to_cn, verdict_to_action,
+};
+
+// ── 定时任务持久化端口（cron_job.rs 的 DB 层下沉目标；见该模块头）──
+pub mod cron_persistence;
+
 // ── 共享数据类型 ──
 pub mod audit_trail;
 pub use audit_trail::{AuditEntry, AuditRecorder};
@@ -64,6 +73,12 @@ pub mod util_fns;
 pub mod workflow_lifecycle;
 pub mod workflow_node_deserializer;
 pub mod workflow_types;
+
+// ── 工作流 DAG 端口公理（C1）──
+// `WorkflowEdge.source_handle` 是自由字符串，其与 Switch case label / Condition 分支的
+// 对应关系此前只写在注释里。本模块把该关系提成**可静态校验的公理**，权威照抄
+// `rt-workflow/.../dag_store.rs:100-121` 的分支解析实现。
+pub mod workflow_port_axioms;
 
 // ── 工作流模板级生命周期钩子协议（业务中立，实现由业务侧注册）──
 pub use node_output_status::NodeOutputStatus;
@@ -716,6 +731,17 @@ pub use capability_clusters::{
     CapabilityCluster, all_clusters, clusters_by_domain, derive_cluster_for_passport, find_cluster,
     find_cluster_by_segment,
 };
+// ── L1 域元数据声明(三层路由树第一层的域节点: 导航路径/顺序) ──
+// 只存 `CapabilityDomain` 枚举变体, id 由 `as_str()` 派生 ⇒ 本模块无法与权威源漂移。
+// 元数据的副本方(`src/lib/domainMeta.ts`)由 `scripts/check-domain-single-source.mjs` 逐值比对。
+pub mod domain_registry;
+pub use domain_registry::{
+    DOMAIN_NODES, DomainNode, DomainOverride, apply_domain_overrides, business_domains,
+    clear_domain_overrides, effective_aliases, effective_aliases_with, enabled_business_domains,
+    enabled_domains, enabled_domains_with, enabled_with, extra_aliases, extra_aliases_with,
+    has_override, has_override_with, is_domain_enabled, is_toggleable, l1_classifier_domain_list,
+    node_of, resolve_enabled_domain, toggle_block_reason,
+};
 // ── 路径地址与路由图(三层路由树地址编码 + DAG 邻接表) ──
 pub mod routing_path;
 pub use routing_path::{RoutingGraph, RoutingPath};
@@ -734,6 +760,21 @@ pub use domain_router::{
     DomainDecision, DomainRouter, DomainRouterImpl, DomainRoutingResult, DomainRoutingRule,
     DomainRuleType, LlmReasoner, MatchMode, default_domain_rules,
 };
+
+// ── 字段层语义注册表 ──
+// 「表面名 ↔ 概念身份 ↔ 值域」的唯一权威源；`scripts/check-domain-semantics.mjs` 以此为输入。
+// **刻意不做 `pub use` 再导出**：`CONCEPTS` / `Unit` 等名字过于通用，re-export 到 harness 根
+// 既会与既有模块撞名，对本 crate 的跨 crate 引用场景也无必要 —— 用完整路径访问。
+pub mod domain_semantics;
+
+// ── 瓶颈掘金领域本体（类 / 关系 / 公理）──
+// 「三力」的类层级、类间关系、公理与**权威权重/阈值**的唯一声明源。
+// 与 `domain_semantics`（字段层横向量纲）正交：本模块是**领域层纵向结构**。
+// 副本（`.rhai` fallback / seeder 默认值 / prompt 口径）由
+// `scripts/check-ontology-consistency.mjs` 比对；口径分歧（D1/D2）只登记不擅改。
+// 同样**不做 `pub use` 再导出**：`CLASSES` / `METRICS` / `Band` 名字过于通用。
+pub mod domain_ontology;
+
 pub mod cluster_router;
 pub use cluster_router::{
     ClusterRouter, ClusterRouterImpl, ClusterRoutingResult, ClusterRoutingRule,
@@ -884,13 +925,13 @@ pub use device_sync::{
     PairingResponse, SyncEngine, SyncResult, TrustLevel, VersionVectorEntry,
 };
 
-// ── 行业编排契约（让 analysis-engine 等 consumer 不依赖 orchestrator） ──
-pub mod industry_orchestration;
-pub use industry_orchestration::{
+// ── 域包编排契约（让 analysis-engine 等 consumer 不依赖 orchestrator） ──
+pub mod domain_pack_orchestration;
+pub use domain_pack_orchestration::{
     AcceptanceCriterion, AcceptanceResult, AutoReflectTrigger, AutoTriggerConfig, CriterionResult,
-    DecompositionPlan, DependencyType, DynamicSubGraph, EvolutionConstraints,
-    ForbiddenOptimization, GeneratedSubGraph, IndustryAdapter, IndustryAdapterRegistry,
-    IndustryContext, IndustryLearningConfig, MissionType, OrchestrationError,
+    DecompositionPlan, DependencyType, DomainPackAdapter, DomainPackAdapterRegistry,
+    DomainPackContext, DomainPackLearningConfig, DynamicSubGraph, EvolutionConstraints,
+    ForbiddenOptimization, GeneratedSubGraph, MissionType, OrchestrationError,
     OrchestrationStrategy, PresetWorkflowStep, ProtectedStep, QualityThresholds, QualityWeights,
     ReflectionCheckpoint, ReflectionTemplate, ReinforcementLearningConfig, RewardWeightConfig,
     SelfImprovementConfig, SkillEvolverConfig, StepDependency, SubTask, SubTaskStatus,
@@ -908,6 +949,16 @@ pub mod business_state_machine;
 pub use business_state_machine::{
     BusinessState, BusinessStateMachine, FsmContext, FsmRuntimeState, FsmTransitionError,
     FsmTransitionRecord, FsmValidationError, StateTransition,
+};
+
+// ── 任务生命周期真源（P1-C 统一任务账本）──
+//
+// 与上面的 `business_state_machine` 正交：FSM 是「工作流设计者可配置」的状态机，
+// 本模块是「任务」这一固定生命周期的状态枚举 + 静态迁移表。详见模块头注释。
+pub mod task_state;
+pub use task_state::{
+    TaskSource, TaskStatus, TransitionRejection, validate_transition as validate_task_transition,
+    validate_transition_from as validate_task_transition_from,
 };
 
 // ── 观测层：执行轨迹系统（时间旅行调试）──

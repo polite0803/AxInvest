@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub wiki_id: String,
     pub name: String,
     pub description: Option<String>,
     pub content: String,
     pub page_type: Option<String>,
+    #[sea_orm(default_value = false)]
     pub is_builtin: bool,
     pub created_at: i64,
     pub updated_at: i64,

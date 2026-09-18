@@ -1,22 +1,32 @@
 import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
-import { App, Button, Input, InputNumber, Select, Slider, Space, Switch, Tag, theme } from "antd";
+import { toDbVariable } from "@/lib/workflowVariables";
+import { App, Button, InputNumber, Slider, Space, Tag, theme } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "./SettingsGroup";
+import { VariableControl } from "./VariableControls";
 
 const TEMPLATE_ID = "stock-analysis";
 
 /** Generate default parameter variable list (initial load, sync with stock-analysis workflow template v19).
  * Naming convention: snake_case, must match seed keys in `stock_analysis_setup.rs`.
- * Update this when backend defaults change to keep UI in sync with actual runtime params. */
-function getDefaultVariables(): Variable[] {
+ * Update this when backend defaults change to keep UI in sync with actual runtime params.
+ *
+ * **这是前端参数默认值的单一权威源，按名导出供其他面板复用**（如
+ * `WhatIfBacktest` 的 What-If 滑块需要「参数名 → 默认值 + i18n 标签」映射）。
+ * 在此处新增/修改参数名或默认值，两处面板同时生效 —— 不要再在别处复制一份清单，
+ * 否则会重演「同一参数两套默认值」分叉（后端 `replay_tool_chain` 曾因此把
+ * `risk_max_drawdown_limit` 默认写成 20 而此处是 15）。 */
+export function getDefaultVariables(): Variable[] {
   const vars: Variable[] = [];
   const b = (name: string, val: unknown, desc: string, type: string) =>
     vars.push({ name, varType: type, value: val, description: desc, isSecret: false });
   // 分析流程
   b("analysis_depth", "standard", "stockAnalysis.configDescriptions.analysisDepth", "enum");
-  b("debate_rounds", 3, "stockAnalysis.configDescriptions.debateRounds", "number");
+  // v48（2026-09-14）：3 → 1，与后端 seed_variables 及 harness 的 serde 缺省值收敛。
+  // 多轮在当前引擎中是「假多轮」（第 2+ 轮复用首轮输出 ⇒ 必然假收敛）。
+  b("debate_rounds", 1, "stockAnalysis.configDescriptions.debateRounds", "number");
   b("max_concurrent", 12, "stockAnalysis.configDescriptions.maxConcurrent", "number");
   // 数据源参数
   b("kline_period", "daily", "stockAnalysis.configDescriptions.klinePeriod", "enum");
@@ -49,8 +59,6 @@ function getDefaultVariables(): Variable[] {
   b("pos_max_single_pct", 20, "stockAnalysis.configDescriptions.posMaxSinglePct", "number");
   b("pos_max_total", 10, "stockAnalysis.configDescriptions.posMaxTotal", "number");
   b("pos_max_sector_pct", 40, "stockAnalysis.configDescriptions.posMaxSectorPct", "number");
-  b("pos_min_cash_pct", 10, "stockAnalysis.configDescriptions.posMinCashPct", "number");
-  b("pos_max_turnover_pct", 30, "stockAnalysis.configDescriptions.posMaxTurnoverPct", "number");
   // 估值参数（A股校准：growth=12 / perpetual=4 / discount=8.5）
   b("value_dcf_growth_rate", 12, "stockAnalysis.configDescriptions.valueDcfGrowthRate", "number");
   b("value_dcf_perpetual_rate", 4, "stockAnalysis.configDescriptions.valueDcfPerpetualRate", "number");
@@ -58,19 +66,19 @@ function getDefaultVariables(): Variable[] {
   b("value_moat_threshold", 60, "stockAnalysis.configDescriptions.valueMoatThreshold", "number");
   b("value_fscore_buy", 7, "stockAnalysis.configDescriptions.valueFscoreBuy", "number");
   b("value_safety_margin", 20, "stockAnalysis.configDescriptions.valueSafetyMargin", "number");
-  // 护城河（compute_moat）
-  b("moat_roe_years_min", 5, "stockAnalysis.configDescriptions.moatRoeYearsMin", "number");
-  b("moat_avg_gross_margin_min", 30, "stockAnalysis.configDescriptions.moatAvgGrossMarginMin", "number");
-  b("moat_margin_stable_std_max", 5, "stockAnalysis.configDescriptions.moatMarginStableStdMax", "number");
-  b("moat_fcf_ratio_min", 5, "stockAnalysis.configDescriptions.moatFcfRatioMin", "number");
-  // 选股筛选（screener）
-  b("screener_min_change_pct", -3, "stockAnalysis.configDescriptions.screenerMinChangePct", "number");
-  b("screener_max_change_pct", 7, "stockAnalysis.configDescriptions.screenerMaxChangePct", "number");
-  b("screener_main_inflow_min", 500, "stockAnalysis.configDescriptions.screenerMainInflowMin", "number");
-  b("screener_northbound_ratio_min", 0.5, "stockAnalysis.configDescriptions.screenerNorthboundRatioMin", "number");
-  b("screener_turnover_rate_min", 1, "stockAnalysis.configDescriptions.screenerTurnoverRateMin", "number");
-  b("screener_rsi_oversold", 30, "stockAnalysis.configDescriptions.screenerRsiOversold", "number");
-  b("screener_rsi_overbought", 70, "stockAnalysis.configDescriptions.screenerRsiOverbought", "number");
+  // ── 已移除的死配置（2026-09-11 全项目核实）──
+  // 护城河（moat_roe_years_min / moat_avg_gross_margin_min / moat_margin_stable_std_max /
+  // moat_fcf_ratio_min）与选股筛选（screener_* 7 项）此前在本处声明，但：
+  //   · seed_variables.rs 从未定义 → DB 变量表里不存在 → rhai/工具读取时 present() 恒假；
+  //   · 全项目 grep 无任何消费方（moat_* 对应 analysis-engine/src/value.rs 的硬编码
+  //     `roe_years_above_15 >= 3`；screener_* 无读取点）；
+  //   · 面板 `resolve().filter(Boolean)` 早已把它们整组滤掉，界面上从未显示。
+  // 一并移除的还有 limit_up_* 6 项（crates/tools/src/tools/finance.rs 走的是 ToolNode
+  // args 而非模板变量）、rev_* / val_pe_* / val_pb_* / cap_* 8 项、
+  // pos_min_cash_pct / pos_max_turnover_pct / trading_price_deviation_limit。
+  // 若将来要支持「可配置」，必须补齐三件套，缺一即重演「配置项空接线」：
+  //   ① seed_variables.rs 定义变量；② 对应 input_mapping 同名映射；
+  //   ③ 消费点从硬编码改为读取该变量。
   // 监控
   b("monitor_poll_interval_secs", 30, "stockAnalysis.configDescriptions.monitorPollIntervalSecs", "number");
   b("monitor_change_pct", 5, "stockAnalysis.configDescriptions.monitorChangePct", "number");
@@ -85,6 +93,24 @@ function getDefaultVariables(): Variable[] {
   b("kelly_min_win_rate", 0.4, "stockAnalysis.configDescriptions.kellyMinWinRate", "number");
   b("kelly_min_odds", 1.0, "stockAnalysis.configDescriptions.kellyMinOdds", "number");
   b("risk_free_rate", 0.03, "stockAnalysis.configDescriptions.riskFreeRate", "number");
+  // 市况先验（prior 由市况方向派生；可被反思/演进优化调整）
+  b("regime_prior_bull", 0.55, "stockAnalysis.configDescriptions.regimePriorBull", "number");
+  b("regime_prior_sideways", 0.5, "stockAnalysis.configDescriptions.regimePriorSideways", "number");
+  b("regime_prior_bear", 0.45, "stockAnalysis.configDescriptions.regimePriorBear", "number");
+  // 因子融合门（f7 权重低于该值时，交易员看空信号不再封顶后验概率）
+  // 2026-09-11: portfolio-mgr.rhai 早有 `present(trader_cap_min_weight)` 守卫，
+  // 但变量表从未定义该名 → present() 恒假、恒走硬编码 0.08。本次补齐三件套。
+  b(
+    "trader_cap_min_weight",
+    0.08,
+    "stockAnalysis.configDescriptions.traderCapMinWeight",
+    "number",
+  );
+  // 交易成本率（凯利仓位修正按 (1-成本率) 折损预期收益）
+  // 2026-09-11: 权威源 PORTFOLIO_MGR_TUNABLE_PARAMS 一直登记着它、input_mapping
+  // 也一直在注入它，但面板里 **零出现**（既无此声明也无任何 resolve() 分组）
+  // —— 是全清单唯一没有 UI 入口的参数，用户想改只能改 DB。本次补齐末环。
+  b("cost_pct", 0.003, "stockAnalysis.configDescriptions.costPct", "number");
   // portfolio-mgr 决策阈值（修复 D7/D8: 与 portfolio-mgr.rhai 顶部可配置参数一一对应）
   b("action_buy_threshold", 0.63, "stockAnalysis.configDescriptions.actionBuyThreshold", "number");
   b("action_increase_threshold", 0.53, "stockAnalysis.configDescriptions.actionIncreaseThreshold", "number");
@@ -152,17 +178,7 @@ function getDefaultVariables(): Variable[] {
   b("trend_kline_limit", 250, "stockAnalysis.configDescriptions.trendKlineLimit", "number");
   b("trend_amount_ratio_min", 0.8, "stockAnalysis.configDescriptions.trendAmountRatioMin", "number");
   b("rev_rsi_short_max", 35, "stockAnalysis.configDescriptions.revRsiShortMax", "number");
-  b("rev_drawdown_min_pct", 20, "stockAnalysis.configDescriptions.revDrawdownMinPct", "number");
-  b("rev_rsi_monthly_max", 50, "stockAnalysis.configDescriptions.revRsiMonthlyMax", "number");
-  b("val_pe_short_max", 50, "stockAnalysis.configDescriptions.valPeShortMax", "number");
-  b("val_pe_mid_max", 40, "stockAnalysis.configDescriptions.valPeMidMax", "number");
-  b("val_pb_mid_max", 8, "stockAnalysis.configDescriptions.valPbMidMax", "number");
-  b("cap_inflow_short_min", 200, "stockAnalysis.configDescriptions.capInflowShortMin", "number");
-  b("cap_inflow_mid_min", 500, "stockAnalysis.configDescriptions.capInflowMidMin", "number");
-  b("cap_turnover_min", 2, "stockAnalysis.configDescriptions.capTurnoverMin", "number");
-  b("cap_nb_ratio_min", 0.3, "stockAnalysis.configDescriptions.capNbRatioMin", "number");
   // 交易决策（trading.rs）
-  b("trading_price_deviation_limit", 1.0, "stockAnalysis.configDescriptions.tradingPriceDeviationLimit", "number");
   // 风险模型扩展（risk.rs）
   b("risk_sharpe_annualization", 252, "stockAnalysis.configDescriptions.riskSharpeAnnualization", "number");
   b("risk_kelly_heavy_threshold", 0.25, "stockAnalysis.configDescriptions.riskKellyHeavyThreshold", "number");
@@ -213,12 +229,6 @@ function getDefaultVariables(): Variable[] {
   b("limit_pct_main", 10, "stockAnalysis.configDescriptions.limitPctMain", "number");
   b("limit_pct_star", 20, "stockAnalysis.configDescriptions.limitPctStar", "number");
   b("limit_pct_bj", 30, "stockAnalysis.configDescriptions.limitPctBj", "number");
-  b("limit_up_w_trend", 40, "stockAnalysis.configDescriptions.limitUpWTrend", "number");
-  b("limit_up_w_volume", 20, "stockAnalysis.configDescriptions.limitUpWVolume", "number");
-  b("limit_up_w_hits", 15, "stockAnalysis.configDescriptions.limitUpWHits", "number");
-  b("limit_up_th_high", 60, "stockAnalysis.configDescriptions.limitUpThHigh", "number");
-  b("limit_up_th_med", 30, "stockAnalysis.configDescriptions.limitUpThMed", "number");
-  b("limit_up_th_low", 10, "stockAnalysis.configDescriptions.limitUpThLow", "number");
   // 注意：vendor_* 9 个开关 + iwencai_key 不在这里暴露，
   // 由「数据源」tab（DataVendorsTab）全权管理，避免两边同时写造成竞态。
   // 全局开关
@@ -226,18 +236,12 @@ function getDefaultVariables(): Variable[] {
   return vars;
 }
 
-function parseEnumOptions(desc?: string): string[] {
-  if (!desc) { return []; }
-  const match = desc.match(/: (.+)/);
-  if (match) { return match[1].split(/\s*\/\s*/).map((s) => s.trim()); }
-  return [];
-}
-
-function inferStep(v: Variable): number {
-  // 温度类参数（如 agent_temperature）需要 0.1 步进，用变量名判断更可靠
-  if (v.name === "agent_temperature") { return 0.1; }
-  return 1;
-}
+/**
+ * 变量对象字段名兼容 helper 已抽到 `@/lib/workflowVariables`（varTypeOf /
+ * isSecretOf / toDbVariable）——本面板此前是唯一实现处，另有两个面板
+ * （DemandDiscovery / LiteraryCreation）存在同一 bug 却各自没有 helper，
+ * 故收敛为共享模块，避免再次漂移。这里改为直接 import 使用。
+ */
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface Props {}
@@ -262,72 +266,8 @@ const DEFAULT_VALUATION_PARAMS: ValuationParamsConfig = {
   bondYield: 4.4,
 };
 
-/** number control — vertical on narrow screen, horizontal on wide */
-function NumberControl({ v, value, onChange }: {
-  v: Variable;
-  value: unknown;
-  onChange: (name: string, val: unknown) => void;
-}) {
-  const { t } = useTranslation();
-  const desc = t(v.description ?? "");
-  const hasPct = desc.includes("%") ?? false;
-  const val = Number(value ?? 0);
-  return (
-    <span className="sacp-number">
-      <Slider
-        min={0}
-        max={v.name === "agent_temperature" ? 2 : 100}
-        step={inferStep(v)}
-        className="sacp-number-slider"
-        value={val}
-        onChange={(v2) => onChange(v.name, v2)}
-      />
-      <InputNumber
-        size="small"
-        className="sacp-number-input"
-        value={val}
-        suffix={hasPct ? "%" : undefined}
-        onChange={(v2) => v2 != null && onChange(v.name, v2)}
-      />
-    </span>
-  );
-}
-
-function VariableControl({ v, value, onChange }: {
-  v: Variable;
-  value: unknown;
-  onChange: (name: string, val: unknown) => void;
-}) {
-  const { t } = useTranslation();
-  const desc = t(v.description ?? "");
-  switch (v.varType) {
-    case "boolean":
-      return <Switch checked={!!value} onChange={(c) => onChange(v.name, c)} />;
-    case "enum": {
-      const options = parseEnumOptions(desc);
-      return (
-        <Select
-          size="small"
-          style={{ width: 140 }}
-          value={String(value ?? "")}
-          onChange={(val) => onChange(v.name, val)}
-          options={options.map((o) => ({ value: o, label: o }))}
-        />
-      );
-    }
-    case "number":
-      return <NumberControl v={v} value={value} onChange={onChange} />;
-    default:
-      return (
-        <Input
-          size="small"
-          style={{ maxWidth: 180 }}
-          value={String(value ?? "")}
-          onChange={(e) => onChange(v.name, e.target.value)}
-        />
-      );
-  }
-}
+// `NumberControl` / `VariableControl` 已收敛到 `./VariableControls`（三份面板共用一份，
+// 数值量程统一走 `inferNumberBounds` 动态推断）。
 
 export function StockAnalysisConfigPanel(_props: Props) {
   const { message } = App.useApp();
@@ -339,6 +279,10 @@ export function StockAnalysisConfigPanel(_props: Props) {
   const [saving, setSaving] = useState(false);
   const [valuationParams, setValuationParams] = useState<ValuationParamsConfig>(DEFAULT_VALUATION_PARAMS);
   const [valuationDirty, setValuationDirty] = useState(false);
+  // 折叠状态（按 tool 记）。collapsedByDefault 的分组在展开前不渲染任何控件——
+  // SettingsGroup 不做虚拟化，179 个策略参数全量渲染会让设置页首屏多出数百个
+  // 受控输入框（每个都是 antd InputNumber/Slider），打开就卡。
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -355,7 +299,8 @@ export function StockAnalysisConfigPanel(_props: Props) {
         }
         if (rsp && (!rsp.variables || rsp.variables.length === 0)) {
           // Initial load: if template has no variables, init with defaults and save back
-          const defaults = getDefaultVariables();
+          // 写回前转成后端 snake_case（后端 Variable 无 camelCase 注解，否则 serde 解析失败）
+          const defaults = getDefaultVariables().map(toDbVariable);
           const input: WorkflowTemplateInput = {
             name: rsp.name,
             description: rsp.description,
@@ -397,7 +342,13 @@ export function StockAnalysisConfigPanel(_props: Props) {
   }, [t, message]);
 
   // tool → parameter groups
-  const toolGroups = useMemo(() => {
+  //
+  // 显式标注返回类型：部分分组带 `collapsedByDefault`（2026-09-12 批量补齐的
+  // 策略参数分组）。若不标注，TS 会把数组推断成「带该属性 / 不带该属性」的
+  // 联合类型，渲染处访问 `g.collapsedByDefault` 直接报错。
+  const toolGroups = useMemo<
+    { tool: string; label: string; vars: Variable[]; collapsedByDefault?: boolean }[]
+  >(() => {
     const allVars = template?.variables ?? getDefaultVariables();
     const varMap: Record<string, Variable> = {};
     for (const v of allVars) { varMap[v.name] = v; }
@@ -431,24 +382,12 @@ export function StockAnalysisConfigPanel(_props: Props) {
         ]),
       },
       {
-        tool: "compute_moat",
-        label: t("stockAnalysis.settings.group.moat"),
-        vars: resolve([
-          "moat_roe_years_min",
-          "moat_avg_gross_margin_min",
-          "moat_margin_stable_std_max",
-          "moat_fcf_ratio_min",
-        ]),
-      },
-      {
         tool: "compute_portfolio_risk",
         label: t("stockAnalysis.settings.group.pos"),
         vars: resolve([
           "pos_max_single_pct",
           "pos_max_total",
           "pos_max_sector_pct",
-          "pos_min_cash_pct",
-          "pos_max_turnover_pct",
         ]),
       },
       {
@@ -470,6 +409,20 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "risk_kelly_heavy_threshold",
           "risk_kelly_medium_threshold",
         ]),
+      },
+      {
+        tool: "portfolio_mgr_prior",
+        label: t("stockAnalysis.settings.group.portfolioMgrPrior"),
+        vars: resolve([
+          "regime_prior_bull",
+          "regime_prior_sideways",
+          "regime_prior_bear",
+        ]),
+      },
+      {
+        tool: "portfolio_mgr_fusion",
+        label: t("stockAnalysis.settings.group.portfolioMgrFusion"),
+        vars: resolve(["trader_cap_min_weight"]),
       },
       {
         tool: "portfolio_mgr_action",
@@ -505,6 +458,11 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "risk_debt_low",
           "risk_growth_low",
         ]),
+      },
+      {
+        tool: "portfolio_mgr_cost",
+        label: t("stockAnalysis.settings.group.portfolioMgrCost"),
+        vars: resolve(["cost_pct"]),
       },
       {
         tool: "rules",
@@ -582,22 +540,243 @@ export function StockAnalysisConfigPanel(_props: Props) {
         vars: resolve([
           "trend_kline_limit",
           "trend_amount_ratio_min",
+          // 趋势策略入池门槛与共享乘数（2026-09-12 补齐定义）。
+          // 这些 key 一直被 trend.rs 以 read_f64 读取并带硬编码默认值，但此前既不在
+          // DB 变量表、也不在本 resolve 白名单中 → 面板上完全不可见、不可调。
+          // 其中 trend_high_20_threshold 直接构成超短线入池条件
+          // （现价 ≥ 5 日高 × 该比例），调不了就无法自查「超短线拿不到候选」。
+          "trend_high_20_threshold",
+          "trend_short_ma20_tolerance",
+          "trend_ma60_threshold",
+          "trend_high_60_threshold",
+          "trend_entry_tightness",
+          "trend_stop_mult",
+          "trend_target_mult",
+          "trend_position_adj",
+          "trend_conf_consistency",
+          "trend_conf_signal",
+          "trend_conf_market",
           "rev_rsi_short_max",
-          "rev_drawdown_min_pct",
-          "rev_rsi_monthly_max",
-          "val_pe_short_max",
-          "val_pe_mid_max",
-          "val_pb_mid_max",
-          "cap_inflow_short_min",
-          "cap_inflow_mid_min",
-          "cap_turnover_min",
-          "cap_nb_ratio_min",
         ]),
       },
       {
-        tool: "trading",
-        label: t("stockAnalysis.settings.group.trading"),
-        vars: resolve(["trading_price_deviation_limit"]),
+        tool: "strategy_gates",
+        label: t("stockAnalysis.settings.group.strategyGates"),
+        // 2026-09-12 批量补齐：这些 key 一直被各策略以 read_f64 读取并带
+        // 硬编码默认值，但既不在 DB 变量表、也不在本白名单 ⇒ 面板上完全不可见。
+        // 门槛与过滤条件：32 项。决定「是否入池」。超短线拿不到候选时先查这里：cap_ultra_short_turnover_min / cap_kline_vol_ratio_min 过严，或 val_ultra_short_pe_max 偏低，都会让候选被静默剔除。
+        collapsedByDefault: true,
+        vars: resolve([
+          "cap_kline_mom_5_max",
+          "cap_kline_mom_5_min",
+          "cap_kline_vol_ratio_min",
+          "cap_long_main_inflow_min",
+          "cap_long_nb_ratio_min",
+          "cap_mid_main_inflow_min",
+          "cap_mid_nb_ratio_min",
+          "cap_short_main_inflow_min",
+          "cap_short_turnover_min",
+          "cap_ultra_short_dt_net_min",
+          "cap_ultra_short_turnover_min",
+          "rev_dd_min",
+          "rev_min_divergence_strength",
+          "rev_rsi_mid_max",
+          "rev_rsi_mid_max_divergence",
+          "rev_rsi_mid_period",
+          "rev_rsi_period",
+          "rev_rsi_short_max_divergence",
+          "serenity_growth_exempt_pct",
+          "serenity_max_12m_gain_pct",
+          "serenity_max_3m_gain_pct",
+          "serenity_max_debt_ratio",
+          "serenity_max_pb",
+          "serenity_max_pe",
+          "serenity_min_gross_margin",
+          "serenity_min_revenue_growth",
+          "val_long_pb_max",
+          "val_long_pe_max",
+          "val_mid_pb_max",
+          "val_mid_pe_max",
+          "val_short_pe_max",
+          "val_ultra_short_pe_max",
+        ]),
+      },
+      {
+        tool: "strategy_confidence",
+        label: t("stockAnalysis.settings.group.strategyConfidence"),
+        // 2026-09-12 批量补齐：这些 key 一直被各策略以 read_f64 读取并带
+        // 硬编码默认值，但既不在 DB 变量表、也不在本白名单 ⇒ 面板上完全不可见。
+        // 置信度分量与权重：27 项。各策略的置信度分量权重与加成，决定打分尺度。注意 reco_min_confidence 是全局闸门（在「推荐器」组），这里调的是「分数怎么算出来」。
+        collapsedByDefault: true,
+        vars: resolve([
+          "cap_conf_consistency",
+          "cap_conf_direction",
+          "cap_conf_market",
+          "cap_conf_signal",
+          "rev_conf_base",
+          "rev_conf_consistency",
+          "rev_conf_direction",
+          "rev_conf_market",
+          "rev_conf_signal",
+          "rev_divergence_bonus",
+          "rev_pattern_bonus",
+          "syn_conf_base",
+          "syn_conf_consistency",
+          "syn_conf_direction",
+          "syn_conf_market",
+          "syn_conf_signal",
+          "syn_min_confidence",
+          "val_conf_consistency",
+          "val_conf_direction",
+          "val_conf_market",
+          "val_conf_signal",
+          "wl_conf_base",
+          "wl_conf_consistency",
+          "wl_conf_direction",
+          "wl_conf_market",
+          "wl_conf_signal",
+          "wl_min_confidence",
+        ]),
+      },
+      {
+        tool: "strategy_position",
+        label: t("stockAnalysis.settings.group.strategyPosition"),
+        // 2026-09-12 批量补齐：这些 key 一直被各策略以 read_f64 读取并带
+        // 硬编码默认值，但既不在 DB 变量表、也不在本白名单 ⇒ 面板上完全不可见。
+        // 仓位与价格区间：107 项。入场区间 / 止损 / 目标 / 基准仓位，按策略 × 周期细分。默认值与代码常量逐一对齐，改之前请确认影响面。
+        collapsedByDefault: true,
+        vars: resolve([
+          "cap_long_base_pos",
+          "cap_long_entry_high",
+          "cap_long_entry_low",
+          "cap_long_stop",
+          "cap_long_target",
+          "cap_mid_base_pos",
+          "cap_mid_entry_high",
+          "cap_mid_entry_low",
+          "cap_mid_stop",
+          "cap_mid_target",
+          "cap_short_base_pos",
+          "cap_short_entry_high",
+          "cap_short_entry_low",
+          "cap_short_stop",
+          "cap_short_target",
+          "cap_ultra_short_base_pos",
+          "cap_ultra_short_entry_high",
+          "cap_ultra_short_entry_low",
+          "cap_ultra_short_stop",
+          "cap_ultra_short_target",
+          "rev_avg_amount_mult",
+          "rev_mid_base_pos",
+          "rev_mid_entry_high",
+          "rev_mid_entry_low",
+          "rev_mid_stop",
+          "rev_mid_target",
+          "rev_short_base_pos",
+          "rev_short_entry_high",
+          "rev_short_entry_low",
+          "rev_short_stop",
+          "rev_short_target",
+          "serenity_base_position",
+          "serenity_entry_range",
+          "serenity_stop_mult",
+          "serenity_target_mult",
+          "serenity_target_pe",
+          "syn_long_base_pos",
+          "syn_long_entry_high",
+          "syn_long_entry_low",
+          "syn_long_holding_days",
+          "syn_long_stop",
+          "syn_long_target",
+          "syn_mid_base_pos",
+          "syn_mid_entry_high",
+          "syn_mid_entry_low",
+          "syn_mid_holding_days",
+          "syn_mid_stop",
+          "syn_mid_target",
+          "syn_short_base_pos",
+          "syn_short_entry_high",
+          "syn_short_entry_low",
+          "syn_short_holding_days",
+          "syn_short_stop",
+          "syn_short_target",
+          "syn_ultra_short_base_pos",
+          "syn_ultra_short_entry_high",
+          "syn_ultra_short_entry_low",
+          "syn_ultra_short_holding_days",
+          "syn_ultra_short_stop",
+          "syn_ultra_short_target",
+          "val_long_base_pos",
+          "val_long_entry_high",
+          "val_long_entry_low",
+          "val_long_ma60_mult",
+          "val_long_stop",
+          "val_long_target",
+          "val_mid_base_pos",
+          "val_mid_entry_high",
+          "val_mid_entry_low",
+          "val_mid_stop",
+          "val_mid_target",
+          "val_short_base_pos",
+          "val_short_entry_high",
+          "val_short_entry_low",
+          "val_short_ma_mult",
+          "val_short_stop",
+          "val_short_target",
+          "val_ultra_short_base_pos",
+          "val_ultra_short_entry_high",
+          "val_ultra_short_entry_low",
+          "val_ultra_short_ma_mult",
+          "val_ultra_short_stop",
+          "val_ultra_short_target",
+          "wl_long_base_pos",
+          "wl_long_entry_high",
+          "wl_long_entry_low",
+          "wl_long_holding_days",
+          "wl_long_stop",
+          "wl_long_target",
+          "wl_mid_base_pos",
+          "wl_mid_entry_high",
+          "wl_mid_entry_low",
+          "wl_mid_holding_days",
+          "wl_mid_stop",
+          "wl_mid_target",
+          "wl_short_base_pos",
+          "wl_short_entry_high",
+          "wl_short_entry_low",
+          "wl_short_holding_days",
+          "wl_short_stop",
+          "wl_short_target",
+          "wl_ultra_short_base_pos",
+          "wl_ultra_short_entry_high",
+          "wl_ultra_short_entry_low",
+          "wl_ultra_short_holding_days",
+          "wl_ultra_short_stop",
+          "wl_ultra_short_target",
+        ]),
+      },
+      {
+        tool: "strategy_data",
+        label: t("stockAnalysis.settings.group.strategyData"),
+        // 2026-09-12 批量补齐：这些 key 一直被各策略以 read_f64 读取并带
+        // 硬编码默认值，但既不在 DB 变量表、也不在本白名单 ⇒ 面板上完全不可见。
+        // 数据窗口与限流：13 项。K 线读取上限、最少条数、均线与均量周期。
+        collapsedByDefault: true,
+        vars: resolve([
+          "rev_avg_amount_period",
+          "rev_dd_period",
+          "rev_divergence_lookback",
+          "rev_kline_limit",
+          "rev_min_kline_len",
+          "val_long_kline_limit",
+          "val_long_ma_period",
+          "val_short_kline_limit",
+          "val_short_ma_period",
+          "val_short_min_kline_len",
+          "val_ultra_short_kline_limit",
+          "val_ultra_short_ma_period",
+          "val_ultra_short_min_kline_len",
+        ]),
       },
       {
         tool: "workflow_runtime",
@@ -762,7 +941,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
             ["defaultGrowth", t("stockAnalysis.settings.valuation.defaultGrowth"), "0.08 (8%)", 0.01, 0.50, 0.01],
             ["minGrowth", t("stockAnalysis.settings.valuation.minGrowth"), "0.02 (2%)", 0, 0.20, 0.01],
             ["maxGrowth", t("stockAnalysis.settings.valuation.maxGrowth"), "0.30 (30%)", 0.05, 1.00, 0.01],
-            ["forecastYears", t("stockAnalysis.settings.valuation.forecastYears"), "5 年", 1, 15, 1],
+            ["forecastYears", t("stockAnalysis.settings.valuation.forecastYears"), "5", 1, 15, 1],
             ["bondYield", t("stockAnalysis.settings.valuation.bondYield"), "4.4", 1.0, 10.0, 0.1],
           ] as const).map(([key, label, hint, min, max, step]) => (
             <div key={key} style={rowStyle} className="flex items-center justify-between sacp-row">
@@ -796,30 +975,53 @@ export function StockAnalysisConfigPanel(_props: Props) {
         </div>
       </SettingsGroup>
 
-      {toolGroups.map((g) => (
-        <SettingsGroup
-          key={g.tool}
-          title={
-            <Space size={4}>
-              <span>{g.label}</span>
-              <Tag className="text-xs m-0" color="default">⚙️ {g.tool}</Tag>
-            </Space>
-          }
-        >
-          <div className="sacp-vars">
-            {g.vars.map((v) => (
-              <div key={v.name} style={rowStyle} className="flex items-center justify-between sacp-row">
-                <span className="sacp-var-label" style={{ fontSize: 13, color: token.colorText }}>
-                  {v.description ? t(v.description) : v.name}
-                </span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 16 }}>
-                  <VariableControl v={v} value={values[v.name]} onChange={handleChange} />
-                </span>
+      {toolGroups.map((g) => {
+        const collapsible = g.collapsedByDefault === true;
+        const expanded = expandedGroups[g.tool] === true;
+        const open = !collapsible || expanded;
+        return (
+          <SettingsGroup
+            key={g.tool}
+            title={
+              <Space size={4}>
+                <span>{g.label}</span>
+                <Tag className="text-xs m-0" color="default">⚙️ {g.tool}</Tag>
+              </Space>
+            }
+            extra={collapsible
+              ? (
+                <Button
+                  size="small"
+                  type="link"
+                  className="!h-auto !px-1 !text-xs"
+                  onClick={() => setExpandedGroups((prev) => ({ ...prev, [g.tool]: !expanded }))}
+                >
+                  {expanded
+                    ? t("stockAnalysis.settings.collapseGroup")
+                    : t("stockAnalysis.settings.expandGroup", { total: g.vars.length })}
+                </Button>
+              )
+              : undefined}
+          >
+            {open && (
+              <div className="sacp-vars">
+                {g.vars.map((v) => (
+                  <div key={v.name} style={rowStyle} className="flex items-center justify-between sacp-row">
+                    <span className="sacp-var-label" style={{ fontSize: 13, color: token.colorText }}>
+                      {v.description ? t(v.description) : v.name}
+                    </span>
+                    <span
+                      style={{ display: "inline-flex", alignItems: "center", gap: 8, flexShrink: 0, marginLeft: 16 }}
+                    >
+                      <VariableControl v={v} value={values[v.name]} onChange={handleChange} />
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </SettingsGroup>
-      ))}
+            )}
+          </SettingsGroup>
+        );
+      })}
       <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
         <Button type="primary" loading={saving} onClick={handleSave}>
           {t("stockAnalysis.settings.saveConfig")}

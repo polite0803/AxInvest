@@ -15,14 +15,19 @@ pub struct Model {
     pub container_id: String,
     pub item_id: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "pending")]
     pub status: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub current_stage: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub progress: i32,
     #[sea_orm(column_type = "Text", nullable)]
     pub error_message: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub retry_count: i32,
+    #[sea_orm(default_value = 3)]
     pub max_retries: i32,
+    #[sea_orm(default_value = 0)]
     pub priority: i32,
     pub created_at: i64,
     pub started_at: Option<i64>,

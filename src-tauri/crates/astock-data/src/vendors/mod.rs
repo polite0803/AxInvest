@@ -132,6 +132,20 @@ pub trait StockVendor: Send + Sync {
         Ok(vec![])
     }
 
+    /// 获取历史估值日序列（估值带的唯一数据供应方）
+    ///
+    /// `years` = 回溯年数。默认返回空 —— 目前仅 eastmoney 具备该能力
+    /// （数据中心 RPT_VALUEANALYSIS_DET，逐交易日 PE/PB/PS），
+    /// 其余 vendor 无历史估值接口，返回空数组由路由层继续尝试下一个源。
+    async fn get_valuation_history(
+        &self,
+        stock_code: &str,
+        years: u32,
+    ) -> Result<Vec<ValuationSnapshot>, DataError> {
+        let _ = (stock_code, years);
+        Ok(vec![])
+    }
+
     async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
         Ok(vec![])
     }

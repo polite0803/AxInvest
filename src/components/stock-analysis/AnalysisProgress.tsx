@@ -1,5 +1,6 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
+import { TOOL_NODE_I18N_KEY } from "@/stores/feature/stockWorkflowChatBridge";
 import { Button, message, Progress, Steps, Tag } from "antd";
 import { Pause, Play } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -29,6 +30,16 @@ const ANALYST_NODE_IDS = [
 // 最大辩论轮数（bull/bear 配对数），与 workflow template 中的 maxDebateRounds 同步
 const TOTAL_DEBATE_ROUNDS = 3;
 
+/**
+ * 秒 → `mm:ss`（T-1 P1）。
+ * 纯数字格式、无语言差异，故不进 i18n（避免 11 语言重复维护同一格式）。
+ */
+function formatElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export function AnalysisProgress() {
   const { t } = useTranslation();
   const status = useStockAnalysisStore((s) => s.status);
@@ -41,12 +52,32 @@ export function AnalysisProgress() {
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const progressMessage = useStockAnalysisStore((s) => s.progressMessage);
   const progressPct = useStockAnalysisStore((s) => s.progressPct);
+  // T-1 P1: 当前节点与运行时长（由 workflow-step-start 驱动，长节点期间不再静止）
+  const currentNodeId = useStockAnalysisStore((s) => s.currentNodeId);
+  const currentNodeIndex = useStockAnalysisStore((s) => s.currentNodeIndex);
+  const totalNodeCount = useStockAnalysisStore((s) => s.totalNodeCount);
+  const nodeStartedAt = useStockAnalysisStore((s) => s.nodeStartedAt);
   const dataWarnings = useStockAnalysisStore((s) => s.dataWarnings);
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const workflowId = useStockAnalysisStore((s) => s.workflowId);
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [localPaused, setLocalPaused] = useState(false);
+
+  // T-1 P1: 本地秒级计时。不依赖后端心跳推送 —— 即使事件偶发丢失，用户仍能看到
+  // 「当前节点已运行多久」，据此判断是「LLM 长调用」还是「已卡死」
+  // （健康基线：completed 执行 5.4~27.3 分钟，单节点通常 1-5 分钟）。
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    if (!nodeStartedAt || (status !== "running" && status !== "loading")) {
+      setElapsedSec(0);
+      return;
+    }
+    const tick = () => setElapsedSec(Math.max(0, Math.floor((Date.now() - nodeStartedAt) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [nodeStartedAt, status]);
 
   // Hooks 必须在 early return 之前 — 保持顺序稳定
   const subProgress = useMemo(() => {
@@ -197,6 +228,37 @@ export function AnalysisProgress() {
       {status === "error" && progressMessage && (
         <div className="mt-1 text-xs" style={{ color: "var(--sa-red)" }}>
           {progressMessage}
+        </div>
+      )}
+
+      {
+        /* T-1 P1: 当前正在执行的节点 + 已运行时长。
+          修复前：`progressPct` / `progressMessage` 只在节点**完成**时更新，一个 LLM 节点
+          跑 1-5 分钟期间整块进度区静止，用户无法区分「正在跑」与「已卡死」。
+          节点名走 TOOL_NODE_I18N_KEY（工具节点有 i18n 名）；Agent/Rhai 节点
+          （portfolio-mgr / trader / v-validate 等）未收录，回退显示 nodeId。 */
+      }
+      {(status === "running" || status === "loading") && currentNodeId && (
+        <div className="mt-1 flex items-center gap-1.5 text-xs" style={{ color: "var(--muted)" }}>
+          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span>
+            {totalNodeCount > 0
+              ? t("stockAnalysis.progress.currentNode", {
+                name: TOOL_NODE_I18N_KEY[currentNodeId]
+                  ? t(TOOL_NODE_I18N_KEY[currentNodeId])
+                  : currentNodeId,
+                index: currentNodeIndex,
+                total: totalNodeCount,
+              })
+              : TOOL_NODE_I18N_KEY[currentNodeId]
+              ? t(TOOL_NODE_I18N_KEY[currentNodeId])
+              : currentNodeId}
+          </span>
+          {elapsedSec > 0 && (
+            <span className="tabular-nums opacity-70">
+              · {t("stockAnalysis.progress.elapsed", { time: formatElapsed(elapsedSec) })}
+            </span>
+          )}
         </div>
       )}
 

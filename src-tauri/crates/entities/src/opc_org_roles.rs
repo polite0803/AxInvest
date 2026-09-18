@@ -10,16 +10,19 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub org_id: String,
     /// 角色 id（映射 agent_roles 或 opc-xxx 专家）
     pub role_id: String,
     pub name: String,
     /// 职责描述
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub responsibility: String,
     /// 汇报给的角色 id（None = 最高层）
     pub reports_to: Option<String>,
     /// 资历（junior/mid/senior/lead）
+    #[sea_orm(default_value = "mid")]
     pub seniority: String,
     pub created_at: i64,
     pub updated_at: i64,

@@ -9,6 +9,8 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub name: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "global")]
     pub scope: String,
     pub embedding_provider: Option<String>,
     pub embedding_dimensions: Option<i32>,
@@ -16,6 +18,7 @@ pub struct Model {
     pub retrieval_top_k: Option<i32>,
     pub icon_type: Option<String>,
     pub icon_value: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub sort_order: i32,
 }
 

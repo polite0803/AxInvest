@@ -34,21 +34,22 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   // ── AxInvest 本地业务页（2026-09-01 上游合并时路由被覆盖，09-06 按能力域恢复） ──
   "finance-investment": "/invest",
   "automation-operations": "/opc",
-  // 行业页（IndustryPages.tsx 固定组件，路径沿用 IndustryNavigator 的 /opc/industry/:id 约定）
-  "finance-analysis": "/opc/industry/finance-invest",
-  "finance-accounting": "/opc/industry/accounting",
-  "automation-sales": "/opc/industry/sales-growth",
-  "automation-projects": "/opc/industry/project-management",
-  "automation-consulting": "/opc/industry/industry-consulting",
-  "automation-ecommerce": "/opc/industry/ecommerce",
-  "devops-software": "/opc/industry/software-dev",
-  "devops-security": "/opc/industry/security",
-  "data-geospatial": "/opc/industry/geospatial",
-  "data-ai-research": "/opc/industry/ai-research",
-  "content-media": "/opc/industry/content-media",
-  "content-design": "/opc/industry/design",
-  "content-education": "/opc/industry/education",
-  "ai-media-game": "/opc/industry/game-dev",
+  // 域包页（DomainPages.tsx 固定组件，路径 /opc/domain/:packId；
+  // 2026-09-15 由 /opc/industry/:packId 迁移而来，旧链在 ContentArea 里重定向）
+  "finance-analysis": "/opc/domain/finance-invest",
+  "finance-accounting": "/opc/domain/accounting",
+  "automation-sales": "/opc/domain/sales-growth",
+  "automation-projects": "/opc/domain/project-management",
+  "automation-consulting": "/opc/domain/consulting",
+  "automation-ecommerce": "/opc/domain/ecommerce",
+  "devops-software": "/opc/domain/software-dev",
+  "devops-security": "/opc/domain/security",
+  "data-geospatial": "/opc/domain/geospatial",
+  "data-ai-research": "/opc/domain/ai-research",
+  "content-media": "/opc/domain/content-media",
+  "content-design": "/opc/domain/design",
+  "content-education": "/opc/domain/education",
+  "ai-media-game": "/opc/domain/game-dev",
 
   // ── 通用功能（general 域） ──
   chat: "/chat",

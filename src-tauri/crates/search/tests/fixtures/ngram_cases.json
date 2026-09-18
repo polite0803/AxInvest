@@ -1,0 +1,71 @@
+{
+  "$comment": [
+    "cjk_ngram 归一化的可执行规范（单一真源）。",
+    "",
+    "两侧实现都必须满足本文件的每一条：",
+    "  1. Rust   -> crates/search/src/text_ngram.rs::cjk_ngram",
+    "     （由 crates/search/tests/ngram_consistency.rs 校验）",
+    "  2. SQL/PG -> 迁移 v227_cjk_fts 里的 ax_cjk_ngram()",
+    "     （由 scripts/check-ngram-consistency.mjs 对真实 PG 执行后校验）",
+    "",
+    "原因：索引侧与查询侧的分词若有任何分歧，会**静默失配** —— 索引里有、查询里",
+    "取不到，且不报错、不抛异常、单测也全绿。只有用同一份 fixture 双向下钉才能拦住。",
+    "",
+    "expected 的推导规则见 text_ngram.rs 模块文档。注意输出是「先全部单字、",
+    "再全部 bigram」的两段式（每个段内），不是逐字交替。"
+  ],
+  "cases": [
+    { "note": "空输入", "input": "", "expected": "" },
+    { "note": "纯空白", "input": "   ", "expected": "" },
+    { "note": "纯标点（全角）", "input": "，。！？", "expected": "" },
+
+    { "note": "孤立单字必须可检索（bigram 无法表示）", "input": "股", "expected": "股" },
+    { "note": "最短二字词", "input": "股票", "expected": "股 票 股票" },
+    { "note": "四字：4 单字 + 3 bigram", "input": "向量索引", "expected": "向 量 索 引 向量 量索 索引" },
+    { "note": "五字", "input": "基本面分析", "expected": "基 本 面 分 析 基本 本面 面分 分析" },
+    {
+      "note": "重复字：内容侧不去重，保留词频供 ts_rank；两段式而非交替",
+      "input": "股票股票",
+      "expected": "股 票 股 票 股票 票股 股票"
+    },
+
+    { "note": "全角逗号分隔两段，bigram 不可跨标点", "input": "你好，世界", "expected": "你 好 你好 世 界 世界" },
+    { "note": "无标点时 bigram 连续（好世 必须存在）", "input": "你好世界", "expected": "你 好 世 界 你好 好世 世界" },
+
+    { "note": "中英混排：类型切换处分段", "input": "使用pgvector实现", "expected": "使 用 使用 pgvector 实 现 实现" },
+    { "note": "数字紧跟中文", "input": "代码600519", "expected": "代 码 代码 600519" },
+    { "note": "纯数字为整词", "input": "600519", "expected": "600519" },
+    { "note": "连字符为分隔符", "input": "2026-09-12", "expected": "2026 09 12" },
+    { "note": "下划线为分隔符", "input": "foo_bar", "expected": "foo bar" },
+    { "note": "纯英文", "input": "vector", "expected": "vector" },
+    { "note": "英文多词", "input": "hello world", "expected": "hello world" },
+
+    {
+      "note": "有空格分词的语言不得因改造而回退（改造前 simple 配置对俄语可用）",
+      "input": "привет мир",
+      "expected": "привет мир"
+    },
+    { "note": "中俄混排", "input": "中文Привет中文", "expected": "中 文 中文 Привет 中 文 中文" },
+    { "note": "日文假名", "input": "あいう", "expected": "あ い う あい いう" },
+    { "note": "谚文", "input": "한국어", "expected": "한 국 어 한국 국어" },
+
+    { "note": "斜杠为分隔符", "input": "GBP/USD", "expected": "GBP USD" },
+    { "note": "全角括号为分隔符", "input": "苹果（Apple）", "expected": "苹 果 苹果 Apple" },
+    { "note": "数学符号为分隔符：≥ 与 % 都要切掉，使 ROE/15 可独立检索", "input": "ROE≥15%", "expected": "ROE 15" },
+    { "note": "比较符与单字中文混排", "input": "PE<20 且>15", "expected": "PE 20 且 15" },
+    { "note": "日期中文月份：单字不成 bigram", "input": "2026年09月12日", "expected": "2026 年 09 月 12 日" },
+    { "note": "半角括号内数字", "input": "贵州茅台(600519)", "expected": "贵 州 茅 台 贵州 州茅 茅台 600519" },
+    { "note": "逗号紧贴", "input": "股票,600519", "expected": "股 票 股票 600519" },
+
+    { "note": "全角字母不是 CJK 也不是分隔符，作 word 保留", "input": "ＡＢＣ", "expected": "ＡＢＣ" },
+    { "note": "带圈数字在符号区，作分隔符", "input": "①②③", "expected": "" },
+    { "note": "类 ChatML 控制串：尖括号与竖线为分隔符", "input": "<|im_start|>", "expected": "im start" },
+    { "note": "首尾与中间空格", "input": " 混合 spaced 文本 ", "expected": "混 合 混合 spaced 文 本 文本" },
+    {
+      "note": "真实业务句子（瓶颈掘金场景）",
+      "input": "瓶颈掘金：挖掘未起飞的pre-takeoff公司",
+      "expected": "瓶 颈 掘 金 瓶颈 颈掘 掘金 挖 掘 未 起 飞 的 挖掘 掘未 未起 起飞 飞的 pre takeoff 公 司 公司"
+    },
+    { "note": "emoji 非 CJK 非分隔符，落入 word（行为记录）", "input": "🀄", "expected": "🀄" }
+  ]
+}

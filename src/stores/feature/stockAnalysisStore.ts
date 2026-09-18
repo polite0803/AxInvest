@@ -1,18 +1,27 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import i18n from "@/i18n";
 import {
+  type DecisionExplanation,
   extractContent,
   extractDecision,
   extractLlmField,
   normalizeDecision,
+  parseDecisionExplanation,
   parseJsonLoose,
   reconstructVerdictTag,
   tryParseDecision,
 } from "@/lib/agentOutput";
 import { buildDecisionInputsReport, type DecisionInputsReport } from "@/lib/decisionInputDiagnosis";
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
-import { computeStockConsensus, parseAction, parseRiskLevel } from "@/lib/stock-analysis-utils";
+import {
+  computeStockConsensus,
+  deriveActionFromLlmDecision,
+  parseAction,
+  parseRiskLevel,
+  StockAction,
+} from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
@@ -41,24 +50,67 @@ const EARNINGS_CACHE_TTL_MS = 10 * 60 * 1000; // 10 分钟
 let latestQuoteReqId = 0;
 let latestQuoteCode = "";
 
-// #21 工作流错误自动重试：仅对「瞬态」错误重试一次，避免无限循环与重复浪费
+// #21 工作流错误自动重试：仅对「瞬态」错误重试一次，避免无限循环与重复浪费。
 const MAX_WORKFLOW_ERROR_RETRIES = 1;
-function isRetryableWorkflowError(errorCode: string, msg: string): boolean {
-  const lc = `${errorCode} ${msg}`.toLowerCase();
-  return (
-    lc.includes("timeout")
-    || lc.includes("timed out")
-    || lc.includes("network")
-    || lc.includes("econn")
-    || lc.includes("unavailable")
-    || lc.includes("503")
-    || lc.includes("502")
-    || lc.includes("504")
-    || lc.includes("temporar")
-    || lc.includes("busy")
-    || lc.includes("reset by peer")
-  );
+//
+// ⚠️ 判据必须是**结构化**的。历史实现用 11 个文本子串嗅探（`lc.includes("timeout")`
+// / `"network"` / `"503"` / `"busy"` …）反推「能否重试」，有三个问题：
+//   ① 漏判 —— 后端换措辞（如中文「分析超时」不含 "timeout"）立刻失效；
+//   ② 误判 —— 详情里恰好出现 "busy"/"网络" 等词就会误触发重跑；
+//   ③ 语言相关 —— 嗅探的是英文关键词，而 detail 可能是中文。
+// 现在由后端在事件 payload 里给 `category`（`ErrorCategory` 的 snake_case），
+// 见 `src-tauri/src/commands/stock_workflow/core.rs` 的失败事件契约。
+// 白名单是**冗余兜底**：万一后端漏标 category，仍能识别本工作流唯一的可重试终态。
+const RETRYABLE_WORKFLOW_CODES: ReadonlySet<string> = new Set([
+  "STOCK_WORKFLOW_TIMEOUT",
+]);
+
+// 「运行级取消」波及的节点错误码集合。
+//
+// 手动停止 / 应用关闭会让取消信号扩散到所有正在执行的节点，它们**逐个**上报
+// `status: "failed"` —— 但这些 failed 不代表节点质量问题（2026-09-10 bear-r3 实证：
+// 节点实际已完成，被取消事件污染成 failed，Debug 面板误报）。
+//
+// ⚠️ 判据只读后端给的结构化 `errorCode`，**不得对 `error` 文本做子串匹配**：
+// 该事件的 `error` 是 `NodeError` 的 `Display`（形如 `「CODE: detail」`），
+// 用 `startsWith` 之类反推语义会漏判、误判，且与文案/语言强耦合。
+// 后端已在 `stock_workflow/core.rs::node_error_code` 把 rt-workflow 的**基座码**
+// 收敛成本域码，前端拿到的永远是可译、可编程的 `STOCK_WORKFLOW_*`。
+const RUN_LEVEL_CANCEL_STEP_CODES: ReadonlySet<string> = new Set([
+  "STOCK_WORKFLOW_STEP_CANCELLED",
+]);
+
+function isRetryableWorkflowError(
+  code: string | undefined,
+  category: string | undefined,
+): boolean {
+  if (category === "retryable") {
+    return true;
+  }
+  return code !== undefined && RETRYABLE_WORKFLOW_CODES.has(code);
 }
+
+// 「LLM 降级 ⇒ 视作完成」的错误码集合。
+//
+// 语义来源：`AnalysisProgress.tsx` 在 `llmStatus === "placeholder"` 时显示
+// `stockAnalysis.offlineMode`（「离线模式 (LLM Driver 未连接，占位数据)」），
+// 即 —— 拿不到 LLM 时工作流产出的是**占位结果**，分析「完成」了但可信度低，
+// 所以 `status` 应为 `completed` 而非 `error`。
+//
+// ⚠️ 为什么这里是**空集合**（而不是含 `LLM_FALLBACK`）：
+// 历史实现写 `errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR")`，
+// 即在**自由文本里找 "LLM" 字样**，而 `LLM_FALLBACK` 这个码后端从未产出过
+// （全仓 `grep LLM_FALLBACK src-tauri/` 零命中）—— 是一条入边缺失的死链。
+// 实证该嗅探也不可达：
+//   · `WorkflowError`（`crates/harness/src/workflow_types.rs:2509`）10 个变体全部与 LLM 无关；
+//   · `stock_workflow/` 目录内含 "LLM" 的字符串只出现在 `decision.rs` 的**节点级** error
+//     与日志里，不经 `workflow-error` 事件的 `detail` 字段。
+// 所以删掉嗅探**不改变任何真实行为**，只是把偶然性去掉。
+//
+// 保留该集合是为了让这条状态机有**显式、可审计的入口**：将来后端补上
+// 「LLM 不可用」的就绪探测并产出一个真实码（如 `STOCK_WORKFLOW_LLM_UNAVAILABLE`）时，
+// 只需在此加码 —— 不需要再回到字符串嗅探。
+const LLM_DEGRADED_CODES: ReadonlySet<string> = new Set<string>();
 
 /**
  * parseWorkflowResults 同款策略:从后端 blackboard snapshot 还原各分类字段。
@@ -80,6 +132,8 @@ function parseWorkflowResults(results: Record<string, unknown>) {
   let dataQualitySummary = "";
   const rawData: Record<string, string> = {};
   let decision: StockDecision | null = null;
+  // v45: 工作流「仿真验证」节点（sim-verify，决策之后自动运行）的输出
+  let simulation: SimulationSnapshot | null = null;
   // V55: 提取后端注入的 __untrusted 标记（strict_mode 兜底节点）
   const untrustedNodes: Record<string, true> = {};
 
@@ -152,17 +206,24 @@ function parseWorkflowResults(results: Record<string, unknown>) {
         }
       }
       dataQualitySummary = content;
-      if (import.meta.env.DEV) {
-        console.debug("[DQ] parseWorkflowResults stepId=data-quality", {
-          rawType: raw ? typeof raw : "(null)",
-          rawKeys: raw && typeof raw === "object" ? Object.keys(raw as object) : null,
-          hasResult: raw && typeof raw === "object" ? !!(raw as Record<string, unknown>).result : null,
-          contentLen: content.length,
-          contentPreview: content.slice(0, 200),
-        });
-      }
     } else if (stepId === "raw-data") {
       rawData[stepId] = output;
+    } else if (stepId === "sim-verify") {
+      // v45: 工作流「仿真验证」节点（决策之后自动运行，用户无需手点）。
+      // CodeNode 包装为 {status, language, result: {...}, input_params, node_id, params}，
+      // 真正的字段在 raw.result 层（与 data-quality 同款处理）。
+      if (raw && typeof raw === "object") {
+        const r = raw as Record<string, unknown>;
+        const payload = r.result;
+        if (payload && typeof payload === "object") {
+          simulation = payload as unknown as SimulationSnapshot;
+        } else if (typeof payload === "string") {
+          const loose = parseJsonLoose(payload);
+          if (loose && typeof loose === "object") {
+            simulation = loose as unknown as SimulationSnapshot;
+          }
+        }
+      }
     }
   }
 
@@ -177,6 +238,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
     rawData,
     decision,
     untrustedNodes,
+    simulation,
   };
 }
 
@@ -235,6 +297,17 @@ export interface PortfolioStressResult {
   portfolioPnlPct: number;
   topHit?: { stockCode: string; stockName: string; pnlPct: number };
   note: string;
+  /**
+   * β 取值来源统计（2026-09-14 新增）：
+   * `historical` = 用该股对沪深300的**真实历史回归**估计的持仓数；
+   * `fallback` = 因样本不足而回退到中性 1.0 的持仓数，`fallbackCodes` 给出具体代码。
+   * 后端带 `#[serde(default)]` ⇒ 历史快照可能不含该字段，故为可选。
+   */
+  betaProvenance?: {
+    historical: number;
+    fallback: number;
+    fallbackCodes: string[];
+  };
 }
 
 export interface PortfolioStressBundle {
@@ -291,6 +364,56 @@ export interface PositionLimitsCheck {
   maxSectorExposurePct: number;
   newPositionValue: number;
 }
+/**
+ * 工作流「仿真验证」节点（`sim-verify`）的输出 —— 决策**之后**自动跑的
+ * 蒙特卡洛多场景压力测试结果。
+ *
+ * 节点位置：模板里 `sim-verify` **不在 DAG 执行链上**（`enabled: false` 且无任何边，
+ * 与 `store-result` 并列显示在决策之后），真正的执行由后端在**落库之后**挂钩触发
+ * （`stock_workflow/core.rs`），因此不占用工作流执行时长。
+ * 节点本身不产出任何决策字段 ⇒ 其结果物理上不可能成为决策输入（无节点消费它）。
+ *
+ * ⚠️ `consistencyScore === null` 表示**不可判定**（各场景涨跌幅均值趋零 ⇒ 变异系数
+ * 数学上无定义）。UI 必须渲染为「无法判定」，**不可**当作 0 —— 0 会被读成
+ * 「高度一致」，方向正好相反。
+ */
+export interface SimulationSnapshot {
+  simOk: boolean;
+  /**
+   * `simOk=false` 时的**后端错误码**（形态 `STOCK_SIM_*`）。
+   *
+   * 权威源：`src-tauri/src/commands/error_code.rs::stock_sim`；
+   * 翻译：11 语言**顶层 `error` 段**的 `error.${code}`（项目规范强制错误码平铺
+   * 顶层 `error` 段，禁止散落到业务子段），由 `scripts/check-errorcode-alignment.mjs`
+   * 校验后端码 ↔ 前端翻译一一对齐。
+   *
+   * ⚠️ 这里**只放码**，不放面向用户的文案 —— 界面文案一律经 `translateBackendError`
+   * 翻译，否则非中文界面会漏出中文（这正是本字段从自由文本 `error` 改过来的原因）。
+   */
+  code?: string;
+  /** 错误分类（`ErrorCategory` 的 snake_case），供前端智能分支（重试 / 授权引导）。 */
+  category?: string;
+  /** 技术详情（调试用）；仅在缺译时兜底展示，不是用户可见文案。 */
+  detail?: string;
+  stockCode?: string;
+  /** 参考价（单位：分，与后端 McSimResult 一致） */
+  referencePrice?: number;
+  totalPaths?: number;
+  /** 跨场景上涨占比。由勾选的场景集合决定，**不代表个股质地**。 */
+  survivalRate?: number;
+  consistencyScore?: number | null;
+  bestScenario?: string;
+  worstScenario?: string;
+  scenarioResults?: SimulationScenarioRow[];
+}
+
+export interface SimulationScenarioRow {
+  scenario?: string;
+  label?: string;
+  paths?: number;
+  priceChangePct?: number | null;
+}
+
 const DRY_RUN_TTL_MS = 60_000;
 
 interface StockAnalysisState {
@@ -326,9 +449,21 @@ interface StockAnalysisState {
   ruleCheckResults: Record<string, string>;
   dataQualitySummary: string;
   rawData: Record<string, string>;
+  /** v45: 工作流「仿真验证」节点（sim-verify，决策之后自动运行）的输出 */
+  simulation: SimulationSnapshot | null;
   decision: StockDecision | null;
   /** 方案 D 双向并存: LLM 决策原始 JSON（trader 节点输出） */
   llmDecisionJson: string | null;
+  /**
+   * 决策依据说明书（`decision-explainer` 节点输出）。
+   *
+   * 该节点把 portfolio-mgr（公式决策）+ portfolio-risk-gate（组合风控门）的
+   * **符号化裁决**翻译成人话，是本项目里唯一由 LLM 输出的「决策依据 + 规则追溯码」。
+   * 2026-09-14 之前它的输出**零消费端**（只写进 blackboard_snapshot 无人读）——
+   * 这里补上消费端，历史回放（loadAnalysis）与实时完成（workflow-completed）两条
+   * 路径都填充。
+   */
+  decisionExplanation: DecisionExplanation | null;
   /** 方案 D 双向并存: 公式 vs LLM 一致性分数 0-100 */
   decisionAgreementScore: number | null;
   /** 决策仪表盘报告（借鉴 daily_stock_analysis 推送格式，7 段式结构） */
@@ -355,6 +490,20 @@ interface StockAnalysisState {
   currentStage: number;
   progressMessage: string;
   progressPct: number;
+
+  // T-1 P1(2026-09-12): 节点级实时可观测性。
+  // 此前 `progressPct` 只在节点**完成**时（workflow-step-done）更新 → 一个 LLM 节点
+  // 跑 5 分钟期间进度完全静止，用户无法区分「正在跑」与「已卡死」。
+  // 引擎侧一直在发 status="running" 的事件（`engine/mod.rs:3144`），应用层也已转发为
+  // `workflow-step-start`（`core.rs:518`），但本 store 从未订阅 → 白白丢弃。
+  /** 当前正在执行的节点 ID（`null` = 无节点在跑） */
+  currentNodeId: string | null;
+  /** 当前节点序号（1-based = 已完成节点数 + 1） */
+  currentNodeIndex: number;
+  /** 节点总数（由 workflow-step-start 携带，用于「第 i/N 个」展示） */
+  totalNodeCount: number;
+  /** 当前节点开始时间戳（ms），供前端本地计时（不依赖后端推送） */
+  nodeStartedAt: number | null;
 
   llmStatus: "live" | "placeholder" | "unknown";
   chatIndicatorDismissed: boolean;
@@ -552,9 +701,11 @@ const initialState = {
   ruleCheckResults: {},
   dataQualitySummary: "",
   rawData: {},
+  simulation: null,
   decision: null,
   llmDecisionJson: null,
   decisionAgreementScore: null,
+  decisionExplanation: null,
   dashboardReport: null,
   dashboardMd: null,
   // V55: 跟踪哪些 AgentNode 触发了 strict_mode 兜底（LLM 输出无法解析为合法 JSON）
@@ -571,6 +722,10 @@ const initialState = {
   currentStage: 0,
   progressMessage: "",
   progressPct: 0,
+  currentNodeId: null,
+  currentNodeIndex: 0,
+  totalNodeCount: 0,
+  nodeStartedAt: null,
   llmStatus: "unknown" as const,
   chatIndicatorDismissed: false,
   klinePeriod: "6m",
@@ -765,6 +920,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       workflowId: null,
       progressMessage: i18n.t("stockAnalysis.progress.fetchingData"),
       progressPct: 0,
+      // T-1 P1: 新一轮分析必须清空上一轮的节点标记，否则面板会残留旧节点名
+      currentNodeId: null,
+      currentNodeIndex: 0,
+      totalNodeCount: 0,
+      nodeStartedAt: null,
       chatIndicatorDismissed: false,
       analystReports: {},
       debateRounds: [],
@@ -774,9 +934,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       ruleCheckResults: {},
       dataQualitySummary: "",
       rawData: {},
+      simulation: null,
       decision: null,
       llmDecisionJson: null,
       decisionAgreementScore: null,
+      decisionExplanation: null,
       dashboardReport: null,
       dashboardMd: null,
       untrustedNodes: {},
@@ -844,7 +1006,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         set({
           status: "error",
           error: i18n.t("stockAnalysis.workflow.skipAnalysisError", { reason }),
-          errorCode: "DATA_QUALITY_INSUFFICIENT",
+          // 错误码必须**由后端给**（契约：前端出现的大写码 ⊆ 后端两份权威源的定义，
+          // 见 scripts/check-errorcode-alignment.mjs）。历史实现自造 "DATA_QUALITY_INSUFFICIENT"，
+          // 后端零产出 ⇒ 属幽灵码，`error.${code}` 恒 miss；现由后端发
+          // `STOCK_WORKFLOW_HOOK_BLOCKED`（见 stock_workflow/core.rs 的 skipped 分支。
+          // 没为它新增码：`error_code.rs` 里 `HOOK_BLOCKED` 的文档本就写着「如数据质量
+          // 预检不通过」，属**漏接线**而非缺码，复用可避免同一语义散成两个码）。
+          // 后端不发码时置 null（明示「无结构化码」），而不是编一个。
+          errorCode: (result.code as string | undefined) ?? null,
           analysisId: result.analysisId as string,
           stockCode: result.stockCode as string || stockCode,
           stockName: result.stockName as string || "",
@@ -899,7 +1068,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
     if (_unlisten) { _unlisten(); }
     // 使用 "cancelled" 状态保留已收集的部分数据（面板仍显示，带"已取消"标记）
-    set({ status: "cancelled" as AnalysisStatus, _unlisten: null, currentStage: 0, progressPct: 0, workflowId: null });
+    set({
+      status: "cancelled" as AnalysisStatus,
+      _unlisten: null,
+      currentStage: 0,
+      progressPct: 0,
+      currentNodeId: null,
+      currentNodeIndex: 0,
+      totalNodeCount: 0,
+      nodeStartedAt: null,
+      workflowId: null,
+    });
   },
 
   fetchHistory: async (limit = 20, offset = 0) => {
@@ -920,6 +1099,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       ruleCheckResults: {},
       dataQualitySummary: "",
       rawData: {},
+      simulation: null,
       decision: null,
       untrustedNodes: {},
       timeline: [],
@@ -930,6 +1110,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       dataWarnings: [],
       llmDecisionJson: null,
       decisionAgreementScore: null,
+      decisionExplanation: null,
       dashboardReport: null,
       dashboardMd: null,
       decisionInputsReport: [],
@@ -945,17 +1126,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         dashboardMd?: string | null;
       }
     >("get_stock_analysis", { analysisId });
-
-    // [DQ] 顶层诊断：无任何条件守护，必须打印 — 用于确认 loadAnalysis 路径是否触发
-    console.log("[DQ] loadAnalysis enter", {
-      analysisId,
-      stockCode: record.stockCode,
-      analysisKind: record.analysisKind,
-      hasSnapshot: !!record.blackboardSnapshot,
-      snapshotLen: record.blackboardSnapshot?.length ?? 0,
-      hasDecisionJson: !!record.decisionJson,
-      hasLlmDecisionJson: !!record.llmDecisionJson,
-    });
 
     // 历史数据兼容：旧版在 as-of 模式写入 stock_analyses 时,stock_name 取自
     // quote.name,但 K线合成 quote 时 name 退化为 stock_code(见
@@ -1005,13 +1175,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       mode: useTimeAnchorStore.getState().mode,
       asOfDate: useTimeAnchorStore.getState().asOfDate,
     });
-    // [DQ] 关键诊断：标记即将进入 decisionJson 处理块
-    console.log("[DQ] loadAnalysis before decisionJson block", {
-      hasDecisionJson: !!record.decisionJson,
-      decisionJsonLen: record.decisionJson?.length ?? 0,
-      hasLlmDecisionJson: !!record.llmDecisionJson,
-      hasSnapshot: !!record.blackboardSnapshot,
-    });
     if (record.decisionJson) {
       try {
         // 宽松解析：decisionJson 也可能被 ```json 代码块包裹（与 llmDecisionJson 同源）。
@@ -1023,20 +1186,21 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (normalized) {
           set({ decision: normalized });
           // V64 修复: decisionJson 含 confidence 等字段但无 action 时，
-          // normalizeDecision 返回 WAIT，但 llmDecisionJson 可能包含 verdict/report
-          // 可推导真实 action。此处复用 llmDecisionJson 兜底逻辑进行修补，
-          // 而非等待全零空壳分支（后者因 hasConfidence=true 永远不会触发）。
+          // normalizeDecision 返回 UNCERTAIN，但 llmDecisionJson 可能含
+          // 结构化 action / verdict 字段，或 reasoning 里的显式「方向:」标记，
+          // 可据此推导真实 action。
+          // 推导按「结构化程度」降序（结构化 action → verdict → 显式方向标记），
+          // 全部不可用则保持 UNCERTAIN —— **不再把推导失败当成「观望」**。
           if (
-            (normalized.action === "WAIT" || !normalized.action)
+            (normalized.action === StockAction.UNCERTAIN || !normalized.action)
             && record.llmDecisionJson
           ) {
             const llmRaw = parseJsonLoose(record.llmDecisionJson);
-            if (llmRaw?.reasoning) {
-              const derived = parseAction(String(llmRaw.reasoning));
-              if (derived !== "WAIT") {
-                normalized.action = derived;
-                set({ decision: normalized });
-              }
+            const derived = deriveActionFromLlmDecision(llmRaw);
+            // 已判定为 UNCERTAIN（非 null）时不覆盖：那是「有数据但判断不了」的结论。
+            if (derived && !normalized.action) {
+              normalized.action = derived;
+              set({ decision: normalized });
             }
           }
         } else {
@@ -1054,17 +1218,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
               // 二次兜底：trader 节点按设计只输出价格目标（trader.md 明确定义 schema
               // 仅含 currentPrice/targetPrice/stopLoss/timeHorizon/expectedHoldingDays/
               // confidence/reasoning），不含 action/positionPct。公式侧 portfolio-mgr
-              // 又返回空壳时，action 会被 normalizeDecision 退化为默认 WAIT（观望），
-              // 导致看空股被误显为"观望"。trader.md 第 101 行保证 reasoning 以
-              // `方向:看多|看空|中性` 开头，这里复用既有 parseAction 的 label 映射
-              // （"看空"→SELL/"看多"→BUY/"中性"→HOLD）从 reasoning 推导 action，
-              // 让横幅方向正确。positionPct 仍由公式侧计算，此处无数据则保持 0（未知）。
-              if (
-                (llmDecision.action === "WAIT" || !llmDecision.action)
-                && llmRaw.reasoning
-              ) {
-                const derived = parseAction(String(llmRaw.reasoning));
-                if (derived !== "WAIT") {
+              // 又返回空壳时，action 会被 normalizeDecision 退化为默认 UNCERTAIN，
+              // 导致看空股被误显为"不确定"。trader.md 第 114 行保证输出 verdict
+              // （看多|看空|中性），第 101 行保证 reasoning 以 `方向:…` 开头，
+              // 这里按「结构化 verdict → reasoning 显式方向标记」推导 action。
+              // ⚠️ 只用显式标记推导（`parseDirectionFromText`），不做全文关键词扫描 ——
+              // 全文扫描会被句中的风险词/否定词反转方向（如「风险点：大股东减持」）。
+              // positionPct 仍由公式侧计算，此处无数据则保持 0（未知）。
+              if (llmDecision.action === StockAction.UNCERTAIN || !llmDecision.action) {
+                const derived = deriveActionFromLlmDecision(llmRaw);
+                if (derived) {
                   llmDecision.action = derived;
                 }
               }
@@ -1164,18 +1327,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       }
     }
     set({ llmDecisionJson, decisionAgreementScore });
-    // [DQ] 关键诊断：标记即将进入 blackboardSnapshot 处理块
-    console.log("[DQ] loadAnalysis before snapshot block", {
-      hasSnapshot: !!record.blackboardSnapshot,
-      snapshotLen: record.blackboardSnapshot?.length ?? 0,
-    });
     if (record.blackboardSnapshot) {
       try {
-        if (import.meta.env.DEV) {
-          console.debug("[DQ] loadAnalysis enter snapshot branch", {
-            snapshotLen: record.blackboardSnapshot.length,
-          });
-        }
         // 后端 axagent_stock_analysis::blackboard::build_blackboard_snapshot 会把
         // 节点 ID 重写为带前缀的 key(见 blackboard.rs:25-51):
         //   a-*        → report.{nodeId}
@@ -1187,18 +1340,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 其它节点保留原 nodeId。
         // 这里用本地解析把 snapshot 还原成结构化字段。
         const snap: Record<string, string> = JSON.parse(record.blackboardSnapshot);
-        if (import.meta.env.DEV) {
-          const dqValue = snap["data_quality_summary"];
-          console.debug("[DQ] loadAnalysis snapshot", {
-            snapshotLen: record.blackboardSnapshot.length,
-            snapKeys: Object.keys(snap),
-            hasDQKey: "data_quality_summary" in snap,
-            dqValueType: dqValue !== undefined ? typeof dqValue : "(absent)",
-            dqValueIsObj: dqValue !== null && typeof dqValue === "object",
-            dqValueLen: typeof dqValue === "string" ? dqValue.length : null,
-            dqValuePreview: typeof dqValue === "string" ? dqValue.slice(0, 200) : null,
-          });
-        }
         const reports: Record<string, string> = {};
         const debates: Array<{ round: number; bull: string; bear: string }> = [];
         const risks: Record<string, string> = {};
@@ -1206,6 +1347,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const ruleChecks: Record<string, string> = {};
         const raws: Record<string, string> = {};
         let dataQuality = "";
+        // 决策依据说明书：key 未经重命名（backend blackboard.rs 对非前缀节点按 nodeId 原样存）
+        const decisionExplanation = parseDecisionExplanation(snap["decision-explainer"]);
         for (const [key, value] of Object.entries(snap)) {
           if (key.startsWith("report.")) {
             // 统一与 live 模式 (handleAnalystReport / parseWorkflowResults) 保持一致：
@@ -1357,14 +1500,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }
         }
         const decisionInputsReport = buildDecisionInputsReport(normalizedSnap, {});
-        if (import.meta.env.DEV) {
-          console.debug("[DQ] loadAnalysis final", {
-            dataQualityLen: dataQuality.length,
-            dataQualityPreview: dataQuality.slice(0, 200),
-            reportsCount: Object.keys(reports).length,
-            debatesCount: debates.length,
-            risksCount: Object.keys(risks).length,
-          });
+        // v45: 仿真验证结果（sim-verify，决策之后自动运行）。
+        // CodeNode 输出可能被包装为 {status, result: {...}}，故优先取 .result。
+        const rawSim = normalizedSnap["sim-verify"];
+        let simulationSnapshot: SimulationSnapshot | null = null;
+        if (rawSim && typeof rawSim === "object") {
+          const obj = rawSim as Record<string, unknown>;
+          const payload = obj.result && typeof obj.result === "object" ? obj.result : obj;
+          simulationSnapshot = payload as unknown as SimulationSnapshot;
         }
         set({
           analystReports: reports,
@@ -1374,8 +1517,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           ruleCheckResults: ruleChecks,
           dataQualitySummary: dataQuality,
           rawData: raws,
+          simulation: simulationSnapshot,
           dataWarnings: [],
           decisionInputsReport,
+          decisionExplanation,
         });
 
         // 历史分析回放：也缓存一次共识，让 RecommendationPanel 能用
@@ -1389,11 +1534,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         console.error("[StockAnalysis] Failed to restore blackboard snapshot:", e);
       }
     } else {
-      // [DQ] 明确告知：snapshot 为空导致 dataQualitySummary 永远不会被填充
-      console.warn(
-        "[DQ] loadAnalysis blackboardSnapshot 为 null/空，跳过 dataQualitySummary 填充",
-        { analysisId, analysisKind: record.analysisKind },
-      );
       // V66 修复(2026-07-29): 设置 stale_record 标记的占位 JSON，让 UI 能识别并提示用户重跑。
       // 旧版静默降级导致用户不知道为什么看不到数据质量诊断。
       set({
@@ -1409,7 +1549,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   rerunDecision: async (analysisId: string) => {
     try {
-      set({ status: "loading", progressMessage: i18n.t("stockAnalysis.rerunDecision"), dataWarnings: [] });
+      set({
+        status: "loading",
+        progressMessage: i18n.t("stockAnalysis.rerunDecision"),
+        dataWarnings: [],
+        // 重跑会改决策但不改快照 ⇒ 当前这份仿真结论属于**上一版决策**。
+        // 必须在**发请求之前**清空（而不是在响应回来后清）：
+        // 后端在响应返回前后就会 emit `simulation-ready`，若在响应回来后清空，
+        // 会把刚收到的新结果一起抹掉（竞态）。清空后由事件回填。
+        // 与下方 `decisionExplanation: null` 是同一类「陈旧后置产物」处理。
+        simulation: null,
+      });
       const result = await invoke<{
         analysis_id: string;
         decision: Record<string, unknown>;
@@ -1439,6 +1589,16 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         timeHorizon: String(d.timeHorizon ?? "mid"),
         expectedHoldingDays: Number(d.expectedHoldingDays ?? 0),
         targetTimeframe: String(d.targetTimeframe ?? "1m"),
+        // 决策可信度与数据缺口：此前这里漏了，导致重跑决策后 collapse 标记与
+        // 数据缺口提示整体消失（口径与 lib/agentOutput.ts::normalizeDecision 对齐）。
+        weightsCollapsed: d.weightsCollapsed === true,
+        collapseReason: typeof d.collapseReason === "string" ? d.collapseReason : undefined,
+        weightRatio: d.weightRatio != null ? Number(d.weightRatio) : undefined,
+        untrustedCount: d.untrustedCount != null ? Number(d.untrustedCount) : undefined,
+        dataGaps: Array.isArray(d.data_gaps)
+          ? (d.data_gaps as unknown[]).filter((g): g is string => typeof g === "string")
+          : undefined,
+        isContradictory: d.isContradictory === true,
       };
       // 恢复 LLM 决策（trader 原始输出，rerun 不重跑 LLM 节点，从 DB 读回旧值）
       const llmDecisionJson = result.llm_decision_json ?? null;
@@ -1496,6 +1656,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         decision,
         llmDecisionJson,
         decisionAgreementScore,
+        // 决策依据说明书置空：rerunDecision 只重跑 portfolio-mgr（不重跑
+        // decision-explainer 节点），旧说明书描述的是**上一轮的裁决**，
+        // 重跑后继续展示会与新决策矛盾（同一次决策两个真相源）。
+        // 完整跑一次分析即会重新填充。
+        decisionExplanation: null,
         status: "completed",
         error: null,
         dataWarnings: [],
@@ -1963,18 +2128,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           const r = raw.result;
           content = typeof r === "string" ? r : JSON.stringify(r);
         }
-        if (import.meta.env.DEV) {
-          console.debug("[DQ] routeNodeOutput data-quality", {
-            textLen: text.length,
-            rawOutputType: rawOutput ? typeof rawOutput : "(null)",
-            rawHasResult: raw ? "result" in raw : false,
-            resultType: raw && raw.result ? typeof raw.result : null,
-            resultIsObj: raw && raw.result && typeof raw.result === "object",
-            contentLen: content.length,
-            contentPreview: content.slice(0, 300),
-            setTo: content.slice(0, 200),
-          });
-        }
         set({ dataQualitySummary: content });
       } else if (nodeId === "raw-data") {
         set({ rawData: { ...s.rawData, [nodeId]: text } });
@@ -1986,6 +2139,37 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
 
     // 手动 try-catch 包装每个 listen，一个失败不影响其他的
+
+    // T-1 P1(2026-09-12): 订阅**节点开始**事件 → 实时显示「正在执行哪个节点」。
+    // 引擎在节点 dispatch 前就发 status="running"（`engine/mod.rs:3144`），应用层
+    // 已转发为 `workflow-step-start`（`core.rs:518`，本次补齐 totalNodes/completedNodes）。
+    // 此前该事件只有 executionStore 订阅，本 store 未订阅 → 面板在整个执行期间
+    // 没有任何「当前节点」信息，长 LLM 节点（1-5 分钟）期间进度条静止。
+    try {
+      const uStart = await listen<{
+        stepId: string;
+        totalNodes?: number;
+        completedNodes?: number;
+        executionId?: string;
+      }>("workflow-step-start", (event) => {
+        const { stepId, totalNodes, completedNodes } = event.payload;
+        if (!stepId) { return; }
+        const done = typeof completedNodes === "number" ? completedNodes : 0;
+        const total = typeof totalNodes === "number" ? totalNodes : 0;
+        // 只负责「当前节点 + 计时起点 + 序号」；进度百分比与消息由 workflow-step-done
+        // 统一维护（后端对每个状态都无条件发 done 事件，含 running），避免两处重复写。
+        set({
+          currentNodeId: stepId,
+          currentNodeIndex: total > 0 ? Math.min(done + 1, total) : done + 1,
+          totalNodeCount: total > 0 ? total : get().totalNodeCount,
+          nodeStartedAt: Date.now(),
+        });
+      });
+      unlisteners.push(uStart);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to listen workflow-step-start:", e);
+    }
+
     try {
       const u1 = await listen<{
         workflowId: string;
@@ -1995,8 +2179,18 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         completedNodes: number;
         output?: unknown;
         error?: string;
+        /**
+         * 结构化错误码（本域值域，如 `STOCK_WORKFLOW_STEP_CANCELLED`）。
+         * 后端 `stock_workflow/core.rs` 从 `StepProgressEvent::error_code` 映射后下发。
+         * **判定只用本字段**；`error` 仅供展示。
+         *
+         * `null` = 后端明示「本事件无失败」（running/completed/streaming）——
+         * 故判据用 `typeof errorCode === "string"`，而不是 `!== undefined`
+         * （`null !== undefined` 为真，会把 null 放进 Set 查询）。
+         */
+        errorCode?: string | null;
       }>("workflow-step-done", (event) => {
-        const { nodeId, status, totalNodes, completedNodes, output, error } = event.payload;
+        const { nodeId, status, totalNodes, completedNodes, output, error, errorCode } = event.payload;
 
         // Handler 1: 进度 & 阶段 & 失败节点
         const stage = inferStage(nodeId);
@@ -2004,12 +2198,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         const pct = totalNodes > 0
           ? Math.round((completedNodes / totalNodes) * 100)
           : get().progressPct;
-        // EXECUTION_CANCELLED 是运行级取消（手动停止/应用关闭）波及的节点事件，
-        // 不代表节点质量问题，不计入 failedNodes，避免 Debug 面板误报
-        // （2026-09-10 bear-r3 实证：节点实际 completed，被取消事件污染为 failed）
         const isRunLevelCancel = status === "failed"
-          && typeof error === "string"
-          && error.startsWith("EXECUTION_CANCELLED");
+          && typeof errorCode === "string"
+          && RUN_LEVEL_CANCEL_STEP_CODES.has(errorCode);
         set({
           progressPct: Math.max(pct, get().progressPct),
           progressMessage: status === "completed"
@@ -2017,6 +2208,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             : status === "failed"
             ? i18n.t("stockAnalysis.progress.stepRetrying", { name: nodeId })
             : i18n.t("stockAnalysis.progress.stepRunning", { name: nodeId }),
+          // T-1 P1: 节点进入终态且它正是当前展示的节点 → 清空当前节点标记。
+          // 不能无条件清空：并发执行（max_concurrent=8）下多个节点同时在跑，
+          // 任一节点完成都会发 done 事件，无条件清空会让当前节点信息闪断。
+          currentNodeId: status === "running" || nodeId !== get().currentNodeId
+            ? get().currentNodeId
+            : null,
+          nodeStartedAt: status === "running" || nodeId !== get().currentNodeId
+            ? get().nodeStartedAt
+            : null,
           // 节点重试成功（failed 后再次收到 completed）时摘除失败标记，
           // 否则 Debug 面板会用 failed 覆盖已有的完成报告
           failedNodes: status === "completed"
@@ -2082,21 +2282,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }
 
           // DQ 诊断：记录 data-quality 节点的原始输出结构
-          if (nodeId === "data-quality" && import.meta.env.DEV) {
-            const outputObj = output && typeof output === "object";
-            console.debug("[DQ] workflow-step-done", {
-              status,
-              outputType: output ? typeof output : "(null)",
-              outputKeys: outputObj ? Object.keys(output as object) : null,
-              hasResult: outputObj ? "result" in (output as Record<string, unknown>) : null,
-              resultType: outputObj && ((output as Record<string, unknown>).result)
-                ? typeof (output as Record<string, unknown>).result
-                : null,
-              textLen: text.length,
-              textPreview: text.slice(0, 300),
-            });
-          }
-
           routeNodeOutput(nodeId, text, output);
         }
 
@@ -2281,6 +2466,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             }
           }
         }
+        // 决策依据说明书（decision-explainer 节点）：与 llmDecisionJson 同源的实时路径。
+        // 该节点输出在 results 里是 AgentNode 包装（{role, content: <json_string>}），
+        // parseDecisionExplanation 会解 content 内层；缺失时返回 null（不伪造空壳）。
+        const decisionExplanation = parseDecisionExplanation(results["decision-explainer"]);
         // 调试日志: 验证 results["trader"] 的实际格式
         console.log(
           "[workflow-completed] traderRaw type:",
@@ -2339,22 +2528,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         }
 
         // 第 3 步: 数据质量诊断日志
-        if (import.meta.env.DEV) {
-          const dqRaw = results["data-quality"];
-          const dqKeys = dqRaw && typeof dqRaw === "object" ? Object.keys(dqRaw as object) : null;
-          console.debug("[DQ] workflow-completed", {
-            hasDataQualityKey: "data-quality" in results,
-            resultKeys: Object.keys(results),
-            dqRawType: dqRaw ? typeof dqRaw : "(absent)",
-            dqRawKeys: dqKeys,
-            dqHasResult: dqKeys ? dqKeys.includes("result") : null,
-            dqResultType: dqKeys && dqRaw ? typeof (dqRaw as Record<string, unknown>).result : null,
-            parsedDQLen: parsed.dataQualitySummary.length,
-            parsedDQPreview: parsed.dataQualitySummary.slice(0, 200),
-            streamingDQ: s.dataQualitySummary ? s.dataQualitySummary.slice(0, 200) : "(empty)",
-          });
-        }
-
         set({
           analystReports: { ...s.analystReports, ...parsed.analystReports },
           debateRounds: mergedDebateRounds,
@@ -2363,6 +2536,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           ruleCheckResults: { ...s.ruleCheckResults, ...parsed.ruleCheckResults },
           dataQualitySummary: parsed.dataQualitySummary || s.dataQualitySummary,
           rawData: { ...s.rawData, ...parsed.rawData },
+          // v45: 仿真验证结果（决策之后自动跑）；本次未产出则保留旧值
+          simulation: parsed.simulation ?? s.simulation,
           // V55: 合并 strict_mode 兜底节点标记（用于红色"数据异常"警告横幅）
           untrustedNodes: { ...s.untrustedNodes, ...parsed.untrustedNodes },
           // 决策输入诊断：从 workflow results 提取 portfolio-mgr 上游 16 个节点的数据符合度
@@ -2371,10 +2546,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           decision,
           llmDecisionJson,
           decisionAgreementScore,
+          decisionExplanation,
           status: "completed",
           progressMessage: i18n.t("stockAnalysis.progress.completed"),
           progressPct: 100,
           currentStage: 4,
+          // T-1 P1: 执行结束，清空当前节点标记（否则面板会一直显示最后一个节点名）
+          currentNodeId: null,
+          nodeStartedAt: null,
           // 后端在 workflow-completed 事件中携带 dashboardReport/dashboardMd，
           // 正常分析完成路径也立即填充 dashboard，无需用户手动点"重跑决策"。
           // 后端为 null（dashboard 构建失败）时回退到 store 现有值，避免覆盖。
@@ -2458,27 +2637,27 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     try {
       const u3 = await listen<{
         workflowId: string;
-        error: string;
-        errorCode?: string;
+        /** 错误码（`STOCK_WORKFLOW_*`）—— 唯一展示依据，见 core.rs 的失败事件契约 */
+        code?: string;
+        /** `ErrorCategory` 的 snake_case，供状态机判定（retryable / validation / …） */
+        category?: string;
+        /** 技术详情，仅作译文缺失时的兜底 */
+        detail?: string;
+        /** @deprecated 旧版自由文本字段；仅当 `code` 缺失时作展示兜底，**不参与任何判定** */
+        error?: string;
         results?: Record<string, unknown>;
         output?: unknown;
       }>("workflow-error", (event) => {
-        const msg = event.payload.error;
-        const { results, errorCode, output } = event.payload;
+        const { results, code, category, detail, output } = event.payload;
+        // 展示文本统一走错误码翻译层：命中 `error.${code}` 用 11 语言译文，未命中回退 detail。
+        // **不再**把后端原始文本直接写进 UI 字段（那正是非中文界面漏中文的根因）。
+        const displayText = code
+          ? translateBackendError({ code, category, detail })
+          : (event.payload.error ?? detail ?? "");
 
         // 即使失败也尝试解析已有的部分结果
         if (results) {
           const parsed = parseWorkflowResults(results);
-          if (import.meta.env.DEV) {
-            console.debug("[DQ] workflow-error", {
-              error: msg,
-              errorCode,
-              hasDataQualityKey: "data-quality" in results,
-              resultKeys: Object.keys(results),
-              parsedDQLen: parsed.dataQualitySummary.length,
-              parsedDQPreview: parsed.dataQualitySummary.slice(0, 200),
-            });
-          }
           set({
             analystReports: parsed.analystReports,
             debateRounds: parsed.debateRounds,
@@ -2487,6 +2666,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             ruleCheckResults: parsed.ruleCheckResults,
             dataQualitySummary: parsed.dataQualitySummary,
             rawData: parsed.rawData,
+            simulation: parsed.simulation,
             decision: parsed.decision,
             // V55: 即使工作流失败也要保留 strict_mode 兜底标记
             untrustedNodes: { ...get().untrustedNodes, ...parsed.untrustedNodes },
@@ -2497,28 +2677,31 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           if (parsed) { set({ decision: parsed }); }
         }
 
-        // 修复 #9: 优先用结构化 errorCode，回退到 msg.includes("LLM") 字符串判断
-        const effectiveErrorCode = errorCode ?? (msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR");
-        const isLlmError = effectiveErrorCode.startsWith("LLM_");
+        // LLM 降级判定：**按码**，不嗅探文本（理由见 LLM_DEGRADED_CODES 声明处）。
+        // 兜底码也换成后端**真实存在**的一个码：历史上这里写的是前端自造的
+        // `GENERIC_ERROR` / `LLM_FALLBACK`，后端均不产出（幽灵码，且会让
+        // `error.${code}` 查询必然落空、静默退化为裸串展示）。
+        const effectiveErrorCode = code ?? "STOCK_WORKFLOW_EXEC_FAILED";
+        const isLlmError = code !== undefined && LLM_DEGRADED_CODES.has(code);
         const cur = get();
         set({
-          error: msg,
+          error: displayText,
           errorCode: effectiveErrorCode,
-          // 修复 #4: LLM 错误时工作流已终止，status 应为 "completed" 而非 "running"，
+          // 修复 #4: LLM 降级时工作流已终止，status 应为 "completed" 而非 "running"，
           // llmStatus="placeholder" 已表达降级语义，progressPct 保持实际进度不虚报 100%
           status: isLlmError ? "completed" : "error",
           llmStatus: isLlmError ? "placeholder" : cur.llmStatus,
           progressMessage: isLlmError
             ? i18n.t("stockAnalysis.progress.llmFallback")
-            : msg,
+            : displayText,
           progressPct: cur.progressPct,
           currentStage: cur.currentStage,
         });
 
-        // #21 自动重试：仅瞬态错误(超时/网络/服务暂不可用等)且未超过上限时，
+        // #21 自动重试：仅瞬态错误（后端 category="retryable"）且未超过上限时，
         // 延迟重跑同一股票的工作流一次。LLM 降级错误不重试(已走 placeholder 降级)。
         // 重试前再次校验状态仍为同一股票的 error，避免覆盖用户后续操作或重复触发。
-        if (!isLlmError && isRetryableWorkflowError(effectiveErrorCode, msg)) {
+        if (!isLlmError && isRetryableWorkflowError(code, category)) {
           const retryState = get();
           if (retryState._workflowErrorRetries < MAX_WORKFLOW_ERROR_RETRIES) {
             set({ _workflowErrorRetries: retryState._workflowErrorRetries + 1 });
@@ -2571,6 +2754,36 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       unlisteners.push(u4);
     } catch (e) {
       console.error("[StockAnalysis] Failed to listen stock-monitor-t0-rerun-requested:", e);
+    }
+
+    // v45(2026-09-14): 工作流「仿真验证」环节的就绪通知。
+    //
+    // 该环节在**决策落库之后**由后端挂钩触发（core.rs），不在 DAG 执行链上、
+    // 不占工作流执行时长 ⇒ 其结果必然晚于 workflow-completed 到达。
+    // 因此用事件推送而不是在 workflow-completed 里拉取（那会拿到空值）。
+    try {
+      const u5 = await listen<{
+        analysisId: string;
+        stockCode: string;
+        simulation: SimulationSnapshot;
+      }>("simulation-ready", (event) => {
+        const { analysisId, stockCode, simulation } = event.payload;
+        const cur = get();
+        // 只接受「当前正在查看的这条分析」的结果：仿真在后端异步跑，
+        // 期间用户可能已切股/切历史记录，直接覆盖会串台（A 股的仿真结果
+        // 显示在 B 股的页面上）。
+        if (cur.analysisId && analysisId && cur.analysisId !== analysisId) {
+          console.info(
+            `[sim-verify] 忽略非当前分析的结果: event=${analysisId} current=${cur.analysisId}`,
+          );
+          return;
+        }
+        set({ simulation });
+        console.info(`[sim-verify] 仿真结果就绪: stock=${stockCode} simOk=${simulation?.simOk}`);
+      });
+      unlisteners.push(u5);
+    } catch (e) {
+      console.error("[StockAnalysis] Failed to listen simulation-ready:", e);
     }
     // _unlisten 已在函数顶部 set 过(line 1034),这里不再重复 set。
   },

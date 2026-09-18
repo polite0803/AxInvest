@@ -13,12 +13,16 @@ pub struct Model {
     pub content: String,
     pub category: String,
     pub tags: String,
+    #[sea_orm(default_value = "[]")]
     pub scenarios: String,
     pub parameters: String,
     pub created_at: String,
     pub updated_at: String,
+    #[sea_orm(default_value = 0)]
     pub usage_count: i32,
+    #[sea_orm(default_value = 0.0)]
     pub success_rate: f64,
+    #[sea_orm(default_value = 0)]
     pub avg_execution_time_ms: i64,
     /// 连续失败次数：Failure 累加，Success/Partial 清零
     #[sea_orm(default_value = 0)]

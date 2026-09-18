@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub server_id: String,
     pub name: String,
     pub description: Option<String>,
@@ -19,7 +20,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::mcp_servers::Entity",
         from = "Column::ServerId",
-        to = "super::mcp_servers::Column::Id"
+        to = "super::mcp_servers::Column::Id",
+        on_delete = "Cascade"
     )]
     McpServers,
 }

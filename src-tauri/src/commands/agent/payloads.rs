@@ -260,14 +260,6 @@ pub struct AgentApproveRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct AgentApprovePlanRequest {
-    #[serde(rename = "conversationId")]
-    pub conversation_id: String,
-    /// 用户决策："approve" 批准执行，"reject" 拒绝执行。
-    pub decision: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct AgentRespondAskRequest {
     #[serde(rename = "askId")]
     pub ask_id: String,

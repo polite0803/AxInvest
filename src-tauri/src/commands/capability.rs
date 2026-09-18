@@ -9,6 +9,7 @@ use crate::commands::error::{CommandError, ErrorCategory, ErrorResponse};
 use axagent_agent_macro::agent_command;
 use axagent_dao::repo::agent_profile as agent_profile_repo;
 use axagent_dao::repo::agent_role as agent_role_repo;
+use axagent_dao::repo::capability_domain_override as domain_override_repo;
 use axagent_entities::{agency_experts, agent_roles};
 use axagent_harness::trajectory_types::TrajectoryOutcome;
 use axagent_harness::{
@@ -787,6 +788,298 @@ pub(crate) async fn register_evolution_product(
         "🗺️ 进化产物已注册护照并同步进工作流图谱"
     );
     Ok(())
+}
+
+// ── 能力域注册表（P2：覆盖层 —— 域从「只读契约」升级为「可治理的一层」）──
+//
+// 设计要点（见 `docs/plans/PLAN-domain-single-source.md` §9.3）：
+//
+// - **声明**：内置默认永远是 `DOMAIN_NODES`（编译期）；本层只写**覆盖**。
+// - **不开放 id 空间**：9 个 id 只读、不可增删（`capability.rs` 明令禁止自定义域）。
+// - **验收标准不是「有 UI」**，而是「改完之后某个代码路径的行为真的变了」——
+//   故这两个命令的产物必须被 L1 分类器 prompt / L1 路由 / 能力过滤三处真实消费
+//   （接线见 `init/state.rs`、`domain_router.rs`、`capability_filter_impl.rs`）。
+
+/// 追加别名的条数上限。
+///
+/// 不是为了省资源（数量级微不足道），而是防「把别名当标签库用」：
+/// 别名会进入每次用户输入 / LLM 输出的解析路径，几百条近义写法里几乎必然出现
+/// 语义重叠，而重叠的后果是**解析顺序决定了命中哪个域**（静默、难查）。
+const MAX_EXTRA_ALIASES: usize = 32;
+
+/// 单条别名的字符数上限（按 `char` 计，中文别名不会被按字节误伤）。
+const MAX_ALIAS_CHARS: usize = 64;
+
+/// 「能力域」注册表条目 —— 前端「能力域」面板的数据源（内置声明 ∪ 覆盖层）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityDomainEntryDto {
+    /// 域 id（协议 slug）。**只读**：由 `CapabilityDomain` 枚举决定，不可增删。
+    pub id: String,
+    /// i18n 显示名 key（`capabilityDomain.<id>`，派生自 `DomainNode::label_key()`）。
+    pub label_key: String,
+    /// 导航路径（`None` = 内部域，不进入导航）。
+    pub nav_path: Option<String>,
+    /// 导航顺序（`None` = 内部域）。
+    pub nav_order: Option<u8>,
+    /// 是否内部域（`system`）。
+    pub is_system: bool,
+    /// 是否允许被停用（`general` / `system` 不可，理由见 [`axagent_harness::toggle_block_reason`]）。
+    pub toggleable: bool,
+    /// 不可停用的**原因码**（`None` = 可停用）；前端按码查 i18n（11 语言）。
+    pub toggle_block_reason: Option<String>,
+    /// 当前是否启用（合并视图：覆盖层 ∪ 内置默认）。
+    pub enabled: bool,
+    /// 是否有覆盖行（UI 用它区分「内置默认」与「用户改过」；也让「重置」按钮有状态可依）。
+    pub has_override: bool,
+    /// 内置别名（**只读**；27 条存量兼容别名，不可删 —— PLAN §7.2）。
+    pub builtin_aliases: Vec<String>,
+    /// 追加别名（用户可改；语义是「在内置之上追加」，不是替换）。
+    pub extra_aliases: Vec<String>,
+    /// 有效别名 = 内置 ∪ 追加（UI 展示用，避免前端自己合并出一份副本）。
+    pub effective_aliases: Vec<String>,
+}
+
+/// 由「声明节点 + 覆盖集」构造条目。
+///
+/// 刻意做成纯函数：`list`（读库快照）与 `update`（落库后回读）共用它，
+/// 保证两条路径**不会渲染出形状不同的条目**。
+fn build_domain_entry(
+    node: &axagent_harness::DomainNode,
+    overrides: &[axagent_harness::DomainOverride],
+) -> CapabilityDomainEntryDto {
+    CapabilityDomainEntryDto {
+        id: node.slug().to_string(),
+        label_key: node.label_key(),
+        nav_path: node.nav_path.map(|p| p.to_string()),
+        nav_order: node.nav_order,
+        is_system: node.domain.is_system(),
+        toggleable: axagent_harness::is_toggleable(node.domain),
+        toggle_block_reason: axagent_harness::toggle_block_reason(node.domain)
+            .map(|s| s.to_string()),
+        enabled: axagent_harness::enabled_with(overrides, node.domain),
+        has_override: axagent_harness::has_override_with(overrides, node.domain),
+        builtin_aliases: node.aliases.iter().map(|a| (*a).to_string()).collect(),
+        extra_aliases: axagent_harness::extra_aliases_with(overrides, node.domain),
+        effective_aliases: axagent_harness::effective_aliases_with(overrides, node.domain),
+    }
+}
+
+/// 列出「能力域」注册表（内置声明 ∪ 覆盖层）。
+///
+/// ⚠ 本命令**不修改**任何全局状态（不顺手 apply 覆盖层）：
+/// 读命令带副作用会让并发请求看到「别人触发的刷新」，且难以推理。
+/// 它取数据库快照后交给 harness 的 `*_with` 纯函数族渲染 ——
+/// 与运行时路径用**同一套判据**，不产生第二份「启用语义」。
+#[agent_command(domain = capability, safety = Safe, call_mode = StateOnly, description = "列出能力域注册表")]
+#[tauri::command]
+pub async fn list_capability_domain_registry(
+    state: State<'_, AppState>,
+) -> Result<Vec<CapabilityDomainEntryDto>, CommandError> {
+    let db = state.harness.db();
+    let (overrides, unknown) = domain_override_repo::snapshot_for_view(db).await.map_err(|e| {
+        ErrorResponse::from_error_with_code(
+            crate::commands::error_code::capability_domain::LIST_FAILED,
+            e,
+            ErrorCategory::Retryable,
+        )
+    })?;
+
+    // 坏行（`domain` 解析不出枚举）不表现为「已覆盖」，但也不该无声无息：
+    // 用户在界面上会看到「无覆盖」，日志里必须能查到原因。
+    if !unknown.is_empty() {
+        tracing::warn!(
+            ?unknown,
+            "capability_domain_overrides 存在无法解析的域行（界面不会显示为「已覆盖」）"
+        );
+    }
+
+    Ok(axagent_harness::DOMAIN_NODES.iter().map(|n| build_domain_entry(n, &overrides)).collect())
+}
+
+/// 更新能力域覆盖的请求（**局部更新**：未提供的字段保持原值）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCapabilityDomainRequest {
+    /// 域 id（协议 slug；解析成 `CapabilityDomain` 枚举后才会被接受）。
+    pub domain: String,
+    /// 启用 / 停用（`None` = 不改）。
+    ///
+    /// `Some(false)` 对 `general` / `system` 会被拒绝（见 `is_toggleable`）。
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// 追加别名**整体替换**（`None` = 不改；`Some([])` = 清空追加别名）。
+    #[serde(default)]
+    pub extra_aliases: Option<Vec<String>>,
+}
+
+/// 更新一个能力域的覆盖（启用状态 / 追加别名），落库并**立刻**刷新运行时覆盖层。
+///
+/// # 为什么返回值是「落库后回读」而不是「我们的意图」
+///
+/// 写命令返回自己构造的 DTO 是最容易的写法，但它掩盖两类失败：
+/// ① 写入被静默改写（列类型 / 触发器 / 并发覆盖）；② 落库的行在回读路径上解析失败。
+/// 回读一次多一条查询，换来「界面显示的必然是**真实可读的当前状态**」。
+#[agent_command(domain = capability, safety = Caution, call_mode = StateInput, description = "更新能力域覆盖")]
+#[tauri::command]
+pub async fn update_capability_domain(
+    state: State<'_, AppState>,
+    request: UpdateCapabilityDomainRequest,
+) -> Result<CapabilityDomainEntryDto, CommandError> {
+    let db = state.harness.db();
+
+    // ── 1. 域必须存在：解析成**枚举**（枚举是单点真相源，不是字符串表）──
+    //
+    // 刻意不用「与 9 个 slug 字符串比对」：那会在这里造出第 N 份 id 副本，
+    // 且新增域时漏改只是静默拒绝写入。解析枚举则由编译器强制走查。
+    let domain: CapabilityDomain = request.domain.trim().to_lowercase().parse().map_err(|_| {
+        CommandError::new(crate::commands::error_code::capability_domain::UNKNOWN)
+            .with_category(ErrorCategory::Validation)
+            .with_detail(format!("未知的能力域标识：{}", request.domain))
+    })?;
+    let node = axagent_harness::node_of(domain);
+
+    // ── 2. 停用守卫（与运行时读侧**同一判据** `is_toggleable`）──
+    if request.enabled == Some(false) && !axagent_harness::is_toggleable(domain) {
+        return Err(CommandError::new(
+            crate::commands::error_code::capability_domain::NOT_TOGGLEABLE,
+        )
+        .with_category(ErrorCategory::Validation)
+        .with_detail(
+            axagent_harness::toggle_block_reason(domain).unwrap_or("not_toggleable").to_string(),
+        ));
+    }
+
+    // ── 3. 读当前覆盖 → 合成新值（局部更新）──
+    let (current, _unknown) = domain_override_repo::snapshot_for_view(db).await.map_err(|e| {
+        ErrorResponse::from_error_with_code(
+            crate::commands::error_code::capability_domain::LIST_FAILED,
+            e,
+            ErrorCategory::Retryable,
+        )
+    })?;
+
+    let next_enabled =
+        request.enabled.unwrap_or_else(|| axagent_harness::enabled_with(&current, domain));
+    let next_extra = match &request.extra_aliases {
+        Some(list) => validate_extra_aliases(list, domain, &current)?,
+        None => axagent_harness::extra_aliases_with(&current, domain),
+    };
+
+    // ── 4. 落库 → 灌运行时（让改动**不必重启**即刻影响三个消费端）──
+    domain_override_repo::upsert_override(db, node.slug(), next_enabled, &next_extra)
+        .await
+        .map_err(|e| {
+            ErrorResponse::from_error_with_code(
+                crate::commands::error_code::capability_domain::UPDATE_FAILED,
+                e,
+                ErrorCategory::Unrecoverable,
+            )
+        })?;
+    let applied = domain_override_repo::load_into_runtime(db).await.map_err(|e| {
+        ErrorResponse::from_error_with_code(
+            crate::commands::error_code::capability_domain::UPDATE_FAILED,
+            e,
+            ErrorCategory::Unrecoverable,
+        )
+    })?;
+
+    tracing::info!(
+        domain = node.slug(),
+        enabled = next_enabled,
+        extra_aliases = next_extra.len(),
+        applied,
+        "能力域覆盖已更新（L1 分类器 prompt / L1 路由 / 能力过滤三处即刻生效）"
+    );
+
+    // ── 5. 回读合并视图（返回**持久化后**的真实状态，而不是我们的意图）──
+    let (after, _) = domain_override_repo::snapshot_for_view(db).await.map_err(|e| {
+        ErrorResponse::from_error_with_code(
+            crate::commands::error_code::capability_domain::LIST_FAILED,
+            e,
+            ErrorCategory::Retryable,
+        )
+    })?;
+    Ok(build_domain_entry(node, &after))
+}
+
+/// 校验并规范化追加别名。
+///
+/// # 规则与理由
+///
+/// | 规则 | 违反后果（若不拦） |
+/// |---|---|
+/// | 非空、≤[`MAX_ALIAS_CHARS`] 字符、**不含空白** | 解析入口是「整串比对」，含空白的别名只在「用户整句恰好等于它」时命中 —— 是个陷阱而非功能 |
+/// | 条数 ≤ [`MAX_EXTRA_ALIASES`] | 别名越多，语义重叠概率越高，而重叠时**解析顺序决定命中域**（静默、难查） |
+/// | **不得等于任何规范 id** | 会**遮蔽**那个域：`finance` 作为别名后，输入 `finance` 可能先命中别名持有者 ⇒ 该域永远解析不出来（与 `domain_registry::tests::test_aliases_do_not_shadow_canonical_ids` 同一条不变量） |
+/// | **不得与其它域的有效别名冲突** | `resolve_enabled_domain` 按协议顺序取**第一个**命中 ⇒ 冲突时后者永久不可达，且不报错 |
+///
+/// 空串 / 纯空白项被**静默丢弃**（它们是 UI 标签输入框的常见残留，不含信息量）；
+/// 其余违规**逐条报错**，不回显全部规则（错误码负责翻译，细节负责定位）。
+fn validate_extra_aliases(
+    raw: &[String],
+    target: CapabilityDomain,
+    overrides: &[axagent_harness::DomainOverride],
+) -> Result<Vec<String>, CommandError> {
+    let invalid = |detail: String| {
+        CommandError::new(crate::commands::error_code::capability_domain::ALIAS_INVALID)
+            .with_category(ErrorCategory::Validation)
+            .with_detail(detail)
+    };
+    let conflict = |detail: String| {
+        CommandError::new(crate::commands::error_code::capability_domain::ALIAS_CONFLICT)
+            .with_category(ErrorCategory::Validation)
+            .with_detail(detail)
+    };
+
+    // 规范化：trim + 原序去重（大小写不敏感，与解析侧同口径）
+    let mut out: Vec<String> = Vec::new();
+    for a in raw {
+        let t = a.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if out.iter().any(|x| x.eq_ignore_ascii_case(t)) {
+            continue;
+        }
+        out.push(t.to_string());
+    }
+
+    if out.len() > MAX_EXTRA_ALIASES {
+        return Err(invalid(format!("追加别名最多 {MAX_EXTRA_ALIASES} 条，收到 {}", out.len())));
+    }
+
+    // 其它域的**有效别名**（内置 ∪ 追加）—— 一次性算好，避免 O(n²) 反复读全局
+    let mut taken_by_others: Vec<(String, &'static str)> = Vec::new();
+    for other in axagent_harness::DOMAIN_NODES {
+        if other.domain == target {
+            continue;
+        }
+        for a in axagent_harness::effective_aliases_with(overrides, other.domain) {
+            taken_by_others.push((a, other.slug()));
+        }
+    }
+
+    for a in &out {
+        if a.chars().count() > MAX_ALIAS_CHARS {
+            return Err(invalid(format!("别名「{a}」超过 {MAX_ALIAS_CHARS} 个字符")));
+        }
+        if a.chars().any(|c| c.is_whitespace()) {
+            return Err(invalid(format!(
+                "别名「{a}」含空白 —— 别名按「整串比对」解析，含空白者几乎永不命中"
+            )));
+        }
+        if axagent_harness::DOMAIN_NODES.iter().any(|n| n.slug() == a.to_lowercase()) {
+            return Err(conflict(format!(
+                "别名「{a}」与规范域 id 同名 ⇒ 会遮蔽该域（该域将永远解析不出来）"
+            )));
+        }
+        if let Some((_, owner)) = taken_by_others.iter().find(|(x, _)| x.eq_ignore_ascii_case(a)) {
+            return Err(conflict(format!("别名「{a}」已被域 {owner} 占用")));
+        }
+    }
+
+    Ok(out)
 }
 
 // ── 单元测试：进化边界 ─────────────────────────────

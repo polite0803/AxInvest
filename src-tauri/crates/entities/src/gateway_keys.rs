@@ -12,6 +12,7 @@ pub struct Model {
     #[sea_orm(unique)]
     pub key_hash: String,
     pub key_prefix: String,
+    #[sea_orm(default_value = 1)]
     pub enabled: i32,
     pub created_at: i64,
     pub last_used_at: Option<i64>,

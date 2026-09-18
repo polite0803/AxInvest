@@ -9,7 +9,8 @@ use axagent_entities::knowledge_relations;
 use axagent_trajectory::{
     CausalEdgeStats, DEFAULT_HINT_MIN_CONFIDENCE, MessageRole, ToolCall, Trajectory,
     TrajectoryOutcome, TrajectoryStep, TrajectoryStorage, TrajectoryToolResult, build_delay_hints,
-    get_edge, observe_edge, observe_from_trajectory, predict_chain, tool_entity,
+    get_edge, list_causal_edge_stats, observe_edge, observe_from_trajectory, predict_chain,
+    tool_entity,
 };
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 use std::sync::Arc;
@@ -86,6 +87,50 @@ async fn observe_edge_insert_then_update_single_row() {
     assert_eq!(persisted.observations, 2);
     assert_eq!(persisted.positive, 1);
     assert!((persisted.delay_mean_ms - 200.0).abs() < 1e-9);
+
+    std::fs::remove_file(&handle.path).ok();
+}
+
+/// 回归：因果边的 `knowledge_base_id` 必须落在 sentinel KB 下。
+///
+/// 这一列同时被两股力量夹击，写错会以两种**完全不同**的方式失败：
+/// 1. **外键**：`knowledge_relations.knowledge_base_id` → `knowledge_bases(id)` 是
+///    真实约束（声明式引擎建的，`sqlx-sqlite` 默认 `PRAGMA foreign_keys=ON`）。
+///    写空串 ⇒ 找不到父行 ⇒ `code 787 FOREIGN KEY constraint failed`，**插入直接报错**。
+/// 2. **读端口径**：`commands/proactive.rs` 的校准器采样与
+///    `TrajectoryStorage::get_all_relationships` 都按 sentinel 过滤 ⇒
+///    即便关掉外键让空串写成功，这些读端也**一条都看不到**。
+///
+/// 断言选在读端（`list_causal_edge_stats`）而非只查列值，是为了让
+/// 「列值写对了但读端仍读不到」这一形态同样被拦住——只查列值只守得住第 1 类失败。
+#[tokio::test]
+async fn observe_edge_writes_sentinel_kb_visible_to_scoped_readers() {
+    let handle = setup().await;
+    let db = &handle.conn;
+    let kb = axagent_dao::repo::knowledge_graph::TRAJECTORY_KB_ID;
+
+    observe_edge(db, "tool:x", "tool:y", true, Some(50), "traj_kb")
+        .await
+        .expect("observe_edge 应成功（写空 kb 时此处因外键失败）");
+
+    // 第 1 层：列值落在 sentinel 下
+    let row = knowledge_relations::Entity::find()
+        .filter(knowledge_relations::Column::RelationType.eq("causes"))
+        .one(db)
+        .await
+        .expect("query failed")
+        .expect("因果边必须已落库");
+    assert_eq!(row.knowledge_base_id, kb, "因果边必须落在 sentinel KB 下");
+
+    // 第 2 层：真正按 kb 过滤的读端能读到（这才是生产校准器的取数路径）
+    let stats = list_causal_edge_stats(db, kb).await.expect("list_causal_edge_stats");
+    assert_eq!(stats.len(), 1, "sentinel 口径下必须能读到刚写入的边");
+    assert_eq!(stats[0].observations, 1);
+
+    // 反向守卫：用空串当 kb 去问，必须读不到任何东西
+    //（防止将来有人把这里「修」成两边都写空串来让测试变绿）
+    let empty = list_causal_edge_stats(db, "").await.expect("list_causal_edge_stats");
+    assert!(empty.is_empty(), "空 kb 不是有效口径，不应匹配到任何边");
 
     std::fs::remove_file(&handle.path).ok();
 }

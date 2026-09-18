@@ -164,7 +164,10 @@ export function VendorHealthDashboard() {
     setError(null);
     try {
       const result = await invoke<VendorHealthItem[]>("get_vendor_health_all");
-      setData(result);
+      // 后端可能返回 JSON null（无健康记录时序列化 Option::None），
+      // 而 TS 类型断言不会拦下它 —— 直接 setData(null) 会让下面的 data.filter
+      // 抛 TypeError 并把整个分析页推入 PageErrorBoundary。
+      setData(result ?? []);
     } catch (e: unknown) {
       setError(
         typeof e === "string"

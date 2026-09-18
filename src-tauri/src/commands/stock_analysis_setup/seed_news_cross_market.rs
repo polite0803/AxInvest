@@ -319,6 +319,14 @@ pub async fn seed_news_cross_market_template(
 
     // 先删再插
     let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
+
+    // P0 软门禁（C1，2026-09-14）：种子的端口公理 —— 结构性死链在此被记录（不阻断启动）。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("stock_analysis_setup:seed_news_cross_market:{TEMPLATE_ID}"),
+        &nodes_json,
+        &edges_json,
+    );
+
     workflow_template::ActiveModel {
         hooks_config: Set(None),
         id: Set(TEMPLATE_ID.into()),

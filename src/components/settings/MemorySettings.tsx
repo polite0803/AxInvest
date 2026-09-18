@@ -7,6 +7,7 @@ import { NamespaceIcon } from "@/components/shared/NamespaceIcon";
 import { showBackendError, translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { listen } from "@/lib/invoke";
+import { logIpcError } from "@/lib/invoke";
 import { formatImportance, getNatureLabel, getTierColor, getTierLabel, TIER_COLORS } from "@/lib/memoryUtils";
 import { useMemoryStore } from "@/stores";
 import type { MemoryItem, MemoryNamespace, MemoryNature, MemorySource, MemoryTier as MemoryTierType } from "@/types";
@@ -128,6 +129,37 @@ interface TierStats {
   user_count: number;
   total_tokens: number;
   tier_counts: Record<string, number>;
+}
+
+/**
+ * FTS5 全文索引健康状态（后端 `MemoryFtsHealth`，camelCase）。
+ *
+ * 这里的 `available` 与 `indexedRows` 必须分开看：`available === false` 时
+ * `indexedRows` 恒为 0，但「0 条已索引」与「索引未挂载」是两件事 ——
+ * 前者是待修复的落后，后者是当前后端的设计限制（PG 无 FTS5）。
+ * 渲染时先判 `available`，否则会把「功能没开」显示成「索引空了」。
+ */
+interface MemoryFtsHealth {
+  available: boolean;
+  unavailableReason?: string | null;
+  tablesExist: boolean;
+  sourceRows: number;
+  indexedRows: number;
+  laggingRows: number;
+  needsRebuild: boolean;
+  trajectoriesCount: number;
+  skillsCount: number;
+  messagesCount: number;
+}
+
+/** 记忆索引重建结果（后端 `MemoryIndexRebuildResult`，camelCase）。 */
+interface MemoryIndexRebuildResult {
+  vectorEnqueued: number;
+  ftsRebuilt: string[];
+  ftsSkipped: string[];
+  ftsSourceRows: number;
+  ftsIndexedRows: number;
+  ftsUnavailableReason?: string | null;
 }
 
 interface SearchExplanation {
@@ -431,6 +463,7 @@ function MemoryItemsPanel({ namespace }: { namespace: MemoryNamespace }) {
 
   // Tier Stats state
   const [tierStats, setTierStats] = useState<TierStats | null>(null);
+  const [ftsHealth, setFtsHealth] = useState<MemoryFtsHealth | null>(null);
 
   // Find Duplicates state
   const [duplicatesModalOpen, setDuplicatesModalOpen] = useState(false);
@@ -485,11 +518,28 @@ function MemoryItemsPanel({ namespace }: { namespace: MemoryNamespace }) {
     }
   };
 
+  /**
+   * 拉取 FTS5 全文索引健康。
+   *
+   * 失败时保持 `null` 而不是填一份零值报告：零值会被渲染成「已索引 0 / N 条」，
+   * 那是把「没查到」说成「索引是空的」。`null` 渲染成 `—`，即「未知」。
+   */
+  const loadFtsHealth = async () => {
+    try {
+      const result = await invoke<MemoryFtsHealth>("get_memory_fts_health");
+      setFtsHealth(result);
+    } catch (e) {
+      logIpcError("Failed to load FTS health")(e);
+      setFtsHealth(null);
+    }
+  };
+
   // Load working memories and tier stats when namespace changes
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadWorkingMemories();
     loadTierStats();
+    loadFtsHealth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [namespace.id]);
 
@@ -1299,12 +1349,14 @@ function MemoryItemsPanel({ namespace }: { namespace: MemoryNamespace }) {
           setSettingsOpen(false);
           if (pendingProvider) {
             setRebuildingIndex(true);
-            invoke("rebuild_memory_index", { namespaceId: namespace.id }).catch(
-              (e) => {
+            invoke<MemoryIndexRebuildResult>("rebuild_memory_index", {
+              namespaceId: namespace.id,
+            })
+              .then(() => loadFtsHealth())
+              .catch((e) => {
                 setRebuildingIndex(false);
                 showBackendError(messageApi, e);
-              },
-            );
+              });
           }
         }}
         onCancel={() => {
@@ -1316,6 +1368,43 @@ function MemoryItemsPanel({ namespace }: { namespace: MemoryNamespace }) {
       >
         <p>{t("settings.memory.changeEmbeddingWarning")}</p>
       </Modal>
+
+      {
+        /* FTS5 全文索引状态。
+          修复前这一状态在 UI 上完全不存在：FTS5 在 PG 后端下根本不挂载
+          （init/state.rs:151），全文检索恒返回空结果，而界面无从区分
+          「没有匹配」与「功能没开」。这里把两者拆开显示。 */
+      }
+      {ftsHealth && (
+        <div className="flex items-center gap-2 mb-2 text-xs">
+          <Tag color={ftsHealth.available ? "blue" : "default"} style={{ margin: 0 }}>
+            {t("settings.memory.ftsTitle")}
+          </Tag>
+          {ftsHealth.available
+            ? (
+              <>
+                <span>
+                  {t("settings.memory.ftsProgress", {
+                    indexed: ftsHealth.indexedRows,
+                    source: ftsHealth.sourceRows,
+                  })}
+                </span>
+                {ftsHealth.laggingRows > 0 && (
+                  <Tag color="warning" style={{ margin: 0 }}>
+                    {t("settings.memory.ftsLagging", { count: ftsHealth.laggingRows })}
+                  </Tag>
+                )}
+              </>
+            )
+            : (
+              <Tooltip title={ftsHealth.unavailableReason ?? ""}>
+                <Tag color="default" style={{ margin: 0 }}>
+                  {t("settings.memory.ftsUnavailable")}
+                </Tag>
+              </Tooltip>
+            )}
+        </div>
+      )}
 
       {/* Toolbar: add + rebuild + sync + find duplicates + knowledge graph on left, search + clear on right */}
       <div className="flex items-center justify-between mb-3 gap-3">
@@ -1337,10 +1426,25 @@ function MemoryItemsPanel({ namespace }: { namespace: MemoryNamespace }) {
               setRebuildingIndex(true);
               rebuildingRef.current = true;
               try {
-                await invoke("rebuild_memory_index", {
-                  namespaceId: namespace.id,
-                });
+                const result = await invoke<MemoryIndexRebuildResult>(
+                  "rebuild_memory_index",
+                  { namespaceId: namespace.id },
+                );
+                // 结果必须回显，尤其 FTS 部分：修复前这个按钮只重建向量索引，
+                // 对全文索引只字不提 —— 用户以为「重建成功」等于两种索引都新了。
+                if (result.ftsUnavailableReason) {
+                  messageApi.warning(t("settings.memory.rebuildFtsUnavailable"));
+                } else {
+                  messageApi.success(
+                    t("settings.memory.rebuildResult", {
+                      vector: result.vectorEnqueued,
+                      indexed: result.ftsIndexedRows,
+                      source: result.ftsSourceRows,
+                    }),
+                  );
+                }
                 await loadItems(namespace.id);
+                await loadFtsHealth();
               } catch (e) {
                 setRebuildingIndex(false);
                 rebuildingRef.current = false;

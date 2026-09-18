@@ -45,6 +45,77 @@ fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::
     super::resolve_var_path(path, &context.variables)
 }
 
+/// expression 型 switch case 中**注入变量的合法名字**。
+///
+/// ⚠️ 切勿改回 `_value`：Rhai 拒绝一切以下划线开头的标识符，`let _value = …` 直接报
+/// `ErrorParsing(BadInput(MalformedIdentifier("_value")))`。2026-09-13 用 rhai 1.26 实测：
+/// `_value` / `_v` / `__v` 全部失败，`value` 通过。
+const SWITCH_INPUT_VAR: &str = "value";
+
+/// 把历史写法 `_value` 规范成合法标识符 `value`。
+///
+/// 2026-09-13 修复「expression 型 case 恒不命中」：
+///   执行器原先把输入值注入为 `let _value = …;`，而该标识符在 Rhai 中**无法解析**，
+///   于是每个 expression case 都在 `eval` 时失败（仅打一条 `warn!` 后 `continue`），
+///   `found` 永远为 `None` ⇒ **恒回落 `default_case`**。
+///   实证：`quality-gate` 的 `data-quality.result.grade` 实际为 `"C"`，但落库的
+///   `matched_label` 却是 `low-quality` ⇒ C 级数据被误判为低质量，整条决策尾链被路由
+///   到保守的 `quality-fallback`（LLM 覆盖公式决策），且无任何用户可见告警。
+///
+/// 由于 `_value` 在 Rhai 里不可能作为标识符出现，除字符串字面量之外的任何 `_value`
+/// 片段都只可能指代本执行器注入的输入值，故在求值前统一改写。改写会跳过字符串字面量，
+/// 并要求标识符边界（避免误伤 `_valuex` 这类名字）。
+fn normalize_case_expr(expr: &str) -> String {
+    const NEEDLE: &str = "_value";
+    let chars: Vec<char> = expr.chars().collect();
+    let needle: Vec<char> = NEEDLE.chars().collect();
+    let is_ident_char = |c: char| c.is_alphanumeric() || c == '_';
+    let mut out = String::with_capacity(expr.len());
+    let mut i = 0usize;
+    let mut quote: Option<char> = None;
+    while i < chars.len() {
+        let c = chars[i];
+        if let Some(q) = quote {
+            // 字符串字面量内原样透传（含反斜杠转义）
+            out.push(c);
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if c == '"' || c == '\'' || c == '`' {
+            quote = Some(c);
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        let boundary_ok = (i == 0 || !is_ident_char(chars[i - 1]))
+            && (i + needle.len() >= chars.len() || !is_ident_char(chars[i + needle.len()]));
+        if c == '_' && boundary_ok && chars[i..].starts_with(&needle[..]) {
+            out.push_str(SWITCH_INPUT_VAR);
+            i += needle.len();
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+/// 构造 expression 型 case 的求值脚本（注入变量 + 规范化后的表达式）。
+///
+/// 抽成独立函数是为了让单测能直接断言「裸跑脚本能解析并得到正确布尔值」——
+/// 这正是原实现缺失的验证（原实现只依赖 `tracing::warn!`，静默腐烂了两轮迭代）。
+fn build_case_script(rhai_value: &str, expr: &str) -> String {
+    format!("let {SWITCH_INPUT_VAR} = {rhai_value}; {}", normalize_case_expr(expr))
+}
+
 /// 将 serde_json::Value 转为 Rhai 兼容的字面量表达式。
 /// - String → `"value"` (JSON 序列化自带引号和转义)
 /// - Number → 原样数字
@@ -121,8 +192,9 @@ impl NodeExecutorTrait for SwitchExecutor {
                         if expr.is_empty() {
                             continue;
                         }
-                        // 构造 Rhai 脚本：将实际值赋给 _value 变量，执行表达式
-                        let script = format!("let _value = {}; {}", rhai_value, expr);
+                        // 构造 Rhai 脚本：注入输入值（合法标识符 `value`）并把历史
+                        // `_value` 写法规范化，见 build_case_script / normalize_case_expr。
+                        let script = build_case_script(&rhai_value, expr);
                         let mut e = rhai::Engine::new();
                         e.set_max_operations(10_000);
                         e.set_max_call_levels(8);
@@ -329,5 +401,55 @@ impl SwitchExecutor {
             },
             control: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 回归（2026-09-13）：expression 型 case 必须真的能命中。
+    ///
+    /// 原实现注入 `let _value = …`，而 Rhai 无法解析下划线开头的标识符 ⇒ 表达式恒失败、
+    /// 恒回落 default。本测试直接对「执行器实际构造的脚本」断言求值结果，覆盖：
+    ///   - 历史写法 `_value`（DB 中已落库的模板仍需可用，靠 normalize 兼容）
+    ///   - 规范写法 `value`
+    #[test]
+    fn expression_case_script_evaluates_and_matches() {
+        let cases: &[(&str, &str, bool)] = &[
+            ("C", r#"_value == "A" || _value == "B" || _value == "C""#, true),
+            ("D", r#"_value == "A" || _value == "B" || _value == "C""#, false),
+            ("C", r#"value == "A" || value == "B" || value == "C""#, true),
+            ("F", r#"value == "A" || value == "B" || value == "C""#, false),
+            ("C", r#"["A","B","C"].contains(_value)"#, true),
+            ("D", r#"["A","B","C"].contains(value)"#, false),
+        ];
+        for (input, expr, expected) in cases {
+            let rhai_value = json_to_rhai_literal(&serde_json::Value::String((*input).into()));
+            let script = build_case_script(&rhai_value, expr);
+            let mut engine = rhai::Engine::new();
+            engine.set_max_operations(10_000);
+            let got = engine.eval::<bool>(&script);
+            assert_eq!(
+                got.as_ref().ok().copied(),
+                Some(*expected),
+                "脚本求值不符合预期: expr={expr:?} value={input} script={script:?} got={got:?}"
+            );
+        }
+    }
+
+    /// 字符串字面量里的 `_value` 不被改写；`_valuex` 这类更长标识符不被误伤。
+    ///
+    /// 关于属性访问 `x._value`：Rhai 的字段访问与裸标识符共用同一套标识符规则，
+    /// `x._value` 与 `_value` 一样在解析期就被拒（`MalformedIdentifier`）。因此这里
+    /// 把它一并改写成 `x.value` 是**严格更优**的选择 —— 保留原样只会留下一个必然
+    /// 求值失败的表达式；改写后至少语义上指向同名字段且可解析。
+    #[test]
+    fn normalize_case_expr_skips_string_literals_and_non_identifiers() {
+        assert_eq!(normalize_case_expr(r#"_value == "x""#), r#"value == "x""#);
+        assert_eq!(normalize_case_expr(r#"_value == "_value""#), r#"value == "_value""#);
+        assert_eq!(normalize_case_expr("_valuex == 1"), "_valuex == 1");
+        // `.` 不是标识符字符 ⇒ 边界判定通过 ⇒ `_value` 被规范化为可解析的 `value`
+        assert_eq!(normalize_case_expr("x._value == 1"), "x.value == 1");
     }
 }

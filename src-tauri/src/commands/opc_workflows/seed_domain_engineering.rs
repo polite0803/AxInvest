@@ -2,7 +2,7 @@
 
 //! 工程与开发（engineering）领域工作流种子化 — 13 个工作流（v4 丰富拓扑）
 //!
-//! 手动定义 WorkflowNode/Edge，与行业 seed 文件模式一致。
+//! 手动定义 WorkflowNode/Edge，与域包 seed 文件模式一致。
 //!
 //! 生成的工作流：
 //! - wf-eng-api-design:     API设计（规格 → 设计校验分支 → 文档）

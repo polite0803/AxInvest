@@ -18,12 +18,21 @@ pub struct Model {
     pub metadata_json: Option<Json>,
     pub schedule_cron: Option<String>,
     pub last_fetched_at: Option<i64>,
+    #[sea_orm(default_value = "active")]
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::wikis::Entity",
+        from = "Column::WikiId",
+        to = "super::wikis::Column::Id",
+        on_delete = "Cascade"
+    )]
+    Wiki,
+}
 
 impl ActiveModelBehavior for ActiveModel {}

@@ -848,7 +848,6 @@ mod tests_conversation {
             agent_ask_senders: Arc::new(Mutex::new(std::collections::HashMap::new())),
             agent_always_allowed: Arc::new(Mutex::new(std::collections::HashMap::new())),
             agent_prompters: Arc::new(Mutex::new(std::collections::HashMap::new())),
-            agent_plan_approvals: Arc::new(Mutex::new(std::collections::HashMap::new())),
             evolution_consent_senders: Arc::new(Mutex::new(std::collections::HashMap::new())),
             pending_capability_gaps: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashMap::new(),
@@ -968,7 +967,6 @@ mod tests_conversation {
             )),
             telemetry_sink: Arc::new(axagent_telemetry::MemoryTelemetrySink::default())
                 as Arc<dyn axagent_telemetry::TelemetrySink>,
-            persistent_runner: None,
             semantic_cache: semantic_cache.clone(),
             prompt_cache: Arc::new(PromptCache::new()),
             fleet_repository: Arc::new(axagent_harness::fleet::NoopFleetRepository)
@@ -1072,27 +1070,6 @@ mod tests_conversation {
                 std::collections::HashMap::new(),
             )),
             // ── Phase 3 P1 Task 3.1: domain sub-states ──
-            infra: crate::state::InfraState::new(
-                axagent_runtime::harness::RuntimeHarness::new(
-                    axagent_runtime::harness::HarnessDeps {
-                        persistence: Arc::new(axagent_dao::db::DbHandle {
-                            conn: db.clone(),
-                            path: ":memory:".into(),
-                        })
-                            as Arc<dyn axagent_harness::Persistence>,
-                        master_key: [0; 32],
-                        provider_registry: Arc::new(
-                            axagent_providers::registry::ProviderRegistry::create_default(),
-                        )
-                            as Arc<dyn axagent_harness::registry::ProviderRegistry>,
-                    },
-                ),
-                vector_store.clone(),
-                Arc::new(tokio::sync::Semaphore::new(2)),
-                Arc::new(axagent_storage::file_authorizer::FileAuthorizer::new()),
-                temp_dir.clone(),
-            ),
-            gateway_state: crate::state::GatewayState::new(Arc::new(Mutex::new(None))),
             task: crate::state::TaskState::new(
                 Arc::new(axagent_runtime::task_manager::TaskManager::new()),
                 Arc::new(Mutex::new(None)),
@@ -1238,9 +1215,9 @@ mod tests_conversation {
                     axagent_trajectory::ProcessRewardModel::default()
                         .with_default_provider("general"),
                 )),
-                Arc::new(axagent_orchestrator::IndustryLearningEngine::new()),
+                Arc::new(axagent_orchestrator::DomainPackLearningEngine::new()),
                 Arc::new(tokio::sync::Mutex::new(
-                    axagent_orchestrator::IndustryAdapterRegistry::new(),
+                    axagent_orchestrator::DomainPackAdapterRegistry::new(),
                 )),
             ),
             tool: crate::state::ToolState::new(Arc::new(tokio::sync::Mutex::new(

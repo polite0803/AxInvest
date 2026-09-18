@@ -105,6 +105,9 @@ pub async fn unified_knowledge_search(
                 source_id,
                 &request.query,
                 per_source,
+                // 该路径无 per-KB 阈值上下文（统一检索面板不读 kb.retrieval_threshold）
+                // ⇒ 不过滤；阈值语义与过滤位置见 `rag::search_with_filter`。
+                None,
             )
             .await
             {

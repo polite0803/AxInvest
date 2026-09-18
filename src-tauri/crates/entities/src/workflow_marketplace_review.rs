@@ -12,6 +12,7 @@ pub struct Model {
     pub user_id: String,
     pub rating: i32,
     pub comment: Option<String>,
+    #[sea_orm(default_value = false)]
     pub is_hidden: bool,
     pub created_at: i64,
     pub updated_at: i64,

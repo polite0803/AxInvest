@@ -6,19 +6,30 @@
  * 用户在 AgentCard 上点击 → 切换到此面板 → 输入消息 →
  * store.directMessage → 展示该 agent 的回复。
  *
+ * ## 会话隔离
+ *
+ * 每个成员的私信是**独立会话**（后端 `conversation_id = "dm:<slug>"`）：
+ * 与 A 的私信既不会出现在群聊面板，也不会出现在与 B 的私信里，更不会进
+ * 群聊的路由 prompt。所以本面板显示的是「持久化历史（真源）+ 本次事件流」，
+ * 与 ChatPanel 同构 —— 此前它只显示事件流，切走再回来内容就没了。
+ *
  * 顶部快捷区提供「分析当前股票」按钮，把 stockAnalysisStore 中的当前
  * 股票代码作为预设消息直接发给 agent，方便投研团队对单个 agent
  * 做定向咨询（例如让 risk agent 评估当前股票的风控建议）。
  */
 
 import { useOfficeStore, useStockAnalysisStore } from "@/stores";
-import type { DispatchEvent, FleetMember } from "@/types";
+import type { DispatchEvent, FleetMember, FleetMessage } from "@/types";
+import { conversationDm, conversationKey } from "@/types";
 import { Button, Input, Space, Tag, theme, Tooltip, Typography } from "antd";
 import { LineChart, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text } = Typography;
+
+/** 稳定的空数组：`?? []` 每次渲染都会造新引用，会让 zustand 选择器永远判定「变了」 */
+const NO_MESSAGES: FleetMessage[] = [];
 
 export interface DirectMessagePanelProps {
   fleetId: string;
@@ -33,6 +44,15 @@ export function DirectMessagePanel({ fleetId, target, onBack }: DirectMessagePan
   const directMessage = useOfficeStore((s) => s.directMessage);
   const events = useOfficeStore((s) => s.dispatchEvents);
   const clearEvents = useOfficeStore((s) => s.clearDispatchEvents);
+  const loadMessages = useOfficeStore((s) => s.loadMessages);
+  // 本成员专属的私信会话；`target` 为空时给一个不可能命中的占位键
+  const conversationId = target ? conversationDm(target.agentSlug) : "";
+  const messages = useOfficeStore(
+    (s) =>
+      conversationId
+        ? (s.messagesByConversation[conversationKey(fleetId, conversationId)] ?? NO_MESSAGES)
+        : NO_MESSAGES,
+  );
   // 从 stockAnalysisStore 拉取当前股票代码/名称
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
@@ -42,16 +62,19 @@ export function DirectMessagePanel({ fleetId, target, onBack }: DirectMessagePan
   const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // 切换目标 agent 时清空
+  // 切换目标 agent 时清空事件流，并加载**该私信会话**的持久化历史
   useEffect(() => {
     clearEvents();
-  }, [target?.id, clearEvents]);
+    if (conversationId) {
+      void loadMessages(fleetId, conversationId);
+    }
+  }, [conversationId, fleetId, clearEvents, loadMessages]);
 
   useEffect(() => {
     if (listRef.current) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
-  }, [events]);
+  }, [events, messages]);
 
   const handleSend = async (msgOverride?: string) => {
     if (!target) { return; }
@@ -166,13 +189,18 @@ export function DirectMessagePanel({ fleetId, target, onBack }: DirectMessagePan
           minHeight: 200,
         }}
       >
-        {events.length === 0
+        {events.length === 0 && messages.length === 0
           ? (
             <div style={{ textAlign: "center", color: token.colorTextQuaternary, fontSize: 12, padding: 24 }}>
               {t("office.dm.emptyHint", { slug: target.agentSlug })}
             </div>
           )
-          : <DMEventList events={events} />}
+          : (
+            <>
+              <DMMessageList messages={messages} />
+              <DMEventList events={events} />
+            </>
+          )}
       </div>
 
       {/* 输入栏 */}
@@ -200,6 +228,46 @@ export function DirectMessagePanel({ fleetId, target, onBack }: DirectMessagePan
           {t("office.dm.send")}
         </Button>
       </Space.Compact>
+    </div>
+  );
+}
+
+/** 私信会话的持久化历史（来自数据库，按 seq 升序） */
+function DMMessageList({ messages }: { messages: FleetMessage[] }) {
+  const { t } = useTranslation();
+  const { token } = theme.useToken();
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+      {messages.map((m) => {
+        const isHuman = m.authorKind === "human";
+        return (
+          <div
+            key={m.id}
+            style={{
+              fontSize: 12,
+              padding: "6px 8px",
+              background: isHuman ? token.colorFillQuaternary : token.colorBgContainer,
+              borderRadius: 4,
+              border: `1px solid ${token.colorBorderSecondary}`,
+            }}
+          >
+            <div
+              style={{
+                fontWeight: 600,
+                color: isHuman ? token.colorTextSecondary : token.colorPrimary,
+                marginBottom: 2,
+                fontSize: 11,
+              }}
+            >
+              {isHuman
+                ? t("office.chat.speakerMe")
+                : (m.authorDisplayName || m.authorSlug || "agent")}
+            </div>
+            <div style={{ color: token.colorText, whiteSpace: "pre-wrap" }}>{m.content}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }

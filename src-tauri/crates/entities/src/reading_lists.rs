@@ -19,8 +19,10 @@ pub struct Model {
     /// 所有者用户 ID（可选，多用户场景预留）
     pub owner_user_id: Option<String>,
     /// 状态：active / archived
+    #[sea_orm(default_value = "active")]
     pub status: String,
     /// 排序序号
+    #[sea_orm(default_value = 0)]
     pub sort_order: i32,
     /// 创建时间（Unix 毫秒）
     pub created_at: i64,

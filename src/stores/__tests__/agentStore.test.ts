@@ -244,7 +244,35 @@ describe("agentStore event handling", () => {
 
     const cleanup = setupAgentEventListeners();
 
-    expect(vi.mocked(listen)).toHaveBeenCalledTimes(25);
+    // 数量的两段归属（改动前先看清是哪一段变了，别直接把数字改成实测值）：
+    //   agentStore 自身 9 个 —— 见下方 ownEvents
+    //   + setupExecutionEventListeners() 委派 15 个 —— 工具/状态/worker/workflow 步骤
+    //     （definition 在 executionStore.ts:774，本函数第 848 行调用）
+    //   = 24
+    const ownEvents = [
+      "agent-permission-request",
+      "agent-permission-timeout",
+      "agent-ask-user",
+      "agent-rate-limit",
+      "agent-done",
+      "agent-error",
+      "agent-cancelled",
+      "agent-paused",
+      "agent-resumed",
+    ];
+    for (const ev of ownEvents) {
+      expect(vi.mocked(listen)).toHaveBeenCalledWith(ev, expect.any(Function));
+    }
+    expect(vi.mocked(listen)).toHaveBeenCalledTimes(24);
+
+    // 历史值 25 多出的那 1 个是 `agent-plan-ready-for-approval`：它按「事件发射/监听对称」
+    // 审计（PLAN-evoflow-borrowings.md 段 G）被判为**真断链** —— Rust 侧零 emit（全项目
+    // 仅剩一处注释命中），功能已由 `task-shape-approval-request` 取代，处置方向是
+    // 「删监听端」。故这里把该决策上锁：任何无发射端的监听若被加回，本断言立即失败。
+    expect(vi.mocked(listen)).not.toHaveBeenCalledWith(
+      "agent-plan-ready-for-approval",
+      expect.any(Function),
+    );
 
     cleanup();
   });

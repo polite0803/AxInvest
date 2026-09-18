@@ -1,5 +1,5 @@
-// OPC 行业闭环学习层
-// 对齐 stock-analysis 的自我进化机制，实现行业分析结果的收集、评估和改进
+// OPC 域包闭环学习层
+// 对齐 stock-analysis 的自我进化机制，实现域包分析结果的收集、评估和改进
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,18 +7,18 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use super::analysis::{OpcIndustryDecision, RiskLevel};
+use super::analysis::{OpcDomainPackDecision, RiskLevel};
 use super::error::OpcResult;
 
 // ── 学习样本 ─────────────────────────────────────────────────
 
-/// 行业学习样本（一次分析的完整记录）
+/// 域包学习样本（一次分析的完整记录）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndustryLearningSample {
+pub struct DomainPackLearningSample {
     pub sample_id: String,
-    pub industry_id: String,
+    pub domain_pack_id: String,
     pub timestamp: i64,
-    pub decision: OpcIndustryDecision,
+    pub decision: OpcDomainPackDecision,
     pub actual_outcome: Option<ActualOutcome>,
     pub feedback_score: Option<f64>,
     pub tags: Vec<String>,
@@ -44,10 +44,10 @@ pub enum OutcomeType {
 
 // ── 学习指标 ─────────────────────────────────────────────────
 
-/// 行业学习指标
+/// 域包学习指标
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndustryLearningMetrics {
-    pub industry_id: String,
+pub struct DomainPackLearningMetrics {
+    pub domain_pack_id: String,
     pub total_samples: u64,
     pub decision_accuracy: f64,
     pub risk_prediction_accuracy: f64,
@@ -66,20 +66,20 @@ pub enum ImprovementTrend {
 
 // ── 学习引擎 ─────────────────────────────────────────────────
 
-/// 行业学习引擎
-pub struct IndustryLearningEngine {
-    industry_id: String,
-    samples: Arc<RwLock<Vec<IndustryLearningSample>>>,
+/// 域包学习引擎
+pub struct DomainPackLearningEngine {
+    domain_pack_id: String,
+    samples: Arc<RwLock<Vec<DomainPackLearningSample>>>,
     max_samples: usize,
 }
 
-impl IndustryLearningEngine {
-    pub fn new(industry_id: String) -> Self {
-        Self { industry_id, samples: Arc::new(RwLock::new(Vec::new())), max_samples: 1000 }
+impl DomainPackLearningEngine {
+    pub fn new(domain_pack_id: String) -> Self {
+        Self { domain_pack_id, samples: Arc::new(RwLock::new(Vec::new())), max_samples: 1000 }
     }
 
     /// 添加学习样本
-    pub async fn add_sample(&self, sample: IndustryLearningSample) -> OpcResult<()> {
+    pub async fn add_sample(&self, sample: DomainPackLearningSample) -> OpcResult<()> {
         let mut samples = self.samples.write().await;
         samples.push(sample);
 
@@ -95,12 +95,12 @@ impl IndustryLearningEngine {
     /// 添加带反馈的决策样本
     pub async fn record_decision(
         &self,
-        decision: OpcIndustryDecision,
+        decision: OpcDomainPackDecision,
         actual_outcome: Option<ActualOutcome>,
-    ) -> OpcResult<IndustryLearningSample> {
-        let sample = IndustryLearningSample {
+    ) -> OpcResult<DomainPackLearningSample> {
+        let sample = DomainPackLearningSample {
             sample_id: uuid::Uuid::new_v4().to_string(),
-            industry_id: self.industry_id.clone(),
+            domain_pack_id: self.domain_pack_id.clone(),
             timestamp: chrono::Utc::now().timestamp_millis(),
             feedback_score: None,
             decision,
@@ -113,12 +113,12 @@ impl IndustryLearningEngine {
     }
 
     /// 计算学习指标
-    pub async fn compute_metrics(&self) -> OpcResult<IndustryLearningMetrics> {
+    pub async fn compute_metrics(&self) -> OpcResult<DomainPackLearningMetrics> {
         let samples = self.samples.read().await;
 
         if samples.is_empty() {
-            return Ok(IndustryLearningMetrics {
-                industry_id: self.industry_id.clone(),
+            return Ok(DomainPackLearningMetrics {
+                domain_pack_id: self.domain_pack_id.clone(),
                 total_samples: 0,
                 decision_accuracy: 0.0,
                 risk_prediction_accuracy: 0.0,
@@ -153,8 +153,8 @@ impl IndustryLearningEngine {
         // 判断改进趋势
         let trend = self.determine_improvement_trend(&samples);
 
-        Ok(IndustryLearningMetrics {
-            industry_id: self.industry_id.clone(),
+        Ok(DomainPackLearningMetrics {
+            domain_pack_id: self.domain_pack_id.clone(),
             total_samples: total,
             decision_accuracy,
             risk_prediction_accuracy: risk_accuracy,
@@ -164,7 +164,7 @@ impl IndustryLearningEngine {
         })
     }
 
-    fn calculate_decision_accuracy(&self, samples: &[IndustryLearningSample]) -> (usize, usize) {
+    fn calculate_decision_accuracy(&self, samples: &[DomainPackLearningSample]) -> (usize, usize) {
         let mut correct = 0;
         let mut total = 0;
 
@@ -185,7 +185,7 @@ impl IndustryLearningEngine {
         (correct, total)
     }
 
-    fn calculate_risk_prediction_accuracy(&self, samples: &[IndustryLearningSample]) -> f64 {
+    fn calculate_risk_prediction_accuracy(&self, samples: &[DomainPackLearningSample]) -> f64 {
         let mut correct = 0;
         let mut total = 0;
 
@@ -212,13 +212,16 @@ impl IndustryLearningEngine {
         }
     }
 
-    fn determine_improvement_trend(&self, samples: &[IndustryLearningSample]) -> ImprovementTrend {
+    fn determine_improvement_trend(
+        &self,
+        samples: &[DomainPackLearningSample],
+    ) -> ImprovementTrend {
         if samples.len() < 5 {
             return ImprovementTrend::InsufficientData;
         }
 
-        let recent: Vec<&IndustryLearningSample> = samples.iter().rev().take(5).collect();
-        let older: Vec<&IndustryLearningSample> = samples.iter().rev().skip(5).take(5).collect();
+        let recent: Vec<&DomainPackLearningSample> = samples.iter().rev().take(5).collect();
+        let older: Vec<&DomainPackLearningSample> = samples.iter().rev().skip(5).take(5).collect();
 
         if recent.is_empty() || older.is_empty() {
             return ImprovementTrend::InsufficientData;
@@ -236,7 +239,7 @@ impl IndustryLearningEngine {
         }
     }
 
-    fn avg_feedback(&self, samples: &[&IndustryLearningSample]) -> f64 {
+    fn avg_feedback(&self, samples: &[&DomainPackLearningSample]) -> f64 {
         let scores: Vec<f64> = samples.iter().filter_map(|s| s.feedback_score).collect();
         if scores.is_empty() {
             0.0
@@ -246,7 +249,7 @@ impl IndustryLearningEngine {
     }
 
     /// 获取所有样本
-    pub async fn get_samples(&self) -> Vec<IndustryLearningSample> {
+    pub async fn get_samples(&self) -> Vec<DomainPackLearningSample> {
         self.samples.read().await.clone()
     }
 
@@ -258,35 +261,35 @@ impl IndustryLearningEngine {
 
 // ── 学习管理器 ─────────────────────────────────────────────────
 
-/// 行业学习管理器（全局单例模式）
-pub struct IndustryLearningManager {
-    engines: HashMap<String, Arc<IndustryLearningEngine>>,
+/// 域包学习管理器（全局单例模式）
+pub struct DomainPackLearningManager {
+    engines: HashMap<String, Arc<DomainPackLearningEngine>>,
 }
 
-impl IndustryLearningManager {
+impl DomainPackLearningManager {
     pub fn new() -> Self {
         Self { engines: HashMap::new() }
     }
 
-    /// 获取或创建行业学习引擎
-    pub fn get_or_create(&mut self, industry_id: &str) -> &Arc<IndustryLearningEngine> {
+    /// 获取或创建域包学习引擎
+    pub fn get_or_create(&mut self, domain_pack_id: &str) -> &Arc<DomainPackLearningEngine> {
         self.engines
-            .entry(industry_id.to_string())
-            .or_insert_with(|| Arc::new(IndustryLearningEngine::new(industry_id.to_string())))
+            .entry(domain_pack_id.to_string())
+            .or_insert_with(|| Arc::new(DomainPackLearningEngine::new(domain_pack_id.to_string())))
     }
 
-    /// 获取行业学习引擎
-    pub fn get(&self, industry_id: &str) -> Option<&Arc<IndustryLearningEngine>> {
-        self.engines.get(industry_id)
+    /// 获取域包学习引擎
+    pub fn get(&self, domain_pack_id: &str) -> Option<&Arc<DomainPackLearningEngine>> {
+        self.engines.get(domain_pack_id)
     }
 
-    /// 列出所有行业
+    /// 列出所有域包
     pub fn list_industries(&self) -> Vec<&String> {
         self.engines.keys().collect()
     }
 }
 
-impl Default for IndustryLearningManager {
+impl Default for DomainPackLearningManager {
     fn default() -> Self {
         Self::new()
     }

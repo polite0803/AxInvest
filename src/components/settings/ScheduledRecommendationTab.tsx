@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import type { PeriodKey } from "@/types";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import {
   App,
@@ -21,8 +22,10 @@ import { Clock, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-type PeriodKey = "short" | "mid" | "long";
-
+// PeriodKey 复用 `@/types` 的权威定义（4 个周期，含 ultra_short）。
+// 此前本文件自带一份 `"short" | "mid" | "long"` 的副本，与后端
+// `recommender::Period`（4 变体）不一致 —— 超短线任务因此既创建不出来、
+// 也没法在列表里显示。
 interface RecoCronConfig {
   periods: PeriodKey[];
   minConfidence: number;
@@ -58,6 +61,7 @@ const INTERVAL_PRESETS = [
 ];
 
 const ALL_PERIODS: { value: PeriodKey; labelKey: string }[] = [
+  { value: "ultra_short", labelKey: "settings.scheduled-recommendation.period-ultra-short" },
   { value: "short", labelKey: "settings.scheduled-recommendation.period-short" },
   { value: "mid", labelKey: "settings.scheduled-recommendation.period-mid" },
   { value: "long", labelKey: "settings.scheduled-recommendation.period-long" },
@@ -243,7 +247,10 @@ export function ScheduledRecommendationTab() {
             initialValues={{
               name: t("settings.scheduled-recommendation.default-name"),
               periods: ["short", "mid"],
-              minConfidence: 60,
+              // 50 与后端 `RecoCronConfig` 的兜底值、以及模板变量
+              // `reco_min_confidence` 的出厂值保持一致。三处若不同步，
+              // 会出现「新建的定时任务比智能荐股页面更严」的静默错配。
+              minConfidence: 50,
               topN: 5,
               cronExpression: "30 15 * * *",
             }}

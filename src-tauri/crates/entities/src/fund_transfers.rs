@@ -14,6 +14,7 @@ pub struct Model {
     /// 金额（正数）
     pub amount: f64,
     /// 银证转账日期 YYYY-MM-DD
+    #[sea_orm(indexed)]
     pub transfer_date: String,
     /// 转账手续费（可选）
     pub fee: Option<f64>,

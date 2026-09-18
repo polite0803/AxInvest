@@ -2,8 +2,8 @@
 
 //! Trajectory storage module using SeaORM
 
-use crate::fts5::{FTS5Config, FTS5Query, FTS5Result, FTS5Search};
-use crate::memory::{Entity, Relationship};
+use crate::fts5::{FTS5Config, FTS5Health, FTS5Query, FTS5RebuildReport, FTS5Result, FTS5Search};
+use crate::memory::{Entity, Relationship, RelationshipType};
 use crate::skill::Skill;
 use crate::trajectory::{
     MessageRole, RLTrainingEntry, RewardSignal, Trajectory, TrajectoryExportOptions,
@@ -226,9 +226,17 @@ impl TrajectoryStorage {
                 reward_type: Set(format!("{:?}", r.reward_type)),
                 value: Set(r.value),
                 step_index: Set(r.step_index as i32),
-                created_at: Set(chrono::DateTime::from_timestamp_millis(r.timestamp_ms as i64)
-                    .unwrap_or_else(Utc::now)
-                    .to_rfc3339()),
+                // ⚠ 该列**不是日历时间**，它承载的是 `RewardSignal.timestamp_ms`。
+                // `timestamp_ms` 的基准由契约声明为「未定义 / 相对」（`causal.rs` 模块头与
+                // `causal_delay` 的文档注释都写明「不假设基准」），生产端写的是
+                // **相对轨迹起点的毫秒偏移**（`agent/src/trajectory_recorder.rs:142`）。
+                // 历史实现把它喂给 `DateTime::from_timestamp_millis` ⇒ 偏移 56867 被落成
+                // `1970-01-01T00:00:56.867Z`（实测 13 行）：**用一个假日期掩盖了真偏移**，
+                // 且 `.unwrap_or_else(Utc::now)` 永不触发（`from_timestamp_millis` 对任何
+                // i64 都返回 `Some`），所以坏值只能一路落库、不会被兜底拦下。
+                // 现改存原样十进制毫秒；读端 `get_trajectory_rewards` 双向前兼容
+                // （先按数字解析，再回退 RFC3339 以兼容 2026-09-18 之前的存量行）。
+                created_at: Set(r.timestamp_ms.to_string()),
             }
             .insert(&txn)
             .await?;
@@ -455,14 +463,27 @@ impl TrajectoryStorage {
                     "reasoning_quality" => crate::trajectory::RewardType::ReasoningQuality,
                     _ => crate::trajectory::RewardType::UserFeedback,
                 };
-                let ct = chrono::DateTime::parse_from_rfc3339(&r.created_at)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now());
+                // `created_at` 双向前兼容：新行为存十进制毫秒（= `timestamp_ms` 原样），
+                // 旧行为存 `from_timestamp_millis` 产出的 RFC3339 —— 两者还原成同一个毫秒数。
+                // 刻意**不**用「解析失败 ⇒ `Utc::now()`」兜底：那会在读不出时**静默伪造一个当前
+                // 时刻**，让「没读到」看起来像「读到了」（同族：静默降级 / 兜底档永不触发）。
+                // 改为告警 + `0` —— 在本字段的语义（相对轨迹起点的偏移）里 0 是诚实的缺省。
+                let timestamp_ms = match parse_reward_timestamp_ms(&r.created_at) {
+                    Some(ms) => ms,
+                    None => {
+                        tracing::warn!(
+                            "trajectory_rewards.created_at 既非毫秒数也非 RFC3339 ⇒ timestamp_ms 取 0（id={}, value={:?}）",
+                            r.id,
+                            r.created_at
+                        );
+                        0
+                    },
+                };
                 RewardSignal {
                     reward_type: rt,
                     value: r.value,
                     step_index: r.step_index as usize,
-                    timestamp_ms: ct.timestamp_millis() as u64,
+                    timestamp_ms,
                     metadata: serde_json::Value::Null,
                 }
             })
@@ -485,13 +506,24 @@ impl TrajectoryStorage {
             reward_profile: Set(serde_json::to_string(&p.reward_profile)?),
             created_at: Set(p.created_at.to_rfc3339()),
         })
+        // ⚠ 本冲突键是 `Id`，其**有效性前提**是「同一逻辑模式每次拿到同一 id」——
+        //   由 `TrajectoryPattern::new` 用 `name` 派生主键来保证（见
+        //   `harness/src/trajectory_types.rs::stable_id_for_name` 的根因说明）。
+        //   调用方自定义主键时（如 `rl_checkpoint:` 检查点）语义是「同一 id 覆盖」。
+        //
+        //   更新列必须覆盖**全部聚合列**：只更新 frequency/success_rate 而漏掉
+        //   `trajectory_ids` 会让同一行自相矛盾（频率涨到 5 而行内只有 1 个轨迹 id）。
         .on_conflict(
             sea_orm::sea_query::OnConflict::column(trajectory_patterns::Column::Id)
                 .update_columns([
                     trajectory_patterns::Column::Name,
+                    trajectory_patterns::Column::Description,
+                    trajectory_patterns::Column::TrajectoryIds,
                     trajectory_patterns::Column::Frequency,
                     trajectory_patterns::Column::SuccessRate,
                     trajectory_patterns::Column::AverageQuality,
+                    trajectory_patterns::Column::AverageValueScore,
+                    trajectory_patterns::Column::RewardProfile,
                 ])
                 .to_owned(),
         )
@@ -794,7 +826,10 @@ impl TrajectoryStorage {
 
     // ── Entities (stored in knowledge_entities table, v101 merge) ──
 
-    const TRAJECTORY_KB_ID: &str = "__sys_trajectory__";
+    /// Sentinel KB id —— **值不在此重复**，转发 harness 的权威定义
+    /// （AGENTS.md 禁区 12）。用关联常量转发是为了让调用点继续写
+    /// `Self::TRAJECTORY_KB_ID`。
+    const TRAJECTORY_KB_ID: &str = axagent_harness::constants::sentinel::TRAJECTORY_KB_ID;
 
     pub async fn save_entity(&self, e: &Entity) -> Result<()> {
         use knowledge_entities::Column;
@@ -824,7 +859,9 @@ impl TrajectoryStorage {
             last_seen_at: Set(Some(e.last_seen_at.to_rfc3339())),
             source_type: Set(String::from("knowledge_base")),
             source_id: Set(String::new()),
-            node_type: Set(String::from("entity")),
+            node_type: Set(String::from(
+                axagent_harness::knowledge_graph::GraphNodeType::Entity.as_str(),
+            )),
             external_id: Set(None),
         })
         .on_conflict(
@@ -852,6 +889,7 @@ impl TrajectoryStorage {
 
     pub async fn get_all_entities(&self) -> Result<Vec<Entity>> {
         Ok(knowledge_entities::Entity::find()
+            .filter(knowledge_entities::Column::Lifecycle.is_null())
             .filter(knowledge_entities::Column::KnowledgeBaseId.eq(Self::TRAJECTORY_KB_ID))
             .order_by_desc(knowledge_entities::Column::UpdatedAt)
             .all(self.db.as_ref())
@@ -864,6 +902,7 @@ impl TrajectoryStorage {
     pub async fn search_entities(&self, query: &str, limit: usize) -> Result<Vec<Entity>> {
         let pattern = format!("%{}%", query);
         Ok(knowledge_entities::Entity::find()
+            .filter(knowledge_entities::Column::Lifecycle.is_null())
             .filter(
                 knowledge_entities::Column::KnowledgeBaseId
                     .eq(Self::TRAJECTORY_KB_ID)
@@ -895,6 +934,25 @@ impl TrajectoryStorage {
 
     // ── Relationships (stored in knowledge_relations table, v101 merge) ──
 
+    /// 保存一条关系（按 `rel.id` upsert）。
+    ///
+    /// # id 契约（调用方必须遵守 —— 2026-09-17 补文档）
+    ///
+    /// 本函数的幂等性**完全**来自 `ON CONFLICT (id)`：它只在「同一逻辑关系每次传入
+    /// 同一个 `id`」时才会触发。由此有两种**合法但语义不同**的用法：
+    ///
+    /// - **就地改写**：传入**已存在行**的 id —— 典型是实体合并时把关系从被合并实体
+    ///   重定向到保留实体（`memory_providers/service.rs` 的合并循环传的是 `rel.clone()`
+    ///   的原 id）⇒ 冲突命中原行 ⇒ 该行被更新。
+    /// - **按自然键去重**：id 由自然键派生
+    ///   （`axagent_harness::knowledge_graph::stable_relation_id`）⇒ 同一
+    ///   `(kb, source, target, type)` 反复写入只留一行。
+    ///
+    /// ⚠ **不要每次新造随机 id**（如 `Uuid::new_v4()`）：冲突键就是本次刚生成的那个值，
+    /// 永不与任何已存在行相同 ⇒ `on_conflict` 静默失效、退化为纯 `INSERT` ⇒ 调用方
+    /// 每跑一轮就为同一逻辑关系再插一行，**无界增长且无任何报错**。实测形态见
+    /// `docs/plans/PLAN-memory-kb-reflow-id-space.md` §5d 类 C（同一缺陷家族：
+    /// `trajectory_patterns` 2038 行却只有 3 个 `name`）。
     pub async fn save_relationship(&self, rel: &Relationship) -> Result<()> {
         use knowledge_relations::Column;
         use sea_orm::sea_query::OnConflict;
@@ -905,7 +963,15 @@ impl TrajectoryStorage {
             knowledge_base_id: Set(Self::TRAJECTORY_KB_ID.to_string()),
             source_entity_id: Set(rel.source_id.clone()),
             target_entity_id: Set(rel.target_id.clone()),
-            relation_type: Set(serde_json::to_string(&rel.relation_type).unwrap_or_default()),
+            // D5（2026-09-14）：写**裸字面量**（`part_of`），不再 `serde_json::to_string`。
+            //
+            // 历史：此处曾用 `serde_json::to_string(&rel.relation_type)` ⇒ 落库是**带引号**的
+            // `"part_of"`。该编码自成一体（读端用 `from_str(&format!("\"{}\"", …))` 反解），
+            // 但**与裸字面量不互通**：任何按字面量过滤的读方（`GraphEnhancedSearchInput::
+            // relation_type_filters`、`dao::repo::knowledge_graph` 排除因果边）都匹配不到它。
+            // 收敛后整列只有一种编码；读取端（`parse_stored_relation_type`）永久兼容两态，
+            // 故**存量数据无需迁移**（本机实测带引号行 = 0，但已发布版本写过）。
+            relation_type: Set(rel.relation_type.to_string()),
             description: Set(None),
             properties: Set(if rel.properties.is_empty() {
                 None
@@ -1098,7 +1164,8 @@ impl TrajectoryStorage {
 
     // ── Memories (stored in memory_items table, v101 merge) ──
 
-    const TRAJECTORY_MEM_NS_ID: &str = "__sys_trajectory_memory__";
+    /// Sentinel 命名空间 id —— 同上，转发 harness 权威定义，值不重复。
+    const TRAJECTORY_MEM_NS_ID: &str = axagent_harness::constants::sentinel::TRAJECTORY_MEM_NS_ID;
 
     pub async fn get_all_memories(&self) -> Result<Vec<crate::memory::MemoryEntry>> {
         use sea_orm::QueryFilter;
@@ -1145,7 +1212,19 @@ impl TrajectoryStorage {
             title: Set(mem.memory_type.clone()),
             content: Set(mem.content.clone()),
             source: Set(source_conv_id.clone().unwrap_or_else(|| "trajectory".to_string())),
-            index_status: Set("ready".to_string()),
+            // 状态取 `pending`：这条记忆**确实**等待向量化，推进责任在
+            // `IndexJobService` 的孤儿扫描器（它按 index_status='pending' 扫全表并为
+            // 无活跃作业的条目补入队）。本层（DAO/entity 层）拿不到 AppHandle，
+            // 无法自行入队 —— 这正是「写入 pending 却不入队」这一架构缺口的来源，
+            // 也正因如此，兜底必须做在扫描器侧而不是每个写入点。
+            //
+            // 旧值 `"ready"` 是一句无法成立的断言：它声称"向量索引已完成"，而该记录
+            // 从未被向量化过。后果不只是显示错误 —— 状态机里的 `ready` 意味着"无需再
+            // 处理"，扫描器会跳过它，于是这条记忆永久缺失向量表示且永不重试。
+            //
+            // 若 `__sys_trajectory_memory__` 命名空间未配置 embedding provider，
+            // 扫描器会把它诚实降为 `skipped` 并写明原因，不会反复入队。
+            index_status: Set(axagent_harness::constants::status::PENDING.to_string()),
             index_error: Set(None),
             updated_at: Set(now.clone()),
             tier: Set(mem.tier.as_str().to_string()),
@@ -1468,13 +1547,50 @@ impl TrajectoryStorage {
             Ok(())
         }
     }
+    /// 从 FTS 索引移除一条记忆。
+    ///
+    /// **修复点**：原实现是 `let _ = fts.delete_from_fts("memory_items_fts", id).await;`
+    /// —— 内层错误被丢弃，本函数**恒返回 `Ok(())`**。而 `delete_from_fts` 内部
+    /// 已经处理了「该行不在索引中」的正常情形（查不到 rowid 即静默返回），
+    /// 所以任何 `Err` 都是真实故障（表损坏 / SQL 失败），不能吞。
+    ///
+    /// 吞掉的后果有两个，都不可见：
+    ///   ① 四个调用点（含淘汰 / 过期 / 衰减清理）的 `tracing::warn!` 成为**不可达死代码**；
+    ///   ② 索引残留无人知晓 —— 搜索会返回一条**已经删除的记忆**。
     pub async fn delete_memory_fts(&self, id: &str) -> Result<()> {
-        // v101: trajectory_memories_fts was dropped; memory_items FTS is TBD
-        // Gracefully handle missing FTS table.
         if let Some(ref fts) = self.fts_searcher {
-            let _ = fts.delete_from_fts("memory_items_fts", id).await;
+            fts.delete_from_fts("memory_items_fts", id).await?;
         }
         Ok(())
+    }
+
+    /// FTS5 索引健康状态（**读路径**）。
+    ///
+    /// 没有这个出口，`health_check` 本身就是死代码 —— 索引是否落后于主数据
+    /// 将永远只存在于 `tracing::warn!` 里，UI 与诊断入口都看不到。
+    ///
+    /// `fts_searcher` 为 `None` 时返回 `available: false` 的健康报告，**不是** `Err`：
+    /// PG 后端下这就是设计内的降级（`src/init/state.rs:151` 有明确注释），
+    /// 用错误表达它会让上层把「已知的降级」当成「故障」处理。
+    /// 但也不能像修复前那样返回一份全零报告 —— 那会让调用方以为「索引是空的，
+    /// 一切正常」，而事实是这个存储的 FTS 读写**全部是 no-op**。
+    pub async fn fts_health(&self) -> Result<FTS5Health> {
+        match self.fts_searcher {
+            Some(ref fts) => fts.health_check(Some(Self::TRAJECTORY_MEM_NS_ID)).await,
+            None => Ok(FTS5Health::unavailable(
+                "FTS5 未挂载（fts_searcher 为 None）。\
+                 PostgreSQL 后端下即为设计内降级，此时向量检索可用但全文检索整体为空；\
+                 基表的 tsvector 列已在 v001 预留，PG 侧全文检索尚未实现",
+            )),
+        }
+    }
+
+    /// 重建 FTS5 索引（仅限具备回填路径的表，详见 `fts5::rebuild_indexes` 文档）。
+    pub async fn rebuild_fts_indexes(&self) -> Result<FTS5RebuildReport> {
+        match self.fts_searcher {
+            Some(ref fts) => fts.rebuild_indexes(Self::TRAJECTORY_MEM_NS_ID).await,
+            None => anyhow::bail!("FTS5 未挂载（fts_searcher 为 None），无法重建索引"),
+        }
     }
 
     pub async fn delete_skill_fts(&self, id: &str) -> Result<()> {
@@ -1548,6 +1664,28 @@ fn model_to_trajectory(
     }
 }
 
+/// `trajectory_rewards.created_at` 是 text 列，承载的是 `RewardSignal.timestamp_ms`
+/// —— **相对轨迹起点的毫秒偏移，不是日历时间**（理由见 `save_trajectory` 里对该列的注释）。
+///
+/// 双向前兼容（⇒ 存量零迁移）：
+///   · 2026-09-18 起：十进制毫秒字面量（与本文件 `save_memory` 的
+///     `timestamp_millis().to_string()` 同款编码）；
+///   · 更早：`DateTime::from_timestamp_millis` 的 RFC3339 产物 —— 含把偏移 `56867` 落成
+///     `1970-01-01T00:00:56.867Z` 的坏形态。
+///
+/// 两种形态还原出的毫秒数与写端原值**逐位相同**（毫秒精度在 RFC3339 里有小数秒承载），
+/// 所以坏行不必迁移，读端一次兼容两种形态即可。
+fn parse_reward_timestamp_ms(raw: &str) -> Option<u64> {
+    let s = raw.trim();
+    if let Ok(ms) = s.parse::<i64>() {
+        // ⚠ 必须写 `Ord::max` 而非 `ms.max(0)`：本文件 `use sea_orm::ExprTrait` 也在作用域里，
+        // 该 trait 为同型提供了 `max` ⇒ 点号写法报 `E0034 multiple applicable items in scope`
+        // （实测：`cargo fmt --check` 报 EXIT=0 而同一份代码编译不过 —— 格式过 ≠ 编译过）。
+        return Some(Ord::max(ms, 0) as u64);
+    }
+    chrono::DateTime::parse_from_rfc3339(s).ok().map(|dt| Ord::max(dt.timestamp_millis(), 0) as u64)
+}
+
 fn model_to_skill(s: &trajectory_skills::Model) -> Skill {
     Skill {
         id: s.id.clone(),
@@ -1617,6 +1755,42 @@ mod tests {
         )
     }
 
+    /// `trajectory_rewards.created_at` 读端兼容：**两种历史编码必须还原成同一个毫秒数**。
+    ///
+    /// 存在理由：该列存过两种编码，且旧编码会把「相对偏移」伪装成 1970 的日期。
+    /// 只断言「能读出来」不够 —— 必须断言**逐位等于原偏移**，否则「读出一个值」与
+    /// 「读出正确的值」在被测对象上区分不开（同族：测试数据须自证区分力）。
+    ///
+    /// 期望值一律**先算再写**：`2026-09-06T08:49:50.755+00:00` = `1788684590755`，
+    /// 凭感觉会写成 `1783414190755`（差 61 天）。
+    #[test]
+    fn reward_timestamp_ms_roundtrip_both_encodings() {
+        // 新编码：十进制毫秒（= `timestamp_ms` 原样），两种基准都要无损
+        assert_eq!(parse_reward_timestamp_ms("56867"), Some(56867), "偏移毫秒应原样还原");
+        assert_eq!(
+            parse_reward_timestamp_ms("1789355135987"),
+            Some(1789355135987),
+            "绝对 epoch-ms 也应原样还原（该列历史上两种基准都出现过）"
+        );
+        // 旧编码：`from_timestamp_millis` 的产物 —— 含把偏移伪装成 1970 的坏形态。
+        // 这一条就是「存量零迁移」的依据：坏行的毫秒语义本来就没丢。
+        assert_eq!(
+            parse_reward_timestamp_ms("1970-01-01T00:00:56.867+00:00"),
+            Some(56867),
+            "被伪装成 1970 的偏移必须仍还原成 56867"
+        );
+        assert_eq!(
+            parse_reward_timestamp_ms("2026-09-06T08:49:50.755+00:00"),
+            Some(1788684590755),
+            "旧编码里的真实日期同样按毫秒还原"
+        );
+        // 强制走兜底分支：不可解析 ⇒ None（由调用方告警，**不得**静默伪造 `now`）
+        assert_eq!(parse_reward_timestamp_ms("not-a-timestamp"), None);
+        assert_eq!(parse_reward_timestamp_ms(""), None);
+        // 列是 text，历史写入可能带空白
+        assert_eq!(parse_reward_timestamp_ms("  56867 "), Some(56867));
+    }
+
     /// 阶段三 T3.1：软删除（append-only）——`delete_trajectory` 仅置
     /// `is_invalidated = 1`，证据本体保留；活动查询（get_trajectories）不再可见。
     #[tokio::test]
@@ -1670,6 +1844,128 @@ mod tests {
             .expect("轨迹应存在");
         assert_eq!(row.is_invalidated, 0);
     }
+
+    /// C-#2 回归（2026-09-17）：`save_pattern` 的幂等性必须**真的**生效。
+    ///
+    /// 修前 `.on_conflict(Column::Id)` 打的是 `TrajectoryPattern::new` 每次新生成的
+    /// `Uuid::new_v4()` ⇒ 冲突永不发生 ⇒ 同一模式每次学习都插新行
+    /// （生产实测：`trajectory_patterns` 2038 行 / 仅 3 个不同 `name`，
+    ///  `tool-CapabilityView` 一名占 1019 行、当天仍在增）。
+    #[tokio::test]
+    async fn save_pattern_is_idempotent_on_natural_key() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功").conn;
+        let storage = TrajectoryStorage::new(Arc::new(db.clone()));
+
+        let mut p = TrajectoryPattern::new(
+            "tool-read_file".to_string(),
+            "Tool sequence: read_file->edit_file (2 steps)".to_string(),
+            "tool_sequence".to_string(),
+        );
+        p.trajectory_ids.push("t-1".to_string());
+        p.frequency = 1;
+        p.success_rate = 1.0;
+        storage.save_pattern(&p).await.expect("测试：首次保存应成功");
+
+        // 第二轮：同一自然键 ⇒ 同一 id，频率与成功率推进
+        let mut p2 = p.clone();
+        p2.trajectory_ids.push("t-2".to_string());
+        p2.frequency = 2;
+        p2.success_rate = 0.5;
+        storage.save_pattern(&p2).await.expect("测试：二次保存应成功");
+
+        let rows = trajectory_patterns::Entity::find().all(&db).await.expect("测试：查询应成功");
+        assert_eq!(
+            rows.len(),
+            1,
+            "同一自然键必须只有一行 —— 多于一行即 ON CONFLICT (id) 没触发（C-#2 复发）"
+        );
+        assert_eq!(rows[0].frequency, 2, "冲突分支必须把频率推进到 2");
+        assert_eq!(rows[0].success_rate, 0.5, "冲突分支必须更新成功率");
+        assert!(
+            rows[0].trajectory_ids.contains("t-2"),
+            "聚合列必须随 upsert 一起更新，否则 frequency 与 trajectory_ids 自相矛盾"
+        );
+    }
+
+    /// C-#2 反向守卫：**不同 `id` + 同名**必须仍是两行。
+    ///
+    /// `commands/rl_training.rs` 的检查点正是这个形态：身份是调用方给的 `id`
+    /// （`load_checkpoint` 按 `p.id == checkpoint_id` 命中、`list_checkpoints` 按 `ckpt.id`
+    /// 去重），`name` 是 `rl_checkpoint:{name}`。本项修法只把「学习器产出的模式」主键
+    /// 确定性化，**没有**把「身份 = name」的假设塞进 repo 层 —— 否则同名检查点会被压成一行。
+    #[tokio::test]
+    async fn save_pattern_keeps_distinct_ids_with_same_name_apart() {
+        let db = axagent_dao::db::create_test_pool().await.expect("测试：创建连接池应成功").conn;
+        let storage = TrajectoryStorage::new(Arc::new(db.clone()));
+
+        for id in ["ckpt-a", "ckpt-b"] {
+            let p = TrajectoryPattern {
+                id: id.to_string(),
+                name: "rl_checkpoint:epoch-1".to_string(),
+                description: format!("{{\"id\":\"{}\"}}", id),
+                pattern_type: "rl_checkpoint".to_string(),
+                trajectory_ids: Vec::new(),
+                frequency: 1,
+                success_rate: 0.5,
+                average_quality: 0.5,
+                average_value_score: 0.5,
+                reward_profile: Vec::new(),
+                created_at: Utc::now(),
+            };
+            storage.save_pattern(&p).await.expect("测试：保存检查点式模式应成功");
+        }
+
+        let rows = trajectory_patterns::Entity::find().all(&db).await.expect("测试：查询应成功");
+        assert_eq!(rows.len(), 2, "同名但异 id 的两条检查点记录必须都保留");
+    }
+
+    /// D5（2026-09-14）：`parse_stored_relation_type` 必须**同时**吃下两种历史编码。
+    ///
+    /// 这是「写入端收敛、读取端宽容」这个方案的**唯一前提**：如果读端只认裸字面量，
+    /// 那存量带引号的行会被静默解析成 `RelatedTo`（默认值）—— 不报错，但语义错了，
+    /// 等于改写数据。本测试锁住这条。
+    #[test]
+    fn parse_stored_relation_type_tolerates_both_historical_encodings() {
+        // `RelationshipType` 由模块级 `use` 引入，再经 `use super::*` 带进本测试模块
+        // ⇒ 这里**不要**再 `use` 一次（重复导入会触发 unused_imports ⇒ clippy -D warnings 红）。
+        // ① 现行形态：裸字面量（写入端 `Display` 产物）
+        assert_eq!(parse_stored_relation_type("part_of"), RelationshipType::PartOf);
+        assert_eq!(parse_stored_relation_type("contains"), RelationshipType::Contains);
+
+        // ② 历史形态：JSON 编码（旧 `serde_json::to_string` 产物）—— 必须解析成**同一个**值，
+        //    而不是落默认值 `RelatedTo`。
+        assert_eq!(parse_stored_relation_type("\"part_of\""), RelationshipType::PartOf);
+        assert_eq!(parse_stored_relation_type("\"contains\""), RelationshipType::Contains);
+        assert_ne!(
+            parse_stored_relation_type("\"part_of\""),
+            RelationshipType::RelatedTo,
+            "带引号行被解析成默认值 = 静默改写数据"
+        );
+
+        // ③ 形态边界：首尾空白 / 单边引号 / 空串 —— 一律不 panic，且不得造出假关系
+        assert_eq!(parse_stored_relation_type("  part_of  "), RelationshipType::PartOf);
+        assert_eq!(parse_stored_relation_type("\"part_of"), RelationshipType::RelatedTo);
+        assert_eq!(parse_stored_relation_type("part_of\""), RelationshipType::RelatedTo);
+        assert_eq!(parse_stored_relation_type(""), RelationshipType::RelatedTo);
+        assert_eq!(parse_stored_relation_type("\""), RelationshipType::RelatedTo);
+
+        // ④ 真实存量里存在的**数据驱动值**（`edges.csv` 的中文职位名）—— 未识别 ⇒ 落 `RelatedTo`。
+        //    这仍然不是「静默改写」：它们在收敛前也解析不出枚举变体，行为一致。
+        assert_eq!(parse_stored_relation_type("董事"), RelationshipType::RelatedTo);
+        assert_eq!(parse_stored_relation_type("\"董事\""), RelationshipType::RelatedTo);
+    }
+
+    /// `strip_json_quotes` 的**UTF-8 边界安全性** —— 切片落在多字节字符上会 panic。
+    #[test]
+    fn strip_json_quotes_never_slices_inside_a_multibyte_char() {
+        assert_eq!(strip_json_quotes("\"董事\""), "董事");
+        assert_eq!(strip_json_quotes("\"\""), "");
+        assert_eq!(strip_json_quotes("\""), "\"");
+        assert_eq!(strip_json_quotes(""), "");
+        assert_eq!(strip_json_quotes("董事"), "董事");
+        // 首尾虽为引号但中间含多字节字符：切片点仍是 ASCII 字节边界 ⇒ 安全
+        assert_eq!(strip_json_quotes("\"a董事b\""), "a董事b");
+    }
 }
 
 fn ke_to_entity(e: &knowledge_entities::Model) -> Entity {
@@ -1707,14 +2003,39 @@ fn ke_to_entity(e: &knowledge_entities::Model) -> Entity {
     }
 }
 
+/// 解析存量 `knowledge_relations.relation_type` 字面量，**兼容两种历史编码**。
+///
+/// | 形态 | 谁写的 | 例子 |
+/// |---|---|---|
+/// | 裸字面量 | 现行（D5 收敛后）与其余全部写入方（`causal.rs` / `dao::repo::conversation` / `edges.csv`） | `part_of` |
+/// | JSON 编码（带引号） | 本文件 2026-09-14 之前的写法（`serde_json::to_string`） | `"part_of"` |
+///
+/// 读取端**永久**兼容两态：收敛只改了写入方，存量行不会自己变成裸字面量，
+/// 而带引号的行在旧版本里确实可能已落库 —— 靠「迁移脚本」不如靠「读端宽容」来得稳
+/// （迁移漏一次就永久丢数据，读端宽容则自愈）。本机实测带引号行 = 0，故无需迁移。
+///
+/// 未识别的取值落 `RelatedTo`（与收敛前的 `serde_json::from_str(..).unwrap_or(RelatedTo)` 同）。
+fn parse_stored_relation_type(raw: &str) -> RelationshipType {
+    RelationshipType::from(strip_json_quotes(raw.trim()))
+}
+
+/// 去掉成对的 JSON 引号：`"part_of"` → `part_of`；不成对或为空则原样返回。
+///
+/// 字节切片在此是安全的：首尾都是 1 字节的 ASCII `"`，切点必落在 UTF-8 边界上。
+fn strip_json_quotes(raw: &str) -> &str {
+    if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+        &raw[1..raw.len() - 1]
+    } else {
+        raw
+    }
+}
+
 fn kr_to_relationship(r: &knowledge_relations::Model) -> Relationship {
-    use crate::memory::RelationshipType;
     Relationship {
         id: r.id.clone(),
         source_id: r.source_entity_id.clone(),
         target_id: r.target_entity_id.clone(),
-        relation_type: serde_json::from_str(&format!("\"{}\"", r.relation_type))
-            .unwrap_or(RelationshipType::RelatedTo),
+        relation_type: parse_stored_relation_type(&r.relation_type),
         properties: match &r.properties {
             Some(serde_json::Value::Object(map)) => {
                 map.iter().map(|(k, v)| (k.clone(), v.clone())).collect()

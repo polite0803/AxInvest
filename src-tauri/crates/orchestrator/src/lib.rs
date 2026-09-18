@@ -17,35 +17,35 @@
 //! ```
 
 pub mod decomposer;
+pub mod domain_pack_adapters;
+pub mod domain_pack_learning;
 pub mod dynamic_subgraph;
 pub mod executor;
-pub mod industry_adapters;
-pub mod industry_learning;
 pub mod task_context;
 pub mod task_shape_classifier;
 pub mod token_budget;
 pub mod types;
 
-pub use dynamic_subgraph::{DynamicSubGraph, GeneratedSubGraph};
-pub use executor::{OrchestratorExecutor, OrchestratorState};
-pub use industry_adapters::types::ReinforcementLearningConfig;
-pub use industry_adapters::types::{
-    AcceptanceCriterion, EvolutionConstraints, IndustryContext, IndustryLearningConfig,
+pub use domain_pack_adapters::types::ReinforcementLearningConfig;
+pub use domain_pack_adapters::types::{
+    AcceptanceCriterion, DomainPackContext, DomainPackLearningConfig, EvolutionConstraints,
     MissionType, ReflectionTemplate, RewardWeightConfig,
 };
-pub use industry_adapters::{IndustryAdapter, IndustryAdapterRegistry};
-pub use industry_learning::{
-    DimensionScore, EvolutionRequest, EvolutionResult, ExperiencePoolStats, IndustryLearningEngine,
-    LlmInferencePort, RLExperience, RLPolicyUpdate, ReflectionRequest, ReflectionResult,
-    SelfImprovementRequest, SelfImprovementResult,
+pub use domain_pack_adapters::{DomainPackAdapter, DomainPackAdapterRegistry};
+pub use domain_pack_learning::{
+    DimensionScore, DomainPackLearningEngine, EvolutionRequest, EvolutionResult,
+    ExperiencePoolStats, LlmInferencePort, RLExperience, RLPolicyUpdate, ReflectionRequest,
+    ReflectionResult, SelfImprovementRequest, SelfImprovementResult,
 };
+pub use dynamic_subgraph::{DynamicSubGraph, GeneratedSubGraph};
+pub use executor::{OrchestratorExecutor, OrchestratorState};
 pub use task_context::{
-    IndustryContextManager, IndustryTaskContext, TaskContextState, TaskContextSummary,
+    DomainPackContextManager, DomainPackTaskContext, TaskContextState, TaskContextSummary,
 };
 pub use task_shape_classifier::{DefaultTaskShapeClassifier, classify_hybrid, classify_input};
 pub use token_budget::{
-    BudgetDecision, CompactionResult, DryLeafEntry, IndustryTokenBudgetManager,
-    IndustryTokenConfig, IndustryTokenStats, TokenUsageSnapshot,
+    BudgetDecision, CompactionResult, DomainPackTokenBudgetManager, DomainPackTokenConfig,
+    DomainPackTokenStats, DryLeafEntry, TokenUsageSnapshot,
 };
 pub use types::{
     DecompositionPlan, OrchestrationError, OrchestrationEvent, OrchestrationStrategy,

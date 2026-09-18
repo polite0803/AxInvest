@@ -16,7 +16,7 @@ pub mod strategies;
 pub mod strategy;
 pub mod types;
 
-pub use notify::{build_notification, run_recommendation_scan};
+pub use notify::{build_notification, run_recommendation_scan, RecommendationScan};
 pub use strategy::{RecoContext, RecommendStrategy};
 pub use types::{Period, RecoPick, RecoResponse, Style};
 
@@ -704,13 +704,23 @@ pub async fn recommend_stocks(
 
     // P3-3: drop picks below user-configured min_confidence
     // (reco_min_confidence from StockAnalysisConfigPanel, 0 = no filter)
+    //
+    // Watchlist 豁免：它是候选池兜底策略，置信度按设计就低
+    // （watchlist.rs 注释「信心度低（0.55），因为没有技术信号支撑」，
+    // calc_confidence(0.55, 0.5, 0.5, 0.0, 1.0) ≈ 50，即上限约 50），
+    // 且自带专属门槛 wl_min_confidence（默认 30）。全局绝对阈值
+    // reco_min_confidence 一旦 ≥ 50 就会把 watchlist 结构性全灭，
+    // 其空桶随即被 emit_synthetic_picks 的「信号缺失，按现价合成」占位填满，
+    // 前端看到的是 10 条假候选而非「该风格无真实信号」。
     if reco_cfg.min_confidence > 0 {
         tracing::info!(
             "[recommender] before confidence filter (min={}), picks={}",
             reco_cfg.min_confidence,
             all_picks.len()
         );
-        all_picks.retain(|p| p.confidence >= reco_cfg.min_confidence);
+        all_picks.retain(|p| {
+            p.style == types::Style::Watchlist || p.confidence >= reco_cfg.min_confidence
+        });
         tracing::info!("[recommender] after confidence filter, picks={}", all_picks.len());
     }
 

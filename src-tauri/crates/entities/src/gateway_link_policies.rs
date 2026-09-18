@@ -10,11 +10,14 @@ pub struct Model {
     pub id: String,
     pub link_id: String,
     pub route_strategy: String,
+    #[sea_orm(default_value = 1)]
     pub model_fallback_enabled: i32,
     pub global_rpm: Option<i64>,
     pub per_model_rpm: Option<i64>,
     pub token_limit_per_minute: Option<i64>,
+    #[sea_orm(default_value = "round_robin")]
     pub key_rotation_strategy: String,
+    #[sea_orm(default_value = 1)]
     pub key_failover_enabled: i32,
 }
 

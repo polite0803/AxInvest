@@ -10,6 +10,7 @@
  * 数据源：usePaperPortfolioStore
  */
 
+import { formatCNY } from "@/lib/format";
 import { usePaperPortfolioStore } from "@/stores/feature/paperPortfolioStore";
 import type { PortfolioDetail, PositionWithPnl } from "@/types/paper-portfolio";
 import {
@@ -36,11 +37,6 @@ import { useTranslation } from "react-i18next";
 const { Text, Paragraph } = Typography;
 
 // ── 工具函数 ──
-
-/** 格式化人民币金额 */
-function formatCNY(v: number): string {
-  return v.toLocaleString("zh-CN", { style: "currency", currency: "CNY" });
-}
 
 /** 盈亏颜色 */
 function pnlColor(v: number | null | undefined): string {
@@ -470,7 +466,10 @@ export function PaperPortfolioDashboard() {
   const totalReturnPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
 
   return (
-    <div style={{ padding: 16 }}>
+    // 滚动入口：InvestHub Tab 面板（.ant-tabs-content-active）是 overflow:hidden 的
+    // flex 列容器，本组件若不给自身高度约束 + 滚动，内容超出面板高度就会被静默裁掉
+    // 且永远出不来垂直滚动条（空数据时不溢出、一旦有多个组合/持仓即复现）。
+    <div className="flex-1 min-h-0 overflow-auto" style={{ padding: 16 }}>
       {/* 顶部操作栏 */}
       <Space style={{ marginBottom: 16 }}>
         <Button type="primary" onClick={() => setCreateOpen(true)}>

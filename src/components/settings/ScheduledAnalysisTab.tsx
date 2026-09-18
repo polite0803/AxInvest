@@ -38,6 +38,119 @@ export function ScheduledAnalysisTab() {
   const [wlScanJobs, setWlScanJobs] = useState<CronJobRow[]>([]);
   const [wlCron, setWlCron] = useState("0 21 * * 1-5");
 
+  // 候选池逐只分析（task_type = pool-scan）
+  // 与「自选股扫描」的区别：数据源是 reco_picks 候选池（荐股/趋势智选的产物），
+  // 而非 watchlist_items。没有它，候选池里的股票永远不会被自动分析。
+  const [poolJobs, setPoolJobs] = useState<CronJobRow[]>([]);
+  const [poolCron, setPoolCron] = useState("0 17 * * 1-5");
+
+  // 趋势智选定时筛选（task_type = trend-screening，调度 serenity-screening 工作流）
+  // 产物写入 reco_picks（style='serenity'），与智能荐股结果共同构成候选池。
+  const [trendJobs, setTrendJobs] = useState<CronJobRow[]>([]);
+  const [trendCron, setTrendCron] = useState("0 16 * * 1-5");
+
+  // 4 周期反思（task_type = batch-reflection）
+  // 每个档位一个任务：超短线 2 天 / 短线 5 天 / 中线 28 天 / 长线 90 天
+  const [reflJobs, setReflJobs] = useState<CronJobRow[]>([]);
+  const [reflCron, setReflCron] = useState("0 18 * * *");
+  const [reflPeriod, setReflPeriod] = useState<string>("short");
+
+  const loadPool = async () => {
+    try {
+      const list = await invoke<CronJobRow[]>("list_pool_scan_crons");
+      if (Array.isArray(list)) { setPoolJobs(list); }
+    } catch { /* backend not running */ }
+  };
+
+  const loadRefl = async () => {
+    try {
+      const list = await invoke<CronJobRow[]>("list_batch_reflection_crons");
+      if (Array.isArray(list)) { setReflJobs(list); }
+    } catch { /* backend not running */ }
+  };
+
+  const loadTrend = async () => {
+    try {
+      const list = await invoke<CronJobRow[]>("list_trend_screening_crons");
+      if (Array.isArray(list)) { setTrendJobs(list); }
+    } catch { /* backend not running */ }
+  };
+
+  const toggleTrend = async (job: CronJobRow | null, enable: boolean) => {
+    try {
+      if (enable && !job) {
+        await invoke("create_trend_screening_cron", { cronExpression: trendCron, enabled: true });
+        message.success(t("stockAnalysis.scheduledAnalysis.scanStarted"));
+      } else if (!enable && job) {
+        await invoke("toggle_trend_screening_cron", { id: job.id, enabled: false });
+        message.success(t("stockAnalysis.scheduledAnalysis.scanPaused"));
+      }
+      loadTrend();
+    } catch {
+      message.error(t("stockAnalysis.scheduledAnalysis.operationFailed"));
+    }
+  };
+
+  const deleteTrend = async (id: string) => {
+    try {
+      await invoke("delete_trend_screening_cron", { id });
+      loadTrend();
+    } catch { /* silent */ }
+  };
+
+  const togglePool = async (job: CronJobRow | null, enable: boolean) => {
+    try {
+      if (enable && !job) {
+        await invoke("create_pool_scan_cron", { cronExpression: poolCron, enabled: true });
+        message.success(t("stockAnalysis.scheduledAnalysis.scanStarted"));
+      } else if (!enable && job) {
+        await invoke("toggle_pool_scan_cron", { id: job.id, enabled: false });
+        message.success(t("stockAnalysis.scheduledAnalysis.scanPaused"));
+      }
+      loadPool();
+    } catch {
+      message.error(t("stockAnalysis.scheduledAnalysis.operationFailed"));
+    }
+  };
+
+  const deletePool = async (id: string) => {
+    try {
+      await invoke("delete_pool_scan_cron", { id });
+      loadPool();
+    } catch { /* silent */ }
+  };
+
+  const createRefl = async () => {
+    try {
+      await invoke("create_batch_reflection_cron", {
+        cronExpression: reflCron,
+        period: reflPeriod,
+        dueOnly: false,
+        enabled: true,
+      });
+      message.success(t("stockAnalysis.scheduledAnalysis.taskCreated"));
+      loadRefl();
+    } catch {
+      message.error(t("stockAnalysis.scheduledAnalysis.createFailed"));
+    }
+  };
+
+  const toggleRefl = async (job: CronJobRow, enable: boolean) => {
+    try {
+      await invoke("toggle_batch_reflection_cron", { id: job.id, enabled: enable });
+      loadRefl();
+    } catch {
+      message.error(t("stockAnalysis.scheduledAnalysis.operationFailed"));
+    }
+  };
+
+  const deleteRefl = async (id: string) => {
+    try {
+      await invoke("delete_batch_reflection_cron", { id });
+      loadRefl();
+    } catch { /* silent */ }
+  };
+
   const loadWlScan = async () => {
     try {
       const list = await invoke<CronJobRow[]>("list_watchlist_scan_crons");
@@ -96,6 +209,24 @@ export function ScheduledAnalysisTab() {
       .then((list) => {
         if (cancelled) { return; }
         if (Array.isArray(list)) { setWlScanJobs(list); }
+      })
+      .catch(() => {});
+    invoke<CronJobRow[]>("list_pool_scan_crons")
+      .then((list) => {
+        if (cancelled) { return; }
+        if (Array.isArray(list)) { setPoolJobs(list); }
+      })
+      .catch(() => {});
+    invoke<CronJobRow[]>("list_batch_reflection_crons")
+      .then((list) => {
+        if (cancelled) { return; }
+        if (Array.isArray(list)) { setReflJobs(list); }
+      })
+      .catch(() => {});
+    invoke<CronJobRow[]>("list_trend_screening_crons")
+      .then((list) => {
+        if (cancelled) { return; }
+        if (Array.isArray(list)) { setTrendJobs(list); }
       })
       .catch(() => {});
     return () => {
@@ -227,6 +358,144 @@ export function ScheduledAnalysisTab() {
             </Popconfirm>
           )}
         </div>
+      </Card>
+
+      {/* 候选池逐只分析（pool-scan）：reco_picks 候选池 → 逐只完整分析 → pending 反思 */}
+      <Card
+        size="small"
+        title={t("stockAnalysis.scheduledAnalysis.poolScan")}
+        styles={{ body: { padding: "8px 12px" } }}
+      >
+        <div className="flex items-center gap-3 flex-wrap">
+          <Switch
+            checked={poolJobs.some((j) => j.status === "active")}
+            onChange={(checked) => togglePool(poolJobs.length > 0 ? poolJobs[0] : null, checked)}
+          />
+          <span className="text-xs text-gray-400">
+            {poolJobs.some((j) => j.status === "active")
+              ? t("stockAnalysis.scheduledAnalysis.enabled")
+              : t("stockAnalysis.scheduledAnalysis.disabled")}
+          </span>
+          <Select
+            size="small"
+            style={{ width: 180 }}
+            value={poolCron}
+            onChange={setPoolCron}
+            options={[
+              { label: t("stockAnalysis.scheduledAnalysis.cron.tradeDayClose"), value: "0 17 * * 1-5" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyOpen"), value: "0 9 * * *" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyClose"), value: "30 15 * * *" },
+            ]}
+          />
+          {poolJobs.length > 0 && (
+            <Popconfirm
+              title={t("stockAnalysis.scheduledAnalysis.confirmDelete")}
+              onConfirm={() => deletePool(poolJobs[0].id)}
+            >
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          {t("stockAnalysis.scheduledAnalysis.poolScanHint")}
+        </div>
+      </Card>
+
+      {/* 趋势智选定时筛选（trend-screening）：调度 serenity-screening 工作流 → 候选池 */}
+      <Card
+        size="small"
+        title={t("stockAnalysis.scheduledAnalysis.trendScreening")}
+        styles={{ body: { padding: "8px 12px" } }}
+      >
+        <div className="flex items-center gap-3 flex-wrap">
+          <Switch
+            checked={trendJobs.some((j) => j.status === "active")}
+            onChange={(checked) => toggleTrend(trendJobs.length > 0 ? trendJobs[0] : null, checked)}
+          />
+          <span className="text-xs text-gray-400">
+            {trendJobs.some((j) => j.status === "active")
+              ? t("stockAnalysis.scheduledAnalysis.enabled")
+              : t("stockAnalysis.scheduledAnalysis.disabled")}
+          </span>
+          <Select
+            size="small"
+            style={{ width: 180 }}
+            value={trendCron}
+            onChange={setTrendCron}
+            options={[
+              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyClose"), value: "30 15 * * *" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.weeklyMon"), value: "0 9 * * 1" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyOpen"), value: "0 9 * * *" },
+            ]}
+          />
+          {trendJobs.length > 0 && (
+            <Popconfirm
+              title={t("stockAnalysis.scheduledAnalysis.confirmDelete")}
+              onConfirm={() => deleteTrend(trendJobs[0].id)}
+            >
+              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          {t("stockAnalysis.scheduledAnalysis.trendScreeningHint")}
+        </div>
+      </Card>
+
+      {/* 4 周期反思（batch-reflection）：按超短/短/中/长各自的持有期间隔自动反思 */}
+      <Card
+        size="small"
+        title={t("stockAnalysis.scheduledAnalysis.reflectionScan")}
+        styles={{ body: { padding: "8px 12px" } }}
+        extra={
+          <Button size="small" icon={<PlusOutlined />} onClick={createRefl}>
+            {t("stockAnalysis.scheduledAnalysis.create")}
+          </Button>
+        }
+      >
+        <div className="flex items-center gap-3 flex-wrap">
+          <Select
+            size="small"
+            style={{ width: 130 }}
+            value={reflPeriod}
+            onChange={setReflPeriod}
+            options={[
+              { label: t("stockAnalysis.scheduledAnalysis.period.ultraShort"), value: "ultra_short" },
+              { label: t("stockAnalysis.scheduledAnalysis.period.short"), value: "short" },
+              { label: t("stockAnalysis.scheduledAnalysis.period.mid"), value: "mid" },
+              { label: t("stockAnalysis.scheduledAnalysis.period.long"), value: "long" },
+            ]}
+          />
+          <Select
+            size="small"
+            style={{ width: 180 }}
+            value={reflCron}
+            onChange={setReflCron}
+            options={[
+              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyClose"), value: "30 15 * * *" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.daily1800"), value: "0 18 * * *" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.weeklyMon"), value: "0 9 * * 1" },
+            ]}
+          />
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          {t("stockAnalysis.scheduledAnalysis.reflectionScanHint")}
+        </div>
+        {reflJobs.length === 0
+          ? <div className="text-xs text-gray-400 mt-2">{t("stockAnalysis.scheduledAnalysis.noTask")}</div>
+          : reflJobs.map((j) => (
+            <div key={j.id} className="flex items-center gap-2 mt-2">
+              <Switch size="small" checked={j.status === "active"} onChange={(c) => toggleRefl(j, c)} />
+              <span className="text-xs">{j.description}</span>
+              <Tag className="text-xs m-0 font-mono">{j.schedule}</Tag>
+              <Popconfirm
+                title={t("stockAnalysis.scheduledAnalysis.confirmDelete")}
+                onConfirm={() => deleteRefl(j.id)}
+              >
+                <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </div>
+          ))}
       </Card>
 
       <Card

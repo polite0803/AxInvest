@@ -2,7 +2,7 @@
 
 //! 代码验收引擎契约 — 定义代码级 diff 验证和质量检查的接口
 //!
-//! 本模块为 OPC 行业工作流提供独立的代码验收能力：
+//! 本模块为 OPC 域包工作流提供独立的代码验收能力：
 //! - CodeVerifierPort: 代码验证端口 trait，由 wiring 层实现
 //! - CodeVerificationResult: 验证结果 DTO
 //! - CodeChange / DiffHunk: 代码变更描述
@@ -116,7 +116,7 @@ pub trait CodeVerifierPort: Send + Sync {
     /// 验证代码变更
     ///
     /// # 参数
-    /// - `industry_id`: 行业标识
+    /// - `domain_pack_id`: 域包标识
     /// - `workflow_id`: 工作流标识
     /// - `changes`: 代码变更列表
     ///
@@ -124,17 +124,17 @@ pub trait CodeVerifierPort: Send + Sync {
     /// - `CodeVerificationResult`: 验证结果
     async fn verify_changes(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         workflow_id: &str,
         changes: &[CodeChange],
     ) -> Result<CodeVerificationResult, String>;
 
-    /// 获取行业特定的验证规则
+    /// 获取域包特定的验证规则
     ///
-    /// 不同行业可能有不同的代码验收标准。
+    /// 不同域包可能有不同的代码验收标准。
     async fn get_verification_rules(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
     ) -> Result<Vec<VerificationRule>, String>;
 }
 
@@ -174,7 +174,7 @@ impl Default for NoopCodeVerifier {
 impl CodeVerifierPort for NoopCodeVerifier {
     async fn verify_changes(
         &self,
-        _industry_id: &str,
+        _domain_pack_id: &str,
         _workflow_id: &str,
         changes: &[CodeChange],
     ) -> Result<CodeVerificationResult, String> {
@@ -201,7 +201,7 @@ impl CodeVerifierPort for NoopCodeVerifier {
 
     async fn get_verification_rules(
         &self,
-        _industry_id: &str,
+        _domain_pack_id: &str,
     ) -> Result<Vec<VerificationRule>, String> {
         Ok(Vec::new())
     }

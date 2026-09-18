@@ -21,15 +21,19 @@ pub struct Model {
     pub capability_id: String,
     /// 总调用次数
     #[sea_orm(column_name = "total_calls")]
+    #[sea_orm(default_value = 0)]
     pub total_calls: i64,
     /// 成功次数
     #[sea_orm(column_name = "success_count")]
+    #[sea_orm(default_value = 0)]
     pub success_count: i64,
     /// 最近 N 次执行结果（JSON 数组，[0/1, ...]，0=失败 1=成功），用于计算近 N 次成功率
     #[sea_orm(column_name = "recent_window")]
+    #[sea_orm(default_value = "[]")]
     pub recent_window: String,
     /// 平均执行耗时（毫秒）
     #[sea_orm(column_name = "avg_duration_ms")]
+    #[sea_orm(default_value = 0)]
     pub avg_duration_ms: i64,
     /// 最近一次执行时间（Unix 毫秒）
     #[sea_orm(column_name = "last_executed_at")]

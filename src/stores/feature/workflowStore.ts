@@ -607,29 +607,68 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
         nodes: unknown[];
         edges: unknown[];
         explanation: string;
+        alternatives?: GenerationResult[];
       };
 
       const result = await invoke<GenerationResult>("generate_workflow_from_prompt", {
         prompt: request.prompt,
-        currentNodes: null,
-        currentEdges: null,
+        currentNodes: request.currentNodes ?? null,
+        currentEdges: request.currentEdges ?? null,
+      });
+
+      // 轻量防御校验：过滤缺少 id/type 的非法节点与缺少 id/source/target 的非法边，
+      // 避免坏结构进入画布（后端返回的节点带 type 判别字段，与编辑器类型一致）
+      const validNodes = (result.nodes ?? []).filter(
+        (n): n is WorkflowNode =>
+          n != null
+          && typeof n === "object"
+          && typeof (n as { id?: unknown }).id === "string"
+          && typeof (n as { type?: unknown }).type === "string",
+      );
+      const validEdges = (result.edges ?? []).filter(
+        (e): e is WorkflowEdge =>
+          e != null
+          && typeof e === "object"
+          && typeof (e as { id?: unknown }).id === "string"
+          && typeof (e as { source?: unknown }).source === "string"
+          && typeof (e as { target?: unknown }).target === "string",
+      );
+
+      // 后端返回的备选方案 → WorkflowDefinition[]（复用同一套校验逻辑）
+      const toWorkflow = (nodes: unknown[], edges: unknown[], explanation?: string): WorkflowDefinition => ({
+        id: "",
+        name: `NL-${Date.now()}`,
+        description: explanation ?? "",
+        version: 1,
+        nodes: (nodes ?? []).filter(
+          (n): n is WorkflowNode =>
+            n != null
+            && typeof n === "object"
+            && typeof (n as { id?: unknown }).id === "string"
+            && typeof (n as { type?: unknown }).type === "string",
+        ),
+        edges: (edges ?? []).filter(
+          (e): e is WorkflowEdge =>
+            e != null
+            && typeof e === "object"
+            && typeof (e as { id?: unknown }).id === "string"
+            && typeof (e as { source?: unknown }).source === "string"
+            && typeof (e as { target?: unknown }).target === "string",
+        ),
+        variables: {},
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        status: "draft",
       });
 
       const nlResult: NLParseResult = {
-        workflow: {
-          id: "",
-          name: `NL-${Date.now()}`,
-          description: result.explanation,
-          version: 1,
-          nodes: result.nodes as WorkflowNode[],
-          edges: result.edges as WorkflowEdge[],
-          variables: {},
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          status: "draft",
-        },
-        confidence: 0.85,
+        workflow: toWorkflow(validNodes, validEdges, result.explanation),
+        // 后端 clarify/refuse 时返回空节点集 → 低置信度；有节点 → 高置信度
+        confidence: validNodes.length > 0 ? 0.85 : 0.3,
         suggestions: [result.explanation],
+        alternatives: (result.alternatives ?? [])
+          .filter((alt) => Array.isArray(alt.nodes) && alt.nodes.length > 0)
+          .map((alt) => toWorkflow(alt.nodes, alt.edges, alt.explanation)),
       };
 
       set((s) => ({ parseHistory: [nlResult, ...s.parseHistory] }));

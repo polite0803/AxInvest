@@ -279,11 +279,75 @@ pub mod embed {
     pub const MAX_RETRIES: u32 = 3;
     pub const RETRY_BASE_DELAY_MS: u64 = 500;
     pub const RAG_CACHE_TTL_SECS: u64 = 30;
+
+    /// embedding 配置的**确定性错误**标记①：**没有**配置 provider。
+    ///
+    /// 由 `axagent_search::rag::resolve_default_embedding_provider` 产出；
+    /// 该模块 `pub use` 本常量，因此 `axagent_search::rag::ERR_NO_EMBEDDING_PROVIDER`
+    /// 这一既有路径仍然可用，历史调用点无需改动。
+    ///
+    /// 消费点唯一：`axagent_lib::index_queue` 的 R9 通道 —— 命中即把作业直接置为
+    /// `failed` 终态，不消耗 `max_retries` 次指数退避。
+    pub const ERR_NO_EMBEDDING_PROVIDER: &str = "EMBEDDING_PROVIDER_NOT_CONFIGURED";
+
+    /// embedding 配置的**确定性错误**标记②：配置了 provider，但**指向的 provider
+    /// 已不存在**（悬空引用 —— provider 被删除，或重建后换了 id）。
+    ///
+    /// #### 为什么两个标记必须定义在同一处
+    ///
+    /// 它们被**同一个判断**消费，分开定义必然漂移。这正是 2026-09-12 修掉的缺陷：
+    /// R9 通道原本只匹配标记①，于是悬空引用的作业照常走完 `max_retries` 次指数
+    /// 退避。生产实证：两个 `index_memory` 作业因 `Not found: Provider af052547-…`
+    /// 停在 `retrying` 并持续刷 WARN。
+    ///
+    /// #### 为什么要与「运行时抖动」区分
+    ///
+    /// provider 不存在是**确定性**的，重试多少次结果都一样 —— 重试一个确定性无效
+    /// 的动作不是韧性，只是日志噪音。两者的**用户修复动作也不同**：标记①是
+    /// 「去配一个」，本标记是「去重新绑定」。
+    pub const ERR_EMBEDDING_PROVIDER_GONE: &str = "EMBEDDING_PROVIDER_GONE";
+
+    /// 全部「embedding 配置确定性错误」标记的**唯一清单**。
+    ///
+    /// 新增标记时的唯一动作是**加进这个数组** —— [`is_deterministic_config_error`]
+    /// 从本数组派生判定，因此不存在「定义了标记但忘了加判断分支」的可能。
+    /// 这正是 2026-09-12 的缺陷形态：标记② 有了，判定还是 `if contains(标记①)`。
+    pub const DETERMINISTIC_CONFIG_MARKERS: &[&str] =
+        &[ERR_NO_EMBEDDING_PROVIDER, ERR_EMBEDDING_PROVIDER_GONE];
+
+    /// 错误消息是否属于「embedding 配置确定性错误」⇒ 重试结果必然相同，不应重试。
+    ///
+    /// 判定按 [`DETERMINISTIC_CONFIG_MARKERS`] 派生，调用方（`axagent_lib::index_queue`
+    /// 的 R9 通道）不要自行写 `contains(某个标记)`，否则又会回到漏判。
+    pub fn is_deterministic_config_error(err_msg: &str) -> bool {
+        DETERMINISTIC_CONFIG_MARKERS.iter().any(|m| err_msg.contains(m))
+    }
 }
 
 /// Agent 执行默认迭代上限。各层（coordinator / agent_runtime / conversation_runtime）
 /// 引用此常量以避免三层默认值不一致。coordinator 层可在 AgentConfig 中覆写。
 pub const DEFAULT_MAX_ITERATIONS: usize = 50;
+
+/// OPC 域包（Domain Pack）协议 / 钩子的共享标识符。
+///
+/// 此前这两个值分别定义在 `commands/opc_workflow_kpi_hook.rs` 与
+/// `commands/opc_workflows/` 内 —— 即**命令层**。后果是每个消费方都必须
+/// 「跨命令模块 import」，命令依赖图退化成网（分层门禁 `commands-no-sibling-call` 会拦）。
+/// 它们是不承载业务的纯标识符，权威源理应在 harness：
+/// 写入端与消费端共用同一份，改名时只有一处可改。
+pub mod domain_pack {
+    /// 工作流 `ctx.input` 里承载域包归属的键名。
+    ///
+    /// 写入端 `opc_domain_pack_actions::run_template_via_engine` 与消费端
+    /// `opc_workflow_kpi_hook` 必须同名 —— 不同名则 KPI **静默不落库**。
+    pub const INPUT_KEY: &str = "domain_pack_id";
+
+    /// 内容媒体域包的 KPI 落库生命周期钩子名。
+    ///
+    /// 模板 `hooks_config.post_exec` 按此名引用（见 `seed_content_media`）；
+    /// 名称不一致 ⇒ 钩子注册了却永不触发 ⇒ 同样表现为 KPI 静默不落库。
+    pub const KPI_HOOK_NAME: &str = "content-media-kpi-persist";
+}
 
 /// 认知编排执行链共享常量（护照投影 ↔ agent 工具 ↔ 循环终止辅助共用，禁止散落字面量）
 pub mod capability_chain {
@@ -352,4 +416,108 @@ Before output, verify each item:
 - [ ] 关键数据是否都有来源标注？
 - [ ] 是否已完成所有步骤（无遗漏）？
 - [ ] 输出格式是否满足任务要求？";
+}
+
+/// DB 内建（sentinel）行的固定主键 —— 系统自动创建、非用户可见。
+///
+/// # 为什么必须收敛到这一处（AGENTS.md 禁区 12）
+///
+/// 这些值是**跨 crate 的 DB 协议**：迁移负责 `INSERT`，repo 与 trajectory
+/// 负责按同一 id `SELECT`。收敛前 `__sys_trajectory__` 在 3 个文件、
+/// `__sys_trajectory_memory__` 在 3 个文件各自以字面量定义 ——
+/// **值当时一致，但改一处不改另两处不会报任何错**，只会让实体图 / 记忆检索
+/// **静默返空**（写入的 id 与查询的 id 不再相等）。
+///
+/// 这类缺陷的表现是「功能没数据」而非崩溃，排查成本极高（不报错、单测也过）。
+/// 因此权威定义收敛到 harness（所有 crate 的共同依赖），消费点一律 `use`。
+pub mod sentinel {
+    /// 轨迹实体知识库的固定 KB id（v101 合并后接管 `trajectory_entities`）。
+    pub const TRAJECTORY_KB_ID: &str = "__sys_trajectory__";
+
+    /// 轨迹记忆的固定命名空间 id（v101 合并后接管 `trajectory_memories`）。
+    pub const TRAJECTORY_MEM_NS_ID: &str = "__sys_trajectory_memory__";
+
+    /// 上述命名空间的显示名（仅用于建行时的 `name` 列）。
+    pub const TRAJECTORY_MEM_NS_NAME: &str = "System Memory (Trajectory)";
+
+    /// sentinel KB 的 `enabled` 取值：`0` = 禁用（系统内部 KB，不参与用户可见列表）。
+    ///
+    /// ⚠ `knowledge_bases.enabled` 是 **INTEGER** 列。PostgreSQL 不接受把布尔
+    /// 字面量 `FALSE` 插进 integer 列，会报
+    /// 「字段 "enabled" 的类型为 integer, 但表达式的类型为 boolean」
+    /// —— 这是 v101 曾在 PG 上令应用**完全无法启动**的直接原因。
+    /// 类型标成 `i32` 就是为了让这类写法在编译期就不可能发生。
+    pub const TRAJECTORY_KB_ENABLED: i32 = 0;
+
+    /// 「Memory → 知识图谱回流」所用 KB 的固定 id。
+    ///
+    /// # 为什么必须是**独立**的 KB，而不是复用 memory 的 namespace id
+    ///
+    /// `memory_namespaces.id` 与 `knowledge_bases.id` 是**两个 id 空间**：两者都是 TEXT，
+    /// 所以类型系统拦不住「拿一个当另一个用」。回流路径原先就踩了这个坑
+    /// （见 `PLAN-memory-kb-reflow-id-space.md` §1.1），症状是**静默空转**：
+    /// `knowledge_entities.knowledge_base_id` 上有指向 `knowledge_bases.id` 的外键
+    /// （`entities/src/knowledge_entities.rs` 的 `Relation::KnowledgeBase`，`on_delete = Cascade`），
+    /// 在 PG 上写入一个「长得像 id、但不是任何 KB 行」的值 ⇒ **外键违反** ⇒
+    /// 该路径一行也写不进去，且失败被 `debug!` 吞掉。
+    ///
+    /// ⇒ 本常量就是那个「真实存在的 KB 行」的 id。行本身由
+    /// `dao/src/seed.rs::ensure_sentinels` 播种（幂等、不分方言），与
+    /// [`TRAJECTORY_KB_ID`] **同构**。
+    pub const MEMORY_REFLOW_KB_ID: &str = "__sys_memory_reflow__";
+
+    /// 上述 KB 的显示名（仅用于建行时的 `name` 列）。
+    pub const MEMORY_REFLOW_KB_NAME: &str = "System Memory Reflow";
+
+    /// 与 [`TRAJECTORY_KB_ENABLED`] 同义：`0` = 系统内部 KB，不参与用户可见列表。
+    ///
+    /// ⚠ 同样是 `i32` 而非 `bool` —— 理由见 [`TRAJECTORY_KB_ENABLED`]：该列是 INTEGER，
+    /// PG 拒绝布尔字面量，曾令应用**完全无法启动**。
+    pub const MEMORY_REFLOW_KB_ENABLED: i32 = 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::embed;
+
+    /// 清单里的每个标记都必须能被谓词识别，且**嵌在长消息里也要能识别**。
+    ///
+    /// 断言「嵌在长消息里」是刻意的：调用方传进来的是完整错误串
+    /// （如 `EMBEDDING_PROVIDER_GONE: embedding_provider 指向的 provider …`），
+    /// 不是裸标记。用裸标记做断言会掩盖「匹配方式写成了 `==`」这类错误。
+    #[test]
+    fn deterministic_markers_are_recognized_inside_longer_messages() {
+        assert!(
+            !embed::DETERMINISTIC_CONFIG_MARKERS.is_empty(),
+            "清单不能为空 —— 空清单会让谓词恒返 false，R9 通道静默失效"
+        );
+        for marker in embed::DETERMINISTIC_CONFIG_MARKERS {
+            let msg = format!("{marker}: embedding_provider 指向的 provider `x` 不存在");
+            assert!(
+                embed::is_deterministic_config_error(&msg),
+                "标记 `{marker}` 在长消息中未被识别"
+            );
+        }
+    }
+
+    /// 反向断言：运行时抖动不能被误判成确定性配置错误。
+    ///
+    /// 这条比上面那条更重要 —— 误判会让「网络抖动导致的索引失败」被直接置为
+    /// 终态 `failed` 且**永不重试**，属于把可自愈的失败变成永久失败。
+    #[test]
+    fn transient_errors_are_not_classified_as_deterministic() {
+        for msg in [
+            "",
+            "connection reset by peer",
+            "request timed out after 30s",
+            "429 Too Many Requests",
+            // 只差一个词：`NOT_CONFIGURED` 之外的写法不能被 contains 命中
+            "EMBEDDING_PROVIDER_OTHER_REASON",
+        ] {
+            assert!(
+                !embed::is_deterministic_config_error(msg),
+                "瞬时错误被误判为确定性配置错误：{msg}"
+            );
+        }
+    }
 }

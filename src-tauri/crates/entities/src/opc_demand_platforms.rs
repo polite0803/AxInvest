@@ -20,14 +20,17 @@ pub struct Model {
     /// 连接器类型：api / scanner / mock / manual
     pub platform_type: String,
     /// 是否启用（布尔列按项目规范用 INTEGER，0/1）
+    #[sea_orm(default_value = 1)]
     pub enabled: i32,
     /// 平台基础 URL，NULL 时用连接器默认端点
     pub base_url: Option<String>,
     /// 连接器扩展配置（JSON 字符串）
+    #[sea_orm(default_value = "{}")]
     pub config_json: String,
     /// 最近一次扫描成功时间戳（秒）
     pub last_sync_at: Option<i64>,
     /// 连接器状态：idle / ok / error / skipped（合规跳过）
+    #[sea_orm(default_value = "idle")]
     pub status: String,
     /// 最近一次扫描失败原因；NULL = 最近一次成功 / 从未扫描 / 合规跳过
     pub last_error: Option<String>,

@@ -97,6 +97,9 @@ export function InvestHub() {
     // 切换到非 workspace tab 时清理 workspace 专属参数
     if (key !== "workspace") {
       next.delete("stockCode");
+      // stockName 必须与 stockCode 同生共死：只留名称会让下次进入工作区
+      // 时把上一只股票的名称贴到新股票上
+      next.delete("stockName");
       next.delete("view");
     }
     setSearchParams(next, { replace: true });

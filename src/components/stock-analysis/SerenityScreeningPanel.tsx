@@ -1,7 +1,9 @@
+import { useStockJump } from "@/hooks/useStockJump";
+import i18n from "@/i18n";
+import { translateFailureText } from "@/lib/errorI18n";
 import { invoke, listen, TimeoutError as InvokeTimeoutError } from "@/lib/invoke";
 import {
   type SerenityCandidate,
-  type StepLog,
   type StepStage,
   type TrendInfo,
   useSerenityStore,
@@ -11,6 +13,7 @@ import {
   AlertOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  DeleteOutlined,
   DownOutlined,
   HistoryOutlined,
   LoadingOutlined,
@@ -28,6 +31,7 @@ import {
   Empty,
   InputNumber,
   Modal,
+  Popconfirm,
   Progress,
   Select,
   Space,
@@ -36,9 +40,8 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { SerenityCandidateCard } from "./SerenityCandidateCard";
 
 const { Text, Title } = Typography;
@@ -256,47 +259,215 @@ function findCandidatesDeep(obj: Record<string, unknown>, depth = 0): SerenityCa
 }
 
 // ── 节点 ID → 阶段映射 ──
-// 与 seed_serenity.rs 中实际节点 ID 同步（v4 模板）
+// 与 DB `workflow_templates(id='serenity-screening')` 主表实际节点集同步（v53，19 节点）。
+// 模板每次升版后必须重跑双向 diff（DB nodes[].id 集合 vs 本表 key）：
+//   模板有、本表缺 → `?? "loading"` 兜底让阶段文案倒退；本表有、模板无 → 僵尸残留。
+// 历史坑：本表曾长期停留在 v4（33 条，含 t-baseline-*/t-signal-*/
+// c-bottleneck-trend1~5/s-save-candidates 等已删除节点），执行到 c-scorer-trendN 时
+// 因无映射回落 "loading"，阶段文案倒退、进度条语义错乱。
 const NODE_STAGE_MAP: Record<string, StepStage> = {
   trigger: "loading",
   // Phase 0: 市场扫描
   "t-industry-rank": "scanning",
   "t-cls-flash": "scanning",
   "t-northbound": "scanning",
-  "t-baseline-semi": "scanning",
-  "t-baseline-battery": "scanning",
-  "t-baseline-chem": "scanning",
-  "t-baseline-med": "scanning",
-  "t-baseline-aero": "scanning",
-  "t-baseline-consumer-elec": "scanning",
-  "t-baseline-auto": "scanning",
-  "t-signal-semi": "scanning",
-  "t-signal-battery": "scanning",
-  "t-signal-chem": "scanning",
-  "t-signal-med": "scanning",
-  "t-signal-aero": "scanning",
-  "t-signal-consumer-elec": "scanning",
-  "t-signal-auto": "scanning",
+  "t-policy-news": "scanning",
   "a-trend-scanner": "scanning",
-  // Phase 1: 产业链拆解
+  // Phase 1: 产业链拆解（a-chain-trendN 与 c-scorer-trendN 交替执行）
   "a-chain-trend1": "decomposing",
   "a-chain-trend2": "decomposing",
   "a-chain-trend3": "decomposing",
   "a-chain-trend4": "decomposing",
   "a-chain-trend5": "decomposing",
-  // Phase 2: 瓶颈指标计算
-  "c-bottleneck-trend1": "identifying",
-  "c-bottleneck-trend2": "identifying",
-  "c-bottleneck-trend3": "identifying",
-  "c-bottleneck-trend4": "identifying",
-  "c-bottleneck-trend5": "identifying",
+  // Phase 2: 策略评分 + 一致性检查
+  "c-scorer-trend1": "identifying",
+  "c-scorer-trend2": "identifying",
+  "c-scorer-trend3": "identifying",
+  "c-scorer-trend4": "identifying",
+  "c-scorer-trend5": "identifying",
   "c-consistency-check": "identifying",
-  // Phase 3: 候选公司映射
+  // Phase 3: 候选公司映射 + 财务数据验证
+  // 注：v53 已无 s-save-candidates 节点 —— 候选落库由 run_serenity_screening 尾部
+  // 的 Rust 代码完成（不产生节点事件），因此没有节点映射到 "saving" 阶段。
   "a-candidate-mapper": "mapping",
   "c-data-verifier": "mapping",
-  // Phase 4: 保存
-  "s-save-candidates": "saving",
 };
+
+// ── 工作流事件监听（模块级单例）──
+// 2026-09-11 修复：原实现在 handleRun 内 listen、组件 unmount 时 unlisten，而
+// ScreenerPage 的 Tabs 使用 destroyOnHidden（切走即 unmount）→ 切回后没有监听，
+// 进度冻结在切走那一帧，且 store.running 粘滞为 true（按钮永久禁用）。
+// 现改为模块级注册一次、永不解绑：
+//   1) 事件持续写入 store，面板重新挂载后直接读到最新进度/候选/步骤；
+//   2) 按 runId 过滤：节点 ID 跨运行恒定且 addStep 按 nodeId upsert，不校验运行
+//      归属则残留或并发运行的事件必然串台覆盖当前运行。
+let listenersPromise: Promise<void> | null = null;
+/** 当前运行 ID：面板发起运行时生成，随 invoke 传给后端，后端原样回灌到事件 payload */
+let activeRunId: string | null = null;
+/** completed/failed 事件是否已处理（避免 invoke 兜底路径重复设置或错误覆盖） */
+let eventHandled = false;
+
+/** 生成一次运行的唯一 ID（WebView2 支持 crypto.randomUUID，降级为时间戳+随机数） */
+function newRunId(): string {
+  const c = globalThis.crypto as Crypto | undefined;
+  if (c && typeof c.randomUUID === "function") { return c.randomUUID(); }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** 事件是否属于当前运行：后端未回灌 runId 时放行（兼容旧二进制/其它入口） */
+function isEventOfActiveRun(payloadRunId: unknown): boolean {
+  if (typeof payloadRunId !== "string" || payloadRunId.length === 0) { return true; }
+  return activeRunId == null || payloadRunId === activeRunId;
+}
+
+/// 幂等注册工作流事件监听（模块级，跨组件挂载周期存活）
+function ensureSerenityListeners(): Promise<void> {
+  if (!listenersPromise) {
+    listenersPromise = (async () => {
+      try {
+        await listen<{
+          runId?: string;
+          nodeId: string;
+          status: string;
+          totalNodes: number;
+          completedNodes: number;
+          output?: unknown;
+          error?: string;
+          /**
+           * 节点失败的**结构化错误码**（后端收敛到本域值域，见 `stock_workflow/core.rs::node_error_code`）。
+           * `null` = 后端明示「本事件无失败」，故判定须用 `typeof errorCode === "string"`。
+           */
+          errorCode?: string | null;
+          elapsedMs?: number;
+        }>("serenity-screening-step", (event) => {
+          const p = event.payload;
+          if (!isEventOfActiveRun(p.runId)) { return; }
+          const store = useSerenityStore.getState();
+          // 映射缺失时兜底 "loading" 已由 v53 全量映射消除（见 NODE_STAGE_MAP）
+          store.setStage(NODE_STAGE_MAP[p.nodeId] ?? "loading");
+          store.setTotalNodes(p.totalNodes ?? 0);
+          store.setCompletedNodes(p.completedNodes ?? 0);
+          store.setCurrentNode(p.nodeId);
+          store.addStep({
+            nodeId: p.nodeId,
+            status: p.status,
+            output: p.output,
+            error: p.error,
+            errorCode: p.errorCode,
+            elapsedMs: p.elapsedMs,
+            totalNodes: p.totalNodes,
+            completedNodes: p.completedNodes,
+            timestamp: Date.now(),
+          });
+        });
+
+        await listen<{
+          runId?: string;
+          status: string;
+          result?: unknown;
+          candidates?: unknown[];
+          trends?: TrendInfo[];
+          error?: string;
+          /**
+           * 工作流级失败的**结构化码**（后端 `stock_workflow/core.rs::workflow_error_code`
+           * 映射 `WorkflowError` 全部 10 个变体）。`undefined` = 旧载荷（无码）⇒ 展示回退 `error` 原文。
+           */
+          code?: string | null;
+          emptyReason?: string | null;
+          /**
+           * 落库部分失败（`partial_failure`）的**结构化码**：`stock_workflow::PERSIST_FAILED`
+           * （`error_code.rs`）。与 `code` 一样，`null` = 后端明示无失败，`undefined` = 旧载荷。
+           */
+          persistenceCode?: string | null;
+          /** 首个写入失败的股票代码 —— 作为详情行的 `params`（主文案不含它）。 */
+          persistenceStockCode?: string | null;
+          /**
+           * 落库失败的**技术详情**（DB 报错原文，后端已去掉中文前缀）。
+           * ⚠ 旧载荷里这里是 `"写入 300567 失败: <db err>"` 整句 —— 故渲染层
+           * **必须**先看 `persistenceCode` 是否存在，再决定要不要补股票代码行，
+           * 否则旧载荷下会把代码重复渲染两遍。
+           */
+          persistenceError?: string | null;
+        }>("serenity-screening-completed", (event) => {
+          const p = event.payload;
+          if (!isEventOfActiveRun(p.runId)) { return; }
+          const store = useSerenityStore.getState();
+          eventHandled = true;
+          if (p.status === "failed") {
+            // 本地化：有码取 11 语言译文，无码（旧载荷）回退原文。
+            // `p.error` 形如 `"Serenity 筛选工作流失败: <WorkflowError::Display>"`，其中可能含中文
+            // ——`WorkflowError` 的 `InvalidStateTransition` / `LifecycleHookFailed` 两个变体自带中文。
+            const failureText = translateFailureText(p.error, p.code)
+              || i18n.t("serenityPanel.errorUnknown");
+            store.setError(failureText);
+            store.setStage("error");
+            store.setRunning(false);
+            store.setCurrentNode(null);
+            return;
+          }
+          // completed 与 partial_failure 都必须收尾：
+          // partial_failure = 候选已产出但部分落库失败（serenity.rs persistence_success=false），
+          // 旧实现只认 completed/failed → 该分支既不收尾也不清 running（面板卡在运行中）。
+          if (p.status === "completed" || p.status === "partial_failure") {
+            if (p.status === "partial_failure") {
+              // 日志打结构化字段（码由 payload 承载）——此前打的是中文整句，非中文环境查日志同样难读。
+              console.warn(
+                "[Serenity] 持久化部分失败：",
+                p.persistenceCode ?? "(no code)",
+                p.persistenceStockCode,
+                p.persistenceError,
+              );
+            }
+            const directCandidates = Array.isArray(p.candidates)
+              ? (p.candidates.filter((c: unknown) => c != null) as SerenityCandidate[])
+              : null;
+            const list = directCandidates && directCandidates.length > 0
+              ? directCandidates
+              : extractCandidatesList(p.result);
+            if (list.length > 0) {
+              store.setCandidates(list);
+            } else {
+              console.warn(
+                "[Serenity] ⚠️ No candidates could be extracted! Full payload:",
+                JSON.stringify(p).slice(0, 1000),
+              );
+            }
+            if (Array.isArray(p.trends)) {
+              store.setTrends(p.trends);
+            }
+            if (typeof p.emptyReason === "string" && p.emptyReason.trim().length > 0) {
+              store.setEmptyReason(p.emptyReason.trim());
+            }
+            // 部分落库失败时把原因暴露给用户（候选仍正常展示，仅提示写入异常）。
+            // 双层：主文案走**结构化码**取 11 语言译文（`translateFailureText`），
+            // 技术详情（哪只 + DB 原文）另起一行保留 —— 本地化不以「丢原因」为代价。
+            if (p.status === "partial_failure" && typeof p.persistenceError === "string") {
+              const persistCode = typeof p.persistenceCode === "string" ? p.persistenceCode : null;
+              // 有码 ⇒ `persistenceError` 已是纯 DB 原文，需补「哪只」才有排查价值；
+              // 无码（旧载荷）⇒ 原文整句里本就带股票代码，再拼一次会把代码重复渲染两遍。
+              const persistDetail = persistCode
+                ? [p.persistenceStockCode, p.persistenceError]
+                  .filter((x): x is string => typeof x === "string" && x.length > 0)
+                  .join(": ")
+                : null;
+              store.setError(
+                translateFailureText(p.persistenceError, persistCode),
+                persistDetail || null,
+              );
+            }
+            store.setStage("done");
+            store.setRunning(false);
+            store.setCurrentNode(null);
+          }
+        });
+      } catch {
+        // 非 Tauri 环境（浏览器 mock）listen 不可用：置空以允许下次重试
+        listenersPromise = null;
+      }
+    })();
+  }
+  return listenersPromise;
+}
 
 /// 将节点 ID 映射为 i18n 标题 key
 function nodeTitleKey(nodeId: string): string {
@@ -522,6 +693,7 @@ export function SerenityScreeningPanel() {
     trends,
     setTrends,
     error,
+    errorDetail,
     setError,
     stage,
     setStage,
@@ -530,7 +702,6 @@ export function SerenityScreeningPanel() {
     totalNodes,
     setTotalNodes,
     steps,
-    addStep,
     currentNodeId,
     setCurrentNode,
     clearSteps,
@@ -538,16 +709,11 @@ export function SerenityScreeningPanel() {
     setEmptyReason,
   } = useSerenityStore();
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const isInInvestHub = location.pathname.startsWith("/invest");
+  // 跳转统一走 useStockJump（与智能荐股 / 筛选结果同一条链，避免参数名分叉）
+  const jumpToStock = useStockJump();
 
-  // 用于在 handleRun 启动前注册监听器，确保不漏事件
-  const unlistenStepRef = useRef<(() => void) | null>(null);
-  const unlistenDoneRef = useRef<(() => void) | null>(null);
-  // 跟踪 completed/failed 事件是否已处理（用于避免 invoke 错误路径覆盖事件已设置的结果）
-  const eventHandledRef = useRef<boolean>(false);
+  // 事件监听已上移到模块级（ensureSerenityListeners）：跨 tab 切换存活，
+  // 不再使用组件内 ref 保存 unlisten，也不再随 unmount 解绑。
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
   // 回馈闭环状态
   const [feedbackData, setFeedbackData] = useState<
@@ -579,6 +745,9 @@ export function SerenityScreeningPanel() {
       generatedAt: string;
       stockCount: number;
       createdAt: string;
+      // 该条记录实际包含的风格（后端 GROUP_CONCAT DISTINCT style），
+      // 详情查询用它对齐列表口径，避免列表认两种风格而详情只认一种导致数量对不上
+      styles: string;
     }>
   >([]);
   const [serenityHistoryLoading, setSerenityHistoryLoading] = useState(false);
@@ -601,6 +770,7 @@ export function SerenityScreeningPanel() {
       generatedAt: string;
       stockCount: number;
       createdAt: string;
+      styles: string;
     } | null
   >(null);
 
@@ -610,10 +780,14 @@ export function SerenityScreeningPanel() {
   // ── 估值过滤设置 ──
   const [serenitySettingsOpen, setSerenitySettingsOpen] = useState(false);
   const [serenityVars, setSerenityVars] = useState<Record<string, number>>({});
+  // 2026-09-11 修复：原实现写死 get_template_by_version({ version: 6 }) —— 读的是
+  // 历史快照（该函数按版本精确匹配），而运行时执行与写入（apply_update_variable）
+  // 都走主表当前版本 → 改完设置关闭再打开会「回弹」旧值（快照里还留着已删除的
+  // ref_*_code 变量）。改为按 id 读主表（当前版本），与写侧同源。
   useEffect(() => {
     invoke<{ variables: Array<{ name: string; value: unknown }> }>(
-      "get_template_by_version",
-      { id: "serenity-screening", version: 6 },
+      "get_workflow_template",
+      { id: "serenity-screening" },
     ).then((tpl) => {
       if (!tpl) { return; }
       const map: Record<string, number> = {};
@@ -636,19 +810,24 @@ export function SerenityScreeningPanel() {
     } catch { /* ignore */ }
   }, []);
 
-  // 组件卸载时清理监听
+  // 挂载即确保事件监听已注册（模块级单例，注册后永不解绑）。
+  // 不放 handleRun 内：监听随组件卸载解绑正是「切 tab 后进度冻结 + running 粘滞」
+  // 的根因；模块级注册后，重新挂载的面板可直接读到 store 中的最新进度。
   useEffect(() => {
-    return () => {
-      unlistenStepRef.current?.();
-      unlistenDoneRef.current?.();
-    };
+    void ensureSerenityListeners();
   }, []);
 
   // ── 挂载时恢复最近一次工作流运行产生的候选 ──
   // tab 打开（destroyOnHidden 下每次切换都会重新 mount）默认展示上一次
-  // 趋势智选产物。styleFilter 同时认 'serenity'（serenity-screening 工作流
-  // 落库 style='serenity'）和 'bottleneck'（智能荐股内置 SerenityStrategy
-  // 落库 style='bottleneck'）——业务上两类都是"趋势智选"，让面板都能显示。
+  // 趋势智选产物。
+  // ⚠ 2026-09-18 修复：恢复查询**优先只认 style='serenity'**（serenity-screening
+  // 工作流产物，seed_pool_json 是完整候选对象，含 serenity_score/催化剂/风险等）；
+  // 仅当历史中完全没有 serenity 记录时，才回退到 style='bottleneck'
+  // （智能荐股内置 SerenityStrategy 产物，业务上也属"趋势智选"）。
+  // 此前直接认 "serenity,bottleneck"：若最近一次是智能荐股，其 seed_pool_json
+  // 是推荐池快照（数组），restoreCandidate 走 fallback 只剩
+  // {stockCode, stockName, confidence} —— 趋势智选卡片评分恒为 0、
+  // 催化剂/风险/退出信号/关注度全部缺失（格式与信息均不正确）。
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -656,14 +835,24 @@ export function SerenityScreeningPanel() {
       if (useSerenityStore.getState().running) { return; }
       setLastRunLoading(true);
       try {
-        const list = await invoke<Array<{ generatedAt: string; stockCount: number; createdAt: string }>>(
+        // 先查最近一次真正的趋势智选（serenity）记录
+        let list = await invoke<Array<{ generatedAt: string; stockCount: number; createdAt: string }>>(
           "list_reco_history",
-          { styleFilter: "serenity,bottleneck", limit: 1 },
+          { styleFilter: "serenity", limit: 1 },
         );
+        let restoreStyle = "serenity";
+        // 无 serenity 历史 → 回退到智能荐股 SerenityStrategy（bottleneck）记录
+        if (!list || list.length === 0) {
+          list = await invoke<Array<{ generatedAt: string; stockCount: number; createdAt: string }>>(
+            "list_reco_history",
+            { styleFilter: "bottleneck", limit: 1 },
+          );
+          restoreStyle = "bottleneck";
+        }
         if (cancelled || !list || list.length === 0) { return; }
         const detail = await invoke<RecoDetailItem[]>("get_reco_detail", {
           generatedAt: list[0].generatedAt,
-          styleFilter: "serenity,bottleneck",
+          styleFilter: restoreStyle,
         });
         if (cancelled) { return; }
         const restored = (detail ?? [])
@@ -707,103 +896,13 @@ export function SerenityScreeningPanel() {
     setCompletedNodes(0);
     setTotalNodes(0);
     setExpandedSteps(new Set());
-    eventHandledRef.current = false;
 
-    // 先注册事件监听，再启动 invoke，避免漏掉早期事件
-    unlistenStepRef.current?.();
-    unlistenDoneRef.current?.();
-
-    try {
-      unlistenStepRef.current = await listen<{
-        nodeId: string;
-        status: string;
-        totalNodes: number;
-        completedNodes: number;
-        output?: unknown;
-        error?: string;
-        elapsedMs?: number;
-      }>("serenity-screening-step", (event) => {
-        const p = event.payload;
-        const nodeStage = NODE_STAGE_MAP[p.nodeId] ?? "loading";
-        setStage(nodeStage);
-        setTotalNodes(p.totalNodes ?? 0);
-        setCompletedNodes(p.completedNodes ?? 0);
-        setCurrentNode(p.nodeId);
-        const log: StepLog = {
-          nodeId: p.nodeId,
-          status: p.status,
-          output: p.output,
-          error: p.error,
-          elapsedMs: p.elapsedMs,
-          totalNodes: p.totalNodes,
-          completedNodes: p.completedNodes,
-          timestamp: Date.now(),
-        };
-        addStep(log);
-      });
-
-      unlistenDoneRef.current = await listen<{
-        status: string;
-        result?: unknown;
-        candidates?: unknown[];
-        trends?: TrendInfo[];
-        error?: string;
-        emptyReason?: string | null;
-      }>("serenity-screening-completed", (event) => {
-        const p = event.payload;
-        eventHandledRef.current = true;
-        if (p.status === "failed") {
-          setError(p.error ?? t("serenityPanel.errorUnknown"));
-          setStage("error");
-          setRunning(false);
-          setCurrentNode(null);
-        } else if (p.status === "completed") {
-          console.log(
-            "[Serenity] done payload candidates:",
-            p.candidates?.length ?? 0,
-            "trends:",
-            Array.isArray(p.trends) ? p.trends.length : typeof p.trends,
-            "result type:",
-            Array.isArray(p.result)
-              ? "array"
-              : typeof p.result === "object" && p.result != null
-              ? `object keys=${Object.keys(p.result as Record<string, unknown>).join(",")}`
-              : typeof p.result,
-          );
-          // 优先使用事件 payload 中直接的 candidates 数组
-          // 如果 candidates 为空数组但 result 有数据，回退到从 result 提取
-          const directCandidates = Array.isArray(p.candidates)
-            ? (p.candidates.filter((c: unknown) => c != null) as SerenityCandidate[])
-            : null;
-          const list = directCandidates && directCandidates.length > 0
-            ? directCandidates
-            : extractCandidatesList(p.result);
-          if (list.length > 0) {
-            setCandidates(list);
-          } else {
-            // 最终兜底：打印完整 payload 帮助诊断
-            console.warn(
-              "[Serenity] ⚠️ No candidates could be extracted! Full payload:",
-              JSON.stringify(p).slice(0, 1000),
-            );
-          }
-          // trends 来自事件
-          if (Array.isArray(p.trends)) {
-            setTrends(p.trends);
-          }
-          // 接收后端透传的"为什么没有候选"原因（来自 a-candidate-mapper
-          // 的 arguments.summary），在 candidates 为空时展示
-          if (typeof p.emptyReason === "string" && p.emptyReason.trim().length > 0) {
-            setEmptyReason(p.emptyReason.trim());
-          }
-          setStage("done");
-          setRunning(false);
-          setCurrentNode(null);
-        }
-      });
-    } catch {
-      // 非 Tauri 环境下 listen 不可用，静默忽略
-    }
+    // 事件监听是模块级单例（ensureSerenityListeners）：这里只确保已注册，
+    // 并在启动前锁定本次运行的 runId —— 监听器据此丢弃其它运行的事件。
+    // 必须先 await 再 invoke，避免漏掉早期节点事件。
+    activeRunId = newRunId();
+    eventHandled = false;
+    await ensureSerenityListeners();
 
     setRunning(true);
     try {
@@ -821,12 +920,15 @@ export function SerenityScreeningPanel() {
         {
           asOfDate,
           themes: themeTags.length > 0 ? themeTags : null,
+          // 运行 ID：后端把它原样回灌到 step/completed 事件 payload，
+          // 前端监听器据此过滤掉其它运行（并发/残留）的事件，避免串台。
+          runId: activeRunId,
         },
         SERENITY_TIMEOUT_MS,
       );
       // 如果事件已经处理过（覆盖了 candidates/trends），这里不要重复 set
       // 但仍要确保 running 状态被关闭
-      if (!eventHandledRef.current) {
+      if (!eventHandled) {
         const list = extractCandidatesList(r?.candidates);
         if (list.length > 0) {
           setCandidates(list);
@@ -841,7 +943,7 @@ export function SerenityScreeningPanel() {
       }
     } catch (err: unknown) {
       // 仅在 completed 事件未已经处理时才显示错误
-      if (!eventHandledRef.current) {
+      if (!eventHandled) {
         // 超时错误特殊处理：如果后端仍在运行，给用户友好提示
         if (err instanceof InvokeTimeoutError) {
           console.warn(
@@ -864,7 +966,6 @@ export function SerenityScreeningPanel() {
       setCurrentNode(null);
     }
   }, [
-    addStep,
     clearSteps,
     setCandidates,
     setEmptyReason,
@@ -881,16 +982,21 @@ export function SerenityScreeningPanel() {
 
   /** 打开瓶颈掘金历史详情 */
   const openSerenityDetail = useCallback(
-    async (row: { generatedAt: string; stockCount: number; createdAt: string }) => {
+    async (row: { generatedAt: string; stockCount: number; createdAt: string; styles: string }) => {
       setSerenityDetailRow(row);
       setSerenityDetailOpen(true);
       setSerenityDetailLoading(true);
       try {
+        // ⚠ 2026-09-18 修复：详情查询用该记录自身的 styles（后端 list 返回的
+        // GROUP_CONCAT DISTINCT style），与列表口径一致。此前硬编码 "serenity"：
+        // 列表用 "serenity,bottleneck" 展示合并数量（如 10），详情却只查 serenity，
+        // 若该轮候选来自智能荐股（bottleneck）则详情恒空，显示"无候选股票数据"。
+        const styleFilter = row.styles || "serenity";
         const items = await invoke<
           Array<{ stockCode: string; stockName: string; confidence: number; generatedAt: string }>
         >("get_reco_detail", {
           generatedAt: row.generatedAt,
-          styleFilter: "serenity",
+          styleFilter,
         });
         setSerenityDetailItems(items ?? []);
       } catch (e) {
@@ -900,6 +1006,32 @@ export function SerenityScreeningPanel() {
       setSerenityDetailLoading(false);
     },
     [],
+  );
+
+  /** 删除单条历史记录（复用 batch_delete_reco_history，传单元素数组） */
+  const handleDeleteOne = useCallback(
+    async (row: { generatedAt: string; stockCount: number; createdAt: string; styles: string }) => {
+      setSerenityDeleting(true);
+      try {
+        await invoke("batch_delete_reco_history", { generatedAts: [row.generatedAt] });
+        messageApi.success(
+          t("serenityPanel.serenityHistory.deleteSuccess", { count: 1 }),
+        );
+        // 若当前详情正是被删这条，同步关闭
+        if (serenityDetailRow?.generatedAt === row.generatedAt) {
+          setSerenityDetailOpen(false);
+          setSerenityDetailItems([]);
+          setSerenityDetailRow(null);
+        }
+        setSerenityHistory((prev) => prev.filter((r) => r.generatedAt !== row.generatedAt));
+        setSerenitySelected((prev) => prev.filter((g) => g !== row.generatedAt));
+      } catch (e) {
+        messageApi.error(String(e));
+      } finally {
+        setSerenityDeleting(false);
+      }
+    },
+    [serenityDetailRow, messageApi, t],
   );
 
   // 当前阶段文案
@@ -1186,10 +1318,14 @@ export function SerenityScreeningPanel() {
                 : <LoadingOutlined style={{ color: "#1677ff" }} />;
               // 节点输出语义化分析（ToolNode 表格 / CodeNode 计算 / AgentNode 文本）
               const view = buildNodeOutputView(s.nodeId, s.output);
+              // 失败节点的展示文案。`s.error` 是后端 `NodeError::Display` 的**自由文本**
+              // （可能含中文，如 "EXECUTION_CANCELLED: 节点执行已取消"）⇒ 只作技术详情；
+              // 主文案优先用 `errorCode` 取 11 语言译文，无码/未收录时自动回退原文。
+              const failureText = isFailed ? translateFailureText(s.error, s.errorCode) : "";
               // 折叠态单行摘要：失败 → 错误信息；成功 → "类型 · 数据规模"
               let summary = "";
               if (isFailed) {
-                summary = s.error ? truncateText(s.error, 60) : "";
+                summary = failureText ? truncateText(failureText, 60) : "";
               } else if (s.status === "completed" && view.kind !== "empty") {
                 const typeLabel = t(`serenityPanel.stepLogType.${view.kind}`);
                 // 摘要优先级：结论文本（summary）> 数组条数（空→"空数据"）> 字段数
@@ -1250,7 +1386,22 @@ export function SerenityScreeningPanel() {
                   </div>
                   {isExpanded && (
                     isFailed && s.error
-                      ? <div className="mt-1 text-xs text-red-500 whitespace-pre-wrap break-all">{s.error}</div>
+                      ? (
+                        <div className="mt-1 text-xs text-red-500 whitespace-pre-wrap break-all">
+                          {
+                            /*
+                            展开态 = 后端**原文**（`NodeError::Display`）全文。
+                            刻意不在这里重复主文案：本地化主文案已由上面的折叠摘要承担，
+                            展开的意义是「看完整原文」（摘要会截断 60 字符）。
+
+                            原文可能含中文（如 "EXECUTION_CANCELLED: 节点执行已取消"）—— 这是
+                            刻意的取舍：detail 承载具体原因（LLM 报错正文 / IO 详情），没有对应
+                            译文，抹掉它会让失败无从排查。**主文案本地化 + 详情保留原文**。
+                          */
+                          }
+                          {s.error}
+                        </div>
+                      )
                       : view.kind === "empty"
                       ? (
                         <div className="mt-1 text-xs text-gray-400 italic">
@@ -1319,7 +1470,15 @@ export function SerenityScreeningPanel() {
           className="rounded border border-red-500/30 p-2 text-sm text-red-400"
           style={{ backgroundColor: "rgba(255,77,79,0.08)" }}
         >
-          {error}
+          <div>{error}</div>
+          {
+            /* 技术详情行：未本地化的原文（DB 报错 / 节点 `NodeError` 自由文本），仅供排查。
+              与主文案相同则不渲染 —— 旧载荷下 `errorDetail` 会被置 null，
+              但这里再挡一次，避免调用方误传同一串导致同一句话出现两行。 */
+          }
+          {errorDetail && errorDetail !== error && (
+            <div className="mt-1 font-mono text-xs break-all opacity-80">{errorDetail}</div>
+          )}
         </div>
       )}
 
@@ -1601,7 +1760,7 @@ export function SerenityScreeningPanel() {
             </div>
           )
           : null}
-        width={560}
+        width={620}
       >
         <Table
           size="small"
@@ -1656,6 +1815,26 @@ export function SerenityScreeningPanel() {
               key: "stockCount",
               render: (v: number) => <span className="text-xs">{v}{t("serenityPanel.filterSuffixCount")}</span>,
             },
+            {
+              title: t("serenityPanel.serenityHistory.actions"),
+              key: "actions",
+              width: 64,
+              render: (_, r: { generatedAt: string; stockCount: number; createdAt: string; styles: string }) => (
+                <Popconfirm
+                  title={t("serenityPanel.serenityHistory.deleteOneConfirm")}
+                  onConfirm={() => handleDeleteOne(r)}
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    danger
+                    icon={<DeleteOutlined />}
+                    loading={serenityDeleting}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </Popconfirm>
+              ),
+            },
           ]}
         />
       </Modal>
@@ -1696,17 +1875,7 @@ export function SerenityScreeningPanel() {
                   className="w-full"
                   onClick={() => {
                     setSerenityDetailOpen(false);
-                    if (isInInvestHub) {
-                      // 在 InvestHub 内部：使用 URL 参数切换到 workspace tab，自动输入股票代码
-                      const next = new URLSearchParams(searchParams);
-                      next.set("tab", "workspace");
-                      next.set("stockCode", item.stockCode);
-                      next.set("view", "analysis");
-                      setSearchParams(next, { replace: true });
-                    } else {
-                      // 独立页面：跳转到股票分析页面
-                      navigate(`/stock-analysis?code=${item.stockCode}`, { replace: true });
-                    }
+                    jumpToStock({ code: item.stockCode, name: item.stockName });
                   }}
                 >
                   <div className="flex items-center justify-between">

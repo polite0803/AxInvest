@@ -22,11 +22,33 @@ let verified_candidates = [];
 //   content.arguments 层不存在、路径2对字符串索引 candidates 失败 → 全 null →
 //   data-verifier early return 空数组 → serenity 优先取 c-data-verifier 吞掉真候选。
 //   直接对 content 整体 json_parse 兜底。
+// 路径4 (report包裹, 2026-09-11 实锤): AgentNode content 为 {"report":"<json字符串>"}
+//   双重编码形态——candidates 藏在 report 字符串内层，且 report 值可能带
+//   ```tool_json 围栏。json_parse 不剥围栏，需先截取首个平衡 JSON 块再二次解析。
+fn extract_json_block(s) {
+    let start = s.index_of("{");
+    if start < 0 { return s; }
+    let n = s.len;
+    // range 不含终点 → 终点用 start-1 才能覆盖 i==start
+    for i in range(n - 1, start - 1, -1) {
+        if s.sub_string(i, 1) == "}" {
+            return s.sub_string(start, i - start + 1);
+        }
+    }
+    s.sub_string(start, n - start)
+}
 let candidates_from_raw = if present(candidates_raw) && type_of(candidates_raw) == "string" {
     let p = json_parse(candidates_raw);
     if type_of(p) == "array" { p }
     else if type_of(p) == "map" && p["candidates"] != () && type_of(p["candidates"]) == "array" {
         p["candidates"]
+    } else if type_of(p) == "map" && p["report"] != () && type_of(p["report"]) == "string" {
+        print("[data-verifier] content 为 report 包裹形态，二次解析 report 内层");
+        let q = json_parse(extract_json_block(p["report"]));
+        if type_of(q) == "array" { q }
+        else if type_of(q) == "map" && q["candidates"] != () && type_of(q["candidates"]) == "array" {
+            q["candidates"]
+        } else { [] }
     } else { [] }
 } else { [] };
 // 选择第一个有效的数组

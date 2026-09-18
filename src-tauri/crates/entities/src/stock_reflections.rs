@@ -10,6 +10,7 @@ pub struct Model {
     pub stock_code: String,
     pub stock_name: String,
     /// 原始分析的 ID（关联 stock_analyses.id）
+    #[sea_orm(indexed)]
     pub original_analysis_id: String,
     /// as-of 时间（原始分析日期，YYYY-MM-DD）
     pub as_of_date: String,

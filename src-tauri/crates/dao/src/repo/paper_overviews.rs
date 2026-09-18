@@ -289,10 +289,13 @@ mod tests {
 
     #[tokio::test]
     async fn crud_round_trip() {
-        use crate::migrations::v107_paper_reading_list as v107;
-        let db =
-            sea_orm::Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        v107::up(db.clone()).await.expect("测试：异步操作应成功");
+        // 建表改走**声明式引擎**（`migrations/v107_paper_reading_list.rs` 已删）。
+        // 用 `create_test_pool` 而非手连 in-memory：它走生产同一条 `initialize_schema`，
+        // 且把连接数显式钉成 1 —— `sqlite::memory:` 的连接池若 >1，每个连接各自一个
+        // 独立内存库，建表与后续 CRUD 会落在不同库上（表现为间歇性「表不存在」，
+        // 且与建表语句本身无关，极难归因）。
+        let handle = crate::db::create_test_pool().await.expect("测试：测试库应可建立");
+        let db = handle.conn.clone();
 
         // create
         let created = create(&db, sample_input("doc1", "kb1")).await.expect("测试：异步操作应成功");
@@ -337,10 +340,13 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_by_document_creates_then_updates() {
-        use crate::migrations::v107_paper_reading_list as v107;
-        let db =
-            sea_orm::Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        v107::up(db.clone()).await.expect("测试：异步操作应成功");
+        // 建表改走**声明式引擎**（`migrations/v107_paper_reading_list.rs` 已删）。
+        // 用 `create_test_pool` 而非手连 in-memory：它走生产同一条 `initialize_schema`，
+        // 且把连接数显式钉成 1 —— `sqlite::memory:` 的连接池若 >1，每个连接各自一个
+        // 独立内存库，建表与后续 CRUD 会落在不同库上（表现为间歇性「表不存在」，
+        // 且与建表语句本身无关，极难归因）。
+        let handle = crate::db::create_test_pool().await.expect("测试：测试库应可建立");
+        let db = handle.conn.clone();
 
         // 首次 upsert → 创建
         let v1 = upsert_by_document(&db, sample_input("doc2", "kb2"))
@@ -364,10 +370,13 @@ mod tests {
 
     #[tokio::test]
     async fn delete_nonexistent_returns_not_found() {
-        use crate::migrations::v107_paper_reading_list as v107;
-        let db =
-            sea_orm::Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        v107::up(db.clone()).await.expect("测试：异步操作应成功");
+        // 建表改走**声明式引擎**（`migrations/v107_paper_reading_list.rs` 已删）。
+        // 用 `create_test_pool` 而非手连 in-memory：它走生产同一条 `initialize_schema`，
+        // 且把连接数显式钉成 1 —— `sqlite::memory:` 的连接池若 >1，每个连接各自一个
+        // 独立内存库，建表与后续 CRUD 会落在不同库上（表现为间歇性「表不存在」，
+        // 且与建表语句本身无关，极难归因）。
+        let handle = crate::db::create_test_pool().await.expect("测试：测试库应可建立");
+        let db = handle.conn.clone();
 
         let err = delete(&db, "nonexistent").await.unwrap_err();
         match err {

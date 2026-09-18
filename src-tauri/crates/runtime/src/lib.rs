@@ -27,7 +27,6 @@ mod bootstrap;
 pub mod branch_lock;
 pub mod buddy;
 pub mod checkpoint;
-pub mod collaboration;
 pub mod connection_pool;
 pub mod cron;
 pub mod dashboard_plugin;
@@ -60,12 +59,6 @@ pub mod message_gateway;
 pub mod mode_selector;
 pub mod module_switch;
 mod oauth;
-/// 3.3 P2:6 小时无人值守持久重试调度器
-///
-/// 跨进程持久化重试调度器,失败后保存 session → 等待冷却 → 自动加载恢复 → 继续执行。
-/// 由 src-tauri/src/init/ 的后台守护进程定时唤醒检查 pending session。
-pub mod persistent_queue;
-pub mod persistent_runner;
 pub mod plugin_lifecycle;
 mod policy_engine;
 pub mod priority_scheduler;
@@ -74,7 +67,6 @@ pub mod profile_manager;
 mod prompt;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod pty;
-pub mod reactive_compact;
 // recovery_recipes merged into error_recovery
 mod remote;
 pub mod resource_governor;
@@ -196,7 +188,8 @@ pub use error_recovery::{
     EscalationPolicy, FailureScenario, RecoveryContext, RecoveryEvent, RecoveryRecipe,
     RecoveryResult, RecoveryStep, attempt_recovery, recipe_for,
 };
-pub use reactive_compact::{
+// ── 响应式压缩：权威源在 runtime-core，此处仅 re-export（禁止重复定义） ──
+pub use axagent_runtime_core::reactive_compact::{
     ReactiveCompactResult, ReactiveTrigger, classify_trigger, is_context_overflow_error,
     is_media_size_error, try_reactive_compact,
 };

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::ProviderAdapter;
 use crate::anthropic::AnthropicAdapter;
+use crate::compat::impl_default_via_new;
 use crate::deepseek::DeepSeekAdapter;
 use crate::gemini::GeminiAdapter;
 use crate::glm::GlmAdapter;
@@ -74,11 +75,7 @@ impl ProviderRegistry {
     }
 }
 
-impl Default for ProviderRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(ProviderRegistry);
 
 // ============================================================
 // Harness ProviderRegistry trait 实现

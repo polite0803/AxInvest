@@ -36,6 +36,7 @@ import {
   Dropdown,
   Empty,
   Input,
+  type InputRef,
   type MenuProps,
   Modal,
   Radio,
@@ -233,6 +234,47 @@ export function ChatSidebar({
   const [archiveLoading, setArchiveLoading] = useState(false);
   const [categoryManagerOpen, setCategoryManagerOpen] = useState(false);
   const conversationsLoading = useConversationStore((s) => s.loading);
+  /** 会话搜索输入框（Ctrl+F 的聚焦目标） */
+  const searchInputRef = useRef<InputRef>(null);
+
+  // ── 「展开并聚焦会话搜索」请求（来源：Ctrl+F，见 useKeyboardShortcuts）──
+  const chatSearchFocusRequest = useUIStore((s) => s.chatSearchFocusRequest);
+  const consumeChatSearchFocus = useUIStore((s) => s.consumeChatSearchFocus);
+
+  // 第一步：补齐渲染前提。搜索框的渲染条件是 `!showArchived && searchVisible && !multiSelectMode`，
+  // 任一不满足时 DOM 里根本没有输入框，聚焦必然失败。侧栏折叠（桌面宽 48px）时也一并展开，
+  // 否则会聚焦到一个视觉上不可见的元素。
+  useEffect(() => {
+    if (chatSearchFocusRequest === 0) {
+      return;
+    }
+    setShowArchived(false);
+    setMultiSelectMode(false);
+    setSearchVisible(true);
+    setIsCollapsed(false);
+    onCollapseChange?.(false);
+  }, [chatSearchFocusRequest, onCollapseChange]);
+
+  // 第二步：元素就绪后聚焦，随后**消费请求（归零）**。
+  // 归零而非用 ref 记「已消费的值」：ref 随卸载重置，ChatSidebar 在 Tab 间切换会反复卸载，
+  // 用 ref 会让同一个旧请求在每次重新挂载时重复触发聚焦。
+  useEffect(() => {
+    if (chatSearchFocusRequest === 0) {
+      return;
+    }
+    const el = searchInputRef.current?.input;
+    if (!el) {
+      return; // 本帧尚未挂载（Suspense/lazy）；先不消费，等依赖变化后重试
+    }
+    el.focus();
+    consumeChatSearchFocus();
+  }, [
+    chatSearchFocusRequest,
+    searchVisible,
+    showArchived,
+    multiSelectMode,
+    consumeChatSearchFocus,
+  ]);
 
   const expandedParentIdsRef = useRef(expandedParentIds);
 
@@ -2085,6 +2127,7 @@ export function ChatSidebar({
         >
           <Input
             id="chat-sidebar-input-5"
+            ref={searchInputRef}
             prefix={<Search size={14} />}
             placeholder={t("chat.searchPlaceholder")}
             allowClear

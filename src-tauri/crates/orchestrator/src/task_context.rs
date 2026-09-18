@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 行业级 TaskContext — 执行逻辑隔离
+//! 域包级 TaskContext — 执行逻辑隔离
 //!
-//! 为每个行业工作流提供独立的执行上下文，实现：
-//! - 状态隔离：各行业独立维护自己的执行状态
-//! - 配置隔离：行业特定的配置只能在该行业上下文中访问
-//! - 资源隔离：Token 预算、缓存等资源按行业分区
-//! - 安全隔离：防止跨行业数据泄漏
+//! 为每个域包工作流提供独立的执行上下文，实现：
+//! - 状态隔离：各域包独立维护自己的执行状态
+//! - 配置隔离：域包特定的配置只能在该域包上下文中访问
+//! - 资源隔离：Token 预算、缓存等资源按域包分区
+//! - 安全隔离：防止跨域包数据泄漏
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,10 +14,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::industry_adapters::types::IndustryContext;
-use crate::token_budget::IndustryTokenBudgetManager;
+use crate::domain_pack_adapters::types::DomainPackContext;
+use crate::token_budget::DomainPackTokenBudgetManager;
 
-/// 行业任务上下文状态
+/// 域包任务上下文状态
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TaskContextState {
     /// 空闲
@@ -34,42 +34,42 @@ pub enum TaskContextState {
     Error,
 }
 
-/// 行业任务上下文
+/// 域包任务上下文
 ///
-/// 每个行业工作流拥有独立的 TaskContext，提供：
-/// - 行业适配器访问
+/// 每个域包工作流拥有独立的 TaskContext，提供：
+/// - 域包适配器访问
 /// - Token 预算管理
 /// - 执行状态跟踪
 /// - 资源隔离
 #[derive(Debug)]
-pub struct IndustryTaskContext {
-    /// 行业 ID
-    industry_id: String,
-    /// 行业上下文信息
-    context: IndustryContext,
+pub struct DomainPackTaskContext {
+    /// 域包 ID
+    domain_pack_id: String,
+    /// 域包上下文信息
+    context: DomainPackContext,
     /// 上下文状态
     state: RwLock<TaskContextState>,
     /// 执行计数器
     execution_count: RwLock<u64>,
     /// 最近执行时间（毫秒）
     last_execution_ms: RwLock<Option<u64>>,
-    /// 行业特定扩展数据
+    /// 域包特定扩展数据
     extensions: RwLock<HashMap<String, serde_json::Value>>,
     /// Token 预算管理器引用
-    token_budget: Arc<IndustryTokenBudgetManager>,
+    token_budget: Arc<DomainPackTokenBudgetManager>,
     /// 是否启用隔离模式
     isolation_enabled: bool,
 }
 
-impl IndustryTaskContext {
-    /// 创建行业任务上下文
+impl DomainPackTaskContext {
+    /// 创建域包任务上下文
     pub fn new(
-        industry_id: &str,
-        context: IndustryContext,
-        token_budget: Arc<IndustryTokenBudgetManager>,
+        domain_pack_id: &str,
+        context: DomainPackContext,
+        token_budget: Arc<DomainPackTokenBudgetManager>,
     ) -> Self {
         Self {
-            industry_id: industry_id.to_string(),
+            domain_pack_id: domain_pack_id.to_string(),
             context,
             state: RwLock::new(TaskContextState::Idle),
             execution_count: RwLock::new(0),
@@ -80,13 +80,13 @@ impl IndustryTaskContext {
         }
     }
 
-    /// 获取行业 ID
-    pub fn industry_id(&self) -> &str {
-        &self.industry_id
+    /// 获取域包 ID
+    pub fn domain_pack_id(&self) -> &str {
+        &self.domain_pack_id
     }
 
-    /// 获取行业上下文
-    pub fn context(&self) -> &IndustryContext {
+    /// 获取域包上下文
+    pub fn context(&self) -> &DomainPackContext {
         &self.context
     }
 
@@ -174,22 +174,22 @@ impl IndustryTaskContext {
     }
 
     /// 获取 Token 预算管理器
-    pub fn token_budget(&self) -> &Arc<IndustryTokenBudgetManager> {
+    pub fn token_budget(&self) -> &Arc<DomainPackTokenBudgetManager> {
         &self.token_budget
     }
 
-    /// 校验行业匹配（用于隔离检查）
-    pub fn check_industry_match(&self, required_industry: &str) -> bool {
+    /// 校验域包匹配（用于隔离检查）
+    pub fn check_domain_pack_match(&self, required_domain_pack: &str) -> bool {
         if !self.isolation_enabled {
-            return true; // 隔离关闭时允许跨行业访问
+            return true; // 隔离关闭时允许跨域包访问
         }
-        self.industry_id == required_industry
+        self.domain_pack_id == required_domain_pack
     }
 
     /// 生成上下文摘要
     pub async fn summary(&self) -> TaskContextSummary {
         TaskContextSummary {
-            industry_id: self.industry_id.clone(),
+            domain_pack_id: self.domain_pack_id.clone(),
             state: *self.state.read().await,
             execution_count: *self.execution_count.read().await,
             last_execution_ms: *self.last_execution_ms.read().await,
@@ -201,62 +201,65 @@ impl IndustryTaskContext {
 /// 任务上下文摘要
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskContextSummary {
-    pub industry_id: String,
+    pub domain_pack_id: String,
     pub state: TaskContextState,
     pub execution_count: u64,
     pub last_execution_ms: Option<u64>,
     pub extension_keys: Vec<String>,
 }
 
-/// 行业上下文管理器
+/// 域包上下文管理器
 ///
-/// 管理所有行业的 TaskContext，提供：
+/// 管理所有域包的 TaskContext，提供：
 /// - 上下文注册和注销
 /// - 上下文查找
 /// - 批量状态查询
 /// - 隔离检查
 #[derive(Debug, Default)]
-pub struct IndustryContextManager {
-    /// 所有行业上下文
-    contexts: RwLock<HashMap<String, Arc<IndustryTaskContext>>>,
+pub struct DomainPackContextManager {
+    /// 所有域包上下文
+    contexts: RwLock<HashMap<String, Arc<DomainPackTaskContext>>>,
     /// Token 预算管理器
-    token_budget: Arc<IndustryTokenBudgetManager>,
+    token_budget: Arc<DomainPackTokenBudgetManager>,
 }
 
-impl IndustryContextManager {
+impl DomainPackContextManager {
     /// 创建新的上下文管理器
-    pub fn new(token_budget: Arc<IndustryTokenBudgetManager>) -> Self {
+    pub fn new(token_budget: Arc<DomainPackTokenBudgetManager>) -> Self {
         Self { contexts: RwLock::new(HashMap::new()), token_budget }
     }
 
-    /// 注册行业上下文
+    /// 注册域包上下文
     pub async fn register(
         &self,
-        industry_id: &str,
-        context: IndustryContext,
-    ) -> Arc<IndustryTaskContext> {
-        let task_context =
-            Arc::new(IndustryTaskContext::new(industry_id, context, self.token_budget.clone()));
+        domain_pack_id: &str,
+        context: DomainPackContext,
+    ) -> Arc<DomainPackTaskContext> {
+        let task_context = Arc::new(DomainPackTaskContext::new(
+            domain_pack_id,
+            context,
+            self.token_budget.clone(),
+        ));
 
         let mut contexts = self.contexts.write().await;
-        contexts.insert(industry_id.to_string(), task_context.clone());
+        contexts.insert(domain_pack_id.to_string(), task_context.clone());
 
         task_context
     }
 
-    /// 获取行业上下文
-    pub async fn get(&self, industry_id: &str) -> Option<Arc<IndustryTaskContext>> {
+    /// 获取域包上下文
+    pub async fn get(&self, domain_pack_id: &str) -> Option<Arc<DomainPackTaskContext>> {
         let contexts = self.contexts.read().await;
-        contexts.get(industry_id).cloned()
+        contexts.get(domain_pack_id).cloned()
     }
 
-    /// 注销行业上下文
-    pub async fn unregister(&self, industry_id: &str) -> bool {
+    /// 注销域包上下文
+    pub async fn unregister(&self, domain_pack_id: &str) -> bool {
         let mut contexts = self.contexts.write().await;
-        contexts.remove(industry_id).is_some()
+        contexts.remove(domain_pack_id).is_some()
     }
 
-    /// 列出所有行业 ID
+    /// 列出所有域包 ID
     pub async fn list_industries(&self) -> Vec<String> {
         let contexts = self.contexts.read().await;
         contexts.keys().cloned().collect()
@@ -274,26 +277,26 @@ impl IndustryContextManager {
         summaries
     }
 
-    /// 检查跨行业访问是否允许
-    pub async fn check_access(&self, source_industry: &str, target_industry: &str) -> bool {
-        if source_industry == target_industry {
-            return true; // 同行业直接允许
+    /// 检查跨域包访问是否允许
+    pub async fn check_access(&self, source_domain_pack: &str, target_domain_pack: &str) -> bool {
+        if source_domain_pack == target_domain_pack {
+            return true; // 同域包直接允许
         }
 
         // 查找目标上下文
-        if let Some(ctx) = self.get(target_industry).await {
-            ctx.check_industry_match(source_industry)
+        if let Some(ctx) = self.get(target_domain_pack).await {
+            ctx.check_domain_pack_match(source_domain_pack)
         } else {
-            false // 目标行业不存在，拒绝访问
+            false // 目标域包不存在，拒绝访问
         }
     }
 
     /// 获取 Token 预算管理器
-    pub fn token_budget(&self) -> &Arc<IndustryTokenBudgetManager> {
+    pub fn token_budget(&self) -> &Arc<DomainPackTokenBudgetManager> {
         &self.token_budget
     }
 
-    /// 获取行业数量
+    /// 获取域包数量
     pub async fn count(&self) -> usize {
         let contexts = self.contexts.read().await;
         contexts.len()
@@ -304,12 +307,12 @@ impl IndustryContextManager {
 mod tests {
     use super::*;
 
-    fn create_test_context(industry_id: &str) -> IndustryContext {
-        IndustryContext {
-            session_id: Some(format!("session-{}", industry_id)),
+    fn create_test_context(domain_pack_id: &str) -> DomainPackContext {
+        DomainPackContext {
+            session_id: Some(format!("session-{}", domain_pack_id)),
             user_id: Some("test-user".to_string()),
             workspace_id: Some("test-workspace".to_string()),
-            inputs: serde_json::json!({"industry": industry_id}),
+            inputs: serde_json::json!({"domain_pack": domain_pack_id}),
             history: vec![],
             knowledge_ids: vec![],
             metadata: serde_json::Value::Null,
@@ -318,22 +321,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_task_context() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let ctx = IndustryTaskContext::new(
-            "test-industry",
-            create_test_context("test-industry"),
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let ctx = DomainPackTaskContext::new(
+            "test-domain-pack",
+            create_test_context("test-domain-pack"),
             token_budget,
         );
 
-        assert_eq!(ctx.industry_id(), "test-industry");
+        assert_eq!(ctx.domain_pack_id(), "test-domain-pack");
         assert_eq!(ctx.state().await, TaskContextState::Idle);
         assert_eq!(ctx.execution_count().await, 0);
     }
 
     #[tokio::test]
     async fn test_begin_execution() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let ctx = IndustryTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         assert!(ctx.begin_execution().await.is_ok());
         assert_eq!(ctx.state().await, TaskContextState::Running);
@@ -342,8 +345,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_complete_execution() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let ctx = IndustryTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         ctx.begin_execution().await.unwrap();
         ctx.complete_execution(true).await;
@@ -353,18 +356,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_isolation_check() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let ctx =
-            IndustryTaskContext::new("industry-a", create_test_context("industry-a"), token_budget);
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let ctx = DomainPackTaskContext::new(
+            "domain-pack-a",
+            create_test_context("domain-pack-a"),
+            token_budget,
+        );
 
-        assert!(ctx.check_industry_match("industry-a"));
-        assert!(!ctx.check_industry_match("industry-b"));
+        assert!(ctx.check_domain_pack_match("domain-pack-a"));
+        assert!(!ctx.check_domain_pack_match("domain-pack-b"));
     }
 
     #[tokio::test]
     async fn test_extensions() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let ctx = IndustryTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         ctx.set_extension("key1", serde_json::json!("value1")).await;
         let val = ctx.get_extension("key1").await;
@@ -379,42 +385,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_manager() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let manager = IndustryContextManager::new(token_budget);
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let manager = DomainPackContextManager::new(token_budget);
 
-        manager.register("industry-1", create_test_context("industry-1")).await;
-        manager.register("industry-2", create_test_context("industry-2")).await;
+        manager.register("domain-pack-1", create_test_context("domain-pack-1")).await;
+        manager.register("domain-pack-2", create_test_context("domain-pack-2")).await;
 
         assert_eq!(manager.count().await, 2);
 
         let industries = manager.list_industries().await;
-        assert!(industries.contains(&"industry-1".to_string()));
-        assert!(industries.contains(&"industry-2".to_string()));
+        assert!(industries.contains(&"domain-pack-1".to_string()));
+        assert!(industries.contains(&"domain-pack-2".to_string()));
     }
 
     #[tokio::test]
-    async fn test_cross_industry_access() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let manager = IndustryContextManager::new(token_budget);
+    async fn test_cross_domain_pack_access() {
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let manager = DomainPackContextManager::new(token_budget);
 
-        manager.register("industry-1", create_test_context("industry-1")).await;
-        manager.register("industry-2", create_test_context("industry-2")).await;
+        manager.register("domain-pack-1", create_test_context("domain-pack-1")).await;
+        manager.register("domain-pack-2", create_test_context("domain-pack-2")).await;
 
-        assert!(manager.check_access("industry-1", "industry-1").await);
-        assert!(!manager.check_access("industry-1", "industry-2").await);
-        assert!(!manager.check_access("industry-2", "industry-1").await);
+        assert!(manager.check_access("domain-pack-1", "domain-pack-1").await);
+        assert!(!manager.check_access("domain-pack-1", "domain-pack-2").await);
+        assert!(!manager.check_access("domain-pack-2", "domain-pack-1").await);
     }
 
     #[tokio::test]
     async fn test_summary() {
-        let token_budget = Arc::new(IndustryTokenBudgetManager::new());
-        let ctx = IndustryTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
+        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         ctx.begin_execution().await.unwrap();
         ctx.set_extension("test-key", serde_json::json!(42)).await;
 
         let summary = ctx.summary().await;
-        assert_eq!(summary.industry_id, "test");
+        assert_eq!(summary.domain_pack_id, "test");
         assert_eq!(summary.state, TaskContextState::Running);
         assert_eq!(summary.execution_count, 1);
         assert!(summary.last_execution_ms.is_some());

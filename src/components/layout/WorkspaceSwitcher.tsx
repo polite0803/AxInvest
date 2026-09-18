@@ -1,41 +1,40 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useSettingsStore, useWorkspaceTabStore, type WorkspaceTab } from "@/stores";
+import { useWorkspaceTabActivity } from "@/hooks/useWorkspaceTabActivity";
+import { useWorkspaceTabNavigator } from "@/hooks/useWorkspaceTabNavigator";
+import { workspaceTabShortcutLabel } from "@/lib/workspaceShortcuts";
+import { GATED_WORKSPACE_TABS, WORKSPACE_TAB_ICONS, WORKSPACE_TABS } from "@/lib/workspaceTabs";
+import { useSettingsStore, useUIStore, useWorkspaceTabStore } from "@/stores";
 import { theme } from "antd";
-import { Database, Folder, FolderTree, Grid, MessageSquare, SquareTerminal, Users, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
-
-interface TabConfig {
-  key: WorkspaceTab;
-  labelKey: string;
-  icon: typeof MessageSquare;
-}
-
-const TABS: TabConfig[] = [
-  { key: "chat", labelKey: "nav.chat", icon: MessageSquare },
-  { key: "dashboard", labelKey: "nav.dashboard", icon: Grid },
-  { key: "workflow", labelKey: "nav.workflow", icon: FolderTree },
-  { key: "terminal", labelKey: "nav.terminal", icon: SquareTerminal },
-  { key: "files", labelKey: "nav.files", icon: Folder },
-  { key: "knowledge", labelKey: "nav.knowledge", icon: Database },
-  { key: "multiAgent", labelKey: "nav.multiAgent", icon: Users },
-  { key: "devtools", labelKey: "nav.devTools", icon: Wrench },
-];
 
 /**
  * 工作台功能切换栏。
  * 紧凑的水平按钮组，位于内容区顶部，在 /chat 路由下显示。
- * 对话页作为核心枢纽，其他功能（仪表盘/工作流/终端/文件/知识源/开发工具）以 Tab 形式切换。
+ * 对话页作为核心枢纽，其他功能（仪表盘/工作流/终端/文件/知识源/多智能体/开发工具）以 Tab 形式切换。
  * 开发工具 Tab 由设置 show_developer_tools 门控（默认开启）。
- * 注：OPC 一人公司面板不在对话页重复展示——导航栏（Sidebar）已有完整入口。
+ *
+ * Tab 定义来自 @/lib/workspaceTabs（唯一真相源），与快捷键/命令面板共用，
+ * 避免「切换栏有 8 个但快捷键只认 6 个」这类漂移。
+ * 点击一律走 useWorkspaceTabNavigator —— 它同时写 store 与 `?ws=`，保证 Tab 可深链、可刷新恢复。
+ *
+ * 活动点：非当前 Tab 上有工作进行中时，右上角显示小圆点（信号见 useWorkspaceTabActivity）。
+ * 只做「进行中」一色，**不做**「出错」色 —— 错误需要「已读」语义（用户看过就该熄灭），
+ * 那要额外维护一份已读状态，否则会退化成常亮噪声。
  */
 export function WorkspaceSwitcher() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const activeTab = useWorkspaceTabStore((s) => s.activeTab);
-  const setActiveTab = useWorkspaceTabStore((s) => s.setActiveTab);
+  const switchTab = useWorkspaceTabNavigator();
   const showDevTools = useSettingsStore((s) => s.settings.showDeveloperTools !== false);
-  const visibleTabs = showDevTools ? TABS : TABS.filter((x) => x.key !== "devtools");
+  const deviceLayout = useUIStore((s) => s.deviceLayout);
+  const activity = useWorkspaceTabActivity();
+  // 移动端窄屏：只留图标，避免 8 个文字标签把切换栏压成横向滚动条
+  const iconOnly = deviceLayout === "mobile";
+  const visibleTabs = WORKSPACE_TABS.filter(
+    (tab) => showDevTools || !GATED_WORKSPACE_TABS.includes(tab.key),
+  );
 
   return (
     <div
@@ -52,15 +51,27 @@ export function WorkspaceSwitcher() {
         whiteSpace: "nowrap",
       }}
     >
-      {visibleTabs.map(({ key, labelKey, icon: Icon }) => {
+      {visibleTabs.map(({ key, labelKey }) => {
+        const Icon = WORKSPACE_TAB_ICONS[key];
         const isActive = activeTab === key;
+        const label = t(labelKey);
+        const shortcut = workspaceTabShortcutLabel(key);
+        // 活动点只在**非当前** Tab 上出现：当前 Tab 用户正看着，提示是多余的
+        const running = !isActive && activity[key] === true;
+        const activityText = t("nav.tabActivity");
         return (
           <button
             key={key}
             type="button"
-            title={t(labelKey)}
-            onClick={() => setActiveTab(key)}
+            title={[
+              shortcut ? `${label} (${shortcut})` : label,
+              running ? activityText : null,
+            ].filter(Boolean).join(" · ")}
+            aria-label={running ? `${label} · ${activityText}` : label}
+            aria-current={isActive ? "page" : undefined}
+            onClick={() => switchTab(key)}
             style={{
+              position: "relative",
               display: "inline-flex",
               alignItems: "center",
               gap: 6,
@@ -89,7 +100,25 @@ export function WorkspaceSwitcher() {
             }}
           >
             <Icon size={14} />
-            <span className="ws-label">{t(labelKey)}</span>
+            {!iconOnly && <span className="ws-label">{label}</span>}
+            {running && (
+              <span
+                className="ws-activity-dot"
+                data-testid={`ws-activity-${key}`}
+                // 纯装饰：活动信息已并入按钮的 aria-label / title
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  top: 3,
+                  right: 3,
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  backgroundColor: token.colorPrimary,
+                  pointerEvents: "none",
+                }}
+              />
+            )}
           </button>
         );
       })}

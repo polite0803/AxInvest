@@ -20,6 +20,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 来源平台标识
+    #[sea_orm(indexed)]
     pub platform: String,
     pub title: String,
     pub description: String,
@@ -28,6 +29,7 @@ pub struct Model {
     /// 预算上限
     pub budget_max: Option<f64>,
     /// 币种（默认 CNY）
+    #[sea_orm(default_value = "CNY")]
     pub budget_currency: String,
     pub contact_name: Option<String>,
     pub contact_email: Option<String>,
@@ -37,20 +39,29 @@ pub struct Model {
     /// 内容指纹（标题+描述归一化哈希，v136）：去重主键；NULL = 旧数据/空内容不参与
     pub content_fingerprint: Option<String>,
     /// 平台原始返回数据（JSON 字符串）
+    #[sea_orm(default_value = "{}")]
     pub raw_snapshot: String,
     /// 生命周期：new / evaluated / contacted / won / lost
+    #[sea_orm(default_value = "new")]
     pub status: String,
     /// 评估置信度 0-1
+    #[sea_orm(default_value = 0)]
     pub confidence: f64,
     /// 痛点强度 0-100
+    #[sea_orm(default_value = 0)]
     pub pain_score: f64,
     /// 市场空白度 0-100
+    #[sea_orm(default_value = 0)]
     pub market_gap_score: f64,
     /// 商业价值综合分 0-100
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = 0)]
     pub commercial_value_score: f64,
     /// 需求类型（snake_case 标识）
+    #[sea_orm(default_value = "unknown")]
     pub demand_type: String,
     /// 转化生成的实现工作流模板 ID（v132；NULL = 未转化）
+    #[sea_orm(indexed)]
     pub linked_workflow_id: Option<String>,
     /// 首次启动实现工作流执行的时间戳（秒；NULL = 未执行）
     pub implemented_at: Option<i64>,

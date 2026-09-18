@@ -214,28 +214,56 @@ pub async fn init_database_with_dir(app_dir: PathBuf) -> Result<DatabaseInitResu
     //
     // 场景：连接的是下游 fork 库（如 AxInvest 的 axinvest 库），其迁移版本号
     // 体系与主线不同（fork 用 v200+ 编号），`applied_max` 恒大于主线
-    // `CURRENT_VERSION`。`run_migrations` 按版本号判断会误判"已最新"，
-    // 导致主线新增迁移（如 v127–v130 的能力关系/统计/策略/会话状态表）
-    // 在 fork 库上从未执行 → 运行时"关系不存在"。
+    // `CURRENT_VERSION`。
     //
-    // 这里检测版本超前场景，自动触发 `repair_schema`（无条件重跑所有已注册
-    // 迁移，全部 `IF NOT EXISTS` 幂等，自动补全缺失表/列，不碰存量数据），
-    // 无需用户手动点击"修复 Schema"按钮。
+    // 这里检测版本超前场景，自动触发 `repair_schema`，无需用户手动点击
+    // "修复 Schema"按钮。
+    //
+    // ⚠ 2026-09-16 迁移清单清空后，`repair_schema` 做的事只剩
+    // `schema_diff::heal_all`（以实体声明为权威补缺失列 + 修类型错配）—— 它
+    // **不再无条件重跑所有已注册迁移**（清单为空，无迁移可跑）也不再写版本表。
+    // 本块对「版本超前」场景的兜底价值因此收缩为「补齐列级缺口」，不再兼有
+    // 「重跑全部 IF NOT EXISTS 的迁移」这一层。
+    //
+    // 2026-09-12 更新：`run_migrations` 的原判据 `MAX(version)` 高水位线**判不出
+    // 中间缺口**（生产库 `applied == latest == 227` 而 v101 / v139 从未执行，
+    // 见 `axagent_dao::migrations::missing_versions` 注释），该判据已改为
+    // **版本表集合成员判定**。⚠ 清单清空后集合成员判定同样无对象
+    // （`MIGRATIONS` 为空 ⇒ 无缺口可补），于是本块**只剩「版本超前」这一个用途**：
+    // 它是 `applied_version` / `latest_version` 两个字段在全仓的**唯一逻辑消费者**
+    // —— 删掉本块，那两个字段就没有存在理由了（见 `SchemaStatus` 的字段文档）。
     if let Ok(status) = axagent_dao::migrations::get_schema_status(&db_handle.conn).await {
         if status.applied_version > status.latest_version {
             tracing::warn!(
                 "[DB] 检测到 schema 版本超前（applied={} > latest={}，疑似下游 fork 库），\
-                 自动执行 repair_schema 补齐缺失表...",
+                 自动执行 repair_schema 补齐缺失列...",
                 status.applied_version,
                 status.latest_version
             );
             match axagent_dao::migrations::repair_schema(&db_handle.conn).await {
-                Ok((fixed, total)) => {
-                    tracing::info!(
-                        "[DB] repair_schema 自动自愈完成: {}/{} 迁移已补齐",
-                        fixed,
-                        total
-                    );
+                Ok(report) => {
+                    // ⚠ 补的是**列**不是表：`heal_all` 对本库里不存在的表直接跳过
+                    // （建表是引擎的事），所以这里别说成「补齐缺失表」。
+                    if report.errors.is_empty() {
+                        tracing::info!(
+                            "[DB] repair_schema 自动自愈完成: 对照 {} 张表，补列 {} 个，类型修复 {} 个",
+                            report.tables_scanned,
+                            report.columns_added.len(),
+                            report.types_healed.len()
+                        );
+                    } else {
+                        // 部分未完成也是「没做完」：这些表的列账不完整，启动日志必须
+                        // 说得清，否则它和上面那句 info 长得一样、被当成完全成功。
+                        tracing::warn!(
+                            "[DB] repair_schema 自动自愈**部分完成**: {} 张表对照完成，\
+                             另有 {} 张未对照完（其缺失列无从判断），补列 {} 个，类型修复 {} 个；未完成: {:?}",
+                            report.tables_scanned,
+                            report.errors.len(),
+                            report.columns_added.len(),
+                            report.types_healed.len(),
+                            report.errors
+                        );
+                    }
                 },
                 Err(e) => {
                     tracing::warn!("[DB] repair_schema 自动自愈失败（不阻塞启动）: {}", e);

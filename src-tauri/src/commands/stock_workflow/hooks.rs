@@ -25,7 +25,8 @@ use crate::commands::stock_workflow::core::{
     fetch_similar_cases, fetch_stock_lessons, record_lesson_applications,
 };
 use crate::commands::stock_workflow::decision::{
-    QualityPrecheckResult, data_quality_precheck, extract_decision_fields,
+    QualityPrecheckResult, data_quality_precheck, extract_decision_fields, extract_position_state,
+    normalize_action_for_storage,
 };
 use axagent_astock_data::AStockClient;
 use axagent_entities::stock_analyses;
@@ -128,11 +129,20 @@ pub(crate) fn inject_reco_crosscheck(
     };
     let decision_action = obj.get("action").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let decision_pos = obj.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    // V76(2026-09-14): 持仓状态轴一并写入 crossCheck 快照 —— 展示层据
+    // (action, positionState) 两轴派生「持有/观望」，不再依赖 pct 反推。
+    let decision_state = obj.get("positionState").and_then(|v| v.as_str()).map(str::to_string);
     let reco_conf = reco_prior["recoConfidence"].as_f64().unwrap_or(0.0);
     let reco_pos = reco_prior["recoPositionPct"].as_f64().unwrap_or(0.0);
-    let divergent = reco_conf >= 60.0
-        && reco_pos > 0.0
-        && (decision_pos <= 0.0 || matches!(decision_action.as_str(), "观望" | "卖出"));
+    // P1-6(2026-09-14): 否决档判定改走统一归一化。
+    // 原实现硬编码中文 `matches!(decision_action, "观望" | "卖出")`：action 一旦是
+    // 英文 `WAIT`/`SELL`（或 dashboard 值域的「强烈卖出」），此处判不出否决，
+    // 分歧报告静默不生成。判定集合与旧实现严格等价 —— 只含「观望 / 卖出」两档，
+    // 不含「减持」（是否纳入属产品语义变更，不在本次收敛范围）。
+    use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
+    let workflow_vetoed =
+        matches!(normalize_action(&decision_action), Some(ActionKind::Wait | ActionKind::Sell));
+    let divergent = reco_conf >= 60.0 && reco_pos > 0.0 && (decision_pos <= 0.0 || workflow_vetoed);
     obj.insert(
         "crossCheck".into(),
         json!({
@@ -148,6 +158,7 @@ pub(crate) fn inject_reco_crosscheck(
             "attentionHeat": reco_prior["attentionHeat"],
             "catalysts": reco_prior["catalysts"],
             "decisionAction": decision_action,
+            "decisionPositionState": decision_state,
             "decisionPositionPct": decision_pos,
             "divergent": divergent,
         }),
@@ -362,12 +373,40 @@ pub(crate) async fn build_stock_analysis_variables(
             let mean = returns.iter().sum::<f64>() / n;
             let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
             let annual_vol = variance.sqrt() * (252.0_f64).sqrt();
-            let sim_stability = 1.0 / (1.0 + annual_vol * 3.0).clamp(0.3, 1.0);
+            // ── P1-E 修复（2026-09-11）──
+            // ① sim_stability 括号错位（死门）：
+            //    原式 `1.0 / (1.0 + annual_vol * 3.0).clamp(0.3, 1.0)`
+            //    方法调用优先级高于除法，实际是对内层 `1.0 + av*3.0` 做 clamp。
+            //    av > 0 时 1+3av > 1.0 必被夹到上界 1.0 → 倒数恒 = 1.0。
+            //    实测 12 条新模板运行 sim_stability 全部 = 1，
+            //    S-501（sim_stability < 0.3 → 强制观望）为数学上不可能触发的死门。
+            //    修正：钳位作用在「结果」上，并放宽下界到 0.05 保留动态范围
+            //    （av=0.4→0.45 / av=0.8→0.29 / av=1.5→0.18 / av=2.5→0.12）。
+            //    配套：rhai 侧 S-501 阈值同步 0.3 → 0.15（对应年化波动 >210%）。
+            let sim_stability = (1.0 / (1.0 + annual_vol * 3.0)).clamp(0.05, 1.0);
             let avg_daily_volume = total_volume / (klines.len() as f64);
             let daily_volume_val = avg_daily_volume * avg_price;
             let sim_liquidity = (daily_volume_val / 100_000_000.0 * 0.7 + 0.1).clamp(0.1, 0.95);
-            let sim_impact =
-                (annual_vol * 100.0 * (1.0 - sim_liquidity) * 50.0 + 5.0).clamp(1.0, 200.0);
+            // ② sim_impact 量级错误导致饱和（S-503 退化为无条件减仓）：
+            //    原式 `(annual_vol*100*(1-sim_liquidity)*50+5).clamp(1,200)`
+            //    中 sim_liquidity 由上式得，日成交额 ≥1.21 亿即顶格 0.95，
+            //    故 (1-liq) 恒 0.05，叠加常数 50 → av ≥ 0.4 就直接触顶 200。
+            //    实测：sim_impact = 162.9 / 200（顶格），S-503（>150bps 仓位减半）
+            //    触发率 92.5%，等价于「出仓位就砍半」的死规则。
+            //    修正：流动性折价改用「日成交额绝对水平」（不经过已饱和的 liq 通道），
+            //    量级重标定到 A 股真实区间（日成交额 5 亿→折价 0.1，2 亿→0.6，
+            //    1 亿→0.8，≤0.25 亿→0.95）：
+            //      av=0.35, 成交 5 亿 → 8.5bps ｜ av=0.90, 成交 5 亿 → 14bps
+            //      av=0.60, 成交 1 亿 → 53bps ｜ av=0.90, 成交 0.5 亿 → 86bps
+            //    配套：rhai 侧 S-503 阈值同步 150 → 80bps。标定原则：阈值须落在
+            //    「高波动但流动性充足」（应放行，约 14bps）与「高波动+流动性不足」
+            //    （该拦截，约 86bps）之间。使该规则从「出仓位就砍半」回归
+            //    「惩罚真正的流动性风险」。
+            //    注：本式为「轻量代理」，未含下单量/ADV 参与率，绝对水平仍属定性标定，
+            //    需后续用真实成交数据回测校准。
+            let turnover_yi = daily_volume_val / 100_000_000.0; // 日成交额（亿元）
+            let liq_discount = (1.0 - (turnover_yi / 5.0).clamp(0.05, 0.9)).clamp(0.1, 0.95);
+            let sim_impact = (annual_vol * 100.0 * liq_discount + 5.0).clamp(1.0, 500.0);
             Some(json!({
                 "sim_stability": (sim_stability * 100.0).round() / 100.0,
                 "sim_liquidity": (sim_liquidity * 100.0).round() / 10.0 / 10.0,
@@ -767,7 +806,11 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             provider_id: Set("cognitive".into()),
             conversation_id: Set(uuid::Uuid::new_v4().to_string()),
             status: Set(status.into()),
-            decision_action: Set(action.clone()),
+            // P1-4(2026-09-14): 与 core.rs 的落库点共用同一归一化实现
+            // （`decision_action` 的两个写入口值域必须一致）。
+            decision_action: Set(normalize_action_for_storage(action.as_deref())),
+            // P1-2: 与 action 正交的持仓状态轴（缺失保持 NULL）
+            decision_position_state: Set(extract_position_state(&decision_json_str)),
             decision_position_pct: Set(position_pct),
             decision_reasoning: Set(reasoning.clone()),
             decision_json: Set(decision_json_str.clone()),

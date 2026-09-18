@@ -26,6 +26,7 @@ pub mod database;
 pub mod demand_llm;
 pub mod devops;
 pub mod document;
+pub mod domain_pack_defs;
 pub mod export;
 pub mod file_edit;
 pub mod file_read;
@@ -50,9 +51,11 @@ pub mod migration_tool;
 pub mod misc;
 pub mod monitor;
 pub mod multi_agent;
+pub mod narrative_structure;
 pub mod network;
 pub mod obsidian;
 pub mod ocr;
+pub mod ontology_query;
 pub mod opc;
 pub mod opc_demand_scan;
 pub mod package_ecosystem_scanner;
@@ -133,6 +136,8 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(capability_view::CapabilityViewTool),
         // ── 能力渐进式披露 L1.5：加载层（写会话状态 + 激活工具，有副作用）──
         std::sync::Arc::new(capability_load::CapabilityLoadTool),
+        // ── 领域本体查询：按 domain 路由查类/关系/分档/权重（P1 §4.3.3，一次注册全域可见）──
+        std::sync::Arc::new(ontology_query::OntologyQueryTool),
         // ── 能力持久化：把已加载能力组装为工作流模板 ──
         std::sync::Arc::new(save_as_workflow::SaveAsWorkflowTool),
         // ── 工作流执行入口：认知编排命中 Workflow 能力后由 agent 发起执行（T3）──
@@ -141,6 +146,9 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(capability_browse::CapabilityBrowseTool),
         // ── OPC 需求发现：按关键词扫描平台并评估入库（demand-discovery 模板 Loop 体）──
         std::sync::Arc::new(opc_demand_scan::OpcDiscoverLeadsTool),
+        // ── 叙事结构引擎：文学创作工作流的确定性结构注入 / 落库（替代 lc-structure-injector LLM 节点）──
+        std::sync::Arc::new(narrative_structure::NarrativeChapterInstructionsTool),
+        std::sync::Arc::new(narrative_structure::NarrativeStructurePersistTool),
         std::sync::Arc::new(skill::SkillBundleListTool),
         std::sync::Arc::new(skill::SkillBundleCreateTool),
         std::sync::Arc::new(skill::SkillBundleLoadTool),
@@ -351,6 +359,61 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
     // （domain=Finance + tool_ref），DiscoverSkills / extra_tools 注入链路即刻生效。
     // 内部跳过与 finance.rs 重名的 3 个工具，避免 HashMap 静默覆盖。
     registry.register_all(astock_data::stock_mcp_tool_instances());
+
+    // ── OPC 业务工具（一人公司：发票 / 客户 / 项目 / 站点内容 / KPI / 发布计划）──
+    //
+    // 为什么单独列一段：`opc.rs` 这 27 个 `impl Tool` 此前**只被
+    // 域包工具白名单（现 `crates/tools/src/tools/domain_pack_defs.rs`，2026-09-16 下沉）
+    // 的 `opc_tool_defs()` 用来产出
+    // ToolDef schema**，从未进入本注册表。后果是 `init/services.rs` 的 ToolResolver
+    // 判定 `known = reg.list_all_tool_names().contains(name) || mcp_tools...` 恒为
+    // false —— 工作流 AgentNode 只要声明 `OpcCreateBlogPost` 之类，执行时就必然拿到
+    // 「工具 '{name}' 未注册」（派发点 `agent_executor.rs` 的 `execute_tool`）。
+    // 本段补上注册后，该 resolver 的 `known` 分支即刻接通，**无需改引擎 / resolver**。
+    //
+    // 与 `opc_demand_scan::OpcDiscoverLeadsTool`（上方 :144 已注册）不重复：
+    // 那段是 demand-discovery 的 Loop 体工具，与本段 26 个无交集。
+    //
+    // ⚠️ `OpcSendNotification` **故意未列入**：它的 `call` 走
+    // `opc.rs` 的 `get_notify_tx()`，而该函数是
+    // `OPC_NOTIFY_TX.get().expect("OPC notify tx not initialized")`，
+    // 且 `set_opc_notify_tx` 目前**全仓零调用者** ⇒ 一旦注册即「可达且必 panic」。
+    // 待该 panic 改成返回 `Err`（工具返回 Err 会被上层处理，panic 不会）后，
+    // 再把 `opc::OpcSendNotificationTool` 加回本段。见 output/opc-tool-wiring-impl.md
+    // 的 DEF-OPC-NOTIFY-01。
+    registry.register_all(vec![
+        // 发票 / 客户 / 项目
+        std::sync::Arc::new(opc::OpcListInvoicesTool),
+        std::sync::Arc::new(opc::OpcCreateInvoiceTool),
+        std::sync::Arc::new(opc::OpcTransitionInvoiceTool),
+        std::sync::Arc::new(opc::OpcListCustomersTool),
+        std::sync::Arc::new(opc::OpcCreateCustomerTool),
+        std::sync::Arc::new(opc::OpcListProjectsTool),
+        std::sync::Arc::new(opc::OpcCreateProjectTool),
+        std::sync::Arc::new(opc::OpcAddMilestoneTool),
+        std::sync::Arc::new(opc::OpcGetDashboardTool),
+        // 站点内容（博客 / 落地页 / 联系人）
+        std::sync::Arc::new(opc::OpcListLandingPagesTool),
+        std::sync::Arc::new(opc::OpcListBlogPostsTool),
+        std::sync::Arc::new(opc::OpcListContactsTool),
+        std::sync::Arc::new(opc::OpcCreateLandingPageTool),
+        std::sync::Arc::new(opc::OpcCreateBlogPostTool),
+        // 指标 / 知识源 / 财务
+        std::sync::Arc::new(opc::OpcRecordKpiTool),
+        std::sync::Arc::new(opc::OpcListKpisTool),
+        std::sync::Arc::new(opc::OpcSearchWikiTool),
+        std::sync::Arc::new(opc::OpcGetFinancialReportTool),
+        // 内容资产（域包模板已引用，见 domain_pack.rs 的 opc_tool_defs）
+        std::sync::Arc::new(opc::OpcCreateContentAssetTool),
+        std::sync::Arc::new(opc::OpcListContentAssetsTool),
+        std::sync::Arc::new(opc::OpcUpdateContentAssetTool),
+        std::sync::Arc::new(opc::OpcDeleteContentAssetTool),
+        // 发布计划（草稿 → 已发布的唯一程序化入口之一）
+        std::sync::Arc::new(opc::OpcCreatePublishScheduleTool),
+        std::sync::Arc::new(opc::OpcListPublishSchedulesTool),
+        std::sync::Arc::new(opc::OpcCancelPublishScheduleTool),
+        std::sync::Arc::new(opc::OpcProcessDueSchedulesTool),
+    ]);
 
     let available_toolsets: HashSet<String> =
         registry.list_all().iter().map(|t| format!("{:?}", t.category).to_lowercase()).collect();

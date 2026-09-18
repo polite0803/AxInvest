@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { formatFileSize } from "@/lib/format";
 import { useBackupStore } from "@/stores";
 import type { BackupManifest, RestoreStrategy } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -27,18 +28,6 @@ import { useTranslation } from "react-i18next";
 import { WebDavSync } from "./WebDavSync";
 
 const { Text } = Typography;
-
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
-}
 
 export function BackupCenter() {
   const { t } = useTranslation();

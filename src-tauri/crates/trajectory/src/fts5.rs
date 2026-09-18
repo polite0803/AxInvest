@@ -803,9 +803,16 @@ impl FTS5Search {
 
     // ── FTS5 健康检查 ──────────────────────────────────────────────
 
-    /// 检查 FTS5 索引健康状态
-    pub async fn health_check(&self) -> Result<FTS5Health> {
+    /// 检查 FTS5 索引健康状态。
+    ///
+    /// `memory_namespace_id` 必须传入轨迹记忆的命名空间：`memory_items` 是全项目
+    /// 共用的表（知识库文档也写它），而 `memory_items_fts` **只索引轨迹记忆**
+    /// （唯一写入点是 `memory_providers/service.rs` 的 `index_memory_fts`）。
+    /// 不按命名空间收口，源行数会把知识库记忆一并算进来
+    /// ⇒ `needs_rebuild` 永远为真且永远无法清除（就是本次修掉的那类「恒真标志位」）。
+    pub async fn health_check(&self, memory_namespace_id: Option<&str>) -> Result<FTS5Health> {
         let conn = self.conn.clone();
+        let ns = memory_namespace_id.map(|s| s.to_string());
         let health = tokio::task::spawn_blocking(move || -> Result<FTS5Health> {
             let conn = conn.blocking_lock();
 
@@ -832,15 +839,38 @@ impl FTS5Search {
             let skills_count = count_table("trajectory_skills_fts");
             let messages_count = count_table("trajectory_messages_fts");
 
+            // 源表行数：只统计轨迹命名空间下的记忆（见方法文档）。
+            // 未提供命名空间时取 0 —— 宁可让 drift 判定退化成「只看结构」，
+            // 也不用全表计数伪造一个「索引落后」的结论。
+            let memory_items_source_count = match ns.as_deref() {
+                Some(ns) => conn
+                    .query_row(
+                        "SELECT COUNT(*) FROM memory_items WHERE namespace_id = ?1",
+                        params![ns],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .unwrap_or(0) as u64,
+                None => 0,
+            };
+
+            // `needs_rebuild` 的语义修正。原实现是「四张索引表都为空」，两个方向都错：
+            //   ① 全新空库（无任何数据）也判 true —— 假警报，且重建无法消除（无数据可索引）
+            //   ② 重建后索引全空 ⇒ 恒为 true，永远无法满足
+            // 改为判定「有源数据但索引为空」这一确定无疑的落后状态。
+            // 部分落后（索引少于源）不在此标志位里表态，而是通过下方两个计数并排暴露，
+            // 由消费方自行计算 —— 硬编码一个比例阈值只会制造第二个不可满足的判定。
             let needs_rebuild = !tables_exist
-                || trajectories_count == 0 && memory_items_count == 0 && skills_count == 0;
+                || (memory_items_source_count > 0 && memory_items_count == 0);
 
             Ok(FTS5Health {
+                available: true,
+                unavailable_reason: None,
                 tables_exist,
                 trajectories_count,
                 memory_items_count,
                 skills_count,
                 messages_count,
+                memory_items_source_count,
                 needs_rebuild,
             })
         })
@@ -849,39 +879,36 @@ impl FTS5Search {
         Ok(health)
     }
 
-    /// 重建 FTS5 索引（分步执行，支持断点续跑）
-    pub async fn rebuild_indexes(&self) -> Result<()> {
+    /// 重建 FTS5 索引。
+    ///
+    /// ## 与原实现的差异（本次修复的核心）
+    ///
+    /// 原实现无条件 `DROP` 全部 4 张 FTS 表、再建成空表，**没有任何回填步骤**，
+    /// 然后打印「rebuilt successfully」并返回 `Ok(())`。也就是说：
+    /// 「重建」= 清空索引 + 报告成功。方向是**越修越坏** —— 重建前可能还有部分索引，
+    /// 重建后必然全空；而因为返回 `Ok(())`，调用方无从发现。
+    ///
+    /// 本实现遵守一条硬规则：**不 DROP 一张没有回填路径的表**。
+    /// 当前只有 `memory_items_fts` 具备回填能力（源 `memory_items`，列映射见下方 SQL），
+    /// 其余三张原样保留并在 `skipped` 中说明原因 —— 保留一份"不完整但真实"的索引，
+    /// 永远优于一份"完整但为空"的索引。
+    ///
+    /// 回填后**必须自校验**（源行数 == 索引行数）。重建这种破坏性操作不能靠
+    /// 「没报错」证明成功，只能靠计数相等证明；不等即 `Err` 并把两个计数带回。
+    pub async fn rebuild_indexes(&self, memory_namespace_id: &str) -> Result<FTS5RebuildReport> {
         let conn = self.conn.clone();
+        let ns = memory_namespace_id.to_string();
         info!("Starting FTS5 index rebuild...");
 
-        tokio::task::spawn_blocking(move || -> Result<()> {
+        let report = tokio::task::spawn_blocking(move || -> Result<FTS5RebuildReport> {
             let conn = conn.blocking_lock();
 
-            // 1. 删除旧索引
+            // 1. 只删除「能在本函数内回填」的表。见方法文档的硬规则。
+            conn.execute_batch("DROP TABLE IF EXISTS memory_items_fts;")?;
+
+            // 2. 重建该表（列定义与 `create_fts_tables` 保持一字不差）
             conn.execute_batch(
                 r#"
-                DROP TABLE IF EXISTS trajectories_fts;
-                DROP TABLE IF EXISTS memory_items_fts;
-                DROP TABLE IF EXISTS trajectory_skills_fts;
-                DROP TABLE IF EXISTS trajectory_messages_fts;
-                "#,
-            )?;
-
-            // 2. 重建索引表
-            conn.execute_batch(
-                r#"
-                CREATE VIRTUAL TABLE trajectories_fts USING fts5(
-                    id UNINDEXED,
-                    session_id UNINDEXED,
-                    topic,
-                    summary,
-                    content,
-                    outcome UNINDEXED,
-                    quality_score UNINDEXED,
-                    created_at UNINDEXED,
-                    tokenize='porter unicode61'
-                );
-
                 CREATE VIRTUAL TABLE memory_items_fts USING fts5(
                     id UNINDEXED,
                     memory_type UNINDEXED,
@@ -890,35 +917,77 @@ impl FTS5Search {
                     created_at UNINDEXED,
                     tokenize='porter unicode61'
                 );
-
-                CREATE VIRTUAL TABLE trajectory_skills_fts USING fts5(
-                    id UNINDEXED,
-                    name,
-                    description,
-                    content,
-                    category UNINDEXED,
-                    tags,
-                    created_at UNINDEXED,
-                    tokenize='porter unicode61'
-                );
-
-                CREATE VIRTUAL TABLE trajectory_messages_fts USING fts5(
-                    id UNINDEXED,
-                    session_id UNINDEXED,
-                    role UNINDEXED,
-                    content,
-                    created_at UNINDEXED,
-                    tokenize='porter unicode61'
-                );
                 "#,
             )?;
 
-            info!("FTS5 indexes rebuilt successfully");
-            Ok(())
+            // 3. 从源表回填。列映射的依据是 `storage.rs::save_memory`（唯一的写入路径）：
+            //      memory_items_fts.memory_type ← memory_items.title
+            //          —— `save_memory` 把 `MemoryEntry.memory_type` 存进了 `title` 列
+            //             （crates/trajectory/src/storage.rs:1191 `title: Set(mem.memory_type.clone())`）
+            //      memory_items_fts.entities    ← memory_items.tags
+            //          —— `index_memory` 写入的是 `entities.join(" ")`，
+            //             而 `save_memory` 存的是 JSON 数组串（`["a","b"]`）。
+            //             直接照搬会把 `[` `]` `"` `,` 一起塞进 FTS 词流，
+            //             故在此剥掉这些标点，保持与增量写入路径同构。
+            //      memory_items_fts.created_at  ← memory_items.updated_at
+            //          —— `memory_items` **没有** created_at 列；该列在 FTS 里是 UNINDEXED，
+            //             仅用于回显，取最近的写入时间比取 0 更有信息量。
+            let source_rows = conn.query_row(
+                "SELECT COUNT(*) FROM memory_items WHERE namespace_id = ?1",
+                params![ns],
+                |row| row.get::<_, i64>(0),
+            )? as u64;
+
+            conn.execute(
+                r#"INSERT INTO memory_items_fts (id, memory_type, content, entities, created_at)
+                   SELECT
+                       id,
+                       COALESCE(title, ''),
+                       COALESCE(content, ''),
+                       REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(tags, ''), '[', ' '), ']', ' '), '"', ' '), ',', ' '),
+                       COALESCE(CAST(updated_at AS INTEGER) / 1000, 0)
+                   FROM memory_items
+                   WHERE namespace_id = ?1"#,
+                params![ns],
+            )?;
+
+            // 4. 自校验：出口必须严。计数不等 = 回填不完整，必须以 Err 返回，
+            //    否则「重建成功」又与「索引缺行」共存，回到原缺陷同形态。
+            let indexed_rows = conn.query_row(
+                "SELECT COUNT(*) FROM memory_items_fts",
+                [],
+                |row| row.get::<_, i64>(0),
+            )? as u64;
+
+            if indexed_rows != source_rows {
+                anyhow::bail!(
+                    "FTS5 重建自校验失败：memory_items 源行数 {} != 索引行数 {}（命名空间 {}）。\
+                     索引态可能不完整，已保留现有索引不再继续操作。",
+                    source_rows,
+                    indexed_rows,
+                    ns
+                );
+            }
+
+            info!(
+                "FTS5 memory_items_fts rebuilt: {} / {} rows",
+                indexed_rows, source_rows
+            );
+
+            Ok(FTS5RebuildReport {
+                rebuilt: vec!["memory_items_fts".to_string()],
+                skipped: vec![
+                    "trajectories_fts（本版本无回填路径，保留原索引）".to_string(),
+                    "trajectory_skills_fts（本版本无回填路径，保留原索引）".to_string(),
+                    "trajectory_messages_fts（本版本无回填路径，保留原索引）".to_string(),
+                ],
+                source_rows,
+                indexed_rows,
+            })
         })
         .await??;
 
-        Ok(())
+        Ok(report)
     }
 }
 
@@ -935,12 +1004,65 @@ pub struct LineageSearchResult {
 /// FTS5 健康状态
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FTS5Health {
+    /// FTS5 子系统是否真正被挂载。
+    ///
+    /// 这一位是本次修复的核心补充。修复前，「FTS 不可用」（PG 后端下
+    /// `fts_searcher` 为 `None`，见 `src/init/state.rs:151`）与「搜索无命中」
+    /// 在 API 层完全同形 —— 都表现为 `Ok(Vec::new())`。
+    /// 于是 UI 上的「0 条结果」是一句**无法证伪的话**：它既可能是真的没有匹配，
+    /// 也可能是整个检索子系统从未工作过。这一位把它拆开。
+    pub available: bool,
+    /// `available == false` 时的原因（人类可读）
+    pub unavailable_reason: Option<String>,
     pub tables_exist: bool,
     pub trajectories_count: u64,
     pub memory_items_count: u64,
     pub skills_count: u64,
     pub messages_count: u64,
+    /// 轨迹记忆的**源表**行数（`memory_items` 中属于轨迹命名空间的行）。
+    ///
+    /// 必须与 `memory_items_count` 并排暴露：只给索引侧计数回答不了「有没有漏」，
+    /// 而「有没有漏」正是「索引落后」的定义。消费方（UI / 诊断命令）
+    /// 用 `source - indexed` 即得落后幅度。
+    pub memory_items_source_count: u64,
     pub needs_rebuild: bool,
+}
+
+impl FTS5Health {
+    /// 构造「FTS 未挂载」的健康状态。
+    pub fn unavailable(reason: impl Into<String>) -> Self {
+        Self {
+            available: false,
+            unavailable_reason: Some(reason.into()),
+            tables_exist: false,
+            trajectories_count: 0,
+            memory_items_count: 0,
+            skills_count: 0,
+            messages_count: 0,
+            memory_items_source_count: 0,
+            // 不可用时**刻意不置** `needs_rebuild`。置 true 会诱导调用方去「重建」，
+            // 而没有 searcher 时重建同样是 no-op —— 那会造出一个永远无法满足的标志位
+            // （与本文件里 `needs_rebuild` 原来那个恒真缺陷同形态）。
+            // 正确处置是先解决可用性（可用性由 `available` + `unavailable_reason` 表达）。
+            needs_rebuild: false,
+        }
+    }
+}
+
+/// FTS5 重建结果。
+///
+/// 做成返回值而不是只打一行 `info!`：原实现无论实际做了什么（包括**什么都没回填**）
+/// 都打印「rebuilt successfully」，调用方无法区分「重建成功」与「索引被清空」。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FTS5RebuildReport {
+    /// 完成「清空 + 回填」的表
+    pub rebuilt: Vec<String>,
+    /// 未重建的表及原因（本版本只有 `memory_items_fts` 具备回填路径）
+    pub skipped: Vec<String>,
+    /// 回填源行数
+    pub source_rows: u64,
+    /// 回填后索引行数
+    pub indexed_rows: u64,
 }
 
 /// 把任意字节偏移向下对齐到最近的 char boundary，避免在多字节字符中间切片触发 panic。
@@ -955,4 +1077,164 @@ fn floor_char_boundary(s: &str, index: usize) -> usize {
         i -= 1;
     }
     i
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::{Connection, params};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    /// 与生产同源 —— 测试夹具也必须指向 harness 的权威定义，
+    /// 否则「夹具用的 id」与「迁移写入的 id」会各自漂移而不报错。
+    const NS: &str = axagent_harness::constants::sentinel::TRAJECTORY_MEM_NS_ID;
+
+    async fn setup() -> (FTS5Search, Arc<Mutex<Connection>>) {
+        let raw = Connection::open_in_memory().expect("in-memory sqlite");
+        // 只建本模块回填需要的列，不引全量迁移 —— 否则本测试会变成迁移测试
+        raw.execute_batch(
+            "CREATE TABLE memory_items (\
+                 id TEXT PRIMARY KEY NOT NULL,\
+                 namespace_id TEXT NOT NULL,\
+                 title TEXT NOT NULL,\
+                 content TEXT NOT NULL,\
+                 tags TEXT NOT NULL,\
+                 updated_at TEXT NOT NULL\
+             );",
+        )
+        .expect("create memory_items");
+        let conn = Arc::new(Mutex::new(raw));
+        let searcher = FTS5Search::new(conn.clone(), FTS5Config::default());
+        searcher.create_fts_tables().await.expect("create fts tables");
+        (searcher, conn)
+    }
+
+    async fn insert_memory(
+        conn: &Arc<Mutex<Connection>>,
+        id: &str,
+        ns: &str,
+        title: &str,
+        tags: &str,
+    ) {
+        conn.lock()
+            .await
+            .execute(
+                "INSERT INTO memory_items (id, namespace_id, title, content, tags, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, ns, title, "正文内容", tags, "1700000000000"],
+            )
+            .expect("insert memory_items");
+    }
+
+    async fn table_row_count(conn: &Arc<Mutex<Connection>>, table: &str) -> u64 {
+        conn.lock()
+            .await
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get::<_, i64>(0))
+            .unwrap_or(0) as u64
+    }
+
+    async fn table_exists(conn: &Arc<Mutex<Connection>>, table: &str) -> bool {
+        conn.lock()
+            .await
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                params![table],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0
+    }
+
+    /// 回归：重建**不得**删除没有回填路径的表。
+    ///
+    /// 修复前 `rebuild_indexes` 无条件 DROP 全部 4 张 FTS 表，且没有任何回填步骤，
+    /// 然后返回 `Ok(())` 并打印「rebuilt successfully」。本测试同时钉住两件事：
+    ///   ① 有回填路径的表被真正回填（计数相等）
+    ///   ② 无回填路径的表**原样保留**（行数与存在性都不变）
+    #[tokio::test]
+    async fn rebuild_backfills_memory_items_and_preserves_unbackfillable_tables() {
+        let (searcher, conn) = setup().await;
+
+        insert_memory(&conn, "m1", NS, "preference", "[\"a\",\"b\"]").await;
+        insert_memory(&conn, "m2", NS, "fact", "[]").await;
+        // 另一命名空间的记忆不属于轨迹域，不应被回填
+        insert_memory(&conn, "k1", "other_ns", "knowledge", "[]").await;
+
+        // 往一张「本版本无回填路径」的表里塞一行，用来验证它不会被清空
+        conn.lock()
+            .await
+            .execute(
+                "INSERT INTO trajectories_fts (id, session_id, topic, summary, content, outcome, \
+                 quality_score, created_at) VALUES ('t1','s1','topic','summary','body','success',1.0,0)",
+                [],
+            )
+            .expect("seed trajectories_fts");
+
+        let report = searcher.rebuild_indexes(NS).await.expect("rebuild");
+
+        assert_eq!(report.rebuilt, vec!["memory_items_fts".to_string()]);
+        assert_eq!(report.skipped.len(), 3, "三张无回填路径的表必须列入 skipped");
+        assert_eq!(report.source_rows, 2, "只统计轨迹命名空间");
+        assert_eq!(report.indexed_rows, 2);
+        assert_eq!(table_row_count(&conn, "memory_items_fts").await, 2);
+
+        // 关键否定断言：无回填路径的表既不能被删，也不能被清空
+        assert!(table_exists(&conn, "trajectories_fts").await, "trajectories_fts 被删除");
+        assert_eq!(
+            table_row_count(&conn, "trajectories_fts").await,
+            1,
+            "trajectories_fts 被清空 —— 这正是修复前「重建 = 越修越坏」的形态"
+        );
+    }
+
+    /// 回归：源行数与索引行数必须分开暴露，且 `needs_rebuild` 不能恒真。
+    ///
+    /// 修复前 `needs_rebuild = 四张索引表都为空`：全新空库也判 true（假警报且无法消除），
+    /// 重建后索引为空又恒为 true（永远无法满足）。
+    #[tokio::test]
+    async fn health_separates_source_and_index_counts() {
+        let (searcher, conn) = setup().await;
+        insert_memory(&conn, "m1", NS, "preference", "[]").await;
+        insert_memory(&conn, "m2", NS, "fact", "[]").await;
+
+        // 回填前：有源数据但索引为空 ⇒ 确定无疑的落后
+        let before = searcher.health_check(Some(NS)).await.expect("health");
+        assert!(before.available);
+        assert_eq!(before.memory_items_source_count, 2);
+        assert_eq!(before.memory_items_count, 0);
+        assert!(before.needs_rebuild, "有源数据而索引为空时应判需要重建");
+
+        searcher.rebuild_indexes(NS).await.expect("rebuild");
+
+        // 回填后：标志位必须能被满足（修复前这里恒为 true）
+        let after = searcher.health_check(Some(NS)).await.expect("health");
+        assert_eq!(after.memory_items_source_count, 2);
+        assert_eq!(after.memory_items_count, 2);
+        assert!(!after.needs_rebuild, "重建后 needs_rebuild 必须变为 false，否则是恒真标志位");
+    }
+
+    /// 未提供命名空间时不得伪造「索引落后」的判断。
+    ///
+    /// `memory_items` 是全项目共用的表，只有轨迹命名空间的行才归 `memory_items_fts`。
+    /// 不做收口就会把知识库记忆也算进来，从而制造一个永远无法清除的落后判定。
+    #[tokio::test]
+    async fn health_without_namespace_does_not_fabricate_drift() {
+        let (searcher, conn) = setup().await;
+        insert_memory(&conn, "m1", NS, "preference", "[]").await;
+
+        let h = searcher.health_check(None).await.expect("health");
+        assert_eq!(h.memory_items_source_count, 0, "无命名空间时不得用全表计数");
+        assert!(!h.needs_rebuild, "无命名空间时不得声称索引落后");
+    }
+
+    /// 不可用状态必须是**可观测的**，而不是伪装成「索引为空」。
+    #[test]
+    fn unavailable_health_is_explicit_and_does_not_claim_rebuild_needed() {
+        let h = FTS5Health::unavailable("测试原因");
+        assert!(!h.available);
+        assert_eq!(h.unavailable_reason.as_deref(), Some("测试原因"));
+        // 不可用时置 needs_rebuild 会诱导调用方去做一个同样是 no-op 的「重建」
+        assert!(!h.needs_rebuild);
+    }
 }

@@ -153,6 +153,14 @@ pub enum FilterDimension {
     Policy,
     /// 维度十：前提条件匹配（P1：Skill preconditions）
     Preconditions,
+    /// 维度十一：域启用闸门（P2：能力域覆盖层 —— 被停用的域，其能力一律裁剪）
+    ///
+    /// ⚠ 与 [`FilterDimension::Policy`] 的区别不是「都叫裁剪」，而是**判据来源不同**：
+    /// `Policy` 来自用户配置的**排除规则**（多行、可组合、带优先级），
+    /// `DomainEnabled` 来自域**自身的启用位**（每个域一个布尔）。
+    /// 分开的原因是诊断：日志里看到 `DomainEnabled`，含义唯一 ——
+    /// 「这个域被停用了」，不需要去翻是哪条策略规则把它删掉的。
+    DomainEnabled,
 }
 
 impl FilterDimension {
@@ -169,6 +177,7 @@ impl FilterDimension {
             FilterDimension::ExperimentGroup => "experiment_group",
             FilterDimension::Policy => "policy",
             FilterDimension::Preconditions => "preconditions",
+            FilterDimension::DomainEnabled => "domain_enabled",
         }
     }
 }

@@ -3,11 +3,11 @@
 //! Core types for the Orchestrator system — 从 harness 重导出共享类型
 //!
 //! 共享类型（SubTask、DecompositionPlan、OrchestrationError 等）的权威定义
-//! 已迁移至 `axagent-harness::industry_orchestration::plan`。
+//! 已迁移至 `axagent-harness::domain_pack_orchestration::plan`。
 //! 仅保留 orchestrator 特有的事件和交接类型。
 
 // ── 从 harness 重导出共享类型 ──
-pub use axagent_harness::industry_orchestration::plan::{
+pub use axagent_harness::domain_pack_orchestration::plan::{
     DecompositionPlan, OrchestrationError, OrchestrationStrategy, SubTask, SubTaskStatus,
 };
 

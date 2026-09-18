@@ -23,6 +23,24 @@
 //! // ... code session ...
 //! mode_selector.enter_general_mode().await?;
 //! ```
+//!
+//! # ⚠ 接线状态：本模块**没有任何生产入口**（2026-09-15 实测）
+//!
+//! 上面这段 "one-click toggle" 描述的是**设计意图**，不是当前行为。实测：
+//!
+//! - `ModeSelector::new` 全仓唯一调用点在本文件的 `mod tests`（`:226`）；
+//! - `ModuleRegistry` 的生产实例化点数为 **0**（仅本模块与 `module_switch.rs`
+//!   各自的测试里构造）；`runtime/src/lib.rs:59` 只有 `pub mod mode_selector;`
+//!   这一条声明；
+//! - 既无 `init` 装配、无 Tauri command、无前端 UI 入口。
+//!
+//! 即 [`SPEED_MODE_ESSENTIAL`] / [`SPEED_MODE_DISABLED`] **确实被
+//! `enter_speed_mode` 读取**（各自有真实消费点），但 `enter_speed_mode` 自身
+//! 在运行时**不可达** —— 「常量有人读」与「特性可用」是两件事。
+//! （PLAN-weknora-borrowings `§9.1` 曾把这条记成「两条常量零消费点」，机制描述
+//! 有误，此处按实测改正。）
+//!
+//! 处置待裁决（接线成完整特性 / 登记为未完成特性并保留现状），见 PLAN `§9.1`。
 
 use crate::module_switch::{ModuleRegistry, ModuleState, ResourceCost};
 use serde::{Deserialize, Serialize};

@@ -13,9 +13,12 @@ pub struct Model {
     pub name: String,
     pub email: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub message: String,
+    #[sea_orm(default_value = "")]
     pub source: String,
     #[sea_orm(column_name = "is_read")]
+    #[sea_orm(default_value = 0)]
     pub is_read: i32,
     pub created_at: i64,
 }

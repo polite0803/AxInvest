@@ -1,11 +1,12 @@
 use super::decision::QualityPrecheckResult;
 use super::decision::{
     build_dashboard_from_workflow_result, compute_decision_agreement, data_quality_precheck,
-    extract_decision_fields, extract_decision_json, extract_llm_decision_json,
-    load_and_inject_template, parse_asof_param, resolve_runtime_options,
+    extract_decision_fields, extract_decision_json, extract_formula_decision_json,
+    extract_llm_decision_json, extract_position_state, load_and_inject_template,
+    normalize_action_for_storage, parse_asof_param, resolve_runtime_options,
 };
 use crate::AppState;
-use crate::commands::error::ErrorResponse;
+use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::blackboard::build_blackboard_snapshot;
@@ -21,6 +22,146 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
+
+// ────────────────────────────────────────────────────────────────
+// 失败事件的对外契约（`workflow-error` / `workflow-step-error`）
+// ────────────────────────────────────────────────────────────────
+//
+// 这两条事件是**前端可见的失败主路径**：
+//   - `workflow-error`       → `stockAnalysisStore` 的 `error` / `status` / `llmStatus`
+//   - `workflow-step-error`  → `executionStore` 执行池条目（`AgentPoolPanel` 直接渲染）
+//
+// 契约（与命令层的 `ErrorResponse` 同形，前端可复用 `translateBackendError`）：
+//   { code:  "STOCK_WORKFLOW_*",     ← 唯一展示依据，11 语言可译
+//     category: "retryable" | ...,   ← 前端据此决定「能否自动重试」，不看文本
+//     detail: "…",                   ← 技术细节，仅作译文缺失时的兜底
+//     workflowId / stepId / … }      ← 业务字段
+//
+// ⚠️ **不得再往 payload 里塞中文自由文本让前端直接渲染**。
+// 历史实现在 payload 里直接放一个 `error` 键 + 一句中文（如「分析超时（超过 N 秒）」），
+// 非中文界面会漏出中文句子，且前端只能用字符串子串嗅探反推语义。
+// 注：此处**刻意不复述旧写法的字面量** —— 复述会让该字面量成为未来静态扫描的永久假锚点。
+//
+// 另一条通道 `workflow-step-done`（向后兼容事件，前端 store 驱动进度用）形态略不同：
+//   { status, errorCode: "STOCK_WORKFLOW_*", error: "…自由文本…", output, … }
+// 它**刻意保留** `error` 原文（Debug 面板要显示节点原始报错），但**判定一律用 `errorCode`** ——
+// 该码由 `node_error_code` 从 `StepProgressEvent::error_code` 映射，不是从文本解析出来的。
+
+/// 把 `WorkflowError` 的**具体变体**映射成对外错误码 + 分类。
+///
+/// 为什么必须按变体映射、而不是 `e.to_string()` 透传：
+/// `WorkflowError` 的 `Display`（`crates/harness/src/workflow_types.rs:2585/2587`）
+/// 里 `InvalidStateTransition` 与 `LifecycleHookFailed` 两个变体本身输出**中文**，
+/// 直接透传要么漏中文到非中文界面、要么依赖前端做文本嗅探。
+///
+/// 分层：**码 + 分类**是契约（可译、可编程），`detail` 只作技术细节兜底。
+///
+/// 分支穷举全部 10 个变体、**不写 `_ =>` 兜底** —— 这样将来 harness 给
+/// `WorkflowError` 加变体时，此处会编译报错，强迫补映射（否则新变体会静默
+/// 落到兜底码上，界面只说「内部错误」，与今天的缺陷同型）。
+///
+/// 可见性 `pub(super)`：`serenity.rs` 复用同一份映射（**刻意只有一个实现** ——
+/// 第二份映射必然与这份漂移，漂移后的症状是「同一失败在不同面板显示不同码」）。
+pub(super) fn workflow_error_code(
+    e: &axagent_rt_workflow::workflow_engine::WorkflowError,
+) -> (&'static str, ErrorCategory) {
+    use axagent_rt_workflow::workflow_engine::WorkflowError as WE;
+    match e {
+        WE::DuplicateNodeId(_) | WE::InvalidDependency { .. } | WE::CycleDetected => {
+            (wf_err::GRAPH_INVALID, ErrorCategory::Validation)
+        },
+        WE::WorkflowNotFound | WE::NodeNotFound => {
+            (wf_err::TARGET_NOT_FOUND, ErrorCategory::Unrecoverable)
+        },
+        WE::SerializationError(_) => (wf_err::SERIALIZE_FAILED, ErrorCategory::Unrecoverable),
+        WE::InputValidationFailed { .. } | WE::OutputValidationFailed { .. } => {
+            (wf_err::VALIDATION_FAILED, ErrorCategory::Validation)
+        },
+        WE::InvalidStateTransition(_) => (wf_err::INVALID_STATE, ErrorCategory::Unrecoverable),
+        WE::LifecycleHookFailed { .. } => (wf_err::HOOK_BLOCKED, ErrorCategory::Unrecoverable),
+    }
+}
+
+/// 把 rt-workflow 的**节点级**错误码映射成对外错误码 + 分类。
+///
+/// 入参来自 `StepProgressEvent::error_code`（**结构化字段**，不是文本）——
+/// 此前该事件只带自由文本 `error`，前端只能用 `startsWith(…)` 之类子串嗅探
+/// 反推「这是运行级取消还是节点质量问题」。
+///
+/// **为什么要在命令层再映射一次、而不把 rt-workflow 的码直接透给前端**：
+/// 那套码（`rt_workflow::work_engine::node_executor_trait::error_code`）是**基座值域**，
+/// 不在本项目的错误码契约内 —— `check-errorcode-alignment.mjs` 只认
+/// `commands/error_code.rs` 与 `harness/error_codes.rs` 两份权威源，
+/// 前端 11 语言的 `error` 段也只登记了这两处的码。透传会让前端拿到一个**无译文**的码，
+/// `translateBackendError` 查表必然落空并静默退化为裸串展示（幽灵码病型）。
+/// 故在边界上收敛到本域值域：三个出口，全部有 11 语言译文。
+///
+/// 分类（`category`）与码同源产出，前端**不需要也不应该**从文本猜「能不能重试」。
+///
+/// **返回 `Option` 是刻意的**：`running` / `completed` / `streaming` 三类事件本就
+/// 与失败无关（`StepProgressEvent::error_code` 为 `None`）⇒ 对外 payload 里
+/// `errorCode` 应为缺省，**不能填一个「步骤失败」码上去** —— 否则成功事件会带着
+/// 失败码流向消费端（契约**形状**对、**语义**错，最难查的一类缺陷）。
+/// 可见性为 `pub(super)`：`serenity.rs`（兄弟模块）的 `serenity-screening-step` 事件
+/// 也需要同一个映射 —— 第 4 处「自由文本漏到界面」的节点级事件。
+/// **刻意只有一个实现**：两份映射会在 rt-workflow 新增基座码时各自漂移（判据 I：
+/// 「N 份实现只 1 份在跑」）。
+pub(super) fn node_error_code(rt_code: Option<&str>) -> Option<(&'static str, ErrorCategory)> {
+    use axagent_rt_workflow::work_engine::node_executor_trait::error_code as node_err;
+    let rt = rt_code?;
+    // 运行级取消波及的节点：不是节点质量问题（手动停止 / 应用关闭），
+    // 故单独成码，供前端把它排除出 failedNodes 与自动重试。
+    if rt == node_err::EXECUTION_CANCELLED {
+        return Some((wf_err::STEP_CANCELLED, ErrorCategory::General));
+    }
+    // 节点/步骤超时：可重试。
+    if rt == node_err::TIMEOUT {
+        return Some((wf_err::TIMEOUT, ErrorCategory::Retryable));
+    }
+    // 其余基座码（LLM_CALL_FAILED / PROVIDER_QUERY_FAILED / VARIABLE_NOT_FOUND / …）
+    // 归兜底码：它们的**具体原因**已由 `detail` 承载，码只需回答「是否可重试」——
+    // 按现状这些都不具备自动重试条件。
+    Some((wf_err::STEP_FAILED, ErrorCategory::Unrecoverable))
+}
+
+/// 构造 `workflow-error` 的 payload（`ErrorResponse` 形状 + `workflowId`）。
+fn workflow_error_payload(
+    wf_id: &str,
+    code: &str,
+    category: ErrorCategory,
+    detail: impl Into<String>,
+) -> serde_json::Value {
+    let mut v =
+        serde_json::to_value(ErrorResponse::new(code).with_category(category).with_detail(detail))
+            .unwrap_or_else(|_| json!({ "code": code }));
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("workflowId".to_string(), json!(wf_id));
+    }
+    v
+}
+
+/// 构造 `workflow-step-error` 的 payload（含节点定位字段）。
+///
+/// `code` / `category` 由 `node_error_code` 从 `StepProgressEvent::error_code` 映射而来
+/// （故本函数不再自带默认码）—— 这样「取消 / 超时 / 一般失败」三类在
+/// `executionStore` 的执行池里就能显示成三种不同的原因，而不是统一一句
+/// 「分析节点执行失败」。
+fn step_error_payload(
+    wf_id: &str,
+    node_id: &str,
+    code: &str,
+    category: ErrorCategory,
+    detail: impl Into<String>,
+) -> serde_json::Value {
+    let mut v =
+        serde_json::to_value(ErrorResponse::new(code).with_category(category).with_detail(detail))
+            .unwrap_or_else(|_| json!({ "code": code }));
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("conversationId".to_string(), json!(format!("wf-{wf_id}")));
+        obj.insert("stepId".to_string(), json!(node_id));
+    }
+    v
+}
 
 /// 启动股票分析工作流（DAG 模式）。
 ///
@@ -323,6 +464,9 @@ pub(crate) async fn run_stock_workflow_inner(
             status: Set("running".into()),
             decision_action: Set(None),
             decision_position_pct: Set(None),
+            // P1-2(2026-09-14): 新列必须显式初始化。此处是 "running" 占位行 ——
+            // 决策尚未产生，故 NULL（语义 = 采集时点无此信息），不是 EMPTY。
+            decision_position_state: Set(None),
             decision_reasoning: Set(None),
             decision_json: Set(None),
             llm_decision_json: Set(None),
@@ -399,6 +543,13 @@ pub(crate) async fn run_stock_workflow_inner(
                 tracing::error!("[DB] 预检不足状态更新失败: {e}");
             }
             return Ok(json!({
+                // 结构化错误码。此前本响应**不发 `code`**，前端只好自造
+                // `"DATA_QUALITY_INSUFFICIENT"` —— 该码全后端零产出（幽灵码），
+                // `translateBackendError` 查 `error.${code}` 恒 miss。
+                // 复用 `HOOK_BLOCKED` 而非新增码：`error_code.rs` 里该码的文档**已写明**
+                // 「（如数据质量预检不通过）」，即本场景本就是它的覆盖范围（此处属漏接线），
+                // 且其 11 语言译文「前置检查未通过，分析已中止」对用户语义精准。
+                "code": wf_err::HOOK_BLOCKED,
                 "status": "skipped",
                 "reason": summary,
                 "dataMissingReport": missing_report,
@@ -519,6 +670,16 @@ pub(crate) async fn run_stock_workflow_inner(
                         "stepId": event.node_id,
                         "stepGoal": event.node_id,
                         "agentRole": "workflow",
+                        // T-1 P1(2026-09-12): 补节点序号与总数。
+                        // 此前该分支只发 4 个字段，而 `StepProgressEvent` 里
+                        // total_nodes / completed_nodes / execution_id 本就有值
+                        // （`engine/mod.rs:3144` 构造时已填），白白丢弃 → 面板
+                        // 无法显示「正在执行 第 i/N 个节点」，长节点期间进度静止，
+                        // 无法区分「LLM 长调用」与「已卡死」。
+                        // 补字段后 `stockAnalysisStore` 可直接由本事件驱动当前节点展示。
+                        "totalNodes": event.total_nodes,
+                        "completedNodes": event.completed_nodes,
+                        "executionId": event.execution_id,
                     }),
                 ),
                 "completed" => (
@@ -529,16 +690,25 @@ pub(crate) async fn run_stock_workflow_inner(
                         "stepGoal": event.node_id,
                     }),
                 ),
-                s if s == "failed" || s == "timeout" => (
-                    "workflow-step-error",
-                    serde_json::json!({
-                        "conversationId": format!("wf-{}", wf_id),
-                        "stepId": event.node_id,
-                        // 修复: 透传 StepProgressEvent.error 真实错误，而非占位符 "Step failed"
-                        "error": event.error.clone()
-                            .unwrap_or_else(|| format!("Step {}", event.status)),
-                    }),
-                ),
+                s if s == "failed" || s == "timeout" => {
+                    // 结构化分流：码与分类都来自 `StepProgressEvent::error_code`，
+                    // 不再由前端对 `error` 文本做子串嗅探。
+                    // 兜底 (STEP_FAILED, Unrecoverable)：本分支只在 failed/timeout 进入，
+                    // 后端所有失败构造点均已填码；`None` 只可能是旧生产者 ⇒ 按一般失败处理。
+                    let (code, category) = node_error_code(event.error_code.as_deref())
+                        .unwrap_or((wf_err::STEP_FAILED, ErrorCategory::Unrecoverable));
+                    (
+                        "workflow-step-error",
+                        step_error_payload(
+                            &wf_id,
+                            &event.node_id,
+                            code,
+                            category,
+                            // 修复: 透传 StepProgressEvent.error 真实错误，而非占位符 "Step failed"
+                            event.error.clone().unwrap_or_else(|| format!("Step {}", event.status)),
+                        ),
+                    )
+                },
                 // 流式增量（2026-09-08 修复）：AgentExecutor 每 2s 发一次，output 携带
                 // 累积文本。转发为 workflow-step-delta 供前端"边生成边显示"（辩论等长节点）。
                 "streaming" => (
@@ -564,6 +734,12 @@ pub(crate) async fn run_stock_workflow_inner(
                     "executionId": event.execution_id,
                     // 修复: 携带真实错误，前端 failedNodeErrors 才能显示具体失败原因
                     "error": event.error.clone(),
+                    // 结构化错误码（本域值域，非 rt-workflow 码 —— 见 `node_error_code`）。
+                    // 前端**判定只用本字段**：此前 `stockAnalysisStore` 靠对 `error` 做
+                    // `startsWith(…)` 子串嗅探来区分「运行级取消」与「节点质量问题」，
+                    // 该写法漏判/误判都与文案耦合。
+                    // `None`（running/completed/streaming）⇒ 序列化为 `null`，表示「无失败」。
+                    "errorCode": node_error_code(event.error_code.as_deref()).map(|(c, _)| c),
                     // 修复: 携带节点输出，前端 analystReports 能实时填充（一边进行一边显示）
                     "output": event.output,
                 }),
@@ -586,6 +762,11 @@ pub(crate) async fn run_stock_workflow_inner(
     let sc_for_ret = stock_code.clone();
     let sc_name = quote.name.clone();
     let sc_name_for_spawn = sc_name.clone();
+    // v45(2026-09-14): 「决策落库后仿真验证」所需的两项输入。
+    // 现价取自主流程已获取的 quote —— 与 hooks.rs 里 `sim_*` 代理用的是同一份，
+    // 保证「仿真看到的价」与「决策看到的价」口径一致（否则两者不可对照）。
+    let code_for_sim = stock_code.clone();
+    let quote_price_for_sim = quote.price;
     let vector_store = state.vector_store.clone();
     let master_key = state.harness.master_key_owned();
     // 市场状态（market_regime）与市场模拟指标（sim_stability/sim_liquidity/sim_impact）
@@ -681,10 +862,14 @@ pub(crate) async fn run_stock_workflow_inner(
                 let _ = engine.cancel_workflow(&wf_id).await;
                 let _ = app_h.emit(
                     "workflow-error",
-                    serde_json::json!({
-                        "workflowId": wf_id,
-                        "error": format!("分析超时（超过 {} 秒）", total_timeout.as_secs())
-                    }),
+                    workflow_error_payload(
+                        &wf_id,
+                        wf_err::TIMEOUT,
+                        // 超时是**可重试**的：多为上游瞬时慢/网络抖动，
+                        // 前端据 category 决定自动重跑（不再靠文本里找 "timeout"）。
+                        ErrorCategory::Retryable,
+                        format!("分析超时（超过 {} 秒）", total_timeout.as_secs()),
+                    ),
                 );
                 if let Err(db_e) = stock_analyses::Entity::update_many()
                     .col_expr(stock_analyses::Column::Status, Expr::value("timeout"))
@@ -707,7 +892,13 @@ pub(crate) async fn run_stock_workflow_inner(
                     axagent_rt_workflow::workflow_engine::WorkflowStatus::Cancelled => {
                         if let Err(e) = app_h.emit(
                             "workflow-error",
-                            serde_json::json!({ "workflowId": wf_id, "error": "分析已被取消" }),
+                            workflow_error_payload(
+                                &wf_id,
+                                wf_err::CANCELLED,
+                                // 用户主动取消 → 不重试、不标红，走 General
+                                ErrorCategory::General,
+                                "分析已被取消",
+                            ),
                         ) {
                             tracing::warn!("[emit] workflow-error 发送失败: {e}");
                         }
@@ -874,9 +1065,15 @@ pub(crate) async fn run_stock_workflow_inner(
                         let decision_json = extract_decision_json(&result);
                         // V40 修复:计算 LLM 决策(trader)与公式决策(portfolio-mgr)的一致性分数
                         // V50 升级: 返回 AgreementBreakdown，包含分维度诊断
+                        // ⚠️ 2026-09-13: 公式侧必须用 extract_formula_decision_json（只认确定性
+                        //   节点），不能用 extract_decision_json —— 后者在 D/F 档会取到
+                        //   quality-fallback 的 **LLM** 决策，于是 formulaAction 挂着「公式」的名字
+                        //   展示 LLM 的答案（实证 600031：formulaAction="减持"/高风险 实为 LLM 兜底，
+                        //   真正公式决策是 gate 的 增持/中风险）。铁律 41。
                         let llm_dj_agr = extract_llm_decision_json(&result);
+                        let formula_dj_agr = extract_formula_decision_json(&result);
                         let agreement_breakdown = compute_decision_agreement(
-                            decision_json.as_deref(),
+                            formula_dj_agr.as_deref(),
                             llm_dj_agr.as_deref(),
                         );
                         // V50: 预计算分歧诊断文本（供 reasoning 追加和 UI 展示）
@@ -1001,11 +1198,27 @@ pub(crate) async fn run_stock_workflow_inner(
                             let action_str = decision_json.as_deref()
                                 .and_then(|dj| serde_json::from_str::<serde_json::Value>(dj).ok())
                                 .and_then(|v| v.get("action").and_then(|a| a.as_str()).map(String::from));
+                            // 2026-09-13 修正：退出紧迫度只在「确实持有该股」时才有意义。
+                            // 旧实现仅「观望」分支查 holding.shares>0，「卖出/减持」不查 ⇒
+                            // 空仓股也会落 _exitUrgency=60/90。实证 601166（2026-09-12）：
+                            // portfolio_holdings 中该股 0 行，决策却是「减持」并带上 _exitUrgency=60。
+                            //
+                            // ⚠️ 本字段当前**只写不读**（2026-09-13 全仓 grep：仅下面这一个写入点，
+                            // 后端 / 前端 `src/` / 类型 / e2e 均零消费者；前端展示的"退出紧迫度"
+                            // 来自另一条链 —— `astock-data::mcp_tools` 的 `overall_exit_urgency`，
+                            // 仅 Serenity 候选卡使用，与本字段无任何关系）。
+                            // ⇒ 本次改动**不是修一个用户可见的 bug**，而是防止未来消费者读到与
+                            // 事实相反的值（零仓位却标"中紧迫减持"）。铁律 14「零仓位不是不操作
+                            // 的证据」。**建议裁决**：给它接上消费者（把紧迫度真正展示出来），
+                            // 或连同这段计算一起删除 —— 不要让它继续以"已修"的姿态留在库里。
+                            let has_holding =
+                                holding.as_ref().map(|h| h.shares > 0.0).unwrap_or(false);
                             match action_str.as_deref() {
-                                Some("卖出") => Some(90.0),   // 高紧迫卖出
-                                Some("减持") => Some(60.0),   // 中紧迫减持
-                                Some("观望") if holding.as_ref().map(|h| h.shares > 0.0).unwrap_or(false) => Some(30.0), // 低紧迫（不增持）
-                                _ => None,                     // 持有/买入 → 不触发退出
+                                Some("卖出") if has_holding => Some(90.0), // 高紧迫卖出
+                                Some("减持") if has_holding => Some(60.0), // 中紧迫减持
+                                Some("观望") if has_holding => Some(30.0), // 低紧迫（不增持）
+                                // 空仓（或持有/买入）→ 不触发退出建议
+                                _ => None,
                             }
                         };
                         // 将退出紧迫度注入 decision_json
@@ -1116,10 +1329,13 @@ pub(crate) async fn run_stock_workflow_inner(
                                     .get("action")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
-                                let should_create_alert = matches!(
+                                // P1-6(2026-09-14): 改走统一归一化。
+                                //   原判据只认中文 ⇒ 英文值域下 should_create_alert 恒 false，
+                                //   决策结论**静默地不再生成任何价格告警**（用户以为设了，其实没有）。
+                                let should_create_alert = axagent_analysis_engine::decision_action::normalize_action(
                                     dj_action,
-                                    "买入" | "增持" | "持有" | "减持" | "卖出"
-                                );
+                                )
+                                .is_some_and(|k| !k.is_no_action());
                                 if should_create_alert {
                                     let target_price = dj_val
                                         .get("targetPrice")
@@ -1332,13 +1548,37 @@ pub(crate) async fn run_stock_workflow_inner(
                         ) {
                             tracing::warn!("[emit] workflow-completed 发送失败: {e}");
                         }
+
+                        // ── v45(2026-09-14): 决策落库后自动运行「仿真验证」 ──────────
+                        //
+                        // 为什么挂在这里（两个条件同时成立）：
+                        //   ① **在持久化之后** —— 模板里的 `sim-verify` 是 `enabled=false`
+                        //      的图示节点，不参与 DAG 调度。真执行放在这里，主链路
+                        //      （notify / store-result / end-output）已全部完成，
+                        //      因此**不占用工作流执行时长**。
+                        //   ② **在决策之后** —— 此刻 action / positionPct 已由
+                        //      portfolio-risk-gate + quality-gate 定稿，仿真只产出补充
+                        //      信息、不产出任何决策字段，下游无消费者 ⇒ 不可能回灌决策。
+                        //
+                        // ⚠ 实现已抽到 `sim_hook`，**必须与 `rerun_decision` 共用**：
+                        // 那个入口会改决策但不重写快照，若它不重跑仿真，前端就会把
+                        // 上一版决策的仿真当成新决策的结论展示。
+                        super::sim_hook::spawn_simulation_after_decision(
+                            db.clone(),
+                            app_h.clone(),
+                            aid.clone(),
+                            code_for_sim.clone(),
+                            Some(quote_price_for_sim),
+                        );
                     },
                 }
             },
             Err(e) => {
+                // 按 `WorkflowError` 变体精确映射，而非把 Display 文本当契约递给前端。
+                let (code, category) = workflow_error_code(&e);
                 let _ = app_h.emit(
                     "workflow-error",
-                    serde_json::json!({ "workflowId": wf_id, "error": e.to_string() }),
+                    workflow_error_payload(&wf_id, code, category, e.to_string()),
                 );
                 if let Err(db_e) = stock_analyses::Entity::update_many()
                     .col_expr(stock_analyses::Column::Status, Expr::value(format!("failed: {e}")))
@@ -1388,12 +1628,19 @@ pub async fn cancel_stock_workflow(
 /// - 不需要 `as_of_date` 参数（使用当前时间，非回放模式）
 /// - 不需要 `dry_run`（总是完整执行）
 /// - 参数是独立引用而非 Tauri State
+///
+/// `expected_holding_days`：调用方已知的持有期（如候选池扫描时来自 pick 的周期
+/// ⇒ `Period::default_holding_days()` = 2/5/28/90）。
+/// **[2026-09-13]** 此前该函数恒写 `decision_expected_holding_days = None`，
+/// 于是反思侧只能兜底 28 天 —— 超短/短/长线三种间隔语义全部塌缩成中线，
+/// 「按 4 周期分别反思」在数据层面无从实现。现在由调用方传入并落库。
 pub async fn run_single_stock_analysis(
     db: &DatabaseConnection,
     client: &axagent_astock_data::AStockClient,
     engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
     stock_code: &str,
     stock_name: &str,
+    expected_holding_days: Option<u32>,
 ) -> Result<String, String> {
     // 1. 创建 stock_analyses 记录
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -1409,6 +1656,8 @@ pub async fn run_single_stock_analysis(
         status: Set("running".into()),
         decision_action: Set(None),
         decision_position_pct: Set(None),
+        // P1-2(2026-09-14): 新列显式初始化（同上方 "running" 占位行，NULL = 尚无此信息）
+        decision_position_state: Set(None),
         decision_reasoning: Set(None),
         decision_json: Set(None),
         llm_decision_json: Set(None),
@@ -1420,7 +1669,7 @@ pub async fn run_single_stock_analysis(
         data_snapshot_id: Set(None),
         outcome: Set(None),
         decision_time_horizon: Set(None),
-        decision_expected_holding_days: Set(None),
+        decision_expected_holding_days: Set(expected_holding_days.map(|d| d as i64)),
         parent_analysis_id: Set(None),
         trade_intent_status: Set("pending".into()),
         trade_intent_source: Set(None),
@@ -1546,21 +1795,37 @@ pub async fn run_single_stock_analysis(
             // 修复"决策信息缺失"误报:用 extract_decision_json 从 portfolio-mgr
             // 节点 .result 提取决策(而非 CodeNode 包装顶层,后者无 action 字段)。
             let decision_json_str = extract_decision_json(&wf);
-            // 提取 expected_holding_days（在 decision_json_str 被 move 之前）
-            let (_, _, _, _, expected_holding_days) = extract_decision_fields(&decision_json_str);
+            // 提取持有期（在 decision_json_str 被 move 之前）。
+            // 决策里声明了就用它；没声明则回退到调用方传入的周期档位
+            // （候选池扫描时 = pick 的 `Period::default_holding_days()` = 2/5/28/90）。
+            let (_, _, _, _, decision_holding_days) = extract_decision_fields(&decision_json_str);
+            let effective_holding_days = decision_holding_days.or(expected_holding_days);
             let decision_output = decision_json_str
                 .as_deref()
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
 
-            let decision_action = decision_output
-                .as_ref()
-                .and_then(|d| d.get("action").and_then(|a| a.as_str().map(|s| s.to_string())));
+            // P1-4(2026-09-14): 落库前**归一化** action。
+            // 历史实现把决策 JSON 的 action 原文直接写进 `decision_action`
+            // （`Option<String>`，无 CHECK 约束、无归一化），于是 DB 里同时存在
+            // 中文/英文/未识别值三种形态，值域漂移既无法统计也无人拦截。
+            // 归一化收敛到 `normalize_action_for_storage`（唯一写入口，
+            // 与 hooks.rs 的对话直执行落库点共用同一实现）。
+            let decision_action = normalize_action_for_storage(
+                decision_output.as_ref().and_then(|d| d.get("action")).and_then(|a| a.as_str()),
+            );
+
+            // P1-2(2026-09-14): 与 action **正交**的持仓状态轴。
+            // 缺失（老模板 / 老记录）保持 NULL —— NULL 的语义是「采集时点无此信息」，
+            // 消费端应按 positionPct 自行派生，不得读成 EMPTY。
+            let decision_position_state = extract_position_state(&decision_json_str);
 
             let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
                 id: Set(analysis_id.clone()),
                 status: Set("completed".into()),
                 decision_action: Set(decision_action),
+                decision_position_state: Set(decision_position_state),
                 decision_json: Set(decision_json_str),
+                decision_expected_holding_days: Set(effective_holding_days.map(|d| d as i64)),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
                 ..Default::default()
             })
@@ -1584,7 +1849,7 @@ pub async fn run_single_stock_analysis(
             let pending_id = uuid::Uuid::new_v4().to_string();
             let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
             let hindsight_date_str = {
-                let hold_days = expected_holding_days.unwrap_or(28) as i64;
+                let hold_days = effective_holding_days.unwrap_or(28) as i64;
                 let analysis_naive = chrono::NaiveDate::parse_from_str(&today_str, "%Y-%m-%d")
                     .unwrap_or_else(|_| chrono::Local::now().date_naive());
                 let h = analysis_naive + chrono::Duration::days(hold_days);

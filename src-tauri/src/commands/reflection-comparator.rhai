@@ -5,19 +5,34 @@
 //
 // 设计原则：不依赖 LLM 解析，全确定性计算。
 //
+// [2026-09-13 实际行情改造] 新增「价格层对比」：
+//   —— 反思的对比基准由后端 `compute_market_snapshot()` 用**前复权 K 线**确定性算出
+//   （分析日 → 最新交易日），经 `actual_market_json` 变量注入。
+//   此前本脚本只消费一个标量 `raw_return_pct`，且批量入口长期传 0.0
+//   ⇒ `actual_direction` 恒「横盘」、`direction_match` 恒 false，
+//   反思 agent 实际是在对假数据写结论。现在价格、回撤、目标价实现度全部可见。
+//
 // 输入映射（由 DAG input_mapping 注入）：
 //   trader_action       — 交易员最终动作（buy/hold/sell 等）
-//   trader_target_price — 目标价（可选）
+//   trader_target_price — 目标价（sub-analysis 记忆，可选）
 //   trader_confidence   — 交易员置信度（可选）
 //   portfolio_action    — 组合投资经理最终 action
 //   portfolio_posterior — posterior 概率
 //   debate_consensus    — 辩论共识度（0-1）
 //   total_score         — 技术评分（0-100）
-//   raw_return_pct      — 实际收益率 %
+//   raw_return_pct      — 实际净收益率 %（扣双边成本，来自行情快照）
 //   alpha_return_pct    — 相对基准超额 %
-//   holding_days        — 实际持有天数
+//   holding_days        — 实际跨度交易日数
 //   original_time_horizon — 原始决策时间维度
 //   original_holding_days — 原始期望持有天数
+//   latest_price        — 最新收盘价（当前实际行情）
+//   entry_price         — 入场基准价（分析日次一交易日开盘）
+//   target_price        — 决策目标价（行情快照侧，优先于 trader_target_price）
+//   target_progress_pct — 目标价实现度 %
+//   max_drawdown_pct    — 期间最大回撤 %
+//   period_high/low     — 区间最高/最低价
+//   latest_date         — 最新交易日
+//   within_expected_horizon — 是否仍未到期望持有期（期中观察标记）
 //   u_trader            — trader 节点 __untrusted 标记
 //   u_research_mgr      — research-mgr 节点 __untrusted 标记
 //   u_catalyst          — a-catalyst 节点 __untrusted 标记
@@ -32,6 +47,7 @@
 //   horizon_mismatch     — string: 时间维度匹配度
 //   deviation_summary    — string: 单句偏差总结（≤200 字符）
 //   key_findings         — array: 关键发现列表
+//   price_context        — map: 价格层事实（入场/最新/目标价/回撤/实现度）
 //   untrusted_count      — i64: 不可信节点数
 //   untrusted_sources    — array: 不可信节点名列表
 //   sub_analysis_healthy — bool: 子工作流整体健康度
@@ -89,6 +105,34 @@ fn main() {
     } else { "unknown" };
 
     let expected_days = if !is_unit(original_holding_days) { original_holding_days } else { 0 };
+
+    // ── [实际行情] 价格层事实提取 ──
+    // 由后端 compute_market_snapshot() 用前复权 K 线确定性算出，经 actual_market_json 注入。
+    // 全部做 is_unit 守卫：行情不可用时后端注入 {} ⇒ 这些键取到 ()，不能让脚本崩。
+    let cur_price = if !is_unit(latest_price) { latest_price } else { 0.0 };
+    let base_price = if !is_unit(entry_price) { entry_price } else { 0.0 };
+    let dd_pct = if !is_unit(max_drawdown_pct) { max_drawdown_pct } else { 0.0 };
+    let prog_pct = if !is_unit(target_progress_pct) { target_progress_pct } else { 0.0 };
+    let hi_price = if !is_unit(period_high) { period_high } else { 0.0 };
+    let lo_price = if !is_unit(period_low) { period_low } else { 0.0 };
+    let latest_d = if !is_unit(latest_date) && type_of(latest_date) == "string" {
+        latest_date.to_string()
+    } else { "" };
+    let within_horizon = if !is_unit(within_expected_horizon)
+        && type_of(within_expected_horizon) == "bool" {
+        within_expected_horizon
+    } else { false };
+
+    // 目标价：优先取行情快照侧（三个入口都能供给），回退 sub-analysis 记忆里的 trader 输出。
+    // 注：此前 DAG 声明了 trader_target_price 映射但本脚本从未消费它（死映射），
+    // 目标价维度实际从未参与过反思对比 —— 本次一并接线。
+    let tgt_price = if !is_unit(target_price) && target_price > 0.0 {
+        target_price
+    } else if !is_unit(trader_target_price) && trader_target_price > 0.0 {
+        trader_target_price
+    } else { 0.0 };
+
+    let has_price_facts = base_price > 0.0 && cur_price > 0.0;
 
     // ── 方向对比：交易员动作 vs 实际收益 ──
     let trader_act_str = if !is_unit(trader_action) && type_of(trader_action) == "string" {
@@ -206,8 +250,31 @@ fn main() {
         findings.push(`上游${untrusted_count}个节点不可信：${untrusted_sources}`);
     }
 
+    // 7. [实际行情] 价格层发现 —— 让反思 agent 能引用具体价格而非只有百分比
+    if has_price_facts {
+        let chg_pct = ((cur_price - base_price) / base_price * 10000.0).round() / 100.0;
+        findings.push(`价格事实：入场基准 ${base_price} → 最新 ${cur_price}（${latest_d}），涨跌 ${chg_pct}%`);
+        findings.push(`区间最高 ${hi_price} / 最低 ${lo_price}，期间最大回撤 ${dd_pct}%`);
+    } else {
+        findings.push("实际行情数据不可用：无法给出价格层对比");
+    }
+
+    // 8. [实际行情] 目标价兑现度（此前 trader_target_price 是死映射，从未参与对比）
+    if tgt_price > 0.0 {
+        let reached = if has_price_facts && cur_price >= tgt_price { "已达到/超过" } else { "未达到" };
+        findings.push(`目标价 ${tgt_price}：最新价${reached}目标价，目标实现度 ${prog_pct}%`);
+    }
+
+    // 9. [实际行情] 期中观察标记 —— 未到期就反思时，agent 必须降低结论权重
+    if within_horizon {
+        findings.push(`⚠ 尚未到期望持有期（实际 ${actual_days} 天 / 期望 ${expected_days} 天），本结论属期中观察而非事后终评`);
+    }
+
     // ── 偏差总结（≤200 字符）──
-    let deviation_summary = if direction_match {
+    let deviation_summary = if !has_price_facts {
+        // 行情缺失时必须显式告知，而不是拿 raw_return=0.0 冒充"横盘"
+        `实际行情数据不可用，无法做定量方向对比，请仅基于定性记忆反思。评分=${sc}`
+    } else if direction_match {
         if raw_return.abs() < 2.0 {
             `方向判断正确但收益有限(${raw_return}%)。后验=${post}，评分=${sc}`
         } else {
@@ -234,6 +301,19 @@ fn main() {
         "key_findings": findings,
         "actual_holding_days": actual_days,
         "expected_holding_days": expected_days,
+        "has_price_facts": has_price_facts,
+        "price_context": #{
+            "available": has_price_facts,
+            "entry_price": base_price,
+            "latest_price": cur_price,
+            "latest_date": latest_d,
+            "period_high": hi_price,
+            "period_low": lo_price,
+            "max_drawdown_pct": dd_pct,
+            "target_price": tgt_price,
+            "target_progress_pct": prog_pct,
+            "within_expected_horizon": within_horizon
+        },
         "untrusted_count": untrusted_count,
         "untrusted_sources": untrusted_sources,
         "sub_analysis_healthy": sub_analysis_healthy

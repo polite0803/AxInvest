@@ -9,12 +9,20 @@ import { invoke } from "@/lib/invoke";
 import { Alert, Button, Collapse, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { confidenceBar } from "./evidenceConfidenceBar";
 
 /** 单条证据引用（对齐后端 EvidenceCitation） */
 interface EvidenceCitation {
   claim: string;
   sourceAnalystId: string;
   sourceAnalystName: string;
+  /**
+   * 匹配置信度，量纲契约 = **`[0, 1]`**
+   *
+   * 后端类型是 `axagent_harness::domain_semantics::Ratio01`（构造即钳制），
+   * `serde(transparent)` 保证过线后仍是裸数字 —— 所以这里乘 100 才是对的。
+   * ⚠ 展示方**不要**再夹 `Math.min(…, 100)` 把越界压平：那会掩盖契约破坏。
+   */
   matchConfidence: number;
   sourceSnippet: string;
   hasDataSupport: boolean;
@@ -142,70 +150,71 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
       {/* 理由列表 */}
       <Collapse
         size="small"
-        items={report.citations.map((citation, i) => ({
-          key: String(i),
-          label: (
-            <div
-              className="flex items-center gap-2 text-sm"
-              style={{ maxWidth: "100%", minWidth: 0 }}
-            >
-              <span className="text-gray-400 font-mono text-xs shrink-0">#{i + 1}</span>
-              <span
-                className="text-gray-200 flex-1"
-                style={{
-                  overflowWrap: "anywhere",
-                  wordBreak: "break-all",
-                  whiteSpace: "normal",
-                }}
+        items={report.citations.map((citation, i) => {
+          // 契约 [0,1]；越界必须可见（判据与回归测试见 evidenceConfidenceBar.ts）
+          const bar = confidenceBar(citation.matchConfidence);
+          return {
+            key: String(i),
+            label: (
+              <div
+                className="flex items-center gap-2 text-sm"
+                style={{ maxWidth: "100%", minWidth: 0 }}
               >
-                {citation.claim}
-              </span>
-              <Tag
-                className="text-[10px] leading-none px-1 py-0 shrink-0"
-                color={citation.hasDataSupport ? "green" : "orange"}
-              >
-                {citation.hasDataSupport
-                  ? t("stockAnalysis.evidenceCitation.supported")
-                  : t("stockAnalysis.evidenceCitation.unsupported")}
-              </Tag>
-            </div>
-          ),
-          children: (
-            <div className="text-xs space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-gray-400">
-                  {t("stockAnalysis.evidenceCitation.source")}:
-                </span>
-                <Tag className="text-xs">{citation.sourceAnalystName}</Tag>
-                <Tooltip
-                  title={t("stockAnalysis.evidenceCitation.matchConfidence", {
-                    percent: (citation.matchConfidence * 100).toFixed(0),
-                  })}
+                <span className="text-gray-400 font-mono text-xs shrink-0">#{i + 1}</span>
+                <span
+                  className="text-gray-200 flex-1"
+                  style={{
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-all",
+                    whiteSpace: "normal",
+                  }}
                 >
-                  <div className="h-1.5 w-16 bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${Math.min(citation.matchConfidence * 100, 100)}%`,
-                        backgroundColor: citation.matchConfidence > 0.5 ? "#22c55e" : "#eab308",
-                      }}
-                    />
-                  </div>
-                </Tooltip>
+                  {citation.claim}
+                </span>
+                <Tag
+                  className="text-[10px] leading-none px-1 py-0 shrink-0"
+                  color={citation.hasDataSupport ? "green" : "orange"}
+                >
+                  {citation.hasDataSupport
+                    ? t("stockAnalysis.evidenceCitation.supported")
+                    : t("stockAnalysis.evidenceCitation.unsupported")}
+                </Tag>
               </div>
-              {citation.sourceSnippet && (
-                <div className="bg-gray-900/60 rounded p-1.5 text-gray-400 italic border-l-2 border-gray-600">
-                  {citation.sourceSnippet}
+            ),
+            children: (
+              <div className="text-xs space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-400">
+                    {t("stockAnalysis.evidenceCitation.source")}:
+                  </span>
+                  <Tag className="text-xs">{citation.sourceAnalystName}</Tag>
+                  <Tooltip
+                    title={t("stockAnalysis.evidenceCitation.matchConfidence", {
+                      percent: (citation.matchConfidence * 100).toFixed(0),
+                    })}
+                  >
+                    <div className="h-1.5 w-16 bg-gray-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${bar.widthPct}%`, backgroundColor: bar.color }}
+                      />
+                    </div>
+                  </Tooltip>
                 </div>
-              )}
-              {citation.dataSource && (
-                <div className="text-green-400/80">
-                  📊 {citation.dataSource}
-                </div>
-              )}
-            </div>
-          ),
-        }))}
+                {citation.sourceSnippet && (
+                  <div className="bg-gray-900/60 rounded p-1.5 text-gray-400 italic border-l-2 border-gray-600">
+                    {citation.sourceSnippet}
+                  </div>
+                )}
+                {citation.dataSource && (
+                  <div className="text-green-400/80">
+                    📊 {citation.dataSource}
+                  </div>
+                )}
+              </div>
+            ),
+          };
+        })}
       />
     </div>
   );

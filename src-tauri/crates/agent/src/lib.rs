@@ -49,7 +49,6 @@ pub mod insight_generator;
 pub mod interrupt;
 pub mod lint_checker;
 pub mod llm_bridge;
-pub mod llm_dispatcher;
 pub mod metrics;
 pub mod noop_kit;
 pub mod outline_builder;
@@ -120,9 +119,6 @@ pub use provider_adapter::{AxAgentApiClient, StreamEventCallback};
 
 // fallback_adapter — 外部引用：commands/agent
 pub use fallback_adapter::FallbackProviderAdapter;
-
-// llm_dispatcher — 外部引用：commands/fleet
-pub use llm_dispatcher::LlmDispatcher;
 
 // llm_bridge — 外部引用：runtime/llm_bridge
 pub use llm_bridge::ProviderLlmBridge;

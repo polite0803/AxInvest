@@ -27,6 +27,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 截图 SHA256（用于去重，避免同一截图重复诊断）
+    #[sea_orm(indexed)]
     pub image_hash: Option<String>,
     /// 截图本地存储路径（可选，若存了原图）
     pub image_path: Option<String>,
@@ -37,6 +38,7 @@ pub struct Model {
     /// 原图高度
     pub image_height: Option<i32>,
     /// 截图来源 App（同花顺 / 东方财富 / 雪球 / 通达信 / 其他）
+    #[sea_orm(indexed)]
     pub source_app: Option<String>,
     /// LLM 视觉管线 OCR 提取的完整文本（debug 用）
     pub ocr_text: Option<String>,
@@ -60,17 +62,19 @@ pub struct Model {
     #[sea_orm(default_value = "[]")]
     pub recommended_actions: String,
     /// 来源工作流执行 ID（可空，手动上传则为 null）
+    #[sea_orm(indexed)]
     pub source_workflow_execution_id: Option<String>,
     /// 使用的 LLM provider ID（溯源 + 复算用）
     pub provider_id: Option<String>,
     /// 使用的 LLM model ID
     pub model_id: Option<String>,
     /// active / archived / failed
-    #[sea_orm(default_value = "active")]
+    #[sea_orm(default_value = "active", indexed)]
     pub status: String,
     /// 若失败，错误原因
     pub error_message: Option<String>,
     /// 创建时间戳（ms）
+    #[sea_orm(indexed)]
     pub created_at: i64,
     /// 更新时间戳（ms）
     pub updated_at: i64,

@@ -17,6 +17,7 @@
 
 use std::sync::Arc;
 
+use crate::compat::openai_compat_cloud_adapter;
 use crate::openai::OpenAIAdapter;
 use crate::{ProviderAdapter, ProviderRequestContext};
 use async_trait::async_trait;
@@ -37,28 +38,16 @@ pub struct GlmAdapter {
     inner: OpenAIAdapter,
 }
 
-impl Default for GlmAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ── 委托样板由宏生成（new / Default / base_url / get_client +
+//    trait 的 chat / chat_stream / list_models / validate_key / embed）──
+//    与其余 4 家云厂商逐字一致，改 trait 签名时不会漏改某一家（见 compat.rs）。
+openai_compat_cloud_adapter!(
+    GlmAdapter,
+    default_base_url = DEFAULT_BASE_URL,
+    validate_path = "/models",
+);
 
 impl GlmAdapter {
-    pub fn new() -> Self {
-        Self { inner: OpenAIAdapter::new() }
-    }
-
-    /// 解析智谱 GLM 的有效 base URL。
-    fn base_url(ctx: &ProviderRequestContext) -> String {
-        ctx.base_url.clone().unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
-    }
-
-    /// 构建带代理支持的 HTTP 客户端，委托给内部 OpenAI 适配器。
-    #[allow(clippy::result_large_err)]
-    fn get_client(&self, ctx: &ProviderRequestContext) -> Result<reqwest::Client> {
-        self.inner.get_client(ctx)
-    }
-
     /// 返回智谱 GLM 官方模型列表。
     fn builtin_models(provider_id: &str) -> Vec<Model> {
         vec![
@@ -127,56 +116,5 @@ impl GlmAdapter {
                 output_price_per_mtok: None,
             },
         ]
-    }
-}
-
-#[async_trait]
-impl ProviderAdapter for GlmAdapter {
-    async fn chat(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: Arc<ChatRequest>,
-    ) -> Result<ChatResponse> {
-        // 委托给 OpenAI 适配器：thinking 字段已由 extract_thinking 解析
-        self.inner.chat(ctx, request).await
-    }
-
-    fn chat_stream(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: ChatRequest,
-        cancel_token: Option<Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Pin<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
-        // 委托给 OpenAI 适配器：thinking 字段已由 extract_thinking 解析
-        self.inner.chat_stream(ctx, request, cancel_token)
-    }
-
-    /// 返回智谱 GLM 官方模型列表（不调用 API）。
-    async fn list_models(&self, ctx: &ProviderRequestContext) -> Result<Vec<Model>> {
-        Ok(Self::builtin_models(&ctx.provider_id))
-    }
-
-    /// 通过智谱 GLM 的 `/models` 端点校验 API Key 有效性。
-    async fn validate_key(&self, ctx: &ProviderRequestContext) -> Result<bool> {
-        let url = format!("{}/models", Self::base_url(ctx));
-        let resp = crate::apply_request_headers(
-            self.get_client(ctx)?
-                .get(&url)
-                .header("Authorization", format!("Bearer {}", ctx.api_key)),
-            ctx,
-        )
-        .send()
-        .await
-        .map_err(|e| AxAgentError::Provider(format!("Request failed: {e}")))?;
-        let status = resp.status().as_u16();
-        Ok(status != 401 && status != 403)
-    }
-
-    async fn embed(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: EmbedRequest,
-    ) -> Result<EmbedResponse> {
-        self.inner.embed(ctx, request).await
     }
 }

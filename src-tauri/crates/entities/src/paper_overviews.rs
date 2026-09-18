@@ -16,24 +16,31 @@ pub struct Model {
     /// 关联 knowledge_bases.id
     pub knowledge_base_id: String,
     /// 概览类型（paper / long_document / auto）
+    #[sea_orm(default_value = "auto")]
     pub overview_type: String,
     /// 论文摘要
     #[sea_orm(column_type = "Text", nullable)]
     pub abstract_text: Option<String>,
     /// 核心概念 JSON 数组字符串 ["concept1","concept2"]
+    #[sea_orm(default_value = "[]")]
     pub key_concepts: String,
     /// 方法论 JSON 数组字符串
+    #[sea_orm(default_value = "[]")]
     pub methods: String,
     /// 贡献 JSON 数组字符串
+    #[sea_orm(default_value = "[]")]
     pub contributions: String,
     /// 局限 JSON 数组字符串
+    #[sea_orm(default_value = "[]")]
     pub limitations: String,
     /// 一句话总结（TL;DR）
     #[sea_orm(column_type = "Text", nullable)]
     pub tl_dr: Option<String>,
     /// 章节结构 JSON 数组字符串 [{title, summary}]
+    #[sea_orm(default_value = "[]")]
     pub sections: String,
     /// 任意扩展元数据 JSON 字符串（authors/doi/arxiv_id/published_date 等）
+    #[sea_orm(default_value = "{}")]
     pub metadata_json: String,
     /// 生成模型标识
     pub generated_by: Option<String>,

@@ -410,6 +410,12 @@ export function EvolutionDriftPanel() {
                   { key: "capExtreme", label: t("stockAnalysis.evolutionDrift.calibrateCapExtreme") },
                   { key: "capHigh", label: t("stockAnalysis.evolutionDrift.calibrateCapHigh") },
                   { key: "capMid", label: t("stockAnalysis.evolutionDrift.calibrateCapMid") },
+                  { key: "priorBull", label: t("stockAnalysis.evolutionDrift.calibratePriorBull") },
+                  {
+                    key: "priorSideways",
+                    label: t("stockAnalysis.evolutionDrift.calibratePriorSideways"),
+                  },
+                  { key: "priorBear", label: t("stockAnalysis.evolutionDrift.calibratePriorBear") },
                 ].map(({ key, label }) => (
                   <div key={key} style={{ minWidth: 100 }}>
                     <div style={{ fontSize: 11, color: "var(--muted, #8c8c8c)" }}>{label}</div>
@@ -490,6 +496,27 @@ export function EvolutionDriftPanel() {
                   width: 60,
                   align: "right",
                   render: (v: number) => `${v.toFixed(0)}%`,
+                },
+                {
+                  title: t("stockAnalysis.evolutionDrift.calibratePriorBull"),
+                  dataIndex: "priorBull",
+                  width: 60,
+                  align: "right",
+                  render: (v: number) => v.toFixed(2),
+                },
+                {
+                  title: t("stockAnalysis.evolutionDrift.calibratePriorSideways"),
+                  dataIndex: "priorSideways",
+                  width: 60,
+                  align: "right",
+                  render: (v: number) => v.toFixed(2),
+                },
+                {
+                  title: t("stockAnalysis.evolutionDrift.calibratePriorBear"),
+                  dataIndex: "priorBear",
+                  width: 60,
+                  align: "right",
+                  render: (v: number) => v.toFixed(2),
                 },
               ]}
             />

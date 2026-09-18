@@ -67,4 +67,13 @@ describe("runDiagnosticRules — orphan_node", () => {
     const edges = [e("e1", "trigger-1", "parallel-1")];
     expect(orphanIds(runDiagnosticRules(nodes, edges))).toHaveLength(0);
   });
+
+  it("禁用节点（enabled=false）不误报为孤立", () => {
+    const nodes = [
+      n("trigger-1", "trigger"),
+      { ...n("sim-verify", "code"), enabled: false },
+    ];
+    const edges: WorkflowEdge[] = [];
+    expect(orphanIds(runDiagnosticRules(nodes, edges))).toHaveLength(0);
+  });
 });

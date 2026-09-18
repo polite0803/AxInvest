@@ -576,6 +576,14 @@ async fn upsert_template(
     let input_json = data.input_schema.as_ref().and_then(|s| serde_json::to_string(s).ok());
     let output_json = data.output_schema.as_ref().and_then(|s| serde_json::to_string(s).ok());
 
+    // P0 软门禁（C1，2026-09-14）：种子的端口公理 —— 结构性死链在此被记录（不阻断启动）。
+    // 判据复用 harness 的 `warn_port_axioms_json`，不在本文件另写一份。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("stock_pipeline:seed_stock_pipeline:{}", data.id),
+        &nodes_json,
+        &edges_json,
+    );
+
     let am = workflow_template::ActiveModel {
         hooks_config: Set(None),
         id: Set(data.id.clone()),

@@ -117,6 +117,19 @@ export type EnhancementConfig = {
   combinedCall: boolean;
 };
 
+/**
+ * 重排配置。字段形状与后端 `crates/harness/src/rag_config.rs::RerankConfig` 一一对应。
+ *
+ * ⚠ 曾有一个 `ollamaEndpoint: string | null` 字段（2026-09-15 删）：后端 `RerankConfig`
+ * **没有**该字段，写入后会被 serde 当作未知键忽略（不报错，但也没有任何作用），
+ * 属「幽灵字段」—— 依 AGENTS.md 禁区 13（TS 类型须与后端 DTO 对齐）删除。
+ * 需要 Ollama 端点的是 `SelfRagConfig.ollamaEndpoint`（后端确有该字段）。
+ *
+ * ⚠ `backend` 的 wire 名就是 `backend`：后端字段名为 `backend`，
+ * 靠 `#[serde(rename_all = "camelCase")]` 输出同名。曾有一个 `#[serde(rename = "type")]`
+ * 把它改成 `type`，导致本类型写出的 JSON 后端解析失败（见
+ * `rag_config.rs::tests::frontend_shaped_config_must_parse` 的注释）。
+ */
 export type RerankConfig = {
   enabled: boolean;
   backend: "rule" | "cross_encoder" | "pipeline";
@@ -125,7 +138,6 @@ export type RerankConfig = {
   candidateK: number;
   ruleFilterKeep: number;
   scoreThreshold: number | null;
-  ollamaEndpoint: string | null;
 };
 
 export type SelfRagConfig = {
@@ -137,8 +149,30 @@ export type SelfRagConfig = {
   maxRetryRounds: number;
 };
 
+export type HybridConfig = {
+  enabled: boolean;
+  vectorWeight: number;
+  bm25Weight: number;
+  sparseWeight: number;
+  fusion: "rrf" | "weighted";
+  rrfK: number;
+};
+
+/// Graph RAG 增强检索（实体图谱）。
+///
+/// `enabled=true` 时后端会向 `RAGPipeline` 注入 `EntityGraphProvider`，
+/// 阶段 4 用 `graph_enhanced_search` 取「实体 + 关系 + 邻居」并合入注入 prompt 的上下文。
+/// 默认 `false`（图检索会改变注入内容，属可见行为变更）。
+export type EntityGraphConfig = {
+  enabled: boolean;
+};
+
 export type RAGPipelineConfig = {
   queryEnhancement: EnhancementConfig;
   rerank: RerankConfig;
   selfRag: SelfRagConfig;
+  /// 多引擎 RAG：混合检索权重与融合算法（后端 `HybridConfig`）
+  hybrid?: HybridConfig;
+  /// Graph RAG 增强检索（后端 `EntityGraphConfig`）
+  entityGraph?: EntityGraphConfig;
 };

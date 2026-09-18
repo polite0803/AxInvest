@@ -14,6 +14,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 工作流 ID（用于按模板聚合历史反思）。
+    #[sea_orm(indexed)]
     pub workflow_id: String,
     /// 执行 ID（与 `Reflection.task_id` 一致，单次执行的唯一标识）。
     pub execution_id: String,
@@ -22,14 +23,19 @@ pub struct Model {
     /// 质量分（0-10），来自 `Reflection.quality_score`。
     pub quality_score: i32,
     /// 总结性描述，来自 `Reflection.overall_summary`。
+    #[sea_orm(default_value = "")]
     pub summary: String,
     /// JSON 序列化的 `Vec<String>`，来自 `Reflection.error_patterns`。
+    #[sea_orm(default_value = "[]")]
     pub error_patterns_json: String,
     /// JSON 序列化的 `Vec<String>`，来自 `Reflection.reusable_patterns`。
+    #[sea_orm(default_value = "[]")]
     pub reusable_patterns_json: String,
     /// JSON 序列化的 `WorkflowReflectionMetadata`，来自 `Reflection.metadata`。
+    #[sea_orm(default_value = "{}")]
     pub metadata_json: String,
     /// 反思时间戳（RFC3339），来自 `Reflection.timestamp`。
+    #[sea_orm(indexed)]
     pub timestamp: String,
     /// 入库时间戳（RFC3339），由存储层在落库时设置。
     pub created_at: String,

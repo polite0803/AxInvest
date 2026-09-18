@@ -15,6 +15,8 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
+use crate::compat::impl_default_via_new;
+use crate::transport::sse_data_payload;
 use crate::url_utils::resolve_chat_url;
 use crate::{ProviderAdapter, ProviderRequestContext, build_http_client, parse_base64_data_url};
 
@@ -26,11 +28,7 @@ pub struct AnthropicAdapter {
     client: reqwest::Client,
 }
 
-impl Default for AnthropicAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(AnthropicAdapter);
 
 impl AnthropicAdapter {
     pub fn new() -> Self {
@@ -618,15 +616,7 @@ impl ProviderAdapter for AnthropicAdapter {
                             let line = buf[..pos].trim_end().to_string();
                             buf = buf[pos + 1..].to_string();
 
-                            if line.is_empty() || line.starts_with("event:") {
-                                continue;
-                            }
-
-                            let data = if let Some(d) = line.strip_prefix("data: ") {
-                                d
-                            } else if let Some(d) = line.strip_prefix("data:") {
-                                d
-                            } else {
+                            let Some(data) = sse_data_payload(&line) else {
                                 continue;
                             };
 

@@ -12,6 +12,7 @@ use sea_orm::{
 };
 use std::sync::Arc;
 
+use crate::decision_action::{normalize_action, ActionKind};
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::{detect_market_type, get_st_price_limit_pct};
 use axagent_entities::{portfolio_holdings, stock_analyses, trades};
@@ -198,7 +199,12 @@ impl TradingEngine {
                         let suggested_action = decision["action"].as_str().unwrap_or("");
                         let suggested_target = decision["targetPrice"].as_f64();
 
-                        if suggested_action == "卖出" || suggested_action == "减持" {
+                        // P1-6(2026-09-14): 原先只认 2 个中文字面量 —— 英文 SELL
+                        // 不触发「分析建议卖出而非买入」二次确认（漏报）。
+                        if matches!(
+                            normalize_action(suggested_action),
+                            Some(ActionKind::Reduce | ActionKind::Sell)
+                        ) {
                             warnings.push(format!(
                                 "分析建议「{}」而非买入，请二次确认",
                                 suggested_action

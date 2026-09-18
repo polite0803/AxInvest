@@ -8,20 +8,26 @@
 //! 7 段式结构：核心结论 / 评分 / 趋势 / 买卖点位 / 风险警报 / 催化因素 / 操作检查清单
 //! + 大盘复盘模板（主要指数 / 市场概况 / 板块表现）
 
+use crate::decision_action::{normalize_action, ActionKind};
 use axagent_harness::{DashboardDigest, DashboardReport, MarketReviewReport};
 
 // ── 辅助函数 ──
 
 /// 根据动作返回对应 emoji（借鉴 DSA 的 emoji 风格）
 fn action_emoji(action: &str) -> &'static str {
-    match action {
-        "强烈买入" => "🚀",
-        "买入" => "📈",
-        "增持" => "⬆️",
-        "持有" => "➡️",
-        "减持" => "⬇️",
-        "卖出" => "📉",
-        _ => "❓",
+    // P1-6(2026-09-14): 改走统一归一化 —— 原判据只认中文，英文值域一律渲染 ❓。
+    // ⚠️ 已知收敛损失：dashboard 值域的「强烈买入」与「买入」归一化后同为 ActionKind::Buy，
+    //    🚀 与 📈 的区分**丢失**（本 crate 的权威档位没有 strong-buy 这一档）。
+    //    要恢复该区分应加独立的「强度」字段，而不是在值域里再加一个档 —— 那正是本次要消灭的形态。
+    match normalize_action(action) {
+        Some(ActionKind::Buy) => "📈",
+        Some(ActionKind::Increase) => "⬆️",
+        Some(ActionKind::Hold) => "➡️",
+        Some(ActionKind::Wait) => "⏸️",
+        Some(ActionKind::Reduce) => "⬇️",
+        Some(ActionKind::Sell) => "📉",
+        Some(ActionKind::Uncertain) => "🤔",
+        Some(ActionKind::Unavailable) | None => "❓",
     }
 }
 
@@ -135,8 +141,15 @@ pub fn render_dashboard_md(report: &DashboardReport) -> String {
         },
         _ => {},
     }
-    md.push_str(&format!("- 目标价: {}\n", fmt_opt_f64(report.target_price)));
+    // 2026-09-13: 「交易目标价」与「内在价值」分离标注 —— 前者是 LLM trader 的方向性目标
+    // （持有/观望档常为空或等于现价），后者是 `t-valuation` 客观计算的 DCF 三档。
+    // 两者曾同名展示为「目标价」⇒ 用户读到「同一工作流结论矛盾」（603466 风语筑实证）。
+    md.push_str(&format!("- 交易目标价: {}\n", fmt_opt_f64(report.target_price)));
     md.push_str(&format!("- 止损价: {}\n", fmt_opt_f64(report.stop_loss)));
+    if let (Some(low), Some(high)) = (report.intrinsic_value_low, report.intrinsic_value_high) {
+        let cp = report.current_price.map(|p| format!("（现价 {p:.2}）")).unwrap_or_default();
+        md.push_str(&format!("- 内在价值(DCF): {low:.2} - {high:.2}{cp}\n"));
+    }
     md.push_str(&format!("- 建议仓位: {:.0}%\n\n", report.position_pct));
 
     // 3. 风险警报
@@ -349,11 +362,18 @@ pub fn render_dashboard_html(report: &DashboardReport) -> String {
         },
         _ => {},
     }
-    html.push_str(&format!("<li>目标价: <b>{}</b></li>", fmt_opt_f64(report.target_price)));
+    // 2026-09-13: 与 md 渲染同源 —— 「交易目标价」vs「内在价值」语义分离
+    html.push_str(&format!("<li>交易目标价: <b>{}</b></li>", fmt_opt_f64(report.target_price)));
     html.push_str(&format!(
         "<li>止损价: <b style=\"color:#f85149\">{}</b></li>",
         fmt_opt_f64(report.stop_loss)
     ));
+    if let (Some(low), Some(high)) = (report.intrinsic_value_low, report.intrinsic_value_high) {
+        let cp = report.current_price.map(|p| format!("（现价 {p:.2}）")).unwrap_or_default();
+        html.push_str(&format!(
+            "<li>内在价值(DCF): <b style=\"color:#58a6ff\">{low:.2} - {high:.2}</b>{cp}</li>"
+        ));
+    }
     html.push_str(&format!("<li>建议仓位: <b>{:.0}%</b></li>", report.position_pct));
     html.push_str("</ul>");
 
@@ -448,6 +468,12 @@ pub fn render_dashboard_html(report: &DashboardReport) -> String {
 /// `stock_code` / `stock_name` / `analysis_date` 来自分析记录元数据。
 ///
 /// `analyst_reports` 是各专家节点的报告文本（key 为 expert_id），用于提取风险警报和催化因素。
+///
+/// `valuation_json` 是 `t-valuation` 节点输出的**已解包并 parse** 的对象
+/// （`{current_price, dcf:{low,mid,high,...}, graham:{...}, ...}`），用于填充
+/// **估值语义**的 `intrinsic_value_*` —— 与交易语义的 `target_price` 严格区分
+/// （2026-09-13：两者同名展示导致用户读到「同一工作流结论矛盾」，603466 实证）。
+/// 传 `None` 时这四个字段保持 `None`，UI 侧按「无估值数据」渲染。
 pub fn build_dashboard_report_from_workflow(
     decision_json: &serde_json::Value,
     score_json: &serde_json::Value,
@@ -455,16 +481,36 @@ pub fn build_dashboard_report_from_workflow(
     stock_name: &str,
     analysis_date: &str,
     analyst_reports: &std::collections::HashMap<String, String>,
+    valuation_json: Option<&serde_json::Value>,
 ) -> DashboardReport {
     use chrono::Utc;
 
-    let action = decision_json.get("action").and_then(|v| v.as_str()).unwrap_or("持有").to_string();
+    // P1-6(2026-09-14): 原 `unwrap_or("持有")` 把「决策缺失」吸收成「持有」——缺失不是结论。
+    //   改走统一归一化：识别到的档位落规范中文，缺失 / 未识别一律落显式哨兵「数据缺失」，
+    //   由展示层渲染「数据缺失」而非任何操作建议。
+    let action = decision_json
+        .get("action")
+        .and_then(|v| v.as_str())
+        .and_then(normalize_action)
+        .unwrap_or(ActionKind::Unavailable)
+        .as_storage_cn()
+        .to_string();
     let position_pct = decision_json.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let confidence = decision_json.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let reasoning =
         decision_json.get("reasoning").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let target_price = decision_json.get("targetPrice").and_then(|v| v.as_f64());
     let stop_loss = decision_json.get("stopLoss").and_then(|v| v.as_f64());
+
+    // ── 估值语义字段（来自 t-valuation 的客观计算，与交易价位严格区分）──
+    // 603466 实证：仪表盘「目标价」= 13.27（LLM 自填、等于现价），而估值区间是 4.44–5.57
+    // ⇒ 用户读到「同一工作流结论矛盾」。根因是两套语义共用了一个词，故在此显式并列供 UI 分栏。
+    let val_dcf = valuation_json.and_then(|v| v.get("dcf"));
+    let intrinsic_value_low = val_dcf.and_then(|d| d.get("low")).and_then(|v| v.as_f64());
+    let intrinsic_value_high = val_dcf.and_then(|d| d.get("high")).and_then(|v| v.as_f64());
+    let intrinsic_value_mid = val_dcf.and_then(|d| d.get("mid")).and_then(|v| v.as_f64());
+    let current_price =
+        valuation_json.and_then(|v| v.get("current_price")).and_then(|v| v.as_f64());
 
     let score = score_json.get("total").and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or(0);
     let trend = score_json
@@ -515,6 +561,10 @@ pub fn build_dashboard_report_from_workflow(
         target_price,
         stop_loss,
         position_pct,
+        intrinsic_value_low,
+        intrinsic_value_high,
+        intrinsic_value_mid,
+        current_price,
         risk_alerts,
         catalysts,
         checklist,
@@ -562,10 +612,17 @@ fn extract_risk_alerts(
                 continue; // 无风险关键词则跳过
             };
 
-            // 提取包含"风险"的句子作为描述
+            // 提取包含"风险"的句子作为描述。
+            // 切分符含真实换行（报告 unwrap 后是 markdown 多行文本），跳过标题行，
+            // 避免整段 markdown 表格被当成一个「句子」塞进描述（2026-09-11 光库实证）
             let description = report
-                .split(['。', '！', '？'])
-                .find(|s| s.contains("风险") || s.contains("警惕") || s.contains("注意"))
+                .split(['。', '！', '？', '\n'])
+                .map(|s| s.trim())
+                .find(|s| {
+                    (s.contains("风险") || s.contains("警惕") || s.contains("注意"))
+                        && !s.starts_with('#')
+                        && s.chars().count() >= 6
+                })
                 .map(|s| s.trim().to_string())
                 .unwrap_or_else(|| format!("{source}存在风险"));
 
@@ -580,6 +637,14 @@ fn extract_risk_alerts(
     }
 
     alerts
+}
+
+/// 仅供主 crate 集成测试使用（决策仪表盘风险描述提取回归）
+#[doc(hidden)]
+pub fn __extract_risk_alerts_for_test(
+    analyst_reports: &std::collections::HashMap<String, String>,
+) -> Vec<axagent_harness::RiskAlert> {
+    extract_risk_alerts(analyst_reports)
 }
 
 /// 从专家报告中提取催化因素
@@ -611,10 +676,16 @@ fn extract_catalysts(
                 continue;
             };
 
-            // 提取包含关键词的句子作为描述
+            // 提取包含关键词的句子作为描述（切分符含真实换行，跳过标题行，
+            // 与 extract_risk_alerts 同规则；2026-09-11 光库实证）
             let description = report
-                .split(['。', '！', '？'])
-                .find(|s| s.contains(keyword) || s.contains("增长") || s.contains("下滑"))
+                .split(['。', '！', '？', '\n'])
+                .map(|s| s.trim())
+                .find(|s| {
+                    (s.contains(keyword) || s.contains("增长") || s.contains("下滑"))
+                        && !s.starts_with('#')
+                        && s.chars().count() >= 6
+                })
                 .map(|s| s.trim().to_string())
                 .unwrap_or_else(|| format!("{source}{direction}"));
 
@@ -640,8 +711,12 @@ fn build_default_checklist(
 ) -> Vec<axagent_harness::ChecklistItem> {
     let mut items = Vec::new();
 
-    let is_buy = matches!(action, "强烈买入" | "买入" | "增持");
-    let is_sell = matches!(action, "减持" | "卖出");
+    // P1-6(2026-09-14): 改走统一归一化 —— 原判据只认中文，一旦链路上是英文 token
+    //   或 dashboard 值域短语，is_buy / is_sell 双 false ⇒ 入场/出场检查清单**整段不生成**，
+    //   报告缺项且毫无告警。未识别 / 缺失时双 false 是正确行为（没有方向就不该给方向性清单）。
+    let kind = normalize_action(action);
+    let is_buy = kind.is_some_and(ActionKind::implies_buy);
+    let is_sell = matches!(kind, Some(ActionKind::Reduce | ActionKind::Sell));
 
     if is_buy {
         items.push(axagent_harness::ChecklistItem {
@@ -713,6 +788,10 @@ mod tests {
             target_price: Some(1900.0),
             stop_loss: Some(1600.0),
             position_pct: 30.0,
+            intrinsic_value_low: None,
+            intrinsic_value_high: None,
+            intrinsic_value_mid: None,
+            current_price: None,
             risk_alerts: vec![RiskAlert {
                 description: "短期获利盘压力".into(),
                 severity: "中".into(),
@@ -880,6 +959,7 @@ mod tests {
             "贵州茅台",
             "2026-07-16",
             &reports,
+            None,
         );
 
         assert_eq!(report.stock_code, "600519");
@@ -922,6 +1002,7 @@ mod tests {
             "平安银行",
             "2026-07-16",
             &reports,
+            None,
         );
 
         assert_eq!(report.action, "持有");
@@ -954,6 +1035,7 @@ mod tests {
             "贵州茅台",
             "2026-07-16",
             &reports,
+            None,
         );
 
         // 完整性校验失败但占位符补全后 integrity_passed=true

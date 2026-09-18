@@ -117,6 +117,9 @@ pub struct WorkflowGenerationResult {
     pub nodes: Vec<WorkflowNode>,
     pub edges: Vec<WorkflowEdge>,
     pub explanation: Option<String>,
+    /// 备选方案（多方案对比：LLM 一次返回多个完整工作流，结构与顶层一致）
+    #[serde(default)]
+    pub alternatives: Option<Vec<WorkflowGenerationResult>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -174,12 +177,13 @@ pub(super) async fn resolve_ai_provider(state: &AppState) -> Result<ResolvedProv
         store_response: None,
     };
 
+    // 无启用的模型时直接报错，避免静默回退到可能不存在的 "gpt-4"
     let model_id = provider
         .models
         .iter()
         .find(|m| m.enabled)
         .map(|m| m.model_id.clone())
-        .unwrap_or_else(|| "gpt-4".to_string());
+        .ok_or_else(|| format!("No enabled model configured for provider: {}", provider.id))?;
 
     Ok(ResolvedProvider { ctx, model_id, provider_type: provider.provider_type.clone() })
 }
@@ -685,6 +689,38 @@ fn layout_workflow_nodes(
     positions
 }
 
+/// 单个 LLM 工作流响应（顶层与 alternatives 复用同一结构，支持递归反序列化）
+#[derive(Deserialize)]
+struct LlmWorkflowResponse {
+    #[serde(default)]
+    intent: Option<String>,
+    nodes: Vec<LlmNode>,
+    edges: Vec<LlmEdge>,
+    explanation: Option<String>,
+    /// 备选方案（多方案对比：LLM 一次返回多个完整工作流）
+    #[serde(default)]
+    alternatives: Option<Vec<LlmWorkflowResponse>>,
+}
+
+#[derive(Deserialize)]
+struct LlmNode {
+    id: String,
+    node_type: String,
+    title: String,
+    description: Option<String>,
+    config: serde_json::Value,
+    #[serde(default)]
+    parent_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct LlmEdge {
+    id: String,
+    source: String,
+    target: String,
+    edge_type: Option<String>,
+}
+
 pub(super) fn parse_llm_response(
     prompt: &str,
     response_content: &str,
@@ -697,37 +733,18 @@ pub(super) fn parse_llm_response(
         )
     })?;
 
-    #[derive(Deserialize)]
-    struct LlmWorkflowResponse {
-        #[serde(default)]
-        intent: Option<String>,
-        nodes: Vec<LlmNode>,
-        edges: Vec<LlmEdge>,
-        explanation: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct LlmNode {
-        id: String,
-        node_type: String,
-        title: String,
-        description: Option<String>,
-        config: serde_json::Value,
-        #[serde(default)]
-        parent_id: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct LlmEdge {
-        id: String,
-        source: String,
-        target: String,
-        edge_type: Option<String>,
-    }
-
     let parsed: LlmWorkflowResponse = serde_json::from_str(json_str)
         .map_err(|e| format!("Failed to parse workflow JSON: {}", e))?;
 
+    convert_llm_response(parsed, prompt, model_id)
+}
+
+/// 将单个 LlmWorkflowResponse 转换为 WorkflowGenerationResult，并递归转换 alternatives。
+fn convert_llm_response(
+    parsed: LlmWorkflowResponse,
+    prompt: &str,
+    model_id: &str,
+) -> Result<WorkflowGenerationResult, String> {
     if let Some(intent) = parsed.intent.as_deref() {
         match intent {
             "refuse" => {
@@ -738,6 +755,7 @@ pub(super) fn parse_llm_response(
                         "[AI 拒绝生成] {}",
                         parsed.explanation.unwrap_or_else(|| "请求被拒绝".to_string())
                     )),
+                    alternatives: None,
                 });
             },
             "clarify" => {
@@ -748,6 +766,7 @@ pub(super) fn parse_llm_response(
                         "[AI 请求澄清] {}",
                         parsed.explanation.unwrap_or_else(|| "请补充更详细的需求".to_string())
                     )),
+                    alternatives: None,
                 });
             },
             _ => {},
@@ -1298,13 +1317,31 @@ pub(super) fn parse_llm_response(
         edges.extend(new_edges);
     }
 
-    Ok(WorkflowGenerationResult {
+    let mut result = WorkflowGenerationResult {
         nodes,
         edges,
         explanation: parsed
             .explanation
             .or_else(|| Some(format!("基于您的描述 '{}' 生成了工作流", prompt))),
-    })
+        alternatives: None,
+    };
+
+    // 递归转换备选方案：跳过空节点方案（refuse/clarify 或解析失败），保证前端拿到完整可选工作流
+    if let Some(alts) = parsed.alternatives {
+        let mut converted = Vec::new();
+        for alt in alts {
+            if let Ok(r) = convert_llm_response(alt, prompt, model_id) {
+                if !r.nodes.is_empty() {
+                    converted.push(r);
+                }
+            }
+        }
+        if !converted.is_empty() {
+            result.alternatives = Some(converted);
+        }
+    }
+
+    Ok(result)
 }
 
 /// 构造专家清单 brief，用于注入 LLM system prompt。

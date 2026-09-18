@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { invoke } from "@/lib/invoke";
-import { Button, Card, Col, message, Row, Space, Tag, Typography } from "antd";
+import { Button, Card, Col, message, Row, Space, Switch, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -58,18 +58,27 @@ export function MarketPackTab() {
                 <div>ID: {p.id}</div>
                 <div>{t("opc.market.version", { version: p.version })}</div>
                 <div>
-                  {t("opc.market.enabled", { value: p.enabled ? t("opc.market.yes") : t("opc.market.no") })}
+                  {t("opc.market.domain", {
+                    domain: p.domain ?? t("opc.market.domainUndefined"),
+                  })}
+                </div>
+                <div>
+                  {t("opc.market.capabilityCount", {
+                    count: p.capabilityCount ?? 0,
+                  })}
                 </div>
               </div>
-              <Space style={{ marginTop: 8 }}>
+              <Space style={{ marginTop: 8 }} wrap>
                 <Button
                   size="small"
                   type={p.installed ? "default" : "primary"}
                   disabled={p.installed}
                   onClick={async () => {
                     try {
-                      await invoke("opc_import_industry_pack", { archivePath: p.path });
-                      message.success(t("opc.market.installSuccess", { name: p.name }));
+                      const auditMsg = await invoke<string>("opc_import_domain_pack", { archivePath: p.path });
+                      message.success(
+                        `${t("opc.market.installSuccess", { name: p.name })} —— ${auditMsg}`,
+                      );
                       refresh();
                     } catch (e) {
                       message.error(t("opc.market.installFailed", { error: String(e) }));
@@ -78,6 +87,23 @@ export function MarketPackTab() {
                 >
                   {t("opc.market.install")}
                 </Button>
+                <Space size={4}>
+                  <Switch
+                    size="small"
+                    checked={p.enabled}
+                    onChange={async (checked) => {
+                      try {
+                        await invoke("opc_set_domain_pack_enabled", { packId: p.id, enabled: checked });
+                        message.success(t("opc.market.toggleSuccess", { name: p.name }));
+                        refresh();
+                      } catch (e) {
+                        message.error(t("opc.market.toggleFailed", { error: String(e) }));
+                        refresh();
+                      }
+                    }}
+                  />
+                  <Text style={{ fontSize: 12 }}>{t("opc.market.toggle")}</Text>
+                </Space>
               </Space>
             </Card>
           </Col>

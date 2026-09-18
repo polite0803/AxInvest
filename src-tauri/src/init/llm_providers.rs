@@ -1,21 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Wiring 层：LLM 推理 / 评判 / 分解 provider 工厂
+//! Wiring 层：LLM 推理 / 工具生成 / 任务分解 provider 工厂
 //!
 //! 将 DB 中的 provider 配置装配为具体的 trait 实现并注入到消费者：
 //!
-//! - [`build_reasoning_provider_from_db`] → 构造 [`LlmDrivenReasoningProvider`]
-//!   实现 [`LlmReasoningProvider`]，注入到 `ReActEngine`。
-//! - [`build_llm_judge_from_db`] → 构造 [`ProviderLlmBridge`]（已实现 [`LlmJudge`]），
-//!   注入到 `RLEngine`。
-//! - [`build_llm_decomposer_from_db`] → 构造 [`LlmBasedDecomposer`]
-//!   实现 [`MissionDecomposer`]，注入到 `OrchestratorExecutor`。
+//! - [`build_reasoning_provider_from_db`] → 构造 `LlmDrivenReasoningProvider`
+//!   实现 `LlmReasoningProvider`，注入到 `ReActEngine`。
+//! - [`build_llm_tool_provider_from_db`] → 构造 `ProviderLlmBridge`
+//!   实现 `LlmToolProvider`，供「运行时工具发现闭环」使用。
+//! - [`build_llm_decomposer_from_db`] → 构造 `LlmBasedDecomposer`
+//!   实现 `MissionDecomposer`，注入到 `OrchestratorExecutor`。
 //!
 //! 三个工厂都走 [`build_llm_components_from_db`] 获取 `(adapter, ctx, model)` 三元组，
 //! 避免重复 DB 查询逻辑（AGENTS.md 第 12 条：禁止重复定义）。
 //!
+//! **此处不提供 `LlmJudge` 工厂**（2026-09-12 删除 `build_llm_judge_from_db`）：
+//! `LlmJudge` 的消费者 `RLEngine::set_llm_judge()` 由 `src/init/services.rs:975` 用
+//! `axagent_runtime::llm_bridge::build_llm_bridge_from_db()` 的返回值直接注入 ——
+//! 该工厂全仓 **17 个调用者**，是本项目 bridge 的权威来源。被删的那个函数只是
+//! 它的**平行副本**（返回同一个 `ProviderLlmBridge`），零调用 ⇒ 按 AGENTS.md
+//! 第 12 条删除，避免「同一职责两个工厂、只有一个被接线」的缺陷复现。
+//!
 //! **降级策略**：任一工厂返回 `None` 时，调用方应回退到规则化占位实现
-//! （`DefaultReasoningProvider` / `DefaultLlmJudge` / `RuleBasedDecomposer`），
+//! （`DefaultReasoningProvider` / `RuleBasedDecomposer`），
 //! 这些占位实现返回 `Err(NotConfigured)` 或走规则兜底。
 
 use std::sync::Arc;
@@ -91,26 +98,26 @@ impl LlmExecutionService for BridgeLlmExecutionService {
 /// - `plan`：输出 JSON Action（tool_call / llm_call / user_confirm / plan）
 /// - `reflect`：回顾进度，给出策略调整建议
 /// - `synthesize`：综合推理链与观察，生成最终响应
+///
+/// # 唯一生产消费点（P0-B 已于 2026-09-12 接线）
+///
+/// `init/state.rs` 装配 MCP `agent_run` 的 `HarnessAgentAdapter` 时调用本函数，
+/// 并经由 `with_reasoning_provider()` 注入进 `ReActEngine`。接线前该引擎的
+/// `reasoning_provider` 停留在 `DefaultReasoningProvider`，其每个 trait 方法
+/// 直接返回 `Err("not configured: …")`（`crates/agent/src/react_engine.rs:135-184`）
+/// ⇒ MCP `agent_run` 重试 3 次后**必失败**。
+///
+/// 注意：本函数只负责**构造**，不负责**注入**。故日志措辞用「已构建」而非
+/// 「注入完成」，避免读者误以为接线已通（铁律 #12：归因字段不得说谎）。
 pub async fn build_reasoning_provider_from_db(
     master_key: &[u8; 32],
 ) -> Option<Arc<dyn LlmReasoningProvider>> {
     let (adapter, ctx, model) = build_llm_components_from_db(master_key).await?;
     let provider = LlmDrivenReasoningProvider::new(adapter, ctx, model);
-    tracing::info!("[wiring] LlmReasoningProvider 注入完成 (LlmDrivenReasoningProvider)");
+    tracing::debug!(
+        "[wiring] LlmReasoningProvider 已构建 (LlmDrivenReasoningProvider)，注入由调用方完成"
+    );
     Some(Arc::new(provider))
-}
-
-/// 从 DB 构建 LLM 评判器（`ProviderLlmBridge`，已实现 `LlmJudge`）。
-///
-/// 返回 `None` 表示未配置可用 provider，调用方应回退到 `DefaultLlmJudge`
-/// （其 trait 方法返回 `Err(NotConfigured)`）。
-pub async fn build_llm_judge_from_db(
-    master_key: &[u8; 32],
-) -> Option<Box<dyn axagent_harness::trajectory_types::LlmJudge>> {
-    let (adapter, ctx, model) = build_llm_components_from_db(master_key).await?;
-    let bridge = ProviderLlmBridge::new(adapter, ctx, model);
-    tracing::info!("[wiring] LlmJudge 注入完成 (ProviderLlmBridge)");
-    Some(Box::new(bridge))
 }
 
 /// 从 DB 构建 LLM 工具生成器（`ProviderLlmBridge`，已实现 `LlmToolProvider`）。

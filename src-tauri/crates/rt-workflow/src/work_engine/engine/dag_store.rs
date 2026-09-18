@@ -77,6 +77,51 @@ fn make_workflow(id: &str, nodes: Vec<WorkflowNode>, edges: Vec<WorkflowEdge>) -
     }
 }
 
+/// 取 Switch 节点声明的 `default_case`（未声明则为 `None`）。
+fn switch_default_case<'a>(workflow: &'a Workflow, node_id: &str) -> Option<&'a str> {
+    workflow.nodes.iter().find_map(|n| match n {
+        WorkflowNode::Switch(s) if n.base_id() == node_id => s.config.default_case.as_deref(),
+        _ => None,
+    })
+}
+
+/// 判定 Switch 节点的一条出边是否应被激活 —— 4 处调度路径共用同一判据。
+///
+/// ⚠️ 修复（2026-09-13）：原实现把「无 `source_handle` 的边」一律当作**无条件边**
+/// （`label.is_empty() || matched == label`），于是 Switch 的**默认分支永远被激活**，
+/// 与命中哪条具名分支无关 —— 「默认」实际退化成「并行」，两个分支的结果同时产出。
+///
+/// 实证（stock-analysis v40，`quality-gate`）：
+///   `data-quality.result.grade = "C"` ⇒ `matched_label = "acceptable"`，具名边
+///   `acceptable → decision-explainer` 正确激活；同时默认边
+///   `e-quality-gate-quality-fallback`（`sourceHandle: null`）**也被激活**
+///   ⇒ 保守 LLM 决策与公式决策同时产出，落库按「链尾优先」取到 LLM 兜底
+///   ⇒ 界面显示 `增持 11.5%`、库里却是 `减持 5%`，同一次运行两套真相。
+///   前端 i18n 已把该配置项命名为「默认分支（兜底）」，设计意图本就是**互斥兜底**。
+///
+/// 判据：
+/// - 边带 `source_handle`（具名分支）⇒ 仅当 `matched_label` 等于该 handle 时激活。
+/// - 边不带 `source_handle`（默认分支）：
+///   * Switch **未**声明 `default_case` ⇒ 维持旧行为（无条件激活，兼容既有模板）；
+///   * Switch **已**声明 `default_case` ⇒ 仅当 `matched_label` 等于 `default_case` 时激活。
+/// - Switch 尚无结果（失败 / 未跑）⇒ 维持旧行为（具名不激活、默认激活）。这同时是
+///   失败兜底路径：拿不到 grade 时必须放行保守分支，否则尾链永久 Pending。
+fn switch_edge_should_follow(
+    default_case: Option<&str>,
+    switch_output: Option<&serde_json::Value>,
+    edge: &WorkflowEdge,
+) -> bool {
+    let matched = switch_output.and_then(|o| o.get("matched_label")).and_then(|v| v.as_str());
+    match edge.source_handle.as_deref() {
+        Some(handle) => matched == Some(handle),
+        None => match (switch_output, default_case) {
+            (None, _) => true,
+            (Some(_), Some(dc)) => matched == Some(dc),
+            (Some(_), None) => true,
+        },
+    }
+}
+
 impl WorkEngine {
     /// 根据 edges 构建邻接表，返回就绪节点（入度为 0 的节点）。
     ///
@@ -147,14 +192,12 @@ impl WorkEngine {
                 });
                 (branch == "true" && result) || (branch == "false" && !result)
             } else {
-                // Switch 边
-                let switch_output = workflow.results.get(edge.source.as_str());
-                let matched = switch_output
-                    .and_then(|o| o.get("matched_label"))
-                    .and_then(|l| l.as_str())
-                    .unwrap_or("");
-                let label = edge.source_handle.as_deref().unwrap_or("");
-                label.is_empty() || matched == label
+                // Switch 边：具名分支互斥、默认分支兜底（见 switch_edge_should_follow）
+                switch_edge_should_follow(
+                    switch_default_case(workflow, &edge.source),
+                    workflow.results.get(edge.source.as_str()),
+                    edge,
+                )
             };
 
             tracing::info!(
@@ -242,20 +285,19 @@ impl WorkEngine {
                 }
             }
 
-            // Switch 边：根据 switch 节点的 matched_label 决定是否激活
+            // Switch 边：具名分支互斥、默认分支兜底（见 switch_edge_should_follow）
             let is_switch_source = workflow
                 .nodes
                 .iter()
                 .any(|n| n.base_id() == edge.source && matches!(n, WorkflowNode::Switch(_)));
-            if is_switch_source {
-                let switch_output = workflow.results.get(edge.source.as_str());
-                let selected_case =
-                    switch_output.and_then(|o| o.get("matched_label")).and_then(|v| v.as_str());
-                if let Some(ref handle) = edge.source_handle
-                    && selected_case.is_none_or(|case| case != handle.as_str())
-                {
-                    continue;
-                }
+            if is_switch_source
+                && !switch_edge_should_follow(
+                    switch_default_case(workflow, &edge.source),
+                    workflow.results.get(edge.source.as_str()),
+                    edge,
+                )
+            {
+                continue;
             }
         }
 
@@ -408,13 +450,12 @@ impl WorkEngine {
                 });
                 (branch == "true" && result) || (branch == "false" && !result)
             } else {
-                let switch_output = workflow.results.get(edge.source.as_str());
-                let matched = switch_output
-                    .and_then(|o| o.get("matched_label"))
-                    .and_then(|l| l.as_str())
-                    .unwrap_or("");
-                let label = edge.source_handle.as_deref().unwrap_or("");
-                label.is_empty() || matched == label
+                // Switch 边：具名分支互斥、默认分支兜底（见 switch_edge_should_follow）
+                switch_edge_should_follow(
+                    switch_default_case(workflow, &edge.source),
+                    workflow.results.get(edge.source.as_str()),
+                    edge,
+                )
             };
 
             if should_follow {
@@ -469,20 +510,19 @@ impl WorkEngine {
                 }
             }
 
-            // Switch 边：根据 switch 节点的 matched_label 决定是否激活
+            // Switch 边：具名分支互斥、默认分支兜底（见 switch_edge_should_follow）
             let is_switch_source = workflow
                 .nodes
                 .iter()
                 .any(|n| n.base_id() == edge.source && matches!(n, WorkflowNode::Switch(_)));
-            if is_switch_source {
-                let switch_output = workflow.results.get(edge.source.as_str());
-                let selected_case =
-                    switch_output.and_then(|o| o.get("matched_label")).and_then(|v| v.as_str());
-                if let Some(ref handle) = edge.source_handle
-                    && selected_case.is_none_or(|case| case != handle.as_str())
-                {
-                    continue;
-                }
+            if is_switch_source
+                && !switch_edge_should_follow(
+                    switch_default_case(workflow, &edge.source),
+                    workflow.results.get(edge.source.as_str()),
+                    edge,
+                )
+            {
+                continue;
             }
         }
 
@@ -628,9 +668,41 @@ impl WorkEngine {
     }
 }
 
-// ── Condition 节点分支跳过辅助 ──
+// ── Condition / Switch 节点分支跳过辅助 ──
 
-/// Condition 节点完成后，将不匹配分支上的所有下游节点标记为 Skipped。
+/// 单条出边的「是否被选中」判定 —— Condition / Switch 两类控制节点统一口径。
+///
+/// 返回 `None` 表示 source **不是**控制节点（或该边不参与分支语义），调用方按普通
+/// Direct 边处理；返回 `Some(true/false)` 表示该边属于某个控制节点的分支且是否被选中。
+fn control_edge_selected(workflow: &Workflow, edge: &WorkflowEdge) -> Option<bool> {
+    let source_node = workflow.nodes.iter().find(|n| n.base_id() == edge.source)?;
+    match source_node {
+        WorkflowNode::Condition(_) => {
+            if !matches!(edge.edge_type, EdgeType::ConditionTrue | EdgeType::ConditionFalse) {
+                return None;
+            }
+            let result = workflow
+                .results
+                .get(edge.source.as_str())
+                .and_then(|o| o.get("result"))
+                .and_then(|r| r.as_bool())
+                .unwrap_or(false);
+            let branch = edge.source_handle.as_deref().unwrap_or(match edge.edge_type {
+                EdgeType::ConditionTrue => "true",
+                _ => "false",
+            });
+            Some((branch == "true" && result) || (branch == "false" && !result))
+        },
+        WorkflowNode::Switch(s) => Some(switch_edge_should_follow(
+            s.config.default_case.as_deref(),
+            workflow.results.get(edge.source.as_str()),
+            edge,
+        )),
+        _ => None,
+    }
+}
+
+/// 控制节点（Condition / Switch）完成后，把**未被选中**分支上的下游节点标记为 Skipped。
 ///
 /// **汇合点保护（2026-08-28 修复）**：此前直接递归标记整棵下游子树，
 /// 当分支在下游重新汇合时（如认知编排主 DAG 中 `call_l2` 同时有
@@ -640,37 +712,38 @@ impl WorkEngine {
 /// 现改为两阶段算法：
 ///   1. 先收集被跳过分支的子树节点集合（不改状态）；
 ///   2. 不动点收敛：子树内节点若存在任一「活跃入边」（来自子树外的
-///      follow 分支条件边 / 已完成或未决定状态的非条件上游），则视为
-///      分支汇合点，移出跳过集合并级联重估其下游；
+///      被选中控制边 / 已完成或未决定状态的非控制上游），则视为分支汇合点，
+///      移出跳过集合并级联重估其下游；
 ///   3. 最后统一把仍在集合内且处于 Pending/Ready 的节点标记 Skipped。
+///
+/// ⚠️ 2026-09-13 扩展：原实现**只处理 Condition**（仅看 `edge_type == ConditionTrue/
+/// ConditionFalse`），Switch **没有任何等价机制**。而 `compute_ready_nodes` 对
+/// 「已完成的 Switch 源」的出边不做任何阻塞（第二遍扫描里 `!should_follow → continue`
+/// 之后没有增量语句，等于空操作）⇒ 实际效果是 **Switch 的所有分支都会被执行**，
+/// 「默认分支」退化成「并行分支」。
+///
+/// 实证（stock-analysis v40 `quality-gate`）：`data-quality.result.grade = "C"`
+/// ⇒ `matched_label = "acceptable"`，具名分支 `acceptable → decision-explainer`
+/// 正确激活，**同时**默认分支 `e-quality-gate-quality-fallback`
+/// （`sourceHandle: null`）也被执行 ⇒ 保守 LLM 决策与公式决策同时产出 ⇒
+/// 界面显示 `增持 11.5%`、落库却是 `减持 5%`（同一次运行两套真相）。
+///
+/// 现统一走 `control_edge_selected()` 判据；Condition 语义与「非控制边来自未 Skipped
+/// 上游即视为活跃」的汇合点保护规则保持不变。
 pub(crate) fn skip_disabled_branch_nodes(
     workflow: &mut Workflow,
     edges: &[WorkflowEdge],
-    cond_node_id: &str,
+    ctrl_node_id: &str,
 ) {
-    let cond_output = workflow.results.get(cond_node_id);
-    let result =
-        cond_output.and_then(|o| o.get("result")).and_then(|r| r.as_bool()).unwrap_or(false);
-
-    // 确定要跳过的分支：result==true → 跳过 "false" 分支；result==false → 跳过 "true" 分支
-    let skip_branch = if result { "false" } else { "true" };
-    let follow_branch = if result { "true" } else { "false" };
-
-    // ── 阶段 1：收集跳过分支子树（不改状态，terminal 节点不展开）──
+    // ── 阶段 1：收集未被选中分支的子树（不改状态，terminal 节点不展开）──
     let mut skip_set: HashSet<String> = HashSet::new();
     let mut stack: Vec<String> = Vec::with_capacity(16);
     for edge in edges {
-        if edge.source != cond_node_id {
+        if edge.source != ctrl_node_id {
             continue;
         }
-        if edge.edge_type != EdgeType::ConditionTrue && edge.edge_type != EdgeType::ConditionFalse {
-            continue;
-        }
-        let actual_branch = edge.source_handle.as_deref().unwrap_or(match edge.edge_type {
-            EdgeType::ConditionTrue => "true",
-            _ => "false",
-        });
-        if actual_branch == skip_branch {
+        // 控制边且**未被选中** ⇒ 该分支整体跳过；非控制边不参与分支语义
+        if control_edge_selected(workflow, edge) == Some(false) {
             stack.push(edge.target.clone());
         }
     }
@@ -717,24 +790,16 @@ pub(crate) fn skip_disabled_branch_nodes(
                 if skip_set.contains(&e.source) {
                     return false;
                 }
-                match e.edge_type {
-                    EdgeType::ConditionTrue | EdgeType::ConditionFalse => {
-                        // 条件边：仅 follow 分支视为活跃
-                        let branch = e.source_handle.as_deref().unwrap_or(match e.edge_type {
-                            EdgeType::ConditionTrue => "true",
-                            _ => "false",
-                        });
-                        branch == follow_branch
-                    },
-                    _ => {
-                        // 非条件边：source 非 Skipped 即视为活跃
-                        // （Completed 直连 / Pending 待执行，保守保护汇合点）
-                        workflow
-                            .node_states
-                            .get(&e.source)
-                            .map(|s| !matches!(s.status, NodeStatus::Skipped))
-                            .unwrap_or(true)
-                    },
+                match control_edge_selected(workflow, e) {
+                    // 控制边（Condition / Switch）：仅**被选中**的分支算活跃入边
+                    Some(selected) => selected,
+                    // 非控制边：source 非 Skipped 即视为活跃
+                    // （Completed 直连 / Pending 待执行，保守保护汇合点）
+                    None => workflow
+                        .node_states
+                        .get(&e.source)
+                        .map(|s| !matches!(s.status, NodeStatus::Skipped))
+                        .unwrap_or(true),
                 }
             });
             if has_active_incoming {
@@ -748,6 +813,10 @@ pub(crate) fn skip_disabled_branch_nodes(
     }
 
     // ── 阶段 3：统一应用 Skipped（仅 Pending/Ready，不覆盖 terminal 状态）──
+    // skip_reason 统一记为 `branch_not_taken`：本函数的全部调用点都源于
+    // Condition/Switch 的「未选中分支」，属**配置意图**而非故障 —— 与停滞
+    // 传播写入的 `upstream_failed` / `upstream_skipped` 形成可区分的两类跳过
+    // （见 `NodeRuntimeState::skip_reason` 文档）。
     for node_id in skip_set {
         let state = workflow.node_states.entry(node_id).or_insert_with(|| NodeRuntimeState {
             status: NodeStatus::Skipped,
@@ -755,13 +824,31 @@ pub(crate) fn skip_disabled_branch_nodes(
             error: None,
             started_at: None,
             completed_at: Some(current_timestamp() as i64),
+            skip_reason: Some(BRANCH_NOT_TAKEN.into()),
         });
         if matches!(state.status, NodeStatus::Pending | NodeStatus::Ready) {
             state.status = NodeStatus::Skipped;
             state.completed_at = Some(current_timestamp() as i64);
+            state.skip_reason = Some(BRANCH_NOT_TAKEN.into());
         }
     }
 }
+
+/// 跳过原因：Condition/Switch 未选中的分支（配置意图，非故障）。
+pub(crate) const BRANCH_NOT_TAKEN: &str = "branch_not_taken";
+
+/// 跳过原因：直接上游节点 Failed（真故障）。
+pub(crate) const UPSTREAM_FAILED: &str = "upstream_failed";
+
+/// 跳过原因：直接上游节点被跳过（故障沿链传播的第二跳起）。
+pub(crate) const UPSTREAM_SKIPPED: &str = "upstream_skipped";
+
+/// 跳过原因：模板声明 `enabled:false`（配置意图，非故障）。
+pub(crate) const SKIPPED_DISABLED: &str = "disabled";
+
+/// 跳过原因：无入边且从未被调度为就绪（孤立节点，如 `enabled:false` 且被
+/// 调度器跳过的图示节点）。既非分支未选中，也非上游失败。
+pub(crate) const UNREACHABLE: &str = "unreachable";
 
 // ── 测试 ──
 
@@ -1004,5 +1091,230 @@ mod tests {
             !ready.contains(&"shared-body".to_string()),
             "shared-body 即使有入边也不应被 DAG 提前调度"
         );
+    }
+
+    // ────────── Switch 分支跳过（2026-09-13 新增）──────────
+    // 背景：`skip_disabled_branch_nodes` 原实现只认 Condition（`edge_type == ConditionTrue/
+    // False`），Switch 没有任何等价机制，而 `compute_ready_nodes` 对「已完成的 Switch 源」
+    // 的出边不做阻塞 ⇒ Switch 的默认分支会被无条件执行。以下用例锁定修复后的语义。
+
+    /// 构建 Switch 节点：`case_labels` 为具名分支 label，`default_case` 为兜底档 label。
+    fn make_switch_node(
+        id: &str,
+        default_case: Option<&str>,
+        case_labels: &[&str],
+    ) -> WorkflowNode {
+        use axagent_harness::workflow_types::{
+            Position, RetryConfig, SwitchCase, SwitchNode, SwitchNodeConfig, WorkflowNodeBase,
+        };
+        WorkflowNode::Switch(SwitchNode {
+            base: WorkflowNodeBase {
+                id: id.to_string(),
+                title: format!("Switch {id}"),
+                description: None,
+                position: Position { x: 0.0, y: 0.0 },
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: true,
+            },
+            config: SwitchNodeConfig {
+                input_var: "data-quality.result.grade".to_string(),
+                cases: case_labels
+                    .iter()
+                    .map(|l| SwitchCase {
+                        value: format!("value == \"{l}\""),
+                        label: (*l).to_string(),
+                    })
+                    .collect(),
+                default_case: default_case.map(str::to_string),
+                match_mode: "expression".to_string(),
+                use_llm: None,
+                llm_prompt: None,
+                llm_model: None,
+                output_var: format!("{id}-result"),
+            },
+        })
+    }
+
+    /// 构建带 `source_handle` 的边（`None` = Switch 的默认分支）。
+    fn make_handle_edge(source: &str, handle: Option<&str>, target: &str) -> WorkflowEdge {
+        let h = handle.unwrap_or("default");
+        WorkflowEdge {
+            id: format!("e_{source}_{h}_{target}"),
+            source: source.to_string(),
+            target: target.to_string(),
+            edge_type: EdgeType::Direct,
+            source_handle: handle.map(str::to_string),
+            target_handle: None,
+            label: None,
+        }
+    }
+
+    /// 把 Switch 标为 Completed 并写入 `matched_label`（形状同 SwitchExecutor::build_output）。
+    fn complete_switch(wf: &mut Workflow, node_id: &str, matched: &str) {
+        wf.node_states.get_mut(node_id).unwrap().status = NodeStatus::Completed;
+        wf.results.insert(node_id.to_string(), serde_json::json!({ "matched_label": matched }));
+    }
+
+    /// 调用分支跳过：先克隆 edges 再执行，避免 `&mut wf` 与 `&wf.edges` 同时借用。
+    fn run_skip(wf: &mut Workflow, ctrl_node_id: &str) {
+        let edges = wf.edges.clone();
+        skip_disabled_branch_nodes(wf, &edges, ctrl_node_id);
+    }
+
+    /// 命中具名分支 ⇒ **默认分支必须被跳过**（这是 600031 那次运行的核心缺陷）。
+    ///
+    /// 修复前：`quality-fallback`（无 handle 的默认分支）与 `decision-explainer`
+    /// （具名 `acceptable` 分支）同时执行 ⇒ 公式决策与 LLM 保守决策同时产出 ⇒
+    /// 界面显示 `增持 11.5%`、落库却是 `减持 5%`。
+    #[test]
+    fn switch_default_branch_skipped_when_named_case_matched() {
+        let sw = make_switch_node("quality-gate", Some("low-quality"), &["acceptable"]);
+        let ok = make_tool_node("decision-explainer", true);
+        let fb = make_tool_node("quality-fallback", true);
+        let edges = vec![
+            make_handle_edge("quality-gate", Some("acceptable"), "decision-explainer"),
+            make_handle_edge("quality-gate", None, "quality-fallback"),
+        ];
+        let mut wf = make_workflow("wf_switch_named", vec![sw, ok, fb], edges);
+        complete_switch(&mut wf, "quality-gate", "acceptable");
+
+        run_skip(&mut wf, "quality-gate");
+
+        assert_eq!(
+            wf.node_states["quality-fallback"].status,
+            NodeStatus::Skipped,
+            "命中具名分支时，默认分支（兜底）必须被跳过"
+        );
+        assert_eq!(
+            wf.node_states["decision-explainer"].status,
+            NodeStatus::Pending,
+            "被选中的具名分支不得被误跳"
+        );
+    }
+
+    /// 命中默认档 ⇒ **具名分支必须被跳过**（对称面）。
+    #[test]
+    fn switch_named_branch_skipped_when_default_case_matched() {
+        let sw = make_switch_node("quality-gate", Some("low-quality"), &["acceptable"]);
+        let ok = make_tool_node("decision-explainer", true);
+        let fb = make_tool_node("quality-fallback", true);
+        let edges = vec![
+            make_handle_edge("quality-gate", Some("acceptable"), "decision-explainer"),
+            make_handle_edge("quality-gate", None, "quality-fallback"),
+        ];
+        let mut wf = make_workflow("wf_switch_default", vec![sw, ok, fb], edges);
+        complete_switch(&mut wf, "quality-gate", "low-quality");
+
+        run_skip(&mut wf, "quality-gate");
+
+        assert_eq!(
+            wf.node_states["decision-explainer"].status,
+            NodeStatus::Skipped,
+            "命中默认档时，具名分支必须被跳过"
+        );
+        assert_eq!(
+            wf.node_states["quality-fallback"].status,
+            NodeStatus::Pending,
+            "被选中的默认分支不得被误跳"
+        );
+    }
+
+    /// 汇合点保护：跳过的默认分支与活跃的具名分支在下游重新汇合时，
+    /// 汇合点（`decision-explainer`）**不得**被连带跳过 —— 这是真实模板的形状。
+    #[test]
+    fn switch_downstream_merge_point_not_skipped() {
+        let sw = make_switch_node("quality-gate", Some("low-quality"), &["acceptable"]);
+        let fb = make_tool_node("quality-fallback", true);
+        let de = make_tool_node("decision-explainer", true);
+        let edges = vec![
+            make_handle_edge("quality-gate", Some("acceptable"), "decision-explainer"),
+            make_handle_edge("quality-gate", None, "quality-fallback"),
+            make_edge("quality-fallback", "decision-explainer"),
+        ];
+        let mut wf = make_workflow("wf_switch_merge", vec![sw, fb, de], edges);
+        complete_switch(&mut wf, "quality-gate", "acceptable");
+
+        run_skip(&mut wf, "quality-gate");
+
+        assert_eq!(wf.node_states["quality-fallback"].status, NodeStatus::Skipped);
+        assert_eq!(
+            wf.node_states["decision-explainer"].status,
+            NodeStatus::Pending,
+            "汇合点有活跃入边（具名分支 acceptable）⇒ 不得被跳过"
+        );
+    }
+
+    /// 未声明 `default_case` 的 Switch ⇒ 无 handle 边维持旧行为（不跳过），保证兼容。
+    #[test]
+    fn switch_without_default_case_keeps_no_handle_edge() {
+        let sw = make_switch_node("sw", None, &["a", "b"]);
+        let na = make_tool_node("na", true);
+        let nb = make_tool_node("nb", true);
+        let fan = make_tool_node("fan", true);
+        let edges = vec![
+            make_handle_edge("sw", Some("a"), "na"),
+            make_handle_edge("sw", Some("b"), "nb"),
+            make_handle_edge("sw", None, "fan"),
+        ];
+        let mut wf = make_workflow("wf_switch_nodc", vec![sw, na, nb, fan], edges);
+        complete_switch(&mut wf, "sw", "a");
+
+        run_skip(&mut wf, "sw");
+
+        assert_eq!(wf.node_states["na"].status, NodeStatus::Pending, "命中的具名分支保留");
+        assert_eq!(wf.node_states["nb"].status, NodeStatus::Skipped, "未命中的具名分支跳过");
+        assert_eq!(
+            wf.node_states["fan"].status,
+            NodeStatus::Pending,
+            "未声明 default_case ⇒ 无 handle 边维持旧行为（无条件放行）"
+        );
+    }
+
+    /// Condition 语义未被本次重构改变（回归护栏）。
+    #[test]
+    fn condition_false_branch_still_skipped() {
+        use axagent_harness::workflow_types::{
+            ConditionNode, ConditionNodeConfig, LogicalOperator, Position, RetryConfig,
+            WorkflowNodeBase,
+        };
+        let cond = WorkflowNode::Condition(ConditionNode {
+            base: WorkflowNodeBase {
+                id: "cond".to_string(),
+                title: "Cond".to_string(),
+                description: None,
+                position: Position { x: 0.0, y: 0.0 },
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: false,
+            },
+            config: ConditionNodeConfig {
+                conditions: vec![],
+                logical_op: LogicalOperator::And,
+                judge_by_llm: None,
+                routing_prompt: None,
+                routing_model: None,
+                confidence_threshold: None,
+            },
+        });
+        let t = make_tool_node("on_true", true);
+        let f = make_tool_node("on_false", true);
+        let mut edges = vec![make_edge("cond", "on_true"), make_edge("cond", "on_false")];
+        edges[0].edge_type = EdgeType::ConditionTrue;
+        edges[1].edge_type = EdgeType::ConditionFalse;
+        let mut wf = make_workflow("wf_cond", vec![cond, t, f], edges);
+        wf.node_states.get_mut("cond").unwrap().status = NodeStatus::Completed;
+        wf.results.insert("cond".to_string(), serde_json::json!({ "result": true }));
+
+        run_skip(&mut wf, "cond");
+
+        assert_eq!(wf.node_states["on_true"].status, NodeStatus::Pending, "true 分支保留");
+        assert_eq!(wf.node_states["on_false"].status, NodeStatus::Skipped, "false 分支跳过");
     }
 }

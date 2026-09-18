@@ -108,28 +108,36 @@ title: 投资复盘官
 
 每条建议包含：
 
-| 字段              | 说明                                                                                          |
-| ----------------- | --------------------------------------------------------------------------------------------- |
-| `param`           | 参数名（全小写 snake_case，如 `kelly_fraction`、`scoring_trend`），**必须精确匹配模板变量名** |
-| `current_value`   | 当前值（数字）                                                                                |
-| `suggested_value` | 建议值（数字）                                                                                |
-| `reason`          | 调整原因（引用具体相关分析作为证据，不超过 100 字）                                           |
+| 字段              | 说明                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------- |
+| `param`           | 参数名（全小写 snake_case，如 `action_buy_threshold`、`risk_vol_high`），**必须精确匹配下方清单** |
+| `current_value`   | 当前值（数字）                                                                                    |
+| `suggested_value` | 建议值（数字）                                                                                    |
+| `reason`          | 调整原因（引用具体相关分析作为证据，不超过 100 字）                                               |
 
-### 可用的参数名（必须精确匹配以下列表）
+### 可用的参数名（只能取自下方清单）
 
-参数名来自 stock-analysis 模板的 variables 定义，只允许修改数值型、非敏感（is_secret=false）的变量：
+参数名来自 **portfolio-mgr 的决策参数权威源**（`PORTFOLIO_MGR_TUNABLE_PARAMS`），
+只列出真正影响决策边界、且已接线到 `portfolio-mgr.rhai` 的参数（共 28 项），
+按决策相关性排序（决策链上游优先）：
 
-- `trend_high_20_threshold` — 短线突破阈值（默认 0.99）
-- `trend_ma60_threshold` — 中线站上 MA60 阈值（默认 0.995）
-- `reversion_rsi_threshold` — 超跌 RSI 阈值
-- `scoring_consistency_weight` — 评分一致性权重
-- `scoring_signal_strength_weight` — 评分信号强度权重
-- `scoring_liquidity_weight` — 评分流动性权重
-- `scoring_momentum_weight` — 评分动量权重
-- `stop_loss_default_pct` — 默认止损百分比
-- `take_profit_default_pct` — 默认止盈百分比
+1. 市况先验 `regime_prior_*`（决策起点）
+2. 因子融合门 `trader_cap_min_weight`（f7 权重门，决定交易员看空信号是否封顶后验概率）
+3. 行动阈值 `action_*`（后验概率 → 买入/增持/持有/观望/减持 的分档边界）
+4. 仓位阈值与上限 `pos_buy_min`、`pos_increase_min`、`pos_cap_*`
+5. 风险分类阈值 `risk_*_high` / `risk_*_low` / `risk_*_extreme`
+6. 交易成本 `cost_pct`
 
-不在上述列表中的参数名会被 `apply_param_suggestions` 忽略。
+⚠️ 估值与风险**计算**类参数（如 `risk_free_rate`、`risk_hhi_*`、`risk_sharpe_annualization`）
+虽然也在模板变量表中，但它们改变的是估值与风险的计算结果，**不移动 portfolio-mgr 的决策边界**，
+因此**不在清单内**，请不要建议它们。
+
+{{tunable_params_catalog}}
+
+不在上述清单中的参数名会被 `apply_param_suggestions` 忽略。
+⚠️ 禁止凭记忆或经验自造参数名 —— `scoring_money_flow` / `kelly_fraction` /
+`trend_high_20_threshold` / `scoring_trend_weight` 等历史名称**已废弃**，写它们等于本次建议作废。
+若你判断某项参数不在清单内，说明它不可配置，请不要建议它。
 
 限制：
 

@@ -29,6 +29,11 @@ pub fn create_rhai_engine() -> Engine {
     // DoS 防护：限制字符串和数组大小
     engine.set_max_string_size(2_000_000); // 2MB
     engine.set_max_array_size(50_000); // 5 万元素上限
+    // 分档查询：让 .rhai 直接读本体权威源（harness::domain_ontology::band_for_score），
+    // 消除脚本内独立的 75/55/35 分档字面量（P0：分档收敛到本体）。
+    engine.register_fn("band_for_score", |score: f64| -> String {
+        axagent_harness::domain_ontology::band_for_score(score).to_string()
+    });
     engine
 }
 

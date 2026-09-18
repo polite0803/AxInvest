@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useWorkspaceTabNavigator } from "@/hooks/useWorkspaceTabNavigator";
 import { executeShortcutAction } from "@/lib/shortcutActions";
 import { getShortcutBinding, matchesShortcutEvent, SHORTCUT_ACTIONS } from "@/lib/shortcuts";
-import { useConversationStore, useSettingsStore, useTabStore } from "@/stores";
+import { isWorkspaceTabGated, matchWorkspaceTabShortcut } from "@/lib/workspaceShortcuts";
+import { useConversationStore, useSettingsStore, useTabStore, useUIStore } from "@/stores";
 import { useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 export function useKeyboardShortcuts(): void {
   const navigate = useNavigate();
   const settings = useSettingsStore((s) => s.settings);
+  const switchWorkspaceTab = useWorkspaceTabNavigator();
 
   const handleKeyDown = useCallback(
     async (e: KeyboardEvent) => {
@@ -39,6 +42,19 @@ export function useKeyboardShortcuts(): void {
         return;
       }
 
+      // ── 工作台功能 Tab 快捷键（桌面 Ctrl/Cmd+1..8；浏览器 Ctrl+Alt+1..8）──
+      // 组合键判定与界面提示共用 @/lib/workspaceShortcuts，避免「提示的是 Ctrl+1、按下无效」。
+      const workspaceTab = matchWorkspaceTabShortcut(e);
+      if (workspaceTab) {
+        // 门控 Tab（开发工具）被设置关闭时，快捷键一并失效 —— 与切换栏的可见性判断保持一致
+        if (isWorkspaceTabGated(workspaceTab) && settings.showDeveloperTools === false) {
+          return;
+        }
+        e.preventDefault();
+        switchWorkspaceTab(workspaceTab);
+        return;
+      }
+
       const matchedAction = SHORTCUT_ACTIONS.find((action) => {
         const binding = getShortcutBinding(settings, action);
         return binding && matchesShortcutEvent(e, binding);
@@ -65,13 +81,16 @@ export function useKeyboardShortcuts(): void {
       switch (e.key.toLowerCase()) {
         case "f":
           e.preventDefault();
-          navigate("/");
-          setTimeout(() => {
-            const searchInput = document.querySelector<HTMLInputElement>(
-              ".chat-sidebar-search input",
-            );
-            searchInput?.focus();
-          }, 50);
+          // ① 先切回对话 Tab —— 必须走唯一入口（同时写 store + URL）。
+          //    原来是 navigate("/")：URL 不带 `?ws=chat`，WorkspaceHub 会按「无显式诉求」
+          //    保持上次 Tab，于是停在终端/工作流时按 Ctrl+F 画面根本不动。
+          switchWorkspaceTab("chat");
+          // ② 再登记「聚焦会话搜索」意图。此刻 ChatSidebar 大概率尚未挂载
+          //    （ChatPage 是切 Tab 后才渲染的），所以用 store 状态而非 DOM 查询 + setTimeout：
+          //    旧的 `document.querySelector(".chat-sidebar-search input")` 在两种情况下
+          //    必然返回 null —— 搜索框默认 searchVisible=false 根本不渲染；且非对话 Tab 时
+          //    ChatSidebar 未挂载。`?.focus()` 把失败静默吞掉，表现为「快捷键无反应」。
+          useUIStore.getState().requestChatSearchFocus();
           return;
         case "w":
           e.preventDefault();
@@ -89,7 +108,7 @@ export function useKeyboardShortcuts(): void {
           return;
       }
     },
-    [navigate, settings],
+    [navigate, settings, switchWorkspaceTab],
   );
 
   const handleKeyDownEsc = useCallback(

@@ -1,0 +1,18 @@
+# Domain Pack: 游戏开发（game_dev）
+id: game_dev
+name: "游戏开发完整流程"
+icon: "🎮"
+description: "游戏设计、关卡设计、数值平衡、游戏测试"
+version: 1
+enabled: true
+domain: ai_media
+capabilities:
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:WebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:FileWrite"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:FileRead"}

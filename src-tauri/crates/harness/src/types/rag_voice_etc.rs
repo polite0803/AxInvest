@@ -36,6 +36,17 @@ pub struct RagSourceResult {
 }
 
 /// Combined results of RAG context collection.
+///
+/// # 为什么没有 `graph_context` 字段（2026-09-15 删）
+///
+/// 曾经有一个 `graph_context: Option<GraphEnhancedSearchResult>`，但**全仓零读取端**
+/// （写入 7 处、读取 0 处）。它唯一的实际用途是在 `search/src/rag.rs` 内部把多次召回的
+/// 图检索结果从中转手给 `fuse_rag_context_results` 的调用点 —— 属**同模块内的私有传递**，
+/// 不该出现在跨 crate 的 DTO 上（`harness::rag_provider` / `rt-workflow::agent_executor`
+/// 只是拿它当返回类型，从不读该字段）。
+///
+/// 图检索结果的**真正出口**是 `context_parts`：由 `rag.rs::fold_entity_graph_context`
+/// 折入末尾的回链上下文。判据见记忆 I 组「给零读取端字段补写入 = 纯噪声」。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RagContextResult {
@@ -43,9 +54,6 @@ pub struct RagContextResult {
     pub context_parts: Vec<String>,
     /// Structured results for frontend display.
     pub source_results: Vec<RagSourceResult>,
-    /// Graph RAG 增强检索结果（如果启用了 EntityGraphProvider）
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub graph_context: Option<crate::GraphEnhancedSearchResult>,
 }
 
 /// Tauri event emitted after RAG context retrieval completes.
@@ -1553,8 +1561,13 @@ pub struct EnhancedQuery {
 }
 
 /// 查询增强配置
+///
+/// `#[serde(default)]` 为结构体级：任一字段缺失时回落到 `EnhancementConfig::default()`
+/// 的同名字段值（不是字段类型的 `Default`，避免 `maxVariants` 变 0）。
+/// 理由同 `rag_config.rs::SelfRagConfig` —— 没有它，缺一个字段会让整份
+/// `RAGPipelineConfig` 解析失败并被静默吞掉（2026-09-15 实测故障形态）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct EnhancementConfig {
     pub enabled: bool,
     pub strategy: EnhancementStrategy,
@@ -1588,6 +1601,7 @@ pub struct UpdateAgentProfileInput {
 }
 
 // Re-export from sibling modules for convenience
+pub use crate::rag_config::EntityGraphConfig;
 pub use crate::rag_config::RAGPipelineConfig;
 pub use crate::rag_config::RerankConfig;
 pub use crate::rag_config::SelfRagConfig;

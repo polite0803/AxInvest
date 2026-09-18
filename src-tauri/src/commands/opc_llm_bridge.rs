@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! OPC 行业学习 LLM 桥接 — `LlmInferencePort` 的 wiring 层实现。
+//! OPC 域包学习 LLM 桥接 — `LlmInferencePort` 的 wiring 层实现。
 //!
-//! 让行业学习引擎（反思/进化/自我改进）从「规则打分占位」升级为真实 LLM 推理：
+//! 让域包学习引擎（反思/进化/自我改进）从「规则打分占位」升级为真实 LLM 推理：
 //! 复用 `RuntimeHarness` 解析默认提供商（第一个启用且含可用 key 的 provider），
 //! 并经 `axagent_harness::execute_llm` 中心化入口调用（统一 PromptGuard/审计/重试）。
 //!
 //! 设计要点：
-//! - **无状态**：仅持 `RuntimeHarness`（Clone），行业无关，天然满足行业隔离原则。
-//! - **失败回退**：任何失败返回 `Err`，由 `IndustryLearningEngine` 自动回退规则评估，
-//!   不阻塞行业工作流。
+//! - **无状态**：仅持 `RuntimeHarness`（Clone），域包无关，天然满足域包隔离原则。
+//! - **失败回退**：任何失败返回 `Err`，由 `DomainPackLearningEngine` 自动回退规则评估，
+//!   不阻塞域包工作流。
 //! - **低配置起步**：`LlmCallConfig::default()`（缓存关闭），验证稳定后可开缓存。
 
 use std::sync::Arc;
@@ -73,7 +73,7 @@ async fn resolve_default_provider(harness: &RuntimeHarness) -> Result<ResolvedPr
     Ok(ResolvedProvider { model_id, adapter, ctx })
 }
 
-/// 行业学习 LLM 桥接（无状态，仅持 `RuntimeHarness` 克隆）。
+/// 域包学习 LLM 桥接（无状态，仅持 `RuntimeHarness` 克隆）。
 pub struct OpcLlmBridge {
     harness: RuntimeHarness,
     /// 输出 token 上限（反思/进化/自我改进输出通常较短）

@@ -13,6 +13,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 关联 quant_runs.id
+    #[sea_orm(indexed)]
     pub run_id: String,
     pub code: String,
     /// "buy" | "sell" | "hold"

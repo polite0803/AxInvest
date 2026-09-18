@@ -17,6 +17,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use serde_json::json;
+
 use axagent_harness::workflow_types::{
     LoopCheckpoint, LoopNode, LoopNodeConfig, LoopType, Position, RetryConfig, WorkflowNode,
     WorkflowNodeBase,
@@ -353,7 +355,108 @@ async fn loop_partial_results_arrive_in_order() {
     assert_eq!(cumulative_lengths, vec![1, 2, 3], "cumulative_partial 应递增：1/2/3");
 }
 
-// ── 测试 4：点路径输入（上游节点输出内的数组）─────────────────────────
+// ── 测试 4：检查点续跑 —— 从 cursor 继续，不重跑已完成轮次 ─────────────
+//
+// 不变式（Loop body 复用缺陷修复后必须保持）：
+// 断点续跑的起点由 `checkpoint.cursor` 决定（loop_executor.rs 主循环的
+// `let mut iter_index: u32 = cursor;`）。已完成轮次（index < cursor）**根本不进入**
+// body dispatch，因此「每轮 body 都重新执行」的修复不会让它们重跑；
+// 已完成轮次的产物只能来自 checkpoint.partial_results。
+//
+// 用计数器把这条不变式钉死：cursor=2 时 body 只能被调用 2 次（第 2、3 轮）。
+
+#[tokio::test]
+async fn loop_checkpoint_cursor_resumes_without_rerunning_completed_rounds() {
+    let mut state = make_state("exec5");
+    state.variables.insert("tx_list".to_string(), serde_json::json!([1, 2, 3, 4]));
+
+    let call_count = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let body_fn: Arc<dyn Fn(String, ExecutionState) -> NodeOutput + Send + Sync> = {
+        let call_count = call_count.clone();
+        Arc::new(move |_step_id, ctx| {
+            call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let item =
+                ctx.variables.get("__loop_iteratee__").cloned().unwrap_or(serde_json::Value::Null);
+            NodeOutput {
+                output: serde_json::json!({"echo": item}),
+                output_var: Some("echo_out".to_string()),
+                control: None,
+            }
+        })
+    };
+    state.callbacks.as_mut().expect("测试应成功").loop_body_dispatch =
+        Some(make_body_dispatch(body_fn));
+
+    let (cp_ops, cp_store) = in_memory_checkpoint_ops();
+    // 预置检查点：前 2 轮（index 0/1）已完成，cursor 指向第 2 轮
+    cp_store.lock().await.insert(
+        ("exec5".to_string(), "loop1".to_string()),
+        LoopCheckpoint {
+            execution_id: "exec5".to_string(),
+            node_id: "loop1".to_string(),
+            cursor: 2,
+            input_items: vec![json!(1), json!(2), json!(3), json!(4)],
+            partial_results: vec![json!({"echo": 1}), json!({"echo": 2})],
+            pending_approval_node: None,
+            pending_step_output: None,
+            saved_at_ms: 0,
+            interrupting_step_id: None,
+        },
+    );
+    state.callbacks.as_mut().expect("测试应成功").loop_checkpoint = Some(cp_ops);
+
+    let (tx, mut rx) = tokio::sync::broadcast::channel::<PartialResultEvent>(16);
+    state.partial_result_tx = Some(tx);
+
+    let node = make_loop_node(LoopNodeConfig {
+        loop_type: LoopType::ForEach,
+        items_var: None,
+        iter_input_var: Some("tx_list".to_string()),
+        iteratee_var: Some("__loop_iteratee__".to_string()),
+        iter_output_var: Some("iter_output".to_string()),
+        partial_result_var: None,
+        max_iterations: None,
+        continue_condition: None,
+        continue_on_error: false,
+        body_steps: vec!["echo_step".to_string()],
+        sub_graph: None,
+        interrupt_after_each: false,
+        interrupt_nodes: vec![],
+    });
+
+    let executor = LoopExecutor::new();
+    let out = executor.execute(&node, &state).await.expect("execute");
+
+    assert_eq!(
+        call_count.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "cursor=2 时只能驱动第 2/3 轮：已完成轮次不得重跑"
+    );
+    assert_eq!(
+        out.output.get("resumed_from_checkpoint").and_then(|v| v.as_bool()),
+        Some(true),
+        "应走检查点恢复路径"
+    );
+    assert_eq!(out.output.get("iter_count").and_then(|v| v.as_u64()), Some(4));
+    let items = out.output.get("items").and_then(|v| v.as_array()).expect("items array");
+    assert_eq!(
+        items,
+        &vec![json!({"echo": 1}), json!({"echo": 2}), json!({"echo": 3}), json!({"echo": 4})],
+        "前两轮产物应原样来自 checkpoint.partial_results，后两轮为新产出"
+    );
+
+    // 已恢复轮次（< cursor）不产生 partial 事件；新轮次按 2/3 递增累计
+    let mut got: Vec<(u32, usize)> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        got.push((ev.iter_index, ev.cumulative_partial.len()));
+    }
+    assert_eq!(got, vec![(2, 3), (3, 4)], "续跑只应广播第 2/3 轮的 partial 事件");
+
+    let g = cp_store.lock().await;
+    assert!(g.is_empty(), "完成后检查点应被 delete");
+}
+
+// ── 测试 5：点路径输入（上游节点输出内的数组）─────────────────────────
 
 #[tokio::test]
 async fn loop_foreach_reads_dot_path_input() {

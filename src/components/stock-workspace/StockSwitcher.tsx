@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useStockJump } from "@/hooks/useStockJump";
 import { useWorkspaceStore } from "@/stores";
 import { BarChart3, Briefcase, ChevronLeft, Search, Star, X } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -19,7 +20,11 @@ export function StockSwitcher() {
   const toggle = useWorkspaceStore((s) => s.toggleLeftSidebar);
   const recentStocks = useWorkspaceStore((s) => s.recentStocks);
   const currentStockCode = useWorkspaceStore((s) => s.currentStockCode);
-  const setCurrentStock = useWorkspaceStore((s) => s.setCurrentStock);
+  // 换股必须改写 URL（而不是只写 store）：
+  // StockWorkspaceShell 的 URL→store effect 以 URL 为准，只写 store 会被
+  // URL 里的旧 stockCode 立刻覆盖回来 ⇒ 点一下像是没反应（静默弹回），
+  // 且内嵌的分析页也不会跟随。keepView 保留当前视图（如监控/交易）。
+  const jumpToStock = useStockJump();
 
   const [search, setSearch] = useState("");
 
@@ -123,7 +128,7 @@ export function StockSwitcher() {
                   <button
                     key={stock.code}
                     type="button"
-                    onClick={() => setCurrentStock(stock.code, stock.name)}
+                    onClick={() => jumpToStock({ code: stock.code, name: stock.name, keepView: true })}
                     className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-left transition-colors"
                     style={{
                       background: isActive ? "var(--accent-bg, rgba(59,130,246,0.10))" : "transparent",

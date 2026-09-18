@@ -6,7 +6,6 @@ use crate::trajectory::{Trajectory, TrajectoryOutcome, TrajectoryPattern};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatternConfig {
@@ -114,7 +113,12 @@ impl PatternLearner {
             new_patterns.push(pattern);
         }
 
-        for pattern in &new_patterns {
+        for pattern in &mut new_patterns {
+            // 自然键聚合口径统一：`frequency` = 该模式去重后观察到的轨迹数。
+            // 复用路径（`extract_tool_sequence`）本来就写这一项，新建路径却漏了
+            // ⇒ 首次落库 frequency=0，与同一行内 `trajectory_ids` 的长度自相矛盾，
+            //   且 `get_high_value_patterns` 的 `min_frequency` 过滤会把刚出现的模式永远滤掉。
+            pattern.frequency = pattern.trajectory_ids.len() as u32;
             self.learned_patterns.insert(pattern.name.clone(), pattern.clone());
         }
 
@@ -134,8 +138,13 @@ impl PatternLearner {
 
         let sequence_key = tool_names.join("->");
 
-        let pattern_key = format!("tool_seq_{}", sequence_key);
-        let pattern = self.learned_patterns.get(&pattern_key);
+        // ⚠ 自然键必须与 `learn_from_trajectory` 写进 `learned_patterns` 时的键**同一个**：
+        //   那边写的是 `pattern.name`，此处原先却用 `tool_seq_{sequence_key}` 去查 ⇒
+        //   同一个 `HashMap` 两套键名空间 ⇒ 查表恒 miss ⇒ 每次都当新模式新建
+        //   （frequency 永远停在 1、`trajectory_ids` 永远只攒下 1 个）。
+        //   修法是让「查什么」对齐「写什么」，**不改 `name` 的形态**（那属另一项语义决策）。
+        let name = format!("tool-{}", tool_names[0]);
+        let pattern = self.learned_patterns.get(&name);
 
         if let Some(existing) = pattern {
             let mut updated = existing.clone();
@@ -157,7 +166,7 @@ impl PatternLearner {
         let description = format!("Tool sequence: {} ({} steps)", sequence_key, tool_names.len());
 
         let mut pattern = TrajectoryPattern::new(
-            format!("tool-{}", tool_names[0]),
+            name,
             description,
             PatternType::ToolSequence.as_str().to_string(),
         );
@@ -455,9 +464,12 @@ impl CrossSessionLearner {
                     / trajectories.len() as f64;
 
                 if avg_quality >= 0.6 {
+                    // ⚠ 同一缺陷家族：主键同样必须由自然键（`name`）派生，否则
+                    //   `save_pattern` 的 `ON CONFLICT (id)` 对跨会话模式一样永不触发。
+                    let name = format!("cross-session-{}", trajectories.len());
                     patterns.push(TrajectoryPattern {
-                        id: Uuid::new_v4().to_string(),
-                        name: format!("cross-session-{}", trajectories.len()),
+                        id: TrajectoryPattern::stable_id_for_name(&name),
+                        name,
                         description: format!(
                             "Cross-session pattern: {} appeared in {} sessions with avg quality {:.2}",
                             sequence,
@@ -593,5 +605,49 @@ mod tests {
 
         assert_eq!(stats.total_patterns, 0);
         assert!(stats.by_type.is_empty());
+    }
+
+    /// C-#2 回归（2026-09-17）：同一工具序列重复学习必须复用**同一**模式实例。
+    ///
+    /// 修前 `extract_tool_sequence` 用 `tool_seq_{序列}` 查表，而 `learn_from_trajectory`
+    /// 用 `pattern.name` 写入 `learned_patterns` ⇒ 同一个 `HashMap` 两套键名空间
+    /// ⇒ 查表恒 miss ⇒ 每次都当新模式新建（frequency 恒 1）⇒ 下游 `save_pattern` 的
+    /// `ON CONFLICT (id)` 永不触发 ⇒ 生产表按「每次学习 × 每个模式」无界增长。
+    #[test]
+    fn tool_sequence_pattern_reuses_natural_key_across_runs() {
+        let mut learner = PatternLearner::default();
+        let t1 = create_test_trajectory(vec!["read_file", "edit_file"], false);
+        let t2 = create_test_trajectory(vec!["read_file", "edit_file"], false);
+
+        let seq1 = learner
+            .learn_from_trajectory(&t1)
+            .into_iter()
+            .find(|p| p.name == "tool-read_file")
+            .expect("测试：应产出工具序列模式");
+
+        let seq2 = learner
+            .learn_from_trajectory(&t2)
+            .into_iter()
+            .find(|p| p.name == "tool-read_file")
+            .expect("测试：第二次应复用同一模式而非新建");
+
+        assert_eq!(seq1.frequency, 1, "首次学习 frequency 应为 1（修前新建路径恒为 0）");
+        assert_eq!(
+            seq1.id, seq2.id,
+            "同一自然键必须给出同一主键，否则 save_pattern 的 ON CONFLICT (id) 永不触发"
+        );
+        assert_eq!(seq2.frequency, 2, "第二次学习应把频率推进到 2（修前恒为 1）");
+        assert_eq!(seq2.trajectory_ids.len(), 2, "两条轨迹都应落在同一模式上");
+    }
+
+    /// 自然键派生主键的**边界**：同名 ⇒ 同主键（幂等前提）；异名 ⇒ 异主键（不得并成一行）。
+    #[test]
+    fn stable_id_is_derived_from_name_only() {
+        let a = TrajectoryPattern::new("multi-step-13".into(), "d1".into(), "multi_step".into());
+        let b = TrajectoryPattern::new("multi-step-13".into(), "d2".into(), "multi_step".into());
+        let c = TrajectoryPattern::new("multi-step-10".into(), "d3".into(), "multi_step".into());
+
+        assert_eq!(a.id, b.id, "同名必须同主键（save_pattern 幂等性的唯一前提）");
+        assert_ne!(a.id, c.id, "异名必须异主键，否则不同模式会被 upsert 覆盖成同一行");
     }
 }

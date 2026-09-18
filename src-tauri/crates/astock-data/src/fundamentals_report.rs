@@ -87,7 +87,17 @@ impl FundamentalsAnalyzer {
         financials: &[FinancialReport],
     ) -> FundamentalsReport {
         let latest = financials.first();
-        let ratios = Self::compute_ratios(quote, latest);
+        let mut ratios = Self::compute_ratios(quote, latest);
+        // 口径修正（2026-09-14）：`compute_ratios` 只收单期报告，其 `roe` 在中报/季报下是
+        // **年内累计值**；而同一份报告里的 `pe` 用的是**年化 EPS** ⇒ 两者并列会自相矛盾
+        // （「估值极低」与「盈利严重恶化」同时成立）。
+        // 601166 实证：`roe = 4.8`（半年）与 `pe = 5.09`（年化）并存，
+        // 使 `health_score` 的 ROE 分档从 `>=5.0` 的 10 分掉到 5 分，
+        // 并被 a-fundamentals / risk-* / research-mgr 全部引为看空首条论据。
+        // 还原失败（缺历史期）时**保留原值**，不猜测。
+        if let Some(roe_ttm) = crate::mcp_tools::annualized_roe(financials) {
+            ratios.roe = Some(roe_ttm);
+        }
         let health_score = Self::health_score(&ratios);
         let health_level = HealthLevel::from_score(health_score);
         let key_takeaways = Self::takeaways(quote, &ratios);

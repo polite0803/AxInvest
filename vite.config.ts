@@ -148,7 +148,20 @@ export default defineConfig(async () => ({
             },
             {
               name: "markstream",
-              test: /markstream/,
+              // ⚠ test 必须限定在 `node_modules/` 下（与下方各分组写法一致），
+              // **不能**写成裸的 `/markstream/` —— 那会同时匹配**未解析的裸说明符**
+              // `stream-diffs/markstream`（`markstream-react@2.0.7` 的
+              // peerDependenciesMeta 里标了 optional:true、本项目未安装的可选依赖）。
+              //
+              // 后果（2026-09-17 实测，`AUDIT-wiki-graph-edges-2026-09-15` §6.14-②）：
+              // rolldown 对无法解析的导入**不报错**，而是生成「模块求值即 throw」的桩；
+              // 该模块本属 markstream 内部的**动态 import()**（懒 chunk，不加载就没事），
+              // 但被本分组拽进**静态命名 chunk** ⇒ 该 chunk 成为入口的静态依赖
+              // ⇒ `index.html` 用 modulepreload **急切预加载** ⇒ 入口图求值即抛
+              // ⇒ React 从未挂载（`#root` 子节点 0）⇒ **整页白屏**。
+              // 实测对照：摘掉全部 codeSplitting 分组的量化构建里，该桩留在懒 chunk
+              // （index.html 对 markstream 相关 0 个引用）⇒ 页面正常渲染。
+              test: /node_modules[\\/]markstream/,
               priority: 25,
             },
             {

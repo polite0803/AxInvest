@@ -1,92 +1,56 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Versioned schema migration framework.
 //!
-//! ## 当前状态
+//! ## 当前状态（2026-09-16 起）
 //!
-//! 本项目采用「上游基线 + 本地增量」的双层迁移架构：
-//! - [v100_consolidated]：上游所有 DDL（表/索引/触发器/种子数据）的单一基线。
-//! - v101–v125：AxAgent 各功能模块的增量迁移与 schema 自愈。
+//! **建表来源只有一个：声明式收敛引擎**（`crate::reconcile::apply::bootstrap_schema`）。
+//! 迁移清单 [`MIGRATIONS`] 已清空为 `&[]`，本模块的执行路径因此成为 no-op；但本模块
+//! **不能删** —— 它是「老库升级」的唯一落点（存量库的一次性数据搬迁：知识图谱合并、
+//! 回填、改名…），那些是实体声明表达不了的逻辑。
 //!
-//! ## 约定
+//! ## 曾经的形态（已失效，保留作考古）
 //!
-//! - 上游表/字段变更：直接修改 v100_consolidated.rs（与上游保持同步）
-//! - AxAgent 独有表/字段：新建递增版本号迁移（v126+）
-//! - 新增索引：跟随所属表的迁移文件
+//! 清空前这里是「**上游基线 + 本地增量**」双层架构：`v100_consolidated` 是上游全部 DDL
+//! （表 / 索引 / 触发器 / 种子数据）的单一基线，`v101–v233` 是本地各功能模块的增量。
+//! 那些迁移文件已随这次切换删除（可从 `.worktrees/` 的旧整树快照按版本号找回），
+//! 所以此处**不再以「文件:行」引用它们** —— 指向已删文件的链接是死的，而
+//! `cargo check` / `clippy` **都不查** intra-doc link（只有 `cargo doc` 会报）。
+//!
+//! ## 约定（清空后）
+//!
+//! - 建表 / 加列 / 加索引：改**实体声明**或 `crate::reconcile::extras` 的声明，不要新建迁移
+//! - 确需数据搬迁的升级：在本模块追加一条 `Migration` —— 这是迁移仅剩的用途
+//! - [`CURRENT_VERSION`] 的「保持 233」理由见其自身文档
 
 use sea_orm::{ConnectionTrait, DbBackend, DbErr, Statement};
 
 pub mod pg_ddl;
 pub mod schema_diff;
-pub mod v100_consolidated;
-pub mod v101_consolidate_knowledge_memory;
-pub mod v102_create_fleets;
-pub mod v103_wiki_graph_perf;
-pub mod v104_notes_fts;
-pub mod v105_kb_vault_kind;
-pub mod v106_context_source_doc_ids;
-pub mod v107_paper_reading_list;
-pub mod v108_memory_applicability;
-pub mod v109_repair_memory_items_columns;
-pub mod v110_fix_knowledge_json_columns;
-pub mod v111_retrieval_hits_feedback;
-pub mod v112_feedback_data_lake;
-pub mod v113_unified_knowledge_graph;
-pub mod v114_wiki_sources_schedule;
-pub mod v115_fleet_member_agent_profile;
-pub mod v116_create_sync_tables;
-pub mod v117_workflow_execution_resume;
-pub mod v118_wiki_kb_link;
-pub mod v119_add_note_tags;
-pub mod v120_add_trajectory_invalidated;
-pub mod v121_add_trajectory_agent_name;
-pub mod v122_evolution_execution_stats;
-pub mod v123_workflow_tools;
-pub mod v124_backfill_wiki_sync_queue_columns;
-pub mod v125_heal_stale_schema;
-pub mod v126_create_narrative_structures;
-pub mod v127_capability_stats;
-pub mod v128_capability_policies;
-pub mod v129_capability_relationships;
-pub mod v130_session_states;
-pub mod v131_backfill_wiki_graph_source;
-pub mod v132_memory_access_indexes;
-pub mod v133_opc_demand_discovery;
-pub mod v134_lead_workflow_link;
-pub mod v135_demand_subscriptions;
-pub mod v136_opc_invoices;
-pub mod v137_governance_disable_platforms;
-pub mod v138_demand_lead_dedupe_fingerprint;
-pub mod v139_create_session_events;
-pub mod v200_axinvest_stock_tables;
-pub mod v201_lesson_application_tracking;
-pub mod v202_stock_analyses_parent_version;
-pub mod v203_price_alerts_align_monitor;
-pub mod v204_paper_portfolio;
-pub mod v205_market_mainline;
-pub mod v206_screenshot_diagnosis;
-pub mod v207_chat_run;
-pub mod v208_backfill_wiki_sync_queue_columns;
-pub mod v209_opc_tables;
-pub mod v210_opc_ext;
-pub mod v211_opc_industries;
-pub mod v212_opc_work_items;
-pub mod v213_opc_orgs;
-pub mod v214_opc_experience;
-pub mod v215_opc_rl_experience;
-pub mod v216_opc_content_assets;
-pub mod v217_opc_publish_schedules;
-pub mod v218_extend_agent_roles;
-pub mod v219_trade_intent_audit;
-pub mod v220_narrative_structure;
-pub mod v221_demand_discovery;
-pub mod v222_demand_lead_evaluation;
-pub mod v223_heal_stale_schema;
 // 上游新 migration：为 workflow_templates 表添加 hooks_config 列（模板级生命周期钩子）。
 // 上游编号 v134 与本地 v134_lead_workflow_link 冲突，故作为本地序列下一个版本 v224 追加。
-pub mod v134_add_workflow_template_hooks;
 
-/// 当前 schema 版本号。每次新增 migration 时必须累加此常量。
-pub const CURRENT_VERSION: i32 = 224;
+/// 当前 schema 版本号。迁移时代「每次新增 migration 时必须累加此常量」的约定已随
+/// 清单清空失效（[`MIGRATIONS`] = `&[]`）。
+///
+/// 语义仍是「**代码中定义的最新版本号**」（见 [`SchemaStatus::latest_version`]），
+/// 但唯一用途只剩 `init/database.rs` 的 `applied_version > latest_version` 判定 ——
+/// 它识别「连到了版本号体系不同的下游 fork 库」并触发一次重型 `repair_schema`。
+///
+/// ⚠ **必须保持 233，不得改成 0**：版本表是存量库的既成事实（生产库最后一行是 233），
+/// 改成 0 会让**每一个**存量库都满足 `applied > latest` ⇒ 每次启动跑一次全量自愈。
+///
+/// 2026-09-15 修正：原为 `231`，而数组早已含 `v232` ⇒ 两处漂移。
+///
+/// ⚠ 2026-09-16 清空迁移清单时，下面两条旧描述**同时失效**，故一并改写（不是删除结论，
+/// 而是说明它们为何不再成立）：
+/// * 「必须等于 `MIGRATIONS` 数组里的最大 `version`」—— 空数组没有最大值，该约束
+///   已无对象。它当年的目的是「防偏小 ⇒ 误判 fork 库」，那个目的现在由「保持 233」
+///   直接承担。
+/// * 「用于 `repair_schema` 收尾记录」—— `repair_schema` 已不再写版本表
+///   （理由见该函数文档）。
+///
+/// 它与「是否执行某条迁移」从来无关（后者判据是版本表集合成员，见 [`missing_versions`]）。
+pub const CURRENT_VERSION: i32 = 233;
 
 /// P2-10: Schema 版本追踪表名。
 ///
@@ -118,343 +82,91 @@ struct Migration {
     up: MigrationFn,
 }
 
-const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 100,
-        description: "v100_consolidated: 合并 v001–v011 + v101–v104 的全部 DDL（表/索引/触发器/种子数据），统一用正确类型建表；不再保留旧库类型修复 ALTER 通道",
-        up: |db| Box::pin(v100_consolidated::up(db)),
-    },
-    Migration {
-        version: 101,
-        description: "v101_consolidate_knowledge_memory: 合并轨迹实体/关系到知识图谱知识实体/关系表，合并轨迹记忆到记忆条目表，删除 trajectory_entities/relationships/memories 旧表",
-        up: |db| Box::pin(v101_consolidate_knowledge_memory::up(db)),
-    },
-    Migration {
-        version: 102,
-        description: "v102_create_fleets: 创建 fleets / fleet_members 表与索引，承载多办公室 AI 团队的持久化（AgentFleet 集成）",
-        up: |db| Box::pin(v102_create_fleets::up(db)),
-    },
-    Migration {
-        version: 103,
-        description: "v103_wiki_graph_perf: 给 notes/note_links/note_backlinks 加复合索引（10 万节点查询优化），新增 wiki_graph_cache 表缓存 GraphData+LouvainResult",
-        up: |db| Box::pin(v103_wiki_graph_perf::up(db)),
-    },
-    Migration {
-        version: 104,
-        description: "v104_notes_fts: 为 notes 表添加全文检索索引（SQLite FTS5 + PostgreSQL tsvector+GIN），解决 wiki_notes_search_keyword 内存 BM25 在 10 万节点下的性能问题",
-        up: |db| Box::pin(v104_notes_fts::up(db)),
-    },
-    Migration {
-        version: 105,
-        description: "v105_kb_vault_kind: 为 knowledge_bases 表添加 kind/vault_path 字段，支持 ConnectedVault 类型 KB（Obsidian vault 集成）",
-        up: |db| Box::pin(v105_kb_vault_kind::up(db)),
-    },
-    Migration {
-        version: 106,
-        description: "v106_context_source_doc_ids: 为 context_sources 表添加 doc_ids_json 字段，支持多文档协同（按 doc_id 过滤 RAG 检索）",
-        up: |db| Box::pin(v106_context_source_doc_ids::up(db)),
-    },
-    Migration {
-        version: 107,
-        description: "v107_paper_reading_list: 新增 paper_overviews / reading_lists / reading_list_items 三张表，支持论文结构化概览与阅读列表管理",
-        up: |db| Box::pin(v107_paper_reading_list::up(db)),
-    },
-    Migration {
-        version: 108,
-        description: "v108_memory_applicability: 为 memory_items 表添加 applicability_tags + confirmed 字段，支持记忆适用范围边界划分与人工确认门（自进化闭环）",
-        up: |db| Box::pin(v108_memory_applicability::up(db)),
-    },
-    Migration {
-        version: 109,
-        description: "v109_repair_memory_items_columns: 防御性修复，补全 memory_items 表可能缺失的 tier/importance/access_count 等 12 个字段（修复 v101/v108 在 SQLite 上 ALTER TABLE 静默失败导致的字段缺失）",
-        up: |db| Box::pin(v109_repair_memory_items_columns::up(db)),
-    },
-    Migration {
-        version: 110,
-        description: "v110_fix_knowledge_json_columns: 将知识图谱表（knowledge_entities/relations/flows/interfaces/attributes）的 JSON 列从 TEXT 改为 JSONB，修复 SeaORM Json 类型在 PostgreSQL 下的类型不兼容错误（SQLite 下无操作）",
-        up: |db| Box::pin(v110_fix_knowledge_json_columns::up(db)),
-    },
-    Migration {
-        version: 111,
-        description: "v111_retrieval_hits_feedback: 为 retrieval_hits 表添加 feedback/feedback_at/used_in_response/score_after_rerank/created_at 字段，构建 RAG 反馈闭环数据基础",
-        up: |db| Box::pin(v111_retrieval_hits_feedback::up(db)),
-    },
-    Migration {
-        version: 112,
-        description: "v112_feedback_data_lake: 新建 tool_call_logs/memory_access_logs/wiki_edit_logs 三张反馈数据表，建立统一反馈数据湖",
-        up: |db| Box::pin(v112_feedback_data_lake::up(db)),
-    },
-    Migration {
-        version: 113,
-        description: "v113_unified_knowledge_graph: 扩展 knowledge_entities/knowledge_relations 表支持多源节点（wiki note/memory item/KB entity/Obsidian note）",
-        up: |db| Box::pin(v113_unified_knowledge_graph::up(db)),
-    },
-    Migration {
-        version: 114,
-        description: "v114_wiki_sources_schedule: wiki_sources 新增 schedule_cron/last_fetched_at/status 字段，支撑知识源定时刷新与状态管理",
-        up: |db| Box::pin(v114_wiki_sources_schedule::up(db)),
-    },
-    Migration {
-        version: 115,
-        description: "v115_fleet_member_agent_profile: 为 fleet_members 添加 agent_profile_id 字段，成员按 AgentProfile（角色+专家组合）定义智能体身份",
-        up: |db| Box::pin(v115_fleet_member_agent_profile::up(db)),
-    },
-    Migration {
-        version: 116,
-        description: "v116_create_sync_tables: 创建 sync_devices/sync_change_logs/sync_policies/sync_histories/sync_permissions/sync_audit_logs 六张同步相关表，支持多设备同步持久化",
-        up: |db| Box::pin(v116_create_sync_tables::up(db)),
-    },
-    Migration {
-        version: 117,
-        description: "v117_workflow_execution_resume: 为 workflow_executions 添加 execution_state_json 和 paused_at 列，支持工作流崩溃后恢复",
-        up: |db| Box::pin(v117_workflow_execution_resume::up(db)),
-    },
-    Migration {
-        version: 118,
-        description: "v118_wiki_kb_link: 为 wikis 表添加 knowledge_base_id 字段，建立 Wiki 与 KB 的显式关联，修复图谱融合硬编码 wiki_id==kb_id 的架构缺陷",
-        up: |db| Box::pin(v118_wiki_kb_link::up(db)),
-    },
-    Migration {
-        version: 119,
-        description: "v119_add_note_tags: 为 notes 表添加 tags 字段（PostgreSQL 用 JSONB，SQLite 用 TEXT），修复 Wiki 图谱节点标签缺失问题",
-        up: |db| Box::pin(v119_add_note_tags::up(db)),
-    },
-    Migration {
-        version: 120,
-        description: "v120_add_trajectory_invalidated: 为 trajectory_trajectories 表添加 is_invalidated 字段（append-only 证据存储，软删除取代物理删除）",
-        up: |db| Box::pin(v120_add_trajectory_invalidated::up(db)),
-    },
-    Migration {
-        version: 121,
-        description: "v121_add_trajectory_agent_name: 为 trajectory_trajectories 表添加 agent_name 字段（结构化 Agent 标识，进化系统据此精准聚合每个 Agent 的证据）",
-        up: |db| Box::pin(v121_add_trajectory_agent_name::up(db)),
-    },
-    Migration {
-        version: 122,
-        description: "v122_evolution_execution_stats: 创建 evolution_execution_stats 表（复合主键 (conversation_id, tool_id)），持久化进化产物真实执行反馈，重启后真实证据不丢失（阶段四后置闭环 D3）",
-        up: |db| Box::pin(v122_evolution_execution_stats::up(db)),
-    },
-    Migration {
-        version: 123,
-        description: "v123_workflow_tools: 创建 workflow_tools 表（(workflow_id, tool_name) 唯一约束），持久化工作流运行时发现/生成的工具定义（rhai_script/workflow_dag/llm_function，pending/active/disabled 状态机 + 使用统计）",
-        up: |db| Box::pin(v123_workflow_tools::up(db)),
-    },
-    Migration {
-        version: 124,
-        description: "v124_backfill_wiki_sync_queue_columns: 补全 wiki_sync_queue 表缺失的 created_at / processed_at 列（修复存量库 v100 PHASE 3.9 后加列未生效问题）",
-        up: |db| Box::pin(v124_backfill_wiki_sync_queue_columns::up(db)),
-    },
-    Migration {
-        version: 125,
-        description: "v125_heal_stale_schema: 自愈迁移——补 trajectory_trajectories.agent_name 列，修复 repair_schema 强制写版本号导致的存量库 schema 缺失",
-        up: |db| Box::pin(v125_heal_stale_schema::up(db)),
-    },
-    Migration {
-        version: 126,
-        description: "v126_create_narrative_structures: 创建叙事结构表（弧线/交汇点/伏笔持久化），支撑叙事面板与文学创作工作流",
-        up: |db| Box::pin(v126_create_narrative_structures::up(db)),
-    },
-    Migration {
-        version: 127,
-        description: "v127_capability_stats: 创建能力护照执行统计表，修复能力发现排序器 β 历史成功率/探索提权数据源恒为 0 的反馈闭环断裂（Phase 1）",
-        up: |db| Box::pin(v127_capability_stats::up(db)),
-    },
-    Migration {
-        version: 128,
-        description: "v128_capability_policies: 创建能力发现策略表（排除型规则 JSON），策略对象化——策略从硬编码 8 维闸门扩展为可注册规则（Phase 3）",
-        up: |db| Box::pin(v128_capability_policies::up(db)),
-    },
-    Migration {
-        version: 129,
-        description: "v129_capability_relationships: 创建能力关系图谱表（复合主键 source_id+target_id+relationship_type），统一能力模型第四层 CapabilityRelationship 的物化镜像 + 关系元信息载体（P2）",
-        up: |db| Box::pin(v129_capability_relationships::up(db)),
-    },
-    Migration {
-        version: 130,
-        description: "v130_session_states: 创建会话状态表（自然主键 state_key + 冗余 conversation_id/agent_id 双索引），能力按需加载闭环 P0-1——承载 CapabilityLoad 写入、下轮注入读取的解耦点",
-        up: |db| Box::pin(v130_session_states::up(db)),
-    },
-    Migration {
-        version: 131,
-        description: "v131_backfill_wiki_graph_source: 回填 Wiki 实体/关系的 v113 多源来源字段（kb_id 命中 wikis 表的存量行 source_type 纠正为 wiki、source_id=wiki_id），消除 Wiki 实体与真实 KB 实体混标（R5）",
-        up: |db| Box::pin(v131_backfill_wiki_graph_source::up(db)),
-    },
-    Migration {
-        version: 132,
-        description: "v132_memory_access_indexes: 为 memory_items 补衰减/淘汰路径索引（expires_at / last_accessed / importance / namespace_id+tier），消除衰减 tick 全表扫描",
-        up: |db| Box::pin(v132_memory_access_indexes::up(db)),
-    },
-    Migration {
-        version: 133,
-        description: "v133_opc_demand_discovery: 创建 OPC 需求发现两张表（平台配置 opc_demand_platforms + 需求线索 opc_demand_leads，(platform, source_url) 唯一去重）",
-        up: |db| Box::pin(v133_opc_demand_discovery::up(db)),
-    },
-    Migration {
-        version: 134,
-        description: "v134_lead_workflow_link: 为 opc_demand_leads 添加 linked_workflow_id + implemented_at 两列，建立线索 → 实现工作流转化链路",
-        up: |db| Box::pin(v134_lead_workflow_link::up(db)),
-    },
-    Migration {
-        version: 135,
-        description: "v135_demand_subscriptions: 创建 OPC 需求订阅词表 opc_demand_subscriptions（keyword 唯一 / 扫描间隔 / 推送门槛 / 限定平台）",
-        up: |db| Box::pin(v135_demand_subscriptions::up(db)),
-    },
-    Migration {
-        version: 136,
-        description: "v136_opc_invoices: 创建 OPC 交付发票表 opc_invoices（lead_id 溯源 / draft→sent→paid 状态机 / 多币种金额）",
-        up: |db| Box::pin(v136_opc_invoices::up(db)),
-    },
-    Migration {
-        version: 137,
-        description: "v137_governance_disable_platforms: 数据源治理——默认禁用 10 个无公开检索 API/需官方凭证的平台（config_json 无非空 api_token 时 default_enabled=false）",
-        up: |db| Box::pin(v137_governance_disable_platforms::up(db)),
-    },
-    Migration {
-        version: 138,
-        description: "v138_demand_lead_dedupe_fingerprint: 需求线索去重键从 (platform, source_url) 迁移为内容指纹 content_fingerprint（标题+描述归一化哈希，16 位 hex）",
-        up: |db| Box::pin(v138_demand_lead_dedupe_fingerprint::up(db)),
-    },
-    Migration {
-        version: 139,
-        description: "v139_create_session_events: 创建 session_events 表（跨进程 Resume 事件流）—— session_id + seq 唯一索引 + session_id+event_type 查询索引，支撑 agent_resume_from_events 从事件流重放 ThoughtChain + 识别 Interrupted 点",
-        up: |db| Box::pin(v139_create_session_events::up(db)),
-    },
-    Migration {
-        version: 200,
-        description: "v200_axinvest_stock_tables: AxInvest 独有股票业务表（stock_analyses / price_alerts / portfolio_holdings / financial_snapshots / news_archive 等）",
-        up: |db| Box::pin(v200_axinvest_stock_tables::up(db)),
-    },
-    Migration {
-        version: 201,
-        description: "v201_lesson_application_tracking: lesson 应用追踪闭环（lesson_applications 表，精确统计 times_applied / success_count）",
-        up: |db| Box::pin(v201_lesson_application_tracking::up(db)),
-    },
-    Migration {
-        version: 202,
-        description: "v202_stock_analyses_parent_version: stock_analyses 新增 parent_analysis_id（分析重跑版本链）",
-        up: |db| Box::pin(v202_stock_analyses_parent_version::up(db)),
-    },
-    Migration {
-        version: 203,
-        description: "v203_price_alerts_align_monitor: price_alerts 与 RealtimeMonitor 告警模型对齐（alert_type / condition_type / threshold，列存在性守卫）",
-        up: |db| Box::pin(v203_price_alerts_align_monitor::up(db)),
-    },
-    Migration {
-        version: 204,
-        description: "v204_paper_portfolio: G2 模拟观察组合（paper_portfolios / paper_positions）",
-        up: |db| Box::pin(v204_paper_portfolio::up(db)),
-    },
-    Migration {
-        version: 205,
-        description: "v205_market_mainline: G4 市场主线自动提炼（market_mainlines 表）",
-        up: |db| Box::pin(v205_market_mainline::up(db)),
-    },
-    Migration {
-        version: 206,
-        description: "v206_screenshot_diagnosis: G6 截图持仓诊断闭环",
-        up: |db| Box::pin(v206_screenshot_diagnosis::up(db)),
-    },
-    Migration {
-        version: 207,
-        description: "v207_chat_run: G8 /api/chat/runs 后台 Run Lifecycle 持久化（chat_runs / chat_run_events）",
-        up: |db| Box::pin(v207_chat_run::up(db)),
-    },
-    Migration {
-        version: 208,
-        description: "v208_backfill_wiki_sync_queue_columns: 补全 wiki_sync_queue 缺失的 created_at / processed_at 列",
-        up: |db| Box::pin(v208_backfill_wiki_sync_queue_columns::up(db)),
-    },
-    Migration {
-        version: 209,
-        description: "v209_opc_tables: OPC 业务领域表（发票、客户、项目、交付）",
-        up: |db| Box::pin(v209_opc_tables::up(db)),
-    },
-    Migration {
-        version: 210,
-        description: "v210_opc_ext: OPC 扩展表（站点、分析、自动化）",
-        up: |db| Box::pin(v210_opc_ext::up(db)),
-    },
-    Migration {
-        version: 211,
-        description: "v211_opc_industries: OPC 行业注册表（Industry Pack 扫描/启用/禁用/版本追踪）",
-        up: |db| Box::pin(v211_opc_industries::up(db)),
-    },
-    Migration {
-        version: 212,
-        description: "v212_opc_work_items: OPC 工作项表（Self-Run 状态机持久层，P3）",
-        up: |db| Box::pin(v212_opc_work_items::up(db)),
-    },
-    Migration {
-        version: 213,
-        description: "v213_opc_orgs: OPC 组织抽象表（Self-Built，P3-2）",
-        up: |db| Box::pin(v213_opc_orgs::up(db)),
-    },
-    Migration {
-        version: 214,
-        description: "v214_opc_experience: OPC 经验闭环表（Self-Grown，P3-5）",
-        up: |db| Box::pin(v214_opc_experience::up(db)),
-    },
-    Migration {
-        version: 215,
-        description: "v215_opc_rl_experience: OPC 强化学习经验持久化表",
-        up: |db| Box::pin(v215_opc_rl_experience::up(db)),
-    },
-    Migration {
-        version: 216,
-        description: "v216_opc_content_assets: OPC 内容资产表",
-        up: |db| Box::pin(v216_opc_content_assets::up(db)),
-    },
-    Migration {
-        version: 217,
-        description: "v217_opc_publish_schedules: OPC 发布计划表",
-        up: |db| Box::pin(v217_opc_publish_schedules::up(db)),
-    },
-    Migration {
-        version: 218,
-        description: "v218_extend_agent_roles: agent_roles 补齐 8 个扩展字段（列存在性守卫 + backend 分支）",
-        up: |db| Box::pin(v218_extend_agent_roles::up(db)),
-    },
-    Migration {
-        version: 219,
-        description: "v219_trade_intent_audit: stock_analyses 交易意图审核流转扩展（7 列，ADD COLUMN IF NOT EXISTS）",
-        up: |db| Box::pin(v219_trade_intent_audit::up(db)),
-    },
-    Migration {
-        version: 220,
-        description: "v220_narrative_structure: 叙事结构持久化表",
-        up: |db| Box::pin(v220_narrative_structure::up(db)),
-    },
-    Migration {
-        version: 221,
-        description: "v221_demand_discovery: OPC 需求发现表（opc_demand_lead 单数版：平台来源/内容/预算/状态流转 + opc_delivery 等）",
-        up: |db| Box::pin(v221_demand_discovery::up(db)),
-    },
-    Migration {
-        version: 222,
-        description: "v222_demand_lead_evaluation: opc_demand_lead 价值评估字段（pain/market_gap/commercial_value 评分 + duplicate column 容错）",
-        up: |db| Box::pin(v222_demand_lead_evaluation::up(db)),
-    },
-    Migration {
-        version: 223,
-        description: "v223_heal_stale_schema: 自愈迁移——修复存量库缺失的列与 CHECK 约束（information_schema/pragma 守卫，重跑安全）",
-        up: |db| Box::pin(v223_heal_stale_schema::up(db)),
-    },
-    Migration {
-        version: 224,
-        description: "v224_add_workflow_template_hooks: 为 workflow_templates 添加 hooks_config 列（模板级生命周期钩子声明 JSON，NULL 合法）——通用引擎按声明查运行时注册表，业务侧经 register_lifecycle_hook 注入实现（上游原编号 v134，与本地 v134_lead_workflow_link 冲突，重编号追加）",
-        up: |db| Box::pin(v134_add_workflow_template_hooks::up(db)),
-    },
-];
+/// 版本化迁移的**注册表** —— 2026-09-16 起**刻意保持为空**。
+///
+/// 建表职责已交给声明式引擎（`reconcile::apply::bootstrap_schema`，由
+/// `crate::db::initialize_schema` 调用）。空表不是「忘了填」，而是本轮的**终点状态**：
+/// 一旦往这里重新加迁移，它就会和引擎**同时**是建表来源，而两套真相源的差异
+/// （列类型、索引命名 `idx_x_y` vs 引擎的 `idx-x-y`、约束写法）不会在改动当场暴露，
+/// 只会在某次启动时集中爆发成难以归因的故障。要恢复迁移机制，必须先撤掉引擎接管 ——
+/// 二者只能有一个 owner。
+///
+/// ## 数组清空后本模块仍然要留下的东西（**不可**跟着一起删）
+///
+/// 删掉任一项都会各自造成一类缺陷：
+///
+/// 1. `SCHEMA_VERSION_TABLE` + `record_version` + `get_schema_status`：
+///    版本表是**存量库的既成事实**（生产库有 74 行）。`init/database.rs` 用
+///    `applied_version > latest_version` 判定「版本超前」并触发全量自愈 ——
+///    把这套记账删掉，所有老库都会被误判成「下游 fork 库」，每次启动跑一次重型自愈。
+/// 2. `CURRENT_VERSION`：**必须保留 233，不得改成 0**。它是上面那条判定的另一半；
+///    改成 0 会让「已应用 233 的库」看起来超前 233 个版本 ⇒ 同样每次启动全量自愈。
+/// 3. `schema_diff::heal_all`（`repair_schema` 内调用）：启动期**唯一的列类型加宽**
+///    通道 —— `AlterColumnType` 不在引擎的纯新增白名单里，引擎不做这件事。
+///
+/// ## 与「逐条迁移」一起消失的能力（**已知代价，已登记**）
+///
+/// 迁移时代逐条记录的「这条迁移修了什么」不复存在 ⇒ 存量库若落后于 `CURRENT_VERSION`，
+/// 不再有任何**数据修复**通道（引擎只做结构收敛，不做数据搬迁）。在用的库都已在
+/// 其迁移轨道上执行完，故本轮接受此代价；详见 PLAN §十一。
+const MIGRATIONS: &[Migration] = &[];
 
 /// 执行所有尚未应用的 schema 迁移。
 ///
 /// 启动时调用；幂等，多次调用结果相同。
 ///
-/// 第一步（建 version tracking 表、读 MAX(version)）使用 `&impl
-/// ConnectionTrait`——这是 ConnectionTrait 的稳定接口，ddl.rs shim
-/// 可以直接转发。第二步（实际跑 up()）需要 `&DatabaseConnection`，
-/// 所以顶层 API 接收 `&DatabaseConnection`；ddl.rs shim 已经更新
-/// 成强类型。
+/// 「尚未应用」的判据是**版本表集合成员**，不是 `MAX(version)` 高水位线 ——
+/// 两者在「中间缺口」场景下结论相反，理由见函数体内注释与 `missing_versions`。
+///
+/// 第一步（建 version tracking 表）使用 `&impl ConnectionTrait`——这是
+/// ConnectionTrait 的稳定接口，ddl.rs shim 可以直接转发。第二步（实际跑 up()）
+/// 需要 `&DatabaseConnection`，所以顶层 API 接收 `&DatabaseConnection`；
+/// ddl.rs shim 已经更新成强类型。
+///
+/// ## 为什么每条迁移**没有**包事务（2026-09-13 实测结论）
+///
+/// 「给每条迁移包事务」长期挂在待办上：判据从高水位线改成集合成员后，失败的迁移
+/// 会被**重试**，于是「中途失败留下的 partial apply 被反复叠加」成为真实风险。
+///
+/// 但**当前 API 形状下做不到**，实测依据（不是推测）：
+///
+/// - `sea-orm 2.0.2` 的 `DatabaseConnectionType`（即 `DatabaseConnection` 的内层枚举，
+///   定义在 `sea-orm-2.0.2/src/database/db_connection.rs:47`）只有**连接池**变体：
+///   `SqlxMySqlPoolConnection` / `SqlxPostgresPoolConnection` /
+///   `SqlxSqlitePoolConnection` / `RusqliteSharedConnection` /
+///   `MockDatabaseConnection` / `ProxyDatabaseConnection` / `Disconnected`。
+///   **没有 `Transaction` 变体**；
+/// - 也不存在 `impl From<DatabaseTransaction> for DatabaseConnection`
+///   （全 crate grep 零命中）；
+/// - 而 [`MigrationFn`] 的签名是 `fn(DatabaseConnection) -> …`（**owned**）。
+///
+/// ⇒ 事务对象无法作为 `DatabaseConnection` 传进 `up()`。
+///
+/// 唯一的做法是：把 [`MigrationFn`] 与**全部 68 个迁移**的 `up()` 签名从
+/// `DatabaseConnection` 改成 `&DatabaseTransaction`（并连带改它们调用的每一个
+/// 辅助函数的签名），再在 `db.transaction(|txn| …)` 的闭包里调用。
+/// 那是**跨 68 个文件的重构 + 双方言真机全量回归**，不应与别的修复混做一轮。
+///
+/// ⚠ 2026-09-17 版本号订正：上面引的 `sea-orm 2.0.1` 是旧快照 —— **版本真源是
+/// `src-tauri/Cargo.lock`**（`sea-orm = 2.0.2`），已改。两版该文件**逐字节相同**
+/// （均 927 行，`:47` 恰为 `pub enum DatabaseConnectionType {`，变体清单一致）
+/// ⇒ 行号与结论均不变。⚠ 这类缺陷**存在性检查查不出来**：registry 长期留历史版本，
+/// 「指向 2.0.1 的路径」照样解析成功，而它证明的已不是我们在用的那份代码。
+///
+/// ⚠ 2026-09-16：迁移清单已清空（[`MIGRATIONS`] = `&[]`），**上面这段论述已无对象**。
+/// 保留它（而不是删掉）是为了让「为什么当初没给迁移包事务」这个结论不随代码消失 ——
+/// 它正是下面两件事的成因：版本表按**集合成员**判定而非 `MAX(version)`、
+/// 以及 `repair_schema` 那条「失败的迁移下次启动会重试」的承诺。
+/// 读这段时要把它当**历史依据**，不要当成待办。
+///
+/// 当前的实际防护是「**迁移自身幂等**」：`CREATE TABLE IF NOT EXISTS` /
+/// `INSERT … ON CONFLICT DO NOTHING` / 先查 PRAGMA 或 information_schema 再 ALTER
+/// —— 幂等则重试无害。**若要恢复迁移机制，新增迁移必须沿用这个约定**；
+/// 若某条迁移无法写成幂等，它才需要上面那个重构来兜底。
+///
+/// ⚠ 但在往 [`MIGRATIONS`] 里加回任何一条之前，先读它的文档：迁移与声明式引擎
+/// **只能有一个**建表 owner。两者并存时差异（列类型、索引命名 `idx_x_y` vs
+/// 引擎的 `idx-x-y`、约束写法）不会在改动当场暴露，只会在某次启动时集中爆发。
 pub async fn run_migrations(db: &sea_orm::DatabaseConnection) -> Result<(), DbErr> {
     let backend = db.get_database_backend();
 
@@ -467,20 +179,105 @@ pub async fn run_migrations(db: &sea_orm::DatabaseConnection) -> Result<(), DbEr
     ))
     .await?;
 
-    // 2) 读已应用的最大版本号（首次启动 = 0）
-    let applied_max: i32 = read_max_version(db).await?;
+    // 2) 读已应用版本集合
+    //
+    // 刻意用「集合成员判定」而不是 `MAX(version)` 高水位线。高水位线有两个缺陷：
+    // ① 判不出**中间缺口** —— 后补进清单的中间版本号在既有库上被永久静默跳过
+    //    （生产实证见 `missing_versions` 注释）；
+    // ② 让 `repair_schema` 里「下次启动 run_migrations 将重试失败的迁移」这句
+    //    承诺落空 —— 失败迁移自身没写版本号，但比它大的版本号可能已写入，
+    //    `MAX` 于是越过它，永不重试。
+    let applied: std::collections::HashSet<i32> =
+        read_applied_versions(db).await?.into_iter().collect();
 
-    // 3) 按顺序补跑未应用 migration
+    // 3) 按注册顺序补跑未应用 migration
     for m in MIGRATIONS {
-        if m.version <= applied_max {
+        if applied.contains(&m.version) {
             continue;
         }
         // db.clone() 是 Arc +1，up() 内部 await 时持有一个 owned 副本。
-        (m.up)(db.clone()).await?;
+        //
+        // 失败时**必须带上版本号**再向上传：裸传 DbErr 会让调用方只看到一句 SQL
+        // 错误（如 `字段 "enabled" 的类型为 integer, 但表达式的类型为 boolean`），
+        // 却不知道是清单里的哪一条（写下这段时是 68 条）—— 排障要逐个翻文件。归因信息缺失与归因说谎
+        // 同样有害（2026-09-12 生产事故：应用弹「数据库初始化失败」，错误串里
+        // 完全没有 v101 的踪迹）。
+        //
+        // 这里刻意**保持 fail-fast 语义**（不改成 warn 吞掉）：迁移失败意味着
+        // schema 与代码不匹配，硬撑着启动只会把故障从"起不来"变成更难查的
+        // "跑得起来但到处出错"。要做的是让错误**说得清**，而不是让它沉默。
+        (m.up)(db.clone()).await.map_err(|e| {
+            tracing::error!(
+                version = m.version,
+                description = m.description,
+                error = %e,
+                "[run_migrations] 迁移执行失败，数据库初始化中止"
+            );
+            DbErr::Custom(format!(
+                "迁移 v{} 执行失败: {e} —— 该迁移此前未应用过。\
+                 若它是首次在 PostgreSQL 上执行，请优先核对 DDL 是否为 PG 兼容语法\
+                 （SQLite 专有写法如 AUTOINCREMENT / INSERT OR IGNORE / 布尔字面量插整数列，PG 均不接受）。",
+                m.version
+            ))
+        })?;
         record_version(db, backend, m.version, m.description).await?;
     }
 
     Ok(())
+}
+
+/// 已注册迁移的版本号（升序，含重复）。
+///
+/// 供启动自愈判定使用：**仅凭 `MAX(version)`（高水位线）判不出「中间缺口」**。
+///
+/// 生产实证（2026-09-12，axagent PG 库）：源码 68 个版本 vs 版本表 66 行，
+/// `applied_max = 227 == CURRENT_VERSION`，而下面两条从未执行 ——
+///   - **v101**（`trajectory_*` 合并 + `__sys_trajectory_memory__` sentinel）：
+///     三项产物全部缺失（sentinel KB / sentinel NS 无行，旧表
+///     `trajectory_entities|memories|relationships` 仍存在）；
+///   - **v139**（建 `session_events`）：`to_regclass` 为 NULL，而
+///     `DbSessionEventSink::emit` 每次 INSERT 都失败并被 `tracing::warn!` 吞掉
+///     ⇒ 事件流持久化 100% 静默降级。
+///
+/// 成因：`run_migrations` 只看 `MAX(version)`，任何**后补进清单的中间版本号**
+/// 在既有库上被永久静默跳过（新库按序跑则正常）。这是「新装/升级不一致」类缺陷。
+pub fn registered_versions() -> Vec<i32> {
+    MIGRATIONS.iter().map(|m| m.version).collect()
+}
+
+/// 「已注册但版本表里没有」的版本号（升序去重）。空 = 真正追平。
+///
+/// 与 `read_max_version` 的区别：后者是**高水位线**，判不出缺口。
+/// 实现刻意复用 `registered_versions()`（而不是再次遍历 `MIGRATIONS`）：
+/// 让「注册清单」只有一处推导，避免两个函数日后对清单的理解漂移。
+///
+/// ⚠ 2026-09-16 迁移清单清空后，本函数**恒返回空**（生产调用点也随之消失）。
+/// 保留它（而不是删掉）是为了让「**为什么版本判定必须用集合成员而不是 `MAX(version)`**」
+/// 这个结论不随代码消失 —— 它绑着上面那条生产实证（v101/v139 被高水位线永久跳过、
+/// 事件流 100% 静默降级）。删掉它，下次有人想「简化」`run_migrations` 时就只剩
+/// 无人记得的理由。测试 `missing_versions_is_empty_after_migration_purge` 负责在
+/// 有人往 [`MIGRATIONS`] 里加回迁移时变红，提醒他重读本函数与 `run_migrations` 的文档。
+pub fn missing_versions(applied: &[i32]) -> Vec<i32> {
+    let applied: std::collections::HashSet<i32> = applied.iter().copied().collect();
+    let mut out: Vec<i32> =
+        registered_versions().into_iter().filter(|v| !applied.contains(v)).collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// 读出全部已应用迁移的版本号（不排序、不去重）。
+///
+/// 与 `read_max_version` 并列存在：两者语义不同，别互相替代 ——
+/// `read_max_version` 只回答「最高跑到哪」，本函数回答「跑了哪些」。
+async fn read_applied_versions(db: &sea_orm::DatabaseConnection) -> Result<Vec<i32>, DbErr> {
+    let rows = db
+        .query_all_raw(Statement::from_string(
+            db.get_database_backend(),
+            format!("SELECT version FROM {SCHEMA_VERSION_TABLE}"),
+        ))
+        .await?;
+    Ok(rows.iter().filter_map(|r| r.try_get_by::<i32, _>("version").ok()).collect())
 }
 
 async fn read_max_version(db: &sea_orm::DatabaseConnection) -> Result<i32, DbErr> {
@@ -500,86 +297,185 @@ async fn read_max_version(db: &sea_orm::DatabaseConnection) -> Result<i32, DbErr
     }
 }
 
-// ── P2-9: Schema 迁移状态查询 ─────────────────────────────────────────────
+// ── P2-9: Schema 状态查询 ─────────────────────────────────────────────────
 //
-// 暴露给 Tauri 命令层，让前端可以查询当前 schema 版本号、已应用迁移列表、
-// 以及尚未应用的 pending 迁移数量（用于诊断「schema 滞后」类问题）。
+// 暴露给 Tauri 命令层，让前端可以查询「库结构离代码声明还差多少、谁会去修」。
+//
+// ⚠ 2026-09-16 起本节的形态变了：迁移清单清空后，旧的「已应用版本 + pending 迁移
+// 数量 + 已应用迁移列表」三件套**全部失真**（详见 `SchemaStatus` 的字段文档）。
+// 结构面改由只读探测 `reconcile::status::probe` 提供，版本面只剩 legacy 记账。
 
-/// 单条已应用迁移的元数据（对应 `axagent_schema_version` 表的一行）。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct AppliedMigration {
-    pub version: i32,
-    pub applied_at: i64,
-    pub description: String,
-}
-
-/// Schema 迁移状态摘要。
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct SchemaMigrationStatus {
-    /// 当前数据库已应用的最大版本号（0 表示首次启动未跑过任何 migration）
-    pub applied_version: i32,
-    /// 代码中定义的最新版本号（`CURRENT_VERSION`）
-    pub latest_version: i32,
-    /// 尚未应用的 migration 数量（latest - applied，若已追平则为 0）
-    pub pending_count: i32,
-    /// 已应用迁移的完整列表（按 version 升序）
-    pub applied: Vec<AppliedMigration>,
-}
-
-/// P2-9: 查询当前 schema 迁移状态。
+/// 数据库结构状态（**引擎视角**）。
 ///
-/// 返回已应用版本、最新版本、pending 数量和已应用迁移列表。
+/// ## 为什么替换了 `SchemaMigrationStatus`
+///
+/// 迁移清单清空后，旧结构的两个字段同时失效：`pending_count` 恒 0（`MIGRATIONS` 为空）、
+/// `applied_version` 只剩遗留记账。前端用 `pending_count > 0` 决定显示「滞后」还是
+/// 「已是最新」⇒ 它恒走「已是最新」那一支，且那句里的版本号是常量 —— **面板在说谎**。
+/// 现在改为把「库结构离声明还差多少、谁会去修」直接报出来。
+///
+/// 每个结构面字段都来自**只读**探测（`reconcile::status::probe`），不写 DDL、不写审计。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SchemaStatus {
+    /// 方言：`"sqlite"` / `"postgres"`。
+    pub dialect: String,
+    /// 声明侧 / 实况侧的表数。
+    pub tables_expected: i32,
+    pub tables_actual: i32,
+    /// 引擎下次启动会**自动补**的变更条数。
+    pub pending_apply: i32,
+    /// 纯新增、但本方言**没有原生 DDL** 的条数（已知限制，每轮重现）。
+    pub pending_unsupported: i32,
+    /// 启动期**刻意不动**、需人工处理的条数（收缩 / 改类型）。
+    pub pending_manual: i32,
+    /// 声明漂移（advisory）条数 —— 只有表达式文本差异，不产出 DDL。
+    pub advisories: i32,
+    /// 异常备注（正常为空）。
+    pub notes: Vec<String>,
+    /// 版本表高水位线 `MAX(version)`。
+    ///
+    /// ⚠ **遗留记账**：迁移时代的产物，迁移清单已清空。它**不是**「schema 跑到哪了」的
+    /// 答案（那个问题现在由上面的结构面字段回答）。保留它只为一件事：
+    /// `init/database.rs:231-252` 用 `applied_version > latest_version` 识别「连到了版本号
+    /// 更高的下游 fork 库」并触发重型自愈。**UI 不展示** —— 它正是用户要求去掉的那个
+    /// 「数据迁移标记」。
+    pub applied_version: i32,
+    /// 本程序认识的最高版本号（`CURRENT_VERSION`）。含义见 `applied_version`。
+    ///
+    /// ⚠ `CURRENT_VERSION` **必须保持 233**，不要改成 0。
+    pub latest_version: i32,
+    /// 结构面探测失败的原因。`Some` ⇒ 上面**结构面**各字段全为 0 且不可信
+    /// （含 `dialect`：它是空串，因为方言也由那次失败的探测读出）；
+    /// 版本面字段（`applied_version` / `latest_version`）仍然有效。
+    pub probe_error: Option<String>,
+}
+
+/// P2-9: 查询当前 schema 状态。
+///
+/// 返回**结构面**（离声明形态还差多少、分别由谁去修）与**版本面**（遗留记账）两组字段。
 /// 失败时返回 `DbErr`，调用方（Tauri 命令）转 `String`。
-pub async fn get_schema_status(
-    db: &sea_orm::DatabaseConnection,
-) -> Result<SchemaMigrationStatus, DbErr> {
-    // 1) 读已应用的最大版本号
+///
+/// ⚠ **本函数不再报 `pending_count`**：`MIGRATIONS` 清空后它恒为 0，留着就是 UI 谎报
+/// （旧实现在 `pending_count == 0` 时显示「Schema 已是最新 v233」，而那句话既依赖一个
+/// 恒真条件、又依赖一个与库状态无关的常量）。「还差多少」现在由 `pending_apply` /
+/// `pending_unsupported` / `pending_manual` 三个桶回答，它们的口径见
+/// [`crate::reconcile::status::EngineStatus`]。
+///
+/// 结构面探测失败**不**让整个调用失败：版本面字段仍有效，而 `init/database.rs` 的
+/// 「版本超前」判定只依赖版本面 ⇒ 探测失败不该连带让它失效。失败原因进 `probe_error`。
+pub async fn get_schema_status(db: &sea_orm::DatabaseConnection) -> Result<SchemaStatus, DbErr> {
+    // 1) 版本面：读已应用的最大版本号（legacy 记账，见 `applied_version` 文档）
     let applied_version = read_max_version(db).await?;
 
-    // 2) 读全部已应用迁移的明细
-    let rows = db
-        .query_all_raw(Statement::from_string(
-            db.get_database_backend(),
-            format!(
-                "SELECT version, applied_at, description FROM {SCHEMA_VERSION_TABLE} ORDER BY version ASC"
-            ),
-        ))
-        .await?;
-    let mut applied: Vec<AppliedMigration> = Vec::new();
-    for r in rows {
-        let version: i32 = r.try_get_by::<i32, _>("version").unwrap_or(0);
-        let applied_at: i64 = r.try_get_by::<i64, _>("applied_at").unwrap_or(0);
-        let description: String = r.try_get_by::<String, _>("description").unwrap_or_default();
-        applied.push(AppliedMigration { version, applied_at, description });
-    }
-
-    let pending_count = (CURRENT_VERSION - applied_version).max(0);
-
-    Ok(SchemaMigrationStatus {
+    let mut status = SchemaStatus {
+        dialect: String::new(),
+        tables_expected: 0,
+        tables_actual: 0,
+        pending_apply: 0,
+        pending_unsupported: 0,
+        pending_manual: 0,
+        advisories: 0,
+        notes: Vec::new(),
         applied_version,
         latest_version: CURRENT_VERSION,
-        pending_count,
-        applied,
-    })
+        probe_error: None,
+    };
+
+    // 2) 结构面：只读探测（不执行 DDL / 不写审计 / 不建元表）
+    match crate::reconcile::status::probe(db).await {
+        Ok(e) => {
+            status.dialect = e.dialect;
+            status.tables_expected = e.tables_expected as i32;
+            status.tables_actual = e.tables_actual as i32;
+            status.pending_apply = e.pending_apply as i32;
+            status.pending_unsupported = e.pending_unsupported as i32;
+            status.pending_manual = e.pending_manual as i32;
+            status.advisories = e.advisories as i32;
+            status.notes = e.notes;
+        },
+        Err(e) => {
+            // 必须留痕：结构面字段全 0 时，UI 显示的是「什么都不缺」——
+            // 若这里静默，一次探测失败会被读成「库完全健康」。
+            tracing::warn!(
+                "[get_schema_status] 结构面探测失败（版本面字段仍有效，结构面各字段置 0 且不可信）: {e}"
+            );
+            status.probe_error = Some(e.to_string());
+        },
+    }
+
+    Ok(status)
 }
 
-/// 修复数据库架构：重跑所有注册的迁移（幂等安全）。
+/// 修复结果 —— `schema_diff::heal_all` 的**真实产出**。
 ///
-/// 与 `run_migrations` 不同，此函数跳过版本号检查，
-/// 无条件对**所有**已注册迁移调用 `up()` 函数。
-///
-/// 由于每个迁移的 DDL 都使用 `IF NOT EXISTS` / `ON CONFLICT DO NOTHING`，
-/// 重复执行是安全的：
-///   - 新库/已修复的库：CREATE/ALTER 检测到已存在 → 无操作
-///   - 缺失表/列的存量库：首次触发 DDL → 补全
-///   - v101 等含数据迁移步骤的：INSERT ... SELECT 用 ON CONFLICT DO NOTHING
-///     防止重复，旧表被删除后自动跳过
-///
-/// 优势：不依赖版本号、无硬编码清单、自动适配所有下游 fork（v200+）。
-pub async fn repair_schema(db: &sea_orm::DatabaseConnection) -> Result<(usize, usize), DbErr> {
-    let backend = db.get_database_backend();
+/// ⚠ 这是本函数**唯一**还在做的事。旧版本返回的 `(fixed, total)` 语义是「重跑了几个
+/// 迁移」，注册表清空后恒为 `(0, 0)`；命令层把它 `format!("{}", added)` 成 `"0"` 回给
+/// 前端，UI 于是永远显示「补了 0 个缺失字段」—— **而 heal_all 真补了多少列从不回传**。
+/// 现在直接回传它。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SchemaRepairReport {
+    /// **对照完成**的实体表数（表缺失的、对照失败的不计入 —— 见 `errors`）。
+    pub tables_scanned: i32,
+    /// 补上的列（`表.列`）。
+    pub columns_added: Vec<String>,
+    /// 修好的列类型错配（`表.列`）。
+    pub types_healed: Vec<String>,
+    /// 逐实体对照失败的原因（`表: 原始错误`），正常为空。
+    ///
+    /// 非空 ⇒ 那几张表**没对照完**（`heal_entity` 的列循环遇错即中断，见
+    /// `schema_diff::DiffReport::errors`），因此 `columns_added` / `types_healed`
+    /// 对它们而言是**不完整**的账，不能读成「它们没有缺列」。
+    ///
+    /// ⚠ 这是「部分未完成」，与整个调用失败是两件事：前者 `repair_schema` 仍返回
+    /// `Ok`（其余表确实修了），由调用方按本字段显示「部分未完成」并列出原因；
+    /// 只有连列快照都拿不到（`heal_all` 返回 `Err`）才算整体失败。
+    pub errors: Vec<String>,
+}
 
-    // 确保 version tracking 表存在
+/// 修复数据库结构：调 `schema_diff::heal_all`，以实体声明为权威补缺失列 / 修类型错配。
+///
+/// ⚠ 2026-09-16 起**迁移清单已清空**（[`MIGRATIONS`] = `&[]`），本函数因此只剩
+/// `heal_all` 一件事。旧文档说的「重跑所有注册的迁移」「与 `run_migrations` 不同，
+/// 此函数跳过版本号检查、无条件对所有已注册迁移调用 `up()`」—— 那两段现在都无对象，
+/// 连同 `for m in MIGRATIONS` 空循环与「强制写入 `CURRENT_VERSION`」的收尾一起删掉了
+/// （后者连语义都不再需要：`repair_schema` 不再改版本表，见下）。
+///
+/// ## 它补的是引擎**够不着**的那两类
+///
+/// * **列类型错配**（`AlterColumnType`）：不在 `plan::ChangeKind::is_purely_additive`
+///   的白名单里 ⇒ 引擎**永远不做**类型修复，启动期也刻意不做（改类型是破坏性变更）。
+///   ⚠ 这一条**只在 PG 上成立**：SQLite 没有 `ALTER COLUMN`，那边既做不了也不需要
+///   （动态类型下列声明的类型名不影响解码）。
+/// * **缺列**（`AddColumn`）：虽然在白名单里、引擎每轮启动已经会补，但本函数是
+///   **手动兜底** —— 用户点「修复 Schema」时不必等下一次启动，且它是引擎那条链之外
+///   的独立通道（引擎被拒 / 渲染失败时仍有这条）。
+///
+/// ## 对库的写入面
+///
+/// 只做两件事：① `CREATE TABLE IF NOT EXISTS` 版本表（`get_schema_status` 要读它，
+/// 不含则读报错）；② `heal_all` 的 `ALTER TABLE ADD COLUMN`（双方言）+ `ALTER TABLE
+/// ALTER COLUMN … TYPE`（**只在 PG**：SQLite 没有这条 DDL，2026-09-16 起由
+/// `schema_diff::heal_entity` 的方言闸挡住，详见那里）。
+/// **不再写版本表**：`record_version(CURRENT_VERSION, …)` 那一步已删。这么删是安全的：
+/// `init/database.rs` 的触发条件是 `applied_version > latest_version`，只有「版本号
+/// 体系更高的下游 fork 库」才成立；而 `record_version` 是 `INSERT OR IGNORE`
+/// （只插不覆盖），它能把 `MAX(version)` 抬到 233，却无法把它抬**过** 233
+/// ⇒ 它永远不会**造成**那个触发，只可能**阻止**它。删掉它不影响那个判定。
+///
+/// ⚠ 与旧版相比有一处**刻意的语义变化**：旧版在 `heal_all` 失败时只 `warn!` 然后照样
+/// 返回 `Ok`（fail-open 静默降级）。现在把错误**返回出去** —— 这个按钮的全部职责就是
+/// `heal_all`，它失败了却报「成功」等于让 UI 显示「已修复」而实际什么都没做。
+///
+/// **失败分两层，不要合并**：
+/// * **整体失败** ⇒ `Err`：连实际列快照都读不出来（连接/权限/元数据查询坏了），
+///   此时一件事都没做，调用方必须报错。
+/// * **部分未完成** ⇒ `Ok` + [`SchemaRepairReport::errors`] 非空：单个实体的列对照
+///   中断（如一条本方言执行不了的 DDL），其余实体照常修完。把它也升级成 `Err` 会
+///   让「修好了 180 张表、2 张没查完」被显示成「修复失败」，从而丢掉已完成的那部分；
+///   而把它压成 `warn!` 就又回到了 fail-open。所以它必须**随返回值一起出去**。
+pub async fn repair_schema(db: &sea_orm::DatabaseConnection) -> Result<SchemaRepairReport, DbErr> {
+    // 确保 version tracking 表存在（`get_schema_status` 会读它，不含则 SELECT 报错）。
+    // 注意：这里只建**空表**，不再往里写任何版本行。
     db.execute_unprepared(&format!(
         "CREATE TABLE IF NOT EXISTS {SCHEMA_VERSION_TABLE} (\
          version INTEGER NOT NULL PRIMARY KEY, \
@@ -588,75 +484,42 @@ pub async fn repair_schema(db: &sea_orm::DatabaseConnection) -> Result<(usize, u
     ))
     .await?;
 
-    let mut fixed = 0usize;
-    let total = MIGRATIONS.len();
-    // 记录是否有迁移失败：只要有失败，就不得强制写入 CURRENT_VERSION，
-    // 否则版本表会显示"已追平"，下次 run_migrations 将永久跳过失败的迁移
-    // （这正是 v125 背景中「存量库 schema 缺失」的根因）。
-    let mut all_ok = true;
-
-    for m in MIGRATIONS {
-        tracing::info!("[repair_schema] 重跑迁移 v{}: {}", m.version, m.description);
-        match (m.up)(db.clone()).await {
-            Ok(()) => {
-                // 记录版本号。容错处理：即使记录失败也不中断修复流程。
-                if let Err(e) = record_version(db, backend, m.version, m.description).await {
-                    tracing::warn!("[repair_schema] 版本号写入失败 v{}: {}", m.version, e);
-                }
-                fixed += 1;
-            },
-            Err(e) => {
-                all_ok = false;
-                tracing::warn!("[repair_schema] 迁移 v{} 重跑报错（可忽略）: {}", m.version, e);
-            },
-        }
-    }
-
-    if all_ok {
-        // 所有迁移成功：强制确保 CURRENT_VERSION 被记录。
-        // 这保证了 get_schema_status 能正确返回 0 pending。
-        record_version(db, backend, CURRENT_VERSION, "repair_schema completed").await.map_err(
-            |e| {
-                tracing::error!("[repair_schema] 强制写入版本号失败: {}", e);
-                DbErr::Custom(format!("修复完成但版本号写入失败: {e}"))
-            },
-        )?;
-    } else {
-        tracing::warn!(
-            "[repair_schema] 部分迁移失败，不强制写入 CURRENT_VERSION，\
-             下次启动 run_migrations 将重试失败的迁移"
-        );
-    }
-
     // schema diff 层：迁移重跑只能修「缺表/缺数据」，修不了「有表缺列」
-    // （CREATE TABLE IF NOT EXISTS 对已存在的表是 no-op）。这里以实体定义
-    // 为权威对照实际库列集，缺失即补；同时修类型错配（如 SQLite 方言
-    // 迁移在 PG 上产出的 real 列 vs 实体 f64 的 DOUBLE PRECISION）。
-    // 失败不阻塞版本号写入——迁移仍是建表权威，diff 是列级自愈。
+    // （CREATE TABLE IF NOT EXISTS 对已存在的表是 no-op）。这里以实体定义为权威
+    // 对照实际库列集，缺失即补；同时修类型错配（如 SQLite 方言迁移在 PG 上产出的
+    // real 列 vs 实体 f64 的 DOUBLE PRECISION）。
     match schema_diff::heal_all(db).await {
         Ok(report) => {
-            tracing::info!(
-                "[repair_schema] schema diff: {} 张实体表对照，补列 {} 个，类型修复 {} 个",
-                report.tables_scanned,
-                report.columns_added.len(),
-                report.types_healed.len()
-            );
+            if report.errors.is_empty() {
+                tracing::info!(
+                    "[repair_schema] schema diff: {} 张实体表对照完成，补列 {} 个，类型修复 {} 个",
+                    report.tables_scanned,
+                    report.columns_added.len(),
+                    report.types_healed.len()
+                );
+            } else {
+                // 刻意不说「完成」：这些表的 `columns_added` 是**部分账**
+                tracing::warn!(
+                    "[repair_schema] schema diff: {} 张实体表对照完成（另有 {} 张**未对照完**，缺失列无从判断），补列 {} 个，类型修复 {} 个；未完成: {:?}",
+                    report.tables_scanned,
+                    report.errors.len(),
+                    report.columns_added.len(),
+                    report.types_healed.len(),
+                    report.errors,
+                );
+            }
+            Ok(SchemaRepairReport {
+                tables_scanned: report.tables_scanned as i32,
+                columns_added: report.columns_added,
+                types_healed: report.types_healed,
+                errors: report.errors,
+            })
         },
         Err(e) => {
-            tracing::warn!("[repair_schema] schema diff 失败（不阻塞修复流程）: {}", e);
+            tracing::warn!("[repair_schema] schema diff 失败: {e}");
+            Err(e)
         },
     }
-
-    // 验证：读取当前最大版本号
-    let final_version = read_max_version(db).await.unwrap_or(0);
-    tracing::info!(
-        "[repair_schema] 完成: 重跑了 {}/{} 条迁移，最终版本号 v{}",
-        fixed,
-        total,
-        final_version
-    );
-
-    Ok((fixed, total))
 }
 
 /// 安全网：确保 agency_experts / agent_profiles 的 category CHECK 约束
@@ -665,7 +528,7 @@ pub async fn repair_schema(db: &sea_orm::DatabaseConnection) -> Result<(usize, u
 /// ⚠️ AxInvest fork 分歧点（upstream merge 时必须保留，勿被上游版本覆盖）：
 /// 上游 AxAgent 的同名函数只含 9 个通用值，因为上游没有 OPC/荐股业务；
 /// AxInvest 的 opc_setup 种子（opc_setup/mod.rs seed_opc_experts 等）与
-/// stock profile 会写入 `opc-company`/`opc-experts`/`opc-industry`/
+/// stock profile 会写入 `opc-company`/`opc-experts`/`opc-domain_pack`/
 /// `opc-domain`/`stock-analysis`，v200 PHASE 3 与 v223 自愈迁移的约束
 /// 列表也包含这些值。2026-08-18 后某次上游合并把本函数覆盖回 9 值版，
 /// 导致 ADD CONSTRAINT 被存量 opc-* 行顶回（EXPERT_READ_DIR_FAILED 同期
@@ -682,7 +545,7 @@ pub async fn ensure_category_check_constraints(
     let backend = db.get_database_backend();
     let categories = "'general','development','security','data','finance',\
         'devops','design','writing','business',\
-        'opc-company','opc-experts','opc-industry','opc-domain','stock-analysis'";
+        'opc-company','opc-experts','opc-domain_pack','opc-domain','stock-analysis'";
 
     // 防护：先校验存量数据再动约束。若先 DROP 后 ADD 失败，表会落得
     // 「无任何 category 约束」的裸奔状态（2026-09-06 实测发生过）。
@@ -780,14 +643,31 @@ async fn record_version(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::Database;
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 以下 4 条是「版本化迁移」清除后的判据集合（2026-09-16，P6）。
+    //
+    // 改判原则：**换被测对象，不换判据**。旧判据是「迁移跑完之后这些表/索引在不在」，
+    // 其中迁移只是**手段**，「这些表/索引在不在」才是产品级不变量 ⇒ 手段换了，
+    // 不变量继续测。这与第 2 步删掉的那些不同：那些的被测对象（逐条迁移的幂等性、
+    // 注册表唯一性、中间缺口补跑）在产品意义上已经不存在，留着只能靠伪造前提通过。
+    //
+    // * `fresh_db_via_init_chain_has_core_tables_and_no_dead_tables` —— 改判（3 条之一）
+    // * `l2_declared_indices_reach_ddl_on_engine_built_db`           —— 改判（3 条之二）
+    // * `repair_schema_on_converged_db_reports_no_heal`              —— 改判（3 条之三）：
+    //   顶替 `repair_schema_records_current_version`，后者被测对象已消失，删因见下
+    // * `missing_versions_is_empty_after_migration_purge`            —— 新增：防回流棘轮
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// 全新库经**完整初始化链**后，核心业务表必须存在，且死表不得被建出来。
     #[tokio::test]
-    async fn migrations_apply_cleanly_on_fresh_db() {
-        let db = Database::connect("sqlite::memory:").await.expect("in-memory db");
-        run_migrations(&db).await.expect("v1-v3 should apply on fresh db");
+    async fn fresh_db_via_init_chain_has_core_tables_and_no_dead_tables() {
+        // 走 `create_test_pool` 而不是自己连 in-memory 库：它走的是与生产**同一条**
+        // `initialize_schema`（版本表记账 → 引擎建表 → 哨兵播种）。手连 in-memory
+        // 只覆盖链条的一段，会让「链上少了一步」这类缺陷从判据里漏掉。
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        let db = &handle.conn;
 
-        // 验证关键表存在
         for table in &[
             "messages",
             "conversations",
@@ -808,7 +688,9 @@ mod tests {
             assert!(row.is_some(), "table {} should exist", table);
         }
 
-        // 死表应已被 v003 删除
+        // ⚠ 死表判据的**依据变了**（且更强了）：旧版靠「v003 把它们 DROP 过」，
+        // 现在靠「它们不在任何实体/L2 声明里，引擎根本不认识它们」——
+        // 不再依赖某条迁移被执行过。
         for dead in &["categories", "apps", "context_packs"] {
             let row = db
                 .query_one_raw(Statement::from_sql_and_values(
@@ -818,249 +700,265 @@ mod tests {
                 ))
                 .await
                 .expect("测试应成功");
-            assert!(row.is_none(), "dead table {} should have been dropped", dead);
+            assert!(row.is_none(), "dead table {} should not be created", dead);
         }
     }
 
+    /// L2 声明的索引必须**逐字**落到 DDL 上（多列 + partial 两条形态）。
+    ///
+    /// 这条覆盖的是**声明 → plan → render → apply** 整条链在「非单列索引」上的落地。
+    /// 此前这条链只有 PG 侧探针覆盖，单测里没有 ⇒ 「L2 声明写错了列」这类缺陷
+    /// 只在某次改 PG 时才暴露。
+    ///
+    /// ⚠ 刻意**不**断言 `idx_conversations_updated` / `idx_provider_keys_provider`
+    /// 这两个旧名字 —— 是登记过的决定，不是遗忘：
+    /// 1. 索引命名有两套约定。迁移用 `idx_{表}_{列}`（且带 `DESC` 方向），而实体
+    ///    `#[sea_orm(indexed)]` 派生的是 **`idx-{表}-{列名原文}`**（sea-orm 硬编码，
+    ///    `sea-orm-2.0.2/src/schema/entity.rs:158` 的
+    ///    `format!("idx-{}-{}", entity.to_string(), column.to_string())`）。
+    ///    注意「列名原文」含下划线 ⇒ `updated_at` 派生为
+    ///    **`idx-conversations-updated_at`**（连字符与下划线混写，看着像笔误但不是）。
+    /// 2. 两个旧名在存量库上的归宿**已被真库探针定论**
+    ///    （`output/tmp-p3-probe-prod2.log`，非推测）：
+    ///    - `idx_provider_keys_provider` → **RENAME** 成 `idx-provider_keys-provider_id`
+    ///      （列集/unique/method 一致，只差名字 ⇒ 改名匹配成立，**无语义损失**）。
+    ///    - `idx_conversations_updated`（实况 `cols[updated_at DESC]`）→ **DROP**。
+    ///      成因是**方向**而非名字：实况是 `DESC`，实体声明里没有表达方向的维度
+    ///      ⇒ 派生出的新索引是升序。⚠ 这不是「换个名字」：`ORDER BY updated_at DESC`
+    ///      的查询会失去有序索引。该语义差**无法**用列标志承接（`expected.rs` 里
+    ///      没有「索引方向」这一维），已记入 PLAN 待办，本轮不下判断。
     #[tokio::test]
-    async fn migrations_are_idempotent() {
-        let db = Database::connect("sqlite::memory:").await.expect("in-memory db");
-        run_migrations(&db).await.expect("测试：异步操作应成功");
-        // 第二次跑：所有 migration 都在 `applied_max >= m.version` 路径被 skip
-        run_migrations(&db).await.expect("second run should be a no-op, not an error");
+    async fn l2_declared_indices_reach_ddl_on_engine_built_db() {
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        let db = &handle.conn;
 
-        let max: i32 = read_max_version(&db).await.expect("测试：异步操作应成功");
-        assert_eq!(max, CURRENT_VERSION, "version should be {}", CURRENT_VERSION);
+        for idx in &["idx_messages_conv_created", "idx_gateway_usage_key", "idx_messages_branch"] {
+            let row = db
+                .query_one_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+                    [(*idx).into()],
+                ))
+                .await
+                .expect("测试应成功");
+            assert!(
+                row.is_some(),
+                "L2 声明的索引 {} 没落到 DDL 上 —— 声明与实际建出的对象脱节",
+                idx
+            );
+        }
 
-        // schema_version 表行数应与 MIGRATIONS 列表一一对应
-        let count_row = db
-            .query_one_raw(Statement::from_string(
+        // 实体 `#[sea_orm(indexed)]` 派生的名字是 `idx-{表}-{列名原文}`（sea-orm 硬编码，
+        // `sea-orm-2.0.2/src/schema/entity.rs:158`）。取两个名字是为了覆盖
+        // **列名里有没有下划线**这两态 —— 假设有人按「名字=全连字符」的直觉去改
+        // 派生逻辑，`updated_at` 那一条会当场红（`status` 那一条不会）。
+        //
+        // ⚠ 刻意把**字面名写死**，不改成「从 `expected::build` 读出来再比对」：读期望模型
+        // 会让「有人删掉了 `#[sea_orm(indexed)]` 属性」这类回归在**两侧同时消失** ⇒
+        // 判据自证化。字面名锚的是「实况库里真有这个对象」。
+        for idx in &["idx-conversations-updated_at", "idx-stock_analyses-status"] {
+            let row = db
+                .query_one_raw(Statement::from_sql_and_values(
+                    DbBackend::Sqlite,
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+                    [(*idx).into()],
+                ))
+                .await
+                .expect("测试应成功");
+            assert!(
+                row.is_some(),
+                "实体 `#[sea_orm(indexed)]` 应派生出索引 {}（列名原文含下划线，故是\
+                 连字符+下划线混写），但引擎没建出来 —— 声明与实际建出的对象脱节",
+                idx
+            );
+        }
+    }
+
+    /// `trajectory_patterns` 插一行 —— 只把 `id`/`name` 参数化，其余 9 列按实体声明的类型补常量。
+    ///
+    /// 刻意走 `execute_raw` 而**不**走 `ActiveModel`：本判据要观测的是**库上的约束**，
+    /// 过一遍实体层会把 `ActiveModel` 的默认值/校验混进观测面 —— 那时红了也分不清
+    /// 是约束没生效还是实体层拦下的。
+    async fn insert_pattern(
+        db: &sea_orm::DatabaseConnection,
+        id: &str,
+        name: &str,
+    ) -> Result<(), DbErr> {
+        db.execute_raw(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            "INSERT INTO trajectory_patterns \
+             (id, name, description, pattern_type, trajectory_ids, frequency, \
+              success_rate, average_quality, average_value_score, reward_profile, created_at) \
+             VALUES (?, ?, '', '', '', 1, 0.0, 0.0, 0.0, '', '')",
+            [id.into(), name.into()],
+        ))
+        .await?;
+        Ok(())
+    }
+
+    /// 排除式部分唯一索引必须在**真库**上按谓词生效 —— 「对象建出来了」不等于「语义对了」。
+    ///
+    /// 为什么单列一条、不并进 `l2_declared_indices_reach_ddl_on_engine_built_db`：那条只断言
+    /// 对象**存在**（`sqlite_master` 里查得到）。对 `uq_trajectory_patterns_name` 而言
+    /// 「存在」是最弱的一档，它真正要挡的是 C-#2 —— 声明里 `dialect` 被写成
+    /// `Some(Postgres)` 时**SQLite 期望集整条消失**，引擎于是根本不建它（不是建错，是建都不建），
+    /// 而本表 `name` 列没有 `#[sea_orm(unique)]` ⇒ 唯一性只剩这一条载体。
+    ///
+    /// ⚠ 必须带**反例**，否则本判据挡不住「谓词丢了」：只测「同名第二行被挡下」时，
+    /// 任何一条**整表唯一**的索引都能让它通过 —— 而那正是丢谓词的退化形态
+    /// （把 `rl_checkpoint:%` 的同名多行也一起挡掉，而检查点**需要**同名多行）。
+    /// 所以第三段反着测：被谓词排除的前缀，同名多行**必须**插得进去。
+    ///
+    /// ⚠ 它**不**替代生产库验证：本判据跑的是 `create_test_pool` 建出的 SQLite
+    /// （与生产同一条 `initialize_schema` 链，但**是另一个库文件**）。
+    /// 「生产 SQLite 库里真建出了这条索引」仍属未验证项。
+    #[tokio::test]
+    async fn partial_unique_index_excludes_checkpoint_names_on_engine_built_sqlite() {
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        let db = &handle.conn;
+
+        // 1) DDL 形态：谓词必须真的出现在 `sqlite_master.sql` 里。
+        let row = db
+            .query_one_raw(Statement::from_sql_and_values(
                 DbBackend::Sqlite,
-                format!("SELECT COUNT(*) AS cnt FROM {SCHEMA_VERSION_TABLE}"),
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+                ["uq_trajectory_patterns_name".into()],
             ))
             .await
             .expect("测试应成功")
-            .expect("count row");
-        let cnt: i32 = count_row.try_get_by("cnt").expect("测试应成功");
-        assert_eq!(
-            cnt as usize,
-            MIGRATIONS.len(),
-            "schema_version rows should match MIGRATIONS.len()"
+            .expect(
+                "SQLite 上没建出 uq_trajectory_patterns_name —— 该声明 `dialect: None` 被改成 \
+                 `Some(..)` 时的症状就是这个：本方言期望集整条消失，且**无任何报错**（缺陷 C-#2）",
+            );
+        let ddl: String = row.try_get("", "sql").unwrap_or_default();
+        assert!(
+            ddl.contains("UNIQUE INDEX")
+                && ddl.contains("WHERE")
+                && ddl.contains("NOT LIKE 'rl_checkpoint:%'"),
+            "SQLite 上的 DDL 少了排除谓词 ⇒ 退化成**整表唯一**（连 `rl_checkpoint:%` 的同名多行 \
+             也会被挡）。实际 DDL: {ddl}"
+        );
+
+        // 2) 正例：非前缀重名必须被挡。
+        insert_pattern(db, "p1", "pattern-a").await.expect("首行应插入成功");
+        assert!(
+            insert_pattern(db, "p2", "pattern-a").await.is_err(),
+            "非 `rl_checkpoint:` 前缀的同名第二行**必须**被唯一约束挡下 —— 它插得进去说明 \
+             SQLite 侧这条索引没生效"
+        );
+
+        // 3) 反例：被谓词排除的前缀**必须**允许同名多行（这才是「排除式」的全部意义）。
+        insert_pattern(db, "c1", "rl_checkpoint:epoch-1").await.expect("检查点首行应插入成功");
+        insert_pattern(db, "c2", "rl_checkpoint:epoch-1")
+            .await
+            .expect("`rl_checkpoint:%` 被 WHERE 排除在索引之外 ⇒ 同名多行必须允许");
+    }
+
+    /// 迁移清单**必须保持为空** —— 有人加回迁移时这条会红。
+    #[test]
+    fn missing_versions_is_empty_after_migration_purge() {
+        assert!(
+            registered_versions().is_empty(),
+            "`MIGRATIONS` 被加回了东西（实测 {:?}）—— 这与「引擎是唯一建表来源」冲突。\
+             请先重读 `MIGRATIONS` / `run_migrations` / `missing_versions` 三处文档：\
+             迁移与声明式引擎只能有一个建表 owner，且它们对版本判定的口径不同。",
+            registered_versions()
+        );
+        assert!(
+            missing_versions(&[100, 200, 233]).is_empty(),
+            "注册表为空 ⇒ 不存在「已注册但未应用」的版本号；\
+             若这里非空，说明 `missing_versions` 的推导不再只依赖 `registered_versions()`"
         );
     }
 
-    /// 防回归：v002 引入的索引必须真实存在。
-    /// partial index (`idx_messages_branch`) 在 messages.branch_id IS NOT NULL
-    /// 命中时使用。
-    #[tokio::test]
-    async fn repair_schema_sets_version_to_current() {
-        let db = Database::connect("sqlite::memory:").await.expect("in-memory db");
+    // ═══════════════════════════════════════════════════════════════════════
+    // `repair_schema_records_current_version` 为什么被删（2026-09-16）
+    //
+    // 它钉住的是「`repair_schema` 必须把 `CURRENT_VERSION` 写进版本表」，理由是
+    // 「否则 `init/database.rs` 的『版本超前』判定会把存量库误判成下游 fork 库并每轮
+    // 跑全量自愈」。**这个理由是反的**：那个判定的触发条件是
+    // `applied_version > latest_version`，而 `record_version` 是 `INSERT OR IGNORE`
+    // （`ON CONFLICT DO NOTHING`），它只能把 `MAX(version)` 抬到 233、不可能抬**过**
+    // 233 ⇒ 它永远不会**造成**那个触发，只可能**阻止**它。
+    //
+    // 更关键的是**被测对象已经消失**：迁移清单清空后，「`repair_schema` 写版本表」这一步
+    // 的全部意义就是「让 `get_schema_status` 报出 0 pending」，而 `pending_count` 这个
+    // 字段本身已随旧结构一起删除（`MIGRATIONS` 为空时它恒 0）。按本项目纪律
+    // 「被测对象消失的用例只能靠伪造前提通过 ⇒ 必须删掉，而不是放宽」，故删。
+    //
+    // 它留下的那半条真结论（「版本表里是 255 的库进来时不要被误判」）现在由
+    // [`CURRENT_VERSION`] 保持不变（233）来承担，见该常量的文档。替身是下面的
+    // `repair_schema_on_converged_db_reports_no_heal`：**换被测对象**（`repair_schema`
+    // 的真职责从「记账」变成 `heal_all`），**不换判据**（它必须真做了事，且不该报出
+    // 不存在的问题）。
+    // ═══════════════════════════════════════════════════════════════════════
 
-        // 模拟存量库：只跑了 v100，后续都没跑
-        // 先直接写入 v100 的版本号
-        db.execute_unprepared(&format!(
-            "CREATE TABLE IF NOT EXISTS {SCHEMA_VERSION_TABLE} (\
-             version INTEGER NOT NULL PRIMARY KEY, \
-             applied_at INTEGER NOT NULL, \
-             description TEXT)"
-        ))
-        .await
-        .expect("测试应成功");
-        db.execute_unprepared(&format!(
-            "INSERT INTO {SCHEMA_VERSION_TABLE} (version, applied_at, description) VALUES (100, 0, 'v100')"
-        ))
-        .await
-        .expect("测试应成功");
-
-        // 验证此时 pending_count > 0
-        let status = get_schema_status(&db).await.expect("测试：异步操作应成功");
-        assert!(status.pending_count > 0, "should have pending before repair");
-
-        // 执行 repair_schema
-        let (fixed, total) = repair_schema(&db).await.expect("测试：异步操作应成功");
-        assert!(fixed >= 1, "should fix at least 1 migration");
-        assert_eq!(total, MIGRATIONS.len());
-
-        // 验证 pending_count == 0
-        let status = get_schema_status(&db).await.expect("测试：异步操作应成功");
-        assert_eq!(
-            status.pending_count, 0,
-            "pending should be 0 after repair, got {}",
-            status.pending_count
-        );
-        assert_eq!(status.applied_version, CURRENT_VERSION);
-    }
-    /// 注：v002 已被合并到 v100_consolidated，索引由 PHASE 4 创建。
-    #[tokio::test]
-    async fn v002_critical_indices_exist() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        run_migrations(&db).await.expect("测试：异步操作应成功");
-
-        for idx in &[
-            "idx_messages_conv_created",
-            "idx_conversations_updated",
-            "idx_provider_keys_provider",
-            "idx_gateway_usage_key",
-            "idx_messages_branch",
-        ] {
-            let row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
-                    [(*idx).into()],
-                ))
-                .await
-                .expect("测试应成功");
-            assert!(row.is_some(), "index {} should exist", idx);
-        }
-    }
-
-    /// v100 consolidated 的 `up` 也应单独 idempotent：单独跑
-    /// 一次，重复跑不报错（所有 CREATE 都用 IF NOT EXISTS）。
-    #[tokio::test]
-    async fn v100_is_self_idempotent() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        // 不走 run_migrations，直接跑 v100
-        v100_consolidated::up(db.clone()).await.expect("测试：异步操作应成功");
-        v100_consolidated::up(db).await.expect("v100 must be re-runnable in isolation");
-    }
-
-    /// 防回归：v102 创建的 fleets / fleet_members 表与索引必须真实存在。
+    /// `repair_schema` 在**已收敛的库**上必须报出「没补任何列」。
     ///
-    /// 此测试在 SQLite 内存库上验证迁移效果。PostgreSQL 侧由 DDL 的
-    /// PG 语法原生支持（BIGINT/TEXT/REFERENCES ON DELETE CASCADE），
-    /// CI 集成测试环境会覆盖 PG 路径。
+    /// 这条同时钉住三件事：
+    /// 1. **全部实体表都对照完成** —— 断言值取自 `expected::expected_table_count`
+    ///    （与引擎 `expected::build` 同源），**不写死 183**：那个数是「此刻实体集」
+    ///    的快照，会和实体集一起腐烂（加/删一个实体就过期）。这一条同时守住
+    ///    「实体集与库表集同步」：少一张 ⇒ 某实体表不存在或该实体的对照被中断。
+    /// 2. **没有实体对照失败**（`errors` 为空）—— 2026-09-16 定因后补的：
+    ///    当天实测 `tables_scanned=31`（而非 183）的成因不是「表缺了」，而是
+    ///    `heal_entity` 发出 SQLite 不支持的 `ALTER COLUMN` 后中断、失败被 `warn!`
+    ///    吞掉。**只断言 `columns_added.is_empty()` 是拦不住它的** —— 中断的表的
+    ///    补列账恰好也是空的，于是「没查完」长成了「没问题」的样子。第 2 条把
+    ///    「测量中断」与「测量结果为 0」分开。
+    /// 3. **引擎自建的库里没有列级缺口** —— 这正是 `probe` 报 `pending_apply == 0`
+    ///    的同一件事的另一条独立通道（那边靠 diff，这边靠实体逐列对照）。
+    ///
+    /// ⚠ 第 1 条原来写的是 `tables_scanned > 0`，**太弱**：它拦不住「183 张里只对照完
+    /// 31 张」（31 > 0 为真）。当时把它写成反空真断言是对的、写强到「等于期望表数」还
+    /// 需要第 2 条同时到位才不至于把两件事混成一条。
+    ///
+    /// ⚠ 若这条红了：**不要放宽断言**。
+    /// * 第 1 条红 ⇒ 把「期望表名集合 − 实际被对照的表名集合」逐条列出来报回，**不许**
+    ///   退回 `> 0`、也不许改成 `>= 150` 之类的软阈值：少的那张要么真不存在，要么它的
+    ///   对照被中断，两种都是要归因的真发现。
+    /// * 第 3 条红 ⇒ `heal_all` 报出了 `columns_added` / `types_healed` 非空，说明引擎
+    ///   建出来的库与实体声明的列集/类型之间**真有**差异（引擎漏建列，或两条通道对同一
+    ///   份实体得出不同结论），把实际值原样贴出来归因。
     #[tokio::test]
-    async fn v102_fleets_tables_and_indices_exist() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        run_migrations(&db).await.expect("测试：异步操作应成功");
+    async fn repair_schema_on_converged_db_reports_no_heal() {
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        let db = &handle.conn;
 
-        // 表存在
-        for table in &["fleets", "fleet_members"] {
-            let row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                    [(*table).into()],
-                ))
-                .await
-                .expect("测试应成功");
-            assert!(row.is_some(), "table {} should exist after v102", table);
-        }
+        let report = repair_schema(db).await.expect("测试：修复应成功");
 
-        // 索引存在
-        for idx in &[
-            "idx_fleet_members_fleet_id",
-            "idx_fleet_members_agent_slug",
-            "idx_fleet_members_status",
-            "idx_fleets_status",
-        ] {
-            let row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
-                    [(*idx).into()],
-                ))
-                .await
-                .expect("测试应成功");
-            assert!(row.is_some(), "index {} should exist after v102", idx);
-        }
-    }
+        println!(
+            "[repair_schema] tables_scanned={} columns_added={:?} types_healed={:?} errors={:?}",
+            report.tables_scanned, report.columns_added, report.types_healed, report.errors
+        );
 
-    /// v102 单独 idempotent：重复跑不报错（所有 CREATE 都用 IF NOT EXISTS）。
-    #[tokio::test]
-    async fn v102_is_self_idempotent() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        v102_create_fleets::up(db.clone()).await.expect("测试：异步操作应成功");
-        v102_create_fleets::up(db).await.expect("v102 must be re-runnable in isolation");
-    }
-
-    /// 防回归：v103 创建的索引和 wiki_graph_cache 表必须真实存在。
-    #[tokio::test]
-    async fn v103_wiki_graph_perf_indices_and_cache_exist() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        run_migrations(&db).await.expect("测试：异步操作应成功");
-
-        // 索引存在
-        for idx in &[
-            "idx_notes_vault_deleted",
-            "idx_note_links_vault_source",
-            "idx_note_links_vault_target",
-            "idx_note_backlinks_vault_source",
-            "idx_note_backlinks_vault_target",
-        ] {
-            let row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
-                    [(*idx).into()],
-                ))
-                .await
-                .expect("测试应成功");
-            assert!(row.is_some(), "index {} should exist after v103", idx);
-        }
-
-        // wiki_graph_cache 表存在
-        let row = db
-            .query_one_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                ["wiki_graph_cache".into()],
-            ))
-            .await
-            .expect("测试应成功");
-        assert!(row.is_some(), "table wiki_graph_cache should exist after v103");
-    }
-
-    /// v103 单独 idempotent：先建表（v100）再重复跑 v103 两次，验证幂等。
-    /// v103 依赖 notes/note_links/note_backlinks 表存在，必须先跑 v100。
-    #[tokio::test]
-    async fn v103_is_self_idempotent() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        // 先跑 v100 建 notes/note_links/note_backlinks
-        v100_consolidated::up(db.clone()).await.expect("测试：异步操作应成功");
-        v103_wiki_graph_perf::up(db.clone()).await.expect("测试：异步操作应成功");
-        v103_wiki_graph_perf::up(db).await.expect("v103 must be re-runnable in isolation");
-    }
-
-    /// 防回归：v104 创建的 FTS5 虚拟表/触发器必须真实存在（SQLite 路径）。
-    #[tokio::test]
-    async fn v104_notes_fts_objects_exist() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        run_migrations(&db).await.expect("测试：异步操作应成功");
-
-        // notes_fts 虚拟表存在
-        let row = db
-            .query_one_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                ["notes_fts".into()],
-            ))
-            .await
-            .expect("测试应成功");
-        assert!(row.is_some(), "virtual table notes_fts should exist after v104");
-
-        // 触发器存在
-        for trig in &["notes_fts_ai", "notes_fts_ad", "notes_fts_au"] {
-            let row = db
-                .query_one_raw(Statement::from_sql_and_values(
-                    DbBackend::Sqlite,
-                    "SELECT name FROM sqlite_master WHERE type='trigger' AND name=?",
-                    [(*trig).into()],
-                ))
-                .await
-                .expect("测试应成功");
-            assert!(row.is_some(), "trigger {} should exist after v104", trig);
-        }
-    }
-
-    /// v104 单独 idempotent：先建 notes 表（v100）再重复跑 v104 两次，验证幂等。
-    /// v104 的 FTS5 触发器依赖 notes 表存在。
-    #[tokio::test]
-    async fn v104_is_self_idempotent() {
-        let db = Database::connect("sqlite::memory:").await.expect("测试：连接数据库应成功");
-        v100_consolidated::up(db.clone()).await.expect("测试：异步操作应成功");
-        v104_notes_fts::up(db.clone()).await.expect("测试：异步操作应成功");
-        v104_notes_fts::up(db).await.expect("v104 must be re-runnable in isolation");
+        // 1) 全部实体表都对照完成。期望值取自派生函数（与 `expected::build` 同源），
+        //    不是手抄的 183 —— 手抄数会和实体集一起腐烂。
+        assert_eq!(
+            report.tables_scanned as usize,
+            crate::reconcile::expected::expected_table_count(
+                crate::reconcile::extras::Dialect::Sqlite
+            ),
+            "对照完成的实体表数应等于本方言的期望表数 —— 少一张说明该实体表不存在，\
+             或该实体的对照被中断（后者看下一条）；多一张说明计数口径漂了"
+        );
+        // 2) 一条都不许「没查完」。必须与第 1 条并存：`errors` 非空时第 1 条也会红，
+        //    但两者归因不同（前者是「数对不上」，这里是「数恰好对上但有一张是中断的」）。
+        assert!(
+            report.errors.is_empty(),
+            "有实体未能对照完成：{:?} —— 那些表的列对照是**中断**的，`columns_added` \
+             对它们而言只是部分账，不能读成「没有缺列」。先看这些错误的原始 SQL",
+            report.errors
+        );
+        assert!(
+            report.columns_added.is_empty(),
+            "引擎刚建完的库里 `heal_all` 仍补了列：{:?} —— 两条列声明通道结论不一致",
+            report.columns_added
+        );
+        assert!(
+            report.types_healed.is_empty(),
+            "引擎刚建完的库里 `heal_all` 仍修了类型：{:?} —— 两条类型声明通道结论不一致",
+            report.types_healed
+        );
     }
 }

@@ -3,8 +3,7 @@
 use crate::commands::proactive::ProactiveService;
 use crate::semantic_cache::SemanticCache;
 use crate::state::{
-    AgentState, GatewayState, InfraState, LearningEngineState, MemoryState, SkillState, TaskState,
-    ToolState,
+    AgentState, LearningEngineState, MemoryState, SkillState, TaskState, ToolState,
 };
 use axagent_credential::CredentialManager;
 use axagent_harness::CapabilityGapProposal;
@@ -259,10 +258,6 @@ pub struct AppState {
         Arc<Mutex<std::collections::HashMap<String, std::collections::HashSet<String>>>>,
     pub agent_prompters:
         Arc<Mutex<std::collections::HashMap<String, axagent_agent::ChannelPermissionPrompter>>>,
-    /// 计划确认闸门（P0-2）的挂起审批槽：conversationId → 批准信号发送端。
-    /// `agent_query` 在闸门触发时插入 sender 并 await；`agent_approve_plan` 取出并发送。
-    pub agent_plan_approvals:
-        Arc<Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
     /// 能力补齐/进化改进提议的挂起审批槽：proposalId → 同意信号发送端（阻塞式，保留供超时兼容）。
     pub evolution_consent_senders:
         Arc<Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
@@ -341,7 +336,7 @@ pub struct AppState {
     pub prompt_cache: Arc<PromptCache>,
     /// Fleet 持久化仓库
     pub fleet_repository: Arc<dyn FleetRepository>,
-    /// Fleet 意图分类 LLM（wiring 层注入真实实现，供 fleet_dispatch 路由与 LlmDispatcher 复用）
+    /// Fleet 意图分类 LLM（wiring 层注入真实实现，供 fleet_dispatch 路由消费）
     pub fleet_intent_llm: Arc<dyn axagent_harness::fleet::FleetIntentLlm>,
     /// Harness 容器（统一管理核心基础设施注入）
     pub harness: axagent_runtime::harness::RuntimeHarness,
@@ -402,19 +397,6 @@ pub struct AppState {
     /// 所有 `record()` 调用都会经过 `FilteringSink` 过滤后落盘。
     pub telemetry_sink: Arc<dyn axagent_telemetry::TelemetrySink>,
 
-    /// 3.3 P2:持久化重试调度器(可选,None = 未启用)。
-    ///
-    /// 由 wiring 层在 `create_app_state` 中根据 `UnifiedConfig.persistent_runner.enabled`
-    /// 决定是否构造。`enabled: false`(默认)时不构造,零开销。
-    ///
-    /// 启用后,`start_background_services` 会调用 `spawn_daemon` 启动后台守护循环,
-    /// 每 60 秒检查 pending session 并调度执行。
-    ///
-    /// **注意**:当前 executor 闭包为占位实现(返回 `Err("not implemented")`),
-    /// 真正的 SessionManager 适配器需后续实现。启用配置后守护线程会运行,
-    /// 但实际执行会失败并记录 warn 日志。
-    pub persistent_runner: Option<Arc<axagent_runtime::persistent_runner::PersistentRunner>>,
-
     /// 统一事件总线(跨 crate 事件流标准入口)。
     ///
     /// 由 wiring 层(src/init/state.rs)在构造 AppState 时实例化,
@@ -439,19 +421,8 @@ pub struct AppState {
         Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
 
     // ── Phase 3 P1 Task 3.1: domain decomposition ───────────────────────────
-    // The six sub-state structs below provide a focused, composable view of
-    // `AppState`. They are constructed at start-up with `Arc`/`Mutex` clones
-    // of the corresponding top-level fields above, so the legacy call-sites
-    // (200+ `commands/*` files) keep working unchanged. New code can opt
-    // into the grouped accessors on these sub-states.  The fields are
-    // `#[allow(dead_code)]` until the migration is complete.
-    pub infra: InfraState,
-    /// Renamed from `gateway` to `gateway_state` to avoid colliding with
-    /// the existing `pub gateway: Arc<Mutex<Option<GatewayServer>>>` field
-    /// above. Existing call-sites that read the gateway server handle
-    /// continue to use the `gateway` field; new code can use
-    /// `app_state.gateway_state` for the grouped gateway view.
-    pub gateway_state: GatewayState,
+    // 以下子状态结构提供 `AppState` 的聚焦组合视图，启动时以 `Arc`/`Mutex`
+    // 克隆对应顶层字段构造，存量 `commands/*` 调用点保持原样。
     pub task: TaskState,
     pub agent: AgentState,
     pub memory: MemoryState,

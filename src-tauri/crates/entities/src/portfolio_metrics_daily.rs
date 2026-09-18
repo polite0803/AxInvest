@@ -12,6 +12,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 快照日期 (YYYY-MM-DD)
+    #[sea_orm(indexed)]
     pub snapshot_date: String,
     /// 持仓总市值
     pub total_market_value: f64,

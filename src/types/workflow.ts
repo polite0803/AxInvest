@@ -44,6 +44,10 @@ export interface NLParseRequest {
   prompt: string;
   context?: string;
   constraints?: string[];
+  /** 当前画布节点（供上下文感知生成 / 合并模式使用）。结构为编辑器节点类型，此处泛化为 unknown 避免跨类型依赖 */
+  currentNodes?: unknown[];
+  /** 当前画布边 */
+  currentEdges?: unknown[];
 }
 
 /** 自然语言解析结果 */

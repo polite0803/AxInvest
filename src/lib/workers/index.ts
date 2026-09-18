@@ -4,9 +4,6 @@
 //
 // Usage:
 //   import { estimateTokensAsync, processMarkdownAsync } from "@/lib/workers";
-//
-//   const tokens = await estimateTokensAsync(largeText);
-//   const clean = await processMarkdownAsync(markdown, true);
 
 type TaskType =
   | "estimateTokens"

@@ -489,6 +489,45 @@ pub(crate) fn extract_decision_fields(
     (action, position_pct, reasoning, time_horizon, expected_holding_days)
 }
 
+/// 落库前的 action 归一化 —— `stock_analyses.decision_action` 的**唯一写入口**。
+///
+/// 为什么必须唯一：`decision_action` 有两个落库点（`stock_workflow/core.rs` 的
+/// 工作区路径、`stock_workflow/hooks.rs` 的对话直执行路径）。任一处不做归一化，
+/// DB 值域就会重新漂移成中/英/未识别三种形态共存 —— 这正是本次 P1-4 要消灭的形态
+/// （同名语义散成多套值域 ⇒ 必有一处 fail-open）。
+///
+/// 规则：
+/// - 可识别值 → 规范中文标签（与 `portfolio-mgr.rhai` 的 6 档一致）
+/// - 未识别值 → 「不确定」+ WARN（**不原样入库**，也不伪装成「观望」）
+/// - `None`（决策缺失）→ `None`，由消费端按缺失处理
+pub(crate) fn normalize_action_for_storage(raw: Option<&str>) -> Option<String> {
+    use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
+    raw.map(|a| match normalize_action(a) {
+        Some(kind) => kind.as_storage_cn().to_string(),
+        None => {
+            tracing::warn!(
+                raw_action = %a,
+                "[decision] 落库前遇到未识别 action 值域，归入「不确定」"
+            );
+            ActionKind::Uncertain.as_storage_cn().to_string()
+        },
+    })
+}
+
+/// 从决策 JSON 中提取与 action **正交**的持仓状态轴（`P1-2`）。
+///
+/// 缺失 / 空串 → `None`：NULL 的语义是「采集时点无此信息」，消费端应按
+/// `decisionPositionPct` 自行派生展示，**不得**读成 `EMPTY`。
+pub(crate) fn extract_position_state(decision_json: &Option<String>) -> Option<String> {
+    let raw = decision_json.as_deref().filter(|s| !s.is_empty())?;
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    parsed
+        .get("positionState")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// 从 Workflow 结果中提取 portfolio-mgr 节点的决策 JSON 字符串。
 ///
 /// 优先取 `results["portfolio-mgr"]["result"]`（CodeNode 包装内 Rhai 脚本的
@@ -559,33 +598,90 @@ fn humanize_node_error(error_msg: &str) -> String {
     error_msg.to_string()
 }
 
-pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
-    if let Some(pm) = wf.results.get("portfolio-mgr") {
-        // CodeNode 包装: { status, result, input_params, node_id, params }
-        // 实际决策在 .result 字段;若 .result 缺失(旧版/异常路径)则降级用
-        // 整个 pm 值,让 extract_decision_fields 至少能拿到 action 等字段。
-        //
-        // V63 修复: portfolio-mgr 也可能是 {node_id, output, source, status}
-        // 格式（不含 result/params），决策数据在 .output 字段中。
-        let actual = match pm {
-            serde_json::Value::Object(obj) => {
-                if let Some(result) = obj.get("result") {
-                    result.clone()
-                } else if let Some(output) = obj.get("output") {
-                    output.clone()
-                } else {
-                    pm.clone()
-                }
-            },
-            _ => pm.clone(),
+/// 判断候选决策是否"可用"：必须是对象且含非空 `action` 字符串。
+///
+/// V71 硬化(2026-09-11)：拦截三类"伪决策"（DB 实证导致 `decision_action` 为空的根因）：
+///
+///   1) portfolio-mgr 结果被包装成 `{ node_id, output: null, source, status:"terminated" }`
+///      —— 取 `.output` 得到 `null`，序列化后 decision_json 字面量为 `"null"`；
+///   2) 从 results 里误取到**其他节点**（如一致性检查 / 辩论收敛）的输出，
+///      形状是 `{adjustedConfidence, agreementBreakdown, formulaLlmAgreement, ...}`，无 action；
+///   3) `wf.output` 是 results map（键为节点 ID），整张 map 被当成决策序列化。
+///
+/// 三类都会让 `decision_action` 落 NULL：前端显示"决策缺失"，统计上表现为
+/// "analysis completed 但无决策"。此处统一要求 action 存在，否则继续走后续兜底分支。
+fn has_usable_action(v: &serde_json::Value) -> bool {
+    v.get("action").and_then(|a| a.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false)
+}
+
+/// 从 rt-workflow 的节点输出中取出「实际决策对象」。
+///
+/// CodeNode / AgentNode 的包装形状有三种历史形态，统一在一处解包：
+///   1. `{ status, result, input_params, node_id, params }` → 取 `.result`（Rhai CodeNode 标准形态）
+///   2. `{ node_id, output, source, status }`               → 取 `.output`（V63 实证形态）
+///   3. 已是裸决策对象                                      → 原样返回
+fn unwrap_node_output(v: &serde_json::Value) -> serde_json::Value {
+    match v {
+        serde_json::Value::Object(obj) => {
+            if let Some(result) = obj.get("result") {
+                result.clone()
+            } else if let Some(output) = obj.get("output") {
+                output.clone()
+            } else {
+                v.clone()
+            }
+        },
+        _ => v.clone(),
+    }
+}
+
+/// 从节点输出中取出「**纯公式侧**决策」——只认确定性节点（风控门 → 组合经理），
+/// **绝不接受 LLM 兜底**（`quality-fallback`）。
+///
+/// 与 `extract_decision_json` 的分工（铁律 41：同一语义不得被两条链按不同口径消费）：
+/// - `extract_decision_json` = **本次实际生效的最终决策**（链尾优先；D/F 档含 LLM 保守决策）
+///   ⇒ 落库 / 仪表盘 / 历史列表 / 退出紧迫度。
+/// - 本函数 = **公式决策**（确定性链）⇒ `compute_decision_agreement` 的「公式 vs LLM」诊断。
+///
+/// 2026-09-13 新增：此前 `compute_decision_agreement` 直接拿 `extract_decision_json` 当「公式侧」，
+/// 一旦链尾是 LLM 兜底，同一份输出里的 `formulaAction` / `formulaRiskLevel` 就变成了
+/// **LLM 的答案**却挂着「公式」的名字。实证 600031（2026-09-13）：
+/// `formulaAction="减持"` / `formulaRiskLevel="高风险"` 实为 `quality-fallback` 的 LLM 输出，
+/// 而真正的公式决策是风控门的 `增持` / `中风险`（11.5%）—— 前端把它渲染成
+/// 「公式 ◀ 53 ▶ LLM」，用户看到的「公式」其实是 LLM。
+pub(crate) fn extract_formula_decision_json(wf: &Workflow) -> Option<String> {
+    for node_id in ["portfolio-risk-gate", "portfolio-mgr"] {
+        let Some(node) = wf.results.get(node_id) else {
+            continue;
         };
-        if let Ok(s) = serde_json::to_string(&actual) {
+        let actual = unwrap_node_output(node);
+        if has_usable_action(&actual)
+            && let Ok(s) = serde_json::to_string(&actual)
+        {
             return Some(s);
         }
     }
-    // V40 修复: 当 quality-gate 判定为 D/F 时，portfolio-mgr 公式决策被
-    // quality-fallback(AgentNode)的保守决策替代。此时取 quality-fallback 的
-    // content JSON 作为最终决策，确保前端 DB 展示与质量门禁路径一致。
+    None
+}
+
+pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
+    // V71: 记录 portfolio-mgr 候选不可用的原因，供后续兜底分支生成可诊断的占位决策
+    let mut unusable_reason: Option<String> = None;
+
+    // ── 优先级 0：quality-fallback（数据质量 D/F 档的 LLM 保守决策）──
+    // V40 语义保持 + 2026-09-13 顺序修正：
+    //   quality-gate 判 D/F（`default_case = "low-quality"`）时路由到 quality-fallback，
+    //   由 AgentNode 的保守决策**替代** portfolio-mgr 的公式决策。因此本分支必须排在
+    //   风控门之前 —— 风控门吃的是 portfolio-mgr 的公式结果（拓扑：
+    //   portfolio-mgr → portfolio-risk-gate → rule-check → quality-gate），
+    //   D/F 档下它照样会产出结果；若把 gate 排在最前，就会把「已被质量门替代的公式决策」
+    //   重新抬成最终结论，直接推翻 V40 修复。
+    //
+    //   D/F 档的完整链路是：quality-gate(default) → quality-fallback → decision-explainer
+    //   ⇒ 链尾终值是 quality-fallback，与 store-result / end-output 声明一致。
+    //
+    //   正常档（A/B/C）quality-fallback 为 Skipped（无 result，见 rt-workflow
+    //   apply_node_status_update 仅在 result=Some 时写入）⇒ 本分支不命中，继续走 gate。
     if let Some(qf) = wf.results.get("quality-fallback") {
         if let Some(content_str) = qf.get("content").and_then(|v| v.as_str()) {
             // quality-fallback 输出格式: {"action":"持有/减持/卖出","positionPct":0-20,"confidence":20-40,"riskLevel":"高风险","reasoning":"..."}
@@ -604,8 +700,67 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
                         }
                     }
                 }
-                return Some(v.to_string());
+                // V71: quality-fallback 也可能输出无 action 的 JSON（LLM 未遵循 schema）
+                if has_usable_action(&v) {
+                    return Some(v.to_string());
+                }
+                if unusable_reason.is_none() {
+                    unusable_reason = Some("quality-fallback 输出缺少 action 字段".to_string());
+                }
             }
+        }
+    }
+
+    // ── 优先级 1：portfolio-risk-gate（模板声明的链尾终值）──
+    // 2026-09-13 修复「风控门仓位修正被落库链整体丢弃」：
+    //   模板四处（store-result.input_var / end-output.output_var / rule-check 与
+    //   decision-explainer 的 contextSources）都以 portfolio-risk-gate 为终值，
+    //   但本函数此前只认 portfolio-mgr ⇒ 同一次运行产出两套真相：
+    //   rule-check / decision-explainer 报「已按 R-206 下调至 0%」，DB 与前端仍是
+    //   portfolio-mgr 的 8.85%（实证 601166 / 2026-09-12：风险敞口被高估 8.8pt，
+    //   且用户完全看不到风控曾介入）。
+    //   风控门输出 = portfolio-mgr 全字段 + 覆盖 action/positionPct + risk_gate 元数据，
+    //   是 portfolio-mgr 的超集，故优先取它；其缺位或不可用时再回落 portfolio-mgr
+    //   （保留旧语义，兼容风控门被跳过/失败的历史运行）。
+    //   ⚠️ 顺序：排在 quality-fallback **之后**。风控门吃 portfolio-mgr 的公式结果，
+    //   在 D/F 档下照样产出结果；若排在 quality-fallback 之前会把「已被质量门替代的
+    //   公式决策」重新抬成结论（见优先级 0 注释）。
+    if let Some(gate) = wf.results.get("portfolio-risk-gate") {
+        let actual = unwrap_node_output(gate);
+        if has_usable_action(&actual) {
+            if let Ok(s) = serde_json::to_string(&actual) {
+                return Some(s);
+            }
+        } else {
+            tracing::warn!(
+                "[extract_decision_json] portfolio-risk-gate 结果缺少 action 字段，回落 portfolio-mgr"
+            );
+        }
+    }
+
+    // ── 优先级 2：portfolio-mgr（公式层原始决策，兼容风控门缺位的历史运行）──
+    if let Some(pm) = wf.results.get("portfolio-mgr") {
+        // CodeNode 包装解包（.result / .output / 裸对象），见 unwrap_node_output 注释。
+        // 实际决策在 .result 字段;若 .result 缺失(旧版/异常路径)则降级用
+        // 整个 pm 值,让 extract_decision_fields 至少能拿到 action 等字段。
+        //
+        // V63 修复: portfolio-mgr 也可能是 {node_id, output, source, status}
+        // 格式（不含 result/params），决策数据在 .output 字段中。
+        let actual = unwrap_node_output(pm);
+        // V71: 只有含可用 action 才认作决策，否则记原因并继续兜底
+        if has_usable_action(&actual) {
+            if let Ok(s) = serde_json::to_string(&actual) {
+                return Some(s);
+            }
+        } else {
+            let shape: Vec<String> =
+                actual.as_object().map(|o| o.keys().take(8).cloned().collect()).unwrap_or_default();
+            unusable_reason =
+                Some(format!("portfolio-mgr 结果缺少 action 字段(形状: {{{}}})", shape.join(",")));
+            tracing::warn!(
+                "[extract_decision_json] portfolio-mgr 结果不可用({}),继续尝试兜底分支",
+                unusable_reason.as_deref().unwrap_or("未知")
+            );
         }
     }
     // ── V57 硬化：portfolio-mgr 节点未成功产出结果时（Failed / Skipped /
@@ -617,40 +772,45 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
     // 注意：只要节点状态不是 Completed（即没拿到有效 result）就触发，
     // 覆盖 Rhai 运行时错误(Failed)与上游失败导致 Skipped 两种空壳来源。
     if let Some(state) = wf.node_states.get("portfolio-mgr") {
-        if state.status != NodeStatus::Completed {
-            let error_msg = state.error.clone().unwrap_or_else(|| match state.status {
-                NodeStatus::Skipped => {
-                    "portfolio-mgr 节点被跳过（上游依赖失败导致，无本地错误详情）".to_string()
-                },
-                NodeStatus::Failed => "portfolio-mgr 节点执行失败（无错误详情）".to_string(),
-                _ => "portfolio-mgr 节点未完成（状态非 Completed）".to_string(),
-            });
+        // V71: 除"节点未完成"外，节点 Completed 但结果无可辨识 action（伪决策）
+        // 同样走本兜底，避免 decision_action 落 NULL。
+        if state.status != NodeStatus::Completed || unusable_reason.is_some() {
+            let error_msg =
+                state.error.clone().or_else(|| unusable_reason.clone()).unwrap_or_else(|| {
+                    match state.status {
+                        NodeStatus::Skipped => {
+                            "portfolio-mgr 节点被跳过（上游依赖失败导致，无本地错误详情）"
+                                .to_string()
+                        },
+                        NodeStatus::Failed => {
+                            "portfolio-mgr 节点执行失败（无错误详情）".to_string()
+                        },
+                        _ => "portfolio-mgr 节点未完成（状态非 Completed）".to_string(),
+                    }
+                });
             // 错误码资源键转可读文案：reasoning 内联可读错误，不再让用户翻
             // JSON 子字段；原始错误串（含资源键码）保留在 diagnostics.errorCode。
             let humanized = humanize_node_error(&error_msg);
-            let mut fallback = serde_json::Map::new();
-            fallback.insert("action".to_string(), json!("观望"));
-            fallback.insert("positionPct".to_string(), json!(0));
-            fallback.insert("confidence".to_string(), json!(0));
-            fallback.insert("riskLevel".to_string(), json!("未知"));
-            fallback.insert("timeHorizon".to_string(), json!("短期"));
-            fallback.insert(
-                "reasoning".to_string(),
-                json!(format!("组合管理节点未产出有效决策，已降级为保守观望。原因：{humanized}")),
-            );
-            let mut diag = serde_json::Map::new();
-            diag.insert("node".to_string(), json!("portfolio-mgr"));
-            diag.insert("nodeStatus".to_string(), json!(format!("{:?}", state.status)));
-            diag.insert("nodeError".to_string(), json!(humanized));
-            diag.insert("errorCode".to_string(), json!(error_msg.clone()));
             let hint = if state.status == NodeStatus::Skipped {
                 "portfolio-mgr 被 Skipped：检查其上游依赖节点（trader/research-mgr/a-catalyst/t-risk 等）是否失败或超时，错误在对应 node_states[上游].error。"
+            } else if state.status == NodeStatus::Completed {
+                // V71: 节点跑成功但结果形状不含 action —— 检查上游 input_mapping 是否解析到空值
+                "portfolio-mgr 已执行但结果无可辨识 action：优先检查该节点 input_mapping（data 键是否解析为 null）与 Rhai 是否为每一条 return 路径都输出含 action 的对象。"
             } else {
                 "portfolio-mgr Rhai 运行失败：检查未走 present() 直接引用的变量、除零或类型错误。"
             };
-            diag.insert("hint".to_string(), json!(hint));
-            fallback.insert("diagnostics".to_string(), serde_json::Value::Object(diag));
-            return serde_json::to_string(&serde_json::Value::Object(fallback)).ok();
+            // P0-5(2026-09-14): 收敛到单一构造点。
+            // 原先此处与 `conservative_placeholder` 是两份结构相同的手写占位
+            // （仅此处多一个 errorCode），属「同一能力 N 份实现」——
+            // 且两份都把「节点没产出决策」写成 action="观望"。
+            return serde_json::to_string(&conservative_placeholder(
+                &format!("{:?}", state.status),
+                &humanized,
+                hint,
+                Some(error_msg.as_str()),
+                &PlaceholderContext::collect(wf, Some("portfolio-mgr")),
+            ))
+            .ok();
         }
     }
 
@@ -665,55 +825,215 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
     //
     // 修复策略:检测到 results map 时,走最小占位结构(与 V57 硬化同款),
     // 给前端一个明确的"决策缺失,已降级为观望"信号,而非含糊的 results map。
+    //
+    // V71 硬化(2026-09-11): 原实现用**硬编码节点 ID 白名单**判断 results map，
+    //   DB 实证漏判 —— 600900/601166/300795 的 decision_json 是 `{p-analysts, pace-calc,
+    //   t-catalyst-data, t-hotmoney-data, t-lockup-data, ...}`，301302 是 `{"": {debate...}, a-catalyst,
+    //   a-hotmoney, ...}`，名单里没有 `p-analysts`/`pace-calc`/空串键 → 整张 results map
+    //   被当成决策序列化 → decision_action 为 NULL。
+    //   改为通用判据：顶层对象**不含可用 action** 即视为 results map（决策必然含 action）。
     if let Some(output) = wf.output.as_ref() {
-        // 检测:顶层是 object 且含已知 workflow 节点 ID
-        let is_results_map = output
-            .as_object()
-            .map(|obj| {
-                obj.contains_key("portfolio-mgr")
-                    || obj.contains_key("trigger")
-                    || obj.contains_key("end-output")
-                    || obj.contains_key("research-mgr")
-                    || obj.contains_key("trader")
-                    || obj.contains_key("value-investor")
-                    || obj.contains_key("debate-convergence")
-                    || obj.contains_key("raw-data")
-                    || obj.contains_key("t-quote")
-                    || obj.contains_key("t-kline")
-            })
-            .unwrap_or(false);
+        let is_results_map = output.is_object() && !has_usable_action(output);
         if is_results_map {
             tracing::warn!(
                 "[extract_decision_json] portfolio-mgr 缺位且 node_states 无记录,wf.output 是 results map,降级为最小占位决策"
             );
-            let mut fallback = serde_json::Map::new();
-            fallback.insert("action".to_string(), json!("观望"));
-            fallback.insert("positionPct".to_string(), json!(0));
-            fallback.insert("confidence".to_string(), json!(0));
-            fallback.insert("riskLevel".to_string(), json!("未知"));
-            fallback.insert("timeHorizon".to_string(), json!("短期"));
-            fallback.insert(
-                "reasoning".to_string(),
-                json!("组合管理节点未产出有效决策,已降级为保守观望。portfolio-mgr 节点缺位且 node_states 无状态记录。"),
-            );
-            let mut diag = serde_json::Map::new();
-            diag.insert("node".to_string(), json!("portfolio-mgr"));
-            diag.insert("nodeStatus".to_string(), json!("Missing"));
-            diag.insert(
-                "nodeError".to_string(),
-                json!("portfolio-mgr 节点在 results 和 node_states 中均缺位,可能工作流异常终止"),
-            );
-            diag.insert(
-                "hint".to_string(),
-                json!("检查工作流执行日志,确认 portfolio-mgr 节点是否被正确调度。若为工作流引擎 bug,需排查 rt-workflow engine 的节点写入逻辑。"),
-            );
-            fallback.insert("diagnostics".to_string(), serde_json::Value::Object(diag));
-            return serde_json::to_string(&serde_json::Value::Object(fallback)).ok();
+            // P0-5: 收敛到单一构造点（原为第三份手写占位）
+            return serde_json::to_string(&conservative_placeholder(
+                "Missing",
+                "portfolio-mgr 节点在 results 和 node_states 中均缺位,可能工作流异常终止",
+                "检查工作流执行日志,确认 portfolio-mgr 节点是否被正确调度。若为工作流引擎 bug,需排查 rt-workflow engine 的节点写入逻辑。",
+                None,
+                &PlaceholderContext::collect(wf, Some("portfolio-mgr")),
+            ))
+            .ok();
         }
-        serde_json::to_string(output).ok()
+        if has_usable_action(output) {
+            serde_json::to_string(output).ok()
+        } else {
+            // V71: 非对象/形状异常的顶层输出（如裸字符串）同样给出可诊断占位，
+            // 保证 decision_action 永不落 NULL（前端才不会显示"决策缺失"）
+            serde_json::to_string(&conservative_placeholder(
+                "Invalid",
+                unusable_reason
+                    .as_deref()
+                    .unwrap_or("wf.output 形状异常且无可辨识 action"),
+                "检查 wf.output 的序列化内容是否为决策对象；应为含 action 的 portfolio-mgr 结果或股票分析输出结构。",
+                None,
+                &PlaceholderContext::collect(wf, Some("portfolio-mgr")),
+            ))
+            .ok()
+        }
     } else {
         None
     }
+}
+
+/// 一个被跳过的节点及其原因（A4，2026-09-14）。
+#[derive(Debug, Clone)]
+struct SkippedNode {
+    node_id: String,
+    title: String,
+    /// 引擎写入的 `NodeRuntimeState::skip_reason`：
+    /// `upstream_failed`（真故障）/ `upstream_skipped`（故障传播第二跳起）/
+    /// `branch_not_taken`（配置意图）/ `disabled` / `unreachable`。
+    reason: String,
+}
+
+/// 「决策缺失」占位决策的上下文（A4，2026-09-14）。
+///
+/// ## 为什么需要它
+///
+/// 601166 断链审计（`AUDIT-601166-chain-break-2026-09-14.md`）暴露的核心问题是
+/// **「不应该继续，但应该告知错误」里的后半句完全缺失**：`bear-r3` 的 LLM 504
+/// 明明记在 `node_states["bear-r3"].error` 里，却**零消费者** —— 落库只剩一句
+/// 「portfolio-mgr 节点被跳过（上游依赖失败导致，无本地错误详情）」，
+/// 用户拿不到任何可行动信息，只能人肉翻 62 个节点。
+///
+/// 本上下文把两件事补上：
+/// ① `root_failure`：沿上游回溯到**第一个真正失败**的节点及其错误（真正的根因）；
+/// ② `skipped_nodes`：全部被跳过节点 + 原因，让「配置意图的跳过」与
+///    「故障导致的跳过」在数据层就能区分（引擎侧见 `NodeRuntimeState::skip_reason`）。
+#[derive(Debug, Default, Clone)]
+struct PlaceholderContext {
+    root_failure: Option<(String, String)>,
+    skipped_nodes: Vec<SkippedNode>,
+}
+
+impl PlaceholderContext {
+    /// 采集上下文。`backtrace_from` 为回溯根因的起点节点（通常 `"portfolio-mgr"`）。
+    fn collect(wf: &Workflow, backtrace_from: Option<&str>) -> Self {
+        let mut skipped_nodes: Vec<SkippedNode> = wf
+            .node_states
+            .iter()
+            .filter(|(_, s)| s.status == NodeStatus::Skipped)
+            .map(|(id, s)| SkippedNode {
+                node_id: id.clone(),
+                title: wf
+                    .nodes
+                    .iter()
+                    .find(|n| n.base_id() == id.as_str())
+                    .map(|n| n.base_title().to_string())
+                    .unwrap_or_default(),
+                reason: s.skip_reason.clone().unwrap_or_else(|| "unknown".to_string()),
+            })
+            .collect();
+        // HashMap 迭代顺序随机 ⇒ 显式排序，保证同一份运行产物可复现、可 diff。
+        skipped_nodes.sort_by(|a, b| a.node_id.cmp(&b.node_id));
+        let root_failure = backtrace_from.and_then(|start| find_root_failure(wf, start));
+        Self { root_failure, skipped_nodes }
+    }
+}
+
+/// 从 `start` 沿**入边**做 BFS，返回第一个 `Failed` 节点及其错误。
+///
+/// BFS 保证「离 `start` 最近」优先 —— 在故障传播语义上这就是最直接的原因
+/// （更远的 `Failed` 往往是它的下游受害者）。同层多个失败时按边的声明顺序取首个，
+/// 结果确定。找不到返回 `None`（如纯分支跳过，根本没节点失败）。
+fn find_root_failure(wf: &Workflow, start: &str) -> Option<(String, String)> {
+    let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+    visited.insert(start.to_string());
+    queue.push_back(start.to_string());
+    while let Some(cur) = queue.pop_front() {
+        for e in wf.edges.iter() {
+            if e.target != cur || !visited.insert(e.source.clone()) {
+                continue;
+            }
+            if let Some(st) = wf.node_states.get(&e.source)
+                && st.status == NodeStatus::Failed
+            {
+                let err = st
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "（节点状态为 Failed 但未记录错误详情）".to_string());
+                return Some((e.source.clone(), err));
+            }
+            queue.push_back(e.source.clone());
+        }
+    }
+    None
+}
+
+/// 构造「决策缺失」占位决策（action=数据缺失 / 0 仓位 / 带 diagnostics）。
+///
+/// V71 抽取：原三处兜底分支各自手写一份相同结构的占位 JSON，
+/// 统一为单一构造点，避免后续再出现"某条兜底路径漏写 action"。
+///
+/// ⚠️ P0-5(2026-09-14): action 由「观望」改为显式缺失哨兵「数据缺失」。
+/// 原实现（action="观望" + positionPct=0 + confidence=0）让「节点根本没产出决策」
+/// 在 UI 与 DB 上表现为一条**已做出的观望结论**，与真实观望无法区分 ——
+/// 缺失被两种业务语义（观望 / uncertain）分别吸收，且无法事后统计。
+/// 现填哨兵，前端渲染「数据缺失」；归因信息完整保留在 `diagnostics`。
+///
+/// A4(2026-09-14)：新增 `ctx`，把**根因失败节点**与**跳过清单**带进 reasoning 与
+/// diagnostics。旧文案「上游依赖失败导致，无本地错误详情」是本项目最典型的
+/// 「故障不可观测」形态 —— 错误就在内存里，只是没有消费者。
+fn conservative_placeholder(
+    node_status: &str,
+    node_error: &str,
+    hint: &str,
+    error_code: Option<&str>,
+    ctx: &PlaceholderContext,
+) -> serde_json::Value {
+    let mut fallback = serde_json::Map::new();
+    fallback.insert(
+        "action".to_string(),
+        json!(axagent_analysis_engine::decision_action::ActionKind::Unavailable.as_storage_cn()),
+    );
+    fallback.insert("positionPct".to_string(), json!(0));
+    fallback.insert("confidence".to_string(), json!(0));
+    fallback.insert("riskLevel".to_string(), json!("未知"));
+    fallback.insert("timeHorizon".to_string(), json!("短期"));
+    // 用户可读的 reasoning：优先讲**根因**，其次才是本节点自己的状态。
+    let reasoning = match (&ctx.root_failure, ctx.skipped_nodes.len()) {
+        (Some((nid, err)), n) if n > 0 => format!(
+            "组合管理节点未产出有效决策（数据缺失，非观望结论）。根因：上游节点 `{nid}` 执行失败 —— {err}。\
+             该失败已被引擎判定为不可继续，{n} 个下游节点随即被级联跳过（含 portfolio-mgr），因此本次没有决策。"
+        ),
+        (Some((nid, err)), _) => format!(
+            "组合管理节点未产出有效决策（数据缺失，非观望结论）。根因：上游节点 `{nid}` 执行失败 —— {err}。"
+        ),
+        (None, 0) => {
+            format!("组合管理节点未产出有效决策（数据缺失，非观望结论）。原因：{node_error}")
+        },
+        (None, n) => format!(
+            "组合管理节点未产出有效决策（数据缺失，非观望结论）。原因：{node_error}；\
+             另有 {n} 个节点被跳过（未发现 Failed 节点，疑为分支未选中或上游越界）。"
+        ),
+    };
+    fallback.insert("reasoning".to_string(), json!(reasoning));
+    let mut diag = serde_json::Map::new();
+    diag.insert("node".to_string(), json!("portfolio-mgr"));
+    diag.insert("nodeStatus".to_string(), json!(node_status));
+    diag.insert("nodeError".to_string(), json!(node_error));
+    diag.insert("hint".to_string(), json!(hint));
+    if let Some(code) = error_code {
+        diag.insert("errorCode".to_string(), json!(code));
+    }
+    // A4：根因 + 跳过清单（结构化，供前端分栏展示与事后统计）
+    if let Some((nid, err)) = &ctx.root_failure {
+        diag.insert("rootFailureNode".to_string(), json!(nid));
+        diag.insert("rootFailureError".to_string(), json!(err));
+    }
+    if !ctx.skipped_nodes.is_empty() {
+        diag.insert("skippedNodeCount".to_string(), json!(ctx.skipped_nodes.len()));
+        diag.insert(
+            "skippedNodes".to_string(),
+            json!(
+                ctx.skipped_nodes
+                    .iter()
+                    .map(|s| json!({
+                        "nodeId": s.node_id,
+                        "title": s.title,
+                        "reason": s.reason,
+                    }))
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+    fallback.insert("diagnostics".to_string(), serde_json::Value::Object(diag));
+    serde_json::Value::Object(fallback)
 }
 
 /// 从 Workflow 结果中提取 trader 节点的 LLM 决策 JSON。
@@ -765,13 +1085,14 @@ pub(crate) fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
                         let verdict_clone =
                             parsed.get("verdict").and_then(|v| v.as_str()).map(|s| s.to_string());
                         if let Some(ref v) = verdict_clone {
-                            let mapped: &str = match v.trim() {
-                                "看多" | "看涨" => "买入",
-                                "看空" | "看跌" => "卖出",
-                                "中性" | "震荡" => "持有",
-                                "不确定" | "无法判断" => "观望",
-                                _ => v.trim(), // 兜底: 保留原值, 让 normalize_llm_action 处理
-                            };
+                            // P1-1(2026-09-14): verdict → action 改走统一降维映射
+                            // (`decision_action::verdict_to_action`)，不再内联第二份。
+                            // ⚠️ 语义修正：「不确定 / 无法判断」现映射为「不确定」而**不是**
+                            // 「观望」—— 方向未知 ≠ 判断为中性，压成观望等于替 LLM 下结论。
+                            let mapped =
+                                axagent_analysis_engine::decision_action::verdict_to_action(v)
+                                    .map(|k| k.as_storage_cn())
+                                    .unwrap_or_else(|| v.trim());
                             if let Some(obj) = parsed.as_object_mut() {
                                 obj.insert(
                                     "action".into(),
@@ -799,49 +1120,54 @@ pub(crate) fn extract_llm_decision_json(wf: &Workflow) -> Option<String> {
     }
 }
 
-/// 标准化 LLM 输出的 action 字段, 映射非标准值到标准值。
+/// 标准化 LLM 输出的 action 字段, 把非标准值映射到标准值。
 ///
-/// 标准值: 买入, 增持, 持有, 减持, 卖出, 观望
-/// 非标准值映射规则:
-///   "不确定" / "未知" / "? " / "" → "观望" (无判断 → 不操作)
-///   "回避" / "远离" / "清仓" / "止损" → "卖出" (明确看空 → 卖出)
-///   "卖" / "sell" → "卖出", "买" / "buy" → "买入"
-///   "减" → "减持"
+/// 标准值: 买入 / 增持 / 持有 / 减持 / 卖出 / 观望（+ 不确定）
+///
+/// ⚠️ P1-1(2026-09-14): 值域权威表已收敛到 `decision_action::normalize_action`，
+/// 本函数不再内联维护第二份。
+///
+/// ⚠️ 语义修正：`"不确定" / "未知" / "" / "无法判断"` 现归入 **「不确定」**，
+/// 而不再是原先的「观望」。原实现把「LLM 说不清」压成「观望（不操作）」，
+/// 等于替 LLM 下了一个它没下的结论，前端据此渲染的观望标签是**伪造的结论**。
+/// 兜底分支同理：未识别值不再默认「观望」。
 pub(crate) fn normalize_llm_action(parsed: &mut serde_json::Value) {
-    let obj = match parsed.as_object_mut() {
-        Some(o) => o,
+    use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
+
+    let Some(obj) = parsed.as_object_mut() else {
+        return;
+    };
+    let trimmed = match obj.get("action").and_then(|v| v.as_str()) {
+        Some(a) => a.trim().to_string(),
         None => return,
     };
-    let action = match obj.get("action").and_then(|v| v.as_str()) {
-        Some(a) => a,
-        None => return,
-    };
-    let trimmed = action.trim();
-    // 已在标准白名单中 → 不处理
-    const STANDARD: &[&str] = &["买入", "增持", "持有", "减持", "卖出", "观望"];
-    if STANDARD.contains(&trimmed) {
+    // 已在标准值域内（含「观望」「不确定」）→ 不处理
+    if normalize_action(&trimmed).is_some() {
         return;
     }
-    // V46 映射表: 把 LLM 可能输出的所有非标准值映射到标准值
-    let normalized: &str = match trimmed {
-        // 无判断 → 观望
-        "不确定" | "未知" | "?" | "??" | "" | "无法判断" | "无法确定" => "观望",
+    // V46 映射表的近义词部分：LLM 自由发挥的简写 / 极端表述
+    let mapped: ActionKind = match trimmed.as_str() {
+        // 无判断（含空值）→ 不确定。**不是**观望
+        "未知" | "?" | "??" | "" | "无法确定" => ActionKind::Uncertain,
         // 明确看空 → 卖出
-        "回避" | "远离" | "清仓" | "止损" | "割肉" | "离场" => "卖出",
+        "回避" | "远离" | "清仓" | "止损" | "割肉" | "离场" => ActionKind::Sell,
         // 近义词映射
-        "卖" | "sell" | "做空" | "空" => "卖出",
-        "买" | "buy" | "做多" | "多" => "买入",
-        "减" => "减持",
-        "增" | "加" => "增持",
-        "持" => "持有",
-        "观" => "观望",
-        // 兜底: 其他未知值 → 观望（保守操作）
+        "卖" | "sell" | "做空" | "空" => ActionKind::Sell,
+        "买" | "buy" | "做多" | "多" => ActionKind::Buy,
+        "减" => ActionKind::Reduce,
+        "增" | "加" => ActionKind::Increase,
+        "持" => ActionKind::Hold,
+        "观" => ActionKind::Wait,
+        // 兜底: 未识别值 → 不确定（原实现压成「观望」，属伪造结论）
         _ => {
-            tracing::warn!("[normalize_llm_action] 未知 action 值 {:?}, 兜底映射为观望", trimmed);
-            "观望"
+            tracing::warn!(
+                "[normalize_llm_action] 未识别 action 值 {:?}, 归入「不确定」（不再默认观望）",
+                trimmed
+            );
+            ActionKind::Uncertain
         },
     };
-    obj.insert("action".to_string(), serde_json::Value::String(normalized.to_string()));
+    obj.insert("action".to_string(), serde_json::Value::String(mapped.as_storage_cn().to_string()));
 }
 
 /// 双视角一致性诊断结果
@@ -912,7 +1238,7 @@ pub(crate) struct AgreementBreakdown {
 ///   - positionPct: 20 分（≤10% 满分 20 / ≤20% 半分 10 / >20% 零分 0）
 ///   - confidence: 15 分（差值 ≤10 满分 15 / ≤20 半分 10 / 否则 5）
 ///   - riskLevel: 15 分（精确匹配 15 / 相邻 8 / 跨级 0）
-///   - data_gaps: 10 分（Jaccard 相似度 × 10）
+///   - data_gaps: 10 分（双方非空时 Jaccard×10；双方都空=10；仅一方空=5 中性）
 ///   - evidence 引用密度: 10 分（≥3 条满分 10 / 2 条 5 / <2 条 0）
 ///
 /// 归一化规则（与前端 normalizeAction 保持一致）:
@@ -973,31 +1299,41 @@ pub(crate) fn compute_decision_agreement(
 
     // ── V65: action 评分（满分 30，原满分 50 的 60%）──
     // 精确匹配 30 > 同向同类 20 > 中性不同义 5-10 > 对立 0
-    let is_buy = |s: &str| s.contains("买") || s.contains("增持");
-    let is_sell = |s: &str| s.contains("卖") || s.contains("减持");
-    let is_hold = |s: &str| s == "持有";
-    let is_watch = |s: &str| s == "观望";
-    let is_uncertain = |s: &str| s.contains("不确定") || s.contains("未知");
-    let action_score: f64 = match (f_action.clone(), l_action.clone()) {
+    //
+    // P1-6(2026-09-14): 判定改走统一归一化（`decision_action::normalize_action`）。
+    // 原实现用中文字符包含 / 全等判定：链路上 action 一旦是英文（BUY / HOLD / WAIT）
+    // 或 dashboard 值域短语，`is_buy`/`is_sell`/`is_hold` 全不命中 ⇒ 同向双方被
+    // 误判成「对立方向 0 分」（一致性分数虚假偏低）。
+    //
+    // ⚠️ 同时修掉两处**不可达 / 判据重叠**：
+    //   ① 原 `(持有|观望) vs 不确定 = 3` 已包含 is_watch 分支，紧随其后的
+    //      `观望 vs 不确定 = 6` 永远命中不到（同一判据被两条分支共用，靠前的吞掉靠后的）；
+    //   ② 无「缺失哨兵」分支 ⇒ 哨兵会被当英文串落入「对立 0 分」。
+    // 现按原**声明分值**保留语义（持有 vs 不确定 = 3、观望 vs 不确定 = 6，观望更接近
+    // 「说不好」），并使各分支真正互斥；缺失哨兵按「单侧缺失」档处理。
+    use axagent_analysis_engine::decision_action::{ActionKind, normalize_action};
+    let f_kind = f_action.as_deref().and_then(normalize_action);
+    let l_kind = l_action.as_deref().and_then(normalize_action);
+    let is_bull = |k: ActionKind| matches!(k, ActionKind::Buy | ActionKind::Increase);
+    let is_bear = |k: ActionKind| matches!(k, ActionKind::Sell | ActionKind::Reduce);
+    let action_score: f64 = match (f_kind, l_kind) {
         (Some(a), Some(b)) if a == b => 30.0,
-        (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => 20.0,
-        (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => 20.0,
+        (Some(a), Some(b)) if is_bull(a) && is_bull(b) => 20.0,
+        (Some(a), Some(b)) if is_bear(a) && is_bear(b) => 20.0,
         // 中性但不同义: 持有 vs 观望 = 10
-        (Some(a), Some(b)) if (is_hold(&a) && is_watch(&b)) || (is_hold(&b) && is_watch(&a)) => {
-            10.0
-        },
-        // 明确中性 vs 不确定: 持有/观望 vs 不确定 = 3
-        (Some(a), Some(b)) if (is_hold(&a) || is_watch(&a)) && is_uncertain(&b) => 3.0,
-        (Some(a), Some(b)) if (is_hold(&b) || is_watch(&b)) && is_uncertain(&a) => 3.0,
-        // 观望 vs 不确定 = 6
-        (Some(a), Some(b))
-            if is_watch(&a) && is_uncertain(&b) || is_watch(&b) && is_uncertain(&a) =>
-        {
-            6.0
-        },
+        (Some(ActionKind::Hold), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Hold)) => 10.0,
+        // 观望 vs 不确定 = 6（观望与「说不好」比持有更接近）
+        (Some(ActionKind::Wait), Some(ActionKind::Uncertain))
+        | (Some(ActionKind::Uncertain), Some(ActionKind::Wait)) => 6.0,
+        // 明确中性 vs 不确定: 持有 vs 不确定 = 3
+        (Some(ActionKind::Hold), Some(ActionKind::Uncertain))
+        | (Some(ActionKind::Uncertain), Some(ActionKind::Hold)) => 3.0,
+        // 缺失哨兵不是方向判断，不参与方向比对（与「单侧缺失」同档）
+        (Some(ActionKind::Unavailable), Some(_)) | (Some(_), Some(ActionKind::Unavailable)) => 15.0,
         // 对立方向
         (Some(_), Some(_)) => 0.0,
-        // 单侧缺失
+        // 单侧缺失 / 未识别值域
         _ => 15.0,
     };
 
@@ -1057,21 +1393,35 @@ pub(crate) fn compute_decision_agreement(
     let f_risk_raw = fj.get("riskLevel").and_then(|v| v.as_str()).unwrap_or("?").to_string();
     let l_risk_raw = lj.get("riskLevel").and_then(|v| v.as_str()).unwrap_or("?").to_string();
 
-    // ── V65: data_gaps 评分（满分 10）──
-    // Jaccard 相似度 = |A ∩ B| / |A ∪ B|
-    let data_gaps_similarity: Option<f64> = if !f_gaps.is_empty() || !l_gaps.is_empty() {
-        let intersection = f_gaps.intersection(&l_gaps).count() as f64;
-        let union = f_gaps.union(&l_gaps).count() as f64;
-        if union > 0.0 {
-            Some(intersection / union)
-        } else {
-            Some(1.0) // 双方都为空视为完全一致
-        }
-    } else {
-        // 双方都无 data_gaps 字段 → None（无法判断）
-        None
+    // ── V75(2026-09-13) data_gaps 评分（满分 10）──
+    // 旧实现有两个缺陷：
+    //   ① `union == 0 → Some(1.0)`（「双方都为空视为完全一致」）**永不可达** ——
+    //      外层 `if !f_gaps.is_empty() || !l_gaps.is_empty()` 已要求至少一方非空
+    //      （铁律 5：恒等边界/死守卫）。而真正的「双方都为空」落到
+    //      `unwrap_or(0.0)` ⇒ 得 0 分，**惩罚了完全一致的情形**。
+    //   ② 两侧词表本就不同：公式侧 `data_gaps` 只登记「节点级输入缺失」（常态为空，
+    //      见 portfolio-mgr.rhai 的 10 项 present() 检查），trader 侧登记「分析师自报
+    //      缺口」（实证 601166 为 8 条）⇒ Jaccard 恒为 0 ⇒ 该维度**长期恒 0 分**，
+    //      10 分权重退化为固定惩罚，诊断文案还会写「数据缺口不一致」误导用户。
+    // 新口径：双方都空 → 满分（确实一致）；仅一方为空 → 不可比，取中性半分；
+    //        双方非空 → Jaccard × 10。
+    // ⚠️ 会改变 `total` 分数（进而影响 adjustedConfidence 与 60/40 档位文案）。
+    let data_gaps_similarity: Option<f64> = match (f_gaps.is_empty(), l_gaps.is_empty()) {
+        (true, true) => Some(1.0),
+        // 不可比：一方无缺口清单。给 None 由调用方取中性分，不判为「不一致」。
+        (true, false) | (false, true) => None,
+        (false, false) => {
+            let intersection = f_gaps.intersection(&l_gaps).count() as f64;
+            let union = f_gaps.union(&l_gaps).count() as f64;
+            Some(if union > 0.0 {
+                intersection / union
+            } else {
+                1.0
+            })
+        },
     };
-    let data_gaps_score: f64 = data_gaps_similarity.unwrap_or(0.0) * 10.0;
+    // None（不可比）→ 中性 5 分：既不当「一致」奖励，也不当「分歧」惩罚。
+    let data_gaps_score: f64 = data_gaps_similarity.map(|s| s * 10.0).unwrap_or(5.0);
 
     // ── V65: evidence_cited 评分（满分 10）──
     // ≥3 条满分 10 / 2 条 5 / <2 条 0
@@ -1112,21 +1462,29 @@ pub(crate) fn compute_decision_agreement(
         f7_free_info.unwrap_or((None, None, None));
 
     // 计算无 f7 版本的 action 一致性评分（与主 action_score 同尺度，满分 30）
+    // P1-6(2026-09-14): 与主 action_score 同源，改走 `decision_action::normalize_action`。
+    //   原实现走 `f7_free_action.map(norm)` + 一组局部 `is_buy/is_sell/is_hold/is_watch/
+    //   is_uncertain` 逐词判定；该组判据的值域只有中文与极少数英文缩写 ⇒ 一旦上游是
+    //   dashboard 值域（`strong_buy` / `WAIT` 等）全部不命中，直接落到
+    //   `(Some(_), Some(_)) => Some(0.0)` —— 同向双方被判成「完全对立」并计入冲突类型分类。
+    //   另：原 `(持有|观望) vs 不确定 = 3` 已把「观望」吃掉，紧随其后的
+    //   `(观望 vs 不确定) = 6` **永不命中**（声明了却不可达的分支）。
+    //   归并后按 `ActionKind` 穷举，并按声明分值重建为互斥分支（wait 在前 6 / hold 在后 3）。
     let f7_compare_target = l_action.as_deref().or(f_action.as_deref());
-    let f7_free_action_score = match (f7_free_action.as_deref().map(norm), f7_compare_target) {
+    let f7_kind = f7_free_action.as_deref().and_then(normalize_action);
+    let tgt_kind = f7_compare_target.and_then(normalize_action);
+    let is_bull_k = |k: ActionKind| matches!(k, ActionKind::Buy | ActionKind::Increase);
+    let is_bear_k = |k: ActionKind| matches!(k, ActionKind::Sell | ActionKind::Reduce);
+    let f7_free_action_score = match (f7_kind, tgt_kind) {
         (Some(a), Some(b)) if a == b => Some(30.0),
-        (Some(a), Some(b)) if is_buy(&a) && is_buy(&b) => Some(20.0),
-        (Some(a), Some(b)) if is_sell(&a) && is_sell(&b) => Some(20.0),
-        (Some(a), Some(b)) if (is_hold(&a) && is_watch(&b)) || (is_hold(&b) && is_watch(&a)) => {
-            Some(10.0)
-        },
-        (Some(a), Some(b)) if (is_hold(&a) || is_watch(&a)) && is_uncertain(&b) => Some(3.0),
-        (Some(a), Some(b)) if (is_hold(&b) || is_watch(&b)) && is_uncertain(&a) => Some(3.0),
-        (Some(a), Some(b))
-            if is_watch(&a) && is_uncertain(&b) || is_watch(&b) && is_uncertain(&a) =>
-        {
-            Some(6.0)
-        },
+        (Some(a), Some(b)) if is_bull_k(a) && is_bull_k(b) => Some(20.0),
+        (Some(a), Some(b)) if is_bear_k(a) && is_bear_k(b) => Some(20.0),
+        (Some(ActionKind::Hold), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Hold)) => Some(10.0),
+        (Some(ActionKind::Wait), Some(ActionKind::Uncertain))
+        | (Some(ActionKind::Uncertain), Some(ActionKind::Wait)) => Some(6.0),
+        (Some(ActionKind::Hold), Some(ActionKind::Uncertain))
+        | (Some(ActionKind::Uncertain), Some(ActionKind::Hold)) => Some(3.0),
         (Some(_), Some(_)) => Some(0.0),
         _ => None,
     };
@@ -1419,19 +1777,45 @@ mod tests {
         assert_eq!(parsed["riskLevel"], "中");
     }
 
-    /// portfolio-mgr 是 CodeNode 包装但 .result 字段缺失(异常路径)→ 降级用包装本身
+    /// 2026-09-13 契约变更：`portfolio-risk-gate` 优先于 `portfolio-mgr`。
+    ///
+    /// 背景：模板四处（store-result.input_var / end-output.output_var / rule-check 与
+    /// decision-explainer 的 contextSources）都声明风控门是链尾终值，但落库此前只认
+    /// portfolio-mgr ⇒ 风控门的仓位修正（R-206）被整体丢弃，出现「报告说已清仓 0%、
+    /// 界面说仍持 8.8%」的两套真相。本测试锁定「gate 存在且含 action ⇒ 取 gate」。
     #[test]
-    pub(crate) fn extract_decision_json_falls_back_to_pm_wrapper_when_result_missing() {
+    pub(crate) fn extract_decision_json_prefers_portfolio_risk_gate_over_mgr() {
         use std::collections::HashMap;
         let mut results = HashMap::new();
         results.insert(
             "portfolio-mgr".to_string(),
             json!({
                 "status": "executed",
-                "language": "rhai",
-                // 故意无 .result 字段(异常路径)
-                "params": { "action": "HOLD", "confidence": 30.0 },
-                "node_id": "portfolio-mgr",
+                "result": {
+                    "action": "减持",
+                    "positionPct": 8.85,
+                    "confidence": 44.7,
+                    "riskLevel": "极高风险",
+                    "reasoning": "公式原始决策",
+                },
+            }),
+        );
+        results.insert(
+            "portfolio-risk-gate".to_string(),
+            json!({
+                "status": "executed",
+                "result": {
+                    "action": "减持",
+                    "positionPct": 0.0,
+                    "confidence": 44.7,
+                    "riskLevel": "极高风险",
+                    "reasoning": "公式原始决策 | [风控门] R-206 单股仓位 8.9% 超过上限，已下调",
+                    "risk_gate": {
+                        "adjusted": true,
+                        "originalPositionPct": 8.85,
+                        "reasons": ["R-206 单股仓位 8.9% 超过上限，已下调"],
+                    },
+                },
             }),
         );
         let wf = Workflow {
@@ -1451,8 +1835,334 @@ mod tests {
         };
         let dj = extract_decision_json(&wf).expect("必须返回决策 JSON");
         let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
-        // 降级用 portfolio-mgr 本身(CodeNode 包装),有 params.action
-        assert_eq!(parsed["params"]["action"], "HOLD");
+        assert_eq!(
+            parsed["positionPct"], 0.0,
+            "必须取风控门下调后的仓位，而非 portfolio-mgr 的 8.85"
+        );
+        assert_eq!(parsed["risk_gate"]["adjusted"], true, "风控门元数据必须随决策落库");
+    }
+
+    /// 风控门结果不可用（无 action）时回落到 portfolio-mgr，保持旧语义不被破坏。
+    #[test]
+    pub(crate) fn extract_decision_json_falls_back_to_mgr_when_gate_unusable() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "portfolio-mgr".to_string(),
+            json!({
+                "status": "executed",
+                "result": { "action": "买入", "positionPct": 12.0, "confidence": 66.0 },
+            }),
+        );
+        results.insert(
+            "portfolio-risk-gate".to_string(),
+            json!({ "status": "executed", "result": { "risk_gate": { "adjusted": false } } }),
+        );
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states: HashMap::new(),
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        let dj = extract_decision_json(&wf).expect("必须回落到 portfolio-mgr");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        assert_eq!(parsed["action"], "买入");
+        assert_eq!(parsed["positionPct"], 12.0);
+    }
+
+    /// 2026-09-13 顺序约束：D/F 档下 `quality-fallback` 必须压过 `portfolio-risk-gate`。
+    ///
+    /// 拓扑：portfolio-mgr → portfolio-risk-gate → rule-check → quality-gate。
+    /// quality-gate 判 D/F 时（`default_case = "low-quality"`）路由到 quality-fallback，
+    /// 由 LLM 保守决策**替代**公式决策。但风控门在 quality-gate **之前**就已产出结果
+    /// ⇒ 若把 gate 放在最高优先级，就会拿「已被质量门替代的公式决策」当最终结论，
+    /// 直接推翻 V40 修复。本测试用「gate 有 action 且 qf 有 action」同时在场的场景锁定顺序。
+    #[test]
+    pub(crate) fn extract_decision_json_prefers_quality_fallback_over_gate() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "portfolio-mgr".to_string(),
+            json!({ "status": "executed", "result": { "action": "减持", "positionPct": 8.85 } }),
+        );
+        results.insert(
+            "portfolio-risk-gate".to_string(),
+            json!({
+                "status": "executed",
+                "result": { "action": "减持", "positionPct": 0.0, "reasoning": "风控门下调" },
+            }),
+        );
+        results.insert(
+            "quality-fallback".to_string(),
+            json!({
+                "content": r#"{"action":"观望","positionPct":0,"confidence":25,"riskLevel":"高风险","reasoning":"数据质量 D 级，保守观望"}"#,
+            }),
+        );
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states: HashMap::new(),
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        let dj = extract_decision_json(&wf).expect("必须返回决策 JSON");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        assert_eq!(parsed["action"], "观望", "D/F 档链尾是 quality-fallback，不是风控门");
+        assert_eq!(parsed["riskLevel"], "高风险");
+        // LLM 未输出 decisionConfidence 时由本函数补齐（P0 默认值语义）
+        assert_eq!(parsed["decisionConfidence"], 25.0);
+    }
+
+    /// 2026-09-13 新增：`extract_formula_decision_json` 只认确定性节点，
+    /// **绝不能**把 LLM 兜底当成「公式侧」。
+    ///
+    /// 实证 600031（2026-09-13）：`compute_decision_agreement` 此前直接用
+    /// `extract_decision_json` 当公式侧，于是 `formulaAction="减持"`/
+    /// `formulaRiskLevel="高风险"` 其实是 `quality-fallback` 的 **LLM** 输出，
+    /// 而真正的公式决策是风控门的 `增持`/`中风险`（11.5%）—— 前端渲染成
+    /// 「公式 ◀ 53 ▶ LLM」，用户看到的「公式」其实是 LLM（铁律 41）。
+    #[test]
+    pub(crate) fn formula_decision_json_never_returns_llm_fallback() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "portfolio-mgr".to_string(),
+            json!({ "status": "executed", "result": { "action": "增持", "positionPct": 11.5 } }),
+        );
+        results.insert(
+            "portfolio-risk-gate".to_string(),
+            json!({
+                "node_id": "end-output",
+                "output": { "action": "增持", "positionPct": 11.5, "riskLevel": "中风险" },
+                "status": "terminated",
+            }),
+        );
+        results.insert(
+            "quality-fallback".to_string(),
+            json!({
+                "content": r#"{"action":"减持","positionPct":5,"confidence":30,"riskLevel":"高风险"}"#,
+            }),
+        );
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states: HashMap::new(),
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        // 公式侧：取风控门（穿透 EndNode 的 {node_id, output, status} 包装）
+        let f = extract_formula_decision_json(&wf).expect("必须返回公式决策");
+        let parsed: serde_json::Value = serde_json::from_str(&f).expect("必须可解析");
+        assert_eq!(parsed["action"], "增持", "公式侧必须是 gate 的增持，不得是 LLM 兜底的减持");
+        assert_eq!(parsed["positionPct"], 11.5);
+        assert_eq!(parsed["riskLevel"], "中风险");
+        // 对照：落库口径（链尾优先）仍取 quality-fallback —— 两者分工不同
+        let stored: serde_json::Value =
+            serde_json::from_str(&extract_decision_json(&wf).unwrap()).unwrap();
+        assert_eq!(stored["action"], "减持", "落库口径仍取 D/F 档的链尾 LLM 保守决策");
+    }
+
+    /// 公式节点全部缺位时返回 `None`（不得退化成「随便拿一个」）。
+    #[test]
+    pub(crate) fn formula_decision_json_is_none_without_formula_nodes() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "quality-fallback".to_string(),
+            json!({ "content": r#"{"action":"观望","positionPct":0}"# }),
+        );
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states: HashMap::new(),
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        assert!(
+            extract_formula_decision_json(&wf).is_none(),
+            "只有 LLM 兜底时必须返回 None，不能把它当公式决策"
+        );
+    }
+
+    // ── extract_analyst_reports_from_snapshot（仪表盘分析师报告提取 + 双重编码穿透）──
+
+    /// 双重编码：值是「JSON 字符串」且内部又是 `{"report": "<md>"}` → 必须穿透到纯 md 文本
+    #[test]
+    pub(crate) fn extract_analyst_reports_unwraps_double_encoded_report_json() {
+        use std::collections::HashMap;
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            "report.a-hot-money".to_string(),
+            json!({"report": "{\"report\": \"### 资金面报告\\n主力超大单承接不足，杠杆风险高\"}"}),
+        );
+        let reports = extract_analyst_reports_from_snapshot(&snapshot);
+        let text = reports.get("hot-money-tracker").expect("必须提取到 hot-money-tracker 报告");
+        assert!(text.starts_with("### 资金面报告"), "实际文本: {text}");
+        assert!(!text.contains("{\"report\""), "不允许残留 JSON 包装: {text}");
+        assert!(text.contains('\n'), "字面量 \\n 必须解为真实换行: {text}");
+    }
+
+    /// ToolNode 包装 `{content: "<json字符串>", tool_name}` → 穿透 content 后取 report 字段
+    #[test]
+    pub(crate) fn extract_analyst_reports_unwraps_tool_node_content_wrapper() {
+        use std::collections::HashMap;
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            "a-news".to_string(),
+            json!({
+                "content": "{\"report\": \"公司发布业绩预增公告，属利好催化\"}",
+                "tool_name": "agent_executor",
+            }),
+        );
+        let reports = extract_analyst_reports_from_snapshot(&snapshot);
+        let text = reports.get("news-analyst").expect("必须提取到 news-analyst 报告");
+        assert_eq!(text, "公司发布业绩预增公告，属利好催化");
+    }
+
+    /// 围栏包裹 + 对象直出等形态均规整为纯文本
+    #[test]
+    pub(crate) fn extract_analyst_reports_strips_code_fence_and_keeps_plain_object() {
+        use std::collections::HashMap;
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            "report.a-policy".to_string(),
+            json!("```json\n{\"report\": \"产业政策利好落地\"}\n```"),
+        );
+        // 对象直出（历史路径原有形态，行为不能回退）
+        snapshot.insert(
+            "report.a-fundamentals".to_string(),
+            json!({"report": "基本面稳健\n估值处于低位", "verdict": {"direction": "多"}}),
+        );
+        let reports = extract_analyst_reports_from_snapshot(&snapshot);
+        assert_eq!(reports.get("policy-analyst").unwrap(), "产业政策利好落地");
+        assert_eq!(reports.get("fundamentals-analyst").unwrap(), "基本面稳健\n估值处于低位");
+    }
+
+    /// 仪表盘风险描述：markdown 多行报告中应取到内容行而非整段表格/标题
+    #[test]
+    pub(crate) fn dashboard_risk_alert_description_extracts_content_line() {
+        let mut analyst_reports = std::collections::HashMap::new();
+        analyst_reports.insert(
+            "hot-money-tracker".to_string(),
+            "### 六、综合判断与风险\n\n| 维度 | 信号 | 方向 |\n|---|---|---|\n\
+             | 主力超大单 | 单日 -3.26 亿，承接不足 | 空 |\n| 融资盘 | 16.58 亿，杠杆风险高 | 空 |\n\
+             核心结论：短期资金面偏空。"
+                .to_string(),
+        );
+        let alerts = axagent_analysis_engine::dashboard_report::__extract_risk_alerts_for_test(
+            &analyst_reports,
+        );
+        assert_eq!(alerts.len(), 1);
+        let desc = &alerts[0].description;
+        assert_eq!(desc, "| 融资盘 | 16.58 亿，杠杆风险高 | 空 |");
+    }
+
+    /// V71 硬化契约：`portfolio-mgr` 节点 **Completed 但结果无可用 action**
+    /// （CodeNode 包装里既无 `.result` 也无 `.output`，action 只藏在 `params` 里）⇒
+    /// 必须落「决策缺失」占位决策，而**不是返回 None**（返回 None 会让 `decision_action`
+    /// 落 NULL、前端显示"决策缺失"，正是 V71 要消灭的形态）。
+    ///
+    /// ⚠️ P0-5(2026-09-14): 占位 action 由「观望」改为显式缺失哨兵「数据缺失」。
+    /// 原契约把「节点没产出决策」写成一个保守**结论**（观望），使它在 UI 与 DB 上
+    /// 与真实观望无法区分 —— 前端据此渲染的操作标签是伪造的。
+    ///
+    /// ⚠️ 本测试原名 `extract_decision_json_falls_back_to_pm_wrapper_when_result_missing`，
+    /// 断言的是 **V71 之前的契约**（无条件把包装本身当决策返回，断言 `parsed["params"]["action"]`）。
+    /// V71 引入 `has_usable_action` 后该契约被取代，但测试未同步 ⇒ 长期红测。
+    /// 佐证（无 git）：worktree `v297` / `pre992947df` 中**该测试存在而
+    /// `has_usable_action` 尚不存在**（`grep -c` 分别为 1 / 0）—— 即失败早于本次改动。
+    /// 2026-09-13 按现行契约重写，并补上「Completed + 无可辨识 action」这一原本未覆盖的分支
+    /// （Failed / Skipped 分支已由 hardens_failed / hardens_skipped 两个测试覆盖）。
+    #[test]
+    pub(crate) fn extract_decision_json_hardens_completed_pm_without_action() {
+        use std::collections::HashMap;
+        let mut results = HashMap::new();
+        results.insert(
+            "portfolio-mgr".to_string(),
+            json!({
+                "status": "executed",
+                "language": "rhai",
+                // 故意无 .result / .output（异常路径）
+                "params": { "action": "HOLD", "confidence": 30.0 },
+                "node_id": "portfolio-mgr",
+            }),
+        );
+        let mut node_states = HashMap::new();
+        node_states.insert(
+            "portfolio-mgr".to_string(),
+            NodeRuntimeState {
+                status: NodeStatus::Completed,
+                attempts: 1,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                skip_reason: None,
+            },
+        );
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            status: axagent_rt_workflow::workflow_engine::WorkflowStatus::Completed,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states,
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        let dj = extract_decision_json(&wf).expect("必须返回占位决策，而不是 None");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        assert_eq!(parsed["action"], "数据缺失", "无可辨识 action ⇒ 显式缺失哨兵，不得伪装成观望");
+        assert_eq!(parsed["positionPct"], 0.0);
+        assert_eq!(parsed["confidence"], 0.0);
+        assert_eq!(parsed["diagnostics"]["node"], "portfolio-mgr");
+        assert_eq!(parsed["diagnostics"]["nodeStatus"], "Completed");
+        // 归因必须指向「action 缺失」（形状里的键序依赖 serde_json Map 实现，故用前缀断言）
+        assert!(
+            parsed["diagnostics"]["errorCode"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("portfolio-mgr 结果缺少 action 字段"),
+            "归因错误: {}",
+            parsed["diagnostics"]["errorCode"]
+        );
     }
 
     /// portfolio-mgr 节点不存在时回退到 wf.output(兼容无 portfolio-mgr 工作流)
@@ -1482,7 +2192,11 @@ mod tests {
     }
 
     /// V57 硬化：portfolio-mgr 节点 Failed（Rhai 运行时错误）且 results 缺位时，
-    /// 必须返回最小有效决策 action:"观望" 并携带 diagnostics.nodeError，而非空壳。
+    /// 必须返回「数据缺失」占位决策并携带 diagnostics.nodeError，而非空壳。
+    ///
+    /// ⚠️ 断言在 P0-5(2026-09-14) 把占位 action 由「观望」改为「数据缺失」时**未同步**
+    /// （同文件的 `..._hardens_completed_pm_without_action` 已断言「数据缺失」，
+    /// 两条同语义测试自相矛盾）⇒ 长期红测。2026-09-14 A4 批次一并修正。
     #[test]
     pub(crate) fn extract_decision_json_hardens_failed_portfolio_mgr() {
         use std::collections::HashMap;
@@ -1496,6 +2210,7 @@ mod tests {
                 error: Some("Rhai 执行失败: Variable not found: foo".to_string()),
                 started_at: None,
                 completed_at: None,
+                skip_reason: None,
             },
         );
         let wf = Workflow {
@@ -1515,7 +2230,10 @@ mod tests {
         };
         let dj = extract_decision_json(&wf).expect("失败节点也必须返回最小有效决策");
         let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
-        assert_eq!(parsed["action"], "观望");
+        assert_eq!(
+            parsed["action"], "数据缺失",
+            "节点没产出决策 ⇒ 显式缺失哨兵，不得伪装成观望（P0-5 契约）"
+        );
         assert_eq!(parsed["positionPct"], 0.0);
         assert_eq!(parsed["confidence"], 0.0);
         assert_eq!(parsed["diagnostics"]["node"], "portfolio-mgr");
@@ -1575,6 +2293,7 @@ mod tests {
                 error: Some(format!("{}: 上游 LLM 无响应", code::LLM_CALL_FAILED)),
                 started_at: None,
                 completed_at: None,
+                skip_reason: None,
             },
         );
         let wf = Workflow {
@@ -1609,6 +2328,10 @@ mod tests {
 
     /// V57 硬化：portfolio-mgr 因上游失败被 Skipped 时同样兜底，
     /// 不再退化成 wf.output 空壳。
+    ///
+    /// A4(2026-09-14)：本测试同时守护新增的 `skip_reason` → `diagnostics.skippedNodes`
+    /// 通路 —— 用户裁决「下游不该继续，但**应该告知错误**」，而此前的落库只剩
+    /// 「上游依赖失败导致，无本地错误详情」这种零可行动信息的文案。
     #[test]
     pub(crate) fn extract_decision_json_hardens_skipped_portfolio_mgr() {
         use std::collections::HashMap;
@@ -1622,6 +2345,7 @@ mod tests {
                 error: None,
                 started_at: None,
                 completed_at: None,
+                skip_reason: Some("upstream_failed".to_string()),
             },
         );
         let wf = Workflow {
@@ -1641,8 +2365,24 @@ mod tests {
         };
         let dj = extract_decision_json(&wf).expect("跳过节点也必须返回最小有效决策");
         let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
-        assert_eq!(parsed["action"], "观望");
+        assert_eq!(
+            parsed["action"], "数据缺失",
+            "被跳过的节点同样没产出决策 ⇒ 缺失哨兵（P0-5 契约）"
+        );
         assert_eq!(parsed["diagnostics"]["nodeStatus"], "Skipped");
+        // A4：跳过清单必须带出原因，且原因是引擎写入的分类值而非自由文本
+        assert_eq!(parsed["diagnostics"]["skippedNodeCount"], 1);
+        assert_eq!(parsed["diagnostics"]["skippedNodes"][0]["nodeId"], "portfolio-mgr");
+        assert_eq!(parsed["diagnostics"]["skippedNodes"][0]["reason"], "upstream_failed");
+        // 无 Failed 节点 ⇒ 不得凭空编造根因（宁可只说「原因：…」）
+        assert!(parsed["diagnostics"]["rootFailureNode"].is_null());
+        assert!(
+            parsed["reasoning"].as_str().unwrap_or_default().contains("upstream_failed")
+                || parsed["reasoning"].as_str().unwrap_or_default().contains("被级联跳过")
+                || parsed["reasoning"].as_str().unwrap_or_default().contains("被跳过"),
+            "reasoning 必须说明跳过事实: {}",
+            parsed["reasoning"]
+        );
     }
 
     /// P4 修复(2026-07-25): portfolio-mgr 节点在 results 和 node_states 中均缺位,
@@ -1651,7 +2391,9 @@ mod tests {
     /// results map 后因 portfolio-mgr 缺失而判为"全零空壳"返回 null。
     ///
     /// 修复后:检测到 wf.output 是 results map 时,降级为最小占位决策
-    /// (action="观望" + diagnostics.nodeStatus="Missing"),前端不再误报"全零空壳"。
+    /// (action="数据缺失" + diagnostics.nodeStatus="Missing"),前端不再误报"全零空壳"。
+    /// （P0-5(2026-09-14) 起占位 action 由「观望」改为缺失哨兵；本断言于 2026-09-14
+    ///  A4 批次同步，此前为红测。）
     #[test]
     pub(crate) fn extract_decision_json_hardens_workflow_output_results_map() {
         use std::collections::HashMap;
@@ -1681,7 +2423,7 @@ mod tests {
         let dj = extract_decision_json(&wf).expect("results map 必须降级为最小占位决策");
         let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
         // 不应是 results map,应是最小占位决策
-        assert_eq!(parsed["action"], "观望");
+        assert_eq!(parsed["action"], "数据缺失");
         assert_eq!(parsed["positionPct"], 0.0);
         assert_eq!(parsed["confidence"], 0.0);
         assert_eq!(parsed["diagnostics"]["node"], "portfolio-mgr");
@@ -1690,6 +2432,100 @@ mod tests {
         assert!(parsed.get("trigger").is_none());
         assert!(parsed.get("research-mgr").is_none());
         assert!(parsed.get("trader").is_none());
+    }
+
+    /// A4（2026-09-14）：决策缺失时必须在 `diagnostics` 里带出**根因失败节点**。
+    ///
+    /// 场景取自 601166 实测拓扑（见 `AUDIT-601166-chain-break-2026-09-14.md`）：
+    /// 容器体 `bear-r3`（上游 LLM 504）失败 → 其下游被引擎 fail-closed 级联标
+    /// Skipped → `portfolio-mgr` 未产出决策。
+    ///
+    /// 旧行为只落一句「上游依赖失败导致，无本地错误详情」—— 真根因明明就躺在
+    /// `node_states["bear-r3"].error` 里，却**零消费者**。本测试守护修复：
+    /// ① 沿上游回溯到最远的 `Failed` 节点；② 跳过清单带原因；③ 用户可读文案
+    /// 同时给出根因与影响面。
+    #[test]
+    pub(crate) fn extract_decision_json_reports_root_failure_and_skipped_nodes() {
+        use axagent_harness::workflow_types::EdgeType;
+        use std::collections::HashMap;
+        let results = HashMap::new();
+        let mut node_states = HashMap::new();
+        node_states.insert(
+            "bear-r3".to_string(),
+            NodeRuntimeState {
+                status: NodeStatus::Failed,
+                attempts: 1,
+                error: Some(
+                    "UNSUPPORTED_PROVIDER: OpenAI API error 504: response headers not received within 15s"
+                        .to_string(),
+                ),
+                started_at: None,
+                completed_at: None,
+                skip_reason: None,
+            },
+        );
+        // 两个下游：p-risk-assess（中间跳）与 portfolio-mgr（链尾），均因上游失败被跳过
+        for nid in ["p-risk-assess", "portfolio-mgr"] {
+            node_states.insert(
+                nid.to_string(),
+                NodeRuntimeState {
+                    status: NodeStatus::Skipped,
+                    attempts: 0,
+                    error: None,
+                    started_at: None,
+                    completed_at: None,
+                    skip_reason: Some("upstream_failed".to_string()),
+                },
+            );
+        }
+        let mk_edge = |s: &str, t: &str| WorkflowEdge {
+            id: format!("e-{s}-{t}"),
+            source: s.to_string(),
+            source_handle: None,
+            target: t.to_string(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        };
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            // nodes 留空：根因回溯只依赖 edges + node_states，节点标题缺失仅降级为空串
+            nodes: vec![],
+            edges: vec![
+                mk_edge("p-risk-assess", "portfolio-mgr"),
+                mk_edge("bear-r3", "p-risk-assess"),
+            ],
+            status: axagent_rt_workflow::WorkflowStatus::PartiallyCompleted,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states,
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        let dj = extract_decision_json(&wf).expect("必须返回占位决策");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        assert_eq!(parsed["action"], "数据缺失");
+        // 根因必须回溯到**最远的 Failed 节点**（bear-r3），而非中间被跳过的 p-risk-assess
+        assert_eq!(parsed["diagnostics"]["rootFailureNode"], "bear-r3");
+        assert!(
+            parsed["diagnostics"]["rootFailureError"].as_str().unwrap_or_default().contains("504"),
+            "根因错误原文必须保留: {}",
+            parsed["diagnostics"]["rootFailureError"]
+        );
+        // 跳过清单：2 项，原因均为引擎写入的分类值；按 nodeId 排序保证可复现
+        assert_eq!(parsed["diagnostics"]["skippedNodeCount"], 2);
+        assert_eq!(parsed["diagnostics"]["skippedNodes"][0]["nodeId"], "p-risk-assess");
+        assert_eq!(parsed["diagnostics"]["skippedNodes"][1]["nodeId"], "portfolio-mgr");
+        assert_eq!(parsed["diagnostics"]["skippedNodes"][1]["reason"], "upstream_failed");
+        // 用户可读文案必须同时给出「根因是谁 / 错在哪 / 影响几个节点」
+        let reasoning = parsed["reasoning"].as_str().unwrap_or_default();
+        assert!(reasoning.contains("bear-r3"), "reasoning 缺根因节点: {reasoning}");
+        assert!(reasoning.contains("504"), "reasoning 缺根因错误: {reasoning}");
+        assert!(reasoning.contains("2 个下游节点"), "reasoning 缺影响面: {reasoning}");
     }
 }
 
@@ -1720,6 +2556,7 @@ pub(crate) fn extract_verdict_from_text(text: &str) -> Option<serde_json::Value>
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "重运行股票决策计算")]
 #[tauri::command]
 pub async fn rerun_decision(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     analysis_id: String,
 ) -> Result<serde_json::Value, String> {
@@ -2178,6 +3015,7 @@ pub async fn rerun_decision(
             &stock_name,
             &analysis_date,
             &analyst_reports,
+            extract_valuation_json(&snapshot).as_ref(),
         );
     let dashboard_md =
         axagent_analysis_engine::dashboard_report::render_dashboard_md(&dashboard_report);
@@ -2187,6 +3025,25 @@ pub async fn rerun_decision(
         dashboard_report.integrity_passed,
         dashboard_report.risk_alerts.len(),
         dashboard_report.catalysts.len()
+    );
+
+    // 8. 重跑「仿真验证」（v45）
+    //
+    // 为什么必须在这里重跑：本函数会改 action / positionPct，但**不重写
+    // blackboard_snapshot** ⇒ 快照里的 `sim-verify` 仍是**上一版决策**的结果。
+    // 前端若继续展示它，就成了「决策已变、补充信息未变」的静默误导。
+    // 与第 6 步清空 `decisionExplanation` 是同一类问题的同一种处理。
+    //
+    // 参考价传 `None`：本入口没有新的行情输入，重算用的就是快照里那份数据，
+    // 故由挂钩从快照的 `t-scoring.result.content.currentPrice` 取价（同口径）。
+    // 挂钩内部 `tokio::spawn`，不阻塞本次返回；结果经 `simulation-ready`
+    // 事件推给已打开的分析页。
+    super::sim_hook::spawn_simulation_after_decision(
+        db.clone(),
+        app,
+        analysis_id.clone(),
+        stock_code.clone(),
+        None,
     );
 
     Ok(json!({
@@ -2224,19 +3081,11 @@ pub(crate) fn extract_analyst_reports_from_snapshot(
         let report_key = format!("report.{node_id}");
         let value = snapshot.get(&report_key).or_else(|| snapshot.get(*node_id));
         if let Some(val) = value {
-            let text = if let Some(s) = val.as_str() {
-                s.to_string()
-            } else if let Some(obj) = val.as_object() {
-                // 对象类型：尝试取 content / report / text 字段
-                obj.get("content")
-                    .or_else(|| obj.get("report"))
-                    .or_else(|| obj.get("text"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| val.to_string())
-            } else {
-                val.to_string()
-            };
+            // 深度穿透 ToolNode/AgentNode 包装（content/result/字符串二次编码），
+            // 与 extract_score_json 同源；否则实时路径拿到 `{"report":"..."}` 双重编码
+            // 原始串，仪表盘风险警报/催化因素显示整段转义文本（2026-09-11 光库实证）
+            let unwrapped = unwrap_tool_node_content(val);
+            let text = unwrap_report_text(&unwrapped);
             if !text.is_empty() {
                 reports.insert((*target_id).to_string(), text);
             }
@@ -2244,6 +3093,72 @@ pub(crate) fn extract_analyst_reports_from_snapshot(
     }
 
     reports
+}
+
+/// 把节点输出值规整为纯报告文本（最多 3 轮，防失控）。
+///
+/// 处理形态：对象 {report|content|text: "<文本>"}；JSON 字符串二次编码
+/// （字符串本身可 parse）；markdown 代码围栏包裹。规整失败则回退
+/// Value 的字符串表示（与旧行为一致，不丢数据）。
+fn unwrap_report_text(val: &serde_json::Value) -> String {
+    let mut cur = val.clone();
+    for _ in 0..4 {
+        cur = match cur {
+            serde_json::Value::String(ref s) => {
+                let trimmed = strip_md_code_fence(s.trim());
+                match serde_json::from_str::<serde_json::Value>(&trimmed) {
+                    // 字符串二次编码：解一层转义（\n 字面量 → 真实换行）
+                    Ok(serde_json::Value::String(inner)) => {
+                        let inner = inner.trim().to_string();
+                        if inner == trimmed {
+                            return inner;
+                        }
+                        serde_json::Value::String(inner)
+                    },
+                    Ok(parsed @ serde_json::Value::Object(_)) => parsed,
+                    _ => return trimmed,
+                }
+            },
+            serde_json::Value::Object(ref obj) => {
+                let picked = obj
+                    .get("report")
+                    .or_else(|| obj.get("content"))
+                    .or_else(|| obj.get("text"))
+                    .cloned();
+                match picked {
+                    Some(v) if !v.is_null() => v,
+                    _ => return cur.to_string(),
+                }
+            },
+            _ => return cur.to_string(),
+        };
+    }
+    // 预算耗尽：String 直接还原文本，其余回退 JSON 表示（与旧行为一致，不丢数据）
+    match cur {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    }
+}
+
+/// 剥掉 markdown 代码围栏（``` 包裹），返回内部文本。
+fn strip_md_code_fence(s: &str) -> String {
+    let trimmed = s.trim();
+    if let Some(rest) = trimmed.strip_prefix("```") {
+        // 只剥已知语言标签，避免误删正文首字符
+        let rest = rest
+            .strip_prefix("json")
+            .or_else(|| rest.strip_prefix("md"))
+            .or_else(|| rest.strip_prefix("markdown"))
+            .or_else(|| rest.strip_prefix("text"))
+            .unwrap_or(rest);
+        let rest = rest.trim_start_matches('\n');
+        let body = match rest.rfind("```") {
+            Some(end) => &rest[..end],
+            None => rest,
+        };
+        return body.trim().to_string();
+    }
+    trimmed.to_string()
 }
 
 /// 从 Workflow 执行结果构建 DashboardReport + Markdown 文本。
@@ -2283,6 +3198,7 @@ pub(crate) fn build_dashboard_from_workflow_result(
             stock_name,
             analysis_date,
             &analyst_reports,
+            extract_valuation_json(&wf.results).as_ref(),
         );
     let dashboard_md =
         axagent_analysis_engine::dashboard_report::render_dashboard_md(&dashboard_report);
@@ -2351,10 +3267,45 @@ pub(crate) fn extract_score_json(
     }
 }
 
-/// dashboard 显示兜底：portfolio-mgr 的 decision_json 只输出百分比（stopLossPct/takeProfitPct），
-/// 无绝对价格的 targetPrice/stopLoss 键 → dashboard 构建端 get 不到，目标价/止损价恒显示「—」
-/// （2026-09-11 科华数据实证）。trader 的 llm_decision_json（content 解析后，verdict 层）含
-/// 绝对价格，decision_json 缺失这两个键时用其补齐。只影响 dashboard 显示，不改决策本体。
+/// 从 snapshot / workflow results map 中提取 `t-valuation` 估值 JSON（**已解包**）。
+///
+/// 与 [`extract_score_json`] 同源：兼容三种 key + 6 层穿透。返回对象形如
+/// `{current_price, dcf:{low,mid,high,assumptions,...}, graham:{...}, pe, pb, ...}`，
+/// 供 DashboardReport 填充**估值语义**字段（`intrinsic_value_*` / `current_price`），
+/// 使其与**交易语义**的 `targetPrice`（LLM trader 自填）在 UI 上分栏并列。
+///
+/// 2026-09-13（603466 风语筑）：仪表盘「目标价」显示 13.27（= 现价，LLM 自填），
+/// 而估值区间是 4.44–5.57，用户读到「同一工作流结论矛盾」——
+/// 根因是两条链共用一个词，**不是计算错误**。返回 `None` 时 UI 按「无估值数据」渲染。
+pub(crate) fn extract_valuation_json(
+    map: &std::collections::HashMap<String, serde_json::Value>,
+) -> Option<serde_json::Value> {
+    let raw = map
+        .get("t-valuation")
+        .or_else(|| map.get("_raw.t-valuation"))
+        .or_else(|| map.get("t-valuation.result"))?;
+    let unwrapped = unwrap_tool_node_content(raw);
+    if unwrapped.is_object() {
+        Some(unwrapped)
+    } else {
+        None
+    }
+}
+
+/// 用 trader 的 LLM 决策补齐 dashboard 的绝对价格字段。
+///
+/// ⚠️ **这不是「兜底」，而是常态主路径**（2026-09-13 更正，原注释写「缺键时兜底」是错的）：
+/// `portfolio-mgr.rhai` 的 `decision_json` **只输出百分比**（`stopLossPct`/`takeProfitPct`），
+/// **从不产出绝对价格** ⇒ 公式侧 `targetPrice`/`stopLoss` 键**永远不存在**（DB 实证 603466），
+/// 本函数因此**恒命中**（3 个调用点 2323/2484/2639 全部走此路）。
+/// 后果：仪表盘的目标价 **100% 来自 LLM 自填值**，公式侧没有任何价格可校验 ——
+/// 于是 LLM 在「持有」档把 `targetPrice` 抄成 `currentPrice` 时（603466：13.27 == 13.27），
+/// 仪表盘就显示一个「等于现价的目标价」，与同一工作流的估值区间（DCF 4.44–5.57）
+/// 读起来像自相矛盾（用户报告的那个问题）。
+///
+/// 配套修复：① trader prompt 补 `targetPrice` 方向语义并禁等于现价（模板 v39）；
+/// ② `portfolio-mgr.rhai` 新增 R-204 判「价格信号无信息量」并留痕。
+/// 本函数本身只影响 dashboard 显示，不改决策本体。
 pub(crate) fn merge_price_fields_from_llm(
     decision_value: &serde_json::Value,
     llm_json: Option<&str>,
@@ -2371,12 +3322,12 @@ pub(crate) fn merge_price_fields_from_llm(
             root.get("verdict").and_then(|v| v.get(key)).filter(|v| !v.is_null()).cloned()
         })
     };
-    if obj.get("targetPrice").map_or(true, |v| v.is_null()) {
+    if obj.get("targetPrice").is_none_or(|v| v.is_null()) {
         if let Some(v) = find_field(&parsed, "targetPrice") {
             obj.insert("targetPrice".to_string(), v);
         }
     }
-    if obj.get("stopLoss").map_or(true, |v| v.is_null()) {
+    if obj.get("stopLoss").is_none_or(|v| v.is_null()) {
         if let Some(v) = find_field(&parsed, "stopLoss") {
             obj.insert("stopLoss".to_string(), v);
         }
@@ -2438,6 +3389,7 @@ pub(crate) fn build_dashboard_from_analysis_record(
             &analysis.stock_name,
             &analysis.analysis_date,
             &analyst_reports,
+            extract_valuation_json(&snapshot).as_ref(),
         );
     let dashboard_md =
         axagent_analysis_engine::dashboard_report::render_dashboard_md(&dashboard_report);

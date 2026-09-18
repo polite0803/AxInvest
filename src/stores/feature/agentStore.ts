@@ -18,7 +18,6 @@ import type {
   AskUserEvent,
   CreateAgentProfileInput,
   PermissionRequestEvent,
-  PlanApprovalEvent,
   SubAgentCardData,
   SubAgentCardEvent,
   ToolCallState,
@@ -34,27 +33,6 @@ import type { CurrentToolCall } from "./executionToolCallUtils";
 
 export type { CurrentToolCall };
 
-/** 计划确认闸门开关的 localStorage 持久化键（P0-2） */
-const PLAN_APPROVAL_ENABLED_KEY = "axagent:agent:planApprovalEnabled";
-
-/** 从 localStorage 读取开关状态；不可用时回退 false */
-function loadPlanApprovalEnabled(): boolean {
-  try {
-    return localStorage.getItem(PLAN_APPROVAL_ENABLED_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-/** 持久化开关状态到 localStorage */
-function persistPlanApprovalEnabled(enabled: boolean): void {
-  try {
-    localStorage.setItem(PLAN_APPROVAL_ENABLED_KEY, String(enabled));
-  } catch {
-    // localStorage 不可用，忽略
-  }
-}
-
 interface QueryStats {
   numTurns?: number;
   inputTokens?: number;
@@ -69,13 +47,11 @@ interface AgentStore {
   sessions: Record<string, AgentSession>;
 
   // Runtime state (unique to agentStore — execution state delegated to executionStore)
-  pendingPlan: PlanApprovalEvent | null; // 当前待确认的计划草稿（P0-2）
   pendingPermissions: Record<string, PermissionRequestEvent>; // toolUseId → request
   pendingAskUser: Record<string, AskUserEvent>; // askId → request
   queryStats: Record<string, QueryStats>; // assistantMessageId → cost stats
   rateLimitInfo: Record<string, AgentRateLimitEvent>; // conversationId → rate limit event
   pausedConversations: Set<string>; // conversationIds that are paused
-  planApprovalEnabled: boolean; // 计划确认闸门总开关（P0-2），默认关闭
   subAgentCards: Record<string, SubAgentCardData>; // cardId → card data
 
   // 执行进度追踪（仅 agentStore 独有的标志——agentPool/agentStatus/sdkIdToExecId 由 executionStore 管理）
@@ -109,9 +85,6 @@ interface AgentStore {
     decision: string,
     toolName?: string,
   ) => Promise<void>;
-  setPlanApprovalEnabled: (enabled: boolean) => void;
-  approvePlan: (conversationId: string, decision: string) => Promise<void>;
-  handlePlanApproval: (event: PlanApprovalEvent) => void;
 
   // Event handlers
   handleToolUse: (event: ToolUseEvent) => void;
@@ -166,13 +139,11 @@ interface AgentStore {
 
 export const useAgentStore = create<AgentStore>((set, get) => ({
   sessions: {},
-  pendingPlan: null,
   pendingPermissions: {},
   pendingAskUser: {},
   queryStats: {},
   rateLimitInfo: {},
   pausedConversations: new Set<string>(),
-  planApprovalEnabled: loadPlanApprovalEnabled(),
   subAgentCards: {},
   isExecuting: {},
   executingConversationIds: [],
@@ -333,26 +304,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     } catch (e) {
       logIpcError("agentStore.approveToolUse")(e);
     }
-  },
-
-  setPlanApprovalEnabled: (enabled) => {
-    persistPlanApprovalEnabled(enabled);
-    set({ planApprovalEnabled: enabled });
-  },
-
-  approvePlan: async (conversationId, decision) => {
-    try {
-      await invoke("agent_approve_plan", {
-        request: { conversationId, decision },
-      });
-      set({ pendingPlan: null });
-    } catch (e) {
-      logIpcError("agentStore.approvePlan")(e);
-    }
-  },
-
-  handlePlanApproval: (event) => {
-    set({ pendingPlan: event });
   },
 
   handleToolUse: (event) => {
@@ -875,16 +826,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   },
 }));
 
-// 监听 storage 事件，使浏览器模式下测试可以通过 page.evaluate 更新状态
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (e) => {
-    if (e.key === PLAN_APPROVAL_ENABLED_KEY) {
-      const enabled = e.newValue === "true";
-      useAgentStore.setState({ planApprovalEnabled: enabled });
-    }
-  });
-}
-
 // Rate-limit timer tracking for cleanup
 const _rateLimitTimers: Record<string, ReturnType<typeof setTimeout>> = {};
 
@@ -914,12 +855,6 @@ export function setupAgentEventListeners(): () => void {
   unlisteners.push(
     listen<PermissionRequestEvent>("agent-permission-request", (event) => {
       store.handlePermissionRequest(event.payload);
-    }),
-  );
-
-  unlisteners.push(
-    listen<PlanApprovalEvent>("agent-plan-ready-for-approval", (event) => {
-      store.handlePlanApproval(event.payload);
     }),
   );
 
@@ -995,10 +930,3 @@ export function setupAgentEventListeners(): () => void {
     }
   };
 }
-
-// P0-2 兜底：在模块顶层注册 plan 事件监听，避免依赖 setupAgentEventListeners
-// 的 useEffect 时机（ChatView mount 与 Playwright click send 之间可能存在
-// 竞态，导致事件丢失 → pendingPlan 未设置 → Modal 不渲染）。
-listen<PlanApprovalEvent>("agent-plan-ready-for-approval", (event) => {
-  useAgentStore.getState().handlePlanApproval(event.payload);
-});

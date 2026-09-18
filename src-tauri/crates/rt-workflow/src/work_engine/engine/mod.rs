@@ -44,6 +44,7 @@ use output_builder::{
 use rhai_runtime::{LocalRhaiToolFn, RhaiScriptCache, rhai_map_to_json};
 
 use dag_store::skip_disabled_branch_nodes;
+use dag_store::{SKIPPED_DISABLED, UNREACHABLE, UPSTREAM_FAILED, UPSTREAM_SKIPPED};
 use node_state::{
     AnyNodeState, NodeCircuitBreaker, NodeResult, compute_backoff, restore_typestate,
 };
@@ -2602,8 +2603,18 @@ impl WorkEngine {
                                     serde_json::from_str(&template.edges)
                                         .map_err(|e| format!("边解析失败: {}", e))?;
 
+                                // 子工作流即一次独立执行，其模板声明的 post_exec 钩子
+                                // 应在本次子执行终态触发（HookOutcome 取当前执行的
+                                // results）。漏传会让模板级钩子在子执行路径上静默不触发。
+                                let hooks_config =
+                                    parse_hooks_config(&template.hooks_config, &sub_workflow_id);
                                 let workflow = engine
-                                    .create_workflow(&template.name, nodes, edges)
+                                    .create_workflow_with_hooks(
+                                        &template.name,
+                                        nodes,
+                                        edges,
+                                        hooks_config,
+                                    )
                                     .await
                                     .map_err(|e| e.to_string())?;
                                 let wid = workflow.id.clone();
@@ -2831,10 +2842,15 @@ impl WorkEngine {
                         // 注意：对本分支下游存在 Completed 上游的节点（如本次事件的
                         // data-quality）永远不会命中该规则——那是调度语义，由
                         // compute_ready_nodes 的 continue_on_fail 处理，不在此处。
+                        //
+                        // 2026-09-14：同时写入 `skip_reason`，把「配置意图」与「真故障」
+                        // 分开。此前两者共用 PartiallyCompleted，导致 286 次运行里
+                        // 208 次被判 partially_completed（其中真含故障的仅 5 次），
+                        // 用户无法区分「分支没选中」和「引擎炸了」。
                         loop {
-                            // 先收集需要标记为 Skipped 的节点 key，避免 mutable + immutable
-                            // 双重借用 wf.node_states。
-                            let keys_to_skip: Vec<String> = wf
+                            // 先收集需要标记为 Skipped 的节点 key 与原因，避免 mutable +
+                            // immutable 双重借用 wf.node_states。
+                            let keys_to_skip: Vec<(String, &'static str)> = wf
                                 .node_states
                                 .iter()
                                 .filter_map(|(state_key, state)| {
@@ -2844,24 +2860,47 @@ impl WorkEngine {
                                     ) {
                                         return None;
                                     }
-                                    let upstream_terminal = wf.edges.iter().all(|e| {
+                                    // 直接上游全部进入终态（Failed/Skipped）才可传播跳过。
+                                    // 无入边节点在此恒真 —— 单独归类为 unreachable，
+                                    // 不能笼统算作「上游失败」（那会凭空造出故障信号）。
+                                    let mut in_edges = 0usize;
+                                    let mut any_upstream_failed = false;
+                                    for e in wf.edges.iter() {
                                         if e.target != *state_key {
-                                            return true;
+                                            continue;
                                         }
-                                        matches!(
-                                            wf.node_states.get(&e.source).map(|s| &s.status),
-                                            Some(NodeStatus::Skipped | NodeStatus::Failed)
-                                        )
-                                    });
-                                    upstream_terminal.then(|| state_key.clone())
+                                        in_edges += 1;
+                                        match wf.node_states.get(&e.source).map(|s| &s.status) {
+                                            Some(NodeStatus::Failed) => any_upstream_failed = true,
+                                            Some(NodeStatus::Skipped) => {},
+                                            _ => return None,
+                                        }
+                                    }
+                                    let disabled = wf
+                                        .nodes
+                                        .iter()
+                                        .find(|n| n.base_id() == state_key.as_str())
+                                        .is_some_and(|n| !n.base_enabled());
+                                    let reason = if disabled {
+                                        SKIPPED_DISABLED
+                                    } else if in_edges == 0 {
+                                        UNREACHABLE
+                                    } else if any_upstream_failed {
+                                        UPSTREAM_FAILED
+                                    } else {
+                                        UPSTREAM_SKIPPED
+                                    };
+                                    Some((state_key.clone(), reason))
                                 })
                                 .collect();
                             if keys_to_skip.is_empty() {
                                 break;
                             }
-                            for key in keys_to_skip {
+                            for (key, reason) in keys_to_skip {
                                 if let Some(state) = wf.node_states.get_mut(&key) {
                                     state.status = NodeStatus::Skipped;
+                                    state.completed_at = Some(current_timestamp() as i64);
+                                    state.skip_reason = Some(reason.to_string());
                                 }
                             }
                         }
@@ -3151,6 +3190,7 @@ impl WorkEngine {
                         completed_nodes: completed,
                         execution_id: Some(execution_id.clone()),
                         error: None,
+                        error_code: None,
                         output: None,
                     })
                     .await;
@@ -3357,8 +3397,21 @@ impl WorkEngine {
                                                         |e| format!("边解析失败: {}", e),
                                                     )?;
 
+                                                // 子工作流即一次独立执行，其模板声明的
+                                                // post_exec 钩子应在本次子执行终态触发
+                                                // （HookOutcome 取当前执行的 results）。漏传
+                                                // 会让模板级钩子在子执行路径上静默不触发。
+                                                let hooks_config = parse_hooks_config(
+                                                    &template.hooks_config,
+                                                    &sub_workflow_id,
+                                                );
                                                 let workflow = engine
-                                                    .create_workflow(&template.name, nodes, edges)
+                                                    .create_workflow_with_hooks(
+                                                        &template.name,
+                                                        nodes,
+                                                        edges,
+                                                        hooks_config,
+                                                    )
                                                     .await
                                                     .map_err(|e| e.to_string())?;
                                                 let wid = workflow.id.clone();
@@ -3748,6 +3801,7 @@ impl WorkEngine {
                                 completed_nodes: completed_count,
                                 execution_id: Some(execution_id.clone()),
                                 error: None,
+                                error_code: None,
                                 output: Some(output.output.clone()),
                             })
                             .await;
@@ -3769,7 +3823,10 @@ impl WorkEngine {
                         )
                         .await;
 
-                        if matches!(nr.node, WorkflowNode::Condition(_)) {
+                        // Condition / Switch 节点分支跳过处理：
+                        // Switch 同样需要（否则默认分支会被无条件执行，见
+                        // dag_store::skip_disabled_branch_nodes 的 2026-09-13 说明）
+                        if matches!(nr.node, WorkflowNode::Condition(_) | WorkflowNode::Switch(_)) {
                             let mut workflows = self.execution_workflows.write().await;
                             if let Some(wf) = workflows.get_mut(&execution_id) {
                                 skip_disabled_branch_nodes(wf, &wf.edges.clone(), &nr.node_id);
@@ -4106,6 +4163,9 @@ impl WorkEngine {
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
                                 error: Some(err_msg.clone()),
+                                // 结构化码直接取自 `NodeError::code()` —— 与 `err_msg`
+                                // 同源同一次失败，不存在两处口径分叉的可能。
+                                error_code: Some(err.code().to_string()),
                                 output: None,
                             })
                             .await;
@@ -4325,6 +4385,11 @@ impl WorkEngine {
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
                                 error: Some(err_msg.clone()),
+                                // 本分支是 JoinError（超时/panic），已无 `NodeError` 可取码 ⇒
+                                // 显式标为 TIMEOUT（与 `error` 的自由文本一致）。
+                                error_code: Some(
+                                    super::node_executor_trait::error_code::TIMEOUT.to_string(),
+                                ),
                                 output: None,
                             })
                             .await;
@@ -5745,7 +5810,8 @@ pub fn build_loop_body_dispatch(
                 ));
             };
 
-            // 合并依赖结果到 ctx.variables（已有变量优先，保留父容器注入的 __debate_topic__ 等）
+            // 合并依赖结果到 ctx.variables（已有变量优先，保留父容器 Loop 注入的
+            // __loop_iter_index__ / iteratee 等）
             // 合并顺序优先级（从低到高）：deps_results < context_source_results < ctx.variables（已有）
             for (k, v) in deps_results {
                 ctx.variables.entry(k).or_insert(v);
@@ -5787,46 +5853,31 @@ pub fn build_loop_body_dispatch(
                             .await
                             .ok();
                     },
-                    // 容器体（Debate/Swarm/Loop）按轮次重复驱动同一批 body 节点：
-                    // 第 2+ 轮 dispatch 时节点已是终态，状态机「终态不变性」会拒绝
-                    // Running/Completed 写入 → 输出进不了 results，且 LLM 被重复调用
-                    // （stock-analysis 实证 2026-09-08：3 轮 × 6 辩手 = 18 次调用中
-                    //  12 次纯浪费，20+ 分钟耗在无信息增量的重跑上——辩手 prompt 不
-                    //  消费 __debate_history__/__debate_round__，重跑输入与第 1 轮相同）。
-                    // 处理：Completed 且已有输出 → 直接复用返回（不重跑 LLM）；
-                    //       其他终态（Failed/Skipped）或无输出 → 重置为 Ready 重跑。
-                    Some(NodeStatus::Completed) => {
-                        let existing = {
-                            let wfs = engine.execution_workflows.read().await;
-                            wfs.get(&execution_id).and_then(|w| w.results.get(&node_id)).cloned()
-                        };
-                        if let Some(existing) = existing {
-                            tracing::info!(
-                                workflow_id = %workflow_id,
-                                node_id = %node_id,
-                                "Debate/Swarm/Loop 容器体重跑：body 节点已有输出，复用跳过（不重复调用 LLM）"
-                            );
-                            return Ok(super::node_executor_trait::NodeOutput {
-                                output: existing,
-                                output_var: None,
-                                control: None,
-                            });
-                        }
-                        // Completed 但 results 无输出（异常态）→ 落入下方重置逻辑
-                        {
-                            let mut wfs = engine.execution_workflows.write().await;
-                            if let Some(wf) = wfs.get_mut(&execution_id) {
-                                if let Some(st) = wf.node_states.get_mut(&node_id) {
-                                    st.status = NodeStatus::Ready;
-                                }
-                            }
-                        }
-                        tracing::info!(
-                            workflow_id = %workflow_id,
-                            node_id = %node_id,
-                            "容器体重跑：Completed 无输出，状态重置为 Ready 重跑"
-                        );
-                    },
+                    // 容器体按轮次重复驱动同一批 body 节点：第 2+ 轮 dispatch 时节点已是
+                    // 终态，状态机「终态不变性」会拒绝 Running/Completed 写入 →
+                    // 输出进不了 results。本工厂只服务 Loop（Debate/Swarm 走
+                    // `build_debate_body_dispatch`），而两者对「是否复用上一轮输出」
+                    // 的期望**相反**：
+                    //  · Debate/Swarm 的多轮是同一批辩手重复发言，且辩手 prompt 不消费
+                    //    __debate_history__/__debate_round__ ⇒ 重跑输入与第 1 轮逐字相同
+                    //    （stock-analysis 实证 2026-09-08：3 轮 × 6 辩手 = 18 次调用中
+                    //     12 次纯浪费、20+ 分钟零信息增量）⇒ 那侧保留「复用既有输出」。
+                    //  · Loop 的每一轮由**不同的 iteratee**（如 chapter）驱动，是本轮
+                    //    全新的逻辑执行。此处此前照抄了 Debate 的复用分支（Completed
+                    //    且有输出 → 直接 return Ok(existing)），而轮次之间没有任何节点
+                    //    状态清理 ⇒ 第 2..N 轮被短路，N 轮迭代全部产出第 1 轮的缓存
+                    //    产物，且外层看起来「跑通了」。
+                    // 处理：Loop 侧一律复位为 Ready 重跑，不复用既有结果。
+                    // 注：终态→非终态的迁移被 `is_valid_transition_from` 拒绝
+                    //（harness/workflow_types.rs:1818），故与下方终态分支同一手法——
+                    // 直接写 status 字段，再由后续 update 走 Ready → Running 的合法路径。
+                    //
+                    // 「复位重跑」不破坏断点续跑：从哪一轮开始续跑由 LoopExecutor 的
+                    // checkpoint.cursor 决定（loop_executor.rs:189-198 / :231-233），
+                    // 已完成轮次（index < cursor）根本不进入 body dispatch，不会被重跑。
+                    //
+                    // 覆盖三种终态：Completed（此前被复用短路，本缺陷）、Failed/Skipped
+                    // （重跑给它们一次机会）。复位手法见上一条注释。
                     Some(s) if s.is_terminal() => {
                         {
                             let mut wfs = engine.execution_workflows.write().await;
@@ -5840,7 +5891,7 @@ pub fn build_loop_body_dispatch(
                             workflow_id = %workflow_id,
                             node_id = %node_id,
                             prev_status = ?s,
-                            "Debate/Swarm/Loop 容器体重跑：body 节点状态重置为 Ready"
+                            "Loop 容器体重跑：body 节点已是终态，复位为 Ready 本轮重新执行（不复用上一轮输出）"
                         );
                     },
                     _ => {},
@@ -5860,7 +5911,8 @@ pub fn build_loop_body_dispatch(
                 .await
                 .ok();
 
-            let dispatch_result = engine.dispatcher.read().await.dispatch(&node, &ctx).await;
+            let dispatch_result =
+                dispatch_container_body_with_retry(&engine, &node, &ctx, &workflow_id).await;
 
             match dispatch_result {
                 Ok(output) => {
@@ -5888,8 +5940,10 @@ pub fn build_loop_body_dispatch(
                         .await
                         .ok();
 
-                    // Condition 节点分支跳过处理
-                    if matches!(node, WorkflowNode::Condition(_)) {
+                    // Condition / Switch 节点分支跳过处理
+                    // （Switch 若不做，默认分支会被无条件执行 —— 见
+                    //  dag_store::skip_disabled_branch_nodes 的 2026-09-13 说明）
+                    if matches!(node, WorkflowNode::Condition(_) | WorkflowNode::Switch(_)) {
                         let mut workflows = engine.execution_workflows.write().await;
                         if let Some(wf) = workflows.get_mut(&execution_id) {
                             skip_disabled_branch_nodes(wf, &wf.edges.clone(), &node_id);
@@ -5940,6 +5994,33 @@ pub fn build_loop_body_dispatch(
                             None,
                             Some(e.to_string()),
                             None,
+                        )
+                        .await
+                        .ok();
+
+                    // A1（2026-09-14）：失败路径补落库。
+                    // 此前容器体**只在成功路径**写 `node_executions`，失败路径仅改内存
+                    // 状态 ⇒ 失败节点在运行记录里**完全不存在**（既非 completed 也非
+                    // failed）。601166 的 `bear-r3` 就是这么消失的，直接导致后续所有
+                    // 「本次执行了哪些节点」的统计把分母算错、根因无从追溯。
+                    // 本改动是纯埋点补全，不改变任何控制流。
+                    engine
+                        .record_node_execution(
+                            &execution_id,
+                            NodeExecutionRecord {
+                                node_id: node_id.clone(),
+                                node_type: node_type_name(&node).to_string(),
+                                node_name: Some(node.base_title().to_string()),
+                                status: "failed".to_string(),
+                                input: None,
+                                output: None,
+                                execution_time_ms: Some(elapsed_ms.max(0) as u64),
+                                error: Some(e.to_string()),
+                                started_at,
+                                completed_at: Some(Utc::now().timestamp_millis()),
+                                parent_execution_id: ctx.parent_execution_id.clone(),
+                                sub_workflow_id: None,
+                            },
                         )
                         .await
                         .ok();
@@ -6042,6 +6123,96 @@ pub(crate) fn sanitize_container_step_orders(workflow: &mut Workflow) {
             WorkflowNode::Swarm(s) => s.config.agent_steps = ordered,
             _ => unreachable!(),
         }
+    }
+}
+
+/// 容器体（Debate/Swarm/Loop 的 body 节点）默认单次执行超时。
+///
+/// 与 `EngineOptions::step_timeout` 的默认值保持一致：容器体节点全是 agent 类节点
+/// （辩手 / loop step），走同一套 LLM 调用语义。模板若在节点上声明 `timeout`
+/// 则以模板为准（见 `WorkflowNode::base_timeout`）。
+const DEFAULT_CONTAINER_BODY_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// 容器体单节点 dispatch：**引擎级超时 + 按节点 retry 配置重试**。
+///
+/// ## 为什么需要这个函数（B1，2026-09-14 用户裁决）
+///
+/// `build_debate_body_dispatch` / `build_loop_body_dispatch` 此前都是**裸
+/// dispatch** —— 既没有 `tokio::time::timeout` 包装，也没有重试。而主图节点
+/// 在主调度循环里两者都有。这个不对称造成了 601166 那次「单点失败掐断全链」：
+///
+/// - 链尾辩手 `bear-r3` 撞上游 LLM 504（响应头 15s 未达）→ **无重试机会** →
+///   直接 Failed；
+/// - 主图 fail-closed（`upstream ∈ {Failed, Skipped}` ⇒ 下游标 Skipped）把它
+///   全部 27 个下游级联跳过 → 风险分析 / 估值 / 组合管理 / 风控门 / 落库全链
+///   消失，落库只剩一句「数据缺失」；
+/// - 而同一次运行里主图节点 `a-market-analyst` / `a-policy` 吃到**同款 504
+///   却重试成功**。差异在「有没有重试封装」，不在阈值。
+/// - 模板其实早已声明 `bear-r3.retry = {enabled:true, maxRetries:1}`，
+///   该配置在容器体路径上从未被消费 —— 典型「声明了但没接线」。
+///
+/// ## 语义（与主调度循环对齐）
+///
+/// - 超时：`node.base_timeout()` → 回退 `DEFAULT_CONTAINER_BODY_TIMEOUT`。
+///   超时错误折算成 `NodeError{code: TIMEOUT}`，与普通失败走同一套重试判定。
+/// - 重试：只看**节点级** `retry` 配置（不继承工作流级 `retry_policy` ——
+///   容器已经在外层按轮次重复驱动 body，再叠一层工作流级策略会放大重试倍数）。
+/// - 确定性错误不重试：复用 `is_non_retryable_error`（模板变量缺失、配置缺失、
+///   权限不足等），重试必然复现同样失败，只会拉长耗时。
+/// - 退避：复用 `compute_backoff`，与主循环同一实现。
+///
+/// **不改** provider 侧的 15s 响应头超时公式 —— 那是刻意的「小请求快速失败」
+/// 设计（见 `providers/openai.rs`），本函数补的是**重试机会**而非抬高阈值。
+async fn dispatch_container_body_with_retry(
+    engine: &WorkEngine,
+    node: &WorkflowNode,
+    ctx: &super::execution_state::ExecutionState,
+    workflow_id: &str,
+) -> Result<super::node_executor_trait::NodeOutput, super::node_executor_trait::NodeError> {
+    let node_id = node.base_id();
+    let body_timeout =
+        node.base_timeout().map(Duration::from_secs).unwrap_or(DEFAULT_CONTAINER_BODY_TIMEOUT);
+    let retry_cfg = node.base_retry().clone();
+    let mut attempt: u32 = 0;
+    loop {
+        let outcome =
+            tokio::time::timeout(body_timeout, engine.dispatcher.read().await.dispatch(node, ctx))
+                .await;
+        let err = match outcome {
+            Ok(Ok(output)) => return Ok(output),
+            Ok(Err(e)) => e,
+            Err(_elapsed) => super::node_executor_trait::NodeError::exec_failed(
+                super::node_executor_trait::error_code::TIMEOUT,
+                format!(
+                    "容器体节点 '{node_id}' 超过 {}s 未返回（容器体引擎级超时）",
+                    body_timeout.as_secs()
+                ),
+            ),
+        };
+        let err_text = err.to_string();
+        let retryable = retry_cfg.enabled
+            && !super::node_executor_trait::is_non_retryable_error(&err_text)
+            && attempt < retry_cfg.max_retries;
+        if !retryable {
+            return Err(err);
+        }
+        attempt += 1;
+        let backoff_ms = compute_backoff(
+            retry_cfg.backoff_type.clone(),
+            retry_cfg.base_delay_ms,
+            retry_cfg.max_delay_ms,
+            attempt.saturating_sub(1),
+        );
+        tracing::warn!(
+            workflow_id = %workflow_id,
+            node_id = %node_id,
+            attempt,
+            max_retries = retry_cfg.max_retries,
+            backoff_ms,
+            error = %err_text,
+            "容器体节点失败，按节点 retry 配置重试（B1 修复：此前容器体无重试机会）"
+        );
+        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
     }
 }
 
@@ -6167,7 +6338,7 @@ pub fn build_debate_body_dispatch(
                             .await
                             .ok();
                     },
-                    // 容器体（Debate/Swarm/Loop）按轮次重复驱动同一批 body 节点：
+                    // Debate/Swarm 容器体按轮次重复驱动同一批 body 节点：
                     // 第 2+ 轮 dispatch 时节点已是终态，状态机「终态不变性」会拒绝
                     // Running/Completed 写入 → 输出进不了 results，且 LLM 被重复调用
                     // （stock-analysis 实证 2026-09-08：3 轮 × 6 辩手 = 18 次调用中
@@ -6184,7 +6355,7 @@ pub fn build_debate_body_dispatch(
                             tracing::info!(
                                 workflow_id = %workflow_id,
                                 node_id = %node_id,
-                                "Debate/Swarm/Loop 容器体重跑：body 节点已有输出，复用跳过（不重复调用 LLM）"
+                                "Debate/Swarm 容器体重跑：body 节点已有输出，复用跳过（不重复调用 LLM）"
                             );
                             return Ok(super::node_executor_trait::NodeOutput {
                                 output: existing,
@@ -6220,7 +6391,7 @@ pub fn build_debate_body_dispatch(
                             workflow_id = %workflow_id,
                             node_id = %node_id,
                             prev_status = ?s,
-                            "Debate/Swarm/Loop 容器体重跑：body 节点状态重置为 Ready"
+                            "Debate/Swarm 容器体重跑：body 节点状态重置为 Ready"
                         );
                     },
                     _ => {},
@@ -6249,12 +6420,17 @@ pub fn build_debate_body_dispatch(
                     completed_nodes: 0,
                     execution_id: Some(execution_id.clone()),
                     error: None,
+                    error_code: None,
                     output: None,
                 })
                 .await;
             }
 
-            let dispatch_result = engine.dispatcher.read().await.dispatch(&node, &ctx).await;
+            // B1（2026-09-14）：容器体节点统一走「引擎级超时 + 节点 retry」封装，
+            // 与主图节点等价。此前这里是裸 dispatch，导致 601166 的 bear-r3 一次
+            // 504 就掐断整条决策链（详见 `dispatch_container_body_with_retry` 文档）。
+            let dispatch_result =
+                dispatch_container_body_with_retry(&engine, &node, &ctx, &workflow_id).await;
 
             match dispatch_result {
                 Ok(output) => {
@@ -6283,8 +6459,10 @@ pub fn build_debate_body_dispatch(
                         .await
                         .ok();
 
-                    // Condition 节点分支跳过处理
-                    if matches!(node, WorkflowNode::Condition(_)) {
+                    // Condition / Switch 节点分支跳过处理
+                    // （Switch 若不做，默认分支会被无条件执行 —— 见
+                    //  dag_store::skip_disabled_branch_nodes 的 2026-09-13 说明）
+                    if matches!(node, WorkflowNode::Condition(_) | WorkflowNode::Switch(_)) {
                         let mut workflows = engine.execution_workflows.write().await;
                         if let Some(wf) = workflows.get_mut(&execution_id) {
                             skip_disabled_branch_nodes(wf, &wf.edges.clone(), &node_id);
@@ -6324,6 +6502,7 @@ pub fn build_debate_body_dispatch(
                             completed_nodes: 0,
                             execution_id: Some(execution_id.clone()),
                             error: None,
+                            error_code: None,
                             output: Some(output.output.clone()),
                         })
                         .await;
@@ -6353,6 +6532,30 @@ pub fn build_debate_body_dispatch(
                         .await
                         .ok();
 
+                    // A1（2026-09-14）：失败路径补落库 —— 见同函数 Ok 分支上方注释。
+                    // 这是 601166 审计里「`bear-r3` 在 node_executions 中完全不存在」
+                    // 的直接根因。零控制流影响，纯埋点。
+                    engine
+                        .record_node_execution(
+                            &execution_id,
+                            NodeExecutionRecord {
+                                node_id: node_id.clone(),
+                                node_type: node_type_name(&node).to_string(),
+                                node_name: Some(node.base_title().to_string()),
+                                status: "failed".to_string(),
+                                input: None,
+                                output: None,
+                                execution_time_ms: Some(elapsed_ms.max(0) as u64),
+                                error: Some(e.to_string()),
+                                started_at,
+                                completed_at: Some(Utc::now().timestamp_millis()),
+                                parent_execution_id: ctx.parent_execution_id.clone(),
+                                sub_workflow_id: None,
+                            },
+                        )
+                        .await
+                        .ok();
+
                     // 进度事件：辩手子节点失败（携带真实错误，前端可即时提示）
                     if let Some(cb) = &progress_cb {
                         cb(StepProgressEvent {
@@ -6362,6 +6565,7 @@ pub fn build_debate_body_dispatch(
                             completed_nodes: 0,
                             execution_id: Some(execution_id.clone()),
                             error: Some(e.to_string()),
+                            error_code: Some(e.code().to_string()),
                             output: None,
                         })
                         .await;
@@ -6531,8 +6735,8 @@ mod tests {
     /// sanitizer 应按拓扑序还原正确执行序，避免 R3 辩手缺失 R2 上下文。
     #[test]
     fn sanitize_fixes_scrambled_debater_steps() {
-        let correct = vec!["bull-r1", "bear-r1", "bull-r2", "bear-r2", "bull-r3", "bear-r3"];
-        let scrambled = vec!["bull-r1", "bear-r1", "bull-r2", "bull-r3", "bear-r3", "bear-r2"];
+        let correct = ["bull-r1", "bear-r1", "bull-r2", "bear-r2", "bull-r3", "bear-r3"];
+        let scrambled = ["bull-r1", "bear-r1", "bull-r2", "bull-r3", "bear-r3", "bear-r2"];
         let mut wf = Workflow {
             id: "wf_test".into(),
             name: "test".into(),

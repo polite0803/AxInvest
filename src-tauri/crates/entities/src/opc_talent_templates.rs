@@ -10,12 +10,15 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub category: String,
     pub name: String,
     /// 描述
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub description: String,
     /// 来源仓库（agency-agents-src / 市场包）
+    #[sea_orm(default_value = "")]
     pub source_repo: String,
     /// 提示词引用（json 数组）
     pub prompt_refs: Option<String>,

@@ -1,0 +1,107 @@
+version: 1
+domain_pack_id: "ai_research"
+domain_pack_name: "人工智能研究"
+
+reflection:
+  enabled: true
+  min_quality_score: 60.0
+  auto_reflect_on_failure: true
+  dimensions:
+    - name: "quality"
+      weight: 0.3
+      description: "执行结果质量"
+    - name: "efficiency"
+      weight: 0.2
+      description: "执行效率"
+    - name: "completeness"
+      weight: 0.3
+      description: "任务完成度"
+    - name: "innovation"
+      weight: 0.2
+      description: "创新性与改进建议"
+
+evolution:
+  workflow_evolver:
+    enabled: false
+    max_iterations: 10
+    improvement_threshold: 0.1
+  code_evolver:
+    enabled: false
+    safety_check: true
+    auto_apply: false
+
+self_improvement:
+  enabled: false
+  schedule: "weekly"
+
+reinforcement_learning:
+  enabled: false
+  learning_rate: 0.01
+  discount_factor: 0.95
+  exploration_rate: 0.1
+  reward_weights:
+    quality: 0.4
+    efficiency: 0.3
+    user_satisfaction: 0.3
+  experience_batch_size: 32
+  update_interval: 100
+  auto_save: true
+
+adapter:
+  reflection_template:
+    id: "ai-research-default"
+    name: "AI 研究反思模板"
+    quality_weights:
+      task_completion: 0.3
+      output_quality: 0.3
+      efficiency: 0.2
+      cost_efficiency: 0.2
+    checkpoints:
+      - id: "accuracy"
+        name: "研究准确性"
+        dimension: "accuracy"
+        description: "评估论文分析和技术解读的准确性"
+        weight: 0.4
+      - id: "coverage"
+        name: "调研覆盖度"
+        dimension: "coverage"
+        description: "评估技术调研的广度和深度"
+        weight: 0.3
+      - id: "actionability"
+        name: "可操作性"
+        dimension: "actionability"
+        description: "评估研究结论的实践指导价值"
+        weight: 0.3
+    prompts:
+      - "请评估本次 AI 研究的准确性和深度"
+      - "本次研究是否覆盖了关键技术方向？"
+      - "研究结论是否具有实际应用价值？"
+  evolution_constraints:
+    min_steps: 2
+    max_steps: 15
+    quality_thresholds:
+      min_accuracy: 0.8
+      min_success_rate: 0.7
+      min_quality_score: 0.6
+  acceptance_criteria:
+    - id: "ai-research-accuracy"
+      name: "研究准确性"
+      description: "论文和技术解读是否准确"
+      dimension: "accuracy"
+      threshold: 0.85
+      is_critical: true
+      weight: 0.4
+    - id: "ai-research-coverage"
+      name: "研究覆盖度"
+      description: "是否覆盖指定的研究范围"
+      dimension: "coverage"
+      threshold: 0.7
+      is_critical: false
+      weight: 0.3
+    - id: "ai-research-actionable"
+      name: "可操作性"
+      description: "结论是否可以指导实际应用"
+      dimension: "actionability"
+      threshold: 0.7
+      is_critical: false
+      weight: 0.3

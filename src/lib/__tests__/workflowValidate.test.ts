@@ -84,6 +84,36 @@ describe("validateWorkflow", () => {
       const result = validateWorkflow(nodes, edges);
       expect(findIssues(result.issues, "orphan_node")).toHaveLength(0);
     });
+
+    it("禁用节点（enabled=false 顶层字段）不误报为孤立", () => {
+      const nodes = [
+        n("trigger-1", "trigger"),
+        { ...n("sim-verify", "code"), enabled: false },
+      ];
+      const edges: WorkflowEdge[] = [];
+      const result = validateWorkflow(nodes, edges);
+      expect(findIssues(result.issues, "orphan_node")).toHaveLength(0);
+    });
+
+    it("禁用节点（标准 WorkflowNodeBase 形状 base.enabled=false）不误报为孤立", () => {
+      const nodes = [
+        n("trigger-1", "trigger"),
+        {
+          base: {
+            id: "sim-verify",
+            title: "仿真验证",
+            position: { x: 0, y: 0 },
+            retry: { enabled: false, maxRetries: 0, backoffType: "Fixed", baseDelayMs: 0, maxDelayMs: 0 },
+            enabled: false,
+          },
+          type: "code",
+          config: {},
+        } as unknown as WorkflowNode,
+      ];
+      const edges: WorkflowEdge[] = [];
+      const result = validateWorkflow(nodes, edges);
+      expect(findIssues(result.issues, "orphan_node")).toHaveLength(0);
+    });
   });
 
   // ================================================================

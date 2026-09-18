@@ -11,10 +11,12 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub name: String,
-    /// 公司画像（业务/行业/规模描述）
+    /// 公司画像（业务/域包/规模描述）
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub company_profile: String,
     /// 组织拓扑（扁平/层级/矩阵等）
+    #[sea_orm(default_value = "flat")]
     pub topology: String,
     /// 最终决策角色 id（CEO 等）
     pub final_decider_role_id: Option<String>,

@@ -28,24 +28,42 @@ pub fn extract_text(file_path: &Path, mime_type: &str) -> Result<String> {
         // PDF
         "application/pdf" => {
             let text = extract_pdf(file_path)?;
-            // 扫描版 PDF 文本层为空时回退到 OCR
-            if text.trim().is_empty() {
-                let ocr_text = ocr_fallback(file_path).unwrap_or_default();
-                if !ocr_text.trim().is_empty() {
-                    return Ok(ocr_text);
-                }
+            if !text.trim().is_empty() {
+                return Ok(text);
             }
-            Ok(text)
+            // 文本层为空 ⇒ 扫描版 PDF，回退 OCR。
+            //
+            // OCR 不可用（Err）与「OCR 可用但图中确实没有文字」（Ok 空串）是两种
+            // 不同的事实，但**都必须报错**：此前这里 `unwrap_or_default()` 后返回
+            // `Ok("")`，上游 `prepare_chunks` 得到零 chunk、文档状态仍被置为 `ready`
+            // —— 用户看到「索引成功」而知识库零内容（2026-09-15 修，假成功源头）。
+            match ocr_fallback(file_path) {
+                Ok(ocr_text) if !ocr_text.trim().is_empty() => Ok(ocr_text),
+                Ok(_) => Err(AxAgentError::Provider(format!(
+                    "PDF 文本层为空，且 OCR 未识别出文字（可能为纯图片/矢量图）: {}",
+                    file_path.display()
+                ))),
+                Err(e) => Err(AxAgentError::Provider(format!(
+                    "PDF 文本层为空，OCR 回退失败（{e}）: {}",
+                    file_path.display()
+                ))),
+            }
         },
 
         // 图片类型 —— 直接走 OCR
         "image/png" | "image/jpeg" | "image/tiff" | "image/bmp" | "image/webp" => {
-            let ocr_text = ocr_fallback(file_path).unwrap_or_default();
-            if ocr_text.trim().is_empty() {
-                // OCR 无结果时返回错误，便于上层判断
-                Err(AxAgentError::Provider(format!("OCR 未识别出文字，MIME 类型 '{}'", mime_type)))
-            } else {
-                Ok(ocr_text)
+            match ocr_fallback(file_path) {
+                Ok(ocr_text) if !ocr_text.trim().is_empty() => Ok(ocr_text),
+                Ok(_) => Err(AxAgentError::Provider(format!(
+                    "OCR 未识别出文字，MIME 类型 '{mime_type}': {}",
+                    file_path.display()
+                ))),
+                // OCR 不可用（tesseract 未安装 / 调用失败）必须把原因带出来，
+                // 不能降级成「未识别出文字」—— 那会把「环境缺依赖」误报成「图里没字」。
+                Err(e) => Err(AxAgentError::Provider(format!(
+                    "OCR 不可用（{e}），无法解析图片: {}",
+                    file_path.display()
+                ))),
             }
         },
 
@@ -80,8 +98,10 @@ pub fn extract_text(file_path: &Path, mime_type: &str) -> Result<String> {
 ///
 /// - 默认语言 `eng+chi_sim`（英文 + 简体中文）
 /// - 超时 120 秒
-/// - tesseract 未安装或调用失败时返回 `Ok(String::new())`（空字符串），
-///   不向上层抛错，让 RAG 链路可以正常处理空文本
+/// - **失败一律返回 `Err(原因)`**（tesseract 未安装 / 调用失败 / 工作线程异常退出）。
+///   `Ok` 只表示 tesseract 正常执行完毕，其返回值**可能为空**（图里确实没文字）。
+///   此前三种失败都返回 `Ok(String::new())`，把「环境缺依赖」伪装成「文档为空」，
+///   是文档索引假成功的源头（2026-09-15 修）。
 ///
 /// 注意：document-parser crate 是同步的，所以这里用 `std::process::Command`
 /// 而非 `tokio::process::Command`。超时通过 spawn 子线程 + mpsc channel 实现。
@@ -112,15 +132,14 @@ pub fn ocr_fallback(path: &Path) -> std::result::Result<String, String> {
             Ok(text)
         },
         Ok(Err(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-            // tesseract 未安装 —— 静默返回空字符串
+            // tesseract 未安装 —— 属环境缺依赖，必须报错让用户知道要装 OCR
             let _ = worker.join();
-            Ok(String::new())
+            Err("tesseract 未安装（PATH 中找不到该命令）".to_string())
         },
         Ok(Err(e)) => {
-            // tesseract 调用失败 —— 记录日志并返回空字符串
-            tracing::warn!(target: "document-parser", "tesseract 调用失败: {}", e);
+            // tesseract 调用失败 —— 同上，带出原始原因
             let _ = worker.join();
-            Ok(String::new())
+            Err(format!("tesseract 调用失败: {e}"))
         },
         Err(mpsc::RecvTimeoutError::Timeout) => {
             // 超时：尽力 kill 已 spawn 的子进程（通过 drop worker 不能 kill child，
@@ -129,9 +148,9 @@ pub fn ocr_fallback(path: &Path) -> std::result::Result<String, String> {
             Err(format!("OCR 超时 (120 秒): {}", path.display()))
         },
         Err(mpsc::RecvTimeoutError::Disconnected) => {
-            // 工作线程 panic 或提前结束 —— 返回空字符串
+            // 工作线程 panic 或提前结束 —— 属 OCR 不可用，不得伪装成「无文字」
             let _ = worker.join();
-            Ok(String::new())
+            Err("OCR 工作线程异常退出（未取到识别结果）".to_string())
         },
     }
 }

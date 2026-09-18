@@ -30,6 +30,13 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Note,
+    #[sea_orm(
+        belongs_to = "super::wikis::Entity",
+        from = "Column::WikiId",
+        to = "super::wikis::Column::Id",
+        on_delete = "Cascade"
+    )]
+    Wiki,
 }
 
 impl Related<super::notes::Entity> for Entity {

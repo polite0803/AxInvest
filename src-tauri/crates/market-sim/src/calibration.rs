@@ -13,8 +13,15 @@
 //! score:                 3.18
 //! ```
 //!
-//! 这些参数已导出为 `BEST_PARAMS` 常量，被 `MarketSimulationTool` 和
-//! `QuantStrategyAgent` 默认使用。
+//! 这些参数已导出为 `BEST_PARAMS` 常量，当前被以下位置消费：
+//!
+//! - `src-tauri/src/commands/market_sim.rs` —— 三个前端可见命令
+//!   （`market_sim_run` / `market_sim_run_mc` / `market_sim_run_strategy`）
+//! - `src-tauri/src/commands/wf_des.rs` —— DES 集成命令（当前无 UI 入口）
+//!
+//! ⚠️ 本节原表述为「被 `MarketSimulationTool` 和 `QuantStrategyAgent` 默认使用」，
+//! 该表述**不成立**：前者类型在全仓不存在，后者并未引用 `BEST_PARAMS`。
+//! 注释是这里唯一的规格，故保留此更正说明以防反复。
 
 //! ## 用法
 //!
@@ -71,6 +78,33 @@ pub struct CalibrationResult {
     pub score: f64,
     pub stylized_facts: StylizedFactsF64,
     pub total_trades: usize,
+}
+
+/// 「成交不足」阈值：低于它无法计算风格化事实（`StylizedFacts`），分数无意义。
+pub const MIN_TRADES_FOR_FACTS: usize = 20;
+
+/// 哨兵分数：**模拟跑通但成交不足** ⇒ 无效结果。
+pub const SCORE_NO_TRADES: f64 = 999.0;
+
+/// 哨兵分数：**模拟内核直接返回 `Err`** ⇒ 无效结果。
+pub const SCORE_SIM_FAILED: f64 = 9999.0;
+
+/// 「有效分数」的上界：`score >= SCORE_VALID_MAX` 一律视为哨兵/无效。
+///
+/// 判据用 `< SCORE_NO_TRADES` 而非 `!= 999.0`：拟合误差是连续量，
+/// 未来哨兵取值改变时这里仍能把「异常大的分数」拦住。
+pub const SCORE_VALID_MAX: f64 = SCORE_NO_TRADES;
+
+impl CalibrationResult {
+    /// 本次参数是否给出**可比较**的校准结果。
+    ///
+    /// 为什么必须有这个方法：`run()` 只做升序排序，**没有任何有效性判断**，
+    /// 而哨兵恰好是大数、排完序躺在末尾 —— 于是「**全部**参数都失败」时
+    /// `results[0]` 仍会被上层当作「最佳参数」打印出来（分数渲染成 `N/A`，
+    /// 但「最佳参数」的结论照样成立）。这就是「把失败当最优」的成因。
+    pub fn is_valid(&self) -> bool {
+        self.total_trades >= MIN_TRADES_FOR_FACTS && self.score < SCORE_VALID_MAX
+    }
 }
 
 /// 最佳校准参数（A 股，2026-07-03）
@@ -238,7 +272,7 @@ impl CalibrationRunner {
         match kernel.run() {
             Ok(result) => {
                 let total_trades = result.trades.len();
-                let facts = if total_trades >= 20 {
+                let facts = if total_trades >= MIN_TRADES_FOR_FACTS {
                     // 使用 Bar 聚合（10ms 窗口）
                     StylizedFacts::from_bars(&result.trades, self.bar_ns)
                 } else {
@@ -251,14 +285,17 @@ impl CalibrationRunner {
                         leverage_corr: 0.0,
                         n_observations: total_trades,
                         passed: Vec::new(),
-                        failed: vec![format!("成交不足: {} < 20", total_trades)],
+                        failed: vec![format!(
+                            "成交不足: {} < {}",
+                            total_trades, MIN_TRADES_FOR_FACTS
+                        )],
                     }
                 };
 
-                let score = if total_trades >= 20 {
+                let score = if total_trades >= MIN_TRADES_FOR_FACTS {
                     facts.score(&TargetRange::default())
                 } else {
-                    999.0
+                    SCORE_NO_TRADES
                 };
 
                 CalibrationResult {
@@ -277,7 +314,7 @@ impl CalibrationRunner {
             },
             Err(e) => CalibrationResult {
                 param: *param,
-                score: 9999.0,
+                score: SCORE_SIM_FAILED,
                 stylized_facts: StylizedFactsF64 {
                     kurtosis: 0.0,
                     hurst: 0.5,
@@ -312,13 +349,47 @@ impl CalibrationRunner {
             })
             .collect();
 
+        // 升序：有效分数的量级远小于哨兵，故哨兵自然落到末尾。
+        // ⚠ 「排在末尾」**不等于**「不会被选中」—— 全部失败时 `results[0]` 仍是哨兵。
+        // 取「最佳」必须走 `best_valid` / `best_n`（两者按 `is_valid` 过滤），
+        // **不要直接读 `results[0]`**。
         results.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
         results
     }
 
-    /// 获取最佳 N 个结果
+    /// 最佳**有效**结果；全部参数都失败时返回 `None`。
+    ///
+    /// **不要用 `results[0]` 代替本方法** —— 全失败时它是哨兵值（见 [`SCORE_SIM_FAILED`]）。
+    ///
+    /// ⚠ **本方法不依赖入参有序**。分数是「拟合误差」，**越小越好**，故取有效项中
+    /// `score` 最小者。曾经的写法是 `find(|r| r.is_valid())`，它把「入参已升序」
+    /// 这一前置条件**藏进了实现**：`run()` 恰好排过序因而正确，但本方法是公开 API，
+    /// 任何调用方传入乱序切片都会**静默拿到错误答案**（不报错、结果看着也合理）。
+    /// 这与「哨兵被当成最优」同属一族缺陷 —— 都是把「排序/有效性」的先验
+    /// 隐式寄托在调用方身上。对已排序的 `run()` 输出，`min_by` 与原 `find` 等价。
+    pub fn best_valid<'a>(
+        &self,
+        results: &'a [CalibrationResult],
+    ) -> Option<&'a CalibrationResult> {
+        results
+            .iter()
+            .filter(|r| r.is_valid())
+            .min_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal))
+    }
+
+    /// 获取最佳 N 个结果 —— **只取有效结果**。
+    ///
+    /// 无效结果（成交不足 / 模拟失败）不入选：其哨兵分数只用于排序占位，
+    /// 不表示可比优劣。全部无效时返回空 `Vec`（而不是"前 N 个哨兵"）。
+    ///
+    /// 与 [`best_valid`](Self::best_valid) 同样**不依赖入参有序**：内部自行按
+    /// `score` 升序取前 `n`，避免「调用方忘了排序 ⇒ 返回的不是最佳 N 个」。
     pub fn best_n(&self, results: &[CalibrationResult], n: usize) -> Vec<CalibrationResult> {
-        results.iter().take(n.min(results.len())).cloned().collect()
+        let mut valid: Vec<CalibrationResult> =
+            results.iter().filter(|r| r.is_valid()).cloned().collect();
+        valid.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap_or(std::cmp::Ordering::Equal));
+        valid.truncate(n);
+        valid
     }
 }
 
@@ -358,9 +429,18 @@ mod tests {
             print_best(results.len() - i, r);
         }
 
-        // 最佳参数简介
-        let best = &results[0];
-        println!("\n--- 最佳参数 ---");
+        // 最佳参数简介 —— 必须走 best_valid：全失败时 results[0] 是哨兵，
+        // 直接读它就会把「一次都没跑成」报告成「最佳参数」。
+        let best = match runner.best_valid(&results) {
+            Some(b) => b,
+            None => panic!(
+                "校准扫描无任何有效结果：{} 组参数全部命中哨兵（成交不足 < {} 或模拟失败）\
+                 ⇒ 先修仿真链路，不得按「最佳参数」采信",
+                results.len(),
+                MIN_TRADES_FOR_FACTS
+            ),
+        };
+        println!("\n--- 最佳参数（首个**有效**结果；哨兵不计入） ---");
         println!("  mm_spread_bps:        {}", best.param.mm_spread_bps);
         println!("  mm_quote_size:        {}", best.param.mm_quote_size);
         println!("  noise_act_prob:       {:.4}", best.param.noise_act_prob);
@@ -373,13 +453,15 @@ mod tests {
     }
 
     fn print_best(rank: usize, r: &CalibrationResult) {
-        let score_str = if r.score >= 100.0 {
-            format!("{:>8}", "N/A")
-        } else {
+        // 判据不再是魔数 `score >= 100.0`，而是有效性谓词
+        // （哨兵只是「无效」的一种；未来新增无效形态无需再改这里）
+        let score_str = if r.is_valid() {
             format!("{:.2}", r.score)
+        } else {
+            "N/A".to_string()
         };
         println!(
-            "  #{:<3} score={} trades={:<5} spread={:>3}bps size={:>4} noise_p={:.2} noise_bps={:>3} mom={:.4}",
+            "  #{:<3} score={:>8} trades={:<5} spread={:>3}bps size={:>4} noise_p={:.2} noise_bps={:>3} mom={:.4}{}",
             rank,
             score_str,
             r.total_trades,
@@ -387,8 +469,63 @@ mod tests {
             r.param.mm_quote_size,
             r.param.noise_act_prob,
             r.param.noise_price_noise_bps,
-            r.param.momentum_threshold
+            r.param.momentum_threshold,
+            if r.is_valid() { "" } else { "  ⚠无效" }
         );
+    }
+
+    /// 选择逻辑的**纯单元测试**（不跑仿真）。
+    ///
+    /// 为什么用合成数据：真实扫描是否产生哨兵取决于内核行为与成交数，
+    /// 无法稳定复现「全失败」这一关键形态；只有合成数据能把三种形态
+    /// （全失败 / 部分失败 / 全有效）全部锁死。
+    #[test]
+    fn test_best_selection_ignores_sentinels() {
+        let mk = |score: f64, trades: usize| CalibrationResult {
+            param: CalibrationParam::default(),
+            score,
+            stylized_facts: StylizedFactsF64 {
+                kurtosis: 0.0,
+                hurst: 0.5,
+                lb_pvalue: 1.0,
+                leverage_corr: 0.0,
+                passed: vec![],
+                failed: vec![],
+            },
+            total_trades: trades,
+        };
+
+        // ⚠ 本切片**故意不排序**（`3.0` 排在 `12.5` 之后）：选择函数不得依赖
+        // 「入参已升序」这一隐式前置条件。`run()` 恰好排过序，但 `best_valid`
+        // 是公开 API，调用方完全可能传乱序/手工构造的切片 —— 曾经的
+        // `find(|r| r.is_valid())` 在这里会返回 `12.5`，静默给出错误答案。
+        // **不要为了让本测试变绿而给下面这个 vec 排序**（那等于删掉守卫）。
+        let results = vec![
+            mk(SCORE_SIM_FAILED, 0), // 内核 Err
+            mk(SCORE_NO_TRADES, 0),  // 成交不足
+            mk(12.5, MIN_TRADES_FOR_FACTS),
+            mk(3.0, 100),
+        ];
+        let runner = CalibrationRunner::new(1000, 20);
+
+        assert!(!results[0].is_valid(), "模拟失败必须判无效");
+        assert!(!results[1].is_valid(), "成交不足必须判无效");
+        assert!(results[2].is_valid() && results[3].is_valid(), "两项应有效");
+
+        let best = runner.best_valid(&results).expect("存在有效结果时应返回最优");
+        assert_eq!(best.score, 3.0, "最优必须取自**有效**结果");
+
+        let top2 = runner.best_n(&results, 2);
+        assert_eq!(top2.len(), 2, "应只返回 2 个有效结果");
+        assert!(top2.iter().all(|r| r.is_valid()), "best_n 不得夹带哨兵");
+        // 是「最**优**的 n 个」而非「最**先**的 n 个有效项」—— 无序入参下必须自行排序
+        assert_eq!(top2[0].score, 3.0, "best_n 首项必须是全局最小有效分数");
+        assert_eq!(top2[1].score, 12.5, "best_n 次项应为次小有效分数");
+
+        // 反向对照：全失败 ⇒ 不得凭空造出「最佳」
+        let all_bad = vec![mk(SCORE_SIM_FAILED, 0), mk(SCORE_NO_TRADES, 3)];
+        assert!(runner.best_valid(&all_bad).is_none(), "全失败时不得返回「最佳参数」");
+        assert!(runner.best_n(&all_bad, 5).is_empty(), "全失败时 best_n 必须为空");
     }
 
     #[test]

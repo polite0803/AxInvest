@@ -144,12 +144,18 @@ const DEFAULT_SETTINGS: AppSettings = {
     rerank: {
       enabled: true,
       backend: "rule" as const,
-      crossEncoderModel: "bge-reranker-v2-m3",
+      // 文件名的**权威来源**是后端 `harness::rag_config::RERANKER_MODEL_FILENAME`
+      // （下载清单 `search::model_downloader::preset_models` 用的就是它）。
+      // 2026-09-15 修：此处原写 "bge-reranker-v2-m3"（缺 `.Q4_K_M.gguf` 后缀）
+      // ⇒ 指向一个**永远不会存在**的模型文件，属「同名默认值多个真源」。
+      // 后端一致性由 `search::model_downloader::tests::reranker_preset_matches_rerank_config_default` 钉住。
+      crossEncoderModel: "bge-reranker-v2-m3.Q4_K_M.gguf",
       topN: 5,
       candidateK: 30,
       ruleFilterKeep: 15,
       scoreThreshold: null,
-      ollamaEndpoint: "http://localhost:11434",
+      // 注：此处曾有 `ollamaEndpoint`，后端 `RerankConfig` 无该字段（幽灵字段，
+      // 2026-09-15 随 `src/types/knowledge.ts` 一并删除）。
     },
     selfRag: {
       enabled: false,

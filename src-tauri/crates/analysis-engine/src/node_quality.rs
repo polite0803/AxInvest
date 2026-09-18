@@ -10,6 +10,7 @@
 //! - valuation: 估值节点（估值区间+合理性结构）
 //! - risk: 风险节点（风险指标+阈值合规结构）
 
+use crate::decision_action::{normalize_action, ACTION_ALIASES};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -431,8 +432,14 @@ pub fn check_decision_quality(node_id: &str, parsed: &serde_json::Value) -> Node
 
     // 1. action 检查
     if let Some(a) = action {
-        let valid_actions = ["buy", "sell", "hold", "add", "reduce", "买入", "卖出", "持有"];
-        if !valid_actions.iter().any(|v| a.contains(v)) {
+        // P1-6(2026-09-14): 原先白名单只有 8 个字面量 —— 「观望」「增持」「减持」
+        // 「wait」「trim」等**合法**取值全部被误判为「action 值异常」并扣 10 分
+        // （假阳性惩罚，会让质量分系统性偏低）。
+        // 保留 contains 宽松语义（本处的输入是 LLM 自由文本，形如「买入（分批建仓）」），
+        // 但别名集合改为从唯一权威模块取，不再各写一份。
+        let low = a.to_lowercase();
+        let known = normalize_action(a).is_some() || ACTION_ALIASES.iter().any(|v| low.contains(v));
+        if !known {
             checks.push(QualityCheck {
                 category: "validity".into(),
                 field: "action".into(),

@@ -204,11 +204,21 @@ pub fn group_by_style_and_trim(
         // 同一风格内的置信度 min-max 归一化，解决不同策略置信度不可比问题
         let min_conf = v.iter().map(|p| p.confidence).min().unwrap_or(0);
         let max_conf = v.iter().map(|p| p.confidence).max().unwrap_or(100);
-        let range = if max_conf > min_conf {
-            (max_conf - min_conf) as f64
-        } else {
-            100.0
-        };
+        if max_conf <= min_conf {
+            // 组内置信度完全一致 → min-max 归一化在数学上无定义（分母为 0）。
+            //
+            // 这里必须保持原值：同策略同周期的 conf 由同一组固定参数算出，
+            // 只要该策略不消费 per-stock 的变率因子，组内必然全部同值
+            // （capital.rs / value.rs 的 turnover_anomaly 传常数 1.0，100% 命中此分支）。
+            //
+            // 旧实现此处把 range 回退成 100.0，于是 normalized 恒等于 0，
+            // 再被 clamp 到下限 1 —— 真实 pick 的置信度被整体压成 1，
+            // 反而低于 synthetic 兜底（conf=40），真实信号在展示上被假数据反超。
+            v.sort_by_key(|b| std::cmp::Reverse(b.confidence));
+            v.truncate(per_style_limit);
+            continue;
+        }
+        let range = (max_conf - min_conf) as f64;
         for p in v.iter_mut() {
             let original = p.confidence;
             let normalized = ((original as f64 - min_conf as f64) / range * 100.0).round() as u8;

@@ -1,8 +1,8 @@
+import { useStockJump } from "@/hooks/useStockJump";
 import { getActionColor } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Progress, Tag, theme } from "antd";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 
 /** 后端返回的分析动作常量（用于比较，不做 UI 展示） */
 
@@ -16,7 +16,7 @@ import { useNavigate } from "react-router-dom";
 export function StockAnalysisChatIndicator() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const navigate = useNavigate();
+  const jumpToStock = useStockJump();
 
   const status = useStockAnalysisStore((s) => s.status);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
@@ -34,7 +34,7 @@ export function StockAnalysisChatIndicator() {
   }
 
   const handleViewDetails = () => {
-    navigate(`/stock-analysis?code=${stockCode}`);
+    jumpToStock({ code: stockCode ?? "", name: stockName });
   };
 
   const handleRetry = () => {

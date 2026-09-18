@@ -85,6 +85,13 @@ pub async fn record_hit(
 }
 
 /// Record multiple retrieval hits in bulk.
+///
+/// 单条失败不中断整批，但**必须可观测**：返回的 `Ok(ids)` 只含成功写库的 ID
+/// （长度可能短于 `hits`）。
+///
+/// 2026-09-15 修：此前逐条 `warn!` 后恒 `Ok(ids)`，整批失败与全部成功返回值
+/// 形态完全相同 —— 反馈闭环（RL / 自适应优化的训练数据）静默缺数据却无人知晓。
+/// 现在失败会汇总成一条 `error!`，并明确记录失败条数 / 总条数。
 pub async fn record_hits(
     db: &DatabaseConnection,
     conversation_id: &str,
@@ -92,23 +99,27 @@ pub async fn record_hits(
     hits: &[(String, String, String, f64, String)], // (kb_id, doc_id, chunk_ref, score, preview)
 ) -> Result<Vec<String>, DbErr> {
     let mut ids = Vec::with_capacity(hits.len());
+    let mut failures: Vec<String> = Vec::new();
     for (kb_id, doc_id, chunk_ref, score, preview) in hits {
         match record_hit(db, conversation_id, message_id, kb_id, doc_id, chunk_ref, *score, preview)
             .await
         {
             Ok(id) => ids.push(id),
-            Err(e) => {
-                tracing::warn!(
-                    "[retrieval_hit] 记录失败 conv={} msg={} kb={} chunk={}: {}",
-                    conversation_id,
-                    message_id,
-                    kb_id,
-                    chunk_ref,
-                    e
-                );
-            },
+            Err(e) => failures.push(format!("kb={kb_id} chunk={chunk_ref}: {e}")),
         }
     }
+
+    if !failures.is_empty() {
+        tracing::error!(
+            "[retrieval_hit] {}/{} 条检索命中写库失败 conv={} msg={}：{}",
+            failures.len(),
+            hits.len(),
+            conversation_id,
+            message_id,
+            failures.join("；")
+        );
+    }
+
     Ok(ids)
 }
 

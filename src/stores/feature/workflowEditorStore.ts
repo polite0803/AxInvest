@@ -262,6 +262,12 @@ interface WorkflowEditorState {
       explanation?: string;
     } | null
   >;
+  /** 直接应用已解析的工作流节点/边到画布（替换或合并），不经过二次 LLM 生成 */
+  applyParsedWorkflow: (
+    nodes: WorkflowNode[],
+    edges: WorkflowEdge[],
+    mergeMode?: boolean,
+  ) => Promise<boolean>;
   optimizeAgentPrompt: (prompt: string) => Promise<string | null>;
   recommendNodes: (
     context: string,
@@ -342,6 +348,12 @@ interface WorkflowEditorState {
   pendingAiChatMessageId: string | null;
   setPendingAiChatActions: (messageId: string, actions: AiChatAction[]) => void;
   clearPendingAiChatActions: () => void;
+
+  /**
+   * 最近一次 merge 应用时因冲突被重命名的输出变量（`from` → `to`）。
+   * 供 AIPanel 应用后提示用户；非 merge 或未发生重命名时为 null。
+   */
+  aiMergeRenames: Array<{ from: string; to: string }> | null;
 
   semanticCheckResult: SemanticCheckResult | null;
   pendingReplacements: Map<
@@ -593,11 +605,90 @@ function mergeReports(ruleReport: DiagnosticReport, llmReport: DiagnosticReport)
   };
 }
 
+/** merge 模式下节点 config 中声明/引用变量名的字段（用于输出变量重名检测与同步） */
+const VARIABLE_REF_FIELDS = new Set([
+  "outputVar",
+  "inputVar",
+  "itemsVar",
+  "iterateeVar",
+  "continueCondition",
+  "query",
+  "target",
+  "source",
+]);
+
+/** 把节点 config 中等于 `from` 的变量引用改写为 `to`（限定变量引用字段，避免误伤自由文本） */
+function rewriteVarRefs(node: WorkflowNode, map: Map<string, string>): void {
+  const cfg = (node as unknown as { config?: Record<string, unknown> }).config;
+  if (!cfg) { return; }
+  const walk = (obj: unknown): void => {
+    if (!obj || typeof obj !== "object") { return; }
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "string") {
+        if (VARIABLE_REF_FIELDS.has(k) && map.has(v)) {
+          (obj as Record<string, unknown>)[k] = map.get(v);
+        }
+      } else if (Array.isArray(v)) {
+        for (const item of v) { walk(item); }
+      } else if (v && typeof v === "object") {
+        walk(v);
+      }
+    }
+  };
+  walk(cfg);
+}
+
+/**
+ * merge 冲突处理（纯函数，仅作用于新加入的副本节点）：
+ *
+ * 1. **outputVar 重名冲突** — 新节点声明的输出变量与画布现有节点重名时，
+ *    把声明改名为 `{name}_ai{n}`，并同步新节点集合内部所有变量引用字段，
+ *    避免下游节点读到被覆盖的旧变量值。
+ * 2. **悬空边过滤** — 新边端点不在最终节点集合（现有 ∪ 新加入）内时丢弃，
+ *    保证合并后图的 source/target 引用一致。
+ */
+function resolveMergeConflicts(
+  existingNodes: WorkflowNode[],
+  newNodes: WorkflowNode[],
+  newEdges: WorkflowEdge[],
+): { nodes: WorkflowNode[]; edges: WorkflowEdge[]; renamedVars: Array<{ from: string; to: string }> } {
+  const renamedVars: Array<{ from: string; to: string }> = [];
+  const existingOutputVars = new Set<string>();
+  for (const n of existingNodes) {
+    const cfg = (n as unknown as { config?: Record<string, unknown> }).config;
+    if (cfg && typeof cfg.outputVar === "string") { existingOutputVars.add(cfg.outputVar); }
+  }
+  const nodes = newNodes.map((n) => ({ ...n }));
+  // 1. 重名输出变量改名（含新节点之间去重）
+  for (let i = 0; i < nodes.length; i++) {
+    const cfg = (nodes[i] as unknown as { config?: Record<string, unknown> }).config;
+    if (!cfg || typeof cfg.outputVar !== "string") { continue; }
+    const name = cfg.outputVar;
+    if (existingOutputVars.has(name)) {
+      const to = `${name}_ai${i + 1}`;
+      cfg.outputVar = to;
+      renamedVars.push({ from: name, to });
+    }
+    existingOutputVars.add(cfg.outputVar as string);
+  }
+  // 同步新节点内部对改名变量的引用
+  if (renamedVars.length > 0) {
+    const map = new Map(renamedVars.map((r) => [r.from, r.to]));
+    for (const node of nodes) { rewriteVarRefs(node, map); }
+  }
+  // 2. 悬空边过滤
+  const finalIds = new Set<string>(existingNodes.map((n) => n.id).concat(nodes.map((n) => n.id)));
+  const edges = newEdges.filter((e) => finalIds.has(e.source) && finalIds.has(e.target));
+  return { nodes, edges, renamedVars };
+}
+
 /**
  * V2 协议 LLM diagnose 报告原始 schema(后端 `llm_diagnose_workflow` 返回):
  * 4 档 severity + 顶层 fixes[] + autoApply 标志
+ *
+ * 导出供 WorkflowExecutor 等跨上下文场景复用(禁止重复定义)。
  */
-interface LlmDiagnoseV2 {
+export interface LlmDiagnoseV2 {
   summary: string;
   issues: Array<{
     severity: string;
@@ -711,6 +802,7 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
     _aiChatCleanup: null,
     pendingAiChatActions: null,
     pendingAiChatMessageId: null,
+    aiMergeRenames: null,
     expandedSubWorkflows: {},
     collapsedContainers: (() => {
       try {
@@ -1905,6 +1997,59 @@ export const useWorkflowEditorStore = create<WorkflowEditorState>()(
           state.isLoading = false;
         });
         return null;
+      }
+    },
+
+    applyParsedWorkflow: async (nodes: WorkflowNode[], edges: WorkflowEdge[], mergeMode?: boolean) => {
+      set((state) => {
+        state.isLoading = true;
+        state.error = null;
+      });
+      // 生成→回滚闭环：应用前拍 AI 事务快照，成功后保留事务，
+      // 前端可随时通过 rollbackLastAiActionTransaction() 一键回滚本次应用
+      const txId = get().beginAiActionTransaction();
+      try {
+        set((state) => {
+          if (mergeMode && state.nodes.length > 0) {
+            const existingIds = new Set(state.nodes.map((n) => n.id));
+            const prefix = `ai-${Date.now()}`;
+            const newNodes = nodes.map((n) => ({
+              ...n,
+              id: existingIds.has(n.id) ? `${prefix}-${n.id}` : n.id,
+              position: { x: n.position.x + 50, y: n.position.y + 50 },
+            }));
+            const nodeIdMap = new Map<string, string>();
+            nodes.forEach((orig, i) => {
+              if (newNodes[i].id !== orig.id) {
+                nodeIdMap.set(orig.id, newNodes[i].id);
+              }
+            });
+            const newEdges = edges.map((e) => ({
+              ...e,
+              id: `ai-edge-${Date.now()}-${e.id}`,
+              source: nodeIdMap.get(e.source) || e.source,
+              target: nodeIdMap.get(e.target) || e.target,
+            }));
+            // merge 冲突处理：输出变量重名改名 + 悬空边过滤
+            const resolved = resolveMergeConflicts(state.nodes, newNodes, newEdges);
+            state.nodes = [...state.nodes, ...resolved.nodes];
+            state.edges = [...state.edges, ...resolved.edges];
+            state.aiMergeRenames = resolved.renamedVars.length > 0 ? resolved.renamedVars : null;
+          } else {
+            state.nodes = nodes;
+            state.edges = edges;
+            state.aiMergeRenames = null;
+          }
+          state.isLoading = false;
+        });
+        return true;
+      } catch (error) {
+        get().rollbackAiActionTransaction(txId);
+        set((state) => {
+          state.error = String(error);
+          state.isLoading = false;
+        });
+        return false;
       }
     },
 

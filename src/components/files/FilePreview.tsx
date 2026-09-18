@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { type FileInfo, getFileInfo, readTextFile } from "@/lib/fileBrowserApi";
+import { formatFileSize } from "@/lib/format";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { Empty, Spin, theme, Typography } from "antd";
 import { File as FileIcon } from "lucide-react";
@@ -82,14 +83,6 @@ function getExtension(path: string): string {
   const idx = base.lastIndexOf(".");
   if (idx < 0) { return ""; }
   return base.slice(idx + 1).toLowerCase();
-}
-
-function formatSize(bytes?: number): string {
-  if (bytes == null) { return "—"; }
-  if (bytes === 0) { return "0 B"; }
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
 function formatTime(ts?: number): string {
@@ -273,7 +266,7 @@ export function FilePreview({ path }: FilePreviewProps) {
           <span style={{ color: token.colorTextTertiary }}>
             {t("files.previewSize")}:
           </span>{" "}
-          {formatSize(info.size)}
+          {formatFileSize(info.size)}
         </div>
         <div>
           <span style={{ color: token.colorTextTertiary }}>

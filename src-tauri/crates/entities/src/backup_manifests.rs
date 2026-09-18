@@ -10,12 +10,15 @@ pub struct Model {
     pub id: String,
     pub version: String,
     pub created_at: String,
+    #[sea_orm(default_value = 0)]
     pub encrypted: i32,
     pub checksum: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "{}")]
     pub object_counts_json: String,
     pub source_app_version: String,
     pub file_path: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub file_size: i64,
 }
 

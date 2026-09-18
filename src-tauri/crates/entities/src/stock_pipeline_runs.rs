@@ -11,10 +11,12 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 管道执行日期（YYYY-MM-DD）
+    #[sea_orm(indexed)]
     pub run_date: String,
     /// 时间旅行模式截止日（可选）
     pub as_of_date: Option<String>,
     /// running / completed / failed
+    #[sea_orm(indexed)]
     pub status: String,
     /// 候选股列表 JSON
     pub candidates_json: Option<String>,

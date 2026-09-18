@@ -17,7 +17,9 @@ pub struct Model {
     pub target_type: String,
     pub target_id: String,
     pub payload: Option<Json>,
+    #[sea_orm(default_value = "pending")]
     pub status: String,
+    #[sea_orm(default_value = 0)]
     pub retry_count: i32,
     pub error_message: Option<String>,
     pub created_at: i64,
@@ -25,7 +27,15 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::wikis::Entity",
+        from = "Column::WikiId",
+        to = "super::wikis::Column::Id",
+        on_delete = "Cascade"
+    )]
+    Wiki,
+}
 
 impl ActiveModelBehavior for ActiveModel {}
 

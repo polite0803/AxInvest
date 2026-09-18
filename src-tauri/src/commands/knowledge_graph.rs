@@ -300,7 +300,9 @@ pub(crate) fn parse_entity_extraction_response(
         .map(|r| ExtractedRelation {
             source: r.source,
             target: r.target,
-            relation_type: r.relation.unwrap_or_else(|| "mentions".to_string()),
+            relation_type: r
+                .relation
+                .unwrap_or_else(|| axagent_harness::knowledge_graph::RELATION_MENTIONS.to_string()),
         })
         .collect();
 
@@ -475,58 +477,36 @@ pub async fn sync_memory_to_knowledge_graph(
     importance_threshold: Option<f64>,
     max_items: Option<u32>,
 ) -> Result<MemoryToKnowledgeResult, String> {
-    let threshold = importance_threshold.unwrap_or(0.7);
-    let max = max_items.unwrap_or(100);
+    // 默认口径取自 dao 的常量（原先此处内联 0.7 / 100，与周期任务那份是**两处手抄**）。
+    let threshold = importance_threshold
+        .unwrap_or(axagent_dao::repo::knowledge_graph::REFLOW_IMPORTANCE_THRESHOLD);
+    let max = max_items.unwrap_or(axagent_dao::repo::knowledge_graph::REFLOW_MAX_ITEMS);
 
-    let items = axagent_dao::repo::memory::list_high_importance_items(
+    // ⚠ 2026-09-17：本命令原先自己实现了一遍回流（与 `src/init/services.rs` 的周期任务
+    //   `knowledge_consolidation` 步骤 3 **逐字重复**），且两处都把
+    //   `memory_namespaces.id` 当作 `knowledge_bases.id` 用 —— 那是**两个 id 空间**
+    //   ⇒ `knowledge_entities.knowledge_base_id` 的外键违反 ⇒ 用户点这个命令只会看到
+    //   `entities_created: 0, failures: N`，而原因被 `debug!` 吞掉（比周期任务那条更隐蔽：
+    //   它连 failures 都只进返回值、不落日志）。
+    //
+    //   现收敛到 dao 的单一实现，KB 归属走**哨兵常量**
+    //   （该 KB 行由 `dao::seed::ensure_sentinels` 幂等播种，与
+    //   `TRAJECTORY_KB_ID` 同构）。返回值形状 `MemoryToKnowledgeResult` **不变**
+    //   —— 前端契约不受影响。
+    let stats = axagent_dao::repo::knowledge_graph::reflow_memory_to_knowledge(
         state.harness.db(),
-        Some(threshold),
-        Some(max),
+        axagent_harness::constants::sentinel::MEMORY_REFLOW_KB_ID,
+        threshold,
+        max,
     )
     .await
     .map_err(|e| err_to_string(AxAgentError::internal(e.to_string())))?;
 
-    let items_read = items.len();
-    let mut entities_created = 0usize;
-    let mut failures = 0usize;
-
-    for item in &items {
-        let kb_id = if item.namespace_id.is_empty() {
-            "memory_default".to_string()
-        } else {
-            item.namespace_id.clone()
-        };
-        let name: String = item.content.chars().take(100).collect();
-        let confidence = (item.importance).min(1.0);
-
-        match axagent_dao::repo::knowledge_graph::upsert_entity(
-            state.harness.db(),
-            &kb_id,
-            &name,
-            "memory_item",
-            "[]",
-            confidence,
-            None,
-            None,
-        )
-        .await
-        {
-            Ok(_) => entities_created += 1,
-            Err(e) => {
-                tracing::debug!("[sync_memory_to_knowledge] 转换失败 item={}: {}", item.id, e);
-                failures += 1;
-            },
-        }
-    }
-
-    tracing::info!(
-        "[sync_memory_to_knowledge] 完成：读取 {} 条，创建 {} 实体，{} 失败",
-        items_read,
-        entities_created,
-        failures
-    );
-
-    Ok(MemoryToKnowledgeResult { items_read, entities_created, failures })
+    Ok(MemoryToKnowledgeResult {
+        items_read: stats.items_read,
+        entities_created: stats.entities_created,
+        failures: stats.failures,
+    })
 }
 
 #[cfg(test)]

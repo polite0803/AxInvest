@@ -6,7 +6,11 @@ use crate::thought_chain::ThoughtChain;
 /// 目标评估结果
 #[derive(Debug, Clone)]
 pub struct GoalEvaluation {
-    /// 目标是否已达成
+    /// 目标是否已达成。
+    ///
+    /// **语义约束**：本字段只表示「真实判定结果」。因连续未达上限而放弃继续
+    /// 判定时，它**保持** `false`，放行意图由 [`Self::forced_synthesis`] 表达
+    /// （2026-09-12 修复，见该字段文档）。
     pub achieved: bool,
     /// 置信度 0.0-1.0
     pub confidence: f32,
@@ -14,6 +18,23 @@ pub struct GoalEvaluation {
     pub reason: String,
     /// 缺失的子目标
     pub missing: Vec<String>,
+    /// 是否因「连续未达成次数超限」而**放弃继续判定并放行**。
+    ///
+    /// # 为什么与 `achieved` 分开
+    ///
+    /// 修复前该场景直接返回 `achieved: true`（理由文案写的是「强制进入综合
+    /// 阶段」），把「放弃判定」**伪装成「已达成」**。后果：任何连续 N 轮未达
+    /// 成的任务，此后每一轮都恒定输出 `achieved=true` ⇒ 该信号在长任务后段
+    /// **完全失去判别力**，而下游会把它当真实达成信号消费
+    /// （铁律 #5：同向恒定 = 偏置非证据）。
+    ///
+    /// 现在两个语义各有出口：
+    /// - `achieved` —— 目标到底达成没有（可能是 `false`）
+    /// - `forced_synthesis` —— 判定是否已被放弃（保护性放行）
+    ///
+    /// 消费方必须**同时**检查两者：`!achieved && !forced_synthesis` 才回退继续
+    /// 推理；`forced_synthesis` 为真时应放行进综合阶段并自行标注「未确认达成」。
+    pub forced_synthesis: bool,
 }
 
 /// 目标达成评估器
@@ -81,16 +102,23 @@ impl GoalEvaluator {
         };
         let no_sub_goals = sub_goals.is_empty();
 
-        // 安全检查：连续多次未达成，强制放行，防止无限重试
+        // 安全检查：连续多次未达成 ⇒ 放弃继续判定并放行，防止无限重试。
+        //
+        // 修复（2026-09-12）：此前此处返回 `achieved: true`，把「放弃判定」
+        // 伪装成「已达成」。凡连续 N 轮未达成的任务，此后每轮都恒定
+        // `achieved=true` ⇒ 信号在长任务后段完全失去判别力，而下游当真实信号
+        // 消费（铁律 #5：同向恒定 = 偏置非证据）。
+        // 现改为 `achieved` 保持 false + `forced_synthesis: true`，分离两个语义。
         if self.consecutive_not_achieved >= self.max_not_achieved {
             return GoalEvaluation {
-                achieved: true,
+                achieved: false,
                 confidence: 0.5,
                 reason: format!(
-                    "连续 {} 次评估未达成，强制进入综合阶段",
+                    "连续 {} 次评估未达成，放弃继续判定，强制进入综合阶段（达成状态未确认）",
                     self.consecutive_not_achieved
                 ),
                 missing: Vec::new(),
+                forced_synthesis: true,
             };
         }
 
@@ -105,6 +133,7 @@ impl GoalEvaluator {
                 } else {
                     sub_goals.clone()
                 },
+                forced_synthesis: false,
             };
         }
 
@@ -119,6 +148,7 @@ impl GoalEvaluator {
                     completed_steps
                 ),
                 missing: missing_goals,
+                forced_synthesis: false,
             };
         }
 
@@ -133,6 +163,7 @@ impl GoalEvaluator {
                     missing_goals.join(", ")
                 ),
                 missing: missing_goals,
+                forced_synthesis: false,
             };
         }
 
@@ -146,6 +177,7 @@ impl GoalEvaluator {
                 sub_goals.len().saturating_sub(missing_goals.len())
             ),
             missing: missing_goals,
+            forced_synthesis: false,
         }
     }
 
@@ -192,6 +224,15 @@ mod tests {
         assert!(result.achieved);
     }
 
+    /// 超限放行**不等于**达成 —— P1-A 核心回归断言。
+    ///
+    /// 修复前此处断言的是 `assert!(r2.achieved)`，即把「放弃判定」伪装成
+    /// 「已达成」并被测试**固化**。修复后 `achieved` 必须保持 `false`，
+    /// 放行意图由 `forced_synthesis` 表达。
+    ///
+    /// 两个断言缺一不可：只断言 `forced_synthesis` 会漏掉「又偷偷把 achieved
+    /// 写成 true」这种回退，而 `achieved` 才是下游的最终决策字段
+    /// （铁律 #5：修 bug ≠ 修结论，必须核对最终决策字段）。
     #[test]
     fn test_consecutive_not_achieved_force_through() {
         let chain = ThoughtChain::new();
@@ -201,10 +242,37 @@ mod tests {
         // 第一次 — 未达成
         let r1 = evaluator.evaluate(&chain, &context);
         assert!(!r1.achieved);
-        // 第二次 — consecutive=1 >= max=1，强制通过
+        assert!(!r1.forced_synthesis, "首次未达成不应触发放弃判定");
+
+        // 第二次 — consecutive=1 >= max=1 ⇒ 放弃判定并放行
         let r2 = evaluator.evaluate(&chain, &context);
-        assert!(r2.achieved);
+        assert!(!r2.achieved, "放弃判定不得伪装成已达成");
+        assert!(r2.forced_synthesis, "必须用独立字段表达放行原因");
         assert!(r2.confidence < 0.6);
+    }
+
+    /// 铁律 #5 回归：「同向恒定 = 偏置非证据」。
+    ///
+    /// 空 chain + `max_not_achieved=3` ⇒ 前 3 轮 consec 递增，第 4 轮起进入
+    /// 放弃判定分支并**持续**放行。断言无论放行多少轮，`achieved` 都不得变为
+    /// `true` —— 即该信号不因「轮次多」而失去判别力。
+    #[test]
+    fn forced_synthesis_never_reports_achieved() {
+        let chain = ThoughtChain::new();
+        let context = ReasoningContext::new("impossible goal");
+        let mut evaluator = GoalEvaluator::new(3);
+
+        let mut forced_rounds = 0;
+        for round in 1..=10 {
+            let r = evaluator.evaluate(&chain, &context);
+            if r.forced_synthesis {
+                forced_rounds += 1;
+                assert!(!r.achieved, "第 {round} 轮：forced_synthesis 时 achieved 必须为 false");
+            }
+        }
+        // 第 4..=10 轮放行（前 3 轮 consec 尚未达阈值）—— 同时也证明该分支
+        // 确实被走到，避免「分支永不触发所以断言恒真」的假绿。
+        assert_eq!(forced_rounds, 7, "max_not_achieved=3 ⇒ 第 4..=10 轮放行");
     }
 
     #[test]
@@ -218,5 +286,6 @@ mod tests {
         // reset 后计数归零
         let result = evaluator.evaluate(&chain, &context);
         assert!(!result.achieved); // 不是强制通过
+        assert!(!result.forced_synthesis, "reset 后不应仍处于放弃判定状态");
     }
 }

@@ -50,14 +50,6 @@ test.describe("Chat Navigation", () => {
     }
   });
 
-  test("should display plan approval toggle", async ({ page }) => {
-    const toggle = page.locator('[data-testid="plan-approval-toggle"]');
-    const isVisible = await toggle.isVisible({ timeout: 5000 }).catch(() => false);
-    if (isVisible) {
-      await expect(toggle).toBeVisible();
-    }
-  });
-
   test("should navigate to dashboard from chat", async ({ page }) => {
     await page.goto("/dashboard");
     await page.waitForLoadState("networkidle");

@@ -8,6 +8,7 @@ use axagent_harness::types::*;
 use futures::Stream;
 use std::pin::Pin;
 
+use crate::compat::impl_default_via_new;
 use crate::hermes::HermesAdapter;
 use crate::{ProviderAdapter, ProviderRequestContext};
 
@@ -33,11 +34,7 @@ impl OpenClawAdapter {
     }
 }
 
-impl Default for OpenClawAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(OpenClawAdapter);
 
 #[async_trait]
 impl ProviderAdapter for OpenClawAdapter {

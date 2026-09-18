@@ -143,45 +143,26 @@ impl RGA {
         self.mark_deleted(&entry_id)
     }
 
-    /// 标记条目为已删除
+    /// 标记条目为已删除（墓碑化）
+    ///
+    /// # 为什么墓碑必须保留左右指针
+    ///
+    /// `left_id` / `right_id` 是远端并发插入时**定位锚点的唯一依据**（见
+    /// [`Self::find_position_for_merge`]）。若删除时清除指针对并重连邻居，
+    /// 远端「在已删条目旁插入」的操作会锚回一个已失去位置的墓碑，
+    /// 新条目虽存在于 `entries` 却从可见链表断裂 —— `to_vec` 遍历不到它，
+    /// 表现为**元素静默丢失**（本地能查到、序列化出去就没了）。
+    ///
+    /// 正确做法：墓碑**留在链上**（指针不动），由 [`Self::to_vec`] 遍历时跳过
+    /// `deleted` 条目。这样删除只影响可见性，不影响定位结构。
     fn mark_deleted(&mut self, entry_id: &str) -> bool {
-        // 先获取条目信息
-        let (left_id, right_id) = {
-            if let Some(entry) = self.entries.iter().find(|e| e.id == entry_id) {
-                if entry.deleted {
-                    return false;
-                }
-                (entry.left_id.clone(), entry.right_id.clone())
-            } else {
-                return false;
-            }
+        let Some(entry) = self.entries.iter_mut().find(|e| e.id == entry_id) else {
+            return false;
         };
-
-        // 标记为已删除
-        if let Some(entry) = self.entries.iter_mut().find(|e| e.id == entry_id) {
-            entry.deleted = true;
-            entry.left_id = None;
-            entry.right_id = None;
-        } else {
+        if entry.deleted {
             return false;
         }
-
-        // 更新邻居链接
-        if let Some(lid) = &left_id {
-            if let Some(left_entry) = self.entries.iter_mut().find(|e| e.id == *lid) {
-                left_entry.right_id = right_id.clone();
-            }
-        } else {
-            // 删除的是头部
-            self.head_id = right_id.clone();
-        }
-
-        if let Some(rid) = &right_id
-            && let Some(right_entry) = self.entries.iter_mut().find(|e| e.id == *rid)
-        {
-            right_entry.left_id = left_id.clone();
-        }
-
+        entry.deleted = true;
         true
     }
 
@@ -418,5 +399,75 @@ mod tests {
         // 两个元素都应该存在
         assert!(values.contains(&&json!("fromA")));
         assert!(values.contains(&&json!("fromB")));
+    }
+
+    // ─── 回归测试：墓碑必须保留邻接指针（修复前为红） ───────────────────
+
+    /// 回归：远端「在已删条目旁插入」的元素必须可见
+    ///
+    /// 修复前 `mark_deleted` 会把已删条目的 `left_id` / `right_id` 置 `None` 并重连邻居，
+    /// 于是远端插入时锚回一个**已失去位置的墓碑** —— 新条目仍存在于 `entries`，
+    /// 却从可见链表断裂（`to_vec` 遍历不到），表现为元素静默丢失。
+    #[test]
+    fn test_merge_insert_adjacent_to_tombstone() {
+        let mut a = RGA::new("siteA".to_string());
+        a.insert(0, json!("a"));
+        a.insert(1, json!("b"));
+        a.insert(2, json!("c"));
+
+        // B 复制 A 的初始状态，随后在 b 与 c 之间插入 x
+        let mut b = RGA::new("siteB".to_string());
+        b.merge(&a);
+        b.insert(2, json!("x"));
+
+        // A 删除 b（此时 x 尚未到达 A）
+        assert!(a.remove(1));
+        assert_eq!(a.len(), 2, "A 删除后应剩两个可见元素");
+
+        // 双向合并必须收敛到同一顺序，且 x 可见
+        a.merge(&b);
+        b.merge(&a);
+
+        let expected = vec![json!("a"), json!("x"), json!("c")];
+        let a_vals: Vec<Value> = a.values().into_iter().cloned().collect();
+        let b_vals: Vec<Value> = b.values().into_iter().cloned().collect();
+
+        assert_eq!(a_vals, expected, "A 侧应看到 [a,x,c]，实际 {a_vals:?}");
+        assert_eq!(b_vals, expected, "B 侧应看到 [a,x,c]，实际 {b_vals:?}");
+    }
+
+    /// 回归：连续删除多个中间条目后，链表仍必须可达
+    #[test]
+    fn test_multiple_tombstones_keep_chain_intact() {
+        let mut a = RGA::new("siteA".to_string());
+        a.insert(0, json!("a"));
+        a.insert(1, json!("b"));
+        a.insert(2, json!("c"));
+        a.insert(3, json!("d"));
+
+        assert!(a.remove(1)); // 删 b
+        assert!(a.remove(1)); // 删 c（此时它是 index 1）
+
+        let vals: Vec<Value> = a.values().into_iter().cloned().collect();
+        assert_eq!(vals, vec![json!("a"), json!("d")], "连续删除后链表必须仍可达，实际 {vals:?}");
+    }
+
+    /// 回归：删除头部条目后，遍历必须从下一个可见条目继续
+    #[test]
+    fn test_delete_head_keeps_traversal_alive() {
+        let mut a = RGA::new("siteA".to_string());
+        a.insert(0, json!("a"));
+        a.insert(1, json!("b"));
+        a.insert(2, json!("c"));
+
+        assert!(a.remove(0)); // 删头部
+
+        let vals: Vec<Value> = a.values().into_iter().cloned().collect();
+        assert_eq!(vals, vec![json!("b"), json!("c")], "删除头部后不应截断后续元素，实际 {vals:?}");
+
+        // 删除头部后继续插入，新元素仍应可见
+        a.insert(0, json!("z"));
+        let vals: Vec<Value> = a.values().into_iter().cloned().collect();
+        assert_eq!(vals, vec![json!("z"), json!("b"), json!("c")], "实际 {vals:?}");
     }
 }

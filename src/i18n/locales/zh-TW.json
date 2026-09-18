@@ -1763,6 +1763,7 @@
     "searchConversations": "搜尋對話",
     "settings": "設定",
     "toggleSidebar": "切換側邊欄",
+    "workbench": "工作台",
     "toggleInspector": "切換檢查器"
   },
   "commandSuggest": {
@@ -2568,6 +2569,8 @@
     "CONVERSATION_TITLE_FAILED": "設定對話標題失敗",
     "CONVERSATION_TOOL_LOOP_EXCEEDED": "工具呼叫循環超過最大次數",
     "CONVERSATION_UPDATE_FAILED": "更新對話失敗",
+    "DB_CONNECT_FAILED": "無法連線到資料庫，請檢查主機、連接埠、網路與認證資訊",
+    "DB_QUERY_VERIFY_FAILED": "資料庫連線已建立，但驗證查詢失敗（SELECT 1），請稍後重試或檢查伺服器狀態",
     "CONVERSATION_WEB_SEARCH_PARAM_MISSING": "網路搜尋缺少必要參數",
     "KNOWLEDGE_NOT_FOUND": "知識庫未找到",
     "KNOWLEDGE_DOCUMENT_NOT_FOUND": "知識庫文件未找到",
@@ -2588,6 +2591,7 @@
     "DASHBOARD_NO_MANIFEST": "儀表板缺少清單檔案",
     "DESKTOP_CONNECTION_TIMEOUT": "桌面連線逾時",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "桌面通知傳送失敗",
+    "DOMAIN_UNREGISTERED": "能力域未註冊本體",
     "FINE_TUNE_DELETE_FAILED": "刪除微調任務失敗",
     "EXPERT_DELETE_FAILED": "刪除專家失敗",
     "EXPERT_JSON_PARSE_FAILED": "專家 JSON 解析失敗",
@@ -2763,6 +2767,7 @@
     "WORKFLOW_NODE_NOT_FOUND": "工作流程節點未找到",
     "WORKFLOW_NOT_FOUND": "工作流程未找到",
     "WORKFLOW_PLAN_NOT_FOUND": "工作流程計畫未找到",
+    "WORKFLOW_PLAN_NOT_AUTHORIZED": "計畫尚未獲得執行授權，請先在計畫卡上批准",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "套用工作流程反思失敗",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "工作流程反思演化失敗",
     "WORKFLOW_REFLECTION_SEAM_NOT_READY": "工作流能力接縫未註冊（反思/進化/優化服務不可用）",
@@ -2867,6 +2872,12 @@
     "CAPABILITY_METADATA_RESTORE_FAILED": "元數據恢復失敗",
     "CAPABILITY_EVOLVE_FAILED": "能力進化失敗",
     "CAPABILITY_NOT_EVOLVABLE": "該能力不可進化（外部外掛唯讀能力）",
+    "CAPABILITY_DOMAIN_UNKNOWN": "未知的能力域識別碼",
+    "CAPABILITY_DOMAIN_NOT_TOGGLEABLE": "該能力域不允許停用",
+    "CAPABILITY_DOMAIN_ALIAS_CONFLICT": "別名與既有域或別名衝突",
+    "CAPABILITY_DOMAIN_ALIAS_INVALID": "別名不合法（為空、過長或含空白）",
+    "CAPABILITY_DOMAIN_UPDATE_FAILED": "能力域設定儲存失敗",
+    "CAPABILITY_DOMAIN_LIST_FAILED": "能力域清單讀取失敗",
     "AGENT_INPUT_CHANNEL_CLOSED": "使用者提問通道已關閉",
     "AGENT_INPUT_WAIT_REPLY_TIMEOUT": "等待使用者回覆逾時（5 分鐘）",
     "AGENT_INPUT_NO_PROVIDER": "沒有可用的 provider/model：請先在設定中啟用供應商",
@@ -2902,7 +2913,26 @@
     "proxyTestFailed": "代理測試失敗",
     "message": "錯誤",
     "STOCK_SETUP_INTERNAL": "Stock setup internal error",
-    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error"
+    "STOCK_SIM_INPUT_MISSING": "模擬缺少必要輸入（股票代碼或參考價）",
+    "STOCK_SIM_NO_REFERENCE_PRICE": "無法確定參考價：即時行情與歷史快照都沒有可用現價",
+    "STOCK_SIM_RESULT_PARSE_FAILED": "模擬結果無法解析，請重新執行一次分析",
+    "STOCK_SIM_EXEC_FAILED": "模擬引擎執行失敗",
+    "STOCK_SIM_CANCELLED": "模擬任務被取消（應用結束或分析中斷）",
+    "STOCK_WORKFLOW_INTERNAL": "Stock workflow internal error",
+    "STOCK_WORKFLOW_TIMEOUT": "分析逾時，請稍後重試",
+    "STOCK_WORKFLOW_CANCELLED": "分析已被取消",
+    "STOCK_WORKFLOW_EXEC_FAILED": "股票分析工作流執行失敗",
+    "STOCK_WORKFLOW_STEP_FAILED": "分析節點執行失敗",
+    "STOCK_WORKFLOW_STEP_CANCELLED": "分析節點因分析被取消而中止",
+    "STOCK_WORKFLOW_HOOK_BLOCKED": "前置檢查未通過，分析已中止",
+    "STOCK_WORKFLOW_VALIDATION_FAILED": "節點輸入/輸出驗證未通過",
+    "STOCK_WORKFLOW_GRAPH_INVALID": "工作流定義不合法（節點重複、依賴缺失或存在環）",
+    "STOCK_WORKFLOW_TARGET_NOT_FOUND": "工作流或節點不存在",
+    "STOCK_WORKFLOW_SERIALIZE_FAILED": "工作流資料序列化失敗",
+    "STOCK_WORKFLOW_INVALID_STATE": "工作流狀態異常，無法繼續",
+    "STOCK_WORKFLOW_PERSIST_FAILED": "篩選已完成，但結果未能儲存至歷史紀錄",
+    "SEARCH_HTTP_ERROR": "搜尋服務回傳異常狀態",
+    "SEARCH_UNREACHABLE": "無法連線到搜尋服務"
   },
   "errorBoundary": {
     "copied": "已複製",
@@ -3737,6 +3767,7 @@
     "topP": "Top P"
   },
   "nav": {
+    "tabActivity": "執行中",
     "app": "AxAgent",
     "chat": "對話",
     "dashboard": "儀錶板",
@@ -3750,6 +3781,7 @@
     "settings": "設定",
     "terminal": "終端",
     "wiki": "知識庫",
+    "workbench": "工作台",
     "workflow": "工作流程",
     "marketplace": "市場",
     "dynamicUI": "動態頁面",
@@ -3934,6 +3966,8 @@
       "tagProcess": "處理",
       "tokenUsage": "{{slug}}：+{{input}}↑ / +{{output}}↓",
       "completed": "完成",
+      "heldNotice": "偵測到 {{count}} 則新訊息（會話已推進到 #{{seq}}），本輪未執行。請重送，agent 會依據最新上下文作答。",
+      "speakerMe": "我",
       "contextInjectedHint": "已自動注入當前選中股票作為業務上下文，dispatcher 據此路由到投研員/交易員/風控員"
     },
     "dm": {
@@ -4182,6 +4216,20 @@
   "plan": {
     "approveAll": "批准並執行",
     "approveStep": "批准此步驟",
+    "authorization": {
+      "authorized": "已授權",
+      "unauthorized": "未授權",
+      "tooltipAuthorized": "由{{source}}於 {{time}} 授權",
+      "tooltipMissing": "計畫已進入「{{status}}」，但授權位為 0 —— 執行前的授權校驗會拒絕後續操作",
+      "source": {
+        "user": "使用者",
+        "system": "系統",
+        "api": "API",
+        "ui": "介面",
+        "automation": "自動化",
+        "unknown": "未知來源"
+      }
+    },
     "cancel": "取消",
     "defaultTitle": "執行計劃",
     "executeApproved": "執行已批准步驟",
@@ -4830,6 +4878,39 @@
     "apiKey": "API密钥"
   },
   "settings": {
+    "capabilityDomains": {
+      "title": "能力域",
+      "description": "管理 Agent 的業務能力域。停用某個域後：該域不再出現在 L1 分類器候選中、不再被路由命中、該域下的能力也會被過濾。追加別名可讓你用自己的說法命中該域。",
+      "consumersTitle": "修改後立即生效（無需重新啟動），影響以下路徑：",
+      "consumerClassifier": "L1 分類器提示詞 —— 停用的域從候選清單中消失",
+      "consumerRouter": "L1 域路由 —— 命中的規則若指向停用域會被跳過",
+      "consumerFilter": "能力過濾 —— 停用域的能力一律不放行",
+      "consumerAlias": "域解析 —— 追加別名參與使用者輸入與模型輸出的域識別",
+      "statTotal": "共 {{count}} 個域",
+      "statEnabled": "已啟用 {{count}}",
+      "statOverridden": "已自訂 {{count}}",
+      "tagSystem": "內部",
+      "tagOverridden": "已自訂",
+      "tagDisabled": "已停用",
+      "switchOn": "啟用",
+      "switchOff": "停用",
+      "builtinAliases": "內建別名",
+      "noAliases": "無",
+      "extraAliases": "追加別名",
+      "extraAliasesPlaceholder": "用逗號分隔，例如：投資, 證券",
+      "saveAliases": "儲存",
+      "effectiveAliases": "生效別名",
+      "restoreDefault": "恢復預設行為",
+      "restoreDefaultHint": "啟用該域並清空追加別名。域識別碼與內建別名不可刪，覆蓋記錄會保留（用於區分「內建預設」與「人工改過」）。",
+      "navPath": "入口路徑",
+      "loadFailed": "讀取能力域註冊表失敗",
+      "loadRetry": "重試",
+      "blockReason": {
+        "general_is_fallback": "「通用」是唯一的兜底域，不可停用",
+        "system_is_internal": "「系統」是內部域，不可停用",
+        "unknown": "該域不可停用"
+      }
+    },
     "modelLabels": {
       "defaultModel": "預設對話模型",
       "titleSummaryModel": "標題摘要模型",
@@ -4948,6 +5029,19 @@
       "permissionControl": "權限控制",
       "permissionMode": "權限模式",
       "readOnly": "只讀",
+      "reactEngine": {
+        "title": "進階引擎參數",
+        "hint": "改動需重啟應用後才生效；留空的項目保持引擎預設值。",
+        "timeoutSecs": "單次工具呼叫逾時（秒）",
+        "maxRetryAttempts": "工具失敗最大重試次數",
+        "maxRepeatedCalls": "同一工具重複呼叫上限",
+        "maxNoProgressIterations": "無進展迭代上限（觸發停滯判定）",
+        "minQualityThreshold": "最低品質閾值（低於則觸發重試）",
+        "cycleDetectionEnabled": "迴圈偵測（辨識重複動作）",
+        "verificationEnabled": "結果驗證（執行後校驗產物）",
+        "reflectionEnabled": "反思（自我評估並調整）",
+        "checkpointEnabled": "檢查點（儲存可恢復狀態）"
+      },
       "refresh": "重新整理",
       "runtimeAgentList": "運行時 Agent 列表",
       "statusCancelled": "已取消",
@@ -5073,18 +5167,25 @@
       "pgPasswordPlaceholder": "資料庫密碼",
       "pgPortLabel": "連接埠",
       "pgSchemaLabel": "Schema（選用）",
+      "fallbackToSqlite": "PG 無法使用時回退到 SQLite",
+      "fallbackToSqliteHint": "PostgreSQL 連線失敗時回退到本機 SQLite；關閉後 PG 連不上將直接導致啟動失敗。",
       "pgSchemaPlaceholder": "留空使用預設 public",
       "pgUserLabel": "使用者名稱",
       "pgUserPlaceholder": "postgres",
       "restartHint": "資料庫設定將在應用程式重新啟動後生效。",
       "saveButton": "儲存",
       "saved": "已儲存，重新啟動應用程式後生效",
-      "schemaStatusError": "Schema 狀態查詢失敗：{{error}}",
-      "schemaStatusLoadFailed": "Schema 狀態載入失敗",
-      "schemaStatusPending": "Schema 落後：已套用 v{{applied}}，待套用 {{count}} 條遷移",
+      "schemaStatusAdvisories": "宣告漂移 {{count}} 條（僅表達式文字差異，不產出 DDL）",
+      "schemaStatusDialect": "當前方言：{{dialect}}",
+      "schemaStatusError": "資料庫結構狀態查詢失敗：{{error}}",
+      "schemaStatusLoadFailed": "資料庫結構狀態載入失敗",
+      "schemaStatusManual": "另有 {{count}} 條需人工處理（收縮 / 改型別，啟動期不做）",
+      "schemaStatusPending": "引擎下次啟動會補 {{count}} 條結構變更",
+      "schemaStatusProbeFailed": "結構探測失敗：{{error}}",
       "schemaStatusRefresh": "重新整理",
-      "schemaStatusTitle": "Schema 遷移狀態",
-      "schemaStatusUpToDate": "Schema 已是最新（v{{version}}）",
+      "schemaStatusTitle": "資料庫結構狀態",
+      "schemaStatusUnsupported": "另有 {{count}} 條變更在本方言沒有原生 DDL，屬已知限制（每輪會重現，不影響使用）",
+      "schemaStatusUpToDate": "結構已收斂：實況 {{actual}} 張表 = 期望 {{expected}} 張",
       "sqliteNote": "SQLite 為本機檔案資料庫，無需額外服務。",
       "sqlitePathLabel": "SQLite 檔案路徑",
       "sqlitePathPlaceholder": "留空使用預設路徑（{app_dir}/axagent.db）",
@@ -5096,10 +5197,11 @@
       "typePostgres": "PostgreSQL（含 pgvector 向量支援）",
       "typeSqlite": "SQLite（本機檔案，預設）",
       "useSslLabel": "使用 SSL 連線",
-      "schemaRepairButton": "修复 Schema",
-      "schemaRepairRunning": "修复中...",
-      "schemaRepairSuccess": "Schema 修复完成，补了 {{count}} 个缺失字段",
-      "schemaRepairFailed": "Schema 修复失败：{{error}}"
+      "schemaRepairButton": "修復結構",
+      "schemaRepairRunning": "修復中...",
+      "schemaRepairSuccess": "修復完成：補欄位 {{columns}} 個，修型別 {{types}} 個",
+      "schemaRepairFailed": "資料庫結構修復失敗：{{error}}",
+      "schemaRepairPartial": "修復未完整：{{count}} 張表未對照成功（明細見下方）"
     },
     "defaultConversationModel": "預設對話模型",
     "defaultConversationModelDesc": "新建對話時預設選擇的模型，未設定時將沿用上個活躍對話的模型",
@@ -5421,6 +5523,10 @@
       "feedbackUseful": "有用",
       "findDuplicates": "查找重複",
       "fromConversation": "來自對話",
+      "ftsLagging": "落後 {{count}} 條",
+      "ftsProgress": "已索引 {{indexed}} / {{source}} 條",
+      "ftsTitle": "全文索引（FTS5）",
+      "ftsUnavailable": "未掛載",
       "global": "全域",
       "hoursAgo": "{{hours}}小時前",
       "iconUrlPlaceholder": "輸入圖片連結",
@@ -5448,9 +5554,11 @@
       "promote": "推廣",
       "promoteSuccess": "記憶已提升",
       "provenance": "來源",
+      "rebuildFtsUnavailable": "全文索引未掛載，本次只重建了向量索引",
       "rebuildIndex": "重建搜尋引",
       "rebuildIndexConfirm": "確定重建索引？將重新生成所有記錄的向量嵌入。",
       "rebuildItemConfirm": "確定重新索引該記錄？",
+      "rebuildResult": "向量索引入列 {{vector}} 條；全文索引 {{indexed}}/{{source}} 條",
       "recency": "時效性",
       "refreshWorkingMemory": "重新整理",
       "reindexItem": "重新搜尋引",
@@ -5644,6 +5752,10 @@
         "topN": "最終返回數"
       },
       "rerankerModel": "重新排序模型",
+      "entityGraph": {
+        "title": "圖譜增強檢索",
+        "desc": "開啟後用實體圖譜補充上下文（實體、關係與鄰居）。會改變注入提示詞的內容，屬可見行為變更；儲存後即時生效。"
+      },
       "selfRag": {
         "desc": "用本地裁判模型評估檢索結果質量，自動糾正低質量檢索",
         "judgeModel": "評判模型",
@@ -6291,6 +6403,10 @@
       "group-presets": "常用預設",
       "group-custom-interval": "自訂間隔",
       "label-periods": "推薦週期",
+      "period-ultra-short": "超短线",
+      "period-short": "短线",
+      "period-mid": "中线",
+      "period-long": "长线",
       "placeholder-periods": "選擇一個或多個週期",
       "label-min-confidence": "最低信心度",
       "label-top-n": "推薦數量上限",
@@ -6513,7 +6629,6 @@
     "sectionInfrastructure": "基礎設施",
     "sectionOverview": "概覽",
     "sectionTools": "工具",
-    "sectionWorkspace": "工作台",
     "sectionCreation": "創作",
     "sectionKnowledge": "知識",
     "sectionDevelopment": "開發",
@@ -7065,16 +7180,24 @@
     "exitCode": "退出碼",
     "noOutput": "（無輸出）",
     "refresh": "重新整理",
+    "sourceCommand": "命令",
+    "sourceOther": "其他",
+    "sourceRestore": "恢復",
+    "sourceTool": "工具",
     "startFailed": "啟動失敗",
     "statusCompleted": "已完成",
     "statusFailed": "失敗",
     "statusPending": "待處理",
     "statusRunning": "執行中",
     "statusStopped": "已停止",
+    "statusUnknown": "未知狀態",
     "stop": "停止",
     "stopConfirm": "確定停止此任務？",
     "stopFail": "停止失敗",
     "stopped": "任務已停止",
+    "timeline": "狀態時間軸",
+    "timelineEmpty": "暫無狀態變更記錄",
+    "timelineLoadFail": "載入狀態時間軸失敗",
     "title": "背景任務",
     "bash": "bash"
   },
@@ -7676,6 +7799,8 @@
       "zoomOut": "縮小",
       "legend": "圖例",
       "edgeTypes": "邊類型篩選",
+      "relationTypes": "知識庫關係類型：{{edges}} 條 / {{types}} 種",
+      "relationTypesMore": "另有 {{count}} 種",
       "repairGraph": "修復圖譜關聯",
       "repairSuccess": "修復完成：已關聯知識庫，修復 {{count}} 篇筆記的連結",
       "repairPartial": "修復完成：修復 {{count}} 篇筆記的連結（未找到匹配的知識庫）",
@@ -7698,6 +7823,22 @@
       "backlinksCount": "入鏈 {{count}}",
       "totalDegree": "總度 {{count}}",
       "canvasAriaLabel": "知識圖譜畫布，支援拖曳平移、滾輪縮放、點擊選取節點",
+      "unresolvedTypes": {
+        "title": "未識別節點類型",
+        "desc": "{{nodes}} 個節點使用了 {{types}} 種不在已知詞彙表內的類型 —— 它們的關係親和度會落預設值。",
+        "list": "涉及類型：{{list}}"
+      },
+      "unresolvedRelations": {
+        "title": "未識別關係標籤",
+        "desc": "{{edges}} 條邊使用了 {{types}} 種後端無法解釋的標籤 —— 它們只能以通用樣式呈現。",
+        "list": "涉及標籤：{{list}}"
+      },
+      "danglingEdges": {
+        "title": "端點缺失的邊（未繪製）",
+        "desc": "{{total}} 條邊中有 {{dangling}} 條的端點不在目前節點集裡 —— 它們不會被繪製，已不計入邊數。",
+        "bothMissing": "其中 {{count}} 條兩端都缺失，通常意味著知識庫實體的域與邊的域不一致。",
+        "list": "樣例：{{list}}"
+      },
       "minimapAriaLabel": "縮圖導航，點擊或拖曳可跳轉到對應區域"
     },
     "hidePanel": "隱藏面板",
@@ -8581,7 +8722,14 @@
       "required": "必填",
       "cancelExecution": "取消執行",
       "invalidField": "「{{name}}」格式不正確",
-      "requiredField": "請輸入 {{name}}"
+      "requiredField": "請輸入 {{name}}",
+      "selfHeal": "AI 自癒",
+      "selfHealTitle": "AI 診斷結果",
+      "selfHealNoIssues": "未發現明顯問題",
+      "selfHealApply": "套用 {{count}} 項修復",
+      "selfHealApplyHint": "節點級修復將直接寫入範本，重新執行生效",
+      "selfHealApplied": "已套用 {{count}} 項修復，可重新執行",
+      "selfHealUnsupported": "另有 {{count}} 項修復需在編輯器中處理"
     },
     "existingSkill": "現有技能",
     "expandLeftPanel": "展開左側面板",
@@ -8916,7 +9064,8 @@
       "example1": "每天早上 8 點抓取指定網站的最新文章",
       "example2": "收到新郵件後用 AI 分析內容，如果是緊急則通知",
       "example3": "使用者提交表單後先驗證資料再寫入資料庫",
-      "exampleConstraint": "例如：執行時間不超過 5 分鐘，出錯時重試"
+      "exampleConstraint": "例如：執行時間不超過 5 分鐘，出錯時重試",
+      "diffSummary": "相對當前畫布"
     },
     "noDescription": "無描述",
     "noExecutionHistory": "無執行歷史",
@@ -9890,7 +10039,13 @@
       "clickCanvasToAdd": "已選取 \"{{label}}\" — 點擊畫布以放置節點",
       "chatPlaceholder": "輸入訊息…",
       "workflowParsed": "工作流程已解析",
-      "workflowParsedLowConfidence": "工作流解析完成（信心度較低）"
+      "workflowParsedLowConfidence": "工作流解析完成（信心度較低）",
+      "rollbackApply": "回滾",
+      "applyRolledBack": "已回滾本次應用",
+      "diagnoseFoundIssues": "發現 {{count}} 個問題（{{errors}} 個錯誤），可一鍵 AI 修復",
+      "aiRepair": "AI 修復",
+      "mergeRenamedVars": "輸出變數重名，已自動重新命名 {{count}} 處",
+      "selectionFocus": "已聚焦 {{count}} 個選中節點，生成將只感知選區"
     },
     "canvasTitle": {
       "clickToRename": "點擊重新命名"
@@ -10247,6 +10402,10 @@
     "mediumCredibility": "中等可信度"
   },
   "settingsSearch": {
+    "capabilityDomains.title": "能力域",
+    "capabilityDomains.domain": "域",
+    "capabilityDomains.alias": "別名",
+    "capabilityDomains.enable": "啟用",
     "boot": "啟動",
     "chatSettings": "對話",
     "context": "上下文",
@@ -11060,14 +11219,6 @@
     "rejectedToast": "高風險操作已拒絕"
   },
   "domain": {
-    "general": "通用",
-    "finance": "金融",
-    "automation": "自動化",
-    "devops": "維運",
-    "dataAnalysis": "數據分析",
-    "contentCreation": "內容創作",
-    "aiMedia": "AI 媒體",
-    "communication": "通訊",
     "description": "該能力域下聚合的所有功能入口",
     "empty": "該域下暫無可用功能入口"
   },
@@ -11198,7 +11349,7 @@
     "portfolioSourceEventPlaceholder": "如：來自截圖診斷 2026-01-01"
   },
   "opc": {
-    "title": "OPC — 一人公司管理面板",
+    "title": "管理面板",
     "nav": {
       "dashboard": "仪表盘",
       "invoices": "发票",
@@ -11207,11 +11358,11 @@
       "sites": "站点",
       "office": "办公室",
       "talent": "人才市场",
-      "market": "市场包",
+      "market": "域包",
       "demand": "需求發現",
       "kanban": "看板",
       "contentMedia": "內容媒體",
-      "industries": "產業導航"
+      "domains": "產業導航"
     },
     "common": {
       "cancel": "Cancel",
@@ -11345,7 +11496,25 @@
       "sourcePlaceholder": "选择来源",
       "filterStatus": "按状态筛选",
       "filterSource": "按来源筛选",
-      "emptyTip": "暂无客户数据"
+      "emptyTip": "暂无客户数据",
+      "columnType": "類型",
+      "columnLocation": "地區",
+      "filterType": "按類型篩選",
+      "typeLabel": "客戶類型",
+      "typeRequired": "請選擇客戶類型",
+      "typePlaceholder": "選擇類型",
+      "countryLabel": "國家/地區",
+      "countryPlaceholder": "如：中國",
+      "regionLabel": "省/州",
+      "regionPlaceholder": "如：廣東",
+      "cityLabel": "城市",
+      "cityPlaceholder": "如：上海",
+      "addressLabel": "詳細地址",
+      "addressPlaceholder": "如：街道/門牌",
+      "latitudeLabel": "緯度",
+      "latitudePlaceholder": "如：31.2304",
+      "longitudeLabel": "經度",
+      "longitudePlaceholder": "如：121.4737"
     },
     "project": {
       "updated": "项目已更新",
@@ -11546,8 +11715,8 @@
       "createFailed": "创建工作项失败: {{error}}"
     },
     "market": {
-      "refresh": "刷新市场",
-      "subtitle": "行业数据资产包市场：每个行业独立安装/启用，安装后 seed 对应工作流模板",
+      "refresh": "刷新",
+      "subtitle": "行业数据资产包：每个行业独立安装/启用，安装后 seed 对应工作流模板",
       "installed": "已安装",
       "notInstalled": "未安装",
       "version": "版本: v{{version}}",
@@ -11556,15 +11725,23 @@
       "no": "否",
       "install": "安装",
       "installSuccess": "已安装: {{name}}",
-      "installFailed": "安装失败: {{error}}"
+      "installFailed": "安装失败: {{error}}",
+      "domain": "本體域: {{domain}}",
+
+      "domainUndefined": "未宣告",
+
+      "capabilityCount": "能力承諾: {{count}} 項",
+      "toggle": "啟用",
+      "toggleSuccess": "已更新啟用狀態: {{name}}",
+      "toggleFailed": "切換啟用狀態失敗: {{error}}"
     },
-    "industries": {
+    "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
       "finance_invest": "Finance & Investment",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
-      "industry_consulting": "Industry Consulting",
+      "consulting": "Industry Consulting",
       "accounting": "Accounting",
       "ecommerce": "E-Commerce",
       "education": "Education",
@@ -11573,7 +11750,7 @@
       "finance_invest_desc": "金融投資",
       "sales_growth_desc": "銷售成長",
       "content_media_desc": "內容媒體",
-      "industry_consulting_desc": "產業諮詢",
+      "consulting_desc": "產業諮詢",
       "accounting_desc": "會計",
       "ecommerce_desc": "電商",
       "education_desc": "教育",
@@ -11588,7 +11765,7 @@
       "game_dev": "遊戲開發",
       "game_dev_desc": "遊戲研發流程：概念設計 → 原型開發 → 品質保證 → 遊戲測試"
     },
-    "industry": {
+    "domain": {
       "actions": {
         "ai-research": {
           "ai-paper": {
@@ -11688,7 +11865,7 @@
             "description": "Plan monthly content publishing"
           }
         },
-        "industry-consulting": {
+        "consulting": {
           "ic-report": {
             "label": "Industry Report",
             "description": "Generate in-depth industry reports"
@@ -11783,7 +11960,9 @@
         "7days": "近 7 天",
         "30days": "近 30 天",
         "90days": "近 90 天",
-        "noData": "暫無 KPI 資料"
+        "noData": "暫無 KPI 資料",
+        "noDataSource": "未接資料來源",
+        "noDataYet": "暫無資料"
       },
       "disabled": "Disabled",
       "domainWorkflows": "領域工作流",
@@ -11981,7 +12160,7 @@
             "description": "Positioning → Persona → Planning → Growth"
           }
         },
-        "industry-consulting": {
+        "consulting": {
           "wf-ic-1": {
             "name": "Industry Scan",
             "description": "Research → Competition → Trends → Opportunities"
@@ -12353,7 +12532,7 @@
           }
         }
       },
-      "industry_consulting": {
+      "consulting": {
         "tabs": {
           "strategy": {
             "label": "Strategic Planning",
@@ -12788,11 +12967,11 @@
       "nav": {
         "title": "Industry Navigator",
         "description": "Select an industry domain to enter. Each industry has its own business workflows and quick actions.",
-        "totalIndustries": "Industries",
+        "totalDomains": "Industries",
         "totalWorkflows": "Workflows",
         "totalActions": "Quick Actions",
         "totalCategories": "Categories",
-        "noIndustries": "No industries",
+        "noDomains": "No industries",
         "workflows": "{{count}} workflows",
         "actions": "{{count}} actions"
       },
@@ -12904,8 +13083,8 @@
           "placeholder": "如：30000"
         }
       },
-      "industry_consulting": {
-        "industry_name": {
+      "consulting": {
+        "domain_pack_name": {
           "label": "行业名称"
         },
         "client_goal": {
@@ -13042,7 +13221,7 @@
       "refresh": "Refresh",
       "optimize": "Optimize Policy",
       "totalExperiences": "Total Experiences",
-      "industryCount": "Industry Count",
+      "domainCount": "Industry Count",
       "avgReward": "Avg Reward",
       "successRate": "Success Rate",
       "policyUpdate": "Policy Update Result",
@@ -13671,6 +13850,19 @@
         "failed": "Failed",
         "cancelled": "Cancelled"
       }
+    },
+    "customerType": {
+      "consumer": "個人 (C端)",
+      "business": "企業 (B端)",
+      "unknown": "未分類"
+    },
+    "customerMap": {
+      "title": "客戶地理位置分佈",
+      "china": "中國",
+      "world": "世界",
+      "empty": "暫無帶座標的客戶",
+      "list": "列表",
+      "map": "地圖"
     }
   },
   "demandDiscovery": {
@@ -13904,7 +14096,6 @@
   },
   "components_skill_SkillABTestResults": {
     "暂无_A_B_测试数据": "[TODO] 暂无 A/B 测试数据",
-    "components_skill_Ski": "[TODO] components_skill_SkillABTestResults.暂无_A_B_测试数据",
     "指标": "[TODO] 指标",
     "版本_A": "[TODO] 版本 A",
     "版本_B": "[TODO] 版本 B",
@@ -13919,12 +14110,10 @@
     "当前版本": "[TODO] 当前版本",
     "总进化次数": "[TODO] 总进化次数",
     "最近进化": "[TODO] 最近进化",
-    "A_B_测试结果": "[TODO] A/B 测试结果",
-    "components_skill_Ski": "[TODO] components_skill_SkillEvolutionViewer.A_B_测试结果"
+    "A_B_测试结果": "[TODO] A/B 测试结果"
   },
   "components_skill_SkillVersionTimeline": {
     "暂无进化历史": "[TODO] 暂无进化历史",
-    "components_skill_Ski": "[TODO] components_skill_SkillVersionTimeline.暂无进化历史",
     "确认回滚": "[TODO] 确认回滚"
   },
   "dualView": {
@@ -14446,8 +14635,10 @@
       "title": "瓶頸掘金歷史",
       "generatedAt": "推薦時間",
       "candidateCount": "候選數",
+      "actions": "操作",
       "batchDelete": "批量刪除 ({{count}})",
       "deleteConfirm": "確定刪除選中的 {{count}} 條瓶頸掘金記錄？",
+      "deleteOneConfirm": "確定刪除此條趨勢智選記錄？",
       "deleteSuccess": "已刪除 {{count}} 條瓶頸掘金記錄",
       "selectedCount": "已選 {{count}} 項",
       "exitSelect": "退出多選",
@@ -14716,6 +14907,15 @@
     "placeholder": "用歷史資料驗證策略"
   },
   "stockAnalysis": {
+    "decisionExplanation": {
+      "title": "決策依據說明書",
+      "expand": "展開",
+      "collapse": "收合",
+      "ruleTraceLabel": "規則追溯",
+      "riskCommentLabel": "風險提示",
+      "confidenceNoteLabel": "信心度解讀",
+      "sourceHint": "由決策解釋節點依風控門最終裁決生成，僅供研究參考。"
+    },
     "actionBuy": "买入",
     "actionSell": "卖出",
     "actionIncrease": "增持",
@@ -14838,7 +15038,8 @@
       "evolution": "evolution",
       "reflection": "Reflection",
       "overview": "概覽",
-      "dashboard": "儀表盤"
+      "dashboard": "儀表盤",
+      "simulation": "模擬分析"
     },
     "stockCode1": "股票代碼1",
     "stockCode2": "股票代碼2",
@@ -14881,7 +15082,9 @@
       "error": "❌ Analysis error: {{msg}}",
       "stepDone": "stepDone",
       "stepRetrying": "stepRetrying",
-      "stepRunning": "stepRunning"
+      "stepRunning": "stepRunning",
+      "currentNode": "正在執行：{{name}}（{{index}}/{{total}}）",
+      "elapsed": "已執行 {{time}}"
     },
     "chart": {
       "zoom": "zoom",
@@ -15107,6 +15310,7 @@
     "trade": {
       "pnlPercent": "pnlPercent",
       "quickRecord": "quickRecord",
+      "quickRecordNoDirection": "該決策無明確交易方向，無法一鍵錄入",
       "stopLoss": "stopLoss",
       "totalPnl": "totalPnl",
       "totalTrades": "totalTrades",
@@ -15360,6 +15564,8 @@
         "exposedToolHeader": "LLM 暴露工具（Agent 自主调用）",
         "localCompute": "本地计算工具（不依赖远程 vendor）"
       },
+      "collapseGroup": "收起",
+      "expandGroup": "展开（{{total}} 项）",
       "group": {
         "vendor": "数据源",
         "agent": "分析师",
@@ -15380,9 +15586,16 @@
         "recommender": "推荐器",
         "indicators": "技术指标",
         "strategyParams": "策略参数",
+        "strategyGates": "策略门槛与过滤条件",
+        "strategyConfidence": "置信度分量与权重",
+        "strategyPosition": "仓位与价格区间",
+        "strategyData": "数据窗口与限流",
         "trading": "交易决策",
         "dryRun": "干跑模式",
+        "portfolioMgrPrior": "市況先驗（portfolio-mgr）",
         "portfolioMgrAction": "组合决策阈值（portfolio-mgr）",
+        "portfolioMgrFusion": "因子融合門（portfolio-mgr）",
+        "portfolioMgrCost": "交易成本（portfolio-mgr）",
         "portfolioMgrRisk": "风险分类阈值（portfolio-mgr）",
         "simulation": "蒙特卡洛仿真",
         "refCodes": "行业参考标的",
@@ -15619,7 +15832,8 @@
     "rename": "重命名",
     "renameSuccess": "已重命名",
     "renameFailed": "重命名失败",
-    "actionUncertain": "不确定",
+    "actionUncertain": "不確定",
+    "actionUnavailable": "資料缺失",
     "analystConsensus": "分析師共識",
     "cancelled": "分析已取消 — 顯示部分数据",
     "contradiction": "决策矛盾",
@@ -15701,8 +15915,10 @@
     "dqTableAnalyst": "分析师",
     "dqTableExpectedData": "预期数据",
     "dqTableConfidence": "置信度",
+    "dqTablePlaceholder": "失敗標記",
     "dqTableStatus": "状态",
     "dqTableGapReason": "差距原因",
+    "dqPlaceholderTooltip": "報告含 {{count}} 處失敗標記（無法取得/資料缺失/傳回空等）",
     "dqStatusNormal": "✅ 正常",
     "dqStatusLowConfidence": "⚠️ 低置信",
     "dqStatusMissing": "❌ 缺失",
@@ -15727,6 +15943,15 @@
     "weightCollapseThreshold": "因子权重占比 {{ratio}}% 低于阈值",
     "weightCollapseConsequence": "后果：仓位强制 0%、方向置信度 ×0.5",
     "weightCollapseTag": "⚠️ 因子权重坍缩",
+    "trustNotice": {
+      "title": "決策可信度受限",
+      "tagLabel": "可信度受限",
+      "passiveWatch": "本次「觀望」為資料不足導致的被動降級，非看空判斷",
+      "collapseLabel": "因子權重坍縮",
+      "gapReason": "資料缺口 {{count}} 項",
+      "showGaps": "檢視缺口",
+      "hideGaps": "收起"
+    },
     "confidenceBayesianTooltip": "置信度 = 贝叶斯证据强度（受数据质量分级 cap），不受权重坍缩影响。与「决策置信度」不同：后者是方向确信度，坍缩时减半。",
     "gradeSuffix": " 级",
     "scoreLabel": "得分: {{score}}",
@@ -15904,6 +16129,10 @@
       "score": "评分",
       "stopLoss": "止损价",
       "targetPrice": "目标价",
+      "targetPriceTrading": "交易目標價",
+      "targetPriceUnset": "—（未設）",
+      "intrinsicValue": "內在價值",
+      "vsCurrentPrice": "現價",
       "regimeAboveMa60": "MA60 之上",
       "regimeBelowMa60": "MA60 之下",
       "regimeSideways": "横盘震荡"
@@ -15959,6 +16188,9 @@
       "calibrateCapExtreme": "極高上限",
       "calibrateCapHigh": "高上限",
       "calibrateCapMid": "中上限",
+      "calibratePriorBull": "牛市先验",
+      "calibratePriorSideways": "震荡先验",
+      "calibratePriorBear": "熊市先验",
       "calibrateApplyBest": "應用最優參數",
       "calibrateApplyDone": "已應用最優參數到模板",
       "calibrateRefreshCount": "基於 {{total}} 條反思",
@@ -16057,7 +16289,8 @@
       "crossCheckAligned": "与分析师共识一致",
       "crossCheckNeutral": "{{total}}份报告中{{neutral}}份中性",
       "crossCheckTitle": "分析师交叉验证 (更新于 {{updatedAt}})",
-      "dataQualitySummary": "{{real}} 真实 + {{synthetic}} 兜底",
+      "dataQualitySummary": "{{real}} 條真實候選 · {{synthetic}} 條兜底候選已隱藏",
+      "styleOnlySynthetic": "該風格暫無真實命中（{{count}} 條兜底候選已隱藏）",
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
       "styleSerenity": "瓶颈掘金",
@@ -16159,6 +16392,13 @@
     "scheduledAnalysis": {
       "description": "基于上游 CronJobStore 持久化 — 按 Cron 表达式周期性对指定股票执行完整分析流程",
       "watchlistScan": "自选股自动扫描",
+      "poolScan": "候選池自動分析",
+      "poolScanHint": "定時讀取薦股/趨勢智選產出的候選池，逐檔執行完整分析（結果自動進入反思佇列）",
+      "trendScreening": "趨勢智選定時篩選",
+      "trendScreeningHint": "定時執行趨勢智選（serenity-screening）工作流，產物（style=serenity）併入候選池",
+      "reflectionScan": "週期反思",
+      "reflectionScanHint": "依超短線 2 天 / 短線 5 天 / 中線 28 天 / 長線 90 天的間隔，自動反思已完成的股票分析",
+      "noTask": "尚未建立任務",
       "enabled": "已开启",
       "disabled": "已关闭",
       "confirmDelete": "删除此定时任务?",
@@ -16180,7 +16420,14 @@
         "hourly": "每小时",
         "tradeDayClose": "交易日 21:00 (每日收盘)",
         "dailyOpen": "每日 09:00 (开盘前)",
-        "dailyClose": "每日 15:30 (收盘)"
+        "dailyClose": "每日 15:30 (收盘)",
+        "daily1800": "每日 18:00"
+      },
+      "period": {
+        "ultraShort": "超短線",
+        "short": "短線",
+        "mid": "中線",
+        "long": "長線"
       },
       "column": {
         "id": "ID",
@@ -16257,11 +16504,10 @@
       "startReflection": "開始反思",
       "placeholderCode": "股票代碼",
       "placeholderDate": "分析日期 (YYYY-MM-DD)",
-      "placeholderOutcome": "实际结果描述（如30天跌8%）",
-      "fillRequired": "请填寫股票代碼、分析日期和实际结果",
+      "fillRequired": "請填寫股票代碼和分析日期",
       "triggerSuccess": "反思工作流已触發，请在反思历史中查看结果",
       "triggerFailed": "反思触發失败: {{error}}",
-      "manualHint": "输入参数后點击「開始反思」，工作流将基于指定日期的数据重跑分析并输出反思结论",
+      "manualHint": "填寫股票代碼與分析日期後點擊「開始反思」。系統會自動拉取該股票從分析日到最新交易日的實際行情，與已完成的分析結論逐項對比，再由反思 agent 給出複盤結論。",
       "paramSuggestTitle": "参数调整建议",
       "paramCol": "参数名",
       "paramCurrent": "當前前值",
@@ -16398,7 +16644,18 @@
       "step2": "Step 2: 调整参数",
       "step3": "Step 3: 对比结果",
       "title": "What-If 参数回测",
-      "totalScoreLabel": "totalScore（基础评分）"
+      "totalScoreLabel": "totalScore（基础评分）",
+      "groupScoringWeights": "評分權重（技術評分鏈）",
+      "groupActionThresholds": "決策閾值（後驗機率分檔）",
+      "groupPositionCaps": "倉位閾值與上限（%）",
+      "groupRegimePriors": "市況先驗（決策起點基礎機率）",
+      "groupRiskThresholds": "風險分檔閾值（財務/波動指標）",
+      "groupMiscParams": "其他決策參數（凱利/成本/F-Score）",
+      "replayResultTitle": "回放結果（後端重算）",
+      "replayTotalScore": "綜合評分",
+      "replayDataDegraded": "⚠️ 資料降級：部分即時資料來自快取或中性佔位，估值結果僅供參考",
+      "replayFailed": "回放失敗，請查看日誌",
+      "replayNoSelection": "請先選擇一筆歷史分析紀錄"
     },
     "experimentTrail": {
       "acceptOrSkip": "接受或跳过",
@@ -16601,6 +16858,24 @@
       "dataQualityCheckCount": "共 {{count}} 項檢查",
       "dataQualityEmpty": "無結構化資料可分析",
       "dataQualityNoScore": "無評分值",
+      "dqDimensionReport": "報告品質",
+      "dqDimensionTool": "工具可信度",
+      "dqDimensionFactor": "因子完整度",
+      "dqScoreSource": "等級由工作流 data-quality 節點統一產出，本面板不再另行計算",
+      "dqNodeDiagnosis": "本節點診斷",
+      "dqNoNodeDiagnosis": "本次記錄不含該節點的逐節點診斷（舊版快照），請重跑分析",
+      "dqFieldNodeStatus": "節點狀態",
+      "dqFieldPlaceholder": "報告失敗標記",
+      "dqFieldExpected": "預期資料來源",
+      "dqFieldGapReason": "歸因",
+      "dqStatusNormal": "正常",
+      "dqStatusLow": "低信心",
+      "dqStatusMissing": "資料缺失",
+      "dqStatusUntrusted": "降級兜底",
+      "dqPlaceholderNone": "未檢出",
+      "dqPlaceholderCount": "{{count}} 處",
+      "dqGapReasonNone": "無異常",
+      "dqDirectionConflict": "多空分歧：{{bull}} 個看多 vs {{bear}} 個看空",
       "nodeTypeAnalyst": "分析師",
       "nodeTypeDebate": "辯論節點",
       "nodeTypeDecision": "決策節點",
@@ -16689,7 +16964,7 @@
       "select-at-least-one-scenario": "请至少选择一个场景",
       "total-paths-stat": "总路径数",
       "paths-unit": "条",
-      "cross-scenario-survival-rate": "跨场景胜率",
+      "cross-scenario-survival-rate": "上漲場景佔比",
       "consistency-score": "一致性评分",
       "consistency-stable-suffix": " (稳定)",
       "consistency-volatile-suffix": " (波动)",
@@ -16714,7 +16989,13 @@
       "advice-consistent": "策略在所有场景下表现一致",
       "advice-different": "策略在 {{best}} 场景中最佳，在 {{worst}} 场景中最差，建议结合当前市场风格使用",
       "empty-state-title": "选择多个市场场景，运行蒙特卡洛鲁棒性测试",
-      "empty-state-desc": "系统会在每个场景中运行 N 条随机路径，评估策略的跨场景稳定性"
+      "empty-state-desc": "系统会在每个场景中运行 N 条随机路径，评估策略的跨场景稳定性",
+      "consistency-undetermined": "無法判定",
+      "consistency-undetermined-desc": "各場景漲跌幅均值趨零（漲跌互抵），變異係數在數學上無定義 —— 這是最分歧的情形，不是最一致。",
+      "preset-label": "快速預設",
+      "preset-quick": "快速檢查",
+      "preset-stress": "壓力測試",
+      "preset-deep": "深度分析"
     },
     "compact": {
       "noAnalystReports": "暂无分析师报告",
@@ -16858,6 +17139,29 @@
       "other": "其他"
     },
     "analystRoles": {
+      "bullR2": "多方質詢（R2）",
+      "bearR2": "空方質詢（R2）",
+      "bullR3": "多方終辯（R3）",
+      "bearR3": "空方終辯（R3）",
+      "valueInvestor": "價值投資者（巴菲特框架）",
+      "qualityFallback": "保守風險決策師",
+      "ruleChecker": "規則檢查員",
+      "catalystAnalyst": "催化劑與敘事分析師",
+      "debateConvergence": "辯論收斂官",
+      "riskConvergence": "風險收斂官",
+      "reflection": "投資復盤官",
+      "trendScanner": "產業趨勢掃描器",
+      "chainDecomposer": "產業鏈拆解師",
+      "chokepointIdentifier": "瓶頸鑑定師",
+      "candidateMapper": "候選公司映射器",
+      "socialMediaAnalyst": "社群媒體分析師",
+      "volumePriceAnalyst": "量價分析師",
+      "marketSynthesizer": "市場主線綜合師",
+      "industryChainAnalyzer": "產業鏈傳導分析師",
+      "screenshotDiagnoser": "持倉截圖診斷師",
+      "positionPlanner": "倉位規劃師",
+      "stopLossReviewer": "停損複查員",
+      "explainer": "決策解釋官",
       "marketAnalyst": "市场技术分析师",
       "sentimentAnalyst": "情绪面分析师",
       "newsAnalyst": "消息面分析师",
@@ -16934,6 +17238,11 @@
       "kellyMinWinRate": "凯利最低胜率要求 (0-1)，低于此值返回不适用",
       "kellyMinOdds": "凯利最低赔率要求 (avg_win/avg_loss)",
       "riskFreeRate": "无风险利率 (小数)",
+      "regimePriorBull": "牛市先驗機率 (0-1)，無個股證據時對上漲的基礎判斷",
+      "regimePriorSideways": "震盪市先驗機率 (0-1)，無個股證據時對上漲的基礎判斷",
+      "regimePriorBear": "熊市先驗機率 (0-1)，無個股證據時對上漲的基礎判斷",
+      "traderCapMinWeight": "交易員因子權重門 (0-1)：f7 權重低於該值時，其看空訊號不再封頂後驗機率",
+      "costPct": "交易成本率 (0.003=0.3%)：凱利倉位修正按 (1-成本率) 折損預期收益",
       "actionBuyThreshold": "买入决策阈值 (0-1)，effective_posterior 高于此值且仓位达标则买入",
       "actionIncreaseThreshold": "增持决策阈值 (0-1)，effective_posterior 高于此值且仓位达标则增持",
       "actionHoldThreshold": "持有决策阈值 (0-1)，effective_posterior 高于此值则持有",
@@ -17197,7 +17506,27 @@
     "viz": {
       "noData": "暂无可视化数据"
     },
-    "weight": "权重"
+    "weight": "权重",
+    "simulation": {
+      "contextLabel": "目前分析標的",
+      "contextHint": "各面板預設使用此標的與現價，可在面板內個別修改",
+      "noStock": "尚未選擇標的 —— 請先在「行情」頁選擇股票",
+      "scope": "模擬回答「這部位建得起嗎、最壞能壞到哪」：訂單簿級的成交成本與壓力韌性。它不做漲跌方向預測 —— 價格中樞由模型設定而非市場發現，請勿據此判斷買賣方向。目前模擬市場不含你自己的訂單，因此暫無本筆交易的衝擊成本與滑價。",
+      "yuanEquivalent": "≈ {{yuan}} 元",
+      "autoTitle": "工作流自動模擬（決策之後）",
+      "autoReady": "已自動產生",
+      "autoFailed": "未產生",
+      "autoPending": "完成一次股票分析後，模擬結果會自動產生於此，無需手動執行。",
+      "autoFailReason": "模擬未完成",
+      "survivalLabel": "上漲情境佔比",
+      "consistencyLabel": "情境一致性",
+      "bestWorstLabel": "最佳情境",
+      "worstScenarioLabel": "最差情境",
+      "pathsLabel": "總路徑數",
+      "colScenario": "情境",
+      "colPaths": "路徑數",
+      "colChange": "期末漲跌幅"
+    }
   },
   "pipeline": {
     "title": "股票管道",
@@ -17212,6 +17541,10 @@
     "running": "執行中...",
     "progress": "執行進度",
     "history": "歷史記錄",
+    "stepRunning": "執行中",
+    "stepCompleted": "完成",
+    "stepFailed": "失敗",
+    "stepTimeout": "逾時",
     "noHistory": "暫無執行歷史"
   },
   "timeTravel": {

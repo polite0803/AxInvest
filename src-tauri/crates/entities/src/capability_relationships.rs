@@ -33,6 +33,7 @@ pub struct Model {
     #[sea_orm(column_name = "relationship_type")]
     pub relationship_type: String,
     /// 关系权重（0.0-1.0，检索排序用；默认 1.0）
+    #[sea_orm(default_value = 1.0)]
     pub weight: f64,
     /// 关系描述上下文
     #[sea_orm(column_name = "context")]

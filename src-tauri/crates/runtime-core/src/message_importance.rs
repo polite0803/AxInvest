@@ -8,80 +8,14 @@
 //! - 包含错误的工具结果降低优先级（可丢弃的错误重试）
 //! - 文本长度影响信息密度评估
 
-use crate::session::{ContentBlock, ConversationMessage, MessageRole};
-
-/// 消息重要性分数 (0-100)
-///
-/// 评分规则：
-/// - 基础分 50
-/// - 用户消息 +20（用户意图最关键）
-/// - 包含工具调用 +15（记录实际操作步骤）
-/// - 工具结果包含错误 -10（错误重试信息可丢弃）
-/// - 文本长度 > 500 字符 +10（可能包含重要上下文）
-/// - 文本长度 < 20 字符 -5（信息量过低）
-#[must_use]
-pub fn score_message(msg: &ConversationMessage) -> u32 {
-    let mut score = 50; // 基础分
-
-    // 用户消息更重要
-    if msg.role == MessageRole::User {
-        score += 20;
-    }
-
-    // 包含工具调用的消息更重要
-    let has_tool_use = msg.blocks.iter().any(|b| matches!(b, ContentBlock::ToolUse { .. }));
-    if has_tool_use {
-        score += 15;
-    }
-
-    // 包含错误的工具结果减分（可丢弃）
-    let has_error =
-        msg.blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { is_error: true, .. }));
-    if has_error {
-        score -= 10;
-    }
-
-    // 纯文本内容长度影响
-    let text_len: usize = msg
-        .blocks
-        .iter()
-        .map(|b| match b {
-            ContentBlock::Text { text } => text.len(),
-            _ => 0,
-        })
-        .sum();
-    if text_len > 500 {
-        score += 10; // 长消息可能包含重要信息
-    }
-    if text_len < 20 {
-        score -= 5; // 太短的消息信息量低
-    }
-
-    score.clamp(0, 100)
-}
-
-/// 选择保留的消息：按重要性排序，保留 top N 条
-///
-/// 返回值为原始索引列表（已按原始顺序排序），表示应保留的消息位置。
-/// 优先保留得分高的消息，同等分数时保留位置靠前的。
-#[must_use]
-pub fn select_top_messages(messages: &[ConversationMessage], keep_count: usize) -> Vec<usize> {
-    let actual_keep = keep_count.min(messages.len());
-    if actual_keep == 0 || messages.is_empty() {
-        return Vec::new();
-    }
-
-    let mut scored: Vec<(usize, u32)> =
-        messages.iter().enumerate().map(|(i, msg)| (i, score_message(msg))).collect();
-
-    // 按分数降序排列（稳定排序保证同分时保持原序）
-    scored.sort_by_key(|b| std::cmp::Reverse(b.1));
-
-    // 取前 N 条，恢复原始顺序
-    let mut indices: Vec<usize> = scored.iter().take(actual_keep).map(|(i, _)| *i).collect();
-    indices.sort();
-    indices
-}
+// ── 权威源：axagent_harness::runtime_types::compact（本模块仅 re-export，禁止重复定义）──
+//
+// 评分规则（由权威实现提供）：
+//   基础分 50；用户消息 +20；含 ToolUse 的消息 +15；ToolResult 含错误 -10；
+//   纯文本长度 >500 字符 +10；<20 字符 -5；最终 clamp 到 [0,100]。
+//
+// 下方 `tests` 模块保留不变 —— 它现在直接回归覆盖 harness 侧的实现。
+pub use axagent_harness::runtime_types::compact::{score_message, select_top_messages};
 
 #[cfg(test)]
 mod tests {

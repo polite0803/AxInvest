@@ -1,12 +1,12 @@
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { ScheduledAnalysisPanel } from "@/components/stock-analysis/ScheduledAnalysisPanel";
+import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
 import { App, Button, Card, Col, Modal, Row, Spin, Statistic, Table, Tabs, Tag } from "antd";
 import { BarChart3, Calendar, Plus, RefreshCw, Trash2, TrendingDown, TrendingUp, Upload, Wallet } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 
 interface Holding {
   id: string;
@@ -66,7 +66,8 @@ export function PortfolioDashboard() {
 /** 持仓视图 — 原 PortfolioDashboard 主体逻辑 */
 function HoldingsTab() {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  // 跳转统一走 useStockJump（URL 是当前股票的唯一真相源）
+  const jumpToStock = useStockJump();
   const { message: messageApi } = App.useApp();
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [loading, setLoading] = useState(false);
@@ -204,7 +205,7 @@ function HoldingsTab() {
       dataIndex: "stockName",
       key: "stockName",
       render: (_: string, r: Holding) => (
-        <a onClick={() => navigate(`/stock-analysis?code=${r.stockCode}`)}>
+        <a onClick={() => jumpToStock({ code: r.stockCode, name: r.stockName })}>
           <span className="font-medium">{r.stockName}</span>
           <span className="text-xs ml-1" style={{ color: "var(--color-text-tertiary)" }}>
             {r.stockCode}

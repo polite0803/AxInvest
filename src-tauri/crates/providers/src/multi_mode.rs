@@ -22,6 +22,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::anthropic::AnthropicAdapter;
+use crate::compat::impl_default_via_new;
 use crate::openai::OpenAIAdapter;
 use crate::openai_responses::OpenAIResponsesAdapter;
 
@@ -176,8 +177,4 @@ impl MultiModeAdapter {
     }
 }
 
-impl Default for MultiModeAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(MultiModeAdapter);

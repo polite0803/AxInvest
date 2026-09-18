@@ -12,6 +12,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 策略名（unique，用户可读）
+    #[sea_orm(indexed)]
     pub name: String,
     pub version: String,
     /// "builtin" | "rhai"

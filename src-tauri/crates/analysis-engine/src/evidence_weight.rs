@@ -54,10 +54,11 @@ pub const ANALYST_IDS: &[&str] = &[
     "capital",
 ];
 
-/// 分析师按领域的分类
+/// 分析师**角色**分类（**不是**能力域 `CapabilityDomain`）——基本面/宏观/技术面/情绪/裁决，
+/// 是投资域内部的分工粒度，不可复用为通用能力轴。划界见 `PLAN-domain-single-source.md` §5。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum AnalystDomain {
+pub enum AnalystRole {
     /// 基本面/价值
     Fundamental,
     /// 宏观/行业
@@ -70,25 +71,25 @@ pub enum AnalystDomain {
     Research,
 }
 
-fn classify_domain(analyst_id: &str) -> AnalystDomain {
+fn classify_role(analyst_id: &str) -> AnalystRole {
     match analyst_id {
-        "fundamental" | "a-fundamentals" | "value-investor" => AnalystDomain::Fundamental,
-        "macro" | "a-macro" | "a-sector" => AnalystDomain::Macro,
-        "a-market" | "a-technical" => AnalystDomain::Technical,
+        "fundamental" | "a-fundamentals" | "value-investor" => AnalystRole::Fundamental,
+        "macro" | "a-macro" | "a-sector" => AnalystRole::Macro,
+        "a-market" | "a-technical" => AnalystRole::Technical,
         "sentiment" | "a-sentiment" | "a-news" | "a-hot-money" | "capital" => {
-            AnalystDomain::Sentiment
+            AnalystRole::Sentiment
         },
-        "research-mgr" => AnalystDomain::Research,
+        "research-mgr" => AnalystRole::Research,
         _ => {
             // 按关键词后缀推断
             if analyst_id.contains("fundamental") || analyst_id.contains("value") {
-                AnalystDomain::Fundamental
+                AnalystRole::Fundamental
             } else if analyst_id.contains("macro") || analyst_id.contains("sector") {
-                AnalystDomain::Macro
+                AnalystRole::Macro
             } else if analyst_id.contains("market") || analyst_id.contains("technical") {
-                AnalystDomain::Technical
+                AnalystRole::Technical
             } else {
-                AnalystDomain::Sentiment
+                AnalystRole::Sentiment
             }
         },
     }
@@ -320,7 +321,7 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
 /// - **熊市**: 基本面+宏观权重显著提升 (防御价值凸显)，技术面+情绪面被削弱
 /// - **高波动**: 所有 domain 降低权重，风控优先
 /// - **震荡市**: 基本面+情绪面权重提升 (精选个股+预期差)，技术面中性
-fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystDomain, f64> {
+fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystRole, f64> {
     let mut modifiers = HashMap::new();
 
     let vol_penalty = match regime.volatility.as_str() {
@@ -331,34 +332,34 @@ fn compute_regime_modifiers(regime: &MarketRegimeInfo) -> HashMap<AnalystDomain,
 
     match regime.regime.as_str() {
         "bull" => {
-            modifiers.insert(AnalystDomain::Technical, 1.30 * vol_penalty);
-            modifiers.insert(AnalystDomain::Sentiment, 1.20 * vol_penalty);
-            modifiers.insert(AnalystDomain::Fundamental, 1.10 * vol_penalty);
-            modifiers.insert(AnalystDomain::Macro, 1.05 * vol_penalty);
-            modifiers.insert(AnalystDomain::Research, 1.05 * vol_penalty);
+            modifiers.insert(AnalystRole::Technical, 1.30 * vol_penalty);
+            modifiers.insert(AnalystRole::Sentiment, 1.20 * vol_penalty);
+            modifiers.insert(AnalystRole::Fundamental, 1.10 * vol_penalty);
+            modifiers.insert(AnalystRole::Macro, 1.05 * vol_penalty);
+            modifiers.insert(AnalystRole::Research, 1.05 * vol_penalty);
         },
         "bear" => {
-            modifiers.insert(AnalystDomain::Fundamental, 1.35 * vol_penalty);
-            modifiers.insert(AnalystDomain::Macro, 1.30 * vol_penalty);
-            modifiers.insert(AnalystDomain::Research, 1.20 * vol_penalty);
-            modifiers.insert(AnalystDomain::Technical, 0.80 * vol_penalty);
-            modifiers.insert(AnalystDomain::Sentiment, 0.75 * vol_penalty);
+            modifiers.insert(AnalystRole::Fundamental, 1.35 * vol_penalty);
+            modifiers.insert(AnalystRole::Macro, 1.30 * vol_penalty);
+            modifiers.insert(AnalystRole::Research, 1.20 * vol_penalty);
+            modifiers.insert(AnalystRole::Technical, 0.80 * vol_penalty);
+            modifiers.insert(AnalystRole::Sentiment, 0.75 * vol_penalty);
         },
         "volatile" => {
             // 高波动: 全 domain 降权
-            modifiers.insert(AnalystDomain::Fundamental, 0.80);
-            modifiers.insert(AnalystDomain::Macro, 0.85);
-            modifiers.insert(AnalystDomain::Technical, 0.70);
-            modifiers.insert(AnalystDomain::Sentiment, 0.65);
-            modifiers.insert(AnalystDomain::Research, 0.90);
+            modifiers.insert(AnalystRole::Fundamental, 0.80);
+            modifiers.insert(AnalystRole::Macro, 0.85);
+            modifiers.insert(AnalystRole::Technical, 0.70);
+            modifiers.insert(AnalystRole::Sentiment, 0.65);
+            modifiers.insert(AnalystRole::Research, 0.90);
         },
         // sideways / 震荡: 精选个股模式
         _ => {
-            modifiers.insert(AnalystDomain::Fundamental, 1.15 * vol_penalty);
-            modifiers.insert(AnalystDomain::Sentiment, 1.10 * vol_penalty);
-            modifiers.insert(AnalystDomain::Research, 1.10 * vol_penalty);
-            modifiers.insert(AnalystDomain::Macro, 1.00 * vol_penalty);
-            modifiers.insert(AnalystDomain::Technical, 0.95 * vol_penalty);
+            modifiers.insert(AnalystRole::Fundamental, 1.15 * vol_penalty);
+            modifiers.insert(AnalystRole::Sentiment, 1.10 * vol_penalty);
+            modifiers.insert(AnalystRole::Research, 1.10 * vol_penalty);
+            modifiers.insert(AnalystRole::Macro, 1.00 * vol_penalty);
+            modifiers.insert(AnalystRole::Technical, 0.95 * vol_penalty);
         },
     }
 
@@ -479,19 +480,19 @@ fn check_hold_gate(analysts: &[AnalystWeight]) -> HoldGateResult {
     let mut fund_has_catalyst = false;
 
     for a in analysts {
-        let domain = classify_domain(&a.analyst_id);
+        let domain = classify_role(&a.analyst_id);
         match domain {
-            AnalystDomain::Technical
+            AnalystRole::Technical
                 if a.stance_direction != "neutral" && a.stance_confidence > 0.5 =>
             {
                 tech_has_trend = true;
             },
-            AnalystDomain::Sentiment
+            AnalystRole::Sentiment
                 if a.stance_direction != "neutral" && a.stance_confidence > 0.5 =>
             {
                 money_has_dir = true;
             },
-            AnalystDomain::Fundamental | AnalystDomain::Macro
+            AnalystRole::Fundamental | AnalystRole::Macro
                 if (a.stance_direction == "bullish" || a.stance_direction == "bearish")
                     && a.stance_confidence > 0.5 =>
             {
@@ -648,7 +649,7 @@ pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeigh
         .analysts
         .iter()
         .map(|analyst| {
-            let domain = classify_domain(&analyst.analyst_id);
+            let domain = classify_role(&analyst.analyst_id);
 
             // 时间维度基础权重
             let horizon_w =

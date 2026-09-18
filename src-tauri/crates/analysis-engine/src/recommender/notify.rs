@@ -15,6 +15,18 @@ use axagent_astock_data::AStockClient;
 use super::types::{Period, RecoPick};
 use super::{recommend_stocks, RecoResponse};
 
+/// 一次定时荐股扫描的完整结果。
+///
+/// 除 `picks` 外还带 **本次扫描实际使用的候选池快照** —— 调用方（cron executor）
+/// 需要把它一并落库到 `reco_picks.seed_pool_json`，否则回测的负向样本
+/// （候选池 − 正向样本）会缺失，且「候选池→逐只分析」的候选来源也无从追溯。
+pub struct RecommendationScan {
+    /// 过滤 synthetic、过阈值、按 confidence 降序、截断到 top N 后的真实推荐
+    pub picks: Vec<RecoPick>,
+    /// 首个成功 period 的 seed pool 快照（`[[code,name],...]` JSON）
+    pub seed_pool_snapshot: Option<String>,
+}
+
 /// 跑一次"定时荐股扫描"，返回符合要求的 picks（按 confidence 降序）
 ///
 /// 流程：
@@ -30,9 +42,9 @@ pub async fn run_recommendation_scan(
     template_vars: &[(String, serde_json::Value)],
     min_confidence: u8,
     top_n: usize,
-) -> Vec<RecoPick> {
+) -> RecommendationScan {
     if periods.is_empty() || top_n == 0 {
-        return Vec::new();
+        return RecommendationScan { picks: Vec::new(), seed_pool_snapshot: None };
     }
 
     // 1. 拉取所有 period 的 RecoResponse
@@ -46,9 +58,15 @@ pub async fn run_recommendation_scan(
     }
 
     let mut all_picks: Vec<RecoPick> = Vec::new();
+    let mut seed_pool_snapshot: Option<String> = None;
     for h in futs {
         match h.await {
-            Ok((_period, Ok(resp))) => collect_real_picks(&resp, &mut all_picks),
+            Ok((_period, Ok(resp))) => {
+                if seed_pool_snapshot.is_none() {
+                    seed_pool_snapshot = resp.seed_pool_snapshot.clone();
+                }
+                collect_real_picks(&resp, &mut all_picks)
+            },
             Ok((_period, Err(e))) => {
                 tracing::warn!("[recommendation_cron] period {:?} 扫描失败: {e}", _period);
             },
@@ -82,7 +100,7 @@ pub async fn run_recommendation_scan(
 
     // 5. top N
     filtered.truncate(top_n);
-    filtered
+    RecommendationScan { picks: filtered, seed_pool_snapshot }
 }
 
 fn collect_real_picks(resp: &RecoResponse, out: &mut Vec<RecoPick>) {

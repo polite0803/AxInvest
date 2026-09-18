@@ -83,14 +83,23 @@ impl HarnessAgentAdapter {
         self.with_session_manager(sm).with_cancellation_flag(flag)
     }
 
-    pub fn from_engine(name: &str, engine: ReActEngine) -> Self {
-        Self {
-            name: name.to_string(),
-            caps: vec![],
-            engine: tokio::sync::Mutex::new(engine),
-            session_manager: None,
-            cancellation_flag: None,
-        }
+    /// 注入已装配好的 `ReActEngine`（保留 `new()` 的默认 caps）。
+    ///
+    /// **wiring 层必须走本方法，不要直接用 `new()` 的默认引擎**：`new()` 内部的
+    /// `ReActEngine::new()` 未注入 `LlmReasoningProvider`，`reasoning_provider`
+    /// 停留在 `DefaultReasoningProvider`，其每个 trait 方法直接返回
+    /// `Err("...not configured: inject a real LlmReasoningProvider...")`
+    /// ⇒ 每次 `execute` 都会在 Analyzing 阶段失败（`ReActEngine::run` 重试
+    /// `max_retry_attempts` 次后返回 `ReActResult::failure`）。
+    ///
+    /// 注入示例（`src/init/state.rs`）：
+    /// ```ignore
+    /// let engine = ReActEngine::new().with_reasoning_provider(provider);
+    /// HarnessAgentAdapter::new("default").with_engine(engine)
+    /// ```
+    pub fn with_engine(mut self, engine: ReActEngine) -> Self {
+        self.engine = tokio::sync::Mutex::new(engine);
+        self
     }
 }
 
@@ -152,7 +161,23 @@ impl Agent for HarnessAgentAdapter {
             if let Some(token) = cancel_token {
                 engine.set_cancel_flag(token);
             }
-            engine.run(&req.goal).await
+
+            // 调用级预算：消费 `max_steps`（入边为 MCP `agent_run` 的请求参数，
+            // 见 `crates/mcp/src/server.rs` `agent_run` → `max_steps: req.max_steps`）。
+            // engine 在 Mutex 内**跨调用复用**，故必须 save/restore —— 直接改写
+            // 会污染后续调用。`0` 视为未指定（否则立即触发 "Max iterations (0) reached"）。
+            let prev_max_iterations = engine.max_iterations();
+            let override_max_iterations = req.max_steps.filter(|v| *v > 0).map(|v| v as usize);
+            if let Some(n) = override_max_iterations {
+                engine.set_max_iterations(n);
+            }
+
+            let out = engine.run(&req.goal).await;
+
+            if override_max_iterations.is_some() {
+                engine.set_max_iterations(prev_max_iterations);
+            }
+            out
         };
 
         // 3. 返回结果
@@ -172,5 +197,63 @@ impl Agent for HarnessAgentAdapter {
                 PlanStep { description: "生成最终结果".into(), agent: None },
             ],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::react_engine::ReActEngine;
+    use crate::reasoning_state::ReActConfig;
+
+    /// `with_engine` 必须保留 `new()` 建立的默认能力集。
+    ///
+    /// 回归护栏：被它替代的 `from_engine` 曾把 `caps` 置空（`caps: vec![]`），
+    /// 使经该路径构造的适配器对外声明零能力。
+    #[test]
+    fn with_engine_preserves_default_capabilities() {
+        let adapter = HarnessAgentAdapter::new("t").with_engine(ReActEngine::new());
+        assert_eq!(adapter.capabilities().len(), 2, "with_engine 不应清空默认 caps");
+    }
+
+    /// 调用级 `max_steps` 覆盖必须在 `execute` 结束后还原。
+    ///
+    /// engine 在 `Mutex` 内**跨调用复用** —— 覆盖后不还原会让后续调用的
+    /// `max_iterations` 被上一次的 `max_steps` 永久污染。
+    /// 本用例走**失败路径**（未注入 reasoning provider ⇒ `run()` 返回 failure），
+    /// 用于确认失败路径同样会还原 config。
+    #[tokio::test]
+    async fn execute_restores_max_iterations_after_override() {
+        let adapter = HarnessAgentAdapter::new("t");
+        let baseline = ReActConfig::default().max_iterations;
+
+        let _ = adapter
+            .execute(AgentExecuteRequest {
+                goal: "noop".to_string(),
+                context: None,
+                max_steps: Some(7),
+            })
+            .await;
+
+        let engine = adapter.engine.lock().await;
+        assert_eq!(engine.max_iterations(), baseline, "max_steps 覆盖未还原：engine 被跨调用污染");
+    }
+
+    /// `max_steps: Some(0)` 视为未指定 —— 否则会立即触发 "Max iterations (0) reached"。
+    #[tokio::test]
+    async fn zero_max_steps_is_treated_as_unspecified() {
+        let adapter = HarnessAgentAdapter::new("t");
+        let baseline = ReActConfig::default().max_iterations;
+
+        let _ = adapter
+            .execute(AgentExecuteRequest {
+                goal: "noop".to_string(),
+                context: None,
+                max_steps: Some(0),
+            })
+            .await;
+
+        let engine = adapter.engine.lock().await;
+        assert_eq!(engine.max_iterations(), baseline);
     }
 }

@@ -112,6 +112,7 @@ impl WorkflowTemplateData {
                     .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()),
                 tool_ref: crate::workflow_types::workflow_passport_tool_ref(),
                 steps: crate::workflow_types::project_node_steps(&parsed_nodes),
+                domain_pack_id: None,
             },
         )
     }

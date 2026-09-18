@@ -15,12 +15,15 @@ pub struct Model {
     /// 场景模板 slug（可选，下游业务系统可填）
     pub scene_template_slug: Option<String>,
     /// 舰队状态：active / paused / stopped
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "active")]
     pub status: String,
     /// 创建时间（Unix 毫秒）
     pub created_at: i64,
     /// 更新时间（Unix 毫秒）
     pub updated_at: i64,
     /// 业务元数据 JSON
+    #[sea_orm(default_value = "{}")]
     pub metadata_json: String,
 }
 

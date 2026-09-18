@@ -1,0 +1,38 @@
+# Domain Pack: 内容与媒体（content_media）
+# 行业 = 数据资产包，非代码。manifest 版本号驱动 seed/升级。
+id: content_media
+name: 内容营销流程
+icon: "📝"
+description: 选题策划 → 内容创作 → 落地页发布。CMO 视角，含博客和落地页创建。
+version: 2
+enabled: true
+domain: content_creation
+# 模板 ID 前缀（不含 `workflow-`）。该行业的工作流模板 ID 形如 `workflow-cm-*`，
+# 与行业 id（content_media → content-media）不构成默认前缀关系，必须显式声明；
+# 消费方：`opc_learning_hook::identify_domain_pack_from_template`。
+template_prefix: cm
+capabilities:
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcListBlogPosts"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:WebSearch"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcCreateBlogPost"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:FileWrite"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:FileRead"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcCreatePublishSchedule"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcListPublishSchedules"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcCreateContentAsset"}

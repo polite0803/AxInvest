@@ -10,11 +10,16 @@ pub struct Model {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    #[sea_orm(default_value = "")]
     pub icon: String,
     pub tags: Option<String>,
+    #[sea_orm(default_value = 1)]
     pub version: i32,
+    #[sea_orm(default_value = false)]
     pub is_preset: bool,
+    #[sea_orm(default_value = true)]
     pub is_editable: bool,
+    #[sea_orm(default_value = false)]
     pub is_public: bool,
     pub trigger_config: Option<String>,
     #[sea_orm(column_type = "Text")]

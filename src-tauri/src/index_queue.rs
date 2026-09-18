@@ -27,6 +27,14 @@ const RETRY_MAX_DELAY_MS: u64 = 60_000;
 const POLL_INTERVAL_MS: u64 = 500;
 const MAX_CONCURRENT_JOBS: usize = 2;
 
+/// 孤立记忆扫描间隔。
+///
+/// 与队列轮询（500ms）刻意解耦：轮询是热路径，扫描是兜底，60s 足够把
+/// 「状态为 pending 但没有任何作业」的条目捞出来，且不会给 DB 造成压力。
+const ORPHAN_SWEEP_INTERVAL_MS: u64 = 60_000;
+/// 单轮最多处理的孤儿条目数。上限存在的意义是让扫描成本可控且有界。
+const ORPHAN_SWEEP_BATCH: u64 = 200;
+
 #[derive(Clone)]
 pub struct IndexJobService {
     db: DatabaseConnection,
@@ -35,6 +43,18 @@ pub struct IndexJobService {
     semaphore: Arc<Semaphore>,
     shutdown_token: CancellationToken,
     app: AppHandle,
+}
+
+/// 容器类型归一：`container_type` 存在 "kb"/"knowledge"、"mem"/"memory" 两组等价写法
+/// （`run_job` 里 `match job.container_type.as_str()` 把两组都映射到同一个 `ContainerType`）。
+fn is_kb_container(container_type: &str) -> bool {
+    matches!(container_type, "knowledge" | "kb")
+}
+
+/// 记忆侧的两种写法以 `jobs` 中的常量为权威定义 —— 那边的去重判定需要精确匹配，
+/// 是「哪个写法是对的」这件事的唯一真相来源；此处仅做读取侧归一。
+fn is_mem_container(container_type: &str) -> bool {
+    container_type == jobs::CONTAINER_TYPE_MEM || container_type == jobs::CONTAINER_TYPE_MEM_ALIAS
 }
 
 impl IndexJobService {
@@ -85,6 +105,18 @@ impl IndexJobService {
         }
         self.recover_pending_jobs().await;
 
+        // 兜底推进器：与 recover_pending_jobs 互补，两者解决的是**不同**的失效形态。
+        //   recover_pending_jobs → 救「有作业，但进程中断在 processing/retrying」
+        //   本扫描器            → 救「条目状态是 pending，但从来没有过任何作业」
+        // 后者无法在调度层修复：`index_status` 由 DAO 层在插入时写成 pending，
+        // 而「入队」是命令层（拿得到 AppHandle）的独立动作。凡不经命令层的写入路径
+        // 都会留下永久 pending —— 生产实证（2026-09-12）：`index_jobs` 中
+        // container_type='mem' 的记录数为 0，即记忆向量化**从未入队过一次**。
+        {
+            let sweeper = self.clone();
+            tokio::spawn(async move { sweeper.run_orphan_sweeper().await });
+        }
+
         loop {
             tokio::select! {
                 _ = self.shutdown_token.cancelled() => {
@@ -119,6 +151,62 @@ impl IndexJobService {
                 },
             }
         }
+    }
+
+    /// 周期性扫描「状态为 pending 但没有任何活跃作业」的记忆条目，并为它们补入队。
+    ///
+    /// 首轮立即执行（`tokio::time::interval` 的第一次 tick 立即就绪）——
+    /// 应用刚启动时正是历史孤儿最需要被捞出的时刻。
+    async fn run_orphan_sweeper(self: std::sync::Arc<Self>) {
+        let mut ticker = tokio::time::interval(Duration::from_millis(ORPHAN_SWEEP_INTERVAL_MS));
+        loop {
+            tokio::select! {
+                _ = self.shutdown_token.cancelled() => {
+                    tracing::debug!("[index_queue] 收到关闭信号，停止孤儿扫描器");
+                    break;
+                },
+                _ = ticker.tick() => {
+                    if let Err(e) = self.sweep_orphan_memory_items().await {
+                        tracing::warn!("[index_queue] 孤儿记忆扫描失败: {}", e);
+                    }
+                },
+            }
+        }
+    }
+
+    /// 单轮孤儿扫描：判定逻辑在 `jobs::sweep_pending_memory_items`（纯 DB，可单测），
+    /// 本方法只负责把「补入队」这件事广播给前端。
+    async fn sweep_orphan_memory_items(&self) -> Result<(), String> {
+        let report = jobs::sweep_pending_memory_items(&self.db, ORPHAN_SWEEP_BATCH)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        for (item_id, namespace_id, job_id) in &report.enqueued {
+            tracing::info!(
+                job_id = %job_id,
+                item_id = %item_id,
+                namespace_id = %namespace_id,
+                "[index_queue] 孤儿记忆条目已补入索引作业",
+            );
+            let _ = self.app.emit(
+                "index-job-queued",
+                serde_json::json!({
+                    "jobId": job_id,
+                    "jobType": jobs::JOB_TYPE_INDEX_MEMORY,
+                    "containerType": jobs::CONTAINER_TYPE_MEM,
+                    "containerId": namespace_id,
+                    "itemId": item_id,
+                }),
+            );
+        }
+
+        if report.marked_skipped > 0 {
+            tracing::info!(
+                count = report.marked_skipped,
+                "[index_queue] 命名空间无 embedding provider，相关条目已降为 skipped",
+            );
+        }
+        Ok(())
     }
 
     async fn process_next_batch(&self) -> Result<(), String> {
@@ -190,9 +278,12 @@ impl IndexJobService {
             Err(e) => {
                 let err_msg = e.to_string();
 
-                // R9: embedding provider 未配置属确定性配置错误，重试结果必然相同，
-                // 直接进入 failed 终态，避免指数退避空转 max_retries 次。
-                if err_msg.contains(axagent_search::rag::ERR_NO_EMBEDDING_PROVIDER) {
+                // R9: embedding 配置类错误（未配置 / 配置已悬空）属**确定性**错误，
+                // 重试结果必然相同，直接进入 failed 终态，避免指数退避空转 max_retries 次。
+                // 判定取自 `axagent_harness::constants::embed::DETERMINISTIC_CONFIG_MARKERS`
+                // 的唯一清单，勿在此直接写 `contains(某个标记)` —— 那样新增标记时会漏判，
+                // 而漏判的形态是静默多跑几次重试，不报错、不告警（2026-09-12 实测缺陷）。
+                if axagent_harness::constants::embed::is_deterministic_config_error(&err_msg) {
                     match jobs::mark_job_failed_no_retry(&self.db, &job.id, &err_msg).await {
                         Ok(_) => {
                             self.emit_failed(&job, &err_msg).await;
@@ -200,7 +291,8 @@ impl IndexJobService {
                             tracing::error!(
                                 job_id = %job.id,
                                 error = %err_msg,
-                                "[index_queue] embedding 未配置，任务不重试直接失败"
+                                "[index_queue] embedding 配置为确定性错误（未配置或已悬空），\
+                                 任务不重试直接失败"
                             );
                         },
                         Err(e2) => {
@@ -457,6 +549,34 @@ impl IndexJobService {
         }
     }
 
+    /// 该容器是否还有未完成的索引任务。
+    ///
+    /// **失败时保守返回 `true`**（视为未完成）：宁可漏发一次「全部完成」，
+    /// 也不要误报完成 —— 前端收到 `*-rebuild-complete` 就会停止刷新与转圈，
+    /// 误报会让用户看到「已完成」而实际仍在排队（比不刷新更糟）。
+    async fn container_has_unfinished_jobs(
+        &self,
+        container_type: &str,
+        container_id: &str,
+    ) -> bool {
+        match jobs::list_jobs_by_container(&self.db, container_type, container_id).await {
+            Ok(list) => list.iter().any(|j| {
+                j.status == jobs::INDEX_JOB_STATUS_PENDING
+                    || j.status == jobs::INDEX_JOB_STATUS_PROCESSING
+                    || j.status == jobs::INDEX_JOB_STATUS_RETRYING
+            }),
+            Err(e) => {
+                tracing::warn!(
+                    "[index_queue] 容器完成判定查询失败 ({} / {}): {} —— 保守视为未完成",
+                    container_type,
+                    container_id,
+                    e
+                );
+                true
+            },
+        }
+    }
+
     async fn emit_progress(&self, job: &jobs::IndexJob, stage: &str, progress: i32) {
         let _ = self.app.emit(
             "index-job-progress",
@@ -470,6 +590,23 @@ impl IndexJobService {
                 "progress": progress,
             }),
         );
+
+        // P1-D（2026-09-12）：领域事件补发。
+        // `index-job-*` 是队列的**基础设施事件**（前端零监听）；前端组件实际监听的是
+        // 领域事件 `knowledge-base-updated` / `memory-item-indexed` / `memory-rebuild-complete`
+        // —— 而后端此前**从未发过这三个名字**，两侧名字不同（段 G 报为「前端 listen 无后端 emit」）。
+        // 这里不是新增功能，而是**事件名对齐**：数据（容器 / item / 进度 / 错误）本就齐全。
+        if is_kb_container(&job.container_type) {
+            let _ = self.app.emit(
+                "knowledge-base-updated",
+                serde_json::json!({
+                    "knowledgeBaseId": job.container_id,
+                    "status": "indexing",
+                    "progress": progress,
+                    "stage": stage,
+                }),
+            );
+        }
     }
 
     async fn emit_completed(&self, job: &jobs::IndexJob) {
@@ -483,6 +620,24 @@ impl IndexJobService {
                 "itemId": job.item_id,
             }),
         );
+
+        // P1-D：item 级领域事件（`MemorySettings` 靠它刷新列表与索引状态）
+        if is_mem_container(&job.container_type) {
+            let _ = self.app.emit(
+                "memory-item-indexed",
+                serde_json::json!({
+                    "itemId": job.item_id,
+                    "success": true,
+                    "status": "ready",
+                    "isRebuild": job.job_type == jobs::JOB_TYPE_REBUILD_CONTAINER,
+                }),
+            );
+        }
+
+        // P1-D：容器级领域事件。
+        // 调用点保证 `mark_job_completed` 先于本函数执行（`index_queue.rs:186-187`），
+        // 故此处查询时当前 job 已是 completed，不会把自己算作「未完成」。
+        self.emit_container_settled(job).await;
     }
 
     async fn emit_failed(&self, job: &jobs::IndexJob, error: &str) {
@@ -499,6 +654,48 @@ impl IndexJobService {
                 "maxRetries": job.max_retries,
             }),
         );
+
+        // P1-D：item 级领域事件（失败态）
+        if is_mem_container(&job.container_type) {
+            let _ = self.app.emit(
+                "memory-item-indexed",
+                serde_json::json!({
+                    "itemId": job.item_id,
+                    "success": false,
+                    "status": "failed",
+                    "error": error,
+                    "isRebuild": job.job_type == jobs::JOB_TYPE_REBUILD_CONTAINER,
+                }),
+            );
+        }
+
+        self.emit_container_settled(job).await;
+    }
+
+    /// 容器内最后一个任务落定（成功或最终失败）时，补发容器级领域事件。
+    ///
+    /// 仅在**无剩余 pending/processing/retrying** 时发，避免每个 item 都触发一次
+    /// 全量刷新（重建 500 条记忆会打 500 次刷新）。
+    async fn emit_container_settled(&self, job: &jobs::IndexJob) {
+        if self.container_has_unfinished_jobs(&job.container_type, &job.container_id).await {
+            return;
+        }
+
+        if is_mem_container(&job.container_type) {
+            let _ = self.app.emit(
+                "memory-rebuild-complete",
+                serde_json::json!({ "namespaceId": job.container_id }),
+            );
+        } else if is_kb_container(&job.container_type) {
+            let _ = self.app.emit(
+                "knowledge-base-updated",
+                serde_json::json!({
+                    "knowledgeBaseId": job.container_id,
+                    "status": "completed",
+                    "progress": 100,
+                }),
+            );
+        }
     }
 
     async fn emit_retrying(&self, job: &jobs::IndexJob, error: &str) {

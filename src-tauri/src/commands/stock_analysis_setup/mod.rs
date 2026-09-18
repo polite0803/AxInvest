@@ -33,6 +33,21 @@ use seed_screenshot_portfolio_diagnosis::seed_screenshot_portfolio_diagnosis_tem
 use seed_serenity::seed_serenity_screening_workflow_template;
 use seed_stock_analysis::seed_stock_analysis_workflow_template;
 
+/// 已注销的专家 id。
+///
+/// ⚠ 从 `EMBEDDED_PROMPTS` / `EXPERT_ROLE_MAP` / `PROFILE_TOOLS` 移除某个专家时，
+/// **必须**把它的 id 登记到这里：上述三个数组只是 seed 的「建」侧，而
+/// `seed_agency_experts` / `seed_agent_profiles` 只做 UPSERT（有则 update、无则
+/// insert），**从不删除**。因此已注销专家会以旧行形式残留在 DB 中，前端按
+/// `source_dir = "stock-analysis"` 聚合专家列表时会继续展示它
+/// （典型症状：「界面里还能选，但它已不参与工作流」）。
+/// 每次种子化结束会对本清单执行定向删除（幂等；失败仅告警，不阻断启动）。
+///
+/// 2026-09-14: `data-quality-inspector` —— 其职责已由确定性 CodeNode
+/// `data-quality.rhai` 承担（该节点输出 `grade` / `score` / `diagnostics`，
+/// 是数据质量分档的唯一权威；见 `AUDIT-data-quality-dual-algorithm-2026-09-14.md`）。
+const RETIRED_EXPERT_IDS: &[&str] = &["data-quality-inspector"];
+
 /// 编译期嵌入的专家提示词（include_str 确保打包后可用）
 const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
     ("market-analyst", include_str!("../../../agency_experts/stock-analysis/market-analyst.md")),
@@ -79,10 +94,6 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
     (
         "value-investor",
         include_str!("../../../agency_experts/stock-analysis/custom/value-investor.md"),
-    ),
-    (
-        "data-quality-inspector",
-        include_str!("../../../agency_experts/stock-analysis/data-quality-inspector.md"),
     ),
     (
         "quality-fallback",
@@ -147,6 +158,13 @@ const EMBEDDED_PROMPTS: &[(&str, &str)] = &[
         "stop-loss-reviewer",
         include_str!("../../../agency_experts/stock-analysis/stop-loss-reviewer.md"),
     ),
+    // ── P0 补齐: decision-explainer（三明治第三段的「翻译说明书」节点）──
+    // 背景：模板节点 `decision-explainer` 的 agent_profile_id = "stock-explainer"，
+    // 但三处注册（.md / EMBEDDED_PROMPTS / EXPERT_ROLE_MAP）此前**全无** explainer
+    // ⇒ profile `stock-explainer` 不存在 ⇒ agent_executor 的 profile 解析返回 None
+    // ⇒ expert 提示词整段跳过（只打一条 WARN，节点不失败）—— 静默降级。
+    // 该节点只做「把符号裁决翻译成人话」，故 tools=[]（见 PROFILE_TOOLS）。
+    ("explainer", include_str!("../../../agency_experts/stock-analysis/explainer.md")),
 ];
 
 const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
@@ -171,7 +189,6 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     ("research-manager", "decision-maker"),
     ("trader", "trader"),
     ("value-investor", "stock-analyst"),
-    ("data-quality-inspector", "stock-analyst"),
     ("quality-fallback", "decision-maker"),
     ("rule-checker", "risk-evaluator"),
     ("catalyst-analyst", "stock-analyst"),
@@ -192,6 +209,8 @@ const EXPERT_ROLE_MAP: &[(&str, &str)] = &[
     // ── 事件驱动模板：仓位规划与止损复查角色映射 ──
     ("position-planner", "decision-maker"),
     ("stop-loss-reviewer", "decision-maker"),
+    // 决策解释官：产出是人话说明书，归入决策者层（与 research-manager 等同层）
+    ("explainer", "decision-maker"),
 ];
 
 struct StockRoleDef {
@@ -366,8 +385,8 @@ const STOCK_ROLES: &[StockRoleDef] = &[
         name: "股票分析师",
         description: "A股多维分析",
         system_prompt: "你是专业的 A 股分析师，基于行情数据、财务数据、新闻资讯等对股票进行深度分析。",
-        // 修复 Defect #6: 提升到 14 以容纳 11 个 a-* + value-investor + data-quality-inspector + catalyst-analyst
-        // + social-media-analyst + volume-price-analyst（共 14 个 stock-analyst 角色节点），留 1 槽位余量。
+        // stock-analyst 角色的并发上限：覆盖全部 a-* 分析师 + 专项分析师
+        // （Serenity 链条、催化剂、社媒/量价等），留 1 槽位余量。
         max_concurrent: 15,
         timeout_seconds: 600,
     },
@@ -548,10 +567,9 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "search_stock",
         ],
     ),
-    // ── P3 (real-nodes): 数据质量检查员 + 规则检查员 ──
-    // data-quality-inspector 只需阅读上游分析师报告（context_sources 注入），
-    // 不需要外部工具调用
-    ("data-quality-inspector", &["search_stock"]),
+    // ── P3 (real-nodes): 规则检查员 ──
+    // 2026-09-14: 原 "data-quality-inspector" 的工具白名单已随之移除——该职责现由
+    // 确定性 CodeNode `data-quality.rhai` 承担，不再作为 LLM 专家参与工作流。
     // quality-fallback: 数据降级时的保守决策，只需少量查询
     ("quality-fallback", &["get_stock_quote", "get_stock_kline", "compute_scoring"]),
     // rule-checker 需要读取技术指标与估值/风控结果
@@ -658,11 +676,42 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("position-planner", &["get_stock_quote", "get_account_info", "get_stock_risk_metrics"]),
     // stop-loss-reviewer: 止损复查，需波动率 + 风险指标
     ("stop-loss-reviewer", &["get_stock_quote", "get_stock_risk_metrics", "compute_volatility"]),
+    // explainer: 决策解释官 —— 显式声明**无工具**。
+    // 其输入（portfolio-risk-gate 的裁决结果）全部经 input_mapping 注入，职责是翻译
+    // 而非取数；`&[]`（而非缺省）表示「已评估并确定为无」，与「未配置」区分开。
+    ("explainer", &[]),
+    // ── 补齐历史上「有专家、无工具行」的 5 个（recommended_tools 此前落 NULL）──
+    // 二者是收敛节点：输入全部来自上游辩论 / 风险评估节点的 context_sources 注入，
+    // 自身不取数 —— 显式登记为空。
+    ("debate-convergence", &[]),
+    ("risk-convergence", &[]),
+    // 投资复盘官：输入来自历史分析与反思记录，不取实时数据。
+    ("reflection", &[]),
+    // ⚠️ 以下两个**当前未接入任何模板**（仅存在于专家库，`agent_profile_id` 无引用）。
+    // 显式登记为空只是为了消除 NULL（「未配置」与「确认为空」在 DB 里无法区分）；
+    // 若将来把它们接进模板，**必须先按其数据源确定工具白名单**，不要沿用本行。
+    ("social-media-analyst", &[]),
+    ("volume-price-analyst", &[]),
 ];
 
 pub async fn ensure_stock_analysis_experts_seeded(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<(), String> {
+    // 0) 存量自愈（P0，2026-09-14）：端口公理非法的存量模板归零 `version`，
+    //    使下面各 stock 种子函数的 `existing.version >= TEMPLATE_VERSION` 门放行重建。
+    //    与 OPC 侧同一个函数、同一份判据（`port_axiom_errors`）；失败不阻断种子。
+    match axagent_dao::repo::workflow_template::reset_port_axiom_illegal_versions(db).await {
+        Ok(ids) if !ids.is_empty() => {
+            tracing::warn!(
+                "[stock_analysis_setup] 端口公理非法的存量模板已归零版本号，等待重建: {ids:?}"
+            );
+        },
+        Ok(_) => {},
+        Err(e) => {
+            tracing::warn!("[stock_analysis_setup] 存量端口公理自愈检查失败（不阻断种子）: {e}");
+        },
+    }
+
     // 先执行 Serenity 种子，独立 try 避免被前序步骤阻塞
     tracing::info!("[stock_analysis_setup] === 开始种子 Serenity 模板 ===");
     if let Err(e) = seed_serenity_screening_workflow_template(db).await {
@@ -824,6 +873,15 @@ async fn seed_agency_experts(db: &sea_orm::DatabaseConnection) -> Result<(), Str
         }
         count += 1;
     }
+
+    // 清理已注销专家的残留行（UPSERT 只增改不删 —— 见 RETIRED_EXPERT_IDS 文档）
+    for retired in RETIRED_EXPERT_IDS {
+        let agency_id = format!("agency-stock-analysis-{retired}");
+        if let Err(e) = agency_experts::Entity::delete_by_id(&agency_id).exec(db).await {
+            tracing::warn!("[stock_analysis_setup] 清理已注销专家 {agency_id} 失败 (非致命): {e}");
+        }
+    }
+
     tracing::info!("[stock_analysis_setup] 已种子化/更新 {count} 个 agency_experts");
     Ok(())
 }
@@ -985,6 +1043,17 @@ async fn seed_agent_profiles(db: &sea_orm::DatabaseConnection) -> Result<(), Str
         }
         count += 1;
     }
+
+    // 清理已注销专家的 profile 残留行（同样只增改不删）
+    for retired in RETIRED_EXPERT_IDS {
+        let profile_id = format!("stock-{retired}");
+        if let Err(e) = agent_profiles::Entity::delete_by_id(&profile_id).exec(db).await {
+            tracing::warn!(
+                "[stock_analysis_setup] 清理已注销 profile {profile_id} 失败 (非致命): {e}"
+            );
+        }
+    }
+
     tracing::info!("[stock_analysis_setup] 已种子化/更新 {count} 个 agent_profiles");
     Ok(())
 }
@@ -1054,6 +1123,8 @@ pub(crate) fn expert_id_to_display(id: &str) -> String {
         "chain-decomposer" => "产业链拆解师".to_string(),
         "chokepoint-identifier" => "瓶颈鉴定师".to_string(),
         "candidate-mapper" => "候选公司映射器".to_string(),
+        // 决策解释官（decision-explainer 节点的 profile 显示名）
+        "explainer" => "决策解释官".to_string(),
         o => o.to_string(),
     }
 }
@@ -1199,6 +1270,43 @@ pub(crate) fn merge_variable_values(
     })
 }
 
+/// 强制覆写模板变量表中的某个变量值（**无视** `merge_variable_values` 的「旧值优先」）。
+///
+/// ## 什么时候需要它
+///
+/// `merge_variable_values` 的语义是「新定义 + 旧值」，即**无条件保留用户旧值** ——
+/// 这对「用户自己调过的参数」是正确的，但对**语义发生变化的变量**是错的：
+/// DB 里那个旧值本身就是本次要修掉的东西，不覆写就等于没改。
+///
+/// 首个用例（v48，2026-09-14）：`debate_rounds` 由 3 固定为 1。只改
+/// `seed_variables.rs` 的默认值无效，因为 DB 里的 3 会在升级时覆盖回来。
+///
+/// ## 失败策略
+///
+/// 解析失败 / 变量不存在时**原样返回**并 warn，不 panic、不阻断种子：
+/// 变量值错顶多让下游行为退化，而阻断会让整个模板卡在旧版本（代价更大）。
+pub(crate) fn force_variable_value(
+    variables_json: &str,
+    name: &str,
+    value: serde_json::Value,
+) -> String {
+    let Ok(mut vars) = serde_json::from_str::<Vec<serde_json::Value>>(variables_json) else {
+        tracing::warn!("force_variable_value: 变量表解析失败，保持原样（name={name}）");
+        return variables_json.to_string();
+    };
+    let mut hit = false;
+    for v in vars.iter_mut() {
+        if v.get("name").and_then(|n| n.as_str()) == Some(name) {
+            v["value"] = value.clone();
+            hit = true;
+        }
+    }
+    if !hit {
+        tracing::warn!("force_variable_value: 变量 '{name}' 不在变量表中，未覆写");
+    }
+    serde_json::to_string(&vars).unwrap_or_else(|_| variables_json.to_string())
+}
+
 // seed_debate_subworkflow: 辩论已通过 DebateNode 容器直接嵌入主模板，旧独立模板已移除
 
 /// 种子化反思复盘工作流模板（stock-reflection）。
@@ -1303,6 +1411,19 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 ("holding_days", "holding_days"),
                 ("original_time_horizon", "original_time_horizon"),
                 ("original_holding_days", "original_holding_days"),
+                // [实际行情 2026-09-13] 价格层事实。来源 = 后端 compute_market_snapshot()
+                // 用前复权 K 线确定性算出的 MarketSnapshot，经 actual_market_json 变量注入。
+                // 在此之前本 comparator 只消费标量 raw_return_pct，价格/回撤/目标价
+                // 全部不可见；而 trader_target_price 虽在映射表里却从未被脚本消费（死映射）。
+                ("latest_price", "actual_market_json.latestPrice"),
+                ("entry_price", "actual_market_json.entryPrice"),
+                ("target_price", "actual_market_json.targetPrice"),
+                ("target_progress_pct", "actual_market_json.targetProgressPct"),
+                ("max_drawdown_pct", "actual_market_json.maxDrawdownPct"),
+                ("period_high", "actual_market_json.periodHigh"),
+                ("period_low", "actual_market_json.periodLow"),
+                ("latest_date", "actual_market_json.latestDate"),
+                ("within_expected_horizon", "actual_market_json.withinExpectedHorizon"),
                 // __untrusted 标记（从子工作流各 Agent 节点提取）
                 ("u_trader", "sub-analysis.trader.__untrusted"),
                 ("u_research_mgr", "sub-analysis.research-mgr.__untrusted"),
@@ -1408,6 +1529,11 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     相对基准超额: {{alpha_return_pct}}%\n\
                     实际持有天数: {{holding_days}} 天\n\
                     基准名称: {{benchmark_name}}\n\
+                    ——当前实际行情（价格层事实，由前复权 K 线确定性计算）——\n\
+                    {{actual_market_text}}\n\
+                    以上是「已完成的分析结论」与「该股票当前实际行情」的客观差异，是你的事实基础。\n\
+                    若标记「尚未到期望持有期」，本次属期中观察：不要据此判定策略失效，结论权重放低。\n\
+                    若标记「行情数据不可用」，只做定性反思，禁止对涨跌方向/幅度下结论。\n\
                     反思深度: {{reflection_depth}}（light = 简要；deep = 详细推理链）\n\n\
                     ——定量偏差报告（reflection-comparator 输出）——\n\
                     详见下方【输入上下文】的 deviation_report 字段。\n\
@@ -1442,13 +1568,16 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                       \"code_diff_proposal\": \"具体修改方案描述（L1简述 / L2-L3含文件路径和代码段）\",\n\
                       \"params_suggestion\": [\n\
                         {\n\
-                          \"param\": \"参数名\",\n\
+                          \"param\": \"参数名（必须严格取自下方【可调参数清单】的 name，禁止自造名字）\",\n\
                           \"current_value\": \"当前值\",\n\
                           \"suggested_value\": \"建议值\",\n\
                           \"reason\": \"调整原因\"\n\
                         }\n\
                       ]\n\
-                    }"
+                    }\n\n\
+                    【可调参数清单】（只能建议以下参数；param 字段须写清单中的 name；\n\
+                    若本次复盘没有充分证据支持调整某参数，就不要把它写进 params_suggestion）\n\
+                    {{tunable_params_catalog}}"
                 .into(),
                 context_sources: vec!["sub-analysis".into(), "reflection-comparator".into()],
                 input_mapping: [
@@ -1467,6 +1596,10 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     ("stock_lessons".to_string(), "stock_lessons".to_string()),
                     ("hindsight_date".to_string(), "hindsight_date".to_string()),
                     ("deviation_report".to_string(), "reflection-comparator".to_string()),
+                    // [实际行情] 价格层事实文本块（入场价/最新价/涨跌/回撤/目标价实现度），
+                    // 由 run_reflection_workflow 顶层注入。不接会让 prompt 里的
+                    // {{actual_market_text}} 渲染为空或 VARIABLE_NOT_FOUND。
+                    ("actual_market_text".to_string(), "actual_market_text".to_string()),
                 ]
                 .into_iter()
                 .collect(),
@@ -1586,10 +1719,42 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             description: Some("反思深度：light(简要) / deep(详细推理链)".into()),
             is_secret: false,
         },
+        // [实际行情 v2] 价格层事实。运行时由 run_reflection_workflow 用
+        // compute_market_snapshot() 的结果覆盖；此处声明默认值是为了：
+        // ① 模板变量表完整（前端模板编辑器可见）；
+        // ② input_mapping / context_sources 能找到 source 变量，避免静默取空。
+        Variable {
+            name: "actual_market_text".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(String::new()),
+            description: Some(
+                "当前实际行情文本块（入场基准价/最新价/涨跌/回撤/超额/目标价实现度）".into(),
+            ),
+            is_secret: false,
+        },
+        Variable {
+            name: "actual_market_json".into(),
+            var_type: "object".into(),
+            value: serde_json::json!({}),
+            description: Some(
+                "当前实际行情结构化快照（供 reflection-comparator 按路径下钻）".into(),
+            ),
+            is_secret: false,
+        },
     ];
 
     // serenity-reflection 模板版本。
-    const REFLECTION_TEMPLATE_VERSION: i32 = 1;
+    //
+    // v2 (2026-09-13)：「结论 vs 当前实际行情」改造 ——
+    //   ① reflection-agent prompt 增补 {{actual_market_text}} 价格层事实段
+    //      （入场基准价/最新价/涨跌/回撤/目标价实现度/期中观察标记）；
+    //   ② reflection-comparator input_mapping 接入 actual_market_json 的 9 个价格字段，
+    //      并把此前是死映射的 trader_target_price 真正接线为「目标价兑现度」对比；
+    //   ③ 新增变量定义 actual_market_text / actual_market_json（由 run_reflection_workflow
+    //      **无条件注入** —— 缺失会让 comparator 与 prompt 双双 VARIABLE_NOT_FOUND）。
+    //
+    // ⚠ 升版必做：不升版 DB 里会保留 v1 模板行，本次全部改动静默失效。
+    const REFLECTION_TEMPLATE_VERSION: i32 = 2;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =
@@ -1663,6 +1828,14 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
 
     // 先删再插，避免 SeaORM .save() 对已存在记录的 update 失败
     let _ = workflow_template::Entity::delete_by_id("stock-reflection").exec(db).await;
+
+    // P0 软门禁（C1，2026-09-14）：见 `opc_workflows::upsert_template` 同款说明。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        "stock_analysis_setup:seed_reflection_workflow_template:stock-reflection",
+        &nodes_json,
+        &edges_json,
+    );
+
     workflow_template::ActiveModel {
         hooks_config: Set(None),
         id: Set("stock-reflection".to_string()),
@@ -1965,6 +2138,17 @@ async fn seed_event_triggered_decision_template(
 
     // 先删再插，避免 .save() 对已存在记录的 update 失败
     let _ = workflow_template::Entity::delete_by_id(spec.template_id).exec(db).await;
+
+    // P0 软门禁（C1，2026-09-14）：见 `opc_workflows::upsert_template` 同款说明。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!(
+            "stock_analysis_setup:seed_event_triggered_decision_template:{}",
+            spec.template_id
+        ),
+        &nodes_json,
+        &edges_json,
+    );
+
     workflow_template::ActiveModel {
         hooks_config: Set(None),
         id: Set(spec.template_id.to_string()),
@@ -2071,4 +2255,45 @@ async fn seed_auto_stop_loss_review_template(
         model_role: Some("decision-maker"),
     };
     seed_event_triggered_decision_template(db, spec).await
+}
+
+#[cfg(test)]
+mod force_variable_value_tests {
+    use super::force_variable_value;
+
+    /// v48 用例：`debate_rounds` 的 DB 旧值 3 必须被覆写为 1
+    /// （`merge_variable_values` 的「旧值优先」语义让默认值修改失效）。
+    #[test]
+    fn 覆写已存在变量的值() {
+        let input = r#"[
+            {"name":"analysis_depth","var_type":"enum","value":"standard","is_secret":false},
+            {"name":"debate_rounds","var_type":"number","value":3,"is_secret":false},
+            {"name":"kline_limit","var_type":"number","value":120,"is_secret":false}
+        ]"#;
+        let out = force_variable_value(input, "debate_rounds", serde_json::json!(1));
+        let vars: Vec<serde_json::Value> = serde_json::from_str(&out).expect("输出必须是合法 JSON");
+        let get = |n: &str| vars.iter().find(|v| v.get("name").and_then(|x| x.as_str()) == Some(n));
+        assert_eq!(get("debate_rounds").unwrap()["value"], 1);
+        // 其余变量必须原样保留（只动目标，不做整表替换）
+        assert_eq!(get("analysis_depth").unwrap()["value"], "standard");
+        assert_eq!(get("kline_limit").unwrap()["value"], 120);
+        assert_eq!(vars.len(), 3);
+    }
+
+    /// 变量不存在 ⇒ 原样返回（不 panic、不阻断种子），仅告警
+    #[test]
+    fn 变量不存在时保持原样() {
+        let input = r#"[{"name":"a","var_type":"number","value":1,"is_secret":false}]"#;
+        let out = force_variable_value(input, "not_there", serde_json::json!(9));
+        let vars: Vec<serde_json::Value> = serde_json::from_str(&out).unwrap();
+        assert_eq!(vars.len(), 1);
+        assert_eq!(vars[0]["value"], 1);
+    }
+
+    /// 非法 JSON ⇒ 原样返回（种子流程不能因为一个变量覆写失败而整体中断）
+    #[test]
+    fn 非法输入时保持原样() {
+        let out = force_variable_value("not json at all", "x", serde_json::json!(1));
+        assert_eq!(out, "not json at all");
+    }
 }

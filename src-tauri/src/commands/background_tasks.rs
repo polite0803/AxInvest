@@ -5,7 +5,9 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::task as task_err;
 use crate::commands::spawn_guard::panic_message;
 use axagent_agent_macro::agent_command;
+use axagent_dao::task_ledger::TransitionRequest;
 use axagent_entities::background_tasks;
+use axagent_harness::task_state::{TaskSource, TaskStatus};
 use chrono::Utc;
 use futures::FutureExt;
 use sea_orm::*;
@@ -78,6 +80,46 @@ impl From<background_tasks::Model> for BackgroundTaskInfo {
     }
 }
 
+/// 任务事件时间线的一行（`task_events` 的前端投影）。
+///
+/// 字段名走 camelCase（AGENTS.md 禁区 13）：Rust 侧保持 snake_case，
+/// 靠 `#[serde(rename_all = "camelCase")]` 输给前端。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskEventInfo {
+    pub id: String,
+    pub task_id: String,
+    /// 写入入口：`command` | `tool` | `restore` | `other`
+    pub source: String,
+    /// 迁移前状态；创建事件为 `None`
+    pub from_status: Option<String>,
+    pub to_status: String,
+    /// 触发者：`user` | `system` | `scheduler` | `agent` | `unknown`
+    pub actor: String,
+    pub reason: Option<String>,
+    /// 附加 JSON 字符串（原样透传，前端自行解析；不在此处 parse 是因为
+    /// 解析失败只会变成 `null`，反而掩盖了「写入了非 JSON」这个事实）
+    pub payload: Option<String>,
+    /// 毫秒时间戳
+    pub created_at: i64,
+}
+
+impl From<axagent_entities::task_events::Model> for TaskEventInfo {
+    fn from(m: axagent_entities::task_events::Model) -> Self {
+        Self {
+            id: m.id,
+            task_id: m.task_id,
+            source: m.source,
+            from_status: m.from_status,
+            to_status: m.to_status,
+            actor: m.actor,
+            reason: m.reason,
+            payload: m.payload,
+            created_at: m.created_at,
+        }
+    }
+}
+
 async fn append_output(db: &DatabaseConnection, task_id: &str, text: &str) -> Result<(), String> {
     let now = Utc::now().timestamp_millis();
     let task = background_tasks::Entity::find_by_id(task_id)
@@ -110,42 +152,30 @@ async fn append_output(db: &DatabaseConnection, task_id: &str, text: &str) -> Re
     Ok(())
 }
 
+/// **任务状态写入的唯一入口**（命令层）。
+///
+/// 修复前这里直接 `am.status = Set(status.to_string())` —— 裸字符串、无迁移校验、
+/// 与 DAO 仓库层 (`background_task_repository.rs`) 各写各的。现在收敛到
+/// `axagent_dao::task_ledger::transition_task`：状态语义来自
+/// `harness::task_state` 单一真源，每次迁移在同一事务内追加 `task_events`。
+///
+/// 参数类型从 `&str` 改成 `TaskStatus` 是**故意的**：裸字符串是这条链上
+/// 「拼写漂移 + 非法回环」的载体，用枚举让编译器兜住。
 async fn update_status(
     db: &DatabaseConnection,
     task_id: &str,
-    status: &str,
+    to: TaskStatus,
     exit_code: Option<i32>,
 ) -> Result<(), String> {
-    let now = Utc::now().timestamp_millis();
-    let task = background_tasks::Entity::find_by_id(task_id)
-        .one(db)
-        .await
-        .map_err(|e| {
-            String::from(crate::commands::error::ErrorResponse::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            ))
-        })?
-        .ok_or_else(|| {
-            serde_json::to_string(&ErrorResponse::new(task_err::NOT_FOUND))
-                .unwrap_or_else(|e| format!("{{\"error\":\"serialization failed: {}\"}}", e))
-        })?;
-    let mut am: background_tasks::ActiveModel = task.into();
-    am.status = Set(status.to_string());
-    am.updated_at = Set(now);
+    let mut req = TransitionRequest::new(task_id, to, TaskSource::Command, "system");
     if let Some(code) = exit_code {
-        am.exit_code = Set(Some(code));
+        req = req.exit_code(code).payload(serde_json::json!({ "exitCode": code }));
     }
-    if status == "completed" || status == "failed" || status == "stopped" {
-        am.finished_at = Set(Some(now));
-    }
-    am.update(db).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    Ok(())
+    axagent_dao::task_ledger::transition_task(db, req).await.map(|_| ()).map_err(|e| {
+        // 非法迁移必须显式暴露：静默吞掉会让「任务卡在 running」变得无从归因。
+        warn!(task_id = %task_id, to = %to, "[background_tasks] 状态迁移失败: {}", e);
+        e.to_string()
+    })
 }
 
 #[agent_command(domain = system, safety = Caution, call_mode = StateInput, description = "创建后台任务")]
@@ -194,7 +224,7 @@ pub async fn spawn_background_task(
         task_type: Set(task_type.clone()),
         command: Set(command.clone()),
         prompt: Set(prompt.clone()),
-        status: Set("pending".to_string()),
+        status: Set(TaskStatus::Pending.as_db_str().to_string()),
         output: Set(String::new()),
         exit_code: Set(None),
         conversation_id: Set(None),
@@ -212,6 +242,19 @@ pub async fn spawn_background_task(
             crate::commands::error::ErrorCategory::Unrecoverable,
         ))
     })?;
+
+    // 创建事件：让「任务从哪来」在事件脊上有起源。
+    // 失败不阻断创建（业务行已落库，回滚没有意义），但**必须显式记 error** ——
+    // 「事件写失败」如果只是 `let _ =`，事后排障会把事件脊的空洞当成噪声忽略，
+    // 而空洞恰恰是最需要解释的状态。
+    if let Err(e) =
+        axagent_dao::task_ledger::record_task_created(&db, &id, TaskSource::Command, "user").await
+    {
+        tracing::error!(
+            task_id = %id,
+            "[spawn_background_task] 写入创建事件失败（任务已创建，审计脊将缺少起源）: {}", e
+        );
+    }
 
     if task_type == "bash" {
         if let Some(cmd) = command {
@@ -247,7 +290,9 @@ pub async fn spawn_background_task(
                         let tid = self.task_id.clone();
                         let app = self.app.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = update_status(&db, &tid, "failed", Some(-1)).await {
+                            if let Err(e) =
+                                update_status(&db, &tid, TaskStatus::Failed, Some(-1)).await
+                            {
                                 warn!("TaskGuard drop 兜底更新 status 失败: {}", e);
                             }
                             let _ = app.emit("background-task:failed", &tid);
@@ -263,7 +308,7 @@ pub async fn spawn_background_task(
 
                 // === 2. catch_unwind 包裹主体 ===
                 let result = AssertUnwindSafe(async {
-                    if let Err(e) = update_status(&db1, &tid1, "running", None).await {
+                    if let Err(e) = update_status(&db1, &tid1, TaskStatus::Running, None).await {
                         warn!("更新任务状态失败: {}", e);
                     }
                     let mut cmd_builder =
@@ -360,7 +405,8 @@ pub async fn spawn_background_task(
                                     tracing::warn!("后台任务追加输出失败 task_id={}: {}", tid4, e);
                                 }
                                 if let Err(e) =
-                                    update_status(&db3, &tid4, "completed", Some(code)).await
+                                    update_status(&db3, &tid4, TaskStatus::Completed, Some(code))
+                                        .await
                                 {
                                     tracing::warn!(
                                         "后台任务状态更新为 completed 失败 task_id={}: {}",
@@ -379,7 +425,7 @@ pub async fn spawn_background_task(
                                     tracing::warn!("后台任务追加输出失败 task_id={}: {}", tid4, e);
                                 }
                                 if let Err(e) =
-                                    update_status(&db3, &tid4, "failed", Some(code)).await
+                                    update_status(&db3, &tid4, TaskStatus::Failed, Some(code)).await
                                 {
                                     tracing::warn!(
                                         "后台任务状态更新为 failed 失败 task_id={}: {}",
@@ -419,7 +465,7 @@ pub async fn spawn_background_task(
             });
         }
     } else if task_type == "agent" {
-        if let Err(e) = update_status(&db, &id, "running", None).await {
+        if let Err(e) = update_status(&db, &id, TaskStatus::Running, None).await {
             tracing::warn!("后台任务启动状态更新为 running 失败 task_id={}: {}", id, e);
         }
     }
@@ -486,8 +532,48 @@ pub async fn stop_background_task(
             serde_json::to_string(&ErrorResponse::new(task_err::NOT_FOUND))
                 .unwrap_or_else(|e| format!("{{\"error\":\"serialization failed: {}\"}}", e))
         })?;
-    if task.status == "running" || task.status == "pending" {
-        update_status(state.harness.db(), &task_id, "stopped", None).await?;
+    // 可停止态用枚举判定（原来是裸字符串比较，`"runing"` 之类拼写错误会静默
+    // 变成「不可停止」而不是报错）。未知状态不假装可停止。
+    let current = TaskStatus::from_db_str(&task.status);
+    if matches!(current, TaskStatus::Running | TaskStatus::Pending) {
+        update_status(state.harness.db(), &task_id, TaskStatus::Stopped, None).await?;
+    } else if current == TaskStatus::Unknown {
+        warn!(
+            task_id = %task_id, raw = %task.status,
+            "[stop_background_task] 任务状态未知，按「不可停止」处理（不猜）"
+        );
     }
     Ok(())
+}
+
+/// 单次查询最多返回的事件条数。
+///
+/// `task_events` 是追加型表，长跑任务（每秒一条进度）能让单任务事件数上万。
+/// 前端时间线不需要全量，因此硬性截断 —— 但**截断策略写在读命令里而不是
+/// `limit` 参数上**：调用方传 `u64::MAX` 时不至于把整个表拖进内存。
+const MAX_TASK_EVENTS: u64 = 500;
+
+/// 拉取某任务的状态迁移时间线（正序：最早在前，最新在后）。
+///
+/// 这是 `task_events` 的**读路径**。写入型审计表如果没有读消费者，它就是
+/// 死表 —— 表在建、数据在写、但没有任何一处能把它显示出来，
+/// `cargo check` 与单测照样全绿。因此该命令与 `TaskPanel` 的时间线是一对，
+/// 缺任何一个都算未完成。
+#[agent_command(domain = system, safety = Safe, call_mode = StateInput, description = "获取后台任务状态迁移时间线")]
+#[tauri::command]
+pub async fn list_task_events(
+    state: State<'_, AppState>,
+    task_id: String,
+    limit: Option<u64>,
+) -> Result<Vec<TaskEventInfo>, String> {
+    let effective = limit.unwrap_or(100).clamp(1, MAX_TASK_EVENTS);
+    let rows = axagent_dao::task_ledger::list_task_events(state.harness.db(), &task_id, effective)
+        .await
+        .map_err(|e| {
+            // 读失败就是读失败，不返回空 `Vec`：空列表会被前端渲染成
+            // 「该任务没有任何状态迁移」，那是**归因字段说谎**（铁律 #12）。
+            warn!(task_id = %task_id, "[list_task_events] 读取任务事件失败: {}", e);
+            e.to_string()
+        })?;
+    Ok(rows.into_iter().map(Into::into).collect())
 }

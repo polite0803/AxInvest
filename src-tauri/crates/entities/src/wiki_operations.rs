@@ -20,6 +20,14 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::wikis::Entity",
+        from = "Column::WikiId",
+        to = "super::wikis::Column::Id",
+        on_delete = "Cascade"
+    )]
+    Wiki,
+}
 
 impl ActiveModelBehavior for ActiveModel {}

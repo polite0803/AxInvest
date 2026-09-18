@@ -14,9 +14,14 @@ pub struct Model {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "novel")]
     pub genre: String,
     pub structure: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = false)]
     pub is_template: bool,
+    #[sea_orm(default_value = 1)]
     pub version: i32,
     pub created_at: i64,
     pub updated_at: i64,

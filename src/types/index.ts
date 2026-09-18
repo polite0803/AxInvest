@@ -8,6 +8,7 @@ export * from "./paired";
 export * from "./modelSelection";
 
 // === Provider System ===
+import type { SkillPermissions } from "@/sdk/types";
 import type { RAGPipelineConfig } from "./knowledge";
 import type { NullableModelRef } from "./paired";
 import type { TaskShapeDecision } from "./taskShape";
@@ -903,21 +904,6 @@ export type BuiltinPageKey =
   | "replay-workbench"
   | "cross-market"
   | "opc"
-  | "opc-industry-ai-research"
-  | "opc-industry-software-dev"
-  | "opc-industry-finance-invest"
-  | "opc-industry-sales-growth"
-  | "opc-industry-content-media"
-  | "opc-industry-industry-consulting"
-  | "opc-industry-accounting"
-  | "opc-industry-ecommerce"
-  | "opc-industry-education"
-  | "opc-industry-design"
-  | "opc-industry-project-management"
-  | "opc-industry-security"
-  | "opc-industry-geospatial"
-  | "opc-industry-game-dev"
-  | "opc-industries"
   | "multi-agent";
 export type PageKey = BuiltinPageKey | string;
 export type SettingsSection =
@@ -972,13 +958,13 @@ export interface GeneratedToolInfo {
   createdAt: number;
 }
 
-// === Industry Learning Config ===
+// === Domain Learning Config ===
 
 /** 行业学习配置视图（从后端 YAML 解析而来） */
-export interface IndustryLearningConfig {
+export interface DomainLearningConfig {
   version: number;
-  industryId: string;
-  industryName: string;
+  domainPackId: string;
+  domainPackName: string;
   reflectionEnabled: boolean;
   evolutionEnabled: boolean;
   codeEvolverEnabled: boolean;
@@ -988,10 +974,10 @@ export interface IndustryLearningConfig {
 }
 
 /** 行业学习配置列表项（用于列表展示） */
-export interface IndustryLearningConfigSummary {
+export interface DomainLearningConfigSummary {
   version: number;
-  industryId: string;
-  industryName: string;
+  domainPackId: string;
+  domainPackName: string;
   reflectionEnabled: boolean;
   evolutionEnabled: boolean;
   codeEvolverEnabled: boolean;
@@ -1002,21 +988,21 @@ export interface IndustryLearningConfigSummary {
 
 /** 反思请求参数 */
 export interface ReflectOnWorkflowParams {
-  industryId: string;
+  domainPackId: string;
   workflowId: string;
   workflowResult: Record<string, unknown>;
 }
 
 /** 进化请求参数 */
 export interface EvolveWorkflowParams {
-  industryId: string;
+  domainPackId: string;
   workflowId: string;
   reason: string;
 }
 
 /** 自我改进请求参数 */
 export interface RunSelfImprovementParams {
-  industryId: string;
+  domainPackId: string;
   target: string;
 }
 
@@ -1025,7 +1011,7 @@ export interface RunSelfImprovementParams {
 /** RL 经验记录 — 单次工作流执行的经验数据 */
 export interface RLExperience {
   id: string;
-  industryId: string;
+  domainPackId: string;
   workflowId: string;
   timestampMs: number;
   qualityScore: number;
@@ -1041,7 +1027,7 @@ export interface RLExperience {
 
 /** RL 策略优化结果 */
 export interface RLPolicyUpdate {
-  industryId: string;
+  domainPackId: string;
   experiencesUsed: number;
   avgReward: number;
   rewardTrend: "improving" | "declining" | "stable" | string;
@@ -1054,7 +1040,7 @@ export interface RLPolicyUpdate {
 /** RL 经验池统计 */
 export interface ExperiencePoolStats {
   totalExperiences: number;
-  industryCount: number;
+  domainPackCount: number;
   oldestTimestampMs?: number;
   newestTimestampMs?: number;
   avgReward: number;
@@ -1084,7 +1070,7 @@ export interface ReinforcementLearningConfig {
 
 /** RL 经验记录请求参数 */
 export interface RecordRLExperienceParams {
-  industryId: string;
+  domainPackId: string;
   workflowId: string;
   qualityScore: number;
   workflowResult: Record<string, unknown>;
@@ -1092,7 +1078,7 @@ export interface RecordRLExperienceParams {
 
 /** RL 策略优化请求参数 */
 export interface TriggerRLOptimizationParams {
-  industryId: string;
+  domainPackId: string;
 }
 
 /** 自动学习闭环触发结果 */
@@ -1309,26 +1295,9 @@ export interface SkillManifest {
   lifecycle?: SkillLifecycleHooks;
 }
 
-/** 权限白名单 */
-export interface SkillPermissions {
-  commands?: string[];
-  events?: string[];
-  /**
-   * 允许读取的 Zustand Store 字段路径列表。
-   * 格式："storeName" (整个 store) 或 "storeName:fieldPath" (特定字段)。
-   * 示例：["preference:theme", "preference:language", "ui"]
-   */
-  storeRead?: string[];
-  /**
-   * 允许写入的 Zustand Store 字段路径列表。
-   * 格式同 storeRead。仅声明 "storeName" 时允许写入整个 store。
-   */
-  storeWrite?: string[];
-  navigate?: string[];
-  network?: string[];
-  filesystem?: { read?: string[]; write?: string[] };
-  tools?: string[];
-}
+/** 权限白名单 —— 权威定义在技能协议层 `src/sdk/types.ts`（零 import、被 `sdk/sandboxTemplate.ts`
+ *  内联，故 sdk 不能反向依赖本文件）。此处仅转出，应用代码照旧 `from "@/types"` 导入。 */
+export type { SkillPermissions };
 
 /** 生命周期钩子 */
 export interface SkillLifecycleHooks {
@@ -1784,7 +1753,9 @@ export type PlanStatus =
   | "executing"
   | "completed"
   | "partial"
-  | "cancelled";
+  | "cancelled"
+  /** DB 出现后端未定义的状态取值时如实返回（修复前被静默报成 "cancelled"） */
+  | "unknown";
 
 export interface Plan {
   id: string;
@@ -1794,6 +1765,18 @@ export interface Plan {
   title: string;
   steps: PlanStep[];
   status: PlanStatus;
+  /**
+   * 执行授权位（P0-A）：`false`=未授权，`true`=已授权。
+   *
+   * **这是「能否执行」的唯一判据**，与 `status` 解耦。后端只接受经
+   * `plan_authorize` 写入的授权（写入者白名单不含模型路径）。
+   * 计划内容被修改、被取消、被恢复时均会自动撤权。
+   */
+  executionAuthorized: boolean;
+  /** 授权时间（毫秒时间戳），未授权为 undefined */
+  authorizedAt?: number;
+  /** 授权来源（user/system/api/ui/automation），未授权为 undefined */
+  authorizedBy?: string;
   isActive: boolean;
   /** The work_strategy that was active when this plan was created, for restoration context */
   createdUnderStrategy?: "direct" | "plan";
@@ -1817,7 +1800,31 @@ export interface PlanStepUpdateEvent {
 export interface PlanExecutionCompleteEvent {
   conversationId: string;
   planId: string;
-  status: "completed" | "cancelled";
+  /** 后端可能回 partial（部分步骤失败）—— 修复前此处类型漏了这个取值 */
+  status: "completed" | "partial" | "cancelled";
+}
+
+/** 计划执行授权请求（P0-A）—— 授权位的唯一写入口 */
+export interface PlanAuthorizeRequest {
+  conversationId: string;
+  planId: string;
+  /** 授权来源，后端按白名单校验：user/system/api/ui/automation（不含模型路径） */
+  authorizedBy: string;
+  /** true = 批准执行（置授权位）；false = 拒绝（撤权并归档） */
+  approved: boolean;
+}
+
+/**
+ * 执行授权位变更事件（P0-A）。
+ *
+ * 前端据此刷新计划卡按钮态 —— 修复前前端只能从 `status` 猜「是否已批准」，
+ * 而 `approved` 状态在后端从无写入点。
+ */
+export interface PlanAuthorizationChangedEvent {
+  conversationId: string;
+  planId: string;
+  authorized: boolean;
+  authorizedBy?: string;
 }
 
 export interface PlanGenerateRequest {

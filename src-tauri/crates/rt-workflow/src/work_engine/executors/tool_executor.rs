@@ -66,9 +66,15 @@ impl NodeExecutorTrait for ToolExecutor {
         };
 
         // 解析输入映射
+        //
+        // 使用全限定 `super::resolve_var_path`（共享宽松版），**不用 `use` 导入**：
+        // 本项目有「本地定义 vs 导入同名静默遮蔽」的先例，全限定调用可彻底规避。
+        // 与旧的文件内私有严格版相比，共享版会穿透 result/content 这类 JSON 字符串
+        // 包裹（见 executors/mod.rs:106-164），因此 `<节点>.content.<字段>` /
+        // `<节点>.result.<字段>` 形式的 input_mapping 由此变为可解析。
         let resolved_args: serde_json::Value =
             tool_node.config.input_mapping.iter().fold(serde_json::json!({}), |mut acc, (k, v)| {
-                let resolved = resolve_var_path(v, context);
+                let resolved = super::resolve_var_path(v, &context.variables);
                 acc[k] = resolved.unwrap_or(serde_json::Value::Null);
                 acc
             });
@@ -241,20 +247,127 @@ fn attach_investigation(tool_name: &str, mut output: serde_json::Value) -> serde
     output
 }
 
-fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::Value> {
-    // 修复：空路径直接返回 None，避免 parts[0] 在空字符串上访问触发 panic
-    if path.is_empty() {
-        return None;
+// ── 测试：ToolNode 转调共享宽松版 resolver 后的行为契约 ──
+//
+// 本模块置于文件**最末尾**，避免 `clippy::items_after_module`。
+// 契约来源：`executors/mod.rs:106-164`（共享宽松版）＋ 2026-09-09「终值不 auto_parse」修复。
+// 对照物：`condition_executor.rs` 的严格版仍保留（其 `None` 语义是另一套已登记契约，不随本次统一改变）。
+#[cfg(test)]
+mod resolve_var_path_unified_tests {
+    use serde_json::{Value, json};
+    use std::collections::HashMap;
+
+    /// ① AgentNode 生产者：`content` 是 **JSON 字符串**（而非 JSON 对象）时，
+    /// `<节点>.content.<字段>` 必须能穿透 —— 这正是本次统一所修复的能力。
+    /// 旧的文件内私有严格版在此返回 `None`：它对 String 执行 `current.get(part)?`
+    /// 会直接失败并整体 return None（不走 fallback）。
+    #[test]
+    fn toolnode_penetrates_json_string_content() {
+        let mut vars: HashMap<String, Value> = HashMap::new();
+        vars.insert(
+            "lc-conceive".to_string(),
+            json!({
+                "role": "assistant",
+                "content": "{\"persona\":\"网络小说老手\",\"genre\":\"novel\"}",
+            }),
+        );
+
+        assert_eq!(
+            super::super::resolve_var_path("lc-conceive.content.persona", &vars),
+            Some(json!("网络小说老手")),
+            "content 为 JSON 字符串时应可穿透取到字段"
+        );
     }
-    let parts: Vec<&str> = path.split('.').collect();
-    // 尝试按节点输出路径解析：root 为节点 ID，后续为嵌套字段
-    if let Some(root) = context.variables.get(parts[0]) {
-        let mut current = root.clone();
-        for part in &parts[1..] {
-            current = current.get(part)?.clone();
-        }
-        return Some(current);
+
+    /// ② ToolNode 生产者：`result` 是 JSON 字符串，其内部又嵌一层 `content` 包裹，
+    /// 于是消费路径由三段 `<工具>.result.<字段>` 变成四段 `<工具>.result.content.<字段>`。
+    /// 四段路径需要连续两次字符串穿透：`result` 字符串 → 对象 → `content` 字符串 → 对象。
+    #[test]
+    fn toolnode_penetrates_result_content_four_segments() {
+        let mut vars: HashMap<String, Value> = HashMap::new();
+        vars.insert(
+            "t-extract".to_string(),
+            json!({
+                "tool_name": "narrative_chapter_instructions",
+                "result": "{\"content\":{\"chapter_text\":\"第一章 起风\"}}",
+                "is_error": false,
+            }),
+        );
+
+        assert_eq!(
+            super::super::resolve_var_path("t-extract.result.content.chapter_text", &vars),
+            Some(json!("第一章 起风")),
+            "四段路径应能连续穿透 result 与 content 两层 JSON 字符串包裹"
+        );
+
+        // 对照组：三段路径 `<工具>.result.<字段>` 在 `result` 字符串本身即带该字段时同样可解析。
+        let mut vars_flat: HashMap<String, Value> = HashMap::new();
+        vars_flat.insert(
+            "t-risk".to_string(),
+            json!({ "tool_name": "risk_scan", "result": "{\"totalScore\":42}" }),
+        );
+        assert_eq!(
+            super::super::resolve_var_path("t-risk.result.totalScore", &vars_flat),
+            Some(json!(42)),
+            "三段路径穿透 result 字符串后取字段"
+        );
     }
-    // fallback：root 不是节点 ID，将整个 path 作为模板变量名直查
-    context.variables.get(path).cloned()
+
+    /// ③ 平键**不**做 auto_parse（`executors/mod.rs:119-125` 的显式契约）。
+    /// ToolNode 的 `input_mapping` 常以平键读取 `stock_code` 这类纯数字字符串；
+    /// 若被 auto_parse 成 Number，下游字符串参数会被破坏。
+    #[test]
+    fn flat_key_not_auto_parsed() {
+        let mut vars: HashMap<String, Value> = HashMap::new();
+        vars.insert("stock_code".to_string(), json!("600036"));
+        vars.insert("enabled".to_string(), json!("true"));
+
+        let code = super::super::resolve_var_path("stock_code", &vars).expect("平键应直查命中");
+        assert!(
+            matches!(code, Value::String(_)),
+            "单段平键 stock_code 必须原样返回字符串，实际得到：{code:?}"
+        );
+        assert_eq!(code, json!("600036"));
+
+        let flag = super::super::resolve_var_path("enabled", &vars).expect("平键应直查命中");
+        assert!(
+            matches!(flag, Value::String(_)),
+            "单段平键 enabled 不得被 auto_parse 成 Bool，实际得到：{flag:?}"
+        );
+
+        // fallback 分支（root 不是节点 ID，整路径直查）同样保持不 auto_parse。
+        let mut vars_dotted: HashMap<String, Value> = HashMap::new();
+        vars_dotted.insert("a.b".to_string(), json!("100"));
+        let dotted = super::super::resolve_var_path("a.b", &vars_dotted).expect("fallback 应命中");
+        assert!(
+            matches!(dotted, Value::String(_)),
+            "fallback 分支不得 auto_parse，实际得到：{dotted:?}"
+        );
+    }
+
+    /// ④ 终值**不** auto_parse（2026-09-09 显式修复）。
+    /// `<节点>.content` 这类以字符串字段收尾的路径，必须把内容的**字符串本身**交回
+    /// 调用方 —— data-quality / portfolio-mgr / pace-calc 的 Rhai 消费端契约是
+    /// 「ToolNode 输出为 JSON 字符串，脚本内自行 json_parse」，且用
+    /// `type_of(x) == "string"` 做分支判定。若终值被 parse 成 map/array，
+    /// 这些分支会全部失效、因子信号恒 0。
+    #[test]
+    fn final_value_not_auto_parsed() {
+        let mut vars: HashMap<String, Value> = HashMap::new();
+        vars.insert(
+            "lc-draft-agent".to_string(),
+            json!({
+                "role": "assistant",
+                "content": "{\"chapter_text\":\"第一章\"}",
+            }),
+        );
+
+        let final_value =
+            super::super::resolve_var_path("lc-draft-agent.content", &vars).expect("终值应命中");
+        assert!(
+            matches!(final_value, Value::String(_)),
+            "终值必须是字符串本身，不得被 parse 成对象，实际得到：{final_value:?}"
+        );
+        assert_eq!(final_value, json!("{\"chapter_text\":\"第一章\"}"));
+    }
 }

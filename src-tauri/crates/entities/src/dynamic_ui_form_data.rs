@@ -8,9 +8,11 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub schema_id: String,
     #[sea_orm(column_type = "Text")]
     pub form_data_json: String,
+    #[sea_orm(default_value = "default")]
     pub instance_key: String,
     pub updated_at: String,
 }

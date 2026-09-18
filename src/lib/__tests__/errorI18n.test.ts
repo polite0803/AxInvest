@@ -3,7 +3,13 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import i18n from "@/i18n";
-import { getBackendErrorCategory, parseBackendError, showBackendError, translateBackendError } from "../errorI18n";
+import {
+  getBackendErrorCategory,
+  parseBackendError,
+  showBackendError,
+  translateBackendError,
+  translateFailureText,
+} from "../errorI18n";
 
 // 使用 zh-CN 源语言（同步 bundle），确保翻译命中真实 locale 数据。
 beforeAll(async () => {
@@ -58,6 +64,40 @@ describe("parseBackendError", () => {
   });
 });
 
+describe("translateFailureText", () => {
+  it("有码 ⇒ 用本地化译文（自由文本里的中文不再漏到界面）", () => {
+    expect(translateFailureText("EXECUTION_CANCELLED: 节点执行已取消", "STOCK_WORKFLOW_STEP_CANCELLED"))
+      .toBe("分析节点因分析被取消而中止");
+    expect(translateFailureText("TIMEOUT: 节点执行超时", "STOCK_WORKFLOW_TIMEOUT"))
+      .toBe("分析超时，请稍后重试");
+  });
+
+  it("无码（null = 后端明示无失败 / undefined = 旧载荷）⇒ 原文，零回归", () => {
+    const raw = "EXECUTION_CANCELLED: 节点执行已取消";
+    expect(translateFailureText(raw, null)).toBe(raw);
+    expect(translateFailureText(raw, undefined)).toBe(raw);
+  });
+
+  it("非法码格式 ⇒ 原文（不被当成码查表）", () => {
+    expect(translateFailureText("boom", "not_a_code")).toBe("boom");
+    expect(translateFailureText("boom", "LOWER")).toBe("boom");
+  });
+
+  it("合法码但 locale 未收录 ⇒ 回退原文，而非对象的 JSON 串", () => {
+    // 钉死 translateBackendError 的**对象入参陷阱**：无 detail 时它会回退 parsed.raw，
+    // 而对象入参的 raw 是 JSON.stringify ⇒ 界面会显示 {"code":"TOTALLY_UNKNOWN_CODE"}。
+    const text = translateFailureText("some real failure", "TOTALLY_UNKNOWN_CODE");
+    expect(text).toBe("some real failure");
+    expect(text).not.toContain("{");
+  });
+
+  it("原文为空 ⇒ 空串（绝不产生 JSON 串 / 不编造文案）", () => {
+    expect(translateFailureText("", "STOCK_WORKFLOW_STEP_FAILED")).toBe("");
+    expect(translateFailureText(null, "STOCK_WORKFLOW_STEP_FAILED")).toBe("");
+    expect(translateFailureText(undefined, "STOCK_WORKFLOW_STEP_FAILED")).toBe("");
+  });
+});
+
 describe("translateBackendError", () => {
   it("已知码翻译为 zh-CN 文本", () => {
     expect(translateBackendError({ code: "CONVERSATION_NOT_FOUND" })).toBe("会话未找到");
@@ -67,6 +107,17 @@ describe("translateBackendError", () => {
   it("未知码回退 detail", () => {
     expect(translateBackendError({ code: "TOTALLY_UNKNOWN_CODE", detail: "fallback detail" }))
       .toBe("fallback detail");
+  });
+
+  it("【行为记录】合法码 + locale 未收录 + detail 空 ⇒ 退化成 JSON 串（translateFailureText 的空值短路正为规避它）", () => {
+    // 尖角的**精确条件**（三者和集，缺一不成立）：码合法 ⇢ locale 未收录 ⇢ detail 空/缺失。
+    // 码被收录时 L156-158 直接返回译文、不看 detail（且 `{ code, detail: "" }` 实测 = "工具未找到"）；
+    // 未收录时落到 L162 `parsed.detail || parsed.raw`，而对象入参的 raw 是 JSON.stringify(对象)。
+    // 若此断言将来失败 ⇒ 翻译层已修好该尖角，届时可重估 `translateFailureText` 的空值短路是否还需要。
+    const text = translateBackendError({ code: "TOTALLY_UNKNOWN_CODE", detail: "" });
+    expect(text).toContain('"code"');
+    // 负向对照：同码但 detail 非空 ⇒ 正常回退原文，不产生 JSON 串
+    expect(translateBackendError({ code: "TOTALLY_UNKNOWN_CODE", detail: "boom" })).toBe("boom");
   });
 
   it("未知码无 detail 时回退原始文本", () => {

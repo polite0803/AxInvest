@@ -16,15 +16,31 @@ pub enum RiskTier {
 
 impl RiskTier {
     /// 该风险档位下的单股仓位上限（%）
+    ///
+    /// ⚠️ 语义约束：本表**只能收紧**，不能放宽。
+    /// 唯一消费方式是 `min(PositionLimits::max_single_stock_pct, tier_cap)`（见
+    /// `check_new_position_with_risk` 与 `portfolio_formula::portfolio_risk_gate`），
+    /// 因此任何 > `PositionLimits::default().max_single_stock_pct`（20%）的档位值都
+    /// 是**恒等死分支**——永远不会生效。
+    ///
+    /// 2026-09-13 修复（两处）：
+    ///   ① `Extreme` 由 0.0 改为 10.0，与另两处「极高风险仓位上限」口径对齐
+    ///      （模板参数 `pos_cap_extreme` 默认 10、`portfolio_formula::apply_risk_cap`
+    ///      的 10）。旧值 0.0 会把「减持 8.85%」直接清零成「清仓」——
+    ///      极高风险的真实语义是「禁开新仓」（见 `forbid_new_position`）＋限仓，
+    ///      而不是强制清仓；同一个语义三套值（0 / 10 / 10）属铁律 5「同量被两套判定
+    ///      用不同口径消费」的变体。
+    ///   ② `High` 由 35.0 改为 20.0：旧值 35 > 20 恒被 `min` 覆盖，是永不生效的死分支
+    ///      （原注释「高风险 35% 上限」在机制上无法成立）。
     pub fn max_single_stock_pct(self) -> f64 {
         match self {
             RiskTier::Low => 20.0,
             RiskTier::Medium => 20.0,
             RiskTier::MediumHigh => 20.0,
-            // 修复 H5: 高风险 35% 上限
-            RiskTier::High => 35.0,
-            // 极高风险强制观望（实际不允许开新仓）
-            RiskTier::Extreme => 0.0,
+            // 2026-09-13: 旧值 35.0 被 min(20) 恒等覆盖（死分支），回归 20.0（= 全局默认）
+            RiskTier::High => 20.0,
+            // 2026-09-13: 旧值 0.0 会把「减持」清零成「清仓」；对齐 pos_cap_extreme=10
+            RiskTier::Extreme => 10.0,
         }
     }
 
@@ -147,8 +163,9 @@ impl PositionLimits {
 
     /// 修复 H5: 风险档位感知的仓位检查
     /// - 极高风险档位直接拒绝开新仓（强制观望）
-    /// - 高风险档位使用 35% 单股上限（覆盖 max_single_stock_pct）
-    /// - 其余档位沿用 max_single_stock_pct
+    /// - 其余档位取 `min(max_single_stock_pct, tier_cap)` —— 注意这里只能**收紧**：
+    ///   档位上限大于全局上限时不会放宽（2026-09-13 更正旧注释「高风险 35% 覆盖
+    ///   max_single_stock_pct」，`min` 语义下不可能向上覆盖）
     pub fn check_new_position_with_risk(
         &self,
         new_position_value: f64,

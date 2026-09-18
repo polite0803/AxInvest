@@ -92,3 +92,44 @@ fn bottleneck_calc_v9_compiles() {
         Err(e) => panic!("编译失败: {e}"),
     }
 }
+
+/// 防回归：`portfolio-mgr.rhai` 不得重新引入「观望 ⇄ 持有」互改。
+///
+/// 背景（2026-09-14）：`action` 曾同时承载「方向强度」与「持仓状态」两个维度 ——
+/// 同一中性档因仓位有无被**双向**改写：
+///   · 升级向：试探仓块把 `base_action` 由「观望」改成「持有」；
+///   · 降级向：`position_pct<=0` 时把 买入/增持/持有 统一改成「观望」。
+/// 两轴拆开后，持仓状态由 `positionState` 独立表达，上述互改已移除；
+/// 落库的 `action` 因而保真（空仓看多的记录保留「买入」而非被改写成「观望」）。
+///
+/// 本测试用**文本判据**钉住，防止后续改动无意中把它加回来。
+/// （行为级测试需要 DB + 完整工作流环境，成本过高；此处防的是「重新引入」这一类回归。）
+#[test]
+fn portfolio_mgr_has_no_hold_wait_mutual_rewrite() {
+    let code = include_str!("../../../src/commands/portfolio-mgr.rhai");
+    // 只判**代码行**：注释里必然出现这些字样的说明文字，不能误当代码
+    let code_only: String =
+        code.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+
+    // ① 「观望 → 持有」升级向：`base_action = "持有"` 应只剩后验阶梯判定那一处
+    assert_eq!(
+        code_only.matches("base_action = \"持有\";").count(),
+        1,
+        "portfolio-mgr.rhai 重新出现了试探仓的 `base_action = \"持有\"`（互改的升级向）"
+    );
+    // ② 「零仓位 ⇒ 降级为观望」降级向
+    assert!(
+        !code_only.contains("position_pct <= 0.0 && (base_action == \"买入\""),
+        "「零仓位 ⇒ 降级为观望」分支回归了（互改的降级向）"
+    );
+    // ③ 「观望 ⇒ 清零仓位」反向耦合（不删则试探仓会被静默清零）
+    assert!(
+        !code_only.contains("final_action == \"观望\" && position_pct > 0.0"),
+        "「观望 ⇒ 清零仓位」分支回归了（会使试探仓静默失效）"
+    );
+    // ④ 持仓状态轴必须仍然输出 —— 它是「两轴正交」成立的前提
+    assert!(
+        code_only.contains("\"positionState\": position_state"),
+        "portfolio-mgr.rhai 不再输出 positionState ⇒ 两轴正交被破坏，互改的前提回来了"
+    );
+}

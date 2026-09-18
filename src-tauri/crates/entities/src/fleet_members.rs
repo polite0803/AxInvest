@@ -11,26 +11,34 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 所属舰队 ID
+    #[sea_orm(indexed)]
     pub fleet_id: String,
     /// 关联的 AgentSession ID
     pub agent_id: String,
     /// agent slug（业务标识，用于 Dispatcher 路由）
+    #[sea_orm(indexed)]
     pub agent_slug: String,
     /// 显示名称
     pub display_name: String,
     /// 角色描述
+    #[sea_orm(default_value = "")]
     pub role: String,
     /// 关联的 AgentProfile ID（NULL = 旧成员，回退自由文本 role）
     pub agent_profile_id: Option<String>,
     /// 房间 ID（前端 Phaser 渲染位置）
+    #[sea_orm(default_value = "workspace")]
     pub room_id: String,
     /// 成员状态：idle / busy / paused / error / offline
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "idle")]
     pub status: String,
     /// 加入时间（Unix 毫秒）
     pub joined_at: i64,
     /// 今日 token 用量
+    #[sea_orm(default_value = 0)]
     pub today_tokens: i64,
     /// 累计 token 用量
+    #[sea_orm(default_value = 0)]
     pub total_tokens: i64,
 }
 
@@ -40,7 +48,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::fleets::Entity",
         from = "Column::FleetId",
-        to = "super::fleets::Column::Id"
+        to = "super::fleets::Column::Id",
+        on_delete = "Cascade"
     )]
     Fleet,
 }

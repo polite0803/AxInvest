@@ -9,7 +9,7 @@ interface AgentResult {
   tool_calls_made?: unknown[];
 }
 
-import { parseAction, parseRiskLevel } from "@/lib/stock-analysis-utils";
+import { parseAction, parsePositionState, parseRiskLevel } from "@/lib/stock-analysis-utils";
 import type { StockDecision } from "@/types/stock-analysis";
 
 /** 清理 LLM 原始输出中的工具调用标签、think 标签和乱码 */
@@ -329,9 +329,42 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
   const agreementBreakdown = source.agreementBreakdown != null
     ? (source.agreementBreakdown as StockDecision["agreementBreakdown"])
     : undefined;
+
+  // ── 决策可信度 / 跨系统字段透传（2026-09-11 修复）──
+  // 下面的 return 此前是**白名单构造**，导致后端已产出的字段被静默丢弃，
+  // 前端消费处恒 undefined。受影响字段与症状：
+  //   · weightsCollapsed / collapseReason / weightRatio / untrustedCount（V66 因子权重坍缩）
+  //     → DecisionBanner 的 collapse Tag 从未显示过，用户只看到「观望 0%」，
+  //       分不清是「数据不足被动降级」还是「分析后主动看空」= 黑盒观望体感；
+  //   · data_gaps（portfolio-mgr 顶层 snake_case 字段，后端 decision.rs V65 亦按此名读取）
+  //     → 决策卡看不到「9 项上游数据缺了 4 项」这类关键前提；
+  //   · isContradictory / crossCheck（后端 hooks.rs 注入的跨系统互证）
+  //     → 互证分歧 UI（DecisionBanner L1672）与「自相矛盾」标签均不显示。
+  // 教训：白名单式构造是静默失效的温床 —— 后端加字段、类型也声明了，
+  // 解析层却把它过滤掉且不报任何错。补字段时必须同步这里。
+  const weightsCollapsedRaw = source.weightsCollapsed ?? source.weights_collapsed;
+  const collapseReasonRaw = source.collapseReason ?? source.collapse_reason;
+  const weightRatioRaw = source.weightRatio ?? source.weight_ratio;
+  const untrustedCountRaw = source.untrustedCount ?? source.untrusted_count;
+  // data_gaps 是决策 JSON 里唯一的顶层 snake_case 字段（历史命名，后端已依赖），
+  // 同时兼容 camelCase 以便将来统一后不破。
+  const dataGapsRaw = source.data_gaps ?? source.dataGaps;
+  const dataGaps = Array.isArray(dataGapsRaw)
+    ? dataGapsRaw.filter((g): g is string => typeof g === "string")
+    : undefined;
+  const isContradictoryRaw = source.isContradictory ?? source.is_contradictory;
+  const crossCheckRaw = source.crossCheck ?? source.cross_check;
+  // P1-2(2026-09-14): 持仓状态 —— 与 action 正交的第二轴，portfolio-mgr.rhai 输出 camelCase
+  // `positionState`（EMPTY/OPENING/HOLDING/TRIMMING），兼容 snake_case。
+  // 未识别/缺失 → null，语义是「采集时点无此信息」，**不得**读成 EMPTY（那会把「不知道」当「空仓」）；
+  // 展示层由 `resolveDisplayAction` 在 null 时退回 positionPct 判据。
+  const positionStateRaw = source.positionState ?? source.position_state;
+  const positionState = parsePositionState(positionStateRaw);
+
   return {
     action,
     positionPct: isNaN(positionPct) ? 0 : positionPct,
+    positionState,
     targetPrice: targetPrice != null && !isNaN(targetPrice) ? targetPrice : null,
     stopLoss: stopLoss != null && !isNaN(stopLoss) ? stopLoss : null,
     reasoning,
@@ -344,6 +377,20 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     targetTimeframe: targetTimeframe || null,
     adjustedConfidence,
     agreementBreakdown,
+    // ── 决策可信度（V66 因子权重坍缩）──
+    weightsCollapsed: weightsCollapsedRaw === true,
+    collapseReason: typeof collapseReasonRaw === "string" ? collapseReasonRaw : undefined,
+    weightRatio: weightRatioRaw != null && !isNaN(Number(weightRatioRaw)) ? Number(weightRatioRaw) : undefined,
+    untrustedCount: untrustedCountRaw != null && !isNaN(Number(untrustedCountRaw))
+      ? Number(untrustedCountRaw)
+      : undefined,
+    // ── 数据缺口（portfolio-mgr 消费的上游节点缺失清单）──
+    dataGaps: dataGaps && dataGaps.length > 0 ? dataGaps : undefined,
+    // ── 跨系统 / 自洽性标记 ──
+    isContradictory: isContradictoryRaw === true,
+    crossCheck: crossCheckRaw != null && typeof crossCheckRaw === "object"
+      ? (crossCheckRaw as unknown as StockDecision["crossCheck"])
+      : undefined,
   };
 }
 
@@ -584,4 +631,98 @@ export function reconstructVerdictTag(text: string): string {
 
   // 无正文只有 verdict
   return `<!-- VERDICT: ${verdict} -->`;
+}
+
+/**
+ * 决策依据说明书（`decision-explainer` 节点的产出）。
+ *
+ * 该节点把 `portfolio-mgr`（公式决策）+ `portfolio-risk-gate`（组合风控门）的
+ * **符号化裁决**翻译成人话，字段语义：
+ *   - `summary`          一段话摘要（最终行动 + 仓位 + 置信度）
+ *   - `explanation`      决策依据展开（为什么是这个结论）
+ *   - `ruleTrace`        规则追溯码逐条（命中/否决/降档了哪些规则）
+ *   - `riskComment`      风险提示
+ *   - `confidenceNote`   置信度解读
+ */
+export interface DecisionExplanation {
+  summary: string | null;
+  explanation: string | null;
+  /** 规则追溯码逐条：{rule_id, status, description} */
+  ruleTrace: Array<{ ruleId: string; status: string; description: string }>;
+  riskComment: string | null;
+  confidenceNote: string | null;
+}
+
+/**
+ * 把「节点原始输出」解包成业务对象。
+ *
+ * 兼容三种形态（与 llmDecisionJson 的 V41/V60 修复同源）：
+ *   1. AgentNode 包装 `{role, content: "<json 字符串>", ...}` → 解 content 内层
+ *   2. 纯 JSON 字符串（旧版 blackboard snapshot 经 extract_node_text 压平）
+ *   3. 已经是业务对象
+ */
+function unwrapNodeOutput(raw: unknown): Record<string, unknown> | null {
+  if (raw === null || raw === undefined) { return null; }
+  if (typeof raw === "string") { return parseJsonLoose(raw); }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.content === "string" && obj.content.trim().length > 0) {
+      const inner = parseJsonLoose(obj.content);
+      if (inner) { return inner; }
+    }
+    if (obj.content && typeof obj.content === "object" && !Array.isArray(obj.content)) {
+      return obj.content as Record<string, unknown>;
+    }
+    if (obj.result && typeof obj.result === "object" && !Array.isArray(obj.result)) {
+      return obj.result as Record<string, unknown>;
+    }
+    return obj;
+  }
+  return null;
+}
+
+function nonEmptyString(v: unknown): string | null {
+  return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+
+/**
+ * 解析 `decision-explainer` 节点输出为结构化说明书。
+ *
+ * 字段名同时接受 snake_case（后端 prompt 约定的 `rule_trace` / `risk_comment` /
+ * `confidence_note`）与 camelCase（prompt 调整后的形态）——**不猜值**：
+ * 缺失一律回 `null` / `[]`，四个内容字段全空时整体返回 `null`，
+ * 避免渲染出一个空壳面板（缺失必须显式，而不是伪造一份空说明书）。
+ */
+export function parseDecisionExplanation(raw: unknown): DecisionExplanation | null {
+  const obj = unwrapNodeOutput(raw);
+  if (!obj) { return null; }
+  const pick = (...keys: string[]): unknown => {
+    for (const k of keys) {
+      if (obj[k] !== undefined && obj[k] !== null) { return obj[k]; }
+    }
+    return null;
+  };
+  const summary = nonEmptyString(pick("summary"));
+  const explanation = nonEmptyString(pick("explanation", "detail"));
+  const riskComment = nonEmptyString(pick("risk_comment", "riskComment"));
+  const confidenceNote = nonEmptyString(pick("confidence_note", "confidenceNote"));
+  const ruleTrace: DecisionExplanation["ruleTrace"] = [];
+  const rawTrace = pick("rule_trace", "ruleTrace");
+  if (Array.isArray(rawTrace)) {
+    for (const item of rawTrace) {
+      if (!item || typeof item !== "object") { continue; }
+      const it = item as Record<string, unknown>;
+      const ruleId = nonEmptyString(it.rule_id ?? it.ruleId);
+      if (!ruleId) { continue; }
+      ruleTrace.push({
+        ruleId,
+        status: nonEmptyString(it.status) ?? "—",
+        description: nonEmptyString(it.description) ?? "",
+      });
+    }
+  }
+  if (!summary && !explanation && !riskComment && !confidenceNote && ruleTrace.length === 0) {
+    return null;
+  }
+  return { summary, explanation, ruleTrace, riskComment, confidenceNote };
 }

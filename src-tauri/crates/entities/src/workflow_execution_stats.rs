@@ -12,10 +12,10 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 任务哈希（mission 文本的归一化哈希，用于聚合相同任务的不同执行）
-    #[sea_orm(column_name = "mission_hash")]
+    #[sea_orm(column_name = "mission_hash", indexed)]
     pub mission_hash: Option<String>,
     /// 关联工作流模板
-    #[sea_orm(column_name = "template_id")]
+    #[sea_orm(column_name = "template_id", indexed)]
     pub template_id: Option<String>,
     /// 关联工作流执行记录
     #[sea_orm(column_name = "execution_id")]
@@ -24,12 +24,15 @@ pub struct Model {
     pub status: String,
     /// 总耗时（毫秒）
     #[sea_orm(column_name = "total_time_ms")]
+    #[sea_orm(default_value = 0)]
     pub total_time_ms: i64,
     /// 输入 token 数
     #[sea_orm(column_name = "input_tokens")]
+    #[sea_orm(default_value = 0)]
     pub input_tokens: i64,
     /// 输出 token 数
     #[sea_orm(column_name = "output_tokens")]
+    #[sea_orm(default_value = 0)]
     pub output_tokens: i64,
     /// 失败原因（失败时填）
     #[sea_orm(column_name = "error_message")]

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub conversation_id: String,
     pub summary_text: String,
     pub compressed_until_message_id: Option<String>,
@@ -22,7 +23,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::conversations::Entity",
         from = "Column::ConversationId",
-        to = "super::conversations::Column::Id"
+        to = "super::conversations::Column::Id",
+        on_delete = "Cascade"
     )]
     Conversation,
 }

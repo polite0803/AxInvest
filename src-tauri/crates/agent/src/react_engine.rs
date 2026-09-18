@@ -633,6 +633,23 @@ impl ReActEngine {
         self.cancel_flag = Some(flag);
     }
 
+    /// 读取当前最大迭代次数。
+    ///
+    /// 供**调用级预算覆盖前保存原值**——engine 在 `Mutex` 内跨调用复用，
+    /// 覆盖后必须还原，否则会污染后续调用（见 `HarnessAgentAdapter::execute`
+    /// 对 `AgentExecuteRequest.max_steps` 的处理）。
+    pub fn max_iterations(&self) -> usize {
+        self.config.max_iterations
+    }
+
+    /// 覆盖最大迭代次数（调用级预算，不改变装配时的默认值语义）。
+    ///
+    /// 对应 `AgentExecuteRequest.max_steps` 的消费点。此前该字段从 MCP
+    /// `agent_run` 请求传入后被末端静默丢弃，故此处即为缺失的消费点。
+    pub fn set_max_iterations(&mut self, max_iterations: usize) {
+        self.config.max_iterations = max_iterations;
+    }
+
     pub fn with_config(mut self, config: ReActConfig) -> Self {
         self.config = config;
         self
@@ -734,6 +751,18 @@ impl ReActEngine {
                 Some(parking_lot::Mutex::new(crate::goal_evaluator::GoalEvaluator::new(3)));
         }
 
+        // token 预算：真实 tracker 的 `check(None, _)` 契约是**立即 Stop**
+        // （见 `axagent_kit::token_budget::TokenBudgetTracker::check`），而
+        // `ReActConfig::token_budget_limit = None` 的语义是「使用模型上下文窗口大小」。
+        // 两者冲突 —— 该组合会被下面的检查点跳过（不交给 tracker），但需显式告警，
+        // 避免「开关打开却没生效」的静默形态（铁律 #6）。
+        if self.config.token_budget_enabled && self.config.token_budget_limit.is_none() {
+            tracing::warn!(
+                "[ReActEngine] token_budget_enabled=true 但 token_budget_limit 为 None；\
+                 真实 tracker 在 budget=None 时会立即 Stop，故本次运行按「不启用」处理"
+            );
+        }
+
         while !state.is_terminal() {
             context.increment_iteration();
 
@@ -811,11 +840,13 @@ impl ReActEngine {
                         break;
                     }
 
-                    if self.config.token_budget_enabled {
+                    // 仅在同时给出上限时才检查 —— 语义冲突收口，见 `run()` 开头的告警。
+                    // 真实 tracker 在 `budget=None` 时返回 Stop，直接透传会导致首次迭代即停。
+                    if self.config.token_budget_enabled
+                        && let Some(limit) = self.config.token_budget_limit
+                    {
                         let estimated_tokens = estimate_chain_tokens(&chain);
-                        let decision = self
-                            .token_budget
-                            .check(self.config.token_budget_limit, estimated_tokens);
+                        let decision = self.token_budget.check(Some(limit), estimated_tokens);
 
                         match decision {
                             KitTokenBudgetDecision::Continue { nudge_message, .. } => {
@@ -1358,7 +1389,17 @@ impl ReActEngine {
                         if let Some(ref evaluator) = self.goal_evaluator {
                             let mut guard = evaluator.lock();
                             let evaluation = guard.evaluate(chain, context);
-                            if !evaluation.achieved {
+                            // `forced_synthesis` = 判定已放弃（连续未达上限），必须放行
+                            // 进入综合阶段，否则会死循环 —— 这是 `achieved: true` 原先
+                            // 承担的唯一职责。现在放行意图由独立字段表达，`achieved`
+                            // 保持真实判定的 `false`，语义不再撒谎，但消费端**必须**
+                            // 同时检查两个字段（P1-A，2026-09-12）。
+                            if evaluation.forced_synthesis {
+                                tracing::warn!(
+                                    "GoalEvaluator 放弃继续判定（达成状态未确认），强制进入综合阶段：{}",
+                                    evaluation.reason
+                                );
+                            } else if !evaluation.achieved {
                                 let reasoning = format!(
                                     "目标未达成 (置信度 {:.0}%): {}。缺失: {}。返回 Thinking 继续处理。",
                                     evaluation.confidence * 100.0,

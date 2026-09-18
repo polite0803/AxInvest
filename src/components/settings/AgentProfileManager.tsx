@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { CAPABILITY_DOMAIN_OPTIONS } from "@/lib/domainMeta";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
@@ -592,16 +593,10 @@ export function AgentProfileManager() {
                 size="small"
                 style={{ width: "100%" }}
                 placeholder={t("settings.toolAccess")}
-                options={[
-                  { value: "general", label: t("capabilityDomain.general") },
-                  { value: "devops", label: t("capabilityDomain.devops") },
-                  { value: "ai_media", label: t("capabilityDomain.ai_media") },
-                  { value: "data_analysis", label: t("capabilityDomain.data_analysis") },
-                  { value: "content_creation", label: t("capabilityDomain.content_creation") },
-                  { value: "communication", label: t("capabilityDomain.communication") },
-                  { value: "finance", label: t("capabilityDomain.finance") },
-                  { value: "automation", label: t("capabilityDomain.automation") },
-                ]}
+                options={CAPABILITY_DOMAIN_OPTIONS.map((o) => ({
+                  value: o.value,
+                  label: t(o.labelKey),
+                }))}
               />
             </div>
           </div>

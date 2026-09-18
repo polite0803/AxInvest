@@ -14,8 +14,17 @@ mod capability_embedding;
 mod commands;
 mod context_manager;
 mod database_query_impl;
-#[path = "divergence-log.rs"]
-pub mod divergence_log;
+// 2026-09-16 删除 `#[path = "divergence-log.rs"] pub mod divergence_log;` ——
+// 该模块是 `divergence_logs` 表的**第二份 schema**（rusqlite 手写 DDL，14 列、
+// `id INTEGER AUTOINCREMENT`），与 SeaORM 实体（17 列、`id TEXT`）**列交集仅 8 个
+// 且主键类型不同**：谁先建表谁赢，另一方必 `no such column`。两侧当时都零消费者，
+// 故缺陷不可观测。用户裁定「收敛到实体版」。
+// 2026-09-16 续（同日第二次裁决）：该实体经复核同样**零写入端、零读取端**，迁移链内
+// 也无 `CREATE TABLE`（实测本机 PG 任意 schema 均无此表）⇒ 裁定**整条死链删除**
+// （本模块 + 实体 + `config/divergence-log-schema.json`，并摘除 entities 中随之无用的
+// `hex`/`sha2` 依赖）。删除记录与存档（含被删的规则→维度映射、手工版「假验证」形态、
+// 曾存在的正确 `verify_chain` 实现的定位）见
+// `docs/plans/PLAN-declarative-schema-sync.md` §五·四 ③。
 pub mod gateway_memory_store;
 pub mod gateway_stock_store;
 mod index_queue;
@@ -24,6 +33,7 @@ mod indexing_triggers;
 pub mod init;
 pub use init::{create_app_state, init_database_with_dir};
 mod knowledge_integration;
+pub mod market_sim_service;
 mod memory_extract;
 pub mod scheduler;
 
@@ -35,9 +45,6 @@ pub use paths::axagent_home;
 mod semantic_cache;
 mod smart_router;
 pub mod state;
-
-#[macro_use]
-mod util;
 
 #[cfg(desktop)]
 mod tray;
@@ -390,7 +397,6 @@ pub fn run() {
             let init_pattern_learner = init_state.pattern_learner.clone();
             let init_stream_reporter = init_state.stream_reporter.clone();
             // NOTE: concept_index 已随 AxAgent 清理移除
-            // let init_concept_index = init_state.concept_index.clone();
             let _init_platform_manager = init_state.platform_manager.clone();
             let init_local_tool_registry = init_state.local_tool_registry.clone();
             let init_work_engine = init_state.work_engine.clone();

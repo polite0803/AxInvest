@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// 从 ChatViewMessages.tsx 抽离的 AssistantFooter 组件 + Actions/ActionItem 共享定义。
-// 主文件 ChatViewMessages.tsx 与本文件共同复用 Actions 组件，避免重复实现。
+// AssistantFooter 组件 + Actions/ActionItem 共享定义（含 styleBtn）。
+// 本文件是这三者的唯一实现，ChatViewMessages.tsx 通过 import 复用，不再保留内联副本。
 
 import { App, Input, Modal, Popconfirm, Popover, theme } from "antd";
 import {
@@ -12,7 +12,6 @@ import {
   Copy,
   GitBranch,
   MessageSquare,
-  Pencil,
   RotateCcw,
   Save,
   TextCursorInput,
@@ -37,8 +36,8 @@ import { ModelTags } from "./ModelTags";
 import { LayoutSwitcher, type MultiModelDisplayMode } from "./MultiModelDisplay";
 import { VersionPagination } from "./VersionPagination";
 
-// Popover 内格式按钮的统一样式
-const styleBtn: React.CSSProperties = {
+// Popover 内格式按钮的统一样式（供本文件与 ChatViewMessages.tsx 共用）
+export const styleBtn: React.CSSProperties = {
   padding: "4px 12px",
   border: "none",
   background: "transparent",
@@ -101,14 +100,9 @@ export interface AssistantFooterProps {
   conversationId: string;
   assistantCopyText: string;
   getModelDisplayInfo: (
-    model_id?: string | null,
+    modelId?: string | null,
     providerId?: string | null,
   ) => { modelName: string; providerName: string };
-  onEditMessage: (
-    messageId: string,
-    content: string,
-    role: "user" | "assistant",
-  ) => void;
   isStreaming?: boolean;
   displayMode?: MultiModelDisplayMode;
   onDisplayModeChange?: (
@@ -116,11 +110,8 @@ export interface AssistantFooterProps {
     mode: MultiModelDisplayMode,
   ) => void;
   onMultiModelDetected?: (parentMsgId: string, versions: Message[]) => void;
-  isDarkMode: boolean;
-  codeBlockDarkTheme: string;
-  codeBlockLightTheme: string;
-  codeBlockThemes: string[];
-  codeFontFamily?: string;
+  /** 引用回复：点击引用按钮时回调；未传则不渲染 */
+  onQuoteReply?: (messageId: string) => void;
 }
 
 export function AssistantFooter({
@@ -128,11 +119,11 @@ export function AssistantFooter({
   conversationId,
   assistantCopyText,
   getModelDisplayInfo,
-  onEditMessage,
   isStreaming = false,
   displayMode,
   onDisplayModeChange,
   onMultiModelDetected,
+  onQuoteReply,
 }: AssistantFooterProps) {
   const { token } = theme.useToken();
   const { t } = useTranslation();
@@ -413,6 +404,18 @@ export function AssistantFooter({
                   );
                 },
               },
+              ...(onQuoteReply
+                ? [
+                  {
+                    key: "quote",
+                    icon: <MessageSquare size={14} />,
+                    label: t("chat.quote.reply"),
+                    onItemClick: () => {
+                      onQuoteReply(msg.id);
+                    },
+                  },
+                ]
+                : []),
               {
                 key: "regenerate",
                 icon: <RotateCcw size={14} />,
@@ -439,18 +442,6 @@ export function AssistantFooter({
                       } catch (e) {
                         messageApi.error(String(e));
                       }
-                    },
-                  },
-                ]
-                : []),
-              ...(msg.role === "assistant"
-                ? [
-                  {
-                    key: "edit",
-                    icon: <Pencil size={14} />,
-                    label: t("chat.editMessage"),
-                    onItemClick: () => {
-                      onEditMessage(msg.id, msg.content, "assistant");
                     },
                   },
                 ]

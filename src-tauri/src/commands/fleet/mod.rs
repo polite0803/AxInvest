@@ -23,6 +23,13 @@
 //! - `fleet_dispatch` — 群聊智能路由：真实 LLM 意图分类 → 路由到成员 → 真实 Agent 回合执行
 //!   （通过 `Channel<DispatchEvent>` 流式回传事件）
 //! - `fleet_direct_message` — 直接 DM 指定 agent（绕过 LLM 路由，仍真实执行）
+//! - `fleet_list_messages` — 读取**指定会话**的持久化消息（群聊 / 某条 DM）
+//!
+//! ## 会话（conversation）
+//!
+//! 消息按**会话**隔离，不按成员房间：群聊 = [`CONVERSATION_GROUP`]（`"group"`），
+//! 私信 = `conversation_dm(slug)`（`"dm:<slug>"`）。群聊的路由 prompt 与新鲜度门
+//! 只在群聊会话内取值 —— 否则别人私聊一句就会把群聊判为「已被推进」而误暂扣。
 //!
 //! ## 错误处理
 //!
@@ -34,12 +41,12 @@ use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::fleet as fleet_err;
 use axagent_agent_macro::agent_command;
 use axagent_harness::fleet::{
-    DispatchChatMessage, DispatchEvent, Fleet, FleetMember, FleetMemberStatus, FleetMetadata,
-    FleetStatus,
+    AUTHOR_KIND_AGENT, AUTHOR_KIND_HUMAN, CONVERSATION_GROUP, DispatchEvent, Fleet, FleetMember,
+    FleetMemberStatus, FleetMessage, FleetMetadata, FleetStatus, conversation_dm,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
-use tracing::warn;
+use tracing::{info, warn};
 
 pub mod executor;
 use executor::execute_fleet_turn;
@@ -180,12 +187,18 @@ pub struct AddMemberInput {
     /// 关联的 AgentProfile ID（AgentProfile = 角色 + 专家组合，定义成员智能体身份）
     #[serde(default)]
     pub agent_profile_id: Option<String>,
-    /// 房间 ID（前端 Phaser 渲染位置，如 "manager" / "meeting"）
-    #[serde(default = "default_room_id")]
+    /// **物理房间** ID —— 像素办公室里精灵站位（如 "manager" / "meeting"），
+    /// 由前端 Phaser 渲染消费，**不参与消息查询**。
+    /// 消息的会话归属是 `FleetMessage.conversation_id`，与它无关。
+    #[serde(default = "default_member_room")]
     pub room_id: String,
 }
 
-fn default_room_id() -> String {
+/// 成员物理房间的缺省值（前端 Phaser 的默认站位）。
+///
+/// ⚠ 与 [`CONVERSATION_GROUP`] 是两个正交概念：曾共用同一个函数当默认值，
+/// 于是「群聊会话 id」被写死成 `"workspace"`（一个房间名），语义就此含混。
+fn default_member_room() -> String {
     "workspace".to_string()
 }
 
@@ -302,9 +315,6 @@ pub struct DispatchInput {
     pub fleet_id: String,
     /// 用户消息
     pub user_message: String,
-    /// 历史消息（可选，最早的在前面）
-    #[serde(default)]
-    pub history: Vec<DispatchChatMessage>,
 }
 
 /// 群聊智能路由 — 真实 LLM 意图分类 → 路由到成员 → 真实 Agent 回合执行。
@@ -335,9 +345,37 @@ pub async fn fleet_dispatch(
         return Err(ErrorResponse::new(fleet_err::ALL_MEMBERS_UNAVAILABLE));
     }
 
-    // 2. 真实 LLM 意图路由（wiring 层注入的 FleetIntentLlm）；失败/未命中时兜底到第一个可路由成员
+    // 2. 记录**群聊会话**的水位基线（协调门的比对基准）
+    //
+    //    取「进入本命令那一刻」群聊会话的 **agent** 水位。之后的路由 LLM 往返与
+    //    回合执行都是真实的时间窗口，期间若有另一个 dispatch 写入了回复，
+    //    本次决策即已过期。只统计 agent 消息 —— 本命令随后写入的用户消息（human）
+    //    不该被算作「过期」。
+    //
+    //    ⚠ 必须限定在群聊会话内：若取舰队全局水位，任何一条 DM 的 agent 回复
+    //    都会把水位顶高，于是每次群聊都被判为「已被推进」而误暂扣。
+    let baseline_seq = app_state
+        .fleet_repository
+        .max_seq(&input.fleet_id, CONVERSATION_GROUP, true)
+        .await
+        .map_err(|e| {
+            ErrorResponse::from_error_with_code(fleet_err::NOT_FOUND, e, ErrorCategory::General)
+        })?;
+
+    // 3. 读取群聊会话的真实历史（用于路由 prompt）
+    //
+    //    历史不再由调用方传入（`DispatchInput` 已无 `history` 字段）：
+    //    库是唯一真源，否则前端一刷新「对话记忆」就没了。
+    //    也只读群聊 —— DM 是用户与某个成员的私密往返，不该进群聊的路由上下文。
+    //
+    //    ⚠ 此处**尚未**写入本轮的用户消息 —— 落库推迟到协调门放行之后。
+    //    否则被 HELD 时用户会重发，历史里就留下两条一模一样的用户消息。
+    //    HELD 的语义是「本轮不做」，那本轮的输入自然也不该进历史。
+    let history = load_conversation_history(&app_state, &input.fleet_id, CONVERSATION_GROUP).await;
+
+    // 4. 真实 LLM 意图路由（wiring 层注入的 FleetIntentLlm）；失败/未命中时兜底到第一个可路由成员
     let system_prompt = build_fleet_system_prompt(&routable);
-    let user_prompt = build_fleet_user_prompt(&input.user_message, &input.history);
+    let user_prompt = build_fleet_user_prompt(&input.user_message, &history);
     let mut fell_back = false;
     let target_slug = match app_state.fleet_intent_llm.route(&system_prompt, &user_prompt).await {
         Ok(resp) => {
@@ -373,7 +411,7 @@ pub async fn fleet_dispatch(
         send_event(&on_event, notice);
     }
 
-    // 3. 路由决策事件
+    // 5. 路由决策事件
     send_event(
         &on_event,
         DispatchEvent::Routing {
@@ -384,13 +422,42 @@ pub async fn fleet_dispatch(
         },
     );
 
-    // 4. 真实执行成员回合（事件流式转发；错误事件已由 executor 推送，仍需 Complete 收尾）
+    // 6. ★ 协调门（新鲜度 preflight）—— 执行**前**复核群聊会话是否已被推进
+    //
+    //    放在这里而不是入口是刻意的：入口处会话必然与基线一致（基线正取自入口），
+    //    只有经过路由的 LLM 往返之后才可能出现「我已经晚了」。
+    if let Some((max_seq, held_messages)) =
+        preflight_held(&app_state, &input.fleet_id, CONVERSATION_GROUP, baseline_seq).await
+    {
+        // HELD 是**暂扣**而非错误：内联未读消息即为「展示」，
+        // 调用方读过之后直接重发即可通过（见 `DispatchEvent::Held` 的契约）。
+        send_event(&on_event, DispatchEvent::Held { max_seq, held_messages });
+        send_event(&on_event, DispatchEvent::Complete);
+        return Ok(());
+    }
+
+    // 7. 用户消息落库 —— 此刻已确定本轮会真正执行
+    //
+    //    放在闸门之后是关键：HELD 的语义是「本轮不做」，那本轮的输入也不该进历史，
+    //    否则用户重发时会看到两条一模一样的用户消息。
+    append_human_message(&app_state, &input.fleet_id, CONVERSATION_GROUP, &input.user_message)
+        .await?;
+
+    // 8. 真实执行成员回合（事件流式转发；错误事件已由 executor 推送，仍需 Complete 收尾）
     let emit = |evt: DispatchEvent| {
         let _ = on_event.send(evt);
     };
-    let result = execute_fleet_turn(&app_state, &target, &input.user_message, &emit).await;
+    let result = execute_fleet_turn(
+        &app_state,
+        &input.fleet_id,
+        CONVERSATION_GROUP,
+        &target,
+        &input.user_message,
+        &emit,
+    )
+    .await;
 
-    // 5. 流结束
+    // 9. 流结束
     send_event(&on_event, DispatchEvent::Complete);
 
     result.map(|_| ())
@@ -406,9 +473,6 @@ pub struct DirectMessageInput {
     pub agent_slug: String,
     /// 用户消息
     pub user_message: String,
-    /// 历史消息
-    #[serde(default)]
-    pub history: Vec<DispatchChatMessage>,
 }
 
 #[agent_command(domain = fleet, safety = Caution, call_mode = StateInput, description = "直接发送消息给指定agent")]
@@ -429,7 +493,21 @@ pub async fn fleet_direct_message(
                 .with_param("slug", input.agent_slug.clone())
         })?;
 
-    // 2. 路由决策事件
+    // 2. 用户消息落库（DM 同样进对话记录）
+    //
+    //    ⚠ 会话 = `dm:<slug>`，**不是** `target.room_id`。后者是精灵站位，
+    //    用它当会话键会让「与 A 的私信」和「A 在群聊里的回复」落进同一线程
+    //    （A 的两次发言房间都是它的站位），于是 DM 混进群聊面板与路由 prompt。
+    //
+    //    ⚠ 此处**刻意不做**新鲜度 preflight：DM 是「点名找这个人」，目标唯一且
+    //    用户明确，不存在「抢答」语义，被暂扣只会让人困惑。
+    //    cumora 也把 2 人 DM 列在新鲜度门的豁免名单里（其 COORDINATION.md：
+    //    「2 人 DM（并行打字是正常的）」）—— 那道门只属于群聊路径。
+    let conversation_id = conversation_dm(&target.agent_slug);
+    append_human_message(&app_state, &input.fleet_id, &conversation_id, &input.user_message)
+        .await?;
+
+    // 3. 路由决策事件
     send_event(
         &on_event,
         DispatchEvent::Routing {
@@ -440,16 +518,52 @@ pub async fn fleet_direct_message(
         },
     );
 
-    // 3. 真实执行成员回合（错误事件已由 executor 推送，仍需 Complete 收尾）
+    // 4. 真实执行成员回合（错误事件已由 executor 推送，仍需 Complete 收尾）
     let emit = |evt: DispatchEvent| {
         let _ = on_event.send(evt);
     };
-    let result = execute_fleet_turn(&app_state, &target, &input.user_message, &emit).await;
+    let result = execute_fleet_turn(
+        &app_state,
+        &input.fleet_id,
+        &conversation_id,
+        &target,
+        &input.user_message,
+        &emit,
+    )
+    .await;
 
-    // 4. 流结束
+    // 5. 流结束
     send_event(&on_event, DispatchEvent::Complete);
 
     result.map(|_| ())
+}
+
+/// 列出**指定会话**的持久化消息（按 `seq` 升序）。
+///
+/// - `conversation_id`：群聊传 `"group"`，私信传 `"dm:<slug>"`。
+///   缺省为群聊会话（前端群聊面板不传也能工作）。
+/// - `after_seq`：只返回 `seq > after_seq` 的消息（增量拉取 / 断线续传）
+/// - `limit`：条数上限，缺省 [`CONVERSATION_HISTORY_LIMIT`]
+#[agent_command(domain = fleet, safety = Safe, call_mode = StateInput, description = "列出会话消息历史")]
+#[tauri::command]
+pub async fn fleet_list_messages(
+    app_state: State<'_, AppState>,
+    fleet_id: String,
+    conversation_id: Option<String>,
+    after_seq: Option<i64>,
+    limit: Option<u32>,
+) -> Result<Vec<FleetMessage>, ErrorResponse> {
+    let conversation_id = conversation_id.unwrap_or_else(|| CONVERSATION_GROUP.to_string());
+    app_state
+        .fleet_repository
+        .list_messages(
+            &fleet_id,
+            &conversation_id,
+            after_seq,
+            limit.unwrap_or(CONVERSATION_HISTORY_LIMIT),
+        )
+        .await
+        .map_err(|e| ErrorResponse::from_error(e, ErrorCategory::General))
 }
 
 // ── 内部工具 ─────────────────────────────────────────────────────────
@@ -458,6 +572,168 @@ pub async fn fleet_direct_message(
 fn send_event(channel: &tauri::ipc::Channel<DispatchEvent>, event: DispatchEvent) {
     if let Err(e) = channel.send(event) {
         warn!("[fleet] 事件推送失败（前端可能已关闭）: {e}");
+    }
+}
+
+// ── 消息持久化辅助 ───────────────────────────────────────────────────
+
+/// 单次注入 prompt / **单次**返回给前端的会话历史最大条数。
+///
+/// 太大既费 token、又稀释当前意图；太小则 agent 看不到必要的来龙去脉。
+///
+/// ⚠ 这是**单次往返**的上限，不是前端累积的上限：前端按 `seq` 合并多次结果，
+/// 本地时间线会随会话推进而增长（消息只追加不删除，故累积是安全的）。
+const CONVERSATION_HISTORY_LIMIT: u32 = 30;
+
+/// 人类作者的固定本地标识。
+///
+/// AxInvest 是单用户桌面应用，「我是谁」暂时不构成需要建模的维度；
+/// 保留 `author_id` 是为了让协调门的「作者 ≠ 当前成员」判据在将来引入
+/// 多人类成员时无需改表结构。
+const LOCAL_USER_ID: &str = "local-user";
+
+/// 写入一条人类消息，返回带已分配 `seq` 的记录。
+async fn append_human_message(
+    app_state: &AppState,
+    fleet_id: &str,
+    conversation_id: &str,
+    content: &str,
+) -> Result<FleetMessage, ErrorResponse> {
+    let message = FleetMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        fleet_id: fleet_id.to_string(),
+        conversation_id: conversation_id.to_string(),
+        // seq 由 DAO 在写入时分配，此处仅为占位
+        seq: 0,
+        author_kind: AUTHOR_KIND_HUMAN.to_string(),
+        author_id: LOCAL_USER_ID.to_string(),
+        author_slug: None,
+        author_display_name: None,
+        content: content.to_string(),
+        created_at: chrono::Utc::now().timestamp_millis(),
+    };
+    app_state
+        .fleet_repository
+        .append_message(message)
+        .await
+        .map_err(|e| ErrorResponse::from_error(e, ErrorCategory::General))
+}
+
+/// 写入一条 agent 消息，返回带已分配 `seq` 的记录。
+///
+/// `conversation_id` 必须由调用方传入**本轮所属的会话**（群聊 or 对应 DM），
+/// 不能用 `member.room_id` 顶替 —— 那是精灵站位，同一成员在群聊与私信里
+/// 站位相同，用它当会话键会把两个线程混成一个。
+pub(crate) async fn append_agent_message(
+    app_state: &AppState,
+    fleet_id: &str,
+    conversation_id: &str,
+    member: &FleetMember,
+    content: &str,
+) -> Result<FleetMessage, ErrorResponse> {
+    let message = FleetMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        fleet_id: fleet_id.to_string(),
+        conversation_id: conversation_id.to_string(),
+        seq: 0,
+        author_kind: AUTHOR_KIND_AGENT.to_string(),
+        author_id: member.agent_id.clone(),
+        author_slug: Some(member.agent_slug.clone()),
+        author_display_name: Some(member.display_name.clone()),
+        content: content.to_string(),
+        created_at: chrono::Utc::now().timestamp_millis(),
+    };
+    app_state
+        .fleet_repository
+        .append_message(message)
+        .await
+        .map_err(|e| ErrorResponse::from_error(e, ErrorCategory::General))
+}
+
+/// 读取某会话最近的对话历史（按 `seq` 升序）。
+///
+/// 读库失败时返回空历史并**出声** —— 与 `preflight_held` 同为 fail-open：
+/// 让 agent 在缺历史的情况下作答，好过让用户完全说不了话。
+/// 但绝不静默：静默的降级会让「agent 突然失忆」变成无从诊断的悬案。
+async fn load_conversation_history(
+    app_state: &AppState,
+    fleet_id: &str,
+    conversation_id: &str,
+) -> Vec<FleetMessage> {
+    match app_state
+        .fleet_repository
+        .list_messages(fleet_id, conversation_id, None, CONVERSATION_HISTORY_LIMIT)
+        .await
+    {
+        Ok(messages) => messages,
+        Err(e) => {
+            warn!("[fleet] 读取会话历史失败，本轮以空历史继续（fail-open）: {e}");
+            Vec::new()
+        },
+    }
+}
+
+/// 协调门 —— **新鲜度 preflight**。
+///
+/// ## 判据
+///
+/// 不是「会话有没有新消息」，而是「**本次读取（`baseline_seq`）之后，会话有没有
+/// 被其他 agent 推进**」。
+///
+/// 这个区别决定成败：若用「有没有比自己见过的更新」，首次调用必然命中
+/// （会话本来就有历史），于是**每次都要被暂扣一轮**——cumora 的 compose-anchor
+/// 门就是因为这个被退役的（其 COORDINATION.md §5a：在繁忙房间总是首次尝试即 HOLD，
+/// 每次回复多花 1-2 次大模型往返）。
+///
+/// 两侧都只看 **agent** 水位（`only_agents = true`），且都限定在
+/// `conversation_id` 指定的会话内 —— 正常串行下 `current_seq == baseline_seq`，
+/// 恒放行；DM 的写入也不会污染群聊的判据。
+///
+/// ## 返回
+///
+/// `Some((max_seq, held_messages))` = 应当暂扣，并把未读消息内联返回（即「展示」）。
+/// `None` = 放行。
+///
+/// ## fail-open
+///
+/// 查询失败一律**放行**：宁可漏过一次竞态检测，也不要把用户的正常对话卡死
+/// （与 cumora 对 hold-token 的处理一致 —— Redis 报错即不阻塞工作）。但必须出声。
+async fn preflight_held(
+    app_state: &AppState,
+    fleet_id: &str,
+    conversation_id: &str,
+    baseline_seq: i64,
+) -> Option<(i64, Vec<FleetMessage>)> {
+    let current_seq =
+        match app_state.fleet_repository.max_seq(fleet_id, conversation_id, true).await {
+            Ok(seq) => seq,
+            Err(e) => {
+                warn!("[fleet] 新鲜度门查询会话水位失败，本次放行（fail-open）: {e}");
+                return None;
+            },
+        };
+    if current_seq <= baseline_seq {
+        return None;
+    }
+
+    // 把「基线之后新增的消息」内联返回 —— 这一步就是契约里的「展示」
+    match app_state
+        .fleet_repository
+        .list_messages(fleet_id, conversation_id, Some(baseline_seq), CONVERSATION_HISTORY_LIMIT)
+        .await
+    {
+        Ok(held_messages) => {
+            info!(
+                "[fleet] 新鲜度门暂扣本轮：会话「{conversation_id}」agent 基线 seq={baseline_seq}，\
+                 水位已到 {current_seq}，内联展示 {} 条新增消息",
+                held_messages.len()
+            );
+            Some((current_seq, held_messages))
+        },
+        Err(e) => {
+            warn!("[fleet] 新鲜度门读取未读消息失败，本次放行（fail-open）: {e}");
+            None
+        },
     }
 }
 
@@ -486,17 +762,20 @@ fn build_fleet_system_prompt(members: &[FleetMember]) -> String {
     )
 }
 
-/// 构造路由用户提示词（用户消息 + 历史）
-fn build_fleet_user_prompt(user_message: &str, history: &[DispatchChatMessage]) -> String {
+/// 构造路由用户提示词（用户消息 + 真实历史）
+///
+/// 历史来自数据库（`FleetMessage`），不再由调用方传入。
+/// 也不再需要按 role 过滤 —— `author_kind` 已保证每条都是真实发生过的对话消息。
+fn build_fleet_user_prompt(user_message: &str, history: &[FleetMessage]) -> String {
     if history.is_empty() {
         return format!("用户消息:\n{user_message}");
     }
 
     let history_text: Vec<String> = history
         .iter()
-        .filter(|h| h.role == "user" || h.role == "assistant")
         .map(|h| {
-            let speaker = h.agent_slug.as_deref().unwrap_or("user");
+            // 人类作者没有 slug，用 "user" 呈现；agent 用其 slug
+            let speaker = h.author_slug.as_deref().unwrap_or("user");
             format!("[{speaker}]: {}", h.content)
         })
         .collect();

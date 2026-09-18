@@ -263,13 +263,13 @@ pub trait RLTrainer: Send + Sync {
     async fn get_progress(&self) -> Result<TrainingReport, String>;
 }
 
-// ── OPC 行业 RL 经验持久化契约 ─────────────────────────────────────
+// ── OPC 域包 RL 经验持久化契约 ─────────────────────────────────────
 
 /// OPC RL 经验记录 DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RlExperienceRecord {
     pub id: String,
-    pub industry_id: String,
+    pub domain_pack_id: String,
     pub workflow_id: String,
     pub timestamp_ms: i64,
     pub quality_score: f64,
@@ -283,10 +283,10 @@ pub struct RlExperienceRecord {
     pub metadata: String,
 }
 
-/// OPC RL 行业训练统计 DTO
+/// OPC RL 域包训练统计 DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RlIndustryStats {
-    pub industry_id: String,
+pub struct RlDomainPackStats {
+    pub domain_pack_id: String,
     pub total_experiences: i32,
     pub total_reward: f64,
     pub avg_reward: f64,
@@ -305,28 +305,28 @@ pub trait RlExperienceStore: Send + Sync {
     /// 保存一条 RL 经验记录
     async fn save_experience(&self, record: &RlExperienceRecord) -> Result<(), String>;
 
-    /// 查询指定行业的经验列表（按时间倒序）
+    /// 查询指定域包的经验列表（按时间倒序）
     async fn get_experiences(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         limit: Option<u64>,
     ) -> Result<Vec<RlExperienceRecord>, String>;
 
-    /// 查询指定行业的经验数量
-    async fn count_experiences(&self, industry_id: &str) -> Result<u64, String>;
+    /// 查询指定域包的经验数量
+    async fn count_experiences(&self, domain_pack_id: &str) -> Result<u64, String>;
 
-    /// 获取全局统计（所有行业）
-    async fn get_global_stats(&self) -> Result<Vec<RlIndustryStats>, String>;
+    /// 获取全局统计（所有域包）
+    async fn get_global_stats(&self) -> Result<Vec<RlDomainPackStats>, String>;
 
-    /// 获取指定行业统计
-    async fn get_industry_stats(
+    /// 获取指定域包统计
+    async fn get_domain_pack_stats(
         &self,
-        industry_id: &str,
-    ) -> Result<Option<RlIndustryStats>, String>;
+        domain_pack_id: &str,
+    ) -> Result<Option<RlDomainPackStats>, String>;
 
-    /// 更新行业训练统计
-    async fn upsert_stats(&self, stats: &RlIndustryStats) -> Result<(), String>;
+    /// 更新域包训练统计
+    async fn upsert_stats(&self, stats: &RlDomainPackStats) -> Result<(), String>;
 
-    /// 清除指定行业的所有经验
-    async fn clear_experiences(&self, industry_id: &str) -> Result<(), String>;
+    /// 清除指定域包的所有经验
+    async fn clear_experiences(&self, domain_pack_id: &str) -> Result<(), String>;
 }

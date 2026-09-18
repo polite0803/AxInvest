@@ -4,7 +4,7 @@ import { Icon } from "@/components/common/Icon";
 import { Tooltip } from "@/components/layout/Tooltip";
 import { FEATURE_FLAGS } from "@/constants/featureFlags";
 import { useResolvedAvatarSrc } from "@/hooks/useResolvedAvatarSrc";
-import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
+import { CAPABILITY_DOMAIN_META, domainLabelKey } from "@/lib/domainMeta";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { type NavItem, navItemsByDomain } from "@/lib/navRegistry";
 import { BUILTIN_PAGE_PATH } from "@/lib/pageRegistry";
@@ -274,7 +274,7 @@ export function Sidebar() {
     const sections: SidebarSection[] = [];
 
     // 侧栏以「能力域」为组织轴：8 个业务域分组，域内导航项按业务本质归域。
-    // 每个域分组标题可点击，跳转到该域的聚合入口页（DomainHub）。
+    // 每个域分组标题可点击，跳转到该域的聚合入口页（DomainHubPage）。
     for (const domain of CAPABILITY_DOMAIN_META) {
       const items = navItemsByDomain(domain.id);
       if (items.length === 0) {
@@ -282,7 +282,7 @@ export function Sidebar() {
       }
       sections.push({
         key: domain.id,
-        labelKey: domain.labelKey,
+        labelKey: domainLabelKey(domain.id),
         color: domain.color,
         domainPath: domain.path,
         items,

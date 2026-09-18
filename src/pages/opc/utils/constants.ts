@@ -28,12 +28,21 @@ export interface Invoice {
   updated_at: number;
 }
 
+export type CustomerType = "consumer" | "business" | "unknown";
+
 export interface Customer {
   id: string;
   name: string;
   email: string;
   phone: string | null;
   company: string | null;
+  customer_type: CustomerType;
+  country: string | null;
+  region: string | null;
+  city: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
   status: string;
   source: string | null;
   tags: string[];
@@ -102,6 +111,10 @@ export interface MarketPack {
   enabled: boolean;
   installed: boolean;
   path: string;
+  /** 期一·4：归属本体域（manifest.domain，可缺省） */
+  domain?: string | null;
+  /** 期一·4：能力承诺数（manifest.capabilities 条数） */
+  capabilityCount?: number;
 }
 
 // ── 状态键映射 ───────────────────────────────────────────────
@@ -112,6 +125,10 @@ export function getInvoiceStatusKey(status: string): string {
 
 export function getCustomerStatusKey(status: string): string {
   return `opc.customerStatus.${status}`;
+}
+
+export function getCustomerTypeKey(type: string): string {
+  return `opc.customerType.${type}`;
 }
 
 export function getProjectStatusKey(status: string): string {
@@ -139,6 +156,12 @@ export const CUST_STATUS_COLOR_MAP: Record<string, string> = {
   active: "green",
   inactive: "default",
   churned: "red",
+};
+
+export const CUST_TYPE_COLOR_MAP: Record<string, string> = {
+  consumer: "cyan",
+  business: "purple",
+  unknown: "default",
 };
 
 export const PROJ_STATUS_COLOR_MAP: Record<string, string> = {

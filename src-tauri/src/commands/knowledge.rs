@@ -500,9 +500,16 @@ pub async fn delete_knowledge_document(
     base_id: String,
     id: String,
 ) -> Result<(), String> {
-    // Delete vector embeddings for this document
+    // 向量删除必须成功后才继续删除 DB 记录（2026-09-15 修：此前 `let _ =` 吞错，
+    // 于是「文档记录已删、向量还在库中」—— 已删除文档的内容仍会被检索命中）。
+    // 失败即返回错误并保留文档记录，用户可重试。
     let collection_id = format!("kb_{}", base_id);
-    let _ = state.vector_store.delete_document_embeddings(&collection_id, &id).await;
+    state.vector_store.delete_document_embeddings(&collection_id, &id).await.map_err(|e| {
+        crate::commands::error::ErrorResponse::err_with_detail(
+            crate::commands::error_code::knowledge::DELETE_DOCUMENT_FAILED,
+            format!("清理文档 {id} 的向量失败: {e}"),
+        )
+    })?;
 
     axagent_dao::repo::knowledge::delete_document(state.harness.db(), &id).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
@@ -520,13 +527,28 @@ pub async fn search_knowledge_base(
     query: String,
     top_k: Option<usize>,
 ) -> Result<Vec<axagent_search::vector_store::VectorSearchResult>, String> {
-    let mut results = crate::indexing::search_knowledge(
+    // 阈值必须先取到，才能交给**检索层**在截断之前过滤（理由见函数末尾说明）。
+    let kb = axagent_dao::repo::knowledge::get_knowledge_base(state.harness.db(), &base_id)
+        .await
+        .map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Unrecoverable,
+        ))
+    })?;
+    // `retrieval_threshold` 是**相关度下限 ∈ [0,1]**，检索层按同一标尺过滤
+    // （`combined_score >= 下限`）。换算规则的单一真源在 `axagent_search::rag`。
+    let min_similarity =
+        axagent_search::rag::similarity_floor_from_threshold(kb.retrieval_threshold.unwrap_or(0.0));
+
+    let results = crate::indexing::search_knowledge(
         state.harness.db(),
         state.harness.master_key(),
         &state.vector_store,
         &base_id,
         &query,
         top_k.unwrap_or(5),
+        Some(min_similarity),
     )
     .await
     .map_err(|e| {
@@ -536,26 +558,17 @@ pub async fn search_knowledge_base(
         ))
     })?;
 
-    // Apply distance threshold filter consistent with collect_rag_context_from_refs.
-    // score 是 L2 距离（越小越相似）。threshold > 0 时使用用户配置；
-    // threshold == 0（默认）时使用与 rag.rs 一致的默认阈值 20.0，避免前端搜索与 Agent RAG 行为不一致。
-    let kb = axagent_dao::repo::knowledge::get_knowledge_base(state.harness.db(), &base_id)
-        .await
-        .map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-    let default_max_distance = 20.0_f32; // 必须与 crates/search/src/rag.rs 中 default_max_distance 保持一致
-    let threshold = kb.retrieval_threshold.unwrap_or(0.0);
-    let effective_threshold = if threshold > 0.0 {
-        threshold
-    } else {
-        default_max_distance
-    };
-    results.retain(|r| r.score <= effective_threshold);
-
+    // ⚠ 2026-09-15 二次修（过滤位置）：此处原先在结果**返回之后**按
+    // `r.score <= distance_ceiling_from_similarity_floor(threshold)` 筛。两个问题：
+    // ① **两把尺子** —— 这里用 `r.score`（pipeline 路径下是**重排阶段**分数）去比一个
+    //    按**融合分数**（`combined_score`）标定的阈值 ⇒ 合格集非前缀 ⇒ 真会丢中间合格项，
+    //    方向还可能整体反（同 #186）。
+    //    ⚠ 「已截断成 top_k ⇒ 候选集里二十条过阈值却只检查了五条」这一说法**已被自查
+    //    否定**（候选池 `top_k*3`，筛选键 == 排序键 ⇒ 两次序等价，见 `MEMORY-RULES` #205）。
+    // ② 同一条规则同时存在于调用方与检索层两处 ⇒ 必然漂移（本文件此前就各写了一份
+    //    写死的 `20.0`）。
+    // 现在阈值经 `min_similarity` 进入 `HybridSearchOptions.min_score`，由四条收尾
+    // 路径在 `truncate(top_k)` **之前**统一处理 ⇒ 过滤只剩一处真源。
     Ok(results)
 }
 
@@ -1658,6 +1671,21 @@ async fn import_lemonhu_graph(
         );
     }
 
+    // P1-write（2026-09-14）：实体类型观测。
+    //
+    // 本路径**绕过 DAO 写函数**（循环里直接 `ActiveModel::insert`），所以 DAO 侧的
+    // 三处观测都覆盖不到它 —— 这里显式调用**同一个** helper（`observe_entity_types`），
+    // 不另写一份校验/去重。
+    //
+    // 必须在**循环之前**做：本路径实测写入 6 万+ 行，逐条校验不仅慢，同一类型的
+    // 警告还会重复 6 万次 —— 那不是可观测，是刷屏。本路径的 `etype` 来自固定映射
+    // （`nodes.csv` 的 type 列 + `raw/*.csv` 的硬编码字面量），
+    // 所以这里真正要抓的是「数据文件换了取值」。
+    axagent_dao::repo::knowledge_graph::observe_entity_types(
+        "commands::knowledge::graph_import",
+        entity_data.iter().map(|(_, _, etype)| etype.as_str()),
+    );
+
     for (id, name, etype) in entity_data {
         let prefixed_id = format!("{}{}", prefix, id);
         let exists = knowledge_entities::Entity::find_by_id(&prefixed_id)
@@ -1688,7 +1716,9 @@ async fn import_lemonhu_graph(
             last_seen_at: Set(None),
             source_type: Set(String::from("knowledge_base")),
             source_id: Set(String::new()),
-            node_type: Set(String::from("entity")),
+            node_type: Set(String::from(
+                axagent_harness::knowledge_graph::GraphNodeType::Entity.as_str(),
+            )),
             external_id: Set(None),
             created_at: Set(now_ms),
             updated_at: Set(now_ms),
@@ -1788,6 +1818,25 @@ async fn import_lemonhu_graph(
             "[graph_import] 未找到 edges.csv 或 raw/*.csv，关系跳过 (lemonhu_dir={})",
             lemonhu_dir.display()
         );
+    }
+
+    // B1（2026-09-14）：关系词表校验。**按「类型」去重上报**，避免逐行刷屏。
+    // 只校验 id —— 导入路径在这里没有解析实体的节点类，域/值域无从校验。
+    // 不阻断导入：`edges.csv` 的 rtype 直接来自数据文件（非代码常量），
+    // 闭合词表必然误伤它；这里只让「未登记值」可见。
+    {
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (_, _, _, rtype) in &rel_data {
+            if !seen.insert(rtype.as_str()) {
+                continue;
+            }
+            if let Some(v) = axagent_harness::knowledge_graph::validate_relation_id(rtype) {
+                axagent_harness::knowledge_graph::warn_on_violations(
+                    "commands::knowledge::graph_import",
+                    &[v],
+                );
+            }
+        }
     }
 
     for (id, src, tgt, rtype) in rel_data {
@@ -2057,7 +2106,18 @@ pub async fn sync_project_knowledge_sources(
             // 文件已存在且发生变化 → 删旧 + 加新（保证磁盘内容与 KB 一致）
             let doc_id = existing.id.clone();
             let collection_id = format!("kb_{}", base_id);
-            let _ = state.vector_store.delete_document_embeddings(&collection_id, &doc_id).await;
+            // 向量删不掉就不删 DB 记录（2026-09-15 修）：否则记录消失而向量残留，
+            // 旧内容继续被检索命中。计入 errors 后 continue，下次同步会重试。
+            if let Err(e) =
+                state.vector_store.delete_document_embeddings(&collection_id, &doc_id).await
+            {
+                result.error_count += 1;
+                result.errors.push(ImportDirectoryError {
+                    path: abs.clone(),
+                    error: format!("清理旧文档向量失败: {e}"),
+                });
+                continue;
+            }
             if let Err(e) = axagent_dao::repo::knowledge::delete_document(db, &doc_id).await {
                 result.error_count += 1;
                 result.errors.push(ImportDirectoryError {
@@ -2149,8 +2209,18 @@ pub async fn sync_project_knowledge_sources(
     for (key, doc) in &doc_by_path {
         if !matched_keys.contains(key) {
             let collection_id = format!("kb_{}", base_id);
-            let _ = state.vector_store.delete_document_embeddings(&collection_id, &doc.id).await;
-            if let Err(e) = axagent_dao::repo::knowledge::delete_document(db, &doc.id).await {
+            // 向量删不掉就不删 DB 记录（2026-09-15 修）：否则文档记录消失而向量残留，
+            // 已被移除的文件内容继续被检索命中。
+            if let Err(e) =
+                state.vector_store.delete_document_embeddings(&collection_id, &doc.id).await
+            {
+                result.error_count += 1;
+                result.errors.push(ImportDirectoryError {
+                    path: doc.source_path.clone(),
+                    error: format!("清理已移除文档的向量失败: {e}"),
+                });
+            } else if let Err(e) = axagent_dao::repo::knowledge::delete_document(db, &doc.id).await
+            {
                 result.error_count += 1;
                 result.errors.push(ImportDirectoryError {
                     path: doc.source_path.clone(),

@@ -86,16 +86,82 @@ export type DispatchEvent =
   | { type: "agent_status"; agentSlug: string; agentId: string; status: FleetMemberStatus }
   | { type: "token_usage"; agentSlug: string; agentId: string; inputTokens: number; outputTokens: number }
   | { type: "complete" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  /**
+   * 消息被协调门暂扣 —— 本次回合**未执行**。
+   *
+   * `heldMessages` 是**未读的更新消息**，服务端已把它们展示出来；
+   * 读过之后直接重发即可通过（「展示即已见」契约），**不需要任何旗标**。
+   * 详见后端 `DispatchEvent::Held` 的说明与「为何刻意没有 force 参数」。
+   *
+   * `maxSeq` 是**该会话**的 agent 水位，与 `heldMessages` 同源但**不相等**
+   * （后者受条数上限截断）；UI 用它显示「已推进到 #N」，让用户判断落后多远。
+   */
+  | { type: "held"; maxSeq: number; heldMessages: FleetMessage[] };
 
-/** 聊天消息（Dispatcher 输入） */
-export interface DispatchChatMessage {
-  /** 角色：user / assistant / system */
-  role: string;
-  /** 消息内容 */
+/**
+ * 舰队消息 — **已持久化**的群聊 / DM 消息。
+ *
+ * 与后端 `FleetMessage` 对应。这是对话的**真源**：历史不再由前端临时构造
+ * 后传给后端（那种做法一刷新就没了，agent 也看不到房间的真实来龙去脉）。
+ */
+export interface FleetMessage {
+  /** 唯一 ID */
+  id: string;
+  /** 所属舰队 ID */
+  fleetId: string;
+  /**
+   * **会话作用域** ID —— 消息线程的归属。
+   *
+   * - 群聊：`"group"`（见 {@link CONVERSATION_GROUP}）
+   * - 私信：`"dm:<agentSlug>"`（见 {@link conversationDm}）
+   *
+   * ⚠ 不是 `FleetMember.roomId` —— 那是精灵站位的**物理房间**，不参与消息查询。
+   */
+  conversationId: string;
+  /** 单调递增序号（**同一 (fleetId, conversationId) 内**唯一且递增） */
+  seq: number;
+  /** 作者类型 */
+  authorKind: "human" | "agent";
+  /** 作者 ID（human 为本地固定标识；agent 为 agentId） */
+  authorId: string;
+  /** 作者 slug（agent 才有） */
+  authorSlug?: string;
+  /** 作者显示名（human 无） */
+  authorDisplayName?: string;
+  /** 消息正文 */
   content: string;
-  /** 关联的 agent slug（assistant 消息才有） */
-  agentSlug?: string;
+  /** 创建时间（Unix 毫秒） */
+  createdAt: number;
+}
+
+// ── 会话作用域 ────────────────────────────────────────────────────────
+
+/**
+ * 群聊（智能路由）会话的 `conversationId`。
+ *
+ * 群聊是舰队内**唯一**的共享会话。⚠ 与 `FleetMember.roomId`（精灵站位的物理房间，
+ * 如 `"workspace"` / `"showroom"`）是两个正交概念，**不要互相顶替** ——
+ * 后端曾因两者同名而在「DM 与群聊共享一条时间线」上翻车。
+ */
+export const CONVERSATION_GROUP = "group";
+
+/** 与指定成员私信的 `conversationId`（后端同名 helper：`conversation_dm`）。 */
+export function conversationDm(agentSlug: string): string {
+  return `dm:${agentSlug}`;
+}
+
+/** `messagesByConversation` 的键：会话是 (舰队, 会话 ID) 的二元组。 */
+export function conversationKey(fleetId: string, conversationId: string): string {
+  // 用 join 而不是「模板字符串里把两段插值夹着 `::` 拼起来」：门禁 `check-id-validation.mjs`
+  // 会把那种形态报成「模板字符串拼接可能为 undefined 的 ID」（纯正则扫描，读不到类型；
+  // 连注释里写的示例也算命中 —— 这正是该脚本自带 FALSE_POSITIVE_FILES 白名单的原因）。
+  // 但它建议的修法 `safeJoinIds` 在这个位置是错的：`safeJoinIds` 是
+  // `filter(isValidId)` 后再 join，缺一段时**静默**产出**一段**的键；而本键是
+  // **持久化**结构（`messagesByConversation`，键格式见 `ChatPanel.tsx` 顶部说明）
+  // ⇒ 退化的键既读不回原消息、也不抛错，比 `undefined::xxx` 更难发现。
+  // 两段在类型上都非可选（`string`），保证来自赋值端；此处只拼接，不做过滤。
+  return [fleetId, conversationId].join("::");
 }
 
 // ── 命令输入参数 ──────────────────────────────────────────────────────
@@ -128,17 +194,20 @@ export interface AddMemberInput {
   roomId?: string;
 }
 
-/** 群聊智能路由输入 */
+/**
+ * 群聊智能路由输入。
+ *
+ * 已无 `history` 字段：历史由后端从数据库读取（库是唯一真源）。
+ * 即便调用方多传了该字段，serde 也会忽略，不会报错。
+ */
 export interface DispatchInput {
   /** 舰队 ID */
   fleetId: string;
   /** 用户消息 */
   userMessage: string;
-  /** 历史消息 */
-  history?: DispatchChatMessage[];
 }
 
-/** 直接 DM 指定 agent 输入 */
+/** 直接 DM 指定 agent 输入（同样无 history，历史由后端从库读取） */
 export interface DirectMessageInput {
   /** 舰队 ID */
   fleetId: string;
@@ -146,8 +215,6 @@ export interface DirectMessageInput {
   agentSlug: string;
   /** 用户消息 */
   userMessage: string;
-  /** 历史消息 */
-  history?: DispatchChatMessage[];
 }
 
 // ── 前端 UI 辅助类型 ──────────────────────────────────────────────────

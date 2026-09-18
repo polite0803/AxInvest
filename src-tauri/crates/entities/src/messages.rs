@@ -16,12 +16,15 @@ pub struct Model {
     pub token_count: Option<i64>,
     pub prompt_tokens: Option<i64>,
     pub completion_tokens: Option<i64>,
+    #[sea_orm(default_value = "[]")]
     pub attachments: String,
     pub thinking: Option<String>,
     pub created_at: i64,
     pub branch_id: Option<String>,
     pub parent_message_id: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub version_index: i32,
+    #[sea_orm(default_value = 1)]
     pub is_active: i32,
     pub tool_calls_json: Option<String>,
     pub tool_call_id: Option<String>,
@@ -43,7 +46,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::conversations::Entity",
         from = "Column::ConversationId",
-        to = "super::conversations::Column::Id"
+        to = "super::conversations::Column::Id",
+        on_delete = "Cascade"
     )]
     Conversation,
 }

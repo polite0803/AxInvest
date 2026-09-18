@@ -6,5 +6,8 @@ publish = false
 description = "L2 disk cache backed by SQLite"
 
 [dependencies]
-rusqlite = { version = "0.39", features = ["bundled"] }
+axagent-entities = { path = "../entities" }
+sea-orm = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true }
+tracing = { workspace = true }

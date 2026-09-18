@@ -8,8 +8,11 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub pattern: String,
+    #[sea_orm(indexed)]
     pub pattern_type: String,
+    #[sea_orm(default_value = 0)]
     pub success: i32,
+    #[sea_orm(default_value = 0)]
     pub failure: i32,
     pub last_used: String,
     pub created_at: String,

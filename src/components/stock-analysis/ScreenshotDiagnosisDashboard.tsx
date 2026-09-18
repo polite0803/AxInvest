@@ -10,6 +10,7 @@
  * 数据源：useScreenshotDiagnosisStore
  */
 
+import { formatCNY } from "@/lib/format";
 import { useProviderStore } from "@/stores/feature/providerStore";
 import { useScreenshotDiagnosisStore } from "@/stores/feature/screenshotDiagnosisStore";
 import type { ProviderConfig } from "@/types";
@@ -76,11 +77,6 @@ function levelColor(level: string): string {
 /** 格式化百分比 */
 function formatPct(v: number): string {
   return `${v.toFixed(2)}%`;
-}
-
-/** 格式化人民币金额 */
-function formatCNY(v: number): string {
-  return v.toLocaleString("zh-CN", { style: "currency", currency: "CNY" });
 }
 
 // ── 子组件：上传区 ──
@@ -494,7 +490,12 @@ export function ScreenshotDiagnosisDashboard() {
   }, [store.recentDiagnoses, filterStatus]);
 
   return (
-    <div style={{ padding: 16 }}>
+    // 滚动入口：InvestHub Tab 面板（.ant-tabs-content-active）是 overflow:hidden 的
+    // flex 列容器，本组件若不给自身高度约束 + 滚动，内容超出 419px 就会被静默裁掉
+    // 且永远出不来垂直滚动条。与 screener / quant 两个 tab 保持同一模式
+    // （flex-1 min-h-0 overflow-auto）。此处刻意用 overflow-auto 而非 overflow-y-auto：
+    // 后者会被 useGlobalOverlayScrollbars 的全局选择器接管。
+    <div className="flex-1 min-h-0 overflow-auto" style={{ padding: 16 }}>
       <UploadSection
         onSubmit={handleCreateFromImage}
         submitting={store.submitting}

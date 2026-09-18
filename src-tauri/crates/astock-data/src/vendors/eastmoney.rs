@@ -416,16 +416,18 @@ impl StockVendor for EastMoneyVendor {
             format!("SZ{code}")
         };
 
-        let url = format!(
-            "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=0&code={}",
-            em_code
-        );
+        let base_url = |t: u8| {
+            format!(
+                "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type={t}&code={em_code}"
+            )
+        };
 
-        let resp = self.em_get(&url).await?;
+        // ① 主请求 type=0：按报告期返回**最近 9 期**（约 2.25 年）。
+        let resp = self.em_get(&base_url(0)).await?;
         let json: Value = resp.json().await?;
 
-        let data = match json["data"].as_array() {
-            Some(arr) if !arr.is_empty() => arr,
+        let mut rows: Vec<Value> = match json["data"].as_array() {
+            Some(arr) if !arr.is_empty() => arr.clone(),
             _ => {
                 return Err(DataError::VendorError {
                     vendor: "eastmoney".into(),
@@ -434,9 +436,48 @@ impl StockVendor for EastMoneyVendor {
             },
         };
 
-        let reports: Vec<FinancialReport> = data
+        // ② 补充请求 type=1：按**年度**返回最近 9 个年报，合并进列表。
+        //
+        // 背景（2026-09-12，DB 实证 603353 和顺石油）：
+        //   原实现只请求 type=0，并以为 `take(24)` 能拿到「6 年季度」——
+        //   但该接口**单次只返回 9 个报告期**（约 2.25 年），24 条永远取不满。
+        //   后果落在 `compute_dcf` 的亏损期归一化锚定上：它要的是
+        //   「近 5 年年报正净利均值×0.90」，而 type=0 里年报候选只有 2 个，
+        //   再经 `filter(np > 0)` 剔除亏损年后常常只剩 1 个单点。
+        //   实测偏差：锚定值 2926 万（仅 2024 单年）vs 正确的近 5 年
+        //   （2021~2025）正净利均值 6918 万 —— **偏低 2.36×**，且静默无日志。
+        //   type=1 与 type=0 的字段集实测完全一致（均 141 个字段），可直接合并。
+        //
+        // 容错：补充请求失败只 warn —— 它是增强项，不应让整条链路硬失败。
+        match self.em_get(&base_url(1)).await {
+            Ok(resp) => match resp.json::<Value>().await {
+                Ok(j) => {
+                    if let Some(arr) = j["data"].as_array() {
+                        rows.extend(arr.iter().cloned());
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("[eastmoney] get_financials 年报补充(type=1) 解析失败: {e}")
+                },
+            },
+            Err(e) => tracing::warn!("[eastmoney] get_financials 年报补充(type=1) 请求失败: {e}"),
+        }
+
+        // ③ 合并去重 + 按报告期倒序 —— `financials[0]` 必须是**最新报告期**
+        //    （`compute_dcf` / `annualized_eps` 都以它作当期），更早的年报排在尾部。
+        let date_of = |r: &Value| -> String { r["REPORT_DATE"].as_str().unwrap_or("").to_string() };
+        {
+            let mut seen = std::collections::HashSet::new();
+            rows.retain(|r| {
+                let d = date_of(r);
+                !d.is_empty() && seen.insert(d)
+            });
+            rows.sort_by_key(|r| std::cmp::Reverse(date_of(r)));
+        }
+
+        let reports: Vec<FinancialReport> = rows
             .iter()
-            .take(24)           // 取24条(6年季度)，as-of 截断后有足够历史数据
+            .take(40) // 去重后实测 16 条（9 期 + 7 个更早年报）；上限防异常返回
             .map(|r| {
                 let s = |key: &str| -> &str { r[key].as_str().unwrap_or("") };
                 // 修复 M-FIN-1: 原 n 函数只处理字符串类型，但东方财富 API 部分字段
@@ -508,6 +549,77 @@ impl StockVendor for EastMoneyVendor {
         }
 
         Ok(reports)
+    }
+
+    /// 历史估值日序列（估值带的唯一数据供应方）
+    ///
+    /// 东财数据中心 `RPT_VALUEANALYSIS_DET`：每个交易日一行，含 PE_TTM / PB_MRQ /
+    /// PS_TTM / PCF_OCF_TTM / 收盘价 / 总市值。实测可回溯 8 年+（600519 共 2111 个交易日）。
+    ///
+    /// 背景：本地 `financial_snapshots` 表原设计为"每日 EOD 写一行"，但全项目从无写入路径
+    /// （只有迁移建表和两个读命令）→ 估值带样本恒为 0、图表永远空白。
+    /// 由本接口一次性回填多年历史（落库在 compute_valuation_band 命令层完成）。
+    async fn get_valuation_history(
+        &self,
+        stock_code: &str,
+        years: u32,
+    ) -> Result<Vec<ValuationSnapshot>, DataError> {
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        // 每页 500 条；A 股每年约 243 个交易日，按 250 估算页数并留 1 页余量，上限 12 页防异常入参
+        const PAGE_SIZE: usize = 500;
+        let want = years.max(1) as usize * 250;
+        let max_pages = ((want / PAGE_SIZE) + 2).min(12);
+        // 接口按 TRADE_DATE 降序返回，因此累计到页码上限即可覆盖所要年数；
+        // 精确的区间裁剪交给命令层（按 since_date 过滤），此处不做日期运算以免引入额外依赖。
+        let mut out: Vec<ValuationSnapshot> = Vec::new();
+        for page in 1..=max_pages {
+            let url = format!(
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_VALUEANALYSIS_DET&columns=SECURITY_CODE,TRADE_DATE,PE_TTM,PB_MRQ,PS_TTM,PCF_OCF_TTM,CLOSE_PRICE,TOTAL_MARKET_CAP&filter=(SECURITY_CODE=\"{code}\")&pageSize={PAGE_SIZE}&pageNumber={page}&sortColumns=TRADE_DATE&sortTypes=-1&source=WEB&client=WEB"
+            );
+            let resp = self.em_get(&url).await?;
+            let json: Value = resp.json().await?;
+            let rows = match json["result"]["data"].as_array() {
+                Some(arr) if !arr.is_empty() => arr,
+                _ => break,
+            };
+            let got = rows.len();
+            for r in rows {
+                // 与 get_financials 同款容错：字段可能为字符串或数字，"--"/""/null 视为缺失
+                let n = |key: &str| -> Option<f64> {
+                    let v = &r[key];
+                    if v.is_null() {
+                        return None;
+                    }
+                    if let Some(s) = v.as_str() {
+                        if s.is_empty() || s == "--" || s == "null" {
+                            return None;
+                        }
+                        return s.parse::<f64>().ok();
+                    }
+                    v.as_f64()
+                };
+                let date = r["TRADE_DATE"].as_str().unwrap_or("");
+                if date.is_empty() {
+                    continue;
+                }
+                out.push(ValuationSnapshot {
+                    // "2026-09-11 00:00:00" → "2026-09-11"
+                    trade_date: date.chars().take(10).collect(),
+                    pe_ttm: n("PE_TTM"),
+                    pb: n("PB_MRQ"),
+                    ps_ttm: n("PS_TTM"),
+                    pcf: n("PCF_OCF_TTM"),
+                    close_price: n("CLOSE_PRICE"),
+                    total_market_cap: n("TOTAL_MARKET_CAP"),
+                });
+            }
+            // 返回条数不足一页 = 已到最后一页
+            if got < PAGE_SIZE {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
@@ -1918,26 +2030,39 @@ impl StockVendor for EastMoneyVendor {
         &self,
         stock_code: &str,
     ) -> Result<Vec<InstitutionalVisit>, DataError> {
-        // 修复(2026-07-22): 原 RPT_ORG_SURVEY 报表返回空(retry-skip)。
-        // 改用 emweb.eastmoney.com F10 接口的 RPT_F10_EH_HOLDERS 之外的
-        // 机构调研专用接口: datacenter-web RPT_ORG_VISIT_RECORD
-        // 该报表返回机构调研记录,字段更完整。
+        // 修复(2026-09-12, P0-H L3): 原实现有**三层全部失效且全部静默**的逻辑，
+        // 使机构调研恒为空数组（2026-09-12 实测 603353 复现）：
         //
-        // 字段映射:
-        //   - NOTICE_DATE: 调研日期
-        //   - ORG_CODE: 机构代码
-        //   - ORG_NAME: 机构名称
-        //   - ORG_TYPE: 机构类型
-        //   - CONTENT: 调研内容
-        //   - VISIT_WAY: 调研方式
+        //   ① 主路径 `RPT_ORG_VISIT_RECORD` —— 接口返回
+        //      `{"success":false,"message":"报表配置不存在,RPT_ORG_VISIT_RECORD","code":9501}`
+        //      ⇒ 该报表在 datacenter-web 上已不存在，主路径 100% 失败。
+        //   ② fallback `sortColumns=SURVEY_DATE` —— 接口返回
+        //      `{"success":false,"message":"SURVEY_DATE排序列不存在"}`
+        //      ⇒ fallback 也 100% 失败（`result.data` 缺失 ⇒ 直接 `Ok(vec![])`）。
+        //   ③ 即使前两层修好，字段读的是 `MAIN_CONTENT` / `ORG_NUM` / `SURVEY_TYPE`，
+        //      而 `RPT_ORG_SURVEY` 的真实键是 `CONTENT` / `NUM` / `RECEIVE_WAY_EXPLAIN`
+        //      ⇒ `content.is_empty()` 把**每一行**都丢掉（实测 20 行、`CONTENT` 长度
+        //      1215、全部被丢弃）—— 又一个静默空。
+        //
+        // 现改为**只查唯一可用的 `RPT_ORG_SURVEY`**（实测 20 行真实数据），
+        // 并按 2026-09-12 dump 出的真实键集映射（键名以实测为准，勿照抄旧注释）：
+        //   - RECEIVE_START_DATE : 实际接待日（比 NOTICE_DATE 公告日更贴近「调研日期」）
+        //   - NUM                : 同一批调研内的**机构序号**（1..N），**不是机构总数**
+        //   - CONTENT            : 调研问答全文
+        //   - RECEIVE_WAY_EXPLAIN: 调研方式（如「业绩说明会,网络文字互动」）
+        //   - RECEIVE_OBJECT     : 接待对象（「投资者」或机构名）
+        //
+        // ⇒ 因「一行 = 一家机构」，按 RECEIVE_START_DATE **归并**：同日多行合成一条，
+        //   `institution_count` = 同日行数（实测 2026-01-08 有 5 行 = 5 家机构），
+        //   `main_content` 同日一致（实测 5 行 CONTENT 长度均为 1215）取首行即可。
         let code =
             stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-            reportName=RPT_ORG_VISIT_RECORD&columns=ALL&\
+            reportName=RPT_ORG_SURVEY&columns=ALL&\
             filter=(SECURITY_CODE%3D%22{code}%22)&\
             sortColumns=NOTICE_DATE&sortTypes=-1&\
-            pageSize=20&pageNumber=1&source=WEB"
+            pageSize=50&pageNumber=1&source=WEB"
         );
 
         let resp = self.em_get(&url).await?;
@@ -1945,64 +2070,43 @@ impl StockVendor for EastMoneyVendor {
 
         let rows = match json["result"]["data"].as_array() {
             Some(arr) if !arr.is_empty() => arr,
-            _ => {
-                // RPT_ORG_VISIT_RECORD 也为空时,回退尝试 RPT_ORG_SURVEY (旧接口)
-                let fallback_url = format!(
-                    "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-                    reportName=RPT_ORG_SURVEY&columns=ALL&\
-                    filter=(SECURITY_CODE%3D%22{code}%22)&\
-                    sortColumns=SURVEY_DATE&sortTypes=-1&\
-                    pageSize=20&pageNumber=1&source=WEB"
-                );
-                let fb_resp = self.em_get(&fallback_url).await?;
-                let fb_json: Value = fb_resp.json().await?;
-                let fb_rows = match fb_json["result"]["data"].as_array() {
-                    Some(arr) if !arr.is_empty() => arr,
-                    _ => return Ok(vec![]),
-                };
-                return Ok(fb_rows
-                    .iter()
-                    .filter_map(|r| {
-                        let content = r["MAIN_CONTENT"].as_str().unwrap_or("").to_string();
-                        if content.is_empty() || content.len() < 10 {
-                            return None;
-                        }
-                        Some(InstitutionalVisit {
-                            stock_code: stock_code.to_string(),
-                            stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
-                            visit_date: r["SURVEY_DATE"]
-                                .as_str()
-                                .map(|s| s.chars().take(10).collect::<String>())
-                                .unwrap_or_default(),
-                            institution_count: r["ORG_NUM"].as_i64().unwrap_or(0) as i32,
-                            main_content: content,
-                            visit_type: r["SURVEY_TYPE"].as_str().map(|s| s.to_string()),
-                        })
-                    })
-                    .collect());
-            },
+            _ => return Ok(vec![]),
         };
 
-        Ok(rows
-            .iter()
-            .filter_map(|r| {
-                let content = r["CONTENT"].as_str().unwrap_or("").to_string();
-                if content.is_empty() || content.len() < 10 {
-                    return None;
-                }
-                Some(InstitutionalVisit {
-                    stock_code: stock_code.to_string(),
-                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
-                    visit_date: r["NOTICE_DATE"]
-                        .as_str()
-                        .map(|s| s.chars().take(10).collect::<String>())
-                        .unwrap_or_default(),
-                    institution_count: r["ORG_NUM"].as_i64().unwrap_or(0) as i32,
-                    main_content: content,
-                    visit_type: r["VISIT_WAY"].as_str().map(|s| s.to_string()),
-                })
-            })
-            .collect())
+        let mut out: Vec<InstitutionalVisit> = Vec::new();
+        for r in rows {
+            let content = r["CONTENT"].as_str().unwrap_or("");
+            // 保留原有「内容太短视为无效记录」门槛（实测有效记录均 ≥ 352 字符）
+            if content.chars().count() < 10 {
+                continue;
+            }
+            let visit_date = r["RECEIVE_START_DATE"]
+                .as_str()
+                .or_else(|| r["NOTICE_DATE"].as_str())
+                .map(|s| s.chars().take(10).collect::<String>())
+                .unwrap_or_default();
+            if visit_date.is_empty() {
+                continue;
+            }
+            // 同一接待日的第二家机构起：只累加计数（同日内容/方式与首行一致）
+            if let Some(prev) = out.iter_mut().find(|v| v.visit_date == visit_date) {
+                prev.institution_count += 1;
+                continue;
+            }
+            out.push(InstitutionalVisit {
+                stock_code: stock_code.to_string(),
+                stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
+                visit_date,
+                institution_count: 1,
+                main_content: content.to_string(),
+                visit_type: r["RECEIVE_WAY_EXPLAIN"]
+                    .as_str()
+                    .or_else(|| r["RECEIVE_WAY"].as_str())
+                    .map(|s| s.to_string()),
+            });
+        }
+
+        Ok(out)
     }
 
     async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
@@ -2015,9 +2119,27 @@ impl StockVendor for EastMoneyVendor {
             );
             match self.em_get(&url).await {
                 Ok(resp) => {
-                    let json: Value = resp.json().await.unwrap_or(Value::Null);
+                    // P0-I(2026-09-12): 原实现 `unwrap_or(Value::Null)` + `if d.is_null() { continue }`
+                    // 把「响应体解析失败」与「data 为 null」两种完全不同的故障合并成同一个
+                    // 静默 `continue`，配合下方的 `Err(_) => continue` ⇒ 三个指数全失败时
+                    // 本函数返回 `Ok(vec![])`，调用方无法区分「源不可用」与「今日无行情」。
+                    // 603353 实证（v37）：`t-index-quotes` 载荷恒 `"[]"`，报告板块恒空，
+                    // 而同一 URL 从宿主机直连正常（上证 3888.11）⇒ 需日志才能定位。
+                    let json: Value = match resp.json().await {
+                        Ok(j) => j,
+                        Err(e) => {
+                            tracing::warn!(
+                                "[eastmoney] get_index_quotes {secid}({name}) 响应解析失败: {e}"
+                            );
+                            continue;
+                        },
+                    };
                     let d = &json["data"];
                     if d.is_null() {
+                        tracing::warn!(
+                            "[eastmoney] get_index_quotes {secid}({name}) 返回 data=null, rc={}",
+                            json["rc"]
+                        );
                         continue;
                     }
                     let f = |key: &str| d[key].as_f64().unwrap_or(0.0);
@@ -2031,7 +2153,12 @@ impl StockVendor for EastMoneyVendor {
                         amount: f("f48"),
                     });
                 },
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        "[eastmoney] get_index_quotes {secid}({name}) 请求失败（已含重试）: {e}"
+                    );
+                    continue;
+                },
             }
         }
         Ok(results)

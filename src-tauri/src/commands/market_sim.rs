@@ -4,6 +4,16 @@
 //!
 //! 允许前端/工作流在分析流程中运行多 Agent 市场模拟并读取结果。
 //!
+//! ## 本模块只是**薄壳**，共享内核在 `crate::market_sim_service`
+//!
+//! 蒙特卡洛的 DTO 与两个执行入口（`run_mc_core` / `run_mc_preset`）住在
+//! `src/market_sim_service.rs`。原因：它们还有一个**命令层之外**的消费者 ——
+//! `stock_workflow/sim_hook.rs`（决策落库后的自动仿真挂钩）与
+//! `stock_workflow/rhai_pm.rs`（注册的 Rhai 宿主函数 `sim_run_mc`）。
+//! 内核留在 `commands/` 会让两个命令模块互相 `crate::commands::…::` 横向调用，
+//! 依赖图退化成网（分层门禁 `commands-no-sibling-call` 拦的正是这个）。
+//! **改仿真口径请改服务层那一份**，本模块只做参数搬运。
+//!
 //! ## 使用方式
 //!
 //! ```typescript
@@ -21,12 +31,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
+use crate::market_sim_service::{McSimRequest, McSimResult, run_mc_core};
 use axagent_agent_macro::agent_command;
 use axagent_market_sim::{
-    ExchangeAgent, MarketMakerAgent, MomentumAgent, NoiseAgent, SimConfig, SimKernel, SimResult,
-    ValueAgent,
-    agent::QuantStrategyAgent,
-    monte_carlo::{MonteCarloEngine, ScenarioConfig, ScenarioType},
+    BEST_PARAMS, ExchangeAgent, MarketMakerAgent, MomentumAgent, NoiseAgent, SimConfig, SimKernel,
+    SimResult, ValueAgent, agent::QuantStrategyAgent,
 };
 use axagent_quant::{BollStrategy, MaCrossStrategy, MacdStrategy, RsiStrategy, TurtleStrategy};
 
@@ -128,35 +137,39 @@ fn build_default_agents(
     // 交易所（始终需要）
     agents.push(Box::new(ExchangeAgent::with_tick_size("exchange", 1)));
 
-    // 做市商
+    // 做市商。价差与挂单量取校准值 `BEST_PARAMS`（calibration.rs，2026-07-03 扫描结果），
+    // 不再使用硬编码字面量 —— 否则校准工作只在无 UI 的 `wf_des_integration` 上生效。
     let n_mm = config.market_makers.unwrap_or(1);
     for i in 0..n_mm {
         agents.push(Box::new(MarketMakerAgent::new(
             format!("mm_{}", i),
-            30,      // 30bps
-            500,     // 500 股/档
-            5000,    // 库存上限
-            0.1,     // 库存偏移敏感度
-            200_000, // 200μs 刷新间隔
+            BEST_PARAMS.mm_spread_bps, // 校准值 35bps
+            BEST_PARAMS.mm_quote_size, // 校准值 634 股/档
+            5000,                      // 库存上限
+            0.1,                       // 库存偏移敏感度
+            200_000,                   // 200μs 刷新间隔
             reference_price,
         )));
     }
 
-    // 动量
+    // 动量。阈值取校准值。lookback / 下单量目前无校准对应项，暂留字面量。
     let n_mom = config.momentum_agents.unwrap_or(1);
     for i in 0..n_mom {
         agents.push(Box::new(MomentumAgent::new(
             format!("momentum_{}", i),
-            5,       // lookback
-            0.003,   // 0.3% 阈值
-            200,     // 200 股/次
-            2000,    // 持仓上限
-            500_000, // 500μs 检查间隔
+            5,                              // lookback
+            BEST_PARAMS.momentum_threshold, // 校准值 0.0035
+            200,                            // 200 股/次
+            2000,                           // 持仓上限
+            500_000,                        // 500μs 检查间隔
             reference_price as f64,
         )));
     }
 
-    // 价值
+    // 价值。
+    // ⚠️ 已知缺陷（P2 待修）：公允价写死为 `参考价 × 1.02`，价格中枢被这个
+    // 人造常数锚定 ⇒ `price_change_pct` 的方向性结论**不含市场发现过程**。
+    // 修法是改用个股波动率/成交额反标定，见 PLAN-market-sim-value.md §2.4。
     let n_val = config.value_agents.unwrap_or(1);
     for i in 0..n_val {
         agents.push(Box::new(ValueAgent::new(
@@ -169,15 +182,15 @@ fn build_default_agents(
         )));
     }
 
-    // 噪声
+    // 噪声。激活概率与噪声幅度取校准值。
     let n_noise = config.noise_agents.unwrap_or(2);
     for i in 0..n_noise {
         agents.push(Box::new(NoiseAgent::new(
             format!("noise_{}", i),
-            300_000 + i as u64 * 100_000, // 300-500μs 间隔（错开）
-            0.3,                          // 30% 下单概率
-            50,                           // 最大 50 股/单
-            30,                           // 30bps 噪声
+            300_000 + i as u64 * 100_000,      // 300-500μs 间隔（错开）
+            BEST_PARAMS.noise_act_prob,        // 校准值 0.27
+            50,                                // 最大 50 股/单
+            BEST_PARAMS.noise_price_noise_bps, // 校准值 32bps
             reference_price,
             42 + i as u64, // seed
         )));
@@ -242,134 +255,11 @@ pub fn market_sim_defaults() -> serde_json::Value {
     })
 }
 
-/// 蒙特卡洛多场景模拟请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McSimRequest {
-    pub stock_code: String,
-    pub reference_price: i64,
-    /// 最大模拟时间（纳秒），默认 50ms
-    pub max_sim_time_ns: Option<u64>,
-    /// 随机种子，默认 42
-    pub seed: Option<u64>,
-    /// 场景列表
-    pub scenarios: Vec<McScenarioSpec>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McScenarioSpec {
-    pub scenario: String,
-    pub paths: u32,
-}
-
-/// 蒙特卡洛模拟结果（前端展示用）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McSimResult {
-    pub stock_code: String,
-    pub reference_price: i64,
-    pub total_paths: usize,
-    pub survival_rate: f64,
-    pub consistency_score: f64,
-    pub best_scenario: String,
-    pub worst_scenario: String,
-    pub scenario_results: Vec<McScenarioResultItem>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McScenarioResultItem {
-    pub scenario: String,
-    pub label: String,
-    pub paths: usize,
-    pub avg_total_trades: f64,
-    pub avg_final_mid_price: Option<f64>,
-    pub price_change_pct: Option<f64>,
-}
-
 /// 运行蒙特卡洛多场景模拟
 #[agent_command(domain = market_sim, safety = Caution, call_mode = StateInput, description = "运行蒙特卡洛模拟")]
 #[tauri::command]
 pub fn market_sim_run_mc(request: McSimRequest) -> Result<McSimResult, String> {
-    let ref_price = request.reference_price;
-    let stock_code = request.stock_code.clone();
-    let max_time_ns = request.max_sim_time_ns.unwrap_or(50_000_000);
-    let seed = request.seed.unwrap_or(42);
-    let scenarios = request.scenarios.clone();
-
-    let default_agents = move |_seed: u64| -> Vec<Box<dyn axagent_market_sim::SimAgent>> {
-        vec![
-            Box::new(ExchangeAgent::with_tick_size("exchange", 1)),
-            Box::new(MarketMakerAgent::new("mm", 50, 500, 5000, 0.1, 200_000, ref_price)),
-            Box::new(MomentumAgent::new(
-                "momentum",
-                5,
-                0.003,
-                200,
-                2000,
-                500_000,
-                ref_price as f64,
-            )),
-            Box::new(ValueAgent::new(
-                "value",
-                (ref_price as f64 * 1.02) as i64,
-                30,
-                300,
-                3000,
-                1_000_000,
-            )),
-            Box::new(NoiseAgent::new("noise", 300_000, 0.3, 50, 30, ref_price, _seed)),
-        ]
-    };
-
-    let config = SimConfig {
-        max_time_ns,
-        seed,
-        stock_code: stock_code.clone(),
-        reference_price: ref_price,
-        tick_size: 1,
-        ..Default::default()
-    };
-
-    let mut engine = MonteCarloEngine::new(config, default_agents);
-    engine.scenarios = scenarios
-        .iter()
-        .map(|s| {
-            let scenario_type = match s.scenario.as_str() {
-                "bull" => ScenarioType::Bull,
-                "bear" => ScenarioType::Bear,
-                "flash_crash" => ScenarioType::FlashCrash,
-                "high_vol" => ScenarioType::HighVolatility,
-                _ => ScenarioType::Normal,
-            };
-            ScenarioConfig { scenario: scenario_type, paths: s.paths as usize }
-        })
-        .collect();
-
-    let report = engine.run();
-
-    Ok(McSimResult {
-        stock_code: report.stock_code,
-        reference_price: report.reference_price,
-        total_paths: report.total_paths,
-        survival_rate: (report.survival_rate * 1000.0).round() / 10.0,
-        consistency_score: report.consistency_score,
-        best_scenario: report.best_scenario,
-        worst_scenario: report.worst_scenario,
-        scenario_results: report
-            .scenario_results
-            .into_iter()
-            .map(|sr| McScenarioResultItem {
-                scenario: format!("{:?}", sr.scenario),
-                label: sr.label,
-                paths: sr.paths,
-                avg_total_trades: (sr.avg_total_trades * 10.0).round() / 10.0,
-                avg_final_mid_price: sr.avg_final_mid_price.map(|p| (p * 100.0).round() / 100.0),
-                price_change_pct: sr.price_change_pct.map(|p| (p * 100.0).round() / 100.0),
-            })
-            .collect(),
-    })
+    run_mc_core(&request)
 }
 
 /// 量化策略模拟请求
@@ -426,8 +316,8 @@ pub fn market_sim_run_strategy(request: QuantSimRequest) -> Result<QuantSimRunRe
     kernel.register(Box::new(ExchangeAgent::with_tick_size("exchange", 1)));
     kernel.register(Box::new(MarketMakerAgent::new(
         "mm",
-        50,
-        500,
+        BEST_PARAMS.mm_spread_bps,
+        BEST_PARAMS.mm_quote_size,
         5000,
         0.1,
         200_000,
@@ -436,9 +326,9 @@ pub fn market_sim_run_strategy(request: QuantSimRequest) -> Result<QuantSimRunRe
     kernel.register(Box::new(NoiseAgent::new(
         "noise",
         300_000,
-        0.3,
+        BEST_PARAMS.noise_act_prob,
         50,
-        30,
+        BEST_PARAMS.noise_price_noise_bps,
         request.reference_price,
         request.seed.unwrap_or(42),
     )));

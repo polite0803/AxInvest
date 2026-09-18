@@ -1,6 +1,7 @@
 use axagent_astock_data::indicators::TechnicalIndicators;
 
 use crate::decision::RuleConfig;
+use crate::decision_action::{normalize_action, ActionKind};
 use crate::scoring::ObjectiveScore;
 
 /// 规则检查结果
@@ -37,7 +38,9 @@ impl RuleEngine {
         let mut corrections = Vec::new();
         let mut force_signals: Vec<String> = Vec::new();
 
-        let is_buy = matches!(proposed_action, "买入" | "增持");
+        // P1-6(2026-09-14): 改走统一归一化 —— 原判据只认中文，英文值域下 is_buy 恒 false，
+        //   追高容忍 / 加仓类规则整段失效且无告警。
+        let is_buy = normalize_action(proposed_action).is_some_and(ActionKind::implies_buy);
 
         // catalyst_override 路径：L2+ 催化剂 + 机构建仓 + 放量突破 → 容忍追高
         let catalyst_override =

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 内容媒体行业 4 个专属工作流模板种子化（代码驱动，对齐股票业务）。
+//! 内容媒体域包 4 个专属工作流模板种子化（代码驱动，对齐股票业务）。
 //!
 //! 模板列表：
 //! - workflow-cm-viral-content      爆款内容生成：选题策划 → 内容创作 → 优化打磨
@@ -13,10 +13,63 @@ use axagent_harness::capability::Visibility;
 use axagent_harness::workflow_types::*;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
+use crate::commands::constants::domain_pack::KPI_HOOK_NAME;
+
 /// 旧 3 模板版本号（保持 v2，不影响已有用户配置）
 const LEGACY_TEMPLATE_VERSION: i32 = 3;
-/// 新文学创作模板版本号（v4：改用 ExportWord 工具 + 可配置路径 + 变量）
-const LITERARY_TEMPLATE_VERSION: i32 = 4;
+/// 新文学创作模板版本号。
+///
+/// **v7 累积覆盖五批改动**（版本门 `src/commands/opc_workflows/mod.rs:632` 是**整行跳过** ⇒ 库内 version 不到 v7
+/// 就一次性吃到全部改动；库内 `workflow-cm-literary-creation` 实测为 v4）：
+/// 1) 24 条 input_mapping 源路径补 `content.` 层；
+/// 2) 条件节点改读一层 `content` + 正则匹配、variables / hooks_config 透传；
+/// 3) 新增 `lc-extract-fulltext`（Rhai CodeNode）+ `lc-finalize.markdown` 改指它；
+/// 4) R1/R4/A1/A2/R3 一批：
+///    · R1 新增 `lc-outline-chapters`（CodeNode 脱壳成真数组）+ Loop
+///    `iter_input_var` 改 3 段 `lc-outline-chapters.result.chapters`；
+///    · A1 删 LLM 节点 `lc-structure-injector`，改 Loop 体内 ToolNode
+///    `lc-chapter-instructions`（确定性叙事引擎），两处消费端改 4 段路径；
+///    · A2 主路径新增 `narrative_structure_persist` ToolNode；
+///    · R4 新增 `lc-chapter-pack`（CodeNode）+ `lc-chapter-bare`
+///    （DataTransformer 提层，使聚合元素顶层为裸 `{chapter_text, summary}`）；
+///    · R3 删除 `lc-outline.remaining` 死映射。
+/// 5) **v7 新增（2026-09-15 第三批）**：
+///    · B9：`structure_checker_prompt` / `anti_logic_prompt` 加可量化判据 + 逐项打分 +
+///    输出 schema 扩展（`ai_flavor_hits` / `subtext_ratio` / `scene_try_fail_cycles` /
+///    `foreshadow_occurrences` / `pacing_runs` 等）+ C1「统计先行」条件式声明；
+///    · 真值化：`LC_FULLTEXT_RHAI` 增出 `char_count`（字符数，非字节）与
+///    `chapter_count`（仅小说路径；非空 Array 才写键）；为此给 `lc-extract-fulltext`
+///    加一条 `input_mapping ("chapters_items","lc-draft-loop.items")`；
+///    · 删 `assemble_prompt` / `assemble_single_prompt` 输出 schema 里 LLM 自报的
+///    `total_word_count`（改为由上面的 `char_count` 提供真值）；
+///    · 删 `structure_adapter_prompt` 里假输入项 `- 剩余章节数：{remaining_chapters}`；
+///    · 注释层：`KNOWN_DANGLING` 清零可追溯说明（门禁脚本）、ToolNode 已统一宽松解析器的
+///    作用域锚定与失效理由更正。
+///
+/// ⚠️ **为什么必须递增版本号（不是形式主义）**：`upsert_template_safe`（本文件 `:222-232`）
+/// 的判定是 `if existing.version >= data.version { 跳过 }`。**改源码而不递增版本号 ⇒
+/// 库内已是 v6 的环境会整行跳过 ⇒ 上面第 5 批的内容永远不落库**（源码看着改了、
+/// 运行期还是旧的）。第 3/4 批同理，故每次都递增。
+///
+/// ⚠️ 为什么 R1 必须先有引擎侧 R6：Loop 容器体在第 2 轮起会把「已是终态」的 body 节点
+/// **跳过执行、直接复用上一轮产物**，而那条复用短路返回的 `NodeOutput.output_var` 是
+/// `None` ⇒ `loop_executor.rs:273-275` 的 `if let Some(out_var)` 不成立 ⇒ 本轮 iter_vars
+/// 不被回写，`chapter` / `last_step_output` 全是第 1 轮的旧值。若只有 R1 而没有 R6，
+/// 逐章循环会变成「N 轮全推第 1 章」，**比修前（恒 1 轮）更糟**。
+///
+/// R6 已落地（loop-body-reuse-verifier，2026-09-15，本人已逐行复核）：
+///   · loop 工厂（engine/mod.rs:5737 起）内的 Completed 复用短路**已净删除**；
+///   · 现在统一在 `Some(s) if s.is_terminal()`（`:5858-5873`）把 body 节点复位为 Ready
+///     并**本轮真执行**（日志 `:5871`：「不复用上一轮输出」）；
+///   · 全仓仅剩的复用分支在 Debate/Swarm 工厂 `:6326-6342`（刻意保留；其 `output_var: None`
+///     对 debate/swarm 是**惰性**的 —— `debate_executor.rs:152` / `swarm_executor.rs:129`
+///     都是 `round_results.insert(step_id, output.output)`，只按 step_id 取 `output.output`，
+///     从不读 `output_var`）。**不要为「对称」去动 debate 侧。**
+///
+/// 状态：本批只完成**静态**验证（门禁 + 反向夹具 + 形状/渲染仿真 + Rust 结构 lint）；
+/// 运行期证据仍待 `cargo test -p axagent-rt-workflow --test loop_e2e_workflow`
+/// 与文学链端到端（后者是否解禁由 lead 决定）。
+const LITERARY_TEMPLATE_VERSION: i32 = 7;
 
 /// 获取指定模板的版本号
 fn get_template_version(template_id: &str) -> i32 {
@@ -25,6 +78,17 @@ fn get_template_version(template_id: &str) -> i32 {
     } else {
         LEGACY_TEMPLATE_VERSION
     }
+}
+
+/// 文学创作模板的模板级生命周期钩子声明 —— 这是**写进 `workflow_templates.hooks_config`
+/// 列的入库产物**，不是内部约定。
+///
+/// ⚠️ 产物必须与历史字面量 `{"post_exec":["content-media-kpi-persist"]}` **逐字相同**：
+/// 消费端是引擎的 `run_post_exec_hooks` 注册表查名，名字对不上只 warn 跳过（fail-open），
+/// 运行期表现是 **KPI 静默不落库**。故钩子名只保留 `KPI_HOOK_NAME` 一份载体，
+/// 入库字符串由本文件 `mod tests` 的用例逐字锁死。
+fn literary_hooks_config() -> String {
+    format!(r#"{{"post_exec":["{}"]}}"#, KPI_HOOK_NAME)
 }
 
 /// 内容媒体 4 个专属工作流 ID
@@ -118,7 +182,27 @@ pub async fn seed_content_media_workflows(
         };
 
         let template_data = WorkflowTemplateData {
-            hooks_config: None,
+            // 模板级生命周期钩子声明（JSON 字符串，NULL 合法）。**必须由
+            // `upsert_template_safe` 透传**，否则声明被写死 NULL 吞掉（见下方注释）。
+            //
+            // 只给文学创作模板声明：KPI 落库钩子的提取器常量（`NODE_EXTRACT_FULLTEXT` /
+            // `NODE_OUTLINE_CHAPTERS` / `NODE_DRAFT_LOOP` / `NODE_TOLERANCE_AGENT`，
+            // 定义均在 `src/commands/opc_workflow_kpi_hook.rs`）读的全是文学链节点 ID，
+            // 其余 3 个模板声明了也取不到值、只会白跑一趟。
+            // ⚠️ `lc-assemble` / `lc-outline` **不是**提取器来源，别把它们列进来：前者的
+            // `total_word_count` 档位**已删除**（该值是 LLM 自报，留着即伪造数据），
+            // 后者的成品字数改由 `lc-extract-fulltext` 的 `char_count` 提供真值。
+            //
+            // 钩子名不写字面量，取 `constants::domain_pack::KPI_HOOK_NAME`（唯一载体，见
+            // `literary_hooks_config`）；启动期注册在 `register_opc_kpi_hooks`。
+            // 引擎侧消费：`parse_hooks_config` → `run_post_exec_hooks`（按 post_exec 名单
+            // 查注册表，未注册 warn 跳过，钩子失败不阻断 —— 即 fail-open，故「钩子名对不上」
+            // 的运行期表现是**静默**不落库，只能靠用例与日志发现）。
+            hooks_config: if template_id == "workflow-cm-literary-creation" {
+                Some(literary_hooks_config())
+            } else {
+                None
+            },
             id: template_id.to_string(),
             name,
             description: Some(description),
@@ -186,12 +270,30 @@ async fn upsert_template_safe(
     let nodes_json = serde_json::to_string(&data.nodes).map_err(|e| format!("nodes: {e}"))?;
     let edges_json = serde_json::to_string(&data.edges).map_err(|e| format!("edges: {e}"))?;
     let trigger_json = data.trigger_config.as_ref().and_then(|t| serde_json::to_string(t).ok());
+    // 透传模板声明的变量：此前写死 `Set(Some("[]"))`，把 build_literary_creation 里
+    // :50-118 构造的 output_dir / document_title / file_format / review_strictness /
+    // tolerance_threshold 全部丢弃（生产库实证 workflow-cm-* 的 variables 列恒为 "[]"），
+    // 使 lc-finalize 的 input_mapping ("output_path","output_dir") /
+    // ("title","document_title") 在运行期必然解析为 None。
+    // 与权威实现 `opc_workflows::upsert_template`（src/commands/opc_workflows/mod.rs:588 + :615）保持一致。
+    let vars_json = serde_json::to_string(&data.variables).unwrap_or_default();
+
+    // P0 软门禁（C1，2026-09-14）：见 `opc_workflows::upsert_template` 同款说明。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("opc-workflows:seed_content_media:{}", data.id),
+        &nodes_json,
+        &edges_json,
+    );
 
     let am = workflow_template::ActiveModel {
-        hooks_config: Set(None),
+        // 透传模板声明的生命周期钩子：此前写死 `Set(None)`，与 `data.hooks_config`
+        // 的声明无关地一律写入 NULL ⇒ 模板钩子机制对种子模板**永远不可用**
+        // （文学创作模板的 KPI 落库钩子就是这么被吞掉的）。
+        // 与权威实现 `opc_workflows::upsert_template`（src/commands/opc_workflows/mod.rs:613）保持一致。
+        hooks_config: Set(data.hooks_config.clone()),
         id: Set(data.id.clone()),
         cluster_id: Set(data.cluster_id.clone()),
-        // 显式 route_path 优先，否则走权威行业/能力映射（与 upsert_template 一致）
+        // 显式 route_path 优先，否则走权威域包/能力映射（与 upsert_template 一致）
         route_path: Set(data
             .route_path
             .clone()
@@ -209,7 +311,7 @@ async fn upsert_template_safe(
         edges: Set(edges_json),
         input_schema: Set(None),
         output_schema: Set(None),
-        variables: Set(Some("[]".to_string())),
+        variables: Set(Some(vars_json)),
         error_config: Set(None),
         composite_source: Set(None),
         mission_hash: Set(None),
@@ -465,6 +567,75 @@ fn make_tool_node(
     })
 }
 
+/// CodeNode 辅助函数：在 DAG 中直接执行 Rhai 脚本（确定性数据变换 / 包裹层降层）。
+///
+/// `execute_directly=true` + `language="rhai"` ⇒ CodeExecutor 走
+/// `execute_rhai_directly`（code_executor.rs:491-533），其 input_mapping 经
+/// **穿透型** `executors::resolve_var_path`（executors/mod.rs:106-164）解析，
+/// 因此可读 `<node>.content.<field>` 这类多层路径 —— 这正是它与 ToolNode /
+/// ConditionNode 的**严格解析器**（不穿透 JSON 字符串）的关键差异。
+/// 输出包裹层为 `{status, language, result, input_params, node_id}` ⇒
+/// 下游严格消费端只能写到 `<本节点>.result.<field>`（≤3 段）。
+fn make_code_node(
+    id: &str,
+    title: &str,
+    code: &str,
+    input_mapping: Vec<(&str, &str)>,
+    output_var: &str,
+    x: f64,
+    y: f64,
+) -> WorkflowNode {
+    let mut im = std::collections::HashMap::new();
+    for (k, v) in input_mapping {
+        im.insert(k.to_string(), v.to_string());
+    }
+    WorkflowNode::Code(CodeNode {
+        base: make_base(id, title, "Rhai 脚本直接执行", x, y),
+        config: CodeNodeConfig {
+            language: "rhai".to_string(),
+            code: code.to_string(),
+            output_var: output_var.to_string(),
+            tool_name: None,
+            execute_directly: true,
+            input_mapping: im,
+        },
+    })
+}
+
+/// DataTransformer 辅助函数：**无信封**的「提层」节点。
+///
+/// `DataTransformerExecutor`（data_transformer_executor.rs:150-224）是唯一把 Rhai
+/// 表达式的裸返回值直接当 `NodeOutput.output` 的执行器 —— 既不套 CodeNode 的
+/// `{status, language, result, input_params, node_id}`，也不套 AgentNode 的
+/// `{role, model, content, …}`。因此它是**唯一**能让 Loop 聚合元素顶层直接是业务字段
+/// 的节点类型（`loop_executor.rs:407` 的 `partial.push(last_step_output)`）。
+///
+/// 两条硬约束（写表达式前必读）：
+/// 1. `input_var` 是**平键查找**（`:171-176`，不支持点路径，`ctx.variables.get`），
+///    命中值同时以 `input` 名义无条件注入 scope（`:176`）。
+/// 2. 引擎是裸 `rhai::Engine::new()`（`:167`），**没有** `json_parse`/`clamp`/`join`
+///    （那些只在 code_executor::shared_rhai_engine() 里）⇒ 表达式只能用核心原语。
+///    `input_var` 名含连字符时 `is_valid_rhai_ident` 为假，不会被注入具名变量
+///    （`:182-193`），只能用 `input`。
+fn make_data_transformer_node(
+    id: &str,
+    title: &str,
+    input_var: &str,
+    expression: &str,
+    output_var: &str,
+    x: f64,
+    y: f64,
+) -> WorkflowNode {
+    WorkflowNode::DataTransformer(DataTransformerNode {
+        base: make_base(id, title, "数据变换（Rhai 表达式，输出无信封）", x, y),
+        config: DataTransformerNodeConfig {
+            input_var: input_var.to_string(),
+            expression: expression.to_string(),
+            output_var: output_var.to_string(),
+        },
+    })
+}
+
 fn make_approval_node(
     id: &str,
     title: &str,
@@ -663,6 +834,191 @@ fn build_ip_building() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>, String, String,
 
 // ── 模板 4: 文字创作（文学创作） ──
 
+/// `lc-extract-fulltext`（Rhai CodeNode）的脚本：把上游 Agent 的 JSON 字符串
+/// 拆成纯正文，给 `lc-finalize` 的 ExportWord 当 `markdown`。
+///
+/// 为什么必须有这个节点（任务 G 的结论）：
+/// **历史背景（ToolNode 严格版时期，本节点即因此诞生）**：当时 `lc-finalize`
+/// 作为 ToolNode 用的是文件内私有严格版 `resolve_var_path`，**不做 JSON 字符串穿透**
+/// ⇒ 写 `lc-assemble.content.full_text`（3 段，中间值是 JSON 字符串）恒 None，
+/// ExportWord 拿到空 markdown 直接报 `Error: markdown 是必需的`，.docx 不落地。
+/// 而 Agent/CodeNode 的 input_mapping 从一开始就走**穿透型**解析器
+/// （executors/mod.rs:106-164）。
+///
+/// ⚠️ **现状（2026-09-15 任务 #16 起）**：ToolNode 已统一为共享宽松版 ——
+/// `tool_executor.rs:70-80` 全限定调用 `super::resolve_var_path`，会穿透 content 字符串。
+/// 因此上面那句「`lc-assemble.content.full_text` 恒 None」**在今天已不成立**，
+/// 该 3 段路径现在可以直接解析。本节点的保留理由**不再依赖解析器策略**：
+/// 它让「正文抽取」这一步**显式失败**（`json_parse` 是软实现，直连取不到时是静默空值，
+/// 见下方失败语义），属 fail-open → fail-loud 的收口；
+/// 「本节点在宽松解析器下是否仍属必需」留给 lead 裁决，不在本批擅自增删节点。
+/// 于是用 CodeNode 当"降层器"：它读得到 `lc-assemble.content` 整串，脚本内
+/// `json_parse` 出 `full_text`，输出 `<本节点>.result.full_text`（3 段），
+/// 形态与 `t-scoring.result.totalScore` 同一路数。
+///
+/// 为什么按 `lc-assemble.content` 而不用节点 id：两条互斥创作路径
+/// （novel 的 `lc-assemble` / 非 novel 的 `lc-assemble-single`）**故意共用同一个
+/// output_var 名 `lc-assemble`**（见 lc-assemble-single 处的注释），
+/// engine/mod.rs:1670-1673 把结果同时写进 node_id 与 output_var 两个 key，
+/// 故按 output_var 名读天然覆盖两条路径。
+///
+/// 失败语义：**显式 throw**，绝不回退成整段 JSON 或空字符串。
+/// `json_parse` 是"失败返回 () 不报错"的软实现（`crates/harness/src/rhai_engine.rs:73-98`），
+/// 所以这里必须自己复核形态，否则就变成 fail-open → fail-open 的静默降级。
+///
+/// ## 输出契约（真值化，2026-09-15 第二批）
+/// | 键 | 类型 | 来源 | 语义 |
+/// |---|---|---|---|
+/// | `full_text` | string | `lc-assemble.content.full_text` | 已校验非空的正文原文 |
+/// | `char_count` | int | **本脚本按字符数算** | `full_text` 的**字符个数**（含空白/换行） |
+/// | `chapter_count` | int | **本脚本按数组长度算** | `lc-draft-loop.items` 的元素个数；**实到不是非空 Array 时该键根本不出现** |
+///
+/// **`char_count` 为什么必须由代码算**：`word_count` / `total_word_count` 原先是要
+/// LLM 在输出 JSON 里自己报的数字，属 C1 明令禁止的「把可确定性计算的东西交给 LLM 自评」。
+/// 本键取代它成为 KPI `word_count` 的真值来源。
+///
+/// **`len` 的语义已实证（不是假设）**：本仓锁定 rhai 1.26.0（`src-tauri/Cargo.lock`），
+/// `rhai-1.26.0/src/packages/string_more.rs:181-197` 的
+/// `#[rhai_fn(name = "len", get = "len")] pub fn len(string: &str) -> INT`
+/// 实现体是 **`string.chars().count()`**，即**字符数**而非字节数
+/// （文档示例亦为 `print(text.len); // prints 17`；同文件紧邻的 `bytes` 才返回 UTF-8 字节数）。
+/// 该包确实被注册：`rhai-1.26.0/src/engine.rs:320-321`
+/// `engine.register_global_module(StandardPackage::new().as_shared_module())`，
+/// 而 `StandardPackage` 含 `MoreStringPackage`（`rhai-1.26.0/src/packages/pkg_std.rs:21-31`）。
+/// ⇒ 中文一个汉字计 1，不会出现 3 倍虚高。
+///
+/// **`chapter_count` 为什么是「有则算」**：`lc-draft-loop` 只在小说路径存在，
+/// 非小说路径（`lc-assemble-single`）该节点从未执行 ⇒ 入参解析为 `()` ⇒ **省略该键**。
+/// 刻意**不用 0 冒充**（0 会被下游当成「确认有 0 章」），也**不用正则猜**（正文里的
+/// "第一章" 字样是启发式，不是统计）。`items.len` 对 Array 走
+/// `rhai-1.26.0/src/packages/array_basic.rs:59` 的同名 `len`（元素个数）。
+const LC_FULLTEXT_RHAI: &str = r#"
+let raw = raw_text;
+if type_of(raw) != "string" {
+    throw "lc-extract-fulltext: 上游 lc-assemble.content 缺失（期望 JSON 字符串，实到 " + type_of(raw) + "）";
+}
+let parsed = json_parse(raw);
+if type_of(parsed) != "map" {
+    throw "lc-extract-fulltext: lc-assemble.content 不是合法 JSON 对象（json_parse 实到 " + type_of(parsed) + "）";
+}
+let text = parsed["full_text"];
+if type_of(text) != "string" {
+    throw "lc-extract-fulltext: 缺少字符串字段 full_text（实到 " + type_of(text) + "）";
+}
+if text.trim() == "" {
+    throw "lc-extract-fulltext: full_text 为空，拒绝产出空正文";
+}
+
+// char_count：字符数（Rhai 1.26.0 的 String::len == chars().count()，非字节数）
+let out = #{ full_text: text, char_count: text.len };
+
+// chapter_count：有则算，没有不放这个键（0 会冒充「确认 0 章」，正则猜属于编造）
+let items = chapters_items;
+if type_of(items) == "array" && items.len > 0 {
+    out["chapter_count"] = items.len;
+}
+out
+"#;
+
+/// `lc-outline-chapters`（Rhai CodeNode）—— **R1 修法**：把 `lc-outline` 的顶层章节
+/// JSON 数组从 AgentNode 信封的 `content` **字符串**里取出来，包成
+/// `#{ chapters: parsed }`。
+///
+/// 为什么必须有这个节点（而不是把 `iter_input_var` 改写成 2 段）：
+/// `loop_executor.rs:163-174` 只在 `resolve_var_path(iter_input_var)` 返回
+/// **真 Array** 时才逐项迭代，拿到字符串/对象一律 `vec![other]`（单元素）或空数组；
+/// 而 `executors/mod.rs:148-157` 明确**终值不做 auto_parse**（2026-09-09 显式修复）
+/// ⇒ `iter_input_var = "lc-outline.content"` 也只能得到字符串 ⇒ 恒 1 轮。
+/// CodeNode 的包裹层里 `result` 已是**对象**（code_executor.rs:520-532），
+/// 故 `<本节点>.result.chapters` 是 3 段纯对象跳，Loop 的宽松解析器可取到真数组。
+///
+/// 失败语义：**显式 throw**（本仓 lock 的 rhai 1.26.0 里 `throw` 是 `Token::Throw`
+/// → `Stmt::Return` + `ASTFlags::BREAK`，非 map 返回路径一律转 `NodeError`），
+/// 绝不静默返回空数组冒充「0 章」——那正是 loop_executor 会当成「正常运行 0 轮」
+/// 的形态（`json_parse` 是失败返回 `()` 的软实现，见 `crates/harness/src/rhai_engine.rs:73-98`）。
+const LC_CHAPTERS_RHAI: &str = r#"
+let raw = chapters_raw;
+if type_of(raw) != "string" {
+    throw "lc-outline-chapters: 上游 lc-outline.content 缺失（期望 JSON 字符串，实到 " + type_of(raw) + "）";
+}
+let parsed = json_parse(raw);
+if type_of(parsed) != "array" {
+    throw "lc-outline-chapters: lc-outline.content 不是顶层 JSON 数组（json_parse 实到 " + type_of(parsed) + "）";
+}
+if parsed.len() == 0 {
+    throw "lc-outline-chapters: 章节数组为空，拒绝进入逐章循环";
+}
+#{ chapters: parsed }
+"#;
+
+/// `lc-chapter-pack`（Rhai CodeNode）—— **R4 前半**：从 `lc-summary` 的信封
+/// `content` 字符串里取出 `chapter_text` / `summary`，包成只含这两个键的对象。
+///
+/// 为什么需要：Loop 聚合 `items` 的元素是**每轮最后一步输出的整体**
+/// （`partial.push(last_step_output)`，loop_executor.rs:407）。此前最后一步是
+/// `lc-structure-adapter`，其输出是 AgentNode 信封
+/// `{role, model, content: <字符串>, …}` ⇒ 元素顶层既无 `chapter_text` 也无
+/// `summary`，而 `assemble_prompt`（:965「每项含 chapter_text 完整正文与 summary
+/// 摘要」）与 `draft_chapter_prompt`（:897「取数组最后一项的 summary」）都按
+/// 顶层读 ⇒ **双双落空**。唯一还持有正文的地方就是循环内的 `lc-summary`。
+///
+/// 失败语义：同 `LC_CHAPTERS_RHAI`，显式 throw，绝不产出空章节。
+const LC_CHAPTER_PACK_RHAI: &str = r#"
+let raw = summary_raw;
+if type_of(raw) != "string" {
+    throw "lc-chapter-pack: 上游 lc-summary.content 缺失（期望 JSON 字符串，实到 " + type_of(raw) + "）";
+}
+let parsed = json_parse(raw);
+if type_of(parsed) != "map" {
+    throw "lc-chapter-pack: lc-summary.content 不是合法 JSON 对象（json_parse 实到 " + type_of(parsed) + "）";
+}
+let chapter_text = parsed["chapter_text"];
+if type_of(chapter_text) != "string" {
+    throw "lc-chapter-pack: 缺少字符串字段 chapter_text（实到 " + type_of(chapter_text) + "）";
+}
+if chapter_text.trim() == "" {
+    throw "lc-chapter-pack: chapter_text 为空，拒绝产出空章节";
+}
+let summary = parsed["summary"];
+if type_of(summary) != "string" {
+    throw "lc-chapter-pack: 缺少字符串字段 summary（实到 " + type_of(summary) + "）";
+}
+#{ chapter_text: chapter_text, summary: summary }
+"#;
+
+/// `lc-chapter-bare`（DataTransformer）的 Rhai 表达式 —— **R4 后半**：「提层」。
+///
+/// 为什么必须是 DataTransformer：它是唯一**不套信封**的执行器
+/// （data_transformer_executor.rs:206 + 215-223：`NodeOutput.output` 直接是 Rhai
+/// 表达式的裸返回值）⇒ 只有把它放在 `body_steps` **末位**，
+/// `lc-draft-loop.items` 的元素顶层才是裸 `{chapter_text, summary}`。
+///
+/// ⚠️ 只能用 Rhai **核心原语**：DataTransformer 用裸 `rhai::Engine::new()`
+/// （`:167`），**没有** `json_parse` ⇒「解析」必须在 `lc-chapter-pack` 里做完，
+/// 本节点只做一次纯对象跳。
+///
+/// ⚠️ 只能写 `input`：`input_var` 名含连字符（`lc-chapter-pack`）⇒
+/// `is_valid_rhai_ident` 为假 ⇒ 不会被注入具名变量（`:182-193`），
+/// 但 `input` 是**无条件注入**的（`:176`）。
+///
+/// 失败语义：Rhai 对 Map 缺失键的属性访问返回 `()`（engine 默认
+/// fail_on_invalid_map_property=false），`dynamic_to_json(())` = Null ⇒ 聚合元素
+/// **静默**变成 null。所以必须显式守卫 + throw（throw ⇒ `TRANSFORM_EVAL_FAILED`；
+/// Loop 的 `continue_on_error=false` ⇒ 整条工作流失败 —— 这是刻意的 fail-loud）。
+const LC_CHAPTER_BARE_EXPR: &str = r#"
+if type_of(input) != "map" {
+    throw "lc-chapter-bare: input 不是 Rhai Map（实到 " + type_of(input) + "）";
+}
+let v = input.result;
+if type_of(v) == "()" {
+    throw "lc-chapter-bare: input 缺少 result 字段";
+}
+if type_of(v) != "map" {
+    throw "lc-chapter-bare: result 不是对象（实到 " + type_of(v) + "）";
+}
+v
+"#;
+
 fn build_literary_creation()
 -> (Vec<WorkflowNode>, Vec<WorkflowEdge>, String, String, String, Vec<String>) {
     let profile = "opc-cmo-cmo-literary-creator";
@@ -803,11 +1159,50 @@ fn build_literary_creation()
         \n\
         输入：{chapter_draft}\n\
         \n\
+        【统计口径声明（统计先行）】\n\
+        若本提示词中出现以「【代码统计】」开头、形如 `键=值` 的数值，\n\
+        那是上游**用代码统计出来的确定性事实**：请**直接引用**，不得自行重算。\n\
+        若没有出现该标记，则**不要编造任何统计数字**，\n\
+        并把无法判定的维度名写进 unverifiable 数组。\n\
+        \n\
+        逐项判据（每条都必须给出**可核对证据**：引用原文片段 + 位置）：\n\
+        1. 时间线一致：是否出现「后发生的事被先叙述」且全程没有任何交代。\n\
+           给出矛盾条数，并逐条抄出证据。\n\
+        2. 因果闭合：每个「因为…所以…」的因果链是否成立。\n\
+           把断裂的因果链逐条列出，写明「因」与「果」之间缺的是哪一步。\n\
+        3. 人物能力边界：角色是否越过既有设定或证据直接得出结论（全知化）。\n\
+           每条都要指出「角色凭什么知道」。\n\
+        4. 物件与场景连续性：同一物件的位置/状态、同一场景的时间是否自相冲突。\n\
+        5. 与既有摘要的矛盾：与上一章摘要里的人物状态、已知信息是否冲突。\n\
+        \n\
+        打分方式：**先逐项给分，再汇总**，不允许只给一个主观总分。\n\
+        每个维度给 0-100 的整数分，并附一句引用原文的理由；\n\
+        coherence_score 必须是这些维度分的**算术平均**（四舍五入到整数），\n\
+        不得与任何维度分互相矛盾。\n\
+        \n\
         请输出 JSON：\n\
         {\n\
           \"revised_draft\": \"修订后草稿\",\n\
-          \"logic_issues\": [\"发现的逻辑问题\"],\n\
-          \"coherence_score\": 85\n\
+          \"coherence_score\": 85,\n\
+          \"dimension_scores\": {\n\
+            \"timeline\": { \"score\": 90, \"evidence\": \"引用原文片段\" },\n\
+            \"causality\": { \"score\": 85, \"evidence\": \"引用原文片段\" },\n\
+            \"character_bounds\": { \"score\": 80, \"evidence\": \"引用原文片段\" },\n\
+            \"continuity\": { \"score\": 95, \"evidence\": \"引用原文片段\" },\n\
+            \"summary_consistency\": { \"score\": 90, \"evidence\": \"引用原文片段\" }\n\
+          },\n\
+          \"logic_issues\": [\n\
+            { \"issue_type\": \"causality_gap\", \"description\": \"问题描述\", \"quote\": \"引用原文片段\", \"severity\": \"medium\", \"fix\": \"具体改法\" }\n\
+          ],\n\
+          \"timeline_conflicts\": 0,\n\
+          \"causal_chain_breaks\": 0,\n\
+          \"character_bounds_violations\": [\n\
+            { \"character\": \"角色名\", \"claim\": \"该角色下的结论\", \"missing_evidence\": \"缺少的证据\" }\n\
+          ],\n\
+          \"continuity_conflicts\": [\n\
+            { \"element\": \"物件或场景\", \"chapter_state\": \"本章状态\", \"conflict_with\": \"与之冲突的前文状态\" }\n\
+          ],\n\
+          \"unverifiable\": [\"无法判定且无统计量的维度名\"]\n\
         }";
 
     let summary_prompt = "你是一名摘要编辑。\n\
@@ -845,6 +1240,14 @@ fn build_literary_creation()
           \"summary\": \"200字摘要\"\n\
         }";
 
+    // 真值化（2026-09-15 第二批）：本 prompt 的输出 schema **删除了
+    // `"total_word_count"`**。原因：那是要求 LLM 自己报一个总字数，属 C1 明令禁止的
+    // 「把可确定性计算的东西交给 LLM 自评」；且它的消费端（`opc_workflow_kpi_hook.rs`
+    // 的 `extract_word_count`）无论如何都取不到它 —— 钩子的 `node_output()` 只解
+    // `.result` / `.output` 包装，**不解 Agent 的 `.content` JSON 字符串**
+    // （`opc_workflow_kpi_hook.rs:64-70`），而本节点是 AgentNode，其业务字段全在
+    // `content` 字符串里 ⇒ 那一档恒 None。真值改由 `lc-extract-fulltext.char_count`
+    // （Rhai 按字符数算出）提供。消费端清单见交付说明。
     let assemble_prompt = "你是一名长篇小说组装编辑。\n\
         \n\
         chapters_items 是逐章创作循环的输出数组（每项含 chapter_text 完整正文与 summary 摘要）。\n\
@@ -860,10 +1263,10 @@ fn build_literary_creation()
         {\n\
           \"full_text\": \"完整正文（按章节顺序拼接）\",\n\
           \"issues\": [\"发现的问题\"],\n\
-          \"total_word_count\": 35000,\n\
           \"consistency_score\": 92\n\
         }";
 
+    // 同上（非小说路径的同族）：`"total_word_count"` 一并删除，理由见 `assemble_prompt` 上方。
     let assemble_single_prompt = "你是一名文学作品编辑。\n\
         \n\
         对以下单篇作品进行润色和一致性校验：\n\
@@ -877,7 +1280,6 @@ fn build_literary_creation()
         {\n\
           \"full_text\": \"润色后正文\",\n\
           \"issues\": [\"发现的问题\"],\n\
-          \"total_word_count\": 2000,\n\
           \"consistency_score\": 92\n\
         }";
 
@@ -931,25 +1333,13 @@ fn build_literary_creation()
           \"confidence\": 0.85\n\
         }";
 
-    // —— 叙事结构增强：结构注入/校验/调整 Prompt ——
-
-    let structure_injector_prompt = "你是一名叙事结构设计师。\n\
-        \n\
-        基于完整的 narrative_structure（含 arcs/confluences/foreshadows），\n\
-        为每一章生成精确的结构约束指令。\n\
-        \n\
-        输入：{narrative_structure}\n\
-        \n\
-        请遍历 narrative_structure，为每一章生成结构指令：\n\
-        - 弧线推进：该章需推进的弧线阶段\n\
-        - 伏笔管理：该章需埋设/回收的伏笔\n\
-        - 交汇点触发：该章的关键交汇点事件\n\
-        \n\
-        请输出 JSON（键为章节号，值为结构指令）：\n\
-        {\n\
-          \"1\": { \"arc_instructions\": [{ \"arc_id\": \"arc-1\", \"stage_name\": \"现状\", \"stage_description\": \"起始状态\" }], \"foreshadow_instructions\": [], \"confluence_triggers\": [] },\n\
-          \"2\": { \"arc_instructions\": [], \"foreshadow_instructions\": [{ \"foreshadow_id\": \"fs-1\", \"action\": \"setup\", \"description\": \"埋设伏笔描述\" }], \"confluence_triggers\": [] }\n\
-        }";
+    // —— 叙事结构增强：结构校验/调整 Prompt ——
+    //
+    // 注：原先还有一个 `structure_injector_prompt`（「结构注入」LLM 节点，
+    // 输出「章号 → 逐章指令」映射）。它已被 A1 删除：那一步本就是
+    // `NarrativeStructure::get_chapter_instructions(chapter)` 的等值筛选，
+    // 改用确定性工具 `narrative_chapter_instructions`（crates/tools/src/tools/
+    // narrative_structure.rs）在 Loop 体内逐章调用 —— 章节号只在 Loop 作用域内存在。
 
     let structure_checker_prompt = "你是一名叙事结构校验器。\n\
         \n\
@@ -960,18 +1350,73 @@ fn build_literary_creation()
         - 章节结构指令：{chapter_structure}\n\
         - 叙事结构总览：{narrative_structure}\n\
         \n\
-        检查维度：\n\
-        1. 弧线推进：是否体现了指定的弧线阶段变化\n\
-        2. 伏笔管理：是否自然融入了埋设/回收的伏笔\n\
-        3. 交汇点：是否触发了关键事件\n\
-        4. 节奏控制：叙事节奏是否合理\n\
+        【统计口径声明（统计先行）】\n\
+        若本提示词中出现以「【代码统计】」开头、形如 `键=值` 的数值，\n\
+        那是上游**用代码统计出来的确定性事实**：请**直接引用**，\n\
+        不得自行重算、不得另算一套与之冲突的数字。\n\
+        若没有出现该标记，则**不要编造任何统计数字**（字数、段数、占比一律留空），\n\
+        并把无法判定的维度名写进 unverifiable 数组。\n\
+        \n\
+        逐项判据（每条都必须给出**可核对证据**：引用原文片段 + 次数或占比）：\n\
+        1. 弧线推进：本章是否出现弧线阶段的**可观察变化**——\n\
+           判据是「角色的选择与上一章相比发生了改变」，不是「文中提到了弧线」。\n\
+        2. 伏笔管理：逐个列出本章的重要伏笔及其出现次数。\n\
+           判据：同一个重要伏笔至少出现两次；且**回收后必须产生新的信息或情感波动**\n\
+           （回收之后什么都没改变的，只能算「填坑」，不算回收）。\n\
+        3. 交汇点：本章是否真的触发了结构指令里点名的关键事件。\n\
+           逐条列出「已触发的事件 id」与「未触发的事件 id」。\n\
+        4. 节奏控制：把本章切成连续段落，为每段标注节奏类型（快 / 慢 / 过渡），\n\
+           然后给出**最长同类型连续段数**。判据：连续 3 段同类型即报警。\n\
+        5. 场景循环：统计本章的 Try-Fail 循环数（尝试达成目标 → 受阻 → 换策略 → 局面更糟）。\n\
+           判据：本章至少 3 个循环，且每个循环必须让角色离目标更远或代价更大。\n\
+        6. 对白潜台词：统计对白行中「字面之下还有另一层意思」的行数占比。\n\
+           判据：占比不低于 0.5。若情绪是靠「他冷冷地说」这类副词标签标出来的，\n\
+           直接记为不合格（那是偷懒，不是潜台词）。\n\
+        7. 去 AI 味：逐项检查下列 10 项，命中即计入 ai_flavor_hits（每项都要抄出原文）：\n\
+           (1) 排比式总结句（「不仅…更是…也是…」）；\n\
+           (2) 直接标注情绪（「他感到一阵悲伤」）；\n\
+           (3) 相邻句子长度高度雷同；\n\
+           (4) 定节奏的标记词（「此刻」「就在这时」）；\n\
+           (5) 把因果链全部摊在表面的连接词堆叠；\n\
+           (6) 同类形容词叠加（「温暖而明亮的…」）；\n\
+           (7) 人物越过证据直接下结论（全知化）；\n\
+           (8) 对话标签膨胀（用标签代替动作表达情绪）；\n\
+           (9) 段尾强行积极收束；\n\
+           (10) 由个别现象拔高成「人类自古以来…」式的大开口句。\n\
+        \n\
+        打分方式：**先逐项给分，再汇总**，不允许只给一个主观总分。\n\
+        每个维度给 0-100 的整数分，并附一句引用原文的理由；\n\
+        compliance_score 必须是这些维度分的**算术平均**（四舍五入到整数），\n\
+        不得与任何维度分互相矛盾。\n\
         \n\
         请输出 JSON：\n\
         {\n\
           \"compliance_score\": 85,\n\
+          \"dimension_scores\": {\n\
+            \"arc\": { \"score\": 90, \"evidence\": \"引用原文片段\", \"arc_stage_observed\": \"本章实际呈现的弧线阶段\" },\n\
+            \"foreshadow\": { \"score\": 80, \"evidence\": \"引用原文片段\" },\n\
+            \"confluence\": { \"score\": 100, \"evidence\": \"引用原文片段\" },\n\
+            \"pacing\": { \"score\": 75, \"evidence\": \"引用原文片段\" },\n\
+            \"scene_cycle\": { \"score\": 70, \"evidence\": \"引用原文片段\" },\n\
+            \"subtext\": { \"score\": 60, \"evidence\": \"引用原文片段\" },\n\
+            \"deai\": { \"score\": 65, \"evidence\": \"引用原文片段\" }\n\
+          },\n\
           \"arc_compliance\": 90,\n\
           \"foreshadow_compliance\": 80,\n\
           \"confluence_compliance\": 100,\n\
+          \"confluence_triggered\": [\"已触发的事件 id\"],\n\
+          \"confluence_missing\": [\"未触发的事件 id\"],\n\
+          \"foreshadow_occurrences\": [\n\
+            { \"id\": \"fs-1\", \"planted\": true, \"reinforced\": 1, \"payoff\": false, \"payoff_ripple\": false, \"evidence\": \"引用原文片段\" }\n\
+          ],\n\
+          \"pacing_runs\": { \"labels\": [\"快\", \"慢\", \"快\"], \"longest_run\": 2, \"alarm\": false },\n\
+          \"scene_try_fail_cycles\": 3,\n\
+          \"subtext_ratio\": 0.5,\n\
+          \"subtext_marked_by_adverb\": false,\n\
+          \"ai_flavor_hits\": [\n\
+            { \"item\": \"排比式总结句\", \"quote\": \"引用原文片段\", \"count\": 1 }\n\
+          ],\n\
+          \"unverifiable\": [\"无法判定且无统计量的维度名\"],\n\
           \"deviations\": [\n\
             { \"deviation_type\": \"arc_deviation\", \"description\": \"未充分展现弧线转变\", \"affected_element\": \"arc-1\", \"severity\": \"medium\" }\n\
           ],\n\
@@ -985,7 +1430,6 @@ fn build_literary_creation()
         输入：\n\
         - 结构校验报告：{compliance_report}\n\
         - 当前叙事结构：{narrative_structure}\n\
-        - 剩余章节数：{remaining_chapters}\n\
         \n\
         调整策略：\n\
         - 若伏笔未按时埋设：延后到最近的可行章节\n\
@@ -1019,14 +1463,62 @@ fn build_literary_creation()
             200.0,
             0.0,
         ),
+        // lc-persist-structure: 叙事结构落库（A2）
+        //
+        // 位置：`lc-conceive` 之后、体裁路由之前的主路径**单链**上（只有一条入边，
+        // 不构成 AND-join 语义）。
+        // 工具契约：`narrative_structure_persist`（常量见 crates/tools/src/tools/
+        // narrative_structure.rs:58，注册点同 crate 的 registry）。消费端是 ToolNode
+        // 自身 ⇒ 走共享宽松解析器（tool_executor.rs:70-80 全限定调用），可穿透
+        // AgentNode 的 content JSON 字符串，故 `structure` 用 4 段路径。
+        // ⚠️ 若该「ToolNode 转调共享宽松版」的统一被回退，兜底形态是
+        // `lc-conceive.content`（整串信封，需工具侧自取 narrative_structure/genre）
+        // —— 首选形态与兜底形态**只能留一个**，不可同时挂。
+        //
+        // `name` 刻意不映射：ToolNode 的 input_mapping 值只能是变量路径、没有字面量
+        // （tool_executor.rs:75-80 解析失败即 Value::Null），故由工具侧把 `name`
+        // 改为可选/自派生。若工具侧未落地该改动，本节点运行期会报
+        // 「缺少必填参数 name」——属已知的跨模块依赖，见交付说明。
+        make_tool_node(
+            "lc-persist-structure",
+            "叙事结构落库",
+            "narrative_structure_persist",
+            vec![
+                ("structure", "lc-conceive.content.narrative_structure"),
+                ("genre", "lc-conceive.content.genre"),
+            ],
+            "lc-persist-structure",
+            300.0,
+            -200.0,
+        ),
         // lc-genre-route: 体裁路由（在 outline 前，读 conceive 输出的 genre）
+        //
+        // ⚠️ **作用域锚定（防止误读为「全仓都取不到」）**：
+        // 下面这条限制**仅适用于 ConditionNode 的严格解析器**，不是全仓性质。
+        // AgentNode / ToolNode / CodeNode 的 `input_mapping` 走**共享宽松版**
+        // `executors::resolve_var_path`（executors/mod.rs:106-164；穿透逻辑在 :128-139），
+        // 它对中间段的 JSON **字符串**会先 `from_str` 解析再 `.get`，
+        // 因此 `<agent节点>.content.<字段>` 这类路径在**它们那里是可以取到的**。
+        // 本节点（`lc-genre-route`）之所以取不到，仅仅因为它恰好是 ConditionNode。
+        // ⇒ 不要因为这段注释而否定 Agent/Tool 侧的 `.content.<字段>` 写法。
+        //
+        // ⚠️ ConditionNode 用的是 `condition_executor::resolve_var_path`
+        // （condition_executor.rs:392-412），**与 executors::resolve_var_path 不是同一个实现**：
+        // 它是严格模式，源码注释明写「不做 JSON 字符串穿透」，实现是
+        // `current = current.get(part)?.clone()` 且**没有 auto_parse**。
+        // 后果：Agent 的 content 是 JSON **字符串**，任何 `<node>.<嵌套字段>` 都恒 None
+        // —— `lc-conceive.genre` 与 `lc-conceive.content.genre` **两者都取不到**
+        // （前者包装层无该键；后者在字符串上 .get 恒 None）。
+        // **可达的只有一层**：`<node_id>.content` 本身（包装层顶层键）。
+        // 因此这里取整段 content 字符串 + 正则匹配 JSON 里的 "genre":"novel"
+        // （正则锚定 JSON 键，避免正文里偶然出现 novel 造成假阳）。
         make_condition_node(
             "lc-genre-route",
             "体裁路由",
             vec![Condition {
-                var_path: "lc-conceive.genre".to_string(),
-                operator: CompareOperator::Eq,
-                value: serde_json::json!("novel"),
+                var_path: "lc-conceive.content".to_string(),
+                operator: CompareOperator::RegexMatch,
+                value: serde_json::json!("\"genre\"\\s*:\\s*\"novel\""),
             }],
             LogicalOperator::And,
             400.0,
@@ -1043,36 +1535,41 @@ fn build_literary_creation()
             Some(profile),
             "chapters",
             vec![
-                ("persona", "lc-conceive.persona"),
-                ("world_schema", "lc-conceive.world_schema"),
-                ("conflict_map", "lc-conceive.conflict_map"),
-                ("narrative_structure", "lc-conceive.narrative_structure"),
+                ("persona", "lc-conceive.content.persona"),
+                ("world_schema", "lc-conceive.content.world_schema"),
+                ("conflict_map", "lc-conceive.content.conflict_map"),
+                ("narrative_structure", "lc-conceive.content.narrative_structure"),
             ],
             vec!["lc-conceive"],
             600.0,
             0.0,
         ),
-        // —— 叙事结构增强：结构注入节点 ——
-
-        // lc-structure-injector: 将叙事结构映射为逐章指令
-        // 在大纲生成后、逐章创作前执行
-        make_agent_node_full(
-            "lc-structure-injector",
-            "结构注入",
-            structure_injector_prompt,
-            vec![],
-            Some(profile),
-            "lc-chapter-structure",
-            vec![("narrative_structure", "lc-conceive.narrative_structure")],
-            vec!["lc-conceive"],
+        // —— R1：把 outline 的章节数组「脱壳」成真 Array ——
+        //
+        // 原先这里是 AgentNode `lc-structure-injector`（LLM「结构注入」，输出
+        // 「章号 → 指令」映射）。它已被 A1 删除：① 那一步是
+        // `get_chapter_instructions` 的等值筛选，确定性可算；② 它在 Loop **之前**
+        // 只跑一次，不可能产出「当前章」的指令，下游
+        // `lc-chapter-structure.current_chapter` 因此恒 None（长期基线违规）。
+        // 现在换成 CodeNode：只做「字符串 → 真数组」这一件事，
+        // 供 `lc-draft-loop.iter_input_var` 取用（loop_executor.rs:163-174）。
+        make_code_node(
+            "lc-outline-chapters",
+            "大纲脱壳",
+            LC_CHAPTERS_RHAI,
+            vec![("chapters_raw", "lc-outline.content")],
+            "lc-outline-chapters",
             700.0,
             0.0,
         ),
         // —— Loop 体内部节点（小说路径，仅在 body_steps 中引用，不通过 edges 连接）——
 
         // lc-draft-chapter: 单章创作（Loop 内，接收当前章 + 上下文）
-        // context_sources 加 lc-conceive/lc-outline/lc-structure-injector：body 节点无 edges，
+        // context_sources 加 lc-conceive/lc-outline：body 节点无 edges，
         // 跨级引用 persona/world_schema/conflict_map/narrative_structure 必须经软依赖注入
+        // （lc-chapter-structure 不在此列：它由**同轮前一个 body_step**
+        //  `lc-chapter-instructions` 产出，loop_executor.rs:273-275 已按 output_var
+        //  写进本轮 iter_vars，后续 body_step 直接可见）
         make_agent_node_full(
             "lc-draft-chapter",
             "单章创作",
@@ -1081,15 +1578,20 @@ fn build_literary_creation()
             Some(profile),
             "lc-draft-chapter",
             vec![
-                ("chapter", "chapter"),                         // Loop 迭代变量：当前章
+                ("chapter", "chapter"),                               // Loop 迭代变量：当前章
                 ("prev_summary", "chapters_text__partial"), // 从 partial 结果读取：取数组最后一项的 summary
-                ("persona", "lc-conceive.persona"),         // 全局 persona
-                ("world_schema", "lc-conceive.world_schema"), // 全局设定
-                ("conflict_point", "lc-conceive.conflict_map"), // 冲突图谱
-                ("narrative_structure", "lc-conceive.narrative_structure"), // 叙事结构总览
-                ("chapter_structure", "lc-chapter-structure.current_chapter"), // 当前章结构指令
+                ("persona", "lc-conceive.content.persona"), // 全局 persona
+                ("world_schema", "lc-conceive.content.world_schema"), // 全局设定
+                ("conflict_point", "lc-conceive.content.conflict_map"), // 冲突图谱
+                ("narrative_structure", "lc-conceive.content.narrative_structure"), // 叙事结构总览
+                // 当前章结构指令：ToolNode 消费端（本节点是 AgentNode ⇒ 宽松解析器），
+                // 4 段逐跳穿透 `result`（对象）→ `content`（JSON 字符串，导航时自动 parse）
+                // → `constraints`。**不是 3 段**：生产走 ToolResolver 回调路径，
+                // `result` 里只有 `content`（tool_executor.rs:177-188 外层 +
+                // src/init/services.rs:1972-1976 内层）。
+                ("chapter_structure", "lc-chapter-structure.result.content.constraints"),
             ],
-            vec!["lc-conceive", "lc-outline", "lc-structure-injector"],
+            vec!["lc-conceive", "lc-outline"],
             300.0,
             -400.0,
         ),
@@ -1101,7 +1603,7 @@ fn build_literary_creation()
             vec![],
             Some(profile),
             "lc-anti-logic",
-            vec![("chapter_draft", "lc-draft-chapter.chapter_draft")],
+            vec![("chapter_draft", "lc-draft-chapter.content.chapter_draft")],
             vec!["lc-conceive"],
             500.0,
             -400.0,
@@ -1114,7 +1616,7 @@ fn build_literary_creation()
             vec![],
             Some(profile),
             "lc-summary",
-            vec![("revised_draft", "lc-anti-logic.revised_draft")],
+            vec![("revised_draft", "lc-anti-logic.content.revised_draft")],
             vec!["lc-conceive"],
             700.0,
             -400.0,
@@ -1130,11 +1632,12 @@ fn build_literary_creation()
             Some(profile),
             "lc-structure-check",
             vec![
-                ("chapter_draft", "lc-summary.chapter_text"),
-                ("chapter_structure", "lc-chapter-structure.current_chapter"),
-                ("narrative_structure", "lc-conceive.narrative_structure"),
+                ("chapter_draft", "lc-summary.content.chapter_text"),
+                // 同 lc-draft-chapter：4 段（Tool 源 + 宽松消费端），不是 3 段
+                ("chapter_structure", "lc-chapter-structure.result.content.constraints"),
+                ("narrative_structure", "lc-conceive.content.narrative_structure"),
             ],
-            vec!["lc-conceive", "lc-structure-injector"],
+            vec!["lc-conceive"],
             900.0,
             -400.0,
         ),
@@ -1149,31 +1652,102 @@ fn build_literary_creation()
             "lc-adapted-structure",
             vec![
                 ("compliance_report", "lc-structure-checker"),
-                ("narrative_structure", "lc-conceive.narrative_structure"),
-                ("remaining_chapters", "lc-outline.remaining"),
+                ("narrative_structure", "lc-conceive.content.narrative_structure"),
+                // R3：原先这里映射 ("remaining_chapters", "lc-outline.remaining")。
+                // `lc-outline` 的产出是**顶层 JSON 数组**（键只有 num/title/summary/
+                // key_events/conflict_idx/focal），既无 `remaining` 键、数组也无该属性
+                // ⇒ 该路径恒 None（长期基线违规）。本仓 input_mapping 值只能是变量路径、
+                // 不含字面量，而「剩余章节数」没有任何确定的变量来源（Loop 的
+                // `__loop_iter_total__` 注入在 body 内、且为 0 基），故直接删除该映射。
+                // 同步：`structure_adapter_prompt` 正文里原有的
+                // `- 剩余章节数：{remaining_chapters}` 一行也已删除 —— 本仓 prompt 模板
+                // 引擎**只认双花括号**（crates/rt-workflow/src/work_engine/prompt_template.rs:69-103，需先见 `{{` 才起槽位），
+                // 单花括号 `{remaining_chapters}` 不是占位符、是**原样字面文本**，
+                // 留着等于在提示词里写了个假输入项，诱导 LLM 现编章节数。
             ],
-            vec!["lc-conceive", "lc-structure-injector"],
+            vec!["lc-conceive"],
             1100.0,
             -400.0,
         ),
+        // —— Loop 体新增：逐章确定性结构指令（A1）+ 章节打包提层（R4）——
+        //
+        // lc-chapter-instructions: 用确定性叙事引擎替换被删的 LLM 节点
+        // `lc-structure-injector`。**必须放在 Loop 体内、`lc-draft-chapter` 之前**：
+        // `NarrativeStructure::get_chapter_instructions(chapter)` 是「按章节号等值
+        // 筛选」，而章节号只在 Loop 作用域内存在（`iteratee_var = "chapter"`）。
+        // output_var 沿用旧名 `lc-chapter-structure`，使两个消费端只需改路径中段。
+        // `structure` 用 4 段：ToolNode 已转调共享宽松版 resolver（tool_executor.rs:70-80）
+        // ⇒ 可穿透 `lc-conceive.content` 的 JSON 字符串。兜底形态（若统一被回退）是
+        // `lc-conceive.content` 整串信封，需工具侧自行取字段 —— 二者只可留一个。
+        make_tool_node(
+            "lc-chapter-instructions",
+            "逐章结构指令",
+            "narrative_chapter_instructions",
+            vec![
+                ("structure", "lc-conceive.content.narrative_structure"),
+                ("chapter", "chapter"), // Loop 迭代变量：当前章对象，工具侧按 num 优先取章号
+            ],
+            "lc-chapter-structure",
+            100.0,
+            -400.0,
+        ),
+        // lc-chapter-pack: 从 `lc-summary` 的信封里取出正文与摘要（R4 前半）
+        make_code_node(
+            "lc-chapter-pack",
+            "章节打包",
+            LC_CHAPTER_PACK_RHAI,
+            vec![("summary_raw", "lc-summary.content")],
+            "lc-chapter-pack",
+            1300.0,
+            -400.0,
+        ),
+        // lc-chapter-bare: 提层（R4 后半）——**必须是 body_steps 的最后一步**。
+        // 它是唯一无信封的执行器（DataTransformer），因此 loop_executor.rs:407 的
+        // `partial.push(last_step_output)` 得到的元素顶层就是裸
+        // `{chapter_text, summary}`，`assemble_prompt`（:965）与
+        // `draft_chapter_prompt`（:897 prev_summary）的原文契约才成立。
+        // input_var 是平键，必须等于上一步的 output_var（否则 `input` 为 unit ⇒ 抛错）。
+        make_data_transformer_node(
+            "lc-chapter-bare",
+            "章节包提层",
+            "lc-chapter-pack",
+            LC_CHAPTER_BARE_EXPR,
+            "lc-chapter-bare",
+            1500.0,
+            -400.0,
+        ),
         // lc-draft-loop: LoopNode（小说路径核心）
-        // iter_input_var = "lc-outline"：deps_results 按 node_id 注入，
-        // variables["lc-outline"] = outline 输出的顶层章节数组
+        //
+        // iter_input_var = "lc-outline-chapters.result.chapters"（3 段）：
+        //   · 不能直接写 `lc-outline` / `lc-outline.content` —— AgentNode 的
+        //     content 是 JSON 字符串，且宽松解析器**终值不 auto_parse**
+        //     （executors/mod.rs:148-157）⇒ 拿到字符串后 loop_executor 只当单元素
+        //     （`Some(other) => vec![other]`），循环恒 1 轮。
+        //   · 经 `lc-outline-chapters`（CodeNode）脱壳后，`result` 已是对象，
+        //     `.chapters` 是终值 Array（终值无需 parse）⇒ 真正逐章迭代。
+        //   · Loop 的 iter_input_var 走的就是共享宽松版（loop_executor.rs:166），
+        //     3 段可达。
         make_loop_node(
             "lc-draft-loop",
             "逐章创作循环",
             LoopType::ForEach,
-            Some("lc-outline"), // iter_input_var: 从 lc-outline 输出读取章节数组（node_id 注入）
-            Some("chapter"),    // iteratee_var: 当前章注入 scope 的变量名
+            Some("lc-outline-chapters.result.chapters"), // iter_input_var: CodeNode 产出的真数组
+            Some("chapter"),                             // iteratee_var: 当前章注入 scope 的变量名
             Some("chapters_text"), // iter_output_var: 聚合输出变量（每轮 last_step 累积）
             Some("chapters_text__partial"), // partial_result_var: 流式累积变量（供下一轮 prev_summary 读取）
             Some(50),                       // 最多 50 章
             vec![
+                // 顺序敏感：① lc-chapter-instructions 必须在 lc-draft-chapter 之前
+                //（同轮先算出本章结构指令）；② lc-chapter-bare 必须在**末位**
+                //（聚合取每轮最后一步的输出）。
+                "lc-chapter-instructions".to_string(),
                 "lc-draft-chapter".to_string(),
                 "lc-anti-logic".to_string(),
                 "lc-summary".to_string(),
                 "lc-structure-checker".to_string(),
                 "lc-structure-adapter".to_string(),
+                "lc-chapter-pack".to_string(),
+                "lc-chapter-bare".to_string(),
             ],
             1200.0,
             0.0,
@@ -1191,9 +1765,9 @@ fn build_literary_creation()
             Some(profile),
             "lc-draft-single",
             vec![
-                ("persona", "lc-conceive.persona"),
-                ("world_schema", "lc-conceive.world_schema"),
-                ("conflict_map", "lc-conceive.conflict_map"),
+                ("persona", "lc-conceive.content.persona"),
+                ("world_schema", "lc-conceive.content.world_schema"),
+                ("conflict_map", "lc-conceive.content.conflict_map"),
             ],
             vec!["lc-conceive"],
             800.0,
@@ -1203,7 +1777,9 @@ fn build_literary_creation()
 
         // lc-assemble: 小说路径组装（接收 Loop 聚合 items，每项含 chapter_text 正文）
         // 引用 "lc-draft-loop.items"：deps_results 按 node_id 注入 Loop 输出对象，
-        // items 字段 = 每轮最后一步（lc-summary）输出的累积数组
+        // items 字段 = 每轮**最后一步**输出的累积数组（loop_executor.rs:407）。
+        // R4 之后最后一步是 `lc-chapter-bare`（DataTransformer，无信封），
+        // 故每项顶层就是裸 `{chapter_text, summary}` —— 与 assemble_prompt 原文一致。
         make_agent_node_with_inputs(
             "lc-assemble",
             "组装校验",
@@ -1225,7 +1801,7 @@ fn build_literary_creation()
             vec![],
             Some(profile),
             "lc-assemble",
-            vec![("draft", "lc-draft-single.draft")],
+            vec![("draft", "lc-draft-single.content.draft")],
             1200.0,
             200.0,
         ),
@@ -1243,9 +1819,42 @@ fn build_literary_creation()
             vec![],
             Some(profile),
             "lc-review-agent",
-            vec![("full_text", "lc-assemble.full_text")],
+            vec![("full_text", "lc-assemble.content.full_text")],
             vec!["lc-assemble"],
             1400.0,
+            0.0,
+        ),
+        // lc-extract-fulltext: 包裹层「降层器」（Rhai CodeNode）—— 任务 G
+        //
+        // 位置刻意选在**汇合点 lc-review-agent 之后**：
+        //   · 本仓对「两条互斥路径的下游节点」的既有接法是**每个分支终点各接一条
+        //     Direct 入边**（如 lc-review-agent 同时接 lc-assemble 与
+        //     lc-assemble-single），靠 dag_store.rs:162-238 的互斥短路 +
+        //     :738-834 的「未选中子树跳过 + 汇合点保护（不动点）」解死锁：
+        //     未选中分支整棵子树被标 Skipped（reason=branch_not_taken），
+        //     但只要该节点还有一条来自子树外的活跃入边就被移出跳过集。
+        //   · 本节点**不需要**这套机制：它只有一条入边，位于 lc-review-agent
+        //     （唯一真汇合点）之后的单链上 ⇒ 无 AND-join 语义风险（lead 明令禁止）。
+        // 读 `lc-assemble.content`：两条路径共用同一 output_var 名，天然都覆盖。
+        make_code_node(
+            "lc-extract-fulltext",
+            "抽取全文",
+            LC_FULLTEXT_RHAI,
+            vec![
+                ("raw_text", "lc-assemble.content"),
+                // 真值化（2026-09-15 第二批）：`chapter_count` 的来源。
+                // 唯一改动是**这条 input_mapping**，无节点/无边的增删（拓扑不变）。
+                // · `lc-draft-loop.items` 是 Loop 输出包裹层的合法字段（loop_executor.rs:536-546），
+                //   门禁规则 A 对「源是 Loop」已放行 `items`（与本文件既有的
+                //   `lc-draft-loop.items → chapters_text__partial` 同类）。
+                // · 消费端是本 CodeNode ⇒ 走宽松解析器，2 段直接取到。
+                // · 非小说路径（lc-assemble-single）该 Loop 从未执行 ⇒ 变量不存在
+                //   ⇒ `resolve_var_path` 返回 None ⇒ `context.variables` 里无此键
+                //   ⇒ 脚本内 `type_of(chapters_items) == "()"` ⇒ **省略 chapter_count 键**。
+                ("chapters_items", "lc-draft-loop.items"),
+            ],
+            "lc-extract-fulltext",
+            1500.0,
             0.0,
         ),
         // lc-tolerance-agent: 容错评审 Agent（汇总四路评审结果）
@@ -1257,24 +1866,28 @@ fn build_literary_creation()
             Some(profile),
             "lc-tolerance",
             vec![
-                ("style_audit_result", "lc-review-agent.style_audit"),
-                ("entropy_check_result", "lc-review-agent.entropy_check"),
-                ("reader_vulgar_result", "lc-review-agent.reader_vulgar"),
-                ("reader_critic_result", "lc-review-agent.reader_critic"),
+                ("style_audit_result", "lc-review-agent.content.style_audit"),
+                ("entropy_check_result", "lc-review-agent.content.entropy_check"),
+                ("reader_vulgar_result", "lc-review-agent.content.reader_vulgar"),
+                ("reader_critic_result", "lc-review-agent.content.reader_critic"),
             ],
             1600.0,
             0.0,
         ),
         // lc-tolerance: 容错判定 ConditionNode
-        // var_path 必须用节点 ID "lc-tolerance-agent"（deps_results 按 node_id 注入），
-        // Agent 的 output_var="lc-tolerance" 只写入 results 不进 ctx.variables
+        // var_path 用节点 ID "lc-tolerance-agent"（deps_results 按 node_id 注入；
+        // engine/mod.rs:3252-3264 另会把 wf.results 的全部 key 兜底注入，output_var
+        // 同样可达，但按 node_id 写更稳）。
+        // ⚠️ 同 lc-genre-route：ConditionNode 的 resolve_var_path 不做字符串穿透，
+        // 嵌套字段恒 None ⇒ 只能取一层 `lc-tolerance-agent.content`，
+        // 再用正则匹配 JSON 里的 "verdict":"pass"。
         make_condition_node(
             "lc-tolerance",
             "容错判定",
             vec![Condition {
-                var_path: "lc-tolerance-agent.verdict".to_string(),
-                operator: CompareOperator::Eq,
-                value: serde_json::json!("pass"),
+                var_path: "lc-tolerance-agent.content".to_string(),
+                operator: CompareOperator::RegexMatch,
+                value: serde_json::json!("\"verdict\"\\s*:\\s*\"pass\""),
             }],
             LogicalOperator::And,
             1800.0,
@@ -1299,7 +1912,12 @@ fn build_literary_creation()
             "保存为 Word 文档",
             "ExportWord",
             vec![
-                ("markdown", "lc-assemble.full_text"),
+                // 指 CodeNode 降层后的 `<code>.result.<field>` 3 段：`result` 已是对象
+                // （code_executor.rs:520-532），3 段纯对象跳，任意消费端都可达
+                // （见 LC_FULLTEXT_RHAI 注释）。注：ToolNode 的私有严格 resolver 已于
+                // 2026-09-15 统一为共享宽松版（tool_executor.rs:70-80），故此处**不再**
+                // 受「不穿透」限制；保留 CodeNode 通路是为了让正文只降层一次。
+                ("markdown", "lc-extract-fulltext.result.full_text"),
                 ("output_path", "output_dir"),
                 ("title", "document_title"),
             ],
@@ -1312,14 +1930,16 @@ fn build_literary_creation()
     ];
 
     // —— 边定义 ——
-    // 注意：Loop 内节点（lc-draft-chapter, lc-anti-logic, lc-summary, lc-structure-checker, lc-structure-adapter）
-    // 不通过 edges 连接，由 LoopExecutor 通过 body_steps 驱动执行。
+    // 注意：Loop 内节点（lc-chapter-instructions, lc-draft-chapter, lc-anti-logic,
+    // lc-summary, lc-structure-checker, lc-structure-adapter, lc-chapter-pack,
+    // lc-chapter-bare）不通过 edges 连接，由 LoopExecutor 通过 body_steps 驱动执行。
 
     let edges = vec![
-        // 主链路：构思 → 体裁路由
+        // 主链路：构思 → 叙事结构落库 → 体裁路由
         edge("e-trigger-conceive", "trigger", "lc-conceive"),
-        edge("e-conceive-genre-route", "lc-conceive", "lc-genre-route"),
-        // 体裁路由：true(小说) → outline → structure-injector → Loop；false(诗歌/散文) → 单次创作
+        edge("e-conceive-persist-structure", "lc-conceive", "lc-persist-structure"),
+        edge("e-persist-structure-genre-route", "lc-persist-structure", "lc-genre-route"),
+        // 体裁路由：true(小说) → outline → 脱壳 → Loop；false(诗歌/散文) → 单次创作
         edge_cond(
             "e-genre-route-novel",
             "lc-genre-route",
@@ -1334,17 +1954,18 @@ fn build_literary_creation()
             "lc-draft-single",
             EdgeType::ConditionFalse,
         ),
-        // 小说路径：outline → structure-injector → Loop → 组装
-        edge("e-outline-structure-injector", "lc-outline", "lc-structure-injector"),
-        edge("e-structure-injector-draft-loop", "lc-structure-injector", "lc-draft-loop"),
+        // 小说路径：outline → outline-chapters（脱壳成真数组）→ Loop → 组装
+        edge("e-outline-chapters", "lc-outline", "lc-outline-chapters"),
+        edge("e-chapters-draft-loop", "lc-outline-chapters", "lc-draft-loop"),
         edge("e-draft-loop-assemble", "lc-draft-loop", "lc-assemble"),
         // 非小说路径：单次创作 → 组装
         edge("e-draft-single-assemble", "lc-draft-single", "lc-assemble-single"),
         // 统一：组装 → 后编辑评审（两条路径汇聚）
         edge("e-assemble-review", "lc-assemble", "lc-review-agent"),
         edge("e-assemble-single-review", "lc-assemble-single", "lc-review-agent"),
-        // 评审 → 容错评审 Agent → 容错判定
-        edge("e-review-tolerance-agent", "lc-review-agent", "lc-tolerance-agent"),
+        // 评审 → 全文抽取（CodeNode，单链公共路径）→ 容错评审 Agent → 容错判定
+        edge("e-review-extract-fulltext", "lc-review-agent", "lc-extract-fulltext"),
+        edge("e-extract-fulltext-tolerance", "lc-extract-fulltext", "lc-tolerance-agent"),
         edge("e-tolerance-agent-tolerance", "lc-tolerance-agent", "lc-tolerance"),
         // 容错判定：true(通过) → 保存；false(需重写) → 人工审批
         edge_cond(
@@ -1371,7 +1992,7 @@ fn build_literary_creation()
         nodes,
         edges,
         "文字创作".to_string(),
-        "创作元认知 → 叙事结构设计 → 大纲拆章 → 结构注入 → 逐章创作（含结构校验/调整）→ 反逻辑校验 → 双读者评审 → 容错归档。专业文学创作工作流。".to_string(),
+        "创作元认知 → 叙事结构设计（落库）→ 大纲拆章 → 逐章结构指令 → 逐章创作（含结构校验/调整）→ 反逻辑校验 → 双读者评审 → 容错归档。专业文学创作工作流。".to_string(),
         "📖".to_string(),
         vec![
             "literary".to_string(),
@@ -1382,4 +2003,25 @@ fn build_literary_creation()
             "narrative-structure".to_string(),
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{KPI_HOOK_NAME, literary_hooks_config};
+
+    /// `hooks_config` 是写进 `workflow_templates.hooks_config` 的**入库产物**，消费端是引擎
+    /// 的 `run_post_exec_hooks` 注册表查名（fail-open：名字对不上只 warn 跳过）。
+    /// ⇒ 把「钩子名只留 `KPI_HOOK_NAME` 一份载体」这一步的产物**逐字锁死**：谁改了骨架立刻红。
+    #[test]
+    fn hooks_config_product_is_byte_identical_to_legacy_literal() {
+        assert_eq!(literary_hooks_config(), r#"{"post_exec":["content-media-kpi-persist"]}"#);
+    }
+
+    /// 声明里的名字必须与启动期注册用的常量同源（防只改常量、或只改产物）。
+    #[test]
+    fn hooks_config_declares_the_registered_hook_constant() {
+        let cfg: axagent_harness::WorkflowHooksConfig =
+            serde_json::from_str(&literary_hooks_config()).expect("必须是合法 JSON");
+        assert_eq!(cfg.post_exec, vec![KPI_HOOK_NAME.to_string()]);
+    }
 }

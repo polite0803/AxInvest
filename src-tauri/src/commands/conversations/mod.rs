@@ -3056,7 +3056,6 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
         agent_ask_senders: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         agent_always_allowed: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         agent_prompters: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        agent_plan_approvals: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         evolution_consent_senders: Arc::new(tokio::sync::Mutex::new(
             std::collections::HashMap::new(),
         )),
@@ -3173,7 +3172,6 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
         )),
         telemetry_sink: Arc::new(axagent_telemetry::MemoryTelemetrySink::default())
             as Arc<dyn axagent_telemetry::TelemetrySink>,
-        persistent_runner: None,
         semantic_cache: semantic_cache.clone(),
         prompt_cache: Arc::new(PromptCache::new()),
         fleet_repository: Arc::new(axagent_harness::fleet::NoopFleetRepository)
@@ -3270,24 +3268,6 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
         ),
         session_share_manager: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         // ── Phase 3 P1 Task 3.1: domain sub-states ──
-        infra: crate::state::InfraState::new(
-            axagent_runtime::harness::RuntimeHarness::new(axagent_runtime::harness::HarnessDeps {
-                persistence: Arc::new(axagent_dao::db::DbHandle {
-                    conn: db.clone(),
-                    path: ":memory:".into(),
-                }) as Arc<dyn axagent_harness::Persistence>,
-                master_key: [0; 32],
-                provider_registry: Arc::new(
-                    axagent_providers::registry::ProviderRegistry::create_default(),
-                )
-                    as Arc<dyn axagent_harness::registry::ProviderRegistry>,
-            }),
-            vector_store.clone(),
-            Arc::new(tokio::sync::Semaphore::new(2)),
-            Arc::new(axagent_storage::file_authorizer::FileAuthorizer::new()),
-            temp_dir.clone(),
-        ),
-        gateway_state: crate::state::GatewayState::new(Arc::new(tokio::sync::Mutex::new(None))),
         task: crate::state::TaskState::new(
             Arc::new(axagent_runtime::task_manager::TaskManager::new()),
             Arc::new(tokio::sync::Mutex::new(None)),
@@ -3422,8 +3402,10 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
             Arc::new(tokio::sync::Mutex::new(
                 axagent_trajectory::ProcessRewardModel::default().with_default_provider("general"),
             )),
-            Arc::new(axagent_orchestrator::IndustryLearningEngine::new()),
-            Arc::new(tokio::sync::Mutex::new(axagent_orchestrator::IndustryAdapterRegistry::new())),
+            Arc::new(axagent_orchestrator::DomainPackLearningEngine::new()),
+            Arc::new(tokio::sync::Mutex::new(
+                axagent_orchestrator::DomainPackAdapterRegistry::new(),
+            )),
         ),
         tool: crate::state::ToolState::new(Arc::new(tokio::sync::Mutex::new(
             axagent_trajectory::AutoToolCreator::new(

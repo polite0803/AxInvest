@@ -127,8 +127,6 @@ impl CapitalStrategy {
         let price = quote.price;
 
         let mf = client.get_money_flow(code).await.ok().flatten();
-        let nb = client.get_north_bound_holding(code).await.ok().flatten();
-        let dt = client.get_dragon_tiger(code).await.ok();
 
         // 检测"空壳" MoneyFlow：Tencent 等vendor 返回了对象但关键字段全为 0，
         // 这种情况等同于数据不可用，应回退到 K 线量价检测。
@@ -140,10 +138,20 @@ impl CapitalStrategy {
                 || m.small_net != 0.0
         };
 
-        // eastmoney 资金流向被反爬拦截，或 vendor 返回零值空壳数据时回退到 K 线量价检测
+        // eastmoney 资金流向被反爬拦截，或 vendor 返回零值空壳数据时回退到 K 线量价检测。
+        //
+        // 顺序要求：本判断必须在拉 north_bound / dragon_tiger **之前**。
+        // 旧实现无条件先拉三个源再判断，导致"资金流已注定走 K 线代理"的股票
+        // 仍要付出 north_bound + dragon_tiger 的完整请求与重试代价
+        // （北向个股持仓已全源失效，单只冷启动 3 源 × 3 轮重试实测 ≈ 8.5s；
+        //   筛池 80+ 只累加即达分钟级，期间租户只能干等）。
         if mf.as_ref().is_none_or(|m| !mf_is_effective(m)) {
             return self.scan_from_klines(client, code, name, sector, vars).await;
         }
+
+        // 仅当资金流确实有效、要走资金驱动路径时，才继续拉另外两个源
+        let nb = client.get_north_bound_holding(code).await.ok().flatten();
+        let dt = client.get_dragon_tiger(code).await.ok();
 
         // 三个资金数据源在 as-of 下可能全部不可用，回退到 K 线量价检测
         if nb.is_none() && dt.as_ref().is_none_or(|e| e.is_empty()) {

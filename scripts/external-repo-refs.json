@@ -1,0 +1,117 @@
+{
+  "_readme": [
+    "活文档 BROKEN / NONLOC 引用的**显式豁免名册**（2026-09-18 用户裁决新增；同日第二轮扩容读面；同日第三轮收紧粒度）。",
+    "用途：把「不该、也不需要在本仓验证」的引用，从 dump 报告里摘出来**并点名**。",
+    "",
+    "⚠ 五条约束（都是实证踩出来的，别绕过）：",
+    "  0. **两个键集，互不相通**（2026-09-18 第三轮，**实测事故**后立的规矩）：",
+    "     · 不带 `lines` 的条目 ⇒ 文件级键 `doc::refFile`，**只对 BROKEN 生效**；",
+    "     · 带 `lines` 的条目   ⇒ 行级键 `doc::refFile::被引行号`，**只对 NONLOC 生效**。",
+    "     没有任何一条路径能让文件级键豁免 NONLOC。",
+    "     【为何 BROKEN 可以文件级】被引文件**根本不存在** ⇒「为何不需验证」只关于文件、与行号无关。",
+    "     【为何 NONLOC 必须行级】文件**存在** ⇒ 同一文档里对它的另一次引用**是崭新的待查引用**；",
+    "       拿「某一行是举例」去豁免整个文件 = 拿一条证据解释它没解释过的东西。",
+    "     ⚠ 事故现场：`PLAN-weknora-borrowings.md::wiki.rs` 一条（理由只解释了 `:1660`）曾把同文档的",
+    "       `:620`（历史 clippy 台账）与 `:651`（已裁决残留）**一并豁免**，`ALLOWLISTED` 3 条而证据 1 条。",
+    "       这正是豁免位的唯一失败模式：**只会变松**（与 #485 的块级标记同族）。",
+    "  1. **读面 = BROKEN 与 NONLOC，两者语义不同**（2026-09-18 第二轮扩容，原先只覆盖 BROKEN）：",
+    "     · BROKEN（本仓无此文件）⇒ 归入 BROKEN 的 `ALLOWLISTED` 细分桶，从「真待查」里摘出；",
+    "     · NONLOC（同名多份、路径后缀也不能消歧）⇒ 归入 NONLOC 的 `ALLOWLISTED` 桶。",
+    "       ⚠ 它**本来就不产生可疑**，所以这里的实效**只是「点名」** —— 不点名的计数会被误读成",
+    "       「都查过了」（判据 #16）；**计数一个都不改**，`miss` / `sus` / 退出码全不动。",
+    "     · **LOCATED（能唯一定位）本名册仍然够不着** —— `classifyBroken` / `classifyNonloc`",
+    "       结构上都不会被调用。要豁免一条 LOCATED 引用，只能改文档或改引用本身。",
+    "       这是**刻意**的：门禁有同类事故记录（块级标记使 EXTERNAL 42→54、BROKEN −5，",
+    "       读数变好看而问题没少），详见 check-single-source-facts.mjs 的 externalMarkFor 注释。",
+    "  2. **自动判据优先** —— classifyBroken 已能自动识别两类：",
+    "     · EXT-REPO    = 对比审计文档（PLAN-<repo>-borrowings.md）+ 头部「参考边界」声明 + 扩展名不在本仓主力栈；",
+    "     · DELETED-SRC = 已删迁移命名（v\\d{3}_*.rs）或引用句自陈「已删 / 已拆成 / 已退休」。",
+    "     本名册只补自动判据覆盖不到的个案。2026-09-18 实测：自动判据覆盖 66/115（EXT-REPO）+ 24/115（DELETED-SRC）。",
+    "  3. **每一条都必须带 evidence** —— 指向「这条引用为何不需验证」的一手证据（外部仓库名 + 该仓库内的路径",
+    "     证据 / 同文档行号 / 实测读数）。无 evidence 的条目视为未登记。",
+    "  4. **NONLOC 条目必须自证「不产生可疑」** —— 否则它可能是在掩盖一条真缺陷。",
+    "     判别式：同名候选里**有几份够长**（行数 ≥ 被引行号）？写在 evidence 里（**写实测数，别抄旧数**：判据 #J 数值先腐烂）。",
+    "     若全部够不到 ⇒ 那**不是**豁免问题，是「行号越界」，门禁会自己把它点进 `OVERFLOW` 桶。",
+    "",
+    "格式：{ \"allow\": [ { \"doc\": \"docs/plans/x.md\", \"refFile\": \"a/b.py\", \"lines\": [123], \"reason\": \"...\", \"evidence\": \"...\" } ] }",
+    "doc 用仓库相对路径（与 dump 输出的逐文件行同口径）；refFile 用引用串原样（含路径，不含行号）。",
+    "`lines` 里写的是**被引行号**（引用串里 `:` 后面那个数），不是文档行号 ——",
+    "因为 `.md` 侧去重键就是 `文档::引用串::被引行号`，两者同键同粒度；文档行号会随文档增删漂移。",
+    "⚠ `lines` 写在条目上但取值非法（字符串 / 0 / 负数）⇒ 该条目**零效力**，且**不会**退化成文件级（防手滑放宽）。",
+    "⚠ 失效方向是刻意的：键对不上 ⇒ 不豁免 ⇒ 落回 `OTHER` 被点名出来。名册只会失去效力，不会静默放宽。",
+    "",
+    "条目数见 `allow` 数组长度（**刻意不在此写死数字** —— 写死的那个数一定会腐烂，判据 #J：数值先腐烂）。",
+    "`--dump-doc-refs` 会输出「名册自检：声明 N 键｜命中 M｜零命中 K」并**逐条点名零命中的键**",
+    "（零命中未必是腐烂，也可能是该引用被 EXTERNAL 判定先行截获 —— 见门禁内该处注释）。",
+    "以下三类不适用本名册：",
+    "  · 第三方 crate 源码漏写版本目录（builder.rs / packages/pkg_std.rs）⇒ 应**补全版本目录**，不是豁免；",
+    "    （注意与下面第 6 条的区别：那条是**引例**，改掉即毁示例。）",
+    "  · 本仓已删文件（v207_chat_run.rs / src/divergence-log.rs）⇒ 走 DELETED-SRC 自动判据；",
+    "  · 真待查（BROKEN）⇒ 应去查，不该豁免。"
+  ],
+  "allow": [
+    {
+      "doc": "docs/plans/PLAN-declarative-schema-sync.md",
+      "refFile": "divergence-log.rs",
+      "reason": "本仓已删文件（整链删除），引用是考古记录，无法也不需验证",
+      "evidence": "同文档 :909 的引用句自陈「（该文件亦已删除）」；§五·四 ③ 有整链删除记录"
+    },
+    {
+      "doc": "docs/plans/PLAN-declarative-schema-sync.md",
+      "refFile": "crates/runtime/src/persistent_queue.rs",
+      "reason": "文件已迁入 entities crate，runtime 侧模块已删除",
+      "evidence": "同文档 :1499 的引用句自陈「✅ 已完成（2026-09-16 批 10）：迁入 axagent-entities::gateway_message_queue … runtime 侧错位模块删除」"
+    },
+    {
+      "doc": "docs/plans/PLAN-declarative-schema-sync.md",
+      "refFile": "runtime/src/persistent_queue.rs",
+      "reason": "同上（同一事实的另一种路径写法）",
+      "evidence": "同 :1499"
+    },
+    {
+      "doc": "docs/plans/PLAN-weknora-borrowings.md",
+      "refFile": "src/commands/opc_industry_actions.rs",
+      "reason": "文件已不存在；引用句是并发会话的历史 clippy/fmt 日志（台账），不改也不验证",
+      "evidence": "本仓全仓零同名文件；output/backup-* 内有副本；引用句自带时间戳（15:06:47）与「并发会话」标注"
+    },
+    {
+      "doc": "docs/plans/PLAN-declarative-schema-sync.md",
+      "refFile": "sqlite/table.rs",
+      "reason": "引例 —— 所在段落讨论的是「门禁判定本身」（路径写法之争），不是待办的源码引用",
+      "evidence": "同文档 :3409 的引用句自陈「根因**不是路径错**：vendored sea-query 1.0.2 实存」"
+    },
+    {
+      "doc": "docs/plans/PLAN-weknora-borrowings.md",
+      "refFile": "packages/pkg_std.rs",
+      "reason": "引例 —— 所在段落是门禁演进史（举例说明「省略路径」形态），改掉即毁示例",
+      "evidence": "同文档 :1018 上下文为「取块级而非行级：…第 869/876 行把路径省略成 … ⇒ 行级判据必然漏」"
+    },
+    {
+      "doc": "docs/plans/PLAN-weknora-borrowings.md",
+      "refFile": "array_basic.rs",
+      "reason": "同上（同一引例组）",
+      "evidence": "同 :1018"
+    },
+    {
+      "doc": "docs/plans/PLAN-weknora-borrowings.md",
+      "refFile": "wiki.rs",
+      "lines": [373],
+      "reason": "台账 —— 该引用是**历史 clippy 日志**（第 3 跑的 lint 位置），不是待办指针：那次 `useless_conversion` 已在第 4 跑修掉（`CLIPPY_EXIT=0`）⇒ 被引行号记的是**当时**位置，改成当前值 = 篡改日志。行级条目（2026-09-18 第三轮拆出）：本条只解释 `:373` 这一处",
+      "evidence": "同文档 :620（clippy 三跑记录表第 3 行）列出 `commands/knowledge.rs:508` / `memory.rs:329` / `wiki.rs:373`；同文档 :621 记录第 4 跑 EXIT=0。自证不产生可疑：basename 候选 2 份 —— src-tauri/src/commands/wiki.rs[3027 行] 与 src-tauri/crates/dao/src/repo/wiki.rs[633 行]，**够长 2/2** ⇒ 不落 OVERFLOW；实测见 output/verify-graph-2026-09-15/probe-wikilines-0918N.txt"
+    },
+    {
+      "doc": "docs/plans/PLAN-weknora-borrowings.md",
+      "refFile": "wiki.rs",
+      "lines": [1132],
+      "reason": "台账 —— 该引用是 `check-decl-evidence.mjs` 的**残留条目登记**，文档自己已裁决「既有且刻意（合成边本就不带 relationType，注释即证据）⇒ 非本次引入，不动」⇒ 无需再验。行级条目：本条只解释 `:1132` 这一处",
+      "evidence": "同文档 :651（§10.8 复跑行的「剩 1 条」）即该裁决原文。自证不产生可疑：候选 2 份（3027 / 633 行），**够长 1/2**（633 < 1132）⇒ 不落 OVERFLOW"
+    },
+    {
+      "doc": "docs/plans/PLAN-weknora-borrowings.md",
+      "refFile": "wiki.rs",
+      "lines": [1660],
+      "reason": "引例 —— 所在行是「门禁演进史」表格 v1 那一行的**举例**（列举「裸文件名」写法），改掉即毁示例。落 NONLOC，本就不产生可疑；进名册的实效是**把它从「未检查」的匿名计数里点名出来**。行级条目：本条只解释 `:1660` 这一处",
+      "evidence": "同文档 :1003（小节 `#### 12.12.1 扫描器自身撒了两次谎`，表头 `| 版本 | 报出 | 真实 | 根因 |`）= 「引用多半是**裸文件名**（`wiki.rs:1660` / `mod.rs:196` / `tool_executor.rs:177`）—— 出处没写路径」。自证不产生可疑：候选 2 份（3027 / 633 行），**够长 1/2**（633 < 1660）⇒ 不落 OVERFLOW。⚠ 同行另两个：`mod.rs:196` 同名 71 份**够长 21 份**（同属引例，**尚未登记**）；`tool_executor.rs:177` 是 **LOCATED**（同名唯一）且已被真检查通过 ⇒ 本名册够不着、也不需要"
+    }
+  ]
+}

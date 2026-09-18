@@ -32,6 +32,7 @@ use crate::AppState;
 use crate::commands::error::ErrorCategory;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::fleet as fleet_err;
+use crate::commands::fleet::append_agent_message;
 use crate::commands::memory::resolve_default_provider;
 use async_trait::async_trait;
 use axagent_agent::AxAgentApiClient;
@@ -72,7 +73,8 @@ async fn route_with_harness(
 /// 持有 `RuntimeHarness`（Clone），用默认提供商做意图分类。
 ///
 /// 由 `init/state.rs` 注入到 `AppState.fleet_intent_llm`，
-/// 供 `fleet_dispatch` 等命令消费；也供 `axagent_agent::LlmDispatcher` 构造使用。
+/// 供 `fleet_dispatch` 的路由步骤直接消费（无中间 Dispatcher 层）。
+/// 本仓曾有一个 `LlmDispatcher` 包装层，从未接线，2026-09-15 已删。
 pub struct ProviderFleetIntentLlm {
     harness: RuntimeHarness,
 }
@@ -140,12 +142,20 @@ async fn resolve_member_profile(
 
 /// 真实执行一个成员回合，产出事件流。
 ///
+/// - `fleet_id`: 所属舰队（agent 回复落库时写入，命令层已确认其存在）
+/// - `conversation_id`: 本轮所属**会话作用域**（群聊 `CONVERSATION_GROUP` / 私信
+///   `conversation_dm(slug)`）。
+///
+///   ⚠ 与 `member.room_id`（精灵站位的物理房间）**无关**；AgentSession 另有一个
+///   会话 id（本函数内局部名 `session_conversation_id`），三者互不等价。
 /// - `member`: 目标成员（路由已确定）
-/// - `user_message`: 用户消息（含历史摘要）
+/// - `user_message`: 用户消息
 /// - `emit`: 事件回调（命令层转发到 Channel）
 /// - 返回所有事件（不含路由决策与 Complete，由调用方补充）
 pub async fn execute_fleet_turn(
     app_state: &AppState,
+    fleet_id: &str,
+    conversation_id: &str,
     member: &FleetMember,
     user_message: &str,
     emit: &(dyn Fn(DispatchEvent) + Sync),
@@ -197,11 +207,16 @@ pub async fn execute_fleet_turn(
         .map(|(name, _)| name.clone())
         .unwrap_or_else(|| member.role.clone());
 
-    // ── 3. 获取/创建 AgentSession（conversation_id = member.agent_id）──
-    let conversation_id = member.agent_id.clone();
+    // ── 3. 获取/创建 AgentSession ──
+    //
+    // ⚠ 注意本变量**不是**函数形参 `conversation_id`：
+    //   - 形参 `conversation_id` = Fleet 的**消息会话**（群聊 / 某条 DM，落库用）
+    //   - 本变量 = AgentSession 的会话键（= member.agent_id，供 SessionManager 用）
+    // 两者同名过一次，结果形参被遮蔽、落库写进了错误的会话 id（能编译，语义错）。
+    let session_conversation_id = member.agent_id.clone();
     let session = match app_state
         .agent_session_manager
-        .get_or_create_session(resolved.provider_id.clone(), conversation_id.clone())
+        .get_or_create_session(resolved.provider_id.clone(), session_conversation_id.clone())
         .await
     {
         Ok(s) => s.with_role(role_label),
@@ -265,7 +280,7 @@ pub async fn execute_fleet_turn(
             &session_id,
             user_message.to_string(),
             runtime,
-            conversation_id.clone(),
+            session_conversation_id.clone(),
             Some(cancel_token),
             app_state.agent_prompters.clone(),
         )
@@ -286,10 +301,23 @@ pub async fn execute_fleet_turn(
                 }
             }
             if !text.trim().is_empty() {
+                let content = text.trim().to_string();
+
+                // 落库：消息是对话的真源，事件流只是传输通道。
+                //
+                // 落库失败**不阻断**本次回复（内容已随事件发出，用户看得到），
+                // 但必须出声 —— 否则「回复看起来成功了，重开却没了」会变成悬案。
+                if let Err(e) =
+                    append_agent_message(app_state, fleet_id, conversation_id, member, &content)
+                        .await
+                {
+                    warn!("[fleet] agent 回复落库失败（回复已发出，历史将缺此条）: {e:?}");
+                }
+
                 let msg_evt = DispatchEvent::AgentMessage {
                     agent_slug: member.agent_slug.clone(),
                     agent_id: member.agent_id.clone(),
-                    content: text.trim().to_string(),
+                    content,
                 };
                 events.push(msg_evt.clone());
                 emit(msg_evt);

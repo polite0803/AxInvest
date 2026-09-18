@@ -46,7 +46,7 @@ mod payloads;
 pub use payloads::*;
 
 pub mod pricing;
-// lib.rs startup 异步初始化块经 `commands::agent::init_pricing_config` 调用（lib.rs:405）
+// lib.rs startup 异步初始化块经 `commands::agent::init_pricing_config` 调用（src/lib.rs:417）
 pub use pricing::init_pricing_config;
 // 供本模块内其他函数调用（pricing.rs 中为 pub(super)，对本模块可见）
 use pricing::{check_token_budget, estimate_cost_usd};
@@ -564,6 +564,13 @@ pub async fn agent_query(
 ) -> Result<AgentQueryResponse, String> {
     let conversation_id = request.conversation_id.clone();
     info!("[agent_query] Starting for conversation: {}", conversation_id);
+    // P1-D（2026-09-12）：`agent-started` 此前**全仓无发射点**（段 G 报出）。
+    // 它与 `agent-done`（本文件 :2556 附近）、`agent-status` 同属一组生命周期事件，
+    // 前端 `backendStatusStore` 靠它把会话标记为「运行中」。缺了它，会话在正常结束前
+    // 一直是未知态（`agent-status` 只在 phase=error 时兜底置 false）。
+    // key 用 camelCase，与 `AgentStatusPayload` / `AgentDonePayload` 的
+    // `#[serde(rename = "conversationId")]` 保持一致（前端读的就是 `conversationId`）。
+    let _ = app.emit("agent-started", serde_json::json!({ "conversationId": conversation_id }));
     emit_status(
         &app,
         &conversation_id,
@@ -1418,7 +1425,7 @@ pub async fn agent_query(
         info!("[agent] Added {} Tauri command tools to chat_tools", tauri_tool_count);
         info!("[agent] Registered {} Tauri command handlers", handler_count);
 
-        // ── AxInvest 专属工具桥接：股票分析 + OPC 行业命令注册为 Agent 工具 ──
+        // ── AxInvest 专属工具桥接：股票分析 + OPC 域包命令注册为 Agent 工具 ──
         // 设计对齐上方 command_bridge 模式：chat_tools 暴露给 LLM，
         // SkillToolHandler 负责实际执行（含写操作门控）。
         let stock_tools = crate::commands::stock_analysis_bridge::build_stock_chat_tools();
@@ -1435,15 +1442,15 @@ pub async fn agent_query(
         }
         info!("[agent] Added {} stock analysis tools to chat_tools", stock_tool_count);
 
-        let opc_tools = crate::commands::opc_industry_bridge::build_opc_industry_chat_tools();
+        let opc_tools = crate::commands::opc_domain_pack_bridge::build_opc_domain_pack_chat_tools();
         let opc_tool_count = opc_tools.len();
         chat_tools.extend(opc_tools);
         let opc_handlers =
-            crate::commands::opc_industry_bridge::build_opc_industry_handlers(app.clone());
+            crate::commands::opc_domain_pack_bridge::build_opc_domain_pack_handlers(app.clone());
         for (tool_name, handler) in opc_handlers {
             tool_registry.register_skill_tool(tool_name, handler);
         }
-        info!("[agent] Added {} OPC industry tools to chat_tools", opc_tool_count);
+        info!("[agent] Added {} OPC domain_pack tools to chat_tools", opc_tool_count);
     } else {
         info!("[agent] execution_mode={:?} — 跳过 Tauri 命令桥接工具", request.execution_mode);
     }
@@ -2933,30 +2940,6 @@ pub async fn agent_query(
     }
 }
 
-/// Approve or reject a pending plan (P0-2 plan confirmation gate)
-#[agent_command(domain = agent, safety = Caution, call_mode = StateInput, description = "审批或拒绝待确认的计划")]
-#[tauri::command]
-pub async fn agent_approve_plan(
-    app_state: State<'_, AppState>,
-    request: AgentApprovePlanRequest,
-) -> Result<(), String> {
-    info!(
-        "[agent_approve_plan] conversationId={}, decision={}",
-        request.conversation_id, request.decision
-    );
-    let approved = request.decision == "approve";
-    let mut approvals = app_state.agent_plan_approvals.lock().await;
-    if let Some(sender) = approvals.remove(&request.conversation_id) {
-        let _ = sender.send(approved);
-    } else {
-        info!(
-            "[agent_approve_plan] No pending plan approval for conversationId={}",
-            request.conversation_id
-        );
-    }
-    Ok(())
-}
-
 /// Approve a permission request
 #[agent_command(domain = agent, safety = Caution, call_mode = StateInput, description = "审批或拒绝工具权限请求")]
 #[tauri::command]
@@ -3237,12 +3220,25 @@ pub async fn agent_resume_from_events(
     let db = app_state.harness.persistence().connection();
 
     // 1. 读 session_events
+    //
+    // 这里刻意**不做字符串插值**、也**不硬编码后端**：
+    // ① 插值 `'{conversation_id}'` 时，值里一旦出现单引号（`it's`）就会直接
+    //    破坏语句 —— 而这正是写入端 `DbSessionEventSink` 修掉的那类缺陷；
+    // ② 旧代码硬编码 `DbBackend::Sqlite` 却用 PG 方言的占位符，两个后端各对一半：
+    //    占位符方言是 driver 协议层面的差异，`from_sql_and_values` 不做转换。
+    // 占位符统一由 `bind_placeholders` 按动态后端产出（权威实现在 harness）。
+    let backend = db.get_database_backend();
     let sql = format!(
         "SELECT seq, event_type, payload, created_at FROM session_events \
-         WHERE session_id = '{conversation_id}' ORDER BY seq ASC"
+         WHERE session_id = {} ORDER BY seq ASC",
+        axagent_harness::util_fns::bind_placeholders(1, backend)
     );
     let rows = db
-        .query_all_raw(sea_orm::Statement::from_string(sea_orm::DbBackend::Sqlite, sql))
+        .query_all_raw(sea_orm::Statement::from_sql_and_values(
+            backend,
+            sql,
+            [sea_orm::Value::from(conversation_id.clone())],
+        ))
         .await
         .map_err(|e| format!("query session_events failed: {e}"))?;
 

@@ -8,6 +8,7 @@ description = "Device management and multi-device sync implementation"
 [dependencies]
 aes-gcm = "0.11"
 async-trait = "0.1"
+axagent-crdt = { path = "../crdt" }
 axagent-harness = { path = "../harness" }
 base64 = "0.22"
 chrono = { workspace = true, features = ["serde"] }

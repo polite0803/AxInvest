@@ -20,17 +20,24 @@
 //!
 //! ## 使用
 //!
-//! 在 `init/services.rs` 启动时，把 `SkillSummaryProvider` 注册到
-//! `MemoryProviderRegistry`，与 `Mem0Provider` / `HonchoProvider` 并列。
-//! Agent 推理前调用 `registry.prefetch()` 时会自动检索相关技能摘要。
+//! **尚未接线**：`SkillSummaryProvider` 目前无任何构造点，且 `MemoryProviderRegistry`
+//! 全仓并不存在（早期文档误引该类型名）。要启用需先落地 MemoryProvider 运行时。
 
 #![allow(dead_code)]
 
 // [2026-09-03] 本模块曾因 memory_providers/mod.rs 缺 `pub mod` 声明而从未编译。
 // 断链原因在消费侧而非本模块：`MemoryProvider` trait（memory_provider.rs:63）
 // 全仓只有定义、零调用方，连已接线的 closed_loop / memory_hook_provider 都不是它的实现。
-// → 三个 provider（mem0 / honcho / skill_summary）要真正运转，需先落地 MemoryProvider
-//   运行时（注册中心 + prefetch/sync_turn 调用链）。属新功能开发，非接线，待用户裁决。
+// → 要真正运转，需先落地 MemoryProvider 运行时（注册中心 + prefetch/sync_turn 调用链）。
+//   属新功能开发，非接线，待用户裁决。
+//
+// [2026-09-13] 去重审计 P1-1：同族的 `honcho_provider` / `mem0_provider` 已删除
+// （类型为 `pub(crate)` + lib.rs 无 re-export + 零构造点 + 两者互为 155 行克隆）。
+// 本模块**有意保留**：它是三者中唯一带完整设计说明与 `#[cfg(test)]` 用例的实现，
+// 且 `SkillSummaryProvider` 为 `pub`，作为「待接线的公共 API 落点」留用。
+// ⚠ 该 `#![allow(dead_code)]` 正在掩盖「零构造点」这一事实（祖先 `mod memory_providers;`
+//   为私有且无 re-export ⇒ 本模块对外不可达 ⇒ 移除 allow 会报一片 dead_code）。
+//   接线时请连同 allow 一起清理。
 
 use std::sync::Arc;
 

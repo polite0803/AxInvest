@@ -69,7 +69,9 @@ impl KnowledgeEntityRepository for DaoKnowledgeEntityRepository {
             last_seen_at: Set(None),
             source_type: Set(String::from("knowledge_base")),
             source_id: Set(String::new()),
-            node_type: Set(String::from("entity")),
+            node_type: Set(String::from(
+                axagent_harness::knowledge_graph::GraphNodeType::Entity.as_str(),
+            )),
             external_id: Set(None),
         };
 

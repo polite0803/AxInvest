@@ -232,6 +232,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
       ?? "auto") as "none" | "hyde" | "multi_query" | "decomposition" | "auto",
     queryEnhancementMaxVariants: ragPipelineConfig?.queryEnhancement?.maxVariants ?? 3,
     queryEnhancementCombinedCall: ragPipelineConfig?.queryEnhancement?.combinedCall ?? true,
+    entityGraphEnabled: ragPipelineConfig?.entityGraph?.enabled ?? false,
   });
 
   const persistRagConfig = useCallback(
@@ -240,34 +241,61 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
       setRagAdvancedConfig(next);
       saveSettings({
         ragPipelineConfig: {
+          // ⚠ 保底展开既有配置（2026-09-15 修）：此处原为「从零重建对象、只写 3 个字段」，
+          // 后果是 (a) `hybrid`（W2 接线后已真被后端读取）在用户动任何 RAG 开关时被**静默清空**，
+          // 权重回默认；(b) `rerank.crossEncoderModel` / `ruleFilterKeep` / `ollamaEndpoint`
+          // 等 UI 未覆盖的字段被下方硬编码值**覆盖**用户原值。
+          // 现改为「以既有配置为底 + 覆盖 UI 拥有的字段」。
+          // 注（2026-09-16）：本对象里**共 5 处**展开一律不写 `?? {}` —— 对象展开 `undefined`
+          // 本就是 no-op（语义与 `...x` 完全等价），`?? {}` 是死代码，被 oxlint 的
+          // `unicorn/no-useless-fallback-in-spread` 判为无用兜底。5 处为：
+          // 本行、`queryEnhancement`、`rerank`、`selfRag`、`entityGraph`。
+          ...ragPipelineConfig,
           queryEnhancement: {
+            ...ragPipelineConfig?.queryEnhancement,
             enabled: next.queryEnhancementEnabled,
             strategy: next.queryEnhancementStrategy,
             maxVariants: next.queryEnhancementMaxVariants,
             combinedCall: next.queryEnhancementCombinedCall,
           },
           rerank: {
+            // 顺序即语义：先展开既有配置（"以既有配置为底"），再写 UI 拥有的字段，
+            // 最后**补齐 DTO 必填字段**。三者都不能省（2026-09-15 修）：
+            //  ① 展开写在后面 ⇒ 缺省值覆盖用户原值；
+            //  ② UI 字段在展开前后各写一遍 ⇒ TS1117 重复键（对象里同名属性只能有一个）；
+            //  ③ 不补齐必填字段 ⇒ TS 类型（`src/types/knowledge.ts` 的 `RerankConfig`）
+            //     编译不过；且 Rust 侧这些字段**没有**逐字段 `serde(default)`，
+            //     缺一个就会让整份 `ragPipelineConfig` 反序列化失败，被静默吞成默认值
+            //     —— 表现为「RAG 面板所有设置都不生效」。
+            // 缺省值取 `settingsStore.ts` 里 `ragPipelineConfig.rerank` 的同名值。
+            ...ragPipelineConfig?.rerank,
             enabled: next.rerankEnabled,
             backend: next.rerankBackend,
-            crossEncoderModel: "bge-reranker-v2-m3",
             topN: next.rerankTopN,
             candidateK: next.rerankCandidateK,
-            ruleFilterKeep: 15,
-            scoreThreshold: null,
-            ollamaEndpoint: "http://localhost:11434",
+            crossEncoderModel: ragPipelineConfig?.rerank?.crossEncoderModel ?? "bge-reranker-v2-m3.Q4_K_M.gguf",
+            ruleFilterKeep: ragPipelineConfig?.rerank?.ruleFilterKeep ?? 15,
+            scoreThreshold: ragPipelineConfig?.rerank?.scoreThreshold ?? null,
           },
           selfRag: {
+            // 同上：展开在前、UI 字段在后、必填字段补齐。
+            ...ragPipelineConfig?.selfRag,
             enabled: next.selfRagEnabled,
             judgeModel: next.selfRagJudgeModel,
-            ollamaEndpoint: "http://localhost:11434",
             relevanceThreshold: next.selfRagRelevanceThreshold,
             qualityThreshold: next.selfRagQualityThreshold,
             maxRetryRounds: next.selfRagMaxRetries,
+            // Rust `SelfRagConfig` 确有 `ollama_endpoint`，但 UI 无对应控件 ⇒ 保留原值
+            ollamaEndpoint: ragPipelineConfig?.selfRag?.ollamaEndpoint ?? "http://localhost:11434",
+          },
+          entityGraph: {
+            ...ragPipelineConfig?.entityGraph,
+            enabled: next.entityGraphEnabled,
           },
         },
       });
     },
-    [ragAdvancedConfig, saveSettings],
+    [ragAdvancedConfig, ragPipelineConfig, saveSettings],
   );
 
   // ── Local model management ────────────────────────────────
@@ -1329,6 +1357,24 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                     </div>
                   </div>
                 )}
+
+                {/* Graph RAG（实体图谱增强检索） */}
+                <Divider plain style={{ fontSize: 13, marginTop: 12 }}>
+                  {t("settings.rag.entityGraph.title")}
+                </Divider>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm">
+                    {t("settings.rag.entityGraph.title")}
+                  </span>
+                  <Switch
+                    id="knowledge-settings-switch-entity-graph"
+                    checked={ragAdvancedConfig.entityGraphEnabled}
+                    onChange={(v) => persistRagConfig({ entityGraphEnabled: v })}
+                  />
+                </div>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {t("settings.rag.entityGraph.desc")}
+                </Typography.Text>
 
                 {/* Self-RAG */}
                 <Divider plain style={{ fontSize: 13, marginTop: 12 }}>

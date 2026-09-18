@@ -4,7 +4,7 @@
 //!
 //! ## 设计
 //!
-//! - 直接操作 `axagent_entities::fleets` / `fleet_members` 两张表
+//! - 直接操作 `axagent_entities::fleets` / `fleet_members` / `fleet_messages` 三张表
 //! - 不使用内存索引（每次查询直接走 DB），简化并发控制
 //! - 错误统一转为 `String` 返回（符合 harness 错误隔离约定）
 //! - 状态枚举在 DB 中以字符串存储（snake_case），与 harness DTO 双向映射
@@ -12,9 +12,10 @@
 //!   （SQLite 用 INTEGER 存 i64，PG 用 BIGINT；字符串列类型一致）
 
 use async_trait::async_trait;
-use axagent_entities::{fleet_members, fleets};
+use axagent_entities::{fleet_members, fleet_messages, fleets};
 use axagent_harness::fleet::{
-    Fleet, FleetMember, FleetMemberStatus, FleetMetadata, FleetRepository, FleetStatus,
+    AUTHOR_KIND_AGENT, Fleet, FleetMember, FleetMemberStatus, FleetMessage, FleetMetadata,
+    FleetRepository, FleetStatus,
 };
 use sea_orm::sea_query::Expr;
 use sea_orm::*;
@@ -99,6 +100,34 @@ fn member_from_entity(m: fleet_members::Model) -> FleetMember {
         today_tokens: std::cmp::max(m.today_tokens, 0) as u64,
         total_tokens: std::cmp::max(m.total_tokens, 0) as u64,
     }
+}
+
+fn message_from_entity(m: fleet_messages::Model) -> FleetMessage {
+    FleetMessage {
+        id: m.id,
+        fleet_id: m.fleet_id,
+        conversation_id: m.conversation_id,
+        seq: m.seq,
+        author_kind: m.author_kind,
+        author_id: m.author_id,
+        author_slug: m.author_slug,
+        author_display_name: m.author_display_name,
+        content: m.content,
+        created_at: m.created_at,
+    }
+}
+
+/// 判断数据库错误是否为**唯一约束冲突**（`seq` 分配竞态的唯一预期失败形态）。
+///
+/// 双库文本不同：PG 报 `duplicate key value violates unique constraint`（SQLSTATE 23505），
+/// SQLite 报 `UNIQUE constraint failed`。
+///
+/// **只有这一种错误值得重试** —— 外键失败、连接断开等重试只会掩盖真实问题，
+/// 且会把「写不进去」伪装成「一直在重试」。
+fn is_unique_violation(err_text: &str) -> bool {
+    err_text.contains("UNIQUE constraint failed")
+        || err_text.contains("duplicate key value violates unique constraint")
+        || err_text.contains("23505")
 }
 
 #[async_trait]
@@ -253,6 +282,108 @@ impl FleetRepository for SeaOrmFleetRepository {
             .await
             .map_err(|e| format!("移除成员失败: {e}"))?;
         Ok(())
+    }
+
+    // ── 消息持久化（协调门的地基） ──────────────────────────────────────
+
+    async fn append_message(&self, message: FleetMessage) -> Result<FleetMessage, String> {
+        // seq 分配的最大重试次数。3 次足够：真正的并发窗口只有「两个 dispatch
+        // 在同一瞬间分配」，第 2 次必然拿到新值；给到 3 只为容忍极端调度。
+        // 注意：函数体内**不能**用 `///`（那是 unused_doc_comments，-D warnings 下即红）。
+        const MAX_SEQ_ATTEMPTS: u32 = 3;
+
+        let mut last_err = String::new();
+
+        for _ in 0..MAX_SEQ_ATTEMPTS {
+            // 分配 seq：调用方传入的 seq 被忽略（见 trait 文档）。
+            // ⚠ 作用域是**会话** —— 群聊与每条 DM 各有独立序列，
+            // 否则 DM 的写入会把群聊水位顶高（或反之），协调门误判。
+            let seq = self
+                .max_seq(&message.fleet_id, &message.conversation_id, false)
+                .await
+                .map_err(|e| format!("分配消息 seq 失败: {e}"))?
+                + 1;
+
+            let model = fleet_messages::ActiveModel {
+                id: Set(message.id.clone()),
+                fleet_id: Set(message.fleet_id.clone()),
+                conversation_id: Set(message.conversation_id.clone()),
+                seq: Set(seq),
+                author_kind: Set(message.author_kind.clone()),
+                author_id: Set(message.author_id.clone()),
+                author_slug: Set(message.author_slug.clone()),
+                author_display_name: Set(message.author_display_name.clone()),
+                content: Set(message.content.clone()),
+                created_at: Set(message.created_at),
+            };
+
+            // 不要求返回行：seq 已由本方法掌握，回读反而多一次往返
+            match fleet_messages::Entity::insert(model).exec(&self.db).await {
+                // 此分支发散（return），故可在循环内 move `message` ——
+                // 借用检查器能证明后续迭代不可达，无需 clone
+                Ok(_) => return Ok(FleetMessage { seq, ..message }),
+                Err(e) => {
+                    let text = e.to_string();
+                    if !is_unique_violation(&text) {
+                        return Err(format!("追加消息失败: {text}"));
+                    }
+                    // 唯一约束冲突 = 并发事务抢了同一个 seq ⇒ 重新分配
+                    last_err = text;
+                },
+            }
+        }
+
+        Err(format!(
+            "追加消息失败：seq 分配连续 {MAX_SEQ_ATTEMPTS} 次冲突（并发写入过密）: {last_err}"
+        ))
+    }
+
+    async fn list_messages(
+        &self,
+        fleet_id: &str,
+        conversation_id: &str,
+        after_seq: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<FleetMessage>, String> {
+        // 会话是过滤的第一维：不隔离会让 DM 混进群聊面板、并混进路由 prompt
+        let mut query = fleet_messages::Entity::find()
+            .filter(fleet_messages::Column::FleetId.eq(fleet_id))
+            .filter(fleet_messages::Column::ConversationId.eq(conversation_id));
+        if let Some(after) = after_seq {
+            query = query.filter(fleet_messages::Column::Seq.gt(after));
+        }
+        // 先按 seq 倒序取**最新** limit 条，再翻转回升序 ——
+        // 若按升序 + limit 会拿到最早的历史，把最近上下文挤出窗口。
+        let mut rows = query
+            .order_by_desc(fleet_messages::Column::Seq)
+            .limit(limit as u64)
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("查询舰队消息失败: {e}"))?;
+        rows.reverse();
+        Ok(rows.into_iter().map(message_from_entity).collect())
+    }
+
+    async fn max_seq(
+        &self,
+        fleet_id: &str,
+        conversation_id: &str,
+        only_agents: bool,
+    ) -> Result<i64, String> {
+        let mut query = fleet_messages::Entity::find()
+            .filter(fleet_messages::Column::FleetId.eq(fleet_id))
+            .filter(fleet_messages::Column::ConversationId.eq(conversation_id));
+        if only_agents {
+            query = query.filter(fleet_messages::Column::AuthorKind.eq(AUTHOR_KIND_AGENT));
+        }
+        // 用 order_by_desc + one() 取最大，避免 sea-orm 的 `ExprTrait::max` 与
+        // `Ord::max` 在作用域内产生方法歧义（见 AGENTS.md 高频报错速查）。
+        let row = query
+            .order_by_desc(fleet_messages::Column::Seq)
+            .one(&self.db)
+            .await
+            .map_err(|e| format!("查询房间水位失败: {e}"))?;
+        Ok(row.map(|m| m.seq).unwrap_or(0))
     }
 }
 

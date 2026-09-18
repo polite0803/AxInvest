@@ -18,6 +18,7 @@ pub struct Model {
     /// 来源反思行 ID
     pub source_reflection_id: Option<String>,
     /// 适用 ticker（None=通用规则）
+    #[sea_orm(indexed)]
     pub stock_code: Option<String>,
     /// JSON 数组：适用场景标签（如 ["短线", "高估值"]）
     pub applicable_scenarios: Option<String>,
@@ -28,6 +29,7 @@ pub struct Model {
     /// 规则置信度 0-1
     pub confidence: f64,
     /// active / deprecated
+    #[sea_orm(indexed)]
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,

@@ -14,6 +14,21 @@
 //! 2. 正则表达式匹配
 //! 3. LLM 语义分类（兜底）
 //!
+//! # ⚠ 域启用闸门（P2，2026-09-15）
+//!
+//! **被停用的域不得从本层返回** —— 这是 P2「域可治理」的消费端②。两处拦截：
+//!
+//! | 位置 | 行为 |
+//! |---|---|
+//! | [`DomainRouter::route`] 规则命中后 | 目标域被停用 ⇒ 跳过该规则（并记 debug，语义是「本可命中却被拦」） |
+//! | [`DomainRouter::decide`] 模型兜底结果 | 用 [`crate::domain_registry::resolve_enabled_domain`] 解析 ⇒ 停用域返回 `None` ⇒ 落 `General` |
+//!
+//! 兜底路径（全部规则未命中 → `General`）**不需要**额外检查：`General` 是唯一兜底域，
+//! 由 [`crate::domain_registry::is_toggleable`] 保证不可停用。
+//!
+//! ⚠ 本层**只读**覆盖层（`is_domain_enabled` / `resolve_enabled_domain`），**不写**它：
+//! 域覆盖的唯一写入口是 `update_capability_domain` 命令 + DAO，避免出现第二处写入路径。
+//!
 //! # 性能目标
 //! - 纯规则路径: <1ms
 //! - LLM 兜底: <2s
@@ -508,28 +523,30 @@ pub enum DomainDecision {
 /// 3. 所有规则未命中 → LLM 兜底分类
 /// 4. LLM 也未命中 → 返回 General（通用域）
 /// ```
+///
+/// # ⚠ 只读契约（2026-09-15 裁决，勿把管理接口加回来）
+/// 本 trait **只负责路由与读取**。它此前还声明了四个「运行时规则管理」方法
+/// （`add_rule` / `update_rule` / `remove_rule` / `reorder_rules`），经全仓核实：
+/// **生产零消费、无 Tauri 命令、无 UI 入口**，且默认实现的规则集仅存内存
+/// （重启即回内置 9 条）⇒ 它们是「看起来能配、实际不能」的假接口，已删除。
+///
+/// 需要「自适应路由」时应重新设计完整链路（规则落 DB + Tauri 命令 + 设置页 UI +
+/// 版本治理 + 冲突消解），**不要**单独把方法加回来 —— 那只会重现同一个假象。
 #[async_trait]
 pub trait DomainRouter: Send + Sync {
     /// 执行 L1 域路由
     async fn route(&self, query: &str) -> DomainRoutingResult;
 
-    /// 获取所有规则
+    /// 获取所有规则（只读）
+    ///
+    /// 生产消费点：`cognitive_router.rs` 的 `DefaultCognitiveRouter` —— 用规则的
+    /// 目标域扩展 L1 判定的覆盖面（`domain_router.list_rules()`）。
     async fn list_rules(&self) -> Vec<DomainRoutingRule>;
 
-    /// 添加规则
-    async fn add_rule(&self, rule: DomainRoutingRule) -> Result<(), String>;
-
-    /// 更新规则
-    async fn update_rule(&self, rule: DomainRoutingRule) -> Result<(), String>;
-
-    /// 删除规则
-    async fn remove_rule(&self, rule_id: &str) -> Result<(), String>;
-
-    /// 按 ID 获取规则
+    /// 按 ID 获取规则（只读；**当前零生产消费**）
+    ///
+    /// 保留它与已删除的那四个方法区别在于：它是**纯读**接口，不构成「可配置」语义。
     async fn get_rule(&self, rule_id: &str) -> Option<DomainRoutingRule>;
-
-    /// 批量更新规则优先级
-    async fn reorder_rules(&self, rule_ids: Vec<String>) -> Result<(), String>;
 
     /// 双层决策三段流水线（设计 §4）。
     ///
@@ -554,7 +571,12 @@ pub trait DomainRouter: Send + Sync {
             Some(reasoner) => reasoner(query).await,
             None => None,
         };
-        let Some(domain) = llm_domain.and_then(|d| d.parse::<CapabilityDomain>().ok()) else {
+        // ⚠ 用 `resolve_enabled_domain` 而不是 `parse::<CapabilityDomain>()`（P2 消费端②）：
+        // 后者是**存量读取**语义（不看覆盖层的停用状态），而这里是「这次请求去哪个域」，
+        // 停用的域必须在这里消失。顺带获得追加别名的解析能力（模型输出用户自定义的近义写法）。
+        let Some(domain) =
+            llm_domain.and_then(|d| crate::domain_registry::resolve_enabled_domain(&d))
+        else {
             return DomainDecision::General;
         };
         // 3) 模型输出再过规则关：用 LLM 给出的域重跑规则匹配，
@@ -796,20 +818,31 @@ pub fn default_domain_rules() -> Vec<DomainRoutingRule> {
 
 // ── 默认域路由器实现 ──────────────────────────────
 
-/// L1 域路由默认实现 — 纯规则匹配 + 运行时规则管理
+/// L1 域路由默认实现 — 纯规则匹配（**只读**：规则集构造后不可变）
 ///
 /// # 路由流程
 /// 1. 加载全部启用规则，按优先级降序排序
 /// 2. 逐条匹配用户 Query，命中即返回 `rule_hit`
 /// 3. 全部未命中 → 返回 `unknown`（通用域，置信度 0）
 ///
+/// # ⚠ 已删除的四个「运行时规则管理」方法（2026-09-15 裁决）
+/// 本实现此前还有 `add_rule` / `update_rule` / `remove_rule` / `reorder_rules`，
+/// 核实结论：**生产零消费**（唯一实例化点是 `init/state.rs` 与两处 conversations，
+/// 都只调 `route`）、**无 Tauri 命令、无 UI 入口**，规则集仅存内存 ⇒ 重启即回内置 9 条。
+/// 那组接口只在制造「看起来能配、实际不能」的假象，已连同 trait 声明一并删除。
+///
+/// 需要「自适应路由」时应重新设计完整链路（落 DB + 命令 + 设置页 + 版本治理 +
+/// 冲突消解），**不要**只把方法加回来。当前规则集的唯一变更口是构造期的
+/// [`DomainRouterImpl::with_rules`]。
+///
 /// # LLM 兜底
 /// harness foundation 层保持零依赖，LLM 语义兜底由 implementor 层
 /// 以 `DomainRouter` trait 的包装实现扩展（待接入 Agent 模型）。
 ///
 /// # 线程安全
-/// 规则集合由 `tokio::sync::RwLock` 保护，支持运行时增删改与优先级调整，
-/// 满足 AGENTS.md 铁律 8（禁止 `parking_lot::RwLock` 跨 await 持锁）。
+/// 规则集合由 `tokio::sync::RwLock` 保护，当前只有只读路径（`route` / `list_rules` /
+/// `get_rule`）；保留 `RwLock` 是为了给未来的构造期之外的注入留位，且满足 AGENTS.md
+/// 铁律 8（禁止 `parking_lot::RwLock` 跨 await 持锁）。
 pub struct DomainRouterImpl {
     rules: tokio::sync::RwLock<Vec<DomainRoutingRule>>,
 }
@@ -843,19 +876,39 @@ impl DomainRouter for DomainRouterImpl {
         sorted.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         for rule in sorted {
-            if rule.matches(query) {
-                let elapsed = start.elapsed().as_millis() as u64;
+            if !rule.matches(query) {
+                continue;
+            }
+            // ── P2 消费端②：被停用的域**不得**从 L1 路由返回 ──
+            //
+            // 停在「已命中」之后再判启用，是为了让这条日志有精确语义：
+            // 它表示「**本来会**路由到 X，但 X 被停用了」。
+            // 若改成在 `matches` 之前跳过，同一条日志会在规则未命中时也打出来，
+            // 于是「本可命中却被拦」与「压根没命中」在日志里无法区分 ——
+            // 而那正是排查「为什么这个域的请求跑到 general 去了」唯一需要的区分。
+            if !crate::domain_registry::is_domain_enabled(rule.target_domain) {
                 tracing::debug!(
                     rule_id = %rule.rule_id,
                     domain = %rule.target_domain.as_str(),
-                    "L1 域路由规则命中"
+                    "L1 域路由规则已命中，但目标域被停用 ⇒ 跳过该规则"
                 );
-                return DomainRoutingResult::rule_hit(rule.target_domain, rule.clone(), elapsed);
+                continue;
             }
+            let elapsed = start.elapsed().as_millis() as u64;
+            tracing::debug!(
+                rule_id = %rule.rule_id,
+                domain = %rule.target_domain.as_str(),
+                "L1 域路由规则命中"
+            );
+            return DomainRoutingResult::rule_hit(rule.target_domain, rule.clone(), elapsed);
         }
 
         let elapsed = start.elapsed().as_millis() as u64;
         tracing::debug!(query, "L1 全部规则未命中，返回通用域（LLM 兜底待 implementor 扩展）");
+        // 兜底域是 `General`，而 `General` **不可停用**（`domain_registry::is_toggleable`）
+        // ⇒ 此处返回的域一定是启用态，消费端②（不得返回停用域）在兜底路径上自动成立。
+        // 这条因果关系是硬的：若哪天有人让 `General` 可停用，`unknown()` 会立刻开始
+        // 返回停用域 —— 故 `is_toggleable` 的注释里明确禁止了这件事。
         DomainRoutingResult::unknown(elapsed)
     }
 
@@ -863,56 +916,8 @@ impl DomainRouter for DomainRouterImpl {
         self.rules.read().await.clone()
     }
 
-    async fn add_rule(&self, rule: DomainRoutingRule) -> Result<(), String> {
-        let mut rules = self.rules.write().await;
-        if rules.iter().any(|r| r.rule_id == rule.rule_id) {
-            return Err(format!("规则 ID 已存在: {}", rule.rule_id));
-        }
-        rules.push(rule);
-        Ok(())
-    }
-
-    async fn update_rule(&self, rule: DomainRoutingRule) -> Result<(), String> {
-        let mut rules = self.rules.write().await;
-        let idx = rules
-            .iter()
-            .position(|r| r.rule_id == rule.rule_id)
-            .ok_or_else(|| format!("规则不存在: {}", rule.rule_id))?;
-        rules[idx] = rule;
-        Ok(())
-    }
-
-    async fn remove_rule(&self, rule_id: &str) -> Result<(), String> {
-        let mut rules = self.rules.write().await;
-        let before = rules.len();
-        rules.retain(|r| r.rule_id != rule_id);
-        if rules.len() == before {
-            Err(format!("规则不存在: {}", rule_id))
-        } else {
-            Ok(())
-        }
-    }
-
     async fn get_rule(&self, rule_id: &str) -> Option<DomainRoutingRule> {
         self.rules.read().await.iter().find(|r| r.rule_id == rule_id).cloned()
-    }
-
-    async fn reorder_rules(&self, rule_ids: Vec<String>) -> Result<(), String> {
-        if rule_ids.len() != self.rules.read().await.len() {
-            return Err("规则数量不匹配，必须包含全部规则 ID".to_string());
-        }
-        let mut rules = self.rules.write().await;
-        // 按 rule_ids 顺序重新分配优先级（100 递减），route 时据此排序生效
-        let mut next_priority = 100;
-        for id in &rule_ids {
-            let rule = rules
-                .iter_mut()
-                .find(|r| &r.rule_id == id)
-                .ok_or_else(|| format!("规则 ID 不存在: {}", id))?;
-            rule.priority = next_priority;
-            next_priority -= 10;
-        }
-        Ok(())
     }
 }
 
@@ -928,6 +933,14 @@ mod tests {
     /// 金融关键词（股票/基金/投资/行情等）是无歧义强信号，优先级必须更高。
     #[tokio::test]
     async fn test_stock_analysis_input_routes_to_finance() {
+        // ⚠ 必须持 `overlay_case()` 的锁 —— 本用例断言的是 `route()` 在**默认覆盖层**下的结果，
+        // 而 `test_route_skips_disabled_domain`（本模块）与 `domain_registry` 的用例会**短暂停用
+        // finance 域**。不持锁就会落在那个窗口里，把「停用 finance 之后的兜底域 data_analysis」
+        // 当成默认结果 ⇒ **随机红**（实测：单跑必绿；并行子集 8 轮 1 红 7 绿），
+        // 且红时给出的失败信息（left: DataAnalysis）与路由优先级（finance 88 > data_analysis 80）
+        // 自相矛盾，极易被误判成路由逻辑回归。锁的语义见 `domain_registry::test_support`。
+        let _guard = crate::domain_registry::test_support::overlay_case().await;
+
         let router = DomainRouterImpl::new();
         for query in ["分析股票301302", "分析股票600519", "股票301302行情如何"] {
             let result = router.route(query).await;
@@ -943,8 +956,62 @@ mod tests {
     /// 数据分析域规则仍然生效：不含金融信号的「分析」输入照常进 DataAnalysis。
     #[tokio::test]
     async fn test_generic_analysis_still_routes_to_data_analysis() {
+        // 同型缺陷一并锁上（按量纲穷举的结论：本二进制里读覆盖层的**未持锁**用例只有这两条）。
+        // 当前没有「停用 data_analysis」的用例 ⇒ 它暂时不会红；但它读的是同一份进程级全局，
+        // 只要日后有人加一条停用 data_analysis 的用例，这里就会立刻变成随机红。
+        let _guard = crate::domain_registry::test_support::overlay_case().await;
+
         let router = DomainRouterImpl::new();
         let result = router.route("帮我把这份销售数据做个透视分析").await;
         assert_eq!(result.domain, CapabilityDomain::DataAnalysis);
+    }
+
+    /// **P2 消费端② 的验收证据**：L1 路由不得返回被停用的域。
+    ///
+    /// # 为什么这样写才是证据
+    ///
+    /// 断言的是**公共入口 `route()` 的返回值**（判据 #152：接线点须落在公共下游），
+    /// 而不是「`is_domain_enabled` 被调用过」——后者在实现换判据、或那个调用点被
+    /// 挪到别处时**照样绿**，无法回答「行为真的变了吗」。
+    ///
+    /// 用例内含**对照组**：同一条输入在未停用时必须路由到 `finance`。
+    /// 没有对照组时，「`route()` 恒返回 General」这种退化实现也能让
+    /// 「不得返回 finance」通过 —— 那是「用一条恒真断言换一个绿灯」。
+    ///
+    /// ⚠ 必须持 `test_support::overlay_case()` 的锁：覆盖层是进程级全局，
+    /// 而测试默认并行。见 `domain_registry::test_support` 的文档。
+    #[tokio::test]
+    async fn test_route_skips_disabled_domain() {
+        use crate::domain_registry::{
+            DomainOverride, apply_domain_overrides, clear_domain_overrides,
+        };
+
+        let _guard = crate::domain_registry::test_support::overlay_case().await;
+        let router = DomainRouterImpl::new();
+        const QUERY: &str = "分析股票301302";
+
+        // ── 改前（对照组）：同一条输入确实命中 finance 域规则 ──
+        let before = router.route(QUERY).await;
+        assert_eq!(
+            before.domain,
+            CapabilityDomain::Finance,
+            "对照组失败：未停用 finance 时「{QUERY}」本应路由到 finance，实际 {}",
+            before.domain.as_str()
+        );
+
+        // ── 改后：停用 finance ⇒ 同一输入不得再返回 finance ──
+        apply_domain_overrides(vec![DomainOverride::with_enabled(
+            CapabilityDomain::Finance,
+            false,
+        )]);
+        let after = router.route(QUERY).await;
+        assert_ne!(
+            after.domain,
+            CapabilityDomain::Finance,
+            "停用 finance 后「{QUERY}」仍被路由到 finance ⇒ 域启用闸门没接在 route() 上"
+        );
+
+        // ── 收尾：恢复默认，避免污染同二进制内的其它用例 ──
+        clear_domain_overrides();
     }
 }

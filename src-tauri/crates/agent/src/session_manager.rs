@@ -29,7 +29,7 @@ const NP: &NoopPromptProvider = &NoopPromptProvider;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex, RwLock};
 use tracing::info;
@@ -273,6 +273,20 @@ pub struct SessionManager {
     ///
     /// 未注入时保持原行为(异步 fire-and-forget 复盘)。
     self_improvement_flags: tokio::sync::RwLock<SelfImprovementFlags>,
+    /// 用户配置的最大迭代次数覆盖值（前端 `app_config.maxIterations`）。
+    ///
+    /// `0` = 未配置 ⇒ 回退到 `dynamic_max_iterations()` 的复杂度推导。
+    /// 由 wiring 层（`src/init/state.rs`）从 DB 读取后注入，并可在用户改
+    /// 设置时经 `save_app_config` 即时更新 —— 与 `self_improvement_flags`
+    /// 同一模式。
+    ///
+    /// **修复背景（2026-09-12）**：前端「最大迭代次数」控件此前只把值
+    /// 写进 DB，**后端零消费** ⇒ 运行期恒用 `dynamic_max_iterations()` 的
+    /// 硬编码值（20/50/100），用户改了不起作用（铁律 #6：可配置 ≠ 可被优化）。
+    ///
+    /// 用 `AtomicUsize` 而非 `RwLock`：该值在每次 `run_turn` 的热路径上读取，
+    /// 且为 Copy 语义标量，无需异步锁。
+    max_iterations_override: AtomicUsize,
     /// Per-session 运行时取消信号。
     ///
     /// 每个 session 在 create_session 时注册一个独立 Arc<AtomicBool>，
@@ -313,6 +327,7 @@ impl SessionManager {
             session_event_sink: tokio::sync::RwLock::new(None),
             reflector: tokio::sync::RwLock::new(None),
             self_improvement_flags: tokio::sync::RwLock::new(SelfImprovementFlags::default()),
+            max_iterations_override: AtomicUsize::new(0),
             cancel_tokens: Mutex::new(std::collections::HashMap::new()),
         }
     }
@@ -355,6 +370,25 @@ impl SessionManager {
     pub async fn set_self_improvement_flags(&self, flags: SelfImprovementFlags) {
         let mut guard = self.self_improvement_flags.write().await;
         *guard = flags;
+    }
+
+    /// 注入用户配置的最大迭代次数覆盖值（由 wiring 层从 DB `app_config` 读取）。
+    ///
+    /// - `n > 0`：后续每个 turn 的迭代上限恒为 `n`
+    /// - `0`：清除覆盖，回退到 `dynamic_max_iterations()` 的复杂度推导
+    ///
+    /// 同步方法（非 async）：内部为原子存储，供 `save_app_config` 在 Tauri 命令
+    /// 上下文内直接调用，避免为一次标量写入引入异步锁。
+    pub fn set_max_iterations_override(&self, n: usize) {
+        self.max_iterations_override.store(n, Ordering::Relaxed);
+    }
+
+    /// 读取用户覆盖值。`None` 表示未配置（调用方应回退到复杂度推导）。
+    pub fn max_iterations_override(&self) -> Option<usize> {
+        match self.max_iterations_override.load(Ordering::Relaxed) {
+            0 => None,
+            n => Some(n),
+        }
     }
 
     /// 发布一个 agent 领域事件到统一总线(若已注入),同时落 session_events 表(若已注入)。
@@ -848,13 +882,22 @@ impl SessionManager {
         };
 
         // Compute dynamic config from trajectory, then configure runtime
-        let max_iters = dynamic_max_iterations(
-            &self
-                .trajectory
-                .as_ref()
-                .map(|s| s.estimate_complexity(&user_input))
-                .unwrap_or(TaskComplexity::Medium),
-        );
+        //
+        // 用户配置优先（前端 `app_config.maxIterations`，由 wiring 层注入）。
+        // 仅当未配置时才走轨迹复杂度推导 —— 修复前此处**恒**用
+        // `dynamic_max_iterations()`，导致前端「最大迭代次数」控件改了不生效
+        // （铁律 #6：可配置 ≠ 可被优化）。
+        // 短路写法同时省掉一次 `estimate_complexity()` 轨迹查询。
+        let max_iters = match self.max_iterations_override() {
+            Some(n) => n,
+            None => dynamic_max_iterations(
+                &self
+                    .trajectory
+                    .as_ref()
+                    .map(|s| s.estimate_complexity(&user_input))
+                    .unwrap_or(TaskComplexity::Medium),
+            ),
+        };
         runtime.set_max_iterations(max_iters);
         runtime.set_auto_compaction_threshold(AUTO_COMPACTION_TOKEN_THRESHOLD as u32);
 
@@ -2486,5 +2529,31 @@ mod tests {
         ];
         let tokens = estimate_tokens_from_messages(&messages);
         assert!(tokens >= 3);
+    }
+
+    /// `max_iterations_override` 的哨兵语义 —— 配置链接通后的核心回归点。
+    ///
+    /// `0` 是「未配置」哨兵（`AtomicUsize` 默认值），**不得**被当成「上限 0」
+    /// 消费：否则每个 turn 都会立即触发 `Max iterations (0) reached` 停摆。
+    /// 前端清空输入框、字段缺失、非数字取值都收敛到这条路径。
+    #[test]
+    fn max_iterations_override_uses_zero_as_unset_sentinel() {
+        let sm =
+            SessionManager::new_for_test(axagent_harness::test_support::empty_agent_session_repo());
+
+        // 默认 = 未配置 ⇒ 调用方回退到 dynamic_max_iterations() 复杂度推导
+        assert_eq!(sm.max_iterations_override(), None);
+
+        // 显式写 0 = 清除覆盖
+        sm.set_max_iterations_override(0);
+        assert_eq!(sm.max_iterations_override(), None, "0 必须是「未配置」而非「上限 0」");
+
+        // 正常值往返
+        sm.set_max_iterations_override(30);
+        assert_eq!(sm.max_iterations_override(), Some(30));
+
+        // 覆盖可被再次清除（用户把设置改回默认）
+        sm.set_max_iterations_override(0);
+        assert_eq!(sm.max_iterations_override(), None);
     }
 }

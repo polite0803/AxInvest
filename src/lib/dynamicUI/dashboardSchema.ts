@@ -7,16 +7,9 @@
  * 保持与原始 DashboardPage.tsx 完全相同的视觉布局与功能。
  */
 
+import { formatNumber } from "@/lib/format";
 import type { UISchema } from "@/types";
 import type { TFunction } from "i18next";
-
-// ── Helpers ──
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) { return `${(n / 1_000_000).toFixed(1)}M`; }
-  if (n >= 1_000) { return `${(n / 1_000).toFixed(1)}K`; }
-  return n.toLocaleString();
-}
 
 // ── Types ──
 

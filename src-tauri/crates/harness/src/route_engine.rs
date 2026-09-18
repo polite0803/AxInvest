@@ -2,7 +2,7 @@
 
 //! 动态路由引擎契约 — 定义会话级路由决策和 Hard Gate 机制
 //!
-//! 本模块为 OPC 行业工作流提供动态路由能力：
+//! 本模块为 OPC 域包工作流提供动态路由能力：
 //! - RouteEngine: 路由引擎 trait，决定工作流执行路径
 //! - RouteDecision: 路由决策 DTO
 //! - HardGate: 强制门控机制，确保关键步骤通过验收
@@ -155,8 +155,8 @@ impl HardGate {
 pub struct RouteContext {
     /// 会话 ID
     pub session_id: String,
-    /// 行业 ID
-    pub industry_id: String,
+    /// 域包 ID
+    pub domain_pack_id: String,
     /// 当前节点 ID
     pub current_node_id: String,
     /// 工作流 ID

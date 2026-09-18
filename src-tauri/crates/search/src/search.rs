@@ -499,8 +499,36 @@ pub async fn execute_search(
     timeout_ms: i32,
 ) -> Result<SearchResponse> {
     let cache_key = make_cache_key(provider_type, query, max_results);
+
+    // ── L1：进程内 `quick_cache`（未落盘，进程重启即失效） ──────────────────
     if let Some(cached) = get_search_cache().get(&cache_key) {
         return Ok(cached);
+    }
+
+    // ── L2：磁盘缓存（`axagent-disk-cache`，跨进程存活） ───────────────────
+    //
+    // 这正是 `disk-cache` crate 文档所述的冷热分层：「L1 内存 + L2 SQLite」。
+    // 改造前此处只有 L1 ⇒ 进程重启/换工作区即需重新联网检索。
+    //
+    // ⚠ 未注册 L2（`init_l2` 未被调用，如单测 / 移动端）时 `l2()` 返回 `None`，
+    // 行为与改造前**完全一致**（纯 L1）。读取失败一律**按未命中处理**并告警，
+    // 绝不让缓存故障影响检索本身。
+    let l2 = axagent_disk_cache::l2();
+    let l2_hash = axagent_disk_cache::DiskCache::query_hash(&cache_key);
+    if let Some(l2) = l2 {
+        match l2.get_search_results(&l2_hash).await {
+            Ok(Some(hit)) => match serde_json::from_str::<SearchResponse>(&hit.results_json) {
+                Ok(resp) => {
+                    // 回填 L1，避免同进程内反复解析 JSON
+                    get_search_cache().insert(cache_key.clone(), resp.clone());
+                    tracing::debug!(query = %query, hits = hit.hit_count, "L2 搜索缓存命中");
+                    return Ok(resp);
+                },
+                Err(e) => tracing::warn!("L2 缓存反序列化失败，按未命中处理: {e}"),
+            },
+            Ok(None) => {},
+            Err(e) => tracing::warn!("L2 搜索缓存读取失败，按未命中处理: {e}"),
+        }
     }
 
     let start = Instant::now();
@@ -555,7 +583,23 @@ pub async fn execute_search(
 
     // 缓存成功结果（5 分钟 TTL 由 quick_cache 的容量管理间接限制）
     if response.ok {
-        get_search_cache().insert(cache_key, response.clone());
+        get_search_cache().insert(cache_key.clone(), response.clone());
+
+        // 同步写 L2（磁盘）—— 使缓存跨进程存活。仅在检索**成功**时写，
+        // 与 L1 的既有判据一致（失败结果不缓存，避免把一次网络抖动固化 30 天）。
+        if let Some(l2) = l2 {
+            match serde_json::to_string(&response) {
+                Ok(json) => {
+                    if let Err(e) = l2
+                        .store_search_results(&l2_hash, query, &json, response.results.len())
+                        .await
+                    {
+                        tracing::warn!("L2 搜索结果缓存写入失败: {e}");
+                    }
+                },
+                Err(e) => tracing::warn!("搜索结果序列化失败，跳过 L2 缓存: {e}"),
+            }
+        }
     }
 
     Ok(response)

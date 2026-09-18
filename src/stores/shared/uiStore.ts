@@ -76,6 +76,19 @@ interface UIState {
   /** 引用回复：被引用消息的 ID（null 表示未引用） */
   quotedMessageId: string | null;
   setQuotedMessageId: (id: string | null) => void;
+
+  // --- Chat 会话搜索聚焦请求 ---
+  /**
+   * 「展开并聚焦会话搜索框」的请求计数器。0 = 无请求，>0 = 有一次待消费的请求。
+   *
+   * ⚠ 用「计数 + 消费归零」的 store 状态，**不要**改成一次性 CustomEvent：
+   * 派发方（Ctrl+F 快捷键）触发时 ChatSidebar 常常尚未挂载（例：正停在终端 Tab），
+   * 事件会丢；放进 store 后 ChatSidebar 挂载即能自取，跨挂载也正确。
+   */
+  chatSearchFocusRequest: number;
+  requestChatSearchFocus: () => void;
+  /** 由 ChatSidebar 在完成聚焦后调用（幂等，重复调用无害） */
+  consumeChatSearchFocus: () => void;
 }
 
 /** 根据窗口宽度解析布局模式 */
@@ -127,6 +140,12 @@ export const useUIStore = create<UIState>((set, get) => ({
   // --- Chat Quote Reply state ---
   quotedMessageId: null,
   setQuotedMessageId: (id) => set({ quotedMessageId: id }),
+
+  // --- Chat 会话搜索聚焦请求 ---
+  chatSearchFocusRequest: 0,
+  requestChatSearchFocus: () => set((s) => ({ chatSearchFocusRequest: s.chatSearchFocusRequest + 1 })),
+  consumeChatSearchFocus: () => set({ chatSearchFocusRequest: 0 }),
+
   setActivePage: (page) => set({ activePage: page }),
   enterSettings: () => {
     const current = get().activePage;

@@ -8,6 +8,7 @@
 //! 权威定义在 harness 层（铁律 4），stock-analysis / notification / gateway
 //! 等 crate 通过 `pub use` 引用，不得重复定义。
 
+use crate::decision_action::{ActionKind, normalize_action};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -46,12 +47,27 @@ pub struct DashboardReport {
     pub buy_point_low: Option<f64>,
     /// 买入点位区间（上限）
     pub buy_point_high: Option<f64>,
-    /// 目标价
+    /// **交易目标价**（LLM trader 给出的方向性目标；持有/观望档通常为空）。
+    ///
+    /// ⚠️ 与下方 `intrinsic_value_*` 是**两个不同概念**，UI 必须分开标注、不可混称「目标价」：
+    ///   · 本字段回答「打算在哪卖出」—— 由 trader 的 LLM 决策产出，可等于现价（即无信息量）；
+    ///   · `intrinsic_value_*` 回答「这家公司值多少钱」—— 由 `t-valuation` 客观计算产出。
+    /// 2026-09-13 实证：两者被同名展示后用户读到「同一工作流结论矛盾」（603466 风语筑）。
     pub target_price: Option<f64>,
     /// 止损价
     pub stop_loss: Option<f64>,
     /// 建议仓位百分比（0-100）
     pub position_pct: f64,
+
+    // ── 2b. 估值语义的「内在价值」区间（与上方交易价位严格区分）──
+    /// 内在价值区间下沿（DCF 悲观档）
+    pub intrinsic_value_low: Option<f64>,
+    /// 内在价值区间上沿（DCF 乐观档）
+    pub intrinsic_value_high: Option<f64>,
+    /// 内在价值中位（DCF 中性档）
+    pub intrinsic_value_mid: Option<f64>,
+    /// 现值（用于让 UI 直观对比「内在价值 vs 现价」）
+    pub current_price: Option<f64>,
 
     // ── 3. 风险警报 ──
     pub risk_alerts: Vec<RiskAlert>,
@@ -254,7 +270,9 @@ pub fn validate_dashboard_report(report: &DashboardReport) -> Vec<MissingField> 
         });
     }
     // 买入信号应有目标价
-    if (report.action == "强烈买入" || report.action == "买入" || report.action == "增持")
+    // P1-6(2026-09-14): 原先只认 3 个中文字面量 —— 英文值域（BUY / INCREASE）不匹配
+    // 任何一项，于是「买入信号应有目标价」这条校验被静默跳过（fail-open）。
+    if normalize_action(&report.action).is_some_and(ActionKind::implies_buy)
         && report.target_price.is_none()
     {
         missing.push(MissingField {
@@ -317,6 +335,10 @@ mod tests {
             target_price: Some(1900.0),
             stop_loss: Some(1600.0),
             position_pct: 30.0,
+            intrinsic_value_low: None,
+            intrinsic_value_high: None,
+            intrinsic_value_mid: None,
+            current_price: None,
             risk_alerts: vec![RiskAlert {
                 description: "短期获利盘压力".into(),
                 severity: "中".into(),
@@ -345,6 +367,41 @@ mod tests {
         let report = make_valid_report();
         let missing = validate_dashboard_report(&report);
         assert!(missing.is_empty(), "应有 0 个缺失字段, got {missing:?}");
+    }
+
+    /// P1-6 回归（2026-09-14）：英文值域的看多信号必须走**同一条**校验。
+    ///
+    /// 修复前判据是 `report.action == "强烈买入" || "买入" || "增持"` —— 英文 `BUY`
+    /// 不匹配任何一项 ⇒ 「买入信号应有目标价」被**静默跳过**：一份没有目标价的看多
+    /// 报告反而通过完整性校验（fail-open）。
+    #[test]
+    fn test_buy_signal_in_english_also_requires_target_price() {
+        for action in ["BUY", "buy", "INCREASE", "increase", "买入", "增持", "强烈买入"] {
+            let mut report = make_valid_report();
+            report.action = action.into();
+            report.target_price = None;
+            let missing = validate_dashboard_report(&report);
+            assert!(
+                missing.iter().any(|m| m.field == "target_price"),
+                "{action} 是看多信号且缺目标价，却未报缺失: {missing:?}"
+            );
+        }
+    }
+
+    /// 负对照：中性 / 无操作档位**不得**被要求目标价（否则会凭空造缺失项）。
+    #[test]
+    fn test_neutral_signal_does_not_require_target_price() {
+        for action in ["HOLD", "WAIT", "持有", "观望", "UNCERTAIN", "不确定", "UNAVAILABLE"]
+        {
+            let mut report = make_valid_report();
+            report.action = action.into();
+            report.target_price = None;
+            let missing = validate_dashboard_report(&report);
+            assert!(
+                !missing.iter().any(|m| m.field == "target_price"),
+                "{action} 不是看多信号，却被要求目标价: {missing:?}"
+            );
+        }
     }
 
     #[test]

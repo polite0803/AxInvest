@@ -3,6 +3,9 @@
 
 import type { JsonSchemaProperty, Variable, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { WorkflowLogPanel } from "@/components/workflow/WorkflowLogPanel";
+import { invoke, logIpcError } from "@/lib/invoke";
+import { isSecretOf } from "@/lib/workflowVariables";
+import type { LlmDiagnoseV2 } from "@/stores/feature/workflowEditorStore";
 import { useWorkflowStore, WORKFLOW_EXEC_CANCELLED } from "@/stores/feature/workflowStore";
 import type { WorkflowDefinition, WorkflowExecution } from "@/types";
 import {
@@ -23,9 +26,10 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { Play, RotateCcw, Square } from "lucide-react";
+import { Play, RotateCcw, Square, Wand2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { DiagnosticFix } from "./types/workflow.types";
 
 const { Text } = Typography;
 
@@ -51,6 +55,115 @@ const statusColor: Record<string, string> = {
   partially_completed: "warning",
   paused: "warning",
 };
+
+/** AI 自愈修复应用到模板快照的结果 */
+interface SelfHealApplyResult {
+  template: WorkflowTemplateResponse;
+  applied: string[];
+  unsupported: string[];
+}
+
+/**
+ * 把 V2 协议诊断修复应用到模板数据层（纯函数，返回新对象）。
+ *
+ * 支持可在数据层直接落地的 fix：
+ * - set_node_field / set_timeout / enable_retry / delete_node / delete_edge / update_variable
+ * 需编辑器或版本上下文的 fix（remove_debater_step / edit_asset_file / rollback_to_version）
+ * 归入 `unsupported`，由 UI 提示用户在编辑器中处理，避免在数据层盲目改动结构。
+ */
+function applySelfHealFixesToTemplate(
+  template: WorkflowTemplateResponse,
+  fixes: DiagnosticFix[],
+): SelfHealApplyResult {
+  const nodes = template.nodes.map((n) => ({ ...n }));
+  const edges = template.edges.map((e) => ({ ...e }));
+  const variables = (template.variables ?? []).map((v) => ({ ...v }));
+  const applied: string[] = [];
+  const unsupported: string[] = [];
+
+  for (const fix of fixes) {
+    switch (fix.actionType) {
+      case "set_node_field": {
+        const node = nodes.find((n) => n.id === fix.nodeId);
+        if (!node) {
+          unsupported.push(fix.actionType);
+          break;
+        }
+        // SAFE: 模板节点 config 统一为 Record<string, unknown>
+        const cfg = (node as unknown as { config?: Record<string, unknown> }).config ?? {};
+        (node as unknown as { config: Record<string, unknown> }).config = { ...cfg, [fix.field]: fix.value };
+        applied.push(fix.actionType);
+        break;
+      }
+      case "set_timeout": {
+        const node = nodes.find((n) => n.id === fix.nodeId);
+        if (!node) {
+          unsupported.push(fix.actionType);
+          break;
+        }
+        (node as unknown as { timeout?: number }).timeout = fix.timeoutMs;
+        applied.push(fix.actionType);
+        break;
+      }
+      case "enable_retry": {
+        const node = nodes.find((n) => n.id === fix.nodeId);
+        if (!node) {
+          unsupported.push(fix.actionType);
+          break;
+        }
+        (node as unknown as { retry?: unknown }).retry = {
+          enabled: true,
+          maxRetries: fix.maxRetries,
+          backoffType: "Exponential",
+          baseDelayMs: 1000,
+          maxDelayMs: 60000,
+        };
+        applied.push(fix.actionType);
+        break;
+      }
+      case "delete_node": {
+        const idx = nodes.findIndex((n) => n.id === fix.nodeId);
+        if (idx === -1) {
+          unsupported.push(fix.actionType);
+          break;
+        }
+        nodes.splice(idx, 1);
+        // 级联删除关联边，保持图结构一致
+        for (let i = edges.length - 1; i >= 0; i--) {
+          if (edges[i].source === fix.nodeId || edges[i].target === fix.nodeId) {
+            edges.splice(i, 1);
+          }
+        }
+        applied.push(fix.actionType);
+        break;
+      }
+      case "delete_edge": {
+        const idx = edges.findIndex((e) => e.id === fix.edgeId);
+        if (idx === -1) {
+          unsupported.push(fix.actionType);
+          break;
+        }
+        edges.splice(idx, 1);
+        applied.push(fix.actionType);
+        break;
+      }
+      case "update_variable": {
+        const v = variables.find((x) => x.name === fix.name);
+        if (v) {
+          v.value = fix.value;
+        } else {
+          variables.push({ name: fix.name, varType: "string", value: fix.value, isSecret: false });
+        }
+        applied.push(fix.actionType);
+        break;
+      }
+      default:
+        unsupported.push(fix.actionType);
+        break;
+    }
+  }
+  return { template: { ...template, nodes, edges, variables }, applied, unsupported };
+}
 
 /** 从 JsonSchemaProperty + Variable 推导动态表单字段 */
 interface DynamicField {
@@ -107,7 +220,9 @@ function buildDynamicFields(workflow: WorkflowTemplateResponse): DynamicField[] 
       required: required.has(name),
       default: v?.value ?? prop.default,
       enumValues: prop.enumValues ?? [],
-      isSecret: v?.isSecret ?? false,
+      // 必须走 isSecretOf：工作流变量来自 DB 模板，键是 snake_case 的 is_secret，
+      // 直接读 v.isSecret 恒 false → 密钥类变量不再显示「密钥」标记、输入框不退化为密码框。
+      isSecret: v ? isSecretOf(v) : false,
     });
   }
 
@@ -122,7 +237,7 @@ function buildDynamicFields(workflow: WorkflowTemplateResponse): DynamicField[] 
       required: false,
       default: v.value,
       enumValues: [],
-      isSecret: v.isSecret,
+      isSecret: isSecretOf(v),
     });
   }
 
@@ -193,6 +308,10 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
   const { message } = App.useApp();
   const [form] = Form.useForm();
   const [execution, setExecution] = useState<WorkflowExecution | null>(null);
+  // AI 自愈：执行失败后回喂 LLM 诊断，产出修复动作应用到模板
+  const [selfHealLoading, setSelfHealLoading] = useState(false);
+  const [selfHealReport, setSelfHealReport] = useState<LlmDiagnoseV2 | null>(null);
+  const [selfHealApplying, setSelfHealApplying] = useState(false);
   const isExecuting = useWorkflowStore((s) => s.isExecuting);
   const executeWorkflow = useWorkflowStore((s) => s.executeWorkflow);
   const cancelExecution = useWorkflowStore((s) => s.cancelExecution);
@@ -320,7 +439,90 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
 
   const handleReExecute = useCallback(() => {
     setExecution(null);
+    setSelfHealReport(null);
   }, []);
+
+  /** 构造执行失败上下文（失败节点错误 + error 级日志），注入诊断请求供 LLM 感知 */
+  const buildFailureContext = useCallback((exec: WorkflowExecution): string => {
+    const parts: string[] = [];
+    for (const ns of exec.nodeStates) {
+      if (ns.status === "failed" && ns.error) {
+        parts.push(`- 节点 ${ns.nodeId} 执行失败: ${ns.error}`);
+      }
+    }
+    for (const log of exec.logs) {
+      if (log.level === "error") {
+        parts.push(`- [${log.nodeName || log.nodeId}] ${log.message}`);
+      }
+    }
+    return parts.length > 0 ? `\n\n【执行失败上下文】\n${parts.join("\n")}` : "";
+  }, []);
+
+  /** AI 自愈：执行失败后调 LLM 诊断（带失败上下文），返回诊断报告 */
+  const handleSelfHeal = useCallback(async () => {
+    if (!execution) { return; }
+    setSelfHealLoading(true);
+    setSelfHealReport(null);
+    try {
+      const failureCtx = buildFailureContext(execution);
+      const report = await invoke<LlmDiagnoseV2>("llm_diagnose_workflow", {
+        request: {
+          nodes: workflow.nodes,
+          workflow_name: workflow.name,
+          workflow_description: `${workflow.description ?? ""}${failureCtx}`,
+        },
+      });
+      setSelfHealReport(report);
+      if (!report.issues || report.issues.length === 0) {
+        message.info(t("workflow.executor.selfHealNoIssues"));
+      }
+    } catch (error) {
+      logIpcError("AI 自愈诊断")(error);
+      message.error(String(error));
+    } finally {
+      setSelfHealLoading(false);
+    }
+  }, [execution, workflow, buildFailureContext, message, t]);
+
+  /** 应用自愈修复：节点级 fix 落到模板数据层并保存（复用 update_workflow_template） */
+  const handleApplySelfHealFixes = useCallback(async () => {
+    const fixes = selfHealReport?.fixes;
+    if (!fixes || fixes.length === 0) { return; }
+    setSelfHealApplying(true);
+    try {
+      const { template, applied, unsupported } = applySelfHealFixesToTemplate(workflow, fixes);
+      await invoke<boolean>("update_workflow_template", {
+        id: template.id,
+        input: {
+          name: template.name,
+          description: template.description ?? "",
+          icon: template.icon,
+          tags: template.tags,
+          nodes: template.nodes,
+          edges: template.edges,
+          variables: (template.variables ?? []).map((v) => ({
+            name: v.name,
+            var_type: v.varType,
+            value: v.value,
+            description: v.description,
+            is_secret: v.isSecret,
+          })),
+          trigger_config: template.triggerConfig,
+        },
+      });
+      setSelfHealReport(null);
+      setExecution(null);
+      message.success(t("workflow.executor.selfHealApplied", { count: applied.length }));
+      if (unsupported.length > 0) {
+        message.warning(t("workflow.executor.selfHealUnsupported", { count: unsupported.length }));
+      }
+    } catch (error) {
+      logIpcError("AI 自愈应用修复")(error);
+      message.error(String(error));
+    } finally {
+      setSelfHealApplying(false);
+    }
+  }, [selfHealReport, workflow, message, t]);
 
   return (
     <Modal
@@ -485,6 +687,83 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
                   logs={execution.logs}
                   maxHeight={200}
                 />
+              </div>
+            )}
+
+            {/* AI 自愈：执行失败后回喂 LLM 诊断并支持一键应用修复到模板 */}
+            {execution.status !== "completed" && (
+              <div>
+                <Divider style={{ margin: "4px 0" }} />
+                <Space wrap>
+                  <Button
+                    icon={<Wand2 size={14} />}
+                    onClick={handleSelfHeal}
+                    loading={selfHealLoading}
+                    disabled={!!selfHealReport}
+                  >
+                    {t("workflow.executor.selfHeal")}
+                  </Button>
+                </Space>
+                {selfHealReport && (
+                  <div
+                    style={{
+                      marginTop: 12,
+                      padding: 12,
+                      background: "var(--color-fill-tertiary)",
+                      borderRadius: 6,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                    }}
+                  >
+                    <Text strong>{t("workflow.executor.selfHealTitle")}</Text>
+                    {selfHealReport.summary && <Text style={{ fontSize: 12 }}>{selfHealReport.summary}</Text>}
+                    {(selfHealReport.issues ?? []).length > 0 && (
+                      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+                        {(selfHealReport.issues ?? []).slice(0, 8).map((iss, idx) => (
+                          <li key={idx} style={{ marginBottom: 4 }}>
+                            <Space size={6} align="start">
+                              <Tag
+                                color={iss.severity === "critical" || iss.severity === "high"
+                                    || iss.severity === "error"
+                                  ? "red"
+                                  : iss.severity === "medium" || iss.severity === "warning"
+                                  ? "orange"
+                                  : "default"}
+                                style={{ fontSize: 10, marginInlineEnd: 0 }}
+                              >
+                                {iss.severity}
+                              </Tag>
+                              <span>
+                                {iss.title}
+                                {iss.suggestion && (
+                                  <Text type="secondary" style={{ display: "block", fontSize: 11 }}>
+                                    {iss.suggestion}
+                                  </Text>
+                                )}
+                              </span>
+                            </Space>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {selfHealReport.fixes && selfHealReport.fixes.length > 0 && (
+                      <Space wrap>
+                        <Button
+                          type="primary"
+                          size="small"
+                          onClick={handleApplySelfHealFixes}
+                          loading={selfHealApplying}
+                        >
+                          {t("workflow.executor.selfHealApply", { count: selfHealReport.fixes.length })}
+                        </Button>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          {t("workflow.executor.selfHealApplyHint")}
+                        </Text>
+                      </Space>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

@@ -123,7 +123,13 @@ export function ExperimentSidebar() {
   // Track if params differ from original
   const hasChanges = useMemo(() => {
     if (!originalDecision) { return false; }
-    return result.decision !== originalDecision.decision
+    // P1-6(2026-09-14): 原判据 `result.decision !== originalDecision.decision` 是**跨值域**比较 ——
+    //   本组件的 what-if 仿真 computeDecision 产出小写 `"buy"/"hold"/"sell"`，
+    //   而 originalDecision.decision 是后端 action token（`"BUY"/"HOLD"/"WAIT"`…）。
+    //   `"buy" !== "BUY"` 恒成立 ⇒ 只要原决策非中性，「参数已修改」指示器**永久常亮**，
+    //   用户改不改参数都看到同一个状态（等于该指示器失效）。
+    //   修法：两侧都走 parseAction 收敛到同一值域再比语义。
+    return parseAction(result.decision) !== parseAction(originalDecision.decision)
       || Math.abs(result.confidence - originalDecision.confidence) > 2
       || Math.abs(result.positionPct - originalDecision.positionPct) > 2;
   }, [result, originalDecision]);

@@ -11,6 +11,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 发起设备 ID
+    #[sea_orm(indexed)]
     pub device_id: String,
     /// 实体类型（conversation/message/setting 等）
     pub entity_type: String,
@@ -21,14 +22,18 @@ pub struct Model {
     /// 操作数据（JSON）
     pub data: String,
     /// 版本号（用于 CRDT）
+    #[sea_orm(indexed)]
     pub version: i64,
     /// 父版本 ID（可选）
     pub parent_version_id: Option<String>,
     /// 变更时间（Unix 毫秒）
     pub created_at: i64,
     /// 是否已同步
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = false)]
     pub is_synced: bool,
     /// 同步到的设备列表（JSON 数组）
+    #[sea_orm(default_value = "[]")]
     pub synced_to: String,
 }
 
@@ -38,7 +43,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::sync_device::Entity",
         from = "Column::DeviceId",
-        to = "super::sync_device::Column::Id"
+        to = "super::sync_device::Column::Id",
+        on_delete = "Cascade"
     )]
     Device,
 }

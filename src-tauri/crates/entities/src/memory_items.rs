@@ -6,32 +6,47 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub namespace_id: String,
     pub title: String,
     #[sea_orm(column_type = "Text")]
     pub content: String,
+    #[sea_orm(default_value = "manual")]
     pub source: String,
+    #[sea_orm(default_value = "pending")]
     pub index_status: String,
     pub index_error: Option<String>,
     pub updated_at: String,
     // v101: trajectory memory fields
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "working")]
     pub tier: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = 0.5)]
     pub importance: f64,
+    #[sea_orm(default_value = 0)]
     pub access_count: i32,
+    #[sea_orm(indexed)]
     pub last_accessed: Option<i64>,
+    #[sea_orm(default_value = 0.01)]
     pub decay_rate: f64,
+    #[sea_orm(indexed)]
     pub expires_at: Option<i64>,
     pub source_conversation_id: Option<String>,
     pub source_message_id: Option<String>,
+    #[sea_orm(default_value = "semantic")]
     pub memory_nature: String,
+    #[sea_orm(default_value = "[]")]
     pub tags: String,
     // v108: 自进化闭环 — 记忆适用范围边界 + 人工确认门
     /// JSON 数组字符串，如 `["rust","frontend"]`，标记记忆的适用范围边界。
     /// RAG 检索时可按当前任务上下文标签过滤，降低无关记忆干扰。
     /// 默认 '[]' 表示不限制。
+    #[sea_orm(default_value = "[]")]
     pub applicability_tags: String,
     /// 0=未确认（Reflector 自动沉淀的默认状态），1=已人工确认。
     /// 晋升到 core 层（promote_memory_entry）需要 confirmed=1 门槛。
+    #[sea_orm(default_value = 0)]
     pub confirmed: i32,
 }
 

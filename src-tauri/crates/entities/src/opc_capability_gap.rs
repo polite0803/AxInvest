@@ -13,17 +13,25 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub lead_id: Option<String>,
     #[sea_orm(column_type = "Text")]
     pub title: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub description: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub missing_capability: String,
+    #[sea_orm(default_value = "capability")]
     pub gap_type: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub suggested_action: String,
+    #[sea_orm(default_value = 3)]
     pub priority: i32,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "open")]
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,

@@ -8,16 +8,22 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub knowledge_base_id: String,
     pub title: String,
     pub source_path: String,
     pub mime_type: String,
+    #[sea_orm(default_value = 0)]
     pub size_bytes: i64,
+    #[sea_orm(default_value = "pending")]
     pub indexing_status: String,
+    #[sea_orm(default_value = "")]
     pub doc_type: String,
     pub index_error: Option<String>,
     pub source_conversation_id: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub created_at: i64,
+    #[sea_orm(default_value = 0)]
     pub updated_at: i64,
 }
 

@@ -5,8 +5,10 @@ import { IpcReconnectBanner } from "@/components/layout/IpcReconnectBanner";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageContextProvider } from "@/components/shared/PageContextProvider";
 import { useIpcHealth } from "@/hooks/useIpcHealth";
+import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub } from "@/lib/devtoolsSubTabs";
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
+import { WORKSPACE_TAB_PARAM } from "@/lib/workspaceTabs";
 
 import { Button, Result, Spin } from "antd";
 import { lazy, memo, Suspense } from "react";
@@ -40,67 +42,84 @@ const LazyDemandDiscoveryPage = lazy(() =>
 );
 const LazyInvestPage = lazy(() => import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage })));
 const LazyOpcPage = lazy(() => import("@/pages/OpcPage").then((m) => ({ default: m.OpcPage })));
-// ── 行业页（OPC 9+ 行业包，2026-09-06 按能力域恢复接线） ──
-const LazyFinanceInvestIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.FinanceInvestPage }))
+// ── 域包页（OPC 域包，2026-09-06 按能力域恢复接线；2026-09-15 「行业」→「域」概念统一） ──
+const LazyFinanceInvestDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.FinanceInvestPage }))
 );
-const LazyAccountingIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.AccountingPage }))
+const LazyAccountingDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.AccountingPage }))
 );
-const LazySalesGrowthIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.SalesGrowthPage }))
+const LazySalesGrowthDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.SalesGrowthPage }))
 );
-const LazyProjectManagementIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.ProjectManagementPage }))
+const LazyProjectManagementDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.ProjectManagementPage }))
 );
-const LazyIndustryConsultingIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.IndustryConsultingPage }))
+const LazyConsultingDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.ConsultingPage }))
 );
-const LazyEcommerceIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.EcommercePage }))
+const LazyEcommerceDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.EcommercePage }))
 );
-const LazySoftwareDevIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.SoftwareDevPage }))
+const LazySoftwareDevDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.SoftwareDevPage }))
 );
-const LazySecurityIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.SecurityPage }))
+const LazySecurityDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.SecurityPage }))
 );
-const LazyGeospatialIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.GeospatialPage }))
+const LazyGeospatialDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.GeospatialPage }))
 );
-const LazyAiResearchIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.AiResearchPage }))
+const LazyAiResearchDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.AiResearchPage }))
 );
-const LazyContentMediaIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.ContentMediaPage }))
+const LazyContentMediaDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.ContentMediaPage }))
 );
-const LazyDesignIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.DesignPage }))
+const LazyDesignDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.DesignPage }))
 );
-const LazyEducationIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.EducationPage }))
+const LazyEducationDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.EducationPage }))
 );
-const LazyGameDevIndustryPage = lazy(() =>
-  import("@/pages/opc/industries/IndustryPages").then((m) => ({ default: m.GameDevPage }))
+const LazyGameDevDomainPage = lazy(() =>
+  import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.GameDevPage }))
 );
 
-/** 行业页路由表：[BuiltinPageKey（即能力域导航 key）, 页面组件] */
-const INDUSTRY_ROUTES: ReadonlyArray<[string, React.LazyExoticComponent<React.ComponentType>]> = [
-  ["finance-analysis", LazyFinanceInvestIndustryPage],
-  ["finance-accounting", LazyAccountingIndustryPage],
-  ["automation-sales", LazySalesGrowthIndustryPage],
-  ["automation-projects", LazyProjectManagementIndustryPage],
-  ["automation-consulting", LazyIndustryConsultingIndustryPage],
-  ["automation-ecommerce", LazyEcommerceIndustryPage],
-  ["devops-software", LazySoftwareDevIndustryPage],
-  ["devops-security", LazySecurityIndustryPage],
-  ["data-geospatial", LazyGeospatialIndustryPage],
-  ["data-ai-research", LazyAiResearchIndustryPage],
-  ["content-media", LazyContentMediaIndustryPage],
-  ["content-design", LazyDesignIndustryPage],
-  ["content-education", LazyEducationIndustryPage],
-  ["ai-media-game", LazyGameDevIndustryPage],
+/** 域包页路由表：[BuiltinPageKey（即能力域导航 key）, 页面组件] */
+const DOMAIN_ROUTES: ReadonlyArray<[string, React.LazyExoticComponent<React.ComponentType>]> = [
+  ["finance-analysis", LazyFinanceInvestDomainPage],
+  ["finance-accounting", LazyAccountingDomainPage],
+  ["automation-sales", LazySalesGrowthDomainPage],
+  ["automation-projects", LazyProjectManagementDomainPage],
+  ["automation-consulting", LazyConsultingDomainPage],
+  ["automation-ecommerce", LazyEcommerceDomainPage],
+  ["devops-software", LazySoftwareDevDomainPage],
+  ["devops-security", LazySecurityDomainPage],
+  ["data-geospatial", LazyGeospatialDomainPage],
+  ["data-ai-research", LazyAiResearchDomainPage],
+  ["content-media", LazyContentMediaDomainPage],
+  ["content-design", LazyDesignDomainPage],
+  ["content-education", LazyEducationDomainPage],
+  ["ai-media-game", LazyGameDevDomainPage],
 ];
+
+/**
+ * 旧链兼容：`/opc/industry/:packId` → `/opc/domain/:packId`。
+ *
+ * 2026-09-15「行业」→「域」概念统一迁移后 pack 路径前缀改为 `/opc/domain/`，
+ * 此单段路由兜住历史书签与外部链接。查询串（`?tab=` 等）原样保留，
+ * 用 `replace` 避免在浏览历史里留下中间态。
+ */
+function LegacyIndustryPathRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to={location.pathname.replace("/opc/industry/", "/opc/domain/") + location.search}
+      replace
+    />
+  );
+}
 
 function PageLoader() {
   return (
@@ -146,6 +165,21 @@ function NotFoundRoute() {
 /** 旧路由重定向到 /chat，通过 location.state.tab 传递目标功能 Tab。 */
 function redirectToChat(tab: string) {
   return <Navigate to={BUILTIN_PAGE_PATH.chat} replace state={{ tab }} />;
+}
+
+/** 开发工具旧子路由 → `/chat?ws=devtools&sub=<子页>`。
+ *
+ * 刻意**不走** redirectToChat 的 `location.state` 机制：WorkspaceHub 的 state→URL 归一化
+ * 只认 `tab`，`sub` 会在那一刻丢失（这正是此前 6 条子路由全部落到首个 Tab 的原因）。
+ * 直接产出 URL，子页选择即可深链、可刷新恢复。`sub` 缺省时只写 `ws=devtools`，
+ * 由 DevToolsPage 回落到默认子页。 */
+function redirectToDevTools(sub?: DevToolsSub) {
+  const params = new URLSearchParams();
+  params.set(WORKSPACE_TAB_PARAM, "devtools");
+  if (sub) {
+    params.set(DEVTOOLS_SUB_PARAM, sub);
+  }
+  return <Navigate to={{ pathname: BUILTIN_PAGE_PATH.chat, search: params.toString() }} replace />;
 }
 
 /** 重定向到 /chat 并保留当前 URL 的查询参数（如 template=xxx）。
@@ -254,8 +288,8 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          {/* ── AxInvest 行业页（OPC 行业包，路径 /opc/industry/:id，按能力域归位） ── */}
-          {INDUSTRY_ROUTES.map(([pageKey, Page]) => (
+          {/* ── AxInvest 域包页（OPC 域包，路径 /opc/domain/:id，按能力域归位） ── */}
+          {DOMAIN_ROUTES.map(([pageKey, Page]) => (
             <Route
               key={pageKey}
               path={BUILTIN_PAGE_PATH[pageKey]}
@@ -266,6 +300,8 @@ export const ContentArea = memo(function ContentArea() {
               }
             />
           ))}
+          {/* ── 旧链兼容：/opc/industry/:packId → /opc/domain/:packId ── */}
+          <Route path="/opc/industry/:packId" element={<LegacyIndustryPathRedirect />} />
           <Route
             path={BUILTIN_PAGE_PATH["demand-discovery"]}
             element={
@@ -353,12 +389,14 @@ export const ContentArea = memo(function ContentArea() {
           />
 
           {/* 开发工具旧路由 → 重定向到 /chat */}
-          <Route path={BUILTIN_PAGE_PATH.devtools} element={redirectToChat("devtools")} />
-          <Route path={BUILTIN_PAGE_PATH.devtoolsTraceExplorer} element={redirectToChat("devtools")} />
-          <Route path={BUILTIN_PAGE_PATH.devtoolsBenchmark} element={redirectToChat("devtools")} />
-          <Route path={BUILTIN_PAGE_PATH.devtoolsToolRecommender} element={redirectToChat("devtools")} />
-          <Route path={BUILTIN_PAGE_PATH.devtoolsFineTune} element={redirectToChat("devtools")} />
-          <Route path={BUILTIN_PAGE_PATH.devtoolsRlTraining} element={redirectToChat("devtools")} />
+          {
+            /* 开发工具旧路由 → /chat?ws=devtools&sub=<子页>。
+              子页信息必须保留（此前全部压平到首个 Tab，见 lib/devtoolsSubTabs.ts）。 */
+          }
+          <Route path={BUILTIN_PAGE_PATH.devtools} element={redirectToDevTools()} />
+          {DEVTOOLS_SUBS.map((sub) => (
+            <Route key={sub} path={DEVTOOLS_SUB_PATHS[sub]} element={redirectToDevTools(sub)} />
+          ))}
 
           {/* 学习图 */}
           <Route

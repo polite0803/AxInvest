@@ -112,6 +112,13 @@ color: orange
 ### LLM 决策特有字段
 
 - `verdict`: **方向结论**，必须三选一："看多" / "看空" / "中性"
+  - ⚠️ **字段边界**：`verdict` 与 `action` 是两个独立字段，**禁止**把方向词写进
+    `action`。`action` 只接受六档操作指令（买入 / 增持 / 持有 / 观望 / 减持 / 卖出），
+    方向词（看多 / 看空 / 中性）只属于 `verdict`。
+  - ⚠️ **六档不得合并**：给出 `verdict` 不等于可以省略 `action` 的档位区分 ——
+    「买入 vs 增持」的依据是仓位强度（见下方 positionPct 约束），
+    「持有 vs 观望」的依据是**当前是否已持仓**。输出"中性"时仍须明确是
+    「持有」（有仓位不动作）还是「观望」（空仓不建仓）。
 - `currentPrice`: 优先使用 context 中的 `reference_price`
 - `targetPrice`: 目标价（元）
 - `stopLoss`: 止损价（元）

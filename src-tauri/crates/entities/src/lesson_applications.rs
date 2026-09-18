@@ -29,8 +29,10 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 被引用的 lesson ID → reflection_lessons.id
+    #[sea_orm(indexed)]
     pub lesson_id: String,
     /// 引用该 lesson 的决策分析 ID → stock_analyses.id
+    #[sea_orm(indexed)]
     pub analysis_id: String,
     /// 决策分析的股票代码（冗余字段，便于按股票维度查询）
     pub stock_code: String,

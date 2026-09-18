@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 const DEFAULT_AMOUNT_RATIO_MIN: f64 = 0.8;
 const DEFAULT_MA20_TOLERANCE: f64 = 0.985; // Short：距 MA20 最小比例
-const DEFAULT_MA60_THRESHOLD: f64 = 0.985; // Mid：距 MA60 ���小比例
+const DEFAULT_MA60_THRESHOLD: f64 = 0.985; // Mid：距 MA60 最小比例
 const DEFAULT_HIGH_20_THRESHOLD: f64 = 0.97; // Short：距 20 日高最小比例
 const DEFAULT_HIGH_60_THRESHOLD: f64 = 0.94; // Mid：距 60 日高最小比例
 const DEFAULT_ENTRY_TIGHTNESS: f64 = 1.0; // 入场范围乘数（1.0=标准，1.5=更宽松）

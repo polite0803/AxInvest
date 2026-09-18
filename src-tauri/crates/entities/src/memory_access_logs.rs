@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub conversation_id: Option<String>,
+    #[sea_orm(indexed)]
     pub namespace_id: String,
     pub memory_id: String,
     pub access_type: String,
@@ -16,7 +18,10 @@ pub struct Model {
     pub query: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub content_snippet: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub hit: i32,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = 0)]
     pub created_at: i64,
 }
 

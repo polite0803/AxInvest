@@ -557,15 +557,18 @@ pub async fn get_vault_graph(db: &DatabaseConnection, vault_id: &str) -> Result<
             if !seen_edges.insert(edge_key) {
                 continue;
             }
-            edges.push(GraphEdge {
-                source: link.source_note_id.clone(),
-                target: link.target_note_id.clone(),
-                edge_type: "link".to_string(),
-            });
+            edges.push(GraphEdge::structural(
+                link.source_note_id.clone(),
+                link.target_note_id.clone(),
+                "link",
+            ));
         }
     }
 
-    Ok(GraphData { nodes, edges })
+    // A2-升级（2026-09-14）：用构造函数而非字面量 —— 它会顺带算好 `unresolved_types`
+    // （节点 `page_type` 不在 `PageType` 词汇表内的统计），该字段随图一并缓存，
+    // 于是**缓存命中路径也带着降级信号**，UI 不会因为「这次读了缓存」就看不到。
+    Ok(GraphData::new(nodes, edges))
 }
 
 /// 图谱查询专用的轻量 notes 列表：只取 id/title/file_path/page_type/tags，

@@ -14,16 +14,14 @@
 //!   2) state.variables 其次（`RunOptions.variables`）
 //!   3) state.input_params 兜底（`RunOptions.input`）
 
+mod common;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
 use async_trait::async_trait;
-use axagent_harness::registry::ProviderRegistry;
-use axagent_harness::repo_dtos::WorkflowExecutionData;
-use axagent_harness::repositories::{
-    WorkflowExecutionRepository, set_workflow_execution_repository,
-};
+use axagent_harness::repositories::set_workflow_execution_repository;
 use axagent_harness::workflow_types::{
     EdgeType, Position, RetryConfig, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode,
     TriggerType, Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase,
@@ -34,70 +32,18 @@ use axagent_harness::{
 
 use axagent_rt_workflow::work_engine::{RunOptions, WorkEngine};
 
+use common::{EmptyProviderRegistry, RecordingWorkflowExecutionRepo};
+
 // ── Mock WorkflowExecutionRepository ────────────────────────────────────
 // run_workflow → start_workflow 需要此 repo，测试不关心实际持久化。
-
-struct MockWorkflowExecRepo;
-#[async_trait]
-impl WorkflowExecutionRepository for MockWorkflowExecRepo {
-    async fn create_workflow_execution(
-        &self,
-        _id: &str,
-        _workflow_id: &str,
-        _input_params: Option<&str>,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-    async fn update_workflow_execution_status(
-        &self,
-        _id: &str,
-        _status: &str,
-        _output_result: Option<&str>,
-        _node_executions: Option<&str>,
-        _total_time_ms: Option<i32>,
-    ) -> Result<bool, String> {
-        Ok(true)
-    }
-    async fn list_workflow_executions(
-        &self,
-        _workflow_id: &str,
-    ) -> Result<Vec<WorkflowExecutionData>, String> {
-        Ok(vec![])
-    }
-    async fn save_execution_state(
-        &self,
-        _id: &str,
-        _status: &str,
-        _execution_state_json: &str,
-    ) -> Result<bool, String> {
-        Ok(true)
-    }
-    async fn clear_execution_state(&self, _id: &str, _status: &str) -> Result<bool, String> {
-        Ok(true)
-    }
-    async fn list_paused_executions(&self) -> Result<Vec<WorkflowExecutionData>, String> {
-        Ok(vec![])
-    }
-}
+// 原 `MockWorkflowExecRepo`（空桩，逐字为 `RecordingWorkflowExecutionRepo` 的子集）
+// 已统一为 `tests/common/mod.rs` 的记录型实现（去重 2026-09-14）。
 
 static MOCK_WF_EXEC_REPO: OnceLock<()> = OnceLock::new();
 fn init_mock_workflow_exec_repo() {
     MOCK_WF_EXEC_REPO.get_or_init(|| {
-        set_workflow_execution_repository(Arc::new(MockWorkflowExecRepo));
+        set_workflow_execution_repository(Arc::new(RecordingWorkflowExecutionRepo::default()));
     });
-}
-
-// ── 最小 ProviderRegistry 实现 ──────────────────────────────────────────
-//
-// WorkEngine::new 构造时需要 `Arc<dyn ProviderRegistry>`，本测试不消费
-// 任何 provider 能力（只用 tool 节点），所以 `get` 返回 `None` 即可。
-
-struct EmptyProviderRegistry;
-
-impl ProviderRegistry for EmptyProviderRegistry {
-    fn get(&self, _provider_type: &str) -> Option<Arc<dyn axagent_harness::ProviderAdapter>> {
-        None
-    }
 }
 
 // ── 捕获工具调用的 ToolRegistry ─────────────────────────────────────────

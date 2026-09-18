@@ -1,0 +1,113 @@
+version: 1
+domain_pack_id: "accounting"
+domain_pack_name: "会计"
+
+reflection:
+  enabled: true
+  min_quality_score: 60.0
+  auto_reflect_on_failure: true
+  dimensions:
+    - name: "quality"
+      weight: 0.3
+      description: "执行结果质量"
+    - name: "efficiency"
+      weight: 0.2
+      description: "执行效率"
+    - name: "completeness"
+      weight: 0.3
+      description: "任务完成度"
+    - name: "innovation"
+      weight: 0.2
+      description: "创新性与改进建议"
+
+evolution:
+  workflow_evolver:
+    enabled: false
+    max_iterations: 10
+    improvement_threshold: 0.1
+  code_evolver:
+    enabled: false
+    safety_check: true
+    auto_apply: false
+
+self_improvement:
+  enabled: false
+  schedule: "weekly"
+
+reinforcement_learning:
+  enabled: false
+  learning_rate: 0.01
+  discount_factor: 0.95
+  exploration_rate: 0.1
+  reward_weights:
+    quality: 0.4
+    efficiency: 0.3
+    user_satisfaction: 0.3
+  experience_batch_size: 32
+  update_interval: 100
+  auto_save: true
+
+adapter:
+  reflection_template:
+    id: "accounting-default"
+    name: "会计反思模板"
+    quality_weights:
+      task_completion: 0.3
+      output_quality: 0.3
+      efficiency: 0.2
+      cost_efficiency: 0.2
+    checkpoints:
+      - id: "accuracy"
+        name: "数据准确性"
+        dimension: "accuracy"
+        description: "评估财务数据的准确性"
+        weight: 0.5
+      - id: "compliance"
+        name: "合规性"
+        dimension: "compliance"
+        description: "评估是否符合会计准则"
+        weight: 0.3
+      - id: "efficiency"
+        name: "效率"
+        dimension: "efficiency"
+        description: "评估流程执行效率"
+        weight: 0.2
+    prompts:
+      - "请评估本次财务处理的准确性"
+      - "是否符合会计准则？"
+      - "流程是否高效？"
+  evolution_constraints:
+    protected_steps:
+      - step_id: "compliance_check"
+        reason: "会计合规性是硬性要求"
+    min_steps: 2
+    max_steps: 15
+    forbidden_optimizations:
+      - optimization_type: "skip_compliance"
+        reason: "不允许跳过合规检查"
+    quality_thresholds:
+      min_accuracy: 0.95
+      min_success_rate: 0.9
+      min_quality_score: 0.8
+  acceptance_criteria:
+    - id: "ac-accuracy"
+      name: "数据准确性"
+      description: "财务数据准确无误"
+      dimension: "accuracy"
+      threshold: 0.95
+      is_critical: true
+      weight: 0.5
+    - id: "ac-compliance"
+      name: "合规性"
+      description: "符合会计准则和法规"
+      dimension: "compliance"
+      threshold: 0.95
+      is_critical: true
+      weight: 0.3
+    - id: "ac-efficiency"
+      name: "效率"
+      description: "流程执行高效"
+      dimension: "efficiency"
+      threshold: 0.7
+      is_critical: false
+      weight: 0.2

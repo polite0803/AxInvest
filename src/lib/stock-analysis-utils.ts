@@ -102,30 +102,43 @@ export const StockAction = {
   REDUCE: "REDUCE",
   SELL: "SELL",
   WAIT: "WAIT",
+  /** 有决策数据但无法判断方向（解析失败 / 证据不足） */
   UNCERTAIN: "UNCERTAIN",
+  /** 决策数据本身缺失（后端显式哨兵 `UNAVAILABLE`，与「不确定」不同：后者是判断结论） */
+  UNAVAILABLE: "UNAVAILABLE",
 } as const;
 
 export type StockActionType = (typeof StockAction)[keyof typeof StockAction];
 
-/** 中文标签映射（给 LLM 输出兼容 + 解析用） */
+/**
+ * action 值域权威表（中英文**严格全等**匹配，仅容错首尾空白）。
+ *
+ * ⚠️ 本表只承载「操作档位」语义，**不得**加入方向词（看多 / 看空 / 中性）：
+ * 方向词属于 verdict 空间，混入会让「增持」「观望」两档被静默吞掉
+ * （`"看多"→BUY` 凭空吃掉 INCREASE 表达）。verdict → action 的降维转换
+ * 走 `directionToAction`，两张表职责分离。
+ *
+ * 也不得加入带空白/换行的变体键 —— 严格匹配已用 `trim()` 覆盖该场景。
+ */
 export const STOCK_ACTION_LABELS: Record<string, StockActionType> = {
   "买入": StockAction.BUY,
   "增持": StockAction.INCREASE,
   "持有": StockAction.HOLD,
   "减持": StockAction.REDUCE,
   "卖出": StockAction.SELL,
-  "不确定": StockAction.UNCERTAIN,
-  "无法判断": StockAction.UNCERTAIN,
   "观望": StockAction.WAIT,
   "等待": StockAction.WAIT,
   "减仓": StockAction.REDUCE,
   "加仓": StockAction.INCREASE,
-  "看多": StockAction.BUY,
-  "看空": StockAction.SELL,
-  "中性": StockAction.HOLD,
-  "买入\n": StockAction.BUY,
-  "买入 ": StockAction.BUY,
-  "持有 ": StockAction.HOLD,
+  "不确定": StockAction.UNCERTAIN,
+  "无法判断": StockAction.UNCERTAIN,
+  "数据缺失": StockAction.UNAVAILABLE,
+  // ── 兼容 dashboard_report 的「6 档中文」值域（强烈买入…卖出）──
+  // 该值域由 `harness/dashboard_report.rs` 产出（`report.action = "强烈买入"`），
+  // 与 portfolio-mgr 的 6 档是**两套不同定义**（前者无「观望」档、有「强烈买入」）。
+  // 收敛前先把这两个值纳入权威表，否则严格解析会把它们降级为 UNCERTAIN。
+  "强烈买入": StockAction.BUY,
+  "强烈卖出": StockAction.SELL,
 };
 
 /** 股票风险等级枚举 */
@@ -151,16 +164,187 @@ export const STOCK_RISK_LABELS: Record<string, StockRiskLevelType> = {
 
 // ── 解析函数 ──
 
-/** 解析股票操作动作（兼容英文/中文/大小写/前后空格） */
+/**
+ * 严格值域解析器 —— 只在输入**本身就是 action 值**时返回结果，否则 null。
+ *
+ * 接受：英文枚举（大小写不敏感）、中文标签（首尾空白容错）。
+ * 不接受：自由文本、句子、带修饰词的短语。
+ */
+export function parseActionStrict(raw: unknown): StockActionType | null {
+  if (typeof raw !== "string") { return null; }
+  const clean = raw.trim();
+  if (clean === "") { return null; }
+  const upper = clean.toUpperCase();
+  if (upper in StockAction) { return upper as StockActionType; }
+  return STOCK_ACTION_LABELS[clean] ?? null;
+}
+
+/**
+ * 解析股票操作动作（兼容英文/中文/大小写/前后空格）—— 严格值域解析。
+ *
+ * ⚠️ 不要改回 `raw.includes(label)` 式的全文扫描：历史实现在自由文本上会
+ * **按对象键序**命中（`买入` 键序先于 `看空`、`减持` 先于 `看多`），于是
+ * 「方向:看多。…风险点：大股东减持 5%」（trader.md 自带示例文本）被解析成
+ * REDUCE —— 只要句中出现否定词或风险词，方向即反转（已实证 3/5 用例不符）。
+ * 需要从自由文本推导方向请用 `parseDirectionFromText`。
+ *
+ * 未识别返回 `UNCERTAIN`（不是 `WAIT`）：解析失败属于「无法判断」，
+ * 不是业务语义上的「观望」。把解析失败伪装成「观望」等于把缺失当结论。
+ */
 export function parseAction(raw: unknown): StockActionType {
-  if (typeof raw === "string") {
-    const clean = raw.trim().toUpperCase();
-    if (clean in StockAction) { return clean as StockActionType; }
-    for (const [label, action] of Object.entries(STOCK_ACTION_LABELS)) {
-      if (raw.includes(label)) { return action; }
-    }
+  return parseActionStrict(raw) ?? StockAction.UNCERTAIN;
+}
+
+/** 方向结论（verdict 空间三值） */
+export type DirectionVerdict = "看多" | "看空" | "中性";
+
+/**
+ * 从自由文本中读取**显式方向标记** —— 只认 `方向:` / `verdict:` / `stance:`
+ * 这类结构化前缀，命中即返回，**不做全文关键词扫描**（全文扫描是方向反转的根因）。
+ *
+ * 例：`方向:看多。…风险点：大股东减持 5%` → "看多"（不会被「减持」反转）
+ *     无标记文本 → null（由调用方决定兜底，不要臆造方向）
+ */
+export function parseDirectionFromText(text: unknown): DirectionVerdict | null {
+  if (typeof text !== "string") { return null; }
+  const s = text.trim();
+  if (s === "") { return null; }
+  // `方向：看多` / `方向: 看多` / `"verdict":"bearish"` / `verdict = neutral`
+  const m = s.match(
+    /(?:方向|verdict|stance|direction)\s*["']?\s*[:：=]\s*["']?\s*(看多|看空|中性|bullish|bearish|neutral)/i,
+  );
+  if (!m) { return null; }
+  const v = m[1].toLowerCase();
+  if (v === "看多" || v === "bullish") { return "看多"; }
+  if (v === "看空" || v === "bearish") { return "看空"; }
+  return "中性";
+}
+
+/**
+ * verdict（方向结论）→ action（操作档位）的降维映射。
+ *
+ * 依据 `trader.md` 的一致性表：「买入 / 增持 → 看多」「卖出 / 减持 → 看空」
+ * 「持有 / 观望 → 中性」。反向映射是有损的（一对二），因此**只在没有结构化
+ * action 字段时**作为兜底使用，且必须让调用方知道这是一次降维。
+ */
+export function directionToAction(verdict: unknown): StockActionType | null {
+  if (typeof verdict !== "string") { return null; }
+  const v = verdict.trim().toLowerCase();
+  switch (true) {
+    case v === "看多" || v === "bullish" || v === "buy":
+      return StockAction.BUY;
+    case v === "看空" || v === "bearish" || v === "sell":
+      return StockAction.SELL;
+    case v === "中性" || v === "neutral" || v === "hold":
+      return StockAction.HOLD;
+    default:
+      return null;
   }
-  return StockAction.WAIT;
+}
+
+/**
+ * 从 LLM 决策对象推导 action —— 按「结构化程度」降序取第一个可用来源：
+ *   ① 结构化 `action` 字段（严格值域）
+ *   ② 结构化 `verdict` / `stance` / `direction` 字段
+ *   ③ `reasoning` 里的显式 `方向:` 标记
+ * 全部不可用返回 null —— 调用方应保留原 action 或标记缺失，**不得臆造方向**。
+ */
+export function deriveActionFromLlmDecision(
+  llmRaw: Record<string, unknown> | null | undefined,
+): StockActionType | null {
+  if (!llmRaw) { return null; }
+  const direct = parseActionStrict(llmRaw.action);
+  if (direct) { return direct; }
+  const fromVerdict = directionToAction(llmRaw.verdict ?? llmRaw.stance ?? llmRaw.direction);
+  if (fromVerdict) { return fromVerdict; }
+  return directionToAction(parseDirectionFromText(llmRaw.reasoning));
+}
+
+/**
+ * action → 交易方向（下单表单用）。只有方向明确的档位可映射：
+ *   BUY / INCREASE → "buy"，SELL / REDUCE → "sell"
+ *   HOLD / WAIT / UNCERTAIN / UNAVAILABLE → null
+ *
+ * ⚠️ 不要写成 `action === SELL ? "sell" : "buy"`：那会把「观望 / 不确定 / 数据缺失」
+ * 一并当成**买入方向**填进表单（TradePanel 的历史缺陷，会误导真实下单录入）。
+ */
+export function actionToDirection(action: unknown): "buy" | "sell" | null {
+  switch (parseAction(action)) {
+    case StockAction.BUY:
+    case StockAction.INCREASE:
+      return "buy";
+    case StockAction.SELL:
+    case StockAction.REDUCE:
+      return "sell";
+    default:
+      return null;
+  }
+}
+
+// ── 持仓状态轴（与 action 正交，P1-2） ──
+
+/**
+ * 持仓状态枚举 —— 与 `action`（方向强度）**正交**的第二轴。
+ *
+ * 背景：「持有 vs 观望」此前不是两个语义，而是同一中性档因仓位有无被单向互改的
+ * 两个名字（后端公式里仓位 > 0 时「观望」升级为「持有」、仓位 ≤ 0 时
+ * 「买入/增持/持有」降级为「观望」）。两轴混在一列后，一条「观望」记录
+ * 无法区分「判断中性」与「有方向但不可持仓」。后端自 v228 起单独落库本轴。
+ */
+export const PositionState = {
+  /** 空仓（当前不持有该标的） */
+  EMPTY: "EMPTY",
+  /** 建仓中（本次为买入 / 增持） */
+  OPENING: "OPENING",
+  /** 持有中（有仓位且不打算变动） */
+  HOLDING: "HOLDING",
+  /** 减仓中（本次为减持 / 卖出） */
+  TRIMMING: "TRIMMING",
+} as const;
+
+export type PositionStateType = (typeof PositionState)[keyof typeof PositionState];
+
+/**
+ * 解析持仓状态。`null` / 空串 / 未识别 → `null`。
+ *
+ * ⚠️ `null` 的语义是「该记录产生于本字段引入之前，采集时点无此信息」，
+ * **不得**读成 `EMPTY` —— 那会把「不知道」当成「空仓」。
+ */
+export function parsePositionState(raw: unknown): PositionStateType | null {
+  if (typeof raw !== "string") { return null; }
+  const clean = raw.trim().toUpperCase();
+  return clean in PositionState ? (clean as PositionStateType) : null;
+}
+
+/**
+ * 由 `(action, positionState, positionPct)` 派生**展示档** ——
+ * 「持有 / 观望」的唯一派生点，取代各组件里散落的 `positionPct <= 0` 判断。
+ *
+ * 规则：
+ * - 非中性档（买入 / 增持 / 减持 / 卖出 / 不确定 / 缺失）不受持仓状态影响，原样返回；
+ * - 中性档（HOLD / WAIT）按持仓状态派生：空仓 → 观望，有仓位 → 持有；
+ * - `positionState` 为 `null`（老数据）时退回 `positionPct`（与后端同判据）；
+ *   两者都不可用时保持原值。
+ *
+ * 这样「持有 vs 观望」在展示层是**单向派生**关系，而不再是两个可互相改写的标签。
+ */
+export function resolveDisplayAction(
+  action: unknown,
+  positionState?: unknown,
+  positionPct?: number | null,
+): StockActionType {
+  const parsed = parseAction(action);
+  if (parsed !== StockAction.HOLD && parsed !== StockAction.WAIT) {
+    return parsed;
+  }
+  const state = parsePositionState(positionState);
+  if (state) {
+    return state === PositionState.EMPTY ? StockAction.WAIT : StockAction.HOLD;
+  }
+  if (typeof positionPct === "number" && Number.isFinite(positionPct)) {
+    return positionPct <= 0 ? StockAction.WAIT : StockAction.HOLD;
+  }
+  return parsed;
 }
 
 /** 解析股票风险等级（兼容英文/中文/大小写） */
@@ -189,7 +373,10 @@ export function parseRiskLevel(raw: unknown): StockRiskLevelType {
  * 列表/下拉面板请使用 getActionTagStyle（CSS 变量样式）。
  */
 export function getActionColor(action: string): string {
-  switch (action) {
+  // P1-6(2026-09-14): 原先直接 `switch (action)` **不解析** —— 传入中文「买入」或小写
+  // `buy` 全部落到 `default`（无配色）。同文件的 getActionTKey 一直是解析后再查表的，
+  // 三者判据不一致，导致「标签显示了颜色却没有」。现统一走 parseAction。
+  switch (parseAction(action)) {
     case StockAction.BUY:
     case StockAction.INCREASE:
       return "red";
@@ -201,6 +388,7 @@ export function getActionColor(action: string): string {
     case StockAction.WAIT:
       return "orange";
     case StockAction.UNCERTAIN:
+    case StockAction.UNAVAILABLE:
     default:
       return "default";
   }
@@ -224,7 +412,8 @@ export function getActionTagStyle(action: string): CSSProperties {
   let fg: string;
   let bg: string;
   let bd: string;
-  switch (action) {
+  // P1-6(2026-09-14): 同 getActionColor —— 原 switch 不解析原串，中文/小写值无配色。
+  switch (parseAction(action)) {
     case StockAction.BUY:
     case StockAction.INCREASE:
       fg = "var(--color-danger)";
@@ -248,6 +437,7 @@ export function getActionTagStyle(action: string): CSSProperties {
       bd = "color-mix(in oklch, var(--color-warning) 30%, transparent)";
       break;
     case StockAction.UNCERTAIN:
+    case StockAction.UNAVAILABLE:
     default:
       fg = "var(--color-t-tertiary)";
       bg = "color-mix(in oklch, var(--color-t-tertiary) 12%, transparent)";
@@ -272,6 +462,8 @@ export function getActionTKey(action: string): string {
       return "stockAnalysis.actionSell";
     case StockAction.WAIT:
       return "stockAnalysis.actionWait";
+    case StockAction.UNAVAILABLE:
+      return "stockAnalysis.actionUnavailable";
     default:
       return "stockAnalysis.actionUncertain";
   }

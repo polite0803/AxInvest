@@ -10,8 +10,12 @@
 //! 独立实现，不引用第三方源码。
 //!
 //! 设计要点：
-//! - 表上无 (source, target, relation_type) 唯一索引，因此采用 read-then-write，
-//!   不使用 `on_conflict`（现有 `dao::upsert_relation` 即因此退化为纯 INSERT）。
+//! - 表上无 (source, target, relation_type) 唯一索引，且本模块需要**读旧统计量再累加**
+//!   （read-modify-write），不是单纯覆盖写 ⇒ 采用 read-then-write，不使用 `on_conflict`。
+//!   ⚠ 这**不是**「因为 `dao::upsert_relation` 有缺陷才绕开」：那个缺陷（主键随机 ⇒
+//!   `on_conflict` 永不触发）已于 2026-09-17 修好（见
+//!   `harness::knowledge_graph::stable_relation_id`）。即便它没缺陷，本模块也不能用它 ——
+//!   它不接受统计量、无法表达「累加」语义。
 //! - 延迟只取 step 之间的差值，不假设 `timestamp_ms` 的基准（相对/绝对皆可）。
 
 use anyhow::Result;
@@ -28,6 +32,20 @@ pub use axagent_harness::knowledge_graph::CAUSAL_RELATION_TYPE;
 
 /// 因果边来源标记，供检索层与文档知识边区分
 pub const CAUSAL_SOURCE_TYPE: &str = "causal_observation";
+
+/// 因果边落库时使用的 sentinel KB id。
+///
+/// **值不在此重复**，转发 `harness::constants::sentinel` 的权威定义（AGENTS.md 禁区 12）。
+///
+/// 这个字段不是装饰性的：`knowledge_relations.knowledge_base_id` 上有指向
+/// `knowledge_bases(id)` 的外键。写空串等于写一个**不存在的父行** —— 声明式引擎已为
+/// 该列建好 FK，`sqlx-sqlite` 默认开启 `PRAGMA foreign_keys=ON`，因此空串会直接
+/// 触发 `code 787 FOREIGN KEY constraint failed`，整条边写不进去。
+///
+/// 同时它也是**读端口径**：`commands/proactive.rs` 的校准器采样与
+/// `TrajectoryStorage::get_all_relationships` 都按 sentinel 过滤 ⇒ 即便关闭外键让
+/// 空串写成功，这些读端也一条都看不到。
+const CAUSAL_KB_ID: &str = axagent_harness::constants::sentinel::TRAJECTORY_KB_ID;
 
 /// 置信度平滑系数：`confidence = n / (n + CONFIDENCE_SMOOTHING)`
 const CONFIDENCE_SMOOTHING: f64 = 3.0;
@@ -265,8 +283,10 @@ pub async fn list_causal_edge_stats(
 
 /// 观测一次因果事件并落库
 ///
-/// 采用 read-then-write：表上无 (source, target, relation_type) 唯一索引，
-/// `on_conflict` 无法在此维度生效（现有 `dao::upsert_relation` 即因此退化为纯 INSERT）。
+/// 采用 read-then-write：本函数要**读旧统计量 → 累加 → 写回**，是 read-modify-write。
+/// `on_conflict(...).update_columns([...])` 只能用 SQL 表达式表达固定更新，承载不了
+/// Welford 在线方差这类跨行状态推进 ⇒ 不走 upsert。
+/// （表上也无 `(source, target, relation_type)` 唯一索引，`on_conflict` 在该维度不可用。）
 pub async fn observe_edge(
     db: &DatabaseConnection,
     cause: &str,
@@ -299,7 +319,7 @@ pub async fn observe_edge(
         None => {
             knowledge_relations::Entity::insert(knowledge_relations::ActiveModel {
                 id: Set(format!("rel_causal_{}", uuid::Uuid::new_v4())),
-                knowledge_base_id: Set(String::new()),
+                knowledge_base_id: Set(CAUSAL_KB_ID.to_string()),
                 source_entity_id: Set(cause.to_string()),
                 target_entity_id: Set(effect.to_string()),
                 relation_type: Set(CAUSAL_RELATION_TYPE.to_string()),

@@ -3,14 +3,16 @@
 //! OPC 业务工作流种子化（代码驱动 + 数据资产包）
 //!
 //! 启动接线：init/services.rs 的 spawn_opc_workflows_seeding 在应用启动后
-//! 调用 ensure_opc_workflows_seeded，激活全部行业/领域/生产/内容媒体模板种子。
+//! 调用 ensure_opc_workflows_seeded，激活全部域包/领域/生产/内容媒体模板种子。
 
 use axagent_entities::workflow_template;
 use axagent_harness::workflow_types::*;
 use sea_orm::DatabaseConnection;
 
 pub mod domain_workflows;
-mod industry_pack;
+// 域包引擎已下沉：实现见 `axagent_analysis_engine::opc::domain_pack`，
+// 工具白名单映射见 `axagent_tools::tools::domain_pack_defs`。
+// 本模块只保留 re-export，维持既有调用面（opc.rs / opc_data.rs / 本文件内部 helper）。
 mod seed_content_media;
 mod seed_domain_academic;
 mod seed_domain_design;
@@ -20,6 +22,20 @@ mod seed_domain_gamedev;
 mod seed_domain_gis;
 mod seed_domain_helpers;
 mod seed_domain_marketing;
+mod seed_domain_pack_accounting;
+mod seed_domain_pack_ai_research;
+mod seed_domain_pack_consulting;
+mod seed_domain_pack_content_media;
+mod seed_domain_pack_design;
+mod seed_domain_pack_ecommerce;
+mod seed_domain_pack_education;
+mod seed_domain_pack_finance_invest;
+mod seed_domain_pack_game_dev;
+mod seed_domain_pack_geospatial;
+mod seed_domain_pack_project_management;
+mod seed_domain_pack_sales_growth;
+mod seed_domain_pack_security;
+mod seed_domain_pack_software_dev;
 mod seed_domain_paidmedia;
 mod seed_domain_pm;
 mod seed_domain_product;
@@ -30,64 +46,75 @@ mod seed_domain_specialized;
 mod seed_domain_strategy;
 mod seed_domain_support;
 mod seed_domain_testing;
-mod seed_industry_accounting;
-mod seed_industry_ai_research;
-mod seed_industry_content_media;
-mod seed_industry_design;
-mod seed_industry_ecommerce;
-mod seed_industry_education;
-mod seed_industry_finance_invest;
-mod seed_industry_game_dev;
-mod seed_industry_geospatial;
-mod seed_industry_industry_consulting;
-mod seed_industry_project_management;
-mod seed_industry_sales_growth;
-mod seed_industry_security;
-mod seed_industry_software_dev;
 mod seed_production;
 
-pub use industry_pack::INDUSTRIES_DIR;
-pub use industry_pack::IndustryManifest;
-// AnalysisDataSource 不在此 re-export：opc_industry_runtime 经 axagent_analysis_engine::opc glob 获取
-pub use industry_pack::analysis_schema::IndustryAnalysisConfig;
-pub use industry_pack::export_industry_pack;
-pub use industry_pack::import_industry_pack;
-pub use industry_pack::{local_tool_defs, opc_tool_defs, stock_tool_defs};
+// ── 域包引擎（已下沉，此处 re-export 维持既有调用面）──────────────
+pub use axagent_analysis_engine::opc::domain_pack;
+// ⚠ 只转发有 crate 内使用者的项（`commands` 为私有模块 ⇒ `pub use` 按 `pub(crate) use`
+//   逐项判 `unused_imports`）。下列已删项均因「消费点改走显式全路径」而零消费者：
+//   `LEGACY_DOMAIN_PACKS_DIR` / `domain_packs_base_dir`（M2 下沉时）；
+//   `DOMAIN_PACKS_DIR` / `DomainPackManifest` / `export_domain_pack` / `import_domain_pack` /
+//   `DomainPackAnalysisConfig`（b2 收口）。如需引用请走
+//   `axagent_analysis_engine::opc::*`（glob 已导出）。
+pub use axagent_analysis_engine::opc::domain_pack::{copy_dir_recursive, resolve_domain_packs_dir};
+// AnalysisDataSource / DomainPackAnalysisConfig 均不在此 re-export：消费方各走显式路径
+// tool_defs 三函数不在命令层转发：消费方直接 use `axagent_tools::tools::domain_pack_defs::{...}`
 pub use seed_content_media::seed_content_media_workflows;
-pub use seed_industry_accounting::seed_industry_accounting_workflow_template;
-pub use seed_industry_ai_research::seed_industry_ai_research_workflow_template;
-pub use seed_industry_content_media::seed_industry_content_media_workflow_template;
-pub use seed_industry_design::seed_industry_design_workflow_template;
-pub use seed_industry_ecommerce::seed_industry_ecommerce_workflow_template;
-pub use seed_industry_education::seed_industry_education_workflow_template;
-pub use seed_industry_finance_invest::seed_industry_finance_invest_workflow_template;
-pub use seed_industry_game_dev::seed_industry_game_dev_workflow_template;
-pub use seed_industry_geospatial::seed_industry_geospatial_workflow_template;
-pub use seed_industry_industry_consulting::seed_industry_industry_consulting_workflow_template;
-pub use seed_industry_project_management::seed_industry_project_management_workflow_template;
-pub use seed_industry_sales_growth::seed_industry_sales_growth_workflow_template;
-pub use seed_industry_security::seed_industry_security_workflow_template;
-pub use seed_industry_software_dev::seed_industry_software_dev_workflow_template;
+pub use seed_domain_pack_accounting::seed_domain_pack_accounting_workflow_template;
+pub use seed_domain_pack_ai_research::seed_domain_pack_ai_research_workflow_template;
+pub use seed_domain_pack_consulting::seed_domain_pack_consulting_workflow_template;
+pub use seed_domain_pack_content_media::seed_domain_pack_content_media_workflow_template;
+pub use seed_domain_pack_design::seed_domain_pack_design_workflow_template;
+pub use seed_domain_pack_ecommerce::seed_domain_pack_ecommerce_workflow_template;
+pub use seed_domain_pack_education::seed_domain_pack_education_workflow_template;
+pub use seed_domain_pack_finance_invest::seed_domain_pack_finance_invest_workflow_template;
+pub use seed_domain_pack_game_dev::seed_domain_pack_game_dev_workflow_template;
+pub use seed_domain_pack_geospatial::seed_domain_pack_geospatial_workflow_template;
+pub use seed_domain_pack_project_management::seed_domain_pack_project_management_workflow_template;
+pub use seed_domain_pack_sales_growth::seed_domain_pack_sales_growth_workflow_template;
+pub use seed_domain_pack_security::seed_domain_pack_security_workflow_template;
+pub use seed_domain_pack_software_dev::seed_domain_pack_software_dev_workflow_template;
 pub use seed_production::seed_landing_page_workflow;
 pub use seed_production::seed_startup_mvp_workflow;
 
-/// 行业包根目录（相对仓库根，由调用方拼接）
-pub fn industries_base_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(INDUSTRIES_DIR)
-}
+// v3 → v4（2026-09-14）：修复 `prod-startup-mvp` 的 GO/NO-GO Switch 分支绑定 ——
+// 出边 handle 与 `default_case` 原写的是 case `value`，而引擎产出的 `matched_label`
+// 是 case `label` ⇒ 命中任一 case 时两条出边都匹配不上（分支全灭、流程停住）。
+// 不升版本则 DB 不重种子，修复静默失效（`check_template_version` 会跳过）。
+// 影响面：仅 seed_production.rs 的 2 个模板（本常量无其它使用者）。
+const OPC_TEMPLATE_VERSION: i32 = 4;
 
-const OPC_TEMPLATE_VERSION: i32 = 3; // 升级到 2 以覆盖旧 YAML 版本
-
-/// 主入口：全代码驱动种子化（行业 + 领域 + 生产 + 内容媒体）。
+/// 主入口：全代码驱动种子化（域包 + 领域 + 生产 + 内容媒体）。
 ///
 /// 与股票分析工作流一致：手动定义 WorkflowNode/Edge →
 /// 种子化写入 workflow_template 表 → 运行时 DB 加载执行。
+///
+/// ⚠ 能力集封闭审计（手动 `assert_domain_pack_capability_closed` / `audit_domain_packs_capability`）
+/// **不在本函数路径执行**：seed 只种 `workflow_templates`、不新增能力护照，护照态由
+/// 应用于启动时 `register_all_capabilities`（索引重建）承载审计 + `opc_import_domain_pack`
+/// 导入后承接审计。此处若重复审计只会输出与启动完全相同的日志，故以注释声明覆盖关系，
+/// 避免为硬凑接线而侵入 seed 调用链。
 pub async fn ensure_opc_workflows_seeded(
     db: &DatabaseConnection,
     _app_dir: Option<&std::path::Path>,
 ) -> Result<(), String> {
-    // 1) 行业工作流（14 行业，手动定义 WorkflowNode/Edge）
-    seed_opc_industries_from_seed_files(db).await?;
+    // 0) 存量自愈（P0，2026-09-14）：端口公理非法的存量模板先把 `version` 归零，
+    //    使下面各 seed 的 `check_template_version` 版本门放行、按当前（已修）的种子源码重建。
+    //    背景：`prod-startup-mvp` 的 `s-gonogo` 死链是「种子源码已修、DB 未重种子」的残留 ——
+    //    版本号相同 ⇒ 永不重建，而写路径门禁只管新写入、管不到既有行。
+    //    判据复用 `port_axiom_errors`（不写第二份）；失败不阻断种子（下一轮启动会再试）。
+    match axagent_dao::repo::workflow_template::reset_port_axiom_illegal_versions(db).await {
+        Ok(ids) if !ids.is_empty() => {
+            tracing::warn!("[opc-workflows] 端口公理非法的存量模板已归零版本号，等待重建: {ids:?}");
+        },
+        Ok(_) => {},
+        Err(e) => {
+            tracing::warn!("[opc-workflows] 存量端口公理自愈检查失败（不阻断种子）: {e}");
+        },
+    }
+
+    // 1) 域包工作流（14 域包，手动定义 WorkflowNode/Edge）
+    seed_opc_domain_packs_from_seed_files(db).await?;
 
     // 2) 领域工作流（17 领域 75 个工作流，手动定义 seed 文件）
     let domain_seeded = seed_domains_from_seed_files(db).await?;
@@ -109,40 +136,40 @@ pub async fn ensure_opc_workflows_seeded(
     Ok(())
 }
 
-/// 从手动定义的 seed 文件种子化 14 个行业工作流。
+/// 从手动定义的 seed 文件种子化 14 个域包工作流。
 ///
 /// 每个 seed 文件手动定义 WorkflowNode/Edge，与股票分析工作流一致。
-/// 替换了旧版通过 IndustryAdapterFactory 动态生成 DAG 的方式。
-async fn seed_opc_industries_from_seed_files(db: &DatabaseConnection) -> Result<usize, String> {
+/// 替换了旧版通过 DomainPackAdapterFactory 动态生成 DAG 的方式。
+async fn seed_opc_domain_packs_from_seed_files(db: &DatabaseConnection) -> Result<usize, String> {
     let mut seeded_count = 0;
 
-    seed_industry_accounting_workflow_template(db).await?;
+    seed_domain_pack_accounting_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_ai_research_workflow_template(db).await?;
+    seed_domain_pack_ai_research_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_content_media_workflow_template(db).await?;
+    seed_domain_pack_content_media_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_design_workflow_template(db).await?;
+    seed_domain_pack_design_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_ecommerce_workflow_template(db).await?;
+    seed_domain_pack_ecommerce_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_education_workflow_template(db).await?;
+    seed_domain_pack_education_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_finance_invest_workflow_template(db).await?;
+    seed_domain_pack_finance_invest_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_game_dev_workflow_template(db).await?;
+    seed_domain_pack_game_dev_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_geospatial_workflow_template(db).await?;
+    seed_domain_pack_geospatial_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_industry_consulting_workflow_template(db).await?;
+    seed_domain_pack_consulting_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_project_management_workflow_template(db).await?;
+    seed_domain_pack_project_management_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_sales_growth_workflow_template(db).await?;
+    seed_domain_pack_sales_growth_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_security_workflow_template(db).await?;
+    seed_domain_pack_security_workflow_template(db).await?;
     seeded_count += 1;
-    seed_industry_software_dev_workflow_template(db).await?;
+    seed_domain_pack_software_dev_workflow_template(db).await?;
     seeded_count += 1;
 
     tracing::info!("[opc-workflows] Industries seeded from seed files: {seeded_count}");
@@ -152,7 +179,7 @@ async fn seed_opc_industries_from_seed_files(db: &DatabaseConnection) -> Result<
 /// 从手动定义的 seed 文件种子化 17 个领域工作流。
 ///
 /// 每个 seed 文件手动定义 WorkflowNode/Edge，通过 check_template_version +
-/// upsert_template 写入数据库。与行业工作流一致，每个领域有独立的 seed 文件。
+/// upsert_template 写入数据库。与域包工作流一致，每个领域有独立的 seed 文件。
 /// 注：工程领域 wf-eng-refactor 暂时保留内联生成器调用，待后续完全手动转换。
 async fn seed_domains_from_seed_files(db: &DatabaseConnection) -> Result<usize, String> {
     let mut seeded_count = 0;
@@ -179,41 +206,14 @@ async fn seed_domains_from_seed_files(db: &DatabaseConnection) -> Result<usize, 
     Ok(seeded_count)
 }
 
-/// 行业包目录解析：app_dir/config/opc/industries → 仓库根 fallback。
-pub fn resolve_industries_dir(app_dir: Option<&std::path::Path>) -> std::path::PathBuf {
-    if let Some(dir) = app_dir {
-        let candidate = dir.join(INDUSTRIES_DIR);
-        if candidate.is_dir() {
-            return candidate;
-        }
-    }
-    industries_base_dir()
-}
-
 // ── 配置目录同步（CWD 无关）────────────────────────────────
 
 /// OPC 配置根目录常量（相对仓库根）
 pub const OPC_CONFIG_DIR: &str = "config/opc";
 
-/// 递归拷贝目录（仅文件与子目录，保持结构）
-pub fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if from.is_dir() {
-            copy_dir_recursive(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)?;
-        }
-    }
-    Ok(())
-}
-
 /// 递归增量拷贝：仅补目标**缺失**的文件，已存在（含用户编辑）一律保留不覆盖。
 ///
-/// v1.1 行业独立版：行业包目录已存在于 app_dir 时，把包内新增资产
+/// v1.1 域包独立版：域包目录已存在于 app_dir 时，把包内新增资产
 /// （如 learning.yaml、新增 workflows）补进生产目录。返回拷贝文件数。
 pub fn copy_dir_incremental(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<u32> {
     let mut copied = 0u32;
@@ -256,14 +256,14 @@ pub fn find_repo_config_dir(rel: &str) -> Option<std::path::PathBuf> {
     candidates.into_iter().find(|p| p.is_dir())
 }
 
-/// 启动时确保 `config/opc`（行业包 + 领域包）同步到 `app_dir/config/opc`。
+/// 启动时确保 `config/opc`（域包 + 领域包）同步到 `app_dir/config/opc`。
 ///
-/// 生产/服务模式下进程 CWD 不是仓库根，`resolve_industries_dir` /
+/// 生产/服务模式下进程 CWD 不是仓库根，`resolve_domain_packs_dir` /
 /// `resolve_domains_dir` 的仓库根 fallback 必然失败；将仓库根的资产
 /// 同步一份到用户数据目录，使 app_dir 分支始终可用。
 ///
-/// P2-4 修复：原实现"目标已含任一 manifest 则整体跳过"，新增行业包永远
-/// 推不到生产目录。改为**增量同步**——只补目标缺失的行业/领域包与散文件，
+/// P2-4 修复：原实现"目标已含任一 manifest 则整体跳过"，新增域包永远
+/// 推不到生产目录。改为**增量同步**——只补目标缺失的域包/领域包与散文件，
 /// 已存在（含用户导入/编辑的包）一律保留不覆盖。
 pub fn ensure_opc_config_synced(app_dir: &std::path::Path) {
     let Some(src) = find_repo_config_dir(OPC_CONFIG_DIR) else {
@@ -326,19 +326,19 @@ pub fn ensure_opc_config_synced(app_dir: &std::path::Path) {
     }
 }
 
-// ── 行业适配器配置加载（P0-1-A：行业包驱动，消灭 Rust 硬编码） ────
+// ── 域包适配器配置加载（P0-1-A：域包驱动，消灭 Rust 硬编码） ────
 
-/// 从行业包目录加载全部行业适配器（`learning.yaml` 的 `adapter:` 段驱动）。
+/// 从域包目录加载全部域包适配器（`learning.yaml` 的 `adapter:` 段驱动）。
 ///
-/// P0-1-A：替代 orchestrator `create_all_adapters()` 的 Rust 硬编码 9 行业配置；
-/// 动态扫描 `config/opc/industries/*/`，新增行业无需改代码。
-/// `adapter` 段缺失（旧包）→ 默认适配器（向后兼容）；解析失败仅告警跳过该行业。
-pub fn load_industry_adapters_from_packs(
+/// P0-1-A：替代 orchestrator `create_all_adapters()` 的 Rust 硬编码 9 域包配置；
+/// 动态扫描 `config/opc/domain_packs/*/`，新增域包无需改代码。
+/// `adapter` 段缺失（旧包）→ 默认适配器（向后兼容）；解析失败仅告警跳过该域包。
+pub fn load_domain_pack_adapters(
     app_dir: Option<&std::path::Path>,
-) -> Vec<std::sync::Arc<dyn axagent_orchestrator::IndustryAdapter>> {
-    use axagent_orchestrator::industry_adapters::BaseIndustryAdapter;
+) -> Vec<std::sync::Arc<dyn axagent_orchestrator::DomainPackAdapter>> {
+    use axagent_orchestrator::domain_pack_adapters::BaseDomainPackAdapter;
 
-    let base = resolve_industries_dir(app_dir);
+    let base = resolve_domain_packs_dir(app_dir);
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(&base) else { return out };
     for entry in entries.flatten() {
@@ -346,26 +346,26 @@ pub fn load_industry_adapters_from_packs(
         if !dir.is_dir() {
             continue;
         }
-        let Some(bundle) = industry_pack::analysis_schema::load_industry_pack(&dir) else {
+        let Some(bundle) = domain_pack::analysis_schema::load_domain_pack(&dir) else {
             continue;
         };
         let m = &bundle.manifest;
-        // 行业 ID 双轨归一：manifest.id 是下划线（software_dev），orchestrator
+        // 域包 ID 双轨归一：manifest.id 是下划线（software_dev），orchestrator
         // 学习/编排侧约定连字符（software-dev）——与 learning hook 的
-        // `identify_industry_from_template` 转换一致（P4-4）。
-        let industry_id = m.id.replace('_', "-");
+        // `identify_domain_pack_from_template` 转换一致（P4-4）。
+        let domain_pack_id = m.id.replace('_', "-");
         let learning_path = dir.join(&m.learning);
         let adapter_cfg = std::fs::read_to_string(&learning_path)
             .ok()
             .and_then(|c| serde_yaml::from_str::<serde_json::Value>(&c).ok())
             .and_then(|v| v.get("adapter").cloned())
             .unwrap_or(serde_json::Value::Null);
-        match BaseIndustryAdapter::from_config_json(&industry_id, &m.name, &adapter_cfg) {
+        match BaseDomainPackAdapter::from_config_json(&domain_pack_id, &m.name, &adapter_cfg) {
             Ok(a) => {
                 out.push(std::sync::Arc::new(a)
-                    as std::sync::Arc<dyn axagent_orchestrator::IndustryAdapter>);
+                    as std::sync::Arc<dyn axagent_orchestrator::DomainPackAdapter>);
             },
-            Err(e) => tracing::warn!("[opc-adapter] 行业 {} 适配器配置解析失败: {e}", m.id),
+            Err(e) => tracing::warn!("[opc-adapter] 域包 {} 适配器配置解析失败: {e}", m.id),
         }
     }
     out
@@ -388,21 +388,21 @@ pub(crate) fn make_base(id: &str, title: &str, desc: &str, x: f64, y: f64) -> Wo
     }
 }
 
-/// OPC 行业 industry_id → CapabilityDomain L1 映射
+/// OPC 域包 domain_pack_id → CapabilityDomain L1 映射
 /// （对齐 `src/lib/domainMeta.ts` 的 `NAV_ITEM_DOMAIN_MAP` 业务本质归域）。
-const OPC_INDUSTRY_DOMAIN: &[(&str, &str)] = &[
+const OPC_DOMAIN_PACK_DOMAIN: &[(&str, &str)] = &[
     ("accounting", "finance"),
     ("ai_research", "data_analysis"),
     ("content_media", "content_creation"),
-    ("design", "content_creation"),
-    ("ecommerce", "automation"),
+    ("design", "ai_media"),
+    ("ecommerce", "content_creation"),
     ("education", "content_creation"),
     ("finance_invest", "finance"),
     ("game_dev", "ai_media"),
     ("geospatial", "data_analysis"),
-    ("industry_consulting", "automation"),
-    ("project_management", "automation"),
-    ("sales_growth", "automation"),
+    ("consulting", "data_analysis"),
+    ("project_management", "devops"),
+    ("sales_growth", "content_creation"),
     ("security", "devops"),
     ("software_dev", "devops"),
 ];
@@ -442,8 +442,8 @@ const STOCK_EXPLICIT_ROUTE: &[(&str, &str)] = &[
     ("opc-demand-discovery", "/automation/opc/demand-discovery"),
 ];
 
-fn industry_to_domain(industry_id: &str) -> Option<&'static str> {
-    OPC_INDUSTRY_DOMAIN.iter().find(|(k, _)| *k == industry_id).map(|(_, v)| *v)
+fn domain_pack_to_domain(domain_pack_id: &str) -> Option<&'static str> {
+    OPC_DOMAIN_PACK_DOMAIN.iter().find(|(k, _)| *k == domain_pack_id).map(|(_, v)| *v)
 }
 
 fn wf_segment_to_domain(seg: &str) -> Option<&'static str> {
@@ -451,7 +451,7 @@ fn wf_segment_to_domain(seg: &str) -> Option<&'static str> {
 }
 
 /// 权威三层路由地址（`/{domain}/{cluster}/{capability}`）：
-/// seed 时按模板 ID 推导行业/能力路径，**L1 段必须是 CapabilityDomain
+/// seed 时按模板 ID 推导域包/能力路径，**L1 段必须是 CapabilityDomain
 /// 合法值**（general/finance/automation/devops/data_analysis/content_creation/
 /// ai_media/communication），以匹配前端 `TemplateList` 的 `getTemplateDomain`
 /// 严格按 routePath 归域逻辑（`src/components/workflow/Templates/TemplateList.tsx`）。
@@ -459,8 +459,8 @@ fn wf_segment_to_domain(seg: &str) -> Option<&'static str> {
 /// 推导优先级：
 /// 1. stock 域模板显式路径（`STOCK_EXPLICIT_ROUTE`，如 `/finance/equity/multi-dim-analysis`）；
 /// 2. content_media 专属特例（既有契约，L1=`content_creation`）；
-/// 3. `{industry}_harness_workflow` → `/{industry_domain}/{industry}/harness`
-///    （14 行业，按业务本质归 CapabilityDomain）；
+/// 3. `{domain_pack}_harness_workflow` → `/{domain_pack_domain}/{domain_pack}/harness`
+///    （14 域包，按业务本质归 CapabilityDomain）；
 /// 4. `wf-{seg}-{slug}` → `/{seg_domain}/{seg}/{slug}`（17 领域 75 模板）；
 /// 5. `prod-{slug}` → `/automation/production/{slug}`（OPC 自动化运营）；
 /// 6. 兜底 `/general/{template_id}`（确定性路径，不产生未分类）。
@@ -478,9 +478,9 @@ pub(crate) fn authoritative_route_path(template_id: &str) -> String {
         };
         return format!("/content_creation/{cluster_cap}");
     }
-    if let Some(industry) = template_id.strip_suffix("_harness_workflow") {
-        let domain = industry_to_domain(industry).unwrap_or("general");
-        return format!("/{domain}/{industry}/harness");
+    if let Some(domain_pack) = template_id.strip_suffix("_harness_workflow") {
+        let domain = domain_pack_to_domain(domain_pack).unwrap_or("general");
+        return format!("/{domain}/{domain_pack}/harness");
     }
     if let Some(rest) = template_id.strip_prefix("wf-") {
         let (seg, slug) = rest.split_once('-').unwrap_or((rest, "main"));
@@ -496,7 +496,7 @@ pub(crate) fn authoritative_route_path(template_id: &str) -> String {
 /// 回填存量缺失 route_path：seed 后对 `route_path IS NULL` 的预设模板
 /// 按权威映射补全（幂等，非空行不动）。
 ///
-/// 覆盖 OPC(行业 harness / wf / prod / workflow-cm) + stock 域模板
+/// 覆盖 OPC(域包 harness / wf / prod / workflow-cm) + stock 域模板
 /// （stock- / serenity- / news- / daily- / screenshot- / auto- / opc- 前缀），
 /// 排除 `cognitive_*` 系统模板（前端业务列表已过滤，归系统域）。
 pub(crate) async fn backfill_missing_route_paths(db: &DatabaseConnection) -> Result<usize, String> {
@@ -557,11 +557,23 @@ pub(crate) async fn upsert_template(
     let output_json = data.output_schema.as_ref().and_then(|s| serde_json::to_string(s).ok());
     let error_json = data.error_config.as_ref().and_then(|e| serde_json::to_string(e).ok());
 
+    // P0 软门禁（C1，2026-09-14）：种子的端口公理 —— 结构性死链在此**被记录**（不阻断启动）。
+    // 本函数是 OPC 全部生产/内容媒体种子的公共落库点，一处即可覆盖。
+    // 判据复用 `warn_port_axioms_json` → `port_axiom_errors` → `PortAxiomViolation::severity`，
+    // 不在此另写 `matches!`。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("opc-workflows:upsert_template:{}", data.id),
+        &nodes_json,
+        &edges_json,
+    );
+
     let am = workflow_template::ActiveModel {
-        hooks_config: Set(None),
+        // 透传模板自身声明的生命周期钩子（此前后写死 Set(None)，导致任何 OPC 模板
+        // 的 hooks_config 都永远为 NULL —— 模板级钩子机制实际不可用）。
+        hooks_config: Set(data.hooks_config.clone()),
         id: Set(data.id.clone()),
         cluster_id: Set(None),
-        // 显式 route_path 优先（如既有特例模板），否则走权威行业/能力映射
+        // 显式 route_path 优先（如既有特例模板），否则走权威域包/能力映射
         route_path: Set(data
             .route_path
             .clone()
@@ -604,6 +616,8 @@ pub(crate) async fn upsert_template(
                 .update_column(workflow_template::Column::ErrorConfig)
                 .update_column(workflow_template::Column::ToolDefs)
                 .update_column(workflow_template::Column::RoutePath)
+                // 重新 seed 时同步模板声明的钩子，否则已存在的行永远保持 NULL
+                .update_column(workflow_template::Column::HooksConfig)
                 .update_column(workflow_template::Column::UpdatedAt)
                 .to_owned(),
         )
@@ -631,13 +645,15 @@ pub(crate) async fn check_template_version(
 
 #[cfg(test)]
 mod tests {
-    use super::industry_pack::scan_industry_packs;
+    use super::domain_pack::scan_domain_packs;
     use super::*;
     use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait};
+    // b2 收口：这两个函数的 re-export 已撤（消费点走显式全路径），测试内保留短名在此引入
+    use axagent_analysis_engine::opc::domain_pack::{export_domain_pack, import_domain_pack};
 
     #[test]
     fn authoritative_route_path_mapping() {
-        // 行业 harness → /{CapabilityDomain}/{industry}/harness
+        // 域包 harness → /{CapabilityDomain}/{domain_pack}/harness
         assert_eq!(
             super::authoritative_route_path("accounting_harness_workflow"),
             "/finance/accounting/harness"
@@ -659,8 +675,8 @@ mod tests {
             "/ai_media/game_dev/harness"
         );
         assert_eq!(
-            super::authoritative_route_path("industry_consulting_harness_workflow"),
-            "/automation/industry_consulting/harness"
+            super::authoritative_route_path("consulting_harness_workflow"),
+            "/data_analysis/consulting/harness"
         );
         assert_eq!(
             super::authoritative_route_path("security_harness_workflow"),
@@ -711,17 +727,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn industry_pack_migration_creates_registry() {
+    async fn domain_pack_pack_migration_creates_registry() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let row = db
             .query_one_raw(sea_orm::Statement::from_string(
                 sea_orm::DbBackend::Sqlite,
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='opc_industries'",
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='opc_domain_packs'",
             ))
             .await
             .unwrap();
-        assert!(row.is_some(), "opc_industries 表应存在（v211 迁移）");
+        assert!(row.is_some(), "opc_domain_packs 表应存在（v211 迁移）");
         // 编译期常量断言（clippy: assertions-on-constants）
         const {
             assert!(axagent_dao::migrations::CURRENT_VERSION >= 211);
@@ -729,29 +745,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn industry_pack_seed_registers_industries() {
+    async fn domain_pack_pack_seed_registers_industries() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .join("config/opc/industries");
+            .join("config/opc/domain_packs");
 
-        let manifests = scan_industry_packs(&base);
-        assert!(!manifests.is_empty(), "scan_industry_packs 不应为空");
+        let manifests = scan_domain_packs(&base);
+        assert!(!manifests.is_empty(), "scan_domain_packs 不应为空");
 
-        // 行业包 manifest 注册（仅注册，不 seed 工作流）
+        // 域包 manifest 注册（仅注册，不 seed 工作流）
         let seeded =
-            super::industry_pack::ensure_opc_industries_seeded(db, &base).await.expect("注册成功");
-        assert_eq!(seeded.len(), 14, "应注册 14 行业: {seeded:?}");
+            super::domain_pack::ensure_opc_domain_packs_seeded(db, &base).await.expect("注册成功");
+        assert_eq!(seeded.len(), 14, "应注册 14 域包: {seeded:?}");
 
-        use axagent_entities::opc_industries;
-        let count = opc_industries::Entity::find().count(db).await.unwrap();
-        assert_eq!(count, 14, "opc_industries 应有 14 行");
+        use axagent_entities::opc_domain_packs;
+        let count = opc_domain_packs::Entity::find().count(db).await.unwrap();
+        assert_eq!(count, 14, "opc_domain_packs 应有 14 行");
 
         // 工作流由 Rust 种子文件
-        let wf_seeded = seed_opc_industries_from_seed_files(db).await.expect("seed 文件成功");
-        assert_eq!(wf_seeded, 14, "应 seed 14 行业工作流");
+        let wf_seeded = seed_opc_domain_packs_from_seed_files(db).await.expect("seed 文件成功");
+        assert_eq!(wf_seeded, 14, "应 seed 14 域包工作流");
 
         use axagent_entities::workflow_template;
         let fi = workflow_template::Entity::find_by_id("finance_invest_harness_workflow")
@@ -763,7 +779,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn industry_pack_disabled_industry_not_seeded() {
+    async fn domain_pack_pack_disabled_domain_pack_not_seeded() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let tmp = std::env::temp_dir().join(format!("opc-test-{}", std::process::id()));
@@ -775,35 +791,35 @@ mod tests {
         )
         .unwrap();
 
-        let seeded = super::industry_pack::ensure_opc_industries_seeded(db, &tmp).await.unwrap();
+        let seeded = super::domain_pack::ensure_opc_domain_packs_seeded(db, &tmp).await.unwrap();
         assert!(!seeded.contains(&"disabled_test".to_string()));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[tokio::test]
-    async fn industry_pack_export_import_roundtrip() {
+    async fn domain_pack_pack_export_import_roundtrip() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .join("config/opc/industries");
+            .join("config/opc/domain_packs");
         let tmp = std::env::temp_dir().join(format!("opc-export-test-{}", std::process::id()));
         std::fs::create_dir_all(&tmp).unwrap();
 
         // 导出 finance_invest → .opcip（含 manifest + analysis + learning）
-        let out = export_industry_pack(&base, "finance_invest", &tmp).await.expect("导出成功");
+        let out = export_domain_pack(&base, "finance_invest", &tmp).await.expect("导出成功");
         assert!(std::path::Path::new(&out).exists(), "归档应生成");
-        assert!(out.ends_with("finance_invest.opcip"), "归档名应含行业 id");
+        assert!(out.ends_with("finance_invest.opcip"), "归档名应含域包 id");
 
         // 导入到独立 app_dir → 注册 manifest
         let app_dir = tmp.join("app");
         let imported =
-            import_industry_pack(db, &app_dir, std::path::Path::new(&out)).await.expect("导入成功");
+            import_domain_pack(db, &app_dir, std::path::Path::new(&out)).await.expect("导入成功");
         assert_eq!(imported, "finance_invest");
 
         // 解包的 manifest 应存在
-        let manifest = app_dir.join("config/opc/industries/finance_invest/manifest.yaml");
+        let manifest = app_dir.join("config/opc/domain_packs/finance_invest/manifest.yaml");
         assert!(manifest.exists(), "解包后 manifest 应存在");
 
         // 工作流由 Rust 适配器提供，导入不包含 YAML 工作流
@@ -831,14 +847,14 @@ mod tests {
 
     #[tokio::test]
     async fn finance_pack_injects_astock_tools() {
-        // 金融投资行业工作流种子化验证：验证行业适配器生成正确的工作流结构
+        // 金融投资域包工作流种子化验证：验证域包适配器生成正确的工作流结构
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
 
-        // 行业工作流由 Rust 种子文件
-        seed_opc_industries_from_seed_files(db).await.expect("seed 文件成功");
+        // 域包工作流由 Rust 种子文件
+        seed_opc_domain_packs_from_seed_files(db).await.expect("seed 文件成功");
 
-        // 金融投资行业工作流应存在（由 Rust adapter 生成）
+        // 金融投资域包工作流应存在（由 Rust adapter 生成）
         use axagent_entities::workflow_template;
         let wf = workflow_template::Entity::find_by_id("finance_invest_harness_workflow")
             .one(db)
@@ -856,7 +872,7 @@ mod tests {
         assert!(!wf.edges.is_empty(), "边不应为空");
 
         // stock_tool_defs 工具函数可正确匹配 astock 工具
-        let defs = super::industry_pack::stock_tool_defs(&[
+        let defs = axagent_tools::tools::domain_pack_defs::stock_tool_defs(&[
             "get_stock_quote".to_string(),
             "search_stock".to_string(),
         ]);
@@ -866,7 +882,7 @@ mod tests {
     #[tokio::test]
     async fn stock_tool_defs_match_astock() {
         // stock_tool_defs 从 astock-data 匹配工具名
-        let defs = super::industry_pack::stock_tool_defs(&[
+        let defs = axagent_tools::tools::domain_pack_defs::stock_tool_defs(&[
             "get_stock_quote".to_string(),
             "get_stock_financials".to_string(),
         ]);
@@ -876,23 +892,25 @@ mod tests {
         assert!(defs[0].parameters.is_some(), "工具应有参数 schema");
 
         // 不存在的工具名 → 空
-        let none = super::industry_pack::stock_tool_defs(&["not_a_real_tool".to_string()]);
+        let none = axagent_tools::tools::domain_pack_defs::stock_tool_defs(&[
+            "not_a_real_tool".to_string()
+        ]);
         assert!(none.is_empty());
     }
 
-    /// 最终验收：9 行业 seed 产物端到端断言——工作流结构完整、幂等。
+    /// 最终验收：9 域包 seed 产物端到端断言——工作流结构完整、幂等。
     #[tokio::test]
-    async fn industry_packs_end_to_end_verification() {
+    async fn domain_pack_packs_end_to_end_verification() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
 
-        // 行业工作流由 Rust 种子文件
-        seed_opc_industries_from_seed_files(db).await.expect("seed 14 行业");
+        // 域包工作流由 Rust 种子文件
+        seed_opc_domain_packs_from_seed_files(db).await.expect("seed 14 域包");
 
         use axagent_entities::workflow_template;
         use sea_orm::EntityTrait;
 
-        // 1. 14 行业工作流模板全部存在
+        // 1. 14 域包工作流模板全部存在
         let expected_ids = [
             "accounting_harness_workflow",
             "ai_research_harness_workflow",
@@ -900,7 +918,7 @@ mod tests {
             "ecommerce_harness_workflow",
             "education_harness_workflow",
             "finance_invest_harness_workflow",
-            "industry_consulting_harness_workflow",
+            "consulting_harness_workflow",
             "sales_growth_harness_workflow",
             "software_dev_harness_workflow",
             "design_harness_workflow",
@@ -925,7 +943,7 @@ mod tests {
             assert!(!wf.edges.is_empty(), "{id} 边不应为空");
         }
 
-        // 3. 会计行业（requires_approval=true）应包含审批节点（v4 起节点 id 为 ap-accounting）
+        // 3. 会计域包（requires_approval=true）应包含审批节点（v4 起节点 id 为 ap-accounting）
         let acc = workflow_template::Entity::find_by_id("accounting_harness_workflow")
             .one(db)
             .await
@@ -942,19 +960,19 @@ mod tests {
         assert!(sdev.nodes.contains("step_software_dev"), "software_dev 应含步骤节点");
 
         // 5. 幂等：二次 seed 不报错、不产生重复
-        seed_opc_industries_from_seed_files(db).await.expect("二次 seed 应成功");
+        seed_opc_domain_packs_from_seed_files(db).await.expect("二次 seed 应成功");
         let count = workflow_template::Entity::find().count(db).await.unwrap();
-        assert_eq!(count, 14, "14 行业共 14 个工作流，二次 seed 后不应残留/重复，实际 {count}");
+        assert_eq!(count, 14, "14 域包共 14 个工作流，二次 seed 后不应残留/重复，实际 {count}");
     }
 
     #[tokio::test]
     async fn approval_edges_build_correctly() {
-        // P0-1 回归：会计行业需审批流程，验证审批节点存在且有正确的边连接
+        // P0-1 回归：会计域包需审批流程，验证审批节点存在且有正确的边连接
         // v4 升级：丰富拓扑（LLM 条件门 + 修正分支 + 汇合），审批节点 id 为 ap-accounting
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
 
-        seed_opc_industries_from_seed_files(db).await.expect("seed 文件成功");
+        seed_opc_domain_packs_from_seed_files(db).await.expect("seed 文件成功");
 
         use axagent_entities::workflow_template;
         let wf = workflow_template::Entity::find_by_id("accounting_harness_workflow")
@@ -963,7 +981,7 @@ mod tests {
             .unwrap()
             .expect("accounting_harness_workflow 应存在");
 
-        // 会计行业 requires_approval()=true，应包含审批节点（id 为 ap-accounting）
+        // 会计域包 requires_approval()=true，应包含审批节点（id 为 ap-accounting）
         assert!(wf.nodes.contains("ap-accounting"), "应包含审批节点 ap-accounting");
 
         // 审批节点应有至少一条入边和一条出边（step4_accounting → ap-accounting → end）
@@ -1043,13 +1061,13 @@ mod tests {
 
     #[tokio::test]
     async fn market_list_scans_builtin_packs() {
-        // 模拟 opc_market_list：扫描内置行业包目录
+        // 模拟 opc_market_list：扫描内置域包目录
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .join("config/opc/industries");
-        let manifests = super::industry_pack::scan_industry_packs(&base);
-        assert_eq!(manifests.len(), 14, "内置 14 个行业包");
+            .join("config/opc/domain_packs");
+        let manifests = super::domain_pack::scan_domain_packs(&base);
+        assert_eq!(manifests.len(), 14, "内置 14 个域包");
 
         // 每个包有 manifest 关键字段
         for m in &manifests {
@@ -1060,13 +1078,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn industry_pack_four_assets_loaded() {
-        // P0-4 回归：行业包四件套（manifest + workflows + analysis + learning）一次读全，
+    async fn domain_pack_pack_four_assets_loaded() {
+        // P0-4 回归：域包四件套（manifest + workflows + analysis + learning）一次读全，
         // manifest.analysis/learning 字段缺省默认值，analysis.yaml 全部可解析
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .unwrap()
-            .join("config/opc/industries");
+            .join("config/opc/domain_packs");
 
         let mut count = 0;
         for entry in std::fs::read_dir(&base).unwrap().flatten() {
@@ -1074,8 +1092,8 @@ mod tests {
             if !dir.is_dir() {
                 continue;
             }
-            let bundle = super::industry_pack::analysis_schema::load_industry_pack(&dir)
-                .expect("行业包应完整加载（manifest 可解析）");
+            let bundle = super::domain_pack::analysis_schema::load_domain_pack(&dir)
+                .expect("域包应完整加载（manifest 可解析）");
             // manifest 扩展字段：缺省默认 analysis.yaml / learning.yaml
             assert_eq!(
                 bundle.manifest.analysis, "analysis.yaml",
@@ -1103,7 +1121,7 @@ mod tests {
                 "{} quality_precheck 源必须存在于 data_sources",
                 bundle.manifest.id
             );
-            // learning.yaml 四件套之一：P4-3 已迁入行业包
+            // learning.yaml 四件套之一：P4-3 已迁入域包
             assert!(
                 dir.join("learning.yaml").is_file(),
                 "{} 缺 learning.yaml（P4-3 要求）",
@@ -1111,24 +1129,24 @@ mod tests {
             );
             count += 1;
         }
-        assert_eq!(count, 14, "应扫描到 14 个行业包，实际 {count}");
+        assert_eq!(count, 14, "应扫描到 14 个域包，实际 {count}");
     }
 
     #[test]
-    fn industry_adapters_loaded_from_packs() {
-        // P0-1-A 回归：行业适配器由行业包 learning.yaml 的 adapter 段驱动
+    fn domain_pack_adapters_loaded_from_packs() {
+        // P0-1-A 回归：域包适配器由域包 learning.yaml 的 adapter 段驱动
         //（替代 orchestrator create_all_adapters Rust 硬编码）。
         // 用 accounting 已知配置对账：3 checkpoints + 3 AC + min/max 2/15 + protected compliance_check。
         // 测试 CWD=src-tauri，相对路径落空 → 显式传仓库根（模拟 app_dir 命中分支）。
         let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let adapters = super::load_industry_adapters_from_packs(Some(repo_root));
-        assert_eq!(adapters.len(), 14, "应加载 14 个行业适配器: {}", adapters.len());
+        let adapters = super::load_domain_pack_adapters(Some(repo_root));
+        assert_eq!(adapters.len(), 14, "应加载 14 个域包适配器: {}", adapters.len());
 
         let accounting = adapters
             .iter()
-            .find(|a| a.industry_id() == "accounting")
+            .find(|a| a.domain_pack_id() == "accounting")
             .expect("accounting 适配器应存在");
-        assert_eq!(accounting.industry_name(), "会计财务流程");
+        assert_eq!(accounting.domain_pack_name(), "会计财务流程");
 
         let rt = accounting.reflection_template();
         assert_eq!(rt.id, "accounting-default", "reflection_template.id 应对账 yaml");
@@ -1148,34 +1166,34 @@ mod tests {
         assert_eq!(ac.len(), 3, "accounting 应有 3 条验收标准");
         assert!(ac.iter().any(|c| c.id == "ac-accuracy" && c.is_critical));
 
-        // software-dev：唯一带 protected/deps/forbidden + must_follow_order 的行业
+        // software-dev：唯一带 protected/deps/forbidden + must_follow_order 的域包
         let sd = adapters
             .iter()
-            .find(|a| a.industry_id() == "software-dev")
+            .find(|a| a.domain_pack_id() == "software-dev")
             .expect("software-dev 适配器应存在");
         assert!(sd.evolution_constraints().must_follow_order, "software-dev 应 must_follow_order");
         assert_eq!(sd.evolution_constraints().protected_steps.len(), 3);
         assert_eq!(sd.acceptance_criteria().len(), 4);
 
-        // 新增行业零代码：临时目录建 manifest + learning.yaml(adapter 段) → 动态出现
+        // 新增域包零代码：临时目录建 manifest + learning.yaml(adapter 段) → 动态出现
         let tmp = std::env::temp_dir().join(format!("opc-adapter-test-{}", std::process::id()));
-        let pkg = tmp.join("config/opc/industries/mock_industry");
+        let pkg = tmp.join("config/opc/domain_packs/mock_domain_pack");
         std::fs::create_dir_all(&pkg).unwrap();
         std::fs::write(
             pkg.join("manifest.yaml"),
-            "id: mock-industry\nname: 模拟行业\nversion: 1\nenabled: true\n",
+            "id: mock-domain-pack\nname: 模拟域包\nversion: 1\nenabled: true\n",
         )
         .unwrap();
         std::fs::write(
             pkg.join("learning.yaml"),
-            "version: 1\nindustry_id: mock-industry\nadapter:\n  reflection_template:\n    id: mock\n    name: Mock 模板\n    checkpoints:\n      - id: c1\n        name: C1\n        dimension: d\n        description: desc\n        weight: 0.5\n",
+            "version: 1\ndomain_pack_id: mock-domain-pack\nadapter:\n  reflection_template:\n    id: mock\n    name: Mock 模板\n    checkpoints:\n      - id: c1\n        name: C1\n        dimension: d\n        description: desc\n        weight: 0.5\n",
         )
         .unwrap();
-        let adapters2 = super::load_industry_adapters_from_packs(Some(&tmp));
+        let adapters2 = super::load_domain_pack_adapters(Some(&tmp));
         let mock = adapters2
             .iter()
-            .find(|a| a.industry_id() == "mock-industry")
-            .expect("新增行业应自动加载（零代码）");
+            .find(|a| a.domain_pack_id() == "mock-domain-pack")
+            .expect("新增域包应自动加载（零代码）");
         assert_eq!(mock.reflection_template().id, "mock");
         let _ = std::fs::remove_dir_all(&tmp);
     }

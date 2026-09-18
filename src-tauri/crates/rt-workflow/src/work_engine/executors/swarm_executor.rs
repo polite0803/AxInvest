@@ -83,6 +83,14 @@ impl NodeExecutorTrait for SwarmExecutor {
         let mut round_outputs: Vec<HashMap<String, serde_json::Value>> = Vec::new();
         let mut prev_round_snapshot: Option<Vec<serde_json::Value>> = None;
 
+        // A2（2026-09-14）：与 `debate_executor` 同款修复 —— 旧的硬编码
+        // `"status": "completed"` 是有 agent 失败时的 fail-open 说谎字段。
+        // 职责边界同 debate：本层只「说真话」，不改变控制流；重试粒度在单个
+        // 子节点（`dispatch_container_body_with_retry`），不是整个容器。
+        let mut attempted: u32 = 0;
+        let mut succeeded: u32 = 0;
+        let mut failed_agents: Vec<serde_json::Value> = Vec::new();
+
         for round in 0..max_rounds {
             tracing::info!(
                 "Swarm round {}/{} with {} agents",
@@ -114,21 +122,29 @@ impl NodeExecutorTrait for SwarmExecutor {
                         .insert("__swarm_history__".to_string(), serde_json::json!(snapshot));
                 }
 
+                attempted += 1;
                 match dispatch_fn(step_id.clone(), round_ctx).await {
                     Ok(output) => {
+                        succeeded += 1;
                         round_results.insert(step_id.clone(), output.output);
                     },
                     Err(e) => {
+                        let err_text = e.to_string();
                         tracing::warn!(
                             "Swarm agent '{}' failed in round {}: {}",
                             step_id,
                             round,
-                            e
+                            err_text
                         );
+                        failed_agents.push(serde_json::json!({
+                            "agent": step_id,
+                            "round": round,
+                            "error": err_text,
+                        }));
                         round_results.insert(
                             step_id.clone(),
                             serde_json::json!({
-                                "error": e.to_string(),
+                                "error": err_text,
                                 "round": round,
                             }),
                         );
@@ -155,10 +171,35 @@ impl NodeExecutorTrait for SwarmExecutor {
                 Some(round_results.values().cloned().collect::<Vec<serde_json::Value>>());
         }
 
+        // 状态三档（A2）：全成功 completed / 部分成功 degraded / 全失败 failed。
+        let status = if failed_agents.is_empty() {
+            "completed"
+        } else if succeeded == 0 {
+            "failed"
+        } else {
+            "degraded"
+        };
+        let degraded = !failed_agents.is_empty();
+        if degraded {
+            tracing::warn!(
+                workflow = "swarm",
+                status,
+                failed = failed_agents.len(),
+                attempted,
+                rounds_used = round_outputs.len(),
+                max_rounds,
+                "Swarm 容器降级完成：有 agent 失败，内容不完整（下游质量闸门应据此拦截）"
+            );
+        }
+
         let final_output = serde_json::json!({
-            "status": "completed",
+            "status": status,
+            "degraded": degraded,
             "total_rounds": round_outputs.len(),
             "max_rounds": max_rounds,
+            "attempted": attempted,
+            "succeeded": succeeded,
+            "failed_agents": failed_agents,
             "rounds": round_outputs,
             "consensus": super::build_round_consensus(&round_outputs),
         });

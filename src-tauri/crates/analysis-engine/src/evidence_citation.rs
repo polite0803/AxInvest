@@ -21,8 +21,29 @@
 //! 引用提取算法：将 `decision_reasoning` 文本按句拆分，与各分析师报告的
 //! 关键词做 Jaccard 相似度匹配，找到最可能的来源。
 
+use axagent_harness::domain_semantics::{Percent100, Ratio01};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// 文本相似度权重（Jaccard）。
+///
+/// ⚠️ **两项权重之和必须为 1**，且两项输入都必须先落在 `[0,1]`：
+/// `jaccard ∈ [0,1]`；`数字重合数 / 声明去重字符数 ∈ [0,1]`。
+/// 这样 `score` 才真在 `[0,1]`，与字段文档、`Ratio01` 类型、前端
+/// `matchConfidence * 100` 的口径一致。
+///
+/// 2026-09-14 修复：第二项原为 `* 30.0`，使实际值域变成 `0–30.7`
+/// （`3/20 × 30 = 4.5` 是常见值），而下游全部按 `0–1` 消费 ——
+/// 后果是前端条形**恒满格**、颜色**恒绿**、Tooltip 可显示 `450%`。
+/// 量纲登记见 `axagent_harness::domain_semantics`（`axinvest.evidence.match_confidence`）。
+const W_JACCARD: f64 = 0.7;
+const W_NUMBER: f64 = 0.3;
+
+/// 匹配命中阈值（与 `score` 同量纲：`[0,1]`）。
+///
+/// 修复量纲后本阈值才真正起作用 —— 此前数字项一项就能把 `score` 顶到 4.5，
+/// 阈值近乎恒真，`jaccard`（真正的文本相似度）几乎不参与判定。
+const MATCH_THRESHOLD: f64 = 0.15;
 
 /// 单条证据引用
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,8 +55,12 @@ pub struct EvidenceCitation {
     pub source_analyst_id: String,
     /// 来源分析师显示名（如 "基本面分析师"）
     pub source_analyst_name: String,
-    /// 匹配置信度 (0.0-1.0)
-    pub match_confidence: f64,
+    /// 匹配置信度，值域 **`[0, 1]`**
+    ///
+    /// 类型是 [`Ratio01`] 而非 `f64`：量纲由**编译器**归属。
+    /// 构造即钳制，序列化仍是裸数字（`serde(transparent)`），
+    /// 故前端 `matchConfidence * 100` 的既有契约不变。
+    pub match_confidence: Ratio01,
     /// 分析师原文中匹配的片段
     pub source_snippet: String,
     /// 该理由是否在分析师报告中有数据支撑
@@ -148,9 +173,12 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
                 .filter(|n| report_text.contains(&n.to_string()))
                 .count();
 
-            let score = jaccard * 0.7 + (number_overlap as f64 / claim_len.max(1.0)) * 30.0;
+            let score =
+                jaccard * W_JACCARD + (number_overlap as f64 / claim_len.max(1.0)) * W_NUMBER;
 
-            if score > 0.15 && (best_match.is_none() || score > best_match.as_ref().unwrap().1) {
+            if score > MATCH_THRESHOLD
+                && (best_match.is_none() || score > best_match.as_ref().unwrap().1)
+            {
                 // 取匹配段（前后 60 字）
                 let snippet = extract_snippet(report_text, claim, 60);
                 best_match = Some((analyst_id.clone(), score, snippet));
@@ -168,7 +196,7 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
                 claim: claim.to_string(),
                 source_analyst_id: analyst_id.clone(),
                 source_analyst_name: analyst_display_name(&analyst_id),
-                match_confidence: (score * 100.0).round() / 100.0,
+                match_confidence: Ratio01::new(score),
                 source_snippet: snippet,
                 has_data_support: has_data,
                 data_source: if has_data {
@@ -183,7 +211,7 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
                 claim: claim.to_string(),
                 source_analyst_id: "unknown".into(),
                 source_analyst_name: "未识别来源".into(),
-                match_confidence: 0.0,
+                match_confidence: Ratio01::ZERO,
                 source_snippet: String::new(),
                 has_data_support: false,
                 data_source: None,
@@ -342,17 +370,20 @@ pub fn citations_to_markdown(report: &CitationReport) -> String {
     md.push_str(&format!("**参与分析师**: {} 个\n\n", report.analyst_count));
 
     for (i, citation) in report.citations.iter().enumerate() {
-        let confidence_bar = match (citation.match_confidence * 10.0) as usize {
+        // 档位仍按比率折算（算术与修复前逐位一致，只多了 `.get()`）
+        let confidence_bar = match (citation.match_confidence.get() * 10.0) as usize {
             0..=2 => "🟡",
             3..=6 => "🟢",
             _ => "🔵",
         };
+        // 展示用百分数走显式换算，单位不再靠读者猜
+        let confidence_pct = Percent100::from(citation.match_confidence);
         md.push_str(&format!("{}. {}\n", i + 1, citation.claim));
         md.push_str(&format!(
             "   {} 来源: {} (匹配度 {:.0}%)\n",
             confidence_bar,
             citation.source_analyst_name,
-            citation.match_confidence * 100.0
+            confidence_pct.get()
         ));
         if citation.has_data_support {
             md.push_str("   📊 有数据支撑\n");
@@ -395,7 +426,7 @@ mod tests {
         let report = extract_citations(reasoning, snapshot);
         assert!(report.total_claims > 0);
         // 至少有一个理由匹配上了
-        let matched = report.citations.iter().filter(|c| c.match_confidence > 0.0).count();
+        let matched = report.citations.iter().filter(|c| c.match_confidence.get() > 0.0).count();
         assert!(matched > 0, "应有至少一个理由匹配到分析师报告");
     }
 
@@ -419,5 +450,36 @@ mod tests {
         let three_byte_text = format!("突破xx{}", "上".repeat(50));
         let snippet3 = extract_snippet(&three_byte_text, "xx", 5);
         assert!(snippet3.contains("x"), "边缘情况应包含查询词的内容");
+    }
+
+    /// 回归：`match_confidence` 的量纲必须真在 `[0,1]`（修复前实际可达 `0–30.7`）。
+    ///
+    /// **为什么不能只断言 `<= 1.0`** —— [`Ratio01`] 构造即钳制，越界会被压到 `1.0`，
+    /// 于是「在范围内」恒真、断言等于没写。**量纲回归的可观测症状是「饱和到满值」**：
+    /// 本用例下旧公式第二项 = `3/21 × 30 ≈ 4.29` ⇒ `match_confidence` 会正好 `== 1.0`。
+    /// 所以判据写成「**命中但未饱和**」。
+    #[test]
+    fn test_match_confidence_is_ratio_not_saturated() {
+        // 3 个数字 + 约 21 个去重字符 ⇒ 正是触发旧公式 `×30.0` 的形态
+        let reasoning = "ROE 22.3% 且营收 150 亿且增长 5.2% 超预期。";
+        let snapshot = r#"{"report.a-fundamentals":"ROE 22.3 营收 150 增长 5.2 均超预期"}"#;
+        let report = extract_citations(reasoning, snapshot);
+
+        assert!(report.total_claims > 0, "应至少拆出一句理由");
+        let max = report.citations.iter().map(|c| c.match_confidence.get()).fold(0.0_f64, f64::max);
+
+        assert!(max > 0.05, "该输入应能命中，实际最大匹配度 {}", max);
+        assert!(
+            max < 0.99,
+            "最大匹配度 {} 已饱和到满值 —— 打分公式可能又漂回 0–30 量纲（旧值约 4.29）",
+            max
+        );
+        for c in &report.citations {
+            assert!(
+                (0.0..=1.0).contains(&c.match_confidence.get()),
+                "match_confidence 越界：{}（声明值域 0–1）",
+                c.match_confidence.get()
+            );
+        }
     }
 }

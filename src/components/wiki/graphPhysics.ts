@@ -218,6 +218,28 @@ export interface PhysicsConfig {
   springDamping: number;
   maxVelocity: number;
   clusterForce?: number;
+  /** 让重力成为**均匀加速度场**（力 ∝ 自身质量），而不是「恒定大小的力」。
+   *
+   *  默认 `undefined/false` ⇒ 保持原语义 `F = gravity`，加速度 `a = gravity/mass`。
+   *  两种语义在**质量齐一**时等价（主物理的节点质量 1~161，差异尚有界），
+   *  但在聚合物理里质量 = 成员数×0.6（1~553，跨 3 个数量级）时差异致命：
+   *  `a = gravity/mass` 会让「214 人的社区」受到的向心加速度只有「1 人社区」的 1/553
+   *  ⇒ 大社区被斥力推到外圈、小社区堆在中心 —— 这正是「社区呈环状、中心空」的来源之一。
+   *  开启后所有聚合节点受同等的向心加速度，位置由斥力（∝ 对方质量）与拓扑决定，
+   *  语义上对应「群体尺度由密度决定」而不是「由体重决定」。 */
+  gravityScalesWithMass?: boolean;
+  /** 关闭「全体近乎静止即早退」的性能兜底。默认关闭该兜底（即保持原语义）。
+   *
+   *  ⚠ 原兜底（`!anyMoving && !communities` ⇒ **清零速度**并 return）有个非显然后果：
+   *  它把「慢」当成「停」。速度阈值是 `v² > 0.01`（即 v>0.1），而稳态速度
+   *  `v∞ = a·dt/(1-damping)` —— 只要某配置的加速度 `a < 0.1(1-damping)/dt`，
+   *  系统就会在**受力未平衡**的情况下被判为静止、速度被清零，此后**永久冻结**。
+   *  实测（2026-09-16 标定扫描）：把 repulsion 从 70000 降到 3.5（为了把平衡尺度拉回
+   *  可视范围）后，`span` 在 20000 步内恒等于播种半径、`maxV` 恒为 0.00 ——
+   *  看起来像「已收敛」，实际是冻结（判据 #8/#313：统计量恒等 ⇒ 先怀疑测量工具）。
+   *  聚合物理规模 ≤ MAX_AGG_PHYS_NODES(800) 且每 6 帧才跑一次，兜底省不下可观测成本，
+   *  却在「温和力」参数区间里是致命的，故该分支显式关闭它。 */
+  keepSimulating?: boolean;
 }
 
 export const DEFAULT_PHYSICS_CONFIG: PhysicsConfig = {
@@ -333,7 +355,9 @@ export function stepPhysics(
     }
   }
 
-  if (!anyMoving && !communities) {
+  // ⚠ `keepSimulating` 见 PhysicsConfig 的注释：该兜底会把「受力但速度慢」误判为「静止」
+  //     并清零速度 ⇒ 系统永久冻结。聚合物理分支显式关闭它。
+  if (!anyMoving && !communities && !config.keepSimulating) {
     for (let i = 0; i < n; i++) {
       const node = nodes[i];
       if (fixedMask[i]) { continue; }
@@ -357,8 +381,11 @@ export function stepPhysics(
     fy += repForce.fy;
 
     const distToCenter = Math.sqrt(node.x * node.x + node.y * node.y) || 1;
-    fx += -config.gravity * node.x / distToCenter;
-    fy += -config.gravity * node.y / distToCenter;
+    // 默认：恒定大小的向心力（a = gravity/mass）。开启 gravityScalesWithMass 后把力乘上
+    // 自身质量，使 a = gravity 对全体一致（均匀加速度场）—— 见 PhysicsConfig 的注释。
+    const gravityForce = config.gravityScalesWithMass ? config.gravity * node.mass : config.gravity;
+    fx += -gravityForce * node.x / distToCenter;
+    fy += -gravityForce * node.y / distToCenter;
 
     const neighbors = neighborMap.get(i);
     if (neighbors) {
@@ -517,7 +544,11 @@ export function initializePositions(nodes: PhysicsNode[], width: number, height:
   const cx = 0;
   const cy = 0;
   const minDim = Math.min(width, height);
-  const radius = Math.max(minDim * 0.6, nodes.length * 2);
+  // 布局半径必须与视口同量级。旧公式 `nodes.length * 2` 是线性增长：6000 节点给出
+  // radius=12000（视口的 ~14 倍），24000 节点给出 48000，配合初始 zoom=1 会把
+  // 95% 以上的节点推到视野之外 —— 打开图谱只能看到一片空白加几个孤点。
+  // 改为按 sqrt(n) 增长（面积意义上的节点密度守恒），上限仍以视口为基准。
+  const radius = Math.max(minDim * 0.5, Math.sqrt(nodes.length) * 8);
 
   for (let i = 0; i < nodes.length; i++) {
     // 使用斐波那契螺旋分布，确保节点均匀填充圆盘

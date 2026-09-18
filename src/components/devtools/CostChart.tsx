@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { formatTokens } from "@/lib/format";
 import { useFormatCny } from "@/stores";
 import type { TraceMetrics } from "@/types";
 import { Card, Progress } from "antd";
@@ -7,16 +8,6 @@ import { useTranslation } from "react-i18next";
 
 interface CostChartProps {
   metrics: TraceMetrics;
-}
-
-function formatTokens(tokens: number): string {
-  if (tokens < 1000) {
-    return `${tokens}`;
-  }
-  if (tokens < 1000000) {
-    return `${(tokens / 1000).toFixed(1)}K`;
-  }
-  return `${(tokens / 1000000).toFixed(1)}M`;
 }
 
 export function CostChart({ metrics }: CostChartProps) {

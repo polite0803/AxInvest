@@ -4,7 +4,13 @@
 //! 格式为 YAML frontmatter + Markdown body。
 //! 实际加载由 `stock_analysis_setup.rs` 的 `include_str!` 编译期嵌入完成。
 
-/// 22 个专家 ID（对应 22 个 .md 文件）
+/// 历史专家 ID 清单。
+///
+/// ⚠ **已过期且零消费者**：不含 Serenity 链条（trend-scanner / chain-decomposer /
+/// chokepoint-identifier / candidate-mapper）与简化模板新增的专家，与
+/// `stock_analysis_setup::EMBEDDED_PROMPTS` 重复维护（违反 AGENTS.md 禁区 12
+/// 「禁止重复定义」）。专家注册的唯一权威是 `EMBEDDED_PROMPTS`；本清单待整体清理。
+/// 2026-09-14: 同步移除已注销的 `data-quality-inspector`。
 pub const EXPERT_IDS: &[&str] = &[
     "market-analyst",
     "sentiment-analyst",
@@ -28,7 +34,6 @@ pub const EXPERT_IDS: &[&str] = &[
     "trader",
     "reflection",
     "value-investor",
-    "data-quality-inspector",
     "rule-checker",
     "catalyst-analyst",
 ];

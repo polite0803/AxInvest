@@ -2,6 +2,7 @@
 //! RSI 顶背离、组合风险，推荐在未来什么时间以什么价格挂出哪些持仓股票。
 
 use crate::candlestick_pattern;
+use crate::decision_action::{normalize_action, ActionKind};
 use crate::divergence;
 use axagent_astock_data::indicators::compute_indicators;
 use axagent_entities::{portfolio_holdings, stock_analyses};
@@ -218,7 +219,12 @@ async fn evaluate_position(
                 stop_loss = decision["stopLoss"].as_f64();
 
                 // 分析建议卖出/减持
-                if action_str == "卖出" || action_str == "减持" {
+                // P1-6(2026-09-14): 原先只认 2 个中文字面量 —— 英文 SELL / REDUCE
+                // 不触发「分析建议卖出」退出信号（漏报，fail-open 方向）。
+                if matches!(
+                    normalize_action(action_str),
+                    Some(ActionKind::Reduce | ActionKind::Sell)
+                ) {
                     score += SCORE_ANALYSIS_SELL;
                     signals.push(ExitSignal {
                         signal_type: "analysis_sell".into(),

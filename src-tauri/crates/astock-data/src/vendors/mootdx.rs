@@ -195,7 +195,7 @@ impl TdxConnection {
                 break;
             }
 
-            let market = body[pos];
+            let _market = body[pos];
             pos += 1;
 
             let code_end = (pos + 6).min(body.len());
@@ -285,7 +285,6 @@ impl TdxConnection {
             let low = cal_price(price, low_diff);
 
             results.push(QuoteResult {
-                market,
                 code,
                 price: cal_price(price, 0),
                 last_close,
@@ -412,9 +411,6 @@ impl TdxConnection {
 }
 
 struct QuoteResult {
-    /// tdx 行情协议响应字段：解析时消费该字节保持 wire 契约完整，Rust 侧暂未读取
-    #[allow(dead_code)]
-    market: u8,
     code: String,
     price: f64,
     last_close: f64,

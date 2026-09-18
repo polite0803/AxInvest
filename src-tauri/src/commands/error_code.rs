@@ -20,20 +20,25 @@
 //! 前端 11 语言均有 `error.CONSTANT` 翻译键,且 crates/插件可动态构建这些错误码。
 //! 删除会破坏契约对齐、使前端翻译成为孤儿码(被 check-errorcode-alignment.mjs 捕获)。
 //! 详见 src-tauri/src/commands/error_code.rs / crates/harness/src/error_codes.rs 的模块设计。
-#![allow(dead_code)]
+//!
+//! 关于 `unused_imports` 的说明（与上面的 `dead_code` 同源，理由相同）：
+//! 与基座域共享的错误码已改为 `pub use axagent_harness::error_codes::<域>;`（禁止重复定义，
+//! 见 AGENTS.md 禁区 12）。由于本 crate 的 `commands` 是私有模块（`lib.rs: mod commands;`），
+//! 且部分域在 Rust 侧确实没有直接引用点（如 voice / paper / reading_list / unity），
+//! rustc 会对这些「仅作为前端 i18n 契约存在」的 re-export 报 `unused_imports`。
+//! 判定这些码是否仍被需要，依据是 `scripts/check-errorcode-alignment.mjs` 与
+//! `scripts/check-contracts.mjs`（它们按源码文本取码值并集），**不是**编译器的引用计数。
+//! 因此这里同样保留该 allow。
+#![allow(dead_code, unused_imports)]
 
 /// 会话/对话相关错误码
 pub mod conversation {
+    // 基座域码（`ALREADY_ARCHIVED` / `DELETE_FAILED` / `NOT_WORKFLOW` / `NOT_FOUND`）权威源在
+    // `axagent_harness::error_codes::conversation` —— 此处不再 re-export（crate 内零消费者 ⇒
+    // `unused_imports`，说明见下方 `voice` 处）。需要时直接从 harness 导入。
+    // ── 以下为 commands 层独有错误码 ──
     /// 内部服务器错误
     pub const INTERNAL: &str = "CONVERSATION_INTERNAL";
-    /// 此会话不是工作流类型，请使用普通归档
-    pub const NOT_WORKFLOW: &str = "CONVERSATION_NOT_WORKFLOW";
-    /// 会话已归档，请勿重复操作
-    pub const ALREADY_ARCHIVED: &str = "CONVERSATION_ALREADY_ARCHIVED";
-    /// 会话未找到
-    pub const NOT_FOUND: &str = "CONVERSATION_NOT_FOUND";
-    /// 删除会话失败
-    pub const DELETE_FAILED: &str = "CONVERSATION_DELETE_FAILED";
 }
 
 /// 微调训练相关错误码
@@ -43,39 +48,16 @@ pub mod fine_tune {
 }
 
 /// 工具执行相关错误码
-pub mod tool {
-    /// 工具未找到
-    pub const NOT_FOUND: &str = "TOOL_NOT_FOUND";
-    /// 工具缺少必需参数
-    pub const PARAM_REQUIRED: &str = "TOOL_PARAM_REQUIRED";
-    /// 工具执行超时
-    pub const EXECUTION_TIMEOUT: &str = "TOOL_EXECUTION_TIMEOUT";
-    /// 工具执行错误
-    pub const EXECUTION_ERROR: &str = "TOOL_EXECUTION_ERROR";
-    /// stdio工具未配置命令
-    pub const STDIO_NO_COMMAND: &str = "TOOL_STDIO_NO_COMMAND";
-    /// HTTP工具未配置端点
-    pub const HTTP_NO_ENDPOINT: &str = "TOOL_HTTP_NO_ENDPOINT";
-    /// SSE工具未配置端点
-    pub const SSE_NO_ENDPOINT: &str = "TOOL_SSE_NO_ENDPOINT";
-    /// 不支持的传输类型
-    pub const TRANSPORT_UNSUPPORTED: &str = "TOOL_TRANSPORT_UNSUPPORTED";
-    /// 工具重复注册（运行时动态注册时与已有工具同名）
-    pub const REGISTRATION_DUPLICATE: &str = "TOOL_REGISTRATION_DUPLICATE";
-}
+// ── 权威源：axagent_harness::error_codes::tool（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::tool;
 
 /// MCP服务器相关错误码
 pub mod mcp {
-    /// MCP服务器未启用
-    pub const SERVER_NOT_ENABLED: &str = "MCP_SERVER_NOT_ENABLED";
-    /// MCP连接失败
-    pub const CONNECT_FAILED: &str = "MCP_CONNECT_FAILED";
-    /// 不支持的MCP传输类型
-    pub const TRANSPORT_UNSUPPORTED: &str = "MCP_TRANSPORT_UNSUPPORTED";
-    /// MCP连接超时
-    pub const TIMEOUT: &str = "MCP_TIMEOUT";
-    /// MCP工具发现超时
-    pub const TOOL_DISCOVERY_TIMEOUT: &str = "MCP_TOOL_DISCOVERY_TIMEOUT";
+    // ── 基座域错误码：权威源在 axagent-harness，此处仅 re-export（禁止重复定义）──
+    pub use axagent_harness::error_codes::mcp::{
+        CONNECT_FAILED, SERVER_NOT_ENABLED, TIMEOUT, TOOL_DISCOVERY_TIMEOUT, TRANSPORT_UNSUPPORTED,
+    };
+    // ── 以下为 commands 层独有错误码 ──
     /// Agent 会话未找到
     pub const AGENT_SESSION_NOT_FOUND: &str = "MCP_AGENT_SESSION_NOT_FOUND";
     /// Agent 会话取消失败
@@ -84,10 +66,9 @@ pub mod mcp {
 
 /// 浏览器相关错误码
 pub mod browser {
-    /// 浏览器客户端未初始化
-    pub const NOT_INITIALIZED: &str = "BROWSER_NOT_INITIALIZED";
-    /// 浏览器操作失败
-    pub const ACTION_FAILED: &str = "BROWSER_ACTION_FAILED";
+    // ── 基座域错误码：权威源在 axagent-harness，此处仅 re-export（禁止重复定义）──
+    pub use axagent_harness::error_codes::browser::NOT_INITIALIZED;
+    // ── 以下为 commands 层独有错误码 ──
     /// URL格式无效
     pub const INVALID_URL: &str = "BROWSER_INVALID_URL";
     /// URL协议不允许（仅允许 http/https）
@@ -97,104 +78,46 @@ pub mod browser {
 }
 
 /// 存储/文件相关错误码
-pub mod storage {
-    /// 路径必须是绝对路径
-    pub const PATH_NOT_ABSOLUTE: &str = "STORAGE_PATH_NOT_ABSOLUTE";
-    /// 创建目录失败
-    pub const CREATE_DIR_FAILED: &str = "STORAGE_CREATE_DIR_FAILED";
-    /// 读取目录失败
-    pub const READ_DIR_FAILED: &str = "STORAGE_READ_DIR_FAILED";
-    /// 读取文件失败
-    pub const READ_FILE_FAILED: &str = "STORAGE_READ_FILE_FAILED";
-    /// 写入文件失败
-    pub const WRITE_FILE_FAILED: &str = "STORAGE_WRITE_FILE_FAILED";
-}
+// ── 权威源：axagent_harness::error_codes::storage（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::storage;
 
 /// 技能(Skill)相关错误码
 pub mod skill {
-    /// 无法确定用户主目录
-    pub const HOME_DIR_FAILED: &str = "SKILL_HOME_DIR_FAILED";
-    /// 解析skill-manifest.json失败
-    pub const MANIFEST_PARSE_FAILED: &str = "SKILL_MANIFEST_PARSE_FAILED";
-    /// 技能依赖未找到
-    pub const DEPENDENCY_NOT_FOUND: &str = "SKILL_DEPENDENCY_NOT_FOUND";
-    /// 技能序列化失败
-    pub const SERIALIZE_FAILED: &str = "SKILL_SERIALIZE_FAILED";
+    // ── 基座域错误码：权威源在 axagent-harness，此处仅 re-export（禁止重复定义）──
+    pub use axagent_harness::error_codes::skill::{
+        CONTENT_EMPTY, DEPENDENCY_NOT_FOUND, MANIFEST_PARSE_FAILED, NOT_FOUND, SERIALIZE_FAILED,
+    };
+    // ── 以下为 commands 层独有错误码 ──
     /// 技能保存成功（成功消息）
     pub const SAVED: &str = "SKILL_SAVED";
-    /// 技能内容为空
-    pub const CONTENT_EMPTY: &str = "SKILL_CONTENT_EMPTY";
     /// 未配置默认模型提供商
     pub const MODEL_PROVIDER_NOT_CONFIGURED: &str = "SKILL_MODEL_PROVIDER_NOT_CONFIGURED";
     /// 未配置默认模型
     pub const MODEL_NOT_CONFIGURED: &str = "SKILL_MODEL_NOT_CONFIGURED";
     /// 输出格式不正确
     pub const OUTPUT_FORMAT_ERROR: &str = "SKILL_OUTPUT_FORMAT_ERROR";
-    /// 资源未找到
-    pub const NOT_FOUND: &str = "SKILL_NOT_FOUND";
 }
 
 /// 专家(Expert)相关错误码
-pub mod expert {
-    /// 读取目录失败
-    pub const READ_DIR_FAILED: &str = "EXPERT_READ_DIR_FAILED";
-    /// 读取目录条目失败
-    pub const READ_ENTRY_FAILED: &str = "EXPERT_READ_ENTRY_FAILED";
-    /// 读取文件失败
-    pub const READ_FILE_FAILED: &str = "EXPERT_READ_FILE_FAILED";
-    /// 保存失败
-    pub const SAVE_FAILED: &str = "EXPERT_SAVE_FAILED";
-    /// 删除失败
-    pub const DELETE_FAILED: &str = "EXPERT_DELETE_FAILED";
-    /// 更新失败
-    pub const UPDATE_FAILED: &str = "EXPERT_UPDATE_FAILED";
-    /// 查询失败
-    pub const QUERY_FAILED: &str = "EXPERT_QUERY_FAILED";
-    /// 加载设置失败
-    pub const LOAD_SETTINGS_FAILED: &str = "EXPERT_LOAD_SETTINGS_FAILED";
-    /// 密钥解密失败
-    pub const KEY_DECRYPT_FAILED: &str = "EXPERT_KEY_DECRYPT_FAILED";
-    /// 无活跃密钥
-    pub const NO_ACTIVE_KEY: &str = "EXPERT_NO_ACTIVE_KEY";
-    /// LLM调用失败
-    pub const LLM_CALL_FAILED: &str = "EXPERT_LLM_CALL_FAILED";
-    /// JSON解析失败
-    pub const JSON_PARSE_FAILED: &str = "EXPERT_JSON_PARSE_FAILED";
-    /// 未找到供应商适配器
-    pub const VENDOR_NOT_FOUND: &str = "EXPERT_VENDOR_NOT_FOUND";
-}
+// ── 权威源：axagent_harness::error_codes::expert（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::expert;
 
 /// Agent相关错误码
 pub mod agent {
+    // ── 基座域错误码：权威源在 axagent-harness，此处仅 re-export（禁止重复定义）──
+    pub use axagent_harness::error_codes::agent::{
+        NOT_FOUND, NOT_PAUSED, NOT_RUNNING, RUNNING, WORKFLOW_NOT_FOUND,
+    };
+    // ── 以下为 commands 层独有错误码 ──
     /// 内部服务器错误
     pub const INTERNAL: &str = "AGENT_INTERNAL";
-    /// Agent已在运行
-    pub const RUNNING: &str = "AGENT_RUNNING";
-    /// Agent未运行
-    pub const NOT_RUNNING: &str = "AGENT_NOT_RUNNING";
-    /// Agent未暂停
-    pub const NOT_PAUSED: &str = "AGENT_NOT_PAUSED";
-    /// 工作流未找到
-    pub const WORKFLOW_NOT_FOUND: &str = "AGENT_WORKFLOW_NOT_FOUND";
-    /// Agent未找到
-    pub const NOT_FOUND: &str = "AGENT_NOT_FOUND";
     /// 轨迹未找到
     pub const TRAJECTORY_NOT_FOUND: &str = "TRAJECTORY_NOT_FOUND";
 }
 
 /// 后台任务相关错误码
-pub mod task {
-    /// 命令包含危险字符，已拒绝
-    pub const DANGEROUS_COMMAND: &str = "TASK_DANGEROUS_COMMAND";
-    /// 任务未找到
-    pub const NOT_FOUND: &str = "TASK_NOT_FOUND";
-    /// 更新任务状态失败
-    pub const UPDATE_FAILED: &str = "TASK_UPDATE_FAILED";
-    /// 启动任务失败
-    pub const START_FAILED: &str = "TASK_START_FAILED";
-    /// 追加输出失败
-    pub const OUTPUT_APPEND_FAILED: &str = "TASK_OUTPUT_APPEND_FAILED";
-}
+// ── 权威源：axagent_harness::error_codes::task（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::task;
 
 /// 初始化向导相关错误码
 pub mod onboarding {
@@ -211,12 +134,8 @@ pub mod onboarding {
 }
 
 /// 提供商相关错误码
-pub mod provider {
-    /// 获取模型列表超时，请检查网络连接和API地址
-    pub const MODEL_LIST_TIMEOUT: &str = "PROVIDER_MODEL_LIST_TIMEOUT";
-    /// 未找到提供商适配器
-    pub const ADAPTER_NOT_FOUND: &str = "PROVIDER_ADAPTER_NOT_FOUND";
-}
+// ── 权威源：axagent_harness::error_codes::provider（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::provider;
 
 /// 本地模型（llama.cpp）服务管理错误码
 pub mod local_model {
@@ -253,28 +172,16 @@ pub mod local_model {
 }
 
 /// 搜索相关错误码
-pub mod search {
-    /// 未配置端点
-    pub const ENDPOINT_NOT_CONFIGURED: &str = "SEARCH_ENDPOINT_NOT_CONFIGURED";
-    /// 搜索提供商未配置
-    pub const PROVIDER_NOT_CONFIGURED: &str = "SEARCH_PROVIDER_NOT_CONFIGURED";
-}
+// ── 权威源：axagent_harness::error_codes::search（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::search;
 
 /// 备份相关错误码
-pub mod backup {
-    /// 不支持的备份格式，仅支持sqlite和json格式
-    pub const FORMAT_UNSUPPORTED: &str = "BACKUP_FORMAT_UNSUPPORTED";
-    /// 备份创建失败
-    pub const CREATE_FAILED: &str = "BACKUP_CREATE_FAILED";
-    /// 备份恢复失败
-    pub const RESTORE_FAILED: &str = "BACKUP_RESTORE_FAILED";
-}
+// ── 权威源：axagent_harness::error_codes::backup（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::backup;
 
 /// 流式响应相关错误码
-pub mod stream {
-    /// 提供商返回空响应
-    pub const EMPTY_RESPONSE: &str = "STREAM_EMPTY_RESPONSE";
-}
+// ── 权威源：axagent_harness::error_codes::stream（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::stream;
 
 /// Agent状态消息码
 pub mod agent_status {
@@ -319,12 +226,8 @@ pub mod storage_path {
 }
 
 /// ZIP安全相关错误码
-pub mod security {
-    /// 检测到路径遍历
-    pub const PATH_TRAVERSAL: &str = "SECURITY_PATH_TRAVERSAL";
-    /// 访问被拒绝，文件在技能目录外
-    pub const ACCESS_DENIED: &str = "SECURITY_ACCESS_DENIED";
-}
+// ── 权威源：axagent_harness::error_codes::security（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::security;
 
 /// 技能操作相关错误码
 pub mod skill_op_err {
@@ -335,19 +238,16 @@ pub mod skill_op_err {
 }
 
 /// 终端相关错误码
-pub mod terminal {
-    /// 获取git分支失败
-    pub const GIT_BRANCH_FAILED: &str = "TERMINAL_GIT_BRANCH_FAILED";
-}
+// ── 权威源：axagent_harness::error_codes::terminal（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::terminal;
 
 /// 工作流相关错误码
 pub mod workflow {
-    /// 工作流未找到
-    pub const NOT_FOUND: &str = "WORKFLOW_NOT_FOUND";
-    /// 工作流计划未找到
-    pub const PLAN_NOT_FOUND: &str = "WORKFLOW_PLAN_NOT_FOUND";
-    /// JSON格式无效
-    pub const INVALID_JSON: &str = "WORKFLOW_INVALID_JSON";
+    // ── 基座域错误码：权威源在 axagent-harness，此处仅 re-export（禁止重复定义）──
+    pub use axagent_harness::error_codes::workflow::{
+        INVALID_JSON, NOT_FOUND, PLAN_NOT_AUTHORIZED, PLAN_NOT_FOUND,
+    };
+    // ── 以下为 commands 层独有错误码 ──
     /// 系统模板受保护（认知编排器等 SystemOnly 模板禁止用户 CRUD）
     pub const SYSTEM_TEMPLATE_PROTECTED: &str = "WORKFLOW_SYSTEM_TEMPLATE_PROTECTED";
     /// 运行时工具状态无效（update_workflow_tool_status 收到非 pending/active/disabled 值）
@@ -359,15 +259,93 @@ pub mod workflow {
 }
 
 /// 股票工作流相关错误码
+///
+/// 本域的码服务**两条前端可见的失败通道**（过去两者都只发中文自由文本，
+/// 落在这套错误码契约之外，详见 `docs/plans/PLAN-market-sim-value.md` §9.12）：
+///
+/// - `workflow-error` 事件（`core.rs` 的 `run_stock_workflow` 三条失败分支）
+/// - `workflow-step-error` 事件（`core.rs` 的节点级 failed/timeout 分支）
+///
+/// 之所以要按 `WorkflowError` 的**具体变体**细分而不是全塌成 `INTERNAL`：
+/// 这些码是**面向用户的原因说明** —— 「超时」可重试、「钩子阻断」要去看数据质量、
+/// 「JSON 序列化失败」是程序问题、「DAG 成环」是模板问题。塌成一个码之后，
+/// 11 语言里全变成「股票分析工作流内部错误」，用户既不知道能不能重试、也不知道该找谁。
 pub mod stock_workflow {
-    /// 内部错误
+    /// 内部错误（创建/取消工作流、DB 写入等基础设施失败）
     pub const INTERNAL: &str = "STOCK_WORKFLOW_INTERNAL";
+    /// 工作流总超时（含应用关闭触发的等价路径）
+    pub const TIMEOUT: &str = "STOCK_WORKFLOW_TIMEOUT";
+    /// 工作流被取消
+    pub const CANCELLED: &str = "STOCK_WORKFLOW_CANCELLED";
+    /// 执行失败（未归入下列具体变体的兜底）
+    pub const EXEC_FAILED: &str = "STOCK_WORKFLOW_EXEC_FAILED";
+    /// 单个节点失败或超时（`workflow-step-error` 事件）
+    pub const STEP_FAILED: &str = "STOCK_WORKFLOW_STEP_FAILED";
+    /// 单个节点因**运行级取消**中止（手动停止 / 应用关闭波及，节点本身无质量问题）
+    ///
+    /// 与 `CANCELLED` 的区别：`CANCELLED` 描述的是**工作流**被取消（`workflow-error` 事件），
+    /// 本码描述的是**节点级事件**（`workflow-step-error` / `workflow-step-done`）中
+    /// 「该节点的失败原因是上层运行被取消」。消费端据此把它排除出「节点质量问题」
+    /// （不计入 failedNodes、不触发自动重试）。
+    ///
+    /// 之所以要单独一个码而不是复用 `CANCELLED`：这两个码落在**不同事件**上，
+    /// 前者用于整条工作流的终态，后者用于 DAG 内并发推进期间逐个节点上报的中间态。
+    /// 合并会让「工作流被取消」与「某节点因取消而中止」无法区分。
+    pub const STEP_CANCELLED: &str = "STOCK_WORKFLOW_STEP_CANCELLED";
+    /// pre_exec 生命周期钩子阻断执行（如数据质量预检不通过）
+    pub const HOOK_BLOCKED: &str = "STOCK_WORKFLOW_HOOK_BLOCKED";
+    /// 输入/输出 schema 校验失败
+    pub const VALIDATION_FAILED: &str = "STOCK_WORKFLOW_VALIDATION_FAILED";
+    /// DAG 结构非法（重复节点 ID / 依赖缺失 / 成环）
+    pub const GRAPH_INVALID: &str = "STOCK_WORKFLOW_GRAPH_INVALID";
+    /// 工作流或节点不存在
+    pub const TARGET_NOT_FOUND: &str = "STOCK_WORKFLOW_TARGET_NOT_FOUND";
+    /// 序列化失败
+    pub const SERIALIZE_FAILED: &str = "STOCK_WORKFLOW_SERIALIZE_FAILED";
+    /// 非法状态迁移
+    pub const INVALID_STATE: &str = "STOCK_WORKFLOW_INVALID_STATE";
+    /// 工作流**已成功产出结果**，但结果落库失败（`serenity-screening-completed`
+    /// 事件的 `partial_failure` 终态）
+    ///
+    /// 为什么不复用 `INTERNAL`：两者**用户可操作性相反**。`INTERNAL` 描述「工作流自身的
+    /// 基础设施操作失败」（创建/取消/状态更新，见 `backtest_validation.rs` / `quant_backtest.rs`
+    /// 的用法）⇒ 用户应重试；本码描述「筛选成功、候选有效、只是这次没写进历史」⇒ 重试只会
+    /// **白烧一次 API 额度**（Serenity 单轮 300+ 次调用），正确动作是照用候选、知悉历史缺口。
+    /// 合并会让「内部错误」这个词同时指代两件行动相反的事。
+    ///
+    /// 注意本码**不是** `SERIALIZE_FAILED` 的同类：后者是序列化，本码是 DB 写入
+    /// （`reco_picks::Entity::insert`）。
+    pub const PERSIST_FAILED: &str = "STOCK_WORKFLOW_PERSIST_FAILED";
 }
 
 /// 股票分析种子数据相关错误码
 pub mod stock_setup {
     /// 内部错误
     pub const INTERNAL: &str = "STOCK_SETUP_INTERNAL";
+}
+
+/// 市场仿真（蒙特卡洛 / 工作流「仿真验证」节点）相关错误码
+///
+/// 为什么需要独立域而不是复用 `stock_workflow::INTERNAL`：
+/// 本域的错误码是**面向用户的原因说明** —— 「仿真验证」区块存在的意义就是告诉用户
+/// 「为什么这次没给出仿真结论」。全塌成 `STOCK_WORKFLOW_INTERNAL` 的话，11 语言
+/// 只能显示「股票工作流内部错误」，「缺参考价」与「内核崩了」在界面上不可区分，
+/// 用户既不知道该补什么数据、也分不清是自己数据的问题还是程序的问题。
+///
+/// 消费方两处（必须产出同一形状，见 `stock_workflow/sim_hook.rs` 模块头）：
+/// - 默认路径：决策落库后的挂钩 `sim_hook`（经 `market_sim_service::run_mc_preset`）
+/// - 备用路径：DAG 节点 `sim-verify` 的脚本 `sim-verify.rhai`（经宿主函数 `sim_run_mc`）
+pub mod stock_sim {
+    /// 仿真缺少必要输入（股票代码为空）
+    pub const INPUT_MISSING: &str = "STOCK_SIM_INPUT_MISSING";
+    /// 无可用的参考价（既未传入实时价，快照里也取不到 t-scoring 现价）
+    pub const NO_REFERENCE_PRICE: &str = "STOCK_SIM_NO_REFERENCE_PRICE";
+    /// 仿真内核返回的结果无法解析
+    pub const RESULT_PARSE_FAILED: &str = "STOCK_SIM_RESULT_PARSE_FAILED";
+    /// 仿真内核执行失败（含 panic、结果序列化失败）
+    pub const EXEC_FAILED: &str = "STOCK_SIM_EXEC_FAILED";
+    /// 仿真任务被取消（运行时关闭）
+    pub const CANCELLED: &str = "STOCK_SIM_CANCELLED";
 }
 
 /// OPC 需求发现工作流种子数据相关错误码
@@ -396,12 +374,11 @@ pub mod workflow_reflection {
 
 /// 平台集成相关错误码
 pub mod platform {
-    /// Telegram集成未启用
-    pub const TELEGRAM_NOT_ENABLED: &str = "PLATFORM_TELEGRAM_NOT_ENABLED";
-    /// Discord集成未启用
-    pub const DISCORD_NOT_ENABLED: &str = "PLATFORM_DISCORD_NOT_ENABLED";
-    /// API服务器未启用
-    pub const API_SERVER_NOT_ENABLED: &str = "PLATFORM_API_SERVER_NOT_ENABLED";
+    // ── 基座域错误码：权威源在 axagent-harness，此处仅 re-export（禁止重复定义）──
+    pub use axagent_harness::error_codes::platforms::{
+        API_SERVER_NOT_ENABLED, DISCORD_NOT_ENABLED, TELEGRAM_NOT_ENABLED,
+    };
+    // ── 以下为 commands 层独有错误码 ──
     /// Webhook订阅管理器未配置
     pub const WEBHOOK_NOT_CONFIGURED: &str = "PLATFORM_WEBHOOK_NOT_CONFIGURED";
 }
@@ -431,53 +408,24 @@ pub mod file {
 }
 
 /// 网关相关错误码
-pub mod gateway {
-    /// SSL已启用但未配置证书文件
-    pub const SSL_NO_CERT: &str = "GATEWAY_SSL_NO_CERT";
-    /// SSL已启用但未配置私钥文件
-    pub const SSL_NO_KEY: &str = "GATEWAY_SSL_NO_KEY";
-    /// HTTP在强制SSL时不可用
-    pub const HTTP_UNAVAILABLE: &str = "GATEWAY_HTTP_UNAVAILABLE";
-    /// 网关已在运行
-    pub const ALREADY_RUNNING: &str = "GATEWAY_ALREADY_RUNNING";
-}
+// ── 权威源：axagent_harness::error_codes::gateway（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::gateway;
 
-/// 语音会话相关错误码（realtime WebSocket 通道）
-///
-/// 这些码通过 `RealtimeServerMessage::Error { code, params, .. }` 回传前端，
-/// 前端按 `t("error.${code}", params)` 翻译。与 locales/*.json 的 `error` 段对齐。
-pub mod voice {
-    /// 票据无效/过期/已被使用（401 鉴权失败）
-    pub const TICKET_INVALID: &str = "VOICE_TICKET_INVALID";
-    /// 语音模型未找到或不支持
-    pub const MODEL_NOT_FOUND: &str = "VOICE_MODEL_NOT_FOUND";
-    /// 语音提供商未找到
-    pub const PROVIDER_NOT_FOUND: &str = "VOICE_PROVIDER_NOT_FOUND";
-    /// 提供商不支持语音能力（STT/TTS）
-    pub const PROVIDER_NO_SPEECH: &str = "VOICE_PROVIDER_NO_SPEECH";
-    /// 网关密钥解密失败
-    pub const DECRYPT_KEY_FAILED: &str = "VOICE_DECRYPT_KEY_FAILED";
-    /// 语音识别（STT）失败
-    pub const STT_FAILED: &str = "VOICE_STT_FAILED";
-    /// 语音合成（TTS）失败
-    pub const TTS_FAILED: &str = "VOICE_TTS_FAILED";
-    /// 无效的语音消息格式
-    pub const INVALID_MESSAGE: &str = "VOICE_INVALID_MESSAGE";
-    /// 未先发送 session.create 消息
-    pub const SESSION_CREATE_REQUIRED: &str = "VOICE_SESSION_CREATE_REQUIRED";
-}
+// ⚠ 以下四段（voice / paper / reading_list / unity）用 `//` 而非 `///`：
+// 它们的 `pub use` 已删除，块后**不再跟任何 item**，写成 `///` 会报
+// `error: expected item after doc comment`（E0585），且会「串」到下一个 item 的文档上。
+//
+// 语音会话相关错误码（realtime WebSocket 通道）
+//
+// 这些码通过 `RealtimeServerMessage::Error { code, params, .. }` 回传前端，
+// 前端按 `t("error.${code}", params)` 翻译。与 locales/*.json 的 `error` 段对齐。
+// 权威源：`axagent_harness::error_codes::voice`。此处**不再** re-export ——
+// `lib.rs` 的 `mod commands;` 为私有 ⇒ 内部 `pub use` 退化为 crate 内私有导入，
+// 无 crate 内引用即触发 `unused_imports`，而 CI 用 `-D warnings`。需要时直接从 harness 导入。
 
 /// Multi-Agent 委派相关错误码
-pub mod multi_agent {
-    /// 角色未找到
-    pub const ROLE_NOT_FOUND: &str = "MULTI_AGENT_ROLE_NOT_FOUND";
-    /// 委派失败（LLM 调用内部异常）
-    pub const DELEGATE_FAILED: &str = "MULTI_AGENT_DELEGATE_FAILED";
-    /// 无效的角色名称（非 analyst/implementer/reviewer）
-    pub const INVALID_ROLE: &str = "MULTI_AGENT_INVALID_ROLE";
-    /// 提供商未找到
-    pub const PROVIDER_NOT_FOUND: &str = "MULTI_AGENT_PROVIDER_NOT_FOUND";
-}
+// ── 权威源：axagent_harness::error_codes::multi_agent（此处仅 re-export，禁止重复定义）──
+pub use axagent_harness::error_codes::multi_agent;
 
 /// 通用错误码
 pub mod common {
@@ -501,19 +449,13 @@ pub mod marketplace {
     pub const PUBLISH_FAILED: &str = "MARKETPLACE_PUBLISH_FAILED";
 }
 
-/// 论文/文献相关错误码
-pub mod paper {
-    /// 论文概览未找到
-    pub const OVERVIEW_NOT_FOUND: &str = "PAPER_OVERVIEW_NOT_FOUND";
-}
+// 论文/文献相关错误码
+// 权威源：`axagent_harness::error_codes::paper`。此处不再 re-export（零消费者 ⇒ `unused_imports`，
+// 说明见上方 `voice` 处）。需要时直接从 harness 导入。
 
-/// 阅读列表相关错误码
-pub mod reading_list {
-    /// 阅读列表未找到
-    pub const NOT_FOUND: &str = "READING_LIST_NOT_FOUND";
-    /// 阅读条目未找到
-    pub const ITEM_NOT_FOUND: &str = "READING_LIST_ITEM_NOT_FOUND";
-}
+// 阅读列表相关错误码
+// 权威源：`axagent_harness::error_codes::reading_list`。此处不再 re-export（零消费者 ⇒
+// `unused_imports`，说明见上方 `voice` 处）。需要时直接从 harness 导入。
 
 // 记忆（Memory）相关错误码 - 已迁移至 axagent_harness::error_codes::memory
 // pub mod memory { ... } // 已删除，使用 axagent_harness::error_codes::memory
@@ -674,16 +616,15 @@ pub mod device_sync {
 
 /// 能力发现相关错误码
 pub mod capability {
+    // ── 基座域错误码：权威源在 axagent-harness，此处仅 re-export（禁止重复定义）──
+    pub use axagent_harness::error_codes::capability::NOT_FOUND;
+    // ── 以下为 commands 层独有错误码 ──
     /// 能力注册失败
     pub const REGISTER_FAILED: &str = "CAPABILITY_REGISTER_FAILED";
     /// 能力发现失败
     pub const DISCOVER_FAILED: &str = "CAPABILITY_DISCOVER_FAILED";
-    /// 能力未找到
-    pub const NOT_FOUND: &str = "CAPABILITY_NOT_FOUND";
     /// 能力索引失败
     pub const INDEX_FAILED: &str = "CAPABILITY_INDEX_FAILED";
-    /// 嵌入生成失败
-    pub const EMBEDDING_FAILED: &str = "CAPABILITY_EMBEDDING_FAILED";
     /// 向量存储操作失败
     pub const VECTOR_STORE_FAILED: &str = "CAPABILITY_VECTOR_STORE_FAILED";
     /// 无效的能力护照
@@ -698,6 +639,22 @@ pub mod capability {
     pub const EVOLVE_FAILED: &str = "CAPABILITY_EVOLVE_FAILED";
     /// 能力不可进化（外部插件只读能力，evolvable = none）
     pub const NOT_EVOLVABLE: &str = "CAPABILITY_NOT_EVOLVABLE";
+}
+
+/// 「能力域」覆盖层错误码（P2：域注册表可配置）
+pub mod capability_domain {
+    /// 未知的域标识（不在 CapabilityDomain 枚举的 9 个变体内）
+    pub const UNKNOWN: &str = "CAPABILITY_DOMAIN_UNKNOWN";
+    /// 该域不允许停用（general 是唯一兜底域、system 是内部域）
+    pub const NOT_TOGGLEABLE: &str = "CAPABILITY_DOMAIN_NOT_TOGGLEABLE";
+    /// 别名冲突（与规范 id 同名，或已被其它域占用）
+    pub const ALIAS_CONFLICT: &str = "CAPABILITY_DOMAIN_ALIAS_CONFLICT";
+    /// 别名不合法（空串、过长、条数超限）
+    pub const ALIAS_INVALID: &str = "CAPABILITY_DOMAIN_ALIAS_INVALID";
+    /// 写入覆盖失败
+    pub const UPDATE_FAILED: &str = "CAPABILITY_DOMAIN_UPDATE_FAILED";
+    /// 读取域注册表失败
+    pub const LIST_FAILED: &str = "CAPABILITY_DOMAIN_LIST_FAILED";
 }
 
 /// 用户提问通道已关闭错误码
@@ -794,12 +751,28 @@ pub mod plugin_profile {
     pub const IO_FAILED: &str = "PLUGIN_PROFILE_IO_FAILED";
 }
 
-/// Unity 改造相关错误码
+/// 数据库连接（设置页「测试连接」）相关错误码
 ///
-/// P0 阶段：任务形态分类器（原则三标尺：上下文保留成本 × 安全隔离需求）。
-/// 与前端 `error.UNITY_P0_CLASSIFIER_FAILED` 翻译键对齐。
-/// 镜像 `crates/harness/src/error_codes.rs::unity`，两处定义值必须一致。
-pub mod unity {
-    /// 任务形态分类失败（分类器内部异常，回退到 HandleLocally 策略）
-    pub const P0_CLASSIFIER_FAILED: &str = "UNITY_P0_CLASSIFIER_FAILED";
+/// 这一域刻意**分成两个码**而不是塌成一个 `DB_CONNECT_FAILED`：两者失败位置不同、
+/// 用户该做的事也不同（「两句话测试」）——
+/// * `CONNECT_FAILED`：地址/端口/网络/凭据没打通 ⇒ 用户该去**核对连接参数**；
+/// * `QUERY_VERIFY_FAILED`：连接**已经建立**，但 `SELECT 1` 在链路上失败
+///   （连接被中断、服务端瞬时故障、库不可用）⇒ 连接参数是对的，用户该**稍后重试**
+///   或去看服务端状态。
+///
+/// 两个码之前都是写死的中文前缀（`"连接失败: {e}"` / `"查询验证失败: {e}"`），
+/// 直接经 IPC 返回前端 ⇒ 10 个非中文语言的用户看到的是中文。
+pub mod db {
+    /// 无法建立数据库连接（地址 / 端口 / 网络 / 凭据层面打不通）
+    pub const CONNECT_FAILED: &str = "DB_CONNECT_FAILED";
+    /// 连接已建立，但验证查询 `SELECT 1` 失败
+    pub const QUERY_VERIFY_FAILED: &str = "DB_QUERY_VERIFY_FAILED";
 }
+
+// Unity 改造相关错误码
+//
+// P0 阶段：任务形态分类器（原则三标尺：上下文保留成本 × 安全隔离需求）。
+// 与前端 `error.UNITY_P0_CLASSIFIER_FAILED` 翻译键对齐。
+// 镜像 `crates/harness/src/error_codes.rs::unity`，两处定义值必须一致。
+// 权威源：`axagent_harness::error_codes::unity`。此处不再 re-export（零消费者 ⇒
+// `unused_imports`，说明见上方 `voice` 处）。需要时直接从 harness 导入。

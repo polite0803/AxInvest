@@ -258,6 +258,24 @@ fn main() {
 
     handlers.sort_by(|a, b| a.path.cmp(&b.path));
 
+    // 去重：同一个源文件常被扫描两次 —— ① 作为 `mod xxx;` 子模块（第 1 步的 sub_mods）
+    // ② 作为 `pub use xxx::*` 重导出（第 1 步的 re_exports），两次产出的
+    // path + cfg 完全相同 ⇒ 生成列表里出现重复 handler。
+    // 实测（2026-09-12）：1500 条注册里 **13 条是重复**，例如
+    // `commands::browser::browser_click` 连续出现两次（两条都带
+    // `#[cfg(not(mobile))]`）。重复注册不会让编译失败、也不会报警，属静默冗余。
+    //
+    // 合并条件必须是 **path 与 cfg 都相同**：cfg 不同的同 path 条目是合法变体
+    // （不同目标平台启用不同实现），删掉会丢注册。
+    let before_dedup = handlers.len();
+    handlers.dedup_by(|a, b| a.path == b.path && a.cfg == b.cfg);
+    if handlers.len() != before_dedup {
+        eprintln!(
+            "[build.rs] 已合并 {} 条重复的命令注册（同一文件被模块声明与重导出各扫一次）",
+            before_dedup - handlers.len()
+        );
+    }
+
     eprintln!("[build.rs] 共发现 {} 个命令", handlers.len());
     for h in handlers.iter().take(10) {
         eprintln!("[build.rs]   命令: {} (cfg={:?})", h.path, h.cfg);
@@ -343,6 +361,19 @@ fn parse_mod_rs(path: &Path) -> Vec<ModuleDecl> {
 }
 
 /// 解析子目录 mod.rs，提取 pub mod 声明和 pub use 重导出
+///
+/// ⚠ 只把 **通配符** 重导出（`pub use sub::*`）计为「子模块命令已上提到父模块」。
+///
+/// 为什么排除 `pub use sub::{a, b}`（2026-09-13 修复）：
+/// 该形式只把**列举的那几项**提到父模块可见，而不是"该子模块全部命令都在父模块可见"。
+/// 旧实现用 `rest.contains("::{")` 把两者混同 ⇒ 只要 `sub.rs` 里有 `#[tauri::command]`，
+/// 第 171 行就会用**父模块路径**（`commands::<父>::<cmd>`）注册这些命令，
+/// 而它们并未被 `::{a, b}` 导出 ⇒ 编译期报
+/// `cannot find __cmd__<cmd> in <父模块>` / `cannot find __tauri_command_name_<cmd>`。
+/// 该报错指向 register_commands.rs（build.rs 的生成物，DO NOT EDIT），
+/// 完全指不到真因 —— 典型「改到生成物上 = 假修复」。
+///
+/// 因此：需要上提子模块命令时，请用 `pub use sub::*;` 或逐条 `pub use sub::cmd;`。
 fn parse_submodule_mod_rs(path: &Path) -> (Vec<SubModuleDecl>, Vec<ReExport>) {
     let Ok(content) = fs::read_to_string(path) else {
         return (vec![], vec![]);
@@ -359,11 +390,10 @@ fn parse_submodule_mod_rs(path: &Path) -> (Vec<SubModuleDecl>, Vec<ReExport>) {
             let name = rest.trim_end_matches(';').trim().to_string();
             sub_mods.push(SubModuleDecl { name });
         }
-        // pub use name::*; 或 pub use name::{...};
+        // pub use name::*; —— 仅通配符形式才代表"该子模块命令已在父模块可见"
         else if let Some(rest) = trimmed.strip_prefix("pub use ") {
             let rest = rest.trim_end_matches(';').trim();
-            // 仅识别通配符重导出（pub use name::*）或结构体重导出（pub use name::{a, b}）
-            if (rest.ends_with("::*") || rest.contains("::{"))
+            if rest.ends_with("::*")
                 && let Some((submod, _)) = rest.split_once("::")
             {
                 re_exports.push(ReExport { submodule: submod.trim().to_string() });
@@ -412,16 +442,41 @@ fn scan_file_for_commands(
 
         // 检查是否为 pub async fn / pub fn 定义
         if line.starts_with("pub async fn ") || line.starts_with("pub fn ") {
-            // 向前搜索最多 10 行，查找命令注解
+            // 向前搜索命令注解。
+            //
+            // ⚠ **必须能穿过 doc 注释块** —— 这是本函数的头号陷阱。
+            // `#[tauri::command]` 与 `pub fn` 之间夹 `///` 文档注释是合法且常见的
+            // 写法，而旧实现遇到第一行「非属性、非空行」就 `break`，`///` 恰好
+            // 落在这一支 ⇒ 这类命令**永远不被收录**。
+            //
+            // 致命之处在于它**每次构建都自动复现**：build.rs 会把生成的列表
+            // `fs::write` 回 `src/register_commands.rs`（见本文件末尾），所以
+            // 「手工补一行」在下次构建时会被静默覆盖掉 —— 缺陷看起来像"修好了"，
+            // 实际只是被撤销前的假象。
+            //
+            // 生产实证（2026-09-12）：`commands::memory::rebuild_memory_index`
+            // 的注解与 fn 之间夹 10 行文档注释（`memory.rs:562`→`573`），因此从未
+            // 注册；契约检查 a 段报「已定义但未注册到 generate_handler!（前端
+            // invoke 会 404）」，而前端有 2 个调用点（`MemorySettings.tsx`）+
+            // 1 个 store 调用点。构建快照时间线可作为独立佐证：
+            // 该行在 09-02 起的所有快照中都存在，12 日 19:52 快照仍在，
+            // 21:08 快照已消失 —— 消失时点与源码 mtime（=构建时刻）重合。
+            //
+            // 窗口给到 64 行而非 10 行：10 行连一个中等长度的文档注释都覆盖不了，
+            // 且窗口一旦耗尽同样是静默漏收录。
             let mut is_cmd = false;
-            for j in 1..=10 {
+            for j in 1..=64 {
                 if j > i {
                     break;
                 }
                 let prev = lines[i - j].trim();
 
-                // 跳过空行
-                if prev.is_empty() {
+                // 空行与注释（行注释 / 文档注释 / 块注释）一律跳过，**不终止搜索**
+                if prev.is_empty()
+                    || prev.starts_with("//")
+                    || prev.starts_with("/*")
+                    || prev.starts_with('*')
+                {
                     continue;
                 }
 
@@ -538,6 +593,32 @@ fn scan_file_for_commands(
         eprintln!(
             "[build.rs]     {}: 发现 {} 个命令",
             file_path.file_name().unwrap_or_default().to_string_lossy(),
+            found_in_file
+        );
+    }
+
+    // ── 自检：本文件「声明」的命令注解数 vs 「收录」的命令数 ────────────────
+    //
+    // 本解析器是**文本启发式**的，任何它跳不过的写法都会让命令静默漏收录，
+    // 而漏收录的后果是前端 `invoke` 直接 404（`cargo check` / `tsc` / 单测
+    // 三者都不会报警）。所以这里把差集显式喊出来，不让它只体现在运行期。
+    //
+    // 判据用**整行精确相等**而不是 `contains`：文档注释里提到
+    // `#[tauri::command]` 时，若用 contains 会凭空多算，把警告变成噪音。
+    let declared = lines
+        .iter()
+        .filter(|l| {
+            let l = l.trim();
+            l == "#[tauri::command]" || l == "#[command]"
+        })
+        .count();
+    if declared != found_in_file {
+        eprintln!(
+            "[build.rs] ⚠ 警告: {} 声明了 {} 个命令注解，但只收录 {} 个 —— \
+             未被收录的命令会导致前端 invoke 404（契约检查 a 段会 fail）。\
+             请检查这些命令的注解与 fn 之间是否有本解析器跳不过的语句。",
+            file_path.file_name().unwrap_or_default().to_string_lossy(),
+            declared,
             found_in_file
         );
     }

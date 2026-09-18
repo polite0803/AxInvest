@@ -23,6 +23,7 @@
 //! - 触发动作：买入/卖出/减仓 → 生成交易意图；通知 → 仅发通知
 
 use crate::conditional_order::{ConditionalOrder, ConditionalOrderEngine, OrderAction};
+use crate::decision_action::{normalize_action, ActionKind};
 use crate::trade_intent::TradeIntentService;
 use axagent_astock_data::realtime_quote::QuoteChangeEvent;
 use axagent_entities::stock_analyses;
@@ -287,6 +288,16 @@ fn parse_condition_from_reasoning(reasoning: &str) -> crate::conditional_order::
 }
 
 fn parse_action(action_str: &str) -> OrderAction {
+    // P1-6(2026-09-14): 先按统一归一化判**裸方向词** —— 原实现只认中文 `contains("买入")`，
+    //   英文 `BUY` / `BUY(100)`（以及 `SELL`/`REDUCE`）会一路落到 `OrderAction::Notify`，
+    //   即**静默降级为「仅通知」，不生成条件单**，且无任何告警。
+    //   带数量的形式（`卖出(500)` / `减仓(50%)` / `卖出全部`）归一化不命中，仍走下方分支。
+    match normalize_action(action_str) {
+        Some(ActionKind::Buy) => return OrderAction::Buy { quantity: 100 },
+        Some(ActionKind::Sell) => return OrderAction::Sell { quantity: None },
+        Some(ActionKind::Reduce) => return OrderAction::Reduce { ratio: 0.5 },
+        _ => {},
+    }
     if action_str.contains("买入") {
         OrderAction::Buy { quantity: 100 }
     } else if action_str.contains("卖出全部") {

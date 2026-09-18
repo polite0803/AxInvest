@@ -10,6 +10,7 @@ import { Button, Collapse, Dropdown } from "antd";
 import {
   ArrowLeftRight,
   Coins,
+  FlaskConical,
   LayoutDashboard,
   LineChart,
   RotateCcw,
@@ -20,7 +21,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AnalysisDebugPanel } from "./AnalysisDebugPanel";
@@ -48,6 +49,8 @@ function DecisionComparisonTabContent() {
   const store = useStockAnalysisStore();
   const dualViewData = {
     decisionAction: store.decision?.action,
+    // V76: 持仓状态轴（来自 portfolio-mgr.rhai 的 positionState）
+    decisionPositionState: store.decision?.positionState ?? null,
     decisionPositionPct: store.decision?.positionPct,
     confidence: store.decision?.confidence,
     adjustedConfidence: store.decision?.adjustedConfidence ?? null,
@@ -105,6 +108,7 @@ import { OptionPcrPanel } from "./OptionPcrPanel";
 import { ReflectionPanel } from "./ReflectionPanel";
 import { RiskMatrix } from "./RiskMatrix";
 import { SectorHeatmapPanel } from "./SectorHeatmapPanel";
+import { SimulationTabContent } from "./SimulationTabContent";
 import { StockAnalysisPageContext } from "./StockAnalysisPageContext";
 import { StockAnalysisSettingsModal } from "./StockAnalysisSettingsModal";
 import { StockQuoteCard } from "./StockQuoteCard";
@@ -167,6 +171,9 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
   const [settingsDefaultTab, setSettingsDefaultTab] = useState<string | undefined>(undefined);
   const [marketStatus, setMarketStatus] = useState("");
   const [expandedFailedNode, setExpandedFailedNode] = useState<string | null>(null);
+  // 记录已按 URL 预填过的股票代码：工作区壳层每次切视图都会 setSearchParams(?view=…)，
+  // searchParams 引用随之变化会重跑下面的预填 effect，无此守卫会重复拉行情 / K 线。
+  const prefilledCodeRef = useRef<string | null>(null);
 
   const openDataSourceSettings = useCallback(() => {
     setSettingsDefaultTab("data");
@@ -191,12 +198,24 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
   // 前一次的 3 个监听句柄变成孤儿（永远不会 unlisten）。
   // 现在挂载时不再注册，只在用户点击"开始分析"时由 startAnalysis 负责注册。
 
+  // ── URL 股票代码/名称 → 分析页预填 ──
+  // 两个参数名都指向同一语义（当前股票代码），必须同时接受：
+  //   - ?code=      → /stock-analysis?code=xxx。该路由由 ContentArea 的 RedirectToInvest
+  //                   重定向到 /invest?tab=workspace（原 query 全量保留 + 补 stockCode）
+  //   - ?stockCode= → InvestHub 内跳转（useStockJump 统一写入）直接改写 query
+  // 此前只认 code，而 InvestHub 内跳转只写 stockCode，导致「能切到分析页但搜索栏/行情不预填」。
+  // ?stockName= 是可选增强：由 useStockJump 写入，有它就不必等行情回来才知道名称。
   useEffect(() => {
     let cancelled = false;
-    const code = searchParams.get("code");
+    const code = searchParams.get("code") ?? searchParams.get("stockCode");
     if (code) {
-      // 立即把 code 写入 searchKeyword，让 StockSearchBar 输入框显示股票代码
-      useStockAnalysisStore.setState({ searchKeyword: code });
+      if (prefilledCodeRef.current === code) { return; }
+      prefilledCodeRef.current = code;
+      // 立即把 code（有名称时是「名称 (代码)」）写入 searchKeyword，让 StockSearchBar 输入框显示
+      const urlName = searchParams.get("stockName");
+      useStockAnalysisStore.setState({
+        searchKeyword: urlName ? `${urlName} (${code})` : code,
+      });
       getStockQuote(code).then(() => {
         if (cancelled) { return; }
         // getStockQuote 完成后，stockName 已写入 store，把 searchKeyword 更新为 "名称(code)" 格式
@@ -337,6 +356,29 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
       label: t("stockAnalysis.tab.dashboard"),
       icon: <LayoutDashboard size={14} />,
       children: <DashboardTabContent />,
+    },
+    {
+      // 模拟仿真：三个仿真面板（市场微观结构 / 压力测试 / 策略沙盒）。
+      // 原挂在回测页（BacktestPage）的 tab 上，2026-09-14 迁入分析页 ——
+      // 仿真回答的是「这仓位建得起吗、最坏能坏到哪」，属单股分析动作，不是回测验证。
+      //
+      // 位置：**决策 → 仪表盘之后**（同日两次调整，此前先误排 `risk` 之后、再误插决策与仪表盘之间）。
+      // 迁入时仅按「归类」（属分析动作）定位，未判定它在叙事链中的位置；而三处
+      // **相互独立**的语义依据都把它定义在决策之后：
+      //   ① 图上位置 —— `commands/sim-verify.rhai:1`「sim-verify 节点体（**图上位于决策之后**）」；
+      //   ② 后端命名 —— `stock_workflow/sim_hook.rs::spawn_simulation_after_decision`
+      //      （调用点 `decision.rs` 决策落库后、`core.rs` 主链同点）；
+      //   ③ 界面文案 —— `simulation.autoTitle` =「工作流自动仿真（**决策之后**）」。
+      // 本 tab 的 label 恰是「决策」，用户读 tab 序列即读步骤顺序 ⇒ 排在决策之前会与真实
+      // 执行时序相反（真实时序：决策落库 → 挂钩触发仿真）。
+      //
+      // 为何最终落在**仪表盘之后**而不是紧跟决策：仿真验证是对**整份分析结论**的独立复核，
+      // 排在汇总性的仪表盘之后 —— 叙事为「看完结论 → 再做独立验证」；同时不打断
+      // 「决策 → 仪表盘」这条最紧的相邻关系（决策产出即仪表盘汇总的内容）。
+      key: "simulation",
+      label: t("stockAnalysis.tab.simulation"),
+      icon: <FlaskConical size={14} />,
+      children: <SimulationTabContent />,
     },
     // Decision tab removed — now rendered as full-width hero at top
     {

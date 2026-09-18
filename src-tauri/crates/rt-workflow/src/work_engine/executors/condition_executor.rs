@@ -390,6 +390,9 @@ fn evaluate_llm_heuristic(
 }
 
 /// 从 ExecutionState 变量中解析点分隔路径。
+///
+/// ⚠️ 严格模式：**不做 JSON 字符串穿透**（与 `executors::resolve_var_path` 不同）。
+/// 中间值为 String 时 `String::get(part)` 恒为 None → 整体降级为 None。
 fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::Value> {
     // 修复：空路径直接返回 None，不再走 parts[0] 触发 panic
     if path.is_empty() {
@@ -406,4 +409,125 @@ fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::
     }
     // fallback：root 不是节点 ID，将整个 path 作为模板变量名直查
     context.variables.get(path).cloned()
+}
+
+#[cfg(test)]
+mod resolve_var_path_tests {
+    use super::{ExecutionState, resolve_var_path};
+
+    /// 模拟 AgentNode 的真实输出结构（见 agent_executor.rs:2618-2634）：
+    /// `content` 是 **JSON 字符串**，persona/world_schema 等 LLM 字段在 `content` 内部。
+    fn ctx_with_agent_output() -> ExecutionState {
+        let mut ctx = ExecutionState::new(
+            "node_test".to_string(),
+            "wf_test".to_string(),
+            serde_json::json!({}),
+        );
+        ctx.variables.insert(
+            "lc-conceive".to_string(),
+            serde_json::json!({
+                "role": "文学创作者",
+                "model": "claude-sonnet",
+                "content": "{\"persona\":\"X\",\"world_schema\":\"W\"}",
+                "thinking": "",
+                "usage": {"input_tokens": 1, "output_tokens": 2},
+                "tool_calls_made": [],
+                "node_id": "lc-conceive",
+            }),
+        );
+        ctx
+    }
+
+    /// 严格版（ConditionNode 专用）：
+    /// `.content.persona` **也失败** —— 因为 content 是字符串，严格版无 auto_parse。
+    #[test]
+    fn strict_variant_string_content_not_penetrated() {
+        let ctx = ctx_with_agent_output();
+        assert_eq!(resolve_var_path("lc-conceive.content.persona", &ctx), None);
+    }
+
+    /// 严格版：直取 `.persona` 必然 None（根对象上不存在该键）。
+    #[test]
+    fn strict_variant_bare_field_is_none() {
+        let ctx = ctx_with_agent_output();
+        assert_eq!(resolve_var_path("lc-conceive.persona", &ctx), None);
+    }
+
+    /// 严格版：根对象上真实存在的键可解析。
+    #[test]
+    fn strict_variant_real_key_resolves() {
+        let ctx = ctx_with_agent_output();
+        assert_eq!(
+            resolve_var_path("lc-conceive.node_id", &ctx),
+            Some(serde_json::json!("lc-conceive"))
+        );
+    }
+
+    /// 宽松版（AgentNode/CodeNode/Loop/Switch/**ToolNode** 用，见 `tool_executor.rs:77`）：
+    /// 中间层是 JSON 字符串时会 auto_parse 穿透 → `.content.persona` **可解析**。
+    /// ⚠ 2026-09-15 更正：此处原写「ToolNode **不用**（宽松版），它有自己的严格副本」，
+    /// 并附了一处指向 `tool_executor.rs` 第 244 行的引用 —— **两者均已过期，角色互换**：
+    /// ToolNode 已改调共享宽松版（`tool_executor.rs:70-77`），严格版只剩 `ConditionNode`
+    /// 这一份（`condition_executor.rs:396`）。
+    /// （写法纪律：更正说明里**不得逐字复写旧引用**，否则等于把坏引用又登记一遍。）
+    /// 注意签名不同：宽松版吃 `&HashMap`，不吃 `&ExecutionState`。
+    #[test]
+    fn lenient_variant_penetrates_json_string_content() {
+        let ctx = ctx_with_agent_output();
+        assert_eq!(
+            super::super::resolve_var_path("lc-conceive.content.persona", &ctx.variables),
+            Some(serde_json::json!("X"))
+        );
+    }
+
+    /// 宽松版：`.persona` 依旧 None（穿透只发生在多段导航；导航失败后 fallback
+    /// 用整条路径当平键直查，同样查不到）。
+    #[test]
+    fn lenient_variant_bare_field_is_none() {
+        let ctx = ctx_with_agent_output();
+        assert_eq!(super::super::resolve_var_path("lc-conceive.persona", &ctx.variables), None);
+    }
+
+    /// 对照形态：`content` 为**对象**（而非 JSON 字符串）。
+    /// 该形态在生产中不出现（`agent_executor.rs:2620` 是 `"content": final_content`，
+    /// `final_content: String`），此处仅用于补齐「若 content 是对象会怎样」的对照，
+    /// 以便与 team-lead 原始指定的 fixture 形态对齐。
+    fn ctx_with_object_content() -> ExecutionState {
+        let mut ctx = ExecutionState::new(
+            "node_test".to_string(),
+            "wf_test".to_string(),
+            serde_json::json!({}),
+        );
+        ctx.variables.insert(
+            "lc-conceive".to_string(),
+            serde_json::json!({"content": {"persona": "X"}, "node_id": "lc-conceive"}),
+        );
+        ctx
+    }
+
+    #[test]
+    fn strict_variant_object_content_penetrates() {
+        let ctx = ctx_with_object_content();
+        assert_eq!(
+            resolve_var_path("lc-conceive.content.persona", &ctx),
+            Some(serde_json::json!("X"))
+        );
+    }
+
+    #[test]
+    fn lenient_variant_object_content_penetrates() {
+        let ctx = ctx_with_object_content();
+        assert_eq!(
+            super::super::resolve_var_path("lc-conceive.content.persona", &ctx.variables),
+            Some(serde_json::json!("X"))
+        );
+    }
+
+    /// 两种形态的**共同结论**：漏掉 `.content.` 一律 None。
+    #[test]
+    fn both_variants_bare_field_none_regardless_of_content_shape() {
+        let obj_ctx = ctx_with_object_content();
+        assert_eq!(resolve_var_path("lc-conceive.persona", &obj_ctx), None);
+        assert_eq!(super::super::resolve_var_path("lc-conceive.persona", &obj_ctx.variables), None);
+    }
 }

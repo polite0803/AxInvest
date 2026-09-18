@@ -11,20 +11,25 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 操作类型
+    #[sea_orm(indexed)]
     pub action: String,
     /// 操作目标类型
     pub target_type: String,
     /// 操作目标 ID
     pub target_id: String,
     /// 执行操作的设备 ID
+    #[sea_orm(indexed)]
     pub actor_device_id: String,
     /// 是否成功
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = true)]
     pub is_successful: bool,
     /// 操作详情（JSON）
     pub details: Option<String>,
     /// 错误信息
     pub error_message: Option<String>,
     /// 创建时间（Unix 毫秒）
+    #[sea_orm(indexed)]
     pub created_at: i64,
 }
 

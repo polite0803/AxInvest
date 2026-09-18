@@ -3,8 +3,15 @@ import { type DecisionInputsReport, summarizeDecisionInputs } from "@/lib/decisi
 import { invoke } from "@/lib/invoke";
 import { exportAnalysisReport } from "@/lib/stock-analysis-export";
 import { type ExportData, type ExportFormat } from "@/lib/stock-analysis-export";
-import { computeStockConsensus } from "@/lib/stock-analysis-utils";
-import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/lib/stock-analysis-utils";
+import {
+  actionToDirection,
+  computeStockConsensus,
+  getActionColor,
+  getActionTKey,
+  getRiskColor,
+  getRiskTKey,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { DataQualityReport } from "@/types";
@@ -13,6 +20,8 @@ import { App, Button, Card, Collapse, Dropdown, Modal, Tag, Tooltip } from "antd
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { DecisionExplanationPanel } from "./DecisionExplanationPanel";
+import { DecisionTrustNotice } from "./DecisionTrustNotice";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { cleanToolCallTags } from "./utils";
 
@@ -24,6 +33,19 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const decision = useStockAnalysisStore((s) => s.decision);
+  // P1-2(2026-09-14): 展示档统一由 (action, positionState, positionPct) 派生 ——
+  // 「持有 / 观望」不再由组件各自判断仓位。后端目前**仍**按仓位互改 action，
+  // 本派生与后端同判据（positionState 优先，缺失时退回 positionPct），故对既有数据是恒等变换；
+  // 后端切换为「action 只表达方向强度」后，此处无需再改。
+  // ⚠️ 只用于**展示**（Tag 文案 + 配色）。方向判定（actionToDirection）与
+  //    「问 AI」prompt 仍读 decision.action 原文，避免派生把原始结论改写掉。
+  const displayAction = useMemo(
+    () =>
+      decision
+        ? resolveDisplayAction(decision.action, decision.positionState, decision.positionPct)
+        : null,
+    [decision],
+  );
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
   // 重跑分析: 透传当前 analysisId 让后端"覆盖"同 id 旧记录(而非新建一条)
@@ -560,8 +582,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
   const isConsensusContradictory = (() => {
     if (!analystReports || Object.keys(analystReports).length < 3 || !decision) { return false; }
     const consensus = computeStockConsensus(analystReports, undefined, decision.timeHorizon);
-    const isBullishAction = decision.action === "BUY" || decision.action === "INCREASE";
-    const isBearishAction = decision.action === "SELL" || decision.action === "REDUCE";
+    // P1-6(2026-09-14): 判定改走统一归一化。原为英文字面量比较，而 portfolio-mgr
+    // 产出的是中文「买入/增持/卖出/减持」⇒ 中文值域下两者恒 false，矛盾检测静默失效。
+    const consensusDirection = actionToDirection(decision.action);
+    const isBullishAction = consensusDirection === "buy";
+    const isBearishAction = consensusDirection === "sell";
     if (isBullishAction && (consensus.consensus === "bearish" || consensus.consensus === "divided")) { return true; }
     if (isBearishAction && (consensus.consensus === "bullish" || consensus.consensus === "divided")) { return true; }
     return false;
@@ -650,26 +675,12 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 {timeHorizonLabel}
               </Tag>
             )}
-            {decision.weightsCollapsed && (
-              <Tooltip
-                title={
-                  <div className="text-xs">
-                    <div>
-                      {decision.collapseReason === "dqi_collapsed"
-                        ? t("stockAnalysis.weightCollapseDqi")
-                        : decision.collapseReason === "multi_untrusted"
-                        ? t("stockAnalysis.weightCollapseUntrusted", { count: decision.untrustedCount ?? "?" })
-                        : t("stockAnalysis.weightCollapseThreshold", { ratio: decision.weightRatio ?? "?" })}
-                    </div>
-                    <div className="mt-1">{t("stockAnalysis.weightCollapseConsequence")}</div>
-                  </div>
-                }
-              >
-                <Tag color="red" style={{ margin: 0, fontSize: 11, lineHeight: "18px", paddingInline: 4 }}>
-                  ⚠️ {t("stockAnalysis.weightCollapseTag")}
-                </Tag>
-              </Tooltip>
-            )}
+            {
+              /* 决策可信度受限（权重坍缩 + 数据缺口）：由共享组件统一渲染。
+                原实现只覆盖 weightsCollapsed，且该字段被 normalizeDecision 的
+                白名单丢弃，实际从未显示过（2026-09-11 修复）。 */
+            }
+            <DecisionTrustNotice decision={decision} variant="tag" />
             {decision.expectedHoldingDays && (
               <span className="text-xs font-mono" style={{ color: "var(--muted)" }}>
                 {t("stockAnalysis.expectedHoldingDaysLabel")}{" "}
@@ -789,8 +800,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 /* 分歧时：双决策并列标题 */
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm">{t("stockAnalysis.dualViewDisagreementTitle")}</span>
-                  <Tag color={getActionColor(decision.action)}>
-                    {t("stockAnalysis.formula")} {actionLabel(decision.action)}
+                  <Tag color={getActionColor(displayAction ?? "")}>
+                    {t("stockAnalysis.formula")} {actionLabel(displayAction ?? "")}
                   </Tag>
                   <span className="text-sm" style={{ color: "var(--muted)" }}>vs</span>
                   <Tag color={getActionColor(llmStance)}>
@@ -812,8 +823,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 /* 一致或无LLM时：原单决策标题 */
                 <div className="flex items-center gap-2">
                   <span>{t("stockAnalysis.finalDecision")}</span>
-                  <Tag color={getActionColor(decision.action)}>
-                    {actionLabel(decision.action)}
+                  <Tag color={getActionColor(displayAction ?? "")}>
+                    {actionLabel(displayAction ?? "")}
                   </Tag>
                   {asOfDate && (
                     <Tag color="purple" title={t("timeTravel.badge.replayTooltip", { date: asOfDate })}>
@@ -838,24 +849,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       }`)}
                     </Tag>
                   )}
-                  {decision.weightsCollapsed && (
-                    <Tooltip
-                      title={
-                        <div className="text-xs">
-                          <div>
-                            {decision.collapseReason === "dqi_collapsed"
-                              ? t("stockAnalysis.weightCollapseDqi")
-                              : decision.collapseReason === "multi_untrusted"
-                              ? t("stockAnalysis.weightCollapseUntrusted", { count: decision.untrustedCount ?? "?" })
-                              : t("stockAnalysis.weightCollapseThreshold", { ratio: decision.weightRatio ?? "?" })}
-                          </div>
-                          <div className="mt-1">{t("stockAnalysis.weightCollapseConsequence")}</div>
-                        </div>
-                      }
-                    >
-                      <Tag color="red">{t("stockAnalysis.weightCollapseTag")}</Tag>
-                    </Tooltip>
-                  )}
+                  {/* 决策可信度受限：标题行用紧凑标签，完整警示条在下方正文区 */}
+                  <DecisionTrustNotice decision={decision} variant="tag" />
                 </div>
               )}
             extra={
@@ -874,6 +869,16 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 : {}),
             }}
           >
+            {
+              /* 决策可信度受限（权重坍缩 / 数据缺口）—— 正文首行，把「为什么观望」
+                的前提摊开，避免只给结论不给依据的「黑盒观望」体感 */
+            }
+            {(decision.weightsCollapsed || (decision.dataGaps?.length ?? 0) > 0) && (
+              <div className="mb-2">
+                <DecisionTrustNotice decision={decision} variant="banner" />
+              </div>
+            )}
+
             {/* 置信度条：数字 + 定性标签 + 共识上下文 — 嵌入模式下精简（顶部HeroBar已显示） */}
             {!embeddedInWorkspace && (
               <div className="mb-2">
@@ -990,10 +995,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     <div className="flex items-center justify-between">
                       <span className="font-medium" style={{ color: "#2563eb" }}>{t("stockAnalysis.formula")}</span>
                       <Tag
-                        color={getActionColor(decision.action)}
+                        color={getActionColor(displayAction ?? "")}
                         style={{ fontSize: 12, lineHeight: "20px", height: 20, paddingInline: 6 }}
                       >
-                        {actionLabel(decision.action)}
+                        {actionLabel(displayAction ?? "")}
                       </Tag>
                     </div>
                     <div className="font-mono flex gap-2" style={{ color: "var(--color-text-secondary)" }}>
@@ -1136,6 +1141,16 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               </div>
             )}
 
+            {
+              /* 决策依据说明书（decision-explainer 节点产出）——
+                与上方 llmSummary 的区别：llmSummary 是 trader 的 LLM 视角（方案 D 对比用），
+                本块是决策解释官对**风控门最终裁决**的翻译 + 规则追溯码清单。
+                无产出时组件自渲染为空（该节点 continue_on_fail=true，跳过属预期）。 */
+            }
+            <div className="mb-2">
+              <DecisionExplanationPanel />
+            </div>
+
             {/* 紧凑指标行：grid 分列填满 Card 宽度，避免右侧留空 */}
             <div className="grid gap-1.5 mb-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}>
               {decision.targetPrice && (
@@ -1238,7 +1253,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
             {/* 操作按钮行 */}
             <div className="flex gap-2 items-center flex-wrap">
               {/* 快速交易录入（紧凑形式）— 决策日可直接在此录入买卖；嵌入模式下隐藏（工作区有专门交易Tab） */}
-              {stockCode && decision.action && decision.action !== "HOLD" && !embeddedInWorkspace && (
+              {
+                /* P0-1: 仅方向明确的决策才显示入口（持有/观望/不确定/数据缺失无交易方向，
+                  显示一个点了必然报错的按钮没有意义），判定与提交处同源。 */
+              }
+              {stockCode && actionToDirection(decision.action) !== null && !embeddedInWorkspace && (
                 <div className="flex items-center gap-1" style={{ marginRight: 4 }}>
                   <input
                     type="number"
@@ -1282,12 +1301,21 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       if (price <= 0 || qty <= 0) {
                         return;
                       }
+                      // P0-1(2026-09-14): 方向必须由 action 归一化映射得出；
+                      // 无方向的决策（持有 / 观望 / 不确定 / 数据缺失）拒绝录入。
+                      // 原实现 `action === "SELL" ? "sell" : "buy"` 会把「观望」直接录成
+                      // **买入方向**并写入真实交易记录（与 TradePanel 同型缺陷，第二入口）。
+                      const direction = actionToDirection(decision.action);
+                      if (!direction) {
+                        message.warning(t("stockAnalysis.trade.quickRecordNoDirection"));
+                        return;
+                      }
                       const analysisId = useStockAnalysisStore.getState().analysisId;
                       try {
                         await invoke("record_trade", {
                           stockCode,
                           stockName,
-                          direction: decision.action === "SELL" ? "sell" : "buy",
+                          direction,
                           price,
                           quantity: Math.round(qty / 100) * 100,
                           tradeDate: new Date().toISOString().slice(0, 10),
@@ -1445,7 +1473,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   <div className="flex items-center justify-between">
                     <span className="font-medium" style={{ color: "#2563eb" }}>{t("dualView.decision.formula")}</span>
                     {decision?.action
-                      ? <Tag color={getActionColor(decision.action)}>{t(getActionTKey(decision.action ?? ""))}</Tag>
+                      ? <Tag color={getActionColor(displayAction ?? "")}>{t(getActionTKey(displayAction ?? ""))}</Tag>
                       : <span style={{ color: "var(--muted)" }}>—</span>}
                   </div>
                   <div className="font-mono flex gap-2" style={{ color: "var(--color-text-secondary)" }}>
@@ -1748,8 +1776,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
         title={
           <div className="flex items-center gap-2">
             <span>{t("stockAnalysis.finalDecision")}</span>
-            <Tag color={getActionColor(decision.action)}>
-              {actionLabel(decision.action)}
+            <Tag color={getActionColor(displayAction ?? "")}>
+              {actionLabel(displayAction ?? "")}
             </Tag>
             {asOfDate && (
               <Tag color="purple" title={t("timeTravel.badge.replayTooltip", { date: asOfDate })}>
@@ -1966,6 +1994,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                             <th className="text-right py-1.5 px-2" style={{ color: "var(--muted)" }}>
                               {t("stockAnalysis.dqTableConfidence")}
                             </th>
+                            <th className="text-right py-1.5 px-2" style={{ color: "var(--muted)" }}>
+                              {t("stockAnalysis.dqTablePlaceholder")}
+                            </th>
                             <th className="text-left py-1.5 px-2" style={{ color: "var(--muted)" }}>
                               {t("stockAnalysis.dqTableStatus")}
                             </th>
@@ -1976,19 +2007,26 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         </thead>
                         <tbody>
                           {Object.entries(dataQualityReport.diagnostics).map(([key, diag]) => {
+                            // 2026-09-12: "untrusted"（strict_mode 降级）此前落入 else 分支，
+                            // 被渲染成「✅ 正常」——与后端语义相反。i18n key dqStatusUntrusted
+                            // 早已存在于全部 11 种语言，但从未被消费。
                             const statusColor = diag.status === "missing"
                               ? "#ef4444"
-                              : diag.status === "low"
+                              : diag.status === "low" || diag.status === "untrusted"
                               ? "#f59e0b"
                               : "#10b981";
                             const statusLabel = diag.status === "missing"
                               ? t("stockAnalysis.dqStatusMissing")
                               : diag.status === "low"
                               ? t("stockAnalysis.dqStatusLowConfidence")
+                              : diag.status === "untrusted"
+                              ? t("stockAnalysis.dqStatusUntrusted")
                               : t("stockAnalysis.dqStatusNormal");
                             const confText = diag.confidence < 0
                               ? "—"
                               : `${diag.confidence.toFixed(0)}`;
+                            // 2026-09-12: 报告文本失败标记数（客观证据，独立于自评 confidence）
+                            const phHits = diag.placeholder_hits ?? 0;
                             return (
                               <tr
                                 key={key}
@@ -2003,6 +2041,15 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                                   style={{ color: diag.confidence < 0 ? "var(--muted)" : statusColor }}
                                 >
                                   {confText}
+                                </td>
+                                <td
+                                  className="py-1.5 px-2 text-right font-mono"
+                                  style={{ color: phHits > 0 ? "#f59e0b" : "var(--muted)" }}
+                                  title={phHits > 0
+                                    ? t("stockAnalysis.dqPlaceholderTooltip", { count: phHits })
+                                    : undefined}
+                                >
+                                  {phHits > 0 ? `${phHits}` : "—"}
                                 </td>
                                 <td className="py-1.5 px-2" style={{ color: statusColor }}>
                                   {statusLabel}

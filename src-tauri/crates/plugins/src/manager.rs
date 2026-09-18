@@ -22,14 +22,8 @@ use axagent_harness::{
     CapabilityPassportDto, EffectHandle, NpmRegistryService, parse_npm_package_spec,
 };
 
-const EXTERNAL_MARKETPLACE: &str = "external";
-const BUILTIN_MARKETPLACE: &str = "builtin";
-const BUNDLED_MARKETPLACE: &str = "bundled";
-const SETTINGS_FILE_NAME: &str = "settings.json";
-const REGISTRY_FILE_NAME: &str = "installed.json";
-const MANIFEST_FILE_NAME: &str = "plugin.json";
-const MANIFEST_RELATIVE_PATH: &str = ".claude-plugin/plugin.json";
-const SKILL_MD_FILE_NAME: &str = "SKILL.md";
+// 插件市场常量不再本地定义：由下方 `use crate::core::*;` 统一引入（core.rs 为唯一定义点）。
+// ⚠ 此处原先的本地定义会**静默遮蔽** glob 导入（编译器不报错），故必须删除才能真正复用同一来源。
 
 use crate::core::*;
 use crate::mcp_launcher::McpLauncher;

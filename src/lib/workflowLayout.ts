@@ -184,6 +184,30 @@ function isLayoutExcluded(n: NodeLike): boolean {
   return t === "_phaseSeparator" || t === "groupFrame";
 }
 
+/**
+ * 判断节点是否被禁用（enabled=false）。
+ *
+ * 兼容两种节点形状：
+ * - WorkflowNode 形状：`base.enabled`
+ * - ReactFlow Node 形状（useFlowNodes 把 WorkflowNode 整体铺进 data）：`data.base.enabled`
+ *
+ * 禁用节点不参与 DAG 调度，「无边」是合法状态（典型：股票分析模板的
+ * `sim-verify` 图示节点 —— 真执行由后端挂钩在决策落库后触发），不应被误报为孤立节点。
+ */
+function isNodeDisabled(n: NodeLike): boolean {
+  const base = (n as unknown as { base?: { enabled?: boolean } }).base;
+  if (typeof base?.enabled === "boolean") { return !base.enabled; }
+  const top = (n as unknown as { enabled?: boolean }).enabled;
+  if (typeof top === "boolean") { return !top; }
+  const d = n.data as Record<string, unknown> | undefined;
+  if (d) {
+    if (typeof d.enabled === "boolean") { return !d.enabled; }
+    const dBase = d.base as Record<string, unknown> | undefined;
+    if (typeof dBase?.enabled === "boolean") { return !dBase.enabled; }
+  }
+  return false;
+}
+
 /** 构建入度 Map（target → 入边数） */
 function buildIndegree(edges: EdgeLike[]): Map<string, number> {
   const m = new Map<string, number>();
@@ -308,7 +332,7 @@ export function suggestTitle(id: string, type: string, t: RenderFn = defaultT): 
  * @returns 校验结果（issues 为空 → valid === true）
  *
  * ### 校验规则
- * 1. **孤立节点**：非 trigger、非容器节点入度=0 且出度=0
+ * 1. **孤立节点**：非 trigger、非容器、非禁用（enabled=false）节点入度=0 且出度=0
  * 2. **数据黑洞**：aggregator 入度≥3 但出度=0
  * 3. **死分支**：容器节点入度=0 且出度=0（有子=调度容器 error；无子=装饰容器 warning）
  * 4. **端口未连**：condition 节点的 true/false 出口至少一边未连
@@ -337,6 +361,8 @@ export function validateWorkflow(
     if (isLayoutExcluded(n)) { continue; }
     const tType = nodeTypeOf(n);
     if (tType === "trigger" || CONTAINER_NODE_TYPES.has(tType)) { continue; }
+    // 禁用节点（enabled=false）不参与 DAG 调度，允许无边 —— 见 isNodeDisabled 注释
+    if (isNodeDisabled(n)) { continue; }
     if ((indegree.get(n.id) || 0) === 0 && (outdegree.get(n.id) || 0) === 0) {
       const key = "workflow.layout.validate.orphan_node";
       const params = { nodeId: n.id };

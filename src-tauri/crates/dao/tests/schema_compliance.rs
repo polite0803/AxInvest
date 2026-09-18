@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! 全量 schema 合规性测试。
 //!
-//! 验证所有 89 个 SeaORM 实体的每一列在 SQLite 内存库中运行全部迁移后真实存在。
+//! 验证下方 `SCHEMA` 清单中每张表的每一列在 SQLite 内存库中运行全部迁移后真实存在。
 //! 这是「字段缺失」bug 的回归防线。
+//!
+//! ⚠ 覆盖范围**恒等于 `SCHEMA` 的条目数**，不是「全部实体」：清单里没有的表既不会
+//! 被判红，也没人知道它没被守 —— 属静默缺口。故新增实体/表时必须同步登记。
+//! （原先此处写「所有 89 个实体」是漂移值，与本文件的真实覆盖无对应关系，已删。）
 
 use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
 
@@ -342,6 +346,24 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("joined_at", "BIGINT"),
             ("today_tokens", "BIGINT"),
             ("total_tokens", "BIGINT"),
+        ],
+    ),
+    (
+        "fleet_messages",
+        &[
+            ("id", "TEXT"),
+            ("fleet_id", "TEXT"),
+            // ⚠ 是 `conversation_id`（会话作用域），**不是** `room_id`（精灵站位的物理房间）。
+            // 曾同名，导致 DM 与群聊混进同一条时间线；2026-09-15 改名。这条清单即是
+            // 该改名的回归防线 —— 若有人把列名改回 `room_id`，此处会立刻报「缺失列」。
+            ("conversation_id", "TEXT"),
+            ("seq", "BIGINT"),
+            ("author_kind", "TEXT"),
+            ("author_id", "TEXT"),
+            ("author_slug", "TEXT"),
+            ("author_display_name", "TEXT"),
+            ("content", "TEXT"),
+            ("created_at", "BIGINT"),
         ],
     ),
     (
@@ -828,11 +850,32 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("title", "TEXT"),
             ("steps_json", "TEXT"),
             ("status", "TEXT"),
+            // v225：执行授权位（与计划生命周期解耦）
+            ("execution_authorized", "INTEGER"),
+            ("authorized_at", "BIGINT"),
+            ("authorized_by", "TEXT"),
             ("is_active", "INTEGER"),
             ("created_under_strategy", "TEXT"),
             ("reason", "TEXT"),
             ("created_at", "BIGINT"),
             ("updated_at", "BIGINT"),
+        ],
+    ),
+    (
+        // v226（P1-C 第一阶段）：任务状态迁移的事件脊。
+        // 新增表必须在此登记 —— 本测试的「多余列」检查是强制的，
+        // 登记后才有「实体/迁移/期望清单」三方一致的保证。
+        "task_events",
+        &[
+            ("id", "TEXT"),
+            ("task_id", "TEXT"),
+            ("source", "TEXT"),
+            ("from_status", "TEXT"),
+            ("to_status", "TEXT"),
+            ("actor", "TEXT"),
+            ("reason", "TEXT"),
+            ("payload", "TEXT"),
+            ("created_at", "BIGINT"),
         ],
     ),
     (
@@ -1517,10 +1560,18 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
 async fn verify_all_entity_columns_exist_in_db() {
     let db = Database::connect("sqlite::memory:").await.expect("测试应成功");
 
-    // 跑全部迁移
-    axagent_dao::migrations::run_migrations(&db)
-        .await
-        .expect("all migrations should apply cleanly");
+    // 建表：走声明式引擎（**唯一**建表来源；版本化迁移已于 2026-09-16 清空）。
+    //
+    // 本条判据的价值正在于它**不是**自证：`SCHEMA` 是手写的实体列清单，
+    // 引擎若在某个方言上漏渲染一列，这里会抓到。换成「从实体读列再比对」就变成
+    // 同义反复（读的和建的是同一份来源），故刻意保留这份手写清单。
+    let out =
+        axagent_dao::reconcile::apply::bootstrap_schema(&db).await.expect("引擎应能在全新库上建表");
+    assert!(
+        out.refusal.is_none(),
+        "全新库上引擎不应被拒（被拒意味着渲染器有缺陷，不是数据问题）：{:?}",
+        out.refusal
+    );
 
     let mut errors: Vec<String> = Vec::new();
 

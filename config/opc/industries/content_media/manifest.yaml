@@ -6,3 +6,7 @@ icon: "📝"
 description: 选题策划 → 内容创作 → 落地页发布。CMO 视角，含博客和落地页创建。
 version: 2
 enabled: true
+# 模板 ID 前缀（不含 `workflow-`）。该行业的工作流模板 ID 形如 `workflow-cm-*`，
+# 与行业 id（content_media → content-media）不构成默认前缀关系，必须显式声明；
+# 消费方：`opc_learning_hook::identify_industry_from_template`。
+template_prefix: cm

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub stock_code: String,
     /// YYYY-MM-DD
     pub snapshot_date: String,

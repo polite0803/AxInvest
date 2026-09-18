@@ -35,8 +35,8 @@ export type {
 } from "@/lib/stock-analysis-utils";
 
 // StockActionType / StockRiskLevelType 由 @/lib/stock-analysis-utils 导出
-import type { StockActionType, StockRiskLevelType } from "@/lib/stock-analysis-utils";
-export type { StockActionType, StockRiskLevelType };
+import type { PositionStateType, StockActionType, StockRiskLevelType } from "@/lib/stock-analysis-utils";
+export type { PositionStateType, StockActionType, StockRiskLevelType };
 
 // ── 纯类型定义 ──
 
@@ -131,6 +131,18 @@ export interface AnalysisConfig {
 export interface StockDecision {
   action: StockActionType;
   positionPct: number;
+  /**
+   * P1-2(2026-09-14): 持仓状态（EMPTY / OPENING / HOLDING / TRIMMING）—— 与 `action` **正交**的第二轴。
+   *
+   * 背景：`action` 表达**方向强度**，`positionPct` 表达仓位大小；「持有 vs 观望」此前是同一
+   * 中性档因仓位有无被后端**互改**的两个名字（仓位>0 观望→持有；仓位≤0 持有→观望）。
+   * 本字段把持仓状态显式化，展示层统一走 `resolveDisplayAction(action, positionState, positionPct)`
+   * 派生展示档，各组件不得再自行写 `positionPct <= 0` 判断。
+   *
+   * ⚠️ `null` / `undefined` 的语义是「该记录产生于本字段引入之前，采集时点无此信息」，
+   * **不得**读成 `EMPTY`（那会把「不知道」当成「空仓」）。派生函数会在此时退回 `positionPct` 判据。
+   */
+  positionState?: PositionStateType | null;
   targetPrice: number | null;
   stopLoss: number | null;
   reasoning: string;
@@ -148,6 +160,15 @@ export interface StockDecision {
   weightRatio?: number;
   /** V66: 不可信上游节点数量 */
   untrustedCount?: number;
+  /**
+   * portfolio-mgr 消费的上游节点中**缺失数据**的清单（如「资金流向(t-hotmoney-data)」）。
+   *
+   * 命名说明：后端 portfolio-mgr 决策 JSON 里该字段是顶层 snake_case 的 `data_gaps`
+   * （唯一一个非 camelCase 的顶层键，且 `stock_workflow/decision.rs` V65 的
+   * 一致性算法也按此名读取，故不能改名）；`normalizeDecision` 已统一收敛为
+   * 前端 camelCase 的 `dataGaps`，消费处只读 `decision.dataGaps`。
+   */
+  dataGaps?: string[];
   /** 时间维度: "ultra_short" | "short" | "mid" | "long" */
   timeHorizon?: string | null;
   /** 期望持有天数（交易日） */
@@ -194,6 +215,8 @@ export interface RecoCrossCheck {
   decisionAction: string;
   /** 本次工作流决策仓位 (%) */
   decisionPositionPct: number;
+  /** 本次工作流决策的持仓状态轴（v228，crossCheck 生成时点的快照） */
+  decisionPositionState?: string | null;
   /** 是否构成跨系统分歧（智选推荐 vs 工作流否决/观望） */
   divergent: boolean;
 }
@@ -235,9 +258,25 @@ export interface DashboardReport {
   confidence: number;
   buyPointLow?: number | null;
   buyPointHigh?: number | null;
+  /**
+   * **交易目标价**（LLM trader 给出的方向性目标）。
+   *
+   * ⚠️ 与下方的 `intrinsicValue*` 是**两个不同概念**，UI 必须分开标注、不可混称「目标价」：
+   *   · 本字段回答「打算在哪卖出」—— 持有/观望档通常为空，也可能等于现价（即无信息量）；
+   *   · `intrinsicValue*` 回答「这家公司值多少钱」—— 由 `t-valuation` 客观计算产出。
+   * 2026-09-13 实证（603466 风语筑）：两者被同名展示后，用户读到「同一工作流结论矛盾」。
+   */
   targetPrice?: number | null;
   stopLoss?: number | null;
   positionPct: number;
+  /** 内在价值区间下沿（DCF 悲观档，估值语义） */
+  intrinsicValueLow?: number | null;
+  /** 内在价值区间上沿（DCF 乐观档，估值语义） */
+  intrinsicValueHigh?: number | null;
+  /** 内在价值中位（DCF 中性档，估值语义） */
+  intrinsicValueMid?: number | null;
+  /** 现值（用于在仪表盘内直观对比「内在价值 vs 现价」） */
+  currentPrice?: number | null;
   riskAlerts: RiskAlert[];
   catalysts: Catalyst[];
   checklist: ChecklistItem[];
@@ -335,10 +374,20 @@ export interface DataQualityDiagItem {
   expected_data: string;
   /** 实际 confidence 值；-1 表示字段缺失/节点失败 */
   confidence: number;
-  /** "missing" | "low" | "normal" */
-  status: "missing" | "low" | "normal";
+  /**
+   * status 判定为「A ∪ B」：
+   * - A = 报告文本失败标记（客观，placeholder_hits > 0）
+   * - B = LLM 自评 confidence（主观）
+   * untrusted 为 strict_mode 降级兜底
+   */
+  status: "missing" | "low" | "normal" | "untrusted";
   /** 缺失或低置信的具体原因（正常时为空字符串） */
   gap_reason: string;
+  /**
+   * 2026-09-12 新增：报告文本命中的失败标记数（如"无法获取"/"为 null"/"返回空"）。
+   * > 0 时即便 confidence >= 50 也判 low（置信度虚高）。
+   */
+  placeholder_hits?: number;
 }
 
 /** data-quality 节点输出的结构化诊断报告（data-quality.rhai 输出 JSON） */
@@ -355,6 +404,17 @@ export interface DataQualityReport {
   missing_factors?: string[];
   gap_count: number;
   good_count: number;
+  /**
+   * 2026-09-12 新增：报告文本含失败标记但自评 confidence >= 50 的分析师数。
+   * 这些节点原被计入 good_count（虚高工具可信度），现按 A ∪ B 降级，计入 low 语义。
+   */
+  degraded_count?: number;
+  /** 2026-09-12 新增：报告文本含失败标记的分析师中文名清单（如 ["资金面","解禁观察"]） */
+  placeholder_nodes?: string[];
+  /** 2026-09-12 新增：报告文本含失败标记的节点缩写清单（如 ["hm","lk"]），用于定位 agent 节点 */
+  placeholder_node_ids?: string[];
+  /** 2026-09-12 新增：全部节点命中的失败标记总数 */
+  placeholder_total_hits?: number;
   avg_confidence: number;
   total_analysts: number;
   /** 各分析师详细诊断，键为缩写（mk/sent/news/...） */
@@ -384,6 +444,12 @@ export interface AnalysisSummary {
   decisionAction: string | null;
   /** 决策仓位百分比（0-100），列表场景由 decisionJson 解析或后端直返 */
   decisionPositionPct: number | null;
+  /**
+   * 决策持仓状态轴（migration v228）：EMPTY / OPENING / HOLDING / TRIMMING。
+   * `null` = 该记录早于 v228（**采集时点没有这个信息**），**不得**读成 EMPTY；
+   * 展示层应据 `decisionPositionPct` 派生。见后端 `stock_analyses` entity 注释。
+   */
+  decisionPositionState: string | null;
   /** 决策 JSON 字符串（含 action/positionPct/confidence 等），列表场景用于渲染决策 Tag */
   decisionJson: string | null;
   createdAt: number;
@@ -490,6 +556,8 @@ export interface LatestAnalysisSummary {
   analysisId: string;
   analysisDate: string;
   decisionAction: string;
+  /** 持仓状态轴（v228）；`null` = 记录早于 v228，非 EMPTY */
+  decisionPositionState: string | null;
   decisionPositionPct: number | null;
   confidence: number | null;
   status: string;

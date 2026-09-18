@@ -179,5 +179,30 @@ describe("uiStore", () => {
         expect(useUIStore.getState().comparedMessageIds).toBeNull();
       });
     });
+
+    describe("chatSearchFocus 请求（Ctrl+F）", () => {
+      beforeEach(() => {
+        useUIStore.getState().consumeChatSearchFocus();
+      });
+
+      it("初始为 0（无待消费请求）", () => {
+        expect(useUIStore.getState().chatSearchFocusRequest).toBe(0);
+      });
+
+      it("requestChatSearchFocus 累加计数 —— 每次请求都必须能被 ChatSidebar 观察到", () => {
+        useUIStore.getState().requestChatSearchFocus();
+        expect(useUIStore.getState().chatSearchFocusRequest).toBe(1);
+        useUIStore.getState().requestChatSearchFocus();
+        expect(useUIStore.getState().chatSearchFocusRequest).toBe(2);
+      });
+
+      it("consumeChatSearchFocus 归零且幂等（重复消费无害）", () => {
+        useUIStore.getState().requestChatSearchFocus();
+        useUIStore.getState().consumeChatSearchFocus();
+        expect(useUIStore.getState().chatSearchFocusRequest).toBe(0);
+        useUIStore.getState().consumeChatSearchFocus();
+        expect(useUIStore.getState().chatSearchFocusRequest).toBe(0);
+      });
+    });
   });
 });

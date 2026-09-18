@@ -9,12 +9,12 @@
 //! 4. 未注册钩子名 warn 跳过（不阻断）
 //! 5. hooks_config 为 NULL 的旧模板不受影响
 
+mod common;
+
 use std::sync::Arc;
 
-use axagent_harness::registry::ProviderRegistry;
-use axagent_harness::repo_dtos::WorkflowExecutionData;
 use axagent_harness::repositories::{
-    WorkflowExecutionRepository, set_loop_checkpoint_repository, set_workflow_execution_repository,
+    set_loop_checkpoint_repository, set_workflow_execution_repository,
 };
 use axagent_harness::workflow_lifecycle::{
     HookExecContext, HookOutcome, WorkflowHooksConfig, WorkflowLifecycleHook,
@@ -26,59 +26,12 @@ use axagent_harness::workflow_types::{
 };
 
 use axagent_rt_workflow::work_engine::{RunOptions, WorkEngine};
+use common::{EmptyProviderRegistry, RecordingWorkflowExecutionRepo};
 use tokio::sync::Mutex;
 
-// ── 记录型 WorkflowExecutionRepository（与 execution_finalization 同款）──
-
-type UpdateLog = Arc<Mutex<Vec<(String, String, Option<i32>)>>>;
-
-#[derive(Clone)]
-struct RecordingWorkflowExecutionRepo {
-    updates: UpdateLog,
-}
-
-#[async_trait::async_trait]
-impl WorkflowExecutionRepository for RecordingWorkflowExecutionRepo {
-    async fn create_workflow_execution(
-        &self,
-        _id: &str,
-        _workflow_id: &str,
-        _input_params: Option<&str>,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-    async fn update_workflow_execution_status(
-        &self,
-        id: &str,
-        status: &str,
-        _output_result: Option<&str>,
-        _node_executions: Option<&str>,
-        total_time_ms: Option<i32>,
-    ) -> Result<bool, String> {
-        self.updates.lock().await.push((id.to_string(), status.to_string(), total_time_ms));
-        Ok(true)
-    }
-    async fn list_workflow_executions(
-        &self,
-        _workflow_id: &str,
-    ) -> Result<Vec<WorkflowExecutionData>, String> {
-        Ok(vec![])
-    }
-    async fn save_execution_state(
-        &self,
-        _id: &str,
-        _status: &str,
-        _execution_state_json: &str,
-    ) -> Result<bool, String> {
-        Ok(true)
-    }
-    async fn clear_execution_state(&self, _id: &str, _status: &str) -> Result<bool, String> {
-        Ok(true)
-    }
-    async fn list_paused_executions(&self) -> Result<Vec<WorkflowExecutionData>, String> {
-        Ok(vec![])
-    }
-}
+// `RecordingWorkflowExecutionRepo`（原「与 execution_finalization 同款」的逐字副本）已收敛到
+// `tests/common/mod.rs`（去重 2026-09-14）。`Mutex` 保留：`TestHook.log` 仍用
+// `Arc<Mutex<Vec<String>>>`。
 
 // ── 测试钩子 ─────────────────────────────────────────────────────────
 
@@ -124,15 +77,9 @@ impl WorkflowLifecycleHook for TestHook {
     }
 }
 
-// ── 最小 ProviderRegistry + 节点构造 helpers ─────────────────────────
-
-struct EmptyProviderRegistry;
-
-impl ProviderRegistry for EmptyProviderRegistry {
-    fn get(&self, _provider_type: &str) -> Option<Arc<dyn axagent_harness::ProviderAdapter>> {
-        None
-    }
-}
+// ── 节点构造 helpers ─────────────────────────────────────────────────
+//
+// `EmptyProviderRegistry` 已收敛到 `tests/common/mod.rs`（去重 2026-09-14）。
 
 fn make_base(id: &str, title: &str) -> WorkflowNodeBase {
     WorkflowNodeBase {

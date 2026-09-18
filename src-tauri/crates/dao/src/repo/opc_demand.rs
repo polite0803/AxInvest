@@ -842,15 +842,17 @@ mod tests {
     /// 手动补录的读回语义：窗口内同指纹重复录入 → 返回既有生效行
     #[tokio::test]
     async fn create_manual_lead_returns_existing_row_on_duplicate() {
-        use crate::migrations::{
-            v133_opc_demand_discovery, v134_lead_workflow_link, v138_demand_lead_dedupe_fingerprint,
-        };
-        use sea_orm::Database;
-
-        let db = Database::connect("sqlite::memory:").await.unwrap();
-        v133_opc_demand_discovery::up(db.clone()).await.unwrap();
-        v134_lead_workflow_link::up(db.clone()).await.unwrap();
-        v138_demand_lead_dedupe_fingerprint::up(db.clone()).await.unwrap();
+        // 建表改走**声明式引擎**（`migrations/v133|v134|v138_*.rs` 均已删）。
+        // 用 `create_test_pool` 而非手连 in-memory：它走生产同一条 `initialize_schema`，
+        // 且把连接数显式钉成 1 —— `sqlite::memory:` 的连接池若 >1，每个连接各自一个
+        // 独立内存库，建表与后续写入会落在不同库上（表现为间歇性「表不存在」，
+        // 与建表语句本身无关，极难归因）。
+        //
+        // ⚠ 本处此前是 `use crate::migrations::{v133…, v134…, v138…};` 的**跨行**
+        //   分组导入 —— 单行正则 grep 跨不过换行，删迁移时它没被扫出来，
+        //   是靠编译器报 E0432 才暴露的。查这类引用要用编译器，不要只靠 grep。
+        let handle = crate::db::create_test_pool().await.unwrap();
+        let db = handle.conn.clone();
 
         let row = super::NewLeadRow {
             id: "lead-manual-1".to_string(),

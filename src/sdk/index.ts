@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { t } from "@/lib/i18nStoreHelper";
+import type { SystemPermissionMode } from "@/types/permission";
 
 /**
  * AxAgent SDK — TypeScript 客户端 SDK
@@ -32,11 +33,9 @@ export type SessionStatus =
   | "compacting"
   | "closed";
 
-/** 系统权限模式 */
-export type SystemPermissionMode =
-  | "read-only"
-  | "workspace-write"
-  | "danger-full-access";
+/** 系统权限模式 —— 权威定义在应用类型层 `src/types/permission.ts`。此处仅转出，
+ *  保持 `@/sdk` 对外 API 不变（`CreateSessionParams.permissionMode` 仍可用该类型）。 */
+export type { SystemPermissionMode };
 
 /** 创建会话参数 */
 export interface CreateSessionParams {

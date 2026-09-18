@@ -25,6 +25,7 @@
 //! - 所有状态变更均需人工触发（reviewed/executed/rejected）
 //! - 审核操作留下完整审计痕迹
 
+use crate::decision_action::{normalize_action, ActionKind};
 use axagent_entities::stock_analyses;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
@@ -168,7 +169,10 @@ impl TradeIntentService {
         let decision_action = model.decision_action.clone();
         let has_decision = decision_action
             .as_deref()
-            .map(|a| !matches!(a, "持有" | "观望" | "hold" | "watch"))
+            // P1-6(2026-09-14): 原判据是「中文两词 + 英文两词」的**半归一化**，
+            //   漏掉同义英文 `WAIT`/`WAIT` 变体与「不确定」⇒ 无方向结论的决策会被
+            //   误判成「有方向的动作」并据此生成交易意图。
+            .map(|a| !matches!(normalize_action(a), Some(ActionKind::Hold | ActionKind::Wait)))
             .unwrap_or(false);
 
         if !has_decision {
@@ -218,6 +222,7 @@ impl TradeIntentService {
             status: Set("completed".to_string()),
             decision_action: Set(Some(action.to_string())),
             decision_position_pct: Set(None),
+            decision_position_state: Set(None),
             decision_reasoning: Set(Some(reasoning.to_string())),
             decision_json: Set(decision_json),
             blackboard_snapshot: Set(None),
@@ -473,6 +478,7 @@ mod tests {
                 conversation_id TEXT NOT NULL,
                 status TEXT NOT NULL,
                 decision_action TEXT,
+                decision_position_state TEXT,
                 decision_position_pct REAL,
                 decision_reasoning TEXT,
                 decision_json TEXT,
@@ -545,6 +551,7 @@ mod tests {
             status: Set("completed".to_string()),
             decision_action: Set(Some("持有".to_string())),
             decision_position_pct: Set(Some(0.0)),
+            decision_position_state: Set(None),
             decision_reasoning: Set(Some("观望中".to_string())),
             decision_json: Set(None),
             blackboard_snapshot: Set(None),
@@ -599,6 +606,7 @@ mod tests {
             status: Set("completed".to_string()),
             decision_action: Set(Some("买入".to_string())),
             decision_position_pct: Set(Some(0.3)),
+            decision_position_state: Set(None),
             decision_reasoning: Set(Some("技术面突破".to_string())),
             decision_json: Set(Some(
                 serde_json::json!({
@@ -665,6 +673,7 @@ mod tests {
             status: Set("completed".to_string()),
             decision_action: Set(Some("卖出".to_string())),
             decision_position_pct: Set(Some(1.0)),
+            decision_position_state: Set(None),
             decision_reasoning: Set(Some("止损".to_string())),
             decision_json: Set(None),
             blackboard_snapshot: Set(None),
@@ -738,6 +747,7 @@ mod tests {
             status: Set("completed".to_string()),
             decision_action: Set(Some("增持".to_string())),
             decision_position_pct: Set(Some(0.2)),
+            decision_position_state: Set(None),
             decision_reasoning: Set(Some("趋势向好".to_string())),
             decision_json: Set(None),
             blackboard_snapshot: Set(None),

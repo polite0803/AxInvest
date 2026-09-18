@@ -556,10 +556,12 @@ impl NodeExecutorTrait for AgentExecutor {
                         all_segments.extend(compile_prompt(&resolved.system_prompt).segments);
                     },
                     Ok(Some(_)) => {
-                        tracing::debug!(
+                        // 「存在但为空」与下面「不存在」后果相同（role 提示词都不生效），
+                        // 级别须一致；且前者更隐蔽——DB 里查得到，容易误以为已配置。
+                        tracing::warn!(
                             node_id = %node.base_id(),
                             role_name = %role_name,
-                            "AgentRole system_prompt 为空，跳过"
+                            "AgentRole 存在但 system_prompt 为空 ⇒ role 提示词不会生效（与 role 不存在后果相同）"
                         );
                     },
                     Ok(None) => {
@@ -596,10 +598,10 @@ impl NodeExecutorTrait for AgentExecutor {
                         all_segments.extend(compile_prompt(&expert.system_prompt).segments);
                     },
                     Ok(Some(_)) => {
-                        tracing::debug!(
+                        tracing::warn!(
                             node_id = %node.base_id(),
                             expert_id = %expert_id,
-                            "Expert system_prompt 为空，跳过"
+                            "Expert 存在但 system_prompt 为空 ⇒ expert 提示词不会生效（与 expert 不存在后果相同）"
                         );
                     },
                     Ok(None) => {
@@ -670,6 +672,10 @@ impl NodeExecutorTrait for AgentExecutor {
             if let Some(rag_cb) = rag_cb {
                 let rag_query = user_prompt_for_rag(&an.config, &context.variables);
                 let (kb_ids, mem_ids, wiki_ids) = parse_rag_source_ids(&an.config.rag_source_ids);
+                // 三类 ID 随后会被 move 进回调，先把计数取出，供「检索成功但零命中」留痕用。
+                let kb_count = kb_ids.len();
+                let mem_count = mem_ids.len();
+                let wiki_count = wiki_ids.len();
                 if !kb_ids.is_empty() || !mem_ids.is_empty() || !wiki_ids.is_empty() {
                     let rag_result = rag_cb(kb_ids, mem_ids, wiki_ids, rag_query).await;
                     match rag_result {
@@ -686,7 +692,17 @@ impl NodeExecutorTrait for AgentExecutor {
                                 all_segments.push(TemplateSegment::Static(part.clone()));
                             }
                         },
-                        Ok(_) => {},
+                        Ok(_) => {
+                            // 检索跑了但零命中属常态，故用 info；留痕是为了事后能区分
+                            // 「压根没检索」与「检索了但知识库里确实没有相关内容」。
+                            tracing::info!(
+                                node_id = %an.base.id,
+                                kb_count = kb_count,
+                                mem_count = mem_count,
+                                wiki_count = wiki_count,
+                                "RAG 检索成功但未命中任何片段（context_parts 为空）⇒ 知识源未注入 system_prompt"
+                            );
+                        },
                         Err(e) => {
                             tracing::warn!(
                                 "RAG context collection failed for agent node {}: {e}",
@@ -694,11 +710,24 @@ impl NodeExecutorTrait for AgentExecutor {
                             );
                         },
                     }
+                } else {
+                    // rag_source_ids 非空但三类前缀全不可识别 ⇒ 整块检索被直接跳过，
+                    // 零注入零痕迹；比上面「检索成功但零命中」更严重（后者真跑了检索）。
+                    let declared_ids = an.config.rag_source_ids.join(", ");
+                    tracing::warn!(
+                        node_id = %an.base.id,
+                        declared = an.config.rag_source_ids.len(),
+                        declared_ids = %declared_ids,
+                        "rag_source_ids 非空但三类 ID 全部解析为空（无 knowledge:/memory:/wiki: 前缀）⇒ 知识源不会被注入 system_prompt"
+                    );
                 }
             } else {
-                tracing::debug!(
-                    "Agent node {} has rag_source_ids but no RAG callback configured, skipping",
-                    an.base.id
+                // 声明了知识源但运行期没注册 RAG 回调 ⇒ 检索永不发生：配置与运行时
+                // 不匹配，属失败而非信息，必须 warn 级可见。
+                tracing::warn!(
+                    node_id = %an.base.id,
+                    declared = an.config.rag_source_ids.len(),
+                    "Agent 节点声明了 rag_source_ids，但运行时未配置 RAG 回调 ⇒ 知识源检索不会执行"
                 );
             }
         }
@@ -766,10 +795,16 @@ impl NodeExecutorTrait for AgentExecutor {
                     };
                     injected_lines.push_str(&format!("【{target_key}】:{formatted}\n"));
                 } else {
-                    tracing::debug!(
-                        "Agent node {} input_mapping: resolve_var_path('{}') returned None",
-                        an.base.id,
-                        source_key
+                    // 声明的输入取不到值 ⇒ 该变量不会进入 system_prompt，模板里对应段落
+                    // 会静默变空。这类「悬空 input_mapping」在本仓反复出现过（如
+                    // `{remaining_chapters}` 之类无产出点的映射），必须 warn 级可见：
+                    // debug 级在默认日志配置下等于没有痕迹，事后无法定位是哪个节点、
+                    // 哪个键取不到。行为不变——此处仍是跳过该键、继续组装 prompt。
+                    tracing::warn!(
+                        node_id = %an.base.id,
+                        target_key = %target_key,
+                        source_key = %source_key,
+                        "Agent 节点 input_mapping 取不到值：源变量路径解析为 None，该输入不会注入 system_prompt（模板中对应段落将为空）"
                     );
                 }
             }
@@ -982,6 +1017,27 @@ impl NodeExecutorTrait for AgentExecutor {
         let max_rounds = an.config.max_tool_rounds.unwrap_or(5).max(1);
         let mut total_usage = (0u32, 0u32);
         let mut final_content = String::new();
+        // 2026-09-14：**流完整性**标记（粘性，跨轮次累积）。
+        //
+        // 背景（用户 2026-09-14 实证反馈「消息面分析师没有文本输出 / 资金面未返回结构化内容」）：
+        // `a-news` 输出 980 字符、`usage = {0, 0}`、耗时 73.6s，内容在
+        // `<!-- VERDICT: {"verdict": "偏空", … "bull_points": ["中` 处**戛然而止**，
+        // 但节点状态是 `completed`。`a-hot-money` 同型（1029 字符 / 截在 `["大单持续`）。
+        //
+        // 根因：`ChatStreamChunk` 带 `done: bool` / `is_final: Option<bool>` 终态标记
+        //（provider 侧在收到 `[DONE]` / `finish_reason` 时置 `done: true`，
+        //  见 `providers/src/openai.rs:1127`），而本循环**只读 content/thinking/usage/tool_calls
+        //  —— 从不检查终态标记**。于是 `stream.next()` 返回 `None`（传输层被掐断）
+        // 与「模型正常写完」在代码里是**同一个分支**（`while let` 自然退出），
+        // 半截输出被原样当作成功结果。
+        //
+        // 与 `usage = {0, 0}` 互相印证：终态 chunk 才会携带 usage，usage 为零 ⇒
+        // 传输层从未送达终态事件。这是**可观测、可判定**的，不需要猜。
+        //
+        // ⚠️ 本标记只做「说真话」，**不改变控制流**：不给节点判 Failed（那会让一个
+        // 缺 VERDICT 标签的分析师把整条链 fail-closed 级联跳过），而是把截断事实
+        // 写进输出，让下游与诊断面板能把它与「正常完成」区分开。
+        let mut stream_truncated = false;
         let mut final_thinking: Option<String> = None;
         let mut tool_calls_made: Vec<serde_json::Value> = Vec::new();
         // V53 修复(M2): 连续空 content + tool 调用轮次计数器。
@@ -1094,6 +1150,8 @@ impl NodeExecutorTrait for AgentExecutor {
             let mut stream_thinking: Option<String> = None;
             let mut stream_tool_calls: Option<Vec<axagent_harness::types::ToolCall>> = None;
             let mut stream_usage = (0u32, 0u32);
+            // 本次（单轮）流是否收到过终态 chunk —— 见上方 `stream_truncated` 的长注释。
+            let mut stream_saw_done = false;
 
             // v8.1: per-chunk 超时，防止 LLM provider 挂起导致 engine 永久阻塞。
             // 默认 120s（v24.6: 从 60s 调到 120s）。
@@ -1234,6 +1292,11 @@ impl NodeExecutorTrait for AgentExecutor {
                 if let Some(usage) = chunk.usage {
                     stream_usage = (usage.input_tokens, usage.output_tokens);
                 }
+                // 2026-09-14：记录终态 chunk（provider 收到 `[DONE]`/`finish_reason` 时置位）。
+                // 缺失即「传输层被掐断」，见上方 `stream_truncated` 注释。
+                if chunk.done || chunk.is_final == Some(true) {
+                    stream_saw_done = true;
+                }
                 if chunk.tool_calls.is_some() {
                     stream_tool_calls = chunk.tool_calls;
                 }
@@ -1251,10 +1314,28 @@ impl NodeExecutorTrait for AgentExecutor {
                         completed_nodes: 0,
                         execution_id: Some(context.execution_id.clone()),
                         error: None,
+                        error_code: None,
                         output: Some(serde_json::json!(stream_content)),
                     })
                     .await;
                 }
+            }
+
+            // 2026-09-14：**流完整性判定** —— 有内容、却从未收到终态 chunk ⇒ 输出被截断。
+            // 判定依据是可观测的（见 `stream_truncated` 声明处注释），不依赖猜测：
+            // provider 在 `openai.rs:1127` 收到 `[DONE]`/`finish_reason` 时置 `done: true`；
+            // 缺它 + `usage` 为零（终态 chunk 才带 usage）两条同时成立 ⇒ 传输层中途断开。
+            if !stream_saw_done && !stream_content.trim().is_empty() {
+                stream_truncated = true;
+                tracing::warn!(
+                    node_id = %node.base_id(),
+                    model = %model,
+                    round = %(round + 1),
+                    content_chars = stream_content.len(),
+                    usage = ?stream_usage,
+                    "Agent LLM 流未收到终态 chunk（done/finish_reason）即结束 ⇒ 输出被截断。\
+                     该事实已写入输出的 `streamTruncated` 字段；节点状态仍为 completed。"
+                );
             }
 
             total_usage.0 += stream_usage.0;
@@ -1621,6 +1702,10 @@ impl NodeExecutorTrait for AgentExecutor {
                 {
                     Ok(mut retry_stream) => {
                         let mut retry_content = String::new();
+                        // 2026-09-14：与主循环同源的完整性标记 —— 重试流同样可能被截断，
+                        // 而**重试被截断后仍会覆盖原内容并报成功**，是「第二次机会也没兜住
+                        // 却无人知晓」的地方（`a-news` 两次尝试 usage 均为 {0,0}）。
+                        let mut retry_saw_done = false;
                         let chunk_timeout =
                             Duration::from_secs(an.config.stream_chunk_timeout_secs.unwrap_or(120));
                         while let Ok(maybe_chunk) =
@@ -1635,9 +1720,33 @@ impl NodeExecutorTrait for AgentExecutor {
                                         total_usage.0 += usage.input_tokens;
                                         total_usage.1 += usage.output_tokens;
                                     }
+                                    if chunk.done || chunk.is_final == Some(true) {
+                                        retry_saw_done = true;
+                                    }
                                 },
-                                Some(Err(_)) | None => break,
+                                Some(Err(e)) => {
+                                    // 2026-09-14：原来这里是 `Some(Err(_)) | None => break`
+                                    // —— **错误被静默丢弃**，重试为何没兜住永远查不到。
+                                    // 按「失败必须可见」原则补日志（不改控制流）。
+                                    tracing::warn!(
+                                        node_id = %node.base_id(),
+                                        error = %e,
+                                        retry_chars = retry_content.len(),
+                                        "VERDICT 兜底: 重试流中途报错，已保留已累积内容"
+                                    );
+                                    break;
+                                },
+                                None => break,
                             }
+                        }
+                        if !retry_saw_done && !retry_content.trim().is_empty() {
+                            stream_truncated = true;
+                            tracing::warn!(
+                                node_id = %node.base_id(),
+                                retry_chars = retry_content.len(),
+                                usage = ?(total_usage.0, total_usage.1),
+                                "VERDICT 兜底: 重试流同样未收到终态 chunk ⇒ 重试输出也被截断"
+                            );
                         }
                         if !retry_content.trim().is_empty() {
                             // P1 修复(2026-07-25): 截断场景重试已生成完整报告，直接替换。
@@ -1829,16 +1938,26 @@ impl NodeExecutorTrait for AgentExecutor {
                         final_content = fixed_content.clone();
                     }
                 } else {
-                    if is_refusal_plain_text(&trimmed) {
-                        let error_json = serde_json::json!({
-                            "error": format!("Agent refused to answer: {}", trimmed.chars().take(100).collect::<String>())
-                        });
-                        final_content = error_json.to_string();
+                    // 2026-09-12 重构：拒答不再短路为 {"error": ...}，改走与"格式错误"
+                    // 相同的 H4.1 fallback_model 重试 / 降级路径（见下方），原因：
+                    //   ① 换模型重试常能拿到合法输出——实证 603353(08:20) 主模型拒答后
+                    //      数据仍完整落库（trader=卖出/conf 85、value-investor bear=85），
+                    //      正是靠 fallback 重试兜住的；短路会白白丢掉这次补救机会。
+                    //   ② 原 error JSON 全项目零消费者（grep "Agent refused" 仅此一处产生），
+                    //      且缺 verdict 字段 → 下游 content.verdict.* 下钻全为 null，
+                    //      既没让人看见、也没让下游正确降级。
+                    // 拒答信息以 refusal_detected / strict_mode_failure_reason 字段保留，
+                    // 真正做到了"既不丢数据，也不丢归因"。
+                    let refusal_detected = is_refusal_plain_text(&trimmed);
+                    if refusal_detected {
                         tracing::warn!(
-                            "strict_mode: 检测到模型拒绝回答，自动转为错误 JSON: {}",
-                            final_content.chars().take(80).collect::<String>()
+                            node_id = %an.base.id,
+                            output_mode = ?an.config.output_mode,
+                            preview = %trimmed.chars().take(120).collect::<String>(),
+                            "strict_mode: 检测到模型拒绝回答，转入 fallback_model 重试路径"
                         );
-                    } else {
+                    }
+                    {
                         // V39 修复: strict_mode 校验失败时降级输出而非返回 NodeError。
                         // 旧的 validate_strict_mode_output(...)? 在所有 JSON 修复失败后
                         // 返回 Err(NodeError)，导致节点 Failed，下游节点拿不到输出。
@@ -1846,10 +1965,29 @@ impl NodeExecutorTrait for AgentExecutor {
                         // V53 修复(M1): 当 tool 已被调用且有返回数据时，将工具执行结果
                         // 注入 tool_results_summary 字段，使下游节点有机会基于实际数据
                         // 而非纯噪音"中性/50/50"做判断。
-                        if let Err(e) =
-                            validate_strict_mode_output(&trimmed, &an.config.output_mode)
-                        {
+                        //
+                        // 拒答文本不可能是"格式写坏了的 JSON"，跑修复链纯属浪费
+                        // （其内部有 fence 剥离/repair_json/截断修复等十余条候选链），
+                        // 因此直接判定校验失败，径直进入下面的 fallback 重试。
+                        let validation = if refusal_detected {
+                            Err(NodeError::exec_failed(
+                                error_code::VALIDATION_FAILED,
+                                format!(
+                                    "严格模式: 模型拒绝回答（refusal，前120字符: {}）",
+                                    trimmed.chars().take(120).collect::<String>()
+                                ),
+                            ))
+                        } else {
+                            validate_strict_mode_output(
+                                &trimmed,
+                                &an.config.output_mode,
+                                &an.base.id,
+                            )
+                        };
+                        if let Err(e) = validation {
                             tracing::warn!(
+                                node_id = %an.base.id,
+                                refusal = refusal_detected,
                                 "strict_mode: LLM 输出格式校验失败,降级为原始文本输出 (output_mode={:?}): {e}",
                                 an.config.output_mode,
                             );
@@ -2013,7 +2151,7 @@ impl NodeExecutorTrait for AgentExecutor {
                                 // 零值会导致下游 portfolio-mgr 因子信号全部为 -1（(0-50)/50=-1），
                                 // posterior 被拉到 0，叠加 weights_collapsed ×0.5 → confidence 恒为 0。
                                 // 改为中性估值（50/50/30），让下游能区分"数据不足但非极端看空"和"看空"。
-                                let fallback_json = serde_json::json!({
+                                let mut fallback_json = serde_json::json!({
                                     "report": trimmed,
                                     "verdict": {
                                         "verdict": "数据不足",
@@ -2027,10 +2165,31 @@ impl NodeExecutorTrait for AgentExecutor {
                                     "strict_mode_fallback": true,
                                     "__data_quality_alert": true,
                                     "__untrusted": true,
-                                    "strict_mode_failure_reason": "LLM 输出非标准格式，无法解析为 JSON",
+                                    // 2026-09-12: 归因不再一律写成"格式错误"。模型拒答
+                                    // 与"JSON 写坏"是两类完全不同的故障（前者要换模型/改
+                                    // prompt，后者只需格式修复），原先统一归因为前者会让
+                                    // 排查方向完全跑偏。
+                                    "strict_mode_failure_reason": if refusal_detected {
+                                        "模型拒绝回答（refusal，非格式错误）"
+                                    } else {
+                                        "LLM 输出非标准格式，无法解析为 JSON"
+                                    },
+                                    "refusal_detected": refusal_detected,
                                     "tool_results_summary": tool_summary,
                                     "fallback_model_configured": an.config.fallback_model.is_some(),
                                 });
+                                // 拒答场景保留历史 error 键（原实现拒答时产出的就是这个结构），
+                                // 非拒答路径不新增键，避免改变既有降级契约。
+                                if refusal_detected && let Some(obj) = fallback_json.as_object_mut()
+                                {
+                                    obj.insert(
+                                        "error".to_string(),
+                                        serde_json::json!(format!(
+                                            "Agent refused to answer: {}",
+                                            trimmed.chars().take(100).collect::<String>()
+                                        )),
+                                    );
+                                }
                                 final_content = fallback_json.to_string();
                             }
                         }
@@ -2462,6 +2621,16 @@ impl NodeExecutorTrait for AgentExecutor {
                 "usage": { "input_tokens": total_usage.0, "output_tokens": total_usage.1 },
                 "tool_calls_made": tool_calls_made,
                 "node_id": node.base_id(),
+                // 2026-09-14：**流完整性**（见函数上方 `stream_truncated` 的长注释）。
+                // 存在的理由：`a-news`/`a-hot-money` 的输出在半截 JSON 处断掉却标 `completed`，
+                // 下游只能看到 `null`（表现为「分析师没有文本输出」），而**截断这个事实本身
+                // 不可见** —— 于是排查必须去数字符、比 usage。补上这两个字段后，
+                // 「正常完成」与「传输层被掐断」在数据层就可区分。
+                // `false` 时行为与改动前完全一致（纯新增字段，零破坏性）。
+                "streamTruncated": stream_truncated,
+                "truncationReason": if stream_truncated {
+                    "LLM 流未收到终态 chunk（done/finish_reason）即结束 —— 传输层中途断开，输出不完整"
+                } else { "" },
             }),
             output_var: Some(an.config.output_var.clone()),
             control: None,
@@ -3923,8 +4092,67 @@ fn is_refusal_plain_text(s: &str) -> bool {
         }
     }
 
-    // 额外检查：极端短句拒绝（纯"抱歉。" "无法回答。" 无分析内容）
-    let refusal_short = ["抱歉。", "无法回答。", "不能回答。", "拒绝回答。", "sorry."];
+    // 额外检查 A（2026-09-12 实证修复）：strict_mode 下的"元语言拒绝"。
+    //
+    // 实证样本（603353 和顺石油分析，08:20:43）：
+    //   「我无法完成您要求输出的 JSON 代码块。」
+    // 该输出未被下面的 starts_with 前缀表命中（模型没用"抱歉我无法回答"句式），
+    // 也未命中精确短句表，于是被误判为"格式错误"：
+    //   ① 多花一次 H4.1 fallback_model 重试；
+    //   ② 重试若再失败则产出 strict_mode_fallback 中性 JSON（50/50/30），
+    //      且 strict_mode_failure_reason 写成"LLM 输出非标准格式"——归因错误，
+    //      真实原因是模型拒绝回答，拒答信息在前端与日志里全部丢失。
+    //
+    // 判据：短文本（上方 200 字符阈值已保证）+ 拒绝动词 + 输出格式元语言。
+    // 为何必须同时要求"元语言"：正常分析报告里也会出现拒绝动词
+    //   （如 a-fundamentals 报告中的「无法完成行业分位校验（数据源缺失）」），
+    // 仅凭动词判定会把"数据不足说明"误判为拒答。这类文本长度远超 200 字符
+    // 已被上方排除，此处再加元语言交集进一步收敛误伤面。
+    let ref_verbs = [
+        "我无法",
+        "我不能",
+        "无法完成",
+        "无法提供",
+        "无法输出",
+        "无法生成",
+        "无法满足",
+        "很抱歉",
+        "抱歉",
+        "对不起",
+        "拒绝",
+        "cannot",
+        "can't",
+        "unable",
+        "sorry",
+    ];
+    let meta_tokens = [
+        "json",
+        "代码块",
+        "code block",
+        "schema",
+        "格式",
+        "要求输出",
+        "输出要求",
+        "要求的内容",
+        "输出内容",
+    ];
+    if ref_verbs.iter().any(|v| lower.contains(v)) && meta_tokens.iter().any(|m| lower.contains(m))
+    {
+        return true;
+    }
+
+    // 额外检查 B：极端短句拒绝（纯"抱歉。" "无法回答。" 无分析内容）
+    let refusal_short = [
+        "抱歉。",
+        "无法回答。",
+        "不能回答。",
+        "拒绝回答。",
+        "sorry.",
+        "我无法完成。",
+        "我无法提供。",
+        "无法完成。",
+        "无法提供。",
+    ];
     for pattern in &refusal_short {
         if trimmed == *pattern {
             return true;
@@ -4298,9 +4526,15 @@ fn try_extract_balanced_json(s: &str) -> Option<String> {
 /// - 当 output_mode 为 Text 时，验证 final_content 是否为非空（防止 LLM 空输出静默通过）
 /// - 若格式不合法，返回错误阻止结果传递给下游
 /// - 自动处理 LLM 常见坏输出模式：markdown fence 包裹、尾逗号等
+///
+/// 说明（2026-09-12）：本函数返回 Err 是**可预期的中间失败**，调用方
+/// （agent_executor 主流程）会捕获后走 H4.1 fallback_model 重试 → 降级 JSON，
+/// 节点不会因此 Failed。因此内部日志一律用 warn 而非 error，并统一带 node_id，
+/// 避免用户看到 "ERROR ... strict_mode" 却无法判断是哪个节点、也不知道它已被兜住。
 fn validate_strict_mode_output(
     final_content: &str,
     output_mode: &axagent_harness::workflow_types::OutputMode,
+    node_id: &str,
 ) -> Result<(), NodeError> {
     use axagent_harness::workflow_types::OutputMode;
     let trimmed = final_content.trim();
@@ -4312,7 +4546,11 @@ fn validate_strict_mode_output(
 
     // 所有模式通用：空输出检测
     if trimmed.is_empty() {
-        tracing::warn!("strict_mode: LLM 输出为空 (output_mode={:?})", output_mode);
+        tracing::warn!(
+            node_id = %node_id,
+            "strict_mode: LLM 输出为空 (output_mode={:?})",
+            output_mode
+        );
         return Err(NodeError::exec_failed(
             error_code::VALIDATION_FAILED,
             format!("严格模式: LLM 输出为空 (output_mode={:?})", output_mode),
@@ -4439,6 +4677,7 @@ fn validate_strict_mode_output(
             if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
                 if candidate != trimmed {
                     tracing::warn!(
+                        node_id = %node_id,
                         "strict_mode: 自动修复 LLM 输出格式 (原始={} => 修复后={})",
                         trimmed.chars().take(80).collect::<String>(),
                         candidate.chars().take(80).collect::<String>(),
@@ -4456,6 +4695,7 @@ fn validate_strict_mode_output(
                 .map(|e| e.to_string())
                 .unwrap_or_default();
             tracing::warn!(
+                node_id = %node_id,
                 "strict_mode: 候选[{}] 解析失败: {} [前100字符: {}]",
                 i,
                 err,
@@ -4469,8 +4709,17 @@ fn validate_strict_mode_output(
             .unwrap_or_default();
         let preview: String = trimmed.chars().take(200).collect();
         let full: String = trimmed.chars().take(3000).collect();
-        tracing::error!("strict_mode: LLM 输出不是合法 JSON: {serde_err} [前200字符: {preview}]");
-        tracing::error!("strict_mode: 完整输出(前3000字符): {full}");
+        // 2026-09-12: 保留 error 级别（降级为 warn 会在只放行 error 的日志配置下
+        // 完全丢失"发生过降级"这一事实），但改写文案 + 补 node_id，消除两点误导：
+        //   ① 原文案未说明该 Err 会被上层捕获（agent_executor 走 H4.1 fallback_model
+        //      重试 → 失败再降级 JSON），节点最终不会 Failed；
+        //   ② 原日志不含 node_id，用户看到后无法判断是哪个节点。
+        tracing::error!(
+            node_id = %node_id,
+            output_mode = ?output_mode,
+            "strict_mode: LLM 输出不是合法 JSON（已被上层捕获，将由 fallback_model 重试/降级 JSON 兜底，节点不会失败）: {serde_err} [前200字符: {preview}]"
+        );
+        tracing::error!(node_id = %node_id, "strict_mode: 完整输出(前3000字符): {full}");
         return Err(NodeError::exec_failed(
             error_code::VALIDATION_FAILED,
             format!("严格模式: LLM 输出不是合法 JSON（错误: {serde_err}, 前200字符: {preview}）"),
@@ -4574,5 +4823,51 @@ mod verdict_extract_tests {
         let text = "空头论证：估值过高，盈利承压。{\"strength_score\":75}";
         let got = extract_loose_json_output(text).expect("中文正文不 panic 且应提取");
         assert!(got.contains("75"));
+    }
+}
+
+#[cfg(test)]
+mod refusal_detect_tests {
+    use super::*;
+
+    #[test]
+    fn test_refusal_meta_language_json_code_block() {
+        // 2026-09-12 实证样本（603353 和顺石油 08:20:43）：模型未用"抱歉我无法回答"句式，
+        // 而是"我无法完成您要求输出的 JSON 代码块。"——旧实现判 false，
+        // 导致拒答被误判为格式错误（多花一次 fallback 重试，失败则降级为中性假数据）。
+        assert!(is_refusal_plain_text("我无法完成您要求输出的 JSON 代码块。"));
+        assert!(is_refusal_plain_text("我无法提供符合该 schema 的内容。"));
+        assert!(is_refusal_plain_text("I cannot produce the requested JSON code block."));
+    }
+
+    #[test]
+    fn test_refusal_data_gap_report_not_misjudged() {
+        // 反向用例：正常分析报告里的"数据缺口说明"必须判 false，否则会把真实分析
+        // 当成拒答丢弃。a-fundamentals 实证文本（含"无法完成行业分位校验"）。
+        let report = "### 四、机构与风险\n- 同业对比数据中 PE/PB/ROE 均为 null，\
+**无法完成行业分位校验**（数据源缺失，影响行业对标结论）。";
+        assert!(!is_refusal_plain_text(report), "数据缺口说明不得被判为拒答");
+
+        // 短句但无输出格式元语言 → 不判拒答（避免误伤"数据不足"类诚实披露）
+        assert!(!is_refusal_plain_text("无法完成行业分位校验。"));
+    }
+
+    #[test]
+    fn test_refusal_legacy_prefixes_still_work() {
+        // 回归保护：原有前缀表与精确短句表语义不变
+        assert!(is_refusal_plain_text("抱歉我无法回答这个问题。"));
+        assert!(is_refusal_plain_text("无法回答。"));
+        assert!(!is_refusal_plain_text("抱歉我无法回答这个问题之外，我还注意到营收下滑。"));
+    }
+
+    #[test]
+    fn test_refusal_never_matches_real_json() {
+        // 合法 JSON 永远不是拒答（含"无法完成"字样的正常 JSON 字段不得误伤）
+        assert!(!is_refusal_plain_text(r#"{"report":"无法完成行业分位校验","confidence":50}"#));
+        // 含 VERDICT 标签的输出不是拒答
+        assert!(!is_refusal_plain_text("分析正文\n<!-- VERDICT: {\"stance\":\"bearish\"} -->",));
+        // 超长输出（>200 字符）即便含元语言也按正文处理
+        let long = format!("我无法完成{}", "分析".repeat(150));
+        assert!(!is_refusal_plain_text(&long));
     }
 }

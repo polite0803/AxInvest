@@ -75,6 +75,7 @@ pub mod agent_roles;
 pub mod agent_sessions;
 
 // Wave 3: Atomic Skill & Work Engine entities
+pub mod capability_domain_overrides;
 pub mod capability_policies;
 pub mod capability_relationships;
 pub mod capability_stats;
@@ -128,6 +129,8 @@ pub mod vec_collections;
 
 // fleet_members / fleets 是 v102 创建的 AxAgent 通用实体
 pub mod fleet_members;
+// fleet_messages 是 v229 新增的群聊 / DM 消息持久化实体（协调门的地基）
+pub mod fleet_messages;
 pub mod fleets;
 
 // Sync entities
@@ -162,9 +165,9 @@ pub mod opc_contact_submissions;
 pub mod opc_content_assets;
 pub mod opc_customers;
 pub mod opc_delivery;
+pub mod opc_domain_packs;
 pub mod opc_experience_records;
 pub mod opc_follow_up_tasks;
-pub mod opc_industries;
 pub mod opc_kpi_records;
 pub mod opc_landing_pages;
 pub mod opc_org_employees;
@@ -181,7 +184,6 @@ pub mod opc_work_items;
 pub mod analyst_feedback;
 pub mod business_roles;
 pub mod decision_validations;
-pub mod divergence_logs;
 pub mod earnings_events;
 pub mod financial_snapshots;
 pub mod fund_transfers;
@@ -208,7 +210,71 @@ pub mod stock_pipeline_runs;
 pub mod stock_reflections;
 pub mod strategy_performance;
 pub mod strategy_weight_history;
+pub mod task_events;
 pub mod trades;
 pub mod watchlist_items;
+
+// === 孤儿表实体化（2026-09-16）===
+//
+// 以下 4 张表原先只有迁移 DDL、无实体声明，持久化层用原生 SQL 手写
+// SQLite / PostgreSQL 双方言分支（`?N` vs `$N`）。补实体后 schema 真相源
+// 统一到实体声明，双方言分支随之消失。
+//
+// 触发背景：`PLAN-declarative-schema-sync.md` 的 P0 盘点发现 12 张表无实体，
+// 其中本组 4 张是「有真实程序访问但走原生 SQL」，故补实体而非删表。
+pub mod evolution_execution_stats;
+pub mod loop_checkpoints;
+pub mod semantic_cache;
+pub mod wiki_graph_cache;
+
+// === 主库活跃表的实体化（2026-09-16）===
+//
+// `cron_jobs` / `cron_job_history` 是主库里的活跃表（`init/state.rs` 建 store），
+// 但此前只有 `runtime-core/src/cron_job.rs` 里的手写 DDL + 5 条按 backend 分支的
+// 原生 SQL（`INSERT OR REPLACE` vs `ON CONFLICT`、`json_extract` vs `data::json->>`、
+// `?` vs `$N`）。补实体后：建表走 `Schema::create_table_from_entity`，
+// 读写走实体 API，方言分支整体消失。
+pub mod cron_job;
+pub mod cron_job_history;
+
+// `gateway_message_queue` 原先定义在 `crates/runtime/src/persistent_queue.rs` ——
+// **不在本 crate**，于是不进 `entity_modules!` 注册清单，schema 引擎看不见它。
+// 全仓 185 个 `table_name` 注解中唯此 1 处越界（详见该实体文件头）。
+pub mod gateway_message_queue;
+
+// === 审计流水表的实体化（2026-09-16）===
+//
+// `audit_log` 原先只有 `tools/src/audit.rs` 里的内联 DDL（连迁移文件都没有），
+// 且建表代码挂在 `AuditConfig.audit_db_path` 上——而该配置在生产路径恒为 `None`
+// （`UnifiedToolRegistry::new()` 用 `ToolAuditor::default()`），于是表从未被创建。
+// 补实体 + 改为进程级连接注册后，审计真实落库。
+pub mod audit_log;
+
+// === 侧车库表（index.db / disk-cache 自持 SQLite 文件）（2026-09-16）===
+//
+// 下列 8 张表原先各自只有「内联手写 DDL + rusqlite 原生 SQL」，散落在
+// `search/src/file_index.rs`、`search/src/ast_index.rs`、`disk-cache/src/lib.rs`。
+// 实体化后 schema 有了唯一真相源。
+//
+// ⚠ 它们**不在主库**：`file_index` / `ast_*` 落在 `src/indexing_triggers.rs` 的
+// `INDEX_DB_FILENAME`（`index.db`）；`l2_*` 由 disk-cache 自持一个 SQLite 文件。
+// 在此声明的是 schema，与连接指向哪个库无关。
+//
+// ⚠ **一模块一实体**是本 crate 的硬契约：`dao/build.rs` 扫描本 crate 的全部 `pub mod`
+// 生成 `entity_modules!`，并展开为 `axagent_entities::$module::Entity`。
+// 故这 8 张表必须落在 8 个独立模块里 —— 曾把 5 张 AST 表聚合进一个 `ast_index` 容器模块，
+// 直接导致 `dao` 报 `cannot find type Entity in module axagent_entities::ast_index`。
+//
+// ⚠ 原第 9 张 `l2_summaries` 已于 2026-09-16 整链删除：它与主库 `conversation_summaries`
+// 功能重复（后者字段更全且是权威真相源），且**零调用**、侧车库无 FK ⇒ 会话删除后
+// 摘要必然残留为孤儿且无人清理。理由与零损失论证见 `disk-cache/src/lib.rs` 的 crate 文档。
+pub mod ast_call_edges;
+pub mod ast_classes;
+pub mod ast_functions;
+pub mod ast_interfaces;
+pub mod ast_variables;
+pub mod file_index;
+pub mod l2_index_snapshots;
+pub mod l2_search_results;
 
 pub use sea_orm;

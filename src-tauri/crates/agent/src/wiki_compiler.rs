@@ -668,11 +668,14 @@ impl WikiCompiler {
         pages
     }
 
+    /// 页面类型白名单 —— **唯一权威在 `axagent_harness::page_type::PageType`**。
+    ///
+    /// D3（2026-09-14）：此处原本是**第二套**词表：它允许 `log`，却拒绝 `note`
+    /// （而 `note` 是 `PageType` 的成员、也是 `notes.page_type` 为 NULL 时的默认值），
+    /// 与 `PageType`、`page_type_dir` 三套并存 ⇒ 收敛为对本体的一处查询。
+    /// 新增页面类型只需改 `page_type.rs`，本处自动跟随（不再需要同步两处）。
     fn is_valid_page_type(pt: &str) -> bool {
-        matches!(pt, "concept" | "entity" | "comparison" | "source_summary")
-            || pt == "index"
-            || pt == "log"
-            || pt == "overview"
+        axagent_harness::page_type::PageType::parse_strict(pt).is_some()
     }
 
     async fn save_page(&self, wiki_id: &str, page: &CompiledPage) -> Result<(Note, bool), String> {
@@ -1548,7 +1551,18 @@ mod tests {
         assert!(WikiCompiler::is_valid_page_type("overview"));
         assert!(!WikiCompiler::is_valid_page_type("invalid"));
         assert!(!WikiCompiler::is_valid_page_type(""));
-        assert!(!WikiCompiler::is_valid_page_type("note"));
+        // D3（2026-09-14）：`note` 由「被拒」改为「接受」—— 它是 `PageType` 的成员，
+        // 也是 `notes.page_type` 为 NULL 时的默认值（`dao/src/repo/note.rs:543`），
+        // 此前拒它属两套词表冲突。
+        assert!(WikiCompiler::is_valid_page_type("note"));
+        // D3 登记的实测写入值同样必须被接受
+        assert!(WikiCompiler::is_valid_page_type("doc"));
+        assert!(WikiCompiler::is_valid_page_type("daily"));
+        assert!(WikiCompiler::is_valid_page_type("knowledge"));
+        assert!(WikiCompiler::is_valid_page_type("knowledge_document"));
+        assert!(WikiCompiler::is_valid_page_type("synced"));
+        // 反向对照：判据确实有判别力（未登记值仍必须被拒）
+        assert!(!WikiCompiler::is_valid_page_type("not_a_page_type"));
     }
 
     #[test]

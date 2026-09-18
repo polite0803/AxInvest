@@ -26,8 +26,8 @@ pub enum OpcError {
     #[error("data service not initialized")]
     DataServiceNotInitialized,
 
-    #[error("industry adapter error: {0}")]
-    IndustryAdapter(String),
+    #[error("domain_pack adapter error: {0}")]
+    DomainPackAdapter(String),
 
     #[error("internal error: {0}")]
     Internal(String),

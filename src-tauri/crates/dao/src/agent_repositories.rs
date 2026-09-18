@@ -217,4 +217,99 @@ pub fn register_repositories(db: &DatabaseConnection) {
     axagent_harness::repositories::set_provider_repository(Arc::new(
         crate::provider_repository::DaoProviderRepository::new(db.clone()),
     ));
+
+    // ── 以下 9 个仓库是 2026-09-12 补的（P1-C 前置修复）──────────────────
+    //
+    // 它们**此前从未被注册**，而各自的 `xxx_repository()` getter 内部是
+    // `.expect("XxxRepository not initialized.")` —— 于是所有消费点不是「返回空」
+    // 而是**直接 panic**。被影响的活跃链路：
+    //
+    // | 仓库 | 消费点 | 影响 |
+    // |---|---|---|
+    // | `background_task` | `tools/task_system.rs` 的 6 个工具 | TaskCreate/Get/List/Stop/Update/Output 全部不可用 |
+    // | `tool_execution` | `tools/recorder.rs`（经 `ToolRegistry.recorder`） | 每次 MCP 工具调用成功后的审计记录 panic |
+    // | `conversation` | `rt-messaging/.../platform_bridge.rs` | 平台消息桥无法建会话 |
+    // | `platform_config` | `rt-messaging/.../platform_manager.rs` | 平台路由表读取 panic |
+    // | `generated_tool` | `runtime/tool_generator/persistence.rs` | 动态生成工具的持久化 panic |
+    // | `knowledge_{document,entity,flow,interface}` | `tools/knowledge.rs` 的 4 个工具 | 知识图谱工具全部不可用 |
+    //
+    // 形态说明：这是「**声明了但无入边供给**」的注册表版本 —— 契约（trait）、
+    // 实现（`DaoXxxRepository`）、消费点（getter 调用）三样齐全，唯独少了
+    // 「把实现塞进注册表」这一句。`cargo check` 全绿、单测全绿、只有真跑到那行才炸。
+    axagent_harness::repositories::set_background_task_repository(Arc::new(
+        crate::background_task_repository::DaoBackgroundTaskRepository::new(db.clone()),
+    ));
+    axagent_harness::repositories::set_conversation_repository(Arc::new(
+        crate::conversation_repository::DaoConversationRepository::new(db.clone()),
+    ));
+    axagent_harness::repositories::set_generated_tool_repository(Arc::new(
+        crate::generated_tool_repository::DaoGeneratedToolRepository::new(db.clone()),
+    ));
+    axagent_harness::repositories::set_platform_config_repository(Arc::new(
+        crate::platform_config_repository::DaoPlatformConfigRepository::new(db.clone()),
+    ));
+    axagent_harness::repositories::set_tool_execution_repository(Arc::new(
+        crate::tool_execution_repository::DaoToolExecutionRepository::new(Arc::new(db.clone())),
+    ));
+    // 知识图谱四件套（同一文件内四个结构体，trait 各自独立）
+    axagent_harness::repositories::set_knowledge_entity_repository(Arc::new(
+        crate::knowledge_crud_repository::DaoKnowledgeEntityRepository::new(db.clone()),
+    ));
+    axagent_harness::repositories::set_knowledge_flow_repository(Arc::new(
+        crate::knowledge_crud_repository::DaoKnowledgeFlowRepository::new(db.clone()),
+    ));
+    axagent_harness::repositories::set_knowledge_interface_repository(Arc::new(
+        crate::knowledge_crud_repository::DaoKnowledgeInterfaceRepository::new(db.clone()),
+    ));
+    axagent_harness::repositories::set_knowledge_document_repository(Arc::new(
+        crate::knowledge_crud_repository::DaoKnowledgeDocumentRepository::new(db.clone()),
+    ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::Database;
+
+    /// **回归网**：注册表里的每个 getter 在被唯一消费之前，都必须已注册。
+    ///
+    /// 这条测试的存在理由是本文件上方注释记录的那次事故：契约、实现、消费点
+    /// 三样齐全，唯独漏了注册这一句 —— 而 `cargo check` 与其余单测全绿，
+    /// 唯一表现是运行期 `.expect` panic。
+    ///
+    /// 因此这里**逐个调用** getter（getter 内部就是 `.expect`，未注册即 panic）
+    /// 而不是断言注册表字段非空 —— 后者需要暴露内部结构，且测的是实现细节而非行为。
+    /// 断言「调用不 panic」才是消费点真正依赖的契约。
+    #[tokio::test]
+    async fn all_registered_repositories_are_retrievable() {
+        let db = Database::connect("sqlite::memory:").await.expect("in-memory db");
+        register_repositories(&db);
+
+        // 有活跃消费点的仓库（缺一即在运行期 panic）
+        let _ = axagent_harness::repositories::agent_profile_repository();
+        let _ = axagent_harness::repositories::agency_expert_repository();
+        let _ = axagent_harness::repositories::agent_role_repository();
+        let _ = axagent_harness::repositories::workflow_execution_repository();
+        let _ = axagent_harness::repositories::loop_checkpoint_repository();
+        let _ = axagent_harness::repositories::workflow_template_repository();
+        let _ = axagent_harness::repositories::note_repository();
+        let _ = axagent_harness::repositories::wiki_repository();
+        let _ = axagent_harness::repositories::wiki_page_repository();
+        let _ = axagent_harness::repositories::wiki_source_repository();
+        let _ = axagent_harness::repositories::wiki_operation_repository();
+        let _ = axagent_harness::repositories::note_backlink_repository();
+        let _ = axagent_harness::repositories::settings_repository();
+        let _ = axagent_harness::repositories::provider_repository();
+
+        // 2026-09-12 补注册的 9 个
+        let _ = axagent_harness::repositories::background_task_repository();
+        let _ = axagent_harness::repositories::conversation_repository();
+        let _ = axagent_harness::repositories::generated_tool_repository();
+        let _ = axagent_harness::repositories::platform_config_repository();
+        let _ = axagent_harness::repositories::tool_execution_repository();
+        let _ = axagent_harness::repositories::knowledge_entity_repository();
+        let _ = axagent_harness::repositories::knowledge_flow_repository();
+        let _ = axagent_harness::repositories::knowledge_interface_repository();
+        let _ = axagent_harness::repositories::knowledge_document_repository();
+    }
 }

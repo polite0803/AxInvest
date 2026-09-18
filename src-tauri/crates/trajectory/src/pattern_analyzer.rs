@@ -24,11 +24,6 @@ pub(crate) struct CodingPatternMatch {
     pub occurrences: u32,
 }
 
-// [2026-09-03] `ModuleStructure` / `ErrorHandling` 两种代码模式尚未实现提取逻辑：
-// `extract_coding_patterns` 目前只产出 Naming / Indentation / Comment 三类。
-// 属「功能未实现」而非死代码——模块对外声明支持 5 类（见文件头与 CodingPatternSummary 文档），
-// 补提取逻辑时直接消费这两个 variant 即可，勿删。
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum PatternType {
     Naming,
@@ -112,6 +107,9 @@ impl PatternAnalyzer {
         let mut naming_counts: HashMap<String, u32> = HashMap::new();
         let mut indentation_counts: HashMap<String, u32> = HashMap::new();
         let mut comment_counts: HashMap<String, u32> = HashMap::new();
+        // T8: 模块结构（编辑文件扩展名多样性）与错误处理（recovered 占比）统计
+        let mut module_extensions: HashMap<String, u32> = HashMap::new();
+        let mut error_stats: HashMap<String, (u32, u32)> = HashMap::new();
 
         for event in events {
             match &event.event_type {
@@ -125,7 +123,7 @@ impl PatternAnalyzer {
                         *indentation_counts.entry("compact".to_string()).or_insert(0) += 1;
                     }
                 },
-                BehaviorEventType::FileEdited { edit_type, lines_changed, .. } => {
+                BehaviorEventType::FileEdited { file_path, edit_type, lines_changed, .. } => {
                     if *lines_changed > 50 {
                         *comment_counts.entry("extensive".to_string()).or_insert(0) += 1;
                     } else {
@@ -134,6 +132,22 @@ impl PatternAnalyzer {
 
                     if *edit_type == "refactor" {
                         *naming_counts.entry("refactoring".to_string()).or_insert(0) += 1;
+                    }
+
+                    // 模块结构：收集被编辑文件的扩展名（无扩展名记 no_ext）
+                    let ext = file_path
+                        .rsplit_once('.')
+                        .map(|(_, ext)| ext)
+                        .filter(|ext| !ext.is_empty())
+                        .unwrap_or("no_ext");
+                    *module_extensions.entry(ext.to_string()).or_insert(0) += 1;
+                },
+                BehaviorEventType::ErrorOccurred { error_type, recovered, .. } => {
+                    // 错误处理：按错误类型统计总数与 recovered 数
+                    let stats = error_stats.entry(error_type.clone()).or_insert((0, 0));
+                    stats.0 += 1;
+                    if *recovered {
+                        stats.1 += 1;
                     }
                 },
                 _ => {},
@@ -169,6 +183,35 @@ impl PatternAnalyzer {
                     value: comment,
                     confidence: (count as f32 / 5.0).min(1.0),
                     occurrences: count,
+                });
+            }
+        }
+
+        // 模块结构：被编辑文件覆盖 ≥3 种扩展名 → 多模块工程结构
+        let module_ext_count = module_extensions.len();
+        if module_ext_count >= 3 {
+            patterns.push(CodingPatternMatch {
+                pattern_type: PatternType::ModuleStructure,
+                value: "multi-module".to_string(),
+                confidence: (module_ext_count as f32 / 5.0).min(1.0),
+                occurrences: module_ext_count as u32,
+            });
+        }
+
+        // 错误处理：错误类型出现 ≥3 次时，按 recovered 占比推断 handled / unhandled
+        for (error_type, (total, recovered)) in error_stats {
+            if total >= 3 {
+                let handled_ratio = recovered as f32 / total as f32;
+                let (value, confidence) = if handled_ratio >= 0.5 {
+                    ("handled", handled_ratio)
+                } else {
+                    ("unhandled", 1.0 - handled_ratio)
+                };
+                patterns.push(CodingPatternMatch {
+                    pattern_type: PatternType::ErrorHandling,
+                    value: format!("{}:{}", error_type, value),
+                    confidence: confidence.min(1.0),
+                    occurrences: total,
                 });
             }
         }

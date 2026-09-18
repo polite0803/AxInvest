@@ -21,9 +21,11 @@ pub mod scheduler;
 pub mod sync_engine;
 pub mod transport;
 pub mod utils;
-pub mod version_vector;
 pub mod webdav_storage;
 
+// 版本向量由 axagent-crdt 统一提供 —— 同一能力只保留唯一实现，
+// 本条 re-export 保持 `axagent_device::VersionVector` 对外路径不变。
+pub use axagent_crdt::VersionVector;
 pub use conflict_resolver::ConflictResolver;
 pub use crdt::{CrdtEngine, CrdtOperation, OperationType};
 pub use encryption::{
@@ -45,5 +47,4 @@ pub use s3_storage::S3Storage;
 pub use scheduler::{SchedulerConfig, SchedulerStatus, SyncPriority, SyncScheduler, SyncTask};
 pub use sync_engine::SyncEngineImpl;
 pub use transport::{SyncTransport, TransportConfig};
-pub use version_vector::VersionVector;
 pub use webdav_storage::WebdavStorage;

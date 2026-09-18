@@ -222,6 +222,13 @@ impl VectorStore {
 
     /// CREATE TABLE for the metadata table. On PostgreSQL an extra generated
     /// `tsvector` column backs keyword search.
+    ///
+    /// ⚠️ PG 分支依赖迁移 v227 建立的 `ax_cjk_ngram()` 函数。
+    /// 不能退回 `to_tsvector('simple', content)`：PG 内置 parser 把连续 CJK
+    /// 视作**一个词元**，实测 `'向量索引实现方案'` 整句塌缩成单 token，搜「向量」
+    /// 恒不命中（索引照建、查询照跑、返回 0 行，全程不报错）。函数缺失时
+    /// CREATE TABLE 会直接失败并报 `function ax_cjk_ngram(text) does not exist` ——
+    /// 这是刻意的 fail-closed：宁可建表失败，也不要建出一张中文永远查不到的索引。
     fn meta_ddl(&self, name: &str) -> String {
         if self.is_pg() {
             format!(
@@ -231,7 +238,8 @@ impl VectorStore {
                  document_id TEXT NOT NULL,\n  \
                  chunk_index INTEGER NOT NULL,\n  \
                  content TEXT NOT NULL,\n  \
-                 content_tsv tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED\n)"
+                 content_tsv tsvector GENERATED ALWAYS AS \
+                 (to_tsvector('simple', ax_cjk_ngram(content))) STORED\n)"
             )
         } else {
             format!(

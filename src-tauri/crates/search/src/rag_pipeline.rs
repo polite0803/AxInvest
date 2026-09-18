@@ -19,6 +19,9 @@ pub struct RAGPipeline {
     self_rag_gate: SelfRagGate,
     /// 可选的实体图谱提供者，用于 Graph RAG 增强检索
     entity_graph_provider: Option<Arc<dyn axagent_harness::EntityGraphProvider>>,
+    /// 混合检索配置（权重 / 融合算法 / 是否启用），来自用户设置的
+    /// `ragPipelineConfig.hybrid`。管线在阶段 1 检索时透传给底层（2026-09-15 接线）。
+    hybrid: axagent_harness::rag_config::HybridConfig,
 }
 
 impl RAGPipeline {
@@ -40,6 +43,7 @@ impl RAGPipeline {
             rerank_pipeline: reranker::create_rerank_pipeline(&config.rerank, engine, api_key),
             self_rag_gate: SelfRagGate::new(config.self_rag.clone()),
             entity_graph_provider,
+            hybrid: config.hybrid.clone(),
         }
     }
 
@@ -71,6 +75,7 @@ impl RAGPipeline {
             rerank_config,
             None,
             None,
+            None,
         )
         .await
     }
@@ -80,6 +85,14 @@ impl RAGPipeline {
     /// `precomputed_embedding`：调用方已为 `query` 计算好的 query embedding
     /// （须与该源 resolve 出的 embedding provider / dims 一致），
     /// 传 `Some` 时跳过检索阶段的重复 embed 调用。
+    ///
+    /// `min_similarity`：**相关度下限 ∈ [0,1]**，透传到阶段 1 的检索
+    /// （`HybridSearchOptions.min_score`）。语义是「**先按阈值筛掉，再截断 top_k**」。
+    /// ⚠ 2026-09-15 修，**同日自查更正了原先写的因果**：此前阈值过滤发生在阶段 1
+    /// **返回之后**，但这**不会**丢合格项 —— 候选池是 `top_k * 3`，且 `hybrid_search`
+    /// 的筛选键与排序键**都是** `combined_score` ⇒ 合格集必为前缀 ⇒ 两种次序**等价**
+    /// （原先「配 5 条 + 阈值 0.6 可能返回 0 条，而候选集另有二十条过阈值」的说法不成立）。
+    /// 真正的收益是**结构**：阈值语义收敛到检索层一处，命令层不再各写一份。见 #205。
     #[allow(clippy::too_many_arguments)]
     pub async fn execute_with_filter<S: rag::RAGSource + ?Sized>(
         &self,
@@ -95,8 +108,10 @@ impl RAGPipeline {
         rerank_config: &reranker::RerankConfig,
         doc_ids: Option<&[String]>,
         precomputed_embedding: Option<Vec<f32>>,
+        min_similarity: Option<f32>,
     ) -> Result<PipelineOutput> {
         // 阶段 1：检索（使用 rag::search_with_filter 透传 doc_ids）
+        // 混合检索权重来自用户配置（`self.hybrid`），透传到底层以免写死。
         let raw_results = rag::search_with_filter(
             source,
             db,
@@ -109,6 +124,8 @@ impl RAGPipeline {
             embed_fn,
             doc_ids,
             precomputed_embedding,
+            Some(&self.hybrid),
+            min_similarity,
         )
         .await?;
 
@@ -122,6 +139,11 @@ impl RAGPipeline {
         }
 
         // 转换为 HybridSearchResult
+        //
+        // ⚠ 2026-09-15 修：此处原为 `1.0 - (r.score / 20.0).min(1.0)` —— `20.0`
+        // 是**手写的第三份** L2 饱和点副本（另两处见 `hybrid_search` 的
+        // `DEFAULT_MAX_L2_DISTANCE` 说明）。且此时 `r.score` 走的正是该标尺，
+        // 故直接复用同一个归一函数，避免两处口径漂移。
         let hybrid_results: Vec<HybridSearchResult> = raw_results
             .iter()
             .map(|r| HybridSearchResult {
@@ -129,10 +151,10 @@ impl RAGPipeline {
                 document_id: r.document_id.clone(),
                 chunk_index: r.chunk_index,
                 content: r.content.clone(),
-                vector_score: Some(1.0 - (r.score / 20.0).min(1.0)),
+                vector_score: Some(crate::hybrid_search::l2_distance_to_similarity(r.score)),
                 bm25_score: None,
                 sparse_score: None,
-                combined_score: 1.0 - (r.score / 20.0).min(1.0),
+                combined_score: crate::hybrid_search::l2_distance_to_similarity(r.score),
             })
             .collect();
 

@@ -1,0 +1,6 @@
+{
+  "note": "行号引用「客观错」的棘轮基线：**只减不增**。修复后跑 --update-baseline 下调，否则基线虚高 = 棘轮失效。",
+  "generatedBy": "scripts/check-single-source-facts.mjs",
+  "count": 0,
+  "known": []
+}

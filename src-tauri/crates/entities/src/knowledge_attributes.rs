@@ -14,6 +14,7 @@ pub struct Model {
     pub attribute_type: String,
     pub data_type: String,
     pub description: Option<String>,
+    #[sea_orm(default_value = false)]
     pub is_required: bool,
     pub default_value: Option<String>,
     pub constraints: Option<Json>,

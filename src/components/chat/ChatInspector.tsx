@@ -58,9 +58,8 @@ export function ChatInspector({
   const branches = workspaceSnapshot?.branches ?? [];
   const activeBranchId = workspaceSnapshot?.activeBranchId ?? null;
 
-  const handleSelectBranch = useCallback((branchId: string | null) => {
+  const handleSelectBranch = useCallback((_branchId: string | null) => {
     // TODO: 实现分支切换逻辑，需要调用 switch_branch 或重新加载会话
-    console.log("Switch to branch:", branchId);
   }, []);
 
   const contextSources = useMemo(() => {

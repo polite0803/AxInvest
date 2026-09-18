@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// ! 能力域聚合入口页（DomainHub）
+// ! 能力域聚合入口页（DomainHubPage）
 //
 // 每个标准域（见 domainMeta.ts）的「域路径」路由渲染本页面，集中展示该域下
 // 归入的内置导航项。域路径由 CAPABILITY_DOMAIN_META 定义（如 /finance、/automation）。
 
-import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
+import { CAPABILITY_DOMAIN_META, domainLabelKey } from "@/lib/domainMeta";
 import { navItemsByDomain } from "@/lib/navRegistry";
 import { Button, Card, Col, Empty, Result, Row, Typography } from "antd";
 import { useTranslation } from "react-i18next";
@@ -57,7 +57,7 @@ export function DomainHubPage() {
             }}
           />
           <Title level={3} style={{ margin: 0 }}>
-            {t(domain.labelKey)}
+            {t(domainLabelKey(domain.id))}
           </Title>
         </div>
         <Paragraph type="secondary" style={{ marginTop: 8 }}>

@@ -1,14 +1,141 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use sea_orm::*;
-use sea_query::OnConflict;
+use sea_query::{Expr, OnConflict};
 
 use axagent_entities::workflow_template;
 use axagent_entities::workflow_template_version;
-use axagent_harness::core_error::Result;
+use axagent_harness::core_error::{AxAgentError, Result};
+use axagent_harness::workflow_port_axioms::{enforce_port_axioms, port_axiom_errors};
 use axagent_harness::workflow_types::{
     ErrorConfig, JsonSchema, RhaiToolDef, TriggerConfig, Variable, WorkflowEdge, WorkflowNode,
 };
+
+// ── C1 端口公理写路径门禁（P0 下沉，2026-09-14）──
+//
+// 这一层是**多数写入路径唯一的公共下游**：命令层 `create_workflow_template` /
+// `update_workflow_template`、技能转工作流、技能分解、AI 编译（`workflow_ai/compile.rs`）、
+// 能力缺口补齐、需求实现、自反思重写（`workflow_reflection.rs`）都从这里落库。
+// 逐点接必漏 —— 2026-09-14 的实测就是「111 个模板里 1 个非法，而它是从种子进来的、
+// 没有任何门禁拦过」。
+//
+// 分级判据只有一份（`harness::workflow_port_axioms::PortAxiomViolation::severity`），
+// 本层只做「调用」，不判级、不列白名单。
+
+/// 取 `ActiveModel` 一列的字符串值（`NotSet` ⇒ `None`；`Unchanged` 也算已设，因为是落库内容）。
+fn active_value_str(v: &ActiveValue<String>) -> Option<&str> {
+    match v {
+        ActiveValue::Set(s) | ActiveValue::Unchanged(s) => Some(s.as_str()),
+        ActiveValue::NotSet => None,
+    }
+}
+
+/// 对 `nodes` / `edges` 的 **JSON 文本**跑端口公理门禁。
+///
+/// - 两列都为空/空白 ⇒ 跳过：这是「该列尚未初始化」的哨兵语义
+///   （`seed_preset_templates` 就用 `t.nodes == "[]" || t.nodes.is_empty()` 判断重建）；
+/// - 非空但解析失败 ⇒ **报错**：落库非法 JSON 会让引擎侧 `template_model_to_data`
+///   同样失败，属于不该放行的数据。
+fn enforce_port_axioms_json(id: &str, nodes_json: &str, edges_json: &str) -> Result<()> {
+    if nodes_json.trim().is_empty() && edges_json.trim().is_empty() {
+        return Ok(());
+    }
+    let nodes: Vec<WorkflowNode> = if nodes_json.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_str(nodes_json).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "workflow template '{id}': cannot decode `nodes` into workflow nodes: {e}"
+            ))
+        })?
+    };
+    let edges: Vec<WorkflowEdge> = if edges_json.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_str(edges_json).map_err(|e| {
+            AxAgentError::Validation(format!(
+                "workflow template '{id}': cannot decode `edges` into workflow edges: {e}"
+            ))
+        })?
+    };
+
+    enforce_port_axioms(&nodes, &edges)
+        .map_err(|msg| AxAgentError::Validation(format!("workflow template '{id}': {msg}")))
+}
+
+/// `ActiveModel` 形态的门禁（`insert` / `upsert` 两条路径的入参就是它）。
+fn enforce_port_axioms_active_model(template: &workflow_template::ActiveModel) -> Result<()> {
+    let id = active_value_str(&template.id).unwrap_or("<unnamed>");
+    enforce_port_axioms_json(
+        id,
+        active_value_str(&template.nodes).unwrap_or(""),
+        active_value_str(&template.edges).unwrap_or(""),
+    )
+}
+
+/// 存量行是否**端口公理干净**（无 Error 级违规）。
+///
+/// 给**种子版本门**用：版本号相同 ⇒ 常规逻辑跳过重建，但存量行可能是**非法形态**
+/// （实测 `prod-startup-mvp` 的 `s-gonogo` 死链就是这么留在库里的 —— 种子源码已修，
+/// 版本没变 ⇒ 永不重种子，而写路径门禁只管新写入、管不到既有行）。
+/// 让「结构非法」单独触发一次重建，存量即可自愈，且**不必**为了修一行而升全局版本号
+/// （升版会把所有模板一起重种子）。
+///
+/// 判据复用 [`port_axiom_errors`]，不写第二份；解析失败判为「不干净」——
+/// 无法判定结构时选择重建，而不是把损坏形态留在库里。
+pub fn is_port_axiom_clean(row: &workflow_template::Model) -> bool {
+    let nodes: Vec<WorkflowNode> = match serde_json::from_str(&row.nodes) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let edges: Vec<WorkflowEdge> = match serde_json::from_str(&row.edges) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    port_axiom_errors(&nodes, &edges).is_empty()
+}
+
+/// **存量自愈**：把端口公理非法的既有模板的 `version` 归零，使各种子函数的
+/// 「`existing.version >= TEMPLATE_VERSION` ⇒ 跳过」版本门自然放行、重新写入。
+///
+/// 返回被归零的模板 id（供调用方日志/断言）。
+///
+/// # 为什么是归零而不是逐个改版本门
+///
+/// 版本门实测有 14 处（OPC 13 个 seed 文件 + opc_setup + stock 侧 6 个），
+/// 逐处加「结构非法也重建」分支等于把同一条判据抄 14 遍 —— 而这类抄写正是
+/// `s-gonogo` 死链能活到今天的原因。归零把决策收在**两个种子编排入口**
+/// （`ensure_opc_workflows_seeded` / `ensure_stock_analysis_experts_seeded`），
+/// 判据仍只有 `port_axiom_errors` 一份。
+///
+/// # 副作用（如实登记）
+///
+/// 被归零的行若**不在**任何种子函数的覆盖范围内，其 `version` 会停在 0
+/// （内容不受影响，`get_template_versions` 会多出一个 0）。实测存量非法模板
+/// 只有 1 个（`prod-startup-mvp`），且在覆盖范围内。
+///
+/// **幂等性靠 `version != 0` 这个前置条件**：归零后该行仍是非法形态（要等种子
+/// 重建才变干净），若不加这一条，每次启动都会把它再归零一次并重复打日志。
+/// 加上后：第一次 v4→0，之后 `version == 0` 直接跳过；种子重建后形态合法，
+/// `is_port_axiom_clean` 为真，同样跳过。若重建后**仍**非法（种子自身的 bug），
+/// version 非 0 且非法 ⇒ 会再次归零 —— 表现为「每次启动重建 + 软门禁 warn」，
+/// 这正是我们希望它暴露的样子。
+pub async fn reset_port_axiom_illegal_versions(db: &DatabaseConnection) -> Result<Vec<String>> {
+    let rows = workflow_template::Entity::find().all(db).await?;
+    let mut reset = Vec::new();
+    for row in &rows {
+        if row.version == 0 || is_port_axiom_clean(row) {
+            continue;
+        }
+        workflow_template::Entity::update_many()
+            .col_expr(workflow_template::Column::Version, Expr::value(0))
+            .filter(workflow_template::Column::Id.eq(&row.id))
+            .exec(db)
+            .await?;
+        reset.push(row.id.clone());
+    }
+    Ok(reset)
+}
 
 pub async fn list_workflow_templates(
     db: &DatabaseConnection,
@@ -37,6 +164,8 @@ pub async fn insert_workflow_template<C: ConnectionTrait>(
     db: &C,
     template: workflow_template::ActiveModel,
 ) -> Result<()> {
+    // P0（2026-09-14）：端口公理门禁 —— Error 级（结构性死链）不得落库。
+    enforce_port_axioms_active_model(&template)?;
     template.clone().insert(db).await?;
     Ok(())
 }
@@ -45,6 +174,9 @@ pub async fn upsert_workflow_template(
     db: &DatabaseConnection,
     template: workflow_template::ActiveModel,
 ) -> Result<()> {
+    // P0（2026-09-14）：同一门禁（见文件头 C1 说明）。`upsert` 是认知编排器
+    // (`cognitive_router_init.rs`) 与自反思重写 (`workflow_reflection.rs`) 的写入口。
+    enforce_port_axioms_active_model(&template)?;
     workflow_template::Entity::insert(template)
         .on_conflict(
             OnConflict::column(workflow_template::Column::Id)
@@ -91,6 +223,12 @@ pub async fn update_workflow_template(
     error_config: Option<ErrorConfig>,
     tool_defs: Option<Vec<RhaiToolDef>>,
 ) -> Result<bool> {
+    // P0（2026-09-14）：端口公理门禁 —— 这里入参已是结构化 `Vec<WorkflowNode>` /
+    // `Vec<WorkflowEdge>`，无需过 JSON。挡在 `begin()` 之前：不允许留下「快照已写、
+    // 主表未更新」的半提交（该函数第 99 行起的注释正是在讲这类残留）。
+    enforce_port_axioms(&nodes, &edges)
+        .map_err(|msg| AxAgentError::Validation(format!("workflow template '{id}': {msg}")))?;
+
     let template = workflow_template::Entity::find_by_id(id).one(db).await?;
 
     if let Some(t) = template {

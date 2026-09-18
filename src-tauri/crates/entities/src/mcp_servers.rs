@@ -11,13 +11,18 @@ pub struct Model {
     pub name: String,
     pub alias: Option<String>,
     pub description: Option<String>,
+    #[sea_orm(default_value = "stdio")]
     pub transport: String,
     pub command: Option<String>,
     pub args_json: Option<String>,
     pub endpoint: Option<String>,
     pub env_json: Option<String>,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = 1)]
     pub enabled: i32,
+    #[sea_orm(default_value = "ask")]
     pub permission_policy: String,
+    #[sea_orm(default_value = "custom")]
     pub source: String,
     pub discover_timeout_secs: Option<i32>,
     pub execute_timeout_secs: Option<i32>,

@@ -11,9 +11,13 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub amount: f64,
+    #[sea_orm(default_value = "CNY")]
     pub currency: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "")]
     pub category: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub description: String,
     pub recorded_at: i64,
     pub created_at: i64,

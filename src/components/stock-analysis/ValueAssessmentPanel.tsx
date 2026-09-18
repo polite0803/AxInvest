@@ -27,8 +27,10 @@ interface ValueReportData {
   moat_rating?: string;
   moat_reasoning?: string;
   financial_health?: string;
-  intrinsic_value_range?: string;
-  margin_of_safety?: string;
+  // V74 后 verdict 字段可能是 number/null（margin_of_safety=-100、intrinsic_value_range=null 实证），
+  // ReportMarkdown/markstream 只接受 string，传 number 会抛 TypeError 炸掉整页（页面错误兜底）
+  intrinsic_value_range?: string | number | null;
+  margin_of_safety?: string | number | null;
   buffett_verdict?: string;
   ideal_buy_price?: string;
   risk_flags?: string[];
@@ -82,7 +84,7 @@ function extractReadableText(report: string, t: (key: string) => string): string
     if (parsed.intrinsic_value_range) {
       parts.push(`## ${t("stockAnalysis.valueAssessment.valuationConclusion")}\n\n${parsed.intrinsic_value_range}`);
     }
-    if (parsed.margin_of_safety) { parts.push(parsed.margin_of_safety); }
+    if (parsed.margin_of_safety != null) { parts.push(asMarkdownText(parsed.margin_of_safety)); }
     // V72: 现值硬数据行
     const metricParts: string[] = [];
     if (parsed.current_price != null) { metricParts.push(`现价 ${parsed.current_price}`); }
@@ -339,6 +341,18 @@ function flattenVerdictReport(data: ValueReportData): ValueReportData {
   return data;
 }
 
+/**
+ * 把 LLM verdict 中的任意字段值安全转为 markstream 可渲染的 string。
+ * V74 后 margin_of_safety / intrinsic_value_range 等字段是 number 或 null，
+ * 直接传给 ReportMarkdown（要求 string）会抛 TypeError 使整页落入「页面错误」兜底。
+ */
+function asMarkdownText(v: unknown): string {
+  if (v == null) { return ""; }
+  if (typeof v === "string") { return v; }
+  if (typeof v === "number" || typeof v === "boolean") { return String(v); }
+  return JSON.stringify(v, null, 2);
+}
+
 /** 结构化估值报告渲染 —— 风格与 AnalystReportCard 保持一致 */
 function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: boolean }) {
   const { t } = useTranslation();
@@ -354,7 +368,7 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
             )}
           </div>
           <div className={`prose max-w-none text-sm ${isDark ? "prose-invert" : ""}`}>
-            <ReportMarkdown content={data.buffett_verdict} isDark={isDark} />
+            <ReportMarkdown content={asMarkdownText(data.buffett_verdict)} isDark={isDark} />
           </div>
         </div>
       )}
@@ -366,7 +380,7 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
             {t("stockAnalysis.valueAssessment.businessModel")}
           </div>
           <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
-            <ReportMarkdown content={data.business_model} isDark={isDark} />
+            <ReportMarkdown content={asMarkdownText(data.business_model)} isDark={isDark} />
           </div>
         </div>
       )}
@@ -382,7 +396,7 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
           </div>
           {data.moat_reasoning && (
             <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
-              <ReportMarkdown content={data.moat_reasoning} isDark={isDark} />
+              <ReportMarkdown content={asMarkdownText(data.moat_reasoning)} isDark={isDark} />
             </div>
           )}
         </div>
@@ -395,7 +409,7 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
             {t("stockAnalysis.valueAssessment.financialHealth")}
           </div>
           <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
-            <ReportMarkdown content={data.financial_health} isDark={isDark} />
+            <ReportMarkdown content={asMarkdownText(data.financial_health)} isDark={isDark} />
           </div>
         </div>
       )}
@@ -409,12 +423,12 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
           <div className="space-y-1">
             {data.intrinsic_value_range && (
               <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
-                <ReportMarkdown content={data.intrinsic_value_range} isDark={isDark} />
+                <ReportMarkdown content={asMarkdownText(data.intrinsic_value_range)} isDark={isDark} />
               </div>
             )}
             {data.margin_of_safety && (
               <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
-                <ReportMarkdown content={data.margin_of_safety} isDark={isDark} />
+                <ReportMarkdown content={asMarkdownText(data.margin_of_safety)} isDark={isDark} />
               </div>
             )}
           </div>
@@ -522,6 +536,10 @@ export function ValueAssessmentPanel() {
   const ruleCheckResults = useStockAnalysisStore((s) => s.ruleCheckResults);
   const dataQualitySummary = useStockAnalysisStore((s) => s.dataQualitySummary);
   const rawData = useStockAnalysisStore((s) => s.rawData);
+  // 估值带需要股票代码：权威来源是 store 顶层 stockCode（loadAnalysis / fetchQuote 都会写）。
+  // rawData 的 key 是节点 id（raw-data / combined），从来取不到 stockCode——旧版据此取值，
+  // 导致 compute_valuation_band 分支实际从未执行（估值带恒不显示）。rawData 仅作兜底。
+  const storeStockCode = useStockAnalysisStore((s) => s.stockCode);
   const [expanded, setExpanded] = useState(false);
 
   // R3-C: 估值带
@@ -529,7 +547,8 @@ export function ValueAssessmentPanel() {
   const [valuationBandLoading, setValuationBandLoading] = useState(false);
 
   useEffect(() => {
-    const code = (rawData?.stockCode as string | undefined) ?? (rawData?.code as string | undefined) ?? "";
+    const code = storeStockCode
+      || ((rawData?.stockCode as string | undefined) ?? (rawData?.code as string | undefined) ?? "");
     let cancelled = false;
     Promise.resolve().then(() => {
       if (cancelled) { return; }
@@ -553,7 +572,7 @@ export function ValueAssessmentPanel() {
     return () => {
       cancelled = true;
     };
-  }, [rawData]);
+  }, [storeStockCode, rawData]);
 
   // 类型保护：确保 valueReport 始终是字符串
   const rawValue = valueAssessments["value-investor"];

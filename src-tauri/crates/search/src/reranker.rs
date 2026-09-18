@@ -30,6 +30,28 @@ pub struct RerankedResult {
 
 // ── Pluggable backend trait ──────────────────────────────────
 
+/// 可插拔的重排后端。
+///
+/// # 分数标尺（2026-09-15 逐一裁定）
+///
+/// `rerank` 返回的第二个元素是**相关度分数**，**越大越相关**。四个后端的标尺
+/// 逐一定量如下 —— 这是 `RerankPipeline` 敢把阶段分数直接写回 `rerank_score`、
+/// 敢在「某阶段只返回子集」时与 `combined_score` 混排的**前提**：
+///
+/// | 后端 | 分数来源 | 值域 | 方向 |
+/// |---|---|---|---|
+/// | `RuleReranker` | `orig*0.3 + 精确命中*0.25 + 覆盖度*0.2 + 首位置*0.15 + 长度惩罚*0.1`，五项各 ∈ [0,1] | [0,1] | 大 = 相关 |
+/// | `CrossEncoderReranker` | `InferenceEngine::rerank` ⇒ 当前实现为 sigmoid 归一的启发式打分（见该结构体文档） | (0,1) | 大 = 相关 |
+/// | `CohereReranker` | `results[].relevance_score` | [0,1]（厂商侧已归一） | 大 = 相关 |
+/// | `JinaReranker` | `results[].relevance_score` | [0,1] | 大 = 相关 |
+/// | `VoyageReranker` | `data[].relevance_score` | [0,1] | 大 = 相关 |
+///
+/// **结论：四者同标尺**（`hybrid_search::combined_score` 亦然）⇒ 阶段分数可与
+/// 融合分数直接比较 / 混排，无需再插一层归一。
+///
+/// ⚠ 若将来接入返回 **logits（无界）** 的后端，**必须先在适配器内归一**：
+/// 否则 `RerankPipeline` 里「阶段只返回子集 ⇒ 未覆盖的 id 退回 `combined_score`」
+/// 这条兜底会把无界分数与 [0,1] 分数放进同一次 `sort_by`。
 #[async_trait]
 pub trait RerankBackend: Send + Sync {
     /// 对候选集重新排序，返回 (chunk_id, score) 列表
@@ -440,6 +462,21 @@ impl RerankPipeline {
         let mut current: Vec<HybridSearchResult> =
             results.into_iter().take(config.candidate_k).collect();
 
+        // 阶段分数累积表（键 = chunk id，值 = **该阶段给出的分数**）。
+        //
+        // ⚠ 2026-09-15 修（分数被丢弃）：此前 `score_map` 只活在循环体内部，
+        // 排序用完即丢，于是最后构造 `RerankedResult` 时只能拿 `r.combined_score`
+        // 去填 `rerank_score` ⇒ 出现「**按阶段分数排了序，却把融合分数当重排分数
+        // 报出去**」：调用方拿到 `rerank_reason = "Ranked #1"` 却读到一个与排名
+        // 无关的分数（在 RRF 路径下它甚至只反映融合排名，与重排结果无关）。
+        //
+        // 累积到函数级作用域后，`rerank_score` 才配得上它的名字。
+        // 多阶段时后一阶段**覆盖**前一阶段；某阶段返回子集时，未覆盖的 id 保留
+        // 上一阶段的分数 —— 这是安全的：各后端的分数标尺见 `RerankBackend` 文档
+        // 的对照表（一律 [0,1] 相关度，越大越相关），故混用不产生量纲错位。
+        let mut stage_scores: std::collections::HashMap<String, f32> =
+            std::collections::HashMap::new();
+
         for stage in &self.stages {
             let chunks: Vec<(String, String, f32)> = current
                 .iter()
@@ -454,6 +491,17 @@ impl RerankPipeline {
                 },
             };
 
+            // 空结果 = 本阶段**没有生效**（云端返回 0 条、或降级路径拿了空列表）。
+            // 此时若继续走排序，`score_map` 全 miss ⇒ 排序退化成「按融合分数排」，
+            // 而 `stage_scores` 也不该被清空。显式告警是必要的：
+            // 「重排没跑」与「重排跑了但没变序」在下游完全同形。
+            if scored.is_empty() {
+                tracing::warn!(
+                    "Rerank stage returned no scores; keeping previous ranking and scores"
+                );
+                continue;
+            }
+
             let score_map: std::collections::HashMap<&str, f32> =
                 scored.iter().map(|(id, s)| (id.as_str(), *s)).collect();
 
@@ -463,6 +511,10 @@ impl RerankPipeline {
                 sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
             });
 
+            for (id, s) in &scored {
+                stage_scores.insert(id.clone(), *s);
+            }
+
             current = current.into_iter().take(config.rule_filter_keep).collect();
         }
 
@@ -470,14 +522,21 @@ impl RerankPipeline {
             .into_iter()
             .take(config.top_n)
             .enumerate()
-            .map(|(i, r)| RerankedResult {
-                id: r.id,
-                document_id: r.document_id,
-                chunk_index: r.chunk_index,
-                content: r.content,
-                original_score: r.combined_score,
-                rerank_score: r.combined_score,
-                rerank_reason: Some(format!("Ranked #{}", i + 1)),
+            .map(|(i, r)| {
+                // ⚠ 必须**先查再 move**：`r.id` 是 `String` 非 `Copy`，写成结构体字段
+                // 字面量里 `stage_scores.get(&r.id)` 会在 `id: r.id` 之后借用 ⇒ E0382。
+                // 有阶段分数 ⇒ 报真正的重排分数；没有任何阶段给出分数时，
+                // 退回融合分数（此时「重排」本就没改变任何东西，报它不算撒谎）。
+                let rerank_score = stage_scores.get(&r.id).copied().unwrap_or(r.combined_score);
+                RerankedResult {
+                    id: r.id,
+                    document_id: r.document_id,
+                    chunk_index: r.chunk_index,
+                    content: r.content,
+                    original_score: r.combined_score,
+                    rerank_score,
+                    rerank_reason: Some(format!("Ranked #{}", i + 1)),
+                }
             })
             .collect()
     }
@@ -503,10 +562,10 @@ pub fn create_rerank_pipeline(
         },
         "cross_encoder" => {
             if let Some(eng) = engine {
-                let model = config
-                    .cross_encoder_model
-                    .clone()
-                    .unwrap_or_else(|| "bge-reranker-v2-m3.Q4_K_M.gguf".to_string());
+                let model = config.cross_encoder_model.clone().unwrap_or_else(|| {
+                    // 单一真源：与下载清单 / `RerankConfig::default()` 同源（防改名后指向不存在的文件）
+                    axagent_harness::rag_config::RERANKER_MODEL_FILENAME.to_string()
+                });
                 pipeline.add_stage(Box::new(CrossEncoderReranker::new(model, eng)));
             } else {
                 tracing::warn!("No InferenceEngine, falling back to rule reranker");
@@ -516,10 +575,9 @@ pub fn create_rerank_pipeline(
         "pipeline" => {
             pipeline.add_stage(Box::new(RuleReranker));
             if let Some(eng) = engine {
-                let model = config
-                    .cross_encoder_model
-                    .clone()
-                    .unwrap_or_else(|| "bge-reranker-v2-m3.Q4_K_M.gguf".to_string());
+                let model = config.cross_encoder_model.clone().unwrap_or_else(|| {
+                    axagent_harness::rag_config::RERANKER_MODEL_FILENAME.to_string()
+                });
                 pipeline.add_stage(Box::new(CrossEncoderReranker::new(model, eng)));
             }
         },

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! OPC 行业 Token 预算管理 — 分区缓存 + 上下文压缩 + 干叶分离
+//! OPC 域包 Token 预算管理 — 分区缓存 + 上下文压缩 + 干叶分离
 //!
-//! 为每个行业工作流提供独立的 token 预算管理：
-//! - 分区缓存：按行业/会话隔离 token 预算，避免跨行业干扰
+//! 为每个域包工作流提供独立的 token 预算管理：
+//! - 分区缓存：按域包/会话隔离 token 预算，避免跨域包干扰
 //! - 上下文压缩：当 token 用量接近阈值时自动压缩历史消息
 //! - 干叶分离：将活跃上下文（当前任务）与历史上下文（干叶）分离，
-//!   干叶信息压缩为摘要保留在行业知识缓存中
+//!   干叶信息压缩为摘要保留在域包知识缓存中
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,9 +14,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
-/// 行业 Token 预算配置
+/// 域包 Token 预算配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndustryTokenConfig {
+pub struct DomainPackTokenConfig {
     /// 上下文窗口大小（token 数）
     #[serde(default = "default_context_window")]
     pub context_window: u32,
@@ -29,8 +29,8 @@ pub struct IndustryTokenConfig {
     /// 最大保留历史消息数（压缩后）
     #[serde(default = "default_max_history_messages")]
     pub max_history_messages: usize,
-    /// 行业名称
-    pub industry_name: String,
+    /// 域包名称
+    pub domain_pack_name: String,
 }
 
 fn default_context_window() -> u32 {
@@ -49,14 +49,14 @@ fn default_max_history_messages() -> usize {
     20
 }
 
-impl Default for IndustryTokenConfig {
+impl Default for DomainPackTokenConfig {
     fn default() -> Self {
         Self {
             context_window: default_context_window(),
             compact_threshold_pct: default_compact_threshold(),
             dry_leaf_threshold_pct: default_dry_leaf_threshold(),
             max_history_messages: default_max_history_messages(),
-            industry_name: "通用".to_string(),
+            domain_pack_name: "通用".to_string(),
         }
     }
 }
@@ -79,8 +79,8 @@ pub struct TokenUsageSnapshot {
 pub struct DryLeafEntry {
     /// 条目 ID
     pub id: String,
-    /// 行业 ID
-    pub industry_id: String,
+    /// 域包 ID
+    pub domain_pack_id: String,
     /// 会话 ID
     pub session_id: String,
     /// 原始消息摘要
@@ -121,29 +121,29 @@ pub enum BudgetDecision {
     DryLeafSeparationRecommended { current_pct: u32 },
 }
 
-/// 行业 Token 预算管理器
+/// 域包 Token 预算管理器
 ///
-/// 为每个行业工作流提供独立的 token 预算管理，支持：
-/// - 分区缓存：按行业/会话隔离 token 预算
+/// 为每个域包工作流提供独立的 token 预算管理，支持：
+/// - 分区缓存：按域包/会话隔离 token 预算
 /// - 上下文压缩：当 token 用量接近阈值时自动压缩
 /// - 干叶分离：将历史消息转为摘要存储
 #[derive(Debug)]
-pub struct IndustryTokenBudgetManager {
-    /// 各行业配置
-    configs: Arc<Mutex<HashMap<String, IndustryTokenConfig>>>,
-    /// 各行业/会话的 token 使用历史
+pub struct DomainPackTokenBudgetManager {
+    /// 各域包配置
+    configs: Arc<Mutex<HashMap<String, DomainPackTokenConfig>>>,
+    /// 各域包/会话的 token 使用历史
     usage_history: Arc<Mutex<HashMap<String, Vec<TokenUsageSnapshot>>>>,
-    /// 各行业的干叶缓存
+    /// 各域包的干叶缓存
     dry_leaves: Arc<Mutex<HashMap<String, Vec<DryLeafEntry>>>>,
 }
 
-impl Default for IndustryTokenBudgetManager {
+impl Default for DomainPackTokenBudgetManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl IndustryTokenBudgetManager {
+impl DomainPackTokenBudgetManager {
     /// 创建新的预算管理器
     pub fn new() -> Self {
         Self {
@@ -153,27 +153,27 @@ impl IndustryTokenBudgetManager {
         }
     }
 
-    /// 注册行业配置
-    pub async fn register_industry(&self, industry_id: &str, config: IndustryTokenConfig) {
+    /// 注册域包配置
+    pub async fn register_domain_pack(&self, domain_pack_id: &str, config: DomainPackTokenConfig) {
         let mut configs = self.configs.lock().await;
-        configs.insert(industry_id.to_string(), config);
+        configs.insert(domain_pack_id.to_string(), config);
     }
 
-    /// 获取行业配置
-    pub async fn get_config(&self, industry_id: &str) -> IndustryTokenConfig {
+    /// 获取域包配置
+    pub async fn get_config(&self, domain_pack_id: &str) -> DomainPackTokenConfig {
         let configs = self.configs.lock().await;
-        configs.get(industry_id).cloned().unwrap_or_default()
+        configs.get(domain_pack_id).cloned().unwrap_or_default()
     }
 
     /// 记录 token 使用快照
     pub async fn record_usage(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         session_id: &str,
         input_tokens: u32,
         output_tokens: u32,
     ) {
-        let key = format!("{}:{}", industry_id, session_id);
+        let key = format!("{}:{}", domain_pack_id, session_id);
         let mut history = self.usage_history.lock().await;
         let snapshots = history.entry(key).or_default();
 
@@ -198,11 +198,11 @@ impl IndustryTokenBudgetManager {
     /// 评估预算并返回决策
     pub async fn evaluate_budget(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         _session_id: &str,
         current_tokens: u32,
     ) -> BudgetDecision {
-        let config = self.get_config(industry_id).await;
+        let config = self.get_config(domain_pack_id).await;
         let pct = ((current_tokens as f64 / config.context_window as f64) * 100.0) as u32;
 
         if pct >= 95 {
@@ -219,11 +219,11 @@ impl IndustryTokenBudgetManager {
     /// 执行上下文压缩
     pub async fn compact_context(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         session_id: &str,
         messages: &[String],
     ) -> CompactionResult {
-        let config = self.get_config(industry_id).await;
+        let config = self.get_config(domain_pack_id).await;
         let before_tokens = Self::estimate_message_tokens(messages);
 
         if before_tokens == 0 {
@@ -253,8 +253,8 @@ impl IndustryTokenBudgetManager {
                 .as_millis() as u64;
 
             let leaf = DryLeafEntry {
-                id: format!("dry-leaf-{}-{}", industry_id, i),
-                industry_id: industry_id.to_string(),
+                id: format!("dry-leaf-{}-{}", domain_pack_id, i),
+                domain_pack_id: domain_pack_id.to_string(),
                 session_id: session_id.to_string(),
                 summary,
                 keywords: extract_keywords(msg),
@@ -263,8 +263,8 @@ impl IndustryTokenBudgetManager {
             };
 
             let mut dry_leaves = self.dry_leaves.lock().await;
-            let industry_leaves = dry_leaves.entry(industry_id.to_string()).or_default();
-            industry_leaves.push(leaf);
+            let domain_pack_leaves = dry_leaves.entry(domain_pack_id.to_string()).or_default();
+            domain_pack_leaves.push(leaf);
         }
 
         // 保留最近的消息
@@ -284,11 +284,11 @@ impl IndustryTokenBudgetManager {
     /// 执行干叶分离
     pub async fn separate_dry_leaves(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         session_id: &str,
         messages: &[String],
     ) -> (Vec<String>, Vec<DryLeafEntry>) {
-        let config = self.get_config(industry_id).await;
+        let config = self.get_config(domain_pack_id).await;
         let total_tokens = Self::estimate_message_tokens(messages);
 
         if total_tokens == 0 {
@@ -320,8 +320,8 @@ impl IndustryTokenBudgetManager {
 
         for (i, msg) in history_messages.iter().enumerate() {
             let leaf = DryLeafEntry {
-                id: format!("dry-leaf-{}-{}-{}", industry_id, session_id, i),
-                industry_id: industry_id.to_string(),
+                id: format!("dry-leaf-{}-{}-{}", domain_pack_id, session_id, i),
+                domain_pack_id: domain_pack_id.to_string(),
                 session_id: session_id.to_string(),
                 summary: generate_brief_summary(msg),
                 keywords: extract_keywords(msg),
@@ -333,28 +333,28 @@ impl IndustryTokenBudgetManager {
 
         // 保存干叶
         let mut dry_leaves = self.dry_leaves.lock().await;
-        let industry_leaves = dry_leaves.entry(industry_id.to_string()).or_default();
-        industry_leaves.extend(new_leaves.clone());
+        let domain_pack_leaves = dry_leaves.entry(domain_pack_id.to_string()).or_default();
+        domain_pack_leaves.extend(new_leaves.clone());
 
         (active_messages, new_leaves)
     }
 
-    /// 检索行业干叶缓存
+    /// 检索域包干叶缓存
     pub async fn retrieve_dry_leaves(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         query: &str,
         limit: usize,
     ) -> Vec<DryLeafEntry> {
         let dry_leaves = self.dry_leaves.lock().await;
-        let industry_leaves = match dry_leaves.get(industry_id) {
+        let domain_pack_leaves = match dry_leaves.get(domain_pack_id) {
             Some(leaves) => leaves,
             None => return Vec::new(),
         };
 
         // 简单关键词匹配
         let query_lower = query.to_lowercase();
-        let mut scored_leaves: Vec<(&DryLeafEntry, usize)> = industry_leaves
+        let mut scored_leaves: Vec<(&DryLeafEntry, usize)> = domain_pack_leaves
             .iter()
             .map(|leaf| {
                 let score = leaf
@@ -377,8 +377,8 @@ impl IndustryTokenBudgetManager {
         messages.iter().map(|m| (m.chars().count() as u32 / 4).max(1)).sum()
     }
 
-    /// 获取行业统计信息
-    pub async fn get_industry_stats(&self, industry_id: &str) -> IndustryTokenStats {
+    /// 获取域包统计信息
+    pub async fn get_domain_pack_stats(&self, domain_pack_id: &str) -> DomainPackTokenStats {
         let usage_history = self.usage_history.lock().await;
         let dry_leaves = self.dry_leaves.lock().await;
 
@@ -388,21 +388,21 @@ impl IndustryTokenBudgetManager {
             .map(|s| s.total_tokens)
             .sum();
 
-        let industry_leaves = dry_leaves.get(industry_id).cloned().unwrap_or_default();
-        let total_saved: u32 = industry_leaves.iter().map(|l| l.saved_tokens).sum();
+        let domain_pack_leaves = dry_leaves.get(domain_pack_id).cloned().unwrap_or_default();
+        let total_saved: u32 = domain_pack_leaves.iter().map(|l| l.saved_tokens).sum();
 
-        IndustryTokenStats {
-            industry_id: industry_id.to_string(),
+        DomainPackTokenStats {
+            domain_pack_id: domain_pack_id.to_string(),
             total_usage,
-            dry_leaf_count: industry_leaves.len() as u32,
+            dry_leaf_count: domain_pack_leaves.len() as u32,
             total_saved,
         }
     }
 
     /// 清理过期的干叶条目（保留最近 N 条）
-    pub async fn cleanup_old_leaves(&self, industry_id: &str, keep_count: usize) {
+    pub async fn cleanup_old_leaves(&self, domain_pack_id: &str, keep_count: usize) {
         let mut dry_leaves = self.dry_leaves.lock().await;
-        if let Some(leaves) = dry_leaves.get_mut(industry_id)
+        if let Some(leaves) = dry_leaves.get_mut(domain_pack_id)
             && leaves.len() > keep_count
         {
             leaves.drain(..leaves.len() - keep_count);
@@ -410,10 +410,10 @@ impl IndustryTokenBudgetManager {
     }
 }
 
-/// 行业 Token 统计
+/// 域包 Token 统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndustryTokenStats {
-    pub industry_id: String,
+pub struct DomainPackTokenStats {
+    pub domain_pack_id: String,
     pub total_usage: u32,
     pub dry_leaf_count: u32,
     pub total_saved: u32,
@@ -450,31 +450,31 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_register_industry() {
-        let manager = IndustryTokenBudgetManager::new();
+    async fn test_register_domain_pack() {
+        let manager = DomainPackTokenBudgetManager::new();
         manager
-            .register_industry(
-                "test-industry",
-                IndustryTokenConfig {
-                    industry_name: "测试行业".to_string(),
+            .register_domain_pack(
+                "test-domain-pack",
+                DomainPackTokenConfig {
+                    domain_pack_name: "测试域包".to_string(),
                     context_window: 100_000,
                     ..Default::default()
                 },
             )
             .await;
 
-        let config = manager.get_config("test-industry").await;
-        assert_eq!(config.industry_name, "测试行业");
+        let config = manager.get_config("test-domain-pack").await;
+        assert_eq!(config.domain_pack_name, "测试域包");
         assert_eq!(config.context_window, 100_000);
     }
 
     #[tokio::test]
     async fn test_evaluate_budget_proceed() {
-        let manager = IndustryTokenBudgetManager::new();
+        let manager = DomainPackTokenBudgetManager::new();
         manager
-            .register_industry(
+            .register_domain_pack(
                 "test",
-                IndustryTokenConfig {
+                DomainPackTokenConfig {
                     context_window: 100_000,
                     compact_threshold_pct: 80,
                     dry_leaf_threshold_pct: 60,
@@ -489,11 +489,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_evaluate_budget_compact_recommended() {
-        let manager = IndustryTokenBudgetManager::new();
+        let manager = DomainPackTokenBudgetManager::new();
         manager
-            .register_industry(
+            .register_domain_pack(
                 "test",
-                IndustryTokenConfig {
+                DomainPackTokenConfig {
                     context_window: 100_000,
                     compact_threshold_pct: 80,
                     dry_leaf_threshold_pct: 60,
@@ -508,11 +508,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_evaluate_budget_compact_required() {
-        let manager = IndustryTokenBudgetManager::new();
+        let manager = DomainPackTokenBudgetManager::new();
         manager
-            .register_industry(
+            .register_domain_pack(
                 "test",
-                IndustryTokenConfig {
+                DomainPackTokenConfig {
                     context_window: 100_000,
                     compact_threshold_pct: 80,
                     dry_leaf_threshold_pct: 60,
@@ -527,11 +527,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_compact_context() {
-        let manager = IndustryTokenBudgetManager::new();
+        let manager = DomainPackTokenBudgetManager::new();
         manager
-            .register_industry(
+            .register_domain_pack(
                 "test",
-                IndustryTokenConfig {
+                DomainPackTokenConfig {
                     context_window: 100_000,
                     max_history_messages: 3,
                     ..Default::default()
@@ -557,11 +557,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_dry_leaf_separation() {
-        let manager = IndustryTokenBudgetManager::new();
+        let manager = DomainPackTokenBudgetManager::new();
         manager
-            .register_industry(
+            .register_domain_pack(
                 "test",
-                IndustryTokenConfig {
+                DomainPackTokenConfig {
                     context_window: 2_000,     // 较小的上下文窗口便于测试
                     dry_leaf_threshold_pct: 1, // 极低阈值以便测试
                     ..Default::default()
@@ -591,11 +591,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_retrieve_dry_leaves() {
-        let manager = IndustryTokenBudgetManager::new();
+        let manager = DomainPackTokenBudgetManager::new();
         manager
-            .register_industry(
+            .register_domain_pack(
                 "test",
-                IndustryTokenConfig {
+                DomainPackTokenConfig {
                     context_window: 100,       // 非常小的上下文窗口便于测试
                     dry_leaf_threshold_pct: 1, // 极低阈值以便测试
                     ..Default::default()
@@ -640,14 +640,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_industry_stats() {
-        let manager = IndustryTokenBudgetManager::new();
-        manager.register_industry("test", IndustryTokenConfig::default()).await;
+    async fn test_get_domain_pack_stats() {
+        let manager = DomainPackTokenBudgetManager::new();
+        manager.register_domain_pack("test", DomainPackTokenConfig::default()).await;
 
         manager.record_usage("test", "session-1", 1000, 500).await;
 
-        let stats = manager.get_industry_stats("test").await;
-        assert_eq!(stats.industry_id, "test");
+        let stats = manager.get_domain_pack_stats("test").await;
+        assert_eq!(stats.domain_pack_id, "test");
         assert!(stats.total_usage > 0);
     }
 }

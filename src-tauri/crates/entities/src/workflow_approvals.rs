@@ -8,10 +8,15 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub execution_id: String,
     pub node_id: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "pending")]
     pub status: String,
+    #[sea_orm(default_value = "")]
     pub title: String,
+    #[sea_orm(default_value = "")]
     pub message: String,
     pub approver: Option<String>,
     pub channels: Option<String>,
@@ -23,7 +28,9 @@ pub struct Model {
     /// 落库以便 DAO 层 auto_resolve_timeouts 在无人值守时按策略裁决。
     #[sea_orm(default_value = "auto_reject")]
     pub timeout_action: String,
+    #[sea_orm(default_value = 86400)]
     pub timeout_secs: i64,
+    #[sea_orm(default_value = 0)]
     pub expires_at: i64,
     pub created_at: i64,
     pub resolved_at: Option<i64>,

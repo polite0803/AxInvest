@@ -24,11 +24,12 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 主线日期 YYYY-MM-DD
+    #[sea_orm(indexed)]
     pub mainline_date: String,
     /// 主题名（如 "AI 算力" / "光模块" / "新能源车"）
     pub theme: String,
     /// 主题大类（科技 / 消费 / 周期 / 金融 / 医药 / 政策 / 其他）
-    #[sea_orm(default_value = "其他")]
+    #[sea_orm(default_value = "其他", indexed)]
     pub theme_category: String,
     /// 主线叙述（LLM 综合的 1-2 句话故事线）
     pub narrative: String,
@@ -36,7 +37,7 @@ pub struct Model {
     #[sea_orm(default_value = "[]")]
     pub representative_symbols: String,
     /// 强度评分 0-100
-    #[sea_orm(default_value = 0.0)]
+    #[sea_orm(default_value = 0.0, indexed)]
     pub strength_score: f64,
     /// 持续性判断（"1d" / "1w" / "1m" / "fading" / "emerging"）
     #[sea_orm(default_value = "1d")]
@@ -45,9 +46,10 @@ pub struct Model {
     #[sea_orm(default_value = "{}")]
     pub evidence_json: String,
     /// 来源工作流执行 ID（可空，手动创建则为 null）
+    #[sea_orm(indexed)]
     pub source_workflow_execution_id: Option<String>,
     /// active / fading / archived
-    #[sea_orm(default_value = "active")]
+    #[sea_orm(default_value = "active", indexed)]
     pub status: String,
     /// 创建时间戳（ms）
     pub created_at: i64,

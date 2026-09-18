@@ -207,12 +207,50 @@ pub async fn resolve_embedding_provider(
 }
 
 /// Build a ProviderRequestContext for an embedding provider.
+///
+/// 本函数是「embedding_provider 字符串 → 可用请求上下文」的**唯一咽喉**：
+/// 知识库文档 / 记忆条目 / Wiki 笔记 / 手动重建索引，所有向量化路径都经过它。
+/// 因此「provider 已不存在」这类**确定性配置错误**的标记做在这里，覆盖面最广。
 pub async fn build_embed_context(
     db: &DatabaseConnection,
     master_key: &[u8; 32],
     provider_id: &str,
 ) -> Result<(ProviderRequestContext, ProviderConfig)> {
-    let provider = axagent_dao::repo::provider::get_provider(db, provider_id).await?;
+    // provider 已被删除 / 重建后 id 变化 ⇒ 悬空引用。
+    //
+    // 为什么必须在这里改写成带标记的错误：`get_provider` 失败会产生
+    // `NotFound("Provider <id>")`，错误串里**没有** R9 标记 ⇒ `index_queue`
+    // 的「确定性配置错误不重试」通道接不住 ⇒ 作业白走 `max_retries` 次指数退避。
+    // 生产实证（2026-09-12）：两个 `index_memory` 作业因
+    // `Not found: Provider af052547-…` 停在 `retrying` 并持续刷 WARN。
+    //
+    // 为什么判在这里而不是更上游：上游单点判只能覆盖单条路径。事实也是这样漏掉的 ——
+    // 孤儿扫描器侧已判掉悬空 provider（`repair_pending_memory_item` 第 3 步），
+    // 但用户按提示点「重建索引」时会绕过扫描器重新入队，日志再次刷出同一个错误。
+    //
+    // `provider_exists` 只在 `get_provider` 失败之后才查（happy path 零额外 SQL），
+    // 且必须与 `get_provider` 分开判：后者含 keys / models 两条子查询，失败原因不止
+    // 「provider 行不存在」。查询本身报错时用 `unwrap_or(true)` 保守放行，避免把
+    // 「DB 抖动」误报成「配置错误」。
+    let provider = match axagent_dao::repo::provider::get_provider(db, provider_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            let vanished = !axagent_dao::repo::provider::provider_exists(db, provider_id)
+                .await
+                .unwrap_or(true);
+            if !vanished {
+                return Err(e);
+            }
+            return Err(AxAgentError::Provider(format!(
+                "{}: embedding_provider 指向的 provider `{}` 不存在（provider 已被删除，\
+                 或重建后 id 已变化）。请在设置中为该知识库 / 记忆命名空间**重新绑定**\
+                 embedding provider，然后重新执行索引。原始错误：{}",
+                axagent_harness::constants::embed::ERR_EMBEDDING_PROVIDER_GONE,
+                provider_id,
+                e
+            )));
+        },
+    };
 
     // 本地推理供应商（llama.cpp / ollama）无需 API key：无 key 行时降级为空 key，
     // 避免 embedding 链路被 `get_active_key` 的 NotFound 卡死。
@@ -787,6 +825,8 @@ async fn run_indexing(
 
     let chunks = rag::prepare_chunks(document_id, &strategy)?;
 
+    // ParseAndChunk 的「解析出空文本」已在 prepare_chunks 内部报错，走不到这里；
+    // 能到达此处的只有 FromText（会话归档确实为空）—— 无内容可索引不是失败。
     if chunks.is_empty() {
         return Ok(());
     }
@@ -878,8 +918,14 @@ pub async fn index_wiki_note(
     };
 
     let chunks = rag::prepare_chunks(note_id, &strategy)?;
+    let collection = rag::collection_id("wiki", wiki_id);
 
     if chunks.is_empty() {
+        // 笔记内容已被清空 ⇒ 必须清掉旧向量，否则旧内容仍会被召回（幽灵数据）。
+        // 删除失败必须上报：静默失败会让「已清空的笔记」继续出现在检索结果里。
+        vector_store.delete_document_embeddings(&collection, note_id).await.map_err(|e| {
+            AxAgentError::Provider(format!("清理笔记 {note_id} 的旧向量失败（内容已清空）: {e}"))
+        })?;
         return Ok(());
     }
 
@@ -898,8 +944,14 @@ pub async fn index_wiki_note(
     // 分块按 {note_id}_{chunkIndex} upsert，编辑后块数变少时旧高序号 chunk 会永久残留，
     // 导致检索命中已删除内容 —— 必须在写入前整体清理（R1 修复）。
     // 顺序放在 embedding 生成成功之后：失败时保留旧向量（任务会重试），避免笔记瞬间失去全部检索能力。
-    let collection = rag::collection_id("wiki", wiki_id);
-    let _ = vector_store.delete_document_embeddings(&collection, note_id).await;
+    //
+    // 删除失败必须上报（2026-09-15 修）：此前 `let _ =` 丢掉错误，于是
+    // 「新 chunk 写入」与「旧 chunk 残留」同时成立 —— 编辑后已删掉的旧内容依然能被
+    // 检索命中，且用户拿不到任何提示。报错后该笔记按索引失败处理，可重试。
+    vector_store
+        .delete_document_embeddings(&collection, note_id)
+        .await
+        .map_err(|e| AxAgentError::Provider(format!("清理笔记 {note_id} 的旧向量失败: {e}")))?;
 
     rag::index(vector_store, "wiki", wiki_id, note_id, content, embed_response.embeddings, chunks)
         .await
@@ -918,7 +970,7 @@ pub struct WikiBatchIndexingTask {
     pub completion_event: Option<&'static str>,
 }
 
-/// 后台批量索引 wiki 笔记：删旧向量 → index_source → 逐条 emit "wiki-note-indexed"。
+/// 后台批量索引 wiki 笔记：index_source（内部负责先清旧向量）→ 逐条 emit "wiki-note-indexed"。
 ///
 /// 供 `llm_wiki_ingest` / `llm_wiki_import_folder` / `write_base64_to_file` /
 /// `deep_research_topic` 复用，保证所有 LLM 生成页与导入页都进入 RAG 索引（R2 修复）。
@@ -962,9 +1014,9 @@ pub fn spawn_wiki_note_batch_indexing(
                     continue;
                 },
             };
-            let collection = rag::collection_id("wiki", &wiki_id);
-            let _ = vector_store.delete_document_embeddings(&collection, note_id).await;
-
+            // 旧向量清理由 `index_wiki_note` 统一负责（它失败时会返回 Err，从而进入
+            // 下面的 per-note 失败通道并 emit 失败事件）。此处此前重复删一次并 `let _ =`
+            // 吞掉错误 —— 同一职责两个执行点、语义还不一致，属冗余清理点（2026-09-15 移除）。
             let index_result = index_source(
                 &db,
                 &master_key,
@@ -1088,6 +1140,104 @@ pub async fn index_source(
 
 // ── Search (delegates to rag::search) ────────────────────────────────────────
 
+/// 读取全局设置里的 RAG 管线配置（`ragPipelineConfig`）**类型化**结果。
+///
+/// 这是解析该配置的**唯一入口**：所有消费方（hybrid 权重、entity_graph 开关…）
+/// 都从这里取，避免各自去 `serde_json::Value` 上按字符串 key 摸字段 ——
+/// 那种写法不会因为 schema 变更而编译失败（2026-09-15 踩过：自造 `entityGraph`
+/// 字符串键，而 `RAGPipelineConfig` 里根本没有该字段，等于一个永远打不开的开关）。
+///
+/// 读取或反序列化失败 ⇒ 退回 `RAGPipelineConfig::default()`（各字段均为关闭 /
+/// 历史写死值），因此失败时的行为与「未接线」一致，不会引入意外的行为变更。
+///
+/// ⚠ **失败必须出声**（2026-09-15 修）：此前这里是 `.ok()` + `unwrap_or_default()`，
+/// 静默吞掉解析错误。后果是 `RerankConfig` 的 wire 名与前端不一致（`type` vs `backend`）
+/// 导致解析**恒失败**、整个 RAG 面板的设置全部回落默认值，而外界只能看到「开关点了没用」，
+/// 没有任何日志指向真正的原因。现在解析失败会打 warn 并带上错误信息与原始 JSON 片段。
+pub async fn load_rag_pipeline_config(
+    db: &DatabaseConnection,
+) -> axagent_harness::types::RAGPipelineConfig {
+    let raw = match axagent_dao::repo::settings::get_settings(db).await {
+        Ok(s) => s.rag_pipeline_config,
+        Err(e) => {
+            tracing::warn!("[RAG] 读取全局设置失败，ragPipelineConfig 回落默认值：{e}");
+            return axagent_harness::types::RAGPipelineConfig::default();
+        },
+    };
+
+    // `Value::Null` 是「用户从未保存过 RAG 设置」的正常形态（见
+    // `AppSettings::default()`），不是错误 ⇒ 静默回落。
+    if raw.is_null() {
+        return axagent_harness::types::RAGPipelineConfig::default();
+    }
+
+    match serde_json::from_value::<axagent_harness::types::RAGPipelineConfig>(raw.clone()) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            // 这是「配置静默失效」类故障的唯一线索来源，故不降级为 debug。
+            tracing::warn!(
+                "[RAG] ragPipelineConfig 反序列化失败，全部设置回落默认值：{e}；\
+                 原始值片段：{}",
+                {
+                    let s = raw.to_string();
+                    // 截断到 512 字节（按字符边界安全截断，避免切坏多字节 UTF-8）
+                    let cut = s.char_indices().take_while(|(i, _)| *i < 512).last();
+                    match cut {
+                        Some((i, c)) => s[..i + c.len_utf8()].to_string(),
+                        None => s,
+                    }
+                }
+            );
+            axagent_harness::types::RAGPipelineConfig::default()
+        },
+    }
+}
+
+/// 读取全局设置里的混合检索配置（`ragPipelineConfig.hybrid`）。
+///
+/// 用户可在设置面板改权重 / 融合算法 / 是否启用混合检索。这些字段此前**零读取点**，
+/// 检索权重被硬编码成 0.7/0.3 ⇒ 改配置不生效且无任何告警（2026-09-15 接线）。
+///
+/// 读取或反序列化失败时退回 `HybridConfig::default()`（其值恰为历史写死的
+/// 0.7/0.3/RRF/60），因此调用方拿到默认值时的行为与修复前一致。
+pub async fn load_hybrid_config(
+    db: &DatabaseConnection,
+) -> axagent_harness::rag_config::HybridConfig {
+    load_rag_pipeline_config(db).await.hybrid
+}
+
+/// 让「实体图谱（Graph RAG 阶段 4）」的开关**无需重启**生效。
+///
+/// 启动时（`init::services`）与保存设置时（`commands::settings::save_settings`）各调一次，
+/// 两条路径共用这一份装配逻辑（分两处各写一遍必然分叉）。
+///
+/// 幂等：`enabled == true` ⇒ 覆盖式注入 provider；`false` ⇒ 清空槽位。
+/// 之所以 `false` 也要显式处理：注入点是**可替换槽位**（`RwLock<Option<Arc<..>>>`）而非
+/// `OnceLock`，用户把开关关掉后必须能真的失效 —— 否则就是个关不掉的假开关。
+///
+/// ⚠ 2026-09-15 补：本函数是**声明了却从未存在**的符号。`services.rs:2014` 与
+/// `src/commands/settings.rs:111` 两个调用点早已写好、`services.rs` 的注释也已写「逻辑已抽成
+/// `indexing::sync_entity_graph_provider`」，但从 `indexing.rs` 的视角看**零定义**
+/// （三个文件属同一次编辑簇 13:37–13:38，定义那一步没落地）。
+/// 二进制 crate 直到 14:31 才第一次被编译（此前门禁一直被并行会话的 file lock 挡在
+/// `axagent-search` 之后）⇒ 这个 `E0425` 藏了近一小时，且期间「entityGraph 热更新」
+/// 实际**完全没生效**（provider 恒为 `None`，阶段 4 恒跳过）。
+///
+/// 教训：调用点存在 ≠ 被调用的函数存在。核验「某能力已接线」时，
+/// 必须**同时**跑 `grep` 定义端与查看调用点，而不是看到调用点就推定为已有定义。
+pub async fn sync_entity_graph_provider(db: &DatabaseConnection) {
+    let enabled = load_rag_pipeline_config(db).await.entity_graph.enabled;
+
+    if enabled {
+        axagent_search::entity_graph::set_entity_graph_provider(std::sync::Arc::new(
+            axagent_dao::knowledge_graph_provider::KnowledgeGraphProvider::new(db),
+        ));
+        tracing::info!("[RAG] 实体图谱 provider 已注入（entityGraph.enabled = true）");
+    } else {
+        axagent_search::entity_graph::clear_entity_graph_provider();
+    }
+}
+
 /// Search knowledge base vectors for relevant content.
 pub async fn search_knowledge(
     db: &DatabaseConnection,
@@ -1096,7 +1246,12 @@ pub async fn search_knowledge(
     knowledge_base_id: &str,
     query: &str,
     top_k: usize,
+    // `min_similarity`：相关度下限 ∈ [0,1]（容器 `retrieval_threshold` 语义）。
+    // 传 `Some` ⇒ 在**检索层**按「过滤 → 排序 → 截断 top_k」生效（2026-09-15 修，
+    // 此前是调用方拿到已截断结果再筛，见 `rag::search_with_filter` 的说明）。
+    min_similarity: Option<f32>,
 ) -> Result<Vec<VectorSearchResult>> {
+    let hybrid = load_hybrid_config(db).await;
     rag::search(
         &KnowledgeRAG,
         db,
@@ -1107,12 +1262,21 @@ pub async fn search_knowledge(
         top_k,
         None,
         ProviderEmbedFn,
+        Some(&hybrid),
+        min_similarity,
     )
     .await
 }
 
 /// Search knowledge base with optional document ID filter (multi-document collaboration).
 /// Paper QA Pipeline 用此函数把检索范围限制在单篇论文内。
+///
+/// 8 参（`doc_ids` + `min_similarity` 各占一个）触发 `clippy::too_many_arguments`，
+/// 属本文件既有惯例的同类例外（见 `:727` / `:780` / `:858` / `:902` / `:1061`）。
+/// 不收敛成 options 结构体：这两个可选参数各自独立（一个限范围、一个限相关度），
+/// 合并只会把「调用点看得见的两个语义」藏进一个匿名结构体，与 `search_knowledge`
+/// 的签名也不再平行。
+#[allow(clippy::too_many_arguments)]
 pub async fn search_knowledge_with_doc_filter(
     db: &DatabaseConnection,
     master_key: &[u8; 32],
@@ -1121,7 +1285,10 @@ pub async fn search_knowledge_with_doc_filter(
     query: &str,
     top_k: usize,
     doc_ids: Option<&[String]>,
+    // 语义同 `search_knowledge`
+    min_similarity: Option<f32>,
 ) -> Result<Vec<VectorSearchResult>> {
+    let hybrid = load_hybrid_config(db).await;
     rag::search_with_filter(
         &KnowledgeRAG,
         db,
@@ -1134,6 +1301,8 @@ pub async fn search_knowledge_with_doc_filter(
         ProviderEmbedFn,
         doc_ids,
         None,
+        Some(&hybrid),
+        min_similarity,
     )
     .await
 }
@@ -1146,12 +1315,15 @@ pub async fn search_memory(
     namespace_id: &str,
     query: &str,
     top_k: usize,
+    // 语义同 `search_knowledge`
+    min_similarity: Option<f32>,
 ) -> Result<Vec<VectorSearchResult>> {
     // Look up namespace settings for dimensions
     let dims = axagent_dao::repo::memory::get_namespace(db, namespace_id)
         .await
         .ok()
         .and_then(|ns| ns.embedding_dimensions.map(|v| v as usize));
+    let hybrid = load_hybrid_config(db).await;
     rag::search(
         &MemoryRAG,
         db,
@@ -1162,6 +1334,8 @@ pub async fn search_memory(
         top_k,
         dims,
         ProviderEmbedFn,
+        Some(&hybrid),
+        min_similarity,
     )
     .await
 }
@@ -1225,34 +1399,28 @@ pub async fn collect_rag_context(
     credential_manager: &Arc<CredentialManager>,
 ) -> RagContextResult {
     if kb_ids.is_empty() && mem_ids.is_empty() && wiki_ids.is_empty() {
-        return RagContextResult {
-            context_parts: vec![],
-            source_results: vec![],
-            graph_context: None,
-        };
+        return RagContextResult { context_parts: vec![], source_results: vec![] };
     }
 
-    // Read pipeline config from global settings
-    let pipeline_config = axagent_dao::repo::settings::get_settings(db)
-        .await
-        .map(|s| s.rag_pipeline_config)
-        .unwrap_or_default();
+    // 读取 RAG 管线配置。
+    //
+    // ⚠ 2026-09-15 二次修：此前这里（以及下方 `collect_rag_context_with_sources`）
+    // 对 `serde_json::Value` 按**字符串键**探测 `queryEnhancement` / `rerank` / `selfRag`
+    // 的 `enabled`，而管线内部又用**类型化**方式解析了同一份配置 ⇒ **同一个判据存在两套
+    // 默认值**：字符串探测是 `unwrap_or(false)`（配置缺失 ⇒ 视作关闭），而
+    // `RerankConfig::default().enabled == true`（与前端默认值一致）。
+    // 两者在「用户从未保存过 RAG 设置」（`ragPipelineConfig` 为 `Value::Null`）时结论相反：
+    // 设置面板显示「重排已开启」，后端却走不施加重排的快速路径。
+    //
+    // 现在统一由 `load_rag_pipeline_config` 的类型化配置给出，矛盾消失。
+    // 副作用（已登记 PLAN §10.7#1）：从未保存过 RAG 设置的实例，默认从「快速路径」
+    // 变为「管线路径」——即与面板显示一致地施加 `backend = "rule"` 的本地重排；
+    // 该路径按设计不写 `RAG_CACHE`（见下方 `Pipeline results are not cached` 注释）。
+    let pipeline_config = load_rag_pipeline_config(db).await;
 
-    let use_pipeline = pipeline_config
-        .get("query_enhancement")
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-        || pipeline_config
-            .get("rerank")
-            .and_then(|v| v.get("enabled"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        || pipeline_config
-            .get("self_rag")
-            .and_then(|v| v.get("enabled"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+    let use_pipeline = pipeline_config.query_enhancement.enabled
+        || pipeline_config.rerank.enabled
+        || pipeline_config.self_rag.enabled;
 
     if !use_pipeline {
         // Fast path: no pipeline features enabled, use existing cached search
@@ -1266,6 +1434,8 @@ pub async fn collect_rag_context(
             }
         }
 
+        // 混合检索配置同样透传到「无管线」快速路径：权重来自用户设置（2026-09-15 接线）
+        let hybrid = load_hybrid_config(db).await;
         let result = rag::collect_rag_context(
             db,
             master_key,
@@ -1276,6 +1446,7 @@ pub async fn collect_rag_context(
             query,
             top_k,
             ProviderEmbedFn,
+            Some(&hybrid),
         )
         .await;
 
@@ -1286,21 +1457,14 @@ pub async fn collect_rag_context(
     }
 
     // Pipeline path: build LLM function if query enhancement is enabled
-    let qe_enabled = pipeline_config
-        .get("query_enhancement")
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let rerank_enabled = pipeline_config
-        .get("rerank")
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let sr_enabled = pipeline_config
-        .get("self_rag")
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    //
+    // 三个开关一律取自**同一份类型化配置**（`pipeline_config`）—— 与上面的 `use_pipeline`
+    // 同源，不再二次解析原始 JSON（此前这里又 `serde_json::from_value(pipeline_config)`
+    // 解析了一遍，属同一配置的两条独立解析路径，任一侧失败都会给出不同结论）。
+    let pipeline_cfg = &pipeline_config;
+    let qe_enabled = pipeline_cfg.query_enhancement.enabled;
+    let rerank_enabled = pipeline_cfg.rerank.enabled;
+    let sr_enabled = pipeline_cfg.self_rag.enabled;
     tracing::info!(
         "RAG pipeline active: enhancement={}, rerank={}, self_rag={}",
         qe_enabled,
@@ -1315,9 +1479,6 @@ pub async fn collect_rag_context(
     };
 
     // Pipeline results are not cached (involve LLM calls whose outputs vary)
-    let pipeline_cfg: axagent_harness::types::RAGPipelineConfig =
-        serde_json::from_value(pipeline_config.clone()).unwrap_or_default();
-
     // 解析云端 reranker 的 API Key（本地 backend 返回 None）
     let rerank_api_key = resolve_rerank_api_key(credential_manager, &pipeline_cfg.rerank).await;
 
@@ -1331,7 +1492,7 @@ pub async fn collect_rag_context(
         query,
         top_k,
         ProviderEmbedFn,
-        &pipeline_cfg,
+        pipeline_cfg,
         llm_fn,
         rerank_api_key,
     )
@@ -1359,11 +1520,7 @@ pub async fn collect_rag_context_with_sources(
     use axagent_search::rag::RAGSourceType;
 
     if sources.is_empty() {
-        return RagContextResult {
-            context_parts: vec![],
-            source_results: vec![],
-            graph_context: None,
-        };
+        return RagContextResult { context_parts: vec![], source_results: vec![] };
     }
 
     // 提取 kb_ids / wiki_ids 用于知识图谱回链
@@ -1378,30 +1535,18 @@ pub async fn collect_rag_context_with_sources(
         .map(|s| s.container_id.clone())
         .collect();
 
-    // 读取 pipeline 配置
-    let pipeline_config = axagent_dao::repo::settings::get_settings(db)
-        .await
-        .map(|s| s.rag_pipeline_config)
-        .unwrap_or_default();
+    // 读取 pipeline 配置：同样只走 `load_rag_pipeline_config`（类型化、单一判据），
+    // 不再对原始 JSON 按字符串键探测（理由见 `collect_rag_context` 处的长注释）。
+    let pipeline_config = load_rag_pipeline_config(db).await;
 
-    let use_pipeline = pipeline_config
-        .get("query_enhancement")
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false)
-        || pipeline_config
-            .get("rerank")
-            .and_then(|v| v.get("enabled"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        || pipeline_config
-            .get("self_rag")
-            .and_then(|v| v.get("enabled"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+    let use_pipeline = pipeline_config.query_enhancement.enabled
+        || pipeline_config.rerank.enabled
+        || pipeline_config.self_rag.enabled;
 
     if !use_pipeline {
         // 快速路径：不缓存（sources 可能带 doc_ids 过滤，缓存键复杂）
+        // 混合检索权重来自用户设置，需显式透传（2026-09-15 接线）
+        let hybrid = load_hybrid_config(db).await;
         return axagent_search::rag::collect_rag_context_with_filters(
             db,
             master_key,
@@ -1412,25 +1557,20 @@ pub async fn collect_rag_context_with_sources(
             ProviderEmbedFn,
             &kb_ids,
             &wiki_ids,
+            Some(&hybrid),
         )
         .await;
     }
 
     // Pipeline 路径
-    let qe_enabled = pipeline_config
-        .get("query_enhancement")
-        .and_then(|v| v.get("enabled"))
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let pipeline_cfg = &pipeline_config;
+    let qe_enabled = pipeline_cfg.query_enhancement.enabled;
 
     let llm_fn = if qe_enabled {
         build_rag_llm_fn(db, master_key).await
     } else {
         None
     };
-
-    let pipeline_cfg: axagent_harness::types::RAGPipelineConfig =
-        serde_json::from_value(pipeline_config.clone()).unwrap_or_default();
 
     let rerank_api_key = resolve_rerank_api_key(credential_manager, &pipeline_cfg.rerank).await;
 
@@ -1442,7 +1582,7 @@ pub async fn collect_rag_context_with_sources(
         query,
         top_k,
         ProviderEmbedFn,
-        &pipeline_cfg,
+        pipeline_cfg,
         llm_fn,
         rerank_api_key,
         &kb_ids,

@@ -10,13 +10,16 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub org_id: String,
     /// 员工 id（agent id 或占位）
     pub employee_id: String,
+    #[sea_orm(indexed)]
     pub role_id: String,
     /// 绑定的专家 id（agency_experts / opc-xxx）
     pub expert_id: Option<String>,
     /// 状态（active/on_leave/terminated）
+    #[sea_orm(default_value = "active")]
     pub status: String,
     /// 经验档案引用（opc_experience_records 关联 key）
     pub experience_ref: Option<String>,

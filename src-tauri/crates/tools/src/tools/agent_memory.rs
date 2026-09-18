@@ -110,28 +110,16 @@ impl Tool for SessionSearchTool {
             return finish_search(query, formatted);
         }
 
-        // 回退：无 SeaORM 连接时（旧路径）用 rusqlite 直连 SQLite FTS5。
-        let db_path_str = match crate::global_state::get_db_path() {
-            Some(p) => p,
-            None => return Ok(ToolResult::error("会话搜索不可用：未配置数据库路径")),
-        };
-        let db_file = db_path_str.strip_prefix("sqlite:").unwrap_or(&db_path_str);
-        let conn = rusqlite::Connection::open(db_file)
-            .map_err(|e| ToolError::execution_failed(format!("打开数据库失败: {}", e)))?;
-        let fts_sql = "SELECT m.conversation_id, snippet(messages_fts, 0, '>>', '<<', '...', 24) as snippet, bm25(messages_fts) as rank FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?";
-        let rows: Vec<String> = match conn.prepare(fts_sql) {
-            Ok(mut stmt) => stmt
-                .query_map(rusqlite::params![query, limit], |row| {
-                    let conv_id: String = row.get(0)?;
-                    let snippet: String = row.get(1)?;
-                    Ok(format!("[{}] {}", conv_id, snippet))
-                })
-                .map_err(|e| ToolError::execution_failed(e.to_string()))?
-                .filter_map(|r| r.ok())
-                .collect(),
-            Err(e) => return Ok(ToolResult::error(format!("会话搜索错误 (FTS5 不可用): {}", e))),
-        };
-        finish_search(query, rows)
+        // 无 SeaORM 连接 ⇒ 会话搜索不可用。
+        //
+        // 2026-09-16：**删除原先的「rusqlite 直连 SQLite FTS5」回退分支**。两条理由：
+        // ① 它按 db 路径另开一条 `rusqlite::Connection` 跑手写 SQL，违反项目原则
+        //    「除向量操作外，DB 访问一律走 SeaORM 实体」；
+        // ② 它**不可达**（死路径）：`set_sea_db`（`src/init/database.rs:264`）与
+        //    `set_db_path`（`:204`）在**同一个初始化函数内无条件执行**，且 `create_pool`
+        //    失败会经 `?` 直接中止启动 ⇒ 不存在「有 db_path 而无 sea_db」的状态。
+        //    （`set_db_path` 全仓仅此一处调用。）
+        Ok(ToolResult::error("会话搜索不可用：数据库连接未初始化"))
     }
 }
 

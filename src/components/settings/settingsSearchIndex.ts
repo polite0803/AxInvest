@@ -1518,4 +1518,24 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
       },
     ],
   },
+  {
+    // P2「能力域」面板（PLAN-domain-single-source.md §9.3 P2-⑤）。
+    // 刻意**只登记板块级**关键词、不登记 `items`：面板按域渲染 9 行，
+    // 项级 `itemKey`（形如 `capabilityDomains:enabled`）会在 9 行上重复，
+    // 而搜索结果点击靠 `querySelector('[data-search-key=...]')` 定位
+    // ⇒ 只能命中第一行，跳转语义是错的。宁可不给项级入口。
+    section: "capabilityDomains",
+    group: "extensions",
+    keywords: [
+      i18n.t("settingsSearch.capabilityDomains.title"),
+      "capability domain",
+      i18n.t("settingsSearch.capabilityDomains.domain"),
+      "domain",
+      i18n.t("settingsSearch.capabilityDomains.alias"),
+      "alias",
+      i18n.t("settingsSearch.capabilityDomains.enable"),
+      "enable",
+      "disable",
+    ],
+  },
 ];

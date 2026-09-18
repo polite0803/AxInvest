@@ -304,7 +304,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
     aiChatSend,
     aiChatCancel,
     aiChatClear,
-    // applyAiChatAction,
     exportTemplate,
     importTemplate,
     loadTemplates,
@@ -313,19 +312,13 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
 
   useEffect(() => {
     hasAutoLaidOutRef.current = false;
-    console.warn("[WorkflowEditor] useEffect trigger: templateId=", templateId, "isSystemTemplate=", isSystemTemplate);
     if (templateId) {
-      console.warn("[WorkflowEditor] Loading template:", templateId, "with includeSystem:", isSystemTemplate);
       loadTemplate(templateId, isSystemTemplate)
-        .then(() => {
-          console.warn("[WorkflowEditor] Template loaded successfully");
-        })
         .catch((err) => {
           console.error("[WorkflowEditor] loadTemplate failed:", err);
           logIpcError("WorkflowEditor: loadTemplate")(err);
         });
     } else {
-      console.warn("[WorkflowEditor] initNewTemplate (no templateId)");
       initNewTemplate();
     }
   }, [templateId, isSystemTemplate, loadTemplate, initNewTemplate]);
@@ -349,12 +342,6 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
   const updateNodeInternals = useUpdateNodeInternals();
 
   useEffect(() => {
-    console.warn(
-      "[WorkflowEditor] Layout effect trigger: computedFlowNodes.length=",
-      computedFlowNodes.length,
-      "isInitialized=",
-      isInitialized,
-    );
     if (isDraggingRef.current || suppressRebuildRef.current) { return; }
 
     setRNodes(computedFlowNodes);
@@ -2108,6 +2095,7 @@ export const WorkflowEditor: React.FC<WorkflowEditorProps> = ({
               onRecommendNodes={recommendNodes}
               onClose={() => setAiPanelVisible(false)}
               selectedNodeId={selectedNodeId}
+              selectedNodeIds={selectedNodeIds.size > 0 ? Array.from(selectedNodeIds) : undefined}
               selectedNodePrompt={selectedNodeId
                 ? (nodes.find(n => n.id === selectedNodeId) as unknown as { config?: { systemPrompt?: string } }) // SAFE: accessing config.systemPrompt on WorkflowNode union
                   ?.config?.systemPrompt ?? null

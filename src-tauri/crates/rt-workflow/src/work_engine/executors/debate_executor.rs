@@ -90,6 +90,28 @@ impl NodeExecutorTrait for DebateExecutor {
         let mut round_outputs: Vec<HashMap<String, serde_json::Value>> = Vec::new();
         let mut prev_round_snapshot: Option<Vec<serde_json::Value>> = None;
 
+        // A2（2026-09-14）：如实统计辩手失败，取代旧的硬编码 `"status": "completed"`。
+        //
+        // 旧行为：无论几个辩手失败，容器输出恒定 `status="completed"` —— 与
+        // `debate_body_dispatch` 已把该子节点标成 `NodeStatus::Failed` 的事实
+        // 自相矛盾。后果两层：
+        //   ① 下游（quality-gate / v-validate）拿到「成功」表象 + 残缺内容，
+        //      质量闸门失去拦截依据；
+        //   ② 排障只能人肉翻 `rounds[].<step>.error`，601166 审计里 `bear-r3`
+        //      的 504 就是这样被藏了一整轮排查。
+        //
+        // ⚠️ 职责边界（重要）：本函数**不改变控制流**，仍返回 `Ok`。
+        //   - 「子节点失败 ⇒ 下游不继续」由主图的 fail-closed 级联负责
+        //     （`upstream ∈ {Failed, Skipped} ⇒ 下游标 Skipped`），用户裁决即此；
+        //   - 「失败重试」的粒度是**单个子节点**，在
+        //     `dispatch_container_body_with_retry` 里按该子节点自己的 `retry`
+        //     配置执行 —— **不是整个容器重试**。容器这一层只负责「说真话」。
+        //   - 因此这里刻意**不**在全部辩手失败时改返回 `Err`：那会引入第二个、
+        //     更粗粒度的重试层（容器级），把已成功的辩手也卷进重跑。
+        let mut attempted: u32 = 0;
+        let mut succeeded: u32 = 0;
+        let mut failed_debaters: Vec<serde_json::Value> = Vec::new();
+
         for round in 0..max_rounds {
             tracing::info!(
                 "Debate round {}/{} with {} debaters",
@@ -123,21 +145,30 @@ impl NodeExecutorTrait for DebateExecutor {
                         .insert("__debate_history__".to_string(), serde_json::json!(snapshot));
                 }
 
+                attempted += 1;
                 match dispatch_fn(step_id.clone(), round_ctx).await {
                     Ok(output) => {
+                        succeeded += 1;
                         round_results.insert(step_id.clone(), output.output);
                     },
                     Err(e) => {
+                        let err_text = e.to_string();
                         tracing::warn!(
                             "Debate debater '{}' failed in round {}: {}",
                             step_id,
                             round,
-                            e
+                            err_text
                         );
+                        // A2：失败明细单独收集，供最终输出如实汇报（不再只靠翻 rounds）。
+                        failed_debaters.push(serde_json::json!({
+                            "debater": step_id,
+                            "round": round,
+                            "error": err_text,
+                        }));
                         round_results.insert(
                             step_id.clone(),
                             serde_json::json!({
-                                "error": e.to_string(),
+                                "error": err_text,
                                 "round": round,
                             }),
                         );
@@ -166,10 +197,36 @@ impl NodeExecutorTrait for DebateExecutor {
                 Some(round_results.values().cloned().collect::<Vec<serde_json::Value>>());
         }
 
+        // 状态三档（A2）：全成功 completed / 部分成功 degraded / 全失败 failed。
+        // 旧实现恒定 "completed"，是「报错但仍成功」的典型 fail-open 说谎字段。
+        let status = if failed_debaters.is_empty() {
+            "completed"
+        } else if succeeded == 0 {
+            "failed"
+        } else {
+            "degraded"
+        };
+        let degraded = !failed_debaters.is_empty();
+        if degraded {
+            tracing::warn!(
+                workflow = "debate",
+                status,
+                failed = failed_debaters.len(),
+                attempted,
+                rounds_used = round_outputs.len(),
+                max_rounds,
+                "辩论容器降级完成：有辩手失败，内容不完整（下游质量闸门应据此拦截）"
+            );
+        }
+
         let final_output = serde_json::json!({
-            "status": "completed",
+            "status": status,
+            "degraded": degraded,
             "total_rounds": round_outputs.len(),
             "max_rounds": max_rounds,
+            "attempted": attempted,
+            "succeeded": succeeded,
+            "failed_debaters": failed_debaters,
             "rounds": round_outputs,
             "consensus": super::build_round_consensus(&round_outputs),
         });

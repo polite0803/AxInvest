@@ -832,6 +832,10 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
 ///   - 不需要 stock_code 输入（自驱动，从市场数据发现趋势）
 ///   - 不写 stock_analyses 表
 ///   - 返回候选股清单（而非单只股票的分析结论）
+///
+/// `run_id`：由前端生成的单次运行标识，原样回灌到所有事件（step/completed/failed）
+/// 的 `runId` 字段。前端据此丢弃其它运行（并发/残留）的事件，避免进度串台。
+/// 不传时退化为 workflow id，保持对旧调用方可用。
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "运行Serenity瓶颈筛选工作流")]
 #[tauri::command]
 pub async fn run_serenity_screening(
@@ -839,6 +843,7 @@ pub async fn run_serenity_screening(
     state: State<'_, AppState>,
     as_of_date: Option<String>,
     themes: Option<Vec<String>>,
+    run_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let engine = Arc::clone(&state.work_engine);
 
@@ -846,7 +851,7 @@ pub async fn run_serenity_screening(
     let as_of_ctx = parse_asof_param(as_of_date.clone())?;
 
     // 运行前确保模板为最新版（幂等：版本已是最新则跳过）。
-    // 修复：启动时 seed 在异步任务中执行（lib.rs:446），失败被吞掉（mod.rs:471 只 log）。
+    // 修复：启动时 seed 在异步任务中执行（src/lib.rs:446），失败被吞掉（src/lib.rs:449 只 log）。
     // 若数据库停留在旧版本（如 v2 缺少 baseline_* input_mapping），
     // Rhai 脚本会报 "Variable not found: baseline_semi"。此处兜底重新 seed。
     crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(state.harness.db())
@@ -903,13 +908,18 @@ pub async fn run_serenity_screening(
     let wf_id = workflow.id.clone();
     let wf_id_ret = wf_id.clone();
     let app_h = app.clone();
+    // 事件运行标识：优先用前端传入的 runId（前端按此过滤串台事件），
+    // 未传时退化为 workflow id（旧调用方仍可用）。
+    let event_run_id = run_id.clone().unwrap_or_else(|| wf_id.clone());
 
     // 3. 进度回调
     let progress_app = app.clone();
     let progress_wf_id = wf_id.clone();
+    let progress_run_id = event_run_id.clone();
     let progress_cb: ProgressCallback = Arc::new(move |event: StepProgressEvent| {
         let app = progress_app.clone();
         let wf_id = progress_wf_id.clone();
+        let run_id = progress_run_id.clone();
         Box::pin(async move {
             // 过滤 streaming 增量（AgentExecutor 每 2s 一次）：Serenity 执行日志
             // 只关心节点级状态切换，透传会以全量文本刷屏。
@@ -918,6 +928,7 @@ pub async fn run_serenity_screening(
             }
             let payload = serde_json::json!({
                 "workflowId": wf_id,
+                "runId": run_id,
                 "type": "serenity-screening",
                 "nodeId": event.node_id,
                 "status": event.status,
@@ -929,6 +940,14 @@ pub async fn run_serenity_screening(
                 // 用户无法判断节点是否拿到真实数据。
                 "output": event.output,
                 "error": event.error,
+                // 与 `stock_workflow/core.rs` 的 `workflow-step-done` 对齐（同一个映射函数，
+                // 见 `super::core::node_error_code` 的可见性注释）：
+                // **`error` 负责展示、`errorCode` 负责判定** —— 前端不得再用
+                // `error.startsWith("EXECUTION_CANCELLED")` 这类子串嗅探反推语义。
+                // `None`（running/completed）⇒ 序列化为 `null`，表示「本事件无失败」；
+                // 消费端须用 `typeof errorCode === "string"` 判定，别把 `null` 当兜底码。
+                "errorCode": super::core::node_error_code(event.error_code.as_deref())
+                    .map(|(c, _)| c),
             });
             let _ = app.emit("serenity-screening-step", payload);
         })
@@ -1193,6 +1212,11 @@ pub async fn run_serenity_screening(
             // ── 持久化 Serenity 候选到 reco_picks 表（style="serenity"）──
             // 先持久化再 emit 事件，确保数据一致性
             let mut persistence_success = true;
+            // 结构化三元组：`persistence_stock_code` = params（哪只）、`persistence_detail` = 技术详情（DB 原文）。
+            // 主文案由**码**决定（前端 `translateFailureText` 取 11 语言译文）——
+            // 此前这里是 `format!("写入 {} 失败: {e}")` 的自由文本，中文硬编码：
+            // ① 非中文界面看到中文；② 「哪只 + 为什么」揉进一个串，无法只本地化主文案而保留技术详情。
+            let mut persistence_stock_code = String::new();
             let mut persistence_detail = String::new();
             // best-effort：失败只记日志，不影响返回结果
             {
@@ -1301,7 +1325,12 @@ pub async fn run_serenity_screening(
                     if let Err(e) = pick.insert(db).await {
                         tracing::warn!("[serenity] 写入 reco_picks 失败 ({}): {e}", code);
                         persistence_success = false;
-                        persistence_detail = format!("写入 {} 失败: {}", code, e);
+                        // 只保留**首个**失败的结构化三元组；多只失败时上方逐只 `warn!` 已记录全量原因。
+                        // 此前为覆盖赋值 ⇒ 多只失败只留最后一只的整句，既不完整又不可本地化。
+                        if persistence_stock_code.is_empty() {
+                            persistence_stock_code = code.to_string();
+                            persistence_detail = e.to_string();
+                        }
                     }
                     // 构建全量数据缓存
                     detail_cache.insert(
@@ -1337,7 +1366,11 @@ pub async fn run_serenity_screening(
                 "partial_failure"
             };
             if !persistence_success {
-                tracing::warn!("[serenity] 持久化部分失败: {}", persistence_detail,);
+                tracing::warn!(
+                    "[serenity] 持久化部分失败: 写入 {} 失败: {}",
+                    persistence_stock_code,
+                    persistence_detail
+                );
             }
             // v47: 根据是否有用户主题判断 source
             let source = if themes.as_ref().is_some_and(|t| !t.is_empty()) {
@@ -1349,12 +1382,23 @@ pub async fn run_serenity_screening(
                 "serenity-screening-completed",
                 serde_json::json!({
                     "workflowId": wf_id_ret,
+                    "runId": event_run_id.clone(),
                     "status": persistence_status,
                     "result": candidates,
                     "candidates": candidate_array,
                     "trends": trends_list,
                     "emptyReason": empty_reason,
                     "source": source,
+                    "persistenceCode": if persistence_success {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(wf_err::PERSIST_FAILED)
+                    },
+                    "persistenceStockCode": if persistence_success {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(persistence_stock_code)
+                    },
                     "persistenceError": if persistence_success {
                         serde_json::Value::Null
                     } else {
@@ -1380,13 +1424,19 @@ pub async fn run_serenity_screening(
             }))
         },
         Err(e) => {
+            // 结构化码：复用 `core.rs::workflow_error_code`（覆盖 `WorkflowError` 全部 10 个变体，
+            // 故**无需新增码**）。与 `error` 的分工：**码负责判定与本地化、`error` 负责技术详情** ——
+            // 后者是 `WorkflowError::Display` 原文中文化后的整句，非中文界面不该只看到它。
+            let (code, _category) = super::core::workflow_error_code(&e);
             let err_msg = format!("Serenity 筛选工作流失败: {e}");
             let _ = app_h.emit(
                 "serenity-screening-completed",
                 serde_json::json!({
                     "workflowId": wf_id_ret,
+                    "runId": event_run_id.clone(),
                     "status": "failed",
                     "error": err_msg,
+                    "code": code,
                 }),
             );
             Err(err_msg)

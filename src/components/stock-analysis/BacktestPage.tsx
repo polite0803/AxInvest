@@ -7,10 +7,7 @@ import { PageHeader } from "./_shared/PageHeader";
 import { BacktestChart } from "./BacktestChart";
 import { BacktestPanel } from "./BacktestPanel";
 import { HistoricalAnalysisPanel } from "./HistoricalAnalysisPanel";
-import { MarketSimPanel } from "./MarketSimPanel";
-import { MonteCarloPanel } from "./MonteCarloPanel";
 import { PnLHistogram, SectorAllocationDonut } from "./PortfolioCharts";
-import { QuantSimPanel } from "./QuantSimPanel";
 import { QuickBacktestPanel } from "./QuickBacktestPanel";
 import { RecoSignalTimeline } from "./RecoSignalTimeline";
 import { RecoStrategyMatrix } from "./RecoStrategyMatrix";
@@ -21,6 +18,10 @@ import { WhatIfBacktest } from "./WhatIfBacktest";
  * 覆盖:BacktestPanel(全量回测统计)+ HistoricalAnalysisPanel(历史分析列表 + 单次回测)
  * + WhatIfBacktest(参数修改回测)
  * analysisId 可选:BacktestPage 默认无聚焦分析,展示历史列表;有 store 当前 analysis 时,会显示其 blackboard snapshot
+ *
+ * 模拟仿真三个面板（市场模拟 / 蒙特卡洛 / 量化仿真）已于 2026-09-14 迁出，
+ * 现挂在股票分析页的「模拟仿真」标签下（见 `SimulationTabContent.tsx`）——
+ * 它们属单股分析动作，不属于回测验证。
  */
 export function BacktestPage() {
   const { t } = useTranslation();
@@ -59,21 +60,6 @@ export function BacktestPage() {
                     {selectedStrategy && <RecoSignalTimeline strategyId={selectedStrategy} />}
                   </div>
                 ),
-              },
-              {
-                key: "simulation",
-                label: `🏭 ${t("stockAnalysis.backtest.tabSimulation")}`,
-                children: <MarketSimPanel />,
-              },
-              {
-                key: "mc",
-                label: `🎲 ${t("stockAnalysis.backtest.tabMonteCarlo")}`,
-                children: <MonteCarloPanel />,
-              },
-              {
-                key: "quant_sim",
-                label: `🤖 ${t("stockAnalysis.backtest.tabQuantSim")}`,
-                children: <QuantSimPanel />,
               },
               {
                 key: "charts",

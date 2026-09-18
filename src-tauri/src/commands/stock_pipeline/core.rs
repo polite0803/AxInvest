@@ -121,17 +121,34 @@ impl PipelineConfig {
     }
 }
 
-/// 管道执行内部函数（供 Tauri 命令和 cron 调用）
+/// 管道节点进度载荷（结构化）。
+///
+/// **为什么是结构体而不是拼好的字符串**：历史实现用
+/// `format!("{}: 执行中", event.node_id)` 拼出中文塞进 `detail`，经 `pipeline-step`
+/// 事件由 `PipelinePage` **直接渲染** ⇒ 中文硬编码漏到界面（同一处还混着英文
+/// `"failed"`/`"timeout"`，三语混杂），且非中文用户看到中文。
+/// 现在**只在产出端发机器可读值**（`node_id` + `status`），**文案由前端按 i18n 组装**
+/// （`pipeline.stepRunning` 等）—— 与 `error`/`errorCode` 的分工同一原则：
+/// 结构化值负责判定与本地化，产出端不产出人类可读文本。
+#[derive(Debug, Clone)]
+pub struct PipelineStepInfo {
+    /// 工作流节点 ID（如 `p1-discovery`）
+    pub node_id: String,
+    /// 节点状态：`running` / `completed` / `failed` / `timeout`（原样透传，不加工）
+    pub status: String,
+}
+
+/// 管道执行内部函数（供 Tauri 命令调用）
 ///
 /// 使用 WorkEngine 加载工作流模板并执行，与股票分析工作流保持一致。
-/// 进度通过可选的回调推送。
+/// 进度通过可选的回调推送（载荷为 [`PipelineStepInfo`]，不含人类可读文案）。
 pub async fn run_stock_pipeline_inner(
     db: &sea_orm::DatabaseConnection,
     client: &Arc<axagent_astock_data::AStockClient>,
     engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
     config: &PipelineConfig,
     as_of_date: Option<&str>,
-    progress_callback: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
+    progress_callback: Option<Arc<dyn Fn(&str, PipelineStepInfo) + Send + Sync>>,
 ) -> Result<PipelineResult, String> {
     let run_id = uuid::Uuid::new_v4().to_string();
     let run_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
@@ -161,13 +178,9 @@ pub async fn run_stock_pipeline_inner(
     // 构建进度回调
     let progress_cb: ProgressCallback = Arc::new(move |event: StepProgressEvent| {
         if let Some(cb) = progress_callback.as_ref() {
-            let step = match event.status.as_str() {
-                "running" => format!("{}: 执行中", event.node_id),
-                "completed" => format!("{}: 完成", event.node_id),
-                s if s == "failed" || s == "timeout" => format!("{}: {}", event.node_id, s),
-                _ => event.node_id.clone(),
-            };
-            cb("pipeline_step", &step);
+            // 只透传结构化值：不在这里拼 `"<nodeId>: 执行中"` 这类人类可读文案
+            // （文案由前端 i18n 组装，见 `PipelineStepInfo` 的说明）。
+            cb("pipeline_step", PipelineStepInfo { node_id: event.node_id, status: event.status });
         }
         Box::pin(async move {})
     });
@@ -445,12 +458,16 @@ pub async fn run_stock_pipeline(
     let config = PipelineConfig::default();
 
     let app_handle = app.clone();
-    let progress_callback = Arc::new(move |step: &str, detail: &str| {
+    let progress_callback = Arc::new(move |step: &str, info: PipelineStepInfo| {
         let _ = app_handle.emit(
             "pipeline-step",
+            // 结构化载荷：`nodeId` + `status` 由前端按 i18n 组装文案。
+            // 不再发拼接好的中文 `detail`（前端 `PipelineStepEvent` 里该字段已标 `@deprecated`，
+            // 仅作旧载荷的展示兜底 —— 后端从这里起不再产出它）。
             json!({
                 "step": step,
-                "detail": detail,
+                "nodeId": info.node_id,
+                "status": info.status,
                 "timestamp": chrono::Utc::now().timestamp_millis()
             }),
         );

@@ -92,19 +92,25 @@ pub fn current_percentile(values: &[f64], current: f64) -> f64 {
 }
 
 /// 单指标计算:从 snapshots 提取有效值 → 计算分位 → 用 current 计算当前位置。
+///
+/// **非正值一律视为无效**：PE / PB / PS ≤ 0 意味着亏损、净资产为负或营收为负，
+/// 此时"分位"没有金融含义。未过滤时实测会出现 P5=-119、P25=-6.8 这类负分位带，
+/// 把亏损公司（如 600876 当前 PE=-4.31）误判成"估值偏低"。
+/// 注意 `current` 本身仍原样返回（前端要展示"当前 PE=-4.31"），
+/// 仅当其 > 0 时才计算分位，否则 `current_percentile` = None（前端显示 "—"）。
 pub fn metric_band_from(samples: &[Option<f64>], current: Option<f64>) -> MetricBand {
-    let values: Vec<f64> = samples.iter().filter_map(|v| *v).collect();
+    let values: Vec<f64> = samples.iter().filter_map(|v| *v).filter(|v| *v > 0.0).collect();
     let sample_size = values.len();
     if sample_size == 0 {
         return MetricBand {
             percentiles: [0.0; 7],
             current,
-            current_percentile: current.map(|_| 50.0),
+            current_percentile: None,
             sample_size: 0,
         };
     }
     let percentiles = compute_percentiles(&values, &PERCENTILE_KEYS);
-    let current_percentile = current.map(|c| current_percentile(&values, c));
+    let current_percentile = current.filter(|c| *c > 0.0).map(|c| current_percentile(&values, c));
     MetricBand { percentiles, current, current_percentile, sample_size }
 }
 
@@ -133,8 +139,18 @@ pub fn compute_valuation_band<S: FinancialSnapshotLike>(
         verdict_from_bands(&pe, &pb)
     };
 
+    // note 需区分两种"样本不足"：数据本来就少 vs 因亏损/负值被剔除。
+    // 后者（长期亏损股）若只说"历史样本不足"，会让人误以为数据没拉到。
+    let pe_dropped = pe_vals.iter().filter(|v| v.is_some()).count() - pe.sample_size;
     let note = if pe.sample_size < 20 {
-        Some(format!("历史样本不足(PE {} < 20),分位仅供参考", pe.sample_size))
+        if pe_dropped > 0 {
+            Some(format!(
+                "PE 有效样本不足（剔除 {} 条亏损/负值后仅 {} < 20），分位仅供参考",
+                pe_dropped, pe.sample_size
+            ))
+        } else {
+            Some(format!("历史样本不足(PE {} < 20),分位仅供参考", pe.sample_size))
+        }
     } else {
         None
     };
@@ -341,5 +357,48 @@ mod tests {
         assert_eq!(band.metric_pe.sample_size, 15);
         assert_eq!(band.verdict, "insufficient");
         assert!(band.note.is_some());
+    }
+
+    #[test]
+    fn band_ignores_non_positive_values() {
+        // 亏损期样本（PE/PB < 0）必须剔除：否则出现负分位带，
+        // 并把"当前仍亏损"的公司误判为估值偏低（实测 600876 P5=-119 / 当前 PE=-4.31）。
+        let mut samples = sample_data(40);
+        for (i, s) in samples.iter_mut().enumerate() {
+            if i < 10 {
+                s.pe = Some(-5.0 - i as f64);
+                s.pb = Some(-1.0);
+            }
+        }
+        let current = MockSnap {
+            date: "2025-01-01".to_string(),
+            pe: Some(-3.0),
+            pb: Some(2.0),
+            ps: Some(3.0),
+        };
+        let band = compute_valuation_band("000008", &samples, Some(&current));
+        // 有效样本 = 40 - 10
+        assert_eq!(band.metric_pe.sample_size, 30);
+        // 分位带必须全为正
+        assert!(band.metric_pe.percentiles.iter().all(|v| *v > 0.0));
+        // current 原样保留（前端要展示"当前 PE=-3.0"），但不参与分位计算
+        assert_eq!(band.metric_pe.current, Some(-3.0));
+        assert!(band.metric_pe.current_percentile.is_none());
+        assert_ne!(band.verdict, "insufficient");
+    }
+
+    #[test]
+    fn band_note_distinguishes_dropped_from_missing() {
+        // 全部 PE 为负 → 有效样本 0；note 必须说明是"剔除负值"而非"数据没拉到"
+        let mut samples = sample_data(30);
+        for s in samples.iter_mut() {
+            s.pe = Some(-8.0);
+        }
+        let band = compute_valuation_band("000009", &samples, None);
+        assert_eq!(band.metric_pe.sample_size, 0);
+        assert_eq!(band.verdict, "insufficient");
+        assert!(band.metric_pe.percentiles.iter().all(|v| *v == 0.0));
+        let note = band.note.unwrap_or_default();
+        assert!(note.contains("剔除"), "note 应说明剔除了负值样本: {note}");
     }
 }

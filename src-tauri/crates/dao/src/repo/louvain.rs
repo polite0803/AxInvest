@@ -56,6 +56,8 @@ impl LouvainDetector {
                 modularity: 1.0,
                 num_communities: 1,
                 color_palette: LouvainResult::default_palette(),
+                // 本分支是「图上只有 0~1 个节点」，实体侧社区由调用方另行附加
+                entity_communities: None,
             };
         }
 
@@ -179,6 +181,8 @@ impl LouvainDetector {
             modularity,
             num_communities,
             color_palette: LouvainResult::default_palette(),
+            // 通用检测入口不涉及「实体侧」这一概念：该字段由 wiki 社区命令按需附加
+            entity_communities: None,
         }
     }
 
@@ -335,44 +339,16 @@ mod tests {
         ];
 
         let edges = vec![
-            GraphEdge {
-                source: "a".to_string(),
-                target: "b".to_string(),
-                edge_type: "link".to_string(),
-            },
-            GraphEdge {
-                source: "a".to_string(),
-                target: "c".to_string(),
-                edge_type: "link".to_string(),
-            },
-            GraphEdge {
-                source: "b".to_string(),
-                target: "c".to_string(),
-                edge_type: "link".to_string(),
-            },
-            GraphEdge {
-                source: "d".to_string(),
-                target: "e".to_string(),
-                edge_type: "link".to_string(),
-            },
-            GraphEdge {
-                source: "d".to_string(),
-                target: "f".to_string(),
-                edge_type: "link".to_string(),
-            },
-            GraphEdge {
-                source: "e".to_string(),
-                target: "f".to_string(),
-                edge_type: "link".to_string(),
-            },
-            GraphEdge {
-                source: "b".to_string(),
-                target: "d".to_string(),
-                edge_type: "link".to_string(),
-            },
+            GraphEdge::structural("a".to_string(), "b".to_string(), "link"),
+            GraphEdge::structural("a".to_string(), "c".to_string(), "link"),
+            GraphEdge::structural("b".to_string(), "c".to_string(), "link"),
+            GraphEdge::structural("d".to_string(), "e".to_string(), "link"),
+            GraphEdge::structural("d".to_string(), "f".to_string(), "link"),
+            GraphEdge::structural("e".to_string(), "f".to_string(), "link"),
+            GraphEdge::structural("b".to_string(), "d".to_string(), "link"),
         ];
 
-        LinkGraph::from_graph_data(GraphData { nodes, edges })
+        LinkGraph::from_graph_data(GraphData::new(nodes, edges))
     }
 
     #[test]

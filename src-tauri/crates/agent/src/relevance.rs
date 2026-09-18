@@ -207,19 +207,11 @@ mod tests {
         ];
 
         let edges = vec![
-            GraphEdge {
-                source: "a".to_string(),
-                target: "b".to_string(),
-                edge_type: "link".to_string(),
-            },
-            GraphEdge {
-                source: "b".to_string(),
-                target: "c".to_string(),
-                edge_type: "link".to_string(),
-            },
+            GraphEdge::structural("a".to_string(), "b".to_string(), "link"),
+            GraphEdge::structural("b".to_string(), "c".to_string(), "link"),
         ];
 
-        let data = GraphData { nodes, edges };
+        let data = GraphData::new(nodes, edges);
         LinkGraph::from_graph_data(data)
     }
 

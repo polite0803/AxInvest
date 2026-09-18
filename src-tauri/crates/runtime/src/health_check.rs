@@ -190,9 +190,6 @@ impl HealthCheck for ReadinessCheck {
 }
 
 pub struct DatabaseHealthCheck {
-    /// 预留字段：真实 DB 探活（TcpStream/sqlx 连接测试）需 DB 驱动依赖，
-    /// runtime crate 未引入；当前 check() 返回恒定健康态，接入驱动后消费。
-    #[allow(dead_code)]
     db_url: String,
 }
 
@@ -210,7 +207,12 @@ impl HealthCheck for DatabaseHealthCheck {
 
     async fn check(&self) -> HealthCheckResult {
         let start = Instant::now();
-        HealthCheckResult::healthy().with_latency(start.elapsed().as_millis() as u64)
+        // 真实探活：复用 axagent-dao 的只读连接（不跑迁移/收敛，零写入），
+        // 成功即 DB 可达；失败返回 unhealthy 并附原因。
+        match axagent_dao::db::connect_without_initialization(&self.db_url).await {
+            Ok(_) => HealthCheckResult::healthy().with_latency(start.elapsed().as_millis() as u64),
+            Err(e) => HealthCheckResult::unhealthy(&format!("数据库连接失败: {e}")),
+        }
     }
 }
 

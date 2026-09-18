@@ -1,0 +1,101 @@
+version: 1
+domain_pack_id: "sales-growth"
+domain_pack_name: "销售增长"
+
+reflection:
+  enabled: true
+  min_quality_score: 60.0
+  auto_reflect_on_failure: true
+  dimensions:
+    - name: "quality"
+      weight: 0.3
+      description: "执行结果质量"
+    - name: "efficiency"
+      weight: 0.2
+      description: "执行效率"
+    - name: "completeness"
+      weight: 0.3
+      description: "任务完成度"
+    - name: "innovation"
+      weight: 0.2
+      description: "创新性与改进建议"
+
+evolution:
+  workflow_evolver:
+    enabled: false
+    max_iterations: 10
+    improvement_threshold: 0.1
+  code_evolver:
+    enabled: false
+    safety_check: true
+    auto_apply: false
+
+self_improvement:
+  enabled: false
+  schedule: "weekly"
+
+reinforcement_learning:
+  enabled: false
+  learning_rate: 0.01
+  discount_factor: 0.95
+  exploration_rate: 0.1
+  reward_weights:
+    quality: 0.4
+    efficiency: 0.3
+    user_satisfaction: 0.3
+  experience_batch_size: 32
+  update_interval: 100
+  auto_save: true
+
+adapter:
+  reflection_template:
+    id: "sales-growth-default"
+    name: "销售增长反思模板"
+    quality_weights:
+      task_completion: 0.25
+      output_quality: 0.25
+      efficiency: 0.3
+      cost_efficiency: 0.2
+    checkpoints:
+      - id: "conversion"
+        name: "转化率"
+        dimension: "conversion"
+        description: "评估线索到成交的转化效率"
+        weight: 0.4
+      - id: "lead-quality"
+        name: "线索质量"
+        dimension: "quality"
+        description: "评估目标客户匹配度"
+        weight: 0.3
+      - id: "response-speed"
+        name: "响应速度"
+        dimension: "speed"
+        description: "评估跟进和响应的及时性"
+        weight: 0.3
+    prompts:
+      - "请评估本次销售活动的转化效果"
+      - "线索质量是否达标？"
+      - "跟进响应是否及时？"
+  evolution_constraints: {}
+  acceptance_criteria:
+    - id: "sg-conversion"
+      name: "转化率"
+      description: "线索转化率达到目标"
+      dimension: "conversion"
+      threshold: 0.7
+      is_critical: true
+      weight: 0.4
+    - id: "sg-lead-quality"
+      name: "线索质量"
+      description: "目标客户符合 ICP"
+      dimension: "quality"
+      threshold: 0.8
+      is_critical: false
+      weight: 0.3
+    - id: "sg-response-time"
+      name: "响应时效"
+      description: "首次响应时间不超过 24 小时"
+      dimension: "speed"
+      threshold: 0.7
+      is_critical: false
+      weight: 0.3

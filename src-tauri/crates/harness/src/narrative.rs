@@ -143,11 +143,13 @@ pub struct ArcStage {
 #[serde(rename_all = "camelCase")]
 pub struct NarrativeArc {
     pub id: String,
+    #[serde(alias = "arc_type")]
     pub arc_type: ArcType,
     pub subject: String,
     pub want: String,
     pub need: String,
     pub stages: Vec<ArcStage>,
+    #[serde(alias = "current_progress")]
     pub current_progress: f32,
 }
 
@@ -202,10 +204,13 @@ impl NarrativeArc {
 #[serde(rename_all = "camelCase")]
 pub enum ConfluenceType {
     /// 冲突爆发：多条线索交汇产生激烈冲突
+    #[serde(alias = "conflict_burst")]
     ConflictBurst,
     /// 真相揭示：隐藏的真相被揭露
+    #[serde(alias = "reveal_truth")]
     RevealTruth,
     /// 视角转换：叙事视角发生重大转变
+    #[serde(alias = "shift_perspective")]
     ShiftPerspective,
 }
 
@@ -214,9 +219,13 @@ pub enum ConfluenceType {
 #[serde(rename_all = "camelCase")]
 pub struct ConfluencePoint {
     pub id: String,
+    #[serde(alias = "trigger_chapter")]
     pub trigger_chapter: u32,
+    #[serde(alias = "confluence_type")]
     pub confluence_type: ConfluenceType,
+    #[serde(alias = "involved_arcs")]
     pub involved_arcs: Vec<String>,
+    #[serde(alias = "involved_foreshadows")]
     pub involved_foreshadows: Vec<String>,
     pub impact: String,
 }
@@ -268,11 +277,15 @@ pub enum ForeshadowStatus {
 #[serde(rename_all = "camelCase")]
 pub struct Foreshadow {
     pub id: String,
+    #[serde(alias = "setup_chapter")]
     pub setup_chapter: u32,
+    #[serde(alias = "payoff_chapter")]
     pub payoff_chapter: Option<u32>,
     pub status: ForeshadowStatus,
     pub description: String,
+    #[serde(alias = "payoff_description")]
     pub payoff_description: Option<String>,
+    #[serde(alias = "related_arcs")]
     pub related_arcs: Vec<String>,
 }
 

@@ -4,6 +4,7 @@ use crate::decision::ScoringWeights;
 
 /// 回测使用的日 K 线数量（约 2 个交易年）。覆盖 analysis_date 后需有足够余量。
 const BACKTEST_KLINE_COUNT: u32 = 500;
+use crate::decision_action::{normalize_action, ActionKind};
 use axagent_harness::market_data::{AdjType, MarketDataProvider};
 use sea_orm::DatabaseConnection;
 
@@ -176,10 +177,23 @@ impl BacktestEngine {
         //   买入/增持 → 上涨为正确（return_pct > 0）
         //   减持/卖出 → 下跌为正确（return_pct < 0）
         //   持有/观望 → |return_pct| < 0.5% 为正确（窄幅震荡），超出则为判断错误
-        let was_correct = match decision_action {
-            "买入" | "增持" => return_pct > 0.0,
-            "减持" | "卖出" => return_pct < 0.0,
-            _ => return_pct.abs() < 0.5, // 持有：窄幅震荡算正确，超出算错
+        // ⚠️ P1-6(2026-09-14): 原判据只 match 中文 ⇒ 英文值域（`BUY`/`SELL`/`WAIT`）
+        //   与 dashboard 值域短语**全部落 `_`**，被当成「持有」——即「|收益|<0.5% 才算对」。
+        //   失真方向是系统性的：买入/卖出样本被判错、中性样本被判对，
+        //   回测准确率与策略权重进化同时被污染。现走 `decision_action::normalize_action`。
+        let was_correct = match normalize_action(decision_action) {
+            Some(ActionKind::Buy | ActionKind::Increase) => return_pct > 0.0,
+            Some(ActionKind::Sell | ActionKind::Reduce) => return_pct < 0.0,
+            // 持有 / 观望：都是「不改变方向」的结论 ⇒ 窄幅震荡算对
+            Some(ActionKind::Hold | ActionKind::Wait) => return_pct.abs() < 0.5,
+            // 不确定 / 缺失哨兵 / 未识别值域：本样本**没有可检验的方向结论**。
+            //   不得落进「持有」档 —— 那会把「无结论」按「窄幅 = 看对了」计分。
+            //   返回 Err 让批量入口 backtest_history 在归并前剔除该样本并告警（它已有 Err 分支）。
+            other => {
+                return Err(format!(
+                    "{stock_code} {analysis_date} 决策无方向结论（action={decision_action:?} → {other:?}），该样本不可回测"
+                ));
+            },
         };
 
         Ok(BacktestResult {
@@ -421,9 +435,12 @@ pub async fn optimize_weights(
     }
     let (mut buy, mut sell, mut hold) = (0u32, 0u32, 0u32);
     for a in &analyses {
-        match a.decision_action.as_deref() {
-            Some("买入") | Some("增持") => buy += 1,
-            Some("卖出") | Some("减持") => sell += 1,
+        // P1-6(2026-09-14): 本函数是同一文件里**第三处**中文字面量分类点（前两处为
+        // was_correct / backtest_history）。原先只认 4 个中文词 —— 英文值域全部落 _ 档
+        // 被计成「持有」，buy_r 因此恒偏低，下方权重调整静默走错分支。
+        match a.decision_action.as_deref().and_then(normalize_action) {
+            Some(k) if k.implies_buy() => buy += 1,
+            Some(ActionKind::Reduce | ActionKind::Sell) => sell += 1,
             _ => hold += 1,
         }
     }
@@ -433,8 +450,10 @@ pub async fn optimize_weights(
     let correct_avg = analyses
         .iter()
         .filter(|a| {
-            a.decision_action.as_deref() == Some("买入")
-                || a.decision_action.as_deref() == Some("增持")
+            a.decision_action
+                .as_deref()
+                .and_then(normalize_action)
+                .is_some_and(ActionKind::implies_buy)
         })
         .count();
     let adj = if buy_r > 0.5 && correct_avg as f64 / total > 0.5 {

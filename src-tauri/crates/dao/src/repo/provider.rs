@@ -218,6 +218,15 @@ pub async fn get_provider(db: &DatabaseConnection, id: &str) -> Result<ProviderC
     Ok(provider_from_entity(row, keys, models))
 }
 
+/// 轻量存在性查询：只读 `providers` 一行。
+///
+/// 与 [`get_provider`] 的区别是刻意不做 keys/models 的子查询（后者共 3 条 SQL）——
+/// 调用方只关心「这个 id 还在不在」的场景（例如校验某个容器绑定的 provider 是否
+/// 已成为悬空引用）不该付完整的组装成本。
+pub async fn provider_exists(db: &DatabaseConnection, id: &str) -> Result<bool> {
+    Ok(providers::Entity::find_by_id(id).one(db).await?.is_some())
+}
+
 pub async fn create_provider(
     db: &DatabaseConnection,
     input: CreateProviderInput,

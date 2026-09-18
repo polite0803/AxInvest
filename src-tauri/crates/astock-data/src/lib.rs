@@ -1302,7 +1302,10 @@ impl AStockClient {
             if self.vendor_has_credentials(name).await {
                 vendor_names_list.push(name.to_string());
             } else {
-                tracing::info!(
+                // 降噪：这是每次路由调用都会命中的常态分支（neodata/iwencai 在
+                // 本机从未配置凭据），用 info 级会把真实告警刷出视野——
+                // 荐股单轮扫描即可产生上百行本日志。排查凭据问题时看 debug。
+                tracing::debug!(
                     "[astock-data] vendor '{name}' 无凭据（neodata/iwencai），从路由链剔除"
                 );
             }
@@ -1311,6 +1314,11 @@ impl AStockClient {
 
         loop {
             let mut last_err = None;
+            // 本轮所有失败是否都属于「数据为空」（非故障）。
+            // 空数据代表数据源当前确实没有该标的的数据，重试同一批 vendor
+            // 不可能改变结果——继续走 1s/3s 退避重试纯属浪费时间
+            // （实锤：北向个股持仓全源永久为空，单只 8.5s 里有 4s 是无效退避）。
+            let mut round_all_empty = true;
 
             // 健康过滤：排除已降级的 vendor
             let healthy_names = self
@@ -1390,6 +1398,23 @@ impl AStockClient {
                             // 并非 vendor 本身故障。如果将其计入降级计数,会导致
                             // eastmoney 因 cls_flash 空数据被全局降级,进而影响
                             // news/money_flow/peers 等所有依赖 eastmoney 的工具。
+                            let is_empty_data = matches!(
+                                &e,
+                                DataError::VendorError { message, .. }
+                                    if {
+                                        let m = message.to_lowercase();
+                                        m.contains("为空")
+                                            || m.contains("返回空")
+                                            || m.contains("empty")
+                                            || m.contains("no data")
+                                            || m.contains("无数据")
+                                    }
+                            );
+                            // 只要有任意一次失败不是「空数据」，本轮就不是纯空数据结果，
+                            // 保留重试资格（网络抖动、限流等仍值得退避重试）
+                            if !is_empty_data {
+                                round_all_empty = false;
+                            }
                             match &e {
                                 DataError::RateLimited { .. } => {
                                     tracing::warn!(
@@ -1399,26 +1424,15 @@ impl AStockClient {
                                         name
                                     );
                                 },
-                                DataError::VendorError { message, .. } => {
-                                    let msg_lower = message.to_lowercase();
-                                    let is_empty_data = msg_lower.contains("为空")
-                                        || msg_lower.contains("返回空")
-                                        || msg_lower.contains("empty")
-                                        || msg_lower.contains("no data")
-                                        || msg_lower.contains("无数据");
-                                    if is_empty_data {
-                                        tracing::info!(
-                                            "[降级] {} {} {} 返回空数据(非故障)，不触发 vendor 降级",
-                                            route_key,
-                                            stock_code,
-                                            name
-                                        );
-                                    } else {
-                                        self.health_tracker
-                                            .record_failure(name, &e.to_string())
-                                            .await;
-                                    }
+                                DataError::VendorError { .. } if is_empty_data => {
+                                    tracing::info!(
+                                        "[降级] {} {} {} 返回空数据(非故障)，不触发 vendor 降级",
+                                        route_key,
+                                        stock_code,
+                                        name
+                                    );
                                 },
+                                // 非空数据的 VendorError 与其他错误类型同样计入健康窗口
                                 _ => {
                                     self.health_tracker.record_failure(name, &e.to_string()).await;
                                 },
@@ -1430,6 +1444,22 @@ impl AStockClient {
             }
 
             if retry_count < max_retries && last_err.is_some() {
+                // V55: 本轮全部失败都是「数据为空」（非故障）→ 跳过重试。
+                // 上面已经把空数据判定为「非 vendor 故障」（不降级），那它同样
+                // 不构成「可重试的瞬态故障」——同一批 vendor 对同一标的反复问
+                // 只会得到同一个空结果。V54 的 ≤2 vendor 规则只覆盖了数据源
+                // 稀少的场景，3 源全空的常见情形仍会白付 1s+3s 退避。
+                if round_all_empty {
+                    tracing::info!(
+                        "[retry-skip] {} {} 全部源返回空数据（非故障），跳过重试",
+                        route_key,
+                        stock_code
+                    );
+                    return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                        vendor: "all".into(),
+                        message: format!("{route_key} {stock_code} 所有数据源均无数据"),
+                    }));
+                }
                 // V54: 若可用的 vendor 数量 ≤ 2（即数据源单一或大部分已降级），
                 // 跳过重试。因为：1-2 个 vendor 全部首次尝试失败几乎不可能是瞬态问题
                 // （API 接口变更 / 数据为空），重试只是浪费 1s+3s 的退避延迟。
@@ -2223,6 +2253,48 @@ impl AStockClient {
                 })
             },
         }
+    }
+
+    /// 历史估值日序列（估值带的数据供应方）
+    ///
+    /// 复用 `financials` 的 vendor 顺序：目前仅 eastmoney 具备该能力（数据中心
+    /// RPT_VALUEANALYSIS_DET，逐交易日 PE/PB/PS），其余 vendor 走 trait 默认实现返回空。
+    /// 空结果按失败处理并继续尝试下一个源 —— 与 get_financials 同款语义，
+    /// 避免"假成功空数组"让调用方误判为"该股票没有历史估值"。
+    /// 缓存 12h：日频数据，当日收盘后才变化。
+    pub async fn get_valuation_history(
+        &self,
+        stock_code: &str,
+        years: u32,
+    ) -> Result<Vec<ValuationSnapshot>, DataError> {
+        let cache_key = Self::cache_key_for("valuation_history", &format!("{stock_code}:{years}"));
+        {
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Vec<ValuationSnapshot>>(&cached) {
+                    return Ok(data);
+                }
+            }
+        }
+        let vendor_names: Vec<String> =
+            self.routing.financials.iter().map(|n| n.to_string()).collect();
+        let sc = stock_code.to_string();
+        let result = self
+            .try_vendors_retry(stock_code, "valuation_history", &vendor_names, 2, |name, vendor| {
+                let sc = sc.clone();
+                Box::pin(async move {
+                    let rows = vendor.get_valuation_history(&sc, years).await?;
+                    if rows.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: name.to_string(),
+                            message: "历史估值序列返回空".into(),
+                        });
+                    }
+                    Ok(rows)
+                })
+            })
+            .await?;
+        self.cache_set_serialized(cache_key, &result, 12 * 3600).await;
+        Ok(result)
     }
 
     /// P2-B4: 对 vendor 返回的新闻列表填充 sentiment_score
@@ -4229,7 +4301,25 @@ impl AStockClient {
             .await
         {
             Ok(result) => Ok(result),
-            Err(_) => Ok(vec![]),
+            Err(e) => {
+                // P0-I(2026-09-12): 原实现是 `Err(_) => Ok(vec![])` —— 把「所有 vendor 全失败」
+                // 静默降级成「空数组」。下游（报告「大盘指数」板块 / 因子链）只能看到「没有数据」，
+                // 无法区分「指数行情源不可用」与「今天没有指数行情」。
+                //
+                // 603353 实证（模板 v37）：新增的 `t-index-quotes` 节点载荷恒为 `"[]"`，
+                // 报告「大盘指数」板块恒空；而同一 URL（`push2his/push2 stock/get?secid=1.000001`）
+                // 从宿主机直连**完全正常**返回（上证 3888.11）。⇒ 失败发生在 app 运行时，
+                // 且被 `eastmoney::get_index_quotes` 的 `Err(_) => continue` +
+                // `unwrap_or(Value::Null)` 与这里的 `Err(_)` **两处一起**吞掉，链路上零日志。
+                // fail-open 三问之③「是否本可补救却放弃」：是。
+                //
+                // 此处仅补可观测性（语义不变：仍返回空数组），
+                // 下一次运行的日志将直接指明是 429 / 连接级 / 还是 data=null。
+                tracing::warn!(
+                    "[astock-data] get_index_quotes 全部 vendor 失败，降级为空数组: {e}"
+                );
+                Ok(vec![])
+            },
         }
     }
 

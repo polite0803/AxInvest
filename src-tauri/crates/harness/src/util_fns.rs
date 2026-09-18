@@ -124,9 +124,86 @@ fn is_cjk(ch: char) -> bool {
     )
 }
 
+/// 生成 `n` 个 SQL 参数占位符（逗号分隔），按后端的方言产出。
+///
+/// # 为什么必须按 `backend` 产出，不能用 `bool is_pg`
+///
+/// 占位符方言是 **driver 协议层面** 的差异：PostgreSQL 用 `$1, $2, …`，
+/// SQLite / MySQL 用 `?, ?, …`。`Statement::from_sql_and_values` **不做转换** ——
+/// 它只把 `sql` 文本、`values`、`backend` 三者一起交给 driver。
+///
+/// 因此凡是拼接含参 SQL 的地方，**SQL 文本里的占位符与后端必须一致**：
+/// - 在 PG 上写 `?` ⇒ 语法错误
+/// - 在 SQLite 上写 `$1` ⇒ 语法错误（`$` 不是 SQLite 的参数前缀）
+///
+/// 反面教材（本仓库真实存在过的三类缺陷，均已修）：
+/// ① 把值直接 `format!` 拼进 SQL 文本（`VALUES (..., {"k":"v"}, ...)` ⇒ 语法错误，
+///    且引号/反斜杠注入）；
+/// ② 后端动态取 `get_database_backend()`，SQL 却硬编码 `$1` ⇒ SQLite 路径必崩；
+/// ③ 后端硬编码 `DbBackend::Sqlite`，SQL 却是 `$1` ⇒ PG 路径语义错。
+///
+/// `n == 0` 返回空串（两侧一致），可用于「无条件子句」的拼接。
+pub fn bind_placeholders(n: usize, backend: sea_orm::DbBackend) -> String {
+    match backend {
+        sea_orm::DbBackend::Postgres => {
+            (1..=n).map(|i| format!("${i}")).collect::<Vec<_>>().join(", ")
+        },
+        _ => vec!["?"; n].join(", "),
+    }
+}
+
+/// 生成第 `index`（从 1 开始）个占位符，用于只参数化部分条件的场景。
+///
+/// 与 [`bind_placeholders`] 同源，避免调用点各自手写 `"$1"` 字面量。
+pub fn placeholder_at(index: usize, backend: sea_orm::DbBackend) -> String {
+    match backend {
+        sea_orm::DbBackend::Postgres => format!("${index}"),
+        _ => "?".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bind_placeholders_postgres_uses_dollar_numbering() {
+        assert_eq!(bind_placeholders(1, sea_orm::DbBackend::Postgres), "$1");
+        assert_eq!(bind_placeholders(3, sea_orm::DbBackend::Postgres), "$1, $2, $3");
+    }
+
+    #[test]
+    fn bind_placeholders_sqlite_uses_question_marks() {
+        assert_eq!(bind_placeholders(1, sea_orm::DbBackend::Sqlite), "?");
+        assert_eq!(bind_placeholders(3, sea_orm::DbBackend::Sqlite), "?, ?, ?");
+    }
+
+    /// `n == 0` 两侧必须都返回空串 —— 否则「无条件子句」的拼接会出现
+    /// PG 空、SQLite 吐出 `" "` 之类的方言不对称。
+    #[test]
+    fn bind_placeholders_zero_is_empty_on_both_backends() {
+        for backend in [sea_orm::DbBackend::Postgres, sea_orm::DbBackend::Sqlite] {
+            assert_eq!(bind_placeholders(0, backend), "", "backend = {backend:?}");
+        }
+    }
+
+    #[test]
+    fn placeholder_at_matches_backend_dialect() {
+        assert_eq!(placeholder_at(1, sea_orm::DbBackend::Postgres), "$1");
+        assert_eq!(placeholder_at(7, sea_orm::DbBackend::Postgres), "$7");
+        assert_eq!(placeholder_at(1, sea_orm::DbBackend::Sqlite), "?");
+        assert_eq!(placeholder_at(7, sea_orm::DbBackend::Sqlite), "?");
+    }
+
+    /// 反向断言：`$n` 编号必须从 1 开始且连续 ——
+    /// 起点写错（如 `0..n`）在 PG 上会报「there is no parameter $0」，
+    /// 而 SQLite 侧毫无察觉（`?` 无编号），只有这个测试能拦住。
+    #[test]
+    fn postgres_placeholders_start_at_one_and_are_contiguous() {
+        let out = bind_placeholders(4, sea_orm::DbBackend::Postgres);
+        assert_eq!(out, "$1, $2, $3, $4");
+        assert!(!out.contains("$0"), "PG 参数编号从 1 开始，不存在 $0");
+    }
 
     #[test]
     fn truncate_ascii_unchanged() {

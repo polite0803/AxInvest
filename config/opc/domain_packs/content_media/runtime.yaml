@@ -1,0 +1,177 @@
+# Runtime 配置：内容营销流程（content_media）
+# 由 opc-domain-pack-content-media crate 迁移而来，version=1
+version: 1
+domain_pack_id: content_media
+
+validations:
+  - entity_type: post
+    field: title
+    operator: not_empty
+    value: null
+    message: 文章标题不能为空
+  - entity_type: post
+    field: content
+    operator: not_empty
+    value: null
+    message: 文章内容不能为空
+  - entity_type: post
+    field: content
+    operator: ge
+    value: 50
+    message: 文章内容至少需要50个字符
+  - entity_type: landing_page
+    field: url
+    operator: not_empty
+    value: null
+    message: 落地页URL不能为空
+  - entity_type: landing_page
+    field: url
+    operator: starts_with
+    value: "http"
+    message: 落地页URL格式无效，需以http://或https://开头
+
+kpi_definitions:
+  # ⚠️ 本行业 7 个 KPI 键**全部**属于受管键集（键集见
+  # `crates/analysis-engine/src/opc/analysis.rs` 的 RISK_SCOPED_KPI_KEYS，按本文件顺序）。
+  # **受管 ≠ 生效**：某键是否参与风控，只看它有没有下面的 `risk` 段。
+  #
+  # 以下 4 键刻意**不声明** `risk` 阈值 —— 阈值必须可举证，「配了却没依据」比「没配」
+  # 更坏（未声明 ⇒ 不参与判定，仅构造风控门控时 warn 留痕）：
+  #   content_count / page_views：计算源是聚合查询（count_blog_posts /
+  #     sum_blog_post_views），**空结果也是 Available 且值为 0** ⇒ 任何 min 都会把
+  #     「本月还没发内容」判成违规；
+  #   conversion_rate：联系数 / 浏览数 × 100，取值域随业务量浮动，代码内无权威界限；
+  #   content_engagement：恒 NoDataSource（无互动数据存储），声明阈值也永远不会生效。
+  - key: content_count
+    name: 内容数量
+    unit: 篇
+    metric_type: count
+  - key: page_views
+    name: 页面浏览量
+    unit: 次
+    metric_type: count
+  - key: conversion_rate
+    name: 转化率
+    unit: "%"
+    metric_type: percentage
+  - key: content_engagement
+    name: 内容互动率
+    unit: "%"
+    metric_type: percentage
+  # 文学创作工作流专属的三键 —— 这三键才有 `risk` 段。
+  #
+  # `risk` 段 = 该 KPI 的风控阈值声明，由 OpcRiskGate 消费（判定逻辑在 Rust）。
+  # **未声明 = 不参与风控**（不用默认值兜底；未声明时启动会 warn 留痕）。
+  # `Critical` 判据的分母 = 已声明生效阈值的受管键数（当前 = 2）。
+  - key: word_count
+    name: 创作字数
+    unit: 字
+    metric_type: count
+    risk:
+      # 出处：`src-tauri/src/commands/opc_workflows/seed_content_media.rs` 中的工作流变量
+      # `word_count_min`（`value: 1000`）。产出低于「输入约束的下限」本身即异常。
+      # 〔更正痕迹〕原写「该文件 `:139-143`」—— 该区间今天是 `chapter_separator` 变量，
+      # 即**行号已漂移且指向了另一个变量**，故改用变量名定位。
+      min: 1000
+  - key: completion_rate
+    name: 完成率
+    unit: "%"
+    metric_type: percentage
+    risk:
+      # 计算式：`src-tauri/src/commands/opc_workflow_kpi_hook.rs` 的 `extract_completion_rate`。
+      # = min(已产出章节, 计划章节) / 计划章节 × 100，取值域 [0,100]；
+      # 实跑只观察到 {0, 100} ⇒ min=100 的语义 = 「必须完整」。
+      # 〔更正痕迹〕原写「该文件 `:278-290`」—— 该区间今天属 word-count 提取器的文档区，
+      # **指向的不是本 KPI 的公式**，故改用符号名。
+      min: 100
+  - key: revision_rounds
+    name: 修改轮次
+    unit: 轮
+    metric_type: count
+    # 刻意不声明 risk：产出被代码限死为 {0, 1}
+    # （`src-tauri/src/commands/opc_workflow_kpi_hook.rs` 的 `extract_revision_rounds`：
+    # pass⇒0 / rewrite⇒1），任何下限或上限都无依据 ⇒ 按「未声明 = 不启用」处理（仅 warn 留痕）。
+    # 〔更正痕迹〕原写「该文件 `:324-341`」—— `:324` 今天是 `extract_completion_rate` 的开头，
+    # 即**顺引用读过去看到的是另一个 KPI 的公式**（且它看起来也合理、不报错），故改用符号名。
+
+kpi_sources:
+  content_count:
+    type: constant
+    value: 0
+  page_views:
+    type: constant
+    value: 0
+  conversion_rate:
+    type: constant
+    value: 0
+  content_engagement:
+    type: constant
+    value: 0
+  word_count:
+    type: constant
+    value: 0
+  completion_rate:
+    type: constant
+    value: 0
+  revision_rounds:
+    type: constant
+    value: 0
+
+automation_rules:
+  - id: content_publish_schedule
+    name: 内容发布提醒
+    conditions:
+      - type: created_days_gte
+        days: 7
+      - type: entity_type_is
+        entity_type: post
+      - type: status_is
+        status: draft
+    actions:
+      - type: send_notification
+        target: editor
+        message: "草稿已创建7天，建议尽快发布"
+    enabled: true
+  - id: content_performance_alert
+    name: 内容绩效预警
+    conditions:
+      - type: field_below
+        field: engagement_rate
+        threshold: 2.0
+      - type: entity_type_is
+        entity_type: post
+      - type: status_is
+        status: published
+    actions:
+      - type: send_notification
+        target: content_team
+        message: "文章互动率低于2%，需要优化"
+    enabled: true
+
+workflow_steps:
+  - id: a-topic
+    name: 选题策划
+    description: 分析市场和客户数据，策划内容主题
+    order: 1
+  - id: a-create
+    name: 内容创作
+    description: 根据选题创作内容，发布博客
+    order: 2
+  - id: a-landing
+    name: 创建落地页
+    description: 为内容创建落地页
+    order: 3
+
+dashboard_cards:
+  - id: content_card
+    title: 本月内容数
+    kpi_key: content_count
+    display_value: -- 篇
+  - id: views_card
+    title: 页面浏览
+    kpi_key: page_views
+    display_value: -- 次
+  - id: conversion_card
+    title: 转化率
+    kpi_key: conversion_rate
+    display_value: --%

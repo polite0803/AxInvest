@@ -2,7 +2,7 @@
 
 //! OPC 强化学习经验持久化 DAO
 //!
-//! 提供 RL 经验的 SQLite 读写能力，供 IndustryLearningEngine 使用。
+//! 提供 RL 经验的 SQLite 读写能力，供 DomainPackLearningEngine 使用。
 
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ impl RlExperienceDao {
     pub async fn insert_experience(
         &self,
         id: &str,
-        industry_id: &str,
+        domain_pack_id: &str,
         workflow_id: &str,
         timestamp_ms: i64,
         quality_score: f64,
@@ -40,7 +40,7 @@ impl RlExperienceDao {
     ) -> Result<(), DbErr> {
         let active = opc_rl_experience::ActiveModel {
             id: Set(id.to_string()),
-            industry_id: Set(industry_id.to_string()),
+            domain_pack_id: Set(domain_pack_id.to_string()),
             workflow_id: Set(workflow_id.to_string()),
             timestamp_ms: Set(timestamp_ms),
             quality_score: Set(quality_score),
@@ -57,14 +57,14 @@ impl RlExperienceDao {
         Ok(())
     }
 
-    /// 查询指定行业的经验池
-    pub async fn get_experiences_by_industry(
+    /// 查询指定域包的经验池
+    pub async fn get_experiences_by_domain_pack(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         limit: Option<u64>,
     ) -> Result<Vec<opc_rl_experience::Model>, DbErr> {
         let mut query = opc_rl_experience::Entity::find()
-            .filter(opc_rl_experience::Column::IndustryId.eq(industry_id))
+            .filter(opc_rl_experience::Column::DomainPackId.eq(domain_pack_id))
             .order_by_desc(opc_rl_experience::Column::TimestampMs);
 
         if let Some(lim) = limit {
@@ -74,32 +74,35 @@ impl RlExperienceDao {
         query.all(self.db.as_ref()).await
     }
 
-    /// 查询指定行业的经验数量
-    pub async fn count_experiences_by_industry(&self, industry_id: &str) -> Result<u64, DbErr> {
+    /// 查询指定域包的经验数量
+    pub async fn count_experiences_by_domain_pack(
+        &self,
+        domain_pack_id: &str,
+    ) -> Result<u64, DbErr> {
         opc_rl_experience::Entity::find()
-            .filter(opc_rl_experience::Column::IndustryId.eq(industry_id))
+            .filter(opc_rl_experience::Column::DomainPackId.eq(domain_pack_id))
             .count(self.db.as_ref())
             .await
     }
 
-    /// 获取所有行业的统计数据
+    /// 获取所有域包的统计数据
     pub async fn get_global_stats(&self) -> Result<Vec<opc_rl_training_stats::Model>, DbErr> {
         opc_rl_training_stats::Entity::find().all(self.db.as_ref()).await
     }
 
-    /// 获取指定行业的统计数据
-    pub async fn get_industry_stats(
+    /// 获取指定域包的统计数据
+    pub async fn get_domain_pack_stats(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
     ) -> Result<Option<opc_rl_training_stats::Model>, DbErr> {
-        opc_rl_training_stats::Entity::find_by_id(industry_id).one(self.db.as_ref()).await
+        opc_rl_training_stats::Entity::find_by_id(domain_pack_id).one(self.db.as_ref()).await
     }
 
-    /// 初始化或更新行业训练统计
+    /// 初始化或更新域包训练统计
     #[allow(clippy::too_many_arguments)]
     pub async fn upsert_training_stats(
         &self,
-        industry_id: &str,
+        domain_pack_id: &str,
         total_experiences: i32,
         total_reward: f64,
         avg_reward: f64,
@@ -109,12 +112,12 @@ impl RlExperienceDao {
         optimization_goals: &str,
     ) -> Result<(), DbErr> {
         let existing =
-            opc_rl_training_stats::Entity::find_by_id(industry_id).one(self.db.as_ref()).await?;
+            opc_rl_training_stats::Entity::find_by_id(domain_pack_id).one(self.db.as_ref()).await?;
 
         let mut active = match existing {
             Some(model) => model.into(),
             None => opc_rl_training_stats::ActiveModel {
-                industry_id: Set(industry_id.to_string()),
+                domain_pack_id: Set(domain_pack_id.to_string()),
                 total_experiences: Set(0),
                 total_reward: Set(0.0),
                 avg_reward: Set(0.0),
@@ -137,10 +140,13 @@ impl RlExperienceDao {
         Ok(())
     }
 
-    /// 删除指定行业的所有经验记录
-    pub async fn clear_experiences_by_industry(&self, industry_id: &str) -> Result<(), DbErr> {
+    /// 删除指定域包的所有经验记录
+    pub async fn clear_experiences_by_domain_pack(
+        &self,
+        domain_pack_id: &str,
+    ) -> Result<(), DbErr> {
         opc_rl_experience::Entity::delete_many()
-            .filter(opc_rl_experience::Column::IndustryId.eq(industry_id))
+            .filter(opc_rl_experience::Column::DomainPackId.eq(domain_pack_id))
             .exec(self.db.as_ref())
             .await?;
         Ok(())

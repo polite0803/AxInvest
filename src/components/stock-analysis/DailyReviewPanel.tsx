@@ -1,4 +1,5 @@
 import { List } from "@/components/common/AntdList";
+import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { ArrowRightOutlined, HistoryOutlined } from "@ant-design/icons";
@@ -71,6 +72,8 @@ function DecisionBadge({ decision }: { decision: DecisionComparison }) {
 export function DailyReviewPanel() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // 跳转统一走 useStockJump（URL 是当前股票的唯一真相源）
+  const jumpToStock = useStockJump();
 
   const [review, setReview] = useState<DailyReview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -148,7 +151,7 @@ export function DailyReviewPanel() {
                         <div
                           className="flex items-center gap-1.5 min-w-0 flex-1"
                           style={{ cursor: "pointer" }}
-                          onClick={() => navigate(`/stock-analysis?code=${w.stockCode}`)}
+                          onClick={() => jumpToStock({ code: w.stockCode, name: w.stockName })}
                         >
                           <Tag className="m-0 text-[10px]">{w.stockCode}</Tag>
                           <span className="font-medium truncate">{w.stockName}</span>
@@ -164,7 +167,7 @@ export function DailyReviewPanel() {
                               size="small"
                               type="text"
                               icon={<RotateCcw size={11} />}
-                              onClick={() => navigate(`/stock-analysis?code=${w.stockCode}&tab=reflection`)}
+                              onClick={() => jumpToStock({ code: w.stockCode, name: w.stockName })}
                             />
                           </Tooltip>
                           <Tooltip title={t("stockAnalysis.dailyReview.backtest")}>

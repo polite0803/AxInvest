@@ -158,6 +158,10 @@ pub mod search {
     pub const PROVIDER_NOT_CONFIGURED: &str = "SEARCH_PROVIDER_NOT_CONFIGURED";
     pub const PROVIDER_NOT_FOUND: &str = "SEARCH_PROVIDER_NOT_FOUND";
     pub const SEARCH_FAILED: &str = "SEARCH_FAILED";
+    /// 搜索服务端返回非预期 HTTP 状态（`test_search_provider` 连通性测试）
+    pub const HTTP_ERROR: &str = "SEARCH_HTTP_ERROR";
+    /// 搜索端点不可达（连接失败 / 超时）
+    pub const UNREACHABLE: &str = "SEARCH_UNREACHABLE";
 }
 
 /// 备份相关错误码
@@ -203,6 +207,8 @@ pub mod workflow {
     pub const INVALID_JSON: &str = "WORKFLOW_INVALID_JSON";
     pub const NOT_FOUND: &str = "WORKFLOW_NOT_FOUND";
     pub const PLAN_NOT_FOUND: &str = "WORKFLOW_PLAN_NOT_FOUND";
+    /// 计划未获得执行授权（P0-A：plans.execution_authorized = 0）
+    pub const PLAN_NOT_AUTHORIZED: &str = "WORKFLOW_PLAN_NOT_AUTHORIZED";
     /// RunWorkflow 工具执行器未注入（wiring 缺失，wiring 层须在启动期 set_workflow_executor）
     pub const EXECUTOR_NOT_SET: &str = "WORKFLOW_EXECUTOR_NOT_SET";
     /// RunWorkflow 工具执行失败（工作流引擎返回错误）
@@ -458,4 +464,10 @@ pub mod cognitive {
 pub mod unity {
     /// 任务形态分类失败（分类器内部异常，回退到 HandleLocally 策略）
     pub const P0_CLASSIFIER_FAILED: &str = "UNITY_P0_CLASSIFIER_FAILED";
+}
+
+/// 领域本体（`domain_ontology` 注册表）相关错误码
+pub mod ontology {
+    /// 请求的能力域未在 `domain_ontology::ONTOLOGY_DOMAINS` 注册本体
+    pub const DOMAIN_UNREGISTERED: &str = "DOMAIN_UNREGISTERED";
 }

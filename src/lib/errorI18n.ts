@@ -162,6 +162,51 @@ export function translateBackendError(e: unknown): string {
   return parsed.detail || parsed.raw || String(e);
 }
 
+/**
+ * 把「自由文本 + 结构化码」形态的**执行失败**信息译成用户可见文本。
+ *
+ * 适用于两级失败通道（同一个形态、同一套码）：
+ * - **节点级**：`workflow-step-done` / `serenity-screening-step` 的 `{ error, errorCode }`，
+ *   其中 `error` 是 `NodeError::Display`（形如 `"EXECUTION_CANCELLED: 节点执行已取消"`）；
+ * - **工作流级**：`serenity-screening-completed` 的 `{ error, code }`，
+ *   其中 `error` 是 `"Serenity 筛选工作流失败: <WorkflowError::Display>"`。
+ *
+ * ⚠ 后端原文**不能**被前端解析出「码」或「detail」：
+ * `NodeError::Io` 是 `#[error(transparent)]` 的（原文不带码前缀），
+ * `WorkflowError::Display` 里 `InvalidStateTransition` / `LifecycleHookFailed`
+ * 两个变体又自带中文 ⇒ 任何 `split(":")` / 子串嗅探都会在部分变体上失配或漏判。
+ * 所以码**必须**由后端结构化给出，本函数只消费它。
+ *
+ * 本函数只做一件事：**用码取译文，取不到就用原文**。它刻意**不丢** `error`
+ * ——命中码时 `translateBackendError` 只返回译文、`detail` 不再出现在结果里（见其 L162），
+ * 所以调用方应把 `error` 另行作为技术详情展示，否则「本地化」会以「丢原因」为代价。
+ *
+ * @param error 后端原文（`null`/`undefined` 视为无）
+ * @param code  结构化码；`null` = 后端明示「本事件无失败」，`undefined` = 旧载荷
+ *
+ * 三条路径（均有 `errorI18n.test.ts` 用例钉死）：
+ * 1. 有码且 locale 收录 ⇒ 本地化译文；
+ * 2. 有合法码但 locale 未收录 ⇒ 回退 `detail`，即原文（**不是** JSON 串 —— 见下方 ⚠）；
+ * 3. 无码 / 非法码格式 / 原文为空 ⇒ 原文（零回归，与迁移前行为一致）。
+ *
+ * ⚠ 路径 2/3 的组合必须先于调用被短路：`translateBackendError` 在**码被 locale 收录**时
+ * 直接返回译文、根本不看 `detail`（故空 `detail` 无害）；但**码未被收录**时它会走
+ * `parsed.detail || parsed.raw`，而**对象入参的 `raw` 是 `JSON.stringify({...})`**
+ * ⇒ 界面会显示 `{"code":"TOTALLY_UNKNOWN_CODE"}` 这种东西。
+ * 实测条件正是「合法码 + locale 未收录 + detail 空/缺失」三者同时成立
+ * （`errorI18n.test.ts` 有专门的行为记录用例）。故此处对空原文直接返回，不进翻译层。
+ */
+export function translateFailureText(
+  error: string | null | undefined,
+  code: string | null | undefined,
+): string {
+  const raw = error ?? "";
+  if (!raw || typeof code !== "string" || !ERROR_CODE_RE.test(code)) {
+    return raw;
+  }
+  return translateBackendError({ code, detail: raw });
+}
+
 /** 取后端错误分类（无则 undefined）。 */
 export function getBackendErrorCategory(e: unknown): BackendErrorCategory | undefined {
   return parseBackendError(e).category;

@@ -493,20 +493,12 @@
   border-radius: 0;
 }
 
-/* 21th 滚动条 — 细线风格 */
-[data-theme-preset*="21th"] ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-[data-theme-preset*="21th"] ::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* 21th 滚动条 — 只留方角风格；颜色统一由全局规则（--scrollbar-thumb）驱动。
+   原实现用 --border-color，实测 21th-dark 对比度 1.9:1、21th-light 1.5:1（纯白 thumb
+   压在浅灰底上），换主题后依旧难以辨认，故不再单独指定颜色。 */
+[data-theme-preset*="21th"]::-webkit-scrollbar-thumb,
 [data-theme-preset*="21th"] ::-webkit-scrollbar-thumb {
-  background: var(--border-color);
   border-radius: 0;
-}
-[data-theme-preset*="21th"] ::-webkit-scrollbar-thumb:hover {
-  background: var(--muted);
 }
 
 /* ── Cyberpunk preset 覆盖 ── */
@@ -535,6 +527,13 @@
   --color-primary: var(--accent);
   --color-fill-alter: var(--accent-dim);
   --accent-deco: var(--accent);
+  /* 滚动指示器颜色 —— 由「全局滚动条样式」消费（见 Scrollbar styling 区）。
+     取 --fg-2 混 80% 透明：实测在全部预设下对内容背景对比度 ≥ 3.3:1
+     （深色 deep-dusk 3.7 / 21th-dark 6.4，浅色 light-dawn 3.6 / 21th-light 3.3），
+     满足 WCAG 非文本对比度下限 3:1；直接用 --muted 时 21th-light 仅 1.9:1 不达标。
+     用 var() 间接引用：实际取值在使用元素所处主题作用域解析，故自动跟随主题切换。 */
+  --scrollbar-thumb: color-mix(in srgb, var(--fg-2) 80%, transparent);
+  --scrollbar-thumb-hover: var(--fg-2);
   /* 保留的 --color-* 别名 */
   --color-bg: var(--bg);
   --color-surface: var(--surface);
@@ -1099,6 +1098,45 @@ th,
 }
 
 /* ── Scrollbar styling ────────────────────────────────────────────── */
+/* ⚠ 全局滚动指示器（2026-09-14）
+ *
+ * 为什么必须显式声明：不声明时滚动条完全由浏览器/系统决定，颜色不跟随应用主题。
+ *   · Windows classic 形态：轨道是系统浅色（深色界面下为近白 #fcfcfc），
+ *     thumb 与轨道对比度仅 1.17:1；
+ *   · Fluent / overlay 形态（WebView2 默认）：细条 + 自动淡出，实测与内容背景
+ *     对比度仅 1.05:1（21th 预设自定义后也只有 1.5~1.9:1）。
+ * 于是「换任何主题都难以发现滚动指示器」。这里统一由 --scrollbar-thumb 驱动，
+ * 实测所有预设下对比度 ≥ 3.3:1（WCAG 非文本对比度下限 3:1）。
+ *
+ * ⚠ 一旦声明 ::-webkit-scrollbar，Chromium 即退出系统默认渲染模式，改为常驻
+ * 自定义滚动条（占布局宽度 10px），未单独声明的容器同样走此样式。
+ * ⚠ 不要同时声明 scrollbar-width / scrollbar-color：标准属性在 Chromium 中
+ * 优先级高于 ::-webkit-scrollbar，会令下面的自定义样式整体失效。
+ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* 无栏的外观（图标条 / 标题栏拖拽区）——标准属性在 Chromium 中会禁掉上面的
+   ::-webkit-scrollbar 自定义，等价于彻底隐藏滚动条，符合这里的原意。 */
 .nav-sidebar,
 .nav-sidebar * {
   scrollbar-width: none;
@@ -1106,13 +1144,6 @@ th,
 .title-bar-drag,
 .title-bar-drag * {
   scrollbar-width: none;
-}
-
-
-
-.axagent-input-textarea {
-  scrollbar-width: thin !important;
-  scrollbar-color: color-mix(in srgb, var(--accent-deco) 18%, transparent) transparent;
 }
 
 .axagent-input-textarea::-webkit-scrollbar {
@@ -1124,15 +1155,18 @@ th,
 }
 
 .axagent-input-textarea::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--accent-deco) 18%, transparent);
+  background: var(--scrollbar-thumb);
   border-radius: 999px;
 }
 
 .axagent-input-textarea::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--accent-deco) 28%, transparent);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* ── OverlayScrollbars custom theme ────────────────────────────────── */
+/* handle 颜色与全局滚动条同源（--scrollbar-thumb）。原实现用 --accent-deco 的
+   8% / 18% / 28% 透明度，实测 handle 与背景对比度仅 ~1.05:1（近乎不可见），
+   且 handle 只在滚动后显示 600ms（autoHide: "scroll"），换成任意主题都难辨认。 */
 .os-theme-axagent {
   --os-size: 5px;
   --os-padding-perpendicular: 0;
@@ -1142,17 +1176,18 @@ th,
   --os-track-bg-hover: transparent;
   --os-track-bg-active: transparent;
   --os-handle-border-radius: 3px;
-  --os-handle-bg: color-mix(in srgb, var(--accent-deco) 8%, transparent);
-  --os-handle-bg-hover: color-mix(in srgb, var(--accent-deco) 18%, transparent);
-  --os-handle-bg-active: color-mix(in srgb, var(--accent-deco) 28%, transparent);
+  --os-handle-bg: var(--scrollbar-thumb);
+  --os-handle-bg-hover: var(--scrollbar-thumb-hover);
+  --os-handle-bg-active: var(--scrollbar-thumb-hover);
   --os-handle-perpendicular-size: 100%;
   --os-handle-perpendicular-size-hover: 100%;
   --os-handle-perpendicular-size-active: 100%;
 }
 
 /* ── Chat scroll indicator ─────────────────────────────────────────── */
+/* 与全局滚动条同源，保证「同一处提示在不同主题下亮度一致」。 */
 .chat-scroll-indicator {
-  background: color-mix(in srgb, var(--accent-deco) 12%, transparent);
+  background: var(--scrollbar-thumb);
 }
 
 /* Custom action item hover style */
@@ -2071,7 +2106,14 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   background: var(--surface);
   padding: 4px 0;
   gap: 1px;
-  overflow: hidden;
+  /* 兜底滚动 — 2026-09-14 修复：
+   * 侧栏由 8 个能力域分组 + 底部工具按钮组成，内容高度必然超过可用高度。
+   * 原为 `overflow: hidden`，实测（1072x679）可视 647px / 内容 673px，
+   * 底部按钮被静默裁掉且无法滚动 —— 即「页面下部内容被折叠」。
+   * 改为 overflow-y:auto 后内容可达；滚动条本身仍由下面的
+   * `scrollbar-width: none` 隐藏，视觉上保持无栏的图标条外观。 */
+  overflow-x: hidden;
+  overflow-y: auto;
   transition: width 0.2s var(--ease), min-width 0.2s var(--ease);
 }
 /* 展开模式：宽侧栏，左对齐（图标+标签） */
@@ -4240,10 +4282,19 @@ html[data-theme="dark"] .markstream-react .table-node thead {
   flex-direction: column;
 }
 /* 通用：tab 内容容器填满高度（不指定 display，避免覆盖 Antd 隐藏机制） */
+/* 兜底滚动 — 2026-09-14 修复：
+ * 此处原为 `overflow: hidden`，导致任何「未自行实现滚动」的 tab 内容一旦超出
+ * 可用高度就被无声裁掉，且不产生任何滚动条（表现为「页面下部的内容被折叠」）。
+ * 实测（1072x679 视口、激活 tab 内容 499px 高）：注入 3000px 内容后，
+ * overflow:hidden 下滚轮 6×300px 后 scrollTop 仍为 0、3000px 内容仅剩 26px 可见；
+ * 改为 overflow-y:auto 后 scrollTop 正常推进到 1500、内容完整可达。
+ * 内容未溢出时 auto 不产生滚动条，故对现有页面零副作用。
+ * overflow-x 保持 hidden，避免横向滚动条。 */
 .ax-fill-tabs > .ant-tabs-body-holder > .ant-tabs-body > .ant-tabs-content {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 /* 只给激活态 Tab 设 display:flex，非激活态由 Antd 用 display:none 隐藏 */
 .ax-fill-tabs > .ant-tabs-body-holder > .ant-tabs-body > .ant-tabs-content-active {

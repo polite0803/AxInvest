@@ -81,13 +81,44 @@ pub struct RobustnessReport {
     pub reference_price: Price,
     pub total_paths: usize,
     pub scenario_results: Vec<ScenarioResult>,
-    /// 策略生存率：在所有场景中都有正收益的路径比例
+    /// 跨场景上涨占比：终价高于参考价的场景数 / 有效场景数。
+    ///
+    /// ⚠️ 注意它**主要由用户勾选了哪些场景决定，不由个股质地决定** ——
+    /// 各场景的涨跌方向在场景定义（Oracle 冲击）时就已确定。
+    /// 不要把它读成「不亏钱的概率」。
     pub survival_rate: f64,
-    /// 场景一致性：各场景之间终止价格的标准差 / 均值
-    pub consistency_score: f64,
+    /// 场景一致性：各场景终价的变异系数（`stddev / |mean|`）。
+    ///
+    /// `None` 表示**不可判定** —— 各场景涨跌幅均值趋零（正负相互抵消）时，
+    /// 变异系数在数学上无定义。此处**不得**用 `0.0` 兜底：下游把 `< 0.5`
+    /// 读作「一致性好」，而均值趋零恰恰是**最分歧**的情形，方向正好相反。
+    pub consistency_score: Option<f64>,
     /// 最佳/最差场景
     pub best_scenario: String,
     pub worst_scenario: String,
+}
+
+/// 计算场景一致性（变异系数 `stddev / |mean|`）。
+///
+/// 返回 `None` 表示**不可判定**：
+/// - 有效场景少于 2 个；或
+/// - 各场景涨跌幅均值趋零（正负相互抵消）⇒ 变异系数在数学上无定义（分母趋零）。
+///
+/// ⚠️ 趋零分支**不可**用 `0.0` 兜底：下游把 `< 0.5` 读作「一致性好」，而均值
+/// 趋零恰恰是**最分歧**的情形，会把方向报反。此缺陷于 2026-09-14 修复，
+/// 边界钉在 `consistency_is_none_when_mean_cancels_out`。
+fn compute_consistency_score(changes: &[f64]) -> Option<f64> {
+    if changes.len() < 2 {
+        return None;
+    }
+    let mean = changes.iter().sum::<f64>() / changes.len() as f64;
+    let variance = changes.iter().map(|c| (c - mean).powi(2)).sum::<f64>() / changes.len() as f64;
+    let stddev = variance.sqrt();
+    if mean.abs() > 0.001 {
+        Some(stddev / mean.abs())
+    } else {
+        None
+    }
 }
 
 // ── 蒙特卡洛引擎 ──
@@ -237,19 +268,7 @@ impl MonteCarloEngine {
             0.0
         };
 
-        let consistency_score = if valid_changes.len() >= 2 {
-            let mean = valid_changes.iter().sum::<f64>() / valid_changes.len() as f64;
-            let variance = valid_changes.iter().map(|c| (c - mean).powi(2)).sum::<f64>()
-                / valid_changes.len() as f64;
-            let stddev = variance.sqrt();
-            if mean.abs() > 0.001 {
-                stddev / mean.abs()
-            } else {
-                0.0
-            }
-        } else {
-            0.0
-        };
+        let consistency_score = compute_consistency_score(&valid_changes);
 
         let best = scenario_results
             .iter()
@@ -279,7 +298,7 @@ impl MonteCarloEngine {
             total_paths: self.scenarios.iter().map(|s| s.paths).sum(),
             scenario_results,
             survival_rate,
-            consistency_score: (consistency_score * 100.0).round() / 100.0,
+            consistency_score: consistency_score.map(|s| (s * 100.0).round() / 100.0),
             best_scenario: best,
             worst_scenario: worst,
         }
@@ -321,6 +340,36 @@ mod tests {
         assert_eq!(report.total_paths, 10);
         assert_eq!(report.scenario_results.len(), 2);
         assert!(report.survival_rate >= 0.0);
-        assert!(report.consistency_score >= 0.0);
+        // 一致性可能为 None —— 各场景涨跌幅均值趋零时变异系数不可判定
+        assert!(report.consistency_score.is_none_or(|s| s >= 0.0));
+    }
+
+    /// 边界：涨跌互抵（均值趋零）⇒ 必须返回 `None`，**不得**返回 `0.0`。
+    ///
+    /// `0.0` 会被下游读成「一致性好」（`< 0.5` 分支），而均值趋零恰是
+    /// **最分歧**的情形 —— 这是 2026-09-14 修复的历史缺陷（方向相反）。
+    #[test]
+    fn consistency_is_none_when_mean_cancels_out() {
+        assert_eq!(compute_consistency_score(&[5.0, -5.0]), None);
+        assert_eq!(compute_consistency_score(&[0.0, 0.0]), None);
+        assert_eq!(compute_consistency_score(&[2.0, -2.0, 0.0]), None);
+    }
+
+    /// 边界：有效场景不足 2 个 ⇒ 不可判定
+    #[test]
+    fn consistency_is_none_when_insufficient_scenarios() {
+        assert_eq!(compute_consistency_score(&[]), None);
+        assert_eq!(compute_consistency_score(&[3.0]), None);
+    }
+
+    /// 可比情形：值 = stddev / |mean|，且随离散度单调变差
+    #[test]
+    fn consistency_equals_coefficient_of_variation() {
+        // mean = 2, stddev = 1 ⇒ 0.5
+        let narrow = compute_consistency_score(&[1.0, 3.0]).expect("均值 2 ⇒ 应可判定");
+        assert!((narrow - 0.5).abs() < 1e-9, "期望 0.5，实际 {narrow}");
+        // 离散度更大 ⇒ 一致性更差（值更大）
+        let wide = compute_consistency_score(&[0.0, 4.0]).expect("均值 2 ⇒ 应可判定");
+        assert!(wide > narrow, "离散度更大时应更不一致：{wide} vs {narrow}");
     }
 }

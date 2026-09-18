@@ -3,10 +3,10 @@
 import { invoke } from "@/lib/invoke";
 import type {
   AutoLearningResult,
+  DomainLearningConfig,
+  DomainLearningConfigSummary,
   EvolveWorkflowParams,
   ExperiencePoolStats,
-  IndustryLearningConfig,
-  IndustryLearningConfigSummary,
   ReflectOnWorkflowParams,
   RLPolicyUpdate,
   RunSelfImprovementParams,
@@ -17,18 +17,18 @@ import type {
  * 获取指定行业的学习配置
  */
 export async function getLearningConfig(
-  industryId: string,
-): Promise<IndustryLearningConfig> {
-  return invoke<IndustryLearningConfig>("opc_get_learning_config", {
-    industryId,
+  domainPackId: string,
+): Promise<DomainLearningConfig> {
+  return invoke<DomainLearningConfig>("opc_get_learning_config", {
+    domainPackId,
   });
 }
 
 /**
  * 获取所有行业的学习配置列表
  */
-export async function listLearningConfigs(): Promise<IndustryLearningConfigSummary[]> {
-  return invoke<IndustryLearningConfigSummary[]>("opc_list_learning_configs");
+export async function listLearningConfigs(): Promise<DomainLearningConfigSummary[]> {
+  return invoke<DomainLearningConfigSummary[]>("opc_list_learning_configs");
 }
 
 /**
@@ -39,14 +39,14 @@ export async function reflectOnWorkflow(
   params: ReflectOnWorkflowParams,
 ): Promise<{
   success: boolean;
-  industryId: string;
+  domainPackId: string;
   workflowId: string;
   qualityScore: number;
   suggestions: string[];
   summary: string;
 }> {
   return invoke("opc_reflect_on_workflow", {
-    industryId: params.industryId,
+    domainPackId: params.domainPackId,
     workflowId: params.workflowId,
     workflowResult: params.workflowResult,
   });
@@ -60,14 +60,14 @@ export async function evolveWorkflow(
   params: EvolveWorkflowParams,
 ): Promise<{
   success: boolean;
-  industryId: string;
+  domainPackId: string;
   workflowId: string;
   status: string;
   suggestedOptimizations: string[];
   message: string;
 }> {
   return invoke("opc_evolve_workflow", {
-    industryId: params.industryId,
+    domainPackId: params.domainPackId,
     workflowId: params.workflowId,
     reason: params.reason,
   });
@@ -81,14 +81,14 @@ export async function runSelfImprovement(
   params: RunSelfImprovementParams,
 ): Promise<{
   success: boolean;
-  industryId: string;
+  domainPackId: string;
   target: string;
   status: string;
   improvementsApplied: string[];
   message: string;
 }> {
   return invoke("opc_run_self_improvement", {
-    industryId: params.industryId,
+    domainPackId: params.domainPackId,
     target: params.target,
   });
 }
@@ -96,9 +96,9 @@ export async function runSelfImprovement(
 /**
  * 获取 RL 经验池统计
  */
-export async function getRLStats(industryId?: string): Promise<ExperiencePoolStats> {
+export async function getRLStats(domainPackId?: string): Promise<ExperiencePoolStats> {
   return invoke("opc_get_rl_stats", {
-    industryId,
+    domainPackId,
   });
 }
 
@@ -107,14 +107,14 @@ export async function getRLStats(industryId?: string): Promise<ExperiencePoolSta
  */
 export async function recordRLExperience(
   params: {
-    industryId: string;
+    domainPackId: string;
     workflowId: string;
     qualityScore: number;
     workflowResult: Record<string, unknown>;
   },
 ): Promise<{ success: boolean; experienceId?: string; totalReward?: number; message?: string }> {
   return invoke("opc_record_rl_experience", {
-    industryId: params.industryId,
+    domainPackId: params.domainPackId,
     workflowId: params.workflowId,
     qualityScore: params.qualityScore,
     workflowResult: params.workflowResult,
@@ -128,7 +128,7 @@ export async function triggerRLOptimization(
   params: TriggerRLOptimizationParams,
 ): Promise<RLPolicyUpdate> {
   return invoke("opc_trigger_rl_optimization", {
-    industryId: params.industryId,
+    domainPackId: params.domainPackId,
   });
 }
 
@@ -136,12 +136,12 @@ export async function triggerRLOptimization(
  * 触发自动学习闭环（反思→进化→自我改进→RL）
  */
 export async function triggerAutoLearning(params: {
-  industryId: string;
+  domainPackId: string;
   workflowId: string;
   workflowResult: Record<string, unknown>;
 }): Promise<AutoLearningResult> {
-  return invoke("opc_trigger_industry_learning", {
-    industryId: params.industryId,
+  return invoke("opc_trigger_domain_pack_learning", {
+    domainPackId: params.domainPackId,
     workflowId: params.workflowId,
     workflowResult: params.workflowResult,
   });

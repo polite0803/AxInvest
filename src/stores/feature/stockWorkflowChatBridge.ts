@@ -22,34 +22,47 @@ const ANALYST_NODE_TO_NAME: Record<string, string> = {
   "a-catalyst": "catalyst",
 };
 
-const TOOL_NODE_TO_LABEL: Record<string, string> = {
-  "t-market-data": i18next.t("stockAnalysis.tool.marketData"),
-  "t-kline-data": i18next.t("stockAnalysis.tool.klineData"),
-  "t-financial-data": i18next.t("stockAnalysis.tool.financialData"),
-  "t-news-data": i18next.t("stockAnalysis.tool.newsData"),
-  "t-money-flow": i18next.t("stockAnalysis.tool.moneyFlow"),
-  "t-sentiment-data": i18next.t("stockAnalysis.tool.sentimentData"),
-  "t-policy-data": i18next.t("stockAnalysis.tool.policyData"),
-  "t-fundamentals-data": i18next.t("stockAnalysis.tool.fundamentalsData"),
-  "t-hotmoney-data": i18next.t("stockAnalysis.tool.hotMoneyData"),
-  "t-lockup-data": i18next.t("stockAnalysis.tool.lockupData"),
-  "t-research-data": i18next.t("stockAnalysis.tool.researchData"),
-  "t-sector-data": i18next.t("stockAnalysis.tool.sectorData"),
-  "t-scoring": i18next.t("stockAnalysis.tool.scoring"),
-  "t-valuation": i18next.t("stockAnalysis.tool.valuation"),
-  "t-portfolio-risk": i18next.t("stockAnalysis.tool.portfolioRisk"),
-  "t-peers-data": i18next.t("stockAnalysis.tool.peersData"),
-  "t-option-data": i18next.t("stockAnalysis.tool.optionData"),
-  "t-index-data": i18next.t("stockAnalysis.tool.indexData"),
-  "t-announcement-data": i18next.t("stockAnalysis.tool.announcement"),
-  "t-northbound-data": i18next.t("stockAnalysis.tool.northbound"),
-  "t-dragon-tiger-data": i18next.t("stockAnalysis.tool.dragonTiger"),
-  "t-cls-flash-data": i18next.t("stockAnalysis.tool.clsFlash"),
-  "t-block-trade-data": i18next.t("stockAnalysis.tool.blockTrade"),
-  "t-institutional-data": i18next.t("stockAnalysis.tool.institutional"),
-  "t-consensus-data": i18next.t("stockAnalysis.tool.consensus"),
-  "t-concept-data": i18next.t("stockAnalysis.tool.concept"),
+/**
+ * 工具节点 ID → i18n key（**未求值**，供调用方用 `t()` 动态解析）。
+ *
+ * T-1 P3(2026-09-12) 两处改进：
+ * ① 原实现直接存 `i18next.t(...)` 的**求值结果**，而模块常量只在首次 import 时
+ *    计算一次 → 用户切换语言后这些标签不会更新（显示旧语言）。
+ *    `AnalysisProgress` 要展示「当前正在执行哪个节点」，必须随语言实时变化。
+ * ② 单一权威源：`TOOL_NODE_TO_LABEL` 改由本表派生，不再维护两份同义映射。
+ */
+export const TOOL_NODE_I18N_KEY: Record<string, string> = {
+  "t-market-data": "stockAnalysis.tool.marketData",
+  "t-kline-data": "stockAnalysis.tool.klineData",
+  "t-financial-data": "stockAnalysis.tool.financialData",
+  "t-news-data": "stockAnalysis.tool.newsData",
+  "t-money-flow": "stockAnalysis.tool.moneyFlow",
+  "t-sentiment-data": "stockAnalysis.tool.sentimentData",
+  "t-policy-data": "stockAnalysis.tool.policyData",
+  "t-fundamentals-data": "stockAnalysis.tool.fundamentalsData",
+  "t-hotmoney-data": "stockAnalysis.tool.hotMoneyData",
+  "t-lockup-data": "stockAnalysis.tool.lockupData",
+  "t-research-data": "stockAnalysis.tool.researchData",
+  "t-sector-data": "stockAnalysis.tool.sectorData",
+  "t-scoring": "stockAnalysis.tool.scoring",
+  "t-valuation": "stockAnalysis.tool.valuation",
+  "t-portfolio-risk": "stockAnalysis.tool.portfolioRisk",
+  "t-peers-data": "stockAnalysis.tool.peersData",
+  "t-option-data": "stockAnalysis.tool.optionData",
+  "t-index-data": "stockAnalysis.tool.indexData",
+  "t-announcement-data": "stockAnalysis.tool.announcement",
+  "t-northbound-data": "stockAnalysis.tool.northbound",
+  "t-dragon-tiger-data": "stockAnalysis.tool.dragonTiger",
+  "t-cls-flash-data": "stockAnalysis.tool.clsFlash",
+  "t-block-trade-data": "stockAnalysis.tool.blockTrade",
+  "t-institutional-data": "stockAnalysis.tool.institutional",
+  "t-consensus-data": "stockAnalysis.tool.consensus",
+  "t-concept-data": "stockAnalysis.tool.concept",
 };
+
+const TOOL_NODE_TO_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(TOOL_NODE_I18N_KEY).map(([id, key]) => [id, i18next.t(key)]),
+);
 
 function wf(type: string, data: Record<string, unknown>, fallback: string): string {
   return makeWorkflowContent(type, data, fallback);

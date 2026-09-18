@@ -12,6 +12,135 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use tauri::{Emitter, State};
 
+/// 构建 `tools` 列表：web_search（若配置了搜索源且未被禁用）+ 内置本地工具表 + MCP 工具，
+/// 按工具名去重后返回；结果为空则 `None`。
+///
+/// `send_message` / `regenerate_message` / `regenerate_with_model` 三处原各内联一份
+/// **逐字重复**的 ~103-110 行构建块（2026-09-14 收敛到本函数，见 `convert-streaming-tools.mjs`）。
+///
+/// `log_tag`：`Some(tag)` 时打印 web_search 注入日志 —— 仅 `send_message` 原先有该日志，
+/// 另两处传 `None`，**保持零行为变化**。
+async fn build_tool_list(
+    db: &axagent_harness::DatabaseConnection,
+    mcp_ids: &[String],
+    has_search_provider: bool,
+    disabled_tools_set: &std::collections::HashSet<String>,
+    group_enabled: &std::collections::HashMap<String, bool>,
+    log_tag: Option<&str>,
+) -> Option<Vec<ChatTool>> {
+    if mcp_ids.is_empty() && !has_search_provider {
+        return None;
+    }
+    let mut all_tools = Vec::new();
+    // Auto-include web_search if any search provider is configured
+    if has_search_provider
+        && super::is_builtin_tool_enabled("web_search", disabled_tools_set, group_enabled)
+    {
+        if let Some(tag) = log_tag {
+            tracing::info!("[{}] injecting web_search tool into tools list", tag);
+        }
+        all_tools.push(ChatTool {
+            r#type: "function".to_string(),
+            function: ChatToolFunction {
+                name: "web_search".to_string(),
+                description: Some(
+                    "MUST use this to search the internet for current, real-time, or recent information. Call this function whenever the user asks about: today's news, current events, latest developments, stock prices, weather, sports scores, or any topic that requires up-to-date information beyond your knowledge cutoff. The search returns relevant web results. Do NOT tell users you cannot access real-time data — use this tool instead.".to_string()
+                ),
+                parameters: Some(serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query"
+                        }
+                    },
+                    "required": ["query"]
+                })),
+            },
+        });
+    }
+    // Auto-include builtin local tools — mirrors UnifiedToolRegistry register_all()
+    // Tool names MUST match the `fn name()` return value of each tool implementation
+    let builtin_local_tools: &[(&str, &str)] = &[
+        // 权威工具名是 `SkillView`（`Skill` 只是它的 alias）。此前表里写的是别名，
+        // 与 registry / builtin_tool_parameters / SkillsList 输出 / 技能索引段提示的
+        // `SkillView` 全不一致 → 模型被引导去调一个它看不到的工具名。
+        (
+            "SkillView",
+            "加载指定技能的完整 SKILL.md 内容（Level 1）。skill: 技能名称（必填）, args: 可选参数。",
+        ),
+        ("DiscoverSkills", "搜索已安装的 Skill。query: 名称/描述关键词。"),
+        ("SkillsList", "列出所有已安装技能的摘要（Level 0 索引）。category: 可选类别过滤。"),
+        (
+            "SkillReference",
+            "读取技能 references/ 目录下的引用文件（Level 2）。skill: 技能名, path: 相对路径。",
+        ),
+        ("FileRead", "读取文件。file_path: 路径, offset: 起始行, limit: 行数。"),
+        ("FileWrite", "创建/覆盖文件。file_path: 路径, content: 内容。"),
+        ("FileEdit", "精确编辑文件。file_path: 路径, old_string: 旧文本, new_string: 新文本。"),
+        ("Glob", "glob 搜索文件。pattern: glob模式。"),
+        ("Grep", "正则搜索文件内容。pattern: 正则表达式。"),
+        ("Bash", "执行 shell 命令。command: 命令, description: 说明。"),
+        ("WebFetch", "获取 URL 内容。url: 目标URL。"),
+        ("WebSearch", "搜索互联网。query: 搜索词。"),
+        ("TaskCreate", "创建后台任务。subject: 标题, description: 描述。"),
+        ("TaskList", "列出所有任务。"),
+        ("TaskUpdate", "更新任务状态。taskId: ID, status: 新状态。"),
+        ("TodoWrite", "管理待办事项。"),
+        ("Agent", "启动子Agent处理复杂任务。"),
+        ("EnterPlanMode", "进入计划模式。"),
+        ("ListDirectory", "列出目录。path: 路径。"),
+        ("DeleteFile", "删除文件。file_path: 路径。"),
+    ];
+    for (name, desc) in builtin_local_tools {
+        // B-3: 双层过滤 —— disabled_tools + group_enabled
+        if !super::is_builtin_tool_enabled(name, disabled_tools_set, group_enabled) {
+            continue;
+        }
+        all_tools.push(ChatTool {
+            r#type: "function".to_string(),
+            function: ChatToolFunction {
+                name: (*name).to_owned(),
+                description: Some((*desc).to_owned()),
+                // P1-3: 有 schema 定义的工具用真 schema，其余沿用空默认
+                parameters: Some(
+                    super::builtin_tool_parameters(name)
+                        .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}})),
+                ),
+            },
+        });
+    }
+    for server_id in mcp_ids {
+        if let Ok(descriptors) =
+            axagent_dao::repo::mcp_server::list_tools_for_server(db, server_id).await
+        {
+            for td in descriptors {
+                // 过滤被禁用的 MCP 工具（MCP 工具不归属内置组，仅按 disabled_tools 过滤）
+                if disabled_tools_set.contains(&td.name) {
+                    continue;
+                }
+                let parameters: Option<serde_json::Value> =
+                    td.input_schema_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
+                all_tools.push(ChatTool {
+                    r#type: "function".to_string(),
+                    function: ChatToolFunction {
+                        name: td.name,
+                        description: td.description,
+                        parameters,
+                    },
+                });
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    all_tools.retain(|t| seen.insert(t.function.name.clone()));
+    if all_tools.is_empty() {
+        None
+    } else {
+        Some(all_tools)
+    }
+}
+
 /// 回退模型重试上下文 — 主模型调用失败且尚未产出内容时，切换到回退模型重试一次
 struct FallbackRetryContext {
     provider: ProviderConfig,
@@ -1063,15 +1192,30 @@ pub async fn send_message(
             })
             .collect();
         if !hits.is_empty() {
-            // 统一写入 retrieval_hits 表，获取生成的 ID 供反馈数据湖使用
-            let hit_ids = axagent_dao::repo::retrieval_hit::record_hits(
+            // 统一写入 retrieval_hits 表，获取生成的 ID 供反馈数据湖使用。
+            // 不吞错（2026-09-15 修）：此前 `unwrap_or_default()` 让写库失败完全静默，
+            // 反馈数据湖静默缺记录。失败改为 error 级别暴露，但**不中断对话流** ——
+            // 反馈闭环是旁路，不应因它让回答失败。
+            let hit_ids = match axagent_dao::repo::retrieval_hit::record_hits(
                 state.harness.db(),
                 &conversation_id,
                 &user_message.id,
                 &hits,
             )
             .await
-            .unwrap_or_default();
+            {
+                Ok(ids) => ids,
+                Err(e) => {
+                    tracing::error!(
+                        "[retrieval_hit] 检索命中批量写库失败 conv={} msg={} hits={}: {}",
+                        conversation_id,
+                        user_message.id,
+                        hits.len(),
+                        e
+                    );
+                    Vec::new()
+                },
+            };
 
             // 通过反馈数据湖附加反馈字段，供 RL 训练和自适应优化使用
             if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
@@ -1332,116 +1476,15 @@ pub async fn send_message(
             .map(|v| v.into_iter().collect())
             .unwrap_or_default();
     let group_enabled = super::load_tool_groups_enabled().await;
-    let tools: Option<Vec<ChatTool>> = if mcp_ids.is_empty() && !has_search_provider {
-        None
-    } else {
-        let mut all_tools = Vec::new();
-        // Auto-include web_search if any search provider is configured
-        if has_search_provider
-            && super::is_builtin_tool_enabled("web_search", &disabled_tools_set, &group_enabled)
-        {
-            tracing::info!("[send_message] injecting web_search tool into tools list");
-            all_tools.push(ChatTool {
-                r#type: "function".to_string(),
-                function: ChatToolFunction {
-                    name: "web_search".to_string(),
-                    description: Some(
-                        "MUST use this to search the internet for current, real-time, or recent information. Call this function whenever the user asks about: today's news, current events, latest developments, stock prices, weather, sports scores, or any topic that requires up-to-date information beyond your knowledge cutoff. The search returns relevant web results. Do NOT tell users you cannot access real-time data — use this tool instead.".to_string()
-                    ),
-                    parameters: Some(serde_json::json!({
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query"
-                            }
-                        },
-                        "required": ["query"]
-                    })),
-                },
-            });
-        }
-        // Auto-include builtin local tools — mirrors UnifiedToolRegistry register_all()
-        // Tool names MUST match the `fn name()` return value of each tool implementation
-        let builtin_local_tools: &[(&str, &str)] = &[
-            // 权威工具名是 `SkillView`（`Skill` 只是它的 alias）。此前表里写的是别名，
-            // 与 registry / builtin_tool_parameters / SkillsList 输出 / 技能索引段提示的
-            // `SkillView` 全不一致 → 模型被引导去调一个它看不到的工具名。
-            (
-                "SkillView",
-                "加载指定技能的完整 SKILL.md 内容（Level 1）。skill: 技能名称（必填）, args: 可选参数。",
-            ),
-            ("DiscoverSkills", "搜索已安装的 Skill。query: 名称/描述关键词。"),
-            ("SkillsList", "列出所有已安装技能的摘要（Level 0 索引）。category: 可选类别过滤。"),
-            (
-                "SkillReference",
-                "读取技能 references/ 目录下的引用文件（Level 2）。skill: 技能名, path: 相对路径。",
-            ),
-            ("FileRead", "读取文件。file_path: 路径, offset: 起始行, limit: 行数。"),
-            ("FileWrite", "创建/覆盖文件。file_path: 路径, content: 内容。"),
-            ("FileEdit", "精确编辑文件。file_path: 路径, old_string: 旧文本, new_string: 新文本。"),
-            ("Glob", "glob 搜索文件。pattern: glob模式。"),
-            ("Grep", "正则搜索文件内容。pattern: 正则表达式。"),
-            ("Bash", "执行 shell 命令。command: 命令, description: 说明。"),
-            ("WebFetch", "获取 URL 内容。url: 目标URL。"),
-            ("WebSearch", "搜索互联网。query: 搜索词。"),
-            ("TaskCreate", "创建后台任务。subject: 标题, description: 描述。"),
-            ("TaskList", "列出所有任务。"),
-            ("TaskUpdate", "更新任务状态。taskId: ID, status: 新状态。"),
-            ("TodoWrite", "管理待办事项。"),
-            ("Agent", "启动子Agent处理复杂任务。"),
-            ("EnterPlanMode", "进入计划模式。"),
-            ("ListDirectory", "列出目录。path: 路径。"),
-            ("DeleteFile", "删除文件。file_path: 路径。"),
-        ];
-        for (name, desc) in builtin_local_tools {
-            // B-3: 双层过滤 —— disabled_tools + group_enabled
-            if !super::is_builtin_tool_enabled(name, &disabled_tools_set, &group_enabled) {
-                continue;
-            }
-            all_tools.push(ChatTool {
-                r#type: "function".to_string(),
-                function: ChatToolFunction {
-                    name: (*name).to_owned(),
-                    description: Some((*desc).to_owned()),
-                    // P1-3: 有 schema 定义的工具用真 schema，其余沿用空默认
-                    parameters: Some(super::builtin_tool_parameters(name).unwrap_or_else(
-                        || serde_json::json!({"type": "object", "properties": {}}),
-                    )),
-                },
-            });
-        }
-        for server_id in &mcp_ids {
-            if let Ok(descriptors) =
-                axagent_dao::repo::mcp_server::list_tools_for_server(state.harness.db(), server_id)
-                    .await
-            {
-                for td in descriptors {
-                    // 过滤被禁用的 MCP 工具（MCP 工具不归属内置组，仅按 disabled_tools 过滤）
-                    if disabled_tools_set.contains(&td.name) {
-                        continue;
-                    }
-                    let parameters: Option<serde_json::Value> =
-                        td.input_schema_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
-                    all_tools.push(ChatTool {
-                        r#type: "function".to_string(),
-                        function: ChatToolFunction {
-                            name: td.name,
-                            description: td.description,
-                            parameters,
-                        },
-                    });
-                }
-            }
-        }
-        let mut seen = std::collections::HashSet::new();
-        all_tools.retain(|t| seen.insert(t.function.name.clone()));
-        if all_tools.is_empty() {
-            None
-        } else {
-            Some(all_tools)
-        }
-    };
+    let tools: Option<Vec<ChatTool>> = build_tool_list(
+        state.harness.db(),
+        &mcp_ids,
+        has_search_provider,
+        &disabled_tools_set,
+        &group_enabled,
+        Some("send_message"),
+    )
+    .await;
 
     // 7. Spawn streaming in background
     // Convert all remaining system messages to user messages if model doesn't support system role
@@ -1789,109 +1832,15 @@ pub async fn regenerate_message(
             .map(|v| v.into_iter().collect())
             .unwrap_or_default();
     let group_enabled = super::load_tool_groups_enabled().await;
-    let tools: Option<Vec<ChatTool>> = if mcp_ids.is_empty() && !has_search_provider {
-        None
-    } else {
-        let mut all_tools = Vec::new();
-        if has_search_provider
-            && super::is_builtin_tool_enabled("web_search", &disabled_tools_set, &group_enabled)
-        {
-            all_tools.push(ChatTool {
-                r#type: "function".to_string(),
-                function: ChatToolFunction {
-                    name: "web_search".to_string(),
-                    description: Some(
-                        "MUST use this to search the internet for current, real-time, or recent information. Call this function whenever the user asks about: today's news, current events, latest developments, stock prices, weather, sports scores, or any topic that requires up-to-date information beyond your knowledge cutoff. The search returns relevant web results. Do NOT tell users you cannot access real-time data — use this tool instead.".to_string()
-                    ),
-                    parameters: Some(serde_json::json!({
-                        "type": "object",
-                        "properties": { "query": { "type": "string", "description": "The search query" } },
-                        "required": ["query"]
-                    })),
-                },
-            });
-        }
-        // Auto-include builtin local tools — mirrors UnifiedToolRegistry register_all()
-        // Tool names MUST match the `fn name()` return value of each tool implementation
-        let builtin_local_tools: &[(&str, &str)] = &[
-            // 权威工具名是 `SkillView`（`Skill` 只是它的 alias）。此前表里写的是别名，
-            // 与 registry / builtin_tool_parameters / SkillsList 输出 / 技能索引段提示的
-            // `SkillView` 全不一致 → 模型被引导去调一个它看不到的工具名。
-            (
-                "SkillView",
-                "加载指定技能的完整 SKILL.md 内容（Level 1）。skill: 技能名称（必填）, args: 可选参数。",
-            ),
-            ("DiscoverSkills", "搜索已安装的 Skill。query: 名称/描述关键词。"),
-            ("SkillsList", "列出所有已安装技能的摘要（Level 0 索引）。category: 可选类别过滤。"),
-            (
-                "SkillReference",
-                "读取技能 references/ 目录下的引用文件（Level 2）。skill: 技能名, path: 相对路径。",
-            ),
-            ("FileRead", "读取文件。file_path: 路径, offset: 起始行, limit: 行数。"),
-            ("FileWrite", "创建/覆盖文件。file_path: 路径, content: 内容。"),
-            ("FileEdit", "精确编辑文件。file_path: 路径, old_string: 旧文本, new_string: 新文本。"),
-            ("Glob", "glob 搜索文件。pattern: glob模式。"),
-            ("Grep", "正则搜索文件内容。pattern: 正则表达式。"),
-            ("Bash", "执行 shell 命令。command: 命令, description: 说明。"),
-            ("WebFetch", "获取 URL 内容。url: 目标URL。"),
-            ("WebSearch", "搜索互联网。query: 搜索词。"),
-            ("TaskCreate", "创建后台任务。subject: 标题, description: 描述。"),
-            ("TaskList", "列出所有任务。"),
-            ("TaskUpdate", "更新任务状态。taskId: ID, status: 新状态。"),
-            ("TodoWrite", "管理待办事项。"),
-            ("Agent", "启动子Agent处理复杂任务。"),
-            ("EnterPlanMode", "进入计划模式。"),
-            ("ListDirectory", "列出目录。path: 路径。"),
-            ("DeleteFile", "删除文件。file_path: 路径。"),
-        ];
-        for (name, desc) in builtin_local_tools {
-            // B-3: 双层过滤 —— disabled_tools + group_enabled
-            if !super::is_builtin_tool_enabled(name, &disabled_tools_set, &group_enabled) {
-                continue;
-            }
-            all_tools.push(ChatTool {
-                r#type: "function".to_string(),
-                function: ChatToolFunction {
-                    name: (*name).to_owned(),
-                    description: Some((*desc).to_owned()),
-                    // P1-3: 有 schema 定义的工具用真 schema，其余沿用空默认
-                    parameters: Some(super::builtin_tool_parameters(name).unwrap_or_else(
-                        || serde_json::json!({"type": "object", "properties": {}}),
-                    )),
-                },
-            });
-        }
-        for server_id in &mcp_ids {
-            if let Ok(descriptors) =
-                axagent_dao::repo::mcp_server::list_tools_for_server(state.harness.db(), server_id)
-                    .await
-            {
-                for td in descriptors {
-                    // 过滤被禁用的 MCP 工具（MCP 工具不归属内置组，仅按 disabled_tools 过滤）
-                    if disabled_tools_set.contains(&td.name) {
-                        continue;
-                    }
-                    let parameters: Option<serde_json::Value> =
-                        td.input_schema_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
-                    all_tools.push(ChatTool {
-                        r#type: "function".to_string(),
-                        function: ChatToolFunction {
-                            name: td.name,
-                            description: td.description,
-                            parameters,
-                        },
-                    });
-                }
-            }
-        }
-        let mut seen = std::collections::HashSet::new();
-        all_tools.retain(|t| seen.insert(t.function.name.clone()));
-        if all_tools.is_empty() {
-            None
-        } else {
-            Some(all_tools)
-        }
-    };
+    let tools: Option<Vec<ChatTool>> = build_tool_list(
+        state.harness.db(),
+        &mcp_ids,
+        has_search_provider,
+        &disabled_tools_set,
+        &group_enabled,
+        None,
+    )
+    .await;
 
     let regen_model_overrides = axagent_dao::repo::provider::get_model(
         state.harness.db(),
@@ -2244,109 +2193,15 @@ pub async fn regenerate_with_model(
             .map(|v| v.into_iter().collect())
             .unwrap_or_default();
     let group_enabled = super::load_tool_groups_enabled().await;
-    let tools: Option<Vec<ChatTool>> = if mcp_ids.is_empty() && !has_search_provider {
-        None
-    } else {
-        let mut all_tools = Vec::new();
-        if has_search_provider
-            && super::is_builtin_tool_enabled("web_search", &disabled_tools_set, &group_enabled)
-        {
-            all_tools.push(ChatTool {
-                r#type: "function".to_string(),
-                function: ChatToolFunction {
-                    name: "web_search".to_string(),
-                    description: Some(
-                        "MUST use this to search the internet for current, real-time, or recent information. Call this function whenever the user asks about: today's news, current events, latest developments, stock prices, weather, sports scores, or any topic that requires up-to-date information beyond your knowledge cutoff. The search returns relevant web results. Do NOT tell users you cannot access real-time data — use this tool instead.".to_string()
-                    ),
-                    parameters: Some(serde_json::json!({
-                        "type": "object",
-                        "properties": { "query": { "type": "string", "description": "The search query" } },
-                        "required": ["query"]
-                    })),
-                },
-            });
-        }
-        // Auto-include builtin local tools — mirrors UnifiedToolRegistry register_all()
-        // Tool names MUST match the `fn name()` return value of each tool implementation
-        let builtin_local_tools: &[(&str, &str)] = &[
-            // 权威工具名是 `SkillView`（`Skill` 只是它的 alias）。此前表里写的是别名，
-            // 与 registry / builtin_tool_parameters / SkillsList 输出 / 技能索引段提示的
-            // `SkillView` 全不一致 → 模型被引导去调一个它看不到的工具名。
-            (
-                "SkillView",
-                "加载指定技能的完整 SKILL.md 内容（Level 1）。skill: 技能名称（必填）, args: 可选参数。",
-            ),
-            ("DiscoverSkills", "搜索已安装的 Skill。query: 名称/描述关键词。"),
-            ("SkillsList", "列出所有已安装技能的摘要（Level 0 索引）。category: 可选类别过滤。"),
-            (
-                "SkillReference",
-                "读取技能 references/ 目录下的引用文件（Level 2）。skill: 技能名, path: 相对路径。",
-            ),
-            ("FileRead", "读取文件。file_path: 路径, offset: 起始行, limit: 行数。"),
-            ("FileWrite", "创建/覆盖文件。file_path: 路径, content: 内容。"),
-            ("FileEdit", "精确编辑文件。file_path: 路径, old_string: 旧文本, new_string: 新文本。"),
-            ("Glob", "glob 搜索文件。pattern: glob模式。"),
-            ("Grep", "正则搜索文件内容。pattern: 正则表达式。"),
-            ("Bash", "执行 shell 命令。command: 命令, description: 说明。"),
-            ("WebFetch", "获取 URL 内容。url: 目标URL。"),
-            ("WebSearch", "搜索互联网。query: 搜索词。"),
-            ("TaskCreate", "创建后台任务。subject: 标题, description: 描述。"),
-            ("TaskList", "列出所有任务。"),
-            ("TaskUpdate", "更新任务状态。taskId: ID, status: 新状态。"),
-            ("TodoWrite", "管理待办事项。"),
-            ("Agent", "启动子Agent处理复杂任务。"),
-            ("EnterPlanMode", "进入计划模式。"),
-            ("ListDirectory", "列出目录。path: 路径。"),
-            ("DeleteFile", "删除文件。file_path: 路径。"),
-        ];
-        for (name, desc) in builtin_local_tools {
-            // B-3: 双层过滤 —— disabled_tools + group_enabled
-            if !super::is_builtin_tool_enabled(name, &disabled_tools_set, &group_enabled) {
-                continue;
-            }
-            all_tools.push(ChatTool {
-                r#type: "function".to_string(),
-                function: ChatToolFunction {
-                    name: (*name).to_owned(),
-                    description: Some((*desc).to_owned()),
-                    // P1-3: 有 schema 定义的工具用真 schema，其余沿用空默认
-                    parameters: Some(super::builtin_tool_parameters(name).unwrap_or_else(
-                        || serde_json::json!({"type": "object", "properties": {}}),
-                    )),
-                },
-            });
-        }
-        for server_id in &mcp_ids {
-            if let Ok(descriptors) =
-                axagent_dao::repo::mcp_server::list_tools_for_server(state.harness.db(), server_id)
-                    .await
-            {
-                for td in descriptors {
-                    // 过滤被禁用的 MCP 工具（MCP 工具不归属内置组，仅按 disabled_tools 过滤）
-                    if disabled_tools_set.contains(&td.name) {
-                        continue;
-                    }
-                    let parameters: Option<serde_json::Value> =
-                        td.input_schema_json.as_ref().and_then(|s| serde_json::from_str(s).ok());
-                    all_tools.push(ChatTool {
-                        r#type: "function".to_string(),
-                        function: ChatToolFunction {
-                            name: td.name,
-                            description: td.description,
-                            parameters,
-                        },
-                    });
-                }
-            }
-        }
-        let mut seen = std::collections::HashSet::new();
-        all_tools.retain(|t| seen.insert(t.function.name.clone()));
-        if all_tools.is_empty() {
-            None
-        } else {
-            Some(all_tools)
-        }
-    };
+    let tools: Option<Vec<ChatTool>> = build_tool_list(
+        state.harness.db(),
+        &mcp_ids,
+        has_search_provider,
+        &disabled_tools_set,
+        &group_enabled,
+        None,
+    )
+    .await;
 
     let rwm_overrides = axagent_dao::repo::provider::get_model(
         state.harness.db(),

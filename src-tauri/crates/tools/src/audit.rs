@@ -8,12 +8,39 @@
 //! 3. 输出内容敏感信息扫描
 //! 4. 调用审计日志
 
-use parking_lot::Mutex;
+use axagent_entities::audit_log;
+use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Schema, Set};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+
+/// 进程级审计库连接。
+///
+/// 为什么不挂在 `ToolAuditor` 实例上：`UnifiedToolRegistry::new()` 全仓有 13 处调用
+/// （含 agent 循环 / fleet / plan / compress 等真实工具执行路径，另有 6 处在测试内），
+/// 每个实例各持一份连接既浪费、又要求逐个调用方注入 —— 漏掉任何一处，
+/// 该路径的审计就静默不落库，而这正是本模块此前的状态。
+///
+/// 形态与 `sandbox_policy` 一致：全局注册一次，之后任何位置（含临时 `new()` 出来的
+/// registry）自动回退读取。
+///
+/// 未注册（`None`）时退化为纯内存审计且不报错，保证单测与未初始化 DB 的场景可运行。
+static AUDIT_DB: OnceLock<DatabaseConnection> = OnceLock::new();
+
+/// 注册审计库连接，并确保 `audit_log` 表存在（建表语句由实体生成，幂等）。
+///
+/// 主程序启动时调用一次；重复调用保留首个连接并返回 `Ok`。
+pub async fn init_audit_db(db: DatabaseConnection) -> Result<(), String> {
+    let mut stmt =
+        Schema::new(db.get_database_backend()).create_table_from_entity(audit_log::Entity);
+    stmt.if_not_exists();
+    db.execute(&stmt).await.map_err(|e| format!("创建 audit_log 表失败: {e}"))?;
+    // `set` 返回 Err 表示已有值 —— 保留首个连接，属幂等成功。
+    let _ = AUDIT_DB.set(db);
+    Ok(())
+}
 
 /// 审计条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,10 +81,8 @@ pub struct AuditConfig {
     pub window_secs: u64,
     /// 是否启用敏感信息扫描
     pub scan_sensitive: bool,
-    /// 最大保留日志条数
+    /// 最大保留日志条数（**内存**环形上限；落库的条数不受此限制）
     pub max_log_entries: usize,
-    /// SQLite 数据库路径（None 表示不持久化）
-    pub audit_db_path: Option<String>,
 }
 
 impl Default for AuditConfig {
@@ -68,7 +93,6 @@ impl Default for AuditConfig {
             window_secs: 10,
             scan_sensitive: true,
             max_log_entries: 500,
-            audit_db_path: None,
         }
     }
 }
@@ -78,53 +102,18 @@ pub struct ToolAuditor {
     config: AuditConfig,
     /// 每个工具独立的频率限制状态
     rate_limits: RwLock<HashMap<String, RateLimitState>>,
-    /// 审计日志（内存）
+    /// 审计日志（内存，保留最近 `max_log_entries` 条）
     log: RwLock<Vec<AuditEntry>>,
-    /// SQLite 持久化连接（None 表示不持久化）
-    db: Option<Arc<Mutex<rusqlite::Connection>>>,
 }
 
 impl ToolAuditor {
+    /// 构造审计器。
+    ///
+    /// 持久化连接不在构造时传入：审计落库走进程级的 [`AUDIT_DB`]，由
+    /// [`init_audit_db`] 在启动时注册一次。未注册时退化为纯内存审计。
+    /// 这样全部 13 处 `UnifiedToolRegistry::new()` 调用点无需改动即可落库。
     pub fn new(config: AuditConfig) -> Self {
-        let db = config.audit_db_path.as_ref().and_then(|path| {
-            match rusqlite::Connection::open(path) {
-                Ok(conn) => {
-                    if let Err(e) = conn.execute(
-                        "CREATE TABLE IF NOT EXISTS audit_log (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            timestamp INTEGER NOT NULL,
-                            tool_name TEXT NOT NULL,
-                            conversation_id TEXT,
-                            success INTEGER NOT NULL,
-                            duration_ms INTEGER NOT NULL,
-                            output_preview TEXT NOT NULL,
-                            has_sensitive_input INTEGER NOT NULL,
-                            has_sensitive_output INTEGER NOT NULL
-                        )",
-                        [],
-                    ) {
-                        tracing::error!("Failed to create audit_log table: {e}");
-                        return None;
-                    }
-                    // Create index for common queries
-                    let _ = conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_audit_tool_name ON audit_log(tool_name)",
-                        [],
-                    );
-                    let _ = conn.execute(
-                        "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)",
-                        [],
-                    );
-                    Some(Arc::new(Mutex::new(conn)))
-                },
-                Err(e) => {
-                    tracing::error!("Failed to open audit DB at {path}: {e}");
-                    None
-                },
-            }
-        });
-
-        Self { config, rate_limits: RwLock::new(HashMap::new()), log: RwLock::new(Vec::new()), db }
+        Self { config, rate_limits: RwLock::new(HashMap::new()), log: RwLock::new(Vec::new()) }
     }
 
     /// 检查频率限制，返回 Ok 表示允许，Err 表示触发限制
@@ -272,30 +261,27 @@ impl ToolAuditor {
         false
     }
 
-    /// 记录审计条目（内存 + SQLite）
+    /// 记录审计条目（内存 + 持久化）
     pub async fn log(&self, entry: AuditEntry) {
-        // 持久化到 SQLite（如果启用）
-        if let Some(ref db) = self.db {
-            let e = entry.clone();
-            let db = db.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                let conn = db.lock();
-                let _ = conn.execute(
-                    "INSERT INTO audit_log (timestamp, tool_name, conversation_id, success, duration_ms, output_preview, has_sensitive_input, has_sensitive_output)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    rusqlite::params![
-                        e.timestamp,
-                        e.tool_name,
-                        e.conversation_id,
-                        e.success as i32,
-                        e.duration_ms as i32,
-                        e.output_preview,
-                        e.has_sensitive_input as i32,
-                        e.has_sensitive_output as i32,
-                    ],
-                );
-            })
-            .await;
+        // 落库：走实体 API，占位符风格与方言差异由 sea-orm 处理
+        if let Some(db) = AUDIT_DB.get() {
+            let model = audit_log::ActiveModel {
+                timestamp: Set(entry.timestamp),
+                tool_name: Set(entry.tool_name.clone()),
+                conversation_id: Set(entry.conversation_id.clone()),
+                success: Set(entry.success as i32),
+                duration_ms: Set(entry.duration_ms as i64),
+                output_preview: Set(entry.output_preview.clone()),
+                has_sensitive_input: Set(entry.has_sensitive_input as i32),
+                has_sensitive_output: Set(entry.has_sensitive_output as i32),
+                // `id` 是自增主键，保持 NotSet 交给数据库分配
+                ..Default::default()
+            };
+            if let Err(e) = audit_log::Entity::insert(model).exec(db).await {
+                // 审计写失败不应中断工具执行，但也绝不能静默吞掉：原实现用
+                // `let _ =` 丢弃全部错误，正是「审计从未落库」长期无人察觉的原因。
+                tracing::error!("[ToolAuditor] 审计落库失败 (tool={}): {e}", entry.tool_name);
+            }
         }
         // 内存日志
         let mut log = self.log.write().await;

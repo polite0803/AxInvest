@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub name: String,
+    #[sea_orm(indexed)]
     pub credential_type: String,
     /// AES-256-GCM encrypted JSON payload (Credential struct)
     pub data_encrypted: String,

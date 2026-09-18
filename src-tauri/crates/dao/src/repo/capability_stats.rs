@@ -147,12 +147,18 @@ fn stats_from_row(row: capability_stats::Model) -> CapabilityStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::Database;
-
+    /// 建库：走**与生产同一条**建表链（`db::initialize_schema`）。
+    ///
+    /// ⚠ 2026-09-16 改判：此前这里是 `Database::connect("sqlite::memory:")` +
+    /// `migrations::run_migrations`。版本化迁移清空后 `run_migrations` 变成**空操作**
+    /// ⇒ 表一张都建不出来，本文件所有用例集体报 `no such table`。
+    /// 换 `create_test_pool` 的理由不是「它更好用」，而是**建表来源只能有一个**：
+    /// 测试要自己另起一套建库方式，它验证的就不是用户真拿到的那条链。
     async fn setup() -> DatabaseConnection {
-        let db = Database::connect("sqlite::memory:").await.expect("连接数据库应成功");
-        crate::migrations::run_migrations(&db).await.expect("迁移应成功");
-        db
+        let handle = crate::db::create_test_pool().await.expect("测试库应可建立");
+        // `DatabaseConnection` 是 Arc 句柄：`handle` 在 setup 返回时析构，但克隆体仍
+        // 持有连接池（`DbHandle` 无 `Drop` 实现，且池的 `min_connections=1`）。
+        handle.conn.clone()
     }
 
     #[tokio::test]

@@ -2,12 +2,35 @@
 
 import { invoke } from "@/lib/invoke";
 import { DeleteOutlined, EditOutlined, PlusOutlined } from "@ant-design/icons";
-import { Button, Card, Col, Form, Input, message, Modal, Popconfirm, Row, Select, Space, Table, Tag } from "antd";
+import {
+  Button,
+  Card,
+  Col,
+  Form,
+  Input,
+  InputNumber,
+  message,
+  Modal,
+  Popconfirm,
+  Row,
+  Segmented,
+  Select,
+  Space,
+  Table,
+  Tag,
+} from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { Customer } from "../utils/constants";
-import { CUST_STATUS_COLOR_MAP, getCustomerStatusKey, getSourceKey } from "../utils/constants";
+import {
+  CUST_STATUS_COLOR_MAP,
+  CUST_TYPE_COLOR_MAP,
+  getCustomerStatusKey,
+  getCustomerTypeKey,
+  getSourceKey,
+} from "../utils/constants";
+import { CustomerMap } from "./CustomerMap";
 
 export function CustomersTab() {
   const { t } = useTranslation();
@@ -17,6 +40,8 @@ export function CustomersTab() {
   const [editing, setEditing] = useState<Customer | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("");
   const [filterSource, setFilterSource] = useState<string>("");
+  const [filterType, setFilterType] = useState<string>("");
+  const [viewMode, setViewMode] = useState<"list" | "map">("list");
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([]);
   const [form] = Form.useForm();
 
@@ -44,6 +69,13 @@ export function CustomersTab() {
         email: values.email as string,
         phone: (values.phone as string) || null,
         company: (values.company as string) || null,
+        customer_type: values.customer_type as "consumer" | "business" | "unknown",
+        country: (values.country as string) || null,
+        region: (values.region as string) || null,
+        city: (values.city as string) || null,
+        address: (values.address as string) || null,
+        latitude: (values.latitude as number) || null,
+        longitude: (values.longitude as number) || null,
         source: (values.source as string) || null,
         tags: [] as string[],
         notes: (values.notes as string) || "",
@@ -77,6 +109,7 @@ export function CustomersTab() {
   const filteredCustomers = customers.filter((c) => {
     if (filterStatus && c.status !== filterStatus) { return false; }
     if (filterSource && c.source !== filterSource) { return false; }
+    if (filterType && c.customer_type !== filterType) { return false; }
     return true;
   });
 
@@ -99,6 +132,22 @@ export function CustomersTab() {
       dataIndex: "company",
       key: "company",
       render: (v: string | null) => v || "-",
+    },
+    {
+      title: t("opc.customer.columnType"),
+      key: "customer_type",
+      render: (_: unknown, r: Customer) => {
+        const color = CUST_TYPE_COLOR_MAP[r.customer_type] || "default";
+        return <Tag color={color}>{t(getCustomerTypeKey(r.customer_type))}</Tag>;
+      },
+    },
+    {
+      title: t("opc.customer.columnLocation"),
+      key: "location",
+      render: (_: unknown, r: Customer) => {
+        const parts = [r.country, r.region, r.city].filter(Boolean);
+        return parts.length ? parts.join(" / ") : "-";
+      },
     },
     {
       title: t("opc.customer.columnStatus"),
@@ -136,6 +185,13 @@ export function CustomersTab() {
                 email: r.email,
                 phone: r.phone,
                 company: r.company,
+                customer_type: r.customer_type,
+                country: r.country,
+                region: r.region,
+                city: r.city,
+                address: r.address,
+                latitude: r.latitude,
+                longitude: r.longitude,
                 source: r.source,
                 notes: r.notes,
               });
@@ -187,6 +243,20 @@ export function CustomersTab() {
               ]}
             />
           </Col>
+          <Col xs={24} sm={8} md={6}>
+            <Select
+              placeholder={t("opc.customer.filterType")}
+              allowClear
+              style={{ width: "100%" }}
+              value={filterType || undefined}
+              onChange={(val) => setFilterType(val || "")}
+              options={[
+                { value: "consumer", label: t("opc.customerType.consumer") },
+                { value: "business", label: t("opc.customerType.business") },
+                { value: "unknown", label: t("opc.customerType.unknown") },
+              ]}
+            />
+          </Col>
           <Col>
             <Space>
               {selectedRowKeys.length > 0 && (
@@ -199,6 +269,7 @@ export function CustomersTab() {
                 onClick={() => {
                   setFilterStatus("");
                   setFilterSource("");
+                  setFilterType("");
                   setSelectedRowKeys([]);
                 }}
               >
@@ -206,41 +277,59 @@ export function CustomersTab() {
               </Button>
             </Space>
           </Col>
+          <Col style={{ marginLeft: "auto" }}>
+            <Segmented
+              value={viewMode}
+              onChange={(v) => setViewMode(v as "list" | "map")}
+              options={[
+                { value: "list", label: t("opc.customerMap.list") },
+                { value: "map", label: t("opc.customerMap.map") },
+              ]}
+            />
+          </Col>
         </Row>
       </Card>
 
-      <Card
-        extra={
-          <Button
-            type="primary"
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setEditing(null);
-              form.resetFields();
-              setModalOpen(true);
-            }}
+      {viewMode === "map"
+        ? (
+          <Card size="small" title={t("opc.customerMap.title")} style={{ marginBottom: 12 }}>
+            <CustomerMap customers={filteredCustomers} />
+          </Card>
+        )
+        : (
+          <Card
+            extra={
+              <Button
+                type="primary"
+                size="small"
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  setEditing(null);
+                  form.resetFields();
+                  setModalOpen(true);
+                }}
+              >
+                {t("opc.customer.newCustomer")}
+              </Button>
+            }
           >
-            {t("opc.customer.newCustomer")}
-          </Button>
-        }
-      >
-        <Table
-          dataSource={filteredCustomers}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          size="small"
-          pagination={{ pageSize: 20 }}
-          rowSelection={{
-            selectedRowKeys,
-            onChange: (keys) => setSelectedRowKeys(keys.map(String)),
-          }}
-          locale={{
-            emptyText: loading ? t("opc.common.loading") : t("opc.customer.emptyTip"),
-          }}
-        />
-      </Card>
+            <Table
+              dataSource={filteredCustomers}
+              columns={columns}
+              rowKey="id"
+              loading={loading}
+              size="small"
+              pagination={{ pageSize: 20 }}
+              rowSelection={{
+                selectedRowKeys,
+                onChange: (keys) => setSelectedRowKeys(keys.map(String)),
+              }}
+              locale={{
+                emptyText: loading ? t("opc.common.loading") : t("opc.customer.emptyTip"),
+              }}
+            />
+          </Card>
+        )}
 
       <Modal
         title={editing ? t("opc.customer.editTitle") : t("opc.customer.newCustomer")}
@@ -263,6 +352,19 @@ export function CustomersTab() {
             <Input />
           </Form.Item>
           <Form.Item
+            name="customer_type"
+            label={t("opc.customer.typeLabel")}
+            rules={[{ required: true, message: t("opc.customer.typeRequired") }]}
+          >
+            <Select
+              placeholder={t("opc.customer.typePlaceholder")}
+              options={[
+                { value: "consumer", label: t("opc.customerType.consumer") },
+                { value: "business", label: t("opc.customerType.business") },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
             name="email"
             label={t("opc.customer.emailLabel")}
             rules={[{ required: true, type: "email", message: t("opc.customer.emailRequired") }]}
@@ -275,6 +377,30 @@ export function CustomersTab() {
           <Form.Item name="company" label={t("opc.customer.companyLabel")}>
             <Input />
           </Form.Item>
+          <Form.Item name="country" label={t("opc.customer.countryLabel")}>
+            <Input placeholder={t("opc.customer.countryPlaceholder")} />
+          </Form.Item>
+          <Form.Item name="region" label={t("opc.customer.regionLabel")}>
+            <Input placeholder={t("opc.customer.regionPlaceholder")} />
+          </Form.Item>
+          <Form.Item name="city" label={t("opc.customer.cityLabel")}>
+            <Input placeholder={t("opc.customer.cityPlaceholder")} />
+          </Form.Item>
+          <Form.Item name="address" label={t("opc.customer.addressLabel")}>
+            <Input placeholder={t("opc.customer.addressPlaceholder")} />
+          </Form.Item>
+          <Row gutter={8}>
+            <Col span={12}>
+              <Form.Item name="latitude" label={t("opc.customer.latitudeLabel")}>
+                <InputNumber style={{ width: "100%" }} placeholder={t("opc.customer.latitudePlaceholder")} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="longitude" label={t("opc.customer.longitudeLabel")}>
+                <InputNumber style={{ width: "100%" }} placeholder={t("opc.customer.longitudePlaceholder")} />
+              </Form.Item>
+            </Col>
+          </Row>
           <Form.Item name="source" label={t("opc.customer.sourceLabel")}>
             <Select
               allowClear

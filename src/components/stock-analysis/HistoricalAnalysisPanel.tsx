@@ -1,6 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
-import { getActionTagStyle, getActionTKey, parseAction } from "@/lib/stock-analysis-utils";
+import { getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
 import { App, Button, Card, Checkbox, Collapse, Empty, Input, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -15,6 +15,8 @@ interface AnalysisRecord {
   decisionAction: string | null;
   /** 决策仓位百分比（后端直返，0-100） */
   decisionPositionPct: number | null;
+  /** 决策持仓状态轴（后端直返，v228）；null = 记录早于 v228，非 EMPTY */
+  decisionPositionState: string | null;
   /** 完整决策 JSON（含 confidence 等，部分旧数据可能为 null） */
   decisionJson: string | null;
   /** 列表场景不返回，详情页通过 get_stock_analysis 单独获取 */
@@ -397,13 +399,25 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                 renderItem={(r) => {
                   // 优先使用后端直返字段 decisionAction / decisionPositionPct，
                   // decisionJson 仅用于提取 confidence 等额外字段（兼容旧数据）。
-                  let action = r.decisionAction ? parseAction(r.decisionAction) : "";
+                  // P1-2(2026-09-14) / V76: 展示档统一派生 —— 后端已移除互改，
+                  // 优先用独立轴 decisionPositionState，null（v228 前历史行）才退回 pct。
+                  const displayOf = (a: string, state?: string | null, pct?: number | null) =>
+                    resolveDisplayAction(a, state ?? undefined, pct == null ? null : pct);
+                  let action = r.decisionAction
+                    ? displayOf(r.decisionAction, r.decisionPositionState, r.decisionPositionPct)
+                    : "";
                   let posPct: number | null = r.decisionPositionPct;
                   let conf: number | null = null;
                   if (r.decisionJson) {
                     try {
                       const d = JSON.parse(r.decisionJson) as Record<string, unknown>;
-                      if (!action && d.action) { action = parseAction(d.action as string); }
+                      if (!action && d.action) {
+                        action = displayOf(
+                          d.action as string,
+                          typeof d.positionState === "string" ? d.positionState : null,
+                          typeof d.positionPct === "number" ? d.positionPct : null,
+                        );
+                      }
                       if (posPct == null && typeof d.positionPct === "number") { posPct = d.positionPct; }
                       if (typeof d.confidence === "number") { conf = d.confidence; }
                     } catch { /* */ }

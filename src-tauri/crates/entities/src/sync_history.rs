@@ -11,6 +11,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 设备 ID
+    #[sea_orm(indexed)]
     pub device_id: String,
     /// 同步方向（push/pull/both）
     pub direction: String,
@@ -19,8 +20,10 @@ pub struct Model {
     /// 同步结果（JSON）
     pub result: String,
     /// 冲突详情（JSON 数组）
+    #[sea_orm(default_value = "[]")]
     pub conflicts: String,
     /// 开始时间（Unix 毫秒）
+    #[sea_orm(indexed)]
     pub started_at: i64,
     /// 结束时间（Unix 毫秒）
     pub completed_at: i64,
@@ -34,7 +37,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::sync_device::Entity",
         from = "Column::DeviceId",
-        to = "super::sync_device::Column::Id"
+        to = "super::sync_device::Column::Id",
+        on_delete = "Cascade"
     )]
     Device,
 }

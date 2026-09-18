@@ -5,12 +5,61 @@ use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
+use axagent_analysis_engine::recommender::Period;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::stock_analyses;
 use sea_orm::DatabaseConnection;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use std::sync::Arc;
 use tauri::State;
+
+/// 组装反思 prompt 的「可调参数清单」（v31，v72 收窄）。
+///
+/// 清单来源 = `PORTFOLIO_MGR_TUNABLE_PARAMS`（单一权威源，与 portfolio-mgr 的
+/// `input_mapping` 同源），逐项从变量表 `build_template_variables()` 取默认值与说明。
+///
+/// 为什么必须要它：`params_suggestion` 的 `param` 字段此前是自由文本，LLM 并不知道
+/// 存在 `regime_prior_*` / `action_*` / `risk_*` 这些可调参数，只能凭训练先验自造
+/// 名字 → 反思侧对市况先验等参数提出建议的概率≈0，「先验可被反思优化」实际不成立。
+///
+/// 为什么不用名字前缀扫全变量表（v31 的做法）：那会把 `risk_free_rate` /
+/// `risk_hhi_*` / `risk_sharpe_annualization` / `pos_max_turnover_pct` 这类
+/// **模型级参数**一并列出（实测 41 项）。这些参数改变的是估值与风险的计算结果，
+/// 不移动 portfolio-mgr 的决策边界，列给 LLM 只会稀释注意力、诱发无效建议。
+/// 收窄到 28 项后顺序即「决策相关性顺序」（先验 → 行动阈值 → 仓位 → 上限 →
+/// 风险分类 → 成本），决策链上游参数优先被 LLM 看到。
+fn build_tunable_params_catalog() -> String {
+    use crate::commands::stock_analysis_setup::seed_stock_analysis::PORTFOLIO_MGR_TUNABLE_PARAMS;
+    use axagent_harness::workflow_types::Variable;
+    use std::collections::HashMap;
+
+    let vars = crate::commands::stock_analysis_setup::seed_variables::build_template_variables();
+    let by_name: HashMap<&str, &Variable> = vars.iter().map(|v| (v.name.as_str(), v)).collect();
+
+    let mut lines: Vec<String> = Vec::new();
+    for name in PORTFOLIO_MGR_TUNABLE_PARAMS {
+        let Some(v) = by_name.get(name) else {
+            // 权威源登记了、变量表却没定义 —— 运行时该参数必然静默走 rhai 硬编码默认值
+            // （「配置项空接线」）。这里显式告警而不是静默跳过，避免再次无声漂移。
+            tracing::warn!(param = name, "可调参数未在 seed_variables.rs 定义，已从反思清单剔除");
+            continue;
+        };
+        let default = match &v.value {
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => "-".to_string(),
+        };
+        lines.push(format!(
+            "- {}（默认 {}）：{}",
+            v.name,
+            default,
+            v.description.as_deref().unwrap_or("")
+        ));
+    }
+    if lines.is_empty() {
+        return "（当前模板未声明可调参数，本次不要输出 params_suggestion）".to_string();
+    }
+    format!("共 {} 项，按决策相关性排序（决策链上游优先）：\n{}", lines.len(), lines.join("\n"))
+}
 
 /// 反思复盘工作流：从原始分析的 blackboard_snapshot 记忆中反思。
 /// 结果写入独立的 `stock_reflections` 表。
@@ -40,6 +89,14 @@ pub async fn run_reflection_workflow(
     // [方向3] 轨迹存储，用于持久化反思执行轨迹。
     // 传 None 则跳过 Trajectory 持久化（手动反思等不需要轨迹的场景）。
     trajectory_storage: Option<&std::sync::Arc<axagent_trajectory::TrajectoryStorage>>,
+    // [实际行情] 「当前实际行情」快照 —— 由调用方在反思前用前复权 K 线确定性算出
+    // （见 `compute_market_snapshot`）。承载价格层事实：入场基准价 / 最新价 /
+    // 涨跌幅 / 最大回撤 / 超额收益 / 目标价实现度。
+    //
+    // None = 行情不可用（K 线获取失败等）⇒ 注入空占位变量，让上游 comparator 与
+    // reflection-agent 显式知道"本次无行情事实"，而不是拿到伪造的 0% 收益
+    // 把实际涨跌误判成「横盘」。
+    market_snapshot: Option<&MarketSnapshot>,
 ) -> Result<String, String> {
     use axagent_entities::stock_reflections;
     use sea_orm::sea_query::Expr;
@@ -190,7 +247,7 @@ pub async fn run_reflection_workflow(
             ),
             is_secret: false,
         },
-        // 内联 system_prompt (stock_analysis_setup.rs:4538-4552) 引用了
+        // 内联 system_prompt (src/commands/stock_analysis_setup/mod.rs:1525) 引用了
         // {{stock_code}} / {{stock_name}} —— 必须在 variables 顶层,
         // input_mapping 的 source="trigger" 不会把它们提到顶层 (只会追加到
         // system_prompt 尾部的 "--- 输入上下文 ---" 块)。
@@ -230,6 +287,17 @@ pub async fn run_reflection_workflow(
             var_type: "string".into(),
             value: serde_json::Value::String(hindsight_date.to_string()),
             description: Some("反思评估时点（YYYY-MM-DD），工具调用和数据查看的时间锚点".into()),
+            is_secret: false,
+        },
+        // ── [v31] 可调参数清单 ──
+        // reflection-agent 的 system_prompt 以 {{tunable_params_catalog}} 引用。
+        // 不注入会让占位符渲染为空（甚至 VARIABLE_NOT_FOUND），反思产出的
+        // params_suggestion 就永远只有 LLM 自造的参数名 → 优化链路形同虚设。
+        axagent_harness::workflow_types::Variable {
+            name: "tunable_params_catalog".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(build_tunable_params_catalog()),
+            description: Some("可调决策参数清单（由变量表派生），供 params_suggestion 使用".into()),
             is_secret: false,
         },
         // [C3 借鉴] 4 个结构化 outcome 变量（reflection.md prompt 引用但原未注入）
@@ -281,6 +349,41 @@ pub async fn run_reflection_workflow(
             is_secret: false,
         },
     ];
+
+    // ── [实际行情] 「已完成的分析结论」vs「当前实际行情」的价格层事实 ──
+    //
+    // 与上方 raw_return_pct 的分工：
+    //   - raw_return_pct 是**标量**（收益率数字），comparator 用它做方向/收益分类；
+    //   - actual_market_text / actual_market_json 是**价格事实**（入场价、最新价、
+    //     区间高低、最大回撤、目标价实现度），让反思 LLM 能引用具体数字做归因，
+    //     而不是对着一个百分比"反思"。
+    //
+    // 两个变量必须**无条件注入**：comparator 的 input_mapping 与 reflection-agent
+    // 的 system_prompt 都引用它们，缺失会触发 VARIABLE_NOT_FOUND 使整条链 Failed。
+    let (market_text, market_json) = match market_snapshot {
+        Some(snap) => (snap.render_text(), serde_json::to_value(snap).unwrap_or_default()),
+        None => (
+            "【当前实际行情】行情数据不可用（K 线获取失败）。\
+             本次反思请仅基于定性记忆，不要对收益方向/幅度下结论。"
+                .to_string(),
+            serde_json::json!({ "status": "unavailable" }),
+        ),
+    };
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "actual_market_text".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(market_text),
+        description: Some("当前实际行情文本块（价格/涨跌/回撤/超额/目标价实现度）".into()),
+        is_secret: false,
+    });
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "actual_market_json".into(),
+        var_type: "object".into(),
+        value: market_json,
+        description: Some("当前实际行情结构化快照（供 comparator 按路径下钻）".into()),
+        is_secret: false,
+    });
+
     if let Some((time_horizon, holding_days)) = original_ctx {
         variables.push(axagent_harness::workflow_types::Variable {
             name: "original_time_horizon".into(),
@@ -835,17 +938,16 @@ pub async fn run_batch_reflection(
             offset.from_utc_datetime(&chrono::Utc::now().naive_utc()).date_naive()
         };
 
-        // hindsight 在未来 → skip（按日历日比较，不受时区影响）
+        // [实际行情] 原「hindsight_date 在未来 ⇒ skip」已移除：反思改为以
+        // **执行时的最新行情**为对比基准，计划评估时点只作提示（下方仅记录日志）。
         if let Some(h) = hindsight_nd {
             if h > today_nd {
                 tracing::info!(
-                    "[D1] pending {} ({}) hindsight_date={} 在未来,未到评估时点 skip",
+                    "[D1] pending {} ({}) 计划评估时点 {} 未到,按最新行情提前反思",
                     p.id,
                     p.stock_code,
                     hindsight_date
                 );
-                skipped_young += 1;
-                continue;
             }
         }
 
@@ -868,19 +970,63 @@ pub async fn run_batch_reflection(
             },
         };
 
-        if days_held < expected_days {
+        // [实际行情] 不再用「期望持有期」做硬门槛：反思现在以「当前实际行情」
+        // 为对比基准，未到期也可做**期中观察**（快照会带 `within_expected_horizon`
+        // 标记，反思 prompt 明确要求对期中观察降低结论权重）。
+        // 真正的门槛下移到行情侧：分析日之后至少要有 1 个交易日的新行情。
+        let within_horizon = days_held < expected_days;
+        if within_horizon {
             tracing::info!(
-                "[D1] pending {} ({}) 持仓 {}/{} 天,未到期 skip",
+                "[D1] pending {} ({}) 持仓 {}/{} 天,未到期,按期中观察反思",
                 p.id,
                 p.stock_code,
                 days_held,
                 expected_days
             );
-            skipped_young += 1;
-            continue;
         }
 
-        // 2c. 调 run_reflection_workflow(B3 UPDATE 路径)
+        // 2c. [实际行情] 拉取「分析日 → 最新交易日」的真实行情（前复权 K 线，确定性计算）。
+        //     必须在调用前算完：run_reflection_workflow 只负责注入变量，不负责取数。
+        let target_price = extract_target_price(&analysis);
+        let snapshot = match compute_market_snapshot(
+            &state.astock_client,
+            &p.stock_code,
+            analysis_date,
+            analysis.decision_expected_holding_days,
+            target_price,
+        )
+        .await
+        {
+            Ok(s) if s.trading_days >= 1 => Some(s),
+            Ok(s) => {
+                tracing::info!(
+                    "[D1] pending {} ({}) 分析日之后仅 {} 个交易日,行情样本不足 skip",
+                    p.id,
+                    p.stock_code,
+                    s.trading_days
+                );
+                skipped_young += 1;
+                continue;
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "[D1] pending {} ({}) 行情快照失败,降级为无行情反思: {e}",
+                    p.id,
+                    p.stock_code
+                );
+                None
+            },
+        };
+
+        // actual_outcome 改为**事实描述**（价格从哪到哪、涨跌多少），
+        // 而不是旧实现的 "correct"/"wrong" 结论词 —— 结论应由反思 agent 给出。
+        let actual_outcome = snapshot
+            .as_ref()
+            .map(|s| s.render_outcome_short())
+            .unwrap_or_else(|| p.actual_outcome.clone());
+        let today_str = today_nd.format("%Y-%m-%d").to_string();
+
+        // 2d. 调 run_reflection_workflow(B3 UPDATE 路径)
         let r = run_reflection_workflow(
             db,
             &state.astock_client,
@@ -890,18 +1036,28 @@ pub async fn run_batch_reflection(
             &p.stock_code,
             &p.stock_name,
             &p.original_analysis_id,
-            &p.actual_outcome,      // 留空字符串走 legacy fallback
-            None,                   // raw_return: pending 阶段未算
-            None,                   // alpha_return
-            Some(days_held as i32), // holding_days 填入
-            None,                   // benchmark_name
+            &actual_outcome,
+            // [修复] 原实现此处传 None —— pending 阶段未回测 ⇒ raw_return_pct 注入 0.0
+            // ⇒ comparator 里 actual_direction 恒「横盘」、direction_match 恒 false
+            // ⇒ agent 基于假数据反思。现改用行情快照的净收益（扣双边成本）。
+            snapshot.as_ref().map(|s| s.net_return_pct),
+            snapshot.as_ref().and_then(|s| s.alpha_pct),
+            Some(snapshot.as_ref().map(|s| s.trading_days as i32).unwrap_or(days_held as i32)),
+            snapshot.as_ref().map(|_| "沪深300"),
             analysis_date,
-            // [时间旅行模式] 传 pending row 的 hindsight_date 而非 today
-            hindsight_date,
-            0u8,
-            "light",
+            // [实际行情] 行情终点是「最新交易日」⇒ AS_OF 锚点必须用**今天**，
+            // agent 的 K 线工具才能看到最新数据。原传 pending 的 hindsight_date
+            // 会把 agent 的时间锚点锁在过去，看不见"当前实际行情"。
+            &today_str,
+            // [2026-09-13] 消费 pending row 自带的阈值与深度。
+            // 此前这里是硬编码 `0u8` / `"light"`，于是 `stock_reflections` 的
+            // `min_confidence_threshold` / `reflection_depth` 成了**死字段** ——
+            // 用户在反思面板设的阈值与深度永远不生效（同构问题见铁律 12）。
+            p.min_confidence_threshold.clamp(0, 255) as u8,
+            p.reflection_depth.as_str(),
             Some(p.id.clone()),              // [B2/B3] 走 UPDATE 路径
             Some(&state.trajectory_storage), // [方向3] 持久化轨迹
+            snapshot.as_ref(),               // [实际行情] 价格层事实
         )
         .await;
 
@@ -1296,6 +1452,180 @@ pub async fn run_lesson_validation_command(
 // 避免循环内 `Arc::new(_engine.clone())` 克隆整个 WorkEngine（可能包含大量状态）。
 // Arc::clone 只是原子引用计数加一，O(1)。
 // 接线：init/services.rs 的 start_batch_reflection 定时任务（每 6 小时）调用。
+/// 批量反思的筛选条件 —— 落地「以超短线 / 短线 / 中线 / 长线为时间间隔自动反思」。
+///
+/// 4 周期档位的权威映射来自 `Period::default_holding_days()`（**2 / 5 / 28 / 90** 天），
+/// 与智能荐股、候选池扫描用的是同一份定义（禁止本地再定义一份天数表）。
+///
+/// 语义：
+/// - `period = None` ⇒ 不限档位，处理全部 pending（保持既有行为）
+/// - `period = Some(p)` ⇒ 只处理「其原分析的期望持有天数最近邻归一到 p」的 pending
+/// - `due_only = true` ⇒ 额外要求计划评估时点 `hindsight_date` 已到（严格的"按间隔"）
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReflectionFilter {
+    /// 目标周期档位
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub period: Option<Period>,
+    /// 仅在 `hindsight_date <= today` 时反思（false = 沿用"以最新行情提前反思"）
+    #[serde(default)]
+    pub due_only: bool,
+    /// 只处理 `stock_reflections.min_confidence_threshold >= 此值` 的 pending
+    /// （None = 不限）。这是「决策校验」定时任务里用户设的阈值的落点 ——
+    /// 此前该阈值只被写进 row 却无人消费（硬编码 `0u8`），现由本字段承接筛选。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_confidence: Option<i32>,
+    /// 覆盖 pending row 自带的 `reflection_depth`（None ⇒ 用 row 自身的值）。
+    /// 「决策校验」任务里用户选的 light/deep 由此生效。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth_override: Option<String>,
+}
+
+impl ReflectionFilter {
+    /// 该 pending 是否命中本筛选。
+    ///
+    /// - `expected_days`：原分析声明的期望持有天数（`None` ⇒ 按反思侧既有兜底口径
+    ///   视为 28 天，与 `run_batch_reflection_inner` 内的一致）
+    /// - `hindsight_due`：计划评估时点是否已到
+    /// - `min_confidence_threshold`：pending row 自带的置信度阈值
+    pub fn matches(
+        &self,
+        expected_days: Option<i64>,
+        hindsight_due: bool,
+        min_confidence_threshold: i32,
+    ) -> bool {
+        if let Some(p) = self.period {
+            let days = expected_days.unwrap_or(28);
+            if Period::nearest_for_holding_days(days) != p {
+                return false;
+            }
+        }
+        if let Some(min) = self.min_confidence {
+            if min_confidence_threshold < min {
+                return false;
+            }
+        }
+        !self.due_only || hindsight_due
+    }
+}
+
+/// `batch-reflection` 定时任务的配置（JSON 存 `CronJob.prompt`）。
+///
+/// 一个任务对应一个周期档位：`period = "ultra_short"` 的任务按 2 天间隔、`short` 按 5 天、
+/// `mid` 按 28 天、`long` 按 90 天（天数映射来自 `Period::default_holding_days()`）。
+/// 配合各自的 cron 表达式，即实现「以 4 个周期为时间间隔自动反思」。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchReflectionConfig {
+    /// 只处理该周期档位的 pending（None = 全部）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub period: Option<Period>,
+    /// 仅在计划评估时点已到时反思（严格的"按间隔"）
+    #[serde(default)]
+    pub due_only: bool,
+    /// 单轮最多处理条数（None ⇒ 后端默认 20）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_count: Option<u32>,
+}
+
+impl BatchReflectionConfig {
+    pub fn from_json(s: &str) -> Result<Self, String> {
+        serde_json::from_str(s).map_err(|e| format!("解析 batch-reflection 配置失败: {e}"))
+    }
+
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string(self).map_err(|e| format!("序列化 batch-reflection 配置失败: {e}"))
+    }
+
+    pub fn to_filter(&self) -> ReflectionFilter {
+        ReflectionFilter {
+            period: self.period,
+            due_only: self.due_only,
+            min_confidence: None,
+            depth_override: None,
+        }
+    }
+}
+
+/// `validate-decisions` 定时任务的配置（JSON 存 `CronJob.prompt`）。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidateDecisionsConfig {
+    /// 触发反思的最低置信度（0 = 全部）
+    #[serde(default)]
+    pub min_confidence: i32,
+    /// 反思深度 "light" | "deep"（写入 pending row 的 reflection_depth 后被消费）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reflection_depth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_count: Option<u32>,
+}
+
+impl ValidateDecisionsConfig {
+    pub fn from_json(s: &str) -> Result<Self, String> {
+        serde_json::from_str(s).map_err(|e| format!("解析 validate-decisions 配置失败: {e}"))
+    }
+
+    pub fn to_json(&self) -> Result<String, String> {
+        serde_json::to_string(self).map_err(|e| format!("序列化 validate-decisions 配置失败: {e}"))
+    }
+
+    pub fn to_filter(&self) -> ReflectionFilter {
+        ReflectionFilter {
+            period: None,
+            due_only: false,
+            min_confidence: Some(self.min_confidence),
+            depth_override: self.reflection_depth.clone(),
+        }
+    }
+}
+
+/// `running` 状态超过该小时数即视为"卡死"，回收到 `pending` 重试。
+///
+/// 取 6 小时：单条反思的 LLM 调用最坏情况在分钟级，6 小时足够任何正常执行完成。
+pub const STALE_RUNNING_HOURS: i64 = 6;
+
+/// 回收卡死的 `running` 反思记录（幂等，返回回收条数）。
+///
+/// # 为什么必须有
+///
+/// 反思 row 被置为 `running` 后，若进程崩溃 / LLM 超时 / 用户直接关掉应用，
+/// **没有任何路径会把它写回** —— 于是永久卡在 `running`：既不会被
+/// `status = 'pending'` 的扫描命中，也没有超时重试。
+///
+/// DB 实证（2026-09-13）：`stock_reflections` 里 11 条 `running` 的记录最后一条
+/// 停在 7-28，一个多月无人回收；同期 `resolved` 数为 **0** ——「自动反思从未产出
+/// 过结论」的直接原因之一（见 `AUDIT-scheduled-tasks-2026-09-13.md`）。
+pub async fn reclaim_stale_running(db: &DatabaseConnection, stale_hours: i64) -> u64 {
+    use axagent_entities::stock_reflections;
+    use sea_orm::sea_query::Expr;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let cutoff_ms = now_ms - stale_hours * 3_600_000;
+    match stock_reflections::Entity::update_many()
+        .col_expr(stock_reflections::Column::Status, Expr::value("pending"))
+        .col_expr(stock_reflections::Column::UpdatedAt, Expr::value(now_ms))
+        .filter(stock_reflections::Column::Status.eq("running"))
+        .filter(stock_reflections::Column::UpdatedAt.lt(cutoff_ms))
+        .exec(db)
+        .await
+    {
+        Ok(r) => {
+            if r.rows_affected > 0 {
+                tracing::warn!(
+                    "[batch_reflection] 回收 {} 条卡死 running 反思（超过 {stale_hours}h 未更新）",
+                    r.rows_affected
+                );
+            }
+            r.rows_affected
+        },
+        Err(e) => {
+            // 回收失败不应阻断本轮反思（只是少了一次自愈机会）
+            tracing::warn!("[batch_reflection] 回收卡死 running 反思失败: {e}");
+            0
+        },
+    }
+}
+
 pub async fn run_batch_reflection_inner(
     db: &sea_orm::DatabaseConnection,
     _client: &axagent_astock_data::AStockClient,
@@ -1304,6 +1634,7 @@ pub async fn run_batch_reflection_inner(
     _master_key: &[u8; 32],
     max_count: Option<u32>,
     trajectory_storage: Option<&std::sync::Arc<axagent_trajectory::TrajectoryStorage>>,
+    filter: Option<&ReflectionFilter>,
 ) -> Result<serde_json::Value, String> {
     use crate::commands::error::ErrorResponse;
     use axagent_entities::stock_analyses;
@@ -1311,6 +1642,10 @@ pub async fn run_batch_reflection_inner(
 
     let max_count = max_count.unwrap_or(20) as usize;
     let today_ms = chrono::Utc::now().timestamp_millis();
+
+    // 0. 自愈：把卡死的 running 记录退回 pending（详见 reclaim_stale_running 文档）。
+    //    必须在扫 pending 之前执行，否则被卡死的 row 本轮仍不会被处理。
+    let reclaimed = reclaim_stale_running(db, STALE_RUNNING_HOURS).await;
 
     // 1. 扫所有 pending row,按 created_at ASC(最老的先处理,避免积压)
     let pendings: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
@@ -1332,6 +1667,7 @@ pub async fn run_batch_reflection_inner(
     let mut resolved = 0u32;
     let mut failed = 0u32;
     let mut skipped_young = 0u32;
+    let mut skipped_by_filter = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
     for p in pendings.iter().take(max_count) {
@@ -1349,10 +1685,10 @@ pub async fn run_batch_reflection_inner(
                 },
             };
 
-        let expected_days = analysis.decision_expected_holding_days.unwrap_or(28);
         let analysis_date = analysis.as_of_date.as_deref().unwrap_or(&p.as_of_date);
 
-        // [时间旅行模式] 评估时点由 pending row 的 hindsight_date 决定。
+        // [实际行情] 原「hindsight_date 未到 ⇒ skip」已移除：反思改为以**执行时的
+        // 最新行情**为对比基准，计划时点只作为提示（下方仅记录日志）。
         // P3-#13 修复：用 NaiveDate 直接相减，避免 UTC vs Asia/Shanghai 时区错位。
         let hindsight_date = p.hindsight_date.as_str();
         let analysis_nd = chrono::NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d").ok();
@@ -1366,7 +1702,28 @@ pub async fn run_batch_reflection_inner(
 
         if let Some(h) = hindsight_nd {
             if h > today_nd {
-                skipped_young += 1;
+                tracing::info!(
+                    "[batch_reflection_inner] {} ({}) 计划评估时点 {} 未到,按最新行情提前反思",
+                    p.id,
+                    p.stock_code,
+                    hindsight_date
+                );
+            }
+        }
+
+        // ── 4 周期分档筛选（P2-A）──
+        // 命中 `filter.period` 档位，且（当 due_only 时）计划评估时点已到，才进入反思。
+        // 于是「超短线 2 天 / 短线 5 天 / 中线 28 天 / 长线 90 天」可以各建一个定时
+        // 任务，用各自的触发频率实现真正的「按周期间隔反思」；不配 filter 时行为与
+        // 本改动前完全一致（不看到期、以最新行情提前反思）。
+        if let Some(f) = filter {
+            let hindsight_due = hindsight_nd.is_some_and(|h| h <= today_nd);
+            if !f.matches(
+                analysis.decision_expected_holding_days,
+                hindsight_due,
+                p.min_confidence_threshold,
+            ) {
+                skipped_by_filter += 1;
                 continue;
             }
         }
@@ -1388,26 +1745,55 @@ pub async fn run_batch_reflection_inner(
             },
         };
 
-        if days_held < expected_days {
-            skipped_young += 1;
-            continue;
-        }
+        // [实际行情] 去掉了原「持仓未到期 skip」硬门槛：反思改为以「当前实际行情」
+        // 为对比基准，未到期做期中观察（快照带 within_expected_horizon 标记）。
+        // 真正的门槛在行情侧：分析日之后至少要有 1 个交易日的新行情。
 
-        // ── [As-of 时间旅行回测验证] 用 BacktestEngine 自动计算事后结果 ──
-        // 在反思之前，先用历史行情验证分析决策的实际表现，
-        // 自动填充 actual_outcome / raw_return / alpha_return，形成完整闭环。
-        let (auto_outcome, auto_raw_return, auto_alpha_return, auto_holding_days) =
-            match run_asof_backtest(&analysis, _client, hindsight_date).await {
-                Ok(result) => result,
-                Err(e) => {
-                    tracing::warn!(
-                        "[as-of backtest] {} 回测失败，使用 pending row 原始数据: {e}",
-                        p.id
-                    );
-                    // 回测失败时回退到 pending row 的原始值
-                    (p.actual_outcome.clone(), p.raw_return, p.alpha_return, Some(days_held as i32))
-                },
-            };
+        // ── [实际行情] 拉取「分析日 → 最新交易日」真实行情 ──
+        // 取代原 `run_asof_backtest`：后者按「期望持有期」切窗口（未到期时被
+        // min(len-1) 夹到最新一根，终点语义含糊），且只返回 return_pct，
+        // 把 entry/exit/max_drawdown 全丢给下游 —— 反思 agent 看不到价格事实。
+        let target_price = extract_target_price(&analysis);
+        let snapshot = match compute_market_snapshot(
+            _client,
+            &p.stock_code,
+            analysis_date,
+            analysis.decision_expected_holding_days,
+            target_price,
+        )
+        .await
+        {
+            Ok(s) if s.trading_days >= 1 => Some(s),
+            Ok(s) => {
+                tracing::info!(
+                    "[batch_reflection_inner] {} ({}) 分析日之后仅 {} 个交易日,行情样本不足 skip",
+                    p.id,
+                    p.stock_code,
+                    s.trading_days
+                );
+                skipped_young += 1;
+                continue;
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "[batch_reflection_inner] {} ({}) 行情快照失败,降级为无行情反思: {e}",
+                    p.id,
+                    p.stock_code
+                );
+                None
+            },
+        };
+
+        let actual_outcome = snapshot
+            .as_ref()
+            .map(|s| s.render_outcome_short())
+            .unwrap_or_else(|| p.actual_outcome.clone());
+        let today_str = today_nd.format("%Y-%m-%d").to_string();
+
+        // depth：cron 任务（validate-decisions）可在 filter 内指定 light/deep，
+        // 覆盖 pending row 的默认值；不指定则用 row 自带的深度。
+        let effective_depth =
+            filter.and_then(|f| f.depth_override.as_deref()).unwrap_or(p.reflection_depth.as_str());
 
         let r = run_reflection_workflow(
             db,
@@ -1419,18 +1805,24 @@ pub async fn run_batch_reflection_inner(
             &p.stock_code,
             &p.stock_name,
             &p.original_analysis_id,
-            &auto_outcome,
-            auto_raw_return,
-            auto_alpha_return,
-            auto_holding_days,
-            None,
+            &actual_outcome,
+            snapshot.as_ref().map(|s| s.net_return_pct),
+            snapshot.as_ref().and_then(|s| s.alpha_pct),
+            Some(snapshot.as_ref().map(|s| s.trading_days as i32).unwrap_or(days_held as i32)),
+            snapshot.as_ref().map(|_| "沪深300"),
             analysis_date,
-            // [时间旅行模式] 传 pending row 的 hindsight_date 而非 today
-            hindsight_date,
-            0u8,
-            "light",
+            // [实际行情] AS_OF 锚点用今天（行情终点=最新交易日），
+            // 让 agent 的 K 线工具看到最新数据而非被锁在过去。
+            &today_str,
+            // [2026-09-13] 消费 pending row 自带的阈值与深度。
+            // 此前这里是硬编码 `0u8` / `"light"`，于是 `stock_reflections` 的
+            // `min_confidence_threshold` / `reflection_depth` 成了**死字段** ——
+            // 用户在反思面板设的阈值与深度永远不生效（同构问题见铁律 12）。
+            p.min_confidence_threshold.clamp(0, 255) as u8,
+            effective_depth,
             Some(p.id.clone()),
             trajectory_storage, // [方向3] 透传轨迹存储
+            snapshot.as_ref(),  // [实际行情] 价格层事实
         )
         .await;
 
@@ -1483,100 +1875,369 @@ pub async fn run_batch_reflection_inner(
         }
     }
 
+    tracing::info!(
+        "[batch_reflection_inner] 完成: total={} resolved={} failed={} skipped_young={} \
+         skipped_by_filter={} reclaimed={} cleaned={}",
+        pendings.len(),
+        resolved,
+        failed,
+        skipped_young,
+        skipped_by_filter,
+        reclaimed,
+        cleaned_up
+    );
+
     Ok(serde_json::json!({
         "totalPending": pendings.len(),
         "processed": pendings.len().min(max_count),
         "resolved": resolved,
         "failed": failed,
         "skippedYoung": skipped_young,
+        "skippedByFilter": skipped_by_filter,
+        "reclaimed": reclaimed,
         "cleanedUp": cleaned_up,
         "errors": errors,
     }))
 }
 
-// ── [As-of 时间旅行回测] 辅助函数 ──────────────────────────
+// ── [实际行情快照] 反思的「当前实际行情」数据源 ──────────────────────
 
-/// 用 BacktestEngine 对单条分析记录做 as-of 时间旅行回测。
+/// 反思拉取个股 K 线的根数（约两年交易日），足够覆盖任何持有期回溯。
+const REFLECTION_KLINE_COUNT: u32 = 500;
+/// A 股双边交易成本（佣金双边约 0.08% + 卖出印花税 0.1%）。
+const A_SHARE_COST_RATE: f64 = 0.0018;
+/// 默认对比基准：沪深300。
+const DEFAULT_BENCHMARK_CODE: &str = "000300";
+
+/// 「已完成的股票分析结论」vs「该股票当前实际行情」的确定性对比快照。
 ///
-/// 从 `stock_analyses` 记录中提取决策信息，调用 `BacktestEngine::backtest_decision`
-/// 用历史行情验证决策表现，返回 `(actual_outcome, raw_return, alpha_return, holding_days)`。
+/// # 为什么不复用 `BacktestEngine::backtest_decision`
 ///
-/// # 参数
-/// - `analysis`: stock_analyses 记录（含 decision_action / decision_json 等）
-/// - `client`: AStockClient（实现 MarketDataProvider trait）
-/// - `hindsight_date`: 事后评估日期（YYYY-MM-DD）
+/// ① 它按「原始期望持有期」切窗口（`entry_idx + holding_days`），未到期时被
+///    `min(len-1)` 夹到最新一根 —— 终点语义含糊，既不是到期日也不明确是今天；
+/// ② 调用方此前只取 `return_pct`，把 `entry_price` / `exit_price` /
+///    `max_drawdown_pct` 全部丢弃 —— 反思 agent 因此看不到任何价格层事实，
+///    只能对着一个百分比数字"反思"。
 ///
-/// # 返回
-/// - `Ok((actual_outcome, raw_return, alpha_return, holding_days))`
-/// - `Err(String)`: 回测失败（上层会回退到 pending row 原始值）
-async fn run_asof_backtest(
-    analysis: &stock_analyses::Model,
+/// 本快照固定窗口为「分析日 → 最新交易日」（即用户要的「当前实际行情」），
+/// 把价格 / 回撤 / 超额 / 目标价进度完整交给下游 comparator 与反思 agent。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketSnapshot {
+    pub stock_code: String,
+    /// 原始分析日（决策锚点）
+    pub analysis_date: String,
+    /// 入场基准日：分析日之后的首个交易日
+    pub entry_date: String,
+    /// 入场基准价：入场日开盘价（用分析日收盘价会引入前视偏差）
+    pub entry_price: f64,
+    /// 最新交易日（= 当前实际行情对应的时间点）
+    pub latest_date: String,
+    /// 最新收盘价（前复权，与 entry 同源）
+    pub latest_price: f64,
+    /// 入场 → 最新 的原始涨跌幅（%），不含交易成本
+    pub price_change_pct: f64,
+    /// 扣双边成本后的净收益率（%）
+    pub net_return_pct: f64,
+    /// 区间最高 / 最低价
+    pub period_high: f64,
+    pub period_low: f64,
+    /// 相对入场价的期间最大回撤（%）
+    pub max_drawdown_pct: f64,
+    /// 实际跨度（交易日）
+    pub trading_days: i64,
+    /// 原始决策的期望持有天数（交易日）；None = 未声明
+    pub expected_holding_days: Option<i64>,
+    /// 是否仍未到期望持有期（true ⇒ 结论属"期中观察"，不是事后终评）
+    pub within_expected_horizon: bool,
+    /// 基准代码（沪深300）
+    pub benchmark_code: Option<String>,
+    pub benchmark_change_pct: Option<f64>,
+    /// 相对基准的超额收益（%）
+    pub alpha_pct: Option<f64>,
+    /// 决策目标价（trader 节点 targetPrice）
+    pub target_price: Option<f64>,
+    /// 目标价实现度（%）：现价涨幅 / 目标涨幅；>100 表示已超越目标价
+    pub target_progress_pct: Option<f64>,
+    /// 最新价是否已达到 / 超过目标价（客观陈述，语义由 LLM 按看多看空判定）
+    pub target_reached: Option<bool>,
+}
+
+impl MarketSnapshot {
+    /// 渲染为单行摘要 —— 写入 `stock_reflections.actual_outcome` 与轨迹。
+    ///
+    /// 刻意不用 "correct/wrong" 这种结论词：结论应由反思 agent 给出，
+    /// 这里只陈述**发生了什么**（价格从哪到哪、涨跌多少、基准如何）。
+    pub fn render_outcome_short(&self) -> String {
+        let mut s = format!(
+            "{} → {}（{}个交易日）：入场基准价 {:.2} → 最新价 {:.2}，涨跌 {:+.2}%（扣双边成本净 {:+.2}%），区间最大回撤 {:.2}%",
+            self.analysis_date,
+            self.latest_date,
+            self.trading_days,
+            self.entry_price,
+            self.latest_price,
+            self.price_change_pct,
+            self.net_return_pct,
+            self.max_drawdown_pct
+        );
+        if let (Some(code), Some(chg)) = (&self.benchmark_code, self.benchmark_change_pct) {
+            s.push_str(&format!(
+                "；同期{} {:+.2}%，超额 {:+.2}%",
+                code,
+                chg,
+                self.alpha_pct.unwrap_or(0.0)
+            ));
+        }
+        if let Some(tp) = self.target_price {
+            s.push_str(&format!(
+                "；决策目标价 {:.2}（目标实现度 {:.1}%）",
+                tp,
+                self.target_progress_pct.unwrap_or(0.0)
+            ));
+        }
+        s
+    }
+
+    /// 渲染为反思 agent 的【实际行情】文本块（注入 `actual_market_text` 变量）。
+    ///
+    /// 与 `actual_market_json` 并存：JSON 供 comparator 按路径下钻，
+    /// 文本供 LLM 直接阅读 —— 不让 LLM 自己去解析嵌套 JSON 的键名。
+    pub fn render_text(&self) -> String {
+        let mut s = String::from("【当前实际行情】\n");
+        s.push_str(&format!(
+            "- 窗口：分析日 {} → 最新交易日 {}（{} 个交易日）\n",
+            self.analysis_date, self.latest_date, self.trading_days
+        ));
+        s.push_str(&format!(
+            "- 入场基准：{} 开盘 {:.2}（用分析日之后首个交易日开盘价，避免前视偏差）\n",
+            self.entry_date, self.entry_price
+        ));
+        s.push_str(&format!("- 最新收盘价：{:.2}\n", self.latest_price));
+        s.push_str(&format!(
+            "- 区间涨跌：{:+.2}%（扣双边交易成本后净收益 {:+.2}%）\n",
+            self.price_change_pct, self.net_return_pct
+        ));
+        s.push_str(&format!(
+            "- 区间最高 {:.2} / 最低 {:.2}，期间最大回撤 {:.2}%\n",
+            self.period_high, self.period_low, self.max_drawdown_pct
+        ));
+        match (&self.benchmark_code, self.benchmark_change_pct) {
+            (Some(code), Some(chg)) => s.push_str(&format!(
+                "- 基准 {} 同期 {:+.2}%，超额收益 {:+.2}%\n",
+                code,
+                chg,
+                self.alpha_pct.unwrap_or(0.0)
+            )),
+            _ => s.push_str("- 基准对比：数据不可用\n"),
+        }
+        match self.target_price {
+            Some(tp) => s.push_str(&format!(
+                "- 决策目标价 {:.2}：现价相对入场价已完成目标幅度的 {:.1}%（最新价{}目标价）\n",
+                tp,
+                self.target_progress_pct.unwrap_or(0.0),
+                if self.target_reached == Some(true) {
+                    "已达到/超过"
+                } else {
+                    "未达"
+                }
+            )),
+            None => s.push_str("- 决策目标价：原始结论未声明\n"),
+        }
+        match self.expected_holding_days {
+            Some(d) if self.within_expected_horizon => s.push_str(&format!(
+                "- ⚠ 尚未到期望持有期（期望 {} 个交易日 / 实际 {} 个）：本结论属**期中观察**，\
+                 不应据此判定策略失效，权重放低\n",
+                d, self.trading_days
+            )),
+            Some(d) => s.push_str(&format!(
+                "- 已越过期望持有期（期望 {} 个交易日 / 实际 {} 个）：可做事后终评\n",
+                d, self.trading_days
+            )),
+            None => {},
+        }
+        s
+    }
+}
+
+/// 计算「已完成的股票分析结论」vs「该股票当前实际行情」的对比快照。
+///
+/// 窗口固定为「分析日 → 最新交易日」（用户要求的「当前实际行情」）。
+/// 全部指标由前复权 K 线确定性推导，不依赖 LLM、不做任何脑补。
+///
+/// 失败语义：K 线取不到 / 分析日之后无数据 → `Err`，由调用方降级为
+/// 「无行情快照」（`market_snapshot=None`），**绝不伪造 0% 收益** ——
+/// 伪造 0% 会让 comparator 把实际涨跌误判成「横盘」，进而让 agent 基于假数据反思。
+pub async fn compute_market_snapshot(
     client: &axagent_astock_data::AStockClient,
-    hindsight_date: &str,
-) -> Result<(String, Option<f64>, Option<f64>, Option<i32>), String> {
-    use axagent_analysis_engine::backtest::BacktestEngine;
+    stock_code: &str,
+    analysis_date: &str,
+    expected_holding_days: Option<i64>,
+    target_price: Option<f64>,
+) -> Result<MarketSnapshot, String> {
+    use axagent_harness::market_data::{AdjType, MarketDataProvider};
 
-    // 1. 提取决策信息
-    let decision_action = analysis.decision_action.clone().unwrap_or_else(|| "hold".to_string());
-
-    // 从 decision_json 中提取 confidence（默认 0.5）
-    let decision_confidence = analysis
-        .decision_json
-        .as_ref()
-        .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
-        .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()))
-        .unwrap_or(0.5);
-
-    let time_horizon = analysis.decision_time_horizon.clone();
-    let expected_holding_days = analysis.decision_expected_holding_days;
-
-    // 2. 用 BacktestEngine 回测
-    // holding_days = hindsight_date - analysis_date（即实际持有天数）
-    let analysis_date = analysis.as_of_date.as_deref().unwrap_or(analysis.analysis_date.as_str());
-
-    let holding_days = chrono::NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d")
-        .ok()
-        .zip(chrono::NaiveDate::parse_from_str(hindsight_date, "%Y-%m-%d").ok())
-        .map(|(a, h)| (h - a).num_days().max(0))
-        .unwrap_or(expected_holding_days.unwrap_or(28));
-
-    let result = BacktestEngine::backtest_decision(
+    let klines = MarketDataProvider::get_klines(
         client,
-        &analysis.stock_code,
-        analysis_date,
-        &decision_action,
-        decision_confidence,
-        holding_days,
-        time_horizon.clone(),
-        expected_holding_days,
+        stock_code,
+        "daily",
+        REFLECTION_KLINE_COUNT,
+        Some(AdjType::Forward),
     )
     .await
-    .map_err(|e| format!("BacktestEngine 回测失败: {e}"))?;
+    .map_err(|e| format!("获取 {stock_code} K线失败: {e}"))?;
 
-    // 3. 构造 actual_outcome 字符串（供反思引擎使用）
-    let actual_outcome = if result.was_correct {
-        "correct"
-    } else {
-        "wrong"
+    if klines.is_empty() {
+        return Err(format!("{stock_code} 无K线数据"));
     }
-    .to_string();
 
-    tracing::info!(
-        "[as-of backtest] {} ({}) 决策={} 持有={}天 收益={:.2}% 正确={}",
-        analysis.stock_code,
-        analysis.stock_name,
-        decision_action,
-        result.holding_days,
-        result.return_pct,
-        result.was_correct
-    );
+    // 入场基准：分析日之后的首个交易日开盘价（分析日收盘后才出结论，用其收盘价会前视偏差）
+    let entry_idx = klines
+        .iter()
+        .position(|k| k.date.as_str() > analysis_date)
+        .ok_or_else(|| format!("{stock_code} 在 {analysis_date} 之后无K线数据"))?;
+    let entry_bar = &klines[entry_idx];
+    let entry_price = entry_bar.open;
+    // 显式拒绝 NaN 与 ≤0（`!(x > 0.0)` 对 NaN 为真，语义等价但 clippy 要求可读写法）
+    if entry_price.is_nan() || entry_price <= 0.0 {
+        return Err(format!("{stock_code} 入场基准价非法: {entry_price}"));
+    }
 
-    Ok((
-        actual_outcome,
-        Some(result.return_pct),
-        None, // alpha 需独立计算，暂留空
-        Some(result.holding_days as i32),
-    ))
+    // 最新一根 = 当前实际行情
+    let latest_bar = klines.last().ok_or_else(|| format!("{stock_code} K线为空"))?;
+    let latest_price = latest_bar.close;
+
+    // 区间高低 + 最大回撤（入场日 → 最新）
+    let window = &klines[entry_idx..];
+    let period_high = window.iter().fold(f64::MIN, |m, k| m.max(k.high));
+    let mut period_low = window.iter().filter(|k| k.low > 0.0).fold(f64::MAX, |m, k| m.min(k.low));
+    let mut peak = entry_price;
+    let mut max_dd = 0.0_f64;
+    for k in window {
+        if k.close > peak {
+            peak = k.close;
+        }
+        if peak > 0.0 {
+            let dd = (peak - k.close) / peak;
+            if dd > max_dd {
+                max_dd = dd;
+            }
+        }
+    }
+    if period_low == f64::MAX {
+        // 全窗口无有效 low（脏数据）→ 用收盘价兜底，不让 MAX 泄进下游
+        period_low = window.iter().map(|k| k.close).fold(f64::MAX, f64::min);
+    }
+
+    let price_change_pct = (latest_price - entry_price) / entry_price * 100.0;
+    let net_return_pct = price_change_pct - A_SHARE_COST_RATE * 100.0;
+    let trading_days = (klines.len() - 1 - entry_idx) as i64;
+
+    // 基准（沪深300）同期涨跌 → 超额收益。基准失败不阻断主链路（降级为 None）。
+    let (benchmark_code, benchmark_change_pct, alpha_pct) =
+        match compute_benchmark_change(client, &entry_bar.date, &latest_bar.date).await {
+            Ok(chg) => {
+                (Some(DEFAULT_BENCHMARK_CODE.to_string()), Some(chg), Some(price_change_pct - chg))
+            },
+            Err(e) => {
+                tracing::warn!("[market snapshot] {stock_code} 基准对比失败,降级为无超额收益: {e}");
+                (None, None, None)
+            },
+        };
+
+    // 目标价实现度：现价涨幅 / 目标涨幅
+    let target_progress_pct = target_price.and_then(|tp| {
+        let expected_pct = (tp - entry_price) / entry_price * 100.0;
+        if expected_pct.abs() < 0.01 {
+            None
+        } else {
+            Some(price_change_pct / expected_pct * 100.0)
+        }
+    });
+    let target_reached = target_price.map(|tp| latest_price >= tp);
+    let within_expected_horizon = expected_holding_days.map(|d| trading_days < d).unwrap_or(false);
+
+    Ok(MarketSnapshot {
+        stock_code: stock_code.to_string(),
+        analysis_date: analysis_date.to_string(),
+        entry_date: entry_bar.date.clone(),
+        entry_price,
+        latest_date: latest_bar.date.clone(),
+        latest_price,
+        price_change_pct,
+        net_return_pct,
+        period_high,
+        period_low,
+        max_drawdown_pct: max_dd * 100.0,
+        trading_days,
+        expected_holding_days,
+        within_expected_horizon,
+        benchmark_code,
+        benchmark_change_pct,
+        alpha_pct,
+        target_price,
+        target_progress_pct,
+        target_reached,
+    })
+}
+
+/// 取基准（沪深300）在指定区间内的涨跌幅（%）。
+///
+/// 与个股同源前复权 K 线，保证可比性；任一端点缺失时返回 `Err`，
+/// 由调用方降级为「无基准对比」，而不是用 0.0 冒充。
+async fn compute_benchmark_change(
+    client: &axagent_astock_data::AStockClient,
+    start_date: &str,
+    end_date: &str,
+) -> Result<f64, String> {
+    use axagent_harness::market_data::{AdjType, MarketDataProvider};
+
+    let klines = MarketDataProvider::get_klines(
+        client,
+        DEFAULT_BENCHMARK_CODE,
+        "daily",
+        REFLECTION_KLINE_COUNT,
+        Some(AdjType::Forward),
+    )
+    .await
+    .map_err(|e| format!("基准 K 线获取失败: {e}"))?;
+
+    let start = klines
+        .iter()
+        .position(|k| k.date.as_str() >= start_date)
+        .ok_or_else(|| format!("基准无 {start_date} 之后数据"))?;
+    let end = klines
+        .iter()
+        .rposition(|k| k.date.as_str() <= end_date)
+        .ok_or_else(|| format!("基准无 {end_date} 之前数据"))?;
+    if start > end {
+        return Err(format!("基准区间无效: {start_date}~{end_date}"));
+    }
+    let base = klines[start].open;
+    // 同 compute_market_snapshot：显式拒绝 NaN 与 ≤0
+    if base.is_nan() || base <= 0.0 {
+        return Err("基准基准价非法".to_string());
+    }
+    Ok((klines[end].close - base) / base * 100.0)
+}
+
+/// 从已完成的分析记录中提取决策目标价（trader 节点的 `targetPrice`）。
+///
+/// 两条来源，按可信度排序：
+/// 1. `decision_json.targetPrice`（决策落库时已规范化）
+/// 2. `blackboard_snapshot` 的 `_raw.trader.content.targetPrice`（LLM 原始输出）
+fn extract_target_price(analysis: &stock_analyses::Model) -> Option<f64> {
+    let from_decision = analysis
+        .decision_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.get("targetPrice").and_then(|t| t.as_f64()));
+    if from_decision.is_some() {
+        return from_decision;
+    }
+
+    let snapshot: serde_json::Value =
+        serde_json::from_str(analysis.blackboard_snapshot.as_deref()?).ok()?;
+    snapshot.get("_raw")?.get("trader")?.get("content")?.get("targetPrice")?.as_f64()
 }
 
 /// 从 `stock_analyses.blackboard_snapshot` 构造 `sub-analysis` 变量。
@@ -1880,3 +2541,151 @@ async fn run_lesson_evolution(
 //      一个有效前缀并解析出 candidates
 //   4) Agent 节点输出顶层 params / output / candidates 字段 → 直返
 //   5) extract_agent_output 顶层 params 优先于 content
+
+// ── 单元测试：[实际行情] 快照渲染与目标价提取（纯函数，无需网络）──
+//
+// 为什么只测渲染层：`compute_market_snapshot` 依赖 AStockClient 实时取数，
+// 属集成范畴；但其**消费侧语义**（"只陈述事实、不下结论"、"期中观察必须标注"、
+// "缺数据必须显式降级而非用 0 冒充"）全在渲染函数里，是本改造的核心契约，
+// 且完全离线可验。契约破了会让反思 agent 重新对着假数据写结论。
+#[cfg(test)]
+mod market_snapshot_tests {
+    use super::*;
+
+    fn sample() -> MarketSnapshot {
+        MarketSnapshot {
+            stock_code: "600519".to_string(),
+            analysis_date: "2026-08-01".to_string(),
+            entry_date: "2026-08-04".to_string(),
+            entry_price: 100.0,
+            latest_date: "2026-09-11".to_string(),
+            latest_price: 94.4,
+            price_change_pct: -5.6,
+            net_return_pct: -5.78,
+            period_high: 103.0,
+            period_low: 92.0,
+            max_drawdown_pct: 10.68,
+            trading_days: 28,
+            expected_holding_days: Some(28),
+            within_expected_horizon: false,
+            benchmark_code: Some("000300".to_string()),
+            benchmark_change_pct: Some(1.2),
+            alpha_pct: Some(-6.8),
+            target_price: Some(120.0),
+            target_progress_pct: Some(-28.0),
+            target_reached: Some(false),
+        }
+    }
+
+    /// 摘要必须是**事实陈述**，不能出现 correct/wrong 这类结论词。
+    ///
+    /// 回归背景：旧实现把 actual_outcome 直接写成 "correct"/"wrong"，等于后端替
+    /// 反思 agent 下了结论，且丢掉了价格信息（agent 无从引用具体数字做归因）。
+    #[test]
+    fn outcome_short_states_facts_not_verdict() {
+        let s = sample().render_outcome_short();
+        assert!(s.contains("2026-08-01"), "应含分析日: {s}");
+        assert!(s.contains("2026-09-11"), "应含最新交易日: {s}");
+        assert!(s.contains("100.00"), "应含入场基准价: {s}");
+        assert!(s.contains("94.40"), "应含最新价: {s}");
+        assert!(s.contains("000300"), "应含基准: {s}");
+        assert!(s.contains("120.00"), "应含目标价: {s}");
+        assert!(!s.contains("correct"), "不得输出结论词 correct: {s}");
+        assert!(!s.contains("wrong"), "不得输出结论词 wrong: {s}");
+    }
+
+    /// 未到期望持有期必须显式标注为「期中观察」。
+    ///
+    /// 回归背景：改造后反思不再等持有期到期（以「当前实际行情」为准），
+    /// 若不标注，agent 会把短期噪声当作策略失效证据。
+    #[test]
+    fn text_marks_horizon_state() {
+        let mut snap = sample();
+        snap.within_expected_horizon = true;
+        let early = snap.render_text();
+        assert!(early.contains("尚未到期望持有期"), "应标注期中观察: {early}");
+        assert!(early.contains("期中观察"), "应显式提示降权: {early}");
+
+        snap.within_expected_horizon = false;
+        let due = snap.render_text();
+        assert!(due.contains("已越过期望持有期"), "应标注可终评: {due}");
+    }
+
+    /// 文本块必须把价格事实全部带上（供 LLM 引用，而非只有百分比）。
+    #[test]
+    fn text_carries_price_facts() {
+        let t = sample().render_text();
+        assert!(t.contains("入场基准"), "{t}");
+        assert!(t.contains("最新收盘价"), "{t}");
+        assert!(t.contains("最大回撤"), "{t}");
+        assert!(t.contains("超额收益"), "{t}");
+        assert!(t.contains("目标价"), "{t}");
+    }
+
+    /// 缺失数据必须**显式降级**，不能用 0 冒充（0 会被读成「横盘/持平」）。
+    #[test]
+    fn text_degrades_explicitly_when_data_missing() {
+        let mut snap = sample();
+        snap.benchmark_code = None;
+        snap.benchmark_change_pct = None;
+        snap.alpha_pct = None;
+        snap.target_price = None;
+        snap.target_progress_pct = None;
+        snap.target_reached = None;
+        let t = snap.render_text();
+        assert!(t.contains("基准对比：数据不可用"), "{t}");
+        assert!(t.contains("原始结论未声明"), "{t}");
+    }
+
+    /// 目标价提取：decision_json 优先，其次 blackboard_snapshot 的 _raw.trader.content。
+    #[test]
+    fn extract_target_price_prefers_decision_json() {
+        let mut model = stock_analyses::Model {
+            id: "a1".to_string(),
+            stock_code: "600519".to_string(),
+            stock_name: "贵州茅台".to_string(),
+            analysis_date: "2026-08-01".to_string(),
+            provider_id: "p".to_string(),
+            conversation_id: "c".to_string(),
+            status: "completed".to_string(),
+            decision_action: Some("买入".to_string()),
+            decision_position_pct: None,
+            // v228 新增轴：NULL = 采集时点无此信息（不是 EMPTY，也不是「持有」）
+            decision_position_state: None,
+            decision_reasoning: None,
+            decision_json: Some(r#"{"targetPrice": 133.0}"#.to_string()),
+            blackboard_snapshot: Some(
+                r#"{"_raw":{"trader":{"content":{"targetPrice": 120.0}}}}"#.to_string(),
+            ),
+            config_id: None,
+            analysis_kind: "live".to_string(),
+            as_of_date: Some("2026-08-01".to_string()),
+            decision_time_horizon: Some("mid".to_string()),
+            decision_expected_holding_days: Some(28),
+            model_version: None,
+            data_snapshot_id: None,
+            outcome: None,
+            llm_decision_json: None,
+            parent_analysis_id: None,
+            trade_intent_status: "pending".to_string(),
+            trade_intent_source: None,
+            trade_intent_source_ref_id: None,
+            trade_intent_reviewed_at: None,
+            trade_intent_reviewed_by: None,
+            trade_intent_review_notes: None,
+            trade_intent_actual_trade_id: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+
+        assert_eq!(extract_target_price(&model), Some(133.0), "应优先取 decision_json");
+
+        // decision_json 无目标价 → 回退 snapshot
+        model.decision_json = Some(r#"{"confidence": 0.6}"#.to_string());
+        assert_eq!(extract_target_price(&model), Some(120.0), "应回退到 blackboard_snapshot");
+
+        // 两处都无 → None（不得返回 0.0 之类假值）
+        model.blackboard_snapshot = Some("{}".to_string());
+        assert_eq!(extract_target_price(&model), None);
+    }
+}

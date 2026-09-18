@@ -16,21 +16,24 @@
 //! 4. 缺少对话级智能路由（Dispatcher）
 //!
 //! 本模块在 harness 层定义：
-//! 1. **共享 DTO** — `Fleet` / `FleetMember` / `FleetStatus` / `FleetMemberStatus`
-//! 2. **`FleetRepository` trait** — 舰队与成员的持久化与查询接口
-//! 3. **`IntentDispatcher` trait + `DispatchEvent`** — 群聊智能路由的统一抽象
+//! 1. **共享 DTO** — `Fleet` / `FleetMember` / `FleetMessage` / `FleetStatus` / `FleetMemberStatus`
+//! 2. **`FleetRepository` trait** — 舰队、成员、**消息**的持久化与查询接口
+//! 3. **`DispatchEvent`** — 群聊智能路由的事件流契约
+//! 4. **`FleetIntentLlm` trait** — 意图分类的 LLM 能力注入点
 //!
 //! ## 实现方
 //!
 //! - `axagent_trajectory::SeaOrmFleetRepository` → 实现 `FleetRepository` trait（SeaORM 持久化，SQLite + PostgreSQL 双兼容）
-//! - `axagent_agent::LlmDispatcher` → 实现 `IntentDispatcher` trait（LLM Function Calling 路由）
+//! - `commands/fleet/executor.rs::ProviderFleetIntentLlm` → 实现 `FleetIntentLlm` trait（真实 LLM 意图分类）
 //! - wiring 层在 `init/state.rs` 注入到 `AppState`
 //!
-//! ## 接入计划
+//! ## 历史
 //!
-//! - **P0**：trait + DTO 定义（本阶段）+ SeaORM 实现
-//! - **P1**：LlmDispatcher 实现 + Tauri 命令暴露
-//! - **P2**：前端 Phaser 像素办公室 + 智能路由对话
+//! 本模块曾定义 `IntentDispatcher` trait（P0 计划中的「统一 Dispatcher 抽象」），
+//! 由 `axagent_agent::LlmDispatcher` 实现。**该抽象从未接线**：全仓零构造点、
+//! 零调用点，命令层直接走 `AppState.fleet_intent_llm` + `execute_fleet_turn`。
+//! 2026-09-15 已删除该 trait 与实现（含仅服务它的 `DispatchChatMessage`），
+//! 以免它带着**已废弃的内存历史形态**继续误导后续改动。
 
 use serde::{Deserialize, Serialize};
 
@@ -188,10 +191,54 @@ pub trait FleetRepository: Send + Sync {
 
     /// 移除成员
     async fn remove_member(&self, member_id: &str) -> Result<(), String>;
+
+    // ── 消息持久化（协调门的地基） ──────────────────────────────────────
+
+    /// 追加一条消息，返回**带已分配 `seq`** 的记录。
+    ///
+    /// ## seq 分配与并发
+    ///
+    /// 实现方以 `MAX(seq)+1` 分配（⚠ 读与写是两条独立语句、**不在同一事务**，
+    /// PG 默认 READ COMMITTED 下并发请求可能读到同一个 MAX），并依赖
+    /// `UNIQUE(fleet_id, conversation_id, seq)` 兜底并发：插入冲突时**重试**
+    /// （建议 ≤3 次），不要把冲突当业务错误抛出。
+    /// 入参 `message.seq` 被忽略（由实现方覆写）。
+    ///
+    /// `seq` 的**作用域是会话**，不是舰队：群聊与每条 DM 各有独立递增序列。
+    async fn append_message(&self, message: FleetMessage) -> Result<FleetMessage, String>;
+
+    /// 按 `seq` 升序列出**指定会话**的消息。
+    ///
+    /// - `conversation_id` 必须显式传入：不隔离会话会让 DM 混进群聊上下文
+    ///   （包括混进路由 prompt），这是改名前的实际缺陷；
+    /// - `after_seq = Some(n)` 只返回 `seq > n`（增量展示 / 协调门比对）；
+    /// - `limit` 为条数上限：**先取最新的 N 条，再按 seq 升序返回**
+    ///   （保证拿到的是最近上下文，而不是最早的历史）。
+    async fn list_messages(
+        &self,
+        fleet_id: &str,
+        conversation_id: &str,
+        after_seq: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<FleetMessage>, String>;
+
+    /// **指定会话**当前水位（最大 `seq`；无消息时为 0）。
+    ///
+    /// `only_agents = true` 只统计 agent 作者的消息 —— 协调门判断
+    /// 「有没有比我读时更新的**同伴**发言」用的就是这一档。
+    ///
+    /// ⚠ 水位必须按会话统计：若跨会话取全局最大，别的 DM 一发言就会把群聊
+    /// 误判为「已被推进」而暂扣本轮。
+    async fn max_seq(
+        &self,
+        fleet_id: &str,
+        conversation_id: &str,
+        only_agents: bool,
+    ) -> Result<i64, String>;
 }
 
 // ============================================================================
-// IntentDispatcher trait + DispatchEvent
+// DispatchEvent + FleetIntentLlm
 // ============================================================================
 
 /// 调度事件 — Dispatcher 在路由与执行过程中产生的事件流
@@ -252,6 +299,43 @@ pub enum DispatchEvent {
         /// 输出 token 数
         output_tokens: u64,
     },
+    /// 消息被协调门暂扣 —— 本次回合**未执行**
+    ///
+    /// ## 契约（「展示即已见」，shown ⇒ seen）
+    ///
+    /// 服务端只在「本次读取之后、执行之前，**会话**被其他 agent 推进过」时返回本事件，
+    /// 并把**未读的更新消息内联在 `held_messages` 里** —— 这一步就是「展示」。
+    /// 调用方读过之后**直接重发即可通过**，不需要任何旗标仪式。
+    ///
+    /// ## 为什么本仓没有 `force` / `send_anyway` 参数
+    ///
+    /// 这是刻意设计。cumora 的实证教训：`--send-anyway` 本是免费无条件旁路，
+    /// 智能体为省一次往返开始**抢占式**传它，协调门就此静默消失
+    /// （其 anti-pattern #10「不要发布没有代价的覆盖标志 —— 软门会侵蚀」）。
+    ///
+    /// 本仓的等价保障来自结构而非纪律：**会话水位基线只在服务端把消息展示出去时
+    /// 才被取用**，客户端无法自行推进它；且重发时基线会重新取值 —— 若会话在此期间
+    /// 又被推进，会**再次 HELD**（同一回合的旧确认也跳不过从未被展示的消息）。
+    #[serde(rename_all = "camelCase")]
+    Held {
+        /// 发现的最新水位 —— **该会话**的 agent 水位
+        /// （`max_seq(fleet_id, conversation_id, only_agents = true)`）。
+        ///
+        /// ⚠ **不等于** `held_messages` 中最大的 seq：后者受服务端条数上限
+        /// （`CONVERSATION_HISTORY_LIMIT`）约束，未读超过上限时只保留最新 N 条被截断。
+        ///
+        /// 前端消费端：HELD 提示条会显示本值（「已推进到 #N」），让用户判断自己
+        /// 落后多远。之所以不需要客户端**回报**它：本仓的基线每次都在
+        /// **服务端入口重新取值**，而非依赖客户端确认。
+        max_seq: i64,
+        /// 未读的更新消息（服务器已展示 ⇒ 重发即可通过）。
+        ///
+        /// 与 `max_seq` 同源，故**只含本会话的消息**。理论上可能混有
+        /// `author_kind = human` 的条目（例如另一个窗口对本会话并发 dispatch 时
+        /// 写入的用户消息）—— 这是刻意的：暂扣期间让用户看到会话全貌，
+        /// 好过只给他看 agent 那一半。
+        held_messages: Vec<FleetMessage>,
+    },
     /// 流结束
     Complete,
     /// 错误
@@ -261,61 +345,75 @@ pub enum DispatchEvent {
     },
 }
 
-/// 聊天消息（Dispatcher 输入）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// 舰队消息 — **已持久化**的群聊 / 私信消息。
+///
+/// ## 为什么不是「调用方临时传一个 history」
+///
+/// 协调门的判据形如「有没有比水位 X 更新的**非自己**消息」，这要求每条消息都能
+/// 回答「**谁写的**」和「**写的先后**」。以前那种「调用方每次传一组
+/// role + content」的临时历史两样都给不出，且前端一刷新记忆就没了。
+///
+/// 因此本类型是库里的真源：`author_kind` / `author_id` 定身份，
+/// `seq` 定顺序，`conversation_id` 定**会话作用域**（群聊 or 某个 DM）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DispatchChatMessage {
-    /// 角色：user / assistant / system
-    pub role: String,
-    /// 消息内容
+pub struct FleetMessage {
+    /// 唯一 ID
+    pub id: String,
+    /// 所属舰队 ID
+    pub fleet_id: String,
+    /// **会话作用域** ID（群聊 = [`CONVERSATION_GROUP`]，私信 = [`conversation_dm`]）
+    ///
+    /// ⚠ 不是 `FleetMember.room_id`：那是像素办公室里精灵站的物理房间，
+    /// 由前端渲染消费，**从不参与消息查询**。两者曾同名，导致 DM 与群聊
+    /// 共享一条时间线而无人察觉。
+    pub conversation_id: String,
+    /// 单调递增序号（同一舰队内唯一且递增）
+    pub seq: i64,
+    /// 作者类型：human / agent
+    pub author_kind: String,
+    /// 作者 ID（human 用本地固定标识；agent 用 agent_id）
+    pub author_id: String,
+    /// 作者 slug（agent 才有）
+    pub author_slug: Option<String>,
+    /// 作者显示名（human 为 None）
+    pub author_display_name: Option<String>,
+    /// 消息正文
     pub content: String,
-    /// 关联的 agent slug（assistant 消息才有）
-    pub agent_slug: Option<String>,
+    /// 创建时间（Unix 毫秒）
+    pub created_at: i64,
 }
 
-/// 群聊智能路由的统一抽象。
-///
-/// 实现方接收用户消息 + 历史，通过 LLM Function Calling 决定路由到哪个 agent，
-/// 然后调用 `SessionManager::run_turn_with_tools` 执行，并产生事件流。
-///
-/// ## 设计要点
-///
-/// - **流式输出**：`dispatch_stream` 返回 `DispatchEvent` 流，前端 SSE 消费
-/// - **动态 prompt**：每次调用都从 `FleetRepository` 重新加载成员列表构建 prompt
-/// - **错误隔离**：内部错误转为 `DispatchEvent::Error` 事件，不中断流
-///
-/// ## 接入计划
-///
-/// - **P0**：trait 定义（本阶段）
-/// - **P1**：`axagent_agent::LlmDispatcher` 实现
-#[async_trait::async_trait]
-pub trait IntentDispatcher: Send + Sync {
-    /// 流式调度 — 返回事件流，调用方消费 SSE
-    async fn dispatch_stream(
-        &self,
-        fleet_id: &str,
-        user_message: &str,
-        history: Vec<DispatchChatMessage>,
-    ) -> Result<Vec<DispatchEvent>, String>;
+/// `FleetMessage.author_kind` 的取值 — 人类作者
+pub const AUTHOR_KIND_HUMAN: &str = "human";
+/// `FleetMessage.author_kind` 的取值 — agent 作者
+pub const AUTHOR_KIND_AGENT: &str = "agent";
 
-    /// 直接 DM 指定 agent（绕过 Dispatcher 路由）
-    async fn direct_message_stream(
-        &self,
-        fleet_id: &str,
-        agent_slug: &str,
-        user_message: &str,
-        history: Vec<DispatchChatMessage>,
-    ) -> Result<Vec<DispatchEvent>, String>;
+/// 群聊（智能路由）会话的 `conversation_id`。
+///
+/// 群聊是舰队内**唯一**的共享会话：所有成员的公开发言与用户的群聊输入都落在这里。
+///
+/// ⚠ 不要与 `FleetMember.room_id` 混用 —— 那是像素办公室里精灵站的物理房间
+/// （`"workspace"` / `"showroom"` …），**从不参与消息查询**。
+pub const CONVERSATION_GROUP: &str = "group";
+
+/// 与指定成员私信（DM）的 `conversation_id`。
+///
+/// 用 slug 而非 member_id 作键：slug 是路由与前端事件的稳定业务标识，
+/// 且同一 agent 在舰队内 slug 唯一（`fleet_add_member` 强制校验）。
+/// 这样「一次 DM」就是一个确定的会话，无需额外建表记录会话关系。
+pub fn conversation_dm(agent_slug: &str) -> String {
+    format!("dm:{agent_slug}")
 }
 
-/// Fleet 意图分类 LLM 调用 trait（供 `LlmDispatcher` 注入）。
+/// Fleet 意图分类 LLM 调用 trait —— 路由能力的**唯一**注入点。
 ///
 /// ## 设计动机
 ///
 /// `axagent_agent` 是 consumer crate，按铁律只能依赖 `axagent-harness`，
 /// 不能直接依赖 `axagent-providers`。因此 LLM 调用能力通过本 trait 注入：
-/// wiring 层实现此 trait（包装 `ProviderLlmBridge` 或直接走 `ProviderAdapter`），
-/// 在 `init/state.rs` 注入到 `LlmDispatcher`。
+/// wiring 层实现此 trait，在 `init/state.rs` 构造后放入 `AppState.fleet_intent_llm`，
+/// 由 `commands::fleet::fleet_dispatch` 直接调用（不经中间 Dispatcher 层）。
 ///
 /// ## 输出约定
 ///
@@ -323,7 +421,7 @@ pub trait IntentDispatcher: Send + Sync {
 /// ```json
 /// {"agent_slug": "copywriter", "reason": "用户要求写产品文案"}
 /// ```
-/// 解析失败时由 `LlmDispatcher` 兜底为第一个可用成员。
+/// 解析失败时由调用方（`commands::fleet`）兜底为第一个可用成员。
 #[async_trait::async_trait]
 pub trait FleetIntentLlm: Send + Sync {
     /// 调用 LLM 做意图分类
@@ -396,6 +494,30 @@ impl FleetRepository for NoopFleetRepository {
     }
     async fn remove_member(&self, _member_id: &str) -> Result<(), String> {
         Ok(())
+    }
+    async fn append_message(&self, mut message: FleetMessage) -> Result<FleetMessage, String> {
+        // Noop 不落库（无 seq 可分配），但形态与真实实现保持一致：
+        // seq=0 ⇒ `max_seq` 恒 0 ⇒ 协调门在离线/测试模式下**恒定放行**，
+        // 不会把「没有持久化」伪装成「检测到竞态」。
+        message.seq = 0;
+        Ok(message)
+    }
+    async fn list_messages(
+        &self,
+        _fleet_id: &str,
+        _conversation_id: &str,
+        _after_seq: Option<i64>,
+        _limit: u32,
+    ) -> Result<Vec<FleetMessage>, String> {
+        Ok(Vec::new())
+    }
+    async fn max_seq(
+        &self,
+        _fleet_id: &str,
+        _conversation_id: &str,
+        _only_agents: bool,
+    ) -> Result<i64, String> {
+        Ok(0)
     }
 }
 

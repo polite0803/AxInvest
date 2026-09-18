@@ -8,14 +8,19 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = true)]
     pub id: i64,
+    #[sea_orm(indexed)]
     pub schema_id: String,
     pub version: String,
     pub title: String,
+    #[sea_orm(default_value = "")]
     pub description: String,
     #[sea_orm(column_type = "Text")]
     pub schema_json: String,
+    #[sea_orm(default_value = "custom")]
     pub category: String,
+    #[sea_orm(default_value = "[]")]
     pub tags: String,
+    #[sea_orm(default_value = "")]
     pub change_log: String,
     pub created_at: i64,
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { listen } from "@/lib/invoke";
-import { App, Button, Input, Modal, Spin, Switch, theme, Typography } from "antd";
+import { App, Button, Input, Modal, Spin, theme } from "antd";
 import DOMPurify from "dompurify";
 import { ChevronDown } from "lucide-react";
 import NodeRenderer from "markstream-react";
@@ -50,7 +50,6 @@ import { ContextGraphPanel } from "./ContextGraphPanel";
 import { ExtractMemoriesModal } from "./ExtractMemoriesModal";
 import { InputArea } from "./InputArea";
 import { PermissionModal } from "./PermissionModal";
-import { PlanApprovalModal } from "./PlanApprovalModal";
 import { PlanCard } from "./PlanCard";
 import { TaskShapeApprovalModal } from "./TaskShapeApprovalModal";
 // QuickCommandBar removed: /clear, /compact, /model are covered by bottom toolbar & header ModelSelector
@@ -79,8 +78,6 @@ function ChatViewInner({
   const { t } = useTranslation();
   const { token } = theme.useToken();
   const { message: messageApi } = App.useApp();
-  const planApprovalEnabled = useAgentStore((s) => s.planApprovalEnabled);
-  const setPlanApprovalEnabled = useAgentStore((s) => s.setPlanApprovalEnabled);
 
   const conversations = useConversationStore((s) => s.conversations);
   const activeConversationId = useConversationStore(
@@ -527,30 +524,11 @@ function ChatViewInner({
             {t("chat.scrollToBottom")}
           </Button>
         )}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "4px 12px",
-          }}
-        >
-          <Switch
-            size="small"
-            data-testid="plan-approval-toggle"
-            checked={planApprovalEnabled}
-            onChange={(v) => setPlanApprovalEnabled(v)}
-          />
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {t("planApproval.toggleLabel")}
-          </Typography.Text>
-        </div>
         <InputArea />
       </div>
 
       <PermissionModal />
       <TaskShapeApprovalModal />
-      <PlanApprovalModal />
       {filePermRequest && (
         <FilePermissionDialog
           open={filePermDialogOpen}

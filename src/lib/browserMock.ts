@@ -8,7 +8,9 @@ import i18n from "@/i18n";
  * Provides CRUD operations for providers, conversations, apps, settings, and gateway.
  */
 
+import { CAPABILITY_DOMAIN_META, CAPABILITY_DOMAIN_PROTOCOL_ORDER, domainLabelKey } from "@/lib/domainMeta";
 import type { CreateNarrativeRequest, NarrativeStructureRecord } from "@/lib/narrativeStructure";
+import type { CapabilityDomain } from "@/types";
 import type {
   Conversation,
   ConversationBranch,
@@ -30,6 +32,7 @@ import type {
   ProgramPolicy,
   SaveProgramPolicyInput,
   SearchProvider,
+  Wiki,
   WikiTemplate,
 } from "@/types";
 import type { Artifact } from "@/types";
@@ -79,6 +82,27 @@ interface FleetMember {
   joinedAt: number;
   todayTokens: number;
   totalTokens: number;
+}
+
+/**
+ * 浏览器模式持久化的舰队消息（对齐 `@/types` 的 `FleetMessage` 与后端
+ * `fleet_messages` 表）。
+ *
+ * ⚠ `conversationId` 是**会话作用域**（`"group"` / `"dm:<slug>"`），
+ * 不是成员站位的物理房间（`FleetMember.roomId`）。二者曾同名，导致
+ * DM 与群聊混进同一条时间线。
+ */
+interface FleetMessage {
+  id: string;
+  fleetId: string;
+  conversationId: string;
+  seq: number;
+  authorKind: "human" | "agent";
+  authorId: string;
+  authorSlug?: string;
+  authorDisplayName?: string;
+  content: string;
+  createdAt: number;
 }
 
 /** 浏览器模式持久化的 AgentSession（与后端 agent_sessions 表 upsert 语义对齐） */
@@ -347,6 +371,71 @@ let MOCK_INVOICES: DeliveryInvoice[] = [
   },
 ];
 
+// ── 能力域覆盖层（P2，PLAN-domain-single-source.md §9.3） ────────────────
+//
+// ⚠ 行集合**派生**自 `domainMeta.ts` 的协议顺序（+ `system`），**不在这里手抄
+//   一遍 9 个 id**：手抄的失败方式是静默的 —— 后端新增一个域后浏览器模式少一行，
+//   而门禁 `check-domain-single-source.mjs` 会把「又一份 id 副本」记进报告。
+//   `nav_path` / `nav_order` 同样取自 `CAPABILITY_DOMAIN_META`（前端**唯一**持有
+//   域 id 集合的地方），故本文件不新增任何域表副本。
+//
+// ⚠ `builtin_aliases` 刻意留空：27 条内置别名是**后端声明**（`DOMAIN_NODES`），
+//   前端没有它、也不该为了 mock 造一份 —— 造出来的那份必然与后端各自腐烂。
+//   （真实别名在桌面端由后端给出；浏览器模式只用于看渲染与交互。）
+//
+// 覆盖层语义照搬后端：**没有覆盖行 = 用内置默认**。故只预置 1 条演示覆盖，
+// 其余保持「未改过」（`has_override: false`、全部启用）。
+
+/** 演示用覆盖层状态：域 id → 该域的覆盖值 */
+const MOCK_DOMAIN_OVERRIDES: Record<string, { enabled: boolean; extra_aliases: string[] }> = {
+  finance: { enabled: true, extra_aliases: ["投资", "证券"] },
+};
+
+/** 与后端 `CapabilityDomainEntryDto` 的 snake_case 源同形（命令出口会转 camelCase） */
+interface MockCapabilityDomainRow {
+  id: string;
+  label_key: string;
+  nav_path: string | null;
+  nav_order: number | null;
+  is_system: boolean;
+  toggleable: boolean;
+  toggle_block_reason: string | null;
+  enabled: boolean;
+  has_override: boolean;
+  builtin_aliases: string[];
+  extra_aliases: string[];
+  effective_aliases: string[];
+}
+
+/** 由「内置声明（前端侧派生）+ 覆盖层」拼出合并视图，与后端 `build_domain_entry` 同义。 */
+function mockCapabilityDomainRegistry(): MockCapabilityDomainRow[] {
+  const ids: CapabilityDomain[] = [...CAPABILITY_DOMAIN_PROTOCOL_ORDER, "system"];
+  return ids.map((id) => {
+    const isSystem = id === "system";
+    const override = MOCK_DOMAIN_OVERRIDES[id];
+    const extraAliases = override?.extra_aliases ?? [];
+    const meta = CAPABILITY_DOMAIN_META.find((m) => m.id === id);
+    // 例外域与后端 `is_toggleable` 同判据：General 是唯一兜底域、System 是内部域
+    const toggleable = id !== "general" && !isSystem;
+    return {
+      id,
+      label_key: domainLabelKey(id),
+      nav_path: meta?.path ?? null,
+      nav_order: meta ? CAPABILITY_DOMAIN_META.indexOf(meta) : null,
+      is_system: isSystem,
+      toggleable,
+      toggle_block_reason: toggleable
+        ? null
+        : (isSystem ? "system_is_internal" : "general_is_fallback"),
+      enabled: override?.enabled ?? true,
+      has_override: override !== undefined,
+      builtin_aliases: [],
+      extra_aliases: extraAliases,
+      effective_aliases: extraAliases,
+    };
+  });
+}
+
 /**
  * 模拟认知编排器路由匹配（L1/L2/L3）
  * 根据用户输入推断业务域、能力簇和工作流
@@ -487,6 +576,63 @@ function getWikiNotes(): Note[] {
 
 function setWikiNotes(notes: Note[]): void {
   setStore("mock.wikiNotes", notes);
+}
+
+// ── Wiki 图谱 fixture（**可选**，浏览器模式下渲染真实规模图谱）──────────
+//
+// 背景：浏览器模式的 wiki 图谱此前完全没有数据通路 —— `llm_wiki_list` 恒返回 `[]`
+// ⇒ 图页面判定「无可用 wiki」后连图数据都不请求。想在图谱页做任何渲染层调试
+// （性能、分组、边可见性）都无从下手，只能靠 Tauri 真机。
+//
+// 本 fixture 是**纯 opt-in** 的：URL 取 `window.__WIKI_GRAPH_FIXTURE_URL__`，
+// 未设置时退回 `/__mock-wiki-graph.json`；**拉不到就返回 null，三个 case 全部退回
+// 改动前的行为**（e2e 不依赖 fixture，因此不受影响）。
+//
+// 文件形态与两个后端命令的返回**逐字段对齐**（由 output/ 下的导出脚本从 PG 生成）：
+//   { wiki, graph, communitiesResult }  ⇒  llm_wiki_list / get_wiki_graph_cached
+//                                          / wiki_graph_communities_cached
+type WikiGraphFixture = {
+  wiki: Wiki;
+  graph: { nodes: unknown[]; edges: unknown[] };
+  communitiesResult: {
+    communities: Record<string, number>;
+    /**
+     * 实体侧社区（`entity:<id>` → cid），**可选** —— 生成 fixture 的导出脚本会带上它；
+     * 老 fixture 没有该字段时前端退回「锚点继承同名笔记的桶」。
+     * 有了它，浏览器模式才能复现「实体侧单独算社区」这条路径，
+     * 否则图页面在浏览器里永远只跑兜底分支（判据与真机不同源）。
+     */
+    entityCommunities?: Record<string, number>;
+  };
+};
+
+let wikiGraphFixturePromise: Promise<WikiGraphFixture | null> | undefined;
+
+function loadWikiGraphFixture(): Promise<WikiGraphFixture | null> {
+  if (!wikiGraphFixturePromise) {
+    wikiGraphFixturePromise = (async () => {
+      const override = (globalThis as { __WIKI_GRAPH_FIXTURE_URL__?: string })
+        .__WIKI_GRAPH_FIXTURE_URL__;
+      const url = override ?? "/__mock-wiki-graph.json";
+      try {
+        const res = await fetch(url);
+        if (!res.ok) { return null; }
+        // ⚠ 必须校验 content-type：Vite dev server 对未知路径会走 SPA 兜底，
+        // 返回 `index.html` 且状态码是 **200**（不是 404）。只判 `res.ok`
+        // 会拿到一段 HTML 再去 JSON.parse，然后被 catch 吞掉 ——
+        // 结果是「fixture 配错了」和「fixture 不存在」表现完全一样，
+        // 排查时会被误导。
+        const ctype = res.headers.get("content-type") ?? "";
+        if (!ctype.includes("json")) { return null; }
+        return (await res.json()) as WikiGraphFixture;
+      } catch {
+        // 文件不存在 / 不是合法 JSON 都属正常情形（默认不启用 fixture），
+        // 此处**刻意不打印 warning**，否则每次浏览器模式启动都会刷一条噪音。
+        return null;
+      }
+    })();
+  }
+  return wikiGraphFixturePromise;
 }
 
 function mockWikiNote(vaultId: string, title: string, content: string, tags: string[]): Note {
@@ -1401,25 +1547,6 @@ const DEFAULT_SETTINGS = {
 
 // ── Command Handler ─────────────────────────────────────────────────────
 
-// ── 计划确认闸门（P0-2）浏览器模式模拟 ──
-// agent_query 在开启 requirePlanApproval 时弹出计划草稿并挂起，直到
-// agent_approve_plan 被调用（approve/reject）。用于 e2e 测试事件驱动流程。
-const planDecisionResolvers = new Map<string, (decision: string) => void>();
-
-function waitForPlanDecision(conversationId: string): Promise<string> {
-  return new Promise<string>((resolve) => {
-    planDecisionResolvers.set(conversationId, resolve);
-  });
-}
-
-function resolvePlanDecision(conversationId: string, decision: string): void {
-  const resolver = planDecisionResolvers.get(conversationId);
-  if (resolver) {
-    planDecisionResolvers.delete(conversationId);
-    resolver(decision);
-  }
-}
-
 // ── DynamicUI Mock 辅助函数 ──────────────────────────────────────
 // i18n-exempt: Mock data keys for localStorage, not user-facing.
 function loadMockDynamicUIData<T>(key: string, defaultValue: T): T {
@@ -1470,6 +1597,180 @@ function buildMockUISchemaJSON(): string {
   });
 }
 
+/**
+ * `content_media` 的 7 个 KPI 夹具（浏览器模式专用）。
+ *
+ * **三态刻意齐全**：`available` × 5（其中 `conversion_rate = 0` 是「真实观测恰为
+ * 0」、`word_count = 200` 越限）、`empty` × 1（`completion_rate`）、
+ * `no_data_source` × 1（`content_engagement`）。后两态在后端 `value` 是占位 `0.0`，
+ * 验收时要能一眼看出它们渲染的是「—」+ 状态词，而不是被伪造成 `0`；而
+ * `conversion_rate` 恰好证明「available 且为 0」**必须**显示 `0`。
+ *
+ * 数值与阈值取自 `config/opc/domain_packs/content_media/runtime.yaml`
+ * （`word_count.risk.min = 1000`、`completion_rate.risk.min = 100`），因此该夹具
+ * 对应的风控结论是 **1/2 个「已声明生效阈值的受管键」越限 ⇒ `medium`**，
+ * 不是 `critical`（不是全部受管键都违规）。
+ */
+function mockContentMediaKpis(): Array<Record<string, unknown>> {
+  const ts = nowTs();
+  const k = (
+    key: string,
+    name: string,
+    value: number,
+    unit: string | null,
+    availability: "available" | "empty" | "no_data_source",
+    note?: string,
+  ) => ({
+    key,
+    id: key,
+    name,
+    value,
+    target: null,
+    unit,
+    timestamp: ts,
+    availability,
+    ...(note ? { note } : {}),
+  });
+  return [
+    k("content_count", "内容数量", 25, "篇", "available"),
+    k("page_views", "页面浏览量", 12500, "次", "available"),
+    k("conversion_rate", "转化率", 0, "%", "available"),
+    k(
+      "content_engagement",
+      "内容互动率",
+      0,
+      "%",
+      "no_data_source",
+      "无互动数据存储：opc_blog_posts 仅 view_count，无 like/comment/share 列或互动表",
+    ),
+    k("word_count", "创作字数", 200, "字", "available"),
+    k(
+      "completion_rate",
+      "完成率",
+      0,
+      "%",
+      "empty",
+      "opc_kpi_records 中暂无 completion_rate 记录（工作流产出经 post_exec 钩子入库后可见）",
+    ),
+    k("revision_rounds", "修改轮次", 1, "轮", "available"),
+  ];
+}
+
+/**
+ * 真实后端下发 **snake_case** DTO 的命令（出口不做 camel 转换）。
+ *
+ * 本文件绝大多数 DTO 在 Rust 侧声明了 `#[serde(rename_all = "camelCase")]`
+ * （如 `ScanPolicy`），mock 照着写 camelCase 键即可，出口的 `convertToCamelCase`
+ * 对它们是空操作。
+ *
+ * 但下列 DTO **没有**该属性，生产环境下发的就是下划线键，前端也照此读取。
+ * 而 `snakeToCamel` 只删下划线、**不可能反向生成**，于是 mock 无论怎么写都还原不出
+ * 后端形态 —— 只能在这里豁免出口转换：
+ *
+ * * `OpcDomainDecision`（`opc::analysis::OpcDomainDecision`）：`domain_pack_id` /
+ *   `decision_type` / `risk_level`。
+ * * `SchemaStatus`（`dao::migrations`，经 `db_config.rs` 的 `get_schema_status`）：
+ *   `tables_expected` / `pending_apply` / `probe_error` …
+ * * `SchemaRepairReport`（同上，经 `repair_schema`）：`tables_scanned` /
+ *   `columns_added` / `types_healed` / `errors`。
+ * * `DbConfig`（`dao::config`，经 `db_config.rs` 的 `get_db_config`）：`db_type` /
+ *   `sqlite_path` / `pg_host` / `pg_port` / … —— 前端 `DbConfigForm` 也按
+ *   snake_case 读写（`DatabaseSettings.tsx:8-18`）。
+ *
+ * ⚠ 后三者**只补桩不登记**不会报任何错，但出口会把 `tables_expected` 转成
+ * `tablesExpected` ⇒ `DatabaseSettings` 读到的字段**全是 `undefined`**
+ * （`notes.map` 那一步会直接抛错、整页被 `PageErrorBoundary` 兜住）。新增桩时
+ * 必须同时登记到这里。
+ *
+ * 曾试过「snake 与 camel 键双写」：无效，两把键会归并到同一个 camel 键上，
+ * snake 键被吃掉，前端读到的仍是 `undefined`。
+ *
+ * ## 准入判据（成员资格必须可判定，双向锁）
+ *
+ * **准入判据 = 该命令的「成功响应载荷里含 snake_case 字段」**（不做转换会被出口
+ * 归一成 camel 而丢键）。响应无载荷（返回 `()` / 直接 `Err`）的命令**不属于**本集合。
+ *
+ * ⇒ 同域的 `save_db_config`（返回 `()`）与 `test_db_connection`（成功时返回 `()`，
+ * 浏览器模式下更是一直 `Err`）**刻意不登记**：它们没有任何键可被转换，登记与否
+ * 等价，若登记进来就会让「是否在集合里」不再等价于「是否需要豁免」，集合与本文
+ * 自相矛盾，后来者无法靠成员资格推出该做什么。
+ */
+const SNAKE_CASE_RESPONSE_COMMANDS = new Set<string>([
+  "opc_execute_analysis",
+  "get_schema_status",
+  "repair_schema",
+  "get_db_config",
+]);
+
+/**
+ * 浏览器模式下 `get_schema_status` 的响应（字段集与 `dao::migrations::SchemaStatus`
+ * 的 11 个字段齐全一致）。
+ *
+ * ⚠ **刻意让 `probe_error` 非 null**：浏览器模式没有真实数据库，就没有结构可探测，
+ * 组件据此走 `schemaStatusProbeFailed` 的 warning 分支 —— 这才是诚实的。
+ * 绝不能返回「看起来已收敛」的形态（`tables_actual === tables_expected` 且
+ * `probe_error: null`），那会让卡片在浏览器模式显示「结构已收敛」，又造出一张
+ * 说谎的卡片。
+ *
+ * ⚠ 每个字段都必须在：组件对 `notes` 直接 `.map`，缺它就是整页崩。
+ * `dialect` 给空串与真实后端一致 —— 探测失败时后端也读不出方言。
+ */
+function mockSchemaStatus(): Record<string, unknown> {
+  return {
+    dialect: "",
+    tables_expected: 0,
+    tables_actual: 0,
+    pending_apply: 0,
+    pending_unsupported: 0,
+    pending_manual: 0,
+    advisories: 0,
+    notes: [],
+    applied_version: 0,
+    latest_version: 0,
+    probe_error: "浏览器模式（localStorage mock）无真实数据库，结构无法探测",
+  };
+}
+
+/**
+ * 浏览器模式下 `db_config.json` 的替身（localStorage key：`axagent_db_config`）。
+ *
+ * ⚠ 键名是 **snake_case**：`dao::config::DbConfig` 没有 `rename_all = "camelCase"`，
+ * 前端 `DbConfigForm` 也照 snake_case 读写。因此 `get_db_config` 必须登记进
+ * `SNAKE_CASE_RESPONSE_COMMANDS`，否则出口会把 `db_type` 转成 `dbType`，
+ * 表单每个字段都读成 `undefined`（静默错值，不报错）。
+ *
+ * 值逐字照抄 `DbConfig::default()`（`dao/src/config.rs:37-54`）——
+ * `get_db_config` 在 `db_config.json` 不存在时**原样返回该默认值**，
+ * 浏览器模式没有配置文件、等价于「从未保存过」，故必须给默认值。
+ * 返回空对象会让表单停在 `initialValues`（只有 3 个字段），与真实后端不一致，
+ * 也让「用户看到的 host/port/database」变成组件默认而非配置默认 —— 又是一处
+ * 只在浏览器模式存在的偏差。
+ *
+ * ⚠ `None` 在 Rust 侧序列化成 `null`（`DbConfig` 字段没有 `skip_serializing_if`），
+ * 所以这里也写 `null` 键而不是省略键：省略会让两种模式的响应**形状**不一致，
+ * 而形状不一致正是本轮修的那类 bug 的温床。antd 的 `Input` 走
+ * `fixControlledValue`，`null` 会渲染成空串，不会产生受控/非受控切换告警。
+ *
+ * ⚠ `pg_password_enc` 保留但不含密文（`null`）：真实后端 `get_db_config` 会
+ * 先 `take()` 走该字段、把解密后的明文放进 `pg_password`，所以真实响应里
+ * 该键存在且为 `null`。浏览器模式没有 master.key、也没有密文，一致。
+ */
+function mockDbConfig(): Record<string, unknown> {
+  return {
+    db_type: "sqlite",
+    sqlite_path: null,
+    pg_host: "localhost",
+    pg_port: 5432,
+    pg_database: "axagent",
+    pg_user: "postgres",
+    pg_password: null,
+    pg_password_enc: null,
+    pg_schema: null,
+    use_ssl: false,
+    fallback_to_sqlite: true,
+  };
+}
+
 export async function handleCommand<T>(
   cmd: string,
   args?: Record<string, unknown>,
@@ -1481,6 +1782,11 @@ export async function handleCommand<T>(
 
   // 调用实际的命令处理逻辑
   const result = await executeCommand<T>(cmd, convertedArgs);
+
+  // 少数命令的响应是 snake_case DTO（见上），转换会破坏字段名 ⇒ 原样返回。
+  if (SNAKE_CASE_RESPONSE_COMMANDS.has(cmd)) {
+    return result;
+  }
 
   // 将后端 snake_case 返回值转换为前端 camelCase 格式
   return convertToCamelCase(result);
@@ -1504,6 +1810,52 @@ async function executeCommand<T>(
       setStore("settings", merged);
       return merged as T;
     }
+
+    // ── 数据库结构状态（`Settings → 数据库` 卡片） ────────────────────────
+    // ⚠ 两个命令都必须在 `SNAKE_CASE_RESPONSE_COMMANDS` 中登记（理由见该处注释）。
+    case "get_schema_status":
+      // 不返回「已收敛」形态：`probe_error` 非 null 才是浏览器模式的真实处境，
+      // 否则卡片会说谎（详见 `mockSchemaStatus` 注释）。
+      return mockSchemaStatus() as T;
+    case "repair_schema":
+      // 必须**抛错**而不是返回空报告：返回 `errors: []` 的报告会被组件读成
+      // 「跑过了、修了 0 个」，返回 `errors` 非空则被读成「跑过了、部分失败」——
+      // 两种都在暗示修复真的执行过。这里根本没跑，只有 Err 的语义是对的。
+      throw new Error("浏览器模式（localStorage mock）无真实数据库，无法执行结构修复");
+
+    // ── 数据库连接配置（`Settings → 数据库` 卡片） ───────────────────────
+    // ⚠ 只有 `get_db_config` 登记进 `SNAKE_CASE_RESPONSE_COMMANDS`（它下发
+    // `DbConfig` 的下划线键）；另两个响应无载荷，按该集合的准入判据**不属于**它，
+    // 理由见集合处注释。
+    case "get_db_config":
+      // 真实后端在 `db_config.json` 不存在时返回 `DbConfig::default()`
+      // （`db_config.rs:40-42`），这里以同一份默认值兜底（详见 `mockDbConfig`）。
+      // 修前落 default 分支的 `get_*` ⇒ `{}`，表单所有字段读成 `undefined`。
+      return getStore("db_config", mockDbConfig()) as T;
+    case "save_db_config": {
+      // 真实后端是**整体覆盖** `db_config.json`，不做字段级合并（`db_config.rs:78-107`），
+      // 这里保持一致：存什么、`get_db_config` 就回什么（往返一致）。
+      //
+      // ⚠ 刻意**不模拟**密码加密：真实后端用 master.key（Aes256Gcm）把 `pg_password`
+      // 加密成 `pg_password_enc` 后落盘、明文不落盘；浏览器模式没有 master.key，
+      // 编一个假密文比留 `null` 更容易骗人（会被读成「已加密」）。故这里只存不加密，
+      // 让 `pg_password` 原样往返 —— 「没有加密能力」是浏览器模式的真实处境。
+      const config = (args as { config?: Record<string, unknown> }).config ?? {};
+      setStore("db_config", config);
+      // 真实后端返回 `Result<(), String>` ⇒ 序列化为 `null`（前端也不读返回值）。
+      return null as T;
+    }
+    case "test_db_connection":
+      // 必须**抛错**：真实后端在这里会真的建连接并跑 `SELECT 1`，
+      // 失败时返回结构化错误码（`db_config.rs` 的 `test_db_connection`）。
+      // 返回任何成功值都会让 `handleTest` 走到 `message.success(...)` ⇒ 显示一个
+      // 从未发生过的「连接成功」；只有 Err 的语义是对的。
+      //
+      // 这里抛的是**纯文本** Error（不含 `{code,...}` JSON）：浏览器模式没有真实
+      // 数据库、也就没有真实 sqlx 错误可归因，编一个错误码等于伪造证据。
+      // `handleTest` 的 catch 走 `translateBackendError` 时无码可查 ⇒ 原样回退原文，
+      // 正是应有的表现。
+      throw new Error("浏览器模式（localStorage mock）无真实数据库，无法测试连接");
 
     // ── Providers ─────────────────────────────────────────────────────
     case "list_providers":
@@ -2129,91 +2481,19 @@ async function executeCommand<T>(
     }
     case "cognitive_query": {
       // 兼容 camelCase 和 snake_case 参数格式
-      const req = (args as {
+      const rawArgs = (args ?? {}) as {
         request?: {
           conversationId?: string;
           conversation_id?: string;
           input?: string;
-          options?: { requirePlanApproval?: boolean; require_plan_approval?: boolean };
         };
-      } | undefined)?.request;
-      const conversationId = req?.conversationId ?? req?.conversation_id ?? `mock-${genId()}`;
-      // 同时支持 camelCase 和 snake_case 格式的 requirePlanApproval
-      const requirePlanApproval = req?.options?.requirePlanApproval ?? req?.options?.require_plan_approval;
-      // P0-2：计划确认闸门开启时，模拟后端判定为复杂任务并弹出计划草稿等待用户确认
-      console.log("[DEBUG cognitive_query] req:", JSON.stringify(req));
-      console.log("[DEBUG cognitive_query] requirePlanApproval:", requirePlanApproval);
-      if (requirePlanApproval) {
-        emitBrowserEvent("agent-plan-ready-for-approval", {
-          conversationId,
-          plan: JSON.stringify({
-            task_preview: (req?.input ?? "").slice(0, 200),
-            selected_engine: "ReactEngine",
-            features: {
-              node_count: 3,
-              estimated_tool_rounds: 2,
-              requires_verification: true,
-              has_branches: false,
-              has_conditions: false,
-            },
-            note: i18n.t("browserMock.complexTaskNote"),
-          }),
-        });
-        const decision = await waitForPlanDecision(conversationId);
-        if (decision !== "approve") {
-          // 拒绝：返回 rejected 状态，前端据此移除占位消息并提示
-          return {
-            routePath: "general/chat",
-            domain: "general",
-            cluster: "chat",
-            capabilityId: "",
-            confidence: 0.5,
-            isLlmFallback: true,
-            circuitBroken: false,
-            circuitBreakReason: null,
-            fallbackPath: null,
-            candidates: [],
-            executionMode: "ask",
-            stageRecords: [],
-            totalElapsedMs: 0,
-            execution: {
-              kind: "agent",
-              conversationId,
-              assistantMessageId: "",
-              status: "rejected",
-            },
-          } as T;
-        }
-        // 批准：模拟流式完成，使前端 eventPromise 正常 resolve
-        const approvedId = genId();
-        emitBrowserEvent("agent-message-id", {
-          conversationId,
-          assistantMessageId: approvedId,
-        });
-        emitBrowserEvent("agent-done", {
-          conversationId,
-          assistantMessageId: approvedId,
-          text: i18n.t("browserMock.planCompleted"),
-          thinking: "",
-          usage: { inputTokens: 1, outputTokens: 1 },
-        });
-        return {
-          routePath: "general/chat",
-          domain: "general",
-          cluster: "chat",
-          capabilityId: "",
-          confidence: 0.5,
-          isLlmFallback: true,
-          circuitBroken: false,
-          circuitBreakReason: null,
-          fallbackPath: null,
-          candidates: [],
-          executionMode: "ask",
-          stageRecords: [],
-          totalElapsedMs: 0,
-          execution: { kind: "agent", conversationId, assistantMessageId: approvedId },
-        } as T;
-      }
+        conversationId?: string;
+        conversation_id?: string;
+        input?: string;
+      };
+      // 兼容 camelCase 与 snake_case：优先取嵌套的 `request`，其次把顶层直接当 `request`
+      const req = rawArgs.request ?? rawArgs;
+      const conversationId = req.conversationId ?? req.conversation_id ?? "";
       // 模拟认知编排器：根据用户输入智能匹配路由
       const userInput = req?.input ?? "";
       const route = mockCognitiveRoute(userInput);
@@ -2248,54 +2528,7 @@ async function executeCommand<T>(
       } as T;
     }
     case "agent_query": {
-      const req = (args as {
-        request?: { requirePlanApproval?: boolean; input?: string; conversationId?: string };
-      } | undefined)?.request;
-      // P0-2：开启计划确认时，模拟后端判定为复杂任务并弹出计划草稿等待用户确认
-      if (req?.requirePlanApproval) {
-        const conversationId = req.conversationId ?? `mock-${genId()}`;
-        const input = req.input ?? "";
-        emitBrowserEvent("agent-plan-ready-for-approval", {
-          conversationId,
-          plan: JSON.stringify({
-            task_preview: input.slice(0, 200),
-            selected_engine: "ReactEngine",
-            features: {
-              node_count: 3,
-              estimated_tool_rounds: 2,
-              requires_verification: true,
-              has_branches: false,
-              has_conditions: false,
-            },
-            note: i18n.t("browserMock.complexTaskNote"),
-          }),
-        });
-        const decision = await waitForPlanDecision(conversationId);
-        if (decision !== "approve") {
-          return { conversationId, assistantMessageId: "", status: "rejected" } as T;
-        }
-        // 批准：模拟流式完成，使前端 eventPromise 正常 resolve
-        const assistantId = genId();
-        emitBrowserEvent("agent-message-id", { conversationId, assistantMessageId: assistantId });
-        emitBrowserEvent("agent-done", {
-          conversationId,
-          assistantMessageId: assistantId,
-          text: i18n.t("browserMock.planCompleted"),
-          thinking: "",
-          usage: { inputTokens: 1, outputTokens: 1 },
-        });
-        return { conversationId, assistantMessageId: "", status: undefined } as T;
-      }
       // Browser mock: return immediately without error
-      return undefined as T;
-    }
-    case "agent_approve_plan": {
-      const req = (args as {
-        request?: { conversationId?: string; decision?: string };
-      } | undefined)?.request;
-      if (req?.conversationId && req?.decision) {
-        resolvePlanDecision(req.conversationId, req.decision);
-      }
       return undefined as T;
     }
     // ── agent 运行控制 mock（浏览器回退模式，避免抛错）──
@@ -2412,36 +2645,40 @@ async function executeCommand<T>(
     case "plan_modify_step": {
       return undefined as T;
     }
+    case "plan_authorize": {
+      // P0-A 授权位写入。handleCommand 已把 args 递归转为 snake_case，
+      // 且调用方以 { request: {...} } 包裹 → 先解出 request 层。
+      const req = ((args as { request?: Record<string, unknown> }).request ?? args) as {
+        plan_id?: string;
+        conversation_id?: string;
+        approved?: boolean;
+        authorized_by?: string;
+      };
+      const approved = req.approved ?? false;
+      const now = Date.now();
+      return {
+        id: req.plan_id ?? genId(),
+        conversationId: req.conversation_id ?? "",
+        userMessageId: genId(),
+        title: "Mock Plan",
+        steps: [],
+        status: approved ? "approved" : "cancelled",
+        executionAuthorized: approved,
+        authorizedAt: approved ? now : undefined,
+        authorizedBy: approved ? (req.authorized_by ?? "user") : undefined,
+        isActive: approved,
+        createdUnderStrategy: "plan",
+        createdAt: now,
+        updatedAt: now,
+      } as T;
+    }
     case "send_message": {
       const raw = (args as { params?: unknown }).params ?? args;
-      const { conversationId, content, attachments, options } = raw as {
+      const { conversationId, content, attachments } = raw as {
         conversationId: string;
         content: string;
         attachments?: unknown[];
-        options?: { requirePlanApproval?: boolean };
       };
-      // P0-2 plan approval gate (browser mock): hang until user approves/rejects
-      if (options?.requirePlanApproval) {
-        emitBrowserEvent("agent-plan-ready-for-approval", {
-          conversationId,
-          plan: JSON.stringify({
-            task_preview: content.slice(0, 200),
-            selected_engine: "ReactEngine",
-            features: {
-              node_count: 3,
-              estimated_tool_rounds: 2,
-              requires_verification: true,
-              has_branches: false,
-              has_conditions: false,
-            },
-            note: i18n.t("browserMock.complexTaskNote"),
-          }),
-        });
-        const decision = await waitForPlanDecision(conversationId);
-        if (decision !== "approve") {
-          return { rejected: true, conversationId } as T;
-        }
-      }
       const userMsgId = genId();
       const userMsg = {
         id: userMsgId,
@@ -2653,14 +2890,23 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "get_gateway_metrics":
+      // ⚠️ 字段名必须与**权威 DTO** 逐字一致：
+      // 后端 `commands/gateway.rs::get_gateway_metrics` 返回 `axagent_harness::types::gateway::GatewayMetrics`，
+      // 该结构体带 `#[serde(rename_all = "camelCase")]`，前端 `src/types/index.ts::GatewayMetrics` 也是 camelCase。
+      // 此前 mock 返回的是另一套 snake_case 字段（total_requests / avg_latency_ms / uptime_seconds…），
+      // 与实际 DTO **零字段重叠** ⇒ 浏览器模式下 GatewayMonitor 读 totalRequests 等恒为 undefined。
       return {
-        total_requests: 0,
-        successful_requests: 0,
-        failed_requests: 0,
-        avg_latency_ms: 0,
-        requests_per_minute: 0,
-        active_keys: 0,
-        uptime_seconds: 0,
+        totalRequests: 0,
+        totalTokens: 0,
+        totalRequestTokens: 0,
+        totalResponseTokens: 0,
+        activeConnections: 0,
+        todayRequests: 0,
+        todayTokens: 0,
+        todayRequestTokens: 0,
+        todayResponseTokens: 0,
+        totalCostUsd: 0,
+        todayCostUsd: 0,
       } as T;
     case "get_gateway_usage_by_key":
     case "get_gateway_usage_by_provider":
@@ -2749,7 +2995,11 @@ async function executeCommand<T>(
       return undefined as T;
     }
     case "test_search_provider":
-      return { ok: true, latency_ms: 120 } as T;
+      // 字段名与后端 `commands/search.rs::test_search_provider` 的成功体保持一致：
+      // 后端返回 `{ ok, latencyMs, resultCount }`（camelCase）。此前 mock 写的是
+      // `latency_ms`，而 `SearchProviderSettings` 读 `result.latencyMs`
+      // ⇒ 浏览器模式下连通性测试恒显示「undefinedms」。
+      return { ok: true, latencyMs: 120, resultCount: 0 } as T;
 
     // ── Phase 2: MCP Servers ──────────────────────────────────────────
     case "list_local_tools":
@@ -3248,6 +3498,17 @@ async function executeCommand<T>(
       const fleetId = (args as { fleet_id?: string }).fleet_id ?? "";
       return getStore<FleetMember[]>(`fleet_members:${fleetId}`, []) as T;
     }
+    case "fleet_list_messages": {
+      // 键名兼容（同 dispatch）：snake_case 是 mock 既有约定，camelCase 也应可用
+      const a = args as Record<string, unknown>;
+      const fleetId = (a.fleetId ?? a.fleet_id ?? "") as string;
+      // 会话缺省为群聊（与后端 `fleet_list_messages` 的 `conversation_id` 缺省一致）
+      const conversationId = (a.conversationId ?? a.conversation_id ?? "group") as string;
+      const afterSeq = (a.afterSeq ?? a.after_seq) as number | undefined;
+      const all = getStore<FleetMessage[]>(`fleet_messages:${fleetId}:${conversationId}`, []);
+      const filtered = afterSeq == null ? all : all.filter((m) => m.seq > afterSeq);
+      return [...filtered].sort((x, y) => x.seq - y.seq) as T;
+    }
     case "fleet_get_member": {
       const memberId = (args as { member_id?: string }).member_id ?? "";
       for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -3331,7 +3592,9 @@ async function executeCommand<T>(
       const input = (args as { input?: { fleet_id?: string; user_message?: string; agent_slug?: string } })
         .input ?? {};
       const onEvent = (args as { on_event?: MockChannel }).on_event;
-      const fleetId = (input as Record<string, unknown>).fleet_id as string ?? "";
+      const inputRaw = input as Record<string, unknown>;
+      // 键名兼容：mock 的既有约定是 snake_case 入参，但直接以 camelCase 调用也应可用
+      const fleetId = (inputRaw.fleetId ?? inputRaw.fleet_id ?? "") as string;
       const members = getStore<FleetMember[]>(`fleet_members:${fleetId}`, []);
       const push = (evt: unknown) => onEvent?.onmessage?.(evt);
       if (members.length === 0) {
@@ -3339,11 +3602,46 @@ async function executeCommand<T>(
         return undefined as T;
       }
       // 直接 DM 时定位目标成员，否则取第一个
-      const targetAgentSlug = (input as Record<string, unknown>).agent_slug as string | undefined;
+      const targetAgentSlug = (inputRaw.agentSlug ?? inputRaw.agent_slug) as string | undefined;
       const target = targetAgentSlug
         ? members.find((m) => m.agentSlug === targetAgentSlug) ?? members[0]
         : members[0];
-      const msg = (input as Record<string, unknown>).user_message as string ?? "";
+      const msg = (inputRaw.userMessage ?? inputRaw.user_message ?? "") as string;
+
+      // ── 消息持久化（localStorage 模拟后端 fleet_messages 表）──
+      // 浏览器模式必须与真实后端同构：用户消息与 agent 回复都要进同一份历史，
+      // 否则 ChatPanel 的「以库为真源」在浏览器模式下会恒为空。
+      //
+      // 会话隔离同样必须同构：群聊落 `"group"`，私信落 `"dm:<slug>"`。
+      // 键里带上 conversationId —— 只按 fleetId 存会让 DM 与群聊共用一个数组。
+      const isDirectMessage = cmd === "fleet_direct_message";
+      const conversationId = isDirectMessage
+        ? `dm:${target.agentSlug}`
+        : "group";
+      const msgKey = `fleet_messages:${fleetId}:${conversationId}`;
+      const storedMsgs = getStore<FleetMessage[]>(msgKey, []);
+      let nextSeq = storedMsgs.reduce((max, m) => Math.max(max, m.seq), 0);
+      const appendMsg = (
+        partial: Omit<FleetMessage, "id" | "fleetId" | "conversationId" | "seq" | "createdAt">,
+      ) => {
+        nextSeq += 1;
+        storedMsgs.push({
+          id: genId(),
+          fleetId,
+          conversationId,
+          seq: nextSeq,
+          createdAt: Date.now(),
+          ...partial,
+        });
+        setStore(msgKey, storedMsgs);
+      };
+
+      appendMsg({
+        authorKind: "human",
+        authorId: "local-user",
+        content: msg,
+      });
+
       push({
         type: "routing",
         agentSlug: target.agentSlug,
@@ -3352,14 +3650,22 @@ async function executeCommand<T>(
         taskSummary: msg,
       });
       push({ type: "agent_status", agentSlug: target.agentSlug, agentId: target.agentId, status: "busy" });
+      const agentReply = i18n.t("browserMock.fleetMessageReceived", {
+        name: target.displayName,
+        message: msg,
+      });
+      appendMsg({
+        authorKind: "agent",
+        authorId: target.agentId,
+        authorSlug: target.agentSlug,
+        authorDisplayName: target.displayName,
+        content: agentReply,
+      });
       push({
         type: "agent_message",
         agentSlug: target.agentSlug,
         agentId: target.agentId,
-        content: i18n.t("browserMock.fleetMessageReceived", {
-          name: target.displayName,
-          message: msg,
-        }),
+        content: agentReply,
       });
       push({
         type: "token_usage",
@@ -5274,6 +5580,25 @@ async function executeCommand<T>(
         elapsedMs: 0,
       } as T;
 
+    // ── OPC 行业分析决策（行业页「执行分析」）────────────────────────
+    // 此前**没有 mock**：会命中下面 default 的 `endsWith("s")` 兜底
+    // （"opc_execute_analysis" 以 s 结尾）返回 `[]`，于是面板拿到一个非决策值。
+    case "opc_execute_analysis": {
+      // 形状逐字对齐 `OpcDomainDecision`（snake_case，无 `rename_all`）。
+      // 该命令已在 `SNAKE_CASE_RESPONSE_COMMANDS` 中豁免出口 camel 转换，否则
+      // `decision_type` / `risk_level` / `domain_pack_id` 会被改写成 camelCase，
+      // 而面板与 `types.ts` 都按后端形态读，两个键就都会变成 `undefined`。
+      return {
+        domain_pack_id: "content_media",
+        decision_type: "performance_review",
+        summary: "行业「content_media」分析：发现 1 个风控违规",
+        confidence: 0.5,
+        kpis: mockContentMediaKpis(),
+        recommendations: ["⚠️ min_word_count: word_count 当前 200.0 低于下限 1000.0"],
+        risk_level: "medium",
+      } as unknown as T;
+    }
+
     case "opc_list_platforms":
       return [...PRESET_MOCK_PLATFORMS] as unknown as T;
 
@@ -5887,8 +6212,25 @@ async function executeCommand<T>(
       return [] as T;
 
     // ── LLM Wiki (知识库) ───────────────────────────────────────────
-    case "llm_wiki_list":
-      return [] as T;
+    // 有 fixture 时让 wiki 列表/图谱走真实数据（见 loadWikiGraphFixture）——
+    // 否则 `llm_wiki_list` 返回空列表会让图页面直接判定「无可用 wiki」，
+    // 图谱渲染层在浏览器模式下完全无法调试。
+    case "llm_wiki_list": {
+      const fx = await loadWikiGraphFixture();
+      return (fx ? [fx.wiki] : []) as T;
+    }
+    case "get_wiki_graph_cached": {
+      const fx = await loadWikiGraphFixture();
+      const wikiId = String(args?.wiki_id ?? args?.wikiId ?? "");
+      if (fx && (!wikiId || fx.wiki.id === wikiId)) {
+        return fx.graph as T;
+      }
+      return { nodes: [], edges: [] } as T;
+    }
+    case "wiki_graph_communities_cached": {
+      const fx = await loadWikiGraphFixture();
+      return (fx ? fx.communitiesResult : { communities: {} }) as T;
+    }
     case "wiki_notes_list": {
       const vaultId = String(args?.vault_id ?? "");
       return seedWikiNotes(vaultId) as unknown as T;
@@ -6028,6 +6370,92 @@ async function executeCommand<T>(
     // ── Skill Stats (技能执行统计) ─────────────────────────────────
     case "get_skill_execution_stats":
       return [] as T;
+
+    // ── Background Tasks (后台任务) ────────────────────────────────
+    // 显式声明而非依赖 default 分支的 `endsWith("s")` 启发式：那个判断是巧合，
+    // 一旦命令改名或启发式调整，浏览器模式会静默变成 `undefined`，
+    // 而 TaskPanel 会把它当成「没有任务」。显式 case 是一份契约。
+    case "list_background_tasks":
+    case "list_task_events":
+      return [] as unknown as T;
+
+    // ── 股票管道（stock_pipeline）──────────────────────────────────────
+    // 浏览器模式没有真实管道执行。必须显式声明，否则会落到 default 分支的
+    // `get_` → `{}` 兜底：`get_pipeline_history` 的消费端按数组使用
+    // （`pipelineRuns.filter/.length`），收到 `{}` 会直接抛
+    // `TypeError: pipelineRuns.filter is not a function`，
+    // 令「投资中心 → 管道」整个 tab 被 ErrorBoundary 兜成「页面错误」。
+    case "get_pipeline_history":
+      return [] as unknown as T;
+    case "get_pipeline_run_detail":
+      return null as unknown as T;
+    case "run_stock_pipeline":
+      return null as unknown as T;
+
+    // 浏览器模式没有真实 FTS5 子系统。返回 `available: false` 而不是编造计数：
+    // 若落到 default 分支的 `get_*` → `{}`，会渲染成「未挂载」但丢失原因；
+    // 若返回假的非零计数，则是在 mock 层伪造「索引健康」这一结论。
+    case "get_memory_fts_health":
+      return {
+        available: false,
+        unavailableReason: "浏览器模式（localStorage mock）无 FTS5 子系统",
+        tablesExist: false,
+        sourceRows: 0,
+        indexedRows: 0,
+        laggingRows: 0,
+        needsRebuild: false,
+        trajectoriesCount: 0,
+        skillsCount: 0,
+        messagesCount: 0,
+      } as unknown as T;
+
+    // ── 能力域覆盖层（P2）─────────────────────────────────────────────
+    // 必须**显式**声明这两条：`update_capability_domain` 落到 default 分支会返回
+    // `undefined`（它不以 `list_`/`get_` 开头、也不以 `s` 结尾），而面板的消费端
+    // 是 `entries.map(e => e.id === updated.id ? …)` ⇒ 直接抛
+    // `TypeError: Cannot read properties of undefined`，把整个设置页
+    // 兜成 ErrorBoundary 的「页面错误」。这是 mock 层最容易漏的一类坑：
+    // 「命令没接线」在 mock 里的症状不是「没反应」，而是**消费端崩**。
+    //
+    // ⚠ 已知偏差（不在本次范围内）：上面的 `mockCognitiveRoute` 用的
+    //   `domainRules` 是另一份**手抄**域表，且不读本覆盖层 —— 即浏览器模式下
+    //   「停用某域」不会改变 L1 路由 mock 的结果。该副本已被门禁登记为报告项，
+    //   属既有边界，此处不顺手改（改它等于顺手改判据的对象）。
+    case "list_capability_domain_registry":
+      return mockCapabilityDomainRegistry() as unknown as T;
+    case "update_capability_domain": {
+      const request = (args as {
+        request?: { domain?: string; enabled?: boolean; extra_aliases?: string[] };
+      }).request ?? {};
+      const domain = request.domain ?? "";
+      const rows = mockCapabilityDomainRegistry();
+      const row = rows.find((r) => r.id === domain);
+      // 错误必须带**码**（JSON 塞进 Error.message）——`parseBackendError` 明确支持
+      // 这一形态，故浏览器模式与桌面模式走同一套 `error.${code}` 翻译。
+      // 只抛 `new Error("某中文文案")` 会让浏览器模式丢失本地化能力。
+      if (!row) {
+        throw new Error(JSON.stringify({
+          code: "CAPABILITY_DOMAIN_UNKNOWN",
+          category: "validation",
+          detail: domain,
+        }));
+      }
+      if (request.enabled === false && !row.toggleable) {
+        throw new Error(JSON.stringify({
+          code: "CAPABILITY_DOMAIN_NOT_TOGGLEABLE",
+          category: "validation",
+          detail: row.toggle_block_reason ?? "",
+        }));
+      }
+      const prev = MOCK_DOMAIN_OVERRIDES[domain];
+      // 局部更新语义与后端一致：未提供的字段保持原值；写一次即产生覆盖行。
+      MOCK_DOMAIN_OVERRIDES[domain] = {
+        enabled: request.enabled ?? prev?.enabled ?? true,
+        extra_aliases: request.extra_aliases ?? prev?.extra_aliases ?? [],
+      };
+      const updated = mockCapabilityDomainRegistry().find((r) => r.id === domain);
+      return updated as unknown as T;
+    }
 
     default: {
       console.warn(`[BrowserMock] Unhandled command: ${cmd}`, args);

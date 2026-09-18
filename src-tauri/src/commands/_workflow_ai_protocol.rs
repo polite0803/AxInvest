@@ -26,7 +26,7 @@
 //! ## 与前端 `DiagnosticFix` 对齐
 //!
 //! 后端这 10 种 fix 的 `action_type` 字符串和字段命名与前端
-//! `src/components/workflow/types/workflow.types.ts:782` 的 discriminated union 严格一致。
+//! `src/components/workflow/types/workflow.types.ts:881` 的 discriminated union 严格一致。
 //! 序列化格式:`#[serde(tag = "action_type", rename_all = "snake_case")]`(内联 tag)。
 //!
 //! ## 设计取舍
@@ -188,7 +188,7 @@ pub struct DiagnosticIssue {
 }
 
 /// DiagnosticFix 10 种(原 6 + 新 4)
-/// 字段名与前端 `DiagnosticFix` discriminated union 严格对齐(见 workflow.types.ts:782)
+/// 字段名与前端 `DiagnosticFix` discriminated union 严格对齐(见 workflow.types.ts:881)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "action_type", rename_all = "snake_case")]
 pub enum DiagnosticFix {

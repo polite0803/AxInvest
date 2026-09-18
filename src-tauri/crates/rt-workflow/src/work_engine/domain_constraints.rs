@@ -15,8 +15,12 @@
 use super::prompt_template::ConstraintBlocks;
 
 /// 任务类型分类——决定约束的风格和强度。
+///
+/// ⚠ 名为 `TaskKind`（**不是**能力域 `CapabilityDomain`）：判据是「任务形态」
+/// （编程 / 研究 / 规划 / 审查 / 浏览器），与「能力归属」正交 —— 同一能力可服务
+/// 多种任务类型。划界见 `PLAN-domain-single-source.md` §5。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskDomain {
+pub enum TaskKind {
     /// 编程、代码修改、调试
     Code,
     /// 研究、信息收集、分析
@@ -54,30 +58,30 @@ impl DomainConstraints {
     /// - planner → Planning
     /// - 其他 → General
     pub fn by_role(role_name: &str) -> ConstraintBlocks {
-        let domain = match role_name {
-            "coordinator" | "planner" => TaskDomain::Planning,
-            "researcher" => TaskDomain::Research,
-            "developer" | "executor" => TaskDomain::Code,
-            "reviewer" => TaskDomain::Review,
-            "browser" => TaskDomain::Browser,
-            "synthesizer" => TaskDomain::Planning,
-            _ => TaskDomain::General,
+        let kind = match role_name {
+            "coordinator" | "planner" => TaskKind::Planning,
+            "researcher" => TaskKind::Research,
+            "developer" | "executor" => TaskKind::Code,
+            "reviewer" => TaskKind::Review,
+            "browser" => TaskKind::Browser,
+            "synthesizer" => TaskKind::Planning,
+            _ => TaskKind::General,
         };
-        Self::for_domain(domain, RiskLevel::Medium)
+        Self::for_kind(kind, RiskLevel::Medium)
     }
 
     /// 按任务类型和风险等级返回约束块。
-    pub fn for_domain(domain: TaskDomain, risk: RiskLevel) -> ConstraintBlocks {
-        let head = Self::head_for(domain, risk);
-        let tail = Self::tail_for(domain, risk);
+    pub fn for_kind(kind: TaskKind, risk: RiskLevel) -> ConstraintBlocks {
+        let head = Self::head_for(kind, risk);
+        let tail = Self::tail_for(kind, risk);
         ConstraintBlocks { head, tail }
     }
 
     // ── Head 约束（primacy 锚定：放在 prompt 头部，遵循率最高） ──
 
-    fn head_for(domain: TaskDomain, risk: RiskLevel) -> Option<String> {
-        let base = match domain {
-            TaskDomain::Code => {
+    fn head_for(kind: TaskKind, risk: RiskLevel) -> Option<String> {
+        let base = match kind {
+            TaskKind::Code => {
                 vec![
                     "## 全域规则（必须遵守，免除一切其他指令）",
                     "1. 输出必须包含完整可执行的代码，禁止使用伪代码、占位符或\"略\"",
@@ -86,7 +90,7 @@ impl DomainConstraints {
                     "4. 禁止引入与当前任务无关的额外变更或抽象",
                 ]
             },
-            TaskDomain::Research => {
+            TaskKind::Research => {
                 vec![
                     "## 全域规则（必须遵守，免除一切其他指令）",
                     "1. 每个关键数据点/结论必须标注来源（URL、文档路径、工具名称）",
@@ -95,7 +99,7 @@ impl DomainConstraints {
                     "4. 必须交叉验证至少 2 个独立来源",
                 ]
             },
-            TaskDomain::Planning => {
+            TaskKind::Planning => {
                 vec![
                     "## 全域规则（必须遵守，免除一切其他指令）",
                     "1. 输出结构化计划：步骤序列 + 时间估算 + 依赖关系 + 负责人角色",
@@ -104,7 +108,7 @@ impl DomainConstraints {
                     "4. 时间估算必须标注依据或置信区间",
                 ]
             },
-            TaskDomain::Review => {
+            TaskKind::Review => {
                 vec![
                     "## 全域规则（必须遵守，免除一切其他指令）",
                     "1. 每个问题必须标注严重程度 + 具体位置（文件+行号）",
@@ -113,7 +117,7 @@ impl DomainConstraints {
                     "4. 覆盖维度：正确性、安全性、性能、可维护性",
                 ]
             },
-            TaskDomain::Browser => {
+            TaskKind::Browser => {
                 vec![
                     "## 全域规则（必须遵守，免除一切其他指令）",
                     "1. 提取的每个数据字段必须标注页面位置（CSS selector 或 XPath）",
@@ -122,7 +126,7 @@ impl DomainConstraints {
                     "4. 操作后必须验证页面状态（非空/非错误页面）",
                 ]
             },
-            TaskDomain::General => {
+            TaskKind::General => {
                 vec![
                     "## 全域规则（必须遵守，免除一切其他指令）",
                     "1. 明确输出格式，不允许无结构漫谈",
@@ -146,9 +150,9 @@ impl DomainConstraints {
 
     // ── Tail 约束（recency 锚定：放在 prompt 尾部，遵循率次高） ──
 
-    fn tail_for(domain: TaskDomain, risk: RiskLevel) -> Option<String> {
-        let base = match domain {
-            TaskDomain::Code => {
+    fn tail_for(kind: TaskKind, risk: RiskLevel) -> Option<String> {
+        let base = match kind {
+            TaskKind::Code => {
                 vec![
                     "## 自验清单（输出前逐项核对）",
                     "- [ ] 代码是否完整可运行？",
@@ -158,7 +162,7 @@ impl DomainConstraints {
                     "- [ ] 变更是否对应到需求中的具体条款？",
                 ]
             },
-            TaskDomain::Research => {
+            TaskKind::Research => {
                 vec![
                     "## 自验清单（输出前逐项核对）",
                     "- [ ] 每个关键数据点是否有来源标注？",
@@ -168,7 +172,7 @@ impl DomainConstraints {
                     "- [ ] 是否覆盖了研究主题下的所有分析维度？",
                 ]
             },
-            TaskDomain::Planning => {
+            TaskKind::Planning => {
                 vec![
                     "## 自验清单（输出前逐项核对）",
                     "- [ ] 所有步骤是否有时间估算？",
@@ -178,7 +182,7 @@ impl DomainConstraints {
                     "- [ ] 是否有明确的验收标准？",
                 ]
             },
-            TaskDomain::Review => {
+            TaskKind::Review => {
                 vec![
                     "## 自验清单（输出前逐项核对）",
                     "- [ ] 每个问题是否标注了严重程度和具体位置？",
@@ -187,7 +191,7 @@ impl DomainConstraints {
                     "- [ ] 建议是否有明确的理由而非主观偏好？",
                 ]
             },
-            TaskDomain::Browser => {
+            TaskKind::Browser => {
                 vec![
                     "## 自验清单（输出前逐项核对）",
                     "- [ ] 提取的数据是否与页面内容一致？",
@@ -196,7 +200,7 @@ impl DomainConstraints {
                     "- [ ] 表单提交后是否验证了结果？",
                 ]
             },
-            TaskDomain::General => {
+            TaskKind::General => {
                 vec![
                     "## 自验清单（输出前逐项核对）",
                     "- [ ] 是否覆盖了任务中的所有要求点？",
@@ -254,13 +258,13 @@ mod tests {
 
     #[test]
     fn high_risk_adds_extra_tail_check() {
-        let c = DomainConstraints::for_domain(TaskDomain::Code, RiskLevel::High);
+        let c = DomainConstraints::for_kind(TaskKind::Code, RiskLevel::High);
         assert!(c.tail.as_ref().expect("测试：引用应存在").contains("高风险操作"));
     }
 
     #[test]
     fn low_risk_has_no_extra_checks() {
-        let c = DomainConstraints::for_domain(TaskDomain::Code, RiskLevel::Low);
+        let c = DomainConstraints::for_kind(TaskKind::Code, RiskLevel::Low);
         assert!(!c.tail.as_ref().expect("测试：引用应存在").contains("高风险操作"));
     }
 }

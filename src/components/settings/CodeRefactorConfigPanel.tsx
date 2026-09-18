@@ -1,5 +1,6 @@
 import type { Variable, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
+import { toDbVariable } from "@/lib/workflowVariables";
 import { App, Button, Input, InputNumber, Select, Switch, Tag, theme, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -271,7 +272,9 @@ export function CodeRefactorConfigPanel({ workflowId, onVariablesChange }: Props
       .then((rsp) => {
         if (cancelled) { return; }
         if (rsp && (!rsp.variables || rsp.variables.length === 0)) {
-          const defaults = getDefaultVariables(workflowId);
+          // 写回 DB 前规范化 snake_case（同 DemandDiscovery / LiteraryCreation：
+          // camelCase 会导致后端 Variable 反序列化失败，而失败被 .catch 静默吞掉）
+          const defaults = getDefaultVariables(workflowId).map(toDbVariable);
           const input = {
             name: rsp.name,
             description: rsp.description,
@@ -285,7 +288,10 @@ export function CodeRefactorConfigPanel({ workflowId, onVariablesChange }: Props
             variables: defaults,
             errorConfig: rsp.errorConfig,
           };
-          invoke<boolean>("update_workflow_template", { id: templateId, input }).catch(() => {});
+          invoke<boolean>("update_workflow_template", { id: templateId, input }).catch((e) => {
+            // 不再静默吞错：这里失败意味着整条参数配置链无声断裂
+            console.warn(`[code-refactor] 初始化模板变量写入失败: ${String(e)}`);
+          });
           rsp.variables = defaults;
         }
         if (rsp) {

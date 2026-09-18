@@ -4,6 +4,7 @@ use sea_orm::*;
 
 use axagent_entities::stored_files;
 use axagent_harness::core_error::{AxAgentError, Result};
+use axagent_harness::util_fns::now_datetime_str;
 
 pub use axagent_harness::repo_dtos::StoredFile;
 
@@ -39,7 +40,7 @@ pub async fn create_stored_file(
         size_bytes: Set(size_bytes),
         storage_path: Set(storage_path.to_string()),
         conversation_id: Set(conversation_id.map(|s| s.to_string())),
-        ..Default::default()
+        created_at: Set(now_datetime_str()),
     };
 
     am.insert(db).await?;

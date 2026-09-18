@@ -2391,11 +2391,14 @@ const EVOLUTION_CONSENT_EVENT: &str = "evolution-consent-request";
 /// 征求用户同意：通过事件通道下发提议，阻塞等待前端弹窗回传。
 ///
 /// 认知编排器（`await_user_consent` 薄封装）与 `SkillEvolutionHook`（wiring 层即时技能进化）
-/// 共用本公共实现，避免重复（禁区 12）。内部复用 `agent_plan_approvals` 同款挂起审批槽模式：
+/// 共用本公共实现，避免重复（禁区 12）。挂起审批槽模式如下：
 /// 1. 插入 `oneshot` sender 到 `evolution_consent_senders`（proposalId → sender）
 /// 2. emit `evolution-consent-request` 事件（携带 camelCase 提议）
 /// 3. await receiver（180s 超时，超时视为拒绝）
 /// 4. 前端弹窗由 `capability_gap_consent` 命令回传结果
+///
+/// 注：`agent_plan_approvals` 曾采用同款模式，但该链路因「只 remove 无 insert +
+/// 事件无发射点」而从未生效，已于 2026-09-12 整体退役（见 `PLAN-evoflow-borrowings.md`）。
 ///
 /// 返回 `true` = 用户同意；`false` = 用户拒绝 / 超时 / 前端无监听。
 pub(crate) async fn await_capability_consent(

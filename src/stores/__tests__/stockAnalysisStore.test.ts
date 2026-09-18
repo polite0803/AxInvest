@@ -126,14 +126,31 @@ describe("stockAnalysisStore", () => {
   describe("setupEventListener", () => {
     it("registers event listeners once", async () => {
       await useStockAnalysisStore.getState().setupEventListener();
-      expect(listenMock).toHaveBeenCalledTimes(5); // 5 events incl. workflow-step-delta
+
+      // 7 个监听 = 4 个 workflow 生命周期 + 节点内流式增量 + 监控重跑请求 + 仿真结果。
+      // 数量的意义在于「面板需要感知的事件集合」，故同时逐个断言事件名 ——
+      // 只断言数字会让下一次新增/删除监听时无从判断该改哪边。
+      //
+      // 历史值 5 少了 `workflow-step-start`：该监听是 T-1 P1(2026-09-12) 有意补齐的
+      // （见 stockAnalysisStore.ts 中该 listen 上方注释）。补齐前只有 executionStore
+      // 订阅它，本面板在整个执行期间拿不到「当前节点」，长 LLM 节点（1-5 分钟）里
+      // 进度条静止 —— 所以这是「该改断言」而不是「该删监听」。
+      //
+      // 历史值 6 少了 `simulation-ready`：该监听是「仿真接入工作流」落点乙
+      // (2026-09-14) 有意新增的。仿真在后端于决策落库后异步执行，结果只经该事件
+      // 推送 —— 在 `workflow-completed` 里拉取会拿到空值（此时仿真尚未跑完）。
+      // 与前一处同理：该改断言，不是该删监听。
+      expect(listenMock).toHaveBeenCalledTimes(7);
+      expect(listenMock).toHaveBeenCalledWith("workflow-step-start", expect.any(Function));
       expect(listenMock).toHaveBeenCalledWith("workflow-step-done", expect.any(Function));
+      expect(listenMock).toHaveBeenCalledWith("workflow-step-delta", expect.any(Function));
       expect(listenMock).toHaveBeenCalledWith("workflow-completed", expect.any(Function));
       expect(listenMock).toHaveBeenCalledWith("workflow-error", expect.any(Function));
       expect(listenMock).toHaveBeenCalledWith("stock-monitor-t0-rerun-requested", expect.any(Function));
+      expect(listenMock).toHaveBeenCalledWith("simulation-ready", expect.any(Function));
 
       await useStockAnalysisStore.getState().setupEventListener();
-      expect(listenMock).toHaveBeenCalledTimes(5); // 5 events registered, 2nd call is no-op
+      expect(listenMock).toHaveBeenCalledTimes(7); // 已注册则第二次调用为 no-op
     });
 
     it("handles workflow-completed event with AgentExecutor JSON results", async () => {

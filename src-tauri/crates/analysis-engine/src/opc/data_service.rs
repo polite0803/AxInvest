@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! OPC 数据服务 — 行业适配器与数据层的桥梁
+//! OPC 数据服务 — 域包适配器与数据层的桥梁
 //!
-//! `OpcDataService` 提供行业适配器所需的数据访问接口：
+//! `OpcDataService` 提供域包适配器所需的数据访问接口：
 //! - 实体查询（客户数、项目数、发票金额等）
 //! - 聚合统计（按时间范围、按状态分组）
 //! - 规则评估上下文构建
@@ -10,14 +10,15 @@
 use async_trait::async_trait;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait,
-    PaginatorTrait, QueryFilter, Statement,
+    PaginatorTrait, QueryFilter, QueryOrder, Statement,
 };
 use serde::{Deserialize, Serialize};
 
 use axagent_entities::{
-    opc_blog_posts, opc_content_assets, opc_customers, opc_invoices, opc_landing_pages,
-    opc_projects, opc_publish_schedules,
+    opc_blog_posts, opc_contact_submissions, opc_content_assets, opc_customers, opc_invoices,
+    opc_kpi_records, opc_landing_pages, opc_projects, opc_publish_schedules,
 };
+use axagent_harness::util_fns::placeholder_at;
 
 use super::customer::CustomerStatus;
 use super::error::{OpcError, OpcResult};
@@ -208,11 +209,45 @@ pub trait OpcDataService: Send + Sync {
 
     /// 统计已发布的发布计划数（status=published）
     async fn count_publish_schedules_published(&self, from: i64, to: i64) -> OpcResult<u64>;
+
+    /// 统计指定时间范围内的联系表单提交数（`opc_contact_submissions.created_at`）
+    async fn count_contacts(&self, from: i64, to: i64) -> OpcResult<u64>;
+
+    /// 读取 `opc_kpi_records` 中**指定域包、指定 `name`** 的最新一条记录值。
+    ///
+    /// 这是「工作流产出 → KPI」通道的**读端**（写端为模板 post_exec 钩子）。
+    /// 无记录返回 `None` —— 调用方必须把它当作「暂无数据」显式呈现，不得当 0。
+    ///
+    /// ## 三个参数缺一不可（每一项都对应一个已实证的串号/混读缺陷）
+    ///
+    /// - `domain_pack_id`：`opc_kpi_records` 是**多域包共用**的一张表（v230 才有域包列）。
+    ///   缺此项时，`content_media` 的 `word_count` 与任何别的域包的同名 KPI
+    ///   落进同一个查询结果，读到的「最新一条」可能属于另一个域包。
+    ///   **必填而非 `Option`**：KPI 采样值必须先有归属才谈得上读取。
+    /// - `range`：此前本函数只按 `recorded_at` 取最新一条、**完全不看时间窗**，
+    ///   于是仪表盘上的时间范围选择器对这三个 KPI 是无效的 —— 选「近 7 天」也可能
+    ///   拿到三个月前的采样值（历史周期与当前周期混读）。
+    ///   `TimeRange` 与 `recorded_at` 的单位**都是秒**（`now_ts()` =
+    ///   `chrono::Utc::now().timestamp()`；`TimeRange::days/hours` 用
+    ///   `now - days * 86400` / `now - hours * 3600`）—— 已逐字核对，不存在
+    ///   秒/毫秒混用导致的「静默全空」。
+    ///
+    /// ## 为什么没有「不限域包/不限时间」的默认档
+    ///
+    /// 与 [`crate::opc::analytics::AnalyticsService::list_kpis`] 同一条取舍：
+    /// 用一个 `Option` 兜底会让「忘传」变成「跨域包全表扫描」这个看起来正常的默认行为。
+    /// 需要跨域包枚举的调用方走显式命名的 `list_kpis_all`。
+    async fn latest_kpi(
+        &self,
+        domain_pack_id: &str,
+        name: &str,
+        range: &TimeRange,
+    ) -> OpcResult<Option<f64>>;
 }
 
 // ── Mock 实现（测试用） ──────────────────────────────────────
 
-/// Mock 数据服务，用于测试行业适配器
+/// Mock 数据服务，用于测试域包适配器
 #[derive(Debug)]
 pub struct MockDataService {
     pub customer_count: u64,
@@ -386,6 +421,19 @@ impl OpcDataService for MockDataService {
 
     async fn count_publish_schedules_published(&self, _from: i64, _to: i64) -> OpcResult<u64> {
         Ok(self.publish_schedules_published)
+    }
+
+    async fn count_contacts(&self, _from: i64, _to: i64) -> OpcResult<u64> {
+        Ok(0)
+    }
+
+    async fn latest_kpi(
+        &self,
+        _domain_pack_id: &str,
+        _name: &str,
+        _range: &TimeRange,
+    ) -> OpcResult<Option<f64>> {
+        Ok(None)
     }
 }
 
@@ -667,19 +715,24 @@ impl OpcDataService for DefaultDataService {
             _ => return Ok(true),
         };
 
+        // 占位符按后端方言产出：此前 SQL 里硬编码 `$1` / `$2`，而 `backend` 是
+        // 动态取的 —— 在 SQLite 上 `$` 不是参数前缀，这条查询必然报语法错。
+        // 值本身已走绑定通道（`values`），这里修的只是**占位符写法**。
+        let backend = self.db.get_database_backend();
+        let p1 = placeholder_at(1, backend);
+        let p2 = placeholder_at(2, backend);
         let (sql, values) = if let Some(exclude) = exclude_id {
             (
-                format!("SELECT id FROM {} WHERE {} = $1 AND id != $2 LIMIT 1", table_name, field),
+                format!("SELECT id FROM {table_name} WHERE {field} = {p1} AND id != {p2} LIMIT 1"),
                 vec![sea_orm::Value::from(value), sea_orm::Value::from(exclude)],
             )
         } else {
             (
-                format!("SELECT id FROM {} WHERE {} = $1 LIMIT 1", table_name, field),
+                format!("SELECT id FROM {table_name} WHERE {field} = {p1} LIMIT 1"),
                 vec![sea_orm::Value::from(value)],
             )
         };
 
-        let backend = self.db.get_database_backend();
         let stmt = Statement::from_sql_and_values(backend, sql, values);
         let row =
             self.db.query_one_raw(stmt).await.map_err(|e| OpcError::Database(e.to_string()))?;
@@ -792,6 +845,15 @@ impl OpcDataService for DefaultDataService {
                     email: sea_orm::Set(data["email"].as_str().unwrap_or("").to_string()),
                     phone: sea_orm::Set(data["phone"].as_str().map(|s| s.to_string())),
                     company: sea_orm::Set(data["company"].as_str().map(|s| s.to_string())),
+                    customer_type: sea_orm::Set(
+                        data["customer_type"].as_str().unwrap_or("unknown").to_string(),
+                    ),
+                    country: sea_orm::Set(data["country"].as_str().map(|s| s.to_string())),
+                    region: sea_orm::Set(data["region"].as_str().map(|s| s.to_string())),
+                    city: sea_orm::Set(data["city"].as_str().map(|s| s.to_string())),
+                    address: sea_orm::Set(data["address"].as_str().map(|s| s.to_string())),
+                    latitude: sea_orm::Set(data["latitude"].as_f64()),
+                    longitude: sea_orm::Set(data["longitude"].as_f64()),
                     source: sea_orm::Set(data["source"].as_str().map(|s| s.to_string())),
                     tags_json: sea_orm::Set(
                         data["tags"]
@@ -949,5 +1011,35 @@ impl OpcDataService for DefaultDataService {
             .await
             .map_err(|e| OpcError::Database(e.to_string()))?;
         Ok(count)
+    }
+
+    async fn count_contacts(&self, from: i64, to: i64) -> OpcResult<u64> {
+        let count = opc_contact_submissions::Entity::find()
+            .filter(opc_contact_submissions::Column::CreatedAt.between(from, to))
+            .count(&self.db)
+            .await
+            .map_err(|e| OpcError::Database(e.to_string()))?;
+        Ok(count)
+    }
+
+    async fn latest_kpi(
+        &self,
+        domain_pack_id: &str,
+        name: &str,
+        range: &TimeRange,
+    ) -> OpcResult<Option<f64>> {
+        // 域包 id 必须与写入侧同一套归一（`content-media` ≡ `content_media`），
+        // 否则同一域包会有两个桶 ⇒ 刚写入的值读不回来。归一真源见
+        // `analytics::canonical_domain_pack_id`。
+        let domain_pack_id = crate::opc::analytics::canonical_domain_pack_id(domain_pack_id)?;
+        let row = opc_kpi_records::Entity::find()
+            .filter(opc_kpi_records::Column::DomainPackId.eq(domain_pack_id))
+            .filter(opc_kpi_records::Column::Name.eq(name))
+            .filter(opc_kpi_records::Column::RecordedAt.between(range.start, range.end))
+            .order_by_desc(opc_kpi_records::Column::RecordedAt)
+            .one(&self.db)
+            .await
+            .map_err(|e| OpcError::Database(e.to_string()))?;
+        Ok(row.map(|r| r.value))
     }
 }

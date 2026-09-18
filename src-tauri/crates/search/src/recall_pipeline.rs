@@ -17,6 +17,13 @@
 //! - L3 (Vector Similarity Sort): Vector search only within L2 candidates,
 //!   producing a hybrid score (AST * 0.4 + Vector * 0.6) and final top-K ranking.
 //!
+//! # ⚠ 接线状态
+//!
+//! `RecallPipeline` 的**生产实例化点当前为 0**（全仓仅本文件定义 + 下方单测）。
+//! 本模块已按 `FileIndex` / `AstIndex` 的异步化同步改造（`execute` 等改为
+//! `async fn`），以确保 crate 能编译 —— **但这不构成接线**：
+//! 真正的接线需要一个用户可见入口（UI 或 agent 工具），而「入口长什么样」
+//! 是产品决策（见 `PLAN-weknora-borrowings.md §12.11.4`）。
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -89,25 +96,30 @@ impl<'a> RecallPipeline<'a> {
     ///
     /// If L3 is disabled, vector_score will be None and combined_score
     /// will equal ast_score alone.
-    pub fn execute(
+    ///
+    /// ⚠ `parking_lot::MutexGuard` **非 `Send`** ⇒ 两处语义缓存临界区都**不得**
+    /// 跨越 `.await`（本函数刻意把两次加锁各自收在无 `.await` 的块内）。
+    pub async fn execute(
         &self,
         query: &str,
         vector_search_fn: Option<&VectorSearchFn>,
     ) -> Result<Vec<RecallResult>, String> {
-        if let Some(ref cache) = self.semantic_cache {
-            let mut cache_guard = cache.lock();
-            if cache_guard.is_enabled()
-                && let Some(cached_entry) = cache_guard.search_by_text(query)
-            {
-                tracing::debug!(
-                    query = %query,
-                    access_count = cached_entry.access_count,
-                    "Semantic cache hit in recall pipeline"
-                );
-                if let Ok(cached_results) =
-                    serde_json::from_str::<Vec<RecallResult>>(&cached_entry.result)
+        {
+            if let Some(ref cache) = self.semantic_cache {
+                let mut cache_guard = cache.lock();
+                if cache_guard.is_enabled()
+                    && let Some(cached_entry) = cache_guard.search_by_text(query)
                 {
-                    return Ok(cached_results);
+                    tracing::debug!(
+                        query = %query,
+                        access_count = cached_entry.access_count,
+                        "Semantic cache hit in recall pipeline"
+                    );
+                    if let Ok(cached_results) =
+                        serde_json::from_str::<Vec<RecallResult>>(&cached_entry.result)
+                    {
+                        return Ok(cached_results);
+                    }
                 }
             }
         }
@@ -116,7 +128,7 @@ impl<'a> RecallPipeline<'a> {
         let l1_files: Vec<String> = if self.config.l1_enabled {
             let extensions: Vec<&str> =
                 self.config.l1_code_extensions.iter().map(|s| s.as_str()).collect();
-            let entries = self.file_index.filter_by_extension(&extensions)?;
+            let entries = self.file_index.filter_by_extension(&extensions).await?;
             entries.into_iter().map(|e| e.path).collect()
         } else {
             Vec::new()
@@ -128,7 +140,7 @@ impl<'a> RecallPipeline<'a> {
 
         // ── L2: AST semantic match ──────────────────────────────────────
         let ast_scored = if self.config.l2_enabled {
-            self.score_ast_matches(query, &l1_files)?
+            self.score_ast_matches(query, &l1_files).await?
         } else {
             l1_files.into_iter().map(|f| (f, 0.0f32, Vec::new())).collect()
         };
@@ -195,26 +207,29 @@ impl<'a> RecallPipeline<'a> {
         };
         results.truncate(limit);
 
-        if let Some(ref cache) = self.semantic_cache {
-            let mut cache_guard = cache.lock();
-            if cache_guard.is_enabled()
-                && !results.is_empty()
-                && let Ok(serialized) = serde_json::to_string(&results)
-            {
-                let chunk_ids: Vec<String> = results.iter().map(|r| r.file_path.clone()).collect();
-                let best_score = results.first().map(|r| r.combined_score).unwrap_or(0.0);
-                cache_guard.insert_by_text(
-                    query.to_string(),
-                    serialized,
-                    chunk_ids,
-                    best_score,
-                    3600,
-                );
-                tracing::debug!(
-                    query = %query,
-                    result_count = results.len(),
-                    "Stored recall results in semantic cache"
-                );
+        {
+            if let Some(ref cache) = self.semantic_cache {
+                let mut cache_guard = cache.lock();
+                if cache_guard.is_enabled()
+                    && !results.is_empty()
+                    && let Ok(serialized) = serde_json::to_string(&results)
+                {
+                    let chunk_ids: Vec<String> =
+                        results.iter().map(|r| r.file_path.clone()).collect();
+                    let best_score = results.first().map(|r| r.combined_score).unwrap_or(0.0);
+                    cache_guard.insert_by_text(
+                        query.to_string(),
+                        serialized,
+                        chunk_ids,
+                        best_score,
+                        3600,
+                    );
+                    tracing::debug!(
+                        query = %query,
+                        result_count = results.len(),
+                        "Stored recall results in semantic cache"
+                    );
+                }
             }
         }
 
@@ -222,7 +237,7 @@ impl<'a> RecallPipeline<'a> {
     }
 
     /// Score files based on AST match relevance to the query.
-    fn score_ast_matches(
+    async fn score_ast_matches(
         &self,
         query: &str,
         l1_files: &[String],
@@ -230,37 +245,37 @@ impl<'a> RecallPipeline<'a> {
         let mut scored: Vec<(String, f32, Vec<String>)> = Vec::new();
 
         // Search functions
-        if let Ok(fns) = self.ast_index.search_functions(query, self.config.l2_limit) {
+        if let Ok(fns) = self.ast_index.search_functions(query, self.config.l2_limit).await {
             for f in &fns {
                 if l1_files.is_empty() || l1_files.contains(&f.file_path) {
-                    self.upsert_score(&mut scored, &f.file_path, 1.0, f.name.clone());
+                    upsert_score(&mut scored, &f.file_path, 1.0, f.name.clone());
                 }
             }
         }
 
         // Search classes
-        if let Ok(cls) = self.ast_index.search_classes(query, self.config.l2_limit) {
+        if let Ok(cls) = self.ast_index.search_classes(query, self.config.l2_limit).await {
             for c in &cls {
                 if l1_files.is_empty() || l1_files.contains(&c.file_path) {
-                    self.upsert_score(&mut scored, &c.file_path, 0.8, c.name.clone());
+                    upsert_score(&mut scored, &c.file_path, 0.8, c.name.clone());
                 }
             }
         }
 
         // Search all definitions in files
-        if let Ok(paths) = self.ast_index.search_all(query, self.config.l2_limit) {
+        if let Ok(paths) = self.ast_index.search_all(query, self.config.l2_limit).await {
             for p in &paths {
                 if l1_files.is_empty() || l1_files.contains(p) {
-                    self.upsert_score(&mut scored, p, 0.5, query.to_string());
+                    upsert_score(&mut scored, p, 0.5, query.to_string());
                 }
             }
         }
 
         // Search call edges
-        if let Ok(edges) = self.ast_index.find_callers(query) {
+        if let Ok(edges) = self.ast_index.find_callers(query).await {
             for e in &edges {
                 if l1_files.is_empty() || l1_files.contains(&e.caller_file) {
-                    self.upsert_score(
+                    upsert_score(
                         &mut scored,
                         &e.caller_file,
                         0.6,
@@ -280,48 +295,60 @@ impl<'a> RecallPipeline<'a> {
 
         Ok(scored)
     }
+}
 
-    fn upsert_score(
-        &self,
-        scored: &mut Vec<(String, f32, Vec<String>)>,
-        file_path: &str,
-        score: f32,
-        def_name: String,
-    ) {
-        if let Some(existing) = scored.iter_mut().find(|(f, _, _)| f == file_path) {
-            existing.1 += score;
-            existing.2.push(def_name);
-        } else {
-            scored.push((file_path.to_string(), score, vec![def_name]));
-        }
+/// `upsert_score` 原为 `&self` 方法但不读任何字段 ⇒ 改为自由函数，
+/// 以便在 `async fn` 里被借用检查器无摩擦地使用。
+fn upsert_score(
+    scored: &mut Vec<(String, f32, Vec<String>)>,
+    file_path: &str,
+    score: f32,
+    def_name: String,
+) {
+    if let Some(existing) = scored.iter_mut().find(|(f, _, _)| f == file_path) {
+        existing.1 += score;
+        existing.2.push(def_name);
+    } else {
+        scored.push((file_path.to_string(), score, vec![def_name]));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
+    use sea_orm::{ConnectOptions, Database};
 
-    fn setup() -> (FileIndex, AstIndex) {
-        let conn = Connection::open_in_memory().expect("测试：打开内存数据库应成功");
-        let fi = FileIndex::new(conn).expect("测试：new 应成功");
-        let ai_conn = Connection::open_in_memory().expect("测试：打开内存数据库应成功");
-        let ai = AstIndex::new(ai_conn).expect("测试：new 应成功");
+    /// ⚠ `sqlite::memory:` 必须 `max_connections(1)`：sqlx 每条池连接各持一份
+    /// 独立内存库，多连接下建表与写入会落到不同库（表现为「表不存在」）。
+    async fn setup() -> (FileIndex, AstIndex) {
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1).sqlx_logging(false);
+        let db = Database::connect(opt).await.expect("测试：打开内存数据库应成功");
+        let fi = FileIndex::new(db).await.expect("测试：new 应成功");
+
+        let mut opt2 = ConnectOptions::new("sqlite::memory:");
+        opt2.max_connections(1).min_connections(1).sqlx_logging(false);
+        let db2 = Database::connect(opt2).await.expect("测试：打开内存数据库应成功");
+        let ai = AstIndex::new(db2).await.expect("测试：new 应成功");
         (fi, ai)
     }
 
-    #[test]
-    fn test_pipeline_l1_l2_only() {
-        let (fi, ai) = setup();
-        fi.upsert("/src/main.rs", "rs", 1024, 1000).expect("测试：upsert 应成功");
-        fi.upsert("/src/lib.rs", "rs", 2048, 2000).expect("测试：upsert 应成功");
-        fi.upsert("/app.ts", "ts", 512, 500).expect("测试：upsert 应成功");
+    #[tokio::test]
+    async fn test_pipeline_l1_l2_only() {
+        let (fi, ai) = setup().await;
+        fi.upsert("/src/main.rs", "rs", 1024, 1000).await.expect("测试：upsert 应成功");
+        fi.upsert("/src/lib.rs", "rs", 2048, 2000).await.expect("测试：upsert 应成功");
+        fi.upsert("/app.ts", "ts", 512, 500).await.expect("测试：upsert 应成功");
 
         ai.index_file("/src/main.rs", "fn calculate() -> u32 { 42 }\nfn render() {}")
+            .await
             .expect("测试应成功");
         ai.index_file("/src/lib.rs", "pub fn add(a: i32, b: i32) -> i32 { a + b }")
+            .await
             .expect("测试应成功");
-        ai.index_file("/app.ts", "function hello() { console.log('hi'); }").expect("测试应成功");
+        ai.index_file("/app.ts", "function hello() { console.log('hi'); }")
+            .await
+            .expect("测试应成功");
 
         let pipeline = RecallPipeline::new(
             &fi,
@@ -329,20 +356,20 @@ mod tests {
             PipelineConfig { l3_enabled: false, ..Default::default() },
         );
 
-        let results = pipeline.execute("calculate", None).expect("测试：execute 应成功");
+        let results = pipeline.execute("calculate", None).await.expect("测试：execute 应成功");
         assert!(!results.is_empty());
         assert!(results.iter().any(|r| r.file_path.contains("main.rs")));
     }
 
-    #[test]
-    fn test_pipeline_empty_query() {
-        let (fi, ai) = setup();
-        fi.upsert("/src/main.rs", "rs", 1024, 1000).expect("测试：upsert 应成功");
-        ai.index_file("/src/main.rs", "fn main() {}").expect("测试应成功");
+    #[tokio::test]
+    async fn test_pipeline_empty_query() {
+        let (fi, ai) = setup().await;
+        fi.upsert("/src/main.rs", "rs", 1024, 1000).await.expect("测试：upsert 应成功");
+        ai.index_file("/src/main.rs", "fn main() {}").await.expect("测试应成功");
 
         let pipeline = RecallPipeline::new(&fi, &ai, PipelineConfig::default());
         let results =
-            pipeline.execute("nonexistent_function_xyz", None).expect("测试：execute 应成功");
+            pipeline.execute("nonexistent_function_xyz", None).await.expect("测试：execute 应成功");
         assert!(results.is_empty());
     }
 }

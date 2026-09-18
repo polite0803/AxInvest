@@ -67,27 +67,35 @@ export function initBackendStatusListeners() {
   if (_initialized || !isTauri()) { return; }
   _initialized = true;
 
-  listen<{ conversation_id: string }>("agent-started", (event) => {
-    useBackendStatusStore.getState().setAgentRunning(event.payload.conversation_id, true);
+  // 注意（P1-D，2026-09-12）：这三个事件的后端 payload 结构体
+  // （`AgentStatusPayload` / `AgentDonePayload`，`commands/agent/payloads.rs`）都写了
+  // `#[serde(rename = "conversationId")]`，即发到前端的 JSON key 是 **camelCase**。
+  // 此前后端读的是 `conversation_id`（全项目仅存于 Rust 字段名），解析结果恒为
+  // `undefined` ⇒ `agentRunning` 表被写成 `{ undefined: true }`，运行中标记从未生效。
+  // 段 G 只查「事件名有无发射」查不出这类**字段名不匹配**，故一并在此显式说明。
+  listen<{ conversationId: string }>("agent-started", (event) => {
+    useBackendStatusStore.getState().setAgentRunning(event.payload.conversationId, true);
   }).catch(logIpcError("listen:agent-started"));
 
-  listen<{ conversation_id: string }>("agent-done", (event) => {
-    useBackendStatusStore.getState().setAgentRunning(event.payload.conversation_id, false);
+  listen<{ conversationId: string }>("agent-done", (event) => {
+    useBackendStatusStore.getState().setAgentRunning(event.payload.conversationId, false);
   }).catch(logIpcError("listen:agent-done"));
 
-  listen<{ id: string; status: string; conversation_id: string }>("agent-status", (event) => {
-    const { conversation_id, status } = event.payload;
-    if (status === "cancelled" || status === "error") {
-      useBackendStatusStore.getState().setAgentRunning(conversation_id, false);
+  // `agent-status` 的 payload 是 `{ conversationId, phase, message, code }` ——
+  // **没有 `status` 字段**，`phase` 才是阶段名（init/setup/running/done/error）。
+  listen<{ conversationId: string; phase: string }>("agent-status", (event) => {
+    const { conversationId, phase } = event.payload;
+    if (phase === "cancelled" || phase === "error") {
+      useBackendStatusStore.getState().setAgentRunning(conversationId, false);
     }
   }).catch(logIpcError("listen:agent-status"));
 
-  listen<{ knowledge_base_id: string; status: string; progress?: number }>("knowledge-base-updated", (event) => {
-    const { knowledge_base_id, status, progress } = event.payload;
+  listen<{ knowledgeBaseId: string; status: string; progress?: number }>("knowledge-base-updated", (event) => {
+    const { knowledgeBaseId, status, progress } = event.payload;
     const store = useBackendStatusStore.getState();
     if (status === "indexing") {
       store.upsertTask({
-        id: `kb-index-${knowledge_base_id}`,
+        id: `kb-index-${knowledgeBaseId}`,
         type: "knowledge-indexing",
         label: `Indexing knowledge base`,
         status: "running",
@@ -96,7 +104,7 @@ export function initBackendStatusListeners() {
       });
     } else {
       store.upsertTask({
-        id: `kb-index-${knowledge_base_id}`,
+        id: `kb-index-${knowledgeBaseId}`,
         type: "knowledge-indexing",
         label: `Indexing knowledge base`,
         status: status === "error" ? "failed" : "completed",
@@ -106,7 +114,9 @@ export function initBackendStatusListeners() {
     }
   }).catch(logIpcError("listen:knowledge-base-updated"));
 
-  listen<{ namespace_id: string }>("memory-rebuild-complete", () => {
+  // 类型声明与实际 payload 对齐（`{ namespaceId }` —— 由 `index_queue.rs`
+  // `emit_container_settled` 发射；此前声明为 snake_case，与后端不符）。
+  listen<{ namespaceId: string }>("memory-rebuild-complete", () => {
     useBackendStatusStore.getState().upsertTask({
       id: "memory-rebuild",
       type: "memory-rebuild",
@@ -117,7 +127,8 @@ export function initBackendStatusListeners() {
     });
   }).catch(logIpcError("listen:memory-rebuild-complete"));
 
-  listen<{ wiki_id: string }>("wiki-rebuild-complete", () => {
+  // 同理：`wiki.rs:529` 发射的是 `{ wikiId }`。
+  listen<{ wikiId: string }>("wiki-rebuild-complete", () => {
     useBackendStatusStore.getState().upsertTask({
       id: "wiki-rebuild",
       type: "wiki-rebuild",

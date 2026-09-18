@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useIndustryLearningStore } from "@/stores";
+import { useDomainLearningStore } from "@/stores";
 import type { ExperiencePoolStats, RLPolicyUpdate } from "@/types";
 import {
   BarChartOutlined,
@@ -20,7 +20,7 @@ const { Text, Title } = Typography;
 
 interface RLLearningPanelProps {
   /** 行业 ID */
-  industryId?: string;
+  domainPackId?: string;
   /** 紧凑模式（嵌入其他页面） */
   compact?: boolean;
 }
@@ -28,7 +28,7 @@ interface RLLearningPanelProps {
 /**
  * RL 学习面板 — 展示经验池统计、策略优化状态和自动学习闭环历史
  */
-export function RLLearningPanel({ industryId, compact = false }: RLLearningPanelProps) {
+export function RLLearningPanel({ domainPackId, compact = false }: RLLearningPanelProps) {
   const { t } = useTranslation();
   const {
     loadRLStats,
@@ -40,26 +40,26 @@ export function RLLearningPanel({ industryId, compact = false }: RLLearningPanel
     autoLearningHistory,
     rlLoading,
     getConfig,
-  } = useIndustryLearningStore();
+  } = useDomainLearningStore();
 
-  const stats = industryId ? rlStats.get(industryId) ?? emptyStats() : rlGlobalStats ?? emptyStats();
-  const config = industryId ? getConfig(industryId) : undefined;
-  const policyUpdate = industryId ? rlPolicyUpdates.get(industryId) : undefined;
+  const stats = domainPackId ? rlStats.get(domainPackId) ?? emptyStats() : rlGlobalStats ?? emptyStats();
+  const config = domainPackId ? getConfig(domainPackId) : undefined;
+  const policyUpdate = domainPackId ? rlPolicyUpdates.get(domainPackId) : undefined;
 
   const loadData = useCallback(async () => {
-    await loadRLStats(industryId);
-    if (industryId) {
-      await loadConfig(industryId);
+    await loadRLStats(domainPackId);
+    if (domainPackId) {
+      await loadConfig(domainPackId);
     }
-  }, [industryId, loadRLStats, loadConfig]);
+  }, [domainPackId, loadRLStats, loadConfig]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   const handleOptimize = async () => {
-    if (industryId) {
-      await triggerOptimization(industryId);
+    if (domainPackId) {
+      await triggerOptimization(domainPackId);
     }
   };
 
@@ -89,7 +89,7 @@ export function RLLearningPanel({ industryId, compact = false }: RLLearningPanel
               >
                 {t("opc.rl.refresh")}
               </Button>
-              {industryId && (
+              {domainPackId && (
                 <Button
                   icon={<BulbOutlined />}
                   onClick={handleOptimize}
@@ -118,8 +118,8 @@ export function RLLearningPanel({ industryId, compact = false }: RLLearningPanel
           <Col xs={12} md={6}>
             <Card size={compact ? "small" : "default"}>
               <Statistic
-                title={t("opc.rl.industryCount")}
-                value={stats.industryCount}
+                title={t("opc.rl.domainCount")}
+                value={stats.domainPackCount}
               />
             </Card>
           </Col>
@@ -370,7 +370,7 @@ function AutoLearningResultItem({
 function emptyStats(): ExperiencePoolStats {
   return {
     totalExperiences: 0,
-    industryCount: 0,
+    domainPackCount: 0,
     oldestTimestampMs: undefined,
     newestTimestampMs: undefined,
     avgReward: 0,

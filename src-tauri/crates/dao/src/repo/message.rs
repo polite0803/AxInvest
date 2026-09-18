@@ -346,37 +346,6 @@ pub async fn update_message_parts(
     Ok(())
 }
 
-/// Append content to a message's existing content field.
-///
-/// This is useful for streaming scenarios where chunks arrive and need to be
-/// appended without overwriting existing content.
-///
-/// # Arguments
-///
-/// * `db` - Database connection
-/// * `id` - Message ID to update
-/// * `append_content` - Content to append
-///
-/// # Returns
-///
-/// Returns `Ok(())` on success, or error if message not found.
-pub async fn append_message_content(
-    db: &DatabaseConnection,
-    id: &str,
-    append_content: &str,
-) -> Result<()> {
-    let query = r#"UPDATE messages SET content = content || $1 WHERE id = $2"#;
-
-    db.execute_raw(Statement::from_sql_and_values(
-        sea_orm::DatabaseBackend::Sqlite,
-        query,
-        vec![append_content.into(), id.into()],
-    ))
-    .await?;
-
-    Ok(())
-}
-
 fn compare_version_priority(left: &messages::Model, right: &messages::Model) -> std::cmp::Ordering {
     right
         .version_index

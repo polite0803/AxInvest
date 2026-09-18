@@ -743,9 +743,9 @@ export const EDUCATION_TEMPLATE: OfficeSceneTemplate = {
 
 // ── 行业咨询行业 — 顾问工位 + 资料室 + 会议室 + 接待区 ──
 
-export const INDUSTRY_CONSULTING_TEMPLATE: OfficeSceneTemplate = {
-  slug: "industry_consulting",
-  displayNameKey: "industry_consulting",
+export const CONSULTING_TEMPLATE: OfficeSceneTemplate = {
+  slug: "consulting",
+  displayNameKey: "consulting",
   canvasWidth: 800,
   canvasHeight: 500,
   defaultRoomId: "consulting",
@@ -899,7 +899,7 @@ export const SCENE_TEMPLATES: OfficeSceneTemplate[] = [
   CONTENT_MEDIA_TEMPLATE,
   ECOMMERCE_TEMPLATE,
   EDUCATION_TEMPLATE,
-  INDUSTRY_CONSULTING_TEMPLATE,
+  CONSULTING_TEMPLATE,
   SALES_GROWTH_TEMPLATE,
 ];
 

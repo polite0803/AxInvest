@@ -20,15 +20,20 @@ use serde_json::{Map, Value};
 
 use axagent_harness::{NpmRegistryService, parse_npm_package_spec};
 
-const EXTERNAL_MARKETPLACE: &str = "external";
-const BUILTIN_MARKETPLACE: &str = "builtin";
-const BUNDLED_MARKETPLACE: &str = "bundled";
-const OPENCLAW_MARKETPLACE: &str = "openclaw";
-const SETTINGS_FILE_NAME: &str = "settings.json";
-const REGISTRY_FILE_NAME: &str = "installed.json";
+// ── 插件市场常量：全 crate 唯一定义点（AGENTS.md 禁区 12「禁止重复定义」）──
+// 历史上 core.rs / manager.rs / types.rs 各抄一份；其中 manager.rs 顶部已有
+// `use crate::core::*;`，本地定义会静默遮蔽 glob 导入（编译器不报错），
+// 且 OPENCLAW_MARKETPLACE 在 manager.rs 已漏抄 —— 典型「同名默认值多定义点必不一致」。
+// 现统一在此定义，其余模块一律引用。
+pub(crate) const EXTERNAL_MARKETPLACE: &str = "external";
+pub(crate) const BUILTIN_MARKETPLACE: &str = "builtin";
+pub(crate) const BUNDLED_MARKETPLACE: &str = "bundled";
+pub(crate) const OPENCLAW_MARKETPLACE: &str = "openclaw";
+pub(crate) const SETTINGS_FILE_NAME: &str = "settings.json";
+pub(crate) const REGISTRY_FILE_NAME: &str = "installed.json";
 pub(crate) const MANIFEST_FILE_NAME: &str = "plugin.json";
 pub(crate) const MANIFEST_RELATIVE_PATH: &str = ".claude-plugin/plugin.json";
-const SKILL_MD_FILE_NAME: &str = "SKILL.md";
+pub(crate) const SKILL_MD_FILE_NAME: &str = "SKILL.md";
 
 use crate::manager::{
     PluginError, run_lifecycle_commands, validate_hook_paths, validate_lifecycle_paths,
@@ -50,6 +55,48 @@ pub trait Plugin {
     fn shutdown(&self) -> Result<(), PluginError>;
 }
 
+/// 为 `Plugin` 的 7 个**纯字段转发**访问器生成实现。
+///
+/// [2026-09-13] 去重审计 P1-11：`BuiltinPlugin` / `BundledPlugin` / `ExternalPlugin` /
+/// `OpenClawPlugin` 四个 impl 各自抄了一份**逐字相同**的 7 个转发体（共 28 份），
+/// 已由本宏收敛为单一定义。
+///
+/// 注意：`validate` / `initialize` / `shutdown` **不进本宏** —— 四者语义各异
+/// （`Builtin` 只校验 metadata 非空、`Bundled`/`External`/`OpenClaw` 各有路径与生命周期
+/// 校验），强行合并会改变行为；`PluginDefinition` 的对应方法是 `match` 派发（非转发），
+/// 同样不适用。
+macro_rules! plugin_accessors {
+    () => {
+        fn metadata(&self) -> &PluginMetadata {
+            &self.metadata
+        }
+
+        fn hooks(&self) -> &PluginHooks {
+            &self.hooks
+        }
+
+        fn lifecycle(&self) -> &PluginLifecycle {
+            &self.lifecycle
+        }
+
+        fn tools(&self) -> &[PluginTool] {
+            &self.tools
+        }
+
+        fn mcp_servers(&self) -> &[PluginMcpServer] {
+            &self.mcp_servers
+        }
+
+        fn skills(&self) -> &[PluginSkillEntry] {
+            &self.skills
+        }
+
+        fn permissions(&self) -> &[PluginPermission] {
+            &self.permissions
+        }
+    };
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum PluginDefinition {
     Builtin(BuiltinPlugin),
@@ -59,33 +106,7 @@ pub enum PluginDefinition {
 }
 
 impl Plugin for BuiltinPlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
-
-    fn hooks(&self) -> &PluginHooks {
-        &self.hooks
-    }
-
-    fn lifecycle(&self) -> &PluginLifecycle {
-        &self.lifecycle
-    }
-
-    fn tools(&self) -> &[PluginTool] {
-        &self.tools
-    }
-
-    fn mcp_servers(&self) -> &[PluginMcpServer] {
-        &self.mcp_servers
-    }
-
-    fn skills(&self) -> &[PluginSkillEntry] {
-        &self.skills
-    }
-
-    fn permissions(&self) -> &[PluginPermission] {
-        &self.permissions
-    }
+    plugin_accessors!();
 
     fn validate(&self) -> Result<(), PluginError> {
         if self.metadata.name.trim().is_empty() {
@@ -112,33 +133,7 @@ impl Plugin for BuiltinPlugin {
 }
 
 impl Plugin for BundledPlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
-
-    fn hooks(&self) -> &PluginHooks {
-        &self.hooks
-    }
-
-    fn lifecycle(&self) -> &PluginLifecycle {
-        &self.lifecycle
-    }
-
-    fn tools(&self) -> &[PluginTool] {
-        &self.tools
-    }
-
-    fn mcp_servers(&self) -> &[PluginMcpServer] {
-        &self.mcp_servers
-    }
-
-    fn skills(&self) -> &[PluginSkillEntry] {
-        &self.skills
-    }
-
-    fn permissions(&self) -> &[PluginPermission] {
-        &self.permissions
-    }
+    plugin_accessors!();
 
     fn validate(&self) -> Result<(), PluginError> {
         validate_hook_paths(self.metadata.root.as_deref(), &self.hooks)?;
@@ -161,33 +156,7 @@ impl Plugin for BundledPlugin {
 }
 
 impl Plugin for ExternalPlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
-
-    fn hooks(&self) -> &PluginHooks {
-        &self.hooks
-    }
-
-    fn lifecycle(&self) -> &PluginLifecycle {
-        &self.lifecycle
-    }
-
-    fn tools(&self) -> &[PluginTool] {
-        &self.tools
-    }
-
-    fn mcp_servers(&self) -> &[PluginMcpServer] {
-        &self.mcp_servers
-    }
-
-    fn skills(&self) -> &[PluginSkillEntry] {
-        &self.skills
-    }
-
-    fn permissions(&self) -> &[PluginPermission] {
-        &self.permissions
-    }
+    plugin_accessors!();
 
     fn validate(&self) -> Result<(), PluginError> {
         validate_hook_paths(self.metadata.root.as_deref(), &self.hooks)?;
@@ -210,33 +179,7 @@ impl Plugin for ExternalPlugin {
 }
 
 impl Plugin for OpenClawPlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
-
-    fn hooks(&self) -> &PluginHooks {
-        &self.hooks
-    }
-
-    fn lifecycle(&self) -> &PluginLifecycle {
-        &self.lifecycle
-    }
-
-    fn tools(&self) -> &[PluginTool] {
-        &self.tools
-    }
-
-    fn mcp_servers(&self) -> &[PluginMcpServer] {
-        &self.mcp_servers
-    }
-
-    fn skills(&self) -> &[PluginSkillEntry] {
-        &self.skills
-    }
-
-    fn permissions(&self) -> &[PluginPermission] {
-        &self.permissions
-    }
+    plugin_accessors!();
 
     fn validate(&self) -> Result<(), PluginError> {
         validate_hook_paths(self.metadata.root.as_deref(), &self.hooks)?;

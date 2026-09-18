@@ -126,6 +126,11 @@ const LazyKnowledgeGraphSearchPanel = lazy(() =>
 const LazyDeviceSyncPanel = lazy(() =>
   import("@/components/settings/DeviceSyncPanel").then((m) => ({ default: m.DeviceSyncPanel }))
 );
+const LazyCapabilityDomainsSettings = lazy(() =>
+  import("@/components/settings/CapabilityDomainsSettings").then((m) => ({
+    default: m.CapabilityDomainsSettings,
+  }))
+);
 
 function SectionFallback() {
   return (
@@ -334,6 +339,11 @@ const SECTION_COMPONENTS: Record<SettingsSection, () => React.ReactNode> = {
   deviceSync: () => (
     <Suspense fallback={<SectionFallback />}>
       <LazyDeviceSyncPanel />
+    </Suspense>
+  ),
+  capabilityDomains: () => (
+    <Suspense fallback={<SectionFallback />}>
+      <LazyCapabilityDomainsSettings />
     </Suspense>
   ),
 };

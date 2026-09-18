@@ -455,13 +455,35 @@ pub async fn debug_run_workflow(
         .transpose()
         .map_err(|e| format!("output_schema 解析失败: {}", e))?;
 
+    // 必须用 with_hooks 变体携带模板 hooks_config：`create_workflow` 内部转调
+    // `create_workflow_with_hooks(..., None)`，模板声明的 post_exec 会被静默丢弃
+    // —— 引擎只在内存 Workflow 对象上读声明，为 None 时直接 return，连日志都不打。
+    // 本命令是 `workflow-cm-literary-creation` 的 post_exec 钩子
+    // （content-media-kpi-persist）的生产入口之一，漏传 ⇒ opc_kpi_records 永不落库。
+    // 解析失败仅 warn 后按 None：钩子是可选旁路，一个 JSON 错误不该让整条工作流失败。
+    let hooks_config = template
+        .hooks_config
+        .as_ref()
+        .and_then(|raw| match serde_json::from_str(raw) {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                tracing::warn!(
+                    "[debug_run_workflow] 模板 {template_id} hooks_config 解析失败，按无钩子处理: {e}"
+                );
+                None
+            },
+        });
+
     let engine = state.work_engine.clone();
-    let workflow = engine.create_workflow(&template.name, nodes, edges).await.map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
+    let workflow = engine
+        .create_workflow_with_hooks(&template.name, nodes, edges, hooks_config)
+        .await
+        .map_err(|e| {
+            String::from(crate::commands::error::ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })?;
     let workflow_id = workflow.id.clone();
     let execution_id = uuid::Uuid::new_v4().to_string();
 

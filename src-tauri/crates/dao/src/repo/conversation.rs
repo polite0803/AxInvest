@@ -505,7 +505,9 @@ pub async fn archive_to_knowledge_base(
         last_seen_at: Set(None),
         source_type: Set(String::from("knowledge_base")),
         source_id: Set(String::new()),
-        node_type: Set(String::from("entity")),
+        node_type: Set(String::from(
+            axagent_harness::knowledge_graph::GraphNodeType::Entity.as_str(),
+        )),
         external_id: Set(None),
     };
     entity_am.insert(&txn).await?;
@@ -702,7 +704,9 @@ pub async fn archive_to_knowledge_base(
             last_seen_at: Set(None),
             source_type: Set(String::from("knowledge_base")),
             source_id: Set(String::new()),
-            node_type: Set(String::from("entity")),
+            node_type: Set(String::from(
+                axagent_harness::knowledge_graph::GraphNodeType::Entity.as_str(),
+            )),
             external_id: Set(None),
         };
         qa_entity_am.insert(&txn).await?;
@@ -713,7 +717,7 @@ pub async fn archive_to_knowledge_base(
             knowledge_base_id: Set(knowledge_base_id.to_string()),
             source_entity_id: Set(entity_id.clone()),
             target_entity_id: Set(qa_entity_id.clone()),
-            relation_type: Set("contains".to_string()),
+            relation_type: Set(axagent_harness::knowledge_graph::RELATION_CONTAINS.to_string()),
             description: Set(Some(format!("Q&A pair #{}", turn_idx + 1))),
             properties: Set(None),
             metadata: Set(None),
@@ -732,7 +736,7 @@ pub async fn archive_to_knowledge_base(
                 knowledge_base_id: Set(knowledge_base_id.to_string()),
                 source_entity_id: Set(prev_id.clone()),
                 target_entity_id: Set(qa_entity_id.clone()),
-                relation_type: Set("follows".to_string()),
+                relation_type: Set(axagent_harness::knowledge_graph::RELATION_FOLLOWS.to_string()),
                 description: Set(None),
                 properties: Set(None),
                 metadata: Set(None),

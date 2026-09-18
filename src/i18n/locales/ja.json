@@ -1763,6 +1763,7 @@
     "searchConversations": "会話を検索",
     "settings": "設定",
     "toggleSidebar": "サイドバーを切り替え",
+    "workbench": "ワークスペース",
     "toggleInspector": "切换检查器"
   },
   "commandSuggest": {
@@ -2568,6 +2569,8 @@
     "CONVERSATION_TITLE_FAILED": "会話タイトルの設定に失敗しました",
     "CONVERSATION_TOOL_LOOP_EXCEEDED": "ツール呼び出しが最大回数を超えました",
     "CONVERSATION_UPDATE_FAILED": "会話の更新に失敗しました",
+    "DB_CONNECT_FAILED": "データベースに接続できません。ホスト、ポート、ネットワーク、認証情報を確認してください。",
+    "DB_QUERY_VERIFY_FAILED": "データベース接続は確立しましたが、検証クエリ（SELECT 1）が失敗しました。しばらくして再試行するか、サーバーの状態を確認してください。",
     "CONVERSATION_WEB_SEARCH_PARAM_MISSING": "Web検索に必要なパラメータが不足しています",
     "KNOWLEDGE_NOT_FOUND": "ナレッジベースが見つかりません",
     "KNOWLEDGE_DOCUMENT_NOT_FOUND": "ナレッジベースのドキュメントが見つかりません",
@@ -2588,6 +2591,7 @@
     "DASHBOARD_NO_MANIFEST": "ダッシュボードマニフェストが見つかりません",
     "DESKTOP_CONNECTION_TIMEOUT": "デスクトップ接続がタイムアウトしました",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "デスクトップ通知の送信に失敗しました",
+    "DOMAIN_UNREGISTERED": "能力域の本体が登録されていません",
     "FINE_TUNE_DELETE_FAILED": "ファインチューニングタスクの削除に失敗しました",
     "EXPERT_DELETE_FAILED": "エキスパートの削除に失敗しました",
     "EXPERT_JSON_PARSE_FAILED": "エキスパートJSONの解析に失敗しました",
@@ -2763,6 +2767,7 @@
     "WORKFLOW_NODE_NOT_FOUND": "ワークフローノードが見つかりません",
     "WORKFLOW_NOT_FOUND": "ワークフローが見つかりません",
     "WORKFLOW_PLAN_NOT_FOUND": "ワークフロー計画が見つかりません",
+    "WORKFLOW_PLAN_NOT_AUTHORIZED": "計画はまだ実行承認されていません。先に承認してください。",
     "WORKFLOW_REFLECTION_APPLY_FAILED": "ワークフローリフレクションの適用に失敗しました",
     "WORKFLOW_REFLECTION_EVOLVE_FAILED": "ワークフローリフレクションの進化に失敗しました",
     "WORKFLOW_REFLECTION_SEAM_NOT_READY": "ワークフロー機能シームが未登録です（リフレクション/進化/オプティマイザーが利用できません）",
@@ -2867,6 +2872,12 @@
     "CAPABILITY_METADATA_RESTORE_FAILED": "メタデータの復元に失敗しました",
     "CAPABILITY_EVOLVE_FAILED": "能力の進化に失敗しました",
     "CAPABILITY_NOT_EVOLVABLE": "この能力は進化できません（外部プラグインの読み取り専用能力）",
+    "CAPABILITY_DOMAIN_UNKNOWN": "不明な能力ドメイン識別子",
+    "CAPABILITY_DOMAIN_NOT_TOGGLEABLE": "この能力ドメインは無効化できません",
+    "CAPABILITY_DOMAIN_ALIAS_CONFLICT": "エイリアスが既存のドメインまたはエイリアスと競合しています",
+    "CAPABILITY_DOMAIN_ALIAS_INVALID": "エイリアスが不正です（空、長すぎる、または空白を含む）",
+    "CAPABILITY_DOMAIN_UPDATE_FAILED": "能力ドメイン設定の保存に失敗しました",
+    "CAPABILITY_DOMAIN_LIST_FAILED": "能力ドメイン一覧の読み込みに失敗しました",
     "AGENT_INPUT_CHANNEL_CLOSED": "ユーザー入力チャネルが閉じられています",
     "AGENT_INPUT_WAIT_REPLY_TIMEOUT": "ユーザーの返信待ちがタイムアウトしました（5分）",
     "AGENT_INPUT_NO_PROVIDER": "利用可能なプロバイダー/モデルがありません：設定でプロバイダーを有効にしてください",
@@ -2897,7 +2908,26 @@
     "WORKFLOW_TOOL_SANDBOX_REJECTED": "生成されたツールがサンドボックスコンパイル検証に失敗しました",
     "OPC_SETUP_INTERNAL": "OPC設定内部エラー",
     "STOCK_WORKFLOW_INTERNAL": "株式ワークフロー内部エラー",
+    "STOCK_WORKFLOW_TIMEOUT": "分析がタイムアウトしました。しばらくしてから再試行してください",
+    "STOCK_WORKFLOW_CANCELLED": "分析はキャンセルされました",
+    "STOCK_WORKFLOW_EXEC_FAILED": "株式分析ワークフローの実行に失敗しました",
+    "STOCK_WORKFLOW_STEP_FAILED": "分析ノードの実行に失敗しました",
+    "STOCK_WORKFLOW_STEP_CANCELLED": "分析がキャンセルされたため、分析ノードを中止しました",
+    "STOCK_WORKFLOW_HOOK_BLOCKED": "事前チェックに失敗したため、分析を中止しました",
+    "STOCK_WORKFLOW_VALIDATION_FAILED": "ノードの入出力検証に失敗しました",
+    "STOCK_WORKFLOW_GRAPH_INVALID": "ワークフロー定義が不正です（ノードの重複、依存関係の欠落、または循環）",
+    "STOCK_WORKFLOW_TARGET_NOT_FOUND": "ワークフローまたはノードが存在しません",
+    "STOCK_WORKFLOW_SERIALIZE_FAILED": "ワークフローデータのシリアライズに失敗しました",
+    "STOCK_WORKFLOW_INVALID_STATE": "ワークフローの状態が不正なため続行できません",
+    "STOCK_WORKFLOW_PERSIST_FAILED": "スクリーニングは完了しましたが、結果を履歴に保存できませんでした",
+    "SEARCH_HTTP_ERROR": "検索サービスが異常なステータスを返しました",
+    "SEARCH_UNREACHABLE": "検索サービスに接続できません",
     "STOCK_SETUP_INTERNAL": "株式セットアップ内部エラー",
+    "STOCK_SIM_INPUT_MISSING": "シミュレーションに必要な入力がありません（銘柄コードまたは基準価格）",
+    "STOCK_SIM_NO_REFERENCE_PRICE": "基準価格を特定できません。リアルタイム相場にも保存済みスナップショットにも有効な現在値がありません",
+    "STOCK_SIM_RESULT_PARSE_FAILED": "シミュレーション結果を解析できませんでした。分析を再実行してください",
+    "STOCK_SIM_EXEC_FAILED": "シミュレーションエンジンの実行に失敗しました",
+    "STOCK_SIM_CANCELLED": "シミュレーションがキャンセルされました（アプリ終了または分析中断）",
     "network": "网络连接失败",
     "providerNotConfigured": "请先配置服务提供商",
     "noModelSelected": "请选择模型",
@@ -3737,6 +3767,7 @@
     "topP": "Top P"
   },
   "nav": {
+    "tabActivity": "実行中",
     "app": "アプリ",
     "chat": "チャット",
     "dashboard": "ダッシュボード",
@@ -3750,6 +3781,7 @@
     "settings": "設定",
     "terminal": "ターミナル",
     "wiki": "Wiki",
+    "workbench": "ワークスペース",
     "workflow": "ワークフロー",
     "marketplace": "マーケットプレース",
     "dynamicUI": "ダイナミックページ",
@@ -3934,6 +3966,8 @@
       "tagProcess": "処理",
       "tokenUsage": "{{slug}}：+{{input}}↑ / +{{output}}↓",
       "completed": "完了",
+      "heldNotice": "新しいメッセージを {{count}} 件検出しました（会話は #{{seq}} まで進んでいます）。今回は実行しませんでした。もう一度送信してください。agent が最新の文脈で回答します。",
+      "speakerMe": "自分",
       "contextInjectedHint": "現在選択中の銘柄がビジネスコンテキストとして自動注入されます。ディスパッチャーはこれに基づきリサーチ/トレード/リスクエージェントへルーティングします"
     },
     "dm": {
@@ -4182,6 +4216,20 @@
   "plan": {
     "approveAll": "承認して実行",
     "approveStep": "このステップを承認",
+    "authorization": {
+      "authorized": "承認済み",
+      "unauthorized": "未承認",
+      "tooltipAuthorized": "{{source}}が {{time}} に承認",
+      "tooltipMissing": "計画は「{{status}}」ですが承認フラグが 0 です。実行前チェックで拒否されます",
+      "source": {
+        "user": "ユーザー",
+        "system": "システム",
+        "api": "API",
+        "ui": "UI",
+        "automation": "自動化",
+        "unknown": "不明"
+      }
+    },
     "cancel": "キャンセル",
     "defaultTitle": "実行計画",
     "executeApproved": "承認済みステップを実行",
@@ -4830,6 +4878,39 @@
     "apiKey": "APIキー"
   },
   "settings": {
+    "capabilityDomains": {
+      "title": "ケイパビリティドメイン",
+      "description": "Agent の業務ケイパビリティドメインを管理します。ドメインを無効にすると、L1 分類器の候補から外れ、ルーティング対象にならず、そのドメインのケイパビリティも除外されます。追加エイリアスを使えば、独自の呼び方でそのドメインに到達できます。",
+      "consumersTitle": "変更は再起動なしで即時反映され、次の経路に影響します：",
+      "consumerClassifier": "L1 分類器プロンプト — 無効化したドメインは候補一覧から消えます",
+      "consumerRouter": "L1 ドメインルーティング — 一致したルールが無効ドメインを指す場合はスキップされます",
+      "consumerFilter": "ケイパビリティ絞り込み — 無効ドメインのケイパビリティは一切通しません",
+      "consumerAlias": "ドメイン解決 — 追加エイリアスはユーザー入力とモデル出力のドメイン判定に使われます",
+      "statTotal": "全 {{count}} ドメイン",
+      "statEnabled": "有効 {{count}}",
+      "statOverridden": "カスタム済み {{count}}",
+      "tagSystem": "内部",
+      "tagOverridden": "カスタム済み",
+      "tagDisabled": "無効",
+      "switchOn": "有効",
+      "switchOff": "無効",
+      "builtinAliases": "組み込みエイリアス",
+      "noAliases": "なし",
+      "extraAliases": "追加エイリアス",
+      "extraAliasesPlaceholder": "カンマ区切り、例：投資, 証券",
+      "saveAliases": "保存",
+      "effectiveAliases": "有効なエイリアス",
+      "restoreDefault": "既定の動作に戻す",
+      "restoreDefaultHint": "このドメインを有効にし、追加エイリアスを空にします。ドメイン ID と組み込みエイリアスは削除できません。上書き記録は残るため、組み込みの既定値と手動変更を区別できます。",
+      "navPath": "入口パス",
+      "loadFailed": "ケイパビリティドメイン登録表の読み込みに失敗しました",
+      "loadRetry": "再試行",
+      "blockReason": {
+        "general_is_fallback": "「汎用」は唯一のフォールバックドメインのため無効にできません",
+        "system_is_internal": "「システム」は内部ドメインのため無効にできません",
+        "unknown": "このドメインは無効にできません"
+      }
+    },
     "modelLabels": {
       "defaultModel": "デフォルト対話モデル",
       "titleSummaryModel": "タイトル要約モデル",
@@ -4948,6 +5029,19 @@
       "permissionControl": "権限制御",
       "permissionMode": "権限モード",
       "readOnly": "読み取り専用",
+      "reactEngine": {
+        "title": "エンジン詳細パラメータ",
+        "hint": "変更はアプリの再起動後に有効になります。空欄の項目はエンジンの既定値のままです。",
+        "timeoutSecs": "ツール呼び出しタイムアウト（秒）",
+        "maxRetryAttempts": "ツール失敗時の最大再試行回数",
+        "maxRepeatedCalls": "同一ツールの反復呼び出し上限",
+        "maxNoProgressIterations": "進展なしの反復上限（停滞判定）",
+        "minQualityThreshold": "最低品質閾値（下回ると再試行）",
+        "cycleDetectionEnabled": "サイクル検出（反復動作の識別）",
+        "verificationEnabled": "結果検証（実行後の出力チェック）",
+        "reflectionEnabled": "リフレクション（自己評価と調整）",
+        "checkpointEnabled": "チェックポイント（再開可能な状態を保存）"
+      },
       "refresh": "更新",
       "runtimeAgentList": "ランタイムエージェントリスト",
       "statusCancelled": "キャンセル",
@@ -5073,18 +5167,25 @@
       "pgPasswordPlaceholder": "データベースのパスワード",
       "pgPortLabel": "ポート",
       "pgSchemaLabel": "スキーマ（任意）",
+      "fallbackToSqlite": "PG 接続不可時に SQLite へフォールバック",
+      "fallbackToSqliteHint": "PostgreSQL に接続できない場合はローカル SQLite にフォールバックします。無効にすると、PostgreSQL に接続できない場合に起動が失敗します。",
       "pgSchemaPlaceholder": "空白の場合は既定の 'public' を使用",
       "pgUserLabel": "ユーザー名",
       "pgUserPlaceholder": "postgres",
       "restartHint": "データベース設定はアプリの再起動後に反映されます。",
       "saveButton": "保存",
       "saved": "保存しました。反映にはアプリの再起動が必要です。",
-      "schemaStatusError": "Schema 状態の照会に失敗しました：{{error}}",
-      "schemaStatusLoadFailed": "Schema 状態の読み込みに失敗しました",
-      "schemaStatusPending": "Schema が遅れています：適用済み v{{applied}}、{{count}} 件の移行が保留中",
+      "schemaStatusAdvisories": "宣言のドリフト {{count}} 件（式のテキスト差分のみで DDL は生成しません）",
+      "schemaStatusDialect": "現在のダイアレクト：{{dialect}}",
+      "schemaStatusError": "データベース構造の照会に失敗しました：{{error}}",
+      "schemaStatusLoadFailed": "データベース構造の読み込みに失敗しました",
+      "schemaStatusManual": "手動対応が必要な変更が他に {{count}} 件あります（縮小 / 型変更、起動時には実行しません）",
+      "schemaStatusPending": "次回起動時に {{count}} 件の構造変更を適用します",
+      "schemaStatusProbeFailed": "構造の検出に失敗しました：{{error}}",
       "schemaStatusRefresh": "更新",
-      "schemaStatusTitle": "Schema 移行状態",
-      "schemaStatusUpToDate": "Schema は最新です（v{{version}}）",
+      "schemaStatusTitle": "データベース構造の状態",
+      "schemaStatusUnsupported": "この方言にネイティブ DDL がない変更が他に {{count}} 件あります（既知の制限で毎回再現しますが動作に影響しません）",
+      "schemaStatusUpToDate": "構造は収束済み：実測 {{actual}} テーブル = 期待 {{expected}} テーブル",
       "sqliteNote": "SQLite はローカルファイルのデータベースで、外部サービス不要です。",
       "sqlitePathLabel": "SQLite ファイルパス",
       "sqlitePathPlaceholder": "空白の場合はデフォルトパスを使用（{app_dir}/axagent.db）",
@@ -5096,10 +5197,11 @@
       "typePostgres": "PostgreSQL（pgvector 対応）",
       "typeSqlite": "SQLite（ローカルファイル、デフォルト）",
       "useSslLabel": "SSL 接続を使用",
-      "schemaRepairButton": "修复 Schema",
-      "schemaRepairRunning": "修复中...",
-      "schemaRepairSuccess": "Schema 修复完成，补了 {{count}} 个缺失字段",
-      "schemaRepairFailed": "Schema 修复失败：{{error}}"
+      "schemaRepairButton": "構造を修復",
+      "schemaRepairRunning": "修復中...",
+      "schemaRepairSuccess": "修復が完了しました：列を {{columns}} 件追加、型を {{types}} 件修正",
+      "schemaRepairFailed": "データベース構造の修復に失敗しました：{{error}}",
+      "schemaRepairPartial": "修復は不完全です：{{count}} テーブルの照合に失敗しました（詳細は下記）"
     },
     "defaultConversationModel": "デフォルト会話モデル",
     "defaultConversationModelDesc": "新しい会話のデフォルトモデル。設定されていない場合は最後のアクティブな会話モデルにフォールバック",
@@ -5421,6 +5523,10 @@
       "feedbackUseful": "便利",
       "findDuplicates": "重複を検索",
       "fromConversation": "会話から",
+      "ftsLagging": "{{count}} 件遅延",
+      "ftsProgress": "{{indexed}} / {{source}} 件インデックス済み",
+      "ftsTitle": "全文インデックス（FTS5）",
+      "ftsUnavailable": "未接続",
       "global": "グローバル",
       "hoursAgo": "{{hours}} 時間前",
       "iconUrlPlaceholder": "画像 URL を入力",
@@ -5448,9 +5554,11 @@
       "promote": "昇格",
       "promoteSuccess": "メモリを昇格しました",
       "provenance": "出所",
+      "rebuildFtsUnavailable": "全文インデックスが未接続のため、ベクトル索引のみ再構築しました",
       "rebuildIndex": "インデックスを再構築",
       "rebuildIndexConfirm": "インデックスを再構築しますか？すべての項目の埋め込みが再生成されます。",
       "rebuildItemConfirm": "この項目を再インデックスしますか？",
+      "rebuildResult": "ベクトル索引に {{vector}} 件を登録；全文索引 {{indexed}}/{{source}} 件",
       "recency": "新しさ",
       "refreshWorkingMemory": "更新",
       "reindexItem": "再インデックス",
@@ -5644,6 +5752,10 @@
         "topN": "最終 Top-N"
       },
       "rerankerModel": "再ランカーモデル",
+      "entityGraph": {
+        "title": "グラフ拡張検索",
+        "desc": "エンティティグラフ（実体・関係・隣接）でコンテキストを補強します。プロンプトに注入される内容が変わります。保存するとすぐに有効になります。"
+      },
       "selfRag": {
         "desc": "ローカル判定モデルで検索品質を評価し、劣る結果を自動修正",
         "judgeModel": "判定モデル",
@@ -6290,6 +6402,10 @@
       "group-presets": "一般プリセット",
       "group-custom-interval": "カスタム間隔",
       "label-periods": "推薦期間",
+      "period-ultra-short": "Ultra-Short",
+      "period-short": "Short-Term",
+      "period-mid": "Mid-Term",
+      "period-long": "Long-Term",
       "placeholder-periods": "1つ以上の期間を選択",
       "label-min-confidence": "最小信頼度",
       "label-top-n": "Top N 上限",
@@ -6513,7 +6629,6 @@
     "sectionInfrastructure": "インフラ",
     "sectionOverview": "概要",
     "sectionTools": "ツール",
-    "sectionWorkspace": "ワークスペース",
     "sectionCreation": "作成",
     "sectionKnowledge": "知識",
     "sectionDevelopment": "開発",
@@ -7065,16 +7180,24 @@
     "exitCode": "終了コード",
     "noOutput": "（出力なし）",
     "refresh": "更新",
+    "sourceCommand": "コマンド",
+    "sourceOther": "その他",
+    "sourceRestore": "復元",
+    "sourceTool": "ツール",
     "startFailed": "启动失败",
     "statusCompleted": "完了",
     "statusFailed": "失敗",
     "statusPending": "待機中",
     "statusRunning": "実行中",
     "statusStopped": "停止済",
+    "statusUnknown": "不明なステータス",
     "stop": "停止",
     "stopConfirm": "このタスクを停止しますか？",
     "stopFail": "停止に失敗",
     "stopped": "タスクを停止しました",
+    "timeline": "ステータス履歴",
+    "timelineEmpty": "ステータス変更はまだありません",
+    "timelineLoadFail": "ステータス履歴の読み込みに失敗しました",
     "title": "バックグラウンドタスク",
     "bash": "bash"
   },
@@ -7678,6 +7801,8 @@
       "zoomOut": "縮小",
       "legend": "凡例",
       "edgeTypes": "エッジタイプフィルター",
+      "relationTypes": "ナレッジ関係タイプ：{{edges}} 本 / {{types}} 種",
+      "relationTypesMore": "ほか {{count}} 種",
       "repairGraph": "グラフリンクを修復",
       "repairSuccess": "修復完了：KBがリンクされ、{{count}}件のノートのリンクを修復しました",
       "repairPartial": "修復完了：{{count}}件のノートのリンクを修復しました（マッチするKBが見つかりませんでした）",
@@ -7700,6 +7825,22 @@
       "backlinksCount": "逆リンク {{count}}",
       "totalDegree": "合計 {{count}}",
       "canvasAriaLabel": "ナレッジグラフキャンバス、ドラッグでパン、スクロールでズーム、クリックでノード選択",
+      "unresolvedTypes": {
+        "title": "未認識のノード型",
+        "desc": "{{nodes}} 個のノードが既知の語彙にない {{types}} 種類の型を使用しています。これらの関係親和度は既定値になります。",
+        "list": "対象の型: {{list}}"
+      },
+      "unresolvedRelations": {
+        "title": "未認識の関係ラベル",
+        "desc": "{{edges}} 本のエッジが、バックエンドで解釈できないラベルを {{types}} 種使用しています —— 汎用スタイルでしか描画できません。",
+        "list": "対象ラベル：{{list}}"
+      },
+      "danglingEdges": {
+        "title": "端点が存在しないエッジ（未描画）",
+        "desc": "{{total}} 件中 {{dangling}} 件のエッジの端点が現在のノード集合にありません — 描画されず、エッジ数にも含まれません。",
+        "bothMissing": "うち {{count}} 件は両端とも欠落しており、通常はエンティティのドメインとエッジのドメインが一致していないことを意味します。",
+        "list": "例：{{list}}"
+      },
       "minimapAriaLabel": "ミニマップナビゲーション、クリックまたはドラッグでエリアにジャンプ"
     },
     "hidePanel": "パネルを非表示",
@@ -8581,7 +8722,14 @@
       "required": "必須",
       "cancelExecution": "実行をキャンセル",
       "invalidField": "「{{name}}」の形式が正しくありません",
-      "requiredField": "{{name}} を入力してください"
+      "requiredField": "{{name}} を入力してください",
+      "selfHeal": "AI セルフヒーリング",
+      "selfHealTitle": "AI 診断結果",
+      "selfHealNoIssues": "目立った問題は見つかりませんでした",
+      "selfHealApply": "{{count}} 件の修正を適用",
+      "selfHealApplyHint": "ノードレベルの修正はテンプレートに直接書き込まれます。再実行で反映されます",
+      "selfHealApplied": "{{count}} 件の修正を適用しました。再実行できます",
+      "selfHealUnsupported": "他に {{count}} 件の修正はエディターで対応が必要です"
     },
     "existingSkill": "既存スキル",
     "expandLeftPanel": "左パネルを展開",
@@ -8916,7 +9064,8 @@
       "example1": "毎日朝 8 時に指定したウェブサイトの最新記事を取得",
       "example2": "新着メールを受信したら AI で内容を分析し、緊急の場合は通知",
       "example3": "ユーザーがフォームを送信した後、データを検証してからデータベースに書き込む",
-      "exampleConstraint": "例：実行時間 5 分以内、エラー時にリトライ"
+      "exampleConstraint": "例：実行時間 5 分以内、エラー時にリトライ",
+      "diffSummary": "現在のキャンバスとの比較"
     },
     "noDescription": "説明なし",
     "noExecutionHistory": "実行履歴なし",
@@ -9890,7 +10039,13 @@
       "clickCanvasToAdd": "\"{{label}}\" を選択 — キャンバスをクリックしてノードを配置",
       "chatPlaceholder": "メッセージを入力…",
       "workflowParsed": "ワークフロー解析済み",
-      "workflowParsedLowConfidence": "ワークフロー解析済み（低信頼度）"
+      "workflowParsedLowConfidence": "ワークフロー解析済み（低信頼度）",
+      "rollbackApply": "ロールバック",
+      "applyRolledBack": "適用をロールバックしました",
+      "diagnoseFoundIssues": "{{count}} 件の問題（{{errors}} 件のエラー）を検出、AI 修復が可能です",
+      "aiRepair": "AI 修復",
+      "mergeRenamedVars": "出力変数名が重複したため、{{count}} 件を自動リネームしました",
+      "selectionFocus": "選択中の {{count}} ノードにフォーカス中。生成は選択範囲のみを考慮します"
     },
     "canvasTitle": {
       "clickToRename": "クリックして名前を変更"
@@ -10247,6 +10402,10 @@
     "mediumCredibility": "信頼性:中"
   },
   "settingsSearch": {
+    "capabilityDomains.title": "ケイパビリティドメイン",
+    "capabilityDomains.domain": "ドメイン",
+    "capabilityDomains.alias": "エイリアス",
+    "capabilityDomains.enable": "有効",
     "boot": "起動",
     "chatSettings": "チャット",
     "context": "コンテキスト",
@@ -11060,14 +11219,6 @@
     "rejectedToast": "高リスク操作は拒否されました"
   },
   "domain": {
-    "general": "汎用",
-    "finance": "金融",
-    "automation": "自動化",
-    "devops": "DevOps",
-    "dataAnalysis": "データ分析",
-    "contentCreation": "コンテンツ制作",
-    "aiMedia": "AIメディア",
-    "communication": "コミュニケーション",
     "description": "この能力ドメインに集約されたすべての機能エントリ",
     "empty": "このドメインにはまだ利用可能な機能エントリがありません"
   },
@@ -11198,7 +11349,7 @@
     "portfolioSourceEventPlaceholder": "例：スクリーンショット診断から 2026-01-01"
   },
   "opc": {
-    "title": "OPC — 一人公司管理面板",
+    "title": "管理面板",
     "nav": {
       "dashboard": "仪表盘",
       "invoices": "发票",
@@ -11207,11 +11358,11 @@
       "sites": "站点",
       "office": "办公室",
       "talent": "人才市场",
-      "market": "市场包",
+      "market": "域包",
       "demand": "需要発見",
       "kanban": "看板",
       "contentMedia": "コンテンツメディア",
-      "industries": "業種ナビゲーション"
+      "domains": "業種ナビゲーション"
     },
     "common": {
       "cancel": "Cancel",
@@ -11345,7 +11496,25 @@
       "sourcePlaceholder": "选择来源",
       "filterStatus": "Filter by status",
       "filterSource": "Filter by source",
-      "emptyTip": "暂无客户数据"
+      "emptyTip": "暂无客户数据",
+      "columnType": "種類",
+      "columnLocation": "地域",
+      "filterType": "種類で絞り込み",
+      "typeLabel": "顧客種別",
+      "typeRequired": "顧客種別を選択してください",
+      "typePlaceholder": "種別を選択",
+      "countryLabel": "国/地域",
+      "countryPlaceholder": "例: 中国",
+      "regionLabel": "地域/州",
+      "regionPlaceholder": "例: 広東省",
+      "cityLabel": "都市",
+      "cityPlaceholder": "例: 上海",
+      "addressLabel": "住所",
+      "addressPlaceholder": "例: 番地",
+      "latitudeLabel": "緯度",
+      "latitudePlaceholder": "例: 31.2304",
+      "longitudeLabel": "経度",
+      "longitudePlaceholder": "例: 121.4737"
     },
     "project": {
       "updated": "项目已更新",
@@ -11546,8 +11715,8 @@
       "createFailed": "Failed to create work item: {{error}}"
     },
     "market": {
-      "refresh": "刷新市场",
-      "subtitle": "行业数据资产包市场：每个行业独立安装/启用，安装后 seed 对应工作流模板",
+      "refresh": "刷新",
+      "subtitle": "行业数据资产包：每个行业独立安装/启用，安装后 seed 对应工作流模板",
       "installed": "已安装",
       "notInstalled": "未安装",
       "version": "版本: v{{version}}",
@@ -11556,15 +11725,23 @@
       "no": "否",
       "install": "安装",
       "installSuccess": "已安装: {{name}}",
-      "installFailed": "安装失败: {{error}}"
+      "installFailed": "安装失败: {{error}}",
+      "domain": "ドメイン: {{domain}}",
+
+      "domainUndefined": "未宣言",
+
+      "capabilityCount": "能力コミットメント: {{count}}",
+      "toggle": "有効",
+      "toggleSuccess": "有効状態を更新しました: {{name}}",
+      "toggleFailed": "有効状態の切り替えに失敗しました: {{error}}"
     },
-    "industries": {
+    "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
       "finance_invest": "Finance & Investment",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
-      "industry_consulting": "Industry Consulting",
+      "consulting": "Industry Consulting",
       "accounting": "Accounting",
       "ecommerce": "E-Commerce",
       "education": "Education",
@@ -11573,7 +11750,7 @@
       "finance_invest_desc": "金融投資",
       "sales_growth_desc": "販売成長",
       "content_media_desc": "コンテンツメディア",
-      "industry_consulting_desc": "業界コンサルティング",
+      "consulting_desc": "業界コンサルティング",
       "accounting_desc": "会計",
       "ecommerce_desc": "Eコマース",
       "education_desc": "教育",
@@ -11588,7 +11765,7 @@
       "game_dev": "ゲーム開発",
       "game_dev_desc": "ゲーム開発プロセス：コンセプトデザイン → プロトタイプ開発 → 品質保証 → ゲームテスト"
     },
-    "industry": {
+    "domain": {
       "actions": {
         "ai-research": {
           "ai-paper": {
@@ -11688,7 +11865,7 @@
             "description": "Plan monthly content publishing"
           }
         },
-        "industry-consulting": {
+        "consulting": {
           "ic-report": {
             "label": "Industry Report",
             "description": "Generate in-depth industry reports"
@@ -11783,7 +11960,9 @@
         "7days": "過去7日間",
         "30days": "過去30日間",
         "90days": "過去90日間",
-        "noData": "KPIデータがありません"
+        "noData": "KPIデータがありません",
+        "noDataSource": "データソース未接続",
+        "noDataYet": "データなし"
       },
       "disabled": "Disabled",
       "domainWorkflows": "ドメインワークフロー",
@@ -11981,7 +12160,7 @@
             "description": "Positioning → Persona → Planning → Growth"
           }
         },
-        "industry-consulting": {
+        "consulting": {
           "wf-ic-1": {
             "name": "Industry Scan",
             "description": "Research → Competition → Trends → Opportunities"
@@ -12353,7 +12532,7 @@
           }
         }
       },
-      "industry_consulting": {
+      "consulting": {
         "tabs": {
           "strategy": {
             "label": "Strategic Planning",
@@ -12788,11 +12967,11 @@
       "nav": {
         "title": "Industry Navigator",
         "description": "Select an industry domain to enter. Each industry has its own business workflows and quick actions.",
-        "totalIndustries": "Industries",
+        "totalDomains": "Industries",
         "totalWorkflows": "Workflows",
         "totalActions": "Quick Actions",
         "totalCategories": "Categories",
-        "noIndustries": "No industries",
+        "noDomains": "No industries",
         "workflows": "{{count}} workflows",
         "actions": "{{count}} actions"
       },
@@ -12904,8 +13083,8 @@
           "placeholder": "例：30000"
         }
       },
-      "industry_consulting": {
-        "industry_name": {
+      "consulting": {
+        "domain_pack_name": {
           "label": "Industry Name"
         },
         "client_goal": {
@@ -13042,7 +13221,7 @@
       "refresh": "Refresh",
       "optimize": "Optimize Policy",
       "totalExperiences": "Total Experiences",
-      "industryCount": "Industry Count",
+      "domainCount": "Industry Count",
       "avgReward": "Avg Reward",
       "successRate": "Success Rate",
       "policyUpdate": "Policy Update Result",
@@ -13671,6 +13850,19 @@
         "failed": "Failed",
         "cancelled": "Cancelled"
       }
+    },
+    "customerType": {
+      "consumer": "個人 (C)",
+      "business": "企業 (B)",
+      "unknown": "不明"
+    },
+    "customerMap": {
+      "title": "顧客の地理分布",
+      "china": "中国",
+      "world": "世界",
+      "empty": "座標のある顧客がいません",
+      "list": "リスト",
+      "map": "マップ"
     }
   },
   "demandDiscovery": {
@@ -14277,12 +14469,14 @@
       "title": "推奨履歴",
       "generatedAt": "推奨時刻",
       "candidateCount": "候補数",
+      "actions": "操作",
       "batchDelete": "一括削除 ({{count}})",
       "deleteSuccess": "{{count}}件の推奨記録を削除しました",
       "selectedCount": "{{count}}件選択中",
       "exitSelect": "選択を解除",
       "detailEmpty": "该轮暂无候选股记录",
       "deleteConfirm": "确定删除选中的 {{count}} 条瓶颈掘金记录？",
+      "deleteOneConfirm": "このトレンド選定記録を削除しますか？",
       "empty": "暂无瓶颈掘金历史"
     },
     "settings": "Valuation Filters",
@@ -14489,6 +14683,15 @@
     "keepEditing": "继续编辑"
   },
   "stockAnalysis": {
+    "decisionExplanation": {
+      "title": "判断根拠の説明書",
+      "expand": "展開",
+      "collapse": "折りたたむ",
+      "ruleTraceLabel": "ルール追跡",
+      "riskCommentLabel": "リスク留意点",
+      "confidenceNoteLabel": "信頼度の解説",
+      "sourceHint": "意思決定解説ノードがリスクゲートの最終判定から生成したものです。研究参考用。"
+    },
     "actionBuy": "Buy",
     "actionSell": "Sell",
     "actionIncrease": "Increase",
@@ -14611,7 +14814,8 @@
       "evolution": "演化",
       "reflection": "反思",
       "overview": "概要",
-      "dashboard": "ダッシュボード"
+      "dashboard": "ダッシュボード",
+      "simulation": "シミュレーション"
     },
     "stockCode1": "Stock Code 1",
     "stockCode2": "Stock Code 2",
@@ -14654,7 +14858,9 @@
       "error": "❌ Analysis error: {{msg}}",
       "stepDone": "✅ {{name}} 完成",
       "stepRetrying": "🔄 {{name}} 重试中",
-      "stepRunning": "⏳ {{name}} 运行中"
+      "stepRunning": "⏳ {{name}} 运行中",
+      "currentNode": "実行中：{{name}}（{{index}}/{{total}}）",
+      "elapsed": "経過 {{time}}"
     },
     "chart": {
       "zoom": "区域缩放",
@@ -14754,6 +14960,7 @@
     "avgRiskScore": "Avg Risk {{score}}",
     "highestRisk": "Highest {{label}} ({{score}})",
     "actionUncertain": "不確定",
+    "actionUnavailable": "データなし",
     "amplitude": "Amplitude",
     "analystConsensus": "Analyst Consensus",
     "bearish": "Bearish",
@@ -14950,6 +15157,7 @@
     "trade": {
       "pnlPercent": "盈亏比例",
       "quickRecord": "快速记录",
+      "quickRecordNoDirection": "この判断には明確な売買方向がないため、ワンクリック記録できません",
       "stopLoss": "ストップロス",
       "totalPnl": "总盈亏",
       "totalTrades": "总交易数",
@@ -15203,6 +15411,8 @@
         "exposedToolHeader": "LLM-exposed tools (Agent autonomous invocation)",
         "localCompute": "Local compute tools (no remote vendor dependency)"
       },
+      "collapseGroup": "Collapse",
+      "expandGroup": "Expand ({{total}})",
       "group": {
         "vendor": "Data Sources",
         "agent": "Analysts",
@@ -15223,9 +15433,16 @@
         "recommender": "Recommender",
         "indicators": "Indicators",
         "strategyParams": "Strategy Params",
+        "strategyGates": "Strategy Gates & Filters",
+        "strategyConfidence": "Confidence Components",
+        "strategyPosition": "Position & Price Range",
+        "strategyData": "Data Window & Limits",
         "trading": "Trading",
         "dryRun": "Dry Run",
+        "portfolioMgrPrior": "市況プライア（portfolio-mgr）",
         "portfolioMgrAction": "组合决策阈值（portfolio-mgr）",
+        "portfolioMgrFusion": "ファクター融合ゲート（portfolio-mgr）",
+        "portfolioMgrCost": "取引コスト（portfolio-mgr）",
         "portfolioMgrRisk": "风险分类阈值（portfolio-mgr）",
         "simulation": "蒙特卡洛仿真",
         "refCodes": "行业参考标的",
@@ -15474,8 +15691,10 @@
     "dqTableAnalyst": "分析师",
     "dqTableExpectedData": "预期数据",
     "dqTableConfidence": "置信度",
+    "dqTablePlaceholder": "失敗マーカー",
     "dqTableStatus": "状态",
     "dqTableGapReason": "差距原因",
+    "dqPlaceholderTooltip": "レポートに {{count}} 件の失敗マーカー（取得不可・データ欠損・空応答など）",
     "dqStatusNormal": "✅ 正常",
     "dqStatusLowConfidence": "⚠️ 低置信",
     "dqStatusMissing": "❌ 缺失",
@@ -15500,6 +15719,15 @@
     "weightCollapseThreshold": "因子权重占比 {{ratio}}% 低于阈值",
     "weightCollapseConsequence": "后果：仓位强制 0%、方向置信度 ×0.5",
     "weightCollapseTag": "⚠️ 因子权重坍缩",
+    "trustNotice": {
+      "title": "意思決定の信頼性が制限されています",
+      "tagLabel": "信頼性制限",
+      "passiveWatch": "今回の「様子見」はデータ不足による受動的な格下げであり、弱気判断ではありません",
+      "collapseLabel": "ファクターウェイトの崩壊",
+      "gapReason": "データ欠損 {{count}} 件",
+      "showGaps": "欠損を表示",
+      "hideGaps": "折りたたむ"
+    },
     "confidenceBayesianTooltip": "置信度 = 贝叶斯证据强度（受数据质量分级 cap），不受权重坍缩影响。与「决策置信度」不同：后者是方向确信度，坍缩时减半。",
     "gradeSuffix": " 级",
     "scoreLabel": "得分: {{score}}",
@@ -15666,6 +15894,10 @@
       "buySellPoints": "Buy/Sell Points",
       "buyRange": "Buy Range",
       "targetPrice": "Target Price",
+      "targetPriceTrading": "トレード目標価格",
+      "targetPriceUnset": "—（未設定）",
+      "intrinsicValue": "本源的価値",
+      "vsCurrentPrice": "現在値",
       "stopLoss": "Stop Loss",
       "positionPct": "Position %",
       "score": "Score",
@@ -15732,6 +15964,9 @@
       "calibrateCapExtreme": "极高上限",
       "calibrateCapHigh": "高上限",
       "calibrateCapMid": "中上限",
+      "calibratePriorBull": "牛市先验",
+      "calibratePriorSideways": "震荡先验",
+      "calibratePriorBear": "熊市先验",
       "calibrateApplyBest": "应用最优参数",
       "calibrateApplyDone": "已应用最优参数到模板",
       "calibrateRefreshCount": "基于 {{total}} 条反思",
@@ -15830,7 +16065,8 @@
       "crossCheckAligned": "Aligned with analyst consensus",
       "crossCheckNeutral": "{{neutral}} neutral out of {{total}} reports",
       "crossCheckTitle": "Analyst Cross-Check (Updated {{updatedAt}})",
-      "dataQualitySummary": "{{real}} real + {{synthetic}} fallback",
+      "dataQualitySummary": "{{real}} real · {{synthetic}} fallback hidden",
+      "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",
@@ -15932,6 +16168,13 @@
     "scheduledAnalysis": {
       "description": "Persisted via CronJobStore — run full analysis periodically for specified stocks",
       "watchlistScan": "Watchlist Auto Scan",
+      "poolScan": "候補プール自動分析",
+      "poolScanHint": "推薦・トレンド選別が生成した候補プールを定期的に読み込み、銘柄ごとに完全分析を実行します（結果は自動で反省キューに入ります）",
+      "trendScreening": "トレンド選別の定期実行",
+      "trendScreeningHint": "トレンド選別（serenity-screening）ワークフローを定期的に実行し、結果を候補プールに取り込みます",
+      "reflectionScan": "周期リフレクション",
+      "reflectionScanHint": "超短期2日 / 短期5日 / 中期28日 / 長期90日の間隔で、完了した分析を自動的に振り返ります",
+      "noTask": "タスクがまだ作成されていません",
       "enabled": "Enabled",
       "disabled": "Disabled",
       "confirmDelete": "Delete this cron job?",
@@ -15953,7 +16196,14 @@
         "hourly": "Hourly",
         "tradeDayClose": "Trading Day 21:00 (Close)",
         "dailyOpen": "Daily 09:00 (Pre-open)",
-        "dailyClose": "Daily 15:30 (Close)"
+        "dailyClose": "Daily 15:30 (Close)",
+        "daily1800": "毎日 18:00"
+      },
+      "period": {
+        "ultraShort": "超短期",
+        "short": "短期",
+        "mid": "中期",
+        "long": "長期"
       },
       "column": {
         "id": "ID",
@@ -16015,11 +16265,10 @@
       "startReflection": "开始反思",
       "placeholderCode": "股票代码",
       "placeholderDate": "分析日期 (YYYY-MM-DD)",
-      "placeholderOutcome": "实际结果描述（如30天跌8%）",
-      "fillRequired": "请填写股票代码、分析日期和实际结果",
+      "fillRequired": "銘柄コードと分析日を入力してください",
       "triggerSuccess": "反思工作流已触发，请在反思历史中查看结果",
       "triggerFailed": "反思触发失败: {{error}}",
-      "manualHint": "输入参数后点击「开始反思」，工作流将基于指定日期的数据重跑分析并输出反思结论",
+      "manualHint": "銘柄コードと分析日を入力して「振り返りを開始」をクリックしてください。システムが分析日から最新取引日までの実際の相場を自動取得し、完了済みの分析結論と項目ごとに比較したうえで、振り返りエージェントが結論を出します。",
       "paramSuggestTitle": "参数调整建议",
       "paramCol": "参数名",
       "paramCurrent": "当前值",
@@ -16178,7 +16427,18 @@
       "step2": "Step 2: Adjust Params",
       "step3": "Step 3: Compare Results",
       "title": "What-If Backtest",
-      "totalScoreLabel": "Total Score"
+      "totalScoreLabel": "Total Score",
+      "groupScoringWeights": "スコア重み（テクニカル評価チェーン）",
+      "groupActionThresholds": "意思決定閾値（事後確率の区分）",
+      "groupPositionCaps": "ポジション下限と上限（%）",
+      "groupRegimePriors": "市況事前確率（意思決定の起点となる基礎確率）",
+      "groupRiskThresholds": "リスク段階閾値（財務・ボラティリティ指標）",
+      "groupMiscParams": "その他の意思決定パラメータ（ケリー・コスト・Fスコア）",
+      "replayResultTitle": "リプレイ結果（バックエンド再計算）",
+      "replayTotalScore": "総合スコア",
+      "replayDataDegraded": "⚠️ データ縮退：一部のリアルタイムデータはキャッシュまたは中立プレースホルダ由来のため、評価結果は参考値です",
+      "replayFailed": "リプレイに失敗しました。ログを確認してください",
+      "replayNoSelection": "先に履歴分析レコードを選択してください"
     },
     "exitRecommendation": {
       "title": "退出建议",
@@ -16296,6 +16556,24 @@
       "dataQualityCheckCount": "共 {{count}} 项检查",
       "dataQualityEmpty": "无结构化数据可分析",
       "dataQualityNoScore": "无评分值",
+      "dqDimensionReport": "レポート品質",
+      "dqDimensionTool": "ツール信頼度",
+      "dqDimensionFactor": "ファクター完全度",
+      "dqScoreSource": "等級はワークフローの data-quality ノードが一括生成します。このパネルは独自計算しません",
+      "dqNodeDiagnosis": "このノードの診断",
+      "dqNoNodeDiagnosis": "この記録にはノード別診断がありません（旧版スナップショット）。分析を再実行してください",
+      "dqFieldNodeStatus": "ノード状態",
+      "dqFieldPlaceholder": "レポート失敗マーカー",
+      "dqFieldExpected": "想定データソース",
+      "dqFieldGapReason": "原因帰属",
+      "dqStatusNormal": "正常",
+      "dqStatusLow": "低信頼度",
+      "dqStatusMissing": "データ欠落",
+      "dqStatusUntrusted": "縮退フォールバック",
+      "dqPlaceholderNone": "検出なし",
+      "dqPlaceholderCount": "{{count}} 件",
+      "dqGapReasonNone": "異常なし",
+      "dqDirectionConflict": "多空分歧：強気 {{bull}} 件 vs 弱気 {{bear}} 件",
       "nodeTypeAnalyst": "アナリスト",
       "nodeTypeDebate": "ディベートノード",
       "nodeTypeDecision": "意思決定ノード",
@@ -16414,7 +16692,7 @@
       "select-at-least-one-scenario": "Please select at least one scenario",
       "total-paths-stat": "Total Paths",
       "paths-unit": " paths",
-      "cross-scenario-survival-rate": "Cross-Scenario Survival",
+      "cross-scenario-survival-rate": "上昇シナリオ比率",
       "consistency-score": "Consistency Score",
       "consistency-stable-suffix": " (Stable)",
       "consistency-volatile-suffix": " (Volatile)",
@@ -16439,7 +16717,13 @@
       "advice-consistent": "Strategy performs consistently across all scenarios",
       "advice-different": "Strategy performs best in {{best}} scenario and worst in {{worst}} scenario. Consider current market conditions.",
       "empty-state-title": "Select multiple market scenarios and run Monte Carlo robustness test",
-      "empty-state-desc": "The system runs N random paths per scenario to evaluate cross-scenario stability"
+      "empty-state-desc": "The system runs N random paths per scenario to evaluate cross-scenario stability",
+      "consistency-undetermined": "判定不能",
+      "consistency-undetermined-desc": "各シナリオの騰落率の平均がゼロに近づく（上昇と下落が相殺する）と、変動係数は数学的に定義できません —— これは最も見解が割れるケースであり、最も一貫しているわけではありません。",
+      "preset-label": "プリセット",
+      "preset-quick": "クイックチェック",
+      "preset-stress": "ストレステスト",
+      "preset-deep": "詳細実行"
     },
     "compact": {
       "noAnalystReports": "No analyst reports",
@@ -16631,6 +16915,29 @@
       "other": "その他"
     },
     "analystRoles": {
+      "bullR2": "強気尋問（R2）",
+      "bearR2": "弱気尋問（R2）",
+      "bullR3": "強気最終反論（R3）",
+      "bearR3": "弱気最終反論（R3）",
+      "valueInvestor": "バリュー投資家（バフェット・フレームワーク）",
+      "qualityFallback": "保守的リスク判断者",
+      "ruleChecker": "ルール検査官",
+      "catalystAnalyst": "カタリスト・ナラティブ分析",
+      "debateConvergence": "討論収束官",
+      "riskConvergence": "リスク収束官",
+      "reflection": "投資レビュー官",
+      "trendScanner": "産業トレンド・スキャナー",
+      "chainDecomposer": "バリューチェーン分解",
+      "chokepointIdentifier": "ボトルネック特定",
+      "candidateMapper": "候補企業マッピング",
+      "socialMediaAnalyst": "SNS センチメント分析",
+      "volumePriceAnalyst": "出来高・価格分析",
+      "marketSynthesizer": "市場メインライン統合",
+      "industryChainAnalyzer": "産業チェーン伝導分析",
+      "screenshotDiagnoser": "保有スクリーンショット診断",
+      "positionPlanner": "ポジション計画",
+      "stopLossReviewer": "損切りレビュー",
+      "explainer": "意思決定解説官",
       "marketAnalyst": "市場テクニカルアナリスト",
       "sentimentAnalyst": "センチメントアナリスト",
       "newsAnalyst": "ニュースアナリスト",
@@ -16707,6 +17014,11 @@
       "kellyMinWinRate": "ケリー最低勝率要求 (0-1)、これを下回ると該当なしを返す",
       "kellyMinOdds": "ケリー最低オッズ要求 (avg_win/avg_loss)",
       "riskFreeRate": "リスクフリーレート (小数)",
+      "regimePriorBull": "強気相場の事前確率 (0-1)：個別銘柄の根拠がない場合の上昇確率の基準値",
+      "regimePriorSideways": "レンジ相場の事前確率 (0-1)：個別銘柄の根拠がない場合の上昇確率の基準値",
+      "regimePriorBear": "弱気相場の事前確率 (0-1)：個別銘柄の根拠がない場合の上昇確率の基準値",
+      "traderCapMinWeight": "トレーダーファクターの重みゲート (0-1)：f7 の重みがこの値未満の場合、弱気シグナルは事後確率を上限規制しない",
+      "costPct": "取引コスト率 (0.003=0.3%)：ケリー建玉補正は (1-コスト率) で期待収益を割り引く",
       "actionBuyThreshold": "買い判断閾値 (0-1)、effective_posteriorがこれを上回りポジション条件を満たせば買い",
       "actionIncreaseThreshold": "増持有判断閾値 (0-1)、effective_posteriorがこれを上回りポジション条件を満たせば増持有",
       "actionHoldThreshold": "保有判断閾値 (0-1)、effective_posteriorがこれを上回れば保有",
@@ -16970,7 +17282,27 @@
     "viz": {
       "noData": "暂无可视化数据"
     },
-    "weight": "权重"
+    "weight": "权重",
+    "simulation": {
+      "contextLabel": "現在の分析対象",
+      "contextHint": "各パネルはこの銘柄と現在値を使用します（パネル内で個別に変更できます）",
+      "noStock": "銘柄が未選択です —— 先に「相場」ページで銘柄を選んでください",
+      "scope": "シミュレーションが答えるのは「この建玉を実際に建てられるか、最悪どこまで悪化するか」です。板レベルの執行コストとストレス耐性を示します。方向性の予測は行いません —— 価格の中枢はモデルが設定したもので市場が発見したものではないため、売買判断の根拠にしないでください。なお現在のシミュレーション市場にはご自身の注文が含まれないため、本取引のインパクトコストとスリッページは算出できません。",
+      "yuanEquivalent": "≈ {{yuan}} 元",
+      "autoTitle": "ワークフロー自動シミュレーション（意思決定後）",
+      "autoReady": "自動生成済み",
+      "autoFailed": "未生成",
+      "autoPending": "銘柄分析が完了すると、シミュレーション結果がここに自動的に表示されます（手動実行は不要）。",
+      "autoFailReason": "シミュレーション未完了",
+      "survivalLabel": "上昇シナリオ比率",
+      "consistencyLabel": "シナリオ一貫性",
+      "bestWorstLabel": "最良シナリオ",
+      "worstScenarioLabel": "最悪シナリオ",
+      "pathsLabel": "総パス数",
+      "colScenario": "シナリオ",
+      "colPaths": "パス数",
+      "colChange": "期末騰落率"
+    }
   },
   "pipeline": {
     "title": "株式パイプライン",
@@ -16985,6 +17317,10 @@
     "running": "実行中...",
     "progress": "進捗",
     "history": "履歴",
+    "stepRunning": "実行中",
+    "stepCompleted": "完了",
+    "stepFailed": "失敗",
+    "stepTimeout": "タイムアウト",
     "noHistory": "履歴なし"
   },
   "timeTravel": {
@@ -17179,7 +17515,6 @@
   },
   "components_skill_SkillABTestResults": {
     "暂无_A_B_测试数据": "暂无 A/B 测试数据",
-    "components_skill_Ski": "components_skill_SkillABTestResults.暂无_A_B_测试数据",
     "指标": "指标",
     "版本_A": "版本 A",
     "版本_B": "版本 B",
@@ -17194,12 +17529,10 @@
     "当前版本": "当前版本",
     "总进化次数": "总进化次数",
     "最近进化": "最近进化",
-    "A_B_测试结果": "A/B 测试结果",
-    "components_skill_Ski": "components_skill_SkillEvolutionViewer.A_B_测试结果"
+    "A_B_测试结果": "A/B 测试结果"
   },
   "components_skill_SkillVersionTimeline": {
     "暂无进化历史": "暂无进化历史",
-    "components_skill_Ski": "components_skill_SkillVersionTimeline.暂无进化历史",
     "确认回滚": "确认回滚"
   },
   "errorRecovery": {

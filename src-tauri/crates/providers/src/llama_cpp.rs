@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::compat::openai_compat_local_adapter;
 use crate::openai::OpenAIAdapter;
 use crate::{ProviderAdapter, ProviderRequestContext};
 use async_trait::async_trait;
@@ -35,17 +36,91 @@ pub struct LlamaCppAdapter {
     inner: OpenAIAdapter,
 }
 
-impl Default for LlamaCppAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ── 委托样板由宏生成（new / Default + trait 的 chat / chat_stream / embed）──
+//    list_models / validate_key 走 llama-server 自己的端点：`/v1/models` 的 `meta` 格式、`/health` 可达性探测，
+//    无法复用云厂商样板，作为 `extra` 原样透传。
+openai_compat_local_adapter!(
+    LlamaCppAdapter,
+    extra: {
+        /// 模型列表：覆写以解析 llama-server 特有的 `meta` 字段格式。
+        async fn list_models(&self, ctx: &ProviderRequestContext) -> Result<Vec<Model>> {
+            let url = format!("{}/models", Self::api_url(ctx));
+
+            let client = self.get_client(ctx)?;
+            let resp = crate::apply_request_headers(
+                client
+                    .get(&url)
+                    .timeout(Duration::from_secs(5))
+                    .header("Authorization", format!("Bearer {}", ctx.api_key)),
+                ctx,
+            )
+            .send()
+            .await
+            .map_err(|e| {
+                AxAgentError::Provider(format!("llama.cpp list_models request failed: {e}"))
+            })?;
+
+            if !resp.status().is_success() {
+                let s = resp.status();
+                let t = resp.text().await.unwrap_or_default();
+                return Err(AxAgentError::Provider(format!("llama.cpp list_models error {s}: {t}")));
+            }
+
+            let body =
+                resp.text().await.map_err(|e| AxAgentError::Provider(format!("Read error: {e}")))?;
+
+            // 解析 llama-server 格式: { data: [{ id, meta: {...} }] }
+            let parsed: LlamaModelsResponse = serde_json::from_str(&body)
+                .map_err(|e| AxAgentError::Provider(format!("llama.cpp models parse error: {e}")))?;
+
+            let models = parsed
+                .data
+                .into_iter()
+                .map(|entry| {
+                    let model_type = Self::detect_llama_model_type(&entry.id);
+                    let caps = Self::infer_capabilities(&model_type, &entry.id);
+                    let max_tokens = entry.meta.as_ref().and_then(|m| m.n_ctx).map(|ctx| ctx as u32);
+
+                    Model {
+                        provider_id: ctx.provider_id.clone(),
+                        model_id: entry.id.clone(),
+                        name: entry.id.clone(),
+                        group_name: None,
+                        model_type,
+                        capabilities: caps,
+                        max_tokens,
+                        max_output_tokens: None,
+                        enabled: true,
+                        param_overrides: None,
+                        input_price_per_mtok: None,
+                        output_price_per_mtok: None,
+                    }
+                })
+                .collect();
+
+            Ok(models)
+        }
+
+        /// llama.cpp 不需要 API key：使用 `/health` 端点探测可达性，而非 `/v1/models`。
+        async fn validate_key(&self, ctx: &ProviderRequestContext) -> Result<bool> {
+            let url = format!("{}/health", Self::root_url(ctx));
+            let client = self.get_client(ctx)?;
+
+            match client.get(&url).send().await {
+                Ok(resp) => Ok(resp.status().is_success()),
+                Err(e) => {
+                    tracing::debug!(
+                        "[llama_cpp] health check failed: {e}, provider_id={}",
+                        ctx.provider_id
+                    );
+                    Ok(false)
+                },
+            }
+        }
+    },
+);
 
 impl LlamaCppAdapter {
-    pub fn new() -> Self {
-        Self { inner: OpenAIAdapter::new() }
-    }
-
     /// 构建 llama-server 的根 URL（去掉可能的 `/v1` 后缀，因为健康检查在根路径）。
     fn root_url(ctx: &ProviderRequestContext) -> String {
         let base = ctx.base_url.clone().unwrap_or_else(|| "http://127.0.0.1:8091/v1".to_string());
@@ -136,111 +211,4 @@ struct LlamaModelEntry {
 struct LlamaModelMeta {
     #[serde(default)]
     n_ctx: Option<u64>,
-}
-
-#[async_trait]
-impl ProviderAdapter for LlamaCppAdapter {
-    /// 非流式 chat — llama-server 完全兼容 OpenAI chat/completions，直接委托。
-    async fn chat(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: Arc<ChatRequest>,
-    ) -> Result<ChatResponse> {
-        self.inner.chat(ctx, request).await
-    }
-
-    /// 流式 chat — llama-server 的 SSE 格式与 OpenAI 兼容，直接委托。
-    fn chat_stream(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: ChatRequest,
-        cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Pin<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
-        self.inner.chat_stream(ctx, request, cancel_token)
-    }
-
-    /// 模型列表：覆写以解析 llama-server 特有的 `meta` 字段格式。
-    async fn list_models(&self, ctx: &ProviderRequestContext) -> Result<Vec<Model>> {
-        let url = format!("{}/models", Self::api_url(ctx));
-
-        let client = self.get_client(ctx)?;
-        let resp = crate::apply_request_headers(
-            client
-                .get(&url)
-                .timeout(Duration::from_secs(5))
-                .header("Authorization", format!("Bearer {}", ctx.api_key)),
-            ctx,
-        )
-        .send()
-        .await
-        .map_err(|e| {
-            AxAgentError::Provider(format!("llama.cpp list_models request failed: {e}"))
-        })?;
-
-        if !resp.status().is_success() {
-            let s = resp.status();
-            let t = resp.text().await.unwrap_or_default();
-            return Err(AxAgentError::Provider(format!("llama.cpp list_models error {s}: {t}")));
-        }
-
-        let body =
-            resp.text().await.map_err(|e| AxAgentError::Provider(format!("Read error: {e}")))?;
-
-        // 解析 llama-server 格式: { data: [{ id, meta: {...} }] }
-        let parsed: LlamaModelsResponse = serde_json::from_str(&body)
-            .map_err(|e| AxAgentError::Provider(format!("llama.cpp models parse error: {e}")))?;
-
-        let models = parsed
-            .data
-            .into_iter()
-            .map(|entry| {
-                let model_type = Self::detect_llama_model_type(&entry.id);
-                let caps = Self::infer_capabilities(&model_type, &entry.id);
-                let max_tokens = entry.meta.as_ref().and_then(|m| m.n_ctx).map(|ctx| ctx as u32);
-
-                Model {
-                    provider_id: ctx.provider_id.clone(),
-                    model_id: entry.id.clone(),
-                    name: entry.id.clone(),
-                    group_name: None,
-                    model_type,
-                    capabilities: caps,
-                    max_tokens,
-                    max_output_tokens: None,
-                    enabled: true,
-                    param_overrides: None,
-                    input_price_per_mtok: None,
-                    output_price_per_mtok: None,
-                }
-            })
-            .collect();
-
-        Ok(models)
-    }
-
-    /// llama.cpp 不需要 API key：使用 `/health` 端点探测可达性，而非 `/v1/models`。
-    async fn validate_key(&self, ctx: &ProviderRequestContext) -> Result<bool> {
-        let url = format!("{}/health", Self::root_url(ctx));
-        let client = self.get_client(ctx)?;
-
-        match client.get(&url).send().await {
-            Ok(resp) => Ok(resp.status().is_success()),
-            Err(e) => {
-                tracing::debug!(
-                    "[llama_cpp] health check failed: {e}, provider_id={}",
-                    ctx.provider_id
-                );
-                Ok(false)
-            },
-        }
-    }
-
-    /// Embedding — llama-server 的 embeddings 端点与 OpenAI 兼容，直接委托。
-    async fn embed(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: EmbedRequest,
-    ) -> Result<EmbedResponse> {
-        self.inner.embed(ctx, request).await
-    }
 }

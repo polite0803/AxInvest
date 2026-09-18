@@ -11,6 +11,13 @@ import { invoke } from "@/lib/invoke";
 import { App, Button, Input, Popover, Select, Space, Spin, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import {
+  PROFILE_NAME_KEYS,
+  PROFILE_NAMES,
+  PROFILE_ROLE_IDS,
+  PROFILE_ROLE_KEYS,
+  PROFILE_ROLES,
+} from "./agentProfileMaps";
 
 interface AgentNodeRow {
   id: string;
@@ -44,105 +51,8 @@ const FIXED_ALGO_TOOLS: Record<string, string[]> = {
   "research-mgr": ["compute_scoring", "compute_valuation", "compute_portfolio_risk"],
 };
 
-const PROFILE_NAMES: Record<string, string> = {
-  "stock-market-analyst": "市场技术分析师",
-  "stock-sentiment-analyst": "情绪面分析师",
-  "stock-news-analyst": "消息面分析师",
-  "stock-fundamentals-analyst": "基本面分析师",
-  "stock-policy-analyst": "政策面分析师",
-  "stock-hot-money-tracker": "资金面追踪",
-  "stock-lockup-watcher": "筹码限售观察",
-  "stock-research-analyst": "研报分析师",
-  "stock-sector-analyst": "板块题材分析师",
-  "stock-bull-researcher": "多方研究员",
-  "stock-bear-researcher": "空方研究员",
-  "stock-aggressive-debator": "激进风险评估",
-  "stock-conservative-debator": "保守风险评估",
-  "stock-neutral-debator": "中性风险评估",
-  "stock-research-manager": "研究经理",
-  "stock-trader": "交易员",
-  "stock-portfolio-manager": "投资组合经理",
-};
-
-const PROFILE_ROLES: Record<string, string> = {
-  "stock-market-analyst": "股票分析师",
-  "stock-sentiment-analyst": "股票分析师",
-  "stock-news-analyst": "股票分析师",
-  "stock-fundamentals-analyst": "股票分析师",
-  "stock-policy-analyst": "股票分析师",
-  "stock-hot-money-tracker": "股票分析师",
-  "stock-lockup-watcher": "股票分析师",
-  "stock-research-analyst": "股票分析师",
-  "stock-sector-analyst": "股票分析师",
-  "stock-bull-researcher": "辩论研究员",
-  "stock-bear-researcher": "辩论研究员",
-  "stock-aggressive-debator": "风险评估师",
-  "stock-conservative-debator": "风险评估师",
-  "stock-neutral-debator": "风险评估师",
-  "stock-research-manager": "决策者",
-  "stock-trader": "交易员",
-  "stock-portfolio-manager": "决策者",
-};
-
-const PROFILE_ROLE_IDS: Record<string, string> = {
-  "stock-market-analyst": "stock-analyst",
-  "stock-sentiment-analyst": "stock-analyst",
-  "stock-news-analyst": "stock-analyst",
-  "stock-fundamentals-analyst": "stock-analyst",
-  "stock-policy-analyst": "stock-analyst",
-  "stock-hot-money-tracker": "stock-analyst",
-  "stock-lockup-watcher": "stock-analyst",
-  "stock-research-analyst": "stock-analyst",
-  "stock-sector-analyst": "stock-analyst",
-  "stock-bull-researcher": "debater",
-  "stock-bear-researcher": "debater",
-  "stock-aggressive-debator": "risk-evaluator",
-  "stock-conservative-debator": "risk-evaluator",
-  "stock-neutral-debator": "risk-evaluator",
-  "stock-research-manager": "decision-maker",
-  "stock-trader": "trader",
-  "stock-portfolio-manager": "decision-maker",
-};
-
-const PROFILE_NAME_KEYS: Record<string, string> = {
-  "stock-market-analyst": "stockAnalysis.analystRoles.marketAnalyst",
-  "stock-sentiment-analyst": "stockAnalysis.analystRoles.sentimentAnalyst",
-  "stock-news-analyst": "stockAnalysis.analystRoles.newsAnalyst",
-  "stock-fundamentals-analyst": "stockAnalysis.analystRoles.fundamentalsAnalyst",
-  "stock-policy-analyst": "stockAnalysis.analystRoles.policyAnalyst",
-  "stock-hot-money-tracker": "stockAnalysis.analystRoles.hotMoneyTracker",
-  "stock-lockup-watcher": "stockAnalysis.analystRoles.lockupWatcher",
-  "stock-research-analyst": "stockAnalysis.analystRoles.researchAnalyst",
-  "stock-sector-analyst": "stockAnalysis.analystRoles.sectorAnalyst",
-  "stock-bull-researcher": "stockAnalysis.analystRoles.bullResearcher",
-  "stock-bear-researcher": "stockAnalysis.analystRoles.bearResearcher",
-  "stock-aggressive-debator": "stockAnalysis.analystRoles.aggressiveDebator",
-  "stock-conservative-debator": "stockAnalysis.analystRoles.conservativeDebator",
-  "stock-neutral-debator": "stockAnalysis.analystRoles.neutralDebator",
-  "stock-research-manager": "stockAnalysis.analystRoles.researchManager",
-  "stock-trader": "stockAnalysis.analystRoles.trader",
-  "stock-portfolio-manager": "stockAnalysis.analystRoles.portfolioManager",
-};
-
-const PROFILE_ROLE_KEYS: Record<string, string> = {
-  "stock-market-analyst": "stockAnalysis.analystRoles.analyst",
-  "stock-sentiment-analyst": "stockAnalysis.analystRoles.analyst",
-  "stock-news-analyst": "stockAnalysis.analystRoles.analyst",
-  "stock-fundamentals-analyst": "stockAnalysis.analystRoles.analyst",
-  "stock-policy-analyst": "stockAnalysis.analystRoles.analyst",
-  "stock-hot-money-tracker": "stockAnalysis.analystRoles.analyst",
-  "stock-lockup-watcher": "stockAnalysis.analystRoles.analyst",
-  "stock-research-analyst": "stockAnalysis.analystRoles.analyst",
-  "stock-sector-analyst": "stockAnalysis.analystRoles.analyst",
-  "stock-bull-researcher": "stockAnalysis.analystRoles.debateResearcher",
-  "stock-bear-researcher": "stockAnalysis.analystRoles.debateResearcher",
-  "stock-aggressive-debator": "stockAnalysis.analystRoles.riskAssessor",
-  "stock-conservative-debator": "stockAnalysis.analystRoles.riskAssessor",
-  "stock-neutral-debator": "stockAnalysis.analystRoles.riskAssessor",
-  "stock-research-manager": "stockAnalysis.analystRoles.decisionMaker",
-  "stock-trader": "stockAnalysis.analystRoles.trader",
-  "stock-portfolio-manager": "stockAnalysis.analystRoles.decisionMaker",
-};
+// 五张平行映射表已抽到独立模块（便于单测断言 key 集合一致 + i18n key 全覆盖）：
+// 见 ./agentProfileMaps.ts；新增专家时五张表必须同步补 5 条。
 
 export function AgentProfileList() {
   const { message } = App.useApp();
@@ -198,7 +108,7 @@ export function AgentProfileList() {
             return {
               id: nodeId,
               profileId: pid,
-              expertId: `agency-${pid}`,
+              expertId: `agency-stock-analysis-${pid.replace(/^stock-/, "")}`,
               expertName: PROFILE_NAMES[pid] ?? pid,
               roleId: PROFILE_ROLE_IDS[pid] ?? "",
               roleName: PROFILE_ROLES[pid] ?? "-",
@@ -234,7 +144,7 @@ export function AgentProfileList() {
         return {
           id: nid,
           profileId: pid,
-          expertId: `agency-${pid}`,
+          expertId: `agency-stock-analysis-${pid.replace(/^stock-/, "")}`,
           expertName: PROFILE_NAMES[pid],
           roleId: PROFILE_ROLE_IDS[pid] ?? "",
           roleName: PROFILE_ROLES[pid] ?? "-",
@@ -295,7 +205,7 @@ export function AgentProfileList() {
               return {
                 id: nodeId,
                 profileId: pid,
-                expertId: `agency-${pid}`,
+                expertId: `agency-stock-analysis-${pid.replace(/^stock-/, "")}`,
                 expertName: PROFILE_NAMES[pid] ?? pid,
                 roleId: PROFILE_ROLE_IDS[pid] ?? "",
                 roleName: PROFILE_ROLES[pid] ?? "-",
@@ -332,7 +242,7 @@ export function AgentProfileList() {
           return {
             id: nid,
             profileId: pid,
-            expertId: `agency-${pid}`,
+            expertId: `agency-stock-analysis-${pid.replace(/^stock-/, "")}`,
             expertName: PROFILE_NAMES[pid],
             roleId: PROFILE_ROLE_IDS[pid] ?? "",
             roleName: PROFILE_ROLES[pid] ?? "-",

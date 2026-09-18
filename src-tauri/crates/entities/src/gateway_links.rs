@@ -12,10 +12,14 @@ pub struct Model {
     pub link_type: String,
     pub endpoint: String,
     pub api_key_id: Option<String>,
+    #[sea_orm(default_value = 1)]
     pub enabled: i32,
+    #[sea_orm(default_value = "disconnected")]
     pub status: String,
     pub error_message: Option<String>,
+    #[sea_orm(default_value = 1)]
     pub auto_sync_models: i32,
+    #[sea_orm(default_value = 1)]
     pub auto_sync_skills: i32,
     pub last_sync_at: Option<i64>,
     pub latency_ms: Option<i64>,

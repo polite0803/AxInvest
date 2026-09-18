@@ -218,7 +218,7 @@ fn main() {
             "industry_momentum_score": industry_momentum_score,
             "industry_change_pct": ind_change_pct,
             "financial_comps": comps,
-            "readiness_signal": if final_composite >= 75.0 { "strong_bottleneck" } else if final_composite >= 55.0 { "potential_bottleneck" } else if final_composite >= 35.0 { "weak_signal" } else { "no_signal" },
+            "readiness_signal": band_for_score(final_composite),
             "raw_inputs": #{
                 "global_supplier_count": raw_supplier_count,
                 "top3_market_share": raw_top3_share,

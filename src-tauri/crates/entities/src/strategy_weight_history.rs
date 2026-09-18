@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub strategy_id: String,
     pub period: String,
     /// 旧权重（1.0 为基准）

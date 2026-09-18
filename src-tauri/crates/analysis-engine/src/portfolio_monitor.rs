@@ -24,6 +24,8 @@ use sea_orm::Set;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use axagent_harness::market_data::AdjType;
+use axagent_harness::market_data::KLine;
 use axagent_harness::market_data::MarketDataProvider;
 
 use super::position_limits::PositionLimits;
@@ -75,6 +77,26 @@ pub struct StressTestResult {
     /// 受影响最大的持仓（按 code / name / pnl_pct）
     pub top_hit: Option<PositionHit>,
     pub note: String,
+    /// beta 取值来源统计 —— 让「有几只标的其实只是回退到了中性 1.0」可见。
+    ///
+    /// ⚠️ 必须带 `#[serde(default)]`：历史快照
+    /// （`portfolio_metrics_daily.stress_test_json`）里没有这个键，缺省会让
+    /// `get_dashboard` 的反序列化**整段失败**，而该处用 `.ok()` 吞错 ⇒ 静默退化成
+    /// `StressTestBundle::default()`，等于**整个压测数据凭空消失**。
+    #[serde(default)]
+    pub beta_provenance: BetaProvenance,
+}
+
+/// beta 取值来源统计（2026-09-14 新增，配套「真实历史 beta」替换行业查表）
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BetaProvenance {
+    /// 用真实历史 beta 估计的持仓数
+    pub historical: usize,
+    /// 回退到中性默认值（`DEFAULT_BETA`）的持仓数
+    pub fallback: usize,
+    /// 回退标的的代码 —— 便于直接定位「是谁缺历史数据」，不必再靠猜
+    pub fallback_codes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,15 +259,20 @@ pub fn compute_concentration_warning(
     }
 }
 
-/// 压测：单股 i 在 scenario 下预计跌幅 = avg_beta_i * market_drop
+/// 压测：单股 i 在 scenario 下预计跌幅 = β_i × market_drop
+///
+/// **β 来源（2026-09-14 变更）**：`betas` 由 `estimate_betas` 提供 —— 用该股自己的
+/// 日收益对沪深300日收益做回归得到的**真实历史 beta**；不可得时回退中性 1.0，
+/// 并在 `beta_provenance` 里记账。此处**不再按 `sector_name` 查表**。
 ///
 /// 修复 P2-10: 原代码接收 `sector_exposure` 参数却完全未使用（`let _ = sector_exposure`），
 /// 行业集中度风险被忽略。改为：当某行业暴露占比超过阈值（40%）时，该行业持仓的
 /// 损失放大 1.2 倍——行业越集中，下跌时踩踏越严重（流动性折价 + 相关性坍缩）。
-/// 返回 (组合总 P&L, P&L%, 受损最大持仓)
+/// 返回组合总 P&L / P&L% / 受损最大持仓 / beta 来源统计
 pub fn run_stress_scenario(
     positions: &[PositionSummary],
     sector_exposure: &HashMap<String, f64>,
+    betas: &BetaMap,
     scenario: StressScenario,
 ) -> StressTestResult {
     let total_mv: f64 = positions.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();
@@ -257,18 +284,32 @@ pub fn run_stress_scenario(
             portfolio_pnl_pct: 0.0,
             top_hit: None,
             note: "无持仓，跳过压测".to_string(),
+            beta_provenance: BetaProvenance::default(),
         };
     }
-    // 简化：单股用 sector 平均 beta 近似（科技 1.3 / 消费 0.7 / 银行 0.5 / 其他 1.0）
     let market_drop = scenario.market_drop();
     let mut total_pnl = 0.0;
     let mut worst_hit: Option<(f64, &PositionSummary)> = None;
     let mut concentration_penalty_applied = false;
+    let mut provenance = BetaProvenance::default();
     for p in positions {
         let mv = p.market_value.unwrap_or(0.0);
+        // β 取自该股对沪深300的**真实历史回归**（`estimate_betas`）；无估计值时回退
+        // 中性 1.0 并记账。**不再读 `p.sector_name` 查表** —— 见文件内
+        // 「真实历史 beta 估计」区块的说明。
         let sector = p.sector_name.as_deref().unwrap_or("");
-        let base_beta = sector_beta(sector);
-        // 行业集中度惩罚：sector_exposure[sector] > 40% 时放大 beta
+        let est = betas.get(&p.stock_code).copied();
+        let base_beta = est.map(|e| e.beta).unwrap_or(DEFAULT_BETA);
+        if est.map(|e| e.historical).unwrap_or(false) {
+            provenance.historical += 1;
+        } else {
+            provenance.fallback += 1;
+            provenance.fallback_codes.push(p.stock_code.clone());
+        }
+        // 行业集中度惩罚：`sector_exposure[sector] > 40%` 时放大 beta。
+        // ⚠️ 这与「按行业归属决定个股判据」**语义不同**：观测对象是「组合在该行业的
+        //    暴露占比」这一**组合级事实**（越集中，下跌时踩踏越重：流动性折价 +
+        //    相关性坍缩），不改变任何个股的独立判断，且占比不超阈值时完全不生效。
         let sector_pct = sector_exposure.get(sector).copied().unwrap_or(0.0);
         let adjusted_beta = if sector_pct > SECTOR_CONCENTRATION_THRESHOLD {
             concentration_penalty_applied = true;
@@ -288,11 +329,22 @@ pub fn run_stress_scenario(
         stock_name: p.stock_name.clone(),
         pnl_pct: worst_hit.as_ref().map(|(w, _)| *w).unwrap_or(0.0),
     });
-    let note = if concentration_penalty_applied {
-        "线性近似 + 行业集中度惩罚：sector_pct>40% 时 beta × 1.2（流动性折价）".to_string()
+    let mut note = if provenance.fallback == 0 {
+        format!(
+            "线性近似：单股跌幅 = β_i（{} 日真实历史 beta，对沪深300回归）× 大盘跌幅",
+            BETA_LOOKBACK_DAYS
+        )
     } else {
-        "线性近似：单股跌幅 = sector_beta × 大盘跌幅".to_string()
+        format!(
+            "线性近似：单股跌幅 = β_i × 大盘跌幅；{}/{} 只无足够历史样本，β 回退中性 {}",
+            provenance.fallback,
+            positions.len(),
+            DEFAULT_BETA
+        )
     };
+    if concentration_penalty_applied {
+        note.push_str("；行业暴露>40% 的持仓 beta × 1.2（流动性折价 + 相关性坍缩）");
+    }
     StressTestResult {
         scenario: scenario.code().to_string(),
         label: scenario.label().to_string(),
@@ -300,6 +352,7 @@ pub fn run_stress_scenario(
         portfolio_pnl_pct: (total_pnl / total_mv) * 100.0,
         top_hit: top,
         note,
+        beta_provenance: provenance,
     }
 }
 
@@ -308,29 +361,157 @@ const SECTOR_CONCENTRATION_THRESHOLD: f64 = 40.0;
 /// 行业集中度惩罚系数：beta × 1.2（模拟流动性折价 + 相关性坍缩）
 const SECTOR_CONCENTRATION_PENALTY: f64 = 1.2;
 
-fn sector_beta(sector: &str) -> f64 {
-    let s = sector.to_lowercase();
-    if s.contains("科技") || s.contains("tech") || s.contains("it") || s.contains("互联网") {
-        1.3
-    } else if s.contains("消费") || s.contains("consumer") || s.contains("食品") {
-        0.7
-    } else if s.contains("银行")
-        || s.contains("金融")
-        || s.contains("bank")
-        || s.contains("finance")
-    {
-        0.5
-    } else if s.contains("医药") || s.contains("medical") || s.contains("health") {
-        0.9
-    } else if s.contains("能源") || s.contains("energy") {
-        1.1
-    } else if s.contains("地产") || s.contains("房地产") || s.contains("real_estate") {
-        1.2
-    } else if s.contains("公用") || s.contains("utility") {
-        0.4
-    } else {
-        1.0
+// ── 真实历史 beta 估计（2026-09-14，替代原「行业关键词 → 固定 beta」查表）──
+//
+// 为什么删掉那张表：它是**按行业归属下判据**的形态 —— 观测量是「这只股票被归到哪个
+// 行业」，而不是「它实际怎么波动」。两个硬伤：
+//   ① 口径必然落空：实测 `stock_sector` 取值域是**门类级**（电子设备 / 电气设备 /
+//      信息技术 / 化石能源 / 机械设备 / 交运设备 / 金融 / 建材），而原表键是科技 /
+//      消费 / 银行 / 医药 / 能源 / 地产 / 公用 ⇒ 除「金融」「化石能源」外**全部落到
+//      else 1.0**，即这张表看起来在区分行业、实际基本没生效（静默退化为中性）。
+//   ② 即便口径对上，「行业 X 的 beta 恒为 Y」本身也不成立 —— beta 是个股对市场的
+//      回归系数，同行业内不同个股的差异远大于行业间均值的差异。
+// 替代者直接观测数据形态：**用该股自己的日收益对沪深300日收益做回归**。
+// 观测对象是「它实际怎么波动」这一事实 ⇒ 与行业分类无关，天然覆盖全部标的。
+// 缺失 / 样本不足时回退中性 1.0，并把「哪些标的回退了」显式暴露出来
+// （见 `BetaProvenance`）—— 静默退化正是本项目反复踩的坑。
+
+/// 中性默认 beta —— 真实历史 beta 不可得时的回退值
+pub const DEFAULT_BETA: f64 = 1.0;
+/// beta 估计回看窗口（交易日）
+pub const BETA_LOOKBACK_DAYS: u32 = 120;
+/// 估计 beta 所需的最少重叠日收益样本（低于此值视为不可估计 ⇒ 回退）
+pub const BETA_MIN_SAMPLES: usize = 30;
+/// beta 估计的市场基准代码（沪深300）
+pub const BETA_BENCHMARK_CODE: &str = "000300";
+
+/// 单只标的的 beta 估计结果
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BetaEstimate {
+    /// beta 值（真实估计或回退默认）
+    pub beta: f64,
+    /// 用于估计的重叠日收益样本数（回退时为 0）
+    pub samples: usize,
+    /// 是否来自真实历史估计（`false` = 回退 `DEFAULT_BETA`）
+    pub historical: bool,
+}
+
+impl BetaEstimate {
+    /// 回退值构造器（唯一入口，避免各处手写 1.0）
+    pub fn fallback() -> Self {
+        Self { beta: DEFAULT_BETA, samples: 0, historical: false }
     }
+    pub fn estimated(beta: f64, samples: usize) -> Self {
+        Self { beta, samples, historical: true }
+    }
+}
+
+/// 逐标的 beta 估计表（key = 股票代码）
+pub type BetaMap = HashMap<String, BetaEstimate>;
+
+/// 收盘价序列 → `(日期, 日简单收益率)` 配对。
+///
+/// 用**日期**而非位置对齐：停牌会让两条序列的 bar 数不同，按位置对齐会把
+/// 「停牌日」与「邻近日」错配成假收益（`refresh_correlation` 用的是尾部对齐，
+/// 单看相关性影响有限，但 beta 的分子分母都会因此偏掉）。
+pub fn date_returns(klines: &[KLine]) -> Vec<(String, f64)> {
+    klines
+        .windows(2)
+        .filter_map(|w| {
+            let (a, b) = (&w[0], &w[1]);
+            if a.close > 0.0 && b.close > 0.0 {
+                Some((b.date.clone(), (b.close - a.close) / a.close))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// 纯函数：按**日期交集**对齐两条收益序列，求个股对市场的 beta。
+///
+/// 返回 `Some((beta, 重叠样本数))`；重叠样本 < `BETA_MIN_SAMPLES`，或市场收益方差
+/// 为 0（`compute_beta` 内部判据）时返回 `None` ⇒ 调用方回退 `DEFAULT_BETA`。
+pub fn beta_from_aligned(
+    stock: &[(String, f64)],
+    market: &[(String, f64)],
+) -> Option<(f64, usize)> {
+    let stock_by_date: HashMap<&str, f64> = stock.iter().map(|(d, r)| (d.as_str(), *r)).collect();
+    // 以**市场序列的日期顺序**为基准（它是交易日历的权威），只取双方都有的日期
+    let mut s_ret: Vec<f64> = Vec::new();
+    let mut m_ret: Vec<f64> = Vec::new();
+    for (d, mr) in market {
+        if let Some(sr) = stock_by_date.get(d.as_str()) {
+            m_ret.push(*mr);
+            s_ret.push(*sr);
+        }
+    }
+    if s_ret.len() < BETA_MIN_SAMPLES {
+        return None;
+    }
+    compute_beta(&s_ret, &m_ret).map(|b| (b, s_ret.len()))
+}
+
+/// 拉取基准与各持仓 K 线，估计真实历史 beta。
+///
+/// - 基准：`BETA_BENCHMARK_CODE`（沪深300）**不复权**日线 —— 指数无复权概念，
+///   与 `backtest.rs` / `market_regime.rs` 的既有取法一致
+/// - 个股：**前复权**日线 —— 未复权价在除权日会产生假收益、直接污染 beta；
+///   前复权是项目里算收益的标准做法（`backtest.rs:117`）
+/// - 任一环节失败 ⇒ 该标的回退 `DEFAULT_BETA`（**不阻断压测主链路**）
+///
+/// 顺序拉取（不并发）：持仓通常 < 20 只，且本项目历史上因并发过高触发过供应商
+/// 降级（429 处置），此处不引入新的并发面。
+pub async fn estimate_betas(
+    client: &dyn MarketDataProvider,
+    positions: &[PositionSummary],
+    lookback_days: u32,
+) -> BetaMap {
+    let mut out: BetaMap = HashMap::new();
+    if positions.is_empty() {
+        return out;
+    }
+    let market = match client.get_klines(BETA_BENCHMARK_CODE, "daily", lookback_days, None).await {
+        Ok(ks) => date_returns(&ks),
+        Err(e) => {
+            tracing::warn!(
+                "[portfolio_monitor] 基准 {} K 线获取失败，全部 beta 回退 {}: {e}",
+                BETA_BENCHMARK_CODE,
+                DEFAULT_BETA
+            );
+            Vec::new()
+        },
+    };
+    if market.is_empty() {
+        // 基准缺失 ⇒ 无法估计任何标的。显式回退（`historical=false`），
+        // 不做「用 1.0 冒充估计值」的静默降级。
+        for p in positions {
+            out.insert(p.stock_code.clone(), BetaEstimate::fallback());
+        }
+        return out;
+    }
+    for p in positions {
+        let est = match client
+            .get_klines(&p.stock_code, "daily", lookback_days, Some(AdjType::Forward))
+            .await
+        {
+            Ok(ks) => match beta_from_aligned(&date_returns(&ks), &market) {
+                Some((b, n)) => BetaEstimate::estimated(b, n),
+                None => BetaEstimate::fallback(),
+            },
+            Err(e) => {
+                tracing::warn!(
+                    "[portfolio_monitor] {} K 线获取失败，beta 回退 {}: {e}",
+                    p.stock_code,
+                    DEFAULT_BETA
+                );
+                BetaEstimate::fallback()
+            },
+        };
+        out.insert(p.stock_code.clone(), est);
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -367,13 +548,25 @@ impl StressScenario {
 pub fn run_all_scenarios(
     positions: &[PositionSummary],
     sector_exposure: &HashMap<String, f64>,
+    betas: &BetaMap,
 ) -> StressTestBundle {
     StressTestBundle {
-        m10: Some(run_stress_scenario(positions, sector_exposure, StressScenario::MarketDown10)),
-        m20: Some(run_stress_scenario(positions, sector_exposure, StressScenario::MarketDown20)),
+        m10: Some(run_stress_scenario(
+            positions,
+            sector_exposure,
+            betas,
+            StressScenario::MarketDown10,
+        )),
+        m20: Some(run_stress_scenario(
+            positions,
+            sector_exposure,
+            betas,
+            StressScenario::MarketDown20,
+        )),
         black_swan: Some(run_stress_scenario(
             positions,
             sector_exposure,
+            betas,
             StressScenario::BlackSwan,
         )),
     }
@@ -454,10 +647,14 @@ pub fn normalize_position_weights(positions: &[f64], max_total_pct: f64) -> Vec<
 
 // ── 持久化层 ──
 
+// 参数已达 8 个（新增 `betas` 后越过 clippy 默认阈值 7）：这是「组合监控一次刷新」
+// 的统一入参，拆结构体会污染调用方且无实际收益，显式豁免。
+#[allow(clippy::too_many_arguments)]
 pub async fn refresh_metrics(
     db: &DatabaseConnection,
     positions: &[PositionSummary],
     limits: &PositionLimits,
+    betas: &BetaMap,
     beta: Option<f64>,
     sharpe_30d: Option<f64>,
     correlation_avg: Option<f64>,
@@ -466,7 +663,10 @@ pub async fn refresh_metrics(
     let today = as_of_date
         .map(|s| s.to_string())
         .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
-    let stress = run_all_scenarios(positions, &compute_concentration(positions).1);
+    // 落库快照与实时面板必须**同口径**：`betas` 由调用方（持有 `MarketDataProvider`
+    // 的那一层）传入。若此处自己传空表，快照会恒用回退 1.0，而面板用真实 beta ⇒
+    // 「时间旅行」对比等于在比两套方法。
+    let stress = run_all_scenarios(positions, &compute_concentration(positions).1, betas);
     let dashboard = compute_dashboard(
         positions,
         limits,
@@ -843,34 +1043,43 @@ mod tests {
     fn stress_scenario_m10_basic() {
         let pos = vec![ps("a", 10000.0, Some("科技"), 50.0)];
         let sector: HashMap<String, f64> = [("科技".into(), 100.0)].into_iter().collect();
-        let r = run_stress_scenario(&pos, &sector, StressScenario::MarketDown10);
-        // 科技 beta=1.3, m10=10%, sector_pct=100%>40% → beta×1.2=1.56 → 单股 -15.6%
+        let betas: BetaMap =
+            [("a".to_string(), BetaEstimate::estimated(1.3, 100))].into_iter().collect();
+        let r = run_stress_scenario(&pos, &sector, &betas, StressScenario::MarketDown10);
+        // β=1.3（真实历史估计，显式注入）, m10=10%, sector_pct=100%>40% → β×1.2=1.56 → 单股 -15.6%
         assert!(
             r.portfolio_pnl_pct < -14.0 && r.portfolio_pnl_pct > -17.0,
             "pct = {}",
             r.portfolio_pnl_pct
         );
         assert_eq!(r.top_hit.as_ref().unwrap().stock_code, "a");
-        assert!(r.note.contains("行业集中度惩罚"));
+        assert!(r.note.contains("行业暴露>40%"), "note = {}", r.note);
+        assert!(r.note.contains("真实历史 beta"), "note = {}", r.note);
+        assert_eq!(r.beta_provenance.historical, 1);
+        assert_eq!(r.beta_provenance.fallback, 0);
+        assert!(r.beta_provenance.fallback_codes.is_empty());
     }
 
     #[test]
     fn stress_scenario_no_penalty_when_sector_low() {
         let pos = vec![ps("a", 10000.0, Some("科技"), 50.0)];
         let sector: HashMap<String, f64> = [("科技".into(), 30.0)].into_iter().collect();
-        let r = run_stress_scenario(&pos, &sector, StressScenario::MarketDown10);
-        // sector_pct=30% < 40% 阈值 → 无惩罚，beta=1.3 → 单股 -13%
+        let betas: BetaMap =
+            [("a".to_string(), BetaEstimate::estimated(1.3, 100))].into_iter().collect();
+        let r = run_stress_scenario(&pos, &sector, &betas, StressScenario::MarketDown10);
+        // sector_pct=30% < 40% 阈值 → 无惩罚，β=1.3 → 单股 -13%
         assert!(
             r.portfolio_pnl_pct < -12.0 && r.portfolio_pnl_pct > -14.0,
             "pct = {}",
             r.portfolio_pnl_pct
         );
-        assert!(!r.note.contains("行业集中度惩罚"));
+        assert!(!r.note.contains("行业暴露>40%"), "note = {}", r.note);
     }
 
     #[test]
     fn stress_scenario_empty_positions() {
-        let r = run_stress_scenario(&[], &HashMap::new(), StressScenario::BlackSwan);
+        let r =
+            run_stress_scenario(&[], &HashMap::new(), &HashMap::new(), StressScenario::BlackSwan);
         assert_eq!(r.portfolio_pnl, 0.0);
         assert!(r.top_hit.is_none());
         assert!(r.note.contains("无持仓"));
@@ -900,17 +1109,291 @@ mod tests {
     #[test]
     fn run_all_scenarios_returns_three() {
         let pos = vec![ps("a", 10000.0, Some("银行"), 50.0)];
-        let s = run_all_scenarios(&pos, &HashMap::new());
+        let s = run_all_scenarios(&pos, &HashMap::new(), &HashMap::new());
         assert!(s.m10.is_some());
         assert!(s.m20.is_some());
         assert!(s.black_swan.is_some());
     }
 
+    // ── β 取值来源（2026-09-14：真实历史 beta 取代行业关键词查表）──
+
+    /// **负控**：无历史 beta 时必须回退中性 1.0，且这次退化必须**可见**。
+    ///
+    /// 这正是「静默降级」最爱的藏身处 —— 旧实现里所有未命中行业关键词的标的都
+    /// 悄悄用 1.0，报表上看不出任何异常（实测 `stock_sector` 取值域是门类级，
+    /// 与旧表的键大面积不匹配 ⇒ 除「金融」「化石能源」外全部落到 else 1.0）。
     #[test]
-    fn sector_beta_buckets() {
-        assert!((sector_beta("科技") - 1.3).abs() < 1e-9);
-        assert!((sector_beta("银行") - 0.5).abs() < 1e-9);
-        assert!((sector_beta("消费") - 0.7).abs() < 1e-9);
-        assert!((sector_beta("") - 1.0).abs() < 1e-9);
+    fn stress_scenario_fallback_is_neutral_and_visible() {
+        let pos = vec![ps("600000", 10000.0, Some("金融"), 50.0)];
+        let r = run_stress_scenario(
+            &pos,
+            &HashMap::new(),
+            &HashMap::new(),
+            StressScenario::MarketDown10,
+        );
+        assert!(
+            (r.portfolio_pnl_pct + 10.0).abs() < 1e-9,
+            "回退 β=1.0 ⇒ 恰好 -10%，实际 {}",
+            r.portfolio_pnl_pct
+        );
+        assert_eq!(r.beta_provenance.historical, 0);
+        assert_eq!(r.beta_provenance.fallback, 1);
+        assert_eq!(r.beta_provenance.fallback_codes, vec!["600000".to_string()]);
+        assert!(r.note.contains("回退中性"), "note = {}", r.note);
+    }
+
+    /// 行为变更的显式留痕：旧口径下 `sector_beta("金融") == 0.5` ⇒ 同一输入是 -5%。
+    /// 断言新口径**不再是** -5%，防止有人日后把行业查表悄悄加回来。
+    #[test]
+    fn stress_scenario_no_longer_uses_sector_keyword_table() {
+        let pos = vec![ps("600000", 10000.0, Some("金融"), 50.0)];
+        let r = run_stress_scenario(
+            &pos,
+            &HashMap::new(),
+            &HashMap::new(),
+            StressScenario::MarketDown10,
+        );
+        assert!(
+            (r.portfolio_pnl_pct + 5.0).abs() > 1e-6,
+            "旧口径 sector_beta(\"金融\")=0.5 仍然生效 ⇒ 行业查表被加了回来"
+        );
+    }
+
+    // ── `date_returns` / `beta_from_aligned`（纯函数，无 IO）──
+
+    fn mk_kline(date: &str, close: f64) -> KLine {
+        KLine {
+            date: date.to_string(),
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume: 0.0,
+            amount: 0.0,
+            turnover_rate: None,
+            adj_factor: None,
+        }
+    }
+
+    /// 连续日期序列（不用真交易日历：两条序列共用同一日历即可）
+    fn mk_dates(n: usize) -> Vec<String> {
+        let start = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        (0..n)
+            .map(|i| (start + chrono::Duration::days(i as i64)).format("%Y-%m-%d").to_string())
+            .collect()
+    }
+
+    /// 用给定日期与日收益序列造 K 线（第 i 个收益作用于第 i+1 个 bar）
+    fn klines_from_dates(dates: &[String], rets: &[f64]) -> Vec<KLine> {
+        let mut close = 100.0;
+        let mut out = vec![mk_kline(&dates[0], close)];
+        for (i, r) in rets.iter().enumerate() {
+            close *= 1.0 + r;
+            out.push(mk_kline(&dates[i + 1], close));
+        }
+        out
+    }
+
+    #[test]
+    fn date_returns_drops_pairs_involving_nonpositive_close() {
+        let ks = vec![
+            mk_kline("2026-01-01", 100.0),
+            mk_kline("2026-01-02", 110.0),
+            mk_kline("2026-01-03", 0.0), // 异常 bar（部分供应商停牌日给 0）
+            mk_kline("2026-01-04", 121.0),
+        ];
+        let r = date_returns(&ks);
+        assert_eq!(r.len(), 1, "0 价 bar 参与的两个配对都必须丢弃: {r:?}");
+        assert_eq!(r[0].0, "2026-01-02", "收益挂在**后一根** bar 的日期上");
+        assert!((r[0].1 - 0.10).abs() < 1e-12);
+    }
+
+    #[test]
+    fn beta_from_aligned_recovers_known_slope() {
+        // stock = 1.5 × market（严格线性、无噪声）⇒ 回归斜率必须精确等于 1.5
+        let n = 60;
+        let market: Vec<(String, f64)> = mk_dates(n)
+            .into_iter()
+            .enumerate()
+            .map(|(i, d)| (d, ((i as f64 * 0.37).sin()) * 0.01))
+            .collect();
+        let stock: Vec<(String, f64)> = market.iter().map(|(d, r)| (d.clone(), r * 1.5)).collect();
+        let (beta, samples) = beta_from_aligned(&stock, &market).expect("样本充足，应能估计");
+        assert_eq!(samples, n);
+        assert!((beta - 1.5).abs() < 1e-9, "beta = {beta}，应精确为 1.5");
+    }
+
+    /// 按**日期交集**对齐（而非按位置）：market 40 日、stock 只取 `dates[1..37]` 共 36 日
+    /// ⇒ 重叠恰好 36；且 stock 收益在重叠区间上严格是 market 的 1.5 倍 ⇒ beta 必须精确 1.5。
+    ///
+    /// ⚠ 数据**必须带波动**：常数序列会让市场方差为 0，落到「不可估计」分支，
+    /// 于是这条测试会以 `None` panic 而**看起来像对齐逻辑错了**（本轮实测踩到）。
+    ///
+    /// 本测试**自证区分力**：把同一组 stock 收益强行贴到 market **尾部 36 日**上（时间轴整体
+    /// 后移 3 天），斜率必须显著偏离 1.5；否则说明这组数据对两种对齐等价，测了等于没测。
+    #[test]
+    fn beta_from_aligned_aligns_by_date_not_by_position() {
+        let dates = mk_dates(40);
+        let market: Vec<(String, f64)> = dates
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (d.clone(), (i as f64 * 0.41).sin() * 0.01))
+            .collect();
+        let stock: Vec<(String, f64)> =
+            market[1..37].iter().map(|(d, r)| (d.clone(), r * 1.5)).collect();
+
+        let (beta, samples) = beta_from_aligned(&stock, &market).expect("36 ≥ 30 应可估计");
+        assert_eq!(samples, 36, "必须按日期交集对齐：40 ∩ 36 = 36");
+        assert!((beta - 1.5).abs() < 1e-9, "严格线性 ⇒ beta 精确 1.5，实际 {beta}");
+
+        // 错位对照：同一组收益挂到 market 尾部 36 日的日期上（只改日期，不改数值）
+        let shifted: Vec<(String, f64)> =
+            stock.iter().enumerate().map(|(k, (_, r))| (market[4 + k].0.clone(), *r)).collect();
+        let (shifted_beta, _) = beta_from_aligned(&shifted, &market).expect("同样 36 个样本");
+        assert!(
+            (shifted_beta - 1.5).abs() > 0.05,
+            "错位 3 天后仍得 {shifted_beta} ⇒ 本测试无法区分两种对齐，需换数据"
+        );
+    }
+
+    #[test]
+    fn beta_from_aligned_rejects_unestimable_input() {
+        let dates = mk_dates(60);
+        // ① 市场收益恒为常数 ⇒ 市场方差 0（compute_beta 内部判据）
+        let flat_market: Vec<(String, f64)> = dates.iter().map(|d| (d.clone(), 0.0)).collect();
+        let stock: Vec<(String, f64)> = dates.iter().map(|d| (d.clone(), 0.01)).collect();
+        assert!(beta_from_aligned(&stock, &flat_market).is_none(), "市场方差 0 应判不可估计");
+        // ② 重叠样本 < BETA_MIN_SAMPLES
+        let few = &dates[..BETA_MIN_SAMPLES - 1];
+        let m2: Vec<(String, f64)> = few.iter().map(|d| (d.clone(), 0.001)).collect();
+        let s2: Vec<(String, f64)> = few.iter().map(|d| (d.clone(), 0.002)).collect();
+        assert!(
+            beta_from_aligned(&s2, &m2).is_none(),
+            "样本 < {BETA_MIN_SAMPLES} 必须判不可估计（而非用够不着的样本硬算）"
+        );
+    }
+
+    // ── `estimate_betas`：拉取层（用测试替身）──
+
+    use axagent_harness::core_error::AxAgentError;
+    use axagent_harness::market_data::{StockQuote, StockSearchResult};
+
+    /// 可编程的 `MarketDataProvider` 替身。
+    ///
+    /// 记录每次 `get_klines` 的 `(code, adj_type)` —— 用于钉住「基准不复权 / 个股前复权」
+    /// 这一口径选择；否则它只是两行裸参数，改动无人拦。
+    // SAFETY: 此处 std::sync::Mutex 不跨 await 使用 —— `seen` 仅在同步临界区内读写，
+    // lock guard 是语句级临时量，在函数内任何 `.await` 之前就已 drop。
+    // 依据 `clippy.toml` 的合法例外规则（铁律 #8 只禁「跨 await 的 std guard」）。
+    #[allow(clippy::disallowed_types)]
+    struct MockProvider {
+        series: HashMap<String, Vec<KLine>>,
+        seen: std::sync::Mutex<Vec<(String, Option<AdjType>)>>,
+    }
+
+    // SAFETY: 同上 —— `new` / `adj_for` 均为同步函数，临界区内无 await 点。
+    #[allow(clippy::disallowed_types)]
+    impl MockProvider {
+        fn new(series: HashMap<String, Vec<KLine>>) -> Self {
+            Self { series, seen: std::sync::Mutex::new(Vec::new()) }
+        }
+        fn adj_for(&self, code: &str) -> Option<Option<AdjType>> {
+            self.seen.lock().unwrap().iter().find(|(c, _)| c.as_str() == code).map(|(_, a)| *a)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MarketDataProvider for MockProvider {
+        async fn get_quote(
+            &self,
+            _stock_code: &str,
+        ) -> axagent_harness::core_error::Result<StockQuote> {
+            Err(AxAgentError::Provider("mock: get_quote 未实现".into()))
+        }
+
+        async fn get_klines(
+            &self,
+            stock_code: &str,
+            _period: &str,
+            _limit: u32,
+            adj_type: Option<AdjType>,
+        ) -> axagent_harness::core_error::Result<Vec<KLine>> {
+            self.seen.lock().unwrap().push((stock_code.to_string(), adj_type));
+            self.series
+                .get(stock_code)
+                .cloned()
+                .ok_or_else(|| AxAgentError::Provider(format!("mock: 无 {stock_code} 数据")))
+        }
+
+        async fn search_stock(
+            &self,
+            _keyword: &str,
+        ) -> axagent_harness::core_error::Result<Vec<StockSearchResult>> {
+            Ok(vec![])
+        }
+    }
+
+    #[tokio::test]
+    async fn estimate_betas_uses_real_regression_and_correct_adj_type() {
+        let n = 60;
+        let dates = mk_dates(n);
+        let rets: Vec<f64> = (0..n - 1).map(|i| ((i as f64 * 0.41).cos()) * 0.012).collect();
+        let market = klines_from_dates(&dates, &rets);
+        let stock_rets: Vec<f64> = rets.iter().map(|r| r * 2.0).collect();
+        let stock = klines_from_dates(&dates, &stock_rets);
+        let mut series = HashMap::new();
+        series.insert(BETA_BENCHMARK_CODE.to_string(), market);
+        series.insert("600000".to_string(), stock);
+        let p = MockProvider::new(series);
+
+        let positions = vec![ps("600000", 10000.0, None, 50.0)];
+        let m = estimate_betas(&p, &positions, 120).await;
+
+        let e = m.get("600000").copied().expect("每个持仓都必须有条目（含回退）");
+        assert!(e.historical, "数据齐全时应给出真实历史估计");
+        assert!((e.beta - 2.0).abs() < 1e-6, "beta = {}，应≈2.0", e.beta);
+        assert_eq!(e.samples, n - 1);
+        // 口径钉死
+        assert_eq!(p.adj_for(BETA_BENCHMARK_CODE), Some(None), "基准指数无复权概念");
+        assert_eq!(
+            p.adj_for("600000"),
+            Some(Some(AdjType::Forward)),
+            "个股必须前复权 —— 除权日的假收益会直接污染 beta"
+        );
+    }
+
+    #[tokio::test]
+    async fn estimate_betas_falls_back_when_benchmark_unavailable() {
+        // 基准也拉不到 ⇒ 无法估计任何标的，必须显式回退（而不是跳过条目）
+        let p = MockProvider::new(HashMap::new());
+        let positions = vec![ps("600000", 10000.0, None, 50.0)];
+        let m = estimate_betas(&p, &positions, 120).await;
+        let e = m.get("600000").copied().expect("回退也必须有条目");
+        assert!(!e.historical);
+        assert!((e.beta - DEFAULT_BETA).abs() < 1e-12);
+        assert_eq!(e.samples, 0);
+    }
+
+    #[tokio::test]
+    async fn estimate_betas_falls_back_when_stock_klines_fail() {
+        let n = 60;
+        let dates = mk_dates(n);
+        let rets: Vec<f64> = (0..n - 1).map(|i| ((i as f64 * 0.41).cos()) * 0.012).collect();
+        let mut series = HashMap::new();
+        series.insert(BETA_BENCHMARK_CODE.to_string(), klines_from_dates(&dates, &rets));
+        // 故意不提供个股 ⇒ 该股回退，但基准存在（不被基准缺失的早退分支吞掉）
+        let p = MockProvider::new(series);
+        let positions = vec![ps("600000", 10000.0, None, 50.0)];
+        let m = estimate_betas(&p, &positions, 120).await;
+        assert!(!m["600000"].historical);
+        assert!((m["600000"].beta - DEFAULT_BETA).abs() < 1e-12);
+    }
+
+    #[tokio::test]
+    async fn estimate_betas_empty_positions_is_empty_without_any_fetch() {
+        let p = MockProvider::new(HashMap::new());
+        let m = estimate_betas(&p, &[], 120).await;
+        assert!(m.is_empty());
+        assert!(p.seen.lock().unwrap().is_empty(), "无持仓时不应发起任何取数");
     }
 }

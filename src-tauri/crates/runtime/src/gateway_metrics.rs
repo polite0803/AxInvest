@@ -66,9 +66,8 @@ pub struct MetricsCollector {
     gauges: Arc<RwLock<HashMap<String, Gauge>>>,
     histograms: Arc<RwLock<HashMap<String, Histogram>>>,
     summaries: Arc<RwLock<HashMap<String, Summary>>>,
-    /// 预留字段：StatsD 推送导出（enable_statsd/statsd_host/port）待导出器
-    /// 实现后消费；collection_interval 由调用方调度循环使用。
-    #[allow(dead_code)]
+    /// StatsD 推送导出配置：`enable_statsd` 为 true 时 `push_statsd()` 按
+    /// `statsd_host` / `statsd_port` 推送当前快照；`collection_interval` 由调用方调度循环使用。
     config: MetricsConfig,
 }
 
@@ -242,6 +241,47 @@ impl MetricsCollector {
         let mut summaries = self.summaries.write().await;
         summaries.clear();
     }
+
+    /// 将当前指标快照按标准 StatsD 协议（UDP，`name:value|type` 行）推送到远端。
+    ///
+    /// `config.enable_statsd` 为 false（默认）时零开销直接返回；
+    /// host 缺省 localhost、port 缺省 8125。由调用方按 `collection_interval` 调度。
+    pub async fn push_statsd(&self) {
+        if !self.config.enable_statsd {
+            return;
+        }
+
+        let metrics = self.get_metrics().await;
+        if metrics.is_empty() {
+            return;
+        }
+
+        let host = self.config.statsd_host.clone().unwrap_or_else(|| "localhost".to_string());
+        let port = self.config.statsd_port.unwrap_or(8125);
+        let addr = format!("{host}:{port}");
+
+        // 同步 UDP socket：单包瞬时发送，符合 statsd 惯例（参照 lan_transfer 先例）。
+        let socket = match std::net::UdpSocket::bind("0.0.0.0:0") {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("[statsd] 绑定 UDP socket 失败: {e}");
+                return;
+            },
+        };
+
+        for m in metrics {
+            let type_char = match m.kind {
+                MetricKind::Counter => "c",
+                MetricKind::Gauge => "g",
+                MetricKind::Histogram => "h",
+                MetricKind::Summary => "ms",
+            };
+            let line = format!("{}:{}|{}", m.name, m.value, type_char);
+            if let Err(e) = socket.send_to(line.as_bytes(), &addr) {
+                tracing::debug!("[statsd] 推送 {line} 失败: {e}");
+            }
+        }
+    }
 }
 
 impl Default for MetricsCollector {
@@ -326,6 +366,12 @@ impl GatewayMetrics {
 
     pub async fn get_all_metrics(&self) -> Vec<MetricValue> {
         self.collector.get_metrics().await
+    }
+
+    /// 按 StatsD 协议推送当前指标快照（`enable_statsd=false` 时零开销）。
+    /// 供外部调度循环按 `MetricsConfig.collection_interval` 周期调用。
+    pub async fn push_statsd(&self) {
+        self.collector.push_statsd().await;
     }
 }
 

@@ -410,12 +410,23 @@ describe("stockAnalysisStore - feature coverage", () => {
   // ────────────────────────────────────────────────────────────
   // 4. workflow-error 事件处理（错误路径）
   // ────────────────────────────────────────────────────────────
-  describe("workflow-error 事件处理 - 错误路径", () => {
+  describe("workflow-error 事件处理 - 错误路径（错误码契约）", () => {
+    /**
+     * 事件 payload 的新契约（见 src-tauri/src/commands/stock_workflow/core.rs 的
+     * 「失败事件的对外契约」注释）：`code` 是唯一展示依据，`category` 供状态机判定，
+     * `detail` 只作译文缺失时的兜底。`error` 是**旧版**自由文本字段，仅在无码时兜底。
+     */
+    type ErrorPayload = {
+      workflowId: string;
+      code?: string;
+      category?: string;
+      detail?: string;
+      error?: string;
+    };
     const setupErrorHandler = async (): Promise<
-      (event: { payload: { workflowId: string; error: string; errorCode?: string } }) => void
+      (event: { payload: ErrorPayload }) => void
     > => {
-      let errorHandler: (event: { payload: { workflowId: string; error: string; errorCode?: string } }) => void =
-        () => {};
+      let errorHandler: (event: { payload: ErrorPayload }) => void = () => {};
       listenMock.mockImplementation((event: string, handler) => {
         if (event === "workflow-error") { errorHandler = handler; }
         return Promise.resolve(unlistenMock);
@@ -424,43 +435,90 @@ describe("stockAnalysisStore - feature coverage", () => {
       return errorHandler;
     };
 
-    it("错误信息不包含 'LLM' → status: 'error'", async () => {
+    it("后端给码 → status: 'error'，errorCode 为后端真码（不再是前端自造的 GENERIC_ERROR）", async () => {
       const errorHandler = await setupErrorHandler();
 
       errorHandler({
-        payload: { workflowId: "wf-1", error: "网络超时" },
+        payload: {
+          workflowId: "wf-1",
+          code: "STOCK_WORKFLOW_EXEC_FAILED",
+          category: "unrecoverable",
+          detail: "工作流执行失败",
+        },
       });
 
       const state = useStockAnalysisStore.getState();
       expect(state.status).toBe("error");
-      expect(state.error).toBe("网络超时");
+      expect(state.errorCode).toBe("STOCK_WORKFLOW_EXEC_FAILED");
+      expect(state.error).toBeTruthy();
       expect(state.llmStatus).toBe("unknown");
     });
 
-    it("错误信息包含 'LLM' → status: 'completed' (LLM 回退时工作流已终止)", async () => {
+    // 反向断言：字符串嗅探已移除 —— detail 里出现 "LLM" 不再改变状态机。
+    // （历史实现写 `msg.includes("LLM") ? "LLM_FALLBACK" : "GENERIC_ERROR"`。）
+    it("detail 含 'LLM' 字样但无 LLM 码 → 仍为 'error'（嗅探已移除）", async () => {
       const errorHandler = await setupErrorHandler();
 
       errorHandler({
-        payload: { workflowId: "wf-1", error: "LLM timeout, falling back to placeholder" },
+        payload: {
+          workflowId: "wf-1",
+          code: "STOCK_WORKFLOW_EXEC_FAILED",
+          category: "unrecoverable",
+          detail: "LLM timeout, falling back to placeholder",
+        },
       });
 
       const state = useStockAnalysisStore.getState();
-      expect(state.status).toBe("completed");
-      expect(state.llmStatus).toBe("placeholder");
+      expect(state.status).toBe("error");
+      expect(state.llmStatus).toBe("unknown");
     });
 
-    // 修复 #4: LLM 错误时 status 为 completed（llmStatus="placeholder" 已表达降级语义）
-    it("使用 errorCode: 'LLM_FALLBACK' 也能触发 completed 状态", async () => {
+    // 反向断言：`LLM_FALLBACK` 是前端自造、后端从不产出的**幽灵码**，
+    // 降级判定改为码白名单（`LLM_DEGRADED_CODES`）后它不再有任何特殊含义。
+    it("幽灵码 LLM_FALLBACK 不再触发 completed 降级", async () => {
       const errorHandler = await setupErrorHandler();
 
       errorHandler({
-        payload: { workflowId: "wf-1", error: "downstream timeout", errorCode: "LLM_FALLBACK" },
+        payload: { workflowId: "wf-1", code: "LLM_FALLBACK", detail: "downstream timeout" },
       });
 
       const state = useStockAnalysisStore.getState();
-      expect(state.status).toBe("completed");
-      expect(state.llmStatus).toBe("placeholder");
-      expect(state.errorCode).toBe("LLM_FALLBACK");
+      expect(state.status).toBe("error");
+      expect(state.llmStatus).toBe("unknown");
+    });
+
+    // 旧版后端二进制（不发 code）仍可用：兜底到真实存在的码，且展示沿用原文本。
+    it("无 code 的旧格式 payload → 兜底 STOCK_WORKFLOW_EXEC_FAILED 且展示原文本", async () => {
+      const errorHandler = await setupErrorHandler();
+
+      errorHandler({ payload: { workflowId: "wf-1", error: "网络超时" } });
+
+      const state = useStockAnalysisStore.getState();
+      expect(state.status).toBe("error");
+      expect(state.errorCode).toBe("STOCK_WORKFLOW_EXEC_FAILED");
+      expect(state.error).toBe("网络超时");
+    });
+
+    // 自动重试判据改为**结构化**：category="retryable"（不再嗅探 "timeout"/"503" 等文本）。
+    it("category='retryable' 触发自动重试计数", async () => {
+      const errorHandler = await setupErrorHandler();
+      useStockAnalysisStore.setState({ _workflowErrorRetries: 0, stockCode: "600519" });
+
+      vi.useFakeTimers();
+      try {
+        errorHandler({
+          payload: {
+            workflowId: "wf-1",
+            code: "STOCK_WORKFLOW_TIMEOUT",
+            category: "retryable",
+            detail: "分析超时（超过 300 秒）",
+          },
+        });
+        // 计数在 setTimeout 之前同步自增，故无需推进假时钟
+        expect(useStockAnalysisStore.getState()._workflowErrorRetries).toBe(1);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -538,6 +596,158 @@ describe("stockAnalysisStore - feature coverage", () => {
 
       // currentStage 不应被覆写为 -1；进度可继续推进
       expect(useStockAnalysisStore.getState().currentStage).toBe(2);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // 5.1 节点级失败的**结构化判据**（errorCode）—— 取代历史文本嗅探
+  //
+  // 背景：`isRunLevelCancel` 曾靠对 `error` 做 `startsWith(…)` 子串匹配来判定
+  // 「这是运行级取消，不是节点质量问题」。后端现已改发结构化 `errorCode`
+  // （`stock_workflow/core.rs::node_error_code` 从 `StepProgressEvent::error_code`
+  // 映射而来），本组用例把「判定只认码、不认文本」钉死。
+  // ────────────────────────────────────────────────────────────
+  describe("workflow-step-done - 节点失败判据（errorCode 结构化）", () => {
+    type StepPayload = {
+      workflowId: string;
+      nodeId: string;
+      status: string;
+      totalNodes: number;
+      completedNodes: number;
+      output?: unknown;
+      error?: string;
+      errorCode?: string | null;
+    };
+
+    const setupStepHandler = async (): Promise<(event: { payload: StepPayload }) => void> => {
+      let stepHandler: (event: { payload: StepPayload }) => void = () => {};
+      listenMock.mockImplementation((event: string, handler) => {
+        if (event === "workflow-step-done") { stepHandler = handler; }
+        return Promise.resolve(unlistenMock);
+      });
+      await useStockAnalysisStore.getState().setupEventListener();
+      return stepHandler;
+    };
+
+    it("errorCode=STOCK_WORKFLOW_STEP_CANCELLED → 不计入 failedNodes / failedNodeErrors", async () => {
+      const stepHandler = await setupStepHandler();
+
+      stepHandler({
+        payload: {
+          workflowId: "wf-1",
+          nodeId: "a-market-analyst",
+          status: "failed",
+          totalNodes: 10,
+          completedNodes: 3,
+          error: "EXECUTION_CANCELLED: 节点执行已取消",
+          errorCode: "STOCK_WORKFLOW_STEP_CANCELLED",
+        },
+      });
+
+      const s = useStockAnalysisStore.getState();
+      expect(s.failedNodes).not.toContain("a-market-analyst");
+      expect(s.failedNodeErrors["a-market-analyst"]).toBeUndefined();
+    });
+
+    it("【反向断言】error 文本含取消字样但无 errorCode → 仍按节点质量失败处理", async () => {
+      // 这条用例的存在意义：证明文本嗅探**已彻底移除**。
+      // 若哪天有人把 `error.includes(...)` 之类判据加回来，本用例会立刻失败。
+      // 注意：下方字符串是**测试夹具**（刻意出现旧字样），不是生产代码的判据。
+      const stepHandler = await setupStepHandler();
+
+      stepHandler({
+        payload: {
+          workflowId: "wf-1",
+          nodeId: "c-bottleneck-trend1",
+          status: "failed",
+          totalNodes: 10,
+          completedNodes: 3,
+          error: "EXECUTION_CANCELLED: 节点执行已取消",
+          // errorCode 缺失（旧后端 / 异常路径）
+        },
+      });
+
+      const s = useStockAnalysisStore.getState();
+      expect(s.failedNodes).toContain("c-bottleneck-trend1");
+      expect(s.failedNodeErrors["c-bottleneck-trend1"]).toBe("EXECUTION_CANCELLED: 节点执行已取消");
+    });
+
+    it("errorCode=STOCK_WORKFLOW_STEP_FAILED → 计入 failedNodes 并保留原始 error 文本", async () => {
+      const stepHandler = await setupStepHandler();
+
+      stepHandler({
+        payload: {
+          workflowId: "wf-1",
+          nodeId: "t-news-data",
+          status: "failed",
+          totalNodes: 10,
+          completedNodes: 3,
+          error: "PROVIDER_QUERY_FAILED: 所有供应商均不可用",
+          errorCode: "STOCK_WORKFLOW_STEP_FAILED",
+        },
+      });
+
+      const s = useStockAnalysisStore.getState();
+      expect(s.failedNodes).toContain("t-news-data");
+      // 展示仍用原始文本（Debug 面板要看节点原始报错），判定才用码
+      expect(s.failedNodeErrors["t-news-data"]).toBe("PROVIDER_QUERY_FAILED: 所有供应商均不可用");
+    });
+
+    it("【边界】errorCode=null（后端明示「本事件无失败」）→ 仍按真实失败处理", async () => {
+      // 后端对 running/completed/streaming 三类事件发 `errorCode: null`，
+      // 故判据必须是 `typeof errorCode === "string"` —— 若写成 `!== undefined`，
+      // `null` 会穿过守卫并进入 Set 查询（结果为 false，本用例仍会通过），
+      // 但一旦 Set 内容变化就会静默误判。本用例把该边界钉住。
+      const stepHandler = await setupStepHandler();
+
+      stepHandler({
+        payload: {
+          workflowId: "wf-1",
+          nodeId: "a-fundamentals",
+          status: "failed",
+          totalNodes: 10,
+          completedNodes: 3,
+          error: "LLM_CALL_FAILED: 模型调用失败",
+          errorCode: null,
+        },
+      });
+
+      const s = useStockAnalysisStore.getState();
+      expect(s.failedNodes).toContain("a-fundamentals");
+      expect(s.failedNodeErrors["a-fundamentals"]).toBe("LLM_CALL_FAILED: 模型调用失败");
+    });
+
+    it("该节点随后 completed → failedNodes 中的标记被摘除（重试成功路径）", async () => {
+      const stepHandler = await setupStepHandler();
+
+      stepHandler({
+        payload: {
+          workflowId: "wf-1",
+          nodeId: "t-news-data",
+          status: "failed",
+          totalNodes: 10,
+          completedNodes: 3,
+          error: "PROVIDER_QUERY_FAILED: 供应商超时",
+          errorCode: "STOCK_WORKFLOW_STEP_FAILED",
+        },
+      });
+      expect(useStockAnalysisStore.getState().failedNodes).toContain("t-news-data");
+
+      stepHandler({
+        payload: {
+          workflowId: "wf-1",
+          nodeId: "t-news-data",
+          status: "completed",
+          totalNodes: 10,
+          completedNodes: 4,
+          output: { content: "ok" },
+        },
+      });
+
+      const s = useStockAnalysisStore.getState();
+      expect(s.failedNodes).not.toContain("t-news-data");
+      // 仅断言 failedNodes 摘除即可：failedNodeErrors 的清理走同一分支，
+      // 但其清空结果受 `nodeId in failedNodeErrors` 守卫，此处不断言具体形态。
     });
   });
 
@@ -720,6 +930,57 @@ describe("stockAnalysisStore - feature coverage", () => {
       expect(useStockAnalysisStore.getState().timeline).toHaveLength(1);
       useStockAnalysisStore.getState().clearTimeline();
       expect(useStockAnalysisStore.getState().timeline).toHaveLength(0);
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // 6. startAnalysis 的「数据质量不足 ⇒ 后端 skipped」分支
+  // ────────────────────────────────────────────────────────────
+  describe("startAnalysis - skipped 响应的 errorCode 来源", () => {
+    /** `get_workflow_template` 返回空模板（⇒ dryRun=false）；`run_stock_workflow` 返回给定结果。 */
+    const setupSkipped = (result: Record<string, unknown>): void => {
+      invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === "get_workflow_template") {
+          return Promise.resolve({ variables: [] });
+        }
+        if (cmd === "run_stock_workflow") {
+          return Promise.resolve(result);
+        }
+        return Promise.resolve(null);
+      });
+    };
+
+    // 反向断言：前端**不再自造** `DATA_QUALITY_INSUFFICIENT` —— 该码全后端零产出（幽灵码），
+    // `error.${code}` 查表恒 miss。码必须来自后端 `stock_workflow/core.rs` 的 `skipped` 响应
+    // （实测发 `HOOK_BLOCKED`：该码文档已写明覆盖「数据质量预检不通过」）。
+    it("后端 skipped 带 code → errorCode 取后端码（不再是自造的 DATA_QUALITY_INSUFFICIENT）", async () => {
+      setupSkipped({
+        status: "skipped",
+        code: "STOCK_WORKFLOW_HOOK_BLOCKED",
+        reason: "缺少 20 日均线数据",
+        analysisId: "an-1",
+        stockCode: "600519",
+        stockName: "贵州茅台",
+      });
+
+      await useStockAnalysisStore.getState().startAnalysis("600519");
+
+      const state = useStockAnalysisStore.getState();
+      expect(state.status).toBe("error");
+      expect(state.errorCode).toBe("STOCK_WORKFLOW_HOOK_BLOCKED");
+      expect(state.errorCode).not.toBe("DATA_QUALITY_INSUFFICIENT");
+      expect(state.error).toContain("缺少 20 日均线数据");
+    });
+
+    // 边界：后端不发码（旧二进制）⇒ 明示「无结构化码」为 null，而不是**编一个码**。
+    it("后端 skipped 不带 code → errorCode 为 null（不编造码）", async () => {
+      setupSkipped({ status: "skipped", reason: "数据不足" });
+
+      await useStockAnalysisStore.getState().startAnalysis("600519");
+
+      const state = useStockAnalysisStore.getState();
+      expect(state.status).toBe("error");
+      expect(state.errorCode).toBeNull();
     });
   });
 });

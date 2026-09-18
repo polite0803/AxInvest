@@ -11,13 +11,15 @@
  * - LLM 决策可用时:两行(公式 / LLM 各一行),底部一致性分数
  * - LLM 不可用时:一行占位 + 灰条"LLM 视角不可用"
  */
-import { getActionTKey } from "@/lib/stock-analysis-utils";
+import { actionToDirection, getActionTKey, parseAction, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 /** 与 AnalysisSummary / LatestAnalysisSummary 的 LLM 字段子集对齐 */
 export interface CompactDecisionShape {
   decisionAction?: string | null;
+  /** 持仓状态轴（v228）；null = 记录早于 v228，非 EMPTY */
+  decisionPositionState?: string | null;
   decisionPositionPct?: number | null;
   confidence?: number | null;
   /** V50: 双视角一致性调制后的置信度 */
@@ -74,17 +76,17 @@ function normalize(data: CompactDecisionComparisonProps["data"]): CompactDecisio
   return {};
 }
 
-/** 归一化 action 字符串(与后端 compute_decision_agreement::normalize_action 保持一致) */
-function normalizeAction(a?: string | null): string {
-  return (a ?? "").trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
-}
-
-/** 把 action 字符串映射成"行动风格"色标(与 DecisionBanner 一致:绿买/红卖/黄观) */
+/**
+ * 把 action 字符串映射成"行动风格"色标（买 → 蓝绿；卖 → 红；中性/未知 → 灰）。
+ *
+ * P1-6(2026-09-14): 原判据用 `norm.includes("买")` —— **只认中文**，英文 token
+ * （`BUY`/`SELL`，后端 DTO 明确可能直返）一律落到灰色，双视角对比里换值域即掉配色。
+ * 改走统一的 `actionToDirection`（已覆盖中英文两套值域）。
+ */
 function actionColor(action?: string | null): string {
-  const norm = normalizeAction(action);
-  // 买/增持 → 蓝绿;持有/观望 → 灰;卖/减持 → 红
-  if (norm.includes("买") || norm.includes("增持")) { return "#10b981"; }
-  if (norm.includes("卖") || norm.includes("减持")) { return "#ef4444"; }
+  const dir = actionToDirection(action);
+  if (dir === "buy") { return "#10b981"; }
+  if (dir === "sell") { return "#ef4444"; }
   return "#94a3b8";
 }
 
@@ -97,7 +99,9 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
     && view.llmDecisionAction !== "null";
   const agreement = typeof view.decisionAgreementScore === "number" ? view.decisionAgreementScore : null;
   const actionsMatch = hasLlm
-    && normalizeAction(view.decisionAction) === normalizeAction(view.llmDecisionAction);
+    // P1-6(2026-09-14): 原按字符串 trim/lower 后直接比字面量 ⇒ 「公式=BUY vs LLM=买入」
+    // 被判成「不一致」。改走 parseAction 统一值域后比较（比语义，不比字形）。
+    && parseAction(view.decisionAction) === parseAction(view.llmDecisionAction);
 
   return (
     <div className="space-y-1.5 text-sm">
@@ -138,7 +142,17 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
           className="font-mono text-sm font-semibold"
           style={{ color: actionColor(view.decisionAction) }}
         >
-          {view.decisionAction ? t(getActionTKey(view.decisionAction)) : "—"}
+          {view.decisionAction
+            ? t(
+              getActionTKey(
+                resolveDisplayAction(
+                  view.decisionAction,
+                  view.decisionPositionState,
+                  view.decisionPositionPct,
+                ),
+              ),
+            )
+            : "—"}
         </span>
         {typeof view.decisionPositionPct === "number" && (
           <span className="text-sm font-mono" style={{ color: "var(--muted)" }}>

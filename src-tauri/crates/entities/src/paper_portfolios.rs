@@ -22,11 +22,12 @@ pub struct Model {
     /// 来源事件描述（如 "英伟达隔夜大跌" / "Meta 卖算力"）
     pub source_event: String,
     /// 关联 news_archive.id，实现新闻→组合溯源（可空）
+    #[sea_orm(indexed)]
     pub source_news_id: Option<String>,
     /// 关联 screenshot_diagnoses.id（G6 用，可空）
     pub source_screenshot_diagnosis_id: Option<String>,
     /// active / closed / archived
-    #[sea_orm(default_value = "active")]
+    #[sea_orm(default_value = "active", indexed)]
     pub status: String,
     /// 创建时间戳（ms）
     pub created_at: i64,

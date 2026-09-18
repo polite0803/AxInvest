@@ -168,13 +168,46 @@ fn count_keyword_groups(text) {
     groups
 }
 
-// has_placeholder: 检测报告是否含占位符/失败标记
+// placeholder_markers: 失败标记词表
+// 2026-09-12 扩充：原表 12 个形态实测有 10.5% 假阴性（27/258 份报告含失败语但未识别，
+// 占全部「真有工具缺口」报告的 25%），漏检形态按频次依次为：
+//   为 null(9) / 返回空(8) / 数据不可用(4) / 无数据(3) / =null(2) /
+//   均为空(2) / 获取失败(2) / 未能获取(2) / 空值(1)
+fn placeholder_markers() {
+    return ["占位报告", "占位", "placeholder", "Placeholder", "PLACEHOLDER",
+            "无法获取", "数据缺失", "未注入", "agentrunner 未注入",
+            "DRY RUN", "TODO", "TBD",
+            "为 null", "=null", "均为空", "返回空", "空值",
+            "数据不可用", "无数据", "获取失败", "未能获取"];
+}
+
+// placeholder_hits: 返回报告命中的失败标记清单（供逐节点归因 + 严重度计数）
+// 折叠规则：命中「占位报告」等长词时不再重复计其子串「占位」，避免同一处双计。
+fn placeholder_hits(text) {
+    if type_of(text) != "string" || text == "" { return []; }
+    let markers = placeholder_markers();
+    let hits = [];
+    for i in 0..markers.len() {
+        if text.contains(markers[i]) { hits.push(markers[i]); }
+    }
+    let long_hit = false;
+    for i in 0..hits.len() {
+        if hits[i] == "占位报告" || hits[i] == "placeholder"
+            || hits[i] == "Placeholder" || hits[i] == "PLACEHOLDER" {
+            long_hit = true;
+        }
+    }
+    if !long_hit { return hits; }
+    let folded = [];
+    for i in 0..hits.len() {
+        if hits[i] != "占位" { folded.push(hits[i]); }
+    }
+    return folded;
+}
+
+// has_placeholder: 检测报告是否含占位符/失败标记（布尔版，供 report_quality 扣分用）
 fn has_placeholder(text) {
-    if type_of(text) != "string" || text == "" { return false; }
-    let markers = ["占位报告", "占位", "placeholder", "Placeholder", "PLACEHOLDER",
-                   "无法获取", "数据缺失", "未注入", "agentrunner 未注入",
-                   "DRY RUN", "TODO", "TBD"];
-    has_any(text, markers)
+    placeholder_hits(text).len() > 0
 }
 
 // ── P2-3 新增(2026-08-09): Schema 驱动的深度字段校验 ──
@@ -223,18 +256,24 @@ fn extract_verdict_str(v) {
     ""
 }
 
-// validate_verdict_schema: 深度字段校验与自动归一化修复
+// validate_verdict_schema: 深度字段校验（纯检测，不改写上游数据）
 // 检查：1) bull_score + bear_score 自洽性 2) verdict 与评分方向一致性 3) confidence 范围
-// 返回修复后的 verdict_data 和问题列表
-fn validate_and_fix_verdict_schema(verdict_data, analyst_name) {
+// 返回问题列表（String 数组）
+//
+// 2026-09-14 修复（假修复）：原实现名为 validate_and_fix_verdict_schema，内部构造
+//   fixed_data 做「自动归一化修复」并写回，但唯一调用方 validate_verdict_schema
+//   只取 issues、fixed_data 被直接丢弃 —— 该「修复」从未生效，属
+//   「声明的机制 ≠ 运行的机制」的出口不严型。且本节点输出为
+//   grade/score/diagnostics，不含 verdict，修复结果本就无下游消费方。
+//   归一化 bull/bear 属各分析师自身职责，检查员只报告、不改写。
+fn validate_verdict_schema(verdict_data, analyst_name) {
     let issues = [];
-    let fixed_data = verdict_data; // 准备进行修改的副本
 
     if type_of(verdict_data) != "map" {
-        return #{ "data": fixed_data, "issues": issues };
+        return issues;
     }
 
-    // 1. bull_score + bear_score 自洽性检查与修复
+    // 1. bull_score + bear_score 自洽性检查
     let bs = extract_bull_score(verdict_data);
     let bes = extract_bear_score(verdict_data);
     
@@ -243,21 +282,8 @@ fn validate_and_fix_verdict_schema(verdict_data, analyst_name) {
         // 如果总和偏离 100 超过 10，触发告警
         if sum < 90.0 || sum > 110.0 {
             issues.push(`[${analyst_name}] 评分不自洽: bull_score + bear_score = ${sum} (应约为 100)`);
-            
-            // 自动归一化修复（强制修复，确保数据自洽）
-            // 防止除以0
-            if sum > 0.0 {
-                let new_bs = round((bs / sum) * 100.0);
-                let new_bes = round((bes / sum) * 100.0);
-                
-                // 修正后的分数写回
-                fixed_data["bull_score"] = new_bs;
-                fixed_data["bear_score"] = new_bes;
-                
-                issues.push(`[${analyst_name}] 已自动修复评分: bull_score -> ${new_bs}, bear_score -> ${new_bes} (归一化至 100)`);
-            }
         } else if sum < 95.0 || sum > 105.0 {
-            // 轻微偏离（5-10之间），仅告警，不强制修复
+            // 轻微偏离（5-10 之间），仅告警
             issues.push(`[${analyst_name}] 评分轻微偏离: bull_score + bear_score = ${sum} (建议约为 100)`);
         }
     }
@@ -267,24 +293,12 @@ fn validate_and_fix_verdict_schema(verdict_data, analyst_name) {
     if v != "" && present(bs) && present(bes) {
         let is_bull = v.contains("看多") || v.contains("看涨") || v.contains("偏多");
         let is_bear = v.contains("看空") || v.contains("看跌") || v.contains("偏空");
-        
-        // 如果评分被修复，使用修复后的分数进行判断
-        let effective_bs = if present(fixed_data["bull_score"]) {
-            fixed_data["bull_score"].to_float()
-        } else {
-            bs
-        };
-        let effective_bes = if present(fixed_data["bear_score"]) {
-            fixed_data["bear_score"].to_float()
-        } else {
-            bes
-        };
 
-        if is_bull && effective_bs <= effective_bes {
-            issues.push(`[${analyst_name}] 逻辑矛盾: verdict='${v}' 但 bull_score(${effective_bs}) <= bear_score(${effective_bes})`);
+        if is_bull && bs <= bes {
+            issues.push(`[${analyst_name}] 逻辑矛盾: verdict='${v}' 但 bull_score(${bs}) <= bear_score(${bes})`);
         }
-        if is_bear && effective_bes <= effective_bs {
-            issues.push(`[${analyst_name}] 逻辑矛盾: verdict='${v}' 但 bear_score(${effective_bes}) <= bull_score(${effective_bs})`);
+        if is_bear && bes <= bs {
+            issues.push(`[${analyst_name}] 逻辑矛盾: verdict='${v}' 但 bear_score(${bes}) <= bull_score(${bs})`);
         }
     }
 
@@ -293,8 +307,6 @@ fn validate_and_fix_verdict_schema(verdict_data, analyst_name) {
     if conf >= 0.0 {
         if conf > 100.0 {
             issues.push(`[${analyst_name}] 置信度越界: confidence=${conf} (超出 0-100)`);
-            // 自动修复 confidence
-            fixed_data["confidence"] = 100.0;
         }
         // 极低置信度也告警
         if conf > 0.0 && conf < 10.0 {
@@ -302,31 +314,32 @@ fn validate_and_fix_verdict_schema(verdict_data, analyst_name) {
         }
     }
 
-    #{ "data": fixed_data, "issues": issues }
+    issues
 }
 
-// 保留旧接口以兼容
-fn validate_verdict_schema(verdict_data, analyst_name) {
-    let result = validate_and_fix_verdict_schema(verdict_data, analyst_name);
-    result["issues"]
-}
-
-// report_quality: 算法化报告质量分（0-100）
-// 维度：字数(40) + 关键词覆盖(30) + 占位符扣分(-15) + 一致性奖励(10)
+// report_quality: 算法化报告质量分（0-100，满量程）
+// 维度：字数(50) + 关键词覆盖(40) + 占位符扣分(-15) + 一致性奖励(10)
 // 缺失报告（空字符串）返回 0
+//
+// 2026-09-14 修复（满量程）：原各维度上限合计仅 80（40+30+10），不是 100 ⇒
+//   report_quality_avg ≤ 80 ⇒ score ≤ 80×0.35 + 100×0.35 + 100×0.30 = 93，
+//   0.35 的权重被系统性稀释，A 级（≥85）只剩 8 分余量、近乎不可达。
+//   更关键的是 V67 调整因子完整度权重时，论证用的是「报告满分 100」的错误前提
+//   （100×0.45 + 100×0.35 + 50×0.20 = 90 判 A），据此得出的
+//   「5/10 因子缺失仍可达 A 级」结论与实际不符。现补齐至满量程 100。
 fn report_quality(text, conf) {
     if type_of(text) != "string" || text == "" { return 0.0; }
 
     let chars = count_chars(text);
-    // 字数评分（40 分）
-    let length_score = if chars >= 500 { 40.0 }
-        else if chars >= 200 { 25.0 }
+    // 字数评分（50 分）
+    let length_score = if chars >= 500 { 50.0 }
+        else if chars >= 200 { 30.0 }
         else if chars >= 50 { 10.0 }
         else { 0.0 };
 
-    // 关键词覆盖评分（30 分，5 组 × 6 分）
+    // 关键词覆盖评分（40 分，5 组 × 8 分）
     let kw_groups = count_keyword_groups(text);
-    let kw_score = kw_groups.to_float() * 6.0;
+    let kw_score = kw_groups.to_float() * 8.0;
 
     // 占位符扣分（-15）
     let placeholder_penalty = if has_placeholder(text) { -15.0 } else { 0.0 };
@@ -384,6 +397,25 @@ let lk_r = extract_report(lk_report);
 let res_r = extract_report(res_report);
 let sec_r = extract_report(sec_report);
 let cat_r = extract_report(cat_report);
+
+// ── 2026-09-12: 报告文本失败标记检测（路径 A，客观证据）──
+// 与路径 B（diag_for 消费的 LLM 自评 confidence）独立，此前两者全程无交叉：
+//   has_placeholder 只影响 report_quality 扣分 + 一句「有占位符」告警（10 节点 OR 成一个布尔），
+//   diag_for 只看 confidence ⇒ 603353 实证：失败标记最多 5 处的 hm(cf=55) 显示「正常」，
+//   而标记为 0、数据齐全的 sec(cf=45) 被判「低置信」。
+// 现按节点分别计算命中数，注入 diag_for 作为 status 的第二证据源。
+let mk_ph = placeholder_hits(mk_r);
+let sent_ph = placeholder_hits(sent_r);
+let news_ph = placeholder_hits(news_r);
+let fund_ph = placeholder_hits(fund_r);
+let pol_ph = placeholder_hits(pol_r);
+let hm_ph = placeholder_hits(hm_r);
+let lk_ph = placeholder_hits(lk_r);
+let res_ph = placeholder_hits(res_r);
+let sec_ph = placeholder_hits(sec_r);
+let cat_ph = placeholder_hits(cat_r);
+let placeholder_total_hits = mk_ph.len() + sent_ph.len() + news_ph.len() + fund_ph.len()
+    + pol_ph.len() + hm_ph.len() + lk_ph.len() + res_ph.len() + sec_ph.len() + cat_ph.len();
 
 // 单个分析师报告质量分（缺失报告 → 0 分）
 let mk_q = report_quality(mk_r, mk_c);
@@ -449,23 +481,28 @@ let n_int = count_present(mk_verdict) + count_present(sent_verdict) + count_pres
     + count_present(cat_verdict);
 let n = n_int.to_float();
 
-let good_count = 0;       // confidence >= 50 且 非 untrusted
+let good_count = 0;       // confidence >= 50 且 非 untrusted 且 报告无失败标记
+let degraded_count = 0;    // 有输出、confidence >= 50，但报告文本含失败标记（置信度虚高）
 let valid_count = 0;      // confidence >= 0 且 非 untrusted
 let gap_count = 0;        // 数据完全缺失（confidence < 0）或 untrusted
 let total_conf = 0.0;     // 累加有效 confidence（排除 untrusted）
 
 // 修复(2026-07-29): untrusted 分析师不计入 valid/good_count,计入 gap_count
 //   理由: strict_mode 降级的 confidence=50 是中性兜底,不代表真实数据质量
-if mk_u || mk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += mk_c; if mk_c >= 50.0 { good_count += 1; } }
-if sent_u || sent_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sent_c; if sent_c >= 50.0 { good_count += 1; } }
-if news_u || news_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += news_c; if news_c >= 50.0 { good_count += 1; } }
-if fund_u || fund_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += fund_c; if fund_c >= 50.0 { good_count += 1; } }
-if pol_u || pol_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += pol_c; if pol_c >= 50.0 { good_count += 1; } }
-if hm_u || hm_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += hm_c; if hm_c >= 50.0 { good_count += 1; } }
-if lk_u || lk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += lk_c; if lk_c >= 50.0 { good_count += 1; } }
-if res_u || res_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += res_c; if res_c >= 50.0 { good_count += 1; } }
-if sec_u || sec_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sec_c; if sec_c >= 50.0 { good_count += 1; } }
-if cat_u || cat_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += cat_c; if cat_c >= 50.0 { good_count += 1; } }
+// 2026-09-12 修复: good_count 原判据只有「自评 confidence >= 50」，与报告文本证据（路径 A）
+//   完全脱钩 ⇒ 置信度虚高的节点（hm cf=55 但报告 5 处「无法获取/返回空」）被计为 good，
+//   虚高 tool_credibility_score。现改为 **A ∪ B**：报告含失败标记即降级（degraded_count），
+//   不再计入 good。degraded 归入 low 语义（low_count = n_int - good - gap 天然包含）。
+if mk_u || mk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += mk_c; if mk_c >= 50.0 { if mk_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if sent_u || sent_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sent_c; if sent_c >= 50.0 { if sent_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if news_u || news_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += news_c; if news_c >= 50.0 { if news_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if fund_u || fund_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += fund_c; if fund_c >= 50.0 { if fund_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if pol_u || pol_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += pol_c; if pol_c >= 50.0 { if pol_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if hm_u || hm_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += hm_c; if hm_c >= 50.0 { if hm_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if lk_u || lk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += lk_c; if lk_c >= 50.0 { if lk_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if res_u || res_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += res_c; if res_c >= 50.0 { if res_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if sec_u || sec_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sec_c; if sec_c >= 50.0 { if sec_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if cat_u || cat_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += cat_c; if cat_c >= 50.0 { if cat_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
 
 let avg_conf = if valid_count > 0 { total_conf / valid_count.to_float() } else { 0.0 };
 
@@ -479,8 +516,11 @@ let report_quality_avg = if n > 0.0 { report_quality_sum / n } else { 0.0 };
 let tool_credibility_score = tool_credibility(avg_conf, good_count, gap_count, n_int);
 
 // ── P2-2 修复(2026-08-09): 分析师方向矛盾检测（升级为加权模式） ──
-// data-quality-inspector.md 职责第 3 条要求"分析师结论是否相互矛盾"，
+// 该检测源自原 data-quality-inspector 专家方法论第 3 条（"分析师结论是否相互矛盾"），
 // 但原 Rhai 版只用了 confidence，verdict 方向字段被完全丢弃。
+// 2026-09-14: 上述专家已注销注册，其职责由本 CodeNode 全权承担（见
+// stock_analysis_setup/mod.rs 的 RETIRED_EXPERT_IDS）；该 .md 文件作为方法论文档保留，
+// 不再是工作流专家。
 // 现解析 10 个分析师的方向分值（看多/偏多→+1，中性→0，看空/偏空→-1），
 // untrusted 分析师方向不计（数据不可信）。
 // V2 升级(2026-08-09): 从简单计数升级为加权评估（结合 confidence 权重），
@@ -646,7 +686,7 @@ if validation_penalty > 0.0 {
 }
 
 // ── 因子数据完整度（0.0 ~ 1.0）──
-// 调用 Rust 函数 pm_compute_factor_completeness 评估 10 个因子的数据存在性。
+// 调用 Rust 函数 pm_compute_factor_completeness 评估 9 个因子的数据存在性。
 // 因子缺失也是数据质量问题的一部分，纳入综合评分可避免「分析师报告写得好看但因子数据全缺」的虚高评分。
 // P1-1 修复(2026-08-09): 注入的 money_flow/lockup_bundle/announcements 经 code_executor
 // 的 resolve_var_path（auto_parse_value 解析 JSON 字符串为对象）+ json_value_to_dynamic
@@ -691,14 +731,16 @@ fn extract_announcements_len(raw) {
 let mf_main_net_inflow = extract_main_net_inflow(money_flow);
 let lb_shareholder_trades_len = extract_shareholder_trades_len(lockup_bundle);
 let ann_count = extract_announcements_len(announcements);
-// P2-2 修复(2026-08-09): trader_direction 契约为字符串（trader.md "看多|看空|中性"），
-// 但 LLM 若输出嵌套 map（verdict: {...}），Rhai map 传给 pm_compute_factor_completeness
-// 的 Option<&str> 参数会报类型转换错误 → 整个脚本失败 → quality-gate 走 default →
-// quality-fallback 误降级。类型防御：非字符串按缺失（unit）处理。
-let trader_direction_safe = if type_of(trader_direction) == "string" { trader_direction } else { () };
+// 2026-09-12: 移除 f7「交易方向」因子。根本原因：data-quality 是 trader 的**上游**
+// （trader 的 dqi_score 由本节点提供），架构上不可能读到 trader 的输出。原实现的
+// trader_direction input_mapping 因循环依赖被删边（见 seed_stock_analysis.rs 的
+// 「修复循环依赖: 移除 trader → data-quality 边」注释）⇒ 该变量恒为 () ⇒ 因子恒缺失
+// ⇒ 完整度上限被钉在 0.9、综合分恒定少 3 分，且 UI 恒显示「缺失因子：交易方向」
+// 这条假告警。f7 的可用性由 portfolio-mgr（trader 下游）消费，不在本节点职责内。
+// 现分母 10 → 9（与 portfolio_formula::compute_factor_completeness 同步）。
 let factor_completeness = pm_compute_factor_completeness(
     total_score, consensus_score, catalyst_level,
-    risk_volatility, valuation_dcf_upside, trader_direction_safe,
+    risk_volatility, valuation_dcf_upside,
     mf_main_net_inflow, lb_shareholder_trades_len,
     ann_count, pace_signal
 );
@@ -711,8 +753,8 @@ if !present(consensus_score) || consensus_score <= 0.0 { missing_factors.push("�
 if !present(catalyst_level) || catalyst_level == "" || catalyst_level == "无" { missing_factors.push("催化剂等级"); }
 if !present(risk_volatility) || risk_volatility <= 0.0 { missing_factors.push("风险波动率"); }
 if !present(valuation_dcf_upside) { missing_factors.push("估值上行空间"); }
-// P2-2 修复(2026-08-09): 用类型防御后的 trader_direction_safe 判断（map 恒非空、"" 判断对 map 恒 false）
-if !present(trader_direction_safe) || trader_direction_safe == "" { missing_factors.push("交易方向"); }
+// 2026-09-12: 「交易方向」判定项已删除（f7 因子整体移除，见上方说明）。
+// 该变量在此处恒为 ()，保留只会让 UI 永久显示一条无法消除的假告警。
 // P2-1(2026-08-09): 与 Rust compute_factor_completeness 口径对齐——主力净流入=0 视为中性无信号（缺失）
 if !present(mf_main_net_inflow) || mf_main_net_inflow == 0.0 { missing_factors.push("主力净流入"); }
 if !present(lb_shareholder_trades_len) || lb_shareholder_trades_len <= 0 { missing_factors.push("股东增减持"); }
@@ -745,24 +787,40 @@ let grade = if final_score >= 85.0 { "A" }
 // ── 诊断条目生成 ──
 // P3-4 修复(2026-08-09): strict_mode 降级的分析师 confidence=50（中性兜底）原显示
 // "normal"，与 untrusted 语义矛盾。新增 untrusted 参数，降级分析师显示 "untrusted"。
-fn diag_for(c, name, expected, untrusted) {
+fn diag_for(c, name, expected, untrusted, ph_n) {
+    let has_ph = ph_n > 0;
+    // 2026-09-12: status 判定从「只看 LLM 自评 confidence」升级为 **A ∪ B**
+    //   A = 报告文本失败标记（客观，placeholder_hits）
+    //   B = analyst 自评 confidence（主观）
+    // 修复前实证反例（603353）：hm 报告有 5 处「无法获取/返回空」而 cf=55 → 显示「正常」；
+    //   sec 报告数据齐全（排名 29/30、板块 -3.26%、净流出 4.08 亿）而 cf=45 → 显示「低置信」。
+    // 现 A 优先：报告含失败标记即至少 low（无论自评多少）。
     let status = if untrusted { "untrusted" }
         else if c < 0.0 { "missing" }
+        else if has_ph { "low" }
         else if c < 50.0 { "low" }
         else { "normal" };
+    // gap_reason 从「三选一免责罗列」升级为确定归因（原文案：
+    //   "可能原因：上游工具数据不完整 / strict_mode 降级兜底 / 分析师对数据覆盖度不满意"
+    //   —— 系统有能力真归因，却把判断责任抛给用户）。
     let reason = if untrusted {
         "strict_mode 降级（LLM 不可用/超时，confidence 为中性兜底，数据不可信）"
     } else if c < 0.0 {
         "节点未输出 VERDICT 或 confidence 字段缺失（可能原因：LLM 超时/截断/解析失败/strict_mode 降级未注入 confidence）"
+    } else if has_ph && c < 50.0 {
+        `确定归因：上游工具数据不完整 —— 报告含 ${ph_n} 处失败标记，且置信度自评仅 ${c}`
+    } else if has_ph {
+        `确定归因：上游工具数据不完整 —— 报告含 ${ph_n} 处失败标记（置信度自评 ${c} 偏高，未反映该缺口）`
     } else if c < 50.0 {
-        `置信度自评 ${c}（可能原因：上游工具数据不完整 / strict_mode 降级兜底 / 分析师对数据覆盖度不满意）`
+        "非数据缺口：报告无失败标记、字段齐全 —— 置信度自评低反映的是分析师对自身结论的不确定，而非数据缺失（confidence 语义与系统按「数据充分度」消费的口径不一致）"
     } else { "" };
     #{
         "name": name,
         "expected_data": expected,
         "confidence": c,
         "status": status,
-        "gap_reason": reason
+        "gap_reason": reason,
+        "placeholder_hits": ph_n
     }
 }
 
@@ -776,30 +834,48 @@ fn join_arr(arr, sep) {
 }
 
 let diagnostics = #{
-    "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u),
-    "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、资金流向、散户/机构态度（t-sentiment-data）", sent_u),
-    "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u),
-    "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）", fund_u),
-    "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u),
-    "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）", hm_u),
-    "lk": diag_for(lk_c, "解禁观察员", "解禁减持、质押风险、大宗交易（t-lockup-data）", lk_u),
-    "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u),
-    "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）", sec_u),
-    "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）", cat_u)
+    "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u, mk_ph.len()),
+    "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、资金流向、散户/机构态度（t-sentiment-data）", sent_u, sent_ph.len()),
+    "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph.len()),
+    "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）", fund_u, fund_ph.len()),
+    "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u, pol_ph.len()),
+    "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）", hm_u, hm_ph.len()),
+    "lk": diag_for(lk_c, "解禁观察员", "解禁减持、质押风险、大宗交易（t-lockup-data）", lk_u, lk_ph.len()),
+    "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u, res_ph.len()),
+    "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）", sec_u, sec_ph.len()),
+    "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）", cat_u, cat_ph.len())
 };
 
 let missing_analysts = [];
 let low_confidence_analysts = [];
-if mk_c < 0.0 { missing_analysts.push("技术面"); } else if mk_c < 50.0 { low_confidence_analysts.push("技术面"); }
-if sent_c < 0.0 { missing_analysts.push("情绪面"); } else if sent_c < 50.0 { low_confidence_analysts.push("情绪面"); }
-if news_c < 0.0 { missing_analysts.push("新闻面"); } else if news_c < 50.0 { low_confidence_analysts.push("新闻面"); }
-if fund_c < 0.0 { missing_analysts.push("基本面"); } else if fund_c < 50.0 { low_confidence_analysts.push("基本面"); }
-if pol_c < 0.0 { missing_analysts.push("政策面"); } else if pol_c < 50.0 { low_confidence_analysts.push("政策面"); }
-if hm_c < 0.0 { missing_analysts.push("资金面"); } else if hm_c < 50.0 { low_confidence_analysts.push("资金面"); }
-if lk_c < 0.0 { missing_analysts.push("解禁观察"); } else if lk_c < 50.0 { low_confidence_analysts.push("解禁观察"); }
-if res_c < 0.0 { missing_analysts.push("研报"); } else if res_c < 50.0 { low_confidence_analysts.push("研报"); }
-if sec_c < 0.0 { missing_analysts.push("行业"); } else if sec_c < 50.0 { low_confidence_analysts.push("行业"); }
-if cat_c < 0.0 { missing_analysts.push("催化剂"); } else if cat_c < 50.0 { low_confidence_analysts.push("催化剂"); }
+// 2026-09-12: 口径与 gap_count / diagnostics.status 对齐
+//   missing = untrusted || c < 0（原实现漏了 untrusted，与 gap_count 不一致）
+//   low     = c < 50 || 报告含失败标记（原实现只看 confidence）
+if mk_u || mk_c < 0.0 { missing_analysts.push("技术面"); } else if mk_c < 50.0 || mk_ph.len() > 0 { low_confidence_analysts.push("技术面"); }
+if sent_u || sent_c < 0.0 { missing_analysts.push("情绪面"); } else if sent_c < 50.0 || sent_ph.len() > 0 { low_confidence_analysts.push("情绪面"); }
+if news_u || news_c < 0.0 { missing_analysts.push("新闻面"); } else if news_c < 50.0 || news_ph.len() > 0 { low_confidence_analysts.push("新闻面"); }
+if fund_u || fund_c < 0.0 { missing_analysts.push("基本面"); } else if fund_c < 50.0 || fund_ph.len() > 0 { low_confidence_analysts.push("基本面"); }
+if pol_u || pol_c < 0.0 { missing_analysts.push("政策面"); } else if pol_c < 50.0 || pol_ph.len() > 0 { low_confidence_analysts.push("政策面"); }
+if hm_u || hm_c < 0.0 { missing_analysts.push("资金面"); } else if hm_c < 50.0 || hm_ph.len() > 0 { low_confidence_analysts.push("资金面"); }
+if lk_u || lk_c < 0.0 { missing_analysts.push("解禁观察"); } else if lk_c < 50.0 || lk_ph.len() > 0 { low_confidence_analysts.push("解禁观察"); }
+if res_u || res_c < 0.0 { missing_analysts.push("研报"); } else if res_c < 50.0 || res_ph.len() > 0 { low_confidence_analysts.push("研报"); }
+if sec_u || sec_c < 0.0 { missing_analysts.push("行业"); } else if sec_c < 50.0 || sec_ph.len() > 0 { low_confidence_analysts.push("行业"); }
+if cat_u || cat_c < 0.0 { missing_analysts.push("催化剂"); } else if cat_c < 50.0 || cat_ph.len() > 0 { low_confidence_analysts.push("催化剂"); }
+
+// 2026-09-12: 报告文本含失败标记的节点逐项清单（原实现把 10 节点 OR 成一个布尔，
+// 前端只能看到「检测到占位符」一句话，无法定位是哪个分析师/工具出问题）。
+let placeholder_nodes = [];      // 中文名，供 UI 展示
+let placeholder_node_ids = [];   // 节点缩写（mk/sent/...），供定位 agent 节点
+if mk_ph.len() > 0 { placeholder_nodes.push("技术面"); placeholder_node_ids.push("mk"); }
+if sent_ph.len() > 0 { placeholder_nodes.push("情绪面"); placeholder_node_ids.push("sent"); }
+if news_ph.len() > 0 { placeholder_nodes.push("新闻面"); placeholder_node_ids.push("news"); }
+if fund_ph.len() > 0 { placeholder_nodes.push("基本面"); placeholder_node_ids.push("fund"); }
+if pol_ph.len() > 0 { placeholder_nodes.push("政策面"); placeholder_node_ids.push("pol"); }
+if hm_ph.len() > 0 { placeholder_nodes.push("资金面"); placeholder_node_ids.push("hm"); }
+if lk_ph.len() > 0 { placeholder_nodes.push("解禁观察"); placeholder_node_ids.push("lk"); }
+if res_ph.len() > 0 { placeholder_nodes.push("研报"); placeholder_node_ids.push("res"); }
+if sec_ph.len() > 0 { placeholder_nodes.push("行业"); placeholder_node_ids.push("sec"); }
+if cat_ph.len() > 0 { placeholder_nodes.push("催化剂"); placeholder_node_ids.push("cat"); }
 
 let low_count = n_int - good_count - gap_count;
 
@@ -834,23 +910,24 @@ if lk_r != "" && count_chars(lk_r) < 200 { warnings.push("解禁观察报告字�
 if res_r != "" && count_chars(res_r) < 200 { warnings.push("研报报告字数不足 200"); }
 if sec_r != "" && count_chars(sec_r) < 200 { warnings.push("行业报告字数不足 200"); }
 if cat_r != "" && count_chars(cat_r) < 200 { warnings.push("催化剂报告字数不足 200"); }
-// 占位符检测
-if has_placeholder(mk_r) || has_placeholder(sent_r) || has_placeholder(news_r)
-    || has_placeholder(fund_r) || has_placeholder(pol_r) || has_placeholder(hm_r)
-    || has_placeholder(lk_r) || has_placeholder(res_r) || has_placeholder(sec_r)
-    || has_placeholder(cat_r) {
-    warnings.push("检测到占位符/失败标记（占位报告/placeholder/无法获取等）");
+// 占位符/失败标记检测
+// 2026-09-12: 逐节点清单替代原「10 节点 OR 成一个布尔」——
+// 原实现只能报「有问题」，无法回答「是哪个分析师/哪个工具」。
+if placeholder_nodes.len() > 0 {
+    warnings.push(`检测到占位符/失败标记：${join_arr(placeholder_nodes, "、")}（共 ${placeholder_total_hits} 处；节点 ${join_arr(placeholder_node_ids, "/")}）`);
 }
 
 let summary_text = if grade == "F" || grade == "D" {
-    let base = `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${gap_count} 个缺失，${low_count} 个低置信，${good_count} 个高置信，${untrusted_analyst_count} 个降级。`;
+    let base = `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${gap_count} 个缺失，${low_count} 个低置信（其中 ${degraded_count} 个为报告含失败标记但自评偏高），${good_count} 个高置信，${untrusted_analyst_count} 个降级。`;
     let miss_part = if missing_analysts.len() > 0 { `缺失：${join_arr(missing_analysts, "、")}。` } else { "" };
     let low_part = if low_confidence_analysts.len() > 0 { `低置信：${join_arr(low_confidence_analysts, "、")}。` } else { "" };
+    let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（共 ${placeholder_total_hits} 处）。` } else { "" };
     let val_part = if field_validation_issues.len() > 0 { `字段校验问题：${field_validation_issues.len()} 个。` } else { "" };
-    `${base}${miss_part}${low_part}${val_part}平均置信度 ${avg_conf}。建议检查对应分析师的上游工具数据源。`
+    `${base}${miss_part}${low_part}${ph_part}${val_part}平均置信度 ${avg_conf}。建议检查对应分析师的上游工具数据源。`
 } else {
     let val_part = if field_validation_issues.len() > 0 { `字段校验问题：${field_validation_issues.len()} 个；` } else { "" };
-    `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${good_count}/${n_int} 高置信度，${untrusted_analyst_count} 个降级，${val_part}平均置信度 ${avg_conf}。`
+    let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 处）；` } else { "" };
+    `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${good_count}/${n_int} 高置信度，${untrusted_analyst_count} 个降级，${ph_part}${val_part}平均置信度 ${avg_conf}。`
 };
 
 #{
@@ -862,6 +939,12 @@ let summary_text = if grade == "F" || grade == "D" {
     "missing_factors": missing_factors,
     "gap_count": gap_count,
     "good_count": good_count,
+    // 2026-09-12: 报告含失败标记但自评 confidence >= 50 的节点数（置信度虚高）
+    "degraded_count": degraded_count,
+    // 2026-09-12: 报告文本含失败标记的逐节点清单（中文名 / 节点缩写 / 命中总数）
+    "placeholder_nodes": placeholder_nodes,
+    "placeholder_node_ids": placeholder_node_ids,
+    "placeholder_total_hits": placeholder_total_hits,
     "avg_confidence": (avg_conf * 10.0).round() / 10.0,
     "total_analysts": n,
     // P2-2(2026-08-09): 方向冲突检测结果（升级为加权模式）

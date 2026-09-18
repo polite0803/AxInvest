@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::openai::validate_tool_call_arguments;
 use std::pin::Pin;
 
+use crate::compat::impl_default_via_new;
 use crate::url_utils::resolve_chat_url;
 use crate::{ProviderAdapter, ProviderRequestContext, build_http_client};
 
@@ -22,11 +23,7 @@ pub struct OpenAIResponsesAdapter {
     client: reqwest::Client,
 }
 
-impl Default for OpenAIResponsesAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(OpenAIResponsesAdapter);
 
 impl OpenAIResponsesAdapter {
     pub fn new() -> Self {

@@ -13,9 +13,11 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 荐股生成时间戳 (ISO 8601)
+    #[sea_orm(indexed)]
     pub generated_at: String,
     /// 周期: "short" | "mid" | "long"
     pub period: String,
+    #[sea_orm(indexed)]
     pub stock_code: String,
     pub stock_name: String,
     /// 命中风格: "trend" | "value" | "capital" | "reversion" | "watchlist"

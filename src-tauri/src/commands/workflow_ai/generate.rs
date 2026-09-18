@@ -113,7 +113,14 @@ dataTransformer, webhookSend, logging, llmClassifier, aggregator, email, end
       "label": "可选，parallelBranch 时填 'branch-N'"
     }}
   ],
-  "explanation": "一段中文解释：为什么这样设计、关键节点的作用、潜在风险"
+  "explanation": "一段中文解释：为什么这样设计、关键节点的作用、潜在风险",
+  "alternatives": [
+    {{
+      "nodes": [ ...同顶层结构... ],
+      "edges": [ ...同顶层结构... ],
+      "explanation": "该备选方案的设计思路"
+    }}
+  ]
 }}
 
 === 强制规则 ===
@@ -126,7 +133,8 @@ dataTransformer, webhookSend, logging, llmClassifier, aggregator, email, end
 7. 若请求违反平台规则（如要求越权访问），intent=refuse，explanation 写明原因。
 8. 涉及并发/批量处理用 parallel；循环遍历用 loop；不要把循环当并发。
 9. 跨多个服务编排时优先用 subWorkflow 复用已有工作流。
-10. 知识检索/文档问答用 vectorRetrieve + documentParser；不要用 llm 凭空生成。{context_section}"#,
+10. 知识检索/文档问答用 vectorRetrieve + documentParser；不要用 llm 凭空生成。{context_section}
+11. 当需求适合多种设计思路时，额外提供最多 2 个完整备选方案（alternatives，结构同顶层）；备选方案应在节点选型、编排顺序或分支策略上真正不同。若只需一种合理方案，省略 alternatives 字段。"#,
         roles_brief =
             build_roles_and_experts_brief().await.unwrap_or_else(|| "（暂无可用专家）".to_string())
     );
@@ -151,7 +159,7 @@ dataTransformer, webhookSend, logging, llmClassifier, aggregator, email, end
         ],
         temperature: Some(0.7),
         top_p: None,
-        max_tokens: Some(4096),
+        max_tokens: Some(8192),
         stream: false,
         tools: None,
         thinking_budget: None,

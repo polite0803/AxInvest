@@ -559,6 +559,28 @@ pub struct BoardMember {
     pub change_pct: Option<f64>,
 }
 
+/// 单日历史估值快照（估值带的数据供应方）
+///
+/// 来源：东财数据中心 `RPT_VALUEANALYSIS_DET`（每交易日一行，可回溯 8 年+）。
+/// 用途：回填本地 `financial_snapshots` 表 —— 该表原设计为"每日 EOD 写一行"，
+/// 但当时没有任何写入路径，导致估值带永远算不出分位（样本恒为 0）。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ValuationSnapshot {
+    /// 交易日，YYYY-MM-DD
+    pub trade_date: String,
+    pub pe_ttm: Option<f64>,
+    /// 市净率（MRQ）
+    pub pb: Option<f64>,
+    pub ps_ttm: Option<f64>,
+    /// 市现率（经营现金流 TTM）
+    pub pcf: Option<f64>,
+    /// 当日收盘价（未复权）
+    pub close_price: Option<f64>,
+    /// 当日总市值
+    pub total_market_cap: Option<f64>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

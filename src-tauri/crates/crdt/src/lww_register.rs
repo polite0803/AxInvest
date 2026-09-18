@@ -57,6 +57,10 @@ impl LWWRegister {
     }
 
     /// 判断是否应该用新值替换当前值
+    ///
+    /// 三级确定性打破：`timestamp` → `logical_clock` → `site_id`（字典序）。
+    /// 第三级保证任意两台设备在时间戳与逻辑时钟都相同时仍能选出同一个赢家
+    /// （否则各副本会各自保留本地值而永久分叉）。
     fn should_replace(&self, timestamp: u64, logical_clock: u64, site_id: &str) -> bool {
         if timestamp > self.timestamp {
             return true;
@@ -66,7 +70,7 @@ impl LWWRegister {
         }
         if timestamp == self.timestamp
             && logical_clock == self.logical_clock
-            && site_id > &self.site_id
+            && site_id > self.site_id.as_str()
         {
             return true;
         }

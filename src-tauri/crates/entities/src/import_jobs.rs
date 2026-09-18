@@ -15,10 +15,14 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub source_type: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "scanning")]
     pub status: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub summary_json: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub conflict_count: i32,
+    #[sea_orm(indexed)]
     pub created_at: String,
 }
 

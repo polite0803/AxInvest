@@ -1,0 +1,21 @@
+# Domain Pack: 设计（design）
+id: design
+name: "设计完整流程"
+icon: "🎨"
+description: "UI/UX 设计、视觉设计、品牌设计、设计系统"
+version: 1
+enabled: true
+domain: ai_media
+capabilities:
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:WebSearch"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:FileWrite"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcCreateContentAsset"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcCreateLandingPage"}

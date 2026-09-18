@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { useWorkspaceTabNavigator } from "@/hooks/useWorkspaceTabNavigator";
 import { CHAT_ICON_COLORS } from "@/lib/iconColors";
 import { executeActionChain } from "@/lib/skillActionExecutor";
 import { resolveIconComponent } from "@/lib/skillIcons";
-import { useSkillExtensionStore, useUIStore } from "@/stores";
+import { workspaceTabShortcutLabel } from "@/lib/workspaceShortcuts";
+import {
+  GATED_WORKSPACE_TABS,
+  WORKSPACE_TAB_ICON_COLORS,
+  WORKSPACE_TAB_ICONS,
+  WORKSPACE_TABS,
+} from "@/lib/workspaceTabs";
+import { useSettingsStore, useSkillExtensionStore, useUIStore } from "@/stores";
 import { Input, Modal, Tag, theme, Typography } from "antd";
 import { MessageSquare, Network, PanelLeftClose, Plus, Puzzle, Search, Settings, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -97,6 +105,8 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   const navigate = useNavigate();
   const toggleSidebar = useUIStore((s) => s.toggleSidebar);
+  const switchWorkspaceTab = useWorkspaceTabNavigator();
+  const showDevTools = useSettingsStore((s) => s.settings.showDeveloperTools !== false);
 
   // 基础命令 + 注册的动态命令
   const commands = useMemo<Command[]>(() => {
@@ -104,14 +114,17 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     const actions = t("commandPalette.actions");
     const settings = t("commandPalette.settings");
 
+    // 「去对话」是明确诉求，必须显式切到 chat Tab —— 只 navigate("/") 会被
+    // WorkspaceHub 解读为「回上次工作位置」（保留持久化 Tab），用户会以为命令失效
     const builtin: Command[] = [
       {
         id: "go-chat",
         label: t("commandPalette.goToChat"),
         icon: <MessageSquare size={16} color={CHAT_ICON_COLORS.MessageSquare} />,
+        shortcut: workspaceTabShortcutLabel("chat"),
         category: nav,
         action: () => {
-          navigate("/");
+          switchWorkspaceTab("chat");
           onClose();
         },
       },
@@ -214,11 +227,31 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       },
     ];
 
+    // 工作台功能 Tab 命令：补齐「工作台 Tab 只有顶部切换栏一条入口」的缺口 ——
+    // 在业务页（/invest、/opc/*）时用户可通过命令面板直接进终端/文件/知识源等。
+    const workbench = t("commandPalette.workbench");
+    const workspaceCommands: Command[] = WORKSPACE_TABS.filter(
+      (tab) => showDevTools || !GATED_WORKSPACE_TABS.includes(tab.key),
+    ).map((tab) => {
+      const TabIcon = WORKSPACE_TAB_ICONS[tab.key];
+      return {
+        id: `workspace-tab-${tab.key}`,
+        label: `${workbench}: ${t(tab.labelKey)}`,
+        icon: <TabIcon size={16} color={WORKSPACE_TAB_ICON_COLORS[tab.key]} />,
+        shortcut: workspaceTabShortcutLabel(tab.key),
+        category: workbench,
+        action: () => {
+          switchWorkspaceTab(tab.key);
+          onClose();
+        },
+      };
+    });
+
     // 合并动态注册的命令（去重）
     const ids = new Set(builtin.map((c) => c.id));
     const extra = commandRegistry.filter((c) => !ids.has(c.id));
-    return [...builtin, ...extra];
-  }, [t, navigate, toggleSidebar, onClose]);
+    return [...builtin, ...workspaceCommands, ...extra];
+  }, [t, navigate, toggleSidebar, switchWorkspaceTab, showDevTools, onClose]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) {

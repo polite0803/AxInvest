@@ -442,21 +442,18 @@ pub(crate) fn best_cluster_by_keywords(
 mod tests {
     use super::*;
     use crate::capability::CapabilityDomain;
+    use crate::domain_registry::business_domains;
 
-    const BUSINESS_DOMAINS: [CapabilityDomain; 8] = [
-        CapabilityDomain::General,
-        CapabilityDomain::Devops,
-        CapabilityDomain::AiMedia,
-        CapabilityDomain::DataAnalysis,
-        CapabilityDomain::ContentCreation,
-        CapabilityDomain::Communication,
-        CapabilityDomain::Finance,
-        CapabilityDomain::Automation,
-    ];
+    // ⚠ 此处曾有 `const BUSINESS_DOMAINS: [CapabilityDomain; 8]`（手抄 8 个业务域）。
+    // 2026-09-15 移除：手抄清单**新增域时不会报错**，只会让下面两个 `for` 静默少检一个域
+    // —— 测试从「覆盖全部业务域」退化成「覆盖 8 个写死的域」而无人察觉。
+    // 现改为从 `domain_registry::DOMAIN_NODES` 派生（唯一声明位置）。
+    // 判据：测试里的硬编码清单若是**枚举的镜像**，它就是会腐烂的副本；只有当它是
+    // **独立断言值**（如 `test_cluster_count` 的 27）时才有保留价值。
 
     #[test]
     fn test_every_business_domain_has_clusters() {
-        for domain in BUSINESS_DOMAINS {
+        for domain in business_domains() {
             let clusters = clusters_by_domain(domain);
             assert!(!clusters.is_empty(), "业务域 {} 必须至少有一个集群", domain.as_str());
         }
@@ -480,7 +477,7 @@ mod tests {
     #[test]
     fn test_same_domain_clusters_are_contiguous() {
         let all = all_clusters();
-        for domain in BUSINESS_DOMAINS {
+        for domain in business_domains() {
             let positions: Vec<usize> = all
                 .iter()
                 .enumerate()

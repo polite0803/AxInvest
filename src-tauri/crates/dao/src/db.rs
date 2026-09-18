@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, DbBackend,
+    ActiveModelTrait, ColumnTrait, ConnectOptions, ConnectionTrait, Database, DbBackend, DbErr,
     EntityTrait, QueryFilter, Set, Statement,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::repo::provider;
 use axagent_entities::providers;
@@ -34,15 +34,193 @@ impl axagent_harness::Persistence for DbHandle {
     }
 }
 
+/// 连接串 → `(实际 URL, 是否 SQLite)`。**纯函数**，好让方言分派可被单测守住。
+///
+/// ## 为什么必须把它提出来（2026-09-16 实测缺陷）
+///
+/// 原先这段是内联的，判据是 `is_sqlite = db_path.starts_with("sqlite:")`，而 `else`
+/// 分支把**其余任何输入**都拼成 `sqlite:{}?mode=rwc`。两者不一致：
+///
+/// * `create_pool_for_profile`（多 profile 模式）传的是**裸文件路径**
+///   （`default_db_path()` → `…/profiles/<name>/data/axagent.db`）⇒ 连接真的落在 SQLite，
+///   但 `is_sqlite` 是 `false` ⇒ 下面那整段 PRAGMA（`foreign_keys=ON` / WAL /
+///   `busy_timeout` / `synchronous` / `cache_size`）**被跳过**。`foreign_keys=ON` 尤甚：
+///   跳过它等于库自己的外键约束静默失效。
+/// * 空串 ⇒ URL 变成 `sqlite:?mode=rwc`，而 SQLite 把**空文件名**当**临时库**：写进去的
+///   数据随后消失。此时既不报错也不落盘 —— 是「数据不知去哪了」那一类。
+/// * 拼错的 scheme（`mysql://…`）同样落进 else，被拼成 `sqlite:mysql://…?mode=rwc`。
+///
+/// ## 语义（"用户设置里选 sqlite 还是 postgresql"，两边同等一等公民）
+///
+/// | 输入 | URL | is_sqlite |
+/// |---|---|---|
+/// | `postgres://…` / `postgresql://…` | 原样 | `false` |
+/// | `sqlite:…` | 追加 `?mode=rwc`（已带 `?` 则不加） | `true` |
+/// | 其它**非空**且不含 `://`（裸文件路径 / 裸文件名） | `sqlite:<path>?mode=rwc` | `true` |
+/// | 空 / 纯空白 | —— **报错** | |
+/// | 含 `://` 但不是上面两种 scheme | —— **报错** | |
+///
+/// 后两行是**刻意不猜**：此处退回 SQLite 会把「连错库 / 没读到配置」伪装成「连上了」，
+/// 而这两种事故的表现都是「数据不见了」。
+///
+/// 返回 `DbErr` 而不是 harness 的 `AxAgentError`：本函数是**纯字符串分类**，与 DB 层无关；
+/// 调用方 `?` 一下就能升成 `AxAgentError`（`From<DbErr>` 已实现）。
+fn resolve_db_url_from_path(db_path: &str) -> std::result::Result<(String, bool), DbErr> {
+    let raw = db_path.trim();
+    if raw.is_empty() {
+        return Err(DbErr::Custom(
+            "db_path 是**空串** —— 不猜。空串会被 SQLite 当成**临时库**（写入的数据随后消失），\
+             静默接受它等于把「配置没读到」变成「数据不知去哪了」。请显式给出 \
+             `postgres://…` / `sqlite:…` / 一个数据库文件路径。"
+                .into(),
+        ));
+    }
+    if raw.starts_with("postgres://") || raw.starts_with("postgresql://") {
+        return Ok((raw.to_string(), false));
+    }
+    if raw.starts_with("sqlite:") {
+        // 已带查询串（如调用方自己写了 `?mode=rwc`）⇒ 不再追加，避免出现两个 `?`。
+        if raw.contains('?') {
+            return Ok((raw.to_string(), true));
+        }
+        return Ok((format!("{raw}?mode=rwc"), true));
+    }
+    if let Some(scheme) = raw.split("://").next().filter(|_| raw.contains("://")) {
+        return Err(DbErr::Custom(format!(
+            "不支持连接的 scheme `{scheme}`（只有 `postgres://` / `postgresql://` / `sqlite:`）。\
+             此处**刻意不退回 SQLite**：退回会把「连错库」伪装成「连上了」。"
+        )));
+    }
+    // 裸文件路径 ⇒ SQLite 文件库。⚠ **必须同时把 is_sqlite 置真**，否则 PRAGMA 段跳过
+    // （这一条正是上面记录的缺陷：多 profile 模式下外键约束静默失效）。
+    Ok((format!("sqlite:{raw}?mode=rwc"), true))
+}
+
+/// 建表 + 声明式收敛的**唯一入口**。
+///
+/// ## 为什么必须只有一份（2026-09-16 实测缺陷）
+///
+/// 此前两个调用方各自写了一份初始化：
+///
+/// | 调用方 | 做过的事 |
+/// |---|---|
+/// | [`create_pool`]（生产 / 降级） | `ddl::run_initialization` + 声明式收敛 |
+/// | [`create_test_pool`]（38 处测试） | **只有** `ddl::run_initialization` |
+///
+/// 在「迁移还在」的年代两者等价（迁移能建出全部表）。但**迁移清单清空后**，测试侧会
+/// **一张业务表都没有** —— 而它是 38 个调用点（`company-runtime` / `trajectory` /
+/// `analysis-engine` / `dao/tests/*` …）的地基。这类「两份实现、只同步了一份」的缺陷
+/// 不会在改动当场暴露，会在删迁移那一刻集中爆发。
+///
+/// ## 两个方言同等一等公民
+///
+/// 方言**不由这里决定**：`db_path` 由用户在设置里选（`resolve_db_url_from_path`），
+/// 这里只负责让「不管连的是哪个库」都走同一条建表链。收敛本身由
+/// `reconcile::apply::bootstrap_schema` → `dialect_of(conn)` 读连接自身的 backend，
+/// **任何硬编码方言的写法在这里都是缺陷**。
+///
+/// ## 被拒即中止启动
+///
+/// 与 `run_initialization` 报错同语义：迁移清空后引擎是唯一的建表来源，被拒意味着库形态
+/// 与本版本代码不匹配 —— 硬撑着启动只会把「起不来」变成更难查的「跑得起来但到处出错」。
+///
+/// ## ⚠ 但「本方言没原生 DDL」**不是**被拒
+///
+/// 2026-09-16 改判：`SET DEFAULT` / `ADD FK` / `ADD CHECK` / `ADD UNIQUE` 在 SQLite 上
+/// 没有原生 `ALTER TABLE` 形态，`apply` 现在把它们记成
+/// [`SkipReason::UnsupportedDialect`]（只跳过本条），**不再**凑成 `refusal`。
+/// 改判的直接证据是本函数自己：`create_test_pool` 会走同一条链，而这些条目会让
+/// **每一个**迁移建出的 SQLite 库（含真实用户的 `.axagent/data/axagent.db`）启动中止。
+/// 原因与代价见 `reconcile::apply::bootstrap_schema` 的文档。
+async fn initialize_schema(conn: &DatabaseConnection) -> Result<()> {
+    // 历史迁移：负责**存量库的一次性数据搬迁**（知识图谱合并、回填、改名…），
+    // 那是实体声明表达不了的逻辑。迁移清单清空后本行成为 no-op（数组为空），
+    // 但**不能删**：它是「老库升级」的唯一落点。
+    crate::ddl::run_initialization(conn).await?;
+
+    // 声明式收敛 —— 「引擎接管建表」的落点，见 `reconcile::apply::bootstrap_schema`。
+    // 必须在 `seed_builtin_providers` **之前**：播种要往表里写行，表得先存在。
+    let out = crate::reconcile::apply::bootstrap_schema(conn).await?;
+    if let Some(r) = &out.refusal {
+        return Err(DbErr::Custom(format!(
+            "声明式 schema 收敛被拒（{}）：{} | 计划条目 {} 条、已执行 {} 条。\
+             被拒的三类是熔断、缺导出证据、渲染器真报错（payload 与 kind 不匹配）；\
+             若确实是渲染器缺陷，那是代码问题，不能靠重试绕过。",
+            r.kind_str(),
+            r.reason(),
+            out.items.len(),
+            out.executed
+        ))
+        .into());
+    }
+    // ⚠ 必须打 WARN 而不是静默跳过：这几条会在**每一轮**启动时重现，而「没被执行」
+    // 若不出现在日志里，运维就只能靠「为什么这个库的表少一个约束」去反推。
+    let unsupported = out.unsupported();
+    if !unsupported.is_empty() {
+        warn!(
+            "声明式 schema 收敛：{} 条无法在 {} 上表达（只跳过，不阻断启动）——\
+             该库结构不会因这几条而收敛，直到实现重建表流程（PLAN §3.1）。前几条：{}",
+            unsupported.len(),
+            crate::reconcile::apply::dialect_of(conn)
+                .map(|d| format!("{d:?}"))
+                .unwrap_or_else(|_| "(未知方言)".into()),
+            unsupported
+                .iter()
+                .take(8)
+                .map(|i| format!("{} {}", i.kind.as_str(), i.object))
+                .collect::<Vec<_>>()
+                .join("、")
+        );
+    }
+    // ⚠ **执行期失败（`aborted`）必须单独可见** —— 它比上面那条 `unsupported` 更严重。
+    //
+    // 判据 #493：`fail-stop` 只接在 `refusal` 上（它在上面被转成 `Err`），执行期的 `aborted`
+    // **不阻断启动**。不阻断是**有意**的（理由见下方注释），但「不阻断」若同时「不可见」，
+    // 就成了 fail-open —— 库停在「改了一半」的状态，而启动日志里一个字都没有。
+    if let Some(a) = &out.aborted {
+        warn!(
+            "声明式 schema 收敛**未完成**：{a} | 其后 {} 条被跳过（AbortedAfterError），\
+             失败那条本身也未生效 ⇒ 本库结构本轮只改到失败点为止。\
+             影响面与上一条不同：`UnsupportedDialect` 只影响它自己，这一类会牵连其后全部条目。\
+             排查：审计表有逐条 error 原文（run_id={}）；\
+             `cargo run -p axagent-dao --example p5_engine_takeover -- --diff <db_url>` 可复现。\
+             常见成因：把唯一约束加到**已有重名行**的存量表上（先清存量、再建约束）。",
+            out.aborted_skips().len(),
+            out.run_id
+        );
+    }
+    // 为什么**不**把 `aborted` 也转成 `Err`（不做 fail-stop）：
+    // `refusal` 表达的是「本版本代码与库形态**根本不匹配**」（熔断 / 缺导出证据 / 渲染器真报错），
+    // 那是启动前就该拦下的；而 `aborted` 多由**存量数据**触发（唯一索引撞上重名行即典型），
+    // 拦下来只会把「结构没收敛完」升级成「应用起不来」，对存量库（含移动端）代价过大。
+    // 换成 warn + 带上「牵连条数」，运维才有手工收敛的落点。
+    if out.executed > 0 {
+        info!(
+            "声明式 schema 收敛：{}/{} 条纯新增变更已应用（run_id={}）",
+            out.executed,
+            out.items.len(),
+            out.run_id
+        );
+    }
+
+    // 持久初始行 —— 「表建好之后还必须存在的那几行」。
+    // 必须在 `bootstrap_schema` **之后**（表得先存在），且必须在这条链上而不是
+    // `create_pool` 里：本函数是生产与测试**共用**的建表链（`create_test_pool`
+    // 也走这里），把它挂在链上才能保证「凡是库建出来过，哨兵就在」。
+    // 具体是谁、为什么缺了会静默返空，见 `crate::seed` 的模块文档。
+    crate::seed::ensure_sentinels(conn).await?;
+    Ok(())
+}
+
+/// **生产/测试入口**：连库 + **建表 + 声明式收敛**。
+///
+/// ⚠ **本函数会改库**（`initialize_schema` 真执行 DDL）。凡宣称「零写入 / 只读」的调用方
+/// （探针、审计脚本）**不得**用它 —— 用 [`connect_without_initialization`]。此前几处探针
+/// 借它取连接，在 `initialize_schema` 落地后那句承诺就变成了假话。
+///
+/// 方言由 `db_path` 决定（用户在设置里选），见 [`resolve_db_url_from_path`]。
 pub async fn create_pool(db_path: &str) -> Result<DbHandle> {
-    let is_sqlite = db_path.starts_with("sqlite:");
-    let url = if is_sqlite {
-        format!("{}?mode=rwc", db_path)
-    } else if db_path.starts_with("postgres://") || db_path.starts_with("postgresql://") {
-        db_path.to_string()
-    } else {
-        format!("sqlite:{}?mode=rwc", db_path)
-    };
+    let (url, is_sqlite) = resolve_db_url_from_path(db_path)?;
 
     let mut opt = ConnectOptions::new(&url);
     // 8 → 20：主连接池被后台任务（实体提取/索引/RAG 预热等慢操作）与命令共享，
@@ -74,8 +252,8 @@ pub async fn create_pool(db_path: &str) -> Result<DbHandle> {
             .await?;
     }
 
-    // Run schema initialization
-    crate::ddl::run_initialization(&conn).await?;
+    // 建表 + 收敛（唯一入口，见 `initialize_schema` 的文档）
+    initialize_schema(&conn).await?;
 
     // Seed built-in providers
     seed_builtin_providers(&conn).await?;
@@ -138,6 +316,22 @@ pub fn profile_db_path(profile_name: &str) -> String {
     let path =
         home.join(".axagent").join("profiles").join(profile_name).join("data").join("axagent.db");
     path.to_string_lossy().to_string()
+}
+
+/// **只读连接**：连库但**不**跑迁移、**不**跑声明式收敛。
+///
+/// 存在的唯一理由是让「零写入」这类承诺**可兑现**：`create_pool` 是生产入口，它**会**
+/// 建表与收敛；探针（`p3_plan_probe` / `p4_apply_probe` 的只读模式）若借它取连接，
+/// 就会在声称「本次只发 SELECT」的同时真改了库。契约分叉 ⇒ 两个函数。
+///
+/// ⚠ 连上之后**什么都没建**，所以调用方不应假设业务表存在。这个「不做」是刻意的：
+/// 只读探针要看的正是**库现在的样子**，而不是被初始化改写过的样子。
+pub async fn connect_without_initialization(db_path: &str) -> Result<DbHandle> {
+    let (url, _is_sqlite) = resolve_db_url_from_path(db_path)?;
+    let mut opt = ConnectOptions::new(&url);
+    opt.max_connections(2).min_connections(1).sqlx_logging(false);
+    let conn = Database::connect(opt).await?;
+    Ok(DbHandle { conn, path: db_path.trim().to_string() })
 }
 
 pub async fn create_pool_for_profile(profile_name: &str) -> Result<DbHandle> {
@@ -557,7 +751,115 @@ pub async fn create_test_pool() -> Result<DbHandle> {
     opt.max_connections(1).min_connections(1).sqlx_logging(false);
     let conn = Database::connect(opt).await?;
     conn.execute_raw(Statement::from_string(DbBackend::Sqlite, "PRAGMA foreign_keys=ON;")).await?;
-    crate::ddl::run_initialization(&conn).await?;
+
+    // ⚠ 必须走与生产**同一个** `initialize_schema`（见其文档：此前这里只跑迁移，
+    // 迁移清单清空后本函数会建不出一张表，而它有 38 处调用）。
+    // 保留自己的连接配置（`max_connections(1)`）是刻意的：测试用 SQLite 文件库，
+    // 多连接会引入锁竞争，而生产主库需要 20。差异只在**连接**，不在建表链。
+    initialize_schema(&conn).await?;
 
     Ok(DbHandle { conn, path: db_path.to_string_lossy().to_string() })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 方言分派判据 —— 「支持 sqlite 与 postgresql，由用户设置决定」这句话的可测形式。
+    ///
+    /// 这一组的价值不在于「函数写对了」，而在于**堵住静默降级**：原实现把「认不出的
+    /// 输入」一律当 SQLite 文件，于是拼错的 scheme / 读空的配置都变成「连上了」。
+    /// 每一条断言都对应一类曾经真实发生（或极易发生）的事故。
+    #[test]
+    fn db_url_dispatch_never_silently_falls_back_to_sqlite() {
+        // ── PostgreSQL：原样透传，且**不许**被当成 SQLite ──
+        for pg in ["postgres://u:p@h:5432/db", "postgresql://u@h/db"] {
+            let (url, is_sqlite) = resolve_db_url_from_path(pg).expect("PG 串应被接受");
+            assert_eq!(url, pg, "PG 连接串必须原样透传（追加查询串会破坏它）");
+            assert!(!is_sqlite, "PG 串不能被判成 SQLite：{pg}");
+        }
+
+        // ── SQLite：显式 scheme ──
+        let (url, is_sqlite) = resolve_db_url_from_path("sqlite:/tmp/a.db").expect("sqlite 串");
+        assert_eq!(url, "sqlite:/tmp/a.db?mode=rwc");
+        assert!(is_sqlite);
+        // 已带查询串时不得再追加一个 `?`（否则 URL 变成 `…?mode=rwc?mode=rwc`）
+        let (url, _) =
+            resolve_db_url_from_path("sqlite:/tmp/a.db?cache=shared").expect("sqlite 串");
+        assert_eq!(url, "sqlite:/tmp/a.db?cache=shared");
+
+        // ── 裸文件路径：**必须**同时把 is_sqlite 置真 ──
+        //
+        // 这条正是实测缺陷的回归判据：`create_pool_for_profile` 传的就是裸路径，
+        // 旧实现下 `is_sqlite == false` ⇒ PRAGMA 段（含 `foreign_keys=ON`）整段跳过，
+        // 而连接实际是 SQLite ⇒ 库自己的外键约束静默失效。
+        let bare = std::path::Path::new("/home/u/.axagent/profiles/p1/data/axagent.db");
+        let (url, is_sqlite) = resolve_db_url_from_path(&bare.to_string_lossy())
+            .expect("裸路径应被当成 SQLite 文件库");
+        assert!(url.starts_with("sqlite:"), "{url}");
+        assert!(url.ends_with("?mode=rwc"), "{url}");
+        assert!(is_sqlite, "裸文件路径被判成「非 SQLite」⇒ PRAGMA 段会被跳过（外键约束失效）");
+
+        // ── 空 / 纯空白：报错，不猜 ──
+        //
+        // SQLite 把**空文件名**当临时库 ⇒ 写入的数据随后消失。静默接受等于把
+        // 「配置没读到」变成「数据不知去哪了」。
+        for empty in ["", "   ", "\t\n"] {
+            let e = resolve_db_url_from_path(empty).expect_err("空串必须报错");
+            assert!(e.to_string().contains("空串"), "{e}");
+        }
+
+        // ── 其它 scheme：报错，不退回 SQLite ──
+        let e = resolve_db_url_from_path("mysql://u@h/db").expect_err("未知 scheme 必须报错");
+        assert!(e.to_string().contains("mysql"), "报错要点出是哪个 scheme：{e}");
+        assert!(e.to_string().contains("不支持"), "{e}");
+    }
+
+    /// **存量 SQLite 库（迁移建出来的形态）必须能初始化成功。**
+    ///
+    /// ## 这条判据为什么值钱
+    ///
+    /// 2026-09-16 实测：`create_test_pool` 接上 `initialize_schema`（= 迁移 + 声明式收敛）
+    /// 之后，`repo::message::tests::create_message_round_trips_attachment_metadata` 当场报红：
+    ///
+    /// ```text
+    /// 声明式 schema 收敛被拒（render）：19 条变更渲染失败：SET DEFAULT narrative_structures.genre…；
+    /// ADD FK gateway_link_activities.link_id… | 计划条目 40 条、已执行 0 条
+    /// ```
+    ///
+    /// 根因不是测试写错：迁移建出的库与实体声明有 40 条差集，其中 19 条（`SET DEFAULT` /
+    /// `ADD FK`）在 SQLite 上没有原生 `ALTER TABLE` 形态 ⇒ 旧实现把它们算进「渲染失败」
+    /// ⇒ 整批拒绝 ⇒ 本函数返回 Err ⇒ **启动中止**。真实用户的 `.axagent/data/axagent.db`
+    /// 走的是同一条链（`create_pool` → `initialize_schema`），所以那时它是一枚上了膛的枪。
+    ///
+    /// ## ⚠ 这条测试的**职责边界**（别把它当成「引擎接管建表」的证明）
+    ///
+    /// `create_test_pool` 先跑迁移，表是**迁移**建的 —— 所以本测试只能证明
+    /// 「存量库的初始化链不会中止」，不能证明引擎能独立建表。后者由
+    /// `reconcile::apply::tests::bootstrap_on_empty_sqlite_has_no_dialect_gaps`
+    /// 与 `examples/p5_engine_takeover.rs --fresh-sqlite` 负责。两种输入，两条判据。
+    ///
+    /// 迁移清单清空后本测试仍然有效（那时它退化成「全新库能建起来」），不随删除而腐烂。
+    #[tokio::test]
+    async fn existing_sqlite_db_initializes_despite_dialect_gaps() {
+        let h = create_test_pool().await.expect("存量形态的 SQLite 库必须能初始化成功");
+
+        // 不能是「没报错但什么都没建」：抽几张业务表逐张存在性检查。
+        // ⚠ 用 `query_all_raw`（`query_one` 在本仓的 sea-orm 2.0 上要求 `StatementBuilder`，
+        // `Statement` 不实现它 —— 别照 `execute_raw` 的用法类推）。
+        for t in ["conversations", "messages", "providers", "workflow_templates"] {
+            let rows = h
+                .conn
+                .query_all_raw(Statement::from_string(
+                    DbBackend::Sqlite,
+                    format!(
+                        "SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name='{t}'"
+                    ),
+                ))
+                .await
+                .expect("查 sqlite_master 应成功");
+            let n: i64 = rows.first().and_then(|r| r.try_get("", "c").ok()).unwrap_or(0);
+            assert_eq!(n, 1, "业务表 `{t}` 不存在 —— 初始化链虽然没报错，但库是空的");
+        }
+    }
 }

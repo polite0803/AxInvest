@@ -342,7 +342,9 @@ impl Tool for OpcListCustomersTool {
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         use axagent_analysis_engine::opc::DefaultCustomerService;
-        use axagent_analysis_engine::opc::{CustomerFilter, CustomerService, CustomerStatus};
+        use axagent_analysis_engine::opc::{
+            CustomerFilter, CustomerService, CustomerStatus, CustomerType,
+        };
 
         let db = get_db()?;
         let svc = DefaultCustomerService::new((*db).clone());
@@ -353,6 +355,10 @@ impl Tool for OpcListCustomersTool {
             .and_then(|s| CustomerStatus::from_str(s).ok());
         let filter = CustomerFilter {
             status,
+            customer_type: input
+                .get("customer_type")
+                .and_then(|v| v.as_str())
+                .and_then(|s| CustomerType::from_str(s).ok()),
             search: input.get("search").and_then(|v| v.as_str()).map(String::from),
             tags: None,
             limit: input.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32),
@@ -426,7 +432,9 @@ impl Tool for OpcCreateCustomerTool {
 
     async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
         use axagent_analysis_engine::opc::DefaultCustomerService;
-        use axagent_analysis_engine::opc::{CreateCustomerInput, CustomerService, CustomerSource};
+        use axagent_analysis_engine::opc::{
+            CreateCustomerInput, CustomerService, CustomerSource, CustomerType,
+        };
 
         let db = get_db()?;
         let svc = DefaultCustomerService::new((*db).clone());
@@ -448,12 +456,29 @@ impl Tool for OpcCreateCustomerTool {
             "Direct" => CustomerSource::Direct,
             other => CustomerSource::Other(other.to_string()),
         });
+        let customer_type = input
+            .get("customer_type")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase())
+            .map(|s| match s.as_str() {
+                "consumer" => CustomerType::Consumer,
+                "business" => CustomerType::Business,
+                _ => CustomerType::Unknown,
+            })
+            .unwrap_or(CustomerType::Unknown);
 
         let inp = CreateCustomerInput {
             name: name.to_string(),
             email: email.to_string(),
             phone: input.get("phone").and_then(|v| v.as_str()).map(String::from),
             company: input.get("company").and_then(|v| v.as_str()).map(String::from),
+            customer_type,
+            country: input.get("country").and_then(|v| v.as_str()).map(String::from),
+            region: input.get("region").and_then(|v| v.as_str()).map(String::from),
+            city: input.get("city").and_then(|v| v.as_str()).map(String::from),
+            address: input.get("address").and_then(|v| v.as_str()).map(String::from),
+            latitude: input.get("latitude").and_then(|v| v.as_f64()),
+            longitude: input.get("longitude").and_then(|v| v.as_f64()),
             source,
             tags: Vec::new(),
             notes: input.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string(),
@@ -770,6 +795,7 @@ impl Tool for OpcGetDashboardTool {
             }),
             cust_svc.list_customers(CustomerFilter {
                 status: None,
+                customer_type: None,
                 search: None,
                 tags: None,
                 limit: Some(100),
@@ -1258,7 +1284,9 @@ impl Tool for OpcRecordKpiTool {
         "OpcRecordKpi"
     }
     fn description(&self) -> &str {
-        "记录一个 KPI 指标。需要名称、数值、单位和周期（如 '2026-07'）。"
+        "记录一个 KPI 指标。**当前不可用**：KPI 必须归属某个域包，而本工具的运行上下文\
+         不携带域包标识，调用必然失败（由 LLM 自报域包会写入错归属的记录）。\
+         创作类 KPI 由域包工作流的 post_exec 钩子自动落库，无需手工记录。"
     }
     fn input_schema(&self) -> Value {
         serde_json::json!({"type":"object","properties":{"name":{"type":"string"},"value":{"type":"number"},"unit":{"type":"string"},"period":{"type":"string"}},"required":["name","value","unit","period"]})
@@ -1270,24 +1298,32 @@ impl Tool for OpcRecordKpiTool {
         ToolDomain::Automation
     }
 
-    async fn call(&self, input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        use axagent_analysis_engine::opc::DefaultAnalyticsService;
-        use axagent_analysis_engine::opc::{AnalyticsService, CreateKpiInput};
-        let db = get_db()?;
-        let svc = DefaultAnalyticsService::new((*db).clone());
-        let inp = CreateKpiInput {
-            name: input.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            value: input.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0),
-            unit: input.get("unit").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            period: input.get("period").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        };
-        match svc.record_kpi(inp).await {
-            Ok(kpi) => Ok(ToolResult::success(format!(
-                "## KPI 已记录\n\n- {}: {} {}\n- 周期: {}",
-                kpi.name, kpi.value, kpi.unit, kpi.period
-            ))),
-            Err(e) => Err(ToolError::execution_failed(format!("记录 KPI 失败: {e}"))),
-        }
+    async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        // ⛔ 本工具**故意拒绝执行**（v230 起 KPI 写入必须带域包归属，而本工具拿不到它）。
+        //
+        // 这不是「还没实现」，是一条有意的取舍，三种更省事的写法都已被否决：
+        // - **让 LLM 在入参里报一个 `domain_pack_id`**：`opc_kpi_records` 是跨域包共用的
+        //   一张表，LLM 自报的域包要么是幻觉（落到不存在的域包桶）、要么是猜的
+        //   （落到别人的域包桶）—— 都是「看起来成功的错数据」，比拒绝写入更糟。
+        // - **空串 / 默认域包兜底**：等于把「调用方忘传」变成「静默写一行查不出来的
+        //   记录」，与 v230 摘掉列 DEFAULT 的取舍直接矛盾。
+        // - **从 `ToolContext.extra` 取**：`extra` 目前只有搜索配置与 `vault_kb_id`
+        //   （`crates/tools/src/registry.rs:529-530` 的 `tool_extra`，
+        //   `commands/agent/mod.rs` 是唯一注入点），**没有任何域包键** —— 现在从这里取
+        //   只会恒为 `None`，等于给一个不存在的通道留档位。
+        //
+        // 域包归属的真实来源是**运行上下文**（工具在 OPC 域包工作流里被调用时，
+        // 上下文应携带域包）。该接线结论由并行的「工具接线」勘察给出；在它落地前，
+        // 本工具保持「响亮拒绝」而不是写无归属的行。
+        //
+        // 正常路径不依赖本工具：创作类 KPI 由域包工作流的 post_exec 钩子
+        // （`content-media-kpi-persist`）在终态自动落库（见
+        // `src/commands/opc_workflow_kpi_hook.rs`）。
+        Err(ToolError::execution_failed(
+            "OpcRecordKpi 不可用：KPI 记录必须归属某个域包，而本工具的运行上下文不携带\
+             域包标识；由 LLM 自报域包会写入错归属的记录，故拒绝执行。\
+             创作类 KPI 由域包工作流的 post_exec 钩子自动落库，无需手工记录。",
+        ))
     }
 }
 
@@ -1324,15 +1360,28 @@ impl Tool for OpcListKpisTool {
         let svc = DefaultAnalyticsService::new((*db).clone());
         let period = input.get("period").and_then(|v| v.as_str()).map(String::from);
         let limit = input.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32);
-        match svc.list_kpis(period, limit).await {
+        // **显式跨域包**读：本工具的运行上下文不携带任何域包标识
+        // （`ToolContext` 只有 working_dir / conversation_id / agent_id / extra，
+        // 而 `extra` 里只有搜索配置与 vault_kb_id）⇒ 让它走 `list_kpis_all`
+        // 而不是猜一个域包 id 去查（猜错就是对别的域包的读，猜对也只是巧合）。
+        // 每行输出都带 `domain_pack_id`，消费方（含 LLM）必须自己按域包理解这些数字。
+        match svc.list_kpis_all(period, limit).await {
             Ok(kpis) => {
                 if kpis.is_empty() {
                     return Ok(ToolResult::success("## KPI 记录\n\n暂无记录。"));
                 }
                 Ok(ToolResult::success(format!(
-                    "## KPI 记录\n\n{}",
+                    "## KPI 记录（跨域包，每条已标注所属域包）\n\n{}",
                     kpis.iter()
-                        .map(|k| format!("- {}: {} {}", k.name, k.value, k.unit))
+                        .map(|k| {
+                            // `''` 是存量行的「未标注」，不是某个域包 —— 如实显示，不臆造域包名
+                            let ind = if k.domain_pack_id.is_empty() {
+                                "(未标注)"
+                            } else {
+                                k.domain_pack_id.as_str()
+                            };
+                            format!("- [{ind}] {}: {} {} ({})", k.name, k.value, k.unit, k.period)
+                        })
                         .collect::<Vec<_>>()
                         .join("\n")
                 )))

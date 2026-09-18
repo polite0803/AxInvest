@@ -5,6 +5,7 @@
  * 整合：agentStore 执行态 + trajectoryStore + ExecutionPhase 状态机
  */
 import i18n from "@/i18n";
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen, type UnlistenFn } from "@/lib/invoke";
 import type {
   AgentCancelledEvent,
@@ -885,19 +886,35 @@ export function setupExecutionEventListeners(): () => void {
     }),
   );
   unlisteners.push(
-    listen<{ conversationId: string; stepId: string; error: string }>(
-      "workflow-step-error",
-      (e) => {
-        store.upsertPoolItem({
-          id: e.payload.stepId,
-          conversationId: e.payload.conversationId,
-          type: "workflow_step",
-          name: e.payload.stepId,
-          status: "failed",
-          error: e.payload.error,
-        });
-      },
-    ),
+    listen<{
+      conversationId: string;
+      stepId: string;
+      /** 错误码（`STOCK_WORKFLOW_*`），见 core.rs 的失败事件契约 */
+      code?: string;
+      /** `ErrorCategory` 的 snake_case */
+      category?: string;
+      /** 技术详情 */
+      detail?: string;
+      /** @deprecated 旧版自由文本字段；仅当 `code` 缺失时作展示兜底 */
+      error?: string;
+    }>("workflow-step-error", (e) => {
+      const { conversationId, stepId, code, category, detail } = e.payload;
+      // 池条目只存**已翻译**文本：`AgentPoolPanel` / `ExecutionTimeline` 直接渲染
+      // `item.error`，在写入点翻译可保证两处展示一致，且渲染层无需感知错误码契约。
+      // 兜底顺序 code → detail → 旧版 error：任一路径都不会把 JSON 对象直接塞进 JSX。
+      const text = code
+        ? translateBackendError({ code, category, detail })
+        : (e.payload.error ?? detail ?? "");
+      store.upsertPoolItem({
+        id: stepId,
+        conversationId,
+        type: "workflow_step",
+        name: stepId,
+        status: "failed",
+        error: text,
+        errorCode: code,
+      });
+    }),
   );
 
   return () => {

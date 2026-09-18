@@ -38,7 +38,9 @@ interface AppInitializerProps {
 async function showWindow() {
   try {
     const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    await getCurrentWebviewWindow().show();
+    const win = getCurrentWebviewWindow();
+    await win.show();
+    await win.setFocus();
   } catch (e) {
     logIpcError("showWindow")(e);
   }
@@ -66,11 +68,6 @@ export function AppInitializer({ children }: AppInitializerProps) {
       const settingsPromise = useSettingsStore.getState().fetchSettings().catch((e) => {
         logIpcError("get_settings")(e);
       });
-
-      // 尽早显示窗口，不等其他初始化完成
-      if (isTauri()) {
-        void showWindow();
-      }
 
       await settingsPromise;
 
@@ -145,10 +142,19 @@ export function AppInitializer({ children }: AppInitializerProps) {
       // 这些是重型依赖，idle 时间加载即可，首屏渲染不应等待。
       void enableD2AndPreload();
 
+      // 首屏就绪后再显示窗口：窗口以 visible=false 启动，
+      // 避免用户在 setup 阻塞白窗 / Spin 加载圈中间态上等待。
+      if (isTauri()) {
+        await showWindow();
+      }
       setPhase("ready");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setFailed(true);
+      // 初始化失败也要显示窗口，否则错误页永远不可见
+      if (isTauri()) {
+        void showWindow();
+      }
     }
   }, []);
 

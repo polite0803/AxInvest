@@ -22,10 +22,12 @@ pub struct Model {
     pub last_linted_at: Option<i64>,
     pub last_compiled_at: Option<i64>,
     pub compiled_source_hash: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub user_edited: i32,
     pub user_edited_at: Option<i64>,
     pub created_at: i64,
     pub updated_at: i64,
+    #[sea_orm(default_value = 0)]
     pub is_deleted: i32,
 }
 

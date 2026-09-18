@@ -36,9 +36,9 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use axagent_harness::IndustryAdapter;
+use axagent_harness::DomainPackAdapter;
 
-use crate::stock_orchestration::StockIndustryAdapter;
+use crate::stock_orchestration::StockDomainPackAdapter;
 use crate::stock_reflection::{
     DimensionScores, StockAnalysisOutcome, StockReflectionEngine, StockReflectionReport,
 };
@@ -199,13 +199,13 @@ fn configs_differ(a: &WeightDecayConfig, b: &WeightDecayConfig) -> bool {
 
 /// 股票业务自适应引擎
 ///
-/// 整合 ReflectionEngine + SelfEvolutionEngine + IndustryAdapter
+/// 整合 ReflectionEngine + SelfEvolutionEngine + DomainPackAdapter
 /// 形成完整的自适应闭环系统。
 pub struct StockAdaptiveEngine {
     config: AdaptiveEngineConfig,
     reflection_engine: Arc<StockReflectionEngine>,
     evolution_engine: Arc<StockSelfEvolutionEngine>,
-    industry_adapter: Arc<StockIndustryAdapter>,
+    domain_pack_adapter: Arc<StockDomainPackAdapter>,
     validator: EvolutionValidator,
     /// 当前生效的配置
     current_config: RwLock<WeightDecayConfig>,
@@ -233,13 +233,13 @@ impl StockAdaptiveEngine {
         let reflection_engine = Arc::new(StockReflectionEngine::new());
         let evolution_engine =
             Arc::new(StockSelfEvolutionEngine::new(Arc::clone(&reflection_engine)));
-        let industry_adapter = Arc::new(StockIndustryAdapter::new());
+        let domain_pack_adapter = Arc::new(StockDomainPackAdapter::new());
 
         Self {
             config: AdaptiveEngineConfig::default(),
             reflection_engine,
             evolution_engine,
-            industry_adapter,
+            domain_pack_adapter,
             validator: EvolutionValidator::new(0.05),
             current_config: RwLock::new(WeightDecayConfig::default()),
             adaptation_history: RwLock::new(Vec::new()),
@@ -273,9 +273,9 @@ impl StockAdaptiveEngine {
         &self.evolution_engine
     }
 
-    /// 获取行业适配器引用
-    pub fn industry_adapter(&self) -> &StockIndustryAdapter {
-        &self.industry_adapter
+    /// 获取域包适配器引用
+    pub fn domain_pack_adapter(&self) -> &StockDomainPackAdapter {
+        &self.domain_pack_adapter
     }
 
     /// 获取自适应运行历史
@@ -414,12 +414,12 @@ impl StockAdaptiveEngine {
         stock_code: &str,
         mission: &str,
     ) -> Result<AdaptiveResult, String> {
-        // Step 1: 通过行业适配器进行编排
-        let context = axagent_harness::IndustryContext::new()
+        // Step 1: 通过域包适配器进行编排
+        let context = axagent_harness::DomainPackContext::new()
             .with_inputs(serde_json::json!({"stock_code": stock_code}));
 
         let subgraph = self
-            .industry_adapter
+            .domain_pack_adapter
             .decompose_mission(mission, &context)
             .await
             .map_err(|e| e.to_string())?;

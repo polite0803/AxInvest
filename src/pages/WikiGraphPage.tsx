@@ -20,7 +20,7 @@ import {
   SearchOutlined,
   ToolOutlined,
 } from "@ant-design/icons";
-import { Button, Empty, Input, Select, Space, Spin, Tag, theme, Typography } from "antd";
+import { Alert, Button, Empty, Input, Select, Space, Spin, Tag, theme, Typography } from "antd";
 import { Eye, PanelLeft, PanelRight } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,6 +52,16 @@ export function WikiGraphPage() {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [graphLoading, setGraphLoading] = useState(true);
   const [communities, setCommunities] = useState<Map<string, number> | null>(
+    null,
+  );
+  /**
+   * **实体侧**社区（`entity:<id>` → cid），与 `communities`（笔记侧）来自
+   * **两次独立的 Louvain** 运行 ⇒ cid 值域会重合，**不可**直接合并使用；
+   * `GraphView` 内部经 `mergeEntityCommunities` 错开命名空间后再合并。
+   * 后端未下发（旧缓存 / 无绑定知识库）时为 `null`，此时实体节点回落到
+   * 「跟随 `mapping` 锚点继承同名笔记的桶」的老路径。
+   */
+  const [entityCommunities, setEntityCommunities] = useState<Map<string, number> | null>(
     null,
   );
 
@@ -129,7 +139,14 @@ export function WikiGraphPage() {
     try {
       const [data, communityResult] = await Promise.all([
         invoke<GraphData>("get_wiki_graph_cached", { wikiId: wikiIdFromUrl }),
-        invoke<{ communities: Record<string, number> }>(
+        invoke<{
+          communities: Record<string, number>;
+          /**
+           * 实体侧社区（`entity:<id>` → cid）。**可选**：后端旧缓存的 JSON 里没有这个字段
+           * （`#[serde(default)]`）⇒ 前端必须容忍它缺席，而不是把整条社区结果判为无效。
+           */
+          entityCommunities?: Record<string, number>;
+        }>(
           "wiki_graph_communities_cached",
           { wikiId: wikiIdFromUrl },
         ).catch(() => null),
@@ -139,8 +156,24 @@ export function WikiGraphPage() {
         setGraphData(data);
         if (communityResult?.communities) {
           setCommunities(new Map(Object.entries(communityResult.communities)));
+          // 实体侧**独立**判定，不跟着笔记侧一起赋值：
+          // 「笔记侧有、实体侧无」是正常情形（旧缓存 JSON 里没这个字段），
+          // 此时必须只把实体侧置 null、保留笔记侧 —— 否则主题/窗口一切换
+          // 就会退回「只有笔记侧社区」的旧行为，表现为实体节点换了颜色。
+          //
+          // ⚠ 外层那道 `communityResult?.communities` 是**整体**门，不是逐字段门：
+          // 反向（笔记侧无、实体侧有）会走 else 把两侧一起清空。该向实际不可达 ——
+          // `LouvainResult.communities` 是**非 Option** 字段，后端恒下发，
+          // 且空表序列化成 `{}`（truthy）而不是 falsy。此处如实写明，
+          // 免得下一位读者以为它是逐字段的。
+          setEntityCommunities(
+            communityResult.entityCommunities
+              ? new Map(Object.entries(communityResult.entityCommunities))
+              : null,
+          );
         } else {
           setCommunities(null);
+          setEntityCommunities(null);
         }
         return data;
       }
@@ -476,6 +509,70 @@ export function WikiGraphPage() {
     };
   }, [graphData]);
 
+  // A2-升级（2026-09-14）：后端「未识别类型」降级规模。
+  // 后端在清单为空时**不写这个字段**（`skip_serializing_if`），旧版缓存的 JSON 也没有它
+  // ⇒ 这里按可选处理，空则整条提示条不渲染。
+  const unresolvedStats = useMemo(() => {
+    const entries = graphData?.unresolvedTypes ?? [];
+    if (entries.length === 0) {
+      return null;
+    }
+    return {
+      nodes: entries.reduce((sum, e) => sum + e.count, 0),
+      types: entries.length,
+      list: entries.map((e) => `${e.rawType}×${e.count}`).join(", "),
+    };
+  }, [graphData]);
+
+  // P2-b（2026-09-14）：**边**侧的同一件事 —— 标签无法被后端解释的边。
+  //
+  // 它与上面那条**不是**同一集合，也**不是**「前端没有专属配色的关系类型」计数：
+  // 后者由 GraphView 图例里的关系类型分布回答（那是开放词表，实测 53 个中文值，
+  // 全部按形态放行 ⇒ 若混进来这条提示会对存量数据直接刷屏）。
+  // 本条的用途是绊线：只报真正「后端/前端都解释不了」的标签。
+  const unresolvedRelationStats = useMemo(() => {
+    const entries = graphData?.unresolvedRelations ?? [];
+    if (entries.length === 0) {
+      return null;
+    }
+    return {
+      edges: entries.reduce((sum, e) => sum + e.count, 0),
+      types: entries.length,
+      list: entries.map((e) => `${e.rawType}×${e.count}`).join(", "),
+    };
+  }, [graphData]);
+
+  // D-2（2026-09-17）：**端点缺失**的边 —— 与上面两条**不是同一类事实**。
+  //
+  // 上面两条说「这个类型/标签后端不认识」（词汇表问题，边照样画得出，只是样式通用）；
+  // 这一条说「**这些边根本画不出来**」：渲染循环用 `idSet` 判端点，端点不在里面就
+  // `continue`（见 `GraphView.drawEdgesOptimized` 的注释）。此前这条链路上**后端、
+  // 渲染层、界面三处都静默**，用户只看到「满屏孤立的点」，工具栏却照旧显示
+  // `74711E` —— 于是「公司/个人/行业之间没有关联」成了一个查无可查的现象。
+  //
+  // 判据取自后端算好的 `danglingEdges`，**不在这里重算**：前端无法按域回答
+  // 「哪些边本来该连起来」（见该字段文档的口径表）。
+  //
+  // B（2026-09-18）：后端在返回前把这些边**从 `edges` 里摘掉**了
+  // （`GraphData::retain_resolved_edges`），工具栏的边数因此只数画得出来的边；
+  // 淘汰规模仍保留在本字段里 ⇒ 本条提示的判据与文案含义都没变。
+  // 换句话说：以前这里报的是「边数里有 276 条是假的」，现在报的是
+  // 「已剔掉 276 条，剔之前是 172,926 条」——`totalEdges` 是**摘掉之前**的基准，
+  // 恒等式 `edges.length + dangling === totalEdges` 成立。
+  const danglingStats = useMemo(() => {
+    const d = graphData?.danglingEdges;
+    // `totalEdges === 0` ⇒ 这份数据没统计过（旧缓存），**不能**当作「干净」而静默。
+    if (!d || d.totalEdges === 0 || d.dangling === 0) {
+      return null;
+    }
+    return {
+      totalEdges: d.totalEdges,
+      dangling: d.dangling,
+      bothMissing: d.missingBoth,
+      list: d.sampleEdgeIds.join(", "),
+    };
+  }, [graphData]);
+
   return (
     <div
       className="h-full flex flex-col"
@@ -598,6 +695,96 @@ export function WikiGraphPage() {
         {wikiIdFromUrl && <QualityScore wikiId={wikiIdFromUrl} compact />}
       </div>
 
+      {
+        /* 类型降级提示条（A2-升级）：只在真有「后端不认识的类型」时出现。
+          这些节点的关系亲和度落兜底值 ⇒ 表现为「连边比预期少」，用户无从判断原因。 */
+      }
+      {unresolvedStats && (
+        <Alert
+          type="warning"
+          showIcon
+          banner
+          style={{ borderRadius: 0, padding: "2px 8px" }}
+          message={
+            <span style={{ fontSize: 12 }}>
+              {t("wiki.graph.unresolvedTypes.title")}
+            </span>
+          }
+          description={
+            <span style={{ fontSize: 11 }}>
+              {t("wiki.graph.unresolvedTypes.desc", {
+                nodes: unresolvedStats.nodes,
+                types: unresolvedStats.types,
+              })} {t("wiki.graph.unresolvedTypes.list", {
+                list: unresolvedStats.list,
+              })}
+            </span>
+          }
+        />
+      )}
+
+      {
+        /* 边标签降级提示条（P2-b）：与上一条对称，只在真有解释不了的边时出现。 */
+      }
+      {unresolvedRelationStats && (
+        <Alert
+          type="warning"
+          showIcon
+          banner
+          style={{ borderRadius: 0, padding: "2px 8px" }}
+          message={
+            <span style={{ fontSize: 12 }}>
+              {t("wiki.graph.unresolvedRelations.title")}
+            </span>
+          }
+          description={
+            <span style={{ fontSize: 11 }}>
+              {t("wiki.graph.unresolvedRelations.desc", {
+                edges: unresolvedRelationStats.edges,
+                types: unresolvedRelationStats.types,
+              })} {t("wiki.graph.unresolvedRelations.list", {
+                list: unresolvedRelationStats.list,
+              })}
+            </span>
+          }
+        />
+      )}
+
+      {
+        /* 悬空边提示条（D-2）：只在真有「端点不在节点集里」的边时出现。
+           `error` 而不是 `warning`：`missingBoth > 0` 时两端都缺，
+           典型成因是实体域与边的域不一致（实体被跨库合并搬走），
+           这会让整个域的关系在界面上整条消失 —— 那是错误，不是警告。 */
+      }
+      {danglingStats && (
+        <Alert
+          type={danglingStats.bothMissing > 0 ? "error" : "warning"}
+          showIcon
+          banner
+          style={{ borderRadius: 0, padding: "2px 8px" }}
+          message={
+            <span style={{ fontSize: 12 }}>
+              {t("wiki.graph.danglingEdges.title")}
+            </span>
+          }
+          description={
+            <span style={{ fontSize: 11 }}>
+              {t("wiki.graph.danglingEdges.desc", {
+                dangling: danglingStats.dangling,
+                total: danglingStats.totalEdges,
+              })}
+              {danglingStats.bothMissing > 0
+                && ` ${
+                  t("wiki.graph.danglingEdges.bothMissing", {
+                    count: danglingStats.bothMissing,
+                  })
+                }`}
+              {` ${t("wiki.graph.danglingEdges.list", { list: danglingStats.list })}`}
+            </span>
+          }
+        />
+      )}
+
       {/* 主工作区 */}
       <div className="flex-1 flex overflow-hidden">
         {/* 左侧面板 */}
@@ -692,6 +879,7 @@ export function WikiGraphPage() {
                 selectedNodeId={selectedNodeId}
                 highlightedNodeIds={highlightedNodeIds}
                 communities={communities ?? undefined}
+                entityCommunities={entityCommunities ?? undefined}
               />
             )}
         </div>

@@ -17,6 +17,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::pin::Pin;
 
+use crate::compat::impl_default_via_new;
 use crate::url_utils::resolve_chat_url;
 use crate::{ProviderAdapter, ProviderRequestContext, build_http_client};
 
@@ -26,11 +27,7 @@ pub struct OpenAIAdapter {
     client: reqwest::Client,
 }
 
-impl Default for OpenAIAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(OpenAIAdapter);
 
 impl OpenAIAdapter {
     pub fn new() -> Self {

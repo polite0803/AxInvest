@@ -9,11 +9,15 @@
 //!
 //! ## 使用
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! let watcher = RealTimeQuoteWatcher::new(client, callback);
 //! watcher.watch("600519", WatchPriority::Active).await;
 //! watcher.start().await; // 启动后台轮询任务
 //! ```
+//!
+//! > 上例为**示意用法**（`client` / `callback` 由调用方构造），标 `ignore` 是因其
+//! > 不依赖真实上下游即可阅读；此前标 `no_run` 会让 `cargo test -p axagent-astock-data`
+//! > 的 doctest 阶段**整包失败**（`cannot find type RealTimeQuoteWatcher`，2026-09-12 修）。
 
 use futures::future::BoxFuture;
 use std::collections::HashMap;

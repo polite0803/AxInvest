@@ -75,10 +75,15 @@ describe("parseAction", () => {
     expect(parseAction("观望")).toBe(StockAction.WAIT);
   });
 
-  it("falls back to WAIT for unknown actions", () => {
-    expect(parseAction("unknown")).toBe(StockAction.WAIT);
-    expect(parseAction("")).toBe(StockAction.WAIT);
-    expect(parseAction(null)).toBe(StockAction.WAIT);
+  it("falls back to UNCERTAIN for unknown actions", () => {
+    // P1-1(2026-09-14)：未识别一律回 `UNCERTAIN`，**不是** `WAIT`。
+    // 解析失败属于「无法判断」，不是业务语义上的「观望」——把缺失伪装成结论
+    // 会让「系统没看懂」在界面上显示成「判断为中性」。见
+    // `lib/stock-analysis-utils.ts::parseAction` 的文档注释。
+    // 本用例此前期望 WAIT，属语义变更后未同步的滞后断言。
+    expect(parseAction("unknown")).toBe(StockAction.UNCERTAIN);
+    expect(parseAction("")).toBe(StockAction.UNCERTAIN);
+    expect(parseAction(null)).toBe(StockAction.UNCERTAIN);
   });
 });
 

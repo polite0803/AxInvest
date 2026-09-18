@@ -21,7 +21,7 @@ use axagent_dao::search_sources_impl::{
 use axagent_harness::AgentSessionRepository;
 use axagent_harness::PatternPromptGuard;
 use axagent_harness::feedback_data_lake::register_feedback_lake;
-use axagent_orchestrator::{IndustryAdapterRegistry, IndustryLearningEngine};
+use axagent_orchestrator::{DomainPackAdapterRegistry, DomainPackLearningEngine};
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
 use axagent_storage::cloud_storage::{CloudStorageConfig, SyncEngine};
@@ -66,8 +66,13 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
                 let bid = base_id.to_string();
                 let q = query.to_string();
                 Box::pin(async move {
+                    // 不传阈值（`None`）：本回调是 **agent 工具**的检索入口，
+                    // 历史上不做阈值过滤 ⇒ 保持行为不变（是否应遵循 KB 的
+                    // `retrieval_threshold` 属产品决策，已登记待裁决；
+                    // 语义见 `rag::search_with_filter`）。
                     let results =
-                        crate::indexing::search_knowledge(&db, &mk, &vs2, &bid, &q, top_k).await?;
+                        crate::indexing::search_knowledge(&db, &mk, &vs2, &bid, &q, top_k, None)
+                            .await?;
                     Ok(results
                         .into_iter()
                         .map(|r| axagent_tools::knowledge_callback::KnowledgeSearchHit {
@@ -375,9 +380,6 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     let agent_prompters: Arc<
         Mutex<std::collections::HashMap<String, axagent_agent::ChannelPermissionPrompter>>,
     > = Arc::new(Mutex::new(std::collections::HashMap::new()));
-    let agent_plan_approvals: Arc<
-        Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
-    > = Arc::new(Mutex::new(std::collections::HashMap::new()));
     // 能力补齐/进化改进提议的挂起审批槽：proposalId → 同意信号发送端。
     // 认知编排器三触发点生成提议后 await；前端同意/拒绝由 capability_gap_consent 回传。
     let evolution_consent_senders: Arc<
@@ -517,11 +519,49 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     > = Arc::new(tokio::sync::RwLock::new(axagent_trajectory::ParallelExecutionService::new(10)));
     let cron_job_store: Arc<axagent_runtime_core::CronJobStore> = {
         let t_cron = std::time::Instant::now();
-        let store =
-            Arc::new(axagent_runtime_core::CronJobStore::new(Arc::new(sea_db.clone())).await);
+        // ⚠ 2026-09-18：DB 实现改从 DAO 注入。此前这里直接传 `Arc<DatabaseConnection>`，
+        // 于是 `cron_job.rs` 自己拿着 sea-orm + 实体做建表与 upsert，
+        // 被 `check:contracts` 的 [D] 项判为「consumer crate 越界依赖实现层」。
+        // 现在 runtime-core 只持有 `dyn CronJobPersistence`，具体实现归 DAO。
+        let persistence: Arc<dyn axagent_harness::cron_persistence::CronJobPersistence> = Arc::new(
+            axagent_dao::repo::cron_job_persistence::PgCronJobPersistence::new(sea_db.clone()),
+        );
+        let store = Arc::new(axagent_runtime_core::CronJobStore::new(persistence).await);
         tracing::info!("[startup] CronJobStore 初始化完成 ({}ms)", t_cron.elapsed().as_millis());
         store
     };
+    // ── 工具调用审计落库（2026-09-16）──
+    // 审计数据一直在工具执行路径上产生（registry.rs 的 `auditor.log(...)`），
+    // 但此前 ToolAuditor 的 db 恒为 None（`audit_db_path` 配置在生产路径从未被设置）
+    // ⇒ 只写内存 500 条、进程退出即丢，`audit_log` 表从未被创建。
+    // 这里注册进程级连接，此后所有 UnifiedToolRegistry 实例（含每次请求临时
+    // new() 出来的）都自动落库。
+    if let Err(e) = axagent_tools::audit::init_audit_db(sea_db.clone()).await {
+        tracing::error!("[startup] 审计库初始化失败，审计退回纯内存模式: {e}");
+    }
+    // ── L2 磁盘缓存注册（2026-09-16）──
+    // 消费方两处，都经 `axagent_disk_cache::l2()` 取进程级实例：
+    // ① `axagent-search::search::execute_search` —— 搜索结果的 L1(内存)/L2(磁盘) 冷热分层；
+    // ② `crate::indexing_triggers` —— 索引快照登记（`l2_index_snapshots`）。
+    // ⚠ 未注册时两侧都**静默退化**为「无 L2」（这是刻意的：单测与未初始化场景
+    // 不该报错），代价是「漏了这一步不会报错，只会让两处接线变成死代码」——
+    // 故此处**必须显式注册**，且失败要 `error!` 而不是警告：
+    // 安静失败正好等于「接线失效而无人知」，即本仓反复出现的入边缺失型断链。
+    {
+        let l2_path = app_dir.join("l2_cache.db");
+        match axagent_disk_cache::init_l2(&l2_path, axagent_disk_cache::DiskCacheConfig::default())
+            .await
+        {
+            Ok(()) => {
+                tracing::info!("[startup] L2 磁盘缓存已注册: {}", l2_path.display());
+            },
+            Err(e) => {
+                tracing::error!(
+                    "[startup] L2 磁盘缓存注册失败，搜索 L2 缓存与索引快照登记将全部退化为「无」: {e}"
+                );
+            },
+        }
+    }
     let user_profile: Arc<TokioRwLock<axagent_trajectory::UserProfile>> =
         Arc::new(TokioRwLock::new(axagent_trajectory::UserProfile::new()));
     let local_tool_registry: Arc<tokio::sync::Mutex<axagent_tools::registry::UnifiedToolRegistry>> = {
@@ -746,6 +786,74 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         crate::commands::app_config::read_self_improvement_flags(&sea_db).await;
     agent_session_manager.set_self_improvement_flags(self_improvement_flags).await;
 
+    // 同源修复（2026-09-12）：把前端「最大迭代次数」控件的值注入 SessionManager。
+    //
+    // 此前该控件（`SettingsPanel` GeneralTab）只把值写进 DB
+    // `app_config.maxIterations`，后端**零消费** ⇒ 运行期恒用
+    // `dynamic_max_iterations()` 的硬编码值（Low/Medium/High ⇒ 20/50/100），
+    // 用户改了不生效（铁律 #6：可配置 ≠ 可被优化）。
+    //
+    // 分工：此处保证**重启后**生效；用户改设置时的**即时**生效由
+    // `save_app_config` 内联注入（该命令是唯一保存路径）。
+    // 未配置（None）时保持「未覆盖」状态，运行期回退到复杂度推导。
+    if let Some(n) = crate::commands::app_config::read_max_iterations(&sea_db).await {
+        agent_session_manager.set_max_iterations_override(n);
+        tracing::info!("[wiring] 已注入用户配置的 max_iterations = {}", n);
+    }
+
+    // P0-B 修复：为 MCP agent_run 装配**真实**的 LLM 推理 provider。
+    //
+    // 此前直接 `HarnessAgentAdapter::new("default")`：其内部的
+    // `ReActEngine::new()` 未注入 `reasoning_provider`，字段停留在
+    // `DefaultReasoningProvider`，而它的每个 trait 方法都直接返回
+    // `Err("...not configured: inject a real LlmReasoningProvider...")`
+    // ⇒ 每次 `agent_run` 都在 Analyzing 阶段失败（`run()` 重试 3 次后返回 failure）。
+    //
+    // 现接线到 `build_reasoning_provider_from_db`（DB provider 配置 → LlmDrivenReasoningProvider）。
+    // 同时 `HarnessAgentAdapter::execute` 会消费 `AgentExecuteRequest.max_steps`（调用级预算）。
+    let mcp_agent_engine = {
+        // 显式传入 config 而非依赖 `ReActEngine::new()` 的内建默认值：
+        // ① 真实 token tracker 的 `check(None, _)` 契约是**立即 Stop**，而
+        //    `ReActConfig::token_budget_limit: None` 的语义是「用模型上下文窗口大小」，
+        //    两者冲突 ⇒ 在此收敛为确定上限（引擎侧另有 run() 告警兜底）。
+        // ② 使 `with_config` 首次拥有生产调用点（此前仅测试调用）。
+        let mut react_config = axagent_agent::reasoning_state::ReActConfig {
+            token_budget_limit: Some(180_000),
+            ..Default::default()
+        };
+
+        // P1-E 扩展（2026-09-12）：应用用户在「设置 → 高级引擎参数」里配置的值。
+        // `ReactEngineOverrides` 的字段全为 `Option`，未配置项保持引擎默认。
+        //
+        // 这里是**启动时读一次**（`create_app_state` 只跑一次），故改设置需重启
+        // 才对 MCP `agent_run` 生效 —— 与 `maxIterations` 的热生效不同（后者走
+        // `SessionManager` 的每-turn 读取）。面板上已如实标注「重启后生效」，
+        // 不做假承诺（铁律 #12：归因/提示不得说谎）。
+        let react_overrides =
+            crate::commands::app_config::read_react_engine_overrides(&sea_db).await;
+        react_overrides.apply_to(&mut react_config);
+
+        let mut engine = axagent_agent::react_engine::ReActEngine::new()
+            .with_config(react_config)
+            // 注入**真实** token 预算 tracker。此前是 `NoopTokenBudgetTracker`，
+            // 其 `check()` 恒返回 Continue ⇒ `token_budget_enabled: true` 从未生效。
+            .with_token_budget(Box::new(axagent_kit::token_budget::TokenBudgetTracker::new()));
+
+        match crate::init::llm_providers::build_reasoning_provider_from_db(&master_key).await {
+            Some(provider) => {
+                tracing::info!(
+                    "[wiring] MCP agent_run 已装配 ReActEngine：LlmDrivenReasoningProvider + \
+                     TokenBudgetTracker + 显式 ReActConfig"
+                );
+                engine = engine.with_reasoning_provider(provider);
+            },
+            None => tracing::warn!(
+                "[wiring] 未配置可用 LLM provider —— MCP agent_run 将在 Analyzing 阶段失败"
+            ),
+        }
+        engine
+    };
+
     // P2 集成: McpAgentServer wiring。
     // - Agent trait 由 HarnessAgentAdapter 提供 (agent crate)
     // - AgentSessionBroker trait 由 SessionManager 提供 (Arc cast 到 dyn)
@@ -754,6 +862,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         axagent_mcp::McpAgentServer::new(
             Some(Arc::new(
                 axagent_agent::harness_adapter::HarnessAgentAdapter::new("default")
+                    .with_engine(mcp_agent_engine)
                     .with_runtime(Arc::clone(&agent_session_manager)),
             ) as Arc<dyn axagent_harness::Agent>),
             Some(Arc::clone(&agent_session_manager) as Arc<dyn axagent_harness::AgentSessionBroker>),
@@ -923,15 +1032,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         }
     };
 
-    // ── Construct the 6 domain sub-states (Phase 3 P1 Task 3.1) ──
-    let infra_state = crate::state::InfraState::new(
-        harness.clone(),
-        vector_store_arc.clone(),
-        Arc::new(tokio::sync::Semaphore::new(2)),
-        file_authorizer.clone(),
-        app_dir.clone(),
-    );
-    let gateway_state = crate::state::GatewayState::new(gateway_server.clone());
+    // ── Construct the domain sub-states (Phase 3 P1 Task 3.1) ──
     let task_state = crate::state::TaskState::new(
         task_manager.clone(),
         auto_backup_handle.clone(),
@@ -1010,33 +1111,32 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     );
 
     // ── M1: 新子状态分解 — 学习引擎与工具创建器 ──
-    // 初始化 OPC 行业适配器注册表（P0-1-A：行业包驱动，替代 create_all_adapters 硬编码）
+    // 初始化 OPC 域包适配器注册表（P0-1-A：域包驱动，替代 create_all_adapters 硬编码）
     // 先把仓库根 config/opc 增量同步到 app_dir（生产模式 CWD 非仓库根，
-    // resolve_industries_dir 的仓库根 fallback 必然失败，app_dir 分支必须可用）
+    // resolve_domain_packs_dir 的仓库根 fallback 必然失败，app_dir 分支必须可用）
     crate::commands::opc_workflows::ensure_opc_config_synced(&app_dir);
-    let mut industry_registry = IndustryAdapterRegistry::new();
-    for adapter in crate::commands::opc_workflows::load_industry_adapters_from_packs(Some(&app_dir))
-    {
-        industry_registry.register(adapter);
+    let mut domain_pack_registry = DomainPackAdapterRegistry::new();
+    for adapter in crate::commands::opc_workflows::load_domain_pack_adapters(Some(&app_dir)) {
+        domain_pack_registry.register(adapter);
     }
-    tracing::info!("[init] OPC 行业适配器注册完成: {} 个", industry_registry.count());
-    let industry_adapter_registry = Arc::new(Mutex::new(industry_registry));
+    tracing::info!("[init] OPC 域包适配器注册完成: {} 个", domain_pack_registry.count());
+    let domain_pack_adapter_registry = Arc::new(Mutex::new(domain_pack_registry));
 
-    // 初始化行业学习引擎（LLM 端口可选，未配置时使用规则回退；
+    // 初始化域包学习引擎（LLM 端口可选，未配置时使用规则回退；
     // RL 持久化存储已随 AxInvest 清理移除，使用内置内存存储）
-    // 接线 OpcLlmBridge：行业学习（反思/进化/自我改进）从规则打分升级为真实 LLM 推理，
-    // 失败自动回退规则评估（LlmInferencePort 契约），不阻塞行业工作流。
-    let industry_learning_engine = Arc::new(IndustryLearningEngine::new().with_llm_port(Arc::new(
-        crate::commands::opc_llm_bridge::OpcLlmBridge::new(harness.clone()),
-    )));
+    // 接线 OpcLlmBridge：域包学习（反思/进化/自我改进）从规则打分升级为真实 LLM 推理，
+    // 失败自动回退规则评估（LlmInferencePort 契约），不阻塞域包工作流。
+    let domain_pack_learning_engine = Arc::new(DomainPackLearningEngine::new().with_llm_port(
+        Arc::new(crate::commands::opc_llm_bridge::OpcLlmBridge::new(harness.clone())),
+    ));
 
     let learning_state = LearningEngineState::new(
         text_grad_engine.clone(),
         intrinsic_motivation.clone(),
         coevolution_env.clone(),
         process_reward_model.clone(),
-        industry_learning_engine,
-        industry_adapter_registry,
+        domain_pack_learning_engine,
+        domain_pack_adapter_registry,
     );
     let tool_state = ToolState::new(auto_tool_creator.clone());
 
@@ -1089,22 +1189,6 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
                 Arc::new(axagent_telemetry::MemoryTelemetrySink::default())
             },
         }
-    };
-
-    // 3.3 P2:构造 PersistentRunner(持久化重试调度器)。
-    //
-    // 使用默认配置(enabled: false),守护线程会空转不调度。
-    // 未来用户通过配置启用后,守护线程立即开始检查 pending session。
-    //
-    // 注意:executor 闭包为占位实现,真正的 SessionManager 适配器需后续实现。
-    let persistent_runner = {
-        let config = axagent_runtime::persistent_runner::PersistentRunnerConfig::default();
-        let runner =
-            Arc::new(axagent_runtime::persistent_runner::PersistentRunner::new(&app_dir, config));
-        tracing::info!(
-            "[persistent_runner] 实例已构造(默认 enabled=false,守护线程将在 start_background_services 中启动)"
-        );
-        Some(runner)
     };
 
     // ── 能力发现系统初始化 ──────────────────────────────────────
@@ -1163,6 +1247,24 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 加速首帧显示（见 run_deferred_init）
     tracing::debug!("Cognitive router templates + main DAG load deferred to background");
 
+    // ── P2：加载「能力域」覆盖层（启用/停用 + 追加别名）──
+    //
+    // 必须早于任何用户请求：**三个消费端**都读这份覆盖层 ——
+    // ① L1 分类器 prompt（停用的域从 LLM 候选集消失）、
+    // ② L1 路由 `DomainRouterImpl::route`（不返回停用域）、
+    // ③ 能力过滤 `CapabilityFilterImpl::check_all`（裁剪停用域的能力）。
+    //
+    // 加载失败**不阻断启动**（域覆盖是可选的用户配置，缺它应回落到内置默认而非白屏），
+    // 但必须**可见**：error! 打出原因。此时覆盖层为空 = 全部内置默认（fail-open 且不静默）。
+    match axagent_dao::repo::capability_domain_override::load_into_runtime(&sea_db).await {
+        Ok(n) => tracing::info!(applied = n, "能力域覆盖层已加载"),
+        Err(e) => tracing::error!(
+            error = %e,
+            "能力域覆盖层加载失败 ⇒ 本次运行按【内置默认】处理（全部域启用、无追加别名）；\
+             用户此前保存的域设置在本进程中不生效"
+        ),
+    }
+
     // ── 认知编排器初始化（三层路由树协调器） ──────────────────────
     // 全局用户消息唯一入口：L1 域路由 → L2 簇路由 → L3 RAR+图谱路由 → 执行模式决策。
     // L1/L2 用生产版规则实现；RAR 复用能力索引（与 capability_router 同源）；
@@ -1191,20 +1293,32 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         let harness = l1_reasoner_harness.clone();
         let input = user_input.to_string();
         Box::pin(async move {
-            const SYS: &str = "你是 L1 域路由分类器。根据用户输入，从以下业务域标识中选最匹配的一个，\
-                只输出该标识，不要解释、不要引号、不要标点：\
-                general, devops, ai_media, data_analysis, content_creation, communication, finance, automation, system";
+            // ── P2 消费端①：候选集**按当前启用集合生成** ──
+            //
+            // 此前这里是 `const SYS` 里手抄的 9 个 slug（第 N 份 id 副本，由门禁正则守）。
+            // P2 起改由 `l1_classifier_domain_list()` 实时派生：停用一个域 ⇒
+            // 它**从提示词里消失**，LLM 不再可能选中它。
+            //
+            // 清单构造刻意留在 harness：它必须与覆盖层**同源**。放在这里手抄
+            // 就会重现「副本各自腐烂」——这正是 `PLAN-domain-single-source.md` 在治的病。
+            let sys = format!(
+                "你是 L1 域路由分类器。根据用户输入，从以下业务域标识中选最匹配的一个，\
+                 只输出该标识，不要解释、不要引号、不要标点：{}",
+                axagent_harness::l1_classifier_domain_list()
+            );
             let user = format!("用户输入：{input}");
-            match axagent_runtime::llm_helpers::chat_with_default_provider(&harness, SYS, &user, 16)
-                .await
+            match axagent_runtime::llm_helpers::chat_with_default_provider(
+                &harness, &sys, &user, 16,
+            )
+            .await
             {
                 Ok(text) => {
                     let candidate = text.trim().trim_matches('"').trim_matches('`');
-                    if candidate.parse::<axagent_harness::CapabilityDomain>().is_ok() {
-                        Some(candidate.to_string())
-                    } else {
-                        None
-                    }
+                    // 解析走运行时权威入口（内置 id/别名 ∪ 追加别名，且**拒绝停用域**）。
+                    // 提示词里已不含停用域，但模型可能凭历史先验"记得"它们
+                    // （判据：提示词约束是软的，解析约束才是硬的 —— 两层都要有）。
+                    axagent_harness::resolve_enabled_domain(candidate)
+                        .map(|d| d.as_str().to_string())
                 },
                 Err(e) => {
                     tracing::warn!(error = %e, "L1 域路由 LLM 兜底调用失败，回退纯规则路由");
@@ -1381,6 +1495,20 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         .await;
     }
 
+    // ── OPC 工作流 KPI 落库钩子注册 ──
+    // 创作类 KPI（word_count/completion_rate/revision_rounds）只在工作流执行上下文
+    // 里算得出来，此前无任何落库路径 ⇒ opc_kpi_records 恒空、仪表盘只能显示
+    // 「未接数据源」。钩子注册后，模板须在 hooks_config.post_exec 中声明钩子名
+    // （见 `commands::constants::domain_pack::KPI_HOOK_NAME`）才会被调用。
+    {
+        crate::commands::opc_workflow_kpi_hook::register_opc_kpi_hooks(
+            &work_engine,
+            harness.db().clone(),
+            app_dir.clone(),
+        )
+        .await;
+    }
+
     Ok(AppState {
         harness,
         gateway: gateway_server,
@@ -1417,7 +1545,6 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         agent_ask_senders,
         agent_always_allowed,
         agent_prompters,
-        agent_plan_approvals,
         evolution_consent_senders,
         pending_capability_gaps,
         agent_session_manager,
@@ -1493,7 +1620,6 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         pty_manager,
         telemetry_level_handle,
         telemetry_sink,
-        persistent_runner,
         event_bus,
         // 能力发现系统
         capability_router,
@@ -1507,8 +1633,6 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         task_shape_llm_classifier,
         task_shape_approval_senders,
         // Phase 3 P1 Task 3.1: domain decomposition
-        infra: infra_state,
-        gateway_state,
         task: task_state,
         agent: agent_state,
         memory: memory_state,
@@ -1535,6 +1659,7 @@ async fn register_all_capabilities(
     tool_registry: &Arc<tokio::sync::Mutex<axagent_tools::registry::UnifiedToolRegistry>>,
     db: &sea_orm::DatabaseConnection,
     skill_state: &crate::state::SkillState,
+    app_dir: &std::path::Path,
 ) {
     use axagent_harness::{
         CapabilityIndexer, CapabilityPassport, CapabilityPassportDto, PlanningComplexity,
@@ -1625,6 +1750,7 @@ async fn register_all_capabilities(
                 }
                 passports.push(CapabilityPassportDto {
                     capability_id: format!("skill:{}", meta.name),
+                    domain_pack_id: None,
                     name: meta.name.clone(),
                     description: skill_description,
                     summary: None,
@@ -1724,6 +1850,7 @@ async fn register_all_capabilities(
                 }
                 passports.push(CapabilityPassportDto {
                     capability_id: format!("agent:{}", p.id),
+                    domain_pack_id: None,
                     name: p.name.clone(),
                     description: p.description.clone().unwrap_or_default(),
                     summary: None,
@@ -1844,6 +1971,7 @@ async fn register_all_capabilities(
                 }
                 passports.push(CapabilityPassportDto {
                     capability_id: format!("agent_role:{}", r.id),
+                    domain_pack_id: None,
                     name: r.name.clone(),
                     description: r.description.clone().unwrap_or_default(),
                     summary: None,
@@ -1909,6 +2037,11 @@ async fn register_all_capabilities(
     let success = results.iter().filter(|r| r.success).count();
     tracing::info!("[capability] 自动注册 {} 个能力护照，成功 {}", total, success);
 
+    // 期一·3 能力集封闭校验：护照收集 + 索引重建完成后，对全部启用域包做一次
+    // 非阻塞审计（承诺 ⊆ 实际），base 目录用 app_dir（产线）或仓库根（开发）。
+    let base = axagent_analysis_engine::opc::domain_pack::resolve_domain_packs_dir(Some(app_dir));
+    audit_and_log_domain_packs_capability(indexer, &base).await;
+
     // 5. 注册系统级能力（CognitiveRouter 编排器等）
     let system_passports = register_system_capabilities(indexer).await;
 
@@ -1927,6 +2060,68 @@ async fn register_all_capabilities(
                 e
             );
         },
+    }
+}
+
+/// 期一·3 装配助手：对全部启用域包跑一次能力封闭校验并打统一日志。
+///
+/// 非阻塞审计（破坏只 warning，不 panic、不改原流程）。三处调用点共用本函数保证日志口径一致：
+/// - 索引重建 `register_all_capabilities`（主装配点，持有 indexer + app_dir）；
+///   - `opc_import_domain_pack`（导入域包后全量对账）；
+///   - seed 路径不在此审计（seed 只种 workflow_templates，不新增护照，护照态由下次索引重建接管）。
+///
+/// 日志口径：`!closed` → `warn!`（列出 missing 的来源/类型/谓词 + domain_proposals 的
+/// domain_id/suggestion）；`closed` → `info!` 一行「域包 {} 能力封闭校验通过（{} 项承诺）」。
+pub(crate) async fn audit_and_log_domain_packs_capability(
+    indexer: &axagent_tools::CapabilityIndexerImpl,
+    base_dir: &std::path::Path,
+) {
+    use std::collections::HashMap;
+
+    let manifests = axagent_analysis_engine::opc::domain_pack::scan_domain_packs(base_dir);
+    let claim_counts: HashMap<String, usize> = manifests
+        .iter()
+        .filter(|m| m.enabled)
+        .map(|m| (m.id.clone(), m.capabilities.len()))
+        .collect();
+
+    let reports =
+        axagent_analysis_engine::opc::domain_pack::audit_domain_packs_capability(indexer, base_dir)
+            .await;
+    for report in &reports {
+        if !report.closed {
+            let missing_detail = report
+                .missing
+                .iter()
+                .map(|m| {
+                    format!("{}:{}({})", m.source.as_str(), m.capability_type, m.predicate_desc)
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let proposal_detail = report
+                .domain_proposals
+                .iter()
+                .map(|p| format!("{}（{}）", p.domain_id, p.suggestion))
+                .collect::<Vec<_>>()
+                .join("; ");
+            tracing::warn!(
+                domain_pack_id = %report.domain_pack_id,
+                missing = %missing_detail,
+                domain_proposals = %proposal_detail,
+                "[domain-pack] 域包 {} 能力封闭校验未通过（missing {} 项，待注册域 {} 项）",
+                report.domain_pack_id,
+                report.missing.len(),
+                report.domain_proposals.len()
+            );
+        } else {
+            let claims = claim_counts.get(&report.domain_pack_id).copied().unwrap_or(0);
+            tracing::info!(
+                domain_pack_id = %report.domain_pack_id,
+                "[domain-pack] 域包 {} 能力封闭校验通过（{} 项承诺）",
+                report.domain_pack_id,
+                claims
+            );
+        }
     }
 }
 
@@ -2002,6 +2197,7 @@ async fn register_system_capabilities(
         // CognitiveRouter — 三层路由编排器
         CapabilityPassportDto {
             capability_id: "system_cognitive_router".to_string(),
+            domain_pack_id: None,
             name: "认知路由编排器".to_string(),
             description: "三层路由编排器（L1域→L2簇→L3能力），负责将用户查询路由到正确的能力"
                 .to_string(),
@@ -2059,6 +2255,7 @@ async fn register_system_capabilities(
         // LayeredPromptEngine — 分层 Prompt 引擎
         CapabilityPassportDto {
             capability_id: "system_layered_prompt_engine".to_string(),
+            domain_pack_id: None,
             name: "分层Prompt引擎".to_string(),
             description: "按Domain/Cluster/Capability/Context四层注入Prompt片段，支持Token预算管理"
                 .to_string(),
@@ -2134,6 +2331,7 @@ async fn register_system_capabilities(
     for (suffix, name, description) in self_evolution_tools {
         system_passports.push(CapabilityPassportDto {
             capability_id: format!("system:self_evolution:{suffix}"),
+            domain_pack_id: None,
             name: name.to_string(),
             description: description.to_string(),
             summary: None,
@@ -2351,6 +2549,7 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
         &app_state.local_tool_registry,
         &app_state.harness.db(),
         &app_state.skill,
+        &app_state.app_data_dir,
     )
     .await;
 
@@ -2542,6 +2741,40 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
 
 use async_trait::async_trait;
 use sea_orm::ConnectionTrait;
+use sea_orm::Statement;
+use sea_orm::Value;
+
+/// 生成 `n` 个绑定参数占位符 —— **必须按 backend 分支**。
+///
+/// PostgreSQL 的绑定参数写作 `$1..$n`，SQLite 写作 `?`：这是 driver 协议层面的差异，
+/// 上层无法消除（`Statement::from_sql_and_values` 不做占位符转换，它只按传入的
+/// `DbBackend` 选择绑定方式）。所以把这段差异**收敛在本函数内**，而不是散落在每条
+/// SQL 字符串里。
+///
+/// #### 为什么本函数必须存在（2026-09-12 生产实证）
+///
+/// `emit` 原实现用 `format!` 把值直接拼进 SQL，其中 `payload` 是
+/// `serde_json::to_string(payload)` 的结果（形如 `{"conversationId":"x"}`）——
+/// **不带外层引号**，于是 SQL 里出现裸 `{`。PG 事务预演逐条复现：
+///
+/// ```text
+/// INSERT ... VALUES ('sess-1', 1, 'TurnStarted', {"conversationId":"sess-1"}, '...')
+/// ❌ 语法错误 在 "{" 或附近的
+/// ```
+///
+/// 而 `publish_agent_event` 调用 emit 时**总是传 `Some(payload)`**
+/// （`crates/agent/src/session_manager.rs`），错误又被 `tracing::warn!` 吞掉
+/// ⇒ **session_events 表即使由 v139 建好，也永远写不进一条数据**（静默 fail-open）。
+/// 同一缺陷还会在 `session_id` 含单引号时触发（`next_seq` / `clear` 同样如此）。
+///
+/// 参数化后两类问题一起消失：值走绑定通道，不再参与 SQL 文本解析。
+fn bind_placeholders(n: usize, is_pg: bool) -> String {
+    if is_pg {
+        (1..=n).map(|i| format!("${i}")).collect::<Vec<_>>().join(", ")
+    } else {
+        vec!["?"; n].join(", ")
+    }
+}
 
 struct DbSessionEventSink {
     db: sea_orm::DatabaseConnection,
@@ -2554,12 +2787,22 @@ impl DbSessionEventSink {
 
     /// 查询某 session 当前最大 seq，返回 +1。
     async fn next_seq(&self, session_id: &str) -> i64 {
-        let row = self.db
-            .query_one_raw(sea_orm::Statement::from_string(
-                sea_orm::DbBackend::Sqlite,
+        // 原实现把 session_id 插值进 SQL（`WHERE session_id = '{session_id}'`）：
+        // 含单引号的 id 会直接语法错（事务预演已复现），改参数化后消失。
+        // 原实现还把 backend 硬编码成 `DbBackend::Sqlite`（即便连的是 PG），此处一并
+        // 改为 `self.db.get_database_backend()`。
+        let backend = self.db.get_database_backend();
+        let is_pg = backend == sea_orm::DbBackend::Postgres;
+        let row = self
+            .db
+            .query_one_raw(Statement::from_sql_and_values(
+                backend,
                 format!(
-                    "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq FROM session_events WHERE session_id = '{session_id}'"
+                    "SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq FROM session_events \
+                     WHERE session_id = {}",
+                    bind_placeholders(1, is_pg)
                 ),
+                [Value::from(session_id)],
             ))
             .await;
         match row.ok().flatten() {
@@ -2578,20 +2821,33 @@ impl axagent_harness::SessionEventSink for DbSessionEventSink {
         payload: Option<serde_json::Value>,
     ) {
         let seq = self.next_seq(session_id).await;
-        let payload_str = payload
-            .as_ref()
-            .and_then(|v| serde_json::to_string(v).ok())
-            .unwrap_or_else(|| "NULL".to_string());
-        let now = chrono::Utc::now();
-        let ts = now.to_rfc3339();
+        // 序列化成 JSON 文本后**走绑定参数**（不再插值）；`None` 绑定为 SQL NULL。
+        let payload_val: Value = match payload.as_ref().and_then(|v| serde_json::to_string(v).ok())
+        {
+            Some(s) => Value::from(s),
+            None => Value::String(None),
+        };
+        let ts = chrono::Utc::now().to_rfc3339();
 
-        let sql = format!(
-            "INSERT INTO session_events (session_id, seq, event_type, payload, created_at) \
-             VALUES ('{session_id}', {seq}, '{evt_type}', {payload_str}, '{ts}')",
-            evt_type = event_type.as_str(),
+        let backend = self.db.get_database_backend();
+        let is_pg = backend == sea_orm::DbBackend::Postgres;
+        let stmt = Statement::from_sql_and_values(
+            backend,
+            format!(
+                "INSERT INTO session_events (session_id, seq, event_type, payload, created_at) \
+                 VALUES ({})",
+                bind_placeholders(5, is_pg)
+            ),
+            [
+                Value::from(session_id),
+                Value::from(seq),
+                Value::from(event_type.as_str()),
+                payload_val,
+                Value::from(ts),
+            ],
         );
 
-        match self.db.execute_unprepared(&sql).await {
+        match self.db.execute_raw(stmt).await {
             Ok(_) => {},
             Err(e) => {
                 tracing::warn!(
@@ -2603,7 +2859,16 @@ impl axagent_harness::SessionEventSink for DbSessionEventSink {
     }
 
     async fn clear(&self, session_id: &str) {
-        let sql = format!("DELETE FROM session_events WHERE session_id = '{session_id}'");
-        let _ = self.db.execute_unprepared(&sql).await;
+        let backend = self.db.get_database_backend();
+        let is_pg = backend == sea_orm::DbBackend::Postgres;
+        let stmt = Statement::from_sql_and_values(
+            backend,
+            format!(
+                "DELETE FROM session_events WHERE session_id = {}",
+                bind_placeholders(1, is_pg)
+            ),
+            [Value::from(session_id)],
+        );
+        let _ = self.db.execute_raw(stmt).await;
     }
 }

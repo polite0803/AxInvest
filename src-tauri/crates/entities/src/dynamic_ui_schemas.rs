@@ -9,14 +9,21 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub title: String,
+    #[sea_orm(default_value = "")]
     pub description: String,
     #[sea_orm(column_type = "Text")]
     pub schema_json: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "custom")]
     pub category: String,
+    #[sea_orm(default_value = "[]")]
     pub tags: String,
+    #[sea_orm(default_value = "1.0.0")]
     pub version: String,
+    #[sea_orm(default_value = 0)]
     pub is_builtin: i32,
     pub created_at: String,
+    #[sea_orm(indexed)]
     pub updated_at: String,
 }
 

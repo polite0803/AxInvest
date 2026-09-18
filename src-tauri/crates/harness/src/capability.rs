@@ -89,8 +89,16 @@ pub enum CapabilityEvolvability {
 /// - `System` 为内部域，仅配合 `Visibility::SystemOnly` 使用，永不进入检索结果。
 ///
 /// # 历史字符串兼容
-/// 反序列化与 `FromStr` 接受旧值别名：`core`→General、`invest`→Finance、`opc`→Automation，
-/// 保证存量数据库（如 `active_domains`、路由路径）不受损；`as_str()`/`Display` 只输出新值。
+/// 反序列化与 `FromStr` 接受旧值别名（18 条：`core`→General、`invest`/`quant`/`portfolio`/
+/// `stock_analysis`→Finance、`opc`/`workflow`→Automation、`pty`/`db_config`→Devops、
+/// `orchestrator`/`agent`→System 等），保证存量数据库（如 `active_domains`、路由路径）
+/// 不受损；`as_str()`/`Display` 只输出新值。
+///
+/// ⚠ **别名表的唯一声明位置**是 [`crate::domain_registry::DOMAIN_NODES`] 各节点的
+/// `aliases` 字段（2026-09-15 从本文件的扁平 `match` 迁出，见 `PLAN-domain-single-source.md`
+/// §9.2）—— 加/改别名去那里，**不要**在本文件重新引入字符串表。
+/// `#[serde(alias = "…")]` 属性是**存量反序列化契约**的额外子集（仅 3 条），
+/// 由门禁 `check-domain-single-source.mjs` 校验「必须出现在别名表里」。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityDomain {
@@ -147,40 +155,33 @@ impl std::fmt::Display for CapabilityDomain {
 impl std::str::FromStr for CapabilityDomain {
     type Err = ();
 
+    /// 解析域标识（规范 id 或历史别名）。
+    ///
+    /// **唯一数据源是 [`crate::domain_registry::DOMAIN_NODES`]**：规范 id 由 `as_str()`
+    /// 派生、历史别名声明在各节点的 `aliases` 字段。本函数只做查找，**不持有任何字符串表**。
+    ///
+    /// # 为什么从「扁平 match」改成「遍历声明」（2026-09-15）
+    ///
+    /// 此前这里是一张 27 条目的 `match`（9 个规范值 + 18 条历史别名），三个问题：
+    /// ① 别名「属于哪个域」只能靠注释与书写位置表达，`invest` 紧挨着 `finance` 是**约定**不是**类型**；
+    /// ② 同一批别名在 `#[serde(alias = …)]` 属性里**又抄了一小份**（`core`/`invest`/`opc`），
+    ///    两份之间没有任何校验；
+    /// ③ 规范值与 `as_str()` 的映射重复，两边写错一侧**编译与测试都不报**。
+    /// 现在别名与规范值同处一份声明，由单测逐条钉住（见 `domain_registry::tests`）。
+    ///
+    /// 复杂度：O(节点数 × 别名数)（9 × ≤8）—— 调用点均为反序列化 / LLM 输出解析等
+    /// 非热路径，换取「别名只有一处声明」。
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.to_lowercase().as_str() {
-            // 新值
-            "general" => CapabilityDomain::General,
-            "devops" => CapabilityDomain::Devops,
-            "ai_media" => CapabilityDomain::AiMedia,
-            "data_analysis" => CapabilityDomain::DataAnalysis,
-            "content_creation" => CapabilityDomain::ContentCreation,
-            "communication" => CapabilityDomain::Communication,
-            "finance" => CapabilityDomain::Finance,
-            "automation" => CapabilityDomain::Automation,
-            "system" => CapabilityDomain::System,
-            // 历史别名（兼容存量数据，单向收敛到标准域，不构成独立域定义）
-            "core" => CapabilityDomain::General,
-            "invest" => CapabilityDomain::Finance,
-            "opc" => CapabilityDomain::Automation,
-            // 历史命令域值别名（命令桥统一前的存量标注，收敛到标准域）
-            "quant" => CapabilityDomain::Finance,
-            "portfolio" => CapabilityDomain::Finance,
-            "stock_analysis" => CapabilityDomain::Finance,
-            "device" => CapabilityDomain::General,
-            "dynamic_ui" => CapabilityDomain::General,
-            "fine_tune" => CapabilityDomain::General,
-            "cloud" => CapabilityDomain::General,
-            "pty" => CapabilityDomain::Devops,
-            "rl_training" => CapabilityDomain::General,
-            "context" => CapabilityDomain::General,
-            "db_config" => CapabilityDomain::Devops,
-            "conversation" => CapabilityDomain::General,
-            "orchestrator" => CapabilityDomain::System,
-            "agent" => CapabilityDomain::System,
-            "workflow" => CapabilityDomain::Automation,
-            _ => return Err(()),
-        })
+        let lower = s.to_lowercase();
+        for node in crate::domain_registry::DOMAIN_NODES {
+            if node.slug() == lower.as_str() {
+                return Ok(node.domain);
+            }
+            if node.aliases.contains(&lower.as_str()) {
+                return Ok(node.domain);
+            }
+        }
+        Err(())
     }
 }
 
@@ -1007,6 +1008,7 @@ pub trait CapabilityPassport: Send + Sync {
             kind: self.kind(),
             domain: self.domain(),
             source: self.source(),
+            domain_pack_id: None,
             evolvable: self.evolvability(),
             sub_category: self.sub_category(),
             visibility: self.visibility(),
@@ -1129,6 +1131,12 @@ pub struct CapabilityPassportDto {
     /// 能力来源（内置 / 插件），用于溯源与进化边界判断
     #[serde(default)]
     pub source: CapabilitySource,
+    /// 归属域包（domain_pack_id）反向指针：能力由哪个域包提供。
+    ///
+    /// 仅域包立案能力（如 `{domain_pack}_harness_workflow`）填充；非域包能力为 None。
+    /// 供「能力集封闭」校验器与域包视角检索使用。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_pack_id: Option<String>,
     /// 能力可进化性（决定进化引擎分发边界）
     #[serde(default)]
     pub evolvable: CapabilityEvolvability,
@@ -1312,6 +1320,7 @@ impl Default for CapabilityPassportDto {
             kind: CapabilityKind::Tool,
             domain: CapabilityDomain::General,
             source: CapabilitySource::Builtin,
+            domain_pack_id: None,
             evolvable: CapabilityEvolvability::None,
             sub_category: String::new(),
             visibility: Visibility::Public,

@@ -54,35 +54,34 @@ impl Tool for ListKnowledgeBasesTool {
     }
 
     async fn call(&self, _input: Value, _ctx: &ToolContext) -> Result<ToolResult, ToolError> {
-        let raw_path = db_path()?;
-        let db_file = raw_path.strip_prefix("sqlite:").unwrap_or(&raw_path);
+        // 走 SeaORM 实体（`axagent_dao::repo::knowledge::list_knowledge_bases`，其
+        // `ORDER BY sort_order, name` 与原手写 SQL 逐字一致）。
+        // 改造前此处是 `rusqlite::Connection::open(<db 路径>)` + 手写 SELECT —— 即
+        // 「按路径另开一条连接 + 原生 SQL」，与本文件其它 6 个工具（全部走
+        // `axagent_harness::repositories::knowledge_*_repository()`）不一致，是本文件
+        // 里的漏网处。顺带消掉一条多余的数据库连接。
+        let db = crate::global_state::get_sea_db()
+            .ok_or_else(|| ToolError::execution_failed("数据库连接未初始化"))?;
 
-        let conn = rusqlite::Connection::open(db_file)
-            .map_err(|e| ToolError::execution_failed(format!("打开数据库失败: {}", e)))?;
+        let bases = axagent_dao::repo::knowledge::list_knowledge_bases(&db)
+            .await
+            .map_err(|e| ToolError::execution_failed(format!("查询知识库失败: {e}")))?;
 
-        let mut stmt = conn
-            .prepare("SELECT id, name, description, enabled FROM knowledge_bases ORDER BY sort_order, name")
-            .map_err(|e| ToolError::execution_failed(format!("查询知识库失败: {}", e)))?;
+        if bases.is_empty() {
+            return Ok(ToolResult::success("未找到知识库。请在 设置 > 知识库 中创建。"));
+        }
 
-        let rows: Vec<String> = stmt
-            .query_map([], |row| {
-                let id: String = row.get(0)?;
-                let name: String = row.get(1)?;
-                let desc: Option<String> = row.get(2)?;
-                let enabled: i32 = row.get(3)?;
-                let status = if enabled != 0 { "enabled" } else { "disabled" };
-                let desc_str = desc.map(|d| format!(" - {}", d)).unwrap_or_default();
-                Ok(format!("- {} [{}] ({}){}", name, id, status, desc_str))
+        let rows: Vec<String> = bases
+            .iter()
+            .map(|b| {
+                let status = if b.enabled { "enabled" } else { "disabled" };
+                let desc_str =
+                    b.description.as_ref().map(|d| format!(" - {d}")).unwrap_or_default();
+                format!("- {} [{}] ({}){}", b.name, b.id, status, desc_str)
             })
-            .map_err(|e| ToolError::execution_failed(format!("读取知识库列表失败: {}", e)))?
-            .filter_map(|r| r.ok())
             .collect();
 
-        if rows.is_empty() {
-            Ok(ToolResult::success("未找到知识库。请在 设置 > 知识库 中创建。"))
-        } else {
-            Ok(ToolResult::success(format!("可用知识库 ({}):\n{}", rows.len(), rows.join("\n"))))
-        }
+        Ok(ToolResult::success(format!("可用知识库 ({}):\n{}", rows.len(), rows.join("\n"))))
     }
 }
 
@@ -172,6 +171,11 @@ impl Tool for SearchKnowledgeTool {
         }
 
         // 回退：文本匹配
+        //
+        // ⚠ **此处保留 rusqlite 原生 SQL 是「向量操作」的豁免项**（项目原则：除向量操作外
+        // DB 访问一律走 SeaORM 实体）。表名 `vec_kb_{id}_meta` 是**运行时拼接的动态表名**，
+        // 而 SeaORM 实体要求**一个固定 `table_name`** ⇒ 语法上无法表达。此分支本身就是
+        // `SearchKnowledgeTool` 在「无 RAG 回调」时的文本匹配兜底，属向量检索的降级路径。
         let raw_path = db_path()?;
         let db_file = raw_path.strip_prefix("sqlite:").unwrap_or(&raw_path);
         let conn = rusqlite::Connection::open(db_file)

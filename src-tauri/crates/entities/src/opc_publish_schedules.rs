@@ -12,7 +12,10 @@ pub struct Model {
     pub id: String,
     pub content_ref_type: String,
     pub content_ref_id: String,
+    #[sea_orm(indexed)]
     pub scheduled_at: i64,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "pending")]
     pub status: String,
     pub published_at: Option<i64>,
     pub created_at: i64,

@@ -69,18 +69,32 @@ pub async fn load_concept_index_from_db(
         .map_err(|e| format!("查 knowledge_entities 失败: {e}"))?;
 
     // 4. 注册概念/行业节点
+    //
+    // ⚠ 2026-09-14（本体接线 P1）：比较**经本体归一**，不再用裸字面量精确比较。
+    //   原实现 `e.entity_type == "concept" || e.entity_type == "industry"` 对 DB 里的
+    //   大小写变体（实测 `COMPANY` 2 行 / `CONCEPT` 1 行）**恒 false** ⇒ 这些实体不会被
+    //   注册成概念节点，下面的成员关系也建不起来 —— 全程静默，没有任何报错。
+    //   而它们在本体登记表里是 `observed: true`（被承认存在）⇒ `validate_entity_type`
+    //   也不会报。「登记」只让问题可见，**不等于消费端认得** —— 所以归一必须在这里显式做。
     for e in &entities {
-        if e.entity_type == "concept" || e.entity_type == "industry" {
+        if is_concept_like(&e.entity_type) {
             let node =
                 ConceptNode::new(&e.id, &e.name, &e.entity_type).with_aliases(&[e.name.as_str()]);
             index.register(node);
         }
     }
 
-    let entity_type_map: HashMap<String, String> =
-        entities.into_iter().map(|e| (e.id.clone(), e.entity_type)).collect();
+    // 归一后再入表：下面 5 的两处比较读的是这张表的值，归一放在**构建处**一处即覆盖全部。
+    let entity_type_map: HashMap<String, String> = entities
+        .into_iter()
+        .map(|e| (e.id.clone(), normalized_entity_type(&e.entity_type)))
+        .collect();
 
     // 5. 填充成员关系
+    //
+    // ⚠ 下面两处 `t == "company"` / `t == "concept"` 之所以**安全**，是因为
+    //   `entity_type_map` 里的值在上面的构建处**已经归一**。若哪天有人绕开 map、
+    //   直接拿 `entity_type` 的原始值来比，大小写变体又会静默漏配（修复前的形态）。
     let mut total = 0usize;
     for r in &relations {
         let source_is_stock =
@@ -101,4 +115,55 @@ pub async fn load_concept_index_from_db(
     );
 
     Ok(total)
+}
+
+/// 实体类型归一：命中本体登记表 ⇒ 规范写法；未登记 ⇒ **原样返回**。
+///
+/// 未登记值原样返回是刻意的：`entity_type` 是开放词表（LLM 抽取 + 会话记忆各写各的），
+/// 把它替换成某个默认类型等于**凭空发明约束**，还会掩盖「LLM 给了个没人认识的值」。
+fn normalized_entity_type(raw: &str) -> String {
+    axagent_harness::knowledge_graph::normalize_entity_type(raw).unwrap_or(raw).to_string()
+}
+
+/// 该实体类型是否属于「概念类」（概念 / 行业）—— 归一后比较。
+///
+/// 归一**不是**把任意值兜底成 concept：未登记值 `normalize_entity_type` 返回 `None`，
+/// 这里落到 `false`，即「不认识就不当概念」——兜底方向与 `ConceptNode::new` 的缺省类型
+/// 无关，不要混。
+fn is_concept_like(raw: &str) -> bool {
+    matches!(
+        axagent_harness::knowledge_graph::normalize_entity_type(raw),
+        Some("concept") | Some("industry")
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 归一必须把大小写变体对齐到规范写法，且**不改写未登记值**。
+    ///
+    /// 这是 `knowledge_loader` 侧漏配的直接判据：DB 实测 `CONCEPT` 1 行、
+    /// `COMPANY` 2 行；修复前它们 `== "concept"` / `== "company"` 恒 false。
+    #[test]
+    fn test_entity_type_normalization_aligns_db_case_variants() {
+        // 修复前会漏配的两个真实存量值
+        assert!(is_concept_like("CONCEPT"), "`CONCEPT` 必须被识别为概念（DB 实测 1 行）");
+        assert!(is_concept_like("concept"));
+        assert!(is_concept_like("INDUSTRY"));
+        assert!(is_concept_like("Industry"));
+
+        // 公司类：`COMPANY`（DB 实测 2 行）必须归一到 company
+        assert_eq!(normalized_entity_type("COMPANY"), "company");
+        assert_eq!(normalized_entity_type("company"), "company");
+
+        // 负对照：非概念类不得被判成概念（防「一律兜底成 concept」的退化）
+        assert!(!is_concept_like("person"));
+        assert!(!is_concept_like("company"));
+        assert!(!is_concept_like("whatever_llm_said"), "未登记值不得兜底成概念");
+
+        // 未登记值原样返回（不发明规范形）
+        assert_eq!(normalized_entity_type("whatever_llm_said"), "whatever_llm_said");
+        assert_eq!(normalized_entity_type(""), "");
+    }
 }

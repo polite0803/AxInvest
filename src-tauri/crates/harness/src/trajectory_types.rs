@@ -222,9 +222,29 @@ pub struct TrajectoryPattern {
 }
 
 impl TrajectoryPattern {
+    /// 由自然键（`name`）派生的**确定性**持久化主键。
+    ///
+    /// `TrajectoryStorage::save_pattern` 的幂等性**完全**依赖 `ON CONFLICT (id) DO UPDATE`；
+    /// 而 `ON CONFLICT` 只在「同一个逻辑模式每次都拿到同一个 `id`」时才可能触发。
+    /// 本类型的自然键是 `name`（去重与统计聚合都按它做），因此主键必须由它派生：
+    /// 若用 `Uuid::new_v4()`，同一 `name` 每次入库都是全新主键 ⇒ 冲突永不发生 ⇒
+    /// 表按「每次学习 × 每个模式」无界增长。
+    ///
+    /// 实证（2026-09-17，生产 PG）：`trajectory_patterns` 2038 行却只有 3 个不同 `name`，
+    /// 其中 `tool-CapabilityView` 一名占 1019 行、当天仍在增（详见
+    /// `docs/plans/PLAN-memory-kb-reflow-id-space.md` §5d 类 C / 类 C-#2）。
+    ///
+    /// ⚠ **需要「同名多行」的场景不要走 `new`**：典型是 `rl_checkpoint:` 检查点，
+    /// 其身份是调用方给的主键（`commands/rl_training.rs` 用结构体字面量自定 `id`），
+    /// 同名不同 `id` 的多条必须并存。
+    pub fn stable_id_for_name(name: &str) -> String {
+        format!("pat_{}", name)
+    }
+
+    /// 以自然键派生主键（见 [`Self::stable_id_for_name`]）构造新模式。
     pub fn new(name: String, description: String, pattern_type: String) -> Self {
         Self {
-            id: Uuid::new_v4().to_string(),
+            id: Self::stable_id_for_name(&name),
             name,
             description,
             pattern_type,

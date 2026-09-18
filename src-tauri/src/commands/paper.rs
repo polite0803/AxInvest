@@ -260,8 +260,25 @@ pub async fn prepare_paper_qa_context(
         .map_err(err_to_string)?;
 
     // 3. 在该文档范围内检索相关 chunks（doc_ids 过滤）
+    //
+    // ⚠ 2026-09-15 二次修（过滤位置）：阈值原先在检索**返回之后**才筛（结果已被
+    // 截断成 top_k）⇒ 「配 8 条 + 阈值」可能返回 0 条；且同一规则同时存在于调用方
+    // 与检索层两处。现在先取阈值交给检索层（`min_similarity` ⇒
+    // `HybridSearchOptions.min_score`），由四条收尾路径在 `truncate(top_k)`
+    // **之前**统一处理。`kb.retrieval_threshold` 是**相关度下限 ∈ [0,1]**，同标尺。
+    //
+    // 历史：此处曾写死 `let default_max_distance = 2.0_f32;`，而注释声称
+    // 「与 collect_rag_context 一致」—— 并不一致（那边是 20.0），且 `2.0` 正是
+    // `rag.rs` 里已被修掉的坏值（该文件测试注释：「修复前为 2.0，过滤了几乎所有
+    // 结果」）。即那次修复只改了 `rag.rs` 一处，这份副本被漏掉。
+    let kb = axagent_dao::repo::knowledge::get_knowledge_base(db, &knowledge_base_id)
+        .await
+        .map_err(err_to_string)?;
+    let min_similarity =
+        axagent_search::rag::similarity_floor_from_threshold(kb.retrieval_threshold.unwrap_or(0.0));
+
     let top_k = top_k.unwrap_or(8).min(30);
-    let mut chunks = crate::indexing::search_knowledge_with_doc_filter(
+    let chunks = crate::indexing::search_knowledge_with_doc_filter(
         db,
         state.harness.master_key(),
         &state.vector_store,
@@ -269,22 +286,10 @@ pub async fn prepare_paper_qa_context(
         &question,
         top_k,
         Some(std::slice::from_ref(&document_id)),
+        Some(min_similarity),
     )
     .await
     .map_err(|e| String::from(ErrorResponse::from_error(e, ErrorCategory::Unrecoverable)))?;
-
-    // 应用 KB 的 retrieval_threshold 过滤（与 collect_rag_context 一致）
-    let kb = axagent_dao::repo::knowledge::get_knowledge_base(db, &knowledge_base_id)
-        .await
-        .map_err(err_to_string)?;
-    let default_max_distance = 2.0_f32;
-    let threshold = kb.retrieval_threshold.unwrap_or(0.0);
-    let effective_threshold = if threshold > 0.0 {
-        threshold
-    } else {
-        default_max_distance
-    };
-    chunks.retain(|r| r.score <= effective_threshold);
 
     // 4. 拼接 RAG context 文本（含 [cite:N] 标记，前端可渲染为引用 chip）
     let mut context_parts: Vec<String> = Vec::new();

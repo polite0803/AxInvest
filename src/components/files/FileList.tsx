@@ -2,6 +2,7 @@
 
 /** FileList renders file rows in an antd Table with built-in multi-column sorting. */
 
+import { formatFileSize } from "@/lib/format";
 import { invoke, logIpcError } from "@/lib/invoke";
 import type { FileCategory, FileRow } from "@/types";
 import { Button, Empty, Image, Popconfirm, Table, Tag, theme } from "antd";
@@ -17,21 +18,6 @@ interface FileListProps {
   onSelectionChange?: (keys: string[]) => void;
   onReveal?: (path: string) => void;
   onDelete?: (id: string) => void;
-}
-
-function formatSize(bytes?: number): string {
-  if (bytes == null) {
-    return "—";
-  }
-  if (bytes === 0) {
-    return "0 B";
-  }
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
-  const i = Math.min(
-    Math.floor(Math.log(bytes) / Math.log(1024)),
-    units.length - 1,
-  );
-  return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
 /** Load base64 data URL for an image thumbnail via Rust command. */
@@ -138,7 +124,7 @@ export function FileList({
       sorter: { compare: (a, b) => (a.size ?? 0) - (b.size ?? 0), multiple: 2 },
       render: (size: number | undefined) => (
         <span className="text-xs" style={{ color: token.colorTextSecondary }}>
-          {formatSize(size)}
+          {formatFileSize(size)}
         </span>
       ),
     },

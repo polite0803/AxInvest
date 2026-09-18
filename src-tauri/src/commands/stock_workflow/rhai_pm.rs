@@ -30,6 +30,16 @@ pub fn register_pm_functions(engine: &mut Engine) {
             portfolio_formula::compute_kelly_position(posterior, odds, cost_pct, risk_level)
         },
     );
+    // ⚠️⚠️ 死映射警示（2026-09-13 实证）：本函数注册进引擎，但**全仓零调用** ——
+    //   仓库内所有 `*.rhai` 均无 `pm_classify_risk` 出现，DB `workflow_templates`
+    //   全表扫描（nodes/tool_defs）同样为 0（正对照 `pm_evidence_scale` 命中 1 条，
+    //   证明检索本身有效）。生产运行时的风险分类走的是 `portfolio-mgr.rhai` 内联的
+    //   同构镜像（阈值取面板参数 `RISK_*`，本函数则是硬编码 V54 值）。
+    //   ⇒ **改这里不会改变任何一次运行的结论**。要改风险判据，改 `portfolio-mgr.rhai`。
+    //   保留原因：它是风险判据唯一的语义单测载体（analysis-engine::portfolio_formula）。
+    //   待裁决：删除（去重）还是把 rhai 改调本函数（统一真相源，但会失去面板调参）。
+    //   v78(2026-09-14)：第 7 参 `sector` 已删除（原用于「金融业白名单豁免」），与
+    //   `portfolio-mgr.rhai` 对齐 —— 风险判据不再读取任何行业标签。
     engine.register_fn(
         "pm_classify_risk",
         |vol: rhai::Dynamic,
@@ -81,7 +91,9 @@ pub fn register_pm_functions(engine: &mut Engine) {
     // 因子数据完整度：供 data-quality.rhai 评估因子层数据完整度
     // P0 修复(2026-08-09): Rhai 1.25 的 register_fn 对含多个 Option<T> 参数的闭包
     // 注册后无法调用（全 Some/全 None/混合均报 Function not found，已实测确认），
-    // 改为 10 个 Dynamic 参数（万能类型，接受 f64/i64/&str/unit），闭包内转 Option。
+    // 改为 9 个 Dynamic 参数（万能类型，接受 f64/i64/&str/unit），闭包内转 Option。
+    // 2026-09-12: 由 10 参降为 9 参 —— 移除 f7「trader_direction」（data-quality 是
+    // trader 的上游，该因子恒缺失，详见 portfolio_formula::compute_factor_completeness 文档）。
     engine.register_fn(
         "pm_compute_factor_completeness",
         |total_score: rhai::Dynamic,
@@ -89,7 +101,6 @@ pub fn register_pm_functions(engine: &mut Engine) {
          catalyst_level: rhai::Dynamic,
          risk_volatility: rhai::Dynamic,
          valuation_dcf_upside: rhai::Dynamic,
-         trader_direction: rhai::Dynamic,
          money_flow_main_net_inflow: rhai::Dynamic,
          lockup_shareholder_trades_len: rhai::Dynamic,
          announcements_len: rhai::Dynamic,
@@ -110,7 +121,6 @@ pub fn register_pm_functions(engine: &mut Engine) {
                 s(&catalyst_level).as_deref(),
                 f(&risk_volatility),
                 f(&valuation_dcf_upside),
-                s(&trader_direction).as_deref(),
                 f(&money_flow_main_net_inflow),
                 i(&lockup_shareholder_trades_len),
                 i(&announcements_len),
@@ -160,4 +170,34 @@ pub fn register_pm_functions(engine: &mut Engine) {
     engine.register_fn("pm_compute_text_sentiment", |text: &str| -> f64 {
         axagent_astock_data::sentiment::compute_text_sentiment(text).unwrap_or(0.0)
     });
+
+    // ── 仿真验证（工作流 `sim-verify` 节点）─────────────────────────────────
+    // 供 `sim-verify.rhai` 调用：在**决策之后**自动跑蒙特卡洛压力测试。
+    //
+    // 为什么必须走宿主函数、不能在脚本里算：共享 Rhai 引擎设了
+    // `set_max_operations(200_000)`（`rt-workflow/.../code_executor.rs`），
+    // 而仿真要遍历「场景 × 路径 × 事件」，写成脚本必然超限。宿主函数内部是
+    // Rust 循环，对 Rhai 只计 1 次操作。
+    //
+    // 形参一律用 `rhai::Dynamic` 而非具体类型，两个原因都不能省：
+    //   ① `input_mapping` 注入的数字被统一转成 f64（`code_executor.rs` 的
+    //      `Value::Number` 分支），若形参写 `i64` 会 Function not found；
+    //   ② Rhai 1.25 对多 `Option<T>` / 泛型参数注册有已知缺陷（见上文
+    //      `pm_classify_risk` 的历史修复）。类型转换放在函数体内是唯一稳的形态。
+    engine.register_fn(
+        "sim_run_mc",
+        |stock_code: rhai::Dynamic,
+         reference_price: rhai::Dynamic,
+         preset: rhai::Dynamic|
+         -> String {
+            let code = stock_code.clone().into_string().unwrap_or_default();
+            let price = reference_price
+                .clone()
+                .try_cast::<f64>()
+                .or_else(|| reference_price.clone().try_cast::<i64>().map(|v| v as f64))
+                .unwrap_or(0.0);
+            let preset = preset.clone().into_string().unwrap_or_else(|_| "stress".to_string());
+            crate::market_sim_service::run_mc_preset(&code, price, &preset)
+        },
+    );
 }

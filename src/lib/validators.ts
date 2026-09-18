@@ -82,12 +82,19 @@ export function validateModelRef(
 /**
  * 安全拼接 ID 字符串，防止 undefined/null 污染
  *
- * 替代 `${a}::${b}` 模板字符串的安全版本。
- * 如果任一参数无效，返回空字符串而非 "undefined::xxx"。
+ * 替代「模板串里把两段插值夹着 `::` 拼起来」的**降级**版本。
+ *
+ * ⚠ 语义澄清（2026-09-18）：实现是 `filter(isValidId)` 后 join ⇒ **无效部分被丢弃**，
+ * 所以**返回的段数可能少于入参段数**（`safeJoinIds([a], sep)` 返回 `"a"`，
+ * 既不是带尾分隔符的形态，也不是空字符串）。
+ * 原文档在此自相矛盾（一处写「返回空字符串」、另一处写「无效部分会被跳过」），
+ * 而门禁 `check-id-validation` 的建议语引用的正是这条错描述 ⇒ 它曾把一个
+ * **必须固定两段**的键指向本函数（见 `src/types/office.ts` 的 `conversationKey`）。
+ * ⇒ **需要固定段数的键不要用本函数**：缺失应当由赋值端暴露，而不是在这里被静默吃掉。
  *
  * @param parts - 需要拼接的 ID 部分
- * @param separator - 分隔符，默认 "::"
- * @returns 安全拼接的字符串，无效部分会被跳过
+ * @param separator - 分隔符，默认 `::`
+ * @returns 保留有效部分后拼接的结果；**段数可能少于 `parts.length`**
  */
 export function safeJoinIds(parts: unknown[], separator = "::"): string {
   return parts

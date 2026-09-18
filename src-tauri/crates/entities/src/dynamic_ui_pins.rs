@@ -10,7 +10,9 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub schema_id: String,
     pub title: String,
+    #[sea_orm(default_value = "other")]
     pub group_name: String,
+    #[sea_orm(default_value = 0)]
     pub position: i32,
     pub created_at: String,
     pub updated_at: String,

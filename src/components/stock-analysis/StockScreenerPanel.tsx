@@ -1,11 +1,12 @@
 import { List } from "@/components/common/AntdList";
+import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { SearchOutlined } from "@ant-design/icons";
 import { Button, Card, InputNumber, Spin, Tag } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
@@ -103,9 +104,9 @@ const FACTOR_DEFS = [
 export function StockScreenerPanel() {
   const { t } = useTranslation();
   const { openDataSourceSettings } = useStockAnalysisPage();
-  const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
+  // 跳转统一走 useStockJump（与智能荐股 / 趋势智选同一条链，避免参数名分叉）
+  const jumpToStock = useStockJump();
   const isInInvestHub = location.pathname.startsWith("/invest");
   const getStockQuote = useStockAnalysisStore((s) => s.getStockQuote);
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
@@ -198,18 +199,12 @@ export function StockScreenerPanel() {
     setFactors((prev) => ({ ...prev, [key]: { ...prev[key], value: v ?? undefined } }));
   };
 
-  const handleAnalyze = async (code: string) => {
-    if (isInInvestHub) {
-      // 在 InvestHub 内部：使用 URL 参数切换到 workspace tab，自动输入股票代码
-      const next = new URLSearchParams(searchParams);
-      next.set("tab", "workspace");
-      next.set("stockCode", code);
-      next.set("view", "analysis");
-      setSearchParams(next, { replace: true });
-    } else {
-      // 独立页面：跳转到股票分析页面
-      navigate(`/stock-analysis?code=${code}`, { replace: true });
-      // 保持原有行为：在股票分析页面内加载数据
+  const handleAnalyze = async (code: string, name?: string) => {
+    // URL 是当前股票的唯一真相源：跳转统一走 useStockJump（独立页分支由
+    // ContentArea 的 RedirectToInvest 归一成 /invest?tab=workspace&stockCode=…）
+    jumpToStock({ code, name });
+    if (!isInInvestHub) {
+      // 独立页入口保持原有行为：跳转后在本页内加载行情并直接开跑分析
       await getStockQuote(code);
       await getStockKline(code, "daily", 120);
       startAnalysis(code);
@@ -316,7 +311,7 @@ export function StockScreenerPanel() {
             renderItem={(r) => (
               <List.Item
                 style={{ cursor: "pointer", padding: "4px 0" }}
-                onClick={() => handleAnalyze(r.stockCode)}
+                onClick={() => handleAnalyze(r.stockCode, r.stockName)}
                 actions={[
                   <Tag key="score" color="blue" className="text-xs m-0">
                     {t("stockAnalysis.settings.screener.score", { score: r.score })}

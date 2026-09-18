@@ -6,6 +6,7 @@
 //! Self-RAG 质量门控、查询增强等模块。
 
 pub mod ast_index;
+pub mod entity_graph;
 pub mod file_index;
 pub mod hybrid_search;
 pub mod incremental_indexer;
@@ -22,5 +23,6 @@ pub mod self_rag;
 pub mod semantic_cache;
 pub mod sources;
 pub mod text_chunker;
+pub mod text_ngram;
 pub mod vector_cache;
 pub mod vector_store;

@@ -33,6 +33,9 @@ interface Props {
 
 const PERCENTILE_LABELS = ["P5", "P10", "P25", "P50", "P75", "P90", "P95"];
 
+/// 后端 / mock 可能返回残缺 metric（缺字段或整个对象缺失），统一兜底避免渲染期抛错
+const EMPTY_METRIC: MetricBandData = { percentiles: [], sampleSize: 0 };
+
 const verdictColor = (v: string): string => {
   if (v === "deep_value") { return "#16a34a"; }
   if (v === "undervalued") { return "#22c55e"; }
@@ -78,14 +81,16 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
         },
       };
     }
-    const pe = d.metricPe;
-    const pb = d.metricPb;
-    const primaryMetric = primary === "pb" ? pb : primary === "ps" ? d.metricPs : pe;
+    const pe = d.metricPe ?? EMPTY_METRIC;
+    const pb = d.metricPb ?? EMPTY_METRIC;
+    const ps = d.metricPs ?? EMPTY_METRIC;
+    const primaryMetric = primary === "pb" ? pb : primary === "ps" ? ps : pe;
     const primaryLabel = primary === "pb" ? "PB" : primary === "ps" ? "PS" : "PE";
     const otherMetric = primary === "pb" ? pe : pb;
     const otherLabel = primary === "pb" ? "PE" : "PB";
 
-    const hasPrimary = primaryMetric.percentiles.length >= 7 && primaryMetric.percentiles.some((v) => v > 0);
+    const hasPrimary = (primaryMetric.percentiles?.length ?? 0) >= 7
+      && primaryMetric.percentiles.some((v) => v > 0);
 
     return {
       backgroundColor: "transparent",
@@ -205,31 +210,31 @@ export function ValuationBandChart({ data, primary = "pe", loading, height = 240
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  if (loading) {
-    return (
-      <div
-        className="flex items-center justify-center text-xs text-gray-400"
-        style={{ height }}
-        data-testid="valuation-band-loading"
-      >
-        {t("common.loading")}
-      </div>
-    );
-  }
-
+  // 注意：不能在这里 early-return loading 占位——图表容器 div 一旦被替换掉，
+  // 首帧（loading=true）时 elRef.current 为 null，初始化 effect 直接 return 且不会再执行，
+  // 加载完成后 div 虽已挂载但 echarts 实例从未创建 → 图表区域永久空白。
+  // 因此容器始终挂载，loading 只叠加一层轻量提示（外层 ValueAssessmentPanel 另有 Spin）。
   return (
-    <div className="space-y-1">
+    <div className="space-y-1 relative">
+      {loading && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center text-xs text-gray-400 pointer-events-none"
+          data-testid="valuation-band-loading"
+        >
+          {t("common.loading")}
+        </div>
+      )}
       {data && (
         <div className="flex items-center gap-2 text-xs" data-testid="valuation-band-verdict">
           <Tag color={verdictColor(data.verdict)}>
             {verdictLabel(data.verdict, t)}
           </Tag>
-          {data.metricPe.currentPercentile != null && (
+          {data.metricPe?.currentPercentile != null && (
             <span className="text-gray-500">
               {t("stockAnalysis.valuationBand.pePercentile")}: {data.metricPe.currentPercentile.toFixed(0)}%
             </span>
           )}
-          {data.metricPb.currentPercentile != null && (
+          {data.metricPb?.currentPercentile != null && (
             <span className="text-gray-500">
               {t("stockAnalysis.valuationBand.pbPercentile")}: {data.metricPb.currentPercentile.toFixed(0)}%
             </span>

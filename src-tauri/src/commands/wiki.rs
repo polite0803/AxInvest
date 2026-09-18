@@ -12,9 +12,9 @@ use axagent_dao::repo::wiki::{
 use axagent_harness::graph_dtos::{GraphEdge, LinkGraph};
 use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::NoteSearchResult;
-use axagent_search::hybrid_search::{FusionAlgorithm, HybridSearchOptions, HybridSearcher};
+use axagent_search::hybrid_search::HybridSearcher;
 use axagent_search::rag::{RAGSource, WikiVaultRAG, collection_id};
-use sea_orm::ConnectionTrait;
+use sea_orm::{ConnectionTrait, DatabaseConnection};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -31,6 +31,35 @@ fn get_entity_cache() -> &'static tokio::sync::Mutex<HashMap<String, (Instant, G
 }
 
 const ENTITY_CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// 悬空边告警节流：kb → 上次告警时的 `(边总数, 悬空数)`。
+///
+/// 本函数由前端**按需**调用（打开/刷新图谱页），而「有边画不出来」是一个**持续状态**：
+/// 不做节流就会把同一条事实刷进日志成百上千遍，真正的新告警反而被淹没。
+///
+/// 节流判据取「`(total_edges, dangling)` 组合是否与上次不同」，**不是**「距上次告警的
+/// 时间」—— 时间节流会在「数据变了」的那一刻保持沉默，而数据变了恰恰是唯一要看的事。
+/// 组合而非单看 `dangling`：从「38171/38171 悬空」变成「40000/38171 悬空」时
+/// `dangling` 没变，但图的规模变了，那是另一个事实。
+// SAFETY: 告警节流是纯同步临界区，static 缓存（OnceLock + Mutex）不跨 await、
+// 不参与异步锁，std::sync::Mutex 在此是正确选择，符合 clippy.toml 的合法例外
+//（对照 harness/src/test_support.rs 既有先例）。
+#[allow(clippy::disallowed_types)]
+fn should_warn_dangling(kb_id: &str, total_edges: usize, dangling: usize) -> bool {
+    type Seen = HashMap<String, (usize, usize)>;
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<Seen>> = std::sync::OnceLock::new();
+    let guard = SEEN.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    // 中毒恢复：本锁保护的是一张纯统计表，一次 panic 不应让后续所有告警永久失效。
+    let mut seen = match guard.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if seen.get(kb_id).copied() == Some((total_edges, dangling)) {
+        return false;
+    }
+    seen.insert(kb_id.to_string(), (total_edges, dangling));
+    true
+}
 
 /// 校验容器 ID（vault_id / note_id 等）格式，防止 SQL 注入和路径穿越。
 /// 规则：1-128 字符，仅允许字母数字、连字符、下划线。
@@ -366,7 +395,16 @@ pub async fn wiki_notes_delete(state: State<'_, AppState>, id: String) -> Result
         match axagent_dao::repo::note::get_note(state.harness.db(), &id).await {
             Ok(existing) => {
                 let collection_id = format!("wiki_{}", existing.vault_id);
-                let _ = state.vector_store.delete_document_embeddings(&collection_id, &id).await;
+                // 向量删不掉就中止删除（2026-09-15 修）：此前 `let _ =` 吞错，于是笔记
+                // 记录被删而旧向量残留 —— 已删除笔记的内容继续被检索命中。
+                state.vector_store.delete_document_embeddings(&collection_id, &id).await.map_err(
+                    |e| {
+                        crate::commands::error::ErrorResponse::err_with_detail(
+                            crate::commands::error_code::wiki::DELETE_NOTE_FAILED,
+                            format!("清理笔记 {id} 的向量失败: {e}"),
+                        )
+                    },
+                )?;
                 (Some(existing.vault_id), Some(existing.content))
             },
             Err(e) if e.to_string().contains("NotFound") || e.to_string().contains("not found") => {
@@ -657,17 +695,20 @@ pub async fn wiki_notes_search(
     if wiki.embedding_provider.is_some() {
         match wiki_notes_search_hybrid(&state, &vault_id, &query, top_k).await {
             Ok(results) => {
-                // 应用距离阈值过滤（与 collect_rag_context_from_refs 一致）
-                let default_max_distance = 20.0_f32;
-                let threshold = wiki.retrieval_threshold.unwrap_or(0.0);
-                let effective_threshold = if threshold > 0.0 {
-                    threshold
-                } else {
-                    default_max_distance
-                };
-                let filtered: Vec<NoteSearchResult> =
-                    results.into_iter().filter(|r| r.score <= effective_threshold as f64).collect();
-                return Ok(filtered);
+                // ⚠ 2026-09-15 二次修（过滤位置）：阈值过滤已**上移到检索层**
+                // （`wiki_notes_search_hybrid` 里写进 `options.min_score`，在
+                // `truncate(top_k)` 之前生效），此处不再重复筛 —— 再筛一次筛的是
+                // 已截断的结果（「先截断后过滤」），且同一条规则两处存在必然漂移。
+                //
+                // 保留这段说明是因为它是**方向事故**的现场：这里对比的
+                // `NoteSearchResult.score` 语义是**相关度、越大越相关**
+                // （`harness::rag_config::NoteSearchResult` 的文档明确写了「与
+                // `VectorSearchResult.score`（L2 距离，越小越好）语义相反」），
+                // 而原代码写的是 `r.score <= effective_threshold` —— 拿相关度去和
+                // 距离上限比。取默认值 20.0 时恒真（空过滤，无害）；取前端默认值
+                // 0.1 时 `score <= 0.1` 把**最不相关的那批**留下、把最相关的全丢掉
+                // ⇒ 不是「搜不到」，而是「搜到最差的」。
+                return Ok(results);
             },
             Err(e) => {
                 tracing::warn!(
@@ -730,15 +771,20 @@ async fn wiki_notes_search_hybrid(
     let collection_id = collection_id(WikiVaultRAG.collection_prefix(), vault_id);
     let searcher = HybridSearcher::new(state.harness.db().clone());
 
-    let options = HybridSearchOptions {
-        vector_weight: 0.7,
-        bm25_weight: 0.3,
-        sparse_weight: 0.0,
-        top_k,
-        min_score: None,
-        fusion: FusionAlgorithm::Rrf,
-        rrf_k: 60.0,
-    };
+    // 混合检索权重来自用户设置（`ragPipelineConfig.hybrid`）—— 此前这里写死
+    // 0.7/0.3/RRF/60，配置改了不生效且无告警（2026-09-15 接线）。
+    let hybrid = crate::indexing::load_hybrid_config(state.harness.db()).await;
+    let mut options = axagent_search::hybrid_search::hybrid_options_from_config(&hybrid, top_k);
+    // ⚠ 2026-09-15 二次修（过滤位置）：阈值原先由调用方在拿到**已截断**的 top_k
+    // 之后再按 `score >= min_similarity` 筛。此处两侧**同为** `combined_score` 标尺
+    // ⇒ 「先截断后过滤」与「先过滤后截断」结果**等价**（合格集必为前缀）
+    // ⇒ 本项收益是**结构**（过滤只有一处真源），不是「修了丢结果」（见 #205）。
+    // 写进 `min_score` 后由 `hybrid_search_with_filter` 在 `truncate(top_k)` **之前**
+    // 统一应用。标尺说明：`options.min_score` 与 `hybrid_result.combined_score`
+    // 同为 [0,1] 相关度（越大越相关）。
+    options.min_score = Some(axagent_search::rag::similarity_floor_from_threshold(
+        wiki.retrieval_threshold.unwrap_or(0.0),
+    ));
 
     let hybrid_results = searcher
         .hybrid_search(&collection_id, query, query_embedding, options)
@@ -775,7 +821,9 @@ async fn wiki_notes_search_keyword(
     query: &str,
     top_k: usize,
 ) -> Result<Vec<NoteSearchResult>, String> {
-    // 走数据库全文索引（v104_notes_fts 迁移建立），避免把 10 万节点灌进内存做 BM25。
+    // 走数据库全文索引（2026-09-16 前由 v104_notes_fts 迁移建立；该迁移已随 74 个迁移
+    // 文件删除，现在由声明式引擎按 `reconcile/extras.rs` 的 L2 声明建出 `notes_fts`
+    // 虚拟表与三条同步触发器）。避免把 10 万节点灌进内存做 BM25。
     // - SQLite: notes_fts 虚拟表 + MATCH 操作符，bm25() 函数返回相关性得分
     // - PostgreSQL: tsv @@ plainto_tsquery + ts_rank
     //
@@ -1007,6 +1055,62 @@ pub async fn wiki_graph_communities(
     Ok(result)
 }
 
+/// 实体侧子图（实体节点 + 实体关系边），带 30 秒 TTL 内存缓存。
+///
+/// **提取自** `get_wiki_graph_cached` 的第 3 步（2026-09-18）：现在有两个消费方 ——
+/// 融合图谱（`get_wiki_graph_cached`）与**实体侧社区检测**
+/// （`wiki_graph_communities_cached`）。两者必须拿到**同一份**实体集，
+/// 否则「图上有、社区映射里没有」的节点会重新出现，而那正是
+/// `assignMissingCommunities` 当初要兜的形态（见前端 `communityMerge.ts`）。
+///
+/// 返回的是**原始形态**（实体 id 与其边两端都加 `entity:` 前缀），
+/// 但**不含**笔记节点与 `mapping` 边 —— 融合与映射由调用方各自完成：
+///   · 融合图谱要的是「全部」；
+///   · 实体侧社区要的**只是实体子图**（把 24k 笔记混进来会让实体分区被稀释，
+///     而单独跑一遍的意义正是让实体按自己的拓扑分区）。
+///
+/// 缓存键是 `kb_id`（不是 `wiki_id`）：本函数的结果只依赖知识库。
+async fn load_fused_entities(db: &DatabaseConnection, kb_id: &str) -> GraphData {
+    let now = Instant::now();
+    {
+        let guard = get_entity_cache().lock().await;
+        if let Some((at, graph)) = guard.get(kb_id)
+            && now.duration_since(*at) < ENTITY_CACHE_TTL
+        {
+            return graph.clone();
+        }
+    }
+
+    // 未命中：实时查询实体并写缓存（仅缓存实体部分，不含笔记与 mapping）
+    let mut entity_nodes = Vec::new();
+
+    // 获取实体节点（ID 加 "entity:" 前缀避免与笔记 ID 冲突）
+    let raw_nodes =
+        axagent_dao::repo::knowledge_graph::get_knowledge_graph_nodes_for_wiki(db, kb_id)
+            .await
+            .unwrap_or_default();
+    for mut node in raw_nodes {
+        node.id = format!("entity:{}", node.id);
+        entity_nodes.push(node);
+    }
+
+    // 获取实体关系边
+    let mut reference_edges = Vec::new();
+    let raw_edges =
+        axagent_dao::repo::knowledge_graph::get_knowledge_graph_edges_for_wiki(db, kb_id)
+            .await
+            .unwrap_or_default();
+    for mut edge in raw_edges {
+        edge.source = format!("entity:{}", edge.source);
+        edge.target = format!("entity:{}", edge.target);
+        reference_edges.push(edge);
+    }
+
+    let fused = GraphData::new(entity_nodes, reference_edges);
+    get_entity_cache().lock().await.insert(kb_id.to_string(), (Instant::now(), fused.clone()));
+    fused
+}
+
 /// 带缓存的图谱查询：优先读 `wiki_graph_cache` 表，未命中则实时计算并写缓存。
 ///
 /// 10 万节点规模下，实时计算单次数秒；命中缓存 < 10ms。
@@ -1066,52 +1170,9 @@ pub async fn get_wiki_graph_cached(
     // 知识图谱实体写路径分散（命令层 + 后台索引任务），无法可靠逐点失效；
     // 采用 30 秒短 TTL 内存缓存：既避免每次打开图谱都全量查询实体，
     // 又保证实体变更后最多 30 秒最终一致。mapping 边在下方基于最新笔记实时重建。
-    let now = Instant::now();
-    let cached_fusion = {
-        let guard = get_entity_cache().lock().await;
-        guard.get(&kb_id).and_then(|(at, graph)| {
-            if now.duration_since(*at) < ENTITY_CACHE_TTL {
-                Some(graph.clone())
-            } else {
-                None
-            }
-        })
-    };
-
-    let (entity_nodes, reference_edges) = if let Some(fused) = cached_fusion {
-        // 命中缓存：复用实体节点与实体关系边
-        (fused.nodes, fused.edges)
-    } else {
-        // 未命中：实时查询实体并写缓存（仅缓存实体部分，不含笔记与 mapping）
-        let mut entity_nodes = Vec::new();
-
-        // 获取实体节点（ID 加 "entity:" 前缀避免与笔记 ID 冲突）
-        let raw_nodes =
-            axagent_dao::repo::knowledge_graph::get_knowledge_graph_nodes_for_wiki(db, &kb_id)
-                .await
-                .unwrap_or_default();
-        for mut node in raw_nodes {
-            node.id = format!("entity:{}", node.id);
-            entity_nodes.push(node);
-        }
-
-        // 获取实体关系边
-        let mut reference_edges = Vec::new();
-        let raw_edges =
-            axagent_dao::repo::knowledge_graph::get_knowledge_graph_edges_for_wiki(db, &kb_id)
-                .await
-                .unwrap_or_default();
-        for mut edge in raw_edges {
-            edge.source = format!("entity:{}", edge.source);
-            edge.target = format!("entity:{}", edge.target);
-            reference_edges.push(edge);
-        }
-
-        let fused = GraphData { nodes: entity_nodes.clone(), edges: reference_edges.clone() };
-        get_entity_cache().lock().await.insert(kb_id.clone(), (Instant::now(), fused));
-
-        (entity_nodes, reference_edges)
-    };
+    // （缓存与查询已提取到 `load_fused_entities` —— 实体侧社区检测要用**同一份**实体集。）
+    let fused_entities = load_fused_entities(db, &kb_id).await;
+    let (entity_nodes, reference_edges) = (fused_entities.nodes, fused_entities.edges);
 
     // 4. 建立实体节点与 Wiki 笔记节点的映射边（v118：消除孤岛）
     let mut mapping_edges = Vec::new();
@@ -1125,11 +1186,12 @@ pub async fn get_wiki_graph_cached(
     for entity_node in &entity_nodes {
         let entity_name_lower = entity_node.title.to_lowercase();
         if let Some(note_id) = note_title_map.get(&entity_name_lower) {
-            mapping_edges.push(GraphEdge {
-                source: entity_node.id.clone(),
-                target: note_id.clone(),
-                edge_type: "mapping".to_string(),
-            });
+            // 合成边：不对应任何 DB 行 ⇒ 刻意不带 `relationType`
+            mapping_edges.push(GraphEdge::structural(
+                entity_node.id.clone(),
+                note_id.clone(),
+                "mapping",
+            ));
         }
     }
 
@@ -1138,14 +1200,84 @@ pub async fn get_wiki_graph_cached(
     base_graph.edges.extend(reference_edges);
     base_graph.edges.extend(mapping_edges);
 
+    // 6. A2-升级（2026-09-14）：把「类型解析失败」的规模送到界面。
+    //
+    // 必须在**这一步**（融合之后、返回之前）重算，理由有两条：
+    // ① 统计要对**最终返回给前端的节点集**成立 —— `get_vault_graph` 那边算过一次，
+    //    但那时还没有实体节点；融合后节点集变了，统计必须跟着变。
+    // ② 缓存命中的分支读的是 **DB 里存的 JSON**，那份数据可能是升级前写的
+    //    （`#[serde(default)]` ⇒ 字段缺失即空清单）⇒ 不在这里重算，老缓存就永远看不到提示。
+    // 判据与聚合都在 `harness::graph_dtos` 里（只有一份实现），此处只调用。
+    // P2-b（2026-09-14）：这个方法现在**同时**刷节点侧与边侧 ——
+    // 融合进来的实体关系边正是边侧统计唯一有内容的来源（笔记链接恒为 `link`）。
+    base_graph.refresh_unresolved();
+
+    // 7. 画不出来的边从 `edges` 里摘掉，但**保留淘汰规模**（B，2026-09-18）
+    //
+    // 上一步只**报**不**改**，于是同一份 JSON 里两半互相矛盾：统计说「172,926 条里有
+    // 276 条端点缺失」，而 `edges` 长度仍是 172,926 —— 渲染层 `idSet.has` 判否即
+    // `continue` 跳过那 276 条，工具栏却照旧显示 `edges.length`（`GraphView` 的
+    // `edgeCount`）。**用户读到的边数里混着根本没画出来的边**，而且这个偏差会随
+    // 任何一次上游脏数据（跨库合并、写端域不一致）重新出现 —— 只修数据不修这里，
+    // 下次照样虚高。
+    //
+    // 摘掉它们**不等于**让它静默：淘汰规模继续留在 `dangling_edges` 里，
+    // 界面照旧告警（判据未变），下一步的日志也照旧打。两条一起才成立 ——
+    // 只删边 = 把异常变静默；只报不改 = 边数继续撒谎。
+    let dropped_edges = base_graph.retain_resolved_edges();
+    if dropped_edges > 0 {
+        tracing::info!(
+            kb = %kb_id,
+            dropped = dropped_edges,
+            remaining_edges = base_graph.edges.len(),
+            "已从 Wiki 图谱边集里剔除端点缺失的边：它们画不出来，此前却仍计进工具栏的边数；淘汰规模保留在 danglingEdges 里继续告警"
+        );
+    }
+
+    // 8. 悬空边必须**在返回前说一次话**（D-2，2026-09-17）
+    //
+    // 在此之前，端点找不到的边在融合层与渲染层是**两处静默**：
+    // 后端照常把它放进 `edges`，前端 `if (!idSet.has(...)) continue;` 直接跳过 ——
+    // 后果是界面「一个节点一条线都没有」而工具栏照旧显示 `74711E`，
+    // 用户与开发者都拿不到「边的绝大多数没画出来」这条信息。
+    //
+    // 本步负责**告警**那一半（上一步负责把它从 `edges` 里摘掉）；丢悬空边本身是对的
+    // （画不出就是画不出），错的是没人知道丢了多少。彻底修复脏数据的路径是修数据
+    // （见 `audit_kb_domain_consistency`）或修合并逻辑（kb 域），不是让前端硬画 ——
+    // 但在数据修好之前，这两步保证界面读到的边数已经是「真的画得出来的条数」。
+    //
+    // 字段同时随 `GraphData` 序列化给前端（`danglingEdges`）⇒ 界面可以自己决定
+    // 怎么提示；日志只负责让「没打开界面」的时刻也留下痕迹。
+    let dangling = &base_graph.dangling_edges;
+    if dangling.dangling > 0
+        && should_warn_dangling(&kb_id, dangling.total_edges, dangling.dangling)
+    {
+        tracing::warn!(
+            kb = %kb_id,
+            total_edges = dangling.total_edges,
+            dangling = dangling.dangling,
+            missing_source_only = dangling.missing_source_only,
+            missing_target_only = dangling.missing_target_only,
+            missing_both = dangling.missing_both,
+            samples = %dangling.sample_edge_ids.join(" | "),
+            "Wiki 图谱存在端点缺失的边：这些边**不会被画出**，但它们仍在 edges 计数里 —— 界面上表现为「节点之间没有关联」；若 missing_both 占多数，通常是知识库实体的域与边的域不一致（见 audit_kb_domain_consistency）"
+        );
+    }
+
     Ok(base_graph)
 }
 
 /// 带缓存的社区检测：优先读缓存，未命中则跑 Louvain 并写缓存。
-#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取 Wiki 社区发现（缓存）")]
-#[tauri::command]
-pub async fn wiki_graph_communities_cached(
-    state: State<'_, AppState>,
+///
+/// ⚠ 本函数只算**笔记侧**，并且**刻意不挂** `#[tauri::command]`：
+/// 命令入口是下面的 `wiki_graph_communities_cached` —— 它在本函数的三处 `return`
+/// **之后**统一附加实体侧社区。把命令属性留在这一层，就等于要求三个早返回分支
+/// 各自记得执行附加步骤，漏一个就是「同一条数据两条路径给出不同结果」。
+///
+/// 参数取 `&State` 而不是 `State`：调用方（命令入口）需要在调用前后各用一次
+/// `state.harness.db()`，move 会让那个连接的借用与 move 冲突。
+async fn note_communities_cached(
+    state: &State<'_, AppState>,
     wiki_id: String,
 ) -> Result<LouvainResult, String> {
     let db = state.harness.db();
@@ -1224,6 +1356,71 @@ pub async fn wiki_graph_communities_cached(
             crate::commands::error::ErrorCategory::Unrecoverable,
         ))
     })?;
+
+    Ok(result)
+}
+
+/// 带缓存的社区检测**命令入口**：笔记侧 ∪ **实体侧**社区（2026-09-18）。
+///
+/// 笔记侧由 `note_communities_cached` 算（含缓存），本函数只负责在**所有**
+/// 早返回分支之后统一附加一次实体侧结果 —— 这就是把命令属性放在这一层的原因。
+#[agent_command(domain = wiki, safety = Safe, call_mode = StateInput, description = "获取 Wiki 社区发现（缓存）")]
+#[tauri::command]
+pub async fn wiki_graph_communities_cached(
+    state: State<'_, AppState>,
+    wiki_id: String,
+) -> Result<LouvainResult, String> {
+    let db = state.harness.db();
+    let mut result = note_communities_cached(&state, wiki_id.clone()).await?;
+
+    // ── 实体侧单独算一遍社区 ──
+    //
+    // 为什么必须单独算，而不是让实体继续靠 `mapping` 锚点继承同名笔记的桶：
+    // 融合图里 22,608 个实体节点带着 75,251 条 `reference` 边，而 Louvain 此前
+    // 只跑**笔记图**（`note::get_vault_graph`，不含实体）⇒ 实体在社区映射里没有任何
+    // 条目 ⇒ 它们的桶完全由「名字是否恰好等于某个笔记标题」决定，与实体在知识图谱
+    // 里的实际位置无关。实测代价（真实载荷 46,896 节点 / 172,650 边，见
+    // `__tests__/kgFusedScale.test.ts` 的密度对照）：锚点路径下**全部 22,608 条
+    // `mapping` 边与 50,059 条 `reference` 边落在桶内、被聚合层直接丢弃** ——
+    // 桶级密度 9.8% 这个好看的数字正是这么换来的。
+    //
+    // 边界（刻意不修的部分）：实体子图上跑 Louvain 与笔记图同量级（数秒），
+    // 故结果随 `LouvainResult` 一起写进 `wiki_graph_cache`，只在「未算过」时执行一次。
+    // 实体图缓存是 30 秒 TTL、而社区缓存随 notes 写入失效 ⇒ 两者**可能不同源**，
+    // 新出现的实体暂时拿不到社区；那批节点由前端锚点兜底且**可观测**
+    // （`GraphView.warnOnHashFallback` 会在锚点也兜不住时报出来），不是静默丢弃。
+    if result.entity_communities.is_none() {
+        let kb_id = axagent_dao::repo::wiki::get_wiki(db, &wiki_id)
+            .await
+            .ok()
+            .and_then(|w| w.knowledge_base_id)
+            .unwrap_or_else(|| wiki_id.clone());
+        let subgraph = load_fused_entities(db, &kb_id).await;
+        if !subgraph.nodes.is_empty() {
+            let entity_result = tokio::task::spawn_blocking(move || {
+                louvain::detect_communities(LinkGraph::from_graph_data(subgraph))
+            })
+            .await
+            .map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
+            if !entity_result.communities.is_empty() {
+                result.entity_communities = Some(entity_result.communities);
+                // 回写缓存：否则每次打开图谱页都要白等这几秒
+                axagent_dao::repo::wiki_graph_cache::save_cached_communities(db, &wiki_id, &result)
+                    .await
+                    .map_err(|e| {
+                        String::from(crate::commands::error::ErrorResponse::from_error(
+                            e,
+                            crate::commands::error::ErrorCategory::Unrecoverable,
+                        ))
+                    })?;
+            }
+        }
+    }
 
     Ok(result)
 }

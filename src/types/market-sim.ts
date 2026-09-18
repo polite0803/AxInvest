@@ -53,7 +53,8 @@ export interface RobustnessResult {
   referencePrice: number;
   totalPaths: number;
   survivalRate: number;
-  consistencyScore: number;
+  /** 场景一致性（变异系数）。null = 不可判定（各场景涨跌幅均值趋零）。 */
+  consistencyScore: number | null;
   bestScenario: string;
   worstScenario: string;
   scenarioResults: McScenarioResultItem[];

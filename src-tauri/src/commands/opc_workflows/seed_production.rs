@@ -358,6 +358,17 @@ pub async fn seed_startup_mvp_workflow(db: &DatabaseConnection) -> Result<(), St
         vec![("frontend","a-frontend.result"),("growth","a-growth.result"),("reality","a-reality-1.result")]));
 
     // Switch: GO / NO-GO
+    //
+    // ⚠ **2026-09-14 修复（C1 端口公理实测捕获）**：本节点的 case `value` 是机器比对值
+    // （exact 模式按 `case.value` 与 `input_var` 比），而 **引擎写进 `matched_label` 的是
+    // `case.label`**（`switch_executor.rs:180-377` 三个分支都取 `case.label`），
+    // `switch_edge_should_follow` 又把出边 `source_handle` 与 `matched_label` 比
+    // （`dag_store.rs:110-122`）⇒ 出边 handle **必须是 case label**。
+    //
+    // 原实现把 handle 写成 `value`（`go` / `no-go`）且 `default_case` 也写 `value`：
+    // 命中任一 case 时 `matched_label` 是中文 label、两条出边都匹配不上 ⇒ **分支全灭、流程停住**；
+    // `actual=None` 时 `matched_label="no-go"` 同样匹配不上 ⇒ 失败兜底也不通。
+    // 现改为 handle / default_case 一律使用 **label**，value 保持机器比对值不变。
     nodes.push(WorkflowNode::Switch(SwitchNode {
         base: base("s-gonogo", "GO/NO-GO决策", 250.0, 1220.0),
         config: SwitchNodeConfig {
@@ -366,7 +377,7 @@ pub async fn seed_startup_mvp_workflow(db: &DatabaseConnection) -> Result<(), St
                 SwitchCase { value: "go".into(), label: "GO 上线".into() },
                 SwitchCase { value: "no-go".into(), label: "NO-GO 打回".into() },
             ],
-            default_case: Some("no-go".into()),
+            default_case: Some("NO-GO 打回".into()),
             match_mode: "exact".into(),
             use_llm: None,
             llm_prompt: None,
@@ -401,7 +412,8 @@ pub async fn seed_startup_mvp_workflow(db: &DatabaseConnection) -> Result<(), St
         WorkflowEdge {
             id: "e-go".into(),
             source: "s-gonogo".into(),
-            source_handle: Some("go".into()),
+            // 必须是 case **label**（引擎写进 `matched_label` 的就是 label，见上方 Switch 注释）
+            source_handle: Some("GO 上线".into()),
             target: "a-launch".into(),
             target_handle: None,
             edge_type: EdgeType::Direct,
@@ -410,7 +422,7 @@ pub async fn seed_startup_mvp_workflow(db: &DatabaseConnection) -> Result<(), St
         WorkflowEdge {
             id: "e-nogo".into(),
             source: "s-gonogo".into(),
-            source_handle: Some("no-go".into()),
+            source_handle: Some("NO-GO 打回".into()),
             target: "a-postpone".into(),
             target_handle: None,
             edge_type: EdgeType::Direct,

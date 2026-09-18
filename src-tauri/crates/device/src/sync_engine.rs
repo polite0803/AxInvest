@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use axagent_crdt::VersionVector;
 use axagent_harness::device_sync::{
     ChangeLogEntry, ChangeOperation, ConflictInfo, ConflictResolutionStrategy, DeviceSyncStatus,
     EntityType, SyncEngine, SyncResult, SyncStorage, VersionVectorEntry,
@@ -20,7 +21,6 @@ use crate::conflict_resolver::ConflictResolver;
 use crate::crdt::{CrdtEngine, OperationType};
 use crate::history_store::HistoryStore;
 use crate::manager::DeviceStore;
-use crate::version_vector::VersionVector;
 
 /// 变更日志存储
 pub struct ChangeLogStore {
@@ -291,21 +291,21 @@ impl SyncEngineImpl {
         entry
     }
 
-    /// 获取本地版本向量（修复版本向量逻辑）
+    /// 从变更日志重建本地版本向量
+    ///
+    /// 每个 `(device_id, counter)` 条目取全局最大值，用 [`VersionVector::observe`] 一次到位。
+    ///
+    /// **为什么不能用逐次递增**：此前的写法是 `for _ in current..counter { vv.increment(..) }`，
+    /// 复杂度为 O(计数器值)。多设备长期同步后计数器可达数千，而本函数在
+    /// **每次 `record_change` 都会被调用**，是同步热路径上的实打实开销；
+    /// 且语义上「推进到水位」本就等价于取 max，无需逐格爬。
     async fn get_local_version_vector(&self) -> VersionVector {
         let entries = self.change_log.get_all_entries().await;
         let mut vv = VersionVector::new();
 
         for entry in &entries {
             for vv_entry in &entry.version_vector {
-                let current = vv.get(&vv_entry.device_id);
-                // 直接取最大值，修复原有的 while 循环逻辑
-                if vv_entry.counter > current {
-                    // 使用 increment_to 或多次递增
-                    for _ in current..vv_entry.counter {
-                        vv.increment(&vv_entry.device_id);
-                    }
-                }
+                vv.observe(&vv_entry.device_id, vv_entry.counter);
             }
         }
 

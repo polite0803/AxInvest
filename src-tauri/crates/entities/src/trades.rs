@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub stock_code: String,
     pub stock_name: String,
     /// 交易方向: "buy" | "sell"
@@ -17,6 +18,7 @@ pub struct Model {
     /// 股数
     pub quantity: i32,
     /// 交易日期 YYYY-MM-DD
+    #[sea_orm(indexed)]
     pub trade_date: String,
     /// 交易时间 HH:MM
     pub trade_time: String,

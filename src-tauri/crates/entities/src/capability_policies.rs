@@ -24,9 +24,12 @@ pub struct Model {
     pub description: Option<String>,
     /// 排除型规则 JSON（见模块注释）
     #[sea_orm(column_name = "rules_json")]
+    #[sea_orm(default_value = "{}")]
     pub rules_json: String,
+    #[sea_orm(default_value = true)]
     pub enabled: bool,
     /// 执行优先级（越小越先执行）
+    #[sea_orm(default_value = 0)]
     pub priority: i32,
     pub created_at: i64,
     pub updated_at: i64,

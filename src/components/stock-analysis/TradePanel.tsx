@@ -1,7 +1,7 @@
 import { ExecutionModeSelector } from "@/components/executionBridge/ExecutionModeSelector";
 import { PendingSignalsList } from "@/components/executionBridge/PendingSignalsList";
 import { invoke } from "@/lib/invoke";
-import { getActionColor, StockAction } from "@/lib/stock-analysis-utils";
+import { actionToDirection, getActionColor } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { App, Button, Card, Divider, Input, InputNumber, Select, Space, Statistic, Switch, Table, Tag } from "antd";
@@ -102,7 +102,10 @@ export function TradePanel() {
   // 同步分析页代码
   useEffect(() => {
     if (storeStockCode && !form.stockCode) {
-      const dir = storeDecision?.action === StockAction.SELL ? "sell" : "buy";
+      // 方向必须由 action 真实映射得出：持有/观望/不确定/数据缺失都**没有**交易方向，
+      // 此时不预填方向（把「不该买入」默认成 buy 会误导下单录入）。
+      const dir = actionToDirection(storeDecision?.action);
+      if (!dir) { return; }
       Promise.resolve().then(() => {
         setForm((f) => ({ ...f, stockCode: storeStockCode, stockName: storeStockName, direction: dir }));
       });
@@ -114,7 +117,13 @@ export function TradePanel() {
     if (!storeDecision) { return; }
     const decisionData = storeDecision as unknown as Record<string, unknown>;
     const { action, positionPct, targetPrice, stopLoss } = decisionData;
-    if (!action || (action as string) === StockAction.HOLD || (action as string) === StockAction.REDUCE) { return; }
+    // 方向不可判定即拒绝代填：action=HOLD/WAIT/UNCERTAIN/UNAVAILABLE 时没有交易方向，
+    // 历史实现只拦 HOLD/REDUCE 并把其余一律当成 buy，会把「观望」录成买入。
+    const dir = actionToDirection(action);
+    if (!dir) {
+      message.warning(t("stockAnalysis.trade.quickRecordNoDirection"));
+      return;
+    }
     const tpRaw = typeof targetPrice === "number" ? targetPrice : Number(targetPrice);
     const ppRaw = typeof positionPct === "number" ? positionPct : Number(positionPct);
     // 校验：目标价需 >0 且为有限数；仓位比例需在 0–100 之间。
@@ -128,7 +137,7 @@ export function TradePanel() {
       ...f,
       stockCode: storeStockCode,
       stockName: storeStockName,
-      direction: action === StockAction.SELL ? "sell" : "buy",
+      direction: dir,
       price: validPrice ? tpRaw : f.price,
       quantity: validPos ? Math.round((ppRaw / 100) * 1000) : f.quantity,
       notes: stopLoss ? t("stockAnalysis.trade.stopLoss", { price: stopLoss }) : "",

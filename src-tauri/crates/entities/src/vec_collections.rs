@@ -12,15 +12,18 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub collection_id: String,
     pub dimensions: i32,
-    #[sea_orm(column_type = "Text", nullable)]
+    #[sea_orm(column_type = "Text", nullable, indexed)]
     pub embedding_model: Option<String>,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "flat")]
     pub index_type: String,
     pub hnsw_ef_construction: Option<i32>,
     pub hnsw_m: Option<i32>,
     pub hnsw_ef_search: Option<i32>,
+    #[sea_orm(default_value = 0)]
     pub vector_count: i64,
     pub created_at: i64,
+    #[sea_orm(indexed)]
     pub updated_at: i64,
     pub last_indexed_at: Option<i64>,
     #[sea_orm(column_type = "Text", nullable)]

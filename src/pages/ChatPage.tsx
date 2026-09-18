@@ -6,6 +6,7 @@ import { ChatView } from "@/components/chat/ChatView";
 import { RightPanelContainer } from "@/components/chat/RightPanelContainer";
 import { ScrollToMessageProvider } from "@/components/chat/ScrollToMessageContext";
 import { useAgentContext } from "@/hooks/useAgentContext";
+import { CHAT_ONLY_QUERY_PARAMS, withoutParams } from "@/lib/workspaceTabs";
 import { useConversationStore, useProviderStore, useSettingsStore, useTabStore, useUIStore } from "@/stores";
 import { theme } from "antd";
 import { ChevronLeft, ChevronRight, PanelRight } from "lucide-react";
@@ -66,8 +67,8 @@ export function ChatPage() {
           // 注入初始 prompt
           await useConversationStore.getState().sendMessage(prompt);
         }
-        // 清理 URL 参数
-        setSearchParams({}, { replace: true });
+        // 清理 URL 参数（**只清 chat 专属**：全量清空会连工作台的 `ws` 一起抹掉）
+        setSearchParams((prev) => withoutParams(prev, CHAT_ONLY_QUERY_PARAMS), { replace: true });
         return;
       }
 
@@ -82,8 +83,8 @@ export function ChatPage() {
         await useConversationStore.getState().sendMessage(prompt);
       }
 
-      // 清理 URL 参数
-      setSearchParams({}, { replace: true });
+      // 清理 URL 参数（**只清 chat 专属**，保留 `ws`，理由同上）
+      setSearchParams((prev) => withoutParams(prev, CHAT_ONLY_QUERY_PARAMS), { replace: true });
     };
 
     void initUrlParams();

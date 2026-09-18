@@ -11,16 +11,22 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 关联的 rt-workflow 运行 id（可选，对接 DAG 引擎）
+    #[sea_orm(indexed)]
     pub run_id: Option<String>,
     /// 阶段（QUEUED / IN_PROGRESS / WAITING_FOR_CHILDREN / BLOCKED / REVIEW / APPROVED / DONE / FAILED / CANCELLED）
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "QUEUED")]
     pub phase: String,
     /// 标题
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub title: String,
     /// 负责角色 id（opc-xxx 或 agent_role id）
+    #[sea_orm(indexed)]
     pub owner_role_id: Option<String>,
     /// 依赖项 json 数组：["item-a", "item-b"]
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "[]")]
     pub deps_json: String,
     /// 被指派的 agent id（可选，空 = 未指派）
     pub assignee_agent_id: Option<String>,

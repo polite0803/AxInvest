@@ -11,12 +11,16 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 角色 id（只更新拥有相关工作项的角色档案，防互相污染）
+    #[sea_orm(indexed)]
     pub role_id: String,
+    #[sea_orm(indexed)]
     pub work_item_id: String,
     /// 信号（success/failure/feedback）
+    #[sea_orm(default_value = "success")]
     pub signal: String,
     /// 经验内容（反思/教训）
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub content: String,
     pub created_at: i64,
 }

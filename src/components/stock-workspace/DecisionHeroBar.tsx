@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { DecisionTrustNotice } from "@/components/stock-analysis/DecisionTrustNotice";
 import { useIsMobile } from "@/components/stock-analysis/MobileResponsive";
 import { DecisionConsensusMeter } from "@/components/stock-workspace/DecisionConsensusMeter";
 import { extractLlmField } from "@/lib/agentOutput";
-import { getActionColor, getActionTKey, getRiskColor, getRiskTKey } from "@/lib/stock-analysis-utils";
+import {
+  getActionColor,
+  getActionTKey,
+  getRiskColor,
+  getRiskTKey,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useWorkspaceStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { StockDecision } from "@/types";
@@ -34,6 +41,15 @@ export function DecisionHeroBar() {
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
 
   const [detailOpen, setDetailOpen] = useState(false);
+
+  // ── 一致性仪表盘的「冲突」判据（2026-09-12 修正）──
+  // 本文件 3 处 DecisionConsensusMeter 的 isContradictory 一律用
+  // `decision.agreementBreakdown?.actionOk === false`（公式 action 与 LLM action 是否相悖），
+  // 不得使用后端的 decision.isContradictory —— 该字段在 portfolio-mgr.rhai 里的定义是
+  // 「trader 的 targetPrice <= stopLoss」，即 trader 价格字段倒置，与「公式 vs LLM 冲突」
+  // 是两回事。误用会把「公式与 LLM 同为卖出」的样本渲染成红色
+  // 「⚠ 决策冲突 / 公式与 LLM 决策冲突，建议人工复核」的假警报（2026-09-12 实证）。
+  // trader 价格倒置属数据质量范畴，由 DecisionBanner 的「自相矛盾」标签负责呈现。
 
   // 解析 LLM stance（用于一致性展示）
   const llmStance = useMemo(() => {
@@ -77,7 +93,16 @@ export function DecisionHeroBar() {
     ? "var(--sa-amber)"
     : "var(--sa-red)";
 
-  const actionColor = getActionColor(decision.action);
+  // P1-2(2026-09-14): 展示档统一由 (action, positionState, positionPct) 派生。
+  // 「持有 / 观望」不再由各组件自行判断仓位——后端仍会按仓位互改 action，但派生函数
+  // 与后端同判据（positionState 优先，缺失时退回 positionPct），故对既有数据是**恒等变换**；
+  // 一旦后端切换到「action 只表达方向强度」，这里无需再改。
+  const displayAction = resolveDisplayAction(
+    decision.action,
+    decision.positionState,
+    decision.positionPct,
+  );
+  const actionColor = getActionColor(displayAction);
 
   // ── 简洁模式：单行紧凑条 ──
   if (isSimple) {
@@ -98,8 +123,13 @@ export function DecisionHeroBar() {
         )}
         {/* Action 标签 */}
         <Tag color={actionColor} style={{ margin: 0 }}>
-          {t(getActionTKey(decision.action))}
+          {t(getActionTKey(displayAction))}
         </Tag>
+        {
+          /* 决策可信度受限（因子权重坍缩 / 数据缺口）—— 紧邻 Action，
+            否则用户只看到「观望 0%」，无法区分「数据不足被动降级」与「主动看空」 */
+        }
+        <DecisionTrustNotice decision={decision} variant="tag" />
         {/* 仓位 */}
         <span className="text-sm font-mono" style={{ color: "var(--color-text-primary)" }}>
           {t("workspace.decisionHero.position")} {decision.positionPct}%
@@ -129,7 +159,7 @@ export function DecisionHeroBar() {
         {/* 一致性（紧凑） */}
         <DecisionConsensusMeter
           agreementScore={decisionAgreementScore}
-          isContradictory={!!decision.isContradictory}
+          isContradictory={decision.agreementBreakdown?.actionOk === false}
           isFallback={!!decision.isFallback}
           agreementBreakdown={decision.agreementBreakdown}
           compact
@@ -184,7 +214,7 @@ export function DecisionHeroBar() {
         )}
         {/* Action */}
         <Tag color={actionColor} style={{ margin: 0 }}>
-          {t(getActionTKey(decision.action))}
+          {t(getActionTKey(displayAction))}
         </Tag>
         {/* 仓位 */}
         <span className="text-sm font-mono flex items-center gap-1">
@@ -237,6 +267,12 @@ export function DecisionHeroBar() {
         )}
       </div>
 
+      {
+        /* 决策可信度受限（因子权重坍缩 / 数据缺口）—— 独立一行置于指标与信心之间，
+          把「为什么是观望」摊开，避免黑盒观望体感 */
+      }
+      <DecisionTrustNotice decision={decision} variant="banner" />
+
       {/* 第二行：信心 + 一致性仪表盘 */}
       <div className="flex items-center gap-2 flex-wrap">
         {/* 信心条 */}
@@ -269,7 +305,7 @@ export function DecisionHeroBar() {
         {/* 一致性仪表盘（紧凑版） */}
         <DecisionConsensusMeter
           agreementScore={decisionAgreementScore}
-          isContradictory={!!decision.isContradictory}
+          isContradictory={decision.agreementBreakdown?.actionOk === false}
           isFallback={!!decision.isFallback}
           agreementBreakdown={decision.agreementBreakdown}
           compact
@@ -332,14 +368,20 @@ function DecisionDetailDrawer({
   asOfDate,
 }: DecisionDetailDrawerProps) {
   const { t } = useTranslation();
+  // 与主组件同判据（见上方 displayAction 注释）—— 展示档一律走派生函数
+  const displayAction = resolveDisplayAction(
+    decision.action,
+    decision.positionState,
+    decision.positionPct,
+  );
 
   return (
     <Drawer
       title={
         <div className="flex items-center gap-2 flex-wrap">
           <span>{stockName ?? ""}</span>
-          <Tag color={getActionColor(decision.action)}>
-            {t(getActionTKey(decision.action))}
+          <Tag color={getActionColor(displayAction)}>
+            {t(getActionTKey(displayAction))}
           </Tag>
           {asOfDate && <Tag color="purple">⏪ {asOfDate}</Tag>}
         </div>
@@ -349,6 +391,9 @@ function DecisionDetailDrawer({
       width="min(640px, 90vw)"
     >
       <div className="space-y-4">
+        {/* 决策可信度受限（因子权重坍缩 / 数据缺口）—— 详情页给出完整前提 */}
+        <DecisionTrustNotice decision={decision} variant="banner" />
+
         {/* 信心 */}
         <div>
           <div className="flex justify-between items-center mb-1">
@@ -453,7 +498,7 @@ function DecisionDetailDrawer({
         {agreementScore !== null && (
           <DecisionConsensusMeter
             agreementScore={agreementScore}
-            isContradictory={!!decision.isContradictory}
+            isContradictory={decision.agreementBreakdown?.actionOk === false}
             isFallback={!!decision.isFallback}
             agreementBreakdown={decision.agreementBreakdown}
           />

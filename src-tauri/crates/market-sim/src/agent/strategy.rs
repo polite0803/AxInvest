@@ -15,6 +15,7 @@
 
 use crate::agent::traits::{AgentAction, AgentContext, AgentType, MessageBody, SimAgent};
 use crate::types::{OrderSide, *};
+use axagent_harness::decision_action::{ActionKind, normalize_action};
 
 pub struct StrategyAgent {
     id: String,
@@ -47,7 +48,8 @@ pub struct StrategyAgent {
 impl StrategyAgent {
     /// 创建策略 Agent
     ///
-    /// - `action`: "买入"/"增持"/"持有"/"观望"/"减持"/"卖出"
+    /// - `action`: 中英文任意形态，由 `decision_action::normalize_action` 归一化
+    ///   （中文 6 档 / 英文 token 均可，见 `axagent_harness::decision_action`）
     /// - `target_price`: 目标价（分）
     /// - `stop_loss`: 止损价（分）
     /// - `position_size`: 仓位（股）
@@ -148,8 +150,11 @@ impl SimAgent for StrategyAgent {
     fn on_init(&mut self, ctx: &mut AgentContext) -> Vec<AgentAction> {
         let mut actions = Vec::new();
 
-        match self.action.as_str() {
-            "买入" | "增持" => {
+        // P1-6(2026-09-14): 原先只匹配中文字面量 —— 英文值域（BUY）落 _ 分支，只打印
+        // 一条 warn 后「什么都不做」，而回测/模拟仍报执行成功（静默 no-op）。
+        // 改走唯一归一化器，并对 8 档做穷举（新增档位由编译器捕获，不再漏分支）。
+        match normalize_action(&self.action) {
+            Some(ActionKind::Buy | ActionKind::Increase) => {
                 let order = MarketOrder {
                     id: self.gen_id(),
                     side: OrderSide::Buy,
@@ -164,7 +169,7 @@ impl SimAgent for StrategyAgent {
                 self.entry_submitted = true;
                 self.action_taken = true;
             },
-            "减持" | "卖出" => {
+            Some(ActionKind::Reduce | ActionKind::Sell) => {
                 let order = MarketOrder {
                     id: self.gen_id(),
                     side: OrderSide::Sell,
@@ -178,12 +183,21 @@ impl SimAgent for StrategyAgent {
                 });
                 self.action_taken = true;
             },
-            "持有" | "观望" => {
-                // 不操作，仅监控
+            Some(ActionKind::Hold | ActionKind::Wait) => {
+                // 明确判断为「不操作」，仅监控
                 self.action_taken = true;
             },
-            _ => {
-                tracing::warn!("StrategyAgent: 未知 action '{}'", self.action);
+            // 不确定 / 数据缺失：无操作依据。语义上与「判断为观望」不同 —— 单独告警，
+            // 不能与前一支合并成一个「没交易」的静默结果。
+            Some(k @ (ActionKind::Uncertain | ActionKind::Unavailable)) => {
+                tracing::warn!(
+                    "StrategyAgent: action='{}' 无操作依据（归一化为 {}），不提交订单",
+                    self.action,
+                    k.as_storage_cn()
+                );
+            },
+            None => {
+                tracing::warn!("StrategyAgent: 未识别 action '{}'，不提交订单", self.action);
             },
         }
 

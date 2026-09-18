@@ -84,7 +84,6 @@ export function ReflectionPanel() {
   const [filterDateRange, setFilterDateRange] = useState<[Dayjs | null, Dayjs | null] | null>(null);
 
   const [manualAsOf, setManualAsOf] = useState<Dayjs | null>(null);
-  const [manualOutcome, setManualOutcome] = useState("");
   const [manualDepth, setManualDepth] = useState("light");
   const [running, setRunning] = useState(false);
 
@@ -191,13 +190,14 @@ export function ReflectionPanel() {
 
   // P0-3 修复: 重跑反思 — 后端无 rerun_reflection 命令,复用 run_reflection_now
   // 语义: 重新跑一次反思,生成新记录,旧失败记录保留(用户可手动删除)
+  // [实际行情] 不再回传上一次的 actualOutcome —— 重跑应当基于**当前**实际行情
+  // 重新拉取对比，而不是把旧结论再算一遍（后端会自动生成 outcome 描述）。
   const rerunReflection = async (r: ReflectionRow) => {
     try {
       await invoke("run_reflection_now", {
         stockCode: r.stockCode,
         stockName: r.stockName,
         asOfDate: r.asOfDate,
-        actualOutcome: r.actualOutcome,
         reflectionDepth: r.reflectionDepth,
       });
       message.success(t("stockAnalysis.reflection.rerunSuccess"));
@@ -383,8 +383,14 @@ export function ReflectionPanel() {
     }
   };
 
+  // [实际行情 2026-09-13] 表单不再要求用户手填「实际走势结果」——
+  // 后端 run_reflection_now 会按「分析日 → 最新交易日」自动拉取前复权 K 线，
+  // 算出入场基准价 / 最新价 / 涨跌幅 / 最大回撤 / 相对沪深300 超额，
+  // 构造行情快照注入工作流供 comparator 与反思 agent 消费。
+  // 原设计让用户"代替行情接口编数据"，且 raw_return 长期传 None，
+  // 导致 comparator 的 actual_direction 恒为「横盘」、direction_match 恒 false。
   const handleManualReflection = async () => {
-    if (!manualCode.trim() || !manualAsOf || !manualAsOf.isValid() || !manualOutcome.trim()) {
+    if (!manualCode.trim() || !manualAsOf || !manualAsOf.isValid()) {
       message.warning(t("stockAnalysis.reflection.fillRequired"));
       return;
     }
@@ -394,7 +400,6 @@ export function ReflectionPanel() {
         stockCode: manualCode.trim(),
         stockName: "",
         asOfDate: manualAsOf.format("YYYY-MM-DD"),
-        actualOutcome: manualOutcome.trim(),
         reflectionDepth: manualDepth,
       });
       message.success(t("stockAnalysis.reflection.triggerSuccess"));
@@ -429,12 +434,6 @@ export function ReflectionPanel() {
               format="YYYY-MM-DD"
               allowClear
               style={{ width: 160 }}
-            />
-            <Input
-              placeholder={t("stockAnalysis.reflection.placeholderOutcome")}
-              value={manualOutcome}
-              onChange={(e) => setManualOutcome(e.target.value)}
-              style={{ width: 200 }}
             />
             <Select
               value={manualDepth}

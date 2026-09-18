@@ -24,7 +24,10 @@ export const usePipelineStore = create<PipelineState>((set, get) => ({
   fetchHistory: async (limit = 20) => {
     try {
       const runs = await invoke<PipelineRun[]>("get_pipeline_history", { limit });
-      set({ pipelineRuns: runs });
+      // 契约防御：mock / 异常后端可能返回非数组（例如 `{}`），
+      // 直接落库会让 PipelinePage 的 `pipelineRuns.filter/.length` 抛
+      // TypeError，进而把整个「投资中心 → 管道」tab 兜成「页面错误」。
+      set({ pipelineRuns: Array.isArray(runs) ? runs : [] });
     } catch (e) {
       console.error("[pipelineStore] 获取历史失败:", e);
     }

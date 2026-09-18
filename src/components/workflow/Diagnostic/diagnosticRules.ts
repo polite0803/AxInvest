@@ -119,6 +119,8 @@ const RULE_ORPHAN_NODES: Rule = (ctx) => {
     if (type === "trigger" || CONTAINER_NODE_TYPES.has(type) || DECORATION_NODE_TYPES.has(type)) { continue; }
     // 容器子节点通过 parentId 归属父容器（不经过边），跳过孤立检查
     if (parentByNode.has(id)) { continue; }
+    // 禁用节点（enabled=false）不参与 DAG 调度，允许无边（如股票分析 sim-verify 图示节点）
+    if (baseOf(n).enabled === false) { continue; }
     const up = ctx.upstreamOf.get(id);
     const down = ctx.downstreamOf.get(id);
     if ((!up || up.length === 0) && (!down || down.length === 0)) {

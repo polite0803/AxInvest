@@ -1,7 +1,9 @@
 /**
  * 数据源 Tab — Vendor 开关 + 健康检测 + 固定工具依赖融合展示。
  */
+import type { Variable } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
+import { toDbVariable } from "@/lib/workflowVariables";
 import { App, Button, Card, Input, Select, Space, Spin, Switch, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -374,7 +376,17 @@ export function DataVendorsTab() {
         value: emProxy.trim(),
         isSecret: false,
       });
-      const merged = Array.from(varMap.values());
+      // 写回 DB 前统一规范化为 snake_case（var_type / is_secret）。
+      // 上面各分支用 camelCase 键构造新对象（varType/isSecret），而后端
+      // `harness::workflow_types::Variable` 没有 rename_all="camelCase"：
+      //   ① 新建变量缺 var_type → 反序列化失败，整次保存静默报错；
+      //   ② `...existing` 分支里 camelCase 覆盖不了 snake_case 旧键 →
+      //      vendor_iwencai_key / vendor_xueqiu_token / vendor_neodata_token 的
+      //      isSecret: true 从未生效，密钥变量落库为 is_secret=false。
+      // toDbVariable 同时兼容读取两种键（varTypeOf 内部回退 var_type），
+      // 因此对 existing（snake_case）与新建（camelCase）对象都安全。
+      const merged = Array.from(varMap.values())
+        .map((v) => toDbVariable(v as unknown as Variable));
       await invoke("update_workflow_template", {
         id: "stock-analysis",
         input: {

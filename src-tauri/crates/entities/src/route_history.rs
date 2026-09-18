@@ -18,6 +18,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 提示词哈希，用于反馈回写时定位记录（建索引用）。
+    #[sea_orm(indexed)]
     pub prompt_hash: String,
     /// 提示词前 200 字预览，便于调试。
     #[sea_orm(column_type = "Text")]
@@ -41,6 +42,7 @@ pub struct Model {
     /// 反馈：实际成本（美元）。
     pub outcome_cost_usd: Option<f64>,
     /// 决策时间戳（Unix 秒）。
+    #[sea_orm(indexed)]
     pub timestamp: i64,
     /// TaskFeatureVector 的 JSON 序列化，用于相似度匹配重建。
     pub features_json: Option<String>,

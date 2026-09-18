@@ -39,7 +39,6 @@ export function EquityCurveChart({
 
     const dates = curve.map((p) => p.date);
     const equities = curve.map((p) => parseFloat(p.equity.toFixed(2)));
-    // const drawdowns = curve.map((p) => parseFloat((p.drawdownPct * 100).toFixed(2)));
 
     const series: echarts.SeriesOption[] = [
       {

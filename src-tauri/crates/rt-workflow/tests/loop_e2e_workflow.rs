@@ -5,22 +5,25 @@
 //! 验证含 Loop 的工作流在 mock 环境下可以正常运行。
 //! 核心修复（compute_ready_nodes 过滤 Loop body 节点）已在单元测试中验证。
 
+mod common;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use axagent_harness::registry::ProviderRegistry;
 use axagent_harness::repositories::{
     set_loop_checkpoint_repository, set_workflow_execution_repository,
 };
 use axagent_harness::test_support::{empty_loop_checkpoint_repo, empty_workflow_execution_repo};
 use axagent_harness::workflow_types::{
-    EdgeType, EndNodeConfig, LoopNode, LoopNodeConfig, LoopType, Position, RetryConfig, ToolNode,
-    ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, WorkflowEdge, WorkflowNode,
-    WorkflowNodeBase,
+    CodeNode, CodeNodeConfig, EdgeType, EndNodeConfig, LoopNode, LoopNodeConfig, LoopType,
+    Position, RetryConfig, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
+    WorkflowEdge, WorkflowNode, WorkflowNodeBase,
 };
 
-use axagent_rt_workflow::work_engine::WorkEngine;
+use axagent_rt_workflow::work_engine::{RunOptions, WorkEngine};
+
+use common::EmptyProviderRegistry;
 
 // ── 全局初始化 ───────────────────────────────────────────────────────
 
@@ -30,16 +33,6 @@ fn init_mock_repos() {
         set_loop_checkpoint_repository(empty_loop_checkpoint_repo());
         set_workflow_execution_repository(empty_workflow_execution_repo());
     });
-}
-
-// ── 最小 ProviderRegistry ───────────────────────────────────────────
-
-struct EmptyProviderRegistry;
-
-impl ProviderRegistry for EmptyProviderRegistry {
-    fn get(&self, _provider_type: &str) -> Option<Arc<dyn axagent_harness::ProviderAdapter>> {
-        None
-    }
 }
 
 // ── 节点构造 helper ──────────────────────────────────────────────────
@@ -102,6 +95,26 @@ fn make_end(id: &str) -> WorkflowNode {
     WorkflowNode::End(axagent_harness::workflow_types::EndNode {
         base: make_base(id, "End"),
         config: EndNodeConfig { output_var: None },
+    })
+}
+
+/// 直接执行的 Rhai CodeNode —— 无需 provider / tool registry 即可产出可控输出。
+fn make_code(
+    id: &str,
+    code: &str,
+    output_var: &str,
+    input_mapping: HashMap<String, String>,
+) -> WorkflowNode {
+    WorkflowNode::Code(CodeNode {
+        base: make_base(id, "Code"),
+        config: CodeNodeConfig {
+            language: "rhai".to_string(),
+            code: code.to_string(),
+            output_var: output_var.to_string(),
+            tool_name: None,
+            execute_directly: true,
+            input_mapping,
+        },
     })
 }
 
@@ -184,5 +197,90 @@ async fn workflow_status_transitions() {
         ),
         "简单工作流应完成或部分完成，实际: {:?}",
         result.status
+    );
+}
+
+// ── 测试：Loop 每一轮都必须真正重跑 body 并消费本轮的 iteratee ──────────
+//
+// 回归对象（R6）：`build_loop_body_dispatch`（engine/mod.rs）的
+// `Some(NodeStatus::Completed)` 分支在 body 节点「已是 Completed 且 results 已有
+// 输出」时**直接 return 既有结果**，而 LoopExecutor 在轮次之间不清理 body 节点的
+// 执行状态 ⇒ 第 2..N 轮根本不执行 body，每轮都吐第 1 轮的缓存产物。
+//
+// 为什么既有测试拦不住：`loop_executor_integration.rs` 的所有用例都用
+// `make_body_dispatch`（stub 闭包）替换了 `build_loop_body_dispatch`，绕过了
+// 缺陷所在的那段引擎代码；本文件的 `create_workflow_with_loop_node` 只断言图的
+// 静态结构、从不运行 ⇒ 该分支此前**没有任何测试覆盖**（测试自腐烂的又一例：
+// 「有 Loop 测试但没有任何一例跑到真实引擎的 body 调度」）。
+//
+// 断言口径：body 把本轮 iteratee（chapter）原样回显 ⇒ 修复前得到 ["a","a","a"]。
+#[tokio::test(flavor = "multi_thread")]
+async fn loop_body_reruns_each_iteration() {
+    init_mock_repos();
+
+    let engine = Arc::new(WorkEngine::new([0u8; 32], Arc::new(EmptyProviderRegistry)));
+    engine.init_dispatcher().await;
+
+    // body 节点：输出 = 本轮 iteratee（chapter），使各轮结果可区分。
+    // 用字符串而非数字，避免 Rhai→JSON 的整数/浮点表示差异干扰断言。
+    let mut echo_mapping = HashMap::new();
+    echo_mapping.insert("chapter".to_string(), "chapter".to_string());
+
+    let nodes = vec![
+        make_trigger("t1"),
+        // 上游产出 3 元素数组（模拟 lc-outline 的章节数组，经 output_var 注入后
+        // 由 iter_input_var = "items_out.result" 点路径取出）
+        make_code("mk-items", r#"["a", "b", "c"]"#, "items_out", HashMap::new()),
+        make_code("echo-step", "chapter", "chapter_echo", echo_mapping),
+        WorkflowNode::Loop(LoopNode {
+            base: make_base("loop1", "Loop"),
+            config: LoopNodeConfig {
+                loop_type: LoopType::ForEach,
+                items_var: None,
+                iter_input_var: Some("items_out.result".to_string()),
+                iteratee_var: Some("chapter".to_string()),
+                iter_output_var: Some("chapters_text".to_string()),
+                partial_result_var: Some("chapters_text__partial".to_string()),
+                max_iterations: None,
+                continue_condition: None,
+                continue_on_error: false,
+                body_steps: vec!["echo-step".to_string()],
+                sub_graph: None,
+                interrupt_after_each: false,
+                interrupt_nodes: vec![],
+            },
+        }),
+        make_end("end1"),
+    ];
+    let edges = vec![
+        make_edge("t1", "mk-items"),
+        make_edge("mk-items", "loop1"),
+        make_edge("loop1", "end1"),
+    ];
+
+    let wf = engine
+        .create_workflow("loop_body_rerun_test", nodes, edges)
+        .await
+        .expect("创建含 Loop 的工作流应成功");
+
+    let run =
+        engine.run_workflow(&wf.id, RunOptions::new()).await.expect("运行含 Loop 的工作流应成功");
+
+    let loop_out = run.results.get("loop1").expect("loop1 应把聚合结果写入 results");
+    assert_eq!(
+        loop_out.get("iter_count").and_then(|v| v.as_u64()),
+        Some(3),
+        "forEach 应迭代 3 次，实际输出: {loop_out}"
+    );
+
+    let items = loop_out.get("items").and_then(|v| v.as_array()).expect("items 应为数组");
+    assert_eq!(items.len(), 3, "每轮产出 1 项");
+    let got: Vec<&str> =
+        items.iter().map(|v| v.get("result").and_then(|r| r.as_str()).unwrap_or("<无>")).collect();
+    assert_eq!(
+        got,
+        vec!["a", "b", "c"],
+        "Loop 每轮必须重新执行 body 并消费本轮 iteratee；若三轮结果相同 \
+         （如 [\"a\",\"a\",\"a\"]）说明 body 节点被复用跳过、每轮返回第 1 轮缓存产物"
     );
 }

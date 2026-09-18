@@ -10,6 +10,32 @@ pub use responses::ResponsesTransport;
 
 use async_trait::async_trait;
 
+/// 从一行 SSE 文本中取出 `data:` 载荷。
+///
+/// 规则：跳过空行与 `event:` 行；`data: `（含空格）与 `data:`（无空格）两种前缀都接受。
+///
+/// ⚠ 与 `chat_completions::parse_sse_chunk` **不是同一形态、不可互换**：
+/// 后者接收**整块**文本并在内部按 `'\n'` 切分，不做「跨 chunk 残留行」缓冲；
+/// 本函数只处理**调用方已切好的完整单行**。
+///
+/// [2026-09-13] 去重审计 P1-8：`anthropic.rs` 与 `gemini.rs` 的 `chat_stream` 中该判定块
+/// **逐字相同**（各 10 行），已收敛至此。
+///
+/// **不适用者**（勿合并，行为不同）：`openai.rs` 与 `openai_responses.rs` 实现的是完整
+/// SSE 事件语义 —— 空行是**事件边界**、多行 `data:` 需 `join("\n")`、并记录 `event:` 类型；
+/// 它们与本函数的「单行独立解析」语义不同，机械合并会改变流式解析行为。
+#[inline]
+pub(crate) fn sse_data_payload(line: &str) -> Option<&str> {
+    if line.is_empty() || line.starts_with("event:") {
+        return None;
+    }
+    if let Some(d) = line.strip_prefix("data: ") {
+        Some(d)
+    } else {
+        line.strip_prefix("data:")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TransportRequest {
     pub model: String,

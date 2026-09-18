@@ -23,8 +23,10 @@ pub struct Model {
     pub url: Option<String>,
     pub media_name: Option<String>,
     /// 发布时间的 unix 毫秒
+    #[sea_orm(indexed)]
     pub publish_time: i64,
     /// 关联个股(可空,关键词搜索时为空)
+    #[sea_orm(indexed)]
     pub stock_code: Option<String>,
     /// 触发此次抓取的关键词(可空,按个股抓时为空)
     pub keyword: Option<String>,

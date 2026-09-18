@@ -13,6 +13,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 关联 quant_strategies.id
+    #[sea_orm(indexed)]
     pub strategy_id: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub name: Option<String>,
@@ -22,6 +23,7 @@ pub struct Model {
     /// BacktestConfig JSON
     pub config_json: String,
     /// "pending" | "running" | "completed" | "failed"
+    #[sea_orm(indexed)]
     pub status: String,
     /// BacktestResult JSON（status=completed 时填入）
     #[serde(skip_serializing_if = "Option::is_none", default)]

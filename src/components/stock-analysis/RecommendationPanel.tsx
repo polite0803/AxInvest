@@ -1,7 +1,8 @@
 import { List } from "@/components/common/AntdList";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
+import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
-import { parseAction } from "@/lib/stock-analysis-utils";
+import { actionToDirection, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
@@ -17,7 +18,6 @@ import type {
 import { Alert, App, Button, Card, Checkbox, Collapse, Empty, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { RecoHistoryModal } from "./RecoHistoryModal";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
@@ -279,19 +279,30 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const degradedStyleSet = useMemo(() => new Set(data?.degradedStyles ?? []), [data]);
   const hasDegraded = degradedStyleSet.size > 0;
 
-  // 数据质量统计：所有 picks 总数（包含兜底合成）
+  // 数据质量统计：所有 picks 总数（包含兜底合成）+ 按风格拆分
+  //
+  // 为什么要拆到风格粒度：兜底合成数据有两个不同用途 ——
+  //   ① 全局计数 → 顶部汇总条，用于判定「数据链是否健康」；
+  //   ② 风格粒度 → 回答「这个风格为什么是空的」：是真的没有信号，
+  //      还是只有兜底占位、已被隐藏。
+  // 缺 ② 时，面板会把「上游数据链断裂」渲染成一片普通空风格，用户无从分辨
+  // —— 超短线拿不到候选的故障正是被这一点掩盖的（100 条兜底被静默隐藏，
+  //    面板只剩 capital 的 10 条真实，看起来只是「风格没选到票」）。
   const dataQuality = useMemo(() => {
-    if (!data) { return { real: 0, synthetic: 0 }; }
+    const byStyle: Record<string, { real: number; synthetic: number }> = {};
     let real = 0;
     let synthetic = 0;
-    for (const arr of Object.values(data.picks ?? {})) {
+    for (const [style, arr] of Object.entries(data?.picks ?? {})) {
       if (!arr) { continue; }
+      let syn = 0;
       for (const p of arr) {
-        if (p.synthetic) { synthetic++; }
-        else { real++; }
+        if (p.synthetic) { syn++; }
       }
+      byStyle[style] = { real: arr.length - syn, synthetic: syn };
+      real += arr.length - syn;
+      synthetic += syn;
     }
-    return { real, synthetic };
+    return { real, synthetic, byStyle };
   }, [data]);
 
   const periodItems = [
@@ -379,10 +390,17 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
           />
         )}
 
-        {/* 当所有推荐均为兜底合成时提示用户（已自动过滤兜底数据） */}
-        {data && dataQuality.real === 0 && dataQuality.synthetic > 0 && (
+        {
+          /* 存在兜底合成候选时提示用户（面板不渲染兜底数据，故在此告知被隐藏的数量）
+            触发条件为 `synthetic > 0`（旧实现为 `real === 0 && synthetic > 0`）：
+            旧条件只在真实产出「完全为 0」时才报警，而本次超短线故障中 capital 恰好擦边
+            产出 10 条真实 → 条件不成立 → 100 条兜底被静默隐藏，面板呈现出「多数风格为空」
+            却没有任何解释，把定位成本从「一眼可辨」抬高到「翻日志复算阈值」。
+            同时按严重度分级：完全无真实产出 = warning（数据链故障），有真实产出 = info（正常补充）。 */
+        }
+        {data && dataQuality.synthetic > 0 && (
           <Alert
-            type="info"
+            type={dataQuality.real === 0 ? "warning" : "info"}
             showIcon
             className="text-xs! mb-2!"
             title={
@@ -465,11 +483,19 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
               ghost
               size="small"
               defaultActiveKey={STYLE_KEYS.filter((s) =>
-                !disabledStyleSet.has(s) && (data?.picks?.[s]?.length ?? 0) > 0
+                // 只默认展开「有真实产出」的风格；仅含兜底占位的风格展开后也是空列表
+                !disabledStyleSet.has(s) && (dataQuality.byStyle[s]?.real ?? 0) > 0
               )
                 .slice(0, 2)}
               items={STYLE_KEYS.map((style) => {
+                // 兜底合成候选不进入列表（占位数据会污染判断，且排序上会反超被压坏的真实值）。
+                // 过滤本身是对的，错在「静默」—— 被隐藏的数量通过
+                // dataQuality.byStyle[style].synthetic 在下方空状态中明确告知用户。
+                // 注意：此处过滤使 PickRow 的 `pick.synthetic === true` 分支当前不可达，
+                // 该分支予以保留（RecoHistoryModal 仍在按同一语义标注兜底，
+                // 且未来若提供「显示兜底候选」开关即可直接复用）。
                 const picks = (data?.picks?.[style])?.filter(p => !p.synthetic) ?? [];
+                const hiddenSynthetic = dataQuality.byStyle[style]?.synthetic ?? 0;
                 const isDisabled = disabledStyleSet.has(style);
                 const isDegraded = degradedStyleSet.has(style);
                 // P2-3: when a style is disabled, still show the section (expandable)
@@ -534,7 +560,12 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                     ? (
                       <Empty
                         image={Empty.PRESENTED_IMAGE_SIMPLE}
-                        description={t("stockAnalysis.recommendation.empty")}
+                        description={hiddenSynthetic > 0
+                          // 有产出但全是兜底占位 → 明确告知「是数据不足，不是没选到票」
+                          ? t("stockAnalysis.recommendation.styleOnlySynthetic", {
+                            count: hiddenSynthetic,
+                          })
+                          : t("stockAnalysis.recommendation.empty")}
                       />
                     )
                     : (
@@ -578,9 +609,11 @@ function CrossCheckBadge({
   const { t, i18n } = useTranslation();
   if (consensus.total === 0) { return null; }
 
-  // 推荐与共识的对齐：BUY 时要求共识 bullish 才算"一致"；
+  // 推荐与共识的对齐：买入方向时要求共识 bullish 才算"一致"；
   // 其他动作（HOLD/SELL）暂不参与交叉验证，留给后续扩展。
-  const aligned = recAction === "BUY" ? consensus.consensus === "bullish" : null;
+  // P1-6(2026-09-14): 改用 `actionToDirection` —— 原 `recAction === "BUY"` 漏掉了
+  // 同方向的「增持」（INCREASE），使增持推荐跳过交叉验证。
+  const aligned = actionToDirection(recAction) === "buy" ? consensus.consensus === "bullish" : null;
 
   let color: "green" | "red" | "orange" | "gold";
   let icon: string;
@@ -643,10 +676,8 @@ function PickRow(
   },
 ) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const isInInvestHub = location.pathname.startsWith("/invest");
+  // 跳转统一走 useStockJump（与趋势智选 / 筛选结果同一条链，避免参数名分叉）
+  const jumpToStock = useStockJump();
   // 读荐股 ↔ 分析师交叉验证缓存（仅当该股已有最近一次工作流结果时存在）
   const stockCodeConsensus = useStockAnalysisStore((s) => s.stockCodeConsensus);
   const consensus = stockCodeConsensus[pick.stockCode];
@@ -654,7 +685,13 @@ function PickRow(
   // P0-1: 上次分析结论的视觉展示
   const historyBadge = useMemo(() => {
     if (!latestAnalysis || latestAnalysis.status !== "completed") { return null; }
-    const action = parseAction(latestAnalysis.decisionAction);
+    // P1-2(2026-09-14) / V76: 优先用独立轴 decisionPositionState（后端已移除互改），
+    // null（v228 前历史行）才退回 decisionPositionPct。
+    const action = resolveDisplayAction(
+      latestAnalysis.decisionAction,
+      latestAnalysis.decisionPositionState,
+      latestAnalysis.decisionPositionPct,
+    );
     let color: string;
     let label: string;
     switch (action) {
@@ -716,6 +753,15 @@ function PickRow(
         <Tag color="volcano" className="m-0 text-[10px]">BUY</Tag>
         {historyBadge}
         {consensus && <CrossCheckBadge consensus={consensus} recAction="BUY" />}
+        {
+          /* 兜底 / 真实标签。当前调用链上 synthetic 分支不可达 ——
+            RecommendationPanel 传给 PickRow 的 picks 已过滤掉 p.synthetic
+            （见 Collapse items 回调），因此此处恒走 real 分支。
+            保留 synthetic 分支而非删除：它是 PickRow 自身完整的语义能力，
+            RecoHistoryModal 按同一语义渲染兜底标签，且未来若提供
+            「显示兜底候选」开关即可直接复用，无需再次改动此处。
+            现状由 Collapse 空状态与顶部汇总条共同对外说明。 */
+        }
         {pick.synthetic
           ? (
             <Tooltip title={t("stockAnalysis.recommendation.syntheticTooltip")}>
@@ -790,19 +836,7 @@ function PickRow(
     >
       <List.Item
         style={{ cursor: "pointer", padding: "4px 0" }}
-        onClick={() => {
-          if (isInInvestHub) {
-            // 在 InvestHub 内部：使用 URL 参数切换到 workspace tab，自动输入股票代码
-            const next = new URLSearchParams(searchParams);
-            next.set("tab", "workspace");
-            next.set("stockCode", pick.stockCode);
-            next.set("view", "analysis");
-            setSearchParams(next, { replace: true });
-          } else {
-            // 独立页面：跳转到股票分析页面
-            navigate(`/stock-analysis?code=${pick.stockCode}`, { replace: true });
-          }
-        }}
+        onClick={() => jumpToStock({ code: pick.stockCode, name: pick.stockName })}
       >
         {content}
       </List.Item>

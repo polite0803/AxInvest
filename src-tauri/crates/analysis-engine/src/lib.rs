@@ -2,8 +2,7 @@
 pub mod alert_mapping;
 pub mod types;
 pub use types::{
-    AnalystStance, BuffettVerdict, FScoreLevel, FeedbackTrend, MarketRegimeType, MoatLevel,
-    MosLevel, StrategyTrend, SuggestionType, ValueSignal, VolatilityLevel,
+    AnalystStance, FeedbackTrend, MarketRegimeType, StrategyTrend, SuggestionType, VolatilityLevel,
 };
 pub mod backtest;
 pub mod backtest_feedback;
@@ -12,6 +11,9 @@ pub mod blackboard;
 pub mod dashboard_report;
 pub mod data_clean;
 pub mod decision;
+// 权威定义已上移至 harness（共享契约层）。此处 re-export 保留 `crate::decision_action::*`
+// 与 `axagent_analysis_engine::decision_action::*` 两个旧路径，消费端零改动。
+pub use axagent_harness::decision_action;
 pub mod decision_tracker;
 pub mod evidence_citation;
 pub mod evidence_weight;
@@ -79,8 +81,6 @@ pub mod trade_intent;
 pub mod trade_review;
 pub mod trade_stats;
 pub mod trading;
-pub mod value;
-pub mod value_investing;
 pub mod vlm_import;
 pub mod weight_decay;
 
@@ -100,12 +100,12 @@ pub use notification_channel::{
 pub mod stock_analysis_round;
 pub use stock_analysis_round::{AnalysisError as StockAnalysisRoundError, StockAnalysisRound};
 
-// ── 股票行业编排（Orchestrator 集成）──
-// 对接 axagent-orchestrator 的 IndustryAdapter trait，
+// ── 股票域包编排（Orchestrator 集成）──
+// 对接 axagent-orchestrator 的 DomainPackAdapter trait，
 // 为股票业务提供动态编排、反思、进化能力。
 pub mod stock_orchestration;
 pub use stock_orchestration::{
-    create_stock_industry_adapter, register_stock_adapter, StockIndustryAdapter,
+    create_stock_domain_pack_adapter, register_stock_adapter, StockDomainPackAdapter,
 };
 
 // ── 股票业务反思引擎（WorkflowReflector 集成）──

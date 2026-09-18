@@ -506,6 +506,7 @@ mod tests {
             stats: crate::capability::CapabilityStats::default(),
             enabled: true,
             source: crate::capability::CapabilitySource::default(),
+            domain_pack_id: None,
             evolvable: crate::capability::CapabilityEvolvability::default(),
             exposure: crate::capability::CapabilityExposure::default(),
             tool_ref: None,

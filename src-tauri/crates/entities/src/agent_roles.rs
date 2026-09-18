@@ -11,14 +11,19 @@ pub struct Model {
     pub name: String,
     pub description: Option<String>,
     #[sea_orm(column_name = "system_prompt")]
+    #[sea_orm(default_value = "")]
     pub system_prompt: String,
     #[sea_orm(column_name = "default_tools")]
     pub default_tools: Option<String>,
     #[sea_orm(column_name = "active_domains")]
     pub active_domains: Option<String>,
+    #[sea_orm(default_value = 3)]
     pub max_concurrent: i32,
+    #[sea_orm(default_value = 600)]
     pub timeout_seconds: i64,
+    #[sea_orm(default_value = "builtin")]
     pub source: String,
+    #[sea_orm(default_value = 0)]
     pub sort_order: i32,
     pub created_at: i64,
     pub updated_at: i64,
@@ -39,6 +44,7 @@ pub struct Model {
     pub icon: Option<String>,
     pub color: Option<String>,
     #[sea_orm(column_name = "is_enabled")]
+    #[sea_orm(default_value = 1)]
     pub is_enabled: i32,
 }
 

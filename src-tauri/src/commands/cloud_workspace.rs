@@ -185,20 +185,15 @@ pub async fn sync_cloud_workspace(
         .await
         .map_err(|e| format!("Failed to sync cloud workspace: {}", e))?;
 
-    // Trigger post-sync indexing
+    // Trigger post-sync indexing（落盘到 `app_data_dir/index.db`）
     let cache_dir = &sync_result.cached_dir;
-    let indexing_report =
-        crate::indexing_triggers::trigger_post_sync_indexing_for_cloud_workspace(cache_dir).await;
+    let indexing_report = crate::indexing_triggers::trigger_post_sync_indexing_for_cloud_workspace(
+        &state.app_data_dir,
+        cache_dir,
+    )
+    .await;
 
-    if indexing_report.skipped {
-        tracing::warn!("Post-sync indexing skipped: {:?}", indexing_report.reason);
-    } else {
-        tracing::info!(
-            "Post-sync indexing complete: {} files, {} AST nodes",
-            indexing_report.files_indexed,
-            indexing_report.ast_nodes_indexed
-        );
-    }
+    log_indexing_report("sync", &indexing_report);
 
     Ok(CloudSyncResponse {
         downloaded: sync_result.downloaded,
@@ -228,18 +223,13 @@ pub async fn push_cloud_workspace_changes(
 
     // Trigger post-push indexing to update indexes with local changes
     let cache_dir = &sync_result.cached_dir;
-    let indexing_report =
-        crate::indexing_triggers::trigger_post_sync_indexing_for_cloud_workspace(cache_dir).await;
+    let indexing_report = crate::indexing_triggers::trigger_post_sync_indexing_for_cloud_workspace(
+        &state.app_data_dir,
+        cache_dir,
+    )
+    .await;
 
-    if indexing_report.skipped {
-        tracing::warn!("Post-push indexing skipped: {:?}", indexing_report.reason);
-    } else {
-        tracing::info!(
-            "Post-push indexing complete: {} files, {} AST nodes",
-            indexing_report.files_indexed,
-            indexing_report.ast_nodes_indexed
-        );
-    }
+    log_indexing_report("push", &indexing_report);
 
     Ok(CloudSyncResponse {
         downloaded: sync_result.downloaded,
@@ -385,4 +375,47 @@ pub async fn check_cloud_connection(config: CheckCloudConnectionRequest) -> Resu
         cloud_config.create_backend().map_err(|e| format!("Failed to create backend: {}", e))?;
 
     backend.check_connection().await.map_err(|e| format!("Connection check failed: {}", e))
+}
+
+/// 索引完成后的日志（`sync` / `push` 两条路径共用，`phase` 传 `"sync"` / `"push"`）。
+///
+/// ⚠ **诚信日志**：本行只声称「扫描 + 落盘 + 快照登记」，**不**声称结果可被检索 ——
+/// 检索侧消费者（`RecallPipeline` / `IncrementalIndexer` / `VectorSearchCache`）的
+/// 生产实例化点当前为 0（`PLAN-weknora-borrowings` `§12.11`）。此前这里写的是
+/// `"indexing complete"`，读起来像「已建立可检索索引」，是**肯定但为假**的信号。
+///
+/// 快照段落的三种形态都如实呈现，**不把「没登记」说成已登记、也不臆断原因**：
+/// - `Some(id)` + `Some(prev)` → 附上一轮计数，可看出增减（索引被清空的唯一线索）；
+/// - `Some(id)` + `None` → 首次索引（该 root 无历史）；
+/// - `None` → **未登记**，并区分两种**已观测到**的原因：AST 阶段提前返回（根本没走到
+///   快照那一步）/ 走到了但侧车库不可用或写入失败。此前这里一律写「L2 cache
+///   unavailable」，在第一种情形下是**未经核实的归因**。
+fn log_indexing_report(phase: &str, report: &crate::indexing_triggers::IndexingReport) {
+    if report.skipped {
+        tracing::warn!("Post-{} indexing skipped: {:?}", phase, report.reason);
+        return;
+    }
+
+    let snapshot = match (&report.snapshot_id, &report.previous_snapshot) {
+        (Some(id), Some(prev)) => format!(
+            "snapshot {id} (prev: {} files / {} defs)",
+            prev.file_count, prev.definition_count
+        ),
+        (Some(id), None) => format!("snapshot {id} (first index for this workspace)"),
+        (None, _) if report.ast_skipped => {
+            "snapshot NOT recorded (AST stage aborted before snapshot)".to_string()
+        },
+        (None, _) => "snapshot NOT recorded (L2 cache unavailable or write failed)".to_string(),
+    };
+
+    tracing::info!(
+        "Post-{} indexing: {} files + {} AST nodes -> {} (replaced {} stale rows; {}; \
+         warn: no retrieval consumer yet, see PLAN §12.11)",
+        phase,
+        report.files_indexed,
+        report.ast_nodes_indexed,
+        report.index_path.as_deref().unwrap_or("<unknown>"),
+        report.stale_rows_removed,
+        snapshot,
+    );
 }

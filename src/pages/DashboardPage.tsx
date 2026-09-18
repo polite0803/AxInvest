@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { OfficeTab } from "@/components/office/OfficeTab";
+import { formatNumber } from "@/lib/format";
 import { invoke, logIpcError } from "@/lib/invoke";
 import {
   initGatewayStatusListener,
@@ -41,14 +42,6 @@ interface DashboardData {
   };
   providerCount: number;
   modelCount: number;
-}
-
-// ── Helpers ──
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) { return `${(n / 1_000_000).toFixed(1)}M`; }
-  if (n >= 1_000) { return `${(n / 1_000).toFixed(1)}K`; }
-  return n.toLocaleString();
 }
 
 // ── Stat Card ──

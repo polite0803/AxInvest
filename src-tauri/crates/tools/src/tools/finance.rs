@@ -6,6 +6,7 @@
 
 use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult, global_state};
 use async_trait::async_trait;
+use axagent_analysis_engine::risk::kelly_criterion_with_thresholds;
 use axagent_astock_data::indicators::sma;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -166,41 +167,10 @@ fn peg_ratio(pe: f64, g: f64) -> PegR {
     }
 }
 
-#[derive(Serialize)]
-struct KellyR {
-    kelly_fraction: f64,
-    half_kelly: f64,
-    position_pct: f64,
-    signal: String,
-}
-fn kelly(wr: f64, aw: f64, al: f64, heavy_th: f64, med_th: f64) -> KellyR {
-    if al <= 0.0 || aw <= 0.0 || wr <= 0.0 {
-        return KellyR {
-            kelly_fraction: 0.0,
-            half_kelly: 0.0,
-            position_pct: 0.0,
-            signal: "不适用".into(),
-        };
-    }
-    let odds = aw / al;
-    let k = ((wr * (odds + 1.0) - 1.0) / odds).max(0.0);
-    let h = k / 2.0;
-    KellyR {
-        kelly_fraction: (k * 1000.0).round() / 1000.0,
-        half_kelly: (h * 1000.0).round() / 1000.0,
-        position_pct: (h * 10000.0).round() / 100.0,
-        signal: if k > heavy_th {
-            "重仓"
-        } else if k > med_th {
-            "中等"
-        } else if k > 0.0 {
-            "轻仓"
-        } else {
-            "不建议"
-        }
-        .into(),
-    }
-}
+// 凯利公式不再本地实现：统一复用 `axagent_analysis_engine::risk::kelly_criterion_with_thresholds`
+// （权威源）。
+// 历史两份实现逐字等价（守卫条件 / odds 算式 / 三处舍入口径 / signal 四档分支），
+// 故本次去重为零行为变更的纯转发。
 
 #[derive(Serialize)]
 struct RpR {
@@ -1090,7 +1060,8 @@ calc_tool_r!(CalcKellyTool, "calc_kelly", "凯利公式仓位计算", |input| {
     ));
     let heavy = tv_f64(&input, "risk_kelly_heavy_threshold", 0.25);
     let med = tv_f64(&input, "risk_kelly_medium_threshold", 0.1);
-    serde_json::to_value(kelly(wr, aw, al, heavy, med)).unwrap_or_default()
+    serde_json::to_value(kelly_criterion_with_thresholds(wr, aw, al, heavy, med))
+        .unwrap_or_default()
 });
 calc_tool_r!(CalcRiskParityTool, "calc_risk_parity", "风险平价权重计算", |input| {
     let vols = parse_f64s(&input, "volatilities_json");

@@ -15,6 +15,8 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
 
+use crate::compat::impl_default_via_new;
+use crate::transport::sse_data_payload;
 use crate::{ProviderAdapter, ProviderRequestContext, build_http_client, parse_base64_data_url};
 
 const DEFAULT_BASE_URL: &str = default_url::GEMINI_BASE;
@@ -23,11 +25,7 @@ pub struct GeminiAdapter {
     client: reqwest::Client,
 }
 
-impl Default for GeminiAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(GeminiAdapter);
 
 impl GeminiAdapter {
     pub fn new() -> Self {
@@ -681,15 +679,7 @@ impl ProviderAdapter for GeminiAdapter {
                             let line = buf[..pos].trim_end().to_string();
                             buf = buf[pos + 1..].to_string();
 
-                            if line.is_empty() || line.starts_with("event:") {
-                                continue;
-                            }
-
-                            let data = if let Some(d) = line.strip_prefix("data: ") {
-                                d
-                            } else if let Some(d) = line.strip_prefix("data:") {
-                                d
-                            } else {
+                            let Some(data) = sse_data_payload(&line) else {
                                 continue;
                             };
 

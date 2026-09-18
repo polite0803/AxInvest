@@ -43,6 +43,8 @@ function makePlan(overrides?: Partial<Plan>): Plan {
       { id: "step-2", title: "Step 2", description: "Second step", status: "pending", result: null },
       { id: "step-3", title: "Step 3", description: "Third step", status: "pending", result: null },
     ],
+    // P0-A：执行授权位，默认未授权（与后端 plans.execution_authorized 对齐）
+    executionAuthorized: false,
     isActive: true,
     createdAt: 1735689600000,
     updatedAt: 1735689600000,
@@ -125,6 +127,16 @@ describe("planStore", () => {
         request: { planId: PLAN_ID, stepId: "step-3", approved: true },
       });
 
+      // P0-A：执行前必须写入执行授权位（后端 plan_execute 以授权位为判据）
+      expect(invokeMock).toHaveBeenCalledWith("plan_authorize", {
+        request: {
+          conversationId: CONV_ID,
+          planId: PLAN_ID,
+          authorizedBy: "user",
+          approved: true,
+        },
+      });
+
       // Should execute with all step IDs
       expect(invokeMock).toHaveBeenCalledWith("plan_execute", {
         request: {
@@ -136,7 +148,29 @@ describe("planStore", () => {
 
       const activePlan = usePlanStore.getState().activePlans[CONV_ID];
       expect(activePlan?.status).toBe("executing");
+      expect(activePlan?.executionAuthorized).toBe(true);
       expect(activePlan?.steps.every((s: { status: string }) => s.status === "approved")).toBe(true);
+    });
+
+    /**
+     * P0-A 顺序约束：授权必须先于执行发生。
+     *
+     * 修复前后端 `plan_execute` 以 status 为判据且与生成态集合不相交，导致
+     * 「执行必拒」；改为授权位判据后，若前端漏调 `plan_authorize`，执行会返回
+     * WORKFLOW_PLAN_NOT_AUTHORIZED。此测试固化调用顺序，防止该回归。
+     */
+    it("writes the execution authorization before executing (P0-A order)", async () => {
+      const plan = makePlan();
+      usePlanStore.setState({ activePlans: { [CONV_ID]: plan } });
+      invokeMock.mockResolvedValue(undefined);
+
+      await usePlanStore.getState().approvePlan(CONV_ID, PLAN_ID);
+
+      const calls = invokeMock.mock.calls.map((c) => c[0] as string);
+      const authIdx = calls.indexOf("plan_authorize");
+      const execIdx = calls.indexOf("plan_execute");
+      expect(authIdx).toBeGreaterThan(-1);
+      expect(execIdx).toBeGreaterThan(authIdx);
     });
 
     it("handles error during approve", async () => {

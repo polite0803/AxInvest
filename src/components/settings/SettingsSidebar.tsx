@@ -14,6 +14,7 @@ import {
   HardDrive,
   Image,
   Info,
+  Layers,
   LayoutDashboard,
   ListChecks,
   MessageSquare,
@@ -80,6 +81,7 @@ const MENU_ICONS: Partial<Record<SettingsSection, React.ReactNode>> = {
   dynamicPages: <LayoutDashboard size={14} />,
   localTools: <Wrench size={14} />,
   mcpServers: <Network size={14} />,
+  capabilityDomains: <Layers size={14} />,
   persona: <User size={14} />,
   proactiveBehavior: <Radio size={14} />,
   readingList: <ListChecks size={14} />,
@@ -126,6 +128,7 @@ const TAB_GROUPS: Record<string, SettingsSection[]> = {
   appearance: ["general", "display", "theme", "animations", "shortcuts"],
   extensions: [
     "tools",
+    "capabilityDomains",
     "skillsHub",
     "plugins",
     "dashboardPlugins",

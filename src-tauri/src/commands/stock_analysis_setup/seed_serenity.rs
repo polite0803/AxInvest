@@ -83,7 +83,13 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     // v48: 全部 Agent 节点 stream_chunk_timeout_secs 120s→300s（对齐 stock-analysis 模板）。
     //      a-chain-trend1 等大上下文节点 TTFB 偶发 >120s，默认值导致 TIMEOUT 失败
     //      （2026-09-09 实证：chunk timeout after 120s, round 2/8）。
-    const TEMPLATE_VERSION: i32 = 48;
+    // v53: data-verifier 吞候选实锤（2026-09-11 run d9b7a146 / 7e3801c8，DB 曾直写至 v52）：
+    //      a-candidate-mapper content 为 {"report":"<json字符串>"} 双重编码形态（report 值
+    //      还可能带 ```tool_json 围栏），data-verifier 路径3 对 content 整体 json_parse 得到
+    //      {report:"..."}，candidates 在 report 字符串内层 → p["candidates"] 不存在 → 返回 []
+    //      → 最终无候选输出。修复：路径4 对 p["report"] 先 extract_json_block 剥围栏截取
+    //      首个平衡 JSON 块，再二次 json_parse 取内层 candidates。
+    const TEMPLATE_VERSION: i32 = 53;
 
     let now = chrono::Utc::now().timestamp_millis();
 
@@ -1254,6 +1260,12 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
 
     // ── Variables（用户可调整的参数字段）──
     // v17: 移除 ref_*_code（原行业基线代表股，随 t-baseline-* 节点一并删除）
+    //
+    // 瓶颈三力权重改为引用领域本体的**权威源**（`harness::domain_ontology`）。
+    // 此前这里是硬编码字面量，与 `.rhai` 的两份 fallback 各自独立 ⇒ 改一处不会同步另两处。
+    // 数值与文本**保持不变**（`format_weight` 固定 2 位小数，`{}` 会给 "0.3" 而破坏种子产物）
+    // ⇒ 种子出的 JSON 逐字节不变，**无需升 `TEMPLATE_VERSION`**。
+    let bw = axagent_harness::domain_ontology::BOTTLENECK_WEIGHTS;
     let serenity_vars = vec![
         // ── t-policy-news 政策新闻搜索关键词（tool input_mapping 引用变量名，不能直接写字面值）──
         Variable {
@@ -1335,25 +1347,35 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             is_secret: false,
         },
         // ── v42 新增：瓶颈评分权重（c-scorer input_mapping 引用，缺定义导致 resolve null → 走脚本 fallback）──
+        // 默认值与描述文本中的数字**均由权威源渲染**（见上方 `bw` 与 `format_weight` 的说明）。
         Variable {
             name: "w_supply".into(),
             var_type: "float".into(),
-            value: serde_json::json!(0.35),
-            description: Some("瓶颈评分-供给刚性权重（默认0.35，c-scorer 引用）".into()),
+            value: serde_json::json!(bw.supply),
+            description: Some(format!(
+                "瓶颈评分-供给刚性权重（默认{}，c-scorer 引用）",
+                axagent_harness::domain_ontology::format_weight(bw.supply)
+            )),
             is_secret: false,
         },
         Variable {
             name: "w_demand".into(),
             var_type: "float".into(),
-            value: serde_json::json!(0.35),
-            description: Some("瓶颈评分-需求弹性权重（默认0.35，c-scorer 引用）".into()),
+            value: serde_json::json!(bw.demand),
+            description: Some(format!(
+                "瓶颈评分-需求弹性权重（默认{}，c-scorer 引用）",
+                axagent_harness::domain_ontology::format_weight(bw.demand)
+            )),
             is_secret: false,
         },
         Variable {
             name: "w_irreplace".into(),
             var_type: "float".into(),
-            value: serde_json::json!(0.30),
-            description: Some("瓶颈评分-不可替代性权重（默认0.30，c-scorer 引用）".into()),
+            value: serde_json::json!(bw.irreplaceability),
+            description: Some(format!(
+                "瓶颈评分-不可替代性权重（默认{}，c-scorer 引用）",
+                axagent_harness::domain_ontology::format_weight(bw.irreplaceability)
+            )),
             is_secret: false,
         },
         // ── v47 新增：用户主题输入（对话式主题荐股）──
@@ -1403,6 +1425,15 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
         tracing::info!("[stock_analysis_setup] Serenity 模板不存在，准备创建");
     }
     let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
+
+    // P0 软门禁（C1，2026-09-14）：种子的端口公理 —— 结构性死链在此被记录（不阻断启动）。
+    // 判据复用 harness 的 `warn_port_axioms_json`，不在本文件另写一份。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("stock_analysis_setup:seed_serenity:{TEMPLATE_ID}"),
+        &nodes_json,
+        &edges_json,
+    );
+
     workflow_template::ActiveModel {
         hooks_config: Set(None),
         id: Set(TEMPLATE_ID.to_string()),

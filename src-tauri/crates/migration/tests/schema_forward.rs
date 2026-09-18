@@ -14,7 +14,9 @@ use axagent_migration::list_backups;
 
 #[tokio::test]
 async fn forward_bootstrap_produces_usable_schema() {
-    // create_test_pool 内部已执行 run_initialization（前向迁移/bootstrap）。
+    // create_test_pool 内部走 `dao::db::initialize_schema`：历史迁移（现已清空，成为
+    // no-op）+ 声明式引擎 `reconcile::apply::bootstrap_schema`（**现在的唯一建表来源**）。
+    // 本用例因此从「迁移能建出可用 schema」改判为「引擎能建出可用 schema」。
     let h = create_test_pool().await.expect("测试应成功");
     let db = &h.conn;
 

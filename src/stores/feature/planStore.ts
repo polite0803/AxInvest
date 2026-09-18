@@ -5,6 +5,7 @@ import { invoke, listen, logIpcError, type UnlistenFn } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import type {
   Plan,
+  PlanAuthorizationChangedEvent,
   PlanExecuteRequest,
   PlanExecutionCompleteEvent,
   PlanGeneratedEvent,
@@ -31,7 +32,12 @@ interface PlanStore {
   // ── Actions ────────────────────────────────────────────────────────
   /** Generate a plan for a conversation */
   generatePlan: (conversationId: string, content: string) => Promise<Plan>;
-  /** Approve all steps in a plan and start execution */
+  /**
+   * Approve all steps in a plan and start execution.
+   *
+   * 完整链路（P0-A 后）：逐 step 批准 → **写入执行授权位** → 执行。
+   * 授权步骤不可省略：后端 `plan_execute` 以授权位为判据，未授权直接拒绝。
+   */
   approvePlan: (conversationId: string, planId: string) => Promise<void>;
   /** Reject a plan entirely */
   rejectPlan: (
@@ -71,6 +77,8 @@ interface PlanStore {
   handlePlanGenerated: (event: PlanGeneratedEvent) => void;
   handlePlanStepUpdate: (event: PlanStepUpdateEvent) => void;
   handlePlanExecutionComplete: (event: PlanExecutionCompleteEvent) => void;
+  /** P0-A：授权位变更（批准/拒绝/内容变更撤权） */
+  handlePlanAuthorizationChanged: (event: PlanAuthorizationChangedEvent) => void;
   updatePlanStatus: (
     conversationId: string,
     planId: string,
@@ -130,6 +138,18 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
         ),
       );
 
+      // ── P0-A：写入执行授权位 ─────────────────────────────────────────
+      // 后端 `plan_execute` 的判据是授权位（plans.execution_authorized）而非
+      // status。授权位的唯一写入口是 `plan_authorize`，其写入者白名单
+      // （user/system/api/ui/automation）**不含模型路径** —— 模型无法自我授权。
+      //
+      // 此处的 "user" 表示「用户在 UI 上点击批准」这一动作来源。
+      // 顺序不可调换：必须早于 plan_execute，否则后端以
+      // WORKFLOW_PLAN_NOT_AUTHORIZED 拒绝执行。
+      await invoke("plan_authorize", {
+        request: { conversationId, planId, authorizedBy: "user", approved: true },
+      });
+
       // 立即将 Plan 状态设为 executing，避免重复点击 Approve All
       set((s) => {
         const currentPlan = s.activePlans[conversationId];
@@ -142,6 +162,8 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
             [conversationId]: {
               ...currentPlan,
               status: "executing",
+              executionAuthorized: true,
+              authorizedBy: "user",
               steps: currentPlan.steps.map((step) =>
                 pendingStepIds.includes(step.id)
                   ? { ...step, status: "approved" as const }
@@ -446,6 +468,30 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
     });
   },
 
+  /**
+   * P0-A：授权位变更。
+   *
+   * 后端在批准 / 拒绝 / 计划内容被修改（自动撤权）时推送。
+   * 前端据此更新计划卡按钮状态 —— 不再需要从 `status` 猜测授权情况。
+   */
+  handlePlanAuthorizationChanged: (event) => {
+    const { conversationId, planId, authorized, authorizedBy } = event;
+    const plan = get().activePlans[conversationId];
+    if (!plan || plan.id !== planId) {
+      return;
+    }
+    set((s) => ({
+      activePlans: {
+        ...s.activePlans,
+        [conversationId]: {
+          ...plan,
+          executionAuthorized: authorized,
+          authorizedBy: authorized ? authorizedBy : undefined,
+        },
+      },
+    }));
+  },
+
   updatePlanStatus: (conversationId, planId, status) => {
     const plan = get().activePlans[conversationId];
     if (!plan || plan.id !== planId) {
@@ -485,6 +531,11 @@ export function setupPlanEventListeners(): () => void {
 
   listen<PlanExecutionCompleteEvent>("plan-execution-complete", (event) => {
     usePlanStore.getState().handlePlanExecutionComplete(event.payload);
+  }).then((fn) => unlisteners.push(fn));
+
+  // P0-A：授权位变更（批准 / 拒绝 / 内容变更自动撤权）
+  listen<PlanAuthorizationChangedEvent>("plan-authorization-changed", (event) => {
+    usePlanStore.getState().handlePlanAuthorizationChanged(event.payload);
   }).then((fn) => unlisteners.push(fn));
 
   _planUnlisten = () => {

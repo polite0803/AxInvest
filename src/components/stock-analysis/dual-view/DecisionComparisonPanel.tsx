@@ -8,7 +8,7 @@
  *   - reasoning 展开前 line-clamp-2，点击展开全文
  *   - 分歧诊断用 Tooltip 内联（不另占卡片空间）
  */
-import { getActionTKey } from "@/lib/stock-analysis-utils";
+import { actionToDirection, getActionTKey, parseAction, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { Empty, Tag, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -25,14 +25,38 @@ function normalize(data: DecisionComparisonPanelProps["data"]): CompactDecisionS
   return {};
 }
 
-function normalizeAction(a?: string | null): string {
-  return (a ?? "").trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
+/**
+ * 展示档派生（P1-2 2026-09-14）。
+ *
+ * 「持有 / 观望」不再由组件各自判断仓位：后端目前仍按仓位互改 action，
+ * `resolveDisplayAction` 与后端同判据（positionState 优先，缺失时退回 positionPct），
+ * 故对既有数据是恒等变换；后端切到「action 只表达方向强度」后此处无需再改。
+ *
+ * V76(2026-09-14): 后端 DTO 已下发 `decisionPositionState`（v228 独立轴），
+ * 本函数优先用它；为 `null`（v228 前的历史行）时才退回 `decisionPositionPct`。
+ */
+function displayActionOf(
+  view: {
+    decisionAction?: string | null;
+    decisionPositionState?: string | null;
+    decisionPositionPct?: number | null;
+  },
+): string {
+  return resolveDisplayAction(
+    view.decisionAction,
+    view.decisionPositionState,
+    view.decisionPositionPct,
+  );
 }
 
+// P1-6(2026-09-14): 原判据用 `norm.includes("买")` —— **只认中文**。
+//   后端 DTO 文档写明 decisionAction 可能直返 `BUY/SELL/HOLD/WAIT/UNCERTAIN`（英文 token），
+//   这一类输入会全部落到 `default`（灰）⇒ 双视角对比里「公式」侧永远没有红/绿配色。
+//   改走统一的 `actionToDirection`（已覆盖中英文两套值域）。
 function actionTagColor(action?: string | null): string {
-  const norm = normalizeAction(action);
-  if (norm.includes("买") || norm.includes("增持")) { return "green"; }
-  if (norm.includes("卖") || norm.includes("减持")) { return "red"; }
+  const dir = actionToDirection(action);
+  if (dir === "buy") { return "green"; }
+  if (dir === "sell") { return "red"; }
   return "default";
 }
 
@@ -52,11 +76,20 @@ function NumValue({ value, suffix = "" }: { value: number | null | undefined; su
 }
 
 /** 检查两列 action 是否不一致 */
+/**
+ * 双视角「动作是否分歧」判据。
+ *
+ * P1-6(2026-09-14): 原实现把两侧字符串各自 trim/lower/去分隔符后**直接比字面量**，
+ * 于是「公式侧 = `BUY`（英文 token） vs LLM 侧 = `买入`（中文）」被判成**分歧** ——
+ * 同义不同值域制造了假的分歧告警（与本案 P0-2「从自由文本猜方向」同一类：
+ * 比的是字形而不是语义）。现走 `parseAction` 统一到同一值域再比。
+ *
+ * ⚠️ 刻意**不**用 `resolveDisplayAction`：那是把「持有 / 观望」按持仓派生的**展示**档，
+ *    用来比「方向是否分歧」会掩盖两侧在持仓语义上的真实差异。
+ */
 function actionsDiffer(a?: string | null, b?: string | null): boolean {
   if (!a || !b) { return false; }
-  const normA = normalizeAction(a);
-  const normB = normalizeAction(b);
-  return normA !== normB;
+  return parseAction(a) !== parseAction(b);
 }
 
 export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) {
@@ -85,7 +118,9 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
           <span style={{ color: "var(--muted)" }}>{t("dualView.decision.action")}</span>
           <span>
-            <Tag color={actionTagColor(view.decisionAction)}>{t(getActionTKey(view.decisionAction ?? ""))}</Tag>
+            <Tag color={actionTagColor(view.decisionAction)}>
+              {t(getActionTKey(displayActionOf(view)))}
+            </Tag>
           </span>
           <span style={{ color: "var(--muted)" }}>{t("dualView.decision.confidence")}</span>
           <span className="font-mono">
@@ -199,7 +234,11 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
               {t("dualView.decision.formula")}
             </span>
             {view.decisionAction
-              ? <Tag color={actionTagColor(view.decisionAction)}>{t(getActionTKey(view.decisionAction ?? ""))}</Tag>
+              ? (
+                <Tag color={actionTagColor(view.decisionAction)}>
+                  {t(getActionTKey(displayActionOf(view)))}
+                </Tag>
+              )
               : <span style={{ color: "var(--muted)" }}>—</span>}
           </div>
           <div className="flex items-center gap-1.5 font-mono text-sm">

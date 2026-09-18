@@ -15,9 +15,11 @@ pub struct Model {
     pub strategy_id: String,
     /// 持仓周期："short" | "mid" | "long"
     pub period: String,
+    #[sea_orm(indexed)]
     pub stock_code: String,
     pub stock_name: String,
     /// 决策时间（ms）
+    #[sea_orm(indexed)]
     pub decision_at: i64,
     /// 退出时间（ms）
     pub exit_at: i64,

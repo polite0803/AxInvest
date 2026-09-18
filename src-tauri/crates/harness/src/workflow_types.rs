@@ -1301,8 +1301,14 @@ pub struct DebateNodeConfig {
     pub sub_graph: Option<SubGraph>,
 }
 
+/// `DebateNodeConfig::max_rounds` 的 serde 缺省值。
+///
+/// v48（2026-09-14）由 2 改为 1，与 `seed_variables.rs` 的 `debate_rounds` 默认值、
+/// 前端 `getDefaultVariables()` 的兜底值收敛为**同一个数**。此前三处分别是 3 / 2 / 3
+/// —— 典型「同名散成多套值域」：模板省字段时按 2 跑、面板未加载时显示 3、
+/// 种子写 3，行为取决于走哪条路径。
 fn default_debate_rounds() -> u32 {
-    2
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS)]
@@ -1764,6 +1770,7 @@ impl WorkflowTemplateData {
             input_schema: self.input_schema.as_ref().and_then(|s| serde_json::to_value(s).ok()),
             tool_ref: workflow_passport_tool_ref(),
             steps: project_node_steps(&json_nodes),
+            domain_pack_id: None,
         }
     }
 }
@@ -1882,6 +1889,21 @@ pub struct NodeRuntimeState {
     pub error: Option<String>,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
+    /// 节点被跳过（`NodeStatus::Skipped`）时的原因。
+    ///
+    /// 2026-09-14 新增。背景：`PartiallyCompleted` 同时覆盖「正常分支未选中」与
+    /// 「上游失败导致级联跳过」两种语义，全库 286 次运行里 208 次是它、而真正含
+    /// 故障的只有 5 次 —— 用户无法从状态区分「这是配置意图」还是「这是引擎炸了」。
+    /// 取值（自由文本，非枚举，允许扩展）：
+    /// - `branch_not_taken`   —— Condition/Switch 未选中的分支（配置意图，正常）
+    /// - `upstream_failed`    —— 直接上游节点 Failed（真故障，需告警）
+    /// - `upstream_skipped`   —— 直接上游被跳过（故障沿链传播的第二跳起）
+    /// - `disabled`           —— 模板里 `enabled:false`（配置意图，正常）
+    ///
+    /// 消费者：决策落库链（`skipped_nodes`）、前端跳过提示。**不要**用它替代
+    /// `error`——`error` 承载节点自身的失败详情，`skip_reason` 只回答「为什么没跑」。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
 }
 
 impl Default for NodeRuntimeState {
@@ -1892,6 +1914,7 @@ impl Default for NodeRuntimeState {
             error: None,
             started_at: None,
             completed_at: None,
+            skip_reason: None,
         }
     }
 }
@@ -1980,6 +2003,19 @@ pub struct StepProgressEvent {
     /// 前端 Debug 面板无法显示具体失败原因（AxInvest #10 数据工具节点失败不可诊断）。
     /// 仅 failed/timeout 状态携带 Some，其余为 None（向后兼容）。
     pub error: Option<String>,
+    /// 节点失败/超时的**结构化错误码**（取值域 = `rt-workflow::work_engine::error_code`，
+    /// 如 `EXECUTION_CANCELLED` / `TIMEOUT` / `LLM_CALL_FAILED`）。
+    ///
+    /// 本字段的存在理由：`error` 是**自由文本**（`NodeError` 的 `Display`，形如
+    /// `"CODE: detail"`），消费端想按语义分流就只能做子串嗅探 —— 实测 `AxInvest` 的
+    /// 股票分析 store 曾用 `error.startsWith("EXECUTION_CANCELLED")` 判「运行级取消」。
+    /// 子串嗅探有三个问题：① 漏判（detail 里出现同名字样即误判）② 与文案强耦合
+    /// ③ 跨语言失效。故把码提升为**一等字段**，消费端判定只读本字段。
+    ///
+    /// `error` 与 `error_code` 的分工与前端 `translateBackendError` 一致：
+    /// **`error_code` 负责判定，`error` 负责展示**。
+    /// 仅 failed/timeout 状态携带 Some，其余为 None（向后兼容：旧消费端忽略即可）。
+    pub error_code: Option<String>,
     /// 节点输出（仅 completed 状态携带）。
     /// 此前该字段缺失导致前端 `workflow-step-done` 事件无法实时获取节点输出，
     /// 分析师卡片只能在工作流全部结束后由 `workflow-completed` 批量填充，
@@ -2150,6 +2186,10 @@ pub struct WorkflowTemplatePassportParams {
     /// 只投节点类型 + 标题，不投 JSON body —— 护照是元数据快照，steps
     /// 服务于 agent 侧的规划提示，不是工作流定义本体。
     pub steps: Vec<String>,
+    /// 归属域包（domain_pack_id）：`{domain_pack}_harness_workflow` 由调用方
+    /// 显式填充；其为 None 时 [`workflow_template_passport`] 从 `id` 推导兜底，
+    /// 保证启动期全量重建与运行时增量索引两条投影路径一致。
+    pub domain_pack_id: Option<String>,
 }
 
 /// 护照 steps 投影条数上限（节点数可能上百，护照必须轻量）
@@ -2297,6 +2337,13 @@ pub fn workflow_template_passport(
     // 保证启动期全量重建与运行时增量索引两条路径逐字段一致。
     dto.tool_ref = params.tool_ref;
     dto.steps = params.steps;
+    // 域包归属反向指针：显式优先，None 时按 `{domain_pack}_harness_workflow` 推导。
+    // 注入在统一入口，两条投影路径（启动期全量 / 运行时增量）一致。
+    if params.domain_pack_id.is_none()
+        && let Some(dp) = params.id.strip_suffix("_harness_workflow")
+    {
+        dto.domain_pack_id = Some(dp.to_string());
+    }
     dto
 }
 
@@ -2885,6 +2932,7 @@ mod tests {
             input_schema: None,
             tool_ref: workflow_passport_tool_ref(),
             steps: vec!["agent:获取行情".to_string(), "llm:三力分析".to_string()],
+            domain_pack_id: None,
         }
     }
 

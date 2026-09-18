@@ -6,6 +6,24 @@ interface ReportMarkdownProps {
 }
 
 /**
+ * 把任意形态的 content 收敛为 string。
+ *
+ * markstream 解析器内部直接对 content 调 `startsWith`，收到非 string（number / object / null）
+ * 会抛 `TypeError: initialMarkdown.startsWith is not a function`，把整页渲染树打崩，
+ * 由 PageErrorBoundary 兜底成「页面错误」。
+ *
+ * 实测来源：LLM 结构化输出（value-investor 等 verdict 字段）常出现 number（-100）、
+ * null、object 等形态，而下游各处默认按 string 传参。类型标注管不住运行时 JSON，
+ * 因此在本组件（stock-analysis 报告渲染的唯一入口）做统一收敛。
+ */
+function toMarkdownString(content: unknown): string {
+  if (typeof content === "string") { return content; }
+  if (content == null) { return ""; }
+  if (typeof content === "number" || typeof content === "boolean") { return String(content); }
+  return JSON.stringify(content, null, 2) ?? "";
+}
+
+/**
  * 静态报告 Markdown 渲染封装（分析师卡片 / 辩论卡片 / 风险矩阵 / 估值面板等）。
  *
  * markstream-react 默认面向"流式 token"场景，两个默认值会坑到静态完整内容：
@@ -21,9 +39,11 @@ interface ReportMarkdownProps {
  *   - deferNodesUntilVisible={false} 禁用视口懒渲染，完整内容一次性全部渲染。
  */
 export function ReportMarkdown({ content, isDark }: ReportMarkdownProps) {
+  // 运行时收敛（类型标注挡不住 LLM JSON 的任意形态）
+  const text = toMarkdownString(content as unknown);
   return (
     <NodeRenderer
-      content={content}
+      content={text}
       isDark={isDark}
       final
       deferNodesUntilVisible={false}

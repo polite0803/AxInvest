@@ -11,15 +11,29 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub title: String,
+    /// URL slug（唯一，博客文章按 slug 对外可达）
+    ///
+    /// ⚠ **`unique` 必须保留**：出处是已删的 `v210` 迁移的
+    /// `slug TEXT NOT NULL UNIQUE`。slug 是**对外路由键**，重复即两篇文章争同一路径。
+    /// （2026-09-16 P6 删迁移时靠本属性承接该语义。）
+    ///
+    /// 为什么不写 `#[sea_orm(indexed)]`：sea-orm `sea-orm-2.0.2/src/schema/entity.rs:156` 的条件是
+    /// `indexed && !unique` ⇒ unique 列不派生普通索引，写了是无产出的死标志。
+    #[sea_orm(unique)]
     pub slug: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub excerpt: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub content: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "[]")]
     pub tags_json: String,
+    #[sea_orm(default_value = 0)]
     pub published: i32,
     pub published_at: Option<i64>,
+    #[sea_orm(default_value = 0)]
     pub view_count: u32,
     pub created_at: i64,
     pub updated_at: i64,

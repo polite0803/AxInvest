@@ -26,6 +26,37 @@ pub enum CustomerSource {
     Other(String),
 }
 
+/// 客户类型（B 端 / C 端）。
+/// `Unknown` 仅作存量/兜底解析；新增与更新强制二选一。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum CustomerType {
+    Consumer,
+    Business,
+    Unknown,
+}
+
+impl CustomerType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Consumer => "consumer",
+            Self::Business => "business",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+impl std::str::FromStr for CustomerType {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "consumer" => Ok(Self::Consumer),
+            "business" => Ok(Self::Business),
+            _ => Ok(Self::Unknown), // 兜底：存量或未知值不报错
+        }
+    }
+}
+
 /// 客户 DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Customer {
@@ -34,6 +65,13 @@ pub struct Customer {
     pub email: String,
     pub phone: Option<String>,
     pub company: Option<String>,
+    pub customer_type: CustomerType,
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub source: Option<CustomerSource>,
     pub tags: Vec<String>,
     pub notes: String,
@@ -88,6 +126,13 @@ pub struct CreateCustomerInput {
     pub email: String,
     pub phone: Option<String>,
     pub company: Option<String>,
+    pub customer_type: CustomerType,
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub city: Option<String>,
+    pub address: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub source: Option<CustomerSource>,
     pub tags: Vec<String>,
     pub notes: String,
@@ -100,6 +145,13 @@ pub struct UpdateCustomerInput {
     pub email: Option<String>,
     pub phone: Option<Option<String>>,
     pub company: Option<Option<String>>,
+    pub customer_type: Option<CustomerType>,
+    pub country: Option<Option<String>>,
+    pub region: Option<Option<String>>,
+    pub city: Option<Option<String>>,
+    pub address: Option<Option<String>>,
+    pub latitude: Option<Option<f64>>,
+    pub longitude: Option<Option<f64>>,
     pub tags: Option<Vec<String>>,
     pub notes: Option<String>,
 }
@@ -109,6 +161,7 @@ pub struct UpdateCustomerInput {
 #[serde(default)]
 pub struct CustomerFilter {
     pub status: Option<CustomerStatus>,
+    pub customer_type: Option<CustomerType>,
     pub search: Option<String>,
     pub tags: Option<Vec<String>>,
     pub limit: Option<u32>,
@@ -167,6 +220,38 @@ impl DefaultCustomerService {
     pub fn new(db: DatabaseConnection) -> Self {
         Self { db }
     }
+
+    /// 存量回填客户类型（幂等）：
+    /// 所有未分类（`unknown`）的客户，按 `company` 是否非空归类为 business / consumer。
+    /// 存量库在引入 `customer_type` 列之前的数据即为 `unknown`，故此处一次性回填。
+    pub async fn backfill_customer_types(&self) -> OpcResult<u64> {
+        // 先读出所有未知类型客户，避免一次 UPDATE 扫描全表
+        let rows = opc_customers::Entity::find()
+            .filter(
+                sea_orm::Condition::any()
+                    .add(opc_customers::Column::CustomerType.is_null())
+                    .add(opc_customers::Column::CustomerType.eq("unknown")),
+            )
+            .all(&self.db)
+            .await
+            .map_err(|e| OpcError::Database(e.to_string()))?;
+
+        let now = now_ts();
+        let mut updated = 0u64;
+        for row in rows {
+            let kind = if row.company.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false) {
+                "business"
+            } else {
+                "consumer"
+            };
+            let mut am: opc_customers::ActiveModel = row.into();
+            am.customer_type = Set(kind.to_string());
+            am.updated_at = Set(now);
+            am.update(&self.db).await.map_err(|e| OpcError::Database(e.to_string()))?;
+            updated += 1;
+        }
+        Ok(updated)
+    }
 }
 
 fn entity_to_dto(e: opc_customers::Model) -> OpcResult<Customer> {
@@ -180,6 +265,7 @@ fn entity_to_dto(e: opc_customers::Model) -> OpcResult<Customer> {
         other => CustomerSource::Other(other.to_string()),
     });
     let status = CustomerStatus::from_str(&e.status).unwrap_or(CustomerStatus::Lead);
+    let customer_type = CustomerType::from_str(&e.customer_type).unwrap_or(CustomerType::Unknown);
 
     Ok(Customer {
         id: e.id,
@@ -187,6 +273,13 @@ fn entity_to_dto(e: opc_customers::Model) -> OpcResult<Customer> {
         email: e.email,
         phone: e.phone,
         company: e.company,
+        customer_type,
+        country: e.country,
+        region: e.region,
+        city: e.city,
+        address: e.address,
+        latitude: e.latitude,
+        longitude: e.longitude,
         source,
         tags,
         notes: e.notes,
@@ -221,6 +314,13 @@ impl CustomerService for DefaultCustomerService {
             email: Set(input.email),
             phone: Set(input.phone),
             company: Set(input.company),
+            customer_type: Set(input.customer_type.as_str().to_string()),
+            country: Set(input.country),
+            region: Set(input.region),
+            city: Set(input.city),
+            address: Set(input.address),
+            latitude: Set(input.latitude),
+            longitude: Set(input.longitude),
             source: Set(input.source.as_ref().map(source_to_str)),
             tags_json: Set(serde_json::to_string(&input.tags).unwrap_or_else(|_| "[]".into())),
             notes: Set(input.notes),
@@ -253,6 +353,9 @@ impl CustomerService for DefaultCustomerService {
 
         if let Some(status) = &filter.status {
             query = query.filter(opc_customers::Column::Status.eq(status.as_str()));
+        }
+        if let Some(customer_type) = &filter.customer_type {
+            query = query.filter(opc_customers::Column::CustomerType.eq(customer_type.as_str()));
         }
         if let Some(search) = &filter.search {
             query = query.filter(
@@ -294,6 +397,27 @@ impl CustomerService for DefaultCustomerService {
         }
         if let Some(company) = input.company {
             am.company = Set(company);
+        }
+        if let Some(customer_type) = input.customer_type {
+            am.customer_type = Set(customer_type.as_str().to_string());
+        }
+        if let Some(country) = input.country {
+            am.country = Set(country);
+        }
+        if let Some(region) = input.region {
+            am.region = Set(region);
+        }
+        if let Some(city) = input.city {
+            am.city = Set(city);
+        }
+        if let Some(address) = input.address {
+            am.address = Set(address);
+        }
+        if let Some(latitude) = input.latitude {
+            am.latitude = Set(latitude);
+        }
+        if let Some(longitude) = input.longitude {
+            am.longitude = Set(longitude);
         }
         if let Some(tags) = input.tags {
             am.tags_json = Set(serde_json::to_string(&tags).unwrap_or_else(|_| "[]".into()));

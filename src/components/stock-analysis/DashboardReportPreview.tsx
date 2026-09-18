@@ -174,6 +174,21 @@ export function DashboardReportPreview({ report }: { report: DashboardReport }) 
 
   const scoreColor = report.score >= 60 ? "#52c41a" : report.score >= 30 ? "#faad14" : "#f5222d";
 
+  // ── 「交易目标价」是否含信息量（2026-09-13）──
+  // LLM trader 在持有/观望档会把 targetPrice 抄成等于现价（603466 实证：13.27 == 13.27），
+  // 这不含任何方向信息。此处与后端 `portfolio-mgr.rhai` 的 R-204 判定**同一容差口径**（相对 0.5%），
+  // 等值时显示「未设」而非具体数字 —— 否则用户会把「目标价 = 现价」与下方估值区间读成自相矛盾。
+  const tp = report.targetPrice;
+  const cp = report.currentPrice;
+  const targetPriceMeaningful = tp != null && tp !== undefined
+    && (cp == null || cp === undefined || cp <= 0 || Math.abs(tp - cp) / cp >= 0.005);
+  // 内在价值区间（估值语义，来自 t-valuation 的 DCF 三档）——与交易价位严格区分
+  const intrinsicRange = report.intrinsicValueLow != null && report.intrinsicValueHigh != null
+    ? `${fmtNum(report.intrinsicValueLow)} - ${fmtNum(report.intrinsicValueHigh)}`
+    : report.intrinsicValueMid != null
+    ? fmtNum(report.intrinsicValueMid)
+    : null;
+
   return (
     <div style={{ padding: 16 }}>
       {/* 标题 */}
@@ -240,10 +255,29 @@ export function DashboardReportPreview({ report }: { report: DashboardReport }) 
               </Text>
             </Text>
           )}
+          {/* 交易目标价（LLM trader 的方向性目标）—— 与下方「内在价值」是两个不同概念 */}
           <Text>
-            {t("stockAnalysis.dashboard.targetPrice")}:{" "}
-            <Text strong style={{ color: "#f5222d" }}>{fmtNum(report.targetPrice)}</Text>
+            {t("stockAnalysis.dashboard.targetPriceTrading")}: {targetPriceMeaningful
+              ? <Text strong style={{ color: "#f5222d" }}>{fmtNum(report.targetPrice)}</Text>
+              : <Text type="secondary">{t("stockAnalysis.dashboard.targetPriceUnset")}</Text>}
           </Text>
+          {
+            /* 内在价值区间（估值语义，来自 t-valuation 的 DCF 三档）——
+              与交易目标价并列展示，消除「同一工作流两个目标价」的误读 */
+          }
+          {intrinsicRange && (
+            <Text>
+              {t("stockAnalysis.dashboard.intrinsicValue")}:{" "}
+              <Text strong style={{ color: "#1677ff" }}>{intrinsicRange}</Text>
+              {report.currentPrice != null && (
+                <Text type="secondary">
+                  {" ("}
+                  {t("stockAnalysis.dashboard.vsCurrentPrice")} {fmtNum(report.currentPrice)}
+                  {")"}
+                </Text>
+              )}
+            </Text>
+          )}
           <Text>
             {t("stockAnalysis.dashboard.stopLoss")}:{" "}
             <Text strong style={{ color: "#52c41a" }}>{fmtNum(report.stopLoss)}</Text>

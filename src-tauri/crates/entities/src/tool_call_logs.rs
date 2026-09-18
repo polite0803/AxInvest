@@ -8,17 +8,25 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub conversation_id: Option<String>,
     pub trajectory_id: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub step_index: i32,
+    #[sea_orm(indexed)]
     pub tool_name: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "{}")]
     pub arguments: String,
     #[sea_orm(column_type = "Text", nullable)]
     pub result: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub success: i32,
+    #[sea_orm(default_value = 0)]
     pub duration_ms: u64,
     pub related_source_id: Option<String>,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = 0)]
     pub created_at: i64,
 }
 

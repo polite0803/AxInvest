@@ -13,10 +13,13 @@ pub struct Model {
     pub name: String,
     pub trigger_type: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "{}")]
     pub trigger_config: String,
     pub action_type: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "{}")]
     pub action_config: String,
+    #[sea_orm(default_value = 1)]
     pub enabled: i32,
     pub last_run_at: Option<i64>,
     pub created_at: i64,

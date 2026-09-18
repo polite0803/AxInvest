@@ -4,13 +4,13 @@
 //! text-grad optimization, intrinsic motivation, co-evolution, and
 //! process reward modeling.
 //!
-//! Also owns the industry-specific learning engine and adapter registry
-//! for OPC (One-Person Company) vertical industry scenarios.
+//! Also owns the domain_pack-specific learning engine and adapter registry
+//! for OPC (One-Person Company) vertical domain_pack scenarios.
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use axagent_orchestrator::{IndustryAdapterRegistry, IndustryLearningEngine};
+use axagent_orchestrator::{DomainPackAdapterRegistry, DomainPackLearningEngine};
 
 #[derive(Clone)]
 pub struct LearningEngineState {
@@ -18,10 +18,10 @@ pub struct LearningEngineState {
     pub intrinsic_motivation: Arc<Mutex<axagent_trajectory::IntrinsicMotivationEngine>>,
     pub coevolution_env: Arc<Mutex<axagent_trajectory::CoevolutionEnvironment>>,
     pub process_reward_model: Arc<Mutex<axagent_trajectory::ProcessRewardModel>>,
-    /// OPC 行业学习引擎 — 实现反思、进化、自我改进
-    pub industry_learning_engine: Arc<IndustryLearningEngine>,
-    /// OPC 行业适配器注册表 — 管理 9 个垂直行业的适配器
-    pub industry_adapter_registry: Arc<Mutex<IndustryAdapterRegistry>>,
+    /// OPC 域包学习引擎 — 实现反思、进化、自我改进
+    pub domain_pack_learning_engine: Arc<DomainPackLearningEngine>,
+    /// OPC 域包适配器注册表 — 管理 9 个垂直域包的适配器
+    pub domain_pack_adapter_registry: Arc<Mutex<DomainPackAdapterRegistry>>,
 }
 
 impl LearningEngineState {
@@ -30,16 +30,16 @@ impl LearningEngineState {
         intrinsic_motivation: Arc<Mutex<axagent_trajectory::IntrinsicMotivationEngine>>,
         coevolution_env: Arc<Mutex<axagent_trajectory::CoevolutionEnvironment>>,
         process_reward_model: Arc<Mutex<axagent_trajectory::ProcessRewardModel>>,
-        industry_learning_engine: Arc<IndustryLearningEngine>,
-        industry_adapter_registry: Arc<Mutex<IndustryAdapterRegistry>>,
+        domain_pack_learning_engine: Arc<DomainPackLearningEngine>,
+        domain_pack_adapter_registry: Arc<Mutex<DomainPackAdapterRegistry>>,
     ) -> Self {
         Self {
             text_grad_engine,
             intrinsic_motivation,
             coevolution_env,
             process_reward_model,
-            industry_learning_engine,
-            industry_adapter_registry,
+            domain_pack_learning_engine,
+            domain_pack_adapter_registry,
         }
     }
 }

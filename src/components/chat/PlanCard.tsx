@@ -118,6 +118,55 @@ export function PlanCard({
   const isPartial = plan.status === "partial";
   const isCancelled = plan.status === "cancelled";
 
+  const statusLabel = isReviewing
+    ? t("plan.status.reviewing")
+    : isApproved
+    ? t("plan.status.approved_plan")
+    : isExecuting
+    ? t("plan.status.executing")
+    : isCompleted
+    ? t("plan.status.completed")
+    : isPartial
+    ? t("plan.status.partial")
+    : isCancelled
+    ? t("plan.status.cancelled")
+    : plan.status;
+
+  // ── 执行授权位（迁移 v225）─────────────────────────────────────────
+  // `execution_authorized` / `authorized_at` / `authorized_by` 由 `plan_authorize`
+  // 写入、由 `plan_execute` 校验。此前前端只有 store 状态同步、**无任何 UI 消费点**，
+  // 用户看不到「谁、何时批准了执行」—— 授权位对用户完全不可见。
+  const isAuthorized = plan.executionAuthorized === true;
+
+  // 授权位与状态漂移：`executing` / `completed` / `partial` 这三个状态
+  // **不可能**在未授权时出现（`plan_execute` 前置校验授权位）。若出现，说明
+  // 授权位被绕过或被外部改写 —— 显示出来，不要静默（铁律 #12：归因字段不说谎）。
+  const authorizationDrift = !isAuthorized
+    && (isExecuting || isCompleted || isPartial);
+
+  // `authorizedBy` 取值来自后端白名单（user/system/api/ui/automation）。
+  // 用显式 switch 而非模板字符串拼 key —— 扫描器静态发现不了拼接出来的 key。
+  const authorizedByLabel = (() => {
+    switch (plan.authorizedBy) {
+      case "user":
+        return t("plan.authorization.source.user");
+      case "system":
+        return t("plan.authorization.source.system");
+      case "api":
+        return t("plan.authorization.source.api");
+      case "ui":
+        return t("plan.authorization.source.ui");
+      case "automation":
+        return t("plan.authorization.source.automation");
+      default:
+        return t("plan.authorization.source.unknown");
+    }
+  })();
+
+  const authorizedAtLabel = plan.authorizedAt
+    ? new Date(plan.authorizedAt).toLocaleString()
+    : "—";
+
   const progress = calcProgress(localSteps);
 
   // ── Handlers ──────────────────────────────────────────────────────
@@ -213,20 +262,37 @@ export function PlanCard({
               : "default"}
             style={{ fontSize: 12, lineHeight: "18px" }}
           >
-            {isReviewing
-              ? t("plan.status.reviewing")
-              : isApproved
-              ? t("plan.status.approved_plan")
-              : isExecuting
-              ? t("plan.status.executing")
-              : isCompleted
-              ? t("plan.status.completed")
-              : isPartial
-              ? t("plan.status.partial")
-              : isCancelled
-              ? t("plan.status.cancelled")
-              : plan.status}
+            {statusLabel}
           </Tag>
+          {isAuthorized && (
+            <Tooltip
+              title={t("plan.authorization.tooltipAuthorized", {
+                source: authorizedByLabel,
+                time: authorizedAtLabel,
+              })}
+            >
+              <Tag
+                color="green"
+                style={{ fontSize: 12, lineHeight: "18px", marginInlineEnd: 0 }}
+              >
+                {t("plan.authorization.authorized")}
+              </Tag>
+            </Tooltip>
+          )}
+          {authorizationDrift && (
+            <Tooltip
+              title={t("plan.authorization.tooltipMissing", {
+                status: statusLabel,
+              })}
+            >
+              <Tag
+                color="warning"
+                style={{ fontSize: 12, lineHeight: "18px", marginInlineEnd: 0 }}
+              >
+                {t("plan.authorization.unauthorized")}
+              </Tag>
+            </Tooltip>
+          )}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           {isReviewing && !isHistorical && (

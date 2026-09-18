@@ -11,11 +11,15 @@ pub struct Model {
     pub key_id: String,
     pub provider_id: String,
     pub model_id: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub request_tokens: i64,
+    #[sea_orm(default_value = 0)]
     pub response_tokens: i64,
+    #[sea_orm(default_value = 0)]
     pub cached_input_tokens: i64,
     /// 本次请求估算的美元成本（基于 ModelPricing 换算）。
     /// 历史数据通过 migration `ALTER TABLE ... ADD COLUMN cost REAL NOT NULL DEFAULT 0.0` 补列。
+    #[sea_orm(default_value = 0.0)]
     pub cost: f64,
     pub created_at: i64,
 }
@@ -25,7 +29,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::gateway_keys::Entity",
         from = "Column::KeyId",
-        to = "super::gateway_keys::Column::Id"
+        to = "super::gateway_keys::Column::Id",
+        on_delete = "Cascade"
     )]
     GatewayKeys,
 }

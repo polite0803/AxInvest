@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 
+use crate::compat::openai_compat_local_adapter;
 use crate::openai::OpenAIAdapter;
 use crate::{ProviderAdapter, ProviderRequestContext};
 use async_trait::async_trait;
@@ -40,17 +41,133 @@ pub struct OllamaAdapter {
     inner: OpenAIAdapter,
 }
 
-impl Default for OllamaAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// ── 委托样板由宏生成（new / Default + trait 的 chat / chat_stream / embed）──
+//    list_models / validate_key 走 Ollama 原生端点：`/api/tags` 列表与可达性探测，
+//    无法复用云厂商样板，作为 `extra` 原样透传。
+openai_compat_local_adapter!(
+    OllamaAdapter,
+    extra: {
+        /// List models using Ollama's native `/api/tags` endpoint.
+        ///
+        /// Falls back to the OpenAI-compatible `/v1/models` endpoint if the
+        /// native endpoint is unavailable (e.g. older Ollama versions).
+        async fn list_models(&self, ctx: &ProviderRequestContext) -> Result<Vec<Model>> {
+            let base = Self::base_url(ctx);
+            let url = format!("{}/api/tags", base.trim_end_matches('/'));
+
+            let client = self.get_client(ctx)?;
+            let resp =
+                crate::apply_request_headers(client.get(&url), ctx).send().await.map_err(|e| {
+                    AxAgentError::execution_with_source(super::diagnose_reqwest_error(&e), e)
+                })?;
+
+            if !resp.status().is_success() {
+                let s = resp.status();
+                let t = resp.text().await.unwrap_or_default();
+                // Fall back to OpenAI-compatible /v1/models
+                if s.as_u16() == 404 {
+                    return self.inner.list_models(ctx).await;
+                }
+                return Err(AxAgentError::execution_with_source(
+                    super::diagnose_http_status("Ollama", s, &t),
+                    anyhow::anyhow!("HTTP {s}: {t}"),
+                ));
+            }
+
+            let body =
+                resp.text().await.map_err(|e| AxAgentError::Provider(format!("Read error: {e}")))?;
+
+            let tags: OllamaTagsResponse = serde_json::from_str(&body).map_err(|e| {
+                AxAgentError::Provider(format!(
+                    "Failed to parse Ollama /api/tags response: {e}. Body: {}",
+                    &body[..body.len().min(200)]
+                ))
+            })?;
+
+            let models = tags
+                .models
+                .into_iter()
+                .map(|m| {
+                    let model_type = axagent_harness::types::provider_model::detect_model_type(&m.name);
+                    let mut caps = match model_type {
+                        ModelType::Chat => vec![ModelCapability::TextChat],
+                        ModelType::Embedding => vec![],
+                        ModelType::Voice => vec![ModelCapability::RealtimeVoice],
+                    };
+                    // 从 details.family 推断部分能力
+                    if let Some(ref details) = m.details
+                        && let Some(ref family) = details.family
+                    {
+                        let fam = family.to_lowercase();
+                        if fam.contains("llava")
+                            || fam.contains("bakllava")
+                            || fam.contains("minicpm")
+                            || fam.contains("moondream")
+                        {
+                            caps.push(ModelCapability::Vision);
+                        }
+                    }
+                    let group_name = m.details.as_ref().and_then(|d| d.family.clone());
+                    // get_model_context_window 已经返回 Option,保留 None 表示未知
+                    let max_tokens = axagent_kit::model_knowledge::get_model_context_window(&m.name);
+                    let name = m
+                        .details
+                        .as_ref()
+                        .and_then(|d| d.parameter_size.clone())
+                        .map(|ps| format!("{} ({})", m.name, ps))
+                        .unwrap_or(m.name.clone());
+                    Model {
+                        provider_id: ctx.provider_id.clone(),
+                        model_id: m.name.clone(),
+                        name,
+                        group_name,
+                        model_type,
+                        capabilities: caps,
+                        max_tokens,
+                        max_output_tokens: None,
+                        enabled: true,
+                        param_overrides: None,
+                        input_price_per_mtok: None,
+                        output_price_per_mtok: None,
+                    }
+                })
+                .collect();
+
+            Ok(models)
+        }
+
+        /// Validate that the Ollama server is reachable.
+        ///
+        /// Ollama does not require an API key, so we simply probe the
+        /// `/api/tags` endpoint. If it responds, the server is running.
+        async fn validate_key(&self, ctx: &ProviderRequestContext) -> Result<bool> {
+            let base = Self::base_url(ctx);
+            let url = format!("{}/api/tags", base.trim_end_matches('/'));
+            let chat_url = Self::effective_chat_url(ctx);
+
+            let client = self.get_client(ctx)?;
+            let resp =
+                crate::apply_request_headers(client.get(&url), ctx).send().await.map_err(|e| {
+                    AxAgentError::Provider(format!(
+                        "Ollama server not reachable at {}: {}. \
+                         Make sure Ollama is running locally. You can start it with 'ollama serve'.",
+                        base, e
+                    ))
+                })?;
+
+            if resp.status().is_success() {
+                tracing::debug!("[Ollama] Tags endpoint OK, chat URL resolved to: {}", chat_url);
+                Ok(true)
+            } else {
+                let s = resp.status();
+                let t = resp.text().await.unwrap_or_default();
+                Err(AxAgentError::Provider(format!("Ollama server returned error {s}: {t}")))
+            }
+        }
+    },
+);
 
 impl OllamaAdapter {
-    pub fn new() -> Self {
-        Self { inner: OpenAIAdapter::new() }
-    }
-
     /// Resolve the effective base URL for an Ollama instance.
     fn base_url(ctx: &ProviderRequestContext) -> String {
         ctx.base_url.clone().unwrap_or_else(|| DEFAULT_OLLAMA_HOST.to_string())
@@ -87,150 +204,4 @@ struct OllamaModel {
 struct OllamaModelDetails {
     family: Option<String>,
     parameter_size: Option<String>,
-}
-
-#[async_trait]
-impl ProviderAdapter for OllamaAdapter {
-    async fn chat(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: Arc<ChatRequest>,
-    ) -> Result<ChatResponse> {
-        self.inner.chat(ctx, request).await
-    }
-
-    fn chat_stream(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: ChatRequest,
-        cancel_token: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    ) -> Pin<Box<dyn Stream<Item = Result<ChatStreamChunk>> + Send>> {
-        self.inner.chat_stream(ctx, request, cancel_token)
-    }
-
-    /// List models using Ollama's native `/api/tags` endpoint.
-    ///
-    /// Falls back to the OpenAI-compatible `/v1/models` endpoint if the
-    /// native endpoint is unavailable (e.g. older Ollama versions).
-    async fn list_models(&self, ctx: &ProviderRequestContext) -> Result<Vec<Model>> {
-        let base = Self::base_url(ctx);
-        let url = format!("{}/api/tags", base.trim_end_matches('/'));
-
-        let client = self.get_client(ctx)?;
-        let resp =
-            crate::apply_request_headers(client.get(&url), ctx).send().await.map_err(|e| {
-                AxAgentError::execution_with_source(super::diagnose_reqwest_error(&e), e)
-            })?;
-
-        if !resp.status().is_success() {
-            let s = resp.status();
-            let t = resp.text().await.unwrap_or_default();
-            // Fall back to OpenAI-compatible /v1/models
-            if s.as_u16() == 404 {
-                return self.inner.list_models(ctx).await;
-            }
-            return Err(AxAgentError::execution_with_source(
-                super::diagnose_http_status("Ollama", s, &t),
-                anyhow::anyhow!("HTTP {s}: {t}"),
-            ));
-        }
-
-        let body =
-            resp.text().await.map_err(|e| AxAgentError::Provider(format!("Read error: {e}")))?;
-
-        let tags: OllamaTagsResponse = serde_json::from_str(&body).map_err(|e| {
-            AxAgentError::Provider(format!(
-                "Failed to parse Ollama /api/tags response: {e}. Body: {}",
-                &body[..body.len().min(200)]
-            ))
-        })?;
-
-        let models = tags
-            .models
-            .into_iter()
-            .map(|m| {
-                let model_type = axagent_harness::types::provider_model::detect_model_type(&m.name);
-                let mut caps = match model_type {
-                    ModelType::Chat => vec![ModelCapability::TextChat],
-                    ModelType::Embedding => vec![],
-                    ModelType::Voice => vec![ModelCapability::RealtimeVoice],
-                };
-                // 从 details.family 推断部分能力
-                if let Some(ref details) = m.details
-                    && let Some(ref family) = details.family
-                {
-                    let fam = family.to_lowercase();
-                    if fam.contains("llava")
-                        || fam.contains("bakllava")
-                        || fam.contains("minicpm")
-                        || fam.contains("moondream")
-                    {
-                        caps.push(ModelCapability::Vision);
-                    }
-                }
-                let group_name = m.details.as_ref().and_then(|d| d.family.clone());
-                // get_model_context_window 已经返回 Option,保留 None 表示未知
-                let max_tokens = axagent_kit::model_knowledge::get_model_context_window(&m.name);
-                let name = m
-                    .details
-                    .as_ref()
-                    .and_then(|d| d.parameter_size.clone())
-                    .map(|ps| format!("{} ({})", m.name, ps))
-                    .unwrap_or(m.name.clone());
-                Model {
-                    provider_id: ctx.provider_id.clone(),
-                    model_id: m.name.clone(),
-                    name,
-                    group_name,
-                    model_type,
-                    capabilities: caps,
-                    max_tokens,
-                    max_output_tokens: None,
-                    enabled: true,
-                    param_overrides: None,
-                    input_price_per_mtok: None,
-                    output_price_per_mtok: None,
-                }
-            })
-            .collect();
-
-        Ok(models)
-    }
-
-    /// Validate that the Ollama server is reachable.
-    ///
-    /// Ollama does not require an API key, so we simply probe the
-    /// `/api/tags` endpoint. If it responds, the server is running.
-    async fn validate_key(&self, ctx: &ProviderRequestContext) -> Result<bool> {
-        let base = Self::base_url(ctx);
-        let url = format!("{}/api/tags", base.trim_end_matches('/'));
-        let chat_url = Self::effective_chat_url(ctx);
-
-        let client = self.get_client(ctx)?;
-        let resp =
-            crate::apply_request_headers(client.get(&url), ctx).send().await.map_err(|e| {
-                AxAgentError::Provider(format!(
-                    "Ollama server not reachable at {}: {}. \
-                     Make sure Ollama is running locally. You can start it with 'ollama serve'.",
-                    base, e
-                ))
-            })?;
-
-        if resp.status().is_success() {
-            tracing::debug!("[Ollama] Tags endpoint OK, chat URL resolved to: {}", chat_url);
-            Ok(true)
-        } else {
-            let s = resp.status();
-            let t = resp.text().await.unwrap_or_default();
-            Err(AxAgentError::Provider(format!("Ollama server returned error {s}: {t}")))
-        }
-    }
-
-    async fn embed(
-        &self,
-        ctx: &ProviderRequestContext,
-        request: EmbedRequest,
-    ) -> Result<EmbedResponse> {
-        self.inner.embed(ctx, request).await
-    }
 }

@@ -705,7 +705,8 @@ impl UnifiedToolRegistry {
         reg
     }
 
-    /// 初始化：注册全部本地工具（约 138 个，来自 tools/ 下 43 个模块），配置默认权限
+    /// 初始化：注册全部本地工具（清单与数量以 `crate::tools::register_all` 为准，
+    /// 此处不写数字——工具总数会随模块增减漂移，硬编码必然过期），配置默认权限
     pub fn init_all(&mut self) {
         // 第一层：注册全部本地 Rust Tool trait 实现
         crate::tools::register_all(&mut self.tools);

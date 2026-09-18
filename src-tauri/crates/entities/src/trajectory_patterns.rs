@@ -9,6 +9,7 @@ pub struct Model {
     pub id: String,
     pub name: String,
     pub description: String,
+    #[sea_orm(indexed)]
     pub pattern_type: String,
     pub trajectory_ids: String,
     pub frequency: i32,

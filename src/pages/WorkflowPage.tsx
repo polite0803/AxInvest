@@ -3,9 +3,17 @@
 import { WorkflowSettings } from "@/components/settings";
 import { WorkflowEditor, WorkflowExecutor } from "@/components/workflow";
 import type { WorkflowTemplateResponse } from "@/components/workflow/types";
+import { withoutParams } from "@/lib/workspaceTabs";
 import { ReactFlowProvider } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+
+/**
+ * 本页消费后须清理的查询参数。
+ * ⚠ 只清这两个 —— 用 `setSearchParams({})` 会连工作台 Tab 参数 `ws` 一起抹掉，
+ * 使 `/chat?ws=workflow&template=X` 跳转后地址栏退回 `/chat`（深链失效）。
+ */
+const WORKFLOW_PAGE_QUERY_PARAMS = ["template", "domain"] as const;
 
 /**
  * 工作流页面：包含「我的工作流」与「市场」两个 Tab（由 WorkflowSettings 内部提供）。
@@ -30,9 +38,9 @@ export function WorkflowPage() {
       return;
     }
     const template = searchParams.get("template");
-    const industry = searchParams.get("industry");
+    const domain = searchParams.get("domain");
 
-    if (!template && !industry) {
+    if (!template && !domain) {
       urlInitDoneRef.current = true;
       return;
     }
@@ -41,13 +49,13 @@ export function WorkflowPage() {
 
     if (template) {
       setEditingTemplateId(template);
-    } else if (industry) {
-      // 仅有 industry 参数时，进入创建模式
+    } else if (domain) {
+      // 仅有 domain 参数时，进入创建模式
       setIsCreatingNew(true);
     }
 
-    // 清理 URL 参数
-    setSearchParams({}, { replace: true });
+    // 清理 URL 参数（保留 `ws`，见文件头常量的说明）
+    setSearchParams((prev) => withoutParams(prev, WORKFLOW_PAGE_QUERY_PARAMS), { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

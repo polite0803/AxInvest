@@ -1,3 +1,4 @@
+import { useStockJump } from "@/hooks/useStockJump";
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
 import { ReloadOutlined } from "@ant-design/icons";
@@ -51,6 +52,8 @@ function regimeLabel(regime: string, t: (key: string) => string): string {
 export function InvestDashboard() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // 跳转统一走 useStockJump（URL 是当前股票的唯一真相源）
+  const jumpToStock = useStockJump();
 
   const [positions, setPositions] = useState<PositionSummary[]>([]);
   const [recentAnalyses, setRecentAnalyses] = useState<RecentAnalysis[]>([]);
@@ -169,7 +172,7 @@ export function InvestDashboard() {
             ]}
             onRow={(record) => ({
               style: { cursor: "pointer" },
-              onClick: () => navigate(`/stock-analysis?code=${record.stockCode}`),
+              onClick: () => jumpToStock({ code: record.stockCode, name: record.stockName }),
             })}
           />
         </Card>
@@ -229,7 +232,7 @@ export function InvestDashboard() {
             ]}
             onRow={(record) => ({
               style: { cursor: "pointer" },
-              onClick: () => navigate(`/stock-analysis?code=${record.stockCode}`),
+              onClick: () => jumpToStock({ code: record.stockCode, name: record.stockName }),
             })}
           />
         </Card>

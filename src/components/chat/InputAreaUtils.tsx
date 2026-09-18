@@ -47,15 +47,9 @@ export function getFileTypeCategory(mimeType: string): FileTypeCategory {
   return "other";
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) {
-    return "0 B";
-  }
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
+// ── formatFileSize 已收敛到 @/lib/format（唯一实现，禁止在本文件重复定义）──
+// 口径统一：一律保留 1 位小数（`1.0 KB`），单位表到 PB，且 null/undefined 返回 "—"。
+// 原实现用 `parseFloat(toFixed(1))` 去尾零并截断在 GB，属可见口径分歧，2026-09-13 已统一。
 
 export function getFileIcon(category: FileTypeCategory) {
   switch (category) {

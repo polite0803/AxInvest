@@ -150,7 +150,6 @@ export function InvoicesTab() {
 
   const handleExportSelected = () => {
     const data = invoices.filter((inv) => selectedRowKeys.includes(inv.id));
-    console.log("Exported invoices:", data);
     message.success(t("opc.common.exportSuccess", { count: data.length }));
   };
 

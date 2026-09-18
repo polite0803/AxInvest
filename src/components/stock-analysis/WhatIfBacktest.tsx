@@ -12,6 +12,7 @@
  * 前提：portfolio-mgr 已从 Agent 改为 CodeNode（Rhai 确定性公式）
  */
 
+import { getDefaultVariables } from "@/components/settings/StockAnalysisConfigPanel";
 import { invoke } from "@/lib/invoke";
 import { Button, Card, Collapse, Empty, InputNumber, Select, SelectProps, Slider, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -387,6 +388,27 @@ export function WhatIfBacktest() {
   const [result, setResult] = useState<PmDecision | null>(null);
   const [configOverrides, setConfigOverrides] = useState<Record<string, number>>({});
   const [toolReplayLoading, setToolReplayLoading] = useState(false);
+  const [replayResult, setReplayResult] = useState<ToolChainReplayResult | null>(null);
+
+  /** 把参数名解析为「i18n 标签 + 默认值 + 控件范围」。
+   *
+   * 默认值与标签均取自设置面板的单一权威源 `getDefaultVariables()`，
+   * 此处不复制第二份清单 —— 否则同一参数会出现两套默认值（后端与面板分叉的
+   * `risk_max_drawdown_limit` 20/15 就是这么来的）。 */
+  const whatIfParamGroups = useMemo(() => {
+    const byName = new Map(getDefaultVariables().map((v) => [v.name, v]));
+    return WHATIF_PARAM_GROUPS.map((group) => ({
+      titleKey: group.titleKey,
+      items: group.params.map((spec) => {
+        const meta = byName.get(spec.name);
+        return {
+          ...spec,
+          labelKey: meta?.description,
+          defaultValue: typeof meta?.value === "number" ? (meta.value as number) : undefined,
+        };
+      }),
+    }));
+  }, []);
 
   // 加载历史分析列表
   useEffect(() => {
@@ -601,74 +623,28 @@ export function WhatIfBacktest() {
                   <div className="text-[10px] text-gray-500">
                     {t("stockAnalysis.whatIfBacktest.configOverridesDesc")}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <ConfigParamSlider
-                      label="scoring_trend"
-                      value={configOverrides.scoring_trend}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_trend: v }))}
-                    />
-                    <ConfigParamSlider
-                      label="scoring_deviation"
-                      value={configOverrides.scoring_deviation}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_deviation: v }))}
-                    />
-                    <ConfigParamSlider
-                      label="scoring_macd"
-                      value={configOverrides.scoring_macd}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_macd: v }))}
-                    />
-                    <ConfigParamSlider
-                      label="scoring_volume"
-                      value={configOverrides.scoring_volume}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_volume: v }))}
-                    />
-                    <ConfigParamSlider
-                      label="scoring_rsi"
-                      value={configOverrides.scoring_rsi}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_rsi: v }))}
-                    />
-                    <ConfigParamSlider
-                      label="scoring_support"
-                      value={configOverrides.scoring_support}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, scoring_support: v }))}
-                    />
-                  </div>
-                  <div className="text-[10px] text-gray-500 mt-1">{t("stockAnalysis.whatIf.valuationParams")}</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <ConfigParamSlider
-                      label="value_dcf_growth_rate"
-                      value={configOverrides.value_dcf_growth_rate}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, value_dcf_growth_rate: v }))}
-                    />
-                    <ConfigParamSlider
-                      label="value_dcf_discount_rate"
-                      value={configOverrides.value_dcf_discount_rate}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, value_dcf_discount_rate: v }))}
-                    />
-                    <ConfigParamSlider
-                      label="value_safety_margin"
-                      value={configOverrides.value_safety_margin}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, value_safety_margin: v }))}
-                    />
-                  </div>
-                  <div className="text-[10px] text-gray-500 mt-1">{t("stockAnalysis.whatIf.riskParams")}</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <ConfigParamSlider
-                      label="kelly_fraction"
-                      value={configOverrides.kelly_fraction}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, kelly_fraction: v }))}
-                      min={0}
-                      max={1}
-                      step={0.05}
-                    />
-                    <ConfigParamSlider
-                      label="risk_max_drawdown_limit"
-                      value={configOverrides.risk_max_drawdown_limit}
-                      onChange={(v) => setConfigOverrides((p) => ({ ...p, risk_max_drawdown_limit: v }))}
-                      min={5}
-                      max={50}
-                    />
-                  </div>
+                  {
+                    /* 参数按「后端真实消费方」分组渲染。滑块名与后端消费 key 逐字一致，
+                      不再有「面板一套命名、引擎另一套命名」的空接线。 */
+                  }
+                  {whatIfParamGroups.map((group) => (
+                    <div key={group.titleKey}>
+                      <div className="text-[10px] text-gray-500 mt-1">{t(group.titleKey)}</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {group.items.map((item) => (
+                          <ConfigParamSlider
+                            key={item.name}
+                            label={item.labelKey ? t(item.labelKey) : item.name}
+                            value={configOverrides[item.name] ?? item.defaultValue}
+                            onChange={(v) => setConfigOverrides((p) => ({ ...p, [item.name]: v }))}
+                            min={item.min}
+                            max={item.max}
+                            step={item.step}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                   <div className="flex justify-end">
                     <Button
                       size="small"
@@ -680,12 +656,42 @@ export function WhatIfBacktest() {
                           const _stockCode = selectedId
                             ? records.find((r) => r.id === selectedId)?.stockCode
                             : "";
-                          if (!_stockCode) { return; }
-                          await invoke("replay_tool_chain", {
+                          if (!_stockCode) {
+                            setReplayResult({
+                              totalScore: 0,
+                              decision: "—",
+                              positionPct: 0,
+                              riskLevel: "—",
+                              dataDegraded: false,
+                              error: t("stockAnalysis.whatIfBacktest.replayNoSelection"),
+                            });
+                            // 提前 return 前必须复位 loading，否则按钮永久转圈
+                            setToolReplayLoading(false);
+                            return;
+                          }
+                          const raw = await invoke("replay_tool_chain", {
                             params: { stockCode: _stockCode, configOverrides },
+                          }) as Record<string, unknown> | null;
+                          const decision = (raw?.decision ?? {}) as Record<string, unknown>;
+                          setReplayResult({
+                            totalScore: typeof raw?.totalScore === "number" ? raw.totalScore : 0,
+                            decision: String(decision.decision ?? "—"),
+                            positionPct: typeof decision.positionPct === "number"
+                              ? Math.round(decision.positionPct)
+                              : 0,
+                            riskLevel: String(decision.riskLevel ?? "—"),
+                            dataDegraded: raw?.dataDegraded === true,
                           });
                         } catch (e) {
                           console.error("Tool chain replay failed:", e);
+                          setReplayResult({
+                            totalScore: 0,
+                            decision: "—",
+                            positionPct: 0,
+                            riskLevel: "—",
+                            dataDegraded: false,
+                            error: t("stockAnalysis.whatIfBacktest.replayFailed"),
+                          });
                         }
                         setToolReplayLoading(false);
                       }}
@@ -693,6 +699,42 @@ export function WhatIfBacktest() {
                       {t("stockAnalysis.whatIfBacktest.applyToBackend")}
                     </Button>
                   </div>
+                  {replayResult && (
+                    <div className="text-[10px] space-y-0.5 border-t border-gray-700 pt-1 mt-1">
+                      <div className="text-gray-400">
+                        {t("stockAnalysis.whatIfBacktest.replayResultTitle")}
+                      </div>
+                      {replayResult.error
+                        ? <div className="text-amber-400">{replayResult.error}</div>
+                        : (
+                          <>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">
+                                {t("stockAnalysis.whatIfBacktest.replayTotalScore")}
+                              </span>
+                              <span className="text-gray-200">{replayResult.totalScore}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">{t("stockAnalysis.decision.action")}</span>
+                              <span className="text-gray-200">{replayResult.decision}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">{t("stockAnalysis.decision.positionPct")}</span>
+                              <span className="text-gray-200">{replayResult.positionPct}%</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">{t("stockAnalysis.decision.riskLevel")}</span>
+                              <span className="text-gray-200">{replayResult.riskLevel}</span>
+                            </div>
+                            {replayResult.dataDegraded && (
+                              <div className="text-amber-400">
+                                {t("stockAnalysis.whatIfBacktest.replayDataDegraded")}
+                              </div>
+                            )}
+                          </>
+                        )}
+                    </div>
+                  )}
                 </div>
               ),
             }]}
@@ -880,6 +922,108 @@ function ParamSelect({
 }
 
 /** 配置参数覆盖滑块（L2 工具链回测） */
+/** `replay_tool_chain` 回放结果的展示视图（仅取 UI 所需字段）。
+ *
+ * 修复前该命令的返回值被 `await` 后直接丢弃 —— 用户调完滑块点「应用配置到后端重算」
+ * 看不到任何反馈，无法判断调参是否生效，等于「接线了但不可观测」。 */
+interface ToolChainReplayResult {
+  totalScore: number;
+  decision: string;
+  positionPct: number;
+  riskLevel: string;
+  dataDegraded: boolean;
+  error?: string;
+}
+
+/** What-If 可调参数的控件范围。
+ *
+ * `name` **必须与后端消费 key 逐字一致**，否则滑块调了也不生效 —— 这正是本面板
+ * 修复前的状态：面板写的是 `scoring_*`（有效）+ `value_dcf_*`（无效，估值输入来自
+ * 快照而非重算），而决策层的 `action_*` / `pos_cap_*` / `regime_prior_*` 等真参数
+ * 根本没有 UI 入口。 */
+interface WhatIfParamSpec {
+  name: string;
+  min: number;
+  max: number;
+  step: number;
+}
+
+/** What-If 参数分组。每组标题点名该组参数的**真实消费链路**，
+ * 便于日后排查「面板可调但引擎不读」的空接线。
+ *
+ * - 第 1 组由 `replay_tool_chain` 的 Rust 简化链直接消费；
+ * - 第 2–6 组经 `WhatIfRequest.paramOverrides` 透传进 `portfolio-mgr.rhai`
+ *   （权威源 = 后端 `PORTFOLIO_MGR_TUNABLE_PARAMS`，共 28 项）。 */
+const WHATIF_PARAM_GROUPS: { titleKey: string; params: WhatIfParamSpec[] }[] = [
+  {
+    titleKey: "stockAnalysis.whatIfBacktest.groupScoringWeights",
+    params: [
+      { name: "scoring_trend", min: 0, max: 60, step: 1 },
+      { name: "scoring_deviation", min: 0, max: 60, step: 1 },
+      { name: "scoring_macd", min: 0, max: 60, step: 1 },
+      { name: "scoring_volume", min: 0, max: 60, step: 1 },
+      { name: "scoring_rsi", min: 0, max: 60, step: 1 },
+      { name: "scoring_support", min: 0, max: 60, step: 1 },
+    ],
+  },
+  {
+    titleKey: "stockAnalysis.whatIfBacktest.groupActionThresholds",
+    params: [
+      { name: "action_buy_threshold", min: 0, max: 1, step: 0.01 },
+      { name: "action_increase_threshold", min: 0, max: 1, step: 0.01 },
+      { name: "action_hold_threshold", min: 0, max: 1, step: 0.01 },
+      { name: "action_watch_threshold", min: 0, max: 1, step: 0.01 },
+      { name: "action_reduce_threshold", min: 0, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    titleKey: "stockAnalysis.whatIfBacktest.groupPositionCaps",
+    params: [
+      { name: "pos_buy_min", min: 0, max: 100, step: 1 },
+      { name: "pos_increase_min", min: 0, max: 100, step: 1 },
+      { name: "pos_cap_extreme", min: 0, max: 100, step: 1 },
+      { name: "pos_cap_high", min: 0, max: 100, step: 1 },
+      { name: "pos_cap_mid", min: 0, max: 100, step: 1 },
+    ],
+  },
+  {
+    titleKey: "stockAnalysis.whatIfBacktest.groupRegimePriors",
+    params: [
+      { name: "regime_prior_bull", min: 0, max: 1, step: 0.01 },
+      { name: "regime_prior_sideways", min: 0, max: 1, step: 0.01 },
+      { name: "regime_prior_bear", min: 0, max: 1, step: 0.01 },
+    ],
+  },
+  {
+    titleKey: "stockAnalysis.whatIfBacktest.groupRiskThresholds",
+    params: [
+      { name: "risk_debt_extreme", min: 0, max: 100, step: 1 },
+      { name: "risk_vol_extreme", min: 0, max: 100, step: 1 },
+      { name: "risk_sharpe_extreme", min: -5, max: 5, step: 0.1 },
+      { name: "risk_vol_high", min: 0, max: 100, step: 1 },
+      { name: "risk_dd_high", min: 0, max: 100, step: 1 },
+      { name: "risk_roe_high", min: -20, max: 40, step: 1 },
+      { name: "risk_debt_high", min: 0, max: 100, step: 1 },
+      { name: "risk_vol_low", min: 0, max: 100, step: 1 },
+      { name: "risk_sharpe_low", min: -5, max: 5, step: 0.1 },
+      { name: "risk_dd_low", min: 0, max: 100, step: 1 },
+      { name: "risk_roe_low", min: -20, max: 40, step: 1 },
+      { name: "risk_debt_low", min: 0, max: 100, step: 1 },
+      { name: "risk_growth_low", min: -50, max: 100, step: 1 },
+    ],
+  },
+  {
+    titleKey: "stockAnalysis.whatIfBacktest.groupMiscParams",
+    params: [
+      { name: "kelly_fraction", min: 0, max: 1, step: 0.05 },
+      { name: "risk_max_drawdown_limit", min: 0, max: 50, step: 1 },
+      { name: "trader_cap_min_weight", min: 0, max: 0.5, step: 0.01 },
+      { name: "cost_pct", min: 0, max: 0.05, step: 0.001 },
+      { name: "value_fscore_buy", min: 0, max: 9, step: 1 },
+    ],
+  },
+];
+
 function ConfigParamSlider({
   label,
   value,

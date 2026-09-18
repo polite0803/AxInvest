@@ -28,7 +28,9 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 关联的 reco_picks.id
+    #[sea_orm(indexed)]
     pub pick_id: String,
+    #[sea_orm(indexed)]
     pub stock_code: String,
     pub stock_name: String,
     /// 风格: "trend" | "value" | "capital" | "reversion" | "watchlist"

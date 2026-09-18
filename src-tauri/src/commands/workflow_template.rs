@@ -958,6 +958,43 @@ pub async fn validate_workflow_template(
         }
     }
 
+    // ── C1（2026-09-14）：端口公理 —— `source_handle` ↔ 分支的对齐 ──
+    //
+    // 现状：`source_handle` 是自由字符串，它与 `Switch` 的 case label / `Condition` 的
+    // true|false 分支的对应关系**只写在注释里**（例：src/commands/stock_analysis_setup/seed_stock_analysis.rs:3655），
+    // 而引擎按「有 handle 用它、没 handle 用 edge_type 兜底」两套规则解析
+    // （dag_store.rs:100-121 与另外四处）。二者不一致 ⇒ 同一条边在不同调度路径下两个答案；
+    // handle 打错 ⇒ 该边永不激活（死边）。
+    //
+    // 分级（C1-升级，2026-09-14）：`PortAxiomSeverity::Error` 的 4 类进 `errors`
+    // （结构性死链：该边/该分支永不激活 ⇒ `is_valid = false`，保存被挡）；
+    // 另 2 类语义冲突进 `warnings`。分级判据在 `PortAxiomViolation::severity`，
+    // 不在此处另写一份。
+    for v in axagent_harness::workflow_port_axioms::validate_port_axioms(&nodes, &edges) {
+        match v.severity() {
+            axagent_harness::workflow_port_axioms::PortAxiomSeverity::Error => {
+                errors.push(ValidationError {
+                    error_type: v.kind().to_string(),
+                    node_id: v.node_id().map(str::to_string),
+                    message: v.describe(),
+                    suggestion: Some(
+                        "Fix the branch binding: a Condition edge must use sourceHandle \
+                         \"true\"/\"false\", and a Switch edge's sourceHandle must equal one of the \
+                         node's case labels (or use the default branch without a sourceHandle)."
+                            .to_string(),
+                    ),
+                });
+            },
+            axagent_harness::workflow_port_axioms::PortAxiomSeverity::Warning => {
+                warnings.push(ValidationWarning {
+                    warning_type: v.kind().to_string(),
+                    node_id: v.node_id().map(str::to_string),
+                    message: v.describe(),
+                });
+            },
+        }
+    }
+
     let is_valid = errors.is_empty();
 
     Ok(ValidationResult { is_valid, errors, warnings })

@@ -3,10 +3,12 @@
 
 import type { Variable, WorkflowTemplateInput, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { invoke } from "@/lib/invoke";
-import { App, Button, Input, InputNumber, Select, Slider, Space, Switch, Tag, theme } from "antd";
+import { toDbVariable } from "@/lib/workflowVariables";
+import { App, Button, Space, Tag, theme } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsGroup } from "./SettingsGroup";
+import { VariableControl } from "./VariableControls";
 
 const TEMPLATE_ID = "demand-discovery";
 
@@ -108,87 +110,11 @@ function getDefaultVariables(): Variable[] {
   return vars;
 }
 
-function parseEnumOptions(desc?: string): string[] {
-  if (!desc) { return []; }
-  const match = desc.match(/: (.+)/);
-  if (match) { return match[1].split(/\s*\/\s*/).map((s) => s.trim()); }
-  return [];
-}
-
-function inferStep(v: Variable): number {
-  if (v.name === "agent_temperature" || v.name.includes("weight")) { return 0.01; }
-  return 1;
-}
-
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 interface Props {}
 
-/** number control — 垂直布局 */
-function NumberControl({ v, value, onChange }: {
-  v: Variable;
-  value: unknown;
-  onChange: (name: string, val: unknown) => void;
-}) {
-  const { t } = useTranslation();
-  const desc = t(v.description ?? "");
-  const hasPct = desc.includes("%");
-  const val = Number(value ?? 0);
-  return (
-    <span className="sacp-number">
-      <Slider
-        min={0}
-        max={v.varType === "number" && v.name.includes("weight") ? 2 : 100}
-        step={inferStep(v)}
-        className="sacp-number-slider"
-        value={val}
-        onChange={(v2) => onChange(v.name, v2)}
-      />
-      <InputNumber
-        size="small"
-        className="sacp-number-input"
-        value={val}
-        suffix={hasPct ? "%" : undefined}
-        onChange={(v2) => v2 != null && onChange(v.name, v2)}
-      />
-    </span>
-  );
-}
-
-function VariableControl({ v, value, onChange }: {
-  v: Variable;
-  value: unknown;
-  onChange: (name: string, val: unknown) => void;
-}) {
-  const { t } = useTranslation();
-  const desc = t(v.description ?? "");
-  switch (v.varType) {
-    case "boolean":
-      return <Switch checked={!!value} onChange={(c) => onChange(v.name, c)} />;
-    case "enum": {
-      const options = parseEnumOptions(desc);
-      return (
-        <Select
-          size="small"
-          style={{ width: 140 }}
-          value={String(value ?? "")}
-          onChange={(val) => onChange(v.name, val)}
-          options={options.map((o) => ({ value: o, label: o }))}
-        />
-      );
-    }
-    case "number":
-      return <NumberControl v={v} value={value} onChange={onChange} />;
-    default:
-      return (
-        <Input
-          size="small"
-          style={{ maxWidth: 220 }}
-          value={String(value ?? "")}
-          onChange={(e) => onChange(v.name, e.target.value)}
-        />
-      );
-  }
-}
+// `NumberControl` / `VariableControl` 已收敛到 `./VariableControls`（与 LiteraryCreation /
+// StockAnalysis 共用一份，数值量程统一走 `inferNumberBounds` 动态推断）。
 
 export function DemandDiscoveryConfigPanel(_props: Props) {
   const { message } = App.useApp();
@@ -205,7 +131,11 @@ export function DemandDiscoveryConfigPanel(_props: Props) {
       .then((rsp) => {
         if (cancelled) { return; }
         if (rsp && (!rsp.variables || rsp.variables.length === 0)) {
-          const defaults = getDefaultVariables();
+          // 写回 DB 前必须规范化为 snake_case（var_type / is_secret）：后端
+          // `harness::workflow_types::Variable` 没有 rename_all="camelCase"，传 camelCase
+          // 会因缺 var_type 反序列化失败。此前失败被 .catch(() => {}) 静默吞掉，
+          // 而 rsp.variables = defaults 让内存有值 → DB 永远是空变量表，界面却正常。
+          const defaults = getDefaultVariables().map(toDbVariable);
           const input: WorkflowTemplateInput = {
             name: rsp.name || t("opc.demand.configDefaultWorkflowName"),
             description: rsp.description || t("opc.demand.configDefaultWorkflowDesc"),
@@ -219,7 +149,10 @@ export function DemandDiscoveryConfigPanel(_props: Props) {
             variables: defaults,
             errorConfig: rsp.errorConfig,
           };
-          invoke<boolean>("update_workflow_template", { id: TEMPLATE_ID, input }).catch(() => {});
+          invoke<boolean>("update_workflow_template", { id: TEMPLATE_ID, input }).catch((e) => {
+            // 不再静默吞错：这里失败意味着整条参数配置链无声断裂
+            console.warn(`[demand-discovery] 初始化模板变量写入失败: ${String(e)}`);
+          });
           rsp.variables = defaults;
         }
         if (rsp) {

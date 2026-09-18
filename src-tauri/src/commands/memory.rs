@@ -11,6 +11,7 @@ use axagent_harness::{
 };
 use axagent_kit::prompts::PromptLang;
 use sea_orm::ActiveModelTrait;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 /// 校验容器 ID（namespace_id / item_id 等）格式，防止 SQL 注入和路径穿越。
@@ -320,9 +321,16 @@ pub async fn delete_memory_item(
     namespace_id: String,
     id: String,
 ) -> Result<(), String> {
-    // Delete vector embedding for this item
+    // 向量删除必须成功后才继续删除 DB 记录（2026-09-15 修：此前 `let _ =` 吞错，
+    // 于是「记录已删除、向量还在库中」—— 已删除的记忆仍会被检索命中，用户毫无提示）。
+    // 失败即返回错误并保留记录，用户可重试。
     let collection_id = format!("mem_{}", namespace_id);
-    let _ = state.vector_store.delete_document_embeddings(&collection_id, &id).await;
+    state.vector_store.delete_document_embeddings(&collection_id, &id).await.map_err(|e| {
+        crate::commands::error::ErrorResponse::err_with_detail(
+            crate::commands::error_code::memory::DELETE_FAILED,
+            format!("清理记忆 {id} 的向量失败: {e}"),
+        )
+    })?;
 
     // Also delete from FTS5 full-text search index
     let ms = state.memory_service.read().await;
@@ -430,13 +438,24 @@ pub async fn search_memory(
             ))
         })?;
 
-    let mut results = crate::indexing::search_memory(
+    // ⚠ 2026-09-15 二次修（过滤位置）：阈值原先在结果**返回之后**才按
+    // `r.score <= distance_ceiling_from_similarity_floor(threshold)` 筛，两个问题：
+    // ① 那时结果已截断成 top_k ⇒ 「配 5 条 + 阈值」可能返回 0 条；
+    // ② 同一规则同时存在于调用方与检索层两处 ⇒ 必然漂移。
+    // 现在经 `min_similarity` 交给检索层的 `HybridSearchOptions.min_score`，
+    // 由四条收尾路径在 `truncate(top_k)` **之前**统一处理。
+    // `ns.retrieval_threshold` 是**相关度下限 ∈ [0,1]**，与检索层同标尺。
+    let min_similarity =
+        axagent_search::rag::similarity_floor_from_threshold(ns.retrieval_threshold.unwrap_or(0.0));
+
+    let results = crate::indexing::search_memory(
         state.harness.db(),
         state.harness.master_key(),
         &state.vector_store,
         &namespace_id,
         &query,
         top_k.unwrap_or(5),
+        Some(min_similarity),
     )
     .await
     .map_err(|e| {
@@ -445,17 +464,6 @@ pub async fn search_memory(
             crate::commands::error::ErrorCategory::Unrecoverable,
         ))
     })?;
-
-    // 应用与 collect_rag_context_from_refs 一致的距离阈值过滤
-    // score 是 L2 距离（越小越相似），threshold > 0 时使用用户配置，否则用默认阈值 20.0
-    let default_max_distance = 20.0_f32;
-    let threshold = ns.retrieval_threshold.unwrap_or(0.0);
-    let effective_threshold = if threshold > 0.0 {
-        threshold
-    } else {
-        default_max_distance
-    };
-    results.retain(|r| r.score <= effective_threshold);
 
     // 写入反馈数据湖
     if let Some(lake) = axagent_harness::feedback_data_lake::global_feedback_lake() {
@@ -484,13 +492,96 @@ pub async fn search_memory(
     Ok(results)
 }
 
+/// FTS5 全文索引健康（前端投影，camelCase）。
+///
+/// 与向量索引不同，FTS5 基于 rusqlite，**PG 后端下不可用**
+/// （见 `src/init/state.rs:151`）。修复前这一状态在 API 层不可观测 ——
+/// 全文检索恒返回空结果，UI 无法区分「无命中」与「功能未挂载」。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryFtsHealth {
+    /// FTS5 是否真正被挂载
+    pub available: bool,
+    /// 不可用时的原因
+    pub unavailable_reason: Option<String>,
+    /// 索引表是否存在
+    pub tables_exist: bool,
+    /// 轨迹记忆源表行数
+    pub source_rows: u64,
+    /// 已入 FTS 索引的记忆行数
+    pub indexed_rows: u64,
+    /// 索引落后幅度（`source_rows - indexed_rows`，下限 0）
+    pub lagging_rows: u64,
+    /// 是否需要重建（源有数据但索引为空）
+    pub needs_rebuild: bool,
+    /// 其余 FTS 表行数（诊断用）
+    pub trajectories_count: u64,
+    pub skills_count: u64,
+    pub messages_count: u64,
+}
+
+/// 记忆索引重建结果（前端投影，camelCase）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryIndexRebuildResult {
+    /// 已入向量索引队列的记忆条目数
+    pub vector_enqueued: usize,
+    /// 本次真正重建（清空 + 回填）的 FTS 表
+    pub fts_rebuilt: Vec<String>,
+    /// 未重建的 FTS 表（本版本无回填路径，保留原索引）
+    pub fts_skipped: Vec<String>,
+    /// FTS 回填源行数
+    pub fts_source_rows: u64,
+    /// FTS 回填后索引行数
+    pub fts_indexed_rows: u64,
+    /// FTS 不可用时说明原因（此时上面 FTS 字段均为 0，前端应据此显示「不可用」而非「0 条」）
+    pub fts_unavailable_reason: Option<String>,
+}
+
+/// 查询 FTS5 全文索引健康状态。
+///
+/// 这是「索引落后」的**可见化出口**：在它之前，索引与主数据的偏差只能通过
+/// `tracing::warn!` 看到，UI 与诊断入口都无从查询。
+#[agent_command(domain = memory, safety = Safe, call_mode = StateOnly, description = "查询记忆全文索引健康")]
+#[tauri::command]
+pub async fn get_memory_fts_health(state: State<'_, AppState>) -> Result<MemoryFtsHealth, String> {
+    let h = state.trajectory_storage.fts_health().await.map_err(|e| {
+        String::from(crate::commands::error::ErrorResponse::from_error(
+            e,
+            crate::commands::error::ErrorCategory::Retryable,
+        ))
+    })?;
+    Ok(MemoryFtsHealth {
+        available: h.available,
+        unavailable_reason: h.unavailable_reason,
+        tables_exist: h.tables_exist,
+        source_rows: h.memory_items_source_count,
+        indexed_rows: h.memory_items_count,
+        lagging_rows: h.memory_items_source_count.saturating_sub(h.memory_items_count),
+        needs_rebuild: h.needs_rebuild,
+        trajectories_count: h.trajectories_count,
+        skills_count: h.skills_count,
+        messages_count: h.messages_count,
+    })
+}
+
 #[agent_command(domain = memory, safety = Caution, call_mode = StateOnly, description = "重建记忆索引")]
 #[tauri::command]
+/// 重建记忆索引。
+///
+/// **本次修复的缺口**：修复前本命令只重建**向量**索引，用户点「重建索引」
+/// 之后 FTS5（关键词检索）索引既不重建、也不报告状态 ——
+/// 而 FTS5 基于 rusqlite，在 PG 后端下压根没挂载（`src/init/state.rs:151`）。
+/// 于是「重建成功」是一句关于向量索引的真话 + 一句关于全文索引的沉默。
+///
+/// 现在 FTS 部分作为**尽力而为**的附加步骤：可用则重建并回报计数，
+/// 不可用则在 `fts_unavailable_reason` 里说明原因并保持向量部分成功 ——
+/// 不能因为设计内的降级（PG 无 FTS）让原本可用的按钮开始报错。
 pub async fn rebuild_memory_index(
     app: AppHandle,
     state: State<'_, AppState>,
     namespace_id: String,
-) -> Result<(), String> {
+) -> Result<MemoryIndexRebuildResult, String> {
     let ns = axagent_dao::repo::memory::get_namespace(state.harness.db(), &namespace_id)
         .await
         .map_err(|e| {
@@ -518,6 +609,7 @@ pub async fn rebuild_memory_index(
             ))
         })?;
 
+    let mut vector_enqueued = 0usize;
     for item in &items {
         let _ = axagent_dao::repo::memory::update_item_index_status(
             state.harness.db(),
@@ -543,9 +635,37 @@ pub async fn rebuild_memory_index(
                 crate::commands::error::ErrorCategory::Unrecoverable,
             ))
         })?;
+        vector_enqueued += 1;
     }
 
-    Ok(())
+    // FTS5 部分：尽力而为。不可用是 PG 后端下的设计内降级，不是错误。
+    let (fts_rebuilt, fts_skipped, fts_source_rows, fts_indexed_rows, fts_unavailable_reason) =
+        match state.trajectory_storage.fts_health().await {
+            Ok(h) if h.available => match state.trajectory_storage.rebuild_fts_indexes().await {
+                Ok(report) => {
+                    (report.rebuilt, report.skipped, report.source_rows, report.indexed_rows, None)
+                },
+                Err(e) => {
+                    // 重建失败必须显式可见：静默当作「没这回事」正是本次要修的形态。
+                    tracing::error!("[rebuild_memory_index] FTS5 重建失败: {}", e);
+                    (Vec::new(), Vec::new(), 0, 0, Some(format!("FTS5 重建失败: {e}")))
+                },
+            },
+            Ok(h) => (Vec::new(), Vec::new(), 0, 0, h.unavailable_reason),
+            Err(e) => {
+                tracing::error!("[rebuild_memory_index] 读取 FTS5 健康状态失败: {}", e);
+                (Vec::new(), Vec::new(), 0, 0, Some(format!("FTS5 健康检查失败: {e}")))
+            },
+        };
+
+    Ok(MemoryIndexRebuildResult {
+        vector_enqueued,
+        fts_rebuilt,
+        fts_skipped,
+        fts_source_rows,
+        fts_indexed_rows,
+        fts_unavailable_reason,
+    })
 }
 
 #[agent_command(domain = memory, safety = Caution, call_mode = StateOnly, description = "自动提取增量记忆")]
@@ -1195,13 +1315,35 @@ pub async fn extract_conversation_entities(
             None => continue,
         };
 
+        // 关系类型先归一，再拿**归一后的值**参与自然键派生。
+        // ⚠ 不能用 `ext_rel.relation_type.as_str()` 直接派生：`RelationshipType::from`
+        //   会把未登记值折叠成 `RelatedTo`（Display = `related_to`）⇒ 原始输入
+        //   `"Causes"` 与 `"related_to"` 会派生出**两个键**却写进**同一个列值** ⇒
+        //   去重照样失效。自然键必须取「实际落库的值」，不是「输入值」。
+        let rel_type = axagent_trajectory::RelationshipType::from(ext_rel.relation_type.as_str());
+
+        // 关系主键由**自然键**派生（规则在 harness 契约层，
+        // 与 `dao::repo::knowledge_graph::upsert_relation` 共用同一实现）。
+        //
+        // 原先每次新造 `rel_{uuid12}` ⇒ `save_relationship` 的 `ON CONFLICT (id)`
+        // 永不触发（冲突键就是本次刚生成的那个值）⇒ 每次 LLM 回流都为同一逻辑关系
+        // 再插一行 ⇒ 无界增长。改后同一 (kb, source, target, type) 反复回流会命中
+        // 冲突并就地更新。
+        //
+        // ⚠ **不追溯存量**：此前回流产出的行主键是随机的，派生主键找不到它们，
+        //   因此每个逻辑关系最多并存「旧的随机 id 行 1 条 + 新的派生 id 行 1 条」。
+        //   彻底收敛需清存量（数据删除决策，本轮未做，见
+        //   `docs/plans/PLAN-memory-kb-reflow-id-space.md` §5d 类 C）。
         let rel = axagent_trajectory::Relationship {
-            id: format!("rel_{}", &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]),
+            id: axagent_harness::knowledge_graph::stable_relation_id(
+                axagent_dao::repo::knowledge_graph::TRAJECTORY_KB_ID,
+                &source_id,
+                &target_id,
+                &rel_type.to_string(),
+            ),
             source_id,
             target_id,
-            relation_type: axagent_trajectory::RelationshipType::from(
-                ext_rel.relation_type.as_str(),
-            ),
+            relation_type: rel_type,
             properties: ext_rel.properties.clone(),
             weight: ext_rel.weight,
             created_at: chrono::Utc::now(),

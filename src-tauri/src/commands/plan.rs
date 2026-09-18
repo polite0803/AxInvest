@@ -10,7 +10,7 @@
 //! 5. Final result emitted as `plan-execution-complete` event
 
 use crate::app_state::AppState;
-use crate::commands::error::ErrorResponse;
+use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::provider as provider_err;
 use crate::commands::error_code::workflow as workflow_err;
 use axagent_agent_macro::agent_command;
@@ -94,6 +94,22 @@ pub struct PlanModifyStepRequest {
     pub approved: Option<bool>,
 }
 
+/// 计划执行授权请求（P0-A）。
+///
+/// 只由 [`plan_authorize`] 消费，该命令**不注册 agent 元数据**，模型无从调用。
+#[derive(Debug, Deserialize)]
+pub struct PlanAuthorizeRequest {
+    #[serde(rename = "conversationId")]
+    pub conversation_id: String,
+    #[serde(rename = "planId")]
+    pub plan_id: String,
+    /// 授权来源，必须在 [`AUTHORIZED_BY_WHITELIST`] 内（user/system/api/ui/automation）。
+    #[serde(rename = "authorizedBy")]
+    pub authorized_by: String,
+    /// `true` = 批准执行（置授权位）；`false` = 拒绝（撤权并取消计划）。
+    pub approved: bool,
+}
+
 // ── Plan data types (mirrors frontend Plan/PlanStep) ──────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +149,19 @@ pub struct Plan {
     pub title: String,
     pub steps: Vec<PlanStep>,
     pub status: FrontendPlanStatus,
+    /// 执行授权位（P0-A）：`false`=未授权，`true`=已授权。
+    ///
+    /// 与 `status` **解耦**：`status` 表达计划自身走到哪一步，本字段表达
+    /// 「用户是否批准执行」。前端应以本字段决定是否展示「执行」按钮，
+    /// 而不是以 `status == "approved"`（修复前该状态从无写入点）。
+    #[serde(rename = "executionAuthorized", default)]
+    pub execution_authorized: bool,
+    /// 授权时间（毫秒时间戳），未授权为 `None`。
+    #[serde(rename = "authorizedAt", default, skip_serializing_if = "Option::is_none")]
+    pub authorized_at: Option<i64>,
+    /// 授权来源（白名单值），未授权为 `None`。用于审计「谁批准了这次执行」。
+    #[serde(rename = "authorizedBy", default, skip_serializing_if = "Option::is_none")]
+    pub authorized_by: Option<String>,
     #[serde(rename = "isActive")]
     pub is_active: bool,
     #[serde(rename = "createdUnderStrategy", skip_serializing_if = "Option::is_none")]
@@ -143,6 +172,21 @@ pub struct Plan {
     pub updated_at: i64,
 }
 
+/// 计划生命周期状态 —— DB `plans.status` 的**唯一真源**。
+///
+/// ## 为什么需要它
+///
+/// 修复前，`plans.status` 的取值以字符串字面量散落在 6 个写入点
+/// （`plan_generate` / `plan_execute` / `plan_cancel` / `plan_activate`）与
+/// 3 个读取点（`plan_get` / `plan_list` / `plan_modify_step`），且读取端一律用
+/// `_ => Cancelled` 兜底 —— **未知取值被静默报成「已取消」**（归因字段说谎）。
+///
+/// ## 与「执行授权」的关系（P0-A 核心）
+///
+/// 本枚举**不再承担「能否执行」的判据**。执行判据是
+/// `plans.execution_authorized`（见 [`plan_authorize`] / [`plan_execute`]）。
+/// - `Reviewing`：已生成、待用户批准
+/// - `Approved`：用户已批准（由 `plan_authorize` 写入，修复前**无任何写入点**）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum FrontendPlanStatus {
@@ -153,7 +197,91 @@ pub enum FrontendPlanStatus {
     Completed,
     Partial,
     Cancelled,
+    /// DB 中出现了本枚举未定义的取值。
+    ///
+    /// 修复前这种情况被 `_ => Cancelled` 静默吞掉 —— 把「未知」报成「已取消」。
+    /// 现在如实呈现，让写库方与枚举的漂移可见（铁律 #12：归因字段不得说谎）。
+    Unknown,
 }
+
+impl FrontendPlanStatus {
+    /// DB 字符串 → 枚举。未知取值返回 [`Self::Unknown`]，**不再伪装成 `Cancelled`**。
+    pub fn from_db_str(raw: &str) -> Self {
+        match raw {
+            "draft" => Self::Draft,
+            "reviewing" => Self::Reviewing,
+            "approved" => Self::Approved,
+            "executing" => Self::Executing,
+            "completed" => Self::Completed,
+            "partial" => Self::Partial,
+            "cancelled" => Self::Cancelled,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// 枚举 → DB 字符串。[`Self::Unknown`] 无对应 DB 值，返回 `None`
+    /// （调用方不得把「未知」回写成某个具体状态）。
+    pub fn as_db_str(&self) -> Option<&'static str> {
+        match self {
+            Self::Draft => Some("draft"),
+            Self::Reviewing => Some("reviewing"),
+            Self::Approved => Some("approved"),
+            Self::Executing => Some("executing"),
+            Self::Completed => Some("completed"),
+            Self::Partial => Some("partial"),
+            Self::Cancelled => Some("cancelled"),
+            Self::Unknown => None,
+        }
+    }
+
+    /// 静态状态迁移表：当前状态允许迁移到哪些状态。
+    ///
+    /// 修复前不存在任何迁移校验：`plan_execute` 无条件写 `executing`、
+    /// `plan_cancel` 无条件写 `cancelled`，任何状态可跳到任何状态。
+    /// 这里把合法迁移显式化，供 [`plan_authorize`] / [`plan_execute`] 校验。
+    ///
+    /// `Cancelled` / `Partial` 允许回到 `Reviewing`，对应 `plan_activate` 的「恢复」语义。
+    pub fn allowed_next(&self) -> &'static [FrontendPlanStatus] {
+        use FrontendPlanStatus::*;
+        match self {
+            Draft => &[Reviewing, Approved, Cancelled],
+            Reviewing => &[Approved, Cancelled],
+            Approved => &[Executing, Cancelled],
+            Executing => &[Completed, Partial, Cancelled],
+            Completed => &[],
+            Partial => &[Reviewing, Executing, Cancelled],
+            Cancelled => &[Reviewing, Approved],
+            Unknown => &[],
+        }
+    }
+
+    /// 当前状态是否允许迁移到 `next`。
+    pub fn can_transition_to(&self, next: &Self) -> bool {
+        self.allowed_next().contains(next)
+    }
+}
+
+/// [`FrontendPlanStatus`] → DB 字符串（所有写入点的统一出口）。
+///
+/// 不变量：`from_db_str(&db_status(x)) == x` 对**所有**取值成立 —— 包括
+/// `Unknown`（写 `"unknown"`，读回仍是 `Unknown`）。因此不存在「写入端与读取端
+/// 集合不相交」的可能，这正是修复前 `reviewing ∉ {draft, approved}` 断链的形态。
+fn db_status(s: FrontendPlanStatus) -> String {
+    s.as_db_str().unwrap_or("unknown").to_string()
+}
+
+/// 执行授权位的**写入者白名单**（P0-A）。
+///
+/// 借鉴 EvoFlow（外部项目）`authorize_execution.py` 第 16 行的唯一一条正确处理：授权位必须由
+/// 「用户动作 / 系统 / 外部 API」写入，**模型路径不得写入** —— 否则模型可以
+/// 给自己授权执行任意计划。
+///
+/// 在 AxInvest 中有两道防线：
+/// 1. [`plan_authorize`] 命令**不注册 `#[agent_command]` 元数据**，因此不进
+///    agent 工具表（`commands/agent/command_bridge.rs` 只暴露带元数据的命令），
+///    模型无从调用；
+/// 2. 即便被调用，`authorized_by` 也必须在下列白名单内，否则直接拒绝。
+const AUTHORIZED_BY_WHITELIST: &[&str] = &["user", "system", "api", "ui", "automation"];
 
 // ── Event payloads ────────────────────────────────────────────────────
 
@@ -184,6 +312,22 @@ pub struct PlanExecutionCompleteEvent {
     #[serde(rename = "planId")]
     pub plan_id: String,
     pub status: String,
+}
+
+/// 执行授权位变更事件（P0-A）。
+///
+/// 前端据此刷新计划卡的按钮可用性 —— 修复前前端只能靠 `status` 猜测
+/// 「是否已批准」，而 `approved` 状态从无写入点。
+#[derive(Debug, Clone, Serialize)]
+pub struct PlanAuthorizationChangedEvent {
+    #[serde(rename = "conversationId")]
+    pub conversation_id: String,
+    #[serde(rename = "planId")]
+    pub plan_id: String,
+    /// 变更后是否处于已授权态。
+    pub authorized: bool,
+    #[serde(rename = "authorizedBy", skip_serializing_if = "Option::is_none")]
+    pub authorized_by: Option<String>,
 }
 
 // ── LLM-based Plan Generation ─────────────────────────────────────────
@@ -406,6 +550,10 @@ async fn generate_plan_via_llm(
         title,
         steps,
         status: FrontendPlanStatus::Reviewing,
+        // 新生成的计划未获授权 —— 授权只能由 plan_authorize 写入
+        execution_authorized: false,
+        authorized_at: None,
+        authorized_by: None,
         is_active: true,
         created_under_strategy: Some("plan".to_string()),
         created_at: now,
@@ -819,7 +967,12 @@ pub async fn plan_generate(
         user_message_id: Set(plan.user_message_id.clone()),
         title: Set(plan.title.clone()),
         steps_json: Set(steps_json),
-        status: Set("reviewing".to_string()),
+        // 新生成的计划一律处于「待批准」态，**未授权**。
+        // 授权只能经 plan_authorize 由用户动作写入（P0-A）。
+        status: Set(db_status(FrontendPlanStatus::Reviewing)),
+        execution_authorized: Set(0),
+        authorized_at: Set(None),
+        authorized_by: Set(None),
         is_active: Set(1),
         created_under_strategy: Set(Some("plan".to_string())),
         reason: Set(None),
@@ -868,20 +1021,38 @@ pub async fn plan_execute(
             )
         })?;
 
-    // 验证计划状态：仅 draft 或 approved 状态允许执行
-    if plan_row.status != "draft" && plan_row.status != "approved" {
+    // ── P0-A 执行闸门：校验「执行授权位」而非 status ─────────────────────
+    //
+    // 修复前此处校验 `status ∈ {draft, approved}`，而 `plan_generate` 写入的是
+    // `reviewing` ⇒ 两个集合不相交，**执行必然失败**；且规则反而放行未批准的
+    // `draft`，而 `"approved"` 在全仓根本没有写入点。
+    //
+    // 现在唯一判据是独立授权位 `execution_authorized`：
+    //   - 只由 `plan_authorize` 写入，写入者受 [`AUTHORIZED_BY_WHITELIST`] 限制（不含模型）
+    //   - 计划内容被修改时自动撤权（见 `plan_modify_step`）
+    if plan_row.execution_authorized == 0 {
+        return Err(ErrorResponse::new(workflow_err::PLAN_NOT_AUTHORIZED)
+            .with_category(ErrorCategory::PermissionDenied)
+            .with_detail(format!(
+                "计划尚未获得执行授权（当前状态 '{}'）。请在计划卡上批准后再执行。",
+                plan_row.status
+            ))
+            .into());
+    }
+
+    // 迁移校验：授权态下仍须符合状态迁移表，防止已完成/已取消的计划被重复执行。
+    // （存量回填会把 completed 计划标为已授权，因此这道校验是必要的第二层。）
+    let current_status = FrontendPlanStatus::from_db_str(&plan_row.status);
+    if !current_status.can_transition_to(&FrontendPlanStatus::Executing) {
         return Err(ErrorResponse::err_with_detail(
             workflow_err::PLAN_NOT_FOUND,
-            format!(
-                "计划状态为 '{}'，只有 draft 或 approved 状态的计划可以执行。请重新生成计划并审批。",
-                plan_row.status
-            ),
+            format!("计划状态 '{}' 不允许进入执行态。请先恢复该计划并重新批准。", plan_row.status),
         ));
     }
 
     // Update plan status to executing
     let mut am: axagent_entities::plans::ActiveModel = plan_row.clone().into();
-    am.status = Set("executing".to_string());
+    am.status = Set(db_status(FrontendPlanStatus::Executing));
     am.updated_at = Set(chrono::Utc::now().timestamp_millis());
     am.update(db).await.map_err(|e| format!("Failed to update plan: {}", e))?;
 
@@ -890,17 +1061,28 @@ pub async fn plan_execute(
         .map_err(|e| format!("Failed to parse plan steps: {}", e))?;
 
     // Filter steps to execute
-    let steps_to_run: Vec<&PlanStep> = if let Some(ref step_ids) = request.step_ids {
-        steps.iter().filter(|s| step_ids.contains(&s.id)).collect()
-    } else {
-        // Only execute explicitly approved steps — pending steps need user approval first
-        steps.iter().filter(|s| s.status == PlanStepStatus::Approved).collect()
+    //
+    // 修复前：显式传 `step_ids` 时**不做 Approved 过滤**，只按 id 命中即执行 ——
+    // 而前端 `planStore.approvePlan` 恰好总是显式传全部 step id，导致 step 级
+    // 审批完全失效（未批准的步骤照样被执行）。
+    //
+    // 现在：先按 Approved 收窄，再按 step_ids 收窄，两个条件都必须满足。
+    let steps_to_run: Vec<&PlanStep> = {
+        let approved: Vec<&PlanStep> =
+            steps.iter().filter(|s| s.status == PlanStepStatus::Approved).collect();
+        match request.step_ids {
+            Some(ref step_ids) => {
+                approved.into_iter().filter(|s| step_ids.contains(&s.id)).collect()
+            },
+            None => approved,
+        }
     };
 
     if steps_to_run.is_empty() {
-        // No steps to execute — mark as completed
+        // 没有已批准的步骤可执行 —— 标记完成（例如用户批准后逐一拒绝了所有步骤）。
+        let completed = db_status(FrontendPlanStatus::Completed);
         let mut am: axagent_entities::plans::ActiveModel = plan_row.into();
-        am.status = Set("completed".to_string());
+        am.status = Set(completed.clone());
         am.updated_at = Set(chrono::Utc::now().timestamp_millis());
         am.update(db).await.ok();
 
@@ -909,7 +1091,7 @@ pub async fn plan_execute(
             PlanExecutionCompleteEvent {
                 conversation_id: request.conversation_id.clone(),
                 plan_id: request.plan_id.clone(),
-                status: "completed".to_string(),
+                status: completed,
             },
         );
         return Ok(());
@@ -1149,11 +1331,16 @@ pub async fn plan_execute(
     let steps_json = serde_json::to_string(&updated_steps).unwrap_or_default();
 
     let has_errors = updated_steps.iter().any(|s| s.status == PlanStepStatus::Error);
-    let final_status = if has_errors { "partial" } else { "completed" };
+    let final_status = if has_errors {
+        FrontendPlanStatus::Partial
+    } else {
+        FrontendPlanStatus::Completed
+    };
+    let final_status_str = db_status(final_status);
 
     let mut am2: axagent_entities::plans::ActiveModel = plan_row.into();
     am2.steps_json = Set(steps_json);
-    am2.status = Set(final_status.to_string());
+    am2.status = Set(final_status_str.clone());
     am2.updated_at = Set(chrono::Utc::now().timestamp_millis());
     am2.update(db).await.ok();
 
@@ -1163,7 +1350,7 @@ pub async fn plan_execute(
         PlanExecutionCompleteEvent {
             conversation_id: request.conversation_id,
             plan_id: request.plan_id,
-            status: final_status.to_string(),
+            status: final_status_str,
         },
     );
 
@@ -1199,11 +1386,18 @@ pub async fn plan_cancel(
         }
     }
 
+    let cancelled = db_status(FrontendPlanStatus::Cancelled);
+
     if let Some(row) =
         axagent_entities::plans::Entity::find_by_id(&request.plan_id).one(db).await.ok().flatten()
     {
         let mut am: axagent_entities::plans::ActiveModel = row.into();
-        am.status = Set("cancelled".to_string());
+        am.status = Set(cancelled.clone());
+        // 取消即撤权：被取消的计划不得保留执行授权
+        // （与「计划内容被修改即撤权」同一原则 —— 授权必须对应当前这份计划）。
+        am.execution_authorized = Set(0);
+        am.authorized_at = Set(None);
+        am.authorized_by = Set(None);
         am.is_active = Set(0);
         am.updated_at = Set(chrono::Utc::now().timestamp_millis());
         if let Some(ref reason) = request.reason {
@@ -1217,7 +1411,7 @@ pub async fn plan_cancel(
         PlanExecutionCompleteEvent {
             conversation_id: request.conversation_id,
             plan_id: request.plan_id,
-            status: "cancelled".to_string(),
+            status: cancelled,
         },
     );
 
@@ -1268,7 +1462,12 @@ pub async fn plan_activate(
 
     let mut am: axagent_entities::plans::ActiveModel = row.clone().into();
     am.is_active = Set(1);
-    am.status = Set("reviewing".to_string());
+    am.status = Set(db_status(FrontendPlanStatus::Reviewing));
+    // 恢复为「待批准」态：撤销既有授权 —— 用户须重新批准这一份计划。
+    // 否则已完成的计划被 resume 后可直接执行（存量回填会把 completed 标为已授权）。
+    am.execution_authorized = Set(0);
+    am.authorized_at = Set(None);
+    am.authorized_by = Set(None);
     am.updated_at = Set(chrono::Utc::now().timestamp_millis());
     am.update(db).await.map_err(|e| format!("DB error: {}", e))?;
 
@@ -1280,6 +1479,9 @@ pub async fn plan_activate(
         title: row.title.clone(),
         steps,
         status: FrontendPlanStatus::Reviewing,
+        execution_authorized: false,
+        authorized_at: None,
+        authorized_by: None,
         is_active: true,
         created_under_strategy: row.created_under_strategy.clone(),
         created_at: row.created_at,
@@ -1309,16 +1511,14 @@ pub async fn plan_get(
     match row {
         Some(row) => {
             let steps: Vec<PlanStep> = serde_json::from_str(&row.steps_json).unwrap_or_default();
-            let status = match row.status.as_str() {
-                "draft" => FrontendPlanStatus::Draft,
-                "reviewing" => FrontendPlanStatus::Reviewing,
-                "approved" => FrontendPlanStatus::Approved,
-                "executing" => FrontendPlanStatus::Executing,
-                "completed" => FrontendPlanStatus::Completed,
-                "partial" => FrontendPlanStatus::Partial,
-                "cancelled" => FrontendPlanStatus::Cancelled,
-                _ => FrontendPlanStatus::Cancelled,
-            };
+            let status = FrontendPlanStatus::from_db_str(&row.status);
+            if status == FrontendPlanStatus::Unknown {
+                tracing::warn!(
+                    "[plan_get] 计划 {} 的状态 '{}' 不在 FrontendPlanStatus 取值集合内",
+                    row.id,
+                    row.status
+                );
+            }
             Ok(Some(Plan {
                 id: row.id,
                 conversation_id: row.conversation_id,
@@ -1326,6 +1526,9 @@ pub async fn plan_get(
                 title: row.title,
                 steps,
                 status,
+                execution_authorized: row.execution_authorized != 0,
+                authorized_at: row.authorized_at,
+                authorized_by: row.authorized_by,
                 is_active: row.is_active != 0,
                 created_under_strategy: row.created_under_strategy,
                 created_at: row.created_at,
@@ -1367,16 +1570,7 @@ pub async fn plan_list(
         .into_iter()
         .map(|row| {
             let steps: Vec<PlanStep> = serde_json::from_str(&row.steps_json).unwrap_or_default();
-            let status = match row.status.as_str() {
-                "draft" => FrontendPlanStatus::Draft,
-                "reviewing" => FrontendPlanStatus::Reviewing,
-                "approved" => FrontendPlanStatus::Approved,
-                "executing" => FrontendPlanStatus::Executing,
-                "completed" => FrontendPlanStatus::Completed,
-                "partial" => FrontendPlanStatus::Partial,
-                "cancelled" => FrontendPlanStatus::Cancelled,
-                _ => FrontendPlanStatus::Cancelled,
-            };
+            let status = FrontendPlanStatus::from_db_str(&row.status);
             Plan {
                 id: row.id,
                 conversation_id: row.conversation_id,
@@ -1384,6 +1578,9 @@ pub async fn plan_list(
                 title: row.title,
                 steps,
                 status,
+                execution_authorized: row.execution_authorized != 0,
+                authorized_at: row.authorized_at,
+                authorized_by: row.authorized_by,
                 is_active: row.is_active != 0,
                 created_under_strategy: row.created_under_strategy,
                 created_at: row.created_at,
@@ -1439,25 +1636,34 @@ pub async fn plan_modify_step(
         }
     }
 
+    // 计划**内容**被修改即撤权（P0-A）：
+    // 授权必须对应用户当时看到的那一份计划。用户批准后又改了步骤标题/描述，
+    // 原授权即失效，须重新批准。
+    // 仅变更「批准标志」不算内容变更 —— 那本身就是审批动作
+    // （前端 approvePlan 的流程是：先逐 step 批准 → 再调用 plan_authorize → 执行）。
+    let content_changed = request.title.is_some() || request.description.is_some();
+    let revoke = content_changed && row.execution_authorized != 0;
+
     let steps_json =
         serde_json::to_string(&steps).map_err(|e| format!("Failed to serialize steps: {}", e))?;
 
     let now = chrono::Utc::now().timestamp_millis();
     let mut am: axagent_entities::plans::ActiveModel = row.clone().into();
     am.steps_json = Set(steps_json);
+    if revoke {
+        tracing::info!(
+            "[plan_modify_step] 计划 {} 内容变更，撤销执行授权（原授权者 {:?}）",
+            request.plan_id,
+            row.authorized_by
+        );
+        am.execution_authorized = Set(0);
+        am.authorized_at = Set(None);
+        am.authorized_by = Set(None);
+    }
     am.updated_at = Set(now);
     am.update(db).await.map_err(|e| format!("Failed to update plan: {}", e))?;
 
-    let status = match row.status.as_str() {
-        "draft" => FrontendPlanStatus::Draft,
-        "reviewing" => FrontendPlanStatus::Reviewing,
-        "approved" => FrontendPlanStatus::Approved,
-        "executing" => FrontendPlanStatus::Executing,
-        "completed" => FrontendPlanStatus::Completed,
-        "partial" => FrontendPlanStatus::Partial,
-        "cancelled" => FrontendPlanStatus::Cancelled,
-        _ => FrontendPlanStatus::Cancelled,
-    };
+    let status = FrontendPlanStatus::from_db_str(&row.status);
 
     Ok(Some(Plan {
         id: row.id,
@@ -1466,9 +1672,224 @@ pub async fn plan_modify_step(
         title: row.title,
         steps,
         status,
+        execution_authorized: !revoke && row.execution_authorized != 0,
+        authorized_at: if revoke { None } else { row.authorized_at },
+        authorized_by: if revoke { None } else { row.authorized_by },
         is_active: row.is_active != 0,
         created_under_strategy: row.created_under_strategy,
         created_at: row.created_at,
         updated_at: now,
     }))
+}
+
+/// 计划执行授权（P0-A）——**授权位的唯一写入口**。
+///
+/// ## 为什么本命令刻意不带 `#[agent_command]`
+///
+/// 其余 plan 命令都带该宏（生成 agent 工具元数据，经
+/// `commands/agent/command_bridge.rs` 暴露给模型）。本命令**刻意不带**：
+/// 授权位一旦可被模型写入，模型就能给自己授权执行任意计划，闸门即失效。
+/// 不注册元数据 ⇒ 不进 agent 工具表 ⇒ 模型无从调用（第一道防线）。
+///
+/// 第二道防线是 `authorized_by` 白名单校验（[`AUTHORIZED_BY_WHITELIST`]），
+/// 对齐 EvoFlow（外部项目）`authorize_execution.py` 第 16 行的 `EXECUTION_AUTHORIZED_BY`
+/// （该白名单同样不含 model）。
+///
+/// ## 语义
+///
+/// - `approved = true`：置授权位 + `reviewing → approved`
+/// - `approved = false`：撤权 + `reviewing → cancelled`（归档）
+#[tauri::command]
+pub async fn plan_authorize(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+    request: PlanAuthorizeRequest,
+) -> Result<Plan, String> {
+    let db = state.harness.db();
+
+    // ── 防线 2：授权者白名单 ────────────────────────────────────────────
+    if !AUTHORIZED_BY_WHITELIST.contains(&request.authorized_by.as_str()) {
+        return Err(ErrorResponse::new(workflow_err::PLAN_NOT_AUTHORIZED)
+            .with_category(ErrorCategory::PermissionDenied)
+            .with_detail(format!(
+                "非法的执行授权来源 '{}'。允许的来源：{}。\
+                 执行授权只接受用户或系统动作，模型不得自我授权。",
+                request.authorized_by,
+                AUTHORIZED_BY_WHITELIST.join("/")
+            ))
+            .into());
+    }
+
+    let row = axagent_entities::plans::Entity::find_by_id(&request.plan_id)
+        .one(db)
+        .await
+        .map_err(|e| format!("Failed to load plan: {}", e))?
+        .ok_or_else(|| {
+            ErrorResponse::err_with_detail(
+                workflow_err::PLAN_NOT_FOUND,
+                format!("Plan not found: {}", request.plan_id),
+            )
+        })?;
+
+    // 归属校验：本字段唯一的实质用途 —— 防止「A 会话的授权请求」作用于
+    // 「B 会话的计划」。事件发射用的是 DB 行的 `conversation_id`（更可信），
+    // 故此处的请求侧值只承担这项校验，否则它就是个死参数。
+    if request.conversation_id != row.conversation_id {
+        return Err(ErrorResponse::err_with_detail(
+            workflow_err::PLAN_NOT_FOUND,
+            format!(
+                "计划 {} 不属于会话 {}（实际归属 {}）",
+                request.plan_id, request.conversation_id, row.conversation_id
+            ),
+        ));
+    }
+
+    let now = chrono::Utc::now().timestamp_millis();
+    let current = FrontendPlanStatus::from_db_str(&row.status);
+    let next_status = if request.approved {
+        FrontendPlanStatus::Approved
+    } else {
+        FrontendPlanStatus::Cancelled
+    };
+
+    // 状态迁移校验：拒绝从终态（completed / unknown）授权，
+    // 迫使调用方先走 plan_activate 恢复。
+    if !current.can_transition_to(&next_status) {
+        return Err(ErrorResponse::err_with_detail(
+            workflow_err::PLAN_NOT_AUTHORIZED,
+            format!(
+                "计划当前状态 '{}' 不允许授权迁移到 '{}'。已完成的计划请先恢复（plan_activate）再批准。",
+                row.status,
+                next_status.as_db_str().unwrap_or("unknown")
+            ),
+        ));
+    }
+
+    let mut am: axagent_entities::plans::ActiveModel = row.clone().into();
+    am.status = Set(db_status(next_status.clone()));
+    am.updated_at = Set(now);
+    if request.approved {
+        am.execution_authorized = Set(1);
+        am.authorized_at = Set(Some(now));
+        am.authorized_by = Set(Some(request.authorized_by.clone()));
+    } else {
+        // 拒绝 = 撤权 + 归档（不保留任何执行授权痕迹）
+        am.execution_authorized = Set(0);
+        am.authorized_at = Set(None);
+        am.authorized_by = Set(None);
+        am.is_active = Set(0);
+    }
+    am.update(db).await.map_err(|e| format!("Failed to update plan: {}", e))?;
+
+    tracing::info!(
+        "[plan_authorize] plan={} approved={} authorized_by={} status='{}' → '{}'",
+        request.plan_id,
+        request.approved,
+        request.authorized_by,
+        row.status,
+        db_status(next_status.clone())
+    );
+
+    let steps: Vec<PlanStep> = serde_json::from_str(&row.steps_json).unwrap_or_default();
+    let plan = Plan {
+        id: row.id,
+        conversation_id: row.conversation_id,
+        user_message_id: row.user_message_id,
+        title: row.title,
+        steps,
+        status: next_status,
+        execution_authorized: request.approved,
+        authorized_at: if request.approved { Some(now) } else { None },
+        authorized_by: if request.approved {
+            Some(request.authorized_by)
+        } else {
+            None
+        },
+        is_active: if request.approved {
+            row.is_active != 0
+        } else {
+            false
+        },
+        created_under_strategy: row.created_under_strategy,
+        created_at: row.created_at,
+        updated_at: now,
+    };
+
+    let _ = app.emit(
+        "plan-authorization-changed",
+        PlanAuthorizationChangedEvent {
+            conversation_id: plan.conversation_id.clone(),
+            plan_id: plan.id.clone(),
+            authorized: request.approved,
+            authorized_by: plan.authorized_by.clone(),
+        },
+    );
+
+    Ok(plan)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 不变量：`from_db_str(db_status(x)) == x` 对**所有**取值成立。
+    ///
+    /// 这正是修复前被破坏的性质：写入端写 `reviewing`，校验端只认
+    /// `{draft, approved}`，两个集合不相交 ⇒ 执行必然失败。
+    #[test]
+    fn status_db_roundtrip_is_total() {
+        for s in [
+            FrontendPlanStatus::Draft,
+            FrontendPlanStatus::Reviewing,
+            FrontendPlanStatus::Approved,
+            FrontendPlanStatus::Executing,
+            FrontendPlanStatus::Completed,
+            FrontendPlanStatus::Partial,
+            FrontendPlanStatus::Cancelled,
+            FrontendPlanStatus::Unknown,
+        ] {
+            let db = db_status(s.clone());
+            assert_eq!(FrontendPlanStatus::from_db_str(&db), s, "roundtrip failed for '{db}'");
+        }
+    }
+
+    /// 固化本次修复：生成态（reviewing）**不可**直接执行，必须先经 approved。
+    #[test]
+    fn reviewing_cannot_execute_directly() {
+        assert!(
+            !FrontendPlanStatus::Reviewing.can_transition_to(&FrontendPlanStatus::Executing),
+            "reviewing 直接执行正是修复前「集合不相交」的形态，不得回归"
+        );
+        assert!(FrontendPlanStatus::Reviewing.can_transition_to(&FrontendPlanStatus::Approved));
+    }
+
+    /// 终态不可执行：存量回填会把 completed 标为已授权，这道迁移校验是第二层防护。
+    #[test]
+    fn terminal_states_cannot_execute() {
+        assert!(!FrontendPlanStatus::Completed.can_transition_to(&FrontendPlanStatus::Executing));
+        assert!(FrontendPlanStatus::Completed.allowed_next().is_empty());
+    }
+
+    /// 授权者白名单不含任何模型路径（第一道防线的语义锚点）。
+    #[test]
+    fn authorized_by_whitelist_excludes_model() {
+        for forbidden in ["model", "lead", "llm", "agent", "assistant", "planner"] {
+            assert!(
+                !AUTHORIZED_BY_WHITELIST.contains(&forbidden),
+                "'{forbidden}' 不得能授予执行权"
+            );
+        }
+        for allowed in ["user", "system", "api", "ui", "automation"] {
+            assert!(AUTHORIZED_BY_WHITELIST.contains(&allowed));
+        }
+    }
+
+    /// 未知 DB 取值不再被伪装成 `Cancelled`（修复前是 `_ => Cancelled`）。
+    #[test]
+    fn unknown_status_is_not_reported_as_cancelled() {
+        let parsed = FrontendPlanStatus::from_db_str("bogus-status");
+        assert_eq!(parsed, FrontendPlanStatus::Unknown);
+        assert_ne!(parsed, FrontendPlanStatus::Cancelled, "未知取值不得报成「已取消」");
+        assert_eq!(parsed.as_db_str(), None, "Unknown 无 DB 对应值");
+    }
 }

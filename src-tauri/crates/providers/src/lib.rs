@@ -4,6 +4,8 @@
 
 pub mod adapter;
 pub mod anthropic;
+/// 适配器委托样板宏（crate 内部使用，非公开 API）。
+mod compat;
 pub mod deepseek;
 pub mod gemini;
 pub mod glm;

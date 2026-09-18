@@ -2,14 +2,17 @@
 
 import { invoke, isTauri } from "@/lib/invoke";
 import type {
+  CodeSample,
   CodeStyleTemplate,
   CodeTemplate,
   DocumentFormat,
   DocumentStyleProfile,
   LearnedPattern,
   LearnedPatternType,
+  MessageSample,
   PatternType,
   StyleDimensions,
+  StyleMigratorStats,
   StylePattern,
   StyleVector,
   UserStyleProfile,
@@ -17,24 +20,24 @@ import type {
 import { create } from "zustand";
 
 export type {
+  CodeSample,
   CodeStyleTemplate,
   CodeTemplate,
   DocumentFormat,
   DocumentStyleProfile,
   LearnedPattern,
   LearnedPatternType,
+  MessageSample,
   PatternType,
   StyleDimensions,
+  StyleMigratorStats,
   StylePattern,
   StyleVector,
   UserStyleProfile,
 };
 
-export interface StyleMigratorStats {
-  totalProfiles: number;
-  totalSamples: number;
-  averageConfidence: number;
-}
+// `StyleMigratorStats` / `CodeSample` / `MessageSample` 的权威定义在 `@/types/style.ts`，
+// 本文件于文件头统一 import + re-export。原先这三处本地副本与之逐字相同（去重 2026-09-14）。
 
 interface StyleStore {
   currentProfile: UserStyleProfile | null;
@@ -62,18 +65,6 @@ interface StyleStore {
   exportProfile: (userId: string) => Promise<string | null>;
   importProfile: (userId: string, json: string) => Promise<void>;
   getStats: () => Promise<StyleMigratorStats | null>;
-}
-
-export interface CodeSample {
-  code: string;
-  language: string;
-  timestamp: string;
-}
-
-export interface MessageSample {
-  content: string;
-  role: string;
-  timestamp: string;
 }
 
 export const useStyleStore = create<StyleStore>((set, get) => ({

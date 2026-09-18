@@ -3,7 +3,7 @@
 import { invoke, logIpcError } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import { useAppConfigStore } from "@/stores/feature/appConfigStore";
-import type { FeatureFlags } from "@/stores/feature/appConfigStore";
+import type { FeatureFlags, ReactEngineFlagKey, ReactEngineNumberKey } from "@/stores/feature/appConfigStore";
 import type { SubAgent } from "@/types";
 import {
   Badge,
@@ -299,10 +299,88 @@ const FEATURE_FLAG_META: Array<{
   },
 ];
 
+/**
+ * 「高级引擎参数」的行定义（表驱动，避免 9 行近乎重复的 JSX）。
+ *
+ * `min`/`max` 存在 ⇒ 渲染为 `InputNumber`，否则渲染为 `Switch`。
+ * 量程与 `appConfigStore.REACT_ENGINE_BOUNDS` 及后端 `extract_bounded_u64`
+ * 三方一致 —— 任一处放行非法值都会让引擎进入病态状态。
+ *
+ * 只收录后端 `ReactEngineOverrides` **实际暴露**的字段；`maxDepth`、
+ * `agentRole`、`reflectionThreshold` 等内部参数刻意不在此列（见后端注释）。
+ */
+const REACT_ENGINE_ROWS: Array<{
+  key: ReactEngineNumberKey | ReactEngineFlagKey;
+  labelKey: string;
+  min?: number;
+  max?: number;
+}> = [
+  {
+    key: "timeoutSecs",
+    labelKey: "settings.agent.reactEngine.timeoutSecs",
+    min: 10,
+    max: 3600,
+  },
+  {
+    key: "maxRetryAttempts",
+    labelKey: "settings.agent.reactEngine.maxRetryAttempts",
+    min: 0,
+    max: 10,
+  },
+  {
+    key: "maxRepeatedCalls",
+    labelKey: "settings.agent.reactEngine.maxRepeatedCalls",
+    min: 1,
+    max: 100,
+  },
+  {
+    key: "maxNoProgressIterations",
+    labelKey: "settings.agent.reactEngine.maxNoProgressIterations",
+    min: 1,
+    max: 100,
+  },
+  {
+    key: "minQualityThreshold",
+    labelKey: "settings.agent.reactEngine.minQualityThreshold",
+    min: 0,
+    max: 10,
+  },
+  {
+    key: "cycleDetectionEnabled",
+    labelKey: "settings.agent.reactEngine.cycleDetectionEnabled",
+  },
+  {
+    key: "verificationEnabled",
+    labelKey: "settings.agent.reactEngine.verificationEnabled",
+  },
+  {
+    key: "reflectionEnabled",
+    labelKey: "settings.agent.reactEngine.reflectionEnabled",
+  },
+  {
+    key: "checkpointEnabled",
+    labelKey: "settings.agent.reactEngine.checkpointEnabled",
+  },
+];
+
 function GeneralTab() {
   const { t } = useTranslation();
   const { token } = theme.useToken();
-  const { permissionMode, maxIterations, setPermissionMode, setMaxIterations } = useAppConfigStore();
+  const {
+    permissionMode,
+    maxIterations,
+    setPermissionMode,
+    setMaxIterations,
+    reactEngine,
+    setReactEngineNumber,
+    setReactEngineFlag,
+    saveConfig,
+  } = useAppConfigStore();
+
+  // store 的 setter 只改内存，而 `saveConfig` 原先仅在组件卸载时触发
+  // （本文件末尾 useEffect 的 cleanup）—— 用户改完不关面板就不落库。
+  // 故每个控件都在 `onBlur` / `onChange` 时显式持久化。
+  const persist = () => saveConfig().catch((e) => logIpcError("appConfigStore: saveConfig")(e));
 
   const rowStyle = { padding: "6px 0" };
 
@@ -319,10 +397,61 @@ function GeneralTab() {
             max={100}
             value={maxIterations}
             onChange={(v) => v != null && setMaxIterations(v)}
+            // 失焦即持久化。store 的 `setMaxIterations` 只改内存，而 `SettingsPanel`
+            // 的 `saveConfig` 原先**仅在组件卸载时**触发（见本文件末尾 useEffect 的
+            // cleanup）—— 用户改完不关面板就不落库。
+            // 后端 `save_app_config` 会顺带把该值注入 SessionManager 使其即时生效，
+            // 所以这里必须真的把值送出去（铁律 #6：可配置 ≠ 可被优化）。
+            onBlur={() => saveConfig().catch((e) => logIpcError("appConfigStore: saveConfig")(e))}
             size="small"
             style={{ width: 120 }}
           />
         </div>
+      </SettingsGroup>
+
+      <SettingsGroup title={t("settings.agent.reactEngine.title")}>
+        <div style={{ paddingBottom: 6 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("settings.agent.reactEngine.hint")}
+          </Text>
+        </div>
+        {REACT_ENGINE_ROWS.map((row) => (
+          <div
+            key={row.key}
+            style={rowStyle}
+            className="flex items-center justify-between"
+            data-search-key={`agent:${row.key}`}
+          >
+            <span className="flex items-center gap-2">
+              <SlidersHorizontal size={14} /> {t(row.labelKey)}
+            </span>
+            {row.min != null
+              ? (
+                <InputNumber
+                  min={row.min}
+                  max={row.max}
+                  value={reactEngine[row.key as ReactEngineNumberKey]}
+                  onChange={(v) => {
+                    if (v != null) {
+                      setReactEngineNumber(row.key as ReactEngineNumberKey, v);
+                    }
+                  }}
+                  onBlur={persist}
+                  size="small"
+                  style={{ width: 120 }}
+                />
+              )
+              : (
+                <Switch
+                  checked={reactEngine[row.key as ReactEngineFlagKey]}
+                  onChange={(v) => {
+                    setReactEngineFlag(row.key as ReactEngineFlagKey, v);
+                    void persist();
+                  }}
+                />
+              )}
+          </div>
+        ))}
       </SettingsGroup>
 
       <SettingsGroup title={t("settings.agent.permissionControl")}>

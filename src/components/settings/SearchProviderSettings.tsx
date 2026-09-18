@@ -2,6 +2,7 @@
 
 import { PasteButton } from "@/components/common/PasteButton";
 import { PROVIDER_TYPE_LABELS, SearchProviderTypeIcon } from "@/components/shared/SearchProviderIcon";
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { useSearchStore } from "@/stores";
 import type { CreateSearchProviderInput, SearchProvider, SearchProviderType } from "@/types";
@@ -260,7 +261,12 @@ function SearchProviderDetail({
         ok: boolean;
         latencyMs?: number;
         resultCount?: number;
-        error?: string;
+        /** 失败时的错误码（`SEARCH_*`），见 `commands/search.rs::test_provider_failure` */
+        code?: string;
+        category?: string;
+        detail?: string;
+        /** @deprecated 旧版字段（曾是自由文本，更早时甚至是 `ErrorResponse` 对象） */
+        error?: string | Record<string, unknown>;
       }>("test_search_provider", { id: provider.id });
       if (result.ok) {
         const latencyPart = `${result.latencyMs}ms`;
@@ -271,7 +277,10 @@ function SearchProviderDetail({
           `${t("settings.searchProviders.testSuccess")} (${latencyPart}${countPart})`,
         );
       } else {
-        message.error(result.error || t("settings.searchProviders.testFailed"));
+        // 走统一错误码翻译层。历史实现是 `message.error(result.error)`，而当时后端
+        // 会把 `ErrorResponse` **对象**塞进 `error` 字段 ⇒ antd 渲染出 `[object Object]`；
+        // 后来改成中文自由文本 ⇒ 非中文界面漏中文。两条路都不通，故收敛到码。
+        message.error(translateBackendError(result));
       }
     } catch (err: unknown) {
       message.error(

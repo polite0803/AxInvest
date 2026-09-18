@@ -502,6 +502,45 @@ export interface CapabilityRegistrationDetailDto {
   pluginId?: string | null;
 }
 
+// ── 能力域注册表（P2：能力域覆盖层） ────────────────
+//
+// 对应后端 capability.rs 的 CapabilityDomainEntryDto（`#[serde(rename_all =
+// "camelCase")]`），即 `list_capability_domain_registry` / `update_capability_domain`
+// 的返回类型。它是**合并视图**：内置声明（编译期 `DOMAIN_NODES`）∪ DB 覆盖层
+// （`capability_domain_overrides`）。
+//
+// ⚠ 域 id 集合不在这里手抄 —— 列表**整体来自后端**，前端只渲染。
+// 前端另有 `lib/domainMeta.ts` 持有「域 id → 呈现元数据」的唯一手写点，
+// 但那是给导航/筛选用的；本面板一律用 DTO 的 `labelKey`，不再造第二份派生。
+
+/** 能力域注册表条目（对应后端 CapabilityDomainEntryDto，camelCase 字段） */
+export interface CapabilityDomainEntry {
+  /** 域 id（协议 slug）。**只读**：由后端 `CapabilityDomain` 枚举决定，不可增删 */
+  id: string;
+  /** i18n 显示名 key（形如 `capabilityDomain.finance`），由后端 `DomainNode::label_key()` 派生 */
+  labelKey: string;
+  /** 一处聚合入口路径（`null` = 内部域，不进入导航） */
+  navPath: string | null;
+  /** 导航顺序（`null` = 内部域） */
+  navOrder: number | null;
+  /** 是否内部域（`system`） */
+  isSystem: boolean;
+  /** 是否允许被停用（`general` / `system` 为 false） */
+  toggleable: boolean;
+  /** 不可停用的**原因码**（`null` = 可停用）；界面按码查 i18n，不硬编码文案 */
+  toggleBlockReason: string | null;
+  /** 当前是否启用（合并视图） */
+  enabled: boolean;
+  /** 是否有覆盖行（区分「内置默认」与「用户改过」） */
+  hasOverride: boolean;
+  /** 内置别名（**只读**：27 条存量兼容别名，不可删） */
+  builtinAliases: string[];
+  /** 追加别名（用户可改；语义是「在内置之上追加」，不是替换） */
+  extraAliases: string[];
+  /** 有效别名 = 内置 ∪ 追加（由后端合并，前端不再合并一次） */
+  effectiveAliases: string[];
+}
+
 // ── Store 载荷 ─────────────────────────────────────
 
 /**
@@ -600,8 +639,6 @@ export interface CognitiveQueryRequestPayload {
     disabledTools?: string[];
     /** 活跃功能域列表 */
     activeDomains?: string[];
-    /** P0-2 计划确认闸门：开启时后端判定复杂任务后先弹计划草稿等待用户批准 */
-    requirePlanApproval?: boolean;
   };
   /** 工作流最大并发节点数（Workflow 模式透传） */
   maxConcurrent?: number;

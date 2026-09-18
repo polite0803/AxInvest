@@ -11,6 +11,7 @@ use std::sync::Arc;
 use crate::{ProviderAdapter, ProviderRequestContext, build_http_client};
 
 use crate::anthropic::AnthropicAdapter;
+use crate::compat::impl_default_via_new;
 use crate::openai::OpenAIAdapter;
 use crate::openai_responses::OpenAIResponsesAdapter;
 
@@ -196,11 +197,7 @@ impl HermesAdapter {
     }
 }
 
-impl Default for HermesAdapter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+impl_default_via_new!(HermesAdapter);
 
 #[async_trait]
 impl ProviderAdapter for HermesAdapter {

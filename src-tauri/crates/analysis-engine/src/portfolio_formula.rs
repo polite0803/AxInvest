@@ -7,6 +7,7 @@
 //!
 //! 所有函数均为纯函数，无副作用，无异步。
 
+use crate::decision_action::{normalize_action, ActionKind};
 use serde::{Deserialize, Serialize};
 
 /// 计算因子数据完整度（0.0 ~ 1.0）。
@@ -20,8 +21,12 @@ use serde::{Deserialize, Serialize};
 /// - `catalyst_level`: a-catalyst 催化剂等级
 /// - `risk_volatility`: t-risk 波动率
 /// - `valuation_dcf_upside`: t-valuation DCF 上行空间
-/// - `trader_direction`: trader 交易方向
 /// - `money_flow_main_net_inflow`: t-hotmoney-data 主力净流入
+///
+/// 注：原 `trader_direction` 因子已于 2026-09-12 移除。data-quality 节点是 trader 的
+/// **上游**（trader 的 `dqi_score` 由本节点提供），架构上不可能读到 trader 输出，
+/// 该因子在此处恒缺失 ⇒ 完整度上限被钉在 0.9、综合分恒定少 3 分。f7 的可用性由
+/// portfolio-mgr（trader 下游）消费，不属于本函数的职责范围。
 /// - `lockup_shareholder_trades_len`: t-lockup-data 股东增减持数量
 /// - `announcements_len`: t-catalyst-data 公告数量
 /// - `pace_signal`: pace-calc PACE 情绪信号
@@ -35,14 +40,15 @@ pub fn compute_factor_completeness(
     catalyst_level: Option<&str>,
     risk_volatility: Option<f64>,
     valuation_dcf_upside: Option<f64>,
-    trader_direction: Option<&str>,
     money_flow_main_net_inflow: Option<f64>,
     lockup_shareholder_trades_len: Option<i64>,
     announcements_len: Option<i64>,
     pace_signal: Option<f64>,
 ) -> f64 {
     let mut present_count = 0.0;
-    let total_factors = 10.0;
+    // 9 个因子（2026-09-12 由 10 降为 9）：移除 f7「交易方向」。
+    // 移除理由见函数文档注释——上游节点不可能评估下游节点的因子。
+    let total_factors = 9.0;
 
     // P2-1 修复(2026-08-09): 从"字段存在性"升级为"值有效性"——
     // 存在但值域异常/中性值(如 0)的数据不计数，避免"字段有值但不可用"被误算为完整。
@@ -79,14 +85,6 @@ pub fn compute_factor_completeness(
     // f5: 估值 — dcf_upside 有效（有限值，-100~1000 合理区间）
     if let Some(u) = valuation_dcf_upside {
         if u.is_finite() && u > -100.0 && u < 1000.0 {
-            present_count += 1.0;
-        }
-    }
-
-    // f7: 交易方案 — trader_direction 非空
-    if let Some(dir) = trader_direction {
-        let trimmed = dir.trim();
-        if !trimmed.is_empty() {
             present_count += 1.0;
         }
     }
@@ -241,7 +239,20 @@ fn apply_risk_cap(position: f64, risk_level: &str) -> f64 {
 ///
 /// 返回 "极高风险" / "高风险" / "低风险" / "中风险"
 ///
-/// V54 放宽阈值适配 A 股（高波动+高负债+低增长的特征）
+/// V54 放宽阈值适配 A 股（高波动+高负债+低增长的特征）。
+///
+/// ⚠️ v40(2026-09-13)：极高风险的第一条判据（负债率 + 营收负增长）此前会让
+/// **整个银行业必然恒顶格**（601166 负债 91.6% / 营收 −0.3% 命中，而技术面
+/// 全在低风险档）。修法是给该硬规则追加**「真困境」第三条件**
+/// （ROE<0 亏损 或 营收增速<−10%）。
+///
+/// ⚠️ v78(2026-09-14)：删除曾短暂存在的「金融业行业白名单豁免」。
+/// **判据只锚定可观测的数据形态，不锚定行业归属** —— 白名单等于宣称「金融企业
+/// 不可能陷入财务困境」，会把真正在亏损/收缩的银行一起放行；且行业分类口径一变
+/// 判据即整体失效。「真困境」条件观测的是事实（真在亏损、真在萎缩），与行业名无关。
+///
+/// ⚠️ 注意：本函数是**参考实现**，生产运行时走的是 `portfolio-mgr.rhai` 的同构镜像
+/// （阈值由面板参数 `risk_*` 注入）。修改本函数时必须同步该镜像，否则两处漂移。
 pub fn classify_risk(
     volatility: Option<f64>,
     sharpe: Option<f64>,
@@ -258,8 +269,8 @@ pub fn classify_risk(
     let d = debt.unwrap_or(0.0);
     let g = growth.unwrap_or(0.0);
 
-    // 极高风险
-    if (d > 85.0 && g < 0.0) || (vol > 60.0 && sp < -1.5) {
+    // 极高风险（v40 C：硬规则须附加「真困境」证据；v78 已删除行业白名单豁免）
+    if (d > 85.0 && g < 0.0 && (r < 0.0 || g < -10.0)) || (vol > 60.0 && sp < -1.5) {
         return "极高风险".into();
     }
 
@@ -373,12 +384,43 @@ pub fn compute_risk_bias(risk_level: &str) -> f64 {
 /// 应用风控否决：根据风险等级限制决策动作。
 ///
 /// 返回 (final_action, was_downgraded, note)
+///
+/// ⚠️ 判定前先经 [`normalize_action`] 归一化值域。历史实现只 `match` 中文
+/// 「买入/增持/持有」：链路上 action 一旦是英文（`BUY`/`HOLD`）或 dashboard
+/// 值域（`强烈买入`），此处不匹配任何分支 ⇒ **极高风险的「禁止持仓」否决
+/// 完全不生效，且静默返回原值**（fail-open）。
+///
+/// 未识别值域不再静默放行：
+/// - 风险等级为高 / 极高：按最保守处理降级为「观望」（未知值视为可能持仓）；
+/// - 其余等级：保留原值，但 `note` 显式说明该值未参与判定。
 pub fn apply_risk_veto(action: &str, risk_level: &str) -> (String, bool, String) {
-    if matches!(risk_level, "极高风险" | "极高") && matches!(action, "买入" | "增持" | "持有")
-    {
+    let extreme = matches!(risk_level, "极高风险" | "极高");
+    let high = matches!(risk_level, "高风险" | "高");
+
+    let Some(kind) = normalize_action(action) else {
+        tracing::warn!(
+            action = %action,
+            risk_level = %risk_level,
+            "[apply_risk_veto] 未识别的 action 值域，跳过结论式放行"
+        );
+        if extreme || high {
+            return (
+                "观望".into(),
+                true,
+                format!("未识别 action 值域「{action}」，风控按保守档降级为观望"),
+            );
+        }
+        return (
+            action.to_string(),
+            false,
+            format!("未识别 action 值域「{action}」，未参与风控判定"),
+        );
+    };
+
+    if extreme && kind.implies_long() {
         return ("观望".into(), true, "极高风险风控否决：禁止持仓".into());
     }
-    if matches!(risk_level, "高风险" | "高") && matches!(action, "买入" | "增持") {
+    if high && kind.implies_buy() {
         return ("持有".into(), true, "高风险风控否决：禁止加仓".into());
     }
     (action.to_string(), false, String::new())
@@ -658,7 +700,11 @@ pub fn portfolio_risk_gate(
                 },
             }
         }
-    } else if risk_tier.forbid_new_position() && matches!(pm_action, "买入" | "增持" | "持有")
+    // P1-6(2026-09-14): R-200 的档位判定改走统一归一化。
+    //   原判据只认中文 ⇒ 上游一旦下发英文 token，**极高风险的「禁止持仓」直接 fail-open**
+    //   （与 apply_risk_veto 同一类缺陷，两处必须同判据）。
+    } else if risk_tier.forbid_new_position()
+        && normalize_action(pm_action).is_some_and(ActionKind::implies_long)
     {
         // 极高风险档位禁止持仓（即使 portfolio-mgr 输出"持有"也要降级）
         reasons.push(format!("R-200 极高风险档位禁止持仓，{}→观望", pm_action));
@@ -700,7 +746,9 @@ pub fn portfolio_risk_gate(
 
     // 6. 标记股票已被持仓（用于 explainer 提示"加仓"vs"新建仓"）
     let already_held = holdings.iter().any(|p| p.stock_code == stock_code);
-    if already_held && matches!(final_action.as_str(), "买入" | "增持") {
+    // P1-6(2026-09-14): 同 R-200，改走统一归一化（英文值域下原判据恒 false，提示静默消失）
+    if already_held && normalize_action(final_action.as_str()).is_some_and(ActionKind::implies_buy)
+    {
         reasons.push(format!("R-210 当前已持有 {}，本次为加仓操作", stock_code));
     }
 
@@ -736,6 +784,34 @@ pub struct PortfolioMgrParamSet {
     pub cap_extreme: f64,
     pub cap_high: f64,
     pub cap_mid: f64,
+    /// 市况先验：无个股证据时对「上涨 / 震荡 / 下跌」的基础判断（由市况方向派生）。
+    ///
+    /// 三个值替代了原先内联在 `portfolio-mgr.rhai` 中的硬编码先验，使其
+    /// **可被反思**（reflection → `params_suggestion` → 模板变量）与
+    /// **可被演进**（WFO 网格搜索 / `score_param_set`）优化。
+    ///
+    /// 与 `conservative()` / `aggressive()` 的风险偏好维度正交，故不随 profile 变化。
+    #[serde(default = "default_prior_bull")]
+    pub prior_bull: f64,
+    #[serde(default = "default_prior_sideways")]
+    pub prior_sideways: f64,
+    #[serde(default = "default_prior_bear")]
+    pub prior_bear: f64,
+}
+
+/// 市况先验默认值（与模板变量 `regime_prior_*` 的 seed 默认值保持一致）。
+pub const DEFAULT_PRIOR_BULL: f64 = 0.55;
+pub const DEFAULT_PRIOR_SIDEWAYS: f64 = 0.50;
+pub const DEFAULT_PRIOR_BEAR: f64 = 0.45;
+
+fn default_prior_bull() -> f64 {
+    DEFAULT_PRIOR_BULL
+}
+fn default_prior_sideways() -> f64 {
+    DEFAULT_PRIOR_SIDEWAYS
+}
+fn default_prior_bear() -> f64 {
+    DEFAULT_PRIOR_BEAR
 }
 
 impl PortfolioMgrParamSet {
@@ -751,6 +827,9 @@ impl PortfolioMgrParamSet {
             cap_extreme: 10.0,
             cap_high: 35.0,
             cap_mid: 50.0,
+            prior_bull: DEFAULT_PRIOR_BULL,
+            prior_sideways: DEFAULT_PRIOR_SIDEWAYS,
+            prior_bear: DEFAULT_PRIOR_BEAR,
         }
     }
     pub fn conservative() -> Self {
@@ -764,6 +843,10 @@ impl PortfolioMgrParamSet {
             cap_extreme: 8.0,
             cap_high: 28.0,
             cap_mid: 40.0,
+            // 先验与风险偏好正交（由市况派生），沿用默认值
+            prior_bull: DEFAULT_PRIOR_BULL,
+            prior_sideways: DEFAULT_PRIOR_SIDEWAYS,
+            prior_bear: DEFAULT_PRIOR_BEAR,
         }
     }
     pub fn aggressive() -> Self {
@@ -777,6 +860,10 @@ impl PortfolioMgrParamSet {
             cap_extreme: 15.0,
             cap_high: 45.0,
             cap_mid: 60.0,
+            // 先验与风险偏好正交（由市况派生），沿用默认值
+            prior_bull: DEFAULT_PRIOR_BULL,
+            prior_sideways: DEFAULT_PRIOR_SIDEWAYS,
+            prior_bear: DEFAULT_PRIOR_BEAR,
         }
     }
     pub fn default_grid() -> Vec<Self> {
@@ -809,6 +896,7 @@ impl PortfolioMgrParamSet {
                 cap_extreme: 5.0,
                 cap_high: 20.0,
                 cap_mid: 30.0,
+                ..Self::v56_default()
             },
             Self {
                 buy_threshold: 0.55,
@@ -819,14 +907,39 @@ impl PortfolioMgrParamSet {
                 cap_extreme: 20.0,
                 cap_high: 50.0,
                 cap_mid: 70.0,
+                ..Self::v56_default()
             },
             Self { buy_threshold: 0.66, increase_threshold: 0.56, ..Self::v56_default() },
             Self { buy_threshold: 0.60, increase_threshold: 0.50, ..Self::v56_default() },
+            // ── 先验敏感候选：单独扫描 regime_prior_* 维度，其余沿用默认 ──
+            // 乐观先验：抬升 bull / 压低 bear，无个股证据时更倾向看多
+            Self {
+                prior_bull: 0.60,
+                prior_sideways: 0.52,
+                prior_bear: 0.40,
+                ..Self::v56_default()
+            },
+            // 谨慎先验：压平三档，无个股证据时更保守
+            Self {
+                prior_bull: 0.50,
+                prior_sideways: 0.48,
+                prior_bear: 0.50,
+                ..Self::v56_default()
+            },
         ]
     }
 }
 
 // ── Path 2: 从 LLM 反思输出解析 ParamSet ──
+
+/// 从 JSON 对象按多个候选键名取 `f64`。
+///
+/// 反思侧 LLM 输出的参数名可能是短名（`prior_bull`）、camelCase（`priorBull`）
+/// 或模板全名（`regime_prior_bull`），三者语义等价，需一并接受，
+/// 否则「LLM 用了全名」会被静默回落成默认值。
+fn pick_f64(obj: &serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|k| obj.get(*k).and_then(|v| v.as_f64()))
+}
 
 /// 从 reflection 的 `parameter_suggestions_json` 解析 `PortfolioMgrParamSet`。
 ///
@@ -855,11 +968,33 @@ pub fn try_parse_param_suggestion(json_str: &str) -> Option<PortfolioMgrParamSet
                 matches!(
                     k.as_str(),
                     "buy_threshold"
+                        | "buyThreshold"
                         | "increase_threshold"
+                        | "increaseThreshold"
                         | "hold_threshold"
+                        | "holdThreshold"
+                        | "watch_threshold"
+                        | "watchThreshold"
+                        | "reduce_threshold"
+                        | "reduceThreshold"
                         | "cap_extreme"
+                        | "capExtreme"
                         | "cap_high"
+                        | "capHigh"
                         | "cap_mid"
+                        | "capMid"
+                        | "prior_bull"
+                        | "priorBull"
+                        | "prior_sideways"
+                        | "priorSideways"
+                        | "prior_bear"
+                        | "priorBear"
+                        | "regime_prior_bull"
+                        | "regimePriorBull"
+                        | "regime_prior_sideways"
+                        | "regimePriorSideways"
+                        | "regime_prior_bear"
+                        | "regimePriorBear"
                 )
             });
             if has_structured {
@@ -891,6 +1026,26 @@ pub fn try_parse_param_suggestion(json_str: &str) -> Option<PortfolioMgrParamSet
                         .unwrap_or(def.cap_extreme),
                     cap_high: obj.get("cap_high").and_then(|v| v.as_f64()).unwrap_or(def.cap_high),
                     cap_mid: obj.get("cap_mid").and_then(|v| v.as_f64()).unwrap_or(def.cap_mid),
+                    prior_bull: pick_f64(
+                        obj,
+                        &["prior_bull", "priorBull", "regime_prior_bull", "regimePriorBull"],
+                    )
+                    .unwrap_or(def.prior_bull),
+                    prior_sideways: pick_f64(
+                        obj,
+                        &[
+                            "prior_sideways",
+                            "priorSideways",
+                            "regime_prior_sideways",
+                            "regimePriorSideways",
+                        ],
+                    )
+                    .unwrap_or(def.prior_sideways),
+                    prior_bear: pick_f64(
+                        obj,
+                        &["prior_bear", "priorBear", "regime_prior_bear", "regimePriorBear"],
+                    )
+                    .unwrap_or(def.prior_bear),
                 });
             }
             // 对象内藏数组: {"params":[{"key":"buy_threshold","value":0.60}, ...]}
@@ -921,6 +1076,17 @@ fn parse_key_value_array(arr: &[serde_json::Value]) -> Option<PortfolioMgrParamS
                     "cap_extreme" | "capExtreme" => p.cap_extreme = v,
                     "cap_high" | "capHigh" => p.cap_high = v,
                     "cap_mid" | "capMid" => p.cap_mid = v,
+                    // 市况先验（兼容模板全名 regime_prior_* / 短名 / camelCase）
+                    "prior_bull" | "priorBull" | "regime_prior_bull" | "regimePriorBull" => {
+                        p.prior_bull = v
+                    },
+                    "prior_sideways"
+                    | "priorSideways"
+                    | "regime_prior_sideways"
+                    | "regimePriorSideways" => p.prior_sideways = v,
+                    "prior_bear" | "priorBear" | "regime_prior_bear" | "regimePriorBear" => {
+                        p.prior_bear = v
+                    },
                     _ => {},
                 }
             }
@@ -1093,9 +1259,38 @@ mod tests {
 
     #[test]
     fn risk_classify_extreme_debt() {
+        // v40 C：高负债 + 营收负增长 + **真困境**（ROE<0 亏损）⇒ 极高风险
+        let level =
+            classify_risk(Some(30.0), Some(0.5), Some(20.0), Some(-3.0), Some(90.0), Some(-5.0));
+        assert_eq!(level, "极高风险", "should be extreme risk");
+    }
+
+    /// v40 C 反例：高负债 + 营收微降 + ROE 为正 ⇒ **不再**判极高（防单一指标顶格）。
+    #[test]
+    fn risk_classify_extreme_debt_requires_distress() {
         let level =
             classify_risk(Some(30.0), Some(0.5), Some(20.0), Some(5.0), Some(90.0), Some(-5.0));
-        assert_eq!(level, "极高风险", "should be extreme risk");
+        assert_ne!(level, "极高风险", "微降 + 正 ROE 不构成财务困境，不应顶格");
+    }
+
+    /// 601166（兴业银行）实测画像应落到「中风险」—— 判据中**不含任何行业标签**。
+    ///
+    /// 输入全部取自 DB `blackboard_snapshot["t-risk"]` 的真实存档值
+    /// （601166 / run 3e01fdc5 / 2026-09-12）：
+    ///   vol 21.1 / sharpe 0.399 / dd 8.7 / roe 4.8 / debt 91.6 / growth -0.3
+    /// 复算：极高风险的两条路径都不触发 ——
+    ///   · 负债路径（debt>85 && growth<0 && 真困境）被「真困境」条件挡住：
+    ///     growth=-0.3 不满足 <-10、roe=4.8 不满足 <0 ⇒ 整体为假；
+    ///   · 波动路径（vol>60 && sharpe<-1.5）⇒ vol 21.1 为假。
+    /// 高风险（AND 结构）左半边 vol>40 / sharpe<0 / dd>45 **三项全不成立**
+    ///   ⇒ 右半边 debt>65 虽为真亦无效 ⇒ 落到「中风险」。
+    /// 注：旧判据（无「真困境」条件）下 debt 91.6 + growth -0.3 会命中「极高风险」，
+    ///     DB 存档中的旧结论即由此产生。
+    #[test]
+    fn risk_classify_bank_profile_is_not_extreme() {
+        let level =
+            classify_risk(Some(21.1), Some(0.399), Some(8.7), Some(4.8), Some(91.6), Some(-0.3));
+        assert_eq!(level, "中风险", "高负债率本身不构成困境：真困境条件（亏损 / 大幅萎缩）未满足");
     }
 
     #[test]
@@ -1177,6 +1372,47 @@ mod tests {
         let (action, was_down, _) = apply_risk_veto("持有", "低风险");
         assert_eq!(action, "持有");
         assert!(!was_down);
+    }
+
+    #[test]
+    fn risk_veto_accepts_english_and_dashboard_value_domains() {
+        // 英文值域：修复前此处不匹配任何中文分支 ⇒ 极高风险否决静默失效
+        let (action, was_down, _) = apply_risk_veto("BUY", "极高风险");
+        assert_eq!(action, "观望");
+        assert!(was_down);
+
+        let (action, was_down, _) = apply_risk_veto("HOLD", "极高风险");
+        assert_eq!(action, "观望");
+        assert!(was_down);
+
+        let (action, was_down, _) = apply_risk_veto("INCREASE", "高风险");
+        assert_eq!(action, "持有");
+        assert!(was_down);
+
+        // dashboard_report 值域（无「观望」档、有「强烈买入」）
+        let (action, was_down, _) = apply_risk_veto("强烈买入", "高风险");
+        assert_eq!(action, "持有");
+        assert!(was_down);
+    }
+
+    #[test]
+    fn risk_veto_unrecognized_value_no_longer_fails_open() {
+        // 高风险 + 未识别值域：不得静默返回原值（旧实现会直接放行）
+        let (action, was_down, note) = apply_risk_veto("待明日观察", "极高风险");
+        assert_eq!(action, "观望");
+        assert!(was_down);
+        assert!(!note.is_empty(), "未识别值域必须留归因");
+
+        // 低风险 + 未识别值域：保留原值，但 note 说明未参与判定
+        let (action, was_down, note) = apply_risk_veto("待明日观察", "低风险");
+        assert_eq!(action, "待明日观察");
+        assert!(!was_down);
+        assert!(note.contains("未识别"));
+
+        // 空串（历史缺失哨兵形态）同样不得被当成「无需否决」
+        let (action, was_down, _) = apply_risk_veto("", "高风险");
+        assert_eq!(action, "观望");
+        assert!(was_down);
     }
 
     // ── Path 2: try_parse_param_suggestion ──
@@ -1506,14 +1742,13 @@ mod tests {
 
     #[test]
     fn factor_completeness_counts_all_valid() {
-        // 10 个因子全部有效 → 1.0
+        // 9 个因子全部有效 → 1.0
         let r = compute_factor_completeness(
             Some(70.0),
             Some(65.0),
             Some("强"),
             Some(25.0),
             Some(15.0),
-            Some("看多"),
             Some(-1.2e8),
             Some(3),
             Some(5),
@@ -1524,44 +1759,126 @@ mod tests {
 
     #[test]
     fn factor_completeness_zero_money_flow_not_counted() {
-        // main_net_inflow = 0（中性无信号）→ f9 不计数 → 9/10
+        // main_net_inflow = 0（中性无信号）→ f9 不计数 → 8/9
         let r = compute_factor_completeness(
             Some(70.0),
             Some(65.0),
             Some("强"),
             Some(25.0),
             Some(15.0),
-            Some("看多"),
             Some(0.0),
             Some(3),
             Some(5),
             Some(0.3),
         );
-        assert!((r - 0.9).abs() < 1e-9, "got {r}");
+        assert!((r - (8.0 / 9.0)).abs() < 1e-9, "got {r}");
     }
 
     #[test]
     fn factor_completeness_out_of_range_values_not_counted() {
-        // total_score=150（超 0-100）、pace=5.0（超 [-1,1]）→ 均不计数 → 8/10
+        // total_score=150（超 0-100）、pace=5.0（超 [-1,1]）→ 均不计数 → 7/9
         let r = compute_factor_completeness(
             Some(150.0),
             Some(65.0),
             Some("强"),
             Some(25.0),
             Some(15.0),
-            Some("看多"),
             Some(-1.2e8),
             Some(3),
             Some(5),
             Some(5.0),
         );
-        assert!((r - 0.8).abs() < 1e-9, "got {r}");
+        assert!((r - (7.0 / 9.0)).abs() < 1e-9, "got {r}");
     }
 
     #[test]
     fn factor_completeness_all_none_is_zero() {
-        let r =
-            compute_factor_completeness(None, None, None, None, None, None, None, None, None, None);
+        let r = compute_factor_completeness(None, None, None, None, None, None, None, None, None);
         assert!((r - 0.0).abs() < 1e-9);
+    }
+
+    // ── PortfolioMgrParamSet：市况先验（可反思 / 可演进优化）──
+
+    #[test]
+    fn prior_defaults_match_template_seed() {
+        // 必须与 seed_variables.rs 的 regime_prior_* 默认值一致，
+        // 否则「未配置基线」与「反思/演进回写基线」会漂移。
+        let d = PortfolioMgrParamSet::v56_default();
+        assert!((d.prior_bull - 0.55).abs() < 1e-9, "got {}", d.prior_bull);
+        assert!((d.prior_sideways - 0.50).abs() < 1e-9, "got {}", d.prior_sideways);
+        assert!((d.prior_bear - 0.45).abs() < 1e-9, "got {}", d.prior_bear);
+    }
+
+    #[test]
+    fn profiles_share_same_prior_dimension() {
+        // 先验由市况派生，与风险偏好正交 → 三个 profile 的先验应完全相同
+        let a = PortfolioMgrParamSet::v56_default();
+        let b = PortfolioMgrParamSet::conservative();
+        let c = PortfolioMgrParamSet::aggressive();
+        assert_eq!(a.prior_bull, b.prior_bull);
+        assert_eq!(a.prior_bull, c.prior_bull);
+        assert_eq!(a.prior_sideways, b.prior_sideways);
+        assert_eq!(a.prior_sideways, c.prior_sideways);
+        assert_eq!(a.prior_bear, b.prior_bear);
+        assert_eq!(a.prior_bear, c.prior_bear);
+    }
+
+    #[test]
+    fn default_grid_scans_prior_dimension() {
+        // 回归守护：若网格中所有候选的先验都等于默认值，WFO 对先验的「搜索」
+        // 等价于没有搜索 ——「演进可优化先验」会名存实亡。
+        let grid = PortfolioMgrParamSet::default_grid();
+        let d = PortfolioMgrParamSet::v56_default();
+        let varied = grid
+            .iter()
+            .filter(|p| {
+                p.prior_bull != d.prior_bull
+                    || p.prior_sideways != d.prior_sideways
+                    || p.prior_bear != d.prior_bear
+            })
+            .count();
+        assert!(varied >= 2, "网格需至少 2 组先验不同的候选，实际 {varied}");
+    }
+
+    #[test]
+    fn parses_prior_from_short_names() {
+        let p = try_parse_param_suggestion(r#"{"prior_bull":0.62,"prior_bear":0.38}"#)
+            .expect("应解析成功");
+        assert!((p.prior_bull - 0.62).abs() < 1e-9);
+        assert!((p.prior_bear - 0.38).abs() < 1e-9);
+        // 未指定字段回落默认值
+        assert!((p.prior_sideways - 0.50).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parses_prior_from_template_full_names() {
+        let p = try_parse_param_suggestion(r#"{"regime_prior_bull":0.58}"#).expect("应解析成功");
+        assert!((p.prior_bull - 0.58).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parses_prior_from_camel_case() {
+        let p = try_parse_param_suggestion(r#"{"priorSideways":0.47}"#).expect("应解析成功");
+        assert!((p.prior_sideways - 0.47).abs() < 1e-9);
+    }
+
+    #[test]
+    fn prior_only_suggestion_is_recognized() {
+        // 回归守护：has_structured 必须认先验键，
+        // 否则「只建议先验」的反思会被整体丢弃。
+        assert!(
+            try_parse_param_suggestion(r#"{"prior_bear":0.40}"#).is_some(),
+            "仅含先验的建议不应被丢弃"
+        );
+    }
+
+    #[test]
+    fn parses_prior_from_key_value_array() {
+        let p = try_parse_param_suggestion(
+            r#"[{"key":"prior_bear","value":0.42},{"key":"buy_threshold","value":0.60}]"#,
+        )
+        .expect("应解析成功");
+        assert!((p.prior_bear - 0.42).abs() < 1e-9);
+        assert!((p.buy_threshold - 0.60).abs() < 1e-9);
     }
 }

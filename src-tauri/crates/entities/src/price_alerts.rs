@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub stock_code: String,
     pub stock_name: String,
     /// 老字段（兼容保留）: "above" 或 "below"
@@ -18,6 +19,7 @@ pub struct Model {
     /// 新字段（v203）: 对齐 RealtimeMonitor 的 6 类 alert_type
     /// 取值: `stop_loss` / `take_profit` / `resistance` / `support` / `change` / `volume`
     /// 老数据在 v203 迁移中已回填，可安全读取。
+    #[sea_orm(indexed)]
     pub alert_type: Option<String>,
     /// 新字段（v203）: 阈值语义
     /// 取值: `price` / `change_pct` / `turnover_rate`

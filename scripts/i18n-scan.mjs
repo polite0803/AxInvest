@@ -105,6 +105,53 @@ function stripComments(lines) {
   return result;
 }
 
+// ── console 调用剥离 ──
+// console.* 输出是**开发者可见的调试日志**，不是用户可见 UI 文案；且 AGENTS.md 明确要求
+// 「注释/日志优先中文」。中文日志被 Rule 1 判为硬编码属误判，走 allowlist 则等于把正常写法
+// 登记成技术债（且行号绑定脆弱，一改就漂）。故此处把 console 调用区间从检测文本中抹除。
+// 返回与输入等长的行数组：console 区间（含跨行参数）变空白，行号与行内其余代码保持不变。
+const CONSOLE_CALL =
+  /^console\s*\.\s*(?:log|warn|error|info|debug|trace|dir|table|group|groupEnd|time|timeEnd|assert|count|countReset)\s*\(/;
+
+function stripConsoleCalls(lines) {
+  const src = lines.join("\n");
+  const out = src.split("");
+  let quote = null;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quote) {
+      if (ch === "\\") { i++; continue; }
+      if (ch === quote) { quote = null; }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") { quote = ch; continue; }
+    // 仅从代码位置（非字符串内）识别 console 调用，避免 `const s = "console.warn(x)"` 被误抹
+    if (ch !== "c" || !src.startsWith("console", i)) { continue; }
+    const m = CONSOLE_CALL.exec(src.slice(i));
+    if (!m) { continue; }
+    // 从 '(' 起做括号配对；字符串/模板串内的括号不计数（模板串 ${} 嵌套为已知简化，不影响本用途）
+    let depth = 0;
+    let j = i + m[0].length - 1;
+    let q = null;
+    for (; j < src.length; j++) {
+      const c = src[j];
+      if (q) {
+        if (c === "\\") { j++; continue; }
+        if (c === q) { q = null; }
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { q = c; continue; }
+      if (c === "(") { depth++; continue; }
+      if (c === ")") { depth--; if (depth === 0) { break; } }
+    }
+    for (let k = i; k <= j && k < src.length; k++) {
+      if (out[k] !== "\n") { out[k] = " "; }
+    }
+    i = j;
+  }
+  return out.join("").split("\n");
+}
+
 // ── 检测单文件违规 ──
 // 返回按规则分组的 {rule, file, line, content}[]
 function scanFile(f, rel) {
@@ -119,8 +166,9 @@ function scanFile(f, rel) {
   // i18n-exempt：文件内标记为豁免的数据文件（mock / NLP / 技术字符串，非用户可见 UI 文案），
   // 恢复 bash 旧脚本支持的文件级豁免惯例（如 browserMock.ts / chartGenerator.ts / searchUtils.ts）。
   if (content.includes("i18n-exempt")) { return []; }
-  // 仅检测纯代码：注释已在下方 stripComments 中剥离，不参与任何规则匹配。
-  const cleaned = stripComments(content.split("\n"));
+  // 仅检测纯代码：注释（stripComments）与 console 日志（stripConsoleCalls）均已剥离，
+  // 二者都不参与任何规则匹配。
+  const cleaned = stripConsoleCalls(stripComments(content.split("\n")));
   const out = [];
   cleaned.forEach((line, idx) => {
     const lnum = idx + 1;

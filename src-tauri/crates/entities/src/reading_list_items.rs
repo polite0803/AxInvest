@@ -23,12 +23,16 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub notes: Option<String>,
     /// 阅读状态：unread / reading / read / skipped
+    #[sea_orm(default_value = "unread")]
     pub status: String,
     /// 优先级 0-100，默认 50
+    #[sea_orm(default_value = 50)]
     pub priority: i32,
     /// 在列表中的位置（用于自定义排序）
+    #[sea_orm(default_value = 0)]
     pub position: i32,
     /// 任意元数据 JSON 字符串（authors/published_date 等）
+    #[sea_orm(default_value = "{}")]
     pub metadata_json: String,
     /// 添加时间（Unix 毫秒）
     pub added_at: i64,

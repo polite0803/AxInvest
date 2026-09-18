@@ -4,12 +4,12 @@
 //!
 //! # 问题背景
 //!
-//! OPC 行业工作流（9 大行业）执行完成后，反思、进化、RL 经验积累全靠手动触发，
+//! OPC 域包工作流（9 大域包）执行完成后，反思、进化、RL 经验积累全靠手动触发，
 //! 导致自动学习闭环实际断裂。本模块提供 `try_auto_learn_workflow()`，
 //! 在工作流完成时自动执行：
 //!
 //! ```text
-//! 工作流完成 → 自动识别行业 → 计算质量分 → 记录 RL 经验
+//! 工作流完成 → 自动识别域包 → 计算质量分 → 记录 RL 经验
 //!     → 触发反思 → 质量分低于阈值则触发进化 → 自我改进 → 策略优化
 //! ```
 //!
@@ -27,13 +27,13 @@ use tauri::State;
 use tracing::{debug, info, warn};
 
 use crate::AppState;
-use crate::commands::opc_industry_actions::load_rl_config;
+use crate::commands::opc_domain_pack_actions::load_rl_config;
 use crate::state::learning::LearningEngineState;
 use axagent_orchestrator::{EvolutionRequest, ReflectionRequest, SelfImprovementRequest};
 
-// ── 行业映射：模板 ID → 行业 ID ──────────────────────────
+// ── 域包映射：模板 ID → 域包 ID ──────────────────────────
 
-/// 领域工作流前缀（17 个领域包，需额外映射；行业包走动态扫描，见下）
+/// 领域工作流前缀（17 个领域包，需额外映射；域包走动态扫描，见下）
 const DOMAIN_TEMPLATE_PREFIXES: &[(&str, &str)] = &[
     ("wf-finance-", "finance-invest"),
     ("wf-accounting-", "accounting"),
@@ -43,36 +43,55 @@ const DOMAIN_TEMPLATE_PREFIXES: &[(&str, &str)] = &[
     ("wf-education-", "education"),
     ("wf-research-", "ai-research"),
     ("wf-ecommerce-", "ecommerce"),
-    ("wf-consulting-", "industry-consulting"),
+    ("wf-consulting-", "consulting"),
 ];
 
-/// 根据工作流模板 ID 识别所属行业
+/// 根据工作流模板 ID 识别所属域包
 ///
-/// v1.1 行业独立版：**动态扫描行业包目录**（`config/opc/industries/{dir}/`，
-/// 模板前缀约定 `workflow-{dir 下划线转连字符}`），新增行业无需改代码
-/// （消灭 M3 硬编码前缀表）；领域包前缀仍走静态表兼容。
+/// v1.1 域包独立版：**动态扫描域包目录**（`config/opc/domain_packs/{dir}/`），
+/// 模板前缀取 `manifest.yaml` 的 `template_prefix`，缺省为域包 id 的连字符形式
+/// （`workflow-{domain_pack_id}`）；领域包前缀仍走静态表兼容。
 ///
-/// 返回 `Some(industry_id)` 表示这是 OPC 行业工作流，
+/// `app_dir`：用户数据目录。生产/服务模式下进程 CWD 不是仓库根，域包只在
+/// `app_dir/config/opc` 下存在 —— 传 `None` 会退化为仓库根探测，生产环境必然扫不到。
+///
+/// 返回 `Some(domain_pack_id)` 表示这是 OPC 域包工作流，
 /// `None` 表示非 OPC 工作流（如股票分析等）。
-pub fn identify_industry_from_template(template_id: &str) -> Option<String> {
-    // 行业包动态注册：扫描 `config/opc/industries/*/` 目录
-    let base = crate::commands::opc_workflows::resolve_industries_dir(None);
+pub fn identify_domain_pack_from_template(
+    template_id: &str,
+    app_dir: Option<&std::path::Path>,
+) -> Option<String> {
+    use axagent_analysis_engine::opc::domain_pack;
+
+    // 域包动态注册：扫描 `config/opc/domain_packs/*/`
+    let base = axagent_analysis_engine::opc::resolve_domain_packs_dir(app_dir);
     if let Ok(rd) = std::fs::read_dir(&base) {
         for entry in rd.filter_map(Result::ok) {
-            if !entry.path().is_dir() {
+            let dir = entry.path();
+            if !dir.is_dir() {
                 continue;
             }
-            let dir_name = entry.file_name().to_string_lossy().to_string();
-            let industry_id = dir_name.replace('_', "-");
-            if template_id.starts_with(&format!("workflow-{industry_id}")) {
-                return Some(industry_id);
+            // manifest 优先（可声明 template_prefix）；解析失败退回目录名推导
+            let (domain_pack_id, prefix) = match domain_pack::read_manifest(&dir) {
+                Some(m) => {
+                    let id = m.id.replace('_', "-");
+                    let prefix = m.template_prefix.clone().unwrap_or_else(|| id.clone());
+                    (id, prefix)
+                },
+                None => {
+                    let id = entry.file_name().to_string_lossy().replace('_', "-");
+                    (id.clone(), id)
+                },
+            };
+            if template_id.starts_with(&format!("workflow-{prefix}")) {
+                return Some(domain_pack_id);
             }
         }
     }
     // 领域包静态表（兼容）
-    for (prefix, industry_id) in DOMAIN_TEMPLATE_PREFIXES {
+    for (prefix, domain_pack_id) in DOMAIN_TEMPLATE_PREFIXES {
         if template_id.starts_with(prefix) {
-            return Some((*industry_id).to_string());
+            return Some((*domain_pack_id).to_string());
         }
     }
     None
@@ -129,7 +148,7 @@ pub fn compute_quality_score(result: &serde_json::Value) -> f64 {
 /// 在工作流完成后自动触发学习管线
 ///
 /// # 执行流程
-/// 1. 识别行业（非 OPC 行业工作流则跳过）
+/// 1. 识别域包（非 OPC 域包工作流则跳过）
 /// 2. 计算质量分
 /// 3. 记录 RL 经验
 /// 4. 触发反思
@@ -146,20 +165,22 @@ pub async fn try_auto_learn_workflow(
     state: &LearningEngineState,
     app_dir: Option<&std::path::Path>,
 ) {
-    let industry_id = match identify_industry_from_template(template_id) {
+    let domain_pack_id = match identify_domain_pack_from_template(template_id, app_dir) {
         Some(id) => id,
         None => {
-            debug!("[opc-auto-learn] 模板 {} 非 OPC 行业工作流，跳过自动学习", template_id);
+            debug!("[opc-auto-learn] 模板 {} 非 OPC 域包工作流，跳过自动学习", template_id);
             return;
         },
     };
 
-    // P1-4：尊重行业 YAML 的 reflection/evolution/self_improvement/rl 开关，
+    // P1-4：尊重域包 YAML 的 reflection/evolution/self_improvement/rl 开关，
     // 关闭的环节不再触发（此前无视开关全部执行）。
-    let config =
-        crate::commands::opc_industry_actions::get_industry_learning_config(&industry_id, app_dir);
+    let config = crate::commands::opc_domain_pack_actions::get_domain_pack_learning_config(
+        &domain_pack_id,
+        app_dir,
+    );
     let Some(config) = config else {
-        debug!("[opc-auto-learn] 行业 {} 学习配置缺失，跳过自动学习", industry_id);
+        debug!("[opc-auto-learn] 域包 {} 学习配置缺失，跳过自动学习", domain_pack_id);
         return;
     };
     let rl_enabled = config.reinforcement_learning_enabled;
@@ -168,8 +189,8 @@ pub async fn try_auto_learn_workflow(
     let quality_score_100 = quality_score * 100.0;
 
     info!(
-        "[opc-auto-learn] 触发自动学习: industry={}, template={}, quality={:.1}, rl={}, reflect={}, evolve={}, self_improve={}",
-        industry_id,
+        "[opc-auto-learn] 触发自动学习: domain_pack={}, template={}, quality={:.1}, rl={}, reflect={}, evolve={}, self_improve={}",
+        domain_pack_id,
         template_id,
         quality_score_100,
         rl_enabled,
@@ -181,7 +202,7 @@ pub async fn try_auto_learn_workflow(
     // 步骤 1：记录 RL 经验（尊重 rl 开关）
     if rl_enabled {
         if let Err(e) =
-            record_experience(&industry_id, template_id, quality_score, result, state, app_dir)
+            record_experience(&domain_pack_id, template_id, quality_score, result, state, app_dir)
                 .await
         {
             warn!("[opc-auto-learn] RL 经验记录失败: {}", e);
@@ -192,7 +213,7 @@ pub async fn try_auto_learn_workflow(
     let mut reflection_result = None;
     if config.reflection_enabled {
         reflection_result =
-            Some(trigger_reflection(&industry_id, template_id, result, state).await);
+            Some(trigger_reflection(&domain_pack_id, template_id, result, state).await);
     }
 
     // 步骤 3：如果反思质量分低于阈值，触发进化（尊重 evolution 开关）
@@ -200,7 +221,7 @@ pub async fn try_auto_learn_workflow(
         if reflection.quality_score < 70.0 && config.evolution_enabled {
             info!("[opc-auto-learn] 质量分 {:.1} 低于阈值 70，触发进化", reflection.quality_score);
             if let Err(e) = trigger_evolution(
-                &industry_id,
+                &domain_pack_id,
                 template_id,
                 &format!("反思质量分较低 ({:.1})，自动触发进化", reflection.quality_score),
                 state,
@@ -214,60 +235,66 @@ pub async fn try_auto_learn_workflow(
 
     // 步骤 4：自我改进（尊重 self_improvement 开关）
     if config.self_improvement_enabled {
-        if let Err(e) = trigger_self_improvement(&industry_id, template_id, state).await {
+        if let Err(e) = trigger_self_improvement(&domain_pack_id, template_id, state).await {
             warn!("[opc-auto-learn] 自我改进失败: {}", e);
         }
     }
 
     // 步骤 5：RL 策略优化（尊重 rl 开关；经验不足时静默跳过）
     if rl_enabled {
-        if let Err(e) = trigger_rl_optimization(&industry_id, state, app_dir).await {
+        if let Err(e) = trigger_rl_optimization(&domain_pack_id, state, app_dir).await {
             debug!("[opc-auto-learn] RL 策略优化（可能经验不足）: {}", e);
         }
     }
 
     info!(
-        "[opc-auto-learn] 自动学习完成: industry={}, template={}, quality={:.1}",
-        industry_id, template_id, quality_score_100
+        "[opc-auto-learn] 自动学习完成: domain_pack={}, template={}, quality={:.1}",
+        domain_pack_id, template_id, quality_score_100
     );
 }
 
 // ── 各步骤实现 ──────────────────────────────────────
 
 async fn record_experience(
-    industry_id: &str,
+    domain_pack_id: &str,
     workflow_id: &str,
     quality_score: f64,
     result: &serde_json::Value,
     state: &LearningEngineState,
     app_dir: Option<&std::path::Path>,
 ) -> Result<(), String> {
-    let rl_config = load_rl_config(industry_id, app_dir)
-        .ok_or_else(|| format!("行业 {} 的 RL 配置不存在", industry_id))?;
+    let rl_config = load_rl_config(domain_pack_id, app_dir)
+        .ok_or_else(|| format!("域包 {} 的 RL 配置不存在", domain_pack_id))?;
 
-    let engine = &state.industry_learning_engine;
-    engine.record_experience(industry_id, workflow_id, quality_score, result, &rl_config).await?;
+    let engine = &state.domain_pack_learning_engine;
+    engine
+        .record_experience(domain_pack_id, workflow_id, quality_score, result, &rl_config)
+        .await?;
 
-    debug!("[opc-auto-learn] RL 经验已记录: industry={}, workflow={}", industry_id, workflow_id);
+    debug!(
+        "[opc-auto-learn] RL 经验已记录: domain_pack={}, workflow={}",
+        domain_pack_id, workflow_id
+    );
     Ok(())
 }
 
 async fn trigger_reflection(
-    industry_id: &str,
+    domain_pack_id: &str,
     workflow_id: &str,
     result: &serde_json::Value,
     state: &LearningEngineState,
 ) -> Result<axagent_orchestrator::ReflectionResult, String> {
-    let registry = state.industry_adapter_registry.lock().await;
-    let adapter =
-        registry.get(industry_id).ok_or_else(|| format!("行业适配器不存在: {}", industry_id))?;
+    let registry = state.domain_pack_adapter_registry.lock().await;
+    let adapter = registry
+        .get(domain_pack_id)
+        .ok_or_else(|| format!("域包适配器不存在: {}", domain_pack_id))?;
 
     let template = adapter.reflection_template().clone();
     drop(registry);
 
-    let engine = &state.industry_learning_engine;
+    let engine = &state.domain_pack_learning_engine;
     let request = ReflectionRequest {
-        industry_id: industry_id.to_string(),
+        domain_pack_id: domain_pack_id.to_string(),
         workflow_id: workflow_id.to_string(),
         workflow_result: result.clone(),
         ..Default::default()
@@ -277,21 +304,22 @@ async fn trigger_reflection(
 }
 
 async fn trigger_evolution(
-    industry_id: &str,
+    domain_pack_id: &str,
     workflow_id: &str,
     reason: &str,
     state: &LearningEngineState,
 ) -> Result<axagent_orchestrator::EvolutionResult, String> {
-    let registry = state.industry_adapter_registry.lock().await;
-    let adapter =
-        registry.get(industry_id).ok_or_else(|| format!("行业适配器不存在: {}", industry_id))?;
+    let registry = state.domain_pack_adapter_registry.lock().await;
+    let adapter = registry
+        .get(domain_pack_id)
+        .ok_or_else(|| format!("域包适配器不存在: {}", domain_pack_id))?;
 
     let constraints = adapter.evolution_constraints().clone();
     drop(registry);
 
-    let engine = &state.industry_learning_engine;
+    let engine = &state.domain_pack_learning_engine;
     let request = EvolutionRequest {
-        industry_id: industry_id.to_string(),
+        domain_pack_id: domain_pack_id.to_string(),
         workflow_id: workflow_id.to_string(),
         reason: reason.to_string(),
     };
@@ -300,46 +328,47 @@ async fn trigger_evolution(
 }
 
 async fn trigger_self_improvement(
-    industry_id: &str,
+    domain_pack_id: &str,
     _workflow_id: &str,
     state: &LearningEngineState,
 ) -> Result<axagent_orchestrator::SelfImprovementResult, String> {
-    let engine = &state.industry_learning_engine;
+    let engine = &state.domain_pack_learning_engine;
     let request = SelfImprovementRequest {
-        industry_id: industry_id.to_string(),
+        domain_pack_id: domain_pack_id.to_string(),
         // P4-4 修复：target 由畸形 `workflow_{workflow_id}_optimization`
-        // （会拼出 workflow_workflow-xxx_optimization）改为按行业寻址
-        target: format!("industry_{}_optimization", industry_id),
+        // （会拼出 workflow_workflow-xxx_optimization）改为按域包寻址
+        target: format!("domain_pack_{}_optimization", domain_pack_id),
     };
 
     engine.run_self_improvement(&request).await
 }
 
 async fn trigger_rl_optimization(
-    industry_id: &str,
+    domain_pack_id: &str,
     state: &LearningEngineState,
     app_dir: Option<&std::path::Path>,
 ) -> Result<(), String> {
-    let rl_config = load_rl_config(industry_id, app_dir)
-        .ok_or_else(|| format!("行业 {} 的 RL 配置不存在", industry_id))?;
+    let rl_config = load_rl_config(domain_pack_id, app_dir)
+        .ok_or_else(|| format!("域包 {} 的 RL 配置不存在", domain_pack_id))?;
 
-    let engine = &state.industry_learning_engine;
-    engine.optimize_policy(industry_id, &rl_config).await?;
+    let engine = &state.domain_pack_learning_engine;
+    engine.optimize_policy(domain_pack_id, &rl_config).await?;
     Ok(())
 }
 
 // ── Tauri 命令 ──────────────────────────────────────
 
 /// 手动触发自动学习（可由前端或 Agent 显式调用）
-#[agent_command(domain = opc, safety = Safe, call_mode = StateInput, description = "触发 OPC 行业工作流的自动学习管线")]
+#[agent_command(domain = opc, safety = Safe, call_mode = StateInput, description = "触发 OPC 域包工作流的自动学习管线")]
 #[tauri::command]
 pub async fn opc_auto_learn_workflow(
     state: State<'_, AppState>,
     template_id: String,
     workflow_result: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let industry_id = identify_industry_from_template(&template_id)
-        .ok_or_else(|| format!("模板 {} 不是 OPC 行业工作流", template_id))?;
+    let domain_pack_id =
+        identify_domain_pack_from_template(&template_id, Some(&state.app_data_dir))
+            .ok_or_else(|| format!("模板 {} 不是 OPC 域包工作流", template_id))?;
 
     let quality_score = compute_quality_score(&workflow_result);
 
@@ -353,7 +382,7 @@ pub async fn opc_auto_learn_workflow(
 
     Ok(serde_json::json!({
         "success": true,
-        "industryId": industry_id,
+        "domainPackId": domain_pack_id,
         "templateId": template_id,
         "qualityScore": quality_score,
         "message": "自动学习已触发",

@@ -185,6 +185,32 @@ pub async fn list_items(db: &DatabaseConnection, namespace_id: &str) -> Result<V
     Ok(models.into_iter().map(model_to_item).collect())
 }
 
+/// 按索引状态跨命名空间列举记忆条目（最老的优先）。
+///
+/// 用途：捞出「状态为 pending 但队列里没有对应作业」的孤儿条目。
+///
+/// 为什么会有孤儿：`index_status` 由本 DAO 层写入（插入时默认 `pending`），
+/// 而「入队」是调用方（命令层）的独立动作。任何绕过命令层的写入路径都会留下
+/// 永久 pending —— 字段声称"等待向量化"，却没有任何机制会去看它。
+/// 生产实证（2026-09-12）：2 条 `source='reflector'` 的记忆自 09-06 起持续
+/// pending，`index_jobs` 中零 pending 作业，`vec_collections` 里不存在任何
+/// memory 命名空间的集合，即这批记忆从未被向量化且永远不会。
+pub async fn list_items_by_index_status(
+    db: &DatabaseConnection,
+    status: &str,
+    limit: u64,
+) -> Result<Vec<MemoryItem>> {
+    let models = memory_items::Entity::find()
+        .filter(memory_items::Column::IndexStatus.eq(status))
+        // 升序：最老的先修（孤儿停留时间越长，越可能是顽固的结构性问题）
+        .order_by_asc(memory_items::Column::UpdatedAt)
+        .limit(limit)
+        .all(db)
+        .await?;
+
+    Ok(models.into_iter().map(model_to_item).collect())
+}
+
 /// 在数据库层面执行记忆条目搜索，带 WHERE 过滤和 LIMIT。
 ///
 /// 避免全表加载，利用数据库索引和 LIMIT 提前截断。

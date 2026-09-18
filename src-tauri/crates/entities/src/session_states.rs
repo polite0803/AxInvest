@@ -24,12 +24,14 @@ pub struct Model {
     /// 作用域（temp / session / persistent）
     pub scope: String,
     /// 会话 ID（冗余列，便于按会话批量清理）
+    #[sea_orm(indexed)]
     pub conversation_id: Option<String>,
     /// Agent 作用域（冗余列，便于按 Agent 批量清理与审计）
     pub agent_id: Option<String>,
     /// 最后更新时间戳（毫秒）
     pub updated_at_ms: i64,
     /// 过期时间戳（毫秒），NULL 表示不过期
+    #[sea_orm(indexed)]
     pub expires_at_ms: Option<i64>,
 }
 

@@ -780,9 +780,6 @@ export function createSendMethods(
                 disabledTools: effectiveDisabledTools.length > 0
                   ? effectiveDisabledTools
                   : undefined,
-                // P0-2 计划确认闸门：开关开启时要求后端对复杂任务先出计划草稿等待批准
-                requirePlanApproval: useAgentStore.getState().planApprovalEnabled
-                  || undefined,
               },
               // 用户意图提示：仅在显式选择时传入，缺省 auto 由路由自动决策
               modeHint: modeHint !== "auto" ? modeHint : undefined,
@@ -870,22 +867,17 @@ export function createSendMethods(
 
         // 认知路由命中的 Workflow 分支由后端执行，前端无需重复触发。
 
-        // 计划确认被用户拒绝（P0-2）：后端直接返回 rejected，不会发 agent-done/agent-error。
+        // 审批被用户拒绝（task_shape 闸门）：后端直接返回 approval_rejected，
+        // 不会发 agent-done/agent-error。
         // cognitive_query 的 Agent 执行分支透传 agent_query 的 status。
-        const isRejected = cognitiveResult?.execution?.kind === "agent"
-          && cognitiveResult.execution.status === "rejected";
         const isApprovalRejected = cognitiveResult?.execution?.kind === "agent"
           && cognitiveResult.execution.status === "approval_rejected";
-        if (isRejected || isApprovalRejected) {
+        if (isApprovalRejected) {
           set((s) => ({
             messages: s.messages.filter((m) => m.id !== currentMsgId),
           }));
           cleanup();
-          if (isApprovalRejected) {
-            message.info(i18n.t("taskShapeApproval.rejectedToast"));
-          } else {
-            message.info(i18n.t("planApproval.rejectedToast"));
-          }
+          message.info(i18n.t("taskShapeApproval.rejectedToast"));
           return;
         }
         // Wait for agent-done or agent-error event

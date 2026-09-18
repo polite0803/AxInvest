@@ -1,3 +1,4 @@
+import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Spin, Table, Tag } from "antd";
@@ -21,6 +22,8 @@ interface PositionSummary {
 export function PositionsMiniPanel() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // 跳转统一走 useStockJump（URL 是当前股票的唯一真相源）
+  const jumpToStock = useStockJump();
   const [positions, setPositions] = useState<PositionSummary[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -128,7 +131,7 @@ export function PositionsMiniPanel() {
         showHeader={false}
         onRow={(record) => ({
           style: { cursor: "pointer" },
-          onClick: () => navigate(`/stock-analysis?code=${record.stockCode}`),
+          onClick: () => jumpToStock({ code: record.stockCode, name: record.stockName }),
         })}
       />
     </div>

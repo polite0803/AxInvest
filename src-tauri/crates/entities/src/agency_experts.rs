@@ -16,6 +16,7 @@ pub struct Model {
     pub color: Option<String>,
     #[sea_orm(column_name = "source_dir")]
     pub source_dir: String,
+    #[sea_orm(default_value = 1)]
     pub is_enabled: i32,
     pub imported_at: i64,
     #[sea_orm(column_name = "recommended_workflows")]

@@ -100,6 +100,16 @@ pub async fn save_settings(
         );
     }
 
+    // ── Graph RAG 实体图谱开关（RAG 设置面板）──
+    //
+    // 与上面 telemetry / 沙箱策略同属「保存后立即生效」的同步点。
+    //
+    // ⚠ 2026-09-15 补：此前这个开关**只在启动装配时读一次**（`init::services`），
+    // 且注入点是 `OnceLock`（首次生效、之后忽略；也没有清除入口）⇒ 用户改完必须重启，
+    // UI 文案只能写「重启后生效」，而「配置了却不即时生效」正是最容易被当成 bug 的形态。
+    // 注入点已改为可替换槽位，这里把「开 ↔ 关」都即时反映到检索链路。
+    crate::indexing::sync_entity_graph_provider(state.harness.db()).await;
+
     #[cfg(not(mobile))]
     {
         crate::tray::sync_tray_language(&app, &settings.language).map_err(|e| {

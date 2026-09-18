@@ -12,6 +12,7 @@ pub struct Model {
     pub provider_type: String,
     pub api_host: String,
     pub api_path: Option<String>,
+    #[sea_orm(default_value = 1)]
     pub enabled: i32,
     pub proxy_config: Option<String>,
     pub tool_adaptation: Option<String>,
@@ -19,6 +20,7 @@ pub struct Model {
     pub custom_headers: Option<String>,
     pub icon: Option<String>,
     pub builtin_id: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub sort_order: i32,
     pub created_at: i64,
     pub updated_at: i64,

@@ -22,15 +22,12 @@ use axagent_harness::{NpmRegistryService, parse_npm_package_spec};
 use crate::manager::PluginError;
 use crate::sandbox::{SandboxConfig, apply_env_to_command, check_subprocess_permission};
 
-const EXTERNAL_MARKETPLACE: &str = "external";
-const BUILTIN_MARKETPLACE: &str = "builtin";
-const BUNDLED_MARKETPLACE: &str = "bundled";
-const OPENCLAW_MARKETPLACE: &str = "openclaw";
-const SETTINGS_FILE_NAME: &str = "settings.json";
-const REGISTRY_FILE_NAME: &str = "installed.json";
-const MANIFEST_FILE_NAME: &str = "plugin.json";
-const MANIFEST_RELATIVE_PATH: &str = ".claude-plugin/plugin.json";
-const SKILL_MD_FILE_NAME: &str = "SKILL.md";
+// 插件市场常量不再本地定义（AGENTS.md 禁区 12）：权威源在 core.rs。
+// 本文件只引用实际用到的 4 个市场标识；原第 5~9 个（settings/installed/plugin.json/相对路径/SKILL.md）
+// 在本文件从未被使用，属死定义，一并移除。
+use crate::core::{
+    BUILTIN_MARKETPLACE, BUNDLED_MARKETPLACE, EXTERNAL_MARKETPLACE, OPENCLAW_MARKETPLACE,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PluginKind {

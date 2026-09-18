@@ -7,7 +7,9 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub knowledge_base_id: String,
+    #[sea_orm(indexed)]
     pub name: String,
+    #[sea_orm(indexed)]
     pub entity_type: String,
     pub description: Option<String>,
     pub source_path: String,
@@ -19,15 +21,25 @@ pub struct Model {
     pub created_at: i64,
     pub updated_at: i64,
     // v101: trajectory entity fields
+    #[sea_orm(default_value = "[]")]
     pub aliases: String,
+    #[sea_orm(default_value = 1)]
     pub mention_count: i32,
+    #[sea_orm(default_value = 0.5)]
     pub confidence: f64,
     pub first_seen_at: Option<String>,
     pub last_seen_at: Option<String>,
     // v113: 统一知识图谱 — 来源/节点类型（DB 已有列，默认值兜底）
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "knowledge_base")]
     pub source_type: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "")]
     pub source_id: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "entity")]
     pub node_type: String,
+    #[sea_orm(indexed)]
     pub external_id: Option<String>,
 }
 

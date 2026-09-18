@@ -16,7 +16,9 @@ pub struct Model {
     pub provider_id: Option<String>,
     pub status_code: i32,
     pub duration_ms: i64,
+    #[sea_orm(default_value = 0)]
     pub request_tokens: i64,
+    #[sea_orm(default_value = 0)]
     pub response_tokens: i64,
     pub error_message: Option<String>,
     pub created_at: i64,

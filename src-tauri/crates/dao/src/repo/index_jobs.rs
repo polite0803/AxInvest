@@ -493,3 +493,223 @@ pub async fn list_all_jobs(
         .await?;
     Ok((models.into_iter().map(model_to_job).collect(), total))
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 孤儿记忆索引条目的兜底推进
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 记忆容器的标准 `container_type` 写法。
+///
+/// 队列消费侧（`index_queue::is_mem_container`）同时接受 `"mem"` 与 `"memory"`
+/// 两种等价写法，但 `enqueue_job` 的去重是**按字符串精确匹配**的 —— 若两个写入点
+/// 用了不同写法，同一条目会同时存在两个活跃作业（做两遍 embedding）。故本文件
+/// 以本常量为准，且判定「是否已有活跃作业」时两种写法都查。
+pub const CONTAINER_TYPE_MEM: &str = "mem";
+/// `"mem"` 的历史等价写法，见 [`CONTAINER_TYPE_MEM`]。
+pub const CONTAINER_TYPE_MEM_ALIAS: &str = "memory";
+
+/// 单条 pending 记忆条目的兜底处置结论。四种结局互斥且穷尽。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingMemoryRepair {
+    /// 队列里已有活跃作业（pending / processing / retrying），无需介入。
+    /// 这也构成幂等保证：重复扫描不会重复入队。
+    AlreadyQueued,
+    /// 命名空间未配置 embedding provider，按「未配置」处理，不进入向量索引队列。
+    /// 与新增记忆时的判定口径一致（`commands::memory::add_memory_item`）。
+    MarkedSkipped,
+    /// 命名空间绑定的 embedding provider **已不存在**（悬空引用）⇒ 确定性配置错误，
+    /// 已把条目标为 `failed` 并写明可操作的恢复指引。**不入队**：这类错误重试多少次
+    /// 结果都一样，入队只会产出「必然失败 + 指数退避空转」的作业与日志噪音。
+    MarkedFailed,
+    /// 已补入索引作业，载荷为新建的作业 id。
+    Enqueued(String),
+}
+
+/// 单轮孤儿扫描的统计结果。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrphanSweepReport {
+    /// 本轮检出的 pending 条目总数。
+    pub scanned: usize,
+    /// 补入索引作业的条目：`(item_id, namespace_id, job_id)`。
+    pub enqueued: Vec<(String, String, String)>,
+    /// 因命名空间无 embedding provider 而按「未配置」处理的条目数。
+    pub marked_skipped: usize,
+    /// 因绑定悬空 provider（确定性配置错误）而标记为 failed 的条目数。
+    pub marked_failed: usize,
+    /// 队列里已有活跃作业、无需介入的条目数。
+    pub already_queued: usize,
+}
+
+/// 扫描「状态为 pending 但队列里没有任何活跃作业」的记忆条目，并为它们补入队。
+///
+/// # 为什么需要这个函数
+///
+/// `memory_items.index_status` 由本 crate 在插入时写成 `pending`，而「入队」是
+/// 上层（命令层，因为只有它拿得到 `AppHandle`）的**独立动作**。任何不经命令层的
+/// 写入路径都会留下永久 `pending`：
+///
+/// - `trajectory::storage::save_memory`（DAO/entity 层）
+/// - `agent::reflector::persist_insight`（走 `MemoryRepository` trait）
+/// - `agent::project_memory`、`tools::agent_memory`
+///
+/// 这些路径都拿不到 Tauri 上下文，**结构上不可能**自行入队。所以兜底必须做在
+/// 队列侧 —— 逐点给每个写入路径补 enqueue 只会不断漏掉新出现的写入点。
+///
+/// 生产实证（2026-09-12，PG）：`index_jobs` 中 `container_type='mem'` 与
+/// `job_type='index_memory'` 的记录数**均为 0** —— 记忆向量化从未入队过一次；
+/// 同时 `memory_items` 有 2 条 `source='reflector'` 的条目自 09-06 起持续
+/// `pending`（`index_error` 为空），`vec_collections` 里也没有任何 `mem_*` 集合。
+///
+/// # 幂等性
+///
+/// 每个条目都先查活跃作业，且 `enqueue_job` 内部另有同维度去重，
+/// 因此可安全地按周期反复调用。
+pub async fn sweep_pending_memory_items(
+    db: &DatabaseConnection,
+    limit: u64,
+) -> Result<OrphanSweepReport> {
+    let items = crate::repo::memory::list_items_by_index_status(
+        db,
+        axagent_harness::constants::status::PENDING,
+        limit,
+    )
+    .await?;
+
+    let mut report = OrphanSweepReport { scanned: items.len(), ..Default::default() };
+    for item in &items {
+        match repair_pending_memory_item(db, item).await {
+            Ok(PendingMemoryRepair::AlreadyQueued) => report.already_queued += 1,
+            Ok(PendingMemoryRepair::MarkedSkipped) => report.marked_skipped += 1,
+            Ok(PendingMemoryRepair::MarkedFailed) => report.marked_failed += 1,
+            Ok(PendingMemoryRepair::Enqueued(job_id)) => {
+                report.enqueued.push((item.id.clone(), item.namespace_id.clone(), job_id));
+            },
+            Err(e) => {
+                // 单条失败不中断整轮：否则一条坏数据会永久阻塞它后面所有条目。
+                tracing::warn!(
+                    item_id = %item.id,
+                    error = %e,
+                    "[index_jobs] 修复孤儿记忆条目失败，跳过该条",
+                );
+            },
+        }
+    }
+    Ok(report)
+}
+
+/// 处理单条 pending 记忆条目。
+///
+/// 判定顺序即优先级：**先看队列，再看 provider**。反过来会让「已有活跃作业但
+/// 命名空间 provider 刚被清空」的条目被误降为 `skipped`，而它的作业马上就会
+/// 把它写成 `ready`（两个写入者互相覆盖）。
+pub async fn repair_pending_memory_item(
+    db: &DatabaseConnection,
+    item: &axagent_harness::types::MemoryItem,
+) -> Result<PendingMemoryRepair> {
+    // 1. 已有活跃作业 ⇒ 队列会处理，不介入。
+    //    两种等价写法都查，避免漏判另一种写法下的活跃作业而产出重复作业。
+    for container_type in [CONTAINER_TYPE_MEM, CONTAINER_TYPE_MEM_ALIAS] {
+        if get_active_job_for_item(db, container_type, &item.id).await?.is_some() {
+            return Ok(PendingMemoryRepair::AlreadyQueued);
+        }
+    }
+
+    // 2. 命名空间未配置 embedding provider ⇒ 按「未配置」处理。
+    //    刻意不断言「永远不可能被向量化」：rag 层的
+    //    `ContainerSource::resolve_embedding_provider` 在 provider 为空时会回退到
+    //    `settings.defaultProviderId`，那条路径是可能成功的。此处只是沿用
+    //    「新增记忆时不配 provider 就不入队」这一既有口径
+    //    （`commands::memory::add_memory_item`），保持两条链语义一致。
+    let ns = crate::repo::memory::get_namespace(db, &item.namespace_id).await?;
+    let provider_ref = match ns.embedding_provider.as_deref() {
+        Some(p) => p,
+        None => {
+            let reason = format!("命名空间「{}」未配置 embedding provider", ns.name);
+            crate::repo::memory::update_item_index_status(
+                db,
+                &item.id,
+                axagent_harness::constants::status::SKIPPED,
+                Some(&reason),
+            )
+            .await?;
+            tracing::info!(
+                item_id = %item.id,
+                namespace = %ns.name,
+                "[index_jobs] 命名空间未配置 embedding provider，条目按跳过处理",
+            );
+            return Ok(PendingMemoryRepair::MarkedSkipped);
+        },
+    };
+
+    // 3. 绑定的 provider 已不存在（悬空引用）⇒ 确定性配置错误，判为终态失败。
+    //
+    //    为什么必须在入队**之前**判：`resolve_embedding_provider` 只检查
+    //    `embedding_provider.is_some()`，并不校验被引用的 provider id 是否还活着，
+    //    因此悬空引用会一路走到 embedding 调用才失败（`Not found: Provider <id>`）。
+    //
+    //    该错误现在**拦得住**：`indexing::build_embed_context` 会把它改写成带
+    //    `ERR_EMBEDDING_PROVIDER_GONE` 标记的消息，index_queue 的 R9 通道据此直接判
+    //    终态（2026-09-12 补的第二条出口）。因此「入队前判」的价值不再是「避免无意义
+    //    重试」，而是**更早更省**：不产生作业（零队列占用）、不经过 worker（零 embed
+    //    尝试），且条目状态与原因在扫描当轮就可见 —— 作业即便被 R9 判失败，也仍占用
+    //    一轮调度。
+    //
+    //    生产实证（2026-09-12）：`memory_namespaces` 的两个命名空间都绑着同一个
+    //    已被删除的 provider `af052547-…`（实际存在的是 `llama.cpp` = `6f67c842-…`），
+    //    扫描器补入的 2 个作业因此停在 `retrying` 并刷出 4 条 WARN。
+    //
+    //    只对完整格式（`providerId::modelId`）校验：不含 `::` 的旧格式由
+    //    `indexing::resolve_embedding_provider` 负责补全且会跨 provider 兜底，
+    //    在此预判会误伤。
+    //    条件是 let-chain（Edition 2024）而非嵌套 `if`：`clippy::collapsible_if`
+    //    在 `-D warnings` 下会拒绝嵌套写法，而本项目 CI 强制 clippy 零警告。
+    if let Some((provider_id, _model_id)) = provider_ref.split_once("::")
+        && !provider_id.is_empty()
+        && !crate::repo::provider::provider_exists(db, provider_id).await?
+    {
+        let reason = format!(
+            "命名空间「{}」绑定的 embedding provider {} 已不存在（provider 被删除，\
+             或重建后换了 id）。请在设置中重新为该命名空间绑定 embedding provider，\
+             然后对该条目执行重建索引。",
+            ns.name, provider_id
+        );
+        crate::repo::memory::update_item_index_status(
+            db,
+            &item.id,
+            axagent_harness::constants::status::FAILED,
+            Some(&reason),
+        )
+        .await?;
+        tracing::warn!(
+            item_id = %item.id,
+            namespace = %ns.name,
+            provider_id = %provider_id,
+            "[index_jobs] 命名空间绑定的 embedding provider 不存在，判为终态失败（不入队）",
+        );
+        return Ok(PendingMemoryRepair::MarkedFailed);
+    }
+
+    // 4. 真的孤儿 ⇒ 补入队。
+    let job = enqueue_job(
+        db,
+        CreateIndexJobInput {
+            job_type: JOB_TYPE_INDEX_MEMORY.to_string(),
+            container_type: CONTAINER_TYPE_MEM.to_string(),
+            container_id: item.namespace_id.clone(),
+            item_id: item.id.clone(),
+            max_retries: None,
+            priority: None,
+            metadata: None,
+        },
+    )
+    .await?;
+
+    tracing::info!(
+        job_id = %job.id,
+        item_id = %item.id,
+        namespace = %ns.name,
+        updated_at = %item.updated_at,
+        "[index_jobs] 检出孤儿记忆条目，补入索引作业",
+    );
+    Ok(PendingMemoryRepair::Enqueued(job.id))
+}

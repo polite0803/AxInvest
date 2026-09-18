@@ -71,7 +71,7 @@ impl ModelDownloader {
     pub fn preset_models() -> Vec<PresetModel> {
         vec![
             PresetModel {
-                filename: "bge-reranker-v2-m3.Q4_K_M.gguf".to_string(),
+                filename: axagent_harness::rag_config::RERANKER_MODEL_FILENAME.to_string(),
                 hf_repo: Some("gpustack/bge-reranker-v2-m3-GGUF".to_string()),
                 direct_url: None,
                 sha256: String::new(),
@@ -466,6 +466,30 @@ mod tests {
         assert_eq!(models[1].model_type, PresetModelType::Judge);
         assert_eq!(models[2].model_type, PresetModelType::SparseEncoder);
         assert_eq!(models[3].model_type, PresetModelType::Embedding);
+    }
+
+    /// **同名默认值单一真源**：下载清单里的 reranker 文件名必须 == `RerankConfig::default()`
+    /// 的 `cross_encoder_model`。
+    ///
+    /// # 为什么必须钉
+    ///
+    /// 这两处此前是各自独立的手写字面量（外加 `reranker.rs` 两处兜底、再加前端一份）。
+    /// 只要有一处改名，就会出现「配置默认值指向一个下不到的文件名」，而失败形态是
+    /// **运行期加载模型失败**，不是编译错误 —— 2026-09-15 实测前端那份写的正是
+    /// 缺 `.Q4_K_M.gguf` 后缀的名字（`bge-reranker-v2-m3`），即指向一个永不存在的文件。
+    /// 本用例把「下载清单」与「类型默认值」绑在一起，改名时直接红。
+    #[test]
+    fn reranker_preset_matches_rerank_config_default() {
+        let reranker = ModelDownloader::preset_models()
+            .into_iter()
+            .find(|m| m.model_type == PresetModelType::Reranker)
+            .expect("预设清单里必须有 Reranker 模型");
+
+        assert_eq!(
+            Some(reranker.filename),
+            axagent_harness::rag_config::RerankConfig::default().cross_encoder_model,
+            "下载清单文件名与 RerankConfig::default().cross_encoder_model 必须同源"
+        );
     }
 
     #[test]

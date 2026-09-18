@@ -10,12 +10,11 @@
 
 use std::collections::HashMap;
 
+use axagent_crdt::VersionVector;
 use axagent_harness::device_sync::{
     ChangeLogEntry, ConflictInfo, ConflictResolutionStrategy, EntityType,
 };
 use uuid::Uuid;
-
-use crate::version_vector::{CausalOrder, VersionVector};
 
 /// 冲突解决器
 pub struct ConflictResolver;
@@ -56,7 +55,7 @@ impl ConflictResolver {
                     let vv1 = VersionVector::from_entries(&entries[i].version_vector);
                     let vv2 = VersionVector::from_entries(&entries[j].version_vector);
 
-                    if matches!(vv1.compare(&vv2), CausalOrder::Concurrent) {
+                    if vv1.is_concurrent_with(&vv2) {
                         let mut conflicting_devices = Vec::new();
                         conflicting_devices.push(entries[i].device_id.clone());
                         if !conflicting_devices.contains(&entries[j].device_id) {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // ! 内置侧栏导航项的唯一权威来源
 //
-// 所有内置导航项集中在此声明，Sidebar 与 DomainHub（域聚合页）共同复用，
+// 所有内置导航项集中在此声明，Sidebar 与 DomainHubPage（域聚合页）共同复用，
 // 禁止在别处重复定义导航项数组。
 // 导航以「能力域」为组织轴：每个导航项通过 NAV_ITEM_DOMAIN_MAP（见 domainMeta）
 // 归入唯一标准域。
@@ -47,10 +47,14 @@ export interface NavItem {
 /** 内置导航项 */
 export const builtinNavItems: NavItem[] = [
   // ── 通用域（general） ──
+  // 侧栏首项语义 = 「回到工作台」：navigate("/chat") 不带 ?ws=，由 WorkspaceHub 解析为
+  // 「恢复上次的功能 Tab」（持久化值）。这是业务页（/invest、/opc/*）回到工作台的唯一侧栏入口，
+  // 因此文案用「工作台」而非「对话」—— 否则点「对话」却停在终端会让人以为导航坏了。
+  // 需要**精确切到对话 Tab** 时用：命令面板 / Ctrl+1 / 显式 /chat?ws=chat。
   {
     key: "chat",
     icon: navIcon(MessageFilled),
-    labelKey: "nav.chat",
+    labelKey: "nav.workbench",
     path: BUILTIN_PAGE_PATH.chat,
     isPlugin: false,
   },

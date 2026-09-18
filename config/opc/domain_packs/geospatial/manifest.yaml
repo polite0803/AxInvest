@@ -1,0 +1,24 @@
+# Domain Pack: 地理信息（geospatial）
+id: geospatial
+name: "地理信息完整流程"
+icon: "🗺️"
+description: "地理数据分析、空间查询、地图可视化、位置服务"
+version: 1
+enabled: true
+domain: data_analysis
+capabilities:
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcSearchWiki"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:WebSearch"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcCreateContentAsset"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcCreateProject"}
+  - source: tool
+    capability_type: general_tool
+    predicate: {kind: id_exact, id: "tool:FileWrite"}

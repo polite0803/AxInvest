@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { formatTokens } from "@/lib/format";
 import { useFormatCny } from "@/stores";
 import { useTracerStore } from "@/stores/devtools/tracerStore";
 import { Button, Card, Col, Descriptions, Row, Space, Tabs, Tag, Typography } from "antd";
@@ -24,16 +25,6 @@ function formatDuration(ms?: number): string {
     return `${(ms / 1000).toFixed(1)}s`;
   }
   return `${(ms / 60000).toFixed(1)}m`;
-}
-
-function formatTokens(tokens: number): string {
-  if (tokens < 1000) {
-    return `${tokens}`;
-  }
-  if (tokens < 1000000) {
-    return `${(tokens / 1000).toFixed(1)}K`;
-  }
-  return `${(tokens / 1000000).toFixed(1)}M`;
 }
 
 export function TraceDetail() {

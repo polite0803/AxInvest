@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { formatFileSize } from "@/lib/format";
 import { Image } from "antd";
 import type { GlobalToken } from "antd";
 import { Trash2 } from "lucide-react";
-import { formatFileSize, getFileIcon, getFileTypeCategory } from "./InputAreaUtils";
+import { getFileIcon, getFileTypeCategory } from "./InputAreaUtils";
 
 export function InputAreaFileList({
   attachedFiles,

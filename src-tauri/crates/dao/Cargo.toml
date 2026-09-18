@@ -7,6 +7,9 @@ publish = false
 [dev-dependencies]
 sea-orm = { workspace = true }
 tokio = { workspace = true }
+# examples/ 探针需要它才能让 `tracing::warn!` 真正落地 ——
+# 否则「失败可见」这条验收判据无法观测（探针第一次跑就踩到：注入失败后 stderr 里什么也没有）。
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
 
 [dependencies]
 async-trait = "0.1"

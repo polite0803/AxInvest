@@ -2,7 +2,7 @@
 
 import { Tooltip } from "@/components/layout/Tooltip";
 import { FEATURE_FLAGS } from "@/constants/featureFlags";
-import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
+import { CAPABILITY_DOMAIN_META, domainLabelKey } from "@/lib/domainMeta";
 import { useAgentPanelStore, useOnboardingStore } from "@/stores";
 import { theme } from "antd";
 import { ArrowLeft, Bot, HelpCircle } from "lucide-react";
@@ -24,21 +24,21 @@ const PAGE_LABELS: Record<string, string> = {
   "/terminal": "nav.terminal",
   "/invest": "nav.financeInvestment",
   "/opc": "nav.automationOperations",
-  // 行业页（/opc/industry/:id）— 顶栏标签与页面大标题（IndustryHub industryTitle）保持一致
-  "/opc/industry/finance-invest": "opc.industries.finance_invest",
-  "/opc/industry/accounting": "opc.industries.accounting",
-  "/opc/industry/sales-growth": "opc.industries.sales_growth",
-  "/opc/industry/project-management": "opc.industries.project_management",
-  "/opc/industry/industry-consulting": "opc.industries.industry_consulting",
-  "/opc/industry/ecommerce": "opc.industries.ecommerce",
-  "/opc/industry/software-dev": "opc.industries.software_dev",
-  "/opc/industry/security": "opc.industries.security",
-  "/opc/industry/geospatial": "opc.industries.geospatial",
-  "/opc/industry/ai-research": "opc.industries.ai_research",
-  "/opc/industry/content-media": "opc.industries.content_media",
-  "/opc/industry/design": "opc.industries.design",
-  "/opc/industry/education": "opc.industries.education",
-  "/opc/industry/game-dev": "opc.industries.game_dev",
+  // 域包页（/opc/domain/:id）— 顶栏标签与页面大标题（DomainPackHub domainTitle）保持一致
+  "/opc/domain/finance-invest": "opc.domains.finance_invest",
+  "/opc/domain/accounting": "opc.domains.accounting",
+  "/opc/domain/sales-growth": "opc.domains.sales_growth",
+  "/opc/domain/project-management": "opc.domains.project_management",
+  "/opc/domain/consulting": "opc.domains.consulting",
+  "/opc/domain/ecommerce": "opc.domains.ecommerce",
+  "/opc/domain/software-dev": "opc.domains.software_dev",
+  "/opc/domain/security": "opc.domains.security",
+  "/opc/domain/geospatial": "opc.domains.geospatial",
+  "/opc/domain/ai-research": "opc.domains.ai_research",
+  "/opc/domain/content-media": "opc.domains.content_media",
+  "/opc/domain/design": "opc.domains.design",
+  "/opc/domain/education": "opc.domains.education",
+  "/opc/domain/game-dev": "opc.domains.game_dev",
 };
 
 function resolvePageLabel(pathname: string): string | null {
@@ -50,7 +50,7 @@ function resolvePageLabel(pathname: string): string | null {
     (d) => pathname === d.path || pathname.startsWith(`${d.path}/`),
   );
   if (domain) {
-    return domain.labelKey;
+    return domainLabelKey(domain.id);
   }
   if (pathname.startsWith("/settings")) {
     return "nav.settings";

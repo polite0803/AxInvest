@@ -65,7 +65,7 @@ async fn async_main() {
     tracing::info!("Database initialized");
 
     // ── 同步 OPC 资产到用户数据目录（CWD 无关） ──
-    // 与 Tauri 模式启动流程保持一致，保证行业包/领域包可读
+    // 与 Tauri 模式启动流程保持一致，保证域包/领域包可读
     // ensure_opc_config_synced 由 axagent_lib 公开 re-export（commands 模块为私有）
     axagent_lib::ensure_opc_config_synced(&app_dir);
 

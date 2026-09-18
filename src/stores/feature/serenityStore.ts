@@ -77,6 +77,17 @@ export interface StepLog {
   status: string;
   output?: unknown;
   error?: string;
+  /**
+   * 节点失败的**结构化错误码**（取值域 = `commands/error_code.rs` 的 `stock_workflow` 域，
+   * 如 `STOCK_WORKFLOW_STEP_CANCELLED` / `STOCK_WORKFLOW_TIMEOUT` / `STOCK_WORKFLOW_STEP_FAILED`）。
+   * `null` = 后端明示「本事件无失败」；`undefined` = 旧载荷 ⇒ 判定须用 `typeof errorCode === "string"`。
+   *
+   * 与 `error` 的分工：**`errorCode` 负责判定与主文案，`error` 负责技术详情**。
+   * 渲染层走 `lib/errorI18n.ts::translateFailureText`（有码取 11 语言译文，无码/未收录回退原文），
+   * `error` 原文仅作展开态的详情行保留。**禁止**用 `error.startsWith(...)` 反推语义
+   * —— 后端 `NodeError::Io` 变体是 `transparent` 的，原文不带码前缀，串嗅探在该变体上必然失配。
+   */
+  errorCode?: string | null;
   elapsedMs?: number;
   totalNodes?: number;
   completedNodes?: number;
@@ -91,6 +102,17 @@ interface SerenityState {
   candidates: SerenityCandidate[];
   trends: TrendInfo[];
   error: string | null;
+  /**
+   * `error` 的**技术详情**行（可选）。
+   *
+   * 与 `error` 的分工：`error` 是**主文案**（有结构化码时已由渲染层本地化为 11 语言译文），
+   * 本字段是给排查用的**未本地化原文**（DB 报错原文、`NodeError` 自由文本等）——
+   * 两者可同时展示，故「本地化」不必以「丢原因」为代价。
+   *
+   * `null` = 无额外详情（主文案已自足，例如旧载荷下 `error` 本身就是原文）⇒
+   * 渲染层**不得**渲染空行，也不得渲染与 `error` 相同的内容。
+   */
+  errorDetail: string | null;
   completedNodes: number;
   totalNodes: number;
   steps: StepLog[];
@@ -107,7 +129,7 @@ interface SerenityState {
   setStage: (s: StepStage) => void;
   setCandidates: (c: SerenityCandidate[]) => void;
   setTrends: (t: TrendInfo[]) => void;
-  setError: (e: string | null) => void;
+  setError: (e: string | null, detail?: string | null) => void;
   setCompletedNodes: (n: number) => void;
   setTotalNodes: (n: number) => void;
   addStep: (log: StepLog) => void;
@@ -123,6 +145,7 @@ const initialState = {
   candidates: [] as SerenityCandidate[],
   trends: [] as TrendInfo[],
   error: null as string | null,
+  errorDetail: null as string | null,
   completedNodes: 0,
   totalNodes: 0,
   steps: [] as StepLog[],
@@ -136,7 +159,10 @@ export const useSerenityStore = create<SerenityState>((set) => ({
   setStage: (s) => set({ stage: s }),
   setCandidates: (c) => set({ candidates: c }),
   setTrends: (t) => set({ trends: t }),
-  setError: (e) => set({ error: e }),
+  // `detail` 缺省即清空，而非「保持上一次」：`setError(text)` 的调用点（工作流级失败）
+  // 不传详情，若默认沿用旧值，上一次的 DB 原文会串台挂到新的失败文案下面。
+  // 清空条件挂在 `e` 上（`setError(null)` 清错误时必须连详情一起清）。
+  setError: (e, detail = null) => set({ error: e, errorDetail: e ? detail : null }),
   setCompletedNodes: (n) => set({ completedNodes: n }),
   setTotalNodes: (n) => set({ totalNodes: n }),
   addStep: (log) =>

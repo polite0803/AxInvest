@@ -15,8 +15,10 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     /// 所属组合 ID
+    #[sea_orm(indexed)]
     pub portfolio_id: String,
     /// 股票代码
+    #[sea_orm(indexed)]
     pub symbol: String,
     /// 市场：A / US / HK / ETF
     #[sea_orm(default_value = "A")]
@@ -48,7 +50,8 @@ pub enum Relation {
     #[sea_orm(
         belongs_to = "super::paper_portfolios::Entity",
         from = "Column::PortfolioId",
-        to = "super::paper_portfolios::Column::Id"
+        to = "super::paper_portfolios::Column::Id",
+        on_delete = "Cascade"
     )]
     PaperPortfolio,
 }

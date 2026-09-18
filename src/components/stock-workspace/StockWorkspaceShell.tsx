@@ -62,6 +62,7 @@ export function StockWorkspaceShell() {
   const [searchParams, setSearchParams] = useSearchParams();
   // stockCode 可来自路径参数（旧路由）或 query 参数（InvestHub tab）
   const urlStockCode = pathStockCode ?? searchParams.get("stockCode");
+  const urlStockName = searchParams.get("stockName");
   const urlView = searchParams.get("view") as string | null;
 
   const deviceLayout = useUIStore((s) => s.deviceLayout);
@@ -73,15 +74,29 @@ export function StockWorkspaceShell() {
   const setCurrentStock = useWorkspaceStore((s) => s.setCurrentStock);
   const setCurrentView = useWorkspaceStore((s) => s.setCurrentView);
 
+  // 名称解析失败时的兜底值就是代码本身，直接拼「名称 (代码)」会渲染成
+  // 600519 (600519) —— 名称与代码相同即视为「只知道代码」，只显示代码一次。
+  const hasDistinctName = !!currentStockName && currentStockName !== currentStockCode;
+  const headerStockLabel = currentStockCode
+    ? (hasDistinctName ? `${currentStockName} (${currentStockCode})` : currentStockCode)
+    : null;
+
   // ── URL → store 同步 ──
-  // 路由参数 stockCode 驱动当前股票
+  // 路由参数 stockCode 驱动当前股票。
+  //
+  // 名称解析必须分三级，缺任何一级都会把「代码」当「名称」渲染：
+  //   ① ?stockName= —— 调用点（荐股候选 / 趋势智选卡片 / 筛选结果 / 左栏切换器）
+  //      本来就知道名称，这是最权威且零成本的一级
+  //   ② recentStocks —— 老 URL / 外部链接没带名称时的本地兜底
+  //   ③ 代码本身 —— 兜底为 null 语义，由渲染层避免出现 "600519 (600519)"
   useEffect(() => {
-    if (urlStockCode && urlStockCode !== currentStockCode) {
-      // URL 带了股票代码，同步到 store（名称从最近列表查找或暂用代码）
-      const recent = useWorkspaceStore.getState().recentStocks.find((s) => s.code === urlStockCode);
-      setCurrentStock(urlStockCode, recent?.name ?? urlStockCode);
+    if (!urlStockCode) { return; }
+    const recent = useWorkspaceStore.getState().recentStocks.find((s) => s.code === urlStockCode);
+    const resolvedName = urlStockName ?? recent?.name ?? urlStockCode;
+    if (urlStockCode !== currentStockCode || resolvedName !== currentStockName) {
+      setCurrentStock(urlStockCode, resolvedName);
     }
-  }, [urlStockCode, currentStockCode, setCurrentStock]);
+  }, [urlStockCode, urlStockName, currentStockCode, currentStockName, setCurrentStock]);
 
   // URL ?view= 驱动当前视图
   useEffect(() => {
@@ -199,7 +214,7 @@ export function StockWorkspaceShell() {
             <ArrowLeft size={18} />
           </button>
           <span className="text-sm font-semibold flex-1 truncate">
-            {currentStockName ?? t("workspace.title")}
+            {hasDistinctName ? currentStockName : (currentStockCode ?? t("workspace.title"))}
           </span>
           <PageTimeAnchor />
         </div>
@@ -241,9 +256,9 @@ export function StockWorkspaceShell() {
         <span className="text-sm" style={{ color: "var(--muted)" }}>|</span>
         <h2 className="text-sm font-semibold flex-1">
           {t("workspace.title")}
-          {currentStockName && (
+          {headerStockLabel && (
             <span className="ml-2" style={{ color: "var(--muted)" }}>
-              · {currentStockName} ({currentStockCode})
+              · {headerStockLabel}
             </span>
           )}
         </h2>

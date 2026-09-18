@@ -7,7 +7,9 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
     pub knowledge_base_id: String,
+    #[sea_orm(indexed)]
     pub source_entity_id: String,
+    #[sea_orm(indexed)]
     pub target_entity_id: String,
     pub relation_type: String,
     pub description: Option<String>,
@@ -16,9 +18,14 @@ pub struct Model {
     pub created_at: i64,
     pub updated_at: i64,
     // v101: trajectory relationship weight
+    #[sea_orm(default_value = 1.0)]
     pub weight: f64,
     // v113: 统一知识图谱 — 来源标记（DB 已有列，默认值兜底）
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "knowledge_base")]
     pub source_type: String,
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = "")]
     pub source_id: String,
 }
 

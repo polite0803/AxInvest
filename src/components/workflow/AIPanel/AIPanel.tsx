@@ -29,6 +29,8 @@ interface AIPanelProps {
   ) => Promise<Array<{ nodeType: string; label: string; description: string; confidence: number }> | null>;
   onClose: () => void;
   selectedNodeId?: string | null;
+  /** 画布多选节点（框选/Shift 多选）。非空时生成聚焦选区上下文。 */
+  selectedNodeIds?: string[];
   selectedNodePrompt?: string | null;
   onApplyPromptToNode?: (nodeId: string, prompt: string) => void;
   chatMessages: AiChatMessage[];
@@ -96,11 +98,11 @@ function renderAssistantContent(content: string) {
 }
 
 export const AIPanel: React.FC<AIPanelProps> = ({
-  onGenerateWorkflow,
   onOptimizePrompt,
   onRecommendNodes,
   onClose,
   selectedNodeId,
+  selectedNodeIds,
   selectedNodePrompt,
   onApplyPromptToNode,
   chatMessages,
@@ -117,7 +119,7 @@ export const AIPanel: React.FC<AIPanelProps> = ({
     [t("aiPanel.progressOptimizing")]: 95,
   };
   const { token } = theme.useToken();
-  const { message } = App.useApp();
+  const { message, notification } = App.useApp();
   // 用 store selector 订阅 nodes/edges 变化，确保 Diff 预览拿到最新数据
   // SAFE: immer middleware wraps store state; runtime return type is correct WorkflowNode[]/WorkflowEdge[]
   const nodes = useWorkflowEditorStore((s) => s.nodes) as unknown as WorkflowNode[];
@@ -146,6 +148,14 @@ export const AIPanel: React.FC<AIPanelProps> = ({
   const [generatePrompt, setGeneratePrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [mergeMode, setMergeMode] = useState(false);
+  // 应用已解析的节点/边到画布（替换或合并），不经过二次 LLM 生成
+  const applyParsedWorkflow = useWorkflowEditorStore((s) => s.applyParsedWorkflow);
+  // 生成→回滚闭环：应用后一键回滚（AI 事务保留在栈顶）
+  const rollbackLastAiActionTransaction = useWorkflowEditorStore(
+    (s) => s.rollbackLastAiActionTransaction,
+  );
+  // 生成→校验闭环：发现问题时引导打开诊断抽屉（规则 + LLM 诊断 + 一键修复）
+  const runWorkflowDiagnose = useWorkflowEditorStore((s) => s.runWorkflowDiagnose);
 
   const [optimizePrompt, setOptimizePrompt] = useState("");
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -224,8 +234,20 @@ export const AIPanel: React.FC<AIPanelProps> = ({
     setGenerateError(null);
     setNlResult(null);
     try {
-      // Phase 4: use NL parse pipeline
-      const result = await workflowStore.parseNaturalLanguage({ prompt: generatePrompt });
+      // 选区模式：聚焦选中节点 + 以选中节点为端点的边作为生成上下文（替代整画布，让 LLM 只感知选区）
+      const focusNodes = selectedNodeIds && selectedNodeIds.length > 0
+        ? nodes.filter((n) => selectedNodeIds.includes(n.id))
+        : [];
+      const focusNodeIds = new Set(focusNodes.map((n) => n.id));
+      const focusEdges = focusNodes.length > 0
+        ? edges.filter((e) => focusNodeIds.has(e.source) || focusNodeIds.has(e.target))
+        : [];
+      // Phase 4: use NL parse pipeline（透传当前画布节点/边，让后端生成时感知已有工作流上下文）
+      const result = await workflowStore.parseNaturalLanguage({
+        prompt: generatePrompt,
+        currentNodes: focusNodes.length > 0 ? focusNodes : nodes,
+        currentEdges: focusNodes.length > 0 ? focusEdges : edges,
+      });
       if (result) {
         setNlResult(result);
         if (result.confidence >= 0.7) {
@@ -245,19 +267,91 @@ export const AIPanel: React.FC<AIPanelProps> = ({
   const handleApplyNLResult = async (workflow: import("@/types/workflow").WorkflowDefinition) => {
     setIsGenerating(true);
     try {
-      const result = await onGenerateWorkflow(
-        JSON.stringify({ nodes: workflow.nodes, edges: workflow.edges }),
+      // 直接应用已解析的节点/边到画布，不再序列化后二次调用 LLM（修复双重生成缺陷）
+      const ok = await applyParsedWorkflow(
+        workflow.nodes as unknown as WorkflowNode[],
+        workflow.edges as unknown as WorkflowEdge[],
         mergeMode,
       );
-      if (result) {
-        message.success(t("workflow.aiPanel.workflowGenerated"));
+      if (ok) {
+        // merge 冲突处理提示：输出变量重名被自动改名时告知用户
+        const renames = useWorkflowEditorStore.getState().aiMergeRenames;
+        if (renames && renames.length > 0) {
+          message.info(t("workflow.aiPanel.mergeRenamedVars", { count: renames.length }));
+        }
+        // 应用后一键回滚：AI 事务保留在栈顶，用户可立即撤销本次应用
+        notification.success({
+          message: t("workflow.aiPanel.workflowGenerated"),
+          placement: "bottomRight",
+          duration: 8,
+          btn: (
+            <Button
+              size="small"
+              type="link"
+              danger
+              onClick={() => {
+                notification.destroy();
+                rollbackLastAiActionTransaction();
+                message.success(t("workflow.aiPanel.applyRolledBack"));
+              }}
+            >
+              {t("workflow.aiPanel.rollbackApply")}
+            </Button>
+          ),
+        });
         setNlResult(null);
+        // 生成→校验闭环：应用后跑规则诊断，发现问题时引导一键 AI 修复（回喂 LLM 二次修正）
+        await runPostApplyDiagnose();
+      } else {
+        setGenerateError(useWorkflowEditorStore.getState().error || "apply failed");
       }
     } catch (error) {
       logIpcError("AI 生成工作流")(error);
       setGenerateError(String(error));
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  /**
+   * 生成→校验闭环（规则诊断部分）：对刚应用的工作流跑轻量规则诊断。
+   * 若发现问题，提示用户一键进入"AI 修复"（打开诊断抽屉，LLM 二次诊断并产出修复动作）。
+   * 诊断失败不阻塞主流程。
+   */
+  const runPostApplyDiagnose = async () => {
+    try {
+      const st = useWorkflowEditorStore.getState();
+      if (st.nodes.length === 0) { return; }
+      const { runDiagnosticRules } = await import(
+        "@/components/workflow/Diagnostic/diagnosticRules"
+      );
+      const report = runDiagnosticRules(st.nodes, st.edges);
+      const issueCount = report.issues.length;
+      if (issueCount > 0) {
+        const errorCount = report.issues.filter((i) => i.severity === "error").length;
+        notification.warning({
+          message: t("workflow.aiPanel.diagnoseFoundIssues", {
+            count: issueCount,
+            errors: errorCount,
+          }),
+          placement: "bottomRight",
+          duration: 8,
+          btn: (
+            <Button
+              size="small"
+              type="link"
+              onClick={() => {
+                notification.destroy();
+                void runWorkflowDiagnose();
+              }}
+            >
+              {t("workflow.aiPanel.aiRepair")}
+            </Button>
+          ),
+        });
+      }
+    } catch {
+      // 规则诊断失败不阻塞主流程
     }
   };
 
@@ -555,6 +649,12 @@ export const AIPanel: React.FC<AIPanelProps> = ({
           <Radio.Button value={true}>{t("workflow.aiPanel.mergeMode")}</Radio.Button>
         </Radio.Group>
       </div>
+      {/* 选区模式提示：生成聚焦画布中已选中的节点，而非整画布 */}
+      {selectedNodeIds && selectedNodeIds.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <Tag color="blue">{t("workflow.aiPanel.selectionFocus", { count: selectedNodeIds.length })}</Tag>
+        </div>
+      )}
       <Button
         type="primary"
         icon={<Sparkles size={14} />}
@@ -595,6 +695,7 @@ export const AIPanel: React.FC<AIPanelProps> = ({
             result={nlResult}
             onApply={handleApplyNLResult}
             loading={isGenerating}
+            existingNodeIds={nodes.map((n) => n.id)}
           />
         </div>
       )}

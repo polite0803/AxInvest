@@ -17,6 +17,7 @@ pub struct Model {
     /// 工具名（运行时注册名，同一工作流内唯一）
     pub tool_name: String,
     /// 工具类型: rhai_script | workflow_dag | llm_function
+    #[sea_orm(default_value = "rhai_script")]
     pub tool_type: String,
     pub description: Option<String>,
     /// 实现体：Rhai 源码 / DAG JSON / LLM 函数定义
@@ -24,10 +25,14 @@ pub struct Model {
     /// 输入 JSON Schema
     pub input_schema: Option<String>,
     /// 来源标记: runtime_discovery | ai_generated | evolution | manual
+    #[sea_orm(default_value = "runtime_discovery")]
     pub source: String,
     /// 状态: pending | active | disabled（运行时只注册 active）
+    #[sea_orm(default_value = "pending")]
     pub status: String,
+    #[sea_orm(default_value = 0)]
     pub usage_count: i32,
+    #[sea_orm(default_value = 0)]
     pub success_rate: f64,
     pub created_at: i64,
     pub updated_at: i64,

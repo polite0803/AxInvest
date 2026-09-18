@@ -10,10 +10,13 @@ pub struct Model {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    #[sea_orm(default_value = "general")]
     pub category: String,
+    #[sea_orm(default_value = "🤖")]
     pub icon: String,
     #[sea_orm(column_name = "agent_role")]
     pub agent_role: Option<String>,
+    #[sea_orm(default_value = "builtin")]
     pub source: String,
     pub tags: Option<String>,
     #[sea_orm(column_name = "suggested_provider_id")]
@@ -34,7 +37,9 @@ pub struct Model {
     pub disallowed_tools: Option<String>,
     #[sea_orm(column_name = "recommended_workflows")]
     pub recommended_workflows: Option<String>,
+    #[sea_orm(default_value = 0)]
     pub sort_order: i32,
+    #[sea_orm(default_value = 1)]
     pub is_enabled: i32,
     pub expert_id: Option<String>,
     pub created_at: i64,
@@ -42,6 +47,14 @@ pub struct Model {
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::agency_experts::Entity",
+        from = "Column::ExpertId",
+        to = "super::agency_experts::Column::Id",
+        on_delete = "SetNull"
+    )]
+    AgencyExpert,
+}
 
 impl ActiveModelBehavior for ActiveModel {}

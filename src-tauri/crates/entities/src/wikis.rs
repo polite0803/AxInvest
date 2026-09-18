@@ -11,8 +11,11 @@ pub struct Model {
     pub name: String,
     pub description: Option<String>,
     pub root_path: String,
+    #[sea_orm(default_value = "1.0")]
     pub schema_version: String,
+    #[sea_orm(default_value = 0)]
     pub note_count: i32,
+    #[sea_orm(default_value = 0)]
     pub source_count: i32,
     pub embedding_provider: Option<String>,
     pub embedding_dimensions: Option<i32>,

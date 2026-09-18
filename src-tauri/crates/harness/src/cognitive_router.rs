@@ -1492,24 +1492,8 @@ mod tests {
             Vec::new()
         }
 
-        async fn add_rule(&self, _rule: DomainRoutingRule) -> Result<(), String> {
-            Ok(())
-        }
-
-        async fn update_rule(&self, _rule: DomainRoutingRule) -> Result<(), String> {
-            Ok(())
-        }
-
-        async fn remove_rule(&self, _rule_id: &str) -> Result<(), String> {
-            Ok(())
-        }
-
         async fn get_rule(&self, _rule_id: &str) -> Option<DomainRoutingRule> {
             None
-        }
-
-        async fn reorder_rules(&self, _rule_ids: Vec<String>) -> Result<(), String> {
-            Ok(())
         }
     }
 

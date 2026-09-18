@@ -379,11 +379,16 @@ impl CapabilityIndexer for CapabilityIndexerImpl {
     }
 
     async fn remove_index(&self, capability_id: &str) -> Result<(), String> {
+        // 三类删除全部尝试，最后一次性汇总失败（2026-09-15 修）。
+        // 此前四处 `if let Err(e) = … { warn! }` 后恒 `Ok(())` ⇒ 调用方的
+        // `if let Err(e) = …remove_index(…)` 分支是死代码，向量残留无人知晓。
+        let mut failures: Vec<String> = Vec::new();
+
         // 删除正向记录（按 document_id 匹配）
         if let Err(e) =
             self.vector_store.delete_document_embeddings(CAPABILITY_COLLECTION, capability_id).await
         {
-            tracing::warn!("Failed to delete positive index for {}: {}", capability_id, e);
+            failures.push(format!("正向索引: {e}"));
         }
 
         // 同时删除元数据持久化记录
@@ -391,7 +396,7 @@ impl CapabilityIndexer for CapabilityIndexerImpl {
         if let Err(e) =
             self.vector_store.delete_document_embeddings(CAPABILITY_COLLECTION, &meta_doc_id).await
         {
-            tracing::warn!("Failed to delete metadata record for {}: {}", capability_id, e);
+            failures.push(format!("元数据记录: {e}"));
         }
 
         // 删除负向记录（按 document_id 匹配）
@@ -400,7 +405,12 @@ impl CapabilityIndexer for CapabilityIndexerImpl {
             .delete_document_embeddings(CAPABILITY_NEGATIVE_COLLECTION, capability_id)
             .await
         {
-            tracing::warn!("Failed to delete negative index for {}: {}", capability_id, e);
+            failures.push(format!("负向索引: {e}"));
+        }
+
+        if !failures.is_empty() {
+            // 内存元数据**不**移除：否则本进程会以为「索引已删」，而库里还有残留向量
+            return Err(format!("能力 {capability_id} 的向量清理失败（{}）", failures.join("；")));
         }
 
         // 移除内存元数据

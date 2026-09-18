@@ -275,6 +275,17 @@ export function IntegratedTerminal({
       if (fitAddonRef.current) {
         // 延迟一帧确保DOM布局更新完成
         requestAnimationFrame(() => {
+          const el = containerRef.current;
+          // ⚠ 容器不可见/尺寸为 0 时必须跳过 fit()。
+          // FitAddon.proposeDimensions() 只守卫「字符尺寸为 0」，**不守卫容器宽高为 0**：
+          // 0 尺寸下 availableWidth/Height 为 0，cols/rows 被 Math.max(MINIMUM_*, …) 兜成
+          // 2×1，fit() 判定 dims 合法并真的执行 terminal.resize(2, 1) ⇒ 经下面的
+          // xterm.onResize 把 resize(2,1) 发给后端 PTY，shell 按 2 列重排、输出错乱。
+          // 场景：工作台 Tab 保活（display:none）、窗口最小化、容器折叠。
+          // 跳过是安全的——重新可见时 ResizeObserver 会因尺寸变化再触发一次正常 fit。
+          if (!el || el.offsetWidth === 0 || el.offsetHeight === 0) {
+            return;
+          }
           fitAddonRef.current?.fit();
         });
       }

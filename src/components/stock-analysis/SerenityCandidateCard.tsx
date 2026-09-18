@@ -1,9 +1,9 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
+import { useStockJump } from "@/hooks/useStockJump";
 import type { AttentionMetrics, Catalyst, ExitSignals, SerenityCandidate } from "@/stores/feature/serenityStore";
 import { AimOutlined, AlertOutlined, ClockCircleOutlined, FireOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { Card, Progress, Tag, Typography } from "antd";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
 
 const { Text, Title } = Typography;
 
@@ -113,7 +113,7 @@ interface Props {
 
 export function SerenityCandidateCard({ candidate }: Props) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
+  const jumpToStock = useStockJump();
 
   const code = candidate.stock_code ?? candidate.stockCode ?? "";
   const name = candidate.stockName ?? candidate.stock_name ?? "";
@@ -146,7 +146,7 @@ export function SerenityCandidateCard({ candidate }: Props) {
       hoverable
       className="w-full overflow-hidden cursor-pointer"
       styles={{ body: { padding: 0 } }}
-      onClick={() => navigate(`/stock-analysis?code=${code}`, { replace: true })}
+      onClick={() => jumpToStock({ code, name })}
     >
       {/* ── 顶部色带 + 头部 ── */}
       <div

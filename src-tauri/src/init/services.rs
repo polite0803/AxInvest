@@ -46,11 +46,10 @@ pub async fn start_background_services(
     start_insight_generator_task_executor(state);
     start_auto_tool_observation(state);
     start_text_grad_analysis(state);
-    start_cron_scheduler(state).await;
+    start_cron_scheduler(app, state).await;
     start_trigger_recovery(state);
     start_scheduler_recovery(app, state);
     start_approval_event_bridge(app, state);
-    start_persistent_runner(state);
     start_platform_adapters(state);
     start_skill_watcher(app, state);
     start_memory_decay_tick(state);
@@ -69,7 +68,7 @@ pub async fn start_background_services(
     //   - start_realtime_quote_watcher：实时行情推送（前端 stock-quote-update 事件）
     //   - start_batch_reflection：股票分析批量反思 cron（run_batch_reflection_inner）
     //   - start_demand_discovery_cron：OPC 需求发现定时扫描（run_demand_discovery_cron）
-    //   - spawn_opc_workflows_seeding：OPC 行业/领域工作流模板种子化（ensure_opc_workflows_seeded）
+    //   - spawn_opc_workflows_seeding：OPC 域包/领域工作流模板种子化（ensure_opc_workflows_seeded）
     start_realtime_monitor(app);
     start_realtime_quote_watcher(app, state);
     start_batch_reflection(state);
@@ -177,6 +176,53 @@ fn start_knowledge_consolidation_tick(state: &AppState) {
             tracing::info!("[knowledge_consolidation] 开始知识转换周期");
             let started = std::time::Instant::now();
 
+            // ── 步骤 0：域一致性体检（只读；2026-09-17 新增） ──
+            //
+            // 放在合并**之前**：合并是唯一会改变域的步骤，体检若放在它后面，
+            // 「合并把域弄坏了、又因不变量回滚」这类情况就只能看到回滚日志，
+            // 看不到「库当前长什么样」。放前面 ⇒ 每轮都有一份「此刻的域状态」基线。
+            //
+            // 为什么值得每轮花一次全表扫描（72k 实体 + 113k 边）：这类损坏
+            // （边的 `knowledge_base_id` ≠ 端点所属域）在库层面**无任何症状** ——
+            // 外键不违反、行数不少、没有任何报错，唯一暴露它的是「按域算有多少条边
+            // 画得出来」。实测曾让一个 wiki 的 38,171 条边全部不可见而无人知晓。
+            match axagent_dao::repo::knowledge_graph::audit_kb_domain_consistency(
+                harness_state.db(),
+            )
+            .await
+            {
+                Ok(rows) => {
+                    let broken: Vec<_> = rows.iter().filter(|r| r.dangling > 0).collect();
+                    if broken.is_empty() {
+                        tracing::info!(
+                            domains = rows.len(),
+                            "[knowledge_consolidation] 域一致性体检：全部通过"
+                        );
+                    } else {
+                        tracing::warn!(
+                            broken_domains = broken.len(),
+                            total_domains = rows.len(),
+                            "[knowledge_consolidation] 域一致性体检：存在悬空边的域（这些边在任何按域过滤的读端上都画不出来）"
+                        );
+                        for r in broken {
+                            tracing::warn!(
+                                kb = %r.knowledge_base_id,
+                                visible_entities = r.visible_entities,
+                                edges = r.edges,
+                                edges_both_visible = r.edges_both_visible,
+                                edges_both_missing = r.edges_both_missing,
+                                dangling = r.dangling,
+                                ratio = r.dangling_ratio(),
+                                "[knowledge_consolidation] 域悬空明细"
+                            );
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("[knowledge_consolidation] 域一致性体检失败: {}", e);
+                },
+            }
+
             // ── 步骤 1：跨源实体合并（轻量，纯数据库操作） ──
             match axagent_dao::repo::knowledge_graph::merge_duplicate_entities_across_all(
                 harness_state.db(),
@@ -184,17 +230,23 @@ fn start_knowledge_consolidation_tick(state: &AppState) {
             .await
             {
                 Ok(result) => {
-                    if result.groups_found > 0 {
+                    if result.groups_found > 0 || result.cross_kb_groups_skipped > 0 {
                         tracing::info!(
-                            "[knowledge_consolidation] 跨源实体合并：{} 个分组，{} 个实体合并，{} 个关系更新",
+                            "[knowledge_consolidation] 同域实体合并：{} 个分组，{} 个实体合并，{} 个关系更新，跨库分组跳过 {} 个，悬空边 {} -> {}",
                             result.groups_found,
                             result.entities_merged,
-                            result.relations_updated
+                            result.relations_updated,
+                            result.cross_kb_groups_skipped,
+                            result.dangling_before,
+                            result.dangling_after
                         );
                     }
                 },
                 Err(e) => {
-                    tracing::warn!("[knowledge_consolidation] 跨源实体合并失败: {}", e);
+                    // ⚠ 这里现在也会接到「域一致性验收失败 ⇒ 已回滚」的错误。
+                    //   那条错误意味着**有人把跨库合并又打开了**（或出现了同型的新路径）——
+                    //   它不是噪声，需要有人去看。故用 `error` 而不是 `warn`。
+                    tracing::error!("[knowledge_consolidation] 同域实体合并失败: {}", e);
                 },
             }
 
@@ -252,58 +304,41 @@ fn start_knowledge_consolidation_tick(state: &AppState) {
             }
 
             // ── 步骤 3：Memory → Knowledge 实体回流 ──
-            // 查询高重要性 Memory 条目，写入知识图谱
-            match axagent_dao::repo::memory::list_high_importance_items(
+            //
+            // ⚠ 2026-09-17：本段原先在此**就地实现**，与
+            //   `src/commands/knowledge_graph.rs` 的 Tauri 命令 `sync_memory_to_knowledge_graph`
+            //   **逐字重复**，且两处都把 `memory_namespaces.id` 当作 `knowledge_bases.id` 用
+            //   —— 那是**两个 id 空间**（都是 TEXT，类型系统拦不住）⇒
+            //   `knowledge_entities.knowledge_base_id` 的外键违反 ⇒ 失败又被 `debug!` 吞掉
+            //   ⇒ 整条路径在 PG 上**静默空转**（判据：fail-silent 是 fail-open 的镜像形态）。
+            //
+            //   现收敛到 `dao::repo::knowledge_graph::reflow_memory_to_knowledge` 单一实现，
+            //   KB 归属改走**哨兵常量**（该 KB 行由 `dao::seed::ensure_sentinels` 幂等播种）。
+            match axagent_dao::repo::knowledge_graph::reflow_memory_to_knowledge(
                 harness_state.db(),
-                Some(0.7), // importance >= 0.7
-                Some(100), // 最多 100 条
+                axagent_harness::constants::sentinel::MEMORY_REFLOW_KB_ID,
+                axagent_dao::repo::knowledge_graph::REFLOW_IMPORTANCE_THRESHOLD,
+                axagent_dao::repo::knowledge_graph::REFLOW_MAX_ITEMS,
             )
             .await
             {
-                Ok(items) if !items.is_empty() => {
+                Ok(stats) => {
+                    // 逐条失败已在 dao 内汇总成**一条** warn（避免 100 行/轮 噪声）；
+                    // 这里只报总数，便于与那一行 warn 对照。
                     tracing::info!(
-                        "[knowledge_consolidation] 发现 {} 条高重要性 Memory 条目，开始回流",
-                        items.len()
-                    );
-                    let mut converted = 0usize;
-                    for item in &items {
-                        // 将 Memory 条目转换为知识图谱实体
-                        let kb_id = if item.namespace_id.is_empty() {
-                            "memory_default".to_string()
-                        } else {
-                            item.namespace_id.clone()
-                        };
-                        let name: String = item.content.chars().take(100).collect();
-                        let confidence = (item.importance).min(1.0);
-                        match axagent_dao::repo::knowledge_graph::upsert_entity(
-                            harness_state.db(),
-                            &kb_id,
-                            &name,
-                            "memory_item",
-                            "[]", // empty aliases JSON
-                            confidence,
-                            None,
-                            None,
-                        )
-                        .await
-                        {
-                            Ok(_) => converted += 1,
-                            Err(e) => {
-                                tracing::debug!(
-                                    "[knowledge_consolidation] Memory→Entity 转换失败 item={}: {}",
-                                    item.id,
-                                    e
-                                );
-                            },
-                        }
-                    }
-                    tracing::info!(
-                        "[knowledge_consolidation] Memory→Knowledge 回流完成：{} 条成功",
-                        converted
+                        "[knowledge_consolidation] Memory→Knowledge 回流：读取 {} 条，成功 {}，失败 {}",
+                        stats.items_read,
+                        stats.entities_created,
+                        stats.failures
                     );
                 },
-                _ => {
-                    // 无高重要性条目或查询失败，静默跳过
+                Err(e) => {
+                    // ⚠ 这条是「本轮整段没跑」（查询/连接失败），与「部分条目失败」不同层级，
+                    //   故由调用点发 warn —— dao 内那条 warn 只覆盖逐条失败。
+                    tracing::warn!(
+                        "[knowledge_consolidation] Memory→Knowledge 回流未能执行: {}",
+                        e
+                    );
                 },
             }
 
@@ -1874,9 +1909,13 @@ fn start_text_grad_analysis(state: &AppState) {
     });
 }
 
-async fn start_cron_scheduler(state: &AppState) {
+async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     use axagent_runtime::cron::{CronExecutor, CronScheduler};
     use std::sync::Arc;
+
+    // 荐股定时任务的推送通道是 OS 桌面通知，需要 AppHandle。
+    // 此前该分支整个不存在，所以没传 app；恢复接线后必须带上。
+    let app_handle = app.clone();
 
     let store = state.cron_job_store.clone();
 
@@ -1971,6 +2010,8 @@ async fn start_cron_scheduler(state: &AppState) {
                 let vector_store = vector_store.clone();
                 Box::pin(async move {
                     let embed_fn = crate::indexing::ProviderEmbedFn;
+                    // 混合检索权重来自用户设置（全局 `ragPipelineConfig.hybrid`）
+                    let hybrid = crate::indexing::load_hybrid_config(&db).await;
                     let result = axagent_search::rag::collect_rag_context(
                         &db,
                         &master_key,
@@ -1981,6 +2022,7 @@ async fn start_cron_scheduler(state: &AppState) {
                         &query,
                         5,
                         embed_fn,
+                        Some(&hybrid),
                     )
                     .await;
                     Ok(result)
@@ -1991,10 +2033,30 @@ async fn start_cron_scheduler(state: &AppState) {
         state.work_engine.set_rag_callback(rag_callback).await;
     }
 
+    // 注入实体图谱提供者（Graph RAG 阶段 4）。
+    //
+    // 该能力此前**永不执行**：`rag.rs` 调用 `RAGPipeline::new` 时第 4 参恒为 `None`，
+    // 而 `rag_pipeline.rs` 的图增强分支在 `None` 时直接跳过（2026-09-15 接线）。
+    //
+    // 类型化读取：此前这里直接 `Value::get("entityGraph")` 按字符串键摸字段，而
+    // `RAGPipelineConfig` 原本**没有** `entity_graph` 字段 ⇒ 那个键只存在于本处代码里，
+    // 前端类型 / 设置 UI 均无，等于一个**永远没人能打开的开关**。现已补齐四条链。
+    //
+    // ⚠ 2026-09-15 二次修：逻辑已抽成 `indexing::sync_entity_graph_provider` 并在此调用。
+    // 原因是注入点由 `OnceLock` 改为**可替换槽位**后，同一个函数还要在「保存设置」时
+    // 再调一次，才能让开关**无需重启**生效（见 `commands::settings::save_settings`）。
+    // 抽成一个幂等函数可避免两处装配逻辑各写一遍而分叉。
+    crate::indexing::sync_entity_graph_provider(state.harness.db()).await;
+
     let work_engine = state.work_engine.clone();
     let cron_store = state.cron_job_store.clone();
     let sync_db = state.harness.db().clone();
     let astock_client = state.astock_client.clone();
+    // [2026-09-13] 批量反思/决策校验分支需要这三个依赖（此前它们只在
+    // `start_batch_reflection` 的硬编码服务里被捕获，cron 分支无从取得）
+    let cron_vector_store = state.vector_store.clone();
+    let cron_master_key = state.harness.master_key_owned();
+    let cron_trajectory_storage = state.trajectory_storage.clone();
     // G17 delivery：此前 create_cron_delivery_sink 建好了 sink 却从未接进
     // executor，导致所有定时任务的 delivery 配置都是死配置。这里接上后，
     // 任务可通过 CronDeliveryConfig 把执行结果推送到 webhook / 文件 / 通知渠道。
@@ -2111,8 +2173,191 @@ async fn start_cron_scheduler(state: &AppState) {
             });
             return;
         }
-        // [AxAgent 残留移除] opc-demand-discovery 和 stock-recommendation 两个 cron
-        // 分支已移除（demand_discovery 模块和 recommendation_cron 函数已整体删除）
+        // 荐股定时推送：task_type = stock-recommendation
+        // （前端 ScheduledRecommendationTab 创建/管理；配置以 JSON 存 CronJob.prompt）
+        //
+        // [2026-09-12 接线恢复] 此前这里只有一句「stock-recommendation 分支已移除」，
+        // 于是形成一条半拆除的功能链：前端 UI 完整 + 4 个 CRUD 命令可用 +
+        // recommender::notify 的扫描/通知逻辑完好（含单测），唯独到点没有执行入口。
+        // 用户能创建任务、能看列表、能启停，但永远等不到推送。
+        // 同构缺陷已于 2026-09-03 在下方 watchlist-scan 侧修过一次，荐股这侧一直漏修。
+        //
+        // 执行：解析 RecoCronConfig → 读 stock-analysis 模板变量（vendor 开关与各策略阈值）
+        // → run_recommendation_scan（多周期并行 + 过滤 synthetic + 阈值 + top N）
+        // → 桌面通知 + delivery sink。
+        if job.task_type.as_deref() == Some("stock-recommendation") {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let app = app_handle.clone();
+            let sink = delivery_sink.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed =
+                    || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 1. 解析任务配置（periods / min_confidence / top_n）。
+                //    解析失败按任务失败记录，不做静默兜底 —— 否则用户设的周期会被
+                //    「默认值」悄悄替换，而列表里显示的仍是原文。
+                let config = match crate::commands::recommendation_cron::RecoCronConfig::from_json(
+                    &prompt,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(
+                            "[CronScheduler] 荐股任务 '{}' 配置解析失败: {}",
+                            job_name,
+                            e
+                        );
+                        let result = axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(e),
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                        };
+                        store.record_run(&job_id, result).await;
+                        if !recurring {
+                            let _ = store
+                                .set_status(
+                                    &job_id,
+                                    axagent_runtime_core::CronJobStatus::Disabled,
+                                )
+                                .await;
+                        }
+                        return;
+                    },
+                };
+
+                // 2. 读模板变量：vendor 启用集合 + reco_*_enabled + 各策略阈值。
+                //    读不到不算失败（走代码内硬编码默认值），但要留痕，
+                //    否则「面板上调了阈值却毫无效果」会变成无从下手的现象。
+                use sea_orm::EntityTrait;
+                let vars =
+                    match axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
+                        .one(&db)
+                        .await
+                    {
+                        Ok(Some(t)) => {
+                            crate::commands::stock_analysis::extract_template_vars(&t)
+                        },
+                        Ok(None) => {
+                            tracing::warn!(
+                                "[CronScheduler] 荐股任务 '{}': 未找到 stock-analysis 模板，\
+                                 本次扫描按硬编码默认参数执行",
+                                job_name
+                            );
+                            Vec::new()
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                "[CronScheduler] 荐股任务 '{}': 读取模板变量失败 ({e})，\
+                                 本次扫描按硬编码默认参数执行",
+                                job_name
+                            );
+                            Vec::new()
+                        },
+                    };
+
+                // 3. 扫描（多周期并行，内部已过滤 synthetic 与低于阈值的 pick）
+                let scan = axagent_analysis_engine::recommender::run_recommendation_scan(
+                    client,
+                    &config.periods,
+                    &vars,
+                    config.min_confidence,
+                    config.top_n,
+                )
+                .await;
+                let picks = scan.picks;
+
+                // 3.5 [2026-09-13] 扫描结果落库到 reco_picks。
+                //     此前定时荐股只推桌面通知、**从不写候选池**（落库逻辑只在命令层
+                //     `recommend_stocks`，即"前端点刷新才落库"），于是下游
+                //     「候选池→逐只分析」（pool-scan）任务永远取不到候选。
+                //     与命令层共用 `persist_reco_picks`，保证两条入口写入同一张表、
+                //     同一套字段。
+                if !picks.is_empty() {
+                    let generated_at =
+                        chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+                    let strategy_weights_json = vars
+                        .iter()
+                        .find(|(k, _)| k == "reco_strategy_weights")
+                        .and_then(|(_, v)| v.is_object().then(|| v.to_string()));
+                    let written = crate::commands::stock_analysis::persist_reco_picks(
+                        &db,
+                        &picks,
+                        scan.seed_pool_snapshot.clone(),
+                        strategy_weights_json,
+                        &generated_at,
+                    )
+                    .await;
+                    tracing::info!(
+                        "[CronScheduler] 荐股任务 '{}' 落库 reco_picks: {written}/{} 行",
+                        job_name,
+                        picks.len()
+                    );
+                }
+
+                // 4. 无 pick 时静默（不推空通知），但有 pick 必须推 —— 这是本任务的存在意义
+                let (title, body) = axagent_analysis_engine::recommender::build_notification(
+                    &picks,
+                );
+                if !picks.is_empty() {
+                    if let Err(e) = crate::commands::desktop::send_desktop_notification(
+                        app,
+                        title.clone(),
+                        body.clone(),
+                    )
+                    .await
+                    {
+                        // 通知失败不影响任务成功（结果已落库，可在列表中查看）
+                        tracing::warn!(
+                            "[CronScheduler] 荐股任务 '{}' 桌面通知发送失败: {e}",
+                            job_name
+                        );
+                    }
+                }
+                tracing::info!(
+                    "[CronScheduler] 荐股任务 '{}' 完成: {} 只（周期 {:?}, 阈值 {}）",
+                    job_name,
+                    picks.len(),
+                    config.periods,
+                    config.min_confidence
+                );
+
+                // 5. output 必须是 JSON 且含 `pushed` 键 ——
+                //    前端 `RecoCronJobResponse.last_picks_count` 读的正是 `output.pushed`，
+                //    换键名会让「上次推送 N 只」恒显示为空。
+                let output = serde_json::json!({
+                    "pushed": picks.len(),
+                    "periods": config.periods.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
+                    "minConfidence": config.min_confidence,
+                    "title": title,
+                    "body": body,
+                })
+                .to_string();
+                let result = axagent_runtime_core::TaskRunResult {
+                    success: true,
+                    output: Some(output),
+                    error: None,
+                    duration_ms: elapsed(),
+                    executed_at: started,
+                };
+                // 无 pick → 不投递（success 但静默），避免定时轰炸通知渠道
+                let sink_ref = if picks.is_empty() { None } else { Some(sink.as_ref()) };
+                store.record_run_with_delivery(&job_id, result, sink_ref).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
         // 自选股定时扫描：task_type = watchlist-scan（前端 ScheduledAnalysisTab 创建/管理）。
         // [2026-09-03 接线恢复] 此前 CronExecutor 无此分支，UI 创建的任务到点后不执行任何分析。
         // 执行：遍历 watchlist_items → 逐只 run_single_stock_analysis（写 stock_analyses
@@ -2160,6 +2405,8 @@ async fn start_cron_scheduler(state: &AppState) {
                         &engine,
                         &item.stock_code,
                         &item.stock_name,
+                        // 自选股扫描无周期语义：持有期交给决策自身声明，缺失时兜底 28 天
+                        None,
                     )
                     .await
                     {
@@ -2193,6 +2440,225 @@ async fn start_cron_scheduler(state: &AppState) {
                     error: first_err,
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+        // 候选池逐只分析：task_type = pool-scan
+        //
+        // [2026-09-13 接线] 补齐「候选池 → 逐只分析」这一环。此前：
+        //   - 荐股 cron 扫出的 pick 只推通知、不写候选池（已在上方分支补落库）；
+        //   - 唯一的批量逐只分析入口 watchlist-scan 扫的是**自选股**，与候选池无关；
+        //   - `stock_pipeline` 模板 trigger = Manual，永不自动调度。
+        // 于是候选池里的股票永远不会被自动分析，也就永远进不了反思队列。
+        //
+        // 配置（lookbackDays / maxStocks / minConfidence）以 JSON 存 CronJob.prompt。
+        if job.task_type.as_deref() == Some(crate::commands::pool_scan::POOL_SCAN_TASK_TYPE) {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let engine = work_engine.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 解析失败按任务失败记录，不做静默兜底 —— 否则用户设的最大只数
+                // 会被"默认值"悄悄替换，而任务列表里显示的仍是原文。
+                let config = match crate::commands::pool_scan::PoolScanConfig::from_json(&prompt) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::error!(
+                            "[CronScheduler] 候选池扫描 '{}' 配置解析失败: {e}",
+                            job_name
+                        );
+                        let result = axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(e),
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                        };
+                        store.record_run(&job_id, result).await;
+                        if !recurring {
+                            let _ = store
+                                .set_status(
+                                    &job_id,
+                                    axagent_runtime_core::CronJobStatus::Disabled,
+                                )
+                                .await;
+                        }
+                        return;
+                    },
+                };
+
+                let result =
+                    match crate::commands::pool_scan::run_pool_scan(&db, &client, &engine, &config)
+                        .await
+                    {
+                        Ok(outcome) => {
+                            tracing::info!(
+                                "[CronScheduler] 候选池扫描 '{}' 完成: {} 只候选, 成功 {}, 失败 {}",
+                                job_name,
+                                outcome.candidates,
+                                outcome.ok,
+                                outcome.fail
+                            );
+                            axagent_runtime_core::TaskRunResult {
+                                // 候选池为空不算失败（可能只是当天没扫出 pick），
+                                // 但有个别分析失败要如实标记
+                                success: outcome.fail == 0,
+                                output: Some(outcome.render()),
+                                error: outcome.first_error.clone(),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("[CronScheduler] 候选池扫描 '{}' 失败: {e}", job_name);
+                            axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(e),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                            }
+                        },
+                    };
+                store.record_run(&job_id, result).await;
+                if !recurring {
+                    let _ = store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await;
+                }
+            });
+            return;
+        }
+        // 反思：task_type = batch-reflection | validate-decisions
+        //
+        // [2026-09-13 接线] 此前这两个 task_type 在 CronExecutor 里**没有任何分支**：
+        //   - `validate-decisions`：反思面板的开关绑的就是它（ReflectionPanel →
+        //     `create_validate_decisions_cron`）⇒ 用户打开开关后，到点什么都不发生；
+        //   - `batch-reflection`：设置页可建、前端零调用，真在跑的只有
+        //     `init/services.rs::start_batch_reflection` 那个 6 小时硬编码服务。
+        //
+        // 现在两者都路由到 `run_batch_reflection_inner`（同一套 pending 队列消费逻辑），
+        // 差异只在配置：
+        //   - batch-reflection: { period, dueOnly, maxCount }
+        //       period = ultra_short|short|mid|long（各自间隔 2/5/28/90 天）
+        //       ⇒ **按 4 周期间隔分别自动反思**
+        //   - validate-decisions: { minConfidence, reflectionDepth, maxCount }
+        //       minConfidence 作为 filter 实际参与筛选（此前该配置无人消费）
+        if matches!(
+            job.task_type.as_deref(),
+            Some("batch-reflection") | Some("validate-decisions")
+        ) {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let engine = work_engine.clone();
+            let vector_store = cron_vector_store.clone();
+            let master_key = cron_master_key;
+            let trajectory_storage = cron_trajectory_storage.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let task_type = job.task_type.clone().unwrap_or_default();
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 1. 解析配置 → 统一 filter + max_count
+                let parsed: Result<
+                    (
+                        crate::commands::stock_workflow::ReflectionFilter,
+                        Option<u32>,
+                    ),
+                    String,
+                > = if task_type == "batch-reflection" {
+                    crate::commands::stock_workflow::BatchReflectionConfig::from_json(&prompt)
+                        .map(|c| (c.to_filter(), c.max_count))
+                } else {
+                    crate::commands::stock_workflow::ValidateDecisionsConfig::from_json(&prompt)
+                        .map(|c| (c.to_filter(), c.max_count))
+                };
+                let (filter, max_count) = match parsed {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::error!(
+                            "[CronScheduler] 反思任务 '{}'({task_type}) 配置解析失败: {e}",
+                            job_name
+                        );
+                        let result = axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(e),
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                        };
+                        store.record_run(&job_id, result).await;
+                        if !recurring {
+                            let _ = store
+                                .set_status(
+                                    &job_id,
+                                    axagent_runtime_core::CronJobStatus::Disabled,
+                                )
+                                .await;
+                        }
+                        return;
+                    },
+                };
+
+                // 2. 跑一轮批量反思（内部已含卡死 running 回收）
+                let r = crate::commands::stock_workflow::run_batch_reflection_inner(
+                    &db,
+                    &client,
+                    &engine,
+                    &vector_store,
+                    &master_key,
+                    max_count,
+                    Some(&trajectory_storage),
+                    Some(&filter),
+                )
+                .await;
+
+                let result = match r {
+                    Ok(summary) => {
+                        tracing::info!(
+                            "[CronScheduler] 反思任务 '{}'({task_type}) 完成: {summary}",
+                            job_name
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: true,
+                            output: Some(summary.to_string()),
+                            error: None,
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            "[CronScheduler] 反思任务 '{}'({task_type}) 失败: {e}",
+                            job_name
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(e),
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                        }
+                    },
                 };
                 store.record_run(&job_id, result).await;
                 if !recurring {
@@ -2351,44 +2817,6 @@ fn start_approval_event_bridge(app: &tauri::AppHandle, state: &AppState) {
                 },
             }
         }
-    });
-}
-
-/// 3.3 P2:启动 PersistentRunner 后台守护线程。
-///
-/// 守护线程每 60 秒检查一次 pending session。默认 `enabled: false` 时
-/// 守护线程空转 sleep,不会有任何调度行为。
-///
-/// **注意**:当前 executor 闭包为占位实现,返回 `Err("not implemented")`。
-/// 真正的 SessionManager 适配器需后续实现 — 实现后即可通过配置启用持久化重试。
-fn start_persistent_runner(state: &AppState) {
-    let Some(runner) = state.persistent_runner.clone() else {
-        tracing::debug!("[start_persistent_runner] PersistentRunner 未构造,跳过");
-        return;
-    };
-
-    // 占位 executor — 真正的 SessionManager 适配器需后续实现。
-    // 当前返回 Err,让 PersistentRunner 记录 warn 日志但不 panic。
-    let executor: axagent_runtime::persistent_runner::SessionExecutor = Arc::new(|_session| {
-        Box::pin(async {
-            tracing::warn!("[PersistentRunner] SessionExecutor 适配器尚未实现,session 执行被跳过");
-            Err("SessionExecutor adapter not yet implemented".to_string())
-        })
-    });
-
-    // 修复：spawn_daemon 内部调用 tokio::spawn,必须在 tokio runtime 上下文中执行。
-    // start_background_services 是同步函数,在 Tauri setup 闭包中直接调用时不在 runtime 上下文,
-    // 直接调用 spawn_daemon 会 panic "there is no reactor running"。
-    // 用 tauri::async_runtime::spawn 包裹,确保进入 runtime 上下文后再调用 spawn_daemon。
-    tauri::async_runtime::spawn(async move {
-        let handle = runner.spawn_daemon(60, executor);
-        tracing::info!(
-            "[start_persistent_runner] 守护线程已启动(默认 enabled=false,空转等待配置启用)"
-        );
-
-        // JoinHandle 被 drop 时 tokio 不会取消任务(detach),守护线程继续运行。
-        // 若需要优雅关闭,可后续把 handle 挂到 task_manager。
-        drop(handle);
     });
 }
 
@@ -2794,6 +3222,9 @@ fn start_batch_reflection(state: &AppState) {
                 &master_key,
                 None,
                 Some(&trajectory_storage),
+                // 兜底服务不限定周期档位：处理全部 pending。
+                // 「按 4 周期分档」由 cron 的 batch-reflection 任务各自指定 filter。
+                None,
             )
             .await
             {
@@ -2839,9 +3270,9 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
     tracing::info!("[startup] 需求发现定时任务已启动（每 12 小时）");
 }
 
-/// OPC 行业/领域工作流模板种子化（后台异步，幂等 upsert）
+/// OPC 域包/领域工作流模板种子化（后台异步，幂等 upsert）
 ///
-/// 激活 opc_workflows 全部 seed 模块：14 行业 + 17 领域 + 生产/内容媒体模板 +
+/// 激活 opc_workflows 全部 seed 模块：14 域包 + 17 领域 + 生产/内容媒体模板 +
 /// route_path 回填。TEMPLATE_VERSION 校验在 seed 函数内部完成。
 fn spawn_opc_workflows_seeding(state: &AppState) {
     let db = state.harness.db().clone();

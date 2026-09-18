@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { formatTokenCount } from "@/lib/format";
 import { getVisibleModelCapabilities } from "@/lib/modelCapabilities";
 import { SmartProviderIcon } from "@/lib/providerIcons";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
@@ -47,18 +48,6 @@ const CAPABILITY_ICONS: Record<ModelCapability, React.ReactNode> = {
   Reasoning: <Lightbulb size={11} />,
   RealtimeVoice: <Mic size={11} />,
 };
-
-function formatTokenCount(tokens: number): string {
-  if (tokens >= 1000000) {
-    const m = tokens / 1000000;
-    return m % 1 === 0 ? `${m}M` : `${m.toFixed(1)}M`;
-  }
-  if (tokens >= 1000) {
-    const k = tokens / 1000;
-    return k % 1 === 0 ? `${k}K` : `${k.toFixed(1)}K`;
-  }
-  return `${tokens}`;
-}
 
 function loadPinnedModels(): string[] {
   try {

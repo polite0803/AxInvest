@@ -10,6 +10,7 @@ pub struct Model {
     pub id: String,
     pub title: String,
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub description: String,
     /// "bash" | "agent"
     pub task_type: String,
@@ -20,9 +21,11 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub prompt: Option<String>,
     /// pending | running | completed | failed | stopped
+    #[sea_orm(default_value = "pending")]
     pub status: String,
     /// 累积输出（追加写入）
     #[sea_orm(column_type = "Text")]
+    #[sea_orm(default_value = "")]
     pub output: String,
     /// 退出码（bash 类型完成时）
     pub exit_code: Option<i32>,

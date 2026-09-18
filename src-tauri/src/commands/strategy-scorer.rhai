@@ -61,11 +61,14 @@ let read_weight = |name, fallback| {
     else { fallback }
 };
 
+// fn readiness_signal(score) 产出档名与本体档名有 `_signal` vs `_bottleneck` 的命名分歧
+// （见 OPEN_DIVERGENCES D3）。按 §7-a b1：阈值一律来自本体 band_for_score，
+// 仅在映射回本脚本对外契约的 `_signal` 档名，6 处产出位（:250/:296/:342/:388/:446/:494）不改。
 fn readiness_signal(score) {
-    if score >= 75.0 { "strong_signal" }
-    else if score >= 55.0 { "potential_signal" }
-    else if score >= 35.0 { "weak_signal" }
-    else { "no_signal" }
+    let band = band_for_score(score);
+    if band == "strong_bottleneck" { "strong_signal" }
+    else if band == "potential_bottleneck" { "potential_signal" }
+    else { band } // "weak_signal" / "no_signal" 两侧档名一致，直接透传
 }
 
 // 归一化 chain_analysis（v18）：字符串（```tool_json/```json 围栏包裹的文本，拆包失败时保留）

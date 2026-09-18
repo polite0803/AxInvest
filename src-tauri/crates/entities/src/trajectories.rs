@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: String,
+    #[sea_orm(indexed)]
     pub session_id: String,
+    #[sea_orm(indexed)]
     pub user_id: String,
     /// 结构化 agent 标识：记录该轨迹由哪个 Agent（AgentProfile 名称）执行。
     /// 进化系统据此精准聚合每个 Agent 的证据（v121 新增，可空列）。
@@ -24,11 +26,14 @@ pub struct Model {
     pub quality_user_satisfaction: f64,
     pub value_score: f64,
     pub patterns: String,
+    #[sea_orm(indexed)]
     pub created_at: String,
+    #[sea_orm(default_value = 0)]
     pub replay_count: i32,
     pub last_replay_at: Option<String>,
     /// 失效标记（append-only 证据存储：0=有效，1=已失效）。
     /// 轨迹作为进化证据不可物理删除，仅可标记失效（v120 新增）。
+    #[sea_orm(default_value = 0)]
     pub is_invalidated: i32,
 }
 

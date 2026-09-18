@@ -71,6 +71,121 @@ jobs:
       - name: Check line endings (LF)
         run: bash scripts/check-line-endings.sh
 
+      # 领域语义（量纲）门禁 —— 权威源是 harness 的 CONCEPTS 注册表
+      # （src-tauri/crates/harness/src/domain_semantics.rs），脚本不自带清单。
+      #
+      # 为什么放这么前：与行尾检查同理 —— 纯 Node、不依赖 npm ci、几秒内出结果。
+      # 为什么先跑 --selftest：扫描器自身会撒谎（v1 曾把 33 处「同一名字下的
+      # 多个自洽概念」全报成冲突）。正负对照不过 ⇒ 后面的结论一律不可信。
+      # 为什么 --strict 只拦未登记量纲：A 段由代码推出，是硬事实；PLAN 待办病点
+      # 属「待办态」，拦它等于逼人删条目 ⇒ 默认只报告，需要时加 --strict-plan。
+      - name: Check domain semantics (unit registry / one-name-many-concepts)
+        run: |
+          node scripts/check-domain-semantics.mjs --selftest
+          node scripts/check-domain-semantics.mjs --strict
+
+      # 模块级分层护栏（依赖方向 / 越层）—— 与上一步同理：纯 Node、秒级、不依赖构建产物。
+      # 为什么需要：分层纪律此前**只写在 AGENTS.md**，`scripts/` 零个脚本查依赖方向 ⇒
+      # 「越界是静态可判的，却没有任何机器在看」。规则文件拦不住任何人。
+      # 为什么先跑 --selftest：扫描器自身会撒谎（本轮实测踩到两处假阳性：字符串字面量、
+      # 共享基础设施模块）⇒ 正负对照不过时后面的「通过」无意义。
+      - name: Check layer discipline (dependency direction / cross-layer)
+        run: |
+          node scripts/check-layer-discipline.mjs --selftest
+          node scripts/check-layer-discipline.mjs
+
+      # 领域本体「权威源 ↔ 副本」一致性 —— 与上两步同理：纯 Node、秒级、不依赖构建产物。
+      # 为什么需要：`harness::domain_ontology` 声明了三力权重与分档阈值的**唯一权威源**，
+      # 但 `.rhai` 读不到 Rust 常量（只能由模板变量注入）⇒ 运行时必须保留一份 fallback，
+      # prompt 与注释里也各有散文口径。**声明了权威源 ≠ 副本会跟着走。**
+      # 实测：同一组权重（0.35/0.35/0.30）散在 2 份 .rhai + seeder + prompt 共 7 处；
+      # 且 prompt 的 composite 定义式（三力/3，等权）与 .rhai（Σwᵢfᵢ，加权）**互相矛盾**，
+      # 而此前没有任何机器看得见。
+      # 分两档（勿合并）：可执行字面量、接线存在性、站点清单完整性 ⇒ 硬拦；
+      # 口径分歧（消除它需要产品裁决）⇒ 只报告，否则会逼人删登记项，信号反而消失。
+      - name: Check domain ontology consistency (authority vs copies)
+        run: |
+          node scripts/check-ontology-consistency.mjs --selftest
+          node scripts/check-ontology-consistency.mjs
+
+      # 能力域单一真相源（权威枚举 ↔ 前端 / prompt / i18n 副本）。
+      # 为什么需要：`CapabilityDomain`（harness/src/capability.rs）是唯一权威，
+      # 但下游有 6 类手抄副本：TS 联合类型 / 前端域元数据 / 协议顺序 /
+      # L1 分类器 prompt 的域清单 / OPC 行业→域映射 / 11 语言的 capabilityDomain key。
+      # 此前一份都没被守 ⇒ 后端加一个域时，前端下拉没有它、LLM 永远学不会它、
+      # 界面显示裸 id —— 编译 / clippy / 单测**全都不报**（静默退化）。
+      # 判据（#147）：集合不一致 = 客观错（修法唯一）⇒ 硬拦；
+      # 顺序不同 / 命名空间用 camelCase = 可能是刻意的产品决策 ⇒ 只报告。
+      # ⚠ 与 `scripts/ci-check.mjs` 的对应条目**命令行逐字同源**。
+      - name: Check capability-domain single source (authority vs copies)
+        run: |
+          node scripts/check-domain-single-source.mjs --selftest
+          node scripts/check-domain-single-source.mjs
+
+      # 声明表 evidence 的「引用腐烂」校验 —— 与上三步同理：纯 Node、秒级、不依赖构建产物。
+      # 为什么需要：`harness::knowledge_graph` 三张声明表（关系 / 实体类型 / 数据驱动列）
+      # 每条 evidence 都带「文件:行」，这类引用**会随行号漂移腐烂**（改了源码，出处悄悄指向
+      # 另一行），而编译器 / clippy / 单测**全都不会报**。实测抓到 4 条指错
+      # （`uses` 曾指向一句 assert_eq!(…, "mentions")，`DATA_DRIVEN_COLUMN` 指向一句 continue;）。
+      # 为什么先跑 --selftest：扫描器自身会撒谎（旧版把「DB 分布 / CSV 行数」这类本就没有
+      # 文件:行的证据全判成失败 ⇒ 恒定假红，报了也没人看）。
+      # 为什么正式步用 --ci 而不裸跑：脚本把「结构腐烂」（文件不存在 / 行号越界 / 指到空行
+      # — 客观错，修法唯一）与「内容与 id 不同源」（软判据，会被「同一件事换了措辞」误伤）
+      # 分开；CI 只拦前者，后者仍打印到 stderr 供人复盘。裸跑会因软判据抖动而红，
+      # 而它的修法是改判据而非修缺陷 ⇒ 红久了必被绕过。
+      # 本地用不带 --ci 的版本可拿到退出码 3（内容存疑，需人判）。
+      - name: Check declaration evidence references (rot detection)
+        run: |
+          node scripts/check-decl-evidence.mjs --selftest
+          node scripts/check-decl-evidence.mjs --ci
+
+
+      # 端口公理写路径接线守卫：门禁接在 15 个「写 workflow_templates.nodes/edges」的
+      # 函数上（DAO 3 个 + 命令层 3 个经 DAO 收口 + 种子 9 个）。新增写路径忘了接门禁
+      # **不会有任何编译错误**，只有这条能拦。
+      # 先跑 --selftest：守卫自身会撒谎（v1 被注释里的「port_axiom_errors」骗成已接；
+      # 又因只枚举两种模式漏掉裸 `ActiveModel {`；再因剥注释不剥字符串而吞掉整段代码）。
+      - name: Check port-axiom write-path wiring
+        run: |
+          node scripts/check-port-axiom-wiring.mjs --selftest
+          node scripts/check-port-axiom-wiring.mjs
+
+      # input_mapping 源路径门禁：每条 `("target","source")` 映射里，源路径一旦写错包裹层
+      # （少一层 `content.` / 段数不够 / 字段名不对），运行期只是**静默解析为 None** ——
+      # 编译 / clippy / 单测全都不报，界面上只表现为「某个字段恒空」。
+      # 与上几步同理：纯 Node、秒级、不依赖 npm ci / 构建产物 ⇒ 放在 dprint / tsc / build 之前最快失败。
+      # 为什么先跑 --selftest：本门禁的规则前提**曾被引擎改动静默作废**（v1 有两条夹具断言
+      #   「ToolNode 用严格解析器」，而该前提在引擎侧统一 resolver 时已被删除 ⇒ 规则看似在跑、
+      #   实际已失真），故必须先证明它「对已知缺陷形态仍能红」，再相信它的绿。
+      # 另注：该脚本原先放在 `output/`（被 .gitignore 忽略）⇒ 对任何 clone 本仓库的人都不存在，
+      #   等于从未生效；2026-09-15 迁到 scripts/ 并按同目录同族形态接入。
+      #   本步两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**
+      #   （那边拆成两条 step 以便逐条计时/显错；容器形态不同，命令逐字相同）。
+      - name: Check input_mapping source paths (envelope shape / consumer reachability / DAG / CodeNode return keys)
+        run: |
+          node scripts/check-input-mapping.mjs --selftest
+          node scripts/check-input-mapping.mjs
+
+      # 「同一事实的多份载体」门禁（行号引用 + reranker 文件名）—— 与上几步同理：
+      # 纯 Node、秒级、不依赖 npm ci / 构建产物。
+      # 为什么需要：一个事实写在多处时，机器此前只看住了一部分 ——
+      #   ① 行号引用：`check-decl-evidence.mjs` 只扫 `harness/src/knowledge_graph.rs` 的
+      #      `evidence:` 字段；`page_type.rs` 的 7 条 rustdoc 引用**不在扫描面内**，
+      #      于是 09-14 起静默腐烂（实测 4 处偏 +10/+3，两次都不是被检查发现的）。
+      #   ② reranker 文件名：Rust 侧有真源常量 + 跨 crate 绑定测试，前端 2 处字面量却无锁
+      #      （全仓 grep 常量名在前端的命中数 = 0）—— 当初就是前端那份缺了 `.Q4_K_M.gguf` 后缀。
+      # 为什么正式步用 --ci 而不裸跑：脚本按判据 #147 把「客观错」（文件不存在 / 行号越界 /
+      #   指到空行 / 载体值不等）与「软判据」（出处那一行已不含同句引号值）分开；裸跑在只有
+      #   软命中时退 3，而软判据的修法是改判据而不是修缺陷 ⇒ 拿它拦 CI 必被绕过。
+      # 覆盖率自陈（判据 #16）：脚本把 LOCATED / NONLOC（裸 `mod.rs` 之类无法定位）/ EXTERNAL
+      #   （第三方 crate 源码）/ BROKEN 四类**分开打印**，并把未覆盖的引用点名列出 ——
+      #   不列的话「0 腐烂」会被误读成「全都查过了」。
+      # 本步两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
+      - name: Check single-source facts (line-ref rot / reranker filename drift)
+        run: |
+          node scripts/check-single-source-facts.mjs --selftest
+          node scripts/check-single-source-facts.mjs --ci
+
       - name: Check frontend formatting (dprint)
         run: npm run format:check
 
@@ -88,14 +203,37 @@ jobs:
       - name: Check i18n hardcoded strings
         run: bash scripts/check-hardcoded-i18n.sh --strict
 
+      - name: Check i18n key alignment (syntax / empty values / t() key existence)
+        # 2026-09-14 补的**断链修复**：本脚本早已存在且是绿的，但**从未被 CI 调用** ——
+        # 又一处「声明的机制 ≠ 运行的机制」。它与下面那道门禁**互补**，缺一不可：
+        #   本步查 **key**（JSON 语法、zh-CN 空值、代码 t() 引用的 key 是否存在）
+        #   下步查 **值**（非 CJK locale 的值是否仍是中文）
+        # 只有本步时：「key 齐全、值却是中文」可全绿逃逸；只有下步时：「值都翻译了、key 却漏加」会逃逸。
+        run: python3 scripts/check_i18n.py --strict
+
+      - name: Check i18n untranslated values (non-CJK locale must not contain CJK chars)
+        # 现有两道 i18n 门禁的盲区：check-hardcoded-i18n.sh 只查代码里的硬编码文案，
+        # 上面那道只查 JSON 语法 / zh-CN 空值 / **key 是否存在**。
+        # 于是「key 存在、11 语言全对齐、但 de/fr/es/ru/hi/ko/ar 的值仍是中文」可全绿逃逸。
+        # 2026-09-14：存量（8 语言 13228 项）已全部翻译完成，基线收紧为 **0** ⇒ 本门禁现为**零容忍**，
+        # 任何新增的中文值都会让 CI 转红。若确属「有意保留中文」（语言自称、需用户原样输入的命令串），
+        # 到 scripts/i18n-untranslated-allowlist.json 登记并写明 reason —— 不要为过门禁把中文抄进非 CJK locale。
+        # 脚本自带判据自检（每次运行内建，含「豁免既生效又不过宽」对照）。
+        run: node scripts/check-i18n-untranslated.mjs
+
       - name: Check ID validation (prevent undefined/null string corruption)
         run: node scripts/check-id-validation.mjs
 
       - name: Check backend error code i18n alignment
         run: node scripts/check-errorcode-alignment.mjs
 
-      - name: Contract consistency check (command registration / i18n keys / harness deps)
-        run: npm run contracts -- --only=a,c,d
+      - name: Contract consistency check (command registration / i18n keys / harness deps / field & event edge supply)
+        # 注意：本步用 `--only` **白名单**限定检查段，新增段必须同步加进来，
+        # 否则「写了但没跑」—— 这正是本仓库反复出现的「声明了不生效的机制」。
+        # b 段不在此处：错误码 i18n 对齐由上面的 check-errorcode-alignment.mjs 独立执行。
+        # f = 登记字段必有消费点（防死参数回归）；g = 事件发射/监听对称（防前端监听永远收不到）。
+        # h = 静默丢弃 Result 棘轮（Rust 侧 bare-except 等价物，只减不增）。
+        run: npm run contracts -- --only=a,c,d,f,g,h
 
   rust-check:
     name: Rust Check (fmt + clippy + build)
@@ -158,6 +296,47 @@ jobs:
     if: needs.should-run-heavy.outputs.skip != 'true'
     timeout-minutes: 120
     runs-on: ubuntu-24.04
+
+    # 真机 PostgreSQL —— 供下面的「PostgreSQL integration tests」步骤使用。
+    #
+    # 为什么必须起：仓库里有 4 个 env-gated 的 PG 集成测试，此前**在 CI 里一条
+    # 都没执行过**（每个文件各自 gate，变量名一度有三种写法：AXAGENT_TEST_PG_URL
+    # / AXAGENT_PG_TEST_URL / AXINVEST_PG_TEST）。而「从未执行过的测试」会稳定腐烂：
+    #
+    #   ⚠ 2026-09-18 读法：上面这个「4 个」是**当时**（2026-09-16）的数目，含随后退休的
+    #   `pg_migrations.rs` / `pg_runtime_test.rs`；现状是 **3 个**，且下方已全部点名
+    #   （原为 2 个漏 1 个，同日补齐）。这句**保留不改** —— 它与下面两条退休实证一样，
+    #   是「为什么必须起 PG service」这个决策的依据，不是待办；读法同
+    #   `crates/dao/tests/pg_cjk_fts.rs` 头部那段（那里也保留了同一批历史记述）。
+    #   判据若要「当前有几个」，请以 `grep -rl AXAGENT_TEST_PG_URL --include=*.rs` 为准。
+    #   - `pg_migrations.rs` 断言 `MAX(version) == 100`（注册表早已到 v227），
+    #     还断言一张 `v101` 会 DROP 掉的表「应存在」；
+    #     ⚠ 2026-09-16：下面这两条都是**退休文件的当时实证**，保留不改 —— 它们是
+    #     「为什么必须起 PG service」这个决策的依据，不是待办。现状：`pg_migrations.rs`
+    #     已随 74 个版本化迁移一起删除（且**删前未备份** ⇒ 其断言原文不可复原，
+    #     见 `PLAN-declarative-schema-sync.md` §十一·十一⑨）；`pg_runtime_test.rs`
+    #     更早已被「断言语义并入前者后删除源文件」处置。
+    #   - `pg_runtime_test.rs` 把口令明文写进源码（本仓库开源），且用
+    #     `DROP SCHEMA public CASCADE` 重建 —— env 一旦误指向生产库即清库。
+    # 后果是「PostgreSQL 路径」在生产上零回归覆盖，而 v101/v139 这两条
+    # 「从未在 PG 上跑过」的迁移直接让应用启动彻底 brick（2026-09-12）。
+    #
+    # 用 pgvector 镜像而非官方 postgres：`axagent-search` 的 pg_integration
+    # 需要 `CREATE EXTENSION vector`。
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: axagent_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v5
 
@@ -201,6 +380,119 @@ jobs:
       - name: Run Rust tests
         run: cargo nextest run --workspace --manifest-path src-tauri/Cargo.toml
 
+      # 真机 PostgreSQL 集成测试 —— **串行**执行，并与上面的 nextest 步骤隔离。
+      #
+      # ⚠ 2026-09-16（P6 迁移清空）：本步骤原本第一个目标是
+      # `cargo test -p axagent-dao --test pg_migrations`。那个文件已随 74 个版本化
+      # 迁移一起删除（`migrations/MIGRATIONS` 置空为 `&[]`），cargo 对不存在的
+      # test target 返回非 0 ⇒ 叠上本步骤的 `set -euo pipefail`，CI heavy job
+      # 会 100% 失败。该行已移除。
+      #
+      # 由此产生的**覆盖缺口（已登记，未修）**：删掉 `pg_migrations` 后，真 PG 上
+      # 没有任何断言覆盖「声明式引擎建出的**全量** schema（表集合 / 列类型 / 约束）」。
+      # 注意缺口**不是**「引擎在真 PG 上没被跑过」—— 下面的 `pg_cjk_fts` 第 1 步
+      # 就会调 `reconcile::apply::bootstrap_schema` 真跑一轮收敛，只是它的断言面
+      # 只覆盖 CJK 子集（函数 / 生成列 / GIN 索引 / 查询命中），全量表集合不属于它。
+      # 补法是新写一个 PG 侧引擎建库测试（尚未做），见
+      # `PLAN-declarative-schema-sync.md` §十一·十一⑨。
+      #
+      # 为什么不直接把 env 给 nextest 让它一并跑：nextest 跨 test binary 并行，
+      # 而 `pg_cjk_fts`（`bootstrap_schema` 收敛 + 重建 `vec_*_meta` 的生成列与
+      # GIN 索引；原先还含「重跑全量迁移」，迁移清空后该部分已成 no-op）
+      # 与 `axagent-search` 的 `pg_integration`（建 `vec_*` 表并查 tsv 生成列）
+      # 会在**同一个库**上争用 —— 那会变成间歇性 flaky，比没有测试更糟。
+      # 这里改成逐个 `cargo test … -- --test-threads=1` 顺序执行：确定性优先。
+      #
+      # 也因此上面的 `cargo nextest run --workspace` **不设** AXAGENT_TEST_PG_URL：
+      # 这几个测试在 nextest 里保持跳过，只在本步骤真正执行。
+      #
+      # 顺序：原先有硬依赖 —— `pg_migrations` 会把库名换成 `postgres` 作维护库，
+      # 并 DROP + CREATE `axagent_pg_migtest`，是唯一会重建库的测试，故排最前。
+      # 该文件删除后这条依赖消失（剩下两个目标互不重建库）。
+      #
+      # ⚠ 2026-09-18：下面补入第三个目标后，**顺序重新有了硬依赖**（上一句那句
+      # 「顺序不再有约束」在这之后不再成立，保留原文是为了让这次改判可追溯）：
+      #
+      #   `pg_upsert_bare_column` **不自己建表**。它断言的对象是 `wiki_graph_cache`
+      #   上 `ON CONFLICT … DO UPDATE SET` 的列限定；表不存在时它打印 SKIP 后
+      #   `return`（EXIT=0），不会报错。⇒ 它必须排在 `pg_cjk_fts` **之后**，因为那张
+      #   表的来源正是 `pg_cjk_fts` 的第 1 步 `reconcile::apply::bootstrap_schema`。
+      #
+      #   连带的取证陷阱（我踩过）：在 `crates/dao/src/reconcile/` 里 grep
+      #   `wiki_graph_cache` 是**零命中**，但这**不等于**引擎不建它 —— 期望侧的表集合
+      #   由 `dao/build.rs` 在编译期读 `entities/src/lib.rs` 的 `pub mod` 生成
+      #   （`reconcile/expected.rs:67-69` 的 `include!`），而 `entities/src/lib.rs:228`
+      #   正是 `pub mod wiki_graph_cache;`。它也不在 `extras::NON_MAIN_DB` 的排除名单里
+      #   （那份名单只有 `ast_*` / `file_index` / `l2_*` 六张侧车库表）。
+      #   ⇒ 判据是「注册表里有没有」，不是「reconcile/ 里有没有字面量」。
+      - name: Run PostgreSQL integration tests (real server)
+        env:
+          AXAGENT_TEST_PG_URL: postgres://postgres:postgres@localhost:5432/axagent_test
+        run: |
+          set -euo pipefail
+          # （2026-09-16 删：此处原为 `cargo test -p axagent-dao --test pg_migrations`。
+          #   该 test target 已随 74 个版本化迁移一起删除 —— 留着会让本步骤必然失败
+          #   （cargo 报 no test target named 'pg_migrations'，退出码非 0；
+          #   本 run 块开头是 `set -euo pipefail`，故整步即红）。
+          #   它当年承担的「真 PG 上断言引擎建出**全量** schema」的那份覆盖，目前**无断言承接**
+          #   —— 注意不是「引擎没被跑过」：本步骤下面的 pg_cjk_fts 第 1 步就会调
+          #   `reconcile::apply::bootstrap_schema` 真跑一轮收敛，只是它的断言面只覆盖
+          #   CJK 子集（函数/生成列/GIN 索引/查询命中），全量表集合不属于它。
+          #   缺口说明与补法见上方的步骤注释 + `PLAN-declarative-schema-sync.md` §十一·十一⑨。）
+          cargo test -p axagent-dao --test pg_cjk_fts \
+            --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+          cargo test -p axagent-search --test pg_integration \
+            --manifest-path src-tauri/Cargo.toml -- --test-threads=1
+
+          # ⚠ 2026-09-18 补：本目标此前**在 CI 里从未被执行过** —— 全仓 3 个 env-gated
+          # PG 测试，这里原先只点了 2 个（本步骤的注释把 4 当成现状也是同一处漏项）。
+          # 它在开发机上被手工跑过一次（`docs/audits/AUDIT-db-upsert-dialect-2026-09-17.md`），
+          # 但 CI 侧一次没有 ⇒ 正是那种会稳定腐烂的测试。
+          #
+          # 为什么值得点名：它锁的是「`ON CONFLICT DO UPDATE SET` 里不得出现未限定列引用」，
+          # 而这类缺陷**只在 PG 上暴露** —— SQLite 对裸列名宽容（实测 3.53.1 各形态全收），
+          # 任何 SQLite 单测都抓不到它，本目标是全仓唯一的观测点。附带它也是
+          # `LouvainResult::entity_communities` **落库往返的唯一观测点**
+          # （`docs/audits/AUDIT-kg-cross-kb-merge-2026-09-17.md` §25.3）。
+          #
+          # ⚠ 顺序依赖：**必须排在本步骤的 `pg_cjk_fts` 之后**，理由见上方步骤注释
+          # （它不自己建表，`wiki_graph_cache` 由 `pg_cjk_fts` 的 `bootstrap_schema` 建出）。
+          #
+          # 为什么只有它加「SKIP 即失败」断言：前两个目标**自己建自己需要的前置**
+          # （`pg_cjk_fts` 先 `bootstrap_schema`；`pg_integration` 自己
+          # `CREATE EXTENSION vector` 且每轮用 `pg_itest_{pid}` 独立集合名），前置不成立
+          # 会直接报错；只有本目标的前置是**别人建的表**，缺表时它打印 SKIP 然后
+          # `return` ⇒ **EXIT=0，CI 照样绿**。那正是「装了门禁但从没见过它红」的翻版，
+          # 故这里把它的诚实输出（`tests/pg_upsert_bare_column.rs` 的两条 SKIP 分支）
+          # 显式判为失败。`--nocapture` 是必需的 —— 否则 test harness 会把 `eprintln!`
+          # 的 SKIP 文本吞进捕获缓冲，这里就 grep 不到。
+          #
+          # ⚠ 判据只能判「SKIP 文本」，**不能**判「有没有 1 passed」：该测试的两条跳过
+          # 分支都是 `return`（不是 `#[ignore]`、不是 panic）⇒ harness 照样报
+          # `test result: ok. 1 passed`。这正是它那条注释的用意
+          # （「本测试**未通过，也未被验证** —— 跳过仅表示环境不具备条件」）：
+          # 通过与否的唯一载体就是这段输出文本本身。
+          # 锚点用 `^[[:space:]]*`：SKIP 由 `eprintln!` 写在行首，允许前导空白；
+          # 不加行首锚会把 `… variable SKIP:ed_thing` 这类行误判成跳过
+          # （自证实测这类假阳性 2 例，另一例是 `error: something SKIP: bad`；见
+          # output/verify-graph-2026-09-15/skip-guard-selftest-0918.log）。
+          #
+          # 上面那行 `cargo … | tee` 依赖**本 run 块第 1 行的 `set -euo pipefail`**
+          # （也是 GitHub Actions 给 Linux bash 的默认 `-eo pipefail`）：没有 pipefail 时
+          # 管道的退出码取最后一个命令（`tee`，恒 0）⇒ cargo 的失败会被静默吞掉。
+          #
+          # 附带（**不是断言、不得外推**）：本目标跑通说明 `wiki_graph_cache` 这张表确实
+          # 被引擎建出来了。但 `table_exists` 只查 `information_schema.tables` 的**表名**
+          # （不带 schema 限定），强度仅够证明「有这么一张表」，**不能**用来顶替上方
+          # 登记的「真 PG 上全量 schema 表集合无断言」那个缺口。
+          cargo test -p axagent-dao --test pg_upsert_bare_column \
+            --manifest-path src-tauri/Cargo.toml -- --test-threads=1 --nocapture 2>&1 \
+            | tee /tmp/pg-upsert-bare-column.log
+          if grep -qE '^[[:space:]]*SKIP:' /tmp/pg-upsert-bare-column.log; then
+            echo "::error::pg_upsert_bare_column 跳过了 —— 前置（wiki_graph_cache 表）不成立。本目标未通过，也未被验证。"
+            exit 1
+          fi
+
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -208,6 +500,37 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci --legacy-peer-deps
+
+      # 中文 ngram 两侧一致性（Rust ↔ PG）—— **本地镜像早就有、CI 却一直没有**，
+      # 2026-09-14 补。为什么这是真盲区：索引侧由 PG 生成列算（`ax_cjk_ngram`），
+      # 查询侧由 Rust 算（`search::text_ngram::cjk_ngram`）；两侧对同一输入产出
+      # 不同 token 串时**静默失配** —— 索引里有、查询取不到，而 `cargo check` /
+      # clippy / Rust 单测**全绿**。此前没有任何 CI 步骤拿同一份 fixture 喂两侧比对。
+      #
+      # 为什么放本 job：整个 workflow 里只有这里有一台真 PG（上面的 pgvector service）。
+      # 挂到 frontend-check job 只能空转 —— 那正是「装了门禁但从没见过它红」。
+      # 为什么 `AXAGENT_NGRAM_PG_URL`：脚本默认读 `~/.axagent/db_config.json`
+      # （开发机的加密配置），CI 里不存在；没有这条 env 通道时它只能 SKIP。
+      # 为什么把 pg 装到独立目录而不是项目 node_modules：`pg` **刻意不是项目依赖**
+      # （生产走 sqlx），脚本自身支持 NODE_PATH 兜底扫描（注释里写明就是为此），
+      # 故装到 /tmp 即可命中，且不干扰后面的 npm run test:run / test:integration。
+      # 为什么必须加那条守卫：driver 装不上时脚本会 SKIP 并**返回 0**，
+      # 于是「装包失败」被静默转成「门禁通过」—— 等于用新盲区换掉旧盲区。
+      # 为什么用 `--only=consistency`：CI 的库是**干净的**、从未执行 v227 迁移
+      # ⇒ 生成列与 GIN 索引都不存在，那半检查在 CI 无意义（会恒红）。
+      # 实测（本机 0 表库 axagent 精确模拟此场景）：函数一致性 34/34 通过。
+      - name: Check CJK ngram consistency (Rust ↔ PG)
+        env:
+          AXAGENT_NGRAM_PG_URL: postgres://postgres:postgres@localhost:5432/axagent_test
+        run: |
+          mkdir -p /tmp/ngram-pgdrv
+          npm install --prefix /tmp/ngram-pgdrv --no-save --legacy-peer-deps --silent pg
+          if [ ! -d /tmp/ngram-pgdrv/node_modules/pg ]; then
+            echo "::error::pg 驱动未装上；缺它时脚本会静默 SKIP，门禁等于空转"
+            exit 1
+          fi
+          NODE_PATH=/tmp/ngram-pgdrv/node_modules \
+            node scripts/check-ngram-consistency.mjs --only=consistency
 
       - name: Run frontend tests
         run: npm run test:run

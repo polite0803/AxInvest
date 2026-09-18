@@ -17,12 +17,13 @@
   color: var(--color-text) !important;
 }
 
-/* 深色主题下滚动条 */
+/* 深色主题下滚动条 —— 颜色统一走全局 --scrollbar-thumb（原用 --color-fill-tertiary，
+   该变量全项目无定义，属性无效 → 退回浏览器默认色，深色主题下几乎不可见） */
 .agent-exec-panel__tabs .ant-tabs-content-holder::-webkit-scrollbar {
   width: 4px;
 }
 
 .agent-exec-panel__tabs .ant-tabs-content-holder::-webkit-scrollbar-thumb {
-  background-color: var(--color-fill-tertiary);
+  background-color: var(--scrollbar-thumb);
   border-radius: 2px;
 }

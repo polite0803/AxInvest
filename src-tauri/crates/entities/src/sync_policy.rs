@@ -15,22 +15,32 @@ pub struct Model {
     /// 策略描述
     pub description: Option<String>,
     /// 同步模式（manual/auto/scheduled）
+    #[sea_orm(default_value = "manual")]
     pub sync_mode: String,
     /// 冲突解决策略
+    #[sea_orm(default_value = "last_write_wins")]
     pub conflict_strategy: String,
     /// 同步间隔（毫秒）
+    #[sea_orm(default_value = 3600000)]
     pub sync_interval_ms: i64,
     /// 允许的实体类型（JSON 数组）
+    #[sea_orm(default_value = "[]")]
     pub allowed_entity_types: String,
     /// 排除的实体类型（JSON 数组）
+    #[sea_orm(default_value = "[]")]
     pub excluded_entity_types: String,
     /// 压缩算法
+    #[sea_orm(default_value = "none")]
     pub compression_algorithm: String,
     /// 最大传输大小（字节）
+    #[sea_orm(default_value = 104857600)]
     pub max_transfer_size: i64,
     /// 是否加密传输
+    #[sea_orm(default_value = false)]
     pub encryption_enabled: bool,
     /// 是否启用
+    #[sea_orm(indexed)]
+    #[sea_orm(default_value = true)]
     pub is_enabled: bool,
     /// 创建时间（Unix 毫秒）
     pub created_at: i64,

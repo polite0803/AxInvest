@@ -10,12 +10,12 @@
 //!     （timestamp_millis），与 created_at（秒）不一致，导致
 //!     total_time_ms = (completed_at - created_at) * 1000 计算出天文数字。修复后统一为秒。
 
+mod common;
+
 use std::sync::Arc;
 
-use axagent_harness::registry::ProviderRegistry;
-use axagent_harness::repo_dtos::WorkflowExecutionData;
 use axagent_harness::repositories::{
-    WorkflowExecutionRepository, set_loop_checkpoint_repository, set_workflow_execution_repository,
+    set_loop_checkpoint_repository, set_workflow_execution_repository,
 };
 use axagent_harness::test_support::empty_loop_checkpoint_repo;
 use axagent_harness::workflow_types::{
@@ -24,74 +24,12 @@ use axagent_harness::workflow_types::{
 };
 
 use axagent_rt_workflow::work_engine::{RunOptions, WorkEngine};
-use tokio::sync::Mutex;
+use common::{EmptyProviderRegistry, RecordingWorkflowExecutionRepo};
 
-// ── 记录型 WorkflowExecutionRepository ───────────────────────────────
+// ── 节点构造 helpers ─────────────────────────────────────────────────
 //
-// 记录每次 create_workflow_execution / update_workflow_execution_status 调用，
-// 便于断言 DB 是否收到终态与总耗时（total_time_ms）。
-
-/// 记录型 repo 的 update 日志：`(exec_id, status, total_time_ms)`
-type UpdateLog = Arc<Mutex<Vec<(String, String, Option<i32>)>>>;
-
-#[derive(Clone)]
-struct RecordingWorkflowExecutionRepo {
-    /// (exec_id, status, total_time_ms)
-    updates: UpdateLog,
-}
-
-#[async_trait::async_trait]
-impl WorkflowExecutionRepository for RecordingWorkflowExecutionRepo {
-    async fn create_workflow_execution(
-        &self,
-        _id: &str,
-        _workflow_id: &str,
-        _input_params: Option<&str>,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-    async fn update_workflow_execution_status(
-        &self,
-        id: &str,
-        status: &str,
-        _output_result: Option<&str>,
-        _node_executions: Option<&str>,
-        total_time_ms: Option<i32>,
-    ) -> Result<bool, String> {
-        self.updates.lock().await.push((id.to_string(), status.to_string(), total_time_ms));
-        Ok(true)
-    }
-    async fn list_workflow_executions(
-        &self,
-        _workflow_id: &str,
-    ) -> Result<Vec<WorkflowExecutionData>, String> {
-        Ok(vec![])
-    }
-    async fn save_execution_state(
-        &self,
-        _id: &str,
-        _status: &str,
-        _execution_state_json: &str,
-    ) -> Result<bool, String> {
-        Ok(true)
-    }
-    async fn clear_execution_state(&self, _id: &str, _status: &str) -> Result<bool, String> {
-        Ok(true)
-    }
-    async fn list_paused_executions(&self) -> Result<Vec<WorkflowExecutionData>, String> {
-        Ok(vec![])
-    }
-}
-
-// ── 最小 ProviderRegistry + 节点构造 helpers ─────────────────────────
-
-struct EmptyProviderRegistry;
-
-impl ProviderRegistry for EmptyProviderRegistry {
-    fn get(&self, _provider_type: &str) -> Option<Arc<dyn axagent_harness::ProviderAdapter>> {
-        None
-    }
-}
+// `RecordingWorkflowExecutionRepo` / `EmptyProviderRegistry` 两处 mock 原先在本文件
+// 逐字重复定义，已收敛到 `tests/common/mod.rs`（去重 2026-09-14）。
 
 fn make_base(id: &str, title: &str, enabled: bool) -> WorkflowNodeBase {
     WorkflowNodeBase {
@@ -138,8 +76,8 @@ fn make_edge(source: &str, target: &str) -> WorkflowEdge {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn sub_workflow_and_partial_finalize_persist_terminal_status() {
-    let updates = Arc::new(Mutex::new(Vec::new()));
-    let repo = Arc::new(RecordingWorkflowExecutionRepo { updates: updates.clone() });
+    let repo = Arc::new(RecordingWorkflowExecutionRepo::default());
+    let updates = repo.updates.clone();
     // 全局 registry 覆盖式注入；单测试函数内顺序执行，无并行 set 冲突。
     set_workflow_execution_repository(repo);
     set_loop_checkpoint_repository(empty_loop_checkpoint_repo());

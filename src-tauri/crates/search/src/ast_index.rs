@@ -8,8 +8,36 @@
 //!
 //! Stores extracted definitions in SQLite for fast semantic matching during
 //! the L2 phase of the three-level recall pipeline.
+//!
+//! # 访问层（2026-09-16 改造：原生 SQL → SeaORM 实体）
+//!
+//! 原先持 `rusqlite::Connection` + 手写 DDL + 原生 SQL；现改持 `DatabaseConnection`
+//! 并全部走 `axagent_entities::ast_*` 五个实体：
+//! - 建表由实体派生（`Schema::create_table_from_entity`）；
+//! - `unchecked_transaction()` → `TransactionTrait::transaction`（真事务，失败回滚）；
+//! - 单文件删除 / 前缀删除改为实体 `delete_many`，**前缀比较在 Rust 侧做字面
+//!   `starts_with`**（理由与 `file_index.rs` 相同：`LIKE` 的 `_` 是通配符，而扫描根
+//!   必定含 `_`；`substr` 需写裸 SQL，会把方言引回来）；
+//! - `remove_file` 原先是 `execute_batch(&format!("... WHERE file_path = '{0}'"))`
+//!   —— **字符串拼 SQL**（只做了 `'` 转义）。现为参数化实体删除，该注入面消失。
+//!
+//! ⚠ `ast_call_edges` 的主键是实体侧**新增**的四列复合主键（原手写 DDL 无主键），
+//! 因此插入配 `OnConflict::do_nothing()`：完全重复的边本身无意义。
+//! 存量库不会因 `CREATE TABLE IF NOT EXISTS` 补上该约束（该库是可重建缓存，
+//! 处置方式是删库重扫，见实体文件说明）。
+//!
+//! ## 同步 → async
+//!
+//! 方法全部改为 `async`。`DatabaseConnection` 是 `Send + Sync + Clone`，从而解除了
+//! `rusqlite::Connection`（`Send` 但非 `Sync`）带来的「访问必须收进 `spawn_blocking`
+//! 且不得跨 `.await` 共享」约束（原裁定见 `PLAN-weknora-borrowings.md §12.11.2`）。
 
-use rusqlite::{Connection, params};
+use axagent_entities::{ast_call_edges, ast_classes, ast_functions, ast_interfaces, ast_variables};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, EntityTrait, PaginatorTrait,
+    QueryFilter, QuerySelect, Schema, Set, TransactionTrait,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,7 +91,7 @@ pub struct CallEdge {
 }
 
 pub struct AstIndex {
-    pub(crate) conn: Connection,
+    pub(crate) db: DatabaseConnection,
 }
 
 impl std::fmt::Debug for AstIndex {
@@ -73,70 +101,37 @@ impl std::fmt::Debug for AstIndex {
 }
 
 impl AstIndex {
-    pub fn new(conn: Connection) -> Result<Self, String> {
-        let index = Self { conn };
-        index.ensure_tables()?;
+    pub async fn new(db: DatabaseConnection) -> Result<Self, String> {
+        let index = Self { db };
+        index.ensure_tables().await?;
         Ok(index)
     }
 
-    fn ensure_tables(&self) -> Result<(), String> {
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS ast_functions (
-                    id TEXT PRIMARY KEY,
-                    file_path TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    signature TEXT NOT NULL DEFAULT '',
-                    line_start INTEGER NOT NULL DEFAULT 0,
-                    line_end INTEGER NOT NULL DEFAULT 0,
-                    visibility TEXT NOT NULL DEFAULT '',
-                    language TEXT NOT NULL DEFAULT ''
-                );
-                CREATE INDEX IF NOT EXISTS idx_ast_fn_name ON ast_functions(name);
-                CREATE INDEX IF NOT EXISTS idx_ast_fn_file ON ast_functions(file_path);
-
-                CREATE TABLE IF NOT EXISTS ast_classes (
-                    id TEXT PRIMARY KEY,
-                    file_path TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    line_start INTEGER NOT NULL DEFAULT 0,
-                    line_end INTEGER NOT NULL DEFAULT 0,
-                    language TEXT NOT NULL DEFAULT '',
-                    parent_class TEXT
-                );
-                CREATE INDEX IF NOT EXISTS idx_ast_cls_name ON ast_classes(name);
-
-                CREATE TABLE IF NOT EXISTS ast_interfaces (
-                    id TEXT PRIMARY KEY,
-                    file_path TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    line_start INTEGER NOT NULL DEFAULT 0,
-                    language TEXT NOT NULL DEFAULT ''
-                );
-
-                CREATE TABLE IF NOT EXISTS ast_variables (
-                    id TEXT PRIMARY KEY,
-                    file_path TEXT NOT NULL,
-                    name TEXT NOT NULL,
-                    type_annotation TEXT,
-                    line INTEGER NOT NULL DEFAULT 0,
-                    language TEXT NOT NULL DEFAULT ''
-                );
-
-                CREATE TABLE IF NOT EXISTS ast_call_edges (
-                    caller_file TEXT NOT NULL,
-                    caller_function TEXT NOT NULL,
-                    callee_name TEXT NOT NULL,
-                    line INTEGER NOT NULL DEFAULT 0
-                );
-                CREATE INDEX IF NOT EXISTS idx_ast_edge_callee ON ast_call_edges(callee_name);
-                CREATE INDEX IF NOT EXISTS idx_ast_edge_file ON ast_call_edges(caller_file);",
-            )
-            .map_err(|e| format!("Failed to create AST tables: {e}"))
+    /// 5 张表的建表语句**由实体生成**（不再手写列清单）。
+    async fn ensure_tables(&self) -> Result<(), String> {
+        let backend = self.db.get_database_backend();
+        for stmt in [
+            Schema::new(backend).create_table_from_entity(ast_functions::Entity),
+            Schema::new(backend).create_table_from_entity(ast_classes::Entity),
+            Schema::new(backend).create_table_from_entity(ast_interfaces::Entity),
+            Schema::new(backend).create_table_from_entity(ast_variables::Entity),
+            Schema::new(backend).create_table_from_entity(ast_call_edges::Entity),
+        ] {
+            let mut stmt = stmt;
+            stmt.if_not_exists();
+            self.db
+                .execute(&stmt)
+                .await
+                .map_err(|e| format!("Failed to create AST tables: {e}"))?;
+        }
+        Ok(())
     }
 
     /// Index a file's AST, replacing previous entries for this file.
-    pub fn index_file(&self, file_path: &str, content: &str) -> Result<usize, String> {
+    ///
+    /// 全程在**一个事务**内：先按单文件删 5 张表，再批量插回。失败回滚 ⇒
+    /// 不会出现「旧的删了、新的没插上」这种索引空洞。
+    pub async fn index_file(&self, file_path: &str, content: &str) -> Result<usize, String> {
         let lang = detect_language(file_path);
         let functions = extract_functions(content, file_path, lang);
         let classes = extract_classes(content, file_path, lang);
@@ -144,186 +139,442 @@ impl AstIndex {
         let variables = extract_variables(content, file_path, lang);
         let call_edges = extract_call_edges(content, file_path, &functions);
 
-        let tx = self.conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
+        let total =
+            functions.len() + classes.len() + interfaces.len() + variables.len() + call_edges.len();
+        let fp = file_path.to_string();
 
-        tx.execute("DELETE FROM ast_functions WHERE file_path = ?1", params![file_path])
-            .map_err(|e| format!("delete fn: {e}"))?;
-        tx.execute("DELETE FROM ast_classes WHERE file_path = ?1", params![file_path])
-            .map_err(|e| format!("delete cls: {e}"))?;
-        tx.execute("DELETE FROM ast_interfaces WHERE file_path = ?1", params![file_path])
-            .map_err(|e| format!("delete iface: {e}"))?;
-        tx.execute("DELETE FROM ast_variables WHERE file_path = ?1", params![file_path])
-            .map_err(|e| format!("delete var: {e}"))?;
-        tx.execute("DELETE FROM ast_call_edges WHERE caller_file = ?1", params![file_path])
-            .map_err(|e| format!("delete edge: {e}"))?;
+        self.db
+            .transaction::<_, (), sea_orm::DbErr>(move |txn| {
+                Box::pin(async move {
+                    ast_functions::Entity::delete_many()
+                        .filter(ast_functions::Column::FilePath.eq(&fp))
+                        .exec(txn)
+                        .await?;
+                    ast_classes::Entity::delete_many()
+                        .filter(ast_classes::Column::FilePath.eq(&fp))
+                        .exec(txn)
+                        .await?;
+                    ast_interfaces::Entity::delete_many()
+                        .filter(ast_interfaces::Column::FilePath.eq(&fp))
+                        .exec(txn)
+                        .await?;
+                    ast_variables::Entity::delete_many()
+                        .filter(ast_variables::Column::FilePath.eq(&fp))
+                        .exec(txn)
+                        .await?;
+                    ast_call_edges::Entity::delete_many()
+                        .filter(ast_call_edges::Column::CallerFile.eq(&fp))
+                        .exec(txn)
+                        .await?;
 
-        let mut total = 0;
+                    if !functions.is_empty() {
+                        let models: Vec<ast_functions::ActiveModel> = functions
+                            .iter()
+                            .map(|f| ast_functions::ActiveModel {
+                                id: Set(f.id.clone()),
+                                file_path: Set(f.file_path.clone()),
+                                name: Set(f.name.clone()),
+                                signature: Set(f.signature.clone()),
+                                line_start: Set(f.line_start as i32),
+                                line_end: Set(f.line_end as i32),
+                                visibility: Set(f.visibility.clone()),
+                                language: Set(f.language.clone()),
+                            })
+                            .collect();
+                        ast_functions::Entity::insert_many(models)
+                            .on_conflict(
+                                OnConflict::column(ast_functions::Column::Id)
+                                    .do_nothing()
+                                    .to_owned(),
+                            )
+                            .exec(txn)
+                            .await?;
+                    }
 
-        for f in &functions {
-            tx.execute(
-                "INSERT INTO ast_functions (id, file_path, name, signature, line_start, line_end, visibility, language) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-                params![f.id, f.file_path, f.name, f.signature, f.line_start as i64, f.line_end as i64, f.visibility, f.language],
-            ).map_err(|e| format!("insert fn: {e}"))?;
-            total += 1;
-        }
-        for c in &classes {
-            tx.execute(
-                "INSERT INTO ast_classes (id, file_path, name, line_start, line_end, language, parent_class) VALUES (?1,?2,?3,?4,?5,?6,?7)",
-                params![c.id, c.file_path, c.name, c.line_start as i64, c.line_end as i64, c.language, c.parent_class],
-            ).map_err(|e| format!("insert cls: {e}"))?;
-            total += 1;
-        }
-        for i in &interfaces {
-            tx.execute(
-                "INSERT INTO ast_interfaces (id, file_path, name, line_start, language) VALUES (?1,?2,?3,?4,?5)",
-                params![i.id, i.file_path, i.name, i.line_start as i64, i.language],
-            ).map_err(|e| format!("insert iface: {e}"))?;
-            total += 1;
-        }
-        for v in &variables {
-            tx.execute(
-                "INSERT INTO ast_variables (id, file_path, name, type_annotation, line, language) VALUES (?1,?2,?3,?4,?5,?6)",
-                params![v.id, v.file_path, v.name, v.type_annotation, v.line as i64, v.language],
-            ).map_err(|e| format!("insert var: {e}"))?;
-            total += 1;
-        }
-        for e in &call_edges {
-            tx.execute(
-                "INSERT INTO ast_call_edges (caller_file, caller_function, callee_name, line) VALUES (?1,?2,?3,?4)",
-                params![e.caller_file, e.caller_function, e.callee_name, e.line as i64],
-            ).map_err(|e| format!("insert edge: {e}"))?;
-            total += 1;
-        }
+                    if !classes.is_empty() {
+                        let models: Vec<ast_classes::ActiveModel> = classes
+                            .iter()
+                            .map(|c| ast_classes::ActiveModel {
+                                id: Set(c.id.clone()),
+                                file_path: Set(c.file_path.clone()),
+                                name: Set(c.name.clone()),
+                                line_start: Set(c.line_start as i32),
+                                line_end: Set(c.line_end as i32),
+                                language: Set(c.language.clone()),
+                                parent_class: Set(c.parent_class.clone()),
+                            })
+                            .collect();
+                        ast_classes::Entity::insert_many(models)
+                            .on_conflict(
+                                OnConflict::column(ast_classes::Column::Id).do_nothing().to_owned(),
+                            )
+                            .exec(txn)
+                            .await?;
+                    }
 
-        tx.commit().map_err(|e| format!("commit: {e}"))?;
+                    if !interfaces.is_empty() {
+                        let models: Vec<ast_interfaces::ActiveModel> = interfaces
+                            .iter()
+                            .map(|i| ast_interfaces::ActiveModel {
+                                id: Set(i.id.clone()),
+                                file_path: Set(i.file_path.clone()),
+                                name: Set(i.name.clone()),
+                                line_start: Set(i.line_start as i32),
+                                language: Set(i.language.clone()),
+                            })
+                            .collect();
+                        ast_interfaces::Entity::insert_many(models)
+                            .on_conflict(
+                                OnConflict::column(ast_interfaces::Column::Id)
+                                    .do_nothing()
+                                    .to_owned(),
+                            )
+                            .exec(txn)
+                            .await?;
+                    }
+
+                    if !variables.is_empty() {
+                        let models: Vec<ast_variables::ActiveModel> = variables
+                            .iter()
+                            .map(|v| ast_variables::ActiveModel {
+                                id: Set(v.id.clone()),
+                                file_path: Set(v.file_path.clone()),
+                                name: Set(v.name.clone()),
+                                type_annotation: Set(v.type_annotation.clone()),
+                                line: Set(v.line as i32),
+                                language: Set(v.language.clone()),
+                            })
+                            .collect();
+                        ast_variables::Entity::insert_many(models)
+                            .on_conflict(
+                                OnConflict::column(ast_variables::Column::Id)
+                                    .do_nothing()
+                                    .to_owned(),
+                            )
+                            .exec(txn)
+                            .await?;
+                    }
+
+                    if !call_edges.is_empty() {
+                        let models: Vec<ast_call_edges::ActiveModel> = call_edges
+                            .iter()
+                            .map(|e| ast_call_edges::ActiveModel {
+                                caller_file: Set(e.caller_file.clone()),
+                                caller_function: Set(e.caller_function.clone()),
+                                callee_name: Set(e.callee_name.clone()),
+                                line: Set(e.line as i32),
+                            })
+                            .collect();
+                        ast_call_edges::Entity::insert_many(models)
+                            .on_conflict(
+                                OnConflict::columns([
+                                    ast_call_edges::Column::CallerFile,
+                                    ast_call_edges::Column::CallerFunction,
+                                    ast_call_edges::Column::CalleeName,
+                                    ast_call_edges::Column::Line,
+                                ])
+                                .do_nothing()
+                                .to_owned(),
+                            )
+                            .exec(txn)
+                            .await?;
+                    }
+
+                    Ok(())
+                })
+            })
+            .await
+            .map_err(|e| format!("index_file: {e}"))?;
+
         Ok(total)
     }
 
     /// Remove all AST entries for a given file.
-    pub fn remove_file(&self, file_path: &str) -> Result<(), String> {
-        self.conn
-            .execute_batch(&format!(
-                "DELETE FROM ast_functions WHERE file_path = '{0}';
-                 DELETE FROM ast_classes WHERE file_path = '{0}';
-                 DELETE FROM ast_interfaces WHERE file_path = '{0}';
-                 DELETE FROM ast_variables WHERE file_path = '{0}';
-                 DELETE FROM ast_call_edges WHERE caller_file = '{0}';",
-                file_path.replace('\'', "''")
-            ))
-            .map_err(|e| format!("remove_file: {e}"))?;
+    ///
+    /// 改造前是 `execute_batch(&format!(...))` 字符串拼 SQL；现为参数化实体删除。
+    pub async fn remove_file(&self, file_path: &str) -> Result<(), String> {
+        let fp = file_path.to_string();
+        ast_functions::Entity::delete_many()
+            .filter(ast_functions::Column::FilePath.eq(&fp))
+            .exec(&self.db)
+            .await
+            .map_err(|e| format!("remove_file (ast_functions): {e}"))?;
+        ast_classes::Entity::delete_many()
+            .filter(ast_classes::Column::FilePath.eq(&fp))
+            .exec(&self.db)
+            .await
+            .map_err(|e| format!("remove_file (ast_classes): {e}"))?;
+        ast_interfaces::Entity::delete_many()
+            .filter(ast_interfaces::Column::FilePath.eq(&fp))
+            .exec(&self.db)
+            .await
+            .map_err(|e| format!("remove_file (ast_interfaces): {e}"))?;
+        ast_variables::Entity::delete_many()
+            .filter(ast_variables::Column::FilePath.eq(&fp))
+            .exec(&self.db)
+            .await
+            .map_err(|e| format!("remove_file (ast_variables): {e}"))?;
+        ast_call_edges::Entity::delete_many()
+            .filter(ast_call_edges::Column::CallerFile.eq(&fp))
+            .exec(&self.db)
+            .await
+            .map_err(|e| format!("remove_file (ast_call_edges): {e}"))?;
         Ok(())
     }
 
-    /// Search functions by name (partial match).
-    pub fn search_functions(&self, query: &str, limit: usize) -> Result<Vec<FunctionDef>, String> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, file_path, name, signature, line_start, line_end, visibility, language FROM ast_functions WHERE name LIKE ?1 OR signature LIKE ?1 LIMIT ?2")
-            .map_err(|e| format!("prepare: {e}"))?;
-        let rows = stmt
-            .query_map(params![format!("%{query}%"), limit as i64], |row| {
-                Ok(FunctionDef {
-                    id: row.get(0)?,
-                    file_path: row.get(1)?,
-                    name: row.get(2)?,
-                    signature: row.get(3)?,
-                    line_start: row.get::<_, i64>(4)? as usize,
-                    line_end: row.get::<_, i64>(5)? as usize,
-                    visibility: row.get(6)?,
-                    language: row.get(7)?,
-                })
-            })
-            .map_err(|e| format!("query: {e}"))?;
+    /// Remove all AST entries whose `file_path` starts with the given prefix.
+    ///
+    /// 与 `FileIndex::remove_by_prefix` 对称（前缀在 Rust 侧做**字面**
+    /// `starts_with` 比较，不用 `LIKE` —— 扫描根由 `WorkspaceUri::cache_path`
+    /// 生成，必定含 `_`；也不用 `substr` 裸 SQL，避免方言回归）。
+    ///
+    /// **为什么持久化索引必须调它**：[`Self::index_file`] 只按**单文件**
+    /// `DELETE`，对「文件已从磁盘删除或改名」无能为力；索引落盘后若不做
+    /// 「root 切片全量替换」，磁盘上已不存在的文件会留下幽灵定义。
+    pub async fn remove_by_prefix(&self, prefix: &str) -> Result<usize, String> {
+        let mut total = 0usize;
 
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row.map_err(|e| format!("row: {e}"))?);
+        // 4 张表按 `file_path`
+        let paths: Vec<String> = ast_functions::Entity::find()
+            .select_only()
+            .column(ast_functions::Column::FilePath)
+            .distinct()
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("load ast_functions paths: {e}"))?;
+        let hit: Vec<String> = paths.into_iter().filter(|p| p.starts_with(prefix)).collect();
+        if !hit.is_empty() {
+            let r = ast_functions::Entity::delete_many()
+                .filter(ast_functions::Column::FilePath.is_in(hit))
+                .exec(&self.db)
+                .await
+                .map_err(|e| format!("remove prefix {prefix} (ast_functions): {e}"))?;
+            total += r.rows_affected as usize;
         }
-        Ok(results)
+
+        let paths: Vec<String> = ast_classes::Entity::find()
+            .select_only()
+            .column(ast_classes::Column::FilePath)
+            .distinct()
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("load ast_classes paths: {e}"))?;
+        let hit: Vec<String> = paths.into_iter().filter(|p| p.starts_with(prefix)).collect();
+        if !hit.is_empty() {
+            let r = ast_classes::Entity::delete_many()
+                .filter(ast_classes::Column::FilePath.is_in(hit))
+                .exec(&self.db)
+                .await
+                .map_err(|e| format!("remove prefix {prefix} (ast_classes): {e}"))?;
+            total += r.rows_affected as usize;
+        }
+
+        let paths: Vec<String> = ast_interfaces::Entity::find()
+            .select_only()
+            .column(ast_interfaces::Column::FilePath)
+            .distinct()
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("load ast_interfaces paths: {e}"))?;
+        let hit: Vec<String> = paths.into_iter().filter(|p| p.starts_with(prefix)).collect();
+        if !hit.is_empty() {
+            let r = ast_interfaces::Entity::delete_many()
+                .filter(ast_interfaces::Column::FilePath.is_in(hit))
+                .exec(&self.db)
+                .await
+                .map_err(|e| format!("remove prefix {prefix} (ast_interfaces): {e}"))?;
+            total += r.rows_affected as usize;
+        }
+
+        let paths: Vec<String> = ast_variables::Entity::find()
+            .select_only()
+            .column(ast_variables::Column::FilePath)
+            .distinct()
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("load ast_variables paths: {e}"))?;
+        let hit: Vec<String> = paths.into_iter().filter(|p| p.starts_with(prefix)).collect();
+        if !hit.is_empty() {
+            let r = ast_variables::Entity::delete_many()
+                .filter(ast_variables::Column::FilePath.is_in(hit))
+                .exec(&self.db)
+                .await
+                .map_err(|e| format!("remove prefix {prefix} (ast_variables): {e}"))?;
+            total += r.rows_affected as usize;
+        }
+
+        // 边表按 `caller_file`
+        let paths: Vec<String> = ast_call_edges::Entity::find()
+            .select_only()
+            .column(ast_call_edges::Column::CallerFile)
+            .distinct()
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("load ast_call_edges paths: {e}"))?;
+        let hit: Vec<String> = paths.into_iter().filter(|p| p.starts_with(prefix)).collect();
+        if !hit.is_empty() {
+            let r = ast_call_edges::Entity::delete_many()
+                .filter(ast_call_edges::Column::CallerFile.is_in(hit))
+                .exec(&self.db)
+                .await
+                .map_err(|e| format!("remove prefix {prefix} (ast_call_edges): {e}"))?;
+            total += r.rows_affected as usize;
+        }
+
+        Ok(total)
+    }
+
+    /// Search functions by name (partial match).
+    pub async fn search_functions(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<FunctionDef>, String> {
+        let pattern = format!("%{query}%");
+        let rows = ast_functions::Entity::find()
+            .filter(
+                Condition::any()
+                    .add(ast_functions::Column::Name.like(&pattern))
+                    .add(ast_functions::Column::Signature.like(&pattern)),
+            )
+            .limit(limit as u64)
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("search_functions: {e}"))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|f| FunctionDef {
+                id: f.id,
+                file_path: f.file_path,
+                name: f.name,
+                signature: f.signature,
+                line_start: f.line_start.max(0) as usize,
+                line_end: f.line_end.max(0) as usize,
+                visibility: f.visibility,
+                language: f.language,
+            })
+            .collect())
     }
 
     /// Search classes by name.
-    pub fn search_classes(&self, query: &str, limit: usize) -> Result<Vec<ClassDef>, String> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT id, file_path, name, line_start, line_end, language, parent_class FROM ast_classes WHERE name LIKE ?1 LIMIT ?2")
-            .map_err(|e| format!("prepare: {e}"))?;
-        let rows = stmt
-            .query_map(params![format!("%{query}%"), limit as i64], |row| {
-                Ok(ClassDef {
-                    id: row.get(0)?,
-                    file_path: row.get(1)?,
-                    name: row.get(2)?,
-                    line_start: row.get::<_, i64>(3)? as usize,
-                    line_end: row.get::<_, i64>(4)? as usize,
-                    language: row.get(5)?,
-                    parent_class: row.get(6)?,
-                })
-            })
-            .map_err(|e| format!("query: {e}"))?;
+    pub async fn search_classes(&self, query: &str, limit: usize) -> Result<Vec<ClassDef>, String> {
+        let pattern = format!("%{query}%");
+        let rows = ast_classes::Entity::find()
+            .filter(ast_classes::Column::Name.like(&pattern))
+            .limit(limit as u64)
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("search_classes: {e}"))?;
 
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row.map_err(|e| format!("row: {e}"))?);
-        }
-        Ok(results)
+        Ok(rows
+            .into_iter()
+            .map(|c| ClassDef {
+                id: c.id,
+                file_path: c.file_path,
+                name: c.name,
+                line_start: c.line_start.max(0) as usize,
+                line_end: c.line_end.max(0) as usize,
+                language: c.language,
+                parent_class: c.parent_class,
+            })
+            .collect())
     }
 
     /// Find callers of a function.
-    pub fn find_callers(&self, function_name: &str) -> Result<Vec<CallEdge>, String> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT caller_file, caller_function, callee_name, line FROM ast_call_edges WHERE callee_name = ?1")
-            .map_err(|e| format!("prepare: {e}"))?;
-        let rows = stmt
-            .query_map(params![function_name], |row| {
-                Ok(CallEdge {
-                    caller_file: row.get(0)?,
-                    caller_function: row.get(1)?,
-                    callee_name: row.get(2)?,
-                    line: row.get::<_, i64>(3)? as usize,
-                })
-            })
-            .map_err(|e| format!("query: {e}"))?;
+    pub async fn find_callers(&self, function_name: &str) -> Result<Vec<CallEdge>, String> {
+        let rows = ast_call_edges::Entity::find()
+            .filter(ast_call_edges::Column::CalleeName.eq(function_name))
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("find_callers: {e}"))?;
 
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row.map_err(|e| format!("row: {e}"))?);
-        }
-        Ok(results)
+        Ok(rows
+            .into_iter()
+            .map(|e| CallEdge {
+                caller_file: e.caller_file,
+                caller_function: e.caller_function,
+                callee_name: e.callee_name,
+                line: e.line.max(0) as usize,
+            })
+            .collect())
     }
 
     /// Search for matching definitions across all types.
     ///
     /// Returns file paths that contain definitions matching the query.
-    pub fn search_all(&self, query: &str, limit: usize) -> Result<Vec<String>, String> {
+    pub async fn search_all(&self, query: &str, limit: usize) -> Result<Vec<String>, String> {
         let pattern = format!("%{query}%");
         let mut results = std::collections::HashSet::new();
 
-        for table in &["ast_functions", "ast_classes", "ast_interfaces", "ast_variables"] {
-            let sql = format!("SELECT DISTINCT file_path FROM {table} WHERE name LIKE ?1 LIMIT ?2");
-            let mut stmt = self.conn.prepare(&sql).map_err(|e| format!("prepare {table}: {e}"))?;
-            let rows = stmt
-                .query_map(params![&pattern, limit as i64], |row| row.get::<_, String>(0))
-                .map_err(|e| format!("query {table}: {e}"))?;
-            for path in rows.flatten() {
-                results.insert(path);
-            }
-        }
+        let paths: Vec<String> = ast_functions::Entity::find()
+            .select_only()
+            .column(ast_functions::Column::FilePath)
+            .filter(ast_functions::Column::Name.like(&pattern))
+            .limit(limit as u64)
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("search_all (ast_functions): {e}"))?;
+        results.extend(paths);
+
+        let paths: Vec<String> = ast_classes::Entity::find()
+            .select_only()
+            .column(ast_classes::Column::FilePath)
+            .filter(ast_classes::Column::Name.like(&pattern))
+            .limit(limit as u64)
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("search_all (ast_classes): {e}"))?;
+        results.extend(paths);
+
+        let paths: Vec<String> = ast_interfaces::Entity::find()
+            .select_only()
+            .column(ast_interfaces::Column::FilePath)
+            .filter(ast_interfaces::Column::Name.like(&pattern))
+            .limit(limit as u64)
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("search_all (ast_interfaces): {e}"))?;
+        results.extend(paths);
+
+        let paths: Vec<String> = ast_variables::Entity::find()
+            .select_only()
+            .column(ast_variables::Column::FilePath)
+            .filter(ast_variables::Column::Name.like(&pattern))
+            .limit(limit as u64)
+            .into_tuple::<String>()
+            .all(&self.db)
+            .await
+            .map_err(|e| format!("search_all (ast_variables): {e}"))?;
+        results.extend(paths);
 
         let mut sorted: Vec<String> = results.into_iter().collect();
+        sorted.sort();
         sorted.truncate(limit);
         Ok(sorted)
     }
 
     /// Get the total count of indexed definitions.
-    pub fn total_definitions(&self) -> Result<usize, String> {
-        let fn_count: i64 = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM ast_functions", [], |r| r.get(0))
-            .unwrap_or(0);
-        let cls_count: i64 =
-            self.conn.query_row("SELECT COUNT(*) FROM ast_classes", [], |r| r.get(0)).unwrap_or(0);
+    ///
+    /// ⚠ 改造前这里对两次 COUNT 都用了 `.unwrap_or(0)` —— 计数失败会被静默当成 0
+    /// （「0 个定义」与「查不出来」不可区分）。现改为向上传递错误。
+    pub async fn total_definitions(&self) -> Result<usize, String> {
+        let fn_count = ast_functions::Entity::find()
+            .count(&self.db)
+            .await
+            .map_err(|e| format!("count ast_functions: {e}"))?;
+        let cls_count = ast_classes::Entity::find()
+            .count(&self.db)
+            .await
+            .map_err(|e| format!("count ast_classes: {e}"))?;
         Ok((fn_count + cls_count) as usize)
     }
 }
@@ -832,53 +1083,115 @@ fn find_block_end(content: &str, start: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sea_orm::{ConnectOptions, Database};
 
-    fn test_index() -> AstIndex {
-        let conn = Connection::open_in_memory().expect("测试：打开内存数据库应成功");
-        AstIndex::new(conn).expect("测试应成功")
+    /// ⚠ `sqlite::memory:` 必须 `max_connections(1)`：sqlx 每条池连接各持一份
+    /// 独立内存库，多连接下建表与写入会落到不同库（表现为「表不存在」）。
+    async fn test_index() -> AstIndex {
+        let mut opt = ConnectOptions::new("sqlite::memory:");
+        opt.max_connections(1).min_connections(1).sqlx_logging(false);
+        let db = Database::connect(opt).await.expect("测试：打开内存数据库应成功");
+        AstIndex::new(db).await.expect("测试应成功")
     }
 
-    #[test]
-    fn test_extract_rust_functions() {
+    #[tokio::test]
+    async fn test_extract_rust_functions() {
         let code = "fn main() {\n    println!(\"hello\");\n}\n\npub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n";
-        let idx = test_index();
-        idx.index_file("/test.rs", code).expect("测试：index_file 应成功");
-        let results = idx.search_functions("add", 10).expect("测试：search_functions 应成功");
+        let idx = test_index().await;
+        idx.index_file("/test.rs", code).await.expect("测试：index_file 应成功");
+        let results = idx.search_functions("add", 10).await.expect("测试：search_functions 应成功");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "add");
         assert!(results[0].signature.contains("pub fn add"));
     }
 
-    #[test]
-    fn test_extract_rust_structs() {
+    #[tokio::test]
+    async fn test_extract_rust_structs() {
         let code = "pub struct User {\n    name: String,\n}\n\nenum Color { Red, Blue }\n";
-        let idx = test_index();
-        idx.index_file("/test.rs", code).expect("测试：index_file 应成功");
-        let results = idx.search_classes("User", 10).expect("测试：search_classes 应成功");
+        let idx = test_index().await;
+        idx.index_file("/test.rs", code).await.expect("测试：index_file 应成功");
+        let results = idx.search_classes("User", 10).await.expect("测试：search_classes 应成功");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "User");
 
-        let all = idx.search_classes("Color", 10).expect("测试：search_classes 应成功");
+        let all = idx.search_classes("Color", 10).await.expect("测试：search_classes 应成功");
         assert_eq!(all.len(), 1);
     }
 
-    #[test]
-    fn test_search_all() {
+    #[tokio::test]
+    async fn test_search_all() {
         let code = "fn calculate() -> u32 { 42 }\nfn render() {}\nstruct Widget {}\n";
-        let idx = test_index();
-        idx.index_file("/test.rs", code).expect("测试：index_file 应成功");
-        let results = idx.search_all("calc", 10).expect("测试：search_all 应成功");
+        let idx = test_index().await;
+        idx.index_file("/test.rs", code).await.expect("测试：index_file 应成功");
+        let results = idx.search_all("calc", 10).await.expect("测试：search_all 应成功");
         assert!(results.contains(&"/test.rs".to_string()));
     }
 
-    #[test]
-    fn test_extract_python() {
+    #[tokio::test]
+    async fn test_extract_python() {
         let code = "def hello():\n    print('hi')\n\nclass MyClass:\n    pass\n";
-        let idx = test_index();
-        idx.index_file("/test.py", code).expect("测试：index_file 应成功");
-        let fns = idx.search_functions("hello", 10).expect("测试：search_functions 应成功");
+        let idx = test_index().await;
+        idx.index_file("/test.py", code).await.expect("测试：index_file 应成功");
+        let fns = idx.search_functions("hello", 10).await.expect("测试：search_functions 应成功");
+        assert_eq!(fns.len(), 1);
         assert_eq!(fns[0].name, "hello");
-        let cls = idx.search_classes("MyClass", 10).expect("测试：search_classes 应成功");
+        let cls = idx.search_classes("MyClass", 10).await.expect("测试：search_classes 应成功");
         assert_eq!(cls[0].name, "MyClass");
+    }
+
+    /// 回归锁：重复索引同一文件**不得**累积行（`index_file` 先删后插）。
+    #[tokio::test]
+    async fn test_index_file_is_idempotent() {
+        let code = "pub fn alpha() {}\npub fn beta() {}\n";
+        let idx = test_index().await;
+        for _ in 0..3 {
+            idx.index_file("/t.rs", code).await.expect("测试：index_file 应成功");
+        }
+        assert_eq!(idx.total_definitions().await.expect("测试：计数应成功"), 2);
+        let fns = idx.search_functions("a", 50).await.expect("测试：search 应成功");
+        assert_eq!(fns.len(), 2, "重复索引后不应出现重复函数行");
+    }
+
+    #[tokio::test]
+    async fn test_remove_file() {
+        let idx = test_index().await;
+        idx.index_file("/a.rs", "pub fn one() {}\n").await.expect("测试：index 应成功");
+        idx.index_file("/b.rs", "pub fn two() {}\n").await.expect("测试：index 应成功");
+        assert_eq!(idx.total_definitions().await.expect("测试：计数应成功"), 2);
+
+        idx.remove_file("/a.rs").await.expect("测试：remove_file 应成功");
+        assert_eq!(idx.total_definitions().await.expect("测试：计数应成功"), 1);
+        let left = idx.search_all("one", 10).await.expect("测试：search_all 应成功");
+        assert!(left.is_empty(), "被删文件的定义不应再被搜到");
+    }
+
+    /// 回归锁：前缀必须是**字面**比较（扫描根 `<authority>_<md5>` 必定含 `_`）。
+    /// 若实现改用 `LIKE`，`_` 会匹配任意字符 ⇒ `/cacheXa1` 会被误删。
+    #[tokio::test]
+    async fn test_remove_by_prefix_is_literal_not_like() {
+        let idx = test_index().await;
+        idx.index_file("/cache_a1/keep.rs", "pub fn kept() {}\n")
+            .await
+            .expect("测试：index 应成功");
+        idx.index_file("/cacheXa1/sibling.rs", "pub fn sib() {}\n")
+            .await
+            .expect("测试：index 应成功");
+
+        let removed = idx.remove_by_prefix("/cache_a1").await.expect("测试：前缀删除应成功");
+        assert_eq!(removed, 1, "只应删掉字面命中那条");
+
+        let left = idx.search_all("sib", 10).await.expect("测试：search_all 应成功");
+        assert_eq!(left, vec!["/cacheXa1/sibling.rs".to_string()], "兄弟目录不得被误删");
+    }
+
+    #[tokio::test]
+    async fn test_find_callers() {
+        let idx = test_index().await;
+        let code = "fn helper() {}\nfn caller() {\n    helper();\n}\n";
+        idx.index_file("/c.rs", code).await.expect("测试：index 应成功");
+        let callers = idx.find_callers("helper").await.expect("测试：find_callers 应成功");
+        assert_eq!(callers.len(), 1);
+        assert_eq!(callers[0].caller_function, "caller");
+        assert_eq!(callers[0].caller_file, "/c.rs");
     }
 }

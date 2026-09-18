@@ -67,12 +67,6 @@ export interface PermissionRequestEvent {
   requestId: string;
 }
 
-export interface PlanApprovalEvent {
-  conversationId: string;
-  /** JSON 字符串，由后端 build_plan_draft_content 生成的计划草稿 */
-  plan: string;
-}
-
 export interface AskUserEvent {
   conversationId: string;
   assistantMessageId: string;
@@ -322,8 +316,15 @@ export interface AgentPoolItem {
   progress?: number;
   /** 状态摘要文本 */
   summary?: string;
-  /** 错误信息 */
+  /** 错误信息（**已翻译**的用户可见文本；由 store 在 upsert 时经错误码翻译层生成） */
   error?: string;
+  /**
+   * 错误码（后端 `ErrorCode` 常量，如 `STOCK_WORKFLOW_STEP_FAILED`）。
+   *
+   * 与 `error` 的分工：`error` 负责展示、`errorCode` 负责判定。
+   * 组件不应再用 `error.startsWith("XXX")` 之类文本嗅探反推语义。
+   */
+  errorCode?: string;
   /** 依赖的前置任务 ID 列表 */
   dependsOn?: string[];
   /** 开始时间（毫秒时间戳） */

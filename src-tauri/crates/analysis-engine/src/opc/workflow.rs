@@ -1,6 +1,6 @@
-// OPC 行业工作流层
+// OPC 域包工作流层
 // 复用 axagent-harness::workflow_types 中的标准工作流节点体系
-// IndustryConfig 定义步骤 → 生成 WorkflowTemplateData → 种子化到 DB → WorkEngine 执行
+// DomainPackConfig 定义步骤 → 生成 WorkflowTemplateData → 种子化到 DB → WorkEngine 执行
 
 #![allow(clippy::type_complexity)]
 
@@ -17,7 +17,7 @@ use axagent_harness::workflow_types::{
 };
 
 use super::automation::{AutomationAction, AutomationCondition};
-use super::industry_config::IndustryConfig;
+use super::domain_pack_config::DomainPackConfig;
 
 /// 创建基础工作流节点
 fn create_node_base(id: impl Into<String>, title: impl Into<String>) -> WorkflowNodeBase {
@@ -42,20 +42,20 @@ pub struct WorkflowEdgeDef {
     pub to: String,
 }
 
-/// 从行业配置直接生成 WorkflowTemplateData（种子化到 DB 的入口）
+/// 从域包配置直接生成 WorkflowTemplateData（种子化到 DB 的入口）
 ///
-/// 整合了原 IndustryWorkflow::from_adapter() + to_template_data() 的逻辑，
-/// 让 OPC 行业工作流与股票分析工作流架构一致：
+/// 整合了原 DomainPackWorkflow::from_adapter() + to_template_data() 的逻辑，
+/// 让 OPC 域包工作流与股票分析工作流架构一致：
 /// Config 定义步骤 → 生成模板数据 → 种子化 → WorkEngine 执行
 ///
 /// # 参数
-/// - `industry_id`: 行业 ID
-/// - `config`: 行业配置
+/// - `domain_pack_id`: 域包 ID
+/// - `config`: 域包配置
 /// - `tool_resolver`: 可选的工具解析器，用于将工具名映射为完整的 ToolDef（含 description 和 parameters）
 #[allow(unused_assignments)]
-pub fn generate_industry_template_data(
-    industry_id: &str,
-    config: &IndustryConfig,
+pub fn generate_domain_pack_template_data(
+    domain_pack_id: &str,
+    config: &DomainPackConfig,
     tool_resolver: Option<&dyn Fn(&[String]) -> Vec<ToolDef>>,
 ) -> WorkflowTemplateData {
     let mut nodes: Vec<WorkflowNode> = Vec::new();
@@ -65,13 +65,13 @@ pub fn generate_industry_template_data(
 
     let next_id = |counter: &mut u32, prefix: &str| -> String {
         *counter += 1;
-        format!("{prefix}_{industry_id}_{counter}")
+        format!("{prefix}_{domain_pack_id}_{counter}")
     };
 
     // ── 1. 触发节点（手动触发） ──
     let trigger_id = next_id(&mut node_counter, "trigger");
     nodes.push(WorkflowNode::Trigger(TriggerNode {
-        base: create_node_base(trigger_id.clone(), format!("{industry_id} 行业分析触发")),
+        base: create_node_base(trigger_id.clone(), format!("{domain_pack_id} 域包分析触发")),
         config: TriggerConfig {
             trigger_type: axagent_harness::workflow_types::TriggerType::Manual,
             config: serde_json::json!({}),
@@ -297,13 +297,13 @@ pub fn generate_industry_template_data(
         prev_node_id = Some(cond_id);
     }
 
-    // ── 5. 审批节点（如果行业需要审批流程） ──
+    // ── 5. 审批节点（如果域包需要审批流程） ──
     if config.requires_approval {
         let approval_id = next_id(&mut node_counter, "approval");
         nodes.push(WorkflowNode::Approval(ApprovalNode {
             base: create_node_base(approval_id.clone(), "审批"),
             config: ApprovalNodeConfig {
-                message: format!("{industry_id} 行业流程需要审批"),
+                message: format!("{domain_pack_id} 域包流程需要审批"),
                 approver: None,
                 timeout_secs: 86400,
                 timeout_action: "auto_reject".to_string(),
@@ -327,7 +327,7 @@ pub fn generate_industry_template_data(
     }
 
     // ── 构建 WorkflowTemplateData ──
-    let workflow_id = format!("{industry_id}_harness_workflow");
+    let workflow_id = format!("{domain_pack_id}_harness_workflow");
     let now = axagent_harness::util_fns::now_ts();
 
     let edges: Vec<HWorkflowEdge> = edges
@@ -374,7 +374,7 @@ pub fn generate_industry_template_data(
         }
         Some(JsonSchema {
             schema_type: "object".to_string(),
-            description: Some(format!("{} 工作流用户输入", industry_id)),
+            description: Some(format!("{} 工作流用户输入", domain_pack_id)),
             properties: Some(properties),
             required: if required_keys.is_empty() {
                 None
@@ -406,12 +406,12 @@ pub fn generate_industry_template_data(
 
     WorkflowTemplateData {
         id: workflow_id,
-        name: format!("{} 标准工作流", industry_id),
-        description: Some(format!("{} 行业工作流（代码驱动）", industry_id)),
+        name: format!("{} 标准工作流", domain_pack_id),
+        description: Some(format!("{} 域包工作流（代码驱动）", domain_pack_id)),
         icon: "⚙️".to_string(),
         cluster_id: None,
         route_path: None,
-        tags: vec![industry_id.to_string(), "opc".to_string()],
+        tags: vec![domain_pack_id.to_string(), "opc".to_string()],
         version: 6, // v6: 直接生成 WorkflowTemplateData，移除中间层
         is_preset: true,
         is_editable: true,
@@ -430,7 +430,7 @@ pub fn generate_industry_template_data(
         error_workflow_id: None,
         mission_hash: None,
         tool_defs: Vec::new(),
-        hooks_config: None, // 上游新增（v134 hooks_config 列）：行业标准工作流暂无生命周期钩子
+        hooks_config: None, // 上游新增（v134 hooks_config 列）：域包标准工作流暂无生命周期钩子
         created_at: now,
         updated_at: now,
     }

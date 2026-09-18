@@ -478,6 +478,24 @@ pub async fn set_domain_pack_enabled(
     Ok(())
 }
 
+/// 读取全部域包的启用状态（id → enabled）。
+///
+/// 供 market_list 等 command 层复用：避免 command 直接访问 `opc_domain_packs` 实体，
+/// 保持「command 只经 analysis-engine / dao 访问 DB」的分层纪律（对齐 `commands-no-direct-db`）。
+/// 不存在于 DB 的域包由调用方回退 manifest 默认。
+pub async fn list_domain_pack_enabled_map(
+    db: &DatabaseConnection,
+) -> Result<std::collections::HashMap<String, bool>, String> {
+    use axagent_entities::opc_domain_packs;
+    use sea_orm::EntityTrait;
+
+    let rows = opc_domain_packs::Entity::find()
+        .all(db)
+        .await
+        .map_err(|e| format!("list domain_pack enabled map: {e}"))?;
+    Ok(rows.into_iter().map(|r| (r.id, r.enabled != 0)).collect())
+}
+
 /// 域包完整 seed：扫描目录 → 注册表（opc_domain_packs）。
 ///
 /// ⚠️ 架构变更：域包工作流已迁移至手动定义的 seed 文件（见 mod.rs `seed_opc_domain_packs_from_seed_files`），

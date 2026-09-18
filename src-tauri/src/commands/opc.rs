@@ -26,7 +26,7 @@ use axagent_analysis_engine::opc::{
 
 use axagent_analysis_engine::opc::domain_pack::{
     DOMAIN_PACKS_DIR, DomainPackManifest, export_domain_pack, import_domain_pack,
-    resolve_domain_packs_dir, set_domain_pack_enabled,
+    list_domain_pack_enabled_map, resolve_domain_packs_dir, set_domain_pack_enabled,
 };
 
 /// 记录 OPC 操作轨迹到 trajectory 系统供学习
@@ -1214,14 +1214,8 @@ pub async fn opc_market_list(state: State<'_, AppState>) -> Result<serde_json::V
 
     // P1-5：用户手动启用/停用状态以 DB `opc_domain_packs.enabled` 为准（manifest 仅首装生效）。
     // 故已注册包取 DB 值，未注册（未 seed）的包退回 manifest 默认。
-    let mut db_enabled: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
-    use axagent_entities::opc_domain_packs;
-    use sea_orm::EntityTrait;
-    if let Ok(rows) = opc_domain_packs::Entity::find().all(state.harness.db()).await {
-        for r in rows {
-            db_enabled.insert(r.id, r.enabled != 0);
-        }
-    }
+    // DB 访问下沉到 analysis-engine（list_domain_pack_enabled_map），不在 command 层直连 entity。
+    let db_enabled = list_domain_pack_enabled_map(state.harness.db()).await.unwrap_or_default();
 
     let mut items = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&builtin) {

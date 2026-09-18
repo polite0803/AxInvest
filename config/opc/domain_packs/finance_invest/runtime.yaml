@@ -20,6 +20,22 @@ validations:
     operator: gt
     value: 0
     message: 投资金额必须为正数
+  # 原硬编码 validate_finance_invest：股票代码须为 6 位、投资金额须为正
+  - entity_type: stock
+    field: code
+    operator: not_empty
+    value: null
+    message: 股票代码必须是6位数字
+  - entity_type: stock
+    field: code
+    operator: len
+    value: 6
+    message: 股票代码必须是6位数字
+  - entity_type: stock
+    field: amount
+    operator: gt
+    value: 0
+    message: 投资金额必须为正数
 
 kpi_definitions:
   - key: total_assets

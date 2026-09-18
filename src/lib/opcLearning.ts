@@ -17,10 +17,10 @@ import type {
  * 获取指定行业的学习配置
  */
 export async function getLearningConfig(
-  domainPackId: string,
+  capabilityPackId: string,
 ): Promise<DomainLearningConfig> {
   return invoke<DomainLearningConfig>("opc_get_learning_config", {
-    domainPackId,
+    capabilityPackId,
   });
 }
 
@@ -39,14 +39,14 @@ export async function reflectOnWorkflow(
   params: ReflectOnWorkflowParams,
 ): Promise<{
   success: boolean;
-  domainPackId: string;
+  capabilityPackId: string;
   workflowId: string;
   qualityScore: number;
   suggestions: string[];
   summary: string;
 }> {
   return invoke("opc_reflect_on_workflow", {
-    domainPackId: params.domainPackId,
+    capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     workflowResult: params.workflowResult,
   });
@@ -60,14 +60,14 @@ export async function evolveWorkflow(
   params: EvolveWorkflowParams,
 ): Promise<{
   success: boolean;
-  domainPackId: string;
+  capabilityPackId: string;
   workflowId: string;
   status: string;
   suggestedOptimizations: string[];
   message: string;
 }> {
   return invoke("opc_evolve_workflow", {
-    domainPackId: params.domainPackId,
+    capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     reason: params.reason,
   });
@@ -81,14 +81,14 @@ export async function runSelfImprovement(
   params: RunSelfImprovementParams,
 ): Promise<{
   success: boolean;
-  domainPackId: string;
+  capabilityPackId: string;
   target: string;
   status: string;
   improvementsApplied: string[];
   message: string;
 }> {
   return invoke("opc_run_self_improvement", {
-    domainPackId: params.domainPackId,
+    capabilityPackId: params.capabilityPackId,
     target: params.target,
   });
 }
@@ -96,9 +96,9 @@ export async function runSelfImprovement(
 /**
  * 获取 RL 经验池统计
  */
-export async function getRLStats(domainPackId?: string): Promise<ExperiencePoolStats> {
+export async function getRLStats(capabilityPackId?: string): Promise<ExperiencePoolStats> {
   return invoke("opc_get_rl_stats", {
-    domainPackId,
+    capabilityPackId,
   });
 }
 
@@ -107,14 +107,14 @@ export async function getRLStats(domainPackId?: string): Promise<ExperiencePoolS
  */
 export async function recordRLExperience(
   params: {
-    domainPackId: string;
+    capabilityPackId: string;
     workflowId: string;
     qualityScore: number;
     workflowResult: Record<string, unknown>;
   },
 ): Promise<{ success: boolean; experienceId?: string; totalReward?: number; message?: string }> {
   return invoke("opc_record_rl_experience", {
-    domainPackId: params.domainPackId,
+    capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     qualityScore: params.qualityScore,
     workflowResult: params.workflowResult,
@@ -128,7 +128,7 @@ export async function triggerRLOptimization(
   params: TriggerRLOptimizationParams,
 ): Promise<RLPolicyUpdate> {
   return invoke("opc_trigger_rl_optimization", {
-    domainPackId: params.domainPackId,
+    capabilityPackId: params.capabilityPackId,
   });
 }
 
@@ -136,12 +136,12 @@ export async function triggerRLOptimization(
  * 触发自动学习闭环（反思→进化→自我改进→RL）
  */
 export async function triggerAutoLearning(params: {
-  domainPackId: string;
+  capabilityPackId: string;
   workflowId: string;
   workflowResult: Record<string, unknown>;
 }): Promise<AutoLearningResult> {
-  return invoke("opc_trigger_domain_pack_learning", {
-    domainPackId: params.domainPackId,
+  return invoke("opc_trigger_capability_pack_learning", {
+    capabilityPackId: params.capabilityPackId,
     workflowId: params.workflowId,
     workflowResult: params.workflowResult,
   });

@@ -16,9 +16,9 @@
 //!                                engine.execute(subgraph) → monitor() → replan() ↻
 //! ```
 
+pub mod capability_pack_adapters;
+pub mod capability_pack_learning;
 pub mod decomposer;
-pub mod domain_pack_adapters;
-pub mod domain_pack_learning;
 pub mod dynamic_subgraph;
 pub mod executor;
 pub mod task_context;
@@ -26,26 +26,26 @@ pub mod task_shape_classifier;
 pub mod token_budget;
 pub mod types;
 
-pub use domain_pack_adapters::types::ReinforcementLearningConfig;
-pub use domain_pack_adapters::types::{
-    AcceptanceCriterion, DomainPackContext, DomainPackLearningConfig, EvolutionConstraints,
+pub use capability_pack_adapters::types::ReinforcementLearningConfig;
+pub use capability_pack_adapters::types::{
+    AcceptanceCriterion, CapabilityPackContext, CapabilityPackLearningConfig, EvolutionConstraints,
     MissionType, ReflectionTemplate, RewardWeightConfig,
 };
-pub use domain_pack_adapters::{DomainPackAdapter, DomainPackAdapterRegistry};
-pub use domain_pack_learning::{
-    DimensionScore, DomainPackLearningEngine, EvolutionRequest, EvolutionResult,
+pub use capability_pack_adapters::{CapabilityPackAdapter, CapabilityPackAdapterRegistry};
+pub use capability_pack_learning::{
+    CapabilityPackLearningEngine, DimensionScore, EvolutionRequest, EvolutionResult,
     ExperiencePoolStats, LlmInferencePort, RLExperience, RLPolicyUpdate, ReflectionRequest,
     ReflectionResult, SelfImprovementRequest, SelfImprovementResult,
 };
 pub use dynamic_subgraph::{DynamicSubGraph, GeneratedSubGraph};
 pub use executor::{OrchestratorExecutor, OrchestratorState};
 pub use task_context::{
-    DomainPackContextManager, DomainPackTaskContext, TaskContextState, TaskContextSummary,
+    CapabilityPackContextManager, CapabilityPackTaskContext, TaskContextState, TaskContextSummary,
 };
 pub use task_shape_classifier::{DefaultTaskShapeClassifier, classify_hybrid, classify_input};
 pub use token_budget::{
-    BudgetDecision, CompactionResult, DomainPackTokenBudgetManager, DomainPackTokenConfig,
-    DomainPackTokenStats, DryLeafEntry, TokenUsageSnapshot,
+    BudgetDecision, CapabilityPackTokenBudgetManager, CapabilityPackTokenConfig,
+    CapabilityPackTokenStats, CompactionResult, DryLeafEntry, TokenUsageSnapshot,
 };
 pub use types::{
     DecompositionPlan, OrchestrationError, OrchestrationEvent, OrchestrationStrategy,

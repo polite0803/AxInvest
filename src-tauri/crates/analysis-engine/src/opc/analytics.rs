@@ -397,8 +397,8 @@ pub trait AnalyticsService: Send + Sync {
 ///
 /// 归一真源只有这一处：写侧（post_exec 钩子、`opc_record_kpi` 命令）与
 /// 读侧（`opc::data_service::DefaultDataService::latest_kpi` 等）**都必须**过这个函数。
-/// 先例同 `domain_pack_kpi_service::kpi_source`（`:187` 的 `replace('-', "_")`）
-/// 与 `opc_domain_pack_actions::opc_execute_workflow`（`:2494` 的「归一化域包 ID」）。
+/// 先例同 `capability_pack_kpi_service::kpi_source`（`:187` 的 `replace('-', "_")`）
+/// 与 `opc_capability_pack_actions::opc_execute_workflow`（`:2494` 的「归一化域包 ID」）。
 ///
 /// 空值直接 `Err`：`''` 在存量行里表示「未标注」（v230 迁移的回填值），
 /// 它**不是**一个域包 id —— 允许它当查询条件会造出一个看起来合法的假域包桶。
@@ -543,7 +543,7 @@ impl DefaultAnalyticsService {
 
     /// 仪表盘摘要的公共实现。
     ///
-    /// `domain_pack: Option<&str>` **只在本文件内部使用** —— 对外暴露的是两个
+    /// `capability_pack: Option<&str>` **只在本文件内部使用** —— 对外暴露的是两个
     /// 显式命名的函数（[`AnalyticsService::get_dashboard_summary`] 带域包、
     /// [`AnalyticsService::get_dashboard_summary_overview`] 跨域包），
     /// 免得「忘传 = 跨域包」成为默认行为。
@@ -551,7 +551,7 @@ impl DefaultAnalyticsService {
     /// 非 KPI 段（收入/发票/项目/客户）不按域包过滤：那几张表（`opc_invoices` /
     /// `opc_projects` / `opc_customers`）本例没有域包列，这个口径**不由本次变更决定**
     /// —— 本次只收敛 KPI 段（`recent_kpis`），不顺手改别的表的语义。
-    async fn load_dashboard(&self, domain_pack: Option<&str>) -> OpcResult<DashboardSummary> {
+    async fn load_dashboard(&self, capability_pack: Option<&str>) -> OpcResult<DashboardSummary> {
         let invoices = opc_invoices::Entity::find()
             .all(&self.db)
             .await
@@ -566,7 +566,7 @@ impl DefaultAnalyticsService {
             .map_err(|e| OpcError::Database(e.to_string()))?;
         let mut kpi_query =
             opc_kpi_records::Entity::find().order_by_desc(opc_kpi_records::Column::RecordedAt);
-        if let Some(ind) = domain_pack {
+        if let Some(ind) = capability_pack {
             kpi_query = kpi_query
                 .filter(opc_kpi_records::Column::DomainPackId.eq(canonical_domain_pack_id(ind)?));
         }

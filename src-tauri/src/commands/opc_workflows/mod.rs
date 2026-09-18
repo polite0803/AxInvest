@@ -10,9 +10,23 @@ use axagent_harness::workflow_types::*;
 use sea_orm::DatabaseConnection;
 
 pub mod domain_workflows;
-// 域包引擎已下沉：实现见 `axagent_analysis_engine::opc::domain_pack`，
-// 工具白名单映射见 `axagent_tools::tools::domain_pack_defs`。
+// 域包引擎已下沉：实现见 `axagent_analysis_engine::opc::capability_pack`，
+// 工具白名单映射见 `axagent_tools::tools::capability_pack_defs`。
 // 本模块只保留 re-export，维持既有调用面（opc.rs / opc_data.rs / 本文件内部 helper）。
+mod seed_capability_pack_accounting;
+mod seed_capability_pack_ai_research;
+mod seed_capability_pack_consulting;
+mod seed_capability_pack_content_media;
+mod seed_capability_pack_design;
+mod seed_capability_pack_ecommerce;
+mod seed_capability_pack_education;
+mod seed_capability_pack_finance_invest;
+mod seed_capability_pack_game_dev;
+mod seed_capability_pack_geospatial;
+mod seed_capability_pack_project_management;
+mod seed_capability_pack_sales_growth;
+mod seed_capability_pack_security;
+mod seed_capability_pack_software_dev;
 mod seed_content_media;
 mod seed_domain_academic;
 mod seed_domain_design;
@@ -22,20 +36,6 @@ mod seed_domain_gamedev;
 mod seed_domain_gis;
 mod seed_domain_helpers;
 mod seed_domain_marketing;
-mod seed_domain_pack_accounting;
-mod seed_domain_pack_ai_research;
-mod seed_domain_pack_consulting;
-mod seed_domain_pack_content_media;
-mod seed_domain_pack_design;
-mod seed_domain_pack_ecommerce;
-mod seed_domain_pack_education;
-mod seed_domain_pack_finance_invest;
-mod seed_domain_pack_game_dev;
-mod seed_domain_pack_geospatial;
-mod seed_domain_pack_project_management;
-mod seed_domain_pack_sales_growth;
-mod seed_domain_pack_security;
-mod seed_domain_pack_software_dev;
 mod seed_domain_paidmedia;
 mod seed_domain_pm;
 mod seed_domain_product;
@@ -49,31 +49,33 @@ mod seed_domain_testing;
 mod seed_production;
 
 // ── 域包引擎（已下沉，此处 re-export 维持既有调用面）──────────────
-pub use axagent_analysis_engine::opc::domain_pack;
+pub use axagent_analysis_engine::opc::capability_pack;
 // ⚠ 只转发有 crate 内使用者的项（`commands` 为私有模块 ⇒ `pub use` 按 `pub(crate) use`
 //   逐项判 `unused_imports`）。下列已删项均因「消费点改走显式全路径」而零消费者：
-//   `LEGACY_DOMAIN_PACKS_DIR` / `domain_packs_base_dir`（M2 下沉时）；
-//   `DOMAIN_PACKS_DIR` / `DomainPackManifest` / `export_domain_pack` / `import_domain_pack` /
-//   `DomainPackAnalysisConfig`（b2 收口）。如需引用请走
+//   `LEGACY_CAPABILITY_PACKS_DIR` / `capability_packs_base_dir`（M2 下沉时）；
+//   `CAPABILITY_PACKS_DIR` / `CapabilityPackManifest` / `export_capability_pack` / `import_capability_pack` /
+//   `CapabilityPackAnalysisConfig`（b2 收口）。如需引用请走
 //   `axagent_analysis_engine::opc::*`（glob 已导出）。
-pub use axagent_analysis_engine::opc::domain_pack::{copy_dir_recursive, resolve_domain_packs_dir};
-// AnalysisDataSource / DomainPackAnalysisConfig 均不在此 re-export：消费方各走显式路径
-// tool_defs 三函数不在命令层转发：消费方直接 use `axagent_tools::tools::domain_pack_defs::{...}`
+pub use axagent_analysis_engine::opc::capability_pack::{
+    copy_dir_recursive, resolve_capability_packs_dir,
+};
+// AnalysisDataSource / CapabilityPackAnalysisConfig 均不在此 re-export：消费方各走显式路径
+// tool_defs 三函数不在命令层转发：消费方直接 use `axagent_tools::tools::capability_pack_defs::{...}`
+pub use seed_capability_pack_accounting::seed_capability_pack_accounting_workflow_template;
+pub use seed_capability_pack_ai_research::seed_capability_pack_ai_research_workflow_template;
+pub use seed_capability_pack_consulting::seed_capability_pack_consulting_workflow_template;
+pub use seed_capability_pack_content_media::seed_capability_pack_content_media_workflow_template;
+pub use seed_capability_pack_design::seed_capability_pack_design_workflow_template;
+pub use seed_capability_pack_ecommerce::seed_capability_pack_ecommerce_workflow_template;
+pub use seed_capability_pack_education::seed_capability_pack_education_workflow_template;
+pub use seed_capability_pack_finance_invest::seed_capability_pack_finance_invest_workflow_template;
+pub use seed_capability_pack_game_dev::seed_capability_pack_game_dev_workflow_template;
+pub use seed_capability_pack_geospatial::seed_capability_pack_geospatial_workflow_template;
+pub use seed_capability_pack_project_management::seed_capability_pack_project_management_workflow_template;
+pub use seed_capability_pack_sales_growth::seed_capability_pack_sales_growth_workflow_template;
+pub use seed_capability_pack_security::seed_capability_pack_security_workflow_template;
+pub use seed_capability_pack_software_dev::seed_capability_pack_software_dev_workflow_template;
 pub use seed_content_media::seed_content_media_workflows;
-pub use seed_domain_pack_accounting::seed_domain_pack_accounting_workflow_template;
-pub use seed_domain_pack_ai_research::seed_domain_pack_ai_research_workflow_template;
-pub use seed_domain_pack_consulting::seed_domain_pack_consulting_workflow_template;
-pub use seed_domain_pack_content_media::seed_domain_pack_content_media_workflow_template;
-pub use seed_domain_pack_design::seed_domain_pack_design_workflow_template;
-pub use seed_domain_pack_ecommerce::seed_domain_pack_ecommerce_workflow_template;
-pub use seed_domain_pack_education::seed_domain_pack_education_workflow_template;
-pub use seed_domain_pack_finance_invest::seed_domain_pack_finance_invest_workflow_template;
-pub use seed_domain_pack_game_dev::seed_domain_pack_game_dev_workflow_template;
-pub use seed_domain_pack_geospatial::seed_domain_pack_geospatial_workflow_template;
-pub use seed_domain_pack_project_management::seed_domain_pack_project_management_workflow_template;
-pub use seed_domain_pack_sales_growth::seed_domain_pack_sales_growth_workflow_template;
-pub use seed_domain_pack_security::seed_domain_pack_security_workflow_template;
-pub use seed_domain_pack_software_dev::seed_domain_pack_software_dev_workflow_template;
 pub use seed_production::seed_landing_page_workflow;
 pub use seed_production::seed_startup_mvp_workflow;
 
@@ -89,9 +91,9 @@ const OPC_TEMPLATE_VERSION: i32 = 4;
 /// 与股票分析工作流一致：手动定义 WorkflowNode/Edge →
 /// 种子化写入 workflow_template 表 → 运行时 DB 加载执行。
 ///
-/// ⚠ 能力集封闭审计（手动 `assert_domain_pack_capability_closed` / `audit_domain_packs_capability`）
+/// ⚠ 能力集封闭审计（手动 `assert_capability_pack_capability_closed` / `audit_capability_packs_capability`）
 /// **不在本函数路径执行**：seed 只种 `workflow_templates`、不新增能力护照，护照态由
-/// 应用于启动时 `register_all_capabilities`（索引重建）承载审计 + `opc_import_domain_pack`
+/// 应用于启动时 `register_all_capabilities`（索引重建）承载审计 + `opc_import_capability_pack`
 /// 导入后承接审计。此处若重复审计只会输出与启动完全相同的日志，故以注释声明覆盖关系，
 /// 避免为硬凑接线而侵入 seed 调用链。
 pub async fn ensure_opc_workflows_seeded(
@@ -114,7 +116,7 @@ pub async fn ensure_opc_workflows_seeded(
     }
 
     // 1) 域包工作流（14 域包，手动定义 WorkflowNode/Edge）
-    seed_opc_domain_packs_from_seed_files(db).await?;
+    seed_opc_capability_packs_from_seed_files(db).await?;
 
     // 2) 领域工作流（17 领域 75 个工作流，手动定义 seed 文件）
     let domain_seeded = seed_domains_from_seed_files(db).await?;
@@ -139,37 +141,39 @@ pub async fn ensure_opc_workflows_seeded(
 /// 从手动定义的 seed 文件种子化 14 个域包工作流。
 ///
 /// 每个 seed 文件手动定义 WorkflowNode/Edge，与股票分析工作流一致。
-/// 替换了旧版通过 DomainPackAdapterFactory 动态生成 DAG 的方式。
-async fn seed_opc_domain_packs_from_seed_files(db: &DatabaseConnection) -> Result<usize, String> {
+/// 替换了旧版通过 CapabilityPackAdapterFactory 动态生成 DAG 的方式。
+async fn seed_opc_capability_packs_from_seed_files(
+    db: &DatabaseConnection,
+) -> Result<usize, String> {
     let mut seeded_count = 0;
 
-    seed_domain_pack_accounting_workflow_template(db).await?;
+    seed_capability_pack_accounting_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_ai_research_workflow_template(db).await?;
+    seed_capability_pack_ai_research_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_content_media_workflow_template(db).await?;
+    seed_capability_pack_content_media_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_design_workflow_template(db).await?;
+    seed_capability_pack_design_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_ecommerce_workflow_template(db).await?;
+    seed_capability_pack_ecommerce_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_education_workflow_template(db).await?;
+    seed_capability_pack_education_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_finance_invest_workflow_template(db).await?;
+    seed_capability_pack_finance_invest_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_game_dev_workflow_template(db).await?;
+    seed_capability_pack_game_dev_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_geospatial_workflow_template(db).await?;
+    seed_capability_pack_geospatial_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_consulting_workflow_template(db).await?;
+    seed_capability_pack_consulting_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_project_management_workflow_template(db).await?;
+    seed_capability_pack_project_management_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_sales_growth_workflow_template(db).await?;
+    seed_capability_pack_sales_growth_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_security_workflow_template(db).await?;
+    seed_capability_pack_security_workflow_template(db).await?;
     seeded_count += 1;
-    seed_domain_pack_software_dev_workflow_template(db).await?;
+    seed_capability_pack_software_dev_workflow_template(db).await?;
     seeded_count += 1;
 
     tracing::info!("[opc-workflows] Industries seeded from seed files: {seeded_count}");
@@ -258,7 +262,7 @@ pub fn find_repo_config_dir(rel: &str) -> Option<std::path::PathBuf> {
 
 /// 启动时确保 `config/opc`（域包 + 领域包）同步到 `app_dir/config/opc`。
 ///
-/// 生产/服务模式下进程 CWD 不是仓库根，`resolve_domain_packs_dir` /
+/// 生产/服务模式下进程 CWD 不是仓库根，`resolve_capability_packs_dir` /
 /// `resolve_domains_dir` 的仓库根 fallback 必然失败；将仓库根的资产
 /// 同步一份到用户数据目录，使 app_dir 分支始终可用。
 ///
@@ -333,12 +337,12 @@ pub fn ensure_opc_config_synced(app_dir: &std::path::Path) {
 /// P0-1-A：替代 orchestrator `create_all_adapters()` 的 Rust 硬编码 9 域包配置；
 /// 动态扫描 `config/opc/domain_packs/*/`，新增域包无需改代码。
 /// `adapter` 段缺失（旧包）→ 默认适配器（向后兼容）；解析失败仅告警跳过该域包。
-pub fn load_domain_pack_adapters(
+pub fn load_capability_pack_adapters(
     app_dir: Option<&std::path::Path>,
-) -> Vec<std::sync::Arc<dyn axagent_orchestrator::DomainPackAdapter>> {
-    use axagent_orchestrator::domain_pack_adapters::BaseDomainPackAdapter;
+) -> Vec<std::sync::Arc<dyn axagent_orchestrator::CapabilityPackAdapter>> {
+    use axagent_orchestrator::capability_pack_adapters::BaseCapabilityPackAdapter;
 
-    let base = resolve_domain_packs_dir(app_dir);
+    let base = resolve_capability_packs_dir(app_dir);
     let mut out = Vec::new();
     let Ok(entries) = std::fs::read_dir(&base) else { return out };
     for entry in entries.flatten() {
@@ -346,13 +350,13 @@ pub fn load_domain_pack_adapters(
         if !dir.is_dir() {
             continue;
         }
-        let Some(bundle) = domain_pack::analysis_schema::load_domain_pack(&dir) else {
+        let Some(bundle) = capability_pack::analysis_schema::load_capability_pack(&dir) else {
             continue;
         };
         let m = &bundle.manifest;
         // 域包 ID 双轨归一：manifest.id 是下划线（software_dev），orchestrator
         // 学习/编排侧约定连字符（software-dev）——与 learning hook 的
-        // `identify_domain_pack_from_template` 转换一致（P4-4）。
+        // `identify_capability_pack_from_template` 转换一致（P4-4）。
         let domain_pack_id = m.id.replace('_', "-");
         let learning_path = dir.join(&m.learning);
         let adapter_cfg = std::fs::read_to_string(&learning_path)
@@ -360,10 +364,10 @@ pub fn load_domain_pack_adapters(
             .and_then(|c| serde_yaml::from_str::<serde_json::Value>(&c).ok())
             .and_then(|v| v.get("adapter").cloned())
             .unwrap_or(serde_json::Value::Null);
-        match BaseDomainPackAdapter::from_config_json(&domain_pack_id, &m.name, &adapter_cfg) {
+        match BaseCapabilityPackAdapter::from_config_json(&domain_pack_id, &m.name, &adapter_cfg) {
             Ok(a) => {
                 out.push(std::sync::Arc::new(a)
-                    as std::sync::Arc<dyn axagent_orchestrator::DomainPackAdapter>);
+                    as std::sync::Arc<dyn axagent_orchestrator::CapabilityPackAdapter>);
             },
             Err(e) => tracing::warn!("[opc-adapter] 域包 {} 适配器配置解析失败: {e}", m.id),
         }
@@ -390,7 +394,7 @@ pub(crate) fn make_base(id: &str, title: &str, desc: &str, x: f64, y: f64) -> Wo
 
 /// OPC 域包 domain_pack_id → CapabilityDomain L1 映射
 /// （对齐 `src/lib/domainMeta.ts` 的 `NAV_ITEM_DOMAIN_MAP` 业务本质归域）。
-const OPC_DOMAIN_PACK_DOMAIN: &[(&str, &str)] = &[
+const OPC_CAPABILITY_PACK_DOMAIN: &[(&str, &str)] = &[
     ("accounting", "finance"),
     ("ai_research", "data_analysis"),
     ("content_media", "content_creation"),
@@ -442,8 +446,8 @@ const STOCK_EXPLICIT_ROUTE: &[(&str, &str)] = &[
     ("opc-demand-discovery", "/automation/opc/demand-discovery"),
 ];
 
-fn domain_pack_to_domain(domain_pack_id: &str) -> Option<&'static str> {
-    OPC_DOMAIN_PACK_DOMAIN.iter().find(|(k, _)| *k == domain_pack_id).map(|(_, v)| *v)
+fn capability_pack_to_domain(pack_id: &str) -> Option<&'static str> {
+    OPC_CAPABILITY_PACK_DOMAIN.iter().find(|(k, _)| *k == pack_id).map(|(_, v)| *v)
 }
 
 fn wf_segment_to_domain(seg: &str) -> Option<&'static str> {
@@ -459,7 +463,7 @@ fn wf_segment_to_domain(seg: &str) -> Option<&'static str> {
 /// 推导优先级：
 /// 1. stock 域模板显式路径（`STOCK_EXPLICIT_ROUTE`，如 `/finance/equity/multi-dim-analysis`）；
 /// 2. content_media 专属特例（既有契约，L1=`content_creation`）；
-/// 3. `{domain_pack}_harness_workflow` → `/{domain_pack_domain}/{domain_pack}/harness`
+/// 3. `{capability_pack}_harness_workflow` → `/{capability_pack_domain}/{capability_pack}/harness`
 ///    （14 域包，按业务本质归 CapabilityDomain）；
 /// 4. `wf-{seg}-{slug}` → `/{seg_domain}/{seg}/{slug}`（17 领域 75 模板）；
 /// 5. `prod-{slug}` → `/automation/production/{slug}`（OPC 自动化运营）；
@@ -478,9 +482,9 @@ pub(crate) fn authoritative_route_path(template_id: &str) -> String {
         };
         return format!("/content_creation/{cluster_cap}");
     }
-    if let Some(domain_pack) = template_id.strip_suffix("_harness_workflow") {
-        let domain = domain_pack_to_domain(domain_pack).unwrap_or("general");
-        return format!("/{domain}/{domain_pack}/harness");
+    if let Some(capability_pack) = template_id.strip_suffix("_harness_workflow") {
+        let domain = capability_pack_to_domain(capability_pack).unwrap_or("general");
+        return format!("/{domain}/{capability_pack}/harness");
     }
     if let Some(rest) = template_id.strip_prefix("wf-") {
         let (seg, slug) = rest.split_once('-').unwrap_or((rest, "main"));
@@ -645,15 +649,17 @@ pub(crate) async fn check_template_version(
 
 #[cfg(test)]
 mod tests {
-    use super::domain_pack::scan_domain_packs;
+    use super::capability_pack::scan_capability_packs;
     use super::*;
     use sea_orm::{ConnectionTrait, EntityTrait, PaginatorTrait};
     // b2 收口：这两个函数的 re-export 已撤（消费点走显式全路径），测试内保留短名在此引入
-    use axagent_analysis_engine::opc::domain_pack::{export_domain_pack, import_domain_pack};
+    use axagent_analysis_engine::opc::capability_pack::{
+        export_capability_pack, import_capability_pack,
+    };
 
     #[test]
     fn authoritative_route_path_mapping() {
-        // 域包 harness → /{CapabilityDomain}/{domain_pack}/harness
+        // 域包 harness → /{CapabilityDomain}/{capability_pack}/harness
         assert_eq!(
             super::authoritative_route_path("accounting_harness_workflow"),
             "/finance/accounting/harness"
@@ -727,7 +733,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn domain_pack_pack_migration_creates_registry() {
+    async fn capability_pack_pack_migration_creates_registry() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let row = db
@@ -737,7 +743,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        assert!(row.is_some(), "opc_domain_packs 表应存在（v211 迁移）");
+        assert!(row.is_some(), "opc_capability_packs 表应存在（v211 迁移）");
         // 编译期常量断言（clippy: assertions-on-constants）
         const {
             assert!(axagent_dao::migrations::CURRENT_VERSION >= 211);
@@ -745,7 +751,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn domain_pack_pack_seed_registers_industries() {
+    async fn capability_pack_pack_seed_registers_industries() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -753,20 +759,21 @@ mod tests {
             .unwrap()
             .join("config/opc/domain_packs");
 
-        let manifests = scan_domain_packs(&base);
-        assert!(!manifests.is_empty(), "scan_domain_packs 不应为空");
+        let manifests = scan_capability_packs(&base);
+        assert!(!manifests.is_empty(), "scan_capability_packs 不应为空");
 
         // 域包 manifest 注册（仅注册，不 seed 工作流）
-        let seeded =
-            super::domain_pack::ensure_opc_domain_packs_seeded(db, &base).await.expect("注册成功");
+        let seeded = super::capability_pack::ensure_opc_capability_packs_seeded(db, &base)
+            .await
+            .expect("注册成功");
         assert_eq!(seeded.len(), 14, "应注册 14 域包: {seeded:?}");
 
-        use axagent_entities::opc_domain_packs;
-        let count = opc_domain_packs::Entity::find().count(db).await.unwrap();
-        assert_eq!(count, 14, "opc_domain_packs 应有 14 行");
+        use axagent_entities::opc_capability_packs;
+        let count = opc_capability_packs::Entity::find().count(db).await.unwrap();
+        assert_eq!(count, 14, "opc_capability_packs 应有 14 行");
 
         // 工作流由 Rust 种子文件
-        let wf_seeded = seed_opc_domain_packs_from_seed_files(db).await.expect("seed 文件成功");
+        let wf_seeded = seed_opc_capability_packs_from_seed_files(db).await.expect("seed 文件成功");
         assert_eq!(wf_seeded, 14, "应 seed 14 域包工作流");
 
         use axagent_entities::workflow_template;
@@ -779,7 +786,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn domain_pack_pack_disabled_domain_pack_not_seeded() {
+    async fn capability_pack_pack_disabled_capability_pack_not_seeded() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let tmp = std::env::temp_dir().join(format!("opc-test-{}", std::process::id()));
@@ -791,13 +798,14 @@ mod tests {
         )
         .unwrap();
 
-        let seeded = super::domain_pack::ensure_opc_domain_packs_seeded(db, &tmp).await.unwrap();
+        let seeded =
+            super::capability_pack::ensure_opc_capability_packs_seeded(db, &tmp).await.unwrap();
         assert!(!seeded.contains(&"disabled_test".to_string()));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[tokio::test]
-    async fn domain_pack_pack_export_import_roundtrip() {
+    async fn capability_pack_pack_export_import_roundtrip() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -808,14 +816,15 @@ mod tests {
         std::fs::create_dir_all(&tmp).unwrap();
 
         // 导出 finance_invest → .opcip（含 manifest + analysis + learning）
-        let out = export_domain_pack(&base, "finance_invest", &tmp).await.expect("导出成功");
+        let out = export_capability_pack(&base, "finance_invest", &tmp).await.expect("导出成功");
         assert!(std::path::Path::new(&out).exists(), "归档应生成");
         assert!(out.ends_with("finance_invest.opcip"), "归档名应含域包 id");
 
         // 导入到独立 app_dir → 注册 manifest
         let app_dir = tmp.join("app");
-        let imported =
-            import_domain_pack(db, &app_dir, std::path::Path::new(&out)).await.expect("导入成功");
+        let imported = import_capability_pack(db, &app_dir, std::path::Path::new(&out))
+            .await
+            .expect("导入成功");
         assert_eq!(imported, "finance_invest");
 
         // 解包的 manifest 应存在
@@ -827,7 +836,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn domain_pack_seed_all_workflows() {
+    async fn capability_pack_seed_all_workflows() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
 
@@ -852,7 +861,7 @@ mod tests {
         let db = &h.conn;
 
         // 域包工作流由 Rust 种子文件
-        seed_opc_domain_packs_from_seed_files(db).await.expect("seed 文件成功");
+        seed_opc_capability_packs_from_seed_files(db).await.expect("seed 文件成功");
 
         // 金融投资域包工作流应存在（由 Rust adapter 生成）
         use axagent_entities::workflow_template;
@@ -872,7 +881,7 @@ mod tests {
         assert!(!wf.edges.is_empty(), "边不应为空");
 
         // stock_tool_defs 工具函数可正确匹配 astock 工具
-        let defs = axagent_tools::tools::domain_pack_defs::stock_tool_defs(&[
+        let defs = axagent_tools::tools::capability_pack_defs::stock_tool_defs(&[
             "get_stock_quote".to_string(),
             "search_stock".to_string(),
         ]);
@@ -882,7 +891,7 @@ mod tests {
     #[tokio::test]
     async fn stock_tool_defs_match_astock() {
         // stock_tool_defs 从 astock-data 匹配工具名
-        let defs = axagent_tools::tools::domain_pack_defs::stock_tool_defs(&[
+        let defs = axagent_tools::tools::capability_pack_defs::stock_tool_defs(&[
             "get_stock_quote".to_string(),
             "get_stock_financials".to_string(),
         ]);
@@ -892,20 +901,20 @@ mod tests {
         assert!(defs[0].parameters.is_some(), "工具应有参数 schema");
 
         // 不存在的工具名 → 空
-        let none = axagent_tools::tools::domain_pack_defs::stock_tool_defs(&[
-            "not_a_real_tool".to_string()
+        let none = axagent_tools::tools::capability_pack_defs::stock_tool_defs(&[
+            "not_a_real_tool".to_string(),
         ]);
         assert!(none.is_empty());
     }
 
     /// 最终验收：9 域包 seed 产物端到端断言——工作流结构完整、幂等。
     #[tokio::test]
-    async fn domain_pack_packs_end_to_end_verification() {
+    async fn capability_pack_packs_end_to_end_verification() {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
 
         // 域包工作流由 Rust 种子文件
-        seed_opc_domain_packs_from_seed_files(db).await.expect("seed 14 域包");
+        seed_opc_capability_packs_from_seed_files(db).await.expect("seed 14 域包");
 
         use axagent_entities::workflow_template;
         use sea_orm::EntityTrait;
@@ -960,7 +969,7 @@ mod tests {
         assert!(sdev.nodes.contains("step_software_dev"), "software_dev 应含步骤节点");
 
         // 5. 幂等：二次 seed 不报错、不产生重复
-        seed_opc_domain_packs_from_seed_files(db).await.expect("二次 seed 应成功");
+        seed_opc_capability_packs_from_seed_files(db).await.expect("二次 seed 应成功");
         let count = workflow_template::Entity::find().count(db).await.unwrap();
         assert_eq!(count, 14, "14 域包共 14 个工作流，二次 seed 后不应残留/重复，实际 {count}");
     }
@@ -972,7 +981,7 @@ mod tests {
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
 
-        seed_opc_domain_packs_from_seed_files(db).await.expect("seed 文件成功");
+        seed_opc_capability_packs_from_seed_files(db).await.expect("seed 文件成功");
 
         use axagent_entities::workflow_template;
         let wf = workflow_template::Entity::find_by_id("accounting_harness_workflow")
@@ -1066,7 +1075,7 @@ mod tests {
             .parent()
             .unwrap()
             .join("config/opc/domain_packs");
-        let manifests = super::domain_pack::scan_domain_packs(&base);
+        let manifests = super::capability_pack::scan_capability_packs(&base);
         assert_eq!(manifests.len(), 14, "内置 14 个域包");
 
         // 每个包有 manifest 关键字段
@@ -1078,7 +1087,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn domain_pack_pack_four_assets_loaded() {
+    async fn capability_pack_pack_four_assets_loaded() {
         // P0-4 回归：域包四件套（manifest + workflows + analysis + learning）一次读全，
         // manifest.analysis/learning 字段缺省默认值，analysis.yaml 全部可解析
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1092,7 +1101,7 @@ mod tests {
             if !dir.is_dir() {
                 continue;
             }
-            let bundle = super::domain_pack::analysis_schema::load_domain_pack(&dir)
+            let bundle = super::capability_pack::analysis_schema::load_capability_pack(&dir)
                 .expect("域包应完整加载（manifest 可解析）");
             // manifest 扩展字段：缺省默认 analysis.yaml / learning.yaml
             assert_eq!(
@@ -1133,20 +1142,20 @@ mod tests {
     }
 
     #[test]
-    fn domain_pack_adapters_loaded_from_packs() {
+    fn capability_pack_adapters_loaded_from_packs() {
         // P0-1-A 回归：域包适配器由域包 learning.yaml 的 adapter 段驱动
         //（替代 orchestrator create_all_adapters Rust 硬编码）。
         // 用 accounting 已知配置对账：3 checkpoints + 3 AC + min/max 2/15 + protected compliance_check。
         // 测试 CWD=src-tauri，相对路径落空 → 显式传仓库根（模拟 app_dir 命中分支）。
         let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-        let adapters = super::load_domain_pack_adapters(Some(repo_root));
+        let adapters = super::load_capability_pack_adapters(Some(repo_root));
         assert_eq!(adapters.len(), 14, "应加载 14 个域包适配器: {}", adapters.len());
 
         let accounting = adapters
             .iter()
             .find(|a| a.domain_pack_id() == "accounting")
             .expect("accounting 适配器应存在");
-        assert_eq!(accounting.domain_pack_name(), "会计财务流程");
+        assert_eq!(accounting.capability_pack_name(), "会计财务流程");
 
         let rt = accounting.reflection_template();
         assert_eq!(rt.id, "accounting-default", "reflection_template.id 应对账 yaml");
@@ -1177,7 +1186,7 @@ mod tests {
 
         // 新增域包零代码：临时目录建 manifest + learning.yaml(adapter 段) → 动态出现
         let tmp = std::env::temp_dir().join(format!("opc-adapter-test-{}", std::process::id()));
-        let pkg = tmp.join("config/opc/domain_packs/mock_domain_pack");
+        let pkg = tmp.join("config/opc/domain_packs/mock_capability_pack");
         std::fs::create_dir_all(&pkg).unwrap();
         std::fs::write(
             pkg.join("manifest.yaml"),
@@ -1189,7 +1198,7 @@ mod tests {
             "version: 1\ndomain_pack_id: mock-domain-pack\nadapter:\n  reflection_template:\n    id: mock\n    name: Mock 模板\n    checkpoints:\n      - id: c1\n        name: C1\n        dimension: d\n        description: desc\n        weight: 0.5\n",
         )
         .unwrap();
-        let adapters2 = super::load_domain_pack_adapters(Some(&tmp));
+        let adapters2 = super::load_capability_pack_adapters(Some(&tmp));
         let mock = adapters2
             .iter()
             .find(|a| a.domain_pack_id() == "mock-domain-pack")

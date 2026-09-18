@@ -62,10 +62,10 @@ export interface UseDomainDataReturn {
 
 /**
  * 行业数据管理 Hook
- * @param domainPackId 行业 ID
+ * @param capabilityPackId 行业 ID
  * @returns 行业数据和操作方法
  */
-export function useDomainData(domainPackId: string | null): UseDomainDataReturn {
+export function useDomainData(capabilityPackId: string | null): UseDomainDataReturn {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [manifest, setManifest] = useState<DomainManifest | null>(null);
@@ -89,7 +89,7 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
 
   // 加载行业清单
   useEffect(() => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       setLoading(false);
       return;
     }
@@ -98,8 +98,8 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
       setLoading(true);
       try {
         const result = await invoke<{ manifest: DomainManifest }>(
-          "opc_get_domain_pack",
-          { domainPackId },
+          "opc_get_capability_pack",
+          { capabilityPackId },
         );
         setManifest(result.manifest);
       } catch (e) {
@@ -110,20 +110,20 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     };
 
     loadDomain();
-  }, [domainPackId]);
+  }, [capabilityPackId]);
 
   // 加载仪表盘
   const loadDashboard = useCallback(async () => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     setDashboardLoading(true);
     try {
       const days = Number(kpiTimeRange);
-      // 后端返回信封 { domainPackId, dashboard }，仪表盘本体在 dashboard 字段内
+      // 后端返回信封 { capabilityPackId, dashboard }，仪表盘本体在 dashboard 字段内
       const result = await invoke<DomainDashboardResponse>(
-        "opc_get_domain_pack_dashboard",
-        { domainPackId, days },
+        "opc_get_capability_pack_dashboard",
+        { capabilityPackId, days },
       );
       setDashboard(result?.dashboard ?? null);
     } catch (e) {
@@ -131,18 +131,18 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     } finally {
       setDashboardLoading(false);
     }
-  }, [domainPackId, kpiTimeRange]);
+  }, [capabilityPackId, kpiTimeRange]);
 
   // 加载工作流步骤
   const loadWorkflowSteps = useCallback(async () => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     setStepsLoading(true);
     try {
       const result = await invoke<{ steps: WorkflowStepInfo[] }>(
-        "opc_get_domain_pack_workflow_steps",
-        { domainPackId },
+        "opc_get_capability_pack_workflow_steps",
+        { capabilityPackId },
       );
       setWorkflowSteps(result.steps || []);
     } catch (e) {
@@ -151,18 +151,18 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     } finally {
       setStepsLoading(false);
     }
-  }, [domainPackId]);
+  }, [capabilityPackId]);
 
   // 加载自动化规则
   const loadAutomationRules = useCallback(async () => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     setRulesLoading(true);
     try {
       const result = await invoke<{ rules: AutomationRuleInfo[] }>(
-        "opc_get_domain_pack_automation_rules",
-        { domainPackId },
+        "opc_get_capability_pack_automation_rules",
+        { capabilityPackId },
       );
       setAutomationRules(result.rules || []);
     } catch (e) {
@@ -171,17 +171,17 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     } finally {
       setRulesLoading(false);
     }
-  }, [domainPackId]);
+  }, [capabilityPackId]);
 
   // 加载决策（使用 opc_execute_analysis 命令）
   const loadDecision = useCallback(async () => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     setDecisionLoading(true);
     try {
       const result = await invoke<OpcDomainDecision>("opc_execute_analysis", {
-        domainPackId,
+        capabilityPackId,
         days: decisionDays,
       });
       setDecision(result);
@@ -190,18 +190,18 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     } finally {
       setDecisionLoading(false);
     }
-  }, [domainPackId, decisionDays]);
+  }, [capabilityPackId, decisionDays]);
 
   // 加载学习指标（使用 opc_get_learning_metrics 命令）
   const loadLearningMetrics = useCallback(async () => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     setMetricsLoading(true);
     try {
       const result = await invoke<DomainLearningMetrics>(
         "opc_get_learning_metrics",
-        { domainPackId },
+        { capabilityPackId },
       );
       setLearningMetrics(result);
     } catch (e) {
@@ -209,18 +209,18 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     } finally {
       setMetricsLoading(false);
     }
-  }, [domainPackId]);
+  }, [capabilityPackId]);
 
   // 加载学习配置（使用 opc_get_learning_config 命令）
   const loadLearningConfig = useCallback(async () => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     setLearningLoading(true);
     try {
       const result = await invoke<DomainLearningConfig>(
         "opc_get_learning_config",
-        { domainPackId },
+        { capabilityPackId },
       );
       setLearningConfig(result);
     } catch (e) {
@@ -228,17 +228,17 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     } finally {
       setLearningLoading(false);
     }
-  }, [domainPackId]);
+  }, [capabilityPackId]);
 
   // 执行自动化规则
   const runAutomationRules = useCallback(async (): Promise<string[]> => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return [];
     }
     setRulesRunning(true);
     try {
       const triggered = await invoke<string[]>("opc_run_automation_rules", {
-        domainPackId,
+        capabilityPackId,
         entityType: "customer",
         entityId: "manual_trigger",
       });
@@ -249,15 +249,15 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     } finally {
       setRulesRunning(false);
     }
-  }, [domainPackId]);
+  }, [capabilityPackId]);
 
-  // 执行工作流（使用 opc_execute_workflow 命令，传递 workflow_id + domain_pack_id + days + userInput）
+  // 执行工作流（使用 opc_execute_workflow 命令，传递 workflow_id + capability_pack_id + days + userInput）
   const executeWorkflow = useCallback(
     async (workflowId: string, userInput?: Record<string, unknown>): Promise<WorkflowExecutionResult> => {
       setWorkflowExecuting(true);
       try {
         const result = await invoke<WorkflowExecutionResult>("opc_execute_workflow", {
-          domainPackId,
+          capabilityPackId,
           workflowId,
           days: 30,
           userInput: userInput ?? null,
@@ -279,20 +279,20 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
         setWorkflowExecuting(false);
       }
     },
-    [domainPackId],
+    [capabilityPackId],
   );
 
   // 反思（使用 opc_reflect_on_workflow 命令，需要 workflow_id + workflow_result）
   const reflectOnWorkflow = useCallback(
     async (workflowId?: string) => {
-      if (!domainPackId) {
+      if (!capabilityPackId) {
         return;
       }
       try {
-        const wfId = workflowId || `default_${domainPackId}`;
+        const wfId = workflowId || `default_${capabilityPackId}`;
         const wfResult = workflowResult || { status: "completed", steps_completed: 0, steps_total: 0 };
         await invoke("opc_reflect_on_workflow", {
-          domainPackId,
+          capabilityPackId,
           workflowId: wfId,
           workflowResult: wfResult,
         });
@@ -301,20 +301,20 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
         console.error("[useDomainData] reflect failed:", e);
       }
     },
-    [domainPackId, workflowResult, loadLearningMetrics],
+    [capabilityPackId, workflowResult, loadLearningMetrics],
   );
 
   // 进化（使用 opc_evolve_workflow 命令，需要 workflow_id + reason）
   const evolveWorkflow = useCallback(
     async (workflowId?: string, reason?: string) => {
-      if (!domainPackId) {
+      if (!capabilityPackId) {
         return;
       }
       try {
-        const wfId = workflowId || `default_${domainPackId}`;
+        const wfId = workflowId || `default_${capabilityPackId}`;
         const reasonText = reason || t("opc.domain.learning.evolution.defaultReason");
         await invoke("opc_evolve_workflow", {
-          domainPackId,
+          capabilityPackId,
           workflowId: wfId,
           reason: reasonText,
         });
@@ -323,19 +323,19 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
         console.error("[useDomainData] evolve failed:", e);
       }
     },
-    [domainPackId, loadLearningMetrics, t],
+    [capabilityPackId, loadLearningMetrics, t],
   );
 
   // 自我改进（使用 opc_run_self_improvement 命令，需要 target）
   const runSelfImprovement = useCallback(
     async (target?: string) => {
-      if (!domainPackId) {
+      if (!capabilityPackId) {
         return;
       }
       try {
         const targetText = target || "all";
         await invoke("opc_run_self_improvement", {
-          domainPackId,
+          capabilityPackId,
           target: targetText,
         });
         await loadLearningMetrics();
@@ -343,12 +343,12 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
         console.error("[useDomainData] self improve failed:", e);
       }
     },
-    [domainPackId, loadLearningMetrics],
+    [capabilityPackId, loadLearningMetrics],
   );
 
   // 初始化加载
   useEffect(() => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     loadDashboard();
@@ -356,15 +356,22 @@ export function useDomainData(domainPackId: string | null): UseDomainDataReturn 
     loadAutomationRules();
     loadLearningMetrics();
     loadLearningConfig();
-  }, [domainPackId, loadDashboard, loadWorkflowSteps, loadAutomationRules, loadLearningMetrics, loadLearningConfig]);
+  }, [
+    capabilityPackId,
+    loadDashboard,
+    loadWorkflowSteps,
+    loadAutomationRules,
+    loadLearningMetrics,
+    loadLearningConfig,
+  ]);
 
   // KPI 时间范围变化时刷新
   useEffect(() => {
-    if (!domainPackId) {
+    if (!capabilityPackId) {
       return;
     }
     loadDashboard();
-  }, [domainPackId, kpiTimeRange, loadDashboard]);
+  }, [capabilityPackId, kpiTimeRange, loadDashboard]);
 
   return {
     loading,

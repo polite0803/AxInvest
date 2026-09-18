@@ -6,12 +6,12 @@
 //!
 //! 创作类 KPI（`word_count` / `completion_rate` / `revision_rounds`）的数值只在
 //! 工作流执行上下文里算出来（`lc-extract-fulltext.result.char_count` 等）；
-//! `opc_domain_pack_actions::run_template_via_engine` 把执行结果返回前端后即丢弃，
+//! `opc_capability_pack_actions::run_template_via_engine` 把执行结果返回前端后即丢弃，
 //! 于是 `opc_kpi_records` 长期为空、仪表盘只能显示「未接数据源」。
 //!
 //! 本模块实现 `WorkflowLifecycleHook`（协议见 `axagent_harness::workflow_lifecycle`），
 //! 在 DAG 终态（post_exec）把产出写进 `opc_kpi_records`。读端为
-//! `OpcDataService::latest_kpi` + `domain_pack_kpi_service::KpiSource::RecordedKpi`。
+//! `OpcDataService::latest_kpi` + `capability_pack_kpi_service::KpiSource::RecordedKpi`。
 //!
 //! ## 触发条件（零业务名硬编码）
 //!
@@ -39,7 +39,7 @@
 //! 归属来源是**调用方注入的运行上下文**，不是模板名、不是 LLM：
 //!
 //! ```text
-//! opc_domain_pack_actions::run_template_via_engine(domain_pack_id, …)
+//! opc_capability_pack_actions::run_template_via_engine(domain_pack_id, …)
 //!   └─ RunOptions.input = { "domain_pack_id": "content-media" }      ← 注入点
 //!        └─ engine 透传 options.input → HookExecContext.input       ← 引擎已支持
 //!             └─ 本钩子读 ctx.input["domain_pack_id"]                  ← 消费点（本文件）
@@ -114,7 +114,7 @@ use axagent_analysis_engine::opc::{
 // （唯一用法：`DefaultAnalyticsService::new(self.db.clone())`）；直接引 `sea_orm::` 路径
 // 会命中分层门禁 `commands-no-direct-db`（判据：命令层不得直连 sea_orm / axagent_entities）。
 use axagent_dao::db::DatabaseConnection;
-use axagent_harness::constants::domain_pack::{INPUT_KEY, KPI_HOOK_NAME};
+use axagent_harness::constants::capability_pack::{INPUT_KEY, KPI_HOOK_NAME};
 use axagent_harness::workflow_types::Variable;
 use axagent_harness::{HookExecContext, HookOutcome, WorkflowLifecycleHook};
 use axagent_rt_workflow::work_engine::WorkEngine;
@@ -122,10 +122,10 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// 钩子名与 `ctx.input` 键名的**权威源在 `axagent_harness::constants::domain_pack`**：
+// 钩子名与 `ctx.input` 键名的**权威源在 `axagent_harness::constants::capability_pack`**：
 // 命令层不得自定义。原先定义在此处，导致每个消费方都必须「跨命令模块 import」，
 // 命令依赖图退化成网（分层门禁 `commands-no-sibling-call` 拦的正是这个）。
-// 本模块与 `seed_content_media`、`opc_domain_pack_actions` 共用同一份，改名只有一处可改。
+// 本模块与 `seed_content_media`、`opc_capability_pack_actions` 共用同一份，改名只有一处可改。
 
 /// 节点 ID：全文抽取（Rhai **CodeNode**，产出 `full_text` / `char_count` / `chapter_count`）。
 ///
@@ -403,7 +403,7 @@ fn is_success_status(status: &str) -> bool {
 /// - `input` 里没有该键（同上）；
 /// - 键存在但取出失败（不是字符串 / 空白 / 空串）—— `''` 在 DB 里表示
 ///   「未标注」的存量语义，不是一个域包 id。
-pub(crate) fn domain_pack_from_context(ctx: &HookExecContext) -> Option<String> {
+pub(crate) fn capability_pack_from_context(ctx: &HookExecContext) -> Option<String> {
     ctx.input
         .as_ref()
         .and_then(|v| v.get(INPUT_KEY))
@@ -427,11 +427,11 @@ impl ContentMediaKpiPersistHook {
 
     /// 从 runtime.yaml 取该 KPI 的单位；取不到返回空串（不伪造单位）。
     fn unit_of(&self, domain_pack_id: &str, key: &str) -> String {
-        use axagent_analysis_engine::opc::domain_pack;
+        use axagent_analysis_engine::opc::capability_pack;
 
-        let base = axagent_analysis_engine::opc::resolve_domain_packs_dir(Some(&self.app_dir));
+        let base = axagent_analysis_engine::opc::resolve_capability_packs_dir(Some(&self.app_dir));
         let dir = base.join(domain_pack_id);
-        domain_pack::analysis_schema::load_domain_pack(&dir)
+        capability_pack::analysis_schema::load_capability_pack(&dir)
             .and_then(|b| b.runtime)
             .and_then(|c| c.definition(key).and_then(|d| d.unit.clone()))
             .unwrap_or_default()
@@ -460,7 +460,7 @@ impl WorkflowLifecycleHook for ContentMediaKpiPersistHook {
 
         let period = chrono::Utc::now().format("%Y-%m").to_string();
         // 域包归属从运行上下文注入（见文件头「域包归属从哪来」）。取不到 ⇒ 不落库。
-        let Some(domain_pack_id) = domain_pack_from_context(&ctx) else {
+        let Some(domain_pack_id) = capability_pack_from_context(&ctx) else {
             tracing::warn!(
                 "[opc-kpi-hook] {} 的 ctx.input 未携带可用的 {INPUT_KEY}，本次不落库：\
                  无归属的 KPI 行在域包读侧查不出来（会把「钩子没生效」伪装成「工作流没产出」）",
@@ -504,7 +504,7 @@ impl WorkflowLifecycleHook for ContentMediaKpiPersistHook {
             };
             match svc.record_kpi(input).await {
                 Ok(rec) => tracing::info!(
-                    "[opc-kpi-hook] {} 落库 KPI: domain_pack={} {}={} {} period={} id={}",
+                    "[opc-kpi-hook] {} 落库 KPI: capability_pack={} {}={} {} period={} id={}",
                     ctx.template_id,
                     rec.domain_pack_id,
                     key,
@@ -915,7 +915,7 @@ mod tests {
     /// 连字符形态必须归成下划线 —— 否则写侧落 `content-media`、读侧查
     /// `content_media`，刚写的值读不回来（「数据明明落了库却显示暂无数据」）。
     #[test]
-    fn domain_pack_from_context_normalizes_hyphen_form() {
+    fn capability_pack_from_context_normalizes_hyphen_form() {
         let ctx = |input: Option<Value>| HookExecContext {
             template_id: "workflow_abc".into(),
             execution_id: "exec-1".into(),
@@ -923,11 +923,11 @@ mod tests {
             variables: Vec::new(),
         };
         assert_eq!(
-            domain_pack_from_context(&ctx(Some(json!({"domain_pack_id": "content-media"})))),
+            capability_pack_from_context(&ctx(Some(json!({"domain_pack_id": "content-media"})))),
             Some("content_media".to_string())
         );
         assert_eq!(
-            domain_pack_from_context(&ctx(Some(json!({"domain_pack_id": "content_media"})))),
+            capability_pack_from_context(&ctx(Some(json!({"domain_pack_id": "content_media"})))),
             Some("content_media".to_string())
         );
     }
@@ -937,7 +937,7 @@ mod tests {
     /// **不得**退化成硬编码 `"content_media"` —— 那正是本文件改前的写法，
     /// 它让别的域包声明本钩子时把值写进 content_media 的桶。
     #[test]
-    fn domain_pack_from_context_none_when_unavailable() {
+    fn capability_pack_from_context_none_when_unavailable() {
         let ctx = |input: Option<Value>| HookExecContext {
             template_id: "workflow_abc".into(),
             execution_id: "exec-1".into(),
@@ -945,14 +945,20 @@ mod tests {
             variables: Vec::new(),
         };
         // ① 调用方没注入 input（如手工在编辑器里跑模板）
-        assert_eq!(domain_pack_from_context(&ctx(None)), None);
+        assert_eq!(capability_pack_from_context(&ctx(None)), None);
         // ② input 里没有该键
-        assert_eq!(domain_pack_from_context(&ctx(Some(json!({"other": 1})))), None);
+        assert_eq!(capability_pack_from_context(&ctx(Some(json!({"other": 1})))), None);
         // ③ 空串 / 空白：`''` 是存量行的「未标注」，不是域包
-        assert_eq!(domain_pack_from_context(&ctx(Some(json!({"domain_pack_id": ""})))), None);
-        assert_eq!(domain_pack_from_context(&ctx(Some(json!({"domain_pack_id": "   "})))), None);
+        assert_eq!(capability_pack_from_context(&ctx(Some(json!({"domain_pack_id": ""})))), None);
+        assert_eq!(
+            capability_pack_from_context(&ctx(Some(json!({"domain_pack_id": "   "})))),
+            None
+        );
         // ④ 不是字符串（LLM/调用方塞了数字或对象）
-        assert_eq!(domain_pack_from_context(&ctx(Some(json!({"domain_pack_id": 42})))), None);
-        assert_eq!(domain_pack_from_context(&ctx(Some(json!({"domain_pack_id": {"a": 1}})))), None);
+        assert_eq!(capability_pack_from_context(&ctx(Some(json!({"domain_pack_id": 42})))), None);
+        assert_eq!(
+            capability_pack_from_context(&ctx(Some(json!({"domain_pack_id": {"a": 1}})))),
+            None
+        );
     }
 }

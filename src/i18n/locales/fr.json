@@ -11723,14 +11723,17 @@
       "enabled": "Activé : {{value}}",
       "yes": "Oui",
       "no": "Non",
-      "install": "Installer",
-      "installSuccess": "Installé : {{name}}",
-      "installFailed": "Échec de l'installation : {{error}}",
+      "import": "Importer",
+      "importSuccess": "Importé : {{name}}",
+      "importFailed": "Échec de l'import : {{error}}",
+      "export": "Exporter au format .opcip",
+      "exportSuccess": "Exporté : {{name}}",
+      "exportFailed": "Échec de l'export : {{error}}",
+      "exportDesktopOnly": "L'export n'est disponible que sur le bureau",
       "domain": "Domaine: {{domain}}",
-
       "domainUndefined": "Non déclaré",
-
       "capabilityCount": "Engagements de capacité: {{count}}",
+      "capabilityListTitle": "Capacités spécifiques",
       "toggle": "Activé",
       "toggleSuccess": "Statut d'activation mis à jour : {{name}}",
       "toggleFailed": "Échec de la bascule du statut d'activation : {{error}}"

@@ -335,10 +335,10 @@ pub const DEFAULT_MAX_ITERATIONS: usize = 50;
 /// 「跨命令模块 import」，命令依赖图退化成网（分层门禁 `commands-no-sibling-call` 会拦）。
 /// 它们是不承载业务的纯标识符，权威源理应在 harness：
 /// 写入端与消费端共用同一份，改名时只有一处可改。
-pub mod domain_pack {
+pub mod capability_pack {
     /// 工作流 `ctx.input` 里承载域包归属的键名。
     ///
-    /// 写入端 `opc_domain_pack_actions::run_template_via_engine` 与消费端
+    /// 写入端 `opc_capability_pack_actions::run_template_via_engine` 与消费端
     /// `opc_workflow_kpi_hook` 必须同名 —— 不同名则 KPI **静默不落库**。
     pub const INPUT_KEY: &str = "domain_pack_id";
 

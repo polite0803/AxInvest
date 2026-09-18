@@ -2,7 +2,7 @@
 
 //! OPC 强化学习经验持久化 DAO
 //!
-//! 提供 RL 经验的 SQLite 读写能力，供 DomainPackLearningEngine 使用。
+//! 提供 RL 经验的 SQLite 读写能力，供 CapabilityPackLearningEngine 使用。
 
 use std::sync::Arc;
 
@@ -58,7 +58,7 @@ impl RlExperienceDao {
     }
 
     /// 查询指定域包的经验池
-    pub async fn get_experiences_by_domain_pack(
+    pub async fn get_experiences_by_capability_pack(
         &self,
         domain_pack_id: &str,
         limit: Option<u64>,
@@ -75,7 +75,7 @@ impl RlExperienceDao {
     }
 
     /// 查询指定域包的经验数量
-    pub async fn count_experiences_by_domain_pack(
+    pub async fn count_experiences_by_capability_pack(
         &self,
         domain_pack_id: &str,
     ) -> Result<u64, DbErr> {
@@ -91,7 +91,7 @@ impl RlExperienceDao {
     }
 
     /// 获取指定域包的统计数据
-    pub async fn get_domain_pack_stats(
+    pub async fn get_capability_pack_stats(
         &self,
         domain_pack_id: &str,
     ) -> Result<Option<opc_rl_training_stats::Model>, DbErr> {
@@ -141,7 +141,7 @@ impl RlExperienceDao {
     }
 
     /// 删除指定域包的所有经验记录
-    pub async fn clear_experiences_by_domain_pack(
+    pub async fn clear_experiences_by_capability_pack(
         &self,
         domain_pack_id: &str,
     ) -> Result<(), DbErr> {

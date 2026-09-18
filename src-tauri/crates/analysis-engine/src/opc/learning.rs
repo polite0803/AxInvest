@@ -7,18 +7,18 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use super::analysis::{OpcDomainPackDecision, RiskLevel};
+use super::analysis::{OpcCapabilityPackDecision, RiskLevel};
 use super::error::OpcResult;
 
 // ── 学习样本 ─────────────────────────────────────────────────
 
 /// 域包学习样本（一次分析的完整记录）
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DomainPackLearningSample {
+pub struct CapabilityPackLearningSample {
     pub sample_id: String,
     pub domain_pack_id: String,
     pub timestamp: i64,
-    pub decision: OpcDomainPackDecision,
+    pub decision: OpcCapabilityPackDecision,
     pub actual_outcome: Option<ActualOutcome>,
     pub feedback_score: Option<f64>,
     pub tags: Vec<String>,
@@ -46,7 +46,7 @@ pub enum OutcomeType {
 
 /// 域包学习指标
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DomainPackLearningMetrics {
+pub struct CapabilityPackLearningMetrics {
     pub domain_pack_id: String,
     pub total_samples: u64,
     pub decision_accuracy: f64,
@@ -67,19 +67,19 @@ pub enum ImprovementTrend {
 // ── 学习引擎 ─────────────────────────────────────────────────
 
 /// 域包学习引擎
-pub struct DomainPackLearningEngine {
+pub struct CapabilityPackLearningEngine {
     domain_pack_id: String,
-    samples: Arc<RwLock<Vec<DomainPackLearningSample>>>,
+    samples: Arc<RwLock<Vec<CapabilityPackLearningSample>>>,
     max_samples: usize,
 }
 
-impl DomainPackLearningEngine {
+impl CapabilityPackLearningEngine {
     pub fn new(domain_pack_id: String) -> Self {
         Self { domain_pack_id, samples: Arc::new(RwLock::new(Vec::new())), max_samples: 1000 }
     }
 
     /// 添加学习样本
-    pub async fn add_sample(&self, sample: DomainPackLearningSample) -> OpcResult<()> {
+    pub async fn add_sample(&self, sample: CapabilityPackLearningSample) -> OpcResult<()> {
         let mut samples = self.samples.write().await;
         samples.push(sample);
 
@@ -95,10 +95,10 @@ impl DomainPackLearningEngine {
     /// 添加带反馈的决策样本
     pub async fn record_decision(
         &self,
-        decision: OpcDomainPackDecision,
+        decision: OpcCapabilityPackDecision,
         actual_outcome: Option<ActualOutcome>,
-    ) -> OpcResult<DomainPackLearningSample> {
-        let sample = DomainPackLearningSample {
+    ) -> OpcResult<CapabilityPackLearningSample> {
+        let sample = CapabilityPackLearningSample {
             sample_id: uuid::Uuid::new_v4().to_string(),
             domain_pack_id: self.domain_pack_id.clone(),
             timestamp: chrono::Utc::now().timestamp_millis(),
@@ -113,11 +113,11 @@ impl DomainPackLearningEngine {
     }
 
     /// 计算学习指标
-    pub async fn compute_metrics(&self) -> OpcResult<DomainPackLearningMetrics> {
+    pub async fn compute_metrics(&self) -> OpcResult<CapabilityPackLearningMetrics> {
         let samples = self.samples.read().await;
 
         if samples.is_empty() {
-            return Ok(DomainPackLearningMetrics {
+            return Ok(CapabilityPackLearningMetrics {
                 domain_pack_id: self.domain_pack_id.clone(),
                 total_samples: 0,
                 decision_accuracy: 0.0,
@@ -153,7 +153,7 @@ impl DomainPackLearningEngine {
         // 判断改进趋势
         let trend = self.determine_improvement_trend(&samples);
 
-        Ok(DomainPackLearningMetrics {
+        Ok(CapabilityPackLearningMetrics {
             domain_pack_id: self.domain_pack_id.clone(),
             total_samples: total,
             decision_accuracy,
@@ -164,7 +164,10 @@ impl DomainPackLearningEngine {
         })
     }
 
-    fn calculate_decision_accuracy(&self, samples: &[DomainPackLearningSample]) -> (usize, usize) {
+    fn calculate_decision_accuracy(
+        &self,
+        samples: &[CapabilityPackLearningSample],
+    ) -> (usize, usize) {
         let mut correct = 0;
         let mut total = 0;
 
@@ -185,7 +188,7 @@ impl DomainPackLearningEngine {
         (correct, total)
     }
 
-    fn calculate_risk_prediction_accuracy(&self, samples: &[DomainPackLearningSample]) -> f64 {
+    fn calculate_risk_prediction_accuracy(&self, samples: &[CapabilityPackLearningSample]) -> f64 {
         let mut correct = 0;
         let mut total = 0;
 
@@ -214,14 +217,15 @@ impl DomainPackLearningEngine {
 
     fn determine_improvement_trend(
         &self,
-        samples: &[DomainPackLearningSample],
+        samples: &[CapabilityPackLearningSample],
     ) -> ImprovementTrend {
         if samples.len() < 5 {
             return ImprovementTrend::InsufficientData;
         }
 
-        let recent: Vec<&DomainPackLearningSample> = samples.iter().rev().take(5).collect();
-        let older: Vec<&DomainPackLearningSample> = samples.iter().rev().skip(5).take(5).collect();
+        let recent: Vec<&CapabilityPackLearningSample> = samples.iter().rev().take(5).collect();
+        let older: Vec<&CapabilityPackLearningSample> =
+            samples.iter().rev().skip(5).take(5).collect();
 
         if recent.is_empty() || older.is_empty() {
             return ImprovementTrend::InsufficientData;
@@ -239,7 +243,7 @@ impl DomainPackLearningEngine {
         }
     }
 
-    fn avg_feedback(&self, samples: &[&DomainPackLearningSample]) -> f64 {
+    fn avg_feedback(&self, samples: &[&CapabilityPackLearningSample]) -> f64 {
         let scores: Vec<f64> = samples.iter().filter_map(|s| s.feedback_score).collect();
         if scores.is_empty() {
             0.0
@@ -249,7 +253,7 @@ impl DomainPackLearningEngine {
     }
 
     /// 获取所有样本
-    pub async fn get_samples(&self) -> Vec<DomainPackLearningSample> {
+    pub async fn get_samples(&self) -> Vec<CapabilityPackLearningSample> {
         self.samples.read().await.clone()
     }
 
@@ -262,24 +266,24 @@ impl DomainPackLearningEngine {
 // ── 学习管理器 ─────────────────────────────────────────────────
 
 /// 域包学习管理器（全局单例模式）
-pub struct DomainPackLearningManager {
-    engines: HashMap<String, Arc<DomainPackLearningEngine>>,
+pub struct CapabilityPackLearningManager {
+    engines: HashMap<String, Arc<CapabilityPackLearningEngine>>,
 }
 
-impl DomainPackLearningManager {
+impl CapabilityPackLearningManager {
     pub fn new() -> Self {
         Self { engines: HashMap::new() }
     }
 
     /// 获取或创建域包学习引擎
-    pub fn get_or_create(&mut self, domain_pack_id: &str) -> &Arc<DomainPackLearningEngine> {
-        self.engines
-            .entry(domain_pack_id.to_string())
-            .or_insert_with(|| Arc::new(DomainPackLearningEngine::new(domain_pack_id.to_string())))
+    pub fn get_or_create(&mut self, domain_pack_id: &str) -> &Arc<CapabilityPackLearningEngine> {
+        self.engines.entry(domain_pack_id.to_string()).or_insert_with(|| {
+            Arc::new(CapabilityPackLearningEngine::new(domain_pack_id.to_string()))
+        })
     }
 
     /// 获取域包学习引擎
-    pub fn get(&self, domain_pack_id: &str) -> Option<&Arc<DomainPackLearningEngine>> {
+    pub fn get(&self, domain_pack_id: &str) -> Option<&Arc<CapabilityPackLearningEngine>> {
         self.engines.get(domain_pack_id)
     }
 
@@ -289,7 +293,7 @@ impl DomainPackLearningManager {
     }
 }
 
-impl Default for DomainPackLearningManager {
+impl Default for CapabilityPackLearningManager {
     fn default() -> Self {
         Self::new()
     }

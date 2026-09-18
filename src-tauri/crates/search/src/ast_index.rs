@@ -1067,6 +1067,11 @@ fn find_block_end(content: &str, start: usize) -> usize {
                 started = true;
             } else if !trimmed.contains('{') && !trimmed.ends_with(':') {
                 return i; // Single-line definition
+            } else if opens > 0 && opens == closes {
+                // 单行花括号块：`fn helper() {}` 开闭括号在同一行配平。
+                // 若不在此短路，started 恒 false ⇒ 块范围会一路吞到文件末行，
+                // 让相邻函数的调用被误归属给本函数（2026-09-18 test_find_callers 回归）。
+                return i;
             }
         }
 

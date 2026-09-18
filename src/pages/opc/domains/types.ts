@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /**
- * 域包页面共享类型定义
+ * 能力包页面共享类型定义
  *
  * ⚠ 契约分层：本文件里的**类型名**是前端标识符（可自由改名），但**字段名**多数镜像
  * 后端 serde 结构（如 `domain_pack_id` / `domain_pack_count`，源自 `#[serde(rename_all)]`），
@@ -196,9 +196,9 @@ export interface DomainDashboard {
   violations: RiskViolation[];
 }
 
-/** `opc_get_domain_pack_dashboard` 的响应信封 */
+/** `opc_get_capability_pack_dashboard` 的响应信封 */
 export interface DomainDashboardResponse {
-  domainPackId: string;
+  capabilityPackId: string;
   dashboard: DomainDashboard;
 }
 

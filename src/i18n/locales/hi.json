@@ -11723,14 +11723,17 @@
       "enabled": "सक्षम: {{value}}",
       "yes": "हाँ",
       "no": "नहीं",
-      "install": "इंस्टॉल करें",
-      "installSuccess": "इंस्टॉल हो गया: {{name}}",
-      "installFailed": "इंस्टॉल विफल: {{error}}",
+      "import": "आयात करें",
+      "importSuccess": "आयात किया गया: {{name}}",
+      "importFailed": "आयात विफल: {{error}}",
+      "export": ".opcip के रूप में निर्यात करें",
+      "exportSuccess": "निर्यात किया गया: {{name}}",
+      "exportFailed": "निर्यात विफल: {{error}}",
+      "exportDesktopOnly": "निर्यात केवल डेस्कटॉप पर उपलब्ध है",
       "domain": "डोमेन: {{domain}}",
-
       "domainUndefined": "घोषित नहीं",
-
       "capabilityCount": "क्षमता प्रतिबद्धताएं: {{count}}",
+      "capabilityListTitle": "विशिष्ट क्षमताएँ",
       "toggle": "सक्षम",
       "toggleSuccess": "सक्षम स्थिति अपडेट की गई: {{name}}",
       "toggleFailed": "सक्षम स्थिति टॉगल करने में विफल: {{error}}"

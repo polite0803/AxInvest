@@ -21,7 +21,7 @@ use axagent_dao::search_sources_impl::{
 use axagent_harness::AgentSessionRepository;
 use axagent_harness::PatternPromptGuard;
 use axagent_harness::feedback_data_lake::register_feedback_lake;
-use axagent_orchestrator::{DomainPackAdapterRegistry, DomainPackLearningEngine};
+use axagent_orchestrator::{CapabilityPackAdapterRegistry, CapabilityPackLearningEngine};
 use axagent_plugins::{PluginManager, PluginManagerConfig};
 use axagent_runtime_core::prompt_cache::PromptCache;
 use axagent_storage::cloud_storage::{CloudStorageConfig, SyncEngine};
@@ -1113,30 +1113,31 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // ── M1: 新子状态分解 — 学习引擎与工具创建器 ──
     // 初始化 OPC 域包适配器注册表（P0-1-A：域包驱动，替代 create_all_adapters 硬编码）
     // 先把仓库根 config/opc 增量同步到 app_dir（生产模式 CWD 非仓库根，
-    // resolve_domain_packs_dir 的仓库根 fallback 必然失败，app_dir 分支必须可用）
+    // resolve_capability_packs_dir 的仓库根 fallback 必然失败，app_dir 分支必须可用）
     crate::commands::opc_workflows::ensure_opc_config_synced(&app_dir);
-    let mut domain_pack_registry = DomainPackAdapterRegistry::new();
-    for adapter in crate::commands::opc_workflows::load_domain_pack_adapters(Some(&app_dir)) {
-        domain_pack_registry.register(adapter);
+    let mut capability_pack_registry = CapabilityPackAdapterRegistry::new();
+    for adapter in crate::commands::opc_workflows::load_capability_pack_adapters(Some(&app_dir)) {
+        capability_pack_registry.register(adapter);
     }
-    tracing::info!("[init] OPC 域包适配器注册完成: {} 个", domain_pack_registry.count());
-    let domain_pack_adapter_registry = Arc::new(Mutex::new(domain_pack_registry));
+    tracing::info!("[init] OPC 域包适配器注册完成: {} 个", capability_pack_registry.count());
+    let capability_pack_adapter_registry = Arc::new(Mutex::new(capability_pack_registry));
 
     // 初始化域包学习引擎（LLM 端口可选，未配置时使用规则回退；
     // RL 持久化存储已随 AxInvest 清理移除，使用内置内存存储）
     // 接线 OpcLlmBridge：域包学习（反思/进化/自我改进）从规则打分升级为真实 LLM 推理，
     // 失败自动回退规则评估（LlmInferencePort 契约），不阻塞域包工作流。
-    let domain_pack_learning_engine = Arc::new(DomainPackLearningEngine::new().with_llm_port(
-        Arc::new(crate::commands::opc_llm_bridge::OpcLlmBridge::new(harness.clone())),
-    ));
+    let capability_pack_learning_engine =
+        Arc::new(CapabilityPackLearningEngine::new().with_llm_port(Arc::new(
+            crate::commands::opc_llm_bridge::OpcLlmBridge::new(harness.clone()),
+        )));
 
     let learning_state = LearningEngineState::new(
         text_grad_engine.clone(),
         intrinsic_motivation.clone(),
         coevolution_env.clone(),
         process_reward_model.clone(),
-        domain_pack_learning_engine,
-        domain_pack_adapter_registry,
+        capability_pack_learning_engine,
+        capability_pack_adapter_registry,
     );
     let tool_state = ToolState::new(auto_tool_creator.clone());
 
@@ -1499,7 +1500,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 创作类 KPI（word_count/completion_rate/revision_rounds）只在工作流执行上下文
     // 里算得出来，此前无任何落库路径 ⇒ opc_kpi_records 恒空、仪表盘只能显示
     // 「未接数据源」。钩子注册后，模板须在 hooks_config.post_exec 中声明钩子名
-    // （见 `commands::constants::domain_pack::KPI_HOOK_NAME`）才会被调用。
+    // （见 `commands::constants::capability_pack::KPI_HOOK_NAME`）才会被调用。
     {
         crate::commands::opc_workflow_kpi_hook::register_opc_kpi_hooks(
             &work_engine,
@@ -2039,8 +2040,9 @@ async fn register_all_capabilities(
 
     // 期一·3 能力集封闭校验：护照收集 + 索引重建完成后，对全部启用域包做一次
     // 非阻塞审计（承诺 ⊆ 实际），base 目录用 app_dir（产线）或仓库根（开发）。
-    let base = axagent_analysis_engine::opc::domain_pack::resolve_domain_packs_dir(Some(app_dir));
-    audit_and_log_domain_packs_capability(indexer, &base).await;
+    let base =
+        axagent_analysis_engine::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
+    audit_and_log_capability_packs_capability(indexer, &base).await;
 
     // 5. 注册系统级能力（CognitiveRouter 编排器等）
     let system_passports = register_system_capabilities(indexer).await;
@@ -2067,27 +2069,28 @@ async fn register_all_capabilities(
 ///
 /// 非阻塞审计（破坏只 warning，不 panic、不改原流程）。三处调用点共用本函数保证日志口径一致：
 /// - 索引重建 `register_all_capabilities`（主装配点，持有 indexer + app_dir）；
-///   - `opc_import_domain_pack`（导入域包后全量对账）；
+///   - `opc_import_capability_pack`（导入域包后全量对账）；
 ///   - seed 路径不在此审计（seed 只种 workflow_templates，不新增护照，护照态由下次索引重建接管）。
 ///
 /// 日志口径：`!closed` → `warn!`（列出 missing 的来源/类型/谓词 + domain_proposals 的
 /// domain_id/suggestion）；`closed` → `info!` 一行「域包 {} 能力封闭校验通过（{} 项承诺）」。
-pub(crate) async fn audit_and_log_domain_packs_capability(
+pub(crate) async fn audit_and_log_capability_packs_capability(
     indexer: &axagent_tools::CapabilityIndexerImpl,
     base_dir: &std::path::Path,
 ) {
     use std::collections::HashMap;
 
-    let manifests = axagent_analysis_engine::opc::domain_pack::scan_domain_packs(base_dir);
+    let manifests = axagent_analysis_engine::opc::capability_pack::scan_capability_packs(base_dir);
     let claim_counts: HashMap<String, usize> = manifests
         .iter()
         .filter(|m| m.enabled)
         .map(|m| (m.id.clone(), m.capabilities.len()))
         .collect();
 
-    let reports =
-        axagent_analysis_engine::opc::domain_pack::audit_domain_packs_capability(indexer, base_dir)
-            .await;
+    let reports = axagent_analysis_engine::opc::capability_pack::audit_capability_packs_capability(
+        indexer, base_dir,
+    )
+    .await;
     for report in &reports {
         if !report.closed {
             let missing_detail = report

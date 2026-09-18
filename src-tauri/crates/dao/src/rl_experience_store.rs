@@ -7,7 +7,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sea_orm::*;
 
-use axagent_harness::rl::{RlDomainPackStats, RlExperienceRecord, RlExperienceStore};
+use axagent_harness::rl::{RlCapabilityPackStats, RlExperienceRecord, RlExperienceStore};
 
 use crate::repo::rl_experience::RlExperienceDao;
 
@@ -52,7 +52,7 @@ impl RlExperienceStore for RlExperienceStoreImpl {
     ) -> Result<Vec<RlExperienceRecord>, String> {
         let models = self
             .dao
-            .get_experiences_by_domain_pack(domain_pack_id, limit)
+            .get_experiences_by_capability_pack(domain_pack_id, limit)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -77,10 +77,13 @@ impl RlExperienceStore for RlExperienceStoreImpl {
     }
 
     async fn count_experiences(&self, domain_pack_id: &str) -> Result<u64, String> {
-        self.dao.count_experiences_by_domain_pack(domain_pack_id).await.map_err(|e| e.to_string())
+        self.dao
+            .count_experiences_by_capability_pack(domain_pack_id)
+            .await
+            .map_err(|e| e.to_string())
     }
 
-    async fn get_global_stats(&self) -> Result<Vec<RlDomainPackStats>, String> {
+    async fn get_global_stats(&self) -> Result<Vec<RlCapabilityPackStats>, String> {
         let models = self.dao.get_global_stats().await.map_err(|e| e.to_string())?;
 
         Ok(models
@@ -88,7 +91,7 @@ impl RlExperienceStore for RlExperienceStoreImpl {
             .map(|m| {
                 let goals: Vec<String> =
                     serde_json::from_str(&m.optimization_goals).unwrap_or_default();
-                RlDomainPackStats {
+                RlCapabilityPackStats {
                     domain_pack_id: m.domain_pack_id,
                     total_experiences: m.total_experiences,
                     total_reward: m.total_reward,
@@ -102,17 +105,17 @@ impl RlExperienceStore for RlExperienceStoreImpl {
             .collect())
     }
 
-    async fn get_domain_pack_stats(
+    async fn get_capability_pack_stats(
         &self,
         domain_pack_id: &str,
-    ) -> Result<Option<RlDomainPackStats>, String> {
+    ) -> Result<Option<RlCapabilityPackStats>, String> {
         let model =
-            self.dao.get_domain_pack_stats(domain_pack_id).await.map_err(|e| e.to_string())?;
+            self.dao.get_capability_pack_stats(domain_pack_id).await.map_err(|e| e.to_string())?;
 
         Ok(model.map(|m| {
             let goals: Vec<String> =
                 serde_json::from_str(&m.optimization_goals).unwrap_or_default();
-            RlDomainPackStats {
+            RlCapabilityPackStats {
                 domain_pack_id: m.domain_pack_id,
                 total_experiences: m.total_experiences,
                 total_reward: m.total_reward,
@@ -125,7 +128,7 @@ impl RlExperienceStore for RlExperienceStoreImpl {
         }))
     }
 
-    async fn upsert_stats(&self, stats: &RlDomainPackStats) -> Result<(), String> {
+    async fn upsert_stats(&self, stats: &RlCapabilityPackStats) -> Result<(), String> {
         let goals_str =
             serde_json::to_string(&stats.optimization_goals).unwrap_or_else(|_| "[]".to_string());
 
@@ -145,6 +148,9 @@ impl RlExperienceStore for RlExperienceStoreImpl {
     }
 
     async fn clear_experiences(&self, domain_pack_id: &str) -> Result<(), String> {
-        self.dao.clear_experiences_by_domain_pack(domain_pack_id).await.map_err(|e| e.to_string())
+        self.dao
+            .clear_experiences_by_capability_pack(domain_pack_id)
+            .await
+            .map_err(|e| e.to_string())
     }
 }

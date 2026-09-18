@@ -8,7 +8,7 @@
 //!
 //! 设计要点：
 //! - **无状态**：仅持 `RuntimeHarness`（Clone），域包无关，天然满足域包隔离原则。
-//! - **失败回退**：任何失败返回 `Err`，由 `DomainPackLearningEngine` 自动回退规则评估，
+//! - **失败回退**：任何失败返回 `Err`，由 `CapabilityPackLearningEngine` 自动回退规则评估，
 //!   不阻塞域包工作流。
 //! - **低配置起步**：`LlmCallConfig::default()`（缓存关闭），验证稳定后可开缓存。
 

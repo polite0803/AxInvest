@@ -11723,14 +11723,17 @@
       "enabled": "Включено: {{value}}",
       "yes": "Да",
       "no": "Нет",
-      "install": "Установить",
-      "installSuccess": "Установлено: {{name}}",
-      "installFailed": "Ошибка установки: {{error}}",
+      "import": "Импортировать",
+      "importSuccess": "Импортировано: {{name}}",
+      "importFailed": "Ошибка импорта: {{error}}",
+      "export": "Экспортировать в .opcip",
+      "exportSuccess": "Экспортировано: {{name}}",
+      "exportFailed": "Ошибка экспорта: {{error}}",
+      "exportDesktopOnly": "Экспорт доступен только на рабочем столе",
       "domain": "Область: {{domain}}",
-
       "domainUndefined": "Не объявлено",
-
       "capabilityCount": "Обязательства по возможностям: {{count}}",
+      "capabilityListTitle": "Конкретные возможности",
       "toggle": "Включено",
       "toggleSuccess": "Обновлён статус включения: {{name}}",
       "toggleFailed": "Не удалось переключить статус включения: {{error}}"

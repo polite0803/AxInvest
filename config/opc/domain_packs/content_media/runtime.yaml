@@ -9,6 +9,12 @@ validations:
     operator: not_empty
     value: null
     message: 文章标题不能为空
+  # 原硬编码 validate_content_media：article 标题同样不能为空（post 已在上方声明）
+  - entity_type: article
+    field: title
+    operator: not_empty
+    value: null
+    message: 内容标题不能为空
   - entity_type: post
     field: content
     operator: not_empty

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { invoke } from "@/lib/invoke";
+import { invoke, isTauri } from "@/lib/invoke";
 import { Button, Card, Col, message, Row, Space, Switch, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,6 +27,66 @@ export function MarketPackTab() {
     }
   }, []);
 
+  const handleExport = useCallback(
+    async (p: MarketPack) => {
+      if (!isTauri()) {
+        message.info(t("opc.market.exportDesktopOnly"));
+        return;
+      }
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const filePath = await save({
+        defaultPath: `${p.id}.opcip`,
+        filters: [{ name: "Capability Pack", extensions: ["opcip"] }],
+      });
+      if (!filePath) {
+        return;
+      }
+      try {
+        const outPath = await invoke<string>("opc_export_capability_pack", {
+          id: p.id,
+          outDir: filePath.replace(/[^/\\]+$/, ""),
+        });
+        message.success(`${t("opc.market.exportSuccess", { name: p.name })} —— ${outPath}`);
+      } catch (e) {
+        message.error(t("opc.market.exportFailed", { error: String(e) }));
+      }
+    },
+    [t],
+  );
+
+  // 导入能力包：弹文件选择对话框挑 .opcip 归档，交给后端解包安装/升级
+  const handleImport = useCallback(
+    async (packName?: string) => {
+      if (!isTauri()) {
+        message.info(t("opc.market.exportDesktopOnly"));
+        return;
+      }
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const chosen = await open({
+        filters: [{ name: "Capability Pack", extensions: ["opcip"] }],
+        multiple: false,
+      });
+      if (!chosen) {
+        return;
+      }
+      const filePath = Array.isArray(chosen) ? chosen[0] : chosen;
+      try {
+        const auditMsg = await invoke<string>("opc_import_capability_pack", {
+          archivePath: filePath,
+        });
+        message.success(
+          packName
+            ? `${t("opc.market.importSuccess", { name: packName })} —— ${auditMsg}`
+            : auditMsg,
+        );
+        refresh();
+      } catch (e) {
+        message.error(t("opc.market.importFailed", { error: String(e) }));
+      }
+    },
+    [t],
+  );
+
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -36,6 +96,9 @@ export function MarketPackTab() {
       <Space style={{ marginBottom: 12 }}>
         <Button size="small" type="primary" onClick={refresh} loading={loading}>
           {t("opc.market.refresh")}
+        </Button>
+        <Button size="small" onClick={() => handleImport()}>
+          {t("opc.market.import")}
         </Button>
         <Text type="secondary">{t("opc.market.subtitle")}</Text>
       </Space>
@@ -67,33 +130,41 @@ export function MarketPackTab() {
                     count: p.capabilityCount ?? 0,
                   })}
                 </div>
+                {p.capabilities && p.capabilities.length > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t("opc.market.capabilityListTitle")}
+                    </Text>
+                    <Space size={[4, 4]} wrap style={{ marginTop: 4 }}>
+                      {p.capabilities.map((c) => (
+                        <Tag key={c} style={{ fontSize: 11 }}>
+                          {c.replace(/^(tool:|workflow:|skill:|agent:|mcp:)/, "")}
+                        </Tag>
+                      ))}
+                    </Space>
+                  </div>
+                )}
               </div>
               <Space style={{ marginTop: 8 }} wrap>
                 <Button
                   size="small"
                   type={p.installed ? "default" : "primary"}
-                  disabled={p.installed}
-                  onClick={async () => {
-                    try {
-                      const auditMsg = await invoke<string>("opc_import_domain_pack", { archivePath: p.path });
-                      message.success(
-                        `${t("opc.market.installSuccess", { name: p.name })} —— ${auditMsg}`,
-                      );
-                      refresh();
-                    } catch (e) {
-                      message.error(t("opc.market.installFailed", { error: String(e) }));
-                    }
-                  }}
+                  onClick={() => handleImport(p.name)}
                 >
-                  {t("opc.market.install")}
+                  {t("opc.market.import")}
                 </Button>
+                {p.installed && (
+                  <Button size="small" onClick={() => handleExport(p)}>
+                    {t("opc.market.export")}
+                  </Button>
+                )}
                 <Space size={4}>
                   <Switch
                     size="small"
                     checked={p.enabled}
                     onChange={async (checked) => {
                       try {
-                        await invoke("opc_set_domain_pack_enabled", { packId: p.id, enabled: checked });
+                        await invoke("opc_set_capability_pack_enabled", { packId: p.id, enabled: checked });
                         message.success(t("opc.market.toggleSuccess", { name: p.name }));
                         refresh();
                       } catch (e) {

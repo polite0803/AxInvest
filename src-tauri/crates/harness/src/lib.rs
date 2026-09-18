@@ -926,16 +926,16 @@ pub use device_sync::{
 };
 
 // ── 域包编排契约（让 analysis-engine 等 consumer 不依赖 orchestrator） ──
-pub mod domain_pack_orchestration;
-pub use domain_pack_orchestration::{
-    AcceptanceCriterion, AcceptanceResult, AutoReflectTrigger, AutoTriggerConfig, CriterionResult,
-    DecompositionPlan, DependencyType, DomainPackAdapter, DomainPackAdapterRegistry,
-    DomainPackContext, DomainPackLearningConfig, DynamicSubGraph, EvolutionConstraints,
-    ForbiddenOptimization, GeneratedSubGraph, MissionType, OrchestrationError,
-    OrchestrationStrategy, PresetWorkflowStep, ProtectedStep, QualityThresholds, QualityWeights,
-    ReflectionCheckpoint, ReflectionTemplate, ReinforcementLearningConfig, RewardWeightConfig,
-    SelfImprovementConfig, SkillEvolverConfig, StepDependency, SubTask, SubTaskStatus,
-    WorkflowEvolverConfig,
+pub mod capability_pack_orchestration;
+pub use capability_pack_orchestration::{
+    AcceptanceCriterion, AcceptanceResult, AutoReflectTrigger, AutoTriggerConfig,
+    CapabilityPackAdapter, CapabilityPackAdapterRegistry, CapabilityPackContext,
+    CapabilityPackLearningConfig, CriterionResult, DecompositionPlan, DependencyType,
+    DynamicSubGraph, EvolutionConstraints, ForbiddenOptimization, GeneratedSubGraph, MissionType,
+    OrchestrationError, OrchestrationStrategy, PresetWorkflowStep, ProtectedStep,
+    QualityThresholds, QualityWeights, ReflectionCheckpoint, ReflectionTemplate,
+    ReinforcementLearningConfig, RewardWeightConfig, SelfImprovementConfig, SkillEvolverConfig,
+    StepDependency, SubTask, SubTaskStatus, WorkflowEvolverConfig,
 };
 
 // ── 协议层：强类型 Schema 系统（刚性协议 + 柔性节点架构核心）──

@@ -24,9 +24,10 @@ use axagent_analysis_engine::opc::{
     UpdateCustomerInput, UpdateInvoiceInput, UpdateProjectInput, UpdatePublishScheduleInput,
 };
 
-use axagent_analysis_engine::opc::domain_pack::{
-    DOMAIN_PACKS_DIR, DomainPackManifest, export_domain_pack, import_domain_pack,
-    list_domain_pack_enabled_map, resolve_domain_packs_dir, set_domain_pack_enabled,
+use axagent_analysis_engine::opc::capability_pack::{
+    CAPABILITY_PACKS_DIR, CapabilityMatchPredicate, CapabilityPackManifest, export_capability_pack,
+    import_capability_pack, list_capability_pack_enabled_map, resolve_capability_packs_dir,
+    set_capability_pack_enabled,
 };
 
 /// 记录 OPC 操作轨迹到 trajectory 系统供学习
@@ -546,8 +547,8 @@ pub async fn opc_list_kpis(
     let svc = DefaultAnalyticsService::new(state.harness.db().clone());
     // 走**显式跨域包**读（`list_kpis_all` 而非 `list_kpis`）：本命令不带域包参数，
     // 语义就是「全部 KPI 记录」（与它在 `register_commands.rs` 里的注册名一致）。
-    // 域包范围内的读取走域包链路（`opc_get_domain_pack_dashboard` →
-    // `domain_pack_kpi_service::compute_kpis` → `OpcDataService::latest_kpi`）。
+    // 域包范围内的读取走域包链路（`opc_get_capability_pack_dashboard` →
+    // `capability_pack_kpi_service::compute_kpis` → `OpcDataService::latest_kpi`）。
     // 每行返回值都带 `domain_pack_id`，调用方自行分组即可，不必让它去猜一个域包。
     svc.list_kpis_all(period, limit).await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
@@ -582,7 +583,7 @@ pub async fn opc_get_dashboard_summary(
     // 走**显式跨域包**总览：本命令的唯一调用方是前端 `OpcPage` 的 dashboard 页签
     // （`src/pages/opc/components/DashboardTab.tsx`，组件不接收域包参数），
     // 语义上就是「所有域包的概览」。域包范围内的摘要走
-    // `opc_get_domain_pack_dashboard`。用两个显式命名的函数而不是
+    // `opc_get_capability_pack_dashboard`。用两个显式命名的函数而不是
     // `Option<domain_pack_id>` 一个函数混两用：后者会让「忘传 = 跨域包」成为默认行为。
     svc.get_dashboard_summary_overview().await.map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
@@ -631,39 +632,40 @@ pub async fn opc_get_investment_advice(
 /// out_dir 为前端选择的保存目录（通过对话框）。
 #[agent_command(domain = "automation", safety = Safe, call_mode = StateInput, description = "导出域包")]
 #[tauri::command]
-pub async fn opc_export_domain_pack(
+pub async fn opc_export_capability_pack(
     state: State<'_, AppState>,
     id: String,
     out_dir: String,
 ) -> Result<String, String> {
     // 包源：app_dir/config/opc/domain_packs（生产）或仓库根（开发）
     let app_dir = &state.app_data_dir;
-    let base = resolve_domain_packs_dir(Some(app_dir));
+    let base = resolve_capability_packs_dir(Some(app_dir));
     let out_path = std::path::PathBuf::from(&out_dir);
-    export_domain_pack(&base, &id, &out_path).await
+    export_capability_pack(&base, &id, &out_path).await
 }
 
 /// 导入 .opcip 域包：解包到 app_dir/config/opc/domain_packs/ 并注册 seed。
 /// archive_path 为前端选择的 .opcip 文件路径。
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "导入域包")]
 #[tauri::command]
-pub async fn opc_import_domain_pack(
+pub async fn opc_import_capability_pack(
     state: State<'_, AppState>,
     archive_path: String,
 ) -> Result<String, String> {
     let app_dir = &state.app_data_dir;
     let archive = std::path::PathBuf::from(&archive_path);
-    let result = import_domain_pack(&state.harness.db().clone(), app_dir, &archive).await;
+    let result = import_capability_pack(&state.harness.db().clone(), app_dir, &archive).await;
     let id = match result {
         Ok(id) => id,
         Err(e) => return Err(e),
     };
     // 期一·3 能力封闭校验：导入成功后全量对账一次（非阻塞审计，坏只 warning）。
     // 期一·4：把刚导入域包的审计摘要（missing / domain_proposals）随成功信息带回前端展示。
-    let base = axagent_analysis_engine::opc::domain_pack::resolve_domain_packs_dir(Some(app_dir));
-    crate::init::state::audit_and_log_domain_packs_capability(&state.capability_indexer, &base)
+    let base =
+        axagent_analysis_engine::opc::capability_pack::resolve_capability_packs_dir(Some(app_dir));
+    crate::init::state::audit_and_log_capability_packs_capability(&state.capability_indexer, &base)
         .await;
-    let reports = axagent_analysis_engine::opc::domain_pack::audit_domain_packs_capability(
+    let reports = axagent_analysis_engine::opc::capability_pack::audit_capability_packs_capability(
         &*state.capability_indexer,
         &base,
     )
@@ -697,17 +699,17 @@ pub async fn opc_import_domain_pack(
     Ok(format!("{id}：能力闭合校验通过"))
 }
 
-/// 启用/停用域包 —— 写 DB `opc_domain_packs.enabled`（权威存储，重启后生效）。
+/// 启用/停用域包 —— 写 DB `opc_capability_packs.enabled`（权威存储，重启后生效）。
 /// pack_id 为域包 id（manifest.id）；enabled 为布尔开关。
 #[agent_command(domain = "automation", safety = Caution, call_mode = StateInput, description = "启用停用域包")]
 #[tauri::command]
-pub async fn opc_set_domain_pack_enabled(
+pub async fn opc_set_capability_pack_enabled(
     state: State<'_, AppState>,
     pack_id: String,
     enabled: bool,
 ) -> Result<(), String> {
     let db = state.harness.db();
-    set_domain_pack_enabled(db, &pack_id, enabled).await
+    set_capability_pack_enabled(db, &pack_id, enabled).await
 }
 
 // ── Company Runtime：看板投影 + 阻塞升级链（P3-3/4）──────────────
@@ -1209,13 +1211,13 @@ fn parse_frontmatter_brief(content: &str, fallback_stem: &str) -> (String, Strin
 #[tauri::command]
 pub async fn opc_market_list(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let app_dir = &state.app_data_dir;
-    let builtin = resolve_domain_packs_dir(Some(app_dir));
-    let installed_root = app_dir.join(DOMAIN_PACKS_DIR);
+    let builtin = resolve_capability_packs_dir(Some(app_dir));
+    let installed_root = app_dir.join(CAPABILITY_PACKS_DIR);
 
-    // P1-5：用户手动启用/停用状态以 DB `opc_domain_packs.enabled` 为准（manifest 仅首装生效）。
+    // P1-5：用户手动启用/停用状态以 DB `opc_capability_packs.enabled` 为准（manifest 仅首装生效）。
     // 故已注册包取 DB 值，未注册（未 seed）的包退回 manifest 默认。
-    // DB 访问下沉到 analysis-engine（list_domain_pack_enabled_map），不在 command 层直连 entity。
-    let db_enabled = list_domain_pack_enabled_map(state.harness.db()).await.unwrap_or_default();
+    // DB 访问下沉到 analysis-engine（list_capability_pack_enabled_map），不在 command 层直连 entity。
+    let db_enabled = list_capability_pack_enabled_map(state.harness.db()).await.unwrap_or_default();
 
     let mut items = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&builtin) {
@@ -1226,7 +1228,7 @@ pub async fn opc_market_list(state: State<'_, AppState>) -> Result<serde_json::V
             }
             let manifest_path = dir.join("manifest.yaml");
             let Ok(raw) = std::fs::read_to_string(&manifest_path) else { continue };
-            let Ok(manifest) = serde_yaml::from_str::<DomainPackManifest>(&raw) else {
+            let Ok(manifest) = serde_yaml::from_str::<CapabilityPackManifest>(&raw) else {
                 continue;
             };
             let installed = installed_root.join(&manifest.id).is_dir();
@@ -1239,8 +1241,25 @@ pub async fn opc_market_list(state: State<'_, AppState>) -> Result<serde_json::V
                 "installed": installed,
                 "path": dir.display().to_string(),
                 // 期一·4：卡片展示归属本体域 + 能力承诺数
-                "domain": manifest.domain.as_ref().map(|d| d.as_str().to_string()),
+                // domain 缺失（旧 manifest）回退默认本体域 Automation，保证 UI 恒有值
+                "domain": manifest
+                    .domain
+                    .as_ref()
+                    .map(|d| d.as_str().to_string())
+                    .unwrap_or_else(|| axagent_harness::CapabilityDomain::Automation.as_str().to_string()),
                 "capabilityCount": manifest.capabilities.len(),
+                // 期一·5：卡片展示具体承诺能力（predicate 解析出的可读 id 列表）
+                "capabilities": manifest
+                    .capabilities
+                    .iter()
+                    .filter_map(|c| match &c.predicate {
+                        CapabilityMatchPredicate::IdExact { id } => Some(id.clone()),
+                        CapabilityMatchPredicate::IdPrefix { prefix } => {
+                            Some(format!("id_prefix:{prefix}"))
+                        },
+                        CapabilityMatchPredicate::All => None,
+                    })
+                    .collect::<Vec<String>>(),
             }));
         }
     }

@@ -14,8 +14,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::domain_pack_adapters::types::DomainPackContext;
-use crate::token_budget::DomainPackTokenBudgetManager;
+use crate::capability_pack_adapters::types::CapabilityPackContext;
+use crate::token_budget::CapabilityPackTokenBudgetManager;
 
 /// 域包任务上下文状态
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,11 +42,11 @@ pub enum TaskContextState {
 /// - 执行状态跟踪
 /// - 资源隔离
 #[derive(Debug)]
-pub struct DomainPackTaskContext {
+pub struct CapabilityPackTaskContext {
     /// 域包 ID
     domain_pack_id: String,
     /// 域包上下文信息
-    context: DomainPackContext,
+    context: CapabilityPackContext,
     /// 上下文状态
     state: RwLock<TaskContextState>,
     /// 执行计数器
@@ -56,17 +56,17 @@ pub struct DomainPackTaskContext {
     /// 域包特定扩展数据
     extensions: RwLock<HashMap<String, serde_json::Value>>,
     /// Token 预算管理器引用
-    token_budget: Arc<DomainPackTokenBudgetManager>,
+    token_budget: Arc<CapabilityPackTokenBudgetManager>,
     /// 是否启用隔离模式
     isolation_enabled: bool,
 }
 
-impl DomainPackTaskContext {
+impl CapabilityPackTaskContext {
     /// 创建域包任务上下文
     pub fn new(
         domain_pack_id: &str,
-        context: DomainPackContext,
-        token_budget: Arc<DomainPackTokenBudgetManager>,
+        context: CapabilityPackContext,
+        token_budget: Arc<CapabilityPackTokenBudgetManager>,
     ) -> Self {
         Self {
             domain_pack_id: domain_pack_id.to_string(),
@@ -86,7 +86,7 @@ impl DomainPackTaskContext {
     }
 
     /// 获取域包上下文
-    pub fn context(&self) -> &DomainPackContext {
+    pub fn context(&self) -> &CapabilityPackContext {
         &self.context
     }
 
@@ -174,16 +174,16 @@ impl DomainPackTaskContext {
     }
 
     /// 获取 Token 预算管理器
-    pub fn token_budget(&self) -> &Arc<DomainPackTokenBudgetManager> {
+    pub fn token_budget(&self) -> &Arc<CapabilityPackTokenBudgetManager> {
         &self.token_budget
     }
 
     /// 校验域包匹配（用于隔离检查）
-    pub fn check_domain_pack_match(&self, required_domain_pack: &str) -> bool {
+    pub fn check_capability_pack_match(&self, required_capability_pack: &str) -> bool {
         if !self.isolation_enabled {
             return true; // 隔离关闭时允许跨域包访问
         }
-        self.domain_pack_id == required_domain_pack
+        self.domain_pack_id == required_capability_pack
     }
 
     /// 生成上下文摘要
@@ -216,16 +216,16 @@ pub struct TaskContextSummary {
 /// - 批量状态查询
 /// - 隔离检查
 #[derive(Debug, Default)]
-pub struct DomainPackContextManager {
+pub struct CapabilityPackContextManager {
     /// 所有域包上下文
-    contexts: RwLock<HashMap<String, Arc<DomainPackTaskContext>>>,
+    contexts: RwLock<HashMap<String, Arc<CapabilityPackTaskContext>>>,
     /// Token 预算管理器
-    token_budget: Arc<DomainPackTokenBudgetManager>,
+    token_budget: Arc<CapabilityPackTokenBudgetManager>,
 }
 
-impl DomainPackContextManager {
+impl CapabilityPackContextManager {
     /// 创建新的上下文管理器
-    pub fn new(token_budget: Arc<DomainPackTokenBudgetManager>) -> Self {
+    pub fn new(token_budget: Arc<CapabilityPackTokenBudgetManager>) -> Self {
         Self { contexts: RwLock::new(HashMap::new()), token_budget }
     }
 
@@ -233,9 +233,9 @@ impl DomainPackContextManager {
     pub async fn register(
         &self,
         domain_pack_id: &str,
-        context: DomainPackContext,
-    ) -> Arc<DomainPackTaskContext> {
-        let task_context = Arc::new(DomainPackTaskContext::new(
+        context: CapabilityPackContext,
+    ) -> Arc<CapabilityPackTaskContext> {
+        let task_context = Arc::new(CapabilityPackTaskContext::new(
             domain_pack_id,
             context,
             self.token_budget.clone(),
@@ -248,7 +248,7 @@ impl DomainPackContextManager {
     }
 
     /// 获取域包上下文
-    pub async fn get(&self, domain_pack_id: &str) -> Option<Arc<DomainPackTaskContext>> {
+    pub async fn get(&self, domain_pack_id: &str) -> Option<Arc<CapabilityPackTaskContext>> {
         let contexts = self.contexts.read().await;
         contexts.get(domain_pack_id).cloned()
     }
@@ -278,21 +278,25 @@ impl DomainPackContextManager {
     }
 
     /// 检查跨域包访问是否允许
-    pub async fn check_access(&self, source_domain_pack: &str, target_domain_pack: &str) -> bool {
-        if source_domain_pack == target_domain_pack {
+    pub async fn check_access(
+        &self,
+        source_capability_pack: &str,
+        target_capability_pack: &str,
+    ) -> bool {
+        if source_capability_pack == target_capability_pack {
             return true; // 同域包直接允许
         }
 
         // 查找目标上下文
-        if let Some(ctx) = self.get(target_domain_pack).await {
-            ctx.check_domain_pack_match(source_domain_pack)
+        if let Some(ctx) = self.get(target_capability_pack).await {
+            ctx.check_capability_pack_match(source_capability_pack)
         } else {
             false // 目标域包不存在，拒绝访问
         }
     }
 
     /// 获取 Token 预算管理器
-    pub fn token_budget(&self) -> &Arc<DomainPackTokenBudgetManager> {
+    pub fn token_budget(&self) -> &Arc<CapabilityPackTokenBudgetManager> {
         &self.token_budget
     }
 
@@ -307,12 +311,12 @@ impl DomainPackContextManager {
 mod tests {
     use super::*;
 
-    fn create_test_context(domain_pack_id: &str) -> DomainPackContext {
-        DomainPackContext {
+    fn create_test_context(domain_pack_id: &str) -> CapabilityPackContext {
+        CapabilityPackContext {
             session_id: Some(format!("session-{}", domain_pack_id)),
             user_id: Some("test-user".to_string()),
             workspace_id: Some("test-workspace".to_string()),
-            inputs: serde_json::json!({"domain_pack": domain_pack_id}),
+            inputs: serde_json::json!({"capability_pack": domain_pack_id}),
             history: vec![],
             knowledge_ids: vec![],
             metadata: serde_json::Value::Null,
@@ -321,8 +325,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_task_context() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let ctx = DomainPackTaskContext::new(
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let ctx = CapabilityPackTaskContext::new(
             "test-domain-pack",
             create_test_context("test-domain-pack"),
             token_budget,
@@ -335,8 +339,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_begin_execution() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let ctx = CapabilityPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         assert!(ctx.begin_execution().await.is_ok());
         assert_eq!(ctx.state().await, TaskContextState::Running);
@@ -345,8 +349,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_complete_execution() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let ctx = CapabilityPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         ctx.begin_execution().await.unwrap();
         ctx.complete_execution(true).await;
@@ -356,21 +360,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_isolation_check() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let ctx = DomainPackTaskContext::new(
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let ctx = CapabilityPackTaskContext::new(
             "domain-pack-a",
             create_test_context("domain-pack-a"),
             token_budget,
         );
 
-        assert!(ctx.check_domain_pack_match("domain-pack-a"));
-        assert!(!ctx.check_domain_pack_match("domain-pack-b"));
+        assert!(ctx.check_capability_pack_match("domain-pack-a"));
+        assert!(!ctx.check_capability_pack_match("domain-pack-b"));
     }
 
     #[tokio::test]
     async fn test_extensions() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let ctx = CapabilityPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         ctx.set_extension("key1", serde_json::json!("value1")).await;
         let val = ctx.get_extension("key1").await;
@@ -385,8 +389,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_manager() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let manager = DomainPackContextManager::new(token_budget);
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let manager = CapabilityPackContextManager::new(token_budget);
 
         manager.register("domain-pack-1", create_test_context("domain-pack-1")).await;
         manager.register("domain-pack-2", create_test_context("domain-pack-2")).await;
@@ -399,9 +403,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cross_domain_pack_access() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let manager = DomainPackContextManager::new(token_budget);
+    async fn test_cross_capability_pack_access() {
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let manager = CapabilityPackContextManager::new(token_budget);
 
         manager.register("domain-pack-1", create_test_context("domain-pack-1")).await;
         manager.register("domain-pack-2", create_test_context("domain-pack-2")).await;
@@ -413,8 +417,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_summary() {
-        let token_budget = Arc::new(DomainPackTokenBudgetManager::new());
-        let ctx = DomainPackTaskContext::new("test", create_test_context("test"), token_budget);
+        let token_budget = Arc::new(CapabilityPackTokenBudgetManager::new());
+        let ctx = CapabilityPackTaskContext::new("test", create_test_context("test"), token_budget);
 
         ctx.begin_execution().await.unwrap();
         ctx.set_extension("test-key", serde_json::json!(42)).await;

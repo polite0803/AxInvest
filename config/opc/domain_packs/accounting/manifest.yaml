@@ -23,3 +23,6 @@ capabilities:
   - source: tool
     capability_type: opc_tool
     predicate: {kind: id_exact, id: "tool:OpcRecordKpi"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcTransitionInvoice"}

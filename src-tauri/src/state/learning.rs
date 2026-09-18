@@ -4,13 +4,13 @@
 //! text-grad optimization, intrinsic motivation, co-evolution, and
 //! process reward modeling.
 //!
-//! Also owns the domain_pack-specific learning engine and adapter registry
-//! for OPC (One-Person Company) vertical domain_pack scenarios.
+//! Also owns the capability_pack-specific learning engine and adapter registry
+//! for OPC (One-Person Company) vertical capability_pack scenarios.
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use axagent_orchestrator::{DomainPackAdapterRegistry, DomainPackLearningEngine};
+use axagent_orchestrator::{CapabilityPackAdapterRegistry, CapabilityPackLearningEngine};
 
 #[derive(Clone)]
 pub struct LearningEngineState {
@@ -19,9 +19,9 @@ pub struct LearningEngineState {
     pub coevolution_env: Arc<Mutex<axagent_trajectory::CoevolutionEnvironment>>,
     pub process_reward_model: Arc<Mutex<axagent_trajectory::ProcessRewardModel>>,
     /// OPC 域包学习引擎 — 实现反思、进化、自我改进
-    pub domain_pack_learning_engine: Arc<DomainPackLearningEngine>,
+    pub capability_pack_learning_engine: Arc<CapabilityPackLearningEngine>,
     /// OPC 域包适配器注册表 — 管理 9 个垂直域包的适配器
-    pub domain_pack_adapter_registry: Arc<Mutex<DomainPackAdapterRegistry>>,
+    pub capability_pack_adapter_registry: Arc<Mutex<CapabilityPackAdapterRegistry>>,
 }
 
 impl LearningEngineState {
@@ -30,16 +30,16 @@ impl LearningEngineState {
         intrinsic_motivation: Arc<Mutex<axagent_trajectory::IntrinsicMotivationEngine>>,
         coevolution_env: Arc<Mutex<axagent_trajectory::CoevolutionEnvironment>>,
         process_reward_model: Arc<Mutex<axagent_trajectory::ProcessRewardModel>>,
-        domain_pack_learning_engine: Arc<DomainPackLearningEngine>,
-        domain_pack_adapter_registry: Arc<Mutex<DomainPackAdapterRegistry>>,
+        capability_pack_learning_engine: Arc<CapabilityPackLearningEngine>,
+        capability_pack_adapter_registry: Arc<Mutex<CapabilityPackAdapterRegistry>>,
     ) -> Self {
         Self {
             text_grad_engine,
             intrinsic_motivation,
             coevolution_env,
             process_reward_model,
-            domain_pack_learning_engine,
-            domain_pack_adapter_registry,
+            capability_pack_learning_engine,
+            capability_pack_adapter_registry,
         }
     }
 }

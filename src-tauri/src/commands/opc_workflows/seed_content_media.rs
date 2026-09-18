@@ -13,7 +13,7 @@ use axagent_harness::capability::Visibility;
 use axagent_harness::workflow_types::*;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-use crate::commands::constants::domain_pack::KPI_HOOK_NAME;
+use crate::commands::constants::capability_pack::KPI_HOOK_NAME;
 
 /// 旧 3 模板版本号（保持 v2，不影响已有用户配置）
 const LEGACY_TEMPLATE_VERSION: i32 = 3;
@@ -193,7 +193,7 @@ pub async fn seed_content_media_workflows(
             // `total_word_count` 档位**已删除**（该值是 LLM 自报，留着即伪造数据），
             // 后者的成品字数改由 `lc-extract-fulltext` 的 `char_count` 提供真值。
             //
-            // 钩子名不写字面量，取 `constants::domain_pack::KPI_HOOK_NAME`（唯一载体，见
+            // 钩子名不写字面量，取 `constants::capability_pack::KPI_HOOK_NAME`（唯一载体，见
             // `literary_hooks_config`）；启动期注册在 `register_opc_kpi_hooks`。
             // 引擎侧消费：`parse_hooks_config` → `run_post_exec_hooks`（按 post_exec 名单
             // 查注册表，未注册 warn 跳过，钩子失败不阻断 —— 即 fail-open，故「钩子名对不上」

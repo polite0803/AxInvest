@@ -23,11 +23,11 @@ const { Title, Text, Paragraph } = Typography;
 function DomainTabContent({
   tab,
   data,
-  domainPackId,
+  capabilityPackId,
 }: {
   tab: DomainTab;
   data: UseDomainDataReturn;
-  domainPackId: string;
+  capabilityPackId: string;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -46,7 +46,7 @@ function DomainTabContent({
 
     if (action?.type === "workflow") {
       const templateId = action.template_id || actionKey;
-      navigate(`/workflow/new?domain=${domainPackId}&template=${templateId}`);
+      navigate(`/workflow/new?domain=${capabilityPackId}&template=${templateId}`);
       return;
     }
 
@@ -57,9 +57,9 @@ function DomainTabContent({
         userPrompt: string;
         actionKey: string;
         actionLabel: string;
-        domainPackId: string;
-      }>("opc_build_domain_pack_prompt", {
-        domainPackId,
+        capabilityPackId: string;
+      }>("opc_build_capability_pack_prompt", {
+        capabilityPackId,
         actionKey,
       });
 
@@ -81,7 +81,7 @@ function DomainTabContent({
         settings.defaultModel.a,
         {
           systemPrompt:
-            `你是一位专业的${domainPackId}领域助手，擅长${actionLabel}相关的分析和咨询。请根据用户需求提供高质量的分析和建议。`,
+            `你是一位专业的${capabilityPackId}领域助手，擅长${actionLabel}相关的分析和咨询。请根据用户需求提供高质量的分析和建议。`,
         },
       );
       if (conv?.id) {
@@ -233,14 +233,14 @@ function DomainTabContent({
  * 行业 Tab 布局主组件
  */
 export function DomainTabLayout({
-  domainPackId,
+  capabilityPackId,
   config,
 }: {
-  domainPackId: string;
+  capabilityPackId: string;
   config: DomainConfig;
 }) {
   const { t } = useTranslation();
-  const data = useDomainData(domainPackId);
+  const data = useDomainData(capabilityPackId);
   const [activeTab, setActiveTab] = useState<string | undefined>(
     config.tabs?.[0]?.key,
   );
@@ -281,7 +281,7 @@ export function DomainTabLayout({
         {tab.label}
       </span>
     ),
-    children: <DomainTabContent tab={tab} data={data} domainPackId={domainPackId} />,
+    children: <DomainTabContent tab={tab} data={data} capabilityPackId={capabilityPackId} />,
   }));
 
   return (

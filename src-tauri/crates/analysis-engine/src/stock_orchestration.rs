@@ -3,7 +3,7 @@
 //! 股票域包编排模块
 //!
 //! 为股票业务场景提供基于 Orchestrator 的动态编排能力，包括：
-//! - 股票域包适配器 (StockDomainPackAdapter)
+//! - 股票域包适配器 (StockCapabilityPackAdapter)
 //! - 分析流水线编排策略 (Pipeline)
 //! - 多空辩论编排策略 (Debate)
 //! - 股票领域特定的反思模板、进化约束和验收标准
@@ -26,12 +26,12 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use axagent_harness::{
-    domain_pack_orchestration::types::{
+    capability_pack_orchestration::types::{
         AcceptanceCriterion, DependencyType, EvolutionConstraints, ForbiddenOptimization,
         ProtectedStep, QualityThresholds, QualityWeights, ReflectionCheckpoint, ReflectionTemplate,
         StepDependency,
     },
-    DecompositionPlan, DomainPackAdapter, DomainPackContext, DomainPackLearningConfig,
+    CapabilityPackAdapter, CapabilityPackContext, CapabilityPackLearningConfig, DecompositionPlan,
     DynamicSubGraph, GeneratedSubGraph, MissionType, OrchestrationError, OrchestrationStrategy,
     SubTask,
 };
@@ -44,21 +44,21 @@ use axagent_harness::{
 /// - 全链路投资分析流水线
 /// - 多空辩论决策机制
 /// - 领域特定的反思和进化配置
-pub struct StockDomainPackAdapter {
+pub struct StockCapabilityPackAdapter {
     domain_pack_id: String,
-    domain_pack_name: String,
+    capability_pack_name: String,
     reflection_template: ReflectionTemplate,
     evolution_constraints: EvolutionConstraints,
     acceptance_criteria: Vec<AcceptanceCriterion>,
-    learning_config: DomainPackLearningConfig,
+    learning_config: CapabilityPackLearningConfig,
 }
 
-impl StockDomainPackAdapter {
+impl StockCapabilityPackAdapter {
     /// 创建股票域包适配器
     pub fn new() -> Self {
         Self {
             domain_pack_id: "stock-invest".to_string(),
-            domain_pack_name: "股票投资分析".to_string(),
+            capability_pack_name: "股票投资分析".to_string(),
             reflection_template: Self::stock_reflection_template(),
             evolution_constraints: Self::stock_evolution_constraints(),
             acceptance_criteria: Self::stock_acceptance_criteria(),
@@ -226,8 +226,8 @@ impl StockDomainPackAdapter {
     }
 
     /// 股票学习配置
-    fn stock_learning_config() -> DomainPackLearningConfig {
-        DomainPackLearningConfig::default()
+    fn stock_learning_config() -> CapabilityPackLearningConfig {
+        CapabilityPackLearningConfig::default()
     }
 
     /// 检测股票分析任务类型
@@ -383,26 +383,26 @@ impl StockDomainPackAdapter {
     }
 }
 
-impl Default for StockDomainPackAdapter {
+impl Default for StockCapabilityPackAdapter {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl DomainPackAdapter for StockDomainPackAdapter {
+impl CapabilityPackAdapter for StockCapabilityPackAdapter {
     fn domain_pack_id(&self) -> &str {
         &self.domain_pack_id
     }
 
-    fn domain_pack_name(&self) -> &str {
-        &self.domain_pack_name
+    fn capability_pack_name(&self) -> &str {
+        &self.capability_pack_name
     }
 
     async fn decompose_mission(
         &self,
         mission: &str,
-        _context: &DomainPackContext,
+        _context: &CapabilityPackContext,
     ) -> Result<GeneratedSubGraph, OrchestrationError> {
         let strategy = self.select_strategy(mission);
 
@@ -428,7 +428,7 @@ impl DomainPackAdapter for StockDomainPackAdapter {
         &self.acceptance_criteria
     }
 
-    fn learning_config(&self) -> &DomainPackLearningConfig {
+    fn learning_config(&self) -> &CapabilityPackLearningConfig {
         &self.learning_config
     }
 }
@@ -436,13 +436,13 @@ impl DomainPackAdapter for StockDomainPackAdapter {
 // ── 工厂函数 ───────────────────────────────────────────────────
 
 /// 创建股票域包适配器
-pub fn create_stock_domain_pack_adapter() -> Arc<dyn DomainPackAdapter> {
-    Arc::new(StockDomainPackAdapter::new())
+pub fn create_stock_capability_pack_adapter() -> Arc<dyn CapabilityPackAdapter> {
+    Arc::new(StockCapabilityPackAdapter::new())
 }
 
 /// 注册股票适配器到注册表
-pub fn register_stock_adapter(registry: &mut axagent_harness::DomainPackAdapterRegistry) {
-    registry.register(create_stock_domain_pack_adapter());
+pub fn register_stock_adapter(registry: &mut axagent_harness::CapabilityPackAdapterRegistry) {
+    registry.register(create_stock_capability_pack_adapter());
 }
 
 // ── 测试 ────────────────────────────────────────────────────────
@@ -453,43 +453,43 @@ mod tests {
 
     #[test]
     fn adapter_has_correct_id() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         assert_eq!(adapter.domain_pack_id(), "stock-invest");
-        assert_eq!(adapter.domain_pack_name(), "股票投资分析");
+        assert_eq!(adapter.capability_pack_name(), "股票投资分析");
     }
 
     #[test]
     fn detects_research_mission() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         let mission_type = adapter.detect_mission_type("请分析贵州茅台的投资价值");
         assert_eq!(mission_type, MissionType::Research);
     }
 
     #[test]
     fn detects_planning_mission() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         let mission_type = adapter.detect_mission_type("给出买入或卖出建议");
         assert_eq!(mission_type, MissionType::Planning);
     }
 
     #[test]
     fn selects_debate_strategy() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         let strategy = adapter.select_strategy("对贵州茅台进行多空辩论");
         assert_eq!(strategy, OrchestrationStrategy::Debate);
     }
 
     #[test]
     fn selects_pipeline_strategy() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         let strategy = adapter.select_strategy("分析比亚迪的基本面");
         assert_eq!(strategy, OrchestrationStrategy::Pipeline);
     }
 
     #[tokio::test]
     async fn decomposes_into_pipeline() {
-        let adapter = StockDomainPackAdapter::new();
-        let context = DomainPackContext::default();
+        let adapter = StockCapabilityPackAdapter::new();
+        let context = CapabilityPackContext::default();
         let result = adapter.decompose_mission("分析宁德时代的技术面和基本面", &context).await;
 
         assert!(result.is_ok(), "Pipeline 分解应成功");
@@ -499,8 +499,8 @@ mod tests {
 
     #[tokio::test]
     async fn decomposes_into_debate() {
-        let adapter = StockDomainPackAdapter::new();
-        let context = DomainPackContext::default();
+        let adapter = StockCapabilityPackAdapter::new();
+        let context = CapabilityPackContext::default();
         let result = adapter.decompose_mission("对招商银行进行多空辩论分析", &context).await;
 
         assert!(result.is_ok(), "Debate 分解应成功");
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn has_protected_steps() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         let constraints = adapter.evolution_constraints();
 
         assert_eq!(constraints.protected_steps.len(), 3);
@@ -520,7 +520,7 @@ mod tests {
 
     #[test]
     fn has_acceptance_criteria() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         let criteria = adapter.acceptance_criteria();
 
         assert_eq!(criteria.len(), 4);
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn has_reflection_checkpoints() {
-        let adapter = StockDomainPackAdapter::new();
+        let adapter = StockCapabilityPackAdapter::new();
         let template = adapter.reflection_template();
 
         assert_eq!(template.checkpoints.len(), 3);

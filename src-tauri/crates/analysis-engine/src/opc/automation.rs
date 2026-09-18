@@ -143,7 +143,7 @@ pub enum AutomationAction {
 
 /// 域包自动化规则
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DomainPackAutomationRule {
+pub struct CapabilityPackAutomationRule {
     pub id: String,
     pub name: String,
     pub conditions: Vec<AutomationCondition>,
@@ -151,7 +151,7 @@ pub struct DomainPackAutomationRule {
     pub enabled: bool,
 }
 
-impl DomainPackAutomationRule {
+impl CapabilityPackAutomationRule {
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,

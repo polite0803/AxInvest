@@ -24,7 +24,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/terminal": "nav.terminal",
   "/invest": "nav.financeInvestment",
   "/opc": "nav.automationOperations",
-  // 域包页（/opc/domain/:id）— 顶栏标签与页面大标题（DomainPackHub domainTitle）保持一致
+  // 能力包页（/opc/domain/:id）— 顶栏标签与页面大标题（CapabilityPackHub domainTitle）保持一致
   "/opc/domain/finance-invest": "opc.domains.finance_invest",
   "/opc/domain/accounting": "opc.domains.accounting",
   "/opc/domain/sales-growth": "opc.domains.sales_growth",

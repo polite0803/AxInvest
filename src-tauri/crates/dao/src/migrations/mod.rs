@@ -528,7 +528,7 @@ pub async fn repair_schema(db: &sea_orm::DatabaseConnection) -> Result<SchemaRep
 /// ⚠️ AxInvest fork 分歧点（upstream merge 时必须保留，勿被上游版本覆盖）：
 /// 上游 AxAgent 的同名函数只含 9 个通用值，因为上游没有 OPC/荐股业务；
 /// AxInvest 的 opc_setup 种子（opc_setup/mod.rs seed_opc_experts 等）与
-/// stock profile 会写入 `opc-company`/`opc-experts`/`opc-domain_pack`/
+/// stock profile 会写入 `opc-company`/`opc-experts`/`opc-capability_pack`/
 /// `opc-domain`/`stock-analysis`，v200 PHASE 3 与 v223 自愈迁移的约束
 /// 列表也包含这些值。2026-08-18 后某次上游合并把本函数覆盖回 9 值版，
 /// 导致 ADD CONSTRAINT 被存量 opc-* 行顶回（EXPERT_READ_DIR_FAILED 同期
@@ -545,7 +545,7 @@ pub async fn ensure_category_check_constraints(
     let backend = db.get_database_backend();
     let categories = "'general','development','security','data','finance',\
         'devops','design','writing','business',\
-        'opc-company','opc-experts','opc-domain_pack','opc-domain','stock-analysis'";
+        'opc-company','opc-experts','opc-domain_pack','opc-capability_pack','opc-domain','stock-analysis'";
 
     // 防护：先校验存量数据再动约束。若先 DROP 后 ADD 失败，表会落得
     // 「无任何 category 约束」的裸奔状态（2026-09-06 实测发生过）。

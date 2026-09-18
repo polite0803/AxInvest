@@ -13,11 +13,11 @@ use axagent_harness::self_improving_loop::{
 use super::data_service::OpcDataService;
 use super::error::OpcResult;
 
-// ── OpcDomainPackDecision ────────────────────────────────────────
+// ── OpcCapabilityPackDecision ────────────────────────────────────────
 
 /// 域包分析决策
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpcDomainPackDecision {
+pub struct OpcCapabilityPackDecision {
     pub domain_pack_id: String,
     pub decision_type: DecisionType,
     pub summary: String,
@@ -66,7 +66,7 @@ pub enum RiskLevel {
 /// **为什么必须按域包限定**：`completion_rate` 在多个域包中同名
 /// （content_media / security / project_management / design / geospatial /
 /// game_dev / software_dev），裸键名匹配会**跨域包误伤**。形态照抄
-/// `domain_pack_kpi_service::KPI_SOURCE_REGISTRY`：新增域包只加一行，不改分支逻辑。
+/// `capability_pack_kpi_service::KPI_SOURCE_REGISTRY`：新增域包只加一行，不改分支逻辑。
 ///
 /// **为什么 5 个受管键刻意不声明阈值**（阈值必须可举证，宁缺勿造；未声明 ⇒ 不参与
 /// 判定，仅 `warn` 留痕）：
@@ -75,7 +75,7 @@ pub enum RiskLevel {
 ///   「本月还没发内容」判成违规（假报）；
 /// - `conversion_rate`：`ContactConversionRate` = 联系数 / 浏览数 × 100，取值域随业务
 ///   量浮动，代码内没有任何权威下限/上限可引；
-/// - `content_engagement`：恒 `NoDataSource`（`domain_pack_kpi_service.rs` 的
+/// - `content_engagement`：恒 `NoDataSource`（`capability_pack_kpi_service.rs` 的
 ///   `CONTENT_MEDIA_KPI_SOURCES`），声明阈值也永远不会生效 —— 留着只会制造
 ///   「配了却没跑」的错觉；
 /// - `revision_rounds`：产出被代码限死为 {0, 1}，任何界限都无依据（详见 runtime.yaml）。
@@ -171,7 +171,7 @@ impl OpcRiskGate {
     /// 受管却整段不生效的配置必须可观测，否则又是一处静默口。
     ///
     /// 一次构造**只打一行**（列出全部未声明键）：门控在仪表盘路径上按请求构造
-    /// （见 `commands::opc_domain_pack_runtime::get_dashboard`），7 键里 5 键默认无阈值，
+    /// （见 `commands::opc_capability_pack_runtime::get_dashboard`），7 键里 5 键默认无阈值，
     /// 逐键各打一行会把一次面板刷新变成 5 行日志。
     fn warn_undeclared_scoped_keys(&self) {
         let undeclared: Vec<&str> = risk_scoped_kpi_keys(&self.domain_pack_id)
@@ -183,7 +183,7 @@ impl OpcRiskGate {
             return;
         }
         tracing::warn!(
-            domain_pack = %self.domain_pack_id,
+            capability_pack = %self.domain_pack_id,
             kpis = ?undeclared,
             "[opc-risk-gate] 这些 KPI 属于本域包受管键集，但 runtime.yaml 未声明 risk 阈值 \
              ⇒ 本次不参与风控（未声明 = 不启用）"
@@ -204,7 +204,7 @@ impl OpcRiskGate {
 
         for kpi in kpis {
             // 前置守卫（对**全部**规则统一生效）：只有 `Available` 才是真实值。
-            // `Empty` / `NoDataSource` 下 `value` 是占位 0.0（见 `domain_pack_kpi_service`
+            // `Empty` / `NoDataSource` 下 `value` 是占位 0.0（见 `capability_pack_kpi_service`
             // 的 `resolve_kpi_value`），据此判定等于把「工作流还没跑过」判成
             // 「字数 0 < 下限」= 伪造数据。
             if kpi.availability != KpiAvailability::Available {
@@ -319,16 +319,16 @@ pub struct RiskViolation {
     pub message: String,
 }
 
-// ── OpcDomainPackAnalysisRound ────────────────────────────────────
+// ── OpcCapabilityPackAnalysisRound ────────────────────────────────────
 
 /// 域包分析回合（实现 SelfImprovingRound trait）
-pub struct OpcDomainPackAnalysisRound {
+pub struct OpcCapabilityPackAnalysisRound {
     domain_pack_id: String,
     data_service: Arc<dyn OpcDataService>,
     risk_gate: OpcRiskGate,
 }
 
-impl OpcDomainPackAnalysisRound {
+impl OpcCapabilityPackAnalysisRound {
     /// 仅通用风控规则生效（不注入域包声明阈值）。
     pub fn new(domain_pack_id: String, data_service: Arc<dyn OpcDataService>) -> Self {
         Self::with_declared_thresholds(domain_pack_id, data_service, Vec::new())
@@ -337,7 +337,7 @@ impl OpcDomainPackAnalysisRound {
     /// 注入域包 `runtime.yaml` 声明的风控阈值。
     ///
     /// 阈值不可能由本 crate 自行取得：`analysis-engine` 不读 YAML，也不持有域包
-    /// 目录 —— 由命令层解析后传入（见 `commands::opc_domain_pack_runtime`）。
+    /// 目录 —— 由命令层解析后传入（见 `commands::opc_capability_pack_runtime`）。
     pub fn with_declared_thresholds(
         domain_pack_id: String,
         data_service: Arc<dyn OpcDataService>,
@@ -351,8 +351,8 @@ impl OpcDomainPackAnalysisRound {
     pub async fn analyze(
         &self,
         time_range: &super::data_service::TimeRange,
-    ) -> OpcResult<OpcDomainPackDecision> {
-        let kpis = super::domain_pack_kpi_service::compute_kpis(
+    ) -> OpcResult<OpcCapabilityPackDecision> {
+        let kpis = super::capability_pack_kpi_service::compute_kpis(
             &self.domain_pack_id,
             &self.data_service,
             time_range,
@@ -365,7 +365,7 @@ impl OpcDomainPackAnalysisRound {
         let risk_level = risk_check.risk_level.clone();
         let confidence = self.calculate_confidence(&kpis);
 
-        Ok(OpcDomainPackDecision {
+        Ok(OpcCapabilityPackDecision {
             domain_pack_id: self.domain_pack_id.clone(),
             decision_type: DecisionType::PerformanceReview,
             summary: self.generate_summary(&kpis, &risk_check),
@@ -450,7 +450,7 @@ fn kpi_value_display(kpi: &super::analytics::KpiValue) -> String {
 }
 
 #[async_trait]
-impl SelfImprovingRound for OpcDomainPackAnalysisRound {
+impl SelfImprovingRound for OpcCapabilityPackAnalysisRound {
     async fn execute_round(
         &mut self,
         _task: &str,
@@ -717,7 +717,7 @@ mod tests {
     }
 
     /// **防跨域包误伤回归**：`completion_rate` 在多个域包中同名，且**语义不同** ——
-    /// `compute_software_dev_kpis`（`domain_pack_kpi_service.rs:96-140`）也产出
+    /// `compute_software_dev_kpis`（`capability_pack_kpi_service.rs:96-140`）也产出
     /// `completion_rate`，但它是 `completed / total × 100` 的项目完成比例（真值、
     /// `Available`），与 content_media 的「章节完成率」不是一回事。若守卫来自裸键名，
     /// software_dev 的 40% 会被 content_media 的 `min = 100` 判成违规。

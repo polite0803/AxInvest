@@ -42,28 +42,28 @@ interface DomainLearningState {
   rlLoading: boolean;
 
   /** 加载指定行业的学习配置 */
-  loadConfig: (domainPackId: string) => Promise<DomainLearningConfig | null>;
+  loadConfig: (capabilityPackId: string) => Promise<DomainLearningConfig | null>;
   /** 加载所有行业学习配置列表 */
   loadAllConfigs: () => Promise<void>;
   /** 从缓存获取配置 */
-  getConfig: (domainPackId: string) => DomainLearningConfig | undefined;
+  getConfig: (capabilityPackId: string) => DomainLearningConfig | undefined;
   /** 清除缓存 */
   clearCache: () => void;
 
   /** 获取指定行业的 RL 经验池统计 */
-  loadRLStats: (domainPackId?: string) => Promise<ExperiencePoolStats | null>;
+  loadRLStats: (capabilityPackId?: string) => Promise<ExperiencePoolStats | null>;
   /** 记录 RL 经验 */
   recordExperience: (params: {
-    domainPackId: string;
+    capabilityPackId: string;
     workflowId: string;
     qualityScore: number;
     workflowResult: Record<string, unknown>;
   }) => Promise<boolean>;
   /** 触发 RL 策略优化 */
-  triggerOptimization: (domainPackId: string) => Promise<RLPolicyUpdate | null>;
+  triggerOptimization: (capabilityPackId: string) => Promise<RLPolicyUpdate | null>;
   /** 触发自动学习闭环 */
   triggerAutoLearning: (params: {
-    domainPackId: string;
+    capabilityPackId: string;
     workflowId: string;
     workflowResult: Record<string, unknown>;
   }) => Promise<AutoLearningResult | null>;
@@ -87,18 +87,18 @@ export const useDomainLearningStore = create<DomainLearningState>(
     autoLearningHistory: [],
     rlLoading: false,
 
-    loadConfig: async (domainPackId: string) => {
+    loadConfig: async (capabilityPackId: string) => {
       const state = get();
-      const cached = state.configs.get(domainPackId);
+      const cached = state.configs.get(capabilityPackId);
       if (cached && state.lastLoadedAt && Date.now() - state.lastLoadedAt < CACHE_TTL_MS) {
         return cached;
       }
 
       set({ loading: true, error: null });
       try {
-        const config = await getLearningConfig(domainPackId);
+        const config = await getLearningConfig(capabilityPackId);
         const newConfigs = new Map(state.configs);
-        newConfigs.set(domainPackId, config);
+        newConfigs.set(capabilityPackId, config);
         set({ configs: newConfigs, loading: false, lastLoadedAt: Date.now() });
         return config;
       } catch (e) {
@@ -117,8 +117,8 @@ export const useDomainLearningStore = create<DomainLearningState>(
       }
     },
 
-    getConfig: (domainPackId: string) => {
-      return get().configs.get(domainPackId);
+    getConfig: (capabilityPackId: string) => {
+      return get().configs.get(capabilityPackId);
     },
 
     clearCache: () => {
@@ -132,13 +132,13 @@ export const useDomainLearningStore = create<DomainLearningState>(
       });
     },
 
-    loadRLStats: async (domainPackId?: string) => {
+    loadRLStats: async (capabilityPackId?: string) => {
       set({ rlLoading: true });
       try {
-        const stats = await getRLStats(domainPackId);
-        if (domainPackId) {
+        const stats = await getRLStats(capabilityPackId);
+        if (capabilityPackId) {
           const newStats = new Map(get().rlStats);
-          newStats.set(domainPackId, stats);
+          newStats.set(capabilityPackId, stats);
           set({ rlStats: newStats, rlLoading: false });
         } else {
           set({ rlGlobalStats: stats, rlLoading: false });
@@ -151,7 +151,7 @@ export const useDomainLearningStore = create<DomainLearningState>(
     },
 
     recordExperience: async (params: {
-      domainPackId: string;
+      capabilityPackId: string;
       workflowId: string;
       qualityScore: number;
       workflowResult: Record<string, unknown>;
@@ -167,12 +167,12 @@ export const useDomainLearningStore = create<DomainLearningState>(
       }
     },
 
-    triggerOptimization: async (domainPackId: string) => {
+    triggerOptimization: async (capabilityPackId: string) => {
       set({ rlLoading: true });
       try {
-        const update = await triggerRLOptimization({ domainPackId });
+        const update = await triggerRLOptimization({ capabilityPackId });
         const newUpdates = new Map(get().rlPolicyUpdates);
-        newUpdates.set(domainPackId, update);
+        newUpdates.set(capabilityPackId, update);
         set({ rlPolicyUpdates: newUpdates, rlLoading: false });
         return update;
       } catch (e) {

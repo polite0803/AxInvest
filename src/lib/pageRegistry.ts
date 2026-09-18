@@ -34,7 +34,7 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   // ── AxInvest 本地业务页（2026-09-01 上游合并时路由被覆盖，09-06 按能力域恢复） ──
   "finance-investment": "/invest",
   "automation-operations": "/opc",
-  // 域包页（DomainPages.tsx 固定组件，路径 /opc/domain/:packId；
+  // 能力包页（DomainPages.tsx 固定组件，路径 /opc/domain/:packId；
   // 2026-09-15 由 /opc/industry/:packId 迁移而来，旧链在 ContentArea 里重定向）
   "finance-analysis": "/opc/domain/finance-invest",
   "finance-accounting": "/opc/domain/accounting",

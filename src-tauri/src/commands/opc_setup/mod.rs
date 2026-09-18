@@ -12,10 +12,10 @@ use axagent_dao::repo::agent_role;
 use axagent_entities::{agency_experts, agent_profiles};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 
+mod capability_pack_agents;
+mod capability_pack_experts;
 mod domain_agents;
 mod domain_experts;
-mod domain_pack_agents;
-mod domain_pack_experts;
 mod roles;
 pub mod seed_opc_cron;
 mod seed_opc_workflow_template;
@@ -195,8 +195,8 @@ pub async fn ensure_opc_company_seeded(db: &DatabaseConnection) -> Result<(), St
     seed_bulk_expert_profiles(db).await?;
 
     // 4. 域包专属 agent（ai-research + 12 个新域包）
-    domain_pack_agents::seed_ai_research_agents(db).await?;
-    domain_pack_agents::seed_all_domain_pack_agents(db).await?;
+    capability_pack_agents::seed_ai_research_agents(db).await?;
+    capability_pack_agents::seed_all_capability_pack_agents(db).await?;
 
     // 5. 领域专属 agent（17 个领域，72 个专家）
     domain_agents::seed_all_domain_agents(db).await?;

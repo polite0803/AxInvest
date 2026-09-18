@@ -3402,9 +3402,9 @@ pub(crate) async fn persist_attachments_registers_stored_files_for_files_page() 
             Arc::new(tokio::sync::Mutex::new(
                 axagent_trajectory::ProcessRewardModel::default().with_default_provider("general"),
             )),
-            Arc::new(axagent_orchestrator::DomainPackLearningEngine::new()),
+            Arc::new(axagent_orchestrator::CapabilityPackLearningEngine::new()),
             Arc::new(tokio::sync::Mutex::new(
-                axagent_orchestrator::DomainPackAdapterRegistry::new(),
+                axagent_orchestrator::CapabilityPackAdapterRegistry::new(),
             )),
         ),
         tool: crate::state::ToolState::new(Arc::new(tokio::sync::Mutex::new(

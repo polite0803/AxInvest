@@ -1442,15 +1442,18 @@ pub async fn agent_query(
         }
         info!("[agent] Added {} stock analysis tools to chat_tools", stock_tool_count);
 
-        let opc_tools = crate::commands::opc_domain_pack_bridge::build_opc_domain_pack_chat_tools();
+        let opc_tools =
+            crate::commands::opc_capability_pack_bridge::build_opc_capability_pack_chat_tools();
         let opc_tool_count = opc_tools.len();
         chat_tools.extend(opc_tools);
         let opc_handlers =
-            crate::commands::opc_domain_pack_bridge::build_opc_domain_pack_handlers(app.clone());
+            crate::commands::opc_capability_pack_bridge::build_opc_capability_pack_handlers(
+                app.clone(),
+            );
         for (tool_name, handler) in opc_handlers {
             tool_registry.register_skill_tool(tool_name, handler);
         }
-        info!("[agent] Added {} OPC domain_pack tools to chat_tools", opc_tool_count);
+        info!("[agent] Added {} OPC capability_pack tools to chat_tools", opc_tool_count);
     } else {
         info!("[agent] execution_mode={:?} — 跳过 Tauri 命令桥接工具", request.execution_mode);
     }

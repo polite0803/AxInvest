@@ -1133,7 +1133,7 @@ pub struct CapabilityPassportDto {
     pub source: CapabilitySource,
     /// 归属域包（domain_pack_id）反向指针：能力由哪个域包提供。
     ///
-    /// 仅域包立案能力（如 `{domain_pack}_harness_workflow`）填充；非域包能力为 None。
+    /// 仅域包立案能力（如 `{capability_pack}_harness_workflow`）填充；非域包能力为 None。
     /// 供「能力集封闭」校验器与域包视角检索使用。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub domain_pack_id: Option<String>,

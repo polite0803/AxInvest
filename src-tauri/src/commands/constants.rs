@@ -8,5 +8,5 @@
 //! 此处仅 re-export（禁止重复定义，见 AGENTS.md 禁区 12）。
 //! 调用方路径 `crate::commands::constants::role::<X>` 保持不变。
 
-pub use axagent_harness::constants::domain_pack;
+pub use axagent_harness::constants::capability_pack;
 pub use axagent_harness::constants::role;

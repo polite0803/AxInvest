@@ -729,7 +729,7 @@ pub const FUNCTIONS: &[FunctionDecl] = &[FunctionDecl {
 // 口径说明：迁移里与之相关的 DDL 共 8 条，但它们是**同 3 个约束的历代替换**：
 //   v100:460/470（建表内联，11 值）
 //     → v200:409/425（ALTER 替换，14 值，含 opc-industry）
-//     → crates/dao/src/migrations/mod.rs:582/598（ALTER 替换，14 值，含 opc-domain_pack）
+//     → crates/dao/src/migrations/mod.rs:582/598（ALTER 替换，14 值，含 opc-capability_pack）
 // 生产库实测正是 3 个约束（`agency_experts_category_check` /
 // `agent_profiles_category_check` / `ck_opc_kpi_period_format`），与去重结果一致。
 // 若照 8 条 DDL 录入，会产生 3 条重复声明 + 1 条同名互斥分支（v230 的 NOT VALID 版）。
@@ -744,13 +744,13 @@ pub const CHECK_CONSTRAINTS: &[CheckDecl] = &[
     CheckDecl {
         table: "agency_experts",
         name: "agency_experts_category_check",
-        expr: "category = ANY (ARRAY['general','development','security','data','finance','devops','design','writing','business','opc-company','opc-experts','opc-domain_pack','opc-domain','stock-analysis'])",
+        expr: "category = ANY (ARRAY['general','development','security','data','finance','devops','design','writing','business','opc-company','opc-experts','opc-domain_pack','opc-capability_pack','opc-domain','stock-analysis'])",
         dialect: Some(Dialect::Postgres),
     },
     CheckDecl {
         table: "agent_profiles",
         name: "agent_profiles_category_check",
-        expr: "category = ANY (ARRAY['general','development','security','data','finance','devops','design','writing','business','opc-company','opc-experts','opc-domain_pack','opc-domain','stock-analysis'])",
+        expr: "category = ANY (ARRAY['general','development','security','data','finance','devops','design','writing','business','opc-company','opc-experts','opc-domain_pack','opc-capability_pack','opc-domain','stock-analysis'])",
         dialect: Some(Dialect::Postgres),
     },
     CheckDecl {

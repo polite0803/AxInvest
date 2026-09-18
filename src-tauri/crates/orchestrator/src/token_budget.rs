@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 
 /// 域包 Token 预算配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DomainPackTokenConfig {
+pub struct CapabilityPackTokenConfig {
     /// 上下文窗口大小（token 数）
     #[serde(default = "default_context_window")]
     pub context_window: u32,
@@ -30,7 +30,7 @@ pub struct DomainPackTokenConfig {
     #[serde(default = "default_max_history_messages")]
     pub max_history_messages: usize,
     /// 域包名称
-    pub domain_pack_name: String,
+    pub capability_pack_name: String,
 }
 
 fn default_context_window() -> u32 {
@@ -49,14 +49,14 @@ fn default_max_history_messages() -> usize {
     20
 }
 
-impl Default for DomainPackTokenConfig {
+impl Default for CapabilityPackTokenConfig {
     fn default() -> Self {
         Self {
             context_window: default_context_window(),
             compact_threshold_pct: default_compact_threshold(),
             dry_leaf_threshold_pct: default_dry_leaf_threshold(),
             max_history_messages: default_max_history_messages(),
-            domain_pack_name: "通用".to_string(),
+            capability_pack_name: "通用".to_string(),
         }
     }
 }
@@ -128,22 +128,22 @@ pub enum BudgetDecision {
 /// - 上下文压缩：当 token 用量接近阈值时自动压缩
 /// - 干叶分离：将历史消息转为摘要存储
 #[derive(Debug)]
-pub struct DomainPackTokenBudgetManager {
+pub struct CapabilityPackTokenBudgetManager {
     /// 各域包配置
-    configs: Arc<Mutex<HashMap<String, DomainPackTokenConfig>>>,
+    configs: Arc<Mutex<HashMap<String, CapabilityPackTokenConfig>>>,
     /// 各域包/会话的 token 使用历史
     usage_history: Arc<Mutex<HashMap<String, Vec<TokenUsageSnapshot>>>>,
     /// 各域包的干叶缓存
     dry_leaves: Arc<Mutex<HashMap<String, Vec<DryLeafEntry>>>>,
 }
 
-impl Default for DomainPackTokenBudgetManager {
+impl Default for CapabilityPackTokenBudgetManager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl DomainPackTokenBudgetManager {
+impl CapabilityPackTokenBudgetManager {
     /// 创建新的预算管理器
     pub fn new() -> Self {
         Self {
@@ -154,13 +154,17 @@ impl DomainPackTokenBudgetManager {
     }
 
     /// 注册域包配置
-    pub async fn register_domain_pack(&self, domain_pack_id: &str, config: DomainPackTokenConfig) {
+    pub async fn register_capability_pack(
+        &self,
+        domain_pack_id: &str,
+        config: CapabilityPackTokenConfig,
+    ) {
         let mut configs = self.configs.lock().await;
         configs.insert(domain_pack_id.to_string(), config);
     }
 
     /// 获取域包配置
-    pub async fn get_config(&self, domain_pack_id: &str) -> DomainPackTokenConfig {
+    pub async fn get_config(&self, domain_pack_id: &str) -> CapabilityPackTokenConfig {
         let configs = self.configs.lock().await;
         configs.get(domain_pack_id).cloned().unwrap_or_default()
     }
@@ -263,8 +267,8 @@ impl DomainPackTokenBudgetManager {
             };
 
             let mut dry_leaves = self.dry_leaves.lock().await;
-            let domain_pack_leaves = dry_leaves.entry(domain_pack_id.to_string()).or_default();
-            domain_pack_leaves.push(leaf);
+            let capability_pack_leaves = dry_leaves.entry(domain_pack_id.to_string()).or_default();
+            capability_pack_leaves.push(leaf);
         }
 
         // 保留最近的消息
@@ -333,8 +337,8 @@ impl DomainPackTokenBudgetManager {
 
         // 保存干叶
         let mut dry_leaves = self.dry_leaves.lock().await;
-        let domain_pack_leaves = dry_leaves.entry(domain_pack_id.to_string()).or_default();
-        domain_pack_leaves.extend(new_leaves.clone());
+        let capability_pack_leaves = dry_leaves.entry(domain_pack_id.to_string()).or_default();
+        capability_pack_leaves.extend(new_leaves.clone());
 
         (active_messages, new_leaves)
     }
@@ -347,14 +351,14 @@ impl DomainPackTokenBudgetManager {
         limit: usize,
     ) -> Vec<DryLeafEntry> {
         let dry_leaves = self.dry_leaves.lock().await;
-        let domain_pack_leaves = match dry_leaves.get(domain_pack_id) {
+        let capability_pack_leaves = match dry_leaves.get(domain_pack_id) {
             Some(leaves) => leaves,
             None => return Vec::new(),
         };
 
         // 简单关键词匹配
         let query_lower = query.to_lowercase();
-        let mut scored_leaves: Vec<(&DryLeafEntry, usize)> = domain_pack_leaves
+        let mut scored_leaves: Vec<(&DryLeafEntry, usize)> = capability_pack_leaves
             .iter()
             .map(|leaf| {
                 let score = leaf
@@ -378,7 +382,10 @@ impl DomainPackTokenBudgetManager {
     }
 
     /// 获取域包统计信息
-    pub async fn get_domain_pack_stats(&self, domain_pack_id: &str) -> DomainPackTokenStats {
+    pub async fn get_capability_pack_stats(
+        &self,
+        domain_pack_id: &str,
+    ) -> CapabilityPackTokenStats {
         let usage_history = self.usage_history.lock().await;
         let dry_leaves = self.dry_leaves.lock().await;
 
@@ -388,13 +395,13 @@ impl DomainPackTokenBudgetManager {
             .map(|s| s.total_tokens)
             .sum();
 
-        let domain_pack_leaves = dry_leaves.get(domain_pack_id).cloned().unwrap_or_default();
-        let total_saved: u32 = domain_pack_leaves.iter().map(|l| l.saved_tokens).sum();
+        let capability_pack_leaves = dry_leaves.get(domain_pack_id).cloned().unwrap_or_default();
+        let total_saved: u32 = capability_pack_leaves.iter().map(|l| l.saved_tokens).sum();
 
-        DomainPackTokenStats {
+        CapabilityPackTokenStats {
             domain_pack_id: domain_pack_id.to_string(),
             total_usage,
-            dry_leaf_count: domain_pack_leaves.len() as u32,
+            dry_leaf_count: capability_pack_leaves.len() as u32,
             total_saved,
         }
     }
@@ -412,7 +419,7 @@ impl DomainPackTokenBudgetManager {
 
 /// 域包 Token 统计
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DomainPackTokenStats {
+pub struct CapabilityPackTokenStats {
     pub domain_pack_id: String,
     pub total_usage: u32,
     pub dry_leaf_count: u32,
@@ -450,13 +457,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_register_domain_pack() {
-        let manager = DomainPackTokenBudgetManager::new();
+    async fn test_register_capability_pack() {
+        let manager = CapabilityPackTokenBudgetManager::new();
         manager
-            .register_domain_pack(
+            .register_capability_pack(
                 "test-domain-pack",
-                DomainPackTokenConfig {
-                    domain_pack_name: "测试域包".to_string(),
+                CapabilityPackTokenConfig {
+                    capability_pack_name: "测试域包".to_string(),
                     context_window: 100_000,
                     ..Default::default()
                 },
@@ -464,17 +471,17 @@ mod tests {
             .await;
 
         let config = manager.get_config("test-domain-pack").await;
-        assert_eq!(config.domain_pack_name, "测试域包");
+        assert_eq!(config.capability_pack_name, "测试域包");
         assert_eq!(config.context_window, 100_000);
     }
 
     #[tokio::test]
     async fn test_evaluate_budget_proceed() {
-        let manager = DomainPackTokenBudgetManager::new();
+        let manager = CapabilityPackTokenBudgetManager::new();
         manager
-            .register_domain_pack(
+            .register_capability_pack(
                 "test",
-                DomainPackTokenConfig {
+                CapabilityPackTokenConfig {
                     context_window: 100_000,
                     compact_threshold_pct: 80,
                     dry_leaf_threshold_pct: 60,
@@ -489,11 +496,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_evaluate_budget_compact_recommended() {
-        let manager = DomainPackTokenBudgetManager::new();
+        let manager = CapabilityPackTokenBudgetManager::new();
         manager
-            .register_domain_pack(
+            .register_capability_pack(
                 "test",
-                DomainPackTokenConfig {
+                CapabilityPackTokenConfig {
                     context_window: 100_000,
                     compact_threshold_pct: 80,
                     dry_leaf_threshold_pct: 60,
@@ -508,11 +515,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_evaluate_budget_compact_required() {
-        let manager = DomainPackTokenBudgetManager::new();
+        let manager = CapabilityPackTokenBudgetManager::new();
         manager
-            .register_domain_pack(
+            .register_capability_pack(
                 "test",
-                DomainPackTokenConfig {
+                CapabilityPackTokenConfig {
                     context_window: 100_000,
                     compact_threshold_pct: 80,
                     dry_leaf_threshold_pct: 60,
@@ -527,11 +534,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_compact_context() {
-        let manager = DomainPackTokenBudgetManager::new();
+        let manager = CapabilityPackTokenBudgetManager::new();
         manager
-            .register_domain_pack(
+            .register_capability_pack(
                 "test",
-                DomainPackTokenConfig {
+                CapabilityPackTokenConfig {
                     context_window: 100_000,
                     max_history_messages: 3,
                     ..Default::default()
@@ -557,11 +564,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_dry_leaf_separation() {
-        let manager = DomainPackTokenBudgetManager::new();
+        let manager = CapabilityPackTokenBudgetManager::new();
         manager
-            .register_domain_pack(
+            .register_capability_pack(
                 "test",
-                DomainPackTokenConfig {
+                CapabilityPackTokenConfig {
                     context_window: 2_000,     // 较小的上下文窗口便于测试
                     dry_leaf_threshold_pct: 1, // 极低阈值以便测试
                     ..Default::default()
@@ -591,11 +598,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_retrieve_dry_leaves() {
-        let manager = DomainPackTokenBudgetManager::new();
+        let manager = CapabilityPackTokenBudgetManager::new();
         manager
-            .register_domain_pack(
+            .register_capability_pack(
                 "test",
-                DomainPackTokenConfig {
+                CapabilityPackTokenConfig {
                     context_window: 100,       // 非常小的上下文窗口便于测试
                     dry_leaf_threshold_pct: 1, // 极低阈值以便测试
                     ..Default::default()
@@ -640,13 +647,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_domain_pack_stats() {
-        let manager = DomainPackTokenBudgetManager::new();
-        manager.register_domain_pack("test", DomainPackTokenConfig::default()).await;
+    async fn test_get_capability_pack_stats() {
+        let manager = CapabilityPackTokenBudgetManager::new();
+        manager.register_capability_pack("test", CapabilityPackTokenConfig::default()).await;
 
         manager.record_usage("test", "session-1", 1000, 500).await;
 
-        let stats = manager.get_domain_pack_stats("test").await;
+        let stats = manager.get_capability_pack_stats("test").await;
         assert_eq!(stats.domain_pack_id, "test");
         assert!(stats.total_usage > 0);
     }

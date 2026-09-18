@@ -26,3 +26,9 @@ capabilities:
   - source: tool
     capability_type: opc_tool
     predicate: {kind: id_exact, id: "tool:OpcListLandingPages"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcListContacts"}
+  - source: tool
+    capability_type: opc_tool
+    predicate: {kind: id_exact, id: "tool:OpcSendNotification"}

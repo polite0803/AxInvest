@@ -683,9 +683,10 @@ mod tests {
     #[test]
     fn hook_timeout_kills_stuck_process() {
         #[cfg(windows)]
-        // 用 %SystemRoot% 绝对路径，避免不同 shell 环境下 cmd 子进程的 PATH 查不到
-        // `ping` 导致 hook 立即失败而非挂起 —— 那样拿不到 timed_out，超时测试会失效。
-        let stuck_cmd = "%SystemRoot%\\System32\\PING.EXE -n 60 127.0.0.1 >nul";
+        // 用硬编码绝对路径：本地回环挂起命令不依赖 PATH / %SystemRoot%（hook 子进程
+        // 的环境变量可能极简，裸 `ping` 或 `%SystemRoot%` 路径都会因解析失败而立即报错，
+        // 那样拿不到 timed_out，超时测试会失效）。
+        let stuck_cmd = "C:\\Windows\\System32\\ping.exe -n 60 127.0.0.1 >nul";
         #[cfg(not(windows))]
         let stuck_cmd = "sleep 60";
 

@@ -612,11 +612,11 @@ pub struct EntityTypeDecl {
 ///
 /// 本表是**知识图谱实体类型**（写入 `knowledge_entities.entity_type`）。
 /// 项目里还存在**另一套字段同名、值域不同**的词表：
-/// `analysis-engine/src/opc/domain_pack_config.rs` 的 `DomainPackConfig.entity_types`
+/// `analysis-engine/src/opc/capability_pack_config.rs` 的 `CapabilityPackConfig.entity_types`
 /// （14 个域包各一组业务记录类型：`invoice` / `portfolio` / `lead` / `bug` …，
 /// 实测 44 条），它写的是 OPC **业务记录**类型，不是图谱实体。
 ///
-/// 两者**值域必须不相交**。这条边界由 `domain_pack_config.rs` 的测试
+/// 两者**值域必须不相交**。这条边界由 `capability_pack_config.rs` 的测试
 /// `test_opc_record_types_do_not_collide_with_kg_entity_types` 断言（不复制清单，
 /// 直接读运行时的 `get_all_configs()`）—— 在此处重复列一份 44 条的副本只会腐烂。
 ///

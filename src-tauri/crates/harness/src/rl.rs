@@ -285,7 +285,7 @@ pub struct RlExperienceRecord {
 
 /// OPC RL 域包训练统计 DTO
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RlDomainPackStats {
+pub struct RlCapabilityPackStats {
     pub domain_pack_id: String,
     pub total_experiences: i32,
     pub total_reward: f64,
@@ -316,16 +316,16 @@ pub trait RlExperienceStore: Send + Sync {
     async fn count_experiences(&self, domain_pack_id: &str) -> Result<u64, String>;
 
     /// 获取全局统计（所有域包）
-    async fn get_global_stats(&self) -> Result<Vec<RlDomainPackStats>, String>;
+    async fn get_global_stats(&self) -> Result<Vec<RlCapabilityPackStats>, String>;
 
     /// 获取指定域包统计
-    async fn get_domain_pack_stats(
+    async fn get_capability_pack_stats(
         &self,
         domain_pack_id: &str,
-    ) -> Result<Option<RlDomainPackStats>, String>;
+    ) -> Result<Option<RlCapabilityPackStats>, String>;
 
     /// 更新域包训练统计
-    async fn upsert_stats(&self, stats: &RlDomainPackStats) -> Result<(), String>;
+    async fn upsert_stats(&self, stats: &RlCapabilityPackStats) -> Result<(), String>;
 
     /// 清除指定域包的所有经验
     async fn clear_experiences(&self, domain_pack_id: &str) -> Result<(), String>;

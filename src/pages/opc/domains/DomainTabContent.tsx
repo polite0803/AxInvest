@@ -24,7 +24,7 @@ import { WorkflowWizard } from "./WorkflowWizard";
 const { Text } = Typography;
 
 interface DomainTabContentProps {
-  domainPackId: string;
+  capabilityPackId: string;
   config: DomainConfig;
   tabKey: string;
 }
@@ -60,12 +60,12 @@ function resolveTemplateId(
   return undefined;
 }
 
-export function DomainTabContent({ domainPackId, config, tabKey }: DomainTabContentProps) {
+export function DomainTabContent({ capabilityPackId, config, tabKey }: DomainTabContentProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const createConversation = useConversationStore((s) => s.createConversation);
   const settings = useSettingsStore((s) => s.settings);
-  const data = useDomainData(domainPackId);
+  const data = useDomainData(capabilityPackId);
 
   const tab = useMemo(() => findTab(config, tabKey), [config, tabKey]);
 
@@ -98,7 +98,7 @@ export function DomainTabContent({ domainPackId, config, tabKey }: DomainTabCont
         return;
       }
       if (templateId) {
-        navigate(`/workflow/new?domain=${domainPackId}&template=${templateId}`);
+        navigate(`/workflow/new?domain=${capabilityPackId}&template=${templateId}`);
       } else {
         message.error(t("opc.domain.workflowTemplateNotFound"));
       }
@@ -114,9 +114,9 @@ export function DomainTabContent({ domainPackId, config, tabKey }: DomainTabCont
         userPrompt: string;
         actionKey: string;
         actionLabel: string;
-        domainPackId: string;
-      }>("opc_build_domain_pack_prompt", {
-        domainPackId,
+        capabilityPackId: string;
+      }>("opc_build_capability_pack_prompt", {
+        capabilityPackId,
         actionKey: action.key,
       });
 
@@ -138,7 +138,7 @@ export function DomainTabContent({ domainPackId, config, tabKey }: DomainTabCont
         settings.defaultModel.a,
         {
           systemPrompt:
-            `你是一位专业的${domainPackId}领域助手，擅长${actionLabel}相关的分析和咨询。请根据用户需求提供高质量的分析和建议。`,
+            `你是一位专业的${capabilityPackId}领域助手，擅长${actionLabel}相关的分析和咨询。请根据用户需求提供高质量的分析和建议。`,
         },
       );
       if (conv?.id) {
@@ -154,7 +154,7 @@ export function DomainTabContent({ domainPackId, config, tabKey }: DomainTabCont
 
   const handleOpenWorkflowEditor = (wf: DomainWorkflow) => {
     const templateId = wf.template_id || wf.id;
-    navigate(`/workflow/new?domain=${domainPackId}&template=${templateId}`);
+    navigate(`/workflow/new?domain=${capabilityPackId}&template=${templateId}`);
   };
 
   const handleWizardClose = () => {

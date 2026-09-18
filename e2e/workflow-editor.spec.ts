@@ -144,7 +144,9 @@ test.describe("Workflow Editor Canvas", () => {
     await expect(aiPanelBtn).toBeVisible({ timeout: 10000 });
     await aiPanelBtn.click();
     await page.waitForTimeout(500);
-    const textarea = page.locator("textarea").first();
+    // AI 面板默认停在「对话」页，其输入框是面板专属 textarea。
+    // 不能取 `textarea.first()`：工作台（/chat 路由）里隐藏的会话输入框在 DOM 中更靠前。
+    const textarea = page.locator("#a-i-panel-chat-input");
     await expect(textarea).toBeVisible({ timeout: 5000 });
   });
 

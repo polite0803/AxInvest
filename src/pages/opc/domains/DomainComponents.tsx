@@ -123,7 +123,7 @@ function KpiStatCard({ kpi }: { kpi: KpiValue }) {
 
 /** 行业页面属性 */
 export interface DomainPageProps {
-  domainPackId: string;
+  capabilityPackId: string;
   config: DomainConfig;
 }
 
@@ -585,10 +585,10 @@ export function DomainLearningMetrics({
  * 行业操作面板组件
  */
 export function DomainActionsPanel({
-  domainPackId,
+  capabilityPackId,
   actions,
 }: {
-  domainPackId: string;
+  capabilityPackId: string;
   actions: ActionItem[];
 }) {
   const { t } = useTranslation();
@@ -601,7 +601,7 @@ export function DomainActionsPanel({
     message: { warning: (msg: string) => console.warn(msg), error: (msg: string) => console.error(msg) },
   };
 
-  const actionsPrefix = `opc.domain.actions.${domainPackId}`;
+  const actionsPrefix = `opc.domain.actions.${capabilityPackId}`;
 
   const handleAction = async (action: ActionItem) => {
     if (!settings?.defaultModel?.a || !settings?.defaultModel?.b) {
@@ -612,7 +612,7 @@ export function DomainActionsPanel({
 
     if (action.type === "workflow") {
       const templateId = action.template_id || action.key;
-      navigate(`/workflow/new?domain=${domainPackId}&template=${templateId}`);
+      navigate(`/workflow/new?domain=${capabilityPackId}&template=${templateId}`);
       return;
     }
 
@@ -625,9 +625,9 @@ export function DomainActionsPanel({
         userPrompt: string;
         actionKey: string;
         actionLabel: string;
-        domainPackId: string;
-      }>("opc_build_domain_pack_prompt", {
-        domainPackId,
+        capabilityPackId: string;
+      }>("opc_build_capability_pack_prompt", {
+        capabilityPackId,
         actionKey: action.key,
       });
 
@@ -649,7 +649,7 @@ export function DomainActionsPanel({
         settings.defaultModel.a,
         {
           systemPrompt:
-            `你是一位专业的${domainPackId}领域助手，擅长${actionLabel}相关的分析和咨询。请根据用户需求提供高质量的分析和建议。`,
+            `你是一位专业的${capabilityPackId}领域助手，擅长${actionLabel}相关的分析和咨询。请根据用户需求提供高质量的分析和建议。`,
         },
       );
       if (conv?.id) {
@@ -714,10 +714,10 @@ export function DomainActionsPanel({
  * 行业工作流面板组件
  */
 export function DomainWorkflowsPanel({
-  domainPackId,
+  capabilityPackId,
   workflows,
 }: {
-  domainPackId: string;
+  capabilityPackId: string;
   workflows: DomainWorkflow[];
 }) {
   const { t } = useTranslation();
@@ -730,7 +730,7 @@ export function DomainWorkflowsPanel({
     message: { warning: (msg: string) => console.warn(msg), error: (msg: string) => console.error(msg) },
   };
 
-  const workflowsPrefix = `opc.domain.workflows.${domainPackId}`;
+  const workflowsPrefix = `opc.domain.workflows.${capabilityPackId}`;
 
   const handleUseWorkflow = async (wf: DomainWorkflow) => {
     if (!settings?.defaultModel?.a || !settings?.defaultModel?.b) {
@@ -892,13 +892,13 @@ export function DomainWorkflowExecution({
  * 学习与进化配置面板
  */
 export function DomainLearningPanel({
-  domainPackId: _domainPackId,
+  capabilityPackId: _capabilityPackId,
   learningConfig,
   onReflect,
   onEvolve,
   onSelfImprove,
 }: {
-  domainPackId: string;
+  capabilityPackId: string;
   learningConfig: NonNullable<ReturnType<typeof useDomainData>["learningConfig"]> | null;
   onReflect: () => Promise<void>;
   onEvolve: () => Promise<void>;
@@ -1072,18 +1072,18 @@ export function DomainLearningPanel({
  * 行业页面头部
  */
 export function DomainHeader({
-  domainPackId,
+  capabilityPackId,
   manifest,
   onRefresh,
   refreshing,
 }: {
-  domainPackId: string;
+  capabilityPackId: string;
   manifest: { icon: string; name: string } | null;
   onRefresh: () => void;
   refreshing: boolean;
 }) {
   const { t } = useTranslation();
-  const domainKey = domainPackId.replace(/-/g, "_");
+  const domainKey = capabilityPackId.replace(/-/g, "_");
 
   return (
     <div style={{ marginBottom: 24 }}>
@@ -1107,12 +1107,12 @@ export function DomainHeader({
  * 基础行业页面布局
  */
 export function DomainPageLayout({
-  domainPackId,
+  capabilityPackId,
   config,
   children,
 }: DomainPageProps & { children?: ReactNode }) {
   const { t } = useTranslation();
-  const data = useDomainData(domainPackId);
+  const data = useDomainData(capabilityPackId);
 
   if (data.loading) {
     return (
@@ -1157,13 +1157,13 @@ export function DomainPageLayout({
   };
 
   const handleExecuteWorkflow = async () => {
-    await data.executeWorkflow(domainPackId);
+    await data.executeWorkflow(capabilityPackId);
   };
 
   return (
     <div style={{ padding: 24, height: "100%", overflow: "auto" }}>
       <DomainHeader
-        domainPackId={domainPackId}
+        capabilityPackId={capabilityPackId}
         manifest={data.manifest}
         onRefresh={handleRefreshAll}
         refreshing={data.dashboardLoading || data.stepsLoading || data.rulesLoading}
@@ -1217,17 +1217,17 @@ export function DomainPageLayout({
 
       {/* 专属操作 */}
       {config.actions && config.actions.length > 0 && (
-        <DomainActionsPanel domainPackId={domainPackId} actions={config.actions} />
+        <DomainActionsPanel capabilityPackId={capabilityPackId} actions={config.actions} />
       )}
 
       {/* 专属工作流 */}
       {config.workflows && config.workflows.length > 0 && (
-        <DomainWorkflowsPanel domainPackId={domainPackId} workflows={config.workflows} />
+        <DomainWorkflowsPanel capabilityPackId={capabilityPackId} workflows={config.workflows} />
       )}
 
       {/* 学习与进化配置 */}
       <DomainLearningPanel
-        domainPackId={domainPackId}
+        capabilityPackId={capabilityPackId}
         learningConfig={data.learningConfig}
         onReflect={data.reflectOnWorkflow}
         onEvolve={data.evolveWorkflow}

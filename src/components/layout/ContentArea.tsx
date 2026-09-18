@@ -42,7 +42,7 @@ const LazyDemandDiscoveryPage = lazy(() =>
 );
 const LazyInvestPage = lazy(() => import("@/pages/InvestPage").then((m) => ({ default: m.InvestPage })));
 const LazyOpcPage = lazy(() => import("@/pages/OpcPage").then((m) => ({ default: m.OpcPage })));
-// ── 域包页（OPC 域包，2026-09-06 按能力域恢复接线；2026-09-15 「行业」→「域」概念统一） ──
+// ── 能力包页（OPC 能力包，2026-09-06 按能力域恢复接线；2026-09-15 「行业」→「域」概念统一） ──
 const LazyFinanceInvestDomainPage = lazy(() =>
   import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.FinanceInvestPage }))
 );
@@ -86,7 +86,7 @@ const LazyGameDevDomainPage = lazy(() =>
   import("@/pages/opc/domains/DomainPages").then((m) => ({ default: m.GameDevPage }))
 );
 
-/** 域包页路由表：[BuiltinPageKey（即能力域导航 key）, 页面组件] */
+/** 能力包页路由表：[BuiltinPageKey（即能力域导航 key）, 页面组件] */
 const DOMAIN_ROUTES: ReadonlyArray<[string, React.LazyExoticComponent<React.ComponentType>]> = [
   ["finance-analysis", LazyFinanceInvestDomainPage],
   ["finance-accounting", LazyAccountingDomainPage],
@@ -288,7 +288,7 @@ export const ContentArea = memo(function ContentArea() {
               </PageContextProvider>
             }
           />
-          {/* ── AxInvest 域包页（OPC 域包，路径 /opc/domain/:id，按能力域归位） ── */}
+          {/* ── AxInvest 能力包页（OPC 能力包，路径 /opc/domain/:id，按能力域归位） ── */}
           {DOMAIN_ROUTES.map(([pageKey, Page]) => (
             <Route
               key={pageKey}

@@ -1,6 +1,6 @@
 // OPC 域包工作流层
 // 复用 axagent-harness::workflow_types 中的标准工作流节点体系
-// DomainPackConfig 定义步骤 → 生成 WorkflowTemplateData → 种子化到 DB → WorkEngine 执行
+// CapabilityPackConfig 定义步骤 → 生成 WorkflowTemplateData → 种子化到 DB → WorkEngine 执行
 
 #![allow(clippy::type_complexity)]
 
@@ -17,7 +17,7 @@ use axagent_harness::workflow_types::{
 };
 
 use super::automation::{AutomationAction, AutomationCondition};
-use super::domain_pack_config::DomainPackConfig;
+use super::capability_pack_config::CapabilityPackConfig;
 
 /// 创建基础工作流节点
 fn create_node_base(id: impl Into<String>, title: impl Into<String>) -> WorkflowNodeBase {
@@ -44,7 +44,7 @@ pub struct WorkflowEdgeDef {
 
 /// 从域包配置直接生成 WorkflowTemplateData（种子化到 DB 的入口）
 ///
-/// 整合了原 DomainPackWorkflow::from_adapter() + to_template_data() 的逻辑，
+/// 整合了原 CapabilityPackWorkflow::from_adapter() + to_template_data() 的逻辑，
 /// 让 OPC 域包工作流与股票分析工作流架构一致：
 /// Config 定义步骤 → 生成模板数据 → 种子化 → WorkEngine 执行
 ///
@@ -53,9 +53,9 @@ pub struct WorkflowEdgeDef {
 /// - `config`: 域包配置
 /// - `tool_resolver`: 可选的工具解析器，用于将工具名映射为完整的 ToolDef（含 description 和 parameters）
 #[allow(unused_assignments)]
-pub fn generate_domain_pack_template_data(
+pub fn generate_capability_pack_template_data(
     domain_pack_id: &str,
-    config: &DomainPackConfig,
+    config: &CapabilityPackConfig,
     tool_resolver: Option<&dyn Fn(&[String]) -> Vec<ToolDef>>,
 ) -> WorkflowTemplateData {
     let mut nodes: Vec<WorkflowNode> = Vec::new();

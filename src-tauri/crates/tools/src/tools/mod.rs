@@ -15,6 +15,7 @@ pub mod batch_missing;
 pub mod browser;
 pub mod capability_browse;
 pub mod capability_load;
+pub mod capability_pack_defs;
 pub mod capability_shared;
 pub mod capability_view;
 pub mod ci;
@@ -26,7 +27,6 @@ pub mod database;
 pub mod demand_llm;
 pub mod devops;
 pub mod document;
-pub mod domain_pack_defs;
 pub mod export;
 pub mod file_edit;
 pub mod file_read;
@@ -363,7 +363,7 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
     // ── OPC 业务工具（一人公司：发票 / 客户 / 项目 / 站点内容 / KPI / 发布计划）──
     //
     // 为什么单独列一段：`opc.rs` 这 27 个 `impl Tool` 此前**只被
-    // 域包工具白名单（现 `crates/tools/src/tools/domain_pack_defs.rs`，2026-09-16 下沉）
+    // 域包工具白名单（现 `crates/tools/src/tools/capability_pack_defs.rs`，2026-09-16 下沉）
     // 的 `opc_tool_defs()` 用来产出
     // ToolDef schema**，从未进入本注册表。后果是 `init/services.rs` 的 ToolResolver
     // 判定 `known = reg.list_all_tool_names().contains(name) || mcp_tools...` 恒为
@@ -403,7 +403,7 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(opc::OpcListKpisTool),
         std::sync::Arc::new(opc::OpcSearchWikiTool),
         std::sync::Arc::new(opc::OpcGetFinancialReportTool),
-        // 内容资产（域包模板已引用，见 domain_pack.rs 的 opc_tool_defs）
+        // 内容资产（域包模板已引用，见 capability_pack.rs 的 opc_tool_defs）
         std::sync::Arc::new(opc::OpcCreateContentAssetTool),
         std::sync::Arc::new(opc::OpcListContentAssetsTool),
         std::sync::Arc::new(opc::OpcUpdateContentAssetTool),

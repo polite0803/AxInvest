@@ -19,6 +19,22 @@ validations:
     operator: not_empty
     value: null
     message: 迭代必须包含结束日期
+  # 原硬编码 validate_software_dev：需求标题/优先级、任务指派人
+  - entity_type: requirement
+    field: title
+    operator: not_empty
+    value: null
+    message: 需求标题不能为空
+  - entity_type: requirement
+    field: priority
+    operator: in
+    value: [P0, P1, P2, P3]
+    message: 优先级必须是 P0/P1/P2/P3
+  - entity_type: task
+    field: assignee
+    operator: not_empty
+    value: null
+    message: 任务必须指派人
 
 kpi_definitions:
   # ── 通用软件开发 KPI ──

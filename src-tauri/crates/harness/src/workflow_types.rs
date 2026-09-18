@@ -2186,7 +2186,7 @@ pub struct WorkflowTemplatePassportParams {
     /// 只投节点类型 + 标题，不投 JSON body —— 护照是元数据快照，steps
     /// 服务于 agent 侧的规划提示，不是工作流定义本体。
     pub steps: Vec<String>,
-    /// 归属域包（domain_pack_id）：`{domain_pack}_harness_workflow` 由调用方
+    /// 归属域包（domain_pack_id）：`{capability_pack}_harness_workflow` 由调用方
     /// 显式填充；其为 None 时 [`workflow_template_passport`] 从 `id` 推导兜底，
     /// 保证启动期全量重建与运行时增量索引两条投影路径一致。
     pub domain_pack_id: Option<String>,
@@ -2337,7 +2337,7 @@ pub fn workflow_template_passport(
     // 保证启动期全量重建与运行时增量索引两条路径逐字段一致。
     dto.tool_ref = params.tool_ref;
     dto.steps = params.steps;
-    // 域包归属反向指针：显式优先，None 时按 `{domain_pack}_harness_workflow` 推导。
+    // 域包归属反向指针：显式优先，None 时按 `{capability_pack}_harness_workflow` 推导。
     // 注入在统一入口，两条投影路径（启动期全量 / 运行时增量）一致。
     if params.domain_pack_id.is_none()
         && let Some(dp) = params.id.strip_suffix("_harness_workflow")

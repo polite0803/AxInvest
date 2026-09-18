@@ -7,6 +7,12 @@ validations:
     operator: not_empty
     value: null
     message: 项目标题不能为空
+  # 原硬编码 validate_security：安全事件类型不能为空
+  - entity_type: incident
+    field: type
+    operator: not_empty
+    value: null
+    message: 安全事件类型不能为空
 
 kpi_definitions:
   - key: task_count

@@ -115,6 +115,8 @@ export interface MarketPack {
   domain?: string | null;
   /** 期一·4：能力承诺数（manifest.capabilities 条数） */
   capabilityCount?: number;
+  /** 期一·5：具体承诺能力（predicate 解析出的可读 id 列表） */
+  capabilities?: string[];
 }
 
 // ── 状态键映射 ───────────────────────────────────────────────

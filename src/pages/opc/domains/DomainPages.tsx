@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { DomainPackHub } from "@/components/opc/DomainPackHub";
+import { CapabilityPackHub } from "@/components/opc/CapabilityPackHub";
 import i18n from "@/i18n";
 import {
   ApiOutlined,
@@ -459,8 +459,8 @@ const aiResearchConfig: DomainConfig = {
 
 export function AiResearchPage() {
   return (
-    <DomainPackHub
-      domainPackId="ai-research"
+    <CapabilityPackHub
+      capabilityPackId="ai-research"
       config={aiResearchConfig}
       domainTitle={t(`opc.domains.ai_research`)}
       domainIcon={<ExperimentOutlined />}
@@ -669,8 +669,8 @@ const softwareDevConfig: DomainConfig = {
 
 export function SoftwareDevPage() {
   return (
-    <DomainPackHub
-      domainPackId="software-dev"
+    <CapabilityPackHub
+      capabilityPackId="software-dev"
       config={softwareDevConfig}
       domainTitle={t(`opc.domains.software_dev`)}
       domainIcon={<CodeSandboxOutlined />}
@@ -757,8 +757,8 @@ const financeInvestConfig: DomainConfig = {
 
 export function FinanceInvestPage() {
   return (
-    <DomainPackHub
-      domainPackId="finance-invest"
+    <CapabilityPackHub
+      capabilityPackId="finance-invest"
       config={financeInvestConfig}
       domainTitle={t(`opc.domains.finance_invest`)}
       domainIcon={<DollarCircleOutlined />}
@@ -880,8 +880,8 @@ const salesGrowthConfig: DomainConfig = {
 
 export function SalesGrowthPage() {
   return (
-    <DomainPackHub
-      domainPackId="sales-growth"
+    <CapabilityPackHub
+      capabilityPackId="sales-growth"
       config={salesGrowthConfig}
       domainTitle={t(`opc.domains.sales_growth`)}
       domainIcon={<LineChartOutlined />}
@@ -1026,8 +1026,8 @@ const contentMediaConfig: DomainConfig = {
 
 export function ContentMediaPage() {
   return (
-    <DomainPackHub
-      domainPackId="content-media"
+    <CapabilityPackHub
+      capabilityPackId="content-media"
       config={contentMediaConfig}
       domainTitle={t(`opc.domains.content_media`)}
       domainIcon={<VideoCameraOutlined />}
@@ -1229,8 +1229,8 @@ const consultingConfig: DomainConfig = {
 
 export function ConsultingPage() {
   return (
-    <DomainPackHub
-      domainPackId="consulting"
+    <CapabilityPackHub
+      capabilityPackId="consulting"
       config={consultingConfig}
       domainTitle={t(`opc.domains.consulting`)}
       domainIcon={<CrownOutlined />}
@@ -1324,8 +1324,8 @@ const accountingConfig: DomainConfig = {
 
 export function AccountingPage() {
   return (
-    <DomainPackHub
-      domainPackId="accounting"
+    <CapabilityPackHub
+      capabilityPackId="accounting"
       config={accountingConfig}
       domainTitle={t(`opc.domains.accounting`)}
       domainIcon={<AuditOutlined />}
@@ -1470,8 +1470,8 @@ const ecommerceConfig: DomainConfig = {
 
 export function EcommercePage() {
   return (
-    <DomainPackHub
-      domainPackId="ecommerce"
+    <CapabilityPackHub
+      capabilityPackId="ecommerce"
       config={ecommerceConfig}
       domainTitle={t(`opc.domains.ecommerce`)}
       domainIcon={<ShopOutlined />}
@@ -1564,8 +1564,8 @@ const educationConfig: DomainConfig = {
 
 export function EducationPage() {
   return (
-    <DomainPackHub
-      domainPackId="education"
+    <CapabilityPackHub
+      capabilityPackId="education"
       config={educationConfig}
       domainTitle={t(`opc.domains.education`)}
       domainIcon={<BookOutlined />}
@@ -1629,8 +1629,8 @@ const designConfig: DomainConfig = {
 
 export function DesignPage() {
   return (
-    <DomainPackHub
-      domainPackId="design"
+    <CapabilityPackHub
+      capabilityPackId="design"
       config={designConfig}
       domainTitle={t(`opc.domains.design`)}
       domainIcon={<EditOutlined />}
@@ -1710,8 +1710,8 @@ const projectManagementConfig: DomainConfig = {
 
 export function ProjectManagementPage() {
   return (
-    <DomainPackHub
-      domainPackId="project-management"
+    <CapabilityPackHub
+      capabilityPackId="project-management"
       config={projectManagementConfig}
       domainTitle={t(`opc.domains.project_management`)}
       domainIcon={<RocketOutlined />}
@@ -1768,8 +1768,8 @@ const securityConfig: DomainConfig = {
 
 export function SecurityPage() {
   return (
-    <DomainPackHub
-      domainPackId="security"
+    <CapabilityPackHub
+      capabilityPackId="security"
       config={securityConfig}
       domainTitle={t(`opc.domains.security`)}
       domainIcon={<SolutionOutlined />}
@@ -1856,8 +1856,8 @@ const geospatialConfig: DomainConfig = {
 
 export function GeospatialPage() {
   return (
-    <DomainPackHub
-      domainPackId="geospatial"
+    <CapabilityPackHub
+      capabilityPackId="geospatial"
       config={geospatialConfig}
       domainTitle={t(`opc.domains.geospatial`)}
       domainIcon={<GlobalOutlined />}
@@ -1957,8 +1957,8 @@ const gameDevConfig: DomainConfig = {
 
 export function GameDevPage() {
   return (
-    <DomainPackHub
-      domainPackId="game-dev"
+    <CapabilityPackHub
+      capabilityPackId="game-dev"
       config={gameDevConfig}
       domainTitle={t(`opc.domains.game_dev`)}
       domainIcon={<BugOutlined />}

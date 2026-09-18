@@ -11723,14 +11723,17 @@
       "enabled": "مفعّل: {{value}}",
       "yes": "نعم",
       "no": "لا",
-      "install": "تثبيت",
-      "installSuccess": "مثبّت: {{name}}",
-      "installFailed": "فشل التثبيت: {{error}}",
+      "import": "استيراد",
+      "importSuccess": "تم الاستيراد: {{name}}",
+      "importFailed": "فشل الاستيراد: {{error}}",
+      "export": "تصدير بصيغة .opcip",
+      "exportSuccess": "تم التصدير: {{name}}",
+      "exportFailed": "فشل التصدير: {{error}}",
+      "exportDesktopOnly": "التصدير متاح على سطح المكتب فقط",
       "domain": "المجال: {{domain}}",
-
       "domainUndefined": "غير معلن",
-
       "capabilityCount": "القدرات الملتزم بها: {{count}}",
+      "capabilityListTitle": "القدرات المحددة",
       "toggle": "تفعيل",
       "toggleSuccess": "تم تحديث حالة التفعيل: {{name}}",
       "toggleFailed": "فشل تبديل حالة التفعيل: {{error}}"

@@ -14,6 +14,17 @@ validations:
     operator: contains
     value: "@"
     message: 客户邮箱格式不正确
+  # 原硬编码 validate_accounting：发票金额必须为正、状态必须是合法枚举
+  - entity_type: invoice
+    field: amount
+    operator: gt
+    value: 0
+    message: 发票金额必须大于零
+  - entity_type: invoice
+    field: status
+    operator: in
+    value: [draft, sent, paid, overdue, cancelled, refunded]
+    message: 无效的发票状态
 
 kpi_definitions:
   - key: invoice_count

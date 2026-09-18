@@ -3,7 +3,7 @@
 /**
  * 旧链兼容回归：`/opc/industry/:packId` → `/opc/domain/:packId`
  *
- * 2026-09-15「行业」→「域」概念统一迁移后，域包路径前缀改为 `/opc/domain/`。
+ * 2026-09-15「行业」→「域」概念统一迁移后，能力包路径前缀改为 `/opc/domain/`。
  * 本用例断言的是**真实路由表命中**（渲染 ContentArea 全表，而非单测重定向组件）：
  * 若重定向路由没接进 `<Routes>`，请求会落到 `path="*"` 的 404，
  * 探针路径不会变、`not-found` 会出现 —— 三种失败都判得出来。
@@ -25,7 +25,7 @@ vi.mock("antd", () => ({
   Spin: () => <div data-testid="spin" />,
 }));
 
-// 域包页面本身不是本用例的被测对象，替换为桩，避免把整条 UI 依赖链拖进来
+// 能力包页面本身不是本用例的被测对象，替换为桩，避免把整条 UI 依赖链拖进来
 const DOMAIN_PAGE_EXPORTS = [
   "FinanceInvestPage",
   "AccountingPage",

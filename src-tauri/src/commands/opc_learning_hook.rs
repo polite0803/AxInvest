@@ -27,7 +27,7 @@ use tauri::State;
 use tracing::{debug, info, warn};
 
 use crate::AppState;
-use crate::commands::opc_domain_pack_actions::load_rl_config;
+use crate::commands::opc_capability_pack_actions::load_rl_config;
 use crate::state::learning::LearningEngineState;
 use axagent_orchestrator::{EvolutionRequest, ReflectionRequest, SelfImprovementRequest};
 
@@ -57,14 +57,14 @@ const DOMAIN_TEMPLATE_PREFIXES: &[(&str, &str)] = &[
 ///
 /// 返回 `Some(domain_pack_id)` 表示这是 OPC 域包工作流，
 /// `None` 表示非 OPC 工作流（如股票分析等）。
-pub fn identify_domain_pack_from_template(
+pub fn identify_capability_pack_from_template(
     template_id: &str,
     app_dir: Option<&std::path::Path>,
 ) -> Option<String> {
-    use axagent_analysis_engine::opc::domain_pack;
+    use axagent_analysis_engine::opc::capability_pack;
 
     // 域包动态注册：扫描 `config/opc/domain_packs/*/`
-    let base = axagent_analysis_engine::opc::resolve_domain_packs_dir(app_dir);
+    let base = axagent_analysis_engine::opc::resolve_capability_packs_dir(app_dir);
     if let Ok(rd) = std::fs::read_dir(&base) {
         for entry in rd.filter_map(Result::ok) {
             let dir = entry.path();
@@ -72,7 +72,7 @@ pub fn identify_domain_pack_from_template(
                 continue;
             }
             // manifest 优先（可声明 template_prefix）；解析失败退回目录名推导
-            let (domain_pack_id, prefix) = match domain_pack::read_manifest(&dir) {
+            let (domain_pack_id, prefix) = match capability_pack::read_manifest(&dir) {
                 Some(m) => {
                     let id = m.id.replace('_', "-");
                     let prefix = m.template_prefix.clone().unwrap_or_else(|| id.clone());
@@ -165,7 +165,7 @@ pub async fn try_auto_learn_workflow(
     state: &LearningEngineState,
     app_dir: Option<&std::path::Path>,
 ) {
-    let domain_pack_id = match identify_domain_pack_from_template(template_id, app_dir) {
+    let domain_pack_id = match identify_capability_pack_from_template(template_id, app_dir) {
         Some(id) => id,
         None => {
             debug!("[opc-auto-learn] 模板 {} 非 OPC 域包工作流，跳过自动学习", template_id);
@@ -175,7 +175,7 @@ pub async fn try_auto_learn_workflow(
 
     // P1-4：尊重域包 YAML 的 reflection/evolution/self_improvement/rl 开关，
     // 关闭的环节不再触发（此前无视开关全部执行）。
-    let config = crate::commands::opc_domain_pack_actions::get_domain_pack_learning_config(
+    let config = crate::commands::opc_capability_pack_actions::get_capability_pack_learning_config(
         &domain_pack_id,
         app_dir,
     );
@@ -189,7 +189,7 @@ pub async fn try_auto_learn_workflow(
     let quality_score_100 = quality_score * 100.0;
 
     info!(
-        "[opc-auto-learn] 触发自动学习: domain_pack={}, template={}, quality={:.1}, rl={}, reflect={}, evolve={}, self_improve={}",
+        "[opc-auto-learn] 触发自动学习: capability_pack={}, template={}, quality={:.1}, rl={}, reflect={}, evolve={}, self_improve={}",
         domain_pack_id,
         template_id,
         quality_score_100,
@@ -248,7 +248,7 @@ pub async fn try_auto_learn_workflow(
     }
 
     info!(
-        "[opc-auto-learn] 自动学习完成: domain_pack={}, template={}, quality={:.1}",
+        "[opc-auto-learn] 自动学习完成: capability_pack={}, template={}, quality={:.1}",
         domain_pack_id, template_id, quality_score_100
     );
 }
@@ -266,13 +266,13 @@ async fn record_experience(
     let rl_config = load_rl_config(domain_pack_id, app_dir)
         .ok_or_else(|| format!("域包 {} 的 RL 配置不存在", domain_pack_id))?;
 
-    let engine = &state.domain_pack_learning_engine;
+    let engine = &state.capability_pack_learning_engine;
     engine
         .record_experience(domain_pack_id, workflow_id, quality_score, result, &rl_config)
         .await?;
 
     debug!(
-        "[opc-auto-learn] RL 经验已记录: domain_pack={}, workflow={}",
+        "[opc-auto-learn] RL 经验已记录: capability_pack={}, workflow={}",
         domain_pack_id, workflow_id
     );
     Ok(())
@@ -284,7 +284,7 @@ async fn trigger_reflection(
     result: &serde_json::Value,
     state: &LearningEngineState,
 ) -> Result<axagent_orchestrator::ReflectionResult, String> {
-    let registry = state.domain_pack_adapter_registry.lock().await;
+    let registry = state.capability_pack_adapter_registry.lock().await;
     let adapter = registry
         .get(domain_pack_id)
         .ok_or_else(|| format!("域包适配器不存在: {}", domain_pack_id))?;
@@ -292,7 +292,7 @@ async fn trigger_reflection(
     let template = adapter.reflection_template().clone();
     drop(registry);
 
-    let engine = &state.domain_pack_learning_engine;
+    let engine = &state.capability_pack_learning_engine;
     let request = ReflectionRequest {
         domain_pack_id: domain_pack_id.to_string(),
         workflow_id: workflow_id.to_string(),
@@ -309,7 +309,7 @@ async fn trigger_evolution(
     reason: &str,
     state: &LearningEngineState,
 ) -> Result<axagent_orchestrator::EvolutionResult, String> {
-    let registry = state.domain_pack_adapter_registry.lock().await;
+    let registry = state.capability_pack_adapter_registry.lock().await;
     let adapter = registry
         .get(domain_pack_id)
         .ok_or_else(|| format!("域包适配器不存在: {}", domain_pack_id))?;
@@ -317,7 +317,7 @@ async fn trigger_evolution(
     let constraints = adapter.evolution_constraints().clone();
     drop(registry);
 
-    let engine = &state.domain_pack_learning_engine;
+    let engine = &state.capability_pack_learning_engine;
     let request = EvolutionRequest {
         domain_pack_id: domain_pack_id.to_string(),
         workflow_id: workflow_id.to_string(),
@@ -332,12 +332,12 @@ async fn trigger_self_improvement(
     _workflow_id: &str,
     state: &LearningEngineState,
 ) -> Result<axagent_orchestrator::SelfImprovementResult, String> {
-    let engine = &state.domain_pack_learning_engine;
+    let engine = &state.capability_pack_learning_engine;
     let request = SelfImprovementRequest {
         domain_pack_id: domain_pack_id.to_string(),
         // P4-4 修复：target 由畸形 `workflow_{workflow_id}_optimization`
         // （会拼出 workflow_workflow-xxx_optimization）改为按域包寻址
-        target: format!("domain_pack_{}_optimization", domain_pack_id),
+        target: format!("capability_pack_{}_optimization", domain_pack_id),
     };
 
     engine.run_self_improvement(&request).await
@@ -351,7 +351,7 @@ async fn trigger_rl_optimization(
     let rl_config = load_rl_config(domain_pack_id, app_dir)
         .ok_or_else(|| format!("域包 {} 的 RL 配置不存在", domain_pack_id))?;
 
-    let engine = &state.domain_pack_learning_engine;
+    let engine = &state.capability_pack_learning_engine;
     engine.optimize_policy(domain_pack_id, &rl_config).await?;
     Ok(())
 }
@@ -367,7 +367,7 @@ pub async fn opc_auto_learn_workflow(
     workflow_result: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
     let domain_pack_id =
-        identify_domain_pack_from_template(&template_id, Some(&state.app_data_dir))
+        identify_capability_pack_from_template(&template_id, Some(&state.app_data_dir))
             .ok_or_else(|| format!("模板 {} 不是 OPC 域包工作流", template_id))?;
 
     let quality_score = compute_quality_score(&workflow_result);

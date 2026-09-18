@@ -20,7 +20,7 @@ const { Text, Title } = Typography;
 
 interface RLLearningPanelProps {
   /** 行业 ID */
-  domainPackId?: string;
+  capabilityPackId?: string;
   /** 紧凑模式（嵌入其他页面） */
   compact?: boolean;
 }
@@ -28,7 +28,7 @@ interface RLLearningPanelProps {
 /**
  * RL 学习面板 — 展示经验池统计、策略优化状态和自动学习闭环历史
  */
-export function RLLearningPanel({ domainPackId, compact = false }: RLLearningPanelProps) {
+export function RLLearningPanel({ capabilityPackId, compact = false }: RLLearningPanelProps) {
   const { t } = useTranslation();
   const {
     loadRLStats,
@@ -42,24 +42,24 @@ export function RLLearningPanel({ domainPackId, compact = false }: RLLearningPan
     getConfig,
   } = useDomainLearningStore();
 
-  const stats = domainPackId ? rlStats.get(domainPackId) ?? emptyStats() : rlGlobalStats ?? emptyStats();
-  const config = domainPackId ? getConfig(domainPackId) : undefined;
-  const policyUpdate = domainPackId ? rlPolicyUpdates.get(domainPackId) : undefined;
+  const stats = capabilityPackId ? rlStats.get(capabilityPackId) ?? emptyStats() : rlGlobalStats ?? emptyStats();
+  const config = capabilityPackId ? getConfig(capabilityPackId) : undefined;
+  const policyUpdate = capabilityPackId ? rlPolicyUpdates.get(capabilityPackId) : undefined;
 
   const loadData = useCallback(async () => {
-    await loadRLStats(domainPackId);
-    if (domainPackId) {
-      await loadConfig(domainPackId);
+    await loadRLStats(capabilityPackId);
+    if (capabilityPackId) {
+      await loadConfig(capabilityPackId);
     }
-  }, [domainPackId, loadRLStats, loadConfig]);
+  }, [capabilityPackId, loadRLStats, loadConfig]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
   const handleOptimize = async () => {
-    if (domainPackId) {
-      await triggerOptimization(domainPackId);
+    if (capabilityPackId) {
+      await triggerOptimization(capabilityPackId);
     }
   };
 
@@ -89,7 +89,7 @@ export function RLLearningPanel({ domainPackId, compact = false }: RLLearningPan
               >
                 {t("opc.rl.refresh")}
               </Button>
-              {domainPackId && (
+              {capabilityPackId && (
                 <Button
                   icon={<BulbOutlined />}
                   onClick={handleOptimize}
@@ -119,7 +119,7 @@ export function RLLearningPanel({ domainPackId, compact = false }: RLLearningPan
             <Card size={compact ? "small" : "default"}>
               <Statistic
                 title={t("opc.rl.domainCount")}
-                value={stats.domainPackCount}
+                value={stats.capabilityPackCount}
               />
             </Card>
           </Col>
@@ -370,7 +370,7 @@ function AutoLearningResultItem({
 function emptyStats(): ExperiencePoolStats {
   return {
     totalExperiences: 0,
-    domainPackCount: 0,
+    capabilityPackCount: 0,
     oldestTimestampMs: undefined,
     newestTimestampMs: undefined,
     avgReward: 0,

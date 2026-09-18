@@ -12,11 +12,11 @@ use serde::{Deserialize, Serialize};
 use super::data_service::{OpcDataService, TimeRange};
 use super::error::OpcResult;
 
-// ── OpDomainPackVendor trait（对齐 StockVendor） ─────────────────
+// ── OpCapabilityPackVendor trait（对齐 StockVendor） ─────────────────
 
 /// 域包数据供应商 trait
 #[async_trait]
-pub trait OpDomainPackVendor: Send + Sync {
+pub trait OpCapabilityPackVendor: Send + Sync {
     fn name(&self) -> &str;
 
     async fn fetch(
@@ -53,7 +53,7 @@ impl DbVendor {
 }
 
 #[async_trait]
-impl OpDomainPackVendor for DbVendor {
+impl OpCapabilityPackVendor for DbVendor {
     fn name(&self) -> &str {
         "db"
     }
@@ -105,7 +105,7 @@ impl CacheVendor {
 }
 
 #[async_trait]
-impl OpDomainPackVendor for CacheVendor {
+impl OpCapabilityPackVendor for CacheVendor {
     fn name(&self) -> &str {
         "cache"
     }
@@ -134,7 +134,7 @@ impl OpDomainPackVendor for CacheVendor {
 pub struct WebVendor;
 
 #[async_trait]
-impl OpDomainPackVendor for WebVendor {
+impl OpCapabilityPackVendor for WebVendor {
     fn name(&self) -> &str {
         "web"
     }
@@ -159,7 +159,7 @@ impl OpDomainPackVendor for WebVendor {
 pub struct FileVendor;
 
 #[async_trait]
-impl OpDomainPackVendor for FileVendor {
+impl OpCapabilityPackVendor for FileVendor {
     fn name(&self) -> &str {
         "file"
     }
@@ -178,7 +178,7 @@ impl OpDomainPackVendor for FileVendor {
     }
 }
 
-// ── OpDomainPackClient ────────────────────────────────────────────
+// ── OpCapabilityPackClient ────────────────────────────────────────────
 
 /// 数据源配置（对应 analysis.yaml 中的 data_sources）
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,18 +190,18 @@ pub struct AnalysisDataSource {
 }
 
 /// 域包数据客户端：按域包 data_sources 路由 + 降级 + 健康追踪
-pub struct OpDomainPackClient {
+pub struct OpCapabilityPackClient {
     domain_pack_id: String,
     sources: Vec<AnalysisDataSource>,
-    vendors: HashMap<String, Arc<dyn OpDomainPackVendor>>,
+    vendors: HashMap<String, Arc<dyn OpCapabilityPackVendor>>,
     health: Mutex<HashMap<String, VendorHealthState>>,
 }
 
-impl OpDomainPackClient {
+impl OpCapabilityPackClient {
     pub fn new(
         domain_pack_id: String,
         sources: Vec<AnalysisDataSource>,
-        vendors: HashMap<String, Arc<dyn OpDomainPackVendor>>,
+        vendors: HashMap<String, Arc<dyn OpCapabilityPackVendor>>,
     ) -> Self {
         Self { domain_pack_id, sources, vendors, health: Mutex::new(HashMap::new()) }
     }

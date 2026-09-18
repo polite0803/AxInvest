@@ -963,8 +963,8 @@ export interface GeneratedToolInfo {
 /** 行业学习配置视图（从后端 YAML 解析而来） */
 export interface DomainLearningConfig {
   version: number;
-  domainPackId: string;
-  domainPackName: string;
+  capabilityPackId: string;
+  capabilityPackName: string;
   reflectionEnabled: boolean;
   evolutionEnabled: boolean;
   codeEvolverEnabled: boolean;
@@ -976,8 +976,8 @@ export interface DomainLearningConfig {
 /** 行业学习配置列表项（用于列表展示） */
 export interface DomainLearningConfigSummary {
   version: number;
-  domainPackId: string;
-  domainPackName: string;
+  capabilityPackId: string;
+  capabilityPackName: string;
   reflectionEnabled: boolean;
   evolutionEnabled: boolean;
   codeEvolverEnabled: boolean;
@@ -988,21 +988,21 @@ export interface DomainLearningConfigSummary {
 
 /** 反思请求参数 */
 export interface ReflectOnWorkflowParams {
-  domainPackId: string;
+  capabilityPackId: string;
   workflowId: string;
   workflowResult: Record<string, unknown>;
 }
 
 /** 进化请求参数 */
 export interface EvolveWorkflowParams {
-  domainPackId: string;
+  capabilityPackId: string;
   workflowId: string;
   reason: string;
 }
 
 /** 自我改进请求参数 */
 export interface RunSelfImprovementParams {
-  domainPackId: string;
+  capabilityPackId: string;
   target: string;
 }
 
@@ -1011,7 +1011,7 @@ export interface RunSelfImprovementParams {
 /** RL 经验记录 — 单次工作流执行的经验数据 */
 export interface RLExperience {
   id: string;
-  domainPackId: string;
+  capabilityPackId: string;
   workflowId: string;
   timestampMs: number;
   qualityScore: number;
@@ -1027,7 +1027,7 @@ export interface RLExperience {
 
 /** RL 策略优化结果 */
 export interface RLPolicyUpdate {
-  domainPackId: string;
+  capabilityPackId: string;
   experiencesUsed: number;
   avgReward: number;
   rewardTrend: "improving" | "declining" | "stable" | string;
@@ -1040,7 +1040,7 @@ export interface RLPolicyUpdate {
 /** RL 经验池统计 */
 export interface ExperiencePoolStats {
   totalExperiences: number;
-  domainPackCount: number;
+  capabilityPackCount: number;
   oldestTimestampMs?: number;
   newestTimestampMs?: number;
   avgReward: number;
@@ -1070,7 +1070,7 @@ export interface ReinforcementLearningConfig {
 
 /** RL 经验记录请求参数 */
 export interface RecordRLExperienceParams {
-  domainPackId: string;
+  capabilityPackId: string;
   workflowId: string;
   qualityScore: number;
   workflowResult: Record<string, unknown>;
@@ -1078,7 +1078,7 @@ export interface RecordRLExperienceParams {
 
 /** RL 策略优化请求参数 */
 export interface TriggerRLOptimizationParams {
-  domainPackId: string;
+  capabilityPackId: string;
 }
 
 /** 自动学习闭环触发结果 */

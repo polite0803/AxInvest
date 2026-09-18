@@ -101,11 +101,11 @@ pub mod stock_analysis_round;
 pub use stock_analysis_round::{AnalysisError as StockAnalysisRoundError, StockAnalysisRound};
 
 // ── 股票域包编排（Orchestrator 集成）──
-// 对接 axagent-orchestrator 的 DomainPackAdapter trait，
+// 对接 axagent-orchestrator 的 CapabilityPackAdapter trait，
 // 为股票业务提供动态编排、反思、进化能力。
 pub mod stock_orchestration;
 pub use stock_orchestration::{
-    create_stock_domain_pack_adapter, register_stock_adapter, StockDomainPackAdapter,
+    create_stock_capability_pack_adapter, register_stock_adapter, StockCapabilityPackAdapter,
 };
 
 // ── 股票业务反思引擎（WorkflowReflector 集成）──

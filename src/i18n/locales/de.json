@@ -11723,14 +11723,17 @@
       "enabled": "Aktiviert: {{value}}",
       "yes": "Ja",
       "no": "Nein",
-      "install": "Installieren",
-      "installSuccess": "Installiert: {{name}}",
-      "installFailed": "Installation fehlgeschlagen: {{error}}",
+      "import": "Importieren",
+      "importSuccess": "Importiert: {{name}}",
+      "importFailed": "Import fehlgeschlagen: {{error}}",
+      "export": "Als .opcip exportieren",
+      "exportSuccess": "Exportiert: {{name}}",
+      "exportFailed": "Export fehlgeschlagen: {{error}}",
+      "exportDesktopOnly": "Export ist nur auf dem Desktop verfügbar",
       "domain": "Domäne: {{domain}}",
-
       "domainUndefined": "Nicht deklariert",
-
       "capabilityCount": "Fähigkeitszusagen: {{count}}",
+      "capabilityListTitle": "Konkrete Fähigkeiten",
       "toggle": "Aktiviert",
       "toggleSuccess": "Aktivierungsstatus aktualisiert: {{name}}",
       "toggleFailed": "Aktivierungsstatus konnte nicht umgeschaltet werden: {{error}}"

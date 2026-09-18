@@ -1125,9 +1125,26 @@ if (process.argv.includes("--selftest")) {
     //   可疑数从真实量级虚涨到 186。判据是**目录语义**：`plans/` 会更新，`audits/` 是史料。
     chk("活栏混进 docs/ 下**非 plans** 的目录（如 audits/）", sc.live.some((p) => inDocs(p) && !inPlans(p)), false);
     chk("活栏非空（空面 ⇒ 取证静默输出 0，那是假绿）", sc.live.length > 0, true);
-    chk("记忆栏非空且只来自 .workbuddy/memory/", sc.memory.length > 0 && sc.memory.every(inMem), true);
+    // ⚠ 非空自证须按**扫描面目录是否存在**门控：`.workbuddy/memory/`、`docs/`、`output/`
+    //   全被 `.gitignore` 忽略 ⇒ 本地有、CI（全新 checkout）**没有**。
+    //   「非空」的语义是「目录在、却静默吐出 0 ⇒ 假绿」；目录不在时空列是**合法**的，
+    //   断言若还硬要非空，就把本地文件系统状态泄漏进了判据（2026-09-18 CI 实测两红）。
+    const dirExists = (p) => {
+      try {
+        return fs.statSync(p).isDirectory();
+      } catch {
+        return false;
+      }
+    };
+    const memDir = path.join(ROOT, ".workbuddy", "memory");
+    const histDirs = [path.join(ROOT, "docs"), path.join(ROOT, "output")];
+    chk(
+      "记忆栏非空且只来自 .workbuddy/memory/",
+      !dirExists(memDir) || (sc.memory.length > 0 && sc.memory.every(inMem)),
+      true,
+    );
     chk("历史栏含 `docs/plans/` 下的文件（= 把史料当待办的口径错）", sc.hist.some(inPlans), false);
-    chk("历史栏非空", sc.hist.length > 0, true);
+    chk("历史栏非空", !histDirs.some(dirExists) || sc.hist.length > 0, true);
     chk("三栏均为 .md", [...sc.live, ...sc.memory, ...sc.hist].every((p) => p.endsWith(".md")), true);
     // 三栏**互不重叠**：同一份文档被两种相反的处置方向同时要求 ⇒ 下面「分桶恒等」也没意义了
     chk(

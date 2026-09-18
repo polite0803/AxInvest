@@ -319,7 +319,7 @@
     "import": "导入角色",
     "importFailed": "导入角色失败: {{error}}",
     "importSkipped": "跳过 {{count}} 个，{{errors}} 个错误: {{detail}}",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "成功导入 {{count}} 个角色",
     "none": "无",
     "saveSuccess": "能力集已保存",
     "category": {
@@ -2457,7 +2457,7 @@
     "versionHistory": "版本历史",
     "versionUpdatedAt": "创建时间",
     "import": "导入",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "成功导入 {{count}} 个页面",
     "importInvalid": "文件无效或为空",
     "export": "导出",
     "exportAll": "导出全部",
@@ -3095,7 +3095,7 @@
     "importFailed": "导入失败: {{error}}",
     "importFromFolder": "从文件夹导入专家",
     "importPathHint": "输入 本地仓库路径（如 ~/）",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "成功导入 {{count}} 个专家",
     "importTools": "匹配 {{count}} 个工具",
     "importWorkflows": "自动创建 {{count}} 个工作流",
     "importedCount": "已导入 {{count}} 个外部专家",
@@ -3569,7 +3569,7 @@
     "selectFolderFirst": "请先选择文件夹",
     "selectDestination": "请选择导入目标",
     "selectKnowledgeBaseFirst": "请先选择一个知识库",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "导入成功",
     "folderSelected": "文件夹已选择: {{path}}"
   },
   "learningGraph": {
@@ -4433,7 +4433,7 @@
     "importFromFile": "从文件导入",
     "importFromFolder": "从文件夹导入",
     "importFromUrl": "从 URL 导入",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "成功导入 {{count}} 个模板",
     "importTitle": "导入提示词模板",
     "imported": "已导入",
     "importedList": "已导入列表",
@@ -5331,7 +5331,7 @@
     "iconGroupModel": "模型",
     "iconGroupProvider": "厂商",
     "importData": "导入数据",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "数据导入成功，部分数据需要重启后生效",
     "indexStatus": {
       "failed": "索引失败",
       "indexed": "已索引",
@@ -5448,7 +5448,7 @@
       "importEmpty": "未找到有效的 MCP 服务器配置",
       "importParseError": "JSON 格式无效",
       "importPlaceholder": "粘贴 JSON 配置，例如：\n{\n  \"mcpServers\": {\n    \"server-name\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
-      "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+      "importSuccess": "成功导入 {{count}} 个服务器",
       "name": "名称",
       "noTools": "暂无工具",
       "notConfigured": "未配置连接",
@@ -7075,8 +7075,7 @@
       "confirm": "开始导入",
       "existingSources": "已有知识源",
       "selectExisting": "选择已有的知识源…",
-      "selectRequired": "请选择目标知识源",
-      "selectRequired": "请选择已有的 Wiki 知识源"
+      "selectRequired": "请选择已有的知识源"
     }
   },
   "sshConfig": {
@@ -8789,7 +8788,7 @@
       "importFailedWithError": "导入失败：{{error}}",
       "importHint": "导入将创建模板的新副本。导入的模板默认为自定义模板（非预设）。",
       "importStructuralErrors": "导入的工作流存在 {{count}} 个结构错误：\n{{details}}",
-      "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+      "importSuccess": "成功导入 {{count}} 个工作流",
       "importTemplate": "导入模板",
       "importValidationWarnings": "导入的工作流存在 {{count}} 个警告：\n{{details}}",
       "invalidJson": "JSON 格式无效",
@@ -8831,7 +8830,7 @@
     "importExportTemplates": "导入/导出模板",
     "importFailed": "导入失败",
     "importNote": "导入将创建模板的新副本",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "导入成功",
     "importTemplate": "导入模板",
     "inputSchema": "输入模式",
     "invalidJson": "JSON 格式无效",
@@ -13236,7 +13235,7 @@
       "yes": "是",
       "no": "否",
       "import": "导入",
-      "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+      "importSuccess": "已导入: {{name}}",
       "importFailed": "导入失败: {{error}}",
       "export": "导出为 .opcip",
       "exportSuccess": "已导出: {{name}}",
@@ -14297,7 +14296,7 @@
     "importHint": "格式：股票代码, 数量, 均价[, 名称] — 每行一条",
     "vlmHint": "将 VLM 识别持仓截图后的输出粘贴到这里",
     "vlmPlaceholder": "粘贴 VLM 输出...",
-    "importSuccess": "导入完成：已创建知识源 {{name}}，新增 {{imported}} 篇文档，跳过 {{skipped}} 篇，失败 {{errors}} 篇",
+    "importSuccess": "已导入 {{count}} 条持仓",
     "importFailed": "VLM 输出中未能解析出有效持仓",
     "preview": "预览",
     "importPlaceholder": "600519, 100, 1800.0, 贵州茅台"

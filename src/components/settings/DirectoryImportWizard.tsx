@@ -338,7 +338,10 @@ function DirectoryImportWizard({
     },
   ];
 
-  const summary = summarizeOutcome(t, mode, importResult!);
+  // ⚠ importResult 初始为 null，只有步骤 3 执行完才赋值。summary 仅步骤 2/3 展示，
+  // 不能在组件挂载期无条件计算（`importResult!` 会掩盖 null 并在挂载时崩溃，
+  // 被页面级错误边界捕获 → 整个工作台白屏）。故门控到非空时再算。
+  const summary = importResult ? summarizeOutcome(t, mode, importResult) : null;
 
   return (
     <Modal
@@ -597,12 +600,14 @@ function DirectoryImportWizard({
 
       {step === 2 && (
         <Space direction="vertical" style={{ width: "100%" }}>
-          <Spin spinning={importing}>
-            <Space direction="vertical" style={{ width: "100%" }}>
-              <Text strong>{summary.label}</Text>
-              <Text type="secondary">{summary.detail}</Text>
-            </Space>
-          </Spin>
+          {summary && (
+            <Spin spinning={importing}>
+              <Space direction="vertical" style={{ width: "100%" }}>
+                <Text strong>{summary.label}</Text>
+                <Text type="secondary">{summary.detail}</Text>
+              </Space>
+            </Spin>
+          )}
           {importResult && importResult.errorCount > 0 && (
             <Table<ImportDirectoryError>
               size="small"

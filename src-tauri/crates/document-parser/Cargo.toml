@@ -7,7 +7,7 @@ description = "Document text extraction: PDF, DOCX, XLSX, PPTX, and plain text"
 
 [dependencies]
 axagent-harness = { path = "../harness" }
-calamine = "0.26"
+calamine = "0.36"
 mailparse = "0.15"
 pdf-extract = "0.12"
 serde_json = "1"

@@ -45,7 +45,7 @@
 //! —— 但因为没人跑，所以没人知道，直到 v101 在 PG 上把应用启动彻底搞挂。
 //! 统一变量名是这条链上最便宜的一环；真正的根治是让 CI 起一个 PG service 去跑它们。
 
-use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
+use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
 
 /// 与 `search/tests/pg_integration.rs` **必须一致**（原先还要求与 `pg_migrations.rs` 一致，
 /// 该文件已于 2026-09-16 退休）。
@@ -63,18 +63,35 @@ async fn connect_or_skip() -> Option<DatabaseConnection> {
             return None;
         },
     };
-    // 走生产入口 `create_pool`，而非裸 `Database::connect`：后者连的是**全新空库**（一张
-    // 业务表都没有），而本测试后续要对 `notes` 做 `count` 与结构断言。生产路径
-    // `create_pool → db::initialize_schema → reconcile::apply::bootstrap_schema` 会把
-    // `notes` / `memory_items` / `vec_*_meta` 等全部业务表建出 —— 也只有这样，CI 的
-    // pgvector 全新空库（`POSTGRES_DB: axagent_test`）才能既验证落地又通过计数，
-    // 不会一上来就 `relation "notes" does not exist`。
-    Some(
-        axagent_dao::db::create_pool(&url)
-            .await
-            .expect("生产初始化链（历史迁移 + 声明式收敛 + 种子）应成功")
-            .conn,
-    )
+    // ── 初始化（三个前置，顺序不可乱）──────────────────────────────────────
+    //
+    // 1. 连库（此刻库是**全新空库**：CI 的 pgvector 镜像只创建 `axagent_test` 库，
+    //    里面一张业务表都没有，`POSTGRES_DB` 不会替我们建业务库）。
+    let db = Database::connect(&url).await.expect("应能连接 PostgreSQL");
+    // 2. `CREATE EXTENSION vector` **必须先于建表**。pgvector 镜像**不自动**启用扩展
+    //    （`axagent-search` 的 `pg_integration` 也自己建它）—— 若缺它，下面 bootstrap
+    //    建第一条依赖 `vector` 类型的表就会失败并 **abort 整批后续表**（含 `notes` /
+    //    `providers`），却只留下 `relation "x" does not exist` 的表象（abort 的原始
+    //    SQL 错误被 tracing 吞掉，见下方注释）。`IF NOT EXISTS` 幂等，旧库已装不受影响。
+    db.execute_unprepared("CREATE EXTENSION IF NOT EXISTS vector").await.unwrap_or_else(|e| {
+        panic!("建 vector 扩展失败（bootstrap 将因 vector 类型缺失而 abort）：{e}")
+    });
+    // 3. 历史迁移（清单已清空=no-op，但保留以对齐生产 `initialize_schema`）。
+    axagent_dao::ddl::run_initialization(&db).await.expect("历史迁移（no-op）应成功");
+    // 4. 声明式收敛：把 `notes` / `memory_items` / `vec_*_meta` 等全部业务表建出。
+    //    ⚠ 必须断言 `aborted == None`：引擎对执行期失败的处置是 **fail-open**（warn 后
+    //    假装成功、后续表 AbortedAfterError 跳过），且该 warn 由 tracing 发出、本测试
+    //    未初始化 subscriber ⇒ **不打印**。若无此断言，「建表没建完」会被静默吞掉，
+    //    只会落到后面 `relation "notes" does not exist` 式的表层失败上。
+    let out = axagent_dao::reconcile::apply::bootstrap_schema(&db).await.expect("声明式收敛应成功");
+    if let Some(aborted) = &out.aborted {
+        panic!(
+            "bootstrap 建表**未完整**（abort）：{aborted}。\
+             \n      该库是全新空库 ⇒ 建表未完整即部分业务表缺失，后续断言会抓假失败。\
+             \n      请以本 panic 的 abort 原文为准定位真正失败的那条 DDL。"
+        );
+    }
+    Some(db)
 }
 
 async fn scalar_i64(db: &DatabaseConnection, sql: &str) -> i64 {

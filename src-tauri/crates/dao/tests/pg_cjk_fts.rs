@@ -87,15 +87,6 @@ async fn cjk_ngram_lands_and_enables_chinese_full_text_search() {
         "本测试只验 PG —— 中文全文检索的 SQLite 路径是另一套实现（FTS5），未在 v227 范围内"
     );
 
-    // ── 0. 迁移前置：记录迁移前的基线，用于事后对比 ──
-    //
-    // 用 plainto_tsquery（旧查询方式）的命中数作为"修复前"的等价指标：
-    // v227 只改生成列定义，不改数据；旧查询方式在新索引上会命中更少（因为
-    // 新索引的 token 是 ngram 化的，整句 token 不再存在）。
-    // 因此这个数在迁移前后都会很小，不能作为对比项 —— 改用下面的 notes 计数。
-
-    let notes_total = scalar_i64(&db, "SELECT count(*)::bigint AS n FROM notes").await;
-
     // ── 1. 确保已落地 ──
     //
     // 改走 `bootstrap_schema`（版本化迁移已于 2026-09-16 清空，`run_migrations`
@@ -109,6 +100,19 @@ async fn cjk_ngram_lands_and_enables_chinese_full_text_search() {
     //   引擎不会重写存量库里形态不同的生成列，这一项已记入 PLAN。
     let started = std::time::Instant::now();
     axagent_dao::reconcile::apply::bootstrap_schema(&db).await.expect("引擎收敛必须成功");
+
+    // ── 0（置于 bootstrap 之后）. 记录 notes 总量，用于事后对比/空库跳过 ──
+    //
+    // ⚠ 2026-09-19 修正顺序：原实现把 `count(*) FROM notes` 放在 bootstrap **之前**，
+    //   假设连接到「已有业务数据的库」（见旧注释「notes 48590 行」）。
+    //   而 CI 起的是 pgvector **全新空库**（`POSTGRES_DB: axagent_test`）⇒ 表尚未建出
+    //   ⇒ `relation "notes" does not exist` 直接崩，PG 集成测试在 CI 首次真跑即红。
+    //
+    //   语义核对：`notes_total` 只用于两句 println 与「空库则跳过效果断言」（见步骤 4），
+    //   不参与「迁移前/后」对比 —— 注释里那个 plainto_tsquery 命中 2 行的基线早已不用。
+    //   bootstrap 是「纯新增类别」收敛（只建表/函数/索引，不改存量数据），故把计数移到
+    //   bootstrap 之后语义不变：存量库里 read 到同一批行，全新库里读到 0（naturally 跳过）。
+    let notes_total = scalar_i64(&db, "SELECT count(*)::bigint AS n FROM notes").await;
     println!(
         "[cjk-ngram] bootstrap_schema 耗时 {:?}（notes {} 行）",
         started.elapsed(),

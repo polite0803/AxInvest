@@ -271,6 +271,8 @@ pub struct KnowledgeDocument {
     pub size_bytes: i64,
     pub indexing_status: String, // pending | indexing | ready | failed
     pub doc_type: String,        // file | url | text | conversation | ...
+    /// 源文件内容 sha256（十六进制小写）；空串 = 未记录 / 不可读（旧数据）
+    pub content_hash: String,
     pub index_error: Option<String>,
     pub source_conversation_id: Option<String>,
 }

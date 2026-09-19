@@ -311,6 +311,9 @@ pub fn run() {
                 dir
             };
 
+            // 清理目录导入遗留的临时解包目录（崩溃 / 强杀可能残留）
+            crate::commands::knowledge::cleanup_import_tmp_dirs();
+
             android_utils::mark_startup_phase("db_init_start");
 
             // 直接使用 Tauri 主 runtime 初始化数据库（无需 spawn_block_on）。

@@ -9,7 +9,7 @@ import { useProviderStore, useSourceStore } from "@/stores";
 import { useLlmWikiStore, type Wiki } from "@/stores/feature/llmWikiStore";
 import { useMemoryStore } from "@/stores/feature/memoryStore";
 import type { SourceConfig, UnifiedSource } from "@/stores/feature/sourceStore";
-import type { ImportDirectoryResult, KnowledgeBase, SyncDirectoryResult } from "@/types";
+import type { KnowledgeBase } from "@/types";
 import {
   App as AntdApp,
   Button,
@@ -22,7 +22,6 @@ import {
   Input,
   Modal,
   Popconfirm,
-  Radio,
   Row,
   Select,
   Space,
@@ -57,6 +56,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { DirectoryImportWizard } from "./DirectoryImportWizard";
 import { KnowledgeBaseDocuments } from "./KnowledgeBaseDocuments";
 
 const { Text, Paragraph } = Typography;
@@ -422,208 +422,6 @@ function CreateSourceModal({
               onChange={(val) => form.setFieldValue("embeddingProvider", val)}
             />
           </Form.Item>
-        )}
-      </Form>
-    </Modal>
-  );
-}
-
-/// 从目录导入/同步通用知识源的 Modal：
-/// - create：创建知识库（create_source）→ 导入所选目录全部文档（import_knowledge_directory）
-/// - update：增量同步目录内容到已有知识库（sync_project_knowledge_sources）
-function ImportDirectoryModal({
-  open,
-  initialMode,
-  onClose,
-}: {
-  open: boolean;
-  initialMode: "create" | "update";
-  onClose: () => void;
-}) {
-  const { t } = useTranslation();
-  const { fetchSources } = useSourceStore();
-  const allSources = useSourceStore((s) => s.sources);
-  const knowledgeSources = allSources.filter((s) => s.containerType === "knowledge" && s.name);
-  const [form] = Form.useForm();
-  const [importing, setImporting] = useState(false);
-  const [dirPath, setDirPath] = useState("");
-  const { message: messageApi } = AntdApp.useApp();
-  const mode: "create" | "update" = Form.useWatch("mode", form) ?? initialMode;
-
-  // 打开时同步初始 mode 与默认名称
-  useEffect(() => {
-    if (open) {
-      setDirPath("");
-      form.setFieldsValue({
-        mode: initialMode,
-        sourceName: "",
-        targetBaseId: undefined,
-        sourcePath: "",
-      });
-    }
-  }, [open, initialMode, form]);
-
-  const handleSelectDirectory = useCallback(async () => {
-    try {
-      const { open: openDialog } = await import("@tauri-apps/plugin-dialog");
-      const selected = await openDialog({ directory: true, multiple: false });
-      if (typeof selected === "string") {
-        setDirPath(selected);
-        form.setFieldValue("sourcePath", selected);
-      }
-    } catch {
-      // 用户取消或环境不支持
-    }
-  }, [form]);
-
-  const handleSubmit = async () => {
-    try {
-      if (!dirPath) {
-        messageApi.error(t("sourceManager.importProjectModal.directoryRequired"));
-        return;
-      }
-      const values = await form.validateFields();
-      setImporting(true);
-      if (mode === "create") {
-        // 通用流程：创建知识库 → 导入所选目录下的全部文档
-        const created = await invoke<UnifiedSource>("create_source", {
-          input: {
-            name: values.sourceName,
-            sourceType: "knowledge",
-            description: null,
-            embeddingProvider: values.embeddingProvider ?? null,
-          },
-        });
-        const result = await invoke<ImportDirectoryResult>("import_knowledge_directory", {
-          baseId: created.id,
-          directoryPath: dirPath,
-          recursive: true,
-        });
-        messageApi.success(t("sourceManager.importSuccess", {
-          imported: result.importedCount,
-          skipped: result.skippedCount,
-          errors: result.errorCount,
-          name: created.name,
-        }));
-        if (!created.embeddingProvider) {
-          messageApi.info(t("sourceManager.importNoEmbedding"));
-        }
-      } else {
-        // 通用流程：增量同步目录内容到已有知识库
-        const result = await invoke<SyncDirectoryResult>("sync_project_knowledge_sources", {
-          baseId: values.targetBaseId,
-          sourcePath: dirPath,
-          recursive: true,
-        });
-        messageApi.success(t("sourceManager.syncSuccess", {
-          added: result.addedCount,
-          updated: result.updatedCount,
-          deleted: result.deletedCount,
-          skipped: result.skippedCount,
-        }));
-      }
-      await fetchSources();
-      form.resetFields();
-      onClose();
-    } catch (e) {
-      messageApi.error(String(e));
-    } finally {
-      setImporting(false);
-    }
-  };
-
-  return (
-    <Modal
-      title={t("sourceManager.importProjectModal.title")}
-      open={open}
-      onOk={handleSubmit}
-      onCancel={() => {
-        form.resetFields();
-        onClose();
-      }}
-      okText={t("sourceManager.importProjectModal.confirm")}
-      confirmLoading={importing}
-      width={520}
-    >
-      <Form form={form} layout="vertical">
-        <Form.Item
-          label={t("sourceManager.importProjectModal.directory")}
-        >
-          <Space.Compact style={{ width: "100%" }}>
-            <Input
-              placeholder={t("sourceManager.importProjectModal.directoryPlaceholder")}
-              value={dirPath}
-              readOnly
-              style={{ width: "100%" }}
-            />
-            <Button
-              onClick={handleSelectDirectory}
-              icon={<FolderPlus size={12} />}
-            >
-              {t("sourceManager.importProjectModal.selectDirectory")}
-            </Button>
-          </Space.Compact>
-        </Form.Item>
-        <Form.Item
-          name={mode === "update" ? "targetBaseId" : "sourceName"}
-          label={mode === "update"
-            ? t("sourceManager.importProjectModal.existingSources")
-            : t("sourceManager.importProjectModal.sourceName")}
-          rules={[{
-            required: true,
-            message: mode === "update"
-              ? t("sourceManager.importProjectModal.selectRequired")
-              : t("sourceManager.importProjectModal.sourceNameRequired"),
-          }]}
-          extra={mode === "create" ? t("sourceManager.importProjectModal.sourceNameHint") : undefined}
-        >
-          {mode === "update"
-            ? (
-              <Select
-                placeholder={t("sourceManager.importProjectModal.selectExisting")}
-                options={knowledgeSources.map((s) => ({ label: s.name, value: s.id }))}
-              />
-            )
-            : <Input placeholder={t("sourceManager.importProjectModal.sourceNamePlaceholder")} />}
-        </Form.Item>
-        <Form.Item
-          name="mode"
-          label={t("sourceManager.importProjectModal.mode")}
-          rules={[{ required: true }]}
-        >
-          <Radio.Group>
-            <Radio value="create">
-              <Text strong>{t("sourceManager.importProjectModal.modeCreate")}</Text>
-              <br />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t("sourceManager.importProjectModal.modeCreateDesc")}
-              </Text>
-            </Radio>
-            <Radio value="update" style={{ display: "block", marginLeft: 0, marginTop: 8 }}>
-              <Text strong>{t("sourceManager.importProjectModal.modeUpdate")}</Text>
-              <br />
-              <Text type="secondary" style={{ fontSize: 12 }}>
-                {t("sourceManager.importProjectModal.modeUpdateDesc")}
-              </Text>
-            </Radio>
-          </Radio.Group>
-        </Form.Item>
-        <Form.Item
-          name="embeddingProvider"
-          label={t("sourceManager.importProjectModal.embeddingModel")}
-          extra={t("sourceManager.importProjectModal.embeddingModelHint")}
-        >
-          <EmbeddingModelSelect
-            value={form.getFieldValue("embeddingProvider")}
-            onChange={(val) => form.setFieldValue("embeddingProvider", val)}
-            placeholder={t("sourceManager.importProjectModal.embeddingModelPlaceholder")}
-            style={{ width: "100%" }}
-          />
-        </Form.Item>
-        {mode === "update" && (
-          <Text type="warning" style={{ fontSize: 12 }}>
-            {t("sourceManager.importProjectModal.updateWarning")}
-          </Text>
         )}
       </Form>
     </Modal>
@@ -1964,7 +1762,7 @@ function SourceManager() {
         onClose={() => setCreateOpen(false)}
       />
 
-      <ImportDirectoryModal
+      <DirectoryImportWizard
         open={importOpen}
         initialMode={importMode}
         onClose={() => setImportOpen(false)}

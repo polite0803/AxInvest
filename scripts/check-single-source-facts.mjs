@@ -1345,6 +1345,7 @@ if (process.argv.includes("--selftest")) {
 const failures = []; // 客观错（BROKEN / 越界 / 空行 / 载体值不等）
 const suspects = []; // 软判据：疑似腐烂
 const notes = []; // 提示 / 覆盖范围自陈
+const docExempt = []; // `.rs → .md` 引用：豁免不查（2026-09-19 用户裁决，理由见主循环）
 const nonloc = new Map(); // NONLOC：无法定位的引用（计数用，不算失败）
 const nonlocSamples = []; // 未覆盖的引用点名（不列的话「0 腐烂」会被误读成「全查过了」）
 const nonlocDetail = []; // --dump-nonloc 用：引用处行原文 + 抽取器给出的 srcLine（**不自己再找 needle**）
@@ -1388,6 +1389,17 @@ for (const abs of rustFiles) {
     const key = `${rel(abs)}::${r.file}:${r.line}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    // ⚠ `.rs → .md` 引用**豁免不查**（2026-09-19 用户裁决，CI 实证）：
+    //   · `docs/`（以及 `.workbuddy/`、`output/`）被 `.gitignore` 忽略 ⇒ CI 全新检出里
+    //     目标文档**不存在** ⇒ 同样的引用本地绿、CI 红，判据结果被环境劫持；
+    //   · 与既有「`.md` 属散文、抖动大，不查」口径一致（见文件头），`.md` 不是代码真源；
+    //   · 命中后从 `seen` 剔除 ⇒ 不污染 `locatedN = seen.size - …` 的推导；
+    //   · 点名计入 `docExempt`，在输出里**自陈**，防「0 失败」被误读成「全查过」。
+    if (/\.md$/i.test(r.file)) {
+      seen.delete(key);
+      docExempt.push({ src: rel(abs), srcLine: r.srcLine, file: r.file, line: r.line });
+      continue;
+    }
 
     // ── ① 第三方 crate 源码引用：与「能否在本仓定位」**正交**，故必须先问 ──────
     //
@@ -2053,6 +2065,13 @@ if (suspects.length > 0) {
     console.error(`   ~ ${s.what}`);
     if (s.at) console.error(s.at);
   }
+}
+if (docExempt.length > 0) {
+  const uniq = [...new Set(docExempt.map((d) => `${d.src}:${d.srcLine + 1} → ${d.file}:${d.line}`))].sort();
+  notes.push(
+    "**`.rs→.md` 引用豁免 " + uniq.length + " 条**（docs/ 等被 gitignore ⇒ CI 检出无目标文档；`.md` 属散文不查）\n     " +
+      uniq.join("\n     "),
+  );
 }
 for (const n of notes) console.log(`ℹ ${n}`);
 

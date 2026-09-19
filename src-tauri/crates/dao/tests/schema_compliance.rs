@@ -574,6 +574,7 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("size_bytes", "BIGINT"),
             ("indexing_status", "TEXT"),
             ("doc_type", "TEXT"),
+            ("content_hash", "TEXT"),
             ("index_error", "TEXT"),
             ("source_conversation_id", "TEXT"),
             ("created_at", "BIGINT"),

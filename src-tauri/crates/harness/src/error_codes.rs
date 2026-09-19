@@ -286,6 +286,10 @@ pub mod knowledge {
     pub const INDEX_FAILED: &str = "KNOWLEDGE_INDEX_FAILED";
     /// 目录导入失败
     pub const IMPORT_DIR_FAILED: &str = "KNOWLEDGE_IMPORT_DIR_FAILED";
+    /// 目录预扫描失败（导入前预览文件清单）
+    pub const SCAN_DIR_FAILED: &str = "KNOWLEDGE_SCAN_DIR_FAILED";
+    /// 按错误清单重试导入失败
+    pub const RETRY_IMPORT_FAILED: &str = "KNOWLEDGE_RETRY_IMPORT_FAILED";
     /// 添加文档失败
     pub const ADD_DOCUMENT_FAILED: &str = "KNOWLEDGE_ADD_DOCUMENT_FAILED";
     /// 删除文档失败

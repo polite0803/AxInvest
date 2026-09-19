@@ -312,9 +312,11 @@ impl CapabilityPackAdapter for SoftwareDevCapabilityPackAdapter {
             MissionType::Generation
         } else if lower.contains("审查") || lower.contains("review") {
             MissionType::Review
-        } else if lower.contains("修复") || lower.contains("bug") {
-            MissionType::Fix
-        } else if lower.contains("重构") || lower.contains("refactor") {
+        } else if lower.contains("修复")
+            || lower.contains("bug")
+            || lower.contains("重构")
+            || lower.contains("refactor")
+        {
             MissionType::Fix
         } else {
             MissionType::Planning

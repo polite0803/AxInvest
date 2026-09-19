@@ -88,6 +88,8 @@ interface KnowledgeState {
     directoryPath: string,
     recursive?: boolean,
     extensions?: string[],
+    generateMarkdown?: boolean,
+    vaultId?: string,
   ) => Promise<ImportDirectoryResult>;
   setSelectedBaseId: (id: string | null) => void;
   setupEventListeners: () => Promise<() => void>;
@@ -269,13 +271,22 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     }
   },
 
-  importDirectory: async (baseId, directoryPath, recursive = false, extensions?: string[]) => {
+  importDirectory: async (
+    baseId,
+    directoryPath,
+    recursive = false,
+    extensions?: string[],
+    generateMarkdown?: boolean,
+    vaultId?: string,
+  ) => {
     try {
       const result = await invoke<ImportDirectoryResult>("import_knowledge_directory", {
         baseId,
         directoryPath,
         recursive,
         extensions,
+        generateMarkdown,
+        vaultId,
       });
       await get().loadDocuments(baseId);
       return result;

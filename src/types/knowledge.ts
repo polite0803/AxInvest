@@ -46,6 +46,8 @@ export type KnowledgeDocument = {
   sizeBytes: number;
   indexingStatus: IndexingStatus;
   docType: string;
+  /** 源文件内容 sha256（十六进制小写）；空串 = 未记录 / 不可读（旧数据） */
+  contentHash: string;
   indexError?: string;
   sourceConversationId?: string;
   // 后端 KnowledgeDocumentDto 实际返回（repo_dtos.rs），此前缺失
@@ -56,6 +58,43 @@ export type KnowledgeDocument = {
 export type ImportDirectoryError = {
   path: string;
   error: string;
+  /** 可选错误码（对应后端 `error_code` 常量），前端可按码走 i18n 翻译；缺省时回退显示 error 原文 */
+  code?: string | null;
+};
+
+/** 目录导入遇到「目标文档已存在」时的冲突处理策略（对应后端 `ConflictPolicy`） */
+export type ConflictPolicy = "skip" | "overwrite";
+
+/** 目录预扫描结果中的单个可导入文件（对应后端 `DirectoryScanFile`） */
+export type DirectoryScanFile = {
+  /** 文件绝对路径（压缩包内部文件为解包后的临时路径，导入时按此路径读取） */
+  path: string;
+  /** 相对目录根的路径（POSIX 风格），导入时作为文档标题 */
+  relPath: string;
+  /** 无点小写扩展名（如 `md`、`pdf`） */
+  extension: string;
+  /** 文件大小（字节） */
+  sizeBytes: number;
+  /** 是否来自压缩包解包（true 时 path 指向临时解包目录） */
+  fromArchive: boolean;
+  /** KB 中是否已存在相同 sourcePath 的文档（导入时按 conflict 策略处理） */
+  exists: boolean;
+};
+
+/** 目录预扫描结果（导入前预览：文件清单 + 统计 + 与 KB 现有文档的重叠情况） */
+export type DirectoryScanResult = {
+  directoryPath: string;
+  recursive: boolean;
+  /** 可导入文件总数（含压缩包解包出的文件） */
+  totalCount: number;
+  /** 被跳过的文件数（隐藏项 / 不支持的扩展名 / ignore 命中 / 解包失败） */
+  skippedCount: number;
+  skipped: string[];
+  files: DirectoryScanFile[];
+  /** KB 中已存在相同 sourcePath 的文档数（conflict=skip 时这些文件将被跳过） */
+  existingCount: number;
+  /** 实际使用的嵌入模型 provider（null 表示未配置，导入后不会自动索引） */
+  embeddingProvider: string | null;
 };
 
 export type ImportDirectoryResult = {

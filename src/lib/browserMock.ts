@@ -3230,6 +3230,7 @@ async function executeCommand<T>(
           sizeBytes: 0,
           indexingStatus: "pending",
           docType: "document",
+          contentHash: "",
         };
         kbs4[kbi].documents = [...(kbs4[kbi].documents || []), doc];
         kbs4[kbi].updated_at = nowTs();

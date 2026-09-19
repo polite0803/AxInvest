@@ -57,6 +57,7 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6"
 enigo = "0.6"
+globset = "0.4"
 hex = "0.4"
 image = { version = "0.25", features = ["png"] }
 insta = { version = "1.48", features = ["yaml", "json", "redactions"] }
@@ -201,6 +202,7 @@ dirs = "6"
 feed-rs = "2"
 flate2 = "1"
 futures = "0.3"
+globset = { workspace = true }
 hex = { workspace = true }
 hostname = "0.4"
 inventory = "0.3"

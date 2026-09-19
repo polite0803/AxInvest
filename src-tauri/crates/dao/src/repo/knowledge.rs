@@ -2,6 +2,7 @@
 
 use sea_orm::sea_query::Expr;
 use sea_orm::*;
+use sha2::{Digest, Sha256};
 
 use axagent_entities::{
     knowledge_attributes, knowledge_bases, knowledge_documents, knowledge_entities,
@@ -66,6 +67,7 @@ fn model_to_doc(m: knowledge_documents::Model) -> KnowledgeDocument {
         size_bytes: m.size_bytes,
         indexing_status: m.indexing_status,
         doc_type: m.doc_type,
+        content_hash: m.content_hash,
         index_error: m.index_error,
         source_conversation_id: m.source_conversation_id,
     }
@@ -296,6 +298,21 @@ pub async fn get_document_mtime_map(
     Ok(models.into_iter().map(|m| (m.id, m.updated_at)).collect())
 }
 
+/// 计算源文件内容的 sha256 指纹（十六进制小写）。
+///
+/// 文件不可读 / 非文件 → 空串（与「旧数据未记录」同一表示），调用方退化为
+/// size+mtime 增量比对，不阻塞导入。指纹用于内容级去重、touch 识别与移动识别。
+/// `pub` 供主 crate（knowledge.rs 的 import/sync 命令层）复用，避免两处重复实现。
+pub fn file_sha256(path: &std::path::Path) -> String {
+    std::fs::read(path)
+        .map(|bytes| {
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            hex::encode(hasher.finalize().as_slice())
+        })
+        .unwrap_or_default()
+}
+
 pub async fn add_document(
     db: &DatabaseConnection,
     knowledge_base_id: &str,
@@ -318,6 +335,9 @@ pub async fn add_document(
             (m.len() as i64, mtime)
         })
         .unwrap_or((0, 0));
+    // 内容指纹：文件可读时计算 sha256（供去重 / touch 识别 / 移动识别）；不可读置空串，
+    // 退化为 size+mtime 比对（与旧数据一致），不阻塞导入。
+    let content_hash = file_sha256(std::path::Path::new(source_path));
 
     let am = knowledge_documents::ActiveModel {
         id: Set(id.clone()),
@@ -327,6 +347,7 @@ pub async fn add_document(
         mime_type: Set(mime_type.to_string()),
         size_bytes: Set(file_size),
         doc_type: Set(doc_type.unwrap_or("file").to_string()),
+        content_hash: Set(content_hash),
         // 记录源文件 mtime（epoch 秒），供 sync_project_knowledge_sources 做增量比对，
         // 避免每次同步对全部已存在文件删旧重加。旧数据该列为 0，同步侧回退到 size 比对。
         updated_at: Set(file_mtime_secs),
@@ -380,6 +401,76 @@ pub async fn delete_document(db: &DatabaseConnection, id: &str) -> Result<()> {
     if result.rows_affected == 0 {
         return Err(AxAgentError::NotFound(format!("KnowledgeDocument {}", id)));
     }
+    Ok(())
+}
+
+/// 按内容指纹反查文档（移动识别用）：磁盘上出现「新路径 + 内容与某已存在文档相同」时，
+/// 判定为文件移动而非新增。旧数据 content_hash 为空串，反查不到。
+pub async fn find_documents_by_content_hash(
+    db: &DatabaseConnection,
+    base_id: &str,
+    content_hash: &str,
+) -> Result<Vec<KnowledgeDocument>> {
+    let models = knowledge_documents::Entity::find()
+        .filter(knowledge_documents::Column::KnowledgeBaseId.eq(base_id))
+        .filter(knowledge_documents::Column::ContentHash.eq(content_hash))
+        .all(db)
+        .await?;
+    Ok(models.into_iter().map(model_to_doc).collect())
+}
+
+/// 更新文档的源文件位置（移动识别）。
+///
+/// 内容未变（hash 相同），向量与 content_hash 保留；同步刷新 size 与 updated_at
+/// （源文件 mtime），下次同步即可增量跳过，不会因移动触发全量重索引。
+pub async fn update_document_source_path(
+    db: &DatabaseConnection,
+    doc_id: &str,
+    source_path: &str,
+    title: &str,
+) -> Result<()> {
+    let mut am: knowledge_documents::ActiveModel = knowledge_documents::Entity::find_by_id(doc_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| AxAgentError::NotFound(format!("KnowledgeDocument {}", doc_id)))?
+        .into();
+
+    let (file_size, file_mtime_secs) = std::fs::metadata(source_path)
+        .map(|m| {
+            let mtime = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            (m.len() as i64, mtime)
+        })
+        .unwrap_or((0, 0));
+
+    am.source_path = Set(source_path.to_string());
+    am.title = Set(title.to_string());
+    am.size_bytes = Set(file_size);
+    am.updated_at = Set(file_mtime_secs);
+    am.update(db).await?;
+    Ok(())
+}
+
+/// 仅刷新文档记录的源文件 mtime（touch 场景：mtime 变、内容 hash 未变）。
+///
+/// 文件被 `touch`（或复制）后 mtime 变新但内容未变，同步侧用 hash 判定「没真变化」，
+/// 此时更新记录中的 mtime 即可增量跳过，避免每次同步都重读文件比对 hash。
+pub async fn update_document_mtime(
+    db: &DatabaseConnection,
+    doc_id: &str,
+    mtime_secs: i64,
+) -> Result<()> {
+    let mut am: knowledge_documents::ActiveModel = knowledge_documents::Entity::find_by_id(doc_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| AxAgentError::NotFound(format!("KnowledgeDocument {}", doc_id)))?
+        .into();
+    am.updated_at = Set(mtime_secs);
+    am.update(db).await?;
     Ok(())
 }
 

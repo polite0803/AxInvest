@@ -147,6 +147,7 @@ describe("knowledgeStore - importDirectory", () => {
         sizeBytes: 10,
         indexingStatus: "pending",
         docType: "markdown",
+        contentHash: "",
       },
     ];
     invokeMock.mockResolvedValueOnce(makeResult()); // import_knowledge_directory
@@ -258,6 +259,7 @@ describe("knowledgeStore - documents", () => {
         sizeBytes: 1,
         indexingStatus: "ready",
         docType: "text",
+        contentHash: "",
       },
     ];
     invokeMock.mockResolvedValueOnce(docs);

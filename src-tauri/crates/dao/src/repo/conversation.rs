@@ -464,6 +464,7 @@ pub async fn archive_to_knowledge_base(
         size_bytes: Set(content_bytes),
         indexing_status: Set(constants::status::PENDING.to_string()),
         doc_type: Set("conversation".to_string()),
+        content_hash: Set(String::new()),
         index_error: Set(None),
         source_conversation_id: Set(Some(conversation_id.to_string())),
         created_at: Set(now),
@@ -781,6 +782,7 @@ pub async fn archive_to_knowledge_base(
         size_bytes: doc_model.size_bytes,
         indexing_status: doc_model.indexing_status,
         doc_type: doc_model.doc_type,
+        content_hash: doc_model.content_hash,
         index_error: doc_model.index_error,
         source_conversation_id: doc_model.source_conversation_id,
     };

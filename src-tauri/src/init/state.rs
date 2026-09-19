@@ -100,6 +100,26 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 注册 MultiAgentTriggerHook 到全局 HookChain（供后续 conversation loop 挂载使用）
     crate::commands::multi_agent::register_global_multi_agent_hook();
 
+    // 注入 document-parser 的外部工具配置（OCR 语言 / whisper 命令与模型路径 / ffmpeg）。
+    // 可用环境变量覆盖默认值：AXAGENT_OCR_LANG / AXAGENT_WHISPER_BIN /
+    // AXAGENT_WHISPER_MODEL / AXAGENT_FFMPEG_BIN（空值忽略，保持默认）。
+    {
+        let mut po = axagent_document_parser::ParserOptions::default();
+        if let Some(v) = std::env::var("AXAGENT_OCR_LANG").ok().filter(|v| !v.is_empty()) {
+            po.ocr_lang = v;
+        }
+        if let Some(v) = std::env::var("AXAGENT_WHISPER_BIN").ok().filter(|v| !v.is_empty()) {
+            po.whisper_bin = v;
+        }
+        if let Some(v) = std::env::var("AXAGENT_WHISPER_MODEL").ok().filter(|v| !v.is_empty()) {
+            po.whisper_model = v;
+        }
+        if let Some(v) = std::env::var("AXAGENT_FFMPEG_BIN").ok().filter(|v| !v.is_empty()) {
+            po.ffmpeg_bin = v;
+        }
+        axagent_document_parser::set_parser_options(po);
+    }
+
     // 注入 search 层的 5 个数据源 trait 实现。
     // search crate 不再依赖 axagent-dao / axagent-document-parser。
     axagent_search::sources::set_sources(
@@ -394,6 +414,11 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         Arc::new(DaoAgentSessionRepository::new(Arc::new(sea_db.clone())));
     let agent_session_manager = Arc::new(axagent_agent::SessionManager::new(agent_session_repo));
     let agent_cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>> = Arc::new(DashMap::new());
+    let knowledge_import_cancels: Arc<DashMap<String, tokio_util::sync::CancellationToken>> =
+        Arc::new(DashMap::new());
+    let knowledge_import_status: Arc<
+        TokioRwLock<std::collections::HashMap<String, crate::app_state::KnowledgeImportTaskStatus>>,
+    > = Arc::new(TokioRwLock::new(std::collections::HashMap::new()));
     let agent_paused: Arc<Mutex<std::collections::HashSet<String>>> =
         Arc::new(Mutex::new(std::collections::HashSet::new()));
     // P0-3：暂停桥接。conversationId → 共享 PauseState（runtime 循环在此等待）。
@@ -1550,6 +1575,8 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         pending_capability_gaps,
         agent_session_manager,
         agent_cancel_tokens,
+        knowledge_import_cancels,
+        knowledge_import_status,
         agent_paused,
         agent_pause_states,
         running_agents,

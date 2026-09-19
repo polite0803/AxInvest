@@ -209,6 +209,22 @@ pub type SessionShareStore =
 //   - `agent_*`（权限 / 取消 / 会话 / 反思等 agent 运行时状态）
 //   - `memory_service` / `shared_memory` / `sub_agent_registry` / `trajectory_*`
 //   - 其它领域服务（pattern_learner / rl_engine / cron_job_store / ...）
+
+/// 目录导入任务运行状态（进度事件与 status 命令共用同一 DTO）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeImportTaskStatus {
+    pub task_id: String,
+    /// 阶段：`scan` | `import` | `done` | `error` | `cancelled`
+    pub phase: String,
+    pub total: usize,
+    pub processed: usize,
+    pub imported: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub error: Option<String>,
+}
+
 pub struct AppState {
     pub gateway: Arc<Mutex<Option<axagent_gateway::server::GatewayServer>>>,
     pub close_to_tray: Arc<AtomicBool>,
@@ -268,6 +284,10 @@ pub struct AppState {
         Arc<tokio::sync::Mutex<std::collections::HashMap<String, CapabilityGapProposal>>>,
     pub agent_session_manager: Arc<axagent_agent::SessionManager>,
     pub agent_cancel_tokens: Arc<DashMap<String, Arc<AtomicBool>>>,
+    /// 目录导入任务取消令牌注册表：task_id → CancellationToken（cancel 命令触发）。
+    pub knowledge_import_cancels: Arc<DashMap<String, CancellationToken>>,
+    /// 目录导入任务运行状态：task_id → 状态（进度事件与 status 命令共用）。
+    pub knowledge_import_status: Arc<TokioRwLock<HashMap<String, KnowledgeImportTaskStatus>>>,
     pub agent_paused: Arc<Mutex<std::collections::HashSet<String>>>,
     /// P0-3 暂停桥接：conversationId → 共享 PauseState。
     /// `agent_pause`/`agent_resume` 通过它唤醒/挂起 runtime 循环（wait_while_paused）。

@@ -1222,7 +1222,9 @@ mod tests {
         assert!(cfg.automation_rules[0].enabled);
 
         // validations：独立段结构（entity_type/field/operator/value/message）
-        assert_eq!(cfg.validations.len(), 2);
+        // ⚠ 2026-09-19 同步：原硬编码 validate_accounting（金额为正、状态枚举）已迁入 YAML
+        // （见 accounting/runtime.yaml 第 17 行注释）⇒ 由 2 条扩为 4 条。
+        assert_eq!(cfg.validations.len(), 4);
         assert_eq!(cfg.validations[0].entity_type, "invoice");
         assert_eq!(cfg.validations[0].operator, "ge");
         assert_eq!(cfg.validations[0].value, serde_json::json!(0));

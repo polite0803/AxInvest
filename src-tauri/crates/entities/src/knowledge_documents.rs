@@ -19,6 +19,10 @@ pub struct Model {
     pub indexing_status: String,
     #[sea_orm(default_value = "")]
     pub doc_type: String,
+    /// 源文件内容的 sha256 指纹（十六进制小写）。空串 = 旧数据未记录 / 文件不可读，
+    /// 此时退化为 size+mtime 增量比对。用于内容级去重、touch 识别与移动识别。
+    #[sea_orm(default_value = "")]
+    pub content_hash: String,
     pub index_error: Option<String>,
     pub source_conversation_id: Option<String>,
     #[sea_orm(default_value = 0)]

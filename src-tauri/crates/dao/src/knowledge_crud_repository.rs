@@ -243,6 +243,7 @@ impl KnowledgeDocumentRepository for DaoKnowledgeDocumentRepository {
             size_bytes: Set(input.size_bytes),
             indexing_status: Set("pending".to_string()),
             doc_type: Set(input.doc_type.clone()),
+            content_hash: Set(String::new()),
             index_error: Set(None),
             source_conversation_id: Set(None),
             created_at: Set(now),

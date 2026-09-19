@@ -14,6 +14,7 @@ fn main() {
             let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("common-controls.manifest");
             println!("cargo:rerun-if-changed={}", manifest.display());
+            println!("cargo:rerun-if-env-changed=__TAURI_WORKSPACE__");
             // lib unit tests（#[cfg(test)] 在 lib 内）链接时只接受 rustc-link-arg，
             // rustc-link-arg-tests 仅作用于 tests/ 集成测试，对 lib unit tests 无效。
             // 该参数会传播到依赖 agent 的 crate 的 bin 链接产物（cargo 依赖传播）。

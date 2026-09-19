@@ -45,7 +45,7 @@
 //! —— 但因为没人跑，所以没人知道，直到 v101 在 PG 上把应用启动彻底搞挂。
 //! 统一变量名是这条链上最便宜的一环；真正的根治是让 CI 起一个 PG service 去跑它们。
 
-use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
+use sea_orm::{ConnectionTrait, DatabaseConnection, DbBackend, Statement};
 
 /// 与 `search/tests/pg_integration.rs` **必须一致**（原先还要求与 `pg_migrations.rs` 一致，
 /// 该文件已于 2026-09-16 退休）。
@@ -63,7 +63,18 @@ async fn connect_or_skip() -> Option<DatabaseConnection> {
             return None;
         },
     };
-    Some(Database::connect(&url).await.expect("应能连接 PostgreSQL"))
+    // 走生产入口 `create_pool`，而非裸 `Database::connect`：后者连的是**全新空库**（一张
+    // 业务表都没有），而本测试后续要对 `notes` 做 `count` 与结构断言。生产路径
+    // `create_pool → db::initialize_schema → reconcile::apply::bootstrap_schema` 会把
+    // `notes` / `memory_items` / `vec_*_meta` 等全部业务表建出 —— 也只有这样，CI 的
+    // pgvector 全新空库（`POSTGRES_DB: axagent_test`）才能既验证落地又通过计数，
+    // 不会一上来就 `relation "notes" does not exist`。
+    Some(
+        axagent_dao::db::create_pool(&url)
+            .await
+            .expect("生产初始化链（历史迁移 + 声明式收敛 + 种子）应成功")
+            .conn,
+    )
 }
 
 async fn scalar_i64(db: &DatabaseConnection, sql: &str) -> i64 {
@@ -89,35 +100,29 @@ async fn cjk_ngram_lands_and_enables_chinese_full_text_search() {
 
     // ── 1. 确保已落地 ──
     //
-    // 改走 `bootstrap_schema`（版本化迁移已于 2026-09-16 清空，`run_migrations`
-    // 现在是空操作）。引擎从 `reconcile::extras` 的 `FUNCTIONS` + 生成列声明
-    // 建出 `ax_cjk_ngram()` 与 `to_tsvector('simple', ax_cjk_ngram(...))` 生成列，
-    // 语义与旧版 v227 迁移一致，且**没有**「版本号已到 227 就跳过」那条捷径。
+    // 落地由 `connect_or_skip` 借生产入口 `db::create_pool` 完成（内部 `initialize_schema`
+    // = 历史迁移（清单清空后 no-op）+ `reconcile::apply::bootstrap_schema` 声明式收敛 +
+    // 种子）。引擎从 `reconcile::extras` 的 `FUNCTIONS` + 生成列声明建出 `ax_cjk_ngram()`
+    // 与 `to_tsvector('simple', ax_cjk_ngram(...))` 生成列，语义与旧版 v227 迁移一致，
+    // 且**没有**「版本号已到 227 就跳过」那条捷径。
     //
     // ⚠ 语义差异（登记）：旧版靠版本表高水位跳过，本版每轮都真跑一次收敛判定；
     //   在「纯新增类别」白名单下，已存在的对象不会被重复创建。
     //   而生成列**表达式**的变更（`AlterColumnType` 一类）不在纯新增白名单里 ⇒
     //   引擎不会重写存量库里形态不同的生成列，这一项已记入 PLAN。
-    let started = std::time::Instant::now();
-    axagent_dao::reconcile::apply::bootstrap_schema(&db).await.expect("引擎收敛必须成功");
 
-    // ── 0（置于 bootstrap 之后）. 记录 notes 总量，用于事后对比/空库跳过 ──
+    // ── 0. 记录 notes 总量，用于事后对比/空库跳过 ──
     //
-    // ⚠ 2026-09-19 修正顺序：原实现把 `count(*) FROM notes` 放在 bootstrap **之前**，
-    //   假设连接到「已有业务数据的库」（见旧注释「notes 48590 行」）。
-    //   而 CI 起的是 pgvector **全新空库**（`POSTGRES_DB: axagent_test`）⇒ 表尚未建出
-    //   ⇒ `relation "notes" does not exist` 直接崩，PG 集成测试在 CI 首次真跑即红。
+    // ⚠ 2026-09-19 实证：本测试曾在 CI 的 **pgvector 全新空库**（`POSTGRES_DB:
+    //   axagent_test`）上 `relation "notes" does not exist` 崩溃。根因是裸 `Database::connect`
+    //   连上的是**一张业务表都没有**的库，只跑 `bootstrap_schema` 无法凭空补出基表 ——
+    //   计数放在 bootstrap **之前或之后**都一样崩（表根本不在）。改走 `create_pool` 后，
+    //   生产初始化链会先把 `notes` 等全部业务表建出，计数才成立。
     //
-    //   语义核对：`notes_total` 只用于两句 println 与「空库则跳过效果断言」（见步骤 4），
-    //   不参与「迁移前/后」对比 —— 注释里那个 plainto_tsquery 命中 2 行的基线早已不用。
-    //   bootstrap 是「纯新增类别」收敛（只建表/函数/索引，不改存量数据），故把计数移到
-    //   bootstrap 之后语义不变：存量库里 read 到同一批行，全新库里读到 0（naturally 跳过）。
+    //   `notes_total` 只用于两句 println 与「空库则跳过效果断言」（见步骤 4），不参与
+    //   「迁移前/后」对比。存量库里 read 到真实行数，全新库里读到 0（naturally 跳过）。
     let notes_total = scalar_i64(&db, "SELECT count(*)::bigint AS n FROM notes").await;
-    println!(
-        "[cjk-ngram] bootstrap_schema 耗时 {:?}（notes {} 行）",
-        started.elapsed(),
-        notes_total
-    );
+    println!("[cjk-ngram] 生产初始化链完成（notes {} 行）", notes_total);
 
     // ── 2. 函数存在且与 Rust 规范逐字节一致 ──
     //

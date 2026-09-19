@@ -520,13 +520,17 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          api-level: 34
-          target-sdk: 34
-          build-tools: '34.0.0'
-          cmake: '3.22.1'
+      - name: Use preinstalled Android SDK
+        # 依赖第三方 `android-actions/setup-android` 反而脆弱：其 v3 的输入白名单已改成
+        # `packages` 一套（旧 `api-level`/`build-tools` 等被判 unexpected），转而尝试安装
+        # legacy `tools` 包，而 cmdline-tools 16 已移除该包 ⇒ `sdkmanager` 直接 exit 1 挂死
+        # （实测 2026-09-19）。GitHub 托管 runner **已预装**完整 SDK（platforms/build-tools/
+        # platform-tools 均就绪），Android 工具链由本 job 上方 `nttld/setup-ndk` 单独安装，
+        # 故这里只需确认 SDK 存在、不再额外下载，去掉对易变第三方 action 的版本黑箱依赖。
+        run: |
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "--- platforms ---"; ls "$ANDROID_HOME/platforms" 2>/dev/null || true
+          echo "--- build-tools ---"; ls "$ANDROID_HOME/build-tools" 2>/dev/null || true
 
       - name: Verify NDK installation
         run: |

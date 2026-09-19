@@ -8,7 +8,7 @@ import { useIpcHealth } from "@/hooks/useIpcHealth";
 import { DEVTOOLS_SUB_PARAM, DEVTOOLS_SUB_PATHS, DEVTOOLS_SUBS, type DevToolsSub } from "@/lib/devtoolsSubTabs";
 import { CAPABILITY_DOMAIN_META } from "@/lib/domainMeta";
 import { BUILTIN_PAGE_PATH, DEFAULT_HOME } from "@/lib/pageRegistry";
-import { WORKSPACE_TAB_PARAM } from "@/lib/workspaceTabs";
+import { buildWorkspaceTabSearch, WORKSPACE_TAB_PARAM, type WorkspaceTab } from "@/lib/workspaceTabs";
 
 import { Button, Result, Spin } from "antd";
 import { lazy, memo, Suspense } from "react";
@@ -162,9 +162,16 @@ function NotFoundRoute() {
   );
 }
 
-/** 旧路由重定向到 /chat，通过 location.state.tab 传递目标功能 Tab。 */
-function redirectToChat(tab: string) {
-  return <Navigate to={BUILTIN_PAGE_PATH.chat} replace state={{ tab }} />;
+/** 旧路由重定向到 /chat，直接产出 URL 查询参数 `/chat?ws=<tab>`。
+ *
+ * 刻意**不走** `location.state` 机制：WorkspaceHub 的 state→URL 归一化只认 `tab`，
+ * 且整页 goto（刷新 / 直链 / E2E 导航）时首次 navigate 的 history.state 未必能可靠
+ * 落到 router 的 location.state，导致引擎回落到 store 持久化的上一个 Tab
+ * （实测 14 个 /knowledge Chromium E2E 全量超时，App 本身可渲染）。直接写出
+ * `?ws=` 后，WorkspaceHub 经 parseWorkspaceTab 首帧即命中，可深链、可刷新恢复。 */
+function redirectToChat(tab: WorkspaceTab) {
+  const search = buildWorkspaceTabSearch(window.location.search, tab);
+  return <Navigate to={{ pathname: BUILTIN_PAGE_PATH.chat, search }} replace />;
 }
 
 /** 开发工具旧子路由 → `/chat?ws=devtools&sub=<子页>`。
@@ -182,15 +189,15 @@ function redirectToDevTools(sub?: DevToolsSub) {
   return <Navigate to={{ pathname: BUILTIN_PAGE_PATH.chat, search: params.toString() }} replace />;
 }
 
-/** 重定向到 /chat 并保留当前 URL 的查询参数（如 template=xxx）。
+/** 重定向到 /chat 并保留当前 URL 的查询参数（如 template=xxx）、同时写入 `ws=<tab>`。
  * 用于 /workflow/new?template=xxx 等需要透传查询参数的场景。
+ * 与 redirectToChat 一致走 URL 查询形式（不走 location.state，见其上注释）。
  * 必须是真正的组件，因为 useLocation 只能在组件渲染时调用，
  * 而路由的 element 属性在路由定义时就被求值。 */
 function RedirectToChatWithParams({ tab }: { tab: string }) {
   const location = useLocation();
-  const qs = location.search;
-  const to = qs ? `${BUILTIN_PAGE_PATH.chat}${qs}` : BUILTIN_PAGE_PATH.chat;
-  return <Navigate to={to} replace state={{ tab }} />;
+  const search = buildWorkspaceTabSearch(location.search, tab as WorkspaceTab);
+  return <Navigate to={{ pathname: BUILTIN_PAGE_PATH.chat, search }} replace />;
 }
 
 /** 旧股票业务路由 → 投资中心 /invest?tab=…。

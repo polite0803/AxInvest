@@ -574,7 +574,7 @@ pub const DATA_DRIVEN_COLUMN: DataDrivenColumnDecl = DataDrivenColumnDecl {
     source: "knowledge-sources/lemonhu/edges.csv",
     meaning: "DB 列原样接收 `rtype` ⇒ 开放词表（DB 全表实测：非 ASCII 53 个 / 74325 行；\
               数据文件 `rtype` 层 24 distinct）",
-    evidence: "src/commands/knowledge.rs:1751（读 `edges.csv` 的 rtype 列）",
+    evidence: "src/commands/knowledge.rs:2872（读 `edges.csv` 的 rtype 列）",
 };
 
 /// 该值是否属于「数据驱动列写入的开放词表形态」：**含非 ASCII 字符**。

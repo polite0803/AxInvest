@@ -76,9 +76,20 @@ async fn connect_or_skip() -> Option<DatabaseConnection> {
     db.execute_unprepared("CREATE EXTENSION IF NOT EXISTS vector").await.unwrap_or_else(|e| {
         panic!("建 vector 扩展失败（bootstrap 将因 vector 类型缺失而 abort）：{e}")
     });
-    // 3. 历史迁移（清单已清空=no-op，但保留以对齐生产 `initialize_schema`）。
+    // 3. **先建分词函数，再建表**。`notes` 等表的生成列 **内联在 CREATE TABLE** 里引用
+    //    `ax_cjk_ngram(text)`，而声明式引擎把 `FUNCTIONS` 的建函数执行安排在建表**之后** ⇒
+    //    全新库 bootstrap 建第一张内联该函数的表即报
+    //    `function ax_cjk_ngram(text) does not exist` 并 abort 整批后续表。
+    //    （准确说：versionized「建依赖」段晚于「建表」段，二者对非空库都正常 —— 函数早已存在；
+    //    只有全新空库才暴露顺序。）与 vector 扩展同理，这里在建表前先建函数就解耦了顺序。
+    //    `render_function_sql()` 是 `CREATE OR REPLACE`，幂等，与引擎 `FUNCTIONS` 声明共用
+    //    同一份模板（`cjk_ngram.rs` 保证不手抄第二份）。
+    db.execute_unprepared(&axagent_dao::cjk_ngram::render_function_sql()).await.unwrap_or_else(
+        |e| panic!("建 ax_cjk_ngram 函数失败（bootstrap 将因函数缺失而 abort）：{e}"),
+    );
+    // 4. 历史迁移（清单已清空=no-op，但保留以对齐生产 `initialize_schema`）。
     axagent_dao::ddl::run_initialization(&db).await.expect("历史迁移（no-op）应成功");
-    // 4. 声明式收敛：把 `notes` / `memory_items` / `vec_*_meta` 等全部业务表建出。
+    // 5. 声明式收敛：把 `notes` / `memory_items` / `vec_*_meta` 等全部业务表建出。
     //    ⚠ 必须断言 `aborted == None`：引擎对执行期失败的处置是 **fail-open**（warn 后
     //    假装成功、后续表 AbortedAfterError 跳过），且该 warn 由 tracing 发出、本测试
     //    未初始化 subscriber ⇒ **不打印**。若无此断言，「建表没建完」会被静默吞掉，

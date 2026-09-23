@@ -2017,6 +2017,11 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
 
     // 荐股定时任务的推送通道是 OS 桌面通知，需要 AppHandle。
     // 此前该分支整个不存在，所以没传 app；恢复接线后必须带上。
+    // ⚠ 桌面通知命令（`commands::desktop`）被 `#[cfg(not(mobile))]` 排除，移动端下
+    // `app` / `app_handle` 均无处可用 ⇒ 一并门控，否则 Android 构建报 unused_variables。
+    #[cfg(mobile)]
+    let _ = app;
+    #[cfg(not(mobile))]
     let app_handle = app.clone();
 
     let store = state.cron_job_store.clone();
@@ -2237,6 +2242,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             let store = cron_store.clone();
             let db = sync_db.clone();
             let client = astock_client.clone();
+            #[cfg(not(mobile))]
             let app = app_handle.clone();
             let sink = delivery_sink.clone();
             let job_id = job.id.clone();

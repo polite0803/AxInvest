@@ -342,8 +342,13 @@ async fn send_high_value_notification(
         }
     }
 
-    // 同时通过日志记录，便于排查
-    tracing::info!("[DemandDiscovery] 高价值需求通知: 发现 {} 条高价值需求", count);
+    // 同时通过日志记录，便于排查。
+    // ⚠ 这里必须直接取 `high_value_leads.len()` 而非上面的 `count` —— 后者被
+    // `#[cfg(not(mobile))]` 门控，在 Android(mobile) 下不存在（曾导致 E0425 编译失败）。
+    tracing::info!(
+        "[DemandDiscovery] 高价值需求通知: 发现 {} 条高价值需求",
+        high_value_leads.len()
+    );
     for (id, score, title) in high_value_leads {
         tracing::info!(
             "[DemandDiscovery] 高价值需求详情: id={}, score={:.1}, title={}",

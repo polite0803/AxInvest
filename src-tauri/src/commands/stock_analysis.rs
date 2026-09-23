@@ -5633,7 +5633,12 @@ pub async fn get_evolution_history(
         .limit(limit.unwrap_or(50) as u64)
         .all(db)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            crate::commands::error::CommandError::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            )
+        })?;
     Ok(rows)
 }
 
@@ -5652,7 +5657,12 @@ pub async fn trigger_stock_evolution(
         .evolution_engine()
         .trigger_manual_evolution(&reason, template_id.as_deref())
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            crate::commands::error::CommandError::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            )
+        })
 }
 
 /// 拉取近期决策一致性分数趋势（Phase 3: 双视角一致性趋势图）

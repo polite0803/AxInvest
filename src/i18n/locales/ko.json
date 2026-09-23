@@ -16054,7 +16054,14 @@
       "calibrateApplyBest": "최적 파라미터 적용",
       "calibrateApplyDone": "템플릿에 최적 파라미터 적용됨",
       "calibrateRefreshCount": "{{total}}개 반성 기반",
-      "calibrateParsedCount": "{{parsed}}개 유효 제안 파싱됨"
+      "calibrateParsedCount": "{{parsed}}개 유효 제안 파싱됨",
+      "trigger": {
+        "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
+        "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
+        "missing_risk_assessment": "Risk assessment missing, add risk control steps",
+        "high_error_rate": "{{count}} error patterns detected, reduce errors",
+        "manual_trigger": "Manual trigger: {{reason}}"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",

@@ -16347,7 +16347,14 @@
       "noEvolutionData": "暂无进化记录",
       "agreementTrendLabel": "一致性趋势",
       "agreementRecentAvg": "近期平均一致性",
-      "agreementRange": "范围"
+      "agreementRange": "范围",
+      "trigger": {
+        "low_quality": "质量分 {{score}} 连续 {{count}} 次低于阈值 {{threshold}}",
+        "poor_signal_accuracy": "信号准确性得分 {{score}}，优化信号策略",
+        "missing_risk_assessment": "检测到风控缺失，补充风控步骤",
+        "high_error_rate": "错误模式 {{count}} 个，减少错误",
+        "manual_trigger": "手动触发：{{reason}}"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",

@@ -16278,7 +16278,14 @@
       "calibrateApplyBest": "應用最優參數",
       "calibrateApplyDone": "已應用最優參數到模板",
       "calibrateRefreshCount": "基於 {{total}} 條反思",
-      "calibrateParsedCount": "解析到 {{parsed}} 條有效建議"
+      "calibrateParsedCount": "解析到 {{parsed}} 條有效建議",
+      "trigger": {
+        "low_quality": "品質分 {{score}} 連續 {{count}} 次低於閾值 {{threshold}}",
+        "poor_signal_accuracy": "訊號準確性得分 {{score}}，優化訊號策略",
+        "missing_risk_assessment": "偵測到風控缺失，補充風控步驟",
+        "high_error_rate": "錯誤模式 {{count}} 個，減少錯誤",
+        "manual_trigger": "手動觸發：{{reason}}"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",

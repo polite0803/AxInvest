@@ -16299,7 +16299,14 @@
       "calibrateApplyBest": "Apply Optimal Parameters",
       "calibrateApplyDone": "Optimal parameters applied to template",
       "calibrateRefreshCount": "Based on {{total}} reflections",
-      "calibrateParsedCount": "Parsed {{parsed}} valid suggestions"
+      "calibrateParsedCount": "Parsed {{parsed}} valid suggestions",
+      "trigger": {
+        "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
+        "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
+        "missing_risk_assessment": "Risk assessment missing, add risk control steps",
+        "high_error_rate": "{{count}} error patterns detected, reduce errors",
+        "manual_trigger": "Manual trigger: {{reason}}"
+      }
     },
     "experimentTrail": {
       "acceptOrSkip": "Accept or Skip",

@@ -16054,7 +16054,14 @@
       "calibrateApplyBest": "应用最优参数",
       "calibrateApplyDone": "已应用最优参数到模板",
       "calibrateRefreshCount": "基于 {{total}} 条反思",
-      "calibrateParsedCount": "解析到 {{parsed}} 条有效建议"
+      "calibrateParsedCount": "解析到 {{parsed}} 条有效建议",
+      "trigger": {
+        "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
+        "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
+        "missing_risk_assessment": "Risk assessment missing, add risk control steps",
+        "high_error_rate": "{{count}} error patterns detected, reduce errors",
+        "manual_trigger": "Manual trigger: {{reason}}"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",

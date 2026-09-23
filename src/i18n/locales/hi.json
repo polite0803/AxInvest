@@ -16054,7 +16054,14 @@
       "calibrateApplyBest": "इष्टतम पैरामीटर लागू करें",
       "calibrateApplyDone": "इष्टतम पैरामीटर टेम्पलेट पर लागू किए गए",
       "calibrateRefreshCount": "{{total}} रिफ़्लेक्शन के आधार पर",
-      "calibrateParsedCount": "{{parsed}} मान्य सुझाव पार्स किए गए"
+      "calibrateParsedCount": "{{parsed}} मान्य सुझाव पार्स किए गए",
+      "trigger": {
+        "low_quality": "Quality score {{score}} below threshold {{threshold}} for {{count}} consecutive times",
+        "poor_signal_accuracy": "Signal accuracy score {{score}}, optimize signal strategy",
+        "missing_risk_assessment": "Risk assessment missing, add risk control steps",
+        "high_error_rate": "{{count}} error patterns detected, reduce errors",
+        "manual_trigger": "Manual trigger: {{reason}}"
+      }
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",

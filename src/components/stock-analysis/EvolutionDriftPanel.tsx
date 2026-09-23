@@ -47,21 +47,25 @@ function formatTime(ms: number): string {
 }
 
 /** 把后端落库的 trigger JSON（tagged enum，snake_case）解析成人类可读的原因 */
-function parseTrigger(raw: string): string {
+function parseTrigger(raw: string, t: (key: string, params?: Record<string, unknown>) => string): string {
   if (!raw) { return ""; }
   try {
     const obj = JSON.parse(raw);
     switch (obj.type) {
       case "low_quality":
-        return `质量分 ${obj.last_score} 连续 ${obj.consecutive_count} 次低于阈值 ${obj.threshold}`;
+        return t("stockAnalysis.evolutionDrift.trigger.low_quality", {
+          score: obj.last_score,
+          count: obj.consecutive_count,
+          threshold: obj.threshold,
+        });
       case "poor_signal_accuracy":
-        return `信号准确性得分 ${obj.score}，优化信号策略`;
+        return t("stockAnalysis.evolutionDrift.trigger.poor_signal_accuracy", { score: obj.score });
       case "missing_risk_assessment":
-        return "检测到风控缺失，补充风控步骤";
+        return t("stockAnalysis.evolutionDrift.trigger.missing_risk_assessment");
       case "high_error_rate":
-        return `错误模式 ${obj.error_count} 个，减少错误`;
+        return t("stockAnalysis.evolutionDrift.trigger.high_error_rate", { count: obj.error_count });
       case "manual_trigger":
-        return `手动触发：${obj.reason ?? ""}`;
+        return t("stockAnalysis.evolutionDrift.trigger.manual_trigger", { reason: obj.reason ?? "" });
       default:
         return raw;
     }
@@ -588,7 +592,7 @@ export function EvolutionDriftPanel() {
                   </Tag>
                   <Tag>{formatTime(h.createdAt)}</Tag>
                   <span style={{ color: "#595959", marginLeft: 4 }}>
-                    {parseTrigger(h.trigger)}
+                    {parseTrigger(h.trigger, t)}
                   </span>
                   {h.improvementSummary && (
                     <div style={{ color: "#8c8c8c", marginTop: 2, marginLeft: 4 }}>

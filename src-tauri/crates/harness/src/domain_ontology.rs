@@ -43,13 +43,13 @@
 //!
 //! | # | 位置 | 内容 |
 //! |---|---|---|
-//! | 1 | `src-tauri/src/commands/bottleneck-calc.rhai:175-177` | 顶层权重 fallback `0.35/0.35/0.30` |
-//! | 2 | `src-tauri/src/commands/bottleneck-calc.rhai:200` | `composite = Σ wᵢ·fᵢ`（**加权**） |
+//! | 1 | `src-tauri/src/commands/bottleneck-calc.rhai:114` | 顶层权重 fallback `0.35/0.35/0.30` |
+//! | 2 | `src-tauri/src/commands/bottleneck-calc.rhai:121` | `composite = Σ wᵢ·fᵢ`（**加权**，经 Rust 权威函数 bottleneck_node_score） |
 //! | 3 | `src-tauri/src/commands/strategy-scorer.rhai:212-214` | 顶层权重 fallback（**第二份脚本，独立一份**） |
 //! | 4 | `src-tauri/src/commands/strategy-scorer.rhai:237` | `composite = Σ wᵢ·fᵢ` |
 //! | 5 | `src-tauri/src/commands/stock_analysis_setup/seed_serenity.rs:1344-1364` | 模板变量默认值 + 描述文本 |
 //! | 6 | `src-tauri/agency_experts/stock-analysis/chokepoint-identifier.md:101` | `composite = 三力 / 3`（**等权**）← **与 2/4 矛盾** |
-//! | 7 | `src-tauri/agency_experts/stock-analysis/chokepoint-identifier.md:102` | 分档 `80 / 60` ← **与 `bottleneck-calc.rhai:221` 的 `75/55/35` 矛盾** |
+//! | 7 | `src-tauri/agency_experts/stock-analysis/chokepoint-identifier.md:102` | 分档 `80 / 60` ← **与 `bottleneck-calc.rhai:148` 的 `band_for_score` 分档逻辑矛盾** |
 //!
 //! ## 两条不同的处置（刻意的，勿"顺手统一"）
 //!
@@ -288,21 +288,21 @@ pub const CLASSES: &[OntoClass] = &[
         label: "供给刚性",
         parent: Some("BottleneckForce"),
         meaning: "供给端难以扩张的程度（集中度 / 技术壁垒 / 扩产周期）",
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:183",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:122",
     },
     OntoClass {
         id: "DemandElasticity",
         label: "需求弹性",
         parent: Some("BottleneckForce"),
         meaning: "下游需求真实且不可逆的程度（订单可见性 / 需求确定性）",
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:192",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:123",
     },
     OntoClass {
         id: "Irreplaceability",
         label: "不可替代性",
         parent: Some("BottleneckForce"),
         meaning: "替代方案缺失的程度（供应商数量 / 技术护城河）",
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:198",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:124",
     },
 ];
 
@@ -357,7 +357,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:183 | src-tauri/src/commands/bottleneck-calc.rhai:211",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:122 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
     Metric {
         id: "demand_elasticity_score",
@@ -366,7 +366,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:192 | src-tauri/src/commands/bottleneck-calc.rhai:212",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:123 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
     Metric {
         id: "irreplaceability_score",
@@ -375,7 +375,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:198 | src-tauri/src/commands/bottleneck-calc.rhai:213",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:124 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
     Metric {
         id: "bottleneck_composite",
@@ -384,7 +384,7 @@ pub const METRICS: &[Metric] = &[
         unit: "0-100 分",
         min: 0.0,
         max: 100.0,
-        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:200 | src-tauri/src/commands/bottleneck-calc.rhai:214",
+        evidence: "src-tauri/src/commands/bottleneck-calc.rhai:125 | src-tauri/src/commands/bottleneck-calc.rhai:148",
     },
 ];
 

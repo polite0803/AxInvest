@@ -398,7 +398,7 @@ fn profile_tools_have_no_orphans() {
 // 用户看到的是「启动失败」。
 //
 // 判据：辩手节点 id 的正确形态是 `bull-r{round}` / `bear-r{round}`，轮数由
-// `debate_max_rounds` 派生（`seed_stock_analysis.rs:1872` 的 `for round in
+// `debate_max_rounds` 派生（`seed_stock_analysis.rs:2490` 的 `for round in
 // 0..debate_max_rounds`）。因此任何**以字符串字面量形式**出现在「边的 source /
 // target」位置的 `bull-rN` / `bear-rN` 都是定时炸弹：轮数一变即悬空。
 //

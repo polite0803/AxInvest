@@ -512,7 +512,7 @@ pub const ORPHAN_EXEMPT: &[OrphanExemptDecl] = &[
 //
 // ## 这条声明修的是什么（2026-09-16 生产库实测事故）
 //
-// `crates/entities/src/lib.rs:253-278` 有 8 个**真 `pub mod`** 的侧车库实体：
+// `crates/entities/src/lib.rs:254-279` 有 8 个**真 `pub mod`** 的侧车库实体：
 // `ast_*`(5) + `file_index` + `l2_index_snapshots` + `l2_search_results`。该文件自己
 // 在注释里写着「⚠ 它们**不在主库**……在此声明的是 schema，与连接指向哪个库无关」。
 //
@@ -598,7 +598,7 @@ pub const NON_MAIN_DB: &[NonMainDbDecl] = &[
             "file_index",
         ],
         reason: "owner = src/indexing_triggers.rs:86 `INDEX_DB_FILENAME`（`index.db`，一个独立 \
-                 SQLite 文件）。这些实体只描述**那个文件**的 schema（见 entities/src/lib.rs:253-278）",
+                 SQLite 文件）。这些实体只描述**那个文件**的 schema（见 entities/src/lib.rs:254-279）",
         // 2026-09-17：原为 `Some(Dialect::Postgres)`。那是以「主库恒为 PG」为前提写的
         // 代理；主库方言由用户可配后它只在一条路径上成立。理由见上方「为什么双方言都排除」。
         dialect: None,
@@ -1281,7 +1281,7 @@ mod counts {
     ///
     /// `2` = ① `index.db` 族（`ast_*` + `file_index`）② `l2_cache.db` 族（`l2_*`）。
     const EXPECT_NON_MAIN_DB_RULES: usize = 2;
-    /// `NON_MAIN_DB` 覆盖的表数（细则见 `crates/entities/src/lib.rs:253-278`）。
+    /// `NON_MAIN_DB` 覆盖的表数（细则见 `crates/entities/src/lib.rs:254-279`）。
     const EXPECT_NON_MAIN_DB_TABLES: usize = 8;
     /// 表达式默认值声明 —— 不计入 `total_declarations`（它是**既有列的一个属性**，
     /// 不新增任何对象）。

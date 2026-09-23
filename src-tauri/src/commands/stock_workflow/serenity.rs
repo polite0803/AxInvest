@@ -878,7 +878,7 @@ pub async fn run_serenity_screening(
     let as_of_ctx = parse_asof_param(as_of_date.clone())?;
 
     // 运行前确保模板为最新版（幂等：版本已是最新则跳过）。
-    // 修复：启动时 seed 在异步任务中执行（src/lib.rs:446），失败被吞掉（src/lib.rs:449 只 log）。
+    // 历史上启动阶段 seed 在 fire-and-forget 异步任务中执行，失败仅 log 不阻塞，
     // 若数据库停留在旧版本（如 v2 缺少 baseline_* input_mapping），
     // Rhai 脚本会报 "Variable not found: baseline_semi"。此处兜底重新 seed。
     crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(state.harness.db())

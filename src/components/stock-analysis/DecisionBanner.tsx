@@ -675,16 +675,16 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
   ];
   const horizonEntries = HORIZON_KEYS
     .map((h) => ({ h, group: decision.horizonPriceMap?.[h.key] ?? null }))
-    .filter((e): e is { h: typeof e.h; group: HorizonPriceGroup } =>
-      Boolean(e.group && e.group.stopLossPct > 0),
-    );
+    .filter((e): e is { h: typeof e.h; group: HorizonPriceGroup } => Boolean(e.group && e.group.stopLossPct > 0));
 
   // 阶段2（PROPOSAL-stock-decision-four-horizon.md）：四周期独立决策面板。
   // 从 decisionsByHorizon 提取四组独立决策；仅在有数据（action 非空）的周期渲染。
   const horizonDecisionEntries = useMemo(() => {
     const dbh = decision.decisionsByHorizon;
     if (!dbh) { return []; }
-    const entries: Array<{ key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string; d: import("@/types").HorizonDecision }> = [];
+    const entries: Array<
+      { key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string; d: import("@/types").HorizonDecision }
+    > = [];
     for (const { key, tSuffix } of HORIZON_KEYS) {
       const d = dbh[key];
       if (d && d.action) {
@@ -1314,11 +1314,13 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               )}
             </div>
 
-            {/* 阶段1：四周期价位映射展示（PROPOSAL-stock-decision-four-horizon.md）
+            {
+              /* 阶段1：四周期价位映射展示（PROPOSAL-stock-decision-four-horizon.md）
               同一决策保留单一 action/仓位，但目标价/止损按四周期各给一组。
               仅在有交易计划（stopLossPct>0）的周期渲染；无映射时整体隐藏。
               标签/文案复用既有 key（timeHorizonX / targetPrice / stopLoss /
-              expectedHoldingDays），不新增 i18n key。 */}
+              expectedHoldingDays），不新增 i18n key。 */
+            }
             {horizonEntries.length > 0 && (
               <div className="mb-2">
                 <div className="grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
@@ -1354,9 +1356,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               </div>
             )}
 
-            {/* 阶段2：四周期独立决策面板（PROPOSAL-stock-decision-four-horizon.md）
+            {
+              /* 阶段2：四周期独立决策面板（PROPOSAL-stock-decision-four-horizon.md）
               仅在有 decisionsByHorizon 数据时渲染。每个周期独立产出 action/仓位/目标价/止损，
-              按周期 Tab 分组展示。方向矛盾时高亮呈现（验收项）。 */}
+              按周期 Tab 分组展示。方向矛盾时高亮呈现（验收项）。 */
+            }
             {horizonDecisionEntries.length > 0 && (
               <div className="mb-2">
                 {/* 方向矛盾警告条 */}
@@ -1424,7 +1428,11 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                   const { d } = activeEntry;
                   const dir = actionToDirection(d.action);
                   const hConf = Math.round(Math.max(0, Math.min(100, d.confidence ?? 0)));
-                  const hConfColor = hConf >= 70 ? "var(--sa-green)" : hConf >= 45 ? "var(--sa-amber)" : "var(--sa-red)";
+                  const hConfColor = hConf >= 70
+                    ? "var(--sa-green)"
+                    : hConf >= 45
+                    ? "var(--sa-amber)"
+                    : "var(--sa-red)";
                   const hTarget = d.targetPrice != null ? Number(d.targetPrice) : null;
                   const hStop = d.stopLoss != null ? Number(d.stopLoss) : null;
                   return (

@@ -231,53 +231,114 @@
               "description": "超短线（1-2日）决策，方案B：confLowerBound 固定 0.35",
               "type": "object",
               "properties": {
-                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "action": {
+                  "type": "string",
+                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "description": "操作指令"
+                },
                 "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
                 "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
                 "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（ultra_short:2-4）" },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 30,
+                  "description": "止损百分比（ultra_short:2-4）"
+                },
                 "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
-                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" },
-                "confLowerBound": { "type": "number", "minimum": 0, "maximum": 1, "description": "置信度下限（方案B 固定 0.35）" }
+                "expectedHoldingDays": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 250,
+                  "description": "预期持有天数（交易日）"
+                },
+                "confLowerBound": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "置信度下限（方案B 固定 0.35）"
+                }
               }
             },
             "short": {
               "description": "短线（1周）决策，完整多周期评分",
               "type": "object",
               "properties": {
-                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "action": {
+                  "type": "string",
+                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "description": "操作指令"
+                },
                 "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
                 "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
                 "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（short:4-7）" },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 30,
+                  "description": "止损百分比（short:4-7）"
+                },
                 "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
-                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" }
+                "expectedHoldingDays": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 250,
+                  "description": "预期持有天数（交易日）"
+                }
               }
             },
             "mid": {
               "description": "中期（1月）决策，完整多周期评分",
               "type": "object",
               "properties": {
-                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "action": {
+                  "type": "string",
+                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "description": "操作指令"
+                },
                 "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
                 "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
                 "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（mid:6-12）" },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 30,
+                  "description": "止损百分比（mid:6-12）"
+                },
                 "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
-                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" }
+                "expectedHoldingDays": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 250,
+                  "description": "预期持有天数（交易日）"
+                }
               }
             },
             "long": {
               "description": "长期（3月）决策，完整多周期评分",
               "type": "object",
               "properties": {
-                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "action": {
+                  "type": "string",
+                  "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"],
+                  "description": "操作指令"
+                },
                 "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
                 "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
                 "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
-                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（long:10-15）" },
+                "stopLossPct": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 30,
+                  "description": "止损百分比（long:10-15）"
+                },
                 "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
-                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" }
+                "expectedHoldingDays": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 250,
+                  "description": "预期持有天数（交易日）"
+                }
               }
             }
           }

@@ -203,18 +203,8 @@ export default defineConfig(async () => ({
             // ── Granular groups for the large fallback libs (priority 15) ──
             // 将原先落入 vendor 兜底组的单体大库拆分为独立 chunk，便于缓存与按需加载
             {
-              name: "recharts-vendor",
-              test: /node_modules\/recharts/,
-              priority: 15,
-            },
-            {
               name: "phaser-vendor",
               test: /node_modules\/phaser/,
-              priority: 15,
-            },
-            {
-              name: "sigma-vendor",
-              test: /node_modules\/sigma\//,
               priority: 15,
             },
             {

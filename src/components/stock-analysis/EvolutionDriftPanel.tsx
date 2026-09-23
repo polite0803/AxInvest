@@ -25,6 +25,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { invoke } from "@/lib/invoke";
+import { agreementColor } from "@/lib/stock-analysis-utils";
 import {
   type EvolutionRecentChangeRow,
   type EvolutionStrategyStatRow,
@@ -45,6 +46,30 @@ function formatTime(ms: number): string {
   return d.toLocaleString();
 }
 
+/** 把后端落库的 trigger JSON（tagged enum，snake_case）解析成人类可读的原因 */
+function parseTrigger(raw: string): string {
+  if (!raw) { return ""; }
+  try {
+    const obj = JSON.parse(raw);
+    switch (obj.type) {
+      case "low_quality":
+        return `质量分 ${obj.last_score} 连续 ${obj.consecutive_count} 次低于阈值 ${obj.threshold}`;
+      case "poor_signal_accuracy":
+        return `信号准确性得分 ${obj.score}，优化信号策略`;
+      case "missing_risk_assessment":
+        return "检测到风控缺失，补充风控步骤";
+      case "high_error_rate":
+        return `错误模式 ${obj.error_count} 个，减少错误`;
+      case "manual_trigger":
+        return `手动触发：${obj.reason ?? ""}`;
+      default:
+        return raw;
+    }
+  } catch {
+    return raw;
+  }
+}
+
 export function EvolutionDriftPanel() {
   const { message } = App.useApp();
   const { t } = useTranslation();
@@ -56,6 +81,11 @@ export function EvolutionDriftPanel() {
   const fetchAgreementHistory = useStockAnalysisStore((s) => s.fetchAgreementScoreHistory);
   const agreementHistory = useStockAnalysisStore((s) => s.agreementScoreHistory);
   const agreementLoading = useStockAnalysisStore((s) => s.agreementScoreHistoryLoading);
+  const evolutionHistory = useStockAnalysisStore((s) => s.evolutionHistory);
+  const evolutionHistoryLoading = useStockAnalysisStore((s) => s.evolutionHistoryLoading);
+  const evolutionTriggering = useStockAnalysisStore((s) => s.evolutionTriggering);
+  const fetchEvolutionHistory = useStockAnalysisStore((s) => s.fetchEvolutionHistory);
+  const triggerStockEvolution = useStockAnalysisStore((s) => s.triggerStockEvolution);
   const asOfDate = useTimeAnchorStore((s) => s.asOfDate);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [timelineData, setTimelineData] = useState<
@@ -79,13 +109,21 @@ export function EvolutionDriftPanel() {
   useEffect(() => {
     fetchDashboard(asOfDate);
     fetchAgreementHistory(50);
-  }, [asOfDate, fetchDashboard, fetchAgreementHistory]);
+    fetchEvolutionHistory(50);
+  }, [asOfDate, fetchDashboard, fetchAgreementHistory, fetchEvolutionHistory]);
 
   const handleRecalc = async () => {
     await recalc(asOfDate);
     if (!lastError) {
       message.success(t("stockAnalysis.evolutionDrift.recalcSuccess"));
     }
+  };
+
+  // 批3-C：手动触发一次进化（触发原因/改动/回测对比透传展示在下方历史区）
+  const handleTriggerEvolution = async (reason?: string) => {
+    await triggerStockEvolution(reason);
+    await fetchEvolutionHistory(50);
+    message.success(t("stockAnalysis.evolutionDrift.triggerSuccess"));
   };
 
   const handleSelect = async (record: EvolutionStrategyStatRow) => {
@@ -276,6 +314,14 @@ export function EvolutionDriftPanel() {
             onClick={handleCalibrate}
           >
             {t("stockAnalysis.evolutionDrift.calibrateParams")}
+          </Button>
+          <Button
+            type="dashed"
+            icon={<ThunderboltOutlined />}
+            loading={evolutionTriggering}
+            onClick={() => handleTriggerEvolution(undefined)}
+          >
+            {t("stockAnalysis.evolutionDrift.triggerEvolution")}
           </Button>
         </div>
 
@@ -526,6 +572,36 @@ export function EvolutionDriftPanel() {
       </Modal>
 
       <div style={{ marginTop: 24 }}>
+        <h4>{t("stockAnalysis.evolutionDrift.evolutionHistoryTitle")}</h4>
+        {evolutionHistoryLoading
+          ? <Spin size="small" />
+          : !evolutionHistory || evolutionHistory.length === 0
+          ? <Empty description={t("stockAnalysis.evolutionDrift.noEvolutionData")} />
+          : (
+            <ul style={{ paddingLeft: 16, margin: 0 }}>
+              {evolutionHistory.map((h) => (
+                <li key={h.id} style={{ marginBottom: 10, fontSize: 13 }}>
+                  <Tag
+                    color={h.status === "success" ? "green" : h.status === "failed" ? "red" : "orange"}
+                  >
+                    {h.evolutionType}
+                  </Tag>
+                  <Tag>{formatTime(h.createdAt)}</Tag>
+                  <span style={{ color: "#595959", marginLeft: 4 }}>
+                    {parseTrigger(h.trigger)}
+                  </span>
+                  {h.improvementSummary && (
+                    <div style={{ color: "#8c8c8c", marginTop: 2, marginLeft: 4 }}>
+                      {h.improvementSummary}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+      </div>
+
+      <div style={{ marginTop: 24 }}>
         <h4>{t("stockAnalysis.evolutionDrift.agreementTrendTitle")}</h4>
         {agreementLoading
           ? <Spin size="small" />
@@ -620,7 +696,8 @@ function AgreementSparkline({
         {points.map((p, i) => {
           const x = i * xStep;
           const y = height - ((p.agreementScore - minS) / range) * (height - 10) - 5;
-          const color = p.agreementScore >= 60 ? "#10b981" : p.agreementScore >= 40 ? "#f59e0b" : "#ef4444";
+          // 2026-09-21: 走单一真相源（原内联 60/40 档位表）
+          const color = agreementColor(p.agreementScore);
           return <circle key={i} cx={x} cy={y} r={3} fill={color} />;
         })}
       </svg>

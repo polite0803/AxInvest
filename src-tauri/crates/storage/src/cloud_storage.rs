@@ -241,11 +241,23 @@ impl S3Backend {
             })?;
 
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = match resp.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                    String::new()
+                },
+            };
             return Err(AxAgentError::Gateway(format!("S3 initiate multipart error: {}", body)));
         }
 
-        let body = resp.text().await.unwrap_or_default();
+        let body = match resp.text().await {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                String::new()
+            },
+        };
         parse_upload_id_from_xml(&body)
     }
 
@@ -271,7 +283,13 @@ impl S3Backend {
             )?;
 
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = match resp.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                    String::new()
+                },
+            };
             return Err(AxAgentError::Gateway(format!(
                 "S3 upload part {} error: {}",
                 part_number, body
@@ -326,11 +344,23 @@ impl S3Backend {
             })?;
 
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = match resp.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                    String::new()
+                },
+            };
             return Err(AxAgentError::Gateway(format!("S3 complete multipart error: {}", body)));
         }
 
-        let resp_body = resp.text().await.unwrap_or_default();
+        let resp_body = match resp.text().await {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                String::new()
+            },
+        };
         let final_etag = parse_complete_multipart_etag(&resp_body);
 
         Ok(StorageObjectMeta {
@@ -555,7 +585,13 @@ impl StorageBackend for S3Backend {
 
                     if !resp.status().is_success() {
                         let status = resp.status();
-                        let body = resp.text().await.unwrap_or_default();
+                        let body = match resp.text().await {
+                            Ok(text) => text,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                                String::new()
+                            },
+                        };
                         if status.is_server_error() {
                             return Err(AxAgentError::Gateway(format!(
                                 "S3 download server error ({}): {}",
@@ -617,7 +653,13 @@ impl StorageBackend for S3Backend {
 
                     if !resp.status().is_success() {
                         let status = resp.status();
-                        let body = resp.text().await.unwrap_or_default();
+                        let body = match resp.text().await {
+                            Ok(text) => text,
+                            Err(e) => {
+                                tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                                String::new()
+                            },
+                        };
                         if status.is_server_error() {
                             return Err(AxAgentError::Gateway(format!(
                                 "S3 upload server error ({}): {}",
@@ -660,7 +702,13 @@ impl StorageBackend for S3Backend {
             .map_err(|e| AxAgentError::Gateway(format!("S3 delete failed: {}", e)))?;
 
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = match resp.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                    String::new()
+                },
+            };
             return Err(AxAgentError::Gateway(format!("S3 delete error: {}", body)));
         }
         Ok(())
@@ -698,11 +746,23 @@ impl StorageBackend for S3Backend {
             .map_err(|e| AxAgentError::Gateway(format!("S3 list failed: {}", e)))?;
 
         if !resp.status().is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = match resp.text().await {
+                Ok(text) => text,
+                Err(e) => {
+                    tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                    String::new()
+                },
+            };
             return Err(AxAgentError::Gateway(format!("S3 list error: {}", body)));
         }
 
-        let body = resp.text().await.unwrap_or_default();
+        let body = match resp.text().await {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::warn!(error = %e, "读取云存储响应体失败，回退为空串");
+                String::new()
+            },
+        };
         let objects = parse_s3_list_response(&body)?;
 
         let is_truncated = parse_s3_is_truncated(&body);

@@ -15,6 +15,7 @@ vi.mock("react-i18next", () => ({
         "stockAnalysis.trustNotice.title": "决策可信度受限",
         "stockAnalysis.trustNotice.tagLabel": "可信度受限",
         "stockAnalysis.trustNotice.passiveWatch": "本次「观望」为数据不足导致的被动降级，非看空判断",
+        "stockAnalysis.trustNotice.gapsNotDegraded": "存在数据缺口，但未触发降级：结论方向不受影响",
         "stockAnalysis.trustNotice.collapseLabel": "因子权重坍缩",
         "stockAnalysis.trustNotice.gapReason": `数据缺口 ${opts?.count ?? 0} 项`,
         "stockAnalysis.trustNotice.showGaps": "查看缺口",
@@ -96,12 +97,37 @@ describe("DecisionTrustNotice", () => {
     expect(screen.getByText(/权重占比 12.3% 低于阈值/)).toBeTruthy();
   });
 
-  it("观望 + 数据缺口 → 明确标注「被动降级，非看空判断」", () => {
+  // 2026-09-21 回归锁定（C 修复）：缺口 ≠ 降级。
+  // 旧判据 `(collapsed || gaps.length > 0)` 只要有一项数据缺口就渲染「本次「观望」为
+  // 数据不足导致的被动降级」—— 688114 实证：`collapseReason=none`（权重未坍缩）、
+  // 三路 action 全「观望」、action 维度 30/30、仓位 8.4%，却仍被说成「被动降级」，
+  // 与同一张卡片自身的数据直接打架。
+  it("观望 + 缺口但权重未坍缩 → 不称「被动降级」，改称「未触发降级」", () => {
+    render(
+      <DecisionTrustNotice
+        decision={mkDecision({
+          action: "WAIT",
+          positionPct: 8.4,
+          weightsCollapsed: false,
+          collapseReason: "none",
+          dataGaps: ["PE数据(t-risk)"],
+        })}
+        variant="banner"
+      />,
+    );
+    expect(screen.getByText(/决策可信度受限/)).toBeTruthy();
+    expect(screen.getByText(/数据缺口 1 项/)).toBeTruthy();
+    expect(screen.getByText(/存在数据缺口，但未触发降级/)).toBeTruthy();
+    expect(screen.queryByText(/被动降级，非看空判断/)).toBeNull();
+  });
+
+  it("观望 + 缺口 + 权重坍缩 → 才标注「被动降级，非看空判断」", () => {
     render(
       <DecisionTrustNotice
         decision={mkDecision({
           action: "WAIT",
           positionPct: 0,
+          weightsCollapsed: true,
           dataGaps: ["资金流向(t-hotmoney-data)", "公告数据(t-catalyst-data)"],
         })}
         variant="banner"

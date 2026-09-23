@@ -11,7 +11,14 @@
  * - LLM 决策可用时:两行(公式 / LLM 各一行),底部一致性分数
  * - LLM 不可用时:一行占位 + 灰条"LLM 视角不可用"
  */
-import { actionToDirection, getActionTKey, parseAction, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import {
+  actionToDirection,
+  agreementBgColor,
+  agreementColor,
+  getActionTKey,
+  parseAction,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -57,8 +64,7 @@ export interface CompactDecisionShape {
     riskLevelScore?: number;
     formulaRiskLevel?: string;
     llmRiskLevel?: string;
-    dataGapsScore?: number;
-    dataGapsSimilarity?: number | null;
+    // 2026-09-21 移除 dataGapsScore / dataGapsSimilarity（随 data_gaps 一致性维度删除）
     evidenceScore?: number;
     evidenceCount?: number;
     conflictType: string;
@@ -112,16 +118,10 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
           <div
             className="flex items-center gap-1 px-1.5 rounded text-sm font-mono"
             style={{
-              background: agreement >= 60
-                ? "rgba(16, 185, 129, 0.12)"
-                : agreement >= 40
-                ? "rgba(245, 158, 11, 0.12)"
-                : "rgba(239, 68, 68, 0.12)",
-              color: agreement >= 60
-                ? "#10b981"
-                : agreement >= 40
-                ? "#f59e0b"
-                : "#ef4444",
+              // 2026-09-21: 阈值与配色统一走 `agreementBgColor` / `agreementColor`
+              // （单一真相源），不再在此内联一份 60/40 档位表。
+              background: agreementBgColor(agreement),
+              color: agreementColor(agreement),
             }}
           >
             <span className="font-semibold">{agreement}</span>

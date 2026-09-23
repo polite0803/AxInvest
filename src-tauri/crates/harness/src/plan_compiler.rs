@@ -142,7 +142,6 @@ pub fn compile_plan_to_dag(
                         max_tool_rounds: None,
                         execution_mode: None,
                         rag_source_ids: vec![],
-                        model_role: None,
                         consistency_check: None,
                         hallucination_guard: None,
                         task_scene: None,

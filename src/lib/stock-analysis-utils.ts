@@ -243,6 +243,45 @@ export function directionToAction(verdict: unknown): StockActionType | null {
 }
 
 /**
+ * 多空方向关键词判据 —— 分析师 / 辩论报告自由文本的**单一真相源**。
+ *
+ * 用途：给定 `verdict` / `stance` / `direction` 这类**自由文本**（如「看多」「偏空」
+ * 「bullish」「买入」），判定其多空方向。**不是** action 值域解析 ——
+ * action 值请走 `parseActionStrict`；方向词表（看多/看空/中性）请走
+ * `parseDirectionFromText`（它只认显式 `方向:` 标记）。
+ *
+ * ⚠️ 为什么必须是单点（2026-09-21 修复）
+ *   同一判据此前在 4 处各写一份，且**值域各不相同**：
+ *     - `AnalystReportGrid` 取多空分数兜底：`看多|买入|增持|做多|看涨|bull`
+ *     - `AnalystReportGrid` 表格「判断」列：`看多|bull|偏多|买入|增持|正面`
+ *     - `AnalystReportCard` stance→verdict：仅 `bull|看多`
+ *     - `AnalystReportCard` 徽标配色 / i18n key（同函数内**两份**，相隔 4 行）：仅 `看多|bull`
+ *   ⇒ 同一份 `verdict: "买入"` 的研报：Grid 判为看多（红），Card 两份判据都不命中
+ *   ⇒ 徽标落到「中性」且染成灰色 —— 同一屏内两套结论。
+ *   本表取上述四份值域的**并集**（`做多/看涨/偏多/正面` 与 `减持/负面` 等一并纳入）。
+ *
+ * 判定顺序：**先多后空**（与四份旧实现一致）。因此
+ * 「看多，但需注意减持风险」判为看多 —— 该取舍是既有行为，此处显式固定；
+ * 需要更精细的双向判定请另外设计，不要在此叠加分支。
+ */
+export const DIRECTION_BULL_PATTERN = /看多|做多|看涨|偏多|买入|增持|加仓|正面|bullish|bull/i;
+export const DIRECTION_BEAR_PATTERN = /看空|做空|看跌|偏空|卖出|减持|减仓|负面|bearish|bear/i;
+
+/**
+ * 自由文本 → 多空方向。无法判定返回 `null`（**不臆造方向**）。
+ *
+ * @returns `"bull"` | `"bear"` | `null`
+ */
+export function classifyDirectionText(text: unknown): "bull" | "bear" | null {
+  if (typeof text !== "string") { return null; }
+  const s = text.trim();
+  if (s === "") { return null; }
+  if (DIRECTION_BULL_PATTERN.test(s)) { return "bull"; }
+  if (DIRECTION_BEAR_PATTERN.test(s)) { return "bear"; }
+  return null;
+}
+
+/**
  * 从 LLM 决策对象推导 action —— 按「结构化程度」降序取第一个可用来源：
  *   ① 结构化 `action` 字段（严格值域）
  *   ② 结构化 `verdict` / `stance` / `direction` 字段
@@ -317,34 +356,84 @@ export function parsePositionState(raw: unknown): PositionStateType | null {
 }
 
 /**
- * 由 `(action, positionState, positionPct)` 派生**展示档** ——
- * 「持有 / 观望」的唯一派生点，取代各组件里散落的 `positionPct <= 0` 判断。
+ * 把后端决策解析为**展示档**。
  *
- * 规则：
- * - 非中性档（买入 / 增持 / 减持 / 卖出 / 不确定 / 缺失）不受持仓状态影响，原样返回；
- * - 中性档（HOLD / WAIT）按持仓状态派生：空仓 → 观望，有仓位 → 持有；
- * - `positionState` 为 `null`（老数据）时退回 `positionPct`（与后端同判据）；
- *   两者都不可用时保持原值。
+ * ⚠️ 自 2026-09-22 起展示档 = 方向档，**不再按仓位派生**（本函数现为恒等变换）。
  *
- * 这样「持有 vs 观望」在展示层是**单向派生**关系，而不再是两个可互相改写的标签。
+ * 历史（已被本次修复废除）：V76 起本函数按 `(action, positionState, positionPct)`
+ * 派生 —— 中性档（HOLD/WAIT）空仓 ⇒ 观望、有仓位 ⇒ 持有（见 `AUDIT-300642-run-variance-2026-09-22.md`）。
+ * 该派生是**循环判据**：`positionState` 来自**本次决策刚算出的建议仓位**，用它反推
+ * 本次决策的展示名，于是 LLM trader 一个措辞变化（verdict 看空 → 中性）经
+ * 「试探仓守卫 → position_pct 0%→3% → positionState EMPTY→HOLDING」三级旁路，
+ * 把同一个后端档「观望」翻成了「持有」——同日两次分析给出两个结论，而
+ * `action` 两次完全相同（都是「观望」）。结论名必须只由确定性的后验阶梯决定。
+ *
+ * 现规则：一律返回 `parseAction(action)`。`positionState` / `positionPct` 仍是
+ * 独立可展示的量（见 `positionState` 字段），但**不参与**方向档名的判定。
+ * 参数保留是为了兼容既有调用点；判据已收敛到 `portfolio-mgr.rhai` 的
+ * `final_action`，改一侧必须同步另一侧。
+ *
+ * ⚠️ 用户**真实持仓**不在此判据内。若将来要按真实持仓区分「持有 / 观望」文案，
+ * 须另接 `portfolio_holdings`，不要复用本次建议仓位（复用即回到循环判据）。
  */
 export function resolveDisplayAction(
   action: unknown,
-  positionState?: unknown,
-  positionPct?: number | null,
+  _positionState?: unknown,
+  _positionPct?: number | null,
 ): StockActionType {
-  const parsed = parseAction(action);
-  if (parsed !== StockAction.HOLD && parsed !== StockAction.WAIT) {
-    return parsed;
-  }
-  const state = parsePositionState(positionState);
-  if (state) {
-    return state === PositionState.EMPTY ? StockAction.WAIT : StockAction.HOLD;
-  }
-  if (typeof positionPct === "number" && Number.isFinite(positionPct)) {
-    return positionPct <= 0 ? StockAction.WAIT : StockAction.HOLD;
-  }
-  return parsed;
+  return parseAction(action);
+}
+
+/**
+ * 决策档位的**规范中文名** —— 与 `portfolio-mgr.rhai` 实际输出的 6 档一一对应。
+ *
+ * ⚠️ 与 `STOCK_ACTION_LABELS` 方向相反：那张表是「中文 → 枚举」（含别名，多对一），
+ * 本表是「枚举 → 唯一中文名」（一对一）。**不要**用 `Object.keys(STOCK_ACTION_LABELS)`
+ * 反查 —— 别名（"等待" / "减仓" / "加仓"）会让结果取决于键序，属不可判定。
+ * 用途仅为「改写后端中文文本」对账，**不是** UI 展示文案（UI 走 `getActionTKey` + i18n）。
+ */
+export const STOCK_ACTION_CANONICAL_LABELS: Record<StockActionType, string> = {
+  [StockAction.BUY]: "买入",
+  [StockAction.INCREASE]: "增持",
+  [StockAction.HOLD]: "持有",
+  [StockAction.REDUCE]: "减持",
+  [StockAction.SELL]: "卖出",
+  [StockAction.WAIT]: "观望",
+  [StockAction.UNCERTAIN]: "不确定",
+  [StockAction.UNAVAILABLE]: "数据缺失",
+};
+
+/** `portfolio-mgr.rhai` reasoning 的结论前缀 —— 唯一允许改写的面，勿扩到全文 */
+const REASONING_DECISION_PREFIX = /^决策=(\S+)/;
+
+/**
+ * 把 `portfolio-mgr` 的 `reasoning` 开头的 `决策=<档名>` 对齐到**展示档**。
+ *
+ * 背景（2026-09-21 实证）：V76 把「持有 / 观望」拆成正交两轴后，展示层统一由
+ * `resolveDisplayAction` 派生（中性档 + 空仓 ⇒ 观望）。但 `portfolio-mgr.rhai` 拼
+ * reasoning 时写的仍是**原始方向档** `final_action` ⇒ **同一条落库记录**里挂角 Tag
+ * 显示「观望」、结论文本却写「决策=持有」，用户直接质问二者矛盾。
+ * 后端已同步改为展示档（新记录一致），本函数让**修复前落库的历史行**也对齐。
+ *
+ * ⚠️ 只改开头**第一个** `决策=X` 这一个 token（见 `REASONING_DECISION_PREFIX`）。
+ *    同段文本里 `| ⚠️极高风险风控否决:持有→观望`、`action已从X修正为Y` 是
+ *    **档位迁移留痕**，用原始档名才表达得对，一律不得改写。
+ * ⚠️ 前缀缺失（LLM 侧 reasoning / 其它来源文本）或**档名本身识别不出** ⇒ 原样返回，
+ *    不臆造结论（识别失败时改写等于把「看不懂」当「已确认」）。
+ */
+export function alignReasoningDecisionLabel(
+  reasoning: string,
+  displayAction: StockActionType,
+): string {
+  if (!reasoning) { return reasoning; }
+  const m = REASONING_DECISION_PREFIX.exec(reasoning);
+  if (!m) { return reasoning; }
+  const written = parseActionStrict(m[1]);
+  // 识别不出 / 本来就一致 ⇒ 零改动（幂等）
+  if (written === null || written === displayAction) { return reasoning; }
+  const label = STOCK_ACTION_CANONICAL_LABELS[displayAction];
+  if (!label) { return reasoning; }
+  return `决策=${label}${reasoning.slice(m[0].length)}`;
 }
 
 /** 解析股票风险等级（兼容英文/中文/大小写） */
@@ -470,7 +559,17 @@ export function getActionTKey(action: string): string {
 }
 
 export function getRiskColor(level: string): string {
-  switch (level) {
+  // 2026-09-21: 与相邻的 `getRiskTKey` 统一判据 —— 此前本函数直接 `switch (level)` **不解析**，
+  //   而后端 `riskLevel` / `agreementBreakdown.formulaRiskLevel` 等落库值是**原始中文**
+  //   （「高风险」「极高风险」，见 portfolio-mgr.rhai 的 overall_risk 赋值处），
+  //   于是中文输入全部落到 `default` ⇒ 灰字，而同一入参在 `getRiskTKey` 上却能正确出文案
+  //   —— 「标签显示了文字却没有颜色」。
+  // 同型先例：本文件 `getActionColor`（见其上方 P1-6 注释）在 2026-09-14 已按此修过 action 侧，
+  //   当时**漏了 risk 侧**，故此处补齐。
+  // ⚠️ 行为变化：无法识别的输入由 `var(--muted)` 变为 MID 档（`parseRiskLevel` 内部会
+  //   `console.warn` 后兜底 MID）。这是**有意**与 `getRiskTKey` 的 `riskMid` 兜底对齐 ——
+  //   两者必须同判据，否则又回到「文字一档、颜色另一档」。
+  switch (parseRiskLevel(level)) {
     case StockRiskLevel.LOW:
       return "var(--sa-green)";
     case StockRiskLevel.MID:
@@ -495,10 +594,233 @@ export function getRiskTKey(level: string): string {
   return map[normalized] ?? "stockAnalysis.riskMid";
 }
 
+// ── 决策一致性分（0-100）的展示分档 ──
+//
+// 2026-09-21: 收敛为单一真相源。此前**四处各存一份档位表**，且高档阈值已漂移：
+//   `dual-view/DecisionComparisonPanel.tsx` 用 **80**，另三处
+//   （`dual-view/CompactDecisionComparison.tsx`、`DecisionBanner.tsx`、
+//   `EvolutionDriftPanel.tsx`）用 **60** ⇒ 分数落在 [60, 80) 时两个面板会给出
+//   **相反的颜色**（一个绿、一个琥珀），用户在同一屏看到矛盾结论。
+//
+// 取 60 为高档阈值：三处使用它（含主决策卡 `DecisionBanner`），且它与后端的
+// `compute_decision_agreement` 6 维度满分 100 的刻度一致（「60 分以上算基本一致」）。
+// ⚠️ 若产品意图是 80，改这一个常量即可 —— 不要再改回组件内联。
+export const AGREEMENT_HIGH_THRESHOLD = 60;
+export const AGREEMENT_MID_THRESHOLD = 40;
+
+/** 一致性分 → 分档（high / mid / low） */
+export function agreementTier(score: number): "high" | "mid" | "low" {
+  if (score >= AGREEMENT_HIGH_THRESHOLD) { return "high"; }
+  if (score >= AGREEMENT_MID_THRESHOLD) { return "mid"; }
+  return "low";
+}
+
+/** 一致性分 → 前景色（绿=高 / 琥珀=中 / 红=低） */
+export function agreementColor(score: number): string {
+  const tier = agreementTier(score);
+  return tier === "high" ? "#10b981" : tier === "mid" ? "#f59e0b" : "#ef4444";
+}
+
+/** 一致性分 → 半透明底色（与 `agreementColor` 严格同档，不得各写一份阈值） */
+export function agreementBgColor(score: number): string {
+  const tier = agreementTier(score);
+  return tier === "high"
+    ? "rgba(16, 185, 129, 0.12)"
+    : tier === "mid"
+    ? "rgba(245, 158, 11, 0.12)"
+    : "rgba(239, 68, 68, 0.12)";
+}
+
+// ── `dashboard_report` 专属值域（与 portfolio-mgr 的 6 档是**两套定义**）──
+//
+// 根因（2026-09-21）：`harness/dashboard_report.rs` 的 action 是
+//   强烈买入 / 买入 / 增持 / 持有 / 减持 / 卖出
+// 与 portfolio-mgr 的 6 档（**无「强烈买入」、有「观望」**）并非同一张表。
+// `DashboardReportPreview` 长期把 `report.action` 等字段**裸渲染**，靠文件头一行
+// `// i18n-exempt` 让硬编码扫描器跳过整个文件 —— 于是 action / trend / severity /
+// category / direction+timeline 这 5 处裸展示在 zh-CN 下看不出问题，切到 en-US
+// 等语言就整片中文乱入。
+//
+// 本区块把这 5 个值域的「值 → i18n key」收敛成单点。**不要**再在组件里写值域
+// switch：文件本地的 `actionColor` 之类的副本已因此在值域变动时静默走 default。
+
+/**
+ * `dashboard_report.action` 中**超出** portfolio-mgr 6 档的两档强度档。
+ *
+ * `parseActionStrict` 已把「强烈买入 / 强烈卖出」收敛到 `BUY` / `SELL`
+ * （见 `STOCK_ACTION_LABELS` 尾部注释），但**收敛会丢掉「强烈」这个强度信息**
+ * ⇒ 展示层不能直接复用 `getActionTKey`，否则 UI 上「强烈买入」被降级成「买入」。
+ */
+const DASHBOARD_ACTION_TKEY_OVERRIDES: Record<string, string> = {
+  "强烈买入": "stockAnalysis.dashboard.actionStrongBuy",
+  "强烈卖出": "stockAnalysis.dashboard.actionStrongSell",
+};
+
+/** 值域查表的公共形态：非字符串 / 未知值一律返回 null（由调用方决定兜底） */
+function lookupTKey(map: Record<string, string>, raw: unknown): string | null {
+  if (typeof raw !== "string") { return null; }
+  return map[raw.trim()] ?? null;
+}
+
+/** `dashboard_report.trend` 值域：看多 / 看空 / 震荡（**不是**「中性」） */
+const DASHBOARD_TREND_TKEYS: Record<string, string> = {
+  "看多": "stockAnalysis.dashboard.trendBullish",
+  "看空": "stockAnalysis.dashboard.trendBearish",
+  "震荡": "stockAnalysis.dashboard.trendSideways",
+};
+
+/** `RiskAlert.severity` 值域：低 / 中 / 高（与 `riskLevel` 的「低风险」措辞不同，故独立成表） */
+const DASHBOARD_SEVERITY_TKEYS: Record<string, string> = {
+  "低": "stockAnalysis.dashboard.severityLow",
+  "中": "stockAnalysis.dashboard.severityMid",
+  "高": "stockAnalysis.dashboard.severityHigh",
+};
+
+/** `ChecklistItem.category` 值域：入场 / 加仓 / 减仓 / 止损 / 止盈 */
+const CHECKLIST_CATEGORY_TKEYS: Record<string, string> = {
+  "入场": "stockAnalysis.dashboard.checklistEntry",
+  "加仓": "stockAnalysis.dashboard.checklistAdd",
+  "减仓": "stockAnalysis.dashboard.checklistReduce",
+  "止损": "stockAnalysis.dashboard.checklistStopLoss",
+  "止盈": "stockAnalysis.dashboard.checklistTakeProfit",
+};
+
+/** `Catalyst.direction` 值域：利好 / 利空 */
+const CATALYST_DIRECTION_TKEYS: Record<string, string> = {
+  "利好": "stockAnalysis.dashboard.catalystBullish",
+  "利空": "stockAnalysis.dashboard.catalystBearish",
+};
+
+/** `Catalyst.timeline` 值域：短期 / 中期 / 长期 */
+const CATALYST_TIMELINE_TKEYS: Record<string, string> = {
+  "短期": "stockAnalysis.dashboard.catalystShortTerm",
+  "中期": "stockAnalysis.dashboard.catalystMidTerm",
+  "长期": "stockAnalysis.dashboard.catalystLongTerm",
+};
+
+/**
+ * `dashboard_report.action` 的 i18n key —— **保留「强烈」强度**的展示层解析器。
+ *
+ * 非强度档完全复用 `getActionTKey`（同一批 UI 文案，避免「买入」在两处各存一份
+ * 翻译而逐渐漂移）；仅「强烈买入 / 强烈卖出」走 dashboard 专属 key。
+ * 解析不出（自由文本 / 脏数据）⇒ `actionUncertain`，与 `parseAction` 同判据，不臆造档位。
+ */
+export function getDashboardActionTKey(raw: unknown): string {
+  if (typeof raw !== "string" || raw.trim() === "") {
+    return "stockAnalysis.actionUnavailable";
+  }
+  const override = lookupTKey(DASHBOARD_ACTION_TKEY_OVERRIDES, raw);
+  if (override !== null) { return override; }
+  const kind = parseActionStrict(raw);
+  if (kind === null) { return "stockAnalysis.actionUncertain"; }
+  return getActionTKey(kind);
+}
+
+/** `dashboard_report.trend` 的 i18n key；未知值返回 null（调用方展示原文，不臆造） */
+export function getDashboardTrendTKey(raw: unknown): string | null {
+  return lookupTKey(DASHBOARD_TREND_TKEYS, raw);
+}
+
+/** `RiskAlert.severity` 的 i18n key；未知值返回 null */
+export function getDashboardSeverityTKey(raw: unknown): string | null {
+  return lookupTKey(DASHBOARD_SEVERITY_TKEYS, raw);
+}
+
+/** `ChecklistItem.category` 的 i18n key；未知值返回 null */
+export function getChecklistCategoryTKey(raw: unknown): string | null {
+  return lookupTKey(CHECKLIST_CATEGORY_TKEYS, raw);
+}
+
+/** `Catalyst.direction` 的 i18n key；未知值返回 null */
+export function getCatalystDirectionTKey(raw: unknown): string | null {
+  return lookupTKey(CATALYST_DIRECTION_TKEYS, raw);
+}
+
+/** `Catalyst.timeline` 的 i18n key；未知值返回 null */
+export function getCatalystTimelineTKey(raw: unknown): string | null {
+  return lookupTKey(CATALYST_TIMELINE_TKEYS, raw);
+}
+
+// ── 上述 dashboard 值域的**配色**（同样收敛到单点，组件内不得再写值域 switch）──
+//
+// ⚠️ 这两个 `action` 表**键集不同**（tKey 表只有 2 个强度档，其余档复用
+// `getActionTKey`；配色表覆盖全部 6 档）⇒ 后端增删档位时**两张表都要看**。
+
+/**
+ * `dashboard_report.action` 的**强度渐变**配色。
+ *
+ * ⚠️ 与 `getActionColor()` 的分工：后者按「涨跌方向」二值着色（买入/增持 → red，
+ * 卖出/减持 → green），同一方向内不再分强度；本表保留 dashboard 的**强度渐变**
+ * （深红 → 橙红 → 橙 → 灰 → 绿 → 青），表达档位的连续强弱。
+ * **不要把两者合并** —— 合并即丢失强度信息（视觉降级）。
+ */
+const DASHBOARD_ACTION_COLORS: Record<string, string> = {
+  "强烈买入": "#f5222d",
+  "买入": "#fa541c",
+  "增持": "#fa8c16",
+  "持有": "#8c8c8c",
+  "减持": "#52c41a",
+  "卖出": "#13c2c2",
+};
+
+const DASHBOARD_NEUTRAL_COLOR = "#8c8c8c";
+
+/** `dashboard_report.action` 的配色；未知值取中性灰（不臆造方向色） */
+export function getDashboardActionColor(raw: unknown): string {
+  return lookupTKey(DASHBOARD_ACTION_COLORS, raw) ?? DASHBOARD_NEUTRAL_COLOR;
+}
+
+/** `dashboard_report.trend` 配色：看多红 / 看空绿（A 股涨跌色习惯），其余中性灰 */
+const DASHBOARD_TREND_COLORS: Record<string, string> = {
+  "看多": "#f5222d",
+  "看空": "#52c41a",
+};
+
+export function getDashboardTrendColor(raw: unknown): string {
+  return lookupTKey(DASHBOARD_TREND_COLORS, raw) ?? DASHBOARD_NEUTRAL_COLOR;
+}
+
+/** `RiskAlert.severity` 配色：Ant Design Tag 预设色名，未知值走 default */
+const DASHBOARD_SEVERITY_COLORS: Record<string, string> = {
+  "高": "red",
+  "中": "orange",
+  "低": "green",
+};
+
+export function getDashboardSeverityColor(raw: unknown): string {
+  return lookupTKey(DASHBOARD_SEVERITY_COLORS, raw) ?? "default";
+}
+
+/**
+ * `Catalyst.direction` 配色：利好红 / 其余绿（A 股涨跌色习惯）。
+ *
+ * ⚠️ 非「利好」一律按利空着色 —— 后端值域只有「利好 / 利空」二值，未知值由
+ * `getCatalystDirectionTKey` 兜底显示原文，此处不额外造「未知」色。
+ */
+export function getCatalystDirectionColor(raw: unknown): string {
+  const key = typeof raw === "string" ? raw.trim() : "";
+  return key === "利好" ? "red" : "green";
+}
+
+/**
+ * 自由文本「信号/方向」关键词 → Ant Design 色名。
+ *
+ * ⚠️ 配色约定（A 股）：**红=看多/买入，绿=看空/卖出** —— 与
+ * [`getActionColor`] / [`getActionTagStyle`] 同源。
+ *
+ * 2026-09-21 修复：本函数此前返回**相反**配色（看多→green、看空→red，美式习惯），
+ * 与同模块的 `getActionColor`（BUY→red）以及 `getActionTagStyle` 的文档注释
+ * 「遵循 A 股涨跌色习惯：红=买入/增持，绿=卖出/减持」直接矛盾 ⇒ 同一屏里
+ * 「看多」标签是绿的、「买入」标签是红的。相邻的 `getCatalystDirectionColor`
+ * （利好→red）亦为 A 股口径。
+ *
+ * 关键词表本身不可直接复用时序枚举（入参是「买入信号 / 上涨趋势」这类自由文本，
+ * 不是 action 值域），故此处保留关键词匹配，只把配色约定对齐权威函数。
+ */
 export function getSignalColor(signal: string): "green" | "red" | "blue" {
   const s = String(signal ?? "").trim().toLowerCase();
-  if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) { return "green"; }
-  if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) { return "red"; }
+  if (s.includes("买") || s.includes("多") || s.includes("涨") || s.includes("牛")) { return "red"; }
+  if (s.includes("卖") || s.includes("空") || s.includes("跌") || s.includes("熊")) { return "green"; }
   return "blue";
 }
 
@@ -531,6 +853,50 @@ function tryParseJson(text: string): Record<string, unknown> | null {
 // ── 情感分析 ──
 
 /**
+ * 自由文本 → 多空情绪（`sentiment` 二值；无法判定返回 `null`）。
+ *
+ * `classifySentiment` 的 **VERDICT 分支**与 **stance 分支共用本函数** ——
+ * 二者此前各写一份内联正则，值域互不相同（`多头/利好/超配/扫货` 只在一份里，
+ * `偏多/正面` 两份都没有），于是**同一段文本走哪条分支结论不同**。
+ *
+ * 分工：方向词走权威单点 [`classifyDirectionText`]；`情绪词`（利好/乐观/流入/超配/
+ * 多头/空头 …）只在本函数拼接 —— 它们不是方向词，仅对分析师自由文本有意义，
+ * **不得**混进 `DIRECTION_BULL_PATTERN`（那会让 Card / Grid 对显式 verdict 的判定过宽）。
+ */
+function directionTextToSentiment(text: string): "bullish" | "bearish" | null {
+  const lower = text.toLowerCase();
+  const dir = classifyDirectionText(text);
+  if (
+    dir === "bull"
+    || text.includes("多头")
+    || text.includes("利好") || text.includes("上涨") || text.includes("乐观")
+    || text.includes("上行") || text.includes("流入") || text.includes("扫货")
+    || text.includes("强于") || text.includes("超配")
+    || lower.includes("buy") || lower.includes("overweight")
+  ) {
+    return "bullish";
+  }
+  if (
+    dir === "bear"
+    || text.includes("空头")
+    || text.includes("利空") || text.includes("下跌") || text.includes("悲观")
+    || text.includes("下行") || text.includes("流出") || text.includes("出货")
+    || text.includes("弱于") || text.includes("低配")
+    || lower.includes("sell") || lower.includes("underweight")
+  ) {
+    return "bearish";
+  }
+  return null;
+}
+
+/**
+ * 中性词表 —— 同样被 VERDICT 分支与 stance 分支共用。
+ * 两份旧内联表分别为 `中性|观望|持有|震荡|hold|neutral` 与
+ * `观望|中性|平衡|震荡|同步|保守|放缓|持有|hold|neutral`（后者是前者的超集）。
+ */
+const NEUTRAL_SENTIMENT_PATTERN = /中性|观望|持有|震荡|平衡|同步|保守|放缓|hold|neutral/i;
+
+/**
  * 分析师报告情感分类（先解析 JSON 提取结构化字段，再回退子串匹配）
  *
  * 支持:
@@ -546,17 +912,13 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
       const jsonEnd = jsonStr.indexOf("-->");
       if (jsonEnd !== -1) {
         const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
-        const stance = String(meta.verdict ?? meta.stance ?? "").trim().toLowerCase();
+        const stance = String(meta.verdict ?? meta.stance ?? "").trim();
         if (stance) {
-          if (/看多|买入|增持|做多|看涨|多头|利好|上涨|乐观|上行|流入|bull|buy|overweight/i.test(stance)) {
-            return "bullish";
-          }
-          if (/看空|卖出|减持|做空|看跌|空头|利空|下跌|悲观|下行|流出|bear|sell|underweight/i.test(stance)) {
-            return "bearish";
-          }
-          if (/中性|观望|持有|震荡|hold|neutral/i.test(stance)) {
-            return "neutral";
-          }
+          // 2026-09-21: 收敛到 `directionTextToSentiment`（原先这里是**第三份**内联
+          //   方向词表，且与下方 stance 分支的表值域不同 ⇒ 同一文本走哪条分支结论不同）。
+          const s = directionTextToSentiment(stance);
+          if (s) { return s; }
+          if (NEUTRAL_SENTIMENT_PATTERN.test(stance)) { return "neutral"; }
         }
         // 用 bull_score / bear_score 判断
         const bull = Number(meta.bull_score ?? -1);
@@ -577,38 +939,13 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
     const stanceRaw = json["stance"] ?? json["view"] ?? json["sentiment"] ?? json["verdict"];
     const stance = String(stanceRaw ?? "").trim();
     if (stance) {
-      const lower = stance.toLowerCase();
-      // 多头方向词
-      if (
-        stance.includes("买入") || stance.includes("增持") || stance.includes("看多")
-        || stance.includes("做多") || stance.includes("看涨") || stance.includes("多头")
-        || stance.includes("利好") || stance.includes("上涨") || stance.includes("乐观")
-        || stance.includes("上行") || stance.includes("流入") || stance.includes("扫货")
-        || stance.includes("强于") || stance.includes("超配") || stance.includes("加仓")
-        || lower.includes("bull") || lower.includes("buy") || lower.includes("overweight")
-      ) {
-        return "bullish";
-      }
-      // 空头方向词
-      if (
-        stance.includes("卖出") || stance.includes("减持") || stance.includes("看空")
-        || stance.includes("做空") || stance.includes("看跌") || stance.includes("空头")
-        || stance.includes("利空") || stance.includes("下跌") || stance.includes("悲观")
-        || stance.includes("下行") || stance.includes("流出") || stance.includes("出货")
-        || stance.includes("弱于") || stance.includes("低配") || stance.includes("减仓")
-        || lower.includes("bear") || lower.includes("sell") || lower.includes("underweight")
-      ) {
-        return "bearish";
-      }
-      // 中性方向词
-      if (
-        stance.includes("观望") || stance.includes("中性") || stance.includes("平衡")
-        || stance.includes("震荡") || stance.includes("同步") || stance.includes("保守")
-        || stance.includes("放缓") || stance.includes("持有") || stance.includes("hold")
-        || lower.includes("neutral") || lower.includes("hold")
-      ) {
-        return "neutral";
-      }
+      // 2026-09-21: 收敛到 `directionTextToSentiment`（原先此处自写一份方向词表，
+      //   与 VERDICT 分支的表在 `多头/利好/超配/扫货` 等词上分歧，且两份都缺
+      //   `偏多/正面/偏空/负面` ⇒ 同一份 `stance: "偏多"` 的研报，卡片徽标判看多（红），
+      //   共识聚合却计入「中性」）。
+      const s = directionTextToSentiment(stance);
+      if (s) { return s; }
+      if (NEUTRAL_SENTIMENT_PATTERN.test(stance)) { return "neutral"; }
     }
     // 1b) action 字段（BUY/INCREASE/SELL/REDUCE/HOLD 或中文 买入/增持/...）
     const action = String(json["action"] ?? "").trim();

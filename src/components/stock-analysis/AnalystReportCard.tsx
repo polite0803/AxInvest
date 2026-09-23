@@ -1,5 +1,5 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
-import { getSignalColor } from "@/lib/stock-analysis-utils";
+import { classifyDirectionText, getSignalColor } from "@/lib/stock-analysis-utils";
 import { useSettingsStore } from "@/stores";
 import { ExpandOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
@@ -125,9 +125,13 @@ function tryParseVerdictFormat(report: string): ParsedReport | null {
     // 辩论节点的 stance 映射到 verdict
     let verdict = meta.verdict ?? undefined;
     if (!verdict && meta.stance) {
+      // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
+      //   原为内联 `bull|看多` / `bear|看空`，值域比 Grid 窄 ⇒ 同一份
+      //   `stance: "买入"` 的研报此处判不出方向、Grid 判为看多。
+      const dir = classifyDirectionText(meta.stance);
       const s = String(meta.stance).toLowerCase();
-      if (s.includes("bull") || s.includes("看多")) { verdict = "看多"; }
-      else if (s.includes("bear") || s.includes("看空")) { verdict = "看空"; }
+      if (dir === "bull") { verdict = "看多"; }
+      else if (dir === "bear") { verdict = "看空"; }
       else if (s.includes("neutral") || s.includes("中性")) { verdict = "中性"; }
       else { verdict = meta.stance; }
     }
@@ -403,12 +407,15 @@ export function AnalystReportCard({ expertId, report }: Props) {
     const bearScore = typeof parsed.bear_score === "number"
       ? (parsed.bear_score > 1 ? parsed.bear_score : parsed.bear_score * 100)
       : null;
-    const verdictColor = parsed.verdict
-      ? (String(parsed.verdict).includes("看多") || String(parsed.verdict).includes("bull")
-        ? "red" // A股红=涨
-        : String(parsed.verdict).includes("看空") || String(parsed.verdict).includes("bear")
-        ? "green" // A股绿=跌
-        : "default")
+    // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
+    //   本函数内此前有**两份**判据（配色与下方 i18n key 各一份，相隔仅 4 行），
+    //   且值域都比 Grid 窄（仅 `看多|bull`）⇒ 同一份 `verdict: "买入"` 的研报
+    //   在 Grid 判为看多（红），此处却落到「中性」并染灰。
+    const verdictDir = classifyDirectionText(parsed.verdict);
+    const verdictColor = verdictDir === "bull"
+      ? "red" // A股红=涨
+      : verdictDir === "bear"
+      ? "green" // A股绿=跌
       : "default";
     return (
       <>
@@ -432,11 +439,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
                 <Tag color={verdictColor} style={{ fontSize: 13, padding: "2px 10px", fontWeight: 600 }}>
                   {t(
                     `stockAnalysis.analystVerdict.${
-                      parsed.verdict.includes("看多") || parsed.verdict.toLowerCase().includes("bull")
-                        ? "bullish"
-                        : parsed.verdict.includes("看空") || parsed.verdict.toLowerCase().includes("bear")
-                        ? "bearish"
-                        : "neutral"
+                      verdictDir === "bull" ? "bullish" : verdictDir === "bear" ? "bearish" : "neutral"
                     }`,
                   )}
                 </Tag>

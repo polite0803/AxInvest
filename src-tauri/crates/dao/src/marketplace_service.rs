@@ -33,6 +33,9 @@ impl MarketplaceServiceTrait for MarketplaceServiceImpl {
 
         let now = chrono::Utc::now().timestamp();
 
+        // 外包显式事务：review 行写入 + marketplace 聚合评分更新 ⇒ 同生共死，任一步失败整批回滚
+        let txn = db.begin().await.map_err(|e| e.to_string())?;
+
         let review = workflow_marketplace_review::ActiveModel {
             id: Set(Uuid::new_v4().to_string()),
             marketplace_id: Set(req.marketplace_id.clone()),
@@ -44,9 +47,11 @@ impl MarketplaceServiceTrait for MarketplaceServiceImpl {
             updated_at: Set(now),
         };
 
-        let result = review.insert(db).await.map_err(|e| e.to_string())?;
+        let result = review.insert(&txn).await.map_err(|e| e.to_string())?;
 
-        self.update_marketplace_rating(db, &req.marketplace_id).await?;
+        self.update_marketplace_rating(&txn, &req.marketplace_id).await?;
+
+        txn.commit().await.map_err(|e| e.to_string())?;
 
         Ok(model_to_response(result))
     }
@@ -95,9 +100,12 @@ impl MarketplaceServiceTrait for MarketplaceServiceImpl {
             return Err("Rating must be between 1 and 5".to_string());
         }
 
+        // 外包显式事务：review 行更新 + marketplace 聚合评分更新 ⇒ 同生共死
+        let txn = db.begin().await.map_err(|e| e.to_string())?;
+
         let review = workflow_marketplace_review::Entity::find()
             .filter(workflow_marketplace_review::Column::Id.eq(review_id))
-            .one(db)
+            .one(&txn)
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Review not found".to_string())?;
@@ -113,17 +121,22 @@ impl MarketplaceServiceTrait for MarketplaceServiceImpl {
         }
         active_model.updated_at = Set(chrono::Utc::now().timestamp());
 
-        let result = active_model.update(db).await.map_err(|e| e.to_string())?;
+        let result = active_model.update(&txn).await.map_err(|e| e.to_string())?;
 
-        self.update_marketplace_rating(db, &marketplace_id).await?;
+        self.update_marketplace_rating(&txn, &marketplace_id).await?;
+
+        txn.commit().await.map_err(|e| e.to_string())?;
 
         Ok(model_to_response(result))
     }
 
     async fn delete_review(&self, db: &DatabaseConnection, review_id: &str) -> Result<(), String> {
+        // 外包显式事务：review 行删除 + marketplace 聚合评分更新 ⇒ 同生共死
+        let txn = db.begin().await.map_err(|e| e.to_string())?;
+
         let review = workflow_marketplace_review::Entity::find()
             .filter(workflow_marketplace_review::Column::Id.eq(review_id))
-            .one(db)
+            .one(&txn)
             .await
             .map_err(|e| e.to_string())?
             .ok_or_else(|| "Review not found".to_string())?;
@@ -131,9 +144,11 @@ impl MarketplaceServiceTrait for MarketplaceServiceImpl {
         let marketplace_id = review.marketplace_id.clone();
 
         let active_model: workflow_marketplace_review::ActiveModel = review.into();
-        active_model.delete(db).await.map_err(|e| e.to_string())?;
+        active_model.delete(&txn).await.map_err(|e| e.to_string())?;
 
-        self.update_marketplace_rating(db, &marketplace_id).await?;
+        self.update_marketplace_rating(&txn, &marketplace_id).await?;
+
+        txn.commit().await.map_err(|e| e.to_string())?;
 
         Ok(())
     }
@@ -143,21 +158,7 @@ impl MarketplaceServiceTrait for MarketplaceServiceImpl {
         db: &DatabaseConnection,
         marketplace_id: &str,
     ) -> Result<MarketplaceStats, String> {
-        let reviews = workflow_marketplace_review::Entity::find()
-            .filter(workflow_marketplace_review::Column::MarketplaceId.eq(marketplace_id))
-            .filter(workflow_marketplace_review::Column::IsHidden.eq(false))
-            .all(db)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let total_reviews = reviews.len() as i32;
-        let rating_average = if total_reviews > 0 {
-            let sum: i32 = reviews.iter().map(|r| r.rating).sum();
-            sum as f64 / total_reviews as f64
-        } else {
-            0.0
-        };
-
+        let (rating_average, total_reviews) = Self::compute_stats(db, marketplace_id).await?;
         Ok(MarketplaceStats {
             marketplace_id: marketplace_id.to_string(),
             total_reviews,
@@ -195,12 +196,35 @@ fn model_to_response(model: workflow_marketplace_review::Model) -> ReviewRespons
 }
 
 impl MarketplaceServiceImpl {
-    async fn update_marketplace_rating(
+    /// 计算某 marketplace 的聚合评分（`get_stats` 与批改事务共用；`C` 可为连接或事务）
+    async fn compute_stats<C: ConnectionTrait>(
+        db: &C,
+        marketplace_id: &str,
+    ) -> Result<(f64, i32), String> {
+        let reviews = workflow_marketplace_review::Entity::find()
+            .filter(workflow_marketplace_review::Column::MarketplaceId.eq(marketplace_id))
+            .filter(workflow_marketplace_review::Column::IsHidden.eq(false))
+            .all(db)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let total_reviews = reviews.len() as i32;
+        let rating_average = if total_reviews > 0 {
+            let sum: i32 = reviews.iter().map(|r| r.rating).sum();
+            sum as f64 / total_reviews as f64
+        } else {
+            0.0
+        };
+        Ok((rating_average, total_reviews))
+    }
+
+    /// 重算并写回某 marketplace 的聚合评分。泛型 `C` 允许传入事务以并入批改的原子性。
+    async fn update_marketplace_rating<C: ConnectionTrait>(
         &self,
-        db: &DatabaseConnection,
+        db: &C,
         marketplace_id: &str,
     ) -> Result<(), String> {
-        let stats = <Self as MarketplaceServiceTrait>::get_stats(self, db, marketplace_id).await?;
+        let (rating_average, total_reviews) = Self::compute_stats(db, marketplace_id).await?;
 
         let marketplace = workflow_marketplace::Entity::find()
             .filter(workflow_marketplace::Column::Id.eq(marketplace_id))
@@ -210,8 +234,8 @@ impl MarketplaceServiceImpl {
             .ok_or_else(|| "Marketplace not found".to_string())?;
 
         let mut active_model: workflow_marketplace::ActiveModel = marketplace.into();
-        active_model.rating_average = Set(stats.rating_average);
-        active_model.rating_count = Set(stats.total_reviews);
+        active_model.rating_average = Set(rating_average);
+        active_model.rating_count = Set(total_reviews);
         active_model.updated_at = Set(chrono::Utc::now().timestamp());
 
         active_model.update(db).await.map_err(|e| e.to_string())?;

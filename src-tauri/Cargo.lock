@@ -1097,7 +1097,6 @@ version = "2.9.9"
 dependencies = [
  "aes-gcm",
  "async-trait",
- "axagent-crdt",
  "axagent-harness",
  "base64 0.22.1",
  "chrono",
@@ -1696,7 +1695,6 @@ dependencies = [
  "axagent-astock-data",
  "axagent-dao",
  "axagent-document-parser",
- "axagent-entities",
  "axagent-harness",
  "axagent-kit",
  "axagent-mcp",

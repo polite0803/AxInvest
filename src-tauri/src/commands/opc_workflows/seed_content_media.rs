@@ -387,7 +387,6 @@ fn make_agent_node(
             max_tool_rounds: None,
             execution_mode: None,
             rag_source_ids: Vec::new(),
-            model_role: None,
             consistency_check: None,
             hallucination_guard: None,
             fallback_model: None,

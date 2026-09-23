@@ -1,5 +1,5 @@
 import { useStockJump } from "@/hooks/useStockJump";
-import { getActionColor } from "@/lib/stock-analysis-utils";
+import { getActionColor, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Progress, Tag, theme } from "antd";
 import { useTranslation } from "react-i18next";
@@ -40,6 +40,16 @@ export function StockAnalysisChatIndicator() {
   const handleRetry = () => {
     useStockAnalysisStore.getState().startAnalysis(stockCode);
   };
+
+  // 展示档（2026-09-22 语义）：`action` 是方向强度轴，展示档 = 方向档 ——
+  // `resolveDisplayAction` 已改为恒等（不再按仓位派生，原因见
+  // `AUDIT-300642-run-variance-2026-09-22.md`）。本组件此前**裸展示** `decision.action`
+  // （原始档）⇒ 同一份 store.decision 在挂角显示「观望」、在此处显示「持有」。
+  // 展示层统一走派生是 P1-2 的既定契约（DecisionBanner / DecisionHeroBar /
+  // HistoricalAnalysisPanel 均已如此），此处为漏改点。
+  const displayAction = decision
+    ? resolveDisplayAction(decision.action, decision.positionState, decision.positionPct)
+    : null;
 
   return (
     <div
@@ -86,10 +96,10 @@ export function StockAnalysisChatIndicator() {
             {" · "}
             <Tag
               variant="filled"
-              color={getActionColor(decision.action)}
+              color={getActionColor(displayAction ?? "")}
               style={{ fontSize: 12 }}
             >
-              {decision.action}
+              {t(getActionTKey(displayAction ?? ""))}
             </Tag>
             {decision.confidence > 0 && (
               <span style={{ marginLeft: 4, fontSize: 12 }}>

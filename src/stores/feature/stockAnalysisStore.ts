@@ -4,22 +4,27 @@ import {
   type DecisionExplanation,
   extractContent,
   extractDecision,
-  extractLlmField,
+  extractValuationApplicability,
   normalizeDecision,
   parseDecisionExplanation,
   parseJsonLoose,
   reconstructVerdictTag,
   tryParseDecision,
+  type ValuationApplicability,
 } from "@/lib/agentOutput";
+import { computeAgreementScore } from "@/lib/decision-agreement";
 import { buildDecisionInputsReport, type DecisionInputsReport } from "@/lib/decisionInputDiagnosis";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import {
+  alignReasoningDecisionLabel,
   computeStockConsensus,
   deriveActionFromLlmDecision,
   parseAction,
+  parsePositionState,
   parseRiskLevel,
+  resolveDisplayAction,
   StockAction,
 } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
@@ -132,6 +137,9 @@ function parseWorkflowResults(results: Record<string, unknown>) {
   let dataQualitySummary = "";
   const rawData: Record<string, string> = {};
   let decision: StockDecision | null = null;
+  // 2026-09-21: 估值维度适用性（`portfolio-mgr` 产物的 `valuationApplicability` 块）。
+  //   此前该字段只写进产物、前端零消费 ⇒ 用户看不到「区间锚定于历史代理」这一前提。
+  let valuationApplicability: ValuationApplicability | null = null;
   // v45: 工作流「仿真验证」节点（sim-verify，决策之后自动运行）的输出
   let simulation: SimulationSnapshot | null = null;
   // V55: 提取后端注入的 __untrusted 标记（strict_mode 兜底节点）
@@ -169,12 +177,24 @@ function parseWorkflowResults(results: Record<string, unknown>) {
     } else if ((stepId.startsWith("risk-") && stepId !== "risk-aggregated") || stepId === "research-mgr") {
       riskAssessments[stepId] = output;
     } else if (stepId === "trader") {
-      analystReports["investment-plan"] = output;
+      // 2026-09-21 修复：此处原先直接存 `output`，**漏了 `reconstructVerdictTag`**，
+      //   而上方 `a-*` 分支（L161）与 live 路径 `handleAnalystReport`（L2129）都有。
+      //   后果（strict_mode 下 trader 输出结构化 JSON `{report, verdict}` 时）：
+      //     AnalystReportCard.tryParseVerdictFormat 找不到 `<!-- VERDICT:` ⇒ 返回 null
+      //     ⇒ 掉进 fuzzy 兜底分支（只能正则抽 `"action"` / `"confidence"`）
+      //     ⇒ 「投资规划」卡片**只剩建议档 + 置信度，正文陈述全丢**。
+      //   `portfolio-mgr` 的决策解析不受影响 ⇒ 表现为「卡片说增持、结论说持有」且卡片无正文。
+      analystReports["investment-plan"] = reconstructVerdictTag(output);
     } else if (stepId === "portfolio-mgr") {
       // 不要构造全 0 假决策——解析失败就保持 null，
       // 让调用方决定如何处理缺失决策。
       const parsed = extractDecision(raw);
       if (parsed) { decision = parsed; }
+      // 2026-09-21: 估值适用性块与决策是**同一条产物里的不同字段** ——
+      //   `extractDecision` 只取 action/positionPct/reasoning，会把它丢掉，
+      //   这正是它此前前端零消费的原因。故单独提取一次。
+      //   与 decision 同策：取不到就保持 null，**不伪造默认值**。
+      valuationApplicability = extractValuationApplicability(raw);
     } else if (stepId === "quality-fallback") {
       // V40 修复: quality-gate 判定 D/F 时，降级决策由 quality-fallback 节点生成。
       // 如果 portfolio-mgr 决策为空（降级路径），用 quality-fallback 的保守决策替代。
@@ -236,6 +256,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
     ruleCheckResults,
     dataQualitySummary,
     rawData,
+    valuationApplicability,
     decision,
     untrustedNodes,
     simulation,
@@ -285,6 +306,20 @@ export interface EvolutionDriftDashboard {
   stats: EvolutionStrategyStatRow[];
   recentChanges: EvolutionRecentChangeRow[];
   strategySummary: EvolutionStrategySummaryRow[];
+}
+
+/** 进化闭环留痕单条记录（对应后端 `stock_evolution_history` 实体，camelCase） */
+export interface EvolutionHistoryEntry {
+  id: string;
+  planId: string;
+  trigger: string;
+  evolutionType: string;
+  qualityBefore: number;
+  parameterResultJson?: string | null;
+  workflowResultJson?: string | null;
+  status: string;
+  improvementSummary: string;
+  createdAt: number;
 }
 
 // ── R2 组合监控类型 ──
@@ -449,6 +484,17 @@ interface StockAnalysisState {
   ruleCheckResults: Record<string, string>;
   dataQualitySummary: string;
   rawData: Record<string, string>;
+  /**
+   * 估值维度适用性（`portfolio-mgr` 输出的 `valuationApplicability` 块）。
+   *
+   * 2026-09-21 新增消费端：此前该字段**只写进产物、前端零消费** —— 用户在估值面板
+   * 看到「内在价值 80.63–156.77 元」，却看不到「该区间锚定于近 5 年正净利均值 ×0.90
+   * 的历史代理」这一前提，于是把代理锚当成内在价值。
+   *
+   * `null` 表示产物里**没有**该字段（旧模板 / 该节点未跑），
+   * 与「前提成立」不是一回事 —— 展示层据此区分「无标注」与「已确认适用」。
+   */
+  valuationApplicability: ValuationApplicability | null;
   /** v45: 工作流「仿真验证」节点（sim-verify，决策之后自动运行）的输出 */
   simulation: SimulationSnapshot | null;
   decision: StockDecision | null;
@@ -613,6 +659,12 @@ interface StockAnalysisState {
   fetchEvolutionDashboard: (asOfDate?: string | null) => Promise<void>;
   recalcEvolutionNow: (asOfDate?: string | null) => Promise<void>;
   loadRecoStrategyWeights: () => Promise<Record<string, number>>;
+  /** 批3-C：进化闭环留痕历史（stock_evolution_history） */
+  evolutionHistory: EvolutionHistoryEntry[] | null;
+  evolutionHistoryLoading: boolean;
+  evolutionTriggering: boolean;
+  fetchEvolutionHistory: (limit?: number) => Promise<void>;
+  triggerStockEvolution: (reason?: string) => Promise<void>;
 
   // R2 组合监控
   portfolioDashboard: PortfolioDashboard | null;
@@ -698,6 +750,7 @@ const initialState = {
   streamingPreviews: {},
   riskAssessments: {},
   valueAssessments: {},
+  valuationApplicability: null,
   ruleCheckResults: {},
   dataQualitySummary: "",
   rawData: {},
@@ -746,6 +799,9 @@ const initialState = {
   evolutionLastError: null,
   agreementScoreHistory: null,
   agreementScoreHistoryLoading: false,
+  evolutionHistory: null,
+  evolutionHistoryLoading: false,
+  evolutionTriggering: false,
   portfolioDashboard: null,
   portfolioCorrelations: [],
   portfolioCorrelationsError: null,
@@ -931,6 +987,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       streamingPreviews: {},
       riskAssessments: {},
       valueAssessments: {},
+      valuationApplicability: null,
       ruleCheckResults: {},
       dataQualitySummary: "",
       rawData: {},
@@ -968,12 +1025,34 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
       // 时间旅行模式：从 useTimeAnchorStore 读 as_of_date，透传给后端
       // 只在 replay / backtest_sweep 模式传日期，live 模式传 null 以避免 persist 残留
+      //
+      // 重跑分析（传 parentAnalysisId）：基于原历史分析时间 as-of 重放、结论覆盖原记录
+      // （便于工作流迭代）。故优先沿用原记录的 as_of_date，而非当前 timeAnchor / 实时时间：
+      //   - 原记录为 replay（asOfDate 非空）→ 注入原日期 ⇒ 后端 replay 同日覆盖（UPDATE 原行）；
+      //   - 原记录为 live（asOfDate 为 null）→ 保持 live 语义（当前实时，新建独立版本）；
+      //   - 拉取原记录失败 → 回退全局 timeAnchor 逻辑，不阻断重跑。
       const anchorMode = useTimeAnchorStore.getState().mode;
-      const rawAsOfDate = useTimeAnchorStore.getState().asOfDate;
-      const asOfDate = anchorMode === "replay" || anchorMode === "backtest_sweep" ? rawAsOfDate : null;
+      let asOfDate: string | null | undefined; // undefined = 未确定，需回退 timeAnchor
+      if (options?.parentAnalysisId) {
+        try {
+          const parent = await invoke<{ asOfDate: string | null }>("get_stock_analysis", {
+            analysisId: options.parentAnalysisId,
+          });
+          asOfDate = parent.asOfDate ?? null;
+        } catch (e) {
+          console.warn("[StockAnalysis] 重跑拉取原记录 asOfDate 失败，回退 timeAnchor:", e);
+        }
+      }
+      if (asOfDate === undefined) {
+        const rawAsOfDate = useTimeAnchorStore.getState().asOfDate;
+        asOfDate = anchorMode === "replay" || anchorMode === "backtest_sweep" ? rawAsOfDate : null;
+      }
       set({
         asOfDate,
-        mode: anchorMode === "backtest_sweep" ? "backtest_sweep" : anchorMode === "replay" ? "replay" : "live",
+        // mode 与注入的 asOfDate 自洽（重跑沿用原 as_of_date 时按 replay 展示）
+        mode: asOfDate
+          ? (anchorMode === "backtest_sweep" ? "backtest_sweep" : "replay")
+          : "live",
       });
       // 版本化分析：透传原始 analysisId 作为 parent，后端新建独立行保留历史版本。
       // 不传则是首次分析（parent_analysis_id = NULL）。
@@ -1096,6 +1175,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       streamingPreviews: {},
       riskAssessments: {},
       valueAssessments: {},
+      valuationApplicability: null,
       ruleCheckResults: {},
       dataQualitySummary: "",
       rawData: {},
@@ -1266,61 +1346,14 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         if (djParsed?.formulaLlmAgreement != null) {
           decisionAgreementScore = Math.round(Number(djParsed.formulaLlmAgreement));
         } else {
-          // V41 修复: 用 extractLlmField 解析 llmDecisionJson，兼容 AgentNode 包装格式
-          // 旧代码直接用 JSON.parse(record.llmDecisionJson) 取 lj.action，
-          // 但旧记录存储的是 {role, content: '{...}', node_id} 格式，lj.action 为 undefined。
-          const ljAction = extractLlmField(llmDecisionJson, "action") as string | null;
-          const ljStance = extractLlmField(llmDecisionJson, "stance") as string | null;
-          const ljPositionPct = extractLlmField(llmDecisionJson, "positionPct") as number | null;
-          const ljConfidence = extractLlmField(llmDecisionJson, "confidence") as number | null;
-          console.log(
-            "[loadAnalysis] llm fields - action:",
-            ljAction,
-            "positionPct:",
-            ljPositionPct,
-            "confidence:",
-            ljConfidence,
-          );
-          // 后端未预计算时，前端自己算（兼容旧记录）
-          // V45 修复: action 一致性评分精细化, 与后端 compute_decision_agreement 保持一致
-          const norm = (s: string) => s.trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
-          // action 一致性 (50分)
-          const fa = djParsed?.action ? norm(String(djParsed.action)) : null;
-          const laRaw = ljAction ?? ljStance;
-          const la = laRaw ? norm(laRaw) : null;
-          const isBuy = (s: string) => s.includes("买") || s.includes("增持");
-          const isSell = (s: string) => s.includes("卖") || s.includes("减持");
-          const isHold = (s: string) => s === "持有";
-          const isWatch = (s: string) => s === "观望";
-          const isUncertain = (s: string) => s.includes("不确定") || s.includes("未知");
-          let actionScore = 25;
-          if (fa && la) {
-            if (fa === la) { actionScore = 50; }
-            else if (isBuy(fa) && isBuy(la)) { actionScore = 35; }
-            else if (isSell(fa) && isSell(la)) { actionScore = 35; }
-            else if ((isHold(fa) && isWatch(la)) || (isHold(la) && isWatch(fa))) { actionScore = 15; }
-            else if ((isHold(fa) || isWatch(fa)) && isUncertain(la)) { actionScore = 5; }
-            else if ((isHold(la) || isWatch(la)) && isUncertain(fa)) { actionScore = 5; }
-            else if (isWatch(fa) && isUncertain(la) || isWatch(la) && isUncertain(fa)) { actionScore = 10; }
-            else { actionScore = 0; }
-          }
-          // positionPct 一致性 (30分)
-          const fp = typeof djParsed?.positionPct === "number" ? djParsed.positionPct : null;
-          const lp = ljPositionPct;
-          let posScore = 15;
-          if (fp !== null && lp !== null) {
-            const diff = Math.abs(fp - lp);
-            posScore = diff <= 5 ? 30 : diff <= 15 ? 20 : diff <= 30 ? 10 : 0;
-          }
-          // confidence 一致性 (20分)
-          const fc = typeof djParsed?.confidence === "number" ? djParsed.confidence : null;
-          const lc = ljConfidence;
-          let confScore = 10;
-          if (fc !== null && lc !== null) {
-            const diff = Math.abs(fc - lc);
-            confScore = diff <= 0.1 ? 20 : diff <= 0.2 ? 15 : diff <= 0.4 ? 8 : 0;
-          }
-          decisionAgreementScore = Math.round(actionScore + posScore + confScore);
+          // 2026-09-21: 降级打分收敛到单点 `computeAgreementScore`
+          //   （`@/lib/decision-agreement`）。原实现在本文件内有**三份近乎逐字的副本**
+          //   （loadAnalysis / rerun / workflow-completed），三份都停留在 V45 的 3 维刻度
+          //   （action 50 / positionPct 30 / confidence 20），而后端 V65 早已是 6 维
+          //   （30 / 20 / 15 / 15 / 10 / 10）⇒ 同一个 `decisionAgreementScore` 在两条路径上
+          //   是**两把尺子**，而 60/40 档位与 `agreement < 80` 判定都按后端刻度解释它。
+          // 取值方式不变：`extractLlmField` 穿透 AgentNode 包装的兼容逻辑移入单点模块内部。
+          decisionAgreementScore = computeAgreementScore(djParsed, llmDecisionJson);
         }
       } catch (e) {
         console.warn("[StockAnalysis] Failed to compute agreement score:", e);
@@ -1357,7 +1390,15 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             // trader 节点后端映射为 report.investment-plan，已是非 a- 前缀，保留不变。
             const rawKey = key.slice(7);
             const normKey = rawKey.startsWith("a-") ? rawKey.slice(2) : rawKey;
-            reports[normKey] = String(value);
+            // 2026-09-21: trader（investment-plan）在**实时路径**长期漏重构（见
+            //   parseWorkflowResults / routeNodeOutput 的 trader 分支注释），旧快照
+            //   同样可能是未重构的 `{report, verdict}` JSON ⇒ 这里对 trader **单独**补一次。
+            //   幂等性：`reconstructVerdictTag` 只对「合法 JSON 且含 string report + verdict」
+            //   的输入做转换；后端 `build_blackboard_snapshot` 已重构过的文本（含
+            //   `<!-- VERDICT:`）会 JSON.parse 失败 ⇒ 原样返回，重复调用无副作用。
+            reports[normKey] = normKey === "investment-plan"
+              ? reconstructVerdictTag(String(value))
+              : String(value);
           } else if (key.startsWith("debate.bull.round_")) {
             const round = parseInt(key.slice("debate.bull.round_".length));
             const bearKey = `debate.bear.round_${round}`;
@@ -1500,6 +1541,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           }
         }
         const decisionInputsReport = buildDecisionInputsReport(normalizedSnap, {});
+        // 2026-09-21: 估值适用性（`portfolio-mgr` 产物字段）。
+        //   快照里 `portfolio-mgr` 的 value 是已序列化的 JSON 字符串，
+        //   `normalizedSnap` 已尝试 parse；提取函数两种形态都能吃。
+        //   取不到时返回 null ⇒ 展示层区分「无标注」与「已确认适用」。
+        const valuationApplicability = extractValuationApplicability(normalizedSnap["portfolio-mgr"]);
         // v45: 仿真验证结果（sim-verify，决策之后自动运行）。
         // CodeNode 输出可能被包装为 {status, result: {...}}，故优先取 .result。
         const rawSim = normalizedSnap["sim-verify"];
@@ -1514,6 +1560,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           debateRounds: debates,
           riskAssessments: risks,
           valueAssessments: values,
+          valuationApplicability,
           ruleCheckResults: ruleChecks,
           dataQualitySummary: dataQuality,
           rawData: raws,
@@ -1576,16 +1623,27 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       // 直接 String() + as 断言会绕过中文→英文枚举映射，导致 UI 显示"不确定"
       const action = parseAction(d.action);
       const riskLevel = parseRiskLevel(d.riskLevel);
+      // 2026-09-21: 与 `normalizeDecision` 同口径。
+      //   ① 持仓状态（P1-2 独立轴）此前在重跑路径**漏解析** ⇒ 挂角 Tag 的派生
+      //      只能退回 positionPct 判据（后端 positionState 就是按 position_pct 推的，
+      //      值通常相同，但「采集时点无此信息」与「确知空仓」的语义差别被抹掉）。
+      //   ② reasoning 的 `决策=X` 必须对齐**最终方向档**，否则重跑后的卡片仍会
+      //      挂角「观望」而结论文本写「持有」（同 normalizeDecision 的修复）。
+      //      ⚠️ 2026-09-22: 展示档已改为「方向档恒等」，不再按仓位派生 ——
+      //        `positionState` 只作展示，不再参与档名判定。
+      const rerunPositionPct = Number(d.positionPct ?? 0);
+      const rerunPositionState = parsePositionState(d.positionState ?? d.position_state);
       const decision: StockDecision = {
         action,
-        positionPct: Number(d.positionPct ?? 0),
+        positionPct: rerunPositionPct,
+        positionState: rerunPositionState,
         confidence: Number(d.confidence ?? 0),
         decisionConfidence: d.decisionConfidence != null ? Number(d.decisionConfidence) : null,
         signalStrength: d.signalStrength != null ? Number(d.signalStrength) : null,
         riskLevel,
         stopLoss: Number(d.stopLossPct ?? 0),
         targetPrice: null,
-        reasoning: String(d.reasoning ?? ""),
+        reasoning: alignReasoningDecisionLabel(String(d.reasoning ?? ""), resolveDisplayAction(action)),
         timeHorizon: String(d.timeHorizon ?? "mid"),
         expectedHoldingDays: Number(d.expectedHoldingDays ?? 0),
         targetTimeframe: String(d.targetTimeframe ?? "1m"),
@@ -1606,48 +1664,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       let decisionAgreementScore: number | null = null;
       if (llmDecisionJson) {
         try {
-          const ljAction = extractLlmField(llmDecisionJson, "action") as string | null;
-          const ljStance = extractLlmField(llmDecisionJson, "stance") as string | null;
-          const ljPositionPct = extractLlmField(llmDecisionJson, "positionPct") as number | null;
-          const ljConfidence = extractLlmField(llmDecisionJson, "confidence") as number | null;
-          const norm = (s: string) => s.trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
-          // action 一致性 (50分)
-          const fa = d.action ? norm(String(d.action)) : null;
-          const laRaw = ljAction ?? ljStance;
-          const la = laRaw ? norm(laRaw) : null;
-          const isBuy = (s: string) => s.includes("买") || s.includes("增持");
-          const isSell = (s: string) => s.includes("卖") || s.includes("减持");
-          const isHold = (s: string) => s === "持有";
-          const isWatch = (s: string) => s === "观望";
-          const isUncertain = (s: string) => s.includes("不确定") || s.includes("未知");
-          let actionScore = 25;
-          if (fa && la) {
-            if (fa === la) { actionScore = 50; }
-            else if (isBuy(fa) && isBuy(la)) { actionScore = 35; }
-            else if (isSell(fa) && isSell(la)) { actionScore = 35; }
-            else if ((isHold(fa) && isWatch(la)) || (isHold(la) && isWatch(fa))) { actionScore = 15; }
-            else if ((isHold(fa) || isWatch(fa)) && isUncertain(la)) { actionScore = 5; }
-            else if ((isHold(la) || isWatch(la)) && isUncertain(fa)) { actionScore = 5; }
-            else if (isWatch(fa) && isUncertain(la) || isWatch(la) && isUncertain(fa)) { actionScore = 10; }
-            else { actionScore = 0; }
-          }
-          // positionPct 一致性 (30分)
-          const fp = typeof d.positionPct === "number" ? d.positionPct : null;
-          const lp = ljPositionPct;
-          let posScore = 15;
-          if (fp !== null && lp !== null) {
-            const diff = Math.abs(fp - lp);
-            posScore = diff <= 5 ? 30 : diff <= 15 ? 20 : diff <= 30 ? 10 : 0;
-          }
-          // confidence 一致性 (20分)
-          const fc = typeof d.confidence === "number" ? d.confidence : null;
-          const lc = ljConfidence;
-          let confScore = 10;
-          if (fc !== null && lc !== null) {
-            const diff = Math.abs(fc - lc);
-            confScore = diff <= 0.1 ? 20 : diff <= 0.2 ? 15 : diff <= 0.4 ? 8 : 0;
-          }
-          decisionAgreementScore = Math.round(actionScore + posScore + confScore);
+          // 2026-09-21: 降级打分收敛到单点 `computeAgreementScore`
+          //   （`@/lib/decision-agreement`）—— 原第二份副本，刻度同 loadAnalysis。
+          decisionAgreementScore = computeAgreementScore(d, llmDecisionJson);
         } catch (e) {
           console.warn("一致性计算失败:", e);
         }
@@ -1743,6 +1762,28 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     } catch (e) {
       console.warn("[AgreementScore] 获取一致性趋势失败:", e);
       set({ agreementScoreHistoryLoading: false });
+    }
+  },
+
+  // 批3-C：进化闭环留痕历史
+  fetchEvolutionHistory: async (limit = 50) => {
+    set({ evolutionHistoryLoading: true });
+    try {
+      const data = await invoke<EvolutionHistoryEntry[]>("get_evolution_history", { limit });
+      set({ evolutionHistory: data, evolutionHistoryLoading: false });
+    } catch (e) {
+      console.warn("[EvolutionHistory] 获取进化历史失败:", e);
+      set({ evolutionHistoryLoading: false });
+    }
+  },
+
+  // 批3-C：手动触发进化
+  triggerStockEvolution: async (reason = "用户主动触发") => {
+    set({ evolutionTriggering: true });
+    try {
+      await invoke("trigger_stock_evolution", { reason });
+    } finally {
+      set({ evolutionTriggering: false });
     }
   },
 
@@ -2101,7 +2142,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       } else if (nodeId.startsWith("risk-") || nodeId === "research-mgr") {
         set({ riskAssessments: { ...s.riskAssessments, [nodeId]: text } });
       } else if (nodeId === "trader") {
-        set({ analystReports: { ...s.analystReports, "investment-plan": text } });
+        // 2026-09-21 修复：同 parseWorkflowResults 的 trader 分支 —— 原先直接存 `text`，
+        //   与 `handleAnalystReport`（L2129 走 reconstructVerdictTag）不一致。
+        //   trader 在 strict_mode 下输出 `{report, verdict}` 结构化 JSON 时，
+        //   不重构 ⇒ 卡片解析不出 VERDICT 标签 ⇒ 正文丢失（详见 parseWorkflowResults 注释）。
+        set({ analystReports: { ...s.analystReports, "investment-plan": reconstructVerdictTag(text) } });
       } else if (nodeId === "portfolio-mgr") {
         const parsed = tryParseDecision(text);
         // Bug #P1-7: 决策解析失败时不构造假 HOLD 决策。
@@ -2113,6 +2158,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             "[StockAnalysis] workflow-step-done: portfolio-mgr decision parse failed, deferring to workflow-completed",
           );
         }
+        // 2026-09-21: 估值适用性与决策**同源同产物**，但 `tryParseDecision` 只取
+        //   action/positionPct/confidence，会把它丢掉 ⇒ 单独提一次。
+        //   与 decision 的差异：决策有 workflow-completed 的三层回退，
+        //   而适用性只是个标注（无回退层）—— 能提就提，提不到置 null。
+        set({ valuationApplicability: extractValuationApplicability(rawOutput ?? text) });
       } else if (nodeId === "value-investor") {
         set({ valueAssessments: { ...s.valueAssessments, [nodeId]: text } });
       } else if (nodeId === "data-quality") {
@@ -2486,42 +2536,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 用同一份 llmDecisionJson 计算一致性分数
         if (llmDecisionJson && decision) {
           try {
-            const fj = decision as unknown as Record<string, unknown>;
-            const lj = JSON.parse(llmDecisionJson);
-            const norm = (s: string) => s.trim().toLowerCase().replace(/[\s/_\u3000]+/g, "");
-            const fa = fj.action ? norm(String(fj.action)) : null;
-            const la = (lj.action ?? lj.stance) ? norm(String(lj.action ?? lj.stance)) : null;
-            let actionScore = 25;
-            if (fa && la) {
-              const isBuy = (s: string) => s.includes("买") || s.includes("增持");
-              const isSell = (s: string) => s.includes("卖") || s.includes("减持");
-              const isHold = (s: string) => s === "持有";
-              const isWatch = (s: string) => s === "观望";
-              const isUncertain = (s: string) => s.includes("不确定") || s.includes("未知");
-              if (fa === la) { actionScore = 50; }
-              else if (isBuy(fa) && isBuy(la)) { actionScore = 35; }
-              else if (isSell(fa) && isSell(la)) { actionScore = 35; }
-              else if ((isHold(fa) && isWatch(la)) || (isHold(la) && isWatch(fa))) { actionScore = 15; }
-              else if ((isHold(fa) || isWatch(fa)) && isUncertain(la)) { actionScore = 5; }
-              else if ((isHold(la) || isWatch(la)) && isUncertain(fa)) { actionScore = 5; }
-              else if (isWatch(fa) && isUncertain(la) || isWatch(la) && isUncertain(fa)) { actionScore = 10; }
-              else { actionScore = 0; }
-            }
-            const fp = typeof fj.positionPct === "number" ? fj.positionPct : null;
-            const lp = typeof lj.positionPct === "number" ? lj.positionPct : null;
-            let posScore = 15;
-            if (fp !== null && lp !== null) {
-              const diff = Math.abs(fp - lp);
-              posScore = diff <= 5 ? 30 : diff <= 15 ? 20 : diff <= 30 ? 10 : 0;
-            }
-            const fc = typeof fj.confidence === "number" ? fj.confidence : null;
-            const lc = typeof lj.confidence === "number" ? lj.confidence : null;
-            let confScore = 10;
-            if (fc !== null && lc !== null) {
-              const diff = Math.abs(fc - lc);
-              confScore = diff <= 0.1 ? 20 : diff <= 0.2 ? 15 : diff <= 0.4 ? 8 : 0;
-            }
-            decisionAgreementScore = Math.round(actionScore + posScore + confScore);
+            // 2026-09-21: 降级打分收敛到单点 `computeAgreementScore`
+            //   （`@/lib/decision-agreement`）—— 原第三份副本，刻度同 loadAnalysis。
+            decisionAgreementScore = computeAgreementScore(decision, llmDecisionJson);
           } catch (e) {
             console.warn("[StockAnalysis] Failed to compute LLM agreement:", e);
           }
@@ -2533,6 +2550,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           debateRounds: mergedDebateRounds,
           riskAssessments: { ...s.riskAssessments, ...parsed.riskAssessments },
           valueAssessments: { ...s.valueAssessments, ...parsed.valueAssessments },
+          // 2026-09-21: 估值适用性随本轮产物**整体覆盖**，不做「保留旧值」——
+          //   旧值属于上一次分析，留着会让面板标注与当前估值数字不同源。
+          valuationApplicability: parsed.valuationApplicability,
           ruleCheckResults: { ...s.ruleCheckResults, ...parsed.ruleCheckResults },
           dataQualitySummary: parsed.dataQualitySummary || s.dataQualitySummary,
           rawData: { ...s.rawData, ...parsed.rawData },
@@ -2663,6 +2683,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             debateRounds: parsed.debateRounds,
             riskAssessments: parsed.riskAssessments,
             valueAssessments: parsed.valueAssessments,
+            valuationApplicability: parsed.valuationApplicability,
             ruleCheckResults: parsed.ruleCheckResults,
             dataQualitySummary: parsed.dataQualitySummary,
             rawData: parsed.rawData,

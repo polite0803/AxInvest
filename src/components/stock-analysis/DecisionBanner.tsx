@@ -1,10 +1,14 @@
 import { extractLlmField } from "@/lib/agentOutput";
+import { reportQualitySeverity } from "@/lib/dataQualityDiagnosis";
 import { type DecisionInputsReport, summarizeDecisionInputs } from "@/lib/decisionInputDiagnosis";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { exportAnalysisReport } from "@/lib/stock-analysis-export";
 import { type ExportData, type ExportFormat } from "@/lib/stock-analysis-export";
 import {
   actionToDirection,
+  agreementBgColor,
+  agreementColor,
   computeStockConsensus,
   getActionColor,
   getActionTKey,
@@ -14,7 +18,7 @@ import {
 } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
-import type { DataQualityReport } from "@/types";
+import type { DataQualityReport, HorizonPriceGroup } from "@/types";
 import { ExpandOutlined, FilePptOutlined, FileTextOutlined, FileWordOutlined, ReloadOutlined } from "@ant-design/icons";
 import { App, Button, Card, Collapse, Dropdown, Modal, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -33,10 +37,9 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
   const isDark = themeMode === "dark"
     || (themeMode === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   const decision = useStockAnalysisStore((s) => s.decision);
-  // P1-2(2026-09-14): 展示档统一由 (action, positionState, positionPct) 派生 ——
-  // 「持有 / 观望」不再由组件各自判断仓位。后端目前**仍**按仓位互改 action，
-  // 本派生与后端同判据（positionState 优先，缺失时退回 positionPct），故对既有数据是恒等变换；
-  // 后端切换为「action 只表达方向强度」后，此处无需再改。
+  // 2026-09-22: 展示档 = 方向档（`resolveDisplayAction` 已恒等，不再按仓位派生）——
+  // 「持有 / 观望」不再由组件各自判断仓位，也不再由**本次建议仓位**反推（那是循环判据，
+  // 见 `AUDIT-300642-run-variance-2026-09-22.md`）。后端 action 已只表达方向强度。
   // ⚠️ 只用于**展示**（Tag 文案 + 配色）。方向判定（actionToDirection）与
   //    「问 AI」prompt 仍读 decision.action 原文，避免派生把原始结论改写掉。
   const displayAction = useMemo(
@@ -426,7 +429,19 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     const { currentPrice, upside, confidencePct } = ctx;
     const context = [
       t("stockAnalysis.askAi.prompt", { stockName, code: stockCode }),
-      decision ? t("stockAnalysis.askAi.decision", { action: decision.action, confidence: confidencePct }) : "",
+      // 喂给 AI 的决策档位必须与界面**同一口径**：`decision.action` 是英文枚举，
+      // 直接插值会让上下文里写 "HOLD"、界面却显示「观望」，用户拿这个上下文提问时
+      // 两边对不上（同 `getRiskTKey` 的处理）。
+      decision
+        ? t("stockAnalysis.askAi.decision", {
+          action: t(
+            getActionTKey(
+              resolveDisplayAction(decision.action, decision.positionState, decision.positionPct),
+            ),
+          ),
+          confidence: confidencePct,
+        })
+        : "",
       t("stockAnalysis.export.price", { price: currentPrice.toFixed(2) }),
       upside != null ? t("stockAnalysis.export.upside", { pct: (upside >= 0 ? "+" : "") + upside.toFixed(1) }) : "",
       `${t(getRiskTKey(decision.riskLevel))}`,
@@ -649,6 +664,55 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
         : "Long"
     }`)
     : null;
+
+  // 阶段1（PROPOSAL-stock-decision-four-horizon.md）：四周期价位映射展示。
+  // 遍历固定的四个键 → i18n 标签，仅在有值（stopLossPct > 0，即该周期有交易计划）时渲染。
+  const HORIZON_KEYS: ReadonlyArray<{ key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string }> = [
+    { key: "ultraShort", tSuffix: "UltraShort" },
+    { key: "short", tSuffix: "Short" },
+    { key: "mid", tSuffix: "Mid" },
+    { key: "long", tSuffix: "Long" },
+  ];
+  const horizonEntries = HORIZON_KEYS
+    .map((h) => ({ h, group: decision.horizonPriceMap?.[h.key] ?? null }))
+    .filter((e): e is { h: typeof e.h; group: HorizonPriceGroup } =>
+      Boolean(e.group && e.group.stopLossPct > 0),
+    );
+
+  // 阶段2（PROPOSAL-stock-decision-four-horizon.md）：四周期独立决策面板。
+  // 从 decisionsByHorizon 提取四组独立决策；仅在有数据（action 非空）的周期渲染。
+  const horizonDecisionEntries = useMemo(() => {
+    const dbh = decision.decisionsByHorizon;
+    if (!dbh) { return []; }
+    const entries: Array<{ key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string; d: import("@/types").HorizonDecision }> = [];
+    for (const { key, tSuffix } of HORIZON_KEYS) {
+      const d = dbh[key];
+      if (d && d.action) {
+        entries.push({ key, tSuffix, d });
+      }
+    }
+    return entries;
+  }, [decision.decisionsByHorizon]);
+
+  // 矛盾检测：四周期中同时存在 BUY 族与 SELL 族，或者两两方向冲突。
+  const horizonHasConflict = useMemo(() => {
+    if (horizonDecisionEntries.length < 2) { return false; }
+    const dirs = horizonDecisionEntries.map((e) => actionToDirection(e.d.action));
+    const hasBuy = dirs.some((d) => d === "buy");
+    const hasSell = dirs.some((d) => d === "sell");
+    return hasBuy && hasSell;
+  }, [horizonDecisionEntries]);
+
+  // 四周期标签页状态（默认选中第一个有数据的周期）
+  const [activeHorizonTab, setActiveHorizonTab] = useState<string | null>(null);
+  const defaultHorizonTab = horizonDecisionEntries.length > 0 ? horizonDecisionEntries[0].key : null;
+  const currentHorizonTab = activeHorizonTab ?? defaultHorizonTab;
+  // 当数据变化时重置标签页选中
+  useEffect(() => {
+    if (horizonDecisionEntries.length > 0 && !horizonDecisionEntries.some((e) => e.key === activeHorizonTab)) {
+      setActiveHorizonTab(horizonDecisionEntries[0].key);
+    }
+  }, [horizonDecisionEntries, activeHorizonTab]);
 
   return (
     <>
@@ -1250,6 +1314,218 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               )}
             </div>
 
+            {/* 阶段1：四周期价位映射展示（PROPOSAL-stock-decision-four-horizon.md）
+              同一决策保留单一 action/仓位，但目标价/止损按四周期各给一组。
+              仅在有交易计划（stopLossPct>0）的周期渲染；无映射时整体隐藏。
+              标签/文案复用既有 key（timeHorizonX / targetPrice / stopLoss /
+              expectedHoldingDays），不新增 i18n key。 */}
+            {horizonEntries.length > 0 && (
+              <div className="mb-2">
+                <div className="grid gap-1.5" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))" }}>
+                  {horizonEntries.map(({ h, group }) => {
+                    const groupTarget = Number(group.targetPrice);
+                    const groupStop = Number(group.stopLoss);
+                    return (
+                      <div
+                        key={h.key}
+                        className="text-sm px-2 py-1 rounded"
+                        style={{ background: "var(--surface)", color: "var(--color-text-primary)" }}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="font-semibold">{t(`stockAnalysis.timeHorizon${h.tSuffix}`)}</span>
+                          <span style={{ color: "var(--muted)" }}>
+                            {t("stockAnalysis.expectedHoldingDays", { days: group.expectedHoldingDays })}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono">
+                          <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</span>
+                          <span className="font-semibold">{groupTarget > 0 ? `¥${groupTarget}` : "—"}</span>
+                        </div>
+                        <div className="flex items-center justify-between font-mono">
+                          <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
+                          <span className="font-semibold" style={{ color: "var(--sa-red)" }}>
+                            {groupStop > 0 ? `¥${groupStop}` : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* 阶段2：四周期独立决策面板（PROPOSAL-stock-decision-four-horizon.md）
+              仅在有 decisionsByHorizon 数据时渲染。每个周期独立产出 action/仓位/目标价/止损，
+              按周期 Tab 分组展示。方向矛盾时高亮呈现（验收项）。 */}
+            {horizonDecisionEntries.length > 0 && (
+              <div className="mb-2">
+                {/* 方向矛盾警告条 */}
+                {horizonHasConflict && (
+                  <div
+                    className="text-sm px-2 py-1 rounded mb-1.5 flex items-center gap-1.5"
+                    style={{
+                      background: "rgba(239,68,68,0.08)",
+                      borderLeft: "3px solid var(--sa-red, #ef4444)",
+                    }}
+                  >
+                    <span>⚠️</span>
+                    <span className="font-medium" style={{ color: "var(--sa-red, #ef4444)" }}>
+                      {t("stockAnalysis.horizonConflictTitle")}
+                    </span>
+                    <span style={{ color: "var(--muted)" }}>
+                      {t("stockAnalysis.horizonConflictHint")}
+                    </span>
+                  </div>
+                )}
+                {/* 周期 Tab 切换 */}
+                <div className="flex items-center gap-1 mb-1.5 flex-wrap">
+                  {horizonDecisionEntries.map((e) => {
+                    const isActive = e.key === currentHorizonTab;
+                    const dir = actionToDirection(e.d.action);
+                    const tabColor = dir === "buy"
+                      ? "var(--sa-green, #10b981)"
+                      : dir === "sell"
+                      ? "var(--sa-red, #ef4444)"
+                      : "var(--muted)";
+                    return (
+                      <button
+                        key={e.key}
+                        onClick={() => setActiveHorizonTab(e.key)}
+                        className="text-sm px-2 py-0.5 rounded font-medium transition-colors"
+                        style={{
+                          background: isActive
+                            ? `${tabColor}22`
+                            : "var(--surface)",
+                          color: isActive ? tabColor : "var(--muted)",
+                          border: isActive
+                            ? `1px solid ${tabColor}66`
+                            : "1px solid var(--border)",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {t(`stockAnalysis.timeHorizon${e.tSuffix}`)}
+                        <span
+                          className="ml-1 px-1 py-px rounded text-xs font-bold"
+                          style={{
+                            background: `${tabColor}22`,
+                            color: tabColor,
+                          }}
+                        >
+                          {t(getActionTKey(e.d.action))}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {/* 当前选中周期的决策详情 */}
+                {currentHorizonTab && (() => {
+                  const activeEntry = horizonDecisionEntries.find((e) => e.key === currentHorizonTab);
+                  if (!activeEntry) { return null; }
+                  const { d } = activeEntry;
+                  const dir = actionToDirection(d.action);
+                  const hConf = Math.round(Math.max(0, Math.min(100, d.confidence ?? 0)));
+                  const hConfColor = hConf >= 70 ? "var(--sa-green)" : hConf >= 45 ? "var(--sa-amber)" : "var(--sa-red)";
+                  const hTarget = d.targetPrice != null ? Number(d.targetPrice) : null;
+                  const hStop = d.stopLoss != null ? Number(d.stopLoss) : null;
+                  return (
+                    <div
+                      className="rounded px-2 py-1.5 space-y-1"
+                      style={{
+                        background: "var(--surface)",
+                        borderLeft: `3px solid ${
+                          dir === "buy" ? "var(--sa-green)" : dir === "sell" ? "var(--sa-red)" : "var(--muted)"
+                        }`,
+                      }}
+                    >
+                      {/* 行 1：仓位 + 置信度 + 预期持仓 */}
+                      <div className="flex items-center gap-2 text-sm flex-wrap">
+                        <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.position")}</span>
+                        <span className="font-semibold font-mono">{d.positionPct}%</span>
+                        <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
+                        <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.confidence")}</span>
+                        <span className="font-mono font-semibold" style={{ color: hConfColor }}>{hConf}%</span>
+                        {d.expectedHoldingDays > 0 && (
+                          <>
+                            <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
+                            <span style={{ color: "var(--muted)" }}>
+                              {t("stockAnalysis.expectedHoldingDays", { days: d.expectedHoldingDays })}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {/* 行 2：目标价 + 止损 */}
+                      <div className="flex items-center gap-2 text-sm flex-wrap">
+                        <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.targetPrice")}</span>
+                        <span className="font-mono font-semibold">
+                          {hTarget != null && hTarget > 0 ? `¥${hTarget}` : "—"}
+                        </span>
+                        <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
+                        <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}</span>
+                        <span className="font-mono font-semibold" style={{ color: "var(--sa-red)" }}>
+                          {hStop != null && hStop > 0 ? `¥${hStop}` : "—"}
+                        </span>
+                        {d.takeProfitPct > 0 && (
+                          <>
+                            <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
+                            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.takeProfit")}</span>
+                            <span className="font-mono font-semibold" style={{ color: "var(--sa-green)" }}>
+                              +{d.takeProfitPct}%
+                            </span>
+                          </>
+                        )}
+                        {d.stopLossPct > 0 && (
+                          <>
+                            <span className="text-sm" style={{ color: "var(--muted)" }}>·</span>
+                            <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.stopLoss")}%</span>
+                            <span className="font-mono font-semibold" style={{ color: "var(--sa-red)" }}>
+                              -{d.stopLossPct}%
+                            </span>
+                          </>
+                        )}
+                      </div>
+                      {/* 行 3：verdict 简述（若有） */}
+                      {d.verdict && (
+                        <div className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+                          {d.verdict}
+                        </div>
+                      )}
+                      {/* 超短线 confLowerBound 标注 */}
+                      {d.confLowerBound != null && (
+                        <div className="text-xs" style={{ color: "var(--muted)" }}>
+                          {t("stockAnalysis.confLowerBoundHint", { bound: d.confLowerBound })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                {/* 概览条：四周期 action 一览 */}
+                <div className="flex items-center gap-1.5 text-xs mt-1" style={{ color: "var(--muted)" }}>
+                  <span>{t("stockAnalysis.horizonOverview")}</span>
+                  {horizonDecisionEntries.map((e) => {
+                    const dir = actionToDirection(e.d.action);
+                    return (
+                      <span
+                        key={e.key}
+                        className="px-1.5 py-px rounded font-medium"
+                        style={{
+                          background: dir === "buy"
+                            ? "rgba(16,185,129,0.12)"
+                            : dir === "sell"
+                            ? "rgba(239,68,68,0.12)"
+                            : "rgba(156,163,175,0.12)",
+                          color: dir === "buy" ? "var(--sa-green)" : dir === "sell" ? "var(--sa-red)" : "var(--muted)",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => setActiveHorizonTab(e.key)}
+                      >
+                        {t(`stockAnalysis.timeHorizon${e.tSuffix}`)}: {t(getActionTKey(e.d.action))}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* 操作按钮行 */}
             <div className="flex gap-2 items-center flex-wrap">
               {/* 快速交易录入（紧凑形式）— 决策日可直接在此录入买卖；嵌入模式下隐藏（工作区有专门交易Tab） */}
@@ -1327,7 +1603,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         });
                         message.success(t("trade.recorded"));
                       } catch (e: unknown) {
-                        message.error(String(e));
+                        showBackendError(message, e);
                       }
                     }}
                   >
@@ -1397,11 +1673,8 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
             <div
               className="flex items-center gap-2 px-3 py-1 rounded cursor-pointer hover:opacity-80 transition-opacity mt-0.5"
               style={{
-                background: decisionAgreementScore >= 60
-                  ? "rgba(16, 185, 129, 0.1)"
-                  : decisionAgreementScore >= 40
-                  ? "rgba(245, 158, 11, 0.1)"
-                  : "rgba(239, 68, 68, 0.1)",
+                // 2026-09-21: 走单一真相源（原内联 60/40 档位表）
+                background: agreementBgColor(decisionAgreementScore),
               }}
               onClick={() => {
                 // V50+: 分歧时内联展开对比面板，一致时跳转 tab 查看详情
@@ -1417,13 +1690,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               </span>
               <span
                 className="font-mono text-[12px] font-semibold"
-                style={{
-                  color: decisionAgreementScore >= 60
-                    ? "#10b981"
-                    : decisionAgreementScore >= 40
-                    ? "#f59e0b"
-                    : "#ef4444",
-                }}
+                style={{ color: agreementColor(decisionAgreementScore) }}
               >
                 {decisionAgreementScore}/100
               </span>
@@ -1627,14 +1894,13 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       </span>
                     )}
                   </div>
-                  {/* V65: 6 维度原始分柱状条 */}
-                  <div className="grid grid-cols-6 gap-1 text-[11px] font-mono">
+                  {/* 原始分柱状条：5 维度（2026-09-21 移除 gaps —— 跨口径 Jaccard 恒 0） */}
+                  <div className="grid grid-cols-5 gap-1 text-[11px] font-mono">
                     {([
                       { label: "act", score: decision.agreementBreakdown.actionScore, max: 30 },
                       { label: "pos", score: decision.agreementBreakdown.positionScore, max: 20 },
                       { label: "conf", score: decision.agreementBreakdown.confidenceScore, max: 15 },
                       { label: "risk", score: decision.agreementBreakdown.riskLevelScore, max: 15 },
-                      { label: "gaps", score: decision.agreementBreakdown.dataGapsScore, max: 10 },
                       { label: "evid", score: decision.agreementBreakdown.evidenceScore, max: 10 },
                     ] as const).map((dim) => {
                       const s = typeof dim.score === "number" ? dim.score : 0;
@@ -1680,13 +1946,6 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       <span style={{ color: getRiskColor(decision.agreementBreakdown.llmRiskLevel) }}>
                         {t(getRiskTKey(decision.agreementBreakdown.llmRiskLevel))}
                       </span>
-                      {decision.agreementBreakdown.dataGapsSimilarity != null && (
-                        <span className="ml-2">
-                          {t("stockAnalysis.gapSimilarity", {
-                            pct: (decision.agreementBreakdown.dataGapsSimilarity * 100).toFixed(0),
-                          })}
-                        </span>
-                      )}
                       {typeof decision.agreementBreakdown.evidenceCount === "number" && (
                         <span className="ml-2">
                           {t("stockAnalysis.llmEvidenceCount", { count: decision.agreementBreakdown.evidenceCount })}
@@ -1968,6 +2227,27 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       {t("stockAnalysis.allFactorsComplete")}
                     </div>
                   )}
+                  {
+                    /*
+                    2026-09-21: 上游取数缺口 —— 与「缺失因子」**分列**显示。
+                    语义差别：缺失因子 = 本节点要消费的因子没值（进 factor_completeness 分母）；
+                    上游缺口 = **上游节点没取到数**（我方采集缺陷，不参与评分）。
+                    故用橙色（提示）而非红色（问题），并在文案里已写明「仅提示，不影响评分」。
+                    ⚠️ 不要把它并进上面的 missing_factors 列表：那会让列表长度与
+                    `pm_compute_factor_completeness` 的分母口径不一致（Rhai 侧有注释守住）。
+                  */
+                  }
+                  {dataQualityReport.upstream_data_gaps
+                    && dataQualityReport.upstream_data_gaps.length > 0 && (
+                    <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                      <span className="font-medium">{t("stockAnalysis.upstreamDataGaps")}</span>
+                      {dataQualityReport.upstream_data_gaps.map((g) => (
+                        <div key={g} className="ml-1" style={{ color: "#f59e0b" }}>
+                          {g}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               <Collapse
@@ -1996,6 +2276,10 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                             </th>
                             <th className="text-right py-1.5 px-2" style={{ color: "var(--muted)" }}>
                               {t("stockAnalysis.dqTablePlaceholder")}
+                            </th>
+                            {/* 2026-09-21 新增列：本节点报告质量分（事实量，非等级；取值见下方 rq 注释）。 */}
+                            <th className="text-right py-1.5 px-2" style={{ color: "var(--muted)" }}>
+                              {t("stockAnalysis.dqTableReportQuality")}
                             </th>
                             <th className="text-left py-1.5 px-2" style={{ color: "var(--muted)" }}>
                               {t("stockAnalysis.dqTableStatus")}
@@ -2027,6 +2311,22 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                               : `${diag.confidence.toFixed(0)}`;
                             // 2026-09-12: 报告文本失败标记数（客观证据，独立于自评 confidence）
                             const phHits = diag.placeholder_hits ?? 0;
+                            // 2026-09-21: 本节点**自己的**报告质量分（0-100）。
+                            //   与 `AnalystDataQualityModal` 的「本节点报告质量」同源同口径
+                            //   （`data-quality.rhai::diag_for` 的 `report_quality`）；本表每节点一行
+                            //   ⇒ 各行值互不相同，正好与顶部那个**全局聚合**值区分开。
+                            //   undefined = 旧版快照缺该字段 ⇒ 显示 "—" 并给 tooltip，**不能当 0**
+                            //   （0 是合法取值：该节点未注入报告）。
+                            //   档位来自 `reportQualitySeverity` 单一来源，勿在此重写阈值。
+                            const rq = diag.report_quality;
+                            const rqSeverity = reportQualitySeverity(rq);
+                            const rqColor = rqSeverity === null
+                              ? "var(--muted)"
+                              : rqSeverity === "good"
+                              ? "#10b981"
+                              : rqSeverity === "warning"
+                              ? "#f59e0b"
+                              : "#ef4444";
                             return (
                               <tr
                                 key={key}
@@ -2050,6 +2350,15 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                                     : undefined}
                                 >
                                   {phHits > 0 ? `${phHits}` : "—"}
+                                </td>
+                                <td
+                                  className="py-1.5 px-2 text-right font-mono"
+                                  style={{ color: rqColor }}
+                                  title={rq === undefined
+                                    ? t("stockAnalysis.analystReport.dqNodeReportQualityUnavailable")
+                                    : undefined}
+                                >
+                                  {rq === undefined ? "—" : rq.toFixed(0)}
                                 </td>
                                 <td className="py-1.5 px-2" style={{ color: statusColor }}>
                                   {statusLabel}

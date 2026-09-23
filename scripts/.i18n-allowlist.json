@@ -1,6 +1,6 @@
 {
   "version": "2",
-  "generated": "2026-09-19",
+  "generated": "2026-09-20",
   "total_entries": 433,
   "total_files": 433,
   "entries": [
@@ -498,7 +498,7 @@
     },
     {
       "file": "src/components/executionBridge/PendingSignalsList.tsx",
-      "lines": "32,34",
+      "lines": "32,33,34,35",
       "reason": "后端数据契约值（风险等级中文枚举值，用于类型映射）",
       "phase": 3
     },
@@ -1050,7 +1050,7 @@
     },
     {
       "file": "src/components/workflow/AIPanel/AIPanel.tsx",
-      "lines": "48,123,128,238,240,257,259,260,279,281,302,304,309,311,320,322,373,396,403,414",
+      "lines": "32,43,44,45,50,119,124,147,149,153,233,241,256,266,273,278,299,305,313,314,315,350,369,392,399,410,648",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
       "phase": 3
     },
@@ -1254,7 +1254,7 @@
     },
     {
       "file": "src/components/workflow/Panels/PropertyPanels/DebatePropertyPanel.tsx",
-      "lines": "51,52,53,69,70,71",
+      "lines": "44,45,46,51,52,53,62,63,64,69,70,71",
       "reason": "历史硬编码基线（注释/内部日志/数据/技术字符串）",
       "phase": 3
     },
@@ -1374,7 +1374,7 @@
     },
     {
       "file": "src/components/workflow/WorkflowExecutor.tsx",
-      "lines": "2,78,85,99,117,131,150,450,458,480,520",
+      "lines": "2,78,85,99,117,131,150,450,451,458,459,480,481,520,521",
       "reason": "硬编码中文字符串",
       "phase": 3
     },

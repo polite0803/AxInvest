@@ -4,7 +4,7 @@ import { logIpcError } from "@/lib/invoke";
 import { useEvolutionStore } from "@/stores/feature/evolutionStore";
 import type { AiChatMessage } from "@/stores/feature/workflowEditorStore";
 import { useWorkflowEditorStore } from "@/stores/feature/workflowEditorStore";
-import { useWorkflowStore } from "@/stores/feature/workflowStore";
+import { NL_PARSE_PROGRESS, useWorkflowStore } from "@/stores/feature/workflowStore";
 import type { NLParseResult } from "@/types";
 import { App, Button, Card, Empty, Input, Progress, Radio, Tag, theme } from "antd";
 import DOMPurify from "dompurify";
@@ -40,7 +40,9 @@ interface AIPanelProps {
   onChatClear: () => void;
 }
 
-// Phase 4: progress map for NL parse stages (rebuilt on each render from i18n keys)
+// Phase 4: 解析进度档位表已上移至 `workflowStore::NL_PARSE_PROGRESS`（单一真相源）——
+//   此前此处本地持有一份，key 取自 `aiPanel.progress*` 的**展示文案**，而 store 写入的是
+//   `workflow.parse.*` 的展示文案，两者零交集 ⇒ 查表恒 undefined ⇒ 进度条恒 10%。
 
 /** Render assistant message content with Markdown-like formatting — defined outside component to avoid re-creation */
 function renderAssistantContent(content: string) {
@@ -112,12 +114,6 @@ export const AIPanel: React.FC<AIPanelProps> = ({
   onChatClear,
 }) => {
   const { t } = useTranslation();
-  const NL_PARSE_PROGRESS_MAP: Record<string, number> = {
-    [t("aiPanel.progressAnalyzing")]: 25,
-    [t("aiPanel.progressMatching")]: 50,
-    [t("aiPanel.progressBuilding")]: 75,
-    [t("aiPanel.progressOptimizing")]: 95,
-  };
   const { token } = theme.useToken();
   const { message, notification } = App.useApp();
   // 用 store selector 订阅 nodes/edges 变化，确保 Diff 预览拿到最新数据
@@ -673,10 +669,10 @@ export const AIPanel: React.FC<AIPanelProps> = ({
       {isGenerating && workflowStore.parseProgress && (
         <div style={{ marginTop: 12 }}>
           <div style={{ color: token.colorTextSecondary, fontSize: 12, marginBottom: 4 }}>
-            {workflowStore.parseProgress}
+            {t(workflowStore.parseProgress)}
           </div>
           <Progress
-            percent={NL_PARSE_PROGRESS_MAP[workflowStore.parseProgress] || 10}
+            percent={NL_PARSE_PROGRESS[workflowStore.parseProgress] ?? 10}
             size="small"
             showInfo={false}
             strokeColor={token.colorPrimary}

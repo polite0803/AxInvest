@@ -2205,7 +2205,6 @@ fn extract_config_from_n8n(n8n_node: &serde_json::Value, node_id: &str) -> Agent
         max_tool_rounds: None,
         execution_mode: None,
         rag_source_ids: vec![],
-        model_role: None,
         consistency_check: None,
         hallucination_guard: None,
         task_scene: None,

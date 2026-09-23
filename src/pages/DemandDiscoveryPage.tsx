@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import { openExternal } from "@/lib/openExternal";
 import type {
@@ -507,7 +508,7 @@ export function DemandDiscoveryPage() {
         await invoke<Delivery>("opc_execute_demand_workflow", { lead_id: row.id });
         message.success(t("opc.demand.deliveryStarted"));
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [message, t],
@@ -2131,7 +2132,7 @@ function CapabilitiesPanel() {
       }
       void loadGaps();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     } finally {
       setAnalyzingGaps(false);
     }
@@ -2144,7 +2145,7 @@ function CapabilitiesPanel() {
         message.success(t("opc.demand.gapClosed"));
         void loadGaps();
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [loadGaps, message, t],
@@ -2302,7 +2303,7 @@ function DeliveriesPanel() {
         message.success(t("opc.demand.deliveryRetried"));
         void load();
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [load, message, t],
@@ -2315,7 +2316,7 @@ function DeliveriesPanel() {
         message.success(t("opc.demand.deliveryCancelled"));
         void load();
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [load, message, t],

@@ -219,7 +219,15 @@ impl VendorHealthTracker {
                 "[VendorHealth] {} 自动恢复（窗口失败数 {} < 阈值 {}）",
                 name, window_count, self.config.degraded_threshold
             );
+            // D5 指标：Degraded → Healthy 自动恢复事件（不计入 calls，否则成功率被抬高）
+            axagent_harness::dependency_metrics::record_vendor_recovered(name);
         }
+
+        // D5 指标：成功记账。埋点选在此处而非调用方 —— `record_success` /
+        // `record_failure` 是**唯一**记账点，同时覆盖 `try_vendors_retry` 与
+        // `get_margin_data` / `get_pledge_data` 两个手写重试循环。
+        // ⚠ 上方的 Disabled 早退已挡住冻结 vendor，故这里记到的都是「真的在跑」的。
+        axagent_harness::dependency_metrics::record_vendor_success(name);
     }
 
     /// 记录失败，返回是否已降级
@@ -257,8 +265,13 @@ impl VendorHealthTracker {
                 "[VendorHealth] {} 30s 窗口内失败 {} 次（共 {} 次），已降级。最后错误: {}",
                 name, window_count, entry.total_failures, error
             );
+            // D5 指标：本次失败**触发了降级**（degraded = true）—— 即审计报告要回答的
+            // 「近 24h 各供应商降级次数」，与普通失败分列，不能合并计数。
+            axagent_harness::dependency_metrics::record_vendor_failure(name, true);
             true
         } else {
+            // D5 指标：普通失败（未达降级阈值）
+            axagent_harness::dependency_metrics::record_vendor_failure(name, false);
             false
         }
     }

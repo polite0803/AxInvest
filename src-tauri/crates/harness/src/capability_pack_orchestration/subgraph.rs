@@ -118,7 +118,6 @@ impl DynamicSubGraph {
             max_tool_rounds: None,
             execution_mode: None,
             rag_source_ids: vec![],
-            model_role: None,
             consistency_check: None,
             hallucination_guard: None,
             fallback_model: None,

@@ -6,6 +6,7 @@ import { Tooltip } from "@/components/layout/Tooltip";
 import { PROVIDER_TYPE_LABELS, SearchProviderTypeIcon } from "@/components/shared/SearchProviderIcon";
 import { SkillToolbar } from "@/components/skill/SkillToolbar";
 import { useVoiceWakeup } from "@/hooks/useVoiceWakeup";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri, logIpcError } from "@/lib/invoke";
 import { findModelByIds, modelHasCapability, supportsReasoning } from "@/lib/modelCapabilities";
 import { formatShortcutForDisplay, getShortcutBinding } from "@/lib/shortcuts";
@@ -1008,7 +1009,7 @@ export function InputArea() {
       setValue((current) => current || trimmed);
       setAttachedFiles((current) => current.length > 0 ? current : submittedFiles);
       logIpcError("handleSend")(e);
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
       // Re-expand textarea after restoring content
       requestAnimationFrame(() => {
         const textarea = textareaRef.current;

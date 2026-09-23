@@ -16,6 +16,7 @@
  * 后端 LlmDispatcher 会读取 strategy 注入对应的业务上下文 prompt。
  */
 import { SCENE_TEMPLATES } from "@/components/office/phaser/sceneTemplates";
+import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { useOfficeStore } from "@/stores";
 import type { CreateFleetInput, FleetMetadata } from "@/types";
@@ -75,7 +76,7 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
       }
     } catch (e) {
       if (e instanceof Error && e.message) {
-        message.error(e.message);
+        showBackendError(message, e);
       }
     } finally {
       setLoading(false);

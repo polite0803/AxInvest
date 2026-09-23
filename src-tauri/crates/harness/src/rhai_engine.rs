@@ -98,6 +98,23 @@ pub fn register_common_functions(engine: &mut Engine) {
     });
 }
 
+/// 注册领域本体查询函数（当前仅 `band_for_score`）。
+///
+/// 为什么不并入 `register_common_functions`：本体查询属于**域知识**，不是「Rhai 语言
+/// 能力补充」；不同引擎按需取舍（动态工具引擎要、纯表达式求值引擎不需要）。
+///
+/// 历史缺陷（2026-09-22）：`band_for_score` 此前**只**在
+/// `crates/tools/src/rhai_engine.rs` 内联注册，共享 Engine（DAG 主路径）与 AxInvest
+/// 本地自建 Engine（What-If / rerun）都没有 ⇒ `strategy-scorer.rhai:68` 与
+/// `bottleneck-calc.rhai:148` 一旦真的执行就报 `Function not found`；
+/// 与 `bottleneck_node_score` 完全同型（同批修复）。
+/// 权威实现是 [`crate::domain_ontology::band_for_score`]，此处只做薄包装。
+pub fn register_ontology_functions(engine: &mut Engine) {
+    engine.register_fn("band_for_score", |score: f64| -> String {
+        crate::domain_ontology::band_for_score(score).to_string()
+    });
+}
+
 /// 清理 JSON 文本中的尾逗号（LLM 输出常见病：`"key": "value",}` / `[1,2,]`）。
 ///
 /// 逐字符扫描：遇到逗号时，若其后方（跳过空白）紧跟 `}` 或 `]`，则该逗号是尾逗号，丢弃。

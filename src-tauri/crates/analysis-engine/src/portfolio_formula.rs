@@ -8,6 +8,7 @@
 //! 所有函数均为纯函数，无副作用，无异步。
 
 use crate::decision_action::{normalize_action, ActionKind};
+use crate::position_limits::RiskTier;
 use serde::{Deserialize, Serialize};
 
 /// 计算因子数据完整度（0.0 ~ 1.0）。
@@ -394,8 +395,19 @@ pub fn compute_risk_bias(risk_level: &str) -> f64 {
 /// - 风险等级为高 / 极高：按最保守处理降级为「观望」（未知值视为可能持仓）；
 /// - 其余等级：保留原值，但 `note` 显式说明该值未参与判定。
 pub fn apply_risk_veto(action: &str, risk_level: &str) -> (String, bool, String) {
-    let extreme = matches!(risk_level, "极高风险" | "极高");
-    let high = matches!(risk_level, "高风险" | "高");
+    // 2026-09-21: 风险档位判据改走 `RiskTier::from_risk_str`，与 `portfolio_risk_gate` 同源。
+    //   原实现自写 `matches!(risk_level, "极高风险" | "极高")` / `("高风险" | "高")` ——
+    //   这是**同一语义的第二份值域表**，且比 `RiskTier` 窄：它不认英文 `EXTREME` / `HIGH`。
+    //   后果（fail-open）：风险等级为英文时 `extreme`/`high` 双 false ⇒
+    //     ① 未识别 action 的「保守降级为观望」不触发；
+    //     ② `extreme && implies_long` 的「极高风险禁止持仓」不触发，**静默放行**。
+    //   `from_risk_str` 已配 high/medium/low 的 ASCII 别名（本次补上 extreme），
+    //   故收敛后同一字符串在两处结论一致。
+    //   对中文值域是零语义变化：`High` 档不含「中高风险」（后者归 `MediumHigh`），
+    //   与原 `matches!(risk_level, "高风险" | "高")` 的取值面逐一相同。
+    let tier = RiskTier::from_risk_str(risk_level);
+    let extreme = matches!(tier, RiskTier::Extreme);
+    let high = matches!(tier, RiskTier::High);
 
     let Some(kind) = normalize_action(action) else {
         tracing::warn!(
@@ -538,7 +550,7 @@ pub fn portfolio_risk_gate(
     use crate::portfolio_monitor::{
         compute_concentration, compute_concentration_warning, normalize_position_weights,
     };
-    use crate::position_limits::{PositionLimits, RiskTier};
+    use crate::position_limits::PositionLimits;
     use crate::trading::PositionSummary;
 
     // 兜底：持仓 JSON 解析失败时返回原始决策
@@ -572,7 +584,17 @@ pub fn portfolio_risk_gate(
                 let mut adjusted = false;
 
                 // 极高风险档位禁开新仓
-                if risk_tier.forbid_new_position() && matches!(pm_action, "买入" | "增持" | "持有")
+                //
+                // 2026-09-21: 判据改走统一归一化，与下方**非空持仓**分支（同函数 L706 附近）
+                //   同型。P1-6(2026-09-14) 那次修复只改了非空分支，本分支被漏掉 ⇒
+                //   **同一函数内同一条 R-200 规则在两条路径上行为不同**：
+                //   action 一旦是英文 token（`BUY`/`HOLD`）或 dashboard 值域（`强烈买入`），
+                //   `matches!` 不命中任何一项 ⇒ 极高风险的「禁止持仓」**静默 fail-open**
+                //   （走空持仓分支的调用被放行，走非空分支的却被否决）。
+                //   `ActionKind::implies_long()` 的集合恰为 `Buy | Increase | Hold`，
+                //   与原先的中文字面量集合**逐一等价** ⇒ 对中文输入是零语义变化的纯补漏。
+                if risk_tier.forbid_new_position()
+                    && normalize_action(pm_action).is_some_and(ActionKind::implies_long)
                 {
                     final_action = "观望".into();
                     final_pct = 0.0;

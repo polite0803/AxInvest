@@ -1,7 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import { Button, Input, Segmented, Tag, Tooltip } from "antd";
+import { App, Button, Input, Segmented, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -22,6 +22,33 @@ const HORIZON_LABELS: Record<string, string> = {
   long: "long",
 };
 
+/**
+ * 从搜索框文本解析出股票代码。
+ *
+ * 存在的理由（2026-09-22 实测缺陷，DB 实证）：输入框文本（searchKeyword）与待分析标的
+ * （store.stockCode）是**两套独立状态**，二者唯一的同步点是「点下拉项」和「回车且 NL 解析成功」。
+ * 用户输入代码后直接点「开始分析」时，按钮用的是**上一次**的 stockCode
+ * ⇒ 输入 688315 却分析了上一次的 300642（实证：stock_analyses 里 688315 零记录，
+ * 而当天该次点击后多出一条 300642）。故点击必须以输入框为准。
+ *
+ * 解析顺序：括号内代码（预填格式「名称 (代码)」）→ 纯 6 位代码 → 后端模糊搜索（优先同名）。
+ */
+async function resolveCodeFromKeyword(keyword: string): Promise<string | null> {
+  const kw = keyword.trim();
+  if (!kw) { return null; }
+  const inParen = /[（(]\s*(\d{6})\s*[)）]/.exec(kw);
+  if (inParen?.[1]) { return inParen[1]; }
+  if (/^\d{6}$/.test(kw)) { return kw; }
+  try {
+    const hits = await invoke<Array<{ code: string; name: string }>>("search_stock", { keyword: kw });
+    if (!Array.isArray(hits) || hits.length === 0) { return null; }
+    const exact = hits.find((h) => h.name === kw);
+    return (exact ?? hits[0])?.code ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function StockSearchBar() {
   const { t } = useTranslation();
   const searchKeyword = useStockAnalysisStore((s) => s.searchKeyword);
@@ -32,11 +59,44 @@ export function StockSearchBar() {
   const getStockKline = useStockAnalysisStore((s) => s.getStockKline);
   const status = useStockAnalysisStore((s) => s.status);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
+  const stockName = useStockAnalysisStore((s) => s.stockName);
   const reportLanguage = useStockAnalysisStore((s) => s.reportLanguage);
   const setReportLanguage = useStockAnalysisStore((s) => s.setReportLanguage);
   const [intent, setIntent] = useState<ParsedIntent | null>(null);
+  const { message } = App.useApp();
 
   const isRunning = status === "loading" || status === "running";
+
+  /**
+   * 启动分析 —— **以输入框文本为准**。
+   *
+   * 修复：此前直接 `startAnalysis(stockCode)`，而 stockCode 是「上一次选中的标的」，
+   * 与输入框内容可以完全无关 ⇒ 输入 688315 却分析了上一次的 300642。
+   * 现在：输入框与当前标的不一致时先解析输入框；解析不出就明确提示并**拒绝启动**，
+   * 绝不退回「静默分析上一只股票」。
+   */
+  const handleStartAnalysis = useCallback(async () => {
+    const kw = searchKeyword.trim();
+    const currentDisplay = stockName ? `${stockName} (${stockCode})` : stockCode;
+    let code = stockCode;
+
+    if (kw && kw !== stockCode && kw !== currentDisplay) {
+      const resolved = await resolveCodeFromKeyword(kw);
+      if (!resolved) {
+        message.warning(t("stockAnalysis.searchUnrecognized", { keyword: kw }));
+        return;
+      }
+      code = resolved;
+      if (resolved !== stockCode) {
+        getStockQuote(resolved);
+        getStockKline(resolved, "daily", 120);
+      }
+    }
+
+    if (code) {
+      void startAnalysis(code);
+    }
+  }, [searchKeyword, stockCode, stockName, message, t, getStockQuote, getStockKline, startAnalysis]);
 
   // Ctrl+K / Cmd+K 聚焦到搜索框
   useEffect(() => {
@@ -103,12 +163,12 @@ export function StockSearchBar() {
         />
         <Button
           type="primary"
-          disabled={!stockCode || isRunning}
+          // 输入框有内容即可点击（解析失败会明确提示），不再要求 store.stockCode 非空 ——
+          // 否则「输入了代码但没选下拉项」时按钮直接变灰，用户会以为界面坏了
+          disabled={(!stockCode && !searchKeyword.trim()) || isRunning}
           loading={isRunning}
           onClick={() => {
-            if (stockCode) {
-              startAnalysis(stockCode);
-            }
+            void handleStartAnalysis();
           }}
         >
           {isRunning ? t("stockAnalysis.analyzing") : t("stockAnalysis.startAnalysis")}
@@ -152,7 +212,12 @@ export function StockSearchBar() {
               onClick={() => {
                 getStockQuote(item.code);
                 getStockKline(item.code, "daily", 120);
-                useStockAnalysisStore.setState({ searchResults: [] });
+                // 输入框回显为「名称 (代码)」，让「输入框显示 = 实际待分析标的」这个不变量可见 ——
+                // 否则输入框停在用户键入的原始文本上，界面无从判断按钮会跑哪只股票
+                useStockAnalysisStore.setState({
+                  searchResults: [],
+                  searchKeyword: `${item.name} (${item.code})`,
+                });
               }}
             >
               {item.code} — {item.name}

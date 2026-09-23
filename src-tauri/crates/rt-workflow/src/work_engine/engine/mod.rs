@@ -6161,8 +6161,9 @@ const DEFAULT_CONTAINER_BODY_TIMEOUT: Duration = Duration::from_secs(300);
 ///   权限不足等），重试必然复现同样失败，只会拉长耗时。
 /// - 退避：复用 `compute_backoff`，与主循环同一实现。
 ///
-/// **不改** provider 侧的 15s 响应头超时公式 —— 那是刻意的「小请求快速失败」
-/// 设计（见 `providers/openai.rs`），本函数补的是**重试机会**而非抬高阈值。
+/// **不改** provider 侧的响应头超时公式 —— 那是刻意的「小请求快速失败」设计
+/// （见 `providers/openai.rs`；2026-09-09/10 起为**随体积缩放**：base 10s + 每 64KB 加 5s、
+/// 封顶 60s，**不是固定 15s**），本函数补的是**重试机会**而非抬高阈值。
 async fn dispatch_container_body_with_retry(
     engine: &WorkEngine,
     node: &WorkflowNode,
@@ -6697,7 +6698,6 @@ mod tests {
                 max_rounds: 3,
                 convergence_prompt: None,
                 convergence_model: None,
-                convergence_model_role: None,
                 topic_var: "trigger.output".into(),
                 output_var: String::new(),
                 sub_graph: None,

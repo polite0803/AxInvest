@@ -185,8 +185,20 @@ pub async fn run_stock_pipeline_inner(
         Box::pin(async move {})
     });
 
-    // 注入变量
-    let variables = build_pipeline_variables(config, as_of_date, &run_date, &run_id);
+    // 注入变量（D8 修复：**模板变量作基座，管道计算值覆盖同名项**）
+    //
+    // 原实现只传 6 个管道自带变量 ⇒ 模板里声明的其余参数在下游 tool/agent 节点的
+    // `input_mapping` 中全部解析不到，静默回退模块常量，与工作区路径取值不一致
+    // （D8 同族：同一参数在不同路径上取不同来源）。详见
+    // `AUDIT-300642-run-variance-2026-09-22.md` §13。
+    let mut variables = loaded.variables.clone().unwrap_or_default();
+    for pv in build_pipeline_variables(config, as_of_date, &run_date, &run_id) {
+        if let Some(pos) = variables.iter().position(|v| v.name == pv.name) {
+            variables[pos] = pv;
+        } else {
+            variables.push(pv);
+        }
+    }
 
     // 创建工作流
     let wf_name = format!("stock-pipeline-{run_id}");
@@ -285,7 +297,21 @@ async fn load_pipeline_template(
 
     let input_schema = template.input_schema.as_ref().and_then(|s| serde_json::from_str(s).ok());
     let output_schema = template.output_schema.as_ref().and_then(|s| serde_json::from_str(s).ok());
-    let variables = template.variables.as_ref().and_then(|v| serde_json::from_str(v).ok());
+    // 解析失败**必须留痕**：`.ok()` 会静默降级成 None，而 None 的后果是下游所有
+    // `input_mapping`（`stock_code` 除外）解析不到并回退默认值 —— 这类"配置看起来配了
+    // 但没生效"的缺陷极难从行为上察觉（D8 的成因之一）。与同文件 hooks_config 同语义：
+    // 降级但不静默。
+    let variables: Option<Vec<Variable>> =
+        template.variables.as_ref().and_then(|v| match serde_json::from_str(v) {
+            Ok(vars) => Some(vars),
+            Err(e) => {
+                tracing::warn!(
+                    "[stock_pipeline] 模板 stock-pipeline 的 variables 解析失败，按无变量处理\
+                     （下游 input_mapping 将回退默认值）: {e}"
+                );
+                None
+            },
+        });
     // NULL → None；解析失败降级 None（与 rt-workflow parse_hooks_config 同语义）
     let hooks_config: Option<axagent_harness::WorkflowHooksConfig> =
         template.hooks_config.as_ref().and_then(|s| serde_json::from_str(s).ok());
@@ -296,6 +322,8 @@ async fn load_pipeline_template(
         input_schema,
         output_schema,
         variables,
+        // 决策落库时写进 stock_analyses.template_version，供离线复算判定公式版本
+        version: template.version,
         hooks_config,
     })
 }

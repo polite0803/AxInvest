@@ -42,6 +42,10 @@ export const TOOL_NODE_I18N_KEY: Record<string, string> = {
   "t-fundamentals-data": "stockAnalysis.tool.fundamentalsData",
   "t-hotmoney-data": "stockAnalysis.tool.hotMoneyData",
   "t-lockup-data": "stockAnalysis.tool.lockupData",
+  // v72(2026-09-21): a-lockup 的第二个前置数据源（股权质押）。
+  // 缺此映射时 `AnalysisProgress` 的兜底是 `currentNodeId` ⇒ 进度条上会直接
+  // 显示裸 id `t-pledge-data`（非中文界面下尤其突兀）。
+  "t-pledge-data": "stockAnalysis.tool.pledgeData",
   "t-research-data": "stockAnalysis.tool.researchData",
   "t-sector-data": "stockAnalysis.tool.sectorData",
   "t-scoring": "stockAnalysis.tool.scoring",

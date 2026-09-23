@@ -182,7 +182,6 @@ pub async fn seed_screenshot_portfolio_diagnosis_template(
                 max_tool_rounds: Some(2), // 限制为 2 轮（1 轮工具调用 + 1 轮输出）
                 execution_mode: Some("react".into()),
                 rag_source_ids: vec![],
-                model_role: None,
                 consistency_check: None,
                 hallucination_guard: None,
                 fallback_model: None,

@@ -57,6 +57,7 @@ import { useResolvedDarkMode } from "@/hooks/useResolvedDarkMode";
 import { type ChatMarkdownNode, parseChatMarkdown, stripAxAgentTags } from "@/lib/chatMarkdown";
 import { hasMultipleModelVersions } from "@/lib/chatMultiModel";
 import { getConvIcon } from "@/lib/convIcon";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri } from "@/lib/invoke";
 import { parseSearchContent } from "@/lib/searchUtils";
 import {
@@ -896,7 +897,7 @@ export function useChatViewMessages({
                       });
                       messageApi.success(t("chat.saved"));
                     } catch (e) {
-                      messageApi.error(String(e));
+                      showBackendError(messageApi, e);
                     }
                   };
                   return (
@@ -956,7 +957,7 @@ export function useChatViewMessages({
                     // user 消息」，中间消息点重生成会错误地重生成最后一条。
                     await regenerateMessage(msg.id);
                   } catch (e) {
-                    messageApi.error(String(e));
+                    showBackendError(messageApi, e);
                   }
                 },
               },
@@ -973,7 +974,7 @@ export function useChatViewMessages({
                             msg.id,
                           );
                         } catch (e) {
-                          messageApi.error(String(e));
+                          showBackendError(messageApi, e);
                         }
                       }
                     }}
@@ -1561,7 +1562,7 @@ export function useChatViewMessages({
                 style={{ marginLeft: 6, cursor: "pointer" }}
                 onClick={() => {
                   void removeContextClear(msgId).catch((err) => {
-                    messageApi.error(String(err));
+                    showBackendError(messageApi, err);
                   });
                 }}
               />

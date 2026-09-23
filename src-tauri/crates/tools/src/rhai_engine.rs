@@ -31,9 +31,10 @@ pub fn create_rhai_engine() -> Engine {
     engine.set_max_array_size(50_000); // 5 万元素上限
     // 分档查询：让 .rhai 直接读本体权威源（harness::domain_ontology::band_for_score），
     // 消除脚本内独立的 75/55/35 分档字面量（P0：分档收敛到本体）。
-    engine.register_fn("band_for_score", |score: f64| -> String {
-        axagent_harness::domain_ontology::band_for_score(score).to_string()
-    });
+    // 2026-09-22：改走 harness 的统一注册入口，不再内联注册 ——
+    // 内联副本是「共享 Engine 漏掉 band_for_score」的成因
+    //（详见 `harness::register_ontology_functions` 的文档）。
+    axagent_harness::register_ontology_functions(&mut engine);
     engine
 }
 

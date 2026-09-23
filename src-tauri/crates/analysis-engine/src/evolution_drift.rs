@@ -449,4 +449,67 @@ mod tests {
         let net: f64 = stats.iter().map(|s| s.delta_pct).sum();
         assert!(net < -5.0, "净 delta 应明显为负");
     }
+
+    #[tokio::test]
+    async fn load_current_weights_picks_latest_per_key() {
+        // A1 正负对照：演化权重回流到一个 (strategy, period) 的最新一行。
+        // 正控——写入两条同键历史，键以最新 applied_at 取到 new_weight；
+        // 负控——把第二条的 new_weight 改成别的值，读取结果必须随之变（证「读到的是哪条」有区分力，
+        // 而非偶合到某一行历史）。
+        use axagent_entities::strategy_weight_history::{
+            ActiveModel, Column as WhColumn, Entity as WhEntity,
+        };
+        use sea_orm::ColumnTrait as _;
+
+        let h = axagent_dao::db::create_test_pool().await.unwrap();
+        let db = &h.conn;
+
+        let base = 1_700_000_000_000i64;
+        let insert_row = |strategy_id: &str, period: &str, weight: f64, applied_at: i64| {
+            WhEntity::insert(ActiveModel {
+                id: Set(Uuid::new_v4().to_string()),
+                strategy_id: Set(strategy_id.to_string()),
+                period: Set(period.to_string()),
+                old_weight: Set(1.0),
+                new_weight: Set(weight),
+                delta_pct: Set((weight - 1.0) / 1.0 * 100.0),
+                trigger: Set("rule".to_string()),
+                source_reflection_id: Set(None),
+                sample_size: Set(10),
+                win_rate: Set(0.6),
+                rationale: Set(Some("测试写入".to_string())),
+                applied_at: Set(applied_at),
+            })
+        };
+
+        // 正控：同键两条，新的在后，取最新 0.85
+        insert_row("s1", "short", 1.0, base).exec(db).await.map_err(|e| e.to_string()).unwrap();
+        insert_row("s1", "short", 0.85, base + 1)
+            .exec(db)
+            .await
+            .map_err(|e| e.to_string())
+            .unwrap();
+
+        let map = load_current_weights(db).await.unwrap();
+        let got = map.get(&("s1".to_string(), "short".to_string())).copied();
+        assert_eq!(got, Some(0.85), "正控：同键应取最新一条 new_weight");
+
+        // 负控：把新一行改成 0.42，读取必须随之变（证明断言绑定到「最新行」，不是某条固定历史）
+        let latest = WhEntity::find()
+            .filter(WhColumn::StrategyId.eq("s1"))
+            .filter(WhColumn::Period.eq("short"))
+            .order_by_desc(WhColumn::AppliedAt)
+            .one(db)
+            .await
+            .map_err(|e| e.to_string())
+            .unwrap()
+            .unwrap();
+        let mut am: ActiveModel = latest.into();
+        am.new_weight = Set(0.42);
+        WhEntity::update(am).exec(db).await.map_err(|e| e.to_string()).unwrap();
+
+        let map2 = load_current_weights(db).await.unwrap();
+        let got2 = map2.get(&("s1".to_string(), "short".to_string())).copied();
+        assert_eq!(got2, Some(0.42), "负控：演化权重改写后读取结果必须随之变（正负对照区分力）");
+    }
 }

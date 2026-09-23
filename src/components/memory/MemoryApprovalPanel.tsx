@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import type { MemoryWriteApprovalConfig, PendingMemoryWrite } from "@/types";
 import { App, Button, Empty, Space, Switch, Tag, Tooltip } from "antd";
@@ -24,7 +25,7 @@ export function MemoryApprovalPanel() {
       setPending(items);
       setConfig(cfg);
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 
@@ -39,7 +40,7 @@ export function MemoryApprovalPanel() {
       message.success(t("skillLearning.approved"));
       load();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 
@@ -49,7 +50,7 @@ export function MemoryApprovalPanel() {
       message.success(t("skillLearning.rejected"));
       load();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 
@@ -62,7 +63,7 @@ export function MemoryApprovalPanel() {
       await invoke<void>("update_memory_write_approval_config", { config: next });
       setConfig(next);
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 

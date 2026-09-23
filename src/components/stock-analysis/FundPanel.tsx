@@ -1,3 +1,4 @@
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { App, Button, Card, DatePicker, Input, InputNumber, Modal, Select, Space, Table } from "antd";
@@ -81,7 +82,7 @@ export function FundPanel() {
       setForm({ transferType: "deposit", amount: 0, transferDate: dayjs().format("YYYY-MM-DD"), fee: 0, notes: "" });
       loadData();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   };
 

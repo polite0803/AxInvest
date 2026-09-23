@@ -9,10 +9,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axagent_crdt::VersionVector;
 use axagent_harness::device_sync::{
     ChangeLogEntry, ChangeOperation, ConflictInfo, ConflictResolutionStrategy, DeviceSyncStatus,
-    EntityType, SyncEngine, SyncResult, SyncStorage, VersionVectorEntry,
+    EntityType, SyncEngine, SyncResult, SyncStorage, VersionVector, VersionVectorEntry,
 };
 use tokio::sync::RwLock;
 use uuid::Uuid;

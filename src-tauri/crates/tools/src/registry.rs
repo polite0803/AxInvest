@@ -1350,8 +1350,16 @@ impl UnifiedToolRegistry {
         self.check_tool_enabled(tool_name)?;
 
         // ── 频率限制检查（审计器） ──
-        if let Err(rate_limit_msg) = self.auditor.check_rate_limit(tool_name).await {
-            return Err(ToolError::permission_denied(tool_name, &rate_limit_msg));
+        // P1-1(2026-09-21): 限流用**独立错误码** `rateLimited`，**不要**复用
+        //   `permission_denied`。原写法下工具结果文本长这样：
+        //     `[permissionDenied] 工具 'get_stock_margin_data' 权限被拒绝: … 调用过于频繁，
+        //      最小间隔 200ms（当前距上次调用 48ms）`
+        //   ⇒ 模型把「调用太快」读成「没权限」，在分析报告里写成「工具调用被拒绝」，
+        //   把使用者引向完全错误的排查方向（真因只是两个并行节点撞了同一把 200ms 闸）。
+        //   限流是可重试的**时序**约束，权限拒绝是不可重试的**能力**缺失。
+        //   实证：`AUDIT-pledge-attribution-2026-09-21.md`。
+        if let Err(violation) = self.auditor.check_rate_limit(tool_name).await {
+            return Err(ToolError::rate_limited(tool_name, &violation.message));
         }
 
         // ── 输入脱敏 ──

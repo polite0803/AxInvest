@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { getActionTKey } from "@/lib/stock-analysis-utils";
 import { App, Button, Card, Col, InputNumber, Row, Spin, Statistic, Table, Tag } from "antd";
 import { BarChart3, Clock, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { useState } from "react";
@@ -9,9 +10,16 @@ interface QuickBacktestSample {
   entryPrice: number;
   exitPrice: number;
   returnPct: number;
+  /** 「买入并持有 N 日后是否盈利」—— 不是「决策是否正确」 */
   wasCorrect: boolean;
+  /**
+   * 决策档位。`quick_backtest` **不运行分析** ⇒ 恒为后端缺失哨兵
+   * （`UNAVAILABLE`），展示时统一渲染为「数据缺失」。
+   * 原实现用 `returnPct > 0` 反推「买入 / 卖出·持有」，是 look-ahead 伪造，已移除。
+   */
   decisionAction: string;
-  decisionConfidence: number;
+  /** 无决策 ⇒ 无置信度，恒为 `null`（原实现用收益幅度伪造，已移除）。 */
+  decisionConfidence: number | null;
 }
 
 interface QuickBacktestResult {
@@ -111,13 +119,17 @@ export function QuickBacktestPanel() {
       dataIndex: "decisionAction",
       key: "decisionAction",
       width: 120,
+      // 后端下发的是 `UNAVAILABLE` 英文哨兵 ⇒ 必须走 i18n 档位名，
+      // 裸渲染会让用户看到 "UNAVAILABLE"（且缺失不该伪装成任何操作建议）。
+      render: (v: string) => (v ? t(getActionTKey(v)) : "—"),
     },
     {
       title: t("stockAnalysis.backtest.confidence"),
       dataIndex: "decisionConfidence",
       key: "decisionConfidence",
       width: 80,
-      render: (v: number) => `${v.toFixed(0)}%`,
+      // `null` = 本命令不产出决策 ⇒ 无置信度。用占位符而不是编一个数字。
+      render: (v: number | null) => (v == null ? "—" : `${v.toFixed(0)}%`),
     },
   ];
 

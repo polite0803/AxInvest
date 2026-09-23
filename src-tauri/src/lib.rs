@@ -62,6 +62,27 @@ use tauri::{Emitter, Manager};
 
 pub use app_state::AppState;
 pub use commands::opc_workflows::ensure_opc_config_synced;
+// 批量 as-of 重跑（bin: `axagent-batch-rerun`）需要脱离 Tauri 调用工作流实现体。
+// 与上一行同因：`commands` 是私有模块，而 bin 是独立 crate ⇒ 只能经 lib 层 re-export 触达。
+//
+// ⚠ 为什么走 `stock_workflow::core::` 完整路径，而**不**在 `stock_workflow/mod.rs`
+// 里加一行 `pub use core::run_stock_workflow_inner;`：
+// `mod.rs:60-64` 的 ⚠ 注释记载，build.rs 的 `parse_submodule_mod_rs` 会把
+// 「子模块已被 re-export 到 stock_workflow 层」当作「该子模块的全部 #[tauri::command]
+// 都已提升到父模块」⇒ 于是用父模块路径注册子模块的命令，编译期报
+// `cannot find __cmd__xxx in stock_workflow`，错误信息完全指不到真因。
+// 本项**不是** #[tauri::command]（是普通 pub async fn），但同一条解析规则无法区分，
+// 故不冒这个险 —— 从 lib 层用完整路径触达，解析面零改动。
+pub use commands::stock_workflow::core::run_stock_workflow_inner;
+// 批量反思：同上，供 `axagent-batch-rerun --reflect-after` 在同一进程内
+// 「重跑完立刻反思」使用（重跑后 hindsight_date 已落在过去 ⇒ 立即可反思）。
+//
+// ⚠ 本项**可以**走 `stock_workflow::` 直接路径（它在 `stock_workflow/mod.rs:46`
+// 已 `pub use reflection::run_batch_reflection_inner;`，即已在父层），
+// 与上一行的 `core::` 完整路径不矛盾 —— 上一行之所以绕 `core::`，
+// 是因为它**尚未**被提到父层；而「在 mod.rs 里新加一条 `pub use core::X;`」
+// 会触碰 build.rs 的子模块 re-export 解析面（详见上一行的 ⚠ 注释）。
+pub use commands::stock_workflow::run_batch_reflection_inner;
 
 /// 在独立线程中创建 current_thread tokio runtime 并执行 async 任务（阻塞等待完成）。
 ///

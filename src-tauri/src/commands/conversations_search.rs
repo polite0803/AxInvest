@@ -2,6 +2,7 @@
 
 use crate::AppState;
 use axagent_agent_macro::agent_command;
+use axagent_harness::util_fns::placeholder_at;
 use sea_orm::{ConnectionTrait, DbBackend, Statement, Value};
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -622,12 +623,28 @@ async fn get_conversation_lineage(
     let mut parent_id = None;
 
     // 向上遍历最多 10 层
+    //
+    // 2026-09-19 修复（方言守卫 `check-sql-dialect.mjs` 检出）：原实现硬编码
+    //   `DbBackend::Sqlite` + `?` 占位符，但本函数是**双方言共用**的 ——
+    //   调用方 `search_conversations` 在 `:86` 按后端分流到 `search_sqlite` /
+    //   `search_postgres`，两条路径都会走到这里。在 PostgreSQL 上 `?` 不被接受
+    //   （PG 用 `$n`），查询恒失败；而调用点以 `unwrap_or_default()` 吞掉错误
+    //   ⇒ **谱系在 PG 上恒为空**，且不报错、不崩，只表现为「没有谱系」。
+    //
+    //   改法：后端运行期取值（`get_database_backend()`）+ 占位符由
+    //   `placeholder_at` 统一生成 —— 与 `analysis-engine/opc/data_service.rs` 同源，
+    //   避免调用点各自手写 `?` / `$1` 字面量（`util_fns.rs` 头部把这两种写法
+    //   列为仓库真实发生过的缺陷形态 ②③）。
+    let be = db.get_database_backend();
+    let sql = format!(
+        "SELECT id, title, parent_conversation_id FROM conversations WHERE id = {}",
+        placeholder_at(1, be)
+    );
     for _ in 0..10 {
-        let sql = "SELECT id, title, parent_conversation_id FROM conversations WHERE id = ?";
         let result = db
             .query_one_raw(Statement::from_sql_and_values(
-                DbBackend::Sqlite,
-                sql,
+                be,
+                sql.as_str(),
                 vec![current_id.clone().into()],
             ))
             .await;

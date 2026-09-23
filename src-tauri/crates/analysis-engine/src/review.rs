@@ -40,7 +40,28 @@ pub struct StockDaySummary {
 #[serde(rename_all = "camelCase")]
 pub struct DecisionComparison {
     pub analysis_date: String,
-    pub action: String, // BUY / HOLD / SELL
+    /// 决策档位。取 `stock_analyses.decision_action` 的**存储形态** ——
+    /// 即中文 6 档 / 中文哨兵（`买入` / `增持` / `持有` / `观望` / `减持` /
+    /// `卖出` / `不确定` / `数据缺失`），**不是**英文 token。
+    /// 权威值域见 `axagent_harness::decision_action`。
+    ///
+    /// ⚠️ 本字段是「方向强度」轴，**不含**持仓状态。展示档（持有 vs 观望）由
+    ///    消费端用 `(action, position_state, position_pct)` 派生 —— 见 `position_state`。
+    pub action: String,
+    /// 决策持仓状态轴（与 `action` **正交**，v228 引入）。
+    ///
+    /// `None` 的语义同 `stock_analyses.decision_position_state`：该记录产生于本字段
+    /// 引入之前，**采集时点没有这个信息** —— 消费端应按 `position_pct` 自行派生，
+    /// **不得**读成 `EMPTY`。
+    ///
+    /// 为什么必须下发：此前本结构只带 `action`，前端 `DailyReviewPanel` 直接渲染它，
+    /// 于是**同一条决策**在历史卡上显示「观望」、在收盘复盘里显示「持有」——
+    /// 与本仓 2026-09-21 修掉的「挂角 vs 结论」矛盾同源（缺的正是这一轴）。
+    #[serde(default)]
+    pub position_state: Option<String>,
+    /// 决策仓位权重（%）。`position_state` 为 `None` 时，消费端用它派生展示档。
+    #[serde(default)]
+    pub position_pct: Option<f64>,
     pub target_price: Option<f64>,
     pub stop_loss: Option<f64>,
     pub days_since_analysis: u32,
@@ -164,7 +185,18 @@ async fn fetch_latest_analysis_decision(
         .ok()
         .flatten()?;
 
-    let action = row.decision_action.as_deref().unwrap_or("uncertain").to_string();
+    // ⚠️ 兜底一律用权威哨兵 `ACTION_UNAVAILABLE`，**不得**自造 `"uncertain"`：
+    //   「决策缺失」与「有决策但无法判断」是两回事（见 `decision_action` 模块头）。
+    //   空串也必须走同一分支 —— `filter(!is_empty)` 覆盖历史实现用
+    //   `unwrap_or_default()` 留下的空串，那种值会被前端解析成「观望」，
+    //   等于把「没有决策」伪装成操作建议。
+    let action = row
+        .decision_action
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(axagent_harness::decision_action::ACTION_UNAVAILABLE)
+        .to_string();
     let target = row.decision_json.as_ref().and_then(|raw| {
         serde_json::from_str::<serde_json::Value>(raw)
             .ok()
@@ -209,9 +241,25 @@ async fn fetch_latest_analysis_decision(
         })
     });
 
+    // 持仓状态轴：与 `action` 正交，必须一并下发，否则消费端只能拿到方向档
+    // （`action`）而看不到持仓状态 ⇒ 「观望 / 持有」在复盘面板里会再次显示错档。
+    // 空串同样按 `None` 处理（与 action 同纪律：空值不是有效状态）。
+    let position_state = row
+        .decision_position_state
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    // ⚠️ 不做 `unwrap_or(0.0)`：`None`（本列引入之前的记录）与「0% 仓位」是两回事，
+    //   强行补 0 会把「不知道」变成「空仓」，与 `decision_position_state` 的
+    //   NULL 语义约定一致 —— 消费端拿到 `None` 时应保持「信息缺失」。
+    let position_pct = row.decision_position_pct;
+
     Some(DecisionComparison {
         analysis_date: row.analysis_date,
         action,
+        position_state,
+        position_pct,
         target_price: target,
         stop_loss,
         days_since_analysis: days_since,

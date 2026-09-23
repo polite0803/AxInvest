@@ -9,6 +9,7 @@
  * - room_id 下拉项来自当前 fleet 的场景模板房间列表
  */
 import { resolveSceneTemplate } from "@/components/office/phaser/sceneTemplates";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import { useAgentRoleStore } from "@/stores";
@@ -91,7 +92,7 @@ export function AddMemberModal({ open, fleetId, sceneTemplateSlug, onClose }: Ad
     } catch (e) {
       // 表单校验失败或 IPC 失败
       if (e instanceof Error && e.message) {
-        message.error(e.message);
+        showBackendError(message, e);
       }
     } finally {
       setLoading(false);

@@ -173,6 +173,8 @@ fn count_keyword_groups(text) {
 // 占全部「真有工具缺口」报告的 25%），漏检形态按频次依次为：
 //   为 null(9) / 返回空(8) / 数据不可用(4) / 无数据(3) / =null(2) /
 //   均为空(2) / 获取失败(2) / 未能获取(2) / 空值(1)
+// ⚠ 2026-09-21：本表**不再单独使用** —— 纯子串匹配存在 33% 假阳性（见下方
+//   strip_verdict_blocks / soft_marker_suppression 的说明），命中判定统一走 placeholder_hits。
 fn placeholder_markers() {
     return ["占位报告", "占位", "placeholder", "Placeholder", "PLACEHOLDER",
             "无法获取", "数据缺失", "未注入", "agentrunner 未注入",
@@ -181,14 +183,57 @@ fn placeholder_markers() {
             "数据不可用", "无数据", "获取失败", "未能获取"];
 }
 
+// ── 2026-09-21 修复：词表判据的两类假阳性 ──
+// 实证（AUDIT-analyst-low-confidence-2026-09-21.md §五，本轮 hm 节点）：
+//   「本维度数据不可用，标注为技术停披而非无数据」——**一句话**同时命中
+//   `数据不可用` + `无数据`，占 hm 全部 3 处命中里的 2 处。纯子串匹配不识别否定语气，
+//   分析师越严谨地排除「这是数据缺口」，越容易被判成数据缺口 —— 判据方向反了。
+// 两层修法（互补，缺一不可）：
+//   ① strip_verdict_blocks —— 剥离报告尾部 `<!-- VERDICT ... -->` 注释块。
+//      601698 轮 lk 的 `<!-- VERDICT: {"bear_points":[...,"质押数据缺失"]} -->` 是
+//      **正常风险点罗列**却被计入命中，判据应只看正文。
+//   ② soft_marker_suppression —— 对「易被澄清语气包裹」的软标记，若正文含其
+//      **定向否定短语**则不计入。硬标记（无法获取/数据缺失/未注入/占位报告…）不设抑制：
+//      本轮真缺口正是用「数据缺失」表达的，抑制它会误杀真缺口。
+// ⚠ 不要对软标记做「整篇抑制」：本轮 hm 报告**同时**含真缺口（数据缺失，来自龙虎榜
+//    席位）与澄清语，整篇抑制会连带抹掉真缺口 —— 抑制必须按 marker 定向。
+
+// strip_verdict_blocks: 以首个 `<!-- VERDICT` 为界截断，只保留正文
+fn strip_verdict_blocks(text) {
+    if type_of(text) != "string" || text == "" { return ""; }
+    if !text.contains("<!-- VERDICT") { return text; }
+    let parts = text.split("<!-- VERDICT");
+    if parts.len() == 0 { return text; }
+    parts[0]
+}
+
+// soft_marker_suppression: 软标记 → 该标记的定向否定短语
+// 命中短语即视为「分析师在澄清/排除该缺口」，该标记不计入失败标记数。
+fn soft_marker_suppression() {
+    #{
+        "数据不可用": ["而非无数据", "非无数据", "而非数据不可用"],
+        "无数据": ["而非无数据", "非无数据", "无数据源", "暂无数据", "该维度暂无"],
+        "返回空": ["暂无数据", "无期权覆盖", "视为该维度暂无", "该维度暂无"],
+        "空值": ["暂无数据", "无期权覆盖"],
+        "均为空": ["暂无数据"],
+    }
+}
+
 // placeholder_hits: 返回报告命中的失败标记清单（供逐节点归因 + 严重度计数）
 // 折叠规则：命中「占位报告」等长词时不再重复计其子串「占位」，避免同一处双计。
+// 2026-09-21：先剥离 VERDICT 块；软标记按定向否定短语抑制（见上方说明）。
 fn placeholder_hits(text) {
     if type_of(text) != "string" || text == "" { return []; }
+    let body = strip_verdict_blocks(text);
     let markers = placeholder_markers();
+    let suppression = soft_marker_suppression();
     let hits = [];
     for i in 0..markers.len() {
-        if text.contains(markers[i]) { hits.push(markers[i]); }
+        if !body.contains(markers[i]) { continue; }
+        // 软标记：正文含该标记的定向否定短语 ⇒ 判为澄清，不计入
+        let phrases = suppression[markers[i]];
+        if type_of(phrases) == "array" && has_any(body, phrases) { continue; }
+        hits.push(markers[i]);
     }
     let long_hit = false;
     for i in 0..hits.len() {
@@ -203,6 +248,33 @@ fn placeholder_hits(text) {
         if hits[i] != "占位" { folded.push(hits[i]); }
     }
     return folded;
+}
+
+// placeholder_occurrences: 失败标记在正文中的**实际出现次数**（同一词多次出现重复计）
+// 2026-09-21 新增：`placeholder_hits` 按**词种**去重（同一 marker 出现几次都只计 1），
+// 面板显示「N 处」与用户数原文的直觉不符（实证：hm 显示 3 处，原文实际出现 4+ 次）。
+// 本函数给出出现次数的独立口径，供面板并列展示「词种数 / 出现次数」。
+// 剥离 VERDICT 与软标记抑制规则与 placeholder_hits **完全一致** ——
+// 否则两个口径会落在不同判定集上，越显示越矛盾。
+fn placeholder_occurrences(text) {
+    if type_of(text) != "string" || text == "" { return 0; }
+    let body = strip_verdict_blocks(text);
+    let markers = placeholder_markers();
+    let suppression = soft_marker_suppression();
+    // 折叠规则与 placeholder_hits 保持一致：长词命中 ⇒ 不再计其子串「占位」
+    let long_hit = body.contains("占位报告") || body.contains("placeholder")
+        || body.contains("Placeholder") || body.contains("PLACEHOLDER");
+    let total = 0;
+    for i in 0..markers.len() {
+        let m = markers[i];
+        if m == "占位" && long_hit { continue; }
+        if !body.contains(m) { continue; }
+        let phrases = suppression[m];
+        if type_of(phrases) == "array" && has_any(body, phrases) { continue; }
+        let n = body.split(m).len() - 1;
+        if n > 0 { total += n; }
+    }
+    total
 }
 
 // has_placeholder: 检测报告是否含占位符/失败标记（布尔版，供 report_quality 扣分用）
@@ -360,6 +432,17 @@ fn report_quality(text, conf) {
 // tool_credibility: 算法化工具可信度分（0-100）
 // 当前指标：avg_conf 基础 + gap 惩罚 + good_count 惩罚
 // P3 升级方向：接入 t-scoring/t-valuation/t-risk 的 credibility 字段后替换此实现
+//
+// ⚠ 2026-09-21 决策：degraded_count（报告含失败标记、但自评 confidence >= 50）**不进入**
+//   惩罚项，这是有意为之，不要「顺手补上」——
+//   ① 与 avg_conf 同源：两者都从分析师**自评 confidence** 派生，惩罚 degraded 等于对
+//      同一信号二次计分；
+//   ② 反事实反证（AUDIT-analyst-low-confidence-2026-09-21.md §八.2）：剔除本轮 4 个
+//      degraded 节点后 avg_conf 反而**上升**（64.5 → 68.3）⇒ 两者负相关，按 avg_conf
+//      扣过的部分再扣一轮即双重扣分；
+//   ③ 语义不同：本函数衡量「上游工具可信度」，degraded 描述的是「分析师措辞/自评偏低」，
+//      该信号已通过 report_quality 的占位符惩罚与 warnings 体现。
+//   若未来要让它影响评分，正确做法是**替换** avg_conf 惩罚口径（二选一），而非叠加。
 fn tool_credibility(avg_conf, good_count, gap_count, n) {
     let base = if avg_conf > 0.0 { avg_conf } else { 30.0 };
     let penalty = 0.0;
@@ -414,8 +497,22 @@ let lk_ph = placeholder_hits(lk_r);
 let res_ph = placeholder_hits(res_r);
 let sec_ph = placeholder_hits(sec_r);
 let cat_ph = placeholder_hits(cat_r);
+// 2026-09-21: 与 *_ph 同源的实际出现次数（*_ph 是词种数）—— 供面板并列展示
+let mk_po = placeholder_occurrences(mk_r);
+let sent_po = placeholder_occurrences(sent_r);
+let news_po = placeholder_occurrences(news_r);
+let fund_po = placeholder_occurrences(fund_r);
+let pol_po = placeholder_occurrences(pol_r);
+let hm_po = placeholder_occurrences(hm_r);
+let lk_po = placeholder_occurrences(lk_r);
+let res_po = placeholder_occurrences(res_r);
+let sec_po = placeholder_occurrences(sec_r);
+let cat_po = placeholder_occurrences(cat_r);
 let placeholder_total_hits = mk_ph.len() + sent_ph.len() + news_ph.len() + fund_ph.len()
     + pol_ph.len() + hm_ph.len() + lk_ph.len() + res_ph.len() + sec_ph.len() + cat_ph.len();
+// 2026-09-21: 与 placeholder_total_hits 同判定集的**实际出现次数**合计（词种数 vs 出现次数）
+let placeholder_total_occurrences = mk_po + sent_po + news_po + fund_po + pol_po
+    + hm_po + lk_po + res_po + sec_po + cat_po;
 
 // 单个分析师报告质量分（缺失报告 → 0 分）
 let mk_q = report_quality(mk_r, mk_c);
@@ -762,6 +859,32 @@ if !present(ann_count) || ann_count <= 0 { missing_factors.push("公告数据");
 // P2-1(2026-08-09): PACE 信号需在 [-1,1] 值域内才算有效
 if !present(pace_signal) || pace_signal < -1.0 || pace_signal > 1.0 { missing_factors.push("PACE情绪"); }
 
+// ── 2026-09-21: 上游取数缺口（**只告警，不扣分**）──
+// 与 `missing_factors` 的**根本区别**（故不可合并成一张表）：
+//   `missing_factors` 判的是**本节点直接消费的因子**是否存在，其长度与
+//   `pm_compute_factor_completeness` 的分母口径绑死（Rust 侧 9 项 ↔ 本文件 9 项）；
+//   本列表判的是**上游节点自己有没有取到数**，是「关于数据的元数据」，不是因子本身。
+//   ⇒ 若并进 missing_factors，会出现「列表长度 ≠ 公式分母」的不一致（本仓有门禁守它）。
+//
+// 病灶（审计 §6.10.5 已精确到行）：原判据
+//   `if !present(valuation_dcf_upside) { missing_factors.push("估值上行空间"); }`
+//   判的是**派生值是否存在**，而非**底层数据是否取到**。`valuation_dcf_upside`
+//   在「锚是历史代理（`is_fallback_anchor=true`）」时**照样存在** ⇒ 该因子记 ✔；
+//   而 `operating_cash_flow` 恒为 `None` 这件事**全链路零告警** ——
+//   这正是 38 条样本 dqi 从不报警的机制。
+//
+// 判据用 `valuation_dcf_fcf_data_missing`（Rust 侧布尔量
+//   ← `dcf.assumptions.fcf_data_missing`），**不**按 `basis` 文案判：
+//   文案是给人看的诊断文本，一改判据就静默失效（同 P0-I 改用布尔量的理由）。
+// ⚠️ 只把**缺数**计入缺口，**不**计「当期FCF≤0」：
+//   后者是标的真实经营状态，不是我方取数失败（同 F2 的两态区分纪律，不可合并）。
+// ⚠️ 本列表**不参与** `score` 公式、不进 `factor_completeness` —— 本轮只做「给用户看见」，
+//   是否扣分 / 扣多少 / 是否进 grade 属独立设计（审计 §6.10.5 的未决部分）。
+let upstream_data_gaps = [];
+if present(valuation_dcf_fcf_data_missing) && valuation_dcf_fcf_data_missing == true {
+    upstream_data_gaps.push("现金流量表数据缺失（DCF 锚定退化为近5年净利均值代理）");
+}
+
 // 综合评分公式：报告质量 35% + 工具可信度 35% + 因子完整度 30%
 // V67 修复(2026-07-29): 因子完整度权重从 0.20 提高到 0.30。
 //   原权重 0.20 时,5/10 因子缺失(factor=0.5)仍可达 A 级(score≥85):
@@ -787,7 +910,18 @@ let grade = if final_score >= 85.0 { "A" }
 // ── 诊断条目生成 ──
 // P3-4 修复(2026-08-09): strict_mode 降级的分析师 confidence=50（中性兜底）原显示
 // "normal"，与 untrusted 语义矛盾。新增 untrusted 参数，降级分析师显示 "untrusted"。
-fn diag_for(c, name, expected, untrusted, ph_n) {
+// 2026-09-21：新增第 7 个参数 `rq` —— 本节点**自己的**报告质量分（`report_quality(text, conf)`）。
+//   此前该值只被累加进全局 `report_quality_avg`，单个节点的得分被平均掉 ⇒
+//   面板顶部只能拿到全局值，10 个分析师弹窗显示同一组数字（用户据此质问「是不是造假」）。
+//   ⚠ 这是**事实量**，不是等级：禁止据此派生 per-node 字母等级 ——
+//     那会再造出「两套同名等级」，正是 2026-09-14 才修掉的坑。
+// 2026-09-21(P2-1)：新增第 8 个参数 `attr_note` —— 归因核对结论
+//   （`attribution_note(lk_report, lk_tool_calls)` 的返回值，`""` = 无异常）。
+//   刻意**不复用** `gap_reason` 的内部计算，也不新增结构化字段：结论统一由
+//   `attribution_note` 产出后并入 `gap_reason`，复用**既有**展示通道
+//   （弹窗「缺口原因」行 + DecisionBanner 逐节点表的「缺口原因」列），
+//   避免为此新增字段 + 前端行 + 11 语言 key。
+fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note) {
     let has_ph = ph_n > 0;
     // 2026-09-12: status 判定从「只看 LLM 自评 confidence」升级为 **A ∪ B**
     //   A = 报告文本失败标记（客观，placeholder_hits）
@@ -814,13 +948,29 @@ fn diag_for(c, name, expected, untrusted, ph_n) {
     } else if c < 50.0 {
         "非数据缺口：报告无失败标记、字段齐全 —— 置信度自评低反映的是分析师对自身结论的不确定，而非数据缺失（confidence 语义与系统按「数据充分度」消费的口径不一致）"
     } else { "" };
+    // P2-1(2026-09-21): 归因核对结论并入 gap_reason。
+    //   ⚠ 两段都要保留：`reason` 是「数据为什么缺」，`attr_note` 是「报告对缺失的
+    //   归因是否可信」。只留其一会让面板重新变成「有结论但看不出可信度」。
+    //   `attr_note` 非字符串（函数返回 unit）时按空处理，避免把 `()` 渲染进面板。
+    let attr_ok = type_of(attr_note) == "string" && attr_note != "";
+    let reason_final = if !attr_ok { reason }
+        else if reason == "" { attr_note }
+        else { `${reason} ｜ ${attr_note}` };
     #{
         "name": name,
         "expected_data": expected,
         "confidence": c,
         "status": status,
-        "gap_reason": reason,
-        "placeholder_hits": ph_n
+        "gap_reason": reason_final,
+        // ph_n = 命中**词种数**（同一词多次出现只计 1）；po_n = **实际出现次数**。
+        // 2026-09-21：两个口径一并返回，面板可区分「N 种标记」与「共 M 次出现」，
+        // 避免用户按原文出现次数核对时误判为计数错误。
+        "placeholder_hits": ph_n,
+        "placeholder_occurrences": po_n,
+        // 本节点报告质量分（0-100，与全局 report_quality_avg 同源同口径）。
+        // 2026-09-21 新增：使面板能显示「这个分析师自己的报告写得好不好」，
+        //   与顶部的全局 grade/score 区分开（此前两者都是全局值，无法区分）。
+        "report_quality": rq
     }
 }
 
@@ -833,17 +983,131 @@ fn join_arr(arr, sep) {
     s
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// P2-1(2026-09-21): 伪归因检出 —— 报告所说的「工具被拒绝」有没有本轮事实支撑
+//
+// 实证（`AUDIT-pledge-attribution-2026-09-21.md`）：a-lockup 的报告原文写着
+//   「**质押风险**：质押数据获取失败（**工具调用被拒绝**），无法评估平仓线距离…」
+// 而本轮该节点的 `tool_calls_made` 里：
+//   · **没有任何质押工具调用**（`get_stock_pledge_data` 全库历史 0 次）；
+//   · 唯一 `is_error=true` 的是 `get_stock_margin_data`，原因是**两个并行分析师
+//     节点撞了 200ms 最小间隔**（限流），不是权限。
+// ⇒ 报告把一次**限流**（可重试的时序冲突）写成「工具调用被拒绝」，且把影响归到一个
+//   **从未被调用**的维度上，把使用者的排查方向整体带偏。
+//
+// 判据**锚在可观测事实**（`tool_calls_made` 的 `is_error` 与工具名）：
+//   措辞只用来判断「报告是否在做工具归因」，**归因真假完全由调用记录裁决** ——
+//   这正是本判据相对于纯词表（`placeholder_markers`）的增量：纯词表抓得到
+//   「有缺口」，抓不到「归因是编造的」。
+//
+// 两级结论，严重度不同，**不要合并**：
+//   · 编造   —— 报告说工具被拒，而本轮**一条失败记录都没有**；
+//   · 含糊   —— 确有失败记录，但报告**一个被拒工具名都没提** ⇒ 无法确认被拒的是
+//               哪个工具 / 影响哪个维度，也无法排除归错维度（本轮实证形态）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 归因性短语：报告把「数据缺失」归因到「工具被拒绝 / 未授权」时用的措辞。
+///
+/// ⚠ 只用于判定「报告是否在做工具归因」，**不用**于判定归因真假（那由调用记录裁决）。
+/// 含「工具调用失败」是刻意的：真失败通常伴随真记录，缺记录时它就属于编造。
+fn attribution_markers() {
+    return ["工具调用被拒绝", "工具调用失败", "工具调用被拒", "调用被拒绝",
+            "权限被拒绝", "权限不足", "无权限调用", "未授权调用", "接口未授权",
+            "工具未授权", "工具不可用", "接口不可用", "工具被拒绝"];
+}
+
+/// 失败调用摘要 → `#{ count, names, named_tools }`。
+///
+/// 字段名是 `is_error`（由 `agent_executor` 写入），**不是** `success` ——
+/// 写错字段名会静默得到 0 条失败（判据恒绿），故此处注明。
+fn rejection_summary(tool_calls) {
+    let names = [];
+    if present(tool_calls) && type_of(tool_calls) == "array" {
+        for tc in tool_calls {
+            if tc.is_error == true {
+                let n = tc.tool;
+                if present(n) && type_of(n) == "string" { names.push(n); }
+            }
+        }
+    }
+    #{ "count": names.len(), "names": join_arr(names, "、"), "named_tools": names }
+}
+
+/// 产出归因核对结论；`""` = 无异常，或**无可核对的数据**。
+fn attribution_note(report, tool_calls) {
+    // ── 守卫①：没有调用记录就**不判** ──
+    // 旧快照缺字段、或该节点本就无工具时，`tool_calls` 为 Null/空数组。
+    // 此时判「编造」会把「测不出」当成「有问题」（判据假阳性），故直接放行。
+    if !present(tool_calls) || type_of(tool_calls) != "array" || tool_calls.len() == 0 {
+        return "";
+    }
+    let text = if type_of(report) == "string" { report } else { "" };
+    // ── 守卫②：报告没有在做工具归因 ⇒ 本判据不适用 ──
+    if !has_any(text, attribution_markers()) {
+        return "";
+    }
+
+    let rej = rejection_summary(tool_calls);
+    if rej.count == 0 {
+        // ⚠ 本条与下面那条都是**用户可见**文本（渲染进弹窗「缺口原因」行 + DecisionBanner）。
+        //   Rhai 的模板字符串 **不支持 `\` 行续接**（它不是 C 风格转义上下文）：
+        //   写成跨行会让 `\` 与行首缩进**逐字进入界面**。
+        //   实证（`output/tmp-151b-rhai-probe.rs` 真执行打印）：
+        //     `…**无一条失败** \` + 换行 + 16 空格 + `⇒ 该归因无事实依据…`
+        //   ⇒ 下方刻意保持**长单行**，不要为了可读性折行。
+        //   守护：`data_quality_placeholder_gate.rs::attribution_note_text_is_single_line`。
+        return `⚠ 疑似编造归因：报告称工具被拒绝，但本轮 ${tool_calls.len()} 次工具调用**无一条失败** ⇒ 该归因无事实依据，不要据此推断数据缺口的原因`;
+    }
+
+    // 有失败记录：看报告是否点名了被拒的那个工具。
+    let named = false;
+    for n in rej.named_tools {
+        if text.contains(n) { named = true; }
+    }
+    if named {
+        return "";
+    }
+    return `⚠ 归因含糊：本轮 ${rej.count} 次调用失败（${rej.names}），但报告未点名被拒工具 ⇒ 无法确认被拒的是哪个工具、影响哪个维度；也可能把 A 工具的失败归到了 B 维度（实证形态：真被拒的是 get_stock_margin_data，报告却写成「质押数据获取失败」）`;
+}
+
+// ⚠ P2-1(2026-09-21)：第 8 个实参是归因核对结论（`attribution_note`）。
+//   10 个调用点**必须全部补齐** —— Rhai 的实参个数不匹配是**运行期**错误（不是编译期），
+//   漏一处会让 data-quality 节点整体失败，故新增/删除本函数参数时必须同步这 10 处。
+//   正控：`output/tmp-151-rhai-arity.mjs` 逐点核对本块的实参个数。
 let diagnostics = #{
-    "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u, mk_ph.len()),
-    "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、资金流向、散户/机构态度（t-sentiment-data）", sent_u, sent_ph.len()),
-    "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph.len()),
-    "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）", fund_u, fund_ph.len()),
-    "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u, pol_ph.len()),
-    "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）", hm_u, hm_ph.len()),
-    "lk": diag_for(lk_c, "解禁观察员", "解禁减持、质押风险、大宗交易（t-lockup-data）", lk_u, lk_ph.len()),
-    "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u, res_ph.len()),
-    "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）", sec_u, sec_ph.len()),
-    "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）", cat_u, cat_ph.len())
+    "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u, mk_ph.len(), mk_po, mk_q,
+        attribution_note(mk_report, mk_tool_calls)),
+    // 2026-09-21 修正归因（原值把用户引向 t-sentiment-data，而真实缺口在
+    // t-dragon-tiger-data ⇒ 归因指向错误会误导排查方向，实证见
+    // AUDIT-analyst-low-confidence-2026-09-21.md §八.1）：
+    //   情绪面「席位数据缺失」与资金面「龙虎榜席位与北向数据缺失」同源于
+    //   t-dragon-tiger-data（龙虎榜营业部明细，独立于 t-sentiment-data 的节点）。
+    "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_u, sent_ph.len(), sent_po, sent_q,
+        attribution_note(sent_report, sent_tool_calls)),
+    "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph.len(), news_po, news_q,
+        attribution_note(news_report, news_tool_calls)),
+    // 基本面/催化剂/行业的「同侪 PE/PB 全为 null」同源于 t-fundamentals-data 的
+    // get_stock_peers（2026-09-21 已补 PE_TTM/PB_MRQ/市值/涨跌幅；ROE 仍未接入）。
+    "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_u, fund_ph.len(), fund_po, fund_q,
+        attribution_note(fund_report, fund_tool_calls)),
+    "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u, pol_ph.len(), pol_po, pol_q,
+        attribution_note(pol_report, pol_tool_calls)),
+    "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）；龙虎榜席位明细（t-dragon-tiger-data）与北向字段", hm_u, hm_ph.len(), hm_po, hm_q,
+        attribution_note(hm_report, hm_tool_calls)),
+    // 2026-09-21(v72) 修正：质押此前**从未接线**（无节点、无白名单授权），
+    //   面板却在 expected_data 里写着「质押风险（t-lockup-data）」——**指明了错误的
+    //   取数入口**，把使用者的排查方向一起带偏（该工具是解禁+增减持+大宗交易**三方**，
+    //   结构上不含质押字段）。现补 `t-pledge-data` 节点 + `get_stock_pledge_data` 授权，
+    //   此处同步为**真实来源**，避免「期望值自证」（拿声明当事实）继续误导。
+    // P2-1：本节点正是伪归因的**实证现场**（报告写「工具调用被拒绝」而归因错维度）。
+    "lk": diag_for(lk_c, "解禁观察员", "解禁减持、大宗交易（t-lockup-data）；股权质押（t-pledge-data）", lk_u, lk_ph.len(), lk_po, lk_q,
+        attribution_note(lk_report, lk_tool_calls)),
+    "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u, res_ph.len(), res_po, res_q,
+        attribution_note(res_report, res_tool_calls)),
+    "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）；同侪估值（t-fundamentals-data: get_stock_peers）", sec_u, sec_ph.len(), sec_po, sec_q,
+        attribution_note(sec_report, sec_tool_calls)),
+    "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_u, cat_ph.len(), cat_po, cat_q,
+        attribution_note(cat_report, cat_tool_calls))
 };
 
 let missing_analysts = [];
@@ -882,7 +1146,14 @@ let low_count = n_int - good_count - gap_count;
 // ── P1-B3: warnings 数组（基于报告质量检测的问题列表）──
 let warnings = [];
 if gap_count >= 1 { warnings.push(`${gap_count} 个分析师数据缺失`); }
+// 2026-09-21 新增：degraded 此前只出现在 summary 文本里，用户看不到「它为什么不扣分」。
+// 显式给出原因，避免后续维护者误判为漏实现（决策依据见 tool_credibility 上方注释）。
+if degraded_count >= 1 { warnings.push(`${degraded_count} 个分析师报告含失败标记但自评置信度偏高（已计入低置信；未额外扣分——该信号与 avg_conf 同源自评，叠加会双重计数）`); }
 if untrusted_analyst_count >= 1 { warnings.push(`${untrusted_analyst_count} 个分析师 strict_mode 降级(__untrusted)`); }
+// 2026-09-21: 上游取数缺口 —— 显式写「不影响评分」，避免与上面几条扣分告警混淆。
+if upstream_data_gaps.len() > 0 {
+    warnings.push(`上游取数缺口 ${upstream_data_gaps.len()} 项（仅提示，不影响因子完整度与综合评分）：${join_arr(upstream_data_gaps, "；")}`);
+}
 if avg_conf < 30.0 && avg_conf > 0.0 { warnings.push(`平均置信度过低 (${avg_conf})`); }
 // P2-2 修复(2026-08-09): 方向冲突告警（升级为加权模式）
 if direction_conflict {
@@ -914,19 +1185,19 @@ if cat_r != "" && count_chars(cat_r) < 200 { warnings.push("催化剂报告字�
 // 2026-09-12: 逐节点清单替代原「10 节点 OR 成一个布尔」——
 // 原实现只能报「有问题」，无法回答「是哪个分析师/哪个工具」。
 if placeholder_nodes.len() > 0 {
-    warnings.push(`检测到占位符/失败标记：${join_arr(placeholder_nodes, "、")}（共 ${placeholder_total_hits} 处；节点 ${join_arr(placeholder_node_ids, "/")}）`);
+    warnings.push(`检测到占位符/失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记，共出现 ${placeholder_total_occurrences} 次；节点 ${join_arr(placeholder_node_ids, "/")}）`);
 }
 
 let summary_text = if grade == "F" || grade == "D" {
     let base = `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${gap_count} 个缺失，${low_count} 个低置信（其中 ${degraded_count} 个为报告含失败标记但自评偏高），${good_count} 个高置信，${untrusted_analyst_count} 个降级。`;
     let miss_part = if missing_analysts.len() > 0 { `缺失：${join_arr(missing_analysts, "、")}。` } else { "" };
     let low_part = if low_confidence_analysts.len() > 0 { `低置信：${join_arr(low_confidence_analysts, "、")}。` } else { "" };
-    let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（共 ${placeholder_total_hits} 处）。` } else { "" };
+    let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记、共出现 ${placeholder_total_occurrences} 次）。` } else { "" };
     let val_part = if field_validation_issues.len() > 0 { `字段校验问题：${field_validation_issues.len()} 个。` } else { "" };
     `${base}${miss_part}${low_part}${ph_part}${val_part}平均置信度 ${avg_conf}。建议检查对应分析师的上游工具数据源。`
 } else {
     let val_part = if field_validation_issues.len() > 0 { `字段校验问题：${field_validation_issues.len()} 个；` } else { "" };
-    let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 处）；` } else { "" };
+    let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记、共出现 ${placeholder_total_occurrences} 次）；` } else { "" };
     `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${good_count}/${n_int} 高置信度，${untrusted_analyst_count} 个降级，${ph_part}${val_part}平均置信度 ${avg_conf}。`
 };
 
@@ -937,6 +1208,9 @@ let summary_text = if grade == "F" || grade == "D" {
     "tool_credibility_score": tool_credibility_score_final,
     "factor_completeness_pct": factor_completeness_pct,
     "missing_factors": missing_factors,
+    // 2026-09-21: 上游**取数**缺口（与 missing_factors 是两张表，见其定义处注释）。
+    //   只告警不扣分 ⇒ 本字段出现不会改变 score / grade。
+    "upstream_data_gaps": upstream_data_gaps,
     "gap_count": gap_count,
     "good_count": good_count,
     // 2026-09-12: 报告含失败标记但自评 confidence >= 50 的节点数（置信度虚高）
@@ -945,6 +1219,8 @@ let summary_text = if grade == "F" || grade == "D" {
     "placeholder_nodes": placeholder_nodes,
     "placeholder_node_ids": placeholder_node_ids,
     "placeholder_total_hits": placeholder_total_hits,
+    // 2026-09-21: 与 placeholder_total_hits 同一判定集的实际出现次数（词种数 vs 出现次数）
+    "placeholder_total_occurrences": placeholder_total_occurrences,
     "avg_confidence": (avg_conf * 10.0).round() / 10.0,
     "total_analysts": n,
     // P2-2(2026-08-09): 方向冲突检测结果（升级为加权模式）

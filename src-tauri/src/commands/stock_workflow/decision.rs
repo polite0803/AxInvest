@@ -45,8 +45,31 @@ pub(crate) enum SourceCheck {
     Failed(String),
 }
 
+/// as-of 回放中**具备历史语义**的数据源白名单。
+///
+/// 判据（源码锚点，非猜测）：`crates/astock-data/src/lib.rs` 只为这两个维度实现了
+/// as-of 支持 —— `:953` 把 K 线截断到截止日、`:1719-1739` 用截断后的 K 线**合成** quote。
+/// 其余维度在 vendor 侧**没有历史接口**：请求发出的始终是「当前」数据，as-of 过滤层
+/// 只能把它们丢弃（实测日志逐源可见：`新闻全部晚于截止日` / `财务数据返回空`）
+/// ⇒ **在回放中必然为空**。
+///
+/// ⇒ 这类失败不是「数据质量差」，而是「**该维度在时间旅行里不存在**」。用今天的完整性
+/// 口径去要求历史回放，等于要求数据商提供它从未提供过的历史新闻 —— 2026-09-23 实测：
+/// 53 条历史分析**全部**因此被 `Insufficient` 拦住，DAG 一条都没跑（4/4 `failed`）。
+const AS_OF_HISTORICAL_SOURCES: &[&str] = &["quote", "klines"];
+
 /// P1-3: 聚合 5 个核心数据源的预检结果, 取最差等级
-pub(crate) fn aggregate_precheck(sources: Vec<(&str, SourceCheck)>) -> QualityPrecheckResult {
+///
+/// `as_of_mode`：当前是否处于 as-of 回放。
+/// 为 `true` 时，**无历史语义的维度**（见 `AS_OF_HISTORICAL_SOURCES`）的 `Failed`
+/// 降级为 `Partial` —— 仍**留痕**（进 summary，前端数据缺失报告与实盘回放可信度
+/// 评估都靠它）但**不阻断** DAG。
+/// `quote` / `klines` 保持原判定：它们失败意味着 as-of 引擎自己拿不到数据，
+/// 那是真故障，必须继续阻断（否则回放会拿空气当行情）。
+pub(crate) fn aggregate_precheck(
+    sources: Vec<(&str, SourceCheck)>,
+    as_of_mode: bool,
+) -> QualityPrecheckResult {
     let mut partial_msgs: Vec<String> = Vec::new();
     let mut missing_sources: Vec<DataMissingItem> = Vec::new();
     for (name, c) in sources {
@@ -54,11 +77,20 @@ pub(crate) fn aggregate_precheck(sources: Vec<(&str, SourceCheck)>) -> QualityPr
             SourceCheck::Ok => {},
             SourceCheck::Partial(reason) => partial_msgs.push(format!("{name}: {reason}")),
             SourceCheck::Failed(reason) => {
-                missing_sources.push(DataMissingItem {
-                    source: name.to_string(),
-                    status: "failed".into(),
-                    detail: reason,
-                });
+                if as_of_mode && !AS_OF_HISTORICAL_SOURCES.contains(&name) {
+                    // as-of：该维度无历史接口 ⇒ 空是**结构性**的，不是质量缺陷。
+                    // 降级为 Partial（不阻断），但把原文与原因一起留在 summary 里，
+                    // 便于事后判断「这条回放结论的哪些输入是缺的」。
+                    partial_msgs.push(format!(
+                        "{name}: {reason}（as-of 回放：该维度无历史接口，空属结构性，不阻断）"
+                    ));
+                } else {
+                    missing_sources.push(DataMissingItem {
+                        source: name.to_string(),
+                        status: "failed".into(),
+                        detail: reason,
+                    });
+                }
             },
         }
     }
@@ -266,18 +298,23 @@ pub(crate) async fn data_quality_precheck(
     // - 任一数据源 Failed（所有 Vendor 降级链均失败）→ 整体 Insufficient，阻断工作流
     // - 全部通过但存在 Partial（成功获取但某维度天然空）→ 整体 Partial，继续但标记警告
     // - 全部通过且无 Partial → Pass
-    aggregate_precheck(vec![
-        ("quote", quote_check),
-        ("financials", fin_check),
-        ("klines", kline_check),
-        ("news", news_check),
-        ("money_flow", money_flow_check),
-        ("announcements", announcements_check),
-        ("concept_blocks", concept_check),
-        ("sector_info", sector_check),
-        ("lockup_schedule", lockup_check),
-        ("dragon_tiger", dragon_tiger_check),
-    ])
+    // ⚠ as-of 回放例外：无历史语义的维度（news/financials/…）必然为空，
+    // 由第二参 `as_of_mode` 触发降级为 Partial —— 见 `AS_OF_HISTORICAL_SOURCES` 注释。
+    aggregate_precheck(
+        vec![
+            ("quote", quote_check),
+            ("financials", fin_check),
+            ("klines", kline_check),
+            ("news", news_check),
+            ("money_flow", money_flow_check),
+            ("announcements", announcements_check),
+            ("concept_blocks", concept_check),
+            ("sector_info", sector_check),
+            ("lockup_schedule", lockup_check),
+            ("dragon_tiger", dragon_tiger_check),
+        ],
+        axagent_astock_data::as_of::current_as_of().is_some(),
+    )
 }
 
 pub(crate) struct LoadedTemplate {
@@ -286,6 +323,13 @@ pub(crate) struct LoadedTemplate {
     pub input_schema: Option<JsonSchema>,
     pub output_schema: Option<JsonSchema>,
     pub variables: Option<Vec<Variable>>,
+    /// 模板行自带的版本号（`workflow_templates.version`）。
+    ///
+    /// 用途：决策落库时写进 `stock_analyses.template_version`，使**历史决策可离线复算**。
+    /// 版本号是公式版本的合法代理 —— 脚本经 `include_str!` 嵌入模板，改公式必升
+    /// `TEMPLATE_VERSION`。少了它，用现行公式复算旧样本会系统性偏高 4.5pt
+    /// （2026-09-18 实测，见 `portfolio-mgr.rhai` 复算注释）。
+    pub version: i32,
     /// 模板声明的生命周期钩子（pre_exec/post_exec）。
     /// 必须随 create_workflow_with_hooks 传入引擎，否则 pre_exec 的
     /// stock-analysis-enhance 钩子不执行 → market_regime 等业务变量
@@ -319,21 +363,27 @@ mod precheck_tests {
     // P1-3: aggregate_precheck 取最差等级
     #[test]
     fn aggregate_all_ok_returns_pass() {
-        let r = aggregate_precheck(vec![
-            ("quote", SourceCheck::Ok),
-            ("financials", SourceCheck::Ok),
-            ("klines", SourceCheck::Ok),
-        ]);
+        let r = aggregate_precheck(
+            vec![
+                ("quote", SourceCheck::Ok),
+                ("financials", SourceCheck::Ok),
+                ("klines", SourceCheck::Ok),
+            ],
+            false,
+        );
         assert!(matches!(r, QualityPrecheckResult::Pass));
     }
 
     #[test]
     fn aggregate_one_partial_returns_partial_with_joined_message() {
-        let r = aggregate_precheck(vec![
-            ("quote", SourceCheck::Ok),
-            ("financials", SourceCheck::Partial("营收缺失".into())),
-            ("klines", SourceCheck::Ok),
-        ]);
+        let r = aggregate_precheck(
+            vec![
+                ("quote", SourceCheck::Ok),
+                ("financials", SourceCheck::Partial("营收缺失".into())),
+                ("klines", SourceCheck::Ok),
+            ],
+            false,
+        );
         match r {
             QualityPrecheckResult::Partial(msg) => {
                 assert!(msg.contains("financials"), "partial msg 应含 source 名: {msg}");
@@ -345,10 +395,13 @@ mod precheck_tests {
 
     #[test]
     fn aggregate_any_failure_returns_insufficient() {
-        let r = aggregate_precheck(vec![
-            ("quote", SourceCheck::Ok),
-            ("klines", SourceCheck::Failed("K 线获取失败".into())),
-        ]);
+        let r = aggregate_precheck(
+            vec![
+                ("quote", SourceCheck::Ok),
+                ("klines", SourceCheck::Failed("K 线获取失败".into())),
+            ],
+            false,
+        );
         match r {
             QualityPrecheckResult::Insufficient { summary, .. } => {
                 assert!(
@@ -364,13 +417,70 @@ mod precheck_tests {
     #[test]
     fn aggregate_failure_beats_partial() {
         // 5 源: 2 partial + 1 failed → overall Insufficient
-        let r = aggregate_precheck(vec![
-            ("quote", SourceCheck::Ok),
-            ("financials", SourceCheck::Partial("缺".into())),
-            ("klines", SourceCheck::Failed("空了".into())),
-            ("news", SourceCheck::Partial("无".into())),
-            ("money_flow", SourceCheck::Ok),
-        ]);
+        let r = aggregate_precheck(
+            vec![
+                ("quote", SourceCheck::Ok),
+                ("financials", SourceCheck::Partial("缺".into())),
+                ("klines", SourceCheck::Failed("空了".into())),
+                ("news", SourceCheck::Partial("无".into())),
+                ("money_flow", SourceCheck::Ok),
+            ],
+            false,
+        );
+        assert!(matches!(r, QualityPrecheckResult::Insufficient { .. }));
+    }
+
+    // ── as-of 分源判定（2026-09-23）──
+    // 锁住那次阻断：53 条历史分析曾因 news 在回放中必然为空而**全部跑不动**（4/4 failed）。
+
+    #[test]
+    fn aggregate_as_of_ignores_sources_without_history_semantics() {
+        let r = aggregate_precheck(
+            vec![
+                ("quote", SourceCheck::Ok),
+                ("klines", SourceCheck::Ok),
+                ("news", SourceCheck::Failed("新闻全部晚于截止日".into())),
+            ],
+            true,
+        );
+        match r {
+            QualityPrecheckResult::Partial(msg) => {
+                assert!(msg.contains("news"), "降级后仍须留痕: {msg}");
+                assert!(msg.contains("无历史接口"), "应标明降级原因: {msg}");
+            },
+            other => panic!("as-of 不得因 news 阻断，期望 Partial，实得 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn aggregate_as_of_still_blocks_when_historical_source_fails() {
+        // 反向断言：as-of 下 quote/klines 失败仍是**真故障**，必须阻断
+        // （否则回放会拿空气当行情，上面那条放宽就成了 fail-open）。
+        let r = aggregate_precheck(
+            vec![
+                ("quote", SourceCheck::Ok),
+                ("klines", SourceCheck::Failed("K 线为空".into())),
+                ("news", SourceCheck::Failed("新闻全部晚于截止日".into())),
+            ],
+            true,
+        );
+        match r {
+            QualityPrecheckResult::Insufficient { summary, .. } => {
+                assert!(summary.contains("klines"), "summary 应含 klines: {summary}");
+                assert!(!summary.contains("news"), "news 已降级，不应进阻断清单: {summary}");
+            },
+            other => panic!("klines 失败必须阻断，期望 Insufficient，实得 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn aggregate_live_mode_keeps_news_as_blocker() {
+        // live 反向锁：同样的 news Failed，**实盘必须仍然阻断** ——
+        // 放宽只对 as_of 生效，绝不能渗到实盘路径。
+        let r = aggregate_precheck(
+            vec![("news", SourceCheck::Failed("全部数据源获取失败".into()))],
+            false,
+        );
         assert!(matches!(r, QualityPrecheckResult::Insufficient { .. }));
     }
 }
@@ -436,8 +546,22 @@ pub(crate) async fn load_and_inject_template(
         template.input_schema.as_ref().and_then(|s| serde_json::from_str(s).ok());
     let output_schema: Option<JsonSchema> =
         template.output_schema.as_ref().and_then(|s| serde_json::from_str(s).ok());
+    // ⚠ 解析失败**必须留痕**，不可用 `.ok()` 静默降级：
+    // `None` 的后果是下游所有 `input_mapping`（`stock_code` 属 input_params 兜底除外）
+    // 解析不到并回退模块常量 —— 「面板上改了、实际没生效」这类缺陷在行为上几乎不可察觉。
+    // D8 取证已确认该降级通道是估值参数分叉的成因之一（详见
+    // `AUDIT-300642-run-variance-2026-09-22.md` §13）。
     let variables: Option<Vec<Variable>> =
-        template.variables.as_ref().and_then(|v| serde_json::from_str(v).ok());
+        template.variables.as_ref().and_then(|v| match serde_json::from_str(v) {
+            Ok(vars) => Some(vars),
+            Err(e) => {
+                tracing::warn!(
+                    "[stock_workflow] 模板 {template_id} 的 variables 解析失败，按无变量处理\
+                     （下游 input_mapping 将回退模块常量）: {e}"
+                );
+                None
+            },
+        });
     // 与 rt-workflow parse_hooks_config 同语义：NULL 合法 → None；解析失败降级 None
     let hooks_config: Option<axagent_harness::WorkflowHooksConfig> =
         template.hooks_config.as_ref().and_then(|s| match serde_json::from_str(s) {
@@ -450,7 +574,16 @@ pub(crate) async fn load_and_inject_template(
             },
         });
 
-    Ok(LoadedTemplate { nodes, edges, input_schema, output_schema, variables, hooks_config })
+    Ok(LoadedTemplate {
+        nodes,
+        edges,
+        input_schema,
+        output_schema,
+        variables,
+        // 决策落库时写进 stock_analyses.template_version，供离线复算判定公式版本
+        version: template.version,
+        hooks_config,
+    })
 }
 
 /// 工作流结果 → blackboard_snapshot — 现已委托给 axagent-stock-analysis::blackboard 模块
@@ -526,6 +659,51 @@ pub(crate) fn extract_position_state(decision_json: &Option<String>) -> Option<S
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// 从决策 JSON 中提取**四周期价位映射**（阶段1，PROPOSAL-stock-decision-four-horizon.md）。
+///
+/// 值形态：`{"ultra_short":{...},"short":{...},"mid":{...},"long":{...}}`，每组含
+/// `stopLossPct`/`takeProfitPct`/`expectedHoldingDays`/`targetPrice`/`stopLoss`。
+/// 该值由 `portfolio-mgr.rhai` 产出并嵌套在 `decision_json` 全文里，本函数把它
+/// 抽成独立 JSON 子串落 `stock_analyses.horizon_price_map`（避免落库后全文反键）。
+///
+/// **缺省语义**：键缺失 / 空串 / 解析失败 → `None`（NULL = 采集时点无此信息，
+/// 或该决策产生于 stage1 字段引入前）。消费端**不得**读成空映射，应按主档位
+/// `decision_json` 的 `targetPrice`/`stopLoss` 回退。这与 `extract_position_state`
+/// 的 NULL 约定一致。
+pub(crate) fn extract_horizon_price_map(decision_json: &Option<String>) -> Option<String> {
+    let raw = decision_json.as_deref().filter(|s| !s.is_empty())?;
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let obj = parsed.as_object()?;
+    let val = obj.get("horizonPriceMap").or_else(|| obj.get("horizon_price_map"))?;
+    if val.is_null() {
+        return None;
+    }
+    serde_json::to_string(val).ok()
+}
+
+/// 从决策 JSON 中提取**四周期独立决策**（阶段2，PROPOSAL-stock-decision-four-horizon.md）。
+///
+/// 值形态：`{"ultra_short":{...},"short":{...},"mid":{...},"long":{...}}`，每组含
+/// `action`/`verdict`/`positionPct`/`confidence`/`stopLossPct`/`takeProfitPct`/
+/// `expectedHoldingDays`，仅 `ultra_short` 额外含 `confLowerBound`（方案B，固定 0.35）。
+/// 该值由 `portfolio-mgr.rhai` 产出并嵌套在 `decision_json` 全文里，本函数把它抽成
+/// 独立 JSON 子串落 `stock_analyses.horizon_decisions`（与 `extract_horizon_price_map`
+/// 同 text 形态、同理由：避免落库后全文反键）。
+///
+/// **缺省语义**：键缺失 / 空串 / 解析失败 → `None`（NULL = 采集时点无此信息，或该决策
+/// 产生于 stage2 字段引入前）。消费端**不得**读成空映射，应按主档位 `decision_action`
+/// 回退。这与 `extract_position_state` 的 NULL 约定一致。
+pub(crate) fn extract_decisions_by_horizon(decision_json: &Option<String>) -> Option<String> {
+    let raw = decision_json.as_deref().filter(|s| !s.is_empty())?;
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let obj = parsed.as_object()?;
+    let val = obj.get("decisionsByHorizon").or_else(|| obj.get("decisions_by_horizon"))?;
+    if val.is_null() {
+        return None;
+    }
+    serde_json::to_string(val).ok()
 }
 
 /// 从 Workflow 结果中提取 portfolio-mgr 节点的决策 JSON 字符串。
@@ -1176,6 +1354,16 @@ pub(crate) fn normalize_llm_action(parsed: &mut serde_json::Value) {
 ///   (action 30 + positionPct 20 + confidence 15 + riskLevel 15 + data_gaps 10 + evidence_cited 10)
 /// 总分 100，低于 60 触发人工复核。
 ///
+/// **2026-09-21 口径变更**：移除 `data_gaps` 维度 ⇒ 现为 **5 维度**，
+///   内部满分 90、输出时归一化回 100 制（见 `compute_decision_agreement` 注释）。
+///   移除理由：两侧缺口清单**命名体系不可比** —— 公式侧由 `portfolio-mgr.rhai`
+///   机械枚举字段缺失（`PE数据(t-risk)` 这类固定标签），LLM 侧是 trader 自由文本
+///   自述（实测 601166 8 条 / 688114 6 条语义缺口）⇒ Jaccard 交集恒 0，且分母含
+///   LLM 侧条数 ⇒「LLM 越诚实列缺口，这一项扣得越狠」。DB 实证（50 条决策）：
+///   16 条有缺口、其中 12 条该维度 0 分，全样本均值 1.8/10；并且会把 action /
+///   position / riskLevel **全部一致**的一轮（688114：三路 action 均「观望」）
+///   判成 `data_gaps_diverge` 冲突类型、压低 `adjustedConfidence`。
+///
 /// 上层可根据维度详情:
 ///   - 决定 confidence 调制幅度
 ///   - 生成分歧诊断 reasoning 文本
@@ -1184,7 +1372,7 @@ pub(crate) fn normalize_llm_action(parsed: &mut serde_json::Value) {
 /// P0 修复: 保留 f7 自指污染标记字段，标注公式决策中 trader 因子(f7)的参与程度，
 /// 帮助识别"公式已含 trader 观点"导致一致性虚高或逻辑矛盾。
 pub(crate) struct AgreementBreakdown {
-    /// 总分 0-100（6 维度加权）
+    /// 总分 0-100（5 维度加权，内部满分 90 归一化）
     pub total: i32,
     /// action 维度原始分 (满分 30)
     pub action_score: f64,
@@ -1210,15 +1398,12 @@ pub(crate) struct AgreementBreakdown {
     pub formula_risk_level: String,
     /// V65 新增: LLM riskLevel 原始值
     pub llm_risk_level: String,
-    /// V65 新增: data_gaps 维度原始分 (满分 10)
-    pub data_gaps_score: f64,
-    /// V65 新增: data_gaps Jaccard 相似度 (0-1)
-    pub data_gaps_similarity: Option<f64>,
     /// V65 新增: evidence_cited 维度原始分 (满分 10)
     pub evidence_score: f64,
     /// V65 新增: LLM 引用上游论据数量
     pub evidence_count: i32,
-    /// 冲突类型: all_agree / opposite_direction / action_divergence / position_gap / confidence_gap / risk_gap / data_gaps_diverge
+    /// 冲突类型: all_agree / opposite_direction / action_divergence / position_gap / confidence_gap / risk_gap
+    /// （`data_gaps_diverge` 已于 2026-09-21 随 data_gaps 维度一并移除）
     pub conflict_type: String,
     // ── P0: f7 自指污染标记（向后兼容保留）──
     /// 公式决策中 f7（trader 因子）权重占总权重百分比。None=无 f7 数据。
@@ -1233,13 +1418,21 @@ pub(crate) struct AgreementBreakdown {
 
 /// 计算公式决策与 LLM 决策的一致性分数（0-100）。
 ///
-/// V65 升级：6 维度对比，对应 trader.md 中"双视角对比说明"的权重分配：
+/// V65 升级：维度对比，对应 trader.md 中"双视角对比说明"的权重分配：
 ///   - action: 30 分（精确匹配 30 / 同向 20 / 中性不同义 5-10 / 对立 0）
 ///   - positionPct: 20 分（≤10% 满分 20 / ≤20% 半分 10 / >20% 零分 0）
 ///   - confidence: 15 分（差值 ≤10 满分 15 / ≤20 半分 10 / 否则 5）
 ///   - riskLevel: 15 分（精确匹配 15 / 相邻 8 / 跨级 0）
-///   - data_gaps: 10 分（双方非空时 Jaccard×10；双方都空=10；仅一方空=5 中性）
 ///   - evidence 引用密度: 10 分（≥3 条满分 10 / 2 条 5 / <2 条 0）
+///     ⇒ 内部满分 **90**，出口统一归一化回 100 制（`raw / 90 × 100`），
+///     使 50 分仍为中性 —— `core.rs` 的 `factor = 1 + (total-50)/100` 与前端
+///     60 分档位文案因此**无需改动**。
+///
+/// **2026-09-21 移除 `data_gaps` 维度**：两侧缺口清单命名体系不可比
+///   （公式侧 = rhai 机械枚举字段缺失，LLM 侧 = trader 自由文本自述），
+///   Jaccard 在该前提下不是「一致性」的任何正确度量 —— 实测恒 0 分，
+///   且分母含 LLM 侧条数 ⇒ 惩罚的恰是 LLM 的坦诚度。缺口信息本身仍照旧输出
+///   （`decision.data_gaps` → UI 提示），只是不再进这张评分表。
 ///
 /// 归一化规则（与前端 normalizeAction 保持一致）:
 /// - 移除空格/斜杠/下划线/全角空格
@@ -1259,24 +1452,14 @@ pub(crate) fn compute_decision_agreement(
     let f_action = fj.get("action").and_then(|v| v.as_str().map(norm));
     let f_pos = fj.get("positionPct").and_then(|v| v.as_f64());
     let f_conf = fj.get("confidence").and_then(|v| v.as_f64());
-    // V65: 公式 riskLevel / data_gaps
+    // V65: 公式 riskLevel（data_gaps 解析已于 2026-09-21 随该维度一并移除）
     let f_risk = fj.get("riskLevel").and_then(|v| v.as_str()).map(norm).unwrap_or_default();
-    let f_gaps: std::collections::HashSet<String> = fj
-        .get("data_gaps")
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(norm)).collect())
-        .unwrap_or_default();
 
     // ── LLM 字段（V65: trader 现在输出完整字段）──
     let l_action = lj.get("action").and_then(|v| v.as_str().map(norm));
     let l_pos = lj.get("positionPct").and_then(|v| v.as_f64());
     let l_conf = lj.get("confidence").and_then(|v| v.as_f64());
     let l_risk = lj.get("riskLevel").and_then(|v| v.as_str()).map(norm).unwrap_or_default();
-    let l_gaps: std::collections::HashSet<String> = lj
-        .get("data_gaps")
-        .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(norm)).collect())
-        .unwrap_or_default();
     // V65: evidence_cited 数量
     let evidence_count: i32 = lj
         .get("evidence_cited")
@@ -1393,35 +1576,13 @@ pub(crate) fn compute_decision_agreement(
     let f_risk_raw = fj.get("riskLevel").and_then(|v| v.as_str()).unwrap_or("?").to_string();
     let l_risk_raw = lj.get("riskLevel").and_then(|v| v.as_str()).unwrap_or("?").to_string();
 
-    // ── V75(2026-09-13) data_gaps 评分（满分 10）──
-    // 旧实现有两个缺陷：
-    //   ① `union == 0 → Some(1.0)`（「双方都为空视为完全一致」）**永不可达** ——
-    //      外层 `if !f_gaps.is_empty() || !l_gaps.is_empty()` 已要求至少一方非空
-    //      （铁律 5：恒等边界/死守卫）。而真正的「双方都为空」落到
-    //      `unwrap_or(0.0)` ⇒ 得 0 分，**惩罚了完全一致的情形**。
-    //   ② 两侧词表本就不同：公式侧 `data_gaps` 只登记「节点级输入缺失」（常态为空，
-    //      见 portfolio-mgr.rhai 的 10 项 present() 检查），trader 侧登记「分析师自报
-    //      缺口」（实证 601166 为 8 条）⇒ Jaccard 恒为 0 ⇒ 该维度**长期恒 0 分**，
-    //      10 分权重退化为固定惩罚，诊断文案还会写「数据缺口不一致」误导用户。
-    // 新口径：双方都空 → 满分（确实一致）；仅一方为空 → 不可比，取中性半分；
-    //        双方非空 → Jaccard × 10。
-    // ⚠️ 会改变 `total` 分数（进而影响 adjustedConfidence 与 60/40 档位文案）。
-    let data_gaps_similarity: Option<f64> = match (f_gaps.is_empty(), l_gaps.is_empty()) {
-        (true, true) => Some(1.0),
-        // 不可比：一方无缺口清单。给 None 由调用方取中性分，不判为「不一致」。
-        (true, false) | (false, true) => None,
-        (false, false) => {
-            let intersection = f_gaps.intersection(&l_gaps).count() as f64;
-            let union = f_gaps.union(&l_gaps).count() as f64;
-            Some(if union > 0.0 {
-                intersection / union
-            } else {
-                1.0
-            })
-        },
-    };
-    // None（不可比）→ 中性 5 分：既不当「一致」奖励，也不当「分歧」惩罚。
-    let data_gaps_score: f64 = data_gaps_similarity.map(|s| s * 10.0).unwrap_or(5.0);
+    // ── 2026-09-21 移除 data_gaps 评分段 ──
+    // 原实现（V75 起）：双方非空 → Jaccard×10 / 仅一侧为空 → 中性 5 / 双方为空 → 10。
+    // 删除理由见本函数文档与 `AgreementBreakdown` 的结构体注释：两侧缺口清单
+    // **命名体系不可比**（公式侧 = rhai 机械枚举字段缺失，LLM 侧 = trader 自由文本
+    // 自述），Jaccard 恒 0；DB 实证：16 条有缺口的决策里 12 条该维度 0 分，且会把
+    // 方向完全一致的一轮判成 `data_gaps_diverge` 假冲突。
+    // 缺口数据本身**未丢失** —— 仍由 `decision.data_gaps` 输出给 UI（DecisionTrustNotice）。
 
     // ── V65: evidence_cited 评分（满分 10）──
     // ≥3 条满分 10 / 2 条 5 / <2 条 0
@@ -1431,14 +1592,14 @@ pub(crate) fn compute_decision_agreement(
         _ => 0.0,
     };
 
-    // ── V65: 6 维度加权总分 ──
-    let total = (action_score
-        + pos_score
-        + conf_score
-        + risk_level_score
-        + data_gaps_score
-        + evidence_score)
-        .round() as i32;
+    // ── 5 维度加权总分（内部满分 90）→ 归一化回 100 制 ──
+    // 2026-09-21: 移除 data_gaps 维度（理由见函数文档）。此处**必须**归一化：
+    //   `total` 既是 `core.rs` 的 `factor = 1 + (total-50)/100` 的输入，也是前端
+    //   60 分档位文案的判据 —— 若直接输出 90 制，50 不再是中性点，且新旧记录的
+    //   「一致性」数值不可比。
+    const RAW_MAX: f64 = 90.0;
+    let raw_total = action_score + pos_score + conf_score + risk_level_score + evidence_score;
+    let total = (raw_total / RAW_MAX * 100.0).round() as i32;
 
     // ── P0: 从公式决策中提取 f7_free 信息（消除自指悖论）──
     let f7_free_info = fj.get("f7_free").and_then(|v| {
@@ -1489,7 +1650,7 @@ pub(crate) fn compute_decision_agreement(
         _ => None,
     };
 
-    // ── V65: 冲突类型分类（6 维度版）──
+    // ── 冲突类型分类（5 维度版；2026-09-21 移除 data_gaps_diverge 分支）──
     let conflict_type: &str = if l_action.is_none() && evidence_count == 0 {
         // 完全无 LLM 视角输入
         match f7_free_action_score {
@@ -1512,8 +1673,6 @@ pub(crate) fn compute_decision_agreement(
         "position_gap"
     } else if risk_level_score == 0.0 && !f_risk.is_empty() && !l_risk.is_empty() {
         "risk_gap"
-    } else if data_gaps_score < 5.0 && data_gaps_similarity.is_some() {
-        "data_gaps_diverge"
     } else {
         "confidence_gap"
     };
@@ -1548,8 +1707,6 @@ pub(crate) fn compute_decision_agreement(
         risk_level_score,
         formula_risk_level: f_risk_raw,
         llm_risk_level: l_risk_raw,
-        data_gaps_score,
-        data_gaps_similarity,
         evidence_score,
         evidence_count,
         conflict_type: conflict_type.to_string(),
@@ -2561,7 +2718,7 @@ pub async fn rerun_decision(
     analysis_id: String,
 ) -> Result<serde_json::Value, String> {
     use crate::commands::error::ErrorResponse;
-    use rhai::{Engine, Scope};
+    use rhai::Scope;
     use std::collections::HashMap;
 
     let db = state.harness.db();
@@ -2663,24 +2820,17 @@ pub async fn rerun_decision(
     // 修复历史 bug：原手动注册漏掉 json_parse，导致 portfolio-mgr.rhai 的 safe_parse 在
     // rerun 路径下失败，进而使公告关键词检测 f3、资金面 f9、筹码面 f10、龙虎榜 f10、
     // PACE f11 等依赖 safe_parse 的下游逻辑全部失去数据。
-    let mut engine = Engine::new();
-    // SECURITY (C4): Rhai 沙箱限制 — 防 DoS
-    engine.set_max_operations(200_000);
-    engine.set_max_call_levels(32);
-    engine.set_max_modules(0);
-    engine.set_max_string_size(2_000_000);
-    engine.set_max_array_size(50_000);
-    // C4 补充: portfolio-mgr.rhai 因子多、表达式嵌套深（line 518 处超默认上限），
-    // 必须放宽 max_expr_depths，否则 eval 直接抛 "Expression exceeds maximum complexity"
-    // （编译期错误，脚本内 try/catch 无法捕获，会导致整个节点无输出）。
-    // 256 为该脚本实测所需下限(48)的 ~5 倍余量；执行总操作数仍受 set_max_operations 约束。
-    engine.set_max_expr_depths(256, 256);
-    axagent_rt_workflow::work_engine::executors::register_common_functions(&mut engine);
-    // ── P3-1: 注册 portfolio 公式函数（替代 Rhai 内联计算）──
-    // pm_* 注册已抽取到 rhai_pm::register_pm_functions（与共享 Engine 注册点共用，
-    // 禁止重复定义）。2026-09-09 起 data-quality / portfolio-risk-gate 等脚本
-    // 也依赖 pm_*，函数集必须与本文件历史版本完全一致。
-    super::rhai_pm::register_pm_functions(&mut engine);
+    // 沙箱档位与宿主函数集统一走 rhai_registry::build_stock_rhai_engine：
+    // 与共享 Engine 同源（common + pm_* + bottleneck_*），不再在此处手工注册。
+    // 历史：本处只注册了 common + pm_*（缺 bottleneck_*），而
+    // commands/stock_analysis.rs 的 What-If 入口更少（仅 common）
+    // ⇒「同一脚本在不同入口能跑 / 不能跑」。2026-09-22 收敛为单一构造点。
+    // 档位取 PORTFOLIO（256，实测下限 48 的 ~5 倍余量）：portfolio-mgr.rhai
+    // 表达式嵌套深，默认上限会在**编译期**抛 "Expression exceeds maximum
+    // complexity"，脚本内 try/catch 无法捕获，会导致整个节点无输出。
+    let engine = super::rhai_registry::build_stock_rhai_engine(
+        super::rhai_registry::RhaiSandboxLimits::PORTFOLIO,
+    );
     let mut scope = Scope::new();
 
     // ── Gap 2: 注入近期 lessons（reflection_lessons 活跃规则）──
@@ -2979,6 +3129,17 @@ pub async fn rerun_decision(
         .col_expr(stock_analyses::Column::DecisionPositionPct, Expr::value(position_pct))
         .col_expr(stock_analyses::Column::DecisionReasoning, Expr::value(reasoning))
         .col_expr(stock_analyses::Column::DecisionJson, Expr::value(decision_json_str))
+        // A4（决策可离线复算）：本函数第 3 步是**从 DB 现读** `stock-analysis` 模板，
+        // 用途就是「改完 portfolio-mgr.rhai 拿旧快照复算验证」 ⇒ 本次产出的决策
+        // 属于**当前**模板版本，必须覆盖旧值，否则该行的 `template_version` 会一直
+        // 指向上一轮那个更旧的公式版本。
+        //
+        // ⚠ 注意 `blackboard_snapshot` **不被本函数重写**（快照仍是旧轮采集的）。
+        // 于是「快照版本 ≠ 决策版本」是这条路径的**正常状态**，不是脏数据：
+        //   template_version = 产出 DecisionJson 的公式版本（本次模板）
+        //   快照自身的采集轮次     = 由 blackboard_snapshot 内容决定
+        // 复算器必须能区分这两者，才不至于把「用新公式复算旧输入」误判成数据不一致。
+        .col_expr(stock_analyses::Column::TemplateVersion, Expr::value(template.version))
         .col_expr(stock_analyses::Column::DecisionTimeHorizon, Expr::value(time_horizon))
         .col_expr(stock_analyses::Column::DecisionExpectedHoldingDays, Expr::value(holding_days))
         .col_expr(
@@ -3046,12 +3207,44 @@ pub async fn rerun_decision(
         None,
     );
 
+    // A4（决策可离线复算）：把「原决策版本 vs 本次复算版本」的漂移显式回报。
+    //
+    // 为什么必须有这个**读数端**：`stock_analyses.template_version` 如果只写不读，
+    //   就是一个没人消费的字段 —— 而它存在的唯一理由，是回答「这条历史决策是用
+    //   哪版公式算出来的」。不回答这个问题的复算，正是 09-12 踩过的坑：同一批样本
+    //   按新版公式复算后 posterior **系统性偏高 ~4.5pt**
+    //   （`portfolio-mgr.rhai:2146-2147` 记载，12/13 样本跑在 v10~v26），
+    //   而当时没有任何运行时信号提示「你正在跨版本比较」。
+    //
+    // `recorded` 取自本次更新**之前**的行值：`analysis` 是第 1 步读出的旧模型，
+    //   第 6 步的 `update_many` 不会回写它 ⇒ 它忠实地是「原决策落库时的版本」。
+    //   为 `None` 属**正常形态**：A4 之前的存量行、以及 chat 通道（`hooks.rs`）
+    //   写入的行本就没有版本信息 —— 不要把它当脏数据修。
+    let recorded_version = analysis.template_version;
+    let current_version = template.version;
+    let version_drifted = recorded_version.is_some_and(|v| v != current_version);
+    let template_version_info = json!({
+        "recorded": recorded_version,
+        "current": current_version,
+        // drifted = true ⇒ 本次复算用了与原决策**不同**的公式版本。此时输出与原决策
+        //   的差异**不能**归因为「快照/数据不一致」，必须先排除公式变更。
+        "drifted": version_drifted,
+        "note": if version_drifted {
+            "本次复算所用模板版本与原决策不同：差异可能来自公式变更，而非输入变化"
+        } else if recorded_version.is_none() {
+            "原决策未记录模板版本（A4 之前的存量行或 chat 通道写入），无法判定是否跨版本"
+        } else {
+            "同版本复算"
+        },
+    });
+
     Ok(json!({
         "analysis_id": analysis_id,
         "decision": decision_value,
         "llm_decision_json": analysis.llm_decision_json,
         "dashboardReport": dashboard_report,
         "dashboardMd": dashboard_md,
+        "templateVersion": template_version_info,
     }))
 }
 
@@ -3292,16 +3485,25 @@ pub(crate) fn extract_valuation_json(
     }
 }
 
-/// 用 trader 的 LLM 决策补齐 dashboard 的绝对价格字段。
+/// 用 trader 的 LLM 决策补齐 dashboard 的绝对价格字段（**公式侧未产出时的回退**）。
 ///
-/// ⚠️ **这不是「兜底」，而是常态主路径**（2026-09-13 更正，原注释写「缺键时兜底」是错的）：
-/// `portfolio-mgr.rhai` 的 `decision_json` **只输出百分比**（`stopLossPct`/`takeProfitPct`），
-/// **从不产出绝对价格** ⇒ 公式侧 `targetPrice`/`stopLoss` 键**永远不存在**（DB 实证 603466），
-/// 本函数因此**恒命中**（3 个调用点 2323/2484/2639 全部走此路）。
-/// 后果：仪表盘的目标价 **100% 来自 LLM 自填值**，公式侧没有任何价格可校验 ——
+/// ⚠️ **2026-09-23 起本函数的角色已变** —— 原文「这不是兜底，而是常态主路径」的判断**已作废**：
+/// 2026-09-23 之前 `portfolio-mgr.rhai` 的 `decision_json` **只输出百分比**
+/// （`stopLossPct`/`takeProfitPct`），**从不产出绝对价格** ⇒ 公式侧 `targetPrice`/`stopLoss`
+/// 键永远不存在 ⇒ 本函数**恒命中**，仪表盘价位 **100% 来自 LLM 自填值**，公式侧无价可校验。
 /// 于是 LLM 在「持有」档把 `targetPrice` 抄成 `currentPrice` 时（603466：13.27 == 13.27），
-/// 仪表盘就显示一个「等于现价的目标价」，与同一工作流的估值区间（DCF 4.44–5.57）
-/// 读起来像自相矛盾（用户报告的那个问题）。
+/// 仪表盘显示「等于现价的目标价」，与同一工作流的估值区间（DCF 4.44–5.57）读起来自相矛盾。
+///
+/// 该断链已在**源头**修复（2026-09-23）：`portfolio-mgr.rhai` 现按
+/// `现价 × (1 ∓ 档位%)` 输出 `targetPrice`/`stopLoss` 绝对价格（档位取自 `timeHorizon`）。
+/// 因此本函数的两条路径语义已分叉：
+///
+/// - **成功路径**：公式两键**存在且非 null** ⇒ 本函数的 `is_none_or(is_null)` 判据不成立
+///   ⇒ **不覆盖** ⇒ **公式优先**。这是刻意的：公式价确定性、可复算、与 `timeHorizon` 自洽，
+///   LLM 值不可校验。LLM 值只在公式**确实无交易计划**（`sl_pct <= 0`）时才机会入场。
+/// - **异常路径**（rhai `catch` 块）：两键**存在但为 null** ⇒ 本函数仍会填入 LLM 值。
+///   这是**已知残留**：一条「Rhai 执行异常」的记录不应携带任何交易结论。若要封死，
+///   须在调用点先判 `action == "数据缺失"` 再决定是否合并（本轮未改）。
 ///
 /// 配套修复：① trader prompt 补 `targetPrice` 方向语义并禁等于现价（模板 v39）；
 /// ② `portfolio-mgr.rhai` 新增 R-204 判「价格信号无信息量」并留痕。

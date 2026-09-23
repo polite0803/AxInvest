@@ -1,10 +1,9 @@
-import { ExecutionModeSelector } from "@/components/executionBridge/ExecutionModeSelector";
-import { PendingSignalsList } from "@/components/executionBridge/PendingSignalsList";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import { actionToDirection, getActionColor } from "@/lib/stock-analysis-utils";
+import { actionToDirection, getActionColor, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
-import { App, Button, Card, Divider, Input, InputNumber, Select, Space, Statistic, Switch, Table, Tag } from "antd";
+import { App, Button, Card, Input, InputNumber, Select, Space, Statistic, Switch, Table, Tag } from "antd";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -42,6 +41,19 @@ export function TradePanel() {
   const storeStockName = useStockAnalysisStore((s) => s.stockName);
   const storeDecision = useStockAnalysisStore((s) => s.decision);
   const storeAnalysisId = useStockAnalysisStore((s) => s.analysisId);
+  // 「最近分析」标签的展示档：`StoreDecision.action` 是**英文枚举**
+  // （`StockActionType`：BUY / HOLD / WAIT …），不能裸渲染（用户会看到 "HOLD"）。
+  // ⚠️ 2026-09-22: 展示档 = 方向档（`resolveDisplayAction` 已恒等，不再按仓位派生，
+  // 见 `AUDIT-300642-run-variance-2026-09-22.md`）；走统一入口只为收敛渲染路径。
+  // 原先此处靠 `as unknown as Record<string, unknown>` 强转绕开类型才拿到字符串，
+  // 走统一入口后强转也一并去掉。
+  const storeDisplayAction = storeDecision
+    ? resolveDisplayAction(
+      storeDecision.action,
+      storeDecision.positionState,
+      storeDecision.positionPct,
+    )
+    : null;
   // R2: 买入前 position_limits 校验
   const checkPositionLimits = useStockAnalysisStore((s) => s.checkPositionLimits);
   const [enabled, setEnabled] = useState(false);
@@ -174,7 +186,7 @@ export function TradePanel() {
       message.success(t("trade.recorded"));
       loadData();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   };
 
@@ -269,20 +281,6 @@ export function TradePanel() {
         </div>
       }
     >
-      {/* 执行模式切换 */}
-      <div className="mb-2">
-        <ExecutionModeSelector compact />
-      </div>
-
-      <Divider className="!my-2" />
-
-      {/* 待执行信号列表 */}
-      <div className="mb-2">
-        <PendingSignalsList autoRefreshInterval={30_000} />
-      </div>
-
-      <Divider className="!my-2" />
-
       {/* 绩效统计 */}
       {trades.length > 0 && (
         <div className="grid grid-cols-3 gap-1 mb-2 p-1 rounded" style={{ background: "var(--surface)" }}>
@@ -357,13 +355,11 @@ export function TradePanel() {
       </div>
 
       {/* 分析结论 → 一键录入 */}
-      {storeDecision && (
+      {storeDecision && storeDisplayAction && (
         <div className="text-xs p-1 rounded mb-2" style={{ background: "var(--surface)" }}>
           <span style={{ color: "var(--muted)" }}>{t("stockAnalysis.recentAnalysis")}:</span>
-          <Tag
-            color={getActionColor((storeDecision as unknown as Record<string, unknown>).action as string)}
-          >
-            {(storeDecision as unknown as Record<string, unknown>).action as string}
+          <Tag color={getActionColor(storeDisplayAction)}>
+            {t(getActionTKey(storeDisplayAction))}
           </Tag>
           <Button size="small" type="link" className="text-xs px-1" onClick={quickRecord}>
             {t("stockAnalysis.trade.quickRecord")}

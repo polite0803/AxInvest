@@ -1405,6 +1405,10 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 此处不做 conversation 事件桥接，conversation_id 参数预留给未来桥接。
     {
         let engine_for_run = work_engine.clone();
+        // D8 同族（2026-09-22）：本执行器是「LLM 经 RunWorkflow 工具按 id 跑工作流」的入口，
+        // 此前**只传 `input`、不装模板变量** ⇒ tool 节点 `input_mapping` 解析不到面板参数、
+        // 静默回退默认值。按 workflow_id 直查模板变量一并装载（取不到不阻断）。
+        let db_for_rw_tool = harness.db().clone();
         type RunFuture = std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<serde_json::Value, String>> + Send>,
         >;
@@ -1414,6 +1418,9 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
                   _conversation_id: Option<String>|
                   -> RunFuture {
                 let engine = engine_for_run.clone();
+                // 本闭包是 `Fn`（可多次调用）⇒ 不能把捕获的 `db_for_rw_tool` move 进
+                // `async move` 块，每次调用 clone 一份（E0507 的编译器建议）
+                let db = db_for_rw_tool.clone();
                 Box::pin(async move {
                     // 与 workflow_execute 同口径：模板不存在先显式失败。
                     // 懒加载兜底：启动期仅 cognitive_router_main 常驻内存，
@@ -1438,10 +1445,26 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
                             "工作流模板 '{workflow_id}' 不存在（RunWorkflow 执行器校验失败）"
                         ));
                     }
-                    let opts = axagent_runtime::work_engine::RunOptions {
-                        input,
-                        ..axagent_runtime::work_engine::RunOptions::default()
-                    };
+                    // D8 同族：装载模板变量（模板声明即面板默认值）。
+                    // 失败/为空都不阻断执行 —— 只是拿不到面板参数、下游回退各自默认值。
+                    // 字段在初始化器里给（`clippy::field_reassign_with_default`）；
+                    // `mut` 仍需要 —— 下方命中模板变量时会整体重绑 `opts`。
+                    let mut opts =
+                        axagent_runtime::work_engine::RunOptions { input, ..Default::default() };
+                    if let Ok(Some(tm)) =
+                        axagent_dao::repo::workflow_template::get_workflow_template(
+                            &db,
+                            &workflow_id,
+                        )
+                        .await
+                    {
+                        let tvars =
+                            axagent_dao::repo::workflow_template::template_model_to_data(&tm)
+                                .variables;
+                        if !tvars.is_empty() {
+                            opts = opts.with_variables(tvars);
+                        }
+                    }
                     engine
                         .run_workflow(&workflow_id, opts)
                         .await
@@ -1564,7 +1587,8 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         )),
         cross_stock_aggregator: std::sync::OnceLock::new(),
         stock_adaptive_engine: Arc::new(
-            axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new(),
+            axagent_analysis_engine::stock_adaptive_engine::StockAdaptiveEngine::new()
+                .with_db(sea_db.clone()),
         ),
         stream_cancel_flags,
         agent_permission_senders,
@@ -2617,8 +2641,9 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
         )
         .await
         {
-            let mutator = super::workflow_injections::ProviderWorkflowLlmMutator::new(bridge);
-            // 进化器经 workflow.evolver 能力接缝获取（与 WorkEngine / 命令层同一 Arc）
+            // 全局进化器（与 WorkEngine / 命令层同一 Arc）注入
+            let mutator =
+                super::workflow_injections::ProviderWorkflowLlmMutator::new(bridge.clone());
             if let Some(evolver) = axagent_harness::get_capability_registry().get_workflow_evolver()
             {
                 if let Err(e) = evolver
@@ -2632,6 +2657,23 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
                 }
             } else {
                 tracing::warn!("[startup] workflow.evolver 接缝未注册，跳过 LLM 变异器注入");
+            }
+
+            // 批3-D：把同一 LLM 变异器也注入股票自我进化引擎内部持有的
+            // `StockSelfEvolutionEngine` 的 `WorkflowEvolverImpl`（该实例与全局
+            // evolver 并非同一 Arc），让股票流程/参数进化从「数值爬山」升级为「语义改写」。
+            let stock_mutator = super::workflow_injections::ProviderWorkflowLlmMutator::new(bridge);
+            let stock_engine = app_state.stock_adaptive_engine.evolution_engine();
+            if let Err(e) = axagent_harness::WorkflowEvolver::set_llm_provider(
+                stock_engine,
+                std::sync::Arc::new(stock_mutator)
+                    as std::sync::Arc<dyn axagent_harness::WorkflowLlmMutator>,
+            )
+            .await
+            {
+                tracing::warn!("[startup] StockSelfEvolutionEngine LLM 注入失败: {e}");
+            } else {
+                tracing::info!("[startup] StockSelfEvolutionEngine LLM 注入完成");
             }
         }
     }

@@ -305,8 +305,6 @@ pub struct AgentNodeConfig {
     /// 执行时从这些源检索与 query 相关的内容注入 system prompt。
     #[serde(default, alias = "rag_source_ids")]
     pub rag_source_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "model_role")]
-    pub model_role: Option<String>,
     /// 结果一致性检查配置（可选，不配置时零影响）
     #[serde(default, skip_serializing_if = "Option::is_none", alias = "consistency_check")]
     pub consistency_check: Option<ConsistencyCheckConfig>,
@@ -1289,8 +1287,6 @@ pub struct DebateNodeConfig {
     pub convergence_prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub convergence_model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub convergence_model_role: Option<String>,
     #[serde(default)]
     pub topic_var: String,
     #[serde(default)]

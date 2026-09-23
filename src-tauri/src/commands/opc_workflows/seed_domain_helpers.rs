@@ -76,7 +76,6 @@ pub fn make_agent_node(
             max_tool_rounds: Some(10),
             execution_mode: None,
             rag_source_ids: vec![],
-            model_role: Some("opc-worker".to_string()),
             consistency_check: None,
             hallucination_guard: None,
             fallback_model: None,

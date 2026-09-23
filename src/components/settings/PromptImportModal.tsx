@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { showBackendError } from "@/lib/errorI18n";
 import { usePromptTemplateStore } from "@/stores/feature/promptTemplateStore";
 import type { ImportPromptResult, ImportPromptTemplateInput } from "@/types";
 import { DownloadOutlined, FolderOpenOutlined, GithubOutlined, InboxOutlined, LinkOutlined } from "@ant-design/icons";
@@ -46,7 +47,7 @@ export function PromptImportModal({ open, onClose }: PromptImportModalProps) {
         }
       }
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setImporting(false);
     }
@@ -112,7 +113,7 @@ export function PromptImportModal({ open, onClose }: PromptImportModalProps) {
         setImporting(false);
         return false;
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
         setImporting(false);
         return false;
       }
@@ -146,7 +147,7 @@ export function PromptImportModal({ open, onClose }: PromptImportModalProps) {
         }
       }
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setImporting(false);
     }

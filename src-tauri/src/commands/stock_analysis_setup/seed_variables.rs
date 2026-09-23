@@ -5,6 +5,47 @@
 
 use axagent_harness::workflow_types::Variable;
 
+/// `debate_rounds` 变量与建图展开轮数的默认值（单一权威源）。
+///
+/// 被三处引用保持一致，避免「同名散成多套值」：
+///   1. 下方 `debate_rounds` 变量的 `value`（最终落库的变量表）；
+///   2. `seed_stock_analysis.rs` 借 `resolve_debate_rounds` 从旧变量解析建图轮数。
+pub(crate) const DEFAULT_DEBATE_ROUNDS: u32 = 3;
+
+/// DCF 估值参数的默认值（**单一权威源**，单位 = 百分数）。
+///
+/// 被两处引用，避免同名散成多套值：
+///   1. 下方 `value_dcf_growth_rate` / `value_dcf_perpetual_rate` /
+///      `value_dcf_discount_rate` 三个变量的 `value`（种子默认值）；
+///   2. `seed_stock_analysis.rs` 的 **v74 强制覆写**（`force_variable_value`）。
+///
+/// ✅ **同源已由代码保证**（2026-09-22 起）：下方三个常量**派生自**
+/// `astock-data::mcp_tools` 的 `DEFAULT_GROWTH` / `PERPETUAL_GROWTH` / `DISCOUNT_RATE`
+/// （×100 换算为百分数），**不再是手抄字面量** —— 此前该处手抄的值与 astock-data
+/// 常量曾各停在不同校准批次上（且本处恰好是"校准后"、astock-data 是"校准前"的反例）。
+///
+/// 业务理由**不在本文件**，也不在 `analysis-engine::decision::ValueConfig`
+/// （该结构 2026-09-23 起本身也已**派生**自 `astock-data`，见其 `default_dcf_*` 注释；
+/// 它当前全仓无消费方，且历史上正是「假修复」的载体）—— 唯一的依据声明在
+/// `astock_data::mcp_tools::{PERPETUAL_GROWTH, DISCOUNT_RATE, RISK_FREE_RATE}` 的文档注释。
+/// 引用方向必须是「本文件 → astock-data」，**不得**反向引用 `decision::ValueConfig`：
+/// 后者是派生端，被当依据会导致下一次校准又只改到它、改不到实际执行的常量。
+///
+/// ## 为什么需要第 2 处引用（v74 的由来）
+///
+/// 这组值 2026-09-12 就校准过（原 10% / 3% / 8% → 8.5% / 4% / 12%），
+/// 但**从未在生产生效**：`merge_variable_values` 的语义是「新定义 + 无条件保留
+/// 旧值」，DB 存量一直是 10 / 3 / 8 —— 改代码常量与种子默认值都是**假修复**。
+/// 实测（2026-09-21，688114 华大智造）：三值恰为校准前的原值，致 `dcf.mid`
+/// 24.23（校正后 37.27，**低估 35%**），且三个方向**一致压低**成长股估值。
+/// ⇒ 只改默认值不够，必须经 `force_variable_value` 覆写存量。
+pub(crate) const DEFAULT_DCF_GROWTH_RATE_PCT: f64 =
+    axagent_astock_data::mcp_tools::DEFAULT_GROWTH * 100.0;
+pub(crate) const DEFAULT_DCF_PERPETUAL_RATE_PCT: f64 =
+    axagent_astock_data::mcp_tools::PERPETUAL_GROWTH * 100.0;
+pub(crate) const DEFAULT_DCF_DISCOUNT_RATE_PCT: f64 =
+    axagent_astock_data::mcp_tools::DISCOUNT_RATE * 100.0;
+
 /// 构建股票分析工作流模板的所有可配置变量
 pub(crate) fn build_template_variables() -> Vec<Variable> {
     vec![
@@ -19,22 +60,15 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "debate_rounds".into(),
             var_type: "number".into(),
-            // v48（2026-09-14）：3 → 1。当前引擎里多轮是**假多轮** ——
-            // `build_debate_body_dispatch` 对第 2+ 轮已 Completed 的 body 节点直接
-            // 复用上次对象返回（不重跑 LLM），收敛检测拿同一对象比相似度 ⇒ 恒 1.0
-            // ⇒ 必然判「已收敛」；且辩手 prompt 不消费 `__debate_history__` /
-            // `__debate_round__`，重跑零信息增量。同时链式 `contextSources` 累积
-            // 会把链尾（bear-r3）请求体推到 85.8KB（601166 实证），撞 provider
-            // 最严的头超时档 15s ⇒ 结构上最脆弱的一环。
-            // 1 轮 = 只保留 bull-r1 → bear-r1 的真交锋，语义不降级（被删的 4 个
-            // 轮次节点本来就只是首轮输出的复制品）。
-            // ⚠️ 改这个默认值**不够** —— DB 旧值会被 `merge_variable_values` 保留，
-            //   故 `seed_stock_analysis.rs` 末尾用 `force_variable_value` 强制覆写。
-            value: serde_json::json!(1),
+            // 多空辩论轮数。每轮展开一对独立辩手节点（bull-rN/bear-rN），经各自的
+            // expert persona 与 context_sources（引用前序轮次输出）产出不同内容——
+            // 即「真多轮」，每轮各自真跑一次 LLM。
+            // ⚠️ 该值在建图时由 `seed_stock_analysis.rs` 从本变量读取并展开节点，
+            //   改动后需升 TEMPLATE_VERSION 强制重种才会生效（版本门见 seed）。
+            value: serde_json::json!(DEFAULT_DEBATE_ROUNDS),
             description: Some(
-                "多空辩论轮数。v48 起固定为 1：当前引擎多轮为「假多轮」（第 2+ 轮复用 \
-                 首轮输出 ⇒ 必然假收敛，零信息增量），且会显著推高链尾请求体积、\
-                 抬高超时失败率。>1 需先修复多轮语义。"
+                "多空辩论轮数（1~3）。每轮展开一对独立辩手节点，各轮经不同专家 \
+                 persona 与前序辩论输出承接，逐轮真跑。建议 ≤3 以控制链尾请求体积。"
                     .into(),
             ),
             is_secret: false,
@@ -290,25 +324,25 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             description: Some("最大行业暴露占比 (%)".into()),
             is_secret: false,
         },
-        // ── 估值参数（A股校准：详见 decision.rs::ValueConfig::default 注释）──
+        // ── 估值参数（A股校准：唯一依据声明见 astock-data::mcp_tools 的常量文档）──
         Variable {
             name: "value_dcf_growth_rate".into(),
             var_type: "number".into(),
-            value: serde_json::json!(12.0),
+            value: serde_json::json!(DEFAULT_DCF_GROWTH_RATE_PCT),
             description: Some("DCF 增长率 (%)".into()),
             is_secret: false,
         },
         Variable {
             name: "value_dcf_perpetual_rate".into(),
             var_type: "number".into(),
-            value: serde_json::json!(4.0),
+            value: serde_json::json!(DEFAULT_DCF_PERPETUAL_RATE_PCT),
             description: Some("DCF 永续增长率 (%)".into()),
             is_secret: false,
         },
         Variable {
             name: "value_dcf_discount_rate".into(),
             var_type: "number".into(),
-            value: serde_json::json!(8.5),
+            value: serde_json::json!(DEFAULT_DCF_DISCOUNT_RATE_PCT),
             description: Some("DCF 折现率 (%)".into()),
             is_secret: false,
         },

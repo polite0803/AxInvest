@@ -443,6 +443,24 @@ fn pearson_correlation(xs: &[f64], ys: &[f64]) -> f64 {
 
 // ── 工具函数：把 RecoPick 转 PickValidation ──
 
+/// 把 hit_outcome 归一化为决策级二进制 outcome（"win" / "loss"），供决策记录回填。
+///
+/// ## 口径（与 compute_hit_rate_report 的统计分母一致）
+/// - `hit` / `partial` → `win`
+/// - `miss` / `false_hit` → `loss`
+/// - `insufficient` / `None` → 数据不足不判定 → `None`（跳过）
+///
+/// B3「决策-结果闭环」要求回填口径与离线回测口径一致：回填决策记录（stock_analyses.outcome）
+/// 与计算命中率必须复用同一套判定，避免两处各自实现导致口径漂移（如一侧把 partial 算 hit、
+/// 另一侧不算）。本函数是二者共用的唯一判定源。
+pub fn hit_outcome_to_binary_outcome(hit_outcome: Option<&str>) -> Option<&'static str> {
+    match hit_outcome {
+        Some("hit") | Some("partial") => Some("win"),
+        Some("miss") | Some("false_hit") => Some("loss"),
+        _ => None,
+    }
+}
+
 /// 从 RecoPick + 已拉取的 T+N K 线数据构建 PickValidation
 pub fn build_pick_validation(
     pick: &RecoPick,
@@ -723,5 +741,22 @@ mod tests {
         assert_eq!(buy_stats.false_hit, 1);
         // hit_rate = 2 / (2+1+1) = 0.5
         assert!((buy_stats.hit_rate - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hit_outcome_to_binary_outcome_matches_hit_rate_denominator() {
+        // B3 口径守卫：回填决策记录的 win/loss 判定，必须与 compute_hit_rate_report
+        // 统计命中率所用的分母口径一致 —— 只有 miss/false_hit 会降低命中率分子差，
+        // 而 insufficient 不参与判定（None 跳过）。
+        // hit/partial → win（计入 hit 或 partial，均视为决策正确侧）
+        assert_eq!(hit_outcome_to_binary_outcome(Some("hit")), Some("win"));
+        assert_eq!(hit_outcome_to_binary_outcome(Some("partial")), Some("win"));
+        // miss/false_hit → loss
+        assert_eq!(hit_outcome_to_binary_outcome(Some("miss")), Some("loss"));
+        assert_eq!(hit_outcome_to_binary_outcome(Some("false_hit")), Some("loss"));
+        // insufficient / None → 数据不足不判定
+        assert_eq!(hit_outcome_to_binary_outcome(Some("insufficient")), None);
+        assert_eq!(hit_outcome_to_binary_outcome(None), None);
+        assert_eq!(hit_outcome_to_binary_outcome(Some("unknown")), None);
     }
 }

@@ -181,6 +181,25 @@ if (canRunFrontend) {
   step("同一事实多份载体自检（正负对照）", "node scripts/check-single-source-facts.mjs --selftest");
   step("同一事实多份载体（行号引用腐烂 / reranker 文件名漂移）", "node scripts/check-single-source-facts.mjs --ci");
 
+  // ── 估值缺省参数等式（2026-09-22 补，见 AUDIT-300642-run-variance-2026-09-22.md §9.6）──
+  // 为什么需要：同一组估值参数（永续增长率 / 折现率 / 缺省增长率 / 增长率上下界 /
+  //   预测年数 / 债券收益率基准）横跨 3 个技术栈共 4 处载体，历史上**各自停在不同的
+  //   校准批次**上 —— A 股校准只落到其中一部分，另一些留旧值 ⇒ 前端直调链
+  //   （`inject_valuation_config_for_tool` 注入 `ValuationParams`）与工作流链
+  //   （`input_mapping` 扁平参数）对同一标的取到**两套估值参数**。
+  //   主 crate 与 seed 已改为代码级派生（`m::` / `axagent_astock_data::mcp_tools::*`），
+  //   前端引用不到 Rust ⇒ 只能由机器守等式。
+  //   自检含 4 类负样本（前端值漂移 / 主 crate 手抄 / seed 手抄 / 真相源写法变更），
+  //   每类都必须真的报红 —— 否则本门禁的「通过」不具区分力。
+  step(
+    "估值缺省参数单源自检（正负对照）",
+    "node scripts/check-valuation-defaults-parity.mjs --selftest",
+  );
+  step(
+    "估值缺省参数（真相源↔主 crate↔seed↔前端）",
+    "node scripts/check-valuation-defaults-parity.mjs",
+  );
+
   // ── 补两条 CI 早已有、本地镜像却缺的门禁（2026-09-14：漂移修复）──
   // 为什么必须补：它们此前**只挂在 CI**，本地跑 `ci-check` 一路绿 ⇒ 本地绿冒充 CI 绿。
   // 典型后果是「推送后才发现」——本地反馈环里根本看不见这类缺陷。
@@ -190,6 +209,17 @@ if (canRunFrontend) {
   //   id 校验扫 1091 个源文件约 1 秒，本机实测 38 条 WARN（**警告级不阻提交**，退出 0）。
   step("ID 数据边界（undefined/null 字符串腐化）", "node scripts/check-id-validation.mjs");
   step("后端错误码 i18n 对齐", "node scripts/check-errorcode-alignment.mjs");
+
+  // ── SQL 方言守卫（2026-09-19 补）──
+  // 为什么需要：本仓同时跑 SQLite（开发）/ PostgreSQL（生产），而「只在 PG 上暴露」
+  //   的缺陷**本地 SQLite 单测永远抓不到**（2026-09-17 的 42702、2026-09-19 的
+  //   `get_conversation_lineage` 谱系恒空都是这一类）。
+  // 判据分两段：A 段（SQLite 专有 SQL 语法出现在非方言感知的函数里）可静态确证 ⇒ 硬拦；
+  //   B 段（方言无关函数里硬编码后端字面量）是启发式 ⇒ 只报告，不给退出码。
+  // 自检必须单独跑：它的 9 条正负对照里有一条锁「扫描面不得为 0 文件」——
+  //   路径配置失效时 A 段会呈现为「0 命中」的假绿。
+  step("SQL 方言守卫（SQLite 专有语法）自检", "node scripts/check-sql-dialect.mjs --selftest");
+  step("SQL 方言守卫（SQLite 专有语法）", "node scripts/check-sql-dialect.mjs");
 
   // ── i18n 三道互补门禁（2026-09-14 补：此前本地镜像**一条都没有**）──
   // 为什么必须三道都在：它们查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——

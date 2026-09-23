@@ -175,8 +175,10 @@ impl StockVendor for BrowserEastMoneyVendor {
             amount: g("f48"),          // 成交额（元），不除以 100
             change_pct: gp("f170"),    // 涨跌幅
             turnover_rate: gp("f168"), // 换手率
-            pe: Some(gp("f162")).filter(|v| *v > 0.0),
-            pb: Some(gp("f167")).filter(|v| *v > 0.0),
+            // 2026-09-21 修复：保留负 PE/PB（亏损 = 有效信息），仅剔除 0 占位。
+            // 详见 vendors/xueqiu.rs 同处注释（三家 vendor 同款过滤，一并放开）。
+            pe: data.get("f162").and_then(|v| v.as_f64()).filter(|v| *v != 0.0).map(|v| v / 100.0),
+            pb: data.get("f167").and_then(|v| v.as_f64()).filter(|v| *v != 0.0).map(|v| v / 100.0),
             total_mv: Some(g("f116")).filter(|v| *v > 0.0), // 总市值，不乘 1e8
             circulating_mv: Some(g("f117")).filter(|v| *v > 0.0), // 流通市值，不乘 1e8
             limit_up: None,
@@ -353,21 +355,46 @@ impl StockVendor for BrowserEastMoneyVendor {
     }
 
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
+        // 2026-09-21 修复：与 eastmoney.rs::get_dragon_tiger 同缺陷 —— 汇总级报表的
+        // BUY_SEAT_NEW/SELL_SEAT_NEW 实测返回字符串，`as_i64()` 恒 None 被 unwrap_or(0)
+        // 吞掉 ⇒ 每行恒产出「买入0席位/卖出0席位」。改接营业部级明细报表，
+        // 详见 eastmoney.rs 同函数的修复说明与 AUDIT-analyst-low-confidence-2026-09-21.md §三。
         let code =
             stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-            reportName=RPT_DAILYBILLBOARD_DETAILS&columns=ALL&\
-            filter=(SECURITY_CODE%3D%22{code}%22)&\
-            pageSize=20&pageNumber=1&source=WEB&\
-            sortColumns=TRADE_DATE&sortTypes=-1"
-        );
-        let json = browser_fetch(self.fetcher.as_ref(), &url).await?;
-        let rows = match json["result"]["data"].as_array() {
-            Some(arr) if !arr.is_empty() => arr,
-            _ => return Ok(vec![]),
-        };
-        rows.iter()
+
+        let mut rows: Vec<Value> = Vec::new();
+        let mut ok_reports = 0usize;
+        let mut last_err: Option<DataError> = None;
+        for report in ["RPT_BILLBOARD_DAILYDETAILSBUY", "RPT_BILLBOARD_DAILYDETAILSSELL"] {
+            let url = format!(
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+                reportName={report}&columns=ALL&\
+                filter=(SECURITY_CODE%3D%22{code}%22)&\
+                pageSize=50&pageNumber=1&source=WEB&\
+                sortColumns=TRADE_DATE&sortTypes=-1"
+            );
+            match browser_fetch(self.fetcher.as_ref(), &url).await {
+                Ok(json) => {
+                    ok_reports += 1;
+                    if let Some(arr) = json["result"]["data"].as_array() {
+                        rows.extend(arr.iter().cloned());
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("[browser_eastmoney] get_dragon_tiger {report} 请求失败: {e}");
+                    last_err = Some(e);
+                },
+            }
+        }
+        if ok_reports == 0 {
+            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                vendor: "browser_eastmoney".into(),
+                message: "get_dragon_tiger 买卖席位明细报表均请求失败".into(),
+            }));
+        }
+
+        Ok(rows
+            .iter()
             .map(|r| {
                 let trade_date = r["TRADE_DATE"].as_str().unwrap_or("");
                 let date = if trade_date.len() >= 10 {
@@ -375,19 +402,17 @@ impl StockVendor for BrowserEastMoneyVendor {
                 } else {
                     trade_date.to_string()
                 };
-                let buy_seat = r["BUY_SEAT_NEW"].as_i64().unwrap_or(0);
-                let sell_seat = r["SELL_SEAT_NEW"].as_i64().unwrap_or(0);
-                Ok(DragonTigerEntry {
+                DragonTigerEntry {
                     stock_code: stock_code.to_string(),
                     date,
-                    dept_name: format!("买入{}席位/卖出{}席位", buy_seat, sell_seat),
-                    buy_amount: r["BILLBOARD_BUY_AMT"].as_f64().unwrap_or(0.0),
-                    sell_amount: r["BILLBOARD_SELL_AMT"].as_f64().unwrap_or(0.0),
-                    net_amount: r["BILLBOARD_NET_AMT"].as_f64().unwrap_or(0.0),
+                    dept_name: r["OPERATEDEPT_NAME"].as_str().unwrap_or("").to_string(),
+                    buy_amount: r["BUY"].as_f64().unwrap_or(0.0),
+                    sell_amount: r["SELL"].as_f64().unwrap_or(0.0),
+                    net_amount: r["NET"].as_f64().unwrap_or(0.0),
                     reason: r["EXPLANATION"].as_str().map(|s| s.to_string()),
-                })
+                }
             })
-            .collect()
+            .collect())
     }
 
     async fn get_margin_data(&self, stock_code: &str) -> Result<Option<MarginData>, DataError> {

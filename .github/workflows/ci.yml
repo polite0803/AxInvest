@@ -186,6 +186,15 @@ jobs:
           node scripts/check-single-source-facts.mjs --selftest
           node scripts/check-single-source-facts.mjs --ci
 
+      # 估值缺省参数横跨 3 个技术栈共 4 处载体（真相源常量 / 主 crate `ValuationParams::default()`
+      # / seed 变量默认值 / 前端兜底），历史上各自停在不同校准批次上，导致前端直调链与工作流链
+      # 取到两套参数。主 crate 与 seed 已是代码级派生，前端引用不到 Rust ⇒ 需机器守等式。
+      # 两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
+      - name: Check valuation default params parity
+        run: |
+          node scripts/check-valuation-defaults-parity.mjs --selftest
+          node scripts/check-valuation-defaults-parity.mjs
+
       - name: Check frontend formatting (dprint)
         run: npm run format:check
 
@@ -221,11 +230,36 @@ jobs:
         # 脚本自带判据自检（每次运行内建，含「豁免既生效又不过宽」对照）。
         run: node scripts/check-i18n-untranslated.mjs
 
+      - name: Check i18n key parity (all locales must expose the same key paths)
+        # 2026-09-21 补的**盲区修复**。上面三道 i18n 门禁比较的**不是同一对集合**：
+        #   · check-hardcoded-i18n.sh  → 源码里的硬编码文案（不涉及 locale 文件）
+        #   · check_i18n.py            → JSON 语法 / zh-CN 空值 / **代码 t() 引用 ↔ zh-CN**
+        #   · 上一步                    → 非 CJK locale 的**值**里是否残留中文
+        # **没有一道比较「zh-CN ↔ 其余 10 语言」的 key 集合** ⇒ 往 zh-CN 加一个 key、
+        # 漏掉其余语言，三道门禁全绿，而运行时靠 `fallbackLng: "zh-CN"` 静默回退
+        # （用户看到中文揣在日文界面里，不报错、不告警）。本步补上这一格：
+        # 以 zh-CN 为基准做**双向叶子路径差集**，非空即失败；含正控防「比较面被写窄」。
+        # 首次接入时实测 11 语言 15130 条路径完全一致 ⇒ 无既存违规，不存在红基线。
+        run: node scripts/check-i18n-key-parity.mjs
+
       - name: Check ID validation (prevent undefined/null string corruption)
         run: node scripts/check-id-validation.mjs
 
       - name: Check backend error code i18n alignment
         run: node scripts/check-errorcode-alignment.mjs
+
+      # SQL 方言守卫（2026-09-19 补）：本仓同时跑 SQLite / PostgreSQL，而
+      # 「只在 PG 上暴露」的缺陷本地 SQLite 单测永远抓不到（2026-09-17 的 42702、
+      # 2026-09-19 的 get_conversation_lineage 谱系恒空）。A 段（SQLite 专有 SQL
+      # 语法出现在非方言感知的函数里）可静态确证 ⇒ 硬拦；B 段（方言无关函数里
+      # 硬编码后端字面量）是启发式 ⇒ 只报告、无退出码。
+      # 自检单独跑：它有一条锁「扫描面不得为 0 文件」，路径配置失效时 A 段会
+      # 呈现为「0 命中」的假绿。
+      - name: SQL dialect guard selftest (SQLite-only syntax)
+        run: node scripts/check-sql-dialect.mjs --selftest
+
+      - name: SQL dialect guard (SQLite-only syntax)
+        run: node scripts/check-sql-dialect.mjs
 
       - name: Contract consistency check (command registration / i18n keys / harness deps / field & event edge supply)
         # 注意：本步用 `--only` **白名单**限定检查段，新增段必须同步加进来，
@@ -271,7 +305,12 @@ jobs:
             libjavascriptcoregtk-4.1-dev protobuf-compiler
 
       - name: Check formatting
-        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
+        # 2026-09-21 补 `--all`：不带它时 cargo 只格式化**根 package**，
+        # `crates/*`（36 个 workspace 成员，本仓大部分逻辑在此）**完全不被检查**。
+        # 实测：当时 `--check` 为 `EXIT=0`（绿），而 `--all --check` 报 4 处 diff，
+        # 且**全在 `crates/` 下** —— 即这条门禁对多数改动文件是**盲**的。
+        # 加 `--all` 后两者口径一致，不再有「改了 crates/ 却查不到格式问题」的盲区。
+        run: cargo fmt --all --check --manifest-path src-tauri/Cargo.toml
 
       - name: Clippy
         run: |

@@ -5,6 +5,7 @@ import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { onBrowserEvent } from "./browserEvents";
 import { handleCommand } from "./browserMock";
+import { validateIpcResult } from "./ipc-schemas";
 
 declare global {
   interface Window {
@@ -460,6 +461,11 @@ export async function invoke<T>(
     } else {
       result = await handleCommand<T>(cmd, args);
     }
+    // 运行时契约校验：泛型 T 只是编译期断言，管不住「后端实际返回了什么」。
+    // 已登记契约的命令不符时抛 IpcSchemaError（未登记的命令直接放行）。
+    // 为什么放在计时之前：契约不符属于**失败**，应走下方 catch 计入失败统计，
+    // 让 `recordDiag` 里能看到「这个命令在报契约错」，而不是伪装成一次成功调用。
+    validateIpcResult(cmd, result);
     const elapsed = Math.round(performance.now() - start);
     recordInvocation(cmd, elapsed, true);
     recordDiag(cmd, true, elapsed);

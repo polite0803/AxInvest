@@ -176,7 +176,6 @@ pub async fn seed_daily_market_events_template(
                 max_tool_rounds: Some(8),
                 execution_mode: Some("react".into()),
                 rag_source_ids: vec![],
-                model_role: None,
                 consistency_check: None,
                 hallucination_guard: None,
                 fallback_model: None,

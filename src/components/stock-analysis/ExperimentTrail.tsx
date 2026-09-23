@@ -5,7 +5,9 @@
  * 每次 Accept 后追加一个新的实验节点。
  */
 
+import { getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
+import type { StockDecision } from "@/types";
 import { useTranslation } from "react-i18next";
 
 export function ExperimentTrail() {
@@ -15,18 +17,29 @@ export function ExperimentTrail() {
 
   if (experiments.length === 0) { return null; }
 
+  // 档位标签必须走「展示档 → i18n key」两步，不能直接插值：
+  // `StockDecision.action` 是**英文枚举**（BUY / HOLD / WAIT …），裸渲染会显示 "HOLD"。
+  // ⚠️ 2026-09-22: 展示档已收敛为**方向档恒等**（不再按仓位派生，见
+  //   `AUDIT-300642-run-variance-2026-09-22.md`）；此处仍走 `resolveDisplayAction`
+  //   是为了保持单一渲染入口，与其历史上的「派生」语义无关。
+  // `action` 缺失 ⇒ "—"（保持「未采集」与「判断为不确定」的区别，不臆造档位）。
+  const actionLabel = (d: Partial<StockDecision> | null | undefined): string =>
+    d?.action
+      ? t(getActionTKey(resolveDisplayAction(d.action, d.positionState, d.positionPct)))
+      : "—";
+
   const steps = [
     {
       label: t("stockAnalysis.experimentTrail.originalAnalysis"),
       sub: decision
-        ? `${decision.action} / ${decision.confidence}% / ${decision.positionPct}%`
+        ? `${actionLabel(decision)} / ${decision.confidence}% / ${decision.positionPct}%`
         : "—",
       active: experiments.length === 0,
       color: "var(--color-background-secondary)",
     },
     ...experiments.map((e, i) => ({
       label: t("stockAnalysis.experimentTrail.experiment", { n: e.step }),
-      sub: `${e.decisionAfter.action ?? "—"} / ${e.decisionAfter.confidence ?? "—"}% / ${
+      sub: `${actionLabel(e.decisionAfter)} / ${e.decisionAfter.confidence ?? "—"}% / ${
         e.decisionAfter.positionPct ?? "—"
       }%`,
       active: i === experiments.length - 1,

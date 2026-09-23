@@ -165,10 +165,29 @@ pub async fn resolve_project_default(
     resolve_default_provider(db).await
 }
 
+/// 拆分节点级模型引用 `providerId::modelId`（前端 `ModelSelect` 的取值形态）。
+///
+/// **语义（2026-09-20 裁决）**：复合值 = 「供应商 + 模型都指定」，即**允许节点跨供应商**。
+/// 依据是与仓内两个同形先例保持一致：
+/// - `src/indexing.rs::parse_embedding_provider`（`embedding_provider` 列同形）
+/// - 前端 `DefaultModelSettings.tsx` 把 `ModelSelect` 的复合值拆成
+///   `defaultProviderId` + `defaultModelId` 两个键再落库
+///
+/// 不带 `::` 时视为「只指定模型」—— 供应商沿用上层（session / profile / 项目默认）；
+/// 带 `::` 但任一侧为空（`"::x"` / `"x::"`）也按无分隔符处理，避免把空串当 id 用出去。
+fn split_node_model(node_model: &str) -> (Option<&str>, &str) {
+    match node_model.split_once("::") {
+        Some((pid, mid)) if !pid.is_empty() && !mid.is_empty() => (Some(pid), mid),
+        _ => (None, node_model),
+    }
+}
+
 /// 统一的工作流节点模型解析函数。
 ///
 /// 优先级：
-/// 1. node_model — 节点配置中显式指定的模型（最高优先级）
+/// 1. node_model — 节点配置中显式指定的模型（最高优先级）。
+///    形如 `providerId::modelId` 时**同时覆盖供应商**（见 [`split_node_model`]）；
+///    不带 `::` 时只覆盖模型 id。
 /// 2. session_model / session_provider_id — 会话/工作流级覆盖
 /// 3. profile_suggested_provider — Agent Profile 建议的 provider（仅 Agent）
 /// 4. 项目默认模型（AppSettings.default_model_id + default_provider_id）
@@ -181,7 +200,17 @@ pub async fn resolve_model_for_node(
     session_provider_id: Option<&str>,
     profile_suggested_provider: Option<&str>,
 ) -> std::result::Result<(ProviderConfig, ProviderKey, String), String> {
-    let effective_provider_id = session_provider_id.or(profile_suggested_provider);
+    // 节点级 `providerId::modelId`：provider 侧与 model 侧都按「节点最优先」取值
+    let (node_provider_id, node_model_id) = match node_model {
+        Some(raw) => {
+            let (pid, mid) = split_node_model(raw);
+            (pid, Some(mid))
+        },
+        None => (None, None),
+    };
+
+    let effective_provider_id =
+        node_provider_id.or(session_provider_id).or(profile_suggested_provider);
 
     if let Some(pid) = effective_provider_id {
         let providers = list_providers(db).await.map_err(|e| e.to_string())?;
@@ -197,13 +226,23 @@ pub async fn resolve_model_for_node(
                 .find(|m| m.enabled)
                 .map(|m| m.model_id.clone())
                 .unwrap_or_default();
-            let model = node_model.or(session_model).unwrap_or(&default_model).to_string();
+            let model = node_model_id.or(session_model).unwrap_or(&default_model).to_string();
             return Ok((prov, key, model));
+        }
+        // 节点级 provider 指向不存在/未启用的行：不能静默 —— 「以为跑在 A、实际跑在 B」
+        // 对影子比对与成本归因都是致命噪声。降级策略与 session_provider_id 的既有
+        // 行为一致（fall through 到下一级），但留痕。
+        if node_provider_id == Some(pid) {
+            tracing::warn!(
+                target: "axagent.llm_resolve",
+                node_provider_id = %pid,
+                "[MODEL-RESOLVE] 节点 config.model 指定的 provider 不存在或未启用，降级到会话/项目默认"
+            );
         }
     }
 
     let (prov, key, default_model) = resolve_project_default(db).await?;
-    let model = node_model.or(session_model).unwrap_or(&default_model).to_string();
+    let model = node_model_id.or(session_model).unwrap_or(&default_model).to_string();
     Ok((prov, key, model))
 }
 
@@ -887,5 +926,39 @@ pub async fn resolve_provider_id(db: &DatabaseConnection, id: &str) -> Result<St
         ensure_builtin_provider(db, builtin_id).await
     } else {
         Ok(id.to_string())
+    }
+}
+
+// ⚠️ 本模块**必须**留在文件末尾：`clippy::items_after_test_module` 会在 test mod
+// 之后还有生产代码时报错，而该 lint **只在 clippy 下暴露**（cargo check/test 全绿）。
+#[cfg(test)]
+mod split_node_model_tests {
+    use super::split_node_model;
+
+    /// 正例：完整复合值 ⇒ provider 与 model 都取出。
+    #[test]
+    fn splits_full_composite() {
+        assert_eq!(split_node_model("prov-1::model-a"), (Some("prov-1"), "model-a"));
+    }
+
+    /// 负对照：不带分隔符 ⇒ provider 必须是 `None`。
+    /// 与上一条**必须同时存在** —— 只断言正例时，一个「永远返回 Some」的实现也能通过。
+    #[test]
+    fn plain_model_has_no_provider() {
+        assert_eq!(split_node_model("model-a"), (None, "model-a"));
+    }
+
+    /// 边界：任一侧为空 ⇒ 按无分隔符处理，不把空串当 id 用出去。
+    #[test]
+    fn empty_side_is_not_an_id() {
+        assert_eq!(split_node_model("::model-a"), (None, "::model-a"));
+        assert_eq!(split_node_model("prov-1::"), (None, "prov-1::"));
+        assert_eq!(split_node_model("::"), (None, "::"));
+    }
+
+    /// 边界：只拆**第一个**分隔符 —— 模型 id 自身含 `::` 时保持完整。
+    #[test]
+    fn splits_on_first_separator_only() {
+        assert_eq!(split_node_model("prov-1::a::b"), (Some("prov-1"), "a::b"));
     }
 }

@@ -10,9 +10,8 @@
 
 use std::collections::HashMap;
 
-use axagent_crdt::VersionVector;
 use axagent_harness::device_sync::{
-    ChangeLogEntry, ConflictInfo, ConflictResolutionStrategy, EntityType,
+    ChangeLogEntry, ConflictInfo, ConflictResolutionStrategy, EntityType, VersionVector,
 };
 use uuid::Uuid;
 

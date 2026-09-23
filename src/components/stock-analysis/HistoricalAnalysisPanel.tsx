@@ -1,4 +1,5 @@
 import { List } from "@/components/common/AntdList";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
@@ -351,7 +352,7 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                           setSelectedIds([]);
                           setSelectMode(false);
                         } catch (e) {
-                          message.error(String(e));
+                          showBackendError(message, e);
                         }
                         setDeleting(false);
                       }}
@@ -399,8 +400,9 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                 renderItem={(r) => {
                   // 优先使用后端直返字段 decisionAction / decisionPositionPct，
                   // decisionJson 仅用于提取 confidence 等额外字段（兼容旧数据）。
-                  // P1-2(2026-09-14) / V76: 展示档统一派生 —— 后端已移除互改，
-                  // 优先用独立轴 decisionPositionState，null（v228 前历史行）才退回 pct。
+                  // 2026-09-22: 展示档 = 方向档（历史 P1-2/V76 的按仓位派生已废除，
+                  // 原因见 `AUDIT-300642-run-variance-2026-09-22.md`：循环判据）。
+                  // 下方 state/pct 仅为兼容签名，不参与判定。
                   const displayOf = (a: string, state?: string | null, pct?: number | null) =>
                     resolveDisplayAction(a, state ?? undefined, pct == null ? null : pct);
                   let action = r.decisionAction

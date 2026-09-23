@@ -2224,24 +2224,6 @@ export type {
   SkillLearningConfig,
 } from "./skillLearning";
 
-// === 交易执行桥接 ===
-export type {
-  ConfirmPendingParams,
-  ExecutionConfirmedEvent,
-  ExecutionFilledEvent,
-  ExecutionMode,
-  ExecutionPendingEvent,
-  ExecutionRejectedEvent,
-  ExecutionRiskLevel,
-  ExecutionRiskRejectedEvent,
-  PendingExecution,
-  RejectPendingParams,
-  RiskCheckResult,
-  SetExecutionModeParams,
-  SubmitSignalParams,
-  TradeDirection,
-} from "./execution";
-
 // === AxInvest 投资域（stock/quant/pipeline） ===
 export * from "./quant";
 // BacktestResult 与 stock-analysis.ts 同名但语义不同（quant=完整量化回测 vs 单股决策记录）；

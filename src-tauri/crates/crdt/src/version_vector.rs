@@ -5,109 +5,24 @@
 //! 版本向量用于跟踪每个副本的操作历史，
 //! 用于检测并发冲突和确定操作的因果顺序。
 //!
-//! # 条目类型来源
+//! # 权威定义来源
 //!
-//! 条目直接复用 [`axagent_harness::device_sync::VersionVectorEntry`]，不再本 crate 另立同名结构。
-//! 该类型是变更日志 `ChangeLogEntry.version_vector` 的载荷，属共享数据模型，
-//! 权威定义在 harness（AGENTS.md 第 12 条）。历史上本 crate 曾有一份字段名为
-//! `site_id` 的重复定义，导致跨 crate 消费时必须手工转换 —— 现已统一。
+//! 版本向量的权威定义在 `axagent-harness`（AGENTS.md 铁律: 共享类型权威在 harness，
+//! 本仓库禁止在非 foundation 层另立同名类型）。本模块不再重复实现，改为 re-export：
+//!
+//! - [`VersionVector`] 本体 → `axagent_harness::device_sync::VersionVector`
+//! - [`VersionVectorEntry`]（条目）→ `axagent_harness::device_sync::VersionVectorEntry`
+//!
+//! 历史上一段存在于本 crate 的完整 `VersionVector` 实现（含 `HashMap` 字段与
+//! `from_entries`/`observe`/`merge` 等方法）已按铁律 4「下沉 + `pub use`」收敛到 harness，
+//! 此处保持对外 API 不变（`axagent_crdt::VersionVector` 仍可用），但指向 harness 权威类型。
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
+/// 版本向量（harness 权威定义）
+pub use axagent_harness::device_sync::VersionVector;
 /// 版本向量条目（harness 权威定义）
 pub use axagent_harness::device_sync::VersionVectorEntry;
 /// 兼容别名：该类型在本 crate 的历史 API 中名为 `VVEntry`
 pub use axagent_harness::device_sync::VersionVectorEntry as VVEntry;
-
-/// 版本向量
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VersionVector {
-    /// 向量条目
-    entries: HashMap<String, u64>,
-}
-
-impl VersionVector {
-    /// 创建空版本向量
-    pub fn new() -> Self {
-        Self { entries: HashMap::new() }
-    }
-
-    /// 从条目列表创建
-    pub fn from_entries(entries: &[VersionVectorEntry]) -> Self {
-        let mut map = HashMap::new();
-        for entry in entries {
-            map.insert(entry.device_id.clone(), entry.counter);
-        }
-        Self { entries: map }
-    }
-
-    /// 转换为条目列表
-    pub fn to_entries(&self) -> Vec<VersionVectorEntry> {
-        self.entries
-            .iter()
-            .map(|(device_id, counter)| VersionVectorEntry {
-                device_id: device_id.clone(),
-                counter: *counter,
-            })
-            .collect()
-    }
-
-    /// 获取指定设备的计数器值
-    pub fn get(&self, device_id: &str) -> u64 {
-        self.entries.get(device_id).copied().unwrap_or(0)
-    }
-
-    /// 递增指定设备的计数器
-    pub fn increment(&mut self, device_id: &str) {
-        let counter = self.entries.entry(device_id.to_string()).or_insert(0);
-        *counter += 1;
-    }
-
-    /// 把指定设备的计数器抬升到 `counter`（取二者最大值）
-    ///
-    /// 用于从变更日志重建版本向量，语义等价于「把该设备的计数推进到已知水位」，
-    /// 但与 [`Self::increment`] 不同，它是 **O(1)** 的。
-    ///
-    /// 之所以需要它：从日志重建时的正确写法是「每个条目取 max」，若改用
-    /// `for _ in current..counter { increment() }` 逐次推进，复杂度会退化成
-    /// O(计数器值)。当日志条目多、计数器大时（多设备频繁同步）开销迅速放大，
-    /// 且这段代码位于同步热路径（每次 `record_change` 都会触发重建）。
-    pub fn observe(&mut self, device_id: &str, counter: u64) {
-        let current = self.entries.entry(device_id.to_string()).or_insert(0);
-        *current = (*current).max(counter);
-    }
-
-    /// 合并另一个版本向量（取最大值）
-    pub fn merge(&mut self, other: &VersionVector) {
-        for (device_id, counter) in &other.entries {
-            self.observe(device_id, *counter);
-        }
-    }
-
-    /// 检查是否包含另一个版本向量（所有条目 >= 另一个的对应条目）
-    pub fn contains(&self, other: &VersionVector) -> bool {
-        other.entries.iter().all(|(device_id, counter)| self.get(device_id) >= *counter)
-    }
-
-    /// 检查是否与另一个版本向量并发（互不包含）
-    pub fn is_concurrent_with(&self, other: &VersionVector) -> bool {
-        !self.contains(other) && !other.contains(self)
-    }
-
-    /// 检查是否小于另一个版本向量（严格因果前序）
-    pub fn is_before(&self, other: &VersionVector) -> bool {
-        self.contains(other) && self != other
-    }
-}
-
-impl std::fmt::Display for VersionVector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let entries: Vec<String> =
-            self.entries.iter().map(|(k, v)| format!("{}:{}", k, v)).collect();
-        write!(f, "[{}]", entries.join(", "))
-    }
-}
 
 #[cfg(test)]
 mod tests {

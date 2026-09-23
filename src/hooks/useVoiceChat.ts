@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { loadAudioWorklet } from "@/lib/audioProcessorWorklet";
+import { showBackendError } from "@/lib/errorI18n";
 import { logIpcError } from "@/lib/invoke";
 import type { RealtimeConfig, VoiceSessionState } from "@/types";
 import { App } from "antd";
@@ -573,7 +574,7 @@ export function useVoiceChat({
           // P3-18：服务端错误同时通知用户，避免静默丢失
           logIpcError("VoiceChat.serverError")(msg.message ?? "unknown");
           if (msg.message && mountedRef.current) {
-            message.error(msg.message);
+            showBackendError(message, msg.message);
           }
           break;
         default:

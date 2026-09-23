@@ -45,8 +45,19 @@ use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
 
 /// 跑决策回测请求参数
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+///
+/// `Default` + `#[serde(default)]`（2026-09-20 加）：cron 任务把本结构序列化进
+/// `CronJob.prompt`，未配置时 `prompt` 为空串 ⇒ 需要能从 `{}` / 空串解析出
+/// 「全部走默认」的请求。缺这两个属性时，即使每个字段都是 `Option`，
+/// `serde_json::from_str::<Self>("{}")` 的行为也依赖 serde 对 `Option` 的隐式容忍，
+/// 一旦将来有人给某字段去掉 `Option` 就会在**运行期**（不是编译期）报缺字段。
+///
+/// `Serialize` 是 2026-09-20 为 B3 自动触发补的：`create_decision_backtest_cron`
+/// 要把请求体序列化成 JSON 存进 `CronJob.prompt`（同 batch-reflection /
+/// validate-decisions 的配置携带方式）。加性扩宽 —— 原本只有前端 → 命令这一向，
+/// 现在多出「命令 → prompt」这一向，`rename_all` 两边一致故往返自洽。
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct RunDecisionBacktestRequest {
     /// T+N 验证窗口（默认 [5, 20, 60]）
     pub t_plus_n_list: Option<Vec<i32>>,
@@ -54,7 +65,8 @@ pub struct RunDecisionBacktestRequest {
     pub exclude_synthetic: Option<bool>,
     /// 最大回测 pick 数（默认 200，避免一次跑太多超时）
     pub max_picks: Option<u32>,
-    /// 仅生成报告不写库（用于前端预览）
+    /// 仅生成报告不写库（用于前端预览）。
+    /// ⚠ cron 路径**强制 false**：定时任务算完就丢弃是零产物（见 `services.rs` 分支）。
     pub dry_run: Option<bool>,
     /// 仅回测指定周期（"short" | "mid" | "long" | None=全部）
     pub period_filter: Option<String>,
@@ -87,6 +99,26 @@ pub async fn run_decision_backtest(
     state: State<'_, AppState>,
     request: RunDecisionBacktestRequest,
 ) -> Result<RunDecisionBacktestResponse, String> {
+    run_decision_backtest_inner(state.harness.db(), &state.astock_client, request).await
+}
+
+/// 决策回测的**实际实现** —— 命令层与 cron 层共用的**唯一入口**。
+///
+/// # 为什么必须抽出来（2026-09-20，B3 自动触发接线）
+///
+/// 原实现整段写在 `#[tauri::command]` 里，入参是 `State<'_, AppState>`；
+/// 而 `CronExecutor` 的 handler 只捕获数据库句柄与 astock client 的 `Arc`，
+/// 且运行在 `tokio::spawn` 里 —— **拿不到 `State`**，于是定时任务无法复用它，
+/// `run_decision_backtest` 全仓零调用方 ⇒ `stock_analyses.outcome` 只能靠人手点。
+/// 同型先例：`stock_workflow::run_batch_reflection_inner`（反思侧同样为接线而抽出）。
+///
+/// 抽的是**实现**，不是把命令当普通函数调 —— 后者要求随手能拿到 `AppState`，
+/// 会把「cron handler 需要什么」与「命令需要什么」耦死。
+pub(crate) async fn run_decision_backtest_inner(
+    db: &sea_orm::DatabaseConnection,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
+    request: RunDecisionBacktestRequest,
+) -> Result<RunDecisionBacktestResponse, String> {
     // ── 参数标准化 ──
     let t_plus_n_list = request.t_plus_n_list.unwrap_or_else(|| vec![5, 20, 60]);
     let exclude_synthetic = request.exclude_synthetic.unwrap_or(true);
@@ -94,7 +126,6 @@ pub async fn run_decision_backtest(
     let dry_run = request.dry_run.unwrap_or(false);
 
     // ── 1. 读取 reco_picks ──
-    let db = state.harness.db();
     let mut query = reco_picks::Entity::find();
     // P1 修复(2026-08-01): 排除 serenity-screening 候选行（style='serenity'，
     // pick_data 的 price 等可能为 0，无决策验证意义；且 seed_pool_json 格式不同）。
@@ -150,7 +181,7 @@ pub async fn run_decision_backtest(
         // 对每个 T+N 跑一次验证
         for &t_plus_n in &t_plus_n_list {
             match fetch_and_validate(
-                &state,
+                client,
                 &reco_pick,
                 &pick_model.id,
                 t_plus_n,
@@ -216,8 +247,12 @@ pub async fn run_decision_backtest(
 }
 
 /// 拉取 T+N 窗口日 K 线并构建 PickValidation
+///
+/// 入参从 `&State<'_, AppState>` 改为 `&Arc<AStockClient>`：本函数原本只用到
+/// `state.astock_client`，取 `State` 会让它无法被 cron 路径复用（见
+/// `run_decision_backtest_inner` 的说明）。
 async fn fetch_and_validate(
-    state: &State<'_, AppState>,
+    client: &std::sync::Arc<axagent_astock_data::AStockClient>,
     reco_pick: &RecoPick,
     pick_id: &str,
     t_plus_n: i32,
@@ -232,9 +267,9 @@ async fn fetch_and_validate(
     let fetch_limit = (t_plus_n as u32 + 10).max(500);
 
     let klines =
-        state.astock_client.get_klines(&reco_pick.stock_code, "daily", fetch_limit).await.map_err(
-            |e| ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("K 线拉取失败: {e}")),
-        )?;
+        client.get_klines(&reco_pick.stock_code, "daily", fetch_limit).await.map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("K 线拉取失败: {e}"))
+        })?;
 
     if klines.is_empty() {
         return Err("K 线为空".to_string());
@@ -539,15 +574,13 @@ async fn sync_outcomes_to_stock_analyses(
     let mut synced = 0u64;
 
     for v in validations {
-        // 1. hit_outcome → outcome 映射
-        let Some(ref hit_outcome) = v.hit_outcome else {
+        // 1. hit_outcome → outcome 映射（口径与离线回测一致，见 hit_rate_backtest 判定源）
+        let Some(outcome) =
+            axagent_analysis_engine::hit_rate_backtest::hit_outcome_to_binary_outcome(
+                v.hit_outcome.as_deref(),
+            )
+        else {
             continue;
-        };
-        let outcome = match hit_outcome.as_str() {
-            "hit" | "partial" => "win",
-            "miss" | "false_hit" => "loss",
-            "insufficient" => continue,
-            _ => continue,
         };
 
         // 2. 从 generated_at 提取日期（YYYY-MM-DD）
@@ -611,6 +644,148 @@ async fn sync_outcomes_to_stock_analyses(
     }
 
     synced
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// B3 自动触发：决策回测的定时任务（task_type = decision-backtest）
+// ═══════════════════════════════════════════════════════════════════════
+//
+// ## 为什么需要这一组（2026-09-20）
+//
+// `run_decision_backtest` 的后端逻辑一直完整（T+N 命中率 + 9 因子 IC +
+// 回写 `stock_analyses.outcome` + `lesson_applications.outcome_at_validation`），
+// 但**全仓零调用方**：前端 `src/**` 搜不到 `runDecisionBacktest` / `hitRate` /
+// `decisionValidation`，CronExecutor 里也没有对应分支 ⇒ `stock_analyses.outcome`
+// 只能靠人手触发，B3 闭环断在「没人触发」这一环，而不是逻辑缺失。
+//
+// 因此本组命令先把**自动触发**接上（产品裁决：先接自动触发，前端面板后做）。
+// 四件套（create / list / toggle / delete）与其余 task_type 保持一致形态，
+// 前端面板将来只需按名调用，不必再改后端。
+//
+// ⚠ 定时任务三问（缺一即为死配置）：
+//   ① 真落库？ —— `create_decision_backtest_cron` 写 `CronJobStore`，配置 JSON
+//      进 `CronJob.prompt`（与 batch-reflection / validate-decisions 同形态）；
+//   ② 有执行分支？ —— `init/services.rs` 的 `decision-backtest` 分支；
+//   ③ 有真产物？ —— 写 `decision_validations` + 回写 `stock_analyses.outcome`。
+//   下游核验入口：`list_decision_validations` / `compute_validation_report`。
+
+/// `decision-backtest` 任务类型标识。
+///
+/// **单点声明**：`init/services.rs` 的分支与本文件的 create 命令都引用它，
+/// 不各写一份字面量（同 `pool_scan::POOL_SCAN_TASK_TYPE` 的处置）。
+/// 改名会静默切断派发（分支匹配不到 ⇒ 任务到点什么都不发生，且不报错）。
+pub const DECISION_BACKTEST_TASK_TYPE: &str = "decision-backtest";
+
+/// 解析 cron 侧的配置（`CronJob.prompt`）。
+///
+/// 空串 / 纯空白 ⇒ 全默认（T+5/20/60、排除 synthetic、200 条上限、写库）。
+/// 解析失败**必须报错**：静默回落默认会让「配置写错」看起来像「配置生效了」。
+pub(crate) fn parse_decision_backtest_config(
+    prompt: &str,
+) -> Result<RunDecisionBacktestRequest, String> {
+    if prompt.trim().is_empty() {
+        return Ok(RunDecisionBacktestRequest::default());
+    }
+    serde_json::from_str(prompt)
+        .map_err(|e| format!("解析 {} 配置失败: {e}", DECISION_BACKTEST_TASK_TYPE))
+}
+
+/// 创建决策回测定时任务。
+///
+/// - `cron_expression`: 默认 `"0 7 * * *"`（**早于**反思族任务的 06:00 之后、
+///   收市结算之前；T+N 验证只读历史 K 线，早跑不会拿到不完整数据）
+/// - `t_plus_n_list` / `max_picks` / `period_filter` / `exclude_synthetic`:
+///   原样进配置；`dry_run` **不可配**（定时任务算完即弃是零产物，见下）
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "创建决策回测定时任务")]
+#[tauri::command]
+pub async fn create_decision_backtest_cron(
+    state: State<'_, AppState>,
+    cron_expression: Option<String>,
+    t_plus_n_list: Option<Vec<i32>>,
+    max_picks: Option<u32>,
+    period_filter: Option<String>,
+    enabled: Option<bool>,
+) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
+    let id = format!("decbt-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
+    let expr = cron_expression.unwrap_or_else(|| "0 7 * * *".to_string());
+
+    // dry_run **恒 false**（不暴露成参数）：定时任务的价值就是落库与回写，
+    // 允许配 true 等于允许建一个"到点跑、算完扔掉"的任务 —— 三问里的第③问直接为否。
+    let request = RunDecisionBacktestRequest {
+        t_plus_n_list: t_plus_n_list.clone(),
+        exclude_synthetic: None, // None ⇒ 默认 true（排除 synthetic 兜底 pick）
+        max_picks,
+        dry_run: Some(false),
+        period_filter: period_filter.clone(),
+    };
+    let prompt =
+        serde_json::to_string(&request).map_err(|e| format!("序列化决策回测配置失败: {e}"))?;
+
+    let windows = t_plus_n_list
+        .as_ref()
+        .map(|v| v.iter().map(|n| format!("T+{n}")).collect::<Vec<_>>().join("/"))
+        .unwrap_or_else(|| "T+5/20/60（默认）".to_string());
+    let desc = format!(
+        "决策回测：按 reco_picks 回放验证并回写 outcome（窗口 {}，周期 {}，上限 {} 条）",
+        windows,
+        period_filter.as_deref().unwrap_or("全部"),
+        max_picks.unwrap_or(200)
+    );
+
+    let mut job = axagent_runtime_core::CronJob::new(&id, &expr, &prompt, &desc)
+        .with_task_type(DECISION_BACKTEST_TASK_TYPE);
+    if !enabled.unwrap_or(true) {
+        job.status = axagent_runtime_core::CronJobStatus::Paused;
+    }
+    state.cron_job_store.add(job.clone()).await;
+    Ok(crate::commands::stock_analysis::CronJobResponse::from(&job))
+}
+
+/// 列出所有决策回测定时任务
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "列出决策回测定时任务")]
+#[tauri::command]
+pub async fn list_decision_backtest_crons(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::commands::stock_analysis::CronJobResponse>, String> {
+    let jobs = state.cron_job_store.list().await;
+    Ok(jobs
+        .iter()
+        .filter(|j| j.task_type.as_deref() == Some(DECISION_BACKTEST_TASK_TYPE))
+        .map(crate::commands::stock_analysis::CronJobResponse::from)
+        .collect())
+}
+
+/// 启停决策回测定时任务
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "开关决策回测定时任务")]
+#[tauri::command]
+pub async fn toggle_decision_backtest_cron(
+    state: State<'_, AppState>,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .cron_job_store
+        .set_status(
+            &id,
+            if enabled {
+                axagent_runtime_core::CronJobStatus::Active
+            } else {
+                axagent_runtime_core::CronJobStatus::Paused
+            },
+        )
+        .await;
+    Ok(())
+}
+
+/// 删除决策回测定时任务
+#[agent_command(domain = "finance", safety = Dangerous, call_mode = StateInput, description = "删除决策回测定时任务")]
+#[tauri::command]
+pub async fn delete_decision_backtest_cron(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.cron_job_store.remove(&id).await;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -520,8 +520,16 @@ function checkEventSymmetry() {
  *        等，属合理丢弃）；② capability_pack_learning.rs:766（原 domain_pack_learning.rs
  *        改名分片）。
  *   · 抬 1 格到 274，继续拦截后续回归。回滚 = 改回 273。
+ *
+ * 2026-09-20 下调 274 → 263（实测值，即脚本自己在 warn 里要求的数）：
+ *   11 × set_status 一次性清完 —— `src-tauri/src/init/services.rs` 的 11 处 cron 分支
+ *   `if !recurring { let _ = store.set_status(&job_id, CronJobStatus::Disabled).await; }`
+ *   全部改为 `if !store.set_status(..).await { tracing::warn!(..) }`。
+ *   这几处**不是**「丢弃 Result」语义：`set_status` 返 `bool`（`crates/runtime-core/src/cron_job.rs:491`），
+ *   false = 未找到该任务或持久化失败 ⇒ 一次性 cron 任务仍留 Active ⇒ 下次到点重复跑。
+ *   274 − 11 = 263，与 11 处一一对应（复跑实测：`共 263 处，已排除 47 处豁免调用`）。回滚 = 改回 274。
  */
-const SILENT_RESULT_BASELINE = 274;
+const SILENT_RESULT_BASELINE = 263;
 
 /** 已知的合理丢弃（按被调方名），计数时排除，避免基线被噪声撑大。 */
 const SILENT_RESULT_EXEMPT_CALLEES = new Set([
@@ -614,6 +622,15 @@ if (warnings.length) {
   console.log(`\n[WARNINGS] (${warnings.length}):`);
   warnings.slice(0, 50).forEach((w) => console.log("  " + w));
   if (warnings.length > 50) { console.log(`  ... 另有 ${warnings.length - 50} 条`); }
+}
+// ⚠ 必须打印 errors 明细：此前 errors 数组**只计数、从不输出**（各段内部只对
+// 「G 事件」这一处打印过明细，其余段 fail 后静默），于是出现「[汇总] errors=1
+// 但通篇看不到是哪一条」—— 与 445 行注释里记录的那个坑是同一个，只是当时只修了
+// G 段、没修汇总处。门禁只报计数不报明细 ⇒ 不可归因 ⇒ 收尾时只能猜。
+if (errors.length) {
+  console.log(`\n[ERRORS] (${errors.length}):`);
+  errors.slice(0, 50).forEach((e) => console.log("  " + e));
+  if (errors.length > 50) { console.log(`  ... 另有 ${errors.length - 50} 条`); }
 }
 console.log(`\n[汇总] errors=${errors.length} warnings=${warnings.length}`);
 console.log(`结果: ${hasError ? "FAIL" : "PASS"}`);

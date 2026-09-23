@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "version": "1.0.0",
-  "description": "AxAgent LLM Agent 输出格式强约束 Schema。所有 LLM Agent（trader/research-mgr/catalyst/debate-convergence/risk-level/data-quality）的输出必须通过本 Schema 验证，否则触发 strict_mode 降级。",
+  "description": "AxAgent LLM Agent 输出格式强约束 Schema。所有 LLM Agent（trader/research-mgr/catalyst/debate-convergence）的输出必须通过本 Schema 验证，否则触发 strict_mode 降级。注：原列在其中的 risk-level 与 data-quality 均已下沉为 Rhai CodeNode（v55 / v58），不再经本 Schema 校验。",
 
   "schemas": {
     "base_event": {
@@ -222,6 +222,65 @@
           "type": "string",
           "minLength": 50,
           "description": "完整推理过程，必须引用 ≥3 个上游节点的具体论据，禁止空话"
+        },
+        "decisions": {
+          "description": "V80 四周期独立决策，与 portfolio-mgr rhai 的 decisionsByHorizon 同维对齐。每周期字段均可选（缺失时前端回退到顶级主决策字段）。超短线(ultra_short)走方案B：单后验+档位映射+置信度下限 0.35",
+          "type": "object",
+          "properties": {
+            "ultra_short": {
+              "description": "超短线（1-2日）决策，方案B：confLowerBound 固定 0.35",
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
+                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
+                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（ultra_short:2-4）" },
+                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" },
+                "confLowerBound": { "type": "number", "minimum": 0, "maximum": 1, "description": "置信度下限（方案B 固定 0.35）" }
+              }
+            },
+            "short": {
+              "description": "短线（1周）决策，完整多周期评分",
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
+                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
+                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（short:4-7）" },
+                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" }
+              }
+            },
+            "mid": {
+              "description": "中期（1月）决策，完整多周期评分",
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
+                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
+                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（mid:6-12）" },
+                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" }
+              }
+            },
+            "long": {
+              "description": "长期（3月）决策，完整多周期评分",
+              "type": "object",
+              "properties": {
+                "action": { "type": "string", "enum": ["买入", "增持", "持有", "观望", "减持", "卖出"], "description": "操作指令" },
+                "verdict": { "type": "string", "enum": ["看多", "看空", "中性"], "description": "方向结论" },
+                "positionPct": { "type": "number", "minimum": 0, "maximum": 95, "description": "建议仓位百分比 0-95" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 100, "description": "置信度 0-100" },
+                "stopLossPct": { "type": "number", "minimum": 0, "maximum": 30, "description": "止损百分比（long:10-15）" },
+                "takeProfitPct": { "type": "number", "minimum": 0, "maximum": 50, "description": "止盈百分比" },
+                "expectedHoldingDays": { "type": "integer", "minimum": 1, "maximum": 250, "description": "预期持有天数（交易日）" }
+              }
+            }
+          }
         }
       }
     },
@@ -300,7 +359,7 @@
     },
 
     "risk_output": {
-      "description": "LLM Risk Level Agent 输出格式",
+      "description": "风险等级分类输出格式。原由 LLM Risk Level Agent 产出，v55(2026-09-20) 起该节点已下沉为 Rhai CodeNode（`risk-level.rhai`）—— 形状保持不变（`category` 仍为四档枚举），`risk_factors` 因无事件级数据而恒为空数组。",
       "type": "object",
       "required": ["category", "risk_factors"],
       "properties": {

@@ -225,6 +225,9 @@ impl TradeIntentService {
             decision_position_state: Set(None),
             decision_reasoning: Set(Some(reasoning.to_string())),
             decision_json: Set(decision_json),
+            // 阶段1：条件单触发的补记非 portfolio-mgr 工作流产出 ⇒ 无四周期价位映射，显式 NULL
+            horizon_price_map: Set(None),
+            horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
             analysis_kind: Set("live".to_string()),
@@ -232,6 +235,10 @@ impl TradeIntentService {
             decision_time_horizon: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
+            // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
+            // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
+            // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
+            template_version: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
@@ -463,9 +470,20 @@ fn to_item(model: stock_analyses::Model) -> TradeIntentItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sea_orm::ConnectionTrait;
+    use sea_orm::{ConnectionTrait, IdenStatic, Iterable, Statement};
 
-    /// 在 SQLite 内存库中创建 stock_analyses 表
+    /// 在 SQLite 内存库中创建 stock_analyses 表。
+    ///
+    /// ⚠ **本 DDL 必须覆盖 `stock_analyses::Entity` 的「全部」列**（`assert_fixture_ddl_covers_entity`
+    /// 会强制这一点）。理由：这些测试用 `ActiveModel::insert` 插入**整行**，SeaORM 会为实体的
+    /// 每一列生成占位符 ⇒ 夹具表少一列就报
+    /// `table stock_analyses has no column named <列>`。
+    ///
+    /// 这个盲区很隐蔽：给实体加字段时，**编译器只穷举 `ActiveModel` 字面量**
+    /// （本轮 A4 加 `template_version` 时 5 处 `ActiveModel` 都被逼着改了），
+    /// **穷举不到这里的手写 DDL 字符串**。2026-09-19 实测：`--workspace` 全量测试里
+    /// 本 crate 因此 4 个测试失败，而此前一直被 `axagent-agent` 的
+    /// `0xc0000139`（cargo 遇首错即停）挡在后面、从未被执行到。
     async fn setup_db() -> DatabaseConnection {
         let db = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
         db.execute_unprepared(
@@ -482,6 +500,8 @@ mod tests {
                 decision_position_pct REAL,
                 decision_reasoning TEXT,
                 decision_json TEXT,
+                horizon_price_map TEXT,
+                horizon_decisions TEXT,
                 blackboard_snapshot TEXT,
                 config_id TEXT,
                 analysis_kind TEXT NOT NULL DEFAULT 'live',
@@ -489,6 +509,7 @@ mod tests {
                 decision_time_horizon TEXT,
                 decision_expected_holding_days INTEGER,
                 model_version TEXT,
+                template_version INTEGER,
                 data_snapshot_id TEXT,
                 outcome TEXT,
                 llm_decision_json TEXT,
@@ -554,6 +575,8 @@ mod tests {
             decision_position_state: Set(None),
             decision_reasoning: Set(Some("观望中".to_string())),
             decision_json: Set(None),
+            horizon_price_map: Set(None),
+            horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
             analysis_kind: Set("live".to_string()),
@@ -561,6 +584,10 @@ mod tests {
             decision_time_horizon: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
+            // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
+            // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
+            // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
+            template_version: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
@@ -616,6 +643,8 @@ mod tests {
                 })
                 .to_string(),
             )),
+            horizon_price_map: Set(None),
+            horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
             analysis_kind: Set("live".to_string()),
@@ -623,6 +652,10 @@ mod tests {
             decision_time_horizon: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
+            // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
+            // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
+            // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
+            template_version: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
@@ -659,7 +692,6 @@ mod tests {
     #[tokio::test]
     async fn test_review_flow() {
         let db = setup_db().await;
-
         // 创建待审核记录
         let id = uuid::Uuid::new_v4().to_string();
         let now = now_ms();
@@ -676,6 +708,8 @@ mod tests {
             decision_position_state: Set(None),
             decision_reasoning: Set(Some("止损".to_string())),
             decision_json: Set(None),
+            horizon_price_map: Set(None),
+            horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
             analysis_kind: Set("live".to_string()),
@@ -683,6 +717,10 @@ mod tests {
             decision_time_horizon: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
+            // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
+            // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
+            // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
+            template_version: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
@@ -750,6 +788,8 @@ mod tests {
             decision_position_state: Set(None),
             decision_reasoning: Set(Some("趋势向好".to_string())),
             decision_json: Set(None),
+            horizon_price_map: Set(None),
+            horizon_decisions: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
             analysis_kind: Set("live".to_string()),
@@ -757,6 +797,10 @@ mod tests {
             decision_time_horizon: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
+            // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
+            // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
+            // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
+            template_version: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
@@ -786,5 +830,49 @@ mod tests {
         .unwrap();
         assert!(result.success);
         assert_eq!(result.new_status, "rejected");
+    }
+
+    /// 门禁：`setup_db` 建的夹具表必须覆盖 `stock_analyses::Entity` 的**全部**列。
+    ///
+    /// 判据锚定**夹具表的实际结构**（`PRAGMA table_info`），不是 DDL 字符串 ——
+    /// 这样即使将来换成别的建表方式，门禁也跟着走；文本解析会在形态变化时失效。
+    ///
+    /// 覆盖边界：**只查「夹具缺列」这一个方向**，不查反向（夹具多列）。
+    /// 反向不可查：全仓另有 13 处**刻意构造的窄表夹具**（如 `schema_diff.rs` 模拟
+    /// 「表先以窄 schema 存在」、`fts5.rs` 「只建本模块回填需要的列」），它们缺列是
+    /// 设计意图 —— 若做成全局「DDL 必须覆盖实体列」的检查会把这 13 处全判违规 ⇒ 判据被豁免表淹没。
+    /// 真正的判据是「这张表会不会被 `ActiveModel::insert` 全列触及」，本夹具正是。
+    #[tokio::test]
+    async fn fixture_table_covers_all_entity_columns() {
+        let db = setup_db().await;
+
+        let rows = db
+            .query_all_raw(Statement::from_string(
+                db.get_database_backend(),
+                "PRAGMA table_info(stock_analyses)".to_string(),
+            ))
+            .await
+            .expect("读夹具表结构应成功");
+        let actual: Vec<String> =
+            rows.iter().map(|r| r.try_get_by::<String, _>("name").unwrap_or_default()).collect();
+
+        let expected: Vec<String> =
+            stock_analyses::Column::iter().map(|c| c.as_str().to_string()).collect();
+
+        let missing: Vec<&String> = expected.iter().filter(|c| !actual.contains(c)).collect();
+        assert!(
+            missing.is_empty(),
+            "夹具表缺实体列 ⇒ ActiveModel::insert 会报 `has no column named`。\
+             缺 {missing:?}；夹具实际 {} 列 = {actual:?}",
+            actual.len()
+        );
+
+        // 自证有区分力：两侧都必须真的有多列，否则 missing 恒空、断言退化成恒真。
+        assert!(
+            actual.len() > 20 && expected.len() > 20,
+            "列数异常（夹具 {} / 实体 {}）⇒ 本断言已退化为恒真，不能作为通过依据",
+            actual.len(),
+            expected.len()
+        );
     }
 }

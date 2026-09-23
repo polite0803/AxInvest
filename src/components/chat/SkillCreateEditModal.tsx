@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { useSkillStore } from "@/stores";
 import { Form, Input, Modal } from "antd";
@@ -34,7 +35,7 @@ export const SkillCreateModal: React.FC<SkillCreateModalProps> = ({
       onClose();
     } catch (e: unknown) {
       if (e instanceof Error) {
-        message.error(e.message);
+        showBackendError(message, e);
       }
     } finally {
       setLoading(false);
@@ -120,7 +121,7 @@ export const SkillEditModal: React.FC<SkillEditModalProps> = ({
       onClose();
     } catch (e: unknown) {
       if (e instanceof Error) {
-        message.error(e.message);
+        showBackendError(message, e);
       }
     } finally {
       setLoading(false);

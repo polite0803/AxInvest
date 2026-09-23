@@ -8,10 +8,65 @@ use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::recommender::Period;
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::stock_analyses;
+use axagent_harness::{ActionKind, normalize_action};
 use sea_orm::DatabaseConnection;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use std::sync::Arc;
 use tauri::State;
+
+/// 从反思输出中按 key 取值，兼容三种**实测存在**的落库形态。
+///
+/// 实测依据（`stock_reflections` 11 条 completed，2026-09-23）：
+/// - ① 顶层直接命中：`{"verdict": "..."}`
+/// - ② 一层嵌套对象：`{"reflection": {"verdict": "..."}}`（1 条，code_diff_proposal 形态）
+/// - ③ 内层 JSON 字符串（双重编码）：`{"report": "{\"verdict\": \"partial\", ...}"}`（10 条）
+///
+/// 旧实现一律 `json.get(key)` 只读顶层 ⇒ ② ③ 全部取不到，
+/// 使 `verdict` / `lesson_summary` / `alpha_cited` 恒 NULL，
+/// 进而把 `was_correct` 压成 0（详见 PLAN-analysis-data-repair.md 缺陷 D1/D2）。
+///
+/// 与入口的关系：`extract_agent_output` 已在入口对 `report` 做解包（serenity.rs），
+/// 但**历史数据不经入口回灌**，且其它包装键（如 `reflection`）不由入口处理 ⇒
+/// 本函数是消费侧的第二道防线，与入口解包**二者不可只留其一**。
+fn deep_get_reflection_field(v: &serde_json::Value, key: &str) -> Option<serde_json::Value> {
+    let obj = v.as_object()?;
+    // ① 顶层命中
+    if let Some(hit) = obj.get(key) {
+        return Some(hit.clone());
+    }
+    // ② / ③ 下探一层子值
+    for child in obj.values() {
+        if let Some(inner) = child.as_object() {
+            if let Some(hit) = inner.get(key) {
+                return Some(hit.clone());
+            }
+        } else if let Some(parsed) =
+            child.as_str().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        {
+            if let Some(hit) = parsed.get(key) {
+                return Some(hit.clone());
+            }
+        }
+    }
+    None
+}
+
+/// `deep_get_reflection_field` 的字符串便捷取法（反思字段绝大多数是字符串）。
+fn deep_get_reflection_str(v: &serde_json::Value, key: &str) -> Option<String> {
+    deep_get_reflection_field(v, key).and_then(|x| x.as_str().map(str::to_string))
+}
+
+/// `deep_get_reflection_field` 的「文本」取法：字符串直取，数组 / 对象做 JSON 序列化。
+///
+/// 为什么需要它：`missed_signals` 实测落库形态是**数组**（`jsonb_typeof = array`），
+/// 用 `as_str()` 取会恒为 `None` ⇒ ExperiencePipeline 的 error_patterns 永远缺这一项。
+/// 与 `what_went_wrong`（落库为 `string`）不同，二者不能共用同一个取法。
+fn deep_get_reflection_text(v: &serde_json::Value, key: &str) -> Option<String> {
+    match deep_get_reflection_field(v, key)? {
+        serde_json::Value::String(s) => Some(s),
+        other => Some(other.to_string()),
+    }
+}
 
 /// 组装反思 prompt 的「可调参数清单」（v31，v72 收窄）。
 ///
@@ -460,46 +515,22 @@ pub async fn run_reflection_workflow(
             let reflection_raw =
                 wf.results.get("reflection").cloned().unwrap_or(serde_json::Value::Null);
             let reflection_json = extract_agent_output(reflection_raw).await;
-            // 兜底: extract_agent_output 在某些 wrapper 格式下可能返回 JSON 字符串
-            // (例如 LLM 输出被包成 `{output: "{...}"}` 时走 line 1552 分支直接 return 字符串),
-            // 这时 as_object() 会得到 None,导致整个字段提取跳到 unwrap_or 兜底,
-            // 数据库里 what_went_wrong / missed_signals / fix_for_future 全部为 null。
-            // 二次解析: 把它当字符串再 parse 一次,还原成对象。
-            let reflection_obj: Option<serde_json::Map<String, serde_json::Value>> =
-                if let Some(obj) = reflection_json.as_object() {
-                    Some(obj.clone())
-                } else if let Some(s) = reflection_json.as_str() {
-                    serde_json::from_str::<serde_json::Value>(s)
-                        .ok()
-                        .and_then(|v| v.as_object().cloned())
-                } else {
-                    None
-                };
-
-            // 兼容两种输出结构:
-            //   A) 直接: {what_went_wrong, missed_signals, fix_for_future, params_suggestion}
-            //   B) 嵌套: {reflection: {what_went_wrong, missed_signals, fix_for_future}, params_suggestion}
-            // 内联 system_prompt 要求 A 格式,reflection.md 外部 expert prompt 要求 B 格式,
-            // 实际 LLM 可能按任一格式输出,后端必须容错。
-            let (what_went_wrong, missed_signals, fix_for_future, params_suggestion_json) =
-                reflection_obj
-                    .map(|obj| {
-                        // 优先看嵌套 reflection 子对象,找不到再退到顶层
-                        let inner = obj.get("reflection").and_then(|v| v.as_object());
-                        let lookup = |key: &str| -> Option<&serde_json::Value> {
-                            inner.and_then(|i| i.get(key)).or_else(|| obj.get(key))
-                        };
-                        let w = lookup("what_went_wrong")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        let m = lookup("missed_signals").map(|v| v.to_string());
-                        let f = lookup("fix_for_future")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        let p = obj.get("params_suggestion").map(|v| v.to_string());
-                        (w, m, f, p)
-                    })
-                    .unwrap_or((None, None, None, None));
+            // 兜底与字段提取统一走 `deep_get_reflection_*`：它们自带
+            // 「顶层 / 一层嵌套 / 双重编码字符串」三形态容错。因此原先此处手写的
+            // 「as_object() 失败则二次 parse」与「reflection 子对象 lookup」两段特殊处理
+            // 已无必要 —— 且两者都漏了双重编码，正是 D1 的成因。
+            //
+            // 三种实际输出结构（实测见 deep_get_reflection_field 注释）：
+            //   A) 直接:     {what_went_wrong, missed_signals, fix_for_future, params_suggestion}
+            //   B) 嵌套:     {reflection: {what_went_wrong, ...}, params_suggestion}
+            //   C) 双重编码: {report: "{\"what_went_wrong\": ...}"}
+            // 内联 system_prompt 要求 A，reflection.md 外部 expert prompt 要求 B，
+            // 而库内实测 C 占 10/11 ⇒ 三者都必须容错。
+            let what_went_wrong = deep_get_reflection_str(&reflection_json, "what_went_wrong");
+            let missed_signals = deep_get_reflection_text(&reflection_json, "missed_signals");
+            let fix_for_future = deep_get_reflection_str(&reflection_json, "fix_for_future");
+            let params_suggestion_json =
+                deep_get_reflection_text(&reflection_json, "params_suggestion");
 
             // 诊断: 检查反思节点是否成功,如果不成功,把状态/错误信息附到 status 字段
             // (Failed 节点 result 是 None,work_engine 不会写入 results,所以
@@ -544,37 +575,73 @@ pub async fn run_reflection_workflow(
                 )
                 .col_expr(stock_reflections::Column::BlackboardSnapshot, Expr::value(bb_text))
                 // v008 (C2 借鉴): 回写 verdict / alpha_cited / lesson_summary
+                // D1 修复：三个字段改走 deep_get_reflection_field 兼容
+                // 「一层嵌套」与「双重编码 JSON 字符串」两种实际落库形态。
                 .col_expr(
                     stock_reflections::Column::Verdict,
-                    Expr::value(reflection_json.get("verdict").and_then(|v| v.as_str().map(|s| s.to_string()))),
+                    Expr::value(deep_get_reflection_str(&reflection_json, "verdict")),
                 )
                 .col_expr(
                     stock_reflections::Column::AlphaCited,
-                    Expr::value(reflection_json.get("alpha_cited").and_then(|v| v.as_str().map(|s| s.to_string()))),
+                    Expr::value(deep_get_reflection_str(&reflection_json, "alpha_cited")),
                 )
                 .col_expr(
                     stock_reflections::Column::LessonSummary,
-                    Expr::value(reflection_json.get("lesson_summary").and_then(|v| v.as_str().map(|s| s.to_string()))),
+                    Expr::value(deep_get_reflection_str(&reflection_json, "lesson_summary")),
                 )
+                // D10 修复：raw_return / alpha_return / holding_days 此前只注入提示词变量、
+                // 只写入 strategy_performance，**从未回写 stock_reflections 自身** ⇒
+                // 三列实测 11/11 全 NULL。而同源的 strategy_performance.return_pct
+                // （下方写入时取自同一个 raw_return）却有真值（-23.90% ~ +5.32%）
+                // —— 这组「同源不同落库」就是缺口存在的直接证据。
+                // 回归判据：本次反思后，三列应与 strategy_performance 对应行一致。
+                .col_expr(stock_reflections::Column::RawReturn, Expr::value(raw_return))
+                .col_expr(stock_reflections::Column::AlphaReturn, Expr::value(alpha_return))
+                .col_expr(stock_reflections::Column::HoldingDays, Expr::value(holding_days))
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
 
             // ── Path 2: 反思参数建议自动解析 ──
-            let verdict_str = reflection_json.get("verdict").and_then(|v| v.as_str()).unwrap_or("");
+            // D1 修复：verdict 改走 deep_get（兼容「一层嵌套」与「双重编码字符串」）。
+            let verdict_opt = deep_get_reflection_str(&reflection_json, "verdict");
+            let verdict_str = verdict_opt.as_deref().unwrap_or("");
 
-            // ── Gap 1: Verdict → Strategy Performance 自动写入 ──
-            // 反思的 verdict 是事后判断，比策略层 was_correct 更高质量。
-            // 写入后 evolution_drift 可消费此反馈自动调整权重。
-            let was_correct: i32 = match verdict_str {
-                "correct" => 1,
-                "wrong" => 0,
-                _ => 0, // partial 也视为不正确
-            };
-            {
+            // ── Gap 1: 确定性判定 → Strategy Performance 自动写入 ──
+            // M1 改写：was_correct 不再由反思 agent 的 verdict（LLM 自评）映射，
+            // 改由行情快照**确定性反推**（deterministic_was_correct，见下方纯函数）。
+            // verdict 仍写 stock_reflections 供反思阅读；但判胜依据（weight_decay.rs:79
+            // 以 `was_correct != 0` 判胜）改用客观符号判定，消除 LLM 幻觉污染。
+            //
+            // 保留 D2 语义：「未判定」与「判定为错」在数据上可区分 ——
+            // 无法判定（无行情 / 中性档 / 期中观察）→ **不写行**：
+            // strategy_performance.was_correct 是 i32 非空列，表达不了第三态，
+            // 而"没写入"本身就是"没有判定依据"的正确表达。
+            let was_correct: Option<i32> = deterministic_was_correct(
+                original_analysis.as_ref().and_then(|a| a.decision_action.as_deref()),
+                market_snapshot,
+            );
+
+            if let Some(was_correct) = was_correct {
                 use axagent_entities::strategy_performance;
                 let sp_id = uuid::Uuid::new_v4().to_string();
                 let decision_at = now_ms - (holding_days.unwrap_or(30) as i64 * 86_400_000);
+                // D3 修复：decision_confidence 不再硬编码 0。
+                // 来源 = 原分析的决策置信度（`decision_json.confidence`，回退 `decisionConfidence`），
+                // 实测量纲已是 0-100（min 0 / max 75，非 0-1 小数）。
+                // ⚠ 已知残留：该列为 i32 非空，取不到置信度时只能落 0，
+                //   与"置信度极低"不可区分 —— 属性缺口，已在 PLAN 登记。
+                let decision_confidence = original_analysis
+                    .as_ref()
+                    .and_then(|a| a.decision_json.as_deref())
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|dj| {
+                        dj.get("confidence")
+                            .or_else(|| dj.get("decisionConfidence"))
+                            .and_then(|v| v.as_f64())
+                    })
+                    .map(|c| c.round().clamp(0.0, 100.0) as i32)
+                    .unwrap_or(0);
                 let sp_insert = strategy_performance::ActiveModel {
                     id: Set(sp_id.clone()),
                     strategy_id: Set("reflection_verdict".to_string()),
@@ -586,7 +653,7 @@ pub async fn run_reflection_workflow(
                     holding_days: Set(holding_days.unwrap_or(30)),
                     return_pct: Set(raw_return.unwrap_or(0.0)),
                     was_correct: Set(was_correct),
-                    decision_confidence: Set(0),
+                    decision_confidence: Set(decision_confidence),
                     horizon_pnl_json: Set(None),
                     agreement_score: Set(None),
                     created_at: Set(now_ms),
@@ -596,10 +663,19 @@ pub async fn run_reflection_workflow(
                 match sp_insert {
                     Ok(_) => tracing::info!(
                         "[reflection] Gap1: 写入 strategy_performance {sp_id}: \
-                         verdict={verdict_str} was_correct={was_correct}"
+                         verdict={verdict_str} was_correct(deterministic)={was_correct} \
+                         decision_confidence={decision_confidence}"
                     ),
                     Err(e) => tracing::warn!("[reflection] 写入 strategy_performance 失败: {e}"),
                 }
+            } else {
+                // 无判定依据（无行情 / 中性档 / 期中观察）⇒ 不写 strategy_performance，
+                // 避免把「无法判定」计为「判定为错」而污染胜率统计。
+                tracing::warn!(
+                    "[reflection] {}: 无判定依据，跳过 strategy_performance 写入\
+                     （避免把「无判定」计为「判定为错」）",
+                    stock_code
+                );
             }
 
             // ── Gap 3: 攒够 N 条一致建议自动触发 WFO 校准 ──
@@ -693,7 +769,8 @@ pub async fn run_reflection_workflow(
                     MessageRole, Trajectory, TrajectoryOutcome, TrajectoryStep,
                 };
 
-                let verdict_str = reflection_json.get("verdict").and_then(|v| v.as_str());
+                let verdict_opt = deep_get_reflection_str(&reflection_json, "verdict");
+                let verdict_str = verdict_opt.as_deref();
                 let outcome = match verdict_str {
                     Some("correct") => TrajectoryOutcome::Success,
                     Some("partial") => TrajectoryOutcome::Partial,
@@ -703,7 +780,7 @@ pub async fn run_reflection_workflow(
                 };
 
                 let lesson =
-                    reflection_json.get("lesson_summary").and_then(|v| v.as_str()).unwrap_or("");
+                    deep_get_reflection_str(&reflection_json, "lesson_summary").unwrap_or_default();
                 let reasoning_text = what_went_wrong.as_deref().unwrap_or("");
                 let duration_ms = (chrono::Utc::now().timestamp_millis() - now_ms).max(0) as u64;
 
@@ -762,16 +839,16 @@ pub async fn run_reflection_workflow(
             // 借鉴 TradingAgents 反思→规则提取机制:反思完成后把 lesson_summary
             // 提取为可重用的规则存入 reflection_lessons 表,下次决策可查询。
             if status_text == "completed" {
-                if let Some(ls) = reflection_json
-                    .get("lesson_summary")
-                    .and_then(|v| v.as_str().map(|s| s.to_string()))
-                {
+                // D1 修复：lesson_summary / verdict 走 deep_get ——
+                // 旧实现取不到 ⇒ 该条件永不满足 ⇒ reflection_lessons 恒 0 行（PLAN D5）。
+                if let Some(ls) = deep_get_reflection_str(&reflection_json, "lesson_summary") {
+                    let verdict_for_rule = deep_get_reflection_str(&reflection_json, "verdict");
                     let _ = extract_lesson_to_rule(
                         db,
                         stock_code,
                         &analysis_id,
                         &ls,
-                        reflection_json.get("verdict").and_then(|v| v.as_str()),
+                        verdict_for_rule.as_deref(),
                     )
                     .await;
                 }
@@ -785,7 +862,8 @@ pub async fn run_reflection_workflow(
             {
                 use axagent_agent::Reflection;
 
-                let verdict_str = reflection_json.get("verdict").and_then(|v| v.as_str());
+                let verdict_opt = deep_get_reflection_str(&reflection_json, "verdict");
+                let verdict_str = verdict_opt.as_deref();
                 let quality_score: u8 = match verdict_str {
                     Some("correct") => 9,
                     Some("partial") => 5,
@@ -794,10 +872,11 @@ pub async fn run_reflection_workflow(
                 };
 
                 let lesson_summary =
-                    reflection_json.get("lesson_summary").and_then(|v| v.as_str()).unwrap_or("");
+                    deep_get_reflection_str(&reflection_json, "lesson_summary").unwrap_or_default();
                 let what_went_wrong_text = what_went_wrong.clone().unwrap_or_default();
-                let missed =
-                    reflection_json.get("missed_signals").and_then(|v| v.as_str()).unwrap_or("");
+                // missed_signals 落库是数组 ⇒ 必须用 text 取法（见 deep_get_reflection_text 注释）。
+                let missed = deep_get_reflection_text(&reflection_json, "missed_signals")
+                    .unwrap_or_default();
                 let fix_text = fix_for_future.clone().unwrap_or_default();
 
                 let mut error_patterns: Vec<String> = Vec::new();
@@ -2532,6 +2611,47 @@ async fn run_lesson_evolution(
     Ok(())
 }
 
+/// M1: 确定性判定 —— 用行情快照反推决策方向是否正确。
+///
+/// 替代旧的「LLM verdict → was_correct」自评路径：verdict 是反思 agent 的
+/// 主观结论，可被幻觉污染；此处只用客观数据（决策方向 + 净收益符号）判定。
+///
+/// 返回:
+///   Some(1) 方向命中（看多且涨 / 看空且跌）
+///   Some(0) 方向未命中（看多且跌 / 看空且涨）
+///   None    无法判定（无行情快照 / 决策方向缺失或为中性档 / 期中观察 / 收益 NaN）
+///
+/// ⚠ 中性档（持有/观望/不确定/无法判断）与「期中观察」不判定 —— 不产出伪结论
+/// （诚实性铁律）。无法判定时上层**不写** strategy_performance 行，
+/// 与既有「无判定依据不写行」语义一致，避免把「没判定」计成「判错」。
+///
+/// ⚠ NaN 显式不判定：`net_return_pct.is_nan()` 时两个不等号都不命中，
+/// 若直接套 `> 0.0 / < 0.0` 会把 NaN 误判成「未命中」（见 AGENTS.md 浮点判据教训）。
+fn deterministic_was_correct(
+    decision_action: Option<&str>,
+    market_snapshot: Option<&MarketSnapshot>,
+) -> Option<i32> {
+    // 行情不可用 → 无法判定
+    let snap = market_snapshot?;
+    // 期中观察（未到期望持有期）→ 不判定：短期噪声不是策略失效证据
+    if snap.within_expected_horizon {
+        return None;
+    }
+    let net = snap.net_return_pct;
+    if net.is_nan() {
+        return None;
+    }
+    // 决策方向归一化；中性档 / 缺失 → 不判定
+    let kind = normalize_action(decision_action?)?;
+    match kind {
+        ActionKind::Buy | ActionKind::Increase => Some(if net > 0.0 { 1 } else { 0 }),
+        ActionKind::Sell | ActionKind::Reduce => Some(if net < 0.0 { 1 } else { 0 }),
+        ActionKind::Hold | ActionKind::Wait | ActionKind::Uncertain | ActionKind::Unavailable => {
+            None
+        },
+    }
+}
+
 // ── 单元测试：覆盖 LLM 输出 → IR → JSON 提取的全链路 ──
 //
 // 关键场景：
@@ -2654,6 +2774,8 @@ mod market_snapshot_tests {
             decision_position_state: None,
             decision_reasoning: None,
             decision_json: Some(r#"{"targetPrice": 133.0}"#.to_string()),
+            horizon_price_map: None,
+            horizon_decisions: None,
             blackboard_snapshot: Some(
                 r#"{"_raw":{"trader":{"content":{"targetPrice": 120.0}}}}"#.to_string(),
             ),
@@ -2663,6 +2785,8 @@ mod market_snapshot_tests {
             decision_time_horizon: Some("mid".to_string()),
             decision_expected_holding_days: Some(28),
             model_version: None,
+            // A4：NULL = 采集时点无版本信息（A4 之前的存量行、chat 通道写入均为此形态）
+            template_version: None,
             data_snapshot_id: None,
             outcome: None,
             llm_decision_json: None,
@@ -2687,5 +2811,102 @@ mod market_snapshot_tests {
         // 两处都无 → None（不得返回 0.0 之类假值）
         model.blackboard_snapshot = Some("{}".to_string());
         assert_eq!(extract_target_price(&model), None);
+    }
+}
+
+// ── 单元测试：M1 确定性判定（deterministic_was_correct）──
+#[cfg(test)]
+mod deterministic_was_correct_tests {
+    use super::*;
+
+    fn snap(net_return_pct: f64, within_expected_horizon: bool) -> MarketSnapshot {
+        MarketSnapshot {
+            stock_code: "600519".to_string(),
+            analysis_date: "2026-08-01".to_string(),
+            entry_date: "2026-08-04".to_string(),
+            entry_price: 100.0,
+            latest_date: "2026-09-11".to_string(),
+            latest_price: 94.4,
+            price_change_pct: -5.6,
+            net_return_pct,
+            period_high: 103.0,
+            period_low: 92.0,
+            max_drawdown_pct: 10.68,
+            trading_days: 28,
+            expected_holding_days: Some(28),
+            within_expected_horizon,
+            benchmark_code: Some("000300".to_string()),
+            benchmark_change_pct: Some(1.2),
+            alpha_pct: Some(-6.8),
+            target_price: Some(120.0),
+            target_progress_pct: Some(-28.0),
+            target_reached: Some(false),
+        }
+    }
+
+    /// 看多（买入/增持）且净收益为正 → 1（胜）；中英文值域等价。
+    #[test]
+    fn buy_uptrend_is_correct() {
+        assert_eq!(deterministic_was_correct(Some("买入"), Some(&snap(5.0, false))), Some(1));
+        assert_eq!(deterministic_was_correct(Some("BUY"), Some(&snap(5.0, false))), Some(1));
+        assert_eq!(deterministic_was_correct(Some("增持"), Some(&snap(5.0, false))), Some(1));
+    }
+
+    /// 看多但净收益为负 → 0（未命中）
+    #[test]
+    fn buy_downtrend_is_incorrect() {
+        assert_eq!(deterministic_was_correct(Some("买入"), Some(&snap(-5.78, false))), Some(0));
+    }
+
+    /// 看空（卖出/减持）且净收益为负 → 1（胜）
+    #[test]
+    fn sell_downtrend_is_correct() {
+        assert_eq!(deterministic_was_correct(Some("卖出"), Some(&snap(-5.78, false))), Some(1));
+        assert_eq!(deterministic_was_correct(Some("SELL"), Some(&snap(-5.78, false))), Some(1));
+        assert_eq!(deterministic_was_correct(Some("减持"), Some(&snap(-5.78, false))), Some(1));
+    }
+
+    /// 看空但净收益为正 → 0（未命中）
+    #[test]
+    fn sell_uptrend_is_incorrect() {
+        assert_eq!(deterministic_was_correct(Some("卖出"), Some(&snap(5.0, false))), Some(0));
+    }
+
+    /// 中性档（持有/观望/不确定/无法判断）→ 不判定
+    #[test]
+    fn neutral_actions_not_judged() {
+        for a in ["持有", "观望", "不确定", "无法判断", "HOLD", "WAIT", "UNCERTAIN"] {
+            assert_eq!(
+                deterministic_was_correct(Some(a), Some(&snap(-5.78, false))),
+                None,
+                "中性档 {a} 不应判定"
+            );
+        }
+    }
+
+    /// 期中观察（未到期望持有期）→ 不判定：短期噪声不是策略失效证据
+    #[test]
+    fn within_horizon_not_judged() {
+        assert_eq!(deterministic_was_correct(Some("买入"), Some(&snap(-5.78, true))), None);
+    }
+
+    /// 无行情快照 / 无决策方向 → 不判定
+    #[test]
+    fn missing_data_not_judged() {
+        assert_eq!(deterministic_was_correct(None, Some(&snap(-5.78, false))), None);
+        assert_eq!(deterministic_was_correct(Some("买入"), None), None);
+    }
+
+    /// 收益为 NaN → 显式不判定（不等号对 NaN 恒 false，会误判成「未命中」）
+    #[test]
+    fn nan_return_not_judged() {
+        assert_eq!(deterministic_was_correct(Some("买入"), Some(&snap(f64::NAN, false))), None);
+        assert_eq!(deterministic_was_correct(Some("卖出"), Some(&snap(f64::NAN, false))), None);
+    }
+
+    /// 未知 action 字符串 → 不判定（normalize_action 返回 None）
+    #[test]
+    fn unrecognized_action_not_judged() {
+        assert_eq!(deterministic_was_correct(Some("乱写"), Some(&snap(-5.78, false))), None);
     }
 }

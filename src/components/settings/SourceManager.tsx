@@ -3,6 +3,7 @@
 import { MemoryGraphView } from "@/components/memory/MemoryGraphView";
 import { EmbeddingModelSelect } from "@/components/shared/EmbeddingModelSelect";
 import { useEmbeddingProviderLabel } from "@/components/shared/ModelSelect";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { useKnowledgeSourceStore, useKnowledgeStore } from "@/stores";
 import { useProviderStore, useSourceStore } from "@/stores";
@@ -202,7 +203,7 @@ function SourceConfigModal({
         messageApi.success(t("sourceManager.config.saveSuccess"));
       }
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setSaving(false);
     }
@@ -493,7 +494,7 @@ function SourceCard({
           });
           messageApi.success(t("sourceManager.deleteSuccess"));
         } catch (e) {
-          messageApi.error(String(e));
+          showBackendError(messageApi, e);
           throw e;
         }
       },
@@ -1090,7 +1091,7 @@ function WikiCard({ wiki }: { wiki: Wiki }) {
       await deleteWiki(wiki.id);
       messageApi.success(t("wiki.llm.deleteSuccess"));
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     }
   };
 

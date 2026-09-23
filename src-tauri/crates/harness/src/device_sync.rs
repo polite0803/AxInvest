@@ -9,6 +9,7 @@
 //! - ConflictResolution: 冲突解决策略
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ─── 设备身份 ───────────────────────────────────────────────────────────
 
@@ -152,6 +153,93 @@ pub enum ChangeOperation {
 pub struct VersionVectorEntry {
     pub device_id: String,
     pub counter: u64,
+}
+
+/// 版本向量
+///
+/// 权威定义下沉自 `axagent-crdt`（AGENTS.md 铁律 4：共享类型权威在 harness）。
+/// 条目直接复用本模块的 [`VersionVectorEntry`]，用于多设备同步的冲突检测与因果排序。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionVector {
+    /// 向量条目
+    entries: HashMap<String, u64>,
+}
+
+impl VersionVector {
+    /// 创建空版本向量
+    pub fn new() -> Self {
+        Self { entries: HashMap::new() }
+    }
+
+    /// 从条目列表创建
+    pub fn from_entries(entries: &[VersionVectorEntry]) -> Self {
+        let mut map = HashMap::new();
+        for entry in entries {
+            map.insert(entry.device_id.clone(), entry.counter);
+        }
+        Self { entries: map }
+    }
+
+    /// 转换为条目列表
+    pub fn to_entries(&self) -> Vec<VersionVectorEntry> {
+        self.entries
+            .iter()
+            .map(|(device_id, counter)| VersionVectorEntry {
+                device_id: device_id.clone(),
+                counter: *counter,
+            })
+            .collect()
+    }
+
+    /// 获取指定设备的计数器值
+    pub fn get(&self, device_id: &str) -> u64 {
+        self.entries.get(device_id).copied().unwrap_or(0)
+    }
+
+    /// 递增指定设备的计数器
+    pub fn increment(&mut self, device_id: &str) {
+        let counter = self.entries.entry(device_id.to_string()).or_insert(0);
+        *counter += 1;
+    }
+
+    /// 把指定设备的计数器抬升到 `counter`（取二者最大值）
+    ///
+    /// 用于从变更日志重建版本向量，语义等价于「把该设备的计数推进到已知水位」，
+    /// 但与 [`Self::increment`] 不同，它是 **O(1)** 的。
+    pub fn observe(&mut self, device_id: &str, counter: u64) {
+        let current = self.entries.entry(device_id.to_string()).or_insert(0);
+        *current = (*current).max(counter);
+    }
+
+    /// 合并另一个版本向量（取最大值）
+    pub fn merge(&mut self, other: &VersionVector) {
+        for (device_id, counter) in &other.entries {
+            self.observe(device_id, *counter);
+        }
+    }
+
+    /// 检查是否包含另一个版本向量（所有条目 >= 另一个的对应条目）
+    pub fn contains(&self, other: &VersionVector) -> bool {
+        other.entries.iter().all(|(device_id, counter)| self.get(device_id) >= *counter)
+    }
+
+    /// 检查是否与另一个版本向量并发（互不包含）
+    pub fn is_concurrent_with(&self, other: &VersionVector) -> bool {
+        !self.contains(other) && !other.contains(self)
+    }
+
+    /// 检查是否小于另一个版本向量（严格因果前序）
+    pub fn is_before(&self, other: &VersionVector) -> bool {
+        self.contains(other) && self != other
+    }
+}
+
+impl std::fmt::Display for VersionVector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let entries: Vec<String> =
+            self.entries.iter().map(|(k, v)| format!("{}:{}", k, v)).collect();
+        write!(f, "[{}]", entries.join(", "))
+    }
 }
 
 // ─── 冲突解决 ───────────────────────────────────────────────────────────

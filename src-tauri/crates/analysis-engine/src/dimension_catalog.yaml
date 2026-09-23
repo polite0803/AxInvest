@@ -1,0 +1,92 @@
+# 股票分析「维度定义」目录配置（批2）
+#
+# 把 stock_orchestration.rs 里硬编码的 SubTask::new 清单抽成此配置。
+# 每个维度 = `{id, 名称(name), 依赖数据源(data_source), 映射的标准节点(role),
+#              权重(weight), 启停(enabled)}`。
+#
+# 新增分析维度 = 在此处加一条 + 提供对应 role 标准节点/工具，不动 adapter 核心；
+# 编排仍交给 DynamicSubGraph，节点复用 harness 标准节点（Agent agent_profile_id）。
+#
+# 注：列表顺序即 Pipeline/Debate 策略下的执行拓扑顺序，转换逻辑见 dimension_catalog.rs。
+
+# 全链路投资分析 Pipeline 维度
+pipeline:
+  max_parallel: 2 # 技术面与基本面可并行
+  max_replans: 3
+  dimensions:
+    - id: data_fetch
+      name: 数据获取
+      description: 获取股票行情、财报、资金流向等数据
+      data_source: 行情引擎|财报接口|资金流向接口
+      role: data_agent
+      weight: 1.0
+      enabled: true
+    - id: technical_analysis
+      name: 技术面分析
+      description: 技术指标计算、K线形态识别、趋势判断
+      data_source: K线行情
+      role: technical_agent
+      weight: 0.9
+      enabled: true
+    - id: fundamental_analysis
+      name: 基本面分析
+      description: 财务报表分析、估值计算、行业对比
+      data_source: 财务数据|行业数据
+      role: fundamental_agent
+      weight: 0.9
+      enabled: true
+    - id: capital_flow_analysis
+      name: 资金面分析
+      description: 主力资金流向、龙虎榜、融资融券分析
+      data_source: 资金流向|龙虎榜|两融数据
+      role: capital_agent
+      weight: 0.8
+      enabled: true
+    - id: signal_aggregation
+      name: 信号聚合
+      description: 整合技术、基本面、资金面信号
+      data_source: 上述维度输出
+      role: aggregator_agent
+      weight: 1.0
+      enabled: true
+    - id: risk_assessment
+      name: 风险评估
+      description: 识别风险因素、计算风险指标
+      data_source: 聚合信号|风险指标
+      role: risk_agent
+      weight: 1.0
+      enabled: true
+    - id: decision_generation
+      name: 决策生成
+      description: 生成买入/卖出/持有建议
+      data_source: 聚合信号|风险评估
+      role: decision_agent
+      weight: 1.0
+      enabled: true
+
+# 多空辩论 Debate 维度
+debate:
+  max_parallel: 2 # 多空并行
+  max_replans: 2
+  dimensions:
+    - id: bull_analyst
+      name: 多头分析师
+      description: 从多头角度分析，寻找上涨理由和买入信号
+      data_source: 看多理由|买入信号
+      role: bull_agent
+      weight: 1.0
+      enabled: true
+    - id: bear_analyst
+      name: 空头分析师
+      description: 从空头角度分析，寻找下跌风险和卖出信号
+      data_source: 看空理由|卖出信号
+      role: bear_agent
+      weight: 1.0
+      enabled: true
+    - id: arbitrator
+      name: 仲裁者
+      description: 综合多空观点，做出最终裁决
+      data_source: 多空观点
+      role: arbiter_agent
+      weight: 1.0
+      enabled: true

@@ -15,7 +15,6 @@ pub mod daily_snapshot;
 pub mod disk_cache;
 pub mod divergence;
 pub mod error;
-pub mod fallback;
 pub mod fundamentals_report;
 pub mod gate;
 pub mod indicators;
@@ -2247,6 +2246,29 @@ impl AStockClient {
                     }
                 }
                 tracing::warn!("[C-fallback] {stock_code} 所有财务数据源失败: {e}");
+                // ── as-of 回放：财务维度不可得时**按空返回**，不抛 Err（2026-09-23）──
+                //
+                // 与 `get_news` 的处置不同：财务**没有**本地历史语料库可兜底
+                // （`news_archive` 无对应物，`financials` 不落本地表）。
+                // 而实测 as-of 下财务源普遍取不到数据（`xueqiu 返回空数据` ⇒ 全链失败），
+                // 原样抛 Err 会造成两层误伤：预检判 `Failed` 拦下整条 DAG（D14）、
+                // 工具层抛 `TOOL_CALL_FAILED` 令 `t-fundamentals-data` 节点失败（D16）。
+                //
+                // ⇒ 回放中「拿不到财报」是**已知的结构性约束**，不是故障：按空返回 + 记降级，
+                // 让下游按「财务缺省」正常降级，且该缺失在降级账本中可查。
+                // ⚠ 仅 as-of 生效：live 的 `C-fallback` 兜底 + 硬失败语义**一字不变**
+                //（该硬失败是为防「假成功空数组被误判成没有财报」，live 下必须保留）。
+                if crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
+                    crate::as_of::record_degradation(
+                        "astock-data",
+                        "get_financials",
+                        &format!("{stock_code} as-of 回放中财务全链失败，按空返回（不阻断）"),
+                    );
+                    tracing::warn!(
+                        "[asof] {stock_code} 财务数据在回放中不可得，按空返回（不判失败）"
+                    );
+                    return Ok(Vec::new());
+                }
                 Err(DataError::VendorError {
                     vendor: "all".into(),
                     message: format!("所有财务数据源失败，无法获取 {} 的财报数据", stock_code),
@@ -2311,6 +2333,57 @@ impl AStockClient {
     }
 
     pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
+        // ── as-of 模式：走本地 `news_archive` 语料库（与 `get_policy_news` 同款）──
+        //
+        // ⚠ 此前**缺失这段分支**（2026-09-23 实测暴露）：as-of 下仍去请求 vendor，
+        // 而各 vendor 只提供「近期」新闻、`truncate_news_by_asof` 会把晚于截止日的全丢弃
+        // ⇒ 逐 vendor 必然返回空 ⇒ 整链抛出 Err。该 Err 造成**两层误伤**：
+        //   ① `data_quality_precheck` 判 `Failed` ⇒ 整条 DAG 被拦（D14）；
+        //   ② 工具层抛 `TOOL_CALL_FAILED` ⇒ `t-news-data` 节点失败 ⇒ DAG 失败（D16）。
+        //
+        // 修法**不是**「宽容失败」，而是**接上本仓已有的历史通道**：`news_archive` 表
+        // 由每次 live 抓取 upsert 进来（见下方 `sink.upsert`），且已提供 `search_asof`
+        // （取 `publish_time <= 截止日` 的最新 N 条）。`get_policy_news` 早就这么做，
+        // 本函数只是漏了 ⇒ 补上后能**真正拿到当时的历史新闻**，而非仅仅「不报错」。
+        if let Some(ctx) = crate::as_of::current_as_of() {
+            if let Some(sink) = &self.news_archive_sink {
+                let as_of_ts_ms = ctx
+                    .as_of_date
+                    .and_hms_opt(23, 59, 59)
+                    .and_then(|dt| dt.and_local_timezone(chrono::Local).single())
+                    .map(|dt| dt.timestamp_millis())
+                    .unwrap_or_else(|| {
+                        ctx.as_of_date
+                            .and_hms_opt(23, 59, 59)
+                            .and_then(|dt| dt.and_utc().timestamp_millis().into())
+                            .unwrap_or(0)
+                    });
+                // 空关键词 = 不做子串过滤，只按 stock_code + 截止日取该股历史新闻
+                let archived = sink.search_asof("", Some(stock_code), as_of_ts_ms, limit).await;
+                if !archived.is_empty() {
+                    tracing::info!(
+                        "[news_archive] get_news 命中 {} 条 (stock={}, as_of={})",
+                        archived.len(),
+                        stock_code,
+                        ctx.as_of_date
+                    );
+                    return Ok(archived);
+                }
+                crate::as_of::record_degradation(
+                    "astock-data",
+                    "get_news",
+                    "as-of 模式 news_archive 无该股历史新闻（该维度结构性为空）",
+                );
+                return Ok(vec![]);
+            }
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_news",
+                "as-of 模式新闻不可用（未配置 news_archive sink）",
+            );
+            return Ok(vec![]);
+        }
+
         {
             let cache_key = Self::cache_key_for("news", &format!("{stock_code}:{limit}"));
             if let Some(cached) = self.cache_get(&cache_key).await {
@@ -3505,6 +3578,9 @@ impl AStockClient {
                             rating_avg: None,
                             rating_count: None,
                             year,
+                            // 来自最新财报的 trailing EPS ⇒ 真实数据，非估算
+                            is_estimated: false,
+                            estimate_source: None,
                         }));
                     }
                 }
@@ -3541,22 +3617,32 @@ impl AStockClient {
         {
             Ok(result) => Ok(Some(result)),
             Err(_) => {
-                // C: consensus_eps fallback — 基于挂牌板块的估算值
-                tracing::warn!("[C-fallback] consensus_eps 全部失败，为 {stock_code} 使用估算值");
-                let eps_est = match detect_market_type(stock_code) {
-                    "star" | "chinext" => 0.40,
-                    "bj" => 0.25,
-                    _ => 0.55,
-                };
-                let this_year = Local::now().format("%Y").to_string();
-                Ok(Some(ConsensusEPS {
-                    stock_code: stock_code.to_string(),
-                    consensus_eps: Some(eps_est),
-                    consensus_target_price: None,
-                    rating_avg: None,
-                    rating_count: None,
-                    year: this_year,
-                }))
+                // 2026-09-19（①「C-fallback 收敛」）：与上面的 `as_of`(replay) 分支对齐 ——
+                //   **不再产出按挂牌板块常数编造的 EPS**。
+                //
+                // 原实现：vendor 全失败时按板块填常数（star/chinext 0.40、bj 0.25、其余 0.55），
+                //   仅打一句 `warn!`。问题：该值不是任何数据源的一致预期，却被下游
+                //   `detect_earnings` 当作「预期基准」算「超预期」⇒ 产出**假信号**；
+                //   而**同一段兜底在 replay 分支早已被显式禁用**并记 degradation
+                //   （见上方 `record_degradation("...replay 模式禁用")` + `return Ok(None)`）——
+                //   实时模式继续往下流属自相矛盾。
+                // 现改为「诚实缺失」，与项目判据「行情缺失传 None 兜底 = 伪造」同源。
+                //
+                // ⚠ 联动（A2 的字段处置）：`ConsensusEPS::is_estimated` / `estimate_source`
+                //   **保留** —— 但本函数自此**不再是 `is_estimated = true` 的 producer**，
+                //   当前全链只剩 `false` 一个值（财报 trailing 分支 + 4 个 vendor 构造点）。
+                //   保留的理由：它仍是消费端 `detect_earnings` 的显式入参契约
+                //   （`consensus_eps_is_estimated`），未来任何估算来源都应继续用它自报 provenance；
+                //   删字段需回滚 7 个文件而收益仅「少一个恒 false 的 bool」。
+                crate::as_of::record_degradation(
+                    "astock-data",
+                    "get_consensus_eps",
+                    "vendor 全部失败;按新口径不再产出板块常数估算(原 C-fallback)",
+                );
+                tracing::warn!(
+                    "[consensus_eps] 全部 vendor 失败，返回 None（不再产出板块常数估算）: {stock_code}"
+                );
+                Ok(None)
             },
         }
     }

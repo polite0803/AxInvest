@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { hasMultipleModelVersions } from "@/lib/chatMultiModel";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, isTauri } from "@/lib/invoke";
 import { useConversationStore, useStreamStore } from "@/stores";
 import type { Message } from "@/types";
@@ -208,7 +209,7 @@ export function AssistantFooter({
           await regenerateWithModel(msg.id, providerId, model_id);
         }
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
       }
     },
     [
@@ -360,7 +361,7 @@ export function AssistantFooter({
                       });
                       messageApi.success(t("chat.saved"));
                     } catch (e) {
-                      messageApi.error(String(e));
+                      showBackendError(messageApi, e);
                     }
                   };
                   return (
@@ -424,7 +425,7 @@ export function AssistantFooter({
                   try {
                     await regenerateMessage(msg.id);
                   } catch (e) {
-                    messageApi.error(String(e));
+                    showBackendError(messageApi, e);
                   }
                 },
               },
@@ -440,7 +441,7 @@ export function AssistantFooter({
                           .getState()
                           .startContinue(conversationId, msg.id, true);
                       } catch (e) {
-                        messageApi.error(String(e));
+                        showBackendError(messageApi, e);
                       }
                     },
                   },
@@ -507,7 +508,7 @@ export function AssistantFooter({
                         try {
                           await deleteMessage(msg.id);
                         } catch (e) {
-                          messageApi.error(String(e));
+                          showBackendError(messageApi, e);
                         }
                       }}
                       okText={t("common.confirm")}
@@ -564,7 +565,7 @@ export function AssistantFooter({
             messageApi.success(t("chat.branchCreated"));
             setBranchModalOpen(false);
           } catch (e) {
-            messageApi.error(String(e));
+            showBackendError(messageApi, e);
           }
         }}
         okText={t("common.confirm")}
@@ -589,7 +590,7 @@ export function AssistantFooter({
               messageApi.success(t("chat.branchCreated"));
               setBranchModalOpen(false);
             } catch (e) {
-              messageApi.error(String(e));
+              showBackendError(messageApi, e);
             }
           }}
         />

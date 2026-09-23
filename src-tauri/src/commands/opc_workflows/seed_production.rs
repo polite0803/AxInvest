@@ -43,7 +43,6 @@ fn agent(
             max_tool_rounds: Some(10),
             execution_mode: None,
             rag_source_ids: vec![],
-            model_role: Some("opc-worker".to_string()),
             consistency_check: None,
             hallucination_guard: Some(HallucinationGuardConfig {
                 enabled: true,

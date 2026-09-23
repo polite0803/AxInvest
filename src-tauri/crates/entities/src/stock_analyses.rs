@@ -29,6 +29,25 @@ pub struct Model {
     pub decision_position_pct: Option<f64>,
     pub decision_reasoning: Option<String>,
     pub decision_json: Option<String>,
+    /// 四周期价位映射（阶段1，PROPOSAL-stock-decision-four-horizon.md）：
+    /// 同一决策保留单一 `decision_action`/仓位/时间维度语义，但目标价/止损按四周期
+    /// 各给一组绝对价，序列化为 JSON 字符串（与 `decision_json` 同 text 形态）。
+    ///
+    /// 值形态：`{"ultra_short":{...},"short":{...},"mid":{...},"long":{...}}`，每组含
+    /// `stopLossPct`/`takeProfitPct`/`expectedHoldingDays`/`targetPrice`/`stopLoss`。
+    /// `NULL` = 该记录产生于本字段引入之前的采集时点，**无此信息**；消费端按主档位
+    /// `decision_json` 的 `targetPrice`/`stopLoss` 回退，**不得**读成空映射。
+    pub horizon_price_map: Option<String>,
+    /// 四周期独立决策（阶段2，PROPOSAL-stock-decision-four-horizon.md）：
+    /// 与 `horizon_price_map` 并存的独立决策轴。`horizon_price_map` 只存价位映射，
+    /// 本列存每组**完整决策**（action/verdict/positionPct/confidence/stopLossPct/
+    /// takeProfitPct/expectedHoldingDays，ultra_short 另含 confLowerBound），序列化为
+    /// JSON 字符串。
+    ///
+    /// 值形态：`{"ultra_short":{...},"short":{...},"mid":{...},"long":{...}}`。
+    /// `NULL` = 该记录产生于本字段引入之前的采集时点，**无此信息**；消费端按主档位
+    /// `decision_action`/`decision_json` 回退，**不得**读成空映射。
+    pub horizon_decisions: Option<String>,
     pub blackboard_snapshot: Option<String>,
     pub config_id: Option<String>,
     /// Time-travel mode: 'live' | 'replay' | 'ab_test'
@@ -42,6 +61,18 @@ pub struct Model {
     pub decision_expected_holding_days: Option<i64>,
     /// 决策所用 LLM 的版本标识（用于复现实验）
     pub model_version: Option<String>,
+    /// 生成该决策时的**工作流模板版本**（取 `workflow_templates.version` 的当时值）。
+    ///
+    /// 为什么必须落库：模板版本是**决策公式的合法代理** —— `portfolio-mgr.rhai` 等
+    /// 脚本经 `include_str!` 嵌入模板，改公式必升 `TEMPLATE_VERSION`
+    /// （`seed_stock_analysis.rs` 的版本史注释已立此规矩）。没有这一列时，
+    /// 用现行公式复算历史决策会**系统性偏高 4.5pt**（2026-09-18 实测，见
+    /// `portfolio-mgr.rhai` 复算注释），使「离线复算」失去意义。
+    ///
+    /// `NULL` 语义 = 该记录产生于本列引入之前，**采集时点没有这个信息** ——
+    /// 复算器见到 NULL 必须声明「公式版本未知」，**不得**默认按当前版本复算。
+    /// （与 `decision_position_state` 同约定：引擎只做纯新增、不做 DML，故有意不回填。）
+    pub template_version: Option<i32>,
     /// 关联到 L2 disk-cache 的快照 ID
     pub data_snapshot_id: Option<String>,
     /// 决策校验结果：pending / win / loss

@@ -252,6 +252,27 @@ impl StockAdaptiveEngine {
         Self { config, ..Self::new() }
     }
 
+    /// 注入数据库连接：透传给内部进化引擎，让参数进化走真DB
+    /// （`strategy_performance` 复盘胜率做 fitness），并让进化产物可落库回看。
+    ///
+    /// 应紧跟 `new()` / `with_config()` 之后、共享引用产生前调用
+    /// （此时内部进化引擎为唯一引用，可安全取出注入 db）。
+    pub fn with_db(mut self, db: sea_orm::DatabaseConnection) -> Self {
+        // 先以重建值占位取出旧 Arc（`with_db` 需按值消费内部引擎）
+        let replacement =
+            Arc::new(StockSelfEvolutionEngine::new(Arc::new(StockReflectionEngine::new())));
+        let previous = std::mem::replace(&mut self.evolution_engine, replacement);
+        match Arc::into_inner(previous) {
+            Some(engine) => {
+                self.evolution_engine = Arc::new(engine.with_db(db));
+            },
+            None => {
+                tracing::warn!("[StockAdaptiveEngine] 进化引擎被共享引用，db 注入被跳过");
+            },
+        }
+        self
+    }
+
     /// 设置当前配置
     pub async fn set_config(&self, config: WeightDecayConfig) {
         let mut current = self.current_config.write().await;

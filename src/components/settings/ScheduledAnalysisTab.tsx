@@ -1,7 +1,7 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
-import { App, Button, Card, Empty, Form, Input, Popconfirm, Select, Spin, Switch, Table, Tag } from "antd";
+import { App, Button, Card, Empty, Form, Input, InputNumber, Popconfirm, Select, Spin, Switch, Table, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -23,6 +23,12 @@ function getCronPresets(t: (k: string) => string) {
     { label: t("stockAnalysis.scheduledAnalysis.cron.hourly"), value: "0 * * * *" },
   ];
 }
+
+/**
+ * 决策回测的 T+N 验证窗口候选（与后端 `RunDecisionBacktestRequest` 默认值
+ * `[5, 20, 60]` 一致：短/中/长三个持有窗口）。
+ */
+const BT_WINDOWS = [5, 20, 60];
 
 export function ScheduledAnalysisTab() {
   const { message } = App.useApp();
@@ -54,6 +60,19 @@ export function ScheduledAnalysisTab() {
   const [reflJobs, setReflJobs] = useState<CronJobRow[]>([]);
   const [reflCron, setReflCron] = useState("0 18 * * *");
   const [reflPeriod, setReflPeriod] = useState<string>("short");
+
+  // 决策回测（task_type = decision-backtest）
+  // 回放 reco_picks 历史荐股 → 拉 T+N 窗口真实 K 线 → 写 decision_validations
+  // → 回写 stock_analyses.outcome。是「决策可采信度」唯一的量化入口。
+  //
+  // 默认 07:00：**晚于**反思族的 06:00、**早于**收市。T+N 验证只读历史 K 线，
+  // 早跑不会拿到不完整数据；与 pool-scan(17:00)/trend-screening(16:00) 错开，
+  // 避免同一时段抢 astock 供应商配额。
+  const [btJobs, setBtJobs] = useState<CronJobRow[]>([]);
+  const [btCron, setBtCron] = useState("0 7 * * *");
+  const [btWindows, setBtWindows] = useState<number[]>([5, 20, 60]);
+  const [btMaxPicks, setBtMaxPicks] = useState(200);
+  const [btPeriod, setBtPeriod] = useState<string>("all");
 
   const loadPool = async () => {
     try {
@@ -151,6 +170,48 @@ export function ScheduledAnalysisTab() {
     } catch { /* silent */ }
   };
 
+  const loadBt = async () => {
+    try {
+      const list = await invoke<CronJobRow[]>("list_decision_backtest_crons");
+      if (Array.isArray(list)) { setBtJobs(list); }
+    } catch { /* backend not running */ }
+  };
+
+  const createBt = async () => {
+    try {
+      await invoke("create_decision_backtest_cron", {
+        cronExpression: btCron,
+        // 「全部周期」必须传 null（后端是 Option<String> 的 None）。
+        // 传空串不是 None，会被当成一个不存在的周期名 ⇒ 一条 pick 都回测不到，
+        // 而任务仍报「成功」（零产物），属于最隐蔽的静默失败。
+        periodFilter: btPeriod === "all" ? null : btPeriod,
+        tPlusNList: btWindows,
+        maxPicks: btMaxPicks,
+        enabled: true,
+      });
+      message.success(t("stockAnalysis.scheduledAnalysis.taskCreated"));
+      loadBt();
+    } catch {
+      message.error(t("stockAnalysis.scheduledAnalysis.createFailed"));
+    }
+  };
+
+  const toggleBt = async (job: CronJobRow, enable: boolean) => {
+    try {
+      await invoke("toggle_decision_backtest_cron", { id: job.id, enabled: enable });
+      loadBt();
+    } catch {
+      message.error(t("stockAnalysis.scheduledAnalysis.operationFailed"));
+    }
+  };
+
+  const deleteBt = async (id: string) => {
+    try {
+      await invoke("delete_decision_backtest_cron", { id });
+      loadBt();
+    } catch { /* silent */ }
+  };
+
   const loadWlScan = async () => {
     try {
       const list = await invoke<CronJobRow[]>("list_watchlist_scan_crons");
@@ -227,6 +288,12 @@ export function ScheduledAnalysisTab() {
       .then((list) => {
         if (cancelled) { return; }
         if (Array.isArray(list)) { setTrendJobs(list); }
+      })
+      .catch(() => {});
+    invoke<CronJobRow[]>("list_decision_backtest_crons")
+      .then((list) => {
+        if (cancelled) { return; }
+        if (Array.isArray(list)) { setBtJobs(list); }
       })
       .catch(() => {});
     return () => {
@@ -491,6 +558,86 @@ export function ScheduledAnalysisTab() {
               <Popconfirm
                 title={t("stockAnalysis.scheduledAnalysis.confirmDelete")}
                 onConfirm={() => deleteRefl(j.id)}
+              >
+                <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </div>
+          ))}
+      </Card>
+
+      {/* 决策回测（decision-backtest）：历史荐股 → T+N 实盘 K 线 → 命中率 + 因子 IC */}
+      <Card
+        size="small"
+        title={t("stockAnalysis.scheduledAnalysis.decisionBacktest")}
+        styles={{ body: { padding: "8px 12px" } }}
+        extra={
+          <Button size="small" icon={<PlusOutlined />} onClick={createBt}>
+            {t("stockAnalysis.scheduledAnalysis.create")}
+          </Button>
+        }
+      >
+        <div className="flex items-center gap-3 flex-wrap">
+          <Select
+            size="small"
+            mode="multiple"
+            style={{ width: 190 }}
+            value={btWindows}
+            onChange={setBtWindows}
+            options={BT_WINDOWS.map((n) => ({
+              value: n,
+              label: t("stockAnalysis.scheduledAnalysis.decisionBacktestWindow", { n }),
+            }))}
+          />
+          <Select
+            size="small"
+            style={{ width: 130 }}
+            value={btPeriod}
+            onChange={setBtPeriod}
+            options={[
+              { label: t("stockAnalysis.scheduledAnalysis.decisionBacktestPeriodAll"), value: "all" },
+              { label: t("stockAnalysis.scheduledAnalysis.period.short"), value: "short" },
+              { label: t("stockAnalysis.scheduledAnalysis.period.mid"), value: "mid" },
+              { label: t("stockAnalysis.scheduledAnalysis.period.long"), value: "long" },
+            ]}
+          />
+          <Select
+            size="small"
+            style={{ width: 180 }}
+            value={btCron}
+            onChange={setBtCron}
+            options={[
+              { label: t("stockAnalysis.scheduledAnalysis.cron.daily0700"), value: "0 7 * * *" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyClose"), value: "30 15 * * *" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.daily1800"), value: "0 18 * * *" },
+              { label: t("stockAnalysis.scheduledAnalysis.cron.weeklyMon"), value: "0 9 * * 1" },
+            ]}
+          />
+          <span className="text-xs text-gray-400">
+            {t("stockAnalysis.scheduledAnalysis.decisionBacktestMaxPicks")}
+          </span>
+          <InputNumber
+            size="small"
+            min={1}
+            max={2000}
+            step={50}
+            style={{ width: 100 }}
+            value={btMaxPicks}
+            onChange={(v) => v != null && setBtMaxPicks(v)}
+          />
+        </div>
+        <div className="text-xs text-gray-500 mt-1">
+          {t("stockAnalysis.scheduledAnalysis.decisionBacktestHint")}
+        </div>
+        {btJobs.length === 0
+          ? <div className="text-xs text-gray-400 mt-2">{t("stockAnalysis.scheduledAnalysis.noTask")}</div>
+          : btJobs.map((j) => (
+            <div key={j.id} className="flex items-center gap-2 mt-2">
+              <Switch size="small" checked={j.status === "active"} onChange={(c) => toggleBt(j, c)} />
+              <span className="text-xs">{j.description}</span>
+              <Tag className="text-xs m-0 font-mono">{j.schedule}</Tag>
+              <Popconfirm
+                title={t("stockAnalysis.scheduledAnalysis.confirmDelete")}
+                onConfirm={() => deleteBt(j.id)}
               >
                 <Button size="small" type="text" danger icon={<DeleteOutlined />} />
               </Popconfirm>

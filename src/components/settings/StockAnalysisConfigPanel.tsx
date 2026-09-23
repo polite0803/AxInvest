@@ -256,12 +256,17 @@ interface ValuationParamsConfig {
   bondYield: number;
 }
 
+// ⚠️ **等式门禁目标**：必须与后端 `ValuationParams::default()` **逐字段相等**
+// （后者派生自 `astock-data::mcp_tools` 的单一真相源常量）。
+// 前端引用不到 Rust 常量，此处只能手抄 ⇒ 由 `scripts/check-valuation-defaults-parity.mjs`
+// 做等式校验（不一致即 CI 红），勿手工"顺手改一个"。
+// 用途仅限「`get_valuation_params` 调用失败」时的兜底显示；正常路径会被后端返回值覆盖。
 const DEFAULT_VALUATION_PARAMS: ValuationParamsConfig = {
-  perpetualGrowth: 0.03,
-  discountRate: 0.10,
-  defaultGrowth: 0.08,
-  minGrowth: 0.02,
-  maxGrowth: 0.30,
+  perpetualGrowth: 0.013,
+  discountRate: 0.077,
+  defaultGrowth: 0.12,
+  minGrowth: -0.3,
+  maxGrowth: 0.3,
   forecastYears: 5,
   bondYield: 4.4,
 };
@@ -936,8 +941,11 @@ export function StockAnalysisConfigPanel(_props: Props) {
       >
         <div className="sacp-vars">
           {([
-            ["perpetualGrowth", t("stockAnalysis.settings.valuation.perpetualGrowth"), "0.03 (3%)", 0, 0.20, 0.01],
-            ["discountRate", t("stockAnalysis.settings.valuation.discountRate"), "0.10 (10%)", 0.01, 0.30, 0.01],
+            // 2026-09-23: hint（建议值）同步到新口径 —— 旧 hint `0.03 (3%)` / `0.10 (10%)`
+            // 是校准前的漂移值，其中永续增长率 3% 现已**越过** `g_terminal ≤ r_f` 硬约束
+            // （r_f = 1.7%）⇒ 照 hint 填会得到一个会被守卫钳回并报信号的非法配置。
+            ["perpetualGrowth", t("stockAnalysis.settings.valuation.perpetualGrowth"), "0.015 (1.5%)", 0, 0.20, 0.01],
+            ["discountRate", t("stockAnalysis.settings.valuation.discountRate"), "0.077 (7.7%)", 0.01, 0.30, 0.01],
             ["defaultGrowth", t("stockAnalysis.settings.valuation.defaultGrowth"), "0.08 (8%)", 0.01, 0.50, 0.01],
             ["minGrowth", t("stockAnalysis.settings.valuation.minGrowth"), "0.02 (2%)", 0, 0.20, 0.01],
             ["maxGrowth", t("stockAnalysis.settings.valuation.maxGrowth"), "0.30 (30%)", 0.05, 1.00, 0.01],

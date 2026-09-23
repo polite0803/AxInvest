@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import type { LearnSkillInput, LearnSkillResult, PendingSkillOperation, SkillLearningConfig } from "@/types";
 import { App, Button, Divider, Empty, Form, Input, Select, Space, Switch, Tag, Tooltip } from "antd";
@@ -23,7 +24,7 @@ export function SkillLearningPanel() {
       const ops = await invoke<PendingSkillOperation[]>("get_pending_skill_operations");
       setPendingOps(ops);
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 
@@ -32,7 +33,7 @@ export function SkillLearningPanel() {
       const cfg = await invoke<SkillLearningConfig>("get_skill_learning_config");
       setConfig(cfg);
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 
@@ -66,7 +67,7 @@ export function SkillLearningPanel() {
       }
       learnForm.resetFields();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     } finally {
       setLearning(false);
     }
@@ -78,7 +79,7 @@ export function SkillLearningPanel() {
       message.success(t("skillLearning.approved"));
       loadPending();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 
@@ -88,7 +89,7 @@ export function SkillLearningPanel() {
       message.success(t("skillLearning.rejected"));
       loadPending();
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 
@@ -102,7 +103,7 @@ export function SkillLearningPanel() {
       setConfig(next);
       message.success(t("skillLearning.configSaved"));
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }
 

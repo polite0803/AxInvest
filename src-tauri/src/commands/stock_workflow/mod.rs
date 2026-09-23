@@ -18,7 +18,11 @@ pub mod hooks;
 pub mod misc;
 pub mod reco_history;
 pub mod reflection;
+// M3：命中率统计只读命令（reflection_stats），消费 strategy_performance 聚合
+pub mod reflection_stats;
+pub mod rhai_bottleneck;
 pub mod rhai_pm;
+pub mod rhai_registry;
 pub mod serenity;
 pub mod sim_hook;
 

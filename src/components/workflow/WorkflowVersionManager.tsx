@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Phase 4: WorkflowVersionManager — 工作流版本管理
 
+import { showBackendError } from "@/lib/errorI18n";
 import { useWorkflowStore } from "@/stores/feature/workflowStore";
 import type { WorkflowDefinition, WorkflowVersion } from "@/types";
 import { App, Button, Drawer, Empty, Popconfirm, Space, Table, Tag, Timeline, Typography } from "antd";
@@ -37,7 +38,7 @@ export function WorkflowVersionManager({ workflow, open, onClose }: WorkflowVers
       const v = await getVersionHistory(workflow.id);
       setVersions(v);
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     } finally {
       setLoading(false);
     }
@@ -57,7 +58,7 @@ export function WorkflowVersionManager({ workflow, open, onClose }: WorkflowVers
         message.success(t("workflow.version.restoreSuccess", { version }));
         loadVersions();
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [workflow.id, restoreVersion, loadVersions, message, t],

@@ -56,7 +56,17 @@ impl RiskTier {
     /// - backtest_strategy.rs: 极高/高/低（3 级混用）
     pub fn from_risk_str(s: &str) -> Self {
         let s = s.trim();
-        if s.contains("极高") || s.contains("极高风险") {
+        // 2026-09-21: 补 `extreme` / `critical` 英文别名 —— 同级 high/medium/low 都已配
+        //   ASCII 别名（`eq_ignore_ascii_case`），唯独最高档只认中文「极高」，是漏配。
+        //   后果：英文值域 `EXTREME` 会静默落到 `Medium` 兜底 ⇒ **极高风险的
+        //   「禁止开新仓」失效**（`forbid_new_position()` 只对 Extreme 为真），
+        //   而同一档在中文值域下是生效的 —— 同一语义因书写形态不同而结论不同（fail-open）。
+        //   消费端：`portfolio_formula::portfolio_risk_gate` 的 R-200 否决、
+        //   `portfolio_formula::apply_risk_veto` 的「极高风险禁止持仓」。
+        if s.contains("极高")
+            || s.eq_ignore_ascii_case("extreme")
+            || s.eq_ignore_ascii_case("critical")
+        {
             RiskTier::Extreme
         } else if s.contains("中高") {
             RiskTier::MediumHigh

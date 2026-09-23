@@ -1,4 +1,15 @@
-// i18n-exempt: 配置映射表/业务数据字符串，非用户可见 UI 文案
+import {
+  getCatalystDirectionColor,
+  getCatalystDirectionTKey,
+  getCatalystTimelineTKey,
+  getChecklistCategoryTKey,
+  getDashboardActionColor,
+  getDashboardActionTKey,
+  getDashboardSeverityColor,
+  getDashboardSeverityTKey,
+  getDashboardTrendColor,
+  getDashboardTrendTKey,
+} from "@/lib/stock-analysis-utils";
 import { useSettingsStore } from "@/stores";
 import type { Catalyst, ChecklistItem, DashboardReport, RiskAlert } from "@/types";
 import { AlertOutlined, BulbOutlined, CheckCircleOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
@@ -7,52 +18,6 @@ import { useTranslation } from "react-i18next";
 import { ReportMarkdown } from "./ReportMarkdown";
 
 const { Text, Title } = Typography;
-
-/** 根据动作返回对应颜色 */
-function actionColor(action: string): string {
-  switch (action) {
-    case "强烈买入":
-      return "#f5222d";
-    case "买入":
-      return "#fa541c";
-    case "增持":
-      return "#fa8c16";
-    case "持有":
-      return "#8c8c8c";
-    case "减持":
-      return "#52c41a";
-    case "卖出":
-      return "#13c2c2";
-    default:
-      return "#8c8c8c";
-  }
-}
-
-/** 根据趋势返回对应颜色 */
-function trendColor(trend: string): string {
-  switch (trend) {
-    case "看多":
-      return "#f5222d";
-    case "看空":
-      return "#52c41a";
-    default:
-      return "#8c8c8c";
-  }
-}
-
-/** 根据风险等级返回对应颜色 */
-function severityColor(severity: string): string {
-  switch (severity) {
-    case "高":
-      return "red";
-    case "中":
-      return "orange";
-    case "低":
-      return "green";
-    default:
-      return "default";
-  }
-}
 
 /** 格式化可选数字 */
 function fmtNum(v?: number | null): string {
@@ -85,7 +50,9 @@ function RiskAlertsSection({ alerts }: { alerts: RiskAlert[] }) {
       <Space orientation="vertical" style={{ width: "100%" }}>
         {alerts.map((alert, idx) => (
           <div key={idx}>
-            <Tag color={severityColor(alert.severity)}>{alert.severity}</Tag>
+            <Tag color={getDashboardSeverityColor(alert.severity)}>
+              {t(getDashboardSeverityTKey(alert.severity) ?? alert.severity)}
+            </Tag>
             {alert.source && <Tag>{alert.source}</Tag>}
             <ReportMarkdown content={alert.description ?? ""} isDark={isDark} />
           </div>
@@ -118,8 +85,10 @@ function CatalystsSection({ catalysts }: { catalysts: Catalyst[] }) {
       <Space orientation="vertical" style={{ width: "100%" }}>
         {catalysts.map((cat, idx) => (
           <div key={idx}>
-            <Tag color={cat.direction === "利好" ? "red" : "green"}>{cat.direction}</Tag>
-            {cat.timeline && <Tag>{cat.timeline}</Tag>}
+            <Tag color={getCatalystDirectionColor(cat.direction)}>
+              {t(getCatalystDirectionTKey(cat.direction) ?? cat.direction)}
+            </Tag>
+            {cat.timeline && <Tag>{t(getCatalystTimelineTKey(cat.timeline) ?? cat.timeline)}</Tag>}
             <ReportMarkdown content={cat.description ?? ""} isDark={isDark} />
             {cat.confidenceScore !== null && cat.confidenceScore !== undefined && (
               <Text type="secondary" style={{ marginLeft: 8 }}>
@@ -156,7 +125,7 @@ function ChecklistSection({ items }: { items: ChecklistItem[] }) {
       <Space orientation="vertical" style={{ width: "100%" }}>
         {items.map((item, idx) => (
           <Checkbox key={idx} checked={item.checked} disabled>
-            <Tag>{item.category}</Tag>
+            <Tag>{t(getChecklistCategoryTKey(item.category) ?? item.category)}</Tag>
             <ReportMarkdown content={item.description ?? ""} isDark={isDark} />
           </Checkbox>
         ))}
@@ -221,10 +190,12 @@ export function DashboardReportPreview({ report }: { report: DashboardReport }) 
         }
       >
         <Space wrap style={{ marginBottom: 8 }}>
-          <Tag color={actionColor(report.action)} style={{ fontSize: 14, padding: "2px 8px" }}>
-            {report.action}
+          <Tag color={getDashboardActionColor(report.action)} style={{ fontSize: 14, padding: "2px 8px" }}>
+            {t(getDashboardActionTKey(report.action))}
           </Tag>
-          <Tag color={trendColor(report.trend)}>{report.trend}</Tag>
+          <Tag color={getDashboardTrendColor(report.trend)}>
+            {t(getDashboardTrendTKey(report.trend) ?? report.trend)}
+          </Tag>
           <Text>
             📊 {t("stockAnalysis.dashboard.score")}:{" "}
             <Text strong style={{ color: scoreColor }}>{report.score}/100</Text>
@@ -276,6 +247,17 @@ export function DashboardReportPreview({ report }: { report: DashboardReport }) 
                   {")"}
                 </Text>
               )}
+            </Text>
+          )}
+          {
+            /* 2026-09-22: 区间口径标注 —— 用户实证质问「十几块到四十几块有什么用」。
+              该区间的宽度几乎全部来自**增长率假设**（同一个 FCF 锚 ×0.6/×1.0/×1.5），
+              它不是「公司值 low~high 元」的概率区间。不标注口径 = 让读者把假设扫描
+              当成估值结论（`AUDIT-300642-run-variance-2026-09-22.md`）。 */
+          }
+          {intrinsicRange && report.intrinsicValueLow != null && report.intrinsicValueHigh != null && (
+            <Text type="secondary" className="text-xs">
+              {t("stockAnalysis.dashboard.intrinsicValueBandNote")}
             </Text>
           )}
           <Text>

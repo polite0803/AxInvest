@@ -16,16 +16,32 @@ pub async fn start_background_services(
     app_dir: std::path::PathBuf,
     _tray_language: String,
 ) {
-    // [2026-09-09 修复] 恢复被误删的共享 Rhai Engine pm_* 注册（原
-    // register_portfolio_mgr_rhai_functions，fork 清理「AxAgent 残留」时连调用带实现
-    // 一起移除，只留下下方 doc 注释）。workflow code_executor 的 shared_rhai_engine
-    // 仅通过此回调获得 pm_* 函数；缺失会导致 data-quality.rhai /
-    // portfolio-mgr.rhai / portfolio-risk-gate.rhai 全部报
-    // Function not found（2026-09-09 data-quality 节点 VALIDATION_FAILED 实证）。
-    // 必须在任何工作流执行前调用（shared_rhai_engine 是 OnceLock 单例）。
-    axagent_rt_workflow::work_engine::executors::register_shared_engine_initializer(Box::new(
-        crate::commands::stock_workflow::rhai_pm::register_pm_functions,
-    ));
+    // [2026-09-09 修复 / 2026-09-22 收敛] 共享 Rhai Engine 的 AxInvest 宿主函数集注册。
+    //
+    // 历史：此处曾先后两次调用 register_shared_engine_initializer（pm_* 一次、
+    // bottleneck_* 一次），而该通道当时是**单槽** OnceLock（容量 1）
+    // ⇒ 第二次注册被静默丢弃，bottleneck_node_score 从未进入共享 Engine
+    //（2026-09-22 实证：只打 1 条 WARN，且其文案「已初始化」属误报）。
+    //
+    // 现改为注册**一个**入口 register_axinvest_rhai_functions（函数集唯一定义点，
+    // 见 commands/stock_workflow/rhai_registry.rs）：新增宿主函数只改那一处，
+    // 且共享 Engine 与本地自建 Engine（What-If / rerun）的函数集不再漂移。
+    // 注册通道本身也已由单槽改为可增长队列，冻结后注册返回 Err 而不再静默丢弃。
+    //
+    // 缺失后果实证：pm_* 缺失曾使 data-quality.rhai / portfolio-mgr.rhai /
+    // portfolio-risk-gate.rhai 全部报 Function not found（2026-09-09 data-quality
+    // 节点 VALIDATION_FAILED）。必须在任何工作流执行前调用 —— Engine 首次使用即冻结。
+    if let Err(e) = axagent_rt_workflow::work_engine::executors::register_shared_engine_initializer(
+        Box::new(crate::commands::stock_workflow::rhai_registry::register_axinvest_rhai_functions),
+    ) {
+        // 走到这里说明启动顺序已被破坏（Engine 在本函数之前就被使用过）。
+        // 不 panic：函数缺失已是既成事实，让应用起来并打 error 级日志更易定位
+        //（原实现只在 warn 级记一句，且文案把根因指向了错误的「初始化时序」）。
+        tracing::error!("[init] 共享 Rhai Engine 宿主函数注册失败：{e}");
+    }
+    // [2026-09-20 收敛项已并入上方单一入口] bottleneck_node_score 的注册
+    //（权威语义 = bottleneck-calc.rhai 原行为）由 rhai_registry 统一承载，
+    // 此处不再单独注册 —— 历史上正是「两处独立注册 + 单槽通道」构成本次缺陷。
     init_mcp_oauth(state);
     start_auto_backup(app, state, app_dir.clone());
     start_webdav_sync(app, state, app_dir.clone());
@@ -487,9 +503,12 @@ fn start_pty_event_forwarder(app: &tauri::AppHandle, state: &AppState) {
 /// （历史备注）本函数头上曾挂着一段 P1-D10 的 doc 注释，描述
 /// 「在应用启动时调用 register_shared_engine_initializer 注入 pm_* 函数」，
 /// 但对应的调用在 fork 清理「AxAgent 残留」时被整体移除，只剩注释——
-/// 2026-09-09 已在 `start_background_services` 开头恢复该调用，
-/// pm_* 注册的权威实现见
-/// `crate::commands::stock_workflow::rhai_pm::register_pm_functions`。
+/// 2026-09-09 已在 `start_background_services` 开头恢复该调用。
+/// 2026-09-22 起注册的是**单个**入口
+/// `crate::commands::stock_workflow::rhai_registry::register_axinvest_rhai_functions`
+/// —— 它才是「AxInvest 宿主函数集」的唯一定义点；`rhai_pm` / `rhai_bottleneck`
+/// 只是被它调用的函数体实现。此处若再直接调用 `rhai_pm::register_pm_functions`，
+/// 会重新引入「两处独立注册」的同型缺陷。
 fn init_mcp_oauth(state: &AppState) {
     let master_key = state.harness.master_key_owned();
     let crypto = std::sync::Arc::new(
@@ -1909,9 +1928,92 @@ fn start_text_grad_analysis(state: &AppState) {
     });
 }
 
+/// 向 `WorkEngine` 注入工具解析器 —— 让工作流里引用的工具名按需解析成可执行回调。
+///
+/// ⚠ **这是工作流能真正跑起来的必要条件**。`run_workflow` 的注册段
+/// （`engine/mod.rs:2287-2332`）依次尝试：① 本函数注入的 resolver、
+/// ② `tool_registry`（`set_tool_registry`，**生产路径从未注入**，仅测试在用）、
+/// ③ Rhai 脚本缓存。三者皆空时 `tool_executor.rs:177` 报「工具 '{}' 未注册」并判该节点失败。
+///
+/// 2026-09-23 抽成**公共函数**（原先是 `start_cron_scheduler` 内的私有块）：
+/// 离线 bin（如 `axagent-batch-rerun`）只调 `create_app_state`、既不启后台服务也无 `AppHandle`，
+/// 因而拿不到 resolver —— 实测后果是 as-of 重跑的 **数据节点全部失败**
+/// （`TOOL_CALL_FAILED: 工具 'get_stock_kline' 未注册`，D15）。
+/// 该块本身**不依赖 `app`**，故可安全抽出；抽出的另一个收益是：
+/// bin 与 Tauri 从此走**同一条装配路径**，不会再出现「bin 能跑而应用不能」的路径偏差。
+pub async fn inject_work_engine_tool_resolver(state: &AppState) {
+    let registry = state.local_tool_registry.clone();
+    let work_engine = state.work_engine.clone();
+    let resolver: axagent_runtime::work_engine::ToolResolver =
+        std::sync::Arc::new(move |tool_name: String| {
+            let registry = registry.clone();
+            let work_engine = work_engine.clone();
+            tracing::info!("[ToolResolver] 被调用: tool_name={}", tool_name);
+            Box::pin(async move {
+                let reg = registry.lock().await;
+                let known = reg.list_all_tool_names().contains(&tool_name)
+                    || reg.mcp.mcp_tools.contains_key(&tool_name);
+                tracing::info!("[ToolResolver] 解析 tool_name={}, known={}", tool_name, known);
+                if known {
+                    let registry = registry.clone();
+                    let cb: axagent_runtime::work_engine::ToolCallback =
+                        std::sync::Arc::new(move |tn: String, args: serde_json::Value| {
+                            let registry = registry.clone();
+                            Box::pin(async move {
+                                let reg = registry.lock().await;
+                                let input_str = serde_json::to_string(&args)
+                                    .unwrap_or_else(|_| "{}".to_string());
+                                match reg.execute(&tn, &input_str).await {
+                                    Ok(output) => {
+                                        Ok(serde_json::json!({"content": output.content}))
+                                    },
+                                    Err(e) => Err(format!("Tool execution error: {}", e)),
+                                }
+                            })
+                        });
+                    Some(cb)
+                } else if let Some(template_id) = tool_name.strip_prefix("workflow::") {
+                    // 工作流注册为工具：workflow::<template_id>
+                    let engine = work_engine.clone();
+                    let template_id = template_id.to_string();
+                    let cb: axagent_runtime::work_engine::ToolCallback =
+                        std::sync::Arc::new(move |_tn: String, args: serde_json::Value| {
+                            let engine = engine.clone();
+                            let tid = template_id.clone();
+                            Box::pin(async move {
+                                let mut opts = axagent_runtime::work_engine::RunOptions::default();
+                                if let Some(input) = args.get("input") {
+                                    opts.input = Some(input.clone());
+                                }
+                                match engine.run_workflow(&tid, opts).await {
+                                    Ok(wf) => Ok(serde_json::json!({
+                                        "content": serde_json::json!({
+                                            "status": format!("{:?}", wf.status),
+                                            "results": wf.results,
+                                        }).to_string()
+                                    })),
+                                    Err(e) => {
+                                        Err(format!("Workflow tool '{}' failed: {:?}", tid, e))
+                                    },
+                                }
+                            })
+                        });
+                    Some(cb)
+                } else {
+                    tracing::warn!(
+                        "[ToolResolver] 工具 '{}' 未匹配任何解析路径 (known=false, not workflow::)",
+                        tool_name
+                    );
+                    None
+                }
+            })
+        });
+    // 复用 Tauri 全局 runtime，避免一次性创建/销毁 runtime 的开销。
+    state.work_engine.set_tool_resolver(resolver).await;
+}
+
 async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     use axagent_runtime::cron::{CronExecutor, CronScheduler};
-    use std::sync::Arc;
 
     // 荐股定时任务的推送通道是 OS 桌面通知，需要 AppHandle。
     // 此前该分支整个不存在，所以没传 app；恢复接线后必须带上。
@@ -1923,78 +2025,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     axagent_tools::tools::cron::init_cron_store(store.clone());
 
     // 设置工具解析器（从全局 registry 按需自动注册工作流中引用的工具）
-    {
-        let registry = state.local_tool_registry.clone();
-        let work_engine = state.work_engine.clone();
-        let resolver: axagent_runtime::work_engine::ToolResolver = std::sync::Arc::new(
-            move |tool_name: String| {
-                let registry = registry.clone();
-                let work_engine = work_engine.clone();
-                tracing::info!("[ToolResolver] 被调用: tool_name={}", tool_name);
-                Box::pin(async move {
-                    let reg = registry.lock().await;
-                    let known = reg.list_all_tool_names().contains(&tool_name)
-                        || reg.mcp.mcp_tools.contains_key(&tool_name);
-                    tracing::info!("[ToolResolver] 解析 tool_name={}, known={}", tool_name, known);
-                    if known {
-                        let registry = registry.clone();
-                        let cb: axagent_runtime::work_engine::ToolCallback =
-                            std::sync::Arc::new(move |tn: String, args: serde_json::Value| {
-                                let registry = registry.clone();
-                                Box::pin(async move {
-                                    let reg = registry.lock().await;
-                                    let input_str = serde_json::to_string(&args)
-                                        .unwrap_or_else(|_| "{}".to_string());
-                                    match reg.execute(&tn, &input_str).await {
-                                        Ok(output) => {
-                                            Ok(serde_json::json!({"content": output.content}))
-                                        },
-                                        Err(e) => Err(format!("Tool execution error: {}", e)),
-                                    }
-                                })
-                            });
-                        Some(cb)
-                    } else if let Some(template_id) = tool_name.strip_prefix("workflow::") {
-                        // 工作流注册为工具：workflow::<template_id>
-                        let engine = work_engine.clone();
-                        let template_id = template_id.to_string();
-                        let cb: axagent_runtime::work_engine::ToolCallback =
-                            std::sync::Arc::new(move |_tn: String, args: serde_json::Value| {
-                                let engine = engine.clone();
-                                let tid = template_id.clone();
-                                Box::pin(async move {
-                                    let mut opts =
-                                        axagent_runtime::work_engine::RunOptions::default();
-                                    if let Some(input) = args.get("input") {
-                                        opts.input = Some(input.clone());
-                                    }
-                                    match engine.run_workflow(&tid, opts).await {
-                                        Ok(wf) => Ok(serde_json::json!({
-                                            "content": serde_json::json!({
-                                                "status": format!("{:?}", wf.status),
-                                                "results": wf.results,
-                                            }).to_string()
-                                        })),
-                                        Err(e) => {
-                                            Err(format!("Workflow tool '{}' failed: {:?}", tid, e))
-                                        },
-                                    }
-                                })
-                            });
-                        Some(cb)
-                    } else {
-                        tracing::warn!(
-                            "[ToolResolver] 工具 '{}' 未匹配任何解析路径 (known=false, not workflow::)",
-                            tool_name
-                        );
-                        None
-                    }
-                })
-            },
-        );
-        // 复用 Tauri 全局 runtime，避免一次性创建/销毁 runtime 的开销。
-        state.work_engine.set_tool_resolver(resolver).await;
-    }
+    inject_work_engine_tool_resolver(state).await;
 
     // 设置 RAG 知识源检索回调（供工作流 Agent 节点从知识库/记忆/Wiki 检索上下文）
     {
@@ -2096,9 +2127,18 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 );
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    let _ = store
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
+                    if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
                 }
             });
             return;
@@ -2166,9 +2206,17 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 let sink_ref = if should_deliver { Some(sink.as_ref()) } else { None };
                 store.record_run_with_delivery(&job_id, result, sink_ref).await;
                 if !recurring {
-                    let _ = store
+                    // 同上方：`set_status` 返 bool（非 Result），false ⇒ 一次性任务留 Active ⇒ 重复跑。
+                    if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
                 }
             });
             return;
@@ -2222,12 +2270,20 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
-                            let _ = store
+                            // 同上：`set_status` 返 bool（非 Result），false ⇒ 一次性任务留 Active ⇒ 重复跑。
+                            if !store
                                 .set_status(
                                     &job_id,
                                     axagent_runtime_core::CronJobStatus::Disabled,
                                 )
-                                .await;
+                                .await
+                            {
+                                tracing::warn!(
+                                    "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                                     （未找到该任务或持久化失败，下次到点会重复跑）",
+                                    job_id
+                                );
+                            }
                         }
                         return;
                     },
@@ -2307,6 +2363,10 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     &picks,
                 );
                 if !picks.is_empty() {
+                    // ⚠ 桌面通知命令仅存在于非 mobile 构建（`commands::desktop` 被
+                    // `#[cfg(not(mobile))]` 排除）；Android(target=mobile) 下整个块剔除，
+                    // 通知不具备跨端意义，跳过即可（结果已落库）。
+                    #[cfg(not(mobile))]
                     if let Err(e) = crate::commands::desktop::send_desktop_notification(
                         app,
                         title.clone(),
@@ -2351,9 +2411,17 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 let sink_ref = if picks.is_empty() { None } else { Some(sink.as_ref()) };
                 store.record_run_with_delivery(&job_id, result, sink_ref).await;
                 if !recurring {
-                    let _ = store
+                    // 同上方：`set_status` 返 bool（非 Result），false ⇒ 一次性任务留 Active ⇒ 重复跑。
+                    if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
                 }
             });
             return;
@@ -2389,9 +2457,17 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     };
                     store.record_run(&job_id, result).await;
                     if !recurring {
-                        let _ = store
+                        // 同上：`set_status` 返 bool（非 Result），false ⇒ 一次性任务留 Active ⇒ 重复跑。
+                        if !store
                             .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                            .await;
+                            .await
+                        {
+                            tracing::warn!(
+                                "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                                 （未找到该任务或持久化失败，下次到点会重复跑）",
+                                job_id
+                            );
+                        }
                     }
                     return;
                 }
@@ -2443,9 +2519,18 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 };
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    let _ = store
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
+                    if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
                 }
             });
             return;
@@ -2490,12 +2575,20 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
-                            let _ = store
+                            // 同上：`set_status` 返 bool（非 Result），false ⇒ 一次性任务留 Active ⇒ 重复跑。
+                            if !store
                                 .set_status(
                                     &job_id,
                                     axagent_runtime_core::CronJobStatus::Disabled,
                                 )
-                                .await;
+                                .await
+                            {
+                                tracing::warn!(
+                                    "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                                     （未找到该任务或持久化失败，下次到点会重复跑）",
+                                    job_id
+                                );
+                            }
                         }
                         return;
                     },
@@ -2536,9 +2629,18 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     };
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    let _ = store
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
+                    if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
                 }
             });
             return;
@@ -2608,12 +2710,20 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
-                            let _ = store
+                            // 同上：`set_status` 返 bool（非 Result），false ⇒ 一次性任务留 Active ⇒ 重复跑。
+                            if !store
                                 .set_status(
                                     &job_id,
                                     axagent_runtime_core::CronJobStatus::Disabled,
                                 )
-                                .await;
+                                .await
+                            {
+                                tracing::warn!(
+                                    "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                                     （未找到该任务或持久化失败，下次到点会重复跑）",
+                                    job_id
+                                );
+                            }
                         }
                         return;
                     },
@@ -2662,9 +2772,165 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 };
                 store.record_run(&job_id, result).await;
                 if !recurring {
-                    let _ = store
+                    // `set_status` 返 **bool**（非 Result，见 crates/runtime-core/src/cron_job.rs:491）：
+                    // false ⇒ 一次性任务仍留 Active ⇒ 下次到点重复跑，故显式判 false 并记 warn。
+                    if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
+                }
+            });
+            return;
+        }
+        // 决策回测（B3 自动触发）：task_type = decision-backtest
+        //
+        // [2026-09-20 接线] 此前 `run_decision_backtest` 的实现完整（T+N 命中率 +
+        //   9 因子 IC + 回写 `stock_analyses.outcome` + `lesson_applications`），
+        //   却**全仓零调用方**：前端 `src/**` 搜不到 `runDecisionBacktest` /
+        //   `hitRate` / `decisionValidation`，本 dispatch 也没有分支
+        //   ⇒ `stock_analyses.outcome` 只能靠人手触发。B3 闭环断在
+        //   「没人触发」这一环，而不是逻辑缺失。
+        //
+        // 现在走 `run_decision_backtest_inner`（从命令里抽出的同一实现，
+        // 命令层是它的薄包装）—— 与上方反思分支复用 `run_batch_reflection_inner`
+        // 是同一形态：**cron 不调命令**，因为命令要 `State<'_, AppState>`，
+        // 而本 handler 拿不到 `State`（只捕获 db / client 的 `Arc`）。
+        //
+        // 配置 JSON 存 `CronJob.prompt`（同 batch-reflection / validate-decisions）：
+        //   { tPlusNList?, excludeSynthetic?, maxPicks?, dryRun?, periodFilter? }
+        //   空串 ⇒ 全默认。dryRun 由 `create_decision_backtest_cron` 恒写 false
+        //   （定时任务算完即弃 = 零产物）；此处再加一道强制，防有人手写 job 绕过。
+        if job.task_type.as_deref()
+            == Some(crate::commands::backtest_validation::DECISION_BACKTEST_TASK_TYPE)
+        {
+            let store = cron_store.clone();
+            let db = sync_db.clone();
+            let client = astock_client.clone();
+            let job_id = job.id.clone();
+            let job_name = job.name.clone();
+            let recurring = job.recurring;
+            let prompt = job.prompt.clone();
+            tokio::task::spawn(async move {
+                let started = axagent_runtime_core::cron_job::now_millis();
+                let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
+
+                // 1. 解析配置
+                let mut request =
+                    match crate::commands::backtest_validation::parse_decision_backtest_config(
+                        &prompt,
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::error!(
+                                "[CronScheduler] 决策回测任务 '{}' 配置解析失败: {e}",
+                                job_name
+                            );
+                            let result = axagent_runtime_core::TaskRunResult {
+                                success: false,
+                                output: None,
+                                error: Some(e),
+                                duration_ms: elapsed(),
+                                executed_at: started,
+                            };
+                            store.record_run(&job_id, result).await;
+                            if !recurring {
+                                // ⚠ `set_status` 返回 **bool**（是否找到并更新，见
+                                // `crates/runtime-core/src/cron_job.rs:491`），**不是** `Result`
+                                // ⇒ 不可照抄同 crate `:392` 那条 `upsert_job` 的
+                                // `if let Err(e)` 形态（两函数**返回类型不同型**，照抄会 E0308）。
+                                // 真正的风险是返回 false 时一次性任务仍留 Active ⇒ 下次到点重复跑。
+                                // 显式处理而非 `let _ =`（`check-contracts.mjs` 的 [H] 棘轮只减不增）。
+                                if !store
+                                    .set_status(
+                                        &job_id,
+                                        axagent_runtime_core::CronJobStatus::Disabled,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(
+                                        "[CronScheduler] 决策回测任务 '{}' 置为 Disabled 失败\
+                                         （未找到该任务或持久化失败，下次到点会重复跑）",
+                                        job_id
+                                    );
+                                }
+                            }
+                            return;
+                        },
+                    };
+                if request.dry_run == Some(true) {
+                    tracing::warn!(
+                        "[CronScheduler] 决策回测任务 '{}' 配置里 dryRun=true —— 定时任务强制改 false，\
+                         否则算完不落库、任务报「成功」却零产物",
+                        job_name
+                    );
+                    request.dry_run = Some(false);
+                }
+
+                // 2. 跑一轮回测（内部含 T+N 拉 K 线、写 decision_validations、
+                //    回写 stock_analyses.outcome + lesson_applications）
+                let r = crate::commands::backtest_validation::run_decision_backtest_inner(
+                    &db, &client, request,
+                )
+                .await;
+
+                let result = match r {
+                    Ok(resp) => {
+                        let summary = format!(
+                            "written={} skipped={} data_source={} hit_rate_report={}",
+                            resp.written_count,
+                            resp.skipped_count,
+                            resp.data_source,
+                            serde_json::to_string(&resp.report)
+                                .unwrap_or_else(|_| "<序列化失败>".to_string())
+                        );
+                        tracing::info!(
+                            "[CronScheduler] 决策回测任务 '{}' 完成: {}",
+                            job_name,
+                            summary
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: true,
+                            output: Some(summary),
+                            error: None,
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            "[CronScheduler] 决策回测任务 '{}' 失败: {e}",
+                            job_name
+                        );
+                        axagent_runtime_core::TaskRunResult {
+                            success: false,
+                            output: None,
+                            error: Some(e),
+                            duration_ms: elapsed(),
+                            executed_at: started,
+                        }
+                    },
+                };
+                store.record_run(&job_id, result).await;
+                if !recurring {
+                    // 理由同上方解析失败分支：`set_status` 返回 bool（非 Result），
+                    // 返回 false 时「一次性回测任务仍是 Active」在界面上看不出来，
+                    // 下次到点会重复跑一遍。
+                    if !store
+                        .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 决策回测任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
                 }
             });
             return;
@@ -2714,9 +2980,17 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 store.record_run(&job_id, result).await;
                 // 非循环任务执行后禁用
                 if !recurring {
-                    let _ = store
+                    // 同上：`set_status` 返 bool（非 Result），false ⇒ 一次性任务留 Active ⇒ 重复跑。
+                    if !store
                         .set_status(&job_id, axagent_runtime_core::CronJobStatus::Disabled)
-                        .await;
+                        .await
+                    {
+                        tracing::warn!(
+                            "[CronScheduler] 一次性任务 '{}' 置为 Disabled 失败\
+                             （未找到该任务或持久化失败，下次到点会重复跑）",
+                            job_id
+                        );
+                    }
                 }
             });
         } else {

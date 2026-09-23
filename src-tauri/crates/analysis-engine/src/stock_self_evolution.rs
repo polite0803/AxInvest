@@ -97,6 +97,9 @@ pub enum EvolutionType {
 pub struct StockEvolutionResult {
     /// 计划 ID
     pub plan_id: String,
+    /// 触发原因（透传前端展示「为何进化」）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<EvolutionTrigger>,
     /// 进化类型
     pub evolution_type: EvolutionType,
     /// 参数进化结果（如果执行了）
@@ -143,8 +146,10 @@ pub struct StockSelfEvolutionEngine {
     /// 参数进化引擎（NumericEvolutionEngine 工厂）
     /// 每次进化创建新实例以避免状态污染
     parameter_config: TrajectoryEvolutionConfig,
-    /// 流程进化器
+    /// 流程进化器（默认接真实 `WorkflowEvolverImpl`，不再走 simulate 占位）
     workflow_evolver: Option<WorkflowEvolverImpl>,
+    /// 数据库连接（A/B 共用；`None` 时真DB 参数进化与落库均降级为兜底）
+    db: Option<sea_orm::DatabaseConnection>,
     /// 进化历史
     history: RwLock<EvolutionHistory>,
     /// 连续低质量计数
@@ -175,7 +180,9 @@ impl StockSelfEvolutionEngine {
                 validation_rounds: 0,
                 ..Default::default()
             },
-            workflow_evolver: None,
+            // 默认接真实流程进化器：不再让流程进化走 simulate 占位
+            workflow_evolver: Some(WorkflowEvolverImpl::with_defaults()),
+            db: None,
             history: RwLock::new(EvolutionHistory::default()),
             low_quality_count: RwLock::new(HashMap::new()),
             results_cache: RwLock::new(Vec::new()),
@@ -196,11 +203,70 @@ impl StockSelfEvolutionEngine {
         self
     }
 
+    /// 注入数据库连接：让参数进化走真DB（`evolution_optimizer::run_evolution`，
+    /// 基于 `strategy_performance` 复盘胜率），并让进化结果可落库回看。
+    ///
+    /// `new()` 构造（无库）的引擎保持原启发式参数进化 + simulate 流程进化兜底，
+    /// 既有单测不受影响。
+    pub fn with_db(mut self, db: sea_orm::DatabaseConnection) -> Self {
+        self.db = Some(db);
+        self
+    }
+
     /// 设置进化触发阈值
     pub fn with_trigger_threshold(mut self, threshold: u8, min_count: usize) -> Self {
         self.evolution_trigger_threshold = threshold;
         self.min_consecutive_low_score_count = min_count;
         self
+    }
+
+    /// 将本次进化结果（参数 / 流程 / 混合）落库到 `stock_evolution_history`，
+    /// 供前端事后回看「某次进化为何触发、改了啥、回测概要」。
+    ///
+    /// `db` 未注入（`new()` 构造的测试引擎）时静默跳过；落库失败仅 `warn!` 不阻断进化。
+    pub async fn persist_evolution(&self, plan: &EvolutionPlan, result: &StockEvolutionResult) {
+        let Some(db) = self.db.as_ref() else {
+            return;
+        };
+        use axagent_entities::stock_evolution_history::{ActiveModel, Entity};
+        use sea_orm::{EntityTrait, Set};
+
+        // 进化前质量分：优先从触发原因提取（LowQuality 精确；其余触发无携带，记 0）
+        let quality_before = match &plan.trigger {
+            EvolutionTrigger::LowQuality { last_score, .. } => last_score,
+            // 其余触发类型不携带质量分，此处保持实体类型不失真地用 0 占位
+            _ => &0,
+        };
+        let evolution_type = match plan.evolution_type {
+            EvolutionType::ParameterEvolution => "parameter",
+            EvolutionType::WorkflowEvolution => "workflow",
+            EvolutionType::HybridEvolution => "hybrid",
+        };
+        let parameter_json =
+            result.parameter_result.as_ref().map(|r| serde_json::to_string(r).unwrap_or_default());
+        let workflow_json =
+            result.workflow_result.as_ref().map(|r| serde_json::to_string(r).unwrap_or_default());
+
+        let status = if result.success { "success" } else { "failed" };
+
+        let row = ActiveModel {
+            id: Set(format!("evo-{}", plan.plan_id)),
+            plan_id: Set(plan.plan_id.clone()),
+            trigger: Set(serde_json::to_string(&plan.trigger).unwrap_or_default()),
+            evolution_type: Set(evolution_type.to_string()),
+            quality_before: Set(*quality_before),
+            parameter_result_json: Set(parameter_json),
+            workflow_result_json: Set(workflow_json),
+            status: Set(status.to_string()),
+            improvement_summary: Set(result.improvement_summary.clone()),
+            created_at: Set(chrono::Utc::now().timestamp_millis()),
+        };
+
+        if let Err(e) = Entity::insert(row).exec(db).await {
+            tracing::warn!("[StockSelfEvolution] 进化结果落库失败: {}", e);
+        } else {
+            tracing::info!("[StockSelfEvolution] 进化结果落库: plan_id={}", plan.plan_id);
+        }
     }
 
     /// 获取进化历史
@@ -276,11 +342,22 @@ impl StockSelfEvolutionEngine {
     }
 
     /// 执行参数进化
+    ///
+    /// 注入 `db` 时统一走真DB（`evolution_optimizer::run_evolution`，基于
+    /// `strategy_performance` 复盘胜率的 `weight*win_rate*confidence` 加权适应度），
+    /// 消除此前与启发式 fitness 的分叉；`db` 未注入时保留启发式作兜底（测试引擎无库）。
     pub async fn evolve_parameters(
         &self,
         reflections: &[Reflection],
     ) -> Result<(Option<EvolutionResult>, NumericEvolutionStats), String> {
-        // 使用反思数据构造适应度函数（空数据时使用默认质量分 5.0）
+        // 真DB 路径：统一到 evolution_optimizer（复盘胜率做 fitness）
+        if let Some(db) = self.db.as_ref() {
+            let result = crate::evolution_optimizer::run_evolution(db, None).await?;
+            let stats = result.evolution_stats.clone();
+            return Ok((Some(result), stats));
+        }
+
+        // db=None 兜底：启发式 fitness（仅测试引擎）
         let fitness_fn = make_fitness_fn_from_reflections(reflections);
 
         let mut engine = NumericEvolutionEngine::new(self.parameter_config.clone(), param_defs());
@@ -449,6 +526,32 @@ impl StockSelfEvolutionEngine {
         }
     }
 
+    /// 手动触发一次进化（用户在前端主动请求）
+    ///
+    /// 与自动触发共用同一 `run_evolution` 执行链（含落库回看），区别仅在触发原因为
+    /// `ManualTrigger`。不依赖反思报告，直接基于用户传入的 reason 构造计划。
+    ///
+    /// # 返回
+    /// 返回 `StockEvolutionResult`（含 `trigger` 原因、改动内容、回测/验证摘要，
+    /// 供前端「进化详情」透传展示）。
+    pub async fn trigger_manual_evolution(
+        &self,
+        reason: &str,
+        template_id: Option<&str>,
+    ) -> Result<StockEvolutionResult, String> {
+        let report = crate::stock_reflection::StockReflectionReport {
+            execution_id: format!("manual-{}", uuid::Uuid::new_v4()),
+            workflow_id: template_id.unwrap_or("stock-invest-default").to_string(),
+            should_trigger_evolution: true,
+            evolution_trigger_reason: Some(reason.to_string()),
+            ..Default::default()
+        };
+
+        let trigger = EvolutionTrigger::ManualTrigger { reason: reason.to_string() };
+        let plan = self.create_plan(&trigger, &report, template_id);
+        self.run_evolution(&plan).await
+    }
+
     /// 执行完整进化流程
     pub async fn run_evolution(
         &self,
@@ -456,6 +559,7 @@ impl StockSelfEvolutionEngine {
     ) -> Result<StockEvolutionResult, String> {
         let mut result = StockEvolutionResult {
             plan_id: plan.plan_id.clone(),
+            trigger: Some(plan.trigger.clone()),
             evolution_type: plan.evolution_type,
             parameter_result: None,
             workflow_result: None,
@@ -541,6 +645,9 @@ impl StockSelfEvolutionEngine {
                 cache.drain(0..drop);
             }
         }
+
+        // 进化结果落库（db 未注入时静默跳过，不阻断）
+        self.persist_evolution(plan, &result).await;
 
         Ok(result)
     }
@@ -907,6 +1014,12 @@ mod tests {
         assert_eq!(plan.evolution_type, EvolutionType::ParameterEvolution);
         assert!(plan.description.contains("参数"));
         assert!(!plan.plan_id.is_empty());
+    }
+
+    #[test]
+    fn default_workflow_evolver_wired() {
+        // A：默认即接真实 WorkflowEvolverImpl，流程进化不再走 simulate 占位
+        assert!(make_test_engine().workflow_evolver.is_some());
     }
 
     #[test]

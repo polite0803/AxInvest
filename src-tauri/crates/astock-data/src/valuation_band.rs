@@ -9,6 +9,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::types::ValuationSnapshot;
+
 /// 单一指标的"分位带"
 ///
 /// `percentile` 数组:索引 0..6 对应 [5, 10, 25, 50, 75, 90, 95] 分位值;
@@ -167,6 +169,58 @@ pub fn compute_valuation_band<S: FinancialSnapshotLike>(
     }
 }
 
+/// 把「回溯年数」换算成窗口起始日期（`YYYY-MM-DD`）—— **窗口口径的唯一来源**。
+///
+/// ## 为什么必须共享这一条（而不是各调用方自己算）
+///
+/// 估值带的结论**完全取决于窗口**：同一个 PE 在 3 年窗口与 8 年窗口里的分位可以差 30 个百分点。
+/// 本仓有**两条**互不相干的生产路径会算同一个 band：
+/// - 命令层 `commands::stock_analysis::compute_valuation_band`（前端 `ValuationBandChart` 用）；
+/// - MCP 工具 `mcp_tools` 的 `compute_valuation_band` 分支（工作流 `t-valuation-band` 用）。
+///
+/// 两者若各自算窗口，就会出现「图上显示 PE 分位 22%（低位），工作流锚腿却按 61%（高位）给折价」
+/// 这种**同一指标两个结论**的形态 —— 且没有任何报错。故两侧都调本函数。
+///
+/// 行为与命令层原实现**逐位一致**（`365 * years`，下溢时兜底 `"0000-00-00"`）：
+/// 刻意**不**加 `max(1)` —— 加了会把「显式传 0 年」的语义从「窗口为空」改成「1 年窗口」，
+/// 属于静默改变既有前端图的口径。
+pub fn since_date_from_years(years: u32) -> String {
+    let days = 365i64 * years as i64;
+    chrono::Local::now()
+        .date_naive()
+        .checked_sub_signed(chrono::Duration::days(days))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| "0000-00-00".to_string())
+}
+
+/// 按起始日期裁剪历史估值序列，并**归一到升序**（`YYYY-MM-DD` 字符串比较）。
+///
+/// ## 三条必须同时说明的事（任一缺失都会静默算出错的分位）
+///
+/// 1. **为什么必须裁剪**：上游 `AStockClient::get_valuation_history` 的入参是**年数**，
+///    而它的分页策略（`vendors/eastmoney.rs`：`max_pages = want/PAGE_SIZE + 2`）
+///    会**多取约 2 页 ≈ 2 年** ⇒ 「年数入参」本身**不足以**定窗口。
+/// 2. **为什么必须归一排序**：`compute_valuation_band` 的调用约定是
+///    **`current` 取 `historical.last()`**（"最后一条 = 最新一条"），
+///    而两个来源的顺序**原本相反** —— vendor 接口按 `TRADE_DATE` **降序**返回，
+///    且 `AStockClient::get_valuation_history` **原样返回不重排**
+///    （`vendors/eastmoney.rs:711`、`lib.rs:2295-2296`）；命令层读表则是
+///    `.order_by_asc(SnapshotDate)` ⇒ **升序**（`commands/stock_analysis.rs`）。
+///    ⇒ 不归一的话，**同一条腿在两条路径上会拿不同的 `current`**：
+///    工具路径会把窗口内**最旧**那天的 PE 当"当前 PE"去算分位（数字离谱且无报错）。
+///    本函数统一输出**升序**，把这条约定钉在唯一点上。
+/// 3. **分位数本身与顺序无关**（`metric_band_from` 内部排序），受顺序影响的**只有 `current`**
+///    以及 `sample_start`/`sample_end`（后者用 min/max，也无关）—— 所以这个缺陷**只会**
+///    表现为"当前分位"错，最容易被人当成数据问题而非代码问题。
+pub fn clip_valuation_history(
+    mut snaps: Vec<ValuationSnapshot>,
+    since_date: &str,
+) -> Vec<ValuationSnapshot> {
+    snaps.retain(|s| !s.trade_date.is_empty() && s.trade_date.as_str() >= since_date);
+    snaps.sort_by(|a, b| a.trade_date.cmp(&b.trade_date));
+    snaps
+}
+
 fn verdict_from_bands(pe: &MetricBand, pb: &MetricBand) -> &'static str {
     let pe_pct = pe.current_percentile.unwrap_or(50.0);
     let pb_pct = pb.current_percentile.unwrap_or(50.0);
@@ -192,6 +246,27 @@ pub trait FinancialSnapshotLike {
     fn pe_ttm(&self) -> Option<f64>;
     fn pb(&self) -> Option<f64>;
     fn ps_ttm(&self) -> Option<f64>;
+}
+
+/// `ValuationSnapshot`（东财历史估值日序列的行类型）直接可当样本用。
+///
+/// 有了它，任何拿到 `Vec<ValuationSnapshot>` 的调用方都不必再写一遍 adapter ——
+/// 例如 `mcp_tools::execute_mcp_tool` 的 `compute_valuation_band` 分支
+/// 与命令层 `commands::stock_analysis::compute_valuation_band` 的 DB 行 adapter
+/// （后者来源是 ORM Model，仍各自需要自己的 adapter，但都收敛到同一个 trait）。
+impl FinancialSnapshotLike for ValuationSnapshot {
+    fn snapshot_date(&self) -> &str {
+        &self.trade_date
+    }
+    fn pe_ttm(&self) -> Option<f64> {
+        self.pe_ttm
+    }
+    fn pb(&self) -> Option<f64> {
+        self.pb
+    }
+    fn ps_ttm(&self) -> Option<f64> {
+        self.ps_ttm
+    }
 }
 
 #[cfg(test)]
@@ -400,5 +475,64 @@ mod tests {
         assert!(band.metric_pe.percentiles.iter().all(|v| *v == 0.0));
         let note = band.note.unwrap_or_default();
         assert!(note.contains("剔除"), "note 应说明剔除了负值样本: {note}");
+    }
+
+    // ── V79(2026-09-21)：窗口裁剪 + 排序归一 ──
+    //
+    // 这三条挡的不是"锦上添花"，而是一个**只会错「当前分位」、且不报错**的缺陷：
+    // vendor 原始顺序是**降序**、命令层读表是**升序**，而 `current` 的约定是
+    // `historical.last()`（见 `compute_valuation_band` 的入参说明）。
+
+    fn vsnap(date: &str, pe: f64) -> ValuationSnapshot {
+        ValuationSnapshot {
+            trade_date: date.to_string(),
+            pe_ttm: Some(pe),
+            pb: Some(1.0),
+            ps_ttm: Some(1.0),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn clip_normalizes_descending_input_to_ascending() {
+        // 输入刻意按 vendor 原样给（降序）
+        let got = clip_valuation_history(
+            vec![vsnap("2025-03-01", 3.0), vsnap("2025-02-01", 2.0), vsnap("2025-01-01", 1.0)],
+            "2025-01-01",
+        );
+        let dates: Vec<&str> = got.iter().map(|s| s.trade_date.as_str()).collect();
+        assert_eq!(dates, vec!["2025-01-01", "2025-02-01", "2025-03-01"], "必须归一到升序");
+        // 反向对照：`last()` 必须是**最新**那天。若实现退回"原样返回"，
+        // 这里会拿到 2025-01-01（最旧）⇒ 当前分位会用最旧那天的 PE 去算。
+        assert_eq!(got.last().map(|s| s.trade_date.as_str()), Some("2025-03-01"));
+    }
+
+    #[test]
+    fn clip_drops_empty_dates_and_out_of_window() {
+        let got = clip_valuation_history(
+            vec![
+                vsnap("", 9.0),           // 空日期必须丢
+                vsnap("2024-12-31", 9.0), // 窗口外（< since）必须丢
+                vsnap("2025-01-01", 1.0), // 边界包含
+                vsnap("2025-06-30", 2.0),
+            ],
+            "2025-01-01",
+        );
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].trade_date, "2025-01-01");
+    }
+
+    #[test]
+    fn since_date_from_years_keeps_zero_year_semantics() {
+        // 刻意**不**加 `max(1)`：传 0 年 = 窗口从"今天"起（取不到历史样本），
+        // 与命令层原实现逐位一致。若有人顺手补 `max(1)`，本断言会红 ——
+        // 因为那是在**静默改变**既有前端图的口径，必须显式决策而不是顺手加。
+        let y0 = since_date_from_years(0);
+        assert_ne!(y0, since_date_from_years(1), "0 年窗口不得被 max(1) 抬成 1 年窗口");
+        assert_eq!(y0.len(), 10);
+        // 单调性 + 格式
+        let (y5, y4) = (since_date_from_years(5), since_date_from_years(4));
+        assert!(y5 < y4, "5 年窗口起点应早于 4 年: {y5} vs {y4}");
+        assert_eq!(y5.len(), 10);
     }
 }

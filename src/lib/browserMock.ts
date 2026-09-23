@@ -6393,6 +6393,33 @@ async function executeCommand<T>(
     case "run_stock_pipeline":
       return null as unknown as T;
 
+    // 2026-09-19（D1）：`list_stock_analyses` 显式声明，理由有二 ——
+    //   ① **消除误导性告警**：不声明会落到 default 并打出
+    //      `[BrowserMock] Unhandled command: list_stock_analyses`，读起来像「该命令没实现」，
+    //      而它的兜底行为（`list_` 前缀 → `[]`）其实**恰好正确**。审计 D1 时就被这条
+    //      warn 误导，一度判定该命令「返回 undefined」。
+    //   ② **让语义显式**：浏览器模式**确实没有**历史决策数据，返回空数组是**如实声明**，
+    //      而不是「未处理所以给个默认值」。将来补真实 mock 数据时，落点就在此。
+    case "list_stock_analyses":
+      return [] as unknown as T;
+
+    // 2026-09-19（D1 配套）：`get_stock_analysis` 必须显式声明，否则会落到 default
+    // 分支的 `get_` → `{}` 兜底，而 `{}` **不含 `id`** —— 新增的 IPC 契约校验
+    // （`src/lib/ipc-schemas.ts` 的 `get_stock_analysis: z.object({ id: z.string() })`）
+    // 会据此判违约并抛 `IpcSchemaError`，把原先「静默无数据」变成「抛错」。
+    //
+    // 语义：浏览器模式没有任何可复算的历史决策 ⇒ 本处**只保证形状合法**（过契约下限），
+    // **不伪造内容** —— 除 `id` 外所有字段缺席，消费端仍按空数据处理（与改动前一致）。
+    // 将来若在 mock 层补上真实历史数据，须同时补内容，否则会造出「有 id 但没内容」的
+    // 半截对象，比返回 `{}` 更难排查。
+    //
+    // 注：`list_stock_analyses` 无需显式声明 —— default 分支的 `list_` 前缀规则
+    // 已返回 `[]`，与 `z.array(...)` 契约相符。
+    case "get_stock_analysis":
+      return {
+        id: String((args as { analysis_id?: unknown } | undefined)?.analysis_id ?? ""),
+      } as unknown as T;
+
     // 浏览器模式没有真实 FTS5 子系统。返回 `available: false` 而不是编造计数：
     // 若落到 default 分支的 `get_*` → `{}`，会渲染成「未挂载」但丢失原因；
     // 若返回假的非零计数，则是在 mock 层伪造「索引健康」这一结论。

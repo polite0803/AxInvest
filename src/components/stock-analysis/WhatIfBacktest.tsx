@@ -14,6 +14,7 @@
 
 import { getDefaultVariables } from "@/components/settings/StockAnalysisConfigPanel";
 import { invoke } from "@/lib/invoke";
+import { parseRiskLevel, StockRiskLevel } from "@/lib/stock-analysis-utils";
 import { Button, Card, Collapse, Empty, InputNumber, Select, SelectProps, Slider, Tag } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -153,13 +154,17 @@ function computeDecisionLocal(params: PmInputParams): PmDecision {
   const dqiAdj = ((dqiScore - 50) / 100) * 5;
 
   // 风险调整
+  // 2026-09-21: 判据改走 `parseRiskLevel` 归一化，与 `ExperimentSidebar` 的同名公式统一。
+  //   `overallRisk` 有两个来源：用户下拉的短词（"低"/"高"/"极高"）与后端回填的长词
+  //   （"低风险"/"高风险"/"极高风险"）。原 `switch` 只认短词 ⇒ 后端来源**静默取 0**，
+  //   与 `ExperimentSidebar` 的同一公式（各处一份副本）也会给出不同 confidence。
   const riskAdjustment = (() => {
-    switch (overallRisk) {
-      case "低":
+    switch (parseRiskLevel(overallRisk)) {
+      case StockRiskLevel.LOW:
         return 5;
-      case "高":
+      case StockRiskLevel.HIGH:
         return -5;
-      case "极高":
+      case StockRiskLevel.EXTREME:
         return -10;
       default:
         return 0;

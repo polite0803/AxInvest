@@ -306,9 +306,27 @@ fn prepare_sandbox_dirs(cwd: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{BashCommandInput, execute_bash};
+    #[cfg(unix)]
+    use super::execute_bash;
+    use super::{BashCommandInput, sandbox_status_for_input};
     #[cfg(unix)]
     use axagent_runtime_core::sandbox::FilesystemIsolationMode;
+
+    /// 构造一个「只是跑 `printf 'hello'`」的输入。
+    /// `dangerously_disable_sandbox` 由调用方给，用于验证该字段对安全判定的影响。
+    fn probe_input(dangerously_disable_sandbox: Option<bool>) -> BashCommandInput {
+        BashCommandInput {
+            command: String::from("printf 'hello'"),
+            timeout: Some(1_000),
+            description: None,
+            run_in_background: Some(false),
+            dangerously_disable_sandbox,
+            namespace_restrictions: None,
+            isolate_network: None,
+            filesystem_mode: None,
+            allowed_mounts: None,
+        }
+    }
 
     #[cfg(unix)]
     #[test]
@@ -358,22 +376,48 @@ mod tests {
         assert!(super::hard_gate_check("git status").is_ok());
     }
 
+    /// LLM 试图传 `dangerouslyDisableSandbox=true` —— 必须被忽略。
+    ///
+    /// ⚠️ 本测试**不 spawn 任何进程**：被测对象是「安全策略」，不是「命令能不能跑起来」。
+    /// 原实现调 `execute_bash` 会去 spawn `sh -lc`，而 `sh` 在 Windows 上通常不在 PATH
+    /// （Git for Windows 只把 `Git\cmd` 加进 PATH，`sh.exe` 在 `Git\bin` / `usr\bin`）
+    /// ⇒ 该测试在所有 Windows 机器上**结构性必红**（`ErrorKind::NotFound: program not
+    /// found`），与沙箱逻辑无关。「命令能真跑」另有 `executes_simple_command` 覆盖。
     #[test]
     fn ignores_llm_supplied_sandbox_bypass() {
-        // LLM 试图传 dangerouslyDisableSandbox=true — 必须被忽略。
-        let output = execute_bash(BashCommandInput {
-            command: String::from("printf 'hello'"),
-            timeout: Some(1_000),
-            description: None,
-            run_in_background: Some(false),
-            dangerously_disable_sandbox: Some(true),
-            namespace_restrictions: None,
-            isolate_network: None,
-            filesystem_mode: None,
-            allowed_mounts: None,
-        })
-        .expect("bash command should execute");
+        let status = sandbox_status_for_input(&probe_input(Some(true)), &std::env::temp_dir());
 
+        assert!(
+            status.enabled,
+            "sandbox must stay enabled unless AXAGENT_ALLOW_UNSANDBOXED=1 is set"
+        );
+    }
+
+    /// 差分断言：`dangerouslyDisableSandbox` 取 `true` / `false` / 缺省三态，`enabled`
+    /// 必须**完全一致**。
+    ///
+    /// 只有上一条正例时，一个「读了该字段然后才返回 true」的实现也能通过 ——
+    /// 差分才能证明这个 LLM 输入**对判定没有任何影响**。
+    #[test]
+    fn bypass_flag_does_not_change_sandbox_enabled() {
+        let cwd = std::env::temp_dir();
+        let on = sandbox_status_for_input(&probe_input(Some(true)), &cwd);
+        let off = sandbox_status_for_input(&probe_input(Some(false)), &cwd);
+        let absent = sandbox_status_for_input(&probe_input(None), &cwd);
+
+        assert_eq!(on.enabled, off.enabled, "true 与 false 不得产生不同判定");
+        assert_eq!(on.enabled, absent.enabled, "缺省与显式传值不得产生不同判定");
+        assert!(on.enabled, "三态下沙箱都应保持启用");
+    }
+
+    /// 端到端（unix）：即使 LLM 传 `bypass=true`，命令仍**能正常执行** ——
+    /// 策略的作用是「不让它关沙箱」，不是「拒绝执行」。
+    #[cfg(unix)]
+    #[test]
+    fn bypass_flag_still_executes_command() {
+        let output = execute_bash(probe_input(Some(true))).expect("bash command should execute");
+
+        assert_eq!(output.stdout, "hello");
         assert!(
             output.sandbox_status.expect("sandbox status").enabled,
             "sandbox must stay enabled unless AXAGENT_ALLOW_UNSANDBOXED=1 is set"

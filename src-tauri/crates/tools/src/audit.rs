@@ -8,10 +8,13 @@
 //! 3. 输出内容敏感信息扫描
 //! 4. 调用审计日志
 
-use axagent_entities::audit_log;
+// `audit_log` 实体定义在 axagent-entities，但 hybrid 层（tools）禁止直接依赖 entities；
+// 经 axagent-dao（implementor）整包 re-export 访问（AGENTS.md 分层铁律，与
+// `narrative_structure.rs` 走 `axagent_dao::axagent_entities::...` 同款先例）。
+use axagent_dao::axagent_entities::audit_log;
 use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Schema, Set};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -97,6 +100,98 @@ impl Default for AuditConfig {
     }
 }
 
+/// 限流违规的类别。
+///
+/// 分开的用处：调用方（`registry.rs`）据此选择**错误码**。P1-1 修复前二者都被
+/// 塞进 `ToolError::permission_denied` ⇒ 模型把「调用太快」读成「没权限」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateLimitViolationKind {
+    /// 距该工具上次调用不足 `AuditConfig::min_interval_ms`
+    MinInterval,
+    /// 滑动窗口内调用次数已达 `AuditConfig::max_calls_per_window`
+    WindowExceeded,
+}
+
+/// 一次限流违规（结构化），供调用方构造错误码 + 决定退避。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RateLimitViolation {
+    pub kind: RateLimitViolationKind,
+    /// 说明文本（**不含工具名** —— 工具名由 `ToolError::rate_limited` 统一前缀，
+    /// 避免两处各拼一遍而漂移）。
+    pub message: String,
+    /// 距可重试还需等待的毫秒数。
+    pub retry_after_ms: u64,
+}
+
+/// 名单里**不豁免**最小间隔的工具（写类 / 有副作用）。
+///
+/// **评审单点**：两个只读数据源新增写类工具时，在此登记（有守护测试断言本表每个
+/// 名字都是**真实存在**的工具名，防「幽灵条目」，并为豁免集合做排除）。
+///
+/// - `dojo_create_plan` / `dojo_revise_plan` / `dojo_execute_plan`：计划状态机，
+///   三者都会落库；
+/// - `optimize_attention_weights`：把优化后的权重写回。
+const MUTATING_DATA_TOOL_NAMES: &[&str] =
+    &["dojo_create_plan", "dojo_revise_plan", "dojo_execute_plan", "optimize_attention_weights"];
+
+/// 只读取数工具的**豁免集合**（P1-2, 2026-09-21）——单点派生，勿手抄。
+///
+/// ## 为什么需要豁免
+///
+/// 限流状态按 **`tool_name` 单键**存放（`ToolAuditor::rate_limits`），而股票分析
+/// 工作流的多个分析师节点在 `p-analysts` 容器里是**并行**的。两个节点先后调同一个
+/// **只读取数**工具时必然互撞 —— 实测原文：
+/// `工具 'get_stock_margin_data' 调用过于频繁，最小间隔 200ms（当前距上次调用 48ms）`。
+/// 这不是滥用，是并行取数的正常形态。
+///
+/// ## 判据
+///
+/// 最小间隔防的是「同一个调用方反复锤同一个工具」。对**只读、幂等、无副作用**的
+/// 本地数据源取数工具，多个并行节点共调**不构成滥用** ⇒ 豁免最小间隔。
+/// **滑动窗口上限（`max_calls_per_window`）照旧生效** —— 那才是防真滥用的那道闸，
+/// 本豁免只摘掉「200ms 单键间隔」这一条。
+///
+/// ## 名单来源（单点派生）
+///
+/// 取两个只读数据源的 schema 清单函数 —— 与
+/// `seed_consistency_tests::resolvable_tool_names()` 用的是**同一对权威来源**
+/// （`tools` crate 已直接依赖这两个 crate，无需手抄、无需改 13 处
+/// `UnifiedToolRegistry::new()` 构造点）。手抄 58 个工具名会立刻腐烂。
+///
+/// ⚠ **不是整包豁免**：清单内混有写类工具，由 [`MUTATING_DATA_TOOL_NAMES`] 逐个剔除
+/// （实测 58 个工具里有 4 个写类/有副作用）。
+fn read_only_data_tool_names() -> &'static HashSet<String> {
+    static NAMES: OnceLock<HashSet<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut set = HashSet::new();
+        for schema in axagent_astock_data::mcp_tools::stock_mcp_tools()
+            .into_iter()
+            .chain(axagent_analysis_engine::mcp_tools::industry_chain_mcp_tools())
+        {
+            if let Some(name) = schema.get("name").and_then(|v| v.as_str()) {
+                set.insert(name.to_string());
+            }
+        }
+        for mutating in MUTATING_DATA_TOOL_NAMES {
+            set.remove(*mutating);
+        }
+        set
+    })
+}
+
+/// 该工具是否豁免最小间隔。
+///
+/// 除裸名外还认 `{server_id}/{tool_name}` 形态 —— MCP 工具在 `mcp_tools` 里就是按
+/// 这个 key 存的。**不处理这层会让豁免对某种调用形态静默失效**（与本轮修的
+/// `filter_map` 静默丢弃同族），故显式覆盖。
+fn is_min_interval_exempt(tool_name: &str) -> bool {
+    let names = read_only_data_tool_names();
+    if names.contains(tool_name) {
+        return true;
+    }
+    tool_name.split_once('/').is_some_and(|(_, bare)| names.contains(bare))
+}
+
 /// 工具调用审计器
 pub struct ToolAuditor {
     config: AuditConfig,
@@ -116,8 +211,16 @@ impl ToolAuditor {
         Self { config, rate_limits: RwLock::new(HashMap::new()), log: RwLock::new(Vec::new()) }
     }
 
-    /// 检查频率限制，返回 Ok 表示允许，Err 表示触发限制
-    pub async fn check_rate_limit(&self, tool_name: &str) -> Result<(), String> {
+    /// 检查频率限制，返回 `Ok(())` 表示允许，`Err(RateLimitViolation)` 表示触发限制。
+    ///
+    /// 两类约束的**处理不同**（P1-2, 2026-09-21）：
+    /// - **最小间隔**：只读取数工具豁免（[`read_only_data_tool_names`]），
+    ///   因为并行分析师节点共调同一只读取数工具是正常形态，不是滥用；
+    /// - **滑动窗口上限**：对**所有**工具生效，它是防真滥用的那道闸。
+    ///
+    /// 返回结构化违规而非 `String`：调用方据此选**错误码**
+    /// （`ToolError::rate_limited`），不再复用 `permission_denied`（P1-1）。
+    pub async fn check_rate_limit(&self, tool_name: &str) -> Result<(), RateLimitViolation> {
         let mut limits = self.rate_limits.write().await;
         let now = Instant::now();
         let state = limits.entry(tool_name.to_string()).or_insert(RateLimitState {
@@ -126,15 +229,24 @@ impl ToolAuditor {
             window_start: now,
         });
 
-        // 检查最小间隔
+        // 检查最小间隔（只读取数工具豁免）
         let elapsed = now.duration_since(state.last_call);
-        if elapsed < Duration::from_millis(self.config.min_interval_ms) {
-            return Err(format!(
-                "工具 '{}' 调用过于频繁，最小间隔 {}ms（当前距上次调用 {}ms）",
-                tool_name,
-                self.config.min_interval_ms,
-                elapsed.as_millis()
-            ));
+        if !is_min_interval_exempt(tool_name)
+            && elapsed < Duration::from_millis(self.config.min_interval_ms)
+        {
+            return Err(RateLimitViolation {
+                kind: RateLimitViolationKind::MinInterval,
+                message: format!(
+                    "调用过于频繁，最小间隔 {}ms（当前距上次调用 {}ms）；这是\
+                     **时序约束、非权限问题**，稍后重试即可",
+                    self.config.min_interval_ms,
+                    elapsed.as_millis()
+                ),
+                retry_after_ms: self
+                    .config
+                    .min_interval_ms
+                    .saturating_sub(elapsed.as_millis() as u64),
+            });
         }
 
         // 检查滑动窗口
@@ -144,10 +256,17 @@ impl ToolAuditor {
         }
 
         if state.call_count >= self.config.max_calls_per_window {
-            return Err(format!(
-                "工具 '{}' 在 {}秒窗口内已达到最大调用次数 {}",
-                tool_name, self.config.window_secs, self.config.max_calls_per_window
-            ));
+            return Err(RateLimitViolation {
+                kind: RateLimitViolationKind::WindowExceeded,
+                message: format!(
+                    "在 {} 秒窗口内已达到最大调用次数 {}；这是**时序约束、非权限问题**，\
+                     稍后重试即可",
+                    self.config.window_secs, self.config.max_calls_per_window
+                ),
+                retry_after_ms: Duration::from_secs(self.config.window_secs)
+                    .saturating_sub(now.duration_since(state.window_start))
+                    .as_millis() as u64,
+            });
         }
 
         state.call_count += 1;
@@ -376,5 +495,137 @@ mod tests {
         let auditor = ToolAuditor::default();
         let output = "Normal text without any secrets";
         assert!(!auditor.scan_output(output));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // P1-2（2026-09-21）：只读取数工具豁免最小间隔
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// 正控：豁免集合必须**非空**，且必须**覆盖本轮真实撞限流的那只工具**。
+    ///
+    /// 本断言的价值在于把门禁**锚在真实事件**上：若哪天 `stock_mcp_tools()` 改名、
+    /// 或派生逻辑写错（例如漏掉 astock-data 那一支），本测试立刻红 ——
+    /// 而不是让豁免集合静默变空、P1-2 悄悄退回修复前状态。
+    #[test]
+    fn read_only_exempt_set_covers_the_incident_tool() {
+        let names = read_only_data_tool_names();
+        assert!(
+            !names.is_empty(),
+            "豁免集合为空 ⇒ 派生逻辑失效（`stock_mcp_tools()` / \
+             `industry_chain_mcp_tools()` 的 `name` 字段抽取出问题？）"
+        );
+        // 本轮实测撞限流的那只（原文：`工具 'get_stock_margin_data' 调用过于频繁，
+        // 最小间隔 200ms（当前距上次调用 48ms）`），以及本轮新接线的质押工具。
+        for must_have in ["get_stock_margin_data", "get_stock_pledge_data", "get_stock_kline"] {
+            assert!(
+                names.contains(must_have),
+                "豁免集合里没有 `{must_have}` ⇒ P1-2 对真实碰撞场景**不生效**（假修复）。\
+                 当前集合 {n} 项：{names:?}",
+                n = names.len()
+            );
+        }
+        // 规模自证：两个数据源合计声明 60 项，剔除 4 个写类后应远多于 10。
+        // 下界只用来抓「只抽到一支数据源」这类静默退化，不追求精确值。
+        assert!(
+            names.len() >= 50,
+            "豁免集合只有 {} 项 —— 预期 ≥ 50（astock-data 58 + 产业链 2 − 写类 4）。\
+             先查是不是只抽到了其中一支数据源。",
+            names.len()
+        );
+    }
+
+    /// 豁免**不是整包**：写类/有副作用的工具必须仍受最小间隔约束。
+    ///
+    /// 同时反查「幽灵条目」：`MUTATING_DATA_TOOL_NAMES` 里每个名字都必须是
+    /// 数据源真声明过的工具名 —— 否则剔除动作打在了空气上（判据「幽灵码」同族）。
+    #[test]
+    fn mutating_tools_are_excluded_and_all_names_are_real() {
+        let names = read_only_data_tool_names();
+        // 先造全量声明集（不剔除），用来验「剔除项确实存在于声明中」。
+        let declared: HashSet<String> = axagent_astock_data::mcp_tools::stock_mcp_tools()
+            .into_iter()
+            .chain(axagent_analysis_engine::mcp_tools::industry_chain_mcp_tools())
+            .filter_map(|t| t.get("name").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+
+        for m in MUTATING_DATA_TOOL_NAMES {
+            assert!(
+                declared.contains(*m),
+                "`{m}` 被登记进 MUTATING_DATA_TOOL_NAMES，但它**不是**任何数据源声明的工具名 \
+                 ⇒ 幽灵条目（剔除打在空气上）。删掉它，或订正拼写。"
+            );
+            assert!(
+                !names.contains(*m),
+                "写类工具 `{m}` 出现在豁免集合里 ⇒ 整包豁免的 bug，它必须受最小间隔约束。"
+            );
+        }
+    }
+
+    /// 行为证明：同名的两次紧邻调用 —— 只读工具放行，非只读工具被拦。
+    #[tokio::test]
+    async fn min_interval_exempts_read_only_but_still_guards_others() {
+        let auditor = ToolAuditor::default(); // min_interval_ms = 200
+
+        // 只读：连续两次紧邻调用都应放行（豁免最小间隔）。
+        assert!(
+            auditor.check_rate_limit("get_stock_margin_data").await.is_ok(),
+            "只读取数工具第一次调用不该被拦"
+        );
+        assert!(
+            auditor.check_rate_limit("get_stock_margin_data").await.is_ok(),
+            "只读取数工具**紧邻第二次**调用必须放行 —— 这正是并行分析师节点互撞的场景（P1-2）"
+        );
+
+        // 非只读：紧邻第二次必须被拦，且类别是 MinInterval（不是 Window）。
+        assert!(auditor.check_rate_limit("some_non_exempt_tool").await.is_ok());
+        let violation = auditor
+            .check_rate_limit("some_non_exempt_tool")
+            .await
+            .expect_err("非只读工具的紧邻第二次调用必须被最小间隔拦住");
+        assert_eq!(violation.kind, RateLimitViolationKind::MinInterval);
+        assert!(violation.retry_after_ms > 0, "应给出可操作的退避时长");
+        // 措辞锁：**不得**出现「归因性」表述（那正是模型写成「工具调用被拒绝」的燃料）。
+        // 注意「非权限问题」这类**显式否认**不算违规 —— 只有把限流归因成权限/授权缺失才违规。
+        for banned in ["权限被拒绝", "权限不足", "未授权", "无权限", "被拒绝"] {
+            assert!(
+                !violation.message.contains(banned),
+                "违规说明含归因性表述「{banned}」⇒ 会被模型读成能力缺失（P1-1 的成因）。\
+                 实际文本：{}",
+                violation.message
+            );
+        }
+    }
+
+    /// 豁免**只摘掉最小间隔这一条**：滑动窗口上限对只读工具**照旧**生效。
+    ///
+    /// 这条防的是「为了修 P1-2 把整道限流闸拆了」。
+    #[tokio::test]
+    async fn window_limit_still_applies_to_exempt_tools() {
+        let auditor = ToolAuditor::default(); // max_calls_per_window = 30
+
+        for i in 0..30 {
+            assert!(
+                auditor.check_rate_limit("get_stock_kline").await.is_ok(),
+                "第 {} 次调用不该被拦（窗口上限是 30）",
+                i + 1
+            );
+        }
+        let violation = auditor
+            .check_rate_limit("get_stock_kline")
+            .await
+            .expect_err("第 31 次调用必须被滑动窗口上限拦住 —— 豁免不得连带摘掉这道闸");
+        assert_eq!(violation.kind, RateLimitViolationKind::WindowExceeded);
+    }
+
+    /// `{server_id}/{tool_name}` 形态也要能命中豁免。
+    ///
+    /// MCP 工具在 `mcp_tools` 里按这个 key 存；不覆盖该形态会让豁免对某种调用方式
+    /// **静默失效**（与 `filter_map` 静默丢弃同族），故显式断言。
+    #[test]
+    fn exempt_lookup_handles_server_qualified_names() {
+        assert!(is_min_interval_exempt("get_stock_margin_data"));
+        assert!(is_min_interval_exempt("stock/get_stock_margin_data"));
+        assert!(!is_min_interval_exempt("stock/dojo_create_plan"));
+        assert!(!is_min_interval_exempt("dojo_create_plan"));
     }
 }

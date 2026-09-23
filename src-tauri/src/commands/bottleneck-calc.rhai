@@ -27,62 +27,6 @@ fn to_array(v) {
     } else { [] }
 }
 
-fn barrier_to_score(level) {
-    if level == "high" { 85.0 } else if level == "medium" { 60.0 } else { 35.0 }
-}
-
-fn certainty_to_score(level) {
-    if level == "high" { 80.0 } else if level == "medium" { 55.0 } else { 30.0 }
-}
-
-fn evidence_to_score(type_str) {
-    // 已知证据类型按可信度评分，覆盖 LLM 常见输出变体
-    if type_str == "有已公开长协/订单" { 90.0 }
-    else if type_str == "已签长协" || type_str == "长协订单" || type_str == "合同负债增长" || type_str == "合同负债" { 75.0 }
-    else if type_str == "产能预订" || type_str == "产能满载" || type_str == "产能利用率提升" || type_str == "订单饱满" || type_str == "订单增长" { 60.0 }
-    else if type_str == "客户扩产" || type_str == "下游扩产" || type_str == "政策强制" || type_str == "政策驱动" { 55.0 }
-    else if type_str == "无公开证据" || type_str == "LLM推测" || type_str == "合理推断" || type_str == "" { 30.0 }
-    else {
-        // 未知类型按中位数 50 分并打印 warning
-        print("WARNING: evidence_to_score 遇到未知证据类型 '" + type_str + "'，按 50.0 评分");
-        50.0
-    }
-}
-
-fn calc_financial_comps_score(fin_data) {
-    if fin_data == () { return #{"available": false}; };
-    let gm = if fin_data["gross_margin"] != () { fin_data["gross_margin"] } else { -1.0 };
-    let rg = if fin_data["revenue_growth_yoy"] != () { fin_data["revenue_growth_yoy"] } else { -1.0 };
-    let dr = if fin_data["debt_ratio"] != () { fin_data["debt_ratio"] } else { -1.0 };
-    let roe = if fin_data["roe"] != () { fin_data["roe"] } else { -1.0 };
-    let rnd = if fin_data["rnd_ratio"] != () { fin_data["rnd_ratio"] } else { -1.0 };
-    let cdr = if fin_data["capex_dep_ratio"] != () { fin_data["capex_dep_ratio"] } else { -1.0 };
-    let gm_score = if gm >= 50.0 { 90.0 } else if gm >= 30.0 { 65.0 } else if gm >= 0.0 { 40.0 } else { -1.0 };
-    let rg_score = if rg >= 20.0 { 85.0 } else if rg >= 10.0 { 60.0 } else if rg >= 0.0 { 35.0 } else { -1.0 };
-    let dr_score = if dr >= 0.0 && dr < 40.0 { 80.0 } else if dr < 60.0 { 55.0 } else if dr >= 0.0 { 30.0 } else { -1.0 };
-    let roe_score = if roe >= 15.0 { 85.0 } else if roe >= 8.0 { 60.0 } else if roe >= 0.0 { 35.0 } else { -1.0 };
-    let rnd_score = if rnd >= 10.0 { 85.0 } else if rnd >= 5.0 { 60.0 } else if rnd >= 0.0 { 35.0 } else { -1.0 };
-    let cdr_score = if cdr >= 2.0 { 80.0 } else if cdr >= 1.0 { 55.0 } else if cdr >= 0.0 { 30.0 } else { -1.0 };
-    let total = 0.0; let cnt = 0.0;
-    if gm_score >= 0.0 { total += gm_score; cnt += 1.0; };
-    if rg_score >= 0.0 { total += rg_score; cnt += 1.0; };
-    if dr_score >= 0.0 { total += dr_score; cnt += 1.0; };
-    if roe_score >= 0.0 { total += roe_score; cnt += 1.0; };
-    if rnd_score >= 0.0 { total += rnd_score; cnt += 1.0; };
-    if cdr_score >= 0.0 { total += cdr_score; cnt += 1.0; };
-    #{
-        "available": true, "num_metrics": cnt,
-        "gross_margin_score": gm_score, "revenue_growth_score": rg_score,
-        "debt_ratio_score": dr_score, "roe_score": roe_score,
-        "rnd_score": rnd_score, "capex_score": cdr_score,
-        "financial_health": if cnt > 0.0 { clamp(total / cnt, 0.0, 100.0) } else { -1.0 },
-        "raw_values": #{
-            "gross_margin": gm, "revenue_growth": rg, "debt_ratio": dr,
-            "roe": roe, "rnd_ratio": rnd, "capex_dep_ratio": cdr
-        }
-    }
-}
-
 // ═══════════════════════════════════════════════
 // 第二部分：主函数
 // ═══════════════════════════════════════════════
@@ -145,14 +89,10 @@ fn main() {
         let raw_top3_share = if node["top3_market_share"] != () { node["top3_market_share"] } else { -1.0 };
         let raw_expansion = if node["expansion_cycle_months"] != () { node["expansion_cycle_months"] } else { -1.0 };
         let raw_barrier = if node["tech_barrier"] != () { node["tech_barrier"].to_string() } else { "low" };
-        let demand_certainty = if node["demand_validation"] != () && node["demand_validation"]["demand_certainty"] != () { node["demand_validation"]["demand_certainty"].to_string() } else { "low" };
-        let evidence_type = if node["demand_validation"] != () && node["demand_validation"]["order_visibility"] != () { node["demand_validation"]["order_visibility"].to_string() } else { "" };
-        let financial_data = if node["financial_data"] != () { node["financial_data"] } else { () };
-        let comps = calc_financial_comps_score(financial_data);
-        let has_financial = comps["available"];
-        if has_financial { any_has_financial = true; };
 
         // 行业动量：遍历 industry_ranking 尝试匹配（不强制，匹配不上则默认）
+        // （demand_certainty / evidence_type / financial_data 的提取与全部三力比分已
+        //   收敛进 Rust 权威函数 bottleneck_node_score，见下方调用）
         let ind_change_pct = 0.0;
         let ind_main_inflow = 0.0;
         let matched_ind_name = "";
@@ -168,40 +108,27 @@ fn main() {
             }
         }
         if matched_ind_name != "" { any_has_industry = true; };
-        let industry_momentum_score = if ind_change_pct > 5.0 && ind_main_inflow > 0.0 { 75.0 } else if ind_change_pct > 2.0 && ind_main_inflow > 0.0 { 60.0 } else if ind_change_pct > 0.0 { 45.0 } else { 30.0 };
 
-        // 三力评分（权重由模板变量注入，默认等权重：0.35/0.35/0.30）
+        // 三力权重（由模板变量注入，默认等权重：0.35/0.35/0.30）
         // 用户可在前端 Serenity 设置Tab中调整 w_supply/w_demand/w_irreplace
         let ws = if w_supply != () { w_supply } else { 0.35 };
         let wd = if w_demand != () { w_demand } else { 0.35 };
         let wi = if w_irreplace != () { w_irreplace } else { 0.30 };
-        let concentration_score = if raw_top3_share >= 70.0 { 85.0 } else if raw_top3_share >= 50.0 { 65.0 } else if raw_top3_share >= 0.0 { 40.0 } else { 50.0 };
-        let barrier_score = barrier_to_score(raw_barrier);
-        let cycle_score = if raw_expansion >= 24.0 { 80.0 } else if raw_expansion >= 12.0 { 60.0 } else if raw_expansion >= 0.0 { 40.0 } else { 50.0 };
-        let financial_capex_score = if has_financial { comps["capex_score"] } else { -1.0 };
-        let adjusted_cycle_score = if financial_capex_score >= 0.0 { (cycle_score + financial_capex_score) / 2.0 } else { cycle_score };
-        let supply_rigidity_score = concentration_score * 0.30 + barrier_score * 0.40 + adjusted_cycle_score * 0.30;
 
-        let evidence_score = evidence_to_score(evidence_type);
-        let certainty_score = certainty_to_score(demand_certainty);
-        let financial_revenue_score = if has_financial { comps["revenue_growth_score"] } else { -1.0 };
-        let adjusted_evidence = if industry_momentum_score > 0.0 {
-            let base = if financial_revenue_score >= 0.0 { (evidence_score + financial_revenue_score) / 2.0 } else { evidence_score };
-            if ind_change_pct > 0.0 { (base + industry_momentum_score) / 2.0 } else if base > 50.0 { base - 10.0 } else { base }
-        } else if financial_revenue_score >= 0.0 { (evidence_score + financial_revenue_score) / 2.0 } else { evidence_score };
-        let demand_elasticity_score = adjusted_evidence * 0.60 + certainty_score * 0.40;
-
-        let supplier_score = if raw_supplier_count <= 2.0 && raw_supplier_count >= 0.0 { 90.0 } else if raw_supplier_count <= 5.0 { 70.0 } else if raw_supplier_count <= 10.0 { 50.0 } else if raw_supplier_count > 10.0 { 30.0 } else { 50.0 };
-        let financial_rnd_score = if has_financial { comps["rnd_score"] } else { -1.0 };
-        let financial_roe_score = if has_financial { comps["roe_score"] } else { -1.0 };
-        let tech_moat_score = if financial_rnd_score >= 0.0 && financial_roe_score >= 0.0 { financial_rnd_score * 0.5 + financial_roe_score * 0.5 } else { barrier_score };
-        let irreplaceability_score = supplier_score * 0.30 + tech_moat_score * 0.40 + barrier_score * 0.30;
-
-        let bottleneck_composite = supply_rigidity_score * ws + demand_elasticity_score * wd + irreplaceability_score * wi;
+        // 三力评分（含财务 comps / 行业动量 / 可靠度标签）：统一调用共享 Engine 的
+        // Rust 权威函数 bottleneck_node_score（与 strategy-scorer 收敛为单一权威口径，
+        // 权威语义 = 本脚本原行为）。s 的键均为 snake_case，脚本侧用面名直接取。
+        let s = bottleneck_node_score(node, ind_change_pct, ind_main_inflow, ws, wd, wi, matched_ind_name);
+        let supply_rigidity_score = s["supply_rigidity_score"];
+        let demand_elasticity_score = s["demand_elasticity_score"];
+        let irreplaceability_score = s["irreplaceability_score"];
+        let bottleneck_composite = s["bottleneck_composite"];
         let final_composite = clamp(bottleneck_composite, 0.0, 100.0);
-
-        // 可靠度标签（不再依赖硬编码行业基线）
-        let data_reliability = if has_financial { "partially_verified" } else if matched_ind_name != "" { "industry_inferred" } else if raw_supplier_count >= 0.0 || raw_top3_share >= 0.0 { "llm_estimated" } else { "insufficient" };
+        let data_reliability = s["data_reliability"];
+        let has_financial = s["has_financial_data"];
+        let comps = s["financial_comps"];
+        let industry_momentum_score = s["industry_momentum_score"];
+        if has_financial { any_has_financial = true; };
         if final_composite > max_composite { max_composite = final_composite; top_node_name = node_name; };
 
         computed_nodes.push(#{

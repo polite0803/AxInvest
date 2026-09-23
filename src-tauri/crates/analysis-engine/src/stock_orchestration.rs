@@ -33,7 +33,6 @@ use axagent_harness::{
     },
     CapabilityPackAdapter, CapabilityPackContext, CapabilityPackLearningConfig, DecompositionPlan,
     DynamicSubGraph, GeneratedSubGraph, MissionType, OrchestrationError, OrchestrationStrategy,
-    SubTask,
 };
 
 // ── 股票域包适配器 ──────────────────────────────────────────────
@@ -51,6 +50,8 @@ pub struct StockCapabilityPackAdapter {
     evolution_constraints: EvolutionConstraints,
     acceptance_criteria: Vec<AcceptanceCriterion>,
     learning_config: CapabilityPackLearningConfig,
+    /// 维度目录（批2）：分析/辩论维度清单配置化，新增维度不改 adapter 核心
+    catalog: crate::dimension_catalog::DimensionCatalog,
 }
 
 impl StockCapabilityPackAdapter {
@@ -63,6 +64,7 @@ impl StockCapabilityPackAdapter {
             evolution_constraints: Self::stock_evolution_constraints(),
             acceptance_criteria: Self::stock_acceptance_criteria(),
             learning_config: Self::stock_learning_config(),
+            catalog: crate::dimension_catalog::DimensionCatalog::embedded(),
         }
     }
 
@@ -260,62 +262,26 @@ impl StockCapabilityPackAdapter {
         MissionType::Consultation
     }
 
-    /// 构建全链路分析 Pipeline 子图
+    /// 构建全链路分析 Pipeline 子图（维度清单来自维度目录配置）
     fn build_analysis_pipeline(
         &self,
         mission: &str,
     ) -> Result<GeneratedSubGraph, OrchestrationError> {
-        let sub_tasks = vec![
-            SubTask::new(
-                "data_fetch".to_string(),
-                "数据获取".to_string(),
-                "获取股票行情、财报、资金流向等数据".to_string(),
-                "data_agent".to_string(),
-            ),
-            SubTask::new(
-                "technical_analysis".to_string(),
-                "技术面分析".to_string(),
-                "技术指标计算、K线形态识别、趋势判断".to_string(),
-                "technical_agent".to_string(),
-            ),
-            SubTask::new(
-                "fundamental_analysis".to_string(),
-                "基本面分析".to_string(),
-                "财务报表分析、估值计算、行业对比".to_string(),
-                "fundamental_agent".to_string(),
-            ),
-            SubTask::new(
-                "capital_flow_analysis".to_string(),
-                "资金面分析".to_string(),
-                "主力资金流向、龙虎榜、融资融券分析".to_string(),
-                "capital_agent".to_string(),
-            ),
-            SubTask::new(
-                "signal_aggregation".to_string(),
-                "信号聚合".to_string(),
-                "整合技术、基本面、资金面信号".to_string(),
-                "aggregator_agent".to_string(),
-            ),
-            SubTask::new(
-                "risk_assessment".to_string(),
-                "风险评估".to_string(),
-                "识别风险因素、计算风险指标".to_string(),
-                "risk_agent".to_string(),
-            ),
-            SubTask::new(
-                "decision_generation".to_string(),
-                "决策生成".to_string(),
-                "生成买入/卖出/持有建议".to_string(),
-                "decision_agent".to_string(),
-            ),
-        ];
+        let set = &self.catalog.pipeline;
+        let sub_tasks = self.catalog.enabled_sub_tasks(false);
+
+        if sub_tasks.is_empty() {
+            return Err(OrchestrationError::SubgraphGenerationFailed(
+                "维度目录未配置任何启用的分析维度".to_string(),
+            ));
+        }
 
         let plan = DecompositionPlan {
             mission: mission.to_string(),
             strategy: OrchestrationStrategy::Pipeline,
             sub_tasks,
-            max_parallel: 2, // 技术面和基本面可并行
-            max_replans: 3,
+            max_parallel: set.max_parallel, // 技术面和基本面可并行
+            max_replans: set.max_replans,
             replan_count: 0,
             created_at: chrono::Utc::now(),
         };
@@ -324,38 +290,26 @@ impl StockCapabilityPackAdapter {
         generator.generate(&plan)
     }
 
-    /// 构建多空辩论 Debate 子图
+    /// 构建多空辩论 Debate 子图（维度清单来自维度目录配置）
     fn build_debate_strategy(
         &self,
         mission: &str,
     ) -> Result<GeneratedSubGraph, OrchestrationError> {
-        let sub_tasks = vec![
-            SubTask::new(
-                "bull_analyst".to_string(),
-                "多头分析师".to_string(),
-                "从多头角度分析，寻找上涨理由和买入信号".to_string(),
-                "bull_agent".to_string(),
-            ),
-            SubTask::new(
-                "bear_analyst".to_string(),
-                "空头分析师".to_string(),
-                "从空头角度分析，寻找下跌风险和卖出信号".to_string(),
-                "bear_agent".to_string(),
-            ),
-            SubTask::new(
-                "arbitrator".to_string(),
-                "仲裁者".to_string(),
-                "综合多空观点，做出最终裁决".to_string(),
-                "arbiter_agent".to_string(),
-            ),
-        ];
+        let set = &self.catalog.debate;
+        let sub_tasks = self.catalog.enabled_sub_tasks(true);
+
+        if sub_tasks.is_empty() {
+            return Err(OrchestrationError::SubgraphGenerationFailed(
+                "维度目录未配置任何启用的辩论维度".to_string(),
+            ));
+        }
 
         let plan = DecompositionPlan {
             mission: mission.to_string(),
             strategy: OrchestrationStrategy::Debate,
             sub_tasks,
-            max_parallel: 2, // 多空并行
-            max_replans: 2,
+            max_parallel: set.max_parallel, // 多空并行
+            max_replans: set.max_replans,
             replan_count: 0,
             created_at: chrono::Utc::now(),
         };

@@ -1,5 +1,5 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
-import { classifySentiment } from "@/lib/stock-analysis-utils";
+import { classifyDirectionText, classifySentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -136,9 +136,12 @@ function extractBullBearScores(report: string): { bull: number; bear: number } |
           };
         }
         // 有 stance/verdict 字段但没有分数 → 用 stance 判断
-        const stance = String(meta.verdict ?? meta.stance ?? "").toLowerCase();
-        if (/看多|买入|增持|做多|看涨|bull/i.test(stance)) { return { bull: 60, bear: 0 }; }
-        if (/看空|卖出|减持|做空|看跌|bear/i.test(stance)) { return { bull: 0, bear: 60 }; }
+        // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
+        //   原为内联正则 `/看多|买入|增持|做多|看涨|bull/`，与同文件表格「判断」列的
+        //   `/看多|bull|偏多|买入|增持|正面/` 值域不同 ⇒ 同一 verdict 两处结论可能相反。
+        const dir = classifyDirectionText(meta.verdict ?? meta.stance);
+        if (dir === "bull") { return { bull: 60, bear: 0 }; }
+        if (dir === "bear") { return { bull: 0, bear: 60 }; }
       }
     } catch { /* ignore */ }
   }
@@ -447,9 +450,10 @@ export function AnalystReportGrid() {
         if (v === null || v === undefined || typeof v !== "string") {
           return <span style={{ color: "var(--muted)", fontSize: 11 }}>-</span>;
         }
-        const isBull = /看多|bull|偏多|买入|增持|正面/i.test(v);
-        const isBear = /看空|bear|偏空|卖出|减持|负面/i.test(v);
-        const color = isBull ? "#f5222d" : isBear ? "#52c41a" : "var(--muted)";
+        // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源），
+        //   配色沿用 A 股口径：红=看多，绿=看空。
+        const dir = classifyDirectionText(v);
+        const color = dir === "bull" ? "#f5222d" : dir === "bear" ? "#52c41a" : "var(--muted)";
         return <span style={{ color, fontWeight: 600, fontSize: 12 }}>{v}</span>;
       },
     },

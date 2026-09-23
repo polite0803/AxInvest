@@ -57,7 +57,7 @@ impl Default for StockReflectionWeights {
 // ── 股票反思报告 ──────────────────────────────────────────────
 
 /// 股票业务反思报告
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct StockReflectionReport {
     /// 执行 ID
     pub execution_id: String,

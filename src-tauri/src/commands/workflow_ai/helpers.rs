@@ -216,8 +216,7 @@ agent
     "agent_profile_id": "string | null",
     "max_tool_rounds": int | null,
     "execution_mode": "react" | "plan" | null,
-    "rag_source_ids": ["knowledge:<id>", "memory:<id>", "wiki:<id>"],
-    "model_role": "quick_think | deep_think | null (映射到全局模型配置, 优先级低于 model 字段)"
+    "rag_source_ids": ["knowledge:<id>", "memory:<id>", "wiki:<id>"]
   }
 
 llm
@@ -449,11 +448,10 @@ debate (容器节点 — 辩手为容器内子 Agent 节点)
     "max_rounds": int (默认 2, 辩论轮数),
     "convergence_prompt": "string | null (收敛判断提示词, 为空则固定轮数)",
     "convergence_model": "string | null",
-    "convergence_model_role": "quick_think | deep_think | null",
     "topic_var": "string (辩论主题变量名)",
     "output_var": "string"
   }
-  子节点: 在 debate 容器内放置 agent 节点作为辩手，每个辩手通过 system_prompt 定义立场，通过 model_role 选择推理深度。
+  子节点: 在 debate 容器内放置 agent 节点作为辩手，每个辩手通过 system_prompt 定义立场。
   输出边: debateRound (每轮辩论输出)
 
 end
@@ -529,11 +527,11 @@ pub const FEW_SHOT_EXAMPLES: &str = r#"
   "nodes": [
     { "id": "n1", "node_type": "trigger",   "title": "手动触发",          "config": { "trigger_type": "manual", "config": {} } },
     { "id": "n2", "node_type": "llm",       "title": "生成辩题",          "config": { "model": "gpt-5.4-mini", "prompt": "根据用户输入生成一个需要多方论证的议题:\n${input.topic}", "temperature": 0.7, "max_tokens": 512, "output_var": "debate_topic" } },
-    { "id": "n3", "node_type": "debate",    "title": "多角色对抗辩论",    "config": { "debater_steps": ["n3a","n3b","n3c"], "max_rounds": 3, "convergence_prompt": "综合以上辩论，给出最终结论和建议。", "convergence_model_role": "deep_think", "topic_var": "debate_topic", "output_var": "debate_result" } },
-    { "id": "n3a", "node_type": "agent",    "title": "正方辩手",         "config": { "system_prompt": "你是正方辩手，请从支持的角度论证议题，提供有力论据。", "model_role": "deep_think", "tools": [], "output_var": "proponent_output" }, "parentId": "n3" },
-    { "id": "n3b", "node_type": "agent",    "title": "反方辩手",         "config": { "system_prompt": "你是反方辩手，请从反对的角度论证议题，指出潜在风险。", "model_role": "deep_think", "tools": [], "output_var": "opponent_output" }, "parentId": "n3" },
-    { "id": "n3c", "node_type": "agent",    "title": "主持人",           "config": { "system_prompt": "你是主持人，在每轮辩论后总结双方观点并指出共识与分歧。", "model_role": "quick_think", "tools": [], "output_var": "moderator_output" }, "parentId": "n3" },
-    { "id": "n4", "node_type": "agent",     "title": "决策总结 Agent",    "config": { "system_prompt": "你是一个决策助手，根据辩论结果提炼可执行的行动方案。", "model_role": "deep_think", "tools": [], "output_var": "action_plan" } },
+    { "id": "n3", "node_type": "debate",    "title": "多角色对抗辩论",    "config": { "debater_steps": ["n3a","n3b","n3c"], "max_rounds": 3, "convergence_prompt": "综合以上辩论，给出最终结论和建议。", "topic_var": "debate_topic", "output_var": "debate_result" } },
+    { "id": "n3a", "node_type": "agent",    "title": "正方辩手",         "config": { "system_prompt": "你是正方辩手，请从支持的角度论证议题，提供有力论据。", "tools": [], "output_var": "proponent_output" }, "parentId": "n3" },
+    { "id": "n3b", "node_type": "agent",    "title": "反方辩手",         "config": { "system_prompt": "你是反方辩手，请从反对的角度论证议题，指出潜在风险。", "tools": [], "output_var": "opponent_output" }, "parentId": "n3" },
+    { "id": "n3c", "node_type": "agent",    "title": "主持人",           "config": { "system_prompt": "你是主持人，在每轮辩论后总结双方观点并指出共识与分歧。", "tools": [], "output_var": "moderator_output" }, "parentId": "n3" },
+    { "id": "n4", "node_type": "agent",     "title": "决策总结 Agent",    "config": { "system_prompt": "你是一个决策助手，根据辩论结果提炼可执行的行动方案。", "tools": [], "output_var": "action_plan" } },
     { "id": "n5", "node_type": "end",       "title": "结束",              "config": { "output_var": "action_plan" } }
   ],
   "edges": [
@@ -851,7 +849,6 @@ fn convert_llm_response(
                         max_tool_rounds: None,
                         execution_mode: None,
                         rag_source_ids: vec![],
-                        model_role: None,
                         consistency_check: None,
                         hallucination_guard: None,
                         task_scene: None,
@@ -1171,7 +1168,6 @@ fn convert_llm_response(
                         max_rounds: 2,
                         convergence_prompt: None,
                         convergence_model: None,
-                        convergence_model_role: None,
                         topic_var: "topic".to_string(),
                         output_var: "debate_result".to_string(),
                         sub_graph: None,
@@ -1194,7 +1190,6 @@ fn convert_llm_response(
                     max_tool_rounds: None,
                     execution_mode: None,
                     rag_source_ids: vec![],
-                    model_role: None,
                     consistency_check: None,
                     hallucination_guard: None,
                     input_mapping: std::collections::HashMap::new(),

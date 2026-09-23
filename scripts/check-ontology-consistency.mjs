@@ -113,24 +113,25 @@ const SITES = [
     kind: "rhai-band-from-ontology",
     note: "readiness_signal 经 band_for_score 读阈值（§7-a b1，档名映射回 _signal，6 处产出不改）",
   },
-  // ── 三力**内部**权重（`*_PARTS`）─────────────────────────────────────
+  // ── 三力**内部**权重（`*_PARTS`）→ Rust 权威函数收敛后的调用断言 ─────
   //
-  // ⚠ 这两条站点的「权威侧」是**声明**，不是**执行**：`*_PARTS` 在 Rust 侧生产消费方 = 0，
-  //   真正算分的是下面这两个 `.rhai`。故此处比对的意义是「数字没抄错」，
-  //   **不能**据此认为本体在管这条链路（详见 `AUDIT-ontology-vs-palantir-2026-09-15.md` §2.2）。
-  //   本检查曾是覆盖缺口：`parseParts()` 早就解析了 `*_PARTS`，但返回值只进
-  //   null 检查 / 自洽校验 / info 打印，**从未进入 `problems.push`**（判据 #197「悬空解析」）。
+  // 2026-09-20 收敛后：两个 `.rhai` 不再内联 `let xxx_score = ... * 0.30...+...`
+  // 计分行了，三力内部权重（0.30/0.40/0.30、0.60/0.40、0.30/0.40/0.30）的唯一
+  // 权威实现迁到 Rust 的 `stock_workflow/rhai_bottleneck.rs::bottleneck_node_score`。
+  //
+  // 但注意：**真实权威算分已不在本体 `*_PARTS` 里被消费**（本体侧生产消费方本为 0，
+  // 见 `AUDIT-ontology-vs-palantir-2026-09-15.md` §2.2）。收敛后用户真正跑在 Arc 上的是
+  // Rust 侧的字面量 —— 为保证这点，脚本还硬校验 Rust 源码里的内部权重字面量就是权威值
+  // （见下方 `rhai-calls-shared` 分支与 `checkRustForcePartsLiterals`）。
   {
     file: "src-tauri/src/commands/bottleneck-calc.rhai",
-    kind: "rhai-force-parts",
-    expectPerForce: 1,
-    note: "三力加权和（`let supply_rigidity_score/demand_elasticity_score/irreplaceability_score`）",
+    kind: "rhai-calls-shared",
+    note: "三力内部权重已收敛进 Rust 权威函数 bottleneck_node_score（rhai_bottleneck.rs），脚本只负责调用与拼装输出",
   },
   {
     file: "src-tauri/src/commands/strategy-scorer.rhai",
-    kind: "rhai-force-parts",
-    expectPerForce: 1,
-    note: "三力加权和（`let srs/des/irs`，第二份独立副本）",
+    kind: "rhai-calls-shared",
+    note: "同上：三力内部权重收敛进 bottleneck_node_score，脚本改为调用共享权威函数",
   },
 ];
 
@@ -507,6 +508,51 @@ export function extractRhaiForceParts(text) {
   return out;
 }
 
+/**
+ * Rust 权威函数 `bottleneck_node_score` 内部权重字面量现场（2026-09-20 收敛后新增）。
+ *
+ * 收敛后两个 `.rhai` 不再内联三力加权和，真实算分迁到 `rhai_bottleneck.rs`。
+ * 用与 `extractRhaiForceParts` 同构的抽取逻辑（`let <三力左值> = … * 0.xx + …;`）
+ * 从 Rust 源码里抓出权重字面量，再与本体 `*_PARTS` 比对 —— 保证「用户真正跑在
+ * Arc 上的 Rust 权重」就是权威值（本体 `*_PARTS` 生产消费方本为 0，收敛后更须
+ * 盯住 Rust 侧字面量）。
+ *
+ * 支持跨行：Rust 的 `let xxx_score =\n        a * 0.30 + b * 0.40 + c * 0.30;`
+ * 会把项拆到后续行，需从 `=` 之后连续收集到分号。
+ */
+export function extractRustForceParts(text) {
+  const out = [];
+  const lines = text.split(/\r?\n/);
+  const seen = new Set();
+  lines.forEach((line, i) => {
+    if (isCommentLine(line)) return;
+    const m = /^\s*let\s+(supply_rigidity_score|demand_elasticity_score|irreplaceability_score)\s*=\s*/.exec(line);
+    if (!m) return;
+    const force = Object.keys(FORCE_LHS_ALIASES).find((f) => FORCE_LHS_ALIASES[f].includes(m[1]));
+    if (!force || seen.has(force)) return;
+    // 从 `=` 之后收集项，若一行没到分号则续后续行
+    let buf = line.slice(m[0].length);
+    let k = i;
+    while (!buf.includes(";") && k + 1 < lines.length) {
+      k += 1;
+      buf += " " + lines[k];
+    }
+    // 截到本声明结束（分号），并去掉 == 的比较式（如需求里的 != 判断不含 * 项，安全）
+    buf = buf.split(";")[0];
+    const terms = [...buf.matchAll(/([A-Za-z_][\w.]*)\s*\*\s*(\d+\.\d+)/g)];
+    if (terms.length < 2) return;
+    seen.add(force);
+    out.push({
+      force,
+      lhs: m[1],
+      site: `${i + 1}`,
+      weights: terms.map((t) => Number(t[2])),
+      text: buf.trim(),
+    });
+  });
+  return out;
+}
+
 // ── 权威源里的「指针字段」现场 ────────────────────────────────────────
 
 /**
@@ -815,6 +861,32 @@ export function selftest() {
     return extractRhaiForceParts(src).length === 0 ? true : "非三力左值被纳入现场";
   });
 
+  // ── Rust 权威函数内部权重（2026-09-20 收敛后新增，跨行、去重的正负对照）──
+  t("抽取 Rust 权威函数内部权重（含跨行声明）", () => {
+    const src = [
+      "        let supply_rigidity_score = concentration_score * 0.30 + barrier_score * 0.40 + adjusted_cycle_score * 0.30;",
+      "        let demand_elasticity_score = adjusted_evidence * 0.60 + certainty_score * 0.40;",
+      "        let irreplaceability_score =",
+      "            supplier_score * 0.30 + tech_moat_score * 0.40 + barrier_score * 0.30;",
+    ].join("\n");
+    const got = extractRustForceParts(src);
+    return got.length === 3 && got[2].force === "Irreplaceability" && fmtSeq(got[2].weights) === "0.30/0.40/0.30"
+      ? true
+      : `得到 ${JSON.stringify(got)}`;
+  });
+  t("★抽取 Rust 内部权重：注释行不得算现场", () => {
+    const src = "        // let supply_rigidity_score = a * 0.30 + b * 0.40 + c * 0.30";
+    return extractRustForceParts(src).length === 0 ? true : "注释被当成可执行现场 ⇒ 假阳性";
+  });
+  t("★抽取 Rust 内部权重：非三力 let（如 temp * 0.5）不得算现场", () => {
+    const src = "        let tech_moat_score = rnd_s * 0.5 + roe_s * 0.5;";
+    return extractRustForceParts(src).length === 0 ? true : "非三力左值被当成现场";
+  });
+  t("★抽取 Rust 内部权重：三力名但少于 2 项不得算现场", () => {
+    const src = "        let supply_rigidity_score = barrier_score * 0.40;";
+    return extractRustForceParts(src).length === 0 ? true : "单项式子被当成加权和";
+  });
+
   // ── 三力内部权重：比较器（必须能判失败）──
   const AUTH_PARTS = {
     SupplyRigidity: [
@@ -1043,21 +1115,19 @@ function main() {
     // 通用检查只会说「抓到 N 条」，而这里必须点名是**哪一力**丢了站点
     // （左值改名时，`got.length` 仍可能是 2+1≠3 之外的各种值，报「3 vs 2」帮不上排查）。
     // `expectPerForce` 已隐含总数约束：每力恰好 1 处 ⇒ 总数必然 = 3。
-    if (s.kind === "rhai-force-parts") {
-      const found = extractRhaiForceParts(text);
-      const bad = compareForceParts(parts, found, s.expectPerForce);
-      for (const b of bad) {
+    if (s.kind === "rhai-calls-shared") {
+      // 2026-09-20 收敛后：.rhai 不再内联三力加权和，而是调用共享 Engine 的 Rust
+      // 权威函数 bottleneck_node_score。此处断言「脚本确实调用了它」，防止脚本又
+      // 退回独立实现（与 rhai-band-from-ontology 同一纪律：「收敛到本体/权威后，
+      // 脚本若不再调用才算回归」）。
+      const hasCall = text.includes("bottleneck_node_score(");
+      siteReport.push({ site: s.file, kind: s.kind, note: s.note, found: hasCall ? "bottleneck_node_score(…)" : "无" });
+      if (!hasCall) {
         problems.push({
-          where: b.site ? `${s.file}:${b.site}` : s.file,
-          why: `三力内部权重与权威源不一致：${b.reason}（权威 ${b.want} / 实际 ${b.got}）`,
+          where: s.file,
+          why: "未发现对 bottleneck_node_score 的调用 —— .rhai 三力评分已退回独立实现（2026-09-20 收敛要求统一走 Rust 权威口径）。若改写了调用形态请同步 SITES",
         });
       }
-      siteReport.push({
-        site: s.file,
-        kind: s.kind,
-        note: s.note,
-        found: found.map((x) => `${x.lhs}=[${fmtSeq(x.weights)}]`).join(" "),
-      });
       continue;
     }
 
@@ -1110,6 +1180,32 @@ function main() {
       }
       siteReport.push({ site: s.file, kind: s.kind, note: s.note, found: shape.join("/") });
     }
+  }
+
+  // 3b. Rust 权威函数内部权重字面量 vs 本体 *_PARTS（2026-09-20 收敛后）
+  //
+  // 两个 .rhai 已收敛为调用 Rust 权威函数 bottleneck_node_score，不再内联三力加权和。
+  // 权威算分迁到 rhai_bottleneck.rs；此处的比对从「比对 .rhai 现场」转为
+  // 「比对 Rust 源码里真正跑的字面量」，保证用户实际执行的那份权重就是权威值。
+  const RS_REL = "src-tauri/src/commands/stock_workflow/rhai_bottleneck.rs";
+  try {
+    const rustText = readText(RS_REL, readCount);
+    const rustParts = extractRustForceParts(rustText);
+    const badRust = compareForceParts(parts, rustParts, 1);
+    for (const b of badRust) {
+      problems.push({
+        where: b.site ? `${RS_REL}:${b.site}` : RS_REL,
+        why: `Rust 权威函数内部权重与本体 *_PARTS 不一致：${b.reason}（权威 ${b.want} / 实际 ${b.got}）`,
+      });
+    }
+    siteReport.push({
+      site: RS_REL,
+      kind: "rust-force-parts",
+      note: "bottleneck_node_score 内部权重字面量（收敛后真实算分侧）",
+      found: rustParts.map((x) => `${x.force}=[${fmtSeq(x.weights)}]`).join(" "),
+    });
+  } catch (e) {
+    problems.push({ where: RS_REL, why: `Rust 权威函数内部权重检查读不到文件：${e.message}` });
   }
 
   // 4. 接线存在性（「接了线」≠「接活」）

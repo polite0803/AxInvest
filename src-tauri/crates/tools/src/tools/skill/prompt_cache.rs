@@ -9,7 +9,6 @@
 //! ## 使用场景
 //!
 //! - Agent 系统提示词拼接：将相关 skill 内容注入 system_prompt
-//! - 工作流 Agent 节点：根据 model_role 自动加载对应 skill
 //! - MCP 工具 `skill_view`：直接返回缓存内容，避免重复 I/O
 
 use parking_lot::Mutex;

@@ -213,17 +213,25 @@ pub struct ValueConfig {
     pub safety_margin_min: f64,
 }
 
+// ⚠️ 2026-09-23：本组默认值改为**派生**自 `astock-data::mcp_tools` 的唯一真相源常量。
+//
+// 此前它们是**第五份手抄**（12.0 / 4.0 / 8.5），而常量区的「唯一真相源」表只列了四处、
+// 未包含本文件 ⇒ 真相源一改，这里就静默漂移。本组单位是**百分数**，故 ×100 换算。
+//
+// 本结构当前**全仓无消费方**（仅定义 + 文档引用）。它的历史角色正是「假修复」的载体：
+// `seed_stock_analysis.rs` 的 v32 变更日志记录 —— 2026-09-12 那次 A 股校准
+// 「只改到了**未被消费的** `decision::ValueConfig`，没改到实际执行的常量」，
+// 于是面板显示 8.5/4.0/12.0 而 `astock-data` 仍按 0.10/0.03/0.08 执行。
+// 漂移的地雷在**无消费方**时最危险（改它、不生效、也无人报警），故此处必须派生：
+// 即便将来有人接线，也不会再引入第五处口径。
 fn default_dcf_growth() -> f64 {
-    // A股校准：优秀公司平均增速 12%（原 8% 偏保守，导致系统性低估成长股）
-    12.0
+    axagent_astock_data::mcp_tools::DEFAULT_GROWTH * 100.0
 }
 fn default_dcf_perpetual() -> f64 {
-    // A股校准：接近长期名义 GDP 增速 4%（原 3% 偏低）
-    4.0
+    axagent_astock_data::mcp_tools::PERPETUAL_GROWTH * 100.0
 }
 fn default_dcf_discount() -> f64 {
-    // A股校准：无风险利率 2.5% + 6% 风险溢价（原 10% 偏高）
-    8.5
+    axagent_astock_data::mcp_tools::DISCOUNT_RATE * 100.0
 }
 fn default_moat_threshold() -> u32 {
     60
@@ -237,11 +245,13 @@ fn default_safety_margin() -> f64 {
 
 impl Default for ValueConfig {
     fn default() -> Self {
+        // ⚠️ 2026-09-23：与上方 `default_dcf_*` **同源派生**，不再各写一份字面量
+        //   （本节曾是手抄第四份，且与函数版可独立漂移）。
+        use axagent_astock_data::mcp_tools as m;
         Self {
-            // A股校准参数：详见 default_dcf_* 函数注释
-            dcf_growth_rate: 12.0,
-            dcf_perpetual_rate: 4.0,
-            dcf_discount_rate: 8.5,
+            dcf_growth_rate: m::DEFAULT_GROWTH * 100.0,
+            dcf_perpetual_rate: m::PERPETUAL_GROWTH * 100.0,
+            dcf_discount_rate: m::DISCOUNT_RATE * 100.0,
             moat_threshold: 60,
             f_score_buy_threshold: 7,
             safety_margin_min: 20.0,

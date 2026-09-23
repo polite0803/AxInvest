@@ -11,6 +11,7 @@ import { Alert, Button, Col, Empty, Progress, Row, Skeleton, Space, Statistic, T
 import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import { getRiskColor, getRiskTKey } from "@/lib/stock-analysis-utils";
 import { type PortfolioCorrelationCell, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 
@@ -32,12 +33,10 @@ function correlationColor(c: number): string {
   return "#8c8c8c";
 }
 
-function riskColor(level: string): string {
-  if (level.includes("高")) { return "red"; }
-  if (level.includes("中")) { return "orange"; }
-  if (level.includes("低")) { return "green"; }
-  return "default";
-}
+// 2026-09-21: 本文件原有的本地 `riskColor`（`level.includes("高") ? "red" : …`）已删除。
+//   它用子串判据且只认中文，与权威 `getRiskColor`（先 `parseRiskLevel` 归一、再精确匹配枚举）
+//   判据相反 —— 中文在它这里能出色、英文落 `default`；而权威函数此前恰好相反（中文落灰）。
+//   两个函数各错一半，同一入参在两处结论不同。现统一调 `getRiskColor`。
 
 export function PortfolioMonitorPanel() {
   const { t } = useTranslation();
@@ -211,8 +210,8 @@ export function PortfolioMonitorPanel() {
       <Row gutter={[12, 12]} className="items-center">
         <Col flex="auto">
           <Space>
-            <Tag color={riskColor(dashboard.riskLevel)} icon={<SafetyOutlined />}>
-              {t("stockAnalysis.portfolioMonitor.riskLevel")}: {dashboard.riskLevel}
+            <Tag color={getRiskColor(dashboard.riskLevel)} icon={<SafetyOutlined />}>
+              {t("stockAnalysis.portfolioMonitor.riskLevel")}: {t(getRiskTKey(dashboard.riskLevel))}
             </Tag>
             {dashboard.correlationAvg != null && (
               <Tag color="purple" icon={<ClusterOutlined />}>

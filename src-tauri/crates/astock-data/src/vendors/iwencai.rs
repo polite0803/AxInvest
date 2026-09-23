@@ -188,6 +188,9 @@ impl StockVendor for IwencaiVendor {
                 .and_then(|v| v.as_str().map(|s| s.to_string())),
             rating_count,
             year: chrono::Utc::now().format("%Y").to_string(),
+            // vendor 返回的真实一致预期 ⇒ 非估算
+            is_estimated: false,
+            estimate_source: None,
         }))
     }
 

@@ -186,7 +186,9 @@ export function AgentWfTab() {
       {isGenerating && (
         <div style={{ padding: "0 12px 8px" }}>
           <Progress percent={100} size="small" status="active" />
-          <Text type="secondary" style={{ fontSize: 12 }}>{parseProgress}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {parseProgress ? t(parseProgress) : ""}
+          </Text>
         </div>
       )}
 

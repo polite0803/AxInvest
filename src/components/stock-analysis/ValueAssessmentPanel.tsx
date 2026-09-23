@@ -2,7 +2,7 @@
 import { invoke } from "@/lib/invoke";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { ExpandOutlined, LineChartOutlined } from "@ant-design/icons";
-import { Button, Card, Collapse, Empty, Modal, Spin, Tag } from "antd";
+import { Alert, Button, Card, Collapse, Empty, Modal, Spin, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ReportMarkdown } from "./ReportMarkdown";
@@ -540,6 +540,11 @@ export function ValueAssessmentPanel() {
   // rawData 的 key 是节点 id（raw-data / combined），从来取不到 stockCode——旧版据此取值，
   // 导致 compute_valuation_band 分支实际从未执行（估值带恒不显示）。rawData 仅作兜底。
   const storeStockCode = useStockAnalysisStore((s) => s.stockCode);
+  // 2026-09-21: 估值维度的**适用性 / 锚定口径**（`portfolio-mgr` 产物字段）。
+  //   面板上的区间是算法值，但锚定前提此前完全不可见 ⇒ 用户会把
+  //   「近 5 年正净利均值 ×0.90」的历史代理锚当成内在价值
+  //   （300308 实证：面板显示 80.63–156.77 元，现价 926.43 元）。
+  const valuationApplicability = useStockAnalysisStore((s) => s.valuationApplicability);
   const [expanded, setExpanded] = useState(false);
 
   // R3-C: 估值带
@@ -585,7 +590,45 @@ export function ValueAssessmentPanel() {
   const hasRuleCheck = Object.keys(ruleCheckResults).length > 0;
   const hasDataQuality = dataQualitySummary.trim().length > 0;
   const hasRawData = Object.keys(rawData).length > 0;
-  const hasAny = hasValue || hasRuleCheck || hasDataQuality || hasRawData;
+
+  // ── 估值前提标注（顺序固定，便于阅读与测试）──
+  // 只报「用户看数字时会被误导」的情形；`null`（旧模板/未跑）⇒ 一条不报，
+  // 且不显示「已确认适用」——「没这个字段」与「字段说适用」是两件事。
+  const applicabilityNotices: Array<{ key: string; tone: "warning" | "info" }> = [];
+  if (valuationApplicability) {
+    const a = valuationApplicability;
+    if (!a.dcfApplicable) {
+      applicabilityNotices.push({
+        key: "stockAnalysis.valuationApplicability.dcfNotApplicable",
+        tone: "warning",
+      });
+    } else if (a.anchorIsFallback) {
+      // 仅当 DCF 腿**仍在参与**时提示锚定口径：已被剔除时上面那条已说明原因，
+      // 再报「锚定是代理」属重复（且会让人以为剔除是针对锚定做的）。
+      applicabilityNotices.push({
+        key: "stockAnalysis.valuationApplicability.anchorIsFallback",
+        tone: "warning",
+      });
+    }
+    if (a.grahamGrowthClamped) {
+      applicabilityNotices.push({
+        key: "stockAnalysis.valuationApplicability.grahamGrowthClamped",
+        tone: "info",
+      });
+    }
+    if (!a.dcfLegUsed && !a.grahamLegUsed) {
+      applicabilityNotices.push({
+        key: "stockAnalysis.valuationApplicability.allLegsExcluded",
+        tone: "warning",
+      });
+    }
+  }
+  const applicabilityReason = valuationApplicability && !valuationApplicability.dcfApplicable
+    ? valuationApplicability.reason
+    : "";
+  const hasApplicability = applicabilityNotices.length > 0;
+
+  const hasAny = hasValue || hasRuleCheck || hasDataQuality || hasRawData || hasApplicability;
 
   const parsed = hasValue ? tryParseValueReport(valueReport) : null;
   const readableText = hasValue ? extractReadableText(valueReport, t) : "";
@@ -694,6 +737,31 @@ export function ValueAssessmentPanel() {
             <ValuationBandChart data={valuationBand} loading={valuationBandLoading} />
           </Spin>
         </Card>
+      )}
+
+      {
+        /* 2026-09-21: 估值前提标注 —— 必须排在数字**之上**，
+          否则用户要先读完「内在价值 80.63–156.77 元」才会看到
+          「该区间锚定于历史代理、并不成立于当期现金流」。 */
+      }
+      {hasApplicability && (
+        <Alert
+          type={applicabilityNotices.some((n) => n.tone === "warning") ? "warning" : "info"}
+          showIcon
+          message={t("stockAnalysis.valuationApplicability.title")}
+          description={
+            <>
+              <ul className="m-0 pl-4 space-y-0.5">
+                {applicabilityNotices.map((n) => <li key={n.key}>{t(n.key)}</li>)}
+              </ul>
+              {applicabilityReason && (
+                <div className="mt-1 opacity-80">
+                  {t("stockAnalysis.valuationApplicability.reasonLabel")}：{applicabilityReason}
+                </div>
+              )}
+            </>
+          }
+        />
       )}
 
       {hasValue && (

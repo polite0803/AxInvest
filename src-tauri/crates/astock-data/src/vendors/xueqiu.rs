@@ -96,8 +96,15 @@ impl StockVendor for XueqiuVendor {
             amount: f("amount"),
             change_pct: f("percent"),
             turnover_rate: f("turnover_rate"),
-            pe: Some(f("pe_ttm")).filter(|v| *v > 0.0),
-            pb: Some(f("pb")).filter(|v| *v > 0.0),
+            // 2026-09-21 修复：**PE < 0 不是「数据缺失」**。
+            // 原实现 `.filter(|v| *v > 0.0)` 把亏损企业的负 PE 抹成 None，而下游
+            // `portfolio-mgr.rhai` 的 `data_gaps` 只看 `present()` ⇒ 把「亏损」渲染成
+            // 「PE数据(t-risk) 缺失」（688114 实证：库里 pe_ttm = −144.08 有值，
+            // 决策链却报缺口，并进一步压低一致性评分）。另一后果是本文件之外
+            // 的 `> 0.0` 守卫全部失效 —— 0 占位值与 None 无法区分。
+            // 现保留原值，**仅剔除 0**（vendor 缺字段时以 0 占位，无经济含义）。
+            pe: item["pe_ttm"].as_f64().filter(|v| *v != 0.0),
+            pb: item["pb"].as_f64().filter(|v| *v != 0.0),
             total_mv: Some(f("market_capital")).filter(|v| *v > 0.0),
             circulating_mv: Some(f("float_market_capital")).filter(|v| *v > 0.0),
             limit_up: None,

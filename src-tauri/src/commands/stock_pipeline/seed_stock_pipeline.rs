@@ -168,7 +168,6 @@ pub async fn seed_stock_pipeline_template(db: &sea_orm::DatabaseConnection) -> R
                 max_tool_rounds: Some(5),
                 execution_mode: None,
                 rag_source_ids: vec![],
-                model_role: None,
                 consistency_check: None,
                 hallucination_guard: Some(HallucinationGuardConfig {
                     enabled: false,

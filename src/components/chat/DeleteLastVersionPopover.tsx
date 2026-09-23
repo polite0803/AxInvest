@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Tooltip } from "@/components/layout/Tooltip";
+import { showBackendError } from "@/lib/errorI18n";
 import { useConversationStore } from "@/stores";
 import type { Message } from "@/types";
 
@@ -30,7 +31,7 @@ export function DeleteLastVersionPopover({
     try {
       await deleteMessage(msg.id);
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     }
   };
 
@@ -52,7 +53,7 @@ export function DeleteLastVersionPopover({
         await deleteMessageGroup(conversationId, msg.parentMessageId);
       }
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     }
   };
 

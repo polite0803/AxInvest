@@ -43,6 +43,7 @@ pub mod huggingface_scanner;
 pub mod integration;
 pub mod knowledge;
 pub mod lsp;
+pub mod market_mainline;
 pub mod marketplace_scanner;
 pub mod media;
 pub mod media_delivery;
@@ -359,6 +360,23 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
     // （domain=Finance + tool_ref），DiscoverSkills / extra_tools 注入链路即刻生效。
     // 内部跳过与 finance.rs 重名的 3 个工具，避免 HashMap 静默覆盖。
     registry.register_all(astock_data::stock_mcp_tool_instances());
+
+    // ── 市场主线工具（daily-market-events 模板的 persist 落地工具）──
+    //
+    // 为什么单独列一段：该工具名由 `seed_daily_market_events.rs` 的 Agent 节点
+    // `ToolDef { name: "market_mainline_batch_upsert" }` 声明，并在提示词里要求模型调用。
+    // 而工作流的工具解析（`init/services.rs` 注入的 `ToolResolver`）判据是
+    // `reg.list_all_tool_names()` ∪ `reg.mcp.mcp_tools` —— `#[agent_command]`
+    // 元数据**不在其中**（它只喂 `command_bridge` 的 `execute_tauri_command` 索引）。
+    // 故未注册时该名字必然解析为 None，调用被 `core.rs` 的 Failed 分支
+    // `emit degraded: true` 静默吞掉（节点仍 completed、结果为空）。
+    //
+    // ⚠️ 与 `seed_daily_market_events.rs` 的 `ToolDef.name` **逐字同名**，
+    //    改名必须同步模板并递增 `TEMPLATE_VERSION`（有单测锚定，见
+    //    `market_mainline::tests::tool_name_matches_seed_template_declaration`）。
+    registry
+        .register_all(vec![std::sync::Arc::new(market_mainline::MarketMainlineBatchUpsertTool)
+            as std::sync::Arc<dyn crate::Tool>]);
 
     // ── OPC 业务工具（一人公司：发票 / 客户 / 项目 / 站点内容 / KPI / 发布计划）──
     //

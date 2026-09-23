@@ -94,7 +94,7 @@ export function NLParserPanel({ onApply }: NLParserPanelProps) {
         <div style={{ padding: "12px 0" }}>
           <Progress percent={50} status="active" showInfo={false} strokeColor="#1677ff" />
           <Text type="secondary" style={{ display: "block", marginTop: 6, fontSize: 12, textAlign: "center" }}>
-            {parseProgress}
+            {parseProgress ? t(parseProgress) : ""}
           </Text>
         </div>
       )}

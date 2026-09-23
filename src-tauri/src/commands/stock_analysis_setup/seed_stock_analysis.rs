@@ -3,6 +3,7 @@
 
 use super::{
     PROFILE_TOOLS, build_analyst_input_mapping, force_variable_value, merge_variable_values,
+    resolve_debate_rounds,
 };
 use crate::commands::error_code::stock_setup;
 
@@ -90,6 +91,279 @@ type AlgoToolRow = (
     f64,
 );
 
+/// `stock-analysis` 模板的 DB 版本号。
+///
+/// ## 取值判据（**不是**「比上一版 +1」）
+///
+/// 版本门是 `existing.version >= TEMPLATE_VERSION ⇒ return Ok(())`（`>=`，不是 `==`），
+/// 所以常量必须**严格大于 DB 现值**才能放行重建。DB 现值可被别的路径写高
+/// （并发会话 / 带更高常量的构建 / 历史遗留），**不能**按注释里的版本序列顺推。
+///
+/// 2026-09-20 实测（真库 + 快照表双重取证）：常量停留在 55，而 DB 已是 **58**
+/// ⇒ **v53 / v54 / v55 三批改动全部未落库**，而 `cargo check / clippy / fmt / test`
+/// 四道门全绿 —— 它们只回答「代码能否编译」，答不了「版本门会不会开门」。
+/// 依据见 `workflow_template_versions` 快照表：最后一次成功落库是 2026-09-18 06:04:22
+/// （写 `stock-analysis_v57` 快照 ⇒ DB 变 58），此后一次都没有。
+///
+/// 2026-09-20 二次升版至 **60**：v55 那批（Rhai 下沉）与 v60 这批
+/// （降级兜底档保守化 + 节点 config 删 `modelRole`）需一并落库。
+///
+/// 2026-09-20 三次升版至 **61**：f13 瓶颈因子权重改走 `get_weight`
+/// （`portfolio-mgr.rhai` + `regime-weights.rhai` 两个嵌入节点 `code` 同批改）。
+/// ⚠️ 该批**未在真库核对现值**（当时无 DB 连接）—— 若真库 `version` 已 ≥ 61
+/// （并发会话 / 更高常量的构建写过），本批仍会被门挡住。核验命令（只读）：
+///   `SELECT id, name, version FROM workflow_templates WHERE id='stock-analysis';`
+///
+/// 2026-09-21 四次升版至 **64**：数据质量链修复 —— `data-quality.rhai`
+/// （词表假阳性抑制 + expected_data 归因）与 `portfolio-mgr.rhai`
+/// （data_gaps 内容级缺口判据）两个嵌入节点 `code` 同批改。
+/// **本批已真库核对**（只读查询，2026-09-21）：`stock-analysis` 的 DB `version` = **62**，
+/// 而上一批常量已写 63 却未落库（本轮运行产物 `template_version=62` 佐证）
+/// ⇒ **v63 与 v64 两批会一并**在下次启动时落库。
+///
+/// 2026-09-21 五次升版至 **66**：估值链修复（value-investor 节点 prompt 扩
+/// 「估值不可用」判据 + 锚定口径披露 + 分歧处理）。配套的 Rust 侧同批改动
+/// （`astock-data`：现金流取数补齐、`ttm_fcf` 还原、`basis` 三态、
+/// `value_signal` 负安全边际）**不随模板走**，随二进制生效。
+/// **本批已真库核对**（只读查询，2026-09-21 05:5x）：`stock-analysis` 的 DB
+/// `version` = **65**（`updated_at` = 1789940216663 ⇒ 2026-09-21 05:36:56），
+/// 而文件常量当场是 **64** ⇒ **DB 已被别的路径写高**（`version_gate_tests`
+/// 的注释把这种状态列为已知情形：「模拟 DB 现值被别的路径写高」）。
+/// 这正好印证：**常量 ≤ DB 现值时本批会被版本门静默挡住**。
+/// 故本次必须跳到 **66**（> 65）才能落库 —— 直接写 65 会被 `>=` 门挡掉。
+/// 已核 v64 内容**确实在库**（`nodes` 含 `strip_verdict_blocks` /
+/// `placeholder_occurrences` / `soft_marker_suppression` / `dt_seat_blank`）。
+///
+/// ## 2026-09-21 再升 66 → 67
+///
+/// 本轮新增 `valuation_graham_growth_clamped` 注入（格雷厄姆腿的增长率封顶标记，
+/// 见 `input_mapping` 处注释）。与上次同理：**注入变量表是模板内容的一部分**，
+/// 不升版本号则 DB 里的 v66 行永不更新 ⇒ 新变量在 Rhai 侧恒 `present() == false`
+/// ⇒ 新加的护栏**静默不生效**。这类「改了但没落地」正是本项目已证的陷阱
+/// （版本门是 `>=`，常量 ≤ DB 现值即被挡）。
+///
+/// ## 2026-09-21 再升 67 → 68（审计 §6.4 四项拍板同批）
+///
+/// 本批是**两处 `.rhai` + 两处新增 `input_mapping` 条目 + 一个新 ToolNode**，全部属模板内容。
+///
+/// ⚠️ 计数订正（2026-09-21 落库核对后）：原写「三处 `.rhai` + 三处 `input_mapping`」，
+/// 实测为 **2 个 rhai 文件**（`portfolio-mgr.rhai` / `data-quality.rhai`）+
+/// **2 条新增注入映射**（DB 实测 `nodes` 文本内仅出现这两个新名字，
+/// 且模板级 `variables` 计数 360 **未变**——映射在**节点级** `config.input_mapping`，
+/// 不是模板变量）。「三处」的第三个在源文件与 DB 两侧都找不到对应物 ⇒ 按实测改。
+/// 教训同 J 组：「本轮新增 N 处」这类计数没有任何门禁守着，**最先腐烂**。
+///
+/// 1. `portfolio-mgr.rhai`：`moat_mult` 方向对称（看多 ×1.15 / 看空 ×0.85）、
+///    `dcf_anchor_decay` 分腿（只压 DCF 腿）、新增第三条锚腿 `band_sig`
+///    （权重 0.56 / 0.24 / 0.20，band 缺位时退化为改动前的 0.7 / 0.3）。
+/// 2. `data-quality.rhai`：新增 `upstream_data_gaps`（**只告警不扣分**）。
+/// 3. 新 ToolNode `t-valuation-band`（`compute_valuation_band`）+ 两条边
+///    （`t-valuation → t-valuation-band → portfolio-mgr`）+
+///    `raw-data` 的 aggregator description **未改**（刻意不把它并入 `algo_tools`，
+///    故「16 个工具节点」的计数仍然成立）。
+/// 4. 新增注入映射 **2 条**：`valuation_pe_percentile`（portfolio-mgr ←
+///    `t-valuation-band.result.content.metricPe.currentPercentile`）、
+///    `valuation_dcf_fcf_data_missing`（data-quality ←
+///    `t-valuation.result.content.dcf.assumptions.fcf_data_missing`）。
+///    二者都写在**节点级 `config.input_mapping`**，**不是**模板级 `variables`
+///    ⇒ 重种后 `variables` 计数**不变**（实测 360）。别拿 `variables` 当核对字段。
+///
+/// ⚠️ 与上批同理：Rust 侧同批改动（`astock-data::DcfAssumptions` 新增
+/// `fcf_data_missing` 布尔量、`commands/stock_analysis.rs` 未改）**不随模板走**。
+/// ✅ **本批已真库核对**（只读，2026-09-21）：重种前 `version` = **65**
+/// （`updated_at` = 2026-09-21 05:36:56，即 66/67 两批常量变更**从未落库**）；
+/// `tauri dev` 的 watcher 因本批源码改动自动重编重启后
+/// 重种**真实发生** ⇒ `version` = **68**、`updated_at` = 2026-09-21 13:25:44、
+/// nodes 62 → **63**、edges 153 → **155**、新节点与两条边齐备。
+/// ⚠️ 先前"watcher 不会自动重启 ⇒ 必须用户手动重启才重种"的推测**已被推翻**：
+/// 实测它**会**重启（代价是 clippy/测试队列要跟它抢 build 锁，一次 15 分钟起）。
+/// 只读核验：`SELECT version FROM workflow_templates WHERE id='stock-analysis';`
+/// ⚠️ **v69（2026-09-21）**：`portfolio-mgr.rhai` 的 reasoning 结论名改走展示档
+/// （详见函数内 v69 注释块）⇒ 本常量 68 → **69**，旧库存需重种才拿到新脚本。
+/// ⚠️ **v70（2026-09-21）**：`portfolio-risk-gate.rhai` 覆盖 `action`/`positionPct` 时
+/// 同步重算三个派生面（`positionState` / reasoning 结论名 / 止损止盈档）。
+/// **必须独立升版**，不能与 v69 合并成一个号：v69 落库后 `tauri dev` 的 watcher
+/// 会因源码改动自动重编重启并完成重种（见上文 v68 批的实测），
+/// 此时旧库存已是 v69 ⇒ 再改 `portfolio-risk-gate.rhai` 若不升号，DB 里那份
+/// 仍是未修复的旧脚本，改了等于没改。
+/// ⚠️ **v72（2026-09-21）**：`a-lockup` 的**第二个前置 ToolNode** —— `t-pledge-data`
+/// （调 MCP 工具 `get_stock_pledge_data`）。补的是**契约缺口**：
+/// `lockup-watcher.md` 的方法论与自检要求分析「质押比例 > 50% 高警戒线 / 质押风险敞口」，
+/// 但该文件的 `data_sources` 与 `PROFILE_TOOLS` 白名单**都不含质押工具**，其唯一上游
+/// `t-lockup-data` 调的 `get_stock_lockup_bundle` 只聚合解禁 / 增减持 / 大宗交易**三方**。
+/// ⇒ 每轮都在逼模型给一个**取不到的维度**编理由。全库实测：15 轮里 12 轮写了质押缺口，
+/// 措辞从「质押数据缺失」（相对准确）漂移到「质押数据获取失败（工具调用被拒绝）」
+/// 这种**伪归因**（详见 `AUDIT-pledge-attribution-2026-09-21.md`）。
+/// 本版三处同时接线：① 本模板新增节点 + 两条边；② `PROFILE_TOOLS["lockup-watcher"]`
+/// 授权 `get_stock_pledge_data`（LLM 侧可主动补取）；③ 专家 frontmatter 的
+/// `data_sources` 补声明（与白名单同源，避免再次只改一侧）。
+/// **必须升版**：节点与边写进 `workflow_templates.nodes|edges`，不升版旧库存照旧缺节点，
+/// 改动静默失效。
+/// ⚠️ **v73（2026-09-21）**：`data-quality.rhai` 新增**伪归因判据**（P2-1）+
+/// `input_mapping` 新增 10 条 `{分析师}_tool_calls`。
+/// 判据把「报告所说的工具被拒绝」与**真实调用记录**（`tool_calls_made` 的 `is_error`）
+/// 交叉核对，两级结论：① 报告称工具被拒而本轮**零失败记录** ⇒ 疑似编造；
+/// ② 有失败记录但报告**未点名被拒工具** ⇒ 归因含糊（无法确认影响哪个维度）。
+/// 结论并入 `gap_reason`（复用既有展示通道，不新增字段 / 前端行 / i18n key）。
+/// **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板的 `data-quality`
+/// 节点 `code` 字段，不升版 DB 里仍是旧脚本 —— 判据写了等于没写。
+/// ⚠️ **v74（2026-09-21）**：**DCF 估值参数强制校正**（`force_variable_value` ×3）。
+/// 三个参数早在 2026-09-12 就已校准（折现率 10→8.5、永续 3→4、默认增长 8→12，
+/// 注释理由：「原 10% 偏高」「原 3% 偏低」「原 8% 偏保守，系统性低估成长股」），
+/// 但 **DB 存量始终是校准前的原值** —— `merge_variable_values` 的语义是
+/// 「新定义 + 无条件保留旧值」，故只改代码常量与种子默认值是**假修复**。
+/// 实测（本版前，688114 华大智造一次运行）：DB 三值恰为 10 / 3 / 8，
+/// 使 `dcf.mid = 24.23` —— 校正后应为 **37.27（低估 35%）**，且三者同向压低估值。
+/// 本版起在变量合并之后覆写，法同 v48 的 `debate_rounds`。
+/// **必须升版**：版本门是 `existing.version >= TEMPLATE_VERSION ⇒ return`，
+/// 不升版则整个种子流程被跳过，覆写永不执行（判据写了等于没写）。
+/// ⚠️ **v75（2026-09-21）**：`portfolio-mgr.rhai` **PE 三态分流**（亏损 ≠ 数据缺失）。
+/// 配合上游三家 vendor 放开 `filter(|v| *v > 0.0)`（负 PE 不再被抹成 None ——
+/// 负值＝亏损，是有效信息），本脚本把 `risk_pe` 拆成三态：
+///   `!present` 真缺失 / `== 0.0` vendor 占位（两者登记缺口）、
+///   `< 0.0` 亏损企业（记 f4 note，**不进缺口清单**）。
+/// 原口径 `!present || <= 0.0` 把亏损与缺失合流 ⇒ 688114 实证：库里
+/// `pe_ttm = −144.08` 有值、决策链仍报「PE数据(t-risk)」缺口，并连带把一致性
+/// 评分的 data_gaps 维度打成 0 分、UI 渲染成「本次「观望」为数据不足导致的
+/// 被动降级，非看空判断」（方向被说反）。
+/// **必须升版**：`portfolio-mgr.rhai` 经 `include_str!` 嵌入本模板的
+/// `portfolio-mgr` 节点 `code` 字段，不升版 DB 里仍是旧脚本。
+/// ⚠️ **v76（2026-09-22）**：**废除「展示档」派生** —— 结论名回归**方向档** `action`。
+/// 实证（300642 透景生命，同日两次运行）：`action` 两次都是「观望」，用户看到的
+/// 结论名却是「观望」/「持有」。根因是**循环判据** ——
+/// `display_action ← position_state ← position_pct ← 试探仓 ← LLM trader 的定性词`
+/// （`!trader_dir_bearish`）⇒ LLM 一个措辞变化经三级旁路改写了结论名。
+/// 变动三处，**必须同进退**（本文件此前就因漏改一处而留下同源矛盾）：
+/// 1. `portfolio-mgr.rhai`：删 `display_action`，`reasoning` 回归 `final_action`；
+///    顺带 `disagreement_mod` 缺失分支 `1.0 → 0.7`（修「数据缺失 ⇒ 置信度反而更高」倒挂）。
+/// 2. `portfolio-risk-gate.rhai`：删同源副本 `gate_display_action`，
+///    `align_decision_label` 的目标档改用 `final_action`。
+/// 3. 前端 `src/lib/stock-analysis-utils.ts::resolveDisplayAction`：改为**恒等**。
+///
+/// ⚠️ `positionState` **保留**：它仍是独立的展示轴，风控门覆盖仓位后照旧重算；
+/// 只是**不再**用于反推结论名。
+///
+/// **必须升版**：两个 rhai 均经 `include_str!` 嵌入本模板节点 `code` 字段，
+/// 不升版则版本门 `existing.version (75) >= TEMPLATE_VERSION` 成立 ⇒ 改动不生效。
+///
+/// ## v77(2026-09-23)：把「证据可用性」的三处声明变成实现
+///
+/// 三处改动同属一个契约 —— **腿/因子必须自己声明「本次是否构成证据」，不构成者退出
+/// 权重，而不是以 0 值占分母**。三处此前都是「注释声明了、实现没做」（详见各自注释）：
+///
+/// 1. `portfolio-mgr.rhai` f6：`σ = 0`（`dqi ≥ 50` 数据够用 / `dqi < 25` F 级中性化，
+///    两种语义都是「无信息」）时 `f6_weight` 归零 —— 与同文件 f11
+///    （`pace_degraded ⇒ f11_weight = 0`）、f13（条件计入）**同范式**，此前未推广。
+/// 2. `portfolio-mgr.rhai` f7：`σ = 0`（`trader_direction` 落「中性」档，是生产样本
+///    的常态）时 `f7_weight` 归零 ⇒ `total_weight` 分母只统计真正提供方向的因子。
+///    已核对 `posterior_cap` 最小权重门 / `no_f7` 纯净对照 / `f7_weight_pct` 三个
+///    下游消费点，行为不变或更正确（论证见该处注释）。
+/// 3. `portfolio-mgr.rhai` band 腿 + `input_mapping`：新增
+///    `valuation_band_verdict` 注入并读取 —— 该腿的注释早已声明「有效性门须按数据
+///    形态判 verdict」，但 `verdict` **在全仓 Rhai 侧零注入**（只有
+///    `valuation_pe_percentile` 一条）⇒ 在样本不足（`verdict = "insufficient"`，
+///    而 `currentPercentile` 仍可能有值）时该腿以**满强度**入场。
+/// 4. `portfolio-mgr.rhai` **交易价位**：新增 `targetPrice`/`stopLoss` **绝对价格**输出
+///    （`现价 × (1 ∓ 档位%)`，档位由 `timeHorizon` 唯一决定；原内联两处的档位表同时
+///    收敛为单一定义 `sl_pct`/`tp_pct`）。
+///    此前该 map **只输出百分比**，绝对价格键从不产出 ⇒ 展示层 `targetPrice` 恒 `—`、
+///    止损位被 LLM 自填的**单端值**顶替（300642：LLM 给 `stopLoss=17.9`，
+///    而公式本可给出 `24.80 / 19.34`）⇒ 用户读到「没有目标价，却有止损」。
+///    与 `decision.rs::merge_price_fields_from_llm` 形成**公式优先**（公式键非空 ⇒
+///    不再覆盖为 LLM 值）；展示层 `pair_trade_prices` 保留作成对性兜底。
+///    rhai `catch` 兜底路径同步输出两键为 `()`（**同 key 集**）—— 异常记录不得携带
+///    任何交易结论（沿用该处 B3-c 原则）。
+///
+/// ⚠️ **本版改变决策数值**（第 1/2 项）：凡 Σ(σ·w) 中 f6 或 f7 为 0 的样本（实测近 24 条样本中
+/// f6 σ=0 占 9 条、f7 σ=0 占 8 条），`total_weight` 分母减小 ⇒ `avg_signal` 按剩余
+/// 活跃因子重新归一化，信号强度更真实（旧口径把「缺测」当成「观测到中性」计入）。
+/// 与 `max_weight`（刻意按 default 计入）的配合会让 `evidence_scale` 同步下降，
+/// 属良性耦合（证据量减少 ⇒ 后验收缩）。
+/// ⚠️ **第 4 项不改变** action / 仓位 / 置信度 —— 只新增两个展示用价格键。
+///
+/// ### v77 续（同日）：估值模型参数的科学性订正（第 5–7 项，**改变全部标的的估值**）
+///
+/// 起因：用户质询「你是不是没有检查相应计算是不是符合科学？」。复算验证方式 —— 由
+/// `high/mid` 与 `low/mid` 两比值联立反解出 300642 的 `growth = 17.78%`、
+/// `FCF/股 = 0.9819` 元，代入 `mcp_tools::compute_dcf` 复算得 `24.76 / 40.53 / 71.89`，
+/// 与面板显示**逐位吻合**（`low/mid` 偏差 0.01%）⇒ 下列结论基于生产公式真值。
+///
+/// 5. `PERPETUAL_GROWTH` **4% → 2%**（`= RISK_FREE_RATE` 派生）。原值**违反模型自身
+///    申报的无风险利率 2.5%**：隐含「该企业永续增速高于无风险利率」= 高于经济体长期
+///    名义增速，违反终值约束 `g_terminal ≤ risk-free rate`（Damodaran）。
+///    定量：300642 的 `mid` 由 40.53 → ≈31.4（**−22.6%**）⇒ 修正前「低估 92.8%」
+///    这一结论里约 **22 个百分点**纯来自一个无依据、且与自身前提冲突的取值。
+///    `DISCOUNT_RATE` 同时拆成 `RISK_FREE_RATE + EQUITY_RISK_PREMIUM` 两个**具名**分量，
+///    并由**编译期断言**锁死三者等式（数值仍 8.5%，但依据显式化、且三者无法各自漂移）。
+/// 6. **折现率纳入区间**（`RISK_STRESS_SPREAD = 1pp`，只加在悲观档）。依据：折现率的
+///    弹性是三者中最大的（300642：`|E_d| = 1.96` vs `E_p = 0.78` vs `E_g = 0.71`；
+///    `d` ±1pp 使估值变动 **1.60 倍**，大于 `p` 整个 ±30% 档的 1.54 倍）⇒ 原实现把
+///    弹性**最大**的参数固定在常量上，区间只覆盖两个弹性最小的参数，**归因错误**。
+///    乐观档**不**下调折现率（上界只由经营假设决定，不靠降要求回报灌水）。
+/// 7. **档位乘子与 clamp 的冲突修复**：原 `high_growth` 与 `growth` 共用
+///    `max_growth` 上界 ⇒ `g ≥ 20%` 时 `g × 1.5` 被砍回中性档（`g = 30%` 时实际
+///    乘子 = 1.0），而文案仍声称「×1.5」⇒ **口径与实算不符**（全库 6 条高终值占比
+///    样本里 **2 条** `g` 正好顶在 30%）。现上界改为 `max_growth × 1.5`。
+///    `MAX_PERPETUAL_GROWTH` 由裸 `0.05` 改锚 `RISK_FREE_RATE` —— 原值只是「刚好压住
+///    `0.04 × 1.3`」凑出来的，改 `PERPETUAL_GROWTH` 会让被截断的样本集**静默变化**。
+///    同日新增 `MIN_TERMINAL_SPREAD`（1.5pp）守卫：`p`/`d` 均用户可配而 `pct()` 只守
+///    `0 < raw ≤ 100` ⇒ `p ≥ d` 可达，此时终值分母塌到地板、估值被放大到
+///    `FCF₅ × 2000` 且**静默无日志**；命中即上报为适用性信号 ⑤（腿整体退出）。
+///
+/// ⚠️ **第 5/6 项改变全部标的的估值号**（第 7 项只影响 `g ≥ 20%` 与永续触顶的样本）。
+/// ⚠️ **第 5 项必须配合 `DCF_MIGRATION_VERSION` 由 76 抬到 77** —— 否则 DB 存量的
+/// `value_dcf_perpetual_rate = 4.0` 会经扁平参数**优先于模块常量**生效，改动等于没改
+/// （同型事故见 v74 注释「只改代码常量是假修复」）。
+///
+/// ⚠️ **v79（2026-09-23）：由 77 抬到 79 —— 与 `DCF_MIGRATION_VERSION` 对齐**。
+///    落库写的是本常量（落库点 = 本文件的 `version: Set(TEMPLATE_VERSION)`），而 DCF 一次性门
+///    读的是 `DCF_MIGRATION_VERSION` ⇒ 二者构成一条不变量：
+///    **`TEMPLATE_VERSION ≥ DCF_MIGRATION_VERSION`**。
+///    倒挂（本常量更低）的后果**不是**「迁移不生效」，而是**反向**的：DB 会停在一个
+///    **仍满足 `版本 < 迁移门`** 的值上 ⇒ 门**永远关不上** ⇒ 下一次为**无关**的模板改动
+///    升版时会**再次**触发 DCF force，把用户在面板里调好的估值参数打回默认
+///    （正是下方 DCF force 段长注释自己警告的那条「每次升版都会把用户调好的参数打回默认」）。
+///    本次 77 < 79 即命中该形态（`mcp_tools.rs` 的常量改了、门抬了，但**承载它的模板
+///    版本号没跟着抬**）—— 属该族**第五种形态**：前四次是「门没抬 / 抬在改动之前」，
+///    这次是「门抬了而落库版本号没抬」。
+///    处置：抬到 **79**（= 门的值）⇒ 本次落库后 DB 停在 79，门与版本号**同时关闭**。
+///    该不变量已落成**编译期断言**（紧随下方 `DCF_MIGRATION_VERSION`），此后任一常量
+///    漂移即编译失败，不再依赖「改的人记得」。
+pub(crate) const TEMPLATE_VERSION: i32 = 80;
+
+/// DCF 估值参数**一次性**迁移门的水位线。
+///
+/// 语义：`previous_version < 本值` ⇒ 强制把 DB 存量的
+/// `value_dcf_{discount,perpetual,growth}_rate` 覆写为 `seed_variables` 的派生默认值。
+/// 取值判据**不是**「比上一版 +1」，而是**「被守护的常量最后一次变更时对应的
+/// `TEMPLATE_VERSION`」**（沿革与每次抬门的理由见调用点 DCF force 段的长注释）。
+///
+/// ## 为什么提到模块级
+///
+/// ① 让紧随的编译期断言能引用它（见下）；② 与 `TEMPLATE_VERSION` 并排，使
+/// 「两者必须满足 `TEMPLATE_VERSION ≥ DCF_MIGRATION_VERSION`」这条约束**可见**。
+pub(crate) const DCF_MIGRATION_VERSION: i32 = 79;
+
+// 编译期断言：`TEMPLATE_VERSION ≥ DCF_MIGRATION_VERSION`。
+// 为什么必须是**编译期**而不是测试：它是**跨常量**的等式型约束，编译期断言让它无法被
+// 「改一个忘一个」绕过（测试要靠人记得跑，而这条约束的失效形态恰恰是「没人注意到」）。
+// 也不要退回「把两个数值写在一起」—— 那正是手抄，会各自漂移（见 `AGENTS.md` 规范）。
+const _: () = assert!(
+    TEMPLATE_VERSION >= DCF_MIGRATION_VERSION,
+    "版本号与 DCF 迁移门水位线倒挂：`TEMPLATE_VERSION` 必须 ≥ `DCF_MIGRATION_VERSION`。\
+     落库写的是前者、门读的是后者 ⇒ 倒挂会让 DB 停在低于门的版本上，门永远关不上，\
+     下次无关升版会把用户面板调好的 DCF 参数打回默认。详见两个常量的文档注释。"
+);
+
+// ## 为什么提到模块级
+//
+// 让 `mod.rs` 末尾的 `version_gate_tests` 能直接引用它去做守门断言
+// （低于它的旧版本必须被升级、高于它的版本必须被跳过）。
+// ⚠ 本块刻意**不写 `///`**：它讲的是常量的**安置理由**，不是常量语义 ——
+// 并进 `TEMPLATE_VERSION` 或 `DCF_MIGRATION_VERSION` 任一者的文档都是**语义错位**；
+// 而普通 `//` 注释不参与文档归属 ⇒ 不会触发 clippy `empty_line_after_doc_comments`
+// （`-D warnings` 下该 lint 直接让构建失败）。
+
 pub(crate) async fn seed_stock_analysis_workflow_template(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<(), String> {
@@ -98,13 +372,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     use axagent_harness::workflow_types::{
         AgentNode, AgentNodeConfig, AggregatorNode, AggregatorNodeConfig, BackoffType, Branch,
         CodeNode, CodeNodeConfig, DebateNode, DebateNodeConfig, DegradeStrategy, EdgeType, EndNode,
-        EndNodeConfig, ErrorConfig, JsonSchema, JsonSchemaProperty, LlmClassifierNode,
-        LlmClassifierNodeConfig, MergeStrategy, NotificationNode, NotificationNodeConfig,
-        OnFailureAction, OutputMode, ParallelNode, ParallelNodeConfig, Position, RetryConfig,
-        StorageNode, StorageNodeConfig, SubGraph, SwitchCase, SwitchNode, SwitchNodeConfig,
-        ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
-        ValidationAssertion, ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge,
-        WorkflowNode, WorkflowNodeBase, WorkflowRetryPolicy,
+        EndNodeConfig, ErrorConfig, JsonSchema, JsonSchemaProperty, MergeStrategy,
+        NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode, ParallelNode,
+        ParallelNodeConfig, Position, RetryConfig, StorageNode, StorageNodeConfig, SubGraph,
+        SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig,
+        TriggerNode, TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig,
+        Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase, WorkflowRetryPolicy,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -134,6 +407,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   fallback_label；② v-validate 改依赖 t-risk（拆除 cls-risk-level→v-validate
     //   死锁边）。data-quality/portfolio-mgr/portfolio-risk-gate 的 continue_on_fail=true
     //   已在 v7/v8 落库，本版本递增确保上述改动重种子生效。
+    //   ⚠️ v55(2026-09-20) 起①的三重防线已无必要：该节点改为 Rhai CodeNode 后不再发起
+    //     LLM 调用，超时成因（agnes-3.0-flash 34.95s > 30s）从根上消失 ⇒ timeout 60→10s、
+    //     重试关闭；②的拆边仍然有效（v-validate 依赖 t-risk，与本节点无关）。
     // v10: 决策尾链全链容错（2026-09-08 遗留风险排查）——v-validate/research-mgr/
     //   trader/quality-gate/quality-fallback/decision-explainer/notify-result/
     //   store-result/end-output 全部开 continue_on_fail：尾链任一上游失败不再死锁，
@@ -406,6 +682,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   而是两条语义完全不同的链共用「目标价」这个词**，且中间有一段静默失效：
     //   · 公式侧 `portfolio-mgr.rhai` **从不产出绝对价格**（只有 stopLossPct/takeProfitPct），
     //     故 `decision_json` 里 `targetPrice`/`stopLoss` 键**根本不存在**（DB 实证）；
+    //     ⚠️ **订正（2026-09-23，v77 第 4 项）：本条自本日起不再成立** —— 公式侧现已产出
+    //     两键的绝对价格（`现价 × (1 ∓ 档位%)`），且优先于 LLM 值。v39 当时只补了
+    //     prompt 约束 + R-204 留痕，**未修这条断链的源头**；2026-09-23 的 300642 样本正是
+    //     该未修部分复现（LLM 合规留空 `targetPrice`、仍填 `stopLoss=17.9`，展示层于是
+    //     同时显示「目标价 —」与「止损价 17.90」）。原文保留以存证 v39 的判断。
     //   · `decision.rs::merge_price_fields_from_llm` 的注释写着「缺键时用 trader 的 LLM 输出兜底，
     //     否则仪表盘目标价恒显示 —」，因公式侧**永远**缺键 ⇒ 这个「兜底」是**唯一来源**
     //     （3 个调用点 2323/2484/2639 全部命中）⇒ 仪表盘目标价 100% 来自 LLM 自填值；
@@ -630,7 +911,201 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   DB 模板里的 `portfolio-mgr` CodeNode.code 被重新写入。
     //   配套：`analysis-engine/portfolio_formula.rs::classify_risk`（参考实现）同步
     //   删除 `sector` 形参与 `is_financial_sector`，避免两处漂移。
-    const TEMPLATE_VERSION: i32 = 51;
+    // v52(2026-09-19): 核心方法论入决策 —— `portfolio-mgr.rhai` 新增 **f13 瓶颈因子**，
+    //   把「瓶颈掘金」三力合成分接入 posterior 融合。此前 `serenity_context` 虽已由
+    //   本模板的 input_mapping 注入（`("serenity_context", "serenity_context")`），
+    //   但脚本侧**零引用** ⇒ 恒不参与决策，只能作 LLM 上下文（详见 f13 段注释）。
+    //   属**公式内容变更** ⇒ 必须升版，否则版本门让种子跳过、DB 模板里
+    //   `portfolio-mgr` CodeNode.code 仍是旧公式（即下方 v50 注释所记的
+    //   「改完不生效」生成物陷阱）。
+    //   同批改动：A3 —— 给 V47 空头否决补「输入可信」前置条件（联立 `trader_data_valid`），
+    //   并新增 `R-201-SUPPRESSED` 留痕（异常输入被抑制的否决必须可见）。
+    //   ⚠️ 代价同前：本版会覆盖 DB 中对该模板 nodes/edges 的手工调整
+    //   （`variables` 的自定义值在升级前保留）。
+    // v53(2026-09-19): 阶段一 A2 —— `detect_earnings_surprise` 的 ToolDef 新增入参
+    //   `consensus_eps_is_estimated`，把「这个一致预期 EPS 是估算值」这一事实**递到工具
+    //   面前**，使它在算「超预期」之前能先拒判。原先拿「板块常数反推」的估算 EPS 当真
+    //   EPS 用，会产出**假超预期**信号并一路流进决策。
+    //   属**工具定义内容变更** ⇒ 必须升版：ToolDef 的入参表与 description 同样是 DB 模板
+    //   内容的一部分，而版本门是 `existing.version >= TEMPLATE_VERSION`
+    //   （见本函数开头的版本门 —— 不是 `==`，所以留在旧号上会**永久跳过**种子），DB 里将仍是**没有
+    //   这个入参**的旧声明 ⇒ Agent 无从填写、`detect_earnings` 永远走不到拒判分支。
+    //   这就是 v50 注释所记的「改完不生效」生成物陷阱的又一次同型复发。
+    //   配套（须同批生效，缺一则退化为半截修复）：
+    //     · `astock-data`：`ConsensusEPS` 新增 `is_estimated` / `estimate_source` 并在
+    //       所有构造点显式赋值（财报值 = false、板块常数兜底 = true）；
+    //     · `tools::finance::detect_earnings`：读标志，为 true 时拒判超预期
+    //       （返回 `surprise_pct = null` + `预期基准不可靠`，而非编一个数）。
+    //   若只升版不落地消费端 ⇒ 「声明了入参但没人消费」；只落地消费端不升版 ⇒
+    //   「有拒判分支但拿不到标志」。两种半截状态都必须避免。
+    // v54(2026-09-19): 阶段一 ② —— 删除 `portfolio-mgr` 节点的 6 条**悬空**
+    //   input_mapping（注入了 scope 但脚本全文零引用 ⇒ 白注入）：
+    //     `risk_gross_margin` / `trader_action` / `trader_data_gaps` /
+    //     `trader_position_pct` / `trader_stop_loss_pct` / `trader_take_profit_pct`。
+    //   依据：`scripts/audit-inject-coverage.mjs` ② 段零命中（手写 target 61 → 55）；
+    //   已排除「靠动态键读取」——脚本内 `scope.get` / `scope.iter` / `scope.contains` /
+    //   `get_value` / `eval(` **全 0 命中**。对照组证明删除有区分度：邻居
+    //   `trader_direction`(8) / `trader_confidence`(8) / `trader_target_price`(34) /
+    //   `trader_stop_loss`(21) / `risk_sharpe`(15) / `risk_roe`(8) / `risk_debt_ratio`(2)
+    //   均被真读，故保留。
+    //   属**节点 input_mapping 内容变更** ⇒ 必须升版（理由同 v53：版本门是 `>=`
+    //   而非 `==`，留在旧号上 DB 里那 6 条白注入会永久留着）。
+    //   ⚠ 勿误删 `trader_action` 的**同名映射**：`reflection-comparator` 节点另有一条
+    //   （`mod.rs` 内的 `("trader_action", "sub-analysis.trader.content.action")`，
+    //   源路径与本节不同），`reflection-comparator.rhai` 在 `is_unit(trader_action)` 处
+    //   真读它 ⇒ 独立映射、本版不动。此处不写行号，认字符串。
+    // v55(2026-09-20): `cls-risk-level` 节点由 **LlmClassifierNode 改为 CodeNode（Rhai）**。
+    //   原节点每轮运行耗 4.8s（真库 76 次调用均值），并曾 5 次撞 60s 超时、
+    //   使整条运行落 `partially_completed`；而其 prompt 通篇是**确定性阈值规则**
+    //   （并明写「不要计算综合评分，直接按规则判定」）⇒ 等于用 LLM 跑一个 if-else。
+    //   改为 Rhai 后 <10ms、零 token、零超时（同 `data-quality` 已验证的 LLM→Rhai 路径）。
+    //   **口径 1:1 照抄原 prompt**：阈值、档位、优先级均未调整；原 prompt 原文完整保留在
+    //   `risk-level.rhai` 头部注释作为口径权威源。配套改动：
+    //     · 新增 `src/commands/risk-level.rhai`（`include_str!` 嵌入节点 code 字段）
+    //     · `portfolio-mgr` 的 input_mapping 源路径 `cls-risk-level.category`
+    //       → `cls-risk-level.result.category`（CodeNode 的输出被包在 `result` 里）
+    //   属**节点类型 + 节点内容变更** ⇒ 必须升版（理由同 v53/v54：版本门是 `>=` 而非
+    //   `==`，留在 54 上 DB 里那个 LLM 节点会永久留着，新脚本一字不落地不生效）。
+    //   ⚠️ 影子比对（真库 59 条可比对样本，`output/rhai-shadow-report.txt`）：
+    //   档位一致率 64.4%，posterior 位移**均值 +0.15pp**（双向抵消，无系统性放松），
+    //   最大上抬 +4.63pp / 最大下压 -3.60pp。分歧主因是**原 LLM 判定自身不一致**
+    //   （实证：`debt=91.6,growth=-0.3` 判高风险，`debt=92.2,growth=+8.3` 判极高风险
+    //   —— 后者负债率更高、增长为正，档位反而更严）。即「换确定性实现」本身就消除了
+    //   这部分随机性，属改造目的而非回归。
+    //   已知未实现项（数据不可得，与原 LLM 版同等受限，非本次引入）：prompt 的
+    //   「极高风险①ST/*ST/退市股」与「低风险③无ST/重大负面公告」两条判据 ——
+    //   t-risk 输出不含 ST 标记与公告数据，原 LLM 同样拿不到。启用需在
+    //   `astock-data` 的 compute_portfolio_risk 补 `isST` 字段（属改口径，待批）。
+    //   ⚠️ 代价同前：本版会覆盖 DB 中对该模板 nodes/edges 的手工调整
+    //   （`variables` 的自定义值在升级前保留）。
+    //   ⚠️⚠️ **升版判据是「严格大于 DB 现值」，不是「比上一版 +1」** —— 2026-09-20 实测：
+    //   真库 `workflow_templates` 里 `stock-analysis` 的 `version` 早已是 **58**
+    //   （`updated_at` = 2026-09-18 06:04:22），而本常量按 v52→v53→v54→v55 的
+    //   注释序列只走到 **55** ⇒ `existing.version (58) >= TEMPLATE_VERSION (55)` 成立
+    //   ⇒ 种子走版本门里的 `return Ok(())` **直接跳过** ⇒ 本节全部改动（含
+    //   `risk-level.rhai` 经 `include_str!` 嵌入的 code 字段）**一字不落库**，
+    //   节点在 DB 里仍是旧的 `LlmClassifierNode`。
+    //   这是「改完不生效」的**第二种形态**：不是常量没升，而是**升得不够高**
+    //   （同族：A 组「改生成物 = 假修复」、`PLAN-declarative-schema-sync` 的版本门陷阱）。
+    //   ⇒ 取值 **59**（严格 > 58）。核验命令（只读）：
+    //     `SELECT id, name, version FROM workflow_templates WHERE id='stock-analysis';`
+    //
+    //   ⚠️⚠️ **2026-09-20 二次取证把爆炸半径扩大了**：查 `workflow_template_versions`
+    //   快照表发现最后一次成功落库是 09-18 06:04:22（写 `stock-analysis_v57` 快照
+    //   ⇒ DB 变 58），此后**一次都没有** ⇒ 卡在门口的不是 v55 一批，而是
+    //   **v53 + v54 + v55 三批**（逐条实测见下）：
+    //     · v53：`detect_earnings_surprise` 的 `consensus_eps_is_estimated` 入参 ——
+    //       DB 节点 JSON 里该串 0 命中；而配套的 Rust 侧（`astock-data` 的
+    //       `ConsensusEPS.is_estimated` + `tools::finance::detect_earnings` 拒判）
+    //       **已随二进制生效** ⇒ 恰是 v53 注释自己警告的
+    //       「有拒判分支但拿不到标志」半截状态；
+    //     · v54：`portfolio-mgr` 的 6 条悬空 `input_mapping` 仍在 DB
+    //       （实测 `trader_action` / `trader_data_gaps` / `trader_position_pct` /
+    //        `trader_stop_loss_pct` / `trader_take_profit_pct` 均未删）；
+    //     · v55：`cls-risk-level` 在 DB 里仍是 `llmClassifier`（旧 prompt 原文
+    //       「你是专业风险分析师…」完整在场），且 DB 的 7 个 `code` 节点里没有它。
+    //   ⇒ 本次升到 59 会**一次性落库三批改动**，不只是本节的 Rhai 下沉。
+    //
+    //   常量本体已提到模块级（见文件顶部 `pub(crate) const TEMPLATE_VERSION`），
+    //   供 `mod.rs` 末尾的 `version_gate_tests` 直接引用。
+    //
+    // v60(2026-09-20): 四项产品语义裁决落地，其中两项触及本模板内容。
+    //   ① **`risk-level.rhai` 降级兜底档由「中风险」改「高风险」（保守档）**：
+    //      - 下游 `portfolio-mgr` 只用 `category` 算 f4 因子（`portfolio-mgr.rhai`
+    //        的 switch：中 -0.05 / 高 -0.25），**并不消费 `degraded`** ⇒ 原中性
+    //        兜底在决策链上等价于「我判定它是中风险」，把「没判定」伪装成「已判定」；
+    //      - 本档表征的是**未知**，未知作用在资金方向上不可逆 ⇒ 取代价较小的一侧；
+    //      - **存量影响面 = 0**：真库 59 条可比对样本里 `degraded` 零命中
+    //        （`output/rhai-shadow-report.txt` 中「LLM 档缺失(f4=0.0)」的 4 条其
+    //        vol 均存在）⇒ 只影响未来「风险画像数据缺失」的异常场景，**不改写任何
+    //        既有结论**。
+    //      ⚠️ 只改 `degraded` 分支：**规则全不命中**那一支仍是「中风险」——那一档是
+    //      prompt 明写的真判定（「A股大多数股票应落在中风险档」），不是降级。
+    //      `degraded` / `warnings` 输出字段不变（诊断面板与复盘消费）。
+    //   ② **节点 config 删除 `modelRole` 装饰键**：该键 Rust 侧**零读取**
+    //      （唯一命中是 serde alias 反序列化进 `AgentNodeConfig.model_role` 字段，
+    //      而该字段本身无任何消费点），且面板给的词表（`quick_think`/`deep_think`）
+    //      与 DB 存量值（`stock-analyst`/`debater`/…）**互不相交**；角色的正式载体是
+    //      `agent_profile_id`（字段注释明写「唯一标识角色的方式」）⇒ 属被取代的旧机制
+    //      残留，删除止血。DB 存量键不迁移（`AgentNodeConfig` 无 `deny_unknown_fields`，
+    //      serde 忽略未知键，不影响反序列化）。
+    //   属**节点 code + 节点 config 内容变更** ⇒ 必须升版（理由同 v53/v54/v55：
+    //   版本门是 `>=` 而非 `==`）。
+    //   ⚠️ 代价同前：本版会覆盖 DB 中对该模板 nodes/edges 的手工调整
+    //   （`variables` 的自定义值在升级前保留）。
+    //   ⚠️ 取值 **60**（严格 > DB 现值 58，判据同 v55 节：不是「比上一版 +1」）。
+    //   ⚠️ 同批（不依赖升版、立即生效的）还有：`dao` 的 `split_node_model` —— 让节点
+    //   `config.model` 的 `providerId::modelId` 复合值真正拆出供应商（此前整串被当
+    //   model id 直传 API），以及 `LlmClassifierPropertyPanel` 补齐模型/阈值/降级档控件。
+    //
+    // v61(2026-09-20): **f13 瓶颈因子权重由硬编码改走 `get_weight`（接 regime 白名单）**。
+    //   产品裁决：待裁决项②「f13 权重硬编码 0.10 是否保留」→ 选「改走 get_weight」。
+    //   改动落在**两个** `include_str!` 嵌入节点 `code` 的 rhai 文件：
+    //     ① `portfolio-mgr.rhai`：`f13_weight = f13_default;`
+    //        → `f13_weight = get_weight(f_weights, "bottleneck", f13_default);`
+    //        （`f13_default = 0.10` 保留为 fallback，语义不变）
+    //     ② `regime-weights.rhai`：`factors` 表新增 `bottleneck` 条目
+    //        （base 0.10 / bull 0.9 / bear 1.2 / neutral 1.0 / volatile 1.3），
+    //        并加入 `factor_names` 与 `consumed_names` 白名单。
+    //
+    //   ⚠️ **两处必须同批改，只改一侧都是空接**：
+    //     · 只改 ① ⇒ `factor_weights` 里没有 `bottleneck`（白名单外 ⇒ 被丢进
+    //       `unconsumed_suggestions`）⇒ `get_weight` 恒取 fallback 0.10，等价于没改；
+    //     · 只改 ② ⇒ pm 仍读硬编码 ⇒ 该条目产出后无人消费，又是一处「死计算」
+    //       （P1-F 契约当初清理的正是这一形态）。
+    //   这类「两文件同改才算一次改动」的耦合，是 `include_str!` 之外还要靠本注释
+    //   记录的根本原因 —— 编译器看得见语法错，看不见「两头没接上」。
+    //
+    //   存量影响面：base 0.10 × neutral 1.0 = 0.10 ⇒ **中性市况下与变更前逐值相同**，
+    //   仅 bull/bear/volatile 三档产生位移（±0.01~0.03 权重，相对全因子总权重
+    //   ≈1.49 为 0.7%~2.0%，不足以单独翻转档位；若需精确量化可用
+    //   `output/rhai-shadow-report` 同型脚本做反事实扫描）。
+    //   `max_weight` **不随之改**：它是「活跃因子**默认**权重之和」，f1/f2/f5/f9/f10
+    //   走 get_weight 后同样用各自 default 计入，f13 保持一致 ⇒ 非瓶颈路径分母
+    //   仍为 1.49、瓶颈路径仍为 1.59，`evidence_scale` / `weights_collapsed`
+    //   口径**零回归**。
+    //   属**节点 code 内容变更** ⇒ 必须升版（理由同 v53~v60：版本门是 `>=` 而非 `==`）。
+    //   ⚠️ 取值 **61**（严格 > 上一常量 60；判据同 v55 节：不是「比上一版 +1」）。
+    //   ⚠️ 代价同前：本版会覆盖 DB 中对该模板 nodes/edges 的手工调整
+    //   （`variables` 的自定义值在升级前保留）。
+    //
+    // v69(2026-09-21): **reasoning 的结论名改走「展示档」** —— 修「挂角说观望、结论说持有」。
+    //   实证（2026-09-21 13:52 的一条「持有 + 0% 仓位」记录）：历史卡挂角 Tag 显示
+    //   「观望」，点开结论文本却是「决策=持有」，用户读到同一条记录内部两个名字。
+    //   根因：V76 拆轴后**展示层**统一走 `resolveDisplayAction`（中性档 + EMPTY ⇒ 观望），
+    //     而 `portfolio-mgr.rhai` 拼 reasoning 用的仍是**原始方向档** `final_action`
+    //     ⇒ 同一份 JSON 里 `action`（原始轴）与 `reasoning`（人读文本）各自为政。
+    //   改动落在 `portfolio-mgr.rhai`（`include_str!` 嵌入本模板 `portfolio-mgr` 节点）：
+    //     · 新增 `display_action`：非中性档原样 / 中性档 + EMPTY ⇒ 观望 / 其余 ⇒ 持有
+    //       —— 判据与前端 `resolveDisplayAction` **逐条对齐**，改一侧必须改另一侧；
+    //     · `reasoning` 的 `决策=${final_action}` → `决策=${display_action}`。
+    //     · `action` 字段**不动**：它是方向强度轴，前端双视角对比（公式 vs LLM）与
+    //       「问 AI」prompt 都依赖原值，在此派生会掩盖真实分歧。
+    //   ⚠️ 存量数据：已落库的历史行 reasoning 仍是旧文本，由前端
+    //     `stock-analysis-utils::alignReasoningDecisionLabel` 在解析层对齐（幂等，
+    //     只改开头第一个 `决策=X`；`风控否决:持有→观望` 这类**过程留痕**不动）。
+    //   ⚠️ 曾登记为「未修」：`portfolio-risk-gate.rhai` 覆盖 `action` 时**不更新** reasoning
+    //     的结论名（只追加 `| [风控门] ...`）。**现已修**：该门末尾调 `align_decision_label`
+    //     把结论名对齐到最终方向档（v76 起目标档 = `final_action`），落库文本自洽。
+    //   属**节点 code 内容变更** ⇒ 必须升版（理由同 v53~v61：版本门是 `>=` 而非 `==`）。
+    //   ⚠️ 取值 **69**（严格 > 上一常量 68）。
+    //   ⚠️ **上述派生已于 v76（2026-09-22）废除** —— 见文件顶部 `TEMPLATE_VERSION`
+    //     的 v76 说明（循环判据：用本次建议仓位反推本次展示名）。本段保留为历史留痕，
+    //     **不要**据此认为代码里还存在 `display_action`。
+    //
+    // v71(2026-09-21): **`data-quality.rhai` 逐节点诊断补 `report_quality`** ——
+    //   修「10 个分析师的数据质量弹窗显示同一组数字」（用户质问「这是造假吗」）。
+    //   根因：面板顶部四数（score / grade / good / degraded / gap）取自 data-quality 节点的
+    //     **全局**输出对象，而该对象里根本没有 per-analyst 的 score/grade ⇒ 前端物理上
+    //     渲染不出「本节点的等级」，10 张分析师卡片复用同一 modal（只换 name/expertId）。
+    //   改动落在 `data-quality.rhai`（`include_str!` 嵌入本模板 `data-quality` 节点）：
+    //     · `diag_for` 新增第 7 参 `rq`，返回 map 补 `"report_quality": rq`；
+    //     · 10 处调用点各补本节点**已算好但此前被平均掉**的 `*_q`
+    //       （`report_quality(text, conf)`，与全局 `report_quality_avg` 同源同口径）。
+    //   ⚠️ 只补**事实量**，不派生 per-node 字母等级 —— 那会再造「两套同名等级」，
+    //     正是 2026-09-14 才修掉的坑（见 `AnalystDataQualityModal.tsx` 头部注释）。
+    //   属**节点 code 内容变更** ⇒ 必须升版（版本门是 `>=`，非 `==`）。
+    //   ⚠️ 取值 **71**（严格 > DB 现值 70，2026-09-21 只读查询实测）。
 
     tracing::info!(
         "[stock_analysis_setup] seed_stock_analysis_workflow_template 开始: TEMPLATE_ID={TEMPLATE_ID}, TEMPLATE_VERSION={TEMPLATE_VERSION}"
@@ -638,6 +1113,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
 
     // 升级前保留旧模板的变量自定义值，在函数体外声明以延长生命周期
     let mut old_variables: Option<String> = None;
+    // D11（2026-09-22）：记录旧模板版本号，供「存量一次性迁移」判定（见下方 DCF force 处）。
+    // `None` = 模板此前不存在（首次创建）⇒ 视为需要执行迁移。
+    let mut previous_version: Option<i32> = None;
 
     if let Some(existing) =
         workflow_template::Entity::find_by_id(TEMPLATE_ID).one(db).await.map_err(|e| {
@@ -717,7 +1195,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             tracing::info!("[stock_analysis_setup] 旧版本快照已保存: {ver_id}");
         }
         old_variables = existing.variables.clone();
-        // 用 UPDATE 替代 DELETE，保留用户自定义变量
+        previous_version = Some(existing.version);
+        // ⚠️ 2026-09-22 更正：落库其实是 DELETE（下方 `delete_by_id`）+ INSERT，**不是** UPDATE；
+        // 变量 `value` 的「保留用户自定义值」由 `merge_variable_values`（:4641 调用）逐名完成。
+        // 原注释「用 UPDATE 替代 DELETE」与实现不符，会误导后续改动。
     } else {
         tracing::info!("[stock_analysis_setup] 模板 {TEMPLATE_ID} 不存在，将创建新模板");
     }
@@ -1137,9 +1618,20 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     let mut earn_props = std::collections::HashMap::new();
     earn_props.insert("actual_eps".into(), sc_prop("实际EPS"));
     earn_props.insert("consensus_eps".into(), sc_prop("一致预期EPS"));
+    // 2026-09-19（A2）：把「基准是否为估算值」显式暴露给调用方。
+    //   来源是 `ConsensusEPS.is_estimated`（序列化为 `isEstimated`）—— 调用方从
+    //   `get_stock_consensus_eps` 拿到该字段后应原样传进来，否则本工具会拿一个
+    //   板块常数当真基准算相对量。
+    earn_props.insert(
+        "consensus_eps_is_estimated".into(),
+        sc_prop("一致预期EPS是否为估算值(true 时本工具拒判超预期)"),
+    );
     let td_earnings = ToolDef {
         name: "detect_earnings_surprise".into(),
-        description: Some("检测业绩超预期/低于预期".into()),
+        description: Some(
+            "检测业绩超预期/低于预期（consensus_eps 为估算值时拒判：假基准算出的相对量无意义）"
+                .into(),
+        ),
         parameters: Some(JsonSchema {
             schema_type: "object".into(),
             description: None,
@@ -1272,6 +1764,26 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         description: Some("获取融资融券数据（融资买入额、余额、融券卖出量、余量）".into()),
         parameters: stock_code_params(),
     };
+    // v72(2026-09-21): 股权质押数据（`get_stock_pledge_data`）。
+    //
+    // ⚠️ **这个 ToolDef 是「白名单授权」生效的**前置条件**，漏了它就是假修复**：
+    //   节点侧 `config.tools` 由
+    //   `tool_names.iter().filter_map(|tn| tool_def_map.get(tn).cloned())` 生成 ——
+    //   `filter_map` 对查不到的名字**静默丢弃**（不报错、不留痕）。
+    //   只往 `PROFILE_TOOLS` 加名字而漏了这里 ⇒ 界面上「已授权」，LLM 手里却没有该工具
+    //   ⇒ 这一维度仍恒缺，与修复前**行为完全一致**。
+    //   守护测试：`seed_consistency_tests::profile_tools_are_all_declared_in_tool_def_map`。
+    //
+    // 与既有的 `td_pledge`（`detect_pledge_risk`，阈值**判定**工具）区分：
+    //   那个要求调用方先自备 `pledge_pct`，本 ToolDef 取的正是那个输入（`pledge_ratio`）。
+    let td_pledge_data = ToolDef {
+        name: "get_stock_pledge_data".into(),
+        description: Some(
+            "获取股权质押数据（大股东质押总比例/质押股数/质押笔数/控股股东质押比例/风险等级）"
+                .into(),
+        ),
+        parameters: stock_code_params(),
+    };
     // P0 修复(2026-07-22): 移除未实现的 get_announcement_content ToolDef
     // 该工具在 mcp_tools.rs 中未注册 dispatch，调用会触发 "Unknown MCP tool" 错误
     let td_sector_info = ToolDef {
@@ -1347,9 +1859,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         ("get_stock_north_bound", td_nb_holding.clone()),
         ("get_stock_dragon_tiger", td_dt.clone()),
         ("get_stock_margin_data", td_margin.clone()),
+        // v72(2026-09-21): 质押数据。**必须在此登记** —— 只写 PROFILE_TOOLS 而漏这里，
+        //   授权会被 `filter_map` 静默丢弃（见 td_pledge_data 定义处的说明）。
+        ("get_stock_pledge_data", td_pledge_data.clone()),
         ("get_stock_sector_info", td_sector_info.clone()),
         ("detect_candlestick_patterns", td_candlestick_patterns.clone()),
         ("detect_divergence", td_divergence.clone()),
+        ("detect_earnings_surprise", td_earnings.clone()),
     ]
     .into_iter()
     .collect();
@@ -1424,7 +1940,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 max_tool_rounds: None,
                 execution_mode: None,
                 rag_source_ids: vec![],
-                model_role: None,
                 consistency_check: None,
                 // V74 关闭: hallucination_guard 锚定检查。
                 // 原因：LLM 输出是分析结论（自然语言），source_context 是工具返回的 JSON 数据，
@@ -1516,6 +2031,20 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   [8] a-sector           ↔ t-sector-data
     // 错位会导致 hot-money analyst 拿到研报数据、research analyst 拿到解禁数据，
     // 9 个分析师产出的报告与各自的角色语义不符。
+    // ── v72(2026-09-21)：a-lockup 的第二个前置数据源（股权质押）──
+    // 单点声明节点 id，供下面三处复用：① 本文件新增 ToolNode；② `a-lockup` 的
+    //   `context_sources`；③ 两条边（trigger→节点、节点→a-lockup）。
+    // 契约缺口背景（详见 `AUDIT-pledge-attribution-2026-09-21.md`）：
+    //   `lockup-watcher.md` 的方法论第 4 条与自检清单都要求分析「质押比例 > 50%
+    //   高警戒线 / 质押风险敞口」，而其唯一上游 `t-lockup-data` 调的是
+    //   `get_stock_lockup_bundle`（解禁 + 增减持 + 大宗交易**三方**聚合，
+    //   结构上不含质押）⇒ 该维度**每轮必缺**，模型只能自己给缺口编原因
+    //   （全库 15 轮里 12 轮写了质押缺口，最远漂到「工具调用被拒绝」的伪归因）。
+    //
+    // ⚠️ **不**并进下面那张 `tool_assignments` 表：它与 `analysts` 数组**按下标
+    //   一一对应**（`a_ids[i]` + 每个 analyst 恰好一条 branch），加一行会错配/越界。
+    const PLEDGE_TOOL_ID: &str = "t-pledge-data";
+
     let tool_assignments: &[(&str, &str, &str, &str)] = &[
         ("t-market-data", "获取K线+行情", "get_stock_kline", "stock_code"),
         // 修复(2026-07-21): t-sentiment-data 改为 get_social_sentiment。
@@ -1617,6 +2146,37 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         });
     }
 
+    // ── v72(2026-09-21)：a-lockup 的第二个前置 ToolNode —— 股权质押 ──
+    // 调 MCP 工具 `get_stock_pledge_data`（`crates/astock-data/src/mcp_tools.rs`，
+    //   schema 与 dispatch 两处成对已在），返回 pledge_ratio / pledge_shares /
+    //   controlling_pledge_ratio / risk_level —— 正是 `lockup-watcher.md` 要的
+    //   「质押比例 > 50% 高警戒线 / 质押风险敞口」。
+    //
+    // ⚠️ 工具名必须写**字面量**（不可引常量）：`seed_consistency_tests` 的
+    //   `tool_node_positional_tool_names` 只抽位置参数中的字面量，写成变量会让本节点
+    //   从「seed 声明 ↔ ToolResolver 解析空间」一致性门禁里**整个消失** ——
+    //   即 V79 的 `t-valuation-band` 形态（工具名未注册却无人报警，节点 completed
+    //   但输出为空、无报错）。写成字面量后，该门禁会替我们断言
+    //   `get_stock_pledge_data` 确实落在解析空间内。
+    nodes.push(tool_node(
+        PLEDGE_TOOL_ID,
+        "获取股权质押数据",
+        "get_stock_pledge_data",
+        PLEDGE_TOOL_ID,
+        "stock_code",
+        &[],
+        Some("p-analysts"),
+        // 布局 (col 1, row 3)：row 3 的 col 0 已被 a-catalyst 占用，col 1/2 空置。
+        //   放在网格内 ⇒ 被 p-analysts 分组框包络，且与任何节点不重叠。
+        520.0,
+        row_y_base + 3.0 * row_dy,
+    ));
+    // 入边：与其它数据 ToolNode 同形（trigger 扇出），先于 a-lockup 完成。
+    edges.push(edge("e-trigger-t-pledge-data", "trigger", PLEDGE_TOOL_ID));
+    // 出边：质押数据 → a-lockup。这条边是**供给**，`context_sources` 是**消费声明**，
+    //   两者必须同时存在（只写一边 ⇒ 变量仍不进 `context.variables`）。
+    edges.push(edge("e-t-pledge-data-a-lockup", PLEDGE_TOOL_ID, "a-lockup"));
+
     // 工具由模板节点 config.tools 统一管理
     // 第 10 个 a-catalyst 放置在 3×3 网格下方（col 0, row 3），作为额外独立行
     for (i, (id, title, _expert)) in analysts.iter().enumerate() {
@@ -1628,7 +2188,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         let row_y = row_y_base + row as f64 * row_dy;
         let mut an = agent(id, title, _expert, Some("p-analysts"), x_agent, row_y);
         if let WorkflowNode::Agent(ref mut a) = an {
-            a.config.context_sources = vec![tool_id.to_string()];
+            // v72: a-lockup 有**两个**前置 ToolNode —— 解禁三方 bundle（`t-lockup-data`）
+            //   + 股权质押（`t-pledge-data`）。`context_sources` 少列一个 ⇒ 该节点的输出
+            //   不进 `context.variables` ⇒ 分析师报告里这一维度恒缺。与 portfolio-mgr
+            //   那批「写进 input_mapping ≠ 有人供给」是**同一失效机制**（见本文件
+            //   「修复 portfolio-mgr 因子输入全空」段的注释）。
+            a.config.context_sources = if *id == "a-lockup" {
+                vec![tool_id.to_string(), PLEDGE_TOOL_ID.to_string()]
+            } else {
+                vec![tool_id.to_string()]
+            };
             // fundamentals-analyst prompt 引用了 {{market_regime}}，
             // 从工作流变量 market_regime.regime 注入（bull/bear/sideways 状态字符串）
             if *id == "a-fundamentals" {
@@ -1642,7 +2211,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             } else {
                 Some(2)
             };
-            a.config.model_role = Some("stock-analyst".into());
             let tool_names = PROFILE_TOOLS
                 .iter()
                 .find(|(k, _)| **k == **_expert)
@@ -1825,37 +2393,39 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // Phase 2: 决策检查点 — 记录分析师完成状态，辩论始终执行
     // 分析师节点已直接连接 DebateNode（无中间条件节点）
 
-    // ── 辩论轮数（DAG 展开为 max_rounds 轮顺序执行） ──
-    // v48（2026-09-14）起**固定 1 轮**，不再从 `debate_rounds` 变量读取。
-    // 理由见文件头 v48 条目：多轮在当前引擎中是「假多轮」（第 2+ 轮复用首轮
-    // 输出 ⇒ 相似度恒 1.0 ⇒ 必然假收敛），且链式累积把链尾请求体推到全局最大
-    // （601166 实证 85.8KB → provider 最严超时档 15s → 504 → 整条决策链被
-    // fail-closed 掐断）。变量 `debate_rounds` 仍保留在变量表（前端「多空辩论
-    // 轮数」可见），由种子末尾**强制覆写为 1** —— 否则 `merge_variable_values`
-    // 会让 DB 旧值（3）覆盖新默认值，改了等于没改。
-    let debate_max_rounds: usize = 1;
+    // ── 辩论轮数（DAG 展开为 N 轮顺序执行） ──
+    // v59（2026-09-21）起从变量 `debate_rounds` 读取，不再硬编码 1 轮。
+    // 每轮展开一对独立辩手节点（bull-rN/bear-rN），各自真跑一次 LLM，
+    // 经 expert persona + context_sources（引用前序轮次输出）产出不同内容，
+    // 即「真多轮」。该值同时用于下游锚点（bear-r{debate_max_rounds}）与落库变量，
+    // 由 `resolve_debate_rounds` 从 DB 旧变量/默认值求值，保证三处同源（防悬空边）。
+    let debate_max_rounds: usize = resolve_debate_rounds(old_variables.as_deref());
 
     // ═══════════════════════════════════════════════════════════════════════
     // 【装饰节点 / Decorative Container】debate-bull-bear
     // ═══════════════════════════════════════════════════════════════════════
-    // 语义：多空辩论的视觉分组容器，配置辩论轮数元数据（轮数由 debate_max_rounds 决定）
-    // 调度：容器本身在引擎中立即 Completed（返回 debater_steps 配置，不返回辩论结果）
-    //      - debater_steps: 2 × debate_max_rounds 个真实辩手节点
-    //        （v48 起 debate_max_rounds=1 ⇒ 仅 bull-r1 / bear-r1；
-    //          r2/r3 的节点与边均不再生成，下游锚点一律用变量拼）
-    //      - max_rounds: 与 debate_max_rounds 同值（v48 起为 1，无"是否收敛"循环控制）
-    //      - convergence_prompt/model: 配置就绪但当前未启用（避免辩论死循环）
+    // 语义：多空辩论的视觉分组容器，按轮展开展开辩论元数据（轮数由 debate_max_rounds 决定）
+    // 调度：容器本身在引擎中立即 Completed；辩手由下方循环展开的独立实体节点承载，
+    //      容器只把 debater_steps 配置列给引擎驱动，不返回辩论结果。
+    //      - debater_steps: 2 × debate_max_rounds 个**独立**辩手节点（bull-r1..bull-rN /
+    //        bear-r1..bear-rN），每轮一对、各带不同 expert persona 与 context_sources
+    //        （引用前序轮次输出）⇒ 各自真跑一次 LLM，即「真多轮」。
+    //      - max_rounds: 固定 1（v59/2026-09-21）。轮次由 distinct 节点边承担，
+    //        max_rounds 若 = debate_max_rounds 会对整批 debater_steps 做 N 遍轮播，
+    //        第 2+ 遍被引擎「Completed 复用」短路 → 假多轮浪费。保持 1 = 单遍跑完。
+    //      - convergence_prompt/model: 配置就绪但当前未启用（v59 起收敛由
+    //        debate-convergence 节点承担，无需引擎级相似度收敛循环）。
     //
     // ⚠️ 关键陷阱（P0 已修复）：
     //   历史 bug：曾将 value-investor 的入边连到本容器，导致 value-investor
     //   在容器 Completed 时立即启动——拿到的是"辩论配置"而非"辩论结果"。
     //   正确接法：value-investor 应等待最后一个真实辩手节点完成，即
-    //   `bear-r{debate_max_rounds}`（v48 起为 bear-r1）。⚠️ 禁止硬编码 `bear-r3`
-    //   —— 轮数一变就会变成悬空入边，整条下游链静默 Skipped。
+    //   `bear-r{debate_max_rounds}`。⚠️ 禁止硬编码 `bear-r3` —— 轮数一变就会变成
+    //   悬空入边，整条下游链静默 Skipped（见 debater_round_refs_are_parameterized）。
     //
     // 真实调度依赖链（首轮 bull-r1 启动条件）：
-    //   trigger → tool → a-* → debate-bull-bear（立即完成）→ bull-r1
-    //   后续轮次：bull-r{r+1} 等 bear-r{r}，bear-r{r} 等 bull-r{r}
+    //   trigger → tool → a-* → debate-bull-bear → bull-r1 → bear-r1 →
+    //   bull-r2 → bear-r2 → … → bull-rN → bear-rN（轮次由下方循环的边串联）
     // parent_id：仅供前端编辑器嵌套渲染用
     //
     // ⚠️ 坐标约定（FIX: 所有节点位置为画布绝对坐标）：
@@ -1889,10 +2459,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             debater_steps: (0..debate_max_rounds)
                 .flat_map(|r| vec![format!("bull-r{}", r + 1), format!("bear-r{}", r + 1)])
                 .collect(),
-            max_rounds: debate_max_rounds as u32,
+            // v59（2026-09-21）：固定 1 —— 单遍驱动全部 distinct 辩手节点。
+            // 轮次由独立节点的边串联，不要设成 debate_max_rounds（会重复轮播被短路）。
+            max_rounds: 1,
             convergence_prompt: None,
             convergence_model: None,
-            convergence_model_role: None,
             topic_var: "trigger.output".into(),
             output_var: String::new(),
             sub_graph: None, // v23+：稍后通过 inject_container_subgraphs 注入
@@ -1980,7 +2551,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 a.config.system_prompt
             );
             a.config.max_tool_rounds = Some(0);
-            a.config.model_role = Some("debater".into());
             // 注入前序轮次辩论输出 + analyst-brief 摘要作为上下文
             // （替代原先加载10份全量报告，由 analyst-brief CodeNode 聚合）
             let mut ctx: Vec<String> = Vec::new();
@@ -2019,7 +2589,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 a.config.system_prompt
             );
             a.config.max_tool_rounds = Some(0);
-            a.config.model_role = Some("debater".into());
             // 注入前序轮次 + 本轮多方输出 + analyst-brief 摘要作为上下文
             let mut ctx: Vec<String> = Vec::new();
             for r in 1..round_num {
@@ -2082,7 +2651,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 ctx.push(format!("bear-r{r}"));
             }
             a.config.context_sources = ctx;
-            a.config.model_role = Some("debater".into());
             // 纯决策节点：tools 默认为空（agent 闭包），无需工具调用轮次
             a.config.max_tool_rounds = Some(0);
             a.config.output_mode = OutputMode::Json; // 输出结构化 JSON，确保 consensus_score / aggregate_prediction 被 input_mapping 解析
@@ -2139,7 +2707,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 // revenueGrowthYoYPct} 来自真实财报提取，使三维度全部硬数据锚定。
                 "t-risk".into(),
             ];
-            a.config.model_role = Some("stock-analyst".into());
             // P0 修复(2026-07-22): 移除所有工具，改为纯决策节点。
             // 原问题：tools 含 get_stock_financials/compute_valuation 等需要 stock_code
             // 的工具，但 input_mapping 未注入 stock_code，LLM 会传空值。
@@ -2159,7 +2726,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  - **客观估值数据**: 来自 t-valuation（结构化算法结果）\n\
                    - result.dcf.{{low,mid,high}}: DCF 内在价值区间（不可用时为 null）\n\
                    - result.dcf.available / result.dcf.note: DCF 可用性与估值口径说明\n\
-                   - result.dcf.upsidePct: DCF 上行空间百分比（正值=低估，负值=高估；不可用时为 null）\n\
+                   - result.dcf.upsidePct: **保守档**上行空间百分比（2026-09-23 起基准由 mid 改为 low）\n\
+                     —— 即「**最保守增长假设下**」的折价幅度（正值=低估，负值=高估；不可用时为 null）\n\
+                   - result.dcf.midUpsidePct: 中性档上行空间（**仅供叙述**「中性假设下能涨多少」；\n\
+                     裁决口径一律用 upsidePct，不得用 midUpsidePct 或直接拿 mid 当「真实价值」）\n\
                    - result.graham.upsidePct: 格雷厄姆上行空间\n\
                    - result.fScore.score: Piotrosky F-Score（0-9，越高越好）\n\
                    - result.moat.label: 护城河评级\n\
@@ -2175,13 +2745,37 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  对成长股，参考 result.dcf.upsidePct 判断是否「合理偏低」，\n\
                  不要一味给出低于现价的保守估值。\n\
                  \n\
-                 **估值不可用处理（V74）**: 当 result.dcf.available=false 或\n\
-                 result.dcf.upsidePct=null 时，表示当期FCF≤0且近5年报无正净利年度\n\
-                 （持续亏损），DCF/格雷厄姆算法估值均不适用（value_signal=「无法估值」）。\n\
-                 此时：① intrinsic_value_range 与 margin_of_safety 填 null；\n\
+                 **【硬不可用】处理（V74 原两条 + 2026-09-21 扩第 ③ 条）**:\n\
+                 情形 ①  result.dcf.available=false\n\
+                 情形 ②  result.dcf.upsidePct=null\n\
+                   （①② 的含义是当期FCF≤0且近5年报无正净利年度＝持续亏损，\n\
+                     DCF/格雷厄姆算法估值均不适用，value_signal=「无法估值」）\n\
+                 情形 ③  result.dcf.assumptions.applicable=false\n\
+                   含义：**模型前提对该标的不成立**。判据见 assumptions.applicability_signals\n\
+                   —— 负债率 > 80%（净利由杠杆驱动），或净利为正但**当期真实自由现金流**\n\
+                   与盈利量级脱钩（FCF/净利 < 0.3）/ 符号相反。此时三档数值**仍会出现**\n\
+                   在 result.dcf 里，但它**不是可靠估值证据**，不得当作内在价值引用。\n\
+                   实证 601166：DCF 给 +143% 上行空间，同一条输出里 LLM 给「观望/0% 仓位」。\n\
+                 命中 ①②③ 任一即（合称**硬不可用**）：\n\
+                 ① intrinsic_value_range 与 margin_of_safety 填 null；\n\
                  ② 理想买入价写「无算法估值锚，需采用清算价值/重置成本等替代方法」；\n\
                  ③ **禁止输出 0 元买入价、0.00 元 DCF 或 0% 安全边际冒充算法估值**——\n\
-                 估值不可用 ≠ 估值为 0，把 null 当 0 是数据语义污染。",
+                 估值不可用 ≠ 估值为 0，把 null 当 0 是数据语义污染。\n\
+                 \n\
+                 **锚定口径披露＝【软衰减】（2026-09-21 新增；与上段并列，勿并入硬不可用）**:\n\
+                 result.dcf.assumptions.is_fallback_anchor=true 表示锚定**不是当期真实自由现金流**，\n\
+                 而是「近 5 年年报正净利均值 × 0.90」的历史代理（口径原文见 assumptions.basis）。\n\
+                 该代理回溯且**系统性偏低** —— 实测 300308（2026-09-21）代理锚比同期 TTM 自由\n\
+                 现金流低约 5.6 倍，对成长/转型标的尤甚。此时数值**可以引用**（三个字段照常填），\n\
+                 但必须：① 在 report 中点明口径，不得陈述成与当期现金流等价的结论；\n\
+                 ② 在 risk_flags 中加一条标注该口径；③ 相应**下调 confidence**。\n\
+                 与情形 ③ 同时命中时（真实 FCF ≤ 0 会同时触发两者）**按硬不可用处理**。\n\
+                 \n\
+                 **分歧处理（2026-09-21 新增）**: 算法锚（result.dcf.upsidePct / value_signal）\n\
+                 与你的判断分歧时，**照实报告分歧**并说明你的理由 —— 不要把算法没给的数字\n\
+                 说成是算法给的。实测 300308（2026-09-21）产出过\n\
+                 「算法 value_signal 为『合理偏低』，但绝对估值锚与现价偏离超 80%」\n\
+                 这种自相矛盾表述（当时 value_signal 的评分函数无法表达高估，已修）。",
                 a.config.system_prompt
             );
             // 环 A: 注入历史反思教训
@@ -2361,7 +2955,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  基于上述数据以{}评估该股票的风险。",
                 a.config.system_prompt, rtitle
             );
-            a.config.model_role = Some("risk-evaluator".into());
             // 修复：风险评估 Agent 需要读到上游分析师报告 + 辩论结果 + 技术指标，
             // 否则 LLM 没有分析素材，不会主动调用工具。
             a.config.context_sources = vec![
@@ -2443,7 +3036,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         if let WorkflowNode::Agent(ref mut a) = rc {
             a.config.context_sources =
                 vec!["risk-agg".into(), "risk-con".into(), "risk-neu".into()];
-            a.config.model_role = Some("risk-evaluator".into());
             // 纯决策节点：tools 默认为空（agent 闭包），无需工具调用轮次
             a.config.max_tool_rounds = Some(0);
             a.config.output_mode = OutputMode::Json; // V54 修复: 纯JSON输出,使 content.disagreement_score 可解析
@@ -2500,6 +3092,51 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-scoring-t-valuation", "t-scoring", "t-valuation"));
     edges.push(edge("e-t-valuation-t-risk", "t-valuation", "t-risk"));
 
+    // ── V79(2026-09-21)：估值分位带（独立 ToolNode，供给 f5 的**第三条锚腿**）──
+    // 调 **MCP 工具** `compute_valuation_band`（`crates/astock-data/src/mcp_tools.rs`）：
+    //   · 在线取东财历史估值日序列（`AStockClient::get_valuation_history`，12h 缓存）
+    //     → 按窗口裁剪 → 算 PE/PB/PS 分位带 + 当前分位；**不落库**。
+    //
+    // ⚠️ 曾经写错、且错了也**没有任何报错**（V79 首次实现，同批修）：
+    //   初版把这个工具名当成了**命令层**的同名函数
+    //   `commands::stock_analysis::compute_valuation_band`。但 `#[agent_command]` 宏
+    //   （`crates/axagent-agent-macro/src/lib.rs:45-64`）只生成 `CommandMetadata` 并注册元数据，
+    //   其唯一消费者是命令文档生成测试 —— **全仓不存在「命令 → 工具」的桥**。
+    //   而 ToolNode 走 `ToolRegistry`（`rt-workflow/.../tool_executor.rs:122-140`），
+    //   表内条目由 `crates/tools/src/tools/astock_data.rs:118` 从 `stock_mcp_tools()`
+    //   逐个包装 ⇒ `ToolResolver` 返 `None` ⇒ `core.rs` 的 Failed 分支 `emit degraded: true`
+    //   **静默吞掉**（节点 completed、输出为空、无报错）⇒ `valuation_pe_percentile` 恒空
+    //   ⇒ 这条腿成了**永久空壳**、逐位退化回 0.7/0.3。
+    //   现工具已进 `stock_mcp_tools()` schema 与 dispatch **两处成对**；
+    //   `seed_consistency_tests` 的门禁也已扩到能看见本节点的**位置参数**形态。
+    //
+    // ⚠️ 为什么必须放进**工作流**、而不是等用户点前端「估值带」图：
+    //   前端那张图走的是**命令**（读/回填本机表），工作流这条腿走**工具**（在线、不落库）；
+    //   决策正确性不该挂在「用户是否点过某个 UI」上。两者窗口口径共享，故结论一致。
+    //   该表此前的**唯一**回填触发点就是前端那个命令（DB 实查全库只有 13 只有数据）——
+    //   这也是「不要把决策依赖塞进 UI 路径」的实证。
+    //
+    // ⚠️ 与 `algo_tools` 表**分开声明**（刻意不往那张表里加行）：`algo_tools` 有两处
+    //   下游消费者 —— `raw-data` 的 `input_sources` 与「给每个 tool 节点显式挂边」的循环，
+    //   两者都按行数生成内容；加一行会连带把本节点拉进 raw 聚合，并让 aggregator 的
+    //   description 里写死的「16 个工具节点（12 个数据源 + 3 个算法 + 1 个龙虎榜）」计数腐烂。
+    //   本节点的**唯一**消费者是 portfolio-mgr（经 `input_mapping`），无需进 raw 聚合。
+    let valuation_band_id = "t-valuation-band";
+    nodes.push(tool_node(
+        valuation_band_id,
+        "估值分位带",
+        "compute_valuation_band",
+        valuation_band_id,
+        "stock_code",
+        &[],
+        None,
+        1020.0, // x: 接在 t-valuation (480) / t-risk (660) / dragon-tiger (840) 之后的第四格
+        2700.0, // y: 与 algo_tools 同行
+    ));
+    // 入边 `t-valuation → t-valuation-band`：估值算完再算分位。分位在数据上并不依赖估值，
+    //   挂这条边是为了让它落在同一条水平工具链上（画布不出现孤立节点），
+    //   且**不会**构成回环（本节点无出边指向 t-risk / raw-data）。
+    edges.push(edge("e-t-valuation-t-valuation-band", "t-valuation", valuation_band_id));
     // ── P1/P2 新增: 龙虎榜数据获取节点（独立 ToolNode，不配 Agent）──
     // 独立创建以保持 raw-data 聚合的完整性，同时直接供给 portfolio-mgr 做筹码面分析增强。
     // 龙虎榜数据包含机构席位买卖动向、游资席位上榜频率等，是 f10 筹码面因子的重要补充。
@@ -2522,6 +3159,43 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   引擎 create_workflow 的 Kahn 检测直接拒绝启动（"Cycle detected in workflow"）。
     //   作为入度 0 的启动节点（与其他 t-* 数据工具一致），它天然先于 a-hot-money 完成，
     //   数据依赖（a-hot-money 的 context_sources 消费 dragon_tiger 变量）由出边保证。
+
+    // ── 阶段2（PROPOSAL-stock-decision-four-horizon.md）：多周期评分节点 ──
+    // 给 portfolio-mgr 的短/中/长档注入**各自周期**的技术评分，供 decisionsByHorizon 用 f1
+    //   独立重融合（rhai 侧读取 totalScore_short / totalScore_mid / totalScore_long）。
+    // 复用老 t-scoring 同一工具 `compute_scoring`，仅以静态参数 `period` 区分数据周期
+    //   （2.1 已在 astock-data/mcp_tools.rs 为 compute_scoring 增加 period 支持）。
+    // 入边链 t-scoring → t-scoring-week → t-scoring-month：既是评分周期的先后（周→月），
+    //   也让新节点有来源边、避免被 validate_workflow 判为 orphan（同 t-valuation-band 先例）。
+    // ⚠️ 不并入 `algo_tools` / `raw_input_sources`：raw-data 聚合的「16 个工具节点」计数与
+    //   description 是写死的，且这两档评分只供 portfolio-mgr 消费，无需进 raw 聚合。
+    nodes.push(tool_node(
+        "t-scoring-week",
+        "技术评分（周线）",
+        "compute_scoring",
+        "t-scoring-week",
+        "stock_code",
+        &[("period", "weekly")],
+        None,
+        1140.0,
+        2700.0,
+    ));
+    nodes.push(tool_node(
+        "t-scoring-month",
+        "技术评分（月线）",
+        "compute_scoring",
+        "t-scoring-month",
+        "stock_code",
+        &[("period", "monthly")],
+        None,
+        1260.0,
+        2700.0,
+    ));
+    edges.push(edge("e-t-scoring-t-scoring-week", "t-scoring", "t-scoring-week"));
+    edges.push(edge("e-t-scoring-week-t-scoring-month", "t-scoring-week", "t-scoring-month"));
+    // 长档复用月线评分（月线已是最长期权周期，不新增季度节点——阶段2按此拍板）
+    edges.push(edge("e-t-scoring-week-portfolio-mgr", "t-scoring-week", "portfolio-mgr"));
+    edges.push(edge("e-t-scoring-month-portfolio-mgr", "t-scoring-month", "portfolio-mgr"));
 
     // ── P0-H L3（2026-09-12）: 报告导出所需的 2 个数据节点 ──
     // 背景：`generate_stock_report` 的「机构调研」与「大盘指数」两个板块此前恒空。
@@ -2638,93 +3312,72 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //      raw-data 通过显式边 e-raw-data-portfolio-mgr 确保调度依赖。
     edges.push(edge("e-raw-data-portfolio-mgr", "raw-data", "portfolio-mgr"));
 
-    // ── LlmClassifierNode: 风险等级分类 ──
-    nodes.push(WorkflowNode::LlmClassifier(LlmClassifierNode {
-        base: WorkflowNodeBase {
-            id: "cls-risk-level".into(),
-            title: "风险等级分类".into(),
-            description: Some("基于算法评分结果自动分类风险等级".into()),
-            position: Position {
-                x: 300.0,
-                y: 3000.0,
+    // ── CodeNode: 风险等级确定性分类（v55：原 LlmClassifierNode 下沉 Rhai）──
+    // 口径来源 = 原 LlmClassifier 的 prompt 原文，已完整保留在 `risk-level.rhai` 头部注释，
+    // 阈值 / 档位 / 优先级 1:1 转写，未做任何调整。改因与实测差异见本文件 v55 段说明。
+    {
+        let rl_code = include_str!("../risk-level.rhai").to_string();
+        nodes.push(WorkflowNode::Code(CodeNode {
+            base: WorkflowNodeBase {
+                // 节点 id 保持不变 —— 三条链按它索引，改名会断链：
+                //   ① 边 e-t-risk-cls-risk / e-cls-risk-level-portfolio-mgr
+                //   ② 前端 stockWorkflowChatBridge / stockAnalysisStore 的阶段映射与回放集合
+                //   ③ research-mgr 的 context_sources 引用的是 output_var（"risk-level"），
+                //      与节点 id 不同名，两者都不可动
+                id: "cls-risk-level".into(),
+                title: "风险等级分类".into(),
+                description: Some(
+                    "按阈值规则做确定性风险等级分类（Rhai），输出风险等级与判定依据".into(),
+                ),
+                position: Position { x: 300.0, y: 3000.0 },
+                // 确定性脚本：无网络、无 LLM ⇒ 不存在「瞬时故障可重试」的场景，重试已无意义
+                // （原 LLM 版因 agnes-3.0-flash 34.95s > 30s 超时曾开 2 次重试，见 v9 记录）。
+                retry: RetryConfig::default(),
+                // 原 60s 是给 LLM 的；Rhai 纯计算实测 <10ms，与 data-quality 同样留 10s 余量。
+                timeout: Some(10),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                // 原为 false，与「其失败不应有任何阻断性代价」的声明**不符** —— v9 注释自己
+                // 记录了它曾阻塞 v-validate 造成全链死锁。Rhai 版不会失败，保留 true 作双保险：
+                // 万一脚本异常，portfolio-mgr 仍有算法分类兜底
+                // （`portfolio-mgr.rhai` 的 `present(overall_risk_llm)` 守卫会走"无数据"分支），
+                // 不会像 cof=false 那样锁死整条决策链。
+                continue_on_fail: true,
             },
-            // v9 修复(2026-09-08 死锁实证)：默认 RetryConfig enabled=false 导致超时零重试，
-            // agnes-3.0-flash 分类调用 34.95s > 30s 超时 → Failed → v-validate 被阻塞 →
-            // data-quality/research-mgr/trader/portfolio-mgr 全链 Pending → 决策不执行。
-            // timeout 30→60s + 开启重试 + fallback_label 兜底，三重防线。
-            retry: RetryConfig { enabled: true, max_retries: 2, ..Default::default() },
-            timeout: Some(60),
-            enabled: true,
-            parent_id: None,
-            compensation: None,
-        continue_on_fail: false,
-        },
-        config: LlmClassifierNodeConfig {
-            categories: vec![
-                "低风险".into(),
-                "中风险".into(),
-                "高风险".into(),
-                // V38 修复: 增加"极高风险"档位（退市/造假/流动性危机），
-                // 与 portfolio-mgr.rhai 的 D1 修复（极高风险→立即卖出清仓）对齐
-                "极高风险".into(),
-            ],
-            prompt: "你是专业风险分析师。根据以下单股风险画像数据，\
-                     判断该股票的整体风险等级（低风险/中风险/高风险/极高风险）。\
-                     \n\n## 数据解读（A股标准）\
-                     \n### 量化指标\
-                     \n- annualizedVolatilityPct: 年化波动率（%）。A股正常15-45%，<20%低波动，20-35%正常，35-50%偏高，>50%高波动\
-                     \n- maxDrawdownPct: 历史最大回撤（%）。A股正常20-40%，<25%好，25-40%正常，40-55%偏大，>55%深\
-                     \n- sharpeRatio: 夏普比率。>0.5好，0-0.5正常，<0偏弱\
-                     \n\
-                     \n### 基本面指标\
-                     \n- roeTTMPct: ROE(TTM)（%）。>10%良好，5-10%一般，<5%偏弱\
-                     \n- grossMarginPct: 毛利率（%）。>25%好，15-25%正常，<15%偏低\
-                     \n- debtRatioPct: 资产负债率（%）。<40%低，40-60%正常，>60%偏高\
-                     \n- revenueGrowthYoYPct: 营收增速YoY（%）。>15%好，5-15%正常，0-5%偏低，<0萎缩\
-                     \n- peTTM: 市盈率(TTM)。<0亏损，0-20低，20-40正常，>40偏高\
-                     \n\
-                     \n\n## 等级判定规则（按优先级，满足即判定，不要计算综合评分）\
-                     \n### 极高风险（立即回避）\
-                     \n- 标的为ST/*ST/退市股\
-                     \n- 资产负债率>80% 且 营收增速<0（财务困境）\
-                     \n- 年化波动率>60% 且 夏普比率<-1.5\
-                     \n\
-                     \n### 高风险（谨慎参与，小仓位）\
-                     \n- 量化维度高风险：波动率>40% 或 夏普<0 或 回撤>45%\
-                     \n- 且基本面有至少一个风险点：ROE<5% 或 毛利率<10% 或 负债率>65%\
-                     \n- 或：量化偏高（波动率>35% 或 夏pe<0.3）且基本面无亮点（ROE<8% 且 营收增速<5%）\
-                     \n\
-                     \n### 中风险（正常参与）\
-                     \n- 量化维度中等：波动率20-40% 或 夏普0-0.5 或 回撤25-45%\
-                     \n- 且基本面无硬伤：ROE>5% 且 负债率<65% 且 营收增速>0\
-                     \n- 或：量化低风险（波动率<20% 且 夏普>0.5）但基本面中等\
-                     \n\
-                     \n### 低风险（优先配置）\
-                     \n- 量化维度低风险：波动率<20% 且 夏普>0.5 且 回撤<30%\
-                     \n- 且基本面健康：ROE>10% 且 毛利率>20% 且 负债率<50% 且 营收增速>5%\
-                     \n- 且：无ST/退市风险，无重大负面公告\
-                     \n\
-                     \n\n## 重要\
-                     \n- 不要计算综合评分，直接按规则判定\
-                     \n- A股大多数股票应落在「中风险」档\
-                     \n- 仅当量化+基本面均差时才判「高风险」\
-                     \n\
-                     \n\n## 输入数据\n{input_text}\n\n请仅输出一行：风险等级|最短理由\
-                     \n例如：中风险|波动率28%正常，ROE 8.5%一般，负债率52%可控"
-                .into(),
-            model: None,
-            // V50 修复: t-risk 现在对单股输出 stockRiskProfile（波动率/VaR/最大回撤/夏普），
-            // 不再是旧版的组合级 HHI/集中度。分类器基于真实风险指标做判断。
-            input_var: "t-risk".into(),
-            output_var: "risk-level".into(),
-            confidence_threshold: None,
-            // v9 修复: 低置信度时兜底到"中风险"而非报错（A股大多数股票应落在中风险档，
-            // 与 prompt 判定规则一致），避免分类器失败阻断下游。
-            fallback_label: Some("中风险".into()),
-            consistency_check: None,
-            categories_var: None,
-        },
-    }));
+            config: CodeNodeConfig {
+                language: "rhai".into(),
+                code: rl_code,
+                // research-mgr 的 context_sources 按此变量名索引
+                output_var: "risk-level".into(),
+                tool_name: None,
+                execute_directly: true,
+                input_mapping: [
+                    // t-risk 是 ToolNode ⇒ stockRiskProfile 在 result.content 中
+                    (
+                        "risk_volatility",
+                        "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
+                    ),
+                    ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
+                    ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
+                    ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
+                    // 毛利率：原 prompt 的高风险条件 A（毛利率<10%）与低风险条件
+                    // （毛利率>20%）都要用它 ⇒ 本节点必须注入。
+                    // ⚠️ 与 portfolio-mgr 的同名映射无关：后者在 v54 已删除（其脚本不读该变量），
+                    //    本节点是**独立**映射，删除其一不影响另一。
+                    ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
+                    ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
+                    (
+                        "risk_revenue_growth",
+                        "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
+                    ),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            },
+        }));
+    }
     edges.push(edge("e-t-risk-cls-risk", "t-risk", "cls-risk-level"));
 
     // ── Validation: 结果完整性校验 ──
@@ -2759,9 +3412,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // v-validate 的 continue_on_fail=false，cls-risk-level 一旦 Failed，该 Direct 边
     // 永久阻塞 v-validate，进而锁死 data-quality/research-mgr/trader/portfolio-mgr
     // 整条决策链（引擎死锁检测只做单遍 Skipped 传播后直接 break）。
-    // v-validate 校验的是 t-risk.output（断言 exists），改为依赖 t-risk 语义更正确：
-    // cls-risk-level 只是 portfolio-mgr.rhai 确定性风险分类的 LLM 兜底（overall_risk_llm），
-    // 其失败不应有任何阻断性代价（research-mgr 的 context_sources 缺失会静默跳过）。
+    // v-validate 校验的是 t-risk.output（断言 exists），改为依赖 t-risk 语义更正确。
+    // ⚠️ v55(2026-09-20) 订正：原注释称本节点「只是 portfolio-mgr.rhai 确定性风险分类的
+    //   LLM 兜底、其失败不应有任何阻断性代价」—— 该表述与实测不符：① 节点已改为 Rhai
+    //   CodeNode，「LLM 兜底」不再成立；② 其输出经 portfolio-mgr.rhai 的 f4_signal 承担
+    //   f4 因子的**全部**权重（真库实测 26/27 条非零），删除或失败并非"无代价"。
+    //   本节点自身的 continue_on_fail 亦已由 false 改为 true（理由见其节点定义处）。
     edges.push(edge("e-t-risk-v-validate", "t-risk", "v-validate"));
 
     // ── P1-4 修复: data-quality 确定性评分（CodeNode + Rhai，替代原 LLM Agent）──
@@ -2844,6 +3500,29 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("res_untrusted", "a-research.__untrusted"),
                     ("sec_untrusted", "a-sector.__untrusted"),
                     ("cat_untrusted", "a-catalyst.__untrusted"),
+                    // ── P2-1(2026-09-21): 每个分析师的**真实工具调用记录** ──
+                    // 供 `data-quality.rhai::attribution_note()` 交叉核对「报告所说的
+                    // 工具被拒绝」是否成立。实证（`AUDIT-pledge-attribution-2026-09-21.md`）：
+                    //   a-lockup 报告写「质押数据获取失败（工具调用被拒绝）」，而本轮
+                    //   **没有任何质押工具调用**，唯一 `is_error` 的是
+                    //   `get_stock_margin_data` 且原因是**限流**（并行节点撞 200ms 间隔）
+                    //   ⇒ 使用者被引向「权限问题」，真因完全在别处。
+                    //
+                    // 路径形态 `{node_id}.tool_calls_made` —— AgentNode 输出的顶层字段，
+                    // 与 `seed_serenity.rs` 的 `a-candidate-mapper.tool_calls_made` 同源。
+                    // ⚠ 解析不到时注入 Null（`code_executor` 语义）⇒ rhai 侧
+                    //   `attribution_note` 的守卫①按「无可核对数据」放行，**不**误判编造。
+                    //   （这也是为什么该守卫不可删：删了会把「测不出」判成「有问题」。）
+                    ("mk_tool_calls", "a-market-analyst.tool_calls_made"),
+                    ("sent_tool_calls", "a-sentiment.tool_calls_made"),
+                    ("news_tool_calls", "a-news.tool_calls_made"),
+                    ("fund_tool_calls", "a-fundamentals.tool_calls_made"),
+                    ("pol_tool_calls", "a-policy.tool_calls_made"),
+                    ("hm_tool_calls", "a-hot-money.tool_calls_made"),
+                    ("lk_tool_calls", "a-lockup.tool_calls_made"),
+                    ("res_tool_calls", "a-research.tool_calls_made"),
+                    ("sec_tool_calls", "a-sector.tool_calls_made"),
+                    ("cat_tool_calls", "a-catalyst.tool_calls_made"),
                     // ── 因子数据完整度评估（供 pm_compute_factor_completeness 使用）──
                     // 2026-09-09 包装对齐修复：ToolNode 输出结构为
                     //   {node_id, result: {content: <json_string>, tool_name}}
@@ -2860,6 +3539,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                         "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
                     ),
                     ("valuation_dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
+                    // 2026-09-21: DCF 锚定**缺数**标记 ← `dcf.assumptions.fcf_data_missing`。
+                    //   与 `is_fallback_anchor` **正交**：后者两态（现金流真为负 / 数据缺失）
+                    //   都为 true，本字段**只在缺数态**为 true ⇒ 用于区分
+                    //   「我方取数失败」与「标的现金流真为负」。
+                    //   消费点：本节点 Rhai 侧的 `upstream_data_gaps`（**只告警、不扣分**，
+                    //   不进 `pm_compute_factor_completeness` 的分母）。
+                    //   ⚠️ 不要改成按 `dcf.assumptions.basis` 文案判分支 —— 文案是给人看的
+                    //   诊断文本，一改判据就静默失效（P0-I 当初正是为此改用布尔量）。
+                    (
+                        "valuation_dcf_fcf_data_missing",
+                        "t-valuation.result.content.dcf.assumptions.fcf_data_missing",
+                    ),
                     // 2026-09-12: 原 `trader_direction` → "trader.content.verdict.verdict"
                     // 映射已删除（死映射）。data-quality 是 trader 的**上游**（trader 的
                     // dqi_score 来自本节点），而 trader → data-quality 的边因循环依赖被移除
@@ -2939,6 +3630,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         //
         // 路径规则（V29 修复）：
         // - LlmClassifierNode: {category, model, ...} → 直接 .category
+        //   ⚠️ v55(2026-09-20): 本模板已无 LlmClassifierNode（唯一实例 cls-risk-level 已下沉
+        //     Rhai CodeNode）⇒ 该节点现须按 CodeNode 规则穿透 `.result`。本行规则对其他
+        //     模板中的 LlmClassifierNode 仍然适用，故保留。
         // - AgentNode: {role, content: <json_string>, ...} → .content.field
         //   （resolve_var_path 遇到 Value::String 会自动 from_str 解析后再下钻）
         // - AggregatorNode strategy="all": result 是数组，不支持对象字段路径导航，
@@ -2953,7 +3647,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-        a.config.model_role = Some("decision-maker".into());
         // P0 修复(2026-07-22): research-mgr 改为纯决策节点，移除全部 14 个计算工具。
         // 原问题与 trader 同款：
         //   1) td_score/td_val/td_risk 与上游 t-scoring/t-valuation/t-risk 重复
@@ -3006,7 +3699,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             "risk-convergence".into(),
             "data-quality".into(),
         ];
-        a.config.model_role = Some("trader".into());
         a.config.output_mode = OutputMode::Json;
         // P0 根因修复(2026-07-22): trader 改为纯决策节点，移除所有数据获取工具。
         // 原设计问题：
@@ -3113,6 +3805,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // AgentNode（trader/a-catalyst）content parse 后为 {report, verdict}，
                     // 结构化字段在 verdict 层。
                     ("totalScore", "t-scoring.result.content.totalScore"),
+                    // 阶段2（PROPOSAL-stock-decision-four-horizon.md）：三档周期独立评分。
+                    // 供 portfolio-mgr.rhai 的 decisionsByHorizon 做 f1 周期重融合；未注入（上游
+                    //   缺陷/数据不足）时 input_mapping 自动补 unit ⇒ rhai 端退化为日线档。
+                    //   短=周线 / 中=月线 / 长=月线（长档复用月线，阶段2拍板不新增季度节点）。
+                    ("totalScore_short", "t-scoring-week.result.content.totalScore"),
+                    ("totalScore_mid", "t-scoring-month.result.content.totalScore"),
+                    ("totalScore_long", "t-scoring-month.result.content.totalScore"),
                     // AgentNode 输出包裹在 {role, content: <json_string>, ...} 中
                     // V29 修复: data-quality 是 AgentNode，无 .result 字段，必须走 .content.
                     // V58 修复: data-quality 实为 CodeNode（Rhai），输出结构为
@@ -3138,12 +3837,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // market_regime 是 core.rs 注入的工作流变量（非 t-scoring 节点输出）
                     ("market_regime_prior", "market_regime.confidence"),
                     ("market_regime_state", "market_regime.regime"),
-                    // P1-7 修复: LLM 风险分类器作为算法分类的 fallback
+                    // P1-7 修复: 风险分类器（v55 起为 CodeNode/Rhai）作为算法分类的 fallback
                     // Rhai 脚本先基于 t-risk stockRiskProfile 做确定性算法分类，
-                    // 仅当数据缺失时回退到此 LLM 分类结果。
-                    // 注意：该 LlmClassifierNode 的节点 id 是 "cls-risk-level"（output_var 才是 "risk-level"），
+                    // 仅当数据缺失时回退到此分类结果。
+                    // 注意：该节点的 id 是 "cls-risk-level"（output_var 才是 "risk-level"），
                     // 边与 input_mapping 必须以节点 id 为准，否则 context.variables 查不到。
-                    ("overall_risk_llm", "cls-risk-level.category"),
+                    // v55(2026-09-20): 该节点已由 LlmClassifierNode 改为 CodeNode ⇒ 其输出被包在
+                    // `result` 里，路径**必须穿透 .result**（同 dqi_grade 的
+                    // "data-quality.result.grade" 形态）。源字段名仍是 `category` 未变，
+                    // 故 portfolio-mgr.rhai 读到的仍是「低风险/中风险/高风险/极高风险」四选一字符串，
+                    // 消费端零改（该脚本 :484 的 f4_signal 查表与 :455 的 fallback 均按字符串匹配）。
+                    ("overall_risk_llm", "cls-risk-level.result.category"),
                     // AgentNode(Json mode) 输出包裹在 {role, content: <json_string>, ...} 中
                     // 2026-09-09: content parse 后为 {report, verdict}，catalyst_level 在 verdict 层
                     ("catalyst_level", "a-catalyst.content.verdict.catalyst_level"),
@@ -3152,7 +3856,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // 旧字段保留: trader_direction/trader_target_price/trader_stop_loss 供 f7 兼容路径
                     // 2026-09-09: trader content parse 后为 {report, verdict:{action, confidence, ...}}，
                     // 结构化字段全部在 verdict 层
-                    ("trader_action", "trader.content.verdict.action"),
+                    // 2026-09-19: 删除 ("trader_action", "trader.content.verdict.action")。
+                    //   依据：`scripts/audit-inject-coverage.mjs` ② 段零命中 ⇒ 本脚本全文不读它
+                    //   （且无 scope.get/iter 一类动态访问）⇒ 白注入。动作语义由下一行的
+                    //   `trader_direction` 承载（脚本内读 8 处）。
+                    //   ⚠ 勿误删 reflection-comparator 的同名映射：那是**另一个节点**，位于
+                    //     `mod.rs`，认字符串 `("trader_action", "sub-analysis.trader.content.action")`；
+                    //     其脚本 `reflection-comparator.rhai` 在 `is_unit(trader_action)` 处真读
+                    //     ⇒ 独立映射、本版不动。
+                    //     （此处不写行号：本仓任何一次插入都会让行号失效，已实测腐烂两轮。）
                     ("trader_direction", "trader.content.verdict.verdict"),
                     ("trader_confidence", "trader.content.verdict.confidence"),
                     // currentPrice: 从 t-scoring 工具节点（get_stock_quote）获取，可靠数据源。
@@ -3162,12 +3874,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("trader_stop_loss", "trader.content.verdict.stopLoss"),
                     ("trader_time_horizon", "trader.content.verdict.timeHorizon"),
                     ("trader_holding_days", "trader.content.verdict.expectedHoldingDays"),
-                    // V65 新增: trader 6 维度对比字段（f7 可消费更丰富的 LLM 信号）
-                    ("trader_position_pct", "trader.content.verdict.positionPct"),
+                    // V65 新增: trader 对比字段
+                    // 2026-09-19 订正: 原注释「trader 6 维度对比字段（f7 可消费更丰富的 LLM 信号）」
+                    //   与代码事实不符 —— 实测 f7 只消费**下面保留的 2 个**
+                    //   （trader_risk_level 读 3 处、trader_evidence_count 读 4 处）；
+                    //   其余 4 个本脚本全文零引用，已删（白注入，`audit-inject-coverage.mjs` ② 段）。
+                    //   删除项: trader_position_pct / trader_stop_loss_pct /
+                    //           trader_take_profit_pct / trader_data_gaps。
+                    //   注：止损/目标价语义由既有 tracker_stop_loss / trader_target_price 承载（分别读 21/34 处）。
                     ("trader_risk_level", "trader.content.verdict.riskLevel"),
-                    ("trader_stop_loss_pct", "trader.content.verdict.stopLossPct"),
-                    ("trader_take_profit_pct", "trader.content.verdict.takeProfitPct"),
-                    ("trader_data_gaps", "trader.content.verdict.data_gaps"),
                     ("trader_evidence_count", "trader.content.verdict.evidence_cited"),
                     // V50 修复: 接入 risk-convergence 的三方风险分歧度
                     // 避免该 LLM 节点（约5-10s）的输出被浪费
@@ -3204,10 +3919,71 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ),
                     ("valuation_dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
                     ("valuation_graham_upside", "t-valuation.result.content.graham.upsidePct"),
+                    // 2026-09-21: 格雷厄姆腿的**增长率封顶**标记 —— `true` 表示
+                    //   `revenue_yoy` 超过 `MAX_GROWTH(30%)` 被封顶，即代入公式的增长率
+                    //   低于实际增速 ⇒ 内在价值系统性偏低 ⇒ `upsidePct` 偏负（看空被夸大）。
+                    //   消费点：portfolio-mgr.rhai 的 f5，对 graham 腿**软衰减**（σ × 0.5）。
+                    //   ⚠️ 与 `applicable=false` 的区别：那是「数值没有经济含义」⇒ 整腿剔除；
+                    //   这里只是「假设被压缩」⇒ 仍有信息量，降信即可。两者不可混用。
+                    //   300308 实证（2026-09-22 量纲修复**后**）：EPS 18.47 × (8.5 + 2×30)
+                    //   = 1265.20，现价 926.43 ⇒ `upsidePct = +36.6`。
+                    //   （修复前误按小数算作 `EPS × 9.1 = 168.08` ⇒ `upsidePct = −81.9`；
+                    //    该样本是量纲修复仅有的 2 个符号翻转样本之一。）
+                    //   该值可用纯 PE 恒等式复现（两边 EPS 相消）⇒ 近乎不含公司特定信息；
+                    //   封顶方向性结论不变 —— 实际增速被 MAX_GROWTH 压低 ⇒ 价值仍系统性偏低。
+                    //   缺该字段（旧模板）时 Rhai 侧按「未封顶」处理。
+                    (
+                        "valuation_graham_growth_clamped",
+                        "t-valuation.result.content.graham.assumptions.growthClampedUpper",
+                    ),
                     ("valuation_fscore", "t-valuation.result.content.fScore.score"),
                     ("valuation_moat", "t-valuation.result.content.moat.label"),
+                    // ── V79(2026-09-21) 第三锚腿：PE 历史分位 ──
+                    // ← `t-valuation-band`（ToolNode，调 `compute_valuation_band`）的
+                    //   `metricPe.currentPercentile`（0 = 近 5 年最便宜 / 100 = 最贵）。
+                    //
+                    // 为什么需要第三条腿（审计 §6.10.2）：
+                    //   · DCF 腿在 `applicable=false`（杠杆畸高 / FCF 与净利背离 / 负增长独裁）
+                    //     时被**整腿剔除**，而命中的恰是银行/保险/券商/地产/重资产周期
+                    //     ⇒ 估值维度只剩 graham 一条腿，而 graham 是**纯 PE 恒等式**
+                    //     （EPS 约掉）⇒ 近乎不含公司特定信息；
+                    //   · graham 腿自身在高增长标的上又因 `revenue_yoy` 被封顶到 30%
+                    //     而系统性偏低。
+                    //   PE 分位**既不依赖 FCF、也不依赖增长率假设** ⇒ 对上述两类标的都有效，
+                    //   且与 graham 的信息**不重复**（graham = 相对 8.5+2g/债券收益率的绝对偏离；
+                    //   本腿 = 相对**自身 5 年历史**的位置）。
+                    //
+                    // 取值域：`currentPercentile: Option<f64>`；「PE ≤ 0（亏损）」与
+                    //   「有效样本 < 20」两种情形为 null ⇒ rhai 侧按 `present()` 判该腿不可用，
+                    //   **按可用腿归一化** —— band 缺失时前两腿份额逐位等于 0.7/0.3（见 rhai）。
+                    // ⚠️ 本节点也会**顺带回填** `financial_snapshots`（5 年日频，~1200 行）。
+                    //   该表此前只在用户点开前端「估值带」图时才回填，覆盖仅 13 只 ⇒
+                    //   若不接本节点，绝大多数标的的 `currentPercentile` 恒为 null、
+                    //   第三腿恒不可用（新腿会退化成永不生效的空壳）。
+                    (
+                        "valuation_pe_percentile",
+                        "t-valuation-band.result.content.metricPe.currentPercentile",
+                    ),
+                    // 2026-09-23: 同时注入 `verdict` —— 让 rhai 侧声明的「有效性门须按
+                    //   **数据形态**判」真正可落地。
+                    //
+                    // 病根（声明与实现不一致）：`portfolio-mgr.rhai` 该腿的注释明写
+                    //   「`compute_valuation_band` 的 verdict 也可能因样本不足为
+                    //   `insufficient`，故此处只接值落在 [0,100] 的分位」，但实现
+                    //   **只查了值域、从未读 verdict** ⇒ 有效样本不足的标的只要
+                    //   `currentPercentile` 恰好有值，就以**满强度**进入融合。
+                    //   `valuation_band.rs` 对样本 < `MIN_SAMPLES` 的处置本来就是
+                    //   `verdict = "insufficient"` ⇒ 该状态是**生产端已给出**的质量声明，
+                    //   消费端漏接（与 DCF 腿的 `applicable` / graham 腿的
+                    //   `growthClampedUpper` 两条质量声明同族，唯独本腿此前无声明可用）。
+                    ("valuation_band_verdict", "t-valuation-band.result.content.verdict"),
                     // V52 新增: t-risk 算法风险分类数据源
-                    // 用确定性算法替代 cls-risk-level 的 LLM 分类器（消除 LLM 不一致性）
+                    // 用确定性算法替代 LLM 分类器（消除 LLM 不一致性）
+                    // v55(2026-09-20) 订正: cls-risk-level 亦已下沉 Rhai ⇒ 本模板内不再存在
+                    //   「LLM 分类器」。注意本算法分类（portfolio-mgr.rhai 的 RISK_* 常量）
+                    //   与 cls-risk-level 的 Rhai 口径（照抄原 prompt 阈值）**并非同一套阈值**
+                    //   （实测 6 处不同，见 risk-level.rhai 头部）⇒ 二者仍是两个独立口径，
+                    //   不是同一判定的重复计算。
                     // t-risk 是 ToolNode, stockRiskProfile 在 result.content 中
                     (
                         "risk_volatility",
@@ -3216,7 +3992,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
                     ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
                     ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
-                    ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
+                    // 2026-09-19: 删除 ("risk_gross_margin", "...stockRiskProfile.grossMarginPct") ——
+                    //   本脚本全文零引用（`audit-inject-coverage.mjs` ② 段零命中），且全仓除本处外
+                    //   无第二处引用 ⇒ 纯白注入。同批删除的另 5 条见本节点上文注释。
+                    //   保留邻居 risk_sharpe / risk_roe / risk_debt_ratio（脚本内分别读 15/8/2 处，实测）。
                     ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
                     // v51(2026-09-14): 删除 ("stock_sector", "stock_sector") —— 该映射在
                     // portfolio-mgr.rhai 中的唯一消费者是 classify_risk 的「金融业行业白名单
@@ -3446,6 +4225,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-scoring-portfolio-mgr", "t-scoring", "portfolio-mgr"));
     edges.push(edge("e-a-catalyst-portfolio-mgr", "a-catalyst", "portfolio-mgr"));
     edges.push(edge("e-t-valuation-portfolio-mgr", "t-valuation", "portfolio-mgr"));
+    // V79(2026-09-21): 新增的 `t-valuation-band` 同样必须在此补边 —— 它被
+    //   portfolio-mgr 的 `input_mapping.valuation_pe_percentile` 引用，缺边则变量不进入
+    //   `context.variables` ⇒ 第三锚腿恒不可用。与上面 5 条**完全同一失效机制**
+    //   （这正是本段注释开头描述的缺陷族：写进 input_mapping ≠ 有人供给）。
+    edges.push(edge("e-t-valuation-band-portfolio-mgr", "t-valuation-band", "portfolio-mgr"));
     edges.push(edge("e-pace-calc-portfolio-mgr", "pace-calc", "portfolio-mgr"));
     edges.push(edge("e-cls-risk-level-portfolio-mgr", "cls-risk-level", "portfolio-mgr"));
 
@@ -3535,7 +4319,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 "t-risk".into(),
                 "trader".into(),
             ];
-            a.config.model_role = Some("risk-evaluator".into());
             // P0 修复(2026-07-22): rule-check 改为纯决策节点，移除全部工具。
             // 原问题与 trader 同款：context_sources 已包含 t-scoring/t-valuation/t-risk，
             // 这些上游 ToolNode 的输出就是 compute_scoring/compute_valuation/
@@ -3633,7 +4416,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 "t-risk".into(),
             ];
             a.config.output_mode = OutputMode::Json;
-            a.config.model_role = Some("decision-maker".into());
             // P0 修复(2026-07-22): 移除 td_quote/td_kline/td_score——context_sources 已包含
             // t-scoring/t-valuation/t-risk，上游数据已注入。原配置与 trader 同款问题：
             // LLM 重新获取数据会传入空 stock_code，触发无效重试。
@@ -3696,7 +4478,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 "t-scoring".into(),
                 "t-risk".into(),
             ];
-            a.config.model_role = Some("explainer".into());
             a.config.output_mode = OutputMode::Json;
             // P0 修复(2026-07-22): 移除 td_quote/td_score——context_sources 已包含 t-scoring，
             // 上游 currentPrice/indicators/totalScore 已注入。explainer 职责是翻译规则引擎
@@ -4045,11 +4826,105 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         _ => variables_val,
     };
 
-    // ── v48 强制覆写：辩论轮数固定 1 ──
-    // `merge_variable_values` 的语义是「旧值优先（保留用户自定义）」—— 这正好
-    // 会让 DB 里遗留的 `debate_rounds = 3` 覆盖新默认值 1，即「改了默认值等于
-    // 没改」。本轮是一次**语义变更**（多轮为假多轮，见文件头 v48），必须覆写。
-    let variables_val = force_variable_value(&variables_val, "debate_rounds", serde_json::json!(1));
+    // ── 辩论轮数：建图展开轮数与落库变量值强制同源 ──
+    // `debate_max_rounds`（resolve_debate_rounds）驱动 DAG 展开几对 bull/bear 节点、
+    // 下游锚点 bear-rN。此处用同一值覆写变量表，保证「建图、下游锚点、变量表」
+    // 三处严格一致 —— 用户在前端把「多空辩论轮数」设成几，重建后即真跑几轮，
+    // 不会出现变量表与 DAG 展开数不匹配的悬空入边。
+    let variables_val =
+        force_variable_value(&variables_val, "debate_rounds", serde_json::json!(debate_max_rounds));
+
+    // ── DCF 估值参数：存量**一次性**迁移（v74 引入；D11 修复于 2026-09-22）──
+    //
+    // 目标：把 DB 存量里「2026-09-12 校准前」的旧值迁到校准后的值。取值一律引用
+    // `seed_variables` 的常量（与变量定义同源，不在此手抄数值 —— 手抄会让口径漂移）。
+    //
+    // ⚠️ 为什么必须是「一次性」（D11 实测）：本 force 自 v74 引入起**从未生效过** ——
+    //    落库构造点的 `variables` 分支会再用 `old_variables` 逐名把 `value` 覆盖回旧值，
+    //    而该分支位于本 force **之后** ⇒ 刚写进去的新值被抹掉。DB 实证：活行 `version=75`
+    //    （= 种子成功跑过多次，版本号就是它写的）而三参数仍是校准前的旧值。
+    //    该覆盖分支与 `merge_variable_values` 语义完全重复，已删除（见落库处注释）。
+    //
+    // ⚠️ 为什么门必须锚在「旧版本 < DCF_MIGRATION_VERSION」而不是无条件执行：
+    //    删掉冗余覆盖之后 force 会真的生效；若仍无条件执行，则**每次**升版都会把用户
+    //    在面板里调好的 DCF 参数打回默认。定为「旧版本 < 76」⇒ 恰好只在本次校正存量时
+    //    执行一次，此后尊重用户设置。`previous_version == None`（首次创建模板）也执行
+    //    ⇒ 首次落库即为校准后值。
+    //
+    // 影响量化（688114 实测）：`discount 10→8.5` + `perpetual 3→4` 使
+    // `dcf.mid` 24.23 → 37.27（+53.8%），区间 16.33-38.84 → 22.39-71.14。
+    //
+    // ⚠️ **v77（2026-09-23）：门由 76 抬到 77 —— 第二次一次性校正（永续 4%→2%）**。
+    //    为什么必须抬：本门是「旧版本 < `DCF_MIGRATION_VERSION`」**一次性**门。
+    //    v76 那次校正过后 DB 已停在 76 ⇒ 若不同步抬门，`PERPETUAL_GROWTH` 从
+    //    0.04 改到 0.02 将**只改代码常量与种子默认值**，而 DB 存量变量仍是 4.0；
+    //    又因为 t-valuation 的 input_mapping 把 `value_dcf_perpetual_rate` 作为
+    //    **扁平参数**传入（优先于模块常量），生效的是 4.0 ⇒ **改动等于没改**。
+    //    这正是 v74 那次「只改代码常量是假修复」的同型复发，故沿用同一处置。
+    //    代价（明示）：会把这期间用户在面板里手调过的永续增长率一并覆盖为 2.0。
+    //    取此代价的理由：4.0% **超过模型自身申报的无风险利率 2.5%**，违反终值约束
+    //    `g_terminal ≤ risk-free rate`，属**口径错误**而非偏好差异，不应被「用户设置」
+    //    固化（详见 `astock_data::mcp_tools::PERPETUAL_GROWTH` 的文档注释）。
+    //
+    // ⚠️ **v78（2026-09-23 同日二改）：门由 77 抬到 78 —— 无风险利率口径订正**。
+    //    改了什么：`RISK_FREE_RATE` 0.025 → **0.017**（旧值实为 1 年期 MLF 政策利率
+    //    2.50%，而 DCF 需要与现金流久期匹配的 **10 年期国债** —— 中债 10Y 实测 1.675%）；
+    //    连带 `DISCOUNT_RATE` 0.085 → **0.077**、`PERPETUAL_GROWTH` 0.02 → **0.015**
+    //    （订正 `r_f` 后原 2.0% 越过了 `g_terminal ≤ r_f` 的硬约束）。
+    //    为什么必须抬门：与 v77 完全同因 —— 不平抬，DB 存量的 `discount_rate=8.5` 会
+    //    经扁平参数继续生效，代码常量改动**等于没改**（v74/v77 同型复发第三次）。
+    //    代价（明示）：再次覆盖面板手调值。DB 实测（sci10）：三参数当前恰等于 v76 规范值
+    //    （`12 / 4 / 8.5`）⇒ **用户并未手调过**，本轮覆盖的实际代价仍为零，可核对。
+    //    注：`DEFAULT_DCF_*_PCT` 三个常量均由 `mcp_tools::*` 派生（`* 100.0`），
+    //    故本次无需改动 `seed_variables.rs` —— 它随常量自动取到 `12.0 / 1.5 / 7.7`。
+    //
+    // ⚠️ **v79（2026-09-23 同日三改）：门由 78 再抬到 79 —— `PERPETUAL_GROWTH` 二次订正**。
+    //    改了什么：`PERPETUAL_GROWTH` 0.015 → **0.013**。
+    //    为什么：v78 把 `MAX_PERPETUAL_GROWTH` 锚到 `r_f = 1.7%` 后，乐观档的
+    //    `p × 1.3 = 1.95%` **越过该上限**被静默砍到 `×1.133`，而面板文案仍声称「×1.3」
+    //    —— 与 v77 在**增长率**维度修掉的缺陷同型（当时 `g × 1.5` 被 `MAX_GROWTH` 吞掉）。
+    //    处置：由不变量 `p × 1.3 ≤ r_f` 反推 `p ≤ 1.3077%` ⇒ 取 **1.3%**，
+    //    并在 `mcp_tools.rs` 加**编译期断言**锁死（此后任一常量漂移即编译失败）。
+    //
+    //    ⚠️⚠️ **为什么改了常量却必须再抬一次门（本次的关键教训）**：
+    //    这是一个**一次性**门（`existing.version < DCF_MIGRATION_VERSION`）。若应用在
+    //    v78 上启动过一次并完成了 force，则 DB 版本已变成 78 ⇒ 我再改常量到 1.3% 时
+    //    `76 < 78` 已为假、`78 < 78` 也为假 ⇒ **新值永远进不去 DB**，而代码里读起来
+    //    一切正常（flat 参数继续用 1.5%）—— **第四种同型复发**，且比前三者更隐蔽：
+    //    前三次是「门没抬」，这次是「门抬了但抬在改动之前」。
+    //    ⇒ 判据：**凡在某个 `_MIGRATION_VERSION` 声明之后又改了被它守护的常量，
+    //       必须再抬一次**；等价地，「版本号」应对应「值的最后变更」，不是「本轮开始」。
+    //
+    // ⚠️⚠️ **v79 补记（第五种形态）：门抬了，但「落库版本号」没跟着抬**。
+    //    前四次的形态都是「门的值 vs 被守护常量」错位；本次新暴露的是**另一条独立水位线**：
+    //    落库写的是 `TEMPLATE_VERSION`（落库点：`version: Set(TEMPLATE_VERSION)`），而本门读的是 `DCF_MIGRATION_VERSION`。
+    //    两者一旦倒挂（`TEMPLATE_VERSION < 门`），DB 会停在一个**仍满足 `版本 < 门`** 的值上
+    //    ⇒ **门永远关不上** ⇒ 此后为任何**无关**模板改动升版都会**再次**触发本 force，
+    //    把用户在面板里调好的 DCF 参数打回默认。
+    //    ⇒ 判据：**幂等门的「水位线」必须 ≤ 落库版本号**（门关闭与落库在同一步完成）；
+    //       等价地，`_MIGRATION_VERSION` 的取值不得**超前**于承载它的 `TEMPLATE_VERSION`。
+    //    处置：`TEMPLATE_VERSION` 77 → **79**（与门对齐），并在两常量旁加**编译期断言**
+    //    `TEMPLATE_VERSION >= DCF_MIGRATION_VERSION` ⇒ 此后不再依赖「改的人记得」。
+    //    门值本体见模块级 `DCF_MIGRATION_VERSION`（提到模块级正是为了让这条断言成立）。
+    let variables_val = if previous_version.is_none_or(|v| v < DCF_MIGRATION_VERSION) {
+        let v = force_variable_value(
+            &variables_val,
+            "value_dcf_discount_rate",
+            serde_json::json!(super::seed_variables::DEFAULT_DCF_DISCOUNT_RATE_PCT),
+        );
+        let v = force_variable_value(
+            &v,
+            "value_dcf_perpetual_rate",
+            serde_json::json!(super::seed_variables::DEFAULT_DCF_PERPETUAL_RATE_PCT),
+        );
+        force_variable_value(
+            &v,
+            "value_dcf_growth_rate",
+            serde_json::json!(super::seed_variables::DEFAULT_DCF_GROWTH_RATE_PCT),
+        )
+    } else {
+        variables_val
+    };
 
     // ── Phase 3/4: Rhai 综合评分工具 + ErrorConfig ──
     use crate::commands::error::ErrorResponse;
@@ -4415,31 +5290,13 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         edges: Set(edges_json),
         input_schema: Set(Some(input_schema_val)),
         output_schema: Set(Some(output_schema_val)),
-        variables: Set(if let Some(ref ov) = old_variables {
-            // 升级时保留用户自定义的变量值
-            let new_vars: Vec<serde_json::Value> =
-                serde_json::from_str(&variables_val).unwrap_or_default();
-            let mut final_vars = new_vars.clone();
-            if let Ok(old_parsed) = serde_json::from_str::<Vec<serde_json::Value>>(ov) {
-                for nv in &mut final_vars {
-                    let nv_name = nv.get("name").and_then(|n| n.as_str());
-                    if let Some(nv_name) = nv_name {
-                        if let Some(old_v) = old_parsed
-                            .iter()
-                            .find(|ov| ov.get("name").and_then(|n| n.as_str()) == Some(nv_name))
-                        {
-                            if let Some(old_val) = old_v.get("value") {
-                                nv.as_object_mut()
-                                    .map(|o| o.insert("value".into(), old_val.clone()));
-                            }
-                        }
-                    }
-                }
-            }
-            Some(serde_json::to_string(&final_vars).unwrap_or(variables_val.clone()))
-        } else {
-            Some(variables_val.clone())
-        }),
+        // ⚠️ 2026-09-22（D11）：此处原有「再用 `old_variables` 逐名把 `value` 覆盖回旧值」的
+        // 分支，已删除 —— 它与上游 `merge_variable_values`（:4641 调用）**语义完全重复**
+        // （同为「逐名保留旧值」），且位于 DCF force **之后**，会把 force 刚写的新值抹掉
+        // （这正是 D11 的成因）。逐情形对账证明删除后行为等价、且不丢失任何能力
+        // （`merge` 还多带 RENAME_MAP 别名迁移）。详见
+        // `AUDIT-300642-run-variance-2026-09-22.md` §13.10.6。
+        variables: Set(Some(variables_val)),
         error_config: Set(Some(error_config_val)),
         composite_source: Set(None),
         tool_defs: Set(Some(tool_defs_val)),

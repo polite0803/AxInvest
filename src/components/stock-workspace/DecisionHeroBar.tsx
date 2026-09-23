@@ -93,15 +93,12 @@ export function DecisionHeroBar() {
     ? "var(--sa-amber)"
     : "var(--sa-red)";
 
-  // P1-2(2026-09-14): 展示档统一由 (action, positionState, positionPct) 派生。
-  // 「持有 / 观望」不再由各组件自行判断仓位——后端仍会按仓位互改 action，但派生函数
-  // 与后端同判据（positionState 优先，缺失时退回 positionPct），故对既有数据是**恒等变换**；
-  // 一旦后端切换到「action 只表达方向强度」，这里无需再改。
-  const displayAction = resolveDisplayAction(
-    decision.action,
-    decision.positionState,
-    decision.positionPct,
-  );
+  // 2026-09-22: 展示档 = 方向档（`resolveDisplayAction` 已改为恒等，不再按仓位派生）。
+  //   旧派生用**本次决策刚算出的建议仓位**反推本次展示名，是循环判据 ——
+  //   LLM 措辞抖动会经「试探仓 → positionPct → positionState」三级旁路把
+  //   「观望」翻成「持有」，同日两次分析给出两个结论（见
+  //   `AUDIT-300642-run-variance-2026-09-22.md`）。
+  const displayAction = resolveDisplayAction(decision.action);
   const actionColor = getActionColor(displayAction);
 
   // ── 简洁模式：单行紧凑条 ──
@@ -368,12 +365,8 @@ function DecisionDetailDrawer({
   asOfDate,
 }: DecisionDetailDrawerProps) {
   const { t } = useTranslation();
-  // 与主组件同判据（见上方 displayAction 注释）—— 展示档一律走派生函数
-  const displayAction = resolveDisplayAction(
-    decision.action,
-    decision.positionState,
-    decision.positionPct,
-  );
+  // 与主组件同判据（见上方 displayAction 注释）—— 展示档 = 方向档，不按仓位派生
+  const displayAction = resolveDisplayAction(decision.action);
 
   return (
     <Drawer

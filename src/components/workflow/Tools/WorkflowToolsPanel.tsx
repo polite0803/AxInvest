@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import type { WorkflowTool, WorkflowToolInput, WorkflowToolStatus, WorkflowToolType } from "@/types";
@@ -57,7 +58,7 @@ export function WorkflowToolsPanel({
       setTools(Array.isArray(list) ? list : []);
     } catch (e) {
       logIpcError("list_workflow_tools")(e);
-      appMessage.error(String(e));
+      showBackendError(appMessage, e);
     } finally {
       setLoading(false);
     }
@@ -90,7 +91,7 @@ export function WorkflowToolsPanel({
       loadTools();
     } catch (e) {
       logIpcError("upsert_workflow_tool")(e);
-      message.error(String(e));
+      showBackendError(message, e);
     }
   };
 
@@ -112,7 +113,7 @@ export function WorkflowToolsPanel({
       loadTools();
     } catch (e) {
       logIpcError("generate_workflow_tool")(e);
-      message.error(String(e));
+      showBackendError(message, e);
     } finally {
       setGenerating(false);
     }
@@ -126,7 +127,7 @@ export function WorkflowToolsPanel({
       loadTools();
     } catch (e) {
       logIpcError("update_workflow_tool_status")(e);
-      message.error(String(e));
+      showBackendError(message, e);
     }
   };
 
@@ -137,7 +138,7 @@ export function WorkflowToolsPanel({
       loadTools();
     } catch (e) {
       logIpcError("delete_workflow_tool")(e);
-      message.error(String(e));
+      showBackendError(message, e);
     }
   };
 

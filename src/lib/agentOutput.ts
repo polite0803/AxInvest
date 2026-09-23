@@ -9,7 +9,13 @@ interface AgentResult {
   tool_calls_made?: unknown[];
 }
 
-import { parseAction, parsePositionState, parseRiskLevel } from "@/lib/stock-analysis-utils";
+import {
+  alignReasoningDecisionLabel,
+  parseAction,
+  parsePositionState,
+  parseRiskLevel,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import type { StockDecision } from "@/types/stock-analysis";
 
 /** 清理 LLM 原始输出中的工具调用标签、think 标签和乱码 */
@@ -356,10 +362,24 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
   const crossCheckRaw = source.crossCheck ?? source.cross_check;
   // P1-2(2026-09-14): 持仓状态 —— 与 action 正交的第二轴，portfolio-mgr.rhai 输出 camelCase
   // `positionState`（EMPTY/OPENING/HOLDING/TRIMMING），兼容 snake_case。
-  // 未识别/缺失 → null，语义是「采集时点无此信息」，**不得**读成 EMPTY（那会把「不知道」当「空仓」）；
-  // 展示层由 `resolveDisplayAction` 在 null 时退回 positionPct 判据。
+  // 未识别/缺失 → null，语义是「采集时点无此信息」，**不得**读成 EMPTY（那会把「不知道」当「空仓」）。
+  // 2026-09-22: 本字段已**不参与**展示档判定（展示档 = 方向档，见 `resolveDisplayAction`），
+  //   仅作为独立的「本次建议持仓状态」供 UI 展示。
   const positionStateRaw = source.positionState ?? source.position_state;
   const positionState = parsePositionState(positionStateRaw);
+  // 阶段1：四周期价位映射透传 —— camel/snake 双兼容（`horizonPriceMap` / `horizon_price_map`）。
+  // 与 targetPrice/stopLoss 一致：null/undefined = stage1 字段引入前的记录，**无此信息**，
+  // 消费端按主档位回退，不得读成空映射。
+  const horizonPriceMapRaw = source.horizonPriceMap ?? source.horizon_price_map;
+  const horizonPriceMap = horizonPriceMapRaw != null && typeof horizonPriceMapRaw === "object"
+    ? (horizonPriceMapRaw as unknown as StockDecision["horizonPriceMap"])
+    : null;
+
+  // 阶段2：四周期独立决策透传 —— camel/snake 双兼容。
+  const decisionsByHorizonRaw = source.decisionsByHorizon ?? source.decisions_by_horizon;
+  const decisionsByHorizon = decisionsByHorizonRaw != null && typeof decisionsByHorizonRaw === "object"
+    ? (decisionsByHorizonRaw as unknown as StockDecision["decisionsByHorizon"])
+    : null;
 
   return {
     action,
@@ -367,7 +387,18 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     positionState,
     targetPrice: targetPrice != null && !isNaN(targetPrice) ? targetPrice : null,
     stopLoss: stopLoss != null && !isNaN(stopLoss) ? stopLoss : null,
-    reasoning,
+    horizonPriceMap,
+    decisionsByHorizon,
+    // 2026-09-22 修复：reasoning 开头的 `决策=X` 必须与**最终方向档**同判据。
+    //   背景：`portfolio-risk-gate.rhai` 覆盖 action 时**不更新** reasoning 的结论名
+    //   （只追加 `| [风控门] ...`）⇒ 文本会停留在 pm 档位，与最终 action 不同名。
+    //   ⚠️ 自 2026-09-22 起展示档**不再按仓位派生**（原因见 `resolveDisplayAction`
+    //   的文档与 `AUDIT-300642-run-variance-2026-09-22.md`：用本次建议仓位反推本次
+    //   展示名是循环判据，会把 LLM 措辞的抖动注入结论名）。故此处对齐目标就是 action。
+    // ⚠️ 只对齐这段**人读文本**；`action` 字段保持原值不动 —— 它是机器轴，
+    //    DecisionComparisonPanel 的双视角对比、DecisionBanner 的「问 AI」prompt
+    //    都依赖它的原值，不得在此派生（否则掩盖公式 vs LLM 的真实分歧）。
+    reasoning: alignReasoningDecisionLabel(reasoning, resolveDisplayAction(action)),
     riskLevel,
     confidence,
     decisionConfidence,
@@ -526,11 +557,6 @@ export function tryParseDecision(text: string): StockDecision | null {
  */
 export function parseJsonLoose(text: string | null): Record<string, unknown> | null {
   if (!text) { return null; }
-  let src = text.trim();
-  const fence = src.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (fence) {
-    src = fence[1].trim();
-  }
   const tryParse = (s: string): Record<string, unknown> | null => {
     try {
       const v = JSON.parse(s);
@@ -539,6 +565,23 @@ export function parseJsonLoose(text: string | null): Record<string, unknown> | n
       return null;
     }
   };
+  const raw = text.trim();
+  // 0) **先按原文本解析**，fence 剥离必须排在其后。
+  //    2026-09-21 修复：原实现**无条件**先剥 fence，于是当 fence 出现在某个 JSON
+  //    字符串值**内部**时（典型输入：AgentNode 包装
+  //    `{"role":"trader","content":"```json\n{...}\n```"}`），正则会劫持整段文本，
+  //    把 src 换成**仍带转义的**内层片段 ⇒ `JSON.parse` 抛错；而随后的兜底切片又是
+  //    对这个**已被破坏的** src 取「第一个 { 到最后一个 }」⇒ 必然二次失败 ⇒
+  //    对**完全合法的 JSON** 返回 null。
+  //    该缺陷此前被 `extractLlmField` 更外层的 `JSON.parse` 兜底掩盖，只在
+  //    「直接调用 `parseJsonLoose` 判可解析性」的地方暴露（如一致性打分的降级入口）。
+  const directRaw = tryParse(raw);
+  if (directRaw) { return directRaw; }
+  let src = raw;
+  const fence = src.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fence) {
+    src = fence[1].trim();
+  }
   // 1) 直接解析（已去 fence）
   const direct = tryParse(src);
   if (direct) { return direct; }
@@ -725,4 +768,91 @@ export function parseDecisionExplanation(raw: unknown): DecisionExplanation | nu
     return null;
   }
   return { summary, explanation, ruleTrace, riskComment, confidenceNote };
+}
+
+/**
+ * 估值维度**适用性**（由 `portfolio-mgr.rhai` 输出，2026-09-21 起前端消费）。
+ *
+ * 存在的理由：估值面板显示的是 `value-investor` 的结论文本，其中
+ * `intrinsic_value_range` / `margin_of_safety` 是算法值，但**锚定口径不可见**。
+ * 实测 300308：面板显示「内在价值 80.63–156.77 元」，而该区间由
+ * 「近 5 年正净利均值 × 0.90」的**历史代理锚**算出 —— 与当期现金流无关；
+ * 该股当期 TTM 自由现金流约 +28.69 亿、FCF/净利 = 0.14（< 0.3）。
+ * 不标注口径 ⇒ 用户会把它当成内在价值，这正是本次缺陷的用户侧表现。
+ */
+export interface ValuationApplicability {
+  /** `false` 表示 DCF **模型前提**对本标的不成立（判据按数据形态，不按行业标签）。 */
+  dcfApplicable: boolean;
+  /** DCF 这条腿是否参与了 f5 估值因子（`dcfApplicable=false` 时必然为 false）。 */
+  dcfLegUsed: boolean;
+  /** 格雷厄姆这条腿是否参与。 */
+  grahamLegUsed: boolean;
+  /** 不适用原因（多条以 `；` 连接）；无则为空串。 */
+  reason: string;
+  /** DCF 的 FCF 锚定是历史代理，**不是**当期真实现金流。 */
+  anchorIsFallback: boolean;
+  /** 格雷厄姆的增长率假设被上限封顶（内在价值系统性偏低 ⇒ 看空被夸大）。 */
+  grahamGrowthClamped: boolean;
+}
+
+/** 递归找第一个指定 key（限深，避免在长文本/深嵌套上爆栈）。 */
+function deepFindKey(obj: unknown, key: string, depth = 0): unknown {
+  if (depth > 6 || !obj || typeof obj !== "object") { return undefined; }
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const hit = deepFindKey(item, key, depth + 1);
+      if (hit !== undefined) { return hit; }
+    }
+    return undefined;
+  }
+  const rec = obj as Record<string, unknown>;
+  if (key in rec) { return rec[key]; }
+  for (const v of Object.values(rec)) {
+    const hit = deepFindKey(v, key, depth + 1);
+    if (hit !== undefined) { return hit; }
+  }
+  return undefined;
+}
+
+/**
+ * 从 `portfolio-mgr` 节点输出里提取 `valuationApplicability`。
+ *
+ * 兼容三种存放形态（与 `extractDecision` 同一族的包装差异）：
+ * 1. 纯 JSON 字符串；2. `{content: "<json>"}` AgentNode 包装；
+ * 3. `{result: {...}}` / `{params: {...}}` CodeNode 包装。
+ *
+ * 全取不到时返回 `null` —— **不构造默认值**。「没有这个字段」（旧模板 / 节点未跑）
+ * 与「字段说前提成立」是两件事，伪造后者会让面板显示一条假的「适用」标注。
+ */
+export function extractValuationApplicability(value: unknown): ValuationApplicability | null {
+  if (value == null) { return null; }
+  const parsed = typeof value === "string"
+    ? parseJsonLoose(value)
+    : (value as Record<string, unknown>);
+  if (!parsed || typeof parsed !== "object") { return null; }
+
+  const candidates: unknown[] = [];
+  // AgentNode 形态：真正的 JSON 在字符串 content 里
+  if (typeof (parsed as Record<string, unknown>).content === "string") {
+    const inner = parseJsonLoose((parsed as Record<string, unknown>).content as string);
+    if (inner) { candidates.push(inner); }
+  }
+  candidates.push(parsed);
+
+  for (const candidate of candidates) {
+    const hit = deepFindKey(candidate, "valuationApplicability");
+    if (hit && typeof hit === "object" && !Array.isArray(hit)) {
+      const rec = hit as Record<string, unknown>;
+      return {
+        // 缺省 true：旧模板未注入 `applicable` 时，行为应与改动前一致（不误报不适用）
+        dcfApplicable: rec.dcfApplicable !== false,
+        dcfLegUsed: rec.dcfLegUsed === true,
+        grahamLegUsed: rec.grahamLegUsed === true,
+        reason: typeof rec.reason === "string" ? rec.reason : "",
+        anchorIsFallback: rec.anchorIsFallback === true,
+        grahamGrowthClamped: rec.grahamGrowthClamped === true,
+      };
+    }
+  }
+  return null;
 }

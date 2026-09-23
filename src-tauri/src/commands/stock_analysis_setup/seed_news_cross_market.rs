@@ -191,7 +191,6 @@ pub async fn seed_news_cross_market_template(
                 max_tool_rounds: Some(6),
                 execution_mode: Some("react".into()),
                 rag_source_ids: vec![],
-                model_role: None,
                 consistency_check: None,
                 hallucination_guard: None,
                 fallback_model: None,

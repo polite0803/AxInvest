@@ -6,7 +6,10 @@
 
 use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult, global_state};
 use async_trait::async_trait;
-use axagent_analysis_engine::risk::kelly_criterion_with_thresholds;
+use axagent_analysis_engine::risk::{
+    kelly_criterion_with_thresholds, pe_percentile, peg_ratio as engine_peg_ratio,
+    value_at_risk as engine_value_at_risk,
+};
 use axagent_astock_data::indicators::sma;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -88,89 +91,86 @@ fn sharpe_ratio(returns: &[f64], rf: f64, annualization: f64) -> SharpeR {
     }
 }
 
-#[derive(Serialize)]
-struct VarR {
-    var_pct: f64,
-    confidence: f64,
-    cvar_pct: f64,
-}
-fn value_at_risk(returns: &[f64], conf: f64) -> VarR {
-    let n = returns.len();
-    if n < 5 {
-        return VarR { var_pct: 0.0, confidence: conf, cvar_pct: 0.0 };
-    }
-    let mut s = returns.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let idx = ((1.0 - conf) * n as f64).floor() as usize;
-    let var = if idx < n { -s[idx] } else { 0.0 };
-    let tail: f64 = s[..=idx.min(n - 1)].iter().map(|r| -r).sum();
-    let cvar = tail / (idx + 1) as f64;
-    VarR {
-        var_pct: (var * 100.0).round() / 100.0,
-        confidence: conf,
-        cvar_pct: (cvar * 100.0).round() / 100.0,
-    }
-}
+// 2026-09-21 去重：`value_at_risk` **不再有本地实现** —— 统一复用
+// `axagent_analysis_engine::risk::value_at_risk`（权威源），照本文件
+// `pe_percentile` / `kelly` 先例。
+//
+// ⚠ 与前两个不同，这次是**先改权威源、再转发** —— 因为两份的算法**不等价**（不是等价副本）：
+//   · 本地（生产在跑，`calc_var` 在消费）：`idx = floor((1-conf) * n)`，直接作 0-based 下标
+//   · 引擎（当时**全仓零调用**）：`idx = floor((1-conf) * (n+1))`，再 `var_idx = idx - 1`
+//   ⇒ 净效果引擎版取**前一位**顺序统计量（更极端的尾部值）。
+//   实测 1980 组参数扫描：索引不同 **45.5%**、最终 2 位小数输出不同 **9.44%**、
+//   最大 Δ **0.032**（≈6.5 倍舍入半格），样例甚至**符号翻转**
+//   （证据：`output/tmp/verify-var-divergence.mjs`）。
+//
+//   口径裁决：**以本地为准**。`floor((1-c)*n)` 数学上恰好命中 (1-c) 分位；引擎版 `+1` 再
+//   `-1` 是偏移叠加后的混合口径（净取前一位 ⇒ 更极端的尾部值），不对应任何标准分位定义。
+//   引擎版零调用 ⇒ 改它零行为风险；反过来改本地会改动所有历史产物且无正确性依据
+//   ⇒ 改引擎版对齐、此处转发。引擎侧的口径锁在 `risk.rs::tests::test_var`。
+//
+//   ⚠ 两口径**并非处处可分**：`1.0-c` 的浮点值可能**略小于**数学值
+//   （`1.0-0.9 = 0.09999999999999998`）⇒ 「整十置信度 × n=10」下 `floor` 掉一档，
+//   恰好抵消旧口径的 `+1`，两口径输出**相同**（实测 c=0.9 时新旧均得 0.05）。
+//   选测试点必须避开这类组合 —— 否则拿到的是「区分力为 0 的假绿」。
+//   详见 `analysis-engine/src/risk.rs::value_at_risk` doc 的「浮点 floor 边界」段。
+//
+// 契约等价性：引擎 `VarResult { var_pct, confidence, cvar_pct }` 与本地 `VarR`
+// **逐字段同名同型同序** ⇒ 序列化 JSON 零变化（LLM 可见契约不动），故本地结构体一并删除。
 
-#[derive(Serialize)]
-struct PeR {
-    percentile: f64,
-    level: String,
-    median: f64,
-}
-fn pe_percentile(cur: f64, hist: &[f64]) -> PeR {
-    let mut s = hist.to_vec();
-    s.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let below = s.iter().filter(|&&p| p <= cur).count();
-    let pct = if s.is_empty() {
-        50.0
-    } else {
-        below as f64 / s.len() as f64 * 100.0
-    };
-    let level = if pct < 20.0 {
-        "极低"
-    } else if pct < 40.0 {
-        "偏低"
-    } else if pct < 60.0 {
-        "合理"
-    } else if pct < 80.0 {
-        "偏高"
-    } else {
-        "极高"
-    };
-    let med = if !s.is_empty() { s[s.len() / 2] } else { cur };
-    PeR { percentile: (pct * 10.0).round() / 10.0, level: level.into(), median: med }
-}
+// ⚠ 转发类改造的等价性判据 = **逐行比对算法本体**，不是「字段同名同型」——
+// 后者只证明 JSON 结构不变，**挡不住阈值/档位数被偷换**（结构不变、值域已变的缺陷
+// 编译器与类型检查都不会报，见 `risk.rs` 同名函数的档位表）。
+//
+// 2026-09-21 去重：`pe_percentile` **不再有本地实现** —— 统一复用
+// `axagent_analysis_engine::risk::pe_percentile`（权威源），照本文件 `kelly` 先例。
+//
+// 逐行等价性已证（证据：本地原实现快照 `output/backup-2026-09-13/dup-fix/finance.rs.before-p0-3`
+// 第 114–142 行，与引擎实现逐项比对）：
+//   排序口径 `partial_cmp/Ordering::Equal` · `below` 的 `<=` · 空序列 `pct = 50.0` ·
+//   五档阈值 `20/40/60/80` → 极低/偏低/合理/极高（**档位数与阈值均一致**）·
+//   `median = s[len/2]`（偶数取上中位、不插值）· 舍入 `*10.0/10.0` ·
+//   字段 `{ percentile, level, median }` 同名同型。
+// ⇒ `calc_pe_percentile` 输出 JSON **结构与值域皆零变化**（LLM 可见契约不动），
+// 故本地 `PeR` 结构体一并删除。
+//
+// 背景：去重前两处副本在 2026-09-21 同日各修过一次（亏损企业 PE<0 曾落进
+// `percentile = 0` ⇒ `level = "极低"`，把「亏损」读成「历史估值极低分位」），
+// 等价性靠人工比对维持；13 日 `dup-fix` 一轮也只修了单侧。收敛到单一权威源后不再有分叉面。
 
+/// 序列化视图：**只暴露 `peg` / `level`** —— 这是 `calc_peg` 工具的既有输出契约。
+///
+/// 权威源 `PEGResult` 另带 `pe` / `growth_rate` 两个回显字段；若直接序列化它，
+/// 工具输出会凭空多出两个键 ⇒ **改 LLM 可见契约**，故此处保留字段子集适配
+/// （刻意不做整删）。判据：**字段同集可整删本地类型，字段超集必须留适配层**。
 #[derive(Serialize)]
 struct PegR {
     peg: f64,
     level: String,
 }
+
+/// 转发到权威源 `axagent_analysis_engine::risk::peg_ratio`，仅取 `peg` / `level`。
+///
+/// 逐行等价性已证（证据：同上快照第 144–167 行）：`g <= 0 ⇒ {INFINITY, "无意义"}` 守卫、
+/// `pe / g` 算式、四档阈值 `0.5/1.0/2.0` → 严重低估/低估/合理/高估、舍入 `*100.0/100.0`
+/// 全部一致；两侧唯一差异是权威源多两个回显字段，已由 `PegR` 适配掉。
+///
+/// 2026-09-21 去重：本地原实现重复了上述四档与 `g <= 0` 守卫，且同日为亏损企业
+/// （PE<0 ⇒ 负 peg 落进 `peg < 0.5` ⇒ "严重低估"）单独修过一次 ——
+/// 两份副本的等价性靠人工比对维持。收敛到单一权威源后，
+/// 该守卫（`pe <= 0.0 ⇒ 无含义`）只在引擎侧维护一处。
+/// ⚠ 亏损分支返回 `INFINITY` ⇒ serde_json 序列化为 `null`（JSON 无 Infinity），
+///   即工具输出是 `{"peg": null, "level": "无意义"}`，非负值 —— 这是刻意的。
 fn peg_ratio(pe: f64, g: f64) -> PegR {
-    if g <= 0.0 {
-        return PegR { peg: f64::INFINITY, level: "无意义".into() };
-    }
-    let peg = pe / g;
-    PegR {
-        peg: (peg * 100.0).round() / 100.0,
-        level: if peg < 0.5 {
-            "严重低估"
-        } else if peg < 1.0 {
-            "低估"
-        } else if peg < 2.0 {
-            "合理"
-        } else {
-            "高估"
-        }
-        .into(),
-    }
+    let r = engine_peg_ratio(pe, g);
+    PegR { peg: r.peg, level: r.level }
 }
 
 // 凯利公式不再本地实现：统一复用 `axagent_analysis_engine::risk::kelly_criterion_with_thresholds`
 // （权威源）。
-// 历史两份实现逐字等价（守卫条件 / odds 算式 / 三处舍入口径 / signal 四档分支），
-// 故本次去重为零行为变更的纯转发。
+// 历史两份实现逐行等价（证据：同上快照第 169–203 行）：守卫条件
+// `al<=0 || aw<=0 || wr<=0`、`odds = aw/al`、`k = ((wr*(odds+1)-1)/odds).max(0.0)`、
+// 三处舍入口径 `1000/1000/10000`、signal 四档 重仓/中等/轻仓/不建议
+// ⇒ 本次去重为零行为变更的纯转发。
 
 #[derive(Serialize)]
 struct RpR {
@@ -682,6 +682,24 @@ fn detect_earnings(args: &Value) -> Result<Value, String> {
     if c.abs() < 1e-10 {
         return Ok(json!({"surprise_pct": 0.0, "level": "无预期"}));
     }
+    // 2026-09-19（A2）：估算值**不得**用作「超预期」判定的基准。
+    //   背景：`astock-data` 的 C-fallback 在 vendor 全失败时按挂牌板块给一个常数
+    //   EPS（科创/创业 0.40、北交所 0.25、其余 0.55），并标记 `is_estimated = true`。
+    //   那个数在原数据里与真实一致预期**数值上不可区分**，但拿它算
+    //   `(actual - consensus) / consensus` 得到的是一个**假基准的相对量** ——
+    //   比如常数 0.55 遇上真实 EPS 0.30，会报出「大幅低于预期」，而实际预期可能远低于 0.30。
+    //   这里返回显式不可用（`level` 说明原因），而不是给一个看起来正常的档位。
+    let eps_estimated =
+        args.get("consensus_eps_is_estimated").and_then(|v| v.as_bool()).unwrap_or(false);
+    if eps_estimated {
+        return Ok(json!({
+            "surprise_pct": null,
+            "level": "预期基准不可靠",
+            "actual_eps": a,
+            "consensus_eps": c,
+            "reason": "consensus_eps 为板块常数估算值（is_estimated=true），不得据此判定超预期/不及预期",
+        }));
+    }
     let s = (a - c) / c.abs() * 100.0;
     // 业绩超预期分级阈值（用户可在设置面板中调整）
     let th_huge = tv_f64(args, "earnings_th_huge_pos", 50.0);
@@ -1030,7 +1048,7 @@ calc_tool_r!(CalcVarTool, "calc_var", "历史模拟法 VaR 计算", |input| {
         "var_confidence",
         0.95,
     ));
-    serde_json::to_value(value_at_risk(&returns, conf)).unwrap_or_default()
+    serde_json::to_value(engine_value_at_risk(&returns, conf)).unwrap_or_default()
 });
 calc_tool_r!(CalcPEPercentileTool, "calc_pe_percentile", "PE 历史分位数", |input| {
     let cur = input.get("current_pe").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -1256,3 +1274,203 @@ api_tool!(ClsFlashTool, "get_cls_flash", "获取财联社实时快讯", |_input,
         .map(|v| ToolResult::success(serde_json::to_value(v).unwrap_or_default().to_string()))
         .map_err(|e| ToolError::execution_failed(e.to_string()))
 });
+
+// ═══════════ 单元测试 ═══════════
+//
+// 2026-09-19（A2）：`detect_earnings` 的「估算基准拒判」是阶段一 A2 的消费端落地，
+// 此前**零测试覆盖** —— 而它正是「不编数」这条纪律在本文件里的唯一执行点。
+// 内联 test mod 必须追加到文件末尾：插在中间会触发 `clippy::items_after_test_module`，
+// 而该 lint **只在 clippy 下暴露**（`cargo check` / `cargo test` 全绿也照样违规）。
+#[cfg(test)]
+mod tests {
+    use super::*;
+    // 显式导入以免依赖 glob 是否带入父模块的私有 `use`（显式 use 遮蔽 glob，不冲突）
+    use serde_json::json;
+
+    /// 估算基准必须**拒判**，而不是拿假基准算出一个像样的档位。
+    ///
+    /// 数值取自真实兜底规则：主板常数 `0.55`（`astock-data` C-fallback）遇上实际 EPS `0.30`。
+    /// 若不拒判，这里会算出约 −45.45% ⇒ 报「低于预期」，而真实一致预期可能远低于 0.30
+    /// （即实际上是「超预期」）—— 结论方向都是反的。
+    #[test]
+    fn detect_earnings_refuses_estimated_consensus() {
+        let r = detect_earnings(&json!({
+            "actual_eps": 0.30,
+            "consensus_eps": 0.55,
+            "consensus_eps_is_estimated": true,
+        }))
+        .expect("拒判是 Ok 分支，不能变成 Err");
+        assert_eq!(
+            r["surprise_pct"],
+            Value::Null,
+            "拒判时不得给出数值 —— 编一个数就等于放行假信号"
+        );
+        assert_eq!(r["level"], "预期基准不可靠");
+        // 留痕：两个入参原样带回，决策 JSON 里才能归因「为什么没有超预期结论」
+        assert_eq!(r["actual_eps"].as_f64(), Some(0.30));
+        assert_eq!(r["consensus_eps"].as_f64(), Some(0.55));
+    }
+
+    /// **同数值、只翻转标记** ⇒ 输出必须不同。
+    ///
+    /// 这是「拒判由 provenance 驱动，而非按数值猜来源」的对照锁：若日后有人把守卫改成
+    /// 「`consensus_eps` 等于 0.25/0.40/0.55 之一就拒判」的启发式，本用例会红 ——
+    /// 那属于按值域猜来源，真实预期恰好是 0.55 的股票会被误杀。
+    #[test]
+    fn detect_earnings_treats_explicit_false_as_real() {
+        let r = detect_earnings(&json!({
+            "actual_eps": 0.30,
+            "consensus_eps": 0.55,
+            "consensus_eps_is_estimated": false,
+        }))
+        .expect("正常路径应返回 Ok");
+        assert_ne!(r["level"], "预期基准不可靠");
+        let pct = r["surprise_pct"].as_f64().expect("正常路径必须给出数值");
+        assert!((pct + 45.45).abs() < 0.01, "期望约 −45.45，实得 {pct}");
+    }
+
+    /// ⚠ 本用例**故意锁住当前偏弱的行为**：标记缺失时按「真实值」处理。
+    ///
+    /// `detect_earnings_surprise` 是 `calc_tool!` 注册的通用计算工具，全仓**无** rhai /
+    /// 节点硬接线调用它 ⇒ 入参由调用方（LLM）填写，缺省即放行。也就是说 A2 在消费端
+    /// 只是一道**软防线**；产出端不再造数才是硬解。订正后的验收口径见
+    /// `AUDIT-codebase-review-roadmap-2026-09-19.md` 的 A2 段。
+    ///
+    /// 2026-09-19（待裁决 ① 已落地）：产出端已收敛 —— `astock-data` 的 C-fallback 不再
+    /// 产出板块常数估算（改 `record_degradation` + `return Ok(None)`）。⇒ 本软肋的**触发
+    /// 前提**（存在 `is_estimated = true` 的生产者）**当前已消失**：全链只剩 `false`。
+    /// 但**契约与守卫都保留** —— 未来任何新的估算来源都必须继续走
+    /// `consensus_eps_is_estimated` 自报 provenance，届时本守卫才会重新发挥作用。
+    #[test]
+    fn detect_earnings_defaults_to_trusting_when_flag_absent() {
+        let r = detect_earnings(&json!({ "actual_eps": 0.30, "consensus_eps": 0.55 }))
+            .expect("缺省标记应照常计算");
+        assert_ne!(
+            r["level"], "预期基准不可靠",
+            "缺省按真实处理 —— 这是已登记的软肋，本用例只负责把它钉住、不负责修"
+        );
+    }
+
+    /// 基准为 0 时走「无预期」的既有分支（该检查排在拒判**之前**）—— 防回归。
+    #[test]
+    fn detect_earnings_reports_no_expectation_on_zero_consensus() {
+        let r = detect_earnings(&json!({ "actual_eps": 1.0, "consensus_eps": 0.0 }))
+            .expect("应返回 Ok");
+        assert_eq!(r["level"], "无预期");
+        assert_eq!(r["surprise_pct"].as_f64(), Some(0.0));
+    }
+
+    /// 真实基准下的分级不因 A2 改动而漂移（挑一个远离阈值的点，避开 `>` 的边界歧义）。
+    #[test]
+    fn detect_earnings_keeps_grading_for_real_consensus() {
+        let r = detect_earnings(&json!({ "actual_eps": 1.6, "consensus_eps": 1.0 }))
+            .expect("正常路径应返回 Ok");
+        assert_eq!(r["level"], "大幅超预期");
+        let pct = r["surprise_pct"].as_f64().expect("应有数值");
+        assert!((pct - 60.0).abs() < 0.01, "期望约 60.0，实得 {pct}");
+    }
+
+    /// 2026-09-21 新增（A 修复，**活路径**）：`calc_pe_percentile` 收到亏损企业 PE
+    /// （负值，来自 t-risk 的 `peTTM`）时不得报「极低」分位 —— 负 cur 在历史正 PE
+    /// 序列里命中 0 条 ⇒ 旧实现 `percentile = 0` ⇒ `level = "极低"`。
+    #[test]
+    fn test_pe_percentile_negative_pe_is_meaningless() {
+        let hist = vec![10.0, 12.0, 15.0, 18.0, 20.0, 22.0, 25.0, 30.0];
+        let r = pe_percentile(-144.08, &hist);
+        assert_eq!(r.level, "无意义", "亏损 PE 不得被读成极低分位");
+        // 正控：同序列下正 PE 仍走原路径（守卫不得吃掉正常输入）
+        let ok = pe_percentile(16.0, &hist);
+        assert!(ok.percentile > 30.0 && ok.percentile < 60.0);
+        assert_ne!(ok.level, "无意义");
+    }
+
+    /// 2026-09-21 新增（A 修复，**活路径**）：`calc_peg` 收到亏损企业 PE 时不得报
+    /// 「严重低估」（旧实现 −144.08 / 25 = −5.76 落进 `peg < 0.5`）。
+    #[test]
+    fn test_peg_ratio_negative_pe_is_meaningless() {
+        let r = peg_ratio(-144.08, 25.0);
+        assert_eq!(r.level, "无意义", "亏损 PE 不得被读成严重低估");
+        assert!(r.peg.is_infinite());
+        // 正控
+        let ok = peg_ratio(20.0, 25.0);
+        assert_eq!(ok.level, "低估");
+    }
+
+    // ── 去重契约锁（2026-09-21）──────────────────────────────────────────────
+    // `pe_percentile` / `peg_ratio` 由本地副本收敛到 `axagent_analysis_engine::risk`
+    // 权威源，等价性已逐行证过（见文件上半部注释 + 快照证据）。但**将来**权威源
+    // 加字段 / 改档位时会**静默**改到 `calc_pe_percentile` / `calc_peg` 的 LLM 可见
+    // 输出 —— 类型检查抓不到。下面三个测试把「工具输出的精确 JSON 形态」钉死。
+
+    /// 键集合必须恰为 `{peg, level}`：权威源 `PEGResult` 多出的 `pe` / `growth_rate`
+    /// **不得**泄露到工具输出 —— 这正是 `PegR` 适配层存在的全部理由。
+    #[test]
+    fn test_calc_peg_output_contract_keys() {
+        let v = serde_json::to_value(peg_ratio(20.0, 25.0)).expect("序列化不应失败");
+        let obj = v.as_object().expect("应为 JSON 对象");
+        let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, vec!["level", "peg"], "calc_peg 输出键集合被改动 ⇒ LLM 可见契约变化");
+    }
+
+    /// 键集合必须恰为 `{percentile, level, median}`。该函数**无适配层**（权威源结构体
+    /// 直接序列化）⇒ 权威源一旦加字段就会直接漏进工具输出，此处是唯一拦点。
+    #[test]
+    fn test_calc_pe_percentile_output_contract_keys() {
+        let hist = [10.0, 12.0, 15.0, 18.0, 20.0, 22.0, 25.0, 30.0];
+        let v = serde_json::to_value(pe_percentile(16.0, &hist)).expect("序列化不应失败");
+        let obj = v.as_object().expect("应为 JSON 对象");
+        let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec!["level", "median", "percentile"],
+            "calc_pe_percentile 输出键集合被改动"
+        );
+    }
+
+    /// 亏损分支的 `f64::INFINITY` 经 serde_json 落为 `null`（JSON 无 Infinity）
+    /// ⇒ 工具输出是 `{"peg": null, "level": "无意义"}`。钉死形态：防将来有人把它
+    /// 改成有效数值（负 peg 会被读成「严重低估」，正是 A 缺陷的原形）。
+    #[test]
+    fn test_calc_peg_negative_pe_serializes_infinity_as_null() {
+        let v = serde_json::to_value(peg_ratio(-144.08, 25.0)).expect("序列化不应失败");
+        assert!(v["peg"].is_null(), "Infinity 必须以 null 落地，实得 {:?}", v["peg"]);
+        assert_eq!(v["level"], "无意义");
+    }
+
+    /// 键集合必须恰为 `{var_pct, confidence, cvar_pct}`。该函数**无适配层**
+    /// （权威源 `VarResult` 直接序列化）⇒ 权威源一旦加字段就会直接漏进 `calc_var`
+    /// 的 LLM 可见输出，此处是唯一拦点。
+    #[test]
+    fn test_calc_var_output_contract_keys() {
+        let rets = [-0.05, -0.03, -0.02, -0.01, -0.01, 0.01, 0.01, 0.02, 0.02, 0.03];
+        let v = serde_json::to_value(engine_value_at_risk(&rets, 0.9)).expect("序列化不应失败");
+        let obj = v.as_object().expect("应为 JSON 对象");
+        let mut keys: Vec<&str> = obj.keys().map(|k| k.as_str()).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec!["confidence", "cvar_pct", "var_pct"],
+            "calc_var 输出键集合被改动 ⇒ LLM 可见契约变化"
+        );
+    }
+
+    /// 口径锁（工具侧视角）：转发之后 `calc_var` 输出的必须是**生产原有口径**
+    /// （`idx = floor((1-c) * n)` 直接取值），而不是引擎旧口径
+    /// （`floor((1-c) * (n+1))` 再 `-1`，净取前一位）。
+    ///
+    /// 参数刻意取 `c = 0.875`（`1-c = 0.125` 是**二进制精确值**）：整十置信度 × n=10
+    /// 那类组合下两口径输出相同、没有区分力（见 `risk.rs` doc 的「浮点 floor 边界」）。
+    /// 本条与 `risk.rs::tests::test_var` 构成双保险 —— 谁改回旧口径，两侧同时红。
+    #[test]
+    fn test_calc_var_keeps_production_percentile_convention() {
+        let rets = [-0.50, -0.40, -0.30, -0.20, -0.10, 0.00, 0.10, 0.20, 0.30, 0.40];
+        let r = engine_value_at_risk(&rets, 0.875);
+        assert!(
+            (r.var_pct - 0.40).abs() < 1e-9,
+            "c=0.875 ⇒ idx=1 ⇒ 0.40；旧混合口径为 0.50（取最小值）"
+        );
+        assert!((r.cvar_pct - 0.45).abs() < 1e-9, "尾均值应与 var 用同一个 idx");
+    }
+}

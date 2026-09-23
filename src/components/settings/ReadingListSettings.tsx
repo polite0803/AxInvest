@@ -4,6 +4,7 @@
 // 对接 useReadingListStore，提供列表管理与条目管理（CRUD + 状态切换 + 重排）
 
 import { List } from "@/components/common/AntdList";
+import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { useReadingListStore } from "@/stores";
 import type { ReadingList, ReadingListItem } from "@/types";
@@ -361,7 +362,7 @@ export function ReadingListSettings() {
             await deleteList(list.id);
             message.success(t("common.success"));
           } catch (e) {
-            message.error(String(e));
+            showBackendError(message, e);
           }
         },
       });
@@ -385,7 +386,7 @@ export function ReadingListSettings() {
         }
         message.success(t("common.success"));
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [editingList, createList, updateList, t],
@@ -407,7 +408,7 @@ export function ReadingListSettings() {
         await deleteItem(id);
         message.success(t("common.success"));
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [deleteItem, t],
@@ -448,7 +449,7 @@ export function ReadingListSettings() {
         }
         message.success(t("common.success"));
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [selectedListId, editingItem, createItem, updateItem, t],
@@ -459,7 +460,7 @@ export function ReadingListSettings() {
       try {
         await setItemStatus(id, status);
       } catch (e) {
-        message.error(String(e));
+        showBackendError(message, e);
       }
     },
     [setItemStatus, t],

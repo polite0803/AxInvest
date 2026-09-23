@@ -435,7 +435,8 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "type": "object",
                 "properties": {
                     "stock_code": { "type": "string", "description": "6位股票代码" },
-                    "kline_json": { "type": "string", "description": "上游K线节点输出的JSON" }
+                    "kline_json": { "type": "string", "description": "上游K线节点输出的JSON" },
+                    "period": { "type": "string", "description": "K线周期：daily/weekly/monthly，决定技术指标与评分所在周期（PROPOSAL 阶段2 四周期独立决策）", "default": "daily" }
                 },
                 "required": ["stock_code"]
             }
@@ -499,6 +500,18 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "properties": {
                     "stock_code": { "type": "string", "description": "6位股票代码" },
                     "financials_json": { "type": "string", "description": "上游财务节点输出的JSON" }
+                },
+                "required": ["stock_code"]
+            }
+        }),
+        json!({
+            "name": "compute_valuation_band",
+            "description": "估值分位带：按东财历史估值日序列算 PE/PB/PS 的 5/10/25/50/75/90/95 分位与当前分位，返回 verdict 与 metricPe.currentPercentile。工作流用它当 DCF 之外的**独立估值锚腿**（历史分位高 ⇒ 折价、低 ⇒ 溢价）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "stock_code": { "type": "string", "description": "6位股票代码" },
+                    "years": { "type": "number", "description": "回溯窗口(年)，默认 5" }
                 },
                 "required": ["stock_code"]
             }
@@ -1205,12 +1218,20 @@ pub async fn execute_mcp_tool(
             if code.is_empty() {
                 return Err("compute_scoring 缺少 stock_code 参数".to_string());
             }
-            // 允许调用方传入 kline_json（避免重复拉取）；若未提供则现场拉取 120 日 K 线
+            // 允许调用方传入 kline_json（避免重复拉取）；若未提供则现场拉取 K 线。
+            // PROPOSAL 阶段 2（四周期独立决策）：`period` 决定技术指标与评分所在周期
+            //（daily/weekly/monthly）。缺省 daily —— 与历史行为一致，无参路径零回归。
+            let period = arguments["period"].as_str().unwrap_or("daily");
+            let period = if period == "weekly" || period == "monthly" {
+                period
+            } else {
+                "daily"
+            };
             let klines = if let Some(kj) = arguments["kline_json"].as_str() {
                 serde_json::from_str::<Vec<crate::types::KLine>>(kj)
                     .map_err(|e| format!("kline_json 解析失败: {e}"))?
             } else {
-                client.get_klines(code, "daily", 120).await.map_err(|e| e.to_string())?
+                client.get_klines(code, period, 120).await.map_err(|e| e.to_string())?
             };
             let ind = crate::indicators::compute_indicators(code, &klines);
             let latest_price = klines.last().map(|k| k.close).unwrap_or(0.0);
@@ -1241,13 +1262,22 @@ pub async fn execute_mcp_tool(
                 "supportScore": score_json["supportScore"],
                 "bollScore": score_json["bollScore"],
                 "fundamentalAdjustment": score_json["fundamentalAdjustment"],
+                // 2026-09-21 拆字段：原 `fundamentalAdjustment` **一名双源**
+                // （基本面 PE/PB/ROE 与行业相对偏离都往它累加）⇒ 字段名给了 LLM 一个
+                // 错的归因。现补两个键：行业分量 + 合计，满足恒等式
+                // `totalAdjustment == fundamentalAdjustment + industryAdjustment`。
+                // ⚠ `fundamentalAdjustment` 的**语义已修正**（由「合计」变为「仅基本面」）；
+                //   要旧口径读 `totalAdjustment`。`total` 字段数值不受影响。
+                "industryAdjustment": score_json["industryAdjustment"],
+                "totalAdjustment": score_json["totalAdjustment"],
                 "signal": score_json["signal"],
                 "signalCode": score_json["signalCode"],
                 // ── #7 新增: 别名 + 原始指标 + 占位字段 ──
                 "totalScore": score_json["total"], // 别名,供 input_mapping 引用
                 "currentPrice": latest_price,       // 最新收盘价
+                "period": period,                   // 本次评分所在周期（daily/weekly/monthly），供多周期决策区分档位
                 "indicators": ind_json,             // 完整技术指标(ma5/ma20/bias_ma5/macd_dif/rsi14/boll_upper 等)
-                // kline_json: 120 根日 K 线原始数据，供 trader 节点的 ATR/Kelly/MC 工具使用
+                // kline_json: K 线原始数据（数量=limit），供 trader 节点的 ATR/Kelly/MC 工具使用
                 "kline_json": kline_json,
                 // factor_backtest 占位: 因子回测引擎未实现,下游 portfolio-mgr.rhai
                 // 会 fallback 到等权,不会因 null 报错。
@@ -1327,8 +1357,13 @@ pub async fn execute_mcp_tool(
 
             // ── 格雷厄姆内在价值（先计算，作为 DCF fallback） ──
             // V74: EPS≤0 时同样走归一化 EPS fallback，均不可用才返回 None
-            let graham_value =
-                compute_graham_value(&financials, current_price, valuation_config.as_ref());
+            // 2026-09-21: 返回值追加「实际生效假设」，供下游判断该腿是否可信
+            //   （`growth_clamped_upper` ⇒ 增长率顶死上界 ⇒ 内在价值系统性偏低）。
+            let (graham_value, graham_assumptions) =
+                match compute_graham_value(&financials, current_price, valuation_config.as_ref()) {
+                    Some((v, a)) => (Some(v), Some(a)),
+                    None => (None, None),
+                };
 
             // ── 估值输出量程守卫（下界 P0 修复 2026-09-11 晚；上界补齐 2026-09-12）──
             // 原判据有两处都无防护力：
@@ -1377,6 +1412,13 @@ pub async fn execute_mcp_tool(
             let graham_usable =
                 current_price > 0.0 && graham_value.is_some_and(|g| g > iv_floor && g < iv_ceil);
             let graham_value = if graham_usable { graham_value } else { None };
+            // 假设快照与可用性同生命周期：量程判定不可用时一并置 null，
+            // 避免下游拿到「其实没生效」的假设（`assumptions != null ⟺ 该腿可用`）。
+            let graham_assumptions = if graham_usable {
+                graham_assumptions
+            } else {
+                None
+            };
 
             // ── 安全边际：优先使用 DCF，不可用时 fallback 到格雷厄姆，均不可用为 None ──
             // P0 修复(2026-09-11): 原实现未对分母（内在价值）做零值防护。当
@@ -1443,28 +1485,7 @@ pub async fn execute_mcp_tool(
             let value_signal: String = if valuation_unavailable {
                 "无法估值".to_string()
             } else {
-                let mut score = 0u32;
-                match mos_pct {
-                    Some(p) if p > 20.0 => score += 30,
-                    Some(p) if p > 10.0 => score += 20,
-                    Some(p) if p > 0.0 => score += 10,
-                    _ => {},
-                }
-                score += f_score.min(9) * 5;
-                score += moat_score.min(100) / 5;
-                if oe_yield > 5.0 {
-                    score += 20;
-                } else if oe_yield > 3.0 {
-                    score += 10;
-                }
-                match score {
-                    60.. => "低估",
-                    45.. => "合理偏低",
-                    30.. => "合理",
-                    15.. => "偏高",
-                    _ => "高估",
-                }
-                .to_string()
+                value_signal_of(mos_pct, f_score, moat_score, oe_yield).to_string()
             };
 
             // V74: 估值不可用时输出 null 而非 0。
@@ -1545,16 +1566,74 @@ pub async fn execute_mcp_tool(
                     // 与 `dcf_valuation.assumptions` 同源同值（同一份快照）——
                     // 两处都放是为了让 `input_mapping` 任一引用路径都能取到。
                     "assumptions": dcf_assumptions,
-                    "upsidePct": match dcf_mid {
-                        Some(mid) if current_price > 0.0 => json!(round1((mid - current_price) / current_price * 100.0)),
-                        _ => serde_json::Value::Null,
+                // ── 2026-09-23：`upsidePct` 基准由**中性档 `mid`** 改为**保守档 `low`** ──
+                //
+                // 病根（用户实证 300642 透景生命）：三段 DCF 自报估值域
+                //   `low/mid/high = 24.76 / 40.53 / 71.89`（现价 21.02）—— **宽 2.90 倍**。
+                //   该宽度来自**人为乘子**（预测期 `g × 0.6 / × 1.5`、永续 `p × 0.7 / × 1.3`）
+                //   经终值项 `1/(d − p)` 放大 —— 300642 终值占 **84.4%**，即估值几乎全由
+                //   「永续增长率」这一个不可验证的假设决定。
+                //   而决策链**只取 `mid`** 算 `upsidePct = +92.8%`，等于把「三个任意假设中
+                //   的中间那个」当成点估计 ⇒ **模型自报的 ±2.9 倍不确定度对决策完全透明**。
+                //   同一份 payload 里的 `low`（24.76，仅比现价高 17.8%）与 `high`（71.89）
+                //   此前**从未参与任何因子计算**。
+                //
+                // 为什么改**基准**而不是加「宽度衰减系数」：
+                //   加系数需要引入一个**新的标定常数**（「宽度 → 折扣率」的映射），而该映射
+                //   本身没有客观依据 —— 那与本次要修的病**同源**（用任意乘子表达不确定性）。
+                //   改基准则**不引入任何新常数**：它只是把已有的 `low` 从「展示用」提升为
+                //   「决策用」，且语义正确 —— **安全边际必须在最保守假设下成立**，
+                //   而不是在中性假设下成立。`low` 正是本模型自报的保守锚。
+                //
+                // ⚠️ 兼容性：`dcf_low/mid/high` 由同一个 `dcf_usable` 分支产出（见上方遮蔽），
+                //   **三者同生同灭** ⇒ 换基准不会产生「`low` 缺失而 `mid` 存在」的新形态。
+                // ⚠️ 本键**语义随之收紧**：由「中性档上行空间」变为「**保守档**上行空间」。
+                //   需要中性档口径的消费方（LLM 点估计）请读新增的 `midUpsidePct`
+                //   —— 信息未丢失，只是不再冒充决策输入。
+                "upsidePct": match dcf_low {
+                    Some(low) if current_price > 0.0 => {
+                        json!(round1((low - current_price) / current_price * 100.0))
                     },
+                    _ => serde_json::Value::Null,
+                },
+                // 中性档上行空间（2026-09-23 新增）：**仅供展示 / LLM 点估计参考**，
+                //   **不参与** f5 因子 —— 它正是 `upsidePct` 改动前的旧口径，保留以避免信息丢失
+                //   （也便于审计「改基准前后差多少」）。
+                "midUpsidePct": match dcf_mid {
+                    Some(mid) if current_price > 0.0 => {
+                        json!(round1((mid - current_price) / current_price * 100.0))
+                    },
+                    _ => serde_json::Value::Null,
+                },
                 },
                 "graham": {
                     "intrinsicValue": num_or_null(graham_value, round2),
                     "upsidePct": match graham_value {
                         Some(g) if current_price > 0.0 => json!(round1((g - current_price) / current_price * 100.0)),
                         _ => serde_json::Value::Null,
+                    },
+                    // 2026-09-21：实际生效假设快照（与 `dcf.assumptions` 同源动机）。
+                    // ⚠️ 消费者**不要**按这里的文案/数值自行重算结论——
+                    //   `growthClampedUpper` 是给下游做「该腿降信」的布尔信号，
+                    //   不是让 Rhai 重新推导估值。
+                    "assumptions": match graham_assumptions {
+                        Some(a) => json!({
+                            "growth": a.growth,
+                            "growthClampedUpper": a.growth_clamped_upper,
+                            "growthClampedLower": a.growth_clamped_lower,
+                            "growthFromDefault": a.growth_from_default,
+                            // 百分数（公式 `4.4 / bondYield` 的修正项分母）
+                            "bondYield": a.bond_yield,
+                            // ⚠️ 口径提醒：上面的 `growth` 是**小数**（0.12），而本公式的
+                            //   `g` 与 `bondYield` 都是**百分数** —— 自证/复算时必须换算
+                            //   （乘数 = `8.5 + 2×12 = 32.5`，**不是** `8.5 + 2×0.12`）。
+                            //   2026-09-22 量纲修复前生产端就栽在这个混淆上。
+                            //   为免下游再算错，直接给出 `multiplier`：
+                            //   消费端（含 LLM）**不要**自己从 `growth` 推乘数。
+                            "formula": "EPS × (8.5 + 2×g%) × 4.4 / bondYield，其中 g% = growth × 100",
+                            "multiplier": round1(8.5 + 2.0 * a.growth * 100.0),
+                        }),
+                        None => serde_json::Value::Null,
                     },
                 },
                 "fScore": {
@@ -1566,6 +1645,48 @@ pub async fn execute_mcp_tool(
                 "summary": summary,
             });
             serde_json::to_string(&result).map_err(|e| e.to_string())
+        },
+        // ── 估值分位带（R3-C）──
+        //
+        // ⚠ **同名不同层**（读到此名的人最容易踩的坑）：
+        //   · `commands::stock_analysis::compute_valuation_band` —— **Tauri 命令**，
+        //     走 `State<AppState>`，读本机 `financial_snapshots` 表（样本不足/陈旧时**先回填**），
+        //     前端 `ValuationBandChart` 与设置面板走它；**它不能被工作流节点调用**
+        //     （`#[agent_command]` 只登记元数据，不存在「命令 → 工具」的桥）。
+        //   · 本分支 —— **MCP 工具**，走 `ToolRegistry`，在线取数（`get_valuation_history`，
+        //     自带 12h 缓存）且**不落库**，工作流 `tool_node("t-valuation-band")` 走它。
+        //
+        // 两条路径的**窗口口径**刻意共享（`since_date_from_years` + `clip_valuation_history`），
+        // 且底层是同一次 `AStockClient::get_valuation_history`（同一份缓存）⇒ 同一交易日下
+        // 两者的分位一致；差异只在「是否把序列落库」。
+        // 背景：V79 首次实现时该节点直接写了 `compute_valuation_band` 当工具名，
+        // 但工具表里没有它 ⇒ `ToolResolver` 返 `None` ⇒ `core.rs` 的 Failed 分支
+        // `emit degraded: true` **静默吞掉**（节点 completed、输出为空、无报错）
+        // ⇒ `valuation_pe_percentile` 恒空 ⇒ band 腿成了**永久空壳**。
+        "compute_valuation_band" => {
+            let code = parse_code(arguments);
+            let code = code.as_str();
+            if code.is_empty() {
+                return Err("compute_valuation_band 缺少 stock_code 参数".to_string());
+            }
+            // 与 `parse_code` 同款容错：LLM/模板可能把 years 传成字符串
+            let years = match &arguments["years"] {
+                serde_json::Value::Number(n) => n.as_u64().map(|v| v as u32),
+                serde_json::Value::String(s) => s.trim().parse::<u32>().ok(),
+                _ => None,
+            }
+            .unwrap_or(5);
+            let snaps =
+                client.get_valuation_history(code, years).await.map_err(|e| e.to_string())?;
+            // ⚠ 必须裁剪：`get_valuation_history(years)` 会多取约 2 页（≈2 年），
+            //   不裁的话窗口比声明值宽近一倍 ⇒ 分位与命令层不一致。
+            let since_date = crate::valuation_band::since_date_from_years(years);
+            // `clip_valuation_history` 会把结果**归一到升序**（vendor 原始顺序是降序，
+            // 命令层读表是升序）—— 所以下面 `snaps.last()` 才是"窗口内最新一条"。
+            // ⚠ 不要在这条链上换掉裁剪函数或自己 filter，否则 `current` 会取到**最旧**那天。
+            let snaps = crate::valuation_band::clip_valuation_history(snaps, &since_date);
+            let band = crate::valuation_band::compute_valuation_band(code, &snaps, snaps.last());
+            serde_json::to_string(&band).map_err(|e| e.to_string())
         },
         "compute_portfolio_risk" => {
             // 修复(2026-07-21):
@@ -1942,13 +2063,19 @@ fn compute_moat_score(
     }
 
     // 5. 估值合理性 (15分)
+    // 2026-09-21 修复：原实现只在**首档**写 `pe_val > 0.0`，后两档裸比 `< 25.0` /
+    //   `< 50.0` —— 负 PE（亏损企业）会命中第二档白拿 +10 分「估值合理性」。
+    //   该缺陷此前被 vendor 的 `filter(|v| *v > 0.0)` 掩盖（pe 恒为 None ⇒ 整块不进），
+    //   放开负 PE 后必须显式守卫，否则「亏损」反而成为估值加分项。
     if let Some(pe_val) = pe {
-        if pe_val < 15.0 && pe_val > 0.0 {
-            score += 15;
-        } else if pe_val < 25.0 {
-            score += 10;
-        } else if pe_val < 50.0 {
-            score += 5;
+        if pe_val > 0.0 {
+            if pe_val < 15.0 {
+                score += 15;
+            } else if pe_val < 25.0 {
+                score += 10;
+            } else if pe_val < 50.0 {
+                score += 5;
+            }
         }
     }
 
@@ -1964,11 +2091,56 @@ fn compute_moat_score(
 
 /// DCF 两阶段估值（保守/中性/乐观三档）
 ///
-/// 估值参数说明（2026-09-12 与 `analysis-engine::decision::ValueConfig` 的 A 股校准值对齐）：
-/// - 永续增长率 `PERPETUAL_GROWTH = 4%`：接近长期名义 GDP 增速（原 3% 偏低）
-/// - 折现率 `DISCOUNT_RATE = 8.5%`：无风险利率 2.5% + 6% 风险溢价（原 10% 偏高）
-/// - 默认增长率 `DEFAULT_GROWTH = 12%`：优秀公司平均增速（原 8% 偏保守，系统性低估成长股）
-/// - 增长率区间 `[MIN_GROWTH, MAX_GROWTH] = [-30%, 30%]`：限制异常值
+/// 估值参数说明。
+///
+/// ## 取值依据（2026-09-23 补 —— 此前本节只论证「四处同步」，**不论证「为什么是这个数」**）
+///
+/// 折现率拆成两个**具名**分量，并由**编译期断言**把三者锁成等式关系
+/// （`DISCOUNT_RATE == RISK_FREE_RATE + EQUITY_RISK_PREMIUM`，见下方断言）：
+///
+/// | 常量 | 值 | 依据 |
+/// |---|---|---|
+/// | `RISK_FREE_RATE` | 2.5% | A 股 10 年期国债收益率中枢，即本模型的**无风险基准** |
+/// | `EQUITY_RISK_PREMIUM` | 6.0% | A 股股权风险溢价常用区间 5%–6%，取**上沿**（偏保守一侧） |
+/// | `DISCOUNT_RATE` | **8.5%** | = 上方两者之和（**编译期断言锁死**，非独立取值） |
+/// | `PERPETUAL_GROWTH` | 2.0% | ≈ 长期通胀中枢（低于 PBoC 目标上沿 3%） |
+/// | `DEFAULT_GROWTH` | 12% | 营收增速缺失时的兜底；A 股优质公司中期增速的中位量级 |
+/// | `MIN_GROWTH`/`MAX_GROWTH` | −30% / +30% | 只作**异常值围栏**，不是预测 |
+///
+/// ## ⚠️ 永续增长率的硬约束 `p ≤ RISK_FREE_RATE`（2026-09-23 订正）
+///
+/// 原值 `PERPETUAL_GROWTH = 4%` **违反本模型自身申报的无风险利率 2.5%**：它隐含
+/// 「该企业永续增速高于无风险利率」⇒ 高于经济体长期名义增速 ⇒ 等价于假设该企业
+/// 在**整个永续期内不断吞掉经济体份额**（终值 → ∞）。
+/// Damodaran 的终值约束即 `g_terminal ≤ risk-free rate`。
+///
+/// 定量后果（300642，现价 21.02）：`p = 4%` → `mid = 40.53`（`upsidePct = +92.8%`）；
+/// `p = 2%` → `mid ≈ 31.4`（**−22.6%**）。即修正前「低估 92.8%」这一结论里，
+/// 约 **22 个百分点**纯粹来自一个无依据、且与自身前提冲突的参数取值。
+///
+/// ## 反解验证（2026-09-23）
+///
+/// 由 `high/mid` 与 `low/mid` 两个比值联立，反解出 300642 的 `growth = 17.78%`、
+/// 隐含 `FCF/股 = 0.9819` 元；代入本节公式复算得 `24.76 / 40.53 / 71.89`，
+/// 与面板显示**逐位吻合**（`low/mid` 偏差 0.01%）⇒ 本节公式就是生产公式，
+/// 下文各处的敏感度数字是复算真值，不是估算。
+///
+/// ## ⚠️ 本节常量是**估值缺省参数的唯一真相源**（`pub const`，2026-09-22）
+///
+/// 这些值此前在多处被**手抄**，且互不一致 —— 校准（2026-09-12：折现率 10→8.5、
+/// 永续 3→4、默认增长 8→12、下界 +2→−30）只落到其中一部分，另一些停在旧值上，
+/// 造成「同一个参数在不同链上取不同值」：
+///
+/// | 消费端 | 位置 | 机制 |
+/// |---|---|---|
+/// | 模块兜底（本文件） | `ValuationConfig::{perpetual_growth,discount_rate,…}` | `unwrap_or(<本常量>)` |
+/// | 设置页估值参数（主 crate） | `commands/stock_analysis.rs::ValuationParams::default()` | **派生自本常量**（勿再手抄） |
+/// | 模板变量默认值 | `stock_analysis_setup/seed_variables.rs::DEFAULT_DCF_*_PCT` | **派生自本常量 ×100** |
+/// | 决策层估值配置 | `analysis-engine::decision::ValueConfig::{default_dcf_*,Default}` | **派生自本常量 ×100**（2026-09-23 收敛，此前是**第五份手抄**） |
+/// | 前端兜底 | `components/settings/StockAnalysisConfigPanel.tsx::DEFAULT_VALUATION_PARAMS` | 前端无法引用 Rust ⇒ 手抄，由等式门禁守卫 |
+///
+/// **改动纪律**：改本常量即改「全部标的的估值口径」，必须同步核验上表四处。
+/// 主 crate 侧有 `valuation_defaults_are_single_sourced` 等式测试兜住前两处。
 ///
 /// **下界由 `+2%` 改为 `-30%`（2026-09-12，PLAN P0-F 方案 A）**。原值 `+0.02` 是**正数**，
 /// 而 `growth = revenue_yoy.clamp(min_growth, max_growth)` ⇒ **营收负增长的标的被抬成
@@ -1976,11 +2148,99 @@ fn compute_moat_score(
 /// 被抬到 `+2%`，`dcf.mid` 因之偏高约 42%（修复后 5.15 → 3.61）。
 /// 同源的 `compute_graham_value` 已于 P1-A 把下界由 `0.0` 改为 `-0.30`（其注释明写
 /// 「把负增长抹平为 0……反而**高估**其内在价值」）—— 本次是补齐 DCF 侧的**漏修**。
-const PERPETUAL_GROWTH: f64 = 0.04;
-const DISCOUNT_RATE: f64 = 0.085;
-const DEFAULT_GROWTH: f64 = 0.12;
-const MIN_GROWTH: f64 = -0.30;
-const MAX_GROWTH: f64 = 0.30;
+/// 无风险利率（小数口径）。
+///
+/// ## 取值与来源（2026-09-23 订正 —— 旧值取错了利率品种）
+///
+/// | 项 | 值 | 来源 |
+/// |---|---|---|
+/// | **本文取值** | **1.7%** | 中债 **10 年期**国债到期收益率，2026-09-22 实测 **1.675%**（chinabond 日评 / 新华财经 / 东财多源一致），取整 1.7% |
+/// | 旧值（错） | 2.5% | 实为 **1 年期 MLF 政策利率 2.50%**（8/25 操作） |
+///
+/// **为什么旧值是错的（可判定，非观点）**：DCF 的无风险利率必须与**被折现现金流的久期**
+/// 匹配。本模型 = 预测期 5 年 + 永续终值 ⇒ 现金流久期在 **10 年以上** ⇒ 对应 **10 年期国债**。
+/// 而 2.5% 是 **MLF（1 年期政策利率）** —— 政策利率是央行主动操作的利率，不是市场无风险
+/// 利率。两者当期相差 **82.5bp**（2.50% vs 1.675%），是数量级错误而非精度问题。
+///
+/// ⚠️ **旧注释声称的口径与取值不符**：上一行原写「A 股 10 年期国债收益率中枢」，而取的是
+/// MLF —— 这正是「依据不可判定」的形态（`MEMORY-RULES.md` #687）：读的人会以为 10Y 就是
+/// 2.5%，无从反驳。
+///
+/// ⚠️ **本值时变**，不得沿用不核对：每次修订须重新核对中债 10Y
+/// （`yield.chinabond.com.cn`，或中债日评），并在上表标注**核对日期**。
+/// 下一行的编译期断言会强制它与 `EQUITY_RISK_PREMIUM` / `DISCOUNT_RATE` 三者一致。
+pub const RISK_FREE_RATE: f64 = 0.017;
+/// 股权风险溢价（小数口径）—— A 股常用区间 5%–6%，取上沿即偏保守一侧。
+pub const EQUITY_RISK_PREMIUM: f64 = 0.06;
+/// 永续增长率 —— **由本模型自身的两条硬约束反推**，不是独立取的「通胀中枢」估计。
+///
+/// 两条约束（都是可判定的，不是偏好）：
+/// 1. `p ≤ RISK_FREE_RATE`（Damodaran 稳定期约束 `g_terminal ≤ r_f`）—— 一个经济体的
+///    永续增速不可能高于其无风险利率；
+/// 2. `p × HIGH_PERPETUAL_SCALE_POS ≤ RISK_FREE_RATE` —— 乐观档取 `p × 1.3`，若该值越过
+///    `MAX_PERPETUAL_GROWTH`（= `r_f`），乐观档的永续增长率会被**静默砍回**，而面板文案
+///    仍声称「×1.3」⇒ **口径与实算不符**。
+///
+///   ⚠️ 该缺陷 2026-09-23 **先被在增长率维度修掉、又在永续维度复活**：
+///   增长率维度当时是 `high_growth` 上界取 `MAX_GROWTH` 而非 `MAX_GROWTH × 1.5` ⇒
+///   `g = 30%` 时实际乘子 1.0 而文案写 ×1.5（已改为 `max_growth × 1.5`）；
+///   本轮把 `p` 取 `1.5%` 且 `MAX_PERPETUAL_GROWTH` 锚到 `r_f = 1.7%` 后，
+///   `1.5% × 1.3 = 1.95% > 1.7%` ⇒ 同型缺陷**在另一维复发**（实际乘子 1.133）。
+///
+/// 取上界：由约束 2 解出 `p ≤ r_f / 1.3 = 1.3077%` ⇒ 取 **0.1pp 整 = `1.3%`**
+/// （`1.3% × 1.3 = 1.69% ≤ 1.7%` ✅ 不再被砍）。下一行的编译期断言锁死该不变量
+/// ⇒ `r_f` 或乘子任一变动都会**在编译期报错**，强制重新反推 `p`，不会静默失效。
+///
+/// ⚠️ **本值随 `RISK_FREE_RATE` 联动，禁止独立调整**（`r_f` 是时变的，见上一节）。
+///
+/// ## 弹性口径订正（2026-09-23，**推翻本文件上一版的两处数字**）
+///
+/// 上一版此处写「`E_d = −1.96`、`E_p = 0.78`」并据此论证「`p` 降 0.5pp ⇒ 估值 ↓」。
+/// 那两个数是在**旧的 `p = 4%`** 上测的，且 `E_p` **不是常数**：
+/// 由 `TV = FCF₅(1+p)/(d−p)` 可解析得 `E_p ∝ p / (d−p)²` —— `p` 越小、`d−p` 越大，
+/// `E_p` 塌得越快。实测（300642，`g = 17.78%`；复算脚本 `output/sci21-structural-at-final-params.mjs`）：
+///
+/// | `p` / `d` | `E_g` | `E_p` | `E_d` | 排序 |
+/// |---|---|---|---|---|
+/// | 4.0% / 8.5%（最早） | 0.711 | 0.783 | −1.963 | `d > p > g` |
+/// | 2.0% / 8.5% | 0.695 | **0.257** | −1.389 | `d > g > p` |
+/// | 1.5% / 7.7% | 0.698 | **0.204** | −1.318 | `d > g > p` |
+/// | **1.3% / 7.7%（终态）** | 0.697 | **0.171** | −1.280 | `d > g > p` |
+///
+/// ⇒ **唯一稳健的排序结论是「折现率的弹性始终最大」**（`|E_d|/|E_g|` 从 2.76 降到 1.84，
+/// 即约 **1.8–2.0 倍**，始终为最大值）；「`p` 的弹性排第二」会随 `p` 取值翻转
+/// （`p` 从 4% 降到 2% 时 `E_p` 由 0.783 **塌到 0.257**），**不得作为依据引用**。
+/// 另需区分**弹性**（局部）与**水平效应**（`p` 在终值分母里，4%→1.3% 使 `mid` 降约 24%）——
+/// 弹性小 ≠ 影响小，两者不可互推。
+pub const PERPETUAL_GROWTH: f64 = 0.013;
+/// 折现率 = 无风险利率 + 股权风险溢价 = **7.7%**（= 1.7% + 6.0%）。
+///
+/// ⚠️ 刻意写成**字面量 + 编译期等式断言**（下一行），而不是 `RISK_FREE_RATE +
+/// EQUITY_RISK_PREMIUM` 表达式：IEEE754 下浮点求和与字面量可能差一个 ULP
+/// （上一版 `0.025 + 0.06 = 0.08499999999999999` ≠ `0.085`）⇒ 会让所有按字面量比对的
+/// 等式门禁（`check-valuation-defaults-parity.mjs` 用 `===`）与已落库快照出现无意义偏差，
+/// 而精度上毫无收益。断言在**编译期**锁死等式关系 ⇒ 两个分量与总和三者**无法各自漂移**，
+/// 这比写成表达式或加运行时测试都更强。
+/// 注：当前取值下 `0.017 + 0.06` 恰等于 `0.077`（差 0），断言仍保留作为防漂移闸。
+pub const DISCOUNT_RATE: f64 = 0.077;
+/// 编译期锁：`DISCOUNT_RATE` 必须恰为两分量之和（1e-12 容差吸收浮点求和误差）。
+/// 手写绝对值而非 `f64::abs()` —— 避免依赖 const-float-method 的稳定版本。
+const _: () = assert!(
+    {
+        let diff = DISCOUNT_RATE - (RISK_FREE_RATE + EQUITY_RISK_PREMIUM);
+        let abs = if diff < 0.0 { -diff } else { diff };
+        abs < 1e-12
+    },
+    "DISCOUNT_RATE 必须 = RISK_FREE_RATE + EQUITY_RISK_PREMIUM（拆分后三者不得各自漂移）"
+);
+pub const DEFAULT_GROWTH: f64 = 0.12;
+pub const MIN_GROWTH: f64 = -0.30;
+pub const MAX_GROWTH: f64 = 0.30;
+/// 格雷厄姆公式中 AAA 企业债收益率的缺省基准（**百分数**口径，公式 `4.4 / bond_yield` 的分母）。
+///
+/// 与上面 5 个小数量纲的常量不同源，故单独列出；此前该值在 [`ValuationConfig::bond_yield`]
+/// 里以裸字面量 `4.4` 出现，主 crate 的 `ValuationParams::default()` 又手抄一份。
+pub const DEFAULT_BOND_YIELD: f64 = 4.4;
 
 /// 三档对**预测期增长率**的方向缩放因子（2026-09-12 新增）。
 ///
@@ -2000,22 +2260,117 @@ const LOW_GROWTH_SCALE_NEG: f64 = 1.4;
 const HIGH_GROWTH_SCALE_POS: f64 = 1.5;
 const HIGH_GROWTH_SCALE_NEG: f64 = 0.6;
 
+/// 三档对**永续增长率**的方向缩放因子（2026-09-23 提为具名常量）。
+///
+/// 原文以裸字面量 `0.7` / `1.3` 内联在 `low_perpetual` / `high_perpetual` 两行里。
+/// 提名的唯一理由是**让不变量可断言** —— 见下方 `const _` 断言：
+/// `PERPETUAL_GROWTH × HIGH_PERPETUAL_SCALE_POS ≤ RISK_FREE_RATE`。
+/// 裸字面量时这条不变量既无法表达、也无法在编译期锁住，直接导致乐观档被静默封顶
+/// （详细复盘见 [`PERPETUAL_GROWTH`] 的文档）。
+const LOW_PERPETUAL_SCALE_POS: f64 = 0.7;
+const HIGH_PERPETUAL_SCALE_POS: f64 = 1.3;
+
+/// 编译期锁：乐观档永续增长率**不得被 `MAX_PERPETUAL_GROWTH` 砍掉**。
+///
+/// 判据：`p × 1.3 ≤ MAX_PERPETUAL_GROWTH`。若违反，`high_perpetual` 会被 `.min()` 截断，
+/// 而面板文案仍声称「永续增长率 ×1.3」⇒ **口径与实算不符**（同族缺陷在增长率维度的复盘见
+/// `max_growth_high` 处注释）。
+///
+/// ⚠️ 为什么必须落在这里：`.min()` 是**静默**的，改动 `RISK_FREE_RATE` 或乘子都不会报错，
+/// 只会让乐观档悄悄变窄 —— 这正是本项目「修了几次都没用」的高发形态
+/// （`MEMORY-RULES.md` #687：依据必须可判定且配闸）。放在编译期 ⇒ 任何一侧漂移即编译失败。
+const _: () = assert!(
+    {
+        let hs = PERPETUAL_GROWTH * HIGH_PERPETUAL_SCALE_POS;
+        let ls = PERPETUAL_GROWTH * LOW_PERPETUAL_SCALE_POS;
+        let room = MAX_PERPETUAL_GROWTH - hs;
+        // 同时要求乐观档严格大于基准档（否则该档与基准重合，三档退化成两档）
+        (hs <= MAX_PERPETUAL_GROWTH) && (ls < PERPETUAL_GROWTH) && (room >= 0.0)
+    },
+    "永续增长率不变量被破坏：须同时满足 `p × HIGH_PERPETUAL_SCALE_POS ≤ MAX_PERPETUAL_GROWTH` \
+     与 `p × LOW_PERPETUAL_SCALE_POS < p`。违反则乐观档被静默封顶、或三档退化成两档。\
+     处置：按 `p ≤ MAX_PERPETUAL_GROWTH / HIGH_PERPETUAL_SCALE_POS` 重新反推 PERPETUAL_GROWTH。"
+);
+
 /// 保守档永续增长率下限：**不允许负永续增长**。
 ///
 /// 原实现用 `min_growth / 2.0` 作下限，在 `MIN_GROWTH` 转负后会变成 `-0.15`
 /// —— 等于允许「公司永久萎缩」的终值假设，DCF 终值项失去经济含义。
 /// 故提为独立常量并固定在 0（`perpetual_growth` 本身经 `pct()` 守卫恒为正，此下限只是兜底）。
 const MIN_PERPETUAL_GROWTH: f64 = 0.0;
-/// 乐观档永续增长率上限：`high_perpetual = min(p × 1.3, MAX_PERPETUAL_GROWTH)`。
+/// 永续增长率的**硬上限**：`p ≤ RISK_FREE_RATE`（Damodaran 稳定期约束）。
 ///
-/// 2026-09-12 由内联魔数 `0.05` 提为具名常量 —— 路径 Y 把 `PERPETUAL_GROWTH`
-/// 对齐到 0.04 后，`0.04 × 1.3 = 0.052` **触顶**该上限，乐观档输出对上限取值
-/// 异常敏感（002353 实测 high 97.89 → 167.45，+71%，远超中性档 +52%），故显式化。
+/// **2026-09-23 改为锚定 [`RISK_FREE_RATE`]**（原为裸 `0.05`）。原取值的由来是
+/// 「刚好压住 `PERPETUAL_GROWTH × 1.3 = 0.04 × 1.3 = 0.052`」—— 它只对
+/// `PERPETUAL_GROWTH = 4%` 这一个具体取值成立，于是形成**脆弱耦合**：
+/// `PERPETUAL_GROWTH` 一改，被截断的样本集会**静默变化**，而上限本身没有独立含义。
 ///
-/// 不变量：必须 < `DISCOUNT_RATE`，否则 `terminal_spread = (d − p).max(0.001)`
-/// 的兜底分支会让终值失真（0.05 < 0.085 ✓）。
-const MAX_PERPETUAL_GROWTH: f64 = 0.05;
-const FORECAST_YEARS: i32 = 5;
+/// 锚定后上限的含义与经济含义一致（**永续增速不得超过无风险利率**）。但**锚定本身不够** ——
+/// 2026-09-23 的下一轮把 `p` 取 `1.5%` 后 `1.5% × 1.3 = 1.95% > r_f = 1.7%`，
+/// 乐观档又被静默截断（实际乘子 1.133 而文案写 ×1.3）。⇒ 真正的护栏是
+/// 「`p` 由 `r_f / HIGH_PERPETUAL_SCALE_POS` 反推」+ 模块级编译期断言，
+/// 见 [`PERPETUAL_GROWTH`] 文档与本节下方的 `const _` 断言。
+///
+/// ## 三处消费者的完整清单（改本常量前必读）
+///
+/// | # | 位置 | 语义 |
+/// |---|---|---|
+/// | 1 | `compute_dcf`：`perpetual_growth.min(MAX_PERPETUAL_GROWTH)` | **基准档**也受约束 |
+/// | 2 | `compute_dcf`：`high_perpetual` 的 `.min(...)` | 乐观档 |
+/// | 3 | `applicability_signals`（判据⑤） | 配置值越界时**上报并退出该腿** |
+///
+/// ⚠️ 第 1 处是 2026-09-23 补的：此前本常量**只作用于乐观档**，基准档的
+/// `perpetual_growth` 只受利差钳位管 ⇒ 用户配 `dcf_perpetual_rate = 5%` 时
+/// `mid` 直接用 5%（越过 `r_f`），**静默违反模型自己的前提**。
+///
+/// 不变量：必须 < `DISCOUNT_RATE`，否则终值分母落到地板、估值失真
+/// （`0.017 < 0.077` ✓）。⚠️ 这只是**常量之间**的不变量，管不住用户配置通道
+/// （`dcf_perpetual_rate` 经 `pct()` 只守 `0 < raw ≤ 100`，可配出 `p ≥ d`）——
+/// 该缺口由 [`MIN_TERMINAL_SPREAD`] 在 `compute_dcf` 内兜住，且**上报**而非静默。
+const MAX_PERPETUAL_GROWTH: f64 = RISK_FREE_RATE;
+
+/// 终值分母 `d − p` 的**利差地板**。
+///
+/// 为什么必须有：终值 `= FCF₅ × (1+p) / (d − p)`，分母是**差值** ⇒ `p → d` 时
+/// 终值 → ∞。而 `p` 与 `d` 都来自**用户可配**的扁平参数
+/// （`dcf_perpetual_rate` / `dcf_discount_rate`），`pct()` 只守 `0 < raw ≤ 100`
+/// ⇒ `p ≥ d` 是**完全可达**的配置。
+///
+/// 原地板是裸字面量 `0.001`：此时 `p = 100%`（`pct()` 允许）× `d = 8.5%`
+/// 会把终值放大到 `FCF₅ × 2000`（正常利差 6.5pp 下约 15 倍，即 **130 倍**），
+/// 且**静默无日志** —— 与 002837 那条 `upsidePct = +618,509,774.8%` 的观测形态同级
+/// （那条的真因是 `total_shares` 量纲错、已另行修复，但**同一量级的放大器**在这里仍然开着）。
+///
+/// 取 1.5pp：对应终值倍数上限 `1 / 0.015 ≈ 67×`，已是「估值由差值独裁」的量级。
+/// 正常配置下（`p = 1.3%`、`d = 7.7%`）利差 6.4pp，本地板**不参与**。
+const MIN_TERMINAL_SPREAD: f64 = 0.015;
+
+/// 悲观情景的**折现率上浮**（「要求回报更高」）。
+///
+/// 依据：三档的语义是**情景**而非单参数敏感性 —— 悲观情景下经营假设（`g`、`p`）
+/// 与要求回报同时不利才是自洽的。而折现率的弹性是三者中最大的：
+///
+/// | 参数 | 300642 弹性（估值变动 % / 参数变动 %） |
+/// |---|---|
+/// | 折现率 `d` | **−1.28** |
+/// | 预测期增长率 `g` | 0.70 |
+/// | 永续增长率 `p` | 0.17 |
+///
+/// ⚠️ **上表是终态参数（`p = 1.3%`、`d = 7.7%`）的实测值**，复算脚本
+/// `output/sci21-structural-at-final-params.mjs`。此前本节引的是 `p = 4%` 时测的
+/// `−1.96 / 0.78 / 0.71` —— `E_p` **不是常数**（`E_p ∝ p/(d−p)²`），
+/// `p` 从 4% 降到 1.3% 时它由 0.783 **塌到 0.171** ⇒ 旧数字不可直接引用。
+/// 唯一稳健的结论是**折现率弹性始终最大**（`|E_d|/|E_g|` = 1.84–2.00）。
+///
+/// 定量（终态参数）：`d` 仅上浮 1pp（相对变动 +13%）就使估值从 36.85 变到 26.36
+/// （**1.40 倍**），**大于** `p` 整个 ×0.7~×1.3 档的 **1.11 倍**。把它排除在区间之外，
+/// 等于宣称「区间只覆盖弹性第二和第三的参数」⇒ 区间宽度**归因错误**：面板把宽度归因于
+/// 增长率假设，真实主因（在 `g` 之后）是要求回报假设。
+///
+/// 乐观档**不**反向下调折现率：那等于用一个无依据的「风险下降」假设去抬高上界，
+/// 让乐观档靠折现率灌水而非靠经营改善 —— 区间上界应只由经营假设决定。
+const RISK_STRESS_SPREAD: f64 = 0.01;
+pub const FORECAST_YEARS: i32 = 5;
 
 // ── DCF 模型适用性判据（2026-09-14）─────────────────────────────────────────
 //
@@ -2034,9 +2389,14 @@ const FORECAST_YEARS: i32 = 5;
 // ⇒ 锚点必须是**数据形态**：DCF 不成立的信号与行业标签无关，可观测：
 //   ① 杠杆畸高 —— 净利由权益乘数驱动，企业 FCF 口径不成立
 //   ② FCF 与净利背离 —— 现金流不反映股东可分配（金融/地产/重资产周期典型）
-//   ③ 预测期收缩却靠永续正增长撑估值 —— 结论由永续假设独裁
-//      （该矛盾已由「永续增长率符号一致性约束」直接修复；本条判据用于标记
-//       「即便永续归零，估值仍几乎全由终值贡献」的残余形态）
+//   ③ ~~预测期收缩却靠永续正增长撑估值~~ —— **2026-09-23 已撤销**。
+//      该矛盾本来就不是「判据能治的病」：它由「永续增长率符号一致性约束」**直接修复**，
+//      而残余的「终值占比高」是**全市场统一参数的结构属性**（非逐样本缺陷）
+//      ⇒ 当判据用必然零区分力（命中集 ≈ {增长率 ≥ 0}）。详见 ③ 原实现处注释。
+//      该属性改为**模型层面的局限声明**（`dashboard_report.rs` 的区间口径文案）。
+//   ④ 亏损 + 当期 FCF 收益率极低 —— 公司尚未盈利，当期现金流不具定价意义
+//      （2026-09-21 新增，补 ② 的符号缺口：② 的两条形态都预设「净利 > 0」。
+//       688114 净利 −2.22 亿、FCF 收益率 1.18% ⇒ 修复前落 `applicable = true`）
 //
 // 输出形态：`applicable` + `inapplicable_reason` + `applicability_signals[]`，
 // **数值仍照常计算**（零破坏性，旧模板依赖三档值），由下游主动降级。
@@ -2066,16 +2426,52 @@ const LEVERAGE_INAPPLICABLE_PCT: f64 = 80.0;
 /// 该情形由 fallback 锚定 + `is_fallback_anchor` 承担置信度衰减。
 const FCF_NP_DIVERGENCE_MIN: f64 = 0.3;
 
-/// 判据 ③：终值现值占比上限。超过且预测期负增长 ⇒ 结论由永续假设独裁。
+/// 判据 ④：亏损公司的 FCF 收益率下限（小数）。
 ///
-/// 601166 实测：**符号一致性约束之前**终值占 70.6%（`growth = −0.25%` + 永续 +3%），
-/// 该矛盾已由约束修复；约束后永续压到 0，占比降到 **62.0%** ⇒
-/// **③ 对 601166 不再触发**（它由 ①② 判定，见 `applicable` 字段注释）。
-/// 本条判据保留用于标记「即便永续已归零、估值仍几乎全由永续假设贡献」的形态
-/// —— 这类标的的预测期增长率本身就是噪声，结论不可检验。
+/// ## 为什么需要这条
 ///
-/// 占比取**生效值**（约束后），因为那才是真正流向下游与面板的结论的构成。
-const TERMINAL_RATIO_MAX: f64 = 0.7;
+/// 判据 ② 的两条形态都挂在 `net_profit.filter(|v| *v > 0.0)` 之下 ⇒
+/// **公司净利为负时整段判据短路**。后果是**反向不公**：净利为正但现金流差的
+/// 公司（601166 兴业银行、300308 中际旭创）被拦下并判 `applicable = false`，
+/// 而**真亏损**的公司反而拿到 `applicable = true` —— 净利更差、更该质疑
+/// 「拿当期 FCF 折现」这件事的标的，判据对它完全失明。
+///
+/// 实测对照（2026-09-21 同日两次运行，模板 v70/v73）：
+///
+/// | 标的 | 净利 | FCF/净利 | `applicable` |
+/// |---|---|---|---|
+/// | 300308 中际旭创 | +204 亿 | 0.14（判据 ② 命中） | `false` ✅ |
+/// | 688114 华大智造 | **−2.22 亿** | 判据 ② 短路 | `true` ❌ |
+///
+/// 688114 的 DCF：`fcf_anchor = 3.588 亿`、市值 303.87 亿 ⇒ 收益率 **1.18%**，
+/// 三档 16.33 / 24.23 / 38.84 元（现价 73.11，`upsidePct = −66.9`），
+/// 以 `is_fallback_anchor = false` **全额权重**进 f5（`dcf_anchor_decay = 1.0`），
+/// 并被 `value-investor` 按 prompt 指示「直接引用」为 `intrinsic_value_range`
+/// ⇒ `margin_of_safety = −201.7%`、`buffett_verdict = 【减持】`。
+///
+/// ## 判据形态（两条并列，缺一不可）
+///
+/// - 当期净利 ≤ 0 —— 公司尚未证明其商业模式能产生利润；
+/// - 锚定 FCF / 市值 < 本阈值 —— 当期现金流**不具定价意义**。
+///
+/// ⚠️ **不能**简化成「净利 ≤ 0 即不适用」：那会误伤「一次性减值致亏、
+/// 但经营现金流充沛」的正常公司（FCF 收益率 20% 时 DCF 完全成立），
+/// 也会与 V74「周期底部用历史正净利归一化锚定」的设计直接冲突。
+///
+/// ## 取值依据
+///
+/// 正常经营企业 FCF 收益率 3–8%（折旧与资本开支大致抵消时接近净利口径）；
+/// 折现率 10% 意味着「零增长 + 零再投资」的理论收益率下限约 10%。
+/// 取 3% 已属**宽松**，只拦「相对市值小到不具备定价意义」的极端形态 ——
+/// 688114 的 1.18%（市值/FCF ≈ 85 倍）正是此类。
+const FCF_YIELD_INAPPLICABLE_MIN: f64 = 0.03;
+
+// 【**2026-09-23 已撤销**】此处原有判据 ③ 的阈值常量 `TERMINAL_RATIO_MAX = 0.7`，
+// 已随该判据一起删除 —— 终值占比**不再**作为适用性判据。论证见 `compute_dcf` 内
+// 「③ 【已撤销】」段。一句话：`tvr > 0.7` 的**命中集 ≈ {预测期增长率 ≥ 0}**，
+// 与它声称的语义（「结论由永续假设独裁」）无关 ⇒ 零区分力；根因是把**全市场统一的
+// 参数常量**（`d − p`）当成了**逐样本的适用性判据**。该属性改为**模型层面的局限声明**
+// （见 `dashboard_report.rs` 的区间口径文案）；`terminal_value_ratio` 字段保留供诊断。
 
 /// 估值运行时配置（可由前端设置页下发）
 ///
@@ -2112,7 +2508,7 @@ impl ValuationConfig {
         self.forecast_years.unwrap_or(FORECAST_YEARS)
     }
     fn bond_yield(&self) -> f64 {
-        self.bond_yield.unwrap_or(4.4)
+        self.bond_yield.unwrap_or(DEFAULT_BOND_YIELD)
     }
 
     /// 从**扁平参数**构造估值配置（C2 路径 Z，2026-09-12）。
@@ -2249,6 +2645,128 @@ fn annualized_eps(financials: &[FinancialReport]) -> Option<f64> {
         Some(v) if v > 0.0 => Some(v),
         _ => normalized_annual_eps(financials, 5),
     }
+}
+
+/// 当期自由现金流（TTM 口径，元）—— `compute_dcf` 的 ① 分支与
+/// `compute_owner_earnings` 的共同输入。
+///
+/// ## 为什么需要它（2026-09-21，300308 中际旭创实证）
+///
+/// vendor 的 `financials[0]` 是**最新报告期**，而中报/季报的
+/// `operating_cash_flow` / `capital_expenditure` 是**年内累计值**（与 `eps`、`roe`
+/// 同口径，见 [`annualized_eps`] 的 P1-A 记录）。直接把半年累计值当年度值代入，
+/// 锚点会被腰斩约一半。
+///
+/// 更根本的是：在本函数出现之前，这条分支在**生产上从未执行过一次** ——
+/// 主要 vendor（eastmoney / akshare / sina / baidu_stock / neodata）长期把这三个
+/// 字段硬编码为 `None` ⇒ `direct_fcf ≡ None` ⇒ 锚点永远走 5 年年报均值 fallback，
+/// 且适用性判据 ② 永远无法命中（详见 `vendors/eastmoney.rs` 的现金流补充块）。
+///
+/// ## 取值链（缺数即 `None`，**不得**把缺失当 0）
+///
+/// ① 年报口径本身即年度值 → `OCF − capex`，缺则退回 vendor 直供的 `free_cash_flow`；
+/// ② 中报/季报 → TTM = 「上年年报 + 本期累计 − 上年同期累计」（三段均按 ① 相减）；
+/// ③ 还原不出（缺任一段）→ 退回 vendor 直供的 `free_cash_flow`；
+/// ④ 全缺 → `None`。
+///
+/// ```text
+/// 实测 300308（东财，2026-09-21）:
+///   2025FY   OCF 108.96 亿 − capex 27.60 亿 = +81.36 亿
+///   2026H1   OCF  18.00 亿 − capex 48.02 亿 = −30.02 亿   （半年累计）
+///   2025H1   OCF  32.18 亿 − capex  9.54 亿 = +22.65 亿
+///   ⇒ TTM  = 81.36 + (−30.02) − 22.65 = +28.69 亿（为正 ⇒ 走 ① 分支）
+/// ```
+/// 若不还原，直接用 2026H1 的 −30.02 亿，就会把一家当期 FCF 为正的公司判成
+/// 「当期FCF≤0」并触发历史均值锚定 —— 这正是本函数要消除的错误面。
+fn ttm_fcf(financials: &[FinancialReport]) -> Option<f64> {
+    let latest = financials.first()?;
+    let from_ocf_capex = |f: &FinancialReport| -> Option<f64> {
+        Some(f.operating_cash_flow? - f.capital_expenditure?)
+    };
+
+    // ① 年报口径
+    if latest.report_date.contains("-12-31") {
+        return from_ocf_capex(latest).or(latest.free_cash_flow);
+    }
+
+    // ② 中报/季报 → TTM 还原
+    let ttm = (|| {
+        let key = report_period_key(&latest.report_date)?;
+        let year = key.get(..4)?.parse::<i32>().ok()?;
+        let month_day = key.get(4..)?;
+        let prev_year = year.checked_sub(1)?;
+        let find = |target: &str| {
+            financials.iter().find(|r| report_period_key(&r.report_date) == Some(target))
+        };
+        let annual = from_ocf_capex(find(&format!("{prev_year}-12-31"))?)?;
+        let prev_same = from_ocf_capex(find(&format!("{prev_year}{month_day}"))?)?;
+        Some(annual + from_ocf_capex(latest)? - prev_same)
+    })();
+
+    // ③ 还原不出 → vendor 直供兜底
+    ttm.or(latest.free_cash_flow)
+}
+
+/// 当期归母净利润（TTM 口径，元）—— 与 [`ttm_fcf`] 同构。
+///
+/// 用于 `compute_owner_earnings` 的最后兜底（`净利 × 0.85~0.95` 代理）。
+/// 修复前该兜底直接取 `financials[0].net_profit`，在中报口径下是**半年累计**，
+/// 于是「所有者收益」与同一份输出里按 TTM 计算的 PE / EPS 口径不一致
+/// （与 [`annualized_eps`] 记录的 601166 ROE 口径事故同源）。
+///
+/// ## ⚠️ 2026-09-23 补回落：原实现**漏了 [`ttm_fcf`] 的 ③ 分支**，造成 fail-open
+///
+/// 原实现只有 ①②，**还原不出就返回 `None`**；而 `ttm_fcf` ③ 会回落到
+/// `latest.free_cash_flow`。两者不对称 ⇒ 序列缺「上年年报 / 上年同期」时，
+/// **FCF 侧有值、净利侧 `None`** ⇒ 下游 `ttm_net_profit(financials).filter(...)`
+/// 的闭包整段短路 ⇒ **判据 ②（FCF 与净利背离）与判据 ④（亏损 + FCF 收益率过低）
+/// 一起静默失明**，`applicability_signals` 恒为空。
+///
+/// 为什么这是「结论变垃圾」而非「少一条提示」：这两条正是**杠杆畸高 / 亏损且现金流
+/// 不具定价意义**的标的唯一的退出通道 ⇒ 失明后这类标的的 DCF 腿会以全额权重喂给
+/// `f5`，产出「估值极低」的假信号。**算不出来 ≠ 没问题**（fail-open）。
+///
+/// 暴露它的不是评审而是测试：`dcf_inapplicable_for_leveraged_negative_fcf_shape`
+/// （序列只有年报 + 本期中报，缺上年同期）与
+/// `dcf_inapplicable_for_loss_making_with_tiny_fcf_yield`（单期序列）
+/// 双双 `signals=[]` ⇒ 见 `cargo test -p axagent-astock-data`。
+///
+/// ## 残余不对称（已知，未消除，方向偏保守）
+///
+/// 两函数的「能否还原」判据含**指标自身**的缺失：若 `operating_cash_flow` /
+/// `capital_expenditure` 缺失（FCF 侧回落单期）而 `net_profit` 三期齐全（净利侧为 TTM），
+/// 则 `ratio = 单期FCF / TTM净利` 被**偏小** ⇒ 判据 ② 更容易命中 ⇒ 偏向「退出该腿」，
+/// 方向保守。反向组合（净利缺、FCF 全）在 vendor 载荷里不出现（净利与现金流同行下发）。
+fn ttm_net_profit(financials: &[FinancialReport]) -> Option<f64> {
+    let latest = financials.first()?;
+
+    // ① 年报口径：直接可用
+    if latest.report_date.contains("-12-31") {
+        return latest.net_profit;
+    }
+
+    // ② 中报/季报 → TTM 还原（与 `ttm_fcf` ② 逐字同构）
+    let ttm = (|| {
+        let key = report_period_key(&latest.report_date)?;
+        let year = key.get(..4)?.parse::<i32>().ok()?;
+        let month_day = key.get(4..)?;
+        let prev_year = year.checked_sub(1)?;
+        let find = |target: &str| {
+            financials
+                .iter()
+                .find(|r| report_period_key(&r.report_date) == Some(target))
+                .and_then(|r| r.net_profit)
+        };
+        let annual = find(&format!("{prev_year}-12-31"))?;
+        let prev_same = find(&format!("{prev_year}{month_day}"))?;
+        Some(annual + latest.net_profit? - prev_same)
+    })();
+
+    // ③ 还原不出 → **回落到最新期单期值**（与 `ttm_fcf` ③ 同构）。
+    //    回落而非返回 None：判据 ② 的分子走 `ttm_fcf`，若此处返回 None 则两侧
+    //    可用性不一致 ⇒ 判据整体失效（见上文 fail-open）。回落后两侧**同口径**
+    //    （要么都 TTM、要么都单期）。
+    ttm.or(latest.net_profit)
 }
 
 /// 年度口径 ROE（%）—— 与 [`annualized_eps`] 同构，保证同一份报告里盈利用同一口径。
@@ -2391,6 +2909,22 @@ struct DcfAssumptions {
     /// eff=0.4327（观望），距 `ACTION_HOLD_THRESHOLD`(0.48) 差 0.047。
     /// 故该字段的用途是**置信度纠正**，不是决策翻转的开关。
     is_fallback_anchor: bool,
+    /// **我方采集缺陷**标记：当期 FCF 缺失的原因是**数据源未提供**，而非标的现金流为负。
+    ///
+    /// 2026-09-21 新增（审计 `AUDIT-dcf-cashflow-anchor-2026-09-21.md` §6.4 / §6.10.5 拍板项）。
+    /// 与 `is_fallback_anchor` **正交**：后者表达「锚是历史代理」（两态都为 `true`），
+    /// 本字段表达「**为什么**用代理」——
+    ///   · `true`  = 现金流量表数据缺失 ⇒ **我方取数失败**，属应上报的缺口；
+    ///   · `false` = 当期 FCF 真为负     ⇒ 标的经营状态，**不是**缺口（不得上报）。
+    ///
+    /// 为什么不让下游按 `basis` 文案判分支：`basis` 是给人与 LLM 看的诊断文本，
+    /// 文案一改判据就**静默失效** —— `is_fallback_anchor` 当初正是为此从
+    /// `== FCF_FALLBACK_BASIS` 的等值比较改成布尔量（见下方 P0-I 注释）。
+    /// 本字段沿用同一纪律。三态区分本身由测试 `dcf_basis_tells_three_states_apart` 钉住。
+    ///
+    /// 消费点：`data-quality.rhai` 的 `upstream_data_gaps`（**只告警、不扣分**，
+    /// 不进 `pm_compute_factor_completeness` 分母 —— 避免「列表长度 ≠ 公式分母」）。
+    fcf_data_missing: bool,
     /// **模型适用性**：DCF 的前提假设是否对本标成立（2026-09-14 新增）。
     ///
     /// `false` 表示「本标的不满足 DCF 的前提」—— 数值仍会算出（保持零破坏性，
@@ -2399,7 +2933,21 @@ struct DcfAssumptions {
     /// 判据锚定**数据形态**而非行业标签，详见模块顶部常量区的说明。命中任一即 `false`：
     /// ① `debt_ratio > LEVERAGE_INAPPLICABLE_PCT(80)` —— 净利由杠杆驱动
     /// ② 净利为正但当期真实 FCF ≤ 0（符号相反），或 `0 < FCF/净利 < 0.3`（量级脱钩）
-    /// ③ `growth < 0 && 终值现值占比 > TERMINAL_RATIO_MAX(0.7)` —— 结论由永续假设独裁
+    /// ③ ~~终值现值占比 > 0.7~~ —— **2026-09-23 撤销**（命中集 ≈ {增长率 ≥ 0}，零区分力）
+    /// ④ 当期净利 ≤ 0 **且** 锚定 FCF / 市值 < `FCF_YIELD_INAPPLICABLE_MIN(3%)`
+    ///    —— 公司尚未盈利且当期现金流不具定价意义（2026-09-21 新增）
+    /// ⑤ 配置的永续增长率与折现率利差 < `MIN_TERMINAL_SPREAD(1.5pp)`
+    ///    —— 终值分母触及地板，估值由差值决定（**2026-09-23 新增**）。
+    ///    ⚠️ ⑤ 的触发源与 ①–④ **不同类**：①–④ 判**标的的数据形态**，⑤ 判
+    ///    **调用方配置**是否把模型推进发散区。放在同一出口是因为对下游后果相同
+    ///    （该腿数值不可信 ⇒ 必须整体退出）。
+    ///    ⚠️ ③ 撤销后，「终值占比高」这一**全市场共有**的结构属性由 ⑤ 的**配置侧**
+    ///    条件承接（利差可配、可跨运行不同）——语义重心从「标的不好」移到「配置发散」。
+    ///
+    /// ⚠️ ④ 补的是 ② 的**符号缺口**：② 的两条形态都写在
+    /// `net_profit.filter(|v| *v > 0.0)` 之内 ⇒ 净利为负时整段短路，
+    /// 于是「净利为正但现金流差」被拦、「真亏损」反被放行（**反向不公**）。
+    /// 详见常量 `FCF_YIELD_INAPPLICABLE_MIN` 的文档。
     ///
     /// ## 601166 实证（2026-09-14，样本 86c7d441）
     ///
@@ -2408,8 +2956,7 @@ struct DcfAssumptions {
     /// 复算 `mid = 44.13` 精确复现，其中 70.6% 来自永续终值，
     /// 且 `growth = −0.25%` 与 `perpetual_growth = +3%` 并存（模型自相矛盾）。
     ///
-    /// 本字段为 `false`，命中 **①（91.6% > 80%）与 ②（净利为正、当期 FCF ≤ 0）
-    /// 两条**；③ 未命中（符号一致性约束后终值占比降到 62.0%）。
+    /// 本字段为 `false`，命中 **①（91.6% > 80%）与 ②（净利为正、当期 FCF ≤ 0）两条**。
     applicable: bool,
     /// 不适用的原因（多条以 `；` 连接）；`applicable == true` 时为 `None`。
     inapplicable_reason: Option<String>,
@@ -2429,7 +2976,7 @@ struct DcfAssumptions {
 fn compute_dcf(
     financials: &[FinancialReport],
     total_shares: Option<f64>,
-    _current_price: f64,
+    current_price: f64,
     config: Option<&ValuationConfig>,
 ) -> (Option<(f64, f64, f64)>, String, Option<DcfAssumptions>) {
     if financials.is_empty() {
@@ -2457,18 +3004,30 @@ fn compute_dcf(
     //   ③ 近 5 年报无正净利年度（持续亏损）→ 返回 None，DCF 不适用
     // P0-I(2026-09-12): fallback 锚定的口径文案提为常量 —— 既用于 `fcf_basis`，
     //   也用于给下游输出 `is_fallback_anchor` 布尔量（避免靠字符串前缀匹配判分支）。
-    const FCF_FALLBACK_BASIS: &str = "当期FCF≤0，改用近5年报正净利均值×0.90归一化锚定（周期底部）";
+    // P0-I(2026-09-12): fallback 锚定的口径文案提为常量。
+    //
+    // 2026-09-21 拆成**两条**：原实现只有一条，且文案写死「（周期底部）」，
+    // 把「FCF 真为负」与「现金流量表数据缺失」两种**性质完全不同**的情形
+    // 合并成同一句诊断：
+    //   · 真为负（`Some(v) if v <= 0`）= 标的当期现金流为负 → 标的属性；
+    //   · 缺失（`None`）            = 我们没取到数 → **我方采集缺陷**。
+    // 实测后果（300308，样本 ee770189）：对一家营收 +182.5%、ROE 62.6% 的公司
+    // 断言「周期底部」，且该句被 value-investor 原样引用进 `risk_flags`
+    // （「当期FCF≤0，DCF基于归一化锚定，绝对估值锚偏低」）⇒ 假诊断流入结论。
+    // 两态**处置相同**（都用历史代理锚），但诊断必须说真话。
+    const FCF_FALLBACK_BASIS: &str = "当期FCF≤0，改用近5年报正净利均值×0.90归一化锚定";
+    const FCF_MISSING_BASIS: &str =
+        "现金流量表数据缺失（该数据源未提供 OCF/资本开支），改用近5年报正净利均值×0.90归一化代理锚定";
     // 2026-09-14：`direct_fcf` 提到外层作用域 —— 适用性判据 ②（`FCF/净利` 背离）
     // 需要看到**当期真实** FCF，而不是 fallback 后的代理值（代理值恒 ≈0.9×净利，
     // 会把「符号相反」这个最强信号抹掉）。
-    let direct_fcf = latest.free_cash_flow.or_else(|| {
-        latest
-            .operating_cash_flow
-            .and_then(|ocf| latest.capital_expenditure.map(|capex| ocf - capex))
-    });
+    // 2026-09-21：改走 [`ttm_fcf`]（TTM 还原 + vendor 直供 FCF 双通道）。
+    //   原实现读 `financials[0]` 的**年内累计值**，中报口径下 OCF 只有半年；
+    //   且因 vendor 侧恒不提供这三列，本变量在生产上**一直是 `None`**。
+    let direct_fcf = ttm_fcf(financials);
     let (fcf, fcf_basis) = match direct_fcf {
         Some(v) if v > 0.0 => (v, "当期FCF".to_string()),
-        _ => match normalized_annual_profit(financials, 5) {
+        Some(_) => match normalized_annual_profit(financials, 5) {
             Some(avg_np) => (avg_np * 0.90, FCF_FALLBACK_BASIS.to_string()),
             None => {
                 return (
@@ -2478,9 +3037,29 @@ fn compute_dcf(
                 )
             },
         },
+        None => match normalized_annual_profit(financials, 5) {
+            Some(avg_np) => (avg_np * 0.90, FCF_MISSING_BASIS.to_string()),
+            None => {
+                return (
+                    None,
+                    "现金流量表数据缺失且近5年报无正净利年度，DCF模型不适用".to_string(),
+                    None,
+                )
+            },
+        },
     };
     // P0-I(2026-09-12): 锚定来源标记，随 `DcfAssumptions` 落库，供 f5 做置信度衰减。
-    let is_fallback_anchor = fcf_basis == FCF_FALLBACK_BASIS;
+    // 2026-09-21：判据由「等值于某一条 fallback 文案」改为「**不是**当期真实 FCF」
+    //   —— 语义没变（该布尔量表达的就是「锚定是历史代理」），但两态 fallback
+    //   现在都正确标记为 true。原实现用 `== FCF_FALLBACK_BASIS` 等值比较，
+    //   拆分文案后若不改，缺失态会被**静默**标成 false ⇒ f5 的衰减门（V77）
+    //   会在「数据缺失」这一最需要衰减的路径上失效。
+    let is_fallback_anchor = fcf_basis != "当期FCF";
+    // 2026-09-21：与 `is_fallback_anchor` **正交**的第二判别 —— 只在「缺数」态为 true。
+    //   与上面那条同源使用**常量**（不是字面量）比较：两处引用同一 `const`，文案再改也不会漂移。
+    //   注意**不能**用 `fcf_basis.contains("缺失")` 之类的子串匹配去替：那只是把等值比较
+    //   换成更宽的文本匹配，仍然把「判据」绑在给人看的文案上。
+    let fcf_data_missing = fcf_basis == FCF_MISSING_BASIS;
     let fcf_per_share = fcf / shares; // 元/股
 
     // 用营收同比增速作为 growth_rate 参考；缺省回落 `default_growth`。
@@ -2515,6 +3094,44 @@ fn compute_dcf(
     let perpetual_clamped_by_negative_growth =
         (perpetual_growth - configured_perpetual_growth).abs() > f64::EPSILON;
 
+    // ── `p` 的可行域守卫（2026-09-23；两条约束合并，此前只有利差那一条）──────────
+    //
+    // 病根：`p` 与 `d` **都来自用户可配的扁平参数**（`dcf_perpetual_rate` /
+    //   `dcf_discount_rate`），而 `pct()` 的守卫只有 `0 < raw ≤ 100`
+    //   ⇒ `p ≥ d` 是可配出来的。此时终值 `= FCF₅(1+p)/max(d−p, 地板)` 的**分母塌到地板**
+    //   ⇒ 终值被放大到 `FCF₅(1+p)/0.001`（`p = 100%` 时约 **2000 倍**，正常利差下约 15 倍），
+    //   **静默无日志**。
+    // `MAX_PERPETUAL_GROWTH` 的文档写着「不变量：必须 < DISCOUNT_RATE」—— 那条不变量
+    //   只约束**两个常量之间**的关系，对配置通道**没有任何约束力**，这正是缺口所在。
+    //
+    // 处置：钳到可行域上界（见下），并把钳位**上报**为一条适用性信号。
+    //   为什么上报而非静默钳：被钳过的估值由「上界」而非由配置假设决定，属**模型前提不成立**，
+    //   与判据 ①②④ 同级。`applicable` 由 `applicability_signals.is_empty()` 派生
+    //   ⇒ 该腿自动退出，不会带着一个伪造的数值流入 f5。
+    // 顺序：本约束在「符号一致性约束」**之后** —— 后者处理的是语义矛盾（负增长配正永续），
+    //   本条处理的是**数值发散**，两者独立，先后不影响结果（取 min 的组合是交换的）。
+    // ── `p` 的可行域上界 = 两条约束取更紧者（2026-09-23 合并）──
+    //
+    // 约束 A（利差）：`d − p ≥ MIN_TERMINAL_SPREAD` ⇒ `p ≤ d − 1.5pp`
+    // 约束 B（无风险利率）：`p ≤ MAX_PERPETUAL_GROWTH = r_f`
+    //
+    // ⚠️ 合并前，约束 B **只出现在 `high_perpetual` 的 `.min()` 里**，基准档不受它管 ⇒
+    //   用户把 `dcf_perpetual_rate` 配成 5%（`pct()` 只守 `0 < raw ≤ 100`）时 `mid`
+    //   **直接采用 5%**，越过模型自己申报的 `r_f = 1.7%`，**静默无日志**。而这一档正是
+    //   `f5` 估值因子的输入。实测（300642 参数，`d = 7.7%`）：`p = 5%` ⇒ `mid = 40.24`
+    //   （+30.7%）、`tvr` 升到 83.2% ⇒ 结论几乎完全由一条违反前提的假设决定。
+    //
+    // ⚠️ 为什么必须记 `spread_is_binding`：两条约束的**数值量级差两个数量级**
+    //   （`d − 1.5pp ≈ 6.2pp` vs `r_f = 1.7pp`）⇒ 默认参数下 **B 恒为紧约束**，
+    //   A 只在 `d < 3.2%` 时才紧。上报时若不分清是哪条被违反，就会印出
+    //   「利差不足，已钳至 6.2%」而实际生效值是 1.7% —— **上报值本身撒谎**。
+    //   故上报文案同时给出两条约束与**生效值**，让读者能自行判断（见判据 ⑤）。
+    let max_perpetual_by_spread = (discount_rate - MIN_TERMINAL_SPREAD).max(MIN_PERPETUAL_GROWTH);
+    let spread_is_binding = max_perpetual_by_spread < MAX_PERPETUAL_GROWTH;
+    let max_perpetual_allowed = max_perpetual_by_spread.min(MAX_PERPETUAL_GROWTH);
+    let perpetual_clamped_by_config = perpetual_growth > max_perpetual_allowed + f64::EPSILON;
+    let perpetual_growth = perpetual_growth.min(max_perpetual_allowed);
+
     // 两阶段 DCF，返回 `(总现值, 永续终值现值)`。
     //
     // 2026-09-14：由返回 `f64` 改为返回二元组 —— 适用性判据 ③ 需要「终值现值 /
@@ -2530,34 +3147,68 @@ fn compute_dcf(
             pv += current_fcf / (1.0 + d).powi(year);
         }
         let terminal_fcf = current_fcf * (1.0 + p);
-        let terminal_spread = (d - p).max(0.001);
+        // 2026-09-23：地板由裸字面量 `0.001` 换为具名常量 `MIN_TERMINAL_SPREAD`（1.5pp）。
+        // 正常配置下**不可达**（`p` 已被 `max_perpetual_by_spread` 钳到 `d − 地板` 之下），
+        // 故本行是纯粹的第二道保险 —— 若它真的生效，说明前面那道守卫被绕过。
+        let terminal_spread = (d - p).max(MIN_TERMINAL_SPREAD);
         let terminal_value = terminal_fcf / terminal_spread;
         let terminal_pv = terminal_value / (1.0 + d).powi(forecast_years);
         (pv + terminal_pv, terminal_pv)
     };
 
-    // 保守档：增长率**向悲观方向**缩放，永续增长率打 7 折
+    // 悲观情景：增长率**向悲观方向**缩放，永续增长率打 7 折，**要求回报 +1pp**。
+    //
+    // 2026-09-23 起本档语义由「单参数敏感性下界」改为**悲观情景**：
+    //   · 原实现只缩放 `g` 与 `p`，把弹性**最大**的 `d` 留在常量上 ⇒ 该档自称
+    //     「保守下界」，实际只是「错过主因」的角落点；
+    //   · 弹性实测（300642，**终态参数** `p = 1.3% d = 7.7%`；脚本 `sci21`）：
+    //     `|E_d| = 1.28` > `E_g = 0.70` > `E_p = 0.17`
+    //     —— `d` 上浮 1pp 使估值变动 1.40 倍，**大于** `p` 整个 ×0.7~×1.3 档的 1.11 倍。
+    //     ⚠️ 早期的 `−1.96 / 0.78 / 0.71`（`p = 4%` 时测）不得再引用：`E_p ∝ p/(d−p)²`
+    //     不是常数，`p` 降下来后 `E_p` 塌得更快，旧数字会夸大 `p` 的地位。
+    //   ⇒ 悲观情景应当**同时**要求：经营假设不利 **且** 要求回报上升。
+    //
+    // 本档是 `upsidePct`（面板「上行空间」）的基准 —— 即**安全边际**口径：
+    // 「即便按悲观情景重估，现价仍低于该值吗」。
     let low_growth = if growth >= 0.0 {
         growth * LOW_GROWTH_SCALE_POS
     } else {
         growth * LOW_GROWTH_SCALE_NEG
     };
-    let low_perpetual = (perpetual_growth * 0.7_f64).max(MIN_PERPETUAL_GROWTH);
-    let (low, _) = dcf_two_stage(fcf_per_share, low_growth, low_perpetual, discount_rate);
+    let low_perpetual = (perpetual_growth * LOW_PERPETUAL_SCALE_POS).max(MIN_PERPETUAL_GROWTH);
+    let low_discount_rate = discount_rate + RISK_STRESS_SPREAD;
+    let (low, _) = dcf_two_stage(fcf_per_share, low_growth, low_perpetual, low_discount_rate);
 
-    // 中性档：原始增长率（已 clamp 到 `[min_growth, max_growth]`）与永续增长率
+    // 基准情景：原始增长率（已 clamp 到 `[min_growth, max_growth]`）与永续增长率。
+    // ⚠️ 本档**不是**内在价值的点估计 —— 它只是「基准假设下的值」。区间非概率区间
+    //   ⇒ 从区间里挑任何一档当点估计都是任意的（此处正是原 `upsidePct` 的错源）。
     let mid_growth = growth;
     let (mid, mid_terminal_pv) =
         dcf_two_stage(fcf_per_share, mid_growth, perpetual_growth, discount_rate);
 
-    // 乐观档：增长率**向乐观方向**缩放，永续增长率放大 1.3 倍
+    // 乐观情景：增长率**向乐观方向**缩放，永续增长率放大 1.3 倍；折现率保持基准
+    //   （见 `RISK_STRESS_SPREAD` 文档：上界不得靠下调要求回报灌水）。
+    //
+    // ⚠️ 2026-09-23：上界由 `max_growth` 改为 `max_growth × HIGH_GROWTH_SCALE_POS`。
+    //   原实现两者共用同一上界 ⇒ `growth ≥ 20%` 时 `growth × 1.5 ≥ 30%` **被砍回中性档**
+    //   （`growth = 30%` 时实际乘子 = 1.0），而面板文案仍声称「×1.5」⇒ **口径与实算不符**。
+    //   全库 6 条高终值占比样本里，**2 条** `growth` 正好顶在 30%（其中一个被完全压平）。
+    //   两个上界职责不同：`max_growth` 围的是**基准预测**（有当期经营数据支撑），
+    //   本处上界围的是**按乘子机械展开的情景**，故应是前提上界 × 该乘子。
+    let max_growth_high = max_growth * HIGH_GROWTH_SCALE_POS;
     let high_growth = (if growth >= 0.0 {
         growth * HIGH_GROWTH_SCALE_POS
     } else {
         growth * HIGH_GROWTH_SCALE_NEG
     })
-    .clamp(min_growth, max_growth);
-    let high_perpetual = (perpetual_growth * 1.3_f64).min(MAX_PERPETUAL_GROWTH);
+    .clamp(min_growth, max_growth_high);
+    // 乐观档永续同样受两条上限约束（利差 / `r_f`）—— 后者由模块级编译期断言
+    // `PERPETUAL_GROWTH × HIGH_PERPETUAL_SCALE_POS ≤ MAX_PERPETUAL_GROWTH` 保证
+    // **不会静默砍掉乘子**。此处保留 `.min()` 是因为 `p` 仍可经扁平参数被配到更大值，
+    // 而那时的越界由判据 ⑤ 上报（不会静默）。
+    let high_perpetual = (perpetual_growth * HIGH_PERPETUAL_SCALE_POS)
+        .min(MAX_PERPETUAL_GROWTH)
+        .min(max_perpetual_by_spread);
     let (high, _) = dcf_two_stage(fcf_per_share, high_growth, high_perpetual, discount_rate);
 
     // 终值现值占中性档估值的比例（0–1）。取**生效值**（符号一致性约束之后），
@@ -2588,7 +3239,24 @@ fn compute_dcf(
     }
 
     // ② FCF 与净利背离：现金流不反映股东可分配
-    if let Some(np) = latest.net_profit.filter(|v| *v > 0.0) {
+    //
+    // 2026-09-23 口径收敛：净利改走 [`ttm_net_profit`]，**不再读 `latest.net_profit`**。
+    //
+    // 病根：同一判据的两侧口径不一致 —— 分子 `direct_fcf` 走 [`ttm_fcf`]（TTM 还原），
+    //   分母却是 `latest.net_profit`（**最新期累计值**，中报口径下只有半年）。
+    //   而 `ttm_net_profit` 早在 `compute_owner_earnings` 的兜底分支里就用过，
+    //   其文档注释记录了同源事故（「修复前直接取 financials[0].net_profit，在中报
+    //   口径下是半年累计 ⇒ 与同一份输出里按 TTM 计算的 PE/EPS 口径不一致」）
+    //   —— **只是判据侧漏接了**。
+    //
+    // 为什么是方向性偏差而非精度问题：中报口径把分母腰斩 ⇒ 比值被系统性放大 2 倍 ⇒
+    //   · 上侧（现金流远超盈利）被**虚假放大**；
+    //   · 下侧 `ratio < FCF_NP_DIVERGENCE_MIN` 本该拦下的「现金流跟不上盈利」样本
+    //     反而因分母偏小而**越过阈值**（假阴性）—— 这正是本条判据存在的理由。
+    //
+    // 实证 300642（报告期 2026-06-30）：`latest.net_profit` = 1047 万（半年累计），
+    //   与 TTM FCF 1.352 亿相比 ratio = 12.92 ⇒ 旧口径下背离被夸大 2 倍以上。
+    if let Some(np) = ttm_net_profit(financials).filter(|v| *v > 0.0) {
         match direct_fcf {
             // 符号相反是**最强信号** —— 账面盈利但现金净流出，FCF 折现无意义
             Some(v) if v <= 0.0 => applicability_signals.push(format!(
@@ -2612,13 +3280,119 @@ fn compute_dcf(
         }
     }
 
-    // ③ 负增长却靠永续假设撑估值：结论由永续假设独裁
-    if growth < 0.0 && terminal_value_ratio > TERMINAL_RATIO_MAX {
+    // ③ 【2026-09-23 **撤销**】终值占比不再作为适用性判据 —— 它是**结构量**，不是样本特征
+    //
+    // ## 演化史（本判据被改了三次，前两次都失效）
+    //
+    // ① 诞生实现：`growth < 0.0 && tvr > 0.7`（601166 样本）⇒ 生产上**零命中**；
+    // ② 2026-09-23 上午：删掉 `growth < 0.0` 合取项（判据「零命中」归因于它）
+    //    ⇒ 变成**恒命中**；
+    // ③ 2026-09-23 同日下午：复算 `tvr` 关于 `g` 的曲线后**整体撤销**（本次）。
+    //
+    // ## 复算证据（`output/sci7-tvr-threshold.mjs`；d = 8.5%、5 年预测期）
+    //
+    // | 预测期增长率 g | tvr（p = 4%） | tvr（p = 2%） | ③ 是否命中 |
+    // |---|---|---|---|
+    // | −30%      | 44.9% | 44.9% | 否 |
+    // | −5%       | 63.9% | 63.9% | 否 |
+    // | **0%**    | 79.6% | 72.6% | **是** |
+    // | +10%      | 82.6% | 76.3% | 是 |
+    // | +30%      | 86.5% | 81.3% | 是 |
+    //
+    // ⇒ **临界点落在 `g > 0` 上，与 `p` 取 2% 还是 4% 无关**（`p` 从 2% 到 4% 都得出
+    //   同一个临界值）。机理是结构性的：
+    //     · `g < 0` ⇒ 「永续增长率符号一致性约束」把 `p` 压到 0 ⇒ 终值倍数塌到
+    //       `1/d = 11.8×` ⇒ tvr 落 44.9%–63.9%；
+    //     · `g ≥ 0` ⇒ `p` 生效 ⇒ 终值倍数 `1/(d−p) = 15.7×–23.1×` ⇒ tvr ≥ 72.6%。
+    //   于是 `tvr > 0.7` 的**命中集 ≈ {g ≥ 0}** —— 它实际在判「预测期非衰退」，
+    //   与它声称的语义（「结论由永续假设独裁」）**毫无关系**。零区分力。
+    //
+    // ## 更深一层：本判据的**思路**不成立（这才是撤销的真正理由）
+    //
+    // 「估值有多依赖永续假设」由终值倍数 `1/(d − p)` 决定，而 `d` 与 `p` 是
+    //   **全市场统一的常量** ⇒ 在参数统一的前提下，该属性是**所有标的共有**的，
+    //   不是某些标的的缺陷。拿它做**逐样本适用性判据**，等于用全局常量去否定逐标的
+    //   估值 —— **作用域错配**（与「拿行业标签当数据形态判据」同族的错误）。
+    //   ⇒ 它只应作为**模型层面的局限声明**：见 `dashboard_report.rs` 的区间口径文案
+    //     （已声明「本模型 5 年预测期 + 该折现率下，非衰退标的的估值有 ≥73% 来自
+    //     永续终值」），以及保留的 `terminal_value_ratio` 字段（诊断用）。
+    //
+    // ## 撤销的代价与不撤销的代价（为什么必须撤）
+    //
+    // · 不撤销：`g ≥ 0` 的样本（占绝大多数，含全部优质成长标的）其 DCF 腿会被
+    //   **整体剔除**（`applicable = false`）⇒ DCF 在 f5 中实质失效。
+    //   即「用一个全市场统一的结构属性，把几乎所有标的的估值证据关掉」。
+    // · 撤销后用户实证的 300642 矛盾**仍已解决**，且不是靠剔除腿：`upsidePct`
+    //   已由 `mid` 改为**悲观档**基准 ⇒ 300642 从「+92.8% 低估」变为
+    //   「**−14.2%**（现价高于悲观档 = 无安全边际）」⇒ 与决策「观望」自洽。
+    //   ⇒ 剔除腿只是把「一个错误结论」换成「没有结论」，属回避而非修复。
+
+    // ④ 当期亏损 + 锚定 FCF 收益率极低：市场不按当期现金流定价（2026-09-21 新增）
+    //
+    // 本条补的是判据 ② 的**符号缺口**：② 的两条形态（符号相反 / FCF/净利 < 0.3）
+    // 都写在 `net_profit.filter(|v| *v > 0.0)` 之内，净利为负时整段短路
+    // ⇒ 亏损公司（恰恰最该质疑 FCF 折现前提）反而落 `applicable = true`。
+    // 完整量化与同日对照见常量 `FCF_YIELD_INAPPLICABLE_MIN` 的文档注释。
+    //
+    // 判据锚定**数据形态**（净利符号 + FCF 相对市值），不锚定行业标签 ——
+    // 与模块顶部「不能写 if 银行 then 跳过」的约束同源。
+    //
+    // 缺数（`net_profit == None`）**不**命中：与判据 ② 同口径，缺数据 ≠ 模型不成立，
+    // 该情形由 `is_fallback_anchor` 承担置信度衰减。同理 `current_price` 或
+    // `shares` 非正时不命中（无市值 ⇒ 无法判断相对规模，不得凭空判定不适用）。
+    // 2026-09-23：净利口径与判据 ② 统一走 [`ttm_net_profit`]。
+    //   本条判的是「净利符号」——中报口径下半年净利与 TTM 净利的**符号**可能相反
+    //   （上年年报大额亏损 + 本期转正 ⇒ 半年为正、TTM 仍为负），此时旧口径会
+    //   把「尚未证明商业模式能盈利」的公司误判成已盈利 ⇒ 本条判据整体失明，
+    //   而它正是为「净利为负时判据 ② 短路」这个缺口而生的。缺数（`None`）不命中，
+    //   与判据 ② 同口径（缺数据 ≠ 模型不成立）。
+    if let Some(np) = ttm_net_profit(financials).filter(|v| *v <= 0.0) {
+        let market_cap = current_price * shares;
+        if market_cap > 0.0 {
+            let fcf_yield = fcf / market_cap;
+            if fcf_yield < FCF_YIELD_INAPPLICABLE_MIN {
+                applicability_signals.push(format!(
+                    "当期净利 {:.2} 亿 ≤ 0 且锚定 FCF 收益率仅 {:.2}%（FCF {:.2} 亿 / 市值 {:.2} 亿）\
+                     < {:.0}%：公司尚未盈利且当期现金流不具定价意义，DCF 口径不成立",
+                    np / 1e8,
+                    fcf_yield * 100.0,
+                    fcf / 1e8,
+                    market_cap / 1e8,
+                    FCF_YIELD_INAPPLICABLE_MIN * 100.0
+                ));
+            }
+        }
+    }
+
+    // ⑤ 配置的永续增长率超出**模型可行域**（**配置可得**，非数据形态）—— 2026-09-23 新增
+    //
+    // 本条的触发源与前四条不同：①②③④ 判的是**标的的数据形态**，本条判的是
+    //   **调用方给的配置**是否把模型推进发散区。放在同一个 `applicability_signals`
+    //   出口，是因为对下游而言后果相同 —— 该腿数值不可信，必须整体退出。
+    // 判据与「谁配的」无关：只要 `configured_perpetual_growth` 越过可行域上界
+    //   （= `min(d − MIN_TERMINAL_SPREAD, MAX_PERPETUAL_GROWTH)`），估值就由被钳后的值
+    //   而非由配置假设决定。
+    //
+    // ⚠️ 文案必须给出**两条约束 + 生效值**，不能只报被违反的那一条：
+    //   约束 A（利差 `d − 1.5pp`）与约束 B（`r_f`）量级差两个数量级 ⇒ 默认参数下
+    //   B 恒紧。若只按「利差距离不足」措辞，会印出「已钳至 6.2%」而上报字段里
+    //   实际是 1.7% —— **上报值自身撒谎**，比不报更糟（诊断时会把责任归到错误的参数上）。
+    if perpetual_clamped_by_config {
         applicability_signals.push(format!(
-            "终值现值占估值 {:.1}% > {:.0}% 且预测期增长为负：\
-             结论由永续假设独裁",
-            terminal_value_ratio * 100.0,
-            TERMINAL_RATIO_MAX * 100.0
+            "配置的永续增长率 {:.2}% 超出模型可行域（上限 {:.2}%，由「{}」更紧地约束）：\
+             生效值已钳至 {:.2}%。两条约束为 g_terminal ≤ r_f = {:.2}%（无风险利率）\
+             与 d − p ≥ {:.1}pp（终值分母利差）。配置值越界属**配置与模型前提冲突**，\
+             与标的质地无关 ⇒ 本配置下的 DCF 数值不可用",
+            configured_perpetual_growth * 100.0,
+            max_perpetual_allowed * 100.0,
+            if spread_is_binding {
+                "终值分母利差"
+            } else {
+                "无风险利率"
+            },
+            perpetual_growth * 100.0,
+            MAX_PERPETUAL_GROWTH * 100.0,
+            MIN_TERMINAL_SPREAD * 100.0
         ));
     }
 
@@ -2645,6 +3419,7 @@ fn compute_dcf(
             fcf_per_share,
             total_shares: shares,
             is_fallback_anchor,
+            fcf_data_missing,
             applicable,
             inapplicable_reason,
             applicability_signals,
@@ -2657,7 +3432,21 @@ fn compute_dcf(
 }
 
 /// 格雷厄姆内在价值公式：V = EPS × (8.5 + 2g) × 4.4 / Y
-/// g 为未来7-10年预期增长率，Y 为AAA企业债收益率基准
+///
+/// `g` 为未来 7-10 年预期增长率（**百分数**，如 17.78 表示 17.78%）；`Y` 为 AAA
+/// 企业债收益率基准（百分数，缺省 4.4）。
+///
+/// ⚠️ 2026-09-22 量纲修复：修复前本函数把 `g` 当**小数**代入（0.1778），而同式的
+/// `4.4 / Y` 用百分数 ⇒ **一个表达式两套口径**。后果：增长项被压 100 倍
+/// （乘数 `8.5 + 2×0.1778 = 8.856`，而非 `8.5 + 2×17.78 = 44.06`），
+/// 内在价值系统性**低估约 5 倍**（300642 实证：0.67 元 → 3.33 元；DCF mid 26.39 元，
+/// 修复前两模型差 39 倍）。
+/// 影响面已量化（23 个历史样本）：仅 **2 个**（688114 / 300308，均 g 顶 30% 上界）
+/// 格雷厄姆腿符号翻转，其余 21 个因 `g = 0` 完全不受影响。
+///
+/// ⚠️ `GrahamAssumptions.growth` 对外仍是**小数**口径（与 DCF 的 `MIN_GROWTH` /
+/// `MAX_GROWTH` 同源，见下方赋值处），只在**本公式内**换算为百分数 ——
+/// 这是两张刻度唯一相遇的地方，改动时不要顺手把 `g` 本身改成百分数。
 ///
 /// V74(2026-09-10): 返回 `Option<f64>`——EPS≤0 且近 5 年报无正 EPS 年度时
 /// 返回 None（公式不适用），不再用 0 冒充估值。当期 EPS≤0 但历史存在正 EPS
@@ -2665,11 +3454,61 @@ fn compute_dcf(
 ///
 /// P1-A(2026-09-11): EPS 一律经 `annualized_eps()` 取**年度口径**（中报/季报
 /// 累计值还原为 TTM）；g 取数从 `profit_yoy` 改为 `revenue_yoy` 并允许负增长。
+/// 格雷厄姆公式**实际生效**的假设快照（2026-09-21 新增）。
+///
+/// ## 为什么要落这份快照
+///
+/// 与 `dcf.assumptions` 同源动机：只输出 `graham.intrinsicValue` 时，
+/// 「这个数怎么来的」只能靠反解，而反解不唯一。
+///
+/// 实测 300308（现价 926.43，`revenue_yoy = 182.5%`，EPS 18.47，`Y` 取缺省 4.4）：
+/// ```text
+/// 修复前（g 当小数，量纲错）：168.08  = 18.47 × (8.5 + 2 × 0.30) × 4.4 / 4.4
+/// 修复后（g 为百分数）      ：1265.20 = 18.47 × (8.5 + 2 × 30)   × 4.4 / 4.4
+///                            └──────── 增长项顶在 MAX_GROWTH 上界 ────────┘
+/// ```
+/// ⇒ 现价 926.43 下 `upsidePct` 从 **−81.9%** 翻转为 **+36.6%**，腿信号
+/// `pm_saturate(36.6, 40) = +0.478`（修复前为 −0.672）。
+///
+/// ⚠️ **口径**：以上用**精确 EPS 18.47**。若改用落库 `intrinsicValue = 168.08`
+/// 反解 EPS（`168.08 / 9.1 = 18.4703`）再重算，得 `1265.22` / `+36.5%` / `+0.463` ——
+/// 两组数只差 round 精度，**不是分歧**。引用时须注明基准，勿当作两个矛盾结论。
+///
+/// 即：`upsidePct` 可被**纯 PE 恒等式**复现 —— `(8.5+2g%)×4.4/Y ÷ PE − 1`，
+/// 两边 `EPS` 相消 ⇒ 该输出对高 PE 标的**几乎不含公司特定信息**，
+/// 只反映「现价 PE 相对基准 PE 的偏离」。
+/// （该恒等性由 **EPS 相消**保证，与 `g` 的量纲无关 ⇒ 2026-09-22 的量纲修复
+/// 不改变本段结论，只改变乘数大小。）
+///
+/// ## 偏差方向（决定处置取向）
+///
+/// 上界 `MAX_GROWTH = 30%` 是**保守假设**（认为高增速不可持续）。
+/// 对真实增速 ≥ 30% 的公司，代入的增长率**低于**实际 ⇒ 内在价值系统性**偏低**
+/// ⇒ `upsidePct` 系统性**偏负** ⇒ 看空被夸大。
+/// 这与 DCF 侧 `is_fallback_anchor`（代理锚偏低）**同方向**，
+/// 故处置也取同族：**软衰减**（下游 f5 的 `valuation_graham_growth_clamped`），
+/// 而不是整腿剔除 —— 它仍是与 FCF 无关的格雷厄姆信号，只是假设被顶死。
+///
+/// 下界方向的偏差相反（内在价值偏高 ⇒ 看多被夸大），单独标记以便将来分别处置。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GrahamAssumptions {
+    /// 实际代入公式的增长率（小数形式）。
+    growth: f64,
+    /// `revenue_yoy` 超过 [`MAX_GROWTH`] ⇒ 增长率被**上限封顶**。
+    growth_clamped_upper: bool,
+    /// `revenue_yoy` 低于 [`MIN_GROWTH`] ⇒ 增长率被**下限封底**。
+    growth_clamped_lower: bool,
+    /// `revenue_yoy` 缺失，改用配置缺省增长率（**非**实测值）。
+    growth_from_default: bool,
+    /// 公式 `4.4 / bond_yield` 修正项实际代入的债券收益率（百分数）。
+    bond_yield: f64,
+}
+
 fn compute_graham_value(
     financials: &[FinancialReport],
     current_price: f64,
     config: Option<&ValuationConfig>,
-) -> Option<f64> {
+) -> Option<(f64, GrahamAssumptions)> {
     if financials.is_empty() || current_price <= 0.0 {
         return None;
     }
@@ -2688,11 +3527,31 @@ fn compute_graham_value(
     //      长期增长预期用营收增速代理更稳定，且与 DCF 同源。
     //   ② clamp 下界 0.0 → −0.30：原实现把负增长抹平为 0，等于对衰退股
     //      默认「零增长」，反而**高估**其内在价值；上界 30% 保持不变。
-    let g = latest
-        .revenue_yoy
-        .map(|y| (y / 100.0).clamp(-0.30, 0.30))
-        .unwrap_or_else(|| cfg.default_growth());
-    Some((eps * (8.5 + 2.0 * g) * 4.4 / bond_yield).max(0.0))
+    // 2026-09-21：上下界改用与 DCF 同源的 `MIN_GROWTH` / `MAX_GROWTH`——
+    //   两者语义相同（预测期增长率区间），原先 graham 手抄 `-0.30, 0.30`
+    //   是同一常量的第二份副本，改一侧不改另一侧即静默分叉。
+    let raw_growth = latest.revenue_yoy.map(|y| y / 100.0);
+    let g =
+        raw_growth.map(|v| v.clamp(MIN_GROWTH, MAX_GROWTH)).unwrap_or_else(|| cfg.default_growth());
+    let assumptions = GrahamAssumptions {
+        growth: g,
+        growth_clamped_upper: raw_growth.is_some_and(|v| v > MAX_GROWTH),
+        growth_clamped_lower: raw_growth.is_some_and(|v| v < MIN_GROWTH),
+        growth_from_default: raw_growth.is_none(),
+        bond_yield,
+    };
+    // 2026-09-22 量纲修复：原式 `8.5 + 2.0 * g` 里 `g` 传的是**小数**（0.1778），
+    //   而同式的 `4.4 / bond_yield` 用的是**百分数**（bond_yield 默认 4.4 = 4.4%）
+    //   ⇒ **同一个表达式两套口径**。后果：增长溢价被压 100 倍
+    //   （8.5 + 2×0.1778 = 8.856，而格雷厄姆原式要求 8.5 + 2×17.78 = 44.06），
+    //   估值被系统性低估约 5 倍。实证 300642：修前 0.67 元（vs DCF mid 26.39 元，
+    //   两模型差 39 倍），修后 ~3.34 元。
+    //   ⚠️ `assumptions.growth` 对外仍是**小数**口径（与 DCF 的 MIN/MAX_GROWTH 同源，
+    //   见上方 clamp），只在**本公式内**换算为百分数 —— 不要改 `g` 本身，
+    //   否则会连带污染 assumptions 的展示口径。
+    //   ⚠️ `g` 为负时乘数可低于 8.5（负增长惩罚），极端负增长下乘数为负 ⇒ 由
+    //   `.max(0.0)` 兜为 0：格雷厄姆式估值对深度衰退股给 0 是原式的固有行为，不是缺陷。
+    Some(((eps * (8.5 + 2.0 * g * 100.0) * 4.4 / bond_yield).max(0.0), assumptions))
 }
 
 /// 巴菲特所有者收益（元）
@@ -2701,24 +3560,83 @@ fn compute_owner_earnings(financials: &[FinancialReport]) -> Option<f64> {
     if financials.is_empty() {
         return None;
     }
+    // 2026-09-21：改走 [`ttm_fcf`]（TTM 口径 + vendor 直供 FCF 双通道）。
+    //   修复前这里是「`financials[0]` 的 OCF − capex」，取的是**年内累计值** ——
+    //   中报口径下 OCF 只有半年 ⇒ 所有者收益被腰斩。更严重的是：该分支因
+    //   vendor 侧恒不提供现金流而**从未执行过**，一直落到下面的 `净利 × factor`
+    //   兜底，于是「所有者收益」实际是**非现金的净利润**，而它被写进
+    //   `owner_earnings_yield_pct` 供 LLM 当论据（300308 实测该值 1.3%，
+    //   与 PE 倒数 1.9% 同量级 ⇒ 该"指标"不携带净利润以外的新信息）。
+    if let Some(fcf) = ttm_fcf(financials) {
+        return Some(fcf.max(0.0));
+    }
     let f = &financials[0];
-    // vendor 返回的财务数据单位均为"元"，无需缩放
-    if let (Some(ocf), Some(capex)) = (f.operating_cash_flow, f.capital_expenditure) {
-        Some((ocf - capex).max(0.0))
-    } else if let Some(fcf) = f.free_cash_flow {
-        Some(fcf.max(0.0))
+    // 兜底：净利 × 负债率折价。净利同样取 TTM 口径，避免与同报告内的 PE/EPS 口径不一致。
+    let net = ttm_net_profit(financials).unwrap_or_else(|| f.net_profit.unwrap_or(0.0));
+    let debt_ratio = f.debt_ratio.unwrap_or(50.0);
+    // debt_ratio 是百分比值，>60% 为高负债
+    let factor = if debt_ratio > 60.0 {
+        0.85
+    } else if debt_ratio > 40.0 {
+        0.90
     } else {
-        let net = f.net_profit.unwrap_or(0.0);
-        let debt_ratio = f.debt_ratio.unwrap_or(50.0);
-        // debt_ratio 是百分比值，>60% 为高负债
-        let factor = if debt_ratio > 60.0 {
-            0.85
-        } else if debt_ratio > 40.0 {
-            0.90
-        } else {
-            0.95
-        };
-        Some((net * factor).max(0.0))
+        0.95
+    };
+    Some((net * factor).max(0.0))
+}
+
+/// 算法综合估值档位（`value_signal`）—— 由安全边际 / F-Score / 护城河 / 所有者收益率合成。
+///
+/// ## 2026-09-21 修复：原评分函数**无法表达「高估」**
+///
+/// 原实现对 `mos_pct` **只在为正时加分**，为负落 `_ => {}` 加 0 分；
+/// 而 F-Score 与护城河两项**恒为正**且合计已达 `9×5 + 100/5 = 45`
+/// —— 恰好就是「合理偏低」档的阈值。于是：
+///
+/// > **只要 F-Score ≥ 6 且护城河 ≥ 75，无论价格多高都稳落「合理偏低」**，
+/// > 安全边际为负这件事在评分里**没有任何权重**。
+///
+/// 实证 300308（2026-09-21，样本 `ee770189`）：现价 926.43、DCF 中性 139.22
+/// （`upsidePct = −85.0`）、安全边际 −565.4%，同一条 payload 的 `value_signal`
+/// 输出 **「合理偏低」**，与 `margin_of_safety.level`「无（高估风险）」**直接矛盾**。
+/// value-investor 在正文里点出了该矛盾（「算法 value_signal 为『合理偏低』，
+/// 但绝对估值锚与现价偏离超 80%」）却仍被 prompt 要求「直接引用」
+/// ⇒ 矛盾被原样带进结论。
+///
+/// ## 修法与口径
+///
+/// 让安全边际**双向**参与评分（负值扣分），正向档位与阈值**保持不变**
+/// （避免动到既有正向样本的档位）。扣分边界沿用 `margin_of_safety.level`
+/// 在 −20% / −50% 附近换档的既有分组，避免两处口径打架。
+fn value_signal_of(
+    mos_pct: Option<f64>,
+    f_score: u32,
+    moat_score: u32,
+    oe_yield: f64,
+) -> &'static str {
+    let mut score: i32 = 0;
+    match mos_pct {
+        Some(p) if p > 20.0 => score += 30,
+        Some(p) if p > 10.0 => score += 20,
+        Some(p) if p > 0.0 => score += 10,
+        Some(p) if p > -20.0 => score -= 10,
+        Some(p) if p > -50.0 => score -= 25,
+        Some(_) => score -= 40,
+        None => {},
+    }
+    score += (f_score.min(9) * 5) as i32;
+    score += (moat_score.min(100) / 5) as i32;
+    if oe_yield > 5.0 {
+        score += 20;
+    } else if oe_yield > 3.0 {
+        score += 10;
+    }
+    match score {
+        60.. => "低估",
+        45.. => "合理偏低",
+        30.. => "合理",
+        15.. => "偏高",
+        _ => "高估",
     }
 }
 
@@ -3481,6 +4399,235 @@ mod valuation_tests {
         Some(shares)
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // 2026-09-21：现金流取值链三态 —— `ttm_fcf` / `basis` / `value_signal`
+    //
+    // 背景：`vendors/eastmoney.rs` 曾把 `operating_cash_flow` /
+    // `capital_expenditure` / `free_cash_flow` 硬编码为 `None` ⇒ `direct_fcf ≡ None`
+    // ⇒ DCF 锚点永远走历史均值 fallback、适用性判据 ② 永远无法命中。
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// 带现金流的三段序列构造器
+    fn report_cf(date: &str, np: f64, ocf: f64, capex: f64) -> FinancialReport {
+        let mut r = report(date, Some(np), None);
+        r.operating_cash_flow = Some(ocf);
+        r.capital_expenditure = Some(capex);
+        r
+    }
+
+    /// 300308 中际旭创实测序列（东财，2026-09-21；原始单位为亿元，此处折「元」）
+    ///
+    /// ```text
+    ///   2025FY  OCF 108.96 − capex 27.60 = +81.36
+    ///   2026H1  OCF  18.00 − capex 48.02 = −30.02   （半年累计）
+    ///   2025H1  OCF  32.18 − capex  9.54 = +22.65
+    /// ```
+    fn zjxc_financials() -> Vec<FinancialReport> {
+        let y = 1.0e8;
+        vec![
+            report_cf("2026-06-30", 136.51 * y, 18.00 * y, 48.02 * y),
+            report_cf("2026-03-31", 57.35 * y, 33.68 * y, 19.29 * y),
+            report_cf("2025-12-31", 107.97 * y, 108.96 * y, 27.60 * y),
+            report_cf("2025-06-30", 40.00 * y, 32.18 * y, 9.54 * y),
+        ]
+    }
+
+    /// ① 年报口径本身就是年度值 ⇒ 直接相减，**不做**任何还原/放大。
+    #[test]
+    fn ttm_fcf_uses_annual_report_directly() {
+        let f = vec![report_cf("2025-12-31", 100.0e8, 80.0e8, 30.0e8)];
+        let v = ttm_fcf(&f).expect("年报口径应可用");
+        assert!((v - 50.0e8).abs() < 1.0, "应直接 OCF−capex = 50 亿，实得 {} 亿", v / 1e8);
+    }
+
+    /// ② 中报口径必须还原 TTM —— 这是本函数存在的**唯一理由**。
+    ///
+    /// 不还原时最新期（2026H1）的 −30.02 亿会被当成年度值，于是一家
+    /// 当期 FCF 为正的公司被判成「当期 FCF ≤ 0」⇒ 触发历史均值锚定。
+    /// 同一组输入做**反向对照**：还原后为正、不还原为负 ⇒ 二者会走
+    /// `compute_dcf` 的不同分支，证明该还原不是装饰。
+    #[test]
+    fn ttm_fcf_restores_ttm_for_interim_reports() {
+        let f = zjxc_financials();
+        let v = ttm_fcf(&f).expect("三段齐备应可还原");
+        // 81.36 + (−30.02) − 22.65 = +28.69 亿
+        assert!((v - 28.69e8).abs() < 0.05e8, "TTM 应为 +28.69 亿，实得 {} 亿", v / 1e8);
+
+        let naive = f[0].operating_cash_flow.unwrap() - f[0].capital_expenditure.unwrap();
+        assert!(naive < 0.0, "不还原时最新期累计值为负 —— 这正是要消除的错误面");
+        assert!(v > 0.0, "还原后为正 ⇒ 两者会走 compute_dcf 的不同分支（符号相反）");
+    }
+
+    /// ③ 缺任一段 ⇒ `None`（**不得**把缺失当 0，也不得退化成单期值）。
+    ///
+    /// 该形态决定 `basis` 走「现金流量表数据缺失」而非「当期FCF≤0」——
+    /// 两者诊断性质完全不同（我方采集缺陷 vs 标的现金流属性）。
+    #[test]
+    fn ttm_fcf_returns_none_when_any_segment_missing() {
+        let y = 1.0e8;
+        // 缺「上年同期」
+        let f = vec![
+            report_cf("2026-06-30", 136.51 * y, 18.00 * y, 48.02 * y),
+            report_cf("2025-12-31", 107.97 * y, 108.96 * y, 27.60 * y),
+        ];
+        assert!(ttm_fcf(&f).is_none(), "缺上年同期应返回 None，不得退化成单期值");
+
+        // 只有 OCF、缺 capital_expenditure ⇒ 无法相减
+        let mut only_ocf = report("2026-06-30", Some(136.51 * y), None);
+        only_ocf.operating_cash_flow = Some(18.00 * y);
+        assert!(ttm_fcf(&[only_ocf]).is_none(), "只有 OCF 无法相减，应 None");
+    }
+
+    /// ④ vendor 直供 `free_cash_flow` 时优先采用（不要求 OCF/capex 在场）。
+    #[test]
+    fn ttm_fcf_falls_back_to_vendor_supplied_free_cash_flow() {
+        let mut r = report("2026-06-30", Some(100.0e8), None);
+        r.free_cash_flow = Some(12.0e8);
+        assert_eq!(ttm_fcf(&[r]).map(|v| v / 1e8), Some(12.0));
+    }
+
+    /// 防回归：`ttm_net_profit` 必须与 [`ttm_fcf`] **同样回落**，不得返回 `None`。
+    ///
+    /// 背景（2026-09-23）：把判据 ②④ 的净利口径收敛到 `ttm_net_profit` 时，
+    /// **漏抄了 `ttm_fcf` 的 ③ 回落分支** ⇒ 序列缺「上年年报 / 上年同期」时
+    /// 净利侧 `None`、FCF 侧有值 ⇒ `ttm_net_profit(...).filter(...)` 整段短路
+    /// ⇒ **判据 ②（FCF 与净利背离）与 ④（亏损 + FCF 收益率过低）一起静默失明**，
+    /// `applicability_signals` 恒空 —— 这两条恰是「杠杆畸高 / 亏损且现金流不具
+    /// 定价意义」的标的**唯一**的退出通道，失明后它们的 DCF 腿会以全额权重喂给 f5。
+    ///
+    /// 暴露它的不是评审而是测试：`dcf_inapplicable_for_leveraged_negative_fcf_shape`
+    /// 与 `dcf_inapplicable_for_loss_making_with_tiny_fcf_yield` 双双 `signals=[]`。
+    /// 本测试把四种形态钉死，防止回落分支再被「顺手删掉」。
+    #[test]
+    fn ttm_net_profit_falls_back_like_ttm_fcf() {
+        // ① 单期（既缺上年年报、也缺上年同期）⇒ 回落最新期值
+        let one = vec![report("2026-06-30", Some(-2.2214e8), Some(-0.53))];
+        assert_eq!(ttm_net_profit(&one), Some(-2.2214e8), "单期序列必须回落，不得返回 None");
+
+        // ② 有上年年报但缺**上年同期** ⇒ 仍回落（这正是两个真实用例的形态）
+        let two = vec![
+            report("2026-06-30", Some(30.0e8), Some(0.30)),
+            report("2025-12-31", Some(81.36e8), Some(0.80)),
+        ];
+        assert_eq!(ttm_net_profit(&two), Some(30.0e8), "缺上年同期必须回落");
+
+        // ③ 三期齐全 ⇒ 走 TTM 还原，且**必须与回落值不同**（否则本测试无区分力）
+        let three = vec![
+            report("2026-06-30", Some(30.0e8), Some(0.30)),
+            report("2025-12-31", Some(81.36e8), Some(0.80)),
+            report("2025-06-30", Some(22.65e8), Some(0.22)),
+        ];
+        assert_eq!(
+            ttm_net_profit(&three),
+            Some(81.36e8 + 30.0e8 - 22.65e8),
+            "三期齐全应走 TTM 还原（逐项量纲与实现一致，避免浮点顺序差）"
+        );
+        assert_ne!(ttm_net_profit(&three), Some(30.0e8), "TTM 值不得等于单期值");
+
+        // ④ 年报口径直接可用（不走 TTM、也不走回落）
+        let annual = vec![report("2025-12-31", Some(81.36e8), Some(0.80))];
+        assert_eq!(ttm_net_profit(&annual), Some(81.36e8));
+    }
+
+    /// ⑤ `compute_dcf` 的锚定口径必须**分三态说真话**。
+    ///
+    /// 修复前 `direct_fcf == None`（数据缺失）与 `Some(v ≤ 0)`（真为负）共用
+    /// 一句「当期FCF≤0（周期底部）」—— 对一家营收 +182.5%、ROE 62.6% 的成长股
+    /// 也断言「周期底部」，且该句被 value-investor 原样引用进 `risk_flags`。
+    ///
+    /// 三态还各自决定 `is_fallback_anchor`：只要锚不是当期真实 FCF 就必须为
+    /// `true`（f5 的置信度衰减门依赖它），**缺数态尤其不能漏**。
+    #[test]
+    fn dcf_basis_tells_three_states_apart() {
+        let y = 1.0e8;
+
+        // (a) 真为负：净利为正而真实 FCF ≤ 0 ⇒ 文案说「当期FCF≤0」且判据 ② 命中
+        let mut neg = report("2025-12-31", Some(100.0 * y), Some(8.0));
+        neg.operating_cash_flow = Some(10.0 * y);
+        neg.capital_expenditure = Some(30.0 * y); // FCF = −20 亿
+        let a = compute_dcf(&[neg], shares_of(10.0e8), 50.0, None).2.expect("应回传快照");
+        assert!(a.is_fallback_anchor, "负 FCF 应走 fallback 锚定");
+        assert!(a.basis.contains("当期FCF≤0"), "真为负应说明当期FCF≤0，实得: {}", a.basis);
+        assert!(!a.basis.contains("缺失"), "真为负不是数据缺失，实得: {}", a.basis);
+        // 2026-09-21：`fcf_data_missing` 必须与 `is_fallback_anchor` **方向相反**才对 ——
+        // 本分支两者都是 fallback，但**缺数标记必须为 false**（标的现金流属性 ≠ 我方采集缺陷）。
+        // 缺这条反向对照，把字段写成 `= is_fallback_anchor` 也能让 (b) 的正向断言全过。
+        assert!(!a.fcf_data_missing, "真为负不是采集缺陷，fcf_data_missing 不得为 true");
+        assert!(
+            !a.applicable,
+            "净利为正而真实 FCF 为负 ⇒ 判据②「符号相反」应命中并判不适用；\
+             修复前该列恒为 None 故此判据在生产上从未命中。signals={:?}",
+            a.applicability_signals
+        );
+
+        // (b) 数据缺失：文案必须说「缺失」，**不得**谎称当期FCF≤0，
+        //     且仍须标记为历史代理锚（否则 f5 衰减门在最该衰减的路径上失效）
+        let a = compute_dcf(
+            &[report("2025-12-31", Some(100.0 * y), Some(8.0))],
+            shares_of(10.0e8),
+            50.0,
+            None,
+        )
+        .2
+        .expect("应回传快照");
+        assert!(a.is_fallback_anchor, "缺数同样走 fallback 锚定（锚仍是历史代理）");
+        assert!(a.basis.contains("缺失"), "缺数应说明数据缺失，实得: {}", a.basis);
+        // 2026-09-21：缺数态**必须**为 true —— 这是 data-quality 上游缺口告警的唯一来源。
+        // 与 (a) 合并成一组「同 is_fallback_anchor、异 fcf_data_missing」的对照。
+        assert!(a.fcf_data_missing, "现金流量表数据缺失属我方采集缺陷，必须标记");
+        assert!(
+            !a.basis.contains("当期FCF≤0"),
+            "缺数时不得谎称当期FCF≤0（我方采集缺陷 ≠ 标的现金流为负），实得: {}",
+            a.basis
+        );
+
+        // (c) 有真实正 FCF ⇒ 不走 fallback，basis 为「当期FCF」，判据 ② 不命中
+        let mut pos = report("2025-12-31", Some(100.0 * y), Some(8.0));
+        pos.operating_cash_flow = Some(80.0 * y);
+        pos.capital_expenditure = Some(30.0 * y); // FCF = +50 亿，FCF/净利 = 0.5
+        let a = compute_dcf(&[pos], shares_of(10.0e8), 50.0, None).2.expect("应回传快照");
+        assert!(!a.is_fallback_anchor, "有真实正 FCF 时不应标记为历史代理锚");
+        assert_eq!(a.basis, "当期FCF");
+        assert!(!a.fcf_data_missing, "真实正 FCF 时不存在缺口");
+        assert!(a.applicable, "FCF/净利 = 0.5 ≥ 0.3 不应判不适用: {:?}", a.applicability_signals);
+    }
+
+    /// ⑥ `value_signal` 必须**能表达「高估」**。
+    ///
+    /// 修复前估值维度只加不减：`mos_pct` 为负落 `_ => {}` 加 0 分，而
+    /// F-Score 与护城河恒加 `9×5 + 100/5 = 45`（恰为「合理偏低」档阈值）
+    /// ⇒ 无论价格多高都稳落「合理偏低」。
+    #[test]
+    fn value_signal_can_express_overvaluation() {
+        // 300308 实测输入（2026-09-21，样本 ee770189）：
+        // 安全边际 −565.4%、F-Score 6、护城河 75、OE 收益率 1.3%
+        // 修复前 = 0 + 30 + 15 + 0 = 45 ⇒「合理偏低」，与同 payload 的
+        // `margin_of_safety.level`「无（高估风险）」直接矛盾。
+        assert_eq!(
+            value_signal_of(Some(-565.4), 6, 75, 1.3),
+            "高估",
+            "深度负安全边际 + 强 F-Score/护城河 不得落「合理偏低」"
+        );
+
+        // 反向对照：同样的 F-Score/护城河，仅安全边际转正 ⇒ 档位必须跟着变
+        assert_ne!(
+            value_signal_of(Some(-565.4), 6, 75, 1.3),
+            value_signal_of(Some(25.0), 6, 75, 1.3),
+            "档位必须对安全边际敏感 —— 这正是修复前缺失的性质"
+        );
+        assert_eq!(value_signal_of(Some(25.0), 6, 75, 1.3), "低估");
+
+        // 负向换档边界（与 `margin_of_safety.level` 的既有分组对齐，避免两处口径打架）
+        assert_eq!(value_signal_of(Some(-19.9), 6, 75, 1.3), "合理");
+        assert_eq!(value_signal_of(Some(-20.1), 6, 75, 1.3), "偏高");
+        // 单调性：安全边际越差，档位不得变好
+        let worse = value_signal_of(Some(-60.0), 6, 75, 1.3);
+        assert_eq!(worse, "高估", "−60% 安全边际应落「高估」，实得 {worse}");
+
+        // mos 缺失时不参与评分（保持原行为）
+        assert_eq!(value_signal_of(None, 6, 75, 1.3), "合理偏低");
+    }
+
     /// `report` 的 ROE 变体
     fn report_roe(date: &str, roe: f64) -> FinancialReport {
         let mut r = report(date, None, None);
@@ -3810,11 +4957,18 @@ mod valuation_tests {
             report("2025-12-31", Some(5.0e8), Some(0.30)),
             report("2024-12-31", Some(8.0e8), Some(0.48)),
         ];
-        let v = compute_graham_value(&financials, 7.91, None).expect("归一化后格雷厄姆值应可用");
+        let (v, a) =
+            compute_graham_value(&financials, 7.91, None).expect("归一化后格雷厄姆值应可用");
         assert!(v > 0.0);
+        // 2026-09-21: fixture 未提供 revenue_yoy ⇒ 走配置缺省值，
+        // 必须与「实测增长率」区分开（两者可信度不同，下游可能分别处置）。
+        assert!(a.growth_from_default, "缺 revenue_yoy 应标为缺省值，实际 {a:?}");
+        assert!(!a.growth_clamped_upper && !a.growth_clamped_lower, "缺省值不参与封顶判定：{a:?}");
         // 最新为 H1 累计且缺上年同期 → TTM 不可得 → 回退近 5 年报正 EPS 均值 = 0.39
-        // g 缺省用 DEFAULT_GROWTH（P1-A 后与 DCF 同源）→ v = 0.39 × (8.5 + 0.16)
-        let expected = 0.39 * (8.5 + 2.0 * DEFAULT_GROWTH);
+        // g 缺省用 DEFAULT_GROWTH = 0.12（P1-A 后与 DCF 同源），公式内换算为百分数 12
+        // ⇒ v = 0.39 × (8.5 + 2×12) × 4.4/4.4 = 0.39 × 32.5 = 12.675
+        // （2026-09-22 量纲修复后必须带 ×100 —— 期望值与生产式同形，改一侧必改另一侧）
+        let expected = 0.39 * (8.5 + 2.0 * DEFAULT_GROWTH * 100.0);
         assert!((v - expected).abs() < 1e-6, "v={v}, expected={expected}");
     }
 
@@ -3827,12 +4981,13 @@ mod valuation_tests {
             report("2025-12-31", Some(2.64e9), Some(2.64)), // 上年年报
             report("2025-06-30", Some(1.22e9), Some(1.22)), // 上年同期累计
         ];
-        let v = compute_graham_value(&financials, 118.94, None).expect("TTM 可还原时应可用");
+        let (v, _) = compute_graham_value(&financials, 118.94, None).expect("TTM 可还原时应可用");
         // TTM EPS = 2.64 + 1.18 − 1.22 = 2.60
-        let expected = 2.60 * (8.5 + 2.0 * DEFAULT_GROWTH);
+        // 2026-09-22 量纲修复：g 在公式内换算为百分数 ⇒ 乘数 8.5 + 2×12 = 32.5
+        let expected = 2.60 * (8.5 + 2.0 * DEFAULT_GROWTH * 100.0);
         assert!((v - expected).abs() < 1e-6, "v={v}, expected={expected}");
         // 回归护栏：绝不能退化成「直接用中报累计 EPS」
-        let interim_only = 1.18 * (8.5 + 2.0 * DEFAULT_GROWTH);
+        let interim_only = 1.18 * (8.5 + 2.0 * DEFAULT_GROWTH * 100.0);
         assert!(
             (v - interim_only).abs() > 1.0,
             "TTM 未生效，v={v} 仍贴近中报口径值 {interim_only}"
@@ -3843,11 +4998,27 @@ mod valuation_tests {
     #[test]
     fn graham_does_not_floor_negative_growth_to_zero() {
         let mut financials = vec![report("2025-12-31", Some(5.0e8), Some(1.0))];
-        financials[0].revenue_yoy = Some(-50.0); // −50% → g 取下界 −0.30
-        let v = compute_graham_value(&financials, 10.0, None).expect("年报口径应可用");
-        let expected = 1.0 * (8.5 + 2.0 * -0.30);
+        financials[0].revenue_yoy = Some(-50.0); // −50% → g 取下界
+        let (v, a) = compute_graham_value(&financials, 10.0, None).expect("年报口径应可用");
+        // 2026-09-22 量纲修复：g 在公式内换算为百分数 ⇒ 乘数 8.5 + 2×(−30) = −51.5
+        // （修复前误按小数算成 8.5 + 2×(−0.30) = 7.9）。
+        // ⚠️ 乘数为负 ⇒ `.max(0.0)` 把它兜为 **0**。这不是「把 g clamp 到 0」——
+        //   下方断言锁住 `a.growth` 仍取到下界 −0.30。「估值 0」纯粹来自乘法器为负，
+        //   是格雷厄姆原式的固有行为（原式中 g < −4.25% 即出现负乘数），
+        //   不是本次修复新引入的缺陷，故**不加**额外兜底去掩盖它。
+        //   业务影响：此类标的 `upsidePct` 恒为 −100%。本次影响面所及的 23 个历史
+        //   样本中 `g < 0` 者为 **0**（21 个 g=0 完全不受影响、2 个 g=+30%），
+        //   故该分支尚未在真实数据上暴露；一旦出现，f5 融合须按
+        //   `growth_clamped_lower` 单独降信，而不是让 −100% 直接参与加权。
+        let expected = (1.0 * (8.5 + 2.0 * MIN_GROWTH * 100.0)).max(0.0);
         assert!((v - expected).abs() < 1e-6, "v={v}, expected={expected}");
+        assert!((v - 0.0).abs() < 1e-12, "负乘数应由 .max(0.0) 兜为 0，实际 {v}");
         assert!(v < 1.0 * 8.5, "负增长估值应低于零增长基准 8.5：{v} vs 8.5");
+        // 2026-09-21: 下界方向的偏差与上界相反（内在价值偏高 ⇒ 看多被夸大），
+        // 单独标记以便将来分别处置；此处锁住「下界命中必须置位」。
+        assert!(a.growth_clamped_lower, "g 封底必须置位，实际 {a:?}");
+        assert!(!a.growth_clamped_upper, "下界命中时不得同时置上界：{a:?}");
+        assert!((a.growth - MIN_GROWTH).abs() < 1e-12, "g 应取到 {MIN_GROWTH}");
     }
 
     /// P1-A: bond_yield 配为 0 时不得返回 inf（除零防护）
@@ -3859,6 +5030,40 @@ mod valuation_tests {
             compute_graham_value(&financials, 10.0, Some(&cfg)).is_none(),
             "bond_yield=0 应返回 None 而非 inf"
         );
+    }
+
+    /// 2026-09-21: 增长率顶死上界必须能被下游观测到（否则无法对 graham 腿降信）。
+    ///
+    /// 300308 实测：`revenue_yoy = 182.5%` ⇒ `g` 被 `MAX_GROWTH` 封顶在 0.30，
+    /// 于是 `graham.intrinsicValue = EPS × 68.5`（量纲修复后；修复前误按小数算作
+    /// `EPS × 9.1`）⇒ 现价 926.43 下 `upsidePct` 从 **−81.9%** 翻转为 **+36.6%**
+    /// （`18.47×68.5 = 1265.20` vs 现价 926.43）。这正是量纲修复影响的 2 个符号
+    /// 翻转样本之一（另一个 688114），其余 21 个样本因 `g = 0` 完全不受影响。
+    /// 该输出可被纯 PE 恒等式 `(8.5+2g)×4.4/Y ÷ PE − 1` 复现，两边 `EPS` 相消
+    /// ⇒ 对高 PE 标的几乎不含公司特定信息。本测试锁住「标记必须置位」。
+    #[test]
+    fn graham_flags_growth_clamped_upper() {
+        let mut financials = vec![report("2025-12-31", Some(2.05e10), Some(18.47))];
+        financials[0].revenue_yoy = Some(182.5); // 远超 MAX_GROWTH
+        let (v, a) = compute_graham_value(&financials, 926.43, None).expect("应可用");
+        assert!(a.growth_clamped_upper, "g 顶死上界必须置位，实际 {a:?}");
+        assert!(!a.growth_clamped_lower, "上界命中时不得同时置下界：{a:?}");
+        assert!(!a.growth_from_default, "有 revenue_yoy 时不得标为缺省值：{a:?}");
+        assert!(
+            (a.growth - MAX_GROWTH).abs() < 1e-12,
+            "g 应取到上界 {MAX_GROWTH}，实际 {}",
+            a.growth
+        );
+        // 形态护栏：值必须由「EPS × (8.5+2g) × 4.4/Y」给出（g 以**百分数**代入），
+        // 不得退化成别的东西 ⇒ 18.47 × (8.5 + 2×30) × 4.4/4.4 = 18.47 × 68.5 = 1265.195
+        let expected = 18.47 * (8.5 + 2.0 * MAX_GROWTH * 100.0) * 4.4 / a.bond_yield;
+        assert!((v - expected).abs() < 1e-6, "v={v}, expected={expected}");
+        // 反向对照：同样 fixture 但营收增速落在区间内 ⇒ 标记必须为 false，
+        // 证明上面的 true 不是恒真（不然门禁无区分力）
+        financials[0].revenue_yoy = Some(12.0);
+        let (_, b) = compute_graham_value(&financials, 926.43, None).expect("应可用");
+        assert!(!b.growth_clamped_upper, "区间内不得置位，实际 {b:?}");
+        assert!((b.growth - 0.12).abs() < 1e-12, "g 应取实测值，实际 {}", b.growth);
     }
 
     /// V74: 全历史 EPS≤0 → None
@@ -3938,18 +5143,19 @@ mod valuation_tests {
         //    提到外层作用域的原因，本断言守住它不被改回去。
         assert!(a.is_fallback_anchor, "当期 FCF ≤ 0 应走 fallback 锚定");
 
-        // ④ 判据 ③ **不**命中：符号一致性约束后永续被压到 0，终值占比 70.6% → ~66%。
-        //    把「③ 是否命中」钉死，防止上方常量与字段的文档注释漂移。
+        // ④ 判据 ③ **已于 2026-09-23 撤销** —— 终值占比不再进入适用性判定。
+        //    本断言保留「③ 不得命中」这一形态（`applicability_signals` 里不该出现
+        //    「终值现值」字样），但理由已从「占比低于阈值」变为「该判据不存在了」；
+        //    `terminal_value_ratio` 仍是诊断字段，故只断言其取值范围合法。
         assert!(a.perpetual_clamped_by_negative_growth);
         assert!(
-            a.terminal_value_ratio < TERMINAL_RATIO_MAX,
-            "约束后终值占比应低于 {}%，实际 {:.1}%",
-            TERMINAL_RATIO_MAX * 100.0,
-            a.terminal_value_ratio * 100.0
+            a.terminal_value_ratio > 0.0 && a.terminal_value_ratio < 1.0,
+            "终值占比仍须照常产出（诊断字段），实际 {}",
+            a.terminal_value_ratio
         );
         assert!(
             !a.applicability_signals.iter().any(|s| s.contains("终值现值")),
-            "③ 不应命中: {:?}",
+            "③ 已撤销，不得再产出该信号: {:?}",
             a.applicability_signals
         );
     }
@@ -4006,38 +5212,220 @@ mod valuation_tests {
         assert!(a.is_fallback_anchor, "缺失会走 fallback 锚定，由该标记负责降级");
     }
 
-    /// 判据 ③：预测期收缩 + 估值几乎全由永续终值贡献 ⇒ 结论不可检验。
+    /// 【2026-09-23】判据 ③ 已撤销：**终值占比不得**再影响 `applicable`。
     ///
-    /// 越过 70% 需要**低折现率** —— 这不是造数据，而是低利率环境下的真实形态
-    /// （`dcf_discount_rate` 是面板可配的扁平参数，不是写死的常量）。
-    /// 同一份财报只改折现率 6.0% → 8.5%，判据从命中变不命中 ⇒ 证明阈值真有区分度。
+    /// 本测试是该撤销的**负向锁** —— 防止有人「顺手把 ③ 加回来」：
+    /// 同一份财报、同一形态，只改折现率使 `tvr` 跨过 0.7，`applicable` 必须**不变**。
+    ///
+    /// 为什么不许它当判据（复算见 `output/sci7-tvr-threshold.mjs`）：
+    /// `tvr > 0.7` 的临界点落在 `g > 0` 上（`p` 取 2% 或 4% 得出同一临界值）
+    /// ⇒ 命中集 ≈ {增长率 ≥ 0}，实际判的是「预测期非衰退」，
+    ///   与它声称的「结论由永续假设独裁」无关 ⇒ 零区分力。
+    ///
+    /// 前身 `dcf_terminal_dominance_signal_tracks_discount_rate` 断言的是相反命题
+    /// （折现率 6% 应命中 ③），已随判据一并撤销。
     #[test]
-    fn dcf_terminal_dominance_signal_tracks_discount_rate() {
+    fn dcf_terminal_ratio_does_not_affect_applicability() {
         let build = || {
             let mut r = report("2025-12-31", Some(10.0e8), Some(0.6));
             r.debt_ratio = Some(30.0);
             r.free_cash_flow = Some(6.0e8); // FCF/净利 = 0.6 ⇒ 不触发判据 ②
-            r.revenue_yoy = Some(-6.05); // 预测期收缩
+            r.revenue_yoy = Some(10.0); // 正增长 ⇒ 永续不被压回 ⇒ tvr 结构性偏高
             vec![r]
         };
-        // 低折现率（6%）⇒ 终值占比 > 70% ⇒ 命中 ③
+        // 低折现率 ⇒ 终值倍数 1/(d−p) 上升 ⇒ tvr 更高。这不是造数据：折现率是面板可配参数。
         let cfg_low =
             ValuationConfig::from_flat_arguments(&serde_json::json!({ "dcf_discount_rate": 6.0 }))
                 .expect("扁平参数应可解析");
-        let a =
+        let high_tvr =
             compute_dcf(&build(), shares_of(10.0e8), 15.0, Some(&cfg_low)).2.expect("应回传快照");
+        let base = compute_dcf(&build(), shares_of(10.0e8), 15.0, None).2.expect("应回传快照");
+
+        // 前置断言：确实造出了「tvr > 0.7」的形态 —— 否则本测试什么都没测到。
         assert!(
-            a.applicability_signals.iter().any(|s| s.contains("终值现值")),
-            "折现率 6% 下终值占比 {:.1}% 应命中 ③: {:?}",
-            a.terminal_value_ratio * 100.0,
+            high_tvr.terminal_value_ratio > 0.7,
+            "测试前提不成立：低折现率下 tvr 应 > 0.7，实际 {:.1}%",
+            high_tvr.terminal_value_ratio * 100.0
+        );
+        assert!(
+            high_tvr.terminal_value_ratio > base.terminal_value_ratio,
+            "低折现率应抬高 tvr：{:.1}% vs {:.1}%",
+            high_tvr.terminal_value_ratio * 100.0,
+            base.terminal_value_ratio * 100.0
+        );
+
+        // 断言本体：tvr 跨越 0.7 不得产生任何适用性信号。
+        for (label, a) in [("d=6%", &high_tvr), ("d=8.5%", &base)] {
+            assert!(
+                !a.applicability_signals.iter().any(|s| s.contains("终值现值")),
+                "{label}: 终值占比不得再作为适用性判据（③ 已于 2026-09-23 撤销）: {:?}",
+                a.applicability_signals
+            );
+        }
+        assert!(base.applicable, "基准配置不应命中任何判据: {:?}", base.applicability_signals);
+        assert!(
+            high_tvr.applicable,
+            "低折现率配置亦不应命中任何判据: {:?}",
+            high_tvr.applicability_signals
+        );
+        // 撤销的是「判据」而不是「数值」：诊断字段仍须产出合法值。
+        assert!(high_tvr.terminal_value_ratio > 0.0 && high_tvr.terminal_value_ratio < 1.0);
+    }
+
+    /// 终值分母**利差守卫**（2026-09-23 新增，判据 ⑤）：
+    /// `p ≥ d − MIN_TERMINAL_SPREAD` 是**用户可配出来**的，而原实现只在算式里
+    /// `.max(0.001)` 兜底 ⇒ 终值被放大到 `FCF₅ × (1+p) / 0.001`
+    /// （`p = 100%` 时约 2000 倍、正常利差下约 15 倍）且**静默无日志**。
+    ///
+    /// 两侧都要钉：越界配置必须钳位 + 上报；**正常配置不得被误报**
+    /// （否则判据会退化成「让所有标的的 DCF 腿都退出」，那是另一种失效）。
+    #[test]
+    fn dcf_perpetual_spread_violation_is_reported() {
+        // ⚠️ 扁平参数值必须**具名复用**（下方 `CFG_*`）。
+        //    本测试首版把 json 里写死的 `8.5` 与断言里的模块常量 `DISCOUNT_RATE` 混用，
+        //    而当时两者恰好都等于 `0.085` ⇒ **假绿**。常量一改（0.085 → 0.077），
+        //    断言立刻失败并报「应被钳到 0.062，实际 0.07」—— 它其实在拿**配置的 d**
+        //    与**模块常量**相减。这正是「手抄值恰好相等」的形态（`MEMORY-RULES.md` K 组）。
+        const CFG_D_PCT: f64 = 8.5;
+        const CFG_P_PCT: f64 = 9.0;
+        let build = || {
+            let mut r = report("2025-12-31", Some(10.0e8), Some(0.6));
+            r.debt_ratio = Some(30.0);
+            r.free_cash_flow = Some(6.0e8); // FCF/净利 = 0.6 ⇒ 不触发判据 ②
+            r.revenue_yoy = Some(10.0);
+            vec![r]
+        };
+
+        // (a) 越界：p = 9% 同时越过两条上限（利差 7.0% / r_f 1.7%）⇒ 命中 ⑤
+        let cfg = ValuationConfig::from_flat_arguments(&serde_json::json!({
+            "dcf_perpetual_rate": CFG_P_PCT,
+            "dcf_discount_rate": CFG_D_PCT,
+        }))
+        .expect("扁平参数应可解析");
+        let (tiers, _, a) = compute_dcf(&build(), shares_of(10.0e8), 15.0, Some(&cfg));
+        let a = a.expect("应回传快照");
+        assert!(!a.applicable, "永续增长率越界必须判不适用: {:?}", a.applicability_signals);
+        let sig = a.applicability_signals.join("；");
+        assert!(sig.contains("利差"), "原因应点名利差约束: {sig}");
+        assert!(sig.contains("无风险利率"), "原因应点名无风险利率约束: {sig}");
+        // 两条上限里更紧的是 r_f（7.0% vs 1.7%）⇒ 生效值必须取 r_f，而不是利差上界。
+        // 这条断言正是首版缺失的：首版只比「d − 1.5pp」，一旦 r_f 更紧就会漏判。
+        assert_eq!(
+            a.perpetual_growth, MAX_PERPETUAL_GROWTH,
+            "生效值应取更紧的上限（r_f），实际 {}",
+            a.perpetual_growth
+        );
+        assert!(
+            a.perpetual_growth < CFG_D_PCT / 100.0 - MIN_TERMINAL_SPREAD,
+            "本用例须落在「r_f 更紧」的区域，否则覆盖不到该分支"
+        );
+        assert_eq!(
+            a.configured_perpetual_growth,
+            CFG_P_PCT / 100.0,
+            "配置原值必须原样保留以供对账，不得被静默丢弃"
+        );
+        // 零破坏性：三档数值仍须产出且不乱序（旧模板依赖它们）。
+        let (low, mid, high) = tiers.expect("不适用也必须照常产出三档数值（零破坏性）");
+        assert!(low <= mid && mid <= high, "档位序不得被新判据破坏");
+
+        // (c) 覆盖**另一分支**：`d` 配到 3% ⇒ 利差上界 1.5pp 比 `r_f` 1.7% 更紧
+        //     ⇒ 生效值取利差上界，且文案必须点名「终值分母利差」而不是「无风险利率」。
+        //     （缺这条，`spread_is_binding` 的那一侧永远不被执行 —— 上报文案可能撒谎。）
+        let cfg2 = ValuationConfig::from_flat_arguments(&serde_json::json!({
+            "dcf_perpetual_rate": 5.0,
+            "dcf_discount_rate": 3.0,
+        }))
+        .expect("扁平参数应可解析");
+        let a2 = compute_dcf(&build(), shares_of(10.0e8), 15.0, Some(&cfg2)).2.expect("应回传快照");
+        assert!(
+            (a2.perpetual_growth - (0.03 - MIN_TERMINAL_SPREAD)).abs() < 1e-12,
+            "d = 3% 时利差上界 {:.4} 应比 r_f {:.4} 更紧，实际生效值 {}",
+            0.03 - MIN_TERMINAL_SPREAD,
+            MAX_PERPETUAL_GROWTH,
+            a2.perpetual_growth
+        );
+        assert!(
+            a2.applicability_signals.join("；").contains("终值分母利差"),
+            "应点名「终值分母利差」为更紧的约束: {:?}",
+            a2.applicability_signals
+        );
+
+        // (b) 反向：默认配置（p = PERPETUAL_GROWTH、d = DISCOUNT_RATE）**不得**命中 ⑤
+        let a = compute_dcf(&build(), shares_of(10.0e8), 15.0, None).2.expect("应回传快照");
+        assert!(
+            a.applicability_signals.is_empty(),
+            "默认配置不应被误报: {:?}",
             a.applicability_signals
         );
-        assert!(!a.applicable);
+        assert_eq!(a.perpetual_growth, PERPETUAL_GROWTH);
+    }
 
-        // 默认折现率（8.5%）⇒ 占比降到 ~63% ⇒ **不**命中（反向断言）
-        let a = compute_dcf(&build(), shares_of(10.0e8), 15.0, None).2.expect("应回传快照");
-        assert!(a.applicable, "8.5% 折现率下不应命中 ③: {:?}", a.applicability_signals);
-        assert!(a.terminal_value_ratio < TERMINAL_RATIO_MAX);
+    /// 乐观档增长率上界（2026-09-23 修复）：`g × 1.5` **不得**被基准上界吞掉。
+    ///
+    /// 原实现乐观档与基准档共用 `max_growth` 上界 ⇒ `g ≥ 20%` 时 `g × 1.5` 被砍回
+    /// 基准档（`g = 30%` 时实际乘子 = 1.0），而面板文案仍声称「×1.5」
+    /// ⇒ **口径与实算不符**。全库 6 条高终值占比样本里 2 条 `g` 正好顶在 30%。
+    #[test]
+    fn dcf_high_tier_honors_growth_scale_when_base_at_cap() {
+        // yoy = 60% ⇒ growth 被 clamp 到 MAX_GROWTH(30%) ⇒ 乐观档应为 30% × 1.5 = 45%
+        let mut r = report("2025-12-31", Some(5.0e8), Some(0.3));
+        r.revenue_yoy = Some(60.0);
+        let (_, _, a) = compute_dcf(&[r], shares_of(10.0e8), 15.0, None);
+        let a = a.expect("应回传参数快照");
+        assert_eq!(a.growth, MAX_GROWTH, "基准增长率应被 clamp 到 {}%", MAX_GROWTH * 100.0);
+        assert!(
+            (a.high_growth - MAX_GROWTH * HIGH_GROWTH_SCALE_POS).abs() < 1e-12,
+            "乐观档应为 {}% = MAX_GROWTH × {}，实际 {}%（等于基准档 ⇒ 乘子被吞）",
+            MAX_GROWTH * HIGH_GROWTH_SCALE_POS * 100.0,
+            HIGH_GROWTH_SCALE_POS,
+            a.high_growth * 100.0
+        );
+        assert!(
+            a.high_growth > a.growth,
+            "上界修复后乐观档必须严格高于基准档：{} vs {}",
+            a.high_growth,
+            a.growth
+        );
+    }
+
+    /// 悲观情景的折现率上浮（`RISK_STRESS_SPREAD`）：**只加在悲观档**。
+    ///
+    /// 依据：折现率是三参数中弹性最大的（300642 终态参数实测 `|E_d| = 1.28` vs
+    /// `E_g = 0.70` vs `E_p = 0.17`；`d` 上浮 1pp 使估值变动 1.40 倍 >
+    /// `p` 整个 ×0.7~×1.3 档的 1.11 倍）⇒ 把它排除在区间外会使区间宽度**归因错误**。
+    /// ⚠️ 弹性随参数变化（`E_p ∝ p/(d−p)²`），引用前须按现行常量复算，见 `sci21`。
+    /// 乐观档**不**下调折现率（上界只由经营假设决定，不靠降要求回报灌水）。
+    ///
+    /// 判据：同一 `g`/`p` 下，「悲观档」必须严格低于「同参数但用基准折现率」的值；
+    /// 且基准档取值必须与 `DISCOUNT_RATE` 一致（未被动过）。
+    #[test]
+    fn dcf_pessimistic_tier_applies_higher_discount_rate() {
+        let mut r = report("2025-12-31", Some(10.0e8), Some(0.6));
+        r.debt_ratio = Some(30.0);
+        r.free_cash_flow = Some(6.0e8);
+        r.revenue_yoy = Some(12.0);
+        let (tiers, _, a) = compute_dcf(&[r], shares_of(10.0e8), 15.0, None);
+        let (low, _, _) = tiers.expect("应有三档");
+        let a = a.expect("应回传参数快照");
+        assert_eq!(a.discount_rate, DISCOUNT_RATE, "基准档折现率不得被上浮");
+
+        // 手工复算「悲观档若沿用基准折现率」的值，断言真实 low 更低。
+        let fcf_ps = 6.0e8 / 10.0e8;
+        let no_stress = {
+            let mut pv = 0.0;
+            let mut cf = fcf_ps;
+            for y in 1..=FORECAST_YEARS {
+                cf *= 1.0 + a.low_growth;
+                pv += cf / (1.0 + DISCOUNT_RATE).powi(y);
+            }
+            let tv = cf * (1.0 + a.low_perpetual) / (DISCOUNT_RATE - a.low_perpetual);
+            pv + tv / (1.0 + DISCOUNT_RATE).powi(FORECAST_YEARS)
+        };
+        assert!(
+            low < no_stress,
+            "悲观档必须因要求回报上浮而更低：实际 {low:.4} vs 未上浮 {no_stress:.4}"
+        );
+        assert!(low > 0.0, "悲观档仍须为正值（上浮不得把估值打成负/零）：{low}");
     }
 
     /// 永续增长率符号一致性：**同一份财报、同一个配置**，仅因增长方向不同而分道。
@@ -4065,7 +5453,15 @@ mod valuation_tests {
         assert!(!b.perpetual_clamped_by_negative_growth);
 
         // 约束必须**真实改变数值**，不能只翻一个标记 ——
-        // 用同一公式把永续塞回 +4% 复算，若两侧接近则说明 `perpetual_growth` 根本没被用上。
+        // 用同一公式把永续按**配置原值**塞回复算，若两侧接近则说明 `perpetual_growth`
+        // 根本没被用上。
+        //
+        // ⚠️ 判据必须是**相对**的：本测试初版写 `> mid_clamped + 1.0`（绝对元），
+        //    那是在 `PERPETUAL_GROWTH = 4%` 下标定的。参数降到 1.3% 后同一约束的
+        //    绝对影响缩到 **0.86 元**（相对 **14.4%**，语义上毫无削弱）⇒ 断言假红。
+        //    绝对容差把「测试的区分力」与「参数的取值」耦死，属**随参数失效**的写法。
+        //    改为相对底 5%：当前实测 14.4%，留 2.9 倍余量；若约束真被空转（差值→0）
+        //    仍会红。
         let fcf_ps = 6.0e8 / 10.0e8;
         let (g, p, d, n) = (-0.0605_f64, PERPETUAL_GROWTH, DISCOUNT_RATE, FORECAST_YEARS);
         let mut pv = 0.0;
@@ -4077,9 +5473,67 @@ mod valuation_tests {
         let with_uncapped_perpetual = pv + (cf * (1.0 + p) / (d - p)) / (1.0 + d).powi(n);
         let mid_clamped = shrink.expect("应可用").1;
         assert!(
-            with_uncapped_perpetual > mid_clamped + 1.0,
-            "压回前 mid({with_uncapped_perpetual}) 与压回后({mid_clamped}) 无显著差异 \
-             ⇒ `perpetual_growth` 未参与实际计算，约束是空转"
+            with_uncapped_perpetual > mid_clamped * 1.05,
+            "压回前 mid({with_uncapped_perpetual}) 与压回后({mid_clamped}) 差异不足 5% \
+             （相对差 {:.4}）⇒ `perpetual_growth` 未参与实际计算，约束是空转",
+            (with_uncapped_perpetual - mid_clamped) / mid_clamped
         );
+    }
+
+    // ── 判据 ④（2026-09-21）：亏损公司的符号缺口 ──
+
+    /// **净利为负** + 锚定 FCF 收益率极低 ⇒ 判不适用。
+    ///
+    /// 回归对象：判据 ② 的两条形态（符号相反 / `FCF/净利 < 0.3`）都写在
+    /// `net_profit.filter(|v| *v > 0.0)` 之内 ⇒ **净利为负时整段短路**，
+    /// 于是「净利为正但现金流差」的公司被拦下，**真亏损**的反被放行。
+    ///
+    /// 生产样本（2026-09-21，688114 华大智造）：净利 −2.22 亿、TTM FCF 3.588 亿、
+    /// 市值 303.87 亿 ⇒ 收益率 **1.18%**；DCF 三档 16.33 / 24.23 / 38.84 元
+    /// 对现价 73.11（`upsidePct = −66.9`），却落 `applicable = true`
+    /// 并以 `is_fallback_anchor = false` **全额权重**进 f5。
+    ///
+    /// 本用例直接复刻该样本的四个量（股本 / 现价 / FCF / 净利）。
+    #[test]
+    fn dcf_inapplicable_for_loss_making_with_tiny_fcf_yield() {
+        let mut latest = report("2026-06-30", Some(-2.2214e8), Some(-0.53));
+        latest.debt_ratio = Some(29.0); // 判据 ① 不触发
+        latest.revenue_yoy = Some(18.91); // 正增长 ⇒ 判据 ③ 不触发
+        latest.free_cash_flow = Some(3.5876e8); // 当期真实正 FCF（判据 ② 短路）
+        let a = compute_dcf(&[latest], shares_of(4.15634e8), 73.11, None).2.expect("应回传快照");
+
+        assert!(
+            !a.applicable,
+            "净利为负 + FCF 收益率 1.18% 应判不适用，实得 signals={:?}",
+            a.applicability_signals
+        );
+        let reason = a.inapplicable_reason.as_deref().expect("不适用必须给出原因");
+        assert!(reason.contains("FCF 收益率"), "原因应含 FCF 收益率判据: {reason}");
+        // 零破坏性：不适用 ≠ 不可用，三档数值仍须产出。
+        assert_eq!(a.basis, "当期FCF", "锚仍应是当期真实 FCF");
+        assert!(!a.is_fallback_anchor, "本条不是 fallback 锚定，两个标记正交");
+    }
+
+    /// **反向断言**：净利为负但现金流充沛（FCF 收益率 20%）**不得**判不适用。
+    ///
+    /// 缺这条，实现可以退化成「净利 ≤ 0 即不适用」而全绿 —— 那会误伤
+    /// 「一次性减值致亏、经营现金流正常」的公司，也与 V74「周期底部用
+    /// 历史正净利归一化锚定」的设计直接冲突。判据必须**两条并列**。
+    #[test]
+    fn dcf_applicable_for_loss_making_with_healthy_fcf_yield() {
+        // 净利 −1 亿（如一次性减值），FCF +20 亿，市值 10 元 × 10 亿股 = 100 亿
+        // ⇒ 收益率 20%，远高于阈值 ⇒ DCF 口径成立
+        let mut latest = report("2026-06-30", Some(-1.0e8), Some(-0.1));
+        latest.debt_ratio = Some(30.0);
+        latest.revenue_yoy = Some(8.0);
+        latest.free_cash_flow = Some(20.0e8);
+        let a = compute_dcf(&[latest], shares_of(10.0e8), 10.0, None).2.expect("应回传快照");
+
+        assert!(
+            a.applicable,
+            "净利为负但 FCF 收益率 20% 不应判不适用: {:?}",
+            a.applicability_signals
+        );
+        assert_eq!(a.inapplicable_reason, None);
     }
 }

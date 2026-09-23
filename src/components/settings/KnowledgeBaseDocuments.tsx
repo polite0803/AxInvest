@@ -3,6 +3,7 @@
 import { EmbeddingModelSelect } from "@/components/shared/EmbeddingModelSelect";
 import { IconEditor } from "@/components/shared/IconEditor";
 import { KnowledgeBaseIcon } from "@/components/shared/KnowledgeBaseIcon";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, listen, logIpcError } from "@/lib/invoke";
 import { useKnowledgeStore, useSettingsStore, useUIStore } from "@/stores";
 import type {
@@ -319,7 +320,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
       setModelList(updated);
       messageApi.success(t("settings.rag.modelDownloaded"));
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setDownloading(null);
     }
@@ -332,7 +333,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
       const updated = await invoke<any[]>("list_local_models");
       setModelList(updated);
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     }
   };
 
@@ -550,7 +551,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
         messageApi.success(summary);
       }
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setImporting(false);
     }
@@ -580,7 +581,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
       );
       setSearchResults(results.toSorted((a, b) => a.score - b.score));
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setSearching(false);
     }
@@ -602,7 +603,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
         );
         setChunks(result);
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
         setChunks([]);
       } finally {
         setChunksLoading(false);
@@ -627,7 +628,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
         }),
       );
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setExtracting(false);
     }
@@ -645,7 +646,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
     } catch (e) {
       setRebuildingIndex(false);
       rebuildingRef.current = false;
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     }
   }, [base.id, loadDocuments, messageApi]);
 
@@ -754,7 +755,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                   next.delete(record.id);
                   return next;
                 });
-                messageApi.error(String(e));
+                showBackendError(messageApi, e);
               }
             }}
           >
@@ -881,7 +882,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                   next.delete(record.id);
                   return next;
                 });
-                messageApi.error(String(e));
+                showBackendError(messageApi, e);
               }
             }}
           >
@@ -905,7 +906,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                 });
                 setChunks((prev) => prev.filter((c) => c.id !== record.id));
               } catch (e) {
-                messageApi.error(String(e));
+                showBackendError(messageApi, e);
               }
             }}
           >
@@ -1168,7 +1169,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
             invoke("rebuild_knowledge_index", { baseId: base.id }).catch(
               (e) => {
                 rebuildingRef.current = false;
-                messageApi.error(String(e));
+                showBackendError(messageApi, e);
               },
             );
           }
@@ -1645,7 +1646,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                 loadDocuments(base.id);
                 messageApi.success(t("settings.knowledge.clearSuccess"));
               } catch (e) {
-                messageApi.error(String(e));
+                showBackendError(messageApi, e);
               }
             }}
           >
@@ -1857,10 +1858,10 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
                   next.delete(chunkViewId);
                   return next;
                 });
-                messageApi.error(String(e));
+                showBackendError(messageApi, e);
               });
             } catch (e) {
-              messageApi.error(String(e));
+              showBackendError(messageApi, e);
             } finally {
               setChunkSaving(false);
             }
@@ -1915,7 +1916,7 @@ export function KnowledgeBaseDocuments({ base }: { base: KnowledgeBase }) {
             setAddChunkOpen(false);
             setAddChunkContent("");
           } catch (e) {
-            messageApi.error(String(e));
+            showBackendError(messageApi, e);
           } finally {
             setAddChunkSaving(false);
           }

@@ -19,8 +19,8 @@ color: "#FF6B6B"
 
 - `get_hot_stocks` — 热门股票列表（按关注度/资金流入排序）
 - `get_cls_flash` — 财联社电报快讯
-- `get_dragon_tiger_list` — 龙虎榜数据
-- `get_north_flow` — 北向资金流向
+- `get_market_dragon_tiger` — 全市场龙虎榜（每日上榜股票 + 净买额排名）
+- `get_north_bound_flow` — 北向资金流向（沪深股通）
 
 ## 输出格式
 

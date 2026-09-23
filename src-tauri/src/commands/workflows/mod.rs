@@ -97,7 +97,7 @@ pub async fn workflow_execute(
     workflow_id: String,
     model_id: Option<String>,
     provider_id: Option<String>,
-    mut variables: Option<Vec<axagent_harness::workflow_types::Variable>>,
+    variables: Option<Vec<axagent_harness::workflow_types::Variable>>,
     max_concurrent: Option<usize>,
     conversation_id: Option<String>,
     input: Option<serde_json::Value>,
@@ -193,36 +193,34 @@ pub async fn workflow_execute(
         let user_input_ref = input.clone();
         opts.input = input;
 
-        // ── 对话驱动模式：自动加载模板变量 ──
-        // 当 conversation_id 存在时，从会话获取 workflow_template_id，
-        // 从数据库加载模板变量定义（如 stock_code 等），合并到执行选项。
-        // 这样即使前端没有显式传递 variables，模板定义的变量也能被正确注入。
-        if let Some(ref conv_id) = conversation_id {
-            if let Ok(conv) = conversation::get_conversation(&db, conv_id).await {
-                if let Some(ref template_id) = conv.workflow_template_id {
-                    if let Ok(Some(template_model)) =
-                        workflow_template::get_workflow_template(&db, template_id).await
-                    {
-                        let template_data =
-                            workflow_template::template_model_to_data(&template_model);
-                        let template_vars = template_data.variables;
-                        if !template_vars.is_empty() {
-                            // 前端显式传入的变量优先级高于模板默认值
-                            let mut merged = template_vars;
-                            if let Some(ref mut front_vars) = variables {
-                                for fv in front_vars {
-                                    if let Some(pos) = merged.iter().position(|m| m.name == fv.name)
-                                    {
-                                        merged[pos] = fv.clone();
-                                    } else {
-                                        merged.push(fv.clone());
-                                    }
-                                }
-                            }
-                            opts = opts.with_variables(merged);
+        // ── 自动加载模板变量（**按 workflow_id 直查**，不再依赖会话标记）──
+        //
+        // 原实现要求「`conversation_id` 非空 **且** 该会话的 `workflow_template_id`
+        // 已设置」两个条件同时成立才加载。PG 实测（D8 取证）：
+        // `stock_analyses.conversation_id` 对应的会话该列**全为 NULL** ⇒ 模板变量
+        // 从未被注入 ⇒ tool 节点 `input_mapping`（如
+        // `dcf_growth_rate <- value_dcf_growth_rate`）解析不到 ⇒ **静默回退模块常量**，
+        // 与工作区路径给出两套估值（详见 `AUDIT-300642-run-variance-2026-09-22.md` §13）。
+        //
+        // 本命令本就持有 `workflow_id`，据此直查模板即可 —— 比"从会话反查模板"更直接，
+        // 也不再受会话元数据是否完整的影响。
+        if let Ok(Some(template_model)) = workflow_template::get_workflow_template(&db, &wid).await
+        {
+            let template_vars =
+                workflow_template::template_model_to_data(&template_model).variables;
+            if !template_vars.is_empty() {
+                // 前端显式传入的变量优先级高于模板默认值
+                let mut merged = template_vars;
+                if let Some(ref front_vars) = variables {
+                    for fv in front_vars {
+                        if let Some(pos) = merged.iter().position(|m| m.name == fv.name) {
+                            merged[pos] = fv.clone();
+                        } else {
+                            merged.push(fv.clone());
                         }
                     }
                 }
+                opts = opts.with_variables(merged);
             }
         }
 

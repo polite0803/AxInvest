@@ -1,6 +1,6 @@
 import { useStockJump } from "@/hooks/useStockJump";
 import i18n from "@/i18n";
-import { translateFailureText } from "@/lib/errorI18n";
+import { showBackendError, translateFailureText } from "@/lib/errorI18n";
 import { invoke, listen, TimeoutError as InvokeTimeoutError } from "@/lib/invoke";
 import {
   type SerenityCandidate,
@@ -1026,7 +1026,7 @@ export function SerenityScreeningPanel() {
         setSerenityHistory((prev) => prev.filter((r) => r.generatedAt !== row.generatedAt));
         setSerenitySelected((prev) => prev.filter((g) => g !== row.generatedAt));
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
       } finally {
         setSerenityDeleting(false);
       }
@@ -1750,7 +1750,7 @@ export function SerenityScreeningPanel() {
                     setSerenityHistory((prev) => prev.filter((r) => !serenitySelected.includes(r.generatedAt)));
                     setSerenitySelected([]);
                   } catch (e) {
-                    messageApi.error(String(e));
+                    showBackendError(messageApi, e);
                   }
                   setSerenityDeleting(false);
                 }}

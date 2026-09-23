@@ -1,6 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
+import { getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { ArrowRightOutlined, HistoryOutlined } from "@ant-design/icons";
 import { Button, Card, Spin, Tag, Tooltip } from "antd";
@@ -12,7 +13,17 @@ import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 
 interface DecisionComparison {
   analysisDate: string;
+  /** 决策档位（方向强度轴，中文存储形态：买入 / 增持 / 持有 / 观望 / 减持 / 卖出 …） */
   action: string;
+  /**
+   * 决策持仓状态轴（与 `action` 正交）。
+   *
+   * `null` = 该记录产生于 v228 之前，**采集时点没有这个信息** ——
+   * 由 `resolveDisplayAction` 退回 `positionPct` 派生，不得读成 `EMPTY`。
+   */
+  positionState: string | null;
+  /** 决策仓位权重（%）；`null` 同为「信息缺失」，不是 0。 */
+  positionPct: number | null;
   targetPrice: number | null;
   stopLoss: number | null;
   daysSinceAnalysis: number;
@@ -39,6 +50,17 @@ interface DailyReview {
 
 function DecisionBadge({ decision }: { decision: DecisionComparison }) {
   const { t } = useTranslation();
+  // 展示档必须走统一入口：`action` 是「方向强度」轴，与持仓状态正交，
+  // 它不是可直接展示的档位名 —— 直接渲染 `decision.action` 会让同一条决策
+  // 在历史卡显示「观望」、在这里显示「持有」（2026-09-21 实证的同源矛盾）。
+  // 2026-09-22: 展示档已收敛为**方向档恒等**（不再按仓位派生，见
+  // `AUDIT-300642-run-variance-2026-09-22.md`），逻辑仍只保留一处。
+  const displayAction = resolveDisplayAction(
+    decision.action,
+    decision.positionState,
+    decision.positionPct,
+  );
+  const actionLabel = t(getActionTKey(displayAction));
   let statusText: string;
   let statusColor: string = "default";
   if (decision.stopLossHit) {
@@ -57,14 +79,14 @@ function DecisionBadge({ decision }: { decision: DecisionComparison }) {
       title={
         <div className="text-[11px] space-y-0.5">
           <div>{t("stockAnalysis.dailyReview.lastAnalysis")}: {decision.analysisDate}</div>
-          <div>{t("stockAnalysis.dailyReview.decisionAction")}: {decision.action}</div>
+          <div>{t("stockAnalysis.dailyReview.decisionAction")}: {actionLabel}</div>
           {decision.targetPrice && <div>{t("stockAnalysis.dailyReview.target")}: {decision.targetPrice.toFixed(2)}
           </div>}
           {decision.stopLoss && <div>{t("stockAnalysis.dailyReview.stopLoss")}: {decision.stopLoss.toFixed(2)}</div>}
         </div>
       }
     >
-      <Tag color={statusColor} className="m-0 text-[10px]">{decision.action} {statusText}</Tag>
+      <Tag color={statusColor} className="m-0 text-[10px]">{actionLabel} {statusText}</Tag>
     </Tooltip>
   );
 }

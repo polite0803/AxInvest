@@ -15,6 +15,7 @@
  * 出参:聚合后的最终决策 + 各模型票数明细 + 平均信心度
  */
 
+import { getActionColor, getActionTKey, parseAction } from "@/lib/stock-analysis-utils";
 import type { Message } from "@/types";
 import { Card, Segmented, Space, Statistic, Tag, theme, Tooltip, Typography } from "antd";
 import { CheckCircle2, Scale, Vote } from "lucide-react";
@@ -26,7 +27,17 @@ export type VoteStrategy = "majority" | "weighted" | "consensus";
 export interface ModelVote {
   modelId: string;
   providerId: string | null;
+  /**
+   * 归一化后的 action（`StockAction` 英文枚举）。
+   *
+   * ⚠️ 必须是归一化值，不能是卡片里的原始串 —— 聚合按 `action` 做身份
+   * （`breakdown[v.action] += 1`、`votes.find(v => v.action === finalAction)`），
+   * 若保留原始串，同一语义的 `BUY` 与「买入」会被算作**两票**，`finalAction`
+   * 与 winner 的匹配也会错位（2026-09-21 修复）。
+   */
   action: string;
+  /** 卡片里的原始 action 串，仅用于排查/展示回退，**不参与聚合**。 */
+  rawAction: string;
   positionPct: number | null;
   targetPrice: number | null;
   stopLoss: number | null;
@@ -71,7 +82,12 @@ function extractDecision(msg: Message): ModelVote | null {
       return {
         modelId: msg.modelId ?? "__unknown__",
         providerId: msg.providerId,
-        action: data.action,
+        // 2026-09-21: 走权威归一化器（`BUY`/`buy`/「买入」→ 同一个 `BUY`）。
+        //   此处若保留原始串，下游 `breakdown[v.action]` 会按**字面量**分组 ⇒
+        //   同一方向被拆成多票，多数票/加权票与 `winner` 归属都会错。
+        //   未识别的自由文本由 `parseAction` 归 `UNCERTAIN`（不伪造成「观望」）。
+        action: parseAction(data.action),
+        rawAction: data.action,
         positionPct: typeof data.positionPct === "number" ? data.positionPct : null,
         targetPrice: typeof data.targetPrice === "number" ? data.targetPrice : null,
         stopLoss: typeof data.stopLoss === "number" ? data.stopLoss : null,
@@ -176,17 +192,15 @@ export function aggregateVotes(
   };
 }
 
-const ACTION_COLOR: Record<string, string> = {
-  BUY: "green",
-  INCREASE: "cyan",
-  HOLD: "gold",
-  REDUCE: "orange",
-  SELL: "red",
-  UNCERTAIN: "default",
-};
-
+// 2026-09-21: 本地 `ACTION_COLOR` 表已删除，改走权威 `getActionColor`。原表有两重问题：
+//   ① **配色约定与产品相反** —— 此处 `BUY: green / SELL: red`，而权威（注释明写
+//      「遵循 A 股涨跌色习惯」）是 `BUY/INCREASE: red`、`SELL/REDUCE: green`。
+//      同一个「买入」在投票面板显示绿色、在决策卡显示红色；
+//   ② 值域已漂移：缺 `WAIT`（观望）/ `UNAVAILABLE`（数据缺失）档，
+//      且 `HOLD` 用 `gold` 而权威用 `blue`。
+// 返回值仍是 antd 预设色名（下方 `token[\`color${...}\`]` 依赖该形态）。
 function actionColor(action: string): string {
-  return ACTION_COLOR[action] ?? "default";
+  return getActionColor(action);
 }
 
 export interface MultiLlmVotePanelProps {
@@ -295,7 +309,7 @@ export const MultiLlmVotePanel = React.memo(function MultiLlmVotePanel({
       >
         <Statistic
           title={t("chat.multiModelVote.finalAction")}
-          value={result.finalAction ?? "—"}
+          value={result.finalAction ? t(getActionTKey(result.finalAction)) : "—"}
           styles={{
             content: {
               color: result.finalAction
@@ -352,7 +366,7 @@ export const MultiLlmVotePanel = React.memo(function MultiLlmVotePanel({
               >
                 <Tag color={actionColor(action)} style={{ padding: "4px 10px" }}>
                   <Space size={4}>
-                    <strong>{action}</strong>
+                    <strong>{t(getActionTKey(action))}</strong>
                     <span>
                       {count} · {pct.toFixed(0)}%
                     </span>
@@ -373,7 +387,7 @@ export const MultiLlmVotePanel = React.memo(function MultiLlmVotePanel({
               color={actionColor(v.action)}
               style={{ marginBottom: 4 }}
             >
-              {v.modelId} → {v.action} ({(v.confidence * 100).toFixed(0)}%)
+              {v.modelId} → {t(getActionTKey(v.action))} ({(v.confidence * 100).toFixed(0)}%)
             </Tag>
           ))}
         </Typography.Text>

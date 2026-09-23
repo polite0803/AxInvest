@@ -98,6 +98,31 @@ pub struct SharpeResult {
 
 /// 历史模拟法 VaR：将收益率排序后取第 (1-confidence) 分位数。
 /// 返回正数表示损失的百分比。
+///
+/// 口径（2026-09-21 定案）：`idx = floor((1-confidence) * n)` 作 0-based 下标**直接**
+/// 取顺序统计量 —— 数学上恰有 `idx` 个样本小于它 ⇒ `idx / n ≈ (1-confidence)`，
+/// 命中的正是该置信水平对应的历史分位点。
+///
+/// ⚠ 本函数此前的算式是 `floor((1-confidence) * (n+1))` 再 `-1`（净效果取**前一位**，
+/// 即多含一个尾部样本）—— 那是 `+1` 与 `-1` 两个偏移叠加后的混合口径，
+/// **不对应任何标准分位定义**。
+///
+/// ⚠⚠ **浮点 floor 边界**（实测踩过，写测试时最容易被它骗）：`1.0 - c` 的浮点值可能
+/// **略小于**数学值（`1.0-0.9 = 0.09999999999999998`、`1.0-0.8 = 0.19999999999999996`），
+/// 于是当 `(1-c) * n` 数学上恰为整数时 `floor` 会**掉到下一档** —— `c=0.9, n=10`：
+/// 数学 `1.0`，浮点 `0.9999999999999998`，得 `idx = 0`（取了最小值）。
+/// 这是**既存行为**（生产实现亦如此，非本次引入）。危险之处在它同时影响**测试**：
+/// **「整十置信度 × n=10」组合下新旧两口径输出恰好相同**（实测 c=0.9 时新旧均为
+/// `var_pct = 0.05`）⇒ 拿这种参数当测试点，得到的是「区分力为 0 的假绿」。
+/// 故 `test_var` 改用 `n=10 + c=0.875 / 0.75` —— `1-c` 分别为 0.125 / 0.25，
+/// **二进制精确**、无边界歧义，且两口径输出差 0.05 / 0.10，可清晰区分。
+///
+/// 为什么改这里而不是改另一份：本函数**全仓零调用**，改它零行为风险；而另一份
+/// （`tools/finance.rs` 的 `value_at_risk`，`calc_var` 工具在消费）是生产在跑的口径，
+/// 改它会让所有历史产物不可复现，且没有任何正确性依据支持那么做。
+/// 两份的实测量级差异：1980 组参数扫描下索引不同 **45.5%**、最终 2 位小数输出不同
+/// **9.44%**、最大 Δ **0.032**（≈6.5 倍舍入半格）、样例甚至**符号翻转**
+/// （证据：`output/tmp/verify-var-divergence.mjs`）。
 pub fn value_at_risk(returns: &[f64], confidence: f64) -> VarResult {
     let n = returns.len();
     if n < 5 {
@@ -105,11 +130,10 @@ pub fn value_at_risk(returns: &[f64], confidence: f64) -> VarResult {
     }
     let mut sorted = returns.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let idx = ((1.0 - confidence) * (n as f64 + 1.0)).floor() as usize;
-    let var_idx = if idx == 0 { 0 } else { idx - 1 };
-    let var_val = if var_idx < n { -sorted[var_idx] } else { 0.0 };
-    let tail: f64 = sorted[..=var_idx.min(n - 1)].iter().map(|r| -r).sum::<f64>();
-    let cvar = tail / (var_idx + 1) as f64;
+    let idx = ((1.0 - confidence) * n as f64).floor() as usize;
+    let var_val = if idx < n { -sorted[idx] } else { 0.0 };
+    let tail: f64 = sorted[..=idx.min(n - 1)].iter().map(|r| -r).sum::<f64>();
+    let cvar = tail / (idx + 1) as f64;
     VarResult {
         var_pct: (var_val * 100.0).round() / 100.0,
         confidence,
@@ -130,6 +154,20 @@ pub struct VarResult {
 pub fn pe_percentile(current_pe: f64, historical_pes: &[f64]) -> PEPercentileResult {
     let mut sorted = historical_pes.to_vec();
     sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    // 2026-09-21 修复：亏损企业（PE < 0）的 PE 没有分位含义 —— 负 cur 在历史正 PE
+    // 序列里命中 0 条 ⇒ percentile = 0 ⇒ level = "极低"，即「亏损」被读成「历史估值
+    // 极低分位」。上游 vendor 已放开负 PE（负值＝亏损）⇒ t-risk 的 peTTM 可能为负。
+    // ⚠ 本函数当前**无生产调用**（仅本文件单测），活路径是
+    //   `crates/tools/src/tools/finance.rs` 的同名私有实现 —— 两处守卫必须保持等价，
+    //   否则将来接线到本函数时缺陷复现（两份副本的分叉已由 2026-09-21 一并修齐）。
+    if current_pe <= 0.0 {
+        let median = if !sorted.is_empty() {
+            sorted[sorted.len() / 2]
+        } else {
+            current_pe
+        };
+        return PEPercentileResult { percentile: 0.0, level: "无意义".into(), median };
+    }
     let below = sorted.iter().filter(|&&pe| pe <= current_pe).count();
     let pct = if sorted.is_empty() {
         50.0
@@ -170,6 +208,13 @@ pub struct PEPercentileResult {
 /// PEG = PE / 增长率。增长率以 % 表示（如 25 表示 25%）。
 pub fn peg_ratio(pe: f64, growth_rate: f64) -> PEGResult {
     if growth_rate <= 0.0 {
+        return PEGResult { peg: f64::INFINITY, level: "无意义".into(), pe, growth_rate };
+    }
+    // 2026-09-21 修复：亏损企业（PE < 0）的 PEG 无含义 —— 原实现只守 growth_rate，
+    // 负 pe 会算出负 peg 落进 `peg < 0.5` ⇒ "严重低估"（亏损被读成严重低估）。
+    // ⚠ 同 `pe_percentile`：本函数当前无生产调用，活路径在
+    //   `crates/tools/src/tools/finance.rs`，两处守卫须保持等价。
+    if pe <= 0.0 {
         return PEGResult { peg: f64::INFINITY, level: "无意义".into(), pe, growth_rate };
     }
     let peg = pe / growth_rate;
@@ -348,10 +393,45 @@ mod tests {
 
     #[test]
     fn test_var() {
-        let returns = vec![0.01, -0.02, 0.03, -0.01, -0.03, 0.02, -0.01, 0.01, -0.05, 0.02];
-        let r = value_at_risk(&returns, 0.95);
-        assert!(r.var_pct > 0.0);
-        assert!(r.cvar_pct >= r.var_pct);
+        // 10 个样本、步长 0.10、已升序（idx 的语义——取第几个顺序统计量——肉眼可核）。
+        //
+        // ⚠ 为什么**不**用「n=10 × 整十置信度（0.95/0.9/0.8）」：见函数 doc 的
+        //   「浮点 floor 边界」——那类组合下 `1.0-c` 的浮点值略小于数学值 ⇒ `floor` 掉一档，
+        //   而旧口径的 `+1` 恰好把它补回来 ⇒ **两口径输出相同**，测试丧失区分力
+        //   （实测 c=0.9 时新旧均得 `var_pct = 0.05`）。
+        //   改用 `c = 0.875 / 0.75`：`1-c` = 0.125 / 0.25 为**二进制精确值**，
+        //   无边界歧义，且两口径输出分别差 0.05 / 0.10，可清晰区分。
+        let returns = [-0.50, -0.40, -0.30, -0.20, -0.10, 0.00, 0.10, 0.20, 0.30, 0.40];
+
+        // ── 口径锁：idx = floor((1-c) * n) 直接作 0-based 下标 ──
+        // c=0.875 ⇒ idx = floor(0.125*10) = 1 ⇒ 第 2 小值 0.40；尾均值 (0.50+0.40)/2 = 0.45。
+        let r875 = value_at_risk(&returns, 0.875);
+        assert!((r875.var_pct - 0.40).abs() < 1e-9, "c=0.875 ⇒ idx=1 ⇒ 0.40");
+        assert!((r875.cvar_pct - 0.45).abs() < 1e-9, "尾均值取 s[..=1] ⇒ 0.45");
+        // 反面断言（锚定被测对象自身形态）：旧口径在此得 idx = floor(1.375) - 1 = 0
+        // ⇒ 0.50 / 0.50。谁把实现改回旧口径，这条立刻红。
+        assert!((r875.var_pct - 0.50).abs() > 1e-9, "不得退化为旧口径（取最小值 0.50）");
+
+        // c=0.75 ⇒ idx = floor(2.5) = 2 ⇒ 0.30；尾均值 (0.50+0.40+0.30)/3 = 0.40。
+        let r75 = value_at_risk(&returns, 0.75);
+        assert!((r75.var_pct - 0.30).abs() < 1e-9, "c=0.75 ⇒ idx=2 ⇒ 0.30");
+        assert!((r75.cvar_pct - 0.40).abs() < 1e-9, "尾均值取 s[..=2] ⇒ 0.40");
+        assert!(r875.cvar_pct >= r875.var_pct, "CVaR 不应小于 VaR");
+
+        // ── 浮点边界：锁住**既存行为**（非本次引入，但与生产实现一致）──
+        // `1.0-0.95 = 0.050000000000000044` → `*10 = 0.5000000000000004` → floor = 0。
+        // 不直观，可它是生产在跑的行为；谁想「修正」它，得先想清历史产物怎么办。
+        let r95 = value_at_risk(&returns, 0.95);
+        assert!(
+            (r95.var_pct - 0.50).abs() < 1e-9,
+            "c=0.95, n=10 落在浮点 floor 边界下方 ⇒ idx=0（取最小值）"
+        );
+
+        // `n < 5` 的早退分支：三个字段都要有确定值，不得留 NaN。
+        let short = value_at_risk(&[0.01, -0.02, 0.03], 0.95);
+        assert_eq!(short.var_pct, 0.0);
+        assert_eq!(short.cvar_pct, 0.0);
+        assert_eq!(short.confidence, 0.95);
     }
 
     #[test]
@@ -366,6 +446,31 @@ mod tests {
         let r = peg_ratio(20.0, 25.0);
         assert!((r.peg - 0.8).abs() < 0.01);
         assert_eq!(r.level, "低估");
+    }
+
+    /// 2026-09-21 新增（A 修复）：亏损企业（PE < 0）不得被判成「历史估值极低分位」。
+    /// 负 cur 在历史正 PE 序列里命中 0 条 ⇒ 旧实现 `percentile = 0` ⇒ `level = "极低"`。
+    #[test]
+    fn test_pe_percentile_negative_pe_is_meaningless() {
+        let pes = vec![10.0, 12.0, 15.0, 18.0, 20.0, 22.0, 25.0, 30.0];
+        let r = pe_percentile(-144.08, &pes);
+        assert_eq!(r.level, "无意义", "亏损 PE 不得被读成极低分位");
+        // 正控：同一序列下正 PE 仍走原路径（守卫不得吃掉正常输入）
+        let ok = pe_percentile(16.0, &pes);
+        assert!(ok.percentile > 30.0 && ok.percentile < 60.0);
+        assert_ne!(ok.level, "无意义");
+    }
+
+    /// 2026-09-21 新增（A 修复）：亏损企业（PE < 0）不得被判成「严重低估」。
+    /// 旧实现只守 `growth_rate <= 0` ⇒ −144.08/25 = −5.76 落进 `peg < 0.5`。
+    #[test]
+    fn test_peg_ratio_negative_pe_is_meaningless() {
+        let r = peg_ratio(-144.08, 25.0);
+        assert_eq!(r.level, "无意义", "亏损 PE 不得被读成严重低估");
+        assert!(r.peg.is_infinite());
+        // 正控
+        let ok = peg_ratio(20.0, 25.0);
+        assert_eq!(ok.level, "低估");
     }
 
     #[test]

@@ -43,76 +43,150 @@ tokio::task_local! {
 // 1. 用 `parking_lot::Mutex`（同步锁），不持锁跨 await，不会破坏
 //    tokio 调度器，也不会出现"未来日期 guard 跨越 await"之类问题。
 // 2. `OnceLock<Mutex<...>>` 延迟初始化，避免构造期全局状态问题。
-// 3. `current_as_of()` 优先 task_local，再回退全局。这样嵌套调用
-//    仍然能区分内外层；只有跨 spawn 边界才"扁平化"到全局值。
-// 4. `with_optional_asof` 同步写全局；`AsOfScopeGuard` 离开时恢复，
-//    确保同一进程内多次回放互不污染。
+// 3. `current_as_of()` 以 task_local 的**可见性**为准：可见（含 `Ok(None)` =
+//    显式声明 live）就用它的值，只有不可见（跨 spawn）才回退全局。**不可**把
+//    「显式 live」与「task_local 不可见」合并处理 —— 合并会让全局残留穿透显式
+//    live 声明（2026-09-19 修复，详见 `current_as_of()` 的文档注释）。
+// 4. `with_optional_asof` 压入一层作用域；离开时按 **token** 移除自己那一层
+//    （而不是"写回进入前读到的值"），确保同一进程内多次/并发回放互不污染。
+//    为什么不能用"写回旧值"，见 `AsOfScopeStack` 的文档。
 
-/// 进程级全局 AsOfContext：task_local 不可见时的兜底
-static GLOBAL_AS_OF: OnceLock<Mutex<Option<AsOfContext>>> = OnceLock::new();
-
-#[inline]
-fn global_lock() -> &'static Mutex<Option<AsOfContext>> {
-    GLOBAL_AS_OF.get_or_init(|| Mutex::new(None))
+/// 进程级全局 AsOf **作用域栈**：task_local 不可见时的兜底。
+///
+/// 为什么是栈，而不是「单槽 + 退出时写回进入前读到的值」：
+/// 后者在**并发**下必然残留。设外层作用域 A 仍持有全局时，
+/// `stock_workflow/core.rs` 把 DAG `tokio::spawn` 出去，子任务进入自己的
+/// `with_optional_asof` 时读到 `prev = A` —— 而 A **不是它的前一个值，是别人的当前值**。
+/// 于是：外层先退出（写回 A 的前一值 None）、子任务后退出（写回 A）
+/// ⇒ 全局永久停在 A，撤销了外层的恢复。
+///
+/// 后果不是"少恢复一次"，而是**整进程被锁进回放模式**：
+/// 2026-09-23 实测（`axagent-batch-rerun --since 2026-07-21 --apply --reflect-after`）——
+/// 4 条 as-of(2026-07-21) 分析全部 `completed` 且落库正确，但紧随其后的批量反思
+/// （在 as-of 作用域**之外**执行）拿到的 K 线被截断在 07-21 ⇒ 4/4 报
+/// 「在 2026-07-21 之后无K线数据」⇒ 降级为无行情反思
+/// ⇒ `deterministic_was_correct` 恒 `None` ⇒ **一条 `strategy_performance` 都不写**，
+/// 反思→规则→反哺闭环（阶段四）整体空转 —— 而日志里每条分析的结论都"正常"。
+///
+/// 栈语义：进入 = `push(token, ctx)`，退出 = 按 **token** 移除自己那一层
+/// （不按位置、不按值比较），栈顶即当前生效值。
+/// 并发交错、嵌套、乱序退出三种情形都自洽 —— 每个作用域只负责移除**自己**。
+struct AsOfScopeStack {
+    /// (token, ctx)；token 单调递增且唯一，用于精确移除自己那一层
+    entries: Vec<(u64, Option<AsOfContext>)>,
+    next_token: u64,
 }
 
-/// 同步写入全局 AsOfContext，返回写入前的旧值。
+/// 进程级全局 AsOf 作用域栈
+static GLOBAL_AS_OF: OnceLock<Mutex<AsOfScopeStack>> = OnceLock::new();
+
+#[inline]
+fn global_lock() -> &'static Mutex<AsOfScopeStack> {
+    GLOBAL_AS_OF.get_or_init(|| Mutex::new(AsOfScopeStack { entries: Vec::new(), next_token: 0 }))
+}
+
+/// 压入一层全局作用域，返回该层的 token（退出时用它精确移除自己）。
 ///
 /// 注意：这是同步调用，**不**会跨 await 持锁；用于在 `tokio::spawn`
 /// 之前先同步写入，使 spawn 出去的 future 通过 `current_as_of()`
 /// 也能读到截止日。
+fn push_global_asof(ctx: Option<AsOfContext>) -> u64 {
+    let mut g = global_lock().lock();
+    g.next_token += 1;
+    let token = g.next_token;
+    g.entries.push((token, ctx));
+    token
+}
+
+/// 按 token 精确移除自己那一层；该层已被 `clear_global_asof` 清掉时无操作。
+///
+/// **不可**退化为"移除栈顶"或"按值查找"：并发交错时退出顺序与进入顺序无关，
+/// 只有 token 能唯一定位"我压的那一层"。
+fn pop_global_asof(token: u64) {
+    let mut g = global_lock().lock();
+    if let Some(pos) = g.entries.iter().position(|(t, _)| *t == token) {
+        g.entries.remove(pos);
+    }
+}
+
+/// 同步写入全局 AsOfContext（**重置为单层**：清空栈后压入一层），
+/// 返回设置前**生效**的值（即原栈顶）。
+///
+/// 注意：这是同步调用，**不**会跨 await 持锁；用于在 `tokio::spawn`
+/// 之前先同步写入，使 spawn 出去的 future 通过 `current_as_of()`
+/// 也能读到截止日。
+///
+/// 之所以"重置为单层"而不是压栈：本函数的语义是**显式设定当前模式**，
+/// 调用方（`enter_global_asof` / 测试）期望"我设的值立即生效"。
+/// 需要可并存的嵌套/并发作用域请走 `with_optional_asof` / `enter_global_asof`，
+/// 它们压栈并按 token 退出。
 pub fn set_global_asof(ctx: Option<AsOfContext>) -> Option<AsOfContext> {
     let mut g = global_lock().lock();
-    let prev = *g;
-    *g = ctx;
+    let prev = g.entries.last().and_then(|(_, c)| *c);
+    g.entries.clear();
+    g.next_token += 1;
+    let token = g.next_token;
+    g.entries.push((token, ctx));
     prev
 }
 
-/// 同步读取全局 AsOfContext（不影响 task_local 优先级）
+/// 同步读取当前生效的全局 AsOfContext（栈顶；不影响 task_local 优先级）
 pub fn peek_global_asof() -> Option<AsOfContext> {
     let g = global_lock().lock();
-    *g
+    g.entries.last().and_then(|(_, c)| *c)
 }
 
-/// 同步清空全局 AsOfContext，返回清空前的旧值
+/// 同步清空全局 AsOf 作用域栈，返回清空前生效的值
 pub fn clear_global_asof() -> Option<AsOfContext> {
-    set_global_asof(None)
+    let mut g = global_lock().lock();
+    let prev = g.entries.last().and_then(|(_, c)| *c);
+    g.entries.clear();
+    prev
 }
 
-/// RAII 守卫：构造时写入全局 AsOfContext，drop 时恢复原值。
+/// RAII 守卫：构造时压入一层全局作用域，drop 时**按 token 移除自己那一层**。
 ///
 /// 用法（推荐用于 Tauri command 入口）：
 /// ```ignore
 /// let _guard = as_of::enter_global_asof(Some(ctx));
 /// // 此作用域内 current_as_of() 在任何 task（包括 spawn 出去的）都可见 ctx
-/// // 作用域结束自动恢复
+/// // 作用域结束自动恢复（恢复 = 移除自己那一层，露出下面一层）
 /// ```
+///
+/// ⚠ 与旧实现的差别：drop 时**不再写回"进入前读到的值"**。
+/// 写回旧值在并发下会把自己不拥有的一层重新装回去（详见 `AsOfScopeStack`），
+/// 是"进程被永久锁进回放模式"的根因。
 pub struct AsOfScopeGuard {
-    prev: Option<AsOfContext>,
+    /// 自己那一层的 token；`drop` 时用它精确移除
+    token: u64,
 }
 
 impl Drop for AsOfScopeGuard {
     fn drop(&mut self) {
-        let _ = set_global_asof(self.prev);
+        pop_global_asof(self.token);
     }
 }
 
 pub fn enter_global_asof(ctx: Option<AsOfContext>) -> AsOfScopeGuard {
-    let prev = set_global_asof(ctx);
-    AsOfScopeGuard { prev }
+    AsOfScopeGuard { token: push_global_asof(ctx) }
 }
 
 /// 读取当前任务的 AsOfContext。
 ///
-/// 优先级：**task_local > 全局**。`tokio::task_local!` 跨 spawn
-/// 边界不可见，所以 spawn 出去又没有自己 `scope` 的 future 走
-/// 全局回退路径。Live 模式（task_local None + 全局 None）返回 None。
+/// 判据是 task_local 的**可见性**，不是它的取值 —— 这两种情况必须分开：
+///
+/// - `Ok(ctx)`（**含 `Ok(None)`**）⇒ 本任务已显式声明模式，一切以它为准。
+///   `Ok(None)` = 显式声明 live，**必须屏蔽全局回退**：否则同一进程内别的执行流
+///   留在全局里的 AsOf 会穿透这条声明（2026-09-19 修复；原先写作
+///   `if let Ok(Some(c)) = …`，把「显式 live」与「task_local 不可见」压成同一类）。
+/// - `Err`（task_local 不可见 —— 跨 `tokio::spawn` / `JoinSet::spawn` 边界）
+///   ⇒ 回落进程级全局。这是全局回退**唯一**存在的理由。
 pub fn current_as_of() -> Option<AsOfContext> {
-    if let Ok(Some(c)) = AS_OF.try_with(|c| *c) {
-        return Some(c);
+    match AS_OF.try_with(|c| *c) {
+        Ok(ctx) => ctx,
+        // spawn 边界兜底：task_local 不可见时读进程级全局
+        Err(_) => peek_global_asof(),
     }
-    // spawn 边界兜底：task_local 不可见时读进程级全局
-    peek_global_asof()
 }
 
 /// 获取 as-of 日期作为 YYYY-MM-DD 字符串，无 as-of 时返回系统当前日期
@@ -256,23 +330,29 @@ pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
 /// `get_industry_ranking` 走 as-of 分支查每日快照（凌晨无快照）+ vendor
 /// NoHistoricalSemantic 全跳过 → 也空 → 上游节点全空、0 候选。
 ///
-/// 现改为 **RAII 语义：退出时恢复进入前的全局值**（与 `enter_global_asof`
-/// 一致）。安全性：f 内 spawn 出去且被 await 的任务在 f 退出前已执行完，
-/// 期间读得到全局；`stock_workflow/core.rs` 的 fire-and-forget spawn 在
-/// spawn 前捕获 `captured_asof`、spawn 内部自行 `with_optional_asof` 重新
-/// 设置，不受影响。嵌套调用 LIFO 正确（内层恢复外层值，外层恢复原值）。
+/// 现改为 **RAII 语义**（与 `enter_global_asof` 一致）。
+///
+/// ⚠️ 2026-09-23 再修（第二次踩同一族坑，方向相反）：上一版 RAII 实现是
+/// 「退出时把进入前读到的值写回全局」，在**并发**下必然残留 —— 外层作用域仍持有
+/// 全局时，本函数内 `tokio::spawn` 出去的 fire-and-forget 任务（如
+/// `stock_workflow/core.rs` 的 DAG）读到 `prev = 外层值`（那是**别人的当前值**，
+/// 不是它的前值）；外层先退出写回 None、子任务后退出把外层值写回
+/// ⇒ 全局永久停在那个 as-of，整进程被锁进回放模式。
+/// 实测后果见 `AsOfScopeStack` 的文档（批量重跑后反思全部拿不到行情）。
+///
+/// 故现改为：**压栈进入、按 token 移除自己那一层**。
+/// 这使三种情形都自洽：嵌套（LIFO）、并发交错、以及"进入顺序与退出顺序相反"。
+/// 每个作用域只负责移除自己压的那一层，不假定"前一个值"归自己所有。
 pub async fn with_optional_asof<F, T>(ctx: Option<AsOfContext>, f: F) -> T
 where
     F: std::future::Future<Output = T>,
 {
-    // 记录进入前的全局值，退出时恢复（防泄漏到调用方之外的后续调用）
-    let prev = set_global_asof(ctx);
-    let result = match ctx {
+    // 用具名 guard 而非"手动在末尾恢复"：异常展开路径也必须移除本层。
+    let _layer = AsOfScopeGuard { token: push_global_asof(ctx) };
+    match ctx {
         Some(c) => AS_OF.scope(Some(c), f).await,
         None => f.await,
-    };
-    let _ = set_global_asof(prev);
-    result
+    }
 }
 
 /// 消费并清空当前任务的降级日志。返回累积的降级条目。
@@ -327,6 +407,39 @@ mod tests {
         let got = AS_OF.scope(Some(ctx), async { current_as_of() }).await;
         assert_eq!(got.unwrap().as_of_date, date);
         assert_eq!(got.unwrap().source, AsOfSource::UserReplay);
+    }
+
+    /// 回归（2026-09-19）：**显式 live 声明必须屏蔽进程级全局残留**。
+    ///
+    /// 缺陷形态：`current_as_of()` 原写作 `if let Ok(Some(c)) = AS_OF.try_with(..)`，
+    /// 把「本任务显式声明 live（`Ok(None)`）」与「task_local 不可见（`Err`）」压成
+    /// 同一类 ⇒ 只要进程里残留一个全局 AsOf（例如兄弟用例装完没还原），显式
+    /// `scope(None, …)` 也会读到它，`vendors_for_live_*` /
+    /// `kline_cache_key_live_no_effective_suffix` 一族断言随之全红。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn explicit_live_scope_shields_global_residue() {
+        let leaked =
+            AsOfContext::new(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(), AsOfSource::UserReplay)
+                .unwrap();
+        let _ = set_global_asof(Some(leaked));
+
+        // 被测行为：scope 内显式声明 live ⇒ 必须为 None，无视全局残留。
+        let inside = AS_OF.scope(None, async { current_as_of() }).await;
+        assert!(
+            inside.is_none(),
+            "显式 scope(None)（声明 live）不得回落到进程级全局残留，实际读到 {:?}",
+            inside.map(|c| c.as_of_date.to_string())
+        );
+
+        // 负控（先证判据会告警）：**同一份残留**下，无 scope 的读取必须读到全局 ——
+        // 否则上一条断言只是「全局恰好为空」带来的平凡真，证明不了屏蔽行为。
+        assert!(
+            current_as_of().is_some(),
+            "负控失效：全局残留未被读到 ⇒ 上一条断言对「屏蔽」无区分力"
+        );
+
+        let _ = clear_global_asof();
     }
 
     #[tokio::test]
@@ -578,6 +691,81 @@ mod tests {
 
         // 回到 outer
         assert_eq!(current_as_of().unwrap().as_of_date, outer_date, "内层 drop 后必须恢复 outer");
+        // 2026-09-19 修复：必须**先显式 drop 外层 guard，再清空全局**。
+        //   原写法（clear 在前、_g_outer 由函数返回时 drop）的真实执行序是：
+        //     clear_global_asof() → GLOBAL_AS_OF = None
+        //     _g_outer.drop()     → set_global_asof(prev)，而 prev 是 :570 创建 guard 时
+        //                           读到的 Some(outer)（因为 :568 已先把全局设成 outer）
+        //                       ⇒ 把 outer 又**装回去**，等于撤销这次 clear。
+        //   后果：进程级 GLOBAL_AS_OF 永久残留 outer(2026-01-01)，
+        //         污染同二进制内**其后**所有读全局的用例。
+        //   实测（`--test-threads=1` 强制顺序）：本用例 + `asof_realtime_degrade_tests::
+        //   is_asof_active_false_in_live` ⇒ 后者 FAILED（读到 asof-20260101 ⇒ 判成 replay）；
+        //   全量并行时另有 5 条 live 断言同因变红（`vendors_for_live_*` / `kline_cache_key_live_*`
+        //   / `should_use_asof_live_is_false` / `try_vendor_with_asof_live_returns_none`）。
+        //   为什么一直没暴露：全量串行按字典序跑，本用例之后还有十几条 `as_of::tests`
+        //   用例**开头都 clear_global_asof()**，顺手当了清道夫 ⇒ 掩盖成假绿。
+        drop(_g_outer);
+        let _ = clear_global_asof();
+    }
+
+    /// 回归（2026-09-23）：**并发/乱序退出的作用域不得把 as-of 残留进进程级全局**。
+    ///
+    /// 缺陷形态（实测于 `axagent-batch-rerun --since 2026-07-21 --apply --reflect-after`）：
+    /// `with_optional_asof` 上一版以「退出时写回进入前读到的值」实现 RAII。
+    /// `stock_workflow/core.rs` 在 as-of 作用域内把 DAG `tokio::spawn` 出去，
+    /// 子任务进入时读到 `prev = 外层的当前值`（那是**别人的**值，不是它的前值）；
+    /// 外层先退出（写回 None）、子任务后退出（把那层的值写回）
+    /// ⇒ 全局永久停留在该 as-of ⇒ 紧随其后的批量反思在 07-21 被截断 K 线
+    /// ⇒ 4/4 降级为「无行情反思」⇒ 不写 strategy_performance。
+    ///
+    /// 用例用 push/pop 显式构造「进入序 A→B、退出序 A→B」的**乱序**，
+    /// 不依赖线程调度，故无 flaky 风险。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn overlapping_scopes_leave_no_global_residue() {
+        let _ = clear_global_asof();
+        let date = NaiveDate::from_ymd_opt(2026, 7, 21).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+
+        // 负控（先证判据会告警）：压入一层且不移除 ⇒ 必须读到 as-of。
+        // 否则下面那条 `is_none()` 只是「栈恰好为空」的平凡真，证明不了移除行为。
+        let ctl = push_global_asof(Some(ctx));
+        assert!(
+            current_as_of().is_some(),
+            "负控失效：push 之后应读到 as-of，否则本用例对「移除」无区分力"
+        );
+        pop_global_asof(ctl);
+
+        // 外层进入（等价 `with_optional_asof(Some(ctx), …)`）
+        let outer = push_global_asof(Some(ctx));
+        // 子任务在外层**仍持有全局时**进入
+        // （等价 `core.rs` 那个 fire-and-forget spawn 内部再 `with_optional_asof`）
+        let inner = push_global_asof(Some(ctx));
+
+        // 外层**先**退出：只移除自己那一层 ⇒ 子任务那层仍生效
+        pop_global_asof(outer);
+        assert_eq!(
+            current_as_of().map(|c| c.as_string()),
+            Some("2026-07-21".to_string()),
+            "外层先退出时，子任务的作用域必须仍然有效"
+        );
+
+        // 子任务后退出：移除自己那层后栈空 ⇒ 必须回到 live
+        pop_global_asof(inner);
+        assert!(
+            current_as_of().is_none(),
+            "全部作用域退出后不得残留 as-of（残留会把整进程锁进回放模式），实际读到 {:?}",
+            current_as_of().map(|c| c.as_string())
+        );
+
+        // 正常 LIFO 退出同样必须无残留（防「只修乱序、修坏常规嵌套」）
+        let a = push_global_asof(Some(ctx));
+        let b = push_global_asof(Some(ctx));
+        pop_global_asof(b);
+        pop_global_asof(a);
+        assert!(current_as_of().is_none(), "正常 LIFO 退出同样不得残留");
+
         let _ = clear_global_asof();
     }
 

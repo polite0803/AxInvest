@@ -1,0 +1,19 @@
+{
+  "_readme": [
+    "SQL 方言守卫豁免名单（scripts/check-sql-dialect.mjs）。",
+    "只允许为本文件鉴定的「合法单方言模块」开豁免：该模块的职责本身就是只服务一种库。",
+    "每条必须有理由 —— 没有理由的豁免等于关掉门禁。",
+    "『待修缺陷』不许写进来：缺陷应修掉，或留在 B 段报告里等裁决。",
+    "files = 整文件豁免（对 A/B 两段都生效）；sites = 单站点豁免（行号，行号会随改动漂移，漂移后豁免失效是安全方向）。"
+  ],
+  "files": {
+    "src-tauri/crates/disk-cache/src/lib.rs": "本地 SQLite 磁盘缓存库：库文件由桌面端自行管理，不存在 PostgreSQL 形态；PRAGMA 调优（WAL / busy_timeout / synchronous）正是它的职责。",
+    "src-tauri/crates/trajectory/src/storage.rs": "本地轨迹库（SQLite-only）：轨迹数据落桌面端本地文件，不随生产库切方言。",
+    "src-tauri/src/indexing_triggers.rs": "本地索引库（SQLite-only）：索引库由本模块自行 open / 建表 / 调优，与生产库无关。"
+  },
+  "sites": {
+    "src-tauri/crates/dao/src/integrity.rs:30": "SQLite 专有完整性检测（PRAGMA integrity_check）：该命令语义只在 SQLite 上成立，PG 侧由服务端自身机制承担。",
+    "src-tauri/crates/dao/src/integrity.rs:35": "同上（sqlite_master 计数），属同一检测流程。",
+    "src-tauri/crates/search/src/vector_store.rs:247": "SQLite/FTS5 形态的向量表 DDL（rowid + AUTOINCREMENT）。PG 侧走 content_tsv，同文件以 self.be() 分派，故该 DDL 只在 SQLite 分支被使用。"
+  }
+}

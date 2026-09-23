@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import i18n from "@/i18n";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, listen, logIpcError, type UnlistenFn } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import type {
@@ -112,7 +113,7 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
       return plan;
     } catch (e) {
       const errMsg = String(e);
-      message.error(errMsg);
+      showBackendError(message, e);
       set((s) => ({
         loading: { ...s.loading, [conversationId]: false },
         errors: { ...s.errors, [conversationId]: errMsg },
@@ -184,7 +185,7 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
       // Plan status will be updated via planStepUpdate / planExecutionComplete events
     } catch (e) {
       const errMsg = String(e);
-      message.error(errMsg);
+      showBackendError(message, e);
       set((s) => ({
         loading: { ...s.loading, [conversationId]: false },
         errors: { ...s.errors, [conversationId]: errMsg },
@@ -279,7 +280,7 @@ export const usePlanStore = create<PlanStore>((set, get) => ({
       await invoke("plan_execute", { request }, 0);
     } catch (e) {
       const errMsg = String(e);
-      message.error(errMsg);
+      showBackendError(message, e);
       set((s) => ({
         loading: { ...s.loading, [conversationId]: false },
         errors: { ...s.errors, [conversationId]: errMsg },

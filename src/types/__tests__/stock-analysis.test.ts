@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifySentiment, getSignalColor, parseAction, StockAction } from "../stock-analysis";
+import { classifySentiment, getActionColor, getSignalColor, parseAction, StockAction } from "../stock-analysis";
 
 describe("classifySentiment", () => {
   it('returns "bullish" for buy signals', () => {
@@ -88,20 +88,30 @@ describe("parseAction", () => {
 });
 
 describe("getSignalColor", () => {
-  it('returns "green" for buy/bull signals', () => {
-    expect(getSignalColor("买入信号")).toBe("green");
-    expect(getSignalColor("看多")).toBe("green");
-    expect(getSignalColor("上涨趋势")).toBe("green");
+  // 2026-09-21: 配色约定改为 A 股习惯（**红=看多/买入，绿=看空/卖出**），
+  //   与 `getActionColor`（BUY→red）/`getActionTagStyle` 同源。
+  //   此前本函数返回相反配色（看多→green），导致同一屏里「看多」是绿的、
+  //   「买入」是红的。原断言只是把旧实现锁死，未记录任何约定依据，故随之更新。
+  it('returns "red" for buy/bull signals（A 股：涨为红）', () => {
+    expect(getSignalColor("买入信号")).toBe("red");
+    expect(getSignalColor("看多")).toBe("red");
+    expect(getSignalColor("上涨趋势")).toBe("red");
   });
 
-  it('returns "red" for sell/bear signals', () => {
-    expect(getSignalColor("卖出信号")).toBe("red");
-    expect(getSignalColor("看空")).toBe("red");
-    expect(getSignalColor("下跌趋势")).toBe("red");
+  it('returns "green" for sell/bear signals（A 股：跌为绿）', () => {
+    expect(getSignalColor("卖出信号")).toBe("green");
+    expect(getSignalColor("看空")).toBe("green");
+    expect(getSignalColor("下跌趋势")).toBe("green");
   });
 
   it('returns "blue" for neutral signals', () => {
     expect(getSignalColor("关注")).toBe("blue");
     expect(getSignalColor("")).toBe("blue");
+  });
+
+  it("与 getActionColor 的配色约定一致（防两套口径回流）", () => {
+    // 同一语义必须同色：看多/买入 → 红，看空/卖出 → 绿
+    expect(getSignalColor("看多")).toBe(getActionColor("买入"));
+    expect(getSignalColor("看空")).toBe(getActionColor("卖出"));
   });
 });

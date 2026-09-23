@@ -132,6 +132,154 @@ function tryParseDebate(text: string): DebateJson | null {
   return null;
 }
 
+/** 把任意值收敛为可安全用于 .toLowerCase() / .includes() / React child 渲染的字符串 */
+function toSafeString(v: unknown): string | undefined {
+  if (typeof v === "string") { return v; }
+  if (typeof v === "number" || typeof v === "boolean") { return String(v); }
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const rec = v as Record<string, unknown>;
+    // 同义键优先取第一个非空字符串（LLM 惯用 stance / position / reason 等）
+    for (const k of ["stance", "position", "final_position", "verdict", "claim", "text", "summary", "reason"]) {
+      const cand = rec[k];
+      if (typeof cand === "string" && cand.trim()) { return cand; }
+    }
+  }
+  return undefined;
+}
+
+/** 把任意值收敛为字符串数组；字符串按分隔符切分（保留信息而非整段丢弃） */
+function toSafeStringArray(v: unknown): string[] | undefined {
+  if (Array.isArray(v)) {
+    return v.map((x) => (typeof x === "string" ? x : JSON.stringify(x)));
+  }
+  if (typeof v === "string" && v.trim()) {
+    return v.split(/[；;\n]/).map((s) => s.trim()).filter(Boolean);
+  }
+  return undefined;
+}
+
+/**
+ * 结构化字段类型规范化 —— **唯一入口**。
+ *
+ * 背景（2026-09-22 实测分析 300642 / id 8d8644a3）：LLM 输出的字段类型不受控。
+ * 该次 `bull-r3` 的 `final_position` 实际是**对象**
+ * `{portfolio_mgr_input, reason, stance:"弱看多"}`，而 R3View 直接
+ * `r3PosLabel(data.final_position, t)` → 内部 `key.toLowerCase()` ⇒
+ * `TypeError: key.toLowerCase is not a function` ⇒ ErrorBoundary 整页「页面错误」。
+ *
+ * 判据：**下游 view 对字段类型的假设，必须在进入 view 之前就被强制成立。**
+ * 否则每出现一种新的 LLM 输出形态 = 一次整页崩溃，且只有真实数据能触发
+ * （静态检查与既有测试都覆盖不到 —— 分派层的 Array.isArray 守卫只管顶层，
+ *  嵌套元素的字段如 cross_examination[].questions、r2_..._response[].verdict 全无保护）。
+ * 因此统一在此收口，不在各 view 里重复打补丁。
+ */
+function normalizeDebateJson(p: DebateJson | null): DebateJson | null {
+  if (!p || typeof p !== "object" || Array.isArray(p)) { return p; }
+  const rec = { ...(p as unknown as Record<string, unknown>) };
+
+  // 1. 顶层数组字段：非数组 ⇒ 置 undefined（让 hasStructuredContent 判据同时变准）
+  for (
+    const k of [
+      "core_arguments",
+      "resonance_points",
+      "preempted_counter_attacks",
+      "cross_examination",
+      "r2_cross_examination_response",
+      "strengthened_arguments",
+      "data_gaps",
+    ]
+  ) {
+    if (rec[k] !== undefined && !Array.isArray(rec[k])) {
+      rec[k] = toSafeStringArray(rec[k]);
+    }
+  }
+
+  // 2. 顶层字符串字段：对象/数字 ⇒ 收敛（对象取同义键，取不到则丢弃，绝不留给 view 崩）
+  for (const k of ["report", "stance", "final_position", "claim", "summary_for_convergence"]) {
+    if (rec[k] !== undefined && typeof rec[k] !== "string") {
+      rec[k] = toSafeString(rec[k]);
+    }
+  }
+
+  // 3. 嵌套 verdict（VerdictView 读 data.verdict.stance 后同样调 .toLowerCase()）
+  if (rec.verdict !== undefined) {
+    if (rec.verdict && typeof rec.verdict === "object" && !Array.isArray(rec.verdict)) {
+      const v = { ...(rec.verdict as Record<string, unknown>) };
+      if (v.stance !== undefined && typeof v.stance !== "string") {
+        v.stance = toSafeString(v.stance);
+      }
+      rec.verdict = v;
+    } else if (typeof rec.verdict !== "string") {
+      rec.verdict = undefined;
+    }
+  }
+
+  // 4. core_arguments[].evidence_refs：R1View 会 .slice(0,2).join("；")
+  if (Array.isArray(rec.core_arguments)) {
+    rec.core_arguments = (rec.core_arguments as unknown[]).map((it) => {
+      if (!it || typeof it !== "object" || Array.isArray(it)) { return it; }
+      const a = { ...(it as Record<string, unknown>) };
+      if (a.evidence_refs !== undefined && !Array.isArray(a.evidence_refs)) {
+        a.evidence_refs = toSafeStringArray(a.evidence_refs);
+      }
+      if (a.claim !== undefined && typeof a.claim !== "string") { a.claim = toSafeString(a.claim); }
+      return a;
+    });
+  }
+
+  // 4b. resonance_points[].dimensions：R1View 会 .join("+")
+  if (Array.isArray(rec.resonance_points)) {
+    rec.resonance_points = (rec.resonance_points as unknown[]).map((it) => {
+      if (!it || typeof it !== "object" || Array.isArray(it)) { return it; }
+      const rp = { ...(it as Record<string, unknown>) };
+      if (rp.dimensions !== undefined && !Array.isArray(rp.dimensions)) {
+        rp.dimensions = toSafeStringArray(rp.dimensions);
+      }
+      return rp;
+    });
+  }
+
+  // 5. cross_examination[].questions：R2View 会 .map()（该字段无分派守卫，最易崩）
+  if (Array.isArray(rec.cross_examination)) {
+    rec.cross_examination = (rec.cross_examination as unknown[]).map((it) => {
+      if (!it || typeof it !== "object" || Array.isArray(it)) { return it; }
+      const ce = { ...(it as Record<string, unknown>) };
+      if (ce.questions !== undefined && !Array.isArray(ce.questions)) {
+        ce.questions = toSafeStringArray(ce.questions);
+      }
+      return ce;
+    });
+  }
+
+  // 6. r2_cross_examination_response[].verdict：R3View 会 r3VerdictLabel() → .toLowerCase()
+  if (Array.isArray(rec.r2_cross_examination_response)) {
+    rec.r2_cross_examination_response = (rec.r2_cross_examination_response as unknown[]).map((it) => {
+      if (!it || typeof it !== "object" || Array.isArray(it)) { return it; }
+      const resp = { ...(it as Record<string, unknown>) };
+      if (resp.verdict !== undefined && typeof resp.verdict !== "string") {
+        resp.verdict = toSafeString(resp.verdict);
+      }
+      return resp;
+    });
+  }
+
+  // 7. strengthened_arguments[]：LLM 实测用 argument/evidence/status，
+  //    而 R3View 读 claim_ref/additional_evidence ⇒ 补别名，避免「不崩但全空」
+  if (Array.isArray(rec.strengthened_arguments)) {
+    rec.strengthened_arguments = (rec.strengthened_arguments as unknown[]).map((it) => {
+      if (!it || typeof it !== "object" || Array.isArray(it)) { return it; }
+      const sa = { ...(it as Record<string, unknown>) };
+      if (sa.claim_ref === undefined) { sa.claim_ref = toSafeString(sa.argument) ?? toSafeString(sa.claim); }
+      if (sa.additional_evidence === undefined) {
+        sa.additional_evidence = toSafeString(sa.evidence) ?? toSafeString(sa.r2_challenge_summary);
+      }
+      return sa;
+    });
+  }
+
+  return rec as unknown as DebateJson;
+}
+
 /** 从非 JSON 文本中提取嵌入的评分（LLM 推理文本中常泄漏 bear/bull score） */
 function extractEmbeddedScores(text: string): DebateJson | null {
   if (!text) { return null; }
@@ -300,7 +448,9 @@ function processDebateInput(raw: string): DebateContent {
     }
   }
 
-  const parsed = tryParseDebate(unwrapped);
+  // 类型规范化收口：LLM 输出的字段类型不受控，必须在进入各 view 之前强制成立。
+  // 不加这一步，`final_position` 是对象时 R3View 会整页崩（见 normalizeDebateJson 文档）。
+  const parsed = normalizeDebateJson(tryParseDebate(unwrapped));
 
   // 检查嵌套 verdict 对象（strict_mode 下 LLM 输出 {report, verdict:{stance,strength_score,confidence}}）
   const hasNestedVerdict = !!parsed && typeof parsed.verdict === "object" && parsed.verdict !== null
@@ -510,7 +660,21 @@ function R2View({ data, isDark }: { data: R2DebateJson; isDark: boolean }) {
   );
 }
 
-function r3PosLabel(key: string, t: (k: string) => string): { text: string; color: string } {
+/** 非字符串 key 的安全降级文本（绝不把对象交给 React child，否则整页崩） */
+function safeLabelText(key: unknown): string {
+  if (typeof key === "string") { return key; }
+  if (key === null || key === undefined) { return ""; }
+  if (typeof key === "object") {
+    try {
+      return JSON.stringify(key).slice(0, 60);
+    } catch {
+      return "";
+    }
+  }
+  return String(key);
+}
+
+function r3PosLabel(key: unknown, t: (k: string) => string): { text: string; color: string } {
   const m: Record<string, [string, string]> = {
     strong_bull: ["stockAnalysis.debate.strongBullish", "red"],
     bull: ["stockAnalysis.debate.bullish", "red"],
@@ -522,19 +686,27 @@ function r3PosLabel(key: string, t: (k: string) => string): { text: string; colo
     bearish: ["stockAnalysis.debate.bearish", "green"],
     weak_bear: ["stockAnalysis.debate.weakBearish", "lime"],
   };
+  // 纵深防御：上游 normalizeDebateJson 已收敛类型；此处若收到非字符串（调用方漏走规范化）
+  // 也必须降级而不是抛 TypeError。2026-09-22 实测 final_position 为对象即由此崩页。
+  if (typeof key !== "string") {
+    return { text: safeLabelText(key), color: "default" };
+  }
   const e = m[key.toLowerCase().trim()];
   return e ? { text: t(e[0]), color: e[1] } : { text: key, color: "default" };
 }
-function r3VerdictLabel(key: string, t: (k: string) => string): { text: string; color: string } {
+function r3VerdictLabel(key: unknown, t: (k: string) => string): { text: string; color: string } {
   const m: Record<string, [string, string]> = {
     rejected: ["stockAnalysis.debate.rejected", "red"],
     partially_accepted: ["stockAnalysis.debate.partiallyAccepted", "orange"],
     accepted: ["stockAnalysis.debate.accepted", "green"],
   };
+  if (typeof key !== "string") {
+    return { text: safeLabelText(key), color: "default" };
+  }
   const e = m[key];
   return e ? { text: t(e[0]), color: e[1] } : { text: key, color: "default" };
 }
-function stanceLabel(key: string, t: (k: string) => string): { text: string; color: string } {
+function stanceLabel(key: unknown, t: (k: string) => string): { text: string; color: string } {
   const m: Record<string, [string, string]> = {
     strong_bull: ["stockAnalysis.debate.strongBullish", "red"],
     bull: ["stockAnalysis.debate.bullish", "red"],
@@ -546,6 +718,9 @@ function stanceLabel(key: string, t: (k: string) => string): { text: string; col
     bearish: ["stockAnalysis.debate.bearish", "green"],
     strong_bear: ["stockAnalysis.debate.strongBearish", "green"],
   };
+  if (typeof key !== "string") {
+    return { text: safeLabelText(key), color: "default" };
+  }
   const e = m[key.toLowerCase().trim()];
   return e ? { text: t(e[0]), color: e[1] } : { text: key, color: "default" };
 }
@@ -572,7 +747,8 @@ function R3View({ data, isDark }: { data: R3DebateJson; isDark: boolean }) {
           className="p-2 rounded text-xs"
           style={{
             background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
-            borderLeft: posInfo?.color === "green" || data.final_position?.includes("bear")
+            borderLeft: posInfo?.color === "green"
+                || (typeof data.final_position === "string" && data.final_position.includes("bear"))
               ? "2px solid var(--sa-green)"
               : "2px solid var(--sa-red)",
           }}
@@ -691,7 +867,7 @@ function VerdictView({ data }: { data: DebateJson }) {
     <div className="space-y-2">
       {stanceInfo && <Tag color={stanceInfo.color}>{stanceInfo.text}</Tag>}
       {typeof score === "number" && (
-        <Tag color={data.stance?.includes("bear") ? "green" : "red"}>
+        <Tag color={typeof data.stance === "string" && data.stance.includes("bear") ? "green" : "red"}>
           {t("stockAnalysis.strength")}: {score}
         </Tag>
       )}
@@ -985,9 +1161,12 @@ export function DebatePanel() {
           <div className="flex items-center gap-2">
             <span>{t("stockAnalysis.debate.title")}</span>
             {finalVerdict && (finalVerdict.final_position || finalVerdict.claim) && (
-              <Tag color={finalVerdict.final_position?.includes("bear") ? "green" : "red"}>
-                {t("stockAnalysis.finalVerdict")}:{" "}
-                {finalVerdict.claim?.slice(0, 30) || finalVerdict.final_position || t("stockAnalysis.pending")}
+              <Tag
+                color={safeLabelText(finalVerdict.final_position).includes("bear") ? "green" : "red"}
+              >
+                {t("stockAnalysis.finalVerdict")}: {safeLabelText(finalVerdict.claim).slice(0, 30)
+                  || safeLabelText(finalVerdict.final_position)
+                  || t("stockAnalysis.pending")}
               </Tag>
             )}
           </div>
@@ -1101,7 +1280,7 @@ export function DebatePanel() {
                   className="mb-0"
                   style={{ fontSize: 11, color: "var(--color-text-secondary)" }}
                 >
-                  {finalVerdict.claim || t("stockAnalysis.debate.noVerdict")}
+                  {safeLabelText(finalVerdict.claim) || t("stockAnalysis.debate.noVerdict")}
                 </Typography.Paragraph>
               </div>
             )}
@@ -1196,11 +1375,11 @@ export function DebatePanel() {
                   className="mb-1"
                   style={{ fontSize: 12, color: "var(--color-text-secondary)" }}
                 >
-                  {finalVerdict.claim || t("stockAnalysis.debate.noVerdict")}
+                  {safeLabelText(finalVerdict.claim) || t("stockAnalysis.debate.noVerdict")}
                 </Typography.Paragraph>
                 {finalVerdict.final_position && (
-                  <Tag color={finalVerdict.final_position.includes("bear") ? "green" : "red"}>
-                    {t("stockAnalysis.debate.position")}: {finalVerdict.final_position}
+                  <Tag color={safeLabelText(finalVerdict.final_position).includes("bear") ? "green" : "red"}>
+                    {t("stockAnalysis.debate.position")}: {safeLabelText(finalVerdict.final_position)}
                   </Tag>
                 )}
                 {typeof finalVerdict.confidence === "number" && (

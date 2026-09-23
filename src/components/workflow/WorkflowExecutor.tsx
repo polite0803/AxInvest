@@ -3,6 +3,7 @@
 
 import type { JsonSchemaProperty, Variable, WorkflowTemplateResponse } from "@/components/workflow/types";
 import { WorkflowLogPanel } from "@/components/workflow/WorkflowLogPanel";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke, logIpcError } from "@/lib/invoke";
 import { isSecretOf } from "@/lib/workflowVariables";
 import type { LlmDiagnoseV2 } from "@/stores/feature/workflowEditorStore";
@@ -423,7 +424,7 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
         message.info(t("workflow.executor.cancelled"));
         return;
       }
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }, [form, workflow.id, executeWorkflow, fields, message, t]);
 
@@ -478,7 +479,7 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
       }
     } catch (error) {
       logIpcError("AI 自愈诊断")(error);
-      message.error(String(error));
+      showBackendError(message, error);
     } finally {
       setSelfHealLoading(false);
     }
@@ -518,7 +519,7 @@ export function WorkflowExecutor({ workflow, open, onClose }: WorkflowExecutorPr
       }
     } catch (error) {
       logIpcError("AI 自愈应用修复")(error);
-      message.error(String(error));
+      showBackendError(message, error);
     } finally {
       setSelfHealApplying(false);
     }

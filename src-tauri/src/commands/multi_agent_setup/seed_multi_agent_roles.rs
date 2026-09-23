@@ -9,7 +9,6 @@
 //!
 //! 与 stock-analysis 自有的 stock-analyst / debater / risk-evaluator 等业务角色不同，
 //! 这三个角色是**通用协作骨架**，跨场景复用：
-//! - 工作流中可通过 AgentNode.model_role = "analyst" / "implementer" / "reviewer" 调用
 //! - delegate_task MCP 工具按 role_name 委派子任务
 //! - MultiAgentTriggerHook 在检测到复杂任务时自动拆分给三角色
 //!

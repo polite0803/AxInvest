@@ -306,6 +306,9 @@ impl StockVendor for AkshareVendor {
             rating_avg: None,
             rating_count,
             year,
+            // vendor 返回的真实一致预期 ⇒ 非估算
+            is_estimated: false,
+            estimate_source: None,
         }))
     }
 

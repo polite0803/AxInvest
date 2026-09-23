@@ -8,7 +8,13 @@
  *   - reasoning 展开前 line-clamp-2，点击展开全文
  *   - 分歧诊断用 Tooltip 内联（不另占卡片空间）
  */
-import { actionToDirection, getActionTKey, parseAction, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import {
+  actionToDirection,
+  agreementTier,
+  getActionTKey,
+  parseAction,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import { Empty, Tag, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,11 +32,12 @@ function normalize(data: DecisionComparisonPanelProps["data"]): CompactDecisionS
 }
 
 /**
- * 展示档派生（P1-2 2026-09-14）。
+ * 展示档（P1-2 2026-09-14；**2026-09-22 语义变更**）。
  *
- * 「持有 / 观望」不再由组件各自判断仓位：后端目前仍按仓位互改 action，
- * `resolveDisplayAction` 与后端同判据（positionState 优先，缺失时退回 positionPct），
- * 故对既有数据是恒等变换；后端切到「action 只表达方向强度」后此处无需再改。
+ * 自 2026-09-22 起展示档 = 方向档 —— `resolveDisplayAction` 已改为恒等，**不再**按
+ * `positionState` / `positionPct` 派生。旧派生是循环判据（用本次决策算出的建议仓位
+ * 反推本次展示名），会让 LLM 措辞抖动经「试探仓 → positionPct → positionState」
+ * 把「观望」翻成「持有」，见 `AUDIT-300642-run-variance-2026-09-22.md`。
  *
  * V76(2026-09-14): 后端 DTO 已下发 `decisionPositionState`（v228 独立轴），
  * 本函数优先用它；为 `null`（v228 前的历史行）时才退回 `decisionPositionPct`。
@@ -60,10 +67,12 @@ function actionTagColor(action?: string | null): string {
   return "default";
 }
 
+// 2026-09-21: 本地档位表已删除，改走 `agreementTier`（单一真相源）。
+//   原实现高档阈值为 **80**，而 `CompactDecisionComparison` / `DecisionBanner` /
+//   `EvolutionDriftPanel` 三处都用 **60** ⇒ 分数落在 [60, 80) 时两个面板给出
+//   **相反的颜色**（本面板显示琥珀、主决策卡显示绿），用户在同一屏看到矛盾结论。
 function agreementLevel(score: number): "high" | "mid" | "low" {
-  if (score >= 80) { return "high"; }
-  if (score >= 40) { return "mid"; }
-  return "low";
+  return agreementTier(score);
 }
 
 /** 带缺失提示的数值组件 */
@@ -84,8 +93,9 @@ function NumValue({ value, suffix = "" }: { value: number | null | undefined; su
  * 同义不同值域制造了假的分歧告警（与本案 P0-2「从自由文本猜方向」同一类：
  * 比的是字形而不是语义）。现走 `parseAction` 统一到同一值域再比。
  *
- * ⚠️ 刻意**不**用 `resolveDisplayAction`：那是把「持有 / 观望」按持仓派生的**展示**档，
- *    用来比「方向是否分歧」会掩盖两侧在持仓语义上的真实差异。
+ * ⚠️ 刻意**不**用 `resolveDisplayAction`：那是**展示档**的统一入口（曾按持仓派生，
+ *    2026-09-22 起已恒等于方向档）。此处比的是「方向是否分歧」，只认方向语义 ——
+ *    经展示入口会掺入与持仓相关的语义，掩盖两侧在方向上的真实差异。
  */
 function actionsDiffer(a?: string | null, b?: string | null): boolean {
   if (!a || !b) { return false; }

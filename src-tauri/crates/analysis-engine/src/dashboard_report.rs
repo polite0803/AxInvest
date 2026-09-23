@@ -149,6 +149,32 @@ pub fn render_dashboard_md(report: &DashboardReport) -> String {
     if let (Some(low), Some(high)) = (report.intrinsic_value_low, report.intrinsic_value_high) {
         let cp = report.current_price.map(|p| format!("（现价 {p:.2}）")).unwrap_or_default();
         md.push_str(&format!("- 内在价值(DCF): {low:.2} - {high:.2}{cp}\n"));
+        // 2026-09-22: 补口径。
+        // 2026-09-23 **订正**：原文末句写「仅中值为点估计」—— 该句与前半句**自相矛盾**：
+        //   既然三档是「非概率区间的假设敏感性带」，中值就只是**基准情景下的值**，
+        //   不是内在价值的点估计。把它追认为点估计，正是 `upsidePct` 当初用 `mid`
+        //   计算的依据 ⇒ 直接产出「估值说低估 92.8%、决策说观望」这条用户可见的矛盾。
+        //   现改为**情景**口径（悲观/基准/乐观），并声明 `upsidePct` 取悲观情景。
+        md.push_str(
+            "- ⚠️ 区间口径: 三档 = 同一自由现金流锚的**情景**区间 —— 悲观（增长率 ×0.6、\
+             永续增长率 ×0.7、**要求回报 +1pp**）/ 基准（原假设）/ 乐观（增长率 ×1.5、\
+             永续增长率 ×1.3，上界受无风险利率约束）。悲观档是多个假设**同时**不利的联合情景，\
+             故**不是概率区间**、也不是「公司值 low~high 元」；上文「上行空间」取**悲观档**\
+             （= 安全边际），基准档仅供叙述。\n",
+        );
+        // 2026-09-23: 补**结构局限**声明 —— 这是「区间为什么这么宽」的最终答案。
+        // 复算（`output/sci7-tvr-threshold.mjs`，d=8.5%、5 年预测期）：非衰退标的
+        // （预测期增长率 ≥ 0）的终值现值占比**下界**为 72.6%，随增长率单调升至 86.5%
+        // ⇒ **估值至少七成来自永续终值**，而终值只由两个全局常量假设（d、p）决定。
+        // 这是模型结构的固有后果（5 年预测期偏短 + 终值倍数 1/(d−p)），**不是个案缺陷**
+        // —— 因此它既不作为「该标的不适用 DCF」的判据（原判据 ③ 已撤销），
+        // 也不能靠调参消除，只能**如实披露**给读数的人。
+        md.push_str(
+            "- ⚠️ 模型结构局限: 本模型预测期 5 年、终值倍数由 `1 / (折现率 − 永续增长率)` \
+             决定 ⇒ 在默认参数下，**任何非衰退标的的估值都有约七成以上来自永续终值**。\
+             即上表的区间宽度主要由两个**全局假设**（而非该公司的经营数据）决定 —— \
+             这是模型的固有性质，请按「假设敏感性」而非「公司价值」读数。\n",
+        );
     }
     md.push_str(&format!("- 建议仓位: {:.0}%\n\n", report.position_pct));
 
@@ -373,6 +399,23 @@ pub fn render_dashboard_html(report: &DashboardReport) -> String {
         html.push_str(&format!(
             "<li>内在价值(DCF): <b style=\"color:#58a6ff\">{low:.2} - {high:.2}</b>{cp}</li>"
         ));
+        // 2026-09-22: 与 md 渲染同源的口径标注（见上方 md 分支注释）。
+        // 2026-09-23: 订正「仅中值为点估计」—— 与 md 分支逐字同源。
+        html.push_str(
+            "<li style=\"opacity:.75;font-size:.9em\">⚠️ 区间口径: 三档 = 同一自由现金流锚的\
+             <b>情景</b>区间 —— 悲观（增长率 ×0.6、永续增长率 ×0.7、<b>要求回报 +1pp</b>）/ \
+             基准（原假设）/ 乐观（增长率 ×1.5、永续增长率 ×1.3，上界受无风险利率约束）。\
+             悲观档是多个假设<b>同时</b>不利的联合情景，故<b>不是概率区间</b>、\
+             也不是「公司值 low~high 元」；「上行空间」取<b>悲观档</b>（= 安全边际）。</li>",
+        );
+        // 2026-09-23: 结构局限声明（与 md 分支同源，见该处注释的复算依据）。
+        html.push_str(
+            "<li style=\"opacity:.75;font-size:.9em\">⚠️ 模型结构局限: 本模型预测期 5 年、\
+             终值倍数由 <code>1 / (折现率 − 永续增长率)</code> 决定 ⇒ 在默认参数下，\
+             <b>任何非衰退标的的估值都有约七成以上来自永续终值</b>。即区间宽度主要由两个\
+             <b>全局假设</b>（而非该公司的经营数据）决定 —— 请按「假设敏感性」而非\
+             「公司价值」读数。</li>",
+        );
     }
     html.push_str(&format!("<li>建议仓位: <b>{:.0}%</b></li>", report.position_pct));
     html.push_str("</ul>");
@@ -474,6 +517,50 @@ pub fn render_dashboard_html(report: &DashboardReport) -> String {
 /// **估值语义**的 `intrinsic_value_*` —— 与交易语义的 `target_price` 严格区分
 /// （2026-09-13：两者同名展示导致用户读到「同一工作流结论矛盾」，603466 实证）。
 /// 传 `None` 时这四个字段保持 `None`，UI 侧按「无估值数据」渲染。
+///
+/// 交易价位的**成对性**约束：目标价与止损价必须**同时**存在，否则两者都按未设处理。
+///
+/// # 为什么需要它
+///
+/// 「交易计划」的定义是**目标 + 保护**两端构成的区间。只有一端时它不是一个计划：
+/// 只有止损 ⇒ 无法评估盈亏比与方向；只有目标价 ⇒ 不知道下行边界。
+/// 把单端渲染成结论，等于向用户断言一个**并不存在**的交易计划。
+///
+/// # 实证（2026-09-23，300642 透景生命）
+///
+/// LLM trader 输出 `targetPrice = null` + `stopLoss = 17.9`，其 `reasoning` 原文写明该止损是
+/// 「**未来若**回踩 MA10 附近**再建仓时**的参考止损线」—— 即一条**条件性参考**
+/// （前提是「未来建仓」）。而仪表盘把它渲染成无条件的「止损价: 17.90」，
+/// 并在同栏显示「交易目标价: —（未设）」⇒ 用户读到「没有目标价，却有止损」，两者互相矛盾。
+///
+/// # 两个独立成因（均已修，本函数只负责其一）
+///
+/// 1. **公式侧不产出绝对价格** —— 主因，已于 2026-09-23 在 `portfolio-mgr.rhai` **源头**修复：
+///    公式本已算出成对档位（`stopLossPct`/`takeProfitPct`，由 `timeHorizon` 唯一决定），
+///    却从未换算成价格 ⇒ `targetPrice`/`stopLoss` 键不存在 ⇒ 仪表盘只能取 LLM 的单端值。
+///    现公式侧按 `现价 × (1 ∓ 档位%)` 产出两键，且优先级高于 LLM（见 `merge_price_fields_from_llm`）。
+/// 2. **prompt 契约只覆盖一个字段** —— v39（2026-09-13，603466 实证）的修复是改 trader 的
+///    `system_prompt`，要求「持有观望**不填** `targetPrice`」。本次 LLM **确实遵守了**
+///    （目标价为 `null`），但该约束**只覆盖 `targetPrice`**、未覆盖 `stopLoss`
+///    ⇒ LLM 合规地留空目标价、同时填了止损。
+///
+/// 本函数以**零参数的结构判据**（成对性）兜住「LLM 单端填值」这一形态：
+/// prompt 约束依赖模型遵守，不可作为唯一防线；结构判据与模型行为无关，
+/// 故它能同时覆盖本形态与将来任何新出现的一端缺失。
+///
+/// ⚠️ 本函数**只影响仪表盘展示**，不触碰 `decision_json` 本体 —— LLM 的原文仍完整
+/// 保留在 `reasoning` / `decision_trail` 中，需要该参考止损的用户仍可查阅。
+fn pair_trade_prices(
+    target_price: Option<f64>,
+    stop_loss: Option<f64>,
+) -> (Option<f64>, Option<f64>) {
+    if target_price.is_some() && stop_loss.is_some() {
+        (target_price, stop_loss)
+    } else {
+        (None, None)
+    }
+}
+
 pub fn build_dashboard_report_from_workflow(
     decision_json: &serde_json::Value,
     score_json: &serde_json::Value,
@@ -499,8 +586,11 @@ pub fn build_dashboard_report_from_workflow(
     let confidence = decision_json.get("confidence").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let reasoning =
         decision_json.get("reasoning").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let target_price = decision_json.get("targetPrice").and_then(|v| v.as_f64());
-    let stop_loss = decision_json.get("stopLoss").and_then(|v| v.as_f64());
+    // 2026-09-23：价位字段的**成对性**约束（见 `pair_trade_prices` 的完整论证）。
+    let (target_price, stop_loss) = pair_trade_prices(
+        decision_json.get("targetPrice").and_then(|v| v.as_f64()),
+        decision_json.get("stopLoss").and_then(|v| v.as_f64()),
+    );
 
     // ── 估值语义字段（来自 t-valuation 的客观计算，与交易价位严格区分）──
     // 603466 实证：仪表盘「目标价」= 13.27（LLM 自填、等于现价），而估值区间是 4.44–5.57

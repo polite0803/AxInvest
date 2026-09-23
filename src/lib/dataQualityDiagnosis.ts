@@ -56,6 +56,32 @@ export function diagStatusToSeverity(status: DataQualityDiagItem["status"]): Dia
 }
 
 /**
+ * 单节点报告质量分（`report_quality`，0-100）→ 展示严重度。
+ *
+ * 2026-09-21 抽为**单一来源**：此前该三档阈值只写在 `AnalystDataQualityModal` 的行内表达式里；
+ * 同日又给 `DecisionBanner` 的逐节点表格加「报告质量」列，若各写一份就会出现
+ * **同一个数值在两处显示不同颜色** —— 正是本项目当天全仓清理的「同语义多份判据」形态。
+ *
+ * ⚠ 这是**视觉分层**（快速指示），**不是**第二套等级体系：全工作流的唯一权威等级仍是
+ *   `data-quality.rhai` 输出的 `grade`（A–F）。禁止据此派生 per-node 字母等级 ——
+ *   那正是 2026-09-14 才修掉的坑（见本文件头部说明）。
+ *
+ * ⚠ 返回 `null` 表示**无值**（旧版快照没有 `report_quality` 字段），调用方须降级展示。
+ *   刻意不把「无值」并入 `good`：那会把「不知道」渲染成「好」（本次修正的一处旧行为）。
+ *
+ * 注：两处调用方各自保留既有调色板（modal 用 antd 语义色、DecisionBanner 用 tailwind 色阶），
+ *   本函数只出**档位**不出颜色 —— 同一档在两处的色值本就不同，不要误以为能直接复用色值。
+ *
+ * @param rq 节点的 `report_quality`；`undefined` = 旧版快照无此字段（**不能当 0**，0 是合法取值）
+ */
+export function reportQualitySeverity(rq: number | undefined): DiagSeverity | null {
+  if (rq === undefined) { return null; }
+  if (rq >= 80) { return "good"; }
+  if (rq >= 50) { return "warning"; }
+  return "issue";
+}
+
+/**
  * 解析 store 中的 `dataQualitySummary`（data-quality 节点输出的 JSON 字符串）。
  *
  * 返回 null 的四种情况（调用方应据此降级展示，而不是自行计算）：

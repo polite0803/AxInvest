@@ -114,7 +114,6 @@ export interface AgentNodeConfig {
   executionMode?: "react" | "plan";
   /** RAG 知识源 ID 列表。格式: "knowledge:<kb_id>", "memory:<ns_id>", "wiki:<wiki_id>" */
   ragSourceIds?: string[];
-  modelRole?: "quick_think" | "deep_think";
   /**
    * 3.7 P2:任务场景 — 控制 Agent 节点的输出风格指令。
    * - `general`:无特殊约束(默认)
@@ -606,7 +605,6 @@ export interface DebateNodeConfig {
   maxRounds: number;
   convergencePrompt?: string;
   convergenceModel?: string;
-  convergenceModelRole?: string;
   topicVar: string;
   outputVar: string;
   /** 子图定义（可选）。编辑器渲染为可展开/折叠容器框体，内部渲染子节点网格。 */

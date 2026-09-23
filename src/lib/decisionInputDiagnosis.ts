@@ -56,7 +56,10 @@ const NODE_SPECS: readonly NodeSpec[] = [
   { nodeId: "debate-convergence", role: "辩论收敛", factor: "f2 共识", weight: 0.25 },
   { nodeId: "a-catalyst", role: "催化剂分析师", factor: "f3 催化剂", weight: 0.20 },
   { nodeId: "t-catalyst-data", role: "公告数据", factor: "f3 催化剂", weight: null },
-  { nodeId: "cls-risk-level", role: "LLM 风险分类", factor: "f4 风险", weight: 0.15 },
+  // v55(2026-09-20)：cls-risk-level 已由 LlmClassifierNode 下沉为 Rhai CodeNode，
+  // 角色名不能再写「LLM 风险分类」（会误导为 LLM 输出）。其余不变：
+  // diagnoseNode 的 extractContentField 会解包 CodeNode 的 result，故 case 分支无需改。
+  { nodeId: "cls-risk-level", role: "确定性风险分类", factor: "f4 风险", weight: 0.15 },
   { nodeId: "t-risk", role: "算法风险", factor: "f4 风险", weight: null },
   { nodeId: "t-valuation", role: "估值", factor: "f5 估值", weight: 0.15 },
   { nodeId: "data-quality", role: "数据质量", factor: "f6 数据质量", weight: 0.15 },
@@ -187,10 +190,22 @@ function diagnoseNode(nodeId: string, raw: unknown): NodeDiagResult {
     }
     case "cls-risk-level": {
       const cat = getPath(content, "category");
+      // v55(2026-09-20)：cls-risk-level 已下沉为 Rhai CodeNode（risk-level.rhai）。
+      // 它的输出契约比原 LLM 版多两个**显式降级信号**：
+      //   · 上游字段缺失时脚本**不报错**（保住整轮工作流不中断），而是置 degraded=true、
+      //     把缺失项从 metrics 里删掉（**不写哨兵值**）、并在 warnings 里列出不可用的输入名；
+      //   · 这两个字段此前**零消费方**（Rust 侧只取 result.category，本文件只取 category，
+      //     store 侧只读节点状态）⇒ 降级只能事后查 node_executions，等于「设计成可见、
+      //     实际不可见」。此处把降级带进 note 让它真正可见。
+      // 说明：本文件所有 note 均为硬编码中文技术串（见文件头 i18n-exempt），故不新增 i18n key。
+      const degraded = getPath(content, "degraded") === true;
+      const warnings = getPath(content, "warnings");
+      const warnCount = Array.isArray(warnings) ? warnings.length : 0;
+      const baseNote = cat ? "分类已输出" : "category 字段缺失";
       return {
         confidence: null,
         stance: typeof cat === "string" ? String(cat) : "",
-        note: cat ? "分类已输出" : "category 字段缺失",
+        note: degraded ? `确定性降级（${warnCount} 项输入不可用）｜${baseNote}` : baseNote,
       };
     }
     case "t-risk": {

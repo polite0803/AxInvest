@@ -4,6 +4,7 @@ use crate::types::*;
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -322,8 +323,10 @@ impl StockVendor for EastMoneyVendor {
             amount: f("f48"),
             change_pct: f("f170") / 100.0,
             turnover_rate: f("f168") / 100.0,
-            pe: Some(f("f162") / 100.0).filter(|v| *v > 0.0),
-            pb: Some(f("f167") / 100.0).filter(|v| *v > 0.0),
+            // 2026-09-21 修复：保留负 PE/PB（亏损 = 有效信息），仅剔除 0 占位。
+            // 详见 vendors/xueqiu.rs 同处注释（三家 vendor 同款过滤，一并放开）。
+            pe: d["f162"].as_f64().filter(|v| *v != 0.0).map(|v| v / 100.0),
+            pb: d["f167"].as_f64().filter(|v| *v != 0.0).map(|v| v / 100.0),
             total_mv: Some(f("f116")).filter(|v| *v > 0.0),
             circulating_mv: Some(f("f117")).filter(|v| *v > 0.0),
             limit_up,
@@ -475,7 +478,7 @@ impl StockVendor for EastMoneyVendor {
             rows.sort_by_key(|r| std::cmp::Reverse(date_of(r)));
         }
 
-        let reports: Vec<FinancialReport> = rows
+        let mut reports: Vec<FinancialReport> = rows
             .iter()
             .take(40) // 去重后实测 16 条（9 期 + 7 个更早年报）；上限防异常返回
             .map(|r| {
@@ -524,6 +527,143 @@ impl StockVendor for EastMoneyVendor {
                 }
             })
             .collect();
+
+        // ④ 补充请求（现金流量表）：补齐 `operating_cash_flow` / `capital_expenditure`。
+        //
+        // ── 为什么必须补（2026-09-21 实证，300308 中际旭创）────────────────────────
+        //
+        // `ZYZBAjaxNew`（主要指标）**不提供可直接使用的现金流量表科目** —— 实测其
+        // 141 个字段里只有派生比率（`NCO_NETPROFIT` = 经营现金流/净利、
+        // `MGJYXJJE` = 每股经营现金流）与两个口径不明的 `FCFF_FORWARD/BACK`，
+        // 没有「经营活动产生的现金流量净额」与「购建固定资产等支付的现金」。
+        // 本文件原先因此把三个字段**硬编码为 None**（见上方 `FinancialReport` 构造）。
+        //
+        // 后果不是「少一个指标」，而是三条既有链**整体退化为死代码**：
+        //   · `compute_dcf` 的 ① 分支 `direct_fcf` 恒为 `None`
+        //     ⇒ DCF 锚点**永远**走「近 5 年报正净利均值 × 0.90」fallback；
+        //   · `compute_dcf` 的适用性判据 ②（「净利为正但当期真实 FCF ≤ 0」/
+        //     「0 < FCF/净利 < 0.3 量级脱钩」）**永远无法命中** ⇒ 该护栏 100% 失效；
+        //   · `compute_owner_earnings` 永远退化为 `净利 × 0.85~0.95`，
+        //     把非现金的净利润冒充「所有者收益」。
+        //
+        // DB 佐证（`stock_analyses` 49 条）：15 条含 DCF `note`、8 条含
+        // `is_fallback_anchor`，其中 **8/8 = true** —— 全库没有一例用过当期真实 FCF；
+        // 且 `note` 统一谎称「当期FCF≤0（周期底部）」，对一家营收 +182.5%、
+        // ROE 62.6% 的成长股也如此断言，并被 value-investor 原样引用进 `risk_flags`。
+        //
+        // ── 接口与字段 ──────────────────────────────────────────────────────────
+        //
+        // `xjllbAjaxNew`（现金流量表，与主要指标同源同站）。实测字段：
+        //   `NETCASH_OPERATE`       经营活动产生的现金流量净额（元，**年内累计**）
+        //   `CONSTRUCT_LONG_ASSET`  购建固定资产、无形资产和其他长期资产支付的现金（元，累计）
+        // ```text
+        //   300308 2025-12-31: OCF 108.96 亿, capex 27.60 亿  ⇒ 自由现金流 +81.36 亿
+        //   300308 2026-06-30: OCF  18.00 亿, capex 48.02 亿  ⇒ 自由现金流 −30.02 亿（半年累计）
+        // ```
+        // 两者与 `eps` / `roe` **同为年内累计口径** ⇒ TTM 还原由 `compute_dcf` 侧的
+        // `ttm_fcf()` 负责；本 vendor 只做忠实映射，**不做年度化**（否则同一份
+        // `FinancialReport` 里各字段口径不一致 —— 参见 `annualized_eps` 的 P1-A 记录）。
+        //
+        // ⚠️ `companyType` 必须随公司类型变化 —— 传错**静默返回 `data: []`**（无报错）：
+        // ```text
+        //   通用=4  银行=3  证券=1  保险=2
+        //   SZ300308(通用) companyType=4 → 3 行；companyType=3 → 0 行
+        //   SH601166(银行) companyType=3 → 3 行；companyType=4 → 0 行
+        //   SH600030(证券) companyType=1 → 1 行；  SH601318(保险) companyType=2 → 1 行
+        // ```
+        // 类型取自同一接口的 `ORG_TYPE` 字段（"通用"/"银行"/"证券"/"保险"），
+        // 故不需要额外请求去探测。
+        //
+        // 容错：与 type=1 年报补充一致 —— 失败只 warn，不硬失败。它是**既有取值链的
+        // 输入补齐**，不是新增能力；缺失时行为回退到本次修复前的形态。
+        let company_type = match rows.first().and_then(|r| r["ORG_TYPE"].as_str()) {
+            Some("银行") => 3,
+            Some("证券") => 1,
+            Some("保险") => 2,
+            _ => 4, // 通用 + 未知类型（未知按通用试，失败只 warn）
+        };
+        let cf_dates: Vec<String> = reports
+            .iter()
+            .filter_map(|r| r.report_date.get(..10).map(|s| s.to_string()))
+            .take(12)
+            .collect();
+        if !cf_dates.is_empty() {
+            let url = format!(
+                "https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/\
+                 xjllbAjaxNew?companyType={company_type}&reportDateType=0&reportType=1&dates={}&code={em_code}",
+                cf_dates.join(",")
+            );
+            match self.em_get(&url).await {
+                Ok(resp) => match resp.json::<Value>().await {
+                    Ok(j) => {
+                        // 与上方 `n` 同形：兼容字符串型数字，过滤 "--" / "" / null
+                        let num = |v: &Value| -> Option<f64> {
+                            if v.is_null() {
+                                return None;
+                            }
+                            if let Some(s) = v.as_str() {
+                                if s.is_empty() || s == "--" || s == "null" {
+                                    return None;
+                                }
+                                return s.parse::<f64>().ok();
+                            }
+                            v.as_f64()
+                        };
+                        let mut cf: HashMap<String, (Option<f64>, Option<f64>)> = HashMap::new();
+                        for row in j["data"].as_array().into_iter().flatten() {
+                            let date = match row["REPORT_DATE"].as_str().and_then(|d| d.get(..10)) {
+                                Some(d) => d.to_string(),
+                                None => continue,
+                            };
+                            cf.insert(
+                                date,
+                                (
+                                    num(&row["NETCASH_OPERATE"]),
+                                    num(&row["CONSTRUCT_LONG_ASSET"]),
+                                ),
+                            );
+                        }
+                        let mut filled = 0usize;
+                        for r in reports.iter_mut() {
+                            let key = match r.report_date.get(..10) {
+                                Some(k) => k,
+                                None => continue,
+                            };
+                            let (ocf, capex) = match cf.get(key) {
+                                Some(v) => *v,
+                                None => continue,
+                            };
+                            r.operating_cash_flow = ocf;
+                            r.capital_expenditure = capex;
+                            if ocf.is_some() && capex.is_some() {
+                                filled += 1;
+                            }
+                        }
+                        // `data: []` 是 companyType 传错时的**静默**失败形态
+                        // （HTTP 200 + 空数组），故只在补齐 0 期时升为 warn。
+                        if filled == 0 {
+                            tracing::warn!(
+                                "[eastmoney] get_financials 现金流量表补充 0 期命中\
+                                 (companyType={company_type}, dates={}, stock_code={stock_code}) \
+                                 —— 可能 companyType 与公司类型不匹配",
+                                cf_dates.len()
+                            );
+                        } else {
+                            tracing::debug!(
+                                "[eastmoney] get_financials 现金流量表补充: {filled}/{} 期补齐 OCF+capex",
+                                reports.len()
+                            );
+                        }
+                    },
+                    Err(e) => tracing::warn!(
+                        "[eastmoney] get_financials 现金流量表解析失败: {e} (stock_code={stock_code})"
+                    ),
+                },
+                Err(e) => tracing::warn!(
+                    "[eastmoney] get_financials 现金流量表请求失败: {e} (stock_code={stock_code})"
+                ),
+            }
+        }
 
         // 修复 M-FIN-2: 字段名映射可能因 API 升级而失效。
         // 当所有关键字段（roe/gross_margin/net_margin/revenue_yoy/profit_yoy）均为 None，
@@ -929,26 +1069,66 @@ impl StockVendor for EastMoneyVendor {
         //   - BILLBOARD_BUY_AMT: 龙虎榜买入额
         //   - BILLBOARD_SELL_AMT: 龙虎榜卖出额
         //   - BILLBOARD_NET_AMT: 龙虎榜净买额
-        //   - BUY_SEAT_NEW/SELL_SEAT_NEW: 买入/卖出营业部数量
+        //   - OPERATEDEPT_NAME: 营业部名称（席位明细）
+        //   - BUY/SELL/NET: 该营业部买入额/卖出额/净额
+        //
+        // 2026-09-21 修复（实证见 AUDIT-analyst-low-confidence-2026-09-21.md §三）：
+        // 原实现用汇总级报表 RPT_DAILYBILLBOARD_DETAILS 的 BUY_SEAT_NEW/SELL_SEAT_NEW
+        // 拼 dept_name，两处缺陷叠加：
+        //   ① BUY_SEAT_NEW 实测返回**字符串**（"13331"），`as_i64()` 对字符串恒返回 None，
+        //      被 `unwrap_or(0)` 静默吞掉 ⇒ 每行恒产出「买入0席位/卖出0席位」，
+        //      14/14 轮历史运行 100% 复现；且该字段是**席位编号**不是营业部数量。
+        //   ② 该报表是**汇总级**（只有买卖总额），本就不含营业部明细 ⇒ 分析师反复写
+        //      「席位数据缺失/未显示营业部明细」，是其报告如实反映工具缺口。
+        // 现改接 RPT_BILLBOARD_DAILYDETAILSBUY / ...SELL（营业部级明细，实测可用），
+        // dept_name 取真实 OPERATEDEPT_NAME，与 baidu_stock 的同名字段语义对齐
+        // （该字段在两个 vendor 上此前语义不一致）。
         let code =
             stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-            reportName=RPT_DAILYBILLBOARD_DETAILS&columns=ALL&\
-            filter=(SECURITY_CODE%3D%22{code}%22)&\
-            pageSize=20&pageNumber=1&source=WEB&\
-            sortColumns=TRADE_DATE&sortTypes=-1"
-        );
 
-        let resp = self.em_get(&url).await?;
-        let json: Value = resp.json().await?;
+        let mut rows: Vec<Value> = Vec::new();
+        let mut ok_reports = 0usize;
+        let mut last_err: Option<DataError> = None;
+        for report in ["RPT_BILLBOARD_DAILYDETAILSBUY", "RPT_BILLBOARD_DAILYDETAILSSELL"] {
+            let url = format!(
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+                reportName={report}&columns=ALL&\
+                filter=(SECURITY_CODE%3D%22{code}%22)&\
+                pageSize=50&pageNumber=1&source=WEB&\
+                sortColumns=TRADE_DATE&sortTypes=-1"
+            );
+            match self.em_get(&url).await {
+                Ok(resp) => match resp.json::<Value>().await {
+                    Ok(json) => {
+                        ok_reports += 1;
+                        if let Some(arr) = json["result"]["data"].as_array() {
+                            rows.extend(arr.iter().cloned());
+                        }
+                    },
+                    Err(e) => {
+                        // 不静默兜底：成因入日志；两个报表都失败则向上返回错误
+                        tracing::warn!("[eastmoney] get_dragon_tiger {report} JSON 解析失败: {e}");
+                        last_err = Some(DataError::VendorError {
+                            vendor: "eastmoney".into(),
+                            message: format!("get_dragon_tiger {report} JSON 解析失败: {e}"),
+                        });
+                    },
+                },
+                Err(e) => {
+                    tracing::warn!("[eastmoney] get_dragon_tiger {report} 请求失败: {e}");
+                    last_err = Some(e);
+                },
+            }
+        }
+        if ok_reports == 0 {
+            return Err(last_err.unwrap_or_else(|| DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: "get_dragon_tiger 买卖席位明细报表均请求失败".into(),
+            }));
+        }
 
-        let rows = match json["result"]["data"].as_array() {
-            Some(arr) if !arr.is_empty() => arr,
-            _ => return Ok(vec![]),
-        };
-
-        rows.iter()
+        Ok(rows
+            .iter()
             .map(|r| {
                 let trade_date = r["TRADE_DATE"].as_str().unwrap_or("");
                 // 截取日期部分 "YYYY-MM-DD 00:00:00" → "YYYY-MM-DD"
@@ -957,20 +1137,17 @@ impl StockVendor for EastMoneyVendor {
                 } else {
                     trade_date.to_string()
                 };
-                let buy_seat = r["BUY_SEAT_NEW"].as_i64().unwrap_or(0);
-                let sell_seat = r["SELL_SEAT_NEW"].as_i64().unwrap_or(0);
-                let dept_name = format!("买入{}席位/卖出{}席位", buy_seat, sell_seat);
-                Ok(DragonTigerEntry {
+                DragonTigerEntry {
                     stock_code: stock_code.to_string(),
                     date,
-                    dept_name,
-                    buy_amount: r["BILLBOARD_BUY_AMT"].as_f64().unwrap_or(0.0),
-                    sell_amount: r["BILLBOARD_SELL_AMT"].as_f64().unwrap_or(0.0),
-                    net_amount: r["BILLBOARD_NET_AMT"].as_f64().unwrap_or(0.0),
+                    dept_name: r["OPERATEDEPT_NAME"].as_str().unwrap_or("").to_string(),
+                    buy_amount: r["BUY"].as_f64().unwrap_or(0.0),
+                    sell_amount: r["SELL"].as_f64().unwrap_or(0.0),
+                    net_amount: r["NET"].as_f64().unwrap_or(0.0),
                     reason: r["EXPLANATION"].as_str().map(|s| s.to_string()),
-                })
+                }
             })
-            .collect()
+            .collect())
     }
 
     async fn get_lockup_schedule(
@@ -1178,6 +1355,9 @@ impl StockVendor for EastMoneyVendor {
             rating_avg,
             rating_count: Some(rating_count),
             year: chrono::Utc::now().format("%Y").to_string(),
+            // vendor 返回的真实一致预期 ⇒ 非估算
+            is_estimated: false,
+            estimate_source: None,
         }))
     }
 
@@ -2229,17 +2409,88 @@ impl StockVendor for EastMoneyVendor {
         };
 
         // 过滤自身:SECURITY_CODE 是纯数字代码(如 "600887")
-        Ok(rows
+        let peer_rows: Vec<&Value> = rows
             .iter()
             .filter(|r| r["SECURITY_CODE"].as_str().map(|c| c != code).unwrap_or(false))
-            .map(|r| PeerComparison {
-                stock_code: r["SECURITY_CODE"].as_str().unwrap_or("").to_string(),
-                stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
-                pe: None,
-                pb: None,
-                roe: None,
-                change_pct: 0.0,
-                market_cap: None,
+            .collect();
+        let peer_codes: Vec<String> = peer_rows
+            .iter()
+            .filter_map(|r| r["SECURITY_CODE"].as_str().map(String::from))
+            .collect();
+
+        // ── 2026-09-21 修复：补估值字段（原 pe/pb/roe/change_pct/market_cap 为硬编码 None/0.0）──
+        // 原实现五个字段全部写死（pe/pb/roe = None，change_pct = 0.0，market_cap = None），
+        // 从未实现取值 ⇒ 基本面/催化剂/行业三个分析师都写「同侪 PE/PB 全为 null，
+        // 横向估值锚缺失」。实测 RPT_VALUEANALYSIS_DET 支持 (SECURITY_CODE in (...))
+        // 批量查询，字段含 PE_TTM / PB_MRQ / TOTAL_MARKET_CAP / CHANGE_RATE；
+        // 该报表按股票返回多日历史，故按 code 取 TRADE_DATE 最大的一行。
+        // ROE 不在该报表内（需财报报表），保持 None —— 不猜值、不伪造。
+        type Valuation = (String, Option<f64>, Option<f64>, f64, Option<f64>);
+        let mut valuations: HashMap<String, Valuation> = HashMap::new();
+        if !peer_codes.is_empty() {
+            let in_list: String =
+                peer_codes.iter().map(|c| format!("%22{c}%22")).collect::<Vec<_>>().join(",");
+            let val_url = format!(
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+                 reportName=RPT_VALUEANALYSIS_DET&\
+                 columns=SECURITY_CODE,PE_TTM,PB_MRQ,TOTAL_MARKET_CAP,CHANGE_RATE,TRADE_DATE&\
+                 filter=(SECURITY_CODE%20in%20({in_list}))&\
+                 source=WEB&sortColumns=TRADE_DATE&sortTypes=-1&pageNumber=1&pageSize={}",
+                peer_codes.len() * 12 + 10
+            );
+            match self.em_get(&val_url).await {
+                Ok(resp) => match resp.json::<Value>().await {
+                    Ok(json) => {
+                        if let Some(arr) = json["result"]["data"].as_array() {
+                            for v in arr {
+                                let cc = match v["SECURITY_CODE"].as_str() {
+                                    Some(c) => c,
+                                    None => continue,
+                                };
+                                let d = v["TRADE_DATE"].as_str().unwrap_or("").to_string();
+                                let better = match valuations.get(cc) {
+                                    Some((exist, ..)) => d > *exist,
+                                    None => true,
+                                };
+                                if better {
+                                    valuations.insert(
+                                        cc.to_string(),
+                                        (
+                                            d,
+                                            v["PE_TTM"].as_f64(),
+                                            v["PB_MRQ"].as_f64(),
+                                            v["CHANGE_RATE"].as_f64().unwrap_or(0.0),
+                                            v["TOTAL_MARKET_CAP"].as_f64(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => tracing::warn!(
+                        "[eastmoney] get_peers 估值批量查询 JSON 解析失败(估值字段留空): {e}"
+                    ),
+                },
+                Err(e) => {
+                    tracing::warn!("[eastmoney] get_peers 估值批量查询失败(估值字段留空): {e}")
+                },
+            }
+        }
+
+        Ok(peer_rows
+            .iter()
+            .map(|r| {
+                let sc = r["SECURITY_CODE"].as_str().unwrap_or("").to_string();
+                let v = valuations.get(&sc);
+                PeerComparison {
+                    stock_code: sc,
+                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
+                    pe: v.and_then(|x| x.1),
+                    pb: v.and_then(|x| x.2),
+                    roe: None,
+                    change_pct: v.map(|x| x.3).unwrap_or(0.0),
+                    market_cap: v.and_then(|x| x.4),
+                }
             })
             .collect())
     }

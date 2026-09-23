@@ -480,6 +480,10 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_stock_institutional_visits",
             "get_stock_peers",
             "search_stock",
+            // 2026-09-20：产品决策反转（§7.3 原「不接」→ 现接入）——
+            // 把 detect_earnings_surprise 接给 fundamentals-analyst，用于基于
+            // 一致预期EPS判业绩超预期/低于预期。
+            "detect_earnings_surprise",
         ],
     ),
     ("policy-analyst", &["search_news", "get_stock_news", "get_cls_flash", "search_stock"]),
@@ -508,6 +512,16 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             //   三份重复 JSON 注入 messages → input tokens 膨胀 3 倍 → output 截断。
             // 保留 get_stock_margin_data（bundle 不含融资融券）和
             //   get_stock_announcements（bundle 不含公告）作为补充数据源。
+            // 2026-09-21(v72): 补 `get_stock_pledge_data` —— 专家 prompt 的方法论第 4 条
+            //   与自检清单都要求评估「质押比例 > 50% 高警戒线 / 质押风险敞口」，而
+            //   bundle 是解禁+增减持+大宗交易**三方**（结构上不含质押），本白名单此前
+            //   也没有任何质押工具 ⇒ 该维度**每轮必缺**，模型只能自己给缺口编原因
+            //   （全库 15 轮里 12 轮写了质押缺口，最远漂到「工具调用被拒绝」的伪归因，
+            //    见 `AUDIT-pledge-attribution-2026-09-21.md`）。
+            //   上游预拉由节点 `t-pledge-data` 承担（seed_stock_analysis.rs），
+            //   本行是**第二层**授权：预拉之外的补充取数 + 预拉失败时仍可自救。
+            //   ⚠ 与 `lockup-watcher.md` frontmatter 的 `data_sources` 同源，改一处必改另一处。
+            "get_stock_pledge_data",
             "get_stock_margin_data",
             "get_stock_announcements",
             "search_stock",
@@ -645,26 +659,41 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ),
     // ── 简化模板升级：3 个新专家工具映射 ──
     // market-synthesizer: 市场主线综合，需多源数据采集 + 持久化
+    // 2026-09-19 订正 —— **判据空间是 chat 工具注册表，不是 `tool_def_map`**：
+    //   本表有两条消费链：① stock_analysis 模板节点工具（`seed_stock_analysis.rs` 的
+    //   `let tool_names = PROFILE_TOOLS` 经 `tool_def_map` 解析）
+    //   ② `agent_profiles.recommended_tools`（本文件内锚点
+    //   `PROFILE_TOOLS.iter().cloned()` → `recommended_tools: Set(tools_json)` 的两处 UPSERT）
+    //   → chat 侧 `local_tool.rs` 的 `get_chat_tools_by_names` 追加给 LLM。
+    //   ⚠ 本注释不写行号：本文件增删一行即失效（已实测腐烂两轮），认锚点。
+    //   本专家**不在** stock_analysis 模板 ⇒ 链① 不生效，唯一生效的是链②，
+    //   其名字空间 = `crates/astock-data/src/mcp_tools.rs` 的工具名表。
+    //   原 3 项在该表中均不存在（静默过滤丢掉，但前端 ExpertSelector 照显），逐条处理：
+    //     · `get_dragon_tiger_list` → `get_market_dragon_tiger`（同物异名，1:1）
+    //     · `get_north_flow`        → `get_north_bound_flow`（同物异名，1:1）
+    //     · `market_mainline_batch_upsert` 删除 —— 它**不是幽灵**：是 daily-market-events
+    //       模板自己的 `ToolDef`，认字符串 `name: "market_mainline_batch_upsert"`（在
+    //       `seed_daily_market_events.rs` 的 `agent_tools` 列表内）；该模板的 Agent 节点
+    //       用 `tools: agent_tools` 自带它 ⇒ 工作流侧不依赖本表；chat 侧该表无此名。
+    //       （此处不写行号：外部文件一改即失效。）
+    //       2026-09-20 更新：命题「工作流侧不依赖本表」成立，但**当时它根本解析不到** ——
+    //       工作流的工具解析走 ToolResolver（判据 = `register_all` 注册表 ∪ MCP 工具表），
+    //       `#[agent_command]` 元数据不在其中，故该名字恒解析为 None、调用被静默降级。
+    //       现已补为真实工具（`crates/tools/src/tools/market_mainline.rs`，注册于
+    //       `tools/mod.rs` 的 register_all）⇒ 模板侧真正可用；本表仍**不加**它：
+    //       本表链②查的是 `crates/astock-data/src/mcp_tools.rs` 的名字表，不含该工具。
+    //       「是否也把市场主线工具暴露给 chat 专家」属产品决策，未擅自扩。
     (
         "market-synthesizer",
-        &[
-            "get_hot_stocks",
-            "get_cls_flash",
-            "get_dragon_tiger_list",
-            "get_north_flow",
-            "market_mainline_batch_upsert",
-        ],
+        &["get_hot_stocks", "get_cls_flash", "get_market_dragon_tiger", "get_north_bound_flow"],
     ),
     // industry-chain-analyzer: 产业链传导，需新闻 + 产业链追踪
+    // 2026-09-19: 删除 `trace_industry_chain` —— chat 名字空间无此名（全仓仅本表引用）。
+    //   语义相近的现有工具是 `compute_industry_position`（产业链位置），但**是否等价
+    //   属产品判断**，未擅自替换；详见 AUDIT-codebase-review-roadmap-2026-09-19.md 待裁决 ④。
     (
         "industry-chain-analyzer",
-        &[
-            "get_stock_news",
-            "get_cls_flash",
-            "get_stock_concept_blocks",
-            "trace_industry_chain",
-            "search_stock",
-        ],
+        &["get_stock_news", "get_cls_flash", "get_stock_concept_blocks", "search_stock"],
     ),
     // screenshot-diagnoser: 持仓截图诊断，需基础分析工具
     (
@@ -673,9 +702,34 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ),
     // ── 事件驱动模板：仓位规划与止损复查 ──
     // position-planner: 仓位规划，需基础行情 + 资金分配
-    ("position-planner", &["get_stock_quote", "get_account_info", "get_stock_risk_metrics"]),
-    // stop-loss-reviewer: 止损复查，需波动率 + 风险指标
-    ("stop-loss-reviewer", &["get_stock_quote", "get_stock_risk_metrics", "compute_volatility"]),
+    // 2026-09-19: 删除 `get_account_info` / `get_stock_risk_metrics` ——
+    //   chat 名字空间（`crates/astock-data/src/mcp_tools.rs` 工具名表）中**不存在这两类工具**：
+    //   该表有 `compute_portfolio_risk`，但那是**组合**级风险，与「个股风险指标」不等价；
+    //   账户权益类工具全仓不存在。⇒ 原两项是被静默丢弃的白声明（`get_chat_tools_by_names`
+    //   按名过滤、无告警），而前端 `ExpertSelector` 会照显 ⇒ 删的是「展示误导」，不是能力
+    //   （功能侧本就解析不到，属零行为变更）。是否新补「个股风险指标 / 账户权益」工具
+    //   属**新增能力**，待产品决策（见 AUDIT-codebase-review-roadmap-2026-09-19.md 待裁决 ④）。
+    ("position-planner", &["get_stock_quote"]),
+    // stop-loss-reviewer: 止损复查，需基础行情 + 退出信号
+    // 2026-09-19: 删除 `get_stock_risk_metrics` / `compute_volatility`（chat 名字空间均无），
+    //   并按「不新增工具、改用现存工具」补上 `check_exit_signals`：
+    //   原声明里的 `compute_volatility` 想表达的是「止损该不该触发 / 波动是否异常」，
+    //   而 `crates/astock-data/src/mcp_tools.rs` **已有语义更贴的现成工具** ——
+    //   `check_exit_signals` 的描述即「检查个股退出信号…返回 `overall_exit_urgency`」，
+    //   入参含 `entry_price` / `stop_loss_price`（**专为止损触发设计**），输出契约
+    //   （technology_disruption / capacity_oversupply / new_entrant / demand_slowdown
+    //   / overall_exit_urgency）还对齐了 mapper_prompt 的 `exit_signals` 字段。
+    //   未同时接 `get_stock_kline`（波动率原料）：本 profile 职责是**复核结论**，
+    //   K 线原料已由上游 trader 经 `kline_json` 传递，再接一层属重复取数。
+    // ⚠ 生效面（勿误读）：本表只喂 **chat 侧**的工具挂载 —— `seed_agent_profiles`
+    //   写入 `agent_profiles.recommended_tools`，再由 chat 侧 `local_tool.rs` 的
+    //   `get_chat_tools_by_names` 追加给 LLM。工作流侧工具**一律**取
+    //   `an.config.tools`（`agent_executor.rs` 的 `tool_defs_to_chat_tools(&an.config.tools)`），
+    //   而 `auto-stop-loss-review` 模板的 AgentNode 是**显式 `tools: vec![]`** ⇒ 那个
+    //   节点仍是纯推理节点（输入全靠 `context_sources` + `input_mapping` 注入），
+    //   **本行改动不会让它多出工具**。`agent_profile_id` 在工作流侧只用于
+    //   provider/model 解析与 role/prompt 拼接。
+    ("stop-loss-reviewer", &["get_stock_quote", "check_exit_signals"]),
     // explainer: 决策解释官 —— 显式声明**无工具**。
     // 其输入（portfolio-risk-gate 的裁决结果）全部经 input_mapping 注入，职责是翻译
     // 而非取数；`&[]`（而非缺省）表示「已评估并确定为无」，与「未配置」区分开。
@@ -1307,6 +1361,41 @@ pub(crate) fn force_variable_value(
     serde_json::to_string(&vars).unwrap_or_else(|_| variables_json.to_string())
 }
 
+/// 解析「辩论轮数」的当前生效值，作为建图展开节点数与下游锚点的唯一来源。
+///
+/// 从旧变量表（DB 存量，经 `merge_variable_values`、RENAME_MAP 保留用户自定义）
+/// 读取 `debate_rounds`；未命中则用 `seed_variables::DEFAULT_DEBATE_ROUNDS` 默认。
+///
+/// ## 为什么需要它（不要直接写死 1）
+///
+/// 该值决定 DAG 展开成几对 `bull-rN`/`bear-rN` 辩手节点、以及下游锚点
+/// `bear-r{name}` 指向第几轮。若建图轮数与落库的 `debate_rounds` 变量值不一致，
+/// 轻则多跑/少跑轮次，重则产生悬空入边（曾致 `create_workflow` 启动期拒绝，
+/// 见 `debater_round_refs_are_parameterized` 负控）。统一由本函数求值，
+/// 保证「建图、下游锚点、变量表」三处同源。
+pub(crate) fn resolve_debate_rounds(old_variables_json: Option<&str>) -> usize {
+    use crate::commands::stock_analysis_setup::seed_variables::DEFAULT_DEBATE_ROUNDS;
+
+    if let Some(json) = old_variables_json.filter(|v| !v.is_empty()) {
+        if let Ok(vars) = serde_json::from_str::<Vec<serde_json::Value>>(json) {
+            for v in vars {
+                if v.get("name").and_then(|n| n.as_str()) == Some("debate_rounds") {
+                    if let Some(n) = v.get("value").and_then(|val| val.as_u64()) {
+                        // 防御性夹紧：上层解析为 usize，避免极端值把 DAG 撑爆
+                        // （u64::clamp 不会越界；区间 [1, 10] 恒合法，不会 panic）
+                        return n.clamp(1, 10) as usize;
+                    }
+                }
+            }
+        }
+        tracing::warn!(
+            "[stock_analysis_setup] 旧变量表中未找到 debate_rounds 数值，回退默认 {} 轮",
+            DEFAULT_DEBATE_ROUNDS
+        );
+    }
+    DEFAULT_DEBATE_ROUNDS as usize
+}
+
 // seed_debate_subworkflow: 辩论已通过 DebateNode 容器直接嵌入主模板，旧独立模板已移除
 
 /// 种子化反思复盘工作流模板（stock-reflection）。
@@ -1615,7 +1704,6 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 execution_mode: None,
                 // 从 stock_reflections 记忆空间检索语义相似的历史反思
                 rag_source_ids: vec!["memory:stock_reflections".into()],
-                model_role: Some("decision-maker".into()),
                 consistency_check: Some(axagent_harness::ConsistencyCheckConfig {
                     enabled: true,
                     mode: axagent_harness::ConsistencyMode::SameModelRepeated,
@@ -1926,8 +2014,6 @@ struct EventTriggeredTemplateSpec {
     tags: &'static [&'static str],
     /// Agent Profile ID（用于绑定 Role + Expert）
     agent_profile_id: Option<&'static str>,
-    /// 模型角色（用于注入 A 股约束等）
-    model_role: Option<&'static str>,
 }
 
 /// 内部辅助函数：构建并持久化一个事件订阅型决策联动工作流模板。
@@ -2020,7 +2106,6 @@ async fn seed_event_triggered_decision_template(
                 max_tool_rounds: Some(1),
                 execution_mode: None,
                 rag_source_ids: vec![],
-                model_role: spec.model_role.map(|r| r.into()),
                 consistency_check: None,
                 hallucination_guard: None,
                 fallback_model: None,
@@ -2218,7 +2303,6 @@ async fn seed_auto_position_plan_template(db: &sea_orm::DatabaseConnection) -> R
 请根据仓位规划方法论完成任务，输出 JSON 结果。"#,
         output_var: "position-plan",
         agent_profile_id: Some("stock-position-planner"),
-        model_role: Some("decision-maker"),
     };
     seed_event_triggered_decision_template(db, spec).await
 }
@@ -2252,7 +2336,6 @@ async fn seed_auto_stop_loss_review_template(
 请根据止损复查方法论完成任务，输出 JSON 结果。"#,
         output_var: "stop-loss-review",
         agent_profile_id: Some("stock-stop-loss-reviewer"),
-        model_role: Some("decision-maker"),
     };
     seed_event_triggered_decision_template(db, spec).await
 }
@@ -2295,5 +2378,243 @@ mod force_variable_value_tests {
     fn 非法输入时保持原样() {
         let out = force_variable_value("not json at all", "x", serde_json::json!(1));
         assert_eq!(out, "not json at all");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 版本门落库守门（2026-09-20 新增）
+//
+// ## 为什么需要它
+//
+// 种子的版本门是 `existing.version >= TEMPLATE_VERSION ⇒ return Ok(())`（`>=`）。
+// 这条判据把「代码改了要不要重建 DB 模板」系在一个**纯数字比较**上，而 DB 现值
+// 可以被别的路径写高（并发会话 / 带更高常量的构建 / 历史遗留）。
+//
+// 实测事故（2026-09-20，真库 + `workflow_template_versions` 快照表双重取证）：
+// 常量停留在 55，DB 已是 58 ⇒ 版本门**永久跳过** ⇒ **v53 / v54 / v55 三批改动
+// 全部未落库**（含 `cls-risk-level` 下沉 Rhai），而 `cargo check` / `clippy` /
+// `fmt` / `test` **四道门全绿** —— 它们只回答「代码能否编译」，没有一个能回答
+// 「版本门会不会开门」。
+//
+// ## 它守什么、不守什么
+//
+// - **守**：门的三态语义（空库建、旧版升级、新版跳过）、以及种子**真的把内容写进去**
+//   （版本号对而内容没变是另一种独立失败）。判据全部从 `TEMPLATE_VERSION` **现取**，
+//   不写死数字 —— 所以改常量不会让本测试腐烂。
+// - **不守**：「生产库现值是否低于常量」。那需要一个具体数字事实，属运维侧
+//   （用 `output/verify-v59-seed.mjs` 之类的只读脚本查），不该固化成断言。
+//
+// ## 为什么不碰生产库
+//
+// 用 `axagent_dao::db::create_test_pool()`：它走**与生产同一个** `initialize_schema`
+// 建表链（仅连接配置不同），落在 `temp_dir` 的唯一 SQLite 文件上 ⇒ 无外部依赖、
+// 可直接进 CI，也不会像真跑生产库那样有「delete 成功 / insert 失败 ⇒ 模板丢失」的风险。
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod version_gate_tests {
+    use super::seed_stock_analysis::{TEMPLATE_VERSION, seed_stock_analysis_workflow_template};
+    use axagent_entities::workflow_template;
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+
+    /// 被测模板 id（与 `seed_stock_analysis.rs` 内的 `TEMPLATE_ID` 同值；
+    /// 此处另取一份是因为它在那个函数体内，模块外不可见）。
+    const TEMPLATE_ID: &str = "stock-analysis";
+
+    async fn fresh_db() -> axagent_dao::db::DbHandle {
+        axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")
+    }
+
+    async fn seed(db: &DatabaseConnection) -> Result<(), String> {
+        seed_stock_analysis_workflow_template(db).await
+    }
+
+    /// 当前 version（模板不存在时 `None`）。
+    async fn version_of(db: &DatabaseConnection) -> Option<i32> {
+        workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .map(|m| m.version)
+    }
+
+    async fn nodes_of(db: &DatabaseConnection) -> Vec<serde_json::Value> {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        serde_json::from_str(&model.nodes).expect("nodes 应是 JSON 数组")
+    }
+
+    /// 把 version 强改为指定值 —— 模拟「DB 现值被别的路径写高 / 写低」。
+    async fn force_version(db: &DatabaseConnection, v: i32) {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        let mut am: workflow_template::ActiveModel = model.into();
+        am.version = Set(v);
+        am.update(db).await.expect("改 version 失败");
+    }
+
+    /// 门的**三态语义**（顺序敏感，必须同一个库）。
+    #[tokio::test]
+    async fn version_gate_seeds_then_upgrades_then_skips() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+
+        // ① 空库 ⇒ 放行，且 version 落在常量现值上
+        assert!(version_of(db).await.is_none(), "前置：临时库应为空");
+        seed(db).await.expect("空库种子化应成功");
+        assert_eq!(
+            version_of(db).await,
+            Some(TEMPLATE_VERSION),
+            "空库种子化后 version 应等于 TEMPLATE_VERSION"
+        );
+
+        // ② 旧版本 ⇒ **必须升级**（这正是 v53/v54/v55 卡住的那条路径）
+        force_version(db, TEMPLATE_VERSION - 1).await;
+        seed(db).await.expect("旧版本重种子化应成功");
+        assert_eq!(
+            version_of(db).await,
+            Some(TEMPLATE_VERSION),
+            "DB 版本低于常量时必须被升级 —— 否则就是「改了代码不生效」"
+        );
+
+        // ③ **门关闭**：DB 高于常量 ⇒ 跳过重建，且**不得篡改 version**
+        //
+        //    本仓真实事故：DB 58 / 常量 55 ⇒ 永久跳过 ⇒ 三批改动一字不落库。
+        //    这里把「跳过」语义钉成契约（它是设计，不是缺陷），
+        //    结论是**常量取值必须严格大于 DB 现值** —— 代价由注释与运维脚本承担，
+        //    不由本测试包办（它拿不到生产库）。
+        let higher = TEMPLATE_VERSION + 1;
+        force_version(db, higher).await;
+        seed(db).await.expect("门关闭时种子化应静默成功（不是报错）");
+        assert_eq!(
+            version_of(db).await,
+            Some(higher),
+            "DB 版本高于常量时必须跳过重建，且跳过时不得把 version 拉低"
+        );
+    }
+
+    /// v55 的**实质内容**必须随种子一起落库（版本号对 ≠ 内容对）。
+    ///
+    /// 单独一条的理由：实测事故里 DB 的 `cls-risk-level` 一直是 `llmClassifier`
+    /// 而版本门看着「正常」—— 版本号与内容是两种独立的失败面。
+    #[tokio::test]
+    async fn seeded_template_carries_rhai_risk_level_node() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+
+        let nodes = nodes_of(db).await;
+        let cls = nodes
+            .iter()
+            .find(|n| n.get("id").and_then(|v| v.as_str()) == Some("cls-risk-level"))
+            .expect("模板里应有 cls-risk-level 节点");
+
+        assert_eq!(
+            cls.get("type").and_then(|v| v.as_str()),
+            Some("code"),
+            "cls-risk-level 必须是 CodeNode（Rhai 确定性实现）；\
+             若为 llmClassifier，说明 v55 的下沉改动没进这份模板"
+        );
+
+        let code = cls.pointer("/config/code").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(!code.is_empty(), "CodeNode 的 code 字段不能为空（`include_str!` 嵌入失败？）");
+        assert!(
+            code.contains("matched_rules"),
+            "code 字段应含 `risk-level.rhai` 的输出契约字段 `matched_rules`；\
+             实际开头: {}",
+            code.chars().take(200).collect::<String>()
+        );
+        // 反向判据：「两份实现被缝在一起」的**真实形态** = 一个节点同时带
+        // `code` 与 `prompt` 字段 ⇒ 断言旧 LlmClassifierNode 的专属字段已消失。
+        //
+        // ⚠️⚠️ 不可写成「`code` 不得含 prompt 原文」—— `risk-level.rhai:111-113`
+        //   写明该段 prompt「**完整保留作为本脚本的口径权威来源**」，第 115 行注释里
+        //   就有「你是专业风险分析师…」这句。种子用 `include_str!` 嵌入**整个文件**，
+        //   故该串**必然**出现在 `config.code` 里。按「不得含」写法本测试在 v59 上
+        //   必红（false red），且检不出真正的缝合形态 —— 它只是把判据锚错了对象。
+        //   （同型事故：`output/verify-v59-seed.mjs` 初版亦犯此错，已同步修正。）
+        let cfg = cls.get("config").expect("cls-risk-level 应有 config 对象");
+        let prompt = cfg.get("prompt");
+        assert!(
+            prompt.is_none_or(serde_json::Value::is_null),
+            "CodeNode 的 config 不得残留 LLM 版专属字段 `prompt`（那是半新半旧的缝合形态）；\
+             实际 config 键: {:?}",
+            cfg.as_object().map(|o| o.keys().collect::<Vec<_>>())
+        );
+
+        // 配套映射也必须同批落库：portfolio-mgr 读的是 `...result.category`，
+        // 而 CodeNode 的输出被包在 `result` 里 —— 只改节点、漏改下游 = 断链。
+        let pm = nodes
+            .iter()
+            .find(|n| n.get("id").and_then(|v| v.as_str()) == Some("portfolio-mgr"))
+            .expect("模板里应有 portfolio-mgr 节点");
+        assert_eq!(
+            pm.pointer("/config/input_mapping/overall_risk_llm").and_then(|v| v.as_str()),
+            Some("cls-risk-level.result.category"),
+            "portfolio-mgr 的 overall_risk_llm 必须指向 `cls-risk-level.result.category`\
+             （CodeNode 输出多一层 `result` 包装）—— 否则风险档位整段读不到"
+        );
+    }
+
+    /// v53 / v54 两批的**落库内容**判据（只验版本号是不够的 —— 版本号对 ≠ 内容对）。
+    ///
+    /// 这两条与 `output/verify-v59-seed.mjs` 的 ⑥/⑦ 是**同一组谓词**：
+    /// 那个脚本面向生产 PG，本测试面向临时 SQLite。两者覆盖同一组谓词 ⇒
+    /// 脚本的**正向**（已落库）行为由本测试在 CI 里持续保证，
+    /// 它的**反向**（未落库）行为由对 v58 生产库的负对照实跑保证
+    /// （实测 7 项判据全数报警，见 `output/_verify-negctl.txt`）。
+    ///
+    /// 单独成条而不并入上一条的理由：失败时**测试名直接指出是哪一批**，
+    /// 不必再从断言消息里反推。
+    #[tokio::test]
+    async fn seeded_template_carries_v53_and_v54_changes() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+
+        let nodes = nodes_of(db).await;
+        let raw = serde_json::to_string(&nodes).expect("nodes 应可序列化");
+
+        // ── v53：`detect_earnings_surprise` 的 ToolDef 契约（`consensus_eps_is_estimated`
+        //    入参）必须保持 —— 判据锚在 seed 侧定义。
+        //    2026-09-20：**产品决策反转**（§7.3 原 v53 定「不接」→ 现接入）——
+        //    该工具已挂到 fundamentals-analyst 节点，nodes 序列化**应**出现该入参。
+        //    （原「不接」决策见 `AUDIT-codebase-review-roadmap-2026-09-19.md` §7.3。）
+        assert!(
+            raw.contains("consensus_eps_is_estimated"),
+            "模板 nodes 应含 `consensus_eps_is_estimated`（2026-09-20 产品决策反转：\
+             detect_earnings_surprise 已接给 fundamentals-analyst）；缺失即说明接线未生效"
+        );
+
+        // ── v54：6 条悬空 `input_mapping` 必须已从 portfolio-mgr 删除 ──
+        //    「悬空」判据 = 该键在 `portfolio-mgr.rhai` 全文零引用（纯白注入）。
+        const V54_DELETED_KEYS: [&str; 6] = [
+            "risk_gross_margin",
+            "trader_action",
+            "trader_data_gaps",
+            "trader_position_pct",
+            "trader_stop_loss_pct",
+            "trader_take_profit_pct",
+        ];
+        let pm = nodes
+            .iter()
+            .find(|n| n.get("id").and_then(|v| v.as_str()) == Some("portfolio-mgr"))
+            .expect("模板里应有 portfolio-mgr 节点");
+        let mapping =
+            pm.pointer("/config/input_mapping").expect("portfolio-mgr 应有 config.input_mapping");
+        let obj = mapping.as_object().expect("input_mapping 应是对象");
+        let left: Vec<&str> =
+            V54_DELETED_KEYS.iter().copied().filter(|k| obj.contains_key(*k)).collect();
+        assert!(
+            left.is_empty(),
+            "v54 未落库：portfolio-mgr 的 input_mapping 仍含悬空键 {left:?}\
+             （这些键在脚本全文零引用，属纯白注入）"
+        );
     }
 }

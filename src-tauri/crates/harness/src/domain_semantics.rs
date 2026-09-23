@@ -464,8 +464,28 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         unit: Unit::Percent,
         min: 0.0,
         max: 100.0,
-        meaning: "数据质量分（分档阈值 25 / 50 / 75 / 90）",
-        evidence: "src-tauri/src/commands/portfolio-mgr.rhai:693",
+        meaning: "数据质量分（分档阈值 A≥85 / B≥65 / C≥45 / D≥25 / F<25）",
+        // 2026-09-19 修正（阈值口径，与下方 evidence 修正同源）：原写「分档阈值
+        //   25 / 50 / 75 / 90」—— 这 4 个数属**未启用的 LLM 专家版**阈值
+        //   （`agency_experts/stock-analysis/data-quality-inspector.md:16` 记作
+        //   「A≥90 / B≥75 / C≥50 / D≥25」，升序即 25/50/75/90），而本 concept 的
+        //   carrier 是「data-quality.rhai 产出」⇒ 记的必须是 rhai 的实际阈值。
+        //   依据 `AUDIT-data-quality-dual-algorithm-2026-09-14.md:63`：「全项目 dqi
+        //   分档阈值现只剩 data-quality.rhai 一份」（2026-09-14 已把四套收敛为一份）。
+        //   ⚠ 防回流：若日后又看到「25/50/75/90」，那是 LLM 专家版的数，**不要据此
+        //     改回本条** —— 该专家当前未被注册为 AgentNode（其文件头部已注明
+        //     「排障与审计一律以 data-quality.rhai 为准」，且公式也与 rhai 不同）。
+        // 2026-09-19 修正（行号引用腐烂 + 指向错文件）：原写 `portfolio-mgr.rhai:693`，
+        //   但 ① 该行号自 v77 起已漂移（现状落在 f5 估值衰减段，与 dqi_score 无关）；
+        //   ② 本 concept 的 carrier 即「data-quality.rhai 产出」，而按「阈值统一」
+        //      （portfolio-mgr.rhai 的 2026-09-14 注释：portfolio-mgr 已改为消费
+        //      grade 字符串、不再自行按 score 分档）阈值权威只剩一份。
+        //   ⇒ 改指 grade 分档的权威处，避免同一分数再出现两套字母阈值。
+        // 2026-09-21 行号刷新：781 → 878。同批给 data-quality.rhai 加了词表假阳性抑制
+        //   （strip_verdict_blocks / soft_marker_suppression / placeholder_occurrences）
+        //   共约 97 行 ⇒ grade 分档整体下移。**该行号是活引用，脚本一改就会漂移**：
+        //   改 data-quality.rhai 后请用 `grep -n '^let grade = if final_score'` 重新定位。
+        evidence: "src-tauri/src/commands/data-quality.rhai:878",
     },
 ];
 

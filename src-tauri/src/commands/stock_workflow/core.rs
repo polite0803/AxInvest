@@ -1,9 +1,10 @@
 use super::decision::QualityPrecheckResult;
 use super::decision::{
     build_dashboard_from_workflow_result, compute_decision_agreement, data_quality_precheck,
-    extract_decision_fields, extract_decision_json, extract_formula_decision_json,
-    extract_llm_decision_json, extract_position_state, load_and_inject_template,
-    normalize_action_for_storage, parse_asof_param, resolve_runtime_options,
+    extract_decision_fields, extract_decision_json, extract_decisions_by_horizon,
+    extract_formula_decision_json, extract_horizon_price_map, extract_llm_decision_json,
+    extract_position_state, load_and_inject_template, normalize_action_for_storage,
+    parse_asof_param, resolve_runtime_options,
 };
 use crate::AppState;
 use crate::commands::error::{ErrorCategory, ErrorResponse};
@@ -163,6 +164,27 @@ fn step_error_payload(
     v
 }
 
+/// 可选的 Tauri 事件发射器：`None` = **无前端监听**的离线场景
+/// （as-of 批量重跑 bin / headless 批处理），此时静默跳过事件。
+///
+/// 为什么统一入口，而不在每处写 `if let Some(h) = app.as_ref()`：
+/// `run_stock_workflow_inner` 内有 6 处发射点，逐处展开会让「离线语义」
+/// 散落在多处 —— 新增发射点时极易漏改。2026-09-23 实测：签名从
+/// `AppHandle` 改成 `Option<AppHandle>` 后漏改 6 处，直到编译才暴露 (E0599)。
+///
+/// 返回 `tauri::Result<()>` 而非 `()`：兼容调用点既有的 `let _ = ...`
+/// 与 `if let Err(e) = ...` 两种写法，使替换面最小（纯机械替换）。
+fn emit_opt(
+    app: &Option<tauri::AppHandle>,
+    event: &str,
+    payload: impl serde::Serialize + Clone,
+) -> tauri::Result<()> {
+    match app.as_ref() {
+        Some(handle) => handle.emit(event, payload),
+        None => Ok(()),
+    }
+}
+
 /// 启动股票分析工作流（DAG 模式）。
 ///
 /// - 默认：生成新 UUID 并 INSERT 新 `stock_analyses` 行（fresh start）。
@@ -190,7 +212,7 @@ pub async fn run_stock_workflow(
         as_of::AS_OF
             .scope(Some(ctx), async {
                 run_stock_workflow_inner(
-                    app,
+                    Some(app),
                     state.inner(),
                     stock_code,
                     dry_run,
@@ -204,7 +226,7 @@ pub async fn run_stock_workflow(
             .await
     } else {
         run_stock_workflow_inner(
-            app,
+            Some(app),
             state.inner(),
             stock_code,
             dry_run,
@@ -294,7 +316,7 @@ pub(crate) async fn trigger_t0_rerun(
     // 5) 执行工作流（permit + per-stock 锁同时持有）
     let app_for_inner = app.clone();
     let exec_result = run_stock_workflow_inner(
-        app_for_inner,
+        Some(app_for_inner),
         state_inner,
         stock_code.clone(),
         None, // dry_run
@@ -335,8 +357,15 @@ pub(crate) async fn trigger_t0_rerun(
     Ok(analysis_id)
 }
 
-pub(crate) async fn run_stock_workflow_inner(
-    app: tauri::AppHandle,
+/// 执行股票分析工作流（命令层与批量/离线调用**共用**的实现体）。
+///
+/// `app` 为 `None` 表示**无前端监听**的离线场景（批量 as-of 重跑 / headless 批处理）：
+/// 此时跳过 `workflow-step-*` 事件发射，其余逻辑与带前端的路径完全一致。
+///
+/// 为什么用 `Option` 承载而不是另拆一个函数：拆函数会让「同一套分析逻辑」出现
+/// 第二份副本，而本仓已有「N 份实现只 1 份在跑」的历史教训（且两份必然逐渐漂移）。
+pub async fn run_stock_workflow_inner(
+    app: Option<tauri::AppHandle>,
     state: &AppState,
     stock_code: String,
     dry_run: Option<bool>,
@@ -414,6 +443,14 @@ pub(crate) async fn run_stock_workflow_inner(
                                     stock_analyses::Column::LlmDecisionJson,
                                     Expr::value(None::<String>),
                                 )
+                                // A4：本分支把决策字段整体清空、重置为 running（replay 同日覆盖），
+                                // 版本号必须同批清空 —— 否则「决策已清空但 template_version 残留
+                                // 上一轮值」这一形态会让复算器拿一个已不存在的决策去对版本，
+                                // 报出「公式版本未知/不匹配」这种指向错误方向的结论。
+                                .col_expr(
+                                    stock_analyses::Column::TemplateVersion,
+                                    Expr::value(None::<i32>),
+                                )
                                 .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now_ms))
                                 .filter(stock_analyses::Column::Id.eq(parent_id.as_str()))
                                 .exec(state.harness.db())
@@ -469,6 +506,10 @@ pub(crate) async fn run_stock_workflow_inner(
             decision_position_state: Set(None),
             decision_reasoning: Set(None),
             decision_json: Set(None),
+            // 阶段1："running" 占位行决策未产生 ⇒ 无四周期价位映射，显式 NULL
+            horizon_price_map: Set(None),
+            // 阶段2："running" 占位行决策未产生 ⇒ 无四周期独立决策，显式 NULL
+            horizon_decisions: Set(None),
             llm_decision_json: Set(None),
             blackboard_snapshot: Set(None),
             config_id: Set(None),
@@ -479,6 +520,10 @@ pub(crate) async fn run_stock_workflow_inner(
             }),
             as_of_date: Set(Some(current_as_of.clone())),
             model_version: Set(None),
+            // A4：本行是 "running" 占位行（决策尚未产生）⇒ NULL；模板在下方才加载，
+            // 真实版本号由 `run_stock_workflow_inner` 的主路径 / 降级分支用 col_expr 写回。
+            // 语义与上方 `decision_position_state` 同约：NULL = 采集时点无此信息。
+            template_version: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             decision_time_horizon: Set(None),
@@ -570,6 +615,11 @@ pub(crate) async fn run_stock_workflow_inner(
     let mut loaded =
         load_and_inject_template(state.harness.db(), &stock_code, &quote.name, "stock-analysis")
             .await?;
+
+    // A4（2026-09-19）：决策落库时要写进 `stock_analyses.template_version`，供离线复算
+    //   判定「该决策用的哪版公式」。提前取出：`loaded` 的 nodes/edges 后续会被 move 进
+    //   引擎，而 `i32` 是 Copy —— 先存局部变量可避免部分 move 带来的借用约束。
+    let template_version = loaded.version;
 
     // P2-3.3: 报告语言切换 — 追加语言指示到 Agent 节点的 system_prompt 末尾
     if let Some(ref lang) = language {
@@ -721,9 +771,14 @@ pub(crate) async fn run_stock_workflow_inner(
                 ),
                 _ => return, // 未知状态，忽略
             };
-            let _ = app.emit(event_name, payload);
+            // 离线批量重跑（`app = None`）没有前端在听，且 emit 本身需要有效的
+            // AppHandle ⇒ 直接跳过事件发射，不影响分析本身。
+            let Some(handle) = app.as_ref() else {
+                return;
+            };
+            let _ = handle.emit(event_name, payload);
             // 向后兼容：同时发送旧事件 workflow-step-done
-            let _ = app.emit(
+            let _ = handle.emit(
                 "workflow-step-done",
                 serde_json::json!({
                     "workflowId": wf_id,
@@ -860,7 +915,7 @@ pub(crate) async fn run_stock_workflow_inner(
             Err(_elapsed) => {
                 tracing::warn!(%wf_id, "工作流总超时，主动取消");
                 let _ = engine.cancel_workflow(&wf_id).await;
-                let _ = app_h.emit(
+                let _ = emit_opt(&app_h,
                     "workflow-error",
                     workflow_error_payload(
                         &wf_id,
@@ -890,7 +945,7 @@ pub(crate) async fn run_stock_workflow_inner(
                 let wf_status = result.status;
                 match wf_status {
                     axagent_rt_workflow::workflow_engine::WorkflowStatus::Cancelled => {
-                        if let Err(e) = app_h.emit(
+                        if let Err(e) = emit_opt(&app_h,
                             "workflow-error",
                             workflow_error_payload(
                                 &wf_id,
@@ -957,6 +1012,10 @@ pub(crate) async fn run_stock_workflow_inner(
                             };
                         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
                             extract_decision_fields(&decision_json);
+                        // 阶段1：抽四周期价位映射，落 `stock_analyses.horizon_price_map`
+                        let horizon_price_map = extract_horizon_price_map(&decision_json);
+                        // 阶段2：抽四周期独立决策，落 `stock_analyses.horizon_decisions`
+                        let horizon_decisions = extract_decisions_by_horizon(&decision_json);
                         let degradation_report = as_of::take_asof_degradation_report();
                         let llm_dj_partial = extract_llm_decision_json(&result);
                         let as_of_for_meta: Option<AsOfContext> = as_of::current_as_of();
@@ -982,6 +1041,15 @@ pub(crate) async fn run_stock_workflow_inner(
                                 Expr::value(decision_json),
                             )
                             .col_expr(
+                                stock_analyses::Column::HorizonPriceMap,
+                                Expr::value(horizon_price_map),
+                            )
+                            // 阶段2：四周期独立决策，落 `stock_analyses.horizon_decisions`
+                            .col_expr(
+                                stock_analyses::Column::HorizonDecisions,
+                                Expr::value(horizon_decisions),
+                            )
+                            .col_expr(
                                 stock_analyses::Column::BlackboardSnapshot,
                                 Expr::value(bb_snapshot),
                             )
@@ -996,6 +1064,12 @@ pub(crate) async fn run_stock_workflow_inner(
                             .col_expr(
                                 stock_analyses::Column::LlmDecisionJson,
                                 Expr::value(llm_dj_partial),
+                            )
+                            // A4：降级分支同样记录模板版本 —— 降级结论也是「按某版公式
+                            // 得出的」，复算时同样需要知道公式版本，否则会被误当作正常决策。
+                            .col_expr(
+                                stock_analyses::Column::TemplateVersion,
+                                Expr::value(template_version),
                             )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
@@ -1028,7 +1102,7 @@ pub(crate) async fn run_stock_workflow_inner(
                             });
                         }
                         // 版本化模式：不再删旧行/改 ID，直接用新行 ID emit
-                        if let Err(e) = app_h.emit(
+                        if let Err(e) = emit_opt(&app_h,
                             "workflow-completed",
                             serde_json::json!({
                                 "workflowId": wf_id,
@@ -1082,7 +1156,7 @@ pub(crate) async fn run_stock_workflow_inner(
                             let f7_note = ab.f7_weight_pct.map(|pct|
                                 format!(" [f7污染{}%]", pct)
                             ).unwrap_or_default();
-                            // V65: 6 维度版分歧诊断
+                            // V65: 5 维度版分歧诊断（2026-09-21 移除 data_gaps 维度）
                             if ab.conflict_type.starts_with("f7_") {
                                 let inf_level = match ab.conflict_type.as_str() {
                                     "f7_low_influence" => "低",
@@ -1100,18 +1174,18 @@ pub(crate) async fn run_stock_workflow_inner(
                                 )
                             } else if ab.total >= 60 {
                                 format!(
-                                    "🤝双视角一致:{}分(维度:act={} pos={} conf={} risk={} gaps={} evid={}){}",
+                                    "🤝双视角一致:{}分(维度:act={} pos={} conf={} risk={} evid={}){}",
                                     ab.total, ab.action_score as i32, ab.position_score as i32,
                                     ab.confidence_score as i32, ab.risk_level_score as i32,
-                                    ab.data_gaps_score as i32, ab.evidence_score as i32,
+                                    ab.evidence_score as i32,
                                     f7_note
                                 )
                             } else if ab.total >= 40 {
                                 format!(
-                                    "⚠️双视角部分一致:{}分(维度:act={} pos={} conf={} risk={} gaps={} evid={}){}",
+                                    "⚠️双视角部分一致:{}分(维度:act={} pos={} conf={} risk={} evid={}){}",
                                     ab.total, ab.action_score as i32, ab.position_score as i32,
                                     ab.confidence_score as i32, ab.risk_level_score as i32,
-                                    ab.data_gaps_score as i32, ab.evidence_score as i32,
+                                    ab.evidence_score as i32,
                                     f7_note
                                 )
                             } else {
@@ -1122,11 +1196,11 @@ pub(crate) async fn run_stock_workflow_inner(
                                     _ => String::new(),
                                 };
                                 format!(
-                                    "🔴双视角分歧:{}分(公式{} vs LLM{},维度:act={} pos={} conf={} risk={} gaps={} evid={}){}{}",
+                                    "🔴双视角分歧:{}分(公式{} vs LLM{},维度:act={} pos={} conf={} risk={} evid={}){}{}",
                                     ab.total, ab.formula_action, ab.llm_action,
                                     ab.action_score as i32, ab.position_score as i32,
                                     ab.confidence_score as i32, ab.risk_level_score as i32,
-                                    ab.data_gaps_score as i32, ab.evidence_score as i32,
+                                    ab.evidence_score as i32,
                                     f7_note, f7_free_note
                                 )
                             }
@@ -1141,7 +1215,7 @@ pub(crate) async fn run_stock_workflow_inner(
                                             "formulaLlmAgreement".into(),
                                             serde_json::json!(ab.total),
                                         );
-                                        // V65: 完整 6 维度诊断结构体
+                                        // V65: 完整 5 维度诊断结构体（2026-09-21 起不再含 data_gaps）
                                         obj.insert("agreementBreakdown".into(), serde_json::json!({
                                             "total": ab.total,
                                             "actionOk": ab.action_ok,
@@ -1157,8 +1231,6 @@ pub(crate) async fn run_stock_workflow_inner(
                                             "riskLevelScore": ab.risk_level_score,
                                             "formulaRiskLevel": ab.formula_risk_level,
                                             "llmRiskLevel": ab.llm_risk_level,
-                                            "dataGapsScore": ab.data_gaps_score,
-                                            "dataGapsSimilarity": ab.data_gaps_similarity,
                                             "evidenceScore": ab.evidence_score,
                                             "evidenceCount": ab.evidence_count,
                                             "conflictType": ab.conflict_type,
@@ -1255,6 +1327,10 @@ pub(crate) async fn run_stock_workflow_inner(
                             time_horizon,
                             expected_holding_days,
                         ) = extract_decision_fields(&decision_json);
+                        // 阶段1：抽四周期价位映射，落 `stock_analyses.horizon_price_map`
+                        let horizon_price_map = extract_horizon_price_map(&decision_json);
+                        // 阶段2：抽四周期独立决策，落 `stock_analyses.horizon_decisions`
+                        let horizon_decisions = extract_decisions_by_horizon(&decision_json);
                         // V50: reasoning 末尾追加双视角分歧诊断
                         let reasoning = match (reasoning, disagreement_note) {
                             (Some(r), Some(note)) => Some(format!("{} | {}", r, note)),
@@ -1293,6 +1369,15 @@ pub(crate) async fn run_stock_workflow_inner(
                                 Expr::value(decision_json),
                             )
                             .col_expr(
+                                stock_analyses::Column::HorizonPriceMap,
+                                Expr::value(horizon_price_map),
+                            )
+                            // 阶段2：四周期独立决策，落 `stock_analyses.horizon_decisions`
+                            .col_expr(
+                                stock_analyses::Column::HorizonDecisions,
+                                Expr::value(horizon_decisions),
+                            )
+                            .col_expr(
                                 stock_analyses::Column::BlackboardSnapshot,
                                 Expr::value(bb_snapshot),
                             )
@@ -1307,6 +1392,12 @@ pub(crate) async fn run_stock_workflow_inner(
                             .col_expr(
                                 stock_analyses::Column::LlmDecisionJson,
                                 Expr::value(llm_dj),
+                            )
+                            // A4：记录当时的工作流模板版本（公式版本的合法代理）。
+                            // 没有它，用现行公式复算历史决策会系统性偏高 4.5pt。
+                            .col_expr(
+                                stock_analyses::Column::TemplateVersion,
+                                Expr::value(template_version),
                             )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
@@ -1470,7 +1561,7 @@ pub(crate) async fn run_stock_workflow_inner(
                                 }
                             });
                             // 同时 emit 前端事件，让 UI 也能感知决策事件总线活动（可选）
-                            let _ = app_h.emit("decision-completed", event_payload);
+                            let _ = emit_opt(&app_h, "decision-completed", event_payload);
                         }
 
                         // 索引决策到 Memory RAG（best-effort，失败不阻塞）
@@ -1536,7 +1627,7 @@ pub(crate) async fn run_stock_workflow_inner(
                             });
                         }
                         // DB 写入完成后再 emit，避免前端 extract_evidence_citations 读到空数据
-                        if let Err(e) = app_h.emit(
+                        if let Err(e) = emit_opt(&app_h,
                             "workflow-completed",
                             serde_json::json!({
                                 "workflowId": wf_id,
@@ -1563,20 +1654,24 @@ pub(crate) async fn run_stock_workflow_inner(
                         // ⚠ 实现已抽到 `sim_hook`，**必须与 `rerun_decision` 共用**：
                         // 那个入口会改决策但不重写快照，若它不重跑仿真，前端就会把
                         // 上一版决策的仿真当成新决策的结论展示。
-                        super::sim_hook::spawn_simulation_after_decision(
-                            db.clone(),
-                            app_h.clone(),
-                            aid.clone(),
-                            code_for_sim.clone(),
-                            Some(quote_price_for_sim),
-                        );
+                        // 离线批量重跑（`app = None`）没有前端，仿真结果无人消费 ⇒ 跳过。
+                        // 仿真不产出任何决策字段（见上方 ② 的约定），故跳过不影响结论。
+                        if let Some(handle) = app_h.as_ref() {
+                            super::sim_hook::spawn_simulation_after_decision(
+                                db.clone(),
+                                handle.clone(),
+                                aid.clone(),
+                                code_for_sim.clone(),
+                                Some(quote_price_for_sim),
+                            );
+                        }
                     },
                 }
             },
             Err(e) => {
                 // 按 `WorkflowError` 变体精确映射，而非把 Display 文本当契约递给前端。
                 let (code, category) = workflow_error_code(&e);
-                let _ = app_h.emit(
+                let _ = emit_opt(&app_h,
                     "workflow-error",
                     workflow_error_payload(&wf_id, code, category, e.to_string()),
                 );
@@ -1660,12 +1755,19 @@ pub async fn run_single_stock_analysis(
         decision_position_state: Set(None),
         decision_reasoning: Set(None),
         decision_json: Set(None),
+        // 阶段1："running" 占位行决策未产生 ⇒ 无四周期价位映射，显式 NULL
+        horizon_price_map: Set(None),
+        // 阶段2："running" 占位行决策未产生 ⇒ 无四周期独立决策，显式 NULL
+        horizon_decisions: Set(None),
         llm_decision_json: Set(None),
         blackboard_snapshot: Set(None),
         config_id: Set(None),
         analysis_kind: Set("live".into()),
         as_of_date: Set(Some(chrono::Utc::now().format("%Y-%m-%d").to_string())),
         model_version: Set(None),
+        // A4：本行同为 "running" 占位行（决策尚未产生）⇒ NULL；真实版本号由
+        // `run_stock_workflow_inner` 的主路径 / 降级分支写回（同上方 462 行的约定）。
+        template_version: Set(None),
         data_snapshot_id: Set(None),
         outcome: Set(None),
         decision_time_horizon: Set(None),
@@ -1781,7 +1883,13 @@ pub async fn run_single_stock_analysis(
         input_schema: loaded.input_schema.clone(),
         output_schema: loaded.output_schema.clone(),
         dry_run: false,
-        variables: None,
+        // D8 修复：**必须**传模板变量，否则 tool 节点的 `input_mapping`（如
+        // `dcf_growth_rate <- value_dcf_growth_rate`）解析不到，静默回退模块常量
+        // ⇒ 与工作区路径（`run_stock_workflow_inner` 的 `opts.variables = template_vars`）
+        // 取值不一致。实测同一面板参数在两条路径上给出两套估值（详见
+        // `AUDIT-300642-run-variance-2026-09-22.md` §13）。
+        // `loaded.nodes/edges` 已在上面 move 进引擎，`variables` 是另一字段，仍可读取。
+        variables: loaded.variables.clone(),
         // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
         tool_permissions: Some(super::strict_tool_permissions()),
         ..Default::default()
@@ -1847,6 +1955,26 @@ pub async fn run_single_stock_analysis(
             //   - expected_holding_days 缺失时默认 28 天（与批量任务默认值一致）
             //   - 若计算出的 hindsight_date 在未来，批量任务会 skip 直到日期到达
             let pending_id = uuid::Uuid::new_v4().to_string();
+            // ⚠ 锚点用 `Utc::now()` 在本函数是**正确的**，不要照搬 as-of 语义。
+            //
+            // 判据（先问「本函数有没有 as-of 入口」，再决定锚点用 now 还是 as-of）：
+            // `run_single_stock_analysis` 的签名里**没有** `as_of_date` 参数，
+            // 且本函数写 `stock_analyses` 时 `analysis_date`（`:1692`）与
+            // `as_of_date`（`:1706`）**都**用 `Utc::now()` ⇒ 两张表锚点同源、无矛盾。
+            // 上方 `:1667` 的函数文档亦明示：「不需要 `as_of_date` 参数（使用当前时间，非回放模式）」。
+            //
+            // 与 as-of 通道的区别（别把两处判据混用）：
+            // - **本函数**（单股即时分析，live-only）⇒ 锚点 = now ✅
+            // - **`hooks.rs` 的 `stock-analysis-persist`**（对话直执行，`analysis_kind="chat"`）
+            //   ⇒ 锚点 = now ✅（`input_has_analysis_id` 守卫使业务封装路径直接跳过该 hook）
+            // - **业务封装路径**（`run_stock_workflow_inner`，支持 `as_of_date` 重跑）
+            //   ⇒ 凡写「分析锚点」必须走 `as_of::current_as_of()` 回退 `now()`，
+            //     与 `:474` 的 `analysis_date` 同源；用 `now()` 会让 `hindsight_date`
+            //     落到未来 ⇒ 反思入口 `AsOfContext::parse` 拒未来日期 ⇒ 硬失败。
+            //
+            // 记账（2026-09-23）：我曾把本处改成 `as_of::current_as_of()` 锚点，
+            // 编译报 E0425 `cannot find value current_as_of` —— 本函数内根本没有该上下文。
+            // 那是一次**把 live-only 通道误判为 replay 通道**的误改，已回退。
             let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
             let hindsight_date_str = {
                 let hold_days = effective_holding_days.unwrap_or(28) as i64;

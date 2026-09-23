@@ -25,7 +25,8 @@ use crate::commands::stock_workflow::core::{
     fetch_similar_cases, fetch_stock_lessons, record_lesson_applications,
 };
 use crate::commands::stock_workflow::decision::{
-    QualityPrecheckResult, data_quality_precheck, extract_decision_fields, extract_position_state,
+    QualityPrecheckResult, data_quality_precheck, extract_decision_fields,
+    extract_decisions_by_horizon, extract_horizon_price_map, extract_position_state,
     normalize_action_for_storage,
 };
 use axagent_astock_data::AStockClient;
@@ -48,8 +49,8 @@ use std::sync::Arc;
 ///
 /// 两处消费：
 /// 1. [`build_stock_analysis_variables`] 注入 `reco_prior` 变量（黑板可见，
-///    供 rhai/LLM 节点后续消费）
-/// 2. 决策持久化时构建 `crossCheck` 字段（跨系统互证）
+///    仅供 LLM 上下文先验 —— report B2 已核：全仓 rhai 无 `reco_prior` 字面量消费）
+/// 2. 决策持久化时构建 `crossCheck` 字段（跨系统互证，core.rs / decision.rs 独立调用）
 pub(crate) async fn fetch_reco_prior(
     db: &DatabaseConnection,
     stock_code: &str,
@@ -280,7 +281,11 @@ pub(crate) async fn build_stock_analysis_variables(
 
     // ── 跨系统互证：注入近 14 天智选推荐先验（reco_prior）──
     // 无论 screening_source 是什么，只要该股近期被趋势智选命中过就注入。
-    // 决策持久化时据此构建 crossCheck（互证字段），rhai/LLM 节点后续也可消费。
+    // 决策持久化时据此构建 crossCheck（互证字段，core.rs / decision.rs 独立调用
+    // fetch_reco_prior 消费 —— 见 report 主线 B2）。
+    // 注入黑板的 reco_prior 键当前**仅供 LLM 上下文先验**，无 rhai 因子消费
+    // （report B2 已核：全仓 rhai 对 `reco_prior` 无字面量读取）；保留作动态扩展
+    // 入口，勿删（删它会砍掉跨系统互证能力的输入路径）。
     if let Some(prior) = fetch_reco_prior(db, stock_code, 14).await {
         tracing::info!(
             "[stock-analysis] 注入 reco_prior: code={} conf={} strategy={}",
@@ -293,7 +298,9 @@ pub(crate) async fn build_stock_analysis_variables(
             var_type: "object".into(),
             value: prior,
             description: Some(
-                "近 14 天智选推荐先验（confidence/strategyType/catalysts 等），用于跨系统互证"
+                "近 14 天智选推荐先验（confidence/strategyType/catalysts 等）；\n\
+                 - 决策持久化 → crossCheck（跨系统互证，真实消费方）；\n\
+                 - 黑板键 → 仅作 LLM 上下文先验，无 rhai 因子引用（report B2）"
                     .into(),
             ),
             is_secret: false,
@@ -795,6 +802,10 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
         let decision_json_str = extract_decision_from_results(&outcome.results);
         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
             extract_decision_fields(&decision_json_str);
+        // 阶段1：抽四周期价位映射，与 core.rs 落库点共用同一提取实现
+        let horizon_price_map = extract_horizon_price_map(&decision_json_str);
+        // 阶段2：抽四周期独立决策，与 core.rs 落库点共用同一提取实现
+        let horizon_decisions = extract_decisions_by_horizon(&decision_json_str);
 
         let now_ms = chrono::Utc::now().timestamp_millis();
         let analysis_id = uuid::Uuid::new_v4().to_string();
@@ -814,6 +825,8 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             decision_position_pct: Set(position_pct),
             decision_reasoning: Set(reasoning.clone()),
             decision_json: Set(decision_json_str.clone()),
+            horizon_price_map: Set(horizon_price_map),
+            horizon_decisions: Set(horizon_decisions),
             llm_decision_json: Set(None),
             blackboard_snapshot: Set(Some(
                 serde_json::to_string(&outcome.results).unwrap_or_else(|_| "{}".to_string()),
@@ -822,6 +835,11 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             analysis_kind: Set("chat".into()),
             as_of_date: Set(Some(chrono::Utc::now().format("%Y-%m-%d").to_string())),
             model_version: Set(None),
+            // A4：chat 通道（cognitive）决策落库 —— 不经过 `workflow_templates`，
+            // 故无「公式版本」可言。⚠ 注意本行**是**有 blackboard_snapshot 的（见上），
+            // 即「有快照但无版本」是这类记录的正常形态，复算器必须能区分
+            // 「版本未知」与「版本不匹配」两种结论，不可混为一谈。
+            template_version: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             decision_time_horizon: Set(time_horizon),
@@ -848,6 +866,13 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
         );
 
         // ── [B1 借鉴] 两阶段协议：决策成功时写 stock_reflections pending row ──
+        // ⚠ 锚点用 `Utc::now()` 在本路径是**正确的**，不要照抄 `core.rs` 的 as-of 修法：
+        // 本 hook 是**对话直执行通道**（`analysis_kind = "chat"`，见上方 `:828`），
+        // 由用户当下提问触发，**不存在重放/as-of 语义** ⇒ today 就是分析锚点。
+        // 而 `core.rs` 的 `run_stock_workflow_inner` 支持 `as_of_date` 重跑，
+        // 那里若用 `now()` 会让 `hindsight_date` 落到未来、令反思以未来为 AS_OF 锚点
+        // ⇒ `AsOfContext` 拒未来日期（`harness/src/as_of.rs:70-76`）⇒ 反思硬失败。
+        // 判据：**先问这条链路有没有 as-of 入口**，再决定锚点用 now 还是 as-of。
         if status == "completed" {
             let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
             let hold_days = expected_holding_days.unwrap_or(28) as i64;

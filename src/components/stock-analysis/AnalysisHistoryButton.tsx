@@ -132,9 +132,12 @@ export function AnalysisHistoryButton() {
     positionPct?: number;
     confidence?: number;
   } | null => {
-    // P1-2(2026-09-14) / V76: 展示档统一由 (action, positionState, positionPct) 派生。
-    // 后端已移除「观望 ⇄ 持有」互改，action 只表达方向强度，持仓状态由独立轴下发 ⇒
-    // 此处**优先用 decisionPositionState**，仅当其为 null（v228 之前的历史行）才退回 pct。
+    // 2026-09-22: 展示档 = 方向档（`resolveDisplayAction` 已恒等，**不再按仓位派生**）。
+    //   历史上 P1-2(2026-09-14)/V76 曾按 positionState/positionPct 派生，因「用本次决策
+    //   算出的建议仓位反推本次展示名」属循环判据而被废除（LLM 措辞抖动能经
+    //   「试探仓 → positionPct → positionState」把「观望」翻成「持有」）——
+    //   见 `AUDIT-300642-run-variance-2026-09-22.md`。
+    //   ⚠️ 下方仍传 state/pct 仅为兼容函数签名，**不参与**判定。
     const displayOf = (a: string, state?: string | null, pct?: number | null) =>
       resolveDisplayAction(a, state ?? undefined, pct == null ? null : pct);
     // 优先使用后端直返字段

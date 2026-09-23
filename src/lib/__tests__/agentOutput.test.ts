@@ -5,22 +5,68 @@ import { describe, expect, it } from "vitest";
 import {
   cleanToolCallTags,
   extractDecision,
+  extractLlmField,
+  extractValuationApplicability,
   normalizeDecision,
   parseDecisionExplanation,
+  parseJsonLoose,
   tryParseDecision,
 } from "@/lib/agentOutput";
 import type { StockDecision } from "@/types/stock-analysis";
 
+/**
+ * 2026-09-21 回归：`parseJsonLoose` 曾**无条件先剥 fence**，于是当 fence 出现在某个
+ * JSON 字符串值**内部**时（典型：AgentNode 包装
+ * `{"role":"trader","content":"```json\n{...}\n```"}`），正则会劫持整段文本并把 src
+ * 换成仍带转义的内层片段 ⇒ 对**完全合法的 JSON** 返回 null。
+ */
+describe("parseJsonLoose —— 内嵌 fence 不得劫持合法 JSON", () => {
+  const wrapped = JSON.stringify({
+    role: "trader",
+    content: "```json\n" + JSON.stringify({ action: "增持" }) + "\n```",
+  });
+
+  it("外层对象合法时返回外层（fence 在 content 字符串内部）", () => {
+    const parsed = parseJsonLoose(wrapped);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.role).toBe("trader");
+  });
+
+  it("同一输入下 extractLlmField 仍能取到内层字段", () => {
+    expect(extractLlmField(wrapped, "action")).toBe("增持");
+  });
+
+  it("整段被 fence 包裹（正常形态）仍能解析", () => {
+    expect(parseJsonLoose('```json\n{"action":"买入"}\n```')?.action).toBe("买入");
+  });
+
+  it("前后带杂文时按首尾花括号切片兜底", () => {
+    expect(parseJsonLoose('杂文 {"action":"买入"} 结尾')?.action).toBe("买入");
+  });
+
+  it("确实非法时返回 null", () => {
+    expect(parseJsonLoose("这不是 JSON")).toBeNull();
+    expect(parseJsonLoose("")).toBeNull();
+    expect(parseJsonLoose(null)).toBeNull();
+  });
+
+  it("数组不算对象（返回 null）", () => {
+    expect(parseJsonLoose("[1,2]")).toBeNull();
+  });
+});
+
 describe("agentOutput decision parsing", () => {
   const expectedDecision: StockDecision = {
     action: "BUY",
-    // P1-2(2026-09-14): 展示档由 (action, positionState, positionPct) 派生，
     // normalizeDecision 恒定输出该键（缺失输入时为 null）。此前漏更新本夹具，
     // 导致该文件 3 个用例长期红灯（掩盖后续新增失败）。
+    // 注：2026-09-22 起 positionState 仅供展示（建议持仓状态），不参与展示档判定。
     positionState: null,
     positionPct: 20,
     targetPrice: null,
     stopLoss: null,
+    horizonPriceMap: null,
+    decisionsByHorizon: null,
     reasoning: "Test decision",
     riskLevel: "MID",
     confidence: 85,
@@ -395,5 +441,104 @@ describe("parseDecisionExplanation", () => {
     expect(r).not.toBeNull();
     expect(r?.summary).toBeNull();
     expect(r?.ruleTrace).toHaveLength(1);
+  });
+});
+
+/**
+ * 2026-09-21：估值适用性提取（`portfolio-mgr` 产物 → 估值面板标注）。
+ *
+ * 该字段此前**只写在产物里、前端零消费** ⇒ 用户看到「内在价值 80.63–156.77 元」
+ * 却看不到「该区间锚定于近 5 年正净利均值 ×0.90 的历史代理」。
+ * 下面同时覆盖「提得到」和「提不到时必须返回 null 而不是伪造默认值」。
+ */
+describe("extractValuationApplicability", () => {
+  /** 取自 300308 实际产物形状（`applicable` 在 F1 生效后为 false）。 */
+  const payload = {
+    action: "增持",
+    valuationApplicability: {
+      dcfApplicable: false,
+      dcfLegUsed: false,
+      grahamLegUsed: true,
+      reason: "净利为正但当期真实自由现金流与盈利量级脱钩（FCF/净利 = 0.14 < 0.3）",
+      anchorIsFallback: true,
+      grahamGrowthClamped: true,
+    },
+  };
+
+  it("纯 JSON 字符串 ⇒ 直接提得到", () => {
+    const a = extractValuationApplicability(JSON.stringify(payload));
+    expect(a).not.toBeNull();
+    expect(a?.dcfApplicable).toBe(false);
+    expect(a?.dcfLegUsed).toBe(false);
+    expect(a?.grahamLegUsed).toBe(true);
+    expect(a?.anchorIsFallback).toBe(true);
+    expect(a?.grahamGrowthClamped).toBe(true);
+    expect(a?.reason).toContain("0.14");
+  });
+
+  it('AgentNode 包装 {content: "<json>"} ⇒ 提得到', () => {
+    const a = extractValuationApplicability({ role: "portfolio-manager", content: JSON.stringify(payload) });
+    expect(a?.dcfApplicable).toBe(false);
+    expect(a?.grahamGrowthClamped).toBe(true);
+  });
+
+  it("CodeNode 包装 {result: {...}} ⇒ 提得到", () => {
+    const a = extractValuationApplicability({ status: "ok", result: payload });
+    expect(a?.dcfApplicable).toBe(false);
+  });
+
+  it("旧模板（没有该字段）⇒ 返回 null，**不伪造**默认块", () => {
+    // 关键：「产物里没这个字段」与「字段说前提成立」是两件事。
+    // 若此处返回一个 {dcfApplicable:true,...} 的默认值，面板就会显示一条假的「适用」。
+    expect(extractValuationApplicability(JSON.stringify({ action: "买入", positionPct: 20 }))).toBeNull();
+    expect(extractValuationApplicability({ action: "买入" })).toBeNull();
+    expect(extractValuationApplicability(null)).toBeNull();
+    expect(extractValuationApplicability(undefined)).toBeNull();
+    expect(extractValuationApplicability("")).toBeNull();
+    expect(extractValuationApplicability("not json")).toBeNull();
+  });
+
+  it("字段缺省时按「不误报」取向：dcfApplicable 缺省 true，其余缺省 false", () => {
+    const a = extractValuationApplicability({ valuationApplicability: {} });
+    expect(a).not.toBeNull();
+    // dcfApplicable 缺省 true：旧模板未注入 `applicable` 时行为应与改动前一致
+    expect(a?.dcfApplicable).toBe(true);
+    // 其余缺省 false：不凭空制造「锚定是代理 / 增长率被封顶」的警报
+    expect(a?.anchorIsFallback).toBe(false);
+    expect(a?.grahamGrowthClamped).toBe(false);
+    expect(a?.dcfLegUsed).toBe(false);
+    expect(a?.grahamLegUsed).toBe(false);
+    expect(a?.reason).toBe("");
+  });
+
+  it("缺省值不是恒真/恒假：显式给值必须被采纳（区分力对照）", () => {
+    const off = extractValuationApplicability({
+      valuationApplicability: { dcfApplicable: true, anchorIsFallback: false, grahamGrowthClamped: false },
+    });
+    const on = extractValuationApplicability({
+      valuationApplicability: { dcfApplicable: false, anchorIsFallback: true, grahamGrowthClamped: true },
+    });
+    // 两个方向都覆盖 ⇒ 证明上一用例的缺省断言不是「怎么给都这样」
+    expect(off?.dcfApplicable).toBe(true);
+    expect(on?.dcfApplicable).toBe(false);
+    expect(off?.anchorIsFallback).toBe(false);
+    expect(on?.anchorIsFallback).toBe(true);
+    expect(off?.grahamGrowthClamped).toBe(false);
+    expect(on?.grahamGrowthClamped).toBe(true);
+  });
+
+  it("非布尔/非字符串的脏值不得被当成 true（避免假标注）", () => {
+    const a = extractValuationApplicability({
+      valuationApplicability: {
+        dcfApplicable: "false", // 字符串 "false" 是**真值**，直接当布尔会把不适用读成适用
+        anchorIsFallback: 1,
+        grahamGrowthClamped: "yes",
+        reason: 42,
+      },
+    });
+    expect(a?.dcfApplicable).toBe(true); // 非 `false` 字面量 ⇒ 保持缺省 true（不误报不适用）
+    expect(a?.anchorIsFallback).toBe(false);
+    expect(a?.grahamGrowthClamped).toBe(false);
+    expect(a?.reason).toBe("");
   });
 });

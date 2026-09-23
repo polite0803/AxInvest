@@ -10,6 +10,7 @@ import { FrontendEditorModal } from "@/components/skill/FrontendEditorModal";
 import { SkillDependencyCheck } from "@/components/skill/SkillDependencyCheck";
 import { SkillLearningPanel } from "@/components/skill/SkillLearningPanel";
 import { SkillStatsPanel } from "@/components/skill/SkillStatsPanel";
+import { showBackendError } from "@/lib/errorI18n";
 import { CHAT_ICON_COLORS } from "@/lib/iconColors";
 import { invoke } from "@/lib/invoke";
 import { useSkillStore, useUIStore } from "@/stores";
@@ -547,7 +548,7 @@ export function SkillsPage() {
         messageApi.success(t("skills.installSuccess", { name }));
         setInstallUrl("");
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
       } finally {
         setInstalling(null);
       }
@@ -563,7 +564,7 @@ export function SkillsPage() {
         const name = await installSkill(src, target);
         messageApi.success(t("skills.installSuccess", { name }));
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
       } finally {
         setInstalling(null);
       }
@@ -681,7 +682,7 @@ export function SkillsPage() {
         await uninstallSkill(name);
         messageApi.success(t("skills.uninstallSuccess", { name }));
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
       }
     },
     [uninstallSkill, messageApi, t],
@@ -692,7 +693,7 @@ export function SkillsPage() {
       try {
         await openSkillDir(path);
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
       }
     },
     [openSkillDir, messageApi],
@@ -713,7 +714,7 @@ export function SkillsPage() {
         await uninstallSkillGroup(group);
         messageApi.success(t("skills.uninstallSuccess", { name: group }));
       } catch (e) {
-        messageApi.error(String(e));
+        showBackendError(messageApi, e);
       }
     },
     [uninstallSkillGroup, messageApi, t],
@@ -753,7 +754,7 @@ export function SkillsPage() {
         try {
           await openSkillDir(groupDir || firstSkillPath);
         } catch (e) {
-          messageApi.error(String(e));
+          showBackendError(messageApi, e);
         }
       }
     },

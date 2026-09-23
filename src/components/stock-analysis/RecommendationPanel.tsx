@@ -2,7 +2,7 @@ import { List } from "@/components/common/AntdList";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
-import { actionToDirection, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import { actionToDirection, getActionColor, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
@@ -692,27 +692,13 @@ function PickRow(
       latestAnalysis.decisionPositionState,
       latestAnalysis.decisionPositionPct,
     );
-    let color: string;
-    let label: string;
-    switch (action) {
-      case "BUY":
-      case "INCREASE":
-        color = "red";
-        label = t("stockAnalysis.actionBuy");
-        break;
-      case "SELL":
-      case "REDUCE":
-        color = "green";
-        label = t("stockAnalysis.actionSell");
-        break;
-      case "UNCERTAIN":
-        color = "default";
-        label = t("stockAnalysis.actionUncertain");
-        break;
-      default:
-        color = "blue";
-        label = t("stockAnalysis.actionHold");
-    }
+    // 2026-09-21: 此处原为手写 switch，与权威表已漂移三处 ——
+    //   ① `INCREASE` 与 `BUY` 合并 ⇒「增持」被显示成「买入」；
+    //   ② `WAIT`/「观望」落 `default` ⇒ 显示成「持有」+ 蓝（权威是「观望」+ orange）；
+    //   ③ `UNAVAILABLE`/「数据缺失」同样落 `default` ⇒ 显示成「持有」。
+    //   文档与配色一律走权威单点（`getActionTKey` / `getActionColor`），不再本地各存一份。
+    const color = getActionColor(action);
+    const label = t(getActionTKey(action));
     const confText = latestAnalysis.confidence != null ? ` ${latestAnalysis.confidence}` : "";
 
     return (

@@ -1,5 +1,13 @@
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
 import { cleanToolCallTags, extractReadableFromRiskReport } from "@/components/stock-analysis/utils";
+import {
+  getActionTKey,
+  getRiskTKey,
+  parseAction,
+  parseRiskLevel,
+  StockAction,
+  StockRiskLevel,
+} from "@/lib/stock-analysis-utils";
 import { getWorkflowNodeLabel } from "@/utils/workflowNodeLabel";
 import { Card, Progress, Tag } from "antd";
 import { TrendingUp } from "lucide-react";
@@ -325,15 +333,25 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
   }
 
   if (data.type === "decision") {
-    const isBull = data.action === t("stockAnalysis.actionBuy") || data.action === t("stockAnalysis.actionIncrease");
-    const isBear = data.action === t("stockAnalysis.actionSell") || data.action === t("stockAnalysis.actionReduce");
+    // ⚠️ 判据必须走**枚举归一化**，不能用 `t("stockAnalysis.actionBuy")` 这类
+    //   **本地化展示文案**去比对 `data.action`：后端下发的是中文档名
+    //   （「买入」/「增持」…），而 `t()` 在 en-US 下返回 "Buy"/"Increase"
+    //   ⇒ 比较恒为 false，箭头与边框色在**非中文语言下永远落到中性档**
+    //   （2026-09-21 发现，属「跨语言字符串契约」失效：拿展示文案当协议值）。
+    //   同一份档位数据在展示处也不得裸渲染 —— 后端值是中文，其它 10 种语言下
+    //   会原样显示中文。
+    const actionKind = parseAction(data.action);
+    const riskKind = parseRiskLevel(data.riskLevel);
+    const isBull = actionKind === StockAction.BUY || actionKind === StockAction.INCREASE;
+    const isBear = actionKind === StockAction.SELL || actionKind === StockAction.REDUCE;
     return (
       <Card
         size="small"
         style={{ borderColor: isBull ? "var(--sa-red)" : isBear ? "var(--sa-green)" : undefined }}
         title={
           <span>
-            {isBull ? "🟢" : isBear ? "🔴" : "🟡"} {t("stockAnalysis.workflow.decisionTitle")}：{data.action}
+            {isBull ? "🟢" : isBear ? "🔴" : "🟡"} {t("stockAnalysis.workflow.decisionTitle")}：
+            {data.action ? t(getActionTKey(actionKind)) : "N/A"}
           </span>
         }
       >
@@ -353,13 +371,15 @@ export function WorkflowAgentCard({ data }: { data: WorkflowCardData }) {
           <span style={{ gridColumn: "1 / -1" }}>
             {t("stockAnalysis.workflow.riskLevel")}:{" "}
             <Tag
-              color={data.riskLevel === t("stockAnalysis.risk.high")
+              color={!data.riskLevel
+                ? "default"
+                : riskKind === StockRiskLevel.HIGH || riskKind === StockRiskLevel.EXTREME
                 ? "red"
-                : data.riskLevel === t("stockAnalysis.risk.medium")
+                : riskKind === StockRiskLevel.MID
                 ? "orange"
                 : "green"}
             >
-              {data.riskLevel ?? "N/A"}
+              {data.riskLevel ? t(getRiskTKey(riskKind)) : "N/A"}
             </Tag>
           </span>
         </div>

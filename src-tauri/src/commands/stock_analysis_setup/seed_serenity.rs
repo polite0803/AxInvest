@@ -570,8 +570,6 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
                 max_tool_rounds: Some(8),
                 execution_mode: None,
                 rag_source_ids: vec![],
-                // FIX-05: 显式设置 model_role，确保 domain_constraints 按 stock-analyst 角色注入
-                model_role: Some("stock-analyst".into()),
                 consistency_check: None,
                 // V74 关闭: hallucination_guard 锚定检查（同 stock-analysis，实测误报率 ~100%）
                 hallucination_guard: Some(HallucinationGuardConfig {

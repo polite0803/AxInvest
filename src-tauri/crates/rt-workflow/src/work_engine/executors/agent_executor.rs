@@ -1038,6 +1038,12 @@ impl NodeExecutorTrait for AgentExecutor {
         // 缺 VERDICT 标签的分析师把整条链 fail-closed 级联跳过），而是把截断事实
         // 写进输出，让下游与诊断面板能把它与「正常完成」区分开。
         let mut stream_truncated = false;
+        // 2026-09-22：VERDICT 兜底重试是否**确实执行过**（可观测性补丁）。
+        // 存在的理由：截断发生后「重试跑没跑」在产物里完全不可见 —— 排查 a-sentiment
+        // 300642 时必须靠反推 strict_mode / tools / usage 才能定性，成本极高，
+        // 而这段推理本不该由人来做。与 `stream_truncated` 同为「说真话」字段：
+        // `false` 时行为与改动前完全一致（纯新增字段，零破坏性）。
+        let mut verdict_retry_attempted = false;
         let mut final_thinking: Option<String> = None;
         let mut tool_calls_made: Vec<serde_json::Value> = Vec::new();
         // V53 修复(M2): 连续空 content + tool 调用轮次计数器。
@@ -1138,9 +1144,13 @@ impl NodeExecutorTrait for AgentExecutor {
                             fb_stream
                         },
                         None => {
+                            // 修复（2026-09-23）：流初始化失败是 LLM 调用层故障
+                            // （provider 不可达 / 鉴权失败 / 网络错误），此前误报
+                            // UNSUPPORTED_PROVIDER（"不支持的数据供应商"），把
+                            // 传输层问题误导成供应商支持性问题。
                             return Err(NodeError::exec_failed(
-                                error_code::UNSUPPORTED_PROVIDER,
-                                format!("Agent LLM stream 初始化失败: {e}"),
+                                error_code::LLM_CALL_FAILED,
+                                format!("LLM 流初始化失败: {e}"),
                             ));
                         },
                     }
@@ -1271,10 +1281,37 @@ impl NodeExecutorTrait for AgentExecutor {
                                 continue;
                             }
                         }
-                        return Err(NodeError::exec_failed(
-                            error_code::UNSUPPORTED_PROVIDER,
-                            format!("Agent LLM stream error: {e}"),
-                        ));
+                        // 修复（2026-09-23）：此前一律报 UNSUPPORTED_PROVIDER
+                        // （"不支持的数据供应商"），把上游网关响应头超时等传输层故障
+                        // 误导成供应商支持性问题（2026-09-23 实证：a-candidate-mapper
+                        // 节点报 "UNSUPPORTED_PROVIDER: Agent LLM stream error: OpenAI
+                        // API error 504: response headers not received within 30s"，
+                        // 真因是上游网关挂起）。LLM 流错误统一归为 LLM_CALL_FAILED，
+                        // 超时情形在 detail 里点明，便于用户选择重试或切换回退模型。
+                        let detail = if is_gateway_header_timeout(&e) {
+                            // 区分「未配置回退模型」与「回退模型也失败」，给出可操作的
+                            // 配置路径（设置 → 默认模型 → 回退模型），避免用户把网关
+                            // 超时误判为供应商支持性问题。
+                            let has_fallback = resolve_effective_fallback(
+                                an.config.fallback_model.as_deref(),
+                                &prov.id,
+                                &model,
+                            )
+                            .await
+                            .is_some();
+                            if has_fallback {
+                                format!(
+                                    "LLM 调用超时（上游网关响应头未按时返回，已尝试回退模型仍失败）: {e}"
+                                )
+                            } else {
+                                format!(
+                                    "LLM 调用超时（上游网关响应头未按时返回；未配置回退模型，可在「设置 → 默认模型 → 回退模型」配置后自动切换）: {e}"
+                                )
+                            }
+                        } else {
+                            format!("LLM 流式调用失败: {e}")
+                        };
+                        return Err(NodeError::exec_failed(error_code::LLM_CALL_FAILED, detail));
                     },
                 };
 
@@ -1577,14 +1614,29 @@ impl NodeExecutorTrait for AgentExecutor {
             let needs_verdict_retry = !final_content.trim().is_empty()
                 && extract_verdict_tag(final_content.trim()).is_none()
                 && serde_json::from_str::<serde_json::Value>(final_content.trim()).is_err();
+            // 2026-09-22：**流截断本身就是重试的充分理由**（方案 A 前半）。
+            // 与 `needs_verdict_retry` 的差集恰好是「有半截标签、且标签内 JSON 已被
+            // `extract_verdict_tag` 的截断分支救出一部分」这一新形态 —— 那种情况下
+            // `needs_verdict_retry` 因"标签能提取到"而判 false，若不放行本次重试，
+            // 就等于用「半截正文 + 部分 verdict」换掉「重写完整报告」的机会，
+            // 修复力度反而下降。`stream_truncated` 是物理事实（流未收到终态 chunk），
+            // 输出必然缺尾 ⇒ 重写是合理的。
+            // 排除"已是合法 JSON"：截断但结构完整闭合时保持原样，避免重写覆盖可用输出。
+            let needs_truncation_retry = stream_truncated
+                && !final_content.trim().is_empty()
+                && serde_json::from_str::<serde_json::Value>(final_content.trim()).is_err();
+            // 「带原内容重写」场景（有内容但不可信）；与下方「空输出」精简场景互斥。
+            let needs_rewrite_retry = needs_verdict_retry || needs_truncation_retry;
             let needs_empty_retry = final_content.trim().is_empty();
 
-            if needs_verdict_retry || needs_empty_retry {
+            if needs_rewrite_retry || needs_empty_retry {
+                verdict_retry_attempted = true;
                 tracing::info!(
                     node_id = %node.base_id(),
                     content_len = final_content.len(),
                     has_verdict = %!needs_verdict_retry,
-                    mode = if needs_verdict_retry { "truncated" } else { "empty" },
+                    stream_truncated,
+                    mode = if needs_rewrite_retry { "truncated" } else { "empty" },
                     "VERDICT 兜底: 输出无 VERDICT 标签，追加纯总结轮次",
                 );
 
@@ -1595,7 +1647,7 @@ impl NodeExecutorTrait for AgentExecutor {
                 // 重新生成完整报告，确保末尾包含 VERDICT 标签（类比空输出场景的 compact 策略）。
                 // 场景 (a): 截断——携带原始上下文让 LLM 重写完整报告
                 // 场景 (b): 空输出——用精简 messages（system + 工具结果摘要）
-                let retry_messages: Vec<ChatMessage> = if needs_verdict_retry {
+                let retry_messages: Vec<ChatMessage> = if needs_rewrite_retry {
                     let truncated_text = final_content.trim().to_string();
                     // P1: 同空输出策略，保留 system + 最近 2 条工具结果，附加截断内容 +
                     // 重写指令。避免全量 messages 重传导致的 input 膨胀。
@@ -1753,7 +1805,7 @@ impl NodeExecutorTrait for AgentExecutor {
                             // 原逻辑：检测到 VERDICT 标签后拼接旧截断内容 + 新标签——这在新
                             // 重写模式下会导致旧截断报告 + 新报告标签的错位拼接，内容混乱。
                             // 新逻辑：截断和空输出场景统一用 retry_content 替换 final_content。
-                            if needs_verdict_retry {
+                            if needs_rewrite_retry {
                                 let verdict_tag = extract_verdict_tag(retry_content.trim());
                                 if verdict_tag.is_some() {
                                     // 重写场景：retry 输出是完整报告 + VERDICT，直接替换
@@ -2309,6 +2361,27 @@ impl NodeExecutorTrait for AgentExecutor {
                                 .to_string()
                         },
                     };
+                } else if stream_truncated
+                    && context.tool_permissions.as_ref().is_some_and(|p| p.strict_mode)
+                {
+                    // ── 方案 A（2026-09-22）：截断 + 无任何可提取结构 ⇒ 落降级 JSON ──
+                    // 走到这里说明：既无 VERDICT 标签（含半截标签修复，见 `extract_verdict_tag`
+                    // 截断分支），也无法从代码块/花括号兜底提取 JSON。
+                    //
+                    // 此时若**流被截断**，就绝不能按"合法正文"放行：
+                    // `output_mode=Text` 的 strict 校验只查非空（`validate_strict_mode_output`
+                    // 的 `matches!(OutputMode::Json)` 分支之外没有结构检查），半截文本会以
+                    // 节点 `completed` 的姿态流向下游，`analyst-brief` 只能标「数据不可用」
+                    // 且前端渲染出一段断在句中的 Markdown。
+                    // 落降级 JSON 后：下游拿到明确的"数据不足 + __untrusted"语义，
+                    // 半截正文保留在 report 里不丢，形态与其它两条降级路径一致。
+                    tracing::warn!(
+                        node_id = %node.base_id(),
+                        content_len = trimmed.len(),
+                        "LLM 输出无 VERDICT 标签且非合法 JSON，但流被截断(streamTruncated=true) \
+                         ⇒ 落降级 JSON（report 保留半截正文 + 中性 verdict + __untrusted）"
+                    );
+                    final_content = build_truncation_degraded_output(&trimmed);
                 } else {
                     tracing::warn!(
                         node_id = %node.base_id(),
@@ -2628,6 +2701,8 @@ impl NodeExecutorTrait for AgentExecutor {
                 // 「正常完成」与「传输层被掐断」在数据层就可区分。
                 // `false` 时行为与改动前完全一致（纯新增字段，零破坏性）。
                 "streamTruncated": stream_truncated,
+                // 2026-09-22：兜底重试是否执行过（人工排查「重试为什么没兜住」的入口）。
+                "verdictRetryAttempted": verdict_retry_attempted,
                 "truncationReason": if stream_truncated {
                     "LLM 流未收到终态 chunk（done/finish_reason）即结束 —— 传输层中途断开，输出不完整"
                 } else { "" },
@@ -2710,7 +2785,9 @@ impl AgentExecutor {
         )
         .await
         .map_err(|e| {
-            NodeError::exec_failed(error_code::UNSUPPORTED_PROVIDER, format!("Plan LLM: {e}"))
+            // 修复（2026-09-23）：Plan 模式生成计划的 LLM 调用失败同样属于
+            // LLM_CALL_FAILED，而非「不支持的数据供应商」。
+            NodeError::exec_failed(error_code::LLM_CALL_FAILED, format!("Plan LLM 调用失败: {e}"))
         })?;
 
         let text = resp.response.content.trim();
@@ -3246,6 +3323,20 @@ fn resolve_role(profile: Option<&axagent_harness::types::AgentProfile>) -> Strin
         return role.clone();
     }
     "executor".to_string()
+}
+
+/// 判断 LLM 调用错误是否为「上游网关响应头超时」。
+///
+/// `providers::openai::chat_stream` 在响应头超时时会本地合成
+/// `"OpenAI API error 504: response headers not received within Ns..."` 错误
+/// （超时值随请求体缩放：base 10s + 每 64KB 递增 5s，封顶 60s），这是设计的
+/// 快速失败路径——重试 / 切换回退模型是预期处置，与「供应商是否受支持」无关。
+///
+/// 该错误此前被上层统一包装成 `UNSUPPORTED_PROVIDER`（"不支持的数据供应商"），
+/// 用户据此会误以为需要更换供应商（2026-09-23 实证）。
+fn is_gateway_header_timeout(detail: &str) -> bool {
+    detail.contains("response headers not received within")
+        || detail.contains("response headers timeout")
 }
 
 /// H4.2: 解析生效的回退模型（两处 fallback 重试点共用）。
@@ -4242,6 +4333,13 @@ fn extract_tool_json_block(text: &str) -> Option<String> {
     None
 }
 
+/// `VERDICT` 标签内必须出现的分析师机读字段白名单 —— 截断修复结果的验收条件。
+/// 存在的理由：截断修复（见 `extract_verdict_tag` 末尾分支）会把半截 JSON 闭合成
+/// 合法对象；若不做字段校验，正文中任何以 `{` 起始的片段都可能被"修复"成空壳对象
+/// 并被下游当成结构化结论消费。
+const VERDICT_MACHINE_FIELDS: [&str; 6] =
+    ["verdict", "bull_score", "bear_score", "bull_points", "bear_points", "confidence"];
+
 fn extract_verdict_tag(text: &str) -> Option<String> {
     // 查找最后一个 <!-- VERDICT: 出现位置（取最后一个，因为正文中可能也有 HTML 注释）
     // 安全做法：直接在全文本上 rfind，不手动做字节切片
@@ -4297,6 +4395,59 @@ fn extract_verdict_tag(text: &str) -> Option<String> {
         }
         search = abs + 4;
     }
+
+    // ── 截断形态（方案 C，2026-09-22）：`<!-- VERDICT: {…` 未闭合 ──
+    // LLM 流在中途被掐断时，标签**本身**都没写完（`-->` 从未生成），标准路径与宽松
+    // 路径都在等 `end_marker` ⇒ 双双落空，直接返回 None。此时标签内已有一段半截 JSON，
+    // 其信息量远大于"完全无结构"，值得尽力抢救。
+    //
+    // 两步走：
+    //   ① `repair_json` + `try_fix_truncated_json` —— 覆盖"截断恰好落在完整 token
+    //      边界"（如 `…"bull_score": 30,` 或 `…"bull_points": ["A","B"],`）；
+    //   ② 逐级回退 —— 覆盖"截断落在**字符串值内部**"（如 `…"bull_points": ["中`）。
+    //      这种形态 `try_fix_truncated_json` 按设计返回 None（见其 `if in_str` 分支：
+    //      截断点在字符串里无法安全修复），因此从后往前找逗号、把那个写了一半的字段
+    //      整个丢掉再闭合，最多回退 8 次。
+    // 验收：修复结果必须能解析为 object **且**含 `VERDICT_MACHINE_FIELDS` 之一，
+    // 否则宁可不认（防误提取正文里提到 VERDICT 的普通句子）。
+    if let Some(start) = text.rfind(start_marker) {
+        let tail = text[start + start_marker.len()..].trim();
+        if !tail.contains(end_marker)
+            && let Some(open) = tail.find('{')
+        {
+            let candidate = &tail[open..];
+            let attempt = repair_json(candidate);
+            let mut fixes: Vec<String> = Vec::new();
+            if let Some(fixed) = try_fix_truncated_json(&attempt) {
+                fixes.push(fixed);
+            }
+            if serde_json::from_str::<serde_json::Value>(&attempt).is_ok() {
+                fixes.push(attempt.clone());
+            }
+            let mut cursor = attempt.len();
+            for _ in 0..8 {
+                let Some(pos) = attempt[..cursor].rfind(',') else {
+                    break;
+                };
+                cursor = pos;
+                if let Some(fixed) = try_fix_truncated_json(&attempt[..cursor]) {
+                    fixes.push(fixed);
+                }
+            }
+            for fixed in fixes {
+                let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&fixed) else {
+                    continue;
+                };
+                if parsed.is_object()
+                    && VERDICT_MACHINE_FIELDS
+                        .iter()
+                        .any(|k| parsed.get(*k).is_some_and(|v| !v.is_null()))
+                {
+                    return Some(parsed.to_string());
+                }
+            }
+        }
+    }
     None
 }
 
@@ -4350,16 +4501,64 @@ fn strip_verdict_tag(text: &str) -> String {
     let start_marker = "<!-- VERDICT: ";
     let end_marker = "-->";
     let mut result = text.to_string();
-    loop {
-        if let Some(start) = result.find(start_marker)
-            && let Some(end) = result[start..].find(end_marker)
-        {
-            result.replace_range(start..start + end + end_marker.len(), "");
-            continue;
+    while let Some(start) = result.find(start_marker) {
+        match result[start..].find(end_marker) {
+            Some(end) => {
+                result.replace_range(start..start + end + end_marker.len(), "");
+                // 循环继续：正文里可能还有第二处完整标签
+            },
+            // 截断形态（2026-09-22）：`<!-- VERDICT: {…` 未闭合（LLM 流在中途断开，
+            // `-->` 从未送达）。此时无法界定标签终点 ⇒ 从标签起点到文本末尾整段丢弃，
+            // 避免半截 JSON 作为"正文"残留在 report 里（下游按 report 渲染时会出现
+            // 一串裸花括号）。需要说明的是：能走到这里说明 `extract_verdict_tag`
+            // 已尽力修复过标签内 JSON（见其截断分支），剩下的是连修复候选都不成立的
+            // 情形 —— 这部分文本本就无信息量。
+            None => {
+                result.truncate(start);
+                break;
+            },
         }
-        break;
     }
     result.trim().to_string()
+}
+
+/// 构造「流截断 + 无任何可提取结构」时的降级输出（方案 A，2026-09-22）。
+///
+/// 背景（a-sentiment / 300642 实证，2026-09-22 01:11）：主流在 847 字符处被掐断
+/// （`streamTruncated=true`），无 VERDICT 标签；VERDICT 兜底重试已执行（`strict_mode`
+/// 与 `tools` 两道门都满足，重试输出同样无标签），而 `output_mode=Text` 的
+/// `validate_strict_mode_output` **只校验非空** ⇒ 半截纯文本被原样放行
+/// （`agent_executor.rs` 重试段那句「让下游 strict_mode 校验走降级」是错误假设：
+/// Text 模式下不存在这个降级）。下游 `analyst-brief` 只能标「数据不可用」。
+///
+/// 本函数把该形态**收敛为结构化 JSON**：
+/// - `report` 保留已获得的半截正文（人可读信息不丢）；
+/// - 机读字段落 `verdict`，取中性 50/50/conf 30 —— 与既有 strict_mode 降级取值一致。
+///   **不要**改成 0/0/0：零值会被下游 portfolio-mgr 当成极端看空
+///   （`(0-50)/50 = -1`，见 V57 注释）；
+/// - 键集与既有两条降级路径（strict_mode 格式失败 `:2154`、空内容保护 `:2610`）保持一致，
+///   仅以 `strict_mode_failure_reason` 文案区分归因，并额外标注 `stream_truncated`
+///   让「传输层截断」与「模型把 JSON 写坏」在产物层可分辨。
+fn build_truncation_degraded_output(report: &str) -> String {
+    serde_json::json!({
+        "report": report,
+        "verdict": {
+            "verdict": "数据不足",
+            "bull_score": 50,
+            "bear_score": 50,
+            "confidence": 30,
+            "position_pct": 50,
+            "bull_points": ["报告因传输中断被截断，未生成看多论据"],
+            "bear_points": ["报告因传输中断被截断，未生成看空论据"],
+        },
+        "strict_mode_fallback": true,
+        "__data_quality_alert": true,
+        "__untrusted": true,
+        "strict_mode_failure_reason": "LLM 流截断（未收到终态 chunk），报告不完整且未生成 VERDICT 标签",
+        "refusal_detected": false,
+        "stream_truncated": true,
+    })
+    .to_string()
 }
 
 /// 从尾部找到最后一个完整闭合的 JSON 对象/数组，截掉后面的垃圾文本。
@@ -4824,6 +5023,70 @@ mod verdict_extract_tests {
         let got = extract_loose_json_output(text).expect("中文正文不 panic 且应提取");
         assert!(got.contains("75"));
     }
+
+    #[test]
+    fn test_extract_verdict_tag_truncated_at_token_boundary() {
+        // 方案 C（2026-09-22）：标签本身没写完（`-->` 从未送达），截断落在完整 token 边界。
+        // 旧实现：标准路径与宽松路径都在等 `end_marker` ⇒ 双双落空返回 None ⇒
+        // a-sentiment/300642 的 847 字符报告只能以纯文本形态落库。
+        let text = "情绪面报告正文……\n\n<!-- VERDICT: {\"verdict\":\"偏空\",\"bull_score\":30,";
+        let got = extract_verdict_tag(text).expect("未闭合标签 + token 边界截断应可修复");
+        assert!(got.contains("偏空"), "应保住已写完的 verdict 字段: {got}");
+        assert!(got.contains("30"), "应保住已写完的 bull_score: {got}");
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_truncated_mid_string_falls_back() {
+        // 截断落在**字符串值内部** —— `try_fix_truncated_json` 按设计返回 None
+        // （见其 `if in_str` 分支），须靠"逐逗号回退、丢掉半截字段"救回前缀字段。
+        let text =
+            "正文\n<!-- VERDICT: {\"verdict\":\"偏空\",\"bull_score\":30,\"bull_points\":[\"中";
+        let got = extract_verdict_tag(text).expect("字符串内截断应通过回退救回前缀字段");
+        assert!(got.contains("偏空"), "回退后至少应保住回退点之前的 verdict: {got}");
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_truncated_unrecoverable_returns_none() {
+        // 连一个逗号都没有（截断紧跟在字符串开始处）⇒ 无回退点 ⇒ 宁可不认
+        assert_eq!(extract_verdict_tag("正文\n<!-- VERDICT: {\"verdict\":\"偏"), None);
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_truncated_whitelist_guard() {
+        // 区分力用例：未闭合标签里是**合法但无业务字段**的 JSON ⇒ 必须拒绝，
+        // 否则正文中任何以 `{` 起始的片段都可能被"修复"成结构化结论。
+        assert_eq!(extract_verdict_tag("正文\n<!-- VERDICT: {\"foo\":\"bar\","), None);
+    }
+
+    #[test]
+    fn test_strip_verdict_tag_removes_unclosed_tail() {
+        // 未闭合标签的尾巴（含半截 JSON）必须整段从 report 中剔除，
+        // 否则前端按 report 渲染时会看到一串裸花括号。
+        let text = "情绪面报告正文\n<!-- VERDICT: {\"verdict\":\"偏空\",";
+        assert_eq!(strip_verdict_tag(text), "情绪面报告正文");
+        // 回归保护：完整标签的既有剥离语义不变（含正文中两处标签）
+        let full = "A\n<!-- VERDICT: {\"v\":1} -->\nB\n<!-- VERDICT: {\"v\":2} -->";
+        assert_eq!(strip_verdict_tag(full), "A\n\nB");
+    }
+
+    #[test]
+    fn test_build_truncation_degraded_output_contract() {
+        // 方案 A 的产出契约：下游按 content.verdict.* / __untrusted 下钻，
+        // 且 bull_score 必须是中性 50 而非 0（V57：零值会被 portfolio-mgr 当成极端看空）。
+        let out = build_truncation_degraded_output("被截断的半截正文");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("降级输出必须是合法 JSON");
+        assert_eq!(v["report"], "被截断的半截正文");
+        assert_eq!(v["verdict"]["verdict"], "数据不足");
+        assert_eq!(v["verdict"]["bull_score"], 50);
+        assert_eq!(v["verdict"]["bear_score"], 50);
+        assert_eq!(v["__untrusted"], true);
+        assert_eq!(v["strict_mode_fallback"], true);
+        assert_eq!(v["stream_truncated"], true);
+        assert!(
+            v["strict_mode_failure_reason"].as_str().unwrap().contains("截断"),
+            "归因文案必须写明截断，便于与『JSON 写坏』『空内容』两族降级区分"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4869,5 +5132,41 @@ mod refusal_detect_tests {
         // 超长输出（>200 字符）即便含元语言也按正文处理
         let long = format!("我无法完成{}", "分析".repeat(150));
         assert!(!is_refusal_plain_text(&long));
+    }
+}
+
+#[cfg(test)]
+mod llm_error_code_tests {
+    use super::*;
+
+    /// 2026-09-23 实证：a-candidate-mapper（候选公司筛选）节点报
+    /// `UNSUPPORTED_PROVIDER: Agent LLM stream error: OpenAI API error 504:
+    /// response headers not received within 30s`，真因是上游网关响应头超时。
+    /// 该文案由 `providers::openai::chat_stream` 本地合成，必须被识别为
+    /// 网关响应头超时，从而归类 LLM_CALL_FAILED 并提示配置回退模型。
+    #[test]
+    fn test_gateway_header_timeout_detected() {
+        let msg = "OpenAI API error 504: response headers not received within 30s. \
+                   The upstream gateway is likely hung.";
+        assert!(is_gateway_header_timeout(msg));
+    }
+
+    /// 反向用例：鉴权失败 / 限流 / 空串不得被误判为响应头超时，
+    /// 否则会把「配置错误」误导成「网关挂起」。
+    #[test]
+    fn test_gateway_header_timeout_not_misjudged() {
+        assert!(!is_gateway_header_timeout("OpenAI API error 401: invalid api key"));
+        assert!(!is_gateway_header_timeout("rate limit exceeded (429)"));
+        assert!(!is_gateway_header_timeout(""));
+    }
+
+    /// 改码后重试语义不变：LLM_CALL_FAILED 仍属可重试错误
+    /// （与原先误用的 UNSUPPORTED_PROVIDER 一致，均不在 non-retryable 清单内）。
+    #[test]
+    fn test_llm_call_failed_stays_retryable() {
+        let new = format!("{}: LLM 流式调用失败: 上游网关 504", error_code::LLM_CALL_FAILED);
+        assert!(!crate::work_engine::node_executor_trait::is_non_retryable_error(&new));
+        let old = format!("{}: Agent LLM stream error", error_code::UNSUPPORTED_PROVIDER);
+        assert!(!crate::work_engine::node_executor_trait::is_non_retryable_error(&old));
     }
 }

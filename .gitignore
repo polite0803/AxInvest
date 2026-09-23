@@ -36,7 +36,14 @@ next-env.d.ts
 
 # Build outputs
 dist/
-target/
+# `target*/` 走 gitignore 语义（无前导斜杠）⇒ 匹配**任意层级**的 `target` 及
+# `target-<后缀>` 目录。2026-09-21 半天内两度踩同一个坑：dprint 会读 .gitignore
+# 决定扫描面，未被忽略的 target 目录会让它把 cargo 构建产物
+# （`.fingerprint/*.json`、`build/<crate>/out/*.md`）当源码检查 ⇒ 门禁**假红**
+# （实测 120 个文件不合格，全是构建产物）。
+# 先有 `target-v79`（并发会话持锁时的独立 target），后有 `target-pe-fix`，
+# 两次都得回头补条目 ⇒ 直接放宽为前缀匹配，一劳永逸。
+target*/
 
 # Secrets
 *.key

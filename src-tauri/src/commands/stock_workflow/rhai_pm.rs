@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! portfolio 系列 Rhai 脚本依赖的 `pm_*` Rust 函数注册（单一权威源）。
+//! portfolio 系列 Rhai 脚本依赖的 `pm_*` Rust 函数注册（函数体权威源）。
 //!
-//! 消费方有两处，必须注册同一套函数：
+//! ⚠ 本函数**不再被各入口直接调用**（2026-09-22 收敛）：唯一调用方是
+//! `stock_workflow/rhai_registry.rs::register_axinvest_rhai_functions`
+//! —— 那里是「AxInvest 需要哪些宿主函数」的唯一定义点，新增函数只改它。
+//! 该单点入口再被两条路径消费：
 //! 1. `init/services.rs::start_background_services` — 通过
 //!    `register_shared_engine_initializer` 注入 rt-workflow 的
 //!    `code_executor::shared_rhai_engine()`（DAG 主路径：portfolio-mgr /
 //!    portfolio-risk-gate / data-quality 等 CodeNode 脚本）。
-//! 2. `stock_workflow/decision.rs`（Rerun Decision 路径）— 自建本地 Engine 后调用本函数。
+//! 2. `rhai_registry::build_stock_rhai_engine` — 供无法走共享 Engine 的入口
+//!    （rerun 决策 `decision.rs`、What-If 回测 `commands/stock_analysis.rs`）
+//!    构造独立 Engine。
 //!
 //! 历史 bug（2026-09-09 实证）：fork 清理「AxAgent 残留」时把
 //! `register_portfolio_mgr_rhai_functions` 的调用整个移除，只留下 doc 注释，
 //! 导致共享 Engine 上没有任何 `pm_*` 函数，data-quality 节点在
 //! `pm_compute_factor_completeness` 处报 `Function not found` → VALIDATION_FAILED。
+//!
+//! 历史 bug 2（2026-09-22 实证）：恢复调用时写成**两处独立注册**（pm_* 与
+//! bottleneck_* 各一次），而当时共享 Engine 的注册通道是单槽 `OnceLock` ⇒
+//! 第二次被静默丢弃，`bottleneck_node_score` 从未生效。
 
 use axagent_analysis_engine::portfolio_formula;
 use rhai::Engine;

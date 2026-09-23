@@ -8,7 +8,7 @@
 //! - portfolio-mgr.rhai 因子权重回测验证
 //!
 //! 数据流：
-//! ```
+//! ```text
 //! reco_picks ──触发──> run_decision_backtest 命令
 //!                     ↓
 //!              拉取 T+N 实际价格（待接入行情 API）

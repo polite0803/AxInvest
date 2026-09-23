@@ -61,12 +61,28 @@ output_format: json
 
 参考 `t-valuation` 节点的输出：
 
-- `result.dcf.upsidePct`：DCF 上行空间百分比
+- `result.dcf.upsidePct`：**保守档**上行空间百分比
+  （2026-09-23 起基准由 `mid` 改为 `low`，即「**最保守增长假设下**的折价幅度」）
   - `> 30%`：显著低估
   - `15% ~ 30%`：合理偏低
   - `0% ~ 15%`：合理
-  - `< 0%`：偏高
-- `result.dcf.{low, mid, high}`：DCF 内在价值区间（直接作为你的 `intrinsic_value_range`）
+  - `< 0%`：偏高（**连最保守的假设都不支持现价**）
+- `result.dcf.midUpsidePct`：**中性档**上行空间百分比（档位解读同上；
+  仅供「中性假设下能涨多少」的参考叙述，**不得**用于裁决）
+- `result.dcf.{low, mid, high}`：DCF 三档（可填入 `intrinsic_value_range`）
+  - ⚠️ **口径（2026-09-22 明确）**：三档是**同一个 FCF 锚 × 增长率假设 {×0.6, ×1.0, ×1.5}** 的
+    机械展开 ⇒ 它是**假设敏感性带**，**不是**概率区间，**不是**「公司值 low~high 元」。
+    上界可达下界的 2.3 倍以上，几乎全部宽度来自增长率假设本身
+    （实证 300642：24.76 / 40.53 / **71.89**，宽 **2.90 倍**，且终值现值占估值 **84.4%**
+    ⇒ 宽度主要由永续增长率 `p` 经终值项 `1/(折现率 − p)` 放大而来）。
+  - ⚠️ **`mid` 不是「个体估计点」（2026-09-23 订正）**：三档同源于一组**任意乘子**，
+    `mid` 只是那组假设的中点，与 `low` / `high` **同质** —— 没有任何一档是从数据不确定性导出的。
+    原文写「只有 `mid` 是个体估计点、不要用区间宽度表达不确定性」，前半句（宽度来自假设）
+    已自证后半句不成立。**安全边际的定义要求它在最保守假设下仍成立**，
+    故裁决口径取 `upsidePct`（保守档），而不是 `mid`。
+  - 引用时必须同时满足：① 一并给出 `dcf.assumptions.basis`（锚定口径，见下方硬不可用/软衰减判据）；
+    ② 在 report 中点明「三档对应增长率假设」；③ **不得**省略口径直接写成「内在价值 X~Y 元」；
+    ④ **不得**把 `mid` 讲成「公司真实价值」或「个体估计点」。
 - `result.graham.upsidePct`：格雷厄姆上行空间（交叉验证）
 - `result.fScore.score`：Piotrosky F-Score（0-9，≥7 为财务健康）
 - `result.moat.label`：算法判定的护城河评级
@@ -137,11 +153,42 @@ output_format: json
 - `report`: **精简**核心判断（3-5句话，不要长篇大论）
 - `moat_rating`: 护城河评级（三选一）
 - `financial_health`: 财务健康度（四选一）
-- `intrinsic_value_range`: **直接引用** `t-valuation.result.dcf.{low}-{high}` 区间，不要自己算；DCF 不可用（`t-valuation.result.dcf.available=false` 或 upsidePct=null，即持续亏损无归一化锚）时填 `null` 并在 report 中说明原因
-- `margin_of_safety`: **直接引用** `t-valuation.result.dcf.upsidePct`，不要自己算；不可用时填 `null`（**禁止填 0**，估值不可用 ≠ 估值为 0）
+- `intrinsic_value_range`: **直接引用** `t-valuation.result.dcf.{low}-{high}` 区间，不要自己算；DCF **硬不可用**（判据见下方 ①②）时填 `null` 并在 report 中说明原因；**软衰减**（③ 历史代理锚）时照常填，但须在 report 与 `risk_flags` 中披露口径
+- `margin_of_safety`: **直接引用** `t-valuation.result.dcf.upsidePct`，不要自己算；硬不可用时填 `null`（**禁止填 0**，估值不可用 ≠ 估值为 0）
 - `buffett_verdict`: **格式必须为「【裁决】+ 一句话理由」**，裁决用 `verdict` 字段的枚举值
 - `verdict`: 五档裁决枚举（与其他分析师对齐）
-- `ideal_buy_price`: **引用** `t-valuation.result.dcf.low` 作为理想买入价；DCF 不可用时写「无算法估值锚（需清算价值/重置成本等替代方法）」，**禁止输出 0 元**
+- `ideal_buy_price`: **引用** `t-valuation.result.dcf.low` 作为理想买入价；DCF **硬不可用**时写「无算法估值锚（需清算价值/重置成本等替代方法）」，**禁止输出 0 元**
+
+**DCF 可用性判据（分**两类**处理，别混同 —— ①② 是**硬不可用**，③ 是**软衰减**）**：
+
+**① 【硬不可用】—— 命中即把上面三个字段填 `null` / 写「无算法估值锚」，并在 report 中说明原因**：
+
+1. `t-valuation.result.dcf.available == false`，或 `dcf.upsidePct == null`。
+   （含义：当期 FCF ≤ 0 **且**近 5 年报无正净利年度 = 持续亏损，DCF 与格雷厄姆算法估值均不适用）
+2. `t-valuation.result.dcf.assumptions.applicable == false`。
+   表示**模型前提对该标的不成立**，判据见 `assumptions.applicability_signals`
+   （① 负债率 > 80%，净利由杠杆驱动；② 净利为正但**当期真实自由现金流**与盈利量级脱钩
+   （`FCF/净利 < 0.3`）或符号相反；③ 负增长却由永续假设撑起 > 70% 的估值）。
+
+> **关于 ①②**：命中时三档数值**仍会出现**在 `result.dcf` 里（历史模板依赖该结构），
+> 但它**不是可靠估值证据**，不得当作内在价值引用。把「模型前提不成立」的数值当成权威结论，
+> 是本项目已实证过的一类污染源（601166：DCF 给 +143% 上行空间，同一条输出里 LLM 给「观望 / 0% 仓位」）。
+
+**② 【软衰减】—— 数值**可以引用**，但必须披露口径、不得拔高 `confidence`**：
+
+3. `t-valuation.result.dcf.assumptions.is_fallback_anchor == true`。
+   表示锚定**不是当期真实自由现金流**，而是「近 5 年年报正净利均值 × 0.90」的历史代理
+   （口径原文见 `dcf.assumptions.basis`）。该代理回溯且**系统性偏低** —— 实测 300308（2026-09-21）：
+   代理锚比同期 TTM 自由现金流**低约 5.6 倍**，对成长/转型标的尤甚。
+   ⇒ 此时 `intrinsic_value_range` / `margin_of_safety` / `ideal_buy_price` **照常填**，但必须：
+   ① 在 report 中点明「历史代理锚」口径，**不得**陈述成与当期现金流等价的结论；
+   ② 在 `risk_flags` 中加一条标注该口径；③ 相应**下调 `confidence`**。
+
+> **优先级**：③ 与 ② 同时命中时（真实 FCF ≤ 0 会同时触发两者），**按硬不可用处理**。
+
+> **引用 DCF 区间时必须一并引用 `dcf.assumptions.basis`** —— 读者需要知道分母是当期
+> 真实自由现金流还是历史代理。**禁止**在不说明口径的情况下把区间写成"内在价值"。
+
 - `pe`: **直接引用** `t-valuation.result.pe`（市盈率）
 - `pb`: **直接引用** `t-valuation.result.pb`（市净率）
 - `current_price`: **直接引用** `t-valuation.result.current_price`（现价）

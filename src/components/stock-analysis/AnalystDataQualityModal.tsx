@@ -1,9 +1,20 @@
 // i18n-exempt: 业务逻辑判断字符串（节点类型/状态枚举键名），非 UI 展示文本
-import { diagStatusToSeverity, parseDataQualityReport, resolveAnalystDiagnosis } from "@/lib/dataQualityDiagnosis";
+import {
+  diagStatusToSeverity,
+  parseDataQualityReport,
+  reportQualitySeverity,
+  resolveAnalystDiagnosis,
+} from "@/lib/dataQualityDiagnosis";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import type { DataQualityDiagItem } from "@/types";
-import { CheckCircleFilled, CloseCircleFilled, ExclamationCircleFilled, ThunderboltFilled } from "@ant-design/icons";
+import {
+  CheckCircleFilled,
+  CloseCircleFilled,
+  ExclamationCircleFilled,
+  MinusCircleFilled,
+  ThunderboltFilled,
+} from "@ant-design/icons";
 import { Button, Col, Modal, Progress, Row, Table, Tag, Tooltip, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useMemo, useState } from "react";
@@ -16,6 +27,10 @@ const STATUS_ICON: Record<string, React.ReactNode> = {
   good: <CheckCircleFilled style={{ color: "#52c41a" }} />,
   warning: <ExclamationCircleFilled style={{ color: "#faad14" }} />,
   issue: <CloseCircleFilled style={{ color: "#f5222d" }} />,
+  // 2026-09-21 新增第 4 态「无值」：旧快照没有 report_quality 字段时使用。
+  // 此前该情形被并入 good ⇒ 绿色对勾旁边写着「旧版快照无此字段」，
+  // 等于把「不知道」渲染成「好」（与项目「兜底档不得冒充正常」的判据相反）。
+  unknown: <MinusCircleFilled style={{ color: "var(--muted)" }} />,
 };
 
 // ── 节点类型检测 ──────────────────────────────────────────────
@@ -71,7 +86,11 @@ const GRADE_COLOR: Record<string, string> = {
 // ── 诊断明细行 ──────────────────────────────────────────────
 interface DiagRow {
   field: string;
-  severity: "good" | "warning" | "issue";
+  /**
+   * 展示严重度。`"unknown"` = **无值**（旧快照缺字段），体现「不知道」而非等级 ——
+   * 与 `@/lib/dataQualityDiagnosis` 的 `DiagSeverity` 区分开，后者只有真实判定的三档。
+   */
+  severity: "good" | "warning" | "issue" | "unknown";
   detail: string;
 }
 
@@ -121,7 +140,10 @@ export function AnalystDataQualityModal({
   const rows = useMemo<DiagRow[]>(() => {
     if (!diag) { return []; }
     const hits = diag.placeholder_hits ?? 0;
+    const occ = diag.placeholder_occurrences ?? 0;
     const sev = diagStatusToSeverity(diag.status);
+    // 本节点报告质量分（2026-09-21 新增）。旧快照无此字段 ⇒ undefined，面板降级展示。
+    const rq = diag.report_quality;
     return [
       {
         field: t("stockAnalysis.analystReport.dqFieldNodeStatus"),
@@ -129,10 +151,24 @@ export function AnalystDataQualityModal({
         detail: `${t(diagStatusKey(diag.status))} · confidence=${diag.confidence}`,
       },
       {
+        // 2026-09-21 新增：本节点**自己的**报告质量分。此前该值只被累加进全局
+        // report_quality_avg ⇒ 单节点得分不可见，弹窗顶部只能显示全局值（10 个弹窗同数）。
+        // 三档阈值取自 `@/lib/dataQualityDiagnosis::reportQualitySeverity` 的**单一来源**
+        // （与 `DecisionBanner` 逐节点表格的「报告质量」列共用，避免同值两处不同色）。
+        // 返回 null = 无值 ⇒ "unknown"（灰点），不再冒充 good。
+        field: t("stockAnalysis.analystReport.dqFieldNodeReportQuality"),
+        severity: reportQualitySeverity(rq) ?? "unknown",
+        detail: rq === undefined
+          ? t("stockAnalysis.analystReport.dqNodeReportQualityUnavailable")
+          : t("stockAnalysis.analystReport.dqNodeReportQualityValue", { score: rq }),
+      },
+      {
         field: t("stockAnalysis.analystReport.dqFieldPlaceholder"),
         severity: hits > 0 ? "warning" : "good",
+        // 2026-09-21: 同时给出「词种数」与「实际出现次数」。原实现只显示词种数，
+        // 用户按原文数出现次数时对不上（实证：资金面显示 3 处，原文实际出现 4+ 次）。
         detail: hits > 0
-          ? t("stockAnalysis.analystReport.dqPlaceholderCount", { count: hits })
+          ? t("stockAnalysis.analystReport.dqPlaceholderCount", { count: hits, occurrences: occ })
           : t("stockAnalysis.analystReport.dqPlaceholderNone"),
       },
       {
@@ -314,6 +350,25 @@ export function AnalystDataQualityModal({
         )
         : (
           <>
+            {
+              /*
+              作用域标注（2026-09-21）：下面四数取自 data-quality 节点的**全局**输出对象，
+              与 expertId 无关 —— 10 张分析师卡片复用同一 modal，打开任意节点都显示同一组数字。
+              此前无任何标注，用户会读成「这个分析师的分数」，并据此质疑数据是否造假（实测提问）。
+              ⚠ 不要试图给每个节点单独算 grade/score：那会再造「两套同名等级」，
+                正是 2026-09-14 才修掉的坑（见本文件头部注释）。本节点自己的量见下方表格。
+            */
+            }
+            <div style={{ marginBottom: 8 }}>
+              <Text strong style={{ fontSize: 13 }}>
+                {t("stockAnalysis.analystReport.dqGlobalScopeTitle", { count: report.total_analysts })}
+              </Text>
+              <div style={{ marginTop: 2 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {t("stockAnalysis.analystReport.dqGlobalScopeNote")}
+                </Text>
+              </div>
+            </div>
             {/* 全局等级（由 data-quality 节点统一产出）*/}
             <Row gutter={24} style={{ marginBottom: 16 }}>
               <Col span={8} style={{ textAlign: "center" }}>
@@ -362,7 +417,7 @@ export function AnalystDataQualityModal({
                 </div>
                 <div style={{ marginTop: 4 }}>
                   <Text style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {t("stockAnalysis.analystReport.dataQualityCheckCount", { count: report.total_analysts })}
+                    {t("stockAnalysis.analystReport.dqAnalystCount", { count: report.total_analysts })}
                   </Text>
                 </div>
               </Col>
@@ -390,6 +445,18 @@ export function AnalystDataQualityModal({
                   {t("stockAnalysis.analystReport.dqScoreSource")}
                 </Text>
               </div>
+              {/* 全局失败标记（词种数 / 实际出现次数）—— 与逐节点口径同源 */}
+              {(report.placeholder_total_hits ?? 0) > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  <Text type="warning" style={{ fontSize: 11 }}>
+                    {t("stockAnalysis.analystReport.dqPlaceholderTotal", {
+                      nodes: (report.placeholder_nodes ?? []).join("、"),
+                      count: report.placeholder_total_hits ?? 0,
+                      occurrences: report.placeholder_total_occurrences ?? 0,
+                    })}
+                  </Text>
+                </div>
+              )}
             </div>
 
             {/* 本节点诊断 */}
@@ -416,6 +483,17 @@ export function AnalystDataQualityModal({
                   {t("stockAnalysis.analystReport.dqNoNodeDiagnosis")}
                 </Text>
               )}
+            {
+              /* 判定规则说明（2026-09-21）：status 取 A ∪ B —— 客观失败标记优先于自评分。
+                用户看到「自评 58 显示正常、自评 60 显示低置信」时会误判为阈值错乱。 */
+            }
+            {rows.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {t("stockAnalysis.analystReport.dqJudgePriorityNote")}
+                </Text>
+              </div>
+            )}
             {report.direction_conflict === true && (
               <div style={{ marginTop: 8 }}>
                 <Text type="warning" style={{ fontSize: 12 }}>

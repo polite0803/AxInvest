@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import i18n from "@/i18n";
 import { useWorkflowEditorStore } from "@/stores";
-import { Button, Divider, Input, InputNumber, Select, Tag, theme } from "antd";
+import { Button, Divider, Input, InputNumber, Tag, theme } from "antd";
 import { Plus, Trash2 } from "lucide-react";
 import React from "react";
 import { useTranslation } from "react-i18next";
@@ -15,12 +14,6 @@ interface Props {
   onUpdate: (u: Partial<WorkflowNode>) => void;
   onDelete: () => void;
 }
-
-const MODEL_ROLE_OPTIONS = [
-  { value: "", label: i18n.t("workflow.debateNode.defaultRole") },
-  { value: "quick_think", label: "Quick Think" },
-  { value: "deep_think", label: "Deep Think" },
-];
 
 export const DebatePropertyPanel: React.FC<Props> = ({ node, onUpdate, onDelete }) => {
   const { t } = useTranslation();
@@ -219,18 +212,6 @@ export const DebatePropertyPanel: React.FC<Props> = ({ node, onUpdate, onDelete 
           })}
           size="small"
           rows={2}
-        />
-      </div>
-      <div>
-        <label style={{ display: "block", color: token.colorTextTertiary, fontSize: 12, marginBottom: 4 }}>
-          {t("workflow.nodeConfig.convergenceModelRole", { defaultValue: "Convergence Model Role" })}
-        </label>
-        <Select
-          value={c.convergenceModelRole || ""}
-          onChange={(v) => sc("convergenceModelRole", v || undefined)}
-          size="small"
-          options={MODEL_ROLE_OPTIONS}
-          style={{ width: "100%" }}
         />
       </div>
       <Divider style={{ margin: "8px 0" }} />

@@ -168,6 +168,14 @@ pub async fn execute_llm(
                 let detail = format!("LLM 调用失败（重试耗尽）: {e}");
                 tracing::error!("[execute_llm] {}", &detail);
                 record_failure_audit(config, &detail, start);
+                // D5 指标：按「逻辑调用」粒度记 1 次失败。`execute_with_retry` 不暴露
+                // 单次 attempt 数，故重试序列整体算一次 —— 口径写在
+                // `dependency_metrics` 模块头，读数前先看那里。
+                crate::dependency_metrics::record_llm_call(
+                    &ctx.provider_id,
+                    false,
+                    start.elapsed().as_millis() as u64,
+                );
                 // BE-I1 修复：返回携带错误码的结构化错误，前端可按 error.LLM_CALL_FAILED 翻译
                 crate::error_codes::error_json(crate::error_codes::llm::CALL_FAILED, detail)
             })?
@@ -176,6 +184,12 @@ pub async fn execute_llm(
             let detail = format!("LLM 调用失败: {e}");
             tracing::error!("[execute_llm] {}", &detail);
             record_failure_audit(config, &detail, start);
+            // D5 指标：无重试策略 ⇒ 本次即全部尝试
+            crate::dependency_metrics::record_llm_call(
+                &ctx.provider_id,
+                false,
+                start.elapsed().as_millis() as u64,
+            );
             // BE-I1 修复：返回携带错误码的结构化错误，前端可按 error.LLM_CALL_FAILED 翻译
             crate::error_codes::error_json(crate::error_codes::llm::CALL_FAILED, detail)
         })?
@@ -183,6 +197,11 @@ pub async fn execute_llm(
 
     let duration_ms = start.elapsed().as_millis() as u64;
     let result = LlmCallResult::from_raw(response, duration_ms, false);
+
+    // D5 指标：真实网络调用成功（`duration_ms` 含重试与 PromptGuard 预处理耗时）。
+    // ⚠ 缓存命中已在上面 return ⇒ 不计入，否则命中会把成功率抬到 100%、把延迟稀释成 0。
+    // ⚠ 本行之后的「低置信度阻断」是**策略拦截**而非供应商故障 ⇒ 此处仍记成功。
+    crate::dependency_metrics::record_llm_call(&ctx.provider_id, true, duration_ms);
 
     // ── 写入缓存（调用成功后） ──
     if let Some(ref cache) = config.cache
@@ -355,6 +374,9 @@ pub async fn execute_llm_stream(
         usage: TokenUsage::default(),
         start: Instant::now(),
         prepared,
+        metrics_provider_id: ctx.provider_id.clone(),
+        metrics_recorded: false,
+        metrics_polled: false,
     };
     Ok(Box::pin(wrapped))
 }
@@ -520,6 +542,18 @@ struct ExecuteLlmStream {
     usage: TokenUsage,
     start: Instant,
     prepared: PreparedCall,
+    // ── D5 指标状态 ──
+    /// 供应商 ID（来自 `ctx`，此处必须带走：`poll_next` 拿不到 `ctx`）
+    metrics_provider_id: String,
+    /// 本流是否已记过指标（成功 / 失败各一次，防 `Drop` 重复计数）
+    metrics_recorded: bool,
+    /// inner 是否至少被 poll 过一次。
+    ///
+    /// ⚠ 这个字段是「aborted 是否可信」的关键：`adapter.chat_stream` 返回的是
+    /// **惰性流**，真正的 HTTP 请求发生在首次 poll。若调用方拿到流后立即 drop，
+    /// 一个字节都没发出去 —— 那是「没发起调用」，不是「调用被放弃」，
+    /// 不设此门会让 aborted 计数被「构造后未消费」的噪声灌满。
+    metrics_polled: bool,
 }
 
 #[derive(Default)]
@@ -541,69 +575,103 @@ impl Stream for ExecuteLlmStream {
         loop {
             let phase = std::mem::take(&mut this.phase);
             match phase {
-                StreamPhase::Streaming => match this.inner.as_mut().poll_next(cx) {
-                    Poll::Pending => {
-                        this.phase = StreamPhase::Streaming;
-                        return Poll::Pending;
-                    },
-                    Poll::Ready(None) => {
-                        // inner 提前结束（无 done），进入后置阶段
-                        this.phase = StreamPhase::Post;
-                    },
-                    // P0 修复(2026-08-29): 流式运行期 provider 错误补 tracing 日志 + 审计
-                    // 此前直接透传，运行日志里完全搜不到网络中断 / chunk 解析失败的详细信息
-                    // 2026-09-10 降级：本地合成的「10s 响应头超时」是设计的快速失败
-                    // （openai.rs），切 fallback/重试是预期路径，按 ERROR 记录会造成
-                    // 「回退已兜住仍在刷 ERROR」的日志噪音（2026-09-09 实证），降为 WARN；
-                    // 其余真实运行期错误维持 ERROR。
-                    Poll::Ready(Some(Err(e))) => {
-                        let detail = format!("LLM 流式运行期错误: {e}");
-                        let is_header_timeout =
-                            detail.contains("response headers not received within");
-                        if is_header_timeout {
-                            tracing::warn!(
-                                target: "axagent.providers",
-                                model = %this.prepared.request.model,
-                                elapsed_ms = this.start.elapsed().as_millis() as u64,
-                                content_bytes = this.content.len(),
-                                thinking_bytes = this.thinking.len(),
-                                "[execute_llm_stream] {}（设计的快速失败，重试/回退预期路径）",
-                                &detail
-                            );
-                        } else {
-                            tracing::error!(
-                                target: "axagent.providers",
-                                model = %this.prepared.request.model,
-                                elapsed_ms = this.start.elapsed().as_millis() as u64,
-                                content_bytes = this.content.len(),
-                                thinking_bytes = this.thinking.len(),
-                                "[execute_llm_stream] {}",
-                                &detail
-                            );
-                        }
-                        record_failure_audit(&this.config, &detail, this.start);
-                        return Poll::Ready(Some(Err(e)));
-                    },
-                    Poll::Ready(Some(Ok(chunk))) => {
-                        if let Some(c) = &chunk.content {
-                            this.content.push_str(c);
-                        }
-                        if let Some(t) = &chunk.thinking {
-                            this.thinking.push_str(t);
-                        }
-                        if let Some(ref u) = chunk.usage {
-                            this.usage = *u;
-                        }
-                        this.phase = if chunk.done {
-                            StreamPhase::Post
-                        } else {
-                            StreamPhase::Streaming
-                        };
-                        return Poll::Ready(Some(Ok(chunk)));
-                    },
+                StreamPhase::Streaming => {
+                    // D5 指标：首次 poll 即视为「调用真的发起了」（inner 是惰性流）
+                    this.metrics_polled = true;
+                    match this.inner.as_mut().poll_next(cx) {
+                        Poll::Pending => {
+                            this.phase = StreamPhase::Streaming;
+                            return Poll::Pending;
+                        },
+                        Poll::Ready(None) => {
+                            // inner 提前结束（无 done），进入后置阶段
+                            this.phase = StreamPhase::Post;
+                        },
+                        // P0 修复(2026-08-29): 流式运行期 provider 错误补 tracing 日志 + 审计
+                        // 此前直接透传，运行日志里完全搜不到网络中断 / chunk 解析失败的详细信息
+                        // 2026-09-10 降级：本地合成的「10s 响应头超时」是设计的快速失败
+                        // （openai.rs），切 fallback/重试是预期路径，按 ERROR 记录会造成
+                        // 「回退已兜住仍在刷 ERROR」的日志噪音（2026-09-09 实证），降为 WARN；
+                        // 其余真实运行期错误维持 ERROR。
+                        Poll::Ready(Some(Err(e))) => {
+                            let detail = format!("LLM 流式运行期错误: {e}");
+                            let is_header_timeout =
+                                detail.contains("response headers not received within");
+                            if is_header_timeout {
+                                tracing::warn!(
+                                    target: "axagent.providers",
+                                    model = %this.prepared.request.model,
+                                    elapsed_ms = this.start.elapsed().as_millis() as u64,
+                                    content_bytes = this.content.len(),
+                                    thinking_bytes = this.thinking.len(),
+                                    "[execute_llm_stream] {}（设计的快速失败，重试/回退预期路径）",
+                                    &detail
+                                );
+                            } else {
+                                tracing::error!(
+                                    target: "axagent.providers",
+                                    model = %this.prepared.request.model,
+                                    elapsed_ms = this.start.elapsed().as_millis() as u64,
+                                    content_bytes = this.content.len(),
+                                    thinking_bytes = this.thinking.len(),
+                                    "[execute_llm_stream] {}",
+                                    &detail
+                                );
+                            }
+                            record_failure_audit(&this.config, &detail, this.start);
+                            // D5 指标：流式运行期错误 ⇒ 记失败。`metrics_recorded` 兼作两个作用：
+                            // ① 防 `Drop` 把它再算成一次 aborted（一错两计）；
+                            // ② 幂等门 —— 与 `Post` 同因（`phase` 被 take 后重置为 Streaming），
+                            //    消费方继续 poll 可能重复经过本分支。
+                            if !this.metrics_recorded {
+                                crate::dependency_metrics::record_llm_call(
+                                    &this.metrics_provider_id,
+                                    false,
+                                    this.start.elapsed().as_millis() as u64,
+                                );
+                                this.metrics_recorded = true;
+                            }
+                            return Poll::Ready(Some(Err(e)));
+                        },
+                        Poll::Ready(Some(Ok(chunk))) => {
+                            if let Some(c) = &chunk.content {
+                                this.content.push_str(c);
+                            }
+                            if let Some(t) = &chunk.thinking {
+                                this.thinking.push_str(t);
+                            }
+                            if let Some(ref u) = chunk.usage {
+                                this.usage = *u;
+                            }
+                            this.phase = if chunk.done {
+                                StreamPhase::Post
+                            } else {
+                                StreamPhase::Streaming
+                            };
+                            return Poll::Ready(Some(Ok(chunk)));
+                        },
+                    }
                 },
                 StreamPhase::Post => {
                     let duration_ms = this.start.elapsed().as_millis() as u64;
+
+                    // D5 指标：流走完（收到 done，或 inner 正常结束）⇒ 记成功。
+                    // 位置选在这里而非 loop 出口：本段之后的「低置信度阻断」是策略拦截、
+                    // 缓存写入是本地副作用，二者都不是供应商故障。置位后 Drop 不再补记。
+                    //
+                    // ⚠ 必须用 `metrics_recorded` 做幂等门：本段若因「低置信度阻断」提前
+                    // `return Err`，上面 `std::mem::take(&mut phase)` 已把 phase 重置为默认
+                    // 的 `Streaming` —— 消费方若继续 poll，就会**第二次进入 Post**。
+                    // 那是本文件既有的 phase 重置缺陷（一并影响审计/缓存），不属 D5 修
+                    // 范围，已单列登记；此处只需保证**指标不被重复计数**。
+                    if !this.metrics_recorded {
+                        crate::dependency_metrics::record_llm_call(
+                            &this.metrics_provider_id,
+                            true,
+                            duration_ms,
+                        );
+                        this.metrics_recorded = true;
+                    }
 
                     // 审计
                     if let Some(ref recorder) = this.config.audit_recorder {
@@ -697,6 +765,22 @@ impl Stream for ExecuteLlmStream {
                 },
                 StreamPhase::Done => return Poll::Ready(None),
             }
+        }
+    }
+}
+
+/// D5 指标：流被**提前丢弃**（调用方取消 / 任务被 abort / provider 挂住不返回）。
+///
+/// 这类流既没走到 `Post`（无 done），也没产出 `Err` —— 不补记就会在指标里凭空消失，
+/// 而它恰恰是「供应商卡住」最典型的形态。故单列 `aborted` 通道，**不**混入 ok / failed：
+/// 记成失败会让成功率凭空变差，记成成功更是骗人。
+///
+/// ⚠ 只在 `metrics_polled` 为真时补记 —— 见该字段的注释：惰性流从未 poll 过，
+/// 意味着一个字节都没发出去。
+impl Drop for ExecuteLlmStream {
+    fn drop(&mut self) {
+        if !self.metrics_recorded && self.metrics_polled {
+            crate::dependency_metrics::record_llm_aborted(&self.metrics_provider_id);
         }
     }
 }

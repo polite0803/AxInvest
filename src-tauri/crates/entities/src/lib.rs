@@ -206,6 +206,7 @@ pub mod reco_picks;
 pub mod reflection_lessons;
 pub mod screenshot_diagnoses;
 pub mod stock_analyses;
+pub mod stock_evolution_history;
 pub mod stock_pipeline_runs;
 pub mod stock_reflections;
 pub mod strategy_performance;

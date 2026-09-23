@@ -190,15 +190,21 @@ fn push_json_to_scope(scope: &mut rhai::Scope<'_>, key: &str, val: &serde_json::
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "执行What-If回测计算")]
 #[tauri::command]
 pub fn compute_what_if(params: WhatIfRequest) -> Result<WhatIfResult, String> {
-    use rhai::{Engine, Scope};
+    use rhai::Scope;
 
-    let mut engine = Engine::new();
-    // C4 补充: portfolio-mgr.rhai 因子多、表达式嵌套深，必须放宽 max_expr_depths
-    // （默认上限会在 line 518 处触发 "Expression exceeds maximum complexity"，且该错误
-    // 是编译期抛出、脚本内 try/catch 无法捕获）。256 为实测下限(48)的 ~5 倍余量。
-    engine.set_max_expr_depths(256, 256);
-    // 注册脚本依赖的 json_parse/clamp/join，否则 safe_parse/clamp 调用会抛 Function not found
-    axagent_harness::rhai_engine::register_common_functions(&mut engine);
+    // 沙箱档位与宿主函数集统一走 rhai_registry::build_stock_rhai_engine。
+    //
+    // 历史缺陷（2026-09-22 修复）：本处只注册了 common（json_parse / clamp / join），
+    // **一个业务宿主函数都没注册** —— 而本函数执行的正是 portfolio-mgr.rhai，
+    // 它调用 pm_*（pm_evidence_scale / pm_kelly_position 等）。函数缺失时脚本内
+    // try/catch 吞掉 "Function not found"，What-If 回测静默走保守兜底
+    //（action="观望"、confidence=0），用户看到的是「怎么调参数都不变」。
+    // 与 rerun 入口（stock_workflow/decision.rs）的历史缺陷同源，故一并收敛。
+    // 档位取 PORTFOLIO：该脚本表达式嵌套深，默认上限会在**编译期**抛
+    // "Expression exceeds maximum complexity"，脚本内 try/catch 无法捕获。
+    let engine = crate::commands::stock_workflow::rhai_registry::build_stock_rhai_engine(
+        crate::commands::stock_workflow::rhai_registry::RhaiSandboxLimits::PORTFOLIO,
+    );
     let mut scope = Scope::new();
 
     // 1. 注入显式参数（用户在前端调整的 6 个核心值）
@@ -639,9 +645,15 @@ pub async fn replay_tool_chain(
     // 此前写作 `fscore_buy_threshold`，导致面板传 `value_fscore_buy` 永远无法命中，
     // 恒走默认 7.0 —— 又一处「命名错配型空接线」。
     let fscore = tv("value_fscore_buy", 7.0) as i64;
+    // 2026-09-21 修复：负 PE（亏损企业）不得落进「低估」档。
+    // 原实现 `map(|pe| if *pe < 20.0 { 20.0 } ...)` 会把 −144 判成
+    // `pePercentile = 20` ⇒ `valuation = "undervalued"`（亏损被读成低估）。
+    // 此前 vendor 把 PE ≤ 0 过滤成 None，故恒走 `unwrap_or(50.0)` 中性档、
+    // 缺陷不可见；放开负值后必须显式守卫 ⇒ 无正 PE 时保持中性 50。
     let pe_pct = quote
         .pe
         .as_ref()
+        .filter(|pe| **pe > 0.0)
         .map(|pe| {
             // 简化版：PE<20 视为低估，PE>40 视为高估
             if *pe < 20.0 {
@@ -3446,6 +3458,16 @@ pub async fn get_earnings_calendar(
 /// - years: 回溯窗口(默认 5 年);内部按 EOD 快照表统计 PE/PB/PS 的 5/10/25/50/75/90/95
 ///   分位 + 当前分位。
 /// - 数据来源:本机 `financial_snapshots` 表(DB),表为空时返回 verdict = "insufficient"。
+///
+/// ## ⚠ 同名不同层（读到此名的人最容易踩的坑）
+///
+/// MCP **工具**表里也有一个叫 `compute_valuation_band` 的工具
+/// （`crates/astock-data/src/mcp_tools.rs` 的 `execute_mcp_tool` 分支）：走 `ToolRegistry`、
+/// **在线取数且不落库**。工作流节点 `t-valuation-band` 调用的是**那个**，不是本命令 ——
+/// `#[agent_command]` 只登记元数据，**不存在「命令 → 工具」的桥**，
+/// 节点直接写本命令名会解析为 `None` 并被 `degraded` 静默吞掉。
+/// 本命令走 `State<AppState>`，读**并回填**本机表，供前端图表与设置面板使用。
+/// 两者的窗口口径刻意共享（`valuation_band::since_date_from_years` + `clip_valuation_history`）。
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "计算估值带")]
 #[tauri::command]
 pub async fn compute_valuation_band(
@@ -3456,11 +3478,10 @@ pub async fn compute_valuation_band(
     use axagent_astock_data::valuation_band::FinancialSnapshotLike;
 
     let years = years.unwrap_or(5);
-    let since_date = chrono::Local::now()
-        .date_naive()
-        .checked_sub_signed(chrono::Duration::days(365 * years as i64))
-        .map(|d| d.format("%Y-%m-%d").to_string())
-        .unwrap_or_else(|| "0000-00-00".to_string());
+    // 窗口口径**单一来源**：与工作流工具路径（`mcp_tools` 的 `compute_valuation_band` 分支）
+    // 共用同一个函数。⚠ 不要在这里自己算日期 —— 两条路径窗口不同会让同一个 PE 得到
+    // 两个分位（前端图一个、决策锚腿另一个），且**没有任何报错**。
+    let since_date = axagent_astock_data::valuation_band::since_date_from_years(years);
 
     let db = state.harness.db();
 
@@ -3527,6 +3548,12 @@ pub async fn compute_valuation_band(
 
     // current 取窗口内最新一条快照 —— 图表据此画"当前值"红点并展示当前分位。
     // 原实现传 None，导致前端 ValuationBandChart 的 markPoint 与分位文字两处永不显示。
+    // ⚠ 这里 `samples.last()` = 最新，**依赖 `load_financial_snapshots` 的
+    //   `.order_by_asc(SnapshotDate)`**。而工具路径（`mcp_tools` 的
+    //   `compute_valuation_band`）的原始数据是**降序**，靠
+    //   `valuation_band::clip_valuation_history` 归一到升序才对得上。
+    //   任何一侧丢了这一步 ⇒ 该侧 `current` 取到**最旧**那条，且**不会报错**
+    //   （分位数与顺序无关，只有"当前分位"错）。
     let band = axagent_astock_data::valuation_band::compute_valuation_band(
         &stock_code,
         &samples,
@@ -3578,11 +3605,9 @@ async fn backfill_financial_snapshots(
         .get_valuation_history(stock_code, years)
         .await
         .map_err(|e| format!("获取历史估值序列失败: {e}"))?;
-    // 接口返回全量历史（降序），这里按窗口裁剪；YYYY-MM-DD 格式可直接字符串比较
-    let rows: Vec<_> = snaps
-        .into_iter()
-        .filter(|s| !s.trade_date.is_empty() && s.trade_date.as_str() >= since_date)
-        .collect();
+    // 窗口口径**单一来源**：与工具路径共用 `clip_valuation_history`。
+    // ⚠ 不能省这一步：`get_valuation_history(years)` 的分页会多取约 2 页（≈2 年）。
+    let rows = axagent_astock_data::valuation_band::clip_valuation_history(snaps, since_date);
     if rows.is_empty() {
         return Ok(0);
     }
@@ -4334,8 +4359,9 @@ pub async fn recommend_stocks(
     let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
 
     // 读取 workflow template 变量用于 vendor 启用检测
+    let db = state.harness.db();
     let template = axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
-        .one(state.harness.db())
+        .one(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询模板失败: {e}"))
@@ -4346,26 +4372,52 @@ pub async fn recommend_stocks(
         None => Vec::new(),
     };
 
+    // ⚙️ B1: 演化权重回流 —— 用 strategy_weight_history 的最新演化权重覆盖模板静态权重，
+    // 让评分链（recommender::parse_strategy_weights → 按 (style, period) 缩放 confidence）
+    // 读到的就是「自学习闭环」真正调过的权重，而非 workflow_template 里写死的静态值。
+    //
+    // 覆盖时机判定：仅当演化表非空时才覆盖，否则回退模板静态值（全新安装、尚无演化记录时
+    // 保留原样，避免凭空抹掉模板里已有的权重配置）。
+    let served_vars: Vec<(String, serde_json::Value)> = {
+        let evolved = axagent_analysis_engine::evolution_drift::load_current_weights(db).await?;
+        if evolved.is_empty() {
+            vars
+        } else {
+            // load_current_weights 返回 ((strategy_id, period), weight)，
+            // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
+            let mut obj = serde_json::Map::new();
+            for ((s, p), w) in evolved {
+                obj.insert(format!("{s}_{p}"), serde_json::json!(w));
+            }
+            let mut v =
+                vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
+            v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
+            v
+        }
+    };
+
     // state.astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
     let client: std::sync::Arc<_> = state.astock_client.clone();
     let response = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async {
-                recommender::recommend_stocks(client, period, &vars, None).await
+                recommender::recommend_stocks(client, period, &served_vars, None).await
             })
             .await
     } else {
-        recommender::recommend_stocks(client, period, &vars, None).await
+        recommender::recommend_stocks(client, period, &served_vars, None).await
     }?;
 
     // ── 持久化荐股结果（仅 live 模式） ──
     if as_of_date.is_none() {
         let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
 
-        // 构建策略权重快照（用于回溯某次荐股时的权重配置）
+        // 构建策略权重快照（用于回溯某次荐股时的权重配置）。
+        // 用 served_vars（已被演化权重覆盖）而非原始模板 vars，
+        // 保证快照忠实反映评分链"实际用到的权重"。
         let strategy_weights_json: Option<String> = {
-            let vars_clone: Vec<(String, serde_json::Value)> = vars.clone();
-            vars_clone.iter().find(|(k, _)| k == "reco_strategy_weights").and_then(|(_, v)| {
+            let served_clone: Vec<(String, serde_json::Value)> = served_vars.clone();
+            served_clone.iter().find(|(k, _)| k == "reco_strategy_weights").and_then(|(_, v)| {
                 if v.is_object() {
                     Some(v.to_string())
                 } else {
@@ -5564,6 +5616,45 @@ pub async fn get_evolution_drift_timeline(
     .await
 }
 
+/// 查询进化闭环留痕（`stock_evolution_history`）—— 供前端事后回看某次进化
+/// "为何触发、改了啥、回测概要"。按创建时间倒序返回。
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询进化历史")]
+#[tauri::command]
+pub async fn get_evolution_history(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<axagent_entities::stock_evolution_history::Model>, String> {
+    use axagent_entities::stock_evolution_history;
+    use sea_orm::{EntityTrait, QueryOrder};
+
+    let db = state.harness.db();
+    let rows = stock_evolution_history::Entity::find()
+        .order_by_desc(stock_evolution_history::Column::CreatedAt)
+        .limit(limit.unwrap_or(50) as u64)
+        .all(db)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// 手动触发一次股票业务进化（用户在前端主动请求）。
+/// 与自动触发共用同一执行链（含落库回看），返回进化详情（触发原因/改动/摘要）。
+#[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "手动触发股票进化")]
+#[tauri::command]
+pub async fn trigger_stock_evolution(
+    state: State<'_, AppState>,
+    reason: Option<String>,
+    template_id: Option<String>,
+) -> Result<axagent_analysis_engine::stock_self_evolution::StockEvolutionResult, String> {
+    let reason = reason.unwrap_or_else(|| "用户主动触发".to_string());
+    state
+        .stock_adaptive_engine
+        .evolution_engine()
+        .trigger_manual_evolution(&reason, template_id.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// 拉取近期决策一致性分数趋势（Phase 3: 双视角一致性趋势图）
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取一致性分数历史")]
 #[tauri::command]
@@ -5855,6 +5946,34 @@ pub struct QuickBacktestRequest {
 }
 
 /// 单次采样结果
+///
+/// ## 本结构的真实语义（2026-09-21 修正）
+///
+/// `quick_backtest` **只做区间收益采样** —— 取采样日收盘价与 `hold_days` 后的
+/// 收盘价算收益，**不运行任何分析 / 决策节点**。因此：
+/// - `entry_price` / `exit_price` / `return_pct` 是**真实行情事实**；
+/// - `was_correct` 表达的是「若在该采样日**买入并持有** N 日是否盈利」，
+///   **不是**「当时的决策是否正确」；
+/// - `decision_action` 恒为 `ACTION_UNAVAILABLE`（本命令不产出决策）。
+///
+/// ⚠️ 历史缺陷（2026-09-21 修复，`PLAN-decision-action-convergence.md` §7.3 第 6 项）：
+/// 原实现把这两个决策字段**用未来收益反推**：
+/// ```ignore
+/// decision_action: if return_pct > 0.0 { "买入" } else { "卖出/持有" },
+/// decision_confidence: 50.0f64.min(50.0 + return_pct.abs()),
+/// ```
+/// 后果有三层，逐层加重：
+/// 1. **look-ahead 伪造** —— 把「事后涨跌」包装成「当时的决策」，用户读到的是一个
+///    **从未发生过**的决策；
+/// 2. **重言式统计** —— `was_correct` 与伪造的 `decision_action` 由**同一个**
+///    `return_pct > 0.0` 派生 ⇒ `correct_count / total` 恒等于「上涨采样点占比」，
+///    再无 `win_rate: accuracy_pct` 直接复制 ⇒ 「胜率」与「决策准确率」是**同一个数**，
+///    两者都与决策无关（统计量恒等 ⇒ 先怀疑测量工具本身，而非数据）；
+/// 3. `"卖出/持有"` 是**两个档位合一**的字符串，`normalize_action()` 对它返回 `None`
+///    —— 既不是合法档位，也无法参与任何方向判定。
+///
+/// 修法选「**去伪造**」而非「接真决策」：本命令按设计不跑分析（50 个采样日 ×
+/// 完整工作流不可行），凭空补一个决策只会换一种伪造方式。缺失就该显示缺失。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QuickBacktestSample {
@@ -5862,9 +5981,14 @@ pub struct QuickBacktestSample {
     pub entry_price: f64,
     pub exit_price: f64,
     pub return_pct: f64,
+    /// 「买入并持有 `hold_days` 个交易日后是否盈利」—— **不是**决策正确性
     pub was_correct: bool,
+    /// 恒为 `ACTION_UNAVAILABLE` 哨兵：本命令不产出决策，不得伪造档位
     pub decision_action: String,
-    pub decision_confidence: f64,
+    /// 恒为 `None`：无决策 ⇒ 无置信度。
+    /// （原实现用 `50 + |return_pct|` 伪造 —— 收益幅度不是置信度。）
+    #[serde(default)]
+    pub decision_confidence: Option<f64>,
 }
 
 /// 快速回测结果
@@ -5985,12 +6109,12 @@ pub async fn quick_backtest(
             exit_price,
             return_pct,
             was_correct,
-            decision_action: if return_pct > 0.0 {
-                "买入".into()
-            } else {
-                "卖出/持有".into()
-            },
-            decision_confidence: 50.0f64.min(50.0 + return_pct.abs()),
+            // 不伪造决策档位：本命令不运行分析 ⇒ 下发显式缺失哨兵，
+            // 由展示层渲染「数据缺失」，而不是一个由**未来收益**反推的假决策。
+            decision_action: axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE
+                .to_string(),
+            // 同上：无决策即无置信度。`None` 与「置信度 0」不是一回事。
+            decision_confidence: None,
         };
 
         samples.push(sample_result);
@@ -6019,6 +6143,13 @@ pub async fn quick_backtest(
         correct_count,
         accuracy_pct,
         avg_return_pct,
+        // ⚠️ 这两个统计量在**本命令的语义下**必然相等，且都不是「决策准确率」：
+        //   `was_correct ⟺ return_pct > 0.0` ⇒ `correct_count / total` 就是
+        //   「采样日中持有 N 日盈利的占比」。在「每个采样日都买入并持有」的
+        //   策略假设下，这就是持有期胜率 —— 所以两者相等是自洽的，**不是**
+        //   两个独立指标。保留同值而非删一个，是因为两个字段名分别对
+        //   前端「正确次数」与「胜率」两个展示位；但注释在此钉住真实语义，
+        //   避免后续有人把它读成「决策命中率」。
         win_rate: accuracy_pct,
         samples,
         error: None,
@@ -6177,32 +6308,44 @@ pub async fn run_self_improving_stock_analysis(
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ValuationParams {
-    /// 永续增长率（默认 0.03 = 3%）
+    /// 永续增长率（小数口径）。缺省值派生自 `astock-data` 常量，见 `Default` 实现。
     pub perpetual_growth: f64,
-    /// 折现率（默认 0.10 = 10%）
+    /// 折现率（小数口径）。缺省值派生自 `astock-data` 常量，见 `Default` 实现。
     pub discount_rate: f64,
-    /// 默认增长率（无数据时使用，默认 0.08 = 8%）
+    /// 默认增长率（无数据时使用，小数口径）。缺省值派生自 `astock-data` 常量。
     pub default_growth: f64,
-    /// 最小增长率（默认 0.02 = 2%）
+    /// 最小增长率（小数口径）。缺省值派生自 `astock-data` 常量。
     pub min_growth: f64,
-    /// 最大增长率（默认 0.30 = 30%）
+    /// 最大增长率（小数口径）。缺省值派生自 `astock-data` 常量。
     pub max_growth: f64,
-    /// 预测年数（默认 5 年）
+    /// 预测年数。缺省值派生自 `astock-data` 常量。
     pub forecast_years: i32,
-    /// 格雷厄姆公式中的 AAA 企业债收益率基准（默认 4.4）
+    /// 格雷厄姆公式中的 AAA 企业债收益率基准（**百分数**口径）。缺省值派生自常量。
     pub bond_yield: f64,
 }
 
 impl Default for ValuationParams {
+    /// ⚠️ 全部字段**派生自 `astock-data::mcp_tools` 的单一真相源常量**，严禁在此手抄字面量。
+    ///
+    /// 2026-09-22 修复（`AUDIT-300642-run-variance-2026-09-22.md` §9.6 方案 A）：
+    /// 此前这里手抄的是**校准前**的旧值（`0.03 / 0.10 / 0.08 / 0.02`），
+    /// 与本仓另外三处给出的新值（`0.04 / 0.085 / 0.12 / −0.30`）**分叉**。
+    /// 而本结构体是 `inject_valuation_config_for_tool` 注入 `valuation_config`
+    /// 的**唯一取值来源**，注入对象在 `compute_valuation` 中优先级最高
+    /// （见 `mcp_tools.rs` 的 `ValuationConfig` 解析处）
+    /// ⇒ 前端直调链（WhatIf / 试算）与工作流链会取到**两套不同的估值参数**。
+    ///
+    /// 等式由 `valuation_defaults_are_single_sourced` 测试锁住。
     fn default() -> Self {
+        use axagent_astock_data::mcp_tools as m;
         Self {
-            perpetual_growth: 0.03,
-            discount_rate: 0.10,
-            default_growth: 0.08,
-            min_growth: 0.02,
-            max_growth: 0.30,
-            forecast_years: 5,
-            bond_yield: 4.4,
+            perpetual_growth: m::PERPETUAL_GROWTH,
+            discount_rate: m::DISCOUNT_RATE,
+            default_growth: m::DEFAULT_GROWTH,
+            min_growth: m::MIN_GROWTH,
+            max_growth: m::MAX_GROWTH,
+            forecast_years: m::FORECAST_YEARS,
+            bond_yield: m::DEFAULT_BOND_YIELD,
         }
     }
 }
@@ -6356,5 +6499,70 @@ mod param_name_resolution_tests {
         let k = known();
         assert!(resolve_param_name("nonsense_param", &k).is_none());
         assert!(resolve_param_name("", &k).is_none());
+    }
+}
+
+#[cfg(test)]
+mod valuation_defaults_tests {
+    use super::ValuationParams;
+    use axagent_astock_data::mcp_tools as m;
+
+    /// `ValuationParams::default()` 必须**派生自** `astock-data` 的单一真相源常量。
+    ///
+    /// ## 为什么需要它
+    ///
+    /// 本结构体是 `inject_valuation_config_for_tool` 注入 `valuation_config` 的
+    /// **唯一取值来源**，而注入对象在 `compute_valuation` 的参数解析里**优先级最高**
+    /// （`valuation_config`(object) > 扁平参数 > 模块常量）⇒ 它一旦与真相源分叉，
+    /// **前端直调链**（WhatIf / 试算，走注入）与**工作流链**（`input_mapping` 扁平参数）
+    /// 就会对同一标的取到两套估值参数。
+    ///
+    /// 历史：此处曾手抄**校准前**的旧值（`0.03 / 0.10 / 0.08 / 0.02`），
+    /// 与真相源（`0.04 / 0.085 / 0.12 / −0.30`）分叉达 10 天
+    /// （见 `AUDIT-300642-run-variance-2026-09-22.md` §9.6）。
+    ///
+    /// 前端那份副本（引用不到 Rust 常量，只能手抄）由
+    /// `scripts/check-valuation-defaults-parity.mjs` 守等式，不在本测试覆盖范围内。
+    #[test]
+    fn valuation_defaults_are_single_sourced() {
+        let p = ValuationParams::default();
+        assert_eq!(p.perpetual_growth, m::PERPETUAL_GROWTH);
+        assert_eq!(p.discount_rate, m::DISCOUNT_RATE);
+        assert_eq!(p.default_growth, m::DEFAULT_GROWTH);
+        assert_eq!(p.min_growth, m::MIN_GROWTH);
+        assert_eq!(p.max_growth, m::MAX_GROWTH);
+        assert_eq!(p.forecast_years, m::FORECAST_YEARS);
+        assert_eq!(p.bond_yield, m::DEFAULT_BOND_YIELD);
+    }
+
+    /// seed 的模板变量默认值（**百分数**口径）必须与真相源（**小数**口径）×100 往返相等。
+    ///
+    /// 这条实际测的是**浮点往返**：`0.085 * 100.0`、`0.04 * 100.0`、`0.12 * 100.0`
+    /// 在 IEEE754 下必须**恰好**等于 `8.5 / 4.0 / 12.0`。若某一项不成立，
+    /// 模板变量会落库成 `8.499999999999998` 之类，面板显示与 DCF 判定都会跟着歪 ——
+    /// 而这类缺陷在「只断言派生关系」的测试里看不见（两边同时歪则测试仍绿）。
+    #[test]
+    fn seed_pct_defaults_round_trip_to_truth_source() {
+        use crate::commands::stock_analysis_setup::seed_variables as sv;
+        assert_eq!(sv::DEFAULT_DCF_GROWTH_RATE_PCT, m::DEFAULT_GROWTH * 100.0);
+        assert_eq!(sv::DEFAULT_DCF_PERPETUAL_RATE_PCT, m::PERPETUAL_GROWTH * 100.0);
+        assert_eq!(sv::DEFAULT_DCF_DISCOUNT_RATE_PCT, m::DISCOUNT_RATE * 100.0);
+        // 反向换算必须回到真相源（防"/100 再 ×100"在中途丢精度）。
+        // 用容差而非 `==`：`PERPETUAL_GROWTH=0.013` 无法精确表示，
+        // `0.013*100.0/100.0` 得 `0.013000000000000001`（IEEE754 往返误差 ~1e-17）。
+        // 容差 1e-12 仍远小于真实分叉（~0.01 量级，见测试头注释），不会掩盖缺陷。
+        let within = |a: f64, b: f64| (a - b).abs() < 1e-12;
+        assert!(
+            within(sv::DEFAULT_DCF_GROWTH_RATE_PCT / 100.0, m::DEFAULT_GROWTH),
+            "growth 往返偏离真相源"
+        );
+        assert!(
+            within(sv::DEFAULT_DCF_PERPETUAL_RATE_PCT / 100.0, m::PERPETUAL_GROWTH),
+            "perpetual 往返偏离真相源"
+        );
+        assert!(
+            within(sv::DEFAULT_DCF_DISCOUNT_RATE_PCT / 100.0, m::DISCOUNT_RATE),
+            "discount 往返偏离真相源"
+        );
     }
 }

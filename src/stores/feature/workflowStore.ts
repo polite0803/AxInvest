@@ -36,6 +36,32 @@ let _activeExecutionRef: {
 } | null = null;
 
 // ============================================================
+// NL 解析进度档位（单一真相源）
+// ============================================================
+
+/**
+ * NL 解析阶段 → 进度百分比。
+ *
+ * ⚠️ key 必须是 `parseProgress` 实际写入的 **i18n key**，不是 `t()` 之后的展示文案。
+ *
+ * 2026-09-21 修复的缺陷：`AIPanel.tsx` 此前在组件内另建了一份进度表，其 key 取自
+ * **`aiPanel.progress*` 的展示文案**；而本 store 写入的却是 **`workflow.parse.*`
+ * 的展示文案**。两组 key 名不同、文案也不同（如 `"正在分析意图..."` vs
+ * `"正在分析意图"`，差一个省略号）⇒ `map[parseProgress]` **恒为 `undefined`**
+ * ⇒ 走 `|| 10` 兜底 ⇒ 进度条永远停在 10%，且该缺陷在**任何语言下都成立**。
+ *
+ * 现约定：`parseProgress` 存 **key**（协议值），展示端一律 `t(parseProgress)`。
+ * 这样档位表可与写入值严格对齐，语言切换时文案也会自动跟随。
+ */
+export const NL_PARSE_PROGRESS: Record<string, number> = {
+  "workflow.parse.analyzingIntent": 25,
+  "workflow.parse.intentAnalysis": 25,
+  "workflow.parse.matchingNodes": 60,
+  "workflow.parse.generating": 60,
+  "workflow.parse.complete": 100,
+};
+
+// ============================================================
 // 后端 DTO 类型（snake_case，与 Rust serde 输出一致）
 // ============================================================
 
@@ -382,6 +408,14 @@ interface WorkflowStoreState {
 
   // NL 解析状态
   isParsing: boolean;
+  /**
+   * 当前 NL 解析阶段的 **i18n key**（如 `"workflow.parse.matchingNodes"`），空串表示未在解析。
+   *
+   * ⚠️ 这是**协议值**，不是展示文案。展示端必须 `parseProgress ? t(parseProgress) : ""`。
+   * 2026-09-21 前此处存的是 `t()` 之后的文案，导致两个后果：
+   *   ① 进度档位表（见 `NL_PARSE_PROGRESS`）无法与写入值对齐 ⇒ 进度条恒 10%；
+   *   ② 语言切换后已显示的阶段文案不跟随刷新。
+   */
   parseProgress: string;
 
   // 执行状态
@@ -425,6 +459,11 @@ interface WorkflowStoreState {
   removeNode: (nodeId: string) => void;
   addEdge: (edge: WorkflowEdge) => void;
   removeEdge: (edgeId: string) => void;
+  /**
+   * 手动设置解析阶段。
+   * ⚠️ `progress` 必须是 i18n key（见 `parseProgress` 字段说明），**不是**展示文案 ——
+   * 传入文案会让 `NL_PARSE_PROGRESS` 查表 miss。
+   */
   setParsingProgress: (progress: string) => void;
 
   // NL2Skill
@@ -599,9 +638,9 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
   // ========== NL 解析 ==========
 
   parseNaturalLanguage: async (request: NLParseRequest) => {
-    set({ isParsing: true, parseProgress: t("workflow.parse.analyzingIntent") });
+    set({ isParsing: true, parseProgress: "workflow.parse.analyzingIntent" });
     try {
-      set({ parseProgress: t("workflow.parse.matchingNodes") });
+      set({ parseProgress: "workflow.parse.matchingNodes" });
 
       type GenerationResult = {
         nodes: unknown[];
@@ -1080,15 +1119,16 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
   },
 
   setParsingProgress: (progress: string) => {
+    // progress 为 i18n key，见 `parseProgress` 字段与 `NL_PARSE_PROGRESS` 的说明
     set({ parseProgress: progress });
   },
 
   // ========== NL2Skill ==========
 
   parseSkillFromNaturalLanguage: async (request: NL2SkillRequest) => {
-    set({ isParsing: true, parseProgress: t("workflow.parse.intentAnalysis") });
+    set({ isParsing: true, parseProgress: "workflow.parse.intentAnalysis" });
     try {
-      set({ parseProgress: t("workflow.parse.generating") });
+      set({ parseProgress: "workflow.parse.generating" });
       const backendResult = await invoke<{
         skill: import("@/types").SkillDefinition;
         confidence: number;
@@ -1098,7 +1138,7 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
         prompt: request.prompt,
         skillType: request.skillType ?? "chat",
       });
-      set({ isParsing: false, parseProgress: t("workflow.parse.complete") });
+      set({ isParsing: false, parseProgress: "workflow.parse.complete" });
       return {
         skill: backendResult.skill,
         confidence: backendResult.confidence,
@@ -1112,7 +1152,7 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
       } satisfies NL2SkillResult;
     } catch (e) {
       logIpcError("parseSkillFromNaturalLanguage: generate_skill_from_prompt")(e);
-      set({ isParsing: false, parseProgress: t("workflow.parse.complete") });
+      set({ isParsing: false, parseProgress: "workflow.parse.complete" });
       throw e;
     }
   },
@@ -1120,9 +1160,9 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
   // ========== NL2UI ==========
 
   parseUIFromNaturalLanguage: async (request: NL2UIRequest) => {
-    set({ isParsing: true, parseProgress: t("workflow.parse.intentAnalysis") });
+    set({ isParsing: true, parseProgress: "workflow.parse.intentAnalysis" });
     try {
-      set({ parseProgress: t("workflow.parse.generating") });
+      set({ parseProgress: "workflow.parse.generating" });
       const backendResult = await invoke<{
         schema: import("@/types/dynamicUI").UISchema;
         confidence: number;
@@ -1132,7 +1172,7 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
         prompt: request.prompt,
         uiType: request.uiType ?? "form",
       });
-      set({ isParsing: false, parseProgress: t("workflow.parse.complete") });
+      set({ isParsing: false, parseProgress: "workflow.parse.complete" });
       return {
         schema: backendResult.schema,
         confidence: backendResult.confidence,
@@ -1146,7 +1186,7 @@ export const useWorkflowStore = create<WorkflowStoreState>((set, get) => ({
       } satisfies NL2UIResult;
     } catch (e) {
       logIpcError("parseUIFromNaturalLanguage: generate_ui_from_prompt")(e);
-      set({ isParsing: false, parseProgress: t("workflow.parse.complete") });
+      set({ isParsing: false, parseProgress: "workflow.parse.complete" });
       throw e;
     }
   },

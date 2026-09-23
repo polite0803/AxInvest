@@ -56,6 +56,16 @@ pub mod usage_pricing;
 pub use usage_pricing::{
     ModelPricing, UsageCostEstimate, cost_for_tokens, format_usd, pricing_for_model,
 };
+
+// ── 外部依赖调用指标（LLM / 行情 vendor）──
+// D5：这两条外部依赖此前只有日志没有指标，回答不了「近 24h 成功率 / 降级次数」。
+// 注册表**必须**落在 harness —— `axagent-telemetry` 依赖本 crate，注册表若放
+// telemetry，本 crate 的 LLM 收口点引用它会形成 crate 环；本模块零 `axagent_*`
+// 依赖，同时满足 `scripts/check-layer-discipline.mjs` 规则 3（harness 扇出锁 0）。
+// 不在此 re-export：`snapshot` / `record_llm_call` 等名字过于通用，放 crate 根
+// 会污染命名空间，调用方一律走 `dependency_metrics::` 全路径。
+pub mod dependency_metrics;
+
 pub mod core_error;
 pub mod error_codes;
 pub mod orchestration_dispatch;
@@ -468,7 +478,7 @@ pub use npm_registry::{NpmRegistryService, parse_npm_package_spec};
 // ── RhaiEngine 契约重导出 ──
 pub use rhai_engine::{
     RhaiEngineAdapter, RhaiToolFn, dynamic_to_json_value, json_value_to_dynamic,
-    register_common_functions,
+    register_common_functions, register_ontology_functions,
 };
 
 // ── Planner 契约重导出 ──
@@ -922,7 +932,7 @@ pub mod device_sync;
 pub use device_sync::{
     ChangeLogEntry, ChangeOperation, ConflictInfo, ConflictResolutionStrategy, DeviceInfo,
     DeviceManager, DeviceSyncStatus, DeviceType, EntityType, PairingCode, PairingRequest,
-    PairingResponse, SyncEngine, SyncResult, TrustLevel, VersionVectorEntry,
+    PairingResponse, SyncEngine, SyncResult, TrustLevel, VersionVector, VersionVectorEntry,
 };
 
 // ── 域包编排契约（让 analysis-engine 等 consumer 不依赖 orchestrator） ──

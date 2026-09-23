@@ -47,7 +47,19 @@ pub struct ObjectiveScore {
     pub rsi_score: u32,
     pub support_score: u32,
     pub boll_score: u32,
-    #[serde(rename = "fundamentalAdjustment")]
+    /// 基本面调整（PE / PB / ROE）—— 由 `apply_fundamental_adjustment` 写入。
+    pub fundamental_adjustment: i32,
+    /// 行业相对估值调整（个股 PE/PB 相对行业中位数的偏离）——
+    /// 由 `apply_industry_adjustment` 写入。2026-09-21 新增。
+    #[serde(default)]
+    pub industry_adjustment: i32,
+    /// 合计调整 = `fundamental_adjustment + industry_adjustment`；`total` 实际加减的就是它。
+    ///
+    /// 2026-09-21 拆字段：此前**只有一个** `fundamentalAdjustment` 字段同时承载两个来源
+    /// （两个 `apply_*` 都往它累加）⇒ 字段名给了 LLM 一个**错的归因**（它会把自己与行业的
+    /// 相对估值偏离读成「基本面调整」）。拆后 `total` 的**数值完全不变**，只是让 LLM
+    /// 可自查恒等式 `totalAdjustment == fundamentalAdjustment + industryAdjustment`。
+    #[serde(default)]
     pub total_adjustment: i32,
     pub signal: String,
     pub signal_code: String,
@@ -150,6 +162,8 @@ impl ScoringEngine {
             rsi_score: rsi,
             support_score: support,
             boll_score: boll,
+            fundamental_adjustment: 0,
+            industry_adjustment: 0,
             total_adjustment: 0,
             signal: signal.to_string(),
             signal_code: signal_code.to_string(),
@@ -157,6 +171,10 @@ impl ScoringEngine {
     }
 
     /// 基本面调整：根据 PE / PB / ROE 对客观评分做增量调整
+    ///
+    /// 入参三态（2026-09-21 明确）：`pe` / `pb` 由调用方以 `unwrap_or(0.0)` 传入，
+    /// 故 **`0.0` 表示「上游未取到」**（不调整）；**负值表示企业亏损 / 净资产为负**
+    /// （显式扣分）。两者语义不同，不可合并成一个「<= 0」判据。
     pub fn apply_fundamental_adjustment(
         score: &mut ObjectiveScore,
         pe: f64,
@@ -164,14 +182,34 @@ impl ScoringEngine {
         roe: Option<f64>,
     ) {
         let mut adj: i32 = 0;
+        // ⚠ 两个来源**语义不同、后果同档**，故合并进一个判据：
+        //     · `pe > 50.0` —— 估值过高；
+        //     · `pe < 0.0`  —— **亏损企业**（EPS < 0 ⇒ PE 无市盈率含义），2026-09-21 新增。
+        //   两者都是「PE 不可用于估值」⇒ 同扣 −5。
+        //   `pe < 0.0` 这条改动前**不存在**：负 PE 两个分支都不命中 ⇒ 既不加分也不扣分，
+        //   等于把「亏损」与「无数据」同等对待。而负 PE 此前根本到不了这里（上游 vendor
+        //   用 `filter(|v| *v > 0.0)` 把它抹成 None ⇒ 调用方 `unwrap_or(0.0)`），
+        //   是 2026-09-21 放开负 PE 之后才必须显式守卫。
+        //   量纲刻意与 `pe > 50.0` 同档，不取更重值，以免与下方 `roe < 5.0` 重复叠加。
+        // ⚠ `pe == 0.0` 落在两个条件之外 ⇒ **不调整**。那是调用方 `unwrap_or(0.0)` 造出的
+        //   「上游未取到」占位，与「亏损」是两码事 —— **不可合流**（合流会把缺数据当亏损扣分）。
+        //
+        // 写法说明（2026-09-21）：`pe > 50.0 || pe < 0.0` 触发 `clippy::manual_range_contains`
+        //   （CI 用 `-D warnings` ⇒ 必红），而 lint 建议的 `!(0.0..=50.0).contains(&pe)`
+        //   **单独用会改 NaN 语义**：`RangeInclusive::contains` 对 NaN 恒 `false`
+        //   ⇒ NaN 被判成「估值过高」扣分；原式两个严格不等号都不命中 ⇒ 不调整。
+        //   故显式补 `!pe.is_nan()` 保持逐情形等价（`pe == 0.0` 仍落在区间内 ⇒ 不调整，
+        //   与上文「占位」语义一致；±INF 两侧同为「扣分」）。
         if pe > 0.0 && pe < 15.0 {
             adj += 5;
-        } else if pe > 50.0 {
+        } else if !(0.0..=50.0).contains(&pe) && !pe.is_nan() {
             adj -= 5;
         }
+        // 同上：`pb > 5.0` 估值过高；`pb < 0.0` 净资产为负（资不抵债，2026-09-21 新增）。
+        // `pb == 0.0` 仍表「上游未取到」，不调整；`!pb.is_nan()` 的理由见上方写法说明。
         if pb > 0.0 && pb < 1.5 {
             adj += 3;
-        } else if pb > 5.0 {
+        } else if !(0.0..=5.0).contains(&pb) && !pb.is_nan() {
             adj -= 3;
         }
         if let Some(r) = roe {
@@ -181,6 +219,7 @@ impl ScoringEngine {
                 adj -= 3;
             }
         }
+        score.fundamental_adjustment += adj;
         score.total_adjustment += adj;
         score.total = (score.total as i32 + adj).clamp(0, 100) as u32;
     }
@@ -212,6 +251,7 @@ impl ScoringEngine {
                 }
             }
         }
+        score.industry_adjustment += adj;
         score.total_adjustment += adj;
         score.total = (score.total as i32 + adj).clamp(0, 100) as u32;
     }
@@ -379,5 +419,91 @@ mod tests {
         let weights = ScoringWeights { trend: 40.0, ..Default::default() };
         let score = ScoringEngine::score(&ind, 150.0, Some(&weights));
         assert!(score.total > 0 && score.total <= 100);
+    }
+
+    /// 2026-09-21 新增（A 修复）：**亏损必须扣分，而「未取到」必须不调整** ——
+    /// `pe == 0.0` 是调用方 `unwrap_or(0.0)` 造出的缺失占位，`pe < 0.0` 才是亏损。
+    /// 两者曾被同一个「不命中任何档」的行为掩盖成一样。
+    #[test]
+    fn test_fundamental_adjustment_loss_vs_missing_pe() {
+        let ind = make_indicators("多头排列", 0.5, "金叉", 0.5, "放量上涨", 55.0, "中轨附近");
+        let adj = |pe: f64| {
+            let mut s = ScoringEngine::score(&ind, 150.0, None);
+            ScoringEngine::apply_fundamental_adjustment(&mut s, pe, 0.0, None);
+            s.fundamental_adjustment
+        };
+        assert_eq!(adj(0.0), 0, "pe=0.0 表示上游未取到，不得产生调整");
+        assert_eq!(adj(-144.08), -5, "亏损企业（负 PE）应扣 5 分");
+        // 正控：原有分档不得被新守卫吃掉
+        assert_eq!(adj(12.0), 5, "低 PE 仍应 +5");
+        assert_eq!(adj(80.0), -5, "过高 PE 仍应 −5");
+    }
+
+    /// 2026-09-21 新增：净资产为负（`pb < 0`）扣分；`pb = 0.0` 仍表缺失、不调整。
+    #[test]
+    fn test_fundamental_adjustment_negative_pb() {
+        let ind = make_indicators("多头排列", 0.5, "金叉", 0.5, "放量上涨", 55.0, "中轨附近");
+        let adj = |pb: f64| {
+            let mut s = ScoringEngine::score(&ind, 150.0, None);
+            ScoringEngine::apply_fundamental_adjustment(&mut s, 0.0, pb, None);
+            s.fundamental_adjustment
+        };
+        assert_eq!(adj(0.0), 0, "pb=0.0 表示上游未取到，不得产生调整");
+        assert_eq!(adj(-1.5), -3, "净资产为负应扣 3 分");
+        // 正控
+        assert_eq!(adj(1.0), 3, "低 PB 仍应 +3");
+        assert_eq!(adj(9.0), -3, "过高 PB 仍应 −3");
+    }
+
+    /// 2026-09-21 新增：NaN / ±INF / 区间端点与「严格不等号原式」逐情形等价。
+    ///
+    /// 背景：`clippy::manual_range_contains` 要求把 `pe > 50.0 || pe < 0.0` 改写成
+    /// `!(0.0..=50.0).contains(&pe)`，但 `RangeInclusive::contains` 对 NaN 恒 `false`
+    /// ⇒ **单独用会把 NaN 判成「估值过高」而扣分**（原式两个严格不等号都不命中 ⇒ 不调整）。
+    /// 生产代码为此显式补了 `!pe.is_nan()`；本测试就是那条 `!is_nan()` 的回归防线 ——
+    /// 谁把它当冗余删掉，这里立刻红。
+    #[test]
+    fn test_fundamental_adjustment_nan_and_inf() {
+        let ind = make_indicators("多头排列", 0.5, "金叉", 0.5, "放量上涨", 55.0, "中轨附近");
+        let adj = |pe: f64, pb: f64| {
+            let mut s = ScoringEngine::score(&ind, 150.0, None);
+            ScoringEngine::apply_fundamental_adjustment(&mut s, pe, pb, None);
+            s.fundamental_adjustment
+        };
+        // NaN = 脏数据：既非「估值过高」亦非「亏损」⇒ 不调整
+        assert_eq!(adj(f64::NAN, 0.0), 0, "NaN 不得被当成估值过高扣分");
+        assert_eq!(adj(0.0, f64::NAN), 0, "NaN 不得被当成净资产为负扣分");
+        // ±INF = 上面两个 0 的构造性对照，证明不是「所有异常值都不调整」
+        assert_eq!(adj(f64::INFINITY, 0.0), -5, "+INF 属估值过高 ⇒ −5");
+        assert_eq!(adj(f64::NEG_INFINITY, 0.0), -5, "−INF 属亏损 ⇒ −5");
+        // 区间端点必须不影响「占位」语义：0.0 仍落在 [0,50] 内 ⇒ 不调整
+        assert_eq!(adj(50.0, 0.0), 0, "PE=50 恰在端点内 ⇒ 不调整");
+        assert_eq!(adj(15.0, 0.0), 0, "PE=15 属不调整带 ⇒ 不调整");
+    }
+
+    /// 2026-09-21 新增（拆字段）：三个调整字段必须**各归其位** ——
+    /// 这是唯一能自动发现「基本面与行业又被合并回一个字段」的地方
+    /// （合并后 `total` 的数值照样正确，LLM 拿到的归因却是错的，其它测试都不会红）。
+    #[test]
+    fn test_adjustment_components_are_attributed_separately() {
+        let ind = make_indicators("多头排列", 0.5, "金叉", 0.5, "放量上涨", 55.0, "中轨附近");
+        let mut s = ScoringEngine::score(&ind, 150.0, None);
+
+        // 只打基本面：PE=12 ⇒ +5（`0 < pe < 15`）；PB=1.0 ⇒ +3（`0 < pb < 1.5`）。
+        ScoringEngine::apply_fundamental_adjustment(&mut s, 12.0, 1.0, None);
+        assert_eq!(s.fundamental_adjustment, 8, "PE=12 应 +5、PB=1.0 应 +3");
+        assert_eq!(s.industry_adjustment, 0, "未调用行业调整 ⇒ 该分量必须保持 0");
+        assert_eq!(s.total_adjustment, 8, "合计 = 基本面 + 行业");
+
+        // 再打行业：PE=12 vs 行业中位 30（12 < 30*0.8 = 24）⇒ +4；
+        // PB=1.0 vs 行业中位 3.0（1.0 < 3.0*0.8 = 2.4）⇒ +3。
+        ScoringEngine::apply_industry_adjustment(&mut s, 12.0, Some(30.0), 1.0, Some(3.0));
+        assert_eq!(s.fundamental_adjustment, 8, "行业调整不得污染基本面分量");
+        assert_eq!(s.industry_adjustment, 7, "行业分量应为 +4(PE) 与 +3(PB)");
+        assert_eq!(
+            s.total_adjustment,
+            s.fundamental_adjustment + s.industry_adjustment,
+            "恒等式：totalAdjustment == fundamentalAdjustment + industryAdjustment"
+        );
     }
 }

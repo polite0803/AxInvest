@@ -137,7 +137,6 @@ pub fn generate_capability_pack_template_data(
                     max_tool_rounds: Some(3),
                     execution_mode: None,
                     rag_source_ids: Vec::new(),
-                    model_role: None,
                     consistency_check: None,
                     hallucination_guard: None,
                     fallback_model: None,

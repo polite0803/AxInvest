@@ -141,13 +141,38 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
 2. **clippy 遇首个 error 即短路** —— 后续 crate **从未被检查**。**不可**由「只有 N 个 error」
    推定其余 crate 干净；修完必须**全量重跑**（同日实测：定点 `-p axagent-analysis-engine` 已
    `EXIT=0`，全量才让 `items_after_test_module` 那处浮出来 —— 它在首跑时被前一个 error 挡在后面）。
-3. **提交前三条门禁缺一不可**：
+   ⚠ **改注释也会触发 lint**：`doc_lazy_continuation` 管的是 `///` 列表项的续行缩进，纯文档改动同样
+   让 clippy 红（2026-09-21 实测：`commands/stock_workflow/decision.rs:1265` 一处 `///   ⇒` 缩进 2
+   而内容列是 4 —— 该违规在第二轮写的，直到第三次全量重跑、clippy 首次推进到主 crate 才浮出来）。
+3. **提交前三条门禁缺一不可 —— 且必须按 CI 口径跑**（与 `.github/workflows/ci.yml` 逐字一致）：
 
    ```
-   cargo fmt --check
-   cargo clippy --workspace --all-targets -- -D warnings
+   cargo fmt --all --check
+   cargo clippy --workspace --all-targets --all-features -- -D warnings
    __TAURI_WORKSPACE__=true cargo test --workspace
    ```
+
+   ⚠ **两条易漏的覆盖面差异（2026-09-21 实测）—— 「本地绿」≠「CI 绿」**：
+
+   - **`cargo fmt --check` 不带 `--all` 只格式化根 package** —— `crates/*`（36 个 workspace
+     成员，本仓大部分逻辑在此）**完全不被检查**。实测：`--check` 为 `EXIT=0`（绿），而
+     `--all --check` 报 4 处 diff，且**全在 `crates/` 下**。CI 已补 `--all`。
+   - **`clippy` 不带 `--all-features` 只 lint 默认 feature 组合** ⇒ feature-gated 的代码路径
+     （`computer-use` / `notification` 等）从未被检查。CI 带 `--all-features`，本地须对齐。
+
+   ⇒ 判据：**门禁命令的覆盖面本身就是门禁的一部分**。抄命令时连同参数一起抄，别只抄动词。
+
+**两个 lint 连锁陷阱（2026-09-21 实测）**：
+
+- **躲一个 lint 会撞上另一个**。合并同体分支前，必须先确认「合并后的形式」本身 lint-clean。
+  实测：`crates/astock-data/src/scoring.rs` 的 `else if pe > 50.0 {}` 与 `else if pe < 0.0 {}`
+  两个 then 块同体 ⇒ 为躲 `clippy::if_same_then_else` 改写成 `pe > 50.0 || pe < 0.0`
+  ⇒ **当场撞上 `clippy::manual_range_contains`**（全量 clippy `-D warnings` 报 2 个 error）。
+- **lint 的机械建议会改语义**。`manual_range_contains` 建议 `!(0.0..=50.0).contains(&pe)`，
+  但 `RangeInclusive::contains` 对 **NaN 恒 `false`** ⇒ 单独套用会把 NaN 判成「越界扣分」；
+  而原式 `pe > 50.0 || pe < 0.0` 对 NaN 两个不等号都不命中 ⇒ 判成「不调整」。
+  **浮点判据套用 lint 建议时必须单独验 NaN / ±INF，它不是纯等价改写**
+  （本例补 `&& !pe.is_nan()` 才逐情形等价，另有 `test_fundamental_adjustment_nan_and_inf` 锁住）。
 
 **合法例外**：不跨 await 的同步临界区可标注 `#[allow(clippy::disallowed_types)]` + `// SAFETY:`
 注释（模板见 `clippy.toml` 头部，全仓已有先例，如 `crates/harness/src/test_support.rs`）。

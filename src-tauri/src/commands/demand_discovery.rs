@@ -309,7 +309,11 @@ async fn send_high_value_notification(
         return;
     }
 
+    // count / titles 均只用于下方 `not(mobile)` 的桌面通知 body ⇒ 一并纳入非 mobile编译，
+    // 否则 Android(mobile) 下为未使用变量触发 `unused_variables` 警告。
+    #[cfg(not(mobile))]
     let count = high_value_leads.len();
+    #[cfg(not(mobile))]
     let titles: Vec<String> = high_value_leads
         .iter()
         .take(3)

@@ -10,6 +10,9 @@ pub mod backtest_strategy;
 pub mod blackboard;
 pub mod dashboard_report;
 pub mod data_clean;
+// 股票分析「维度定义」目录（批2）：把硬编码 SubTask 清单配置化，YAML 编译期内嵌
+pub mod dimension_catalog;
+pub use dimension_catalog::{DimensionCatalog, StockDimensionDef, StrategyDimensionSet};
 pub mod decision;
 // 权威定义已上移至 harness（共享契约层）。此处 re-export 保留 `crate::decision_action::*`
 // 与 `axagent_analysis_engine::decision_action::*` 两个旧路径，消费端零改动。
@@ -63,6 +66,8 @@ pub mod prompts;
 // 原为死代码，无任何外部调用）
 pub mod recommender;
 pub mod reflection_lesson_validator;
+// PLAN-stock-decision-hitrate-validation M2：反思命中率聚合（消费 strategy_performance）
+pub mod reflection_stats;
 pub mod report;
 pub mod review;
 pub mod risk;

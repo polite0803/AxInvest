@@ -46,20 +46,58 @@ use axagent_entities::market_mainlines as ml_entity;
 // ── DTO ───────────────────────────────────────────────────────────────────
 
 /// 创建市场主线的输入（工作流 persist_to_db 节点 / 手动创建）
+///
+/// ## ⚠ 为什么每个多词字段都要 `alias`（2026-09-20 实证）
+///
+/// 本结构体对**外**的 serde 契约是 camelCase（历史约定，前端 `invoke` 走这条），
+/// 但**实际的写入方是 LLM**，它读的是提示词里的示例：
+///
+/// - `agency_experts/skills/market-mainline/SKILL.md` 的 JSON 示例
+/// - `agency_experts/stock-analysis/market-synthesizer.md` 的 JSON 示例
+///
+/// 两处示例**全都是 snake_case**（`mainline_date` / `theme_category` /
+/// `representative_symbols` / `strength_score`）。而本结构体**没有**
+/// `deny_unknown_fields` ⇒ snake_case 的键既匹配不上、也**不报错**，
+/// 直接被丢弃并回落到 `#[serde(default)]`：
+///
+/// | 字段 | snake_case 传入 | 静默回落 | 后果 |
+/// |---|---|---|---|
+/// | `theme_category` | `theme_category` | `"其他"` | 主题分类全丢 |
+/// | `representative_symbols` | `representative_symbols` | `[]` | **标的列表全丢** |
+/// | `strength_score` | `strength_score` | `0.0` | 强度全部归零 |
+/// | `persistence` | 单词，无歧义 | — | — |
+///
+/// 即"写入成功、数据全错"，且**无任何告警**。故此处给每个多词字段补 snake_case
+/// `alias`：加性扩宽，两种写法都收，既有 camelCase 调用行为不变。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateMainlineInput {
+    /// 主线日期
+    ///
+    /// ⚠️ **可省略**（`#[serde(default)]`，2026-09-20 改）：本结构体被两处复用 ——
+    /// ① 单条创建（`create_mainline`，此处必须有值）；
+    /// ② 批量 upsert 的**逐项**载体（`BatchUpsertInput.mainlines`）—— 日期由**外层**
+    ///    `BatchUpsertInput.mainline_date` 提供，`batch_upsert_mainlines` 对插入与更新
+    ///    两路都写外层日期，**逐项值被忽略**。
+    ///
+    /// 改前它是「必填且无默认」⇒ 照提示词示例调用会直接报错而**整批失败**：两处示例
+    /// （`market-mainline/SKILL.md:116-134`、`market-synthesizer.md:27-46`）的
+    /// `mainlines[]` 项里**都不含** `mainline_date` —— 即「工具按文档根本用不了」。
+    /// 这正是「必填字段被下游静默丢弃」的形态：解析期强制调用方提供一个随后被扔掉的值。
+    ///
+    /// 空值仍被拒绝（见 `ensure_date_non_empty`），不会写出 `mainline_date=''` 的行。
+    #[serde(default, alias = "mainline_date")]
     pub mainline_date: String,
     pub theme: String,
     /// 主题大类（科技 / 消费 / 周期 / 金融 / 医药 / 政策 / 其他），默认 "其他"
-    #[serde(default = "default_category")]
+    #[serde(default = "default_category", alias = "theme_category")]
     pub theme_category: String,
     pub narrative: String,
     /// 代表性标的列表（序列化为 JSON 存入 representative_symbols 字段）
-    #[serde(default)]
+    #[serde(default, alias = "representative_symbols")]
     pub representative_symbols: Vec<String>,
     /// 强度评分 0-100，默认 0
-    #[serde(default)]
+    #[serde(default, alias = "strength_score")]
     pub strength_score: f64,
     /// 持续性判断，默认 "1d"
     #[serde(default = "default_persistence")]
@@ -68,6 +106,7 @@ pub struct CreateMainlineInput {
     #[serde(default)]
     pub evidence: serde_json::Value,
     /// 来源工作流执行 ID（可空）
+    #[serde(alias = "source_workflow_execution_id")]
     pub source_workflow_execution_id: Option<String>,
 }
 
@@ -79,14 +118,37 @@ fn default_persistence() -> String {
     "1d".to_string()
 }
 
+/// 主线日期非空校验。
+///
+/// 为什么需要它：`CreateMainlineInput.mainline_date` 与 `BatchUpsertInput.mainline_date`
+/// 都带 `#[serde(default)]`（前者的理由见字段文档），serde 的 `default` **只保证「能解析」**、
+/// 不保证「值有意义」⇒ 不校验就会写出 `mainline_date=''` 的行，而这类行既查不到（按日期
+/// 查询恒 miss）也不报错 —— 「写入成功、数据全错」。
+///
+/// 放在 crate 层（而非命令层）是因为**两个入口共用同一不变量**：命令层
+/// （`commands/market_mainline.rs`）与工作流工具层（`crates/tools/.../market_mainline.rs`）。
+fn ensure_date_non_empty(mainline_date: &str) -> Result<(), DbErr> {
+    if mainline_date.trim().is_empty() {
+        return Err(DbErr::Custom(
+            "mainline_date 不能为空（批量场景请在外层 BatchUpsertInput.mainline_date 提供）"
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// 更新主线状态的输入
+///
+/// `alias` 的理由同 [`CreateMainlineInput`]（提示词契约是 snake_case）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateMainlineInput {
+    #[serde(alias = "mainline_id")]
     pub mainline_id: String,
     /// 新状态（active / fading / archived），None 不更新
     pub status: Option<String>,
     /// 新强度评分，None 不更新
+    #[serde(alias = "strength_score")]
     pub strength_score: Option<f64>,
     /// 新持续性判断，None 不更新
     pub persistence: Option<String>,
@@ -95,15 +157,22 @@ pub struct UpdateMainlineInput {
 }
 
 /// 批量 upsert 输入（工作流 synthesize_mainlines 节点输出多条主线时使用）
+///
+/// `archive_missing` 的 `alias` 尤其关键：`seed_daily_market_events.rs` 的 Agent 提示词
+/// 明写「调用 `market_mainline_batch_upsert` 工具持久化结果（**archive_missing**=true）」，
+/// 而本字段的 camelCase 名是 `archiveMissing` ⇒ 不补 alias 时该参数被静默丢弃，
+/// 「归档当日未提及主线」这一步**永不执行**（`#[serde(default)]` 落回 false）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchUpsertInput {
+    #[serde(alias = "mainline_date")]
     pub mainline_date: String,
     pub mainlines: Vec<CreateMainlineInput>,
     /// 是否清除当日已有但本次未提及的主线（true → status=archived）
-    #[serde(default)]
+    #[serde(default, alias = "archive_missing")]
     pub archive_missing: bool,
     /// 来源工作流执行 ID
+    #[serde(alias = "source_workflow_execution_id")]
     pub source_workflow_execution_id: Option<String>,
 }
 
@@ -123,6 +192,7 @@ pub async fn create_mainline(
     db: &DatabaseConnection,
     input: CreateMainlineInput,
 ) -> Result<ml_entity::Model, DbErr> {
+    ensure_date_non_empty(&input.mainline_date)?;
     let now = chrono::Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
     let symbols_json =
@@ -266,6 +336,7 @@ pub async fn batch_upsert_mainlines(
     db: &DatabaseConnection,
     input: BatchUpsertInput,
 ) -> Result<BatchUpsertResult, DbErr> {
+    ensure_date_non_empty(&input.mainline_date)?;
     let now = chrono::Utc::now().timestamp_millis();
     let existing = list_mainlines_by_date(db, &input.mainline_date).await?;
     let mut existing_by_theme: std::collections::HashMap<String, ml_entity::Model> =
@@ -391,5 +462,49 @@ mod tests {
         assert_eq!(parsed.theme, "AI 算力");
         assert_eq!(parsed.representative_symbols.len(), 2);
         assert_eq!(parsed.strength_score, 85.0);
+    }
+
+    /// ★ 回归锚点：**提示词示例必须能原样解析**。
+    ///
+    /// 下面这段 JSON 逐字取自 `agency_experts/skills/market-mainline/SKILL.md:116-134`
+    /// （`market-synthesizer.md:27-46` 同形），其 `mainlines[]` 项**不含** `mainline_date`。
+    /// 改前 `CreateMainlineInput.mainline_date` 是必填 ⇒ 这段会 `missing field` 失败 ⇒
+    /// 模型照文档调用**整批报错**（「工具按文档用不了」）。本测试钉住该契约不再回退。
+    #[test]
+    fn documented_prompt_example_parses() {
+        let documented = r#"{
+          "mainline_date": "2026-07-26",
+          "mainlines": [
+            {
+              "theme": "AI 算力",
+              "theme_category": "科技",
+              "narrative": "英伟达 CapEx 上修，国产光模块订单超预期",
+              "representative_symbols": ["300308", "002281", "300502", "688256"],
+              "strength_score": 88,
+              "persistence": "1w",
+              "evidence": { "limit_up_count": 6, "north_bound_net": 15.2 }
+            }
+          ]
+        }"#;
+        let p: BatchUpsertInput =
+            serde_json::from_str(documented).expect("提示词示例必须可解析（否则工具按文档不可用）");
+        assert_eq!(p.mainline_date, "2026-07-26");
+        assert_eq!(p.mainlines.len(), 1);
+        // 逐项日期被省略 ⇒ 落默认空串（真实日期由外层 `mainline_date` 提供）
+        assert_eq!(p.mainlines[0].mainline_date, "");
+        // snake_case 的四个多词键必须被收下（别名生效；漏掉会静默回落默认值）
+        assert_eq!(p.mainlines[0].theme_category, "科技");
+        assert_eq!(p.mainlines[0].strength_score, 88.0);
+        assert_eq!(p.mainlines[0].representative_symbols.len(), 4);
+        assert!(p.mainlines[0].evidence.is_object(), "evidence 不得回落成 null");
+    }
+
+    /// 负对照：空日期必须被拒 —— 证明 `ensure_date_non_empty` 真的会拦，
+    /// 而不是一条恒 Ok 的空断言（否则会静默写出 `mainline_date=''` 的行）。
+    #[test]
+    fn empty_date_is_rejected() {
+        assert!(ensure_date_non_empty("").is_err(), "空串必须被拒");
+        assert!(ensure_date_non_empty("   ").is_err(), "纯空白必须被拒");
+        assert!(ensure_date_non_empty("2026-07-26").is_ok(), "正常日期必须通过");
     }
 }

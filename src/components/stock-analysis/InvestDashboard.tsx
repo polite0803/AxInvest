@@ -1,6 +1,7 @@
 import { useStockJump } from "@/hooks/useStockJump";
 import i18n from "@/i18n";
 import { invoke } from "@/lib/invoke";
+import { getActionColor, getActionTKey } from "@/lib/stock-analysis-utils";
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Card, Table, Tag, Typography } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -218,8 +219,13 @@ export function InvestDashboard() {
                 render: (v: string | null) =>
                   v
                     ? (
-                      <Tag className="m-0 text-[10px]" color={v === "BUY" ? "red" : v === "SELL" ? "green" : "blue"}>
-                        {v}
+                      // 2026-09-21: 原判据 `v === "BUY" ? "red" : v === "SELL" ? "green" : "blue"` 有两重错：
+                      //   ① 后端 `decisionAction` 落库是**中文**（「买入/增持/…」）⇒ 恒落 blue；
+                      //   ② 即便输入英文，配色表也与权威 `getActionColor` 不同（缺 WAIT 档，且它按
+                      //      A 股涨跌色 BUY=red / SELL=green）。
+                      //   同时 `{v}` 为裸渲染 ⇒ 切语言后中文乱入。现颜色与文案均走权威单点。
+                      <Tag className="m-0 text-[10px]" color={getActionColor(v)}>
+                        {t(getActionTKey(v))}
                       </Tag>
                     )
                     : <span className="text-xs text-gray-400">—</span>,

@@ -8,7 +8,7 @@
  */
 
 import { invoke } from "@/lib/invoke";
-import { parseAction, parseRiskLevel } from "@/lib/stock-analysis-utils";
+import { parseAction, parseRiskLevel, StockRiskLevel } from "@/lib/stock-analysis-utils";
 import { type ExperimentRecord, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { Button, InputNumber, Select, Slider } from "antd";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -44,13 +44,25 @@ function computeDecision(params: WhatIfParams): {
 } {
   const consensusAdj = ((params.consensusScore - 50) / 100) * 10;
   const dqiAdj = ((params.dqiScore - 50) / 100) * 5;
-  const riskAdj = params.overallRisk === "低"
-    ? 5
-    : params.overallRisk === "高"
-    ? -5
-    : params.overallRisk === "极高"
-    ? -10
-    : 0;
+  // 2026-09-21: 判据改走 `parseRiskLevel` 归一化。本文件 L156 早已对 `result.riskLevel`
+  //   归一化，唯独此处用**严格短词比较** —— 而 `params.overallRisk` 有两个来源：
+  //   ① 用户下拉给的短词（"低"/"中"/"高"/"极高"，见下方 Select 的 options）；
+  //   ② 从后端决策回填的 `decision.riskLevel` 长词（"低风险"/"高风险"/"极高风险"）。
+  //   来源 ② 在严格比较下**全部落 default ⇒ 风险调整静默取 0**（既不加也不减），
+  //   于是同一条记录经「前端下拉」与「后端回填」两条路径会算出**不同的 confidence**。
+  //   归一化后两套值域同判据，且 `MID` ⇒ 0 与原 default 行为一致。
+  const riskAdj = (() => {
+    switch (parseRiskLevel(params.overallRisk)) {
+      case StockRiskLevel.LOW:
+        return 5;
+      case StockRiskLevel.HIGH:
+        return -5;
+      case StockRiskLevel.EXTREME:
+        return -10;
+      default:
+        return 0;
+    }
+  })();
   const catBonus = params.catalystLevel === "L3估值体系级"
     ? 12
     : params.catalystLevel === "L2业绩拐点级"

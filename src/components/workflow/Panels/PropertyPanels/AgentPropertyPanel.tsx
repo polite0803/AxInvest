@@ -698,34 +698,6 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
         />
       </div>
 
-      <div>
-        <label
-          style={{
-            display: "block",
-            color: token.colorTextTertiary,
-            fontSize: 12,
-            marginBottom: 4,
-          }}
-        >
-          {t("workflow.props.modelRole")}
-        </label>
-        <Select
-          value={config.modelRole || undefined}
-          onChange={(value) => handleConfigChange("modelRole", value || undefined)}
-          size="small"
-          style={{ width: "100%" }}
-          allowClear
-          placeholder={t("workflow.props.modelRolePlaceholder")}
-          options={[
-            { value: "quick_think", label: t("workflow.props.modelRoleQuickThink") },
-            { value: "deep_think", label: t("workflow.props.modelRoleDeepThink") },
-          ]}
-        />
-        <div style={{ fontSize: 11, color: token.colorTextTertiary, marginTop: 2 }}>
-          {t("workflow.props.modelRoleHint")}
-        </div>
-      </div>
-
       <div style={{ display: "flex", gap: 8 }}>
         <div style={{ flex: 1 }}>
           <label

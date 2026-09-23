@@ -4,6 +4,7 @@
 // 对接 usePaperStore，提供概览列表查看、详情展示与删除、Prompt 生成能力
 
 import { List } from "@/components/common/AntdList";
+import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { useKnowledgeStore, usePaperStore } from "@/stores";
 import type { PaperOverview } from "@/types";
@@ -26,7 +27,7 @@ function OverviewDetail({ overview }: { overview: PaperOverview }) {
       await deleteOverview(overview.id);
       message.success(t("paper.deleteSuccess"));
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     }
   }, [overview.id, deleteOverview, t]);
 
@@ -38,7 +39,7 @@ function OverviewDetail({ overview }: { overview: PaperOverview }) {
       await navigator.clipboard.writeText(prompt);
       message.success(t("knowledgeGraph.copySuccess"));
     } catch (e) {
-      message.error(String(e));
+      showBackendError(message, e);
     } finally {
       setPromptLoading(false);
     }
@@ -230,7 +231,7 @@ export function PaperOverviewPanel() {
             await navigator.clipboard.writeText(prompt);
             message.success(t("knowledgeGraph.copySuccess"));
           } catch (e) {
-            message.error(String(e));
+            showBackendError(message, e);
           }
         },
       });

@@ -160,40 +160,8 @@ let score_bottleneck = || {
 
     for node in chain_nodes {
         let nn = if node["node_name"] != () { node["node_name"].to_string() } else { "未知" };
-        let sc = if node["global_supplier_count"] != () { node["global_supplier_count"] } else { -1.0 };
-        let t3 = if node["top3_market_share"] != () { node["top3_market_share"] } else { -1.0 };
-        let exp = if node["expansion_cycle_months"] != () { node["expansion_cycle_months"] } else { -1.0 };
-        let bar = if node["tech_barrier"] != () { node["tech_barrier"].to_string() } else { "low" };
-        let dc = if node["demand_validation"] != () && node["demand_validation"]["demand_certainty"] != () { node["demand_validation"]["demand_certainty"].to_string() } else { "low" };
-        let ev = if node["demand_validation"] != () && node["demand_validation"]["order_visibility"] != () { node["demand_validation"]["order_visibility"].to_string() } else { "" };
-        let fd = if node["financial_data"] != () { node["financial_data"] } else { () };
-
-        // 财务评分
-        let fin_ok = false; let fin_health = -1.0; let capex_s = -1.0; let rev_s = -1.0; let rnd_s = -1.0; let roe_s = -1.0;
-        if fd != () {
-            let gm = if fd["gross_margin"] != () { fd["gross_margin"] } else { -1.0 };
-            let rg = if fd["revenue_growth_yoy"] != () { fd["revenue_growth_yoy"] } else { -1.0 };
-            let dr = if fd["debt_ratio"] != () { fd["debt_ratio"] } else { -1.0 };
-            let roe = if fd["roe"] != () { fd["roe"] } else { -1.0 };
-            let rnd = if fd["rnd_ratio"] != () { fd["rnd_ratio"] } else { -1.0 };
-            let cdr = if fd["capex_dep_ratio"] != () { fd["capex_dep_ratio"] } else { -1.0 };
-            let gms = if gm >= 50.0 { 90.0 } else if gm >= 30.0 { 65.0 } else if gm >= 0.0 { 40.0 } else { -1.0 };
-            let rgs = if rg >= 20.0 { 85.0 } else if rg >= 10.0 { 60.0 } else if rg >= 0.0 { 35.0 } else { -1.0 };
-            let drs = if dr >= 0.0 && dr < 40.0 { 80.0 } else if dr < 60.0 { 55.0 } else if dr >= 0.0 { 30.0 } else { -1.0 };
-            let roes = if roe >= 15.0 { 85.0 } else if roe >= 8.0 { 60.0 } else if roe >= 0.0 { 35.0 } else { -1.0 };
-            let rnds = if rnd >= 10.0 { 85.0 } else if rnd >= 5.0 { 60.0 } else if rnd >= 0.0 { 35.0 } else { -1.0 };
-            let cdrs = if cdr >= 2.0 { 80.0 } else if cdr >= 1.0 { 55.0 } else if cdr >= 0.0 { 30.0 } else { -1.0 };
-            let t = 0.0; let c = 0.0;
-            if gms >= 0.0 { t += gms; c += 1.0; };
-            if rgs >= 0.0 { t += rgs; c += 1.0; };
-            if drs >= 0.0 { t += drs; c += 1.0; };
-            if roes >= 0.0 { t += roes; c += 1.0; };
-            if rnds >= 0.0 { t += rnds; c += 1.0; };
-            if cdrs >= 0.0 { t += cdrs; c += 1.0; };
-            fin_ok = true; has_fin = true;
-            fin_health = if c > 0.0 { clamp_score(t / c) } else { -1.0 };
-            capex_s = cdrs; rev_s = rgs; rnd_s = rnds; roe_s = roes;
-        };
+        // 节点原始字段（sc/t3/exp/bar/dc/ev/fd）的提取与全部三力/财务比分已收敛进
+        // Rust 权威函数 bottleneck_node_score，脚本侧不再内联复算。
 
         // 行业动量
         let icp = 0.0; let iif = 0.0; let min = "";
@@ -209,36 +177,23 @@ let score_bottleneck = || {
             }
         }
         if min != "" { has_ind = true; };
-        let ims = if icp > 5.0 && iif > 0.0 { 75.0 } else if icp > 2.0 && iif > 0.0 { 60.0 } else if icp > 0.0 { 45.0 } else { 30.0 };
 
         // 三力评分（v3：权重统一 to_f64，防模板变量为 i64/字符串数字）
+        // 评分本体已收敛到共享 Engine 的 Rust 权威函数 bottleneck_node_score
+        // （口径 = 权威方 bottleneck-calc；strategy-scorer 原内联口径随此被修补为权威值）。
         let ws = if w_supply != () { to_f64(w_supply, 0.35) } else { 0.35 };
         let wd = if w_demand != () { to_f64(w_demand, 0.35) } else { 0.35 };
         let wi = if w_irreplace != () { to_f64(w_irreplace, 0.30) } else { 0.30 };
-        let cs = if t3 >= 70.0 { 85.0 } else if t3 >= 50.0 { 65.0 } else if t3 >= 0.0 { 40.0 } else { 50.0 };
-        let bs = if bar == "high" { 85.0 } else if bar == "medium" { 60.0 } else { 35.0 };
-        let cyc = if exp >= 24.0 { 80.0 } else if exp >= 12.0 { 60.0 } else if exp >= 0.0 { 40.0 } else { 50.0 };
-        let acyc = if capex_s >= 0.0 { (cyc + capex_s) / 2.0 } else { cyc };
-        let srs = cs * 0.30 + bs * 0.40 + acyc * 0.30;
+        let s = bottleneck_node_score(node, icp, iif, ws, wd, wi, min);
 
-        let es = if ev == "有已公开长协/订单" || ev == "已签长协" || ev == "长协订单" { 90.0 }
-            else if ev == "合同负债增长" || ev == "合同负债" || ev == "产能预订" || ev == "产能满载" || ev == "订单饱满" || ev == "订单增长" { 60.0 }
-            else if ev == "客户扩产" || ev == "下游扩产" || ev == "政策强制" || ev == "政策驱动" { 55.0 }
-            else if ev == "无公开证据" || ev == "" { 30.0 }
-            else { 50.0 };
-        let cers = if dc == "high" { 80.0 } else if dc == "medium" { 55.0 } else { 30.0 };
-        let ae = if ims > 0.0 {
-            let base = if rev_s >= 0.0 { (es + rev_s) / 2.0 } else { es };
-            if icp > 0.0 { (base + ims) / 2.0 } else if base > 50.0 { base - 10.0 } else { base }
-        } else if rev_s >= 0.0 { (es + rev_s) / 2.0 } else { es };
-        let des = ae * 0.60 + cers * 0.40;
-
-        let ss = if sc <= 2.0 && sc >= 0.0 { 90.0 } else if sc <= 5.0 { 70.0 } else if sc <= 10.0 { 50.0 } else if sc > 10.0 { 30.0 } else { 50.0 };
-        let tms = if rnd_s >= 0.0 && roe_s >= 0.0 { rnd_s * 0.5 + roe_s * 0.5 } else { bs };
-        let irs = ss * 0.30 + tms * 0.40 + bs * 0.30;
-
-        let composite = clamp_score(srs * ws + des * wd + irs * wi);
-        let rel = if fin_ok { "partially_verified" } else if min != "" { "industry_inferred" } else if sc >= 0.0 || t3 >= 0.0 { "llm_estimated" } else { "insufficient" };
+        let srs = s["supply_rigidity_score"];
+        let des = s["demand_elasticity_score"];
+        let irs = s["irreplaceability_score"];
+        let composite = s["bottleneck_composite"];
+        let rel = s["data_reliability"];
+        let fin_ok = s["has_financial_data"];
+        let ims = s["industry_momentum_score"];
+        if fin_ok { has_fin = true; };
         if composite > max_score { max_score = composite; top_name = nn; };
         computed.push(#{
             "node_name": nn,

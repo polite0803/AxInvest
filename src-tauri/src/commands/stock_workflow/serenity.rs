@@ -18,7 +18,8 @@ use tauri::{Emitter, State};
 /// 优先顺序：
 ///   1) 顶层 `params` 字段
 ///   2) 顶层 `output` / `result` / `data` / `candidates` / `trends` 字段
-///   3) 顶层 `content` 字符串：直接用 `axagent_kit::utils::extract_json_from_llm_response`
+///      2.5) 顶层 `report` 字段的**解包**（含双重编码的 JSON 字符串，见函数内注释）
+///      3) 顶层 `content` 字符串：直接用 `axagent_kit::utils::extract_json_from_llm_response`
 ///      解析（不经过 ResponseNormalizer——它针对工具调用场景，会将 ````json` 块
 ///      误识别为 ToolUse）
 ///   4) 原始包装对象（兜底）
@@ -35,6 +36,32 @@ pub(crate) async fn extract_agent_output(raw: serde_json::Value) -> serde_json::
     for key in ["output", "result", "data", "candidates", "trends"] {
         if let Some(v) = obj.get(key) {
             return v.clone();
+        }
+    }
+    // 2.5) `report` 包装解包。
+    //
+    // 部分专家 prompt（如 reflection.md）要求 LLM 把结构化结果整体放进 `report` 字段，
+    // 而落库时该字段常是**已被 JSON 序列化过的字符串**（双重编码）：
+    //   {"report": "{\"verdict\": \"partial\", ...}"}
+    // 旧实现没有 `report` 分支 ⇒ 落到 4) 兜底原样返回包装对象 ⇒ 消费侧
+    // `json.get("verdict")` 永远取不到（对象里只有 `report` 这一个键）。
+    //
+    // 实测依据：`stock_reflections` 11 条 completed 中 10 条为该形态，
+    // 以致 verdict / lesson_summary / alpha_cited 全为 NULL、下游 was_correct 被压成 0
+    // （详见 PLAN-analysis-data-repair.md 缺陷 D1）。
+    //
+    // 判据：只在「内层确实是对象/数组」时解包 —— 纯自然语言的 report 解析失败即不命中，
+    // 流程继续走 3)，不会吞掉原有兜底行为。
+    if let Some(report) = obj.get("report") {
+        if report.is_object() || report.is_array() {
+            return report.clone();
+        }
+        if let Some(inner) = report
+            .as_str()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .filter(|v| v.is_object() || v.is_array())
+        {
+            return inner;
         }
     }
     // 3) 直接从 content 提取 JSON：找到第一个 { 或 [，找匹配闭合，解析。

@@ -33,7 +33,10 @@ data_sources: [get_fundamentals_report_markdown, compute_valuation]
 - **Volatile 高波动**:降低仓位，关注风控+对冲，警惕情绪化交易
 
 > 工作流引擎已经在你启动前由 `t-regime-detect` 节点预拉了市场 regime 数据，
-> 你无需重新调用 `get_market_regime` 工具。但你仍可主动调用以验证。
+> 已通过上方 `{{market_regime}}` / `{{regime_prompt_bias}}` /
+> `{{regime_triggered_rules}}` 三个变量注入本提示词。
+> 注意：`get_market_regime` 未实现，不在工具白名单中，不要尝试调用——
+> 直接采用上述预拉值，不要为「验证」另行取数。
 
 ## 核心原则
 

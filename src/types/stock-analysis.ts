@@ -59,6 +59,26 @@ export interface ReflectionFeedbackResult {
   };
 }
 
+/**
+ * 机构一致预期 EPS（对应后端 `consensus_eps` 工具返回数据，
+ * 权威定义 `astock-data/src/types.rs::ConsensusEPS`，serde `rename_all = camelCase`）。
+ *
+ * 消费端注意：`isEstimated = true` 时该 EPS 是**估算值**（vendor 全失败时按挂牌板块取常数兜底），
+ * 不得据此做「超预期 / 不及预期」类判定。`estimateSource` 仅 `isEstimated = true` 时有值。
+ */
+export interface ConsensusEPS {
+  stockCode: string;
+  consensusEps: number | null;
+  consensusTargetPrice: number | null;
+  ratingAvg: string | null;
+  ratingCount: number | null;
+  year: string;
+  /** 是否为估算值（非真实一致预期 / 财报数据） */
+  isEstimated: boolean;
+  /** 估算来源，仅 isEstimated = true 时有值（如 "board_constant:star"） */
+  estimateSource?: string | null;
+}
+
 export interface StockQuote {
   code: string;
   name: string;
@@ -128,6 +148,52 @@ export interface AnalysisConfig {
   newsLimit: number;
 }
 
+/** 单一周期的一组交易价位（阶段1四周期价位映射，与后端 DTO 逐字段对齐） */
+export interface HorizonPriceGroup {
+  /** 止损档位 %（0.0 = 该周期无交易计划，见 `stopLossPct > 0` 判据） */
+  stopLossPct: number;
+  /** 止盈档位 % */
+  takeProfitPct: number;
+  /** 该周期期望持有天数（交易日） */
+  expectedHoldingDays: number;
+  /** 目标价（绝对价，`currentPrice × (1 + takeProfitPct/100)`） */
+  targetPrice: number | null;
+  /** 止损价（绝对价，`currentPrice × (1 − stopLossPct/100)`） */
+  stopLoss: number | null;
+}
+
+/** 四周期价位映射，键为 `ultra_short` / `short` / `mid` / `long` */
+export interface HorizonPriceMap {
+  ultraShort?: HorizonPriceGroup | null;
+  short?: HorizonPriceGroup | null;
+  mid?: HorizonPriceGroup | null;
+  long?: HorizonPriceGroup | null;
+}
+
+/** 阶段 2：单个周期的独立决策（`portfolio-mgr.rhai` `horizon_decision()` 产出） */
+export interface HorizonDecision {
+  action: string;
+  verdict: string;
+  positionPct: number;
+  confidence: number;
+  posterior: number;
+  stopLossPct: number;
+  takeProfitPct: number;
+  expectedHoldingDays: number;
+  targetPrice: number | null;
+  stopLoss: number | null;
+  /** 仅超短线（方案 B 降级路径标注） */
+  confLowerBound?: number;
+}
+
+/** 阶段 2：四周期独立决策映射（键 camelCase，对齐 `decisions_by_horizon`） */
+export interface DecisionsByHorizon {
+  ultraShort?: HorizonDecision | null;
+  short?: HorizonDecision | null;
+  mid?: HorizonDecision | null;
+  long?: HorizonDecision | null;
+}
+
 export interface StockDecision {
   action: StockActionType;
   positionPct: number;
@@ -136,15 +202,42 @@ export interface StockDecision {
    *
    * 背景：`action` 表达**方向强度**，`positionPct` 表达仓位大小；「持有 vs 观望」此前是同一
    * 中性档因仓位有无被后端**互改**的两个名字（仓位>0 观望→持有；仓位≤0 持有→观望）。
-   * 本字段把持仓状态显式化，展示层统一走 `resolveDisplayAction(action, positionState, positionPct)`
-   * 派生展示档，各组件不得再自行写 `positionPct <= 0` 判断。
+   *
+   * ⚠️ 2026-09-22：本字段 = **本次建议后的**持仓状态（描述「建议建多少仓」），
+   * **不参与**展示档判定 —— 展示档已改为「方向档恒等」（`resolveDisplayAction(action)`）。
+   * 旧实现用它 + `positionPct` 反推展示档是循环判据：建议仓位来自本次决策，
+   * 再拿它决定本次决策的展示名，会把 LLM 措辞的抖动注入结论名
+   * （见 `AUDIT-300642-run-variance-2026-09-22.md`）。本字段仅供 UI 单独展示。
    *
    * ⚠️ `null` / `undefined` 的语义是「该记录产生于本字段引入之前，采集时点无此信息」，
-   * **不得**读成 `EMPTY`（那会把「不知道」当成「空仓」）。派生函数会在此时退回 `positionPct` 判据。
+   * **不得**读成 `EMPTY`（那会把「不知道」当成「空仓」）。
    */
   positionState?: PositionStateType | null;
   targetPrice: number | null;
   stopLoss: number | null;
+  /**
+   * 阶段1（PROPOSAL-stock-decision-four-horizon.md）四周期价位映射。
+   *
+   * 后端 `portfolio-mgr.rhai` 产出的 `horizonPriceMap`（嵌套在 `decision_json`），
+   * 经 `stock_analyses.horizon_price_map` 落库、`normalizeDecision` 收敛为 camelCase。
+   * 同一决策保留单一 `action`/仓位语义，但目标价/止损按四周期各给一组绝对价，
+   * 前端按周期 Tab/分组查看。
+   *
+   * ⚠️ `null`/`undefined` 语义 = 该记录产生于 stage1 字段引入之前，**无此信息**；
+   * 消费端**不得**读成空映射，应按顶层 `targetPrice`/`stopLoss`（主档位）回退。
+   */
+  horizonPriceMap?: HorizonPriceMap | null;
+  /**
+   * 阶段 2（PROPOSAL-stock-decision-four-horizon.md）四周期独立决策。
+   *
+   * 后端 `portfolio-mgr.rhai` `decisions_by_horizon` → 落库 `stock_analyses.horizon_decisions`
+   * → `normalizeDecision` 收敛为 camelCase。每周期独立产出 action/仓位/目标价/止损，
+   * 前端按周期 Tab 分组展示，**方向矛盾时高亮呈现**（验收项）。
+   *
+   * ⚠️ `null`/`undefined` 语义 = 该记录产生于 stage2 字段引入之前，**无此信息**；
+   * 消费端按主 `action`（`decision_action` 单值）回退。
+   */
+  decisionsByHorizon?: DecisionsByHorizon | null;
   reasoning: string;
   riskLevel: StockRiskLevelType;
   confidence: number;
@@ -350,11 +443,14 @@ export interface AgreementBreakdown {
   formulaRiskLevel?: string;
   /** V65: LLM riskLevel 原始值 */
   llmRiskLevel?: string;
-  /** V65: data_gaps 维度原始分 (满分 10) */
-  dataGapsScore?: number;
-  /** V65: data_gaps Jaccard 相似度 (0-1) */
-  dataGapsSimilarity?: number | null;
-  /** V65: evidence_cited 维度原始分 (满分 10) */
+  /**
+   * V65: evidence_cited 维度原始分 (满分 10)
+   *
+   * （2026-09-21 移除）原 `dataGapsScore` / `dataGapsSimilarity` 随 data_gaps
+   * 一致性维度一并删除：公式侧（rhai 机械枚举字段缺失）与 LLM 侧（trader 自由
+   * 文本自述）命名体系不可比 ⇒ Jaccard 恒 0、且惩罚 LLM 的坦诚度。
+   * 历史记录的 `decision_json` 里仍带这两个字段，前端**不再读取与展示**。
+   */
   evidenceScore?: number;
   /** V65: LLM 引用上游论据数量 */
   evidenceCount?: number;
@@ -384,10 +480,32 @@ export interface DataQualityDiagItem {
   /** 缺失或低置信的具体原因（正常时为空字符串） */
   gap_reason: string;
   /**
-   * 2026-09-12 新增：报告文本命中的失败标记数（如"无法获取"/"为 null"/"返回空"）。
+   * 2026-09-12 新增：报告文本命中的失败标记**词种数**（如"无法获取"/"为 null"/"返回空"）。
    * > 0 时即便 confidence >= 50 也判 low（置信度虚高）。
+   * ⚠ 这是**词种数**不是出现次数：同一标记出现多次只计 1。
+   * 实际出现次数见 `placeholder_occurrences`。
    */
   placeholder_hits?: number;
+  /**
+   * 2026-09-21 新增：同一判定集下的**实际出现次数**（同一标记多次出现重复计）。
+   * 与 `placeholder_hits` 共用剥离 VERDICT 与软标记抑制规则，保证两个口径可对照。
+   * 面板并列展示「N 种标记 / 共 M 次出现」，避免用户按原文出现次数核对时误判为计数错误。
+   */
+  placeholder_occurrences?: number;
+  /**
+   * 2026-09-21 新增：本节点**自己的**报告质量分（0-100），来源 `data-quality.rhai` 的
+   * `report_quality(text, conf)` —— 与全局 `report_quality_score`（10 个节点的**均值**）
+   * 同源同口径，但不再被别人平均掉。
+   *
+   * 用途：面板顶部的 score / grade / good / degraded / gap **全是全局聚合值**
+   * （10 张分析师卡片复用同一 modal ⇒ 打开任意节点都显示同一组数字，用户会误读为
+   * 「该分析师的分数」甚至「造假」）。本字段让弹窗能显示「这个节点自己写得怎么样」。
+   *
+   * ⚠️ 这是**事实量**，不是等级：不要据此派生 per-node 字母等级 —— 那会再造出
+   * 「两套同名等级」，正是 2026-09-14 才修掉的坑。
+   * 旧快照无此字段 ⇒ 可选；面板须能降级展示（不显示该行）。
+   */
+  report_quality?: number;
 }
 
 /** data-quality 节点输出的结构化诊断报告（data-quality.rhai 输出 JSON） */
@@ -402,6 +520,21 @@ export interface DataQualityReport {
   factor_completeness_pct?: number;
   /** V58: 缺失因子中文名列表（如 ["技术面评分", "共识评分", ...]） */
   missing_factors?: string[];
+  /**
+   * 2026-09-21 新增：**上游取数缺口**（我方没取到数据，而非标的自身属性）。
+   *
+   * 与 `missing_factors` 是**两张表**，不可合并：
+   *   · `missing_factors` = 本节点直接消费的因子是否存在（其长度与
+   *     `pm_compute_factor_completeness` 的分母口径绑死）；
+   *   · 本列表 = **上游节点自己有没有取到数**（关于数据的元数据，不是因子本身）。
+   *
+   * 首个来源：`dcf.assumptions.fcf_data_missing == true` ⇒ 现金流量表数据缺失，
+   * DCF 锚定退化为「近 5 年净利均值 × 0.90」代理。
+   * ⚠️ 只把「缺数」计入；「当期 FCF ≤ 0」（标的现金流**真为负**）**不算缺口** ——
+   * 那是我方取数失败与标的属性的区别，不可合并（同 `fcf_data_missing` 的两态纪律）。
+   * ⚠️ 只告警不扣分：本字段出现**不改变** `score` / `grade`。
+   */
+  upstream_data_gaps?: string[];
   gap_count: number;
   good_count: number;
   /**
@@ -413,8 +546,10 @@ export interface DataQualityReport {
   placeholder_nodes?: string[];
   /** 2026-09-12 新增：报告文本含失败标记的节点缩写清单（如 ["hm","lk"]），用于定位 agent 节点 */
   placeholder_node_ids?: string[];
-  /** 2026-09-12 新增：全部节点命中的失败标记总数 */
+  /** 2026-09-12 新增：全部节点命中的失败标记**词种数**合计 */
   placeholder_total_hits?: number;
+  /** 2026-09-21 新增：全部节点失败标记的**实际出现次数**合计（与 placeholder_total_hits 同判定集） */
+  placeholder_total_occurrences?: number;
   avg_confidence: number;
   total_analysts: number;
   /** 各分析师详细诊断，键为缩写（mk/sent/news/...） */
@@ -662,4 +797,25 @@ export interface TimelineNode {
   children?: TimelineNode[];
   startedAt?: number;
   finishedAt?: number;
+}
+
+// ── 反思命中率（M2/M3：PLAN-stock-decision-hitrate-validation）──
+// 后端权威定义 `analysis-engine/src/reflection_stats.rs`（serde camelCase）。
+
+/** 按维度分组的方向命中率；samples < 5 时 directionHitRate 为 null（样本不足） */
+export interface HitrateGroup {
+  key: string;
+  samples: number;
+  directionHitRate: number | null;
+}
+
+/** 命中率聚合结果 —— 消费 strategy_performance + stock_reflections + stock_analyses */
+export interface HitrateStats {
+  totalSamples: number;
+  directionHitRate: number | null;
+  targetHitRate: number | null;
+  avgRawReturnPct: number | null;
+  avgAlphaPct: number | null;
+  byAction: HitrateGroup[];
+  byHorizon: HitrateGroup[];
 }

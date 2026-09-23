@@ -2,12 +2,13 @@
 import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { invoke, listen } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import type { ReflectionFeedbackResult } from "@/types";
+import type { HitrateGroup, HitrateStats, ReflectionFeedbackResult } from "@/types";
 import {
   Button,
   Card,
   Checkbox,
   DatePicker,
+  Descriptions,
   Empty,
   Input,
   message,
@@ -24,6 +25,7 @@ import {
   Typography,
 } from "antd";
 import type { RangePickerProps } from "antd/es/date-picker";
+import type { ColumnsType } from "antd/es/table";
 import type { Dayjs } from "dayjs";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -71,6 +73,8 @@ export function ReflectionPanel() {
 
   const [reflections, setReflections] = useState<ReflectionRow[]>([]);
   const [cronJobs, setCronJobs] = useState<CronJobResponse[]>([]);
+  // M3：命中率统计（方向/价位/收益，按 action 与 horizon 分组）
+  const [hitrate, setHitrate] = useState<HitrateStats | null>(null);
   // P1-5 修复: 加载状态 — 表格 Spin + 刷新按钮 loading
   const [loading, setLoading] = useState(false);
   const [cronExpr, setCronExpr] = useState("0 6 * * *");
@@ -108,17 +112,36 @@ export function ReflectionPanel() {
   // Bug 4 修复: 统一请求级取消令牌,避免 useEffect 与 onClick 双轨加载
   // 各自维护一份 cancelled 标记造成的乱序写入。
   const loadTokenRef = useRef(0);
+  // M3：命中率格式化（null = 样本不足，诚实标注）
+  const formatHitRate = (v: number | null | undefined): string => {
+    if (v == null) {
+      return t("stockAnalysis.reflection.insufficientSamples");
+    }
+    return `${(v * 100).toFixed(1)}%`;
+  };
+  const hitrateGroupColumns = (title: string): ColumnsType<HitrateGroup> => [
+    { title, dataIndex: "key", key: "key", width: 140 },
+    { title: t("stockAnalysis.reflection.hitrateSamples"), dataIndex: "samples", key: "samples", width: 80 },
+    {
+      title: t("stockAnalysis.reflection.hitrateGroupRate"),
+      dataIndex: "directionHitRate",
+      key: "directionHitRate",
+      render: (v: number | null) => formatHitRate(v),
+    },
+  ];
   const load = async () => {
     const myToken = ++loadTokenRef.current;
     setLoading(true); // P1-5 修复
     try {
-      const [r, c] = await Promise.all([
+      const [r, c, h] = await Promise.all([
         invoke<ReflectionRow[]>("list_reflections", {}),
         invoke<CronJobResponse[]>("list_validate_decisions_crons", {}),
+        invoke<HitrateStats>("reflection_stats", {}),
       ]);
       if (myToken !== loadTokenRef.current) { return; }
       if (Array.isArray(r)) { setReflections(r); }
       if (Array.isArray(c)) { setCronJobs(c); }
+      if (h && typeof h === "object") { setHitrate(h); }
     } catch (e) {
       // P0-2 修复: 加载失败必须显式告知用户,否则后端挂掉时用户无感知
       message.error(t("stockAnalysis.reflection.loadFailed", { error: String(e) }));
@@ -528,6 +551,53 @@ export function ReflectionPanel() {
               })()}
             </Text>
           )}
+        </Space>
+      </Card>
+
+      {/* 命中率统计（M3：PLAN-stock-decision-hitrate-validation） */}
+      <Card
+        title={t("stockAnalysis.reflection.hitrateTitle")}
+        size="small"
+        style={{ marginBottom: 16 }}
+      >
+        <Descriptions size="small" bordered column={4}>
+          <Descriptions.Item label={t("stockAnalysis.reflection.hitrateSamples")}>
+            {hitrate?.totalSamples ?? 0}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("stockAnalysis.reflection.hitrateDirection")}>
+            {formatHitRate(hitrate?.directionHitRate)}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("stockAnalysis.reflection.hitrateTarget")}>
+            {formatHitRate(hitrate?.targetHitRate)}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("stockAnalysis.reflection.hitrateAvgReturn")}>
+            {hitrate?.avgRawReturnPct == null
+              ? t("stockAnalysis.reflection.noData")
+              : `${hitrate.avgRawReturnPct.toFixed(2)}%`}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("stockAnalysis.reflection.hitrateAvgAlpha")}>
+            {hitrate?.avgAlphaPct == null
+              ? t("stockAnalysis.reflection.noData")
+              : `${hitrate.avgAlphaPct.toFixed(2)}%`}
+          </Descriptions.Item>
+        </Descriptions>
+        <Space size="large" style={{ marginTop: 12, width: "100%", alignItems: "flex-start" }}>
+          <Table
+            size="small"
+            rowKey="key"
+            pagination={false}
+            style={{ flex: 1 }}
+            dataSource={hitrate?.byAction ?? []}
+            columns={hitrateGroupColumns(t("stockAnalysis.reflection.hitrateByAction"))}
+          />
+          <Table
+            size="small"
+            rowKey="key"
+            pagination={false}
+            style={{ flex: 1 }}
+            dataSource={hitrate?.byHorizon ?? []}
+            columns={hitrateGroupColumns(t("stockAnalysis.reflection.hitrateByHorizon"))}
+          />
         </Space>
       </Card>
 

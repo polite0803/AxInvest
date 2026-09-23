@@ -3,6 +3,7 @@
 import { SessionSearchPanel } from "@/components/search/SessionSearchPanel";
 import { useDebounce } from "@/hooks/useDebounce";
 import { getConvIcon } from "@/lib/convIcon";
+import { showBackendError } from "@/lib/errorI18n";
 import {
   copyTranscript,
   exportAsHTML,
@@ -565,7 +566,7 @@ export function ChatSidebar({
         if (errMsg.includes("WORKFLOW_NO_SKILL_EXECUTIONS")) {
           messageApi.warning(t("chat.noSkillExecutions"));
         } else {
-          messageApi.error(errMsg);
+          showBackendError(messageApi, e);
         }
       }
     },
@@ -598,7 +599,7 @@ export function ChatSidebar({
       setArchiveTargetIds([]);
       setSelectedKbId(null);
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setArchiveLoading(false);
     }

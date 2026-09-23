@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { DropdownMenu } from "@/components/layout/DropdownMenu";
+import { showBackendError } from "@/lib/errorI18n";
 import { usePromptTemplateStore } from "@/stores/feature/promptTemplateStore";
 import type {
   CreatePromptTemplateInput,
@@ -149,7 +150,7 @@ export function PromptTemplatesSettings() {
       setIsEditorOpen(false);
       form.resetFields();
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     }
   }, [editingTemplate, form, createTemplate, updateTemplate, messageApi, t]);
 

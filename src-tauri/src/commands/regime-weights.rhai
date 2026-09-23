@@ -18,9 +18,13 @@
 //   money_flow: 牛市升权（趋势跟踪有效），熊市降权（资金面萎缩）
 //   chip: 熊市升权（解禁减持在熊市杀伤力更大），高波动升权（筹码稳定性更重要）
 //
-// ── P1-F 契约对齐（2026-09-11）──
-// 实证：portfolio-mgr 实际只对 5 个因子调用 get_weight
-//   （trend / consensus / valuation / money_flow / chip；pace/momentum 走 IC 回测权重）。
+// ── P1-F 契约对齐（2026-09-11；v61 2026-09-20 增列 bottleneck）──
+// 实证：portfolio-mgr 实际只对 6 个因子调用 get_weight
+//   （trend / consensus / valuation / money_flow / chip / bottleneck；
+//    pace/momentum 走 IC 回测权重）。
+//   v61 变更：「bottleneck」由硬编码 0.10 改为走 get_weight ⇒ 本表新增该条目并
+//   加入 consumed_names。变更前后**中性市况下权重逐值相同**（0.10×1.0），
+//   差异只出现在 bull/bear/volatile 三档（系数理由见下方 factors 表注释）。
 // 而本脚本原先输出 9 个因子的调节权重，其中 catalyst(0.16) / risk(0.225) /
 //   data_quality(0.18) / trade_signal(0.12) 合计 0.685（占全部调整后权重 1.41 的 48.6%）
 //   —— 产出后无人消费，属「死计算」：既不生效，又让人误以为权重已随市况自适应。
@@ -76,6 +80,23 @@ let factors = #{
     "trade_signal": #{ "base": 0.15, "bull": 1.1, "bear": 0.8, "neutral": 1.0, "volatile": 0.7 },
     "money_flow": #{ "base": 0.12, "bull": 1.3, "bear": 0.7, "neutral": 1.0, "volatile": 0.5 },
     "chip": #{ "base": 0.08, "bull": 0.8, "bear": 1.3, "neutral": 1.0, "volatile": 1.5 },
+    // v61(2026-09-20): f13 瓶颈因子 —— portfolio-mgr 由「硬编码 0.10」改为
+    //   `get_weight(f_weights, "bottleneck", 0.10)`，本表必须提供该条目，
+    //   否则 get_weight 永远回落 fallback，白名单等于空接。
+    //
+    //   系数取值理由：瓶颈 = 供给刚性 / 需求弹性 / 不可替代性，是**结构属性**。
+    //   曾有政策以「结构属性 ⇒ 市况不敏感」为由把 f13 权重硬编码，但那是把
+    //   「**信号源取值**不随市况变」误当成「**该因子的判别价值**不随市况变」：
+    //     牛市 —— β 普涨淹没个股结构性差异 ⇒ 边际信息量下降（0.9）
+    //     熊市/高波动 —— 结构是价格之外先存活下来的维度，噪声越大越该看结构（1.2/1.3）
+    //   方向与 valuation / chip 一致（压力市况升权），但幅度刻意小于它们：
+    //     f13 绝对权重仅 0.10（全因子最低档），摆幅过大会让单一结构因子主导后验；
+    //     且其信号源 `serenity_score` 自身已含市况敏感度，叠加过强即重复计数
+    //     （同 pm 侧 P1-1 协方差衰减要解决的问题）。
+    //   ⚠️ base 0.10 与 neutral 系数 1.0 ⇒ **中性市况下权重与变更前逐值相同**
+    //     （0.10×1.0），非中性市况才产生位移。
+    //   ⚠️ 待真正标定：应按「参数四道门」把 base 与四档系数上提为面板可调参数。
+    "bottleneck": #{ "base": 0.10, "bull": 0.9, "bear": 1.2, "neutral": 1.0, "volatile": 1.3 },
 };
 
 // 解析状态：高波动（volatility="high"）时统一走 "volatile" 降权路径
@@ -84,10 +105,14 @@ let regime_key = if volatility == "high" { "volatile" }
     else { "neutral" };
 
 let factor_names = ["trend", "consensus", "catalyst", "risk", "valuation", "data_quality",
-                    "trade_signal", "money_flow", "chip"];
+                    "trade_signal", "money_flow", "chip", "bottleneck"];
 
 // portfolio-mgr 实际消费的因子白名单（其余为死计算，见文件头 P1-F 说明）
-let consumed_names = ["trend", "consensus", "valuation", "money_flow", "chip"];
+// v61(2026-09-20): 加入 "bottleneck" —— pm 侧 f13 已由硬编码改走 get_weight，
+//   两处必须**同时**改：只改 pm 则 get_weight 恒取 fallback（白名单外 ⇒ 本表把
+//   bottleneck 丢进 unconsumed_suggestions，factor_weights 里没有它）；
+//   只改本表则 pm 仍读硬编码（白名单条目产出后无人消费 ⇒ 又一处死计算）。
+let consumed_names = ["trend", "consensus", "valuation", "money_flow", "chip", "bottleneck"];
 
 // 计算调节后的因子权重（按消费状态分桶）
 let result = #{};

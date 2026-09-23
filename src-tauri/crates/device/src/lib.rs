@@ -23,9 +23,9 @@ pub mod transport;
 pub mod utils;
 pub mod webdav_storage;
 
-// 版本向量由 axagent-crdt 统一提供 —— 同一能力只保留唯一实现，
+// 版本向量权威定义在 axagent-harness（AGENTS.md 铁律 4），
 // 本条 re-export 保持 `axagent_device::VersionVector` 对外路径不变。
-pub use axagent_crdt::VersionVector;
+pub use axagent_harness::device_sync::VersionVector;
 pub use conflict_resolver::ConflictResolver;
 pub use crdt::{CrdtEngine, CrdtOperation, OperationType};
 pub use encryption::{

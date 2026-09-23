@@ -1,5 +1,6 @@
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
 import { List } from "@/components/common/AntdList";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { App, Button, Card, Checkbox, Collapse, Empty, Modal, Table, Tag, Typography } from "antd";
@@ -159,7 +160,7 @@ export function RecoHistoryModal() {
                     setData((prev) => prev.filter((r) => !selected.includes(r.generatedAt)));
                     setSelected([]);
                   } catch (e) {
-                    messageApi.error(String(e));
+                    showBackendError(messageApi, e);
                   }
                   setDeleting(false);
                 }}

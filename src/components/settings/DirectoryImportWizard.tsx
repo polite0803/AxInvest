@@ -6,6 +6,7 @@
 //   步骤 3 执行导入（create：create_source + import_knowledge_directory；update：sync_project_knowledge_sources）
 import { EmbeddingModelSelect } from "@/components/shared/EmbeddingModelSelect";
 import { useEmbeddingProviderLabel } from "@/components/shared/ModelSelect";
+import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { useLlmWikiStore, useSourceStore } from "@/stores";
 import type { UnifiedSource } from "@/stores/feature/sourceStore";
@@ -233,7 +234,7 @@ function DirectoryImportWizard({
       setScanResult(result);
       setStep(1);
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setScanning(false);
     }
@@ -288,7 +289,7 @@ function DirectoryImportWizard({
       await fetchSources();
       setStep(2);
     } catch (e) {
-      messageApi.error(String(e));
+      showBackendError(messageApi, e);
     } finally {
       setImporting(false);
     }

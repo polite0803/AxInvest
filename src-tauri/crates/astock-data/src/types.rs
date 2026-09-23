@@ -255,6 +255,25 @@ pub struct ConsensusEPS {
     pub rating_avg: Option<String>,
     pub rating_count: Option<i32>,
     pub year: String,
+    /// 该 EPS 是否为**估算值**（非真实一致预期 / 财报数据）。
+    ///
+    /// `true` 只出现在 vendor 全部失败的兜底分支（`lib.rs` 的 C-fallback）：
+    /// 按挂牌板块取常数（科创/创业 0.40、北交所 0.25、其余主板 0.55）。
+    ///
+    /// **下游不得用估算值做「超预期 / 不及预期」类判定** —— 那是拿一个假基准
+    /// 算出来的相对量（`tools/src/tools/finance.rs` 的 `detect_earnings` 即此类消费）。
+    /// 形态与 `is_fallback_anchor`（`mcp_tools.rs` 的 DCF 锚点标记）一致：
+    /// bool 标记 + 消费端数值降级 / 拒判。
+    ///
+    /// 为什么必须是**显式标记**而不是让下游猜：常数 0.55 完全可能是某只股票的真实
+    /// 一致预期，数值层面不可区分 —— 只有产出端知道自己是不是编的。
+    #[serde(default)]
+    pub is_estimated: bool,
+    /// 估算来源，仅 `is_estimated = true` 时有值（如 `"board_constant:star"`）。
+    ///
+    /// 留痕用：使「这条数据是编的」可归因到具体兜底规则，而非只留一句 `warn!` 日志。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_source: Option<String>,
 }
 
 /// 同花顺强势股

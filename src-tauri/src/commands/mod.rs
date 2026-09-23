@@ -42,6 +42,7 @@ pub mod dashboard;
 pub mod db_config;
 pub mod demand_discovery;
 pub mod demand_llm_refine;
+pub mod dependency_metrics;
 #[cfg(not(mobile))]
 pub mod desktop;
 pub mod device_sync;
@@ -55,7 +56,6 @@ pub mod evaluator;
 pub mod evolution;
 pub mod evolution_engine;
 pub mod evolution_hook;
-pub mod execution_bridge;
 pub mod file_browser;
 pub(crate) mod file_cleanup;
 pub mod files;

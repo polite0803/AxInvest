@@ -5,6 +5,7 @@ import { SchemaIdContext } from "@/components/dynamicUI/SchemaIdContext";
 import { VisualEditor } from "@/components/dynamicUI/VisualEditor";
 import { generateUIFromNLBackend } from "@/lib/dynamicUI/nl2ui-edit";
 import { validateSchema } from "@/lib/dynamicUI/SchemaValidator";
+import { showBackendError } from "@/lib/errorI18n";
 import { useDynamicUIStore } from "@/stores";
 import type {
   CreateDynamicUISchemaParams,
@@ -231,7 +232,7 @@ export function DynamicUIManagerPage() {
       setParseError(null);
       message.success(t("dynamicUIManager.generateSuccess"));
     } catch (err: unknown) {
-      message.error(err instanceof Error ? err.message : String(err));
+      showBackendError(message, err);
     } finally {
       setGenerating(false);
     }

@@ -1762,7 +1762,7 @@ pub async fn list_portfolio(state: State<'_, AppState>) -> Result<Vec<serde_json
     let enriched: Vec<serde_json::Value> = holdings
         .into_iter()
         .map(|h| {
-            let quote = quotes.get(&h.stock_code).and_then(|q| q.as_ref());
+            let quote: Option<&StockQuote> = quotes.get(&h.stock_code).and_then(Option::as_ref);
             let current_price = quote.map(|q| q.price).unwrap_or(h.avg_cost);
             let market_value = current_price * h.shares;
             let cost_basis = h.avg_cost * h.shares;
@@ -5657,11 +5657,10 @@ pub async fn trigger_stock_evolution(
         .evolution_engine()
         .trigger_manual_evolution(&reason, template_id.as_deref())
         .await
-        .map_err(|e| {
-            crate::commands::error::CommandError::from_error(
-                e,
-                crate::commands::error::ErrorCategory::Unrecoverable,
-            )
+        .map_err(|e: String| -> String {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("手动触发股票进化失败: {e}"))
+                .to_string()
         })
 }
 

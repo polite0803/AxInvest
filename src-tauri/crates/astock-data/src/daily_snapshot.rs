@@ -4,16 +4,23 @@
 //! 提供"每日快照"缓存。这些数据本身没有历史语义——每日快照是在每天
 //! 某个时间点调用 vendor 实时接口获取的"那一刻的今日数据"。
 //!
-//! 存储:复用 DiskCache(文件 JSON,LRU 淘汰),Key 格式 `daily:{method}:{date}`。
-//! 隔离:L2 磁盘缓存是方法级的短暂缓存(30s-5min),每日快照是"日粒度"的持久缓存。
+//! 存储:**独立 DiskCache 实例 + 独立文件** `astock_daily_snapshot.json`（JSON 落盘 + LRU），
+//! Key 格式 `daily:{method}:{date}`，个股级为 `daily:{method}:{code}:{date}`
+//! （读取侧对应 `get_stock`；2026-09-25 之前它只写无读）。
+//! 为什么强调"独立"：本文件过去写着「与 L2 隔离」，实现却是把 `with_l2_cache` 的
+//! `Arc<DiskCache>` 复用一遍 —— 同一实例、同一 10_000 条容量、同一文件。
+//! K 线缓存单条约 70 KB，几条就能把最旧快照按 LRU 挤掉，回放兜底于是"哪天有、哪天没"。
 //!
 //! 使用模式:
 //! 1. 后台 cron 每天调用 sweep_daily() 一次,存入当日快照
+//!    （实现在 `src/init/services.rs::start_daily_snapshot_sweep` →
+//!    `commands/stock_analysis.rs::run_daily_snapshot_sweep`，交易日 15:00 后幂等执行）
 //! 2. replay 模式遇到 NoHistoricalSemantic 方法,先查每日快照
 //! 3. cache miss → 正常走 record_degradation + 返回空(不阻塞回测)
 //!
-//! 配置:通过 AStockClient.with_daily_snapshot_cache() 注入,默认关闭。
-//! 启用后若 cache miss,不降级记录(因为是用户主动开启的,应预期可用)。
+//! 配置:通过 `AStockClient::with_daily_snapshot_cache(path)` 注入,默认关闭；
+//! 它返回快照 DiskCache 句柄，调用方须为其起后台 flush 任务（`spawn_flush_loop`），
+//! 否则当日快照只停在内存里，进程退出即丢。
 
 use crate::disk_cache::DiskCache;
 use std::sync::Arc;

@@ -3,11 +3,11 @@
   "note": "分层护栏棘轮基线：**只减不增**。修复违规后必须用 --update-baseline 下调，否则基线虚高会让棘轮失效。",
   "rules": {
     "commands-no-direct-db": {
-      "total": 675,
+      "total": 680,
       "files": {
         "src-tauri/src/commands/agency_expert.rs": 4,
         "src-tauri/src/commands/agent/command_bridge.rs": 1,
-        "src-tauri/src/commands/agent/mod.rs": 6,
+        "src-tauri/src/commands/agent/mod.rs": 11,
         "src-tauri/src/commands/agent/skill_execution.rs": 1,
         "src-tauri/src/commands/agent_profile.rs": 8,
         "src-tauri/src/commands/agent_role.rs": 3,

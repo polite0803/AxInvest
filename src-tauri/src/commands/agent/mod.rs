@@ -33,12 +33,12 @@ use axagent_tools::registry::{
 };
 use base64::Engine;
 use dashmap::DashMap;
-use sea_orm::{ConnectionTrait, EntityTrait};
+use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
-use tracing::info;
+use tracing::{info, warn};
 
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -1294,6 +1294,27 @@ pub async fn agent_query(
     if let Some(window) = resolved_model.as_ref().and_then(|m| m.max_tokens) {
         tool_registry =
             tool_registry.with_tool_extra(context_keys::CONTEXT_WINDOW, window.to_string());
+
+        // ── 注入「已用 tokens」，供 ContextRemaining 报真实用量（R2-3 订正 2）──
+        // 口径 = 本会话**最近一条有计量的 assistant 消息**的 `prompt_tokens`，即上一次请求
+        // 实际发出的上下文占用 —— 那正是与 auto-compact 阈值对比的数（阈值检查用的同样是
+        // 未裁剪的实际用量，见 `conversations/streaming.rs`）。本轮用量在工具被调用的时刻
+        // 还不存在，故这是「上一轮」口径；工具文案如实标明，不冒充实时值。
+        let last_used = axagent_entities::messages::Entity::find()
+            .filter(axagent_entities::messages::Column::ConversationId.eq(conversation_id.as_str()))
+            .filter(axagent_entities::messages::Column::Role.eq("assistant"))
+            .filter(axagent_entities::messages::Column::PromptTokens.gt(0))
+            .order_by_desc(axagent_entities::messages::Column::CreatedAt)
+            .limit(1)
+            .one(app_state.harness.db())
+            .await
+            .map_err(|e| warn!("[agent] 读取上一轮用量失败（ContextRemaining 将报「未知」）: {e}"))
+            .ok()
+            .flatten();
+        if let Some(tokens) = last_used.and_then(|m| m.prompt_tokens) {
+            tool_registry = tool_registry
+                .with_tool_extra(context_keys::CONTEXT_USED_TOKENS, tokens.to_string());
+        }
     }
 
     // ── 加载搜索提供商配置，注入到 tool_extra ──

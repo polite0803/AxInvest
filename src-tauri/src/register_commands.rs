@@ -925,6 +925,7 @@ macro_rules! register_all_commands {
             commands::platform_integration::update_platform_config,
             commands::plugin::plugin_disable,
             commands::plugin::plugin_enable,
+            commands::plugin::plugin_execute_command,
             commands::plugin::plugin_install,
             commands::plugin::plugin_list,
             commands::plugin::plugin_source_audit,

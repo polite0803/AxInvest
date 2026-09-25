@@ -37,8 +37,13 @@ pub const SEA_DB_PATH: &str = "core.sea_db_path";
 /// 缺省（未注入）表示窗口未知 —— 工具会明确回报「未知」而**不是**猜一个默认值。
 pub const CONTEXT_WINDOW: &str = "core.context_window";
 
-/// 本轮已消耗的上下文 token 数（十进制字符串，可选注入）。
+/// 已消耗的上下文 token 数（十进制字符串，可选注入）。
 ///
 /// 工具侧无法自行观测用量（`tools` 是 hybrid crate，读不到 agent session 的实时状态），
 /// 故只在 wiring 能提供时注入；缺省时工具只报预算与阈值，不报「已用/剩余」。
+///
+/// **口径 = 上一轮请求实际发出的上下文占用**（取本会话最近一条有计量的 assistant 消息的
+/// `prompt_tokens`，由 `commands/agent/mod.rs` 注入）—— 本轮用量在工具被调用的时刻还不存在。
+/// 工作流 turn（`init/agent_turn_adapter.rs`）没有这条读取通路，故只注入窗口、不注入用量，
+/// 工具在该路径下如实报「未知」。
 pub const CONTEXT_USED_TOKENS: &str = "core.context_used_tokens";

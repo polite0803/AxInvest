@@ -54,6 +54,15 @@ pub struct CompactionResult {
     pub formatted_summary: String,
     pub compacted_session: Session,
     pub removed_message_count: usize,
+    /// 本次摘要**消费**的原会话索引区间 `[start, end)`。
+    ///
+    /// 由 `compact_session` 给出真实边界（跳过既有摘要前缀 + tool-use/result 边界回退后的
+    /// 折叠区间），替代此前回放侧按「开头 `removed` 条」倒推的近似值。
+    ///
+    /// ⚠ 区间**不保证逐条都被折叠**：可移除范围 >10 条时启用重要性评分，区间内的高分消息
+    /// 会被额外保留，故 `end - start >= removed_message_count`。这是「消费了哪一段上下文」
+    /// 的诚实表达 —— 若把它当逐条删除清单就会对不上数。
+    pub covered_range: (usize, usize),
 }
 
 /// 粗略估算会话 transcript 的 token 占用。

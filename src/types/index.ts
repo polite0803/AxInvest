@@ -1986,6 +1986,8 @@ export interface PluginSummaryDto {
   tools: string[];
   mcpServers: string[];
   skills: string[];
+  /** 插件声明的命名命令（阶段3-① 执行分发的可见面）。 */
+  commands: { name: string; description: string }[];
 }
 
 export interface PluginManifestDto {

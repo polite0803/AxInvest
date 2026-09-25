@@ -882,7 +882,7 @@ impl SessionManager {
             if let Some(sink) = self.session_event_sink.read().await.as_ref().map(Arc::clone) {
                 let payload = axagent_harness::build_compacted_event_payload(
                     &result.summary,
-                    Some((0, result.removed_message_count)),
+                    Some(result.covered_range),
                     estimate_session_tokens(session.session()) as u64,
                     estimate_session_tokens(&result.compacted_session) as u64,
                 );

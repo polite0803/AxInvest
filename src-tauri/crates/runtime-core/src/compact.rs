@@ -642,4 +642,54 @@ mod tests {
         let cleanup = super::cleanup_task_boundary(&messages);
         assert_eq!(cleanup, Some(4));
     }
+
+    /// R4-1 偏离 2 的收口判据：`covered_range` 必须是**真实**折叠区间，而不是按
+    /// 「开头 removed 条」倒推。二次压缩时原会话第 0 条是既有摘要（前缀不参与折叠），
+    /// 旧口径会把它算进区间 ⇒ 回放侧看到的「被摘要覆盖的消息」整体错位一格。
+    #[test]
+    fn covered_range_reports_the_real_folded_window_not_a_zero_based_guess() {
+        let mut session = Session::new();
+        session.messages = vec![
+            ConversationMessage::user_text("Investigate rust/crates/runtime/src/compact.rs"),
+            ConversationMessage::assistant(vec![ContentBlock::Text {
+                text: "I will inspect the compact flow.".to_string(),
+            }]),
+            ConversationMessage::user_text("Also update rust/crates/runtime/src/conversation.rs"),
+            ConversationMessage::assistant(vec![ContentBlock::Text {
+                text: "Next: preserve prior summary context during auto compact.".to_string(),
+            }]),
+        ];
+        let config = CompactionConfig {
+            preserve_recent_messages: 2,
+            max_estimated_tokens: 1,
+            ..Default::default()
+        };
+
+        // 首次：无前缀，折叠 [0, 2)
+        let first = compact_session(&session, config, NP);
+        assert_eq!(first.covered_range, (0, 2), "首次压缩应折叠开头两条");
+        assert_eq!(first.removed_message_count, 2);
+
+        // 二次：compacted_session[0] 是摘要续接消息，它必须落在区间之外
+        let mut again = first.compacted_session.messages.clone();
+        again.extend([
+            ConversationMessage::user_text("Please add regression tests for compaction."),
+            ConversationMessage::assistant(vec![ContentBlock::Text {
+                text: "Working on regression coverage now.".to_string(),
+            }]),
+        ]);
+        let mut second_session = Session::new();
+        second_session.messages = again;
+        let second = compact_session(&second_session, config, NP);
+        assert_eq!(
+            second.covered_range,
+            (1, 3),
+            "二次压缩必须跳过既有摘要前缀（旧口径会误报 (0, 2)）"
+        );
+        assert_eq!(
+            second.removed_message_count,
+            second.covered_range.1 - second.covered_range.0,
+            "可移除范围 ≤10 条时不启用重要性评分，区间宽度应等于折叠条数"
+        );
+    }
 }

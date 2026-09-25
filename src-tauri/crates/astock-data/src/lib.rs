@@ -743,12 +743,24 @@ impl AStockClient {
         (self, l2)
     }
 
-    /// P5:启用每日快照缓存(必须在 with_l2_cache 之后调用)
-    pub fn with_daily_snapshot_cache(mut self) -> Self {
-        if let Some(l2) = self.l2.clone() {
-            self.daily_snapshot = Some(daily_snapshot::DailySnapshotCache::from_disk(l2));
-        }
-        self
+    /// P5:启用每日快照缓存 —— **独立 DiskCache 实例 + 独立文件**，不复用 L2。
+    ///
+    /// 为什么必须独立（2026-09-26 修）：`daily_snapshot.rs` 的模块注释一直声称
+    /// 「L2 是方法级短暂缓存 / 每日快照是日粒度持久缓存」的隔离，但实现只是把
+    /// `with_l2_cache` 的 `Arc<DiskCache>` 复用一遍 —— 同一实例、同一 10_000 条容量、
+    /// 同一个文件。实测后果：K 线缓存单条约 70 KB（`fetch_limit = max(limit,500)`，
+    /// 且缓存存全量、读时才切），几条就能把最旧的每日快照按 LRU 挤掉
+    /// ⇒ 回放兜底"哪天有、哪天没"，而现场看不出原因。
+    ///
+    /// 返回 `(client, snapshot_disk_handle)`：快照只写内存 + 标脏，句柄必须交给调用方
+    /// 起后台 flush 任务，否则进程退出时当日快照丢失。
+    pub fn with_daily_snapshot_cache(
+        mut self,
+        path: PathBuf,
+    ) -> (Self, Arc<disk_cache::DiskCache>) {
+        let disk = disk_cache::DiskCache::load_or_default(path);
+        self.daily_snapshot = Some(daily_snapshot::DailySnapshotCache::from_disk(disk.clone()));
+        (self, disk)
     }
 
     /// P6:注入本地新闻语料库 sink。
@@ -5873,14 +5885,19 @@ mod asof_snapshot_first_tests {
     use chrono::NaiveDate;
     use serial_test::serial;
 
-    /// 建一个「L2 + 每日快照」都启用的客户端（与 `init/state.rs` 的装配口径一致）。
+    /// 建一个「每日快照缓存已启用」的客户端（快照现在是独立 DiskCache，不再挂在 L2 上）。
     /// 每次用独立临时文件，避免测试间互相读到人家的快照。
     fn client_with_snapshots(tag: &str) -> AStockClient {
+        let (client, _snap_disk) =
+            AStockClient::new().with_daily_snapshot_cache(tmp_cache_path(tag));
+        client
+    }
+
+    fn tmp_cache_path(tag: &str) -> PathBuf {
         let mut dir = std::env::temp_dir();
-        dir.push(format!("astock_snapshot_first_{}_{}.json", tag, std::process::id()));
+        dir.push(format!("astock_snapshot_{}_{}.json", tag, std::process::id()));
         let _ = std::fs::remove_file(&dir);
-        let (client, _l2) = AStockClient::new().with_l2_cache(dir);
-        client.with_daily_snapshot_cache()
+        dir
     }
 
     fn replay(date_str: &str) -> AsOfContext {
@@ -5979,6 +5996,39 @@ mod asof_snapshot_first_tests {
             entries.iter().all(|e| !e.reason.contains("Fallthrough")),
             "逐 vendor 的能力说明不应出现在降级面板: {entries:?}"
         );
+    }
+
+    /// 回归（2026-09-26）：每日快照与 vendor L2 必须是**两个独立实例 + 两个文件**。
+    ///
+    /// 缺陷形态：`with_daily_snapshot_cache()` 只是把 `with_l2_cache()` 的
+    /// `Arc<DiskCache>` 复用一遍 —— 同一实例、同一 10_000 条容量、同一文件。
+    /// K 线缓存单条约 70 KB（`fetch_limit = max(limit,500)` 且存全量），几条就能把
+    /// 最旧的每日快照按 `last_access` LRU 挤掉 ⇒ 回放兜底"哪天有、哪天没"，
+    /// 而现场只会看到"没数据"，看不出是被缓存淘汰吃掉的。
+    ///
+    /// 判据：把 L2 灌到触发淘汰，快照仍必须读得回来。
+    #[test]
+    #[serial(asof)]
+    fn snapshot_cache_is_independent_from_l2() {
+        let (base, l2) = AStockClient::new().with_l2_cache(tmp_cache_path("iso_l2"));
+        let (client, _snap_disk) = base.with_daily_snapshot_cache(tmp_cache_path("iso_snap"));
+        client.set_daily_snapshot(
+            "get_index_quotes",
+            "2026-06-01",
+            r#"[{"code":"000001","name":"上证指数","price":3100.0,"preClose":3080.0,"changePct":0.65,"volume":1.0,"amount":2.0}]"#,
+        );
+
+        // 灌满 L2：容量 10_000，满则按 last_access 淘汰最旧 10%
+        for i in 0..12_000 {
+            l2.set(format!("klines:{i:05}:daily::live"), "[]".to_string(), 300);
+        }
+
+        let hit = client.try_daily_snapshot("get_index_quotes", "2026-06-01");
+        assert!(
+            hit.is_some(),
+            "L2 洪峰不得挤掉每日快照 —— 两者必须分实例分文件（见 with_daily_snapshot_cache 注释）"
+        );
+        assert!(hit.unwrap().contains("上证指数"), "读回的必须是被淘汰前写入的那条快照");
     }
 }
 
@@ -6363,9 +6413,9 @@ mod asof_boundary_tests {
             assert!(report.iter().any(|e| e.method == m), "{m} 应留降级痕迹: {report:?}");
         }
 
-        // ② 命中个股级快照 ⇒ 回放快照值
-        let (base, _l2) = stub_client().with_l2_cache(l2_path("snapshot"));
-        let snap_client = base.with_daily_snapshot_cache();
+        // ② 命中个股级快照 ⇒ 回放快照值（快照是独立 DiskCache，与 L2 无耦合）
+        let (snap_client, _snap_disk) =
+            stub_client().with_daily_snapshot_cache(l2_path("snapshot"));
         snap_client.set_stock_daily_snapshot(
             "get_social_sentiment",
             "600519",

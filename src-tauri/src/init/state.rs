@@ -1594,8 +1594,10 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         ));
         // `with_l2_cache` 返回 `(client, l2)` 二元组：l2 交给下方 flush 任务持有，
         // 因此不能继续链式调用，先解构再逐项注入。
-        let (client, l2) =
-            axagent_astock_data::AStockClient::new().with_l2_cache(app_dir.join("astock_l2.json"));
+        // 文件名对齐 `disk_cache.rs` 头部文档声明的 `astock_l2_cache.json`
+        // （此前写作 astock_l2.json，注释与实现两个名字）。
+        let (client, l2) = axagent_astock_data::AStockClient::new()
+            .with_l2_cache(app_dir.join("astock_l2_cache.json"));
         #[cfg(not(mobile))]
         let client = client.with_browser_fetcher(Arc::new(
             crate::init::browser_fetcher::PlaywrightBrowserFetcher::new(browser_client.clone()),
@@ -1603,14 +1605,19 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         #[cfg(mobile)]
         let client =
             client.with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher));
-        let client = client.with_news_archive_sink(news_archive_sink).with_daily_snapshot_cache();
-        // L2 是「写内存 + 30s 脏检查落盘」，必须有人持有 flush 任务；
-        // 随 shutdown_token 优雅退出，退出前做最后一次 flush。
-        let flush_handle = axagent_astock_data::disk_cache::spawn_flush_loop(l2);
+        // 每日快照用**独立文件 + 独立实例**：与 vendor L2 共用 10_000 条容量时，
+        // K 线缓存（单条约 70 KB）会把最旧快照按 LRU 挤掉，回放兜底变成"哪天有哪天没"。
+        let (client, snapshot_disk) =
+            client.with_daily_snapshot_cache(app_dir.join("astock_daily_snapshot.json"));
+        let client = client.with_news_archive_sink(news_archive_sink);
+        // 两个 DiskCache 都是「写内存 + 30s 脏检查落盘」，必须各有 flush 任务持有；
+        // 随 shutdown_token 一起优雅退出，退出前各做最后一次 flush。
+        let flush_l2 = axagent_astock_data::disk_cache::spawn_flush_loop(l2);
+        let flush_snap = axagent_astock_data::disk_cache::spawn_flush_loop(snapshot_disk);
         let l2_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
             l2_shutdown.cancelled().await;
-            flush_handle.shutdown_and_join().await;
+            tokio::join!(flush_l2.shutdown_and_join(), flush_snap.shutdown_and_join());
         });
         Arc::new(client)
     };
@@ -3029,5 +3036,63 @@ impl axagent_harness::SessionEventSink for DbSessionEventSink {
             [Value::from(session_id)],
         );
         let _ = self.db.execute_raw(stmt).await;
+    }
+}
+
+#[cfg(test)]
+mod compaction_replay_tests {
+    //! R4-1 端到端判据：压缩动作**落库后再从诊断读取原路读回来**。
+    //!
+    //! 为什么必须有这条：harness 侧的 `compacted_payload_shape_roundtrips` 只锁得住
+    //! payload 的形状，锁不住「sink 写进去 → 诊断命令读出来」这段。此前
+    //! `session_events` 曾长期「表建好了却永远写不进一行」（SQL 插值缺陷被
+    //! `tracing::warn` 吞掉，见本文件 `emit` 的文档）—— 那正是只有写入端单测漏掉的缺陷类。
+
+    use super::DbSessionEventSink;
+    use axagent_harness::{SessionEventSink, SessionEventType, build_compacted_event_payload};
+
+    #[tokio::test]
+    async fn compacted_event_round_trips_from_sink_into_resume_report() {
+        let handle = axagent_dao::db::create_test_pool().await.expect("测试池应建成");
+        let conn = handle.conn;
+        let sink = DbSessionEventSink::new(conn.clone());
+        let session_id = "conv-r4-1-roundtrip";
+
+        let summary = "摘要：前 12 条消息已折叠，key_files=a.rs, b.rs；pending_work=跑门禁";
+        sink.emit(
+            session_id,
+            SessionEventType::TurnStarted,
+            Some(serde_json::json!({ "conversationId": session_id })),
+        )
+        .await;
+        sink.emit(
+            session_id,
+            SessionEventType::Compacted,
+            Some(build_compacted_event_payload(summary, Some((0, 12)), 30_000, 4_200)),
+        )
+        .await;
+
+        let report = crate::commands::agent::resume_report_from_events(&conn, session_id)
+            .await
+            .expect("诊断读取应成功");
+        assert_eq!(report["eventCount"], 2, "两条事件都应读回: {report}");
+
+        let events = report["events"].as_array().expect("events 应为数组");
+        let seqs: Vec<i64> = events.iter().map(|e| e["seq"].as_i64().unwrap()).collect();
+        assert_eq!(seqs, vec![1, 2], "判据②：seq 必须严格递增");
+
+        let compacted = &events[1];
+        assert_eq!(compacted["eventType"], "compacted");
+        assert_eq!(
+            compacted["payload"]["summaryPreview"], summary,
+            "判据①：回放必须还原「当时模型看到的是摘要」"
+        );
+        assert_eq!(compacted["payload"]["coveredRange"], serde_json::json!([0, 12]));
+        assert_eq!(compacted["payload"]["tokensBefore"], 30_000);
+        assert_eq!(compacted["payload"]["tokensAfter"], 4_200);
+
+        // 压缩是本轮的最后一个结构性事件 ⇒ 消费侧据此判定「turn 未结束、可恢复」
+        assert_eq!(report["reason"], "compacted_no_ended");
+        assert_eq!(report["lastEventType"], "compacted");
     }
 }

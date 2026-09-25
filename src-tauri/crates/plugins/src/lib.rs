@@ -260,6 +260,44 @@ mod tests {
         );
     }
 
+    /// 阶段3-①（commands[] 执行分发）夹具：声明一个命名命令的插件。
+    /// `with_subprocess=false` 时故意不声明 `subprocess_execution`，用于验证权限拦截。
+    fn write_command_plugin(root: &Path, name: &str, version: &str, with_subprocess: bool) {
+        #[cfg(windows)]
+        let (script_name, script_content) = (
+            "greet.cmd",
+            "@echo off\r\nset /p INPUT=\r\necho command=%CLAWD_TOOL_NAME% input=%CLAWD_TOOL_INPUT%\r\n",
+        );
+        #[cfg(not(windows))]
+        let (script_name, script_content) = (
+            "greet.sh",
+            "#!/bin/sh\ncat >/dev/null\nprintf 'command=%s input=%s\\n' \"$CLAWD_TOOL_NAME\" \"$CLAWD_TOOL_INPUT\"\n",
+        );
+
+        let script_path = root.join("commands").join(script_name);
+        write_file(&script_path, script_content);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mut permissions = fs::metadata(&script_path).expect("metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&script_path, permissions).expect("chmod");
+        }
+        let permissions = if with_subprocess {
+            r#"["read", "subprocess_execution"]"#
+        } else {
+            r#"["read"]"#
+        };
+        write_file(
+            root.join(MANIFEST_RELATIVE_PATH).as_path(),
+            format!(
+                "{{\n  \"name\": \"{name}\",\n  \"version\": \"{version}\",\n  \"description\": \"command plugin\",\n  \"defaultEnabled\": true,\n  \"permissions\": {permissions},\n  \"commands\": [\n    {{\n      \"name\": \"greet\",\n      \"description\": \"Greet the input\",\n      \"command\": \"./commands/{script_name}\"\n    }}\n  ]\n}}"
+            )
+            .as_str(),
+        );
+    }
+
     fn load_enabled_plugins(path: &Path) -> BTreeMap<String, bool> {
         let contents = fs::read_to_string(path).expect("settings should exist");
         let root: Value = serde_json::from_str(&contents).expect("settings json");
@@ -1176,6 +1214,81 @@ mod tests {
         assert_eq!(payload["plugin"], "tool-demo@external");
         assert_eq!(payload["tool"], "plugin_echo");
         assert_eq!(payload["input"]["message"], "hello");
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    /// 阶段3-①：manifest.commands[] 必须流经 summary 可见面并在分发入口被把关 ——
+    /// 未声明 `subprocess_execution` 的插件在 **spawn 之前**即 PermissionDenied，
+    /// 未知命令名 NotFound（此用例不起子进程，无门控）。
+    #[test]
+    fn command_dispatch_gate_blocks_without_subprocess_permission() {
+        let _guard = env_guard();
+        let config_home = temp_dir("cmdgate-home");
+        let source_root = temp_dir("cmdgate-source");
+        write_command_plugin(&source_root, "cmd-gate", "1.0.0", false);
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let install = manager
+            .install(source_root.to_str().expect("utf8 path"))
+            .expect("install should succeed");
+
+        // 可见面：plugin_list 的 summary 携带 commands 声明。
+        let summaries = manager.list_plugins().expect("list should succeed");
+        let summary = summaries
+            .iter()
+            .find(|s| s.metadata.id == install.plugin_id)
+            .expect("installed plugin should be listed");
+        assert_eq!(summary.commands.len(), 1);
+        assert_eq!(summary.commands[0].name, "greet");
+        assert_eq!(summary.commands[0].description, "Greet the input");
+
+        // 权限门槛：不声明 subprocess_execution ⇒ spawn 前拒绝。
+        let err = manager
+            .execute_plugin_command(&install.plugin_id, "greet", &Value::Null)
+            .expect_err("缺 subprocess_execution 必须拒绝");
+        assert!(
+            matches!(err, PluginError::PermissionDenied(_)),
+            "期望 PermissionDenied，实际 {err:?}"
+        );
+
+        // 未知命令名：NotFound，不猜不兜底。
+        let err = manager
+            .execute_plugin_command(&install.plugin_id, "nope", &Value::Null)
+            .expect_err("未声明的命令必须报错");
+        assert!(matches!(err, PluginError::NotFound(_)), "期望 NotFound，实际 {err:?}");
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    /// 阶段3-① 全链：声明齐权限的插件经 `execute_plugin_command` 真实执行命名命令，
+    /// 输入经 stdin / `CLAWD_COMMAND_INPUT` 注入，stdout 原样回传。
+    #[test]
+    fn executes_plugin_command_via_dispatch() {
+        if !require_plugin_subprocess() {
+            return;
+        }
+        let _guard = env_guard();
+        let config_home = temp_dir("cmdexec-home");
+        let source_root = temp_dir("cmdexec-source");
+        write_command_plugin(&source_root, "cmd-exec", "1.0.0", true);
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let install = manager
+            .install(source_root.to_str().expect("utf8 path"))
+            .expect("install should succeed");
+
+        let output = manager
+            .execute_plugin_command(
+                &install.plugin_id,
+                "greet",
+                &serde_json::json!({ "who": "world" }),
+            )
+            .expect("命令执行应成功");
+        assert!(output.contains("command=greet"), "命令名应注入执行环境：{output}");
+        assert!(output.contains("who"), "输入应到达脚本：{output}");
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(source_root);

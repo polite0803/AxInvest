@@ -31,6 +31,11 @@ pub async fn plugin_list(state: State<'_, AppState>) -> Result<Vec<PluginSummary
                         tools: p.tool_names,
                         mcp_servers: p.mcp_server_names,
                         skills: p.skill_names,
+                        commands: p
+                            .commands
+                            .into_iter()
+                            .map(|c| PluginCommandDto { name: c.name, description: c.description })
+                            .collect(),
                     })
                     .collect()
             })
@@ -433,6 +438,39 @@ pub async fn plugin_update(
     .map_err(|e| format!("plugin update task panicked: {e}"))?
 }
 
+/// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。
+///
+/// 走 [`axagent_plugins::PluginManager::execute_plugin_command`]：与 tool 同一
+/// ENV 白名单沙箱 + `subprocess_execution` 权限门槛；输入 JSON 经 stdin /
+/// `CLAWD_TOOL_INPUT` 注入（复用工具执行链），stdout 原样返回。
+#[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "执行插件命名命令")]
+#[command]
+pub async fn plugin_execute_command(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    name: String,
+    input: Option<serde_json::Value>,
+) -> Result<String, String> {
+    let plugin_manager = state.plugin_manager.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = plugin_manager.blocking_read();
+        manager
+            .execute_plugin_command(
+                &plugin_id,
+                &name,
+                &input.unwrap_or_else(|| serde_json::json!({})),
+            )
+            .map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })
+    })
+    .await
+    .map_err(|e| format!("plugin execute_command task panicked: {e}"))?
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginSummaryDto {
@@ -445,6 +483,15 @@ pub struct PluginSummaryDto {
     pub tools: Vec<String>,
     pub mcp_servers: Vec<String>,
     pub skills: Vec<String>,
+    /// 插件声明的命名命令（阶段3-① 执行分发的可见面，`PLAN-plugin-gap-closure.md` §2）。
+    pub commands: Vec<PluginCommandDto>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCommandDto {
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Debug, serde::Serialize)]

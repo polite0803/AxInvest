@@ -368,7 +368,9 @@ impl Tool for ContextRemainingTool {
             .and_then(|v| v.trim().parse::<usize>().ok())
         {
             Some(used) => {
-                lines.push(format!("**已用**: {used} tokens"));
+                lines.push(format!(
+                    "**已用**: {used} tokens（上一轮请求的实际上下文占用；本轮增量尚未计入）"
+                ));
                 lines
                     .push(format!("**距压缩阈值剩余**: {} tokens", threshold.saturating_sub(used)));
             },
@@ -520,4 +522,68 @@ fn is_toolset_available(toolset: &str) -> bool {
         toolset,
         "web" | "file" | "shell" | "git" | "network" | "system" | "browser" | "database"
     )
+}
+
+#[cfg(test)]
+mod context_remaining_tests {
+    //! `ContextRemaining` 的三条口径判据（计划 §3.3 验收：工具与压缩阈值**同源**）。
+
+    use super::ContextRemainingTool;
+    use crate::{Tool, ToolContext, context_keys};
+    use axagent_harness::context_budget::budgets_for;
+
+    const WINDOW: usize = 200_000;
+
+    fn ctx_with(extra: &[(&str, &str)]) -> ToolContext {
+        let mut ctx = ToolContext::new(".");
+        for (key, value) in extra {
+            ctx.extra.insert((*key).to_string(), (*value).to_string());
+        }
+        ctx
+    }
+
+    async fn render(extra: &[(&str, &str)]) -> String {
+        ContextRemainingTool
+            .call(serde_json::json!({}), &ctx_with(extra))
+            .await
+            .expect("只读工具应成功")
+            .content
+    }
+
+    #[tokio::test]
+    async fn unknown_window_is_reported_as_unknown_not_guessed() {
+        let text = render(&[]).await;
+        assert!(
+            text.contains("模型上下文窗口未知") && text.contains("不要假设一个窗口值"),
+            "窗口缺省时必须明说未知，不得猜默认值: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_usage_reports_budget_side_only() {
+        let text = render(&[(context_keys::CONTEXT_WINDOW, "200000")]).await;
+        assert!(text.contains("已用**: 未知"), "有用量缺口时应报「未知」而非编造数值: {text}");
+        assert!(text.contains("分量预算"), "预算侧口径仍应给出: {text}");
+    }
+
+    /// 同源判据：工具里的「距阈值剩余」必须等于 `threshold − used`，而 threshold 取自
+    /// `budgets_for()` —— 与 `should_auto_compress` 同一个供值函数，杜绝两处口径漂移。
+    #[tokio::test]
+    async fn used_and_remaining_share_the_auto_compact_threshold_source() {
+        let used = 120_000usize;
+        let text = render(&[
+            (context_keys::CONTEXT_WINDOW, "200000"),
+            (context_keys::CONTEXT_USED_TOKENS, "120000"),
+        ])
+        .await;
+        let threshold = budgets_for(WINDOW).auto_compact_threshold();
+        assert!(text.contains(&format!("**已用**: {used} tokens")), "应报出注入的用量: {text}");
+        assert!(
+            text.contains(&format!(
+                "**距压缩阈值剩余**: {} tokens",
+                threshold.saturating_sub(used)
+            )),
+            "剩余量必须由同一阈值算出（阈值={threshold}）: {text}"
+        );
+    }
 }

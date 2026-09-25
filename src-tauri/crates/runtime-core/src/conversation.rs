@@ -457,16 +457,11 @@ where
     ) -> AutoCompactionEvent {
         let summary = result.summary;
         let removed_message_count = result.removed_message_count;
+        let covered_range = result.covered_range;
         let tokens_before = estimate_session_tokens(&self.session) as u64;
         self.session = result.compacted_session;
         let tokens_after = estimate_session_tokens(&self.session) as u64;
-        self.emit_compacted_event(
-            &summary,
-            removed_message_count,
-            tokens_before,
-            tokens_after,
-            strategy,
-        );
+        self.emit_compacted_event(&summary, covered_range, tokens_before, tokens_after, strategy);
         AutoCompactionEvent { removed_message_count }
     }
 
@@ -477,7 +472,7 @@ where
     fn emit_compacted_event(
         &self,
         summary: &str,
-        removed_message_count: usize,
+        covered_range: (usize, usize),
         tokens_before: u64,
         tokens_after: u64,
         strategy: crate::session_token_ledger::CompactionStrategy,
@@ -486,12 +481,11 @@ where
             return;
         };
         let session_id = self.session.session_id.clone();
-        // 覆盖区间为**近似值**：`CompactionResult` 未携带原会话索引，此处按
-        // 「原会话开头 removed 条被摘要取代」记录（重要性评分可能跳过个别消息，
-        // 精确区间需给 `CompactionResult` 增字段 —— 见计划 §5.1 偏离记档）。
+        // 覆盖区间由 `CompactionResult::covered_range` 直接给出（压缩器自己知道折叠了哪一段），
+        // 不再按「开头 removed 条」倒推 —— 后者在有既有摘要前缀时会整体错位。
         let payload = axagent_harness::build_compacted_event_payload(
             summary,
-            Some((0, removed_message_count)),
+            Some(covered_range),
             tokens_before,
             tokens_after,
         );
@@ -501,7 +495,8 @@ where
         });
         tracing::debug!(
             strategy = strategy.as_str(),
-            removed = removed_message_count,
+            covered_start = covered_range.0,
+            covered_end = covered_range.1,
             "已落 Compacted 会话事件"
         );
     }
@@ -1412,7 +1407,7 @@ where
         if result.removed_message_count > 0 {
             self.emit_compacted_event(
                 &result.summary,
-                result.removed_message_count,
+                result.covered_range,
                 estimate_session_tokens(&self.session) as u64,
                 estimate_session_tokens(&result.compacted_session) as u64,
                 CompactionStrategy::Manual,

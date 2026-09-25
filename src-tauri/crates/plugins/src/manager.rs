@@ -447,7 +447,7 @@ impl PluginManager {
     /// **复用工具执行链**（`PluginTool::execute_sandboxed`）：manifest 的
     /// `commands[].command` 按空白切分为程序 + 参数直接 exec（不经 shell 解析，防注入），
     /// ENV 白名单沙箱 + `subprocess_execution` 权限门槛与 tools 完全同形。
-    /// 权限档位取 `ReadOnly`（命令输入走 stdin / `CLAWD_COMMAND_INPUT`）；
+    /// 权限档位取 `ReadOnly`（命令输入走 stdin / `CLAWD_TOOL_INPUT`，复用工具执行链）；
     /// 需要写权限的复杂操作应声明为 tool 而非 command。
     pub fn execute_plugin_command(
         &self,

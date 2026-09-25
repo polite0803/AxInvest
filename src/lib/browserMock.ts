@@ -4998,6 +4998,10 @@ async function executeCommand<T>(
         installPath: "",
       } as T;
     }
+    case "plugin_execute_command": {
+      // 浏览器 mock 无子进程能力：命令分发面存在即返回空串（真实执行仅桌面端）。
+      return "" as T;
+    }
     case "plugin_ui_action": {
       // mock 不模拟 manifest 的 `worker` 声明，用「插件存在且已启用」近似
       // 「宿主侧有可用 worker」；不满足时抛与后端同码的结构化错误。

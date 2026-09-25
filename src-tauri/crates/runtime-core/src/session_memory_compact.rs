@@ -419,6 +419,10 @@ pub fn to_compaction_result(
         formatted_summary: format!("Session Memory Summary:\n{}", sm_result.session_memory_content),
         compacted_session,
         removed_message_count: removed_count,
+        // 本策略按「结构化记忆取代 early portion」工作，保留集不保证是原会话的连续后缀，
+        // 故只能给出保守近似（与摘要文案 "summarize the earlier portion" 同口径）。
+        // 与之相对，`compact_session` 路径能给出真实的 `covered_range`。
+        covered_range: (0, removed_count),
     }
 }
 

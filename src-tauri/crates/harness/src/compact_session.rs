@@ -75,6 +75,7 @@ pub fn compact_session(
             formatted_summary: String::new(),
             compacted_session: session.clone(),
             removed_message_count: 0,
+            covered_range: (0, 0),
         };
     }
 
@@ -204,6 +205,7 @@ pub fn compact_session(
         formatted_summary,
         compacted_session,
         removed_message_count: actual_removed.len(),
+        covered_range: (compacted_prefix_len, keep_from),
     }
 }
 

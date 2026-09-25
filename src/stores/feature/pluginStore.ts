@@ -79,6 +79,7 @@ export const usePluginStore = create<PluginState>((set, get) => ({
             tools: [],
             mcpServers: [],
             skills: [],
+            commands: [],
           },
         ],
       }));

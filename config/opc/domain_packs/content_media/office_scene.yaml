@@ -1,0 +1,183 @@
+slug: content_media
+displayNameKey: content_media
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: creation
+rooms:
+  - id: creation
+    nameKey: creation
+    x: 40
+    y: 60
+    width: 360
+    height: 220
+    color: 6953882
+  - id: shooting
+    nameKey: shooting
+    x: 420
+    y: 60
+    width: 180
+    height: 140
+    color: 9315498
+  - id: editing
+    nameKey: editing
+    x: 620
+    y: 60
+    width: 140
+    height: 140
+    color: 11225020
+  - id: publishing
+    nameKey: publishing
+    x: 420
+    y: 220
+    width: 340
+    height: 160
+    color: 13538264
+  - id: lounge
+    nameKey: lounge
+    x: 40
+    y: 320
+    width: 360
+    height: 140
+    color: 14794471
+furniture:
+  creation:
+    - kind: desk
+      x: 70
+      y: 130
+    - kind: chair
+      x: 70
+      y: 165
+    - kind: desk
+      x: 170
+      y: 130
+    - kind: chair
+      x: 170
+      y: 165
+    - kind: desk
+      x: 270
+      y: 130
+    - kind: chair
+      x: 270
+      y: 165
+    - kind: shelf
+      x: 340
+      y: 90
+    - kind: plant
+      x: 50
+      y: 80
+  shooting:
+    - kind: plant
+      x: 40
+      y: 50
+    - kind: plant
+      x: 140
+      y: 50
+    - kind: rug
+      x: 90
+      y: 100
+      w: 120
+      h: 70
+      color: 9315498
+  editing:
+    - kind: desk
+      x: 60
+      y: 80
+    - kind: chair
+      x: 60
+      y: 115
+  publishing:
+    - kind: desk
+      x: 80
+      y: 80
+    - kind: chair
+      x: 80
+      y: 115
+    - kind: desk
+      x: 200
+      y: 80
+    - kind: chair
+      x: 200
+      y: 115
+    - kind: shelf
+      x: 280
+      y: 70
+    - kind: whiteboard
+      x: 150
+      y: 130
+  lounge:
+    - kind: sofa
+      x: 110
+      y: 70
+    - kind: sofa
+      x: 240
+      y: 70
+    - kind: plant
+      x: 60
+      y: 90
+    - kind: plant
+      x: 310
+      y: 90
+decorations:
+  creation:
+    - kind: window
+      x: 260
+      y: 5
+      w: 70
+      h: 40
+    - kind: painting
+      x: 140
+      y: 5
+      w: 40
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5
+    - kind: lamp
+      x: 320
+      y: 5
+  shooting:
+    - kind: window
+      x: 70
+      y: 5
+      w: 60
+      h: 30
+    - kind: lamp
+      x: 10
+      y: 5
+  editing:
+    - kind: window
+      x: 60
+      y: 5
+      w: 50
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5
+  publishing:
+    - kind: window
+      x: 150
+      y: 5
+      w: 80
+      h: 35
+    - kind: painting
+      x: 250
+      y: 5
+      w: 40
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5
+  lounge:
+    - kind: window
+      x: 100
+      y: 5
+      w: 70
+      h: 30
+    - kind: painting
+      x: 230
+      y: 5
+      w: 50
+      h: 25
+    - kind: lamp
+      x: 20
+      y: 5

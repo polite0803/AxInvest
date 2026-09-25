@@ -1,0 +1,164 @@
+slug: finance_invest
+displayNameKey: finance_invest
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: trading
+rooms:
+  - id: trading
+    nameKey: trading
+    x: 40
+    y: 60
+    width: 440
+    height: 220
+    color: 1713022
+  - id: analysis
+    nameKey: analysis
+    x: 500
+    y: 60
+    width: 260
+    height: 140
+    color: 2635155
+  - id: risk
+    nameKey: risk
+    x: 500
+    y: 220
+    width: 260
+    height: 120
+    color: 3754411
+  - id: meeting
+    nameKey: meeting
+    x: 40
+    y: 320
+    width: 300
+    height: 140
+    color: 6056896
+furniture:
+  trading:
+    - kind: desk
+      x: 80
+      y: 140
+    - kind: chair
+      x: 80
+      y: 175
+    - kind: desk
+      x: 180
+      y: 140
+    - kind: chair
+      x: 180
+      y: 175
+    - kind: desk
+      x: 280
+      y: 140
+    - kind: chair
+      x: 280
+      y: 175
+    - kind: desk
+      x: 380
+      y: 140
+    - kind: chair
+      x: 380
+      y: 175
+    - kind: shelf
+      x: 430
+      y: 90
+    - kind: plant
+      x: 50
+      y: 80
+    - kind: plant
+      x: 430
+      y: 240
+  analysis:
+    - kind: desk
+      x: 100
+      y: 100
+    - kind: chair
+      x: 100
+      y: 135
+    - kind: desk
+      x: 200
+      y: 100
+    - kind: chair
+      x: 200
+      y: 135
+    - kind: shelf
+      x: 240
+      y: 70
+  risk:
+    - kind: desk
+      x: 80
+      y: 70
+    - kind: chair
+      x: 80
+      y: 105
+    - kind: plant
+      x: 200
+      y: 70
+    - kind: plant
+      x: 240
+      y: 100
+  meeting:
+    - kind: whiteboard
+      x: 150
+      y: 80
+    - kind: plant
+      x: 50
+      y: 80
+    - kind: plant
+      x: 250
+      y: 80
+    - kind: rug
+      x: 150
+      y: 120
+      w: 160
+      h: 60
+      color: 6056896
+decorations:
+  trading:
+    - kind: window
+      x: 350
+      y: 5
+      w: 80
+      h: 40
+    - kind: painting
+      x: 200
+      y: 5
+      w: 50
+      h: 30
+    - kind: lamp
+      x: 30
+      y: 5
+    - kind: lamp
+      x: 400
+      y: 5
+  analysis:
+    - kind: window
+      x: 180
+      y: 5
+      w: 60
+      h: 30
+    - kind: lamp
+      x: 10
+      y: 5
+  risk:
+    - kind: window
+      x: 150
+      y: 5
+      w: 60
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5
+  meeting:
+    - kind: window
+      x: 100
+      y: 5
+      w: 80
+      h: 35
+    - kind: painting
+      x: 220
+      y: 5
+      w: 40
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5

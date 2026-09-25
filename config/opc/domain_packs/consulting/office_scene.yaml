@@ -1,0 +1,164 @@
+slug: consulting
+displayNameKey: consulting
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: consulting
+rooms:
+  - id: consulting
+    nameKey: consulting
+    x: 40
+    y: 60
+    width: 360
+    height: 220
+    color: 2503224
+  - id: library
+    nameKey: library
+    x: 420
+    y: 60
+    width: 180
+    height: 220
+    color: 3622735
+  - id: meeting
+    nameKey: meeting
+    x: 620
+    y: 60
+    width: 140
+    height: 220
+    color: 4545124
+  - id: reception
+    nameKey: reception
+    x: 40
+    y: 320
+    width: 720
+    height: 140
+    color: 5533306
+furniture:
+  consulting:
+    - kind: desk
+      x: 70
+      y: 130
+    - kind: chair
+      x: 70
+      y: 165
+    - kind: desk
+      x: 170
+      y: 130
+    - kind: chair
+      x: 170
+      y: 165
+    - kind: desk
+      x: 270
+      y: 130
+    - kind: chair
+      x: 270
+      y: 165
+    - kind: shelf
+      x: 340
+      y: 90
+    - kind: plant
+      x: 50
+      y: 80
+  library:
+    - kind: shelf
+      x: 50
+      y: 100
+    - kind: shelf
+      x: 120
+      y: 100
+    - kind: shelf
+      x: 50
+      y: 180
+    - kind: shelf
+      x: 120
+      y: 180
+    - kind: plant
+      x: 80
+      y: 60
+  meeting:
+    - kind: whiteboard
+      x: 70
+      y: 80
+    - kind: plant
+      x: 40
+      y: 120
+    - kind: plant
+      x: 110
+      y: 120
+    - kind: rug
+      x: 70
+      y: 150
+      w: 100
+      h: 60
+      color: 4545124
+  reception:
+    - kind: sofa
+      x: 100
+      y: 70
+    - kind: sofa
+      x: 230
+      y: 70
+    - kind: desk
+      x: 450
+      y: 80
+    - kind: chair
+      x: 450
+      y: 115
+    - kind: plant
+      x: 50
+      y: 90
+    - kind: plant
+      x: 670
+      y: 90
+decorations:
+  consulting:
+    - kind: window
+      x: 260
+      y: 5
+      w: 70
+      h: 40
+    - kind: painting
+      x: 140
+      y: 5
+      w: 40
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5
+    - kind: lamp
+      x: 320
+      y: 5
+  library:
+    - kind: window
+      x: 80
+      y: 5
+      w: 60
+      h: 35
+    - kind: lamp
+      x: 10
+      y: 5
+  meeting:
+    - kind: window
+      x: 60
+      y: 5
+      w: 50
+      h: 35
+    - kind: lamp
+      x: 10
+      y: 5
+  reception:
+    - kind: window
+      x: 200
+      y: 5
+      w: 100
+      h: 35
+    - kind: painting
+      x: 400
+      y: 5
+      w: 50
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5
+    - kind: lamp
+      x: 680
+      y: 5

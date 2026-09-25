@@ -19,8 +19,8 @@ import {
   assignSeedRooms,
   resolveSceneTemplate,
   SCENE_DOMAIN_SLUGS,
-  SCENE_TEMPLATES,
   sceneTemplateLabelKey,
+  useSceneTemplates,
 } from "@/components/office/phaser/sceneTemplates";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
@@ -59,6 +59,7 @@ const STRATEGY_OPTIONS: Array<{
 export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
   const { t } = useTranslation();
   const createFleet = useOfficeStore((s) => s.createFleet);
+  const templates = useSceneTemplates();
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm<FormValues>();
   const sceneSlug = Form.useWatch("sceneTemplateSlug", form);
@@ -143,7 +144,7 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
           label={t("office.createFleet.sceneLabel")}
         >
           <Select
-            options={SCENE_TEMPLATES.map((tpl) => ({
+            options={templates.map((tpl) => ({
               value: tpl.slug,
               label: t(sceneTemplateLabelKey(tpl)),
             }))}

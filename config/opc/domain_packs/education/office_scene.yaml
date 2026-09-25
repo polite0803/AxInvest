@@ -1,0 +1,170 @@
+slug: education
+displayNameKey: education
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: classroom
+rooms:
+  - id: classroom
+    nameKey: classroom
+    x: 40
+    y: 60
+    width: 460
+    height: 240
+    color: 1793568
+  - id: prepare
+    nameKey: prepare
+    x: 520
+    y: 60
+    width: 160
+    height: 140
+    color: 3046706
+  - id: service
+    nameKey: service
+    x: 520
+    y: 220
+    width: 260
+    height: 140
+    color: 3706428
+  - id: meeting
+    nameKey: meeting
+    x: 40
+    y: 320
+    width: 300
+    height: 140
+    color: 4431943
+furniture:
+  classroom:
+    - kind: whiteboard
+      x: 230
+      y: 80
+    - kind: desk
+      x: 80
+      y: 180
+    - kind: chair
+      x: 80
+      y: 200
+    - kind: desk
+      x: 180
+      y: 180
+    - kind: chair
+      x: 180
+      y: 200
+    - kind: desk
+      x: 280
+      y: 180
+    - kind: chair
+      x: 280
+      y: 200
+    - kind: desk
+      x: 380
+      y: 180
+    - kind: chair
+      x: 380
+      y: 200
+    - kind: plant
+      x: 50
+      y: 80
+    - kind: plant
+      x: 410
+      y: 80
+    - kind: rug
+      x: 230
+      y: 130
+      w: 260
+      h: 40
+      color: 4431943
+  prepare:
+    - kind: desk
+      x: 70
+      y: 80
+    - kind: chair
+      x: 70
+      y: 115
+    - kind: shelf
+      x: 100
+      y: 60
+    - kind: plant
+      x: 40
+      y: 60
+  service:
+    - kind: desk
+      x: 80
+      y: 80
+    - kind: chair
+      x: 80
+      y: 115
+    - kind: desk
+      x: 180
+      y: 80
+    - kind: chair
+      x: 180
+      y: 115
+    - kind: plant
+      x: 240
+      y: 60
+  meeting:
+    - kind: whiteboard
+      x: 150
+      y: 80
+    - kind: plant
+      x: 50
+      y: 80
+    - kind: plant
+      x: 250
+      y: 80
+    - kind: rug
+      x: 150
+      y: 120
+      w: 160
+      h: 60
+      color: 4431943
+decorations:
+  classroom:
+    - kind: window
+      x: 350
+      y: 5
+      w: 80
+      h: 40
+    - kind: painting
+      x: 200
+      y: 5
+      w: 50
+      h: 30
+    - kind: lamp
+      x: 30
+      y: 5
+    - kind: lamp
+      x: 430
+      y: 5
+  prepare:
+    - kind: window
+      x: 70
+      y: 5
+      w: 50
+      h: 30
+    - kind: lamp
+      x: 10
+      y: 5
+  service:
+    - kind: window
+      x: 150
+      y: 5
+      w: 60
+      h: 30
+    - kind: lamp
+      x: 10
+      y: 5
+  meeting:
+    - kind: window
+      x: 100
+      y: 5
+      w: 80
+      h: 35
+    - kind: painting
+      x: 220
+      y: 5
+      w: 40
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5

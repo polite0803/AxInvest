@@ -30,10 +30,10 @@ import { AgentCard } from "./AgentCard";
 import { OfficeGame } from "./phaser/OfficeGame";
 import { fleetMemberToSceneMember } from "./phaser/OfficeScene";
 import {
-  resolveSceneTemplate,
   SCENE_TEMPLATES,
   sceneTemplateDescKey,
   sceneTemplateLabelKey,
+  useSceneTemplates,
 } from "./phaser/sceneTemplates";
 
 const { Text } = Typography;
@@ -81,12 +81,15 @@ export function OfficeTab() {
   // 转换为 SceneMember 给 Phaser 渲染
   const sceneMembers = useMemo(() => members.map(fleetMemberToSceneMember), [members]);
 
-  // 当前场景模板（用于房间选项 / 房间标签）
+  // 当前场景模板（用于房间选项 / 房间标签）。
+  // templates 来自订阅：域包 office_scene.yaml 是启动 IPC 异步注入的，
+  // 不订阅则行业房在注入前打开会退化成默认布局（4-① 时序契约）。
+  const templates = useSceneTemplates();
   const currentTemplate = useMemo(
     () =>
-      SCENE_TEMPLATES.find((tpl) => tpl.slug === activeFleet?.sceneTemplateSlug)
-        ?? SCENE_TEMPLATES[0],
-    [activeFleet?.sceneTemplateSlug],
+      templates.find((tpl) => tpl.slug === activeFleet?.sceneTemplateSlug)
+        ?? templates[0],
+    [templates, activeFleet?.sceneTemplateSlug],
   );
 
   // 房间 ID → i18n 展示名（Phaser 房间标签）
@@ -413,6 +416,7 @@ function CreateFleetForm({
 }) {
   const { t } = useTranslation();
   const { token } = theme.useToken();
+  const templates = useSceneTemplates();
   const [name, setName] = useState("");
   const [templateSlug, setTemplateSlug] = useState(SCENE_TEMPLATES[0].slug);
 
@@ -447,14 +451,14 @@ function CreateFleetForm({
             setTemplateSlug(v);
             onTemplateChange(v);
           }}
-          options={SCENE_TEMPLATES.map((tpl) => ({
+          options={templates.map((tpl) => ({
             value: tpl.slug,
             label: `${t(sceneTemplateLabelKey(tpl))} · ${tpl.rooms.length} ${t("office.createFleet.roomsUnit")}`,
           }))}
           style={{ width: "100%" }}
         />
         <div style={{ marginTop: 4, fontSize: 11, color: token.colorTextQuaternary }}>
-          {t(sceneTemplateDescKey(resolveSceneTemplate(templateSlug)))}
+          {t(sceneTemplateDescKey(templates.find((tpl) => tpl.slug === templateSlug) ?? templates[0]))}
         </div>
       </div>
     </div>

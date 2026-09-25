@@ -8,7 +8,7 @@
  * - role 文本域可由 AgentRole 快捷下拉自动填充（注入 dispatcher prompt）
  * - room_id 下拉项来自当前 fleet 的场景模板房间列表
  */
-import { resolveSceneTemplate } from "@/components/office/phaser/sceneTemplates";
+import { useSceneTemplates } from "@/components/office/phaser/sceneTemplates";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
@@ -64,8 +64,9 @@ export function AddMemberModal({ open, fleetId, sceneTemplateSlug, onClose }: Ad
     }
   }, [open, roles.length, fetchRoles]);
 
-  // 默认房间 = 当前场景模板的 defaultRoomId
-  const template = resolveSceneTemplate(sceneTemplateSlug);
+  // 默认房间 = 当前场景模板的 defaultRoomId（订阅注册表：YAML 注入完成后房间列表会自动补齐）
+  const templates = useSceneTemplates();
+  const template = templates.find((tpl) => tpl.slug === sceneTemplateSlug) ?? templates[0];
   const roomOptions = template.rooms.map((r) => ({
     value: r.id,
     label: t(`office.room.${r.nameKey}`) || r.id,

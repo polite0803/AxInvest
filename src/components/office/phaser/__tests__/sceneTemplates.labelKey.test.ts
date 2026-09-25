@@ -5,18 +5,40 @@ import { INVESTMENT_OFFICE_TEMPLATE } from "../investSceneTemplates";
 import {
   assignSeedRooms,
   DEFAULT_OFFICE_TEMPLATE,
+  type OfficeSceneTemplate,
+  type RoomRect,
   SCENE_DOMAIN_SLUGS,
   SCENE_TEMPLATES,
   sceneTemplateDescKey,
   sceneTemplateLabelKey,
+  STARTUP_LOFT_TEMPLATE,
 } from "../sceneTemplates";
+
+function syntheticScene(slug: string, roomIds: string[] = ["r1"]): OfficeSceneTemplate {
+  const rooms: RoomRect[] = roomIds.map((id, i) => ({
+    id,
+    nameKey: id,
+    x: 40 + i * 200,
+    y: 60,
+    width: 160,
+    height: 120,
+    color: 0x1677ff,
+  }));
+  return {
+    slug,
+    displayNameKey: slug,
+    canvasWidth: 800,
+    canvasHeight: 500,
+    defaultRoomId: roomIds[0],
+    rooms,
+  };
+}
 
 describe("sceneTemplateLabelKey 显示名单源化", () => {
   it("行业场景走权威源 opc.domains.<slug>", () => {
-    const finance = SCENE_TEMPLATES.find((tpl) => tpl.slug === "finance_invest");
-    expect(finance).toBeDefined();
-    expect(sceneTemplateLabelKey(finance!)).toBe("opc.domains.finance_invest");
-    expect(sceneTemplateDescKey(finance!)).toBe("opc.domains.finance_invest_desc");
+    const finance = syntheticScene("finance_invest");
+    expect(sceneTemplateLabelKey(finance)).toBe("opc.domains.finance_invest");
+    expect(sceneTemplateDescKey(finance)).toBe("opc.domains.finance_invest_desc");
   });
 
   it("通用/注入场景保留 office.scene.<displayNameKey>", () => {
@@ -26,40 +48,29 @@ describe("sceneTemplateLabelKey 显示名单源化", () => {
     expect(sceneTemplateLabelKey(INVESTMENT_OFFICE_TEMPLATE)).toBe("office.scene.investment_office");
   });
 
-  it("SCENE_DOMAIN_SLUGS：内置 9 行业场景齐全；其余 5 个由域包 office_scene.yaml 运行时注入", () => {
-    const domainScenes = SCENE_TEMPLATES.filter((tpl) => SCENE_DOMAIN_SLUGS.has(tpl.slug));
-    expect(domainScenes).toHaveLength(9);
+  it("注册表：名册 14 个行业 slug；TS 内置自 4-① 起不再含行业场景（全部 YAML 注入）", () => {
     expect(SCENE_DOMAIN_SLUGS.size).toBe(14);
-    // 集合内每个 **TS 内置** slug 都必须有对应场景，防「集合加了、场景没加」的悬空声明；
-    // design/project_management/security/geospatial/game_dev 的场景不在 TS 数组里——
-    // 「slug 必须有同名场景」由 check-office-scene-align 门禁 rule a（TS∪YAML 合并面）把关
-    const YAML_ONLY = new Set([
-      "design",
-      "project_management",
-      "security",
-      "geospatial",
-      "game_dev",
+    expect(SCENE_TEMPLATES.filter((tpl) => SCENE_DOMAIN_SLUGS.has(tpl.slug))).toHaveLength(0);
+    // 内置只剩两个通用场景；「slug 必须有同名场景（TS∪YAML）」由 check-office-scene-align rule a 把关
+    expect(SCENE_TEMPLATES.map((t) => t.slug)).toEqual([
+      DEFAULT_OFFICE_TEMPLATE.slug,
+      STARTUP_LOFT_TEMPLATE.slug,
     ]);
-    for (const slug of SCENE_DOMAIN_SLUGS) {
-      if (YAML_ONLY.has(slug)) { continue; }
-      expect(SCENE_TEMPLATES.some((tpl) => tpl.slug === slug)).toBe(true);
-    }
   });
 });
 
 describe("assignSeedRooms 建房即成队排房", () => {
   it("首个成员落 defaultRoomId，其后轮转覆盖所有房间", () => {
-    const finance = SCENE_TEMPLATES.find((tpl) => tpl.slug === "finance_invest")!;
+    const finance = syntheticScene("finance_invest", ["trading", "analysis", "risk", "meeting"]);
     const rooms = assignSeedRooms(8, finance);
     expect(rooms).toHaveLength(8);
-    expect(rooms[0]).toBe(finance.defaultRoomId);
-    // 8 人 4 间 ⇒ 每间恰 2 人
+    expect(rooms[0]).toBe("trading");
     const byRoom: Record<string, number> = {};
     for (const r of rooms) {
       byRoom[r] = (byRoom[r] ?? 0) + 1;
     }
-    for (const room of finance.rooms) {
-      expect(byRoom[room.id]).toBe(2);
+    for (const id of ["trading", "analysis", "risk", "meeting"]) {
+      expect(byRoom[id]).toBe(2);
     }
   });
 
@@ -68,5 +79,23 @@ describe("assignSeedRooms 建房即成队排房", () => {
     const rooms = assignSeedRooms(10, DEFAULT_OFFICE_TEMPLATE);
     expect(rooms).toHaveLength(10);
     expect(new Set(rooms).size).toBe(DEFAULT_OFFICE_TEMPLATE.rooms.length);
+  });
+});
+
+describe("注册表订阅（4-① 时序契约）", () => {
+  it("registerSceneTemplate 注入后版本递增且数组含新 slug", async () => {
+    const mod = await import("../sceneTemplates");
+    const before = mod.getSceneTemplatesVersion();
+    const probe = syntheticScene("__probe_scene__");
+    mod.registerSceneTemplate(probe);
+    expect(mod.getSceneTemplatesVersion()).toBe(before + 1);
+    expect(mod.SCENE_TEMPLATES.some((t) => t.slug === "__probe_scene__")).toBe(true);
+    // 幂等：同 slug 再注册不递增
+    const after = mod.getSceneTemplatesVersion();
+    mod.registerSceneTemplate(probe);
+    expect(mod.getSceneTemplatesVersion()).toBe(after);
+    // 清理探针，防污染其它用例（直接 splice，注册表无注销 API——运行期不需要）
+    const idx = mod.SCENE_TEMPLATES.findIndex((t) => t.slug === "__probe_scene__");
+    mod.SCENE_TEMPLATES.splice(idx, 1);
   });
 });

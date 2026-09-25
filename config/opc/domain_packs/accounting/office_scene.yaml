@@ -1,0 +1,192 @@
+slug: accounting
+displayNameKey: accounting
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: finance
+rooms:
+  - id: finance
+    nameKey: finance
+    x: 40
+    y: 60
+    width: 360
+    height: 220
+    color: 4532128
+  - id: archive
+    nameKey: archive
+    x: 420
+    y: 60
+    width: 180
+    height: 220
+    color: 6174129
+  - id: audit
+    nameKey: audit
+    x: 620
+    y: 60
+    width: 140
+    height: 220
+    color: 8280002
+  - id: meeting
+    nameKey: meeting
+    x: 40
+    y: 320
+    width: 300
+    height: 140
+    color: 9795021
+  - id: manager
+    nameKey: manager
+    x: 360
+    y: 320
+    width: 400
+    height: 140
+    color: 11771355
+furniture:
+  finance:
+    - kind: desk
+      x: 70
+      y: 130
+    - kind: chair
+      x: 70
+      y: 165
+    - kind: desk
+      x: 170
+      y: 130
+    - kind: chair
+      x: 170
+      y: 165
+    - kind: desk
+      x: 270
+      y: 130
+    - kind: chair
+      x: 270
+      y: 165
+    - kind: plant
+      x: 50
+      y: 80
+    - kind: plant
+      x: 330
+      y: 220
+  archive:
+    - kind: shelf
+      x: 50
+      y: 100
+    - kind: shelf
+      x: 120
+      y: 100
+    - kind: shelf
+      x: 50
+      y: 180
+    - kind: shelf
+      x: 120
+      y: 180
+    - kind: plant
+      x: 80
+      y: 60
+  audit:
+    - kind: desk
+      x: 70
+      y: 100
+    - kind: chair
+      x: 70
+      y: 135
+    - kind: plant
+      x: 40
+      y: 60
+  meeting:
+    - kind: whiteboard
+      x: 140
+      y: 80
+    - kind: plant
+      x: 40
+      y: 80
+    - kind: plant
+      x: 240
+      y: 80
+    - kind: rug
+      x: 140
+      y: 120
+      w: 160
+      h: 60
+      color: 9795021
+  manager:
+    - kind: desk
+      x: 100
+      y: 70
+    - kind: chair
+      x: 100
+      y: 105
+    - kind: shelf
+      x: 280
+      y: 70
+    - kind: plant
+      x: 350
+      y: 100
+    - kind: sofa
+      x: 450
+      y: 80
+decorations:
+  finance:
+    - kind: window
+      x: 280
+      y: 5
+      w: 60
+      h: 35
+    - kind: painting
+      x: 140
+      y: 5
+      w: 40
+      h: 25
+    - kind: lamp
+      x: 20
+      y: 5
+    - kind: lamp
+      x: 320
+      y: 5
+  archive:
+    - kind: window
+      x: 90
+      y: 5
+      w: 60
+      h: 35
+    - kind: lamp
+      x: 10
+      y: 5
+  audit:
+    - kind: window
+      x: 60
+      y: 5
+      w: 50
+      h: 30
+    - kind: lamp
+      x: 10
+      y: 5
+  meeting:
+    - kind: window
+      x: 100
+      y: 5
+      w: 80
+      h: 35
+    - kind: painting
+      x: 220
+      y: 5
+      w: 40
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5
+  manager:
+    - kind: window
+      x: 350
+      y: 5
+      w: 80
+      h: 35
+    - kind: painting
+      x: 500
+      y: 5
+      w: 50
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5
+    - kind: lamp
+      x: 650
+      y: 5

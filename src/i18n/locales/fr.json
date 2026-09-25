@@ -3971,7 +3971,8 @@
       "workspace": "Espace de travail",
       "meeting": "Salle de réunion",
       "lounge": "Repos",
-      "manager": "Bureau du manager"
+      "manager": "Bureau du manager",
+      "investment_office_desc": "Disposition en 6 pièces : Recherche / Données / Stratégie / Salle de réunion / Trading / Contrôle des risques — idéale pour les équipes de recherche en investissement"
     },
     "chat": {
       "emptyHint": "Saisissez un message ci-dessous — le dispatcher le routera vers le bon agent.",
@@ -4079,7 +4080,31 @@
       "data_room": "Données",
       "strategy": "Stratégie",
       "trading": "Trading",
-      "risk": "Contrôle des risques"
+      "risk": "Contrôle des risques",
+      "dev": "Postes de développement",
+      "review": "Revue de code",
+      "lab": "Labo de test",
+      "finance": "Postes financiers",
+      "archive": "Archives",
+      "audit": "Audit",
+      "compute": "Calcul GPU",
+      "paper": "Salle des articles",
+      "creation": "Postes de création",
+      "shooting": "Studio de tournage",
+      "editing": "Salle de montage",
+      "publishing": "Publication",
+      "operations": "Postes d'opérations",
+      "showroom": "Showroom",
+      "service": "Centre de service",
+      "warehouse": "Entrepôt",
+      "classroom": "Salle de classe",
+      "prepare": "Préparation des cours",
+      "consulting": "Postes de conseil",
+      "library": "Bibliothèque",
+      "reception": "Accueil",
+      "sales": "Postes de vente",
+      "marketing": "Marketing",
+      "analysis": "Salle d'analyse"
     },
     "deleteFleet": {
       "button": "Supprimer le bureau",

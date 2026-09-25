@@ -29,7 +29,12 @@ import { useTranslation } from "react-i18next";
 import { AgentCard } from "./AgentCard";
 import { OfficeGame } from "./phaser/OfficeGame";
 import { fleetMemberToSceneMember } from "./phaser/OfficeScene";
-import { SCENE_TEMPLATES } from "./phaser/sceneTemplates";
+import {
+  resolveSceneTemplate,
+  SCENE_TEMPLATES,
+  sceneTemplateDescKey,
+  sceneTemplateLabelKey,
+} from "./phaser/sceneTemplates";
 
 const { Text } = Typography;
 
@@ -444,16 +449,12 @@ function CreateFleetForm({
           }}
           options={SCENE_TEMPLATES.map((tpl) => ({
             value: tpl.slug,
-            label: `${t(`office.scene.${tpl.displayNameKey}`)} · ${tpl.rooms.length} ${
-              t("office.createFleet.roomsUnit")
-            }`,
+            label: `${t(sceneTemplateLabelKey(tpl))} · ${tpl.rooms.length} ${t("office.createFleet.roomsUnit")}`,
           }))}
           style={{ width: "100%" }}
         />
         <div style={{ marginTop: 4, fontSize: 11, color: token.colorTextQuaternary }}>
-          {t(`office.scene.${
-            SCENE_TEMPLATES.find((tpl) => tpl.slug === templateSlug)?.displayNameKey ?? "default_office"
-          }_desc`)}
+          {t(sceneTemplateDescKey(resolveSceneTemplate(templateSlug)))}
         </div>
       </div>
     </div>

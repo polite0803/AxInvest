@@ -914,6 +914,35 @@ export function resolveSceneTemplate(slug?: string): OfficeSceneTemplate {
   return SCENE_TEMPLATES.find((t) => t.slug === slug) ?? DEFAULT_OFFICE_TEMPLATE;
 }
 
+// ── 显示名单源化（`PLAN-office-scene-domain-align.md` 阶段 1）──
+//
+// 行业场景的 slug 与 `config/opc/domain_packs/` 域包 id 逐字一致，其显示名/描述的
+// 权威翻译在 `opc.domains.*`（11 语言齐备）；`office.scene.*` 只保留非域包的
+// 通用/注入场景（default_office / startup_loft / investment_office）。
+
+/** 行业场景 slug 集合 — 与 OPC 域包本体对齐；门禁 check-office-scene-align 读同一清单 */
+export const SCENE_DOMAIN_SLUGS: ReadonlySet<string> = new Set([
+  "finance_invest",
+  "software_dev",
+  "accounting",
+  "ai_research",
+  "content_media",
+  "ecommerce",
+  "education",
+  "consulting",
+  "sales_growth",
+]);
+
+/** 显示名 i18n key：行业场景走权威源 `opc.domains.<slug>`，其余走 `office.scene.<displayNameKey>` */
+export function sceneTemplateLabelKey(tpl: OfficeSceneTemplate): string {
+  return SCENE_DOMAIN_SLUGS.has(tpl.slug) ? `opc.domains.${tpl.slug}` : `office.scene.${tpl.displayNameKey}`;
+}
+
+/** 描述 i18n key，命名空间选择逻辑同 sceneTemplateLabelKey */
+export function sceneTemplateDescKey(tpl: OfficeSceneTemplate): string {
+  return `${sceneTemplateLabelKey(tpl)}_desc`;
+}
+
 /** 给定房间与成员数，计算房间内均匀分布的初始坐标 */
 export function distributeMembersInRoom(
   room: RoomRect,

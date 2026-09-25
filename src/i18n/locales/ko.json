@@ -3971,7 +3971,8 @@
       "workspace": "워크스페이스",
       "meeting": "회의실",
       "lounge": "라운지",
-      "manager": "매니저실"
+      "manager": "매니저실",
+      "investment_office_desc": "6개 룸 레이아웃: 리서치실 / 데이터실 / 전략실 / 회의실 / 트레이딩실 / 리스크관리실, 투자 리서치 팀에 적합"
     },
     "chat": {
       "emptyHint": "아래에 메시지를 입력하면 디스패처가 적절한 에이전트로 라우팅합니다.",
@@ -4079,7 +4080,31 @@
       "data_room": "데이터실",
       "strategy": "전략실",
       "trading": "트레이딩실",
-      "risk": "리스크관리실"
+      "risk": "리스크관리실",
+      "dev": "개발 데스크",
+      "review": "코드 리뷰",
+      "lab": "테스트 랩",
+      "finance": "재무 데스크",
+      "archive": "문서 보관실",
+      "audit": "감사 구역",
+      "compute": "GPU 연산실",
+      "paper": "논문실",
+      "creation": "창작 데스크",
+      "shooting": "촬영 스튜디오",
+      "editing": "편집실",
+      "publishing": "퍼블리싱",
+      "operations": "운영 데스크",
+      "showroom": "상품 선정실",
+      "service": "고객 센터",
+      "warehouse": "물류 창고",
+      "classroom": "교실",
+      "prepare": "수업 준비실",
+      "consulting": "컨설팅 데스크",
+      "library": "자료실",
+      "reception": "접수 데스크",
+      "sales": "영업 데스크",
+      "marketing": "마케팅",
+      "analysis": "분석실"
     },
     "deleteFleet": {
       "button": "오피스 삭제",

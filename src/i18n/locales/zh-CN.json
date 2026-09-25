@@ -3971,7 +3971,8 @@
       "workspace": "工位区",
       "meeting": "会议室",
       "lounge": "休息区",
-      "manager": "经理室"
+      "manager": "经理室",
+      "investment_office_desc": "6 房间布局：投研室 / 数据室 / 策略室 / 会议室 / 交易室 / 风控室，适合投研团队"
     },
     "chat": {
       "emptyHint": "在下方输入消息，Dispatcher 将自动路由到合适的 agent。",
@@ -4079,7 +4080,31 @@
       "data_room": "数据室",
       "strategy": "策略室",
       "trading": "交易室",
-      "risk": "风控室"
+      "risk": "风控室",
+      "dev": "开发工位",
+      "review": "代码审查区",
+      "lab": "测试实验室",
+      "finance": "财务工位",
+      "archive": "档案室",
+      "audit": "审计区",
+      "compute": "GPU 计算区",
+      "paper": "论文区",
+      "creation": "创作工位",
+      "shooting": "拍摄区",
+      "editing": "编辑室",
+      "publishing": "发布区",
+      "operations": "运营工位",
+      "showroom": "选品室",
+      "service": "客服中心",
+      "warehouse": "仓储区",
+      "classroom": "教室",
+      "prepare": "备课区",
+      "consulting": "顾问工位",
+      "library": "资料室",
+      "reception": "接待区",
+      "sales": "销售工位",
+      "marketing": "营销区",
+      "analysis": "分析师区"
     },
     "deleteFleet": {
       "button": "删除办公室",

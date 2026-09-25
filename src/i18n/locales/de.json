@@ -3971,7 +3971,8 @@
       "workspace": "Arbeitsbereich",
       "meeting": "Besprechungsraum",
       "lounge": "Lounge",
-      "manager": "Managerbüro"
+      "manager": "Managerbüro",
+      "investment_office_desc": "6-Raum-Layout: Research / Datenraum / Strategie / Besprechungsraum / Handel / Risikokontrolle – für Investment-Research-Teams"
     },
     "chat": {
       "emptyHint": "Gib unten eine Nachricht ein — der Dispatcher leitet sie an den richtigen Agenten weiter.",
@@ -4079,7 +4080,31 @@
       "data_room": "Datenraum",
       "strategy": "Strategie",
       "trading": "Handel",
-      "risk": "Risikokontrolle"
+      "risk": "Risikokontrolle",
+      "dev": "Entwicklungs-Arbeitsplätze",
+      "review": "Code-Review",
+      "lab": "Testlabor",
+      "finance": "Finanz-Arbeitsplätze",
+      "archive": "Archiv",
+      "audit": "Prüfung",
+      "compute": "GPU-Rechenraum",
+      "paper": "Paper-Raum",
+      "creation": "Kreativ-Arbeitsplätze",
+      "shooting": "Filmstudio",
+      "editing": "Schnittraum",
+      "publishing": "Publishing",
+      "operations": "Ops-Arbeitsplätze",
+      "showroom": "Showroom",
+      "service": "Service-Center",
+      "warehouse": "Lager",
+      "classroom": "Klassenzimmer",
+      "prepare": "Unterrichtsvorbereitung",
+      "consulting": "Berater-Arbeitsplätze",
+      "library": "Bibliothek",
+      "reception": "Empfang",
+      "sales": "Vertriebs-Arbeitsplätze",
+      "marketing": "Marketing",
+      "analysis": "Analyseraum"
     },
     "deleteFleet": {
       "button": "Büro löschen",

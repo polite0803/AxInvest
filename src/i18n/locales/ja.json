@@ -3971,7 +3971,8 @@
       "workspace": "ワークスペース",
       "meeting": "会議室",
       "lounge": "ラウンジ",
-      "manager": "マネージャー室"
+      "manager": "マネージャー室",
+      "investment_office_desc": "6ルーム構成：調査室 / データ室 / 戦略室 / 会議室 / トレード室 / リスク管理室、投資リサーチチーム向け"
     },
     "chat": {
       "emptyHint": "下にメッセージを入力 — Dispatcher が適切な agent に自動ルーティングします。",
@@ -4079,7 +4080,31 @@
       "data_room": "データ室",
       "strategy": "戦略室",
       "trading": "トレード室",
-      "risk": "リスク管理室"
+      "risk": "リスク管理室",
+      "dev": "開発デスク",
+      "review": "コードレビュー",
+      "lab": "テストラボ",
+      "finance": "財務デスク",
+      "archive": "書庫",
+      "audit": "監査エリア",
+      "compute": "GPU計算室",
+      "paper": "論文室",
+      "creation": "創作デスク",
+      "shooting": "撮影スタジオ",
+      "editing": "編集室",
+      "publishing": "パブリッシング",
+      "operations": "運営デスク",
+      "showroom": "商品ルーム",
+      "service": "カスタマーセンター",
+      "warehouse": "倉庫",
+      "classroom": "教室",
+      "prepare": "授業準備室",
+      "consulting": "コンサルタントデスク",
+      "library": "資料室",
+      "reception": "受付",
+      "sales": "営業デスク",
+      "marketing": "マーケティング",
+      "analysis": "アナリスト室"
     },
     "deleteFleet": {
       "button": "オフィスを削除",

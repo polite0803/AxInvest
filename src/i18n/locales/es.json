@@ -3971,7 +3971,8 @@
       "workspace": "Área de trabajo",
       "meeting": "Sala de reuniones",
       "lounge": "Descanso",
-      "manager": "Oficina del gerente"
+      "manager": "Oficina del gerente",
+      "investment_office_desc": "Distribución de 6 salas: Investigación / Datos / Estrategia / Sala de reuniones / Trading / Control de riesgos, para equipos de research de inversión"
     },
     "chat": {
       "emptyHint": "Escribe un mensaje abajo — el dispatcher lo enruta al agente adecuado.",
@@ -4079,7 +4080,31 @@
       "data_room": "Datos",
       "strategy": "Estrategia",
       "trading": "Trading",
-      "risk": "Control de riesgos"
+      "risk": "Control de riesgos",
+      "dev": "Puestos de desarrollo",
+      "review": "Revisión de código",
+      "lab": "Laboratorio de pruebas",
+      "finance": "Puestos financieros",
+      "archive": "Archivo",
+      "audit": "Auditoría",
+      "compute": "Cálculo GPU",
+      "paper": "Sala de papers",
+      "creation": "Puestos de creación",
+      "shooting": "Estudio de grabación",
+      "editing": "Sala de edición",
+      "publishing": "Publicación",
+      "operations": "Puestos de operaciones",
+      "showroom": "Sala de productos",
+      "service": "Centro de atención",
+      "warehouse": "Almacén",
+      "classroom": "Aula",
+      "prepare": "Preparación de clases",
+      "consulting": "Puestos de consultoría",
+      "library": "Biblioteca",
+      "reception": "Recepción",
+      "sales": "Puestos de ventas",
+      "marketing": "Marketing",
+      "analysis": "Sala de análisis"
     },
     "deleteFleet": {
       "button": "Eliminar oficina",

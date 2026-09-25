@@ -15,7 +15,7 @@
  * 选定场景模板 + 策略后写入 Fleet.metadata.strategy 与 sceneTemplateSlug，
  * 后端 LlmDispatcher 会读取 strategy 注入对应的业务上下文 prompt。
  */
-import { SCENE_TEMPLATES } from "@/components/office/phaser/sceneTemplates";
+import { SCENE_TEMPLATES, sceneTemplateLabelKey } from "@/components/office/phaser/sceneTemplates";
 import { showBackendError } from "@/lib/errorI18n";
 import { message } from "@/lib/toast";
 import { useOfficeStore } from "@/stores";
@@ -124,7 +124,7 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
           <Select
             options={SCENE_TEMPLATES.map((tpl) => ({
               value: tpl.slug,
-              label: t(`office.scene.${tpl.displayNameKey}`) || tpl.slug,
+              label: t(sceneTemplateLabelKey(tpl)),
             }))}
           />
         </Form.Item>

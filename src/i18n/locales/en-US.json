@@ -3971,7 +3971,8 @@
       "workspace": "Workspace",
       "meeting": "Meeting Room",
       "lounge": "Lounge",
-      "manager": "Manager Room"
+      "manager": "Manager Room",
+      "investment_office_desc": "6-room layout: Research / Data Room / Strategy / Meeting / Trading / Risk Control, built for investment research teams"
     },
     "chat": {
       "emptyHint": "Type a message below — the dispatcher will route it to the right agent.",
@@ -4079,7 +4080,31 @@
       "data_room": "Data Room",
       "strategy": "Strategy",
       "trading": "Trading",
-      "risk": "Risk Control"
+      "risk": "Risk Control",
+      "dev": "Dev Desks",
+      "review": "Code Review",
+      "lab": "Test Lab",
+      "finance": "Finance Desks",
+      "archive": "Archive",
+      "audit": "Audit",
+      "compute": "GPU Compute",
+      "paper": "Paper Room",
+      "creation": "Creation Desks",
+      "shooting": "Shooting Studio",
+      "editing": "Editing Room",
+      "publishing": "Publishing",
+      "operations": "Operations Desks",
+      "showroom": "Showroom",
+      "service": "Service Center",
+      "warehouse": "Warehouse",
+      "classroom": "Classroom",
+      "prepare": "Lesson Prep",
+      "consulting": "Consulting Desks",
+      "library": "Library",
+      "reception": "Reception",
+      "sales": "Sales Desks",
+      "marketing": "Marketing",
+      "analysis": "Analysis Room"
     },
     "deleteFleet": {
       "button": "Delete Office",

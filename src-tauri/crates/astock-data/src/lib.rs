@@ -1114,7 +1114,6 @@ impl AStockClient {
             .collect()
     }
 
-    #[expect(dead_code)]
     /// 按当前 AsOfContext 截断 DividendRecord：保留 ex_date <= as_of_date 的项。
     /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_dividend_by_asof(items: Vec<DividendRecord>) -> Vec<DividendRecord> {
@@ -1129,6 +1128,46 @@ impl AStockClient {
         items
             .into_iter()
             .filter(|d| !d.ex_date.is_empty() && d.ex_date.as_str() <= cutoff.as_str())
+            .collect()
+    }
+
+    /// 按当前 AsOfContext 截断 EarningsEvent：保留 event_date <= as_of_date 的项。
+    ///
+    /// **为什么裁而不是留**：回放到 2024-06-03 时点，「7 月 5 日发财报」是当时不可知的信息。
+    /// `EarningsEvent` 没有「预告发布日期」字段，无法区分「当时已公布的预告」与「事后补录」，
+    /// 故一律裁到截止日（保守方向，见 `PLAN-asof-gaps.md` §2-D4 的取舍记录）。
+    fn truncate_earnings_by_asof(items: Vec<EarningsEvent>) -> Vec<EarningsEvent> {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
+            return items;
+        }
+        let ctx = match Self::as_of_ctx_or_degrade("truncate_earnings_by_asof") {
+            Some(c) => c,
+            None => return items,
+        };
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        items
+            .into_iter()
+            .filter(|e| !e.event_date.is_empty() && e.event_date.as_str() <= cutoff.as_str())
+            .collect()
+    }
+
+    /// 按当前 AsOfContext 截断估值序列：保留 trade_date <= as_of_date 的样本。
+    ///
+    /// 这一条决定回放里的**两件事**：分位窗口是否含未来样本，以及
+    /// `ValuationBand.current` 取到的是截止日还是今天的 PE/PB（后者由
+    /// `clip_valuation_history` + `snaps.last()` 推出，故必须在此处裁上界）。
+    fn truncate_valuation_by_asof(items: Vec<ValuationSnapshot>) -> Vec<ValuationSnapshot> {
+        if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
+            return items;
+        }
+        let ctx = match Self::as_of_ctx_or_degrade("truncate_valuation_by_asof") {
+            Some(c) => c,
+            None => return items,
+        };
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        items
+            .into_iter()
+            .filter(|s| !s.trade_date.is_empty() && s.trade_date.as_str() <= cutoff.as_str())
             .collect()
     }
 
@@ -1597,6 +1636,36 @@ impl AStockClient {
         self.daily_snapshot.as_ref().and_then(|c| c.get(method, date))
     }
 
+    /// P5:尝试读取**个股级**每日快照（key 含股票代码）
+    ///
+    /// `sweep_daily_snapshots` 对 `PER_STOCK_METHODS`（两融/资金流/北向）以及概念板块、
+    /// 行业分类、公告都是逐只个股写入 `daily:{method}:{code}:{date}`；
+    /// 此前读取侧只有不带 code 的 `try_daily_snapshot` ⇒ 这类快照**只写无读**。
+    fn try_stock_daily_snapshot(
+        &self,
+        method: &str,
+        stock_code: &str,
+        date: &str,
+    ) -> Option<String> {
+        if !daily_snapshot::SNAPSHOT_METHODS.contains(&method) {
+            return None;
+        }
+        self.daily_snapshot.as_ref().and_then(|c| c.get_stock(method, stock_code, date))
+    }
+
+    /// 指定日期是否已有某方法的全市场快照（供后台 sweep 判重，避免同一天重复打 vendor）
+    pub fn has_daily_snapshot(&self, method: &str, date: &str) -> bool {
+        self.daily_snapshot.as_ref().is_some_and(|c| c.has(method, date))
+    }
+
+    /// 每日快照缓存是否已启用
+    ///
+    /// 未启用时 `set_*_daily_snapshot` 是静默 no-op ⇒ 采集只剩打 vendor，
+    /// 后台任务据此直接不启动（否则每小时空转一遍全市场请求）。
+    pub fn daily_snapshot_enabled(&self) -> bool {
+        self.daily_snapshot.is_some()
+    }
+
     /// C5.3 修复：带 keyword 维度的每日快照查询（用于 search_stock 等方法）
     /// 与 try_daily_snapshot 的区别：cache_key 含 keyword，避免不同 keyword 互相覆盖
     fn try_daily_keyword_snapshot(
@@ -1801,11 +1870,22 @@ impl AStockClient {
     /// 直接调用 international vendor，绕过 A 股 routing，避免无效重试。
     /// 缓存 30s（与 A 股 get_quote 一致）。
     pub async fn get_international_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
-        let cache_key = format!("intl_quote:{stock_code}");
+        let cache_key = Self::cache_key_for("intl_quote", stock_code);
         if let Some(cached) = self.cache_get(&cache_key).await {
             if let Ok(q) = serde_json::from_str::<StockQuote>(&cached) {
                 return Ok(q);
             }
+        }
+        // as-of：国际行情同样是实时快照 ⇒ 用截断后的国际 K 线合成，绝不回退到今日价。
+        // （与 A 股 `get_quote` 的 as-of 分支同口径，见 PLAN §2-D6）
+        if crate::as_of::is_asof_active() {
+            let ks = self.get_international_klines(stock_code, "daily", 5, None).await?;
+            return Self::quote_from_klines(stock_code, &ks).ok_or_else(|| {
+                DataError::VendorError {
+                    vendor: "international".into(),
+                    message: format!("as-of 模式下 {stock_code} 无截止日或更早的国际 K 线"),
+                }
+            });
         }
         let vendor = self.find_vendor("international").ok_or_else(|| DataError::VendorError {
             vendor: "international".into(),
@@ -1824,7 +1904,12 @@ impl AStockClient {
         limit: u32,
         adj_type: Option<crate::types::AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
-        let cache_key = format!("intl_klines:{stock_code}:{period}:{limit}:{:?}", adj_type);
+        // cache key 必须带模式后缀：此前用裸 `intl_klines:...`，live 抓到的跨截止日
+        // K 线会被回放直接读走（即使后面加了截断也拦不住缓存这条路）。
+        let cache_key = Self::cache_key_for(
+            "intl_klines",
+            &format!("{stock_code}:{period}:{limit}:{adj_type:?}"),
+        );
         if let Some(cached) = self.cache_get(&cache_key).await {
             if let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached) {
                 if ks.len() >= limit as usize {
@@ -1837,7 +1922,9 @@ impl AStockClient {
             vendor: "international".into(),
             message: "国际股票 vendor 未注册".into(),
         })?;
-        let result = vendor.get_klines(stock_code, period, limit, adj_type).await?;
+        let result = Self::truncate_klines_by_asof(
+            vendor.get_klines(stock_code, period, limit, adj_type).await?,
+        );
         self.cache_set_serialized(cache_key, &result, 300).await;
         Ok(result)
     }
@@ -1852,7 +1939,8 @@ impl AStockClient {
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        let cache_key = format!("benchmark_klines:{benchmark_code}:{period}:{limit}");
+        let cache_key =
+            Self::cache_key_for("benchmark_klines", &format!("{benchmark_code}:{period}:{limit}"));
         if let Some(cached) = self.cache_get(&cache_key).await {
             if let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached) {
                 if ks.len() >= limit as usize {
@@ -1888,6 +1976,8 @@ impl AStockClient {
             let clean_code = benchmark_code.trim().trim_end_matches(".SH").trim_end_matches(".SZ");
             self.get_klines(clean_code, period, limit).await?
         };
+        // 统一在此截断（国际分支绕过 A 股主路径的截断；A 股分支重复截断是幂等的、不会二次丢数据）
+        let result = Self::truncate_klines_by_asof(result);
         self.cache_set_serialized(cache_key, &result, 300).await;
         Ok(result)
     }
@@ -1901,7 +1991,7 @@ impl AStockClient {
         period: &str,
         limit: u32,
     ) -> Result<Vec<KLine>, DataError> {
-        let cache_key = format!("forex_klines:{pair}:{period}:{limit}");
+        let cache_key = Self::cache_key_for("forex_klines", &format!("{pair}:{period}:{limit}"));
         if let Some(cached) = self.cache_get(&cache_key).await {
             if let Ok(ks) = serde_json::from_str::<Vec<KLine>>(&cached) {
                 if ks.len() >= limit as usize {
@@ -1916,7 +2006,9 @@ impl AStockClient {
         })?;
         // 外汇代码转换：USD/CNY → forex.usdcny
         let forex_code = pair.trim().to_uppercase().replace('/', "");
-        let result = vendor.get_klines(&format!("forex.{forex_code}"), period, limit, None).await?;
+        let result = Self::truncate_klines_by_asof(
+            vendor.get_klines(&format!("forex.{forex_code}"), period, limit, None).await?,
+        );
         self.cache_set_serialized(cache_key, &result, 300).await;
         Ok(result)
     }
@@ -2125,6 +2217,7 @@ impl AStockClient {
             },
         )
         .await
+        .map(Self::truncate_earnings_by_asof)
     }
 
     /// 获取社交舆情数据（股吧/雪球热度）
@@ -2132,6 +2225,27 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Vec<crate::types::SocialSentiment>, DataError> {
+        // as-of：舆情是「当下情绪」，`SocialSentiment` 只有 fetched_at、没有逐帖发布时间
+        // ⇒ 无截断可言，唯一历史通道是个股级每日快照（此前直接打 guba/xueqiu，
+        // 等于把今天的舆情喂给回放的 a-sentiment，且不留任何痕迹）。
+        if crate::as_of::is_asof_active() {
+            let date = crate::as_of::current_date_or_now();
+            if let Some(cached) =
+                self.try_stock_daily_snapshot("get_social_sentiment", stock_code, &date)
+            {
+                if let Ok(v) = serde_json::from_str::<Vec<crate::types::SocialSentiment>>(&cached) {
+                    if !v.is_empty() {
+                        return Ok(v);
+                    }
+                }
+            }
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_social_sentiment",
+                &format!("as-of 模式无 {stock_code} 当日舆情快照（该维度无历史语义）"),
+            );
+            return Ok(vec![]);
+        }
         let vendor_names: Vec<String> =
             self.routing.social_sentiment.iter().map(|n| n.to_string()).collect();
         let sc = stock_code.to_string();
@@ -2315,6 +2429,9 @@ impl AStockClient {
                 })
             })
             .await?;
+        // 先裁再缓存：缓存 key 虽按模式隔离，但落缓存的必须是已裁好的序列 ——
+        // 否则同一次回放里后续读缓存会绕过截断，`ValuationBand.current` 又取到今天的 PE。
+        let result = Self::truncate_valuation_by_asof(result);
         self.cache_set_serialized(cache_key, &result, 12 * 3600).await;
         Ok(result)
     }
@@ -2400,7 +2517,9 @@ impl AStockClient {
                 crate::as_of::record_degradation(
                     "astock-data",
                     "get_news",
-                    "as-of 模式 news_archive 无该股历史新闻（该维度结构性为空）",
+                    &format!(
+                        "as-of 模式 news_archive 无 {stock_code} 历史新闻（该维度结构性为空）"
+                    ),
                 );
                 return Ok(vec![]);
             }
@@ -2591,6 +2710,15 @@ impl AStockClient {
         // P4: 按 vendor 申报的 capability 决策
         // 目前所有 vendor 均为 Fallthrough(不支持 as-of 参数),as-of 模式返回 None
         if crate::as_of::is_asof_active() {
+            // ① 个股级每日快照（`run_daily_snapshot_sweep` 当日采过则直接回放）
+            let date = crate::as_of::current_date_or_now();
+            if let Some(cached) = self.try_stock_daily_snapshot("get_money_flow", stock_code, &date)
+            {
+                if let Ok(Some(r)) = serde_json::from_str::<Option<MoneyFlow>>(&cached) {
+                    return Ok(Some(r));
+                }
+            }
+            // ② vendor 的 as-of 通道。无 as-of 能力的源不再逐条记降级（对决策无信息量）
             for name in self.routing.vendors_for("money_flow", &self.routing.money_flow) {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_money_flow") {
@@ -2599,21 +2727,14 @@ impl AStockClient {
                                 return Ok(Some(r));
                             }
                         },
-                        _ => {
-                            crate::as_of::record_degradation(
-                                name,
-                                "get_money_flow",
-                                "no historical semantic",
-                            );
-                            continue;
-                        },
+                        _ => continue,
                     }
                 }
             }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_money_flow",
-                "as-of 模式所有 vendor 均未提供历史资金流向",
+                &format!("as-of 模式无 {stock_code} 历史资金流向（无 as-of 通道，且无当日快照）"),
             );
             return Ok(None);
         }
@@ -3025,18 +3146,41 @@ impl AStockClient {
         // P4: 按 vendor 申报的 capability 决策
         // eastmoney 已申报 NativeDateParam,as-of 模式调 with_asof 可拿到当日数据
         if crate::as_of::is_asof_active() {
+            let cache_key = Self::cache_key_for("margin", stock_code);
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(data) = serde_json::from_str::<Option<MarginData>>(&cached) {
+                    return Ok(data);
+                }
+            }
+            // ① 每日快照（个股级，key 含 code）
+            let date = crate::as_of::current_date_or_now();
+            if let Some(cached) =
+                self.try_stock_daily_snapshot("get_margin_data", stock_code, &date)
+            {
+                if let Ok(Some(r)) = serde_json::from_str::<Option<MarginData>>(&cached) {
+                    return Ok(Some(r));
+                }
+            }
+            // ② vendor 的 as-of 通道。
+            //    「该源本就无 as-of 能力」不再逐源记降级（那种条目对决策没有信息量，
+            //    只是把降级面板刷满），改为计数后在末尾统一留痕一条。
+            let mut unsupported = 0usize;
+            let mut supported = 0usize;
+            let mut all_confirmed_empty = true;
             for name in &self.routing.margin {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_margin_data") {
                         AsOfCapability::NativeDateParam => {
+                            supported += 1;
                             match vendor.get_margin_data_with_asof(stock_code).await {
                                 Ok(Some(r)) => {
-                                    let cache_key = Self::cache_key_for("margin", stock_code);
                                     self.cache_set_serialized(cache_key, &Some(&r), 300).await;
                                     return Ok(Some(r));
                                 },
+                                // 该源明确回答「截止日没有这只票的两融数据」—— 空是答案，不是失败
                                 Ok(None) => continue,
                                 Err(e) => {
+                                    all_confirmed_empty = false;
                                     crate::as_of::record_degradation(
                                         name,
                                         "get_margin_data",
@@ -3046,31 +3190,29 @@ impl AStockClient {
                                 },
                             }
                         },
-                        AsOfCapability::Fallthrough => {
-                            // 没有 truncation 函数,不能使用 vendor 实时数据
-                            crate::as_of::record_degradation(
-                                name,
-                                "get_margin_data",
-                                "Fallthrough vendor 不支持 as-of 参数,跳过",
-                            );
-                            continue;
-                        },
+                        // Fallthrough / NoHistoricalSemantic：无法按截止日取数，
+                        // 也绝不回退到 vendor 实时接口（那是把今天的两融余额当成截止日的）
                         _ => {
-                            crate::as_of::record_degradation(
-                                name,
-                                "get_margin_data",
-                                "no historical semantic",
-                            );
+                            unsupported += 1;
                             continue;
                         },
                     }
                 }
             }
-            crate::as_of::record_degradation(
-                "astock-data",
-                "get_margin_data",
-                "as-of 模式所有 vendor 均未提供历史数据",
-            );
+            // 三种「拿不到两融」的语义必须分开，否则提示会把「确实没有」与「本模块没通道」混为一谈
+            let reason = if supported == 0 {
+                format!(
+                    "as-of 模式 {stock_code} 两融无历史通道：{} 个源均未申报 as-of 能力，且无当日快照",
+                    unsupported
+                )
+            } else if all_confirmed_empty {
+                format!("as-of 模式 {stock_code} 无融资融券披露数据（非两融标的，或该日无披露）")
+            } else {
+                format!(
+                    "as-of 模式 {stock_code} 两融取数失败：{supported} 个有 as-of 通道的源全部报错"
+                )
+            };
+            crate::as_of::record_degradation("astock-data", "get_margin_data", &reason);
             return Ok(None);
         }
         {
@@ -3166,10 +3308,22 @@ impl AStockClient {
     /// 重试策略：与 margin 一致 — 真实故障（网络/解析）才重试，空数据直接返回。
     pub async fn get_pledge_data(&self, stock_code: &str) -> Result<Option<PledgeData>, DataError> {
         if crate::as_of::is_asof_active() {
+            // as-of：`PledgeData` 没有任何日期字段（当日快照口径），vendor 侧也没有
+            // `_with_asof` 实现 ⇒ 唯一历史通道是个股级每日快照。此前这里一进 as-of 就
+            // 记一条「所有 vendor 均未提供历史质押数据」然后返回 None —— 话是实话，
+            // 但快照这条路根本没试，于是质押维度在回放里**恒缺**。
+            let date = crate::as_of::current_date_or_now();
+            if let Some(cached) =
+                self.try_stock_daily_snapshot("get_pledge_data", stock_code, &date)
+            {
+                if let Ok(Some(r)) = serde_json::from_str::<Option<PledgeData>>(&cached) {
+                    return Ok(Some(r));
+                }
+            }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_pledge_data",
-                "as-of 模式所有 vendor 均未提供历史质押数据",
+                &format!("as-of 模式无 {stock_code} 当日质押快照（该维度无历史语义）"),
             );
             return Ok(None);
         }
@@ -3254,6 +3408,16 @@ impl AStockClient {
     ) -> Result<Option<NorthBoundHolding>, DataError> {
         // P4: 按 capability 决策(所有 vendor Fallthrough,as-of 模式返回 None)
         if crate::as_of::is_asof_active() {
+            // ① 个股级每日快照（`run_daily_snapshot_sweep` 当日采过则直接回放）
+            let date = crate::as_of::current_date_or_now();
+            if let Some(cached) =
+                self.try_stock_daily_snapshot("get_north_bound_holding", stock_code, &date)
+            {
+                if let Ok(Some(r)) = serde_json::from_str::<Option<NorthBoundHolding>>(&cached) {
+                    return Ok(Some(r));
+                }
+            }
+            // ② vendor 的 as-of 通道。无 as-of 能力的源不再逐条记降级（对决策无信息量）
             for name in &self.routing.north_bound {
                 if let Some(vendor) = self.find_vendor(name) {
                     match vendor.asof_capability("get_north_bound_holding") {
@@ -3264,21 +3428,14 @@ impl AStockClient {
                                 return Ok(Some(r));
                             }
                         },
-                        _ => {
-                            crate::as_of::record_degradation(
-                                name,
-                                "get_north_bound_holding",
-                                "no historical semantic",
-                            );
-                            continue;
-                        },
+                        _ => continue,
                     }
                 }
             }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_north_bound_holding",
-                "as-of 模式所有 vendor 均未提供历史北向持仓",
+                &format!("as-of 模式无 {stock_code} 历史北向持仓（无 as-of 通道，且无当日快照）"),
             );
             return Ok(None);
         }
@@ -3338,7 +3495,9 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_sector_info", &date) {
+                if let Some(cached) =
+                    self.try_stock_daily_snapshot("get_sector_info", stock_code, &date)
+                {
                     if let Ok(r) = serde_json::from_str::<Option<SectorInfo>>(&cached) {
                         if r.is_some() {
                             return Ok(r);
@@ -3465,7 +3624,9 @@ impl AStockClient {
             })
             .await
         {
-            Ok(result) => Ok(result),
+            // as-of 必须截断：截止日之后的除权/送转是未来信息。
+            // `truncate_dividend_by_asof` 早就写好了，但一直没被调用（事件型数据泄露）。
+            Ok(result) => Ok(Self::truncate_dividend_by_asof(result)),
             Err(_) => Ok(vec![]),
         }
     }
@@ -3665,9 +3826,10 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_stock_concept_blocks", &date) {
-                    // 概念板块按个股有差异,缓存只能做"今日全市场数据"的兜底
-                    // 如果精确到个股,需要后续细化
+                if let Some(cached) =
+                    self.try_stock_daily_snapshot("get_concept_blocks", stock_code, &date)
+                {
+                    // 概念板块按个股有差异,快照按 code 维度存取
                     if let Ok(r) = serde_json::from_str::<Option<ConceptBlocks>>(&cached) {
                         if r.is_some() {
                             return Ok(r);
@@ -4042,6 +4204,16 @@ impl AStockClient {
         &self,
         keyword: &str,
     ) -> Result<Vec<ConceptBoard>, DataError> {
+        // as-of：概念板块榜是「当下」语义（板块构成按月度调整，接口不提供历史区间），
+        // 回放里返回当下构成＝时间泄露 ⇒ 留痕并返回空。
+        if crate::as_of::is_asof_active() {
+            crate::as_of::record_degradation(
+                "astock-data",
+                "search_concept_boards",
+                &format!("as-of 模式概念板块无历史语义（关键词 {keyword}）"),
+            );
+            return Ok(vec![]);
+        }
         let keyword_owned = keyword.to_string();
         let vendor_names: Vec<String> =
             self.routing.concept_boards.iter().map(|n| n.to_string()).collect();
@@ -4082,6 +4254,16 @@ impl AStockClient {
         &self,
         board_code: &str,
     ) -> Result<Vec<BoardMember>, DataError> {
+        // as-of：板块成分同样是「当下」语义（回放里给今日成分＝时间泄露）
+        // ⇒ 留痕并返回空。个股维度请改用 `get_concept_blocks`（那条有每日快照兜底）。
+        if crate::as_of::is_asof_active() {
+            crate::as_of::record_degradation(
+                "astock-data",
+                "get_concept_board_members",
+                &format!("as-of 模式板块成分无历史语义（板块 {board_code}）"),
+            );
+            return Ok(vec![]);
+        }
         let code_owned = board_code.to_string();
         let vendor_names: Vec<String> =
             self.routing.board_members.iter().map(|n| n.to_string()).collect();
@@ -4368,10 +4550,62 @@ impl AStockClient {
 
     pub async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
         if crate::as_of::is_asof_active() {
+            // as-of 模式的指数行情有三条真实通道，全部走完才允许降级 ——
+            // 此前这里是**无条件 `record_degradation + return Ok(vec![])`**，一条通道都没试
+            // （2026-09-25 修）。报告「大盘指数」板块在回放模式下恒空，而 eastmoney 早已
+            // 申报 `SynthesizeFromKline` 并注明「应由路由层用 K 线合成」。
+            let cache_key = Self::cache_key_for("index_quotes", "market");
+            if let Some(cached) = self.cache_get(&cache_key).await {
+                if let Ok(v) = serde_json::from_str::<Vec<IndexQuote>>(&cached) {
+                    return Ok(v);
+                }
+            }
+            // ① 每日快照：live 模式当日收盘后采集过，回放即可直接复用
+            let date = crate::as_of::current_date_or_now();
+            if let Some(cached) = self.try_daily_snapshot("get_index_quotes", &date) {
+                match serde_json::from_str::<Vec<IndexQuote>>(&cached) {
+                    Ok(v) if !v.is_empty() => return Ok(v),
+                    Err(e) => tracing::warn!(
+                        "[asof] daily_snapshot 反序列化失败(get_index_quotes/{date}): {e}"
+                    ),
+                    _ => {},
+                }
+            }
+            // ② vendor 的 as-of 通道（按截止日 K 线合成，见 `eastmoney::get_index_quotes_with_asof`）。
+            //    逐源失败只落 tracing，汇总成**一条**降级留痕 —— 与 `get_margin_data` 同口径，
+            //    避免「某源未申报该能力」这类对决策无信息量的条目占满面板。
+            let mut failed: Vec<String> = Vec::new();
+            for name in &self.routing.index_quotes {
+                let Some(vendor) = self.find_vendor(name) else { continue };
+                // 能力闸门：只有申报「能按截止日取数」的源才允许调 with_asof。
+                // trait 默认实现已改为显式 Err（见 `vendors::mod::get_index_quotes_with_asof`），
+                // 这里再按申报能力拦一道，免得未申报的源把「未实现」当成一次真实失败。
+                if !matches!(
+                    self.vendor_asof_capability(name, "get_index_quotes"),
+                    AsOfCapability::NativeDateParam | AsOfCapability::SynthesizeFromKline
+                ) {
+                    continue;
+                }
+                match vendor.get_index_quotes_with_asof().await {
+                    Ok(quotes) if !quotes.is_empty() => {
+                        self.cache_set_serialized(cache_key, &quotes, 300).await;
+                        return Ok(quotes);
+                    },
+                    Ok(_) => failed.push(format!("{name} 返回空")),
+                    Err(e) => {
+                        tracing::warn!("[asof] {name} get_index_quotes_with_asof 失败: {e}");
+                        failed.push(format!("{name} 未实现或取数失败"));
+                    },
+                }
+            }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_index_quotes",
-                "as-of 模式不支持指数行情",
+                &format!(
+                    "as-of 模式指数行情不可用：无当日快照，可用源 {}，失败源 [{}]",
+                    self.routing.index_quotes.len(),
+                    failed.join(", ")
+                ),
             );
             return Ok(vec![]);
         }
@@ -5629,5 +5863,558 @@ mod asof_realtime_degrade_tests {
         let report = peek_global_degradation_report();
         let has_asof_entry = report.iter().any(|e| e.method == "get_market_dragon_tiger");
         assert!(has_asof_entry, "D 档修复后,as-of 模式应至少记录一次 get_market_dragon_tiger 降级");
+    }
+}
+
+#[cfg(test)]
+mod asof_snapshot_first_tests {
+    use super::*;
+    use crate::as_of::{peek_global_degradation_report, AsOfContext, AsOfSource, AS_OF};
+    use chrono::NaiveDate;
+    use serial_test::serial;
+
+    /// 建一个「L2 + 每日快照」都启用的客户端（与 `init/state.rs` 的装配口径一致）。
+    /// 每次用独立临时文件，避免测试间互相读到人家的快照。
+    fn client_with_snapshots(tag: &str) -> AStockClient {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("astock_snapshot_first_{}_{}.json", tag, std::process::id()));
+        let _ = std::fs::remove_file(&dir);
+        let (client, _l2) = AStockClient::new().with_l2_cache(dir);
+        client.with_daily_snapshot_cache()
+    }
+
+    fn replay(date_str: &str) -> AsOfContext {
+        let d = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").unwrap();
+        AsOfContext::new(d, AsOfSource::UserReplay).unwrap()
+    }
+
+    /// 指数行情：as-of 命中当日快照 ⇒ 不打 vendor、不记降级。
+    ///
+    /// 缺陷形态（2026-09-25 修）：`get_index_quotes` 一进 as-of 就无条件记降级返回空，
+    /// 快照与 vendor 的 as-of 通道两条路都没试过。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn index_quotes_hit_daily_snapshot_before_vendor() {
+        let date = "2026-06-01";
+        let client = client_with_snapshots("idx");
+        let payload = serde_json::to_string(&vec![IndexQuote {
+            code: "000001".into(),
+            name: "上证指数".into(),
+            price: 3100.0,
+            pre_close: 3080.0,
+            change_pct: 0.6494,
+            volume: 1.0,
+            amount: 2.0,
+        }])
+        .unwrap();
+        client.set_daily_snapshot("get_index_quotes", date, &payload);
+        crate::as_of::reset_global_degradation_log();
+
+        let got = AS_OF
+            .scope(Some(replay(date)), async { client.get_index_quotes().await })
+            .await
+            .expect("快照命中应返回数据");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].price, 3100.0, "必须回放快照值，而非当日实时值");
+        let report = peek_global_degradation_report();
+        assert!(
+            report.iter().all(|e| e.method != "get_index_quotes"),
+            "取到数据不应记降级: {report:?}"
+        );
+    }
+
+    /// 两融：个股级快照（key 含 code）必须能被读回。
+    ///
+    /// 缺陷形态：sweep 按 `daily:{method}:{code}:{date}` 写入，读取侧却只有不带 code 的
+    /// `get` ⇒ 采集白采。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn margin_data_hit_stock_scoped_snapshot() {
+        let date = "2026-06-01";
+        let client = client_with_snapshots("margin");
+        let margin = MarginData {
+            stock_code: "600519".into(),
+            date: date.into(),
+            margin_buy: 1.0,
+            margin_balance: 2.0,
+            short_sell_volume: 3.0,
+            short_balance: 4.0,
+        };
+        client.set_stock_daily_snapshot(
+            "get_margin_data",
+            "600519",
+            date,
+            &serde_json::to_string(&margin).unwrap(),
+        );
+
+        let got = AS_OF
+            .scope(Some(replay(date)), async { client.get_margin_data("600519").await })
+            .await
+            .expect("快照命中应返回 Ok")
+            .expect("应读到个股级快照");
+        assert_eq!(got.margin_balance, 2.0);
+        assert_eq!(got.date, date);
+    }
+
+    /// 快照未命中时的降级必须是**汇总级**一条，且不再出现逐 vendor 的
+    /// 「Fallthrough vendor 不支持 as-of 参数」这类对决策无信息量的条目。
+    ///
+    /// 判据不依赖 vendor 是否真取到数（沙箱里网络通常不通 ⇒ 走降级；
+    /// 真取到了则更不该有降级），两种结果都只校验「不得有逐源能力播报」。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn margin_data_degradation_is_aggregated_not_per_vendor() {
+        let date = "2020-01-03";
+        let client = client_with_snapshots("margin_miss");
+        crate::as_of::reset_global_degradation_log();
+
+        let r =
+            AS_OF.scope(Some(replay(date)), async { client.get_margin_data("600519").await }).await;
+        assert!(r.is_ok(), "无数据应返回 Ok 而非报错: {r:?}");
+        let entries: Vec<_> = peek_global_degradation_report()
+            .into_iter()
+            .filter(|e| e.method == "get_margin_data")
+            .collect();
+        assert!(
+            entries.iter().all(|e| !e.reason.contains("Fallthrough")),
+            "逐 vendor 的能力说明不应出现在降级面板: {entries:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod asof_boundary_tests {
+    //! as-of 时间边界不变量：**回放模式下任何取数面都不得返回越过截止日的条目**。
+    //!
+    //! 为什么写这一组而不是只测「降级有没有留痕」：取不到数会在面板留痕、会让分析师写
+    //! "数据缺失"；取到**越过截止日**的数据却什么都不说 —— 报告照写、结论照下，
+    //! 而 `data_quality_precheck` 管的是「够不够数跑 DAG」，不管时间边界。
+    //! ⇒ 把边界写成断言，后续新增取数方法漏接 as-of 时在这里变红。
+    //!
+    //! 全部走 `StubVendor` 构造数据 ⇒ 零真实网络（本仓的 live-network 测试已多次 flaky）。
+    use super::*;
+    use crate::as_of::{peek_global_degradation_report, AsOfContext, AsOfSource, AS_OF};
+    use chrono::NaiveDate;
+    use serial_test::serial;
+    use std::collections::HashSet;
+
+    const CUTOFF: &str = "2024-06-03";
+
+    fn cutoff_ctx() -> AsOfContext {
+        AsOfContext::new(
+            NaiveDate::parse_from_str(CUTOFF, "%Y-%m-%d").unwrap(),
+            AsOfSource::UserReplay,
+        )
+        .unwrap()
+    }
+
+    fn bar(date: &str, close: f64) -> KLine {
+        KLine {
+            date: date.into(),
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume: 1.0,
+            amount: 1.0,
+            turnover_rate: None,
+            adj_factor: None,
+        }
+    }
+
+    /// 跨截止日的估值序列（末条晚于截止日）
+    fn snaps() -> Vec<ValuationSnapshot> {
+        ["2024-05-31", "2024-06-03", "2024-06-10"]
+            .iter()
+            .map(|d| ValuationSnapshot {
+                trade_date: d.to_string(),
+                pe_ttm: Some(10.0),
+                pb: Some(1.0),
+                ps_ttm: Some(2.0),
+                pcf: Some(3.0),
+                close_price: Some(100.0),
+                total_market_cap: Some(1e10),
+            })
+            .collect()
+    }
+
+    fn dividends() -> Vec<DividendRecord> {
+        vec![
+            DividendRecord {
+                stock_code: "600519".into(),
+                ex_date: "2024-05-20".into(),
+                dividend_per_share: 1.0,
+                bonus_share_ratio: 0.0,
+                record_date: "2024-05-18".into(),
+            },
+            DividendRecord {
+                stock_code: "600519".into(),
+                ex_date: "2024-07-01".into(),
+                dividend_per_share: 2.0,
+                bonus_share_ratio: 0.0,
+                record_date: "2024-06-28".into(),
+            },
+        ]
+    }
+
+    fn earnings() -> Vec<EarningsEvent> {
+        vec![
+            EarningsEvent {
+                stock_code: "600519".into(),
+                stock_name: "贵州茅台".into(),
+                event_date: "2024-05-15".into(),
+                event_type: "formal".into(),
+                period: Some("2024Q1".into()),
+                detail: None,
+                source: Some("cninfo".into()),
+                created_at: 0,
+            },
+            EarningsEvent {
+                stock_code: "600519".into(),
+                stock_name: "贵州茅台".into(),
+                event_date: "2024-07-05".into(),
+                event_type: "formal".into(),
+                period: Some("2024Q2".into()),
+                detail: None,
+                source: Some("cninfo".into()),
+                created_at: 0,
+            },
+        ]
+    }
+
+    fn sentiment() -> Vec<SocialSentiment> {
+        vec![SocialSentiment {
+            stock_code: "600519".into(),
+            stock_name: "贵州茅台".into(),
+            platform: "guba".into(),
+            post_count: 42,
+            hot_rank: None,
+            sentiment_score: Some(0.5),
+            bull_ratio: Some(0.6),
+            fetched_at: 1,
+        }]
+    }
+
+    fn pledge() -> PledgeData {
+        PledgeData {
+            stock_code: "600519".into(),
+            pledge_ratio: 12.5,
+            pledge_shares: 1e6,
+            pledge_count: 3,
+            controlling_pledge_ratio: 30.0,
+            risk_level: "低风险".into(),
+        }
+    }
+
+    /// 只回构造数据的 vendor 替身。
+    ///
+    /// 8 个无默认实现的方法给「空/不支持」语义；被审计的方法一律返回**跨截止日**的数据，
+    /// 于是「路由层漏裁」会直接表现为断言失败，而不是静默通过。
+    struct StubVendor;
+
+    #[async_trait::async_trait]
+    impl StockVendor for StubVendor {
+        async fn get_quote(&self, _: &str) -> Result<StockQuote, DataError> {
+            Err(DataError::NotFound("stub".into()))
+        }
+        async fn get_klines(
+            &self,
+            _: &str,
+            _: &str,
+            _: u32,
+            _: Option<AdjType>,
+        ) -> Result<Vec<KLine>, DataError> {
+            Ok(vec![bar("2024-05-30", 99.0), bar("2024-06-10", 105.0)])
+        }
+        async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_news(&self, _: &str, _: u32) -> Result<Vec<NewsItem>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_money_flow(&self, _: &str) -> Result<Option<MoneyFlow>, DataError> {
+            Ok(None)
+        }
+        async fn get_dragon_tiger(&self, _: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_lockup_schedule(&self, _: &str) -> Result<Vec<LockupSchedule>, DataError> {
+            Ok(vec![])
+        }
+        async fn search_stock(&self, _: &str) -> Result<Vec<StockSearchResult>, DataError> {
+            Ok(vec![])
+        }
+        async fn get_valuation_history(
+            &self,
+            _: &str,
+            _: u32,
+        ) -> Result<Vec<ValuationSnapshot>, DataError> {
+            Ok(snaps())
+        }
+        async fn get_dividend_records(&self, _: &str) -> Result<Vec<DividendRecord>, DataError> {
+            Ok(dividends())
+        }
+        async fn get_earnings_calendar(&self, _: &str) -> Result<Vec<EarningsEvent>, DataError> {
+            Ok(earnings())
+        }
+        async fn get_social_sentiment(&self, _: &str) -> Result<Vec<SocialSentiment>, DataError> {
+            Ok(sentiment())
+        }
+        async fn get_pledge_data(&self, _: &str) -> Result<Option<PledgeData>, DataError> {
+            Ok(Some(pledge()))
+        }
+        async fn search_concept_boards(&self, _: &str) -> Result<Vec<ConceptBoard>, DataError> {
+            Ok(vec![ConceptBoard {
+                board_code: "BK0001".into(),
+                board_name: "Stub 板块".into(),
+                stock_count: 1,
+            }])
+        }
+        async fn get_concept_board_members(&self, _: &str) -> Result<Vec<BoardMember>, DataError> {
+            Ok(vec![BoardMember {
+                stock_code: "600519".into(),
+                stock_name: "贵州茅台".into(),
+                change_pct: Some(1.0),
+            }])
+        }
+    }
+
+    /// 只挂替身的客户端：
+    /// - `routing` 各字段直接改成 `["stub"]`（同模块可见私有字段，既有测试已这么用）
+    /// - `international` 条目换成替身 —— `get_international_klines` / `get_forex_klines`
+    ///   与基准指数的国际分支**硬编码** `find_vendor("international")`，不吃 routing
+    /// - `set_enabled_vendors` 只放行这两个名字 ⇒ 真实 vendor 全部被 `find_vendor` 跳过
+    fn stub_client() -> AStockClient {
+        let mut client = AStockClient::new();
+        client.register_vendor("stub", Box::new(StubVendor));
+        let stub_intl: Box<dyn StockVendor> = Box::new(StubVendor);
+        match client.vendors.iter_mut().find(|(n, _)| n == "international") {
+            Some(slot) => slot.1 = stub_intl,
+            None => client.vendors.push(("international".into(), stub_intl)),
+        }
+        let stub = "stub".to_string();
+        client.routing.dividend = vec![stub.clone()];
+        client.routing.earnings_calendar = vec![stub.clone()];
+        client.routing.social_sentiment = vec![stub.clone()];
+        client.routing.pledge = vec![stub.clone()];
+        client.routing.concept_boards = vec![stub.clone()];
+        client.routing.board_members = vec![stub.clone()];
+        client.routing.financials = vec![stub];
+        let allowed = HashSet::from(["stub".to_string(), "international".to_string()]);
+        client.set_enabled_vendors(Some(allowed));
+        client
+    }
+
+    /// 返回越过 `CUTOFF` 的日期串（空 = 没有泄露）
+    fn leaked_dates<T, F>(items: &[T], date_of: F) -> Vec<String>
+    where
+        F: Fn(&T) -> &str,
+    {
+        items.iter().map(date_of).filter(|d| *d > CUTOFF).map(|d| d.to_string()).collect()
+    }
+
+    fn l2_path(tag: &str) -> std::path::PathBuf {
+        let mut p = std::env::temp_dir();
+        p.push(format!("astock_boundary_{}_{}.json", tag, std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        p
+    }
+
+    /// D1 估值历史：越过截止日的样本不得进入回放（它直接决定分位与「当前值」）
+    #[tokio::test]
+    #[serial(asof)]
+    async fn valuation_history_clipped_to_cutoff() {
+        let client = stub_client();
+        let got = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_valuation_history("600519", 5).await })
+            .await
+            .expect("stub 应返回数据");
+        assert!(
+            leaked_dates(&got, |s| s.trade_date.as_str()).is_empty(),
+            "估值序列越过截止日 {CUTOFF}: {:?}",
+            got.iter().map(|s| &s.trade_date).collect::<Vec<_>>()
+        );
+        assert_eq!(got.last().unwrap().trade_date, CUTOFF, "回放里最新一条应正好落在截止日");
+    }
+
+    /// D2 分红：`truncate_dividend_by_asof` 早已写好但零调用点 ⇒ 必须真的被接上
+    #[tokio::test]
+    #[serial(asof)]
+    async fn dividend_records_clipped_to_cutoff() {
+        let client = stub_client();
+        let got = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_dividend_records("600519").await })
+            .await
+            .expect("stub 应返回数据");
+        let leaked = leaked_dates(&got, |d| d.ex_date.as_str());
+        assert!(leaked.is_empty(), "分红除权事件越过截止日: {leaked:?}");
+        assert_eq!(got.len(), 1, "截止日前那条应保留");
+    }
+
+    /// D4 财报日历：回放时点不可知的未来财报日应被裁掉（本轮已定语义）
+    #[tokio::test]
+    #[serial(asof)]
+    async fn earnings_calendar_clipped_to_cutoff() {
+        let client = stub_client();
+        let got = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_earnings_calendar("600519").await })
+            .await
+            .expect("stub 应返回数据");
+        assert!(leaked_dates(&got, |e| e.event_date.as_str()).is_empty(), "财报事件越过截止日");
+    }
+
+    /// D6 跨市场 K 线：国际股票 / 外汇 / 基准指数的国际分支都绕过了 `truncate_klines_by_asof`
+    #[tokio::test]
+    #[serial(asof)]
+    async fn cross_market_klines_clipped_to_cutoff() {
+        let client = stub_client();
+        let intl = AS_OF
+            .scope(Some(cutoff_ctx()), async {
+                client.get_international_klines("AAPL.US", "daily", 10, None).await
+            })
+            .await
+            .expect("国际 K 线应返回数据");
+        assert!(leaked_dates(&intl, |k| k.date.as_str()).is_empty(), "国际 K 线越过截止日");
+
+        let fx = AS_OF
+            .scope(Some(cutoff_ctx()), async {
+                client.get_forex_klines("USD/CNY", "daily", 10).await
+            })
+            .await
+            .expect("外汇 K 线应返回数据");
+        assert!(leaked_dates(&fx, |k| k.date.as_str()).is_empty(), "外汇 K 线越过截止日");
+
+        let bench = AS_OF
+            .scope(Some(cutoff_ctx()), async {
+                client.get_benchmark_klines("SPX", "daily", 10).await
+            })
+            .await
+            .expect("基准指数 K 线应返回数据");
+        assert!(leaked_dates(&bench, |k| k.date.as_str()).is_empty(), "基准指数 K 线越过截止日");
+    }
+
+    /// D6 附带：跨市场 cache key 必须带模式后缀，否则 live 抓的 K 线会被回放直接读走
+    #[tokio::test]
+    #[serial(asof)]
+    async fn cross_market_cache_keys_are_mode_scoped() {
+        let client = stub_client();
+        let live = client.get_international_klines("AAPL.US", "daily", 10, None).await.unwrap();
+        assert!(
+            !leaked_dates(&live, |k| k.date.as_str()).is_empty(),
+            "前置条件：live 模式应拿到越过截止日的原始数据"
+        );
+        let replayed = AS_OF
+            .scope(Some(cutoff_ctx()), async {
+                client.get_international_klines("AAPL.US", "daily", 10, None).await
+            })
+            .await
+            .unwrap();
+        assert!(
+            leaked_dates(&replayed, |k| k.date.as_str()).is_empty(),
+            "回放读到了 live 缓存 ⇒ cache key 未按模式隔离"
+        );
+    }
+
+    /// D5 概念板块搜索与成分：无历史语义 ⇒ 回放里留痕并返回空，不得给当下构成
+    #[tokio::test]
+    #[serial(asof)]
+    async fn concept_board_lookup_degrades_instead_of_leaking() {
+        crate::as_of::reset_global_degradation_log();
+        let client = stub_client();
+        let (boards, members) = AS_OF
+            .scope(Some(cutoff_ctx()), async {
+                (
+                    client.search_concept_boards("人工智能").await,
+                    client.get_concept_board_members("BK0001").await,
+                )
+            })
+            .await;
+        let boards = boards.expect("降级应返回 Ok(空) 而非报错");
+        let members = members.expect("降级应返回 Ok(空) 而非报错");
+        assert!(boards.is_empty(), "板块搜索不得返回当下构成");
+        assert!(members.is_empty(), "板块成分不得返回当下构成");
+        let report = peek_global_degradation_report();
+        for m in ["search_concept_boards", "get_concept_board_members"] {
+            assert!(report.iter().any(|e| e.method == m), "{m} 应留一条降级痕迹: {report:?}");
+        }
+    }
+
+    /// D3/A1 舆情与质押：as-of 唯一正确通道是个股级每日快照 ⇒
+    /// 未命中必须留痕且**不得**返回实时值；命中必须回放快照值。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn sentiment_and_pledge_use_snapshot_never_live() {
+        crate::as_of::reset_global_degradation_log();
+        let client = stub_client();
+
+        // ① 未命中快照 ⇒ 空 + 留痕（替身返回的"当下"值绝不能漏出来）
+        let s_empty = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_social_sentiment("600519").await })
+            .await
+            .expect("降级应返回 Ok(空)");
+        assert!(s_empty.is_empty(), "无快照时舆情必须为空，不得取当下情绪");
+        let p_empty = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_pledge_data("600519").await })
+            .await
+            .expect("降级应返回 Ok(None)");
+        assert!(p_empty.is_none(), "无快照时质押必须为空，不得取当下比例");
+        let report = peek_global_degradation_report();
+        for m in ["get_social_sentiment", "get_pledge_data"] {
+            assert!(report.iter().any(|e| e.method == m), "{m} 应留降级痕迹: {report:?}");
+        }
+
+        // ② 命中个股级快照 ⇒ 回放快照值
+        let (base, _l2) = stub_client().with_l2_cache(l2_path("snapshot"));
+        let snap_client = base.with_daily_snapshot_cache();
+        snap_client.set_stock_daily_snapshot(
+            "get_social_sentiment",
+            "600519",
+            CUTOFF,
+            &serde_json::to_string(&[SocialSentiment {
+                stock_code: "600519".into(),
+                stock_name: "贵州茅台".into(),
+                platform: "guba".into(),
+                post_count: 7,
+                hot_rank: Some(9),
+                sentiment_score: Some(-0.25),
+                bull_ratio: Some(0.3),
+                fetched_at: 2,
+            }])
+            .unwrap(),
+        );
+        snap_client.set_stock_daily_snapshot(
+            "get_pledge_data",
+            "600519",
+            CUTOFF,
+            &serde_json::to_string(&pledge()).unwrap(),
+        );
+        let s = AS_OF
+            .scope(Some(cutoff_ctx()), async { snap_client.get_social_sentiment("600519").await })
+            .await
+            .unwrap();
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].post_count, 7, "必须回放快照值而非当下值");
+        let p = AS_OF
+            .scope(Some(cutoff_ctx()), async { snap_client.get_pledge_data("600519").await })
+            .await
+            .unwrap();
+        assert_eq!(p.unwrap().pledge_ratio, 12.5);
+    }
+
+    /// 负控：live 模式不受上述任何裁剪影响（防「为过回放断言把实时面裁空」）
+    #[tokio::test]
+    #[serial(asof)]
+    async fn live_mode_is_not_clipped() {
+        let client = stub_client();
+        assert_eq!(client.get_valuation_history("600519", 5).await.unwrap().len(), 3);
+        assert_eq!(client.get_dividend_records("600519").await.unwrap().len(), 2);
+        assert_eq!(client.get_earnings_calendar("600519").await.unwrap().len(), 2);
+        assert_eq!(
+            client.get_international_klines("AAPL.US", "daily", 10, None).await.unwrap().len(),
+            2
+        );
+        assert_eq!(client.search_concept_boards("人工智能").await.unwrap().len(), 1);
+        assert_eq!(client.get_social_sentiment("600519").await.unwrap().len(), 1);
+        assert!(client.get_pledge_data("600519").await.unwrap().is_some());
     }
 }

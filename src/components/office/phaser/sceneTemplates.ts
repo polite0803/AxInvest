@@ -920,7 +920,9 @@ export function resolveSceneTemplate(slug?: string): OfficeSceneTemplate {
 // 权威翻译在 `opc.domains.*`（11 语言齐备）；`office.scene.*` 只保留非域包的
 // 通用/注入场景（default_office / startup_loft / investment_office）。
 
-/** 行业场景 slug 集合 — 与 OPC 域包本体对齐；门禁 check-office-scene-align 读同一清单 */
+/** 行业场景 slug 集合 — 与 OPC 域包本体对齐（14 个）；门禁 check-office-scene-align 读同一清单。
+ *  后 5 个（阶段 4-②）无 TS 内置模板，场景由域包 `office_scene.yaml` 启动注入——
+ *  「slug 必须有同名场景」由门禁 rule a（TS∪YAML 合并面）把关。 */
 export const SCENE_DOMAIN_SLUGS: ReadonlySet<string> = new Set([
   "finance_invest",
   "software_dev",
@@ -931,6 +933,11 @@ export const SCENE_DOMAIN_SLUGS: ReadonlySet<string> = new Set([
   "education",
   "consulting",
   "sales_growth",
+  "design",
+  "project_management",
+  "security",
+  "geospatial",
+  "game_dev",
 ]);
 
 /** 显示名 i18n key：行业场景走权威源 `opc.domains.<slug>`，其余走 `office.scene.<displayNameKey>` */

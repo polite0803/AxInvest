@@ -617,6 +617,8 @@ export interface AppSettings {
   defaultWorkspaceDir?: string | null;
   /** Enable screen perception and vision-based UI control */
   screenPerceptionEnabled?: boolean;
+  /** Guardian review gate: an LLM pre-screening pass before asking the user to approve sensitive commands */
+  guardianReviewEnabled?: boolean;
   /** Enable RL optimizer for tool selection and task strategies */
   rlOptimizerEnabled?: boolean;
   /** Enable LoRA fine-tuning for custom model adaptation */

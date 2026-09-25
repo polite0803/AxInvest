@@ -818,6 +818,19 @@ function AgentBehaviorSection() {
         />
       </div>
       <Divider style={{ margin: "4px 0" }} />
+      <div style={{ padding: "4px 0" }} data-search-key="advanced:guardianReview">
+        <div className="flex items-center justify-between">
+          <span>{t("advancedSettings.guardianReview")}</span>
+          <Switch
+            checked={settings.guardianReviewEnabled ?? false}
+            onChange={(v) => saveSettings({ guardianReviewEnabled: v })}
+          />
+        </div>
+        <div style={{ marginTop: 2, fontSize: 12, opacity: 0.6 }}>
+          {t("advancedSettings.guardianReviewHint")}
+        </div>
+      </div>
+      <Divider style={{ margin: "4px 0" }} />
       <div style={{ padding: "4px 0" }} data-search-key="advanced:sandboxMode">
         <div className="flex items-center justify-between">
           <span>{t("advancedSettings.sandboxMode")}</span>

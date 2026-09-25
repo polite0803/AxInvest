@@ -1583,20 +1583,35 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 进 `news_archive` 表（表内仅剩早期手工数据，最后一条约 2026-08-10）；
     // ② 回放/as-of 模式下新闻、政策两条链路恒 `Ok(vec![])` ⇒ 分析师集体写「无法获取」
     // ⇒ 数据质量被拉到 D 级。此处按 `init/news_archive_sink.rs` 头部注释的原始约定接线。
+    // [2026-09-25 接线恢复] astock L2 磁盘缓存 + 每日快照缓存。
+    // `with_l2_cache` / `with_daily_snapshot_cache` 此前全仓零调用点 ⇒
+    // ① vendor 结果只在进程内 moka L1 存活，重启即冷启动全量打 vendor；
+    // ② `daily_snapshot` 恒为 None ⇒ 回放模式的「每日快照」兜底整条不可用，
+    //   `sweep_daily_snapshots` 采回来的数据全部写进 no-op（与 09-24 news sink 同一族断链）。
     let astock_client = {
         let news_archive_sink = Arc::new(crate::init::news_archive_sink::NewsArchiveSinkImpl::new(
             harness.db().clone(),
         ));
+        // `with_l2_cache` 返回 `(client, l2)` 二元组：l2 交给下方 flush 任务持有，
+        // 因此不能继续链式调用，先解构再逐项注入。
+        let (client, l2) =
+            axagent_astock_data::AStockClient::new().with_l2_cache(app_dir.join("astock_l2.json"));
         #[cfg(not(mobile))]
-        let client = axagent_astock_data::AStockClient::new()
-            .with_browser_fetcher(Arc::new(
-                crate::init::browser_fetcher::PlaywrightBrowserFetcher::new(browser_client.clone()),
-            ))
-            .with_news_archive_sink(news_archive_sink);
+        let client = client.with_browser_fetcher(Arc::new(
+            crate::init::browser_fetcher::PlaywrightBrowserFetcher::new(browser_client.clone()),
+        ));
         #[cfg(mobile)]
-        let client = axagent_astock_data::AStockClient::new()
-            .with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher))
-            .with_news_archive_sink(news_archive_sink);
+        let client =
+            client.with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher));
+        let client = client.with_news_archive_sink(news_archive_sink).with_daily_snapshot_cache();
+        // L2 是「写内存 + 30s 脏检查落盘」，必须有人持有 flush 任务；
+        // 随 shutdown_token 优雅退出，退出前做最后一次 flush。
+        let flush_handle = axagent_astock_data::disk_cache::spawn_flush_loop(l2);
+        let l2_shutdown = shutdown_token.clone();
+        tokio::spawn(async move {
+            l2_shutdown.cancelled().await;
+            flush_handle.shutdown_and_join().await;
+        });
         Arc::new(client)
     };
     // [2026-09-03 接线恢复] finance.rs 的 5 个 api_tool（研报/概念板块/北向资金/龙虎榜/财联社快讯）

@@ -181,13 +181,21 @@ pub fn compute_valuation_band<S: FinancialSnapshotLike>(
 /// 两者若各自算窗口，就会出现「图上显示 PE 分位 22%（低位），工作流锚腿却按 61%（高位）给折价」
 /// 这种**同一指标两个结论**的形态 —— 且没有任何报错。故两侧都调本函数。
 ///
-/// 行为与命令层原实现**逐位一致**（`365 * years`，下溢时兜底 `"0000-00-00"`）：
+/// 行为：**live 模式**与命令层原实现逐位一致（`365 * years`，下溢兜底 `"0000-00-00"`）；
+/// **回放模式**锚点改为截止日（见函数体内注释）。
 /// 刻意**不**加 `max(1)` —— 加了会把「显式传 0 年」的语义从「窗口为空」改成「1 年窗口」，
 /// 属于静默改变既有前端图的口径。
 pub fn since_date_from_years(years: u32) -> String {
     let days = 365i64 * years as i64;
-    chrono::Local::now()
-        .date_naive()
+    // 窗口锚点：**回放模式锚在截止日**，live 模式仍锚在真实今天。
+    // 若这里恒用 `Local::now()`，回放 2024-06-03 时窗口下界虽然正确，
+    // 上界却是今天 ⇒ `clip_valuation_history` 只裁下界，`snaps.last()` 于是取到
+    // 今天的 PE 当作"当前值"（须与 `get_valuation_history` 的截断一起才闭合）。
+    let anchor = match crate::as_of::current_as_of() {
+        Some(ctx) => ctx.as_of_date,
+        None => chrono::Local::now().date_naive(),
+    };
+    anchor
         .checked_sub_signed(chrono::Duration::days(days))
         .map(|d| d.format("%Y-%m-%d").to_string())
         .unwrap_or_else(|| "0000-00-00".to_string())
@@ -204,7 +212,7 @@ pub fn since_date_from_years(years: u32) -> String {
 ///    **`current` 取 `historical.last()`**（"最后一条 = 最新一条"），
 ///    而两个来源的顺序**原本相反** —— vendor 接口按 `TRADE_DATE` **降序**返回，
 ///    且 `AStockClient::get_valuation_history` **原样返回不重排**
-///    （`vendors/eastmoney.rs:711`、`lib.rs:2295-2296`）；命令层读表则是
+///    （`vendors/eastmoney.rs:757`、`lib.rs:2428`）；命令层读表则是
 ///    `.order_by_asc(SnapshotDate)` ⇒ **升序**（`commands/stock_analysis.rs`）。
 ///    ⇒ 不归一的话，**同一条腿在两条路径上会拿不同的 `current`**：
 ///    工具路径会把窗口内**最旧**那天的 PE 当"当前 PE"去算分位（数字离谱且无报错）。
@@ -534,5 +542,27 @@ mod tests {
         let (y5, y4) = (since_date_from_years(5), since_date_from_years(4));
         assert!(y5 < y4, "5 年窗口起点应早于 4 年: {y5} vs {y4}");
         assert_eq!(y5.len(), 10);
+    }
+
+    /// 回归（2026-09-25）：**回放模式的窗口锚点必须是截止日**。
+    ///
+    /// 缺陷形态：恒用 `Local::now()` ⇒ 回放 2024-06-03 时窗口下界虽对，上界却是今天；
+    /// 而 `clip_valuation_history` 只裁下界，于是 `snaps.last()`（即 `band.current`）
+    /// 把今天的 PE/PB 当作「当前值」——分位与结论双双越界，且无任何报错。
+    #[tokio::test]
+    #[serial_test::serial(asof)]
+    async fn since_date_anchors_to_cutoff_in_replay() {
+        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        let cutoff = chrono::NaiveDate::from_ymd_opt(2024, 6, 3).unwrap();
+        let ctx = AsOfContext::new(cutoff, AsOfSource::UserReplay).unwrap();
+        let replay = AS_OF.scope(Some(ctx), async { since_date_from_years(1) }).await;
+        assert_eq!(replay, "2023-06-04", "回放窗口下界应由截止日倒推 365 天");
+
+        // 负控：live 模式仍锚在真实今天（前端估值带图口径不得被改动）
+        let live = AS_OF.scope(None, async { since_date_from_years(1) }).await;
+        let expect = (chrono::Local::now().date_naive() - chrono::Duration::days(365))
+            .format("%Y-%m-%d")
+            .to_string();
+        assert_eq!(live, expect, "live 模式不得被锚到截止日");
     }
 }

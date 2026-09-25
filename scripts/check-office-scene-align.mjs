@@ -15,8 +15,8 @@
  * --------------------------------------------------------------
  * | 档 | 对象 | 处置 |
  * |---|---|---|
- * | **硬拦** | a) 场景 slug ∈ 域包目录 ∪ 通用白名单，`SCENE_DOMAIN_SLUGS` 成员必须有同名场景；b) 行业场景的 `opc.domains.<slug>`(+`_desc`) 在 11 语言齐备；c) 每个场景（含 invest 注入版**与域包 office_scene.yaml 版**）的每个 room id/nameKey 的 `office.room.*` 在 11 语言齐备；e) YAML 场景 slug 必须 = 域包目录 id，manifest `office.seed_members[].room` 必须 ∈ 该域包场景房间（阶段 3，`PLAN-office-auto-provision.md`）；YAML 文件存在但解析不出 slug/id-nameKey 不配对 ⇒ 视同结构腐烂 | exit 1 / exit 3 |
- * | **报告** | d) 域包无同名场景 ⇒ 应落豁免清单；豁免清单里的域若已补场景（含 YAML 方式）⇒ 提示清理；YAML 与内置 TS 模板同名 ⇒ 提示阶段 4 迁移删 TS 版。补不补场景是产品裁决，硬拦会逼人删登记项——信号不是被解决，是被消灭 | 只打印 |
+ * | **硬拦** | a) 场景 slug ∈ 域包目录 ∪ 通用白名单，`SCENE_DOMAIN_SLUGS` 成员必须有同名场景；b) 行业场景的 `opc.domains.<slug>`(+`_desc`) 在 11 语言齐备；c) 每个场景（含 invest 注入版**与域包 office_scene.yaml 版**）的每个 room id/nameKey 的 `office.room.*` 在 11 语言齐备；d) 域包必须有同名场景——阶段 4-② 起 14 域包全量覆盖、豁免清零，本判据由报告档升硬拦（判据对象从「产品观点」变成「派生量」即应升级，#147 反向适用）；e) YAML 场景 slug 必须 = 域包目录 id，manifest `office.seed_members[].room` 必须 ∈ 该域包场景房间（阶段 3，`PLAN-office-auto-provision.md`）；YAML 文件存在但解析不出 slug/id-nameKey 不配对 ⇒ 视同结构腐烂 | exit 1 / exit 3 |
+ * | **报告** | YAML 与内置 TS 模板同名 ⇒ 提示阶段 4-① 迁移删 TS 版；豁免清单若残留已覆盖的域 ⇒ 提示清理 | 只打印 |
  *
  * 设计纪律
  * --------
@@ -48,8 +48,9 @@ const LANGS = ["ar", "de", "en-US", "es", "fr", "hi", "ja", "ko", "ru", "zh-CN",
 /** 非域包的通用/注入场景（刻意无域包，见计划 §2 非目标） */
 const GENERIC_WHITELIST = new Set(["default_office", "startup_loft", "investment_office"]);
 
-/** 暂无场景的域包（阶段 4 backlog，见 `PLAN-office-scene-domain-align.md`） */
-const EXEMPT_NO_SCENE = new Set(["design", "project_management", "security", "geospatial", "game_dev"]);
+/** 暂无场景的域包豁免清单——阶段 4-② 已清零（14 域包全部有场景）；
+ *  「域包无场景」自 2026-09-26 起为**硬拦**（原报告档判据升级，沿用「对象从观点变成派生量即升硬拦」纪律） */
+const EXEMPT_NO_SCENE = new Set([]);
 
 // ── 现场采集（真实数据）────────────────────────────────────────────
 
@@ -241,14 +242,14 @@ function evaluate({ scenes, yamlScenes = [], seedRoomsByPack = new Map(), domain
     }
   }
 
-  // d) 域包 → 场景覆盖（报告档）
+  // d) 域包 → 场景覆盖（阶段 4-② 起升硬拦：14 域包全量有场景，缺即缺陷）
   for (const id of domainPackIds) {
     if (sceneBySlug.has(id)) {
       if (exemptNoScene.has(id)) { reports.push(`豁免清单里的 "${id}" 已有场景 ⇒ 应从 EXEMPT_NO_SCENE 移除`); }
     } else if (exemptNoScene.has(id)) {
-      reports.push(`域包 "${id}" 无场景（已登记豁免，阶段 4 backlog）`);
+      hard.push(`域包 "${id}" 仍在 EXEMPT_NO_SCENE——豁免已清零（阶段 4-②），补场景或经裁决后重新登记豁免`);
     } else {
-      reports.push(`域包 "${id}" 无同名场景且未豁免 ⇒ 补场景或显式登记 EXEMPT_NO_SCENE`);
+      hard.push(`域包 "${id}" 无同名场景（TS 内置或 office_scene.yaml 皆无）`);
     }
   }
   for (const id of exemptNoScene) {
@@ -269,23 +270,29 @@ function selftest() {
     lang: "t",
     officeRoom: new Set(["r1", ...extra.rooms ?? []]),
     officeScene: new Set(["default_office"]),
-    opcDomains: new Set(["dom_a", "dom_a_desc", ...extra.opc ?? []]),
+    opcDomains: new Set(["dom_a", "dom_a_desc", "dom_b", "dom_b_desc", ...extra.opc ?? []]),
   });
   const base = {
     scenes: [
       { slug: "dom_a", ids: ["r1"], nameKeys: ["r1"] },
+      { slug: "dom_b", ids: ["r1"], nameKeys: ["r1"] },
       { slug: "default_office", ids: ["r1"], nameKeys: ["r1"] },
     ],
-    domainSlugs: new Set(["dom_a"]),
+    domainSlugs: new Set(["dom_a", "dom_b"]),
     domainPackIds: new Set(["dom_a", "dom_b"]),
     locales: [mkLocale()],
-    // 合成豁免集——不引用真实 EXEMPT_NO_SCENE，否则「豁免清单腐烂」判据会把好样本打成硬拦
-    exemptNoScene: new Set(["dom_b"]),
+    // 阶段 4-② 起豁免清零——夹具同样用空集，否则「豁免未补场景」判据会把好样本打成硬拦
+    exemptNoScene: new Set([]),
   };
   // 正控：好样本零硬拦
   const ok = evaluate(base);
   check("好样本必须零硬拦", ok.hard.length === 0);
-  check("域包缺场景必须落报告档", ok.reports.some((r) => r.includes("dom_b")));
+  // 负控 0（阶段 4-② 升级）：域包无场景 ⇒ 硬拦（原报告档）
+  const m0 = evaluate({ ...base, scenes: [base.scenes[0], base.scenes[2]] });
+  check("域包缺场景必须硬拦（判据已升）", m0.hard.some((p) => p.includes('"dom_b" 无同名场景')));
+  // 负控 0b：豁免清单残留已覆盖的域 ⇒ 过期提示落报告档
+  const m0b = evaluate({ ...base, exemptNoScene: new Set(["dom_a"]) });
+  check("豁免过期必须落报告档", m0b.reports.some((r) => r.includes("dom_a") && r.includes("移除")));
   // 负控 1：opc.domains 缺 _desc
   const m1 = evaluate({ ...base, locales: [{ ...base.locales[0], opcDomains: new Set(["dom_a"]) }] });
   check("缺 dom_a_desc 必须硬拦", m1.hard.some((p) => p.includes("dom_a_desc")));

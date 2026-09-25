@@ -68,6 +68,29 @@ pub fn global_approval_policy() -> Option<Arc<axagent_harness::ApprovalPolicy>> 
     GLOBAL_APPROVAL_POLICY.read().clone()
 }
 
+// ── 全局 Guardian 审查闸门（PLAN-codex-parity-adoption R3-2） ──
+//
+// 与上面同款模式：wiring 层在启动初始化 / Settings 变更时注入这里，构建
+// ToolContext 时回退读取。`tools` 是 hybrid，不得依赖 consumer crate `agent`
+// （审查者 `ProviderLlmBridge` 在那边），故只持有 `axagent_harness::GuardianBridge`。
+//
+// 未注入 ⇒ 闸门不启用，审批走「问用户」原路径（见该 trait 的文档：不把 fail-closed
+// 扩大成「没配审查模型就一切拒绝」）。
+static GLOBAL_GUARDIAN_BRIDGE: parking_lot::RwLock<
+    Option<Arc<dyn axagent_harness::GuardianBridge>>,
+> = parking_lot::RwLock::new(None);
+
+/// 设置全局 Guardian 审查闸门（启动初始化 / Settings 变更时调用；传 `None` 即停用）。
+pub fn set_global_guardian_bridge(bridge: Option<Arc<dyn axagent_harness::GuardianBridge>>) {
+    *GLOBAL_GUARDIAN_BRIDGE.write() = bridge;
+}
+
+/// 读取全局 Guardian 审查闸门快照（未设置时为 `None`）。
+#[must_use]
+pub fn global_guardian_bridge() -> Option<Arc<dyn axagent_harness::GuardianBridge>> {
+    GLOBAL_GUARDIAN_BRIDGE.read().clone()
+}
+
 // ── 全局审批规则存储（PLAN-codex-parity-adoption R2-1） ──
 //
 // 与上面两个全局策略同款模式：wiring 层在启动初始化时把 sea_orm 实现注入这里，
@@ -1497,6 +1520,8 @@ impl UnifiedToolRegistry {
                     .approval_rule_store
                     .clone()
                     .or_else(global_approval_rule_store),
+                // R3-2：审查闸门只有全局一档（wiring 按 settings 决定装不装）。
+                guardian_bridge: global_guardian_bridge(),
             };
 
             // ── 运行时 Schema 校验（M-05） ──

@@ -28,7 +28,8 @@ use axagent_harness::{
 use crate::core::*;
 use crate::mcp_launcher::McpLauncher;
 use crate::sandbox::{
-    SandboxConfig, apply_env_to_command, build_sandbox_from_manifest, check_subprocess_permission,
+    SandboxConfig, apply_env_to_command, build_sandbox_from_manifest,
+    build_sandbox_from_permissions, check_subprocess_permission,
 };
 use crate::skill_installer::SkillInstaller;
 use crate::types::*;
@@ -439,6 +440,49 @@ impl PluginManager {
 
     pub fn aggregated_tools(&self) -> Result<Vec<PluginTool>, PluginError> {
         self.plugin_registry()?.aggregated_tools()
+    }
+
+    /// 执行插件声明的命名命令（阶段3-① 分发入口，`PLAN-plugin-gap-closure.md` §2）。
+    ///
+    /// **复用工具执行链**（`PluginTool::execute_sandboxed`）：manifest 的
+    /// `commands[].command` 按空白切分为程序 + 参数直接 exec（不经 shell 解析，防注入），
+    /// ENV 白名单沙箱 + `subprocess_execution` 权限门槛与 tools 完全同形。
+    /// 权限档位取 `ReadOnly`（命令输入走 stdin / `CLAWD_COMMAND_INPUT`）；
+    /// 需要写权限的复杂操作应声明为 tool 而非 command。
+    pub fn execute_plugin_command(
+        &self,
+        plugin_id: &str,
+        command_name: &str,
+        input: &Value,
+    ) -> Result<String, PluginError> {
+        let registry = self.plugin_registry()?;
+        let plugin = registry
+            .get(plugin_id)
+            .ok_or_else(|| PluginError::NotFound(format!("plugin `{plugin_id}` not found")))?;
+        if !plugin.is_enabled() {
+            return Err(PluginError::CommandFailed(format!(
+                "插件 `{plugin_id}` 未启用，命令 `{command_name}` 不可执行"
+            )));
+        }
+        let entry = plugin.commands().iter().find(|c| c.name == command_name).ok_or_else(|| {
+            PluginError::NotFound(format!("插件 `{plugin_id}` 没有声明命令 `{command_name}`"))
+        })?;
+        let metadata = plugin.metadata();
+        let tool = PluginTool::new(
+            plugin_id,
+            metadata.name.clone(),
+            PluginToolDefinition {
+                name: entry.name.clone(),
+                description: Some(entry.description.clone()),
+                input_schema: Value::Object(Default::default()),
+            },
+            entry.command.clone(),
+            Vec::new(),
+            PluginToolPermission::ReadOnly,
+            metadata.root.clone(),
+        );
+        let sandbox = build_sandbox_from_permissions(plugin.permissions());
+        tool.execute_sandboxed(input, &sandbox)
     }
 
     pub fn validate_plugin_source(&self, source: &str) -> Result<PluginManifest, PluginError> {
@@ -1394,6 +1438,7 @@ pub fn builtin_plugins() -> Vec<PluginDefinition> {
         mcp_servers: Vec::new(),
         skills: Vec::new(),
         permissions: Vec::new(),
+        commands: Vec::new(),
     })]
 }
 
@@ -1420,6 +1465,9 @@ fn load_plugin_definition(
     let mcp_servers = manifest.mcp_servers;
     let skills = manifest.skills;
     let permissions = manifest.permissions;
+    // 阶段3-①：commands 必须一路带进 PluginDefinition —— 历史上此处丢弃字段，
+    // 导致 manifest.commands[] 只有加载校验、零执行分发（「有 schema 无分发」缺口）。
+    let commands = manifest.commands;
     Ok(match kind {
         PluginKind::Builtin => PluginDefinition::Builtin(BuiltinPlugin {
             metadata,
@@ -1429,6 +1477,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            commands,
         }),
         PluginKind::Bundled => PluginDefinition::Bundled(BundledPlugin {
             metadata,
@@ -1438,6 +1487,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            commands,
         }),
         PluginKind::External => PluginDefinition::External(ExternalPlugin {
             metadata,
@@ -1447,6 +1497,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            commands,
         }),
         PluginKind::OpenClaw => PluginDefinition::OpenClaw(OpenClawPlugin {
             metadata,
@@ -1456,6 +1507,7 @@ fn load_plugin_definition(
             mcp_servers,
             skills,
             permissions,
+            commands,
         }),
     })
 }

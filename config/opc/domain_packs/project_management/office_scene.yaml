@@ -1,0 +1,166 @@
+slug: project_management
+displayNameKey: project_management
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: plans
+rooms:
+  - id: plans
+    nameKey: plans
+    x: 40
+    y: 60
+    width: 380
+    height: 220
+    color: 1609983
+  - id: warroom
+    nameKey: warroom
+    x: 440
+    y: 60
+    width: 180
+    height: 160
+    color: 563129
+  - id: tracking
+    nameKey: tracking
+    x: 640
+    y: 60
+    width: 140
+    height: 160
+    color: 1295042
+  - id: meeting
+    nameKey: meeting
+    x: 440
+    y: 240
+    width: 340
+    height: 140
+    color: 6930687
+  - id: lounge
+    nameKey: lounge
+    x: 40
+    y: 300
+    width: 380
+    height: 160
+    color: 4292266
+furniture:
+  plans:
+    - kind: desk
+      x: 80
+      y: 130
+    - kind: chair
+      x: 80
+      y: 165
+    - kind: desk
+      x: 200
+      y: 130
+    - kind: chair
+      x: 200
+      y: 165
+    - kind: desk
+      x: 310
+      y: 130
+    - kind: chair
+      x: 310
+      y: 165
+    - kind: plant
+      x: 50
+      y: 80
+  warroom:
+    - kind: whiteboard
+      x: 90
+      y: 60
+    - kind: rug
+      x: 90
+      y: 110
+      w: 120
+      h: 60
+      color: 563129
+    - kind: plant
+      x: 40
+      y: 90
+  tracking:
+    - kind: whiteboard
+      x: 70
+      y: 50
+    - kind: desk
+      x: 70
+      y: 100
+    - kind: chair
+      x: 70
+      y: 135
+  meeting:
+    - kind: whiteboard
+      x: 160
+      y: 60
+    - kind: plant
+      x: 50
+      y: 70
+    - kind: plant
+      x: 280
+      y: 70
+    - kind: rug
+      x: 160
+      y: 100
+      w: 160
+      h: 50
+      color: 6930687
+  lounge:
+    - kind: sofa
+      x: 120
+      y: 70
+    - kind: sofa
+      x: 250
+      y: 70
+    - kind: plant
+      x: 60
+      y: 90
+    - kind: plant
+      x: 330
+      y: 90
+decorations:
+  plans:
+    - kind: window
+      x: 280
+      y: 5
+      w: 70
+      h: 40
+    - kind: painting
+      x: 150
+      y: 5
+      w: 40
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5
+  warroom:
+    - kind: window
+      x: 60
+      y: 5
+      w: 60
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5
+  tracking:
+    - kind: window
+      x: 40
+      y: 5
+      w: 60
+      h: 25
+  meeting:
+    - kind: window
+      x: 130
+      y: 5
+      w: 80
+      h: 30
+    - kind: painting
+      x: 250
+      y: 5
+      w: 40
+      h: 25
+  lounge:
+    - kind: window
+      x: 100
+      y: 5
+      w: 70
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5

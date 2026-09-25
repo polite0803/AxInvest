@@ -233,7 +233,32 @@ impl Tool for BashTool {
                 return Err(ToolError::permission_denied("Bash", &reason));
             },
             crate::approval::ApprovalDecision::AskUser { reason } => {
-                if !ask_user_approval(ctx, cmd, &reason, false).await? {
+                // ── 审查闸门（R3-2）：配了审查者才启用 ──
+                // Allow ⇒ 免询问；Deny ⇒ 硬拒；RequireConfirmation ⇒ 用闸门的理由转人工。
+                // 未注入闸门时维持原路径（直接问用户）—— 闸门是加法，不是前置条件。
+                let mut prompt = reason.clone();
+                let mut human_required = true;
+                if let Some(bridge) = ctx.guardian_bridge.as_ref() {
+                    match bridge
+                        .review(
+                            serde_json::json!({ "command": cmd, "working_dir": working_dir }),
+                            Some(reason.clone()),
+                        )
+                        .await
+                    {
+                        axagent_harness::AccessDecision::Allow => human_required = false,
+                        axagent_harness::AccessDecision::Deny { reason: why } => {
+                            return Err(ToolError::permission_denied(
+                                "Bash",
+                                &format!("审查闸门拒绝执行：{why}"),
+                            ));
+                        },
+                        axagent_harness::AccessDecision::RequireConfirmation { prompt: p } => {
+                            prompt = p;
+                        },
+                    }
+                }
+                if human_required && !ask_user_approval(ctx, cmd, &prompt, false).await? {
                     return Err(ToolError::permission_denied("Bash", "用户拒绝执行该命令"));
                 }
                 // 批准：沙箱可用则沙箱内跑，否则直通
@@ -244,9 +269,12 @@ impl Tool for BashTool {
                 } else {
                     run_direct(cmd, working_dir, timeout_secs).await?
                 };
-                // 沉淀（R2-1 / §7 O-2 裁定 B）：**批准 + 退出码 0** 才落规则。
-                // 批准只证明「用户点过一次同意」，成功退出才证明「这条命令可用」。
-                sediment_approved_rule(ctx, cmd, &rules, exit_code).await;
+                // 沉淀（R2-1 / §7 O-2 裁定 B）：**人批准 + 退出码 0** 才落规则。
+                // 批准只证明「用户点过一次同意」，成功退出才证明「这条命令可用」；
+                // 闸门放行不算 —— 沉淀是「以后不再问这个人」，前提是这个问过的人存在。
+                if human_required {
+                    sediment_approved_rule(ctx, cmd, &rules, exit_code).await;
+                }
                 return Ok(result);
             },
             crate::approval::ApprovalDecision::RunInsideSandbox => {
@@ -949,5 +977,172 @@ mod tests {
         let rules = store.list().await;
         assert!(rules.is_empty(), "撤销后规则表应为空");
         assert_eq!(evaluate("git status", &rules), RuleVerdict::Incomplete);
+    }
+
+    // ── R3-2：审查闸门接入审批路径（Allow / Deny / RequireConfirmation / 未注入）──
+
+    /// 闸门替身：按脚本返回固定决策，记录被调次数与收到的证据载荷。
+    #[derive(Debug)]
+    struct ScriptedGuardian {
+        decision: axagent_harness::AccessDecision,
+        calls: std::sync::atomic::AtomicUsize,
+        last_payload: parking_lot::Mutex<Option<serde_json::Value>>,
+    }
+
+    impl ScriptedGuardian {
+        fn new(decision: axagent_harness::AccessDecision) -> Self {
+            Self {
+                decision,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+                last_payload: parking_lot::Mutex::new(None),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl axagent_harness::GuardianBridge for ScriptedGuardian {
+        async fn review(
+            &self,
+            payload: serde_json::Value,
+            _reason: Option<String>,
+        ) -> axagent_harness::AccessDecision {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *self.last_payload.lock() = Some(payload);
+            self.decision.clone()
+        }
+    }
+
+    /// 提问桥替身：记录被问次数并按脚本回答。
+    #[derive(Debug)]
+    struct AnswerBridge {
+        asked: std::sync::atomic::AtomicUsize,
+        answer: &'static str,
+    }
+
+    impl axagent_harness::AskUserBridge for AnswerBridge {
+        fn ask_user_blocking(
+            &self,
+            _ask_id: String,
+            _questions_json: serde_json::Value,
+            _conversation_id: &str,
+        ) -> Result<String, String> {
+            self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.answer.to_string())
+        }
+    }
+
+    impl AnswerBridge {
+        fn asked(&self) -> usize {
+            self.asked.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    /// 构造「必定落到 AskUser」的上下文：Untrusted 档 + 无沙箱 ⇒ Safe 命令也要问。
+    fn untrusted_ctx() -> ToolContext {
+        let mut ctx = ToolContext::new(".");
+        ctx.approval_policy = Some(std::sync::Arc::new(axagent_harness::ApprovalPolicy::Untrusted));
+        ctx
+    }
+
+    /// 闸门放行 ⇒ 不弹人工确认、命令照样执行；且**不沉淀**规则（没人批准过）。
+    #[tokio::test]
+    async fn guardian_allow_runs_without_asking_and_does_not_sediment() {
+        use axagent_harness::ApprovalRuleStore;
+
+        let guardian =
+            std::sync::Arc::new(ScriptedGuardian::new(axagent_harness::AccessDecision::Allow));
+        let bridge = std::sync::Arc::new(AnswerBridge {
+            asked: std::sync::atomic::AtomicUsize::new(0),
+            answer: "拒绝", // 若真被问到就拒绝 ⇒ 下面的 Ok 断言可证明确实没问
+        });
+        let store = std::sync::Arc::new(MemRuleStore::default());
+        let mut ctx = untrusted_ctx();
+        ctx.guardian_bridge = Some(guardian.clone());
+        ctx.ask_user_bridge = Some(bridge.clone());
+        ctx.approval_rule_store = Some(store.clone());
+        ctx.conversation_id = Some("conv-r3-2".to_string());
+
+        let result = BashTool
+            .call(serde_json::json!({ "command": "echo guardian_ok", "timeout": 20 }), &ctx)
+            .await
+            .expect("闸门放行后命令应执行");
+        assert!(result.content.contains("guardian_ok"), "应真实执行并回显: {}", result.content);
+        assert_eq!(guardian.calls(), 1, "应过一次闸门");
+        assert_eq!(bridge.asked(), 0, "闸门放行不应再问用户");
+        assert!(store.list().await.is_empty(), "闸门放行不算用户批准，不得沉淀规则");
+    }
+
+    /// 闸门拒绝 ⇒ 硬拒，既不问用户也不执行。
+    #[tokio::test]
+    async fn guardian_deny_blocks_without_asking() {
+        let guardian =
+            std::sync::Arc::new(ScriptedGuardian::new(axagent_harness::AccessDecision::Deny {
+                reason: "疑似破坏性删除".to_string(),
+            }));
+        let bridge = std::sync::Arc::new(AnswerBridge {
+            asked: std::sync::atomic::AtomicUsize::new(0),
+            answer: "批准",
+        });
+        let mut ctx = untrusted_ctx();
+        ctx.guardian_bridge = Some(guardian.clone());
+        ctx.ask_user_bridge = Some(bridge.clone());
+
+        let err = BashTool
+            .call(serde_json::json!({ "command": "echo nope", "timeout": 20 }), &ctx)
+            .await
+            .expect_err("闸门拒绝应硬拒");
+        assert!(err.message.contains("审查闸门拒绝执行"), "错误应标明来源: {}", err.message);
+        assert!(err.message.contains("疑似破坏性删除"), "应透传闸门理由: {}", err.message);
+        assert_eq!(bridge.asked(), 0, "已拒绝就不该再打扰用户");
+    }
+
+    /// 闸门转人工（输入超预算那条唯一路径）⇒ 照常问用户，且用户批准后可沉淀。
+    #[tokio::test]
+    async fn guardian_require_confirmation_falls_back_to_user() {
+        use axagent_harness::ApprovalRuleStore;
+
+        let guardian = std::sync::Arc::new(ScriptedGuardian::new(
+            axagent_harness::AccessDecision::RequireConfirmation {
+                prompt: "审查输入超预算，请人工确认".to_string(),
+            },
+        ));
+        let bridge = std::sync::Arc::new(AnswerBridge {
+            asked: std::sync::atomic::AtomicUsize::new(0),
+            answer: "批准",
+        });
+        let store = std::sync::Arc::new(MemRuleStore::default());
+        let mut ctx = untrusted_ctx();
+        ctx.guardian_bridge = Some(guardian.clone());
+        ctx.ask_user_bridge = Some(bridge.clone());
+        ctx.approval_rule_store = Some(store.clone());
+        ctx.conversation_id = Some("conv-r3-2".to_string());
+
+        BashTool
+            .call(serde_json::json!({ "command": "echo ok", "timeout": 20 }), &ctx)
+            .await
+            .expect("人工批准后应执行");
+        assert_eq!(bridge.asked(), 1, "转人工必须真的问到用户");
+        assert_eq!(store.list().await.len(), 1, "人工批准 + 退出码 0 ⇒ 沉淀一条规则");
+    }
+
+    /// 未注入闸门 ⇒ 行为与既有一致（直接问用户）。闸门是加法，不是前置条件。
+    #[tokio::test]
+    async fn absent_guardian_keeps_asking_user() {
+        let bridge = std::sync::Arc::new(AnswerBridge {
+            asked: std::sync::atomic::AtomicUsize::new(0),
+            answer: "批准",
+        });
+        let mut ctx = untrusted_ctx();
+        ctx.ask_user_bridge = Some(bridge.clone());
+
+        BashTool
+            .call(serde_json::json!({ "command": "echo ok", "timeout": 20 }), &ctx)
+            .await
+            .expect("用户批准后应执行");
+        assert_eq!(bridge.asked(), 1, "无闸门时维持原来的问用户路径");
     }
 }

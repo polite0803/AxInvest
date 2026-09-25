@@ -144,6 +144,8 @@
     "thoughtChain": "Thought chain visualization (<think> blocks)",
     "errorRecovery": "Automatic error recovery",
     "screenPerception": "Screen perception (desktop control tools)",
+    "guardianReview": "Guardian review gate (LLM second opinion)",
+    "guardianReviewHint": "Sensitive commands get one model review pass before they reach you: a pass runs them without asking, a block refuses, and an over-budget input still falls back to asking you. Off by default — enabling it lets the model replace some human confirmations.",
     "tot": "Tree of Thoughts (ToT, expensive)",
     "sandboxMode": "OS Sandbox Mode",
     "sandboxModeHint": "Run shell commands in a restricted subprocess. Read-only = no writes + no network; Workspace write = writes limited to the workspace; Full access = sandbox disabled.",
@@ -4107,7 +4109,15 @@
       "reception": "Reception",
       "sales": "Sales Desks",
       "marketing": "Marketing",
-      "analysis": "Analysis Room"
+      "analysis": "Analysis Room",
+      "station": "Design Studio",
+      "critique": "Design Critique",
+      "material": "Asset Library",
+      "plans": "Planning Desks",
+      "tracking": "Progress Board",
+      "soc": "Security Ops Center",
+      "mapping": "Mapping Studio",
+      "art": "Art Studio"
     },
     "deleteFleet": {
       "button": "Delete Office",

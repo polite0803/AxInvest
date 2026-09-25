@@ -854,6 +854,8 @@ pub struct BuiltinPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
+    pub commands: Vec<PluginCommandManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -866,6 +868,8 @@ pub struct BundledPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
+    pub commands: Vec<PluginCommandManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -878,6 +882,8 @@ pub struct ExternalPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
+    pub commands: Vec<PluginCommandManifest>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -890,4 +896,6 @@ pub struct OpenClawPlugin {
     pub skills: Vec<PluginSkillEntry>,
     /// 插件声明的权限集合（来自 manifest），用于沙箱 capability 检查。
     pub permissions: Vec<PluginPermission>,
+    /// 插件声明的命名命令（阶段3-① 执行分发，`PLAN-plugin-gap-closure.md` §2）。
+    pub commands: Vec<PluginCommandManifest>,
 }

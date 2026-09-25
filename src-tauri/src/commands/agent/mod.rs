@@ -3234,7 +3234,18 @@ pub async fn agent_resume_from_events(
     conversation_id: String,
 ) -> Result<serde_json::Value, String> {
     let db = app_state.harness.persistence().connection();
+    resume_report_from_events(db, &conversation_id).await
+}
 
+/// [`agent_resume_from_events`] 的可测内核：只依赖连接，不依赖 Tauri `State`。
+///
+/// 抽出来是为了给 R4-1 留一条**端到端**判据 —— 「压缩动作进了可回放事件流」只有在
+/// 从写入端**读回来**时才成立（harness 侧的 `compacted_payload_shape_roundtrips`
+/// 只锁得住 payload 形状，锁不住「落库 → 读出」这段）。
+pub(crate) async fn resume_report_from_events(
+    db: &sea_orm::DatabaseConnection,
+    conversation_id: &str,
+) -> Result<serde_json::Value, String> {
     // 1. 读 session_events
     //
     // 这里刻意**不做字符串插值**、也**不硬编码后端**：
@@ -3253,7 +3264,7 @@ pub async fn agent_resume_from_events(
         .query_all_raw(sea_orm::Statement::from_sql_and_values(
             backend,
             sql,
-            [sea_orm::Value::from(conversation_id.clone())],
+            [sea_orm::Value::from(conversation_id)],
         ))
         .await
         .map_err(|e| format!("query session_events failed: {e}"))?;

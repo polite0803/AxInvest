@@ -144,6 +144,8 @@
     "thoughtChain": "Visualización de cadena de pensamiento",
     "errorRecovery": "Recuperación automática de errores",
     "screenPerception": "Percepción de pantalla (control de escritorio)",
+    "guardianReview": "Puerta de revisión Guardian (segunda opinión LLM)",
+    "guardianReviewHint": "Antes de preguntarte, los comandos sensibles pasan una revisión del modelo: aceptado ⇒ se ejecuta sin preguntar, denegado ⇒ no se ejecuta; solo si la entrada excede el presupuesto se te pregunta. Desactivado por defecto — activarlo hace que el modelo sustituya algunas confirmaciones humanas.",
     "tot": "Árbol de pensamientos (ToT, costoso)",
     "sandboxMode": "Modo sandbox del SO",
     "sandboxModeHint": "Ejecuta comandos de shell en un subproceso restringido. Solo lectura = sin escritura ni red; Escritura de espacio de trabajo = solo en el espacio de trabajo; Acceso total = sandbox desactivado.",
@@ -4107,7 +4109,15 @@
       "reception": "Recepción",
       "sales": "Puestos de ventas",
       "marketing": "Marketing",
-      "analysis": "Sala de análisis"
+      "analysis": "Sala de análisis",
+      "station": "Estudio de diseño",
+      "critique": "Revisión de diseños",
+      "material": "Biblioteca de assets",
+      "plans": "Puestos de planificación",
+      "tracking": "Tablero de progreso",
+      "soc": "Centro de operaciones de seguridad",
+      "mapping": "Taller de cartografía",
+      "art": "Taller de arte"
     },
     "deleteFleet": {
       "button": "Eliminar oficina",

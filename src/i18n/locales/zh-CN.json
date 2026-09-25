@@ -144,6 +144,8 @@
     "thoughtChain": "思维链可视化（<think> 块）",
     "errorRecovery": "错误自动恢复",
     "screenPerception": "屏幕感知（桌面控制工具）",
+    "guardianReview": "Guardian 审查闸门（LLM 二次判定）",
+    "guardianReviewHint": "敏感命令在询问你之前先过一次模型判定：判定放行则直接执行、不再弹确认；判定拒绝则不执行；输入过长时仍回到问你。默认关闭 —— 开启后部分人工确认会由模型代替。",
     "tot": "思维树多路径推理（ToT，开销大）",
     "sandboxMode": "OS 沙箱模式",
     "sandboxModeHint": "以受限子进程执行 Shell 命令。只读=禁写+断网；工作区可写=仅工作区可写；完全访问=不启用沙箱。",
@@ -4107,7 +4109,15 @@
       "reception": "接待区",
       "sales": "销售工位",
       "marketing": "营销区",
-      "analysis": "分析师区"
+      "analysis": "分析师区",
+      "station": "设计工位",
+      "critique": "方案评审区",
+      "material": "素材库",
+      "plans": "计划工位",
+      "tracking": "进度看板区",
+      "soc": "安全运营中心",
+      "mapping": "测绘作业区",
+      "art": "美术工坊"
     },
     "deleteFleet": {
       "button": "删除办公室",

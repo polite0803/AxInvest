@@ -434,12 +434,13 @@ impl StockVendor for TencentVendor {
 
     // ── P3:tencent 能力申报 ──
     // get_quote/get_index_quotes:实时快照 → SynthesizeFromKline
-    // get_klines:原生支持日期范围 → NativeDateParam
+    // get_klines:诚实申报 Fallthrough —— 本 vendor **没有** override `get_klines_with_asof`
+    //   （trait 默认实现 = 调 live 方法），申报 NativeDateParam 会让路由层误以为它按截止日取数。
+    //   日期区间能力在 eastmoney（`end=` 参数）那侧；这里由 lib.rs 的 truncate_klines_by_asof 兜底。
     // 其他 stub:Fallthrough
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
-            "get_klines" => AsOfCapability::NativeDateParam,
             _ => AsOfCapability::Fallthrough,
         }
     }
@@ -460,10 +461,16 @@ mod capability_tests {
         assert_eq!(v.asof_capability("get_index_quotes"), AsOfCapability::SynthesizeFromKline);
     }
 
+    /// 回归（2026-09-25）：tencent 的 `get_klines` 必须申报 **Fallthrough**。
+    ///
+    /// 原申报 `NativeDateParam` 是**假话**：本 vendor 没有 override
+    /// `get_klines_with_asof`，trait 默认实现直接调 live 方法 ⇒ 路由层以为它按截止日取数，
+    /// 实际拿到的是「今天往前的 N 根」。申报改成 Fallthrough 后，路由层走
+    /// 「取全量 + `truncate_klines_by_asof` 截断」这条真实可行的路（结果等价，但不再依赖谎报）。
     #[test]
-    fn tencent_klines_is_native() {
+    fn tencent_klines_is_fallthrough_not_falsely_native() {
         let v = make_vendor();
-        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::NativeDateParam);
+        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::Fallthrough);
     }
 
     #[test]
@@ -479,5 +486,18 @@ mod capability_tests {
         ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
         }
+    }
+
+    /// 回归（2026-09-25）：未实现 as-of 指数合成的源**必须显式失败**。
+    ///
+    /// 缺陷形态：trait 默认 `get_index_quotes_with_asof` = `self.get_index_quotes()`，
+    /// 即把「今天的实时点位」当作「截止日的点位」返回 —— tencent 申报的恰是
+    /// `SynthesizeFromKline`，路由层会照着能力去调它，于是回放报告里的「大盘指数」
+    /// 是实时值，时间泄露且无任何提示。
+    #[tokio::test]
+    async fn tencent_index_quotes_with_asof_fails_instead_of_leaking_live_data() {
+        let v = make_vendor();
+        let r = v.get_index_quotes_with_asof().await;
+        assert!(r.is_err(), "默认实现不得回退到实时指数行情: {r:?}");
     }
 }

@@ -741,12 +741,13 @@ impl StockVendor for BaiduStockVendor {
     // ── Vendor trait 大重构 P2:baidu_stock 能力申报 ──
     // 百度财经 API 形态:
     // - quote:实时快照,用 K 线合成(SynthesizeFromKline)
-    // - klines:原生支持日期范围(NativeDateParam)
+    // - klines:**诚实申报 Fallthrough**（2026-09-25）—— 本 vendor 从未 override
+    //   `get_klines_with_asof`，trait 默认实现 = 调 live 方法；原先申报 NativeDateParam
+    //   是假话，会让路由层误以为它能按截止日取数。实际由 lib.rs 的 truncate_klines_by_asof 兜底。
     // - 其他方法:返回带 date 字段的全量,lib.rs truncate_by_asof 正确截断(Fallthrough)
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
             "get_quote" => AsOfCapability::SynthesizeFromKline,
-            "get_klines" => AsOfCapability::NativeDateParam,
             _ => AsOfCapability::Fallthrough,
         }
     }
@@ -767,9 +768,9 @@ mod capability_tests {
     }
 
     #[test]
-    fn baidu_asof_capability_klines_is_native() {
+    fn baidu_asof_capability_klines_is_fallthrough_not_falsely_native() {
         let v = make_vendor();
-        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::NativeDateParam);
+        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::Fallthrough);
     }
 
     #[test]

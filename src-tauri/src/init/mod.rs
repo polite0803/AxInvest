@@ -7,6 +7,7 @@ pub mod browser_fetcher;
 pub mod cognitive_router_init;
 pub mod cron_delivery_sink;
 pub mod database;
+pub mod guardian_bridge;
 pub mod llm_providers;
 pub mod monitor_emitter;
 pub mod news_archive_sink;

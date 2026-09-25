@@ -47,7 +47,7 @@ pub struct CapabilityPackManifest {
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// 分析配置文件（P0-4 四件套之一），缺省 "analysis.yaml"，None 表示无分析配置
-    /// 供 `analysis_schema::load_capability_pack_analysis` 读取（capability_pack.rs:286）
+    /// 供 `analysis_schema::load_capability_pack_analysis` 读取（capability_pack.rs:261）
     #[serde(default = "default_analysis_file")]
     pub analysis: String,
     /// 学习配置文件（P0-4 四件套之一），缺省 "learning.yaml"；读取见

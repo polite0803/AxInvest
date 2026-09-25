@@ -288,6 +288,11 @@ static GLOBAL_DEGRADATION_TOTAL: AtomicU64 = AtomicU64::new(0);
 const GLOBAL_DEGRADATION_CAP: usize = 256;
 
 /// 记录一次降级(仅在 as-of 模式下有效，live 模式直接忽略)
+///
+/// **按 `(vendor, method, reason)` 去重**：一次回放里同一维度常被多个分析师节点反复调用
+/// （如 `t-news-data` 与决策节点都调 `get_news`），逐次追加会让前端降级面板被同一条目刷屏，
+/// 反而看不出"到底哪几个维度降级了"。⇒ 同一条目只记一次，累计总数也不重复计数。
+/// 需要区分「同一 method 的不同对象」时，把对象写进 reason（如 `get_news` 带股票代码）。
 pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
     let as_of = match current_as_of() {
         Some(c) => c.as_string(),
@@ -299,13 +304,22 @@ pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
         reason: reason.to_string(),
         as_of,
     };
+    let is_duplicate = |e: &DegradationEntry| {
+        e.vendor == entry.vendor && e.method == entry.method && e.reason == entry.reason
+    };
     // 任务级尝试：若没在 task_local scope 中，单独初始化一个新 scope
     let _ = DEGRADATION_LOG.try_with(|cell| {
-        cell.borrow_mut().push(entry.clone());
+        let mut log = cell.borrow_mut();
+        if !log.iter().any(is_duplicate) {
+            log.push(entry.clone());
+        }
     });
     // 全局环形缓冲: 累计总数 + 保留最近 N 条详情
     {
         let mut g = GLOBAL_DEGRADATION_LOG.lock();
+        if g.iter().any(is_duplicate) {
+            return;
+        }
         if g.len() >= GLOBAL_DEGRADATION_CAP {
             g.pop_front();
         }
@@ -591,6 +605,47 @@ mod tests {
                 .await
             })
             .await;
+    }
+
+    /// 回归（2026-09-25）：同一 `(vendor, method, reason)` 只记一条。
+    ///
+    /// 实测缺陷形态：一次回放里 `get_news` 被两个节点各调一次，同一原因追加两条
+    /// ⇒ 前端降级面板 5 条里有 2 条是同一件事，看不出真实降级维度数。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn record_degradation_dedups_identical_entries() {
+        let _ = clear_global_asof();
+        reset_global_degradation_log();
+        let before_total = global_degradation_count();
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        AS_OF
+            .scope(Some(ctx), async {
+                with_degradation_log(async {
+                    for _ in 0..3 {
+                        record_degradation("astock-data", "get_news", "as-of 模式无历史新闻");
+                    }
+                    // 不同 reason（如不同个股）必须各自留痕，去重不能吞掉真实信息
+                    record_degradation("astock-data", "get_news", "as-of 模式无 600519 历史新闻");
+                    let report = take_asof_degradation_report();
+                    assert_eq!(report.len(), 2, "同条目应去重，异条目应保留: {report:?}");
+                    assert_eq!(report[0].reason, "as-of 模式无历史新闻");
+                })
+                .await
+            })
+            .await;
+        let global = peek_global_degradation_report();
+        assert_eq!(
+            global.iter().filter(|e| e.reason == "as-of 模式无历史新闻").count(),
+            1,
+            "全局环形缓冲同样不得重复追加"
+        );
+        assert_eq!(
+            global_degradation_count() - before_total,
+            2,
+            "累计总数只按「不同条目」增长，重复调用不得虚增"
+        );
+        reset_global_degradation_log();
     }
 
     // ── 进程级全局回退(缺陷: spawn 边界穿透) ──────────────────

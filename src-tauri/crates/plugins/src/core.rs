@@ -50,6 +50,8 @@ pub trait Plugin {
     fn skills(&self) -> &[PluginSkillEntry];
     /// 插件声明的权限集合（来自 manifest），供沙箱执行前 capability 检查使用。
     fn permissions(&self) -> &[PluginPermission];
+    /// 插件声明的命名命令（阶段3-① 执行分发）。
+    fn commands(&self) -> &[PluginCommandManifest];
     fn validate(&self) -> Result<(), PluginError>;
     fn initialize(&self) -> Result<(), PluginError>;
     fn shutdown(&self) -> Result<(), PluginError>;
@@ -93,6 +95,10 @@ macro_rules! plugin_accessors {
 
         fn permissions(&self) -> &[PluginPermission] {
             &self.permissions
+        }
+
+        fn commands(&self) -> &[PluginCommandManifest] {
+            &self.commands
         }
     };
 }
@@ -265,6 +271,15 @@ impl Plugin for PluginDefinition {
         }
     }
 
+    fn commands(&self) -> &[PluginCommandManifest] {
+        match self {
+            Self::Builtin(plugin) => plugin.commands(),
+            Self::Bundled(plugin) => plugin.commands(),
+            Self::External(plugin) => plugin.commands(),
+            Self::OpenClaw(plugin) => plugin.commands(),
+        }
+    }
+
     fn validate(&self) -> Result<(), PluginError> {
         match self {
             Self::Builtin(plugin) => plugin.validate(),
@@ -321,6 +336,11 @@ impl RegisteredPlugin {
     }
 
     #[must_use]
+    pub fn commands(&self) -> &[PluginCommandManifest] {
+        self.definition.commands()
+    }
+
+    #[must_use]
     pub fn permissions(&self) -> &[PluginPermission] {
         self.definition.permissions()
     }
@@ -355,6 +375,7 @@ impl RegisteredPlugin {
                 .map(|m| m.name.clone())
                 .collect(),
             skill_names: self.definition.skills().iter().map(|s| s.name.clone()).collect(),
+            commands: self.definition.commands().to_vec(),
         }
     }
 }
@@ -366,6 +387,8 @@ pub struct PluginSummary {
     pub tool_names: Vec<String>,
     pub mcp_server_names: Vec<String>,
     pub skill_names: Vec<String>,
+    /// 插件声明的命名命令清单（阶段3-① 执行分发；前端可见面）。
+    pub commands: Vec<PluginCommandManifest>,
 }
 
 #[derive(Debug)]

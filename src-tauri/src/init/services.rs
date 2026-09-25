@@ -44,6 +44,9 @@ pub async fn start_background_services(
     //（权威语义 = bottleneck-calc.rhai 原行为）由 rhai_registry 统一承载，
     // 此处不再单独注册 —— 历史上正是「两处独立注册 + 单槽通道」构成本次缺陷。
     init_mcp_oauth(state);
+    // Guardian 审查闸门（PLAN-codex-parity-adoption R3-2）：按持久化的 Settings 决定是否装载。
+    // 默认关闭 ⇒ 全局槽留 None，Bash 审批维持「问用户」原路径。
+    crate::init::guardian_bridge::refresh_global_guardian_bridge(state).await;
     start_auto_backup(app, state, app_dir.clone());
     start_webdav_sync(app, state, app_dir.clone());
     #[cfg(not(mobile))]
@@ -85,11 +88,13 @@ pub async fn start_background_services(
     //   - start_realtime_quote_watcher：实时行情推送（前端 stock-quote-update 事件）
     //   - start_batch_reflection：股票分析批量反思 cron（run_batch_reflection_inner）
     //   - start_demand_discovery_cron：OPC 需求发现定时扫描（run_demand_discovery_cron）
+    //   - start_daily_snapshot_sweep：每日快照采集（run_daily_snapshot_sweep，回放兜底）
     //   - spawn_opc_workflows_seeding：OPC 域包/领域工作流模板种子化（ensure_opc_workflows_seeded）
     start_realtime_monitor(app);
     start_realtime_quote_watcher(app, state);
     start_batch_reflection(state);
     start_demand_discovery_cron(app, state);
+    start_daily_snapshot_sweep(state);
     spawn_opc_workflows_seeding(state);
     // register_dojo_sdk_executor 中的 DojoSdkExecutorImpl 注册（依赖 astock_client）已移除，
     // 仅保留 Plan 三件套正常后台任务——PLANS_REGISTRY TTL 清理
@@ -3544,6 +3549,58 @@ fn start_demand_discovery_cron(app: &tauri::AppHandle, state: &AppState) {
         }
     });
     tracing::info!("[startup] 需求发现定时任务已启动（每 12 小时）");
+}
+
+/// 启动每日快照采集（交易日收盘后一次）：为回放（as-of）模式积累当日快照。
+///
+/// **为什么必须有这个后台任务**：采集此前只能由前端手动调 `sweep_daily_snapshots`
+/// ⇒ 绝大多数交易日没有任何快照，而 `daily_snapshot` 缓存本身也是 2026-09-25 才在
+/// `init/state.rs` 接上（此前恒 None）——「无历史语义维度」的回放兜底通道整年空转。
+/// 每小时 tick 一次只为覆盖"应用 15:00 之后才启动"的情形；当日已采过即跳过（幂等）。
+fn start_daily_snapshot_sweep(state: &AppState) {
+    let db = state.harness.db().clone();
+    let client = state.astock_client.clone();
+    let shutdown = state.shutdown_token.clone();
+
+    // 快照缓存未启用时，采集只剩「打一遍 vendor 然后写进 no-op」⇒ 每小时空转一轮网络。
+    // 启用点在 `init/state.rs`（with_daily_snapshot_cache），装配缺失就该在这里显式失败可见。
+    if !client.daily_snapshot_enabled() {
+        tracing::warn!("[startup] 每日快照缓存未启用，跳过定时采集（as-of 兜底通道将始终为空）");
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        // 启动延迟 5 分钟，避开启动高峰（与 start_batch_reflection 同口径）
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                _ = interval.tick() => {},
+            }
+            let now = chrono::Local::now();
+            // 收盘（15:00）后才采：盘中采到的是半日数据，回放会把它当成当日完整值
+            if chrono::Timelike::hour(&now) < 15 {
+                continue;
+            }
+            if !axagent_astock_data::calendar::is_trading_day(&now.date_naive()) {
+                continue;
+            }
+            let date = now.format("%Y-%m-%d").to_string();
+            if client.has_daily_snapshot("get_index_quotes", &date) {
+                continue;
+            }
+            match crate::commands::stock_analysis::run_daily_snapshot_sweep(&client, &db).await {
+                Ok(summary) => {
+                    tracing::info!("[daily-snapshot] 快照采集完成: {summary}");
+                },
+                Err(e) => {
+                    tracing::warn!("[daily-snapshot] 快照采集失败: {e}");
+                },
+            }
+        }
+    });
+    tracing::info!("[startup] 每日快照采集已启动（交易日 15:00 后，每小时幂等 tick）");
 }
 
 /// OPC 域包/领域工作流模板种子化（后台异步，幂等 upsert）

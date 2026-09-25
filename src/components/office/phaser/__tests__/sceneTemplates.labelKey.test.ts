@@ -26,11 +26,22 @@ describe("sceneTemplateLabelKey 显示名单源化", () => {
     expect(sceneTemplateLabelKey(INVESTMENT_OFFICE_TEMPLATE)).toBe("office.scene.investment_office");
   });
 
-  it("SCENE_DOMAIN_SLUGS 覆盖且仅覆盖 9 个与域包同名 slug 的行业场景", () => {
+  it("SCENE_DOMAIN_SLUGS：内置 9 行业场景齐全；其余 5 个由域包 office_scene.yaml 运行时注入", () => {
     const domainScenes = SCENE_TEMPLATES.filter((tpl) => SCENE_DOMAIN_SLUGS.has(tpl.slug));
     expect(domainScenes).toHaveLength(9);
-    // 集合内每个 slug 都必须有对应场景，防「集合加了、场景没加」的悬空声明
+    expect(SCENE_DOMAIN_SLUGS.size).toBe(14);
+    // 集合内每个 **TS 内置** slug 都必须有对应场景，防「集合加了、场景没加」的悬空声明；
+    // design/project_management/security/geospatial/game_dev 的场景不在 TS 数组里——
+    // 「slug 必须有同名场景」由 check-office-scene-align 门禁 rule a（TS∪YAML 合并面）把关
+    const YAML_ONLY = new Set([
+      "design",
+      "project_management",
+      "security",
+      "geospatial",
+      "game_dev",
+    ]);
     for (const slug of SCENE_DOMAIN_SLUGS) {
+      if (YAML_ONLY.has(slug)) { continue; }
       expect(SCENE_TEMPLATES.some((tpl) => tpl.slug === slug)).toBe(true);
     }
   });

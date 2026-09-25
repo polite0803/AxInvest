@@ -875,7 +875,7 @@ pub use circuit_breaker::{
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerSnapshot, CircuitState,
 };
 pub mod tool_access;
-pub use tool_access::{AccessDecision, ToolAccessControl, ToolAccessRequest};
+pub use tool_access::{AccessDecision, GuardianBridge, ToolAccessControl, ToolAccessRequest};
 
 // ── P10: 开发者体验契约（可观测 / 基准测试 / 开发体验） ──
 pub mod observability;

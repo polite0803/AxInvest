@@ -3388,6 +3388,7 @@ mod cjk_pdf_integration {
             sandbox: None,
             approval_policy: None,
             approval_rule_store: None,
+            guardian_bridge: None,
         };
         let md = "# 中文标题\n\n这是一段包含中文的段落。**粗体中文** 和 `代码中文` 与 English mixed 都应正常显示。\n\n## 列表\n\n- 第一项：用 CJK 字体渲染\n- Second item: 混合排版\n\n```rust\nfn 中文变量() { println!(\"中文日志\"); }\n```\n";
         let input = serde_json::json!({
@@ -3614,6 +3615,7 @@ mod pptx_compat {
             sandbox: None,
             approval_policy: None,
             approval_rule_store: None,
+            guardian_bridge: None,
         };
         let md = "# 第一页\n\n内容一\n\n# 第二页\n\n内容二\n\n# 第三页\n\n内容三\n";
         let input = serde_json::json!({
@@ -3741,6 +3743,7 @@ mod pptx_compat {
             sandbox: None,
             approval_policy: None,
             approval_rule_store: None,
+            guardian_bridge: None,
         };
         // 含数字列的表格 → 应触发图表生成
         let md = "# 销售数据\n\n| 季度 | 销售额 |\n| --- | --- |\n| Q1 | 100 |\n| Q2 | 250 |\n| Q3 | 180 |\n";
@@ -3835,6 +3838,7 @@ mod pptx_compat {
             sandbox: None,
             approval_policy: None,
             approval_rule_store: None,
+            guardian_bridge: None,
         };
         let md = "# 销售\n\n| 季度 | 销售额 |\n| --- | --- |\n| Q1 | 100 |\n| Q2 | 250 |\n";
         let input = serde_json::json!({
@@ -4586,6 +4590,7 @@ mod mermaid_integration_test {
             sandbox: None,
             approval_policy: None,
             approval_rule_store: None,
+            guardian_bridge: None,
         };
         let md = format!("# 流程图\n\n```mermaid\n{}\n```\n", TEST_MERMAID);
         let input = serde_json::json!({

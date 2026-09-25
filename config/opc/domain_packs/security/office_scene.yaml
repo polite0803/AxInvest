@@ -1,0 +1,158 @@
+slug: security
+displayNameKey: security
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: soc
+rooms:
+  - id: soc
+    nameKey: soc
+    x: 40
+    y: 60
+    width: 400
+    height: 220
+    color: 5447083
+  - id: audit
+    nameKey: audit
+    x: 460
+    y: 60
+    width: 160
+    height: 160
+    color: 7483089
+  - id: lab
+    nameKey: lab
+    x: 640
+    y: 60
+    width: 140
+    height: 160
+    color: 9589982
+  - id: meeting
+    nameKey: meeting
+    x: 460
+    y: 240
+    width: 320
+    height: 140
+    color: 11763691
+  - id: lounge
+    nameKey: lounge
+    x: 40
+    y: 300
+    width: 380
+    height: 160
+    color: 13872631
+furniture:
+  soc:
+    - kind: desk
+      x: 80
+      y: 130
+    - kind: chair
+      x: 80
+      y: 165
+    - kind: desk
+      x: 190
+      y: 130
+    - kind: chair
+      x: 190
+      y: 165
+    - kind: desk
+      x: 300
+      y: 130
+    - kind: chair
+      x: 300
+      y: 165
+    - kind: shelf
+      x: 360
+      y: 90
+    - kind: plant
+      x: 50
+      y: 80
+  audit:
+    - kind: desk
+      x: 70
+      y: 90
+    - kind: chair
+      x: 70
+      y: 125
+    - kind: shelf
+      x: 120
+      y: 50
+  lab:
+    - kind: desk
+      x: 60
+      y: 90
+    - kind: chair
+      x: 60
+      y: 125
+    - kind: plant
+      x: 110
+      y: 50
+  meeting:
+    - kind: whiteboard
+      x: 150
+      y: 60
+    - kind: plant
+      x: 40
+      y: 70
+    - kind: plant
+      x: 270
+      y: 70
+    - kind: rug
+      x: 150
+      y: 100
+      w: 150
+      h: 50
+      color: 11763691
+  lounge:
+    - kind: sofa
+      x: 120
+      y: 70
+    - kind: sofa
+      x: 250
+      y: 70
+    - kind: plant
+      x: 60
+      y: 90
+decorations:
+  soc:
+    - kind: window
+      x: 300
+      y: 5
+      w: 70
+      h: 40
+    - kind: painting
+      x: 160
+      y: 5
+      w: 40
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5
+  audit:
+    - kind: window
+      x: 60
+      y: 5
+      w: 50
+      h: 25
+  lab:
+    - kind: window
+      x: 50
+      y: 5
+      w: 50
+      h: 25
+    - kind: lamp
+      x: 10
+      y: 5
+  meeting:
+    - kind: window
+      x: 120
+      y: 5
+      w: 80
+      h: 30
+  lounge:
+    - kind: window
+      x: 100
+      y: 5
+      w: 70
+      h: 30
+    - kind: lamp
+      x: 20
+      y: 5

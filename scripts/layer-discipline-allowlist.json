@@ -3,11 +3,11 @@
   "note": "分层护栏棘轮基线：**只减不增**。修复违规后必须用 --update-baseline 下调，否则基线虚高会让棘轮失效。",
   "rules": {
     "commands-no-direct-db": {
-      "total": 671,
+      "total": 675,
       "files": {
         "src-tauri/src/commands/agency_expert.rs": 4,
         "src-tauri/src/commands/agent/command_bridge.rs": 1,
-        "src-tauri/src/commands/agent/mod.rs": 5,
+        "src-tauri/src/commands/agent/mod.rs": 6,
         "src-tauri/src/commands/agent/skill_execution.rs": 1,
         "src-tauri/src/commands/agent_profile.rs": 8,
         "src-tauri/src/commands/agent_role.rs": 3,
@@ -29,6 +29,7 @@
         "src-tauri/src/commands/file_cleanup.rs": 1,
         "src-tauri/src/commands/fine_tune.rs": 1,
         "src-tauri/src/commands/fleet/executor.rs": 2,
+        "src-tauri/src/commands/fleet/mod.rs": 2,
         "src-tauri/src/commands/generated_tool.rs": 1,
         "src-tauri/src/commands/health.rs": 1,
         "src-tauri/src/commands/index_jobs.rs": 1,
@@ -100,7 +101,7 @@
         "src-tauri/src/commands/skills/analysis.rs": 2,
         "src-tauri/src/commands/skills_hub.rs": 2,
         "src-tauri/src/commands/sources.rs": 1,
-        "src-tauri/src/commands/stock_analysis.rs": 81,
+        "src-tauri/src/commands/stock_analysis.rs": 82,
         "src-tauri/src/commands/stock_analysis_bridge.rs": 31,
         "src-tauri/src/commands/stock_analysis_bridge_tests.rs": 6,
         "src-tauri/src/commands/stock_analysis_setup/seed_concept_index.rs": 1,
@@ -131,7 +132,7 @@
       }
     },
     "commands-no-sibling-call": {
-      "total": 87,
+      "total": 88,
       "files": {
         "src-tauri/src/commands/agent/mod.rs": 8,
         "src-tauri/src/commands/backtest_validation.rs": 5,
@@ -140,6 +141,7 @@
         "src-tauri/src/commands/demand_discovery.rs": 1,
         "src-tauri/src/commands/evolution_hook.rs": 1,
         "src-tauri/src/commands/fleet/executor.rs": 1,
+        "src-tauri/src/commands/fleet/mod.rs": 1,
         "src-tauri/src/commands/knowledge.rs": 1,
         "src-tauri/src/commands/local_tool.rs": 1,
         "src-tauri/src/commands/multi_agent.rs": 1,

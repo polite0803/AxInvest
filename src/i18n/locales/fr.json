@@ -144,6 +144,8 @@
     "thoughtChain": "Visualisation de la chaîne de pensée",
     "errorRecovery": "Récupération automatique des erreurs",
     "screenPerception": "Perception d'écran (contrôle du bureau)",
+    "guardianReview": "Portique de vérification Guardian (double avis LLM)",
+    "guardianReviewHint": "Avant de te demander, les commandes sensibles passent une revue par le modèle : accordée ⇒ exécution sans demande, refusée ⇒ pas d’exécution ; seul un input hors budget revient à te consulter. Désactivé par défaut — l’activer laisse le modèle remplacer certaines confirmations humaines.",
     "tot": "Arbre de pensées (ToT, coûteux)",
     "sandboxMode": "Mode sandbox OS",
     "sandboxModeHint": "Exécute les commandes shell dans un sous-processus restreint. Lecture seule = écriture interdite + réseau coupé ; Écriture espace de travail = écriture limitée à l'espace de travail ; Accès total = sandbox désactivée.",
@@ -4107,7 +4109,15 @@
       "reception": "Accueil",
       "sales": "Postes de vente",
       "marketing": "Marketing",
-      "analysis": "Salle d'analyse"
+      "analysis": "Salle d'analyse",
+      "station": "Studio de design",
+      "critique": "Revue de maquettes",
+      "material": "Bibliothèque d'assets",
+      "plans": "Postes de planification",
+      "tracking": "Tableau d'avancement",
+      "soc": "Centre des opérations de sécurité",
+      "mapping": "Atelier de cartographie",
+      "art": "Atelier d'art"
     },
     "deleteFleet": {
       "button": "Supprimer le bureau",

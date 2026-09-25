@@ -144,6 +144,8 @@
     "thoughtChain": "思維鏈視覺化（<think> 區塊）",
     "errorRecovery": "錯誤自動恢復",
     "screenPerception": "螢幕感知（桌面控制工具）",
+    "guardianReview": "Guardian 審查閘門（LLM 二次判定）",
+    "guardianReviewHint": "敏感命令在詢問你之前先過一次模型判定：判定放行則直接執行、不再彈出確認；判定拒絕則不執行；輸入過長時仍回到問你。預設關閉 —— 開啟後部分人工確認會由模型取代。",
     "tot": "思維樹多路徑推理（ToT，開銷大）",
     "sandboxMode": "OS 沙箱模式",
     "sandboxModeHint": "以受限子程序執行 Shell 命令。唯讀=禁寫+斷網；工作區可寫=僅工作區可寫；完全存取=不啟用沙箱。",
@@ -4107,7 +4109,15 @@
       "reception": "接待區",
       "sales": "銷售工位",
       "marketing": "行銷區",
-      "analysis": "分析師區"
+      "analysis": "分析師區",
+      "station": "設計工位",
+      "critique": "方案評審區",
+      "material": "素材庫",
+      "plans": "計劃工位",
+      "tracking": "進度看板區",
+      "soc": "安全運營中心",
+      "mapping": "測繪作業區",
+      "art": "美術工坊"
     },
     "deleteFleet": {
       "button": "刪除辦公室",

@@ -144,6 +144,8 @@
     "thoughtChain": "사고 체인 시각화",
     "errorRecovery": "오류 자동 복구",
     "screenPerception": "화면 인식 (데스크톱 제어)",
+    "guardianReview": "Guardian 심사 게이트 (LLM 2차 판단)",
+    "guardianReviewHint": "민감한 명령은 사용자에게 묻기 전에 모델 심사를 한 번 거칩니다. 통과하면 확인 창 없이 바로 실행하고, 거부하면 실행하지 않습니다. 입력이 예산을 초과할 때만 기존처럼 사용자에게 묻습니다. 기본 꺼짐 — 켜면 일부 사람 확인을 모델이 대신합니다.",
     "tot": "생각의 나무 (ToT, 비용 높음)",
     "sandboxMode": "OS 샌드박스 모드",
     "sandboxModeHint": "셸 명령을 제한된 하위 프로세스로 실행합니다. 읽기 전용=쓰기 금지+네트워크 차단, 워크스페이스 쓰기=워크스페이스만 쓰기 허용, 전체 허용=샌드박스 비활성화.",
@@ -4107,7 +4109,15 @@
       "reception": "접수 데스크",
       "sales": "영업 데스크",
       "marketing": "마케팅",
-      "analysis": "분석실"
+      "analysis": "분석실",
+      "station": "디자인 스튜디오",
+      "critique": "디자인 리뷰 구역",
+      "material": "소재 라이브러리",
+      "plans": "기획 데스크",
+      "tracking": "진행 보드",
+      "soc": "보안 운영 센터",
+      "mapping": "측량 작업실",
+      "art": "아트 스튜디오"
     },
     "deleteFleet": {
       "button": "오피스 삭제",

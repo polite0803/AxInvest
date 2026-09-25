@@ -152,6 +152,10 @@ pub struct AppSettings {
     pub default_workspace_dir: Option<String>,
     /// Enable screen perception and vision-based UI control.
     pub screen_perception_enabled: bool,
+    /// Guardian 审查闸门（PLAN-codex-parity-adoption R3-2）：Bash 等敏感命令在「问用户」
+    /// 之前先过一次 LLM 二次判定。默认 **false** —— 开启后 `Allow` 会**跳过**人工确认，
+    /// 属于把审批权部分让给模型，必须由用户显式选择。
+    pub guardian_review_enabled: bool,
     /// Enable RL optimizer for tool selection and task strategies.
     pub rl_optimizer_enabled: bool,
     /// Enable LoRA fine-tuning for custom model adaptation.
@@ -351,6 +355,7 @@ impl Default for AppSettings {
             render_user_markdown: false,
             default_workspace_dir: None,
             screen_perception_enabled: false,
+            guardian_review_enabled: false,
             rl_optimizer_enabled: false,
             lora_finetune_enabled: false,
             proactive_nudge_enabled: true,

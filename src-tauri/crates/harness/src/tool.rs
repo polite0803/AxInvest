@@ -189,6 +189,12 @@ pub struct ToolContext {
     /// 「批准沉淀」的读写唯一出口：`tools` 是 hybrid，禁止依赖 entities / dao，
     /// 故只能经 [`crate::ApprovalRuleStore`] trait 访问；实现由 wiring 层注入。
     pub approval_rule_store: Option<Arc<dyn crate::approval_rules::ApprovalRuleStore>>,
+    /// Guardian 审查闸门（可选，`None` 表示闸门不启用，按既有的「问用户」路径走）。
+    ///
+    /// 与 [`crate::ApprovalRuleStore`] 同一套理由：审批发生在 hybrid crate `tools`，
+    /// 而 LLM 审查者在 consumer crate `agent`，只能经 trait 注入（实现落 wiring 层）。
+    /// 见 [`crate::GuardianBridge`] 的三档语义。
+    pub guardian_bridge: Option<Arc<dyn crate::tool_access::GuardianBridge>>,
 }
 
 impl ToolContext {
@@ -211,6 +217,7 @@ impl ToolContext {
             sandbox: None,
             approval_policy: None,
             approval_rule_store: None,
+            guardian_bridge: None,
         }
     }
 

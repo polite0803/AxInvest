@@ -34,12 +34,21 @@ pub const SNAPSHOT_METHODS: &[&str] = &[
     "get_margin_data",
     "get_index_quotes",
     "get_stock_announcements",
+    // 2026-09-25 补：舆情与质押都只有「当下」语义（SocialSentiment 只有 fetched_at、
+    // PledgeData 连日期字段都没有），回放里的唯一历史通道就是每日快照。
+    "get_social_sentiment",
+    "get_pledge_data",
     // get_market_dragon_tiger / get_board_fund_flow 等全市场快照可后续补充
 ];
 
 /// 需要遍历个股的 per-stock 快照方法（相对于全市场方法）
-pub const PER_STOCK_METHODS: &[&str] =
-    &["get_money_flow", "get_north_bound_holding", "get_margin_data"];
+pub const PER_STOCK_METHODS: &[&str] = &[
+    "get_money_flow",
+    "get_north_bound_holding",
+    "get_margin_data",
+    "get_social_sentiment",
+    "get_pledge_data",
+];
 
 /// 每日快照缓存
 ///
@@ -69,7 +78,7 @@ impl DailySnapshotCache {
     /// 存入个股级快照（资金流向、北向持仓等），key 含股票代码
     /// 调用方遍历股票列表逐只采集后逐只存入
     pub fn set_stock_snapshot(&self, method: &str, stock_code: &str, date: &str, json: &str) {
-        let key = format!("{SNAPSHOT_PREFIX}:{method}:{stock_code}:{date}");
+        let key = Self::stock_cache_key(method, stock_code, date);
         self.disk.set(key, json.to_string(), 0i64);
     }
 
@@ -77,10 +86,24 @@ impl DailySnapshotCache {
         format!("{SNAPSHOT_PREFIX}:{method}:{date}")
     }
 
+    fn stock_cache_key(method: &str, stock_code: &str, date: &str) -> String {
+        format!("{SNAPSHOT_PREFIX}:{method}:{stock_code}:{date}")
+    }
+
     /// 获取指定方法 + 日期的快照
     /// 返回 None 表示未命中缓存(或未启用)
     pub fn get(&self, method: &str, date: &str) -> Option<String> {
         let key = Self::cache_key(method, date);
+        self.disk.get(&key)
+    }
+
+    /// 获取个股级快照（key 含股票代码）
+    ///
+    /// **为什么必须有这个方法**：`set_stock_snapshot` 写入的 key 带股票代码，
+    /// 而读取侧此前只有不带 code 的 `get` ⇒ 个股级快照**只写无读**，
+    /// 采集回来的两融/资金流/北向数据在回放模式下一条也取不到（2026-09-25 补）。
+    pub fn get_stock(&self, method: &str, stock_code: &str, date: &str) -> Option<String> {
+        let key = Self::stock_cache_key(method, stock_code, date);
         self.disk.get(&key)
     }
 
@@ -223,5 +246,34 @@ mod tests {
         let key =
             DailySnapshotCache::cache_key_with_keyword("search_stock", "贵州茅台", "2026-06-01");
         assert_eq!(key, "daily:search_stock:贵州茅台:2026-06-01");
+    }
+
+    /// 回归（2026-09-25）：个股级快照必须可读回。
+    ///
+    /// 缺陷形态：`set_stock_snapshot` 写入带股票代码的 key，读取侧却只有不带 code 的
+    /// `get` ⇒ 回放模式一条也取不到（`sweep_daily_snapshots` 逐只采集看起来"有数据"，
+    /// 实际是只写无读的死键）。
+    #[test]
+    fn test_stock_snapshot_roundtrip() {
+        let cache = make_cache();
+        cache.set_stock_snapshot(
+            "get_margin_data",
+            "600519",
+            "2026-06-01",
+            r#"{"date":"2026-06-01"}"#,
+        );
+
+        assert!(
+            cache.get_stock("get_margin_data", "600519", "2026-06-01").is_some(),
+            "个股级快照必须能按 code + date 读回"
+        );
+        assert!(
+            cache.get_stock("get_margin_data", "000001", "2026-06-01").is_none(),
+            "不同 code 不得串读"
+        );
+        assert!(
+            cache.get("get_margin_data", "2026-06-01").is_none(),
+            "不带 code 的全市场 key 读不到个股快照（这正是缺陷形态）"
+        );
     }
 }

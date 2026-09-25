@@ -116,6 +116,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   closedLoopEnabled: true,
   closedLoopIntervalMinutes: 5,
   screenPerceptionEnabled: false,
+  guardianReviewEnabled: false,
   rlOptimizerEnabled: false,
   loraFinetuneEnabled: false,
   proactiveNudgeEnabled: true,

@@ -144,6 +144,8 @@
     "thoughtChain": "Gedankenkette anzeigen",
     "errorRecovery": "Automatische Fehlerwiederherstellung",
     "screenPerception": "Bildschirmwahrnehmung (Desktop-Steuerung)",
+    "guardianReview": "Guardian-Prüftor (LLM-Zweitprüfung)",
+    "guardianReviewHint": "Sensible Befehle durchlaufen vor deiner Rückfrage einmal eine Modellprüfung: Bestanden ⇒ Ausführung ohne Rückfrage; Abgelehnt ⇒ keine Ausführung. Nur wenn die Eingabe das Budget überschreitet, wird weiterhin du gefragt. Standardmäßig aus — beim Aktivieren übernimmt das Modell Teile der menschlichen Bestätigung.",
     "tot": "Tree of Thoughts (ToT, teuer)",
     "sandboxMode": "OS-Sandbox-Modus",
     "sandboxModeHint": "Shell-Befehle werden in einem eingeschränkten Unterprozess ausgeführt. Nur lesen = keine Schreibvorgänge + kein Netz; Arbeitsbereich schreiben = nur im Arbeitsbereich; Voller Zugriff = Sandbox deaktiviert.",
@@ -4107,7 +4109,15 @@
       "reception": "Empfang",
       "sales": "Vertriebs-Arbeitsplätze",
       "marketing": "Marketing",
-      "analysis": "Analyseraum"
+      "analysis": "Analyseraum",
+      "station": "Design-Studio",
+      "critique": "Entwurfsreview",
+      "material": "Asset-Bibliothek",
+      "plans": "Planungs-Arbeitsplätze",
+      "tracking": "Fortschritts-Board",
+      "soc": "Security-Ops-Center",
+      "mapping": "Kartierungs-Studio",
+      "art": "Kunst-Atelier"
     },
     "deleteFleet": {
       "button": "Büro löschen",

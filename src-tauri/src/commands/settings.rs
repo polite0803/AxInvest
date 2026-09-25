@@ -100,6 +100,10 @@ pub async fn save_settings(
         );
     }
 
+    // ── Guardian 审查闸门（PLAN-codex-parity-adoption R3-2）──
+    // 开关变更立即生效（装载 / 停用全局桥），与上面的沙箱/审批策略同属「保存即生效」同步点。
+    crate::init::guardian_bridge::refresh_global_guardian_bridge(state.inner()).await;
+
     // ── Graph RAG 实体图谱开关（RAG 设置面板）──
     //
     // 与上面 telemetry / 沙箱策略同属「保存后立即生效」的同步点。

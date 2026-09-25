@@ -226,6 +226,18 @@ fn extract_report_period(title: &str) -> Option<String> {
 /// 港股：`116.00700`（去掉 .HK 后缀，加 116 前缀）
 /// 美股：`105.AAPL`（去掉 .US 后缀，加 105 前缀）
 fn to_em_secid(stock_code: &str) -> String {
+    // secid 直通：形如 `1.000001` 的输入已经是东财 secid（指数 K 线走这条路，见
+    // `get_index_quotes_with_asof`），不能再按「首位数字」推断市场 —— 上证指数的代码
+    // 000001 按股票规则会被推断成深圳，静默取回平安银行的历史。
+    if let Some((market, code)) = stock_code.split_once('.') {
+        if !market.is_empty()
+            && market.chars().all(|c| c.is_ascii_digit())
+            && !code.is_empty()
+            && code.chars().all(|c| c.is_ascii_digit())
+        {
+            return stock_code.to_string();
+        }
+    }
     // 修复(2026-07-22): 去除 sh/sz/bj 前缀,否则后续 starts_with('6') 判断会失效,
     // 误把 "sh600887" 当作深圳市场股票,生成 secid="0.sh600887" 导致所有 API 调用返回空数据。
     // 影响范围:get_quote/get_klines/get_financials/get_money_flow/get_dragon_tiger/
@@ -251,6 +263,41 @@ fn to_em_secid(stock_code: &str) -> String {
         "0"
     };
     format!("{market}.{code}")
+}
+
+/// 大盘指数清单：`(东财 secid, 中文名)`。
+///
+/// live 实时快照与 as-of K 线合成共用同一张表，避免两条路径给出不同的指数集合。
+/// secid 的市场位（1=沪 / 0=深）**由本表显式给定** —— 上证综指与平安银行同为
+/// `000001`，按股票首位数字推断市场会静默取回错误的标的。
+pub const EM_INDEX_SECIDS: [(&str, &str); 3] =
+    [("1.000001", "上证指数"), ("0.399001", "深证成指"), ("0.399006", "创业板指")];
+
+/// 用指数日 K 线合成 as-of 时点的指数行情。
+///
+/// `klines` 必须按日期升序（`get_klines*` 已排序），且至少两根才能算涨跌幅；
+/// 点位取末根收盘，昨收取前一根收盘。
+fn index_quote_from_klines(secid: &str, name: &str, klines: &[KLine]) -> Option<IndexQuote> {
+    if klines.len() < 2 {
+        return None;
+    }
+    let last = klines.last()?;
+    let pre_close = klines[klines.len() - 2].close;
+    let change_pct = if pre_close > 0.0 {
+        (last.close - pre_close) / pre_close * 100.0
+    } else {
+        0.0
+    };
+    Some(IndexQuote {
+        // live 路径的 code 来自东财 f57（不带市场位），合成分支保持同一口径
+        code: secid.split('.').nth(1).unwrap_or(secid).to_string(),
+        name: name.to_string(),
+        price: last.close,
+        pre_close,
+        change_pct,
+        volume: last.volume,
+        amount: last.amount,
+    })
 }
 
 /// 构建东方财富 SECUCODE（用于 datacenter 报表 API）
@@ -617,10 +664,7 @@ impl StockVendor for EastMoneyVendor {
                             };
                             cf.insert(
                                 date,
-                                (
-                                    num(&row["NETCASH_OPERATE"]),
-                                    num(&row["CONSTRUCT_LONG_ASSET"]),
-                                ),
+                                (num(&row["NETCASH_OPERATE"]), num(&row["CONSTRUCT_LONG_ASSET"])),
                             );
                         }
                         let mut filled = 0usize;
@@ -2290,10 +2334,8 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
-        let indices =
-            [("1.000001", "上证指数"), ("0.399001", "深证成指"), ("0.399006", "创业板指")];
-        let mut results = Vec::with_capacity(indices.len());
-        for (secid, name) in &indices {
+        let mut results = Vec::with_capacity(EM_INDEX_SECIDS.len());
+        for (secid, name) in &EM_INDEX_SECIDS {
             let url = format!(
                 "https://push2his.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f170"
             );
@@ -3340,16 +3382,36 @@ impl StockVendor for EastMoneyVendor {
     }
 
     // ── SynthesizeFromKline 类的 index_quotes 合成 ──
-    // 用各指数的 as_of 当日 K 线最后一根作为指数值
-    // 简化:返回 ["000001", "399001", "399006"] 三个核心指数
+    //
+    // 此前这里是**直接返回 Err 的占位**，注释写「lib.rs 路由层会拿到 K 线后再合成」——
+    // 而路由层从未实现该合成 ⇒ as-of 模式下「大盘指数」维度恒空（2026-09-25 补）。
+    // 指数的 secid/名称映射本就在 vendor 侧，合成放在这里最不易取错标的。
     async fn get_index_quotes_with_asof(&self) -> Result<Vec<IndexQuote>, DataError> {
-        let _as_of = crate::as_of::current_as_of();
-        // 简化:lib.rs 路由层会拿到 K 线后再合成
-        // vendor 层返回错误让 lib.rs 接管
-        Err(DataError::VendorError {
-            vendor: "eastmoney".into(),
-            message: "get_index_quotes_with_asof: lib.rs 路由层用 K 线合成,不应直连".into(),
-        })
+        crate::as_of::current_as_of().ok_or_else(|| {
+            DataError::ParseError("get_index_quotes_with_asof: 无 as_of 上下文".into())
+        })?;
+        let mut out = Vec::with_capacity(EM_INDEX_SECIDS.len());
+        for &(secid, name) in &EM_INDEX_SECIDS {
+            // 指数不涉及复权 → fqt=0；取 3 根：末根=截止日点位，前一根=昨收
+            match self.get_klines_with_asof(secid, "daily", 3, Some(AdjType::None)).await {
+                Ok(ks) => match index_quote_from_klines(secid, name, &ks) {
+                    Some(q) => out.push(q),
+                    None => {
+                        tracing::warn!("[eastmoney] as-of 指数 {secid}({name}) K线不足两根，跳过")
+                    },
+                },
+                Err(e) => {
+                    tracing::warn!("[eastmoney] as-of 指数 {secid}({name}) K线失败: {e}")
+                },
+            }
+        }
+        if out.is_empty() {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: "as-of 模式下三大指数当日均无可用 K 线".into(),
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -3550,5 +3612,76 @@ mod asof_capability_tests {
         // 其他
         assert_eq!(classify_earnings_title("关于公司章程修订的公告").0, "other");
         assert_eq!(classify_earnings_title("关于公司章程修订的公告").1, None);
+    }
+}
+
+#[cfg(test)]
+mod index_asof_tests {
+    use super::*;
+
+    fn k(date: &str, close: f64, volume: f64, amount: f64) -> KLine {
+        KLine {
+            date: date.into(),
+            open: close,
+            high: close,
+            low: close,
+            close,
+            volume,
+            amount,
+            turnover_rate: None,
+            adj_factor: None,
+        }
+    }
+
+    /// as-of 指数合成：点位取末根收盘，昨收取前一根收盘，涨跌幅据此算出。
+    #[test]
+    fn index_quote_from_two_klines() {
+        let ks =
+            vec![k("2026-06-01", 3000.0, 100.0, 1000.0), k("2026-06-02", 3060.0, 200.0, 2000.0)];
+        let q = index_quote_from_klines("1.000001", "上证指数", &ks).expect("应能合成");
+        assert_eq!(q.code, "000001", "code 必须与 live 路径(f57)同口径，不带市场位");
+        assert_eq!(q.name, "上证指数");
+        assert_eq!(q.price, 3060.0);
+        assert_eq!(q.pre_close, 3000.0);
+        assert!((q.change_pct - 2.0).abs() < 1e-9, "涨跌幅应按两根收盘算: {}", q.change_pct);
+        assert_eq!((q.volume, q.amount), (200.0, 2000.0));
+    }
+
+    /// 只有一根 K 线时无法算涨跌幅 ⇒ 不合成（宁缺毋滥，也不把 pre_close 编成 0）。
+    #[test]
+    fn index_quote_needs_two_klines() {
+        let ks = vec![k("2026-06-02", 3060.0, 200.0, 2000.0)];
+        assert!(index_quote_from_klines("1.000001", "上证指数", &ks).is_none());
+        assert!(index_quote_from_klines("1.000001", "上证指数", &[]).is_none());
+    }
+
+    /// 昨收为 0（脏数据）时涨跌幅归零，不得产出 inf/NaN 传给报告。
+    #[test]
+    fn index_quote_zero_pre_close_yields_no_inf() {
+        let ks = vec![k("2026-06-01", 0.0, 0.0, 0.0), k("2026-06-02", 3060.0, 1.0, 1.0)];
+        let q = index_quote_from_klines("0.399001", "深证成指", &ks).expect("应能合成");
+        assert_eq!(q.change_pct, 0.0);
+        assert!(q.change_pct.is_finite());
+    }
+
+    /// 指数 secid 必须原样透传：`to_em_secid("1.000001")` 若按「首位数字」推断市场，
+    /// 会把上证指数静默换成深市标的（000001 亦是平安银行），合成结果整体错误且无报错。
+    #[test]
+    fn index_secid_passes_through_without_market_inference() {
+        assert_eq!(to_em_secid("1.000001"), "1.000001");
+        assert_eq!(to_em_secid("0.399006"), "0.399006");
+        // 股票口径不受影响
+        assert_eq!(to_em_secid("600519"), "1.600519");
+        assert_eq!(to_em_secid("000001"), "0.000001");
+        // 港股/美股后缀仍走各自前缀分支
+        assert_eq!(to_em_secid("00700.HK"), "116.00700");
+        assert_eq!(to_em_secid("AAPL.US"), "105.AAPL");
+    }
+
+    /// 清单常量必须与 as-of 合成、live 快照共用（两处各写一份会漂移）。
+    #[test]
+    fn index_list_is_shared() {
+        assert_eq!(EM_INDEX_SECIDS.len(), 3);
+        assert_eq!(EM_INDEX_SECIDS[0], ("1.000001", "上证指数"));
     }
 }

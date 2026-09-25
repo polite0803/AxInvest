@@ -4174,21 +4174,31 @@ pub async fn save_eastmoney_proxy(
 /// 执行每日快照采集：遍历 SNAPSHOT_METHODS，将全市场/个股数据存入 DiskCache
 ///
 /// 调用一次即可采集当日快照；as-of 模式下的 NoHistoricalSemantic 方法会优先查快照缓存。
-/// 建议在每日收盘后（15:30 以后）通过 cron 调用。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "采集每日快照")]
 #[tauri::command]
 pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String, String> {
+    run_daily_snapshot_sweep(&state.astock_client, state.harness.db()).await
+}
+
+/// 每日快照采集的公共实现（Tauri 命令与后台定时服务共用）。
+///
+/// **为什么抽成自由函数**：命令形态只拿得到 `State<AppState>`，而后台服务
+/// （`init/services.rs`）没有 State ⇒ 此前采集**只能由前端手动触发**，
+/// 一天没点就没有当日快照，回放模式的「每日快照」兜底形同虚设。
+pub async fn run_daily_snapshot_sweep(
+    client: &axagent_astock_data::AStockClient,
+    db: &sea_orm::DatabaseConnection,
+) -> Result<String, String> {
     use axagent_astock_data::daily_snapshot::{PER_STOCK_METHODS, SNAPSHOT_METHODS};
     use chrono::Local;
 
     let date = Local::now().format("%Y-%m-%d").to_string();
-    let client = &state.astock_client;
     let mut market_count = 0u32;
     let mut stock_count = 0u32;
 
     // 获取自选股列表作为个股遍历的候选池
     let watchlist_codes: Vec<String> = axagent_entities::watchlist_items::Entity::find()
-        .all(state.harness.db())
+        .all(db)
         .await
         .map_err(|e| {
             ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("读取自选股失败: {e}"))
@@ -4215,6 +4225,16 @@ pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String,
                         Ok(Some(r)) => serde_json::to_string(&r).unwrap_or_default(),
                         _ => continue,
                     },
+                    // 舆情/质押只有「当下」语义 ⇒ 每日快照是它们在回放里的唯一历史通道，
+                    // 采集侧不补这两个臂，读取侧的 try_stock_daily_snapshot 就永远 miss。
+                    "get_social_sentiment" => match client.get_social_sentiment(code).await {
+                        Ok(r) if !r.is_empty() => serde_json::to_string(&r).unwrap_or_default(),
+                        _ => continue,
+                    },
+                    "get_pledge_data" => match client.get_pledge_data(code).await {
+                        Ok(Some(r)) => serde_json::to_string(&r).unwrap_or_default(),
+                        _ => continue,
+                    },
                     _ => continue,
                 };
                 client.set_stock_daily_snapshot(method, code, &date, &json);
@@ -4235,8 +4255,11 @@ pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String,
                     Ok(r) => serde_json::to_string(&r).unwrap_or_default(),
                     _ => continue,
                 },
-                "get_stock_concept_blocks" => {
-                    // 概念板块需要个股参数，遍历自选股
+                // 概念板块需要个股参数，遍历自选股。
+                // ⚠ 这里的分支标签必须与 `SNAPSHOT_METHODS` 里的名字逐字一致 ——
+                //   曾写作 `get_stock_concept_blocks`（不在清单内），于是该臂永不命中、
+                //   落到 `_ => continue`，概念板块快照从未被采集过。
+                "get_concept_blocks" => {
                     for code in &watchlist_codes {
                         match client.get_concept_blocks(code).await {
                             Ok(Some(r)) => {

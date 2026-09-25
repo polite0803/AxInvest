@@ -195,6 +195,30 @@ export interface AddMemberInput {
 }
 
 /**
+ * 域包专家 Profile — `list_domain_pack_profiles` 返回值。
+ *
+ * 与后端 `DomainPackProfile`（commands/fleet/mod.rs，`PLAN-office-auto-provision.md` 阶段 1 DTO）字段一致。
+ */
+export interface DomainPackProfile {
+  /** profile id（约定 `opc-<expertKey>`，同时用作 agentSlug / agentProfileId） */
+  profileId: string;
+  /** 显示名（seed 行带 icon 前缀） */
+  name: string;
+  expertKey: string;
+  recommendedTools: string[];
+  /** `agent_profiles` 表中是否已有该行（false = seed 未跑或被删，入房时应跳过） */
+  existsInDb: boolean;
+}
+
+/** 建房即成队的播种结果 */
+export interface SeedMembersResult {
+  /** 成功入房成员数 */
+  seeded: number;
+  /** 跳过数（无 DB 行 / slug 冲突 / 单条失败） */
+  skipped: number;
+}
+
+/**
  * 群聊智能路由输入。
  *
  * 已无 `history` 字段：历史由后端从数据库读取（库是唯一真源）。

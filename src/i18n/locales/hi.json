@@ -3937,7 +3937,10 @@
       "strategyTooltip": "रणनीति Dispatcher prompt में इंजेक्ट होती है और राउटिंग को प्रभावित करती है। निवेश ऑफिसों को Investment Research चुनना चाहिए।",
       "descriptionLabel": "व्यवसाय विवरण",
       "descriptionPlaceholder": "टीम स्थिति / मुख्य जिम्मेदारियां (वैकल्पिक)",
-      "success": "ऑफिस बनाया गया: {{name}}"
+      "success": "ऑफिस बनाया गया: {{name}}",
+      "autoSeedLabel": "डोमेन पैक से सदस्य स्वतः भरें",
+      "seedResult": "{{seeded}} सदस्य स्वतः जोड़े गए",
+      "seedResultSkipped": "{{seeded}} जोड़े, {{skipped}} छोड़े (प्रोफ़ाइल गुँगा या टकराव)"
     },
     "emptyFleet": "कोई ऑफिस अभी तक नहीं बनाई गई। ऊपर दाईं ओर बटन पर क्लिक करके पहली ऑफिस बनाएं।",
     "memberCount": "{{count}} सदस्य",

@@ -959,3 +959,13 @@ export function distributeMembersInRoom(
   const cellH = 50;
   return { x: room.x + cellW * (col + 1), y: room.y + 40 + row * cellH };
 }
+
+/** 「建房即成队」播种排房（PLAN-office-auto-provision.md 阶段 2）：
+ *  从 defaultRoomId 起轮转分到各房间，避免全员堆在同一间。返回长度 = memberCount 的 roomId 列表。 */
+export function assignSeedRooms(memberCount: number, template: OfficeSceneTemplate): string[] {
+  const ordered = [
+    template.defaultRoomId,
+    ...template.rooms.map((r) => r.id).filter((id) => id !== template.defaultRoomId),
+  ];
+  return Array.from({ length: memberCount }, (_, i) => ordered[i % ordered.length] ?? template.defaultRoomId);
+}

@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { INVESTMENT_OFFICE_TEMPLATE } from "../investSceneTemplates";
 import {
+  assignSeedRooms,
   DEFAULT_OFFICE_TEMPLATE,
   SCENE_DOMAIN_SLUGS,
   SCENE_TEMPLATES,
@@ -32,5 +33,29 @@ describe("sceneTemplateLabelKey 显示名单源化", () => {
     for (const slug of SCENE_DOMAIN_SLUGS) {
       expect(SCENE_TEMPLATES.some((tpl) => tpl.slug === slug)).toBe(true);
     }
+  });
+});
+
+describe("assignSeedRooms 建房即成队排房", () => {
+  it("首个成员落 defaultRoomId，其后轮转覆盖所有房间", () => {
+    const finance = SCENE_TEMPLATES.find((tpl) => tpl.slug === "finance_invest")!;
+    const rooms = assignSeedRooms(8, finance);
+    expect(rooms).toHaveLength(8);
+    expect(rooms[0]).toBe(finance.defaultRoomId);
+    // 8 人 4 间 ⇒ 每间恰 2 人
+    const byRoom: Record<string, number> = {};
+    for (const r of rooms) {
+      byRoom[r] = (byRoom[r] ?? 0) + 1;
+    }
+    for (const room of finance.rooms) {
+      expect(byRoom[room.id]).toBe(2);
+    }
+  });
+
+  it("成员数超过房间数仍轮转、为 0 时返回空", () => {
+    expect(assignSeedRooms(0, DEFAULT_OFFICE_TEMPLATE)).toEqual([]);
+    const rooms = assignSeedRooms(10, DEFAULT_OFFICE_TEMPLATE);
+    expect(rooms).toHaveLength(10);
+    expect(new Set(rooms).size).toBe(DEFAULT_OFFICE_TEMPLATE.rooms.length);
   });
 });

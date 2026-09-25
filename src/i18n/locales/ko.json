@@ -3937,7 +3937,10 @@
       "strategyTooltip": "전략은 Dispatcher 프롬프트에 주입되어 라우팅에 영향을 줍니다. 투자 오피스는 투자 리서치를 선택하는 것을 권장합니다.",
       "descriptionLabel": "비즈니스 설명",
       "descriptionPlaceholder": "팀 포지셔닝 / 주요 책임 (선택)",
-      "success": "오피스 생성됨: {{name}}"
+      "success": "오피스 생성됨: {{name}}",
+      "autoSeedLabel": "도메인 팩에서 멤버 자동 배치",
+      "seedResult": "{{seeded}}명의 멤버를 자동 배치했습니다",
+      "seedResultSkipped": "{{seeded}}명 배치, {{skipped}}명 건너뜀(프로필 없음 또는 충돌)"
     },
     "emptyFleet": "생성된 오피스가 없습니다. 우측 상단 버튼을 눌러 첫 오피스를 만들어 보세요.",
     "memberCount": "{{count}}명",

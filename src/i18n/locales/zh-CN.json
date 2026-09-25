@@ -3937,7 +3937,10 @@
       "strategyTooltip": "策略会注入 Dispatcher prompt，影响消息路由偏好。投研办公室建议选「投研策略」。",
       "descriptionLabel": "业务描述",
       "descriptionPlaceholder": "团队定位 / 主要职责（可选）",
-      "success": "已创建办公室：{{name}}"
+      "success": "已创建办公室：{{name}}",
+      "autoSeedLabel": "按域包自动配齐成员",
+      "seedResult": "已自动配齐 {{seeded}} 名成员",
+      "seedResultSkipped": "配齐 {{seeded}} 名，跳过 {{skipped}} 名（无档案或冲突）"
     },
     "emptyFleet": "尚未创建办公室。点击右上角按钮创建第一个办公室。",
     "memberCount": "{{count}} 个成员",

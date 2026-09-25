@@ -15,12 +15,19 @@
  * 选定场景模板 + 策略后写入 Fleet.metadata.strategy 与 sceneTemplateSlug，
  * 后端 LlmDispatcher 会读取 strategy 注入对应的业务上下文 prompt。
  */
-import { SCENE_TEMPLATES, sceneTemplateLabelKey } from "@/components/office/phaser/sceneTemplates";
+import {
+  assignSeedRooms,
+  resolveSceneTemplate,
+  SCENE_DOMAIN_SLUGS,
+  SCENE_TEMPLATES,
+  sceneTemplateLabelKey,
+} from "@/components/office/phaser/sceneTemplates";
 import { showBackendError } from "@/lib/errorI18n";
+import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
 import { useOfficeStore } from "@/stores";
-import type { CreateFleetInput, FleetMetadata } from "@/types";
-import { Button, Form, Input, Modal, Select, Space } from "antd";
+import type { CreateFleetInput, DomainPackProfile, FleetMetadata } from "@/types";
+import { Button, Form, Input, Modal, Select, Space, Switch } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -34,6 +41,8 @@ interface FormValues {
   sceneTemplateSlug?: string;
   strategy?: string;
   description?: string;
+  /** 建房即成队：行业场景模板下自动按域包名册配齐成员（PLAN-office-auto-provision.md 阶段 2） */
+  autoSeed?: boolean;
 }
 
 /** 策略选项 — 与后端 llm_dispatcher.rs build_system_prompt 的 match 分支对齐 */
@@ -52,6 +61,8 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
   const createFleet = useOfficeStore((s) => s.createFleet);
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm<FormValues>();
+  const sceneSlug = Form.useWatch("sceneTemplateSlug", form);
+  const isDomainScene = !!sceneSlug && SCENE_DOMAIN_SLUGS.has(sceneSlug);
 
   const handleSubmit = async () => {
     try {
@@ -71,6 +82,16 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
       const fleet = await createFleet(input);
       if (fleet) {
         message.success(t("office.createFleet.success", { name: fleet.name }));
+        if (values.autoSeed && values.sceneTemplateSlug && SCENE_DOMAIN_SLUGS.has(values.sceneTemplateSlug)) {
+          const res = await seedFleetFromDomain(fleet.id, values.sceneTemplateSlug);
+          if (res === null) {
+            // null = 名册查询失败（已在全局 error 态），不打断建房成功语义
+          } else if (res.skipped > 0) {
+            message.warning(t("office.createFleet.seedResultSkipped", { seeded: res.seeded, skipped: res.skipped }));
+          } else if (res.seeded > 0) {
+            message.success(t("office.createFleet.seedResult", { seeded: res.seeded }));
+          }
+        }
         form.resetFields();
         onClose();
       }
@@ -107,7 +128,7 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
       <Form
         form={form}
         layout="vertical"
-        initialValues={{ sceneTemplateSlug: "default_office" }}
+        initialValues={{ sceneTemplateSlug: "default_office", autoSeed: true }}
       >
         <Form.Item
           name="name"
@@ -128,6 +149,18 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
             }))}
           />
         </Form.Item>
+
+        {isDomainScene
+          ? (
+            <Form.Item
+              name="autoSeed"
+              label={t("office.createFleet.autoSeedLabel")}
+              valuePropName="checked"
+            >
+              <Switch />
+            </Form.Item>
+          )
+          : null}
 
         <Form.Item
           name="strategy"
@@ -153,4 +186,36 @@ export function CreateFleetModal({ open, onClose }: CreateFleetModalProps) {
       </Form>
     </Modal>
   );
+}
+
+/** 建房即成队：查域包名册并逐条入房（PLAN-office-auto-provision.md 阶段 2）。
+ *  单条 addMember 失败（slug 冲突等）计入 skipped 不中断；名册查询失败返回 null。 */
+async function seedFleetFromDomain(
+  fleetId: string,
+  domainPackId: string,
+): Promise<{ seeded: number; skipped: number } | null> {
+  let profiles: DomainPackProfile[];
+  try {
+    profiles = await invoke<DomainPackProfile[]>("list_domain_pack_profiles", { domainPackId });
+  } catch {
+    return null;
+  }
+  const usable = profiles.filter((p) => p.existsInDb);
+  const rooms = assignSeedRooms(usable.length, resolveSceneTemplate(domainPackId));
+  const addMember = useOfficeStore.getState().addMember;
+  let seeded = 0;
+  for (const [i, p] of usable.entries()) {
+    const member = await addMember({
+      fleetId,
+      agentId: p.profileId,
+      agentSlug: p.profileId,
+      displayName: p.name,
+      agentProfileId: p.profileId,
+      roomId: rooms[i],
+    });
+    if (member) {
+      seeded += 1;
+    }
+  }
+  return { seeded, skipped: profiles.length - seeded };
 }

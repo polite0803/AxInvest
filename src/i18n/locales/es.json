@@ -3937,7 +3937,10 @@
       "strategyTooltip": "La estrategia se inyecta en el prompt del Dispatcher y afecta el enrutamiento. Las oficinas de inversión deben elegir Investigación de Inversión.",
       "descriptionLabel": "Descripción del negocio",
       "descriptionPlaceholder": "Posicionamiento del equipo / responsabilidades principales (opcional)",
-      "success": "Oficina creada: {{name}}"
+      "success": "Oficina creada: {{name}}",
+      "autoSeedLabel": "Equipar miembros automáticamente del pack de dominio",
+      "seedResult": "{{seeded}} miembros añadidos automáticamente",
+      "seedResultSkipped": "{{seeded}} añadidos, {{skipped}} omitidos (falta perfil o conflicto)"
     },
     "emptyFleet": "No hay oficinas creadas. Haz clic en el botón superior derecho para crear la primera.",
     "memberCount": "{{count}} miembros",

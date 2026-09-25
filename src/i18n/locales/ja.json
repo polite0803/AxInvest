@@ -3937,7 +3937,10 @@
       "strategyTooltip": "戦略は Dispatcher プロンプトに注入され、ルーティングに影響します。投資オフィスは投資リサーチを選択することを推奨します。",
       "descriptionLabel": "業務説明",
       "descriptionPlaceholder": "チームの位置づけ / 主な担当（任意）",
-      "success": "オフィスを作成しました：{{name}}"
+      "success": "オフィスを作成しました：{{name}}",
+      "autoSeedLabel": "ドメインパックからメンバーを自動配置",
+      "seedResult": "{{seeded}} 名のメンバーを自動配置しました",
+      "seedResultSkipped": "{{seeded}} 名を配置、{{skipped}} 名をスキップ（プロファイル不明または衝突）"
     },
     "emptyFleet": "オフィスが未作成です。右上のボタンから最初のオフィスを作成してください。",
     "memberCount": "{{count}} メンバー",

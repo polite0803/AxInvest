@@ -3937,7 +3937,10 @@
       "strategyTooltip": "La stratégie est injectée dans le prompt du Dispatcher et affecte le routage. Les bureaux de recherche devraient choisir Recherche Investissement.",
       "descriptionLabel": "Description métier",
       "descriptionPlaceholder": "Positionnement de l'équipe / responsabilités principales (optionnel)",
-      "success": "Bureau créé : {{name}}"
+      "success": "Bureau créé : {{name}}",
+      "autoSeedLabel": "Peupler automatiquement l'équipe du pack de domaine",
+      "seedResult": "{{seeded}} membres ajoutés automatiquement",
+      "seedResultSkipped": "{{seeded}} ajoutés, {{skipped}} ignorés (profil manquant ou conflit)"
     },
     "emptyFleet": "Aucun bureau créé. Cliquez sur le bouton en haut à droite pour créer votre premier bureau.",
     "memberCount": "{{count}} membres",

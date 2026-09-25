@@ -3937,7 +3937,10 @@
       "strategyTooltip": "Strategy is injected into the Dispatcher prompt and affects message routing. Investment offices should pick Investment Research.",
       "descriptionLabel": "Business Description",
       "descriptionPlaceholder": "Team positioning / main duties (optional)",
-      "success": "Office created: {{name}}"
+      "success": "Office created: {{name}}",
+      "autoSeedLabel": "Auto-seed members from the domain pack",
+      "seedResult": "Auto-seeded {{seeded}} members",
+      "seedResultSkipped": "Seeded {{seeded}}, skipped {{skipped}} (missing profile or conflict)"
     },
     "emptyFleet": "No office created yet. Click the button in the top right to create your first office.",
     "memberCount": "{{count}} members",

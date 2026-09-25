@@ -353,11 +353,146 @@ async fn seed_capability_pack_experts_inner(
     experts: &[(&str, &str, &str)],
     profile_tools: &[(&str, &[&str])],
     category: &str,
-    color: &str,
     icon: &str,
+    color: &str,
 ) -> Result<(), String> {
     seed_experts(db, experts, category, color).await?;
     seed_profiles(db, experts, profile_tools, category, icon).await?;
     tracing::info!("[opc-domain-pack] {capability_pack_name} 域包专家种子化完成");
     Ok(())
+}
+
+// ── 域包 → 专家名册查询面（PLAN-office-auto-provision.md 阶段 1）──
+//
+// pack_id 用 snake_case，与 `config/opc/domain_packs/` 目录名、前端 sceneTemplateSlug 对齐。
+// seed 调用仍逐包手写（各包 icon/color 不同），但新增域包必须同步
+// `seed_all_capability_pack_agents` 与本注册表 —— 由 roster_covers_seed_lists 测试钉住。
+// 已知缺口：content_media 域包无专家 seed（名册覆盖 13/14），roster 返回 None。
+
+type ExpertTriples = &'static [(&'static str, &'static str, &'static str)];
+type ProfileTools = &'static [(&'static str, &'static [&'static str])];
+
+/// 名册覆盖的域包 id（13 个），仅供测试盘点（生产消费面是 `domain_pack_roster`）。
+#[cfg(test)]
+const ROSTER_DOMAIN_PACK_IDS: &[&str] = &[
+    "accounting",
+    "ai_research",
+    "consulting",
+    "design",
+    "ecommerce",
+    "education",
+    "finance_invest",
+    "game_dev",
+    "geospatial",
+    "project_management",
+    "sales_growth",
+    "security",
+    "software_dev",
+];
+
+/// 域包专家名册的权威查询面：返回 (专家三元组, profile 工具白名单)。
+///
+/// 未知域包返回 `None`（content_media 亦为 None —— 无 seed 的域包「配不出队」是事实而非错误）。
+pub fn domain_pack_roster(pack_id: &str) -> Option<(ExpertTriples, ProfileTools)> {
+    Some(match pack_id {
+        "accounting" => (
+            capability_pack_experts::ACCOUNTING_EXPERTS,
+            capability_pack_experts::ACCOUNTING_PROFILE_TOOLS,
+        ),
+        "ai_research" => (AI_RESEARCH_EXPERTS, AI_RESEARCH_PROFILE_TOOLS),
+        "consulting" => (
+            capability_pack_experts::CONSULTING_EXPERTS,
+            capability_pack_experts::CONSULTING_PROFILE_TOOLS,
+        ),
+        "design" => {
+            (capability_pack_experts::DESIGN_EXPERTS, capability_pack_experts::DESIGN_PROFILE_TOOLS)
+        },
+        "ecommerce" => (
+            capability_pack_experts::ECOMMERCE_EXPERTS,
+            capability_pack_experts::ECOMMERCE_PROFILE_TOOLS,
+        ),
+        "education" => (
+            capability_pack_experts::EDUCATION_EXPERTS,
+            capability_pack_experts::EDUCATION_PROFILE_TOOLS,
+        ),
+        "finance_invest" => (
+            capability_pack_experts::FINANCE_INVEST_EXPERTS,
+            capability_pack_experts::FINANCE_INVEST_PROFILE_TOOLS,
+        ),
+        "game_dev" => (
+            capability_pack_experts::GAME_DEV_EXPERTS,
+            capability_pack_experts::GAME_DEV_PROFILE_TOOLS,
+        ),
+        "geospatial" => (
+            capability_pack_experts::GEOSPATIAL_EXPERTS,
+            capability_pack_experts::GEOSPATIAL_PROFILE_TOOLS,
+        ),
+        "project_management" => (
+            capability_pack_experts::PROJECT_MANAGEMENT_EXPERTS,
+            capability_pack_experts::PROJECT_MANAGEMENT_PROFILE_TOOLS,
+        ),
+        "sales_growth" => (
+            capability_pack_experts::SALES_GROWTH_EXPERTS,
+            capability_pack_experts::SALES_GROWTH_PROFILE_TOOLS,
+        ),
+        "security" => (
+            capability_pack_experts::SECURITY_EXPERTS,
+            capability_pack_experts::SECURITY_PROFILE_TOOLS,
+        ),
+        "software_dev" => (
+            capability_pack_experts::SOFTWARE_DEV_EXPERTS,
+            capability_pack_experts::SOFTWARE_DEV_PROFILE_TOOLS,
+        ),
+        _ => return None,
+    })
+}
+
+/// 域包 profile id 约定：`opc-<expert_key>`（seed_profiles 与消费方的共同契约）
+pub fn domain_pack_profile_id(expert_key: &str) -> String {
+    format!("opc-{expert_key}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roster_covers_all_domain_pack_ids() {
+        assert_eq!(ROSTER_DOMAIN_PACK_IDS.len(), 13);
+        for id in ROSTER_DOMAIN_PACK_IDS {
+            let (experts, _tools) =
+                domain_pack_roster(id).unwrap_or_else(|| panic!("域包 {id} 名册缺失"));
+            assert!(!experts.is_empty(), "域包 {id} 专家清单为空");
+            for (key, name, content) in experts {
+                assert!(!key.is_empty() && !name.is_empty());
+                assert!(content.contains("role:"), "专家 {key} 的 md 缺少 frontmatter");
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_and_unseeded_packs_return_none() {
+        // content_media 有域包目录但无专家 seed —— 缺口被显式锁定，补 seed 时必须一并更名册
+        assert!(domain_pack_roster("content_media").is_none());
+        assert!(domain_pack_roster("no_such_pack").is_none());
+    }
+
+    #[tokio::test]
+    async fn roster_profile_ids_match_seeded_profiles() {
+        use axagent_entities::agent_profiles;
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+        let h = axagent_dao::db::create_test_pool().await.unwrap();
+        let db = &h.conn;
+        seed_ai_research_agents(db).await.unwrap();
+
+        let (experts, _) = domain_pack_roster("ai_research").unwrap();
+        let ids: Vec<String> = experts.iter().map(|(k, _, _)| domain_pack_profile_id(k)).collect();
+        let rows = agent_profiles::Entity::find()
+            .filter(agent_profiles::Column::Id.is_in(ids))
+            .all(db)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), experts.len(), "seed 后名册 profile id 必须逐条命中 DB");
+    }
 }

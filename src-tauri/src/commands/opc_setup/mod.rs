@@ -12,7 +12,7 @@ use axagent_dao::repo::agent_role;
 use axagent_entities::{agency_experts, agent_profiles};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 
-mod capability_pack_agents;
+pub(crate) mod capability_pack_agents;
 mod capability_pack_experts;
 mod domain_agents;
 mod domain_experts;

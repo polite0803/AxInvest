@@ -823,3 +823,65 @@ fn resolve_target_slug(routable: &[FleetMember], raw_slug: &str) -> Option<Strin
         })
         .map(|m| m.agent_slug.clone())
 }
+
+// ── 域包建房即成队查询（PLAN-office-auto-provision.md 阶段 1）────────
+
+/// 域包专家 Profile（`list_domain_pack_profiles` 返回，创建房间弹窗「自动配齐成员」消费）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DomainPackProfile {
+    pub profile_id: String,
+    pub name: String,
+    pub expert_key: String,
+    pub recommended_tools: Vec<String>,
+    /// `agent_profiles` 表中是否已有该行（false = seed 未跑或被删，消费方应跳过并提示）
+    pub exists_in_db: bool,
+}
+
+/// 列出域包专家的种子化 Profile。
+///
+/// 权威源是 Rust 名册（`capability_pack_agents::domain_pack_roster`），
+/// profile id 约定 `opc-<expert_key>`。未知或无 seed 的域包（如 content_media）
+/// 返回空列表而非报错——前端只对行业场景模板调用，「配不出队」是事实不是异常。
+#[agent_command(domain = fleet, safety = Safe, call_mode = StateInput, description = "列出域包专家 Profile")]
+#[tauri::command]
+pub async fn list_domain_pack_profiles(
+    app_state: State<'_, AppState>,
+    domain_pack_id: String,
+) -> Result<Vec<DomainPackProfile>, ErrorResponse> {
+    use crate::commands::opc_setup::capability_pack_agents::{
+        domain_pack_profile_id, domain_pack_roster,
+    };
+    use axagent_entities::agent_profiles;
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+    let Some((experts, tools)) = domain_pack_roster(&domain_pack_id) else {
+        warn!("[fleet] list_domain_pack_profiles: 域包 {domain_pack_id} 无专家名册，返回空");
+        return Ok(vec![]);
+    };
+    let ids: Vec<String> = experts.iter().map(|(k, _, _)| domain_pack_profile_id(k)).collect();
+    let db = app_state.harness.db();
+    let rows = agent_profiles::Entity::find()
+        .filter(agent_profiles::Column::Id.is_in(ids))
+        .all(db)
+        .await
+        .map_err(|e| ErrorResponse::from_error(e, ErrorCategory::General))?;
+    Ok(experts
+        .iter()
+        .map(|(key, name, _)| {
+            let pid = domain_pack_profile_id(key);
+            let row = rows.iter().find(|r| r.id == pid);
+            DomainPackProfile {
+                name: row.map(|r| r.name.clone()).unwrap_or_else(|| (*name).to_string()),
+                recommended_tools: tools
+                    .iter()
+                    .find(|(k, _)| k == key)
+                    .map(|(_, t)| t.iter().map(|s| s.to_string()).collect())
+                    .unwrap_or_default(),
+                expert_key: (*key).to_string(),
+                exists_in_db: row.is_some(),
+                profile_id: pid,
+            }
+        })
+        .collect())
+}

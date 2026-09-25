@@ -122,11 +122,11 @@ fn run_worker(once: bool) -> io::Result<()> {
 fn report_own_rss() {
     #[cfg(target_os = "linux")]
     {
-        if let Ok(s) = std::fs::read_to_string("/proc/self/statm") {
-            if let Some(pages) = s.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok()) {
-                // x86_64/aarch64 Linux 页大小通常为 4096。
-                eprintln!("[worker] 常驻内存 ≈ {} KB", pages * 4);
-            }
+        if let Ok(s) = std::fs::read_to_string("/proc/self/statm")
+            && let Some(pages) = s.split_whitespace().nth(1).and_then(|v| v.parse::<u64>().ok())
+        {
+            // x86_64/aarch64 Linux 页大小通常为 4096。
+            eprintln!("[worker] 常驻内存 ≈ {} KB", pages * 4);
         }
     }
 }

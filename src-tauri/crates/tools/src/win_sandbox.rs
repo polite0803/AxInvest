@@ -1451,9 +1451,19 @@ mod tests {
         tokio::spawn(async move {
             loop {
                 if let Ok((mut sock, _)) = listener.accept().await {
-                    // 回最小 HTTP 响应，让 curl 以退出码 0 判定「连接成功」
-                    let _ = sock.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok").await;
-                    let _ = sock.shutdown().await;
+                    // 回最小 HTTP 响应，让 curl 以退出码 0 判定「连接成功」。
+                    // curl 取完响应即断开，写 / 关闭失败是预期噪声：显式吞掉并
+                    // 继续服务后续连接（H 棘轮不许新增 `let _ = <fallible>.await;`）。
+                    if sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+                        .await
+                        .is_err()
+                    {
+                        continue;
+                    }
+                    if sock.shutdown().await.is_err() {
+                        continue;
+                    }
                 }
             }
         });

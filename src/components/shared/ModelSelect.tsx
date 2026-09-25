@@ -4,6 +4,7 @@
 import { SmartProviderIcon } from "@/lib/providerIcons";
 import { safeJoinIds, safeParseIdPair } from "@/lib/validators";
 import { useProviderStore } from "@/stores";
+import type { Model, ModelType } from "@/types";
 import { ModelIcon } from "@lobehub/icons";
 import { Select, theme } from "antd";
 import { useCallback, useMemo } from "react";
@@ -21,13 +22,22 @@ export function parseModelValue(value: string | undefined) {
   return { providerId: result.first, modelId: result.second };
 }
 
-/** Hook: returns grouped Select options (Provider → Models) */
+/** Hook: returns grouped Select options (Provider → Models)
+ *
+ * `modelTypes` 为可选的模型类型白名单：不传 = 不过滤（保持原行为）；
+ * 传 `["Chat"]` 可把决策模型（Decision）排除在生成类节点之外。
+ */
 // eslint-disable-next-line react-refresh/only-export-components
-export function useGroupedModelOptions() {
+export function useGroupedModelOptions(modelTypes?: ModelType[]) {
   const providers = useProviderStore((s) => s.providers);
+  // 用字符串 key 作为依赖，避免每次渲染新建 Set 导致 useMemo 失效
+  const modelTypeKey = modelTypes?.join(",") ?? "";
   return useMemo(() => {
+    const allowed = modelTypeKey ? new Set(modelTypeKey.split(",")) : null;
+    const isAllowed = (m: Model) => !allowed || allowed.has(m.modelType);
     return providers.flatMap((p) =>
-      p.enabled && p.models.some((m) => m.enabled)
+      p.enabled
+        && p.models.some((m) => m.enabled && isAllowed(m))
         ? [
           {
             label: (
@@ -44,6 +54,9 @@ export function useGroupedModelOptions() {
             ),
             title: p.name,
             options: p.models.flatMap((m) => {
+              if (!isAllowed(m)) {
+                return [];
+              }
               // 防御：只过滤明显会导致问题的脏数据
               // 不过滤 undefined/null，因为可能是暂时的状态
               if (
@@ -77,7 +90,7 @@ export function useGroupedModelOptions() {
         ]
         : []
     );
-  }, [providers]);
+  }, [providers, modelTypeKey]);
 }
 
 /** Hook: returns Map<providerId, providerName> */
@@ -147,15 +160,22 @@ export function ModelSelect({
   placeholder,
   allowClear = true,
   style,
+  modelTypes,
 }: {
   value?: string;
   onChange: (value: string | undefined) => void;
   placeholder?: string;
   allowClear?: boolean;
   style?: React.CSSProperties;
+  /**
+   * 可选的模型类型白名单。生成类节点（LLMNode / Agent / 默认对话模型）
+   * 应传 `["Chat"]`，避免把决策模型（Decision，如 TypeSafe Jev）误配到
+   * 生成节点上；分类器节点传 `["Chat", "Decision"]`。
+   */
+  modelTypes?: ModelType[];
 }) {
   const { token } = theme.useToken();
-  const groupedOptions = useGroupedModelOptions();
+  const groupedOptions = useGroupedModelOptions(modelTypes);
   const providerNameMap = useProviderNameMap();
 
   // Build a flat map of value → label for reliable lookup

@@ -519,7 +519,7 @@ pub(crate) async fn load_and_inject_template(
     if nodes.is_empty() {
         tracing::warn!("[stock_workflow] 模板节点为空，自动重新种子化");
         crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(db).await?;
-        let template = workflow_template::Entity::find_by_id("stock-analysis")
+        let template = workflow_template::Entity::find_by_id(template_id)
             .one(db)
             .await
             .map_err(|e| {
@@ -842,7 +842,29 @@ pub(crate) fn extract_formula_decision_json(wf: &Workflow) -> Option<String> {
     None
 }
 
-pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
+/// 从节点结果中按「**链尾优先**」三级选取本次实际生效的决策 JSON。
+///
+/// 优先级：`quality-fallback`（D/F 档 LLM 保守决策）> `portfolio-risk-gate`
+/// （公式决策 + 风控修正，是 `portfolio-mgr` 的超集）> `portfolio-mgr`（公式层原始决策）。
+///
+/// 返回 `(决策 JSON, 不可用原因)`：
+/// - `(Some(json), _)`      —— 命中可用决策（含非空 `action`）
+/// - `(None, Some(reason))` —— 候选存在但不可用，供上层生成可诊断的占位决策
+/// - `(None, None)`         —— 三级候选全部缺位
+///
+/// ⚠️ **本函数是唯一的选链实现**：业务封装路径（`core.rs` 落库 → `extract_decision_json`）
+/// 与对话直执行路径（`hooks.rs` 的 `StockAnalysisPersistHook`）都必须经由它取决策 ——
+/// 铁律 41「同一语义不得被两条链按不同口径消费」。修复前 hooks 版**只认 `portfolio-mgr`**，
+/// 风控门的仓位修正被整体丢弃，与 `rule-check` / `decision-explainer` 报出的结论并存两套真相
+/// （V71 实证 601166：落库 8.85% vs 报告「已按 R-206 下调至 0%」）。
+///
+/// 入参用 getter 闭包而非具体容器：两条链的结果容器类型不同
+/// （`Workflow.results` 是 `HashMap<String, Value>`，`HookOutcome.results` 是 `Value`），
+/// 闭包让两份实现合一且零拷贝。
+fn pick_chain_tail_decision<'a, F>(get: F) -> (Option<String>, Option<String>)
+where
+    F: Fn(&str) -> Option<&'a serde_json::Value>,
+{
     // V71: 记录 portfolio-mgr 候选不可用的原因，供后续兜底分支生成可诊断的占位决策
     let mut unusable_reason: Option<String> = None;
 
@@ -860,7 +882,7 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
     //
     //   正常档（A/B/C）quality-fallback 为 Skipped（无 result，见 rt-workflow
     //   apply_node_status_update 仅在 result=Some 时写入）⇒ 本分支不命中，继续走 gate。
-    if let Some(qf) = wf.results.get("quality-fallback") {
+    if let Some(qf) = get("quality-fallback") {
         if let Some(content_str) = qf.get("content").and_then(|v| v.as_str()) {
             // quality-fallback 输出格式: {"action":"持有/减持/卖出","positionPct":0-20,"confidence":20-40,"riskLevel":"高风险","reasoning":"..."}
             // P0 修复: 若 LLM 未严格遵循 prompt 缺失 confidence/riskLevel 字段，补充合理保守默认值
@@ -880,7 +902,7 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
                 }
                 // V71: quality-fallback 也可能输出无 action 的 JSON（LLM 未遵循 schema）
                 if has_usable_action(&v) {
-                    return Some(v.to_string());
+                    return (Some(v.to_string()), None);
                 }
                 if unusable_reason.is_none() {
                     unusable_reason = Some("quality-fallback 输出缺少 action 字段".to_string());
@@ -903,11 +925,11 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
     //   ⚠️ 顺序：排在 quality-fallback **之后**。风控门吃 portfolio-mgr 的公式结果，
     //   在 D/F 档下照样产出结果；若排在 quality-fallback 之前会把「已被质量门替代的
     //   公式决策」重新抬成结论（见优先级 0 注释）。
-    if let Some(gate) = wf.results.get("portfolio-risk-gate") {
+    if let Some(gate) = get("portfolio-risk-gate") {
         let actual = unwrap_node_output(gate);
         if has_usable_action(&actual) {
             if let Ok(s) = serde_json::to_string(&actual) {
-                return Some(s);
+                return (Some(s), None);
             }
         } else {
             tracing::warn!(
@@ -917,7 +939,7 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
     }
 
     // ── 优先级 2：portfolio-mgr（公式层原始决策，兼容风控门缺位的历史运行）──
-    if let Some(pm) = wf.results.get("portfolio-mgr") {
+    if let Some(pm) = get("portfolio-mgr") {
         // CodeNode 包装解包（.result / .output / 裸对象），见 unwrap_node_output 注释。
         // 实际决策在 .result 字段;若 .result 缺失(旧版/异常路径)则降级用
         // 整个 pm 值,让 extract_decision_fields 至少能拿到 action 等字段。
@@ -928,7 +950,7 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
         // V71: 只有含可用 action 才认作决策，否则记原因并继续兜底
         if has_usable_action(&actual) {
             if let Ok(s) = serde_json::to_string(&actual) {
-                return Some(s);
+                return (Some(s), None);
             }
         } else {
             let shape: Vec<String> =
@@ -941,6 +963,25 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
             );
         }
     }
+
+    (None, unusable_reason)
+}
+
+/// 对话直执行路径（`hooks.rs`）入口：从 `HookOutcome.results` 取本次实际生效的决策。
+///
+/// 与 `extract_decision_json` 共用 `pick_chain_tail_decision` ⇒ 两条落库链口径一致
+/// （铁律 41：同一语义不得被两条链按不同口径消费）。
+pub(crate) fn extract_decision_from_results_map(results: &serde_json::Value) -> Option<String> {
+    pick_chain_tail_decision(|node_id| results.get(node_id)).0
+}
+
+pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
+    // 三级链尾选链（唯一实现，与 hooks.rs 的落库链共用）
+    let (chain_tail, unusable_reason) = pick_chain_tail_decision(|node_id| wf.results.get(node_id));
+    if let Some(json) = chain_tail {
+        return Some(json);
+    }
+
     // ── V57 硬化：portfolio-mgr 节点未成功产出结果时（Failed / Skipped /
     // 因上游失败被跳过 / 从未运行），rt-workflow 的 apply_node_status_update
     // 仅在 result=Some 时才写入 results（见 rt-workflow engine/mod.rs），

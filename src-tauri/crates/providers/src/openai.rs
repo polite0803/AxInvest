@@ -1395,6 +1395,7 @@ impl ProviderAdapter for OpenAIAdapter {
                         ModelType::Chat => vec![ModelCapability::TextChat],
                         ModelType::Embedding => vec![],
                         ModelType::Voice => vec![ModelCapability::RealtimeVoice],
+                        ModelType::Decision => vec![],
                     };
                     let id_lower = m.id.to_lowercase();
                     if id_lower.contains("gpt-4o")

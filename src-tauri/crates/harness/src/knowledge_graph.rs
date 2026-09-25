@@ -486,7 +486,7 @@ pub const RELATION_DECLS: &[RelationDecl] = &[
         domain: None,
         range: None,
         meaning: "实体属于某行业（`stock_industry.csv` 导入）",
-        evidence: "src/commands/knowledge.rs:1795（另有文档示例 harness/src/knowledge_graph.rs:195）",
+        evidence: "src/commands/knowledge.rs:2923（另有文档示例 harness/src/knowledge_graph.rs:195）",
         observed: true,
     },
     RelationDecl {
@@ -495,7 +495,7 @@ pub const RELATION_DECLS: &[RelationDecl] = &[
         domain: None,
         range: None,
         meaning: "实体关联概念（`stock_concept.csv` 导入）",
-        evidence: "src/commands/knowledge.rs:1780",
+        evidence: "src/commands/knowledge.rs:2908",
         observed: true,
     },
     // ── 只有文档、没有写入方的取值（悬空契约）──
@@ -515,7 +515,7 @@ pub const RELATION_DECLS: &[RelationDecl] = &[
 
 /// **前缀族**：id 不固定、按模板生成的关系类型。
 ///
-/// 存在的理由有据可查：`src/commands/knowledge.rs:1811` 用
+/// 存在的理由有据可查：`src/commands/knowledge.rs:2939` 用
 /// `format!("employ_{position}")` 生成 id —— 职位有多少个，词表就有多少项，
 /// 逐条登记不可行，只能登记**族**。
 #[derive(Debug, Clone, Copy)]
@@ -530,13 +530,13 @@ pub struct RelationFamilyDecl {
 pub const RELATION_FAMILIES: &[RelationFamilyDecl] = &[RelationFamilyDecl {
     prefix: "employ_",
     meaning: "高管任职：公司 → 人物，id 形如 `employ_ceo` / `employ_cfo`",
-    evidence: "src/commands/knowledge.rs:1811（`format!(\"employ_{position}\")`）",
+    evidence: "src/commands/knowledge.rs:2939（`format!(\"employ_{position}\")`）",
     observed: true,
 }];
 
 /// **数据驱动列**：取值由**外部数据文件**决定、不由本仓库代码决定的关系类型。
 ///
-/// `src/commands/knowledge.rs:1751` 把 `edges.csv` 的 `rtype` 列**原样**写进
+/// `src/commands/knowledge.rs:2883` 把 `edges.csv` 的 `rtype` 列**原样**写进
 /// `knowledge_relations.relation_type` ⇒ 值域由数据文件决定。
 ///
 /// ## 为什么它必须是一条**显式声明**（而不是一句注释）
@@ -574,7 +574,7 @@ pub const DATA_DRIVEN_COLUMN: DataDrivenColumnDecl = DataDrivenColumnDecl {
     source: "knowledge-sources/lemonhu/edges.csv",
     meaning: "DB 列原样接收 `rtype` ⇒ 开放词表（DB 全表实测：非 ASCII 53 个 / 74325 行；\
               数据文件 `rtype` 层 24 distinct）",
-    evidence: "src/commands/knowledge.rs:2872（读 `edges.csv` 的 rtype 列）",
+    evidence: "src/commands/knowledge.rs:2879（读 `edges.csv` 的 rtype 列）",
 };
 
 /// 该值是否属于「数据驱动列写入的开放词表形态」：**含非 ASCII 字符**。
@@ -731,7 +731,7 @@ pub struct EdgeTypeDecl {
 /// 生产写入点**只有 3 处**（测试构造点不计）：
 /// `dao/src/repo/note.rs:563`（笔记链接 `link`）、
 /// `dao/src/repo/knowledge_graph.rs:1794`（知识库实体关系 `reference`）、
-/// `src/commands/wiki.rs:1186`（实体↔笔记标题匹配的合成边 `mapping`）。
+/// `src/commands/wiki.rs:1188`（实体↔笔记标题匹配的合成边 `mapping`）。
 ///
 /// 其余 3 条（`backlink` / `derived_from` / `contradicts`）**只在前端类型联合
 /// `GraphEdgeType` 里声明过，后端零产出** —— 它们仍登记在这里（`observed: false`），
@@ -752,7 +752,7 @@ pub const EDGE_TYPE_DECLS: &[EdgeTypeDecl] = &[
     EdgeTypeDecl {
         id: "mapping",
         meaning: "合成边：实体节点 ↔ 标题同名的笔记节点（消除孤岛，**不对应任何 DB 行**）",
-        evidence: "src/commands/wiki.rs:1186",
+        evidence: "src/commands/wiki.rs:1188",
         observed: true,
     },
     EdgeTypeDecl {
@@ -1129,9 +1129,12 @@ mod type_vocabulary_tests {
     }
 
     /// CSV 导入路径写入的关系必须已登记（2026-09-14 修正：`in_industry` **不是**悬空，
-    /// 它在 `src/commands/knowledge.rs:1795` 有写入方）。
+    /// 它在 `src/commands/knowledge.rs:2923` 有写入方）。
     ///
-    /// ⚠ **本表对 `knowledge.rs` 的行号引用已漂移五次**：`1725 → 1738 → 1745 → 1749 → 1748`
+    /// ⚠ **本表对 `knowledge.rs` 的行号引用已漂移六次**：`1725 → 1738 → 1745 → 1749 → 1748`
+    /// → 2026-09-25 前段 IPC 事件名枚举化致 4 处硬拦（空行/`continue;`），借机把 8 处引用
+    /// 一次性校到真值（2883/2908/2923/2939/2879 —— 真正的 graph_import 在 28xx–29xx 段，
+    /// 此前的 17xx 段指向的是 batch-index 代码，属语义腐烂，硬门禁看不出）。
     /// （第一次见 `AUDIT-ontology-p0123-execution-2026-09-14.md`；第二、三、四次都是
     /// `commands/knowledge.rs` 前段被编辑所致 —— 第三次的根因是把 `let _ =`（吞错）
     /// 改写成显式错误传播，净增 7 行；**第四次（2026-09-15）是给 `graph_import`
@@ -1398,7 +1401,7 @@ mod type_vocabulary_tests {
     /// 悬空契约清单必须与文档一致。
     ///
     /// 2026-09-14 修正：`in_industry` 曾被我误登记为悬空 —— 实际在
-    /// `src/commands/knowledge.rs:1795` 有写入方（CSV 导入）。教训：
+    /// `src/commands/knowledge.rs:2923` 有写入方（CSV 导入）。教训：
     /// **grep 字面量 `"in_industry"` 找不到写入方，不代表没有** ——
     /// 那条路径的值是 `format!` / `.into()` 构造出来的。悬空判定必须沿
     /// **数据来源**追，不能只 grep 常量。

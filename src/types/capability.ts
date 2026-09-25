@@ -500,6 +500,8 @@ export interface CapabilityRegistrationDetailDto {
   origin: CapabilityOrigin;
   /** 声明该能力的插件 ID（内置能力为 null） */
   pluginId?: string | null;
+  /** 是否已有运行时实现；false = 仅插件声明，消费方取不到该接缝 */
+  implemented: boolean;
 }
 
 // ── 能力域注册表（P2：能力域覆盖层） ────────────────

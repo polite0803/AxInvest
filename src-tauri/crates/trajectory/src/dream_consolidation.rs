@@ -15,6 +15,7 @@
 //! DTO 类型和 trait 接口定义在 `axagent-harness` crate 中。
 //! 本模块仅包含实现逻辑和内部数据结构。
 
+use axagent_harness::IpcEventName;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -520,7 +521,7 @@ impl DreamConsolidator {
         let deadline = started_at + Duration::seconds(config.max_consolidation_secs as i64);
 
         self.emit(
-            "dream-consolidation-started",
+            IpcEventName::DreamConsolidationStarted.as_str(),
             serde_json::json!({
                 "timestamp": started_at.timestamp_millis(),
                 "maxDurationSecs": config.max_consolidation_secs,
@@ -686,7 +687,7 @@ impl DreamConsolidator {
         drop(state);
 
         self.emit(
-            "dream-consolidation-completed",
+            IpcEventName::DreamConsolidationCompleted.as_str(),
             serde_json::json!({
                 "executed": true,
                 "memoriesExtracted": memories_extracted,

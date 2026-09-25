@@ -1,0 +1,39 @@
+{
+  "case": "legacy_single_horizon",
+  "stockAnalysis": {
+    "id": "analysis-legacy-001",
+    "stockCode": "000001",
+    "stockName": "平安银行",
+    "decisionAction": "卖出",
+    "decisionTimeHorizon": "short",
+    "decisionExpectedHoldingDays": 5,
+    "horizonPriceMap": null,
+    "horizonDecisions": null,
+    "decisionJson": {
+      "action": "卖出",
+      "positionPct": 0.0,
+      "confidence": 66,
+      "timeHorizon": "short",
+      "expectedHoldingDays": 5,
+      "targetPrice": 10.2,
+      "stopLoss": 11.3
+    }
+  },
+  "reflection": {
+    "id": "reflection-legacy-001",
+    "originalAnalysisId": "analysis-legacy-001",
+    "status": "completed",
+    "rawReturn": -3.1,
+    "alphaReturn": -1.2,
+    "holdingDays": 5,
+    "verdict": "correct"
+  },
+  "performance": {
+    "id": "performance-legacy-001",
+    "strategyId": "reflection_verdict",
+    "period": "reflection",
+    "wasCorrect": 1,
+    "returnPct": -3.1,
+    "horizonPnlJson": null
+  }
+}

@@ -38,6 +38,7 @@
 
 use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::stock_sim as sim_err;
+use axagent_harness::IpcEventName;
 // 快照读写**经 dao**（`axagent_dao::repo::stock_analysis_snapshot`），命令层不得直连
 // `axagent_entities` / `sea_orm` —— 分层门禁 `commands-no-direct-db` 的判据。
 // `DatabaseConnection` 也走 dao 暴露的出口（`crates/dao/src/db.rs` 明文：消费者
@@ -224,7 +225,7 @@ pub(crate) async fn run_simulation_after_decision(
     // ── 4. emit：让已打开的分析页即时刷新，无需轮询 ────────────────────────
     if let Some(app) = app {
         if let Err(e) = app.emit(
-            "simulation-ready",
+            IpcEventName::SimulationReady.as_str(),
             serde_json::json!({
                 "analysisId": analysis_id,
                 "stockCode": stock_code,

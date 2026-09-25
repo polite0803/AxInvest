@@ -7,6 +7,7 @@ use axagent_dao::repo::index_jobs as jobs;
 use axagent_entities::{
     knowledge_bases, knowledge_documents, knowledge_entities, knowledge_relations,
 };
+use axagent_harness::IpcEventName;
 use axagent_harness::types::*;
 use axagent_search::rag::KnowledgeContainer;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, Set};
@@ -1728,7 +1729,10 @@ pub async fn rebuild_knowledge_index(
         })?;
 
     if docs.is_empty() {
-        let _ = app.emit("knowledge-rebuild-complete", serde_json::json!({ "baseId": base_id }));
+        let _ = app.emit(
+            IpcEventName::KnowledgeRebuildComplete.as_str(),
+            serde_json::json!({ "baseId": base_id }),
+        );
         return Ok(());
     }
 
@@ -1766,7 +1770,7 @@ pub async fn rebuild_knowledge_index(
                     )
                     .await;
                     let _ = app.emit(
-                        "knowledge-document-indexed",
+                        IpcEventName::KnowledgeDocumentIndexed.as_str(),
                         serde_json::json!({
                             "documentId": doc.id,
                             "success": false,
@@ -1783,7 +1787,7 @@ pub async fn rebuild_knowledge_index(
                 )
                 .await;
                 let _ = app.emit(
-                    "knowledge-document-indexed",
+                    IpcEventName::KnowledgeDocumentIndexed.as_str(),
                     serde_json::json!({ "documentId": doc.id, "success": true }),
                 );
                 continue;
@@ -1823,7 +1827,7 @@ pub async fn rebuild_knowledge_index(
                         )
                         .await;
                         let _ = app.emit(
-                            "knowledge-document-indexed",
+                            IpcEventName::KnowledgeDocumentIndexed.as_str(),
                             serde_json::json!({
                                 "documentId": doc.id,
                                 "success": false,
@@ -1836,7 +1840,7 @@ pub async fn rebuild_knowledge_index(
                         )
                         .await;
                         let _ = app.emit(
-                            "knowledge-document-indexed",
+                            IpcEventName::KnowledgeDocumentIndexed.as_str(),
                             serde_json::json!({
                                 "documentId": doc.id,
                                 "success": true,
@@ -1855,7 +1859,7 @@ pub async fn rebuild_knowledge_index(
                     )
                     .await;
                     let _ = app.emit(
-                        "knowledge-document-indexed",
+                        IpcEventName::KnowledgeDocumentIndexed.as_str(),
                         serde_json::json!({
                             "documentId": doc.id,
                             "success": false,
@@ -1882,7 +1886,10 @@ pub async fn rebuild_knowledge_index(
             }
         }
 
-        let _ = app.emit("knowledge-rebuild-complete", serde_json::json!({ "baseId": base_id }));
+        let _ = app.emit(
+            IpcEventName::KnowledgeRebuildComplete.as_str(),
+            serde_json::json!({ "baseId": base_id }),
+        );
     }));
 
     Ok(())
@@ -2226,7 +2233,7 @@ pub async fn update_knowledge_chunk(
             }
 
             let _ = app.emit(
-                "knowledge-chunk-reindexed",
+                IpcEventName::KnowledgeChunkReindexed.as_str(),
                 serde_json::json!({
                     "chunkId": cid,
                     "success": result.is_ok(),
@@ -2427,7 +2434,7 @@ pub async fn reindex_knowledge_chunk(
         }
 
         let _ = app.emit(
-            "knowledge-chunk-reindexed",
+            IpcEventName::KnowledgeChunkReindexed.as_str(),
             serde_json::json!({
                 "chunkId": cid,
                 "success": result.is_ok(),
@@ -2477,7 +2484,7 @@ pub async fn rebuild_knowledge_document(
 
     if chunks.is_empty() {
         let _ = app.emit(
-            "knowledge-document-indexed",
+            IpcEventName::KnowledgeDocumentIndexed.as_str(),
             serde_json::json!({ "documentId": document_id, "success": true }),
         );
         return Ok(());
@@ -2530,7 +2537,7 @@ pub async fn rebuild_knowledge_document(
                     )
                     .await;
                     let _ = app.emit(
-                        "knowledge-document-indexed",
+                        IpcEventName::KnowledgeDocumentIndexed.as_str(),
                         serde_json::json!({
                             "documentId": doc_id,
                             "success": false,
@@ -2543,7 +2550,7 @@ pub async fn rebuild_knowledge_document(
                     )
                     .await;
                     let _ = app.emit(
-                        "knowledge-document-indexed",
+                        IpcEventName::KnowledgeDocumentIndexed.as_str(),
                         serde_json::json!({
                             "documentId": doc_id,
                             "success": true,
@@ -2562,7 +2569,7 @@ pub async fn rebuild_knowledge_document(
                 )
                 .await;
                 let _ = app.emit(
-                    "knowledge-document-indexed",
+                    IpcEventName::KnowledgeDocumentIndexed.as_str(),
                     serde_json::json!({
                         "documentId": doc_id,
                         "success": false,

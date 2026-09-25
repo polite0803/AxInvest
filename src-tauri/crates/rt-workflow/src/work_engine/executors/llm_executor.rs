@@ -76,6 +76,9 @@ impl NodeExecutorTrait for LlmExecutor {
         )
         .await?;
 
+        // 决策模型（如 TypeSafe Jev）不能用于文本生成节点
+        super::ensure_generation_model(&prov, &model, "LlmExecutor")?;
+
         // 构建 messages
         let mut messages: Vec<ChatMessage> = llm_node
             .config

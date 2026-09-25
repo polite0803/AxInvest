@@ -279,13 +279,13 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
 
     // PlatformBridge 经 message.callback / webhook.dispatch 能力接缝取依赖：
     // 回调与派发器由下方注册进能力注册表，桥在收发消息时读接缝（外部插件可
-    // 经 register_external_* 替换同一接缝，内置与插件平权）。
+    // 经 register_plugin_capability 声明同一接缝，内置与插件平权）。
     let platform_bridge = harness.build_platform_bridge(platform_manager.clone());
 
     // ── P2 rt-messaging 接缝：接入能力注册表 ──────────────────────────────
     // message.callback（PlatformMessageCallback）与 webhook.dispatch（WebhookDispatch）
     // 的权威定义均在 harness。wiring 层在注入 PlatformManager / PlatformBridge 的
-    // 同时注册进注册表，使外部插件可经 register_external_* 替换同一接缝
+    // 同时注册进注册表，使外部插件可经 register_plugin_capability 声明同一接缝
     // （内置与插件平权）。webhook.dispatch 仅在 dispatcher 存在时注册
     // （无 webhook 订阅管理 = 无派发需求，与未注入等价）。
     {
@@ -314,7 +314,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         // ── session.log.invariant 接缝：注册内置会话日志不变量（P2 缺陷#3 05 项） ──
         // 记录模型可见内容并支持可重建校验（Model-visible means logged）。
         // 默认落盘实现，按 session 持久化为 JSONL 到 app_dir/session_logs，进程重启后可回放；
-        // 外部插件可经 register_external_* 替换实现。
+        // 外部插件可经 register_plugin_capability 声明该接缝。
         let session_log_invariant: Arc<dyn axagent_harness::SessionLogInvariant> =
             match axagent_harness::DiskSessionLog::new(app_dir.join("session_logs")) {
                 Ok(log) => Arc::new(log),
@@ -338,6 +338,23 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
                 Ok(_) => tracing::info!("platform.adapter.{name} 已注册 (BuiltIn)"),
                 Err(e) => tracing::warn!("platform.adapter.{name} 注册失败: {e}"),
             }
+        }
+
+        // ── tool.set 接缝：注册内置工具集（P2 §4.2） ──
+        // 工具注册表初始化（`UnifiedToolRegistry::init_all`）经本接缝取回工具清单；
+        // 外部实现注册同一接缝即可整体替换内置工具集。
+        match capability_registry.register_tool_set(Arc::new(axagent_tools::tools::BuiltinToolSet))
+        {
+            Ok(_) => tracing::info!("tool.set 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("tool.set 注册失败: {e}"),
+        }
+
+        // ── session.store 接缝：注册会话状态存储（P2 §4.2） ──
+        // CapabilityLoad / SaveAsWorkflow / LoadedCapabilityContributor 统一从本接缝
+        // 取回会话状态存储；外部实现注册同一接缝即可整体替换（原先是各处 OnceLock 注入）。
+        match capability_registry.register_session_state_store(session_state_store.clone()) {
+            Ok(_) => tracing::info!("session.store 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("session.store 注册失败: {e}"),
         }
     }
 
@@ -619,6 +636,12 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         axagent_tools::registry::set_global_approval_policy(
             axagent_harness::ApprovalPolicy::from_policy_str(&app_settings.approval_policy),
         );
+        // ── 审批规则存储（PLAN-codex-parity R2-1）──
+        // 与上面两个全局策略同款注入：Bash 工具据此做「规则免询问」与「批准后沉淀」。
+        // 落库实现在 wiring（tools 是 hybrid，不得依赖 entities / dao）。
+        axagent_tools::registry::set_global_approval_rule_store(std::sync::Arc::new(
+            crate::init::approval_rule_store::SeaApprovalRuleStore::new(sea_db.clone()),
+        ));
         tracing::info!(
             "[startup] 沙箱/审批策略已注入: sandbox_mode={} approval_policy={}",
             app_settings.sandbox_mode,
@@ -673,7 +696,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 比 ReachabilityWorkflowSandbox 更强:额外做节点级配置合理性、累积超时上限、
     // 环检测,并用 tokio::time::timeout 做硬超时保护(5 秒)。
     // 沙箱统一经 workflow.sandbox 能力接缝分发：此处注册后，进化器在验证时读接缝
-    // （外部插件可经 register_external_sandbox 可逆替换）。
+    // （外部插件可经 register_plugin_capability 声明该接缝）。
     {
         let dry_run_sandbox: std::sync::Arc<dyn axagent_harness::WorkflowSandbox> =
             std::sync::Arc::new(super::workflow_injections::DryRunWorkflowSandbox::new());
@@ -738,8 +761,8 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // wiring 层把 `WorkflowAgentTurnRunner` 同时：
     //   1. 注册进全局能力注册表（`agent.loop` 接缝，CapabilityOrigin::BuiltIn）
     //   2. 注入 `WorkEngine`（set_agent_turn_runner，AgentExecutor 执行前探测）
-    // 使内置 Agent 主循环与外部插件平权——外部插件可经 register_external_agent_loop
-    // 替换同一接缝。注入失败仅告警，不阻断启动（AgentExecutor 回退 inline ReAct）。
+    // 使内置 Agent 主循环与外部插件平权——外部插件可经 register_plugin_capability
+    // 声明同一接缝。注入失败仅告警，不阻断启动（AgentExecutor 回退 inline ReAct）。
     {
         let agent_loop_runner: Arc<dyn axagent_harness::AgentTurnRunner> =
             Arc::new(super::agent_turn_adapter::WorkflowAgentTurnRunner::new(
@@ -761,8 +784,8 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // ── P2 workflow 反射/进化/优化 + 业务规则接缝：接入能力注册表 ──────────
     // 四个 trait（WorkflowReflector/Evolver/Optimizer/BusinessRuleEvaluator）的
     // 权威定义均在 harness，内置实现由 trajectory / rt-workflow 提供。wiring 层
-    // 在注入 WorkEngine 的同时注册进注册表，使外部插件可经 register_external_*
-    // 替换同一接缝（内置与插件平权）。business_rule 默认以空规则实现注入
+    // 在注入 WorkEngine 的同时注册进注册表，使外部插件可经 register_plugin_capability
+    // 声明同一接缝（内置与插件平权）。business_rule 默认以空规则实现注入
     // （无规则 = 不拦截，与未注入等价）。
     {
         let capability_registry = axagent_harness::get_capability_registry();
@@ -784,6 +807,34 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         match capability_registry.register_business_rule(br_engine_dyn) {
             Ok(_) => tracing::info!("workflow.business_rule 接缝已注册 (BuiltIn)"),
             Err(e) => tracing::warn!("workflow.business_rule 注册失败: {e}"),
+        }
+    }
+
+    // ── 依赖收敛：显式声明消费方所需的接缝（§4.3 G5） ─────────────────────
+    // 上述消费方在运行期经 `get_capability_registry().get_*()` 取接缝，取不到时
+    // 各自静默降级（如 AgentExecutor 回退 inline ReAct、进化器跳过沙箱校验）。
+    // 此处显式登记依赖，使「漏注册」在**启动期**就显出，而非等运行期才暴露。
+    {
+        let capability_registry = axagent_harness::get_capability_registry();
+        for (consumer, required) in [
+            ("rt-workflow.agent_executor", &["agent.loop"][..]),
+            ("trajectory.workflow_evolver", &["workflow.sandbox"][..]),
+            (
+                "rt-workflow.engine.reflect_evolve_optimize",
+                &["workflow.reflector", "workflow.evolver", "workflow.optimizer"][..],
+            ),
+            ("rt-workflow.engine.business_rule", &["workflow.business_rule"][..]),
+        ] {
+            let missing = capability_registry.register_consumer(consumer, required);
+            if missing.is_empty() {
+                tracing::debug!(consumer, "依赖收敛：所需接缝齐备");
+            } else {
+                tracing::warn!(
+                    consumer,
+                    missing = %missing.join(", "),
+                    "依赖收敛：所需接缝未就绪，该消费方将以降级形态运行"
+                );
+            }
         }
     }
 
@@ -1256,6 +1307,24 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     axagent_tools::tools::capability_load::set_session_state_store(session_state_store.clone());
     // 注入 SaveAsWorkflow 的会话状态存储：持久化动作需要从这里读取已加载能力列表。
     axagent_tools::tools::save_as_workflow::set_session_state_store(session_state_store.clone());
+
+    // ── system.prompt.* 接缝：注册内置系统提示词段贡献者（P2 §4.2） ──
+    // 会话运行时经 `list_system_prompt_sections()` 一次取回全部段并挂载；
+    // 外部实现注册同一接缝即可插拔系统提示词段。
+    // 置于此处（而非上方接缝注册块）是因为依赖 `capability_indexer_trait` 与本 store。
+    {
+        let contributor = axagent_agent::context_contributors::LoadedCapabilityContributor::new(
+            session_state_store.clone(),
+            capability_indexer_trait.clone(),
+        );
+        match axagent_harness::get_capability_registry()
+            .register_system_prompt_section("loaded_capability", Arc::new(contributor))
+        {
+            Ok(_) => tracing::info!("system.prompt.loaded_capability 接缝已注册 (BuiltIn)"),
+            Err(e) => tracing::warn!("system.prompt.loaded_capability 注册失败: {e}"),
+        }
+    }
+
     let capability_retriever = Arc::new(axagent_tools::CapabilityRetrieverImpl::new(
         vector_store_arc.clone(),
         embedding_provider.clone(),
@@ -1516,14 +1585,26 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 裁掉，导致 with_browser_fetcher 全仓零调用、vendor 持 fetcher=None、所有方法直接
     // Err——链尾兜底空转。此处按适配器注释的原始约定重新接线（懒启动，不增加启动开销）。
     // 移动端无 Playwright，注入 NoopBrowserFetcher 保持 trait 路径一致。
+    // [2026-09-24 接线恢复] NewsArchiveSink 注入。astock-data 定义了 `NewsArchiveSink`
+    // trait 并提供 as-of 分支（get_news / get_policy_news / search_news 都靠它查历史语料），
+    // 但 `with_news_archive_sink` 全仓零调用点 ⇒ sink=None ⇒ ① live 抓到的新闻永不 upsert
+    // 进 `news_archive` 表（表内仅剩早期手工数据，最后一条约 2026-08-10）；
+    // ② 回放/as-of 模式下新闻、政策两条链路恒 `Ok(vec![])` ⇒ 分析师集体写「无法获取」
+    // ⇒ 数据质量被拉到 D 级。此处按 `init/news_archive_sink.rs` 头部注释的原始约定接线。
     let astock_client = {
-        #[cfg(not(mobile))]
-        let client = axagent_astock_data::AStockClient::new().with_browser_fetcher(Arc::new(
-            crate::init::browser_fetcher::PlaywrightBrowserFetcher::new(browser_client.clone()),
+        let news_archive_sink = Arc::new(crate::init::news_archive_sink::NewsArchiveSinkImpl::new(
+            harness.db().clone(),
         ));
+        #[cfg(not(mobile))]
+        let client = axagent_astock_data::AStockClient::new()
+            .with_browser_fetcher(Arc::new(
+                crate::init::browser_fetcher::PlaywrightBrowserFetcher::new(browser_client.clone()),
+            ))
+            .with_news_archive_sink(news_archive_sink);
         #[cfg(mobile)]
         let client = axagent_astock_data::AStockClient::new()
-            .with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher));
+            .with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher))
+            .with_news_archive_sink(news_archive_sink);
         Arc::new(client)
     };
     // [2026-09-03 接线恢复] finance.rs 的 5 个 api_tool（研报/概念板块/北向资金/龙虎榜/财联社快讯）

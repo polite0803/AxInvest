@@ -17,6 +17,7 @@ use crate::openai::OpenAIAdapter;
 use crate::openai_responses::OpenAIResponsesAdapter;
 use crate::openclaw::OpenClawAdapter;
 use crate::qwen::QwenAdapter;
+use crate::typesafe::TypeSafeAdapter;
 use crate::wenxin::WenxinAdapter;
 
 pub struct ProviderRegistry {
@@ -46,32 +47,71 @@ impl ProviderRegistry {
 
     /// Creates a registry pre-populated with built-in provider adapters.
     ///
-    /// 包含：OpenAI / Anthropic / Gemini / OpenClaw / Hermes / Ollama
-    /// 以及国内厂商原生适配器：DeepSeek / 通义千问 / 智谱 GLM / Kimi / 文心一言。
+    /// 内置适配器不再在此硬编码构造函数清单：它们经 `model.provider.{name}`
+    /// 接缝注册进能力注册表，再由本函数从接缝构建（外部插件注册的适配器
+    /// 同样出现在返回的注册表中 —— 内置与插件平权）。
     ///
-    /// 纯构造：只填充本地注册表，不产生任何全局副作用。
+    /// 纯构造：除补注册内置接缝（幂等）外不产生其他全局副作用。
     pub fn create_default() -> Self {
-        let mut registry = Self::new();
-        registry.register_all_builtins();
-        registry
+        register_builtin_providers();
+        Self::from_capability_registry()
     }
 
-    /// 纯构造辅助：把 13 个内置适配器注册到本地注册表。
-    fn register_all_builtins(&mut self) {
-        self.register("openai", Arc::new(OpenAIAdapter::new()));
-        self.register("openai_responses", Arc::new(OpenAIResponsesAdapter::new()));
-        self.register("anthropic", Arc::new(AnthropicAdapter::new()));
-        self.register("gemini", Arc::new(GeminiAdapter::new()));
-        self.register("openclaw", Arc::new(OpenClawAdapter::new()));
-        self.register("hermes", Arc::new(HermesAdapter::new()));
-        self.register("ollama", Arc::new(OllamaAdapter::new()));
-        self.register("llama_cpp", Arc::new(LlamaCppAdapter::new()));
+    /// 从能力注册表构建适配器表（`model.provider.*` 接缝为**唯一来源**）。
+    pub fn from_capability_registry() -> Self {
+        let capability_registry = axagent_harness::get_capability_registry();
+        let mut registry = Self::new();
+        for provider_type in capability_registry.list_model_providers() {
+            if let Some(adapter) = capability_registry.get_model_provider(&provider_type) {
+                registry.adapters.insert(provider_type, adapter);
+            }
+        }
+        registry
+    }
+}
+
+/// 内置 Provider 适配器清单 —— **全仓唯一的硬编码点**。
+///
+/// [`register_builtin_providers`] 与单测共用本清单；新增内置适配器只需在此追加一行。
+fn builtin_adapters() -> Vec<(&'static str, Arc<dyn ProviderAdapter>)> {
+    vec![
+        ("openai", Arc::new(OpenAIAdapter::new())),
+        ("openai_responses", Arc::new(OpenAIResponsesAdapter::new())),
+        ("anthropic", Arc::new(AnthropicAdapter::new())),
+        ("gemini", Arc::new(GeminiAdapter::new())),
+        ("openclaw", Arc::new(OpenClawAdapter::new())),
+        ("hermes", Arc::new(HermesAdapter::new())),
+        ("ollama", Arc::new(OllamaAdapter::new())),
+        ("llama_cpp", Arc::new(LlamaCppAdapter::new())),
         // 国内 LLM 厂商原生适配器
-        self.register("deepseek", Arc::new(DeepSeekAdapter::new()));
-        self.register("qwen", Arc::new(QwenAdapter::new()));
-        self.register("glm", Arc::new(GlmAdapter::new()));
-        self.register("kimi", Arc::new(KimiAdapter::new()));
-        self.register("wenxin", Arc::new(WenxinAdapter::new()));
+        ("deepseek", Arc::new(DeepSeekAdapter::new())),
+        ("qwen", Arc::new(QwenAdapter::new())),
+        ("glm", Arc::new(GlmAdapter::new())),
+        ("kimi", Arc::new(KimiAdapter::new())),
+        ("wenxin", Arc::new(WenxinAdapter::new())),
+        // 决策模型：TypeSafe Jev（decisions 端点，非 chat 兼容）
+        ("typesafe", Arc::new(TypeSafeAdapter::new())),
+    ]
+}
+
+/// 把内置适配器注册进能力注册表（`model.provider.{name}` 接缝）。
+///
+/// **幂等**：已注册的类型名跳过（注册表对重复 ID 返回 `Duplicate`）。
+/// 启动装配时调用一次；[`ProviderRegistry::create_default`] 亦会调用，
+/// 使未走启动装配的路径（如单测）同样拿得到内置适配器。
+pub fn register_builtin_providers() {
+    let capability_registry = axagent_harness::get_capability_registry();
+    for (provider_type, adapter) in builtin_adapters() {
+        if capability_registry.contains(&format!("model.provider.{provider_type}")) {
+            continue;
+        }
+        if let Err(e) = capability_registry.register_model_provider(provider_type, adapter) {
+            tracing::warn!(
+                provider_type,
+                error = %e,
+                "内置 Provider 适配器注册进能力注册表失败"
+            );
+        }
     }
 }
 

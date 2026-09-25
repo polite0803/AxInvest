@@ -657,6 +657,34 @@ pub fn get_builtin_providers() -> Vec<BuiltinProvider> {
             api_host: "http://localhost:8091",
             models: vec![],
         },
+        // TypeSafe **Jev** 决策模型（内置）。
+        //
+        // 它**不是 chat 供应商**：Jev 只接收 `state` + 调用方预先声明的类型化问题，
+        // 返回带概率的结构化判定，故只能被 `llmClassifier` / 勾选「LLM 动态路由」的
+        // `condition` 节点选中。`ModelType::Decision` 由 `detect_model_type` 从模型 id
+        // 推断（无需在此显式声明），见 `providers/src/typesafe.rs` 的单测
+        // `jev_is_typed_as_decision_model`。
+        //
+        // ⚠ 播种的行**不带 API Key**（key 走 `provider_keys`，由用户在设置页填），
+        // 因此播种本身不会让任何链路开始走 Jev：`seed_serenity_fast::resolve_decision_model`
+        // 要求「供应商启用 + 存在启用中的 key + 存在启用的 Decision 模型」三者齐备才返回
+        // `Some`，否则节点 `model` 留空、静默回落默认 chat 模型。用户填 key 后还须升
+        // 对应模板的 `TEMPLATE_VERSION` 重建模板（探测结果已固化进模板 JSON）。
+        BuiltinProvider {
+            builtin_id: "typesafe",
+            name: "TypeSafe Jev",
+            provider_type: ProviderType::TypeSafe,
+            // 与 `providers/src/typesafe.rs` 的 `DEFAULT_BASE_URL` 同值：adapter 会在其后
+            // 拼上 `/alpha/decisions` 组成完整端点，两者不一致会打偏。
+            api_host: "https://openrouter.ai/api",
+            models: vec![(
+                "typesafe/jev-1.13",
+                "Jev 1.13 (TypeSafe)",
+                // 决策模型不挂 chat 能力标签（同 `TypeSafeAdapter::builtin_models`）。
+                vec![],
+                Some(32_000),
+            )],
+        },
     ]
 }
 

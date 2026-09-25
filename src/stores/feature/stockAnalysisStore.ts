@@ -4,7 +4,9 @@ import {
   type DecisionExplanation,
   extractContent,
   extractDecision,
+  extractJevJudgment,
   extractValuationApplicability,
+  type JevJudgment,
   normalizeDecision,
   parseDecisionExplanation,
   parseJsonLoose,
@@ -144,6 +146,8 @@ function parseWorkflowResults(results: Record<string, unknown>) {
   let simulation: SimulationSnapshot | null = null;
   // V55: 提取后端注入的 __untrusted 标记（strict_mode 兜底节点）
   const untrustedNodes: Record<string, true> = {};
+  // 快速链 Jev 判定（`j-*`）：llmClassifier 产物，无正文、只有 category 档位
+  const jevJudgments: Record<string, JevJudgment> = {};
 
   for (const [stepId, raw] of Object.entries(results)) {
     const output = extractContent(raw);
@@ -157,7 +161,13 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       }
     }
 
-    if (stepId.startsWith("a-") && !stepId.includes("bull") && !stepId.includes("bear")) {
+    if (stepId.startsWith("j-")) {
+      // 快速链的 Jev 判定节点。**必须排在 `a-*` 之前单独分流**：Jev 产物没有
+      // `content` 字段，若落进 `a-*` 分支会被 `reconstructVerdictTag` 当正文处理
+      // ⇒ 卡片上出现一段 `{"category":"支持",...}` 原始 JSON 文本（H3 明令禁止）。
+      const judgment = extractJevJudgment(raw);
+      if (judgment) { jevJudgments[stepId] = judgment; }
+    } else if (stepId.startsWith("a-") && !stepId.includes("bull") && !stepId.includes("bear")) {
       analystReports[stepId.slice(2)] = reconstructVerdictTag(output);
     } else if (stepId === "bull-researcher" || (stepId.startsWith("bull-r") && stepId !== "bull-researcher")) {
       // 辩论子节点: 实际 nodeId 为 "bull-researcher" (DAG 引擎单次执行)
@@ -250,6 +260,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
   debateRounds.sort((a, b) => a.round - b.round);
   return {
     analystReports,
+    jevJudgments,
     debateRounds,
     riskAssessments,
     valueAssessments,
@@ -471,6 +482,14 @@ interface StockAnalysisState {
   klineError: string | null;
   klineLoading: boolean;
   analystReports: Record<string, string>;
+  /**
+   * 快速链（`stock-analysis-fast`）的 Jev 判定结果：`j-*` 节点 id → 归一化判定。
+   *
+   * 与 `analystReports` **并列而非合并**：两者产物形态不同（Jev 只有 `category` 档位、
+   * 无正文），合并会让 `a-*` 那套「按 expertId 取报告正文」的读取路径拿到档位词当正文。
+   * 原链不产 `j-*` 节点 ⇒ 本字段恒空，原链行为零影响。
+   */
+  jevJudgments: Record<string, JevJudgment>;
   debateRounds: Array<{ round: number; bull: string; bear: string }>;
   /**
    * 流式增量预览（2026-09-08 修复）：nodeId → 当前累积输出文本。
@@ -626,7 +645,7 @@ interface StockAnalysisState {
   ) => Promise<void>;
   startAnalysis: (
     stockCode: string,
-    options?: { parentAnalysisId?: string; language?: string },
+    options?: { parentAnalysisId?: string; language?: string; templateId?: string },
   ) => Promise<void>;
   rerunDecision: (analysisId: string) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
@@ -746,6 +765,7 @@ const initialState = {
   klineError: null,
   klineLoading: false,
   analystReports: {},
+  jevJudgments: {},
   debateRounds: [],
   streamingPreviews: {},
   riskAssessments: {},
@@ -955,7 +975,10 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     }
   },
 
-  startAnalysis: async (stockCode: string, options?: { parentAnalysisId?: string; language?: string }) => {
+  startAnalysis: async (
+    stockCode: string,
+    options?: { parentAnalysisId?: string; language?: string; templateId?: string },
+  ) => {
     const { status } = get();
     if (status === "loading" || status === "running") {
       console.warn("[StockAnalysis] Analysis already in progress, ignoring duplicate start");
@@ -983,6 +1006,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       nodeStartedAt: null,
       chatIndicatorDismissed: false,
       analystReports: {},
+      jevJudgments: {},
       debateRounds: [],
       streamingPreviews: {},
       riskAssessments: {},
@@ -1069,6 +1093,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       const effectiveLanguage = options?.language ?? (get().reportLanguage === "en" ? "en" : undefined);
       if (effectiveLanguage) {
         runArgs.language = effectiveLanguage;
+      }
+      // 工作流模板选择：前端「快速分析」传 `stock-analysis-fast`（Jev 判定链），
+      // 不传则后端缺省走完整分析链 `stock-analysis`。
+      // 两条链共用同一落库 / 业务后处理 / 前端读取路径，差异只在图结构。
+      if (options?.templateId) {
+        runArgs.templateId = options.templateId;
       }
       const result = await invoke<Record<string, unknown>>(
         "run_stock_workflow",
@@ -1171,6 +1201,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
     // 旧的分析师报告/辩论回合/风险评估等不会自动清除，导致 UI 显示的是上一个股票的数据。
     set({
       analystReports: {},
+      jevJudgments: {},
       debateRounds: [],
       streamingPreviews: {},
       riskAssessments: {},
@@ -2135,7 +2166,13 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       const s = get();
       if (handleAnalystReport(nodeId, text)) { return; }
 
-      if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
+      if (nodeId.startsWith("j-")) {
+        // 快速链 Jev 判定（llmClassifier）。`text` 已是 extractContent 后的 JSON 字符串，
+        // 但 `rawOutput` 是裸产物 ⇒ 优先用它（少一次 JSON.parse）。Jev 产物无 `content`，
+        // 故**不能**走 `handleAnalystReport`（它会当正文塞进 analystReports）。
+        const judgment = extractJevJudgment(rawOutput ?? text);
+        if (judgment) { set({ jevJudgments: { ...s.jevJudgments, [nodeId]: judgment } }); }
+      } else if (nodeId === "bull-researcher" || (nodeId.startsWith("bull-r") && nodeId !== "bull-researcher")) {
         updateDebateRound(nodeId, "bull", text);
       } else if (nodeId === "bear-researcher" || (nodeId.startsWith("bear-r") && nodeId !== "bear-researcher")) {
         updateDebateRound(nodeId, "bear", text);
@@ -2547,6 +2584,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         // 第 3 步: 数据质量诊断日志
         set({
           analystReports: { ...s.analystReports, ...parsed.analystReports },
+          jevJudgments: { ...s.jevJudgments, ...parsed.jevJudgments },
           debateRounds: mergedDebateRounds,
           riskAssessments: { ...s.riskAssessments, ...parsed.riskAssessments },
           valueAssessments: { ...s.valueAssessments, ...parsed.valueAssessments },
@@ -2680,6 +2718,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           const parsed = parseWorkflowResults(results);
           set({
             analystReports: parsed.analystReports,
+            jevJudgments: parsed.jevJudgments,
             debateRounds: parsed.debateRounds,
             riskAssessments: parsed.riskAssessments,
             valueAssessments: parsed.valueAssessments,

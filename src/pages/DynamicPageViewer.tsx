@@ -3,10 +3,10 @@
 import { DynamicUIRenderer } from "@/components/dynamicUI/DynamicUIRenderer";
 import { SchemaIdContext } from "@/components/dynamicUI/SchemaIdContext";
 import { RouteGuard } from "@/components/shared/RouteGuard";
-import { useDynamicUIStore } from "@/stores";
-import type { UISchema } from "@/types";
+import { useDynamicUIStore, usePluginStore } from "@/stores";
+import type { DynamicAction, UISchema } from "@/types";
 import { Result, Spin } from "antd";
-import { useEffect, useReducer } from "react";
+import { useEffect, useMemo, useReducer } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 
@@ -26,12 +26,12 @@ export function DynamicPageViewer() {
   type ViewState =
     | { kind: "loading" }
     | { kind: "error"; message: string }
-    | { kind: "ready"; schema: UISchema };
+    | { kind: "ready"; schema: UISchema; pluginId: string | null };
 
   type ViewAction =
     | { type: "start_load" }
     | { type: "load_error"; message: string }
-    | { type: "load_ok"; schema: UISchema }
+    | { type: "load_ok"; schema: UISchema; pluginId: string | null }
     | { type: "reset" };
 
   function viewReducer(_state: ViewState, action: ViewAction): ViewState {
@@ -41,7 +41,7 @@ export function DynamicPageViewer() {
       case "load_error":
         return { kind: "error", message: action.message };
       case "load_ok":
-        return { kind: "ready", schema: action.schema };
+        return { kind: "ready", schema: action.schema, pluginId: action.pluginId };
       case "reset":
         return { kind: "loading" };
     }
@@ -64,7 +64,12 @@ export function DynamicPageViewer() {
         if (!parsed) {
           dispatch({ type: "load_error", message: t("dynamicUIManager.invalidSchema") });
         } else {
-          dispatch({ type: "load_ok", schema: parsed });
+          // 插件来源的 Schema 才做动作回流（`origin: "plugin"` 时 `ownerId` 即 pluginId）。
+          dispatch({
+            type: "load_ok",
+            schema: parsed,
+            pluginId: record.origin === "plugin" && record.ownerId ? record.ownerId : null,
+          });
         }
       })
       .catch(() => {
@@ -76,6 +81,17 @@ export function DynamicPageViewer() {
       cancelled = true;
     };
   }, [schemaId, getSchema, t]);
+
+  const runUiAction = usePluginStore((s) => s.runUiAction);
+  const readyPluginId = viewState.kind === "ready" ? viewState.pluginId : null;
+
+  // 插件来源 Schema 的动作回流（PLAN §10.5-2）：`DynamicUIRenderer` 的 `onAction`
+  // 是宿主感知动作的唯一通路（Button 等组件只经它），把它接到插件自己的 worker 进程。
+  // 引用必须稳定 —— `DynamicUIRenderer` 的 onMount/onUnmount 副作用以 onAction 为依赖。
+  const handleAction = useMemo(
+    () => (readyPluginId ? (action: DynamicAction) => void runUiAction(readyPluginId, action) : undefined),
+    [readyPluginId, runUiAction],
+  );
 
   if (!schemaId) {
     return (
@@ -102,7 +118,7 @@ export function DynamicPageViewer() {
       {readySchema && (
         <div className="p-6" style={{ flex: 1, overflow: "auto" }}>
           <SchemaIdContext.Provider value={{ schemaId }}>
-            <DynamicUIRenderer schema={readySchema} />
+            <DynamicUIRenderer schema={readySchema} onAction={handleAction} />
           </SchemaIdContext.Provider>
         </div>
       )}

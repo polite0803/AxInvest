@@ -389,9 +389,8 @@ impl NodeExecutorTrait for AgentExecutor {
             guard.as_ref().cloned()
         };
         // P1 缺陷修复：agent-loop 接缝消费改为「注册表优先、字段回退」——
-        // 先查全局能力注册表里的 agent.loop（外部组件经 register_external_agent_loop
-        // 可替换内置核心，运行时生效），查不到再回退 WorkEngine 字段注入的 runner
-        // （兼容未接入注册表的场景）。两者通常指向同一内置实例，无行为差异。
+        // 先查全局能力注册表里的 agent.loop，查不到再回退 WorkEngine 字段注入的
+        // runner（兼容未接入注册表的场景）。两者通常指向同一内置实例，无行为差异。
         let runner = axagent_harness::get_capability_registry()
             .get_agent_turn_runner()
             .or_else(|| engine_clone.as_ref().and_then(|e| e.get_agent_turn_runner()));
@@ -3162,6 +3161,7 @@ impl AgentExecutor {
                                 format!("API key decryption failed: {e}"),
                             )
                         })?;
+                super::ensure_generation_model(&prov, &model, "AgentExecutor")?;
                 return Ok((prov, key, model, adapter, api_key));
             }
         }
@@ -3176,6 +3176,9 @@ impl AgentExecutor {
             "AgentExecutor",
         )
         .await?;
+
+        // 决策模型（如 TypeSafe Jev）不能用于文本生成节点
+        super::ensure_generation_model(&result.0, &result.2, "AgentExecutor")?;
 
         if !has_override {
             let mut cache = self.default_provider_cache.lock().await;
@@ -3209,7 +3212,7 @@ impl AgentExecutor {
     > {
         match fb_provider {
             Some(pid) => {
-                super::resolve_provider_and_adapter(
+                let resolved = super::resolve_provider_and_adapter(
                     &self.master_key,
                     self.provider_registry.as_ref(),
                     Some(fb_model),
@@ -3218,7 +3221,10 @@ impl AgentExecutor {
                     None,
                     "AgentExecutor",
                 )
-                .await
+                .await?;
+                // 决策模型（如 TypeSafe Jev）不能用于文本生成节点
+                super::ensure_generation_model(&resolved.0, &resolved.2, "AgentExecutor")?;
+                Ok(resolved)
             },
             None => {
                 self.resolve_provider(

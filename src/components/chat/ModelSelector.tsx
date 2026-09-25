@@ -34,6 +34,20 @@ import { useNavigate } from "react-router-dom";
 
 const PINNED_MODELS_KEY = "axagent_pinned_models";
 
+/**
+ * 聊天侧可选模型判据：排除决策模型（`ModelType.Decision`，如 TypeSafe Jev）。
+ *
+ * 决策模型只接收 state + 类型化问题、返回带概率的结构化判定，**不做文本生成**；
+ * 被选为对话模型时只会把一段裸判定值塞进消息气泡。它的正确去处是工作流的
+ * `llmClassifier` / `condition`（LLM 动态路由）节点。
+ *
+ * 只挡 Decision 而不做 `["Chat"]` 白名单：语音 / 嵌入等类型在聊天侧原本可见，
+ * 白名单会让它们一并消失（回归）。
+ */
+function isChatSelectable(m: Model) {
+  return m.modelType !== "Decision";
+}
+
 const CAPABILITY_COLORS: Record<ModelCapability, string> = {
   TextChat: "blue",
   Vision: "green",
@@ -341,7 +355,7 @@ export function ModelSelector({
           continue;
         }
         for (const model of p.models) {
-          if (model.enabled) {
+          if (model.enabled && isChatSelectable(model)) {
             pid = p.id;
             mid = model.modelId;
             break;
@@ -391,7 +405,7 @@ export function ModelSelector({
         continue;
       }
       for (const m of p.models) {
-        if (!m.enabled) {
+        if (!m.enabled || !isChatSelectable(m)) {
           continue;
         }
         const key = safeJoinIds([p.id, m.modelId], "::");
@@ -438,7 +452,7 @@ export function ModelSelector({
         return [];
       }
       const models = p.models.filter((m) => {
-        if (!m.enabled) {
+        if (!m.enabled || !isChatSelectable(m)) {
           return false;
         }
         if (excludeModelKeys?.includes(safeJoinIds([p.id, m.modelId], "::"))) {

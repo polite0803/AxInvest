@@ -4,6 +4,7 @@ import { showBackendError, translateFailureText } from "@/lib/errorI18n";
 import { invoke, listen, TimeoutError as InvokeTimeoutError } from "@/lib/invoke";
 import {
   type SerenityCandidate,
+  type SerenityChainId,
   type StepStage,
   type TrendInfo,
   useSerenityStore,
@@ -21,6 +22,7 @@ import {
   ReloadOutlined,
   RightOutlined,
   StockOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
 import {
   Alert,
@@ -258,8 +260,24 @@ function findCandidatesDeep(obj: Record<string, unknown>, depth = 0): SerenityCa
   return [];
 }
 
+// ── 趋势智选两链的模板 id ──
+// 与后端 `commands/stock_workflow/serenity.rs` 的 `SERENITY_TEMPLATE_IDS` 白名单
+// 一一对应（两链共用 `run_serenity_screening` 命令，由本参数决定跑哪条）：
+//   - `serenity-screening`      ：原链（12 个 Agent 腿，慢但覆盖全）
+//   - `serenity-screening-fast` ：快速链（确定性简报 + 单 Agent，见 seed_serenity_fast.rs）
+// 类型本身定义在 `serenityStore`（`runningChain` 是 store 状态，两处各写一份会分叉）。
+
+// 链名显示：复用两个运行按钮的文案，不另建 i18n key —— 与 `ScheduledAnalysisTab.tsx`
+// 的 `TREND_CHAINS` 同一约定（同一概念同一文案），避免两处链名分叉。
+const CHAIN_LABEL_KEY: Record<SerenityChainId, string> = {
+  "serenity-screening": "serenityPanel.run",
+  "serenity-screening-fast": "serenityPanel.fastRun",
+};
+
 // ── 节点 ID → 阶段映射 ──
-// 与 DB `workflow_templates(id='serenity-screening')` 主表实际节点集同步（v53，19 节点）。
+// 两链**共用本表**（H4：事件 `type` 同为 "serenity-screening"，共用监听器/store）：
+//   原链 `serenity-screening`（v53，19 节点）
+//   快速链 `serenity-screening-fast`（21 节点，见 seed_serenity_fast.rs）
 // 模板每次升版后必须重跑双向 diff（DB nodes[].id 集合 vs 本表 key）：
 //   模板有、本表缺 → `?? "loading"` 兜底让阶段文案倒退；本表有、模板无 → 僵尸残留。
 // 历史坑：本表曾长期停留在 v4（33 条，含 t-baseline-*/t-signal-*/
@@ -274,11 +292,14 @@ const NODE_STAGE_MAP: Record<string, StepStage> = {
   "t-policy-news": "scanning",
   "a-trend-scanner": "scanning",
   // Phase 1: 产业链拆解（a-chain-trendN 与 c-scorer-trendN 交替执行）
+  // 注：快速链无 a-chain-trendN（拆解与扫描合并进单个 a-trend-scanner Agent），
+  // 由 c-trend-split（Code，把 Agent 输出切成 trend1..5）替代其承上启下位置。
   "a-chain-trend1": "decomposing",
   "a-chain-trend2": "decomposing",
   "a-chain-trend3": "decomposing",
   "a-chain-trend4": "decomposing",
   "a-chain-trend5": "decomposing",
+  "c-trend-split": "decomposing",
   // Phase 2: 策略评分 + 一致性检查
   "c-scorer-trend1": "identifying",
   "c-scorer-trend2": "identifying",
@@ -291,6 +312,17 @@ const NODE_STAGE_MAP: Record<string, StepStage> = {
   // 的 Rust 代码完成（不产生节点事件），因此没有节点映射到 "saving" 阶段。
   "a-candidate-mapper": "mapping",
   "c-data-verifier": "mapping",
+  // ── 快速链独有节点（原链无这些 id）──
+  // 阶段取值遵循**执行顺序单调不回退**：c-scanner-brief / j-* / t-candidate-search /
+  // c-candidate-pool 全部在 a-trend-scanner **之前**执行 ⇒ 归 "scanning"；
+  // 若按业务语义归 "mapping" 会让阶段在 Agent 启动前先跳到末期、再由
+  // a-trend-scanner 退回 "scanning"（正是本表历史坑的同一形态）。
+  "c-scanner-brief": "scanning",
+  "j-strategy-type": "scanning",
+  "j-bottleneck": "scanning",
+  "t-candidate-search": "scanning",
+  "c-candidate-pool": "scanning",
+  "j-candidate-pick": "scanning",
 };
 
 // ── 工作流事件监听（模块级单例）──
@@ -707,6 +739,8 @@ export function SerenityScreeningPanel() {
     clearSteps,
     emptyReason,
     setEmptyReason,
+    runningChain,
+    setRunningChain,
   } = useSerenityStore();
   const { t } = useTranslation();
   // 跳转统一走 useStockJump（与智能荐股 / 筛选结果同一条链，避免参数名分叉）
@@ -715,6 +749,11 @@ export function SerenityScreeningPanel() {
   // 事件监听已上移到模块级（ensureSerenityListeners）：跨 tab 切换存活，
   // 不再使用组件内 ref 保存 unlisten，也不再随 unmount 解绑。
   const [expandedSteps, setExpandedSteps] = useState<Set<number>>(new Set());
+  // 本次运行跑的是哪条链（null = 未运行/未知）。存在 store 里而非组件 state：
+  // ScreenerPage 的 Tabs 是 destroyOnHidden，切走即 unmount，组件 state 会丢而
+  // store.running 仍为 true ⇒ 两按钮都 disabled、都不转圈，进度卡也说不清是哪条链。
+  // 两个运行按钮各自据此显示 loading，避免点快速链却让原链按钮也在转（running 由
+  // store 统管、无法区分来源）。
   // 回馈闭环状态
   const [feedbackData, setFeedbackData] = useState<
     {
@@ -784,6 +823,7 @@ export function SerenityScreeningPanel() {
   // 历史快照（该函数按版本精确匹配），而运行时执行与写入（apply_update_variable）
   // 都走主表当前版本 → 改完设置关闭再打开会「回弹」旧值（快照里还留着已删除的
   // ref_*_code 变量）。改为按 id 读主表（当前版本），与写侧同源。
+  // 读侧仍以原链模板为**权威源**（两链的变量语义完全相同，设置面板是共享设置）。
   useEffect(() => {
     invoke<{ variables: Array<{ name: string; value: unknown }> }>(
       "get_workflow_template",
@@ -799,15 +839,26 @@ export function SerenityScreeningPanel() {
       setSerenityVars(map);
     }).catch(() => {});
   }, []);
+  // 写侧必须**双写两链**：H2 只约束脚本单源，而变量是「用户共享设置」。
+  // 快速链的模板行在建链时复制了一份默认值（seed_serenity_fast.rs 复用
+  // build_serenity_variables），若只写原链，用户在设置面板改完过滤参数后，
+  // 快速链会静默沿用种子时的旧默认值，两链结果不一致且无任何提示。
+  // 用 allSettled 语义逐项 catch：另一链尚未种子（首次启动竞态）时只丢该项，
+  // 不影响原链写入 —— 原链是权威源，绝不能被快速链的失败带崩。
   const handleSerenityVarChange = useCallback(async (key: string, value: number) => {
     setSerenityVars((prev) => ({ ...prev, [key]: value }));
-    try {
-      await invoke("apply_update_variable", {
-        templateId: "serenity-screening",
-        name: `serenity_${key}`,
-        value,
-      });
-    } catch { /* ignore */ }
+    const chainIds: SerenityChainId[] = ["serenity-screening", "serenity-screening-fast"];
+    await Promise.all(
+      chainIds.map((templateId) =>
+        invoke("apply_update_variable", {
+          templateId,
+          name: `serenity_${key}`,
+          value,
+        }).catch(() => {
+          /* ignore：另一链未种子时该项失败即可 */
+        })
+      ),
+    );
   }, []);
 
   // 挂载即确保事件监听已注册（模块级单例，注册后永不解绑）。
@@ -885,7 +936,7 @@ export function SerenityScreeningPanel() {
     });
   }, []);
 
-  const handleRun = useCallback(async () => {
+  const handleRun = useCallback(async (chainId: SerenityChainId) => {
     // 清理上一次结果
     clearSteps();
     setCandidates([]);
@@ -896,6 +947,7 @@ export function SerenityScreeningPanel() {
     setCompletedNodes(0);
     setTotalNodes(0);
     setExpandedSteps(new Set());
+    setRunningChain(chainId);
 
     // 事件监听是模块级单例（ensureSerenityListeners）：这里只确保已注册，
     // 并在启动前锁定本次运行的 runId —— 监听器据此丢弃其它运行的事件。
@@ -923,6 +975,9 @@ export function SerenityScreeningPanel() {
           // 运行 ID：后端把它原样回灌到 step/completed 事件 payload，
           // 前端监听器据此过滤掉其它运行（并发/残留）的事件，避免串台。
           runId: activeRunId,
+          // 跑哪条链：由按钮决定（原链 / 快速链），后端按白名单校验后
+          // 决定 `load_and_inject_template` 读哪个模板行。
+          templateId: chainId,
         },
         SERENITY_TIMEOUT_MS,
       );
@@ -964,6 +1019,7 @@ export function SerenityScreeningPanel() {
     } finally {
       setRunning(false);
       setCurrentNode(null);
+      setRunningChain(null);
     }
   }, [
     clearSteps,
@@ -1145,11 +1201,31 @@ export function SerenityScreeningPanel() {
           </Button>
           <Button
             type="primary"
-            icon={running ? <ReloadOutlined spin /> : <PlayCircleOutlined />}
-            loading={running}
-            onClick={handleRun}
+            icon={runningChain === "serenity-screening"
+              ? <ReloadOutlined spin />
+              : <PlayCircleOutlined />}
+            loading={runningChain === "serenity-screening"}
+            disabled={running && runningChain !== "serenity-screening"}
+            onClick={() => handleRun("serenity-screening")}
           >
-            {running ? t("serenityPanel.running") : t("serenityPanel.run")}
+            {runningChain === "serenity-screening"
+              ? t("serenityPanel.running")
+              : t("serenityPanel.run")}
+          </Button>
+          <Button
+            type="primary"
+            ghost
+            icon={runningChain === "serenity-screening-fast"
+              ? <ReloadOutlined spin />
+              : <ThunderboltOutlined />}
+            loading={runningChain === "serenity-screening-fast"}
+            disabled={running && runningChain !== "serenity-screening-fast"}
+            title={t("serenityPanel.fastRunTip")}
+            onClick={() => handleRun("serenity-screening-fast")}
+          >
+            {runningChain === "serenity-screening-fast"
+              ? t("serenityPanel.running")
+              : t("serenityPanel.fastRun")}
           </Button>
         </div>
       </div>
@@ -1266,6 +1342,11 @@ export function SerenityScreeningPanel() {
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2 text-sm">
               <Spin indicator={<LoadingOutlined spin />} size="small" />
+              {runningChain && (
+                <Tag color="blue" className="text-xs shrink-0">
+                  {t(CHAIN_LABEL_KEY[runningChain])}
+                </Tag>
+              )}
               <span className="font-medium">{stageLabel}</span>
               {currentNodeId && (
                 <Text type="secondary" className="text-xs">
@@ -1295,6 +1376,11 @@ export function SerenityScreeningPanel() {
             <div className="flex items-center gap-2 text-sm">
               <ClockCircleOutlined />
               <span>{t("serenityPanel.stepLogTitle")}</span>
+              {runningChain && (
+                <Tag color="blue" className="text-xs">
+                  {t(CHAIN_LABEL_KEY[runningChain])}
+                </Tag>
+              )}
               <Tag className="text-xs">{steps.length}</Tag>
             </div>
           }

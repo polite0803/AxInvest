@@ -327,6 +327,8 @@ const SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("tags", "TEXT"),
             ("version", "TEXT"),
             ("is_builtin", "INTEGER"),
+            ("origin", "TEXT"),
+            ("owner_id", "TEXT"),
             ("created_at", "TEXT"),
             ("updated_at", "TEXT"),
         ],

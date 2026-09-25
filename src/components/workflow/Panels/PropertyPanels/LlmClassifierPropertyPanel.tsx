@@ -98,6 +98,7 @@ export const LlmClassifierPropertyPanel: React.FC<Props> = ({ node, onUpdate, on
           onChange={(value) => sc("model", value || "")}
           placeholder={t("workflow.props.selectModel")}
           allowClear
+          modelTypes={["Chat", "Decision"]}
           style={{ width: "100%" }}
         />
         <div style={hintStyle}>{t("workflow.nodeConfig.llmModelHint")}</div>

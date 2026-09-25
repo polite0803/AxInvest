@@ -43,7 +43,7 @@ impl PlatformBridge {
     /// 取 webhook 派发器 —— 统一经 webhook.dispatch 能力接缝获取。
     ///
     /// wiring 层在启动时把派发器注册进能力注册表；外部插件可经
-    /// `register_external_webhook_dispatch` 替换同一接缝（内置与插件平权）。
+    /// `register_plugin_capability` 声明同一接缝（内置与插件平权）。
     /// 此前本结构持有独立的注入副本（平行通道），已收敛删除。
     fn webhook_dispatcher(&self) -> Option<Arc<dyn crate::webhook_subscription::WebhookDispatch>> {
         axagent_harness::get_capability_registry().get_webhook_dispatch()

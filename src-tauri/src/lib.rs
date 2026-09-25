@@ -58,6 +58,7 @@ mod app_state;
 mod config_validator;
 
 #[allow(unused_imports)]
+use axagent_harness::IpcEventName;
 use tauri::{Emitter, Manager};
 
 pub use app_state::AppState;
@@ -673,7 +674,7 @@ pub fn run() {
                             api.prevent_close();
                         } else {
                             api.prevent_close();
-                            let _ = app.emit("app-close-requested", ());
+                            let _ = app.emit(IpcEventName::AppCloseRequested.as_str(), ());
                         }
                     }
                     _ => {}

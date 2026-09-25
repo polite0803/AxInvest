@@ -595,6 +595,16 @@ export interface AnalysisSummary {
   asOfDate: string | null;
   /** 版本化分析：指向原始分析记录 ID，null 表示首次分析 */
   parentAnalysisId: string | null;
+  /**
+   * 生成该记录的工作流模板 id：`"stock-analysis"`（完整链）/ `"stock-analysis-fast"`
+   * （快速 JEV 链）。`null` = 本列引入前的记录或非模板产出（对话直执行 / 条件单补记），
+   * **不得**据此推断链路，按「未知」渲染。
+   *
+   * 用途：历史列表里两条链的记录形态一致（`analysisKind` 同为 `"live"`），
+   * 需要靠本字段区分并打标识，否则用户看到的是「同一只股票两条互相矛盾的记录」
+   * 而没有任何线索说明它们来自不同链路。
+   */
+  templateId: string | null;
 }
 
 export interface AnalysisEvent {
@@ -802,12 +812,22 @@ export interface TimelineNode {
 // ── 反思命中率（M2/M3：PLAN-stock-decision-hitrate-validation）──
 // 后端权威定义 `analysis-engine/src/reflection_stats.rs`（serde camelCase）。
 
-/** 按维度分组的方向命中率；samples < 5 时 directionHitRate 为 null（样本不足） */
+/** 按维度分组的方向命中率与分周期指标；样本 < 5 时命中率为 null（样本不足） */
 export interface HitrateGroup {
   key: string;
+  /** 已判定（成熟）样本数 */
   samples: number;
   directionHitRate: number | null;
+  /** 目标价命中率；无目标价判定样本 → null */
+  targetHitRate: number | null;
+  /** 该组平均净收益（%）；无样本 → null */
+  avgRawReturnPct: number | null;
+  /** 该组平均超额收益（%）；无 alpha 样本 → null */
+  avgAlphaPct: number | null;
 }
+
+/** 四周期命中率分组（key 为 ultra_short / short / mid / long / unknown） */
+export type HorizonHitrateGroup = HitrateGroup;
 
 /** 命中率聚合结果 —— 消费 strategy_performance + stock_reflections + stock_analyses */
 export interface HitrateStats {
@@ -816,6 +836,57 @@ export interface HitrateStats {
   targetHitRate: number | null;
   avgRawReturnPct: number | null;
   avgAlphaPct: number | null;
+  /** 样本中来自旧单周期字段回退（legacy）的条数 */
+  legacySamples: number;
   byAction: HitrateGroup[];
   byHorizon: HitrateGroup[];
 }
+
+// ── 四周期反思结果（批次 3/4：horizon_results_json 结构化）──
+// 后端权威定义 `stock_workflow/reflection.rs::build_horizon_results_json` 落库 JSON。
+
+/** 四周期状态枚举（与后端 HorizonStatus serde snake_case 对齐） */
+export type HorizonStatus = "mature" | "immature" | "unavailable" | "legacy";
+
+/** 单周期决策 */
+export interface HorizonResultDecision {
+  action: string;
+  positionPct?: number | null;
+  targetPrice?: number | null;
+  stopLoss?: number | null;
+  confidence?: number | null;
+}
+
+/** 单周期市场事实 */
+export interface HorizonResultMarket {
+  entryPrice?: number | null;
+  exitPrice?: number | null;
+  returnPct?: number | null;
+  alphaPct?: number | null;
+  maxDrawdownPct?: number | null;
+  targetReached?: boolean | null;
+  stopLossTriggered?: boolean | null;
+}
+
+/** 单周期客观评价 */
+export interface HorizonResultEvaluation {
+  /** 1 = 正确, 0 = 错误, null = 不可判定（immature/unavailable/neutral） */
+  wasCorrect?: 0 | 1 | null;
+  directionMatch?: boolean | null;
+  targetHit?: boolean | null;
+  mismatch?: string | null;
+}
+
+/** 单周期反思条目（对应 horizon_results_json.{horizon}） */
+export interface HorizonResultEntry {
+  status: HorizonStatus;
+  expectedHoldingDays: number;
+  actualHoldingDays?: number | null;
+  decision: HorizonResultDecision;
+  market?: HorizonResultMarket | null;
+  evaluation?: HorizonResultEvaluation | null;
+  reflection?: Record<string, unknown> | null;
+}
+
+/** 四周期结果 Map（后端键为 snake_case，前端消费同键） */
+export type HorizonResultsMap = Partial<Record<"ultra_short" | "short" | "mid" | "long", HorizonResultEntry | null>>;

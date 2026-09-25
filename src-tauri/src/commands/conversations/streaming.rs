@@ -3,6 +3,7 @@
 use super::*;
 use crate::AppState;
 use axagent_agent::clean_output;
+use axagent_harness::IpcEventName;
 use axagent_harness::types::*;
 use axagent_harness::url_utils::resolve_base_url_for_type;
 use axagent_providers::ProviderRequestContext;
@@ -274,7 +275,7 @@ fn spawn_stream_task(
                 Some(a) => a,
                 None => {
                     let _ = app.emit(
-                        "chat-stream-error",
+                        IpcEventName::ChatStreamError.as_str(),
                         ChatStreamErrorEvent {
                             conversation_id: conversation_id.clone(),
                             message_id: assistant_message_id.clone(),
@@ -451,7 +452,7 @@ fn spawn_stream_task(
                     Err(e) => {
                         try_fallback!(e, 'tool_loop);
                         let _ = app.emit(
-                            "chat-stream-error",
+                            IpcEventName::ChatStreamError.as_str(),
                             ChatStreamErrorEvent {
                                 conversation_id: conversation_id.clone(),
                                 message_id: assistant_message_id.clone(),
@@ -574,7 +575,7 @@ fn spawn_stream_task(
                     let mcp_opener = format!("\n\n:::mcp {}\n", metadata);
                     total_content.push_str(&mcp_opener);
                     let _ = app.emit(
-                        "chat-stream-chunk",
+                        IpcEventName::ChatStreamChunk.as_str(),
                         ChatStreamEvent {
                             conversation_id: conversation_id.clone(),
                             message_id: assistant_message_id.clone(),
@@ -657,7 +658,7 @@ fn spawn_stream_task(
                     let mcp_closer = format!("{}\n:::\n\n", result_content);
                     total_content.push_str(&mcp_closer);
                     let _ = app.emit(
-                        "chat-stream-chunk",
+                        IpcEventName::ChatStreamChunk.as_str(),
                         ChatStreamEvent {
                             conversation_id: conversation_id.clone(),
                             message_id: assistant_message_id.clone(),
@@ -791,7 +792,7 @@ fn spawn_stream_task(
                     tracing::error!("Failed to auto-update title: {}", e);
                 } else {
                     let _ = app.emit(
-                        "conversation-title-updated",
+                        IpcEventName::ConversationTitleUpdated.as_str(),
                         ConversationTitleUpdatedEvent {
                             conversation_id: conversation_id.clone(),
                             title: fallback_title,
@@ -801,7 +802,7 @@ fn spawn_stream_task(
 
                 // Notify frontend that title generation is starting
                 let _ = app.emit(
-                    "conversation-title-generating",
+                    IpcEventName::ConversationTitleGenerating.as_str(),
                     ConversationTitleGeneratingEvent {
                         conversation_id: conversation_id.clone(),
                         generating: true,
@@ -834,7 +835,7 @@ fn spawn_stream_task(
                         {
                             tracing::error!("Failed to update AI-generated title: {}", e);
                             let _ = app.emit(
-                                "conversation-title-generating",
+                                IpcEventName::ConversationTitleGenerating.as_str(),
                                 ConversationTitleGeneratingEvent {
                                     conversation_id: conversation_id.clone(),
                                     generating: false,
@@ -843,14 +844,14 @@ fn spawn_stream_task(
                             );
                         } else {
                             let _ = app.emit(
-                                "conversation-title-updated",
+                                IpcEventName::ConversationTitleUpdated.as_str(),
                                 ConversationTitleUpdatedEvent {
                                     conversation_id: conversation_id.clone(),
                                     title,
                                 },
                             );
                             let _ = app.emit(
-                                "conversation-title-generating",
+                                IpcEventName::ConversationTitleGenerating.as_str(),
                                 ConversationTitleGeneratingEvent {
                                     conversation_id: conversation_id.clone(),
                                     generating: false,
@@ -862,7 +863,7 @@ fn spawn_stream_task(
                     Err(err) => {
                         tracing::warn!("Auto title generation failed: {}", err);
                         let _ = app.emit(
-                            "conversation-title-generating",
+                            IpcEventName::ConversationTitleGenerating.as_str(),
                             ConversationTitleGeneratingEvent {
                                 conversation_id: conversation_id.clone(),
                                 generating: false,
@@ -888,7 +889,7 @@ fn spawn_stream_task(
                 };
                 tracing::error!("[spawn_stream_task] PANIC: {}", msg);
                 let _ = app.emit(
-                    "chat-stream-error",
+                    IpcEventName::ChatStreamError.as_str(),
                     ChatStreamErrorEvent {
                         conversation_id: conversation_id.clone(),
                         message_id: assistant_message_id.clone(),
@@ -913,6 +914,47 @@ fn spawn_stream_task(
     });
 }
 
+/// 生成路径守卫：拒绝把决策模型（`ModelType::Decision`，如 TypeSafe Jev）当作
+/// 会话 / 生成模型。
+///
+/// 决策模型只接收 state + 类型化问题、返回带概率的结构化判定，**不做文本生成**；
+/// 被当作对话模型时只会把一段裸判定值写进消息气泡。前端模型选择器
+/// （`ModelSelector` 的 `isChatSelectable`）挡不住手写数据库、历史会话、
+/// 遗留 localStorage 等路径，因此在真正发起生成前于此快速失败。
+///
+/// 判据 `resolve_model_type` / `is_generation_blocked` 的权威定义在 harness 类型层，
+/// 与工作流执行器（`rt-workflow` 的 `llm_resolve.rs` 里的 `ensure_generation_model`）
+/// 共用同一份，不要在此重写。
+async fn ensure_chat_generation_model(
+    db: &sea_orm::DatabaseConnection,
+    provider_id: &str,
+    model_id: &str,
+) -> Result<(), String> {
+    let provider =
+        axagent_dao::repo::provider::get_provider(db, provider_id).await.map_err(|e| {
+            String::from(crate::commands::error::ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })?;
+
+    let model_type =
+        axagent_harness::types::provider_model::resolve_model_type(&provider, model_id);
+    if !axagent_harness::types::provider_model::is_generation_blocked(&model_type) {
+        return Ok(());
+    }
+
+    let mut params = std::collections::HashMap::new();
+    params.insert("model_id".to_string(), model_id.to_string());
+    Err(String::from(
+        crate::commands::error::ErrorResponse::new(
+            axagent_harness::error_codes::provider::MODEL_NOT_GENERATIVE,
+        )
+        .with_category(crate::commands::error::ErrorCategory::Validation)
+        .with_params(params),
+    ))
+}
+
 pub async fn send_message(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
@@ -927,6 +969,22 @@ pub async fn send_message(
         enabled_memory_namespace_ids,
         enabled_wiki_ids,
     } = options;
+
+    // 生成路径守卫：必须在用户消息落库之前校验，拒绝时不留下无回复的半截会话状态。
+    // （下方第 2 步会再读一次 conversation —— 那次要取 increment 之后的
+    //  `message_count` 来判定首条消息，两处不可合并。）
+    let conv_guard =
+        axagent_dao::repo::conversation::get_conversation(state.harness.db(), &conversation_id)
+            .await
+            .map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
+    ensure_chat_generation_model(state.harness.db(), &conv_guard.provider_id, &conv_guard.model_id)
+        .await?;
+
     let persisted_attachments =
         persist_attachments(&state, &conversation_id, &attachments).await.map_err(|e| {
             String::from(crate::commands::error::ErrorResponse::from_error(
@@ -1167,7 +1225,7 @@ pub async fn send_message(
 
     // Always emit RAG results to frontend so it can replace the searching indicator
     let _ = app.emit(
-        "rag-context-retrieved",
+        IpcEventName::RagContextRetrieved.as_str(),
         RagContextRetrievedEvent {
             conversation_id: conversation_id.clone(),
             sources: rag_result.source_results.clone(),
@@ -1256,6 +1314,15 @@ pub async fn send_message(
     if let Some(msg) = build_working_memory_chat_message(&wm_content) {
         chat_messages.push(msg);
     }
+
+    // 沙箱/审批档位写进 system prompt（对标 codex permissions_instructions）：
+    // 让模型知道自己在什么边界内，主动规避越界写路径、主动请求审批，
+    // 而不是先撞沙箱再重试。计入 token_budget::SYSTEM_PROMPT 额度。
+    crate::context_manager::push_permission_notice(
+        &mut chat_messages,
+        &global_settings.sandbox_mode,
+        &global_settings.approval_policy,
+    );
 
     // ── 自进化闭环:文件级 ProjectMemory 按任务语义相关性检索 ──
     //
@@ -1600,6 +1667,26 @@ pub async fn regenerate_message(
     let active_model_id = active_version.and_then(|v| v.model_id.clone());
     let active_provider_id = active_version.and_then(|v| v.provider_id.clone());
 
+    // 生成路径守卫：必须在下方的反激活写入之前校验，拒绝时不改动消息版本状态。
+    // 实际生成模型优先沿用该消息上次用的（active_version），回退会话模型 —— 与第
+    // 4/5 步的解析顺序一致，故此处需提前读一次 conversation（两处不可合并：第 4 步
+    // 的读取发生在反激活写入之后）。
+    let conv_for_guard =
+        axagent_dao::repo::conversation::get_conversation(state.harness.db(), &conversation_id)
+            .await
+            .map_err(|e| {
+                String::from(crate::commands::error::ErrorResponse::from_error(
+                    e,
+                    crate::commands::error::ErrorCategory::Unrecoverable,
+                ))
+            })?;
+    ensure_chat_generation_model(
+        state.harness.db(),
+        active_provider_id.as_deref().unwrap_or(&conv_for_guard.provider_id),
+        active_model_id.as_deref().unwrap_or(&conv_for_guard.model_id),
+    )
+    .await?;
+
     // 3. Deactivate all existing AI reply versions for this user message
     use axagent_entities::messages as msg_entity;
     use sea_orm::sea_query::Expr;
@@ -1691,6 +1778,15 @@ pub async fn regenerate_message(
         });
     }
 
+    // 沙箱/审批档位写进 system prompt（与主发送路径一致，见 context_manager）
+    let global_settings =
+        axagent_dao::repo::settings::get_settings(state.harness.db()).await.unwrap_or_default();
+    crate::context_manager::push_permission_notice(
+        &mut chat_messages,
+        &global_settings.sandbox_mode,
+        &global_settings.approval_policy,
+    );
+
     // RAG retrieval for regeneration: resolve from context_sources when explicit IDs are not provided
     let memory_tag = {
         let sources = resolve_rag_ids(
@@ -1716,7 +1812,7 @@ pub async fn regenerate_message(
 
         // Always emit so frontend can replace the searching indicator
         let _ = app.emit(
-            "rag-context-retrieved",
+            IpcEventName::RagContextRetrieved.as_str(),
             RagContextRetrievedEvent {
                 conversation_id: conversation_id.clone(),
                 sources: rag_result.source_results,
@@ -1786,8 +1882,6 @@ pub async fn regenerate_message(
     // 7. Spawn streaming with new version
     let assistant_message_id = axagent_kit::utils::gen_id();
 
-    let global_settings =
-        axagent_dao::repo::settings::get_settings(state.harness.db()).await.unwrap_or_default();
     let resolved_proxy = axagent_harness::types::provider_model::resolve_provider_proxy(
         &provider.proxy_config,
         &global_settings,
@@ -1928,6 +2022,11 @@ pub async fn regenerate_with_model(
         enabled_memory_namespace_ids,
         enabled_wiki_ids,
     } = options;
+
+    // 生成路径守卫：多模型对比的伴随模型（companion）与“换模型重新生成”都走这里，
+    // 与 send_message 共用同一判据，防决策模型（TypeSafe Jev 等）被当作生成模型。
+    ensure_chat_generation_model(state.harness.db(), &target_provider_id, &target_model_id).await?;
+
     let messages = axagent_dao::repo::message::list_messages(state.harness.db(), &conversation_id)
         .await
         .map_err(|e| {
@@ -2059,6 +2158,15 @@ pub async fn regenerate_with_model(
         );
     }
 
+    // 沙箱/审批档位写进 system prompt（与主发送路径一致，见 context_manager）
+    let global_settings =
+        axagent_dao::repo::settings::get_settings(state.harness.db()).await.unwrap_or_default();
+    crate::context_manager::push_permission_notice(
+        &mut chat_messages,
+        &global_settings.sandbox_mode,
+        &global_settings.approval_policy,
+    );
+
     // RAG retrieval: resolve from context_sources when explicit IDs are not provided
     let memory_tag = {
         let sources = resolve_rag_ids(
@@ -2084,7 +2192,7 @@ pub async fn regenerate_with_model(
 
         // Always emit so frontend can replace the searching indicator
         let _ = app.emit(
-            "rag-context-retrieved",
+            IpcEventName::RagContextRetrieved.as_str(),
             RagContextRetrievedEvent {
                 conversation_id: conversation_id.clone(),
                 sources: rag_result.source_results,
@@ -2149,8 +2257,6 @@ pub async fn regenerate_with_model(
     }
 
     let assistant_message_id = axagent_kit::utils::gen_id();
-    let global_settings =
-        axagent_dao::repo::settings::get_settings(state.harness.db()).await.unwrap_or_default();
     let resolved_proxy = axagent_harness::types::provider_model::resolve_provider_proxy(
         &provider.proxy_config,
         &global_settings,

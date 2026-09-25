@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import type { InstallOutcomeDto, PluginManifestDto, PluginSummaryDto, UpdateOutcomeDto } from "@/types";
+import type { DynamicAction, InstallOutcomeDto, PluginManifestDto, PluginSummaryDto, UpdateOutcomeDto } from "@/types";
 import { create } from "zustand";
 
 interface PluginState {
@@ -18,6 +19,7 @@ interface PluginState {
   disablePlugin: (pluginId: string) => Promise<boolean>;
   uninstallPlugin: (pluginId: string) => Promise<boolean>;
   updatePlugin: (pluginId: string) => Promise<UpdateOutcomeDto | null>;
+  runUiAction: (pluginId: string, action: DynamicAction) => Promise<unknown | null>;
 }
 
 export const usePluginStore = create<PluginState>((set, get) => ({
@@ -159,6 +161,28 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       set({ error: errorMsg });
       if (import.meta.env.DEV) {
         console.error("Failed to update plugin:", e);
+      }
+      return null;
+    }
+  },
+
+  /**
+   * 把动态 UI 里触发的 action 回流传给**插件自己的** worker 进程（`plugin_ui_action`）。
+   *
+   * 仅在 Schema 来自插件（`origin === "plugin"`，`ownerId` 即 pluginId）时调用。
+   * 插件未声明 `worker` 或未启用时后端返回 `PLUGIN_UI_ACTION_UNAVAILABLE` —— 这是
+   * 常态而非异常，故失败只记 `error` 并返回 `null`，不抛给调用方（否则一次点击
+   * 就会把渲染树的 error boundary 打掉）。
+   */
+  runUiAction: async (pluginId, action) => {
+    try {
+      const result = await invoke<unknown>("plugin_ui_action", { pluginId, action });
+      set({ error: null });
+      return result;
+    } catch (e) {
+      set({ error: translateBackendError(e) });
+      if (import.meta.env.DEV) {
+        console.error("Failed to run plugin UI action:", e);
       }
       return null;
     }

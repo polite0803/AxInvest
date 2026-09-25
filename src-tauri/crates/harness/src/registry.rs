@@ -115,3 +115,19 @@ pub trait ToolRegistry: Send + Sync {
         Ok(result)
     }
 }
+
+/// 工具集接缝 —— 向工具注册表**贡献**一组工具（`tool.set`）。
+///
+/// 与 [`ToolRegistry`] 的分工：`ToolRegistry` 是**消费者视角**的查询/执行面
+/// （按名查找、列举信息、统一执行）；本 trait 是**提供者视角**的贡献面
+/// （「我提供这些工具」）。
+///
+/// **为何需要这一层**：内置工具集原先由 `axagent_tools::tools::register_all`
+/// 硬编码在工具注册表构造函数里，外部实现无从替换（「一切皆插件」缺口 G4）。
+/// 内置工具集实现本 trait 并经
+/// [`axagent_harness::CapabilityRegistry::register_tool_set`] 注册后，
+/// 与外部实现走同一入口、平权。
+pub trait ToolSetProvider: Send + Sync {
+    /// 本提供者贡献的全部工具。
+    fn tools(&self) -> Vec<Arc<dyn Tool>>;
+}

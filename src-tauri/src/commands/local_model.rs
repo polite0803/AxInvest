@@ -974,6 +974,7 @@ pub fn scan_gguf_models(provider_id: &str, dir: &Path) -> Vec<axagent_harness::t
                 axagent_harness::types::ModelType::Voice => {
                     vec![axagent_harness::types::ModelCapability::RealtimeVoice]
                 },
+                axagent_harness::types::ModelType::Decision => vec![],
             };
             axagent_harness::types::Model {
                 provider_id: provider_id.to_string(),

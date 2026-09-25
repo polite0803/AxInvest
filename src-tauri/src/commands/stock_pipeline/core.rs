@@ -10,6 +10,7 @@
 #![allow(clippy::type_complexity)]
 
 use axagent_agent_macro::agent_command;
+use axagent_harness::IpcEventName;
 use std::sync::Arc;
 
 use axagent_entities::stock_pipeline_runs;
@@ -488,7 +489,7 @@ pub async fn run_stock_pipeline(
     let app_handle = app.clone();
     let progress_callback = Arc::new(move |step: &str, info: PipelineStepInfo| {
         let _ = app_handle.emit(
-            "pipeline-step",
+            IpcEventName::PipelineStep.as_str(),
             // 结构化载荷：`nodeId` + `status` 由前端按 i18n 组装文案。
             // 不再发拼接好的中文 `detail`（前端 `PipelineStepEvent` 里该字段已标 `@deprecated`，
             // 仅作旧载荷的展示兜底 —— 后端从这里起不再产出它）。

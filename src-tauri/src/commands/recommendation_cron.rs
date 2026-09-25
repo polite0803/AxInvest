@@ -200,11 +200,46 @@ pub async fn delete_recommendation_cron(
 //
 // `task_type = "trend-screening"` 仅作前端列表过滤标记 —— executor 没有它的
 // 专用分支，因此会正常落到 `workflow_id` 分支（这正是我们要的行为）。
+//
+// [2026-09-24 扩展] 趋势智选已拆成**两条链**（原链 `serenity-screening` 12 个 Agent 腿、
+// 慢但覆盖全；快速链 `serenity-screening-fast` 确定性简报 + 单 Agent，见 seed_serenity_fast.rs）。
+// 两条链共用同一个 `task_type`，靠 `workflow_id` 区分 —— 因此建任务时必须显式指定链
+// （见 `resolve_trend_workflow_id`），且 `CronJobResponse` 必须回传 `workflow_id`，
+// 否则前端无法把列表项归链。
 
-/// 趋势智选工作流模板 ID（与 `seed_serenity.rs` 的 TEMPLATE_ID 保持一致）
+/// 趋势智选原链模板 ID（与 `seed_serenity.rs` 的 TEMPLATE_ID 保持一致）
 pub const TREND_SCREENING_WORKFLOW_ID: &str = "serenity-screening";
-/// 前端列表过滤用的任务类型标记
+/// 趋势智选快速链模板 ID（与 `seed_serenity_fast.rs` 的 TEMPLATE_ID 保持一致）
+pub const TREND_SCREENING_FAST_WORKFLOW_ID: &str = "serenity-screening-fast";
+/// 前端列表过滤用的任务类型标记（两链共用）
 pub const TREND_SCREENING_TASK_TYPE: &str = "trend-screening";
+
+/// 趋势智选定时可选的链白名单 —— 与 `stock_workflow/serenity.rs` 的 `SERENITY_TEMPLATE_IDS`
+/// 同集合（那边是**运行**入口的白名单，这边是**定时**入口的；两处必须同集合，
+/// 否则定任务能建出来、到点却跑不起来）。
+const TREND_SCREENING_WORKFLOW_IDS: [&str; 2] =
+    [TREND_SCREENING_WORKFLOW_ID, TREND_SCREENING_FAST_WORKFLOW_ID];
+
+/// 把前端传来的 `workflow_id` 收敛到白名单内：缺省 = 原链。
+///
+/// 未知 id **直接报错**而不是静默回落原链：executor 的 `workflow_id` 兜底分支会拿它去
+/// `engine.run_workflow()`，未知 id 只会在到点执行时抛「模板不存在」，而那时用户早已
+/// 离开设置页，界面上不会有任何提示。
+fn resolve_trend_workflow_id(requested: Option<&str>) -> Result<&'static str, String> {
+    match requested {
+        None => Ok(TREND_SCREENING_WORKFLOW_ID),
+        Some(id) => TREND_SCREENING_WORKFLOW_IDS
+            .iter()
+            .find(|candidate| **candidate == id)
+            .copied()
+            .ok_or_else(|| {
+                format!(
+                    "未知的趋势智选链 id: {id}（可选 {}）",
+                    TREND_SCREENING_WORKFLOW_IDS.join(" / ")
+                )
+            }),
+    }
+}
 
 /// 创建趋势智选定时任务
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateInput, description = "创建趋势智选定时任务")]
@@ -213,17 +248,29 @@ pub async fn create_trend_screening_cron(
     state: State<'_, AppState>,
     cron_expression: Option<String>,
     enabled: Option<bool>,
+    workflow_id: Option<String>,
 ) -> Result<crate::commands::stock_analysis::CronJobResponse, String> {
+    let wf_id = resolve_trend_workflow_id(workflow_id.as_deref())?;
     let expr = cron_expression.unwrap_or_else(|| "0 16 * * 1-5".to_string());
     let id = format!("trend-{}", uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("x"));
-    let mut job = CronJob::new(
-        &id,
-        &expr,
-        "定时运行趋势智选工作流，产物写入候选池（reco_picks）",
-        "趋势智选定时筛选（产物进候选池，供候选池分析任务消费）",
-    )
-    .with_task_type(TREND_SCREENING_TASK_TYPE)
-    .with_workflow_id(TREND_SCREENING_WORKFLOW_ID.to_string());
+    // 名称/描述带上链名：定时任务列表里两链共用一个 task_type，日志与列表若都写「趋势智选」
+    // 就无法判断这条记录跑的是哪条链。
+    let (chain_name, prompt, description) = if wf_id == TREND_SCREENING_FAST_WORKFLOW_ID {
+        (
+            "快速趋势智选",
+            "定时运行快速趋势智选工作流，产物写入候选池（reco_picks）",
+            "快速趋势智选定时筛选（产物进候选池，供候选池分析任务消费）",
+        )
+    } else {
+        (
+            "趋势智选",
+            "定时运行趋势智选工作流，产物写入候选池（reco_picks）",
+            "趋势智选定时筛选（产物进候选池，供候选池分析任务消费）",
+        )
+    };
+    let mut job = CronJob::new(&id, &expr, prompt, &format!("{chain_name}：{description}"))
+        .with_task_type(TREND_SCREENING_TASK_TYPE)
+        .with_workflow_id(wf_id.to_string());
     if !enabled.unwrap_or(true) {
         job.status = CronJobStatus::Paused;
     }
@@ -295,5 +342,22 @@ mod tests {
     fn test_reco_cron_config_invalid_json() {
         let result = RecoCronConfig::from_json("invalid");
         assert!(result.is_err());
+    }
+
+    /// 定时入口的链白名单：缺省回落原链、两条链都放行、未知 id 报错而非静默回落。
+    #[test]
+    fn test_resolve_trend_workflow_id_whitelist() {
+        assert_eq!(resolve_trend_workflow_id(None).unwrap(), TREND_SCREENING_WORKFLOW_ID);
+        assert_eq!(
+            resolve_trend_workflow_id(Some(TREND_SCREENING_WORKFLOW_ID)).unwrap(),
+            TREND_SCREENING_WORKFLOW_ID
+        );
+        assert_eq!(
+            resolve_trend_workflow_id(Some(TREND_SCREENING_FAST_WORKFLOW_ID)).unwrap(),
+            TREND_SCREENING_FAST_WORKFLOW_ID
+        );
+        // 近似但不同的 id 必须被拒 —— 静默回落会让任务到点才失败，用户看不到任何提示。
+        assert!(resolve_trend_workflow_id(Some("serenity-screening-slow")).is_err());
+        assert!(resolve_trend_workflow_id(Some("")).is_err());
     }
 }

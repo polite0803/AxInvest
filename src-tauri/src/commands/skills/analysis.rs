@@ -5,7 +5,6 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::skill_err;
 use axagent_agent_macro::agent_command;
 use axagent_crypto::decrypt_key;
-use axagent_harness::types::provider_model::ProviderType;
 use axagent_harness::types::settings_chat::ChatContent;
 use axagent_harness::types::{ChatMessage, ChatRequest};
 use axagent_harness::util_fns::truncate_to_char_boundary;
@@ -98,16 +97,7 @@ pub async fn skill_analyze_frontend(
             ))
         })?;
 
-    let registry_key = match provider.provider_type {
-        ProviderType::OpenAI => "openai",
-        ProviderType::OpenAIResponses => "openai_responses",
-        ProviderType::Anthropic => "anthropic",
-        ProviderType::Gemini => "gemini",
-        ProviderType::OpenClaw => "openclaw",
-        ProviderType::Hermes => "hermes",
-        ProviderType::Ollama => "ollama",
-        ProviderType::LlamaCpp => "llama_cpp",
-    };
+    let registry_key = axagent_harness::types::provider_registry_key(&provider.provider_type);
     let adapter = state
         .harness
         .provider_registry()

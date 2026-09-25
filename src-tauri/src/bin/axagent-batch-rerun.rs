@@ -346,6 +346,7 @@ async fn ensure_pending_reflection(
             parameter_suggestions_json: Set(None),
             decision_json: Set(None),
             blackboard_snapshot: Set(None),
+            horizon_results_json: Set(None),
             model_version: Set(None),
             status: Set("pending".to_string()),
             created_at: Set(now),
@@ -591,6 +592,7 @@ async fn run() -> Result<(), String> {
                 Some(parent_id),      // 同日 ⇒ 命中「覆盖」分支（非新建版本）
                 None,                 // screening_source
                 None,                 // language：默认中文
+                None,                 // template_id：批处理重跑走完整分析链（非快速链）
             )
             .await
         })

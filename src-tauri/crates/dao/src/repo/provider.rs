@@ -21,21 +21,15 @@ fn parse_provider_type(s: &str) -> ProviderType {
         "hermes" => ProviderType::Hermes,
         "ollama" => ProviderType::Ollama,
         "llama_cpp" => ProviderType::LlamaCpp,
+        "typesafe" => ProviderType::TypeSafe,
         _ => ProviderType::OpenClaw, // fallback to OpenClaw for unknown types
     }
 }
 
+/// 权威映射在 `axagent_harness::types::provider_registry_key`，这里只作转发，
+/// 不再维护第二份副本。
 fn provider_type_str(pt: &ProviderType) -> &'static str {
-    match pt {
-        ProviderType::OpenAI => "openai",
-        ProviderType::OpenAIResponses => "openai_responses",
-        ProviderType::Anthropic => "anthropic",
-        ProviderType::Gemini => "gemini",
-        ProviderType::OpenClaw => "openclaw",
-        ProviderType::Hermes => "hermes",
-        ProviderType::Ollama => "ollama",
-        ProviderType::LlamaCpp => "llama_cpp",
-    }
+    axagent_harness::types::provider_registry_key(pt)
 }
 
 fn key_from_entity(m: provider_keys::Model) -> ProviderKey {

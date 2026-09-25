@@ -16,6 +16,7 @@ pub mod agent_session;
 pub mod analyst_evolution;
 pub mod analyst_feedback;
 pub mod app_config;
+pub mod approval_rules;
 pub mod artifacts;
 pub mod background_tasks;
 pub mod backtest_validation;

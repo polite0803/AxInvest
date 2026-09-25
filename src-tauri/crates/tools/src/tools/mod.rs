@@ -96,9 +96,11 @@ pub mod zhihu_scanner;
 
 pub use todo_write::{AskUserQuestionTool, NotebookEditTool};
 
-/// 注册所有内置工具到注册表
-pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
-    registry.register_all(vec![
+/// 内置工具实例清单 —— [`register_all`] 与 `tool.set` 接缝共用同一份定义。
+///
+/// 顺序即注册顺序（同名后者覆盖前者），与各段原先的拼接顺序一致。
+pub fn builtin_tool_instances() -> Vec<std::sync::Arc<dyn crate::Tool>> {
+    let mut tools: Vec<std::sync::Arc<dyn crate::Tool>> = vec![
         // ── 核心文件操作 ──
         std::sync::Arc::new(file_read::FileReadTool),
         std::sync::Arc::new(file_write::FileWriteTool),
@@ -218,6 +220,7 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(context::CtxInspectTool),
         std::sync::Arc::new(context::SnipTool),
         std::sync::Arc::new(context::ContextResolveTool),
+        std::sync::Arc::new(context::ContextRemainingTool),
         // ── 知识库 ──
         std::sync::Arc::new(knowledge::ListKnowledgeBasesTool),
         std::sync::Arc::new(knowledge::SearchKnowledgeTool),
@@ -353,13 +356,13 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(finance::NorthBoundFlowTool),
         std::sync::Arc::new(finance::DragonTigerTool),
         std::sync::Arc::new(finance::ClsFlashTool),
-    ]);
+    ];
 
-    // ── astock 数据工具（L1）：批量注册 stock_mcp_tools 定义 ──
+    // ── astock 数据工具（L1）：并入内置清单 ──
     // 注册后 register_all_capabilities 的通用逻辑自动派生 tool:{name} 护照
     // （domain=Finance + tool_ref），DiscoverSkills / extra_tools 注入链路即刻生效。
     // 内部跳过与 finance.rs 重名的 3 个工具，避免 HashMap 静默覆盖。
-    registry.register_all(astock_data::stock_mcp_tool_instances());
+    tools.extend(astock_data::stock_mcp_tool_instances());
 
     // ── 市场主线工具（daily-market-events 模板的 persist 落地工具）──
     //
@@ -374,9 +377,7 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
     // ⚠️ 与 `seed_daily_market_events.rs` 的 `ToolDef.name` **逐字同名**，
     //    改名必须同步模板并递增 `TEMPLATE_VERSION`（有单测锚定，见
     //    `market_mainline::tests::tool_name_matches_seed_template_declaration`）。
-    registry
-        .register_all(vec![std::sync::Arc::new(market_mainline::MarketMainlineBatchUpsertTool)
-            as std::sync::Arc<dyn crate::Tool>]);
+    tools.push(std::sync::Arc::new(market_mainline::MarketMainlineBatchUpsertTool));
 
     // ── OPC 业务工具（一人公司：发票 / 客户 / 项目 / 站点内容 / KPI / 发布计划）──
     //
@@ -399,7 +400,10 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
     // 待该 panic 改成返回 `Err`（工具返回 Err 会被上层处理，panic 不会）后，
     // 再把 `opc::OpcSendNotificationTool` 加回本段。见 output/opc-tool-wiring-impl.md
     // 的 DEF-OPC-NOTIFY-01。
-    registry.register_all(vec![
+    // 元素类型必须显式标注：异构的 `vec![Arc::new(A), Arc::new(B), ..]` 会按
+    // **首元素**推成 `Vec<Arc<A>>`，而不是 `Vec<Arc<dyn Tool>>`（原样传给
+    // `registry.register_all` 时由形参兜底，改走 `tools.extend` 后没人兜底）。
+    let opc_tools: Vec<std::sync::Arc<dyn crate::Tool>> = vec![
         // 发票 / 客户 / 项目
         std::sync::Arc::new(opc::OpcListInvoicesTool),
         std::sync::Arc::new(opc::OpcCreateInvoiceTool),
@@ -431,13 +435,36 @@ pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
         std::sync::Arc::new(opc::OpcListPublishSchedulesTool),
         std::sync::Arc::new(opc::OpcCancelPublishScheduleTool),
         std::sync::Arc::new(opc::OpcProcessDueSchedulesTool),
-    ]);
+    ];
+    tools.extend(opc_tools);
+    tools
+}
+
+/// 注册所有内置工具到注册表。
+///
+/// 工具清单来自 [`builtin_tool_instances`] —— 与 `tool.set` 接缝的内置实现
+/// 共用同一份定义，故内置工具集可被外部实现整体替换。
+pub fn register_all(registry: &mut crate::registry::ToolRegistry) {
+    registry.register_all(builtin_tool_instances());
 
     let available_toolsets: HashSet<String> =
         registry.list_all().iter().map(|t| format!("{:?}", t.category).to_lowercase()).collect();
     skill::set_available_toolsets(available_toolsets);
 
     rpc::set_tool_executor(std::sync::Arc::new(registry.clone()));
+}
+
+/// 内置工具集 —— `tool.set` 接缝的内置实现。
+///
+/// wiring 层在启动装配时把它注册进能力注册表（
+/// [`axagent_harness::CapabilityRegistry::register_tool_set`]），
+/// 工具注册表初始化时再从接缝取回；外部实现注册同一接缝即可整体替换内置工具集。
+pub struct BuiltinToolSet;
+
+impl axagent_harness::ToolSetProvider for BuiltinToolSet {
+    fn tools(&self) -> Vec<std::sync::Arc<dyn crate::Tool>> {
+        builtin_tool_instances()
+    }
 }
 
 /// 注入跨层依赖的 trait object。

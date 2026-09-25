@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { ModelSelect } from "@/components/shared/ModelSelect";
 import { message } from "@/lib/toast";
 import { Button, Divider, Input, InputNumber, Select, Switch, theme } from "antd";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
@@ -312,18 +313,30 @@ export const ConditionPropertyPanel: React.FC<ConditionPropertyPanelProps> = ({
             <label style={{ display: "block", color: "#999", fontSize: 12, marginBottom: 4 }}>
               {t("workflow.props.routingModel")}
             </label>
-            <Input
-              value={config.routingModel ?? ""}
-              onChange={(e) =>
+            {
+              /* 类型白名单对齐 llmClassifier：`["Chat", "Decision"]`。
+                决策模型（Decision，如 TypeSafe Jev）正是本字段的目标场景 ——
+                执行器把路由规则写进 state、只取 true/false 判定，Jev 原生支持
+                （见 crates/providers/src/typesafe.rs 的能力边界）。反之若放开
+                Voice / Embedding，则必然在调用侧失败。
+                `ModelSelect` 写回的是 `providerId::modelId` 复合值，后端
+                `resolve_model_for_node` 会拆成「供应商 + 模型」两部分
+                （见 dao/src/repo/provider.rs::split_node_model），即本字段同样
+                **允许跨供应商**；留空则沿用会话 `__workflow_model__` / 项目默认。 */
+            }
+            <ModelSelect
+              value={config.routingModel || undefined}
+              onChange={(value) =>
                 onUpdate({
                   config: {
                     ...config,
-                    routingModel: e.target.value || undefined,
+                    routingModel: value || undefined,
                   },
                 })}
-              size="small"
-              style={{ width: "100%" }}
               placeholder={t("workflow.props.routingModelPlaceholder")}
+              allowClear
+              modelTypes={["Chat", "Decision"]}
+              style={{ width: "100%" }}
             />
           </div>
         </>

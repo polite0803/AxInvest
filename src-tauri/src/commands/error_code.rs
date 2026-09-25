@@ -449,6 +449,14 @@ pub mod marketplace {
     pub const PUBLISH_FAILED: &str = "MARKETPLACE_PUBLISH_FAILED";
 }
 
+/// 审批规则（PLAN-codex-parity R2-1）相关错误码
+pub mod approval {
+    /// 审批规则存储未初始化（启动装配未完成或注入失败）
+    pub const RULE_STORE_UNAVAILABLE: &str = "APPROVAL_RULE_STORE_UNAVAILABLE";
+    /// 撤销规则失败（存储层报错）
+    pub const REVOKE_FAILED: &str = "APPROVAL_REVOKE_FAILED";
+}
+
 // 论文/文献相关错误码
 // 权威源：`axagent_harness::error_codes::paper`。此处不再 re-export（零消费者 ⇒ `unused_imports`，
 // 说明见上方 `voice` 处）。需要时直接从 harness 导入。
@@ -701,6 +709,23 @@ pub mod dynamic_ui {
     pub const SCHEMA_MISSING_FIELD: &str = "DYNAMIC_UI_SCHEMA_MISSING_FIELD";
     /// 生成指令不能为空
     pub const GENERATE_PROMPT_EMPTY: &str = "DYNAMIC_UI_GENERATE_PROMPT_EMPTY";
+    /// Schema 来源不合法（合法值：builtin / user / ai / plugin）
+    pub const INVALID_ORIGIN: &str = "DYNAMIC_UI_INVALID_ORIGIN";
+}
+
+/// 插件域错误码（PLAN §10.5-2 的 UI action 回流通道 + §12.3 的隔离构建）
+pub mod plugin {
+    /// 目标插件当前没有可用的 worker（未声明 `worker` 或当前未启用）
+    pub const UI_ACTION_UNAVAILABLE: &str = "PLUGIN_UI_ACTION_UNAVAILABLE";
+    /// worker 侧执行 UI action 失败（含帧往返错误与插件自报错误）
+    pub const UI_ACTION_FAILED: &str = "PLUGIN_UI_ACTION_FAILED";
+    /// 插件源码编译失败（cargo 非零退出 / 产物缺失 / 源码落盘失败）
+    pub const SOURCE_BUILD_FAILED: &str = "PLUGIN_SOURCE_BUILD_FAILED";
+    /// 缺少可用的 Rust 编译工具链或目标平台（PLAN §14.3 前置探测未通过）
+    pub const SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE: &str =
+        "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE";
+    /// 磁盘空间或内存低于编译下限（PLAN §14.3 前置探测未通过）
+    pub const SOURCE_BUILD_RESOURCE_LOW: &str = "PLUGIN_SOURCE_BUILD_RESOURCE_LOW";
 }
 
 /// 进化引擎相关错误码

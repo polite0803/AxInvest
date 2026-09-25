@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! CtxInspectTool / SnipTool / ContextResolveTool - 上下文管理工具
+//! CtxInspectTool / SnipTool / ContextResolveTool / ContextRemainingTool - 上下文管理工具
 
+use crate::context_keys;
 use crate::{Tool, ToolCategory, ToolContext, ToolError, ToolResult};
 use async_trait::async_trait;
 use axagent_kit::utils::hide_window;
@@ -16,6 +17,7 @@ const URL_REF_TIMEOUT_SECS: u64 = 30;
 pub struct CtxInspectTool;
 pub struct SnipTool;
 pub struct ContextResolveTool;
+pub struct ContextRemainingTool;
 
 fn git_root() -> Option<String> {
     let mut cmd = Command::new("git");
@@ -294,6 +296,102 @@ impl Tool for ContextResolveTool {
         let resolved = resolve_references_impl(&text, base_path).await;
 
         Ok(ToolResult::success(resolved))
+    }
+}
+
+/// 「剩余额度」查询工具（对标 codex 的 `get_context_remaining`）。
+///
+/// 报出的 auto-compact 阈值与 `context_manager::should_auto_compress` **同源**
+/// （都取 `axagent_harness::context_budget::budgets_for(窗口)`），
+/// 故模型据此规划时不会与实际压缩时机出现口径差。
+///
+/// 窗口来自 `ToolContext.extra[context_keys::CONTEXT_WINDOW]`（wiring 注入）；
+/// 未注入即回报「未知」，**不猜默认窗口** —— 猜错会让模型做出错误的长任务规划。
+#[async_trait]
+impl Tool for ContextRemainingTool {
+    fn name(&self) -> &str {
+        "ContextRemaining"
+    }
+    fn description(&self) -> &str {
+        "查询当前上下文的剩余额度：模型窗口、自动压缩阈值、各分量预算与历史额度。长任务规划前调用，可据此判断还能读多少内容、何时该先压缩。"
+    }
+    fn input_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "required": []
+        })
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::System
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
+    async fn call(&self, _input: Value, ctx: &ToolContext) -> Result<ToolResult, ToolError> {
+        let window = ctx
+            .extra
+            .get(context_keys::CONTEXT_WINDOW)
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|w| *w > 0);
+
+        let Some(window) = window else {
+            return Ok(ToolResult::success(
+                "## 上下文剩余额度\n\n\
+                 **模型上下文窗口未知**：本轮未注入 `core.context_window`（该模型未配置 max_tokens）。\n\n\
+                 无法给出额度估算 —— 不要假设一个窗口值来做规划。"
+                    .to_string(),
+            ));
+        };
+
+        let budgets = axagent_harness::context_budget::budgets_for(window);
+        let threshold = budgets.auto_compact_threshold();
+        let history_budget = budgets.history_budget();
+
+        let mut lines = vec![
+            "## 上下文剩余额度".to_string(),
+            String::new(),
+            format!("**模型上下文窗口**: {window} tokens"),
+            format!(
+                "**自动压缩阈值**: {threshold} tokens（窗口的 {}%）",
+                (axagent_harness::context_budget::AUTO_COMPACT_THRESHOLD_RATIO * 100.0) as u32
+            ),
+        ];
+
+        match ctx
+            .extra
+            .get(context_keys::CONTEXT_USED_TOKENS)
+            .and_then(|v| v.trim().parse::<usize>().ok())
+        {
+            Some(used) => {
+                lines.push(format!("**已用**: {used} tokens"));
+                lines
+                    .push(format!("**距压缩阈值剩余**: {} tokens", threshold.saturating_sub(used)));
+            },
+            None => {
+                lines.push("**已用**: 未知（本轮未注入用量，仅能报预算侧口径）".to_string());
+            },
+        }
+
+        lines.push(String::new());
+        lines.push(format!("**分量预算**（按窗口 {window} 取 min(比例 × 窗口, 上限)）:"));
+        lines.push(format!("- system prompt: {} tokens", budgets.system_prompt));
+        lines.push(format!("- working memory: {} tokens", budgets.working_memory));
+        lines.push(format!("- retrieved memories: {} tokens", budgets.retrieved_memories));
+        lines.push(format!("- skills: {} tokens", budgets.skills));
+        lines.push(format!("- nudges: {} tokens", budgets.nudges));
+        lines.push(String::new());
+        lines.push(format!(
+            "**历史消息额度**: {history_budget} tokens =（窗口 − 固定分量 {}）× {}",
+            budgets.fixed_overhead(),
+            budgets.history_ratio
+        ));
+
+        Ok(ToolResult::success(lines.join("\n")))
     }
 }
 

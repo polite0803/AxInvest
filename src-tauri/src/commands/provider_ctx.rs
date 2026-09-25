@@ -26,6 +26,7 @@ pub(crate) fn resolve_provider_adapter(
         ProviderType::LlamaCpp => {
             Ok(Arc::new(axagent_providers::llama_cpp::LlamaCppAdapter::new()))
         },
+        ProviderType::TypeSafe => Ok(Arc::new(axagent_providers::typesafe::TypeSafeAdapter::new())),
     }
 }
 

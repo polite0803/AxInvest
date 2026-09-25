@@ -46,6 +46,14 @@ pub fn set_session_state_store(store: Arc<dyn SessionStateStore>) {
     let _ = SESSION_STATE.set(store);
 }
 
+/// 取会话状态存储：优先 `session.store` 接缝（启动装配期注册），
+/// 未注册时回退本模块 setter 注入的实例（未走启动装配的路径，如单测直构）。
+fn session_state_store() -> Option<Arc<dyn SessionStateStore>> {
+    axagent_harness::get_capability_registry()
+        .get_session_state_store()
+        .or_else(|| SESSION_STATE.get().cloned())
+}
+
 /// 展开 Toolchain 为其子能力护照列表（Skill 保留原样，由 AssemblyBuilder 映射为 AgentNode）。
 ///
 /// # 规则
@@ -182,7 +190,7 @@ impl Tool for SaveAsWorkflowTool {
                 }
             })?;
 
-        let store = SESSION_STATE.get().ok_or_else(|| ToolError {
+        let store = session_state_store().ok_or_else(|| ToolError {
             message: "会话状态存储未注入，SaveAsWorkflow 不可用".to_string(),
             kind: ToolErrorKind::ExecutionFailed,
             error_code: "SAVE_AS_WORKFLOW_NO_STORE".to_string(),

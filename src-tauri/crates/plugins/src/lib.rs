@@ -4,6 +4,8 @@
 pub mod core;
 pub mod manager;
 pub mod sandbox;
+pub mod source_audit;
+pub mod source_build;
 pub mod types;
 
 pub mod agent_provider;
@@ -11,6 +13,7 @@ mod hooks;
 pub mod mcp_launcher;
 pub mod skill_installer;
 pub mod test_isolation;
+pub mod worker;
 
 pub use core::*;
 pub use hooks::{HookEvent, HookRunResult, HookRunner};
@@ -22,7 +25,13 @@ pub use sandbox::{
     default_denied_paths, filter_env_vars, is_env_allowed, note_network_access,
 };
 pub use skill_installer::SkillInstaller;
+pub use source_audit::*;
+pub use source_build::*;
 pub use types::*;
+pub use worker::{
+    LoadedPlugin, OP_UI_ACTION, PluginWorkerConfig, SUPPORTED_REMOTE_SEAMS, WorkerError,
+    is_supported_remote_seam,
+};
 
 #[cfg(test)]
 mod tests {

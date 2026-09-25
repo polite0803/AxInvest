@@ -7,6 +7,8 @@
 pub mod agent_def_loader;
 pub mod agent_def_types;
 pub mod approval;
+/// 审批规则的命令切段、整体评估与沉淀前复算（复用 `bash::parser`，不引入第二套分词）。
+pub mod approval_rules;
 pub mod audit;
 pub mod bash;
 pub mod capability_filter_impl;
@@ -39,6 +41,7 @@ pub mod registry;
 pub mod rhai_engine;
 pub mod runtime_mutation;
 pub mod sandbox;
+pub mod sandbox_denial;
 pub mod stats;
 pub mod streaming;
 pub mod templates;

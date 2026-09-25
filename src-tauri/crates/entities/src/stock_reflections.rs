@@ -48,6 +48,8 @@ pub struct Model {
     pub fix_for_future: Option<String>,
     /// 反思 agent 输出的参数调整建议（params_suggestion JSON 数组字符串）
     pub parameter_suggestions_json: Option<String>,
+    /// 四周期反思结果 JSON（schemaVersion=1）；NULL 表示历史单周期记录。
+    pub horizon_results_json: Option<String>,
     /// portfolio-manager 完整输出 JSON
     pub decision_json: Option<String>,
     /// 工作流完整结果（用于追溯）
@@ -63,3 +65,17 @@ pub struct Model {
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sea_orm::ActiveValue;
+
+    #[test]
+    fn horizon_results_json_is_a_nullable_persistence_column() {
+        assert_eq!(Column::HorizonResultsJson.as_str(), "horizon_results_json");
+        let active =
+            ActiveModel { horizon_results_json: ActiveValue::Set(None), ..Default::default() };
+        assert!(matches!(active.horizon_results_json, ActiveValue::Set(None)));
+    }
+}

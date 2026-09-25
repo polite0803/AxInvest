@@ -694,6 +694,7 @@ export const AgentPropertyPanel: React.FC<AgentPropertyPanelProps> = ({
           onChange={(value) => handleConfigChange("model", value || "")}
           placeholder={t("workflow.props.selectModel")}
           allowClear
+          modelTypes={["Chat"]}
           style={{ width: "100%" }}
         />
       </div>

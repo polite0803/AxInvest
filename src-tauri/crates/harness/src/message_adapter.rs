@@ -9,8 +9,8 @@
 //!
 //! 权威定义在此（harness，foundation），具体实现（telegram/discord/... 8 个内置
 //! 平台）位于 `axagent-rt-messaging`（hybrid）。wiring 层将内置平台注册到能力
-//! 注册表的 `platform.adapter` 接缝，外部插件可经 `register_external_platform_adapter`
-//! 替换/新增同一接缝（内置与插件平权）。
+//! 注册表的 `platform.adapter` 接缝，外部插件可经 `register_plugin_capability`
+//! 声明同一接缝（内置与插件平权）。
 //!
 //! `MediaAttachment`/`MediaType`/`DeliveryMode` 为纯数据 DTO，一并上沉，
 //! 供 trait 方法与消费方共享，避免 rt-messaging 内部重复定义。

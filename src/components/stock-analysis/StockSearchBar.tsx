@@ -1,5 +1,6 @@
 import { List } from "@/components/common/AntdList";
 import { invoke } from "@/lib/invoke";
+import { FAST_TEMPLATE_ID } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { App, Button, Input, Segmented, Tag, Tooltip } from "antd";
 import { useCallback, useEffect, useState } from "react";
@@ -74,8 +75,11 @@ export function StockSearchBar() {
    * 与输入框内容可以完全无关 ⇒ 输入 688315 却分析了上一次的 300642。
    * 现在：输入框与当前标的不一致时先解析输入框；解析不出就明确提示并**拒绝启动**，
    * 绝不退回「静默分析上一只股票」。
+   *
+   * `templateId` 缺省走完整分析链；传 `stock-analysis-fast` 走 Jev 判定快速链。
+   * 两条链的落库与后续读取路径完全一致，仅图结构不同。
    */
-  const handleStartAnalysis = useCallback(async () => {
+  const handleStartAnalysis = useCallback(async (templateId?: string) => {
     const kw = searchKeyword.trim();
     const currentDisplay = stockName ? `${stockName} (${stockCode})` : stockCode;
     let code = stockCode;
@@ -94,7 +98,7 @@ export function StockSearchBar() {
     }
 
     if (code) {
-      void startAnalysis(code);
+      void startAnalysis(code, templateId ? { templateId } : undefined);
     }
   }, [searchKeyword, stockCode, stockName, message, t, getStockQuote, getStockKline, startAnalysis]);
 
@@ -173,6 +177,22 @@ export function StockSearchBar() {
         >
           {isRunning ? t("stockAnalysis.analyzing") : t("stockAnalysis.startAnalysis")}
         </Button>
+        <Tooltip title={t("stockAnalysis.fastAnalysisHint")}>
+          {
+            /* 快速分析：走 `stock-analysis-fast` 模板（Jev 判定链），不产出叙述文本，
+              只给结构化决策，用于快速看结论。落库与完整链同一路径。 */
+          }
+          <Button
+            data-testid="stock-analysis-fast-button"
+            disabled={(!stockCode && !searchKeyword.trim()) || isRunning}
+            loading={isRunning}
+            onClick={() => {
+              void handleStartAnalysis(FAST_TEMPLATE_ID);
+            }}
+          >
+            {t("stockAnalysis.fastAnalysis")}
+          </Button>
+        </Tooltip>
         <Tooltip title={t("stockAnalysis.reportLanguageHint")}>
           <Segmented
             size="small"

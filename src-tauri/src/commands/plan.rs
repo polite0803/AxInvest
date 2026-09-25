@@ -14,6 +14,7 @@ use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::provider as provider_err;
 use crate::commands::error_code::workflow as workflow_err;
 use axagent_agent_macro::agent_command;
+use axagent_harness::IpcEventName;
 use axagent_harness::runtime_types::permissions::PermissionPolicy;
 use axagent_harness::types::{
     ChatContent, ChatMessage, ChatRequest, ChatTool, ChatToolFunction, MessageRole,
@@ -792,7 +793,7 @@ async fn execute_step_with_agent(
 
     // Emit running status
     let _ = app.emit(
-        "plan-step-update",
+        IpcEventName::PlanStepUpdate.as_str(),
         PlanStepUpdateEvent {
             conversation_id: conversation_id.to_string(),
             plan_id: plan_id.to_string(),
@@ -865,7 +866,7 @@ async fn execute_step_with_agent(
             };
 
             let _ = app.emit(
-                "plan-step-update",
+                IpcEventName::PlanStepUpdate.as_str(),
                 PlanStepUpdateEvent {
                     conversation_id: conversation_id.to_string(),
                     plan_id: plan_id.to_string(),
@@ -881,7 +882,7 @@ async fn execute_step_with_agent(
             let err_text = format!("Step failed: {}", e);
 
             let _ = app.emit(
-                "plan-step-update",
+                IpcEventName::PlanStepUpdate.as_str(),
                 PlanStepUpdateEvent {
                     conversation_id: conversation_id.to_string(),
                     plan_id: plan_id.to_string(),
@@ -987,7 +988,7 @@ pub async fn plan_generate(
 
     // Emit plan-generated event
     let _ = app.emit(
-        "plan-generated",
+        IpcEventName::PlanGenerated.as_str(),
         PlanGeneratedEvent { conversation_id: request.conversation_id.clone(), plan: plan.clone() },
     );
 
@@ -1087,7 +1088,7 @@ pub async fn plan_execute(
         am.update(db).await.ok();
 
         let _ = app.emit(
-            "plan-execution-complete",
+            IpcEventName::PlanExecutionComplete.as_str(),
             PlanExecutionCompleteEvent {
                 conversation_id: request.conversation_id.clone(),
                 plan_id: request.plan_id.clone(),
@@ -1234,7 +1235,7 @@ pub async fn plan_execute(
                                 _ => PlanStepStatus::Running,
                             };
                             let _ = app.emit(
-                                "plan-step-update",
+                                IpcEventName::PlanStepUpdate.as_str(),
                                 PlanStepUpdateEvent {
                                     conversation_id: conv_id,
                                     plan_id,
@@ -1260,7 +1261,7 @@ pub async fn plan_execute(
                     Err(e) => {
                         for step in &steps_to_run {
                             let _ = app.emit(
-                                "plan-step-update",
+                                IpcEventName::PlanStepUpdate.as_str(),
                                 PlanStepUpdateEvent {
                                     conversation_id: request.conversation_id.clone(),
                                     plan_id: request.plan_id.clone(),
@@ -1280,7 +1281,7 @@ pub async fn plan_execute(
             Err(e) => {
                 for step in &steps_to_run {
                     let _ = app.emit(
-                        "plan-step-update",
+                        IpcEventName::PlanStepUpdate.as_str(),
                         PlanStepUpdateEvent {
                             conversation_id: request.conversation_id.clone(),
                             plan_id: request.plan_id.clone(),
@@ -1346,7 +1347,7 @@ pub async fn plan_execute(
 
     // Emit completion
     let _ = app.emit(
-        "plan-execution-complete",
+        IpcEventName::PlanExecutionComplete.as_str(),
         PlanExecutionCompleteEvent {
             conversation_id: request.conversation_id,
             plan_id: request.plan_id,
@@ -1407,7 +1408,7 @@ pub async fn plan_cancel(
     }
 
     let _ = app.emit(
-        "plan-execution-complete",
+        IpcEventName::PlanExecutionComplete.as_str(),
         PlanExecutionCompleteEvent {
             conversation_id: request.conversation_id,
             plan_id: request.plan_id,
@@ -1816,7 +1817,7 @@ pub async fn plan_authorize(
     };
 
     let _ = app.emit(
-        "plan-authorization-changed",
+        IpcEventName::PlanAuthorizationChanged.as_str(),
         PlanAuthorizationChangedEvent {
             conversation_id: plan.conversation_id.clone(),
             plan_id: plan.id.clone(),

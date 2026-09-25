@@ -819,6 +819,7 @@ impl ProviderAdapter for GeminiAdapter {
                     ModelType::Chat => vec![ModelCapability::TextChat],
                     ModelType::Embedding => vec![],
                     ModelType::Voice => vec![ModelCapability::RealtimeVoice],
+                    ModelType::Decision => vec![],
                 };
                 if model_id.contains("pro") || model_id.contains("flash") {
                     caps.push(ModelCapability::Vision);

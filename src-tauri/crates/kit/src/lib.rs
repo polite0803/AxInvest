@@ -4,6 +4,8 @@
 //!
 //! 包含浏览器自动化、HTML 清洗、操作审计、提示模板等零散模块。
 
+/// 审批规则的纯函数匹配器（危险包装器黑名单 + 首 token 精确索引 + 多命中取最严）。
+pub mod approval_rules;
 pub mod browser_automation;
 pub mod command_validator;
 #[cfg(feature = "computer-use")]

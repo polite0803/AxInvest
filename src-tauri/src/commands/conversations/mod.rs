@@ -23,6 +23,7 @@ use axagent_agent_macro::agent_command;
 use axagent_dao::repo::agent_session_repo::DaoAgentSessionRepository;
 #[cfg(test)]
 use axagent_harness::AgentSessionRepository;
+use axagent_harness::IpcEventName;
 use axagent_harness::types::*;
 use axagent_harness::url_utils::resolve_base_url_for_type;
 use axagent_providers::{ProviderRequestContext, extract_reasoning_from_text};
@@ -1275,7 +1276,7 @@ pub async fn archive_conversation_to_knowledge_base(
             }
 
             let _ = app.emit(
-                "knowledge-document-indexed",
+                IpcEventName::KnowledgeDocumentIndexed.as_str(),
                 serde_json::json!({
                     "documentId": doc_id,
                     "success": result.is_ok(),
@@ -1517,7 +1518,7 @@ pub(crate) async fn consume_stream(
                     let err_msg = ErrorResponse::new(stream_err::EMPTY_RESPONSE)
                         .with_detail("Provider returned empty response. This may indicate the model could not generate content for the given input, the request was filtered by content policy, or the connection was interrupted before any data was received. Try rephrasing your message or try again.".to_string());
                     let _ = app.emit(
-                        "chat-stream-error",
+                        IpcEventName::ChatStreamError.as_str(),
                         ChatStreamErrorEvent {
                             conversation_id: conversation_id.to_string(),
                             message_id: message_id.to_string(),
@@ -1551,7 +1552,7 @@ pub(crate) async fn consume_stream(
                 }
 
                 let _ = app.emit(
-                    "chat-stream-chunk",
+                    IpcEventName::ChatStreamChunk.as_str(),
                     ChatStreamEvent {
                         conversation_id: conversation_id.to_string(),
                         message_id: message_id.to_string(),
@@ -1568,7 +1569,7 @@ pub(crate) async fn consume_stream(
             Err(e) => {
                 let err_msg = e.to_string();
                 let _ = app.emit(
-                    "chat-stream-error",
+                    IpcEventName::ChatStreamError.as_str(),
                     ChatStreamErrorEvent {
                         conversation_id: conversation_id.to_string(),
                         message_id: message_id.to_string(),
@@ -2395,7 +2396,7 @@ pub async fn regenerate_conversation_title(
 
     // Emit generating event
     let _ = app.emit(
-        "conversation-title-generating",
+        IpcEventName::ConversationTitleGenerating.as_str(),
         ConversationTitleGeneratingEvent {
             conversation_id: conversation_id.clone(),
             generating: true,
@@ -2426,7 +2427,7 @@ pub async fn regenerate_conversation_title(
                 {
                     tracing::error!("Failed to save regenerated title: {}", e);
                     let _ = app_clone.emit(
-                        "conversation-title-generating",
+                        IpcEventName::ConversationTitleGenerating.as_str(),
                         ConversationTitleGeneratingEvent {
                             conversation_id: conv_id,
                             generating: false,
@@ -2435,11 +2436,11 @@ pub async fn regenerate_conversation_title(
                     );
                 } else {
                     let _ = app_clone.emit(
-                        "conversation-title-updated",
+                        IpcEventName::ConversationTitleUpdated.as_str(),
                         ConversationTitleUpdatedEvent { conversation_id: conv_id.clone(), title },
                     );
                     let _ = app_clone.emit(
-                        "conversation-title-generating",
+                        IpcEventName::ConversationTitleGenerating.as_str(),
                         ConversationTitleGeneratingEvent {
                             conversation_id: conv_id,
                             generating: false,
@@ -2451,7 +2452,7 @@ pub async fn regenerate_conversation_title(
             Err(err) => {
                 tracing::warn!("Title regeneration failed: {}", err);
                 let _ = app_clone.emit(
-                    "conversation-title-generating",
+                    IpcEventName::ConversationTitleGenerating.as_str(),
                     ConversationTitleGeneratingEvent {
                         conversation_id: conv_id,
                         generating: false,

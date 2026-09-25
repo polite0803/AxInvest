@@ -33,6 +33,7 @@ use crate::commands::agent::{AgentContextPayload, AgentOptions, AgentQueryReques
 use crate::commands::error::{CommandError, ErrorCategory, ErrorResponse};
 use crate::init::COGNITIVE_ROUTER_MAIN_ID;
 use axagent_agent_macro::agent_command;
+use axagent_harness::IpcEventName;
 use axagent_harness::workflow_evolution::ToolExecutionStats;
 use axagent_harness::workflow_types::Variable;
 use axagent_harness::{
@@ -730,7 +731,7 @@ fn emit_route_event(
             body[key] = value;
         }
     }
-    if let Err(e) = app.emit(axagent_harness::constants::event_name::COGNITIVE_ROUTE_EVENT, body) {
+    if let Err(e) = app.emit(IpcEventName::CognitiveRouteEvent.as_str(), body) {
         tracing::warn!("[cognitive] 路由观测事件发送失败: {}", e);
     }
 }
@@ -1873,7 +1874,7 @@ async fn cognitive_query_inner(
 
                     // 向前端发送审批请求事件
                     let _ = app.emit(
-                        "task-shape-approval-request",
+                        IpcEventName::TaskShapeApprovalRequest.as_str(),
                         serde_json::json!({
                             "approvalId": &approval_id,
                             "conversationId": &conversation_id,
@@ -2385,8 +2386,6 @@ async fn apply_capability_gap_proposal(
 
 /// 用户同意等待超时（秒）。超时视为拒绝，保持原安全行为。
 const CONSENT_TIMEOUT: Duration = Duration::from_secs(180);
-/// 前端同意弹窗事件名（T0.13 EvolutionConsentModal 监听）。
-const EVOLUTION_CONSENT_EVENT: &str = "evolution-consent-request";
 
 /// 征求用户同意：通过事件通道下发提议，阻塞等待前端弹窗回传。
 ///
@@ -2409,7 +2408,7 @@ pub(crate) async fn await_capability_consent(
     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
     senders.lock().await.insert(proposal.id.clone(), tx);
     // 事件下发失败不阻断：视为拒绝（保持原安全行为），并清理挂起槽
-    if let Err(e) = app.emit(EVOLUTION_CONSENT_EVENT, proposal) {
+    if let Err(e) = app.emit(IpcEventName::EvolutionConsentRequest.as_str(), proposal) {
         tracing::warn!(%e, "🧭 能力补齐提议事件下发失败，视为用户拒绝");
         senders.lock().await.remove(&proposal.id);
         return Ok(false);
@@ -2439,7 +2438,7 @@ pub(crate) async fn store_capability_gap(
     let existed = gaps.insert(proposal.id.clone(), proposal.clone()).is_some();
     drop(gaps);
     // 事件下发失败不阻断存储 — 前端可通过 list_pending_gaps 主动拉取
-    if let Err(e) = app.emit(EVOLUTION_CONSENT_EVENT, proposal) {
+    if let Err(e) = app.emit(IpcEventName::EvolutionConsentRequest.as_str(), proposal) {
         tracing::warn!(%e, proposal_id = %proposal.id, "🧭 能力缺口通知事件下发失败");
     }
     if existed {

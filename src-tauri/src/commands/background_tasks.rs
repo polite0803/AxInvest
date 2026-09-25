@@ -7,6 +7,7 @@ use crate::commands::spawn_guard::panic_message;
 use axagent_agent_macro::agent_command;
 use axagent_dao::task_ledger::TransitionRequest;
 use axagent_entities::background_tasks;
+use axagent_harness::IpcEventName;
 use axagent_harness::task_state::{TaskSource, TaskStatus};
 use chrono::Utc;
 use futures::FutureExt;
@@ -446,7 +447,7 @@ pub async fn spawn_background_task(
                             return;
                         },
                     }
-                    let _ = app.emit("background-task:updated", &tid4);
+                    let _ = app.emit(IpcEventName::BackgroundTaskUpdated.as_str(), &tid4);
                     // === 3. 业务正常完成, 通知 Drop guard 跳过兜底 ===
                     guard.finished.store(true, Ordering::Release);
                 })
@@ -469,7 +470,7 @@ pub async fn spawn_background_task(
             tracing::warn!("后台任务启动状态更新为 running 失败 task_id={}: {}", id, e);
         }
     }
-    let _ = app_handle.emit("background-task:created", &id);
+    let _ = app_handle.emit(IpcEventName::BackgroundTaskCreated.as_str(), &id);
     Ok(id)
 }
 

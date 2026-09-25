@@ -10,6 +10,7 @@
 //! - Search knowledge base / memory vectors via the unified RAG layer
 //! - Collect RAG context for conversation injection
 
+use axagent_harness::IpcEventName;
 use sea_orm::DatabaseConnection;
 
 use std::sync::Arc;
@@ -1037,7 +1038,7 @@ pub fn spawn_wiki_note_batch_indexing(
                 },
             };
             let _ = app.emit(
-                "wiki-note-indexed",
+                IpcEventName::WikiNoteIndexed.as_str(),
                 serde_json::json!({
                     "noteId": note_id,
                     "success": success,

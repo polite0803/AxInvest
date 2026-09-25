@@ -26,8 +26,8 @@ use crate::commands::stock_workflow::core::{
 };
 use crate::commands::stock_workflow::decision::{
     QualityPrecheckResult, data_quality_precheck, extract_decision_fields,
-    extract_decisions_by_horizon, extract_horizon_price_map, extract_position_state,
-    normalize_action_for_storage,
+    extract_decision_from_results_map, extract_decisions_by_horizon, extract_horizon_price_map,
+    extract_position_state, normalize_action_for_storage,
 };
 use axagent_astock_data::AStockClient;
 use axagent_entities::stock_analyses;
@@ -741,22 +741,6 @@ impl WorkflowLifecycleHook for StockAnalysisEnhanceHook {
 
 // ── 钩子 3：结果持久化（post_exec） ──────────────────────────────
 
-/// 从节点结果 map（Value 形式）提取 portfolio-mgr 决策 JSON 字符串。
-///
-/// 与 `decision::extract_decision_json`（接收 &Workflow）逻辑同构：
-/// 优先 `.result`（CodeNode Rhai 输出包装），回退 `.output`（V63 格式），
-/// 最后整个 portfolio-mgr 值。
-fn extract_decision_from_results(results: &serde_json::Value) -> Option<String> {
-    let pm = results.get("portfolio-mgr")?;
-    let actual = match pm {
-        serde_json::Value::Object(obj) => {
-            obj.get("result").or_else(|| obj.get("output")).cloned().unwrap_or_else(|| pm.clone())
-        },
-        _ => pm.clone(),
-    };
-    serde_json::to_string(&actual).ok()
-}
-
 pub(crate) struct StockAnalysisPersistHook {
     db: DatabaseConnection,
 }
@@ -799,7 +783,13 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             _ => "failed",
         };
 
-        let decision_json_str = extract_decision_from_results(&outcome.results);
+        // 决策取值口径统一在 `decision::extract_decision_from_results_map`
+        // （三级链尾优先：quality-fallback > portfolio-risk-gate > portfolio-mgr），
+        // 与业务封装路径（`core.rs` → `decision::extract_decision_json`）共用同一实现
+        // （铁律 41：同一语义不得被两条链按不同口径消费）。
+        // 修复前此处**只认 portfolio-mgr** ⇒ 风控门的仓位修正（R-206 等）在对话直执行
+        // 路径下被整体丢弃（V71 实证 601166：落库 8.85% vs 报告「已按 R-206 下调至 0%」）。
+        let decision_json_str = extract_decision_from_results_map(&outcome.results);
         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
             extract_decision_fields(&decision_json_str);
         // 阶段1：抽四周期价位映射，与 core.rs 落库点共用同一提取实现
@@ -840,6 +830,10 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             // 即「有快照但无版本」是这类记录的正常形态，复算器必须能区分
             // 「版本未知」与「版本不匹配」两种结论，不可混为一谈。
             template_version: Set(None),
+            // 2026-09-24：本通道同样**不经过** `workflow_templates`，无模板 id 可言
+            // ⇒ 显式 NULL（语义 = 链路未知）。读取侧的「排除快速链」过滤会放行它，
+            // 这是对的：对话直执行的虽然是完整链，但不该因缺列而被当成快速链排除。
+            template_id: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             decision_time_horizon: Set(time_horizon),
@@ -906,6 +900,7 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
                 missed_signals: Set(None),
                 fix_for_future: Set(None),
                 parameter_suggestions_json: Set(None),
+                horizon_results_json: Set(None),
                 decision_json: Set(None),
                 blackboard_snapshot: Set(None),
                 model_version: Set(None),

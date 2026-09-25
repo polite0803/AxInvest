@@ -191,7 +191,7 @@ pub struct ConversationRuntime<C, T> {
     pause_state: Option<Arc<PauseState>>,
     progress: Option<Arc<AgentExecutionProgress>>,
     /// 动态上下文注入器列表（每次 LLM 调用前执行）。
-    context_contributors: Vec<Box<dyn ContextContributor>>,
+    context_contributors: Vec<Arc<dyn ContextContributor>>,
     /// 前端对话 ID。此前 `ContextRequest.conversation_id` 恒为 `None`，
     /// 注入器拿不到会话维度，无法读取会话状态 —— 这是注入管线长期空转的原因之一。
     conversation_id: Option<String>,
@@ -344,7 +344,7 @@ where
     /// 注册一个动态上下文注入器。
     /// 每次 LLM 调用前，所有已注册的 contributor 会依次执行。
     #[must_use]
-    pub fn with_context_contributor(mut self, contributor: Box<dyn ContextContributor>) -> Self {
+    pub fn with_context_contributor(mut self, contributor: Arc<dyn ContextContributor>) -> Self {
         self.context_contributors.push(contributor);
         self
     }
@@ -2013,7 +2013,7 @@ pub struct ConversationRuntimeFactoryArgs {
     /// 运行时动态工具集 —— `CapabilityLoad` 激活的工具经此进入每轮请求。
     pub dynamic_tools: Option<axagent_harness::DynamicToolSet>,
     /// 动态上下文注入器 —— 每次 LLM 调用前执行，产出待注入文本块。
-    pub context_contributors: Vec<Box<dyn ContextContributor>>,
+    pub context_contributors: Vec<Arc<dyn ContextContributor>>,
 }
 
 impl ConversationRuntimeFactoryArgs {
@@ -2091,8 +2091,18 @@ impl ConversationRuntimeFactoryArgs {
     }
 
     #[must_use]
-    pub fn with_context_contributor(mut self, contributor: Box<dyn ContextContributor>) -> Self {
+    pub fn with_context_contributor(mut self, contributor: Arc<dyn ContextContributor>) -> Self {
         self.context_contributors.push(contributor);
+        self
+    }
+
+    /// 批量追加上下文贡献者（`system.prompt.*` 接缝取回的结果一次挂载）。
+    #[must_use]
+    pub fn with_context_contributors(
+        mut self,
+        contributors: Vec<Arc<dyn ContextContributor>>,
+    ) -> Self {
+        self.context_contributors.extend(contributors);
         self
     }
 }

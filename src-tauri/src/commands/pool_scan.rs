@@ -193,6 +193,7 @@ pub async fn run_pool_scan(
             &c.stock_code,
             &c.stock_name,
             Some(holding_days),
+            None, // template_id — 候选池扫描恒走完整分析链
         )
         .await
         {

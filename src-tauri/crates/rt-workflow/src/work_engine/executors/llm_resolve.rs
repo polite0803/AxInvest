@@ -71,3 +71,33 @@ pub(crate) async fn resolve_provider_and_adapter(
 
     Ok((prov, key, model, adapter, api_key))
 }
+
+/// 拒绝把决策模型（`ModelType::Decision`，如 TypeSafe Jev）配到生成类节点上。
+///
+/// 决策模型只返回结构化判定、不做文本生成，UI 的类型过滤（`ModelSelect` 的
+/// `modelTypes`）挡不住手写工作流 JSON / 模板导入等路径，因此在调用 provider
+/// 之前就在这里快速失败，避免产出一段无法使用的“文本”。
+///
+/// 仅 `llm` / `agent` 这类生成节点需要调用；`llmClassifier` / `condition` /
+/// `switch` 的判断路径本就期望结构化判定，不应调用。
+///
+/// 判据（`resolve_model_type` / `is_generation_blocked`）定义在 harness 的类型权威层，
+/// 聊天发送链路共用同一份，不要在此重写。
+pub(crate) fn ensure_generation_model(
+    prov: &ProviderConfig,
+    model: &str,
+    executor_label: &str,
+) -> Result<(), NodeError> {
+    let model_type = axagent_harness::types::provider_model::resolve_model_type(prov, model);
+
+    if axagent_harness::types::provider_model::is_generation_blocked(&model_type) {
+        return Err(NodeError::exec_failed(
+            error_code::UNSUPPORTED_PROVIDER,
+            format!(
+                "{executor_label} 不支持决策模型（{model}）：决策模型只输出结构化判定，不做文本生成。\
+                 请改配 chat 模型，或把该判断改由 llmClassifier / condition 节点完成。"
+            ),
+        ));
+    }
+    Ok(())
+}

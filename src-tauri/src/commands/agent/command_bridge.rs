@@ -15,6 +15,7 @@
 
 use axagent_agent_command_types;
 use axagent_harness::CapabilityDomain;
+use axagent_harness::IpcEventName;
 use axagent_harness::path_vars::PathEncoder;
 use axagent_harness::types::{ChatTool, ChatToolFunction};
 use axagent_tools::registry::SkillToolHandler;
@@ -840,7 +841,7 @@ async fn dispatch_command(
                 "replace": replace,
             });
 
-            app_handle.emit("agent-render-ui", &payload).map_err(|e| {
+            app_handle.emit(IpcEventName::AgentRenderUi.as_str(), &payload).map_err(|e| {
                 warn!("Failed to emit agent-render-ui event: {}", e);
                 format!("派发 UI 渲染事件失败: {}", e)
             })?;
@@ -869,7 +870,7 @@ async fn dispatch_command(
                 "path": path,
             });
 
-            app_handle.emit("agent-update-ui", &payload).map_err(|e| {
+            app_handle.emit(IpcEventName::AgentUpdateUi.as_str(), &payload).map_err(|e| {
                 warn!("Failed to emit agent-update-ui event: {}", e);
                 format!("派发 UI 更新事件失败: {}", e)
             })?;
@@ -892,7 +893,7 @@ async fn dispatch_command(
                 "schemaId": schema_id,
             });
 
-            app_handle.emit("agent-remove-ui", &payload).map_err(|e| {
+            app_handle.emit(IpcEventName::AgentRemoveUi.as_str(), &payload).map_err(|e| {
                 warn!("Failed to emit agent-remove-ui event: {}", e);
                 format!("派发 UI 移除事件失败: {}", e)
             })?;
@@ -1415,7 +1416,7 @@ impl CommandHandler for AgentUICommandHandler {
                     "replace": replace,
                 });
 
-                app_handle.emit("agent-render-ui", &payload).map_err(|e| {
+                app_handle.emit(IpcEventName::AgentRenderUi.as_str(), &payload).map_err(|e| {
                     warn!("Failed to emit agent-render-ui event: {}", e);
                     format!("派发 UI 渲染事件失败: {}", e)
                 })?;
@@ -1444,7 +1445,7 @@ impl CommandHandler for AgentUICommandHandler {
                     "path": path,
                 });
 
-                app_handle.emit("agent-update-ui", &payload).map_err(|e| {
+                app_handle.emit(IpcEventName::AgentUpdateUi.as_str(), &payload).map_err(|e| {
                     warn!("Failed to emit agent-update-ui event: {}", e);
                     format!("派发 UI 更新事件失败: {}", e)
                 })?;
@@ -1467,7 +1468,7 @@ impl CommandHandler for AgentUICommandHandler {
                     "schemaId": schema_id,
                 });
 
-                app_handle.emit("agent-remove-ui", &payload).map_err(|e| {
+                app_handle.emit(IpcEventName::AgentRemoveUi.as_str(), &payload).map_err(|e| {
                     warn!("Failed to emit agent-remove-ui event: {}", e);
                     format!("派发 UI 移除事件失败: {}", e)
                 })?;

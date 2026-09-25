@@ -35,6 +35,8 @@ pub struct CapabilityRegistrationDetailDto {
     pub description: String,
     pub origin: String,
     pub plugin_id: Option<String>,
+    /// 是否已有运行时实现；`false` = 仅插件声明（消费方取不到该接缝）。
+    pub implemented: bool,
 }
 
 // ── DTO 类型 ──────────────────────────────────────
@@ -208,6 +210,7 @@ pub async fn capability_registry_dump()
             description: d.definition.description,
             origin: d.origin.as_str().to_string(),
             plugin_id: d.plugin_id,
+            implemented: d.implemented,
         })
         .collect())
 }

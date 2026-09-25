@@ -310,16 +310,7 @@ pub async fn validate_provider_key(
         })?;
     // Use the registry to validate by listing models
 
-    let provider_type_str = match provider.provider_type {
-        ProviderType::OpenAI => "openai",
-        ProviderType::OpenAIResponses => "openai_responses",
-        ProviderType::Anthropic => "anthropic",
-        ProviderType::Gemini => "gemini",
-        ProviderType::OpenClaw => "openclaw",
-        ProviderType::Hermes => "hermes",
-        ProviderType::Ollama => "ollama",
-        ProviderType::LlamaCpp => "llama_cpp",
-    };
+    let provider_type_str = axagent_harness::types::provider_registry_key(&provider.provider_type);
     let adapter = state
         .harness
         .provider_registry()
@@ -533,16 +524,7 @@ pub async fn fetch_remote_models(
             ))
         })?;
 
-    let provider_type_str = match provider.provider_type {
-        ProviderType::OpenAI => "openai",
-        ProviderType::OpenAIResponses => "openai_responses",
-        ProviderType::Anthropic => "anthropic",
-        ProviderType::Gemini => "gemini",
-        ProviderType::OpenClaw => "openclaw",
-        ProviderType::Hermes => "hermes",
-        ProviderType::Ollama => "ollama",
-        ProviderType::LlamaCpp => "llama_cpp",
-    };
+    let provider_type_str = axagent_harness::types::provider_registry_key(&provider.provider_type);
     let adapter = state
         .harness
         .provider_registry()
@@ -658,16 +640,7 @@ pub async fn test_model(
             ))
         })?;
 
-    let provider_type_str = match provider.provider_type {
-        ProviderType::OpenAI => "openai",
-        ProviderType::OpenAIResponses => "openai_responses",
-        ProviderType::Anthropic => "anthropic",
-        ProviderType::Gemini => "gemini",
-        ProviderType::OpenClaw => "openclaw",
-        ProviderType::Hermes => "hermes",
-        ProviderType::Ollama => "ollama",
-        ProviderType::LlamaCpp => "llama_cpp",
-    };
+    let provider_type_str = axagent_harness::types::provider_registry_key(&provider.provider_type);
     let adapter = state
         .harness
         .provider_registry()

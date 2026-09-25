@@ -301,7 +301,7 @@ describe("invoke.ts", () => {
   describe("listen", () => {
     it("浏览器环境下应返回空的 unlisten 函数", async () => {
       const handler = vi.fn();
-      const unlisten = await listen("my_event", handler);
+      const unlisten = await listen("agent-done", handler);
 
       expect(typeof unlisten).toBe("function");
       // 调用 unlisten 不应报错
@@ -316,9 +316,9 @@ describe("invoke.ts", () => {
       mockTauriListen.mockResolvedValueOnce(mockUnlisten);
 
       const handler = vi.fn();
-      const unlisten = await listen("tauri_event", handler);
+      const unlisten = await listen("agent-error", handler);
 
-      expect(mockTauriListen).toHaveBeenCalledWith("tauri_event", handler);
+      expect(mockTauriListen).toHaveBeenCalledWith("agent-error", handler);
       expect(unlisten).toBe(mockUnlisten);
     });
   });

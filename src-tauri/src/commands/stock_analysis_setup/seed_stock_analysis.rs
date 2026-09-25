@@ -329,7 +329,18 @@ type AlgoToolRow = (
 ///    处置：抬到 **79**（= 门的值）⇒ 本次落库后 DB 停在 79，门与版本号**同时关闭**。
 ///    该不变量已落成**编译期断言**（紧随下方 `DCF_MIGRATION_VERSION`），此后任一常量
 ///    漂移即编译失败，不再依赖「改的人记得」。
-pub(crate) const TEMPLATE_VERSION: i32 = 80;
+///
+/// ⚠️ **v81（2026-09-24）：由 80 抬到 81 —— 修复四周期闭包「按名调用」的运行时失败**。
+///    v80 引入的阶段1/阶段2 四周期代码把 `let f = |...|` 定义的**闭包**当普通函数按名
+///    调用（`f(x)`）：Rhai 的按名调用只查「AST 内脚本 `fn` 库 + 宿主 native 函数」，
+///    **不查作用域里的 FnPtr**（`rhai/src/func/call.rs::exec_fn_call`）
+///    ⇒ 必抛 `ErrorFunctionNotFound: sl_pct_for (&str | ImmutableString | String)`（实报
+///    line 2505），被上层按「执行异常」**降级为保守决策**（action=观望、confidence=0）。
+///    处置：全部改为 `f.call(...)`（同 `strategy-scorer.rhai:9` 既有约定），并把
+///    「闭包按名调用」写进 `rhai_registry.rs` 的静态门禁防复发；同批扫描发现
+///    `reflection-comparator.rhai` 的 `sink` 闭包同一写法（会让不可信节点扫描恒空、
+///    `untrusted_count` 恒 0），一并修正。
+pub(crate) const TEMPLATE_VERSION: i32 = 81;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///
@@ -381,7 +392,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
-    const TEMPLATE_ID: &str = "stock-analysis";
+    // 与原链派生源（快速链种子从本行派生）共用同一常量，避免字面量两处漂移
+    const TEMPLATE_ID: &str = SOURCE_TEMPLATE_ID;
 
     // V3(2026-08-09): data-quality.rhai 全量缺陷修复——
     //   P0: count_chars replace 崩溃（Rhai 默认 Engine 无 StringPackage）+ pm_compute_factor_completeness
@@ -615,6 +627,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   ⚠️ 本版会改变**结论数值**（非仅显示）：markers 扩充使更多报告触发 -15 分，
     //      good_count 下降使 tool_credibility 的 good 惩罚更易触发 ⇒ score 整体下移，
     //      评级可能跨级。属预期内的口径修正。
+    //      （注：good 惩罚已于 2026-09-24 整体移除，本项现仅剩 -15 占位符扣分生效，
+    //        理由见 data-quality.rhai 的 tool_credibility 注释。）
     //   DB 版本核对：落版时 DB 主表已是 v33（2026-09-12 用户重跑 603353 时重种子），
     //   故必须升 v34 才能触发重种子，使本改动落库。
     //
@@ -5312,4 +5326,2660 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         "[stock_analysis_setup] 股票分析工作流模板已种子化完成: TEMPLATE_ID={TEMPLATE_ID}, VERSION={TEMPLATE_VERSION}"
     );
     Ok(())
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// 快速分析链（`stock-analysis-fast`）种子 —— 从 `stock-analysis` **派生**，不重抄节点字面量
+// ══════════════════════════════════════════════════════════════════════════════════════
+//
+// 设计依据：`PLAN-stock-analysis-fast-workflow.md`（2026-09-24 已批准）。三条硬约束：
+//   H1 不动 `stock-analysis` 的图 —— 本段代码只**读**那一行，其节点 / 边 / 配置一行不改；
+//   H2 两链共用同一份 .rhai 脚本 —— 本文件是**节点配置层**，两链差异只允许落在这里；
+//   H3 落库 / 前端读取与原链一致 —— 故落库三节点沿用同名 id（`quality-fallback` >
+//      `portfolio-risk-gate` > `portfolio-mgr`，见 `stock_workflow/decision.rs`）。
+//
+// ## 为什么是「派生」而不是「再手抄一份节点」
+//
+// 快速链的段 A（取数 / 算法 / 聚合 / 简报）与段 E（落库契约）在节点配置上与原链**逐字相同**，
+// 差别只在「段 B/C/D 换成 Jev 分类节点」与「中间的 23 个 agent 节点不建」。
+// 若在此重抄 `t-scoring` / `portfolio-mgr` 等节点的字面量，就出现**双份定义**：
+// 原链改一处（例如给某数据工具补一个 input_mapping）快速链必然静默漂移 ——
+// 这类漂移不报错、只在运行期表现为「某个变量恒缺」，正是 `AGENTS.md` 铁律 12 要拦的形态。
+// ⇒ 本段改为**从已落库的 `stock-analysis` 行派生**：按 id 保留子集 → 边裁剪 → 孤儿修复
+//   （规则见 `repair_orphan_nodes`）。源图一变，派生结果自动跟着变，无需人工同步任何常量。
+//
+// ## 为什么门禁是「内容比对」而不是「版本号比较」
+//
+// 兄弟种子用 `existing.version >= TEMPLATE_VERSION` 作门，前提是「模板内容由常量定义」。
+// 本模板的内容由**派生源**定义 ⇒ 版本门会引入一个必须人工维护的同步项
+// （源升到 v81 而快速链忘了抬版本号 ⇒ 快速链静默停在旧图，且无从察觉）。
+// 内容比对没有这个必填项：派生结果与库中值不一致就重建，一致就跳过。
+// 代价是**编辑器里对快速链的手工改动会在下次启动被覆盖** —— 这是本模板作为
+// 「代码定义的派生资产」的既定取舍（原链同理，只是它的覆盖点是升版那一刻）。
+
+/// 派生源模板 id。
+///
+/// 单一事实来源：`seed_stock_analysis_workflow_template` 内的 `TEMPLATE_ID` 也引用本常量
+/// （两处字面量「stock-analysis」曾各写一份，改一处忘一处会直接让派生读错源）。
+pub(crate) const SOURCE_TEMPLATE_ID: &str = "stock-analysis";
+
+/// 快速链模板 id（前端 `src/components/stock-analysis/StockSearchBar.tsx` 的
+/// `FAST_TEMPLATE_ID` 与此同值；两处都是模板的入口契约）。
+pub(crate) const FAST_TEMPLATE_ID: &str = "stock-analysis-fast";
+
+/// 快速链模板写在 `workflow_templates.version` 上的版本号。
+///
+/// ⚠ 它**不是**重建判据（判据是内容比对，理由见本段开头）。保留该列是因为编辑器的
+/// 版本快照、前端展示与 `update_workflow_template` 都读它；取 1 = 「派生资产第 1 版」。
+const FAST_TEMPLATE_VERSION: i32 = 1;
+
+/// 派生时**必须**存在于源图的节点 id —— 缺失即报错，不允许静默少一个节点。
+///
+/// 判据：快速链段 A（取数 / 算法 / 聚合 / 简报）+ 段 E（落库契约）的全部节点。
+/// 源图删改这些 id 时编译不会报错，只能靠这道运行期门把「派生结果悄悄缺一块」变成显式失败。
+const FAST_REQUIRED_NODE_IDS: &[&str] = &[
+    // 触发器
+    "trigger",
+    // 段 A · 数据源：10 个维度数据 + 质押 + 指数行情 + 机构调研 + 龙虎榜
+    "t-market-data",
+    "t-sentiment-data",
+    "t-news-data",
+    "t-fundamentals-data",
+    "t-policy-data",
+    "t-hotmoney-data",
+    "t-lockup-data",
+    "t-research-data",
+    "t-sector-data",
+    "t-catalyst-data",
+    "t-pledge-data",
+    "t-index-quotes",
+    "t-institutional-visits",
+    "t-dragon-tiger-data",
+    // 段 A · 算法腿（含依赖顺序：scoring → valuation → band / risk / week → month）
+    "t-scoring",
+    "t-valuation",
+    "t-valuation-band",
+    "t-risk",
+    "t-scoring-week",
+    "t-scoring-month",
+    // 段 A · 聚合与简报
+    "raw-data",
+    "analyst-brief",
+    "data-quality",
+    // 段 E · 决策与落库契约
+    "portfolio-mgr",
+    "portfolio-risk-gate",
+    "rule-check",
+    "quality-gate",
+    "quality-fallback",
+    FAST_EXPLAINER_NODE_ID,
+    "notify-result",
+    "store-result",
+    "end-output",
+];
+
+/// 派生时「源图有就一并保留、没有也不报错」的节点 id。
+///
+/// 这两个是 portfolio-mgr 的因子侧输入（f11 PACE / 因子权重调节），失败本身
+/// `continue_on_fail = true`，故快速链缺它们不会断链 —— 但也正因为如此，
+/// 它们的缺失会静默发生 ⇒ 归入本清单而不是 `FAST_REQUIRED_NODE_IDS`，
+/// 由 `validate_fast_workflow_graph` 保证「保留了就必须接上边」。
+const FAST_OPTIONAL_NODE_IDS: &[&str] = &["regime-weights", "pace-calc"];
+
+/// 快速链的「交易结论」组装节点 id（`output_var` 是 `trader`，与原链同名变量对齐）。
+///
+/// 该节点**不在源图里**，由 [`apply_fast_chain_overrides`] 直接构造 ⇒ 不进
+/// `FAST_REQUIRED_NODE_IDS`（那份清单的语义是「源图必须具备」）。
+const FAST_TRADER_PROXY_NODE_ID: &str = "trader-proxy";
+
+/// 原链 `trader` 变量的取值前缀（AgentNode 输出：`{report, verdict:{...}}`）。
+const TRADER_AGENT_PREFIX: &str = "trader.content.verdict.";
+
+/// 快速链 `trader` 变量的取值前缀 —— 多一层 `result`，因为快速链的 `trader` 由
+/// [`FAST_TRADER_PROXY_NODE_ID`] 这个 **Code 节点**产出，而 engine 会把 Code 节点的
+/// 返回值包进 `result`（`{status, language, result, input_params, node_id, params}`）。
+const TRADER_FAST_PREFIX: &str = "trader.result.content.verdict.";
+
+/// 快速链 `quality-gate` 的判据变量：`data-quality` 的因子完整度（0-100 口径）。
+///
+/// 不用 `data-quality.result.grade` 的理由见 [`apply_fast_chain_overrides`] 的文档。
+const FAST_QUALITY_GATE_INPUT_VAR: &str = "data-quality.result.factor_completeness_pct";
+
+/// 快速链 `quality-gate` 的 acceptable 表达式（`value` 由 `SwitchExecutor` 注入）。
+///
+/// 阈值 60 = 9 项因子里至少 6 项可测。快速链实测可测 7 项（见上方文档）⇒ 77.8 通过；
+/// 若上游再失败 2 项以上（5/9 = 55.6）则走保守降级，与门禁本意一致。
+const FAST_QUALITY_GATE_CASE_EXPR: &str = "value >= 60.0";
+
+/// 快速链**复用**的简报节点 id（node id 与 `output_var` 都保持源图原名）。
+///
+/// 复用而非新建 id 的理由见 [`apply_fast_chain_overrides`] 的 ④：段 B 的 `j-*` 判定节点
+/// 与段 F 的引用都写 `analyst-brief.result.*`，换 id 会让这些引用一起漂移。
+const FAST_BRIEF_NODE_ID: &str = "analyst-brief";
+
+/// 段 F 的解释节点 id（沿用源图同名节点，快速链只改它的 `context_sources`）。
+///
+/// 单点定义的理由：它同时出现在保留集 [`FAST_REQUIRED_NODE_IDS`] 与 ⑥ 步的查找里，
+/// 写成字面量两处会各自漂移（改一处漏一处 ⇒ ⑥ 步报「缺少节点」或静默不生效）。
+const FAST_EXPLAINER_NODE_ID: &str = "decision-explainer";
+
+/// 派生图 `analyst-brief` 节点的输入映射（快速链专属：14 个数据源 + 6 条算法腿）。
+///
+/// 值一律取 `<节点>.result.content`：ToolNode 的 `content` 是 JSON **字符串**，而
+/// `resolve_var_path` 终值不 auto-parse（见 `executors/mod.rs` 的同名注释）⇒
+/// `raw-digest.rhai` 内统一 `load()` 解析。这与 `data-quality` 的同类映射同口径。
+const FAST_BRIEF_INPUTS: [(&str, &str); 20] = [
+    ("market_data", "t-market-data.result.content"),
+    ("sentiment_data", "t-sentiment-data.result.content"),
+    ("news_data", "t-news-data.result.content"),
+    ("fundamentals_data", "t-fundamentals-data.result.content"),
+    ("policy_data", "t-policy-data.result.content"),
+    ("hotmoney_data", "t-hotmoney-data.result.content"),
+    ("lockup_data", "t-lockup-data.result.content"),
+    ("research_data", "t-research-data.result.content"),
+    ("sector_data", "t-sector-data.result.content"),
+    ("catalyst_data", "t-catalyst-data.result.content"),
+    ("pledge_data", "t-pledge-data.result.content"),
+    ("index_quotes", "t-index-quotes.result.content"),
+    ("institutional_visits", "t-institutional-visits.result.content"),
+    ("dragon_tiger_data", "t-dragon-tiger-data.result.content"),
+    ("algo_scoring", "t-scoring.result.content"),
+    ("algo_valuation", "t-valuation.result.content"),
+    ("algo_valuation_band", "t-valuation-band.result.content"),
+    ("algo_risk", "t-risk.result.content"),
+    ("algo_scoring_week", "t-scoring-week.result.content"),
+    ("algo_scoring_month", "t-scoring-month.result.content"),
+];
+
+/// 快速链下 `data-quality` 的**逐维度输入重指向**表：`(诊断缩写, Jev 判定节点 id, 简报段键)`。
+///
+/// ## 为什么必须重指向
+///
+/// 源图 `data-quality` 的 50 路 `input_mapping` 里有 41 路引用那 10 个 `a-*` 分析师节点
+/// （10 路 `{abbr}_verdict` + 10 路 `{abbr}_report` + 10 路 `{abbr}_untrusted` +
+/// 10 路 `{abbr}_tool_calls` + 1 路 `catalyst_level`），而快速链**不建**这 10 个 Agent
+/// 节点（H1：原图不动；本链只保留非 agent 资产）⇒ 这 41 路在派生图里全部解析为 Null：
+///   · `*_verdict` 全 Null ⇒ `extract_conf` 逐路返回 `-1.0` ⇒ `gap_count = 10`
+///     ⇒ `tool_credibility = clamp(30 - 40, 0, 100) = 0`；
+///   · `*_report` 全空 ⇒ `report_quality_avg = 0`；
+///   ⇒ `score ≈ 0.35×0 + 0.35×0 + 0.30×factor_completeness ≈ 23` ⇒ **恒 F**，
+///     且 10 条诊断全 `missing`（数据质量弹窗所见症状）。
+///
+/// ## 重指向到哪
+///
+/// 快速链**复用**同一个 `data-quality` 节点与同一份 `data-quality.rhai`（非 agent 资源
+/// 不另造、不分支），差异只落在本表声明的配置层 —— 分析师的两类产物在本链**仍然存在**，
+/// 只是换了产地：
+///   · `{abbr}_verdict` ← `j-<维度>` 　　　　　　= 该维度的 **Jev 判定（结果输出）**；
+///   · `{abbr}_report`  ← `analyst-brief.result.<段键>` = 该维度的 **数据获取摘要**；
+///   · `{abbr}_untrusted` ← `j-<维度>.degraded`　　　= 判定器降级标记（形态同原链的
+///     `a-*.__untrusted`：`true` 表示「这条不是真判定」）⇒ 让 LLM 调用失败降级为兜底档
+///     的维度**计入 gap**，而不是被当成有效判定抬高 grade；
+///   · `{abbr}_tool_calls` ← `j-<维度>.tool_calls_made` = 形态对齐（判定器不产工具调用
+///     记录 ⇒ 恒 Null ⇒ `attribution_note` 守卫①「无可核对数据」放行，不误判编造）。
+///
+/// ⚠ **这 4 类键一个都不能删**：`code_executor` 只注入 `input_mapping` 里声明过的键，
+///   删键会让 `data-quality.rhai` 在 `present(mk_untrusted)` 处直接抛
+///   "Variable not found"（节点整体失败，比读到 Null 更糟）⇒ 只能改指向、不能删键。
+///
+/// ⚠ `catalyst_level` 的处置见 [`apply_fast_chain_overrides`] ⑦ —— 它必须指向**字符串**
+///   （`missing_factors` 里有 `catalyst_level == ""` 的字符串比较，map 参与比较会抛错）。
+const FAST_DQ_DIMENSIONS: [(&str, &str, &str); 10] = [
+    ("mk", "j-market", "market"),
+    ("sent", "j-sentiment", "sentiment"),
+    ("news", "j-news", "news"),
+    ("fund", "j-fundamentals", "fundamentals"),
+    ("pol", "j-policy", "policy"),
+    ("hm", "j-hotmoney", "hotmoney"),
+    ("lk", "j-lockup", "lockup"),
+    ("res", "j-research", "research"),
+    ("sec", "j-sector", "sector"),
+    ("cat", "j-catalyst", "catalyst"),
+];
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 段 B/C/D/E —— Jev 判定节点（`llmClassifier`）的单点定义
+// ════════════════════════════════════════════════════════════════════════════════════
+
+/// 段 B 的 10 个**维度判定**：`(节点 id, 标题, 简报段键, 维度名, 判据, 类别, 兜底档)`。
+///
+/// `简报段键` 就是 `raw-digest.rhai` 的输出键 ⇒ `input_var` 拼成
+/// `analyst-brief.result.<键>`：**逐维度只喂自己那一段**。
+///
+/// ⚠ 这是对 `PLAN-stock-analysis-fast-workflow.md` §2 的**有意收窄**：PLAN 写的是
+///   10 个节点共用 `input_var = analyst-brief.result`（整包）。整包 ≈16k 字符，
+///   10 个节点各喂一遍既费 token 又稀释注意力 —— 而 F1 登记的正是「长 state 精度劣化」。
+///   收窄后单节点的 state 只有几百字符，且「哪一段喂哪个维度」在图上一眼可查。
+///   段 B 的 3 个**汇总**节点才需要跨维度信息，它们读聚合器 `jev_verdicts`
+///   （粒度是判定结论而非原文），同样不需要整包。
+///
+/// 前 6 个是**指标类**（`raw-digest.rhai` 已把原始 JSON 渲染为「字段=值」短文本），
+/// 后 4 个是**原文类**（新闻 / 政策 / 研报 / 公告原文，直接喂 LLM —— 这正是 F1 风险
+/// 登记的对象，上线前须做影子比对）。
+// 七元组逐位含义在下方各条目里注释：始终以字面元组声明（不抽 type 别名），
+// 让声明处即可看到每列的类型 —— 与本仓既有先例同一手法（`dojo_sdk.rs:51` 等）。
+#[allow(clippy::type_complexity)]
+const FAST_JEV_DIMENSIONS: [(&str, &str, &str, &str, &str, [&str; 3], &str); 10] = [
+    (
+        "j-market",
+        "市场量价判定",
+        "market",
+        "市场量价（K 线 / 成交量 / 换手 / 涨跌幅）",
+        "- 支持：放量上行、站稳关键均线、缩量回调后回稳等明确偏多形态\n\
+         - 反对：放量下跌、有效破位、连续阴线等明确偏空形态\n\
+         - 中性：量价平淡、信号互相抵消，或数据不足以支撑方向",
+        ["支持", "中性", "反对"],
+        "中性",
+    ),
+    (
+        "j-sentiment",
+        "市场情绪判定",
+        "sentiment",
+        "市场情绪（舆情倾向 / 讨论热度 / 情绪指标）",
+        "- 支持：舆情偏正面、关注度上升且以看多讨论为主\n\
+         - 反对：舆情偏负面、恐慌情绪蔓延或质疑集中\n\
+         - 中性：舆情平淡、正负相当，或数据不足以支撑方向",
+        ["支持", "中性", "反对"],
+        "中性",
+    ),
+    (
+        "j-fundamentals",
+        "基本面判定",
+        "fundamentals",
+        "基本面（盈利 / 成长 / 估值 / 商誉）",
+        "- 支持：营收与利润增长、ROE 稳健、估值不贵\n\
+         - 反对：业绩下滑、毛利承压、商誉或负债存在明显隐患\n\
+         - 中性：基本面平稳无亮点，或数据不足以支撑方向",
+        ["支持", "中性", "反对"],
+        "中性",
+    ),
+    (
+        "j-hotmoney",
+        "资金流向判定",
+        "hotmoney",
+        "资金流向（主力净流入 / 大单 / 龙虎榜）",
+        "- 支持：主力资金持续净流入、大单买盘占优\n\
+         - 反对：主力资金持续净流出、大单卖盘占优\n\
+         - 中性：资金进出均衡、金额很小，或数据不足以支撑方向",
+        ["支持", "中性", "反对"],
+        "中性",
+    ),
+    (
+        "j-lockup",
+        "解禁减持判定",
+        "lockup",
+        "解禁与减持（解禁时点 / 规模 / 减持计划）",
+        "- 支持：近期无解禁压力，或解禁规模占比很小\n\
+         - 反对：临近大比例解禁，或已披露明确的减持计划\n\
+         - 中性：有解禁但规模与股价影响不明，或数据不足以支撑方向",
+        ["支持", "中性", "反对"],
+        "中性",
+    ),
+    (
+        "j-sector",
+        "行业板块判定",
+        "sector",
+        "行业与板块（行业排名 / 板块涨跌 / 同业比较）",
+        "- 支持：所属行业排名靠前、板块资金与涨幅领先\n\
+         - 反对：所属行业排名靠后、板块持续走弱\n\
+         - 中性：行业表现平淡，或数据不足以支撑方向",
+        ["支持", "中性", "反对"],
+        "中性",
+    ),
+    (
+        "j-news",
+        "新闻面判定",
+        "news",
+        "新闻面（下述新闻原文）",
+        "- 利好：出现明确的经营 / 订单 / 合作 / 业绩类正面消息\n\
+         - 利空：出现明确的处罚 / 诉讼 / 亏损 / 事故类负面消息\n\
+         - 中性：新闻与公司基本面无关，或正负消息相当",
+        ["利好", "中性", "利空"],
+        "中性",
+    ),
+    (
+        "j-policy",
+        "政策面判定",
+        "policy",
+        "政策面（下述政策原文）",
+        "- 利好：政策明确扶持该行业（补贴 / 规划 / 准入放开）\n\
+         - 利空：政策明确收紧该行业（限制 / 加税 / 监管趋严）\n\
+         - 中性：政策与该公司所属行业无直接关系",
+        ["利好", "中性", "利空"],
+        "中性",
+    ),
+    (
+        "j-research",
+        "研报面判定",
+        "research",
+        "研报面（下述研报原文）",
+        "- 利好：多数研报给出买入 / 增持评级，或上调盈利预测与目标价\n\
+         - 利空：多数研报下调评级或目标价，提示明确风险\n\
+         - 中性：研报观点分歧、评级中性，或仅作事实性跟踪",
+        ["利好", "中性", "利空"],
+        "中性",
+    ),
+    (
+        "j-catalyst",
+        "公告催化判定",
+        "catalyst",
+        "公告与催化（下述公告原文）",
+        "- 利好：出现并购重组、重大订单、股权激励等正向催化\n\
+         - 利空：出现减持、质押爆仓、监管问询等负向催化\n\
+         - 中性：公告为常规事项（例会决议 / 例行披露），无实质催化",
+        ["利好", "中性", "利空"],
+        "中性",
+    ),
+];
+
+/// 段 B 的 3 个**汇总判定**节点 id（入参是聚合器 `jev_verdicts` 的判定数组）。
+const FAST_JEV_SUMMARY_NODE_IDS: [&str; 3] = ["j-direction", "j-conviction", "j-divergence"];
+
+/// 段 C 的 4 个**对抗辩论**判定节点 id（入参同为 `jev_verdicts`）。
+const FAST_JEV_DEBATE_NODE_IDS: [&str; 4] =
+    ["j-bull-strength", "j-bear-strength", "j-winner", "j-disagreement"];
+
+/// 段 E 的 3 个**决策契约**判定节点 id。
+const FAST_JEV_DECISION_NODE_IDS: [&str; 3] = ["j-confidence", "j-target", "j-stop"];
+
+/// `trader-proxy` 的 6 个 Jev 入参节点 id —— 每个都必须有一条 `→ trader-proxy` 的边。
+///
+/// ⚠ 只加 `input_mapping` 不加边是**静默失效**：DAG 只保证「有边才等」，
+///   `trader-proxy` 会先于它们执行、读到 Null 并走 `present()` 降级分支
+///   （方向恒中性、置信度缺失、档位不参与夹逼），全程零报错。
+const FAST_JEV_TRADER_INPUTS: [&str; 6] =
+    ["j-direction", "j-confidence", "j-conviction", "j-risk-level", "j-target", "j-stop"];
+
+/// 段 B 维度判定的聚合器变量名：`input_sources` 装节点 id，`output_var` 与 id **同名**
+/// （`AggregatorExecutor::collect_sources` 按 `context.variables.get(id)` 取值）。
+///
+/// ⚠ **必须无连字符**，这是硬要求而非风格：`LlmClassifierExecutor` 的 prompt 插值正则
+///   是 `\{([a-zA-Z0-9_.]+)\}`（`llm_classifier_executor.rs:487`），**不含连字符**
+///   ⇒ 段 D 的 prompt 里写 `{jev_verdicts.result}` 能替换，写 `{j-direction.category}`
+///   会**原样留在 prompt 里**（不报错、静默失效）。
+const FAST_JEV_VERDICTS_VAR: &str = "jev_verdicts";
+
+/// 段 C 辩论判定的聚合器变量名（命名约束同 [`FAST_JEV_VERDICTS_VAR`]）。
+const FAST_JEV_DEBATE_VAR: &str = "jev_debate";
+
+/// Jev 判定节点的画布布局（只影响前端可读性，不参与调度）。
+const JEV_LAYOUT_X0: f64 = 120.0;
+const JEV_LAYOUT_Y0: f64 = 3000.0;
+const JEV_LAYOUT_DX: f64 = 240.0;
+const JEV_LAYOUT_DY: f64 = 130.0;
+const JEV_LAYOUT_PER_ROW: usize = 5;
+
+/// 一个 Jev 判定节点的单点定义。
+struct JevNodeSpec {
+    id: &'static str,
+    title: &'static str,
+    /// `LlmClassifierExecutor` 的**单一路径**入参。**不得留空** —— 留空会把
+    /// `context.variables` 全部拼进 prompt（该执行器的 `input_var.is_empty()` 分支），
+    /// 30 个节点的原始 JSON 直接撑爆 32k 上下文预算。
+    input_var: String,
+    categories: Vec<&'static str>,
+    /// LLM 调用失败（或置信度低于阈值）时的降级档。
+    fallback: &'static str,
+    prompt: String,
+    /// `Some(t)` ⇒ 执行器走 JSON 模式并在输出里带 `confidence`
+    /// （详见 `seed_serenity_fast::classifier_node` 的文档）。
+    confidence_threshold: Option<f64>,
+    /// 显式补边的上游节点 id —— **必须**与 `input_var` 路径首段、prompt 内 `{...}`
+    /// 占位符首段一致（理由见 [`FAST_JEV_TRADER_INPUTS`] 的 ⚠）。
+    upstreams: Vec<&'static str>,
+}
+
+/// 段 B 维度判定的 prompt 组装（三段式：维度 → 判据 → 输出约束）。
+///
+/// 类别词表由 `categories` **派生**而非另写一遍 ⇒ 改类别时 prompt 自动跟随，
+/// 不会出现「prompt 让模型输出 A、`categories` 里只有 B」的错配 —— 那种错配不报错，
+/// 只会让执行器的 `matched` 落到「原样文本」回退分支，把自由文本塞进 `category`。
+fn dimension_prompt(dimension: &str, criteria: &str, categories: &[&str]) -> String {
+    format!(
+        "你是 A 股判定器，**只**判定「{dimension}」这一个维度，不要综合其它维度、\
+         不要给操作建议。\n\
+         判据：\n{criteria}\n\
+         只输出类别名称（{} 三选一），不要输出解释、标点或换行。",
+        categories.join(" / ")
+    )
+}
+
+/// 构造段 B/C/D/E 的全部 Jev 判定节点定义（顺序即画布布局顺序）。
+///
+/// 节点 id 一律取自上面那几个 `const` 数组（不在本函数里另写字面量）：
+/// 聚合器的 `input_sources`、`trader-proxy` 的补边清单都按同一份 const 生成
+/// ⇒ 「节点少了 / id 拼错」会在构造期直接对不上，而不是静默少一条依赖。
+fn fast_jev_nodes() -> Vec<JevNodeSpec> {
+    let mut specs: Vec<JevNodeSpec> = Vec::new();
+
+    // ── 段 B：10 个维度判定（逐维度只喂自己那一段）──
+    for (id, title, key, dimension, criteria, categories, fallback) in FAST_JEV_DIMENSIONS {
+        specs.push(JevNodeSpec {
+            id,
+            title,
+            input_var: format!("{FAST_BRIEF_NODE_ID}.result.{key}"),
+            categories: categories.to_vec(),
+            fallback,
+            prompt: dimension_prompt(dimension, criteria, &categories),
+            confidence_threshold: None,
+            upstreams: vec![FAST_BRIEF_NODE_ID],
+        });
+    }
+
+    // ── 段 B 汇总：3 个跨维度判定（入参 = 聚合器 `jev_verdicts` 的判定数组）──
+    let [j_direction, j_conviction, j_divergence] = FAST_JEV_SUMMARY_NODE_IDS;
+    let verdicts_in = format!("{FAST_JEV_VERDICTS_VAR}.result");
+    specs.push(JevNodeSpec {
+        id: j_direction,
+        title: "方向结论判定",
+        input_var: verdicts_in.clone(),
+        categories: vec!["看多", "中性", "看空"],
+        fallback: "中性",
+        prompt: "你是 A 股方向判定器。输入文本是 10 个独立维度的判定结果数组\
+                 （每项含 category 与 node_id）。\n\
+                 请综合它们给出一句话方向结论：\n\
+                 - 看多：多数维度偏多（支持 / 利好），且没有明确的反对项\n\
+                 - 看空：多数维度偏空（反对 / 利空），且没有明确的支持项\n\
+                 - 中性：多空相当、维度间分歧明显，或有效判定不足 3 项\n\
+                 注意「反对 / 利空」与「支持 / 利好」**等权**，不要因为反对项数量少就忽略它。\n\
+                 只输出类别名称（看多 / 中性 / 看空），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+    specs.push(JevNodeSpec {
+        id: j_conviction,
+        title: "结论强度判定",
+        input_var: verdicts_in.clone(),
+        categories: vec!["强", "中", "弱"],
+        fallback: "中",
+        prompt: "你是 A 股结论强度判定器。输入文本是 10 个独立维度的判定结果数组。\n\
+                 判断这些维度对**同一方向**的支撑有多强（中性维度不计入分母）：\n\
+                 - 强：≥6 个维度指向同一方向，且反向维度 ≤1 个\n\
+                 - 中：4~5 个维度指向同一方向，或方向一致但有效判定偏少\n\
+                 - 弱：方向分散（多空各半），或大量维度为中性 / 缺失\n\
+                 只输出类别名称（强 / 中 / 弱），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+    specs.push(JevNodeSpec {
+        id: j_divergence,
+        title: "维度一致性判定",
+        input_var: verdicts_in.clone(),
+        categories: vec!["一致", "分歧", "严重分歧"],
+        fallback: "分歧",
+        prompt: "你是 A 股维度一致性判定器。输入文本是 10 个独立维度的判定结果数组。\n\
+                 只看维度之间是否互相矛盾（中性维度不计入分母）：\n\
+                 - 一致：反向维度占有效判定的比例 ≤20%\n\
+                 - 分歧：反向维度占比在 20%~40% 之间\n\
+                 - 严重分歧：反向维度占比 >40%，或同时出现强支持与强反对\n\
+                 只输出类别名称（一致 / 分歧 / 严重分歧），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+
+    // ── 段 C：4 个对抗辩论判定（同为跨维度判定，与段 B 汇总并发）──
+    //
+    // 对照原链的 `bull-r1` / `bear-r1` / `debate-convergence`：那里是「多方 Agent 与
+    // 空方 Agent 各写一篇论述、再由收敛节点汇总」，本链改为**直接判定强弱**——
+    // 省掉两轮生成，这也是「快速」的主要来源之一。
+    let [j_bull, j_bear, j_winner, j_disagreement] = FAST_JEV_DEBATE_NODE_IDS;
+    specs.push(JevNodeSpec {
+        id: j_bull,
+        title: "多方论据强度",
+        input_var: verdicts_in.clone(),
+        categories: vec!["强", "中", "弱"],
+        fallback: "中",
+        prompt: "你是 A 股多方论据强度判定器。输入文本是 10 个独立维度的判定结果数组。\n\
+                 只评估**偏多**（支持 / 利好）那一侧的论据有多硬：\n\
+                 - 强：≥4 个维度明确偏多，且覆盖量价 / 基本面 / 资金面中至少两类\n\
+                 - 中：2~3 个维度明确偏多，或偏多维度集中在同一类\n\
+                 - 弱：≤1 个维度偏多\n\
+                 只输出类别名称（强 / 中 / 弱），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+    specs.push(JevNodeSpec {
+        id: j_bear,
+        title: "空方论据强度",
+        input_var: verdicts_in.clone(),
+        categories: vec!["强", "中", "弱"],
+        fallback: "中",
+        prompt: "你是 A 股空方论据强度判定器。输入文本是 10 个独立维度的判定结果数组。\n\
+                 只评估**偏空**（反对 / 利空）那一侧的论据有多硬：\n\
+                 - 强：≥4 个维度明确偏空，且覆盖量价 / 基本面 / 资金面中至少两类\n\
+                 - 中：2~3 个维度明确偏空，或偏空维度集中在同一类\n\
+                 - 弱：≤1 个维度偏空\n\
+                 只输出类别名称（强 / 中 / 弱），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+    specs.push(JevNodeSpec {
+        id: j_winner,
+        title: "多空裁决",
+        input_var: verdicts_in.clone(),
+        categories: vec!["多方", "空方", "平局"],
+        fallback: "平局",
+        prompt: "你是 A 股多空对决裁判。输入文本是 10 个独立维度的判定结果数组。\n\
+                 比较偏多与偏空两侧的论据：\n\
+                 - 多方：偏多维度的数量与强度都明显占优\n\
+                 - 空方：偏空维度的数量与强度都明显占优\n\
+                 - 平局：两侧相当，或有效判定不足以分出胜负\n\
+                 只输出类别名称（多方 / 空方 / 平局），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+    specs.push(JevNodeSpec {
+        id: j_disagreement,
+        title: "分歧度判定",
+        input_var: verdicts_in.clone(),
+        categories: vec!["低", "中", "高"],
+        fallback: "中",
+        prompt: "你是 A 股分歧度判定器。输入文本是 10 个独立维度的判定结果数组。\n\
+                 给出维度之间的分歧程度（下游用于置信度修正）：\n\
+                 - 低：几乎所有有效维度同向\n\
+                 - 中：存在 1~3 个反向维度\n\
+                 - 高：反向维度 ≥4 个，或多空论据势均力敌\n\
+                 只输出类别名称（低 / 中 / 高），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+
+    // ── 段 D：9 个风险 / 估值判定 ──
+    //
+    // 前两个（`j-risk-level` / `j-risk-score`）是**跨维度**判定：入参是算法风险腿的
+    // 指标文本，prompt 内再注入段 B / 段 C 的判定数组 ⇒ 三条上游边都要显式补。
+    // 其余 7 个是**单维度**判定：入参就是 `raw-digest.rhai` 里对应那一段。
+    let risk_indicators_in = format!("{FAST_BRIEF_NODE_ID}.result.algo_risk");
+    let cross_inputs = vec![FAST_BRIEF_NODE_ID, FAST_JEV_VERDICTS_VAR, FAST_JEV_DEBATE_VAR];
+    specs.push(JevNodeSpec {
+        id: "j-risk-level",
+        title: "风险等级判定",
+        input_var: risk_indicators_in.clone(),
+        categories: vec!["低", "中", "高", "极高"],
+        // 兜底取「高」而不是「中」：风险档位的错判代价不对称（低估风险 ⇒ 仓位过大）。
+        fallback: "高",
+        prompt: format!(
+            "你是 A 股风险等级判定器。输入文本是算法风险腿的指标输出（波动率 / 回撤 / Beta）。\n\
+             同时参考维度判定与多空裁决：\n\
+             维度判定：{{{FAST_JEV_VERDICTS_VAR}.result}}\n\
+             多空裁决：{{{FAST_JEV_DEBATE_VAR}.result}}\n\
+             判据：\n\
+             - 低：波动率与回撤温和，且维度判定无偏空项\n\
+             - 中：指标中性，或偏空维度不超过 2 个\n\
+             - 高：高波动 / 深回撤，或偏空维度占多数\n\
+             - 极高：指标处于极端区间（如年化波动率 >60% 或最大回撤 >40%），\
+             或偏空维度压倒性多数\n\
+             只输出类别名称（低 / 中 / 高 / 极高），不要输出解释。"
+        ),
+        confidence_threshold: None,
+        upstreams: cross_inputs.clone(),
+    });
+    specs.push(JevNodeSpec {
+        id: "j-risk-score",
+        title: "风险强度判定",
+        input_var: risk_indicators_in.clone(),
+        categories: vec!["高", "中", "低"],
+        fallback: "中",
+        prompt: format!(
+            "你是 A 股风险强度评分器。输入文本是算法风险腿的指标输出。\n\
+             另参考：\n\
+             维度判定：{{{FAST_JEV_VERDICTS_VAR}.result}}\n\
+             多空裁决：{{{FAST_JEV_DEBATE_VAR}.result}}\n\
+             给出风险强度的三档判断（与 `j-risk-level` 同源不同粒度，供交叉校验）：\n\
+             - 高：风险指标处于近一年偏极端位置，或偏空维度占多数\n\
+             - 中：风险指标与维度判定都落在中性区间\n\
+             - 低：风险指标温和且维度判定偏多\n\
+             只输出类别名称（高 / 中 / 低），不要输出解释。"
+        ),
+        confidence_threshold: None,
+        upstreams: cross_inputs.clone(),
+    });
+    for (id, title, key, dimension, categories, fallback) in [
+        (
+            "j-pledge-risk",
+            "质押风险判定",
+            "pledge",
+            "股东质押风险",
+            ["是", "否", "数据不足"],
+            "数据不足",
+        ),
+        (
+            "j-lockup-risk",
+            "解禁风险判定",
+            "lockup",
+            "限售解禁风险",
+            ["是", "否", "数据不足"],
+            "数据不足",
+        ),
+        (
+            "j-goodwill-risk",
+            "商誉风险判定",
+            "fundamentals",
+            "商誉减值风险",
+            ["是", "否", "数据不足"],
+            "数据不足",
+        ),
+    ] {
+        specs.push(JevNodeSpec {
+            id,
+            title,
+            input_var: format!("{FAST_BRIEF_NODE_ID}.result.{key}"),
+            categories: categories.to_vec(),
+            fallback,
+            prompt: dimension_prompt(
+                dimension,
+                &format!(
+                    "- 是：数据中出现明确的风险信号（{}）\n\
+                     - 否：数据明确显示无该风险\n\
+                     - 数据不足：输入文本无有效数据（如显示「（无数据）」）",
+                    risk_criteria(id)
+                ),
+                &categories,
+            ),
+            confidence_threshold: None,
+            upstreams: vec![FAST_BRIEF_NODE_ID],
+        });
+    }
+    let valuation_in = format!("{FAST_BRIEF_NODE_ID}.result.algo_valuation");
+    let band_in = format!("{FAST_BRIEF_NODE_ID}.result.algo_valuation_band");
+    specs.push(JevNodeSpec {
+        id: "j-valuation-signal",
+        title: "估值信号判定",
+        input_var: band_in,
+        categories: vec!["低估", "合理", "高估", "无法估值"],
+        fallback: "无法估值",
+        prompt: "你是 A 股估值信号判定器。输入文本是估值分位算法腿的输出\
+                 （形如 verdict = deep_value / undervalued / fair / expensive / overvalued / insufficient）。\n\
+                 把算法结论翻译为四档：\n\
+                 - 低估：verdict 为 deep_value 或 undervalued\n\
+                 - 合理：verdict 为 fair\n\
+                 - 高估：verdict 为 expensive 或 overvalued\n\
+                 - 无法估值：verdict 为 insufficient，或输入文本无有效分位数据\n\
+                 只输出类别名称（低估 / 合理 / 高估 / 无法估值），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_BRIEF_NODE_ID],
+    });
+    specs.push(JevNodeSpec {
+        id: "j-margin-of-safety",
+        title: "安全边际判定",
+        input_var: valuation_in.clone(),
+        categories: vec!["强", "中", "弱"],
+        fallback: "中",
+        prompt: "你是 A 股安全边际判定器。输入文本是估值算法腿的输出（DCF / 相对估值）。\n\
+                 判断现价相对内在价值的安全边际：\n\
+                 - 强：现价明显低于内在价值（上行空间大且估值依据可靠）\n\
+                 - 中：现价与内在价值接近，或上行空间存在但依据一般\n\
+                 - 弱：现价已高于内在价值，或估值依据不可用（无安全边际）\n\
+                 只输出类别名称（强 / 中 / 弱），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_BRIEF_NODE_ID],
+    });
+    specs.push(JevNodeSpec {
+        id: "j-moat",
+        title: "护城河判定",
+        input_var: valuation_in.clone(),
+        categories: vec!["宽", "窄", "无"],
+        fallback: "窄",
+        prompt: "你是 A 股护城河判定器。输入文本是基本面与估值算法腿的输出。\n\
+                 判断公司的竞争壁垒：\n\
+                 - 宽：具备明确的定价权 / 高壁垒（垄断地位、高毛利且稳定、强品牌）\n\
+                 - 窄：有一定壁垒但可被侵蚀\n\
+                 - 无：同质化竞争、毛利承压，或输入数据不足以支持壁垒判断\n\
+                 只输出类别名称（宽 / 窄 / 无），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_BRIEF_NODE_ID],
+    });
+    specs.push(JevNodeSpec {
+        id: "j-dcf-evidence-usable",
+        title: "DCF 证据可用性判定",
+        input_var: valuation_in,
+        categories: vec!["可用", "不可用"],
+        fallback: "不可用",
+        prompt: "你是 DCF 证据可用性判定器。输入文本是估值算法腿的输出，其中 dcf 段含\n\
+                 assumptions（口径）与 applicable / is_fallback_anchor / fcf_data_missing 等标记。\n\
+                 判断 DCF 结果能否作为决策依据：\n\
+                 - 可用：DCF 有效（applicable 为真），且**不是**兜底锚\
+                 （is_fallback_anchor 为假）、自由现金流数据未缺失（fcf_data_missing 为假）\n\
+                 - 不可用：以上任一条件不满足，或输入文本无 DCF 段\n\
+                 只输出类别名称（可用 / 不可用），不要输出解释。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_BRIEF_NODE_ID],
+    });
+
+    // ── 段 E：3 个决策契约判定 ──
+    let [j_confidence, j_target, j_stop] = FAST_JEV_DECISION_NODE_IDS;
+    specs.push(JevNodeSpec {
+        id: j_confidence,
+        title: "结论置信度判定",
+        input_var: verdicts_in.clone(),
+        categories: vec!["高", "中", "低"],
+        fallback: "中",
+        // Some(0.0)：要 `confidence` 数值，但不因阈值降级（见 classifier_node 文档）。
+        // `trader-proxy` 读 `.confidence`，缺失时退到 `j-conviction` 的档位。
+        confidence_threshold: Some(0.0),
+        prompt: "你是 A 股结论置信度评估器。输入文本是 10 个独立维度的判定结果数组。\n\
+                 评估「对这只标的的整体结论」的置信度（不是单个维度）：\n\
+                 - 高：有效判定 ≥8 项且方向一致\n\
+                 - 中：有效判定 4~7 项，或方向基本一致但有少量反向项\n\
+                 - 低：有效判定 ≤3 项，或维度间分歧严重\n\
+                 按 JSON 输出 label（高 / 中 / 低 三选一）与 confidence（0.0~1.0，\
+                 表示你对该档位的把握）。"
+            .to_string(),
+        upstreams: vec![FAST_JEV_VERDICTS_VAR],
+    });
+    // ⚠ `categories` 的字面量必须与 `trader-proxy.rhai` 的 `tier_pct()` 词表**逐字一致**
+    //   （`"5%"` / `"10%"` / `"20%"` / `"30%"`）：该函数只认这 4 个字符串，
+    //   写 `"+5%"` 之类会静默返回 () ⇒ 档位既不参与夹逼、也不参与兜底换算。
+    specs.push(JevNodeSpec {
+        id: j_target,
+        title: "目标涨幅档位判定",
+        input_var: format!("{FAST_BRIEF_NODE_ID}.result.algo_valuation"),
+        categories: vec!["5%", "10%", "20%", "30%"],
+        fallback: "10%",
+        prompt: "你是 A 股目标涨幅档位判定器。输入文本是估值算法腿的输出\
+                 （DCF 上行空间 / 相对估值）。\n\
+                 在四档中选出**该标的上行空间的上界**：\n\
+                 - 5%：上行空间有限，估值已接近合理上限\n\
+                 - 10%：存在温和上行空间\n\
+                 - 20%：上行空间较大且有估值依据支撑\n\
+                 - 30%：上行空间显著（低估明显且依据可靠）\n\
+                 不确定时输出 10%。\n\
+                 只输出档位（5% / 10% / 20% / 30%），不要输出解释或其它文字。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_BRIEF_NODE_ID],
+    });
+    specs.push(JevNodeSpec {
+        id: j_stop,
+        title: "止损幅度档位判定",
+        input_var: risk_indicators_in,
+        categories: vec!["5%", "10%", "20%", "30%"],
+        fallback: "10%",
+        prompt: "你是 A 股止损幅度档位判定器。输入文本是风险算法腿的输出（波动率 / 回撤）。\n\
+                 在四档中选出**该标的应容忍的止损距离上界**：\n\
+                 - 5%：波动温和，窄止损即可\n\
+                 - 10%：波动中等\n\
+                 - 20%：波动较大，需给足空间\n\
+                 - 30%：波动剧烈（极端行情或高 Beta）\n\
+                 不确定时输出 10%。\n\
+                 只输出档位（5% / 10% / 20% / 30%），不要输出解释或其它文字。"
+            .to_string(),
+        confidence_threshold: None,
+        upstreams: vec![FAST_BRIEF_NODE_ID],
+    });
+
+    specs
+}
+
+/// 三个单维度风险判定的「是」判据文案（`j-pledge-risk` / `j-lockup-risk` / `j-goodwill-risk`）。
+///
+/// 单列成函数而不是内联进循环：判据是**业务语义**（质押警戒线 / 解禁比例 / 商誉占比），
+/// 与三个节点的 id 没有一一对应的机械关系，内联会让「哪段判据配哪个节点」不可复核。
+fn risk_criteria(id: &str) -> &'static str {
+    match id {
+        "j-pledge-risk" => "控股股东质押比例偏高、接近平仓线，或近期质押公告密集",
+        "j-lockup-risk" => "未来 3 个月内有较大比例解禁，或已披露减持计划",
+        "j-goodwill-risk" => "商誉占净资产比例超过 30%，存在减值风险",
+        _ => "数据中出现明确的风险信号",
+    }
+}
+
+/// 构造一个 Jev 判定节点（`llmClassifier`），模型与画布坐标在此统一决定。
+fn jev_classifier_node(
+    spec: &JevNodeSpec,
+    model: Option<&str>,
+    index: usize,
+) -> axagent_harness::workflow_types::WorkflowNode {
+    super::seed_serenity_fast::classifier_node(
+        spec.id,
+        spec.title,
+        &spec.prompt,
+        spec.categories.iter().map(|c| (*c).to_string()).collect(),
+        None,
+        &spec.input_var,
+        Some(spec.fallback),
+        spec.confidence_threshold,
+        model.map(str::to_string),
+        JEV_LAYOUT_X0 + (index % JEV_LAYOUT_PER_ROW) as f64 * JEV_LAYOUT_DX,
+        JEV_LAYOUT_Y0 + (index / JEV_LAYOUT_PER_ROW) as f64 * JEV_LAYOUT_DY,
+    )
+}
+
+/// 构造一个 Jev 判定聚合器（`aggregator`）。
+///
+/// `strategy` 保持 `"all"`（输出 `result` 为各源值的**数组**）—— **不可**改成
+/// `"merge"`：各判定节点的输出对象含同名字段（`category` / `model` / `node_id` …），
+/// merge 会互相覆盖，只剩最后一项。
+///
+/// `output_var` 与节点 id **同名**：`AggregatorExecutor::collect_sources` 按
+/// `context.variables.get(id)` 取源值，而每个 `j-*` 节点的 `output_var` 就是其 id
+/// （见 `seed_serenity_fast::classifier_node`）—— 两处命名约定必须一致，否则聚合器
+/// 收集到的是全 `Null` 数组（不报错）。
+///
+/// `continue_on_fail` 保持 `false`（与源图 `agg-risk` / `raw-data` 同）：上游 `j-*` 已
+/// 配 `continue_on_fail: true` + `fallback_label`，聚合器本身没有可降级的语义。
+fn jev_aggregator_node(
+    id: &str,
+    title: &str,
+    description: &str,
+    sources: Vec<String>,
+    x: f64,
+    y: f64,
+) -> axagent_harness::workflow_types::WorkflowNode {
+    use axagent_harness::workflow_types::{
+        AggregatorNode, AggregatorNodeConfig, Position, RetryConfig, WorkflowNode, WorkflowNodeBase,
+    };
+
+    WorkflowNode::Aggregator(AggregatorNode {
+        base: WorkflowNodeBase {
+            id: id.into(),
+            title: title.into(),
+            description: Some(description.into()),
+            position: Position { x, y },
+            retry: RetryConfig::default(),
+            timeout: Some(30),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: false,
+        },
+        config: AggregatorNodeConfig {
+            strategy: "all".into(),
+            input_sources: sources,
+            output_var: id.into(),
+            wait_for_all: true,
+            weights: vec![],
+            summarize_prompt: None,
+            summarize_model: None,
+            sub_graph: None,
+        },
+    })
+}
+
+/// 派生结果（节点 + 边）。全部经不变式校验后才允许落库。
+struct DerivedFastGraph {
+    nodes: Vec<axagent_harness::workflow_types::WorkflowNode>,
+    edges: Vec<axagent_harness::workflow_types::WorkflowEdge>,
+}
+
+/// 取变量路径的**首段**：`t-risk.result.content.grade` → `t-risk`；`trigger` → `trigger`。
+///
+/// 首段就是「这个值由哪个节点写入 `context.variables`」——节点的 `output_var` 与
+/// `input_mapping` 的路径首段按同一约定书写（全模板一贯如此）。
+fn mapping_root(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.split('.').next().unwrap_or(trimmed))
+}
+
+/// 节点**自己声明**读了哪些节点的产出（仅取 input_mapping / input_sources 的路径首段）。
+fn node_declared_sources(node: &axagent_harness::workflow_types::WorkflowNode) -> Vec<String> {
+    use axagent_harness::workflow_types::WorkflowNode;
+
+    let mut roots: Vec<String> = Vec::new();
+    let mut push_all = |values: Vec<&str>| {
+        roots.extend(values.into_iter().filter_map(|v| mapping_root(v).map(str::to_string)));
+    };
+    match node {
+        WorkflowNode::Tool(n) => {
+            push_all(n.config.input_mapping.values().map(String::as_str).collect());
+        },
+        WorkflowNode::Code(n) => {
+            push_all(n.config.input_mapping.values().map(String::as_str).collect());
+        },
+        WorkflowNode::Agent(n) => {
+            push_all(n.config.input_mapping.values().map(String::as_str).collect());
+        },
+        // 聚合节点的 `input_sources` 装的直接就是上游节点 id（无路径），首段即自身。
+        WorkflowNode::Aggregator(n) => {
+            push_all(n.config.input_sources.iter().map(String::as_str).collect());
+        },
+        _ => {},
+    }
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+/// 构造一条 `Direct` 边（与源种子内 `edge(...)` 闭包同形）。
+fn direct_edge(
+    id: &str,
+    source: &str,
+    target: &str,
+) -> axagent_harness::workflow_types::WorkflowEdge {
+    use axagent_harness::workflow_types::{EdgeType, WorkflowEdge};
+
+    WorkflowEdge {
+        id: id.into(),
+        source: source.into(),
+        source_handle: None,
+        target: target.into(),
+        target_handle: None,
+        edge_type: EdgeType::Direct,
+        label: None,
+    }
+}
+
+/// 孤儿修复：给裁剪后**入度为 0** 的非 trigger 节点补入边。
+///
+/// 两种来源，按优先级：
+///   1. 保留集内、该节点**自己声明读取**的节点（`node_declared_sources`）——
+///      这是最准的判据：「我读谁的产出，我就等谁」；
+///   2. 兜底挂 `trigger`：仅当它不读保留集内任何节点时适用，即「入参只来自全局变量
+///      （`stock_code` 等）」的节点（数据工具、以 `stock_code` 为唯一入参的算法节点）。
+///
+/// 为什么不给所有孤儿一律挂 trigger：`analyst-brief` / `data-quality` 这类节点的入参是
+/// **上游节点的产出**，挂 trigger 会让它们在数据未就绪时就跑完（DAG 只保证「有边才等」），
+/// 结果是「跑得很快、全是空」——比缺节点更难查。故此类节点必须先尝试按声明依赖接线；
+/// 声明不到保留集内任何节点时（说明其上游在本图已被整体裁掉）才退回 trigger，并打 WARN。
+fn repair_orphan_nodes(
+    nodes: &[axagent_harness::workflow_types::WorkflowNode],
+    edges: &mut Vec<axagent_harness::workflow_types::WorkflowEdge>,
+    keep: &std::collections::HashSet<&str>,
+) {
+    use axagent_harness::workflow_types::WorkflowNode;
+    use std::collections::HashMap;
+
+    let mut in_degree: HashMap<&str, usize> = HashMap::new();
+    for e in edges.iter() {
+        *in_degree.entry(e.target.as_str()).or_insert(0) += 1;
+    }
+
+    let mut added: Vec<axagent_harness::workflow_types::WorkflowEdge> = Vec::new();
+    for node in nodes {
+        if matches!(node, WorkflowNode::Trigger(_)) {
+            continue;
+        }
+        let id = node.base_id();
+        if in_degree.get(id).copied().unwrap_or(0) > 0 {
+            continue;
+        }
+        let deps: Vec<String> = node_declared_sources(node)
+            .into_iter()
+            .filter(|d| d.as_str() != id && keep.contains(d.as_str()))
+            .collect();
+        if deps.is_empty() {
+            tracing::warn!(
+                "[stock_analysis_setup] 快速链派生：节点 `{id}` 裁剪后失去全部入边，且未声明读取保留集内任何节点 \
+                 ⇒ 挂到 trigger 下（前提：它的入参只取全局变量）"
+            );
+            added.push(direct_edge(&format!("e-trigger-{id}"), "trigger", id));
+        } else {
+            for dep in deps {
+                added.push(direct_edge(&format!("e-{dep}-{id}"), &dep, id));
+            }
+        }
+    }
+    edges.append(&mut added);
+}
+
+/// 快速链专属的**节点配置层**改造（H1：源图一行不改；H2：两链差异只允许落在配置层）。
+///
+/// 六件事：
+///   ① 追加 `trader-proxy` 组装节点（Code，`output_var = "trader"`），并接线
+///      `data-quality → trader-proxy → portfolio-mgr`；
+///   ② 把派生图内**所有**指向 `trader.content.verdict.*` 的映射整体改前缀为
+///      `trader.result.content.verdict.*`（详见下方）；
+///   ③ 摘掉 `portfolio-mgr` 的 `dqi_score` / `dqi_grade`，并把 `quality-gate` 的判据
+///      从 `data-quality.result.grade` 换成 `factor_completeness_pct`（详见下方）；
+///   ④ 把复用 id 的 `analyst-brief` 节点换成快速链专属脚本 + 专属输入（详见下方）；
+///   ⑤ 加入段 B/C/D/E 的全部 Jev 判定节点 + 两个聚合器，并**显式补全**它们之间的边
+///      （详见下方）；
+///   ⑥ 把段 B–E 的 Jev 输出与 `analyst-brief` 补进 `decision-explainer` 的
+///      `context_sources`（**只改上下文、不产生边**，详见下方）。
+///
+/// ## ② 为什么必须改前缀
+///
+/// 原链的 `trader` 是 **AgentNode** 的输出（`{role, content: <json>, ...}`），
+/// 映射写 `trader.content.verdict.*`；快速链的 `trader` 由 **CodeNode**
+/// （[`FAST_TRADER_PROXY_NODE_ID`]）产出，engine 会再包一层 `result`
+/// ⇒ 不改前缀则全部解析为 Null（f7 因子失效、`odds` 恒走 fallback、
+/// `portfolio-risk-gate` 的 `target_price` 为空）。
+///
+/// ⚠ 受影响的**不止** `portfolio-mgr`：`portfolio-risk-gate` 也有
+/// `("target_price", "trader.content.verdict.targetPrice")`。故此处按**前缀**在
+/// 全图 Code 节点上统一改写，而不是硬编码某一两个节点的键名 —— 后者在源图新增
+/// 一个消费 `trader` 的节点时会静默漏改。
+/// 前缀之外的 `trader.*` 路径（如 `trader.__untrusted`）**刻意不改**：那些字段
+/// 快速链本就拿不到（`trader-proxy` 不产出 `__untrusted`），改与不改都是 Null，
+/// 改动只会制造「看起来对齐了」的错觉。
+///
+/// ## ③ 的必要性（快速链的阻断性缺口，2026-09-24 定位）
+///
+/// `data-quality.rhai` 的 `score` 有 35% 权重来自「分析师报告质量」、35% 来自
+/// 「工具可信度」—— 两者的输入是 10 个分析师的 `*_verdict` / `*_report`。
+/// 快速链**不建**这 10 个 Agent 节点（H1 + 本链的既定设计）⇒ 两项恒为 0
+/// （`report_quality_avg = 0`；`tool_credibility` 走缺报告路径 base=30、gap 阶梯满档罚 40
+/// ⇒ clamp 0）
+/// ⇒ `score ≈ factor_completeness × 30 ≈ 23` ⇒ **恒判 grade F**。后果两条，都是阻断级：
+///   a. `portfolio-mgr.rhai` 的 `dqi_collapsed = (dqi_grade_str == "F")` ⇒ 仓位钉死 0%；
+///   b. `quality-gate` 的 `A/B/C` 判据恒不成立 ⇒ 恒走 `low-quality` ⇒ `quality-fallback`
+///      （LLM 保守决策）—— 而落库优先级是 `quality-fallback` **最高**
+///      （见 `stock_workflow/decision.rs`）⇒ Jev 判定链被整体绕开。
+///
+/// 处置（**纯配置层，两链脚本零改动**）：快速链不再消费 `data-quality` 的
+/// `grade` / `score`（它们在本链测不到报告质量，取值没有意义），改用本链**真实可测**的
+/// `factor_completeness_pct`（9 项因子里 7 项可测：`consensus_score` 与 `catalyst_level`
+/// 的提供方 —— `debate-convergence` / `a-catalyst` —— 不在本链）。
+/// 摘掉映射后 `portfolio-mgr.rhai` 的既有分支自然接管：
+/// `dqi_grade_str = ""` ⇒ `confidence_quality_cap = 60.0`（该脚本注释明写
+/// 「数据质量检查不可用 ⇒ 按最保守档」）、`dqi_collapsed = false`、
+/// `f6_signal = 0` ⇒ `f6_weight = 0`（f6 退出权重）。
+/// ⇒ 快速链的置信度上限被压到 60 —— 这是**诚实**的：本链确实没有分析师报告可核。
+///
+/// ## ④ 为什么 `analyst-brief` 要「换脚本、留 id」
+///
+/// 原链的 `analyst-brief` 是**分析师摘要**：入参是 10 个分析师的 `.content.verdict`，
+/// 脚本（`analyst-brief.rhai`）逐份读 `bull_score` / `bear_score` 拼 Markdown。
+/// 快速链**不建**这 10 个 Agent 节点（H1 + 本链既定设计）⇒ 该节点在本链的处境是：
+///   a. 10 条入边全部被裁掉，`input_mapping` 全部解析为 `()` ⇒ 输出恒为十行
+///      「数据不可用」；
+///   b. 它的**唯一**消费者是辩论链（源图 `e-brief-debate` → `debate-bull-bear`），
+///      而辩论链在本链不存在；`decision-explainer` 的 `context_sources` 也不含它
+///      ⇒ 派生图里它**零消费者**，纯属「跑完就扔」。
+///
+/// 处置分两问，答案是分开的：
+///   · **要不要留这个节点**：留。段 B 的 `j-*` 判定节点需要一个「把 14 路原始数据
+///     压成可喂 LLM 的短文本」的上游，而「分维度裁剪」正是这个节点在本链的对应职能
+///     —— 删掉它等于让每个 `j-*` 各自去啃原始 JSON。
+///   · **用哪个脚本**：换。原脚本的输入契约是 verdict map（`bull_score`/`bear_score`），
+///     只改 `input_mapping` 指向数据源**并不能**让它产出有用文本 —— 它仍然只认那两个
+///     字段，输出依旧是十行「数据不可用」（这正是「方案 C 只改输入源」不自洽之处）。
+///     故改用快速链专属脚本 `raw-digest.rhai`（新资产，不是原脚本的副本或版本分支：
+///     输入契约、输出契约、消费者三者全不同，见该文件头部注释）。
+///
+/// **node id 与 `output_var` 保持 `analyst-brief` 不变**：段 B 的 `input_var` 与段 F 的
+/// 引用都写 `analyst-brief.result.<段>`，换 id 会让这些引用一并漂移；而
+/// `repair_orphan_nodes` 会按新 `input_mapping` 声明的 20 个上游自动补边
+/// （故此处**不**手工加边，避免与孤儿修复重复）。
+///
+/// ## ⑤ 为什么 Jev 节点必须**手工**补边（不能指望孤儿修复）
+///
+/// 两个机制性原因，缺一即静默失效：
+///   1. `node_declared_sources` **不识别** `LlmClassifier` 的 `input_var`
+///      （该函数的 `_ => {}` 分支）⇒ 对 29 个 `j-*` 节点它一律返回空 ⇒ 孤儿修复只会
+///      把它们挂到 `trigger` 下，DAG 立刻退化为「谁都不等谁」；
+///   2. 孤儿修复的 `keep` 只含**源图** id，而 `jev_verdicts` / `jev_debate` 是新增节点
+///      ⇒ 即使识别得到上游，也会因不在 `keep` 内而被过滤掉。
+///
+/// 故本步按 [`JevNodeSpec::upstreams`]（单点定义）+ 两个聚合器的源清单**显式补边**，
+/// 并在测试里逐条断言「每条声明都有对应的边」—— 这正是 `FAST_JEV_TRADER_INPUTS`
+/// 文档所警告的「只加映射不加边是静默失效」的机械防线。
+///
+/// 另注：`trader-proxy` 的 6 个 Jev 入参同样在此补边。只加 `input_mapping` 不加边时，
+/// `trader-proxy` 会先于它们执行、读到 Null 并走 `present()` 降级分支（方向恒中性、
+/// 档位不参与夹逼），全程零报错。
+///
+/// ## ⑥ 为什么 `decision-explainer` 补的是 `context_sources` 而不是边
+///
+/// 该节点是**源图既有**节点（`agent()` + `context_sources` + `input_mapping`），
+/// 在快速链里保留原样。它的 `context_sources` 原本是
+/// `[portfolio-risk-gate, rule-check, t-scoring, t-risk]` —— 四个来源在快速链**全部保留**
+/// ⇒ 入度 ≥ 1，`repair_orphan_nodes` 根本不会看它（它只处理入度为 0 的节点）。
+///
+/// 问题不在「断链」而在「读不到判断依据」：原链的解释官复述的是 `portfolio-mgr` 的
+/// 因子/风控裁决，而快速链的**判断主体**是段 B–E 的 Jev 判定。不补来源 ⇒ 解释文案
+/// 只能罗列规则编号，无法回答「凭什么这么判」（H3 要求结论可解析，段 F 是唯一
+/// 承载自然语言论据的节点）。
+///
+/// 补 `context_sources` 而**不补边**是刻意的：
+///   · `context_sources` 只影响 prompt 拼装，不参与 DAG 依赖 —— 补边会改变调度语义
+///     （且 `repair_orphan_nodes` 已在 ⑥ 之前跑完，此处的边只能手工加，反而多一处
+///     与声明不同步的风险）；
+///   · 本节点能读到这些值，靠的是**既有链路顺序**（段 B–E / `analyst-brief` →
+///     `trader-proxy` → `portfolio-mgr` → `portfolio-risk-gate` → `quality-gate` →
+///     本节点），而非本步声明的依赖 ⇒ 该前提若被改动，这里会静默读到 Null。
+///     故本步不引入新边，把「顺序前提」写进注释与 ⑥ 步代码注释，供改动者看到。
+///
+/// ## ⑦ 为什么 `data-quality` 必须改输入、又必须**手工**补边
+///
+/// 该节点是**原样复用**的非 agent 资源（同一 id、同一份 `data-quality.rhai`、不另造脚本），
+/// 但它的 50 路 `input_mapping` 里有 41 路指向那 10 个 `a-*` 分析师节点 —— 本链不建
+/// 这些 Agent ⇒ 41 路全解析为 Null ⇒ `gap_count = 10`、`report_quality_avg = 0`
+/// ⇒ grade **恒 F**、10 条诊断全 `missing`。这不是「快速链取数失败」，而是本节点没接到
+/// 本链的真实产物。改法与其判据逐项写在本函数的 ⑦ 步与 [`FAST_DQ_DIMENSIONS`] 的文档里。
+///
+/// 边必须手工补的理由与 ⑤ 同源但不是同一个：`repair_orphan_nodes` 只处理**入度为 0** 的
+/// 节点，而 `data-quality` 裁剪后仍有 7 条入边 ⇒ 修复器**根本不会看它**。
+/// 只改映射不补边 ⇒ 它先于 `analyst-brief` / `j-*` 执行、读到全 Null，且全程零报错。
+fn apply_fast_chain_overrides(
+    nodes: &mut Vec<axagent_harness::workflow_types::WorkflowNode>,
+    edges: &mut Vec<axagent_harness::workflow_types::WorkflowEdge>,
+    decision_model: Option<&str>,
+) -> Result<(), String> {
+    use axagent_harness::workflow_types::{
+        CodeNode, CodeNodeConfig, Position, RetryConfig, SwitchCase, WorkflowNode, WorkflowNodeBase,
+    };
+
+    // ── ① 追加组装节点 ──
+    if nodes.iter().any(|n| n.base_id() == FAST_TRADER_PROXY_NODE_ID) {
+        return Err(format!(
+            "派生结果已含 `{FAST_TRADER_PROXY_NODE_ID}` —— 该 id 是快速链保留 id，\
+             源图若确实新增了同名节点请先改名（否则两处定义会互相覆盖）"
+        ));
+    }
+    nodes.push(WorkflowNode::Code(CodeNode {
+        base: WorkflowNodeBase {
+            id: FAST_TRADER_PROXY_NODE_ID.into(),
+            title: "交易结论组装（快速链）".into(),
+            description: Some(
+                "确定性重建与原链 `trader` 同形的结论：方向/置信度/风险档取自 Jev 判定，\
+                 目标价/止损价由算法腿换算"
+                    .into(),
+            ),
+            position: Position { x: 840.0, y: 3900.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(10),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            // 与 `portfolio-mgr` 同策略：本节点失败不应让整链停在 Pending
+            // （下游 `present()` 守卫会把缺失降级为中性，见 trader-proxy.rhai 的输出契约）。
+            continue_on_fail: true,
+        },
+        config: CodeNodeConfig {
+            language: "rhai".into(),
+            code: include_str!("../trader-proxy.rhai").to_string(),
+            output_var: "trader".into(),
+            tool_name: None,
+            execute_directly: true,
+            input_mapping: [
+                // 算法腿。⚠ 本节点的入边只有 `data-quality` + `j-*`（见下），而快速链的
+                //   `data-quality` 已不再声明依赖算法腿（它的 10 个分析师上游全被裁掉，
+                //   孤儿修复把它挂到了 `trigger` 下）⇒ 算法腿的**就绪顺序由 `j-*` 传递保证**：
+                //   6 个 `j-*` 入边全部（直连或经 `jev_verdicts`）依赖 `analyst-brief`，
+                //   而 `analyst-brief` 的 `FAST_BRIEF_INPUTS` 含这 6 条算法腿。
+                //   故**不可**删掉 `j-*` 到本节点的边 —— 那会让本节点提前执行、
+                //   三条路径全解析为 Null，且全程零报错（静默失效）。
+                ("current_price", "t-scoring.result.content.currentPrice"),
+                ("dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
+                ("volatility", "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct"),
+                // 逐维度诊断（证据清单来源之一；本链多为 missing，见脚本内的证据清单注释）
+                ("dq_diagnostics", "data-quality.result.diagnostics"),
+                // 段 B 的 10 个维度判定数组（证据清单来源之二：非中性判定即决策论据）。
+                // ⚠ 聚合器 `jev_verdicts` 的 `output_var` 与节点 id 同名 ⇒ 变量名即该 id。
+                ("j_dimensions", "jev_verdicts.result"),
+                // Jev 判定（段 B/C/D 由本函数的 ⑤ 步创建并补边）
+                ("j_direction", "j-direction.category"),
+                ("j_confidence", "j-confidence.confidence"),
+                ("j_conviction", "j-conviction.category"),
+                ("j_risk_level", "j-risk-level.category"),
+                ("j_target", "j-target.category"),
+                ("j_stop", "j-stop.category"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        },
+    }));
+    // 边：`data-quality → trader-proxy → portfolio-mgr`。
+    // ⚠ `j-*` / `jev_verdicts` 的入边**不在此处补** —— 那些节点由本函数的 ⑤ 步创建，
+    //   接线也放在 ⑤ 步（创建与接线同处，避免两份清单各自漂移）。
+    // `portfolio-risk-gate` 不必单独接线：它已有 `portfolio-mgr → 它` 的边，
+    // 而 `portfolio-mgr` 等 `trader-proxy` ⇒ 传递保证 target_price 就绪。
+    edges.push(direct_edge(
+        &format!("e-data-quality-{FAST_TRADER_PROXY_NODE_ID}"),
+        "data-quality",
+        FAST_TRADER_PROXY_NODE_ID,
+    ));
+    edges.push(direct_edge(
+        &format!("e-{FAST_TRADER_PROXY_NODE_ID}-portfolio-mgr"),
+        FAST_TRADER_PROXY_NODE_ID,
+        "portfolio-mgr",
+    ));
+
+    // ── ② + ③ 逐节点改写 ──
+    let mut rewritten = 0usize;
+    let mut dropped_dqi: Vec<String> = Vec::new();
+    for node in nodes.iter_mut() {
+        let WorkflowNode::Code(code) = node else { continue };
+        let is_portfolio_mgr = code.base.id == "portfolio-mgr";
+        code.config.input_mapping.retain(|key, value| {
+            // ③ 只摘 `portfolio-mgr` 的 dqi 映射：`quality-gate` 走的是自己的 input_var，
+            //    其他节点（如 `portfolio-risk-gate`）本就不读这两项。
+            if is_portfolio_mgr && (key == "dqi_score" || key == "dqi_grade") {
+                dropped_dqi.push(key.clone());
+                return false;
+            }
+            // ② 前缀改写
+            if let Some(rest) = value.strip_prefix(TRADER_AGENT_PREFIX) {
+                *value = format!("{TRADER_FAST_PREFIX}{rest}");
+                rewritten += 1;
+            }
+            true
+        });
+    }
+    if dropped_dqi.is_empty() {
+        return Err("派生出的 `portfolio-mgr` 未含预期的 `dqi_score` / `dqi_grade` 映射 —— \
+             源图的该节点已改，请核对后再决定快速链的 data-quality 处置（见本函数文档 ③）"
+            .to_string());
+    }
+    if rewritten == 0 {
+        return Err("派生图内没有任何 `trader.content.verdict.*` 映射被改写 —— \
+             源图已改（`portfolio-mgr` / `portfolio-risk-gate` 应各有一条以上），\
+             快速链的 trader 通路会整体失效"
+            .to_string());
+    }
+
+    // ── ③ quality-gate 判据 ──
+    let qg = nodes
+        .iter_mut()
+        .find(|n| n.base_id() == "quality-gate")
+        .ok_or_else(|| "派生结果缺少 `quality-gate` 节点".to_string())?;
+    let WorkflowNode::Switch(sw) = qg else {
+        return Err("`quality-gate` 在源图里不是 Switch 节点 —— 派生假设已失效".to_string());
+    };
+    sw.config.input_var = FAST_QUALITY_GATE_INPUT_VAR.to_string();
+    sw.config.cases = vec![SwitchCase {
+        value: FAST_QUALITY_GATE_CASE_EXPR.to_string(),
+        label: "acceptable".to_string(),
+    }];
+
+    // ── ④ `analyst-brief`：换脚本 + 换输入（id / output_var 不变，理由见函数文档 ④）──
+    //
+    // ⚠ 顺序要求：本步必须在 `repair_orphan_nodes` **之前** —— 孤儿修复读的是节点的
+    //   `input_mapping` 声明，此处换完映射它才能把 20 个上游正确接上；若反过来，
+    //   它只会看到原链那 10 个已被裁掉的 Agent 上游，从而把本节点挂到 `trigger` 下。
+    let brief = nodes
+        .iter_mut()
+        .find(|n| n.base_id() == FAST_BRIEF_NODE_ID)
+        .ok_or_else(|| format!("派生结果缺少 `{FAST_BRIEF_NODE_ID}` 节点"))?;
+    let WorkflowNode::Code(brief) = brief else {
+        return Err(format!("`{FAST_BRIEF_NODE_ID}` 在源图里不是 Code 节点 —— 派生假设已失效"));
+    };
+    if brief.config.output_var != FAST_BRIEF_NODE_ID {
+        return Err(format!(
+            "`{FAST_BRIEF_NODE_ID}` 的 output_var 已改为 `{}` —— 段 B/段 F 的引用都写 \
+             `{FAST_BRIEF_NODE_ID}.result.*`，此处必须同名",
+            brief.config.output_var
+        ));
+    }
+    brief.base.title = "原始数据分维度摘要（快速链）".into();
+    brief.base.description = Some(
+        "把 14 路原始数据与 6 条算法腿的产出按维度裁剪为短文本段，供 Jev 判定节点消费；\
+         每段独立降级，缺数据只显示「（无数据）」"
+            .into(),
+    );
+    brief.config.code = include_str!("../raw-digest.rhai").to_string();
+    brief.config.input_mapping =
+        FAST_BRIEF_INPUTS.iter().map(|(k, v)| ((*k).to_string(), (*v).to_string())).collect();
+
+    // ── ⑤ 段 B/C/D/E：Jev 判定节点 + 两个聚合器 + 显式边 ──
+    let specs = fast_jev_nodes();
+    for (index, spec) in specs.iter().enumerate() {
+        if nodes.iter().any(|n| n.base_id() == spec.id) {
+            return Err(format!(
+                "派生结果已含 `{}` —— `j-*` 是快速链保留前缀，\
+                 源图若确实新增了同名节点请先改名（否则两处定义会互相覆盖）",
+                spec.id
+            ));
+        }
+        nodes.push(jev_classifier_node(spec, decision_model, index));
+        for upstream in &spec.upstreams {
+            edges.push(direct_edge(&format!("e-{upstream}-{}", spec.id), upstream, spec.id));
+        }
+    }
+
+    // 两个聚合器把「多节点判定」收敛成**单个数组变量**：`LlmClassifierExecutor` 的
+    // `input_var` 只接受单一路径，没有聚合器就只能把 10 个判定各自写一遍 prompt 占位符
+    // （而占位符正则不含连字符，`{j-market.category}` 这类写法根本不替换）。
+    let agg_row = specs.len().div_ceil(JEV_LAYOUT_PER_ROW);
+    let verdict_sources: Vec<String> =
+        FAST_JEV_DIMENSIONS.iter().map(|(id, ..)| (*id).to_string()).collect();
+    nodes.push(jev_aggregator_node(
+        FAST_JEV_VERDICTS_VAR,
+        "维度判定汇总",
+        "把 10 个维度判定的输出收敛为数组，供段 B 汇总 / 段 C 辩论 / 段 E 置信度与 \
+         trader-proxy 的证据清单读取",
+        verdict_sources.clone(),
+        JEV_LAYOUT_X0,
+        JEV_LAYOUT_Y0 + agg_row as f64 * JEV_LAYOUT_DY,
+    ));
+    for id in &verdict_sources {
+        edges.push(direct_edge(
+            &format!("e-{id}-{FAST_JEV_VERDICTS_VAR}"),
+            id,
+            FAST_JEV_VERDICTS_VAR,
+        ));
+    }
+
+    let debate_sources: Vec<String> =
+        FAST_JEV_DEBATE_NODE_IDS.iter().map(|id| (*id).to_string()).collect();
+    nodes.push(jev_aggregator_node(
+        FAST_JEV_DEBATE_VAR,
+        "多空辩论汇总",
+        "把 4 个辩论判定的输出收敛为数组，供段 D 的风险等级 / 风险强度交叉参考",
+        debate_sources.clone(),
+        JEV_LAYOUT_X0,
+        JEV_LAYOUT_Y0 + (agg_row + 1) as f64 * JEV_LAYOUT_DY,
+    ));
+    for id in &debate_sources {
+        edges.push(direct_edge(&format!("e-{id}-{FAST_JEV_DEBATE_VAR}"), id, FAST_JEV_DEBATE_VAR));
+    }
+
+    // `trader-proxy` 的 Jev 入边（理由见本函数文档 ⑤ 末段）。
+    for id in FAST_JEV_TRADER_INPUTS {
+        edges.push(direct_edge(
+            &format!("e-{id}-{FAST_TRADER_PROXY_NODE_ID}"),
+            id,
+            FAST_TRADER_PROXY_NODE_ID,
+        ));
+    }
+    edges.push(direct_edge(
+        &format!("e-{FAST_JEV_VERDICTS_VAR}-{FAST_TRADER_PROXY_NODE_ID}"),
+        FAST_JEV_VERDICTS_VAR,
+        FAST_TRADER_PROXY_NODE_ID,
+    ));
+
+    // ── ⑥ 段 F：把段 B–E 的 Jev 输出与 `analyst-brief` 补进解释节点的上下文 ──
+    //
+    // 源图该节点的 `context_sources` 是 `[portfolio-risk-gate, rule-check, t-scoring,
+    // t-risk]`，四者在快速链**全部保留** ⇒ 它在派生图里入度 ≥ 1，孤儿修复不会碰它
+    // （`repair_orphan_nodes` 只处理入度为 0 的节点）。但它读不到任何 Jev 判定 ⇒
+    // 解释文案只能复述公式层裁决，无法回答「凭什么这么判」—— 而快速链的判断主体
+    // 正是 Jev。故此处补入段 B–E 全部 Jev 输出 + `analyst-brief`（PLAN §2 段 F）。
+    //
+    // ⚠ `context_sources` **不产生边** —— `node_declared_sources` 只读 `input_mapping`
+    //   / `input_sources`，故本步既不改 DAG、也不影响本节点的执行时机。
+    //   它能读到这些值的前提是「它们先于本节点执行」，该前提由既有链路保证：
+    //   段 B–E 与 `analyst-brief` 都是 `trader-proxy` 的上游，而 `trader-proxy` 又在
+    //   `portfolio-mgr` → `portfolio-risk-gate` → `quality-gate` 之前，
+    //   本节点排在 `quality-gate` 之后 ⇒ 执行时这些变量早已写入。
+    //   若将来有人把本节点提到 `portfolio-risk-gate` 之前，这里会读到 Null 且零报错
+    //   （Agent 的上下文拼装对缺失变量是静默跳过），故把该前提记在此处。
+    let jev_sources: Vec<String> = FAST_JEV_DIMENSIONS
+        .iter()
+        .map(|(id, ..)| (*id).to_string())
+        .chain(FAST_JEV_SUMMARY_NODE_IDS.iter().map(|id| (*id).to_string()))
+        .chain(FAST_JEV_DEBATE_NODE_IDS.iter().map(|id| (*id).to_string()))
+        .chain(FAST_JEV_DECISION_NODE_IDS.iter().map(|id| (*id).to_string()))
+        .chain(
+            [FAST_JEV_VERDICTS_VAR, FAST_JEV_DEBATE_VAR, FAST_BRIEF_NODE_ID]
+                .into_iter()
+                .map(str::to_string),
+        )
+        .collect();
+    let explainer = nodes
+        .iter_mut()
+        .find(|n| n.base_id() == FAST_EXPLAINER_NODE_ID)
+        .ok_or_else(|| format!("派生结果缺少 `{FAST_EXPLAINER_NODE_ID}` 节点"))?;
+    let WorkflowNode::Agent(explainer) = explainer else {
+        return Err(format!(
+            "`{FAST_EXPLAINER_NODE_ID}` 在源图里不是 Agent 节点 —— 派生假设已失效"
+        ));
+    };
+    for id in &jev_sources {
+        // 去重是必要的：`context_sources` 若含重复项，引擎会把同一份输出拼两遍。
+        if !explainer.config.context_sources.iter().any(|s| s == id) {
+            explainer.config.context_sources.push(id.clone());
+        }
+    }
+    // 立即把长度取出来：下面 ⑦ 还要可变借用 `nodes`，而 `explainer` 的借用会一直活到
+    // 它最后一次被使用 —— 在 `tracing!` 里现取会与之冲突（E0499）。
+    let explainer_ctx_len = explainer.config.context_sources.len();
+
+    // ── ⑦ `data-quality` 的分析师侧输入重指向（逐项判据见 [`FAST_DQ_DIMENSIONS`]）──
+    //
+    // **位置**：放在 ⑤ 之后（`j-*` 已全部创建）。
+    //
+    // **为什么不靠孤儿修复补边**：`repair_orphan_nodes` 只处理**入度为 0** 的节点，而
+    // `data-quality` 在边裁剪后仍有 7 条入边（`t-scoring` / `t-risk` / `t-valuation` /
+    // `t-hotmoney-data` / `t-lockup-data` / `t-catalyst-data` / `pace-calc`）⇒ 它**不会**
+    // 被修复器看到。只改映射不补边 ⇒ 本节点先于 `analyst-brief` / `j-*` 执行、读到全 Null，
+    // 且全程零报错（静默失效）⇒ 这 11 条边必须在此**显式**补齐。
+    let mut dq_rewrites = 0usize;
+    {
+        let dq = nodes
+            .iter_mut()
+            .find(|n| n.base_id() == "data-quality")
+            .ok_or_else(|| "派生结果缺少 `data-quality` 节点".to_string())?;
+        let WorkflowNode::Code(dq) = dq else {
+            return Err("`data-quality` 在源图里不是 Code 节点 —— 派生假设已失效".to_string());
+        };
+
+        for (abbr, jev_id, segment) in FAST_DQ_DIMENSIONS {
+            // 4 类键同形改写：只换**产地**，不换形态。
+            let rewrites: [(String, String); 4] = [
+                (format!("{abbr}_verdict"), jev_id.to_string()),
+                (format!("{abbr}_report"), format!("{FAST_BRIEF_NODE_ID}.result.{segment}")),
+                (format!("{abbr}_untrusted"), format!("{jev_id}.degraded")),
+                (format!("{abbr}_tool_calls"), format!("{jev_id}.tool_calls_made")),
+            ];
+            for (key, value) in rewrites {
+                // ⚠ 用 `get_mut` 而不是 `insert`：键**必须已存在**（源图定义的 50 路之一），
+                //   缺键说明源图已改 ⇒ 本步的假设失效，必须显式失败而不是静默新增一路。
+                let slot = dq.config.input_mapping.get_mut(&key).ok_or_else(|| {
+                    format!(
+                        "`data-quality` 缺少 `{key}` 映射 —— 源图该节点已改，\
+                         快速链的分析师侧输入重指向假设已失效"
+                    )
+                })?;
+                *slot = value;
+                dq_rewrites += 1;
+            }
+            edges.push(direct_edge(&format!("e-{jev_id}-data-quality"), jev_id, "data-quality"));
+        }
+
+        // `catalyst_level`：源图取自 `a-catalyst.content.verdict.catalyst_level`（等级文案），
+        // 快速链没有该 Agent ⇒ 改取 `j-catalyst.category`（同属**非空字符串**，同时满足
+        // `pm_compute_factor_completeness` 的存在性判据与 `missing_factors` 的
+        // `== ""` / `== "无"` 判据）。**不可**改指 `j-catalyst` 本身（map）——
+        // 字符串比较遇 map 会抛运行期错误，整个节点失败（比少一个因子严重得多）。
+        let (_, j_catalyst, _) = FAST_DQ_DIMENSIONS
+            .iter()
+            .find(|(_, _, segment)| *segment == "catalyst")
+            .ok_or_else(|| "`FAST_DQ_DIMENSIONS` 缺少 catalyst 维度定义".to_string())?;
+        let slot = dq
+            .config
+            .input_mapping
+            .get_mut("catalyst_level")
+            .ok_or_else(|| "`data-quality` 缺少 `catalyst_level` 映射".to_string())?;
+        *slot = format!("{j_catalyst}.category");
+        dq_rewrites += 1;
+
+        // `consensus_score` 是**唯一**保留原路径的一路（不改写，也刻意不删）：
+        // 它取自 `debate-convergence.content.consensus_score`，而快速链没有辩论收敛节点，
+        // 也没有等价的**数值**共识产物（`j-divergence` 给的是「一致/分歧/严重分歧」类别串，
+        // 改指它会在 `consensus_score <= 0.0` 的数值比较处抛错）⇒ 保留原路径、恒 Null、
+        // 「共识评分」诚实记为缺失因子，而不是拿不同量纲的值冒充（本仓禁止假声明）。
+    }
+    edges.push(direct_edge(
+        &format!("e-{FAST_BRIEF_NODE_ID}-data-quality"),
+        FAST_BRIEF_NODE_ID,
+        "data-quality",
+    ));
+
+    tracing::info!(
+        "[stock_analysis_setup] 快速链配置层改造完成：新增 `{FAST_TRADER_PROXY_NODE_ID}`，\
+         trader 前缀改写 {rewritten} 处，摘除 portfolio-mgr 的 {dropped_dqi:?}，\
+         quality-gate 判据改为 `{FAST_QUALITY_GATE_INPUT_VAR}`，\
+         `{FAST_BRIEF_NODE_ID}` 换用 raw-digest.rhai（{} 路输入），\
+         Jev 判定节点 {} 个（段 B/C/D/E）+ 聚合器 2 个（{} / {}），\
+         `data-quality` 分析师侧重指向 {dq_rewrites} 路（本链无 `a-*`），\
+         `{FAST_EXPLAINER_NODE_ID}` 上下文来源补至 {} 个",
+        FAST_BRIEF_INPUTS.len(),
+        specs.len(),
+        FAST_JEV_VERDICTS_VAR,
+        FAST_JEV_DEBATE_VAR,
+        explainer_ctx_len
+    );
+    Ok(())
+}
+
+/// 从源图派生快速链的节点与边。
+///
+/// 步骤：① 保留集 = 必备（缺失即错）∪ 可选（存在才留）；② 按保留集筛选节点；
+/// ③ 父节点被裁掉时清空 `parent_id`（否则画布分组指向不存在的父级）；
+/// ④ 边裁剪（两端都在保留集才留）；⑤ 配置层改造 + 追加段 B/C/D/E 的 Jev 判定节点与
+/// 其显式边（见 [`apply_fast_chain_overrides`]）；⑥ 孤儿修复（见 [`repair_orphan_nodes`]）。
+///
+/// `decision_model` 是段 B/C/D/E 全部 `j-*` 判定节点共用的 Jev 决策模型
+/// （`None` ⇒ 各节点留空 `model`，运行时回落会话模型）。
+///
+/// ## 为什么不给被裁掉的「Trader Agent」补一张 `enabled=false` 的占位节点
+///
+/// `trader` 是全链共享变量（`portfolio-mgr` 从 `trader.content.verdict.*` 读方向 / 置信度 /
+/// 目标价 / 止损）。曾考虑保留源图字面量作占位以「声明存在」，实测两条理由否掉它：
+///   1. **禁用节点不写变量**：`compute_ready_nodes` 用 `n.base_enabled()` 过滤调度
+///      （`dag_store.rs:312`），`enabled=false` 的节点永不执行 ⇒ 它既不写 `trader`，
+///      也就完全不能缓解「下游读不到值」——占位只保留了一个**画布上的空盒子**；
+///   2. **它会污染终态**：死锁处理里「禁用节点」只有在**直接上游全部 Failed/Skipped** 时
+///      才被判 `SKIPPED_DISABLED`（`engine/mod.rs:2879-2892`）；而上游是 Completed 时该分支
+///      `return None` ⇒ 节点永远停在 Pending，整个 run 被降级为 `PartiallyCompleted`。
+///
+/// ⇒ 结论：真正的组装由下游任务的 `trader-proxy` 节点（Code，`output_var = "trader"`）
+///    以**可执行**的形式承接；在那之前本链的 `trader_*` 输入走既有 `present()` 守卫 +
+///    波动率 fallback（与源链「trader 失败」时同一降级路径），不做任何假声明。
+fn derive_fast_workflow_graph(
+    source_nodes: &[axagent_harness::workflow_types::WorkflowNode],
+    source_edges: &[axagent_harness::workflow_types::WorkflowEdge],
+    decision_model: Option<&str>,
+) -> Result<DerivedFastGraph, String> {
+    use std::collections::{HashMap, HashSet};
+
+    let source_ids: HashSet<&str> = source_nodes.iter().map(|n| n.base_id()).collect();
+
+    // ① 保留集
+    let mut keep: HashSet<&str> = HashSet::new();
+    for id in FAST_REQUIRED_NODE_IDS {
+        if !source_ids.contains(*id) {
+            return Err(format!(
+                "源模板 `{SOURCE_TEMPLATE_ID}` 缺少必备节点 `{id}` —— \
+                 若源图确实删改了该节点，需同步更新 FAST_REQUIRED_NODE_IDS 并确认快速链仍然成立"
+            ));
+        }
+        keep.insert(*id);
+    }
+    for id in FAST_OPTIONAL_NODE_IDS {
+        if source_ids.contains(*id) {
+            keep.insert(*id);
+        }
+    }
+
+    // ② 节点（保持源图顺序，便于人工比对派生结果与源图）
+    let mut nodes: Vec<axagent_harness::workflow_types::WorkflowNode> =
+        source_nodes.iter().filter(|n| keep.contains(n.base_id())).cloned().collect();
+
+    // ③ 容器归属：父节点未保留 ⇒ 清空，避免指向不存在的父级
+    for node in nodes.iter_mut() {
+        let parent_dropped =
+            node.base().parent_id.as_deref().is_some_and(|parent| !keep.contains(parent));
+        if parent_dropped {
+            node.base_mut().parent_id = None;
+        }
+    }
+
+    // ④ 边裁剪 + **完全同形的重复边**合并
+    //
+    // ⚠ 源图**自身**就带重复边：`e-pace-calc-portfolio-mgr` 在源链里被 push 了两次
+    //   （portfolio-mgr 依赖段与 pace-calc 段各一次，两端与 handle 完全相同，纯冗余）。
+    //   H1 禁止改源图，而快速链的 `validate_fast_workflow_graph` ① 要求边 id 唯一
+    //   ⇒ 在此合并（保留首条）并打 warn，让该源图缺陷**可见**，而不是静默带进新图。
+    //
+    // 判据边界（**不可**放宽为「按 id 去重」）：只有 6 个字段全同才算冗余副本；
+    //   若 id 相同而两端 / handle / 类型不同，那是**真冲突**（两条不同依赖共用一个 id），
+    //   机械合并会静默丢掉一条依赖 ⇒ 直接报错，交由人修源图。
+    let mut edges: Vec<axagent_harness::workflow_types::WorkflowEdge> = Vec::new();
+    let mut seen: HashMap<&str, &axagent_harness::workflow_types::WorkflowEdge> = HashMap::new();
+    for e in source_edges
+        .iter()
+        .filter(|e| keep.contains(e.source.as_str()) && keep.contains(e.target.as_str()))
+    {
+        if let Some(prev) = seen.get(e.id.as_str()) {
+            let identical = prev.source == e.source
+                && prev.target == e.target
+                && prev.source_handle == e.source_handle
+                && prev.target_handle == e.target_handle
+                && prev.edge_type == e.edge_type
+                && prev.label == e.label;
+            if identical {
+                tracing::warn!(
+                    "[stock_analysis_setup] 源模板 `{SOURCE_TEMPLATE_ID}` 的边 `{id}` \
+                     重复出现且完全同形（{src} → {tgt}），快速链已合并为一条；\
+                     建议修正源图（快速链只读源图，不在派生中改它）",
+                    id = e.id,
+                    src = e.source,
+                    tgt = e.target
+                );
+                continue;
+            }
+            return Err(format!(
+                "源模板 `{SOURCE_TEMPLATE_ID}` 的边 id `{id}` 被两条**不同**依赖共用：\
+                 `{prev_src} → {prev_tgt}` 与 `{src} → {tgt}`。这无法机械合并（合并会丢依赖），\
+                 请先在源图里给其中一条换 id",
+                id = e.id,
+                prev_src = prev.source,
+                prev_tgt = prev.target,
+                src = e.source,
+                tgt = e.target
+            ));
+        }
+        seen.insert(e.id.as_str(), e);
+        edges.push(e.clone());
+    }
+
+    // ⑤ 快速链专属的**配置层**改造（追加 `trader-proxy`、改写 `trader` 前缀、
+    //    换掉 `quality-gate` 判据）—— 必须排在孤儿修复之前：新节点自带入边，
+    //    否则孤儿修复会给它挂到 `trigger` 上，丢掉「等 data-quality 就绪」的语义。
+    apply_fast_chain_overrides(&mut nodes, &mut edges, decision_model)?;
+
+    // ⑥ 孤儿修复
+    repair_orphan_nodes(&nodes, &mut edges, &keep);
+
+    Ok(DerivedFastGraph { nodes, edges })
+}
+
+/// 派生结果的结构不变式（任一不成立 ⇒ 拒绝落库，而不是把一个「看似完整」的坏图写进 DB）。
+///
+/// 判据：
+///   ① 节点 id 唯一、边 id 唯一（重复 id 会让前端画布与调度器各自按不同假设工作）；
+///   ② 无悬挂边（两端都必须存在）、无自环；
+///   ③ 除 trigger 外每个节点入度 ≥ 1（**孤立节点**会「看起来在图里，实际永不执行」）；
+///   ④ trigger 可达全部节点（③ 只保证有入边，不保证与 trigger 连通）；
+///   ⑤ 无环（Kahn）。
+fn validate_fast_workflow_graph(
+    nodes: &[axagent_harness::workflow_types::WorkflowNode],
+    edges: &[axagent_harness::workflow_types::WorkflowEdge],
+) -> Result<(), String> {
+    use std::collections::{HashMap, HashSet, VecDeque};
+
+    const TRIGGER_ID: &str = "trigger";
+
+    let mut ids: HashSet<&str> = HashSet::new();
+    for n in nodes {
+        if !ids.insert(n.base_id()) {
+            return Err(format!("存在重复节点 id `{}`", n.base_id()));
+        }
+    }
+    if !ids.contains(TRIGGER_ID) {
+        return Err(format!("缺少 `{TRIGGER_ID}` 节点"));
+    }
+
+    // ①② 边
+    let mut edge_ids: HashSet<&str> = HashSet::new();
+    for e in edges {
+        if !edge_ids.insert(e.id.as_str()) {
+            return Err(format!("存在重复边 id `{}`", e.id));
+        }
+        if !ids.contains(e.source.as_str()) || !ids.contains(e.target.as_str()) {
+            return Err(format!("悬挂边 `{}`（{} → {}）", e.id, e.source, e.target));
+        }
+        if e.source == e.target {
+            return Err(format!("自环边 `{}`（{}）", e.id, e.source));
+        }
+    }
+
+    // 邻接 + 入度
+    let mut adjacency: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut in_degree: HashMap<&str, usize> = HashMap::new();
+    for id in ids.iter() {
+        adjacency.entry(id).or_default();
+        in_degree.entry(id).or_insert(0);
+    }
+    for e in edges {
+        adjacency.entry(e.source.as_str()).or_default().push(e.target.as_str());
+        *in_degree.entry(e.target.as_str()).or_insert(0) += 1;
+    }
+
+    // ③ 无孤立节点
+    for n in nodes {
+        let id = n.base_id();
+        if id == TRIGGER_ID {
+            continue;
+        }
+        if in_degree.get(id).copied().unwrap_or(0) == 0 {
+            return Err(format!("孤立节点 `{id}`（入度 0，永不执行）"));
+        }
+    }
+
+    // ④ trigger 可达全部节点
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut queue: VecDeque<&str> = VecDeque::from([TRIGGER_ID]);
+    seen.insert(TRIGGER_ID);
+    while let Some(cur) = queue.pop_front() {
+        for next in adjacency.get(cur).into_iter().flatten().copied() {
+            if seen.insert(next) {
+                queue.push_back(next);
+            }
+        }
+    }
+    if seen.len() != ids.len() {
+        let mut unreachable: Vec<&str> =
+            ids.iter().copied().filter(|id| !seen.contains(id)).collect();
+        unreachable.sort();
+        return Err(format!("以下节点从 `{TRIGGER_ID}` 不可达: {unreachable:?}"));
+    }
+
+    // ⑤ 无环（Kahn：反复摘除入度 0 的节点，摘不完即有环）
+    let mut work: HashMap<&str, usize> = in_degree.clone();
+    let mut queue: VecDeque<&str> =
+        work.iter().filter(|(_, d)| **d == 0).map(|(id, _)| *id).collect();
+    let mut removed = 0usize;
+    while let Some(cur) = queue.pop_front() {
+        removed += 1;
+        for next in adjacency.get(cur).into_iter().flatten() {
+            if let Some(d) = work.get_mut(next) {
+                *d = d.saturating_sub(1);
+                if *d == 0 {
+                    queue.push_back(next);
+                }
+            }
+        }
+    }
+    if removed != ids.len() {
+        return Err(format!("图存在环（Kahn 仅摘除 {removed}/{} 个节点）", ids.len()));
+    }
+
+    Ok(())
+}
+
+/// 种子化快速链模板 —— 从已落库的 `stock-analysis` 行派生。
+///
+/// ⚠ 调用顺序要求：必须在 `seed_stock_analysis_workflow_template` **之后**调用
+/// （源行不存在时本函数直接报错，不做任何静默降级）。
+pub(crate) async fn seed_stock_analysis_fast_workflow_template(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<(), String> {
+    use crate::commands::error::ErrorResponse;
+    use axagent_entities::workflow_template;
+    use axagent_harness::workflow_types::{
+        TriggerConfig, TriggerType, Variable, WorkflowEdge, WorkflowNode,
+    };
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    // ── 读派生源 ─────────────────────────────────────────────────────────────────────
+    let source = workflow_template::Entity::find_by_id(SOURCE_TEMPLATE_ID)
+        .one(db)
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(stock_setup::INTERNAL)
+                .with_detail(format!("查询派生源模板失败: {e}"))
+        })?
+        .ok_or_else(|| {
+            ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!(
+                "派生源模板 `{SOURCE_TEMPLATE_ID}` 不存在：快速链必须在它之后种子化"
+            ))
+        })?;
+
+    let source_nodes: Vec<WorkflowNode> = serde_json::from_str(&source.nodes).map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL)
+            .with_detail(format!("解析派生源节点失败（源图 JSON 可能已损坏）: {e}"))
+    })?;
+    let source_edges: Vec<WorkflowEdge> = serde_json::from_str(&source.edges).map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL)
+            .with_detail(format!("解析派生源边失败（源图 JSON 可能已损坏）: {e}"))
+    })?;
+
+    // ── 派生 + 校验 ─────────────────────────────────────────────────────────────────
+    // Jev 决策模型：段 B/C/D/E 的 29 个 `j-*` 节点共用（解析逻辑与趋势智选快速链同一份，
+    // 见 `seed_serenity_fast::resolve_decision_model`；未配置 ⇒ 留空回落会话模型）。
+    let decision_model = super::seed_serenity_fast::resolve_decision_model(db).await;
+    let DerivedFastGraph { nodes, edges } =
+        derive_fast_workflow_graph(&source_nodes, &source_edges, decision_model.as_deref())
+            .map_err(|msg| {
+                ErrorResponse::new(stock_setup::INTERNAL)
+                    .with_detail(format!("派生快速链失败: {msg}"))
+            })?;
+    validate_fast_workflow_graph(&nodes, &edges).map_err(|msg| {
+        ErrorResponse::new(stock_setup::INTERNAL)
+            .with_detail(format!("快速链图结构校验失败（拒绝落库）: {msg}"))
+    })?;
+
+    let nodes_json = serde_json::to_string(&nodes).map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化快速链节点失败: {e}"))
+    })?;
+    let edges_json = serde_json::to_string(&edges).map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化快速链边失败: {e}"))
+    })?;
+
+    // ── 变量：默认值来自同一份 `seed_variables`（两链共用一套面板参数），并保留用户改过的值 ──
+    let existing =
+        workflow_template::Entity::find_by_id(FAST_TEMPLATE_ID).one(db).await.map_err(|e| {
+            ErrorResponse::new(stock_setup::INTERNAL)
+                .with_detail(format!("查询快速链模板失败: {e}"))
+        })?;
+
+    use super::seed_variables::build_template_variables;
+    let variables: Vec<Variable> = build_template_variables();
+    let variables_default = serde_json::to_string(&variables).map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化变量失败: {e}"))
+    })?;
+    let variables_val = match existing.as_ref().and_then(|row| row.variables.as_deref()) {
+        Some(old) if !old.is_empty() => {
+            merge_variable_values(&variables_default, old).unwrap_or(variables_default)
+        },
+        _ => variables_default,
+    };
+
+    // ── 内容门禁（判据见本段开头）：图与变量都一致 ⇒ 跳过 ─────────────────────────────
+    // ⚠ 一律走 `super::same_json`（逐值比较）而非字符串比较 —— 理由见其文档
+    //   （`variables` 经 `merge_variable_values` 往返后 key 顺序会变）。
+    if let Some(row) = existing.as_ref() {
+        let same_graph =
+            super::same_json(&row.nodes, &nodes_json) && super::same_json(&row.edges, &edges_json);
+        let same_variables =
+            row.variables.as_deref().is_some_and(|v| super::same_json(v, &variables_val));
+        if same_graph && same_variables {
+            tracing::info!(
+                "[stock_analysis_setup] 快速链模板与派生结果一致，跳过种子化 (TEMPLATE_ID={FAST_TEMPLATE_ID}, nodes={}, edges={})",
+                nodes.len(),
+                edges.len()
+            );
+            return Ok(());
+        }
+        tracing::info!(
+            "[stock_analysis_setup] 快速链模板与派生结果不一致，重建 (same_graph={same_graph}, same_variables={same_variables}, nodes={}, edges={})",
+            nodes.len(),
+            edges.len()
+        );
+    }
+
+    let tags = serde_json::to_string(&["stock", "analysis", "A股", "fast"]).map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化标签失败: {e}"))
+    })?;
+
+    // 先删再插，与兄弟种子同一手法（SeaORM 的 .save() 对已存在行的 update 不可靠）
+    // 首次播种时该行本就不存在，`delete_by_id` 对 0 行命中不报错，只有 DB 层真出错才落日志。
+    if let Err(e) = workflow_template::Entity::delete_by_id(FAST_TEMPLATE_ID).exec(db).await {
+        tracing::warn!("[stock_analysis_setup] 重建快速链模板前删除旧行失败 (非致命): {e}");
+    }
+
+    // 软门禁：与兄弟种子同一份判据（harness 的端口公理扫描），在此记录结构性死链，不阻断启动
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("stock_analysis_setup:seed_stock_analysis_fast:{FAST_TEMPLATE_ID}"),
+        &nodes_json,
+        &edges_json,
+    );
+
+    let now = chrono::Utc::now().timestamp_millis();
+
+    workflow_template::ActiveModel {
+        hooks_config: Set(Some(
+            // 与源模板同一组钩子：precheck / enhance 保证两条链的变量注入口径零漂移
+            // （同一份 `stock-analysis-enhance`），persist 在业务封装路径下自动跳过。
+            serde_json::to_string(&serde_json::json!({
+                "pre_exec": ["stock-analysis-precheck", "stock-analysis-enhance"],
+                "post_exec": ["stock-analysis-persist"],
+            }))
+            .map_err(|e| {
+                ErrorResponse::new(stock_setup::INTERNAL)
+                    .with_detail(format!("序列化 hooks_config 失败: {e}"))
+            })?,
+        )),
+        id: Set(FAST_TEMPLATE_ID.to_string()),
+        cluster_id: Set(Some("equity".to_string())),
+        // 与源模板**刻意不同**的路由：两条链是两个入口，路由键必须分开。
+        route_path: Set(Some("/finance/equity/fast-analysis".to_string())),
+        name: Set("A股快速分析（Jev 判定链）".to_string()),
+        description: Set(Some(
+            "Jev 秒级判定链：取数 → 多维分类 → 公式层决策 → 结论解释；不含分析师/辩论/风控的长篇论述"
+                .to_string(),
+        )),
+        icon: Set("flash".into()),
+        tags: Set(Some(tags)),
+        version: Set(FAST_TEMPLATE_VERSION),
+        is_preset: Set(true),
+        is_editable: Set(true),
+        is_public: Set(true),
+        // ⚠ 必须 Manual：`init/trigger_recovery.rs` 会为**任何**声明 Schedule 的模板注册
+        // 定时触发器（它按 `trigger_type` 分流，不看模板 id）⇒ 若这里抄源模板的
+        // `0 9 * * 1-5`，快速链会被每日自动执行一次，与本链「按钮手动触发」的定位冲突。
+        trigger_config: Set(Some(
+            serde_json::to_string(&TriggerConfig {
+                trigger_type: TriggerType::Manual,
+                config: serde_json::json!({"stock_code": "{{stock_code}}"}),
+            })
+            .map_err(|e| {
+                ErrorResponse::new(stock_setup::INTERNAL)
+                    .with_detail(format!("序列化 trigger_config 失败: {e}"))
+            })?,
+        )),
+        nodes: Set(nodes_json),
+        edges: Set(edges_json),
+        // 输入/输出 schema、错误配置、工具清单：与源模板同源同形（复用而非重写，
+        // 避免两链在 IPC 契约层出现细微差异）。
+        input_schema: Set(source.input_schema.clone()),
+        output_schema: Set(source.output_schema.clone()),
+        variables: Set(Some(variables_val)),
+        error_config: Set(source.error_config.clone()),
+        composite_source: Set(None),
+        tool_defs: Set(source.tool_defs.clone()),
+        mission_hash: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("写入快速链模板失败: {e}"))
+    })?;
+
+    tracing::info!(
+        "[stock_analysis_setup] 快速链模板已种子化完成: TEMPLATE_ID={FAST_TEMPLATE_ID}, 派生源={SOURCE_TEMPLATE_ID}, nodes={}, edges={}",
+        nodes.len(),
+        edges.len()
+    );
+    Ok(())
+}
+
+// ⚠ 本测试模块**必须**留在文件末尾：`clippy::items_after_test_module` 只在 clippy 下暴露
+//   （`cargo check` / `cargo test` 都不跑），插在中间会让后续所有代码踩该 lint。
+#[cfg(test)]
+mod fast_workflow_derivation_tests {
+    use super::{
+        FAST_BRIEF_INPUTS, FAST_BRIEF_NODE_ID, FAST_DQ_DIMENSIONS, FAST_EXPLAINER_NODE_ID,
+        FAST_JEV_DEBATE_NODE_IDS, FAST_JEV_DEBATE_VAR, FAST_JEV_DECISION_NODE_IDS,
+        FAST_JEV_DIMENSIONS, FAST_JEV_SUMMARY_NODE_IDS, FAST_JEV_TRADER_INPUTS,
+        FAST_JEV_VERDICTS_VAR, FAST_QUALITY_GATE_CASE_EXPR, FAST_QUALITY_GATE_INPUT_VAR,
+        FAST_REQUIRED_NODE_IDS, FAST_TEMPLATE_ID, FAST_TRADER_PROXY_NODE_ID, SOURCE_TEMPLATE_ID,
+        TRADER_AGENT_PREFIX, TRADER_FAST_PREFIX, fast_jev_nodes,
+        seed_stock_analysis_fast_workflow_template, seed_stock_analysis_workflow_template,
+        validate_fast_workflow_graph,
+    };
+    use axagent_entities::workflow_template;
+    use axagent_harness::workflow_types::{WorkflowEdge, WorkflowNode};
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+
+    async fn fresh_db() -> axagent_dao::db::DbHandle {
+        axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")
+    }
+
+    /// 先把派生源种出来，再种快速链（顺序即生产顺序，缺一不可）。
+    async fn seed_both(db: &DatabaseConnection) {
+        seed_stock_analysis_workflow_template(db).await.expect("原链种子化应成功");
+        seed_stock_analysis_fast_workflow_template(db)
+            .await
+            .expect("快速链种子化应成功（派生源已就位）");
+    }
+
+    async fn row(db: &DatabaseConnection, id: &str) -> workflow_template::Model {
+        workflow_template::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .unwrap_or_else(|| panic!("模板 `{id}` 应已存在"))
+    }
+
+    fn parse_nodes(model: &workflow_template::Model) -> Vec<WorkflowNode> {
+        serde_json::from_str(&model.nodes).expect("nodes 应是 JSON 数组")
+    }
+
+    fn parse_edges(model: &workflow_template::Model) -> Vec<WorkflowEdge> {
+        serde_json::from_str(&model.edges).expect("edges 应是 JSON 数组")
+    }
+
+    async fn set_name(db: &DatabaseConnection, id: &str, name: &str) {
+        let mut am: workflow_template::ActiveModel = row(db, id).await.into();
+        am.name = Set(name.to_string());
+        am.update(db).await.expect("改 name 失败");
+    }
+
+    /// 删掉指定模板里的某个节点（**只动该行**，模拟「库里的图与常量定义不一致」）。
+    async fn drop_node(db: &DatabaseConnection, id: &str, node_id: &str) {
+        let model = row(db, id).await;
+        let mut nodes: Vec<serde_json::Value> =
+            serde_json::from_str(&model.nodes).expect("nodes 应是 JSON 数组");
+        nodes.retain(|n| n.get("id").and_then(|v| v.as_str()) != Some(node_id));
+        let mut am: workflow_template::ActiveModel = model.into();
+        am.nodes = Set(serde_json::to_string(&nodes).expect("序列化失败"));
+        am.update(db).await.expect("改 nodes 失败");
+    }
+
+    fn node_ids(model: &workflow_template::Model) -> Vec<String> {
+        parse_nodes(model).iter().map(|n| n.base_id().to_string()).collect()
+    }
+
+    /// 核心测试：派生结果必须是「必备齐全 + 不含源图 agent + 结构合法」的图。
+    #[tokio::test]
+    async fn derived_fast_graph_is_complete_and_structurally_valid() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+
+        // H1 的机械守门：**先取源图快照**，再种快速链，最后逐字比对 —— 派生只读源行。
+        seed_stock_analysis_workflow_template(db).await.expect("原链种子化应成功");
+        let source_before = row(db, SOURCE_TEMPLATE_ID).await;
+        let (nodes_before, edges_before) =
+            (source_before.nodes.clone(), source_before.edges.clone());
+
+        seed_stock_analysis_fast_workflow_template(db).await.expect("快速链种子化应成功");
+
+        let source_after = row(db, SOURCE_TEMPLATE_ID).await;
+        assert_eq!(nodes_before, source_after.nodes, "H1 被破坏：快速链种子改动了源图的 nodes");
+        assert_eq!(edges_before, source_after.edges, "H1 被破坏：快速链种子改动了源图的 edges");
+
+        let fast = row(db, FAST_TEMPLATE_ID).await;
+        let fast_nodes = parse_nodes(&fast);
+        let fast_edges = parse_edges(&fast);
+        let ids: std::collections::HashSet<String> = node_ids(&fast).into_iter().collect();
+
+        // ① 必备节点齐全（含段 E 落库契约三节点 —— 缺任一项落库会走占位决策分支）
+        for id in FAST_REQUIRED_NODE_IDS {
+            assert!(ids.contains(*id), "快速链缺必备节点 `{id}`");
+        }
+        for id in [
+            "quality-fallback",
+            "portfolio-risk-gate",
+            "portfolio-mgr",
+            FAST_TRADER_PROXY_NODE_ID,
+            "end-output",
+        ] {
+            assert!(ids.contains(id), "快速链缺落库/契约节点 `{id}`");
+        }
+
+        // ② 快速链的 Agent 节点必须**恰为**段 E 契约内的那些（分析师 / 辩论 / 风控 / 研究员
+        //    一个都不许留）。期望集由「源图 ∩ FAST_REQUIRED_NODE_IDS」现算，不在测试里再抄一份名单。
+        let source_agent_ids: std::collections::HashSet<String> = parse_nodes(&source_after)
+            .iter()
+            .filter(|n| matches!(n, WorkflowNode::Agent(_)))
+            .map(|n| n.base_id().to_string())
+            .collect();
+        assert!(
+            source_agent_ids.len() >= 20,
+            "源图 Agent 节点数异常（{} 个），测试前提可能已失效",
+            source_agent_ids.len()
+        );
+        let fast_agent_ids: std::collections::HashSet<String> = fast_nodes
+            .iter()
+            .filter(|n| matches!(n, WorkflowNode::Agent(_)))
+            .map(|n| n.base_id().to_string())
+            .collect();
+        let expected_agent_ids: std::collections::HashSet<String> = FAST_REQUIRED_NODE_IDS
+            .iter()
+            .filter(|id| source_agent_ids.contains(**id))
+            .map(|id| (*id).to_string())
+            .collect();
+        assert_eq!(
+            fast_agent_ids, expected_agent_ids,
+            "快速链的 Agent 节点集应恰为段 E 契约内的 Agent；差集里的源图 Agent 说明裁剪没生效"
+        );
+        assert!(
+            fast_agent_ids.len() < source_agent_ids.len(),
+            "快速链不该保留与源图等量的 Agent 节点"
+        );
+
+        // ③ 结构不变式（与种子内同一份判据）：无重复 id / 无悬挂边 / 无孤立节点 / trigger 全可达 / 无环
+        validate_fast_workflow_graph(&fast_nodes, &fast_edges).expect("派生图应满足全部结构不变式");
+
+        // ④ trigger 必须能走到 end-output（否则链跑完没有聚合输出）
+        let adjacency: std::collections::HashMap<&str, Vec<&str>> = fast_edges.iter().fold(
+            Default::default(),
+            |mut acc: std::collections::HashMap<&str, Vec<&str>>, e| {
+                acc.entry(e.source.as_str()).or_default().push(e.target.as_str());
+                acc
+            },
+        );
+        let mut seen = std::collections::HashSet::new();
+        let mut stack = vec!["trigger"];
+        seen.insert("trigger");
+        while let Some(cur) = stack.pop() {
+            for next in adjacency.get(cur).into_iter().flatten() {
+                if seen.insert(*next) {
+                    stack.push(*next);
+                }
+            }
+        }
+        assert!(seen.contains("end-output"), "trigger 无法到达 end-output");
+
+        // ⑤ H1 的**脚本级**守门：派生只改派生副本，源图的 `analyst-brief` 必须仍是原脚本。
+        //    判据锚在两侧各自独有的函数名上（原脚本 `format_analyst` / 新脚本 `render_nested`），
+        //    而不是「包含某个共享工具名」——后者在任一脚本被改时都会假绿。
+        let brief_code_of = |graph: &[WorkflowNode]| -> String {
+            graph
+                .iter()
+                .find_map(|n| match n {
+                    WorkflowNode::Code(c) if c.base.id == FAST_BRIEF_NODE_ID => {
+                        Some(c.config.code.clone())
+                    },
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("图里应含 `{FAST_BRIEF_NODE_ID}` Code 节点"))
+        };
+        let src_code = brief_code_of(&parse_nodes(&source_after));
+        assert!(
+            src_code.contains("fn format_analyst"),
+            "H1 被破坏：源图 `{FAST_BRIEF_NODE_ID}` 的脚本已被改动"
+        );
+        assert!(
+            !src_code.contains("fn render_nested"),
+            "H1 被破坏：源图 `{FAST_BRIEF_NODE_ID}` 被换成了快速链脚本"
+        );
+
+        // ⑥ 派生侧：脚本已换、`output_var` 未换、20 路输入全部接线到位。
+        let fast_brief_code = brief_code_of(&fast_nodes);
+        assert!(
+            fast_brief_code.contains("fn render_nested"),
+            "快速链 `{FAST_BRIEF_NODE_ID}` 应换用 raw-digest.rhai（分维度摘要）"
+        );
+        assert!(
+            !fast_brief_code.contains("fn format_analyst"),
+            "快速链 `{FAST_BRIEF_NODE_ID}` 不该再跑原脚本 —— 本链没有 verdict map 可读"
+        );
+        let fast_brief = fast_nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Code(c) if c.base.id == FAST_BRIEF_NODE_ID => Some(c),
+                _ => None,
+            })
+            .expect("快速链应含 analyst-brief Code 节点");
+        assert_eq!(
+            fast_brief.config.output_var, FAST_BRIEF_NODE_ID,
+            "`output_var` 必须与节点 id 同名 —— 段 B/段 F 的引用都写 `{FAST_BRIEF_NODE_ID}.result.*`"
+        );
+        for (key, path) in FAST_BRIEF_INPUTS {
+            assert_eq!(
+                fast_brief.config.input_mapping.get(key).map(String::as_str),
+                Some(path),
+                "快速链 `{FAST_BRIEF_NODE_ID}` 的 `{key}` 映射不符"
+            );
+            let root = path.split('.').next().unwrap_or(path);
+            assert!(ids.contains(root), "`{key}` 的上游 `{root}` 不在派生图内");
+            assert!(
+                adjacency.get(root).is_some_and(|v| v.contains(&FAST_BRIEF_NODE_ID)),
+                "`{root}` → `{FAST_BRIEF_NODE_ID}` 的边缺失（孤儿修复应已补上）"
+            );
+        }
+    }
+
+    /// 门禁三态：内容一致跳过 → 图被改动则重建。
+    #[tokio::test]
+    async fn fast_seed_skips_when_identical_and_rebuilds_when_differs() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+
+        assert_eq!(row(db, FAST_TEMPLATE_ID).await.version, super::FAST_TEMPLATE_VERSION);
+
+        // ① 内容一致 ⇒ 跳过：哨兵名必须存活（比比对 updated_at 更可靠 —— 同一毫秒内的两次写入无法区分）
+        set_name(db, FAST_TEMPLATE_ID, "SENTINEL-KEEP").await;
+        seed_stock_analysis_fast_workflow_template(db).await.expect("二次种子化应成功");
+        assert_eq!(
+            row(db, FAST_TEMPLATE_ID).await.name,
+            "SENTINEL-KEEP",
+            "内容一致时应跳过重建（哨兵被覆盖 ⇒ 门禁失效，每次启动都会重写模板）"
+        );
+
+        // ② 图不一致 ⇒ 重建：删掉一个节点后再种子化，必须恢复到完整图
+        drop_node(db, FAST_TEMPLATE_ID, "t-pledge-data").await;
+        seed_stock_analysis_fast_workflow_template(db).await.expect("重建应成功");
+        let rebuilt = row(db, FAST_TEMPLATE_ID).await;
+        assert!(node_ids(&rebuilt).contains(&"t-pledge-data".to_string()), "内容不一致时应重建");
+        assert_ne!(rebuilt.name, "SENTINEL-KEEP", "重建应写回常量定义的名字");
+    }
+
+    /// 源图缺必备节点时必须**报错**（而不是静默派生出一个缺一块的图）。
+    #[tokio::test]
+    async fn missing_required_node_fails_loudly() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+
+        // 制造「库里源图 ≠ 常量定义」的形态：删掉源图的一个必备节点
+        drop_node(db, SOURCE_TEMPLATE_ID, "t-pledge-data").await;
+        let err = seed_stock_analysis_fast_workflow_template(db)
+            .await
+            .expect_err("源图缺必备节点时应报错");
+        assert!(err.contains("t-pledge-data"), "错误信息应点出缺失的节点 id，实际: {err}");
+    }
+
+    /// 配置层改造（`apply_fast_chain_overrides`）的三件事必须逐项落地。
+    ///
+    /// 这是 H2 的机械守门：两链差异**只允许**落在配置层（脚本零改动、源图零改动），
+    /// 而配置层漏做不会报错 —— 只会静默降级（f7 因子失效 / `target_price` 为空 /
+    /// 仓位钉死 0% / Jev 判定链被 `quality-fallback` 绕开），故逐项断言。
+    #[tokio::test]
+    async fn fast_chain_config_overrides_are_applied() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+
+        let fast = row(db, FAST_TEMPLATE_ID).await;
+        let nodes = parse_nodes(&fast);
+        let edges = parse_edges(&fast);
+
+        // ① 组装节点：输出变量 / 直执行 / 内嵌脚本口径
+        let proxy = nodes
+            .iter()
+            .find(|n| n.base_id() == FAST_TRADER_PROXY_NODE_ID)
+            .expect("快速链应含 trader-proxy 组装节点");
+        let WorkflowNode::Code(proxy) = proxy else {
+            panic!("`{FAST_TRADER_PROXY_NODE_ID}` 应是 Code 节点");
+        };
+        assert_eq!(proxy.config.output_var, "trader", "组装节点必须产出 `trader`（下游映射的根）");
+        assert!(proxy.config.execute_directly, "组装节点应直执行（不经过工具层）");
+        assert!(
+            proxy.config.code.contains(TRADER_FAST_PREFIX),
+            "内嵌脚本应自行产出 `{TRADER_FAST_PREFIX}*` 形态 —— engine 会给 CodeNode 输出再包一层 \
+             `result`，前缀不对则下游全解析为 Null"
+        );
+
+        // ② 接线：`data-quality → trader-proxy → portfolio-mgr`
+        let has_edge = |s: &str, t: &str| {
+            edges.iter().any(|e| e.source.as_str() == s && e.target.as_str() == t)
+        };
+        assert!(
+            has_edge("data-quality", FAST_TRADER_PROXY_NODE_ID),
+            "缺少 data-quality → 组装节点的边"
+        );
+        assert!(
+            has_edge(FAST_TRADER_PROXY_NODE_ID, "portfolio-mgr"),
+            "缺少 组装节点 → portfolio-mgr 的边"
+        );
+
+        // ③ 前缀改写：全图无旧前缀残留，且 9 条 trader 路径逐条指向新前缀
+        //    （8 条在 `portfolio-mgr` + 1 条在 `portfolio-risk-gate`）。
+        //    ⚠ 判据**不能**是「key 以 `trader_` 开头」—— `portfolio-mgr` 另有
+        //    `trader_cap_min_weight` 这类**面板变量自映射**（值就是变量名本身，
+        //    走「参数四道门」的变量通路，与 trader 节点输出无关）。
+        let expected_trader_paths: [(&str, &str, &str); 9] = [
+            ("portfolio-mgr", "trader_direction", "verdict"),
+            ("portfolio-mgr", "trader_confidence", "confidence"),
+            ("portfolio-mgr", "trader_target_price", "targetPrice"),
+            ("portfolio-mgr", "trader_stop_loss", "stopLoss"),
+            ("portfolio-mgr", "trader_time_horizon", "timeHorizon"),
+            ("portfolio-mgr", "trader_holding_days", "expectedHoldingDays"),
+            ("portfolio-mgr", "trader_risk_level", "riskLevel"),
+            ("portfolio-mgr", "trader_evidence_count", "evidence_cited"),
+            ("portfolio-risk-gate", "target_price", "targetPrice"),
+        ];
+
+        for node in &nodes {
+            let WorkflowNode::Code(code) = node else { continue };
+            for (key, value) in &code.config.input_mapping {
+                assert!(
+                    !value.starts_with(TRADER_AGENT_PREFIX),
+                    "`{}` 的映射 `{key}` 仍是旧前缀 `{TRADER_AGENT_PREFIX}`（快速链的 trader 由 \
+                     CodeNode 产出，不改前缀必为 Null）: {value}",
+                    code.base.id
+                );
+            }
+        }
+
+        for (node_id, key, suffix) in expected_trader_paths {
+            let code = nodes
+                .iter()
+                .find_map(|n| match n {
+                    WorkflowNode::Code(c) if c.base.id == node_id => Some(c),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("快速链缺节点 `{node_id}`"));
+            let expected = format!("{TRADER_FAST_PREFIX}{suffix}");
+            assert_eq!(
+                code.config.input_mapping.get(key).map(String::as_str),
+                Some(expected.as_str()),
+                "`{node_id}` 的 `{key}` 应指向 `{expected}`"
+            );
+        }
+
+        // ④ dqi 映射已摘：留着会让 data-quality 恒判 F ⇒ 仓位钉死 0% + Jev 链被绕开
+        let mgr_dqi_keys: Vec<&String> = nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Code(c) if c.base.id == "portfolio-mgr" => Some(c),
+                _ => None,
+            })
+            .expect("快速链应含 portfolio-mgr 节点")
+            .config
+            .input_mapping
+            .keys()
+            .filter(|k| *k == "dqi_score" || *k == "dqi_grade")
+            .collect();
+        assert!(
+            mgr_dqi_keys.is_empty(),
+            "`portfolio-mgr` 不该再消费 data-quality 的 score/grade（本链测不到报告质量），\
+             实际残留: {mgr_dqi_keys:?}"
+        );
+
+        // ⑤ quality-gate 判据换成本链真实可测的因子完整度
+        let qg = nodes
+            .iter()
+            .find(|n| n.base_id() == "quality-gate")
+            .expect("快速链应含 quality-gate 节点");
+        let WorkflowNode::Switch(qg) = qg else {
+            panic!("quality-gate 应是 Switch 节点");
+        };
+        assert_eq!(qg.config.input_var, FAST_QUALITY_GATE_INPUT_VAR);
+        assert_eq!(qg.config.cases.len(), 1, "快速链只保留一条判据");
+        assert_eq!(qg.config.cases[0].value, FAST_QUALITY_GATE_CASE_EXPR);
+        assert_eq!(qg.config.cases[0].label, "acceptable");
+        assert_eq!(
+            qg.config.default_case.as_deref(),
+            Some("low-quality"),
+            "默认分支应保持不变（不合格时仍走 low-quality → quality-fallback）"
+        );
+
+        // ⑥ `analyst-brief`：换脚本 + 换输入，但 id / output_var 一律不动
+        //    （段 B 的 `input_var` 与段 F 的引用都写 `analyst-brief.result.*`）。
+        let brief = nodes
+            .iter()
+            .find(|n| n.base_id() == FAST_BRIEF_NODE_ID)
+            .expect("快速链应含 analyst-brief 节点");
+        let WorkflowNode::Code(brief) = brief else {
+            panic!("`{FAST_BRIEF_NODE_ID}` 应是 Code 节点");
+        };
+        assert_eq!(
+            brief.config.output_var, FAST_BRIEF_NODE_ID,
+            "`output_var` 改名会让段 B / 段 F 的引用整体失效"
+        );
+        assert!(
+            brief.config.code.contains("fn render_nested"),
+            "应换成快速链专属的 raw-digest.rhai（原脚本只认 verdict map 的 bull/bear_score）"
+        );
+        assert!(
+            !brief.config.code.contains("fn format_analyst"),
+            "不该再跑原 `analyst-brief.rhai` —— 本链没有 10 份 verdict map 可读"
+        );
+        assert_eq!(
+            brief.config.input_mapping.len(),
+            FAST_BRIEF_INPUTS.len(),
+            "输入映射条数应恰为 14 路数据源 + 6 条算法腿"
+        );
+        for (key, path) in FAST_BRIEF_INPUTS {
+            assert_eq!(
+                brief.config.input_mapping.get(key).map(String::as_str),
+                Some(path),
+                "`{FAST_BRIEF_NODE_ID}` 的 `{key}` 应指向 `{path}`"
+            );
+        }
+        assert!(
+            brief.base.title.contains("快速链"),
+            "标题应标明是快速链专属口径，避免与源图同名节点混淆：{}",
+            brief.base.title
+        );
+    }
+
+    /// ⑦ 步的机械守门：`data-quality` 的分析师侧输入必须**重指向本链真实存在的产物**。
+    ///
+    /// 唯一理由：这 41 路映射在派生图里全部解析为 Null **不会报错** —— 只会让 `score ≈ 23`
+    /// 恒判 F ⇒ `portfolio-mgr` 仓位钉死 0% + 数据质量弹窗 10 条全 `missing`。而「不改脚本、
+    /// 不新建节点」是 H1/H2 的边界：本步只允许落在配置层，故既要断言**改对了**、也要断言
+    /// **没越界**（脚本未换、无 `a-*` 残留）。
+    #[tokio::test]
+    async fn fast_chain_data_quality_inputs_are_repointed() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+
+        let fast = row(db, FAST_TEMPLATE_ID).await;
+        let nodes = parse_nodes(&fast);
+        let edges = parse_edges(&fast);
+        let ids: std::collections::HashSet<String> = node_ids(&fast).into_iter().collect();
+        let has_edge = |s: &str, t: &str| {
+            edges.iter().any(|e| e.source.as_str() == s && e.target.as_str() == t)
+        };
+
+        let dq = nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Code(c) if c.base.id == "data-quality" => Some(c),
+                _ => None,
+            })
+            .expect("快速链应含 data-quality Code 节点");
+
+        // ① 节点本体与脚本一律复用（H1/H2）：`output_var` 未换名、脚本仍是原 `data-quality.rhai`
+        //    （判据锚在脚本独有的函数名上 —— 换成任何别的脚本都会翻脸）。
+        assert_eq!(dq.config.output_var, "data-quality");
+        assert!(
+            dq.config.code.contains("fn report_quality")
+                && dq.config.code.contains("fn is_untrusted"),
+            "`data-quality` 必须复用同一份 `data-quality.rhai`（本链不另造脚本、不做版本分支）"
+        );
+
+        // ② 4 类键**逐项**：键必须仍在（删键 ⇒ Rhai 在 `present(mk_untrusted)` 处抛
+        //    "Variable not found" ⇒ 节点整体失败，比读到 Null 更糟），且形态与源图一一对应 ——
+        //    verdict=map / report=文本 / untrusted=**裸 bool**（`mk_untrusted == true` 是直接比较）/
+        //    tool_calls=数组或 Null（`attribution_note` 的守卫①）。
+        for (abbr, jev_id, segment) in FAST_DQ_DIMENSIONS {
+            let cases = [
+                (format!("{abbr}_verdict"), (*jev_id).to_string(), "verdict"),
+                (
+                    format!("{abbr}_report"),
+                    format!("{FAST_BRIEF_NODE_ID}.result.{segment}"),
+                    "report",
+                ),
+                (format!("{abbr}_untrusted"), format!("{jev_id}.degraded"), "untrusted"),
+                (format!("{abbr}_tool_calls"), format!("{jev_id}.tool_calls_made"), "tool_calls"),
+            ];
+            for (key, want, kind) in cases {
+                assert_eq!(
+                    dq.config.input_mapping.get(&key).map(String::as_str),
+                    Some(want.as_str()),
+                    "`{abbr}_{kind}` 应指向 `{want}`（键不得删、指向不得留旧路径）"
+                );
+            }
+            assert!(
+                has_edge(jev_id, "data-quality"),
+                "缺边 `{jev_id}` → `data-quality` —— 本节点会先于上游执行、读到全 Null 且**零报错**"
+            );
+        }
+
+        // ③ `catalyst_level` 必须指向**字符串**：`missing_factors` 里有 `catalyst_level == ""` 的
+        //    字符串比较，指到 map（如 `j-catalyst` 本身）会抛运行期错误 —— 比少一个因子严重得多。
+        assert_eq!(
+            dq.config.input_mapping.get("catalyst_level").map(String::as_str),
+            Some("j-catalyst.category")
+        );
+        assert!(
+            has_edge(FAST_BRIEF_NODE_ID, "data-quality"),
+            "缺边 `{FAST_BRIEF_NODE_ID}` → `data-quality` —— 10 路 `*_report` 与 `catalyst_level` 都依赖它"
+        );
+
+        // ④ 全表不得再有 `a-*` 残留，且每个上游根都必须在派生图内（否则恒 Null）。
+        //    `consensus_score` 是**唯一**刻意保留的原路径：它取自
+        //    `debate-convergence.content.consensus_score`，而本链既无辩论收敛节点、也无等价的
+        //    **数值**共识产物（`j-divergence` 给的是类别串，改指它会在 `<= 0.0` 的数值比较处抛错）
+        //    ⇒ 保留原路径、恒 Null，把「共识评分」诚实记为缺失因子。
+        for (key, value) in &dq.config.input_mapping {
+            if key == "consensus_score" {
+                assert!(
+                    value.starts_with("debate-convergence"),
+                    "`consensus_score` 是本表唯一刻意保留的原路径，实际: {value}"
+                );
+                continue;
+            }
+            assert!(
+                !value.starts_with("a-"),
+                "`data-quality` 的映射 `{key}` 仍指向已被裁掉的分析师节点: {value}"
+            );
+            let root = value.split('.').next().unwrap_or(value);
+            assert!(ids.contains(root), "`{key}` 的上游根 `{root}` 不在派生图内 ⇒ 恒 Null");
+        }
+    }
+
+    /// 抠出 prompt 里的 `{...}` 占位符（取值口径与 `render_template` 同源：首个 `}` 之前）。
+    fn placeholders(prompt: &str) -> Vec<&str> {
+        prompt.split('{').skip(1).filter_map(|rest| rest.split('}').next()).collect()
+    }
+
+    /// T7 的机械守门：段 B/C/D/E 的 Jev 判定节点必须**全部**入图，且每条声明都有对应的边。
+    ///
+    /// 唯一理由：漏补一条边**不会报错**。`node_declared_sources` 不识别
+    /// `LlmClassifier` 的 `input_var`（`_ => {}` 分支），`repair_orphan_nodes` 的 `keep`
+    /// 又不含新增节点 ⇒ 该节点会先于上游执行、读到 Null 并静默走 `fallback_label`
+    /// （方向恒中性、档位不参与夹逼、证据清单为空）。故逐条断言。
+    #[tokio::test]
+    async fn fast_chain_jev_nodes_are_wired() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+
+        let fast = row(db, FAST_TEMPLATE_ID).await;
+        let nodes = parse_nodes(&fast);
+        let edges = parse_edges(&fast);
+        let ids: std::collections::HashSet<String> = node_ids(&fast).into_iter().collect();
+        let has_edge = |s: &str, t: &str| {
+            edges.iter().any(|e| e.source.as_str() == s && e.target.as_str() == t)
+        };
+
+        // ① 单点定义的节点数：段 B 10 维度 + 3 汇总 + 段 C 4 辩论 + 段 D 9 风险/估值 + 段 E 3 契约
+        let specs = fast_jev_nodes();
+        assert_eq!(
+            specs.len(),
+            29,
+            "段 B/C/D/E 的 Jev 节点数应为 29（10 + 3 + 4 + 9 + 3）—— 少一个即某个判定没进图"
+        );
+
+        // ② 逐节点：在图内 / 是 llmClassifier / output_var 同名 / input_var 非空且与定义一致 /
+        //    每条声明的上游都有边（**本测试的核心断言**）
+        for spec in &specs {
+            let node = nodes
+                .iter()
+                .find(|n| n.base_id() == spec.id)
+                .unwrap_or_else(|| panic!("快速链缺 Jev 节点 `{}`", spec.id));
+            let WorkflowNode::LlmClassifier(c) = node else {
+                panic!("`{}` 应是 llmClassifier 节点", spec.id);
+            };
+            assert_eq!(c.config.output_var, spec.id, "`{}` 的 output_var 必须与 id 同名", spec.id);
+            assert!(
+                !c.config.input_var.is_empty(),
+                "`{}` 的 input_var 不得留空 —— 留空会把全部 variables 拼进 prompt（32k 预算直接爆）",
+                spec.id
+            );
+            assert_eq!(
+                c.config.input_var, spec.input_var,
+                "`{}` 的 input_var 与单点定义不符",
+                spec.id
+            );
+            assert_eq!(
+                c.config.categories,
+                spec.categories.iter().map(|s| (*s).to_string()).collect::<Vec<_>>(),
+                "`{}` 的 categories 与单点定义不符",
+                spec.id
+            );
+            assert_eq!(
+                c.config.fallback_label.as_deref(),
+                Some(spec.fallback),
+                "`{}` 应显式配置兜底档（LLM 调用失败时降级而非 Failed，避免下游死锁）",
+                spec.id
+            );
+
+            let root = spec.input_var.split('.').next().unwrap_or(&spec.input_var);
+            assert!(
+                spec.upstreams.contains(&root),
+                "`{}` 的 input_var 根段 `{root}` 不在 upstreams {:?} 内",
+                spec.id,
+                spec.upstreams
+            );
+            for upstream in &spec.upstreams {
+                assert!(ids.contains(*upstream), "`{}` 的上游 `{upstream}` 不在派生图内", spec.id);
+                assert!(
+                    has_edge(upstream, spec.id),
+                    "缺边 `{upstream}` → `{}` —— 该节点会先于上游执行并静默走兜底档",
+                    spec.id
+                );
+            }
+        }
+
+        // ③ 四个 const 组的 id 必须全部落在单点定义里（防「改了 const 没改构造」）
+        let mut const_ids: Vec<&str> = FAST_JEV_DIMENSIONS.iter().map(|(id, ..)| *id).collect();
+        const_ids.extend(FAST_JEV_SUMMARY_NODE_IDS);
+        const_ids.extend(FAST_JEV_DEBATE_NODE_IDS);
+        const_ids.extend(FAST_JEV_DECISION_NODE_IDS);
+        for id in const_ids {
+            assert!(specs.iter().any(|s| s.id == id), "单点定义缺 `{id}`（const 与构造已脱节）");
+        }
+
+        // ④ 两个聚合器：id / output_var / strategy / 源清单 / 逐条边
+        for (var, sources) in [
+            (
+                FAST_JEV_VERDICTS_VAR,
+                FAST_JEV_DIMENSIONS.iter().map(|(id, ..)| *id).collect::<Vec<_>>(),
+            ),
+            (FAST_JEV_DEBATE_VAR, FAST_JEV_DEBATE_NODE_IDS.to_vec()),
+        ] {
+            let node = nodes
+                .iter()
+                .find(|n| n.base_id() == var)
+                .unwrap_or_else(|| panic!("快速链缺聚合器 `{var}`"));
+            let WorkflowNode::Aggregator(agg) = node else {
+                panic!("`{var}` 应是 aggregator 节点");
+            };
+            assert_eq!(agg.config.output_var, var, "聚合器的 output_var 必须与 id 同名");
+            assert_eq!(agg.config.strategy, "all", "`merge` 会因同名字段互相覆盖而只剩最后一项");
+            assert!(agg.config.wait_for_all, "必须等齐全部源，否则聚合出的是半截数组");
+            let expected: Vec<String> = sources.iter().map(|s| (*s).to_string()).collect();
+            assert_eq!(agg.config.input_sources, expected, "`{var}` 的源清单不符");
+            for src in &expected {
+                assert!(ids.contains(src), "`{var}` 的源 `{src}` 不在派生图内");
+                assert!(has_edge(src, var), "缺边 `{src}` → `{var}`");
+            }
+        }
+
+        // ⑤ `trader-proxy` 的 Jev 通路：6 个判定 + 1 个维度数组，共 7 条边 + `j_dimensions` 映射
+        for id in FAST_JEV_TRADER_INPUTS.iter().copied().chain([FAST_JEV_VERDICTS_VAR]) {
+            assert!(
+                has_edge(id, FAST_TRADER_PROXY_NODE_ID),
+                "缺边 `{id}` → `{FAST_TRADER_PROXY_NODE_ID}`"
+            );
+        }
+        let proxy = nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Code(c) if c.base.id == FAST_TRADER_PROXY_NODE_ID => Some(c),
+                _ => None,
+            })
+            .expect("快速链应含 trader-proxy 节点");
+        assert_eq!(
+            proxy.config.input_mapping.get("j_dimensions").map(String::as_str),
+            Some("jev_verdicts.result"),
+            "证据清单来源 ①（段 B 维度判定）必须接通 —— 缺它则 f7 的证据修正恒按 0.4 下界"
+        );
+
+        // ⑥ 两处「静默失效」高发点的逐字锁定
+        let j_conf = nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::LlmClassifier(c) if c.base.id == "j-confidence" => Some(c),
+                _ => None,
+            })
+            .expect("快速链应含 j-confidence");
+        assert_eq!(
+            j_conf.config.confidence_threshold,
+            Some(0.0),
+            "j-confidence 要的是 confidence **数值**：阈值必须为 0（`None` 则根本不输出 confidence；\
+             正数则低置信时被替换成兜底档）"
+        );
+        for id in ["j-target", "j-stop"] {
+            let node = nodes
+                .iter()
+                .find_map(|n| match n {
+                    WorkflowNode::LlmClassifier(c) if c.base.id == id => Some(c),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("快速链应含 `{id}`"));
+            assert_eq!(
+                node.config.categories,
+                vec!["5%", "10%", "20%", "30%"],
+                "`{id}` 的档位字面量必须与 `trader-proxy.rhai` 的 `tier_pct()` 词表逐字一致"
+            );
+        }
+
+        // ⑦ prompt 占位符：根段必须在图内，且**不得含连字符** ——
+        //    `render_template` 的正则是 `\{([a-zA-Z0-9_.]+)\}`，含 `-` 的占位符永不替换、
+        //    也永不报错（`{j-direction.category}` 这类写法是最容易踩的静默失效）。
+        for node in &nodes {
+            let WorkflowNode::LlmClassifier(c) = node else { continue };
+            for ph in placeholders(&c.config.prompt) {
+                assert!(
+                    ph.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'),
+                    "`{}` 的 prompt 占位符 `{{{ph}}}` 含非法字符（如连字符）—— 不会被替换且不报错",
+                    c.base.id
+                );
+                let root = ph.split('.').next().unwrap_or(ph);
+                assert!(
+                    ids.contains(root),
+                    "`{}` 的 prompt 占位符 `{{{ph}}}` 指向图外变量 `{root}`",
+                    c.base.id
+                );
+            }
+        }
+
+        // ⑧ 段 F：`decision-explainer` 的上下文必须覆盖段 B–E 全部 Jev 输出 + `analyst-brief`。
+        //    该步**不产生边**（只影响 prompt 拼装）⇒ 漏做同样零报错，只能靠本断言守。
+        let explainer = nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Agent(a) if a.base.id == FAST_EXPLAINER_NODE_ID => Some(a),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("快速链应含 `{FAST_EXPLAINER_NODE_ID}`（Agent 节点）"));
+        let sources: std::collections::HashSet<&str> =
+            explainer.config.context_sources.iter().map(String::as_str).collect();
+        assert_eq!(
+            sources.len(),
+            explainer.config.context_sources.len(),
+            "`{FAST_EXPLAINER_NODE_ID}` 的 context_sources 含重复项 —— 同一份输出会被拼两遍"
+        );
+        let mut expected: Vec<&str> = FAST_JEV_DIMENSIONS.iter().map(|(id, ..)| *id).collect();
+        expected.extend(FAST_JEV_SUMMARY_NODE_IDS);
+        expected.extend(FAST_JEV_DEBATE_NODE_IDS);
+        expected.extend(FAST_JEV_DECISION_NODE_IDS);
+        expected.extend([FAST_JEV_VERDICTS_VAR, FAST_JEV_DEBATE_VAR, FAST_BRIEF_NODE_ID]);
+        for id in expected {
+            assert!(
+                sources.contains(id),
+                "`{FAST_EXPLAINER_NODE_ID}` 的 context_sources 缺 `{id}` —— \
+                 解释文案读不到该判定，且缺失时静默跳过、零报错"
+            );
+        }
+        // 源图原有的四个来源必须保留（本步只做追加，不替换）
+        for id in ["portfolio-risk-gate", "rule-check", "t-scoring", "t-risk"] {
+            assert!(
+                sources.contains(id),
+                "`{FAST_EXPLAINER_NODE_ID}` 原有的 `{id}` 来源被覆盖 —— 本步只允许追加"
+            );
+        }
+    }
 }

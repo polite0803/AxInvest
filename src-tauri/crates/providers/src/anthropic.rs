@@ -871,6 +871,7 @@ impl ProviderAdapter for AnthropicAdapter {
                     ModelType::Chat => vec![ModelCapability::TextChat],
                     ModelType::Embedding => vec![],
                     ModelType::Voice => vec![ModelCapability::RealtimeVoice],
+                    ModelType::Decision => vec![],
                 };
                 let id_lower = m.id.to_lowercase();
                 // All Claude 3+ models support vision

@@ -6,6 +6,7 @@ use crate::commands::error_code::gateway as gateway_err;
 use axagent_agent_macro::agent_command;
 use axagent_crypto::platform_adapter_impl::DefaultCryptoService;
 use axagent_dao::repo::cli_config::CliTool;
+use axagent_harness::IpcEventName;
 use axagent_harness::types::*;
 use tauri::{AppHandle, Emitter, State};
 
@@ -624,7 +625,7 @@ pub async fn start_gateway(state: State<'_, AppState>, app: AppHandle) -> Result
 
     *gw = Some(server);
     // 通知前端：网关状态已变更（启动）
-    let _ = app.emit("gateway-status-changed", ());
+    let _ = app.emit(IpcEventName::GatewayStatusChanged.as_str(), ());
     Ok(())
 }
 
@@ -641,7 +642,7 @@ pub async fn stop_gateway(state: State<'_, AppState>, app: AppHandle) -> Result<
         })?;
     }
     // 通知前端：网关状态已变更（停止）
-    let _ = app.emit("gateway-status-changed", ());
+    let _ = app.emit(IpcEventName::GatewayStatusChanged.as_str(), ());
     Ok(())
 }
 

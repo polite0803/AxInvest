@@ -339,6 +339,7 @@ function ModelCard({
             value={currentValue}
             onChange={handleChange}
             placeholder={placeholder}
+            modelTypes={["Chat"]}
           />
           {hasParams && (
             <Tooltip title={modalTitle}>

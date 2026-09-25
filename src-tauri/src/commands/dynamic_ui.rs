@@ -42,6 +42,10 @@ pub struct DynamicUISchemaDTO {
     pub tags: Vec<String>,
     pub version: String,
     pub is_builtin: bool,
+    /// 来源维度：`builtin` / `user` / `ai` / `plugin`（纯展示元数据）。
+    pub origin: String,
+    /// 来源归属（`origin = "plugin"` 时为 pluginId，其余为空串）。
+    pub owner_id: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -79,6 +83,39 @@ pub struct CreateSchemaRequest {
     pub schema_json: String,
     pub category: String,
     pub tags: Vec<String>,
+    /// 来源维度（可选，默认 `user`）。取值见 [`SCHEMA_ORIGINS`]。
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// 来源归属（可选）。仅 `origin = "plugin"` 时非空，= pluginId。
+    #[serde(default)]
+    pub owner_id: Option<String>,
+}
+
+/// `origin` 的合法取值集（`PLAN-everything-is-plugin.md` §10.4 G-a）。
+///
+/// 建索引而不建 CHECK 约束：本列是**纯展示元数据**，改词汇表不该需要一次 DDL；
+/// 合法性在写入路径（[`resolve_origin`]）把关即可。
+pub const SCHEMA_ORIGINS: &[&str] = &["builtin", "user", "ai", "plugin"];
+
+/// 解析并校验请求里的 `origin` / `owner_id`。
+///
+/// 缺省 = `user` + 空归属。非法值直接拒绝（不静默降级为 `user`）——静默降级会让
+/// 「来源」这件事在用户不知情时失真，而这正是本列要解决的问题。
+fn resolve_origin(
+    origin: Option<String>,
+    owner_id: Option<String>,
+) -> Result<(String, String), String> {
+    let origin = origin.unwrap_or_else(|| "user".to_string());
+    if !SCHEMA_ORIGINS.contains(&origin.as_str()) {
+        return Err(ErrorResponse::err(dynamic_ui_err::INVALID_ORIGIN));
+    }
+    // 归属只在 plugin 来源下有意义：别让 `user` 的行留着陈旧 owner（卸载时会被误扫）。
+    let owner_id = if origin == "plugin" {
+        owner_id.unwrap_or_default()
+    } else {
+        String::new()
+    };
+    Ok((origin, owner_id))
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -126,6 +163,8 @@ fn model_to_dto(model: SchemaModel) -> DynamicUISchemaDTO {
         tags,
         version: model.version,
         is_builtin: model.is_builtin != 0,
+        origin: model.origin,
+        owner_id: model.owner_id,
         created_at: model.created_at,
         updated_at: model.updated_at,
     }
@@ -295,6 +334,7 @@ pub async fn create_dynamic_ui_schema(
     let id = Uuid::new_v4().to_string();
     let now = now_iso();
     let tags_json = serde_json::to_string(&req.tags).unwrap_or_else(|_| "[]".to_string());
+    let (origin, owner_id) = resolve_origin(req.origin, req.owner_id)?;
 
     let active = SchemaActiveModel {
         id: Set(id.clone()),
@@ -305,6 +345,8 @@ pub async fn create_dynamic_ui_schema(
         tags: Set(tags_json),
         version: Set("1.0.0".to_string()),
         is_builtin: Set(0),
+        origin: Set(origin),
+        owner_id: Set(owner_id),
         created_at: Set(now.clone()),
         updated_at: Set(now),
     };
@@ -436,6 +478,52 @@ pub async fn delete_dynamic_ui_schema(
     }
     tracing::info!(id = %id, "删除 DynamicUI Schema 及其版本历史");
     Ok(())
+}
+
+/// 撤销某个来源单元贡献的全部 Schema（`origin = "plugin"` 且 `owner_id` 匹配）。
+///
+/// 用途：卸载插件时精确撤销其 UI 贡献（`PLAN-everything-is-plugin.md` §10.4 G-a）。
+/// 刻意**不**做成 Tauri 命令：它不是用户直接调用的动作，而是卸载流程的一步 ——
+/// 单独开一个命令面等于给前端一个绕过卸载直接批量删数据的入口。
+///
+/// 返回删除条数。内置 / 用户 / AI 来源的 Schema 不受影响（它们 `origin != "plugin"`）。
+pub(crate) async fn revoke_schemas_owned_by(
+    db: &sea_orm::DatabaseConnection,
+    owner_id: &str,
+) -> Result<usize, String> {
+    if owner_id.is_empty() {
+        return Ok(0);
+    }
+    let ids: Vec<String> = SchemaEntity::find()
+        .filter(SchemaColumn::Origin.eq("plugin"))
+        .filter(SchemaColumn::OwnerId.eq(owner_id))
+        .all(db)
+        .await
+        .map_err(|e| format!("查询插件 UI Schema 失败: {e}"))?
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+
+    // 逐个走公开的删除路径，避免与级联规则分叉出第二套真相源。
+    let mut deleted = 0usize;
+    for id in ids {
+        FormDataEntity::delete_many()
+            .filter(FormDataColumn::SchemaId.eq(&id))
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除关联表单数据失败: {e}"))?;
+        VersionEntity::delete_many()
+            .filter(axagent_entities::dynamic_ui_schema_versions::Column::SchemaId.eq(&id))
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除版本历史失败: {e}"))?;
+        SchemaEntity::delete_by_id(id)
+            .exec(db)
+            .await
+            .map_err(|e| format!("删除Schema失败: {e}"))?;
+        deleted += 1;
+    }
+    Ok(deleted)
 }
 
 // ── 版本管理命令 ──

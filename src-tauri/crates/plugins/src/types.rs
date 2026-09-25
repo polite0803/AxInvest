@@ -156,6 +156,26 @@ pub struct PluginManifest {
     /// 插件声明的能力（P3 外部插件注册：启用时注册到能力注册表，禁用/卸载时可逆回滚）。
     #[serde(default)]
     pub capabilities: Vec<PluginCapabilityDecl>,
+    /// B 层 worker 进程声明（PLAN §5.3）；缺省 = 不启动子进程，只贡献声明式资产。
+    #[serde(default)]
+    pub worker: Option<PluginWorkerDecl>,
+}
+
+/// B 层插件 worker 进程声明（PLAN §5.3「声明获取」/ §10.5-2「action 回流」）。
+///
+/// 声明本字段的插件在**启用时** spawn 一个长驻子进程，双方以长度前缀 JSON 帧通信
+/// （协议在 `crates/plugin-proto`）；未声明则只贡献声明式资产
+/// （hooks / tools / MCP / 技能 / 能力声明），不启动任何进程。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginWorkerDecl {
+    /// worker 可执行文件路径，**必须相对插件安装目录**。
+    ///
+    /// 绝对路径与 `..` 逃逸一律拒绝：安装目录是插件的信任边界，
+    /// 允许绝对路径等于允许插件把自己指向任意系统程序。
+    pub program: String,
+    /// 传给 worker 的命令行参数。
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -179,6 +199,13 @@ pub struct PluginCapabilityDecl {
     /// 能力类型标识（如 `"platform_adapter"`、`"tool_set"`）。
     #[serde(default)]
     pub capability_type: String,
+    /// 该能力的执行 op（PLAN §5.4 映射表的 `op` 列）。
+    ///
+    /// 单 op 接缝（如 `workflow.sandbox` → `"execute"`）由宿主门面按此名转发；
+    /// 多 op 接缝（`session.log.invariant` / `platform.adapter`）的 op 词汇由接缝固定，
+    /// 本字段仅作声明标记、不参与路由（见 `worker.rs` 的远程门面说明）。
+    #[serde(default)]
+    pub op: String,
     /// 契约版本（默认 `"1.0"`）。
     #[serde(default = "default_capability_version")]
     pub version: String,
@@ -452,6 +479,12 @@ pub(crate) struct RawPluginManifest {
     pub integrity: Option<PluginIntegrity>,
     #[serde(default)]
     pub capabilities: Vec<PluginCapabilityDecl>,
+    /// B 层 worker 进程声明（PLAN §5.3）；缺省 = 不启动子进程。
+    ///
+    /// 必须显式转写进 [`PluginManifest`]：serde 默认忽略未知字段，漏了这一步
+    /// `plugin.json` 里声明的 `worker` 会被静默丢弃，插件永远起不来子进程。
+    #[serde(default)]
+    pub worker: Option<PluginWorkerDecl>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

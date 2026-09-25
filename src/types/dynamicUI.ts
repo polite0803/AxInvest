@@ -241,6 +241,14 @@ export const COMPONENT_REQUIRED_PROPS: Readonly<
 
 // ── 持久化 Schema 相关类型 ──
 
+/**
+ * Schema 来源维度（后端 `dynamic_ui_schemas.origin`）。
+ *
+ * 与 `isBuiltin`（二值、用于删除/修改守卫）职责分离：本字段是**纯展示元数据**，
+ * 用来区分「AI 生成」与「插件注入」这类信任级别不同的来源，不做权限分支。
+ */
+export type DynamicUISchemaOrigin = "builtin" | "user" | "ai" | "plugin";
+
 export interface DynamicUISchemaRecord {
   id: string;
   title: string;
@@ -250,6 +258,9 @@ export interface DynamicUISchemaRecord {
   tags: string[];
   version: string;
   isBuiltin: boolean;
+  origin: DynamicUISchemaOrigin;
+  /** 来源归属：`origin === "plugin"` 时为 pluginId，其余为空串 */
+  ownerId: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -268,6 +279,10 @@ export interface CreateDynamicUISchemaParams {
   schemaJson: string;
   category: string;
   tags: string[];
+  /** 来源维度（可选，后端默认 `user`） */
+  origin?: DynamicUISchemaOrigin;
+  /** 来源归属（可选，仅 `origin: "plugin"` 时有意义） */
+  ownerId?: string;
 }
 
 export interface UpdateDynamicUISchemaParams {

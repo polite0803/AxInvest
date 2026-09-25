@@ -65,6 +65,6 @@ pub use reflection::ValidateDecisionsConfig;
 // ⇒ 编译期报 `cannot find __cmd__run_batch_reflection in stock_workflow`，
 // 错误信息完全指不到真因（详见 build.rs `parse_submodule_mod_rs` 的注释）。
 // 另：`MarketSnapshot` 类型无需 re-export，用 `reflection::MarketSnapshot` 访问即可。
-pub use reflection::compute_market_snapshot;
+pub use reflection::compute_market_snapshots;
 
 // Re-export public structs

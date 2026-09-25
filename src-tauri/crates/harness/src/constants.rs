@@ -79,20 +79,6 @@ pub mod api_field {
     pub const SKIPPED: &str = "skipped";
 }
 
-/// 前端事件名 — emit 给前端的 event name
-pub mod event_name {
-    pub const AGENT_ERROR: &str = "agent-error";
-    pub const AGENT_MESSAGE_ID: &str = "agent-message-id";
-    pub const AGENT_MCP_LOAD_FAILED: &str = "agent-mcp-load-failed";
-    pub const AGENT_STREAM: &str = "agent-stream";
-    pub const AGENT_STATUS: &str = "agent-status";
-    pub const CHAT_STREAM_ERROR: &str = "chat-stream-error";
-    pub const SKILL_FILE_CHANGED: &str = "skill:file-changed";
-    /// 认知编排路由观测事件（T6）：三层路由决策 / 执行分派 / 结束失败三时点 emit，
-    /// 前端 cognitiveRouteStore 订阅后即时渲染，不再依赖同步返回值单通道。
-    pub const COGNITIVE_ROUTE_EVENT: &str = "cognitive-route-event";
-}
-
 /// 传输类型
 pub mod transport {
     pub const STREAMABLE_HTTP: &str = "streamableHttp";

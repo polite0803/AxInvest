@@ -6,6 +6,10 @@ use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::recommender::Period;
+use axagent_analysis_engine::reflection_stats::{
+    HorizonStatus, default_expected_holding_days, deterministic_horizon_was_correct,
+    parse_horizon_decisions,
+};
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::stock_analyses;
 use axagent_harness::{ActionKind, normalize_action};
@@ -144,16 +148,15 @@ pub async fn run_reflection_workflow(
     // [方向3] 轨迹存储，用于持久化反思执行轨迹。
     // 传 None 则跳过 Trajectory 持久化（手动反思等不需要轨迹的场景）。
     trajectory_storage: Option<&std::sync::Arc<axagent_trajectory::TrajectoryStorage>>,
-    // [实际行情] 「当前实际行情」快照 —— 由调用方在反思前用前复权 K 线确定性算出
-    // （见 `compute_market_snapshot`）。承载价格层事实：入场基准价 / 最新价 /
-    // 涨跌幅 / 最大回撤 / 超额收益 / 目标价实现度。
+    // [实际行情] 「当前实际行情」四周期快照 —— 由调用方在反思前用 `compute_market_snapshots`
+    // 一次性拉取 K 线并拆分四个目标交易日窗口确定性算出（见 PLAN-stock-reflection-four-horizon 批次 3）。
+    // 承载每周期独立的价格层事实：入场基准价 / 周期末收盘价 / 涨跌幅 / 最大回撤 / 超额收益 / 目标价实现度。
     //
-    // None = 行情不可用（K 线获取失败等）⇒ 注入空占位变量，让上游 comparator 与
-    // reflection-agent 显式知道"本次无行情事实"，而不是拿到伪造的 0% 收益
-    // 把实际涨跌误判成「横盘」。
-    market_snapshot: Option<&MarketSnapshot>,
+    // Key = 周期名（ultra_short / short / mid / long），Value = Some(MarketSnapshot) 或 None（该周期行情不可用）。
+    horizon_snapshots: &std::collections::BTreeMap<String, Option<MarketSnapshot>>,
 ) -> Result<String, String> {
     use axagent_entities::stock_reflections;
+
     use sea_orm::sea_query::Expr;
 
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -215,6 +218,7 @@ pub async fn run_reflection_workflow(
             missed_signals: Set(None),
             fix_for_future: Set(None),
             parameter_suggestions_json: Set(None),
+            horizon_results_json: Set(None),
             decision_json: Set(None),
             blackboard_snapshot: Set(None),
             model_version: Set(None),
@@ -272,6 +276,13 @@ pub async fn run_reflection_workflow(
         let h = a.decision_expected_holding_days?;
         Some((t, h))
     });
+
+    // 派生主周期快照：用于 comparator 顶层变量注入 + strategy_performance 单条写入
+    let primary_horizon = original_analysis
+        .as_ref()
+        .and_then(|a| a.decision_time_horizon.as_deref())
+        .unwrap_or("short");
+    let primary_snapshot = horizon_snapshots.get(primary_horizon).and_then(|s| s.as_ref());
 
     // 4a. 从 blackboard_snapshot 构造 sub-analysis 变量（分析工作流记忆）
     let sub_analysis_memory: serde_json::Value = match &original_analysis {
@@ -415,7 +426,7 @@ pub async fn run_reflection_workflow(
     //
     // 两个变量必须**无条件注入**：comparator 的 input_mapping 与 reflection-agent
     // 的 system_prompt 都引用它们，缺失会触发 VARIABLE_NOT_FOUND 使整条链 Failed。
-    let (market_text, market_json) = match market_snapshot {
+    let (market_text, market_json) = match primary_snapshot {
         Some(snap) => (snap.render_text(), serde_json::to_value(snap).unwrap_or_default()),
         None => (
             "【当前实际行情】行情数据不可用（K 线获取失败）。\
@@ -478,6 +489,45 @@ pub async fn run_reflection_workflow(
             stock_code
         );
     }
+
+    // ── 四周期行情事实 + 周期决策（批次 3）──
+    // 将每个周期的 MarketSnapshot 序列化为 JSON 注入 comparator，
+    // 供 Rhai 脚本逐周期做 horizon_correct 确定性判定。
+    {
+        let mut facts = serde_json::Map::new();
+        for (key, snap_opt) in horizon_snapshots.iter() {
+            facts.insert(
+                key.clone(),
+                snap_opt
+                    .as_ref()
+                    .map(|s| serde_json::to_value(s).unwrap_or_default())
+                    .unwrap_or(serde_json::Value::Null),
+            );
+        }
+        variables.push(axagent_harness::workflow_types::Variable {
+            name: "horizon_market_facts".into(),
+            var_type: "object".into(),
+            value: serde_json::Value::Object(facts),
+            description: Some(
+                "四周期行情快照 {ultra_short/short/mid/long: MarketSnapshot|null}（批次 3）".into(),
+            ),
+            is_secret: false,
+        });
+    }
+
+    // 四周期决策源 JSON（原样透传给 comparator，用于 horizon_correct 阶段注入）
+    let horizon_decisions_raw =
+        original_analysis.as_ref().and_then(|a| a.horizon_decisions.as_deref()).unwrap_or("");
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "horizon_decisions_json".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(horizon_decisions_raw.to_string()),
+        description: Some(
+            "四周期决策 JSON 源串（原样透传给 comparator，用于 horizon_correct 注入）".into(),
+        ),
+        is_secret: false,
+    });
+
     let opts = axagent_rt_workflow::work_engine::RunOptions {
         max_concurrent,
         step_timeout,
@@ -556,9 +606,20 @@ pub async fn run_reflection_workflow(
                 Some(reflection_json.to_string())
             };
 
+            // ── 四周期反思结果 JSON 构建（批次 2）──
+            let horizon_json = build_horizon_results_json(
+                original_analysis.as_ref(),
+                horizon_snapshots,
+                &reflection_json,
+            );
+
             let _ = stock_reflections::Entity::update_many()
                 .col_expr(stock_reflections::Column::Status, Expr::value(&status_text))
                 .col_expr(stock_reflections::Column::DecisionJson, Expr::value(dj_text))
+                .col_expr(
+                    stock_reflections::Column::HorizonResultsJson,
+                    Expr::value(horizon_json),
+                )
                 .col_expr(
                     stock_reflections::Column::WhatWentWrong,
                     Expr::value(what_went_wrong.clone()),
@@ -619,7 +680,7 @@ pub async fn run_reflection_workflow(
             // 而"没写入"本身就是"没有判定依据"的正确表达。
             let was_correct: Option<i32> = deterministic_was_correct(
                 original_analysis.as_ref().and_then(|a| a.decision_action.as_deref()),
-                market_snapshot,
+                primary_snapshot,
             );
 
             if let Some(was_correct) = was_correct {
@@ -1064,84 +1125,30 @@ pub async fn run_batch_reflection(
             );
         }
 
-        // 2c. [实际行情] 拉取「分析日 → 最新交易日」的真实行情（前复权 K 线，确定性计算）。
-        //     必须在调用前算完：run_reflection_workflow 只负责注入变量，不负责取数。
-        let target_price = extract_target_price(&analysis);
-        let snapshot = match compute_market_snapshot(
-            &state.astock_client,
-            &p.stock_code,
-            analysis_date,
-            analysis.decision_expected_holding_days,
-            target_price,
-        )
-        .await
-        {
-            Ok(s) if s.trading_days >= 1 => Some(s),
-            Ok(s) => {
-                tracing::info!(
-                    "[D1] pending {} ({}) 分析日之后仅 {} 个交易日,行情样本不足 skip",
-                    p.id,
-                    p.stock_code,
-                    s.trading_days
-                );
-                skipped_young += 1;
-                continue;
-            },
-            Err(e) => {
-                tracing::warn!(
-                    "[D1] pending {} ({}) 行情快照失败,降级为无行情反思: {e}",
-                    p.id,
-                    p.stock_code
-                );
-                None
-            },
-        };
-
-        // actual_outcome 改为**事实描述**（价格从哪到哪、涨跌多少），
-        // 而不是旧实现的 "correct"/"wrong" 结论词 —— 结论应由反思 agent 给出。
-        let actual_outcome = snapshot
-            .as_ref()
-            .map(|s| s.render_outcome_short())
-            .unwrap_or_else(|| p.actual_outcome.clone());
-        let today_str = today_nd.format("%Y-%m-%d").to_string();
-
-        // 2d. 调 run_reflection_workflow(B3 UPDATE 路径)
-        let r = run_reflection_workflow(
+        // 2c. [实际行情] 四周期行情拉取 + 反思调用 → perform_single_reflection（技术债已清）。
+        let r = perform_single_reflection(
+            "D1",
             db,
             &state.astock_client,
             &state.work_engine,
             &state.vector_store,
             state.harness.master_key(),
-            &p.stock_code,
-            &p.stock_name,
-            &p.original_analysis_id,
-            &actual_outcome,
-            // [修复] 原实现此处传 None —— pending 阶段未回测 ⇒ raw_return_pct 注入 0.0
-            // ⇒ comparator 里 actual_direction 恒「横盘」、direction_match 恒 false
-            // ⇒ agent 基于假数据反思。现改用行情快照的净收益（扣双边成本）。
-            snapshot.as_ref().map(|s| s.net_return_pct),
-            snapshot.as_ref().and_then(|s| s.alpha_pct),
-            Some(snapshot.as_ref().map(|s| s.trading_days as i32).unwrap_or(days_held as i32)),
-            snapshot.as_ref().map(|_| "沪深300"),
+            Some(&state.trajectory_storage),
+            p,
+            &analysis,
             analysis_date,
-            // [实际行情] 行情终点是「最新交易日」⇒ AS_OF 锚点必须用**今天**，
-            // agent 的 K 线工具才能看到最新数据。原传 pending 的 hindsight_date
-            // 会把 agent 的时间锚点锁在过去，看不见"当前实际行情"。
-            &today_str,
-            // [2026-09-13] 消费 pending row 自带的阈值与深度。
-            // 此前这里是硬编码 `0u8` / `"light"`，于是 `stock_reflections` 的
-            // `min_confidence_threshold` / `reflection_depth` 成了**死字段** ——
-            // 用户在反思面板设的阈值与深度永远不生效（同构问题见铁律 12）。
-            p.min_confidence_threshold.clamp(0, 255) as u8,
+            today_nd,
+            days_held,
             p.reflection_depth.as_str(),
-            Some(p.id.clone()),              // [B2/B3] 走 UPDATE 路径
-            Some(&state.trajectory_storage), // [方向3] 持久化轨迹
-            snapshot.as_ref(),               // [实际行情] 价格层事实
         )
         .await;
 
         match r {
-            Ok(_) => {
+            Ok(ReflectionOutcome::SkippedYoung) => {
+                skipped_young += 1;
+                continue;
+            },
+            Ok(ReflectionOutcome::Completed) => {
                 tracing::info!(
                     "[D1] ✓ resolved {}/{} pending: {} ({})",
                     i + 1,
@@ -1659,6 +1666,117 @@ impl ValidateDecisionsConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReflectionOutcome {
+    SkippedYoung,
+    Completed,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn perform_single_reflection(
+    log_prefix: &str,
+    db: &DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    engine: &Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    vector_store: &axagent_search::vector_store::VectorStore,
+    master_key: &[u8; 32],
+    trajectory_storage: Option<&Arc<axagent_trajectory::TrajectoryStorage>>,
+    pending_row: &axagent_entities::stock_reflections::Model,
+    analysis: &axagent_entities::stock_analyses::Model,
+    analysis_date: &str,
+    today_nd: chrono::NaiveDate,
+    days_held: i64,
+    effective_depth: &str,
+) -> Result<ReflectionOutcome, String> {
+    let target_price = extract_target_price(analysis);
+
+    let horizon_days: std::collections::BTreeMap<String, i64> = {
+        let mut map = std::collections::BTreeMap::new();
+        let decisions = analysis
+            .horizon_decisions
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| v.as_object().map(|obj| parse_horizon_decisions(obj).unwrap_or_default()))
+            .unwrap_or_default();
+        for key in &["ultra_short", "short", "mid", "long"] {
+            let days = decisions
+                .get(*key)
+                .and_then(|d| d.expected_holding_days)
+                .unwrap_or_else(|| default_expected_holding_days(key));
+            map.insert(key.to_string(), days);
+        }
+        map
+    };
+
+    let snapshots_raw = compute_market_snapshots(
+        client,
+        &pending_row.stock_code,
+        analysis_date,
+        &horizon_days,
+        target_price,
+    )
+    .await;
+
+    let primary_horizon = analysis.decision_time_horizon.as_deref().unwrap_or("short");
+    let primary_snap_opt =
+        snapshots_raw.get(primary_horizon).and_then(|r| r.as_ref().ok()).cloned();
+
+    match primary_snap_opt {
+        Some(s) if s.trading_days < 1 => {
+            tracing::info!(
+                "[{log_prefix}] {} ({}) {primary_horizon} 分析日之后仅 {} 个交易日,行情样本不足 skip",
+                pending_row.id,
+                pending_row.stock_code,
+                s.trading_days
+            );
+            return Ok(ReflectionOutcome::SkippedYoung);
+        },
+        None => {
+            tracing::warn!(
+                "[{log_prefix}] {} ({}) {primary_horizon} 行情快照不可用,降级",
+                pending_row.id,
+                pending_row.stock_code
+            );
+        },
+        _ => {},
+    }
+
+    let horizon_snapshots: std::collections::BTreeMap<String, Option<MarketSnapshot>> =
+        snapshots_raw.into_iter().map(|(k, v)| (k, v.ok())).collect();
+
+    let actual_outcome = primary_snap_opt
+        .as_ref()
+        .map(|s| s.render_outcome_short())
+        .unwrap_or_else(|| pending_row.actual_outcome.clone());
+    let today_str = today_nd.format("%Y-%m-%d").to_string();
+
+    run_reflection_workflow(
+        db,
+        client,
+        engine,
+        vector_store,
+        master_key,
+        &pending_row.stock_code,
+        &pending_row.stock_name,
+        &pending_row.original_analysis_id,
+        &actual_outcome,
+        primary_snap_opt.as_ref().map(|s| s.net_return_pct),
+        primary_snap_opt.as_ref().and_then(|s| s.alpha_pct),
+        Some(primary_snap_opt.as_ref().map(|s| s.trading_days as i32).unwrap_or(days_held as i32)),
+        primary_snap_opt.as_ref().map(|_| "沪深300"),
+        analysis_date,
+        &today_str,
+        pending_row.min_confidence_threshold.clamp(0, 255) as u8,
+        effective_depth,
+        Some(pending_row.id.clone()),
+        trajectory_storage,
+        &horizon_snapshots,
+    )
+    .await?;
+
+    Ok(ReflectionOutcome::Completed)
+}
+
 /// `running` 状态超过该小时数即视为"卡死"，回收到 `pending` 重试。
 ///
 /// 取 6 小时：单条反思的 LLM 调用最坏情况在分钟级，6 小时足够任何正常执行完成。
@@ -1828,85 +1946,33 @@ pub async fn run_batch_reflection_inner(
         // 为对比基准，未到期做期中观察（快照带 within_expected_horizon 标记）。
         // 真正的门槛在行情侧：分析日之后至少要有 1 个交易日的新行情。
 
-        // ── [实际行情] 拉取「分析日 → 最新交易日」真实行情 ──
-        // 取代原 `run_asof_backtest`：后者按「期望持有期」切窗口（未到期时被
-        // min(len-1) 夹到最新一根，终点语义含糊），且只返回 return_pct，
-        // 把 entry/exit/max_drawdown 全丢给下游 —— 反思 agent 看不到价格事实。
-        let target_price = extract_target_price(&analysis);
-        let snapshot = match compute_market_snapshot(
-            _client,
-            &p.stock_code,
-            analysis_date,
-            analysis.decision_expected_holding_days,
-            target_price,
-        )
-        .await
-        {
-            Ok(s) if s.trading_days >= 1 => Some(s),
-            Ok(s) => {
-                tracing::info!(
-                    "[batch_reflection_inner] {} ({}) 分析日之后仅 {} 个交易日,行情样本不足 skip",
-                    p.id,
-                    p.stock_code,
-                    s.trading_days
-                );
-                skipped_young += 1;
-                continue;
-            },
-            Err(e) => {
-                tracing::warn!(
-                    "[batch_reflection_inner] {} ({}) 行情快照失败,降级为无行情反思: {e}",
-                    p.id,
-                    p.stock_code
-                );
-                None
-            },
-        };
-
-        let actual_outcome = snapshot
-            .as_ref()
-            .map(|s| s.render_outcome_short())
-            .unwrap_or_else(|| p.actual_outcome.clone());
-        let today_str = today_nd.format("%Y-%m-%d").to_string();
-
-        // depth：cron 任务（validate-decisions）可在 filter 内指定 light/deep，
-        // 覆盖 pending row 的默认值；不指定则用 row 自带的深度。
-        let effective_depth =
+        // ── [实际行情] 四周期行情拉取 + 反思调用 → perform_single_reflection（技术债已清）──
+        let depth =
             filter.and_then(|f| f.depth_override.as_deref()).unwrap_or(p.reflection_depth.as_str());
 
-        let r = run_reflection_workflow(
+        let r = perform_single_reflection(
+            "batch_reflection_inner",
             db,
             _client,
-            // P3-#11: Arc::clone O(1)，而非克隆整个 WorkEngine
             &std::sync::Arc::clone(_engine),
             _vector_store,
             _master_key,
-            &p.stock_code,
-            &p.stock_name,
-            &p.original_analysis_id,
-            &actual_outcome,
-            snapshot.as_ref().map(|s| s.net_return_pct),
-            snapshot.as_ref().and_then(|s| s.alpha_pct),
-            Some(snapshot.as_ref().map(|s| s.trading_days as i32).unwrap_or(days_held as i32)),
-            snapshot.as_ref().map(|_| "沪深300"),
+            trajectory_storage,
+            p,
+            &analysis,
             analysis_date,
-            // [实际行情] AS_OF 锚点用今天（行情终点=最新交易日），
-            // 让 agent 的 K 线工具看到最新数据而非被锁在过去。
-            &today_str,
-            // [2026-09-13] 消费 pending row 自带的阈值与深度。
-            // 此前这里是硬编码 `0u8` / `"light"`，于是 `stock_reflections` 的
-            // `min_confidence_threshold` / `reflection_depth` 成了**死字段** ——
-            // 用户在反思面板设的阈值与深度永远不生效（同构问题见铁律 12）。
-            p.min_confidence_threshold.clamp(0, 255) as u8,
-            effective_depth,
-            Some(p.id.clone()),
-            trajectory_storage, // [方向3] 透传轨迹存储
-            snapshot.as_ref(),  // [实际行情] 价格层事实
+            today_nd,
+            days_held,
+            depth,
         )
         .await;
 
         match r {
-            Ok(_) => {
+            Ok(ReflectionOutcome::SkippedYoung) => {
+                skipped_young += 1;
+                continue;
+            },
+            Ok(ReflectionOutcome::Completed) => {
                 resolved += 1;
             },
             Err(e) => {
@@ -2138,24 +2204,30 @@ impl MarketSnapshot {
     }
 }
 
-/// 计算「已完成的股票分析结论」vs「该股票当前实际行情」的对比快照。
+/// ── 四周期行情快照（PLAN-stock-reflection-four-horizon 批次 3）──
 ///
-/// 窗口固定为「分析日 → 最新交易日」（用户要求的「当前实际行情」）。
-/// 全部指标由前复权 K 线确定性推导，不依赖 LLM、不做任何脑补。
+/// 一次 K 线读取，按四个目标交易日索引分别生成窗口快照，避免每周期重复请求。
+/// 每个周期的 exit 点 = min(klines.len()-1, entry_idx + expected_holding_days)。
 ///
-/// 失败语义：K 线取不到 / 分析日之后无数据 → `Err`，由调用方降级为
-/// 「无行情快照」（`market_snapshot=None`），**绝不伪造 0% 收益** ——
-/// 伪造 0% 会让 comparator 把实际涨跌误判成「横盘」，进而让 agent 基于假数据反思。
-pub async fn compute_market_snapshot(
+/// 状态语义（对每个周期）：
+/// - `Ok` + `within_expected_horizon=false` → mature（数据充足，可做终评）
+/// - `Ok` + `within_expected_horizon=true` → immature（数据不足，期中观察）
+/// - `Err` → unavailable（行情源失败）
+///
+/// 基准（沪深300）仅计算一次（从 entry 到全窗口最新），
+/// 所有周期共享同一个基准涨幅（不同窗口的基准偏差在统计上远小于方向误差）。
+pub async fn compute_market_snapshots(
     client: &axagent_astock_data::AStockClient,
     stock_code: &str,
     analysis_date: &str,
-    expected_holding_days: Option<i64>,
+    horizon_expected_days: &std::collections::BTreeMap<String, i64>,
     target_price: Option<f64>,
-) -> Result<MarketSnapshot, String> {
+) -> std::collections::BTreeMap<String, Result<MarketSnapshot, String>> {
     use axagent_harness::market_data::{AdjType, MarketDataProvider};
 
-    let klines = MarketDataProvider::get_klines(
+    let mut results = std::collections::BTreeMap::new();
+
+    let klines = match MarketDataProvider::get_klines(
         client,
         stock_code,
         "daily",
@@ -2163,100 +2235,143 @@ pub async fn compute_market_snapshot(
         Some(AdjType::Forward),
     )
     .await
-    .map_err(|e| format!("获取 {stock_code} K线失败: {e}"))?;
+    {
+        Ok(k) if !k.is_empty() => k,
+        Ok(_) => {
+            let err = format!("{stock_code} 无K线数据");
+            for key in horizon_expected_days.keys() {
+                results.insert(key.clone(), Err(err.clone()));
+            }
+            return results;
+        },
+        Err(e) => {
+            let err = format!("获取 {stock_code} K线失败: {e}");
+            for key in horizon_expected_days.keys() {
+                results.insert(key.clone(), Err(err.clone()));
+            }
+            return results;
+        },
+    };
 
-    if klines.is_empty() {
-        return Err(format!("{stock_code} 无K线数据"));
-    }
+    let entry_idx = match klines.iter().position(|k| k.date.as_str() > analysis_date) {
+        Some(i) => i,
+        None => {
+            let err = format!("{stock_code} 在 {analysis_date} 之后无K线数据");
+            for key in horizon_expected_days.keys() {
+                results.insert(key.clone(), Err(err.clone()));
+            }
+            return results;
+        },
+    };
 
-    // 入场基准：分析日之后的首个交易日开盘价（分析日收盘后才出结论，用其收盘价会前视偏差）
-    let entry_idx = klines
-        .iter()
-        .position(|k| k.date.as_str() > analysis_date)
-        .ok_or_else(|| format!("{stock_code} 在 {analysis_date} 之后无K线数据"))?;
     let entry_bar = &klines[entry_idx];
     let entry_price = entry_bar.open;
-    // 显式拒绝 NaN 与 ≤0（`!(x > 0.0)` 对 NaN 为真，语义等价但 clippy 要求可读写法）
     if entry_price.is_nan() || entry_price <= 0.0 {
-        return Err(format!("{stock_code} 入场基准价非法: {entry_price}"));
-    }
-
-    // 最新一根 = 当前实际行情
-    let latest_bar = klines.last().ok_or_else(|| format!("{stock_code} K线为空"))?;
-    let latest_price = latest_bar.close;
-
-    // 区间高低 + 最大回撤（入场日 → 最新）
-    let window = &klines[entry_idx..];
-    let period_high = window.iter().fold(f64::MIN, |m, k| m.max(k.high));
-    let mut period_low = window.iter().filter(|k| k.low > 0.0).fold(f64::MAX, |m, k| m.min(k.low));
-    let mut peak = entry_price;
-    let mut max_dd = 0.0_f64;
-    for k in window {
-        if k.close > peak {
-            peak = k.close;
+        let err = format!("{stock_code} 入场基准价非法: {entry_price}");
+        for key in horizon_expected_days.keys() {
+            results.insert(key.clone(), Err(err.clone()));
         }
-        if peak > 0.0 {
-            let dd = (peak - k.close) / peak;
-            if dd > max_dd {
-                max_dd = dd;
-            }
-        }
-    }
-    if period_low == f64::MAX {
-        // 全窗口无有效 low（脏数据）→ 用收盘价兜底，不让 MAX 泄进下游
-        period_low = window.iter().map(|k| k.close).fold(f64::MAX, f64::min);
+        return results;
     }
 
-    let price_change_pct = (latest_price - entry_price) / entry_price * 100.0;
-    let net_return_pct = price_change_pct - A_SHARE_COST_RATE * 100.0;
-    let trading_days = (klines.len() - 1 - entry_idx) as i64;
-
-    // 基准（沪深300）同期涨跌 → 超额收益。基准失败不阻断主链路（降级为 None）。
-    let (benchmark_code, benchmark_change_pct, alpha_pct) =
-        match compute_benchmark_change(client, &entry_bar.date, &latest_bar.date).await {
-            Ok(chg) => {
-                (Some(DEFAULT_BENCHMARK_CODE.to_string()), Some(chg), Some(price_change_pct - chg))
-            },
+    // 基准：只算一次（从 entry 到全窗口最新）
+    let latest_bar_all = klines.last().expect("klines non-empty");
+    let (benchmark_code, benchmark_change_pct) =
+        match compute_benchmark_change(client, &entry_bar.date, &latest_bar_all.date).await {
+            Ok(chg) => (Some(DEFAULT_BENCHMARK_CODE.to_string()), Some(chg)),
             Err(e) => {
-                tracing::warn!("[market snapshot] {stock_code} 基准对比失败,降级为无超额收益: {e}");
-                (None, None, None)
+                tracing::warn!(
+                    "[market snapshots] {stock_code} 基准对比失败,降级为无超额收益: {e}"
+                );
+                (None, None)
             },
         };
 
-    // 目标价实现度：现价涨幅 / 目标涨幅
-    let target_progress_pct = target_price.and_then(|tp| {
-        let expected_pct = (tp - entry_price) / entry_price * 100.0;
-        if expected_pct.abs() < 0.01 {
-            None
-        } else {
-            Some(price_change_pct / expected_pct * 100.0)
+    for (horizon_key, &expected_days) in horizon_expected_days {
+        if expected_days <= 0 {
+            results.insert(
+                horizon_key.clone(),
+                Err(format!("{horizon_key}: 无效持有期 {expected_days}")),
+            );
+            continue;
         }
-    });
-    let target_reached = target_price.map(|tp| latest_price >= tp);
-    let within_expected_horizon = expected_holding_days.map(|d| trading_days < d).unwrap_or(false);
 
-    Ok(MarketSnapshot {
-        stock_code: stock_code.to_string(),
-        analysis_date: analysis_date.to_string(),
-        entry_date: entry_bar.date.clone(),
-        entry_price,
-        latest_date: latest_bar.date.clone(),
-        latest_price,
-        price_change_pct,
-        net_return_pct,
-        period_high,
-        period_low,
-        max_drawdown_pct: max_dd * 100.0,
-        trading_days,
-        expected_holding_days,
-        within_expected_horizon,
-        benchmark_code,
-        benchmark_change_pct,
-        alpha_pct,
-        target_price,
-        target_progress_pct,
-        target_reached,
-    })
+        let exit_idx = std::cmp::min(klines.len() - 1, entry_idx + expected_days as usize);
+        let within_expected_horizon = exit_idx < entry_idx + expected_days as usize;
+        let exit_bar = &klines[exit_idx];
+        let latest_price = exit_bar.close;
+        let trading_days = (exit_idx - entry_idx) as i64;
+
+        if trading_days < 1 {
+            results
+                .insert(horizon_key.clone(), Err(format!("{horizon_key}: 分析日之后无交易数据")));
+            continue;
+        }
+
+        // 区间高低 + 最大回撤（entry_idx..=exit_idx）
+        let window = &klines[entry_idx..=exit_idx];
+        let period_high = window.iter().fold(f64::MIN, |m, k| m.max(k.high));
+        let mut period_low =
+            window.iter().filter(|k| k.low > 0.0).fold(f64::MAX, |m, k| m.min(k.low));
+        let mut peak = entry_price;
+        let mut max_dd = 0.0_f64;
+        for k in window {
+            if k.close > peak {
+                peak = k.close;
+            }
+            if peak > 0.0 {
+                let dd = (peak - k.close) / peak;
+                if dd > max_dd {
+                    max_dd = dd;
+                }
+            }
+        }
+        if period_low == f64::MAX {
+            period_low = window.iter().map(|k| k.close).fold(f64::MAX, f64::min);
+        }
+
+        let price_change_pct = (latest_price - entry_price) / entry_price * 100.0;
+        let net_return_pct = price_change_pct - A_SHARE_COST_RATE * 100.0;
+        let alpha_pct = benchmark_change_pct.map(|chg| price_change_pct - chg);
+
+        let target_progress_pct = target_price.and_then(|tp| {
+            let expected_pct = (tp - entry_price) / entry_price * 100.0;
+            if expected_pct.abs() < 0.01 {
+                None
+            } else {
+                Some(price_change_pct / expected_pct * 100.0)
+            }
+        });
+        let target_reached = target_price.map(|tp| latest_price >= tp);
+
+        results.insert(
+            horizon_key.clone(),
+            Ok(MarketSnapshot {
+                stock_code: stock_code.to_string(),
+                analysis_date: analysis_date.to_string(),
+                entry_date: entry_bar.date.clone(),
+                entry_price,
+                latest_date: exit_bar.date.clone(),
+                latest_price,
+                price_change_pct,
+                net_return_pct,
+                period_high,
+                period_low,
+                max_drawdown_pct: max_dd * 100.0,
+                trading_days,
+                expected_holding_days: Some(expected_days),
+                within_expected_horizon,
+                benchmark_code: benchmark_code.clone(),
+                benchmark_change_pct,
+                alpha_pct,
+                target_price,
+                target_progress_pct,
+                target_reached,
+            }),
+        );
+    }
+
+    results
 }
 
 /// 取基准（沪深300）在指定区间内的涨跌幅（%）。
@@ -2292,7 +2407,7 @@ async fn compute_benchmark_change(
         return Err(format!("基准区间无效: {start_date}~{end_date}"));
     }
     let base = klines[start].open;
-    // 同 compute_market_snapshot：显式拒绝 NaN 与 ≤0
+    // 同 compute_market_snapshots：显式拒绝 NaN 与 ≤0
     if base.is_nan() || base <= 0.0 {
         return Err("基准基准价非法".to_string());
     }
@@ -2652,6 +2767,221 @@ fn deterministic_was_correct(
     }
 }
 
+/// 构建四周期反思结果 JSON（PLAN-stock-reflection-four-horizon 批次 2+3）。
+///
+/// 从 `horizon_decisions` 解析四周期决策，结合四周期行情快照与 LLM 反思输出，
+/// 组装为符合目标数据契约的 `horizon_results_json`。
+///
+/// **状态判定**（对每个周期）：
+/// - 有快照 + 已到期望持有期 → `mature`
+/// - 有快照 + 未到期望持有期 → `immature`
+/// - 有决策但无快照 → `unavailable`
+/// - 无四周期决策的旧记录 → `legacy` 单周期回退
+fn build_horizon_results_json(
+    original_analysis: Option<&stock_analyses::Model>,
+    horizon_snapshots: &std::collections::BTreeMap<String, Option<MarketSnapshot>>,
+    reflection_json: &serde_json::Value,
+) -> Option<String> {
+    let primary_horizon =
+        original_analysis.and_then(|a| a.decision_time_horizon.as_deref()).unwrap_or("short");
+
+    let horizon_decisions: Option<std::collections::HashMap<String, _>> = original_analysis
+        .and_then(|a| a.horizon_decisions.as_deref())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.as_object().cloned())
+        .and_then(|obj| parse_horizon_decisions(&obj).ok());
+
+    let horizon_keys = ["ultra_short", "short", "mid", "long"];
+
+    // 如果四周期决策全缺且旧字段也无决策 → 不生成 JSON（旧记录无数据）
+    let has_horizon_decisions = horizon_decisions.is_some();
+    let has_legacy_data = original_analysis.and_then(|a| a.decision_action.as_deref()).is_some();
+
+    if !has_horizon_decisions && !has_legacy_data {
+        return None;
+    }
+
+    // 提取 LLM 反思字段（与 UPDATE 路径共用同一提取逻辑）
+    let verdict = deep_get_reflection_str(reflection_json, "verdict");
+    let what_went_wrong = deep_get_reflection_str(reflection_json, "what_went_wrong");
+    let missed_signals = deep_get_reflection_text(reflection_json, "missed_signals");
+    let fix_for_future = deep_get_reflection_str(reflection_json, "fix_for_future");
+    let lesson_summary = deep_get_reflection_str(reflection_json, "lesson_summary");
+
+    let mut results = serde_json::Map::new();
+
+    if let Some(ref decisions) = horizon_decisions {
+        // 有四周期决策：每个周期独立构造结果
+        for &key in &horizon_keys {
+            let decision = match decisions.get(key) {
+                Some(d) => d,
+                None => {
+                    results.insert(key.to_string(), serde_json::Value::Null);
+                    continue;
+                },
+            };
+
+            let expected_holding_days = decision
+                .expected_holding_days
+                .unwrap_or_else(|| default_expected_holding_days(key));
+
+            let snap = horizon_snapshots.get(key).and_then(|s| s.as_ref());
+
+            // 状态判定：每周期独立查找自己的快照
+            let (status, market_json, eval_json, reflection_section) = match snap {
+                Some(snap) => {
+                    let status = if snap.within_expected_horizon {
+                        HorizonStatus::Immature
+                    } else {
+                        HorizonStatus::Mature
+                    };
+                    let was_correct = deterministic_horizon_was_correct(
+                        &decision.action,
+                        snap.net_return_pct,
+                        snap.within_expected_horizon,
+                    );
+
+                    let mut market = serde_json::json!({
+                        "entryPrice": snap.entry_price,
+                        "exitPrice": snap.latest_price,
+                        "returnPct": snap.net_return_pct,
+                        "alphaPct": snap.alpha_pct,
+                        "maxDrawdownPct": snap.max_drawdown_pct,
+                        "targetReached": snap.target_reached,
+                    });
+                    market["stopLossTriggered"] = serde_json::Value::Null;
+
+                    let mut evaluation = serde_json::json!({
+                        "wasCorrect": was_correct,
+                        "directionMatch": was_correct.map(|v| v == 1),
+                        "targetHit": snap.target_reached,
+                    });
+                    evaluation["mismatch"] = serde_json::Value::Null;
+
+                    let reflection = if reflection_json.is_null() {
+                        serde_json::json!({
+                            "verdict": verdict,
+                            "whatWentWrong": what_went_wrong,
+                            "missedSignals": missed_signals,
+                            "fixForFuture": fix_for_future,
+                            "lessonSummary": lesson_summary,
+                        })
+                    } else {
+                        reflection_json.clone()
+                    };
+
+                    (status, Some(market), Some(evaluation), Some(reflection))
+                },
+                None => (HorizonStatus::Unavailable, None, None, None),
+            };
+
+            results.insert(
+                key.to_string(),
+                serde_json::json!({
+                    "status": status,
+                    "expectedHoldingDays": expected_holding_days,
+                    "actualHoldingDays": snap.map(|s| s.trading_days),
+                    "decision": {
+                        "action": decision.action,
+                        "positionPct": decision.position_pct,
+                        "targetPrice": decision.target_price,
+                        "stopLoss": decision.stop_loss,
+                        "confidence": decision.confidence,
+                    },
+                    "market": market_json,
+                    "evaluation": eval_json,
+                    "reflection": reflection_section,
+                }),
+            );
+        }
+    } else {
+        // 无四周期决策（旧记录）：为每个旧周期键生成 legacy 条目
+        for &key in &horizon_keys {
+            let is_primary = key == primary_horizon;
+            if !is_primary {
+                results.insert(key.to_string(), serde_json::Value::Null);
+                continue;
+            }
+
+            let action = original_analysis.and_then(|a| a.decision_action.as_deref()).unwrap_or("");
+            let expected_holding_days = original_analysis
+                .and_then(|a| a.decision_expected_holding_days)
+                .unwrap_or_else(|| default_expected_holding_days(key));
+
+            let snap = horizon_snapshots.get(key).and_then(|s| s.as_ref());
+
+            let (status, market_json, eval_json, reflection_section) = match snap {
+                Some(snap) => {
+                    let was_correct = if action.is_empty() || snap.within_expected_horizon {
+                        None
+                    } else {
+                        deterministic_was_correct(Some(action), Some(snap))
+                    };
+
+                    let mut market = serde_json::json!({
+                        "entryPrice": snap.entry_price,
+                        "exitPrice": snap.latest_price,
+                        "returnPct": snap.net_return_pct,
+                        "alphaPct": snap.alpha_pct,
+                        "maxDrawdownPct": snap.max_drawdown_pct,
+                        "targetReached": snap.target_reached,
+                    });
+                    market["stopLossTriggered"] = serde_json::Value::Null;
+
+                    let mut evaluation = serde_json::json!({
+                        "wasCorrect": was_correct,
+                        "directionMatch": was_correct.map(|v| v == 1),
+                        "targetHit": snap.target_reached,
+                    });
+                    evaluation["mismatch"] = serde_json::Value::Null;
+
+                    let reflection = if reflection_json.is_null() {
+                        serde_json::json!({
+                            "verdict": verdict,
+                            "whatWentWrong": what_went_wrong,
+                            "missedSignals": missed_signals,
+                            "fixForFuture": fix_for_future,
+                            "lessonSummary": lesson_summary,
+                        })
+                    } else {
+                        reflection_json.clone()
+                    };
+
+                    (HorizonStatus::Legacy, Some(market), Some(evaluation), Some(reflection))
+                },
+                None => (HorizonStatus::Unavailable, None, None, None),
+            };
+
+            results.insert(
+                key.to_string(),
+                serde_json::json!({
+                    "status": status,
+                    "expectedHoldingDays": expected_holding_days,
+                    "actualHoldingDays": snap.map(|s| s.trading_days),
+                    "decision": {
+                        "action": action,
+                        "positionPct": serde_json::Value::Null,
+                        "targetPrice": snap.and_then(|s| s.target_price),
+                        "stopLoss": serde_json::Value::Null,
+                        "confidence": serde_json::Value::Null,
+                    },
+                    "market": market_json,
+                    "evaluation": eval_json,
+                    "reflection": reflection_section,
+                }),
+            );
+        }
+    }
+
+    // 追加 schema 版本号
+    results.insert(
+        "schemaVersion".to_string(),
+        serde_json::Value::Number(serde_json::Number::from(1)),
+    );
+
+    serde_json::to_string(&serde_json::Value::Object(results)).ok()
+}
+
 // ── 单元测试：覆盖 LLM 输出 → IR → JSON 提取的全链路 ──
 //
 // 关键场景：
@@ -2664,7 +2994,7 @@ fn deterministic_was_correct(
 
 // ── 单元测试：[实际行情] 快照渲染与目标价提取（纯函数，无需网络）──
 //
-// 为什么只测渲染层：`compute_market_snapshot` 依赖 AStockClient 实时取数，
+// 为什么只测渲染层：`compute_market_snapshots` 依赖 AStockClient 实时取数，
 // 属集成范畴；但其**消费侧语义**（"只陈述事实、不下结论"、"期中观察必须标注"、
 // "缺数据必须显式降级而非用 0 冒充"）全在渲染函数里，是本改造的核心契约，
 // 且完全离线可验。契约破了会让反思 agent 重新对着假数据写结论。
@@ -2787,6 +3117,8 @@ mod market_snapshot_tests {
             model_version: None,
             // A4：NULL = 采集时点无版本信息（A4 之前的存量行、chat 通道写入均为此形态）
             template_version: None,
+            // 模板 id：本测试用例不关心链路归属，按「未知」置 NULL（语义同上方）
+            template_id: None,
             data_snapshot_id: None,
             outcome: None,
             llm_decision_json: None,

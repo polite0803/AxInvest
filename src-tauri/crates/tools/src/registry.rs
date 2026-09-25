@@ -68,6 +68,26 @@ pub fn global_approval_policy() -> Option<Arc<axagent_harness::ApprovalPolicy>> 
     GLOBAL_APPROVAL_POLICY.read().clone()
 }
 
+// ── 全局审批规则存储（PLAN-codex-parity R2-1） ──
+//
+// 与上面两个全局策略同款模式：wiring 层在启动初始化时把 sea_orm 实现注入这里，
+// 所有 `UnifiedToolRegistry` 构建 ToolContext 时回退读取，无需逐站点注入。
+// `tools` 是 hybrid crate，不得依赖 dao / entities，故此处只能持有 harness trait 对象。
+static GLOBAL_APPROVAL_RULE_STORE: parking_lot::RwLock<
+    Option<Arc<dyn axagent_harness::ApprovalRuleStore>>,
+> = parking_lot::RwLock::new(None);
+
+/// 设置全局审批规则存储（启动初始化时调用一次）。
+pub fn set_global_approval_rule_store(store: Arc<dyn axagent_harness::ApprovalRuleStore>) {
+    *GLOBAL_APPROVAL_RULE_STORE.write() = Some(store);
+}
+
+/// 读取全局审批规则存储快照（未设置时为 `None`，表示不查规则、不沉淀）。
+#[must_use]
+pub fn global_approval_rule_store() -> Option<Arc<dyn axagent_harness::ApprovalRuleStore>> {
+    GLOBAL_APPROVAL_RULE_STORE.read().clone()
+}
+
 /// 工具组摘要信息（替代 agent::LocalToolGroup）
 #[derive(Debug, Clone)]
 pub struct ToolGroupInfo {
@@ -552,6 +572,11 @@ pub struct UnifiedToolRegistry {
     /// 审批策略（PLAN-codex-parity P0-2）—— 透传进 `ToolContext.approval_policy`，
     /// Shell 类工具据此决定敏感操作是跑、问用户还是拒绝。`None` 走全局/默认 `on-request`。
     pub approval_policy: Option<Arc<axagent_harness::ApprovalPolicy>>,
+    /// 审批规则存储（PLAN-codex-parity R2-1）—— 透传进 `ToolContext.approval_rule_store`。
+    ///
+    /// Shell 类工具据此做「规则免询问」与「批准后沉淀」。`None` 走全局 store；
+    /// 全局也为 `None` 时不查规则、不沉淀（保持旧行为）。
+    pub approval_rule_store: Option<Arc<dyn axagent_harness::ApprovalRuleStore>>,
     /// 副作用栈：记录所有动态注册/修改操作，卸载时自动回滚（后进先出）。
     ///
     /// 每个 `register_runtime_tool` 会登记一个 `Disposer`；`unregister_runtime_tool`
@@ -589,6 +614,7 @@ impl Clone for UnifiedToolRegistry {
             runtime_tool_sources: self.runtime_tool_sources.clone(),
             sandbox_policy: self.sandbox_policy.clone(),
             approval_policy: self.approval_policy.clone(),
+            approval_rule_store: self.approval_rule_store.clone(),
             effects: Vec::new(), // Disposer 不可 Clone，克隆体不携带副作用
         }
     }
@@ -621,6 +647,14 @@ impl UnifiedToolRegistry {
     /// 设置审批策略（PLAN-codex-parity P0-2），透传进 `ToolContext.approval_policy`。
     pub fn set_approval_policy(&mut self, policy: axagent_harness::ApprovalPolicy) {
         self.approval_policy = Some(Arc::new(policy));
+    }
+
+    /// 设置审批规则存储（PLAN-codex-parity R2-1），透传进 `ToolContext.approval_rule_store`。
+    ///
+    /// 通常无需调用 —— wiring 层用 [`set_global_approval_rule_store`] 注入一次即可，
+    /// 所有实例自动回退读取。本方法供测试 / 特殊会话覆盖全局值。
+    pub fn set_approval_rule_store(&mut self, store: Arc<dyn axagent_harness::ApprovalRuleStore>) {
+        self.approval_rule_store = Some(store);
     }
 
     /// 临时禁用单个工具（仅内存，不持久化到 DB）。
@@ -686,6 +720,7 @@ impl UnifiedToolRegistry {
             sandbox: Self::default_sandbox(&working_dir),
             sandbox_policy: None,
             approval_policy: None,
+            approval_rule_store: None,
             allowed_tools: HashSet::new(),
             blocked_tools: HashSet::new(),
             strict_mode: false,
@@ -708,8 +743,15 @@ impl UnifiedToolRegistry {
     /// 初始化：注册全部本地工具（清单与数量以 `crate::tools::register_all` 为准，
     /// 此处不写数字——工具总数会随模块增减漂移，硬编码必然过期），配置默认权限
     pub fn init_all(&mut self) {
-        // 第一层：注册全部本地 Rust Tool trait 实现
-        crate::tools::register_all(&mut self.tools);
+        // 第一层：注册全部本地 Rust Tool trait 实现。
+        //
+        // 内置工具集经 `tool.set` 接缝取回 —— 外部实现注册同一接缝即可整体替换。
+        // 接缝未注册时（未走启动装配的路径，如单测直接构造注册表）回退内置实现。
+        let builtin = match axagent_harness::get_capability_registry().get_tool_set() {
+            Some(provider) => provider.tools(),
+            None => crate::tools::builtin_tool_instances(),
+        };
+        self.tools.register_all(builtin);
 
         // 配置默认工具级权限要求
         self.permission_policy = Arc::new(Mutex::new(
@@ -1450,6 +1492,11 @@ impl UnifiedToolRegistry {
                 // P0-1c/P0-2：实例级显式策略优先，否则回退全局 Settings 策略。
                 sandbox: self.sandbox_policy.clone().or_else(global_sandbox_policy),
                 approval_policy: self.approval_policy.clone().or_else(global_approval_policy),
+                // R2-1：规则存储同样「实例优先、回退全局」。
+                approval_rule_store: self
+                    .approval_rule_store
+                    .clone()
+                    .or_else(global_approval_rule_store),
             };
 
             // ── 运行时 Schema 校验（M-05） ──

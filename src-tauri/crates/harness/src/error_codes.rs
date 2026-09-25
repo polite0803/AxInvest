@@ -150,6 +150,8 @@ pub mod provider {
     pub const NO_ACTIVE_KEY: &str = "PROVIDER_NO_ACTIVE_KEY";
     pub const ADAPTER_NOT_FOUND: &str = "PROVIDER_ADAPTER_NOT_FOUND";
     pub const MODEL_NOT_FOUND: &str = "PROVIDER_MODEL_NOT_FOUND";
+    /// 模型类型不支持文本生成（决策模型如 TypeSafe Jev 被用于会话 / 生成节点）
+    pub const MODEL_NOT_GENERATIVE: &str = "PROVIDER_MODEL_NOT_GENERATIVE";
 }
 
 /// 搜索相关错误码

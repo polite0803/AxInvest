@@ -5,6 +5,7 @@
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
+use crate::commands::stock_analysis_setup::seed_stock_analysis::FAST_TEMPLATE_ID;
 use axagent_agent::self_improvement_executor::{SelfImprovementConfig, SelfImprovementExecutor};
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::backtest::{
@@ -1183,6 +1184,16 @@ pub struct StockAnalysisListItem {
     pub analysis_kind: String,
     pub as_of_date: Option<String>,
     pub parent_analysis_id: Option<String>,
+    /// 生成该记录的工作流模板 id（`"stock-analysis"` / `"stock-analysis-fast"`）。
+    ///
+    /// 2026-09-24 新增：历史列表此前**无法区分**快速链与完整链记录（`analysis_kind`
+    /// 两者同为 `"live"`），两类记录在同一下拉里混排且观感完全一致，用户看到的是
+    /// 「同一只股票有两条互相矛盾的记录」而没有任何线索说明它们来自不同链路。
+    /// 前端据此给快速链记录打「快速」标识。
+    ///
+    /// `None` = 该记录产生于本列引入之前（或非模板产出，如对话直执行 / 条件单补记）
+    /// —— **不得**据此推断链路，按「未知」渲染。
+    pub template_id: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -1219,6 +1230,7 @@ pub async fn list_stock_analyses(
         .column(stock_analyses::Column::AnalysisKind)
         .column(stock_analyses::Column::AsOfDate)
         .column(stock_analyses::Column::ParentAnalysisId)
+        .column(stock_analyses::Column::TemplateId)
         .column(stock_analyses::Column::CreatedAt)
         .column(stock_analyses::Column::UpdatedAt)
         .order_by_desc(stock_analyses::Column::CreatedAt)
@@ -3816,6 +3828,12 @@ pub struct CronJobResponse {
     schedule: String,
     status: String,
     recurring: bool,
+    /// 关联工作流模板 ID（`None` = 走 task_type 专用分支，不跑工作流）。
+    ///
+    /// 必须回传：趋势智选有**两条链**（`serenity-screening` / `serenity-screening-fast`）
+    /// 共用一个 `task_type`，前端只能靠本字段把列表项归到各自的链上 ——
+    /// 否则「关掉快速链」会误关掉原链的任务（列表里 `[0]` 是谁取决于插入顺序）。
+    workflow_id: Option<String>,
     run_count: u32,
     last_run_at: Option<i64>,
     next_run_at: Option<i64>,
@@ -3830,6 +3848,7 @@ impl From<&CronJob> for CronJobResponse {
             schedule: j.schedule.clone(),
             status: format!("{:?}", j.status).to_lowercase(),
             recurring: j.recurring,
+            workflow_id: j.workflow_id.clone(),
             run_count: j.run_count,
             last_run_at: j.last_run_at,
             next_run_at: j.next_run_at,
@@ -4622,7 +4641,18 @@ pub async fn get_latest_analysis_for_stock(
     let db = state.harness.db();
     let mut query = stock_analyses::Entity::find()
         .filter(stock_analyses::Column::StockCode.eq(&stock_code))
-        .filter(stock_analyses::Column::Status.eq("completed"));
+        .filter(stock_analyses::Column::Status.eq("completed"))
+        // 2026-09-24：排除快速 JEV 链记录。本函数回答的是「该股最近一次**完整**分析
+        // 的结论」—— 快速链不跑 10 个分析师节点，其 `data_quality_summary` 所缺的正是
+        // 完整链才有的那部分数据源，两者不是同一口径的结论，混在一起比就是拿 F 级
+        // 顶替 D 级（300642 实证）。
+        // `IS NULL OR <>` 两段缺一不可：SQL 里 `NULL <> 'x'` 求值为 NULL 而非 true，
+        // 只写后半段会把所有存量记录（链路未知）一并滤掉。
+        .filter(
+            sea_orm::Condition::any()
+                .add(stock_analyses::Column::TemplateId.is_null())
+                .add(stock_analyses::Column::TemplateId.ne(FAST_TEMPLATE_ID)),
+        );
 
     // 时间旅行模式：只返回截止日之前的分析
     if let Some(ref cutoff) = as_of_date {
@@ -4690,7 +4720,15 @@ pub async fn get_latest_analyses_for_stocks(
     for code in &stock_codes {
         let mut query = stock_analyses::Entity::find()
             .filter(stock_analyses::Column::StockCode.eq(code))
-            .filter(stock_analyses::Column::Status.eq("completed"));
+            .filter(stock_analyses::Column::Status.eq("completed"))
+            // 2026-09-24：同 `get_latest_analysis_for_stock`，排除快速 JEV 链记录
+            // （口径一致性由「同一判据只写一处」无法覆盖 —— 两个函数各自建查询，
+            // 故此处的过滤理由是上面那段注释，改动时须同步）。
+            .filter(
+                sea_orm::Condition::any()
+                    .add(stock_analyses::Column::TemplateId.is_null())
+                    .add(stock_analyses::Column::TemplateId.ne(FAST_TEMPLATE_ID)),
+            );
 
         if let Some(ref cutoff) = as_of_date {
             query = query.filter(stock_analyses::Column::AnalysisDate.lte(cutoff));
@@ -5051,6 +5089,10 @@ pub async fn list_reflections(
         .into_iter()
         .take(limit)
         .map(|r| {
+            let horizon_results = r
+                .horizon_results_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
             serde_json::json!({
                 "id": r.id,
                 "stockCode": r.stock_code,
@@ -5068,6 +5110,8 @@ pub async fn list_reflections(
                 "blackboardSnapshot": r.blackboard_snapshot,
                 "status": r.status,
                 "createdAt": r.created_at,
+                "alphaReturn": r.alpha_return,
+                "horizonResults": horizon_results,
             })
         })
         .collect();
@@ -5145,19 +5189,33 @@ pub async fn run_reflection_now(
         stock_name.clone()
     };
 
-    // ── [实际行情] 自动拉取「分析日 → 最新交易日」真实行情 ──
+    // ── [实际行情] 自动拉取四周期行情快照（批次 3）──
+    // 手动触发无 horizon_decisions，全部用默认持有期。
     // 无行情 ⇒ 直接失败并告知用户（不允许"凭空反思"，更不伪造 0% 收益）。
-    let snapshot = match crate::commands::stock_workflow::compute_market_snapshot(
+    let horizon_days: std::collections::BTreeMap<String, i64> = {
+        let mut map = std::collections::BTreeMap::new();
+        for key in &["ultra_short", "short", "mid", "long"] {
+            map.insert(
+                key.to_string(),
+                axagent_analysis_engine::reflection_stats::default_expected_holding_days(key),
+            );
+        }
+        map
+    };
+
+    let snapshots_raw = crate::commands::stock_workflow::compute_market_snapshots(
         client,
         &stock_code,
         &as_of_date,
-        None, // 手动触发无原始决策记录 ⇒ 不校验期望持有期
+        &horizon_days,
         None, // 无原始分析 ⇒ 无目标价可对比
     )
-    .await
-    {
-        Ok(s) if s.trading_days >= 1 => s,
-        Ok(s) => {
+    .await;
+
+    // 手动反思以 short 为主周期（无 original_analysis ⇒ 无法确定 primary_horizon）
+    let primary_snap = match snapshots_raw.get("short").and_then(|r| r.as_ref().ok()) {
+        Some(s) if s.trading_days >= 1 => s.clone(),
+        Some(s) => {
             return Err(ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!(
                     "{stock_code} 在 {as_of_date} 之后仅 {} 个交易日的新行情，\
@@ -5166,21 +5224,24 @@ pub async fn run_reflection_now(
                 ))
                 .to_string());
         },
-        Err(e) => {
+        None => {
             return Err(ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("{stock_code} 实际行情获取失败，无法反思: {e}"))
+                .with_detail(format!("{stock_code} 实际行情获取失败，无法反思"))
                 .to_string());
         },
     };
     tracing::info!(
         "[run_reflection_now] {} 行情快照: {} → {} 涨跌 {:+.2}%（净 {:+.2}%）回撤 {:.2}%",
         stock_code,
-        snapshot.entry_date,
-        snapshot.latest_date,
-        snapshot.price_change_pct,
-        snapshot.net_return_pct,
-        snapshot.max_drawdown_pct
+        primary_snap.entry_date,
+        primary_snap.latest_date,
+        primary_snap.price_change_pct,
+        primary_snap.net_return_pct,
+        primary_snap.max_drawdown_pct
     );
+
+    let horizon_snapshots: std::collections::BTreeMap<String, Option<_>> =
+        snapshots_raw.into_iter().map(|(k, v)| (k, v.ok())).collect();
 
     // 人工覆盖优先（停牌/重组等行情无法反映的情形），否则用行情事实描述
     let outcome_text = actual_outcome
@@ -5188,7 +5249,7 @@ pub async fn run_reflection_now(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| snapshot.render_outcome_short());
+        .unwrap_or_else(|| primary_snap.render_outcome_short());
 
     crate::commands::stock_workflow::run_reflection_workflow(
         db,
@@ -5201,10 +5262,10 @@ pub async fn run_reflection_now(
         "", // original_analysis_id — 手动触发时无原始决策,run_reflection_workflow 已处理跳过
         &outcome_text,
         // [实际行情] 三个结构化 outcome 变量改由行情快照供给（原固定 None）
-        Some(snapshot.net_return_pct),
-        snapshot.alpha_pct,
-        Some(snapshot.trading_days as i32),
-        snapshot.benchmark_code.as_deref().map(|_| "沪深300"),
+        Some(primary_snap.net_return_pct),
+        primary_snap.alpha_pct,
+        Some(primary_snap.trading_days as i32),
+        primary_snap.benchmark_code.as_deref().map(|_| "沪深300"),
         &as_of_date,
         &today,
         0u8, // min_confidence_threshold — 手动触发时全量
@@ -5213,8 +5274,8 @@ pub async fn run_reflection_now(
         None,
         // [方向3] 手动反思也持久化 trajectory，为 ExperiencePipeline 提供数据源
         Some(&state.trajectory_storage),
-        // [实际行情] 价格层事实（入场价/最新价/回撤/目标价实现度）
-        Some(&snapshot),
+        // [四周期行情] 批次 3
+        &horizon_snapshots,
     )
     .await
 }

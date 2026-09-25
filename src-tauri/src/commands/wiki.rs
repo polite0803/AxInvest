@@ -9,6 +9,7 @@ use axagent_dao::repo::note::{CreateNoteInput, GraphData, Note, NoteLink, Update
 use axagent_dao::repo::wiki::{
     self, CreateWikiTemplateInput, NoteVersion, UpdateWikiTemplateInput, WikiTemplate,
 };
+use axagent_harness::IpcEventName;
 use axagent_harness::graph_dtos::{GraphEdge, LinkGraph};
 use axagent_harness::louvain_dtos::LouvainResult;
 use axagent_harness::types::NoteSearchResult;
@@ -520,7 +521,7 @@ pub async fn rebuild_wiki_index(
             }
 
             let _ = app.emit(
-                "wiki-note-indexed",
+                IpcEventName::WikiNoteIndexed.as_str(),
                 serde_json::json!({
                     "noteId": note.id,
                     "success": result.is_ok(),
@@ -530,7 +531,8 @@ pub async fn rebuild_wiki_index(
             );
         }
 
-        let _ = app.emit("wiki-rebuild-complete", serde_json::json!({ "wikiId": wid }));
+        let _ = app
+            .emit(IpcEventName::WikiRebuildComplete.as_str(), serde_json::json!({ "wikiId": wid }));
     }));
 
     Ok(())

@@ -89,9 +89,9 @@ const EXTERNAL_VARS: &[&str] = &[
     "valuation_dcf_upside",
     // 2026-09-21 补：`input_mapping` 于同批新增该键（seed_stock_analysis.rs 的
     //   `("valuation_dcf_fcf_data_missing", "t-valuation.result.content.dcf.assumptions.fcf_data_missing")`），
-    //   但当时**漏同步本清单** ⇒ 脚本执行到 `data-quality.rhai:884`
+    //   但当时**漏同步本清单** ⇒ 脚本执行到 `data-quality.rhai:923`
     //   （`if present(valuation_dcf_fcf_data_missing) …`）即抛
-    //   `ErrorVariableNotFound("valuation_dcf_fcf_data_missing", 884:12)`，
+    //   `ErrorVariableNotFound("valuation_dcf_fcf_data_missing", 923:12)`，
     //   导致本文件 9 个测试**全红**、`data-quality` 节点整体失败 ⇒ 无 `diagnostics`
     //   ⇒ 前端「分析师数据质量」弹窗退化为「本次记录不含该节点的逐节点诊断」。
     //   ⚠️ 这类漏声明是**静默**的（`rhai_syntax_check` 只编译不执行，照样绿）

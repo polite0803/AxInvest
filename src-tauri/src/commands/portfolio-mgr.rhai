@@ -2471,12 +2471,12 @@ let position_state = if position_pct <= 0.0 {
 //   档位值收敛为三张逐一对应的「周期 → 值」转换函数（sl_pct_for / tp_pct_for /
 //   days_for），**主档位** `sl_pct`/`tp_pct` 由 `time_horizon` 经函数取，**四周期
 //   价位映射** `horizonPriceMap` 亦由同一批函数逐周期生成 ⇒ 档位数值在仓库里出现
-//   且只出现一遍（此前已注释声明「档位表禁止在文件内出现三份」，本改进一步收敛）。
+//   且只出现一遍（此前已注释声明「档位表禁止在文件内出现三份」，本改进一步收敛）。⚠ 下面是**闭包**（`let f = |...|` ⇒ 变量里是 FnPtr）：调用**一律** `f.call(...)`，按名 `f(...)` 恒抛 Function not found（同 strategy-scorer.rhai:9 约定）。
 let sl_pct_for = |h| switch h { "ultra_short" => 3.0, "short" => 5.0, "mid" => 8.0, "long" => 12.0, _ => 5.0 };
 let tp_pct_for = |h| switch h { "ultra_short" => 5.0, "short" => 10.0, "mid" => 18.0, "long" => 30.0, _ => 10.0 };
 let days_for = |h| switch h { "ultra_short" => 2, "short" => 5, "mid" => 28, "long" => 90, _ => 5 };
-let sl_pct = if position_pct > 0.0 { sl_pct_for(time_horizon) } else { 0.0 };
-let tp_pct = if position_pct > 0.0 { tp_pct_for(time_horizon) } else { 0.0 };
+let sl_pct = if position_pct > 0.0 { sl_pct_for.call(time_horizon) } else { 0.0 };
+let tp_pct = if position_pct > 0.0 { tp_pct_for.call(time_horizon) } else { 0.0 };
 
 // ── 四周期价位映射（阶段1 新增）──
 // PROPOSAL 阶段1：不改变 action/仓位语义，仅把目标价/止损价扩展为四周期映射，
@@ -2502,10 +2502,10 @@ let horizon_price_of = |h, sl, tp, days| if price_ok {
     }
 };
 let horizon_price_map = #{
-    "ultra_short": horizon_price_of("ultra_short", sl_pct_for("ultra_short"), tp_pct_for("ultra_short"), days_for("ultra_short")),
-    "short":       horizon_price_of("short",       sl_pct_for("short"),       tp_pct_for("short"),       days_for("short")),
-    "mid":         horizon_price_of("mid",         sl_pct_for("mid"),         tp_pct_for("mid"),         days_for("mid")),
-    "long":        horizon_price_of("long",        sl_pct_for("long"),        tp_pct_for("long"),        days_for("long")),
+    "ultra_short": horizon_price_of.call("ultra_short", sl_pct_for.call("ultra_short"), tp_pct_for.call("ultra_short"), days_for.call("ultra_short")),
+    "short":       horizon_price_of.call("short",       sl_pct_for.call("short"),       tp_pct_for.call("short"),       days_for.call("short")),
+    "mid":         horizon_price_of.call("mid",         sl_pct_for.call("mid"),         tp_pct_for.call("mid"),         days_for.call("mid")),
+    "long":        horizon_price_of.call("long",        sl_pct_for.call("long"),        tp_pct_for.call("long"),        days_for.call("long")),
 };
 
 // ── 阶段2（PROPOSAL-stock-decision-four-horizon.md）：四周期独立决策 ──
@@ -2589,9 +2589,9 @@ let ultra_short_dec = #{
 // 短/中/长分别注入对应周期评分（seed 新增 t-scoring-week / t-scoring-month 节点供给）
 let decisions_by_horizon = #{
     "ultraShort": ultra_short_dec,
-    "short": horizon_decision("short", totalScore_short, 5.0, 10.0, 5),
-    "mid": horizon_decision("mid", totalScore_mid, 8.0, 18.0, 28),
-    "long": horizon_decision("long", totalScore_long, 12.0, 30.0, 90),
+    "short": horizon_decision.call("short", totalScore_short, 5.0, 10.0, 5),
+    "mid": horizon_decision.call("mid", totalScore_mid, 8.0, 18.0, 28),
+    "long": horizon_decision.call("long", totalScore_long, 12.0, 30.0, 90),
 };
 
 // ── 输出 ──

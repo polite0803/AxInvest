@@ -62,6 +62,8 @@ export async function seedStockSchemas(): Promise<void> {
         category: entry.category,
         tags: entry.tags,
         schemaJson: JSON.stringify(entry.schema, null, 2),
+        // 来源元数据：这批是随应用内置的股票看板，不是用户/AI 产出
+        origin: "builtin",
       });
     }
   } catch (err) {

@@ -248,7 +248,7 @@ export function PluginMarketplace() {
         <div className="space-y-2 max-h-96 overflow-auto">
           {filteredRegistry.map((r) => (
             <div
-              key={r.id}
+              key={`${r.pluginId ?? "builtin"}:${r.id}`}
               className="flex items-start justify-between gap-2 border border-zinc-200 rounded-md px-2 py-1.5"
             >
               <div className="min-w-0">
@@ -256,14 +256,22 @@ export function PluginMarketplace() {
                   <Text strong className="text-xs" ellipsis>
                     {r.id}
                   </Text>
-                  <Tag
-                    color={r.origin === "builtin" ? "green" : "purple"}
-                    className="text-xs shrink-0"
-                  >
-                    {r.origin === "builtin"
-                      ? t("chat.plugins.marketplace.registryBuiltin")
-                      : t("chat.plugins.marketplace.registryExternal")}
-                  </Tag>
+                  {r.implemented
+                    ? (
+                      <Tag
+                        color={r.origin === "builtin" ? "green" : "purple"}
+                        className="text-xs shrink-0"
+                      >
+                        {r.origin === "builtin"
+                          ? t("chat.plugins.marketplace.registryBuiltin")
+                          : t("chat.plugins.marketplace.registryExternal")}
+                      </Tag>
+                    )
+                    : (
+                      <Tag color="orange" className="text-xs shrink-0">
+                        {t("chat.plugins.marketplace.registryDeclared")}
+                      </Tag>
+                    )}
                 </div>
                 <Text type="secondary" className="text-xs block truncate">
                   {r.contract}

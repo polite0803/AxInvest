@@ -2332,6 +2332,34 @@ impl AStockClient {
         }
     }
 
+    /// P6:把一批 live 抓到的新闻写入本地语料库(`news_archive`),供 as-of 回放检索。
+    ///
+    /// **缓存命中路径也必须调用**:L1 缓存只表示「300s 内不再请求 vendor」,
+    /// 不代表这批新闻已经入库(sink 可能在缓存写入之后才注入,或上一次 upsert 失败)。
+    /// 此前 get_news / get_policy_news / search_news 三条路径的缓存命中分支都是裸 `return`,
+    /// 与调用点「无关缓存命中」的注释自相矛盾 ⇒ 实盘新闻只进缓存、永不进语料库。
+    ///
+    /// `publish_time` 无法解析为毫秒的条目无法参与 as-of 时间比较,直接丢弃。
+    async fn persist_news_to_archive(
+        &self,
+        source: &str,
+        stock_code: Option<&str>,
+        keyword: Option<&str>,
+        items: &[NewsItem],
+    ) {
+        let Some(sink) = &self.news_archive_sink else {
+            return;
+        };
+        let filtered: Vec<NewsItem> = items
+            .iter()
+            .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
+            .cloned()
+            .collect();
+        if !filtered.is_empty() {
+            sink.upsert(source, stock_code, keyword, &filtered).await;
+        }
+    }
+
     pub async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
         // ── as-of 模式：走本地 `news_archive` 语料库（与 `get_policy_news` 同款）──
         //
@@ -2388,6 +2416,9 @@ impl AStockClient {
             let cache_key = Self::cache_key_for("news", &format!("{stock_code}:{limit}"));
             if let Some(cached) = self.cache_get(&cache_key).await {
                 if let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached) {
+                    // 缓存命中同样入库:否则 300s 内的重复请求会让这批新闻
+                    // 永远只在缓存里(与下方 upsert 处的注释语义保持一致)。
+                    self.persist_news_to_archive("news", Some(stock_code), None, &data).await;
                     return Ok(data);
                 }
             }
@@ -2426,16 +2457,7 @@ impl AStockClient {
                 self.cache_set_serialized(cache_key, &result, 300).await;
                 // P6:自动 upsert 到 news_archive(无关缓存命中/降级,
                 // 任何 vendor 返回的非空结果都入本地语料库)
-                if let Some(sink) = &self.news_archive_sink {
-                    let filtered: Vec<NewsItem> = result
-                        .iter()
-                        .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
-                        .cloned()
-                        .collect();
-                    if !filtered.is_empty() {
-                        sink.upsert("news", Some(stock_code), None, &filtered).await;
-                    }
-                }
+                self.persist_news_to_archive("news", Some(stock_code), None, &result).await;
                 Ok(result)
             },
             Err(e) => {
@@ -2504,6 +2526,8 @@ impl AStockClient {
             let cache_key = Self::cache_key_for("policy_news", &format!("{stock_code}:{limit}"));
             if let Some(cached) = self.cache_get(&cache_key).await {
                 if let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached) {
+                    self.persist_news_to_archive("policy_news", Some(stock_code), None, &data)
+                        .await;
                     return Ok(data);
                 }
             }
@@ -2547,16 +2571,7 @@ impl AStockClient {
                     Self::cache_key_for("policy_news", &format!("{stock_code}:{limit}"));
                 self.cache_set_serialized(cache_key, &result, 300).await;
                 // 自动 upsert 到 news_archive
-                if let Some(sink) = &self.news_archive_sink {
-                    let filtered: Vec<NewsItem> = result
-                        .iter()
-                        .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
-                        .cloned()
-                        .collect();
-                    if !filtered.is_empty() {
-                        sink.upsert("policy_news", Some(stock_code), None, &filtered).await;
-                    }
-                }
+                self.persist_news_to_archive("policy_news", Some(stock_code), None, &result).await;
                 Ok(result)
             },
             Err(e) => {
@@ -2960,6 +2975,7 @@ impl AStockClient {
             let cache_key = Self::cache_key_for("search_news", &format!("{keyword}:{limit}"));
             if let Some(cached) = self.cache_get(&cache_key).await {
                 if let Ok(data) = serde_json::from_str::<Vec<NewsItem>>(&cached) {
+                    self.persist_news_to_archive("search_news", None, Some(keyword), &data).await;
                     return Ok(data);
                 }
             }
@@ -2990,16 +3006,7 @@ impl AStockClient {
                 // H1.2 修复:写入 L1 缓存(60s TTL)
                 let cache_key = Self::cache_key_for("search_news", &format!("{keyword}:{limit}"));
                 self.cache_set_serialized(cache_key, &result, 60).await;
-                if let Some(sink) = &self.news_archive_sink {
-                    let filtered: Vec<NewsItem> = result
-                        .iter()
-                        .filter(|n| parse_news_publish_time_ms(&n.publish_time).is_some())
-                        .cloned()
-                        .collect();
-                    if !filtered.is_empty() {
-                        sink.upsert("search_news", None, Some(keyword), &filtered).await;
-                    }
-                }
+                self.persist_news_to_archive("search_news", None, Some(keyword), &result).await;
                 Ok(result)
             },
             Err(e) => {

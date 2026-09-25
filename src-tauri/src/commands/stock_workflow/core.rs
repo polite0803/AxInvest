@@ -9,6 +9,7 @@ use super::decision::{
 use crate::AppState;
 use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::stock_workflow as wf_err;
+use crate::commands::stock_analysis_setup::seed_stock_analysis::SOURCE_TEMPLATE_ID;
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::blackboard::build_blackboard_snapshot;
 use axagent_analysis_engine::stock_reflection::{AnalysisStepResult, StockAnalysisOutcome};
@@ -16,10 +17,11 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::price_alerts;
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
+use axagent_harness::IpcEventName;
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
 use sea_orm::DatabaseConnection;
 use sea_orm::sea_query::Expr;
-use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
@@ -204,6 +206,9 @@ pub async fn run_stock_workflow(
     screening_source: Option<String>,
     // P2-3.3: 报告输出语言 — "en" / "english" 英文报告，其他值或 None 默认中文
     language: Option<String>,
+    // 工作流模板 id —— 前端「快速分析」按钮传 `"stock-analysis-fast"`。
+    // 缺省（None）走 `"stock-analysis"` 完整分析链，保持既有行为不变。
+    template_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     // 解析 as_of_date；非法或未来日期直接 4xx-style 错误
     let as_of_ctx = parse_asof_param(as_of_date.clone())?;
@@ -220,6 +225,7 @@ pub async fn run_stock_workflow(
                     parent_analysis_id,
                     screening_source,
                     language,
+                    template_id,
                 )
                 .await
             })
@@ -234,6 +240,7 @@ pub async fn run_stock_workflow(
             parent_analysis_id,
             screening_source,
             language,
+            template_id,
         )
         .await
     }
@@ -324,6 +331,7 @@ pub(crate) async fn trigger_t0_rerun(
         None, // parent_analysis_id — 新建独立版本
         None, // screening_source
         None, // language — 默认中文
+        None, // template_id — T+0 重跑恒走完整分析链
     )
     .await;
 
@@ -378,6 +386,10 @@ pub async fn run_stock_workflow_inner(
     // P2-3.3: 报告输出语言 — 传入 prompts::language_instruction 生成指示文本，
     // 追加到每个 AgentNode 的 system_prompt 末尾，让 LLM 用对应语言输出。
     language: Option<String>,
+    // 工作流模板 id —— 缺省 `"stock-analysis"`（完整分析链）；
+    // 前端「快速分析」传 `"stock-analysis-fast"`（Jev 判定链，见
+    // PLAN-stock-analysis-fast-workflow.md）。
+    template_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let quote = state.astock_client.get_quote(&stock_code).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("行情获取失败: {e}"))
@@ -397,6 +409,16 @@ pub async fn run_stock_workflow_inner(
         as_of_date.clone().unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
     let is_live_mode = as_of_date.is_none();
 
+    // 模板 id 解析：缺省走完整分析链（`stock-analysis`）；前端「快速分析」传
+    // `stock-analysis-fast`（Jev 判定链）。两条链共用全部数据源 / 算法 / 脚本资产，
+    // 差异只在图结构（H1：原图节点与边一行不动）。
+    //
+    // 提前到插入之前解析（2026-09-24 修）：本值只取决于入参，与模板是否加载成功无关，
+    // 而 `stock_analyses.template_id` 必须在**建行时**就落定 —— 否则「快速链跑到中途失败」
+    // 会留下一行 template_id=NULL 的记录，读取侧的 `!= 'stock-analysis-fast'` 过滤
+    // 会把它当成完整链放行，原缺陷（快速链顶替完整链的「最近分析」）在失败路径上复现。
+    let template_id = template_id.unwrap_or_else(|| SOURCE_TEMPLATE_ID.to_string());
+
     let (analysis_id, parent_for_record, need_insert) = match &parent_analysis_id {
         Some(parent_id) => {
             match stock_analyses::Entity::find_by_id(parent_id.as_str())
@@ -412,13 +434,38 @@ pub async fn run_stock_workflow_inner(
                         );
                         (uuid::Uuid::new_v4().to_string(), Some(parent_id.clone()), true)
                     } else {
-                        // replay 模式：比较 as_of_date，相同则覆盖，不同则新建版本
-                        let parent_as_of = parent_record.as_of_date.as_deref().unwrap_or("");
-                        if parent_as_of == current_as_of {
-                            // 同一 as_of_date：覆盖现有记录（重置为 running）
+                        // replay 模式：覆盖目标只认「同股 + 同 as_of_date + kind=replay」的既有回放行。
+                        //
+                        // ⚠ 修复(2026-09-24)：原判据只看 `parent_record.as_of_date == current_as_of`，
+                        // 于是「对某日的**实盘**记录做同日回放」会把实盘记录当场覆盖 ——
+                        // UPDATE 重置为 running 后重跑，`analysis_kind` 仍留 'live'，而
+                        // `blackboard_snapshot._meta` 已写成 `mode=replay / source=user_replay`：
+                        // 实盘决策证据被静默销毁，且该行仍被标成 live（实测 511abde4：
+                        // created_at 09-22 且 kind=live，updated_at 09-24，快照却是 replay）。
+                        // 实盘记录是当时真实决策的证据，模拟（回放）不得覆盖它，只能另立版本。
+                        //
+                        // 覆盖目标改为按 (stock_code, as_of_date, kind='replay') 定位：
+                        //   - 已有同日回放行 → 覆盖它（同日重复回放保持幂等，不产生重复行）
+                        //   - 没有 → 新建回放版本，parent 指向本次重跑的来源记录
+                        // 该判据同时让 kind 与语义天然一致：回放行只以 kind='replay' 诞生，
+                        // 实盘行一旦诞生就不再被回放改动，无需在覆盖时改写字段。
+                        let replay_target_id = stock_analyses::Entity::find()
+                            .filter(stock_analyses::Column::StockCode.eq(stock_code.as_str()))
+                            .filter(stock_analyses::Column::AsOfDate.eq(current_as_of.as_str()))
+                            .filter(stock_analyses::Column::AnalysisKind.eq("replay"))
+                            .order_by_desc(stock_analyses::Column::CreatedAt)
+                            .one(state.harness.db())
+                            .await
+                            .map_err(|e| {
+                                ErrorResponse::new(wf_err::INTERNAL)
+                                    .with_detail(format!("回放覆盖目标查询失败: {e}"))
+                            })?
+                            .map(|r| r.id);
+                        if let Some(target_id) = replay_target_id {
+                            // 同一 as_of_date 的既有回放行：覆盖它（重置为 running）
                             tracing::info!(
-                                "[run_stock_workflow] replay 同日重跑(覆盖模式): parent={}, as_of={}",
-                                parent_id,
+                                "[run_stock_workflow] replay 同日重跑(覆盖既有回放行): id={}, as_of={}",
+                                target_id,
                                 current_as_of
                             );
                             stock_analyses::Entity::update_many()
@@ -451,21 +498,29 @@ pub async fn run_stock_workflow_inner(
                                     stock_analyses::Column::TemplateVersion,
                                     Expr::value(None::<i32>),
                                 )
+                                // 2026-09-24：模板 id 同理必须同批清空 —— 「决策已清空但
+                                // template_id 残留」会让读取侧按上一轮的链路归类这一行，
+                                // 而本轮的链路要到完成 UPDATE 才写回，中途失败即留下错误归类。
+                                .col_expr(
+                                    stock_analyses::Column::TemplateId,
+                                    Expr::value(None::<String>),
+                                )
                                 .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now_ms))
-                                .filter(stock_analyses::Column::Id.eq(parent_id.as_str()))
+                                .filter(stock_analyses::Column::Id.eq(target_id.as_str()))
                                 .exec(state.harness.db())
                                 .await
                                 .map_err(|e| {
                                     ErrorResponse::new(wf_err::INTERNAL)
                                         .with_detail(format!("覆盖更新失败: {e}"))
                                 })?;
-                            (parent_id.clone(), None, false)
+                            (target_id, None, false)
                         } else {
-                            // 跨 as_of_date：新建版本
+                            // 无同日回放行：新建回放版本（parent 指向本次重跑的来源记录，
+                            // 若来源是实盘行则原样保留，回放只是它的一个新版本）
                             tracing::info!(
-                                "[run_stock_workflow] replay 跨日新建版本: parent={}, old_as_of={}, new_as_of={}",
+                                "[run_stock_workflow] replay 新建回放版本(不覆盖实盘记录): parent={} (kind={}), as_of={}",
                                 parent_id,
-                                parent_as_of,
+                                parent_record.analysis_kind,
                                 current_as_of
                             );
                             (uuid::Uuid::new_v4().to_string(), Some(parent_id.clone()), true)
@@ -524,6 +579,10 @@ pub async fn run_stock_workflow_inner(
             // 真实版本号由 `run_stock_workflow_inner` 的主路径 / 降级分支用 col_expr 写回。
             // 语义与上方 `decision_position_state` 同约：NULL = 采集时点无此信息。
             template_version: Set(None),
+            // 2026-09-24：与 template_version 不同，模板 id 在建行时就已确定（见上方解析），
+            // 故**显式写入**而非留 NULL —— NULL 在本列语义是「本列引入前的记录，链路未知」，
+            // 留 NULL 会让失败路径下的快速链记录被读取侧误当完整链（原缺陷复现）。
+            template_id: Set(Some(template_id.clone())),
             data_snapshot_id: Set(None),
             outcome: Set(None),
             decision_time_horizon: Set(None),
@@ -612,8 +671,9 @@ pub async fn run_stock_workflow_inner(
         },
     }
 
+    // 模板 id 已在插入前解析（见上文「模板 id 解析」注释块）。
     let mut loaded =
-        load_and_inject_template(state.harness.db(), &stock_code, &quote.name, "stock-analysis")
+        load_and_inject_template(state.harness.db(), &stock_code, &quote.name, &template_id)
             .await?;
 
     // A4（2026-09-19）：决策落库时要写进 `stock_analyses.template_version`，供离线复算
@@ -714,7 +774,7 @@ pub async fn run_stock_workflow_inner(
             // 根据步骤状态分发到对应的前端事件（与 executionStore 监听器匹配）
             let (event_name, payload) = match event.status.as_str() {
                 "running" => (
-                    "workflow-step-start",
+                    IpcEventName::WorkflowStepStart.as_str(),
                     serde_json::json!({
                         "conversationId": format!("wf-{}", wf_id),
                         "stepId": event.node_id,
@@ -733,7 +793,7 @@ pub async fn run_stock_workflow_inner(
                     }),
                 ),
                 "completed" => (
-                    "workflow-step-complete",
+                    IpcEventName::WorkflowStepComplete.as_str(),
                     serde_json::json!({
                         "conversationId": format!("wf-{}", wf_id),
                         "stepId": event.node_id,
@@ -748,7 +808,7 @@ pub async fn run_stock_workflow_inner(
                     let (code, category) = node_error_code(event.error_code.as_deref())
                         .unwrap_or((wf_err::STEP_FAILED, ErrorCategory::Unrecoverable));
                     (
-                        "workflow-step-error",
+                        IpcEventName::WorkflowStepError.as_str(),
                         step_error_payload(
                             &wf_id,
                             &event.node_id,
@@ -762,7 +822,7 @@ pub async fn run_stock_workflow_inner(
                 // 流式增量（2026-09-08 修复）：AgentExecutor 每 2s 发一次，output 携带
                 // 累积文本。转发为 workflow-step-delta 供前端"边生成边显示"（辩论等长节点）。
                 "streaming" => (
-                    "workflow-step-delta",
+                    IpcEventName::WorkflowStepDelta.as_str(),
                     serde_json::json!({
                         "conversationId": format!("wf-{}", wf_id),
                         "stepId": event.node_id,
@@ -779,7 +839,7 @@ pub async fn run_stock_workflow_inner(
             let _ = handle.emit(event_name, payload);
             // 向后兼容：同时发送旧事件 workflow-step-done
             let _ = handle.emit(
-                "workflow-step-done",
+                IpcEventName::WorkflowStepDone.as_str(),
                 serde_json::json!({
                     "workflowId": wf_id,
                     "nodeId": event.node_id,
@@ -916,7 +976,7 @@ pub async fn run_stock_workflow_inner(
                 tracing::warn!(%wf_id, "工作流总超时，主动取消");
                 let _ = engine.cancel_workflow(&wf_id).await;
                 let _ = emit_opt(&app_h,
-                    "workflow-error",
+                    IpcEventName::WorkflowError.as_str(),
                     workflow_error_payload(
                         &wf_id,
                         wf_err::TIMEOUT,
@@ -946,7 +1006,7 @@ pub async fn run_stock_workflow_inner(
                 match wf_status {
                     axagent_rt_workflow::workflow_engine::WorkflowStatus::Cancelled => {
                         if let Err(e) = emit_opt(&app_h,
-                            "workflow-error",
+                            IpcEventName::WorkflowError.as_str(),
                             workflow_error_payload(
                                 &wf_id,
                                 wf_err::CANCELLED,
@@ -1071,6 +1131,12 @@ pub async fn run_stock_workflow_inner(
                                 stock_analyses::Column::TemplateVersion,
                                 Expr::value(template_version),
                             )
+                            // 2026-09-24：replay 同日覆盖分支不建行（need_insert=false），
+                            // 其 template_id 只能由这里写回（覆盖时已被清空）。
+                            .col_expr(
+                                stock_analyses::Column::TemplateId,
+                                Expr::value(template_id.clone()),
+                            )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
                                 Expr::value(chrono::Utc::now().timestamp_millis()),
@@ -1103,7 +1169,7 @@ pub async fn run_stock_workflow_inner(
                         }
                         // 版本化模式：不再删旧行/改 ID，直接用新行 ID emit
                         if let Err(e) = emit_opt(&app_h,
-                            "workflow-completed",
+                            IpcEventName::WorkflowCompleted.as_str(),
                             serde_json::json!({
                                 "workflowId": wf_id,
                                 "results": result.results,
@@ -1399,6 +1465,11 @@ pub async fn run_stock_workflow_inner(
                                 stock_analyses::Column::TemplateVersion,
                                 Expr::value(template_version),
                             )
+                            // 2026-09-24：同上，replay 同日覆盖分支的 template_id 只能由此写回。
+                            .col_expr(
+                                stock_analyses::Column::TemplateId,
+                                Expr::value(template_id.clone()),
+                            )
                             .col_expr(
                                 stock_analyses::Column::UpdatedAt,
                                 Expr::value(chrono::Utc::now().timestamp_millis()),
@@ -1628,7 +1699,7 @@ pub async fn run_stock_workflow_inner(
                         }
                         // DB 写入完成后再 emit，避免前端 extract_evidence_citations 读到空数据
                         if let Err(e) = emit_opt(&app_h,
-                            "workflow-completed",
+                            IpcEventName::WorkflowCompleted.as_str(),
                             serde_json::json!({
                                 "workflowId": wf_id,
                                 "results": result.results,
@@ -1672,7 +1743,7 @@ pub async fn run_stock_workflow_inner(
                 // 按 `WorkflowError` 变体精确映射，而非把 Display 文本当契约递给前端。
                 let (code, category) = workflow_error_code(&e);
                 let _ = emit_opt(&app_h,
-                    "workflow-error",
+                    IpcEventName::WorkflowError.as_str(),
                     workflow_error_payload(&wf_id, code, category, e.to_string()),
                 );
                 if let Err(db_e) = stock_analyses::Entity::update_many()
@@ -1736,10 +1807,16 @@ pub async fn run_single_stock_analysis(
     stock_code: &str,
     stock_name: &str,
     expected_holding_days: Option<u32>,
+    // 工作流模板 id —— 缺省 `"stock-analysis"`（完整分析链）。
+    // 批量 / 定时扫描目前恒传 `None`；参数化是为了后续可切快速链而不必再动签名。
+    template_id: Option<&str>,
 ) -> Result<String, String> {
     // 1. 创建 stock_analyses 记录
     let now_ms = chrono::Utc::now().timestamp_millis();
     let analysis_id = uuid::Uuid::new_v4().to_string();
+    // 模板 id 解析：与主入口同约定，缺省完整分析链。在本函数开头解析一次供建行与
+    // 模板加载复用（2026-09-24：`template_id` 列必须在建行时就落定，理由见主入口注释）。
+    let template_id = template_id.unwrap_or(SOURCE_TEMPLATE_ID);
 
     stock_analyses::ActiveModel {
         id: Set(analysis_id.clone()),
@@ -1768,6 +1845,8 @@ pub async fn run_single_stock_analysis(
         // A4：本行同为 "running" 占位行（决策尚未产生）⇒ NULL；真实版本号由
         // `run_stock_workflow_inner` 的主路径 / 降级分支写回（同上方 462 行的约定）。
         template_version: Set(None),
+        // 2026-09-24：模板 id 建行即知，显式写入（语义约定同主入口）。
+        template_id: Set(Some(template_id.to_string())),
         data_snapshot_id: Set(None),
         outcome: Set(None),
         decision_time_horizon: Set(None),
@@ -1829,7 +1908,7 @@ pub async fn run_single_stock_analysis(
     }
 
     // 4. 加载模板并注入 stock_code
-    let loaded = load_and_inject_template(db, stock_code, stock_name, "stock-analysis").await?;
+    let loaded = load_and_inject_template(db, stock_code, stock_name, template_id).await?;
 
     // 5. 解析运行时参数
     let (max_concurrent, step_timeout, _total_timeout) =
@@ -2006,6 +2085,7 @@ pub async fn run_single_stock_analysis(
                 missed_signals: Set(None),
                 fix_for_future: Set(None),
                 parameter_suggestions_json: Set(None),
+                horizon_results_json: Set(None),
                 decision_json: Set(None),
                 blackboard_snapshot: Set(None),
                 model_version: Set(None),

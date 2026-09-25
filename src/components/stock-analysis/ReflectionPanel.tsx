@@ -2,7 +2,7 @@
 import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { invoke, listen } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
-import type { HitrateGroup, HitrateStats, ReflectionFeedbackResult } from "@/types";
+import type { HitrateGroup, HitrateStats, HorizonResultsMap, ReflectionFeedbackResult } from "@/types";
 import {
   Button,
   Card,
@@ -20,6 +20,7 @@ import {
   Spin,
   Switch,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Typography,
@@ -51,6 +52,8 @@ interface ReflectionRow {
   createdAt: number;
   decisionJson?: string;
   blackboardSnapshot?: string;
+  alphaReturn?: number | null;
+  horizonResults?: HorizonResultsMap | null;
 }
 
 interface CronJobResponse {
@@ -119,6 +122,24 @@ export function ReflectionPanel() {
     }
     return `${(v * 100).toFixed(1)}%`;
   };
+  // 数值指标格式化（null = 暂无数据；不得把缺失渲染成 0）
+  const formatMetric = (v: number | null | undefined): string => {
+    if (v == null) {
+      return t("stockAnalysis.reflection.noData");
+    }
+    return `${v.toFixed(2)}%`;
+  };
+  /** 周期键 → 本地化名称（byHorizon 的 key 为 ultra_short / short / mid / long / unknown） */
+  const horizonKeyLabel = (key: string): string => {
+    const map: Record<string, string> = {
+      ultra_short: t("stockAnalysis.reflection.horizonUltraShort"),
+      short: t("stockAnalysis.reflection.horizonShort"),
+      mid: t("stockAnalysis.reflection.horizonMid"),
+      long: t("stockAnalysis.reflection.horizonLong"),
+      unknown: t("stockAnalysis.reflection.horizonUnknown"),
+    };
+    return map[key] ?? key;
+  };
   const hitrateGroupColumns = (title: string): ColumnsType<HitrateGroup> => [
     { title, dataIndex: "key", key: "key", width: 140 },
     { title: t("stockAnalysis.reflection.hitrateSamples"), dataIndex: "samples", key: "samples", width: 80 },
@@ -127,6 +148,46 @@ export function ReflectionPanel() {
       dataIndex: "directionHitRate",
       key: "directionHitRate",
       render: (v: number | null) => formatHitRate(v),
+    },
+  ];
+  /** 四周期统计表：成熟样本 / 方向命中率 / 目标价命中率 / 平均净收益 / 平均 alpha */
+  const hitrateHorizonColumns: ColumnsType<HitrateGroup> = [
+    {
+      title: t("stockAnalysis.reflection.hitrateByHorizon"),
+      dataIndex: "key",
+      key: "key",
+      width: 130,
+      render: (v: string) => horizonKeyLabel(v),
+    },
+    {
+      title: t("stockAnalysis.reflection.hitrateMatureSamples"),
+      dataIndex: "samples",
+      key: "samples",
+      width: 90,
+    },
+    {
+      title: t("stockAnalysis.reflection.hitrateDirection"),
+      dataIndex: "directionHitRate",
+      key: "directionHitRate",
+      render: (v: number | null) => formatHitRate(v),
+    },
+    {
+      title: t("stockAnalysis.reflection.hitrateTarget"),
+      dataIndex: "targetHitRate",
+      key: "targetHitRate",
+      render: (v: number | null) => formatHitRate(v),
+    },
+    {
+      title: t("stockAnalysis.reflection.hitrateAvgReturn"),
+      dataIndex: "avgRawReturnPct",
+      key: "avgRawReturnPct",
+      render: (v: number | null) => formatMetric(v),
+    },
+    {
+      title: t("stockAnalysis.reflection.hitrateAvgAlpha"),
+      dataIndex: "avgAlphaPct",
+      key: "avgAlphaPct",
+      render: (v: number | null) => formatMetric(v),
     },
   ];
   const load = async () => {
@@ -581,24 +642,28 @@ export function ReflectionPanel() {
               : `${hitrate.avgAlphaPct.toFixed(2)}%`}
           </Descriptions.Item>
         </Descriptions>
-        <Space size="large" style={{ marginTop: 12, width: "100%", alignItems: "flex-start" }}>
-          <Table
-            size="small"
-            rowKey="key"
-            pagination={false}
-            style={{ flex: 1 }}
-            dataSource={hitrate?.byAction ?? []}
-            columns={hitrateGroupColumns(t("stockAnalysis.reflection.hitrateByAction"))}
-          />
-          <Table
-            size="small"
-            rowKey="key"
-            pagination={false}
-            style={{ flex: 1 }}
-            dataSource={hitrate?.byHorizon ?? []}
-            columns={hitrateGroupColumns(t("stockAnalysis.reflection.hitrateByHorizon"))}
-          />
-        </Space>
+        {/* 四周期独立统计：每个 horizon 独立应用 MIN_SAMPLE=5，未成熟/无行情不进分母 */}
+        <Table
+          size="small"
+          rowKey="key"
+          pagination={false}
+          style={{ marginTop: 12 }}
+          dataSource={hitrate?.byHorizon ?? []}
+          columns={hitrateHorizonColumns}
+        />
+        {(hitrate?.legacySamples ?? 0) > 0 && (
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {t("stockAnalysis.reflection.hitrateLegacyHint", { samples: hitrate?.legacySamples })}
+          </Text>
+        )}
+        <Table
+          size="small"
+          rowKey="key"
+          pagination={false}
+          style={{ marginTop: 12 }}
+          dataSource={hitrate?.byAction ?? []}
+          columns={hitrateGroupColumns(t("stockAnalysis.reflection.hitrateByAction"))}
+        />
       </Card>
 
       {/* 反思历史 */}
@@ -912,7 +977,10 @@ function renderBlackboardSnapshot(raw: string, label: string) {
   );
 }
 
-function ExpandedReflectionRow(
+// 导出仅为便于定向单测（四周期 Tab 不串线 / null 不显示为 0 / 空周期不误报）：
+// 该组件不在模块外被生产代码引用，测试入口见
+// `src/components/stock-analysis/__tests__/ReflectionPanel.horizon.test.tsx`。
+export function ExpandedReflectionRow(
   { row, t, onRefresh }: {
     row: ReflectionRow;
     t: (key: string, opts?: object) => string;
@@ -1116,36 +1184,273 @@ function ExpandedReflectionRow(
             </Tooltip>
           )}
         </Space>
-        <div>
-          <Text strong>{t("stockAnalysis.reflection.causeLabel")}</Text>
-          <Text>{row.whatWentWrong || "-"}</Text>
-        </div>
-        <div>
-          <Text strong>{t("stockAnalysis.reflection.signalsLabel")}</Text>
-          <Text>{formatJson(row.missedSignals)}</Text>
-        </div>
-        <div>
-          <Text strong>{t("stockAnalysis.reflection.improveLabel")}</Text>
-          <Text>{row.fixForFuture || "-"}</Text>
-        </div>
-        {(row.decisionJson || row.blackboardSnapshot) && (
-          <details style={{ marginTop: 4 }} open={!row.whatWentWrong && !row.fixForFuture}>
-            <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: 12 }}>
-              {t("stockAnalysis.reflection.rawOutputTitle")}
-            </summary>
-            {row.decisionJson
-              && renderPrettyJson(
-                t("stockAnalysis.reflection.decisionJsonLabel"),
-                row.decisionJson,
-                200,
-              )}
-            {row.blackboardSnapshot
-              && renderBlackboardSnapshot(
-                row.blackboardSnapshot,
-                t("stockAnalysis.reflection.blackboardSnapshotLabel"),
-              )}
-          </details>
-        )}
+        {(() => {
+          const hr = row.horizonResults;
+          const hasHorizon = hr && (hr.ultra_short || hr.short || hr.mid || hr.long);
+
+          if (!hasHorizon) {
+            return (
+              <>
+                <div>
+                  <Text strong>{t("stockAnalysis.reflection.causeLabel")}</Text>
+                  <Text>{row.whatWentWrong || "-"}</Text>
+                </div>
+                <div>
+                  <Text strong>{t("stockAnalysis.reflection.signalsLabel")}</Text>
+                  <Text>{formatJson(row.missedSignals)}</Text>
+                </div>
+                <div>
+                  <Text strong>{t("stockAnalysis.reflection.improveLabel")}</Text>
+                  <Text>{row.fixForFuture || "-"}</Text>
+                </div>
+                {(row.decisionJson || row.blackboardSnapshot) && (
+                  <details style={{ marginTop: 4 }} open={!row.whatWentWrong && !row.fixForFuture}>
+                    <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: 12 }}>
+                      {t("stockAnalysis.reflection.rawOutputTitle")}
+                    </summary>
+                    {row.decisionJson
+                      && renderPrettyJson(
+                        t("stockAnalysis.reflection.decisionJsonLabel"),
+                        row.decisionJson,
+                        200,
+                      )}
+                    {row.blackboardSnapshot
+                      && renderBlackboardSnapshot(
+                        row.blackboardSnapshot,
+                        t("stockAnalysis.reflection.blackboardSnapshotLabel"),
+                      )}
+                  </details>
+                )}
+              </>
+            );
+          }
+
+          const HORIZON_LABELS: Record<string, string> = {
+            ultra_short: t("stockAnalysis.reflection.horizonUltraShort"),
+            short: t("stockAnalysis.reflection.horizonShort"),
+            mid: t("stockAnalysis.reflection.horizonMid"),
+            long: t("stockAnalysis.reflection.horizonLong"),
+          };
+
+          const statusTag = (status: string) => {
+            const map: Record<string, { color: string; label: string }> = {
+              mature: { color: "green", label: t("stockAnalysis.reflection.horizonStatusMature") },
+              immature: {
+                color: "orange",
+                label: t("stockAnalysis.reflection.horizonStatusImmature"),
+              },
+              unavailable: {
+                color: "default",
+                label: t("stockAnalysis.reflection.horizonStatusUnavailable"),
+              },
+              legacy: { color: "purple", label: t("stockAnalysis.reflection.horizonStatusLegacy") },
+            };
+            const cfg = map[status] ?? { color: "default", label: status };
+            return <Tag color={cfg.color}>{cfg.label}</Tag>;
+          };
+
+          const fmtPct = (v: number | null | undefined): string => {
+            if (v == null) { return "—"; }
+            return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+          };
+
+          const fmtBool = (v: boolean | null | undefined): string => {
+            if (v == null) { return "—"; }
+            return v ? "✓" : "✗";
+          };
+
+          const renderHorizonContent = (key: "ultra_short" | "short" | "mid" | "long") => {
+            const entry = hr![key];
+            if (!entry) {
+              return <Text type="secondary">{t("stockAnalysis.reflection.horizonNoEntry")}</Text>;
+            }
+            const isMature = entry.status === "mature" || entry.status === "legacy";
+            const m = entry.market;
+            const ev = entry.evaluation;
+            const dec = entry.decision;
+
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Text strong>{t("stockAnalysis.reflection.horizonStatusLabel")}</Text>
+                  {statusTag(entry.status)}
+                  {!isMature && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {entry.status === "immature"
+                        ? t("stockAnalysis.reflection.horizonImmatureHint")
+                        : entry.status === "unavailable"
+                        ? t("stockAnalysis.reflection.horizonUnavailableHint")
+                        : t("stockAnalysis.reflection.horizonLegacyHint")}
+                    </Text>
+                  )}
+                </div>
+
+                <Descriptions column={3} size="small" bordered>
+                  <Descriptions.Item label={t("stockAnalysis.reflection.horizonAction")}>
+                    {dec?.action ?? "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t("stockAnalysis.reflection.horizonPosition")}>
+                    {dec?.positionPct != null ? `${(dec.positionPct * 100).toFixed(0)}%` : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t("stockAnalysis.reflection.horizonConfidence")}>
+                    {dec?.confidence != null ? `${(dec.confidence * 100).toFixed(0)}%` : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t("stockAnalysis.reflection.horizonTargetPrice")}>
+                    {dec?.targetPrice != null ? dec.targetPrice.toFixed(2) : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t("stockAnalysis.reflection.horizonStopLoss")}>
+                    {dec?.stopLoss != null ? dec.stopLoss.toFixed(2) : "—"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label={t("stockAnalysis.reflection.horizonExpectedHolding")}>
+                    {t("stockAnalysis.reflection.horizonTradingDays", {
+                      days: entry.expectedHoldingDays,
+                    })}
+                  </Descriptions.Item>
+                </Descriptions>
+
+                {m && (
+                  <Descriptions
+                    column={3}
+                    size="small"
+                    bordered
+                    title={t("stockAnalysis.reflection.horizonMarketTitle")}
+                  >
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonEntryPrice")}>
+                      {m.entryPrice != null ? m.entryPrice.toFixed(2) : "—"}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonExitPrice")}>
+                      {m.exitPrice != null ? m.exitPrice.toFixed(2) : "—"}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonActualHolding")}>
+                      {entry.actualHoldingDays != null
+                        ? t("stockAnalysis.reflection.horizonTradingDays", {
+                          days: entry.actualHoldingDays,
+                        })
+                        : "—"}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonReturnPct")} span={2}>
+                      {fmtPct(m.returnPct)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonAlphaPct")}>
+                      {fmtPct(m.alphaPct)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonMaxDrawdown")}>
+                      {fmtPct(m.maxDrawdownPct)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonTargetReached")}>
+                      {fmtBool(m.targetReached)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonStopLossTriggered")}>
+                      {fmtBool(m.stopLossTriggered)}
+                    </Descriptions.Item>
+                  </Descriptions>
+                )}
+
+                {ev && isMature && (
+                  <Descriptions
+                    column={3}
+                    size="small"
+                    bordered
+                    title={t("stockAnalysis.reflection.horizonEvaluationTitle")}
+                  >
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonDirectionHit")}>
+                      {ev.wasCorrect != null
+                        ? (
+                          ev.wasCorrect === 1
+                            ? <Tag color="green">{t("stockAnalysis.reflection.horizonVerdictCorrect")}</Tag>
+                            : <Tag color="red">{t("stockAnalysis.reflection.horizonVerdictWrong")}</Tag>
+                        )
+                        : "—"}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonDirectionMatch")}>
+                      {fmtBool(ev.directionMatch)}
+                    </Descriptions.Item>
+                    <Descriptions.Item label={t("stockAnalysis.reflection.horizonTargetHit")}>
+                      {fmtBool(ev.targetHit)}
+                    </Descriptions.Item>
+                  </Descriptions>
+                )}
+
+                {entry.status === "legacy" && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("stockAnalysis.reflection.horizonLegacyNote")}
+                  </Text>
+                )}
+                {entry.status === "unavailable" && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("stockAnalysis.reflection.horizonUnavailableNote")}
+                  </Text>
+                )}
+                {entry.status === "immature" && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("stockAnalysis.reflection.horizonImmatureNote")}
+                  </Text>
+                )}
+              </div>
+            );
+          };
+
+          const tabItems = (
+            ["ultra_short", "short", "mid", "long"] as const
+          ).map((key) => {
+            const entry = hr![key];
+            const label = HORIZON_LABELS[key] ?? key;
+            if (!entry) {
+              return { key, label: <span style={{ color: "#aaa" }}>{label}</span>, children: null };
+            }
+            const badge = (() => {
+              switch (entry.status) {
+                case "mature":
+                  return "🟢";
+                case "immature":
+                  return "🟠";
+                case "unavailable":
+                  return "⚪";
+                case "legacy":
+                  return "🟣";
+                default:
+                  return "";
+              }
+            })();
+            return {
+              key,
+              label: (
+                <span>
+                  {badge} {label}
+                </span>
+              ),
+              children: renderHorizonContent(key),
+            };
+          }).filter((t) => t.children !== null);
+
+          return (
+            <div>
+              <Text strong>{t("stockAnalysis.reflection.causeLabel")}</Text>
+              <Text>{row.whatWentWrong || "-"}</Text>
+              <div style={{ marginTop: 12 }} />
+              <Tabs
+                items={tabItems}
+                size="small"
+              />
+              <details style={{ marginTop: 12 }} open={false}>
+                <summary style={{ cursor: "pointer", color: "var(--muted)", fontSize: 12 }}>
+                  {t("stockAnalysis.reflection.rawOutputTitle")}
+                </summary>
+                {row.decisionJson
+                  && renderPrettyJson(
+                    t("stockAnalysis.reflection.decisionJsonLabel"),
+                    row.decisionJson,
+                    200,
+                  )}
+                {row.blackboardSnapshot
+                  && renderBlackboardSnapshot(
+                    row.blackboardSnapshot,
+                    t("stockAnalysis.reflection.blackboardSnapshotLabel"),
+                  )}
+              </details>
+            </div>
+          );
+        })()}
         {suggestions.length > 0 && (
           <div>
             <Text strong style={{ fontSize: 13 }}>

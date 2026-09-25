@@ -4,6 +4,7 @@ use crate::AppState;
 use crate::commands::agent::skill_execution::{self, SkillStep};
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::agent as agent_err;
+use axagent_harness::IpcEventName;
 
 use crate::commands::spawn_guard::SpawnGuard;
 use axagent_agent_macro::agent_command;
@@ -168,7 +169,7 @@ pub async fn workflow_execute(
         let _guard = SpawnGuard::new("workflow_run", move || {
             tracing::error!("[workflow_run] PANIC guard fired for workflow={}", wid_for_panic);
             let _ = app_for_panic.emit(
-                "workflow:execution-completed",
+                IpcEventName::WorkflowExecutionCompleted.as_str(),
                 serde_json::json!({
                     "workflow_id": wid_for_panic,
                     "execution_id": null,
@@ -289,7 +290,7 @@ pub async fn workflow_execute(
                 Ok(m) => {
                     // 前端用真实 ID 替换流式占位消息
                     let _ = app_for_emit.emit(
-                        "agent-message-id",
+                        IpcEventName::AgentMessageId.as_str(),
                         serde_json::json!({
                             "conversationId": conv,
                             "assistantMessageId": m.id,
@@ -299,7 +300,7 @@ pub async fn workflow_execute(
                     buf.push_str(&format!("\n[Workflow Started: {}]\n", wid));
 
                     let _ = app_for_emit.emit(
-                        "agent-stream-text",
+                        IpcEventName::AgentStreamText.as_str(),
                         serde_json::json!({
                             "conversationId": conv,
                             "assistantMessageId": m.id,
@@ -348,7 +349,7 @@ pub async fn workflow_execute(
                             buf.push_str(&format!("\n[Step Start] {}: {}\n", kind, title));
 
                             let _ = app.emit(
-                                "agent-stream-text",
+                                IpcEventName::AgentStreamText.as_str(),
                                 serde_json::json!({
                                     "conversationId": conv,
                                     "assistantMessageId": msg,
@@ -364,7 +365,7 @@ pub async fn workflow_execute(
                             buf.push_str(&format!("[Step Complete] {}: ✓\n", title));
 
                             let _ = app.emit(
-                                "agent-stream-text",
+                                IpcEventName::AgentStreamText.as_str(),
                                 serde_json::json!({
                                     "conversationId": conv,
                                     "assistantMessageId": msg,
@@ -380,7 +381,7 @@ pub async fn workflow_execute(
                             buf.push_str(&format!("[Step Error] {}: 节点执行失败\n", evt.node_id));
 
                             let _ = app.emit(
-                                "agent-stream-text",
+                                IpcEventName::AgentStreamText.as_str(),
                                 serde_json::json!({
                                     "conversationId": conv,
                                     "assistantMessageId": msg,
@@ -422,7 +423,7 @@ pub async fn workflow_execute(
                     payload["conversationId"] = serde_json::Value::String(c);
                     payload["assistantMessageId"] = serde_json::Value::String(m);
                 }
-                let _ = app.emit("agent-stream-text", payload);
+                let _ = app.emit(IpcEventName::AgentStreamText.as_str(), payload);
             })
         });
         opts = opts.with_heartbeat_callback(hb_hb_cb);
@@ -453,7 +454,7 @@ pub async fn workflow_execute(
                     payload["conversationId"] = serde_json::Value::String(c);
                     payload["assistantMessageId"] = serde_json::Value::String(m);
                 }
-                let _ = app.emit("agent-stream-text", payload);
+                let _ = app.emit(IpcEventName::AgentStreamText.as_str(), payload);
             })
         });
         opts = opts.with_timeout_warning_callback(tw_cb);
@@ -466,7 +467,7 @@ pub async fn workflow_execute(
                 let execution_id = workflow.id.clone();
                 let status_str = format!("{:?}", workflow.status).to_lowercase();
                 let _ = app_for_emit.emit(
-                    "workflow:execution-completed",
+                    IpcEventName::WorkflowExecutionCompleted.as_str(),
                     serde_json::json!({
                         "workflow_id": wid,
                         "execution_id": execution_id,
@@ -497,7 +498,7 @@ pub async fn workflow_execute(
                     let _ = message::update_message_content(&db, msg_id, &full_text).await;
                     // agent-done 只带结果部分：前端在 workflow 场景追加到已流式的步骤事件尾部
                     let _ = app_for_emit.emit(
-                        "agent-done",
+                        IpcEventName::AgentDone.as_str(),
                         serde_json::json!({
                             "conversationId": conv,
                             "assistantMessageId": msg_id,
@@ -510,7 +511,7 @@ pub async fn workflow_execute(
                         }),
                     );
                     let _ = app_for_emit.emit(
-                        "workflow-complete",
+                        IpcEventName::WorkflowComplete.as_str(),
                         serde_json::json!({
                             "conversationId": conv,
                             "assistantMessageId": msg_id,
@@ -533,7 +534,7 @@ pub async fn workflow_execute(
                 tracing::error!("[workflow] 执行失败: {}", e);
                 let total_time_ms = started_at.elapsed().as_millis() as u64;
                 let _ = app_for_emit.emit(
-                    "workflow:execution-completed",
+                    IpcEventName::WorkflowExecutionCompleted.as_str(),
                     serde_json::json!({
                         "workflow_id": wid,
                         "execution_id": null,
@@ -546,7 +547,7 @@ pub async fn workflow_execute(
                 // 对话驱动模式：失败事件 + 会话状态
                 if let Some(conv) = &conversation_id {
                     let _ = app_for_emit.emit(
-                        "agent-error",
+                        IpcEventName::AgentError.as_str(),
                         serde_json::json!({
                             "conversationId": conv,
                             "assistantMessageId": assistant_message_id,
@@ -554,7 +555,7 @@ pub async fn workflow_execute(
                         }),
                     );
                     let _ = app_for_emit.emit(
-                        "workflow-complete",
+                        IpcEventName::WorkflowComplete.as_str(),
                         serde_json::json!({
                             "conversationId": conv,
                             "assistantMessageId": assistant_message_id,

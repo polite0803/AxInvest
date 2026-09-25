@@ -10,8 +10,9 @@
  *   E. (warning, 默认关闭)   前后端 DTO 粗对齐: 命令返回类型名应在 src/types 有同名导出
  *   F. 登记字段必有消费点:   下表登记的 DTO 字段必须在声明文件之外至少出现 1 次
  *                            (铁律 #6「声明的输入真有入边供给」, 防「死参数」回归)
- *   G. 事件发射/监听对称:     TS 侧 listen("evt") 必须有 Rust 侧 emit("evt")
- *                            (防「前端监听永远收不到」的静默失效)
+ *   G. 事件名契约:          TS 侧 listen("evt") 必须命中后端枚举 IpcEventName 的成员,
+ *                            且每个成员须有发射引用; 生成物 events.ts 须与枚举一致
+ *                            (防「前端监听永远收不到」的静默失效; R2-2 起由枚举驱动)
  *   H. 静默丢弃 Result 棘轮:  `let _ = <fallible>.await;` 的数量不得超过基线
  *                            (Rust 侧 bare-except 等价物; 铁律 #12「归因字段不得说谎」.
  *                             棘轮只减不增 —— 修复后必须同步下调 SILENT_RESULT_BASELINE)
@@ -274,6 +275,14 @@ const FIELD_CONTRACTS = [
     declaredIn: "crates/entities/src/plans.rs",
     rationale: "Plan 执行授权位（P0-A），须有写入点与执行前校验点",
   },
+  {
+    field: "horizon_results_json",
+    container: "stock_reflections::Model",
+    declaredIn: "crates/entities/src/stock_reflections.rs",
+    rationale:
+      "四周期反思结果 JSON（PLAN-stock-reflection-four-horizon）—— 反思写入点须落库、统计展开点须读它，"
+      + "不得只声明；两侧任一缺失都会退化成「四周期面板恒空」而无人察觉",
+  },
 ];
 
 function checkFieldConsumption() {
@@ -307,36 +316,38 @@ function checkFieldConsumption() {
   }
 }
 
-// ---------- G. 事件发射/监听对称 ----------
+// ---------- G. 事件名契约（枚举单一来源） ----------
 /**
- * 跨语言检查：TS 侧 `listen("evt")` 若无对应 Rust 侧 `emit("evt")`，
- * 该监听**永远收不到消息**（前端静默失效，不报错、单测也过）。
- * 本轮已在 `agent-plan-ready-for-approval` 上真实踩到该形态。
+ * R2-2 之前，事件名由两侧各写字符串字面量：后端 `.emit("agent-done", ..)`、
+ * 前端 `listen("agent-done")`。任一侧改名或删除，另一侧**静默失效** ——
+ * 前端监听器永远收不到消息，不报错、单测也过（本仓已在
+ * `agent-plan-ready-for-approval` 上真实踩到该形态）。
  *
- * 已知局限（脚本自陈覆盖范围，避免又变成「声明了不生效的机制」）：
- * - 只能解析**字符串字面量**或指向字面量的 `const &str` 事件名；
- *   `emit(&var, ..)` / `listen(name)` 这类动态取值无法静态判定，
- *   会记入「未解析」并以 warning 打印，**不计入 fail**。
- * - 第三方插件（updater / shell / window 等）事件无 Rust 侧 emit，须登记豁免。
+ * 现在事件名由后端枚举 `axagent_harness::IpcEventName` 单一来源驱动：
+ * 发射点写 `IpcEventName::AgentDone.as_str()`，前端 `listen` 的形参类型是
+ * schema-gen 生成的 `@/types/generated/events` 联合类型。
+ *
+ * 于是「改名 / 删除」由编译器拦住，本段只校验**编译期覆盖不到的四条边**：
+ *
+ *   G1 前端 `listen("X")` 的 X 必须在枚举里 —— 监听一个后端不存在的事件名。
+ *   G2 每个枚举成员必须有 ≥1 处发射引用（`IpcEventName::Variant`）——
+ *      G1 只保证名字合法，G2 才保证它真被发出去（「有声明无入边」）。
+ *   G3 已知死链白名单自检：白名单项一旦被接上（出现发射引用）必须移出，
+ *      否则本段对该事件名**永久失明**。
+ *   G4 `src/types/generated/events.ts` 与枚举逐项一致 —— 生成物腐烂时
+ *      前端会继续接受已被删除的事件名（typecheck 假绿）。
  */
-const EVENT_EXEMPT = new Set([
-  // 由 Tauri 插件或窗口系统发出、不在 axagent 源码里 emit 的事件名。
-  // 补充时必须写明来源，禁止「为了过 CI」而加（这会让本段彻底失效）。
-]);
+const EVENT_NAME_ENUM = join(SRC_TAURI, "crates", "harness", "src", "event_names.rs");
+const EVENT_NAMES_TS = join(FRONTEND, "types", "generated", "events.ts");
 
 /**
- * 已确认断链但**尚未修复**的事件基线（2026-09-12 建立）。
+ * 已确认断链、但**仍在前端监听**的事件名（2026-09-12 建立，R2-2 起改为枚举成员）。
  *
- * 本段首次运行时发现 11 个「前端 listen、Rust 侧零 emit」的事件，逐个 grep
- * 甄别后**全部确认为真断链**（Rust 侧连字符串都没出现过，连注释都没有）。
- * 它们需要逐项判定处置方向 —— 按铁律 #3「独占且无人接线 ⇒ 激活非删」，
- * 要么补发射端（功能仍需要），要么删监听端（功能已被替代）。
- * 判定结果与后续处理见 `PLAN-evoflow-borrowings.md` 的 P1-D。
- *
- * 为什么不直接豁免：`EVENT_EXEMPT` 会让本段对该事件永久失明。此处用
- * **基线集合**，语义是「已知债务，数量必须与 PLAN 同步」：
- * - 出现**基线外**的新断链 ⇒ fail（拦住新回归，这是本段的主要价值）
- * - 基线内的项被修好却没从基线移除 ⇒ fail（阻止基线腐烂成永久豁免）
+ * 这 6 个名字在 src-tauri 中零发射引用（grep 确认），前端却仍在 `listen`，
+ * 属真断链债务。它们必须留在枚举里（否则前端 `listen` 会 typecheck 报错），
+ * 故在本段以「无发射引用白名单」登记。语义是「已知债务，必须与 PLAN 同步」，
+ * 不是「永久豁免」：一旦补上发射端，G3 会要求把它从白名单移出。
+ * 逐个处置方向见 `PLAN-evoflow-borrowings.md` 的 P1-D。
  */
 const KNOWN_DEAD_EVENTS = new Set([
   // agent 生命周期 / 限流：监听方 agentStore / backendStatusStore
@@ -349,72 +360,59 @@ const KNOWN_DEAD_EVENTS = new Set([
   "worker-completed",
   "worker-failed",
 ]);
-// 2026-09-12 剪除 5 项已修复的基线项（脚本的「基线自检」发现：
-// agent-started / agent-plan-ready-for-approval / knowledge-base-updated /
-// memory-item-indexed / memory-rebuild-complete —— 均已不再断链）。
-// 基线留着腐烂会让本段对这几个事件名**永久失明**，所以必须剪。
+
+/** 解析 `event_names.rs` 的 `as_str()`，返回 variant 名 → 事件通道名 */
+function readEventNameEnum() {
+  if (!existsSync(EVENT_NAME_ENUM)) {
+    fail("[G] 事件名枚举文件不存在: crates/harness/src/event_names.rs —— 本段失去判据来源");
+    return new Map();
+  }
+  const src = read(EVENT_NAME_ENUM).replace(/\/\/.*$/gm, "");
+  const map = new Map();
+  for (const m of src.matchAll(/IpcEventName::(\w+)\s*=>\s*"([^"]+)"/g)) {
+    map.set(m[1], m[2]);
+  }
+  if (map.size === 0) {
+    fail(
+      "[G] 未能从 event_names.rs 解析出任何 variant —— 枚举形态已变"
+        + "（as_str 不再由 match 字面量构成），本段须同步改造",
+    );
+  }
+  return map;
+}
 
 function checkEventSymmetry() {
-  const rsFiles = walk(SRC_TAURI, ".rs");
-  const consts = new Map();
-  for (const f of rsFiles) {
-    const re = /(?:pub\s+)?const\s+(\w+)\s*:\s*&(?:'static\s+)?str\s*=\s*"([^"]+)"/g;
-    for (const m of read(f).matchAll(re)) { consts.set(m[1], m[2]); }
-  }
+  const variantToName = readEventNameEnum();
+  if (variantToName.size === 0) { return; }
+  const nameToVariant = new Map([...variantToName].map(([v, n]) => [n, v]));
+  const enumNames = new Set(nameToVariant.keys());
 
-  const emitted = new Set();
-  const unresolved = [];
-  // `.emit(evt, payload)` —— 事件名是第 1 个参数
-  const reDirect = /\.emit\s*(?:::<[^>]*>)?\s*\(\s*([^,)]+)/g;
-  // `.emit_to(target, evt, payload)` / `.emit_all(evt, ..)` / `.emit_filter(..)`
-  // —— 后者的 evt 位置不同，分开匹配避免把 target 误当事件名
-  const reAll = /\.emit_all\s*(?:::<[^>]*>)?\s*\(\s*([^,)]+)/g;
-  const reTo = /\.emit_to\s*(?:::<[^>]*>)?\s*\(\s*[^,)]+,\s*([^,)]+)/g;
-  const reFilter = /\.emit_filter\s*(?:::<[^>]*>)?\s*\(\s*([^,)]+)/g;
+  // 发射引用统计口径：src-tauri 下全部 .rs（去行注释），排除枚举定义文件本身。
+  const bodies = walk(SRC_TAURI, ".rs")
+    .filter((f) => f !== EVENT_NAME_ENUM)
+    .map((f) => read(f).replace(/\/\/.*$/gm, ""));
+  const refCount = (variant) => {
+    const re = new RegExp(`\\bIpcEventName::${variant}\\b`, "g");
+    let n = 0;
+    for (const src of bodies) { n += (src.match(re) || []).length; }
+    return n;
+  };
 
-  for (const f of rsFiles) {
-    const rel = f.slice(SRC_TAURI.length + 1);
-    // 去掉行注释，避免注释里的 `.emit("xxx")` 被当成真实发射点
-    const src = read(f).replace(/\/\/.*$/gm, "");
-    for (const re of [reDirect, reAll, reTo, reFilter]) {
-      re.lastIndex = 0;
-      for (const m of src.matchAll(re)) {
-        const arg = m[1].trim();
-        const lit = arg.match(/^"([^"]+)"$/);
-        if (lit) { emitted.add(lit[1]); }
-        else if (consts.has(arg)) { emitted.add(consts.get(arg)); }
-        else { unresolved.push(`${rel}: ${arg.slice(0, 48)}`); }
-      }
-    }
-  }
-
-  // 二级判据所需的「提及」集合：Rust 源码（去注释后）里出现过的**事件名风格**
-  // 字符串字面量。
-  //
-  // 为什么需要它：事件名经常先赋给局部变量再发射，例如
-  //   let (event_name, payload) = match st { "running" => ("workflow-step-start", ..) };
-  //   app.emit(event_name, payload)
-  // 此时 `emit(arg)` 的 arg 是标识符，静态无法追踪。若不区分，这类**真实存在**
-  // 的发射会被误报为断链 —— 而会误报的门禁最终会被加白名单或禁用。
-  //
-  // 正则为「小写字母开头 + 小写/数字/短横线，长度 ≥4」，只收事件名风格的串，
-  // 不会把任意日志文本收进来（否则判据退化、检查恒 PASS）。
-  const mentioned = new Set();
-  for (const f of rsFiles) {
-    const src = read(f).replace(/\/\/.*$/gm, "");
-    for (const m of src.matchAll(/"([a-z][a-z0-9-]{3,})"/g)) { mentioned.add(m[1]); }
-  }
-
-  // 排除前端测试文件：`__tests__/*.test.ts` 里的 `listen("my_event")` 是
-  // 用假事件名验证 invoke 封装的桩代码，不是真实契约。
+  // ── G1: 前端 listen 只能取枚举成员 ──
+  // 排除前端测试文件：`__tests__/*.test.ts` 里的事件名是验证 invoke 封装的桩代码，
+  // 不是真实契约。
   const isTestFile = (p) =>
     /[\\/]__tests__[\\/]|[\\/]__mocks__[\\/]|\.(?:test|spec)\.[cm]?tsx?$/.test(p);
   const tsFiles = [...walk(FRONTEND, ".ts"), ...walk(FRONTEND, ".tsx")]
     .filter((f) => !isTestFile(f));
 
   const listened = new Map();
-  // 前置负向断言排除 `x.listen(...)` 这类非 Tauri 事件 API
-  const reListen = /(?:^|[^.\w])listen\s*(?:<[^>]*>)?\s*\(\s*"([^"]+)"/g;
+  // 前置负向断言排除 `_unlisten(...)` 这类局部变量名。
+  // 泛型参数用**有界惰性**匹配（`{0,N}?`）：`<[^>]*>` 会被载荷类型里的嵌套 `>`
+  // （如 `Record<string, unknown>`）提前闭合，于是「多行泛型 + 字面量」的调用整条漏掉。
+  // 2026-09-25 实测该形态漏了 5 个真实事件名（agent-render-ui / agent-update-ui /
+  // serenity-screening-completed / workflow-completed）—— 门禁漏报比没有门禁更糟。
+  const reListen = /(?:^|[^.\w])listen\s*(?:<[\s\S]{0,800}?>)?\s*\(\s*"([^"]+)"/g;
   for (const f of tsFiles) {
     const rel = f.slice(FRONTEND.length + 1);
     for (const m of read(f).matchAll(reListen)) {
@@ -422,67 +420,64 @@ function checkEventSymmetry() {
       listened.get(m[1]).add(rel);
     }
   }
-
-  // 三级判定：严格发射 > 已知断链基线 > 仅被提及（间接发射，warning）
-  //           > 完全不存在（fail，新回归）
-  const knownDead = [];
-  const indirect = [];
-  const missing = [];
-  for (const [evt, files] of listened) {
-    if (EVENT_EXEMPT.has(evt) || emitted.has(evt)) { continue; }
-    const where = [...files].join(", ");
-    if (KNOWN_DEAD_EVENTS.has(evt)) { knownDead.push(`${evt}  ← ${where}`); }
-    else if (mentioned.has(evt)) { indirect.push(`${evt}  ← ${where}`); }
-    else { missing.push(`${evt}  ← ${where}`); }
+  const unknownNames = [...listened]
+    .filter(([evt]) => !enumNames.has(evt))
+    .map(([evt, files]) => `${evt}  ← ${[...files].join(", ")}`);
+  if (unknownNames.length) {
+    printList("[G1] 前端 listen 的事件名不在 IpcEventName 中（后端无此契约，监听永远收不到）", unknownNames);
   }
-
-  // 基线自检（防止基线腐烂成永久豁免）：基线项若已不再断链（监听被删 /
-  // 发射被补），必须同步移除，否则本段对该事件名永久失明。
-  const listenedNames = new Set(listened.keys());
-  const staleBaseline = [...KNOWN_DEAD_EVENTS].filter(
-    (e) => !listenedNames.has(e) || emitted.has(e),
+  unknownNames.forEach((s) =>
+    fail(`[G1] 事件 '${s.split("  ←")[0]}' 前端有 listen 但不在 axagent_harness::IpcEventName 中`)
   );
-  // 必须打印明细：此前这里只 fail 不打印，导致「errors 计数涨了但看不到是哪几条」——
-  // 检查器自己的出口不严，等于让维护者无从下手。
+
+  // ── G2: 每个枚举成员必须有发射引用 ──
+  const noEmitRef = [];
+  for (const [variant, name] of variantToName) {
+    if (refCount(variant) === 0 && !KNOWN_DEAD_EVENTS.has(name)) {
+      noEmitRef.push(`${name}  (IpcEventName::${variant})`);
+    }
+  }
+  if (noEmitRef.length) {
+    printList("[G2] 枚举成员无任何发射引用（有声明无入边）", noEmitRef);
+  }
+  noEmitRef.forEach((s) =>
+    fail(`[G2] 事件 '${s.split("  (")[0]}' 是枚举成员但全仓无发射引用 —— 补发射端或删成员`)
+  );
+
+  // ── G3: 白名单自检（防基线腐烂成永久豁免）──
+  const staleBaseline = [];
+  for (const name of KNOWN_DEAD_EVENTS) {
+    const variant = nameToVariant.get(name);
+    if (!variant) { staleBaseline.push(`${name}  ← 已不在枚举中（监听已删？）`); continue; }
+    if (refCount(variant) > 0) { staleBaseline.push(`${name}  ← 已补上发射引用`); }
+  }
   if (staleBaseline.length) {
-    printList(
-      "[G] 基线项已不再断链（必须从 KNOWN_DEAD_EVENTS 移除，否则本段对其永久失明）",
-      staleBaseline.map((e) => `${e}${emitted.has(e) ? "  ← 后端已补 emit" : "  ← 前端监听已删"}`),
-    );
+    printList("[G3] 已知死链白名单已失效（必须从 KNOWN_DEAD_EVENTS 移除，否则本段对其永久失明）", staleBaseline);
   }
-  staleBaseline.forEach((e) =>
-    fail(
-      `[G] 基线事件 '${e}' 已不再断链（前端监听已删或后端发射已补），请从 KNOWN_DEAD_EVENTS 移除`,
-    )
+  staleBaseline.forEach((s) => fail(`[G3] 白名单事件 '${s.split("  ←")[0]}' ${s.split("←")[1].trim()}，请从 KNOWN_DEAD_EVENTS 移除`));
+
+  // ── G4: 生成物与枚举一致 ──
+  if (!existsSync(EVENT_NAMES_TS)) {
+    fail("[G4] 生成物不存在: src/types/generated/events.ts —— 请运行 cargo run -p schema-gen -- event-names");
+  } else {
+    const listed = new Set([...read(EVENT_NAMES_TS).matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+    const missingInTs = [...enumNames].filter((n) => !listed.has(n));
+    const extraInTs = [...listed].filter((n) => !enumNames.has(n));
+    if (missingInTs.length) { printList("[G4] events.ts 缺这些枚举成员", missingInTs); }
+    if (extraInTs.length) { printList("[G4] events.ts 多出枚举中没有的名字（生成物已腐烂）", extraInTs); }
+    if (missingInTs.length || extraInTs.length) {
+      fail(
+        `[G4] src/types/generated/events.ts 与 IpcEventName 不一致`
+          + `（缺 ${missingInTs.length} / 余 ${extraInTs.length}）`
+          + " —— 运行 cargo run -p schema-gen -- event-names 重新生成",
+      );
+    }
+  }
+
+  console.log(
+    `\n[G] 事件名契约: 枚举 ${variantToName.size} 个成员 / 前端监听 ${listened.size} 个名字`
+      + ` / 已知死链白名单 ${KNOWN_DEAD_EVENTS.size} 个`,
   );
-
-  if (knownDead.length) {
-    console.log(
-      `\n[G] 已知断链基线 (${knownDead.length}/${KNOWN_DEAD_EVENTS.size}) —— 待逐项判定「补发射端 or 删监听端」(PLAN P1-D):`,
-    );
-    knownDead.forEach((s) => console.log("  " + s));
-  }
-
-  if (missing.length) {
-    printList("[G] 前端监听但后端无发射（监听永远收不到）", missing);
-  }
-  missing.forEach((s) =>
-    fail(`[G] 事件 '${s.split("  ←")[0]}' 前端有 listen 但 Rust 侧无 emit / 无提及`)
-  );
-
-  if (indirect.length) {
-    printList("[G] (warning) 疑似经变量间接发射，静态不可判定", indirect);
-    indirect.forEach((s) =>
-      warn(`[G] 事件 '${s.split("  ←")[0]}' 在 Rust 侧仅被提及（可能经局部变量 emit），需人工确认`)
-    );
-  }
-
-  if (unresolved.length) {
-    // 覆盖率自陈：不 fail，但必须可见 —— 否则「没报错」会被误读为「已全覆盖」
-    warn(
-      `[G] ${unresolved.length} 处 emit 的事件名为动态取值，本段未覆盖（例: ${unresolved.slice(0, 3).join(" | ")}）`,
-    );
-  }
 }
 
 // ---------- H. 「静默丢弃 Result」棘轮 (EvoFlow 病历 #2/#3) ----------

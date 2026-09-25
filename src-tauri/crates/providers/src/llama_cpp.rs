@@ -176,6 +176,7 @@ impl LlamaCppAdapter {
             ModelType::Chat => vec![ModelCapability::TextChat],
             ModelType::Embedding => vec![],
             ModelType::Voice => vec![ModelCapability::RealtimeVoice],
+            ModelType::Decision => vec![],
         };
 
         let lower = model_id.to_lowercase();

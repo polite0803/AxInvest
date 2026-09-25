@@ -54,17 +54,11 @@ pub(crate) fn error_response(status: StatusCode, message: &str) -> axum::respons
 }
 
 /// Map `ProviderType` to the string key used in the `ProviderRegistry`.
+///
+/// 权威映射在 `axagent_harness::types::provider_registry_key`，这里只作转发，
+/// 不再维护第二份副本。
 pub(crate) fn provider_type_to_str(pt: &ProviderType) -> &'static str {
-    match pt {
-        ProviderType::OpenAI => "openai",
-        ProviderType::OpenAIResponses => "openai_responses",
-        ProviderType::Anthropic => "anthropic",
-        ProviderType::Gemini => "gemini",
-        ProviderType::OpenClaw => "openclaw",
-        ProviderType::Hermes => "hermes",
-        ProviderType::Ollama => "ollama",
-        ProviderType::LlamaCpp => "llama_cpp",
-    }
+    axagent_harness::types::provider_registry_key(pt)
 }
 
 /// Resolve the Hermes / OpenClaw provider and build a `ProviderRequestContext`.

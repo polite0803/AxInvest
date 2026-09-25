@@ -246,6 +246,7 @@ pub async fn plugin_profile_dump(
             description: d.definition.description,
             origin: d.origin.as_str().to_string(),
             plugin_id: d.plugin_id,
+            implemented: d.implemented,
         })
         .collect();
     Ok(PluginProfileDumpResponse { profile, capabilities })

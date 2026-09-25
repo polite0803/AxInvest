@@ -1,4 +1,5 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
+import type { JevJudgment } from "@/lib/agentOutput";
 import { classifyDirectionText, classifySentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Table, Tag, Tooltip } from "antd";
@@ -30,6 +31,86 @@ type AnalystEntry =
   | { nodeId: string; expertId: string; status: "pending" }
   | { nodeId: string; expertId: string; status: "streaming"; preview: string }
   | { nodeId: string; expertId: string; status: "failed"; error?: string };
+
+// ── 快速链（stock-analysis-fast）的 10 个 Jev 维度判定节点 id ──
+// **按索引与 ANALYST_NODE_IDS 一一对应**（同为「市场量价 → 情绪 → 消息 → 基本面 → 政策 →
+// 资金 → 解禁 → 研报 → 板块 → 催化剂」）。两处都写成数组而非 Map：对应关系靠 index 表达，
+// 加/删维度时两行必须同步改 —— 与后端 `FAST_JEV_DIMENSIONS` 的书写顺序同源。
+const JEV_DIMENSION_NODE_IDS = [
+  "j-market",
+  "j-sentiment",
+  "j-news",
+  "j-fundamentals",
+  "j-policy",
+  "j-hotmoney",
+  "j-lockup",
+  "j-research",
+  "j-sector",
+  "j-catalyst",
+] as const;
+
+/**
+ * Jev 判定档位 → 方向归属。值域来自 `seed_stock_analysis.rs` 的
+ * `FAST_JEV_DIMENSIONS`：前 6 个维度用「支持 / 中性 / 反对」，后 4 个（原文类）用
+ * 「利好 / 中性 / 利空」⇒ 两套词表都要认。
+ */
+const JEV_BULL_CATEGORIES = new Set(["支持", "利好", "看多"]);
+const JEV_BEAR_CATEGORIES = new Set(["反对", "利空", "看空"]);
+
+/** 判定档位 → 展示配色（A 股约定：红=偏多、绿=偏空、灰=中性/数据不足）。 */
+function jevCategoryStyle(category: string): { color: string; bg: string } {
+  if (JEV_BULL_CATEGORIES.has(category)) {
+    return { color: "var(--sa-red, #dc2626)", bg: "var(--sa-red-bg, #fee2e2)" };
+  }
+  if (JEV_BEAR_CATEGORIES.has(category)) {
+    return { color: "var(--sa-green, #16a34a)", bg: "var(--sa-green-bg, #dcfce7)" };
+  }
+  return { color: "var(--muted, #6b7280)", bg: "var(--muted-bg, #e5e7eb)" };
+}
+
+/**
+ * Jev 维度判定卡片 —— 快速链下取代 `AnalystReportCard`。
+ *
+ * 快速链**不产出论述文本**（那 23 个 Agent 节点在新图里本就不存在），所以这张卡只显示
+ * 「维度名 + 判定档位（+ 置信度，若节点输出）」，没有任何正文 —— 这正是 H3 的要求：
+ * 不显示文本，但必须正确解析出结论。
+ */
+function JevJudgmentCard({ expertId, judgment }: { expertId: string; judgment: JevJudgment }) {
+  const { t } = useTranslation();
+  const name = t(`stockAnalysis.workflow.analyst.${expertId}`, expertId);
+  const style = jevCategoryStyle(judgment.category);
+
+  return (
+    <Card size="small" className="h-full" styles={{ body: { padding: 12 } }}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className="font-medium text-sm" style={{ color: "var(--color-text-base)" }}>{name}</span>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span
+          className="inline-flex items-center px-2 py-0.5 rounded text-sm font-semibold"
+          style={{ background: style.bg, color: style.color }}
+        >
+          {judgment.category}
+        </span>
+        {
+          /* 段 B 的 10 个维度节点均未配 `confidence_threshold` ⇒ 该字段恒为 null；
+            此处是**按产物契约**渲染（段 E `j-confidence` 就会输出），不是为将来预留。 */
+        }
+        {judgment.confidence !== null && (
+          <span className="text-xs" style={{ color: "var(--muted)" }}>
+            {t("stockAnalysis.workflow.confidence")} {Math.round(judgment.confidence * 100)}%
+          </span>
+        )}
+      </div>
+      {/* LLM 失败会降级为 `fallback_label`（多为「中性」）—— 不标出来就是把失败伪装成判定 */}
+      {judgment.degraded && (
+        <div className="mt-2 text-xs" style={{ color: "var(--ant-warning, #f59e0b)" }}>
+          {t("stockAnalysis.workflow.jevDegraded")}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 /**
  * 分析师占位卡片：工作流运行中或节点失败时显示，让用户看到"分析师 tab 在同步工作流状态"
@@ -185,37 +266,57 @@ function deriveConsensus(
 export function AnalystReportGrid() {
   const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
+  const jevJudgments = useStockAnalysisStore((s) => s.jevJudgments);
   const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const failedNodes = useStockAnalysisStore((s) => s.failedNodes);
   const failedNodeErrors = useStockAnalysisStore((s) => s.failedNodeErrors);
   const workflowStatus = useStockAnalysisStore((s) => s.status);
 
+  // ── 快速链判定：判据是「store 里有没有 Jev 判定」，不读模板 id ──
+  // 原链（`stock-analysis`）不产 `j-*` 节点 ⇒ 该字段恒空 ⇒ 自然走原分支，
+  // 无需任何模板开关，也无需给 `startAnalysis` 传标志。
+  const isJevMode = Object.keys(jevJudgments).length > 0;
+  const isRunning = workflowStatus === "running" || workflowStatus === "loading";
+
   // Aggregate sentiment from reports — 优先用结构化 bull_score/bear_score（与单个分析师卡片一致）
   const sentiment = useMemo(() => {
-    const entries = Object.values(analystReports);
     let bullish = 0;
     let bearish = 0;
     let neutral = 0;
-    for (const rawReport of entries) {
-      const report = cleanToolCallTags(rawReport);
-      // 先尝试提取结构化分数（与 AnalystReportCard 同源）
-      const scores = extractBullBearScores(report);
-      if (scores) {
-        // 有结构化分数：用多空对比判断方向
-        if (scores.bull > scores.bear * 1.2) { bullish++; }
-        else if (scores.bear > scores.bull * 1.2) { bearish++; }
-        else { neutral++; } // 接近 → 中性/分歧
-      } else {
-        // 无结构化数据：回退到关键词匹配
-        const s = classifySentiment(report);
-        if (s === "bullish") { bullish++; }
-        else if (s === "bearish") { bearish++; }
+    if (isJevMode) {
+      // 快速链：维度判定档位直接映射多空（与 `JEV_BULL/BEAR_CATEGORIES` 同一份词表）。
+      // 口径与原链一致（都是「每个维度记一票」）⇒ 共识条与色彩条无需任何改动。
+      // 未产出判定的维度**不计票**（既不算多也不算空）—— 否则失败的维度会被记成中性，
+      // 让「10 项里 7 项没跑出来」看起来像「10 项都判了中性」。
+      for (const nodeId of JEV_DIMENSION_NODE_IDS) {
+        const category = jevJudgments[nodeId]?.category;
+        if (category === undefined) { continue; }
+        if (JEV_BULL_CATEGORIES.has(category)) { bullish++; }
+        else if (JEV_BEAR_CATEGORIES.has(category)) { bearish++; }
         else { neutral++; }
+      }
+    } else {
+      for (const rawReport of Object.values(analystReports)) {
+        const report = cleanToolCallTags(rawReport);
+        // 先尝试提取结构化分数（与 AnalystReportCard 同源）
+        const scores = extractBullBearScores(report);
+        if (scores) {
+          // 有结构化分数：用多空对比判断方向
+          if (scores.bull > scores.bear * 1.2) { bullish++; }
+          else if (scores.bear > scores.bull * 1.2) { bearish++; }
+          else { neutral++; } // 接近 → 中性/分歧
+        } else {
+          // 无结构化数据：回退到关键词匹配
+          const s = classifySentiment(report);
+          if (s === "bullish") { bullish++; }
+          else if (s === "bearish") { bearish++; }
+          else { neutral++; }
+        }
       }
     }
     const total = bullish + bearish + neutral;
     return { bullish, bearish, neutral, total };
-  }, [analystReports]);
+  }, [analystReports, jevJudgments, isJevMode]);
 
   const consensus = useMemo(
     () => deriveConsensus(sentiment.bullish, sentiment.bearish, sentiment.neutral),
@@ -228,9 +329,11 @@ export function AnalystReportGrid() {
   // pending: 工作流运行中且节点未完成未失败 → 渲染等待占位卡片
   // 工作流完成后既无 report 也未 failed 的节点 → 显示失败（无数据兜底，避免一直"等待中"）
   const entries = useMemo<AnalystEntry[]>(() => {
+    // 快速链：新图里**没有** `a-*` 节点 ⇒ 照常构造会得到 10 张「无数据」失败卡。
+    // 那 10 个维度由 Jev 判定卡承担（不显示文本、但显示结论）。
+    if (isJevMode) { return []; }
     const result: AnalystEntry[] = [];
     const seen = new Set<string>();
-    const isRunning = workflowStatus === "running" || workflowStatus === "loading";
 
     for (const nodeId of ANALYST_NODE_IDS) {
       const expertId = nodeId.slice(2);
@@ -271,10 +374,10 @@ export function AnalystReportGrid() {
     }
 
     return result;
-  }, [analystReports, streamingPreviews, failedNodes, failedNodeErrors, workflowStatus, t]);
+  }, [analystReports, streamingPreviews, failedNodes, failedNodeErrors, isJevMode, isRunning, t]);
 
-  // 空态：工作流未启动 / 无任何分析师数据 → 不渲染（保持原行为）
-  if (entries.length === 0) { return null; }
+  // 空态：工作流未启动 / 无任何分析师数据，且无 Jev 判定 → 不渲染（保持原行为）
+  if (entries.length === 0 && !isJevMode) { return null; }
 
   const consensusConfig: Record<Consensus, { color: string; bg: string; labelKey: string; icon: string }> = {
     bullish: {
@@ -637,7 +740,11 @@ export function AnalystReportGrid() {
       )}
 
       {/* ── 分析师数据诊断明细（供辩手） ── */}
-      {sentiment.total > 0 && (
+      {
+        /* 快速链下这张表恒为「0/10 已支撑」（它读的是 `a-*` 报告，新图不产）⇒ 不渲染，
+          否则等于给用户一条「十个分析师全都没数据」的假诊断。 */
+      }
+      {sentiment.total > 0 && !isJevMode && (
         <div className="mb-3">
           <Button
             type="default"
@@ -680,29 +787,60 @@ export function AnalystReportGrid() {
         className="grid gap-2 analyst-cards-grid"
         style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
       >
-        {entries.map((entry) => {
-          if (entry.status === "done") {
+        {isJevMode
+          ? JEV_DIMENSION_NODE_IDS.map((nodeId, i) => {
+            const expertId = ANALYST_NODE_IDS[i].slice(2);
+            const judgment = jevJudgments[nodeId];
+            if (judgment) {
+              return <JevJudgmentCard key={nodeId} expertId={expertId} judgment={judgment} />;
+            }
+            // 未产出判定的维度仍占位（用户要求：不隐藏卡片）—— 状态语义与原链一致：
+            // 运行中→等待中；已失败→失败+错误；已结束但无判定→失败(无数据)。
+            const failed = failedNodes.includes(nodeId);
+            if (failed) {
+              return (
+                <AnalystPlaceholderCard
+                  key={nodeId}
+                  expertId={expertId}
+                  status="failed"
+                  error={failedNodeErrors[nodeId]}
+                />
+              );
+            }
+            return isRunning
+              ? <AnalystPlaceholderCard key={nodeId} expertId={expertId} status="pending" />
+              : (
+                <AnalystPlaceholderCard
+                  key={nodeId}
+                  expertId={expertId}
+                  status="failed"
+                  error={t("stockAnalysis.analystReport.nodeNoData")}
+                />
+              );
+          })
+          : entries.map((entry) => {
+            if (entry.status === "done") {
+              return (
+                <AnalystReportCard
+                  key={entry.expertId}
+                  expertId={entry.expertId}
+                  report={entry.report}
+                />
+              );
+            }
+            const isFailed = entry.status === "failed";
             return (
-              <AnalystReportCard
+              <AnalystPlaceholderCard
                 key={entry.expertId}
                 expertId={entry.expertId}
-                report={entry.report}
+                status={entry.status}
+                error={isFailed ? entry.error : undefined}
+                preview={entry.status === "streaming"
+                  ? (entry.preview.length > 600 ? entry.preview.slice(-600) : entry.preview)
+                  : undefined}
               />
             );
-          }
-          const isFailed = entry.status === "failed";
-          return (
-            <AnalystPlaceholderCard
-              key={entry.expertId}
-              expertId={entry.expertId}
-              status={entry.status}
-              error={isFailed ? entry.error : undefined}
-              preview={entry.status === "streaming"
-                ? (entry.preview.length > 600 ? entry.preview.slice(-600) : entry.preview)
-                : undefined}
-            />
-          );
-        })}
+          })}
       </div>
     </div>
   );

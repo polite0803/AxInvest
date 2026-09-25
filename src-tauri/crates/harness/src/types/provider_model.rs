@@ -60,6 +60,8 @@ pub enum ProviderType {
     Ollama,
     #[serde(rename = "llama_cpp")]
     LlamaCpp,
+    /// TypeSafe Jev 决策模型（decisions 端点，非 chat 兼容协议）。
+    TypeSafe,
 }
 
 impl ProviderType {
@@ -82,6 +84,7 @@ pub fn provider_registry_key(pt: &ProviderType) -> &'static str {
         ProviderType::Hermes => "hermes",
         ProviderType::Ollama => "ollama",
         ProviderType::LlamaCpp => "llama_cpp",
+        ProviderType::TypeSafe => "typesafe",
     }
 }
 
@@ -201,6 +204,10 @@ pub enum ModelType {
     Chat,
     Voice,
     Embedding,
+    /// 决策模型（如 TypeSafe Jev）：只接收 state + 类型化问题，返回带概率的结构化判定，
+    /// **不做文本生成**。故不能被 LLMNode / Agent 这类生成节点选中 —— 见
+    /// `rt-workflow` 的 `llm_resolve.rs` 里的节点类型硬校验。
+    Decision,
 }
 
 impl ModelType {
@@ -212,6 +219,7 @@ impl ModelType {
 /// 使用更精确的匹配策略避免误判：
 /// - Embedding：text-embedding-*、embedding-* 前缀，以及 bge 家族（bge-m3 等本地 GGUF）
 /// - Voice：tts-*, whisper-*, realtime 等明确语音模型标识
+/// - Decision：TypeSafe Jev 家族（`typesafe/jev-*`）
 /// - 其余为 Chat 类型
 pub fn detect_model_type(model_id: &str) -> ModelType {
     let id = model_id.to_lowercase();
@@ -224,9 +232,40 @@ pub fn detect_model_type(model_id: &str) -> ModelType {
         ModelType::Embedding
     } else if id.contains("tts-") || id.contains("whisper-") || id.contains("realtime") {
         ModelType::Voice
+    } else if id.contains("jev-") {
+        // 决策模型即便被手工挂到某个 chat provider 下，也应保留 Decision 类型，
+        // 否则会被 LLMNode / Agent 误选为生成模型。
+        ModelType::Decision
     } else {
         ModelType::Chat
     }
+}
+
+/// 该模型类型是否**禁止用于生成路径**（对话 / LLMNode / Agent）。
+///
+/// 决策模型（`Decision`，如 TypeSafe Jev）只接收 state + 类型化问题、返回带概率的
+/// 结构化判定，**不做文本生成** —— 被塞进生成路径只会产出一段无法使用的“文本”。
+/// 它的正确去处是工作流的 `llmClassifier` / `condition`（LLM 动态路由）节点。
+///
+/// 本判据是全仓唯一权威定义：`rt-workflow` 的 `llm_resolve.rs` 与聊天发送链路
+/// （`commands/conversations/`）都复用它，不要各自重写 `== ModelType::Decision`。
+///
+/// 注意：`Voice` / `Embedding` 各有自己的合法通道（实时语音 / 向量检索），
+/// 不属于本判据范围。
+pub fn is_generation_blocked(model_type: &ModelType) -> bool {
+    matches!(model_type, ModelType::Decision)
+}
+
+/// 解析某 provider 下某模型的 `ModelType`。
+///
+/// 优先取 provider 登记的类型；模型未登记（手工填入 model id、模板导入等路径）
+/// 时回落到按命名推断（`detect_model_type`），避免漏判。
+pub fn resolve_model_type(prov: &ProviderConfig, model_id: &str) -> ModelType {
+    prov.models
+        .iter()
+        .find(|m| m.model_id == model_id)
+        .map(|m| m.model_type.clone())
+        .unwrap_or_else(|| detect_model_type(model_id))
 }
 
 impl std::fmt::Display for ModelType {
@@ -235,6 +274,7 @@ impl std::fmt::Display for ModelType {
             ModelType::Chat => write!(f, "chat"),
             ModelType::Voice => write!(f, "voice"),
             ModelType::Embedding => write!(f, "embedding"),
+            ModelType::Decision => write!(f, "decision"),
         }
     }
 }
@@ -246,6 +286,7 @@ impl std::str::FromStr for ModelType {
             "chat" => Ok(ModelType::Chat),
             "voice" => Ok(ModelType::Voice),
             "embedding" => Ok(ModelType::Embedding),
+            "decision" => Ok(ModelType::Decision),
             _ => Ok(ModelType::Chat),
         }
     }

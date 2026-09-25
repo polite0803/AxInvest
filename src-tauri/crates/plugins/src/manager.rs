@@ -27,9 +27,12 @@ use axagent_harness::{
 
 use crate::core::*;
 use crate::mcp_launcher::McpLauncher;
-use crate::sandbox::{SandboxConfig, apply_env_to_command, check_subprocess_permission};
+use crate::sandbox::{
+    SandboxConfig, apply_env_to_command, build_sandbox_from_manifest, check_subprocess_permission,
+};
 use crate::skill_installer::SkillInstaller;
 use crate::types::*;
+use crate::worker::{LoadedPlugin, PluginWorkerConfig};
 
 #[derive(Debug, Clone)]
 pub struct PluginManagerConfig {
@@ -69,6 +72,11 @@ pub struct PluginManager {
     /// 各插件已注册护照的 capability_id（键 = 插件 ID，值 = 护照 ID 列表）。
     /// 启用时记录，禁用 / 卸载时回滚索引的依据（索引写入由命令层 async 完成）。
     active_passport_ids: HashMap<String, Vec<String>>,
+    /// 已载入的 B 层 worker（键 = 插件 ID）。仅 manifest 声明了 `worker` 才有条目。
+    ///
+    /// 持有 [`LoadedPlugin`] 即同时持有「能力注册句柄」与「子进程」两样东西，
+    /// 移除条目 = 能力 LIFO 回滚 + 停进程，故**只能经 [`Self::stop_plugin_worker`] 移除**。
+    loaded_workers: HashMap<String, LoadedPlugin>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,6 +241,7 @@ impl PluginManager {
             capability_registry: None,
             active_capability_handles: HashMap::new(),
             active_passport_ids: HashMap::new(),
+            loaded_workers: HashMap::new(),
         }
     }
 
@@ -270,6 +279,16 @@ impl PluginManager {
             .install_root
             .clone()
             .unwrap_or_else(|| self.config.config_home.join("plugins").join("installed"))
+    }
+
+    /// 内容寻址的构建产物根目录（PLAN §13.2：`<appdata>/plugins/<plugin_id>/<hash>/`）。
+    ///
+    /// 与 [`Self::install_root`] 同级但**不是**同一目录：`install_root` 下是已安装插件的
+    /// 单层目录（`installed/<plugin-id>/`），本目录下按 `<plugin_id>/<artifact_hash>/` 分层，
+    /// 供 §12.3 的隔离构建落盘可复用的产物（同 hash 命中即跳过编译）。
+    #[must_use]
+    pub fn plugin_build_root(&self) -> PathBuf {
+        self.config.config_home.join("plugins")
     }
 
     #[must_use]
@@ -509,7 +528,59 @@ impl PluginManager {
             let count = self.register_plugin_passports(plugin_id, manifest, record.kind);
             tracing::info!("Plugin `{plugin_id}` registered {count} capability passport(s)");
         }
+        // B 层 worker：声明了 `worker` 才 spawn（长驻子进程，PLAN §5.3）。
+        // 失败不阻断启用 —— 声明式资产（hooks / tools / 技能）仍然可用；但必须留可见日志，
+        // 否则插件「启用了却一个远程能力都没有」会无从排查。
+        if let Some(decl) = &manifest.worker {
+            match self.start_plugin_worker(plugin_id, &record.install_path, decl, manifest) {
+                Ok(()) => tracing::info!("Started worker for plugin `{plugin_id}`"),
+                Err(e) => tracing::warn!("Failed to start worker for plugin `{plugin_id}`: {e}"),
+            }
+        }
         Ok(())
+    }
+
+    /// 启动（或热替换）插件的 B 层 worker 子进程。
+    ///
+    /// 热替换取**最小形态**：先停旧进程再起新进程，无 drain 等待
+    /// （PLAN §13.3 的完整 drain / 孤儿回收 / 双进程热替换尚未实现）。
+    fn start_plugin_worker(
+        &mut self,
+        plugin_id: &str,
+        install_path: &Path,
+        decl: &PluginWorkerDecl,
+        manifest: &PluginManifest,
+    ) -> Result<(), PluginError> {
+        self.stop_plugin_worker(plugin_id);
+        let program = resolve_worker_program(install_path, &decl.program)?;
+        let config = PluginWorkerConfig {
+            args: decl.args.clone(),
+            ..PluginWorkerConfig::new(plugin_id, program)
+                .with_sandbox(build_sandbox_from_manifest(manifest))
+                .with_working_dir(install_path.to_path_buf())
+        };
+        let loaded =
+            LoadedPlugin::load(config).map_err(|e| PluginError::CommandFailed(e.to_string()))?;
+        self.loaded_workers.insert(plugin_id.to_string(), loaded);
+        Ok(())
+    }
+
+    /// 停止插件的 worker：能力 LIFO 回滚 + 进程停机（[`LoadedPlugin::unload`]）。
+    ///
+    /// 无 worker 时是空操作 —— 便于在 disable / uninstall / stop_all 里无条件调用。
+    fn stop_plugin_worker(&mut self, plugin_id: &str) {
+        if let Some(loaded) = self.loaded_workers.remove(plugin_id) {
+            loaded.unload();
+        }
+    }
+
+    /// 取指定插件 worker 的调用面（`None` = 该插件未声明 worker 或当前未启用）。
+    ///
+    /// 宿主侧唯一的用途是**反向回调**（如 UI action 回流，PLAN §10.5-2）：
+    /// 正向（插件 → 宿主）一律走能力接缝门面，不需要本方法。
+    #[must_use]
+    pub fn plugin_invoker(&self, plugin_id: &str) -> Option<Arc<dyn axagent_harness::SeamInvoker>> {
+        self.loaded_workers.get(plugin_id).map(LoadedPlugin::invoker)
     }
 
     /// 把插件声明的能力注册进能力注册表（P3 外部插件注册）。
@@ -724,6 +795,7 @@ impl PluginManager {
         self.skill_installer.remove_plugin_skills(plugin_id).ok();
         self.unregister_plugin_capabilities(plugin_id);
         let _ = self.take_plugin_passport_ids(plugin_id);
+        self.stop_plugin_worker(plugin_id);
         self.ensure_known_plugin(plugin_id)?;
         self.write_enabled_state(plugin_id, Some(false))?;
         self.config.enabled_plugins.insert(plugin_id.to_string(), false);
@@ -786,6 +858,7 @@ impl PluginManager {
             self.skill_installer.remove_plugin_skills(&plugin_id).ok();
             self.unregister_plugin_capabilities(&plugin_id);
             let _ = self.take_plugin_passport_ids(&plugin_id);
+            self.stop_plugin_worker(&plugin_id);
             tracing::info!("Stopped plugin: {plugin_id}");
         }
     }
@@ -826,6 +899,9 @@ impl PluginManager {
         self.skill_installer.remove_plugin_skills(plugin_id).ok();
         self.unregister_plugin_capabilities(plugin_id);
         let _ = self.take_plugin_passport_ids(plugin_id);
+        // 卸载：先停 worker（能力回滚 + 进程停机），再删安装目录 —— 顺序反了会留下
+        // 指向已删除目录的常驻进程。
+        self.stop_plugin_worker(plugin_id);
         if record.install_path.exists() {
             remove_dir_all_with_retry(&record.install_path, 5)?;
         }
@@ -852,6 +928,9 @@ impl PluginManager {
         // 保留用户对 plugin.json / SKILL.md / hooks 的本地修改。
         // 备份失败不阻断升级(降级到原行为),仅 warn 日志。
         // 备份目录命名:{install_path}.bak,仅保留最近 1 个版本。
+        // 换目录前必须停掉 worker：Windows 上正在运行的可执行文件无法删除，
+        // 删除失败会直接让升级失败（且报错指向文件占用，很难联想到 worker）。
+        self.stop_plugin_worker(plugin_id);
         let backup_path = record.install_path.with_extension("bak");
         if record.install_path.exists() {
             // 先清理旧的备份目录(若存在)
@@ -893,6 +972,15 @@ impl PluginManager {
                     "[plugin_update] plugin `{plugin_id}` capability re-registration had errors: {}",
                     errors.join("; ")
                 );
+            }
+            // worker 同样要换到新目录的产物上（旧的指向刚被替换掉的可执行文件）。
+            if let Some(decl) = &manifest.worker {
+                match self.start_plugin_worker(plugin_id, &record.install_path, decl, &manifest) {
+                    Ok(()) => {},
+                    Err(e) => {
+                        tracing::warn!("[plugin_update] plugin `{plugin_id}` worker 重启失败: {e}");
+                    },
+                }
             }
         }
 
@@ -1444,6 +1532,8 @@ fn load_manifest_from_skill_md(
         dependencies: Vec::new(),
         integrity: None,
         capabilities: Vec::new(),
+        // SKILL.md 派生的清单没有 worker 声明（该声明只能来自 plugin.json）。
+        worker: None,
     };
     Ok(manifest)
 }
@@ -1735,6 +1825,7 @@ fn build_plugin_manifest(
         dependencies: raw.dependencies,
         integrity: raw.integrity,
         capabilities: raw.capabilities,
+        worker: raw.worker,
     })
 }
 
@@ -2060,6 +2151,33 @@ fn is_literal_command(entry: &str) -> bool {
     !entry.starts_with("./") && !entry.starts_with("../") && !Path::new(entry).is_absolute()
 }
 
+/// 解析 worker 可执行文件路径：必须是**安装目录内的相对路径**。
+///
+/// 与 hook / tool 路径（[`validate_command_path`]）的宽松口径**有意不同**：那两者是
+/// 「命令字符串」，可以是系统程序；worker 是插件自己的二进制，只应来自插件安装目录 ——
+/// 否则声明里一个绝对路径就能让宿主去跑任意可执行文件。
+fn resolve_worker_program(install_path: &Path, entry: &str) -> Result<PathBuf, PluginError> {
+    let relative = Path::new(entry);
+    if relative.is_absolute() {
+        return Err(PluginError::InvalidManifest(format!(
+            "worker program `{entry}` must be relative to the plugin install directory"
+        )));
+    }
+    if relative.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(PluginError::InvalidManifest(format!(
+            "worker program `{entry}` must not escape the plugin install directory"
+        )));
+    }
+    let path = install_path.join(relative);
+    if !path.is_file() {
+        return Err(PluginError::InvalidManifest(format!(
+            "worker program `{}` does not exist or is not a file",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
 pub fn run_lifecycle_commands(
     metadata: &PluginMetadata,
     lifecycle: &PluginLifecycle,
@@ -2369,7 +2487,7 @@ fn plugin_id(name: &str, marketplace: &str) -> String {
     format!("{normalized}@{marketplace}")
 }
 
-fn sanitize_plugin_id(plugin_id: &str) -> String {
+pub(crate) fn sanitize_plugin_id(plugin_id: &str) -> String {
     plugin_id
         .chars()
         .map(|ch| match ch {
@@ -2582,6 +2700,7 @@ mod tests {
             capabilities: vec![PluginCapabilityDecl {
                 seam: "platform.adapter.telegram".into(),
                 capability_type: "platform_adapter".into(),
+                op: "start".into(),
                 version: "1.0".into(),
                 description: "demo telegram adapter".into(),
                 name: "Telegram 适配器".into(),
@@ -2593,6 +2712,7 @@ mod tests {
                 discoverable: true,
                 evolvable: "derived".into(),
             }],
+            worker: None,
         }
     }
 
@@ -2605,20 +2725,19 @@ mod tests {
 
         let errors = manager.register_plugin_capabilities("external:demo", &manifest);
         assert!(errors.is_empty(), "注册不应失败: {errors:?}");
-        assert!(registry.contains("platform.adapter.telegram"));
-        assert_eq!(registry.len(), 1);
-        assert_eq!(
-            registry.list_origins(),
-            vec![(
-                "platform.adapter.telegram".to_string(),
-                axagent_harness::CapabilityOrigin::ExternalPlugin
-            )]
-        );
-
-        // 回滚后能力被移除
-        manager.unregister_plugin_capabilities("external:demo");
+        // 声明不构成实现：不占实现表（避免「看起来有提供者、运行时取不到」）
         assert!(!registry.contains("platform.adapter.telegram"));
         assert!(registry.is_empty());
+        // 但可在检视视图中看到，并标注「仅声明、未实现」
+        let details = registry.list_with_details();
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].definition.id, "platform.adapter.telegram");
+        assert_eq!(details[0].plugin_id.as_deref(), Some("external:demo"));
+        assert!(!details[0].implemented);
+
+        // 回滚后声明被移除
+        manager.unregister_plugin_capabilities("external:demo");
+        assert!(registry.list_with_details().is_empty());
     }
 
     #[test]
@@ -2651,6 +2770,7 @@ mod tests {
         manifest.capabilities.push(PluginCapabilityDecl {
             seam: "hidden.seam".into(),
             capability_type: "internal".into(),
+            op: String::new(),
             version: "1.0".into(),
             description: String::new(),
             name: String::new(),

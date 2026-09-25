@@ -1,5 +1,5 @@
 import { invoke } from "@/lib/invoke";
-import { getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import { FAST_TEMPLATE_ID, getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { App, Button, Dropdown, Input, Tag } from "antd";
 import { Check, History, Pencil, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -26,6 +26,11 @@ interface AnalysisRecord {
   status: string;
   /** 版本化分析：指向原始记录 ID，null 表示首次分析 */
   parentAnalysisId: string | null;
+  /**
+   * 工作流模板 id：`"stock-analysis-fast"` = 快速 JEV 链。
+   * `undefined` / `null` = 未知（本列引入前的记录或非模板产出）—— 不打标识。
+   */
+  templateId?: string | null;
 }
 
 /** 个股分析页搜索框下方的历史分析快捷按钮 */
@@ -292,6 +297,27 @@ export function AnalysisHistoryButton() {
                             >
                               {dateLabel(r)}
                             </span>
+                            {
+                              /* 链路标识（2026-09-24）：快速 JEV 链与完整链的记录在
+                                本列表里形态一致（analysisKind 同为 live），不打标识时
+                                用户看到的只是「同一只股票两条互相矛盾的结论」。
+                                templateId 为 null（本列引入前 / 非模板产出）时不打。 */
+                            }
+                            {r.templateId === FAST_TEMPLATE_ID && (
+                              <Tag
+                                style={{
+                                  margin: 0,
+                                  fontSize: 10,
+                                  lineHeight: "16px",
+                                  padding: "0 4px",
+                                  border: "1px solid var(--muted, #888)",
+                                  color: "var(--muted, #888)",
+                                  background: "transparent",
+                                }}
+                              >
+                                {t("stockAnalysis.fastAnalysis")}
+                              </Tag>
+                            )}
                             {/* 决策结论 Tag */}
                             {(() => {
                               const info = decisionInfo(r);

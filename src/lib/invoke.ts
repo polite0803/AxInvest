@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { AutoLearnResult, Personality, PersonalityInfo } from "@/types";
+import type { AutoLearnResult, IpcEventName, Personality, PersonalityInfo } from "@/types";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen } from "@tauri-apps/api/event";
 import { onBrowserEvent } from "./browserEvents";
@@ -607,8 +607,15 @@ export function logAndNotify(context: string): (err: unknown) => void {
   };
 }
 
+/**
+ * 订阅后端 IPC 事件。
+ *
+ * `event` 的类型是 schema-gen 由后端 `axagent_harness::IpcEventName` 生成的联合类型
+ * （`@/types/generated/events`）—— 传入后端不存在的事件名会在 `npm run typecheck`
+ * 阶段报错，而不是运行期静默收不到消息。
+ */
 export async function listen<T>(
-  event: string,
+  event: IpcEventName,
   handler: (event: { payload: T }) => void,
 ): Promise<UnlistenFn> {
   if (isTauri()) {

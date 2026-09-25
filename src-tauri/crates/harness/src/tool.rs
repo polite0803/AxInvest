@@ -184,6 +184,11 @@ pub struct ToolContext {
     /// 由 wiring 层从 Settings（`approval_policy` feature flag）注入；
     /// Shell 类工具（Bash 等）消费此字段决定敏感操作是跑、问用户还是拒绝。
     pub approval_policy: Option<Arc<crate::approval_policy::ApprovalPolicy>>,
+    /// 审批规则存储（可选，`None` 表示不做沉淀、不查规则）。
+    ///
+    /// 「批准沉淀」的读写唯一出口：`tools` 是 hybrid，禁止依赖 entities / dao，
+    /// 故只能经 [`crate::ApprovalRuleStore`] trait 访问；实现由 wiring 层注入。
+    pub approval_rule_store: Option<Arc<dyn crate::approval_rules::ApprovalRuleStore>>,
 }
 
 impl ToolContext {
@@ -205,6 +210,7 @@ impl ToolContext {
             dynamic_tools: None,
             sandbox: None,
             approval_policy: None,
+            approval_rule_store: None,
         }
     }
 

@@ -12,6 +12,14 @@ export type StepStage =
   | "done"
   | "error";
 
+/**
+ * 趋势智选两条链的模板 id —— 与后端 `commands/stock_workflow/serenity.rs` 的
+ * `SERENITY_TEMPLATE_IDS` 白名单逐字一致（`run_serenity_screening` 的 `templateId` 参数，
+ * 后端不认的 id 直接报错）。定义在此而非面板：`runningChain` 是 store 状态（见下），
+ * 两处各写一份会分叉。
+ */
+export type SerenityChainId = "serenity-screening" | "serenity-screening-fast";
+
 export interface Catalyst {
   type: string;
   description: string;
@@ -98,6 +106,15 @@ export interface StepLog {
 
 interface SerenityState {
   running: boolean;
+  /**
+   * 本次运行跑的是哪条链（`null` = 未运行 / 未知）。
+   *
+   * 置于 store 而非面板 `useState`：ScreenerPage 的 Tabs 是 destroyOnHidden（切走即
+   * unmount），面板局部状态一卸载就丢，而 `running` 仍为 true ⇒ 两按钮都 disabled、
+   * 都不转圈，进度卡也说不清是哪条链在跑。放进 store 后，重挂载的面板直接读到链名，
+   * 转圈态与链名标注一并恢复。
+   */
+  runningChain: SerenityChainId | null;
   stage: StepStage;
   candidates: SerenityCandidate[];
   trends: TrendInfo[];
@@ -126,6 +143,7 @@ interface SerenityState {
   emptyReason: string | null;
 
   setRunning: (v: boolean) => void;
+  setRunningChain: (c: SerenityChainId | null) => void;
   setStage: (s: StepStage) => void;
   setCandidates: (c: SerenityCandidate[]) => void;
   setTrends: (t: TrendInfo[]) => void;
@@ -141,6 +159,7 @@ interface SerenityState {
 
 const initialState = {
   running: false,
+  runningChain: null as SerenityChainId | null,
   stage: "done" as StepStage,
   candidates: [] as SerenityCandidate[],
   trends: [] as TrendInfo[],
@@ -156,6 +175,7 @@ const initialState = {
 export const useSerenityStore = create<SerenityState>((set) => ({
   ...initialState,
   setRunning: (v) => set({ running: v }),
+  setRunningChain: (c) => set({ runningChain: c }),
   setStage: (s) => set({ stage: s }),
   setCandidates: (c) => set({ candidates: c }),
   setTrends: (t) => set({ trends: t }),

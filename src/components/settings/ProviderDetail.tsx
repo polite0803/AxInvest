@@ -106,6 +106,7 @@ const MODEL_TYPE_LABEL_KEYS: Record<ModelType, string> = {
   Chat: "settings.modelType.Chat",
   Voice: "settings.modelType.Voice",
   Embedding: "settings.modelType.Embedding",
+  Decision: "settings.modelType.Decision",
 };
 
 const MODEL_TYPE_CONFIG: Record<
@@ -115,6 +116,7 @@ const MODEL_TYPE_CONFIG: Record<
   Chat: { color: "blue", icon: <MessageSquare size={12} /> },
   Voice: { color: "red", icon: <Mic size={12} /> },
   Embedding: { color: "cyan", icon: <Database size={12} /> },
+  Decision: { color: "purple", icon: <Lightbulb size={12} /> },
 };
 
 const DEFAULT_PATHS: Record<ProviderType, string> = {
@@ -126,6 +128,7 @@ const DEFAULT_PATHS: Record<ProviderType, string> = {
   hermes: "/v1/chat/completions",
   ollama: "/v1/chat/completions",
   llama_cpp: "/v1/chat/completions",
+  typesafe: "/alpha/decisions",
 };
 
 const DEFAULT_HOSTS: Record<ProviderType, string> = {
@@ -137,6 +140,7 @@ const DEFAULT_HOSTS: Record<ProviderType, string> = {
   hermes: "",
   ollama: "http://localhost:11434",
   llama_cpp: "http://localhost:8091",
+  typesafe: "https://openrouter.ai/api",
 };
 
 function deriveModelGroupName(model_id?: string | null): string {
@@ -3486,6 +3490,7 @@ export function ProviderDetail({ providerId }: ProviderDetailProps) {
                 { label: "Gemini", value: "gemini" },
                 { label: "Ollama", value: "ollama" },
                 { label: "llama.cpp", value: "llama_cpp" },
+                { label: "TypeSafe Jev", value: "typesafe" },
               ]}
               popupMatchSelectWidth={false}
               style={{ width: "100%" }}

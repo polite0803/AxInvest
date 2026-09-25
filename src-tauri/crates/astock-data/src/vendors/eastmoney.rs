@@ -2642,27 +2642,53 @@ impl StockVendor for EastMoneyVendor {
     /// 概念板块归属 — 东方财富 emweb 个股板块归属报表
     ///
     /// 新增(2026-07-22 #4): 获取股权质押数据。
-    /// 使用 datacenter-web RPT_F10_EH_PLEDGE 报表(东方财富 F10 股权质押页面数据源)。
     ///
-    /// 字段映射:
-    ///   - PLEDGE_RATIO: 质押比例(%)
-    ///   - PLEDGE_NUM: 质押股数
-    ///   - PLEDGE_COUNT: 质押笔数
-    ///   - CONTROLLING_PLEDGE_RATIO: 控股股东质押比例(%)
+    /// 修复(2026-09-24): 原报表 `RPT_F10_EH_PLEDGE` 已下线 —— datacenter-web /
+    /// datacenter 两个域、多个路径一律返回
+    /// `{"success":false,"message":"报表配置不存在,RPT_F10_EH_PLEDGE","code":9501}`
+    /// （实测 2026-09-24，300642 / 688114 均如此，而同域 `RPT_F10_CORETHEME_BOARDTYPE`
+    /// 正常返回）⇒ 质押路由只有 eastmoney 一个 vendor，旧代码又把该响应当「空数据（非故障）」
+    /// 静默降级 ⇒ 质押数据 46/46 恒 null，分析师只能写「无法获取」。
+    ///
+    /// 现改用中国结算周度质押报表 `RPT_CSDC_LIST`（data.eastmoney.com/gpzy 的数据源）。
+    /// 字段映射（实测 4 只股票一致）：
+    ///   - PLEDGE_RATIO       → pledge_ratio（大股东质押总比例 %）
+    ///   - REPURCHASE_BALANCE → pledge_shares（接口单位「万股」×10000 换算为「股」）
+    ///   - PLEDGE_DEAL_NUM    → pledge_count（质押笔数）
+    ///   - TRADE_DATE         → 报告期（中国结算按周披露，取最新一期）
+    ///
+    /// 该报表**不含**控股股东质押比例列，`controlling_pledge_ratio` 记 0.0
+    /// （消费端 `detect_pledge_risk` 只读 pledge_ratio，不受影响）。
+    ///
+    /// 报表缺失/异常时返回 Err 而非 Ok(None)：Ok(None) 会被上层判为
+    /// 「该股无质押（非故障）」而永不回退，正是此前静默空值的成因。
     async fn get_pledge_data(&self, stock_code: &str) -> Result<Option<PledgeData>, DataError> {
         let code =
             stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
         let secucode = to_em_secucode(code);
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-            reportName=RPT_F10_EH_PLEDGE&columns=ALL&\
+            reportName=RPT_CSDC_LIST&columns=ALL&\
             filter=(SECUCODE%3D%22{secucode}%22)&\
             pageSize=5&pageNumber=1&source=WEB&\
-            sortColumns=END_DATE&sortTypes=-1"
+            sortColumns=TRADE_DATE&sortTypes=-1"
         );
 
         let resp = self.em_get(&url).await?;
-        let json: Value = resp.json().await?;
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_pledge_data JSON 解析失败: {e}"),
+        })?;
+
+        if json["success"].as_bool() == Some(false) {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!(
+                    "get_pledge_data 报表不可用: {}",
+                    json["message"].as_str().unwrap_or("unknown")
+                ),
+            });
+        }
 
         let rows = match json["result"]["data"].as_array() {
             Some(arr) if !arr.is_empty() => arr,
@@ -2674,9 +2700,11 @@ impl StockVendor for EastMoneyVendor {
             r[key].as_f64().or_else(|| r[key].as_str().and_then(|s| s.parse().ok())).unwrap_or(0.0)
         };
         let pledge_ratio = f("PLEDGE_RATIO");
-        let pledge_shares = f("PLEDGE_NUM");
-        let pledge_count = r["PLEDGE_COUNT"].as_i64().unwrap_or(0) as i32;
-        let controlling_pledge_ratio = f("CONTROLLING_PLEDGE_RATIO");
+        // RPT_CSDC_LIST 的 REPURCHASE_BALANCE 单位是「万股」，接口契约为「股」
+        let pledge_shares = f("REPURCHASE_BALANCE") * 10_000.0;
+        let pledge_count = r["PLEDGE_DEAL_NUM"].as_i64().unwrap_or(0) as i32;
+        // 报表无控股股东质押比例列，置 0.0 表示未提供（非「控股股东零质押」的强断言）
+        let controlling_pledge_ratio = 0.0;
 
         // 风险等级分类(与 detect_pledge_risk 工具阈值对齐)
         let risk_level = if pledge_ratio >= 70.0 {

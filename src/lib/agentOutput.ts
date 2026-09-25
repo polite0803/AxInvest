@@ -856,3 +856,81 @@ export function extractValuationApplicability(value: unknown): ValuationApplicab
   }
   return null;
 }
+
+/**
+ * Jev 判定（`llmClassifier` 节点产物）的归一化结果。
+ *
+ * 产出方是 `LlmClassifierExecutor`，**输出里没有 `content` 字段** —— 这与
+ * `a-*` / `trader` 那些 AgentNode 不同（后者正文在 `content` 里，故需
+ * `reconstructVerdictTag` 那套 VERDICT 标签重构）。Jev 节点只有一个 `category`
+ * 档位词，**没有正文**，这正是快速链「不显示文本、只显示结论」的由来。
+ */
+export interface JevJudgment {
+  /** 判定档位。段 B 维度节点为「支持 / 中性 / 反对」（前 6 个）或「利好 / 中性 / 利空」（后 4 个）。 */
+  category: string;
+  /**
+   * LLM 自陈置信度（0~1）。**只有配了 `confidence_threshold` 的节点才输出该字段**
+   * —— `seed_stock_analysis.rs` 里段 B 的 10 个维度节点均为 `None`，故消费方
+   * 必须容忍 `null`，不得据此判「判定无效」。
+   */
+  confidence: number | null;
+  /**
+   * LLM 调用失败后走了 `fallback_label` 降级（执行器写入的 `degraded: true`）。
+   * 与「模型真的判成中性」是两件事 —— 不区分会让失败静默伪装成中性判定。
+   */
+  degraded: boolean;
+}
+
+/**
+ * 从 Jev 判定节点的产物里提取 `{category, confidence, degraded}`。
+ *
+ * 兼容四种形态（与 `extractValuationApplicability` 同策）：
+ * 1. 纯对象（黑板快照里的裸产物）；
+ * 2. JSON 字符串（`extractContent` 对无 `content` 的对象会 `JSON.stringify`）；
+ * 3. `{content: "<json>"}` AgentNode 包装；
+ * 4. `{result: {...}}` / `{output: {...}}` CodeNode / NodeOutput 包装。
+ *
+ * 取不到 `category` 时返回 `null` —— **不构造默认档位**：把「节点没跑」伪造成
+ * 「判定为中性」会让面板显示一条模型从未给出的结论。
+ */
+export function extractJevJudgment(value: unknown): JevJudgment | null {
+  if (value == null) { return null; }
+
+  const candidates: Record<string, unknown>[] = [];
+  const collect = (v: unknown) => {
+    if (typeof v === "string") {
+      const parsed = parseJsonLoose(v);
+      if (parsed) { candidates.push(parsed); }
+    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+      const rec = v as Record<string, unknown>;
+      candidates.push(rec);
+      // 包装层：真正的产物在下一层
+      for (const key of ["content", "result", "output"]) {
+        const inner = rec[key];
+        if (typeof inner === "string") {
+          const parsed = parseJsonLoose(inner);
+          if (parsed) { candidates.push(parsed); }
+        } else if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+          candidates.push(inner as Record<string, unknown>);
+        }
+      }
+    }
+  };
+  collect(value);
+
+  for (const candidate of candidates) {
+    const category = candidate.category;
+    if (typeof category !== "string" || category.trim().length === 0) { continue; }
+    const rawConfidence = candidate.confidence;
+    return {
+      category,
+      // 执行器写的是 0.0~1.0 的原始值；**不做 >1 归一**（那是 0-10 制的老约定，
+      // 套到 0~1 值域上会把 0.95 误放大成 9.5）。
+      confidence: typeof rawConfidence === "number" && Number.isFinite(rawConfidence)
+        ? rawConfidence
+        : null,
+      degraded: candidate.degraded === true,
+    };
+  }
+  return null;
+}

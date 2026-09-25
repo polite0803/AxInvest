@@ -13,6 +13,7 @@ use axagent_dao::repo::wiki;
 use axagent_dao::repo::wiki_repository::DaoWikiRepository;
 use axagent_dao::repo::wiki_source_repository::DaoWikiSourceRepository;
 use axagent_entities::wiki_sync_queue;
+use axagent_harness::IpcEventName;
 use axagent_harness::kit_bridge::KitMarkdownParser;
 use axagent_harness::repositories;
 use axagent_harness::types::ProviderType;
@@ -435,6 +436,7 @@ fn resolve_provider_adapter(
         ProviderType::LlamaCpp => {
             Ok(Arc::new(axagent_providers::llama_cpp::LlamaCppAdapter::new()))
         },
+        ProviderType::TypeSafe => Ok(Arc::new(axagent_providers::typesafe::TypeSafeAdapter::new())),
     }
 }
 
@@ -606,7 +608,7 @@ pub async fn llm_wiki_compile(
                                 e
                             );
                             let _ = app_for_emit.emit(
-                                "wiki-note-indexed",
+                                IpcEventName::WikiNoteIndexed.as_str(),
                                 serde_json::json!({
                                     "noteId": note_model.id,
                                     "success": false,
@@ -615,7 +617,7 @@ pub async fn llm_wiki_compile(
                             );
                         } else {
                             let _ = app_for_emit.emit(
-                                "wiki-note-indexed",
+                                IpcEventName::WikiNoteIndexed.as_str(),
                                 serde_json::json!({
                                     "noteId": note_model.id,
                                     "success": true,

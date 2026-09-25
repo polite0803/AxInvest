@@ -163,6 +163,8 @@ pub mod serialization;
 
 // ── 工具系统模块 ──
 pub mod approval_policy;
+/// 审批规则（批准沉淀）：DTO + 存储契约（实现见 wiring，匹配器见 `axagent-kit`）。
+pub mod approval_rules;
 pub mod output_sanitizer;
 pub mod sandbox_policy;
 pub mod session_events;
@@ -170,10 +172,18 @@ pub mod tool;
 pub mod tool_permissions;
 pub mod tool_validation;
 pub use approval_policy::ApprovalPolicy;
+pub use approval_rules::{ApprovalRule, ApprovalRuleStore, RuleDecision};
 pub use sandbox_policy::{SandboxMode, SandboxPolicy};
 pub use session_events::{
     NullSessionEventSink, SessionEvent, SessionEventPayload, SessionEventSink, SessionEventType,
 };
+
+// ── 上下文预算（分量预算 + auto-compact 阈值的唯一供值入口） ──
+pub mod context_budget;
+
+// ── IPC 事件名契约（前端 listen / 后端 emit 单一来源）──
+pub mod event_names;
+pub use event_names::IpcEventName;
 
 // ── Agent 单轮 ReAct 执行器契约(2.5 P1)──
 // trait 定义在 foundation 层,由 wiring 把 SessionManager 适配器注入到 WorkEngine,
@@ -331,6 +341,10 @@ pub use skill_evolution_hook::SkillEvolutionHook;
 // ── 可逆效果原语（一切皆插件：注册即记录、卸载即回滚）──
 pub mod reversible_effect;
 pub use reversible_effect::{EffectHandle, EffectScope, NamedEffect, ReversibleEffect};
+
+// ── 跨边界接缝调用面（B 层动态插件：JSON 进 / JSON 出，传输无关）──
+pub mod seam_invoker;
+pub use seam_invoker::SeamInvoker;
 
 // ── 运行时能力注册表（内置与外部插件平权的统一接缝，Capability Seam 三件套）──
 pub mod capability_registry;
@@ -496,7 +510,7 @@ pub use tool::{
 };
 
 // ── Registry 契约重导出 ──
-pub use registry::ToolRegistry;
+pub use registry::{ToolRegistry, ToolSetProvider};
 
 // ── ToolExecutionAudit 契约（让 tools crate 不依赖 dao） ──
 pub mod tool_audit;

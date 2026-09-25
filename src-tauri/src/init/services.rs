@@ -2,6 +2,7 @@
 
 use crate::AppState;
 use crate::index_queue::IndexJobService;
+use axagent_harness::IpcEventName;
 use chrono;
 use notify::{Event, RecursiveMode, Watcher};
 use std::sync::Arc;
@@ -477,7 +478,7 @@ fn start_pty_event_forwarder(app: &tauri::AppHandle, state: &AppState) {
             let Some(event) = event else {
                 break;
             };
-            if let Err(e) = app_handle_output.emit("pty_output", event) {
+            if let Err(e) = app_handle_output.emit(IpcEventName::PtyOutput.as_str(), event) {
                 tracing::warn!("pty_output emit failed: {}", e);
             }
         }
@@ -491,7 +492,7 @@ fn start_pty_event_forwarder(app: &tauri::AppHandle, state: &AppState) {
             let Some(event) = event else {
                 break;
             };
-            if let Err(e) = app_handle_exit.emit("pty_exit", event) {
+            if let Err(e) = app_handle_exit.emit(IpcEventName::PtyExit.as_str(), event) {
                 tracing::warn!("pty_exit emit failed: {}", e);
             }
         }
@@ -1476,7 +1477,7 @@ fn start_skill_watcher(app: &tauri::AppHandle, state: &AppState) {
                     let app = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         for name in ready {
-                            let _ = app.emit("skill:file-changed", name);
+                            let _ = app.emit(IpcEventName::SkillFileChanged.as_str(), name);
                         }
                     });
                 },
@@ -2489,6 +2490,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         &item.stock_name,
                         // 自选股扫描无周期语义：持有期交给决策自身声明，缺失时兜底 28 天
                         None,
+                        None, // template_id — 自选股扫描恒走完整分析链
                     )
                     .await
                     {
@@ -3088,7 +3090,8 @@ fn start_approval_event_bridge(app: &tauri::AppHandle, state: &AppState) {
             match sub.recv().await {
                 Some(evt) => {
                     if evt.kind == "ApprovalRequested" {
-                        let _ = app.emit("workflow:approval-requested", &evt.payload);
+                        let _ = app
+                            .emit(IpcEventName::WorkflowApprovalRequested.as_str(), &evt.payload);
                     }
                 },
                 None => {
@@ -3463,7 +3466,7 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
                 "timestamp": event.current.timestamp,
             });
             Box::pin(async move {
-                let _ = app.emit("stock-quote-update", payload);
+                let _ = app.emit(IpcEventName::StockQuoteUpdate.as_str(), payload);
             })
         })
     };

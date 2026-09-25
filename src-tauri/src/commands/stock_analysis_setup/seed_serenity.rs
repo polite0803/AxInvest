@@ -3,18 +3,22 @@
 
 use crate::commands::error_code::stock_setup;
 
+// ── 两链共用的构建器 / 工具集（`serenity-screening` 与 `serenity-screening-fast`）──
+// 抽到模块级是为了让 `seed_serenity_fast.rs` 复用同一份定义（项目「禁止重复定义」铁律）。
+// 原 seed 通过 `let tool_node = serenity_tool_node;` 取别名调用，产物逐字节不变。
+use axagent_harness::HallucinationGuardConfig;
+use axagent_harness::workflow_types::{
+    AgentNode, AgentNodeConfig, CodeNode, CodeNodeConfig, EdgeType, OutputMode, Position,
+    RetryConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType,
+    WorkflowEdge, WorkflowNode, WorkflowNodeBase,
+};
+use std::collections::HashMap;
+
 pub(crate) async fn seed_serenity_screening_workflow_template(
     db: &sea_orm::DatabaseConnection,
 ) -> Result<(), String> {
     use crate::commands::error::ErrorResponse;
     use axagent_entities::workflow_template;
-    use axagent_harness::HallucinationGuardConfig;
-    use axagent_harness::workflow_types::{
-        AgentNode, AgentNodeConfig, CodeNode, CodeNodeConfig, EdgeType, JsonSchema,
-        JsonSchemaProperty, OutputMode, Position, RetryConfig, ToolDef, ToolNode, ToolNodeConfig,
-        TriggerConfig, TriggerNode, TriggerType, Variable, WorkflowEdge, WorkflowNode,
-        WorkflowNodeBase,
-    };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
     const TEMPLATE_ID: &str = "serenity-screening";
@@ -89,514 +93,29 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     //      {report:"..."}，candidates 在 report 字符串内层 → p["candidates"] 不存在 → 返回 []
     //      → 最终无候选输出。修复：路径4 对 p["report"] 先 extract_json_block 剥围栏截取
     //      首个平衡 JSON 块，再二次 json_parse 取内层 candidates。
+    // ⚠ 2026-09-24 修正（上条 v38 的「dao 保存不递增 version」前提已被推翻，勿据它去改 dao）：
+    //   dao 的 `update_workflow_template` 保存时**确实**把 version 抬到「现值 + 1」——
+    //   这是负载承载的行为，不可删：版本快照表主键是 `{id}_v{version}`（不递增则快照永远
+    //   只有种子那一版），且前端 `getVersionHistory` / `restoreVersion` 依赖它。设计意图正是
+    //   **用户修改优先**：用户保存过的行（version > 本常量）seed 永不覆盖。
+    //   代价是「代码改了图却没抬常量」会被版本号掩盖 ⇒ 原 `>= 即跳过` 让改脚本 / 改拓扑 /
+    //   改 input_mapping 全部静默不落库。故版本门改为 `version` + **图谱指纹** 双判据，
+    //   三态裁决见下方「版本门裁决」段：既保住用户修改优先，又让「能重种子化」成为常态。
     const TEMPLATE_VERSION: i32 = 53;
 
     let now = chrono::Utc::now().timestamp_millis();
 
-    // ── ToolDef 定义 ──
-    let td_industry = ToolDef {
-        name: "get_industry_ranking".into(),
-        description: Some("获取行业涨跌排名".into()),
-        parameters: None,
-    };
-    let td_cls = ToolDef {
-        name: "get_cls_flash".into(),
-        description: Some("获取财联社实时快讯".into()),
-        parameters: None,
-    };
-    let td_concept = ToolDef {
-        name: "get_stock_concept_blocks".into(),
-        description: Some("获取概念板块归属（需股票代码）".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "stock_code".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("6位股票代码".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    let td_dragon = ToolDef {
-        name: "get_market_dragon_tiger".into(),
-        description: Some("获取龙虎榜数据".into()),
-        parameters: None,
-    };
-    let td_north = ToolDef {
-        name: "get_north_bound_flow".into(),
-        description: Some("获取北向资金成交额（净流入2024-08起停披，返回成交额序列）".into()),
-        parameters: None,
-    };
-    let td_fin = ToolDef {
-        name: "get_stock_financials".into(),
-        description: Some("获取财务数据：营收、净利润、EPS、ROE、毛利率等".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "stock_code".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("6位股票代码".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    let td_quote = ToolDef {
-        name: "get_stock_quote".into(),
-        description: Some("获取股票实时行情".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "stock_code".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("6位股票代码".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    let td_visits = ToolDef {
-        name: "get_stock_institutional_visits".into(),
-        description: Some("获取机构调研数据".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "stock_code".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("6位股票代码".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    // 新闻 + 研报工具，供 Agent 节点动态搜索验证（催化剂/CapEx/退出信号）
-    let td_serenity_news = ToolDef {
-        name: "get_stock_news".into(),
-        description: Some("获取个股近期新闻公告，验证催化剂/退出信号".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([
-                (
-                    "stock_code".into(),
-                    JsonSchemaProperty {
-                        schema_type: "string".into(),
-                        description: Some("6位股票代码".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-                (
-                    "limit".into(),
-                    JsonSchemaProperty {
-                        schema_type: "integer".into(),
-                        description: Some("返回数量".into()),
-                        default: Some(serde_json::json!(30)),
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-            ])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    let td_serenity_research = ToolDef {
-        name: "get_stock_research_reports".into(),
-        description: Some("获取券商研报，验证需求/壁垒/CapEx逻辑".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "stock_code".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("6位股票代码".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    // 关键词新闻搜索工具，供 Agent 验证催化剂/CapEx/行业趋势
-    let td_search_news = ToolDef {
-        name: "search_news".into(),
-        description: Some("按关键词搜索财经新闻，用于验证催化剂/CapEx/行业趋势".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([
-                (
-                    "keyword".into(),
-                    JsonSchemaProperty {
-                        schema_type: "string".into(),
-                        description: Some("搜索关键词".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-                (
-                    "limit".into(),
-                    JsonSchemaProperty {
-                        schema_type: "integer".into(),
-                        description: Some("返回条数".into()),
-                        default: Some(serde_json::json!(10)),
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-            ])),
-            required: Some(vec!["keyword".into()]),
-            items: None,
-        }),
-    };
-
-    // 关注度评分工具（方案B）
-    let td_attention = ToolDef {
-        name: "compute_attention_score".into(),
-        description: Some("计算个股关注度评分 0-100，越低越冷门，用于验证低关注度因子".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "stock_code".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("6位股票代码".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    // 行业竞争地位分析工具（方案C）
-    let td_industry_pos = ToolDef {
-        name: "compute_industry_position".into(),
-        description: Some(
-            "行业竞争地位分析：同行对比毛利率/ROE，产能指标（资本开支/折旧比）".into(),
-        ),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "stock_code".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("6位股票代码".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-
-    // 退出信号检查工具（Phase 3）
-    let td_exit = ToolDef {
-        name: "check_exit_signals".into(),
-        description: Some(
-            "检查个股退出信号：价格止损、技术替代新闻、毛利率趋势。返回 exit_urgency".into(),
-        ),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([
-                (
-                    "stock_code".into(),
-                    JsonSchemaProperty {
-                        schema_type: "string".into(),
-                        description: Some("6位股票代码".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-                (
-                    "entry_price".into(),
-                    JsonSchemaProperty {
-                        schema_type: "number".into(),
-                        description: Some("买入价（用于计算止损触发）".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-                (
-                    "stop_loss_price".into(),
-                    JsonSchemaProperty {
-                        schema_type: "number".into(),
-                        description: Some("止损价".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-            ])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-
-    // 回馈闭环工具
-    let td_perf = ToolDef {
-        name: "compute_serenity_performance".into(),
-        description: Some("计算 Serenity 候选推荐后表现".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([
-                (
-                    "stock_code".into(),
-                    JsonSchemaProperty {
-                        schema_type: "string".into(),
-                        description: Some("6位股票代码".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-                (
-                    "recommend_date".into(),
-                    JsonSchemaProperty {
-                        schema_type: "string".into(),
-                        description: Some("推荐日期 YYYY-MM-DD".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-            ])),
-            required: Some(vec!["stock_code".into(), "recommend_date".into()]),
-            items: None,
-        }),
-    };
-    let td_cat = ToolDef {
-        name: "verify_catalysts".into(),
-        description: Some("验证 Serenity 候选的催化剂是否兑现".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([
-                (
-                    "stock_code".into(),
-                    JsonSchemaProperty {
-                        schema_type: "string".into(),
-                        description: Some("6位股票代码".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-                (
-                    "catalyst_descriptions".into(),
-                    JsonSchemaProperty {
-                        schema_type: "array".into(),
-                        description: Some("催化剂描述列表".into()),
-                        default: None,
-                        enum_values: None,
-                        format: None,
-                    },
-                ),
-            ])),
-            required: Some(vec!["stock_code".into()]),
-            items: None,
-        }),
-    };
-    let td_opt = ToolDef {
-        name: "optimize_attention_weights".into(),
-        description: Some("基于历史表现调优关注度评分权重".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "samples".into(),
-                JsonSchemaProperty {
-                    schema_type: "array".into(),
-                    description: Some("样本列表".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["samples".into()]),
-            items: None,
-        }),
-    };
-
-    // 搜索股票代码工具（借助 NeoDataVendor 末位路由覆盖全球供应链公司）
-    let td_search_stock = ToolDef {
-        name: "search_stock".into(),
-        description: Some("搜索股票代码：输入公司中文名/英文名，返回6位A股代码或港股(如00700.HK)/美股(如TSM.US)代码".into()),
-        parameters: Some(JsonSchema {
-            schema_type: "object".into(),
-            description: None,
-            properties: Some(std::collections::HashMap::from([(
-                "keyword".into(),
-                JsonSchemaProperty {
-                    schema_type: "string".into(),
-                    description: Some("公司名称（支持中英文，如\"台积电\"、\"NVIDIA\"、\"三星电子\"）".into()),
-                    default: None,
-                    enum_values: None,
-                    format: None,
-                },
-            )])),
-            required: Some(vec!["keyword".into()]),
-            items: None,
-        }),
-    };
-
-    let tool_defs: Vec<ToolDef> = vec![
-        td_industry,
-        td_cls,
-        td_concept,
-        td_dragon,
-        td_north,
-        td_fin,
-        td_quote,
-        td_visits,
-        td_serenity_news,
-        td_serenity_research,
-        td_search_news,
-        td_search_stock,
-        td_attention,
-        td_industry_pos,
-        td_exit,
-        td_perf,
-        td_cat,
-        td_opt,
-    ];
+    // ── ToolDef 定义 ── 定义见 `build_serenity_tool_defs`（两链共用）
+    let tool_defs = build_serenity_tool_defs();
     let tool_defs_json = serde_json::to_string(&tool_defs).map_err(|e| {
         ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化 ToolDef 失败: {e}"))
     })?;
 
-    // ── 快捷构建函数 ──
-    let tool_node = |id: &str,
-                     title: &str,
-                     tool_name: &str,
-                     output_var: &str,
-                     x: f64,
-                     y: f64|
-     -> WorkflowNode {
-        WorkflowNode::Tool(ToolNode {
-            base: WorkflowNodeBase {
-                id: id.into(),
-                title: title.into(),
-                description: Some(format!("获取数据: {tool_name}")),
-                position: Position { x, y },
-                retry: RetryConfig { enabled: true, max_retries: 2, ..Default::default() },
-                timeout: Some(120),
-                enabled: true,
-                parent_id: None,
-                compensation: None,
-                continue_on_fail: false,
-            },
-            config: ToolNodeConfig {
-                tool_name: tool_name.into(),
-                input_mapping: std::collections::HashMap::new(),
-                output_var: output_var.into(),
-            },
-        })
-    };
-
-    let agent_node = |id: &str,
-                      title: &str,
-                      expert_id: &str,
-                      system_prompt: &str,
-                      context_sources: Vec<&str>,
-                      input_mapping: std::collections::HashMap<String, String>,
-                      x: f64,
-                      y: f64|
-     -> WorkflowNode {
-        WorkflowNode::Agent(AgentNode {
-            base: WorkflowNodeBase {
-                id: id.into(),
-                title: title.into(),
-                description: Some(format!("Serenity 分析: {expert_id}")),
-                position: Position { x, y },
-                retry: RetryConfig { enabled: true, max_retries: 1, ..Default::default() },
-                timeout: Some(600),
-                enabled: true,
-                parent_id: None,
-                compensation: None,
-                continue_on_fail: false,
-            },
-            config: AgentNodeConfig {
-                system_prompt: system_prompt.into(),
-                context_sources: context_sources.into_iter().map(String::from).collect(),
-                input_mapping,
-                output_var: id.into(),
-                model: None,
-                temperature: Some(0.3),
-                max_tokens: Some(32768),
-                tools: vec![],
-                exposed_tools: vec![],
-                output_mode: OutputMode::Json,
-                agent_profile_id: Some(format!("stock-{expert_id}")),
-                max_tool_rounds: Some(8),
-                execution_mode: None,
-                rag_source_ids: vec![],
-                consistency_check: None,
-                // V74 关闭: hallucination_guard 锚定检查（同 stock-analysis，实测误报率 ~100%）
-                hallucination_guard: Some(HallucinationGuardConfig {
-                    enabled: false,
-                    match_threshold: 0.4,
-                }),
-                fallback_model: None,
-                task_scene: None,
-                // stream_chunk_timeout_secs: 300s（5 分钟）— 默认 120s 在大上下文
-                // （产业链拆解 5 路并行 context）下偶发 TTFB >120s 触发 TIMEOUT，
-                // 与 stock-analysis 模板（seed_stock_analysis.rs agent 闭包）保持一致。
-                stream_chunk_timeout_secs: Some(300),
-            },
-        })
-    };
-
-    let edge = |id: &str, source: &str, target: &str| -> WorkflowEdge {
-        WorkflowEdge {
-            id: id.into(),
-            source: source.into(),
-            source_handle: None,
-            target: target.into(),
-            target_handle: None,
-            edge_type: EdgeType::Direct,
-            label: None,
-        }
-    };
+    // ── 快捷构建函数 ── 定义见模块级 `serenity_tool_node` / `serenity_agent_node` / `serenity_edge`
+    //（两链共用；原为局部闭包，抽成函数供 seed_serenity_fast 复用，产物逐字节不变）
+    let tool_node = serenity_tool_node;
+    let agent_node = serenity_agent_node;
+    let edge = serenity_edge;
 
     // ── 构建节点 ──
     let mut nodes: Vec<WorkflowNode> = Vec::new();
@@ -1185,50 +704,19 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     // 此处保持干净，不为 workflow 引入虚假节点。
 
     // ── 为所有 AgentNode 按角色配置工具 ──
-    // agent_node 闭包中 tools/exposed_tools 为空，需要从 tool_defs 中注入。
+    // agent_node 构建器中 tools/exposed_tools 为空，需要从 tool_defs 中注入。
+    // 工具集常量定义见模块级 `SERENITY_*_TOOLS`（两链共用）。
     // 按角色分配工具集：避免 LLM 调用不相关的工具浪费 token。
-    let tool_def_map: std::collections::HashMap<&str, &ToolDef> =
-        tool_defs.iter().map(|td| (td.name.as_str(), td)).collect();
-    let resolve_tools = |names: &[&str]| -> Vec<ToolDef> {
-        names.iter().filter_map(|name| tool_def_map.get(name).cloned()).cloned().collect()
-    };
-    // 数据集工具（Phase 0）：可供趋势扫描器调用获取行业级数据
-    let phase0_tools = &[
-        "get_industry_ranking",
-        "get_cls_flash",
-        "get_stock_concept_blocks",
-        "get_north_bound_flow",
-        "get_market_dragon_tiger",
-    ];
-    // 产业链分析工具（Phase 1）：供 chain-decomposer 调用
-    let chain_tools = &[
-        "search_stock",
-        "get_stock_financials",
-        "get_stock_quote",
-        "get_stock_institutional_visits",
-        "compute_industry_position",
-        "compute_bottleneck_signals", // V55: 瓶颈信号计算
-    ];
-    // 候选筛选工具（Phase 2）：供 candidate-mapper 全功能调用
-    let candidate_tools = &[
-        "search_stock",
-        "get_stock_financials",
-        "get_stock_quote",
-        "get_stock_institutional_visits",
-        "get_stock_news",
-        "get_stock_research_reports",
-        "search_news",
-        "compute_attention_score",
-        "compute_industry_position",
-        "check_exit_signals",
-        "compute_bottleneck_signals", // V55: 瓶颈信号验证
-    ];
     // 后处理工具（回馈闭环）
     for node in &mut nodes {
         if let WorkflowNode::Agent(a) = node {
             let tools = match a.config.agent_profile_id.as_deref() {
-                Some("stock-trend-scanner") => resolve_tools(phase0_tools),
-                Some("stock-chain-decomposer") => resolve_tools(chain_tools),
+                Some("stock-trend-scanner") => {
+                    serenity_resolve_tools(&tool_defs, SERENITY_PHASE0_TOOLS)
+                },
+                Some("stock-chain-decomposer") => {
+                    serenity_resolve_tools(&tool_defs, SERENITY_CHAIN_TOOLS)
+                },
                 Some("stock-candidate-mapper") => {
                     // 候选映射器需要完整上下文：链分析 + 候选筛选
                     // V53 曾硬编码 doubao-seed-2-0-code-preview-260215（"agnes 小模型输出
@@ -1237,12 +725,12 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
                     // PartiallyCompleted、候选为 0。2026-07-31 移除硬编码：回落全局默认
                     // 模型（用户实际配置的 GLM-5.2，其余 6 个 agent 节点均用它且输出
                     // 6000-9000 字符完整），模型选择交给用户在设置页统一管理。
-                    let mut t = resolve_tools(chain_tools);
-                    t.extend(resolve_tools(candidate_tools));
+                    let mut t = serenity_resolve_tools(&tool_defs, SERENITY_CHAIN_TOOLS);
+                    t.extend(serenity_resolve_tools(&tool_defs, SERENITY_CANDIDATE_TOOLS));
                     t
                 },
                 // 兜底：给予基本查询工具
-                _ => resolve_tools(&["search_stock", "get_stock_quote"]),
+                _ => serenity_resolve_tools(&tool_defs, &["search_stock", "get_stock_quote"]),
             };
             a.config.tools = tools;
         }
@@ -1255,6 +743,763 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
     let edges_json = serde_json::to_string(&edges).map_err(|e| {
         ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化边失败: {e}"))
     })?;
+
+    // ── Variables（用户可调整的参数字段）── 定义见 `build_serenity_variables`（两链共用）
+    let serenity_vars = build_serenity_variables();
+    let variables_json = serde_json::to_string(&serenity_vars).map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化变量失败: {e}"))
+    })?;
+
+    // ── Tags ──
+    let tags_json =
+        serde_json::to_string(&["serenity", "bottleneck", "screening"]).map_err(|e| {
+            ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化标签失败: {e}"))
+        })?;
+
+    // ── 版本门裁决（判据：`version` + 图谱指纹，两者缺一不可）──
+    // 为什么不是「`version >= 常量` 即跳过」：那个判据只看得到版本号，看不到**图谱内容**。
+    // 本模板行的 version 会被用户保存（设置面板 / 工作流编辑器）抬高，于是「代码改了图却
+    // 没抬 TEMPLATE_VERSION」与「确实是最新版」在版本号上无法区分 —— 原实现两者都静默
+    // `return`，改脚本 / 改拓扑 / 改 input_mapping 全部一字不落库。改用图谱指纹后，由
+    // 「版本号 + 图谱是否一致」两个维度共同裁决（与 `seed_serenity_fast.rs` 同款语义）。
+    //
+    // 判据（详见 TEMPLATE_VERSION 的「2026-09-24 修正」段）：
+    //   DB version >  常量 ⇒ 用户保存过 ⇒ **永不覆盖**（图谱不一致时告警提醒开发者）
+    //   DB version == 常量 ⇒ DB 仍是本函数上次写入的形态 ⇒ 图谱一致则跳过；
+    //                        不一致只能是代码改了图 ⇒ **重建**（「能重种子化」的常态路径）
+    //   DB version <  常量 ⇒ 显式升版 ⇒ 重建
+    //
+    // ⚠ 本段必须在下方 `delete_by_id` **之前**：一旦先删行再跳过，模板会凭空消失。
+    if let Some(existing) =
+        workflow_template::Entity::find_by_id(TEMPLATE_ID).one(db).await.map_err(|e| {
+            ErrorResponse::new(stock_setup::INTERNAL)
+                .with_detail(format!("查询工作流模板失败: {e}"))
+        })?
+    {
+        // 判据：两侧都按 JSON 结构比较（见 `super::same_json`），不比字符串 ——
+        // DB 文本可能来自旧序列化器或工作流编辑器保存，键序 / 空白 / 浮点写法都可能不同。
+        let graph_same = super::same_json(&existing.nodes, &nodes_json)
+            && super::same_json(&existing.edges, &edges_json);
+
+        // ① 用户保存过 ⇒ 用户修改优先，本次绝不覆盖它。
+        if existing.version > TEMPLATE_VERSION {
+            if graph_same {
+                tracing::info!(
+                    "[stock_analysis_setup] Serenity 模板 v{} 已高于代码 v{TEMPLATE_VERSION}\
+                     （用户已保存过，图谱一致），跳过",
+                    existing.version
+                );
+            } else {
+                tracing::warn!(
+                    "[stock_analysis_setup] ⚠ Serenity 模板 v{} 高于代码 v{TEMPLATE_VERSION}，\
+                     且图谱与代码不一致。二者之一：(a) 用户在工作流编辑器里改过本图 —— 正常，\
+                     忽略本条；(b) 代码已改图、但 TEMPLATE_VERSION 未高于 DB 现值 —— 要落库\
+                     代码这一版，请把 seed_serenity.rs 的 TEMPLATE_VERSION 设为 DB 现值 +1\
+                     （SELECT version FROM workflow_templates WHERE id='{TEMPLATE_ID}';）。\
+                     本次**跳过重建**以免覆盖用户改动。DB nodes/edges {} / {} 字节，\
+                     代码 {} / {} 字节",
+                    existing.version,
+                    existing.nodes.len(),
+                    existing.edges.len(),
+                    nodes_json.len(),
+                    edges_json.len()
+                );
+            }
+            return Ok(());
+        }
+
+        // ② DB 版本等于代码常量且图谱一致 ⇒ 幂等跳过（最常见的情形）。
+        if existing.version == TEMPLATE_VERSION && graph_same {
+            tracing::info!(
+                "[stock_analysis_setup] Serenity 模板已是最新 v{TEMPLATE_VERSION}（图谱一致），跳过"
+            );
+            return Ok(());
+        }
+
+        // ③ 走到这里只剩两种情形，都该重建：`version < 常量`（显式升版）或
+        //    `version == 常量 && 图谱不一致`（代码改了图而没抬常量）。
+        //    后者是安全的：`version == 常量` 意味着用户从未保存过本行，
+        //    重建不会覆盖任何用户改动 —— 这正是「能重种子化」不必人工查 DB 的路径。
+        tracing::info!(
+            "[stock_analysis_setup] 重建 Serenity 模板：DB v{} → 代码 v{TEMPLATE_VERSION}（图谱{}）",
+            existing.version,
+            if graph_same { "一致" } else { "不一致" }
+        );
+    } else {
+        tracing::info!("[stock_analysis_setup] Serenity 模板不存在，准备创建");
+    }
+    // 先删再插：首次播种时该行本就不存在，`delete_by_id` 对 0 行命中不报错，
+    // 只有 DB 层真出错才落日志 —— 故删除失败不阻断后续重建。
+    if let Err(e) = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await {
+        tracing::warn!("[stock_analysis_setup] 重建 Serenity 模板前删除旧行失败 (非致命): {e}");
+    }
+
+    // P0 软门禁（C1，2026-09-14）：种子的端口公理 —— 结构性死链在此被记录（不阻断启动）。
+    // 判据复用 harness 的 `warn_port_axioms_json`，不在本文件另写一份。
+    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
+        &format!("stock_analysis_setup:seed_serenity:{TEMPLATE_ID}"),
+        &nodes_json,
+        &edges_json,
+    );
+
+    workflow_template::ActiveModel {
+        hooks_config: Set(None),
+        id: Set(TEMPLATE_ID.to_string()),
+        cluster_id: Set(Some("trend".to_string())),
+        route_path: Set(Some("/finance/trend/serenity".to_string())),
+        name: Set("趋势智选".to_string()),
+        description: Set(Some(
+            "多策略趋势分析引擎：从市场数据中识别产业链瓶颈/政策驱动/业绩驱动/资金面驱动信号，自动筛选候选标的".to_string(),
+        )),
+        icon: Set("search".into()),
+        tags: Set(Some(tags_json)),
+        version: Set(TEMPLATE_VERSION),
+        is_preset: Set(true),
+        is_editable: Set(true),
+        is_public: Set(true),
+        trigger_config: Set(Some(
+            serde_json::to_string(&TriggerConfig {
+                trigger_type: TriggerType::Manual,
+                config: serde_json::json!({
+                    "description": "Serenity 瓶颈筛选: 自动扫描市场发现产业链瓶颈机会",
+                    "required_params": []
+                }),
+            })
+            .map_err(|e| {
+                ErrorResponse::new(stock_setup::INTERNAL)
+                    .with_detail(format!("序列化触发器配置失败: {e}"))
+            })?,
+        )),
+        nodes: Set(nodes_json),
+        edges: Set(edges_json),
+        input_schema: Set(None),
+        output_schema: Set(None),
+        variables: Set(Some(variables_json)),
+        error_config: Set(None),
+        composite_source: Set(None),
+        tool_defs: Set(Some(tool_defs_json)),
+        mission_hash: Set(None),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(db)
+    .await
+    .map_err(|e| {
+        ErrorResponse::new(stock_setup::INTERNAL)
+            .with_detail(format!("写入 Serenity 模板失败: {e}"))
+    })?;
+
+    tracing::info!("[stock_analysis_setup] Serenity 瓶颈筛选工作流模板已创建 (serenity-screening)");
+    Ok(())
+}
+
+// ── 两链共用：节点 / 边构建器 ──────────────────────────────────
+// 原为 seed 内部的局部闭包，抽成模块级函数供 `seed_serenity_fast.rs` 复用。
+// 构造字段与抽取前逐字一致 ⇒ 原模板产物零变化（无需升 `TEMPLATE_VERSION`）。
+
+/// 工具节点构建器。
+///
+/// 参数超 7 个（clippy `too_many_arguments` 阈值），显式 allow —— 这是节点构造的
+/// 自然参数集，改成 builder 结构体只是把同一组参数换个地方写。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn serenity_tool_node(
+    id: &str,
+    title: &str,
+    tool_name: &str,
+    output_var: &str,
+    x: f64,
+    y: f64,
+) -> WorkflowNode {
+    WorkflowNode::Tool(ToolNode {
+        base: WorkflowNodeBase {
+            id: id.into(),
+            title: title.into(),
+            description: Some(format!("获取数据: {tool_name}")),
+            position: Position { x, y },
+            retry: RetryConfig { enabled: true, max_retries: 2, ..Default::default() },
+            timeout: Some(120),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: false,
+        },
+        config: ToolNodeConfig {
+            tool_name: tool_name.into(),
+            input_mapping: HashMap::new(),
+            output_var: output_var.into(),
+        },
+    })
+}
+
+/// Agent 节点构建器（`model` 留空 → 回落会话 / 全局默认模型）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn serenity_agent_node(
+    id: &str,
+    title: &str,
+    expert_id: &str,
+    system_prompt: &str,
+    context_sources: Vec<&str>,
+    input_mapping: HashMap<String, String>,
+    x: f64,
+    y: f64,
+) -> WorkflowNode {
+    WorkflowNode::Agent(AgentNode {
+        base: WorkflowNodeBase {
+            id: id.into(),
+            title: title.into(),
+            description: Some(format!("Serenity 分析: {expert_id}")),
+            position: Position { x, y },
+            retry: RetryConfig { enabled: true, max_retries: 1, ..Default::default() },
+            timeout: Some(600),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: false,
+        },
+        config: AgentNodeConfig {
+            system_prompt: system_prompt.into(),
+            context_sources: context_sources.into_iter().map(String::from).collect(),
+            input_mapping,
+            output_var: id.into(),
+            model: None,
+            temperature: Some(0.3),
+            max_tokens: Some(32768),
+            tools: vec![],
+            exposed_tools: vec![],
+            output_mode: OutputMode::Json,
+            agent_profile_id: Some(format!("stock-{expert_id}")),
+            max_tool_rounds: Some(8),
+            execution_mode: None,
+            rag_source_ids: vec![],
+            consistency_check: None,
+            // V74 关闭: hallucination_guard 锚定检查（同 stock-analysis，实测误报率 ~100%）
+            hallucination_guard: Some(HallucinationGuardConfig {
+                enabled: false,
+                match_threshold: 0.4,
+            }),
+            fallback_model: None,
+            task_scene: None,
+            // stream_chunk_timeout_secs: 300s（5 分钟）— 默认 120s 在大上下文
+            // （产业链拆解 5 路并行 context）下偶发 TTFB >120s 触发 TIMEOUT，
+            // 与 stock-analysis 模板（seed_stock_analysis.rs agent 闭包）保持一致。
+            stream_chunk_timeout_secs: Some(300),
+        },
+    })
+}
+
+/// Rhai Code 节点构建器（`execute_directly` + `language="rhai"`，输出变量取节点 id）。
+///
+/// `timeout_secs` 由调用方给定：纯算术脚本 15–30s 足够，原链即按此粒度设置。
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn serenity_code_node(
+    id: &str,
+    title: &str,
+    description: &str,
+    code: &str,
+    input_mapping: HashMap<String, String>,
+    x: f64,
+    y: f64,
+    timeout_secs: u64,
+) -> WorkflowNode {
+    WorkflowNode::Code(CodeNode {
+        base: WorkflowNodeBase {
+            id: id.into(),
+            title: title.into(),
+            description: Some(description.into()),
+            position: Position { x, y },
+            retry: RetryConfig::default(),
+            timeout: Some(timeout_secs),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: false,
+        },
+        config: CodeNodeConfig {
+            language: "rhai".into(),
+            code: code.into(),
+            output_var: id.into(),
+            tool_name: None,
+            execute_directly: true,
+            input_mapping,
+        },
+    })
+}
+
+/// 直连边构建器（`EdgeType::Direct`，无 handle / label）。
+pub(crate) fn serenity_edge(id: &str, source: &str, target: &str) -> WorkflowEdge {
+    WorkflowEdge {
+        id: id.into(),
+        source: source.into(),
+        source_handle: None,
+        target: target.into(),
+        target_handle: None,
+        edge_type: EdgeType::Direct,
+        label: None,
+    }
+}
+
+// ── 两链共用：Agent 角色 → 工具集映射 ──────────────────────────
+
+/// 数据集工具（Phase 0）：趋势扫描阶段可调用的行业级数据工具。
+pub(crate) const SERENITY_PHASE0_TOOLS: &[&str] = &[
+    "get_industry_ranking",
+    "get_cls_flash",
+    "get_stock_concept_blocks",
+    "get_north_bound_flow",
+    "get_market_dragon_tiger",
+];
+
+/// 产业链分析工具（Phase 1）：供产业链拆解 / 生成腿调用。
+pub(crate) const SERENITY_CHAIN_TOOLS: &[&str] = &[
+    "search_stock",
+    "get_stock_financials",
+    "get_stock_quote",
+    "get_stock_institutional_visits",
+    "compute_industry_position",
+    "compute_bottleneck_signals", // V55: 瓶颈信号计算
+];
+
+/// 候选筛选工具（Phase 2）：供 candidate-mapper 全功能调用。
+pub(crate) const SERENITY_CANDIDATE_TOOLS: &[&str] = &[
+    "search_stock",
+    "get_stock_financials",
+    "get_stock_quote",
+    "get_stock_institutional_visits",
+    "get_stock_news",
+    "get_stock_research_reports",
+    "search_news",
+    "compute_attention_score",
+    "compute_industry_position",
+    "check_exit_signals",
+    "compute_bottleneck_signals", // V55: 瓶颈信号验证
+];
+
+/// 按名字从 `tool_defs` 中取出工具定义，**保持 `names` 的顺序**（过滤缺失项）。
+pub(crate) fn serenity_resolve_tools(tool_defs: &[ToolDef], names: &[&str]) -> Vec<ToolDef> {
+    let map: HashMap<&str, &ToolDef> = tool_defs.iter().map(|td| (td.name.as_str(), td)).collect();
+    names.iter().filter_map(|name| map.get(name).copied()).cloned().collect()
+}
+
+/// 趋势智选两链（`serenity-screening` / `serenity-screening-fast`）共用的 ToolDef 定义。
+///
+/// 抽成函数以避免两处重复定义（项目「禁止重复定义」铁律）；
+/// 产物与抽取前逐字节一致 ⇒ 原模板无需升 `TEMPLATE_VERSION`。
+pub(crate) fn build_serenity_tool_defs() -> Vec<axagent_harness::workflow_types::ToolDef> {
+    use axagent_harness::workflow_types::{JsonSchema, JsonSchemaProperty, ToolDef};
+
+    // ── ToolDef 定义 ──
+    let td_industry = ToolDef {
+        name: "get_industry_ranking".into(),
+        description: Some("获取行业涨跌排名".into()),
+        parameters: None,
+    };
+    let td_cls = ToolDef {
+        name: "get_cls_flash".into(),
+        description: Some("获取财联社实时快讯".into()),
+        parameters: None,
+    };
+    let td_concept = ToolDef {
+        name: "get_stock_concept_blocks".into(),
+        description: Some("获取概念板块归属（需股票代码）".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_dragon = ToolDef {
+        name: "get_market_dragon_tiger".into(),
+        description: Some("获取龙虎榜数据".into()),
+        parameters: None,
+    };
+    let td_north = ToolDef {
+        name: "get_north_bound_flow".into(),
+        description: Some("获取北向资金成交额（净流入2024-08起停披，返回成交额序列）".into()),
+        parameters: None,
+    };
+    let td_fin = ToolDef {
+        name: "get_stock_financials".into(),
+        description: Some("获取财务数据：营收、净利润、EPS、ROE、毛利率等".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_quote = ToolDef {
+        name: "get_stock_quote".into(),
+        description: Some("获取股票实时行情".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_visits = ToolDef {
+        name: "get_stock_institutional_visits".into(),
+        description: Some("获取机构调研数据".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    // 新闻 + 研报工具，供 Agent 节点动态搜索验证（催化剂/CapEx/退出信号）
+    let td_serenity_news = ToolDef {
+        name: "get_stock_news".into(),
+        description: Some("获取个股近期新闻公告，验证催化剂/退出信号".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "limit".into(),
+                    JsonSchemaProperty {
+                        schema_type: "integer".into(),
+                        description: Some("返回数量".into()),
+                        default: Some(serde_json::json!(30)),
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_serenity_research = ToolDef {
+        name: "get_stock_research_reports".into(),
+        description: Some("获取券商研报，验证需求/壁垒/CapEx逻辑".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    // 关键词新闻搜索工具，供 Agent 验证催化剂/CapEx/行业趋势
+    let td_search_news = ToolDef {
+        name: "search_news".into(),
+        description: Some("按关键词搜索财经新闻，用于验证催化剂/CapEx/行业趋势".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "keyword".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("搜索关键词".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "limit".into(),
+                    JsonSchemaProperty {
+                        schema_type: "integer".into(),
+                        description: Some("返回条数".into()),
+                        default: Some(serde_json::json!(10)),
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["keyword".into()]),
+            items: None,
+        }),
+    };
+
+    // 关注度评分工具（方案B）
+    let td_attention = ToolDef {
+        name: "compute_attention_score".into(),
+        description: Some("计算个股关注度评分 0-100，越低越冷门，用于验证低关注度因子".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    // 行业竞争地位分析工具（方案C）
+    let td_industry_pos = ToolDef {
+        name: "compute_industry_position".into(),
+        description: Some(
+            "行业竞争地位分析：同行对比毛利率/ROE，产能指标（资本开支/折旧比）".into(),
+        ),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "stock_code".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("6位股票代码".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+
+    // 退出信号检查工具（Phase 3）
+    let td_exit = ToolDef {
+        name: "check_exit_signals".into(),
+        description: Some(
+            "检查个股退出信号：价格止损、技术替代新闻、毛利率趋势。返回 exit_urgency".into(),
+        ),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "entry_price".into(),
+                    JsonSchemaProperty {
+                        schema_type: "number".into(),
+                        description: Some("买入价（用于计算止损触发）".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "stop_loss_price".into(),
+                    JsonSchemaProperty {
+                        schema_type: "number".into(),
+                        description: Some("止损价".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+
+    // 回馈闭环工具
+    let td_perf = ToolDef {
+        name: "compute_serenity_performance".into(),
+        description: Some("计算 Serenity 候选推荐后表现".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "recommend_date".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("推荐日期 YYYY-MM-DD".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into(), "recommend_date".into()]),
+            items: None,
+        }),
+    };
+    let td_cat = ToolDef {
+        name: "verify_catalysts".into(),
+        description: Some("验证 Serenity 候选的催化剂是否兑现".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([
+                (
+                    "stock_code".into(),
+                    JsonSchemaProperty {
+                        schema_type: "string".into(),
+                        description: Some("6位股票代码".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+                (
+                    "catalyst_descriptions".into(),
+                    JsonSchemaProperty {
+                        schema_type: "array".into(),
+                        description: Some("催化剂描述列表".into()),
+                        default: None,
+                        enum_values: None,
+                        format: None,
+                    },
+                ),
+            ])),
+            required: Some(vec!["stock_code".into()]),
+            items: None,
+        }),
+    };
+    let td_opt = ToolDef {
+        name: "optimize_attention_weights".into(),
+        description: Some("基于历史表现调优关注度评分权重".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "samples".into(),
+                JsonSchemaProperty {
+                    schema_type: "array".into(),
+                    description: Some("样本列表".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["samples".into()]),
+            items: None,
+        }),
+    };
+
+    // 搜索股票代码工具（借助 NeoDataVendor 末位路由覆盖全球供应链公司）
+    let td_search_stock = ToolDef {
+        name: "search_stock".into(),
+        description: Some("搜索股票代码：输入公司中文名/英文名，返回6位A股代码或港股(如00700.HK)/美股(如TSM.US)代码".into()),
+        parameters: Some(JsonSchema {
+            schema_type: "object".into(),
+            description: None,
+            properties: Some(std::collections::HashMap::from([(
+                "keyword".into(),
+                JsonSchemaProperty {
+                    schema_type: "string".into(),
+                    description: Some("公司名称（支持中英文，如\"台积电\"、\"NVIDIA\"、\"三星电子\"）".into()),
+                    default: None,
+                    enum_values: None,
+                    format: None,
+                },
+            )])),
+            required: Some(vec!["keyword".into()]),
+            items: None,
+        }),
+    };
+
+    let tool_defs: Vec<ToolDef> = vec![
+        td_industry,
+        td_cls,
+        td_concept,
+        td_dragon,
+        td_north,
+        td_fin,
+        td_quote,
+        td_visits,
+        td_serenity_news,
+        td_serenity_research,
+        td_search_news,
+        td_search_stock,
+        td_attention,
+        td_industry_pos,
+        td_exit,
+        td_perf,
+        td_cat,
+        td_opt,
+    ];
+    tool_defs
+}
+
+/// 趋势智选两链共用的模板变量定义（原种子产物逐字节不变）。
+pub(crate) fn build_serenity_variables() -> Vec<axagent_harness::workflow_types::Variable> {
+    use axagent_harness::workflow_types::Variable;
 
     // ── Variables（用户可调整的参数字段）──
     // v17: 移除 ref_*_code（原行业基线代表股，随 t-baseline-* 节点一并删除）
@@ -1387,98 +1632,136 @@ pub(crate) async fn seed_serenity_screening_workflow_template(
             is_secret: false,
         },
     ];
-    let variables_json = serde_json::to_string(&serenity_vars).map_err(|e| {
-        ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化变量失败: {e}"))
-    })?;
+    serenity_vars
+}
 
-    // ── Tags ──
-    let tags_json =
-        serde_json::to_string(&["serenity", "bottleneck", "screening"]).map_err(|e| {
-            ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化标签失败: {e}"))
-        })?;
+// ⚠ 本测试模块**必须**留在文件末尾：`clippy::items_after_test_module` 只在 clippy 下暴露
+//   （`cargo check` / `cargo test` 都不跑），插在中间会让后续所有代码踩该 lint。
+#[cfg(test)]
+mod serenity_version_gate_tests {
+    use super::seed_serenity_screening_workflow_template;
+    use axagent_entities::workflow_template;
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 
-    // ── 写入 DB（版本门）──
-    // 2026-07-31 简化定稿：前端保存（update_workflow_template）已改为【不递增 version】，
-    // version 只由 seed 写入 → `existing.version >= TEMPLATE_VERSION` 版本门天然稳定：
-    // 前端 auto-save 不会再推高 version 误挡 seed 重建；用户编辑的内容在 seed 未升
-    // 版本号时也不会被 seed 覆盖。seed 想更新模板 → TEMPLATE_VERSION+1 即可。
-    if let Some(existing) =
-        workflow_template::Entity::find_by_id(TEMPLATE_ID).one(db).await.map_err(|e| {
-            ErrorResponse::new(stock_setup::INTERNAL)
-                .with_detail(format!("查询工作流模板失败: {e}"))
-        })?
-    {
-        if existing.version >= TEMPLATE_VERSION {
-            tracing::info!(
-                "[stock_analysis_setup] Serenity 模板已是最新 v{TEMPLATE_VERSION}（DB version={}），跳过",
-                existing.version
-            );
-            return Ok(());
-        }
-        tracing::info!(
-            "[stock_analysis_setup] 更新 Serenity 模板 v{} → v{TEMPLATE_VERSION}",
-            existing.version
+    /// 与被测函数内的 `TEMPLATE_ID` 同值 —— 那个常量在**函数体内**，模块外不可见，
+    /// 故此处另取一份（`mod.rs` 的 `version_gate_tests` 对 `stock-analysis` 同样处理）。
+    const TEMPLATE_ID: &str = "serenity-screening";
+
+    /// 与被测函数内的 `TEMPLATE_VERSION` 同值。
+    ///
+    /// ⚠ 它是**副本**：改源码里那个常量时必须一起改。不同步**不会静默失效** ——
+    /// 状态①的 `assert_eq!(version, Some(TEMPLATE_VERSION))` 会当场失败（写成本测试的
+    /// 第一道断言就是为了这个）。宁可响亮地红，也不要一条「看着在跑、其实没在测」的测试。
+    const TEMPLATE_VERSION: i32 = 53;
+
+    async fn fresh_db() -> axagent_dao::db::DbHandle {
+        axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")
+    }
+
+    async fn row(db: &DatabaseConnection) -> workflow_template::Model {
+        workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .unwrap_or_else(|| panic!("模板 `{TEMPLATE_ID}` 应已存在"))
+    }
+
+    fn node_ids(model: &workflow_template::Model) -> Vec<String> {
+        serde_json::from_str::<Vec<serde_json::Value>>(&model.nodes)
+            .expect("nodes 应是 JSON 数组")
+            .iter()
+            .filter_map(|n| n.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    async fn set_name(db: &DatabaseConnection, name: &str) {
+        let mut am: workflow_template::ActiveModel = row(db).await.into();
+        am.name = Set(name.to_string());
+        am.update(db).await.expect("改 name 失败");
+    }
+
+    async fn set_version(db: &DatabaseConnection, version: i32) {
+        let mut am: workflow_template::ActiveModel = row(db).await.into();
+        am.version = Set(version);
+        am.update(db).await.expect("改 version 失败");
+    }
+
+    /// 删掉图里**最后一个**节点（模拟「库里的图与代码产出不一致」），**不动 version**。
+    ///
+    /// 取「最后一个」而不是写死某个 id：`seed_serenity.rs` 的节点拓扑正在被反复改动，
+    /// 写死 id 的测试会在某次重命名后变成「前置条件不成立」的假红/假绿。
+    /// 返回被删掉的 id，供调用方做前置断言。
+    async fn drop_last_node(db: &DatabaseConnection) -> String {
+        let model = row(db).await;
+        let mut nodes: Vec<serde_json::Value> =
+            serde_json::from_str(&model.nodes).expect("nodes 应是 JSON 数组");
+        let dropped = nodes
+            .pop()
+            .and_then(|n| n.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .expect("nodes 不应为空 —— 空图无法用来构造「不一致」");
+        let mut am: workflow_template::ActiveModel = model.into();
+        am.nodes = Set(serde_json::to_string(&nodes).expect("序列化失败"));
+        am.update(db).await.expect("改 nodes 失败");
+        dropped
+    }
+
+    /// 版本门三态（判据 = `version` + 图谱指纹，缺一不可）—— 顺序敏感，必须同一个库。
+    ///
+    /// 用哨兵 `name` 判断「是否跳过」而非比对 `updated_at`：同一毫秒内的两次写入
+    /// 无法区分，而 `name` 被覆盖是**确定**的证据。
+    #[tokio::test]
+    async fn version_gate_three_states() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_serenity_screening_workflow_template(db).await.expect("首次种子化应成功");
+        assert_eq!(
+            row(db).await.version,
+            TEMPLATE_VERSION,
+            "首次写入应带代码常量版本 —— 本断言同时是「测试常量与源码常量已漂移」的告警"
         );
-    } else {
-        tracing::info!("[stock_analysis_setup] Serenity 模板不存在，准备创建");
+        let baseline = node_ids(&row(db).await);
+
+        // ① `version == 常量` && 图谱一致 ⇒ 幂等跳过（最常见的情形：每次启动都走这条）
+        set_name(db, "SENTINEL-KEEP").await;
+        seed_serenity_screening_workflow_template(db).await.expect("二次种子化应成功");
+        assert_eq!(
+            row(db).await.name,
+            "SENTINEL-KEEP",
+            "图谱一致时应跳过 —— 哨兵被覆盖说明每次启动都会重写模板（`same_json` 退化成字符串比较？）"
+        );
+
+        // ② `version == 常量` && 图谱不一致 ⇒ **自动重建**（L3 本轮新语义，「能重种子化」的
+        //    常态路径：version 仍等于常量本身即证明用户从未保存过本行，重建不覆盖任何用户改动）
+        let dropped = drop_last_node(db).await;
+        assert_ne!(node_ids(&row(db).await), baseline, "前置：删节点后图谱应与代码不一致");
+        seed_serenity_screening_workflow_template(db).await.expect("重建应成功");
+        let rebuilt = row(db).await;
+        assert_eq!(
+            node_ids(&rebuilt),
+            baseline,
+            "图谱不一致（version 仍是常量）时应自动重建 —— 否则「代码改了图」会静默不落库"
+        );
+        assert_ne!(rebuilt.name, "SENTINEL-KEEP", "重建应写回代码定义的名字");
+        assert!(
+            !dropped.is_empty() && node_ids(&rebuilt).contains(&dropped),
+            "被删的节点 `{dropped}` 应随重建回来"
+        );
+
+        // ③ `version > 常量` && 图谱不一致 ⇒ **仍然跳过**（用户修改优先）。
+        //    这是唯一需要人工介入的情形：DB 状态无法区分「用户改的图」与「代码改的图」，
+        //    故保守跳过并打响亮 WARN。要落库代码这一版须把 TEMPLATE_VERSION 设为 DB 现值 +1。
+        set_name(db, "SENTINEL-KEEP").await;
+        set_version(db, TEMPLATE_VERSION + 1).await;
+        drop_last_node(db).await;
+        let graph_before = node_ids(&row(db).await);
+        seed_serenity_screening_workflow_template(db).await.expect("种子化应成功（跳过不是报错）");
+        let kept = row(db).await;
+        assert_eq!(
+            node_ids(&kept),
+            graph_before,
+            "用户保存过（version 更高）时不得重建 —— 否则用户改动被静默覆盖"
+        );
+        assert_eq!(kept.name, "SENTINEL-KEEP", "用户保存过的行整体不得被覆盖");
+        assert_eq!(kept.version, TEMPLATE_VERSION + 1, "跳过时不得篡改 version");
     }
-    let _ = workflow_template::Entity::delete_by_id(TEMPLATE_ID).exec(db).await;
-
-    // P0 软门禁（C1，2026-09-14）：种子的端口公理 —— 结构性死链在此被记录（不阻断启动）。
-    // 判据复用 harness 的 `warn_port_axioms_json`，不在本文件另写一份。
-    axagent_harness::workflow_port_axioms::warn_port_axioms_json(
-        &format!("stock_analysis_setup:seed_serenity:{TEMPLATE_ID}"),
-        &nodes_json,
-        &edges_json,
-    );
-
-    workflow_template::ActiveModel {
-        hooks_config: Set(None),
-        id: Set(TEMPLATE_ID.to_string()),
-        cluster_id: Set(Some("trend".to_string())),
-        route_path: Set(Some("/finance/trend/serenity".to_string())),
-        name: Set("趋势智选".to_string()),
-        description: Set(Some(
-            "多策略趋势分析引擎：从市场数据中识别产业链瓶颈/政策驱动/业绩驱动/资金面驱动信号，自动筛选候选标的".to_string(),
-        )),
-        icon: Set("search".into()),
-        tags: Set(Some(tags_json)),
-        version: Set(TEMPLATE_VERSION),
-        is_preset: Set(true),
-        is_editable: Set(true),
-        is_public: Set(true),
-        trigger_config: Set(Some(
-            serde_json::to_string(&TriggerConfig {
-                trigger_type: TriggerType::Manual,
-                config: serde_json::json!({
-                    "description": "Serenity 瓶颈筛选: 自动扫描市场发现产业链瓶颈机会",
-                    "required_params": []
-                }),
-            })
-            .map_err(|e| {
-                ErrorResponse::new(stock_setup::INTERNAL)
-                    .with_detail(format!("序列化触发器配置失败: {e}"))
-            })?,
-        )),
-        nodes: Set(nodes_json),
-        edges: Set(edges_json),
-        input_schema: Set(None),
-        output_schema: Set(None),
-        variables: Set(Some(variables_json)),
-        error_config: Set(None),
-        composite_source: Set(None),
-        tool_defs: Set(Some(tool_defs_json)),
-        mission_hash: Set(None),
-        created_at: Set(now),
-        updated_at: Set(now),
-    }
-    .insert(db)
-    .await
-    .map_err(|e| {
-        ErrorResponse::new(stock_setup::INTERNAL)
-            .with_detail(format!("写入 Serenity 模板失败: {e}"))
-    })?;
-
-    tracing::info!("[stock_analysis_setup] Serenity 瓶颈筛选工作流模板已创建 (serenity-screening)");
-    Ok(())
 }

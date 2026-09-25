@@ -6,6 +6,7 @@ use crate::event_bus::AgentPermissionPayload;
 use crate::shared_blackboard::SharedBlackboard;
 use axagent_harness::AgentSessionRepository;
 use axagent_harness::ConversationMessage;
+use axagent_harness::IpcEventName;
 use axagent_harness::compact_session::compact_session;
 use axagent_harness::conversation_model::{
     ContentBlock as HarnessContentBlock, ConversationMessage as HarnessConversationMessage,
@@ -1350,7 +1351,7 @@ impl PermissionPrompter for ChannelPermissionPrompter {
             serde_json::from_str(&request.input).unwrap_or(serde_json::Value::Null);
 
         let _ = self.app_handle.emit(
-            "agent-permission-request",
+            IpcEventName::AgentPermissionRequest.as_str(),
             AgentPermissionPayload {
                 conversation_id: self.conversation_id.clone(),
                 assistant_message_id: String::new(),
@@ -1396,7 +1397,7 @@ impl PermissionPrompter for ChannelPermissionPrompter {
 
                 // Notify frontend that the permission was auto-denied due to timeout
                 let _ = self.app_handle.emit(
-                    "agent-permission-timeout",
+                    IpcEventName::AgentPermissionTimeout.as_str(),
                     serde_json::json!({
                         "conversationId": self.conversation_id,
                         "requestId": request_id,
@@ -1471,7 +1472,7 @@ impl HookProgressReporter for TauriHookProgressReporter {
                     payload["iteration"] = serde_json::json!(snap.current_iteration);
                     payload["maxIterations"] = serde_json::json!(snap.max_iterations);
                 }
-                let _ = self.app_handle.emit("agent-tool-start", payload);
+                let _ = self.app_handle.emit(IpcEventName::AgentToolStart.as_str(), payload);
             },
             HookProgressEvent::Completed {
                 event: HookEvent::PostToolUse,
@@ -1495,7 +1496,7 @@ impl HookProgressReporter for TauriHookProgressReporter {
                         payload["startedAt"] = serde_json::json!(started_at);
                     }
                 }
-                let _ = self.app_handle.emit("agent-tool-result", payload);
+                let _ = self.app_handle.emit(IpcEventName::AgentToolResult.as_str(), payload);
             },
             HookProgressEvent::Cancelled {
                 event: HookEvent::PostToolUse,
@@ -1525,7 +1526,7 @@ impl HookProgressReporter for TauriHookProgressReporter {
                         payload["startedAt"] = serde_json::json!(started_at);
                     }
                 }
-                let _ = self.app_handle.emit("agent-tool-result", payload);
+                let _ = self.app_handle.emit(IpcEventName::AgentToolResult.as_str(), payload);
             },
             _ => {},
         }
@@ -1555,7 +1556,7 @@ impl HookProgressReporter for TauriHookProgressReporter {
             payload["statusMessage"] = serde_json::Value::String(snap.status_message);
         }
 
-        let _ = self.app_handle.emit("agent-status", payload);
+        let _ = self.app_handle.emit(IpcEventName::AgentStatus.as_str(), payload);
     }
 }
 

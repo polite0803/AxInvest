@@ -3,7 +3,7 @@
 //! P0: RealtimeMonitor → Tauri 前端 + DB 持久化 + 通知推送 桥接器
 //!
 //! 实现 `MonitorEventEmitter` trait，将 monitor.rs 的告警事件同时分发到三条通道：
-//!   1. Tauri `app.emit("price-alert-triggered", ...)` — 前端 PriceAlertPanel 实时弹窗
+//!   1. Tauri `app.emit(IpcEventName::PriceAlertTriggered.as_str(), ...)` — 前端 PriceAlertPanel 实时弹窗
 //!   2. Tauri `app.emit("stock-monitor-alert", ...)` — 通用 monitor 事件（含 T+0 重跑请求）
 //!   3. 写 `price_alerts` 表 `is_triggered=1` + `triggered_at=now` — 持久化触发历史
 //!   4. 调用 `NotificationDispatcher::dispatch_alert` — 推送到 PushPlus/ServerChan/Ntfy/Gotify
@@ -15,6 +15,7 @@
 //!   替代旧的 6→2 降级映射 + 1% 容差匹配（change/volume 告警历史不再丢失）。
 //! - emit 失败（如前端无监听器）不阻塞其他通道。
 
+use axagent_harness::IpcEventName;
 use std::sync::Arc;
 
 use axagent_analysis_engine::monitor::MonitorEventEmitter;
@@ -63,7 +64,7 @@ impl MonitorEventEmitter for TauriMonitorEmitter {
         // 兼容别名：stock-monitor-alert 同时 emit price-alert-triggered
         // 前端 PriceAlertPanel 监听 price-alert-triggered，monitor.rs emit 的是 stock-monitor-alert
         if event == "stock-monitor-alert" {
-            if let Err(e) = app.emit("price-alert-triggered", payload.clone()) {
+            if let Err(e) = app.emit(IpcEventName::PriceAlertTriggered.as_str(), payload.clone()) {
                 warn!("[monitor_emitter] emit price-alert-triggered 别名失败: {e}");
             }
 

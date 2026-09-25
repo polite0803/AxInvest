@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use axagent_agent_macro::agent_command;
+use axagent_harness::IpcEventName;
 use axagent_harness::repo_dtos::WorkflowExecutionData;
 use axagent_harness::workflow_types::NodeStatus;
 use serde::{Deserialize, Serialize};
@@ -509,7 +510,7 @@ pub async fn debug_run_workflow(
             Box::pin(async move {
                 // ── 轻量级节点状态事件（实时）──
                 let _ = app.emit(
-                    "workflow:node-status-changed",
+                    IpcEventName::WorkflowNodeStatusChanged.as_str(),
                     serde_json::json!({
                         "workflow_id": wf_id,
                         "execution_id": exec_id,
@@ -543,7 +544,7 @@ pub async fn debug_run_workflow(
                         })
                         .collect::<Vec<_>>();
                     let _ = app.emit(
-                        "workflow:state-changed",
+                        IpcEventName::WorkflowStateChanged.as_str(),
                         serde_json::json!({
                             "execution_id": full_state.execution_id,
                             "workflow_id": full_state.workflow_id,
@@ -575,7 +576,7 @@ pub async fn debug_run_workflow(
                 wid_for_panic
             );
             let _ = app_for_panic.emit(
-                "workflow:execution-completed",
+                IpcEventName::WorkflowExecutionCompleted.as_str(),
                 serde_json::json!({
                     "workflow_id": wid_for_panic,
                     "execution_id": eid_for_panic,
@@ -606,7 +607,7 @@ pub async fn debug_run_workflow(
         match &result {
             Ok(wf) => {
                 let _ = app_for_completion.emit(
-                    "workflow:execution-completed",
+                    IpcEventName::WorkflowExecutionCompleted.as_str(),
                     serde_json::json!({
                         "workflow_id": wf.id,
                         "execution_id": eid,
@@ -626,7 +627,7 @@ pub async fn debug_run_workflow(
             Err(e) => {
                 tracing::error!("[debug_run_workflow] 执行失败: {}", e);
                 let _ = app_for_completion.emit(
-                    "workflow:execution-completed",
+                    IpcEventName::WorkflowExecutionCompleted.as_str(),
                     serde_json::json!({
                         "workflow_id": wid,
                         "execution_id": eid,

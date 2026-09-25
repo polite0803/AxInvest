@@ -11,6 +11,16 @@
 import { invoke } from "@/lib/invoke";
 import type { CSSProperties } from "react";
 
+/**
+ * 快速分析工作流模板 id（Jev 判定链）—— 前端**唯一**定义。
+ *
+ * 与后端 `stock_analysis_setup::seed_stock_analysis::FAST_TEMPLATE_ID` 必须逐字一致：
+ * ① 它是 `workflow_templates.id` 的查找键，写错会直接报「模板不存在」；
+ * ② 分析记录落库后，`stock_analyses.template_id` 存的就是这个值，历史列表据此
+ *    区分「快速链 vs 完整链」并打标识。
+ */
+export const FAST_TEMPLATE_ID = "stock-analysis-fast";
+
 /** 市场环境信息（与后端 EvidenceWeightRequest 对应） */
 export interface MarketRegimeInfo {
   regime: string;

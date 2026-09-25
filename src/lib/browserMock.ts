@@ -1676,11 +1676,17 @@ function mockContentMediaKpis(): Array<Record<string, unknown>> {
  * * `DbConfig`（`dao::config`，经 `db_config.rs` 的 `get_db_config`）：`db_type` /
  *   `sqlite_path` / `pg_host` / `pg_port` / … —— 前端 `DbConfigForm` 也按
  *   snake_case 读写（`DatabaseSettings.tsx:8-18`）。
+ * * `list_reflections`（`stock_analysis.rs`）：顶层手工 `json!` 已是 camelCase，但
+ *   **嵌套**的 `horizonResults` 是 `horizon_results_json` 原样解析 —— 落库键为
+ *   `ultra_short` / `short` / `mid` / `long`（`reflection.rs::build_horizon_results_json`）。
+ *   `convertToCamelCase` 会**递归**进嵌套对象，把 `ultra_short` 改写成 `ultraShort`
+ *   ⇒ 前端 `hr.ultra_short` 恒 `undefined`，四周期面板**静默丢掉超短线 Tab**
+ *   （不报错、不告警，只有对照 fixture 才看得出来）。
  *
- * ⚠ 后三者**只补桩不登记**不会报任何错，但出口会把 `tables_expected` 转成
- * `tablesExpected` ⇒ `DatabaseSettings` 读到的字段**全是 `undefined`**
- * （`notes.map` 那一步会直接抛错、整页被 `PageErrorBoundary` 兜住）。新增桩时
- * 必须同时登记到这里。
+ * ⚠ 除 `OpcDomainDecision` 外的**后列各项**只补桩不登记不会报任何错，但出口会把
+ * `tables_expected` 转成 `tablesExpected` ⇒ `DatabaseSettings` 读到的字段**全是
+ * `undefined`**（`notes.map` 那一步会直接抛错、整页被 `PageErrorBoundary` 兜住）。
+ * 新增桩时必须同时登记到这里。
  *
  * 曾试过「snake 与 camel 键双写」：无效，两把键会归并到同一个 camel 键上，
  * snake 键被吃掉，前端读到的仍是 `undefined`。
@@ -1700,6 +1706,7 @@ const SNAKE_CASE_RESPONSE_COMMANDS = new Set<string>([
   "get_schema_status",
   "repair_schema",
   "get_db_config",
+  "list_reflections",
 ]);
 
 /**
@@ -4991,6 +4998,19 @@ async function executeCommand<T>(
         installPath: "",
       } as T;
     }
+    case "plugin_ui_action": {
+      // mock 不模拟 manifest 的 `worker` 声明，用「插件存在且已启用」近似
+      // 「宿主侧有可用 worker」；不满足时抛与后端同码的结构化错误。
+      const pluginId = (args?.pluginId as string) || "";
+      const allPlugins = getStore<Array<Record<string, unknown>>>("plugins", []);
+      const target = allPlugins.find((p) => p.id === pluginId);
+      if (!target || target.enabled === false) {
+        throw new Error(
+          JSON.stringify({ code: "PLUGIN_UI_ACTION_UNAVAILABLE", category: "general" }),
+        );
+      }
+      return null as T;
+    }
 
     // ── Agent Profiles (mock) ──────────────────────────────────────
     case "list_agent_profiles":
@@ -5070,6 +5090,8 @@ async function executeCommand<T>(
         tags: req.tags,
         version: "1.0.0",
         isBuiltin: false,
+        origin: req.origin ?? "user",
+        ownerId: req.origin === "plugin" ? (req.ownerId ?? "") : "",
         createdAt: now,
         updatedAt: now,
       };
@@ -5300,6 +5322,8 @@ async function executeCommand<T>(
         tags: version.tags,
         version: version.version,
         isBuiltin: schemas[idx].isBuiltin,
+        origin: schemas[idx].origin,
+        ownerId: schemas[idx].ownerId,
         createdAt: schemas[idx].createdAt,
         updatedAt: new Date().toISOString(),
       };
@@ -6184,6 +6208,7 @@ async function executeCommand<T>(
           description: "Agent 主循环接缝",
           origin: "builtin",
           pluginId: null,
+          implemented: true,
         },
         {
           id: "model.provider.openai",
@@ -6192,6 +6217,7 @@ async function executeCommand<T>(
           description: "内置 LLM 提供商适配器：openai",
           origin: "builtin",
           pluginId: null,
+          implemented: true,
         },
         {
           id: "session.log.invariant",
@@ -6200,6 +6226,7 @@ async function executeCommand<T>(
           description: "会话日志不变量接缝",
           origin: "builtin",
           pluginId: null,
+          implemented: true,
         },
       ] as T;
 
@@ -6402,6 +6429,24 @@ async function executeCommand<T>(
     //      而不是「未处理所以给个默认值」。将来补真实 mock 数据时，落点就在此。
     case "list_stock_analyses":
       return [] as unknown as T;
+
+    // 2026-09-24：`list_reflections` —— **opt-in fixture**，默认空数组。
+    //
+    // 为什么需要：四周期反思（`horizon_results_json` → 面板 Tab）此前在浏览器模式下
+    // **没有任何数据通路** —— default 分支的 `list_` 前缀规则恒返回 `[]`，
+    // 于是 `e2e/stock-reflection-four-horizon.spec.ts` 能且只能断言「表格为空」，
+    // 无法覆盖「周期不串线 / 未成熟不误报 / null 不显示为 0」这三条放行条件。
+    //
+    // 数据来源：localStorage `axagent_mock.reflections`（由 E2E 用 `addInitScript`
+    // 预置固定 fixture）。**不预置就返回 `[]`** ⇒ 其余 e2e 与本地浏览器模式行为不变。
+    //
+    // ⚠ fixture 必须写成**生产线形态**：顶层手工 `json!` 是 camelCase（`stockCode` /
+    // `horizonResults`），而 `horizonResults` 内层键是 **snake_case**
+    // （`ultra_short` / `short` / `mid` / `long`）—— 故本命令已登记进
+    // `SNAKE_CASE_RESPONSE_COMMANDS` 豁免出口 camel 转换（否则 `ultra_short` 会被
+    // 改写为 `ultraShort`，四周期面板静默丢掉超短线 Tab）。
+    case "list_reflections":
+      return getStore<unknown[]>("mock.reflections", []) as unknown as T;
 
     // 2026-09-19（D1 配套）：`get_stock_analysis` 必须显式声明，否则会落到 default
     // 分支的 `get_` → `{}` 兜底，而 `{}` **不含 `id`** —— 新增的 IPC 契约校验

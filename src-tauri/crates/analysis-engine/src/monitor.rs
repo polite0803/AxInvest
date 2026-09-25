@@ -1,3 +1,4 @@
+use axagent_harness::IpcEventName;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -630,7 +631,7 @@ impl RealtimeMonitor {
         let emitter = self.event_emitter.read().await.clone();
         if let Some(ref e) = emitter {
             e.emit(
-                "stock-monitor-t0-rerun-requested",
+                IpcEventName::StockMonitorT0RerunRequested.as_str(),
                 serde_json::json!({
                     "stockCode": stock_code,
                     "reason": reason,

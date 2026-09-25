@@ -325,7 +325,7 @@ struct ErrorBranchParams {
 
 /// 从 workflow.business_rule 能力接缝取业务规则评估器。
 ///
-/// 接缝由 wiring 层注册（内置）或外部插件经 `register_external_business_rule` 替换；
+/// 接缝由 wiring 层注册（内置）；外部插件可经 `register_plugin_capability` 声明；
 /// None = 未注册，不做任何规则检查（与"无规则"语义等价）。
 fn seam_business_rule() -> Option<Arc<dyn axagent_harness::BusinessRuleEvaluator>> {
     axagent_harness::get_capability_registry().get_business_rule()

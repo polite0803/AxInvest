@@ -15,6 +15,7 @@ pub mod seed_daily_market_events;
 pub mod seed_news_cross_market;
 pub mod seed_screenshot_portfolio_diagnosis;
 pub mod seed_serenity;
+pub mod seed_serenity_fast;
 pub mod seed_stock_analysis;
 pub mod seed_variables;
 
@@ -31,7 +32,40 @@ use axagent_dao::repo;
 use seed_daily_market_events::seed_daily_market_events_template;
 use seed_screenshot_portfolio_diagnosis::seed_screenshot_portfolio_diagnosis_template;
 use seed_serenity::seed_serenity_screening_workflow_template;
-use seed_stock_analysis::seed_stock_analysis_workflow_template;
+use seed_serenity_fast::seed_serenity_fast_workflow_template;
+use seed_stock_analysis::{
+    seed_stock_analysis_fast_workflow_template, seed_stock_analysis_workflow_template,
+};
+
+/// 逐**值**比较两段 JSON —— **不是**字符串比较。
+///
+/// 三链种子共用（原链 `seed_serenity` / 快速趋势智选 `seed_serenity_fast` /
+/// 股票分析快速链 `seed_stock_analysis`）：三处的版本门都要拿「DB 现有内容」与
+/// 「本轮代码将写入的内容」比对，判据必须只有一份，否则会各自漂移。
+///
+/// 必要性（实测）：`variables` 在本模块要经过 `merge_variable_values` 往返，而那个函数是
+/// `serde_json::from_str` → `to_string`。`serde_json::Value` 的 Map 默认是 **BTreeMap**
+/// （按 key 排序），而 `serde_json::to_string(&Vec<Variable>)` 输出的是**结构体字段声明序**
+/// ⇒ 同一份变量集合，两次序列化出的字节串**不同**。
+/// 若门禁按字符串比对，会恒判「不一致」⇒ **每次启动都重建模板**（单测的哨兵名当场被覆盖，
+/// 2026-09-24 实测）。
+///
+/// 图谱指纹（`nodes` / `edges`）同样走本函数：DB 文本可能来自旧序列化器或工作流编辑器保存，
+/// 键序 / 空白 / 浮点写法（`1.0` vs `1`）都可能与本轮 `serde_json::to_string` 的输出不同。
+/// 对象比较键序无关；数组比较**保序** —— 节点被重排会判为「不一致」并触发重建 / 告警，
+/// 这正是期望：那张图已经不是代码产出的那张了。
+///
+/// 判据边界：任一侧不是合法 JSON ⇒ 返回 `false`（保守方向 = 判定「不同」⇒ 重建或告警），
+/// 不做「两侧都解析失败 ⇒ 视为相同」的推断 —— 那会让坏数据静默留在库里。
+pub(crate) fn same_json(left: &str, right: &str) -> bool {
+    match (
+        serde_json::from_str::<serde_json::Value>(left),
+        serde_json::from_str::<serde_json::Value>(right),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
 
 /// 已注销的专家 id。
 ///
@@ -773,6 +807,11 @@ pub async fn ensure_stock_analysis_experts_seeded(
     }
     tracing::info!("[stock_analysis_setup] === Serenity 模板种子完成 ===");
 
+    // 快速趋势智选：与原链并存，独立 try（不依赖原链的行，失败互不影响）
+    if let Err(e) = seed_serenity_fast_workflow_template(db).await {
+        tracing::error!("[stock_analysis_setup] 快速趋势智选模板种子失败 (非致命): {e}");
+    }
+
     seed_agency_experts(db).await?;
     seed_agent_roles(db).await?;
     seed_stock_agent_roles(db).await?;
@@ -786,6 +825,11 @@ pub async fn ensure_stock_analysis_experts_seeded(
         tracing::error!("[stock_analysis_setup] 股票分析工作流模板种子失败 (非致命): {e}");
     }
     tracing::info!("[stock_analysis_setup] === 股票分析工作流模板种子完成 ===");
+
+    // 快速链模板必须紧随原链种子（它从 stock-analysis 行派生，源行不存在则直接失败）
+    if let Err(e) = seed_stock_analysis_fast_workflow_template(db).await {
+        tracing::error!("[stock_analysis_setup] 快速链模板种子失败 (非致命): {e}");
+    }
 
     if let Err(e) = seed_reflection_workflow_template(db).await {
         tracing::error!("[stock_analysis_setup] 反思工作流模板种子失败 (非致命): {e}");
@@ -1500,7 +1544,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 ("holding_days", "holding_days"),
                 ("original_time_horizon", "original_time_horizon"),
                 ("original_holding_days", "original_holding_days"),
-                // [实际行情 2026-09-13] 价格层事实。来源 = 后端 compute_market_snapshot()
+                // [实际行情 2026-09-13] 价格层事实。来源 = 后端 compute_market_snapshots()
                 // 用前复权 K 线确定性算出的 MarketSnapshot，经 actual_market_json 变量注入。
                 // 在此之前本 comparator 只消费标量 raw_return_pct，价格/回撤/目标价
                 // 全部不可见；而 trader_target_price 虽在映射表里却从未被脚本消费（死映射）。
@@ -1510,6 +1554,11 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                 ("target_progress_pct", "actual_market_json.targetProgressPct"),
                 ("max_drawdown_pct", "actual_market_json.maxDrawdownPct"),
                 ("period_high", "actual_market_json.periodHigh"),
+                // ── 四周期行情事实 + 周期决策（批次 3）──
+                // comparator 通过 horizon_correct 逐周期做确定性判定，
+                // 写入 reflection-comparator.horizon_was_correct 供下游聚合。
+                ("horizon_market_facts", "horizon_market_facts"),
+                ("horizon_decisions_json", "horizon_decisions_json"),
                 ("period_low", "actual_market_json.periodLow"),
                 ("latest_date", "actual_market_json.latestDate"),
                 ("within_expected_horizon", "actual_market_json.withinExpectedHorizon"),
@@ -1808,7 +1857,7 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             is_secret: false,
         },
         // [实际行情 v2] 价格层事实。运行时由 run_reflection_workflow 用
-        // compute_market_snapshot() 的结果覆盖；此处声明默认值是为了：
+        // compute_market_snapshots() 的结果覆盖；此处声明默认值是为了：
         // ① 模板变量表完整（前端模板编辑器可见）；
         // ② input_mapping / context_sources 能找到 source 变量，避免静默取空。
         Variable {

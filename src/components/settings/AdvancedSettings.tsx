@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import { invoke } from "@/lib/invoke";
 import { useProviderStore, useSettingsStore } from "@/stores";
-import type { SmartRouterTierMapping } from "@/types";
-import { Divider, InputNumber, Radio, Select, Slider, Switch } from "antd";
-import { useEffect } from "react";
+import type { ApprovalRule, SmartRouterTierMapping } from "@/types";
+import { Button, Divider, InputNumber, message, Radio, Select, Slider, Switch } from "antd";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CacheConfigPanel } from "./CacheConfigPanel";
 import { SettingsGroup } from "./SettingsGroup";
@@ -893,6 +894,7 @@ export function AdvancedSettings() {
       <PermissionEnforcerSection />
       <RecoveryRecipesSection />
       <AgentBehaviorSection />
+      <ApprovalRulesSection />
       <GreenContractSection />
       <DreamConsolidationSection />
       <LspDiagnosticsSection />
@@ -914,5 +916,88 @@ function CacheBreakpointSection() {
       enableCacheBreakpoints={cacheBreakpoints}
       onToggleCacheBreakpoints={setCacheBreakpoints}
     />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 已记住的审批规则（PLAN-codex-parity R2-1）
+// ---------------------------------------------------------------------------
+
+/** 从后端结构化错误里取 `code`（非结构化错误返回 undefined）。 */
+function extractErrorCode(e: unknown): string | undefined {
+  try {
+    const raw = e instanceof Error ? e.message : String(e);
+    return (JSON.parse(raw) as { code?: string }).code;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 已记住的审批规则：Bash 工具在用户批准后自动沉淀，此处只展示与撤销。
+ *
+ * 规则不由前端手工新增 —— 它必须来自一次真实的用户批准（沉淀前还会经
+ * 「单段命令 / 非改写型包装器 / 复算自证」三重校验）。
+ */
+function ApprovalRulesSection() {
+  const { t } = useTranslation();
+  const [rules, setRules] = useState<ApprovalRule[]>([]);
+
+  const refresh = useCallback(async () => {
+    try {
+      setRules(await invoke<ApprovalRule[]>("list_approval_rules"));
+    } catch {
+      // 存储未初始化 / 浏览器 mock 未实现该命令：按「无规则」展示，不阻塞设置页。
+      setRules([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const revoke = async (rule: ApprovalRule) => {
+    try {
+      await invoke("revoke_approval_rule", {
+        program: rule.program,
+        argsPrefix: rule.argsPrefix,
+      });
+      message.success(t("advancedSettings.approvalRuleRevoked"));
+      await refresh();
+    } catch (e) {
+      const code = extractErrorCode(e);
+      message.error(code ? t(`error.${code}`) : String(e));
+    }
+  };
+
+  return (
+    <SettingsGroup title={t("advancedSettings.approvalRules")}>
+      <div style={{ marginBottom: 4, fontSize: 12, opacity: 0.6 }}>
+        {t("advancedSettings.approvalRulesHint")}
+      </div>
+      {rules.length === 0
+        ? (
+          <div style={{ fontSize: 12, opacity: 0.6 }}>
+            {t("advancedSettings.approvalRulesEmpty")}
+          </div>
+        )
+        : (
+          rules.map((rule) => {
+            const label = [rule.program, ...rule.argsPrefix].join(" ");
+            return (
+              <div
+                key={label}
+                className="flex items-center justify-between"
+                style={{ padding: "4px 0" }}
+              >
+                <span style={{ fontFamily: "monospace" }}>{label}</span>
+                <Button size="small" onClick={() => void revoke(rule)}>
+                  {t("advancedSettings.approvalRuleRevoke")}
+                </Button>
+              </div>
+            );
+          })
+        )}
+    </SettingsGroup>
   );
 }

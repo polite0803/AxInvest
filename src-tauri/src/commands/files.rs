@@ -3,6 +3,7 @@
 use crate::AppState;
 use axagent_agent_macro::agent_command;
 use axagent_dao::repo::stored_file::StoredFile;
+use axagent_harness::IpcEventName;
 use axagent_storage::file_authorizer::{
     AuthorizationRequest, AuthorizationResponse, PermissionLevel,
 };
@@ -171,5 +172,6 @@ pub async fn request_file_permission(
     reason: String,
 ) -> Result<(), String> {
     let event = FilePermissionRequestEvent { path, reason };
-    app.emit("file-permission-request", event).map_err(|e| format!("Failed to emit event: {}", e))
+    app.emit(IpcEventName::FilePermissionRequest.as_str(), event)
+        .map_err(|e| format!("Failed to emit event: {}", e))
 }

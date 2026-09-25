@@ -101,7 +101,7 @@ docs/                        # 📝 文档。**除根目录白名单外，所有
 - 所有 `pub mod` 声明在 commands/mod.rs 中统一管理
 - 数据库操作：方向在 entity 层用 sea-orm，有复杂查询逻辑用 repository 模式
 - **rustfmt 格式化**：`cargo fmt` 必须通过，CI 强制检查，禁止提交未格式化的 Rust 代码
-- **分层检查策略**：日常开发用 `cargo check`（秒级）快速验证类型正确；提交前必须通过 `cargo clippy -- -D warnings`（CI 强制）
+- **分层检查策略**：多阶段方案**逐阶段完成时不跑全量**（用 `cargo check` + 定点 `cargo clippy -p <crate>`）；**全部阶段完成后**跑一次全量 `clippy --workspace` / `test --workspace`（即提交前那一次，CI 强制）
 - **增量编译加速**：`Cargo.toml` 已配置 `[profile.dev.build-override]` 优化第三方依赖编译，sccache 缓存 50G，避免全量重编
 
 ## 常用命令
@@ -116,7 +116,7 @@ npm run format        # dprint 格式化前端
 npm run build         # tsc + vite build 生产构建
 cargo fmt             # rustfmt 格式化（src-tauri/ 下执行）
 cargo check           # 快速类型检查（推荐日常使用，秒级完成）
-cargo clippy          # Rust lint（提交前必须通过，耗时较长）
+cargo clippy          # 全量 lint（仅「所有阶段完成后」跑一次；阶段内用 cargo clippy -p <crate>）
 npm run bump          # 版本号升级
 
 # Windows 跑 Rust 单元测试必须设置 __TAURI_WORKSPACE__=true
@@ -138,13 +138,13 @@ __TAURI_WORKSPACE__=true cargo test -p axagent --lib commands::knowledge_source
    全绿，只有 clippy 报 `EXIT=101`）。内联 `#[cfg(test)] mod xxx { }` 一律**追加到文件末尾** ——
    插在「刚写的那个函数」后面会触发 `clippy::items_after_test_module`，而该 lint 同样**只在 clippy 下暴露**
    （同日第二次实测：`commands/stock_analysis_setup/mod.rs` 的 test mod 之后还有 915 行生产代码）。
-2. **clippy 遇首个 error 即短路** —— 后续 crate **从未被检查**。**不可**由「只有 N 个 error」
-   推定其余 crate 干净；修完必须**全量重跑**（同日实测：定点 `-p axagent-analysis-engine` 已
-   `EXIT=0`，全量才让 `items_after_test_module` 那处浮出来 —— 它在首跑时被前一个 error 挡在后面）。
+2. **clippy 遇首个 error 即短路** —— 后续 crate **从未被检查**；不可由「只有 N 个 error」
+   推定其余 crate 干净。**多阶段方案逐阶段完成时不要跑全量**：阶段内/阶段边界用定点 `cargo clippy
+   -p <crate> --all-targets -- -D warnings` 收敛，**全部阶段完成后**跑一次全量兜底（实测：定点绿后全量仍浮出违规）。
    ⚠ **改注释也会触发 lint**：`doc_lazy_continuation` 管的是 `///` 列表项的续行缩进，纯文档改动同样
    让 clippy 红（2026-09-21 实测：`commands/stock_workflow/decision.rs:1265` 一处 `///   ⇒` 缩进 2
-   而内容列是 4 —— 该违规在第二轮写的，直到第三次全量重跑、clippy 首次推进到主 crate 才浮出来）。
-3. **提交前三条门禁缺一不可 —— 且必须按 CI 口径跑**（与 `.github/workflows/ci.yml` 逐字一致）：
+   而内容列是 4 —— 该违规在第二轮写的，直到进行全量、clippy 首次推进到主 crate 才浮出来）。
+3. **全量门禁只在「所有阶段完成后」按 CI 口径跑一次** —— 逐阶段完成时**不要**跑这三条全量命令（与 `.github/workflows/ci.yml` 逐字一致）：
 
    ```
    cargo fmt --all --check
@@ -375,3 +375,9 @@ Conventional Commits + 中文描述。类型映射：
 > ⚠ **本节刻意放在文件末尾，新增章节也请一律追加到末尾**：本文件被 B / C 栏（记忆 + 史料）**按行号广泛引用**，
 > 在**中段**插入会让其后每一行整体移位 ⇒ 那些引用**成批腐烂**。实测（2026-09-18）：在 `## 代码规范` 之前插 14 行 ⇒
 > B 栏可疑 +4、C 栏可疑 +14；改为追加到末尾 ⇒ **0 漂移**，而被引用的规范一个字都没少。
+
+## 附：新增 crate 角色登记（追加区）
+
+> 禁止在本节之前的任何位置插入内容（会整体移位其上/其下被按行号引用的正文）。
+
+- `plugin-proto`（`crates/plugin-proto`）：**foundation** —— 插件 worker 帧协议（长度前缀 JSON 帧 + 插件声明 schema）。零 `axagent-*` 依赖，仅 `serde` / `serde_json` / `thiserror`。

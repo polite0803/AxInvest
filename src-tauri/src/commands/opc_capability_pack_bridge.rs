@@ -15,6 +15,7 @@ use crate::commands::opc_capability_pack_actions::{
     get_capability_pack_config, get_capability_pack_learning_config, get_workflow_config,
     load_rl_config,
 };
+use axagent_harness::IpcEventName;
 use axagent_harness::types::{ChatTool, ChatToolFunction};
 use axagent_tools::ToolError;
 use axagent_tools::registry::SkillToolHandler;
@@ -576,7 +577,7 @@ async fn dispatch_opc_capability_pack_command<R: tauri::Runtime>(
                 "replace": replace,
             });
 
-            app_handle.emit("agent-render-ui", &payload).map_err(|e| {
+            app_handle.emit(IpcEventName::AgentRenderUi.as_str(), &payload).map_err(|e| {
                 warn!("[opc-domain-pack-bridge] 派发 UI 渲染事件失败: {}", e);
                 format!("派发 UI 渲染事件失败: {e}")
             })?;

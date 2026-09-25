@@ -10,6 +10,7 @@
 use crate::AppState;
 use axagent_dao::repo::index_jobs as jobs;
 use axagent_harness::ExtractEntitiesResult;
+use axagent_harness::IpcEventName;
 use axagent_harness::prompt_provider::PromptLang;
 use axagent_harness::util_fns::truncate_to_char_boundary;
 use axagent_search::rag;
@@ -598,7 +599,7 @@ impl IndexJobService {
         // 这里不是新增功能，而是**事件名对齐**：数据（容器 / item / 进度 / 错误）本就齐全。
         if is_kb_container(&job.container_type) {
             let _ = self.app.emit(
-                "knowledge-base-updated",
+                IpcEventName::KnowledgeBaseUpdated.as_str(),
                 serde_json::json!({
                     "knowledgeBaseId": job.container_id,
                     "status": "indexing",
@@ -624,7 +625,7 @@ impl IndexJobService {
         // P1-D：item 级领域事件（`MemorySettings` 靠它刷新列表与索引状态）
         if is_mem_container(&job.container_type) {
             let _ = self.app.emit(
-                "memory-item-indexed",
+                IpcEventName::MemoryItemIndexed.as_str(),
                 serde_json::json!({
                     "itemId": job.item_id,
                     "success": true,
@@ -658,7 +659,7 @@ impl IndexJobService {
         // P1-D：item 级领域事件（失败态）
         if is_mem_container(&job.container_type) {
             let _ = self.app.emit(
-                "memory-item-indexed",
+                IpcEventName::MemoryItemIndexed.as_str(),
                 serde_json::json!({
                     "itemId": job.item_id,
                     "success": false,
@@ -683,12 +684,12 @@ impl IndexJobService {
 
         if is_mem_container(&job.container_type) {
             let _ = self.app.emit(
-                "memory-rebuild-complete",
+                IpcEventName::MemoryRebuildComplete.as_str(),
                 serde_json::json!({ "namespaceId": job.container_id }),
             );
         } else if is_kb_container(&job.container_type) {
             let _ = self.app.emit(
-                "knowledge-base-updated",
+                IpcEventName::KnowledgeBaseUpdated.as_str(),
                 serde_json::json!({
                     "knowledgeBaseId": job.container_id,
                     "status": "completed",

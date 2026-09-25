@@ -7,6 +7,9 @@ export * from "./paired";
 // === Model Selection System ===
 export * from "./modelSelection";
 
+// === IPC 事件名契约（由 schema-gen 从后端 axagent_harness::IpcEventName 生成，勿手改） ===
+export type { IpcEventName } from "./generated/events";
+
 // === Provider System ===
 import type { SkillPermissions } from "@/sdk/types";
 import type { RAGPipelineConfig } from "./knowledge";
@@ -21,7 +24,9 @@ export type ProviderType =
   | "openclaw"
   | "hermes"
   | "ollama"
-  | "llama_cpp";
+  | "llama_cpp"
+  // TypeSafe Jev 决策模型（decisions 端点，非 chat 兼容协议）
+  | "typesafe";
 
 export interface ProviderConfig {
   id: string;
@@ -90,7 +95,7 @@ export type ModelCapability =
   | "FunctionCalling"
   | "Reasoning"
   | "RealtimeVoice";
-export type ModelType = "Chat" | "Voice" | "Embedding";
+export type ModelType = "Chat" | "Voice" | "Embedding" | "Decision";
 
 export interface Model {
   providerId: string;
@@ -679,6 +684,28 @@ export interface SmartRouterTierMapping {
   providerId?: string;
   /** 可选的 base URL 覆盖（自建端点 / 代理） */
   baseUrlOverride?: string | null;
+}
+
+// === 审批规则（PLAN-codex-parity R2-1）===
+
+/** 规则裁决 — 与后端 `RuleDecision` 的 camelCase 序列化一致。 */
+export type ApprovalRuleDecision = "allow" | "prompt" | "forbidden";
+
+/**
+ * 已沉淀的审批规则（对应后端 `ApprovalRule`）。
+ *
+ * 由 Bash 工具在用户批准后自动写入（`program` + `argsPrefix` 为匹配键），
+ * 本类型仅用于设置页展示与撤销。
+ */
+export interface ApprovalRule {
+  /** 程序名（小写归一化） */
+  program: string;
+  /** 参数前缀；空数组表示 program 级规则 */
+  argsPrefix: string[];
+  /** 规则裁决 */
+  decision: ApprovalRuleDecision;
+  /** 沉淀来源（会话 id 等，用于追溯） */
+  source: string;
 }
 
 // === Streaming ===
@@ -2066,6 +2093,7 @@ export type {
   DynamicUIFormDataRecord,
   DynamicUIPinRecord,
   DynamicUIProps,
+  DynamicUISchemaOrigin,
   DynamicUISchemaRecord,
   DynamicUISchemaVersion,
   EventHandler,

@@ -109,7 +109,7 @@ mod tests {
     ///
     /// 孤儿脚本（无 seed / 无 DB 节点，如 `bottleneck-calc.rhai`）同样纳入：
     /// 它们仍会被测试或手工路径加载，函数集必须同样完整。
-    const PRODUCTION_SCRIPTS: [(&str, &str); 15] = [
+    const PRODUCTION_SCRIPTS: [(&str, &str); 17] = [
         ("analyst-brief", include_str!("../analyst-brief.rhai")),
         ("bottleneck-calc", include_str!("../bottleneck-calc.rhai")),
         ("consistency-check", include_str!("../consistency-check.rhai")),
@@ -118,12 +118,14 @@ mod tests {
         ("pace-calc", include_str!("../pace-calc.rhai")),
         ("portfolio-mgr", include_str!("../portfolio-mgr.rhai")),
         ("portfolio-risk-gate", include_str!("../portfolio-risk-gate.rhai")),
+        ("raw-digest", include_str!("../raw-digest.rhai")),
         ("reflection-comparator", include_str!("../reflection-comparator.rhai")),
         ("reflection_validator", include_str!("../reflection_validator.rhai")),
         ("regime-weights", include_str!("../regime-weights.rhai")),
         ("risk-level", include_str!("../risk-level.rhai")),
         ("sim-verify", include_str!("../sim-verify.rhai")),
         ("strategy-scorer", include_str!("../strategy-scorer.rhai")),
+        ("trader-proxy", include_str!("../trader-proxy.rhai")),
         ("demand-keywords", include_str!("../opc_setup/demand-keywords.rhai")),
     ];
 
@@ -438,6 +440,93 @@ mod tests {
         problems
     }
 
+    /// 提取「`let name = |...|` 定义的**闭包**变量名」。
+    ///
+    /// 只认「`let` + 标识符 + `=` +（可选 `move`）+ `|`」这一形态 —— `let x = a | b;`
+    /// （按位或）与 `let c = a || b;`（逻辑或）在 `=` 后**不是** `|`，天然不命中，
+    /// 无须枚举例外（判据尽量落在「Rhai 的闭包语法本身」上，而非逐例排除）。
+    fn closure_var_names(src: &str) -> HashSet<String> {
+        let b = src.as_bytes();
+        let mut out = HashSet::new();
+        let mut i = 0;
+        while i + 3 <= b.len() {
+            // `let` 前不得是标识符字符（排除 `outlet` / `inlet` 之类误匹配）
+            if (i > 0 && is_ident_byte(b[i - 1])) || &b[i..i + 3] != b"let" {
+                i += 1;
+                continue;
+            }
+            let mut j = i + 3;
+            if j >= b.len() || !(b[j] as char).is_ascii_whitespace() {
+                i += 1;
+                continue;
+            }
+            while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                j += 1;
+            }
+            let start = j;
+            while j < b.len() && is_ident_byte(b[j]) {
+                j += 1;
+            }
+            if j == start {
+                i += 1;
+                continue;
+            }
+            let name = src[start..j].to_string();
+            while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                j += 1;
+            }
+            // 必须是**赋值** `=`（排除 `==` 等比较/复合赋值）
+            if j + 1 >= b.len() || b[j] != b'=' || b[j + 1] == b'=' {
+                i = j.max(i + 1);
+                continue;
+            }
+            j += 1;
+            while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                j += 1;
+            }
+            // 可选的 `move`（Rhai 支持 `let f = move |x| ...`）
+            if j + 4 <= b.len()
+                && &b[j..j + 4] == b"move"
+                && (j + 4 == b.len() || (b[j + 4] as char).is_ascii_whitespace())
+            {
+                j += 4;
+                while j < b.len() && (b[j] as char).is_ascii_whitespace() {
+                    j += 1;
+                }
+            }
+            if j < b.len() && b[j] == b'|' {
+                out.insert(name);
+            }
+            i = j.max(i + 1);
+        }
+        out
+    }
+
+    /// 门禁本体：返回「以 `name(...)` **按名调用**的闭包变量」。
+    ///
+    /// 为什么这是缺陷而非风格问题：Rhai 的按名调用
+    /// （`rhai/src/func/call.rs::exec_fn_call`）只查两处 —— ① 本 AST 内的脚本 `fn` 库
+    /// （按函数名 hash）② 宿主注册的 native 函数；**没有「查作用域里那个变量是不是
+    /// FnPtr」这一步**（Rhai Book「Function Pointers」页亦明写“Call a function pointer
+    /// via the `call` method”，且 “function pointers are *not* first-class functions”）。
+    /// 故 `let f = |...|; f(x)` 稳抛 `ErrorFunctionNotFound`，且**编译期不报**。
+    /// 本仓既有约定见 `strategy-scorer.rhai:9`：「调用统一用 `f.call(...)`」。
+    fn find_closures_called_by_name(scripts: &[(&str, &str)]) -> Vec<String> {
+        let mut problems = Vec::new();
+        for (label, src) in scripts {
+            let code = strip_comments_and_strings(src);
+            let called = called_identifiers(&code);
+            for name in closure_var_names(&code) {
+                if called.contains(&name) {
+                    problems.push(format!("{label}: {name}"));
+                }
+            }
+        }
+        problems.sort();
+        problems.dedup();
+        problems
+    }
+
     /// 正对照 + 回归：生产脚本用到的每个宿主函数都必须可解析。
     ///
     /// 本测试直接锁住 2026-09-22 那个缺陷：单槽注册通道丢掉 `bottleneck_*` 之后，
@@ -533,5 +622,151 @@ mod tests {
             // 80.0 落在 `READINESS_BANDS` 首档 strong_bottleneck（min = 75.0）。
             assert_eq!(band, "strong_bottleneck", "{label} 路径的分档结果与本体不一致");
         }
+    }
+
+    /// 执行侧契约：`raw-digest.rhai`（快速链专属）必须真的产出「分维度段」的 map。
+    ///
+    /// 为什么不能只靠 `all_rhai_scripts_compile`：那只 `compile`，而本脚本的关键行为
+    /// （`#{}` 逐键赋值、`for (k, v) in map` 迭代、`sub_string` 裁剪、`try/catch` 兜住
+    /// JSON 解析失败）**编译期一律不校验** —— 语法过了，运行时 `Function not found`
+    /// 或 `Variable not found` 一样会把整段静默降级成空，且不报错。
+    ///
+    /// 输入按 engine 的真实行为构造：`code_executor` 会把 `input_mapping` 的**每个键**
+    /// 都推进 scope（解析不到时推 `unit`），故这里既有「有数据」也有「留空」的维度。
+    #[test]
+    fn raw_digest_script_produces_dimension_sections() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "raw-digest")
+            .expect("清单缺 raw-digest")
+            .1;
+        let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+        let ast = engine.compile(src).expect("raw-digest.rhai 应能编译");
+
+        let mut scope = rhai::Scope::new();
+        // 有数据的两个维度：列表类（新闻）+ 对象类（算法腿）
+        scope.push_constant(
+            "news_data".to_string(),
+            rhai::Dynamic::from(
+                r#"[{"title":"公告A","summary":"摘要","publishTime":"2026-09-20"},
+                    {"title":"B","summary":"x","publishTime":"2026-09-19"}]"#
+                    .to_string(),
+            ),
+        );
+        scope.push_constant(
+            "algo_scoring".to_string(),
+            rhai::Dynamic::from(r#"{"totalScore":72.5,"grade":"B"}"#.to_string()),
+        );
+        // 其余 18 路按「工具失败 / 未接线」注入 unit（engine 的真实降级形态）
+        for name in [
+            "market_data",
+            "sentiment_data",
+            "fundamentals_data",
+            "policy_data",
+            "hotmoney_data",
+            "lockup_data",
+            "research_data",
+            "sector_data",
+            "catalyst_data",
+            "pledge_data",
+            "index_quotes",
+            "institutional_visits",
+            "dragon_tiger_data",
+            "algo_valuation",
+            "algo_valuation_band",
+            "algo_risk",
+            "algo_scoring_week",
+            "algo_scoring_month",
+        ] {
+            scope.push_constant(name.to_string(), rhai::Dynamic::UNIT);
+        }
+
+        let out: rhai::Dynamic =
+            engine.eval_ast_with_scope(&mut scope, &ast).expect("raw-digest.rhai 应能执行");
+        let out = axagent_harness::dynamic_to_json_value(&out);
+        let map = out.as_object().expect("脚本应返回 map（下游读 `analyst-brief.result.<段>`）");
+        assert_eq!(map.len(), 20, "应恰有 20 个维度段，实际：{:?}", map.keys().collect::<Vec<_>>());
+
+        let news = map["news"].as_str().expect("news 段应是字符串");
+        assert!(news.contains("title=公告A"), "列表类段应逐条渲染：{news}");
+        assert!(news.contains("2026-09-20"), "列表类段应带时间：{news}");
+        let algo = map["algo_scoring"].as_str().expect("algo_scoring 段应是字符串");
+        assert!(algo.contains("totalScore=72.5"), "对象类段应扁平化渲染：{algo}");
+        assert_eq!(map["policy"].as_str(), Some("（无数据）"), "缺数据的段应显式标注而非留空");
+    }
+
+    /// 回归：`portfolio-mgr.rhai` 的阶段1/阶段2（四周期）曾把 5 个闭包**全部按名调用**，
+    /// 生产上必抛 `Function not found: sl_pct_for (&str | ImmutableString | String)`
+    /// （实报 line 2505），节点被判「执行异常」⇒ **降级为保守决策**（action=观望、
+    /// confidence=0）。当时**没有任何门禁**能发现它：
+    ///
+    /// - `all_rhai_scripts_compile` 只 `compile` —— Rhai 编译期**不校验未知函数名**；
+    /// - `rt-workflow/tests/portfolio_mgr_veto_rhai.rs` 只跑**抽取出的片段**，不执行整脚本；
+    /// - 本模块既有的 `find_unregistered_host_calls` 只看「宿主函数注册没注册」，
+    ///   而 `sl_pct_for` 是**脚本自己的闭包变量**，不在它的判据面上。
+    #[test]
+    fn every_production_script_calls_closures_via_method_call() {
+        // 正对照：扫描器必须真的抽出闭包名，否则下面的空断言恒真。
+        // 四个名字各有分工：
+        // - `sl_pct_for`：单参 + 一体式 `switch`（本次缺陷本体）；
+        // - `horizon_price_of`：4 参 + 多行体（锁住多参形态）；
+        // - `sink`：定义在 `fn main()` **内部**（锁住「不只在顶层」）；
+        // - `read_weight`：`strategy-scorer.rhai:57` 定义了却从未调用（锁住「定义即入集」）。
+        let all: HashSet<String> = PRODUCTION_SCRIPTS
+            .iter()
+            .flat_map(|(_, src)| closure_var_names(&strip_comments_and_strings(src)))
+            .collect();
+        for expect in ["sl_pct_for", "horizon_price_of", "sink", "read_weight"] {
+            assert!(
+                all.contains(expect),
+                "闭包扫描没抽到 `{expect}`（实际抽出 {all:?}）—— 判据可能已失效，\
+                 后续断言会失去区分力"
+            );
+        }
+
+        let problems = find_closures_called_by_name(&PRODUCTION_SCRIPTS);
+        assert!(
+            problems.is_empty(),
+            "以下闭包被**按名调用**。Rhai 的按名调用不查作用域里的 FnPtr ⇒ \
+             运行时必报 Function not found（且编译期不报），请改为 `name.call(...)`:\n  {}",
+            problems.join("\n  ")
+        );
+    }
+
+    /// 负对照：证明上面的门禁**真的会告警**（0 命中 ≠ 没问题）。
+    #[test]
+    fn gate_reports_closure_called_by_name() {
+        let fake = "// 注释里 by_name(2) 不算调用\n\
+                    let by_name = |x| x + 1;\n\
+                    let y = by_name(1);\n\
+                    let ok = |x| x + 1;\n\
+                    let z = ok.call(1);\n\
+                    let w = \"by_name(3)\";\n";
+        let problems = find_closures_called_by_name(&[("injected", fake)]);
+        assert_eq!(
+            problems,
+            vec!["injected: by_name".to_string()],
+            "门禁没能报出按名调用的闭包（且 `.call(...)` / 注释 / 字符串不得被误判）"
+        );
+    }
+
+    /// 语言语义锁定：`let f = |...|` 存的是 **FnPtr**，只能 `f.call(...)` 调用。
+    ///
+    /// 上一条是**静态**判据，它成立的前提是「`f(x)` 真的会失败」—— 本测试用真执行
+    /// 把这个前提钉住：Rhai 若哪天支持了 `f(x)`，本测试会失败并提示判据前提已变
+    /// （而不是让整族门禁悄悄退化成假绿）。
+    #[test]
+    fn closure_in_variable_resolves_only_via_dot_call() {
+        let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+
+        let err = engine
+            .eval::<i64>("let f = |x| x + 1; f(1)")
+            .expect_err("按名调用闭包应当报错 —— 若此处不报错，本模块的闭包门禁前提已变")
+            .to_string();
+        assert!(err.contains("Function not found"), "错误形态与判据预期不符：{err}");
+
+        let via_call: i64 =
+            engine.eval("let f = |x| x + 1; f.call(1)").expect("f.call(1) 应当可用");
+        assert_eq!(via_call, 2, "闭包经 .call() 调用的返回值不符");
     }
 }

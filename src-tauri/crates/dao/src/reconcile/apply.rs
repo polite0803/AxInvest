@@ -1928,4 +1928,67 @@ mod tests {
         let db = mem().await;
         assert_eq!(dialect_of(&db).unwrap(), Dialect::Sqlite);
     }
+
+    // ── PLAN-stock-reflection-four-horizon 批次 2：声明式引擎自动加列 ──
+    //
+    // 本项目 2026-09-16 起迁移清单已清空（`MIGRATIONS = &[]`），建表/加列由声明式
+    // 收敛引擎（`bootstrap_schema`）从 entity 声明自动推导。这三条测试验证
+    // `stock_reflections.horizon_results_json` 列在空库/旧库/重复执行三场景下均正确。
+
+    /// 空库 bootstrap 后 `stock_reflections.horizon_results_json` 列存在且 nullable。
+    #[tokio::test]
+    async fn bootstrap_creates_horizon_results_json_on_empty_db() {
+        let db = mem().await;
+        bootstrap_schema(&db).await.expect("空库 bootstrap 应成功");
+        let schema = introspect::read(&db).await.expect("introspect 应成功");
+        let col = schema
+            .table("stock_reflections")
+            .and_then(|t| t.column("horizon_results_json"))
+            .expect("stock_reflections.horizon_results_json 应由引擎建出");
+        assert!(col.nullable, "horizon_results_json 必须是 nullable 列");
+    }
+
+    /// 旧库缺 `horizon_results_json` 列 → bootstrap 自动 ADD COLUMN 补回。
+    #[tokio::test]
+    async fn bootstrap_adds_horizon_results_json_to_legacy_db() {
+        let db = mem().await;
+        // 先建全表（含新列）
+        bootstrap_schema(&db).await.expect("首次 bootstrap 应成功");
+        // 模拟旧库：删掉新列（SQLite ≥ 3.35 支持 DROP COLUMN）
+        db.execute_unprepared("ALTER TABLE stock_reflections DROP COLUMN horizon_results_json")
+            .await
+            .expect("DROP COLUMN 应成功");
+        // 确认列确实没了
+        let after_drop = introspect::read(&db).await.expect("introspect 应成功");
+        assert!(
+            after_drop
+                .table("stock_reflections")
+                .and_then(|t| t.column("horizon_results_json"))
+                .is_none(),
+            "DROP COLUMN 后列应不存在"
+        );
+        // 再跑 bootstrap → 引擎应自动加回列
+        let out = bootstrap_schema(&db).await.expect("旧库 bootstrap 应成功");
+        assert!(out.executed > 0, "bootstrap 应执行至少一条 ADD COLUMN");
+        let after_repair = introspect::read(&db).await.expect("introspect 应成功");
+        let col = after_repair
+            .table("stock_reflections")
+            .and_then(|t| t.column("horizon_results_json"))
+            .expect("bootstrap 应自动加回 horizon_results_json 列");
+        assert!(col.nullable, "加回的列仍须 nullable");
+    }
+
+    /// 重复执行 bootstrap 幂等：第二次不产生新变更。
+    #[tokio::test]
+    async fn bootstrap_is_idempotent_for_horizon_results_json() {
+        let db = mem().await;
+        let first = bootstrap_schema(&db).await.expect("首次 bootstrap 应成功");
+        assert!(first.executed > 0, "首次应执行建表");
+        let second = bootstrap_schema(&db).await.expect("第二次 bootstrap 应成功");
+        assert_eq!(
+            second.executed, 0,
+            "第二次 bootstrap 应幂等无变更（实际执行了 {} 条）",
+            second.executed
+        );
+    }
 }

@@ -1,7 +1,7 @@
 import { List } from "@/components/common/AntdList";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import { getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import { FAST_TEMPLATE_ID, getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
 import { App, Button, Card, Checkbox, Collapse, Empty, Input, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -27,6 +27,11 @@ interface AnalysisRecord {
   status: string;
   /** 版本化分析：指向原始记录 ID，null 表示首次分析 */
   parentAnalysisId: string | null;
+  /**
+   * 工作流模板 id：`"stock-analysis-fast"` = 快速 JEV 链。
+   * `undefined` / `null` = 未知（本列引入前的记录或非模板产出）—— 不打标识。
+   */
+  templateId?: string | null;
 }
 
 interface BacktestResult {
@@ -496,6 +501,28 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                               }}
                             >
                               ↻
+                            </Tag>
+                          )}
+                          {
+                            /* 链路标识（2026-09-24）：快速 JEV 链记录与完整链在此列表中
+                              混排且形态一致，需与 ↻ 同款小标签把链路点出来。
+                              templateId 为 null（本列引入前 / 非模板产出）时不打。 */
+                          }
+                          {r.templateId === FAST_TEMPLATE_ID && (
+                            <Tag
+                              className="m-0"
+                              style={{
+                                margin: 0,
+                                fontSize: 10,
+                                lineHeight: "16px",
+                                padding: "0 4px",
+                                borderRadius: 3,
+                                border: "1px solid var(--color-t-tertiary, #888)",
+                                color: "var(--color-t-tertiary, #888)",
+                                background: "transparent",
+                              }}
+                            >
+                              {t("stockAnalysis.fastAnalysis")}
                             </Tag>
                           )}
                         </div>

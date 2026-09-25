@@ -7,6 +7,7 @@ use crate::commands::error_code::skill as skill_err;
 use crate::commands::error_code::skill_op_err;
 use crate::paths::axagent_home;
 use axagent_agent_macro::agent_command;
+use axagent_harness::IpcEventName;
 use axagent_harness::types::*;
 use axagent_trajectory::{HermesMetadata, Skill, SkillMetadata};
 use std::collections::HashMap;
@@ -355,7 +356,7 @@ pub async fn toggle_skill(
         },
     )?;
     let _ = app.emit(
-        "skill-state-changed",
+        IpcEventName::SkillStateChanged.as_str(),
         serde_json::json!({
             "skillName": name,
             "enabled": enabled,
@@ -466,7 +467,7 @@ pub async fn install_skill(
     })?;
 
     let _ = app.emit(
-        "skill-state-changed",
+        IpcEventName::SkillStateChanged.as_str(),
         serde_json::json!({
             "skillName": &skill_name,
             "action": "installed",
@@ -1365,7 +1366,7 @@ pub async fn uninstall_skill(
 
     if any_deleted {
         let _ = app.emit(
-            "skill-state-changed",
+            IpcEventName::SkillStateChanged.as_str(),
             serde_json::json!({
                 "skillName": &name,
                 "action": "uninstalled",

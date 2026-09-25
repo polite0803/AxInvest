@@ -11,6 +11,9 @@ interface CronJobRow {
   description: string;
   schedule: string;
   status: string;
+  /** 关联工作流模板 ID（`null` = 走 task_type 专用分支，不跑工作流）。
+   *  趋势智选两条链共用一个 task_type，只能靠本字段把列表项归链。 */
+  workflowId: string | null;
   runCount: number;
   lastRunAt: number | null;
 }
@@ -23,6 +26,19 @@ function getCronPresets(t: (k: string) => string) {
     { label: t("stockAnalysis.scheduledAnalysis.cron.hourly"), value: "0 * * * *" },
   ];
 }
+
+/**
+ * 趋势智选的两条链 —— 定时任务按 `workflowId` 归链。
+ * `workflowId` 必须与后端 `recommendation_cron.rs` 的
+ * `TREND_SCREENING_WORKFLOW_IDS` 白名单逐字一致（后端不认的 id 会直接报错）。
+ * 链名复用趋势智选面板的两个按钮文案，不另建 key（同一概念同一文案）。
+ */
+const TREND_CHAINS = [
+  { id: "serenity-screening", labelKey: "serenityPanel.run" },
+  { id: "serenity-screening-fast", labelKey: "serenityPanel.fastRun" },
+] as const;
+
+type TrendChainId = (typeof TREND_CHAINS)[number]["id"];
 
 /**
  * 决策回测的 T+N 验证窗口候选（与后端 `RunDecisionBacktestRequest` 默认值
@@ -50,10 +66,15 @@ export function ScheduledAnalysisTab() {
   const [poolJobs, setPoolJobs] = useState<CronJobRow[]>([]);
   const [poolCron, setPoolCron] = useState("0 17 * * 1-5");
 
-  // 趋势智选定时筛选（task_type = trend-screening，调度 serenity-screening 工作流）
+  // 趋势智选定时筛选（task_type = trend-screening，两链共用该标记，靠 workflowId 归链）
   // 产物写入 reco_picks（style='serenity'），与智能荐股结果共同构成候选池。
+  // 两链的节奏诉求不同（原链 12 个 Agent 腿、慢但覆盖全；快速链确定性简报 + 单 Agent），
+  // 故各自独立开关与独立 cron —— 合并成一个开关就会让「只跑快速链」无法表达。
   const [trendJobs, setTrendJobs] = useState<CronJobRow[]>([]);
-  const [trendCron, setTrendCron] = useState("0 16 * * 1-5");
+  const [trendCrons, setTrendCrons] = useState<Record<string, string>>({
+    "serenity-screening": "0 16 * * 1-5",
+    "serenity-screening-fast": "0 16 * * 1-5",
+  });
 
   // 4 周期反思（task_type = batch-reflection）
   // 每个档位一个任务：超短线 2 天 / 短线 5 天 / 中线 28 天 / 长线 90 天
@@ -95,10 +116,14 @@ export function ScheduledAnalysisTab() {
     } catch { /* backend not running */ }
   };
 
-  const toggleTrend = async (job: CronJobRow | null, enable: boolean) => {
+  const toggleTrend = async (chainId: TrendChainId, job: CronJobRow | null, enable: boolean) => {
     try {
       if (enable && !job) {
-        await invoke("create_trend_screening_cron", { cronExpression: trendCron, enabled: true });
+        await invoke("create_trend_screening_cron", {
+          cronExpression: trendCrons[chainId],
+          enabled: true,
+          workflowId: chainId,
+        });
         message.success(t("stockAnalysis.scheduledAnalysis.scanStarted"));
       } else if (!enable && job) {
         await invoke("toggle_trend_screening_cron", { id: job.id, enabled: false });
@@ -468,42 +493,53 @@ export function ScheduledAnalysisTab() {
         </div>
       </Card>
 
-      {/* 趋势智选定时筛选（trend-screening）：调度 serenity-screening 工作流 → 候选池 */}
+      {/* 趋势智选定时筛选（trend-screening）：两链各一任务 → reco_picks → 候选池 */}
       <Card
         size="small"
         title={t("stockAnalysis.scheduledAnalysis.trendScreening")}
         styles={{ body: { padding: "8px 12px" } }}
       >
-        <div className="flex items-center gap-3 flex-wrap">
-          <Switch
-            checked={trendJobs.some((j) => j.status === "active")}
-            onChange={(checked) => toggleTrend(trendJobs.length > 0 ? trendJobs[0] : null, checked)}
-          />
-          <span className="text-xs text-gray-400">
-            {trendJobs.some((j) => j.status === "active")
-              ? t("stockAnalysis.scheduledAnalysis.enabled")
-              : t("stockAnalysis.scheduledAnalysis.disabled")}
-          </span>
-          <Select
-            size="small"
-            style={{ width: 180 }}
-            value={trendCron}
-            onChange={setTrendCron}
-            options={[
-              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyClose"), value: "30 15 * * *" },
-              { label: t("stockAnalysis.scheduledAnalysis.cron.weeklyMon"), value: "0 9 * * 1" },
-              { label: t("stockAnalysis.scheduledAnalysis.cron.dailyOpen"), value: "0 9 * * *" },
-            ]}
-          />
-          {trendJobs.length > 0 && (
-            <Popconfirm
-              title={t("stockAnalysis.scheduledAnalysis.confirmDelete")}
-              onConfirm={() => deleteTrend(trendJobs[0].id)}
-            >
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-            </Popconfirm>
-          )}
-        </div>
+        {TREND_CHAINS.map((chain) => {
+          const chainJob = trendJobs.find((j) => j.workflowId === chain.id) ?? null;
+          const active = chainJob?.status === "active";
+          return (
+            <div key={chain.id} className="flex items-center gap-3 flex-wrap mb-1">
+              <span className="text-xs text-gray-500 w-20 shrink-0">{t(chain.labelKey)}</span>
+              <Switch
+                checked={active}
+                onChange={(checked) => toggleTrend(chain.id, chainJob, checked)}
+              />
+              <span className="text-xs text-gray-400">
+                {active
+                  ? t("stockAnalysis.scheduledAnalysis.enabled")
+                  : t("stockAnalysis.scheduledAnalysis.disabled")}
+              </span>
+              <Select
+                size="small"
+                style={{ width: 180 }}
+                value={trendCrons[chain.id]}
+                onChange={(v) => setTrendCrons((prev) => ({ ...prev, [chain.id]: v }))}
+                options={[
+                  // ⚠ 必须含 `trendCrons` 的初值（16:00）：antd Select 找不到匹配 option 时
+                  // 会把 cron 表达式原样显示出来。16:00 是刻意的 —— 晚于收盘（15:00）等数据
+                  // 落定，早于 pool-scan（17:00）避免同时抢 astock 供应商配额。
+                  { label: t("stockAnalysis.scheduledAnalysis.cron.tradeDay1600"), value: "0 16 * * 1-5" },
+                  { label: t("stockAnalysis.scheduledAnalysis.cron.dailyClose"), value: "30 15 * * *" },
+                  { label: t("stockAnalysis.scheduledAnalysis.cron.weeklyMon"), value: "0 9 * * 1" },
+                  { label: t("stockAnalysis.scheduledAnalysis.cron.dailyOpen"), value: "0 9 * * *" },
+                ]}
+              />
+              {chainJob && (
+                <Popconfirm
+                  title={t("stockAnalysis.scheduledAnalysis.confirmDelete")}
+                  onConfirm={() => deleteTrend(chainJob.id)}
+                >
+                  <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+                </Popconfirm>
+              )}
+            </div>
+          );
+        })}
         <div className="text-xs text-gray-500 mt-1">
           {t("stockAnalysis.scheduledAnalysis.trendScreeningHint")}
         </div>

@@ -25,9 +25,12 @@
 //
 // P1-B3 升级（2026-07-24）:
 //   - 算法化 report_quality_score（60% 程序化，基于报告字数+关键词覆盖+占位符检测）
-//   - 算法化 tool_credibility_score（基于已有 avg_conf + gap_count + good_count）
+//   - 算法化 tool_credibility_score（基于已有 avg_conf + gap_count；good_count 惩罚已于
+//     2026-09-24 移除，理由见 tool_credibility 上方注释）
 //   - 综合 score = report_quality × 0.45 + tool_credibility × 0.35 + factor_completeness × 0.20
 //     （V42 调整: 加入因子完整度维度，权重重新分配为 45/35/20）
+//     ⚠ 该权重已被 V67 取代：现行公式为 0.35 / 0.35 / 0.30
+//     （本文件下方 `let score = ...`，理由见其上方注释）。此处保留 V42 原值仅作历史记录。
 //   - t-scoring/t-valuation/t-risk 的 credibility 字段待 P3 接入后再升级 tool_credibility
 
 // ── 辅助函数（供因子完整度评估使用）──
@@ -46,13 +49,15 @@ fn safe_parse(raw) {
 }
 
 // extract_conf: 从 verdict map 中提取 confidence 数值
-// 支持三种格式：
+// 支持四种格式：
 //   扁平: {"verdict":"看多", "confidence":70, ...}
 //   嵌套: {"report":"...", "verdict":{"confidence":85, ...}}
 //   JSON 字符串: 上述任一格式的字符串形式（V68 修复(2026-09-10)：
 //     resolve_var_path 终值不 auto-parse，若上游映射到 .content 终值，
 //     rhai 收到的是 JSON 字符串而非 map，原实现恒返回 -1.0 导致
 //     催化剂分析师被恒判 missing。现先 safe_parse 再走 map 分支）
+//   判定器形态: {"category":"支持", "node_id":"j-market", ...}（2026-09-24 新增，
+//     判据是 `node_id` 而非 `category` —— 见下方分支）
 // Rhai 1.25 64-bit: type_of(i64) == "i64"，不是 "int"
 fn extract_conf(v) {
     let m = if type_of(v) == "string" { safe_parse(v) } else { v };
@@ -66,6 +71,28 @@ fn extract_conf(v) {
             let ic = inner["confidence"];
             if type_of(ic) == "f64" { return ic; }
             if type_of(ic) == "i64" || type_of(ic) == "int" { return ic.to_float(); }
+        }
+        // ── 2026-09-24 增强（服务**两条链**，非快速链分支）──
+        // 快速链的 10 个维度判定由 `llmClassifier`（`j-*` 节点）产出，形态是
+        // `{category, confidence, model, provider, node_id}`：**没有 `verdict` 字段**，
+        // 且未配 `confidence_threshold` 时 `confidence` 恒为 `null`
+        // （`llm_classifier_executor.rs` 的 `resolved_confidence = None` 通路）。
+        // 不做兼容 ⇒ 快速链 30 路分析师侧输入全判 missing：gap_count = 10
+        // ⇒ `tool_credibility = clamp(30 - 40, 0, 100) = 0`、10 条诊断全 `missing`、
+        // grade 被钉死在 F —— 这**不是**「快速链取数失败」，是本节点读不懂判定器形态。
+        // 判据：存在**非空** `category` 字符串 ⇒ 有判定产出、无自评置信度 ⇒ 记 0.0
+        // （「低置信」档，不是「缺失」档）。取 0.0 而非某个正的基准分，是为了不与
+        // 原链「分析师自评置信度」的语义混淆：0.0 会让 `tool_credibility` 走
+        // `avg_conf <= 0 ⇒ base = 30` 的低基准分支（不虚高、不虚低、不产生 gap 罚分）。
+        // ⚠ 对原链**机械不可达**（H2 回归判据）：判定器形态由 `node_id` 唯一标识 ——
+        //   `llm_classifier_executor.rs` 的成功与降级两条通路**都**写入 `node_id`
+        //   （`node.base_id()`），而原链 10 路 `*_verdict` 是 AgentNode 的 verdict map，
+        //   受 `config/llm-output-schemas.json` 约束（`verdict` / `bull_score` /
+        //   `bear_score` / `confidence` …），**不含** `node_id`。故本分支只在判定器形态下命中；
+        //   不用「有没有 category」单独做判据 —— 那是形态相似性，不是来源判据。
+        let cat = m["category"];
+        if type_of(m["node_id"]) == "string" && type_of(cat) == "string" && cat != "" {
+            return 0.0;
         }
         -1.0
     } else { -1.0 }
@@ -430,8 +457,23 @@ fn report_quality(text, conf) {
 }
 
 // tool_credibility: 算法化工具可信度分（0-100）
-// 当前指标：avg_conf 基础 + gap 惩罚 + good_count 惩罚
+// 当前指标：avg_conf 基础 + gap 惩罚
 // P3 升级方向：接入 t-scoring/t-valuation/t-risk 的 credibility 字段后替换此实现
+//
+// ⚠ 2026-09-24 决策：**移除 good_count 惩罚**（原 good_count == 0 → -20，< n/2 → -15）。
+//   它与 avg_conf 同源，构成二次计分：
+//   ① good_count 的判据是「自评 confidence >= 50 且报告无失败标记」——`conf >= 50`
+//      这一半已被 avg_conf 对同一批自评值求均值计过一次；「报告含失败标记」这一半已被
+//      report_quality 的占位符扣分（每份 -15）计过，且 report_quality_avg 另有 0.35 权重。
+//   ② 实证后果（511abde4，D 级）：tc = avg_conf 44.2 − good 15 − severe 冲突 20 −
+//      字段校验 9 = 0.2 ⇒ 惩罚项合计 44 分全部叠加在同一批自评值 / 报告文本上，而真正
+//      与「上游取数」直接相关的只有 avg_conf 与 gap 两项。
+//   ③ 评分标尺被打穿：全库 46 条最优 composite 79.3、tc 上限 ~69 ⇒ 在实测分布
+//      （rq ≤ 75.6、fc 常 100）下 0.35×75.6 + 0.35×69 + 0.30×100 = 80.4 < 85，
+//      A 级**结构性不可达**。移除本项后 tc 上限回到 avg_conf 量级，A 级重新可达 ——
+//      这是修标尺而非放宽标准：avg_conf 仍按原始自评值线性入分，gap 阶梯一格未动。
+//   若将来要让「多数分析师偏低」成为独立信号，正确做法是**替换** avg_conf 口径
+//   （如改用中位数 / 最低 3 位均值），而不是与 avg_conf 叠加。
 //
 // ⚠ 2026-09-21 决策：degraded_count（报告含失败标记、但自评 confidence >= 50）**不进入**
 //   惩罚项，这是有意为之，不要「顺手补上」——
@@ -443,7 +485,7 @@ fn report_quality(text, conf) {
 //   ③ 语义不同：本函数衡量「上游工具可信度」，degraded 描述的是「分析师措辞/自评偏低」，
 //      该信号已通过 report_quality 的占位符惩罚与 warnings 体现。
 //   若未来要让它影响评分，正确做法是**替换** avg_conf 惩罚口径（二选一），而非叠加。
-fn tool_credibility(avg_conf, good_count, gap_count, n) {
+fn tool_credibility(avg_conf, gap_count) {
     let base = if avg_conf > 0.0 { avg_conf } else { 30.0 };
     let penalty = 0.0;
     // gap 惩罚（按 gap_count 阶梯扣分，对齐原 V1 严格性）
@@ -451,9 +493,6 @@ fn tool_credibility(avg_conf, good_count, gap_count, n) {
     else if gap_count >= 3 { penalty += 30.0; }
     else if gap_count >= 2 { penalty += 20.0; }
     else if gap_count >= 1 { penalty += 10.0; }
-    // good_count 惩罚（高置信度分析师比例）
-    if good_count == 0 { penalty += 20.0; }
-    else if good_count < n / 2 { penalty += 15.0; }
     clamp(base - penalty, 0.0, 100.0)
 }
 
@@ -605,12 +644,12 @@ let avg_conf = if valid_count > 0 { total_conf / valid_count.to_float() } else {
 
 // ── P1-B3: 算法化双维度评分（按设计文档公式）──
 // report_quality_score: 10 个分析师报告质量均值（缺失报告按 0 分拉低均值）
-// tool_credibility_score: 基于已有 avg_conf + gap/good_count 指标算法化
+// tool_credibility_score: 基于已有 avg_conf + gap_count 指标算法化
 // score = report × 0.6 + tool × 0.4（替代旧版 valid/good_count 占比 + 阶梯惩罚）
 let report_quality_sum = mk_q + sent_q + news_q + fund_q + pol_q + hm_q + lk_q + res_q + sec_q + cat_q;
 // P2-3 修复(2026-08-09): n 动态化后需防除零（全部 verdict 缺失时 n==0）
 let report_quality_avg = if n > 0.0 { report_quality_sum / n } else { 0.0 };
-let tool_credibility_score = tool_credibility(avg_conf, good_count, gap_count, n_int);
+let tool_credibility_score = tool_credibility(avg_conf, gap_count);
 
 // ── P2-2 修复(2026-08-09): 分析师方向矛盾检测（升级为加权模式） ──
 // 该检测源自原 data-quality-inspector 专家方法论第 3 条（"分析师结论是否相互矛盾"），

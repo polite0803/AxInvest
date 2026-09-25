@@ -31,17 +31,9 @@ fn validate_container_id(id: &str, field_name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 权威映射在 `axagent_harness::types::provider_registry_key`，这里只作转发。
 fn provider_type_to_registry_key(pt: &ProviderType) -> &'static str {
-    match pt {
-        ProviderType::OpenAI => "openai",
-        ProviderType::OpenAIResponses => "openai_responses",
-        ProviderType::Anthropic => "anthropic",
-        ProviderType::Gemini => "gemini",
-        ProviderType::OpenClaw => "openclaw",
-        ProviderType::Hermes => "hermes",
-        ProviderType::Ollama => "ollama",
-        ProviderType::LlamaCpp => "llama_cpp",
-    }
+    axagent_harness::types::provider_registry_key(pt)
 }
 
 /// 解析默认 provider 的完整上下文

@@ -26,6 +26,7 @@ members = [
   "crates/notification",
   "crates/npm",
   "crates/orchestrator",
+  "crates/plugin-proto",
   "crates/plugins",
   "crates/prompt-guard",
   "crates/providers",
@@ -325,4 +326,8 @@ harness = false
 
 [[bench]]
 name = "search_bench"
+harness = false
+
+[[bench]]
+name = "plugin_ipc_bench"
 harness = false

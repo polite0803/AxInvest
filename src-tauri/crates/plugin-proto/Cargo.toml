@@ -1,0 +1,13 @@
+[package]
+name = "axagent-plugin-proto"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

@@ -193,6 +193,38 @@ impl Tool for BashTool {
         let approval_policy = ctx.approval_policy.as_deref().copied().unwrap_or_default();
         let decision = crate::approval::decide(approval_policy, threat, sandbox_active);
 
+        // ── 审批规则层（PLAN-codex-parity R2-1） ──
+        // 逐段评估整条命令：任一段被 `Forbidden` ⇒ 硬拒（不被其他段的 Allow 抵消）；
+        // 全部段被 `Allow` ⇒ 免询问；未命中 / 仅部分命中 ⇒ 交回上面的策略裁决。
+        let rules = match ctx.approval_rule_store.as_ref() {
+            Some(store) => store.list().await,
+            None => Vec::new(),
+        };
+        if !rules.is_empty() {
+            match crate::approval_rules::evaluate(cmd, &rules) {
+                crate::approval_rules::RuleVerdict::Deny => {
+                    return Err(ToolError::permission_denied("Bash", "该命令被审批规则禁止"));
+                },
+                crate::approval_rules::RuleVerdict::AllowAll => {
+                    // 规则只免除「询问」，不免除沙箱：沙箱可用则仍在受限子进程内执行。
+                    if sandbox_active {
+                        let policy = ctx.sandbox.clone().expect("sandbox_active 已保证非 None");
+                        return run_sandboxed(
+                            &policy,
+                            cmd,
+                            working_dir,
+                            timeout_secs,
+                            ctx,
+                            approval_policy,
+                        )
+                        .await;
+                    }
+                    return run_direct(cmd, working_dir, timeout_secs).await;
+                },
+                crate::approval_rules::RuleVerdict::Incomplete => {},
+            }
+        }
+
         match decision {
             crate::approval::ApprovalDecision::Deny { reason } => {
                 return Err(ToolError::permission_denied("Bash", &reason));
@@ -201,6 +233,8 @@ impl Tool for BashTool {
                 if !ask_user_approval(ctx, cmd, &reason, false).await? {
                     return Err(ToolError::permission_denied("Bash", "用户拒绝执行该命令"));
                 }
+                // 批准后 best-effort 沉淀（R2-1）：同类命令下次免询问。
+                sediment_approved_rule(ctx, cmd, &rules).await;
                 // 批准：沙箱可用则沙箱内跑，否则直通
                 if sandbox_active {
                     let policy = ctx.sandbox.clone().expect("sandbox_active 已保证非 None");
@@ -369,12 +403,14 @@ impl SandboxWait for crate::linux_sandbox::SandboxedChild {
 }
 
 /// 等待沙箱子进程完成（带超时，超时靠子进程 RAII Drop 终止进程树）并格式化输出。
-/// 返回 `(结果, 退出码)`——退出码供 OnFailure 重试判断。
+/// 返回 `(结果, 退出码, stderr 文本)`——退出码与 stderr 供 OnFailure 的
+/// 「疑似沙箱拒绝」判据（`crate::sandbox_denial`）使用；stderr 已按控制台码页解码
+/// （Windows 系统报错为本地化 ANSI/OEM 文案，未解码则匹配不到关键词）。
 #[cfg(any(windows, target_os = "linux"))]
 async fn wait_sandbox_result<C: SandboxWait>(
     child: C,
     timeout_secs: u64,
-) -> Result<(ToolResult, i32), ToolError> {
+) -> Result<(ToolResult, i32, String), ToolError> {
     let start = std::time::Instant::now();
     let (exit_code, stdout_bytes, stderr_bytes) =
         tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child.wait())
@@ -388,7 +424,9 @@ async fn wait_sandbox_result<C: SandboxWait>(
     let elapsed = start.elapsed();
 
     let stdout_display = truncate_lossy(&String::from_utf8_lossy(&stdout_bytes), MAX_OUTPUT_BYTES);
-    let stderr_raw = String::from_utf8_lossy(&stderr_bytes);
+    // 沙箱输出可能是 ANSI/OEM 码页的本地化文案（Windows 系统报错），
+    // 需按码页解码：既供「疑似沙箱拒绝」判据匹配，也让用户看到的不再是乱码。
+    let stderr_raw = crate::sandbox_denial::decode_console_text(&stderr_bytes);
     let stderr_display = if stderr_raw.is_empty() {
         String::new()
     } else {
@@ -397,7 +435,33 @@ async fn wait_sandbox_result<C: SandboxWait>(
 
     let result =
         format_shell_result(exit_code, elapsed.as_secs_f64(), &stdout_display, &stderr_display);
-    Ok((ToolResult::success(result), exit_code))
+    Ok((ToolResult::success(result), exit_code, stderr_raw))
+}
+
+/// 批准后 best-effort 沉淀规则（PLAN-codex-parity R2-1）。
+///
+/// 沉淀门槛由 [`crate::approval_rules::safe_to_sediment`] 把关（单段命令 / 非改写型
+/// 包装器 / 写入后复算自证）。写失败只告警、不影响本次执行 —— 沉淀是「省一次询问」
+/// 的优化，不该让用户已批准的命令因此失败。
+async fn sediment_approved_rule(
+    ctx: &ToolContext,
+    cmd: &str,
+    rules: &[axagent_harness::ApprovalRule],
+) {
+    let Some(store) = ctx.approval_rule_store.as_ref() else {
+        return;
+    };
+    let source = ctx.conversation_id.as_deref().unwrap_or("unknown");
+    let Some(rule) = crate::approval_rules::safe_to_sediment(cmd, rules, source) else {
+        return;
+    };
+    if let Err(e) = store.upsert(&rule).await {
+        tracing::warn!(
+            program = %rule.program,
+            error = %e,
+            "审批规则沉淀失败（不影响本次执行）"
+        );
+    }
 }
 
 /// 审批询问：走 `ask_user_bridge`（前端 agent-ask-user UI），
@@ -442,9 +506,12 @@ async fn ask_user_approval(
 /// Windows 走 SAFER restricted token 受限子进程；Linux 走 unshare 命名空间；
 /// 其他平台显式报错（不做静默降级）。
 ///
-/// OnFailure 策略（P0-2）：沙箱内非零退出时询问用户，批准后沙箱外重试一次。
-/// v1 不精确判别失败原因是否为沙箱限制（stderr 语义分析阶段 2 补齐），
-/// 任何非零退出都触发询问——误问成本是一次确认，误放行成本是安全边界。
+/// OnFailure 策略（P0-2）：沙箱内非零退出**且疑似沙箱拒绝**时询问用户，
+/// 批准后沙箱外重试一次。
+///
+/// 拒绝判据见 `crate::sandbox_denial::is_likely_sandbox_denied`（退出码快路
+/// 排除 `2`/`126`/`127` + stderr 关键词匹配）—— 命令自身报错（如 `grep` 找不到
+/// 文件、`exit 1` 无权限类 stderr）不再触发询问，避免误问。
 async fn run_sandboxed(
     policy: &axagent_harness::SandboxPolicy,
     cmd: &str,
@@ -479,10 +546,11 @@ async fn run_sandboxed(
 
     #[cfg(any(windows, target_os = "linux"))]
     {
-        let (result, exit_code) = wait_sandbox_result(child, timeout_secs).await?;
+        let (result, exit_code, stderr_raw) = wait_sandbox_result(child, timeout_secs).await?;
         if exit_code != 0
             && approval_policy == axagent_harness::ApprovalPolicy::OnFailure
-            && ask_user_approval(ctx, cmd, "沙箱内命令执行失败", true).await?
+            && crate::sandbox_denial::is_likely_sandbox_denied(exit_code, &stderr_raw)
+            && ask_user_approval(ctx, cmd, "沙箱内命令执行失败（疑似沙箱限制）", true).await?
         {
             return run_direct(cmd, working_dir, timeout_secs).await;
         }
@@ -679,5 +747,164 @@ mod tests {
             assert!(!probe.exists(), "探测文件不应被创建");
             let _ = std::fs::remove_file(probe);
         }
+    }
+
+    // ── R1-2：OnFailure 询问条件收窄（只问「疑似沙箱拒绝」） ─────────────
+
+    /// 审批桥替身：只记录被问次数；回答「拒绝」以免真的走沙箱外重试。
+    #[cfg(windows)]
+    #[derive(Debug)]
+    struct RecordingBridge {
+        asked: std::sync::atomic::AtomicUsize,
+    }
+
+    #[cfg(windows)]
+    impl axagent_harness::AskUserBridge for RecordingBridge {
+        fn ask_user_blocking(
+            &self,
+            _ask_id: String,
+            _questions_json: serde_json::Value,
+            _conversation_id: &str,
+        ) -> Result<String, String> {
+            self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok("拒绝".to_string())
+        }
+    }
+
+    /// 命令自身报错（`exit 1`，stderr 无权限关键词）→ **不得**触发询问。
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn on_failure_plain_error_does_not_ask() {
+        let bridge =
+            std::sync::Arc::new(RecordingBridge { asked: std::sync::atomic::AtomicUsize::new(0) });
+        let mut ctx = ToolContext::new("C:\\Windows");
+        ctx.ask_user_bridge = Some(bridge.clone());
+        let policy = axagent_harness::SandboxPolicy::read_only("C:\\Windows");
+
+        let result = run_sandboxed(
+            &policy,
+            "exit 1",
+            "C:\\Windows",
+            15,
+            &ctx,
+            axagent_harness::ApprovalPolicy::OnFailure,
+        )
+        .await
+        .expect("沙箱内 exit 1 应返回 Ok(ToolResult)");
+
+        assert!(!result.content.contains("退出码: 0"), "exit 1 应非零退出: {}", result.content);
+        assert_eq!(
+            bridge.asked.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "命令自身报错不应触发 OnFailure 询问（R1-2 收窄误问）"
+        );
+    }
+
+    /// 沙箱拒绝（Windows 实测文案 `Access is denied.`）→ **必须**触发询问。
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn on_failure_sandbox_denial_asks() {
+        let probe = std::path::Path::new("C:\\Windows\\axagent_bash_onfailure_probe.txt");
+        let _ = std::fs::remove_file(probe);
+        let bridge =
+            std::sync::Arc::new(RecordingBridge { asked: std::sync::atomic::AtomicUsize::new(0) });
+        let mut ctx = ToolContext::new("C:\\Windows");
+        ctx.ask_user_bridge = Some(bridge.clone());
+        let policy = axagent_harness::SandboxPolicy::read_only("C:\\Windows");
+
+        let cmd = format!("echo blocked > \"{}\"", probe.display());
+        let result = run_sandboxed(
+            &policy,
+            &cmd,
+            "C:\\Windows",
+            15,
+            &ctx,
+            axagent_harness::ApprovalPolicy::OnFailure,
+        )
+        .await
+        .expect("沙箱内拒绝写应返回 Ok(ToolResult)");
+
+        assert_eq!(
+            bridge.asked.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "疑似沙箱拒绝应触发 OnFailure 询问；沙箱输出={}",
+            result.content
+        );
+        let _ = std::fs::remove_file(probe);
+    }
+
+    // ── R2-1：批准 → 沉淀 → 免询问 闭环 ─────────────────────────────────
+
+    /// 内存规则存储替身（不碰 DB）：验证「沉淀 → 复算 → 撤销」闭环。
+    #[derive(Debug, Default)]
+    struct MemRuleStore {
+        rules: parking_lot::Mutex<Vec<axagent_harness::ApprovalRule>>,
+    }
+
+    #[async_trait::async_trait]
+    impl axagent_harness::ApprovalRuleStore for MemRuleStore {
+        async fn list(&self) -> Vec<axagent_harness::ApprovalRule> {
+            self.rules.lock().clone()
+        }
+
+        async fn upsert(&self, rule: &axagent_harness::ApprovalRule) -> Result<(), String> {
+            let mut rules = self.rules.lock();
+            rules.retain(|r| !(r.program == rule.program && r.args_prefix == rule.args_prefix));
+            rules.push(rule.clone());
+            Ok(())
+        }
+
+        async fn revoke(&self, program: &str, args_prefix: &[String]) -> Result<(), String> {
+            let mut rules = self.rules.lock();
+            rules.retain(|r| !(r.program == program && r.args_prefix == args_prefix));
+            Ok(())
+        }
+    }
+
+    /// R2-1 验收：批准一次 `git status` ⇒ 沉淀 1 条规则 ⇒ 同类命令免询问；
+    /// 多段 / 包装器命令不得沉淀；重复沉淀幂等；撤销后回到「规则管不了」。
+    #[tokio::test]
+    async fn approval_rule_sediment_and_reuse_loop() {
+        use crate::approval_rules::{RuleVerdict, evaluate};
+        // 具体类型（非 dyn）上调用 trait 方法需先引入 trait
+        use axagent_harness::ApprovalRuleStore;
+
+        let store = std::sync::Arc::new(MemRuleStore::default());
+        let mut ctx = ToolContext::new(".");
+        ctx.conversation_id = Some("conv-r2-1".to_string());
+        ctx.approval_rule_store = Some(store.clone());
+
+        // 1. 批准 `git status` → 沉淀一条前缀规则（program + args_prefix）
+        sediment_approved_rule(&ctx, "git status", &[]).await;
+        let rules = store.list().await;
+        assert_eq!(rules.len(), 1, "批准后应沉淀 1 条规则: {rules:?}");
+        assert_eq!(rules[0].program, "git");
+        assert_eq!(rules[0].args_prefix, vec!["status".to_string()]);
+        assert_eq!(rules[0].source, "conv-r2-1");
+
+        // 2. 沉淀生效：本命令及其 flag 变体免询问；其他 git 子命令不受影响
+        assert_eq!(evaluate("git status", &rules), RuleVerdict::AllowAll);
+        assert_eq!(
+            evaluate("git status --short", &rules),
+            RuleVerdict::AllowAll,
+            "前缀命中应覆盖其后的 flag"
+        );
+        assert_eq!(evaluate("git push origin main", &rules), RuleVerdict::Incomplete);
+
+        // 3. 多段 / 包装器 / 不可判定命令都不得沉淀（不得为被隐藏的第二条命令背书）
+        sediment_approved_rule(&ctx, "a && rm -rf /", &rules).await;
+        sediment_approved_rule(&ctx, "sudo rm -rf /", &rules).await;
+        sediment_approved_rule(&ctx, "ls ; rm -rf /", &rules).await;
+        assert_eq!(store.list().await.len(), 1, "上述命令都不得沉淀出新规则");
+
+        // 4. 幂等：重复沉淀同一 (program, args_prefix) 不产生第二条
+        sediment_approved_rule(&ctx, "git status", &rules).await;
+        assert_eq!(store.list().await.len(), 1, "同一规则键应幂等覆盖");
+
+        // 5. 撤销后回到「规则管不了」——交回审批策略照常裁决
+        store.revoke("git", &["status".to_string()]).await.expect("撤销应成功");
+        let rules = store.list().await;
+        assert!(rules.is_empty(), "撤销后规则表应为空");
+        assert_eq!(evaluate("git status", &rules), RuleVerdict::Incomplete);
     }
 }

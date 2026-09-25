@@ -8,36 +8,119 @@
 //!   a `<!-- context-compressed -->` marker is inserted, and subsequent sends use
 //!   the summary + only messages after the marker.
 //!
-//! Token budget management is done locally via the `token_budget` constants below,
-//! which cap each context component (working memory / retrieved memories / skills /
-//! nudges) before history allocation.
+//! Token budget management：分量预算按模型窗口取（`axagent_harness::context_budget`），
+//! 由该模块统一供值，本文件的 [`token_budget`] 只是其 cap 的别名（供尚不知窗口的调用方使用）。
 
+use axagent_harness::context_budget::budgets_for;
 use axagent_harness::types::{ChatContent, ChatMessage};
 use axagent_harness::util_fns::truncate_to_char_boundary;
 use axagent_kit::token_counter;
 
-/// Fraction of context window that triggers auto-compression (70%).
-const THRESHOLD_RATIO: f64 = 0.70;
-
-/// Token budget allocation constants.
-/// These define the maximum token allocation for each context component.
+/// Token budget allocation — 各分量的**上限**（cap）。
+///
+/// ⚠ 这些常数不再直接当作预算用：已知模型窗口时应走
+/// [`axagent_harness::context_budget::budgets_for`] 取 `min(ratio × window, cap)`。
+/// 保留本模块是为了给**尚不知窗口**的调用方（如 sync 的 system prompt 装配、
+/// 上下文分解展示）以及纯展示口径一个稳定引用，取值与
+/// `axagent_harness::context_budget::*_CAP` 同源（非重复定义）。
+///
+/// Note: the permission notice rendered by [`render_permission_notice`] is pushed
+/// into the system messages and therefore spends part of the `SYSTEM_PROMPT`
+/// allowance — it has no separate budget of its own.
 pub mod token_budget {
-    /// Maximum tokens for the system prompt.
-    pub const SYSTEM_PROMPT: usize = 8_000;
-    /// Maximum tokens for working memory injection.
-    pub const WORKING_MEMORY: usize = 800;
-    /// Maximum tokens for retrieved RAG context.
-    pub const RETRIEVED_MEMORIES: usize = 10_000;
-    /// Maximum tokens for enabled skills.
-    pub const SKILLS: usize = 5_000;
-    /// Maximum tokens for nudge suggestions.
-    pub const NUDGES: usize = 2_000;
-    /// Fraction of context window reserved for session history (after other components).
-    pub const HISTORY_RATIO: f64 = 0.65;
+    /// system prompt 上限。Includes the permission notice
+    /// (sandbox mode + approval policy) rendered by [`super::render_permission_notice`].
+    pub const SYSTEM_PROMPT: usize = axagent_harness::context_budget::SYSTEM_PROMPT_CAP;
+    /// working memory 注入上限。
+    pub const WORKING_MEMORY: usize = axagent_harness::context_budget::WORKING_MEMORY_CAP;
+    /// RAG 检索结果注入上限。
+    pub const RETRIEVED_MEMORIES: usize = axagent_harness::context_budget::RETRIEVED_MEMORIES_CAP;
+    /// 技能索引上限。
+    pub const SKILLS: usize = axagent_harness::context_budget::SKILLS_CAP;
+    /// nudge 建议上限。
+    pub const NUDGES: usize = axagent_harness::context_budget::NUDGES_CAP;
+    /// 历史消息占比（比例，已随窗口伸缩）。
+    pub const HISTORY_RATIO: f64 = axagent_harness::context_budget::HISTORY_RATIO;
 }
 
 /// Content string for the compression marker message.
 pub const COMPRESSION_MARKER: &str = "<!-- context-compressed -->";
+
+/// 权限说明段的模板（给模型看的 system prompt 片段，不是 UI 文本，
+/// 因此不进 `src/i18n/locales/`）。
+mod permission_templates {
+    /// 沙箱档位片段，与 `axagent_harness::SandboxMode` 一一对应。
+    pub mod sandbox_mode {
+        pub const READ_ONLY: &str = include_str!("prompts/permissions/sandbox_mode/read-only.md");
+        pub const WORKSPACE_WRITE: &str =
+            include_str!("prompts/permissions/sandbox_mode/workspace-write.md");
+        pub const DANGER_FULL_ACCESS: &str =
+            include_str!("prompts/permissions/sandbox_mode/danger-full-access.md");
+    }
+
+    /// 审批档位片段，与 `axagent_harness::ApprovalPolicy` 一一对应。
+    pub mod approval_policy {
+        pub const UNTRUSTED: &str =
+            include_str!("prompts/permissions/approval_policy/untrusted.md");
+        pub const ON_FAILURE: &str =
+            include_str!("prompts/permissions/approval_policy/on-failure.md");
+        pub const ON_REQUEST: &str =
+            include_str!("prompts/permissions/approval_policy/on-request.md");
+        pub const NEVER: &str = include_str!("prompts/permissions/approval_policy/never.md");
+    }
+}
+
+/// 按当前沙箱档位 + 审批档位渲染权限说明段（纯函数）。
+///
+/// 目的：让模型知道自己在什么边界内工作，从而主动规避越界写路径、主动请求审批，
+/// 而不是先撞沙箱再重试。对标 codex 的 `prompts/src/permissions_instructions.rs`
+/// 把 sandbox mode / approval policy 写成 system prompt 模板的做法。
+///
+/// 档位语义以 `axagent_harness::SandboxMode` / `ApprovalPolicy` 为唯一来源，
+/// 模板文案必须与之一致（特别是 `DangerFullAccess` 不得被描述成仍有写限制）。
+#[must_use]
+pub fn render_permission_notice(
+    sandbox_mode: axagent_harness::SandboxMode,
+    approval_policy: axagent_harness::ApprovalPolicy,
+) -> String {
+    use axagent_harness::{ApprovalPolicy, SandboxMode};
+
+    let sandbox = match sandbox_mode {
+        SandboxMode::ReadOnly => permission_templates::sandbox_mode::READ_ONLY,
+        SandboxMode::WorkspaceWrite => permission_templates::sandbox_mode::WORKSPACE_WRITE,
+        SandboxMode::DangerFullAccess => permission_templates::sandbox_mode::DANGER_FULL_ACCESS,
+    };
+    let approval = match approval_policy {
+        ApprovalPolicy::Untrusted => permission_templates::approval_policy::UNTRUSTED,
+        ApprovalPolicy::OnFailure => permission_templates::approval_policy::ON_FAILURE,
+        ApprovalPolicy::OnRequest => permission_templates::approval_policy::ON_REQUEST,
+        ApprovalPolicy::Never => permission_templates::approval_policy::NEVER,
+    };
+
+    format!("<permissions>\n{}\n\n{}\n</permissions>", sandbox.trim_end(), approval.trim_end())
+}
+
+/// 把权限说明段作为一条 system message 追加到 `messages`。
+///
+/// 入参是 settings 里存储的档位字符串（`sandbox_mode` / `approval_policy`），
+/// 未识别值沿用各自的默认档（`DangerFullAccess` / `OnRequest`）。
+pub fn push_permission_notice(
+    messages: &mut Vec<ChatMessage>,
+    sandbox_mode: &str,
+    approval_policy: &str,
+) {
+    let notice = render_permission_notice(
+        axagent_harness::SandboxMode::from_mode_str(sandbox_mode),
+        axagent_harness::ApprovalPolicy::from_policy_str(approval_policy),
+    );
+    messages.push(ChatMessage {
+        role: "system".to_string(),
+        content: ChatContent::Text(notice),
+        tool_calls: None,
+        tool_call_id: None,
+        thinking: None,
+    });
+}
 
 /// Estimate the token count of a single `ChatMessage`.
 pub fn message_tokens(msg: &ChatMessage) -> usize {
@@ -59,6 +142,10 @@ pub fn message_tokens(msg: &ChatMessage) -> usize {
 ///
 /// When `model_context_window` is `None` (model has no configured limit), always
 /// returns `false` — we never auto-compress without a known budget.
+///
+/// 阈值比例（0.70）与「剩余额度」工具同源：均取自
+/// [`axagent_harness::context_budget::budgets_for`] 的 `auto_compact_threshold()`，
+/// 本函数**不再**自行乘比例（两处各乘一次是口径漂移的典型来源）。
 pub fn should_auto_compress(
     system_messages: &[ChatMessage],
     history_messages: &[ChatMessage],
@@ -68,7 +155,7 @@ pub fn should_auto_compress(
         Some(v) => v as usize,
         None => return false,
     };
-    let threshold = (context_window as f64 * THRESHOLD_RATIO) as usize;
+    let threshold = budgets_for(context_window).auto_compact_threshold();
 
     let total: usize = system_messages
         .iter()
@@ -135,14 +222,11 @@ pub fn build_context_with_query(
 
     match model_context_window {
         Some(ctx_window) => {
-            // Calculate history budget: total window minus fixed component budgets
-            let fixed_overhead = token_budget::SYSTEM_PROMPT
-                + token_budget::WORKING_MEMORY
-                + token_budget::RETRIEVED_MEMORIES
-                + token_budget::SKILLS
-                + token_budget::NUDGES;
-            let history_budget = ((ctx_window as usize).saturating_sub(fixed_overhead) as f64
-                * token_budget::HISTORY_RATIO) as usize;
+            // Calculate history budget: total window minus fixed component budgets.
+            // 分量预算按窗口取（min(ratio × window, cap)），不再用绝对值常量 —— 小窗口
+            // 下五个分量之和几乎吃掉整个窗口，历史只剩几百 token 可用的老问题由此消解。
+            let budgets = budgets_for(ctx_window as usize);
+            let history_budget = budgets.history_budget();
             let system_tokens: usize = out
                 .iter()
                 .map(message_tokens)
@@ -599,4 +683,193 @@ pub fn build_summary_prompt_with_custom(
     });
 
     messages
+}
+
+#[cfg(test)]
+mod permission_notice_tests {
+    use super::{ChatContent, ChatMessage, push_permission_notice, render_permission_notice};
+    use axagent_harness::{ApprovalPolicy, SandboxMode};
+
+    const SANDBOX_MODES: [SandboxMode; 3] =
+        [SandboxMode::ReadOnly, SandboxMode::WorkspaceWrite, SandboxMode::DangerFullAccess];
+
+    const APPROVAL_POLICIES: [ApprovalPolicy; 4] = [
+        ApprovalPolicy::Untrusted,
+        ApprovalPolicy::OnFailure,
+        ApprovalPolicy::OnRequest,
+        ApprovalPolicy::Never,
+    ];
+
+    /// 3 档沙箱 × 4 档策略 = 12 个组合，两两渲染必须不同。
+    #[test]
+    fn all_twelve_combinations_render_differently() {
+        let mut rendered: Vec<(SandboxMode, ApprovalPolicy, String)> = Vec::new();
+        for sm in SANDBOX_MODES {
+            for ap in APPROVAL_POLICIES {
+                rendered.push((sm, ap, render_permission_notice(sm, ap)));
+            }
+        }
+        assert_eq!(rendered.len(), 12);
+        for i in 0..rendered.len() {
+            for j in (i + 1)..rendered.len() {
+                let (sm_i, ap_i, ref text_i) = rendered[i];
+                let (sm_j, ap_j, ref text_j) = rendered[j];
+                assert_ne!(text_i, text_j, "{sm_i:?}/{ap_i:?} 与 {sm_j:?}/{ap_j:?} 渲染结果相同");
+            }
+        }
+    }
+
+    /// 同一沙箱档换审批档、同一审批档换沙箱档，都必须改变文本。
+    #[test]
+    fn each_dimension_alone_changes_output() {
+        for sm in SANDBOX_MODES {
+            let texts: Vec<String> =
+                APPROVAL_POLICIES.iter().map(|ap| render_permission_notice(sm, *ap)).collect();
+            for i in 0..texts.len() {
+                for j in (i + 1)..texts.len() {
+                    assert_ne!(texts[i], texts[j], "沙箱 {sm:?} 下审批档未区分");
+                }
+            }
+        }
+        for ap in APPROVAL_POLICIES {
+            let texts: Vec<String> =
+                SANDBOX_MODES.iter().map(|sm| render_permission_notice(*sm, ap)).collect();
+            for i in 0..texts.len() {
+                for j in (i + 1)..texts.len() {
+                    assert_ne!(texts[i], texts[j], "审批 {ap:?} 下沙箱档未区分");
+                }
+            }
+        }
+    }
+
+    /// 段落必须带 `<permissions>` 边界（与其它 system 段同构，便于模型与调试定位）。
+    #[test]
+    fn notice_is_wrapped_in_permissions_tag() {
+        let text = render_permission_notice(SandboxMode::ReadOnly, ApprovalPolicy::OnRequest);
+        assert!(text.starts_with("<permissions>\n"), "{text}");
+        assert!(text.ends_with("\n</permissions>"), "{text}");
+    }
+
+    /// `DangerFullAccess` 的语义必须与 `sandbox_policy.rs` 一致：
+    /// 不得被描述成仍有写限制（那会让模型误以为越界写会被拦，从而放弃合法写入）。
+    #[test]
+    fn danger_full_access_is_not_described_as_write_restricted() {
+        let text =
+            render_permission_notice(SandboxMode::DangerFullAccess, ApprovalPolicy::OnRequest);
+        assert!(
+            text.contains("No sandbox restriction is applied"),
+            "DangerFullAccess 必须明写不施加沙箱限制: {text}"
+        );
+        // 不得出现其它两档的限制性表述
+        for forbidden in ["can NOT write", "write only inside the workspace root", "are denied"] {
+            assert!(
+                !text.contains(forbidden),
+                "DangerFullAccess 段不应含限制表述 {forbidden:?}: {text}"
+            );
+        }
+    }
+
+    /// 只读 / 工作区可写两档必须各保留自己的写限制声明（与枚举定义一致）。
+    #[test]
+    fn restrictive_modes_state_their_limits() {
+        let ro = render_permission_notice(SandboxMode::ReadOnly, ApprovalPolicy::OnRequest);
+        assert!(ro.contains("can NOT write"), "ReadOnly 应声明禁止写入: {ro}");
+        let ww = render_permission_notice(SandboxMode::WorkspaceWrite, ApprovalPolicy::OnRequest);
+        assert!(
+            ww.contains("write only inside the workspace root"),
+            "WorkspaceWrite 应声明仅工作区可写: {ww}"
+        );
+    }
+
+    /// 注入形态：一条 system message，内容为渲染结果。
+    #[test]
+    fn push_appends_single_system_message() {
+        let mut messages: Vec<ChatMessage> = Vec::new();
+        push_permission_notice(&mut messages, "read-only", "on-failure");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, "system");
+        let ChatContent::Text(text) = &messages[0].content else {
+            panic!("权限说明段应为纯文本");
+        };
+        assert_eq!(
+            text,
+            &render_permission_notice(SandboxMode::ReadOnly, ApprovalPolicy::OnFailure)
+        );
+    }
+
+    /// 未识别档位回退默认（与 `from_mode_str` / `from_policy_str` 的承诺一致）。
+    #[test]
+    fn unknown_values_fall_back_to_defaults() {
+        let mut messages: Vec<ChatMessage> = Vec::new();
+        push_permission_notice(&mut messages, "garbage", "garbage");
+        let ChatContent::Text(text) = &messages[0].content else {
+            panic!("权限说明段应为纯文本");
+        };
+        assert_eq!(
+            text,
+            &render_permission_notice(SandboxMode::DangerFullAccess, ApprovalPolicy::OnRequest)
+        );
+    }
+}
+
+#[cfg(test)]
+mod context_budget_tests {
+    use super::{ChatContent, ChatMessage, budgets_for, message_tokens, should_auto_compress};
+
+    fn msg(text: &str) -> ChatMessage {
+        ChatMessage {
+            role: "user".to_string(),
+            content: ChatContent::Text(text.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+            thinking: None,
+        }
+    }
+
+    /// `should_auto_compress` 的翻转点必须**逐 token 对齐** `budgets_for` 的阈值 ——
+    /// 这是「判据与剩余额度工具共用同一供值函数」的唯一机械判据（防两处各乘一次比例）。
+    #[test]
+    fn auto_compress_flips_exactly_at_shared_threshold() {
+        let window: u32 = 10_000;
+        let threshold = budgets_for(window as usize).auto_compact_threshold();
+        assert_eq!(threshold, 7_000, "10k 窗口阈值应为 70%");
+
+        let unit = "abcdefghij".repeat(100);
+        let unit_tokens = message_tokens(&msg(&unit));
+        assert!(unit_tokens > 0, "计数函数必须给出正数，否则本测试无意义");
+
+        let mut history = Vec::new();
+        while !should_auto_compress(&[], &history, Some(window)) {
+            history.push(msg(&unit));
+            assert!(history.len() < 5_000, "构造的历史始终无法越过阈值");
+        }
+
+        let total: usize = history.iter().map(message_tokens).sum();
+        assert!(total > threshold, "翻转时总量 {total} 应已越过阈值 {threshold}");
+
+        // 少一条消息必然未越阈 —— 证明翻转点就落在阈值上，而非被别的口径误触发
+        let mut below = history.clone();
+        below.pop();
+        let below_total: usize = below.iter().map(message_tokens).sum();
+        assert!(!should_auto_compress(&[], &below, Some(window)));
+        assert!(below_total <= threshold, "未翻转时总量 {below_total} 应不超过阈值 {threshold}");
+    }
+
+    /// 窗口未知时永不压缩（原语义，不得因改造而改变）。
+    #[test]
+    fn unknown_window_never_compresses() {
+        let history: Vec<ChatMessage> = (0..50).map(|_| msg(&"x".repeat(4000))).collect();
+        assert!(!should_auto_compress(&[], &history, None));
+    }
+
+    /// 小窗口下历史额度必须比大窗口**更小**（分量预算随动的直接体现）。
+    #[test]
+    fn smaller_window_leaves_less_history_room() {
+        let small = budgets_for(32_000).history_budget();
+        let reference = budgets_for(200_000).history_budget();
+        assert!(small < reference, "32k 窗口的历史额度 {small} 应小于 200k 的 {reference}");
+        // 32k 窗口下固定分量按比例收缩到 4 128，历史额度不再被 25 800 的绝对值吃掉
+        assert_eq!(budgets_for(32_000).fixed_overhead(), 4_128);
+        assert!(small > 15_000, "32k 窗口历史额度应显著高于旧绝对值口径下的 4 030，实得 {small}");
+    }
 }

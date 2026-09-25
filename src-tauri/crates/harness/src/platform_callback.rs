@@ -8,8 +8,8 @@
 //!
 //! 权威定义在此（harness，foundation），具体实现（如 `PlatformBridge`）位于
 //! `axagent-rt-messaging`（hybrid）。wiring 层将内置实现注册到能力注册表的
-//! `message.callback` 接缝，外部插件可经 `register_external_message_callback`
-//! 替换同一接缝（内置与插件平权）。
+//! `message.callback` 接缝，外部插件可经 `register_plugin_capability`
+//! 声明同一接缝（内置与插件平权）。
 
 use async_trait::async_trait;
 

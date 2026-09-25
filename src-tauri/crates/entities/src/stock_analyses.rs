@@ -73,6 +73,25 @@ pub struct Model {
     /// 复算器见到 NULL 必须声明「公式版本未知」，**不得**默认按当前版本复算。
     /// （与 `decision_position_state` 同约定：引擎只做纯新增、不做 DML，故有意不回填。）
     pub template_version: Option<i32>,
+    /// 生成该记录的**工作流模板 id**（完整分析链 `"stock-analysis"` / 快速 JEV 链
+    /// `"stock-analysis-fast"`）。判据值即 `workflow_templates.id` 的字面量。
+    ///
+    /// 为什么必须落库：`template_version` **不能**承担这个职责 —— 它是
+    /// `workflow_templates.version` 的当时值，而各模板的 version **各自独立计数**
+    /// （实测同库中完整链为 81、快速链为 1），两个数字不可比，用它区分链路是巧合而非判据。
+    /// 没有这一列的后果（2026-09-24 实证，300642）：快速链记录与完整链记录在
+    /// `stock_analyses` 里形态完全一致（`analysis_kind` 同为 `"live"`），
+    /// 「最近分析」查询按 `created_at DESC` 取到的是**更晚写入的快速链记录**，
+    /// 于是界面上表现为「快速分析覆盖了完整分析」的完整数据质量结论（D 级被 F 级顶替）。
+    ///
+    /// `NULL` 语义 = 该记录产生于本列引入之前，**采集时点没有这个信息** ——
+    /// 读取侧不得据此推断链路，应按「未知」处理。
+    ///
+    /// 存量行**刻意不写迁移回填**：本仓 schema 由 entity 驱动（`bootstrap_schema` 负责建列），
+    /// 而 `run_migrations` 在它**之前**执行 ⇒ 迁移里引用本列必然失败（列尚不存在）。
+    /// 确证为快速链的历史记录（判据 `blackboard_snapshot::jsonb ? 'j-winner'`）
+    /// 由一次性 SQL 手工回填，不进版本化迁移。
+    pub template_id: Option<String>,
     /// 关联到 L2 disk-cache 的快照 ID
     pub data_snapshot_id: Option<String>,
     /// 决策校验结果：pending / win / loss

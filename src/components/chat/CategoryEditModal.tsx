@@ -225,6 +225,7 @@ export function CategoryEditModal({
             value={selectedModelValue}
             onChange={handleDefaultModelChange}
             placeholder={t("settings.useActiveModel")}
+            modelTypes={["Chat"]}
             style={{ width: "100%" }}
           />
         </div>

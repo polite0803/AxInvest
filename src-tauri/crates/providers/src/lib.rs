@@ -25,6 +25,7 @@ pub mod registry;
 pub mod screen_vision;
 pub mod structured_output;
 pub mod transport;
+pub mod typesafe;
 pub mod url_utils;
 pub mod wenxin;
 

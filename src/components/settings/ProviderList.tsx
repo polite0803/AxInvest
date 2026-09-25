@@ -20,6 +20,7 @@ const PROVIDER_TYPE_OPTIONS: { label: string; value: ProviderType }[] = [
   { label: "Gemini", value: "gemini" },
   { label: "Ollama", value: "ollama" },
   { label: "llama.cpp", value: "llama_cpp" },
+  { label: "TypeSafe Jev", value: "typesafe" },
 ];
 
 const DEFAULT_HOSTS: Record<ProviderType, string> = {
@@ -31,6 +32,7 @@ const DEFAULT_HOSTS: Record<ProviderType, string> = {
   hermes: "",
   ollama: "http://localhost:11434",
   llama_cpp: "http://localhost:8091",
+  typesafe: "https://openrouter.ai/api",
 };
 
 function SortableProviderItem({

@@ -649,16 +649,7 @@ pub async fn upgrade_tool_with_llm(
             },
         )?;
 
-    let registry_key = match provider.provider_type {
-        axagent_harness::types::ProviderType::OpenAI => "openai",
-        axagent_harness::types::ProviderType::OpenAIResponses => "openai_responses",
-        axagent_harness::types::ProviderType::Anthropic => "anthropic",
-        axagent_harness::types::ProviderType::Gemini => "gemini",
-        axagent_harness::types::ProviderType::OpenClaw => "openclaw",
-        axagent_harness::types::ProviderType::Hermes => "hermes",
-        axagent_harness::types::ProviderType::Ollama => "ollama",
-        axagent_harness::types::ProviderType::LlamaCpp => "llama_cpp",
-    };
+    let registry_key = axagent_harness::types::provider_registry_key(&provider.provider_type);
 
     let adapter = state
         .harness

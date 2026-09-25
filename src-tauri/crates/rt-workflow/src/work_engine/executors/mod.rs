@@ -98,7 +98,7 @@ pub const USER_MESSAGE_VAR: &str = "user_message";
 // `resolve_model_for_node → decrypt_key → registry.get(registry_key)` 三步。
 // 抽成公共 helper 消除 4 处字节级同义代码。
 pub(crate) mod llm_resolve;
-pub(crate) use llm_resolve::resolve_provider_and_adapter;
+pub(crate) use llm_resolve::{ensure_generation_model, resolve_provider_and_adapter};
 
 // ── 共享变量路径解析器 ──
 // 多个 executor 需要从 ExecutionState.variables 中按点号路径（如 "node_id.output.field"）

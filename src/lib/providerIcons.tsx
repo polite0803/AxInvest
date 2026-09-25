@@ -12,6 +12,7 @@ const TYPE_TO_PROVIDER: Record<string, string> = {
   gemini: "google",
   ollama: "ollama",
   llama_cpp: "ollama", // 共用 Ollama 视觉图标（llama.cpp 本地推理）
+  typesafe: "openai", // TypeSafe 无专属图标，回落 OpenAI 风格的通用图标
   custom: "openai",
 };
 

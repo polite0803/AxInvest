@@ -12,6 +12,7 @@ use axagent_agent::{
 };
 use axagent_agent_macro::agent_command;
 use axagent_dao::repo::{conversation, message, provider, search_provider};
+use axagent_harness::IpcEventName;
 use axagent_harness::runtime_types::permissions::PermissionPolicy;
 use axagent_harness::types::{
     Attachment, ChatContent, ChatMessage, ChatRequest, ChatTool, ChatToolFunction, McpServer,
@@ -129,7 +130,7 @@ impl axagent_harness::AskUserBridge for AppAskUserBridge {
             "options": options,
         });
 
-        let _ = self.app_handle.emit("agent-ask-user", &event_payload);
+        let _ = self.app_handle.emit(IpcEventName::AgentAskUser.as_str(), &event_payload);
 
         // 创建 oneshot channel 并阻塞等待用户回复
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -225,7 +226,7 @@ fn emit_status(
     code: Option<&str>,
 ) {
     let _ = app.emit(
-        "agent-status",
+        IpcEventName::AgentStatus.as_str(),
         AgentStatusPayload {
             conversation_id: conversation_id.to_string(),
             phase: phase.to_string(),
@@ -473,7 +474,7 @@ fn build_streaming_api_client(
     client.with_on_event(Box::new(move |event: &AssistantEvent| match event {
         AssistantEvent::TextDelta(text) => {
             let _ = stream_app.emit(
-                "agent-stream-text",
+                IpcEventName::AgentStreamText.as_str(),
                 AgentStreamTextPayload {
                     conversation_id: stream_conv_id.clone(),
                     assistant_message_id: stream_msg_id.clone(),
@@ -483,7 +484,7 @@ fn build_streaming_api_client(
         },
         AssistantEvent::ThinkingDelta(thinking) => {
             let _ = stream_app.emit(
-                "agent-stream-thinking",
+                IpcEventName::AgentStreamThinking.as_str(),
                 AgentStreamThinkingPayload {
                     conversation_id: stream_conv_id.clone(),
                     assistant_message_id: stream_msg_id.clone(),
@@ -493,7 +494,7 @@ fn build_streaming_api_client(
         },
         AssistantEvent::ToolUse { id, name, input } => {
             let _ = stream_app.emit(
-                "agent-tool-use",
+                IpcEventName::AgentToolUse.as_str(),
                 AgentToolUsePayload {
                     conversation_id: stream_conv_id.clone(),
                     assistant_message_id: stream_msg_id.clone(),
@@ -506,7 +507,7 @@ fn build_streaming_api_client(
         },
         AssistantEvent::PromptCache(evt) => {
             let _ = stream_app.emit(
-                "prompt-cache-event",
+                IpcEventName::PromptCacheEvent.as_str(),
                 PromptCachePayload {
                     conversation_id: stream_conv_id.clone(),
                     assistant_message_id: stream_msg_id.clone(),
@@ -570,7 +571,10 @@ pub async fn agent_query(
     // 一直是未知态（`agent-status` 只在 phase=error 时兜底置 false）。
     // key 用 camelCase，与 `AgentStatusPayload` / `AgentDonePayload` 的
     // `#[serde(rename = "conversationId")]` 保持一致（前端读的就是 `conversationId`）。
-    let _ = app.emit("agent-started", serde_json::json!({ "conversationId": conversation_id }));
+    let _ = app.emit(
+        IpcEventName::AgentStarted.as_str(),
+        serde_json::json!({ "conversationId": conversation_id }),
+    );
     emit_status(
         &app,
         &conversation_id,
@@ -1279,6 +1283,14 @@ pub async fn agent_query(
         .with_recorder_from_db(app_state.harness.db())
         .with_execution_context(conversation_id.clone(), None);
 
+    // ── 注入模型上下文窗口到 tool_extra，供 ContextRemaining 工具取预算 ──
+    // 口径与 `conversations/streaming.rs` 的 `model_context_window` 一致（均取模型记录的
+    // `max_tokens`），避免两处各自解析窗口产出不同预算。
+    if let Some(window) = resolved_model.as_ref().and_then(|m| m.max_tokens) {
+        tool_registry =
+            tool_registry.with_tool_extra(context_keys::CONTEXT_WINDOW, window.to_string());
+    }
+
     // ── 加载搜索提供商配置，注入到 tool_extra ──
     // 优先使用请求中指定的 search_provider_id，否则取第一个已启用的提供商
     let search_provider_used = if let Some(ref sp_id) = request.search_provider_id {
@@ -1708,7 +1720,7 @@ pub async fn agent_query(
 
     // Emit RAG results to frontend
     let _ = app.emit(
-        "rag-context-retrieved",
+        IpcEventName::RagContextRetrieved.as_str(),
         axagent_harness::types::RagContextRetrievedEvent {
             conversation_id: conversation_id.clone(),
             sources: rag_result.source_results,
@@ -2109,7 +2121,7 @@ pub async fn agent_query(
         tracing::warn!("[agent_query] Token budget check failed: {}", budget_err);
         // Emit error to frontend
         let _ = app.emit(
-            "agent-error",
+            IpcEventName::AgentError.as_str(),
             AgentErrorPayload {
                 conversation_id: conversation_id.clone(),
                 assistant_message_id: None,
@@ -2256,13 +2268,7 @@ pub async fn agent_query(
 
     // 上下文注入器：每轮 LLM 调用前读会话状态，把已加载能力的完整定义注入系统提示。
     // 这是「写入（CapabilityLoad）→ 读取（本注入器）」的读取侧，两者经 SessionState 解耦。
-    let capability_indexer_trait: Arc<dyn axagent_harness::CapabilityIndexer> =
-        app_state.capability_indexer.clone();
-    let loaded_capability_contributor =
-        axagent_agent::context_contributors::LoadedCapabilityContributor::new(
-            app_state.session_state_store.clone(),
-            capability_indexer_trait,
-        );
+    // 注入器本体由 `system.prompt.*` 接缝提供（装配在 init/state.rs），此处只做取回。
 
     let mut runtime = create_conversation_runtime(
         ConversationRuntimeFactoryArgs::new(
@@ -2288,7 +2294,9 @@ pub async fn agent_query(
         .with_dynamic_tools(dynamic_tools)
         .with_conversation_id(conversation_id.clone())
         .with_agent_id(agent_scope_id.clone())
-        .with_context_contributor(Box::new(loaded_capability_contributor)),
+        .with_context_contributors(
+            axagent_harness::get_capability_registry().list_system_prompt_sections(),
+        ),
     );
 
     // 将 nudge 注入到运行时级 system_prompt（通过 <memory_context> 块在每次 LLM 调用前注入）
@@ -2441,7 +2449,7 @@ pub async fn agent_query(
             // Emit agent-message-id event so the frontend can remap the
             // streaming placeholder ID to the real DB message ID.
             let _ = app.emit(
-                "agent-message-id",
+                IpcEventName::AgentMessageId.as_str(),
                 serde_json::json!({
                     "conversationId": conversation_id,
                     "streamingMessageId": streaming_message_id,
@@ -2548,7 +2556,7 @@ pub async fn agent_query(
                 cost_usd,
                 blocks: blocks_opt,
             };
-            let _ = app.emit("agent-done", &payload);
+            let _ = app.emit(IpcEventName::AgentDone.as_str(), &payload);
 
             // Set workflow_status to "completed" for workflow-type sessions
             if conversation.session_type == "workflow" {
@@ -2840,7 +2848,7 @@ pub async fn agent_query(
                             });
 
                             // 推送技能提案事件到前端，触发通知面板
-                            let _ = app.emit("skill-proposal", &proposal);
+                            let _ = app.emit(IpcEventName::SkillProposal.as_str(), &proposal);
                         }
                     }
                 }
@@ -2925,7 +2933,7 @@ pub async fn agent_query(
 
             // Emit agent-error event
             let _ = app.emit(
-                "agent-error",
+                IpcEventName::AgentError.as_str(),
                 AgentErrorPayload {
                     conversation_id: conversation_id.clone(),
                     assistant_message_id: None,
@@ -3087,7 +3095,7 @@ pub(crate) async fn cancel_agent_internal(
 
     // Emit cancellation event so frontend can clean up
     let _ = app.emit(
-        "agent-cancelled",
+        IpcEventName::AgentCancelled.as_str(),
         serde_json::json!({
             "conversationId": conversation_id,
             "reason": reason,
@@ -3159,7 +3167,7 @@ pub async fn agent_pause(
     info!("[agent_pause] Paused agent for conversationId={}", conversation_id);
 
     let _ = app.emit(
-        "agent-paused",
+        IpcEventName::AgentPaused.as_str(),
         serde_json::json!({
             "conversationId": conversation_id,
         }),
@@ -3199,7 +3207,7 @@ pub async fn agent_resume(
     info!("[agent_resume] Resumed agent for conversationId={}", conversation_id);
 
     let _ = app.emit(
-        "agent-resumed",
+        IpcEventName::AgentResumed.as_str(),
         serde_json::json!({
             "conversationId": conversation_id,
         }),

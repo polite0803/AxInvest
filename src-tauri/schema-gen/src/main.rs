@@ -5,13 +5,15 @@
 //! 功能:
 //! 1. 为 workflow 类型生成 JSON Schema 文档
 //! 2. 从 Rust DTO 生成 TypeScript 类型定义，确保前后端一致性
-//! 3. 校验前端类型定义与后端 DTO 的同步状态
+//! 3. 从 `axagent_harness::IpcEventName` 生成前端 IPC 事件名联合类型
+//! 4. 校验前端类型定义与后端 DTO / 事件名的同步状态
 //!
 //! 使用方法:
 //! ```bash
 //! cargo run -p schema-gen                    # 生成所有类型定义
 //! cargo run -p schema-gen -- check           # 仅检查类型同步，不生成
 //! cargo run -p schema-gen -- ipc-types       # 仅生成 IPC 类型
+//! cargo run -p schema-gen -- event-names     # 仅生成 IPC 事件名联合类型
 //! ```
 
 use axagent_harness::agent::{
@@ -46,10 +48,12 @@ fn main() {
     match mode {
         "check" => run_check(&ts_types_dir),
         "ipc-types" => generate_ipc_types(&ts_types_dir),
+        "event-names" => generate_event_names(&ts_types_dir),
         "workflow-schema" => generate_workflow_schema(&out_dir),
         _ => {
             generate_workflow_schema(&out_dir);
             generate_ipc_types(&ts_types_dir);
+            generate_event_names(&ts_types_dir);
             run_check(&ts_types_dir);
         },
     }
@@ -297,6 +301,49 @@ fn gen_type<T: TS>() -> String {
     format!("{}\n\n", decl)
 }
 
+// ============================================================================
+// IPC 事件名联合类型生成与同步校验
+// ============================================================================
+
+/// 生成 IPC 事件名联合类型（前端 `listen` 的形参类型）
+///
+/// 权威来源是 `axagent_harness::IpcEventName`；本函数只做投影，不含任何逻辑，
+/// 因此**刻意不写时间戳** —— 生成物必须可复现，否则「重新生成后内容不变」
+/// 无法作为同步判据（`ipc.ts` 带时间戳是历史遗留，不要照抄到这里）。
+fn generate_event_names(out_dir: &Path) {
+    fs::create_dir_all(out_dir).expect("事件名生成：创建输出目录失败");
+
+    eprintln!("Generating IPC event name union type...");
+
+    let mut output = String::new();
+    output.push_str("// 此文件由 schema-gen 自动生成，请勿手动编辑\n");
+    output.push_str(
+        "// 修改 Rust `axagent_harness::IpcEventName` 后请重新运行: \
+         cargo run -p schema-gen -- event-names\n",
+    );
+    output.push_str("//\n");
+    output.push_str("// 本文件把后端事件名契约投影到前端：`@/lib/invoke` 的 `listen` 形参类型即\n");
+    output
+        .push_str("// `IpcEventName`，因此监听到「后端不存在的事件名」会在 `npm run typecheck`\n");
+    output.push_str("// 阶段报错，而不是运行期静默收不到消息。\n\n");
+    output.push_str(
+        "/** 全部 IPC 事件名（顺序与后端 `axagent_harness::IpcEventName::ALL` 一致）。 */\n",
+    );
+    output.push_str("export const IPC_EVENT_NAMES = [\n");
+    for evt in axagent_harness::IpcEventName::ALL {
+        output.push_str(&format!("  \"{}\",\n", evt.as_str()));
+    }
+    output.push_str("] as const;\n\n");
+    output.push_str("/** IPC 事件名联合类型（`listen` 只接受这些名字）。 */\n");
+    output.push_str("export type IpcEventName = (typeof IPC_EVENT_NAMES)[number];\n");
+
+    let output_path = out_dir.join("events.ts");
+    fs::write(&output_path, &output)
+        .unwrap_or_else(|e| panic!("事件名生成：写入 {} 失败: {}", output_path.display(), e));
+
+    eprintln!("✅ Generated IPC event names: {}", output_path.display());
+}
+
 /// 检查前端类型定义与后端 DTO 的同步状态
 fn run_check(ts_types_dir: &Path) {
     eprintln!("Checking Tauri IPC type synchronization...");
@@ -305,29 +352,65 @@ fn run_check(ts_types_dir: &Path) {
     if !generated_path.exists() {
         eprintln!("⚠️  生成的 IPC 类型文件不存在: {}", generated_path.display());
         eprintln!("   请先运行: cargo run -p schema-gen -- ipc-types");
+    } else {
+        let generated_content = fs::read_to_string(&generated_path)
+            .unwrap_or_else(|e| format!("读取生成文件失败: {}", e));
+
+        let mut missing_types = Vec::new();
+
+        for (dto_name, _module) in IPC_DTO_TYPES {
+            if !generated_content.contains(&dto_name.to_string()) {
+                missing_types.push(format!("{}: 未在生成的 ipc.ts 中找到类型定义", dto_name));
+            }
+        }
+
+        if missing_types.is_empty() {
+            eprintln!("✅ Tauri IPC 类型同步检查通过");
+            eprintln!("   共检查 {} 个 DTO 类型", IPC_DTO_TYPES.len());
+        } else {
+            eprintln!("⚠️  发现 {} 个类型同步问题:", missing_types.len());
+            for issue in &missing_types {
+                eprintln!("   - {}", issue);
+            }
+            eprintln!();
+            eprintln!("   建议: 运行 'cargo run -p schema-gen -- ipc-types' 重新生成类型定义");
+        }
+    }
+
+    check_event_names_sync(ts_types_dir);
+}
+
+/// 校验 `src/types/generated/events.ts` 与 `IpcEventName` 逐项一致
+///
+/// 判据用「枚举成员的 `"name",` 行是否都出现在生成物中」而不是整文件字节比对：
+/// 前者对生成器的注释措辞改动容忍，后者一旦改注释就报「脏」，
+/// 会让维护者习惯性重跑而不看差异（门禁的出口不严比没有更糟）。
+fn check_event_names_sync(ts_types_dir: &Path) {
+    let events_path = ts_types_dir.join("events.ts");
+    if !events_path.exists() {
+        eprintln!("⚠️  生成的事件名文件不存在: {}", events_path.display());
+        eprintln!("   请先运行: cargo run -p schema-gen -- event-names");
         return;
     }
 
-    let generated_content =
-        fs::read_to_string(&generated_path).unwrap_or_else(|e| format!("读取生成文件失败: {}", e));
+    let actual = fs::read_to_string(&events_path).unwrap_or_default();
+    let missing: Vec<&str> = axagent_harness::IpcEventName::ALL
+        .iter()
+        .map(|e| e.as_str())
+        .filter(|name| !actual.contains(&format!("\"{name}\",")))
+        .collect();
 
-    let mut missing_types = Vec::new();
-
-    for (dto_name, _module) in IPC_DTO_TYPES {
-        if !generated_content.contains(&dto_name.to_string()) {
-            missing_types.push(format!("{}: 未在生成的 ipc.ts 中找到类型定义", dto_name));
-        }
-    }
-
-    if missing_types.is_empty() {
-        eprintln!("✅ Tauri IPC 类型同步检查通过");
-        eprintln!("   共检查 {} 个 DTO 类型", IPC_DTO_TYPES.len());
+    if missing.is_empty() {
+        eprintln!(
+            "✅ IPC 事件名契约同步检查通过（{} 个成员）",
+            axagent_harness::IpcEventName::ALL.len()
+        );
     } else {
-        eprintln!("⚠️  发现 {} 个类型同步问题:", missing_types.len());
-        for issue in &missing_types {
-            eprintln!("   - {}", issue);
+        eprintln!("⚠️  events.ts 落后于 IpcEventName，缺失 {} 个成员:", missing.len());
+        for name in &missing {
+            eprintln!("   - {name}");
         }
         eprintln!();
-        eprintln!("   建议: 运行 'cargo run -p schema-gen -- ipc-types' 重新生成类型定义");
+        eprintln!("   建议: 运行 'cargo run -p schema-gen -- event-names' 重新生成");
     }
 }

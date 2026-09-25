@@ -5,6 +5,7 @@ use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
 use axagent_astock_data::as_of::{self};
 use axagent_entities::reco_picks;
+use axagent_harness::IpcEventName;
 use axagent_harness::response_normalizer::ResponseNormalizer;
 use axagent_harness::types::{ChatResponse, ContentBlock};
 use axagent_rt_workflow::work_engine::{ProgressCallback, RunOptions, StepProgressEvent};
@@ -12,6 +13,11 @@ use axagent_runtime_core::DefaultResponseNormalizer;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
 use std::sync::Arc;
 use tauri::{Emitter, State};
+
+/// 趋势智选两链的模板 id 白名单（第 0 项为默认 = 原链）。
+/// 与种子侧对应：`serenity-screening`（`seed_serenity.rs`）/
+/// `serenity-screening-fast`（`seed_serenity_fast.rs`）。
+const SERENITY_TEMPLATE_IDS: [&str; 2] = ["serenity-screening", "serenity-screening-fast"];
 
 /// 从 Agent 节点输出中提取结构化 JSON。
 ///
@@ -853,7 +859,7 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
     }
 }
 
-/// 运行 Serenity 瓶颈筛选工作流（serenity-screening 模板）。
+/// 运行 Serenity 瓶颈筛选工作流（`serenity-screening` 模板）。
 ///
 /// 与 run_stock_workflow 不同：
 ///   - 不需要 stock_code 输入（自驱动，从市场数据发现趋势）
@@ -863,6 +869,15 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
 /// `run_id`：由前端生成的单次运行标识，原样回灌到所有事件（step/completed/failed）
 /// 的 `runId` 字段。前端据此丢弃其它运行（并发/残留）的事件，避免进度串台。
 /// 不传时退化为 workflow id，保持对旧调用方可用。
+///
+/// `template_id`：两链共用本命令，由前端按钮决定跑哪条 ——
+///   - 不传 / `serenity-screening`：原链（12 个 Agent 腿，慢但覆盖全）
+///   - `serenity-screening-fast`：快速链（确定性简报 + 单 Agent，见 `seed_serenity_fast.rs`）
+/// ⚠️ 只接受 `SERENITY_TEMPLATE_IDS` 白名单内的 id：本参数直接决定 `load_and_inject_template`
+/// 读哪一行模板，不做白名单就等于把「任意模板 id」开放给前端。
+/// ⚠️ 事件 `type` 两链**共用** `serenity-screening`（前端 `SerenityScreeningPanel` 的监听器
+/// 与 store 按该名注册）—— 两链产物是同一个业务对象（趋势智选候选），共用面板即零改前端；
+/// 单次运行用 `runId` 区分（并发/残留事件按它过滤），不需要按链拆事件名。
 #[agent_command(domain = "finance", safety = Caution, call_mode = StateOnly, description =  "运行Serenity瓶颈筛选工作流")]
 #[tauri::command]
 pub async fn run_serenity_screening(
@@ -871,8 +886,18 @@ pub async fn run_serenity_screening(
     as_of_date: Option<String>,
     themes: Option<Vec<String>>,
     run_id: Option<String>,
+    template_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let engine = Arc::clone(&state.work_engine);
+
+    // 模板 id 白名单校验（默认原链，保持对旧调用方可用）
+    let template_id = template_id.unwrap_or_else(|| SERENITY_TEMPLATE_IDS[0].to_string());
+    if !SERENITY_TEMPLATE_IDS.contains(&template_id.as_str()) {
+        return Err(format!(
+            "未知的趋势智选模板 id: {template_id}（可用: {}）",
+            SERENITY_TEMPLATE_IDS.join(", ")
+        ));
+    }
 
     // 解析 as_of_date（支持回放模式）
     let as_of_ctx = parse_asof_param(as_of_date.clone())?;
@@ -885,8 +910,9 @@ pub async fn run_serenity_screening(
         .await
         .map_err(|e| format!("重新种子化失败: {e}"))?;
 
-    // 1. 加载 serenity-screening 模板
-    let loaded = load_and_inject_template(state.harness.db(), "", "", "serenity-screening").await?;
+    // 1. 加载趋势智选模板（原链 / 快速链，由 template_id 决定）
+    let loaded = load_and_inject_template(state.harness.db(), "", "", template_id.as_str()).await?;
+    tracing::info!("[serenity] 运行模板: {template_id}");
 
     // 注入 vendor 启用状态过滤器（与 stock-analysis 主工作流一致）
     super::decision::inject_vendor_state(&state.astock_client, loaded.variables.as_ref());
@@ -923,8 +949,8 @@ pub async fn run_serenity_screening(
     let (max_concurrent, step_timeout, _total_timeout) =
         resolve_runtime_options(variables.as_deref());
 
-    // 2. 创建 Workflow
-    let wf_name = format!("serenity-screening-{}", chrono::Utc::now().timestamp_millis());
+    // 2. 创建 Workflow（实例名带模板标识：两链实例在 DB/日志中可区分）
+    let wf_name = format!("{template_id}-{}", chrono::Utc::now().timestamp_millis());
     // 统一 with_hooks 模式：模板未来声明钩子时不会静默丢失
     let workflow = engine
         .create_workflow_with_hooks(&wf_name, loaded.nodes, loaded.edges, loaded.hooks_config)
@@ -976,7 +1002,7 @@ pub async fn run_serenity_screening(
                 "errorCode": super::core::node_error_code(event.error_code.as_deref())
                     .map(|(c, _)| c),
             });
-            let _ = app.emit("serenity-screening-step", payload);
+            let _ = app.emit(IpcEventName::SerenityScreeningStep.as_str(), payload);
         })
     });
 
@@ -1037,7 +1063,26 @@ pub async fn run_serenity_screening(
                         .unwrap_or(false);
                     !is_empty_array
                 })
-                .or_else(|| wf_result.results.get("a-candidate-mapper").cloned())
+                .or_else(|| {
+                    // 快速链（`serenity-screening-fast`）修复：该链的 a-candidate-mapper 是
+                    // **Code 节点**（不再是 Agent），输出形如
+                    // `{"status":"executed","language":"rhai","result":{candidates,summary},...}`
+                    // ——**没有 `content` 字段**，`serenity_extract_from_node` 会走
+                    // 「节点输出无 content 字段」分支直接返回 Null。此处与上面 data-verifier
+                    // 分支同样先包装 `{"content": to_string(result)}`（`result` 的顶层键就是
+                    // `candidates`/`summary`，正是该提取函数认的路径）。
+                    // 原链该节点仍是 Agent（输出有 content）⇒ `result` 不存在，走 `else`
+                    // 原样透传，零影响。
+                    wf_result.results.get("a-candidate-mapper").map(|v| {
+                        if v.get("result").is_some() {
+                            serde_json::json!({
+                                "content": serde_json::to_string(&v["result"]).unwrap_or_default()
+                            })
+                        } else {
+                            v.clone()
+                        }
+                    })
+                })
                 .unwrap_or(serde_json::Value::Null);
             // 诊断：打印原始节点输出
             {
@@ -1406,7 +1451,7 @@ pub async fn run_serenity_screening(
                 "auto"
             };
             let _ = app_h.emit(
-                "serenity-screening-completed",
+                IpcEventName::SerenityScreeningCompleted.as_str(),
                 serde_json::json!({
                     "workflowId": wf_id_ret,
                     "runId": event_run_id.clone(),
@@ -1457,7 +1502,7 @@ pub async fn run_serenity_screening(
             let (code, _category) = super::core::workflow_error_code(&e);
             let err_msg = format!("Serenity 筛选工作流失败: {e}");
             let _ = app_h.emit(
-                "serenity-screening-completed",
+                IpcEventName::SerenityScreeningCompleted.as_str(),
                 serde_json::json!({
                     "workflowId": wf_id_ret,
                     "runId": event_run_id.clone(),

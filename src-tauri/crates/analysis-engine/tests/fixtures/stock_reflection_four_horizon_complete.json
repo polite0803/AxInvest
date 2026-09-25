@@ -1,0 +1,84 @@
+{
+  "case": "four_horizon_complete",
+  "stockAnalysis": {
+    "id": "analysis-four-horizon-001",
+    "stockCode": "600519",
+    "stockName": "贵州茅台",
+    "decisionAction": "买入",
+    "decisionTimeHorizon": "mid",
+    "decisionExpectedHoldingDays": 28,
+    "horizonPriceMap": {
+      "ultra_short": {
+        "expectedHoldingDays": 2,
+        "targetPrice": 1710.0,
+        "stopLoss": 1640.0
+      },
+      "short": {
+        "expectedHoldingDays": 5,
+        "targetPrice": 1760.0,
+        "stopLoss": 1600.0
+      },
+      "mid": {
+        "expectedHoldingDays": 28,
+        "targetPrice": 1850.0,
+        "stopLoss": 1540.0
+      },
+      "long": {
+        "expectedHoldingDays": 90,
+        "targetPrice": 2050.0,
+        "stopLoss": 1450.0
+      }
+    },
+    "horizonDecisions": {
+      "ultra_short": {
+        "action": "买入",
+        "positionPct": 0.2,
+        "confidence": 68,
+        "expectedHoldingDays": 2,
+        "targetPrice": 1710.0,
+        "stopLoss": 1640.0
+      },
+      "short": {
+        "action": "增持",
+        "positionPct": 0.3,
+        "confidence": 72,
+        "expectedHoldingDays": 5,
+        "targetPrice": 1760.0,
+        "stopLoss": 1600.0
+      },
+      "mid": {
+        "action": "买入",
+        "positionPct": 0.4,
+        "confidence": 78,
+        "expectedHoldingDays": 28,
+        "targetPrice": 1850.0,
+        "stopLoss": 1540.0
+      },
+      "long": {
+        "action": "持有",
+        "positionPct": 0.5,
+        "confidence": 61,
+        "expectedHoldingDays": 90,
+        "targetPrice": 2050.0,
+        "stopLoss": 1450.0
+      }
+    }
+  },
+  "reflection": {
+    "id": "reflection-four-horizon-001",
+    "originalAnalysisId": "analysis-four-horizon-001",
+    "status": "pending",
+    "rawReturn": null,
+    "alphaReturn": null,
+    "holdingDays": null,
+    "verdict": null
+  },
+  "performance": {
+    "id": "performance-four-horizon-001",
+    "strategyId": "reflection_verdict",
+    "period": "reflection",
+    "wasCorrect": 1,
+    "returnPct": 4.2,
+    "horizonPnlJson": null
+  }
+}

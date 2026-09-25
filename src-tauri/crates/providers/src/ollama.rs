@@ -93,6 +93,7 @@ openai_compat_local_adapter!(
                         ModelType::Chat => vec![ModelCapability::TextChat],
                         ModelType::Embedding => vec![],
                         ModelType::Voice => vec![ModelCapability::RealtimeVoice],
+                        ModelType::Decision => vec![],
                     };
                     // 从 details.family 推断部分能力
                     if let Some(ref details) = m.details

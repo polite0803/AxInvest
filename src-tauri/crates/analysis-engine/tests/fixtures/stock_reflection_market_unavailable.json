@@ -1,0 +1,43 @@
+{
+  "case": "market_unavailable",
+  "stockAnalysis": {
+    "id": "analysis-unavailable-001",
+    "stockCode": "688001",
+    "stockName": "华兴源创",
+    "decisionAction": "买入",
+    "decisionTimeHorizon": "ultra_short",
+    "decisionExpectedHoldingDays": 2,
+    "horizonPriceMap": {
+      "ultra_short": {
+        "expectedHoldingDays": 2,
+        "targetPrice": 28.5,
+        "stopLoss": 25.6
+      }
+    },
+    "horizonDecisions": {
+      "ultra_short": {
+        "action": "买入",
+        "positionPct": 0.2,
+        "confidence": 54,
+        "expectedHoldingDays": 2,
+        "targetPrice": 28.5,
+        "stopLoss": 25.6
+      }
+    }
+  },
+  "marketSnapshot": null,
+  "expected": {
+    "status": "unavailable",
+    "wasCorrect": null,
+    "returnPct": null,
+    "targetReached": null,
+    "mustNotUseZeroReturnAsFact": true
+  },
+  "reflection": {
+    "status": "pending",
+    "rawReturn": null,
+    "alphaReturn": null,
+    "holdingDays": null,
+    "verdict": null
+  }
+}

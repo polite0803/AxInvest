@@ -6,7 +6,7 @@
 // 设计原则：不依赖 LLM 解析，全确定性计算。
 //
 // [2026-09-13 实际行情改造] 新增「价格层对比」：
-//   —— 反思的对比基准由后端 `compute_market_snapshot()` 用**前复权 K 线**确定性算出
+//   —— 反思的对比基准由后端 `compute_market_snapshots()` 用**前复权 K 线**确定性算出
 //   （分析日 → 最新交易日），经 `actual_market_json` 变量注入。
 //   此前本脚本只消费一个标量 `raw_return_pct`，且批量入口长期传 0.0
 //   ⇒ `actual_direction` 恒「横盘」、`direction_match` 恒 false，
@@ -53,6 +53,16 @@
 //   sub_analysis_healthy — bool: 子工作流整体健康度
 
 fn is_unit(x) { type_of(x) == "()" }
+
+// ── 四周期 horizon_correct 辅助函数（批次 3）──
+fn is_bull(action) {
+    action == "买入" || action == "增持" || action == "持有"
+    || action == "BUY" || action == "买进" || action == "建仓"
+}
+fn is_bear(action) {
+    action == "卖出" || action == "减持"
+    || action == "SELL" || action == "卖空" || action == "清仓"
+}
 
 // 判断实际收益类别
 fn classify_return(raw_return, horizon) {
@@ -107,7 +117,7 @@ fn main() {
     let expected_days = if !is_unit(original_holding_days) { original_holding_days } else { 0 };
 
     // ── [实际行情] 价格层事实提取 ──
-    // 由后端 compute_market_snapshot() 用前复权 K 线确定性算出，经 actual_market_json 注入。
+    // 由后端 compute_market_snapshots() 用前复权 K 线确定性算出，经 actual_market_json 注入。
     // 全部做 is_unit 守卫：行情不可用时后端注入 {} ⇒ 这些键取到 ()，不能让脚本崩。
     let cur_price = if !is_unit(latest_price) { latest_price } else { 0.0 };
     let base_price = if !is_unit(entry_price) { entry_price } else { 0.0 };
@@ -206,12 +216,14 @@ fn main() {
             untrusted_sources.push(name);
         }
     };
-    sink(u_trader, "trader");
-    sink(u_research_mgr, "research-mgr");
-    sink(u_catalyst, "catalyst");
-    sink(u_debate_cnv, "debate-convergence");
-    sink(u_data_quality, "data-quality");
-    sink(u_risk_cnv, "risk-convergence");
+    // ⚠ sink 是闭包（`let f = |...|` ⇒ FnPtr）⇒ 必须 `sink.call(...)`；按名 `sink(...)`
+    //   会抛 Function not found，整段扫描静默失效（untrusted_count 恒 0）。
+    sink.call(u_trader, "trader");
+    sink.call(u_research_mgr, "research-mgr");
+    sink.call(u_catalyst, "catalyst");
+    sink.call(u_debate_cnv, "debate-convergence");
+    sink.call(u_data_quality, "data-quality");
+    sink.call(u_risk_cnv, "risk-convergence");
     let untrusted_count = untrusted_sources.len();
     let sub_analysis_healthy = untrusted_count == 0;
 
@@ -286,6 +298,70 @@ fn main() {
         `方向误判：预测${predicted_direction}但实际${actual_direction}(${raw_return}%)。后验=${post}，评分=${sc}`
     };
 
+    // ── 四周期 horizon_correct 确定性判定（批次 3）──
+    // 对每个周期独立判定：决策方向是否被实际行情验证。
+    // 判定逻辑与 deterministic_was_correct 同源（Rhai 移植），
+    // 结果写入 horizon_correct map，
+    // key=周期名，value=true/false/"neutral"/"immature"/"unavailable"。
+    let horizon_correct = #{};
+    let have_decisions =
+        !is_unit(horizon_decisions_json) && type_of(horizon_decisions_json) == "string";
+    let have_facts = !is_unit(horizon_market_facts);
+
+    if have_decisions && have_facts {
+        let decisions_map = if horizon_decisions_json.to_string() != "" {
+            parse_json(horizon_decisions_json.to_string())
+        } else {
+            #{}
+        };
+
+        let horizons = ["ultra_short", "short", "mid", "long"];
+
+        for h in horizons {
+            let snap = horizon_market_facts.get(h);
+            let decision_obj = decisions_map.get(h);
+
+            let have_snap = !is_unit(snap) && type_of(snap) == "map";
+            let have_dec = !is_unit(decision_obj) && type_of(decision_obj) == "map";
+
+            if !have_snap || !have_dec {
+                horizon_correct[h] = "unavailable";
+                continue;
+            }
+
+            let action_v = decision_obj.get("action");
+            let action_str = if !is_unit(action_v) && type_of(action_v) == "string" {
+                action_v.to_string()
+            } else {
+                horizon_correct[h] = "unavailable";
+                continue;
+            };
+
+            let within = snap.get("withinExpectedHorizon");
+            let is_within = !is_unit(within) && type_of(within) == "bool" && within;
+
+            if is_within {
+                horizon_correct[h] = "immature";
+                continue;
+            }
+
+            let ret = snap.get("netReturnPct");
+            let ret_val = if !is_unit(ret) {
+                if type_of(ret) == "f64" { ret }
+                else if type_of(ret) == "i64" { ret.to_float() }
+                else { 0.0 }
+            } else { 0.0 };
+
+            if is_bull(action_str) {
+                horizon_correct[h] = ret_val > 0.0;
+            } else if is_bear(action_str) {
+                horizon_correct[h] = ret_val < 0.0;
+            } else {
+                horizon_correct[h] = "neutral";
+            }
+        }
+    }
+
     #{
         "status": "ok",
         "direction_match": direction_match,
@@ -302,6 +378,7 @@ fn main() {
         "actual_holding_days": actual_days,
         "expected_holding_days": expected_days,
         "has_price_facts": has_price_facts,
+        "horizon_correct": horizon_correct,
         "price_context": #{
             "available": has_price_facts,
             "entry_price": base_price,

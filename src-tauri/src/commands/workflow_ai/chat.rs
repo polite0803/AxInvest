@@ -5,6 +5,7 @@ use crate::commands::error_code::provider as provider_err;
 use crate::commands::workflow_ai::NODE_SCHEMAS_DOC;
 use crate::commands::workflow_ai::UPSTREAM_EXTENSION_FOR_CHAT;
 use axagent_agent_macro::agent_command;
+use axagent_harness::IpcEventName;
 use axagent_harness::types::settings_chat::ChatContent;
 use axagent_harness::types::{
     ChatMessage, ChatRequest, ChatStreamChunk, ChatStreamErrorEvent, ChatStreamEvent,
@@ -257,7 +258,7 @@ dataTransformer, webhookSend, logging, llmClassifier, aggregator, email, end
                 };
 
                 let _ = app.emit(
-                    "workflow-ai-chat-chunk",
+                    IpcEventName::WorkflowAiChatChunk.as_str(),
                     ChatStreamEvent {
                         conversation_id: session_id.clone(),
                         message_id: message_id.clone(),
@@ -273,7 +274,7 @@ dataTransformer, webhookSend, logging, llmClassifier, aggregator, email, end
             },
             Err(e) => {
                 let _ = app.emit(
-                    "workflow-ai-chat-error",
+                    IpcEventName::WorkflowAiChatError.as_str(),
                     ChatStreamErrorEvent {
                         conversation_id: session_id.clone(),
                         message_id: message_id.clone(),

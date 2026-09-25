@@ -10,8 +10,9 @@
 //! 1. 注册进能力注册表（`agent.loop` 接缝，`CapabilityOrigin::BuiltIn`）
 //! 2. 注入 `WorkEngine`（`set_agent_turn_runner`）
 //!
-//! 使内置 Agent 主循环与外部插件平权：外部插件可通过 `register_external_agent_loop`
-//! 替换同一接缝，`AgentExecutor` 通过 trait 对象调用，实现「委托」语义。
+//! 使内置 Agent 主循环与外部插件平权：外部插件可经 `register_plugin_capability`
+//! 声明同一接缝（声明不占实现表，实现层替换留待 P3），`AgentExecutor` 通过 trait
+//! 对象调用，实现「委托」语义。
 //!
 //! ## 设计边界
 //!
@@ -146,6 +147,15 @@ impl AgentTurnRunner for WorkflowAgentTurnRunner {
         } else {
             request.model.clone()
         };
+
+        // ── 注入模型上下文窗口到 tool_extra，供 ContextRemaining 工具取预算 ──
+        // 口径与 `commands/agent/mod.rs` 一致：均取模型记录的 `max_tokens`。
+        if let Some(window) =
+            prov.models.iter().find(|m| m.model_id == model).and_then(|m| m.max_tokens)
+        {
+            tool_registry = tool_registry
+                .with_tool_extra(axagent_tools::context_keys::CONTEXT_WINDOW, window.to_string());
+        }
 
         // 会话：以 execution_id 为 conversation_id 创建/复用。
         let session = self

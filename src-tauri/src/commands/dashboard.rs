@@ -1,115 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::AppState;
-use crate::commands::error::ErrorResponse;
-use crate::commands::error_code::dashboard as dashboard_err;
 use axagent_agent_macro::agent_command;
-use axagent_runtime::dashboard_plugin::{DashboardPluginAdapter, DashboardPluginManifest};
-use axagent_runtime::dashboard_registry::DashboardPluginInfo;
+use axagent_plugins::types::DashboardPluginInfo;
 use sea_orm::entity::prelude::*;
 use serde::Serialize;
-use std::path::PathBuf;
 use tauri::State;
 
-fn default_plugins_dir() -> PathBuf {
-    axagent_storage::storage_paths::documents_root().join("dashboard-plugins")
-}
-
+/// 仪表盘面板清单 —— dashboard 合流后为 PluginManager 的只读投影
+/// （见 `PLAN-plugin-gap-closure.md` §3）。
+///
+/// 真相源是 `PluginManifest.dashboard_panels`；安装 / 启停 / 卸载等操作**直接复用
+/// `plugin_*` 命令**（它们自带护照索引同步与 UI 贡献撤销，此处不再造第二套生命周期）。
 #[agent_command(domain = dashboard, safety = Safe, call_mode = StateOnly, description = "列出仪表盘插件")]
 #[tauri::command]
 pub async fn dashboard_list_plugins(
     state: State<'_, AppState>,
 ) -> Result<Vec<DashboardPluginInfo>, String> {
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    Ok(registry.list_plugins().await)
-}
-
-#[agent_command(domain = dashboard, safety = Caution, call_mode = StateInput, description = "注册仪表盘插件")]
-#[tauri::command]
-pub async fn dashboard_register_plugin(
-    state: State<'_, AppState>,
-    manifest_json: String,
-) -> Result<(), String> {
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    let manifest: DashboardPluginManifest = serde_json::from_str(&manifest_json).map_err(|e| {
-        String::from(crate::commands::error::ErrorResponse::from_error(
-            e,
-            crate::commands::error::ErrorCategory::Unrecoverable,
-        ))
-    })?;
-
-    let frontend_entry = manifest.frontend_entry.clone();
-    let plugin = DashboardPluginAdapter::new(manifest, move |panel_id, props| {
-        let panel_info = serde_json::json!({
-            "panel_id": panel_id,
-            "props": props,
-            "frontend_entry": frontend_entry,
-        });
-        axagent_runtime::dashboard_plugin::RenderOutput::Html { content: panel_info.to_string() }
-    });
-
-    registry.register(Box::new(plugin)).await
-}
-
-#[agent_command(domain = dashboard, safety = Dangerous, call_mode = StateInput, description = "注销仪表盘插件")]
-#[tauri::command]
-pub async fn dashboard_unregister_plugin(
-    state: State<'_, AppState>,
-    plugin_id: String,
-) -> Result<(), String> {
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    registry.unregister(&plugin_id).await
-}
-
-#[agent_command(domain = dashboard, safety = Caution, call_mode = StateInput, description = "启用仪表盘插件")]
-#[tauri::command]
-pub async fn dashboard_enable_plugin(
-    state: State<'_, AppState>,
-    plugin_id: String,
-) -> Result<(), String> {
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    registry.enable(&plugin_id).await
-}
-
-#[agent_command(domain = dashboard, safety = Caution, call_mode = StateInput, description = "禁用仪表盘插件")]
-#[tauri::command]
-pub async fn dashboard_disable_plugin(
-    state: State<'_, AppState>,
-    plugin_id: String,
-) -> Result<(), String> {
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    registry.disable(&plugin_id).await
-}
-
-#[agent_command(domain = dashboard, safety = Safe, call_mode = StateInput, description = "渲染仪表盘面板")]
-#[tauri::command]
-pub async fn dashboard_render_panel(
-    state: State<'_, AppState>,
-    plugin_id: String,
-    panel_id: String,
-    props: std::collections::HashMap<String, serde_json::Value>,
-) -> Result<String, String> {
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    registry.render_panel(&plugin_id, &panel_id, props).await.map(|r| match r {
-        axagent_runtime::dashboard_plugin::RenderOutput::Html { content } => content,
-        axagent_runtime::dashboard_plugin::RenderOutput::Data { payload } => payload.to_string(),
-        axagent_runtime::dashboard_plugin::RenderOutput::Directive(d) => {
-            serde_json::to_string(&d).unwrap_or_default()
-        },
+    let plugin_manager = state.plugin_manager.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = plugin_manager.blocking_read();
+        manager.list_dashboard_plugins().map_err(|e| {
+            String::from(crate::commands::error::ErrorResponse::from_error(
+                e,
+                crate::commands::error::ErrorCategory::Unrecoverable,
+            ))
+        })
     })
+    .await
+    .map_err(|e| format!("dashboard list task panicked: {e}"))?
 }
 
-#[agent_command(domain = dashboard, safety = Caution, call_mode = StateOnly, description = "重新加载仪表盘插件")]
+#[agent_command(domain = dashboard, safety = Safe, call_mode = StateInput, description = "打开插件安装目录")]
 #[tauri::command]
-pub async fn dashboard_reload_plugins(state: State<'_, AppState>) -> Result<(), String> {
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    registry.reload().await
-}
-
-#[agent_command(domain = dashboard, safety = Safe, call_mode = Manual, description = "打开仪表盘插件目录")]
-#[tauri::command]
-pub async fn dashboard_open_plugins_folder(app: tauri::AppHandle) -> Result<(), String> {
-    let dir = default_plugins_dir();
+pub async fn dashboard_open_plugins_folder(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // 合流后仪表盘插件与其余插件同根：统一指向 PluginManager 的安装目录。
+    let dir = state.plugin_manager.read().await.install_root();
     std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create plugins dir: {}", e))?;
     use tauri_plugin_opener::OpenerExt;
     app.opener().reveal_item_in_dir(&dir).map_err(|e| {
@@ -118,68 +47,6 @@ pub async fn dashboard_open_plugins_folder(app: tauri::AppHandle) -> Result<(), 
             crate::commands::error::ErrorCategory::Unrecoverable,
         ))
     })
-}
-
-#[agent_command(domain = dashboard, safety = Caution, call_mode = StateInput, description = "安装仪表盘插件")]
-#[tauri::command]
-pub async fn dashboard_install_plugin(
-    state: State<'_, AppState>,
-    source_path: String,
-) -> Result<(), String> {
-    let source = PathBuf::from(&source_path);
-    if !source.exists() {
-        return Err(format!("Source path does not exist: {}", source_path));
-    }
-
-    let plugins_dir = default_plugins_dir();
-    std::fs::create_dir_all(&plugins_dir)
-        .map_err(|e| format!("Failed to create plugins dir: {}", e))?;
-
-    let plugin_dir_name =
-        source.file_stem().and_then(|s| s.to_str()).unwrap_or("plugin").to_string();
-    let dest_dir = plugins_dir.join(&plugin_dir_name);
-
-    if source.is_dir() {
-        if source.join("manifest.json").exists() {
-            let dest = dest_dir;
-            copy_dir_recursive(&source, &dest)?;
-        } else {
-            return Err(ErrorResponse::err(dashboard_err::NO_MANIFEST));
-        }
-    } else if source.extension().and_then(|e| e.to_str()) == Some("json") {
-        let manifest_str = std::fs::read_to_string(&source)
-            .map_err(|e| format!("Failed to read manifest: {}", e))?;
-        let manifest: DashboardPluginManifest =
-            serde_json::from_str(&manifest_str).map_err(|e| format!("Invalid manifest: {}", e))?;
-        let dest_dir = plugins_dir.join(&manifest.id);
-        std::fs::create_dir_all(&dest_dir)
-            .map_err(|e| format!("Failed to create plugin dir: {}", e))?;
-        std::fs::copy(&source, dest_dir.join("manifest.json")).map_err(|e| {
-            ErrorResponse::new(dashboard_err::COPY_MANIFEST_FAILED)
-                .with_detail(format!("Failed to copy manifest: {}", e))
-        })?;
-    } else {
-        return Err(ErrorResponse::err(dashboard_err::NO_MANIFEST));
-    }
-
-    let registry = state.dashboard_registry.as_ref().ok_or("Dashboard registry not initialized")?;
-    registry.reload().await
-}
-
-fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("Failed to create dir: {}", e))?;
-    for entry in std::fs::read_dir(src).map_err(|e| format!("Failed to read dir: {}", e))? {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path)
-                .map_err(|e| format!("Failed to copy file: {}", e))?;
-        }
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]

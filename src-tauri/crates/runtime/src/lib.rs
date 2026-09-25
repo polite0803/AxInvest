@@ -29,8 +29,6 @@ pub mod buddy;
 pub mod checkpoint;
 pub mod connection_pool;
 pub mod cron;
-pub mod dashboard_plugin;
-pub mod dashboard_registry;
 pub mod domain;
 pub mod error_recovery;
 mod file_ops;

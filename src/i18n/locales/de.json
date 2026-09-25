@@ -157,7 +157,7 @@
     "approvalOnRequest": "Vor sensiblen Operationen fragen (Standard)",
     "approvalNever": "Nie fragen, direkt ausführen",
     "approvalRules": "Gemerkte Genehmigungsregeln",
-    "approvalRulesHint": "Regeln, die nach einer Bash-Genehmigung automatisch gemerkt werden; passende Befehle werden nicht mehr abgefragt (Sandbox-Grenzen gelten weiterhin).",
+    "approvalRulesHint": "Regeln, die automatisch gemerkt werden, nachdem ein Bash-Befehl genehmigt wurde und erfolgreich endet (Exit-Code 0); passende Befehle werden nicht mehr abgefragt (Sandbox-Grenzen gelten weiterhin).",
     "approvalRulesEmpty": "Keine gemerkten Regeln",
     "approvalRuleRevoke": "Widerrufen",
     "approvalRuleRevoked": "Regel widerrufen"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "Wissensbasis durchsuchen fehlgeschlagen",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "Vektorspeicher-Vorgang fehlgeschlagen",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "Entitätenextraktion fehlgeschlagen",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "Kopieren des Dashboard-Manifests fehlgeschlagen",
-    "DASHBOARD_NO_MANIFEST": "Dashboard-Manifest nicht gefunden",
     "DESKTOP_CONNECTION_TIMEOUT": "Desktop-Verbindung Zeitüberschreitung",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "Senden der Desktop-Benachrichtigung fehlgeschlagen",
     "DOMAIN_UNREGISTERED": "Für die Domäne ist keine Ontologie registriert",

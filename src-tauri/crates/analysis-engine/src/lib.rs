@@ -55,7 +55,6 @@ pub mod monthly_report;
 // OPC 业务模块（融合自 opc-types + opc-dao，对齐股票业务架构）
 pub mod opc;
 pub mod paper_portfolio;
-pub mod plugin;
 pub mod portfolio_formula;
 pub mod portfolio_monitor;
 pub mod portfolio_risk;

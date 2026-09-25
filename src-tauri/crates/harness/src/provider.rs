@@ -270,7 +270,11 @@ pub trait ProviderAdapter: Send + Sync + std::any::Any {
 }
 
 /// 每次 LLM 调用携带的上下文信息
-#[derive(Debug, Clone)]
+///
+/// 可序列化：`model.provider.{type}` 接缝的远程门面（`plugins::worker`）要把整份
+/// 上下文编成 JSON 帧交给插件 worker，线格式按禁区 13 走 camelCase。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderRequestContext {
     pub api_key: String,
     pub key_id: String,

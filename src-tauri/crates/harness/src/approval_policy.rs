@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 审批策略（PLAN-codex-parity P0-2）
+//! 审批策略
 //!
 //! 对标 codex approval policy 四档语义，决策消费方为 Shell 类工具
 //! （`tools/src/approval.rs` 的 `decide`）：

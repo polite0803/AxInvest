@@ -115,15 +115,59 @@ impl PluginLifecycle {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// 仪表盘面板的落位区域（合流自 rt-dashboard 的强类型声明，见 `PLAN-plugin-gap-closure.md` §3）。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginDashboardPanelPosition {
+    #[default]
+    Main,
+    Sidebar,
+    Header,
+    Footer,
+}
+
+/// 仪表盘面板尺寸。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginDashboardPanelSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+    #[serde(rename = "fullWidth")]
+    FullWidth,
+}
+
+/// 插件贡献的仪表盘面板声明（`dashboard_panels`，manifest 唯一权威声明结构）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PluginDashboardPanel {
     pub id: String,
     pub title: String,
     pub component_name: String,
-    pub position: String,
-    pub size: String,
     #[serde(default)]
-    pub props: HashMap<String, String>,
+    pub position: PluginDashboardPanelPosition,
+    #[serde(default)]
+    pub size: PluginDashboardPanelSize,
+    #[serde(default)]
+    pub props: HashMap<String, Value>,
+    /// 前端入口标识（合流吸收 rt-dashboard `frontend_entry`；挂载消费点待前端贡献点立项）。
+    #[serde(default)]
+    pub frontend_entry: Option<String>,
+}
+
+/// 仪表盘面板清单条目 —— `dashboard_list_plugins` 门面的返回形状
+/// （PluginManager 是权威，本结构只是其清单的只读投影）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DashboardPluginInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub author: Option<String>,
+    pub enabled: bool,
+    pub panels: Vec<PluginDashboardPanel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -131,6 +175,9 @@ pub struct PluginManifest {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// 作者（合流吸收 rt-dashboard `DashboardPluginManifest.author`）。
+    #[serde(default)]
+    pub author: Option<String>,
     pub permissions: Vec<PluginPermission>,
     #[serde(rename = "defaultEnabled", default)]
     pub default_enabled: bool,
@@ -446,11 +493,13 @@ pub struct RawPluginAgentDef {
     pub system_prompt: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct RawPluginManifest {
     pub name: String,
     pub version: String,
     pub description: String,
+    #[serde(default)]
+    pub author: Option<String>,
     #[serde(default)]
     pub permissions: Vec<String>,
     #[serde(rename = "defaultEnabled", default)]

@@ -80,7 +80,7 @@ pub async fn save_settings(
         *guard = new_level;
     }
 
-    // ── OS 级沙箱策略（PLAN-codex-parity P0-1c）──
+    // ── OS 级沙箱策略──
     // sandbox_mode 变更后立即更新全局策略，下一次工具调用即生效（无需重启）。
     {
         let workspace =

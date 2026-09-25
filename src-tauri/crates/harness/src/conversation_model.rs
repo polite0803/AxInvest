@@ -29,7 +29,7 @@ pub enum ContentBlock {
     ToolResult { tool_use_id: String, tool_name: String, output: String, is_error: bool },
 }
 
-// ── 历史消息回灌（PLAN-codex-parity P0-3 跨进程上下文重建） ────────────────────
+// ── 历史消息回灌（跨进程上下文重建） ────────────────────
 
 /// 将 DB 消息行（`messages.parts` JSON + `content`）转换为运行时
 /// `ConversationMessage` 序列，供进程重启后重建 `Session.messages`。

@@ -805,7 +805,6 @@ dependencies = [
  "axagent-prompt-guard",
  "axagent-providers",
  "axagent-quant",
- "axagent-rt-dashboard",
  "axagent-rt-messaging",
  "axagent-rt-theme",
  "axagent-rt-webhook",
@@ -1371,6 +1370,7 @@ dependencies = [
  "async-trait",
  "axagent-harness",
  "axagent-plugin-proto",
+ "futures",
  "hex",
  "parking_lot",
  "serde",
@@ -1423,17 +1423,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "axagent-rt-dashboard"
-version = "2.9.9"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
  "tokio",
  "tracing",
 ]
@@ -1555,7 +1544,6 @@ dependencies = [
  "axagent-plugins",
  "axagent-prompt-guard",
  "axagent-providers",
- "axagent-rt-dashboard",
  "axagent-rt-messaging",
  "axagent-rt-theme",
  "axagent-rt-webhook",

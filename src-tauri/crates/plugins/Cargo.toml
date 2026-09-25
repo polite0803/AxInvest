@@ -9,6 +9,7 @@ anyhow = { workspace = true }
 async-trait = "0.1"
 axagent-harness = { path = "../harness" }
 axagent-plugin-proto = { path = "../plugin-proto" }
+futures = "0.3"
 hex = { workspace = true }
 parking_lot = "0.12"
 serde = { version = "1", features = ["derive"] }

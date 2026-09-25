@@ -13,9 +13,11 @@ const { Text, Paragraph, Title } = Typography;
 interface DashboardPanel {
   id: string;
   title: string;
-  component_name: string;
-  position: "Main" | "Sidebar" | "Header" | "Footer";
-  size: "Small" | "Medium" | "Large" | "FullWidth";
+  componentName: string;
+  position: "main" | "sidebar" | "header" | "footer";
+  size: "small" | "medium" | "large" | "fullWidth";
+  props?: Record<string, unknown>;
+  frontendEntry?: string;
 }
 
 interface DashboardPluginInfo {
@@ -29,10 +31,10 @@ interface DashboardPluginInfo {
 }
 
 const POSITION_COLORS: Record<string, string> = {
-  Main: "blue",
-  Sidebar: "green",
-  Header: "orange",
-  Footer: "purple",
+  main: "blue",
+  sidebar: "green",
+  header: "orange",
+  footer: "purple",
 };
 
 export function DashboardPluginsSettings() {
@@ -75,7 +77,8 @@ export function DashboardPluginsSettings() {
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      await invoke("dashboard_reload_plugins");
+      // dashboard 合流（PLAN-plugin-gap-closure §3）：清单是 PluginManager 的实时投影，
+      // 刷新即重新拉取，不再需要独立 reload 命令。
       await loadPlugins();
       message.success(t("settings.dashboardPlugins.refreshSuccess"));
     } catch (error) {
@@ -97,7 +100,7 @@ export function DashboardPluginsSettings() {
         setInstalling(false);
         return;
       }
-      await invoke("dashboard_install_plugin", { sourcePath: selected });
+      await invoke("plugin_install", { source: selected });
       await loadPlugins();
       message.success(t("settings.dashboardPlugins.enabled"));
     } catch (error) {
@@ -117,10 +120,11 @@ export function DashboardPluginsSettings() {
 
   const handleToggle = async (pluginId: string, enabled: boolean) => {
     try {
+      // 启停复用 plugin_* 命令（自带护照索引同步与 UI 贡献撤销）。
       if (enabled) {
-        await invoke("dashboard_enable_plugin", { pluginId });
+        await invoke("plugin_enable", { pluginId });
       } else {
-        await invoke("dashboard_disable_plugin", { pluginId });
+        await invoke("plugin_disable", { pluginId });
       }
       setPlugins((prev) => prev.map((p) => (p.id === pluginId ? { ...p, enabled } : p)));
       message.success(
@@ -136,7 +140,7 @@ export function DashboardPluginsSettings() {
   const handleUnload = async (pluginId: string) => {
     setUnloadingId(pluginId);
     try {
-      await invoke("dashboard_unregister_plugin", { pluginId });
+      await invoke("plugin_uninstall", { pluginId });
       setPlugins((prev) => prev.filter((p) => p.id !== pluginId));
       message.success(t("settings.dashboardPlugins.unloaded"));
     } catch (error) {

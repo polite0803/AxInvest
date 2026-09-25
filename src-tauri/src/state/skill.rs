@@ -1,8 +1,8 @@
 //! Skill / plugin / sandbox domain state.
 //!
 //! Owns the skill-execution machinery: skill evolution, skill proposal
-//! service, sandbox executor, dashboard / webhook registries, the
-//! plugin manager, the sync engine, the ToT / planner scratch state, the
+//! service, sandbox executor, the webhook registry,
+//! the plugin manager, the sync engine, the ToT / planner scratch state, the
 //! browser client, the various self-improvement engines
 //! (text-grad, auto-tool-creator, intrinsic motivation, coevolution,
 //! process-reward model, constitution), and the proactive service.
@@ -20,7 +20,6 @@ pub struct SkillState {
     pub sandbox_executor: Arc<axagent_trajectory::SkillSandboxExecutor>,
     #[cfg(target_os = "android")]
     pub sandbox_executor: Arc<()>,
-    pub dashboard_registry: Option<Arc<axagent_runtime::dashboard_registry::DashboardRegistry>>,
     pub webhook_subscription_manager:
         Option<Arc<axagent_runtime::webhook_subscription::WebhookSubscriptionManager>>,
     pub plugin_manager: Arc<tokio::sync::RwLock<axagent_plugins::PluginManager>>,
@@ -56,7 +55,6 @@ impl SkillState {
         skill_decomposer: Arc<tokio::sync::RwLock<axagent_trajectory::SkillDecomposer>>,
         skill_learning_manager: Arc<TokioRwLock<axagent_trajectory::SkillLearningManager>>,
         sandbox_executor: SandboxExecutorField,
-        dashboard_registry: Option<Arc<axagent_runtime::dashboard_registry::DashboardRegistry>>,
         webhook_subscription_manager: Option<
             Arc<axagent_runtime::webhook_subscription::WebhookSubscriptionManager>,
         >,
@@ -94,7 +92,6 @@ impl SkillState {
                     panic!("SandboxExecutorField mismatch (real provided on android)")
                 },
             },
-            dashboard_registry,
             webhook_subscription_manager,
             plugin_manager,
             sync_engine,

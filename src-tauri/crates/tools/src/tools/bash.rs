@@ -172,7 +172,7 @@ impl Tool for BashTool {
             // 命令超过 60 秒，建议使用 Monitor 或 run_in_background
         }
 
-        // ── 审批决策层（PLAN-codex-parity P0-2） ──
+        // ── 审批决策层 ──
         // 归并两层分类 → 按 ApprovalPolicy 决策（Untrusted/OnFailure/OnRequest/Never）。
         // Dangerous 是硬拒底线；AskUser 走 ask_user_bridge（前端 agent-ask-user UI）。
         let threat = crate::approval::merge_threat(
@@ -193,7 +193,7 @@ impl Tool for BashTool {
         let approval_policy = ctx.approval_policy.as_deref().copied().unwrap_or_default();
         let decision = crate::approval::decide(approval_policy, threat, sandbox_active);
 
-        // ── 审批规则层（PLAN-codex-parity R2-1） ──
+        // ── 审批规则层（PLAN-codex-parity-adoption R2-1） ──
         // 逐段评估整条命令：任一段被 `Forbidden` ⇒ 硬拒（不被其他段的 Allow 抵消）；
         // 全部段被 `Allow` ⇒ 免询问；未命中 / 仅部分命中 ⇒ 交回上面的策略裁决。
         let rules = match ctx.approval_rule_store.as_ref() {
@@ -217,9 +217,12 @@ impl Tool for BashTool {
                             ctx,
                             approval_policy,
                         )
-                        .await;
+                        .await
+                        .map(|(result, _)| result);
                     }
-                    return run_direct(cmd, working_dir, timeout_secs).await;
+                    return run_direct(cmd, working_dir, timeout_secs)
+                        .await
+                        .map(|(result, _)| result);
                 },
                 crate::approval_rules::RuleVerdict::Incomplete => {},
             }
@@ -233,22 +236,18 @@ impl Tool for BashTool {
                 if !ask_user_approval(ctx, cmd, &reason, false).await? {
                     return Err(ToolError::permission_denied("Bash", "用户拒绝执行该命令"));
                 }
-                // 批准后 best-effort 沉淀（R2-1）：同类命令下次免询问。
-                sediment_approved_rule(ctx, cmd, &rules).await;
                 // 批准：沙箱可用则沙箱内跑，否则直通
-                if sandbox_active {
+                let (result, exit_code) = if sandbox_active {
                     let policy = ctx.sandbox.clone().expect("sandbox_active 已保证非 None");
-                    return run_sandboxed(
-                        &policy,
-                        cmd,
-                        working_dir,
-                        timeout_secs,
-                        ctx,
-                        approval_policy,
-                    )
-                    .await;
-                }
-                return run_direct(cmd, working_dir, timeout_secs).await;
+                    run_sandboxed(&policy, cmd, working_dir, timeout_secs, ctx, approval_policy)
+                        .await?
+                } else {
+                    run_direct(cmd, working_dir, timeout_secs).await?
+                };
+                // 沉淀（R2-1 / §7 O-2 裁定 B）：**批准 + 退出码 0** 才落规则。
+                // 批准只证明「用户点过一次同意」，成功退出才证明「这条命令可用」。
+                sediment_approved_rule(ctx, cmd, &rules, exit_code).await;
+                return Ok(result);
             },
             crate::approval::ApprovalDecision::RunInsideSandbox => {
                 let policy = ctx.sandbox.clone().expect("sandbox_active 已保证非 None");
@@ -260,21 +259,24 @@ impl Tool for BashTool {
                     ctx,
                     approval_policy,
                 )
-                .await;
+                .await
+                .map(|(result, _)| result);
             },
             crate::approval::ApprovalDecision::RunOutside => {},
         }
 
-        run_direct(cmd, working_dir, timeout_secs).await
+        run_direct(cmd, working_dir, timeout_secs).await.map(|(result, _)| result)
     }
 }
 
 /// 直通执行路径：直接 spawn shell（无沙箱限制），行为与沙箱功能引入前一致。
+///
+/// 返回 `(结果, 退出码)` —— 退出码供调用侧判断「命令是否可用」（R2-1 沉淀前置）。
 async fn run_direct(
     cmd: &str,
     working_dir: &str,
     timeout_secs: u64,
-) -> Result<ToolResult, ToolError> {
+) -> Result<(ToolResult, i32), ToolError> {
     // 选择 shell
     let (shell, flag) = if cfg!(target_os = "windows") {
         ("cmd", "/C")
@@ -337,14 +339,11 @@ async fn run_direct(
         format!("\n\n## stderr\n{}", truncate_lossy(&stderr, MAX_OUTPUT_BYTES / 2))
     };
 
-    let result = format_shell_result(
-        output.status.code().unwrap_or(-1),
-        elapsed.as_secs_f64(),
-        &stdout_display,
-        &stderr_display,
-    );
+    let exit_code = output.status.code().unwrap_or(-1);
+    let result =
+        format_shell_result(exit_code, elapsed.as_secs_f64(), &stdout_display, &stderr_display);
 
-    Ok(ToolResult::success(result))
+    Ok((ToolResult::success(result), exit_code))
 }
 
 /// 统一输出格式（直通路径与沙箱路径共用）
@@ -377,7 +376,7 @@ fn truncate_lossy(s: &str, max: usize) -> String {
 ///
 /// `win_sandbox::SandboxedOutput` 与 `linux_sandbox::SandboxedOutput` 字段一致
 /// （exit_code/stdout/stderr），trait 方法把两者折叠为同一元组，让等待/超时/
-/// 格式化逻辑只写一份（P0-1c）。
+/// 格式化逻辑只写一份。
 trait SandboxWait {
     async fn wait(self) -> Result<(i32, Vec<u8>, Vec<u8>), String>;
 }
@@ -434,16 +433,23 @@ async fn wait_sandbox_result<C: SandboxWait>(
     Ok((ToolResult::success(result), exit_code, stderr_raw))
 }
 
-/// 批准后 best-effort 沉淀规则（PLAN-codex-parity R2-1）。
+/// 批准后沉淀规则（PLAN-codex-parity-adoption R2-1 / §7 O-2 裁定 B）。
 ///
-/// 沉淀门槛由 [`crate::approval_rules::safe_to_sediment`] 把关（单段命令 / 非改写型
+/// **前提：命令以退出码 0 结束。** 批准只说明用户放过这一次，成功退出才说明这类命令
+/// 在本机可用；失败的命令沉淀出来的是垃圾规则（下次照样免询问、照样失败）。
+/// 沉淀门槛另由 [`crate::approval_rules::safe_to_sediment`] 把关（单段命令 / 非改写型
 /// 包装器 / 写入后复算自证）。写失败只告警、不影响本次执行 —— 沉淀是「省一次询问」
 /// 的优化，不该让用户已批准的命令因此失败。
 async fn sediment_approved_rule(
     ctx: &ToolContext,
     cmd: &str,
     rules: &[axagent_harness::ApprovalRule],
+    exit_code: i32,
 ) {
+    if exit_code != 0 {
+        tracing::debug!(exit_code, "命令未成功退出，不沉淀审批规则（R2-1 / O-2 裁定 B）");
+        return;
+    }
     let Some(store) = ctx.approval_rule_store.as_ref() else {
         return;
     };
@@ -498,11 +504,11 @@ async fn ask_user_approval(
     }
 }
 
-/// 沙箱执行路径（PLAN-codex-parity P0-1）：
+/// 沙箱执行路径：
 /// Windows 走 capability SID 版受限令牌（`CreateRestrictedToken`）子进程；
 /// Linux 走 unshare 命名空间；其他平台显式报错（不做静默降级）。
 ///
-/// OnFailure 策略（P0-2）：沙箱内非零退出**且疑似沙箱拒绝**时询问用户，
+/// OnFailure 策略：沙箱内非零退出**且疑似沙箱拒绝**时询问用户，
 /// 批准后沙箱外重试一次。
 ///
 /// 拒绝判据见 `crate::sandbox_denial::is_likely_sandbox_denied`（退出码快路
@@ -515,7 +521,7 @@ async fn run_sandboxed(
     timeout_secs: u64,
     ctx: &ToolContext,
     approval_policy: axagent_harness::ApprovalPolicy,
-) -> Result<ToolResult, ToolError> {
+) -> Result<(ToolResult, i32), ToolError> {
     let cwd = std::path::Path::new(working_dir);
 
     #[cfg(any(windows, target_os = "linux"))]
@@ -550,7 +556,7 @@ async fn run_sandboxed(
         {
             return run_direct(cmd, working_dir, timeout_secs).await;
         }
-        Ok(result)
+        Ok((result, exit_code))
     }
 }
 
@@ -777,7 +783,7 @@ mod tests {
         ctx.ask_user_bridge = Some(bridge.clone());
         let policy = axagent_harness::SandboxPolicy::read_only("C:\\Windows");
 
-        let result = run_sandboxed(
+        let (result, exit_code) = run_sandboxed(
             &policy,
             "exit 1",
             "C:\\Windows",
@@ -788,6 +794,7 @@ mod tests {
         .await
         .expect("沙箱内 exit 1 应返回 Ok(ToolResult)");
 
+        assert_eq!(exit_code, 1, "沙箱内 exit 1 应原样回报退出码");
         assert!(!result.content.contains("退出码: 0"), "exit 1 应非零退出: {}", result.content);
         assert_eq!(
             bridge.asked.load(std::sync::atomic::Ordering::SeqCst),
@@ -809,7 +816,7 @@ mod tests {
         let policy = axagent_harness::SandboxPolicy::read_only("C:\\Windows");
 
         let cmd = format!("echo blocked > \"{}\"", probe.display());
-        let result = run_sandboxed(
+        let (result, _) = run_sandboxed(
             &policy,
             &cmd,
             "C:\\Windows",
@@ -898,8 +905,8 @@ mod tests {
         ctx.conversation_id = Some("conv-r2-1".to_string());
         ctx.approval_rule_store = Some(store.clone());
 
-        // 1. 批准 `git status` → 沉淀一条前缀规则（program + args_prefix）
-        sediment_approved_rule(&ctx, "git status", &[]).await;
+        // 1. 批准 + 成功退出（0）的 `git status` → 沉淀一条前缀规则（program + args_prefix）
+        sediment_approved_rule(&ctx, "git status", &[], 0).await;
         let rules = store.list().await;
         assert_eq!(rules.len(), 1, "批准后应沉淀 1 条规则: {rules:?}");
         assert_eq!(rules[0].program, "git");
@@ -916,13 +923,25 @@ mod tests {
         assert_eq!(evaluate("git push origin main", &rules), RuleVerdict::Incomplete);
 
         // 3. 多段 / 包装器 / 不可判定命令都不得沉淀（不得为被隐藏的第二条命令背书）
-        sediment_approved_rule(&ctx, "a && rm -rf /", &rules).await;
-        sediment_approved_rule(&ctx, "sudo rm -rf /", &rules).await;
-        sediment_approved_rule(&ctx, "ls ; rm -rf /", &rules).await;
+        sediment_approved_rule(&ctx, "a && rm -rf /", &rules, 0).await;
+        sediment_approved_rule(&ctx, "sudo rm -rf /", &rules, 0).await;
+        sediment_approved_rule(&ctx, "ls ; rm -rf /", &rules, 0).await;
         assert_eq!(store.list().await.len(), 1, "上述命令都不得沉淀出新规则");
 
+        // 3.5 退出码非 0 ⇒ 即使命令本身可沉淀也不落库（§7 O-2 裁定 B：
+        //     批准只证明「用户放过这一次」，成功退出才证明「这类命令可用」）
+        sediment_approved_rule(&ctx, "npm run build", &rules, 2).await;
+        sediment_approved_rule(&ctx, "npm run build", &rules, 0).await;
+        let rules_after_fail = store.list().await;
+        assert_eq!(
+            rules_after_fail.iter().filter(|r| r.program == "npm").count(),
+            1,
+            "失败的 npm run build 不得留下规则，成功的才落库: {rules_after_fail:?}"
+        );
+        store.revoke("npm", &["run".to_string(), "build".to_string()]).await.expect("撤销应成功");
+
         // 4. 幂等：重复沉淀同一 (program, args_prefix) 不产生第二条
-        sediment_approved_rule(&ctx, "git status", &rules).await;
+        sediment_approved_rule(&ctx, "git status", &rules, 0).await;
         assert_eq!(store.list().await.len(), 1, "同一规则键应幂等覆盖");
 
         // 5. 撤销后回到「规则管不了」——交回审批策略照常裁决

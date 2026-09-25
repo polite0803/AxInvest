@@ -31,7 +31,6 @@ members = [
   "crates/prompt-guard",
   "crates/providers",
   "crates/quant",
-  "crates/rt-dashboard",
   "crates/rt-messaging",
   "crates/rt-theme",
   "crates/rt-webhook",
@@ -124,7 +123,6 @@ devtools = ["tauri/devtools"]
 # cargo-machete's text-based scan cannot detect.
 ignored = [
   "axagent-prompt-guard",
-  "axagent-rt-dashboard",
   "axagent-rt-messaging",
   "axagent-rt-theme",
   "axagent-rt-webhook",
@@ -184,7 +182,6 @@ axagent-orchestrator = { path = "crates/orchestrator" }
 axagent-plugins = { path = "crates/plugins" }
 axagent-prompt-guard = { path = "crates/prompt-guard" }
 axagent-providers = { path = "crates/providers" }
-axagent-rt-dashboard = { path = "crates/rt-dashboard" }
 axagent-rt-messaging = { path = "crates/rt-messaging" }
 axagent-rt-theme = { path = "crates/rt-theme" }
 axagent-rt-webhook = { path = "crates/rt-webhook" }

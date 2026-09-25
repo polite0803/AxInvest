@@ -59,21 +59,26 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axagent_harness::platform_config::PlatformConfig;
+use axagent_harness::types::{
+    ChatRequest, ChatResponse, ChatStreamChunk, EmbedRequest, EmbedResponse, Model,
+};
 use axagent_harness::workflow_types::{NodeKind, WorkflowTemplateData};
 use axagent_harness::{
     AgentTurnRequest, AgentTurnResult, AgentTurnRunner, AxAgentError, BusinessRuleEvaluator,
-    CapabilityRegistry, DispatchMode, DispatchResult, DomainEvent, EffectHandle, EventCategory,
-    EventMatcher, EventSubscriber, EvolutionPopulation, EvolutionStats, InvariantViolation,
-    MessagePlatformAdapter, ModelVisibleContent, NodeExecutionSnapshot, PlatformMessageCallback,
+    CapabilityRegistry, ContextContributor, ContextRequest, DispatchMode, DispatchResult,
+    DomainEvent, EffectHandle, EventCategory, EventMatcher, EventSubscriber, EvolutionPopulation,
+    EvolutionStats, InvariantViolation, MessagePlatformAdapter, ModelVisibleContent,
+    NodeExecutionSnapshot, PlatformMessageCallback, ProviderAdapter, ProviderRequestContext,
     Reflection, RuleEvaluationOutcome, SandboxValidationResult, SeamInvoker, SessionLogInvariant,
     SubscriberVerdict, Tool, ToolCategory, ToolContext, ToolError, ToolResult, ToolSetProvider,
     WebhookDispatch, WebhookEvent, WorkflowEvolver, WorkflowExecutionRecord, WorkflowGenome,
@@ -92,12 +97,16 @@ use crate::sandbox::{SandboxConfig, apply_env_to_command, check_subprocess_permi
 
 /// 已支持远程化的接缝 ID 清单（与 PLAN §5.4 的 op 映射表一致）。
 ///
-/// 唯一例外：`platform.adapter` 的实际接缝 ID 是**动态**的
-/// `platform.adapter.{平台名}`（见 `CapabilityRegistry::register_platform_adapter`），
-/// 此处登记前缀，判定请用 [`is_supported_remote_seam`]。
+/// 三条**动态 ID** 接缝（多实例，后缀由插件声明）：`platform.adapter.{平台名}`
+/// （见 `CapabilityRegistry::register_platform_adapter`）、`model.provider.{类型名}`
+/// （见 `register_model_provider`）、`system.prompt.{段名}`（见
+/// `register_system_prompt_section`）。此处登记前缀，判定请用 [`is_supported_remote_seam`]，
+/// 后缀取回用各自的 `*_from_seam` 助手。
 ///
 /// `event.dispatch` **不在列**且不应加入：它本身是事件总线，插件对它只能是
 /// **订阅方**（声明里的 `subscribe`），不是提供方（PLAN §5.4 / §15.3）。
+///
+/// `session.store` 亦不在列：会话数据主权在宿主，远程化判据未定（`PLAN-plugin-gap-closure.md` §2）。
 pub const SUPPORTED_REMOTE_SEAMS: &[&str] = &[
     "agent.loop",
     "workflow.sandbox",
@@ -110,6 +119,8 @@ pub const SUPPORTED_REMOTE_SEAMS: &[&str] = &[
     "session.log.invariant",
     "platform.adapter",
     "tool.set",
+    "model.provider",
+    "system.prompt",
 ];
 
 /// UI action 回流的 op（宿主 → 插件方向，PLAN §10.5-2）。
@@ -132,6 +143,20 @@ pub fn is_supported_remote_seam(seam: &str) -> bool {
 /// 非该前缀返回 `None`。
 fn platform_name_from_seam(seam: &str) -> Option<&str> {
     seam.strip_prefix("platform.adapter.").filter(|name| !name.is_empty())
+}
+
+/// `model.provider.{类型名}` 的动态接缝 ID 取回 provider 类型名。
+///
+/// 非该前缀返回 `None`。
+fn provider_type_from_seam(seam: &str) -> Option<&str> {
+    seam.strip_prefix("model.provider.").filter(|name| !name.is_empty())
+}
+
+/// `system.prompt.{段名}` 的动态接缝 ID 取回段名。
+///
+/// 非该前缀返回 `None`。
+fn prompt_section_from_seam(seam: &str) -> Option<&str> {
+    seam.strip_prefix("system.prompt.").filter(|name| !name.is_empty())
 }
 
 /// worker 载入 / 调用期的错误。
@@ -678,6 +703,109 @@ impl HostPeer {
                         format!("不支持 `call_seam` 到接缝 `{seam}` 的 op `{other_op}`"),
                     ),
                 }
+            },
+            // `model.provider.{类型名}` 与 `system.prompt.{段名}` 同为**动态**接缝 ID，
+            // 只能用前缀守卫；返回值形状与对应门面**逐字对称**。
+            other if provider_type_from_seam(other).is_some() => {
+                let provider_type = provider_type_from_seam(other).unwrap_or_default();
+                let Some(adapter) = self.registry.get_model_provider(provider_type) else {
+                    return self.unavailable(seam);
+                };
+                // chat / list_models / embed 都必须带调用上下文（API key / base URL 等，
+                // 由发起方插件自备 —— 宿主不替它保管凭据）。
+                let context: ProviderRequestContext = match deserialize_arg(&args, "context", seam)
+                {
+                    Ok(context) => context,
+                    Err(response) => return response,
+                };
+                match op {
+                    "chat" => {
+                        let request: ChatRequest = match deserialize_arg(&args, "request", seam) {
+                            Ok(request) => request,
+                            Err(response) => return response,
+                        };
+                        let Some(result) = self.block_on(adapter.chat(&context, Arc::new(request)))
+                        else {
+                            return no_runtime(seam);
+                        };
+                        match result {
+                            Ok(response) => to_value("ChatResponse", &response),
+                            Err(e) => {
+                                FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string())
+                            },
+                        }
+                    },
+                    "list_models" => {
+                        let Some(result) = self.block_on(adapter.list_models(&context)) else {
+                            return no_runtime(seam);
+                        };
+                        match result {
+                            Ok(models) => to_value("models", &models),
+                            Err(e) => {
+                                FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string())
+                            },
+                        }
+                    },
+                    "embed" => {
+                        let request: EmbedRequest = match deserialize_arg(&args, "request", seam) {
+                            Ok(request) => request,
+                            Err(response) => return response,
+                        };
+                        let Some(result) = self.block_on(adapter.embed(&context, request)) else {
+                            return no_runtime(seam);
+                        };
+                        match result {
+                            Ok(response) => to_value("EmbedResponse", &response),
+                            Err(e) => {
+                                FrameResponse::error(error_codes::PLUGIN_CALL_FAILED, e.to_string())
+                            },
+                        }
+                    },
+                    other_op => FrameResponse::error(
+                        error_codes::SEAM_CALL_UNSUPPORTED,
+                        format!("不支持 `call_seam` 到接缝 `{seam}` 的 op `{other_op}`"),
+                    ),
+                }
+            },
+            other if prompt_section_from_seam(other).is_some() => {
+                let section = prompt_section_from_seam(other).unwrap_or_default();
+                let Some(contributor) = self
+                    .registry
+                    .list_system_prompt_sections()
+                    .into_iter()
+                    .find(|contributor| contributor.name() == section)
+                else {
+                    return self.unavailable(seam);
+                };
+                if op != "contribute" {
+                    return FrameResponse::error(
+                        error_codes::SEAM_CALL_UNSUPPORTED,
+                        format!("不支持 `call_seam` 到接缝 `{seam}` 的 op `{op}`"),
+                    );
+                }
+                let system_prompt: Vec<String> = match deserialize_arg(&args, "system_prompt", seam)
+                {
+                    Ok(prompt) => prompt,
+                    Err(response) => return response,
+                };
+                let extras: HashMap<String, String> =
+                    match deserialize_optional_arg(&args, "extras", seam) {
+                        Ok(Some(extras)) => extras,
+                        Ok(None) => HashMap::new(),
+                        Err(response) => return response,
+                    };
+                let ctx = ContextRequest {
+                    session_id: args.get("session_id").and_then(Value::as_str).unwrap_or_default(),
+                    conversation_id: args.get("conversation_id").and_then(Value::as_str),
+                    agent_id: args.get("agent_id").and_then(Value::as_str),
+                    system_prompt: &system_prompt,
+                    extras: &extras,
+                };
+                let Some(content) = self.block_on(contributor.contribute(&ctx)) else {
+                    return no_runtime(seam);
+                };
+                // `contribute` 本身就是 `Option<String>`：`null` = 该段跳过注入。
+                to_value("system.prompt 段内容", &content)
             },
             // 接缝不在 §5.4 表内，或 op 与映射表不符 —— 都算「不支持」，不猜、不兜底。
             other => FrameResponse::error(
@@ -1863,6 +1991,130 @@ impl MessagePlatformAdapter for RemotePlatformAdapter {
     }
 }
 
+/// `model.provider.{provider_type}` 接缝的远程门面。
+///
+/// **op 路由**：词汇由接缝固定（`chat` / `list_models` / `embed`），声明里的 `op`
+/// 仅作标记（与 `platform.adapter` 同规则）。`validate_key` 不占独立 op —— trait
+/// 默认实现即转 `list_models`，天然落在转发路径上。
+///
+/// **不支持面**：`chat_stream` 明确报错（帧协议一请求一响应，无流式分片复用，不假装有）；
+/// Realtime / 语音 / Batch job 族保持 trait 默认「不支持」实现，覆写与否由后续版本决定。
+struct RemoteProviderAdapter {
+    invoker: Arc<dyn SeamInvoker>,
+    /// provider 类型名 —— 接缝 ID 是动态的，错误信息必须能指到具体 provider。
+    provider_type: &'static str,
+}
+
+impl RemoteProviderAdapter {
+    /// 转发失败统一映射为 `Provider` 类错误，带接缝 ID 便于定位。
+    fn provider_err(&self, op: &str, reason: String) -> AxAgentError {
+        AxAgentError::Provider(format!(
+            "远程 provider `model.provider.{}` 的 `{op}` 调用失败：{reason}",
+            self.provider_type
+        ))
+    }
+}
+
+#[async_trait]
+impl ProviderAdapter for RemoteProviderAdapter {
+    async fn chat(
+        &self,
+        ctx: &ProviderRequestContext,
+        request: Arc<ChatRequest>,
+    ) -> axagent_harness::Result<ChatResponse> {
+        let args = json!({ "context": ctx, "request": &*request });
+        forward_remote(self.invoker.clone(), "chat", args, "ChatResponse")
+            .await
+            .map_err(|e| self.provider_err("chat", e))
+    }
+
+    fn chat_stream(
+        &self,
+        _ctx: &ProviderRequestContext,
+        _request: ChatRequest,
+        _cancel_token: Option<Arc<AtomicBool>>,
+    ) -> Pin<Box<dyn futures::Stream<Item = axagent_harness::Result<ChatStreamChunk>> + Send>> {
+        let provider_type = self.provider_type;
+        // 契约没有「不支持」哨兵值 ⇒ 唯一的诚实出口是第一帧即错误（与 harness 的
+        // `unsupported_speech_stream` 同形态），不得静默产出空流假装成功。
+        Box::pin(futures::stream::once(async move {
+            Err(AxAgentError::Provider(format!(
+                "`chat_stream` 暂不支持远程 provider `model.provider.{provider_type}`（帧协议为一请求一响应，无流式分片复用）"
+            )))
+        }))
+    }
+
+    async fn list_models(
+        &self,
+        ctx: &ProviderRequestContext,
+    ) -> axagent_harness::Result<Vec<Model>> {
+        let args = json!({ "context": ctx });
+        forward_remote(self.invoker.clone(), "list_models", args, "Vec<Model>")
+            .await
+            .map_err(|e| self.provider_err("list_models", e))
+    }
+
+    async fn embed(
+        &self,
+        ctx: &ProviderRequestContext,
+        request: EmbedRequest,
+    ) -> axagent_harness::Result<EmbedResponse> {
+        let args = json!({ "context": ctx, "request": request });
+        forward_remote(self.invoker.clone(), "embed", args, "EmbedResponse")
+            .await
+            .map_err(|e| self.provider_err("embed", e))
+    }
+}
+
+/// `system.prompt.{section}` 接缝的远程门面。
+///
+/// 单 op 接缝：按声明里的 `op`（约定为 `contribute`）转发。
+/// `contribute` 契约里**没有错误位**（`None` = 跳过注入），故远程失败只能按
+/// 「跳过」处理并**留日志** —— 否则表现为「提示词段神秘消失」。
+struct RemoteContextContributor {
+    invoker: Arc<dyn SeamInvoker>,
+    op: String,
+    /// 段名 —— trait `name()` 要求 `&'static str`，名字来自运行期帧 ⇒ 注册处 leak 一次
+    /// （与 `RemotePlatformAdapter::platform_name` 同一契约代价）。
+    section: &'static str,
+}
+
+#[async_trait]
+impl ContextContributor for RemoteContextContributor {
+    async fn contribute(&self, ctx: &ContextRequest<'_>) -> Option<String> {
+        let args = json!({
+            "session_id": ctx.session_id,
+            "conversation_id": ctx.conversation_id,
+            "agent_id": ctx.agent_id,
+            "system_prompt": ctx.system_prompt,
+            "extras": ctx.extras,
+        });
+        // 线格式：value 即段内容（字符串），`null` = 跳过。
+        match forward_remote::<Option<String>>(
+            self.invoker.clone(),
+            &self.op,
+            args,
+            "system.prompt 段内容",
+        )
+        .await
+        {
+            Ok(content) => content,
+            Err(e) => {
+                tracing::warn!(
+                    section = %self.section,
+                    error = %e,
+                    "远程系统提示词段获取失败，按「跳过注入」处理"
+                );
+                None
+            },
+        }
+    }
+
+    fn name(&self) -> &str {
+        self.section
+    }
+}
+
 // ───────────────────────── L1 事件桥 ─────────────────────────
 
 /// 把 worker 接上 `EventDispatchBus`：宿主收到事件时转发给插件，并把插件裁决送回总线。
@@ -2062,9 +2314,9 @@ impl std::fmt::Debug for LoadedPlugin {
 ///
 /// **op 路由**：单 op 接缝（`agent.loop` / `workflow.sandbox` / `workflow.business_rule` /
 /// `workflow.reflector` / `workflow.evolver` / `workflow.optimizer` / `message.callback` /
-/// `webhook.dispatch` / `tool.set`）取声明里的 `op`；多 op 接缝
-/// （`session.log.invariant` / `platform.adapter`）的 op 词汇由接缝固定，声明里的 `op`
-/// 仅作标记、不参与路由（对应门面直接用字面量转发）。
+/// `webhook.dispatch` / `tool.set` / `system.prompt.{段名}`）取声明里的 `op`；多 op 接缝
+/// （`session.log.invariant` / `platform.adapter` / `model.provider`）的 op 词汇由接缝固定，
+/// 声明里的 `op` 仅作标记、不参与路由（对应门面直接用字面量转发）。
 fn register_remote_seam(
     registry: &CapabilityRegistry,
     plugin_id: &str,
@@ -2087,6 +2339,18 @@ fn register_remote_seam(
         registry.register_platform_adapter(
             platform_name,
             Arc::new(RemotePlatformAdapter { invoker, platform_name: leaked }),
+        )
+    } else if let Some(provider_type) = provider_type_from_seam(seam) {
+        let leaked: &'static str = Box::leak(provider_type.to_string().into_boxed_str());
+        registry.register_model_provider(
+            provider_type,
+            Arc::new(RemoteProviderAdapter { invoker, provider_type: leaked }),
+        )
+    } else if let Some(section) = prompt_section_from_seam(seam) {
+        let leaked: &'static str = Box::leak(section.to_string().into_boxed_str());
+        registry.register_system_prompt_section(
+            section,
+            Arc::new(RemoteContextContributor { invoker, op, section: leaked }),
         )
     } else {
         match seam {
@@ -2208,6 +2472,8 @@ mod tests {
             "session.log.invariant",
             "platform.adapter",
             "tool.set",
+            "model.provider",
+            "system.prompt",
         ];
         for seam in expected {
             assert!(SUPPORTED_REMOTE_SEAMS.contains(&seam), "门面清单应含 {seam}");
@@ -2217,6 +2483,14 @@ mod tests {
         assert!(is_supported_remote_seam("platform.adapter.telegram"));
         // 前缀必须落在 `.` 边界上 —— `platform.adapternope` 不是合法接缝。
         assert!(!is_supported_remote_seam("platform.adapternope"));
+        // 本期新增的两条动态接缝（PLAN-plugin-gap-closure §3）同样按 `.` 边界判定。
+        assert!(is_supported_remote_seam("model.provider.deepseek"));
+        assert!(is_supported_remote_seam("system.prompt.memory"));
+        assert!(!is_supported_remote_seam("model.providernope"));
+        assert!(!is_supported_remote_seam("system.promptx"));
+        // 空后缀（只有前缀点）不是合法接缝 ID。
+        assert!(provider_type_from_seam("model.provider.").is_none());
+        assert!(prompt_section_from_seam("system.prompt.").is_none());
     }
 
     /// 单 op 接缝按**声明里的 `op`** 转发（此处以 `workflow.reflector` 为例）。
@@ -2375,6 +2649,138 @@ mod tests {
         assert_eq!(adapter.name(), "telegram");
         assert!(adapter.is_enabled(&PlatformConfig::default()));
         assert!(registry.get_platform_adapter("discord").is_none(), "未注册的平台名不应被命中");
+    }
+
+    /// `model.provider.{类型名}` 是**动态**接缝：按类型名注册与取回（多实例共存）。
+    #[test]
+    fn remote_model_provider_uses_dynamic_seam_id() {
+        let registry = CapabilityRegistry::new();
+        register_remote_seam(
+            &registry,
+            "demo@external",
+            "model.provider.demo",
+            "chat",
+            Arc::new(ScriptedInvoker::new(&[])),
+        )
+        .expect("model.provider 远程接缝应注册成功");
+        assert!(registry.get_model_provider("demo").is_some(), "应按类型名取回远程 provider");
+        assert!(registry.list_model_providers().contains(&"demo".to_string()));
+        assert!(registry.get_model_provider("other").is_none(), "未注册的类型名不应被命中");
+    }
+
+    /// `chat` / `list_models` 的线格式：args 带 `context` + `request`（chat），
+    /// value 即结果本体；`validate_key` 经 trait 默认实现落到 `list_models`。
+    #[tokio::test]
+    async fn remote_provider_chat_forwards_context_and_request() {
+        let registry = CapabilityRegistry::new();
+        let recorder = Arc::new(RecordingInvoker::new(
+            serde_json::to_value(ChatResponse::default()).expect("serialize"),
+        ));
+        register_remote_seam(
+            &registry,
+            "demo@external",
+            "model.provider.demo",
+            "chat",
+            recorder.clone(),
+        )
+        .expect("远程接缝应注册成功");
+        let adapter = registry.get_model_provider("demo").expect("远程 provider 应可取回");
+
+        let response = adapter.chat(&sample_provider_ctx(), Arc::new(ChatRequest::default())).await;
+        assert!(response.is_ok(), "chat 转发应成功：{response:?}");
+        let (op, args) = recorder.last_call().expect("应有一次转发");
+        assert_eq!(op, "chat");
+        // `ProviderRequestContext` 以 camelCase 出线（禁区 13），插件侧才能对上 TS 惯例。
+        assert_eq!(
+            args.get("context").and_then(|c| c.get("apiKey")).and_then(Value::as_str),
+            Some("sk-demo"),
+            "args.context 应为序列化后的调用上下文：{args}"
+        );
+        assert!(args.get("request").is_some(), "chat 必须把 ChatRequest 带给插件");
+
+        // `list_models` 只带 context；默认实现的 `validate_key` 复用它。
+        let lister = Arc::new(RecordingInvoker::new(json!([])));
+        let list_adapter = RemoteProviderAdapter { invoker: lister.clone(), provider_type: "demo" };
+        assert!(list_adapter.list_models(&sample_provider_ctx()).await.expect("应成功").is_empty());
+        let (op, _) = lister.last_call().expect("应有一次转发");
+        assert_eq!(op, "list_models");
+        assert!(
+            list_adapter
+                .validate_key(&sample_provider_ctx())
+                .await
+                .expect("默认实现应复用 list_models")
+        );
+    }
+
+    /// `chat_stream` 在远程门面是**明确不支持**面：第一帧即错误，绝不静默产出空流。
+    #[tokio::test]
+    async fn remote_provider_stream_is_explicitly_unsupported() {
+        let adapter = RemoteProviderAdapter {
+            invoker: Arc::new(ScriptedInvoker::new(&[])),
+            provider_type: "demo",
+        };
+        use futures::StreamExt;
+        let first = adapter
+            .chat_stream(&sample_provider_ctx(), ChatRequest::default(), None)
+            .next()
+            .await
+            .expect("应立即产出一帧");
+        let err = first.expect_err("chat_stream 必须明确失败");
+        assert!(err.to_string().contains("chat_stream"), "错误应指向方法名：{err}");
+    }
+
+    /// `system.prompt.{段名}` 是**动态**接缝：按段名注册，`contribute` 返回文本或跳过。
+    #[tokio::test]
+    async fn remote_system_prompt_section_contributes_or_skips() {
+        let registry = CapabilityRegistry::new();
+        register_remote_seam(
+            &registry,
+            "demo@external",
+            "system.prompt.stock_reflection",
+            "contribute",
+            Arc::new(ScriptedInvoker::new(&[("contribute", json!("插件注入的段落"))])),
+        )
+        .expect("system.prompt 远程接缝应注册成功");
+        // 裸前缀（无段名后缀）必须被拒 —— 动态接缝的 ID 必须带后缀。
+        register_remote_seam(
+            &registry,
+            "demo@external",
+            "system.prompt",
+            "contribute",
+            Arc::new(ScriptedInvoker::new(&[])),
+        )
+        .expect_err("裸前缀不是合法接缝 ID，应被拒绝");
+
+        let extras = HashMap::new();
+        let system_prompt = vec!["base".to_string()];
+        let ctx = ContextRequest {
+            session_id: "s1",
+            conversation_id: Some("c1"),
+            agent_id: None,
+            system_prompt: &system_prompt,
+            extras: &extras,
+        };
+        let contributor = registry
+            .list_system_prompt_sections()
+            .into_iter()
+            .find(|contributor| contributor.name() == "stock_reflection")
+            .expect("应按段名取回远程贡献者");
+        assert_eq!(contributor.contribute(&ctx).await.as_deref(), Some("插件注入的段落"));
+
+        // `null` = 该段本轮跳过（契约无错误位，不得升级成 panic）。
+        let skipper = RemoteContextContributor {
+            invoker: Arc::new(ScriptedInvoker::new(&[("contribute", Value::Null)])),
+            op: "contribute".to_string(),
+            section: "skipped",
+        };
+        assert_eq!(skipper.contribute(&ctx).await, None);
+        // 远程失败同样只能按「跳过」处理。
+        let broken = RemoteContextContributor {
+            invoker: Arc::new(ScriptedInvoker::new(&[])),
+            op: "contribute".to_string(),
+            section: "broken",
+        };
+        assert_eq!(broken.contribute(&ctx).await, None);
     }
 
     // ── 远程门面 / 事件桥：纯内存验证，不启动任何进程 ──
@@ -2810,6 +3216,46 @@ mod tests {
     impl SeamInvoker for ScriptedInvoker {
         fn invoke(&self, op: &str, _args: Value) -> Result<Value, String> {
             self.responses.get(op).cloned().ok_or_else(|| format!("未脚本化的 op：{op}"))
+        }
+    }
+
+    /// 记录最近一次转发的 `(op, args)` 并固定回放的测试替身 —— 用于断言**线格式**。
+    struct RecordingInvoker {
+        response: Value,
+        calls: parking_lot::Mutex<Vec<(String, Value)>>,
+    }
+
+    impl RecordingInvoker {
+        fn new(response: Value) -> Self {
+            Self { response, calls: parking_lot::Mutex::new(Vec::new()) }
+        }
+
+        fn last_call(&self) -> Option<(String, Value)> {
+            self.calls.lock().last().cloned()
+        }
+    }
+
+    impl SeamInvoker for RecordingInvoker {
+        fn invoke(&self, op: &str, args: Value) -> Result<Value, String> {
+            self.calls.lock().push((op.to_string(), args));
+            Ok(self.response.clone())
+        }
+    }
+
+    /// 构造一份最小可用的 provider 调用上下文（字段全填以便断言 camelCase 出线）。
+    fn sample_provider_ctx() -> ProviderRequestContext {
+        ProviderRequestContext {
+            api_key: "sk-demo".to_string(),
+            key_id: "k1".to_string(),
+            provider_id: "p1".to_string(),
+            base_url: Some("https://example.invalid/v1".to_string()),
+            api_path: None,
+            proxy_config: None,
+            custom_headers: None,
+            api_mode: None,
+            conversation: None,
+            previous_response_id: None,
+            store_response: None,
         }
     }
 

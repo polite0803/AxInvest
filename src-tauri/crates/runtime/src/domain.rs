@@ -81,11 +81,6 @@ pub mod providers {
     pub use axagent_providers::*;
 }
 
-/// Re-exports from `axagent-rt-dashboard` (运行态仪表盘)
-pub mod rt_dashboard {
-    pub use axagent_rt_dashboard::*;
-}
-
 /// Re-exports from `axagent-rt-messaging` (运行态消息)
 pub mod rt_messaging {
     pub use axagent_rt_messaging::*;

@@ -14,7 +14,6 @@ use axagent_analysis_engine::backtest::{
 use axagent_analysis_engine::backtest_feedback;
 use axagent_analysis_engine::evidence_weight::{self, EvidenceWeightReport, EvidenceWeightRequest};
 use axagent_analysis_engine::key_levels::{KeyLevelBacktestStats, KeyLevelTracker};
-use axagent_analysis_engine::plugin::AnalystPluginManager;
 use axagent_analysis_engine::portfolio_monitor::{
     self, CorrelationCell, PortfolioDashboard, StressTestBundle,
 };
@@ -2319,14 +2318,12 @@ pub async fn set_quote_watch_priority(
 
 // ── 自定义分析师插件 ──
 
-/// 列出所有自定义分析师插件
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "列出自定义分析师插件")]
-#[tauri::command]
-pub async fn list_custom_analysts()
--> Result<Vec<axagent_analysis_engine::plugin::CustomAnalyst>, String> {
-    let mgr = AnalystPluginManager::new("agency_experts/stock-analysis");
-    Ok(mgr.discover_custom_analysts())
-}
+// dashboard/专家合流（`PLAN-plugin-gap-closure.md` §3）：`list_custom_analysts` 已删除。
+// 原 `AnalystPluginManager` 是磁盘扫描的**第二真相源**（相对 CWD + `create_dir_all` 副作用），
+// 而 custom/*.md 早已由 `EMBEDDED_PROMPTS`（`commands/stock_analysis_setup/mod.rs`）编译期嵌入
+// 并种子化进 `agency_experts` 表 —— 运行链始终读 DB，该命令前端零调用。
+// 真相源统一为 `agency_experts` 表，列表 / 启停走 `agency_expert.rs` 的既有命令
+// （`list_agency_experts` 按 `source_dir` 聚合）。
 
 /// 生成股票分析 HTML 报告
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "生成股票分析HTML报告")]

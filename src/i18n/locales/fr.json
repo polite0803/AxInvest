@@ -157,7 +157,7 @@
     "approvalOnRequest": "Demander avant les opérations sensibles (par défaut)",
     "approvalNever": "Ne jamais demander, exécuter directement",
     "approvalRules": "Règles d'approbation mémorisées",
-    "approvalRulesHint": "Règles mémorisées après une approbation Bash ; les commandes correspondantes ne sont plus demandées (les limites du sandbox s'appliquent toujours).",
+    "approvalRulesHint": "Règles mémorisées après approbation d'une commande Bash et exécution réussie (code de sortie 0) ; les commandes correspondantes ne sont plus demandées (les limites du sandbox s'appliquent toujours).",
     "approvalRulesEmpty": "Aucune règle mémorisée",
     "approvalRuleRevoke": "Révoquer",
     "approvalRuleRevoked": "Règle révoquée"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "Échec de la recherche dans la base de connaissances",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "Échec de l'opération du magasin de vecteurs",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "Échec de l'extraction des entités",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "Échec de la copie du manifeste du tableau de bord",
-    "DASHBOARD_NO_MANIFEST": "Manifeste du tableau de bord introuvable",
     "DESKTOP_CONNECTION_TIMEOUT": "Délai de connexion au bureau dépassé",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "Échec de l'envoi de la notification de bureau",
     "DOMAIN_UNREGISTERED": "Le domaine n'a pas d'ontologie enregistrée",

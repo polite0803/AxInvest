@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Linux OS 级沙箱（PLAN-codex-parity P0-1c）
+//! Linux OS 级沙箱
 //!
 //! 基于 `unshare` 用户命名空间实现受限子进程执行：
 //! - `--user --map-root-user`：无特权用户命名空间（无需 root）；
@@ -11,7 +11,7 @@
 //! ## 当前边界（v1，如实界定）
 //! - **文件系统写保护未实现**：`ReadOnly` / `WorkspaceWrite` 目前在文件写入
 //!   方面同等宽松（unshare --mount 本身不阻断写）。阶段 2 计划接 Landlock
-//!   （kernel LSM，无特权可用）补齐写路径隔离，见 PLAN-codex-parity P0-1。
+//!   （kernel LSM，无特权可用）补齐写路径隔离。
 //! - 依赖系统 `unshare` 二进制（util-linux）；缺失或 user namespace 被禁用
 //!   （如某些容器环境）时 spawn 显式报错，**不做静默降级**。
 //!

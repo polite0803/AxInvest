@@ -157,7 +157,7 @@
     "approvalOnRequest": "Preguntar antes de operaciones sensibles (predeterminado)",
     "approvalNever": "Nunca preguntar, ejecutar directamente",
     "approvalRules": "Reglas de aprobación recordadas",
-    "approvalRulesHint": "Reglas recordadas tras aprobar un comando Bash; los comandos coincidentes ya no se preguntan (los límites del sandbox siguen aplicándose).",
+    "approvalRulesHint": "Reglas recordadas tras aprobar un comando Bash y que termine con éxito (código de salida 0); los comandos coincidentes ya no se preguntan (los límites del sandbox siguen aplicándose).",
     "approvalRulesEmpty": "No hay reglas recordadas",
     "approvalRuleRevoke": "Revocar",
     "approvalRuleRevoked": "Regla revocada"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "Error al buscar en la base de conocimiento",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "Error en la operación del almacén de vectores",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "Error al extraer entidades",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "Error al copiar el manifiesto del panel",
-    "DASHBOARD_NO_MANIFEST": "Manifiesto del panel no encontrado",
     "DESKTOP_CONNECTION_TIMEOUT": "Tiempo de espera de conexión de escritorio agotado",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "Error al enviar la notificación de escritorio",
     "DOMAIN_UNREGISTERED": "El dominio no tiene ontología registrada",

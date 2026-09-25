@@ -11,7 +11,6 @@ use axagent_harness::DefaultCapabilityRouter;
 use axagent_harness::PatternPromptGuard;
 use axagent_harness::fleet::FleetRepository;
 use axagent_plugins::PluginManager;
-use axagent_runtime::dashboard_registry::DashboardRegistry;
 use axagent_runtime::webhook_subscription::WebhookSubscriptionManager;
 use axagent_runtime_core::prompt_cache::PromptCache;
 use axagent_storage::cloud_storage::SyncEngine;
@@ -348,7 +347,6 @@ pub struct AppState {
     // （`axagent_harness::get_capability_registry().get_*()`），与 WorkEngine 同源。
     pub skill_decomposer: Arc<tokio::sync::RwLock<axagent_trajectory::SkillDecomposer>>,
     pub proactive_service: Arc<tokio::sync::RwLock<ProactiveService>>,
-    pub dashboard_registry: Option<Arc<DashboardRegistry>>,
     pub webhook_subscription_manager: Option<Arc<WebhookSubscriptionManager>>,
     /// Webhook 事件派发器（P0 修复：用于在工具执行 / Agent 结束时触发 webhook）
     pub webhook_event_emitter: Option<Arc<dyn axagent_harness::WebhookEventSink>>,

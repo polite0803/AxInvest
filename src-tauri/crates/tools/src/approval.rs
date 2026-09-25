@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 审批决策层（PLAN-codex-parity P0-2）
+//! 审批决策层
 //!
 //! 复用现有两层分类（`HeuristicClassifier` + `SecurityAnalyzer`），不重写检测
 //! 逻辑；本模块只做「分类结果 → 审批决策」的归并与决策，对标 codex 的

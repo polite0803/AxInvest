@@ -157,7 +157,7 @@
     "approvalOnRequest": "敏感操作执行前询问（默认）",
     "approvalNever": "从不询问，直接执行",
     "approvalRules": "已记住的审批规则",
-    "approvalRulesHint": "在 Bash 批准后自动记住的规则，命中后同类命令不再询问（沙箱限制仍然生效）。",
+    "approvalRulesHint": "在 Bash 命令批准且成功执行（退出码 0）后自动记住的规则，命中后同类命令不再询问（沙箱限制仍然生效）。",
     "approvalRulesEmpty": "暂无已记住的规则",
     "approvalRuleRevoke": "撤销",
     "approvalRuleRevoked": "规则已撤销"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "搜索知识库失败",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "向量存储操作失败",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "实体抽取失败",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "复制仪表盘清单失败",
-    "DASHBOARD_NO_MANIFEST": "仪表盘缺少清单文件",
     "DESKTOP_CONNECTION_TIMEOUT": "桌面连接超时",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "桌面通知发送失败",
     "DOMAIN_UNREGISTERED": "能力域未注册本体",

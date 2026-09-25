@@ -157,7 +157,7 @@
     "approvalOnRequest": "السؤال قبل العمليات الحساسة (افتراضي)",
     "approvalNever": "عدم السؤال مطلقًا والتنفيذ مباشرة",
     "approvalRules": "قواعد الموافقة المحفوظة",
-    "approvalRulesHint": "قواعد تُحفظ تلقائيًا بعد الموافقة على أمر Bash؛ الأوامر المطابقة لن تُطلب مرة أخرى (لا تزال حدود صندوق الحماية سارية).",
+    "approvalRulesHint": "قواعد تُحفظ تلقائيًا بعد الموافقة على أمر Bash ونجاحه (رمز الخروج 0)؛ الأوامر المطابقة لن تُطلب مرة أخرى (لا تزال حدود صندوق الحماية سارية).",
     "approvalRulesEmpty": "لا توجد قواعد محفوظة",
     "approvalRuleRevoke": "إلغاء",
     "approvalRuleRevoked": "تم إلغاء القاعدة"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "فشل البحث في قاعدة المعرفة",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "فشلت عملية تخزين المتجهات",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "فشل استخراج الكيانات",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "فشل نسخ بيان لوحة المعلومات",
-    "DASHBOARD_NO_MANIFEST": "بيان لوحة المعلومات غير موجود",
     "DESKTOP_CONNECTION_TIMEOUT": "انتهت مهلة اتصال سطح المكتب",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "فشل إرسال إشعار سطح المكتب",
     "DOMAIN_UNREGISTERED": "لا توجد أنطولوجيا مسجلة للمجال",

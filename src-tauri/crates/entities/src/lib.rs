@@ -251,7 +251,7 @@ pub mod gateway_message_queue;
 // 补实体 + 改为进程级连接注册后，审计真实落库。
 pub mod audit_log;
 
-// === 审批规则沉淀（PLAN-codex-parity R2-1）===
+// === 审批规则沉淀（PLAN-codex-parity-adoption R2-1）===
 //
 // 「批准沉淀」的落库表：Bash 工具在用户批准后写入，下次同类命令免询问。
 pub mod approval_rules;

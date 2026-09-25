@@ -961,7 +961,6 @@ mod tests_conversation {
                 axagent_trajectory::SkillDecomposer::new(),
             )),
             proactive_service: Arc::new(tokio::sync::RwLock::new(ProactiveService::new())),
-            dashboard_registry: None,
             webhook_subscription_manager: None,
             webhook_event_emitter: None,
             #[cfg(not(mobile))]
@@ -1182,7 +1181,7 @@ mod tests_conversation {
                 crate::state::SandboxExecutorField::Real(Arc::new(
                     axagent_trajectory::SkillSandboxExecutor::with_default_policy(),
                 )),
-                None,
+                // dashboard 合流：SkillState 不再持有 dashboard_registry（原此处第一个 None）
                 None,
                 Arc::new(tokio::sync::RwLock::new(axagent_plugins::PluginManager::new(
                     axagent_plugins::PluginManagerConfig::new(temp_dir.clone()),

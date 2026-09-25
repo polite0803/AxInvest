@@ -776,7 +776,6 @@ pub fn run() {
             let api_server_handle = state.api_server_handle.clone();
             let trajectory_cleanup_handle = state.trajectory_cleanup_handle.clone();
             let plugin_manager = state.plugin_manager.clone();
-            let dashboard_registry = state.dashboard_registry.clone();
             let task_manager = state.task_manager.clone();
 
             let shutdown_result = spawn_block_on("shutdown", async move {
@@ -813,21 +812,6 @@ pub fn run() {
                     {
                         Ok(()) => tracing::info!("[shutdown] 所有插件已停止"),
                         Err(e) => tracing::warn!("[shutdown] 插件停止任务异常: {e}"),
-                    }
-
-                    // 停止 Dashboard 插件
-                    if let Some(registry) = dashboard_registry {
-                        tracing::info!("[shutdown] 正在卸载 Dashboard 插件...");
-                        let plugins = registry.list_plugins().await;
-                        for plugin_info in plugins {
-                            if let Err(e) = registry.unregister(&plugin_info.id).await {
-                                tracing::warn!(
-                                    "[shutdown] 卸载 Dashboard 插件 {} 失败: {e}",
-                                    plugin_info.id
-                                );
-                            }
-                        }
-                        tracing::info!("[shutdown] Dashboard 插件已卸载");
                     }
 
                     // 集中式 TaskManager 兜底清理

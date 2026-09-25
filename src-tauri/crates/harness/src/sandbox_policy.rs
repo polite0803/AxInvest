@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 沙箱策略 — 权威 DTO（PLAN-codex-parity P0-1a）
+//! 沙箱策略 — 权威 DTO
 //!
 //! 对标 codex 的 sandbox mode 三档语义：
 //! - `ReadOnly`：只读，禁止一切写入与网络
@@ -85,7 +85,7 @@ impl SandboxPolicy {
         }
     }
 
-    /// 从 settings 的 `sandbox_mode` 字符串构造策略（PLAN-codex-parity P0-1c）。
+    /// 从 settings 的 `sandbox_mode` 字符串构造策略。
     ///
     /// - `read-only` → [`SandboxPolicy::read_only`]
     /// - `workspace-write` → [`SandboxPolicy::workspace_write`]

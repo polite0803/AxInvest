@@ -23,7 +23,6 @@ axagent-orchestrator = { path = "../orchestrator" }
 axagent-plugins = { path = "../plugins" }
 axagent-prompt-guard = { path = "../prompt-guard" }
 axagent-providers = { path = "../providers" }
-axagent-rt-dashboard = { path = "../rt-dashboard" }
 axagent-rt-messaging = { path = "../rt-messaging" }
 axagent-rt-theme = { path = "../rt-theme" }
 axagent-rt-webhook = { path = "../rt-webhook" }

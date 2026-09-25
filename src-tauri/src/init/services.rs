@@ -522,7 +522,6 @@ fn init_mcp_oauth(state: &AppState) {
 
 fn start_plugins(state: &AppState) {
     let plugin_manager = state.plugin_manager.clone();
-    let dashboard_registry = state.dashboard_registry.clone();
 
     tauri::async_runtime::spawn(async move {
         tracing::info!("Initializing plugin system...");
@@ -549,14 +548,8 @@ fn start_plugins(state: &AppState) {
 
         drop(manager);
 
-        if let Some(registry) = dashboard_registry {
-            if let Err(e) = registry.reload().await {
-                tracing::warn!("Failed to reload dashboard plugins: {e}");
-            } else {
-                let count = registry.list_plugins().await.len();
-                tracing::info!("Loaded {count} dashboard plugin(s)");
-            }
-        }
+        // dashboard 合流（PLAN-plugin-gap-closure §3）：仪表盘面板清单是 PluginManager
+        // 的实时只读投影，不再需要独立的 registry reload。
 
         tracing::info!("Plugin system initialization complete");
     });

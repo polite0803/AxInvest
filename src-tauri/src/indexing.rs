@@ -1216,7 +1216,7 @@ pub async fn load_hybrid_config(
 /// 之所以 `false` 也要显式处理：注入点是**可替换槽位**（`RwLock<Option<Arc<..>>>`）而非
 /// `OnceLock`，用户把开关关掉后必须能真的失效 —— 否则就是个关不掉的假开关。
 ///
-/// ⚠ 2026-09-15 补：本函数是**声明了却从未存在**的符号。`services.rs:2080` 与
+/// ⚠ 2026-09-15 补：本函数是**声明了却从未存在**的符号。`services.rs:2079` 与
 /// `src/commands/settings.rs:111` 两个调用点早已写好、`services.rs` 的注释也已写「逻辑已抽成
 /// `indexing::sync_entity_graph_provider`」，但从 `indexing.rs` 的视角看**零定义**
 /// （三个文件属同一次编辑簇 13:37–13:38，定义那一步没落地）。

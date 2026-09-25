@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 审批规则（PLAN-codex-parity R2-1）—— 「批准沉淀」的落库表。
+//! 审批规则（PLAN-codex-parity-adoption R2-1）—— 「批准沉淀」的落库表。
 //!
 //! 主键 `id` 由 `program` + `args_prefix` 派生（见 wiring 层
 //! `init/approval_rule_store.rs` 的 `rule_id`），使同一规则的 upsert 幂等：

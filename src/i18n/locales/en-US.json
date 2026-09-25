@@ -157,7 +157,7 @@
     "approvalOnRequest": "Ask before sensitive operations (default)",
     "approvalNever": "Never ask, run directly",
     "approvalRules": "Remembered approval rules",
-    "approvalRulesHint": "Rules remembered after you approve a Bash command; matching commands are no longer asked again (sandbox limits still apply).",
+    "approvalRulesHint": "Rules remembered after a Bash command is approved and exits successfully (exit code 0); matching commands are no longer asked again (sandbox limits still apply).",
     "approvalRulesEmpty": "No remembered rules",
     "approvalRuleRevoke": "Revoke",
     "approvalRuleRevoked": "Rule revoked"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "Failed to search knowledge base",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "Vector store operation failed",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "Failed to extract entities",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "Failed to copy dashboard manifest",
-    "DASHBOARD_NO_MANIFEST": "Dashboard manifest not found",
     "DESKTOP_CONNECTION_TIMEOUT": "Desktop connection timed out",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "Failed to send desktop notification",
     "DOMAIN_UNREGISTERED": "Domain has no registered ontology",

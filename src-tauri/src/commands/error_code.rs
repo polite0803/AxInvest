@@ -389,14 +389,6 @@ pub mod proxy {
     pub const ADDRESS_NOT_ALLOWED: &str = "PROXY_ADDRESS_NOT_ALLOWED";
 }
 
-/// 仪表盘相关错误码
-pub mod dashboard {
-    /// 目录不包含manifest.json
-    pub const NO_MANIFEST: &str = "DASHBOARD_NO_MANIFEST";
-    /// 复制manifest失败
-    pub const COPY_MANIFEST_FAILED: &str = "DASHBOARD_COPY_MANIFEST_FAILED";
-}
-
 /// 文件操作相关错误码
 pub mod file {
     /// 路径为空
@@ -449,7 +441,7 @@ pub mod marketplace {
     pub const PUBLISH_FAILED: &str = "MARKETPLACE_PUBLISH_FAILED";
 }
 
-/// 审批规则（PLAN-codex-parity R2-1）相关错误码
+/// 审批规则（PLAN-codex-parity-adoption R2-1）相关错误码
 pub mod approval {
     /// 审批规则存储未初始化（启动装配未完成或注入失败）
     pub const RULE_STORE_UNAVAILABLE: &str = "APPROVAL_RULE_STORE_UNAVAILABLE";

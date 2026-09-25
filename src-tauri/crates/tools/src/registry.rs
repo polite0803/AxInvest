@@ -28,7 +28,7 @@ use std::time::Instant;
 
 pub type SkillToolHandler = Box<dyn Fn(&str) -> Result<String, crate::ToolError> + Send + Sync>;
 
-// ── 全局沙箱策略（PLAN-codex-parity P0-1c） ──
+// ── 全局沙箱策略 ──
 //
 // Settings 的 `sandbox_mode` 在启动初始化 / `save_settings` 时写入这里；
 // 所有 `UnifiedToolRegistry`（含每次请求临时 `new()` 的实例）构建 ToolContext
@@ -50,7 +50,7 @@ pub fn global_sandbox_policy() -> Option<Arc<axagent_harness::SandboxPolicy>> {
     GLOBAL_SANDBOX_POLICY.read().clone()
 }
 
-// ── 全局审批策略（PLAN-codex-parity P0-2） ──
+// ── 全局审批策略 ──
 //
 // 与沙箱策略同款模式：Settings 的 `approval_policy` 在启动初始化 /
 // `save_settings` 时写入；ToolContext 构建时回退读取。实例显式设置优先。
@@ -68,7 +68,7 @@ pub fn global_approval_policy() -> Option<Arc<axagent_harness::ApprovalPolicy>> 
     GLOBAL_APPROVAL_POLICY.read().clone()
 }
 
-// ── 全局审批规则存储（PLAN-codex-parity R2-1） ──
+// ── 全局审批规则存储（PLAN-codex-parity-adoption R2-1） ──
 //
 // 与上面两个全局策略同款模式：wiring 层在启动初始化时把 sea_orm 实现注入这里，
 // 所有 `UnifiedToolRegistry` 构建 ToolContext 时回退读取，无需逐站点注入。
@@ -566,13 +566,13 @@ pub struct UnifiedToolRegistry {
     /// 仅存在于 `runtime_tool_sources` 中的工具才允许被 `unregister_runtime_tool` 卸载，
     /// 原生内置工具与 MCP 工具不受影响。
     pub runtime_tool_sources: HashMap<String, String>,
-    /// OS 级沙箱策略（PLAN-codex-parity P0-1）—— 透传进 `ToolContext.sandbox`，
+    /// OS 级沙箱策略—— 透传进 `ToolContext.sandbox`，
     /// Shell 类工具据此决定是否在受限子进程中执行。`None` 保持旧行为。
     pub sandbox_policy: Option<Arc<axagent_harness::SandboxPolicy>>,
-    /// 审批策略（PLAN-codex-parity P0-2）—— 透传进 `ToolContext.approval_policy`，
+    /// 审批策略—— 透传进 `ToolContext.approval_policy`，
     /// Shell 类工具据此决定敏感操作是跑、问用户还是拒绝。`None` 走全局/默认 `on-request`。
     pub approval_policy: Option<Arc<axagent_harness::ApprovalPolicy>>,
-    /// 审批规则存储（PLAN-codex-parity R2-1）—— 透传进 `ToolContext.approval_rule_store`。
+    /// 审批规则存储（PLAN-codex-parity-adoption R2-1）—— 透传进 `ToolContext.approval_rule_store`。
     ///
     /// Shell 类工具据此做「规则免询问」与「批准后沉淀」。`None` 走全局 store；
     /// 全局也为 `None` 时不查规则、不沉淀（保持旧行为）。
@@ -636,7 +636,7 @@ impl UnifiedToolRegistry {
         self.sandbox = Arc::new(crate::AccessPolicyValidator::new(config));
     }
 
-    /// 设置 OS 级沙箱策略（PLAN-codex-parity P0-1）。
+    /// 设置 OS 级沙箱策略。
     ///
     /// 与 [`Self::configure_sandbox`]（路径/命令白名单校验器）互补：
     /// 本策略由 Shell 类工具消费，决定子进程是否在受限 token 下执行。
@@ -644,12 +644,12 @@ impl UnifiedToolRegistry {
         self.sandbox_policy = Some(Arc::new(policy));
     }
 
-    /// 设置审批策略（PLAN-codex-parity P0-2），透传进 `ToolContext.approval_policy`。
+    /// 设置审批策略，透传进 `ToolContext.approval_policy`。
     pub fn set_approval_policy(&mut self, policy: axagent_harness::ApprovalPolicy) {
         self.approval_policy = Some(Arc::new(policy));
     }
 
-    /// 设置审批规则存储（PLAN-codex-parity R2-1），透传进 `ToolContext.approval_rule_store`。
+    /// 设置审批规则存储（PLAN-codex-parity-adoption R2-1），透传进 `ToolContext.approval_rule_store`。
     ///
     /// 通常无需调用 —— wiring 层用 [`set_global_approval_rule_store`] 注入一次即可，
     /// 所有实例自动回退读取。本方法供测试 / 特殊会话覆盖全局值。

@@ -157,7 +157,7 @@
     "approvalOnRequest": "敏感操作執行前詢問（預設）",
     "approvalNever": "從不詢問，直接執行",
     "approvalRules": "已記住的審批規則",
-    "approvalRulesHint": "在 Bash 批准後自動記住的規則，命中後同類命令不再詢問（沙箱限制仍然生效）。",
+    "approvalRulesHint": "在 Bash 命令批准且成功執行（退出碼 0）後自動記住的規則，命中後同類命令不再詢問（沙箱限制仍然生效）。",
     "approvalRulesEmpty": "暫無已記住的規則",
     "approvalRuleRevoke": "撤銷",
     "approvalRuleRevoked": "規則已撤銷"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "搜尋知識庫失敗",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "向量儲存操作失敗",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "實體抽取失敗",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "複製儀表板清單失敗",
-    "DASHBOARD_NO_MANIFEST": "儀表板缺少清單檔案",
     "DESKTOP_CONNECTION_TIMEOUT": "桌面連線逾時",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "桌面通知傳送失敗",
     "DOMAIN_UNREGISTERED": "能力域未註冊本體",

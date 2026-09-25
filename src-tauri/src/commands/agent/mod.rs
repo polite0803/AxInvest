@@ -3221,7 +3221,7 @@ pub async fn agent_resume(
     Ok(())
 }
 
-/// 从 session_events 事件流诊断跨进程中断的会话（PLAN-codex-parity P0-3e）。
+/// 从 session_events 事件流诊断跨进程中断的会话。
 ///
 /// 只读诊断命令：读取 `session_events` 表，按 seq 排序后判断最后一个
 /// TurnStarted 是否有配对的 TurnEnded。返回 JSON 含事件摘要 + 是否可恢复。

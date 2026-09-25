@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! session_events 表 —— 跨进程 Resume 事件流（PLAN-codex-parity P0-3）。
+//! session_events 表 —— 跨进程 Resume 事件流。
 //!
 //! 事件类型：TurnStarted / Message / ToolCall / ToolResult / Compacted / TurnEnded / Interrupted。
 //! 与 messages 表（对话文本）互补：session_events 只存**执行态**事件，不存 LLM 输出。

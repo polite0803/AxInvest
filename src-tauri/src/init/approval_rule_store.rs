@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 审批规则存储的 sea_orm 实现（PLAN-codex-parity R2-1，wiring 层）。
+//! 审批规则存储的 sea_orm 实现（PLAN-codex-parity-adoption R2-1，wiring 层）。
 //!
 //! `tools` 是 hybrid crate，不得依赖 entities / dao，故落库实现只能放在 wiring：
 //! 本模块实现 [`axagent_harness::ApprovalRuleStore`]，由 `init/state.rs` 经

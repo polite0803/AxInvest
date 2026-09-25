@@ -616,7 +616,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         } else {
             None
         };
-        // ── OS 级沙箱策略（PLAN-codex-parity P0-1c）──
+        // ── OS 级沙箱策略──
         // 从 Settings 的 sandbox_mode 构造全局策略：此后所有 ToolRegistry（含
         // 每次请求临时 new() 的实例）构建 ToolContext 时自动回退读取。
         // 默认 "danger-full-access" → 受限子进程不启用，行为与既往一致。
@@ -636,7 +636,7 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         axagent_tools::registry::set_global_approval_policy(
             axagent_harness::ApprovalPolicy::from_policy_str(&app_settings.approval_policy),
         );
-        // ── 审批规则存储（PLAN-codex-parity R2-1）──
+        // ── 审批规则存储（PLAN-codex-parity-adoption R2-1）──
         // 与上面两个全局策略同款注入：Bash 工具据此做「规则免询问」与「批准后沉淀」。
         // 落库实现在 wiring（tools 是 hybrid，不得依赖 entities / dao）。
         axagent_tools::registry::set_global_approval_rule_store(std::sync::Arc::new(
@@ -950,15 +950,8 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         Arc::new(tokio::sync::RwLock::new(axagent_trajectory::SkillDecomposer::new()));
     let proactive_service: Arc<tokio::sync::RwLock<ProactiveService>> =
         Arc::new(tokio::sync::RwLock::new(ProactiveService::new()));
-    let dashboard_registry: Option<Arc<axagent_runtime::dashboard_registry::DashboardRegistry>> =
-        Some(Arc::new(axagent_runtime::dashboard_registry::DashboardRegistry::new_with_config(
-            axagent_runtime::dashboard_registry::DashboardRegistryConfig {
-                plugin_dirs: vec![
-                    axagent_storage::storage_paths::documents_root().join("dashboard-plugins"),
-                ],
-                auto_load: true,
-            },
-        )));
+    // dashboard 合流（PLAN-plugin-gap-closure §3）：仪表盘面板清单由 PluginManager 实时投影，
+    // 独立的 DashboardRegistry 已随 rt-dashboard crate 一并摘除。
     // 注：webhook_subscription_manager 已在 PlatformBridge 之前创建（见上方 P0 修复块）
     // P0-OPT: SemanticCache 初始化推迟到后台 —— 先用内存 SQLite 占位（微秒级），
     // 真实文件缓存（CREATE TABLE + FTS5）在 run_deferred_init 中完成。
@@ -1175,7 +1168,6 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         skill_decomposer.clone(),
         skill_learning_manager.clone(),
         sandbox_executor_field,
-        dashboard_registry.clone(),
         webhook_subscription_manager.clone(),
         plugin_manager.clone(),
         sync_engine.clone(),
@@ -1718,7 +1710,6 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         )),
         skill_decomposer,
         proactive_service,
-        dashboard_registry,
         webhook_subscription_manager,
         webhook_event_emitter,
         semantic_cache,

@@ -157,7 +157,7 @@
     "approvalOnRequest": "संवेदनशील कार्यों से पहले पूछें (डिफ़ॉल्ट)",
     "approvalNever": "कभी न पूछें, सीधे चलाएँ",
     "approvalRules": "याद रखे गए स्वीकृति नियम",
-    "approvalRulesHint": "Bash कमांड स्वीकृत करने पर स्वतः याद रखे गए नियम; मेल खाते कमांड अब नहीं पूछे जाएँगे (सैंडबॉक्स सीमाएँ अभी भी लागू)।",
+    "approvalRulesHint": "Bash कमांड स्वीकृत होने और सफलतापूर्वक समाप्त होने (एग्ज़िट कोड 0) के बाद स्वतः याद रखे गए नियम; मेल खाते कमांड अब नहीं पूछे जाएँगे (सैंडबॉक्स सीमाएँ अभी भी लागू)।",
     "approvalRulesEmpty": "कोई याद रखा गया नियम नहीं",
     "approvalRuleRevoke": "हटाएँ",
     "approvalRuleRevoked": "नियम हटा दिया गया"
@@ -2599,8 +2599,6 @@
     "KNOWLEDGE_SEARCH_FAILED": "ज्ञानकोष खोज विफल",
     "KNOWLEDGE_VECTOR_STORE_FAILED": "वेक्टर स्टोर ऑपरेशन विफल",
     "KNOWLEDGE_EXTRACT_ENTITIES_FAILED": "इकाई निष्कर्षण विफल",
-    "DASHBOARD_COPY_MANIFEST_FAILED": "डैशबोर्ड मैनिफेस्ट कॉपी करने में विफल",
-    "DASHBOARD_NO_MANIFEST": "डैशबोर्ड मैनिफेस्ट नहीं मिला",
     "DESKTOP_CONNECTION_TIMEOUT": "डेस्कटॉप कनेक्शन का समय समाप्त",
     "DESKTOP_NATIVE_NOTIFICATION_FAILED": "डेस्कटॉप सूचना भेजने में विफल",
     "DOMAIN_UNREGISTERED": "डोमेन के लिए कोई ओन्टोलॉजी पंजीकृत नहीं है",

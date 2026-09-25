@@ -381,3 +381,5 @@ Conventional Commits + 中文描述。类型映射：
 > 禁止在本节之前的任何位置插入内容（会整体移位其上/其下被按行号引用的正文）。
 
 - `plugin-proto`（`crates/plugin-proto`）：**foundation** —— 插件 worker 帧协议（长度前缀 JSON 帧 + 插件声明 schema）。零 `axagent-*` 依赖，仅 `serde` / `serde_json` / `thiserror`。
+- `analysis-engine`（`crates/analysis-engine`）：**implementor** —— 股票分析引擎（专家编排 / 反思进化 / OPC 域包 / 策略包）。依赖 `harness + entities + dao + trajectory + astock-data`，符合 implementor 允许组合（此前缺席角色表，2026-09-25 补登）。
+- ⚠ **rt-dashboard 已摘除**（2026-09-25，`PLAN-plugin-gap-closure.md` §3 dashboard 合流）：上方角色表 foundation 列中的 `rt-theme, entities, schema-gen` 一行原并列的 `rt-dashboard` 已随系统删除 —— 仪表盘面板声明统一到 `plugins::types::PluginDashboardPanel`（`PluginManifest.dashboard_panels`），清单/启停/卸载全部收口到 `PluginManager` + `plugin_*` 命令；`dashboard_list_plugins` 仅保留只读投影。新增登记表：`plugins` 同时是 dashboard 面板声明的**唯一权威**，不得再建平行 manifest。

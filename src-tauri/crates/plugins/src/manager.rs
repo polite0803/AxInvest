@@ -397,6 +397,38 @@ impl PluginManager {
         Ok(self.installed_plugin_registry()?.summaries())
     }
 
+    /// 仪表盘面板清单 —— dashboard 合流后的只读投影（`PLAN-plugin-gap-closure.md` §3）。
+    ///
+    /// 真相源是 `PluginManifest.dashboard_panels`：声明了非空面板的插件进入清单，
+    /// 启停位跟随 PluginManager；清单每次调用实时扫描，与 rt-dashboard 时代的
+    /// 「常驻 entries + 手动 reload」相比不再有第二份真相。
+    pub fn list_dashboard_plugins(
+        &self,
+    ) -> Result<Vec<crate::types::DashboardPluginInfo>, PluginError> {
+        let mut out = Vec::new();
+        for summary in self.list_plugins()? {
+            let Some(root) = summary.metadata.root.as_deref() else { continue };
+            // 单个插件清单读取失败不影响整体列表（与 registry 容错加载同口径）。
+            let Ok(manifest) = load_plugin_from_directory(root) else {
+                tracing::warn!(root = %root.display(), "仪表盘面板清单：插件 manifest 读取失败，跳过");
+                continue;
+            };
+            if manifest.dashboard_panels.is_empty() {
+                continue;
+            }
+            out.push(crate::types::DashboardPluginInfo {
+                id: summary.metadata.id,
+                name: summary.metadata.name,
+                version: summary.metadata.version,
+                description: summary.metadata.description,
+                author: manifest.author,
+                enabled: summary.enabled,
+                panels: manifest.dashboard_panels,
+            });
+        }
+        Ok(out)
+    }
+
     pub fn discover_plugins(&self) -> Result<Vec<PluginDefinition>, PluginError> {
         Ok(self.plugin_registry()?.plugins.into_iter().map(|plugin| plugin.definition).collect())
     }
@@ -1518,6 +1550,7 @@ fn load_manifest_from_skill_md(
             description
         },
         version,
+        author: None,
         permissions: permissions.iter().filter_map(|p| PluginPermission::parse(p)).collect(),
         default_enabled,
         hooks: PluginHooks { pre_tool_use, post_tool_use, post_tool_use_failure },
@@ -1785,6 +1818,7 @@ fn build_plugin_manifest(
         name: raw.name,
         version: raw.version,
         description: raw.description,
+        author: raw.author,
         permissions,
         default_enabled: raw.default_enabled,
         hooks: raw.hooks,
@@ -2684,6 +2718,7 @@ mod tests {
             name: "demo".into(),
             version: "1.0.0".into(),
             description: "demo".into(),
+            author: None,
             permissions: Vec::new(),
             default_enabled: true,
             hooks: PluginHooks::default(),
@@ -2714,6 +2749,51 @@ mod tests {
             }],
             worker: None,
         }
+    }
+
+    /// dashboard 合流（PLAN-plugin-gap-closure §3）：`dashboard_panels` 由已安装插件
+    /// 的 manifest 实时投影进 `list_dashboard_plugins` —— 不再有第二套 registry/目录。
+    #[test]
+    fn list_dashboard_plugins_projects_installed_manifest_panels() {
+        let temp = temp_dir("dashproj");
+        let installed = temp.join("plugins").join("installed").join("chart-pack");
+        std::fs::create_dir_all(&installed).expect("创建插件目录");
+        std::fs::write(
+            installed.join(MANIFEST_FILE_NAME),
+            r#"{
+                "name": "chart-pack",
+                "version": "1.0.0",
+                "description": "charts",
+                "author": "ax",
+                "dashboard_panels": [
+                    {
+                        "id": "heatmap",
+                        "title": "Heatmap",
+                        "componentName": "chart-pack.heatmap",
+                        "position": "sidebar",
+                        "size": "fullWidth",
+                        "props": {"limit": 10},
+                        "frontendEntry": "main.js"
+                    }
+                ]
+            }"#,
+        )
+        .expect("写入 manifest");
+        let manager = PluginManager::new(PluginManagerConfig::new(temp));
+        let list = manager.list_dashboard_plugins().expect("清单投影应成功");
+        let entry = list
+            .iter()
+            .find(|plugin| plugin.name == "chart-pack")
+            .expect("声明了面板的已安装插件应进入清单");
+        assert_eq!(entry.panels.len(), 1);
+        assert_eq!(entry.panels[0].component_name, "chart-pack.heatmap");
+        assert_eq!(entry.panels[0].position, crate::types::PluginDashboardPanelPosition::Sidebar);
+        assert_eq!(entry.panels[0].size, crate::types::PluginDashboardPanelSize::FullWidth);
+        assert_eq!(entry.panels[0].props["limit"], serde_json::json!(10));
+        assert_eq!(entry.panels[0].frontend_entry.as_deref(), Some("main.js"));
+        assert_eq!(entry.author.as_deref(), Some("ax"));
+        // 无面板声明的内置/bundled 插件不得混入投影。
+        assert!(list.iter().all(|plugin| !plugin.panels.is_empty()));
     }
 
     #[test]

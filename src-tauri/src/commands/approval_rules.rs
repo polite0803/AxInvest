@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 审批规则命令（PLAN-codex-parity R2-1）。
+//! 审批规则命令（PLAN-codex-parity-adoption R2-1）。
 //!
 //! 规则由 Bash 工具在用户批准后自动沉淀（best-effort），本模块只提供
 //! 「查看」与「撤销」两个入口 —— 规则是用户显式批准的结果，故不由前端手工新增。

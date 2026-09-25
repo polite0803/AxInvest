@@ -254,7 +254,7 @@ pub struct SessionManager {
     /// 未注入时保持原有行为,不影响现有功能。
     /// 用 RwLock 包裹以支持在 `Arc<SessionManager>` 上运行时注入。
     event_bus: tokio::sync::RwLock<Option<Arc<dyn axagent_harness::EventBus>>>,
-    /// session_events 事件持久化 sink（PLAN-codex-parity P0-3）。
+    /// session_events 事件持久化 sink。
     ///
     /// 注入后,SessionManager 在 turn 开始 / 结束时同时发事件到 session_events 表,
     /// 为 agent_resume_from_events 提供事件流。未注入时保持零开销。
@@ -344,7 +344,7 @@ impl SessionManager {
         *guard = Some(bus);
     }
 
-    /// 注入 session_events 事件持久化 sink（P0-3）。
+    /// 注入 session_events 事件持久化 sink。
     ///
     /// 注入后,SessionManager 在 TurnStarted/TurnCompleted 时同时发事件到
     /// session_events 表,供 agent_resume_from_events 读取。
@@ -489,7 +489,7 @@ impl SessionManager {
         self.create_session(provider_id, conversation_id).await
     }
 
-    /// 跨进程上下文重建（PLAN-codex-parity P0-3）。
+    /// 跨进程上下文重建。
     ///
     /// 进程重启或 Session 被 LRU 驱逐后内存会话为空，用 DB 消息历史回灌
     /// `Session.messages`（含已完成 turn 的 tool_use / tool_result 观察块），

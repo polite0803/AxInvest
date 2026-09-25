@@ -128,6 +128,13 @@ if (canRunFrontend) {
   step("能力域单一真相源自检", "node scripts/check-domain-single-source.mjs --selftest");
   step("能力域（权威枚举↔前端/prompt/i18n 副本）", "node scripts/check-domain-single-source.mjs");
 
+  // ── 办公室场景 ↔ OPC 域包 ↔ i18n 对齐门禁（见 `PLAN-office-scene-domain-align.md`）──
+  // 行业场景 slug / 域包目录 id / opc.domains+office.room i18n 三份清单此前零门禁，
+  // 实测 9 场景显示名 + 24 房间名在 11 语言全缺键、界面显示原始串且无任何东西会红。
+  // ⚠ 与 `.github/workflows/ci.yml` 的对应条目**命令行逐字同源**。
+  step("办公室场景对齐自检", "node scripts/check-office-scene-align.mjs --selftest");
+  step("办公室场景↔域包↔i18n 一致性", "node scripts/check-office-scene-align.mjs");
+
   // 声明表 evidence 的「引用腐烂」校验 —— 与上三条同理：纯 Node、秒级、不依赖构建产物。
   // 为什么需要：`harness::knowledge_graph` 三张声明表（RELATION / ENTITY_TYPE / DATA_DRIVEN_COLUMN）
   //   每条 evidence 都带「文件:行」，这类引用**会随行号漂移腐烂**（改了源码，出处悄悄指向

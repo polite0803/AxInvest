@@ -122,6 +122,17 @@ jobs:
           node scripts/check-domain-single-source.mjs --selftest
           node scripts/check-domain-single-source.mjs
 
+      # 办公室场景 ↔ OPC 域包 ↔ i18n 对齐（见 PLAN-office-scene-domain-align.md）。
+      # 为什么需要：行业场景 slug、域包目录 id、opc.domains / office.room i18n 是三份
+      # 各写各的清单，此前零门禁 ⇒ 9 个行业场景显示名 + 24 个房间名在 11 语言全部缺键，
+      # 下拉框与 Phaser 画布直接显示原始键，编译 / 单测全绿。
+      # 分档：slug 本体对齐 / i18n 缺键 = 客观错 ⇒ 硬拦；域包无场景 = 产品裁决 ⇒ 只报告。
+      # ⚠ 与 `scripts/ci-check.mjs` 的对应条目**命令行逐字同源**。
+      - name: Check office scene ↔ domain pack ↔ i18n alignment
+        run: |
+          node scripts/check-office-scene-align.mjs --selftest
+          node scripts/check-office-scene-align.mjs
+
       # 声明表 evidence 的「引用腐烂」校验 —— 与上三步同理：纯 Node、秒级、不依赖构建产物。
       # 为什么需要：`harness::knowledge_graph` 三张声明表（关系 / 实体类型 / 数据驱动列）
       # 每条 evidence 都带「文件:行」，这类引用**会随行号漂移腐烂**（改了源码，出处悄悄指向

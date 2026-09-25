@@ -105,6 +105,8 @@
     "check:ontology:selftest": "node scripts/check-ontology-consistency.mjs --selftest",
     "check:ontology:list": "node scripts/check-ontology-consistency.mjs --list",
     "check:ontology:divergence": "node scripts/check-ontology-consistency.mjs --strict-divergence",
+    "check:office-align": "node scripts/check-office-scene-align.mjs",
+    "check:office-align:selftest": "node scripts/check-office-scene-align.mjs --selftest",
     "check:facts": "node scripts/check-single-source-facts.mjs",
     "check:facts:selftest": "node scripts/check-single-source-facts.mjs --selftest",
     "check:facts:ci": "node scripts/check-single-source-facts.mjs --ci",

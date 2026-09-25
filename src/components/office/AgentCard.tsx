@@ -17,6 +17,7 @@ import { Tag, theme, Tooltip } from "antd";
 import { Bot, Trash2, User } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useExpertName } from "./expertNames";
 
 const STATUS_COLOR: Record<FleetMemberStatus, string> = {
   idle: "#52c41a",
@@ -142,6 +143,7 @@ export interface AgentCardProps {
 
 export function AgentCard({ member, highlighted, onClick, onRemove }: AgentCardProps) {
   const { t } = useTranslation();
+  const expertName = useExpertName();
   const { token } = theme.useToken();
   const [hover, setHover] = useState(false);
 
@@ -232,7 +234,7 @@ export function AgentCard({ member, highlighted, onClick, onRemove }: AgentCardP
               minWidth: 48,
             }}
           >
-            {member.displayName}
+            {expertName(member)}
           </span>
           {/* 角色 Tag — 颜色由角色决定 */}
           <Tag

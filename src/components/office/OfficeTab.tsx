@@ -27,6 +27,7 @@ import { Building2, CirclePlus, UserPlus, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AgentCard } from "./AgentCard";
+import { useExpertName } from "./expertNames";
 import { OfficeGame } from "./phaser/OfficeGame";
 import { fleetMemberToSceneMember } from "./phaser/OfficeScene";
 import {
@@ -85,6 +86,7 @@ export function OfficeTab() {
   // templates 来自订阅：域包 office_scene.yaml 是启动 IPC 异步注入的，
   // 不订阅则行业房在注入前打开会退化成默认布局（4-① 时序契约）。
   const templates = useSceneTemplates();
+  const expertName = useExpertName();
   const currentTemplate = useMemo(
     () =>
       templates.find((tpl) => tpl.slug === activeFleet?.sceneTemplateSlug)
@@ -108,7 +110,7 @@ export function OfficeTab() {
     }
     modal.confirm({
       title: t("office.removeMember.title"),
-      content: t("office.removeMember.confirm", { name: member.displayName }),
+      content: t("office.removeMember.confirm", { name: expertName(member) }),
       okText: t("office.removeMember.button"),
       cancelText: t("common.cancel"),
       okButtonProps: { danger: true },

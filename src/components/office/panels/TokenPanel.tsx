@@ -18,6 +18,7 @@ import type { TFunction } from "i18next";
 import { Briefcase, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useExpertName } from "../expertNames";
 
 const { Text } = Typography;
 
@@ -43,6 +44,7 @@ function formatPct(n: number): string {
 
 export function TokenPanel({ fleetId }: { fleetId: string }) {
   const { t } = useTranslation();
+  const expertName = useExpertName();
   const { token: themeToken } = theme.useToken();
   const members = useOfficeStore((s) => s.membersByFleet[fleetId] ?? []);
   const loading = useOfficeStore((s) => s.loading);
@@ -253,9 +255,9 @@ export function TokenPanel({ fleetId }: { fleetId: string }) {
             {
               title: t("office.token.colMember"),
               dataIndex: "displayName",
-              render: (v, r) => (
+              render: (_v, r) => (
                 <div>
-                  <div style={{ fontWeight: 500, fontSize: 12 }}>{v}</div>
+                  <div style={{ fontWeight: 500, fontSize: 12 }}>{expertName(r)}</div>
                   <div style={{ fontSize: 10, color: themeToken.colorTextQuaternary, fontFamily: "monospace" }}>
                     {r.agentSlug}
                   </div>

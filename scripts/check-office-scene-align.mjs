@@ -107,6 +107,22 @@ function parseDomainSlugs(sceneTemplatesSrc) {
   return new Set([...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
 }
 
+/**
+ * 4-③ rule f 现场：从 Rust 专家常量（`*_EXPERTS`，元素形如 ("key", "名", include_str!)）
+ * 抽取 expert key 全集——成员显示名 i18n（`office.experts.<key>`）的权威对账对象。
+ * 以 `include_str!` 为指纹，天然避开同文件的 PROFILE_TOOLS 数组。
+ */
+function parseRosterExpertKeys(...rustSources) {
+  const keys = new Set();
+  const re = /"([a-z0-9][a-z0-9-]*)",\s*\n?\s*"[^"]+",\s*\n?\s*include_str!/g;
+  for (const src of rustSources) {
+    for (const m of src.matchAll(re)) {
+      keys.add(m[1]);
+    }
+  }
+  return keys.size > 0 ? keys : null;
+}
+
 function collectReal() {
   const sceneSrc = fs.readFileSync(path.join(ROOT, "src/components/office/phaser/sceneTemplates.ts"), "utf8");
   const investSrc = fs.readFileSync(path.join(ROOT, "src/components/office/phaser/investSceneTemplates.ts"), "utf8");
@@ -114,6 +130,11 @@ function collectReal() {
   if (!scenes) { fail("sceneTemplates.ts / investSceneTemplates.ts 场景解析不出（正则腐烂？）"); }
   const domainSlugs = parseDomainSlugs(sceneSrc);
   if (!domainSlugs) { fail("SCENE_DOMAIN_SLUGS 解析不出"); }
+  const rosterKeys = parseRosterExpertKeys(
+    fs.readFileSync(path.join(ROOT, "src-tauri/src/commands/opc_setup/capability_pack_experts.rs"), "utf8"),
+    fs.readFileSync(path.join(ROOT, "src-tauri/src/commands/opc_setup/capability_pack_agents.rs"), "utf8"),
+  );
+  if (!rosterKeys) { fail("Rust 专家常量（*_EXPERTS）解析出 0 个 key"); }
 
   const packsDir = path.join(ROOT, "config/opc/domain_packs");
   if (!fs.existsSync(packsDir)) { fail(`域包目录不存在: ${packsDir}`); }
@@ -130,6 +151,7 @@ function collectReal() {
       lang,
       officeRoom: new Set(Object.keys(j.office?.room ?? {})),
       officeScene: new Set(Object.keys(j.office?.scene ?? {})),
+      officeExperts: new Set(Object.keys(j.office?.experts ?? {})),
       opcDomains: new Set(Object.keys(j.opc?.domains ?? {})),
     };
   });
@@ -159,7 +181,7 @@ function collectReal() {
     }
   }
 
-  return { scenes, yamlScenes, seedRoomsByPack, domainSlugs, domainPackIds, locales };
+  return { scenes, yamlScenes, seedRoomsByPack, domainSlugs, domainPackIds, locales, rosterKeys };
 }
 
 /** manifest `office.seed_members[].room` 行式抽取（缺 room 的成员不计） */
@@ -178,7 +200,7 @@ function parseManifestSeedRooms(text) {
 
 // ── 判据（纯函数，selftest 直接喂合成数据）──────────────────────────
 
-function evaluate({ scenes, yamlScenes = [], seedRoomsByPack = new Map(), domainSlugs, domainPackIds, locales, exemptNoScene = EXEMPT_NO_SCENE }) {
+function evaluate({ scenes, yamlScenes = [], seedRoomsByPack = new Map(), domainSlugs, domainPackIds, locales, rosterKeys, exemptNoScene = EXEMPT_NO_SCENE }) {
   const hard = [];
   const reports = [];
   const sceneBySlug = new Map(scenes.map((s) => [s.slug, s]));
@@ -256,6 +278,22 @@ function evaluate({ scenes, yamlScenes = [], seedRoomsByPack = new Map(), domain
     if (!domainPackIds.has(id)) { hard.push(`EXEMPT_NO_SCENE 含 "${id}" 但域包目录不存在（豁免清单腐烂）`); }
   }
 
+  // f) 成员显示名（4-③，硬拦）：Rust 名册 expert key ⇔ office.experts 双向对账 ×11 语言。
+  //    名册加专家忘补翻译 ⇒ 成员名显示 DB 中文（其它语言用户看不懂，静默）；
+  //    删专家留翻译 ⇒ 键腐烂。两个方向都是缺陷。
+  if (rosterKeys) {
+    for (const key of rosterKeys) {
+      for (const l of locales) {
+        if (!l.officeExperts.has(key)) { hard.push(`office.experts.${key} 在 ${l.lang} 缺失（Rust 名册专家）`); }
+      }
+    }
+    for (const l of locales) {
+      for (const key of l.officeExperts) {
+        if (!rosterKeys.has(key)) { hard.push(`office.experts.${key}（${l.lang}）不在 Rust 名册——键腐烂，删专家须同步删翻译`); }
+      }
+    }
+  }
+
   return { hard, reports };
 }
 
@@ -270,6 +308,7 @@ function selftest() {
     lang: "t",
     officeRoom: new Set(["r1", ...extra.rooms ?? []]),
     officeScene: new Set(["default_office"]),
+    officeExperts: new Set(["dom-a-expert", ...extra.experts ?? []]),
     opcDomains: new Set(["dom_a", "dom_a_desc", "dom_b", "dom_b_desc", ...extra.opc ?? []]),
   });
   const base = {
@@ -281,6 +320,7 @@ function selftest() {
     domainSlugs: new Set(["dom_a", "dom_b"]),
     domainPackIds: new Set(["dom_a", "dom_b"]),
     locales: [mkLocale()],
+    rosterKeys: new Set(["dom-a-expert"]),
     // 阶段 4-② 起豁免清零——夹具同样用空集，否则「豁免未补场景」判据会把好样本打成硬拦
     exemptNoScene: new Set([]),
   };
@@ -314,6 +354,11 @@ function selftest() {
   // 负控 7：YAML 场景 slug ≠ 域包目录 id
   const m7 = evaluate({ ...base, yamlScenes: [{ slug: "wrong", originPack: "dom_a", ids: ["r1"], nameKeys: ["r1"] }] });
   check("YAML slug 错位必须硬拦", m7.hard.some((p) => p.includes("≠ 域包 id")));
+  // 负控 8（rule f）：名册专家缺 experts 翻译 ⇒ 硬拦；反向键腐烂 ⇒ 硬拦
+  const m8 = evaluate({ ...base, locales: [{ ...base.locales[0], officeExperts: new Set() }] });
+  check("名册专家缺 office.experts 翻译必须硬拦", m8.hard.some((p) => p.includes("office.experts.dom-a-expert")));
+  const m8b = evaluate({ ...base, rosterKeys: new Set() });
+  check("office.experts 键不在名册（腐烂）必须硬拦", m8b.hard.some((p) => p.includes("不在 Rust 名册")));
   // 正控 2：为豁免域 dom_b 合法新增同名 YAML 场景 ⇒ 零硬拦（豁免过期只进报告档）
   const ok2 = evaluate({
     ...base,

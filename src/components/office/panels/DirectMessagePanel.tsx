@@ -25,6 +25,7 @@ import { Button, Input, Space, Tag, theme, Tooltip, Typography } from "antd";
 import { LineChart, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useExpertName } from "../expertNames";
 
 const { Text } = Typography;
 
@@ -40,6 +41,7 @@ export interface DirectMessagePanelProps {
 
 export function DirectMessagePanel({ fleetId, target, onBack }: DirectMessagePanelProps) {
   const { t } = useTranslation();
+  const expertName = useExpertName();
   const { token } = theme.useToken();
   const directMessage = useOfficeStore((s) => s.directMessage);
   const events = useOfficeStore((s) => s.dispatchEvents);
@@ -131,7 +133,7 @@ export function DirectMessagePanel({ fleetId, target, onBack }: DirectMessagePan
         )}
         <Tag color="blue">{target.agentSlug}</Tag>
         <Text strong style={{ fontSize: 13 }}>
-          {target.displayName}
+          {expertName(target)}
         </Text>
       </div>
 

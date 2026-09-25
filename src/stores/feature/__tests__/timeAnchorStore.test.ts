@@ -3,7 +3,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { isValidPastDate, todayIso, DATE_RE } = timeAnchorHelpers;
 
+const { invokeMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(),
+}));
+
+// enterReplay 会启动降级轮询并真实 invoke；不 mock 的话失败分支的 console.warn
+// 会在 worker RPC teardown 之后才 flush，触发 EnvironmentTeardownError
+vi.mock("@/lib/invoke", () => ({
+  invoke: invokeMock,
+  listen: vi.fn(() => Promise.resolve(() => {})),
+  isTauri: () => false,
+  logIpcError: vi.fn(() => vi.fn()),
+}));
+
 beforeEach(() => {
+  invokeMock.mockImplementation((cmd: string) => {
+    if (cmd === "get_asof_degradation_log") { return Promise.resolve([]); }
+    if (cmd === "get_asof_degradation_count") { return Promise.resolve(0); }
+    return Promise.resolve(undefined);
+  });
   // 静默 console.warn，避免 vitest RPC teardown 时序竞争
   vi.spyOn(console, "warn").mockImplementation(() => {});
   // 重置 store + 清除 localStorage 持久化
@@ -19,6 +37,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  useTimeAnchorStore.getState().stopDegradationPolling();
   vi.restoreAllMocks();
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem("axagent-time-anchor");

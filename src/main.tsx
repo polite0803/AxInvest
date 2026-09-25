@@ -43,6 +43,11 @@ queueMicrotask(() => {
   import("./components/office/phaser/investSceneTemplates")
     .then(({ registerInvestSceneTemplates }) => registerInvestSceneTemplates())
     .catch(logIpcError("Invest scene template registration failed"));
+
+  // ── 域包 office_scene.yaml 场景模板注入（PLAN-office-auto-provision.md 阶段 3）──
+  import("./components/office/phaser/domainSceneTemplates")
+    .then(({ registerDomainSceneTemplates }) => registerDomainSceneTemplates())
+    .catch(logIpcError("Domain scene template registration failed"));
 });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

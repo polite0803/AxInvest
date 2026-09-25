@@ -208,6 +208,8 @@ export interface DomainPackProfile {
   recommendedTools: string[];
   /** `agent_profiles` 表中是否已有该行（false = seed 未跑或被删，入房时应跳过） */
   existsInDb: boolean;
+  /** manifest `office.seed_members[].room` 显式指定房间；缺省 = 前端轮转分配 */
+  room?: string | null;
 }
 
 /** 建房即成队的播种结果 */

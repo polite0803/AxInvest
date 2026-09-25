@@ -440,6 +440,7 @@ macro_rules! register_all_commands {
             commands::fleet::fleet_update_member_status,
             commands::fleet::fleet_update_status,
             commands::fleet::list_domain_pack_profiles,
+            commands::fleet::list_office_scene_templates,
             commands::gateway::clear_gateway_request_logs,
             commands::gateway::connect_cli_tool,
             commands::gateway::copy_gateway_template,

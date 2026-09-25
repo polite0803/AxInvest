@@ -211,7 +211,8 @@ async function seedFleetFromDomain(
       agentSlug: p.profileId,
       displayName: p.name,
       agentProfileId: p.profileId,
-      roomId: rooms[i],
+      // manifest 显式指定的房间优先（阶段 3），否则轮转分配
+      roomId: p.room ?? rooms[i],
     });
     if (member) {
       seeded += 1;

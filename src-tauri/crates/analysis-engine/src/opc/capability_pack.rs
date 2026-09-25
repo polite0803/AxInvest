@@ -78,6 +78,27 @@ pub struct CapabilityPackManifest {
     /// 每个承诺描述「归属哪个来源 + 哪类能力 + 用何种谓词匹配」，非裸 id 白名单。
     #[serde(default)]
     pub capabilities: Vec<CapabilityPackCapabilityClaim>,
+    /// 办公室「建房即成队」声明段（`PLAN-office-auto-provision.md` 阶段 3）。
+    /// 缺省 `None` = 未声明，消费方回退 Rust 专家名册（`domain_pack_roster`）。
+    #[serde(default)]
+    pub office: Option<CapabilityPackOffice>,
+}
+
+/// manifest 的 `office` 段 —— 域包办公室声明（数据驱动，新增域包无需改代码）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct CapabilityPackOffice {
+    /// 建房自动入房的成员名册。非空即**整表覆盖** Rust 名册推导的默认名单。
+    #[serde(default)]
+    pub seed_members: Vec<CapabilityPackSeedMember>,
+}
+
+/// `office.seed_members` 元素 —— `expert` 是专家 key（profile id = `opc-<expert>`），
+/// `room` 显式指定 Phaser 房间站位；缺省 = 前端按 defaultRoomId 优先轮转分配。
+#[derive(Debug, Clone, Deserialize)]
+pub struct CapabilityPackSeedMember {
+    pub expert: String,
+    #[serde(default)]
+    pub room: Option<String>,
 }
 
 fn default_analysis_file() -> String {
@@ -1190,6 +1211,7 @@ mod tests {
                     id: "tool:OpcListInvoices".to_string(),
                 },
             }],
+            office: None,
         };
 
         let actual = vec![CapabilityPassportDto {

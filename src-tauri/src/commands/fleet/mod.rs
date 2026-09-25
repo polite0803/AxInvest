@@ -836,13 +836,16 @@ pub struct DomainPackProfile {
     pub recommended_tools: Vec<String>,
     /// `agent_profiles` 表中是否已有该行（false = seed 未跑或被删，消费方应跳过并提示）
     pub exists_in_db: bool,
+    /// manifest `office.seed_members[].room` 显式指定的 Phaser 房间；None = 前端轮转分配
+    pub room: Option<String>,
 }
 
 /// 列出域包专家的种子化 Profile。
 ///
-/// 权威源是 Rust 名册（`capability_pack_agents::domain_pack_roster`），
-/// profile id 约定 `opc-<expert_key>`。未知或无 seed 的域包（如 content_media）
-/// 返回空列表而非报错——前端只对行业场景模板调用，「配不出队」是事实不是异常。
+/// 权威源：manifest 的 `office.seed_members` 段（数据驱动，优先）；缺省回退
+/// Rust 名册（`capability_pack_agents::domain_pack_roster`），profile id 约定 `opc-<expert_key>`。
+/// 未知或无 seed 的域包（如 content_media）返回空列表而非报错——前端只对行业场景模板调用，
+/// 「配不出队」是事实不是异常。
 #[agent_command(domain = fleet, safety = Safe, call_mode = StateInput, description = "列出域包专家 Profile")]
 #[tauri::command]
 pub async fn list_domain_pack_profiles(
@@ -852,36 +855,218 @@ pub async fn list_domain_pack_profiles(
     use crate::commands::opc_setup::capability_pack_agents::{
         domain_pack_profile_id, domain_pack_roster,
     };
+    use axagent_analysis_engine::opc::capability_pack;
     use axagent_entities::agent_profiles;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
 
-    let Some((experts, tools)) = domain_pack_roster(&domain_pack_id) else {
+    // manifest office 段（目录名容忍 kebab→snake 变体，见 opc_capability_pack_runtime.rs 先例）
+    let base = capability_pack::resolve_capability_packs_dir(Some(&app_state.app_data_dir));
+    let direct = base.join(&domain_pack_id);
+    let pack_dir = if direct.is_dir() {
+        direct
+    } else {
+        base.join(domain_pack_id.replace('-', "_"))
+    };
+    let declared =
+        capability_pack::read_manifest(&pack_dir).and_then(|m| m.office).map(|o| o.seed_members);
+
+    let roster = domain_pack_roster(&domain_pack_id);
+    let members = resolve_seed_members(roster.map(|(e, _)| e).unwrap_or(&[]), declared);
+    if members.is_empty() {
         warn!("[fleet] list_domain_pack_profiles: 域包 {domain_pack_id} 无专家名册，返回空");
         return Ok(vec![]);
-    };
-    let ids: Vec<String> = experts.iter().map(|(k, _, _)| domain_pack_profile_id(k)).collect();
+    }
+    let ids: Vec<String> = members.iter().map(|(k, _)| domain_pack_profile_id(k)).collect();
     let db = app_state.harness.db();
     let rows = agent_profiles::Entity::find()
         .filter(agent_profiles::Column::Id.is_in(ids))
         .all(db)
         .await
         .map_err(|e| ErrorResponse::from_error(e, ErrorCategory::General))?;
-    Ok(experts
+    Ok(members
         .iter()
-        .map(|(key, name, _)| {
+        .map(|(key, room)| {
             let pid = domain_pack_profile_id(key);
             let row = rows.iter().find(|r| r.id == pid);
+            let fallback_name = roster
+                .map(|(e, _)| {
+                    e.iter().find(|(k, _, _)| k == key).map(|(_, n, _)| *n).unwrap_or(key.as_str())
+                })
+                .unwrap_or(key.as_str());
             DomainPackProfile {
-                name: row.map(|r| r.name.clone()).unwrap_or_else(|| (*name).to_string()),
-                recommended_tools: tools
-                    .iter()
-                    .find(|(k, _)| k == key)
-                    .map(|(_, t)| t.iter().map(|s| s.to_string()).collect())
+                name: row.map(|r| r.name.clone()).unwrap_or_else(|| fallback_name.to_string()),
+                recommended_tools: roster
+                    .and_then(|(_, t)| t.iter().find(|(k, _)| *k == key).map(|(_, v)| v))
+                    .map(|t| t.iter().map(|s| s.to_string()).collect())
                     .unwrap_or_default(),
-                expert_key: (*key).to_string(),
+                expert_key: key.clone(),
                 exists_in_db: row.is_some(),
+                room: room.clone(),
                 profile_id: pid,
             }
         })
         .collect())
+}
+
+/// 播种名单裁决：manifest `office.seed_members` 非空 ⇒ 整表覆盖；否则回退 Rust 名册推导。
+fn resolve_seed_members(
+    roster_experts: &[(&str, &str, &str)],
+    declared: Option<Vec<axagent_analysis_engine::opc::capability_pack::CapabilityPackSeedMember>>,
+) -> Vec<(String, Option<String>)> {
+    if let Some(members) = declared.filter(|v| !v.is_empty()) {
+        return members.into_iter().map(|m| (m.expert, m.room)).collect();
+    }
+    roster_experts.iter().map(|(k, _, _)| (k.to_string(), None)).collect()
+}
+
+// ── 域包办公室场景模板数据驱动（PLAN-office-auto-provision.md 阶段 3）────
+
+/// `{domain_pack_dir}/office_scene.yaml` 的镜像 —— 与前端 `OfficeSceneTemplate` 同形
+/// （camelCase，禁区 13）。前端启动时经 `registerSceneTemplate` 注入，TS 内置模板同名优先。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeSceneTemplateDto {
+    pub slug: String,
+    pub display_name_key: String,
+    pub canvas_width: u32,
+    pub canvas_height: u32,
+    pub default_room_id: String,
+    pub rooms: Vec<OfficeSceneRoomDto>,
+    #[serde(default)]
+    pub furniture: Option<std::collections::HashMap<String, Vec<OfficeSceneFurnitureDto>>>,
+    #[serde(default)]
+    pub decorations: Option<std::collections::HashMap<String, Vec<OfficeSceneFurnitureDto>>>,
+}
+
+/// 房间矩形（key = roomId 的家具/装饰映射使用 `id` 对齐）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeSceneRoomDto {
+    pub id: String,
+    pub name_key: String,
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+    pub color: u32,
+}
+
+/// 家具 / 墙面装饰（两种 kind 联合由前端类型与门禁脚本约束，此处统一形状）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeSceneFurnitureDto {
+    pub kind: String,
+    pub x: u32,
+    pub y: u32,
+    #[serde(default)]
+    pub w: Option<u32>,
+    #[serde(default)]
+    pub h: Option<u32>,
+    #[serde(default)]
+    pub color: Option<u32>,
+}
+
+/// 列出全部域包办公室场景模板（`office_scene.yaml` 数据驱动，零代码新增域包场景）。
+///
+/// 解析失败/缺文件的目录 warn 后跳过——「存在即必须可解析」的判据由
+/// `scripts/check-office-scene-align.mjs` 硬拦，运行时面不重复设防。
+#[agent_command(domain = fleet, safety = Safe, call_mode = StateOnly, description = "列出域包办公室场景模板")]
+#[tauri::command]
+pub async fn list_office_scene_templates(
+    app_state: State<'_, AppState>,
+) -> Result<Vec<OfficeSceneTemplateDto>, ErrorResponse> {
+    use axagent_analysis_engine::opc::capability_pack;
+
+    let base = capability_pack::resolve_capability_packs_dir(Some(&app_state.app_data_dir));
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        warn!("[fleet] list_office_scene_templates: 域包目录不存在: {}", base.display());
+        return Ok(out);
+    };
+    for entry in entries.flatten() {
+        let file = entry.path().join("office_scene.yaml");
+        if !file.is_file() {
+            continue;
+        }
+        let parsed = std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|raw| {
+            serde_yaml::from_str::<OfficeSceneTemplateDto>(&raw).map_err(|e| e.to_string())
+        });
+        match parsed {
+            Ok(tpl) => out.push(tpl),
+            Err(e) => warn!("[fleet] 办公室场景模板解析失败（{}）: {e}", file.display()),
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod office_provision_tests {
+    use super::{OfficeSceneTemplateDto, resolve_seed_members};
+    use axagent_analysis_engine::opc::capability_pack::{
+        CapabilityPackManifest, CapabilityPackSeedMember,
+    };
+
+    #[test]
+    fn manifest_office_section_parses_and_defaults() {
+        let m: CapabilityPackManifest = serde_yaml::from_str(
+            "id: design\nname: 设计\noffice:\n  seed_members:\n    - expert: design-ux\n      room: studio\n",
+        )
+        .unwrap();
+        let office = m.office.expect("office 段应解析");
+        assert_eq!(office.seed_members.len(), 1);
+        assert_eq!(office.seed_members[0].expert, "design-ux");
+        assert_eq!(office.seed_members[0].room.as_deref(), Some("studio"));
+
+        // 无 office 段的存量 manifest 不受影响
+        let m2: CapabilityPackManifest =
+            serde_yaml::from_str("id: accounting\nname: 会计\n").unwrap();
+        assert!(m2.office.is_none());
+    }
+
+    #[test]
+    fn resolve_seed_members_override_and_fallback() {
+        let roster: &[(&str, &str, &str)] = &[("a-x", "A", ""), ("b-y", "B", "")];
+        let declared =
+            vec![CapabilityPackSeedMember { expert: "b-y".into(), room: Some("meeting".into()) }];
+        // 非空声明 ⇒ 整表覆盖（含显式 room）
+        assert_eq!(
+            resolve_seed_members(roster, Some(declared)),
+            vec![("b-y".to_string(), Some("meeting".to_string()))]
+        );
+        // 空声明 ⇒ 回退名册（room 全 None）
+        let fb = resolve_seed_members(roster, Some(vec![]));
+        assert_eq!(fb.len(), 2);
+        assert!(fb.iter().all(|(_, room)| room.is_none()));
+        // 无名册无声明 ⇒ 空（命令层据此 warn + 返回空）
+        assert!(resolve_seed_members(&[], None).is_empty());
+    }
+
+    #[test]
+    fn office_scene_yaml_dto_camel_case_roundtrip() {
+        let yaml = r#"
+slug: design
+displayNameKey: design
+canvasWidth: 800
+canvasHeight: 500
+defaultRoomId: studio
+rooms:
+  - id: studio
+    nameKey: studio
+    x: 40
+    y: 60
+    width: 360
+    height: 220
+    color: 16711680
+furniture:
+  studio:
+    - kind: desk
+      x: 80
+      y: 130
+"#;
+        let tpl: OfficeSceneTemplateDto = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(tpl.default_room_id, "studio");
+        assert_eq!(tpl.rooms.len(), 1);
+        assert_eq!(tpl.furniture.as_ref().unwrap()["studio"].len(), 1);
+        assert!(tpl.decorations.is_none());
+    }
 }

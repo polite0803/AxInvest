@@ -8,8 +8,6 @@
 //! 存储取全局注入的 [`axagent_harness::ApprovalRuleStore`]（`init/state.rs` 在启动时
 //! 用 sea_orm 实现注入）；`None` 表示启动装配未完成 —— 此时列规则返回空，撤销报错。
 
-use axagent_harness::ApprovalRuleStore;
-
 /// 列出已沉淀的审批规则（供设置页展示 / 撤销）。
 ///
 /// 存储未初始化时返回空列表（与「无规则」行为一致，不阻塞 UI 渲染）。

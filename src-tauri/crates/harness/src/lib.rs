@@ -175,7 +175,8 @@ pub use approval_policy::ApprovalPolicy;
 pub use approval_rules::{ApprovalRule, ApprovalRuleStore, RuleDecision};
 pub use sandbox_policy::{SandboxMode, SandboxPolicy};
 pub use session_events::{
-    NullSessionEventSink, SessionEvent, SessionEventPayload, SessionEventSink, SessionEventType,
+    COMPACT_SUMMARY_PREVIEW_CHARS, NullSessionEventSink, SessionEvent, SessionEventPayload,
+    SessionEventSink, SessionEventType, build_compacted_event_payload,
 };
 
 // ── 上下文预算（分量预算 + auto-compact 阈值的唯一供值入口） ──
@@ -329,6 +330,7 @@ pub use cron_delivery::{
 };
 pub mod prompt_guard;
 pub mod provider;
+pub mod provider_continuation;
 pub mod registry;
 pub mod rhai_ast_cache;
 pub mod rhai_engine;

@@ -20,9 +20,13 @@ use axagent_kit::token_counter;
 ///
 /// ⚠ 这些常数不再直接当作预算用：已知模型窗口时应走
 /// [`axagent_harness::context_budget::budgets_for`] 取 `min(ratio × window, cap)`。
-/// 保留本模块是为了给**尚不知窗口**的调用方（如 sync 的 system prompt 装配、
-/// 上下文分解展示）以及纯展示口径一个稳定引用，取值与
+/// 保留本模块是为了给**尚不知窗口**的调用方（如 RAG 注入、技能索引、
+/// 上下文分解展示）一个稳定引用，取值与
 /// `axagent_harness::context_budget::*_CAP` 同源（非重复定义）。
+///
+/// 只保留**确有消费方**的别名：`NUDGES` 与 `HISTORY_RATIO` 在全仓零引用，已删除
+/// （`-D dead-code` 会拦；无消费方的别名属投机性定义，不该留）。
+/// 需要这两者的调用方请直接用 `axagent_harness::context_budget` 的同名常量。
 ///
 /// Note: the permission notice rendered by [`render_permission_notice`] is pushed
 /// into the system messages and therefore spends part of the `SYSTEM_PROMPT`
@@ -37,10 +41,6 @@ pub mod token_budget {
     pub const RETRIEVED_MEMORIES: usize = axagent_harness::context_budget::RETRIEVED_MEMORIES_CAP;
     /// 技能索引上限。
     pub const SKILLS: usize = axagent_harness::context_budget::SKILLS_CAP;
-    /// nudge 建议上限。
-    pub const NUDGES: usize = axagent_harness::context_budget::NUDGES_CAP;
-    /// 历史消息占比（比例，已随窗口伸缩）。
-    pub const HISTORY_RATIO: f64 = axagent_harness::context_budget::HISTORY_RATIO;
 }
 
 /// Content string for the compression marker message.

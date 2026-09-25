@@ -7,6 +7,7 @@ use crate::runtime_types::execution_progress::AgentExecutionProgress;
 use crate::runtime_types::hooks::HookProgressReporter;
 use crate::runtime_types::permissions::PermissionPrompter;
 use crate::runtime_types::session::Session;
+use crate::session_events::SessionEventSink;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -161,6 +162,14 @@ pub trait ConversationRuntimeHost: Send {
     /// 默认实现为空操作（保持向后兼容）。
     fn set_system_directive(&mut self, _directive: String) {}
 
+    /// 注入 session_events 写入端（压缩事件落表，供跨进程回放）。
+    ///
+    /// 由 `SessionManager` 在 `run_turn` 前透传它自己持有的 sink —— 这样
+    /// runtime-core 内部的阈值/轮次压缩也能留下可回放事件，而无需在
+    /// wiring 层为每个 `ConversationRuntime` 额外接线。
+    /// 默认实现为空操作：未注入时压缩照常执行，只是不留事件。
+    fn set_session_event_sink(&mut self, _sink: Arc<dyn SessionEventSink>) {}
+
     /// 消费 runtime，提取 Session。
     fn into_session(self: Box<Self>) -> Session;
 }
@@ -200,6 +209,10 @@ impl<T: ?Sized + ConversationRuntimeHost> ConversationRuntimeHost for Box<T> {
 
     fn set_system_directive(&mut self, directive: String) {
         (**self).set_system_directive(directive)
+    }
+
+    fn set_session_event_sink(&mut self, sink: Arc<dyn SessionEventSink>) {
+        (**self).set_session_event_sink(sink)
     }
 
     fn into_session(self: Box<Self>) -> Session {

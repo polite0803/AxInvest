@@ -77,6 +77,42 @@ pub fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
     &s[..end]
 }
 
+/// 头尾各保留 `max_bytes` 的一半、中间省略，并以 `omitted_bytes` 标记占位。
+///
+/// 与 codex `HeadTailBuffer`（`core/src/unified_exec/head_tail_buffer.rs`）同构：
+/// 命令输出的**横幅在头、最终报错在尾** —— 两头都是关键信息，只留头部会把
+/// 报错原文整段丢掉。返回串长度约为 `max_bytes` 加上标记文本，不做二次裁剪。
+pub fn truncate_head_tail(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let head_budget = max_bytes / 2;
+    let tail_budget = max_bytes - head_budget;
+
+    let head = truncate_to_char_boundary(s, head_budget);
+
+    // 尾部起点落在多字节字符中间时向后让位（少取字节），保证切片不 panic。
+    let mut tail_start = s.len() - tail_budget;
+    while tail_start < s.len() && !s.is_char_boundary(tail_start) {
+        tail_start += 1;
+    }
+    let tail = &s[tail_start..];
+
+    let omitted = s.len() - head.len() - tail.len();
+    format!("{head}\n\n[omitted_bytes={omitted}]\n\n{tail}")
+}
+
+/// 生成短内容摘要（sha256 前 8 字节 = 16 位十六进制小写）。
+///
+/// 用于缓存键等「同一输入必须稳定产出同一值」的场景。`DefaultHasher` 不保证
+/// 跨版本稳定，不适合作为缓存键 / 持久化指纹。
+pub fn short_sha256(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    hex::encode(&hasher.finalize()[..8])
+}
+
 /// Estimate the number of tokens in a text string.
 ///
 /// Heuristic:
@@ -237,5 +273,46 @@ mod tests {
     fn truncate_empty() {
         assert_eq!(truncate_to_char_boundary("", 0), "");
         assert_eq!(truncate_to_char_boundary("", 100), "");
+    }
+
+    #[test]
+    fn head_tail_short_input_unchanged() {
+        assert_eq!(truncate_head_tail("hello", 100), "hello");
+    }
+
+    /// 头尾各半：头部横幅与尾部报错必须同时保留，中间以 `omitted_bytes` 标记占位。
+    #[test]
+    fn head_tail_keeps_both_ends_and_marks_omitted_bytes() {
+        let s = format!("BANNER-START\n{}\nFINAL-ERROR-42", "x".repeat(20_000));
+        let out = truncate_head_tail(&s, 1000);
+
+        assert!(out.starts_with("BANNER-START"), "头部横幅不能丢: {out:.40}");
+        assert!(out.ends_with("FINAL-ERROR-42"), "尾部报错不能丢");
+        assert!(out.contains("[omitted_bytes="), "必须留中间省略标记");
+
+        let omitted: usize = out
+            .split("[omitted_bytes=")
+            .nth(1)
+            .and_then(|rest| rest.split(']').next())
+            .and_then(|n| n.parse().ok())
+            .expect("omitted_bytes 标记必须可解析");
+        assert!(omitted > 0 && omitted < s.len(), "省略字节数应落在 (0, len) 区间: {omitted}");
+    }
+
+    /// 奇数预算下两侧都可能落在多字节字符中间 —— 不得 panic，且头尾仍是完整字符。
+    #[test]
+    fn head_tail_cjk_boundary_safe() {
+        let s = "一二三".repeat(1000); // 9000 字节
+        let out = truncate_head_tail(&s, 1001);
+        assert!(out.starts_with('一'));
+        assert!(out.ends_with('三'));
+        assert!(out.contains("[omitted_bytes="));
+    }
+
+    #[test]
+    fn short_sha256_is_stable_and_sensitive() {
+        assert_eq!(short_sha256("abc"), short_sha256("abc"));
+        assert_ne!(short_sha256("abc"), short_sha256("abd"));
+        assert_eq!(short_sha256("abc").len(), 16);
     }
 }

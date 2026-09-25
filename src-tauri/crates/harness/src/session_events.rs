@@ -76,7 +76,9 @@ impl SessionEventType {
 /// - `Message`：`{ role: "assistant", content_preview: "..." }`
 /// - `ToolCall`：`{ id, name, input }`
 /// - `ToolResult`：`{ tool_use_id, output_preview, is_error }`
-/// - `Compacted`：`{ step_count_before, step_count_after, summary_preview }`
+/// - `Compacted`：`{ summary_preview, covered_range, tokens_before, tokens_after }`
+///   （由 [`build_compacted_event_payload`] 构造；`covered_range` 为被摘要覆盖的
+///   消息区间 `[start, end)`，用于回放时还原「当时模型看到的是摘要」）
 /// - `TurnEnded`：`{ outcome: "success" | "failure", total_iterations, total_tokens }`
 /// - `Interrupted`：`{ last_event_seq, reason: "tool_call_without_result" | "kill" }`
 ///
@@ -99,6 +101,18 @@ pub struct SessionEventPayload {
     pub step_count_before: Option<i64>,
     #[serde(rename = "stepCountAfter", skip_serializing_if = "Option::is_none")]
     pub step_count_after: Option<i64>,
+    /// `Compacted`：被摘要覆盖的原始消息区间 `[start, end)`（end 不含）
+    #[serde(rename = "coveredRange", skip_serializing_if = "Option::is_none")]
+    pub covered_range: Option<(usize, usize)>,
+    /// `Compacted`：压缩后模型实际看到的摘要文本（截断为预览）
+    #[serde(rename = "summaryPreview", skip_serializing_if = "Option::is_none")]
+    pub summary_preview: Option<String>,
+    /// `Compacted`：压缩前会话 token 估算
+    #[serde(rename = "tokensBefore", skip_serializing_if = "Option::is_none")]
+    pub tokens_before: Option<u64>,
+    /// `Compacted`：压缩后会话 token 估算
+    #[serde(rename = "tokensAfter", skip_serializing_if = "Option::is_none")]
+    pub tokens_after: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,6 +120,50 @@ pub struct SessionEventPayload {
     /// 兜底：额外自定义字段（用 serde_json::Map 追加）
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// `Compacted` 事件里摘要预览的字符上限。
+///
+/// 取 2000 字符：足够还原「当时模型看到的是摘要」这一事实与摘要主体，
+/// 又不至于让 `session_events` 表随压缩次数线性膨胀（事件表定位是**执行态**轨迹，
+/// 完整对话文本另有 `messages` 表承载）。
+pub const COMPACT_SUMMARY_PREVIEW_CHARS: usize = 2000;
+
+/// 构造 `Compacted` 事件的 payload。
+///
+/// 抽到 harness 是为了让 agent（`session_manager` 的 turn 前压缩）与
+/// runtime-core（`ConversationRuntime` 的阈值/轮次压缩）两条生产路径
+/// **发出结构完全一致**的事件 —— 否则回放侧要按调用方分叉解析。
+///
+/// # 参数
+/// - `summary`：压缩产出、随后被写入续接 system 消息的摘要文本；
+/// - `covered_range`：被摘要覆盖的原始消息区间 `[start, end)`；
+/// - `tokens_before` / `tokens_after`：压缩前后会话 token 估算。
+#[must_use]
+pub fn build_compacted_event_payload(
+    summary: &str,
+    covered_range: Option<(usize, usize)>,
+    tokens_before: u64,
+    tokens_after: u64,
+) -> serde_json::Value {
+    let payload = SessionEventPayload {
+        summary_preview: Some(preview_chars(summary, COMPACT_SUMMARY_PREVIEW_CHARS)),
+        covered_range,
+        tokens_before: Some(tokens_before),
+        tokens_after: Some(tokens_after),
+        ..Default::default()
+    };
+    serde_json::to_value(payload).unwrap_or(serde_json::Value::Null)
+}
+
+/// 按**字符**（非字节）截断预览，避免在多字节边界切开 UTF-8。
+fn preview_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut truncated: String = text.chars().take(max_chars).collect();
+    truncated.push('…');
+    truncated
 }
 
 /// 单条 session_event（从 DB 读回后的值对象）。
@@ -208,5 +266,36 @@ mod tests {
         assert_eq!(back.tool_use_id.as_deref(), Some("call_1"));
         assert_eq!(back.tool_name.as_deref(), Some("bash"));
         assert_eq!(back.is_error, Some(false));
+    }
+
+    #[test]
+    fn compacted_payload_shape_roundtrips() {
+        let json = build_compacted_event_payload("早期对话摘要", Some((1, 13)), 120_000, 8_000);
+        // 区间以 JSON 数组承载，回放侧按 [start, end) 还原被替换的消息范围。
+        assert_eq!(json.get("coveredRange"), Some(&serde_json::json!([1, 13])));
+        let back: SessionEventPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.summary_preview.as_deref(), Some("早期对话摘要"));
+        assert_eq!(back.covered_range, Some((1, 13)));
+        assert_eq!(back.tokens_before, Some(120_000));
+        assert_eq!(back.tokens_after, Some(8_000));
+    }
+
+    #[test]
+    fn compacted_payload_keeps_short_summary_intact() {
+        let json = build_compacted_event_payload("短摘要", None, 10, 5);
+        let back: SessionEventPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(back.summary_preview.as_deref(), Some("短摘要"));
+        assert_eq!(back.covered_range, None);
+    }
+
+    #[test]
+    fn compacted_payload_truncates_preview_by_chars_not_bytes() {
+        // 全为多字节字符：按字节截断会 panic 或产出乱码，故必须按字符截断。
+        let summary = "汉".repeat(COMPACT_SUMMARY_PREVIEW_CHARS + 500);
+        let json = build_compacted_event_payload(&summary, None, 0, 0);
+        let back: SessionEventPayload = serde_json::from_value(json).unwrap();
+        let preview = back.summary_preview.expect("预览必须存在");
+        assert_eq!(preview.chars().count(), COMPACT_SUMMARY_PREVIEW_CHARS + 1);
+        assert!(preview.ends_with('…'));
     }
 }

@@ -139,7 +139,8 @@ impl AgentTurnRunner for WorkflowAgentTurnRunner {
             tool_registry.disable_tool("RemoteTrigger");
         }
 
-        let (prov, adapter, ctx) = self.resolve_provider(request.provider_id.as_deref()).await?;
+        let (prov, adapter, mut ctx) =
+            self.resolve_provider(request.provider_id.as_deref()).await?;
 
         // 模型：request.model 优先，否则 provider 默认模型。
         let model = if request.model.is_empty() {
@@ -164,6 +165,10 @@ impl AgentTurnRunner for WorkflowAgentTurnRunner {
             .await
             .map_err(|e| AxAgentError::agent(e.to_string()))?;
         let session_id = session.session().session_id.clone();
+
+        // R4-2：绑定会话（会话 id 在 resolve_provider 之后才拿到，故在此补写），
+        // 使本轮可复用 provider 侧的 response 链并派生 `prompt_cache_key`。
+        ctx.conversation = Some(session_id.clone());
 
         // ApiClient + 工具注册表（空名单 = 空注册表纯推理）。
         let api_client: Box<dyn ApiClient + Send> =

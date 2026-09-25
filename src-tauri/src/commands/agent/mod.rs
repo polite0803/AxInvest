@@ -420,7 +420,7 @@ pub(crate) async fn resolve_profile_tool_context(
 #[allow(clippy::too_many_arguments)]
 fn build_streaming_api_client(
     adapter: Arc<dyn ProviderAdapter>,
-    ctx: ProviderRequestContext,
+    mut ctx: ProviderRequestContext,
     chat_tools: Vec<ChatTool>,
     dynamic_tools: axagent_harness::DynamicToolSet,
     model_id: &str,
@@ -437,6 +437,11 @@ fn build_streaming_api_client(
     stream_app: AppHandle,
 ) -> AxAgentApiClient {
     use axagent_runtime::AssistantEvent;
+
+    // R4-2：绑定会话 —— 本函数是主对话路径构造 ApiClient 的收口点，会话 id 在此
+    // 注入 provider 上下文，后续由 `provider_adapter` 用于会话级增量续写
+    // （`previous_response_id`）与 `prompt_cache_key` 派生。
+    ctx.conversation = Some(stream_conv_id.clone());
 
     // 1. 选构造路径
     let mut client = if chat_tools.is_empty() {

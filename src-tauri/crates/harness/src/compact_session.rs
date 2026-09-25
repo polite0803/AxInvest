@@ -476,13 +476,24 @@ fn extract_existing_compacted_summary(
     }
 
     let text = first_text_block(message)?;
-    let summary = text.strip_prefix(compact_continuation_preamble(provider))?;
-    let summary = summary
-        .split_once(&("\n\n".to_string() + compact_recent_messages_note(provider)))
-        .map_or(summary, |(value, _)| value);
-    let summary = summary
-        .split_once(&("\n".to_string() + compact_direct_resume_instruction(provider)))
-        .map_or(summary, |(value, _)| value);
+    let preamble = compact_continuation_preamble(provider);
+    let summary = text.strip_prefix(preamble)?;
+
+    // 仅当后缀文本非空时才做剥离（如 NoopPromptProvider 返回空字符串时
+    // 拆分符退化为纯 "\n"，会误截整个 formatted_summary 的第一行）。
+    let note = compact_recent_messages_note(provider);
+    let summary = if note.is_empty() {
+        summary
+    } else {
+        summary.split_once(&("\n\n".to_string() + note)).map_or(summary, |(value, _)| value)
+    };
+    let instruction = compact_direct_resume_instruction(provider);
+    let summary = if instruction.is_empty() {
+        summary
+    } else {
+        summary.split_once(&("\n".to_string() + instruction)).map_or(summary, |(value, _)| value)
+    };
+
     Some(summary.trim().to_string())
 }
 
@@ -677,4 +688,71 @@ pub fn detect_task_boundary(messages: &[ConversationMessage]) -> Option<usize> {
 #[must_use]
 pub fn cleanup_task_boundary(messages: &[ConversationMessage]) -> Option<usize> {
     detect_task_boundary(messages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        collect_key_files, extract_existing_compacted_summary, infer_pending_work, summarize_block,
+    };
+    use crate::conversation_model::{ContentBlock, ConversationMessage, MessageRole};
+    use crate::prompt_provider::NoopPromptProvider;
+
+    fn user_text(text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: MessageRole::User,
+            blocks: vec![ContentBlock::Text { text: text.to_string() }],
+            usage: None,
+        }
+    }
+
+    fn assistant_text(text: &str) -> ConversationMessage {
+        ConversationMessage {
+            role: MessageRole::Assistant,
+            blocks: vec![ContentBlock::Text { text: text.to_string() }],
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn summarize_block_truncates_long_text() {
+        let summary = summarize_block(&ContentBlock::Text { text: "x".repeat(600) });
+        assert!(summary.ends_with('…'));
+        assert!(summary.chars().count() <= 501);
+    }
+
+    #[test]
+    fn collect_key_files_extracts_paths_from_text() {
+        let files = collect_key_files(&[user_text(
+            "Update rust/crates/runtime/src/compact.rs and rust/crates/rusty-claude-cli/src/main.rs next.",
+        )]);
+        assert!(files.contains(&"rust/crates/runtime/src/compact.rs".to_string()));
+        assert!(files.contains(&"rust/crates/rusty-claude-cli/src/main.rs".to_string()));
+    }
+
+    /// 回归：preamble / note / instruction 均为空串时，不得用退化分隔符
+    /// （`"\n\n"` / `"\n"`）去切分既有摘要 —— 否则摘要会被截断成第一行
+    /// `"Summary:"`，二次压缩时「Previously compacted context」整段丢失。
+    #[test]
+    fn extract_existing_summary_keeps_text_when_prompt_strings_are_empty() {
+        let formatted = "Summary:\nConversation summary:\n- Scope: 2 earlier messages compacted.";
+        let message = ConversationMessage {
+            role: MessageRole::System,
+            blocks: vec![ContentBlock::Text { text: format!("{formatted}\n\n\n") }],
+            usage: None,
+        };
+        let extracted = extract_existing_compacted_summary(&message, &NoopPromptProvider)
+            .expect("空 preamble 时应能提取既有摘要");
+        assert_eq!(extracted, formatted);
+    }
+
+    #[test]
+    fn infer_pending_work_from_recent_messages() {
+        let pending = infer_pending_work(&[
+            user_text("done"),
+            assistant_text("Next: update tests and follow up on remaining CLI polish."),
+        ]);
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].contains("Next: update tests"));
+    }
 }

@@ -2,6 +2,7 @@
 
 //! AxAgent Provider Adapter for ClawCode Runtime
 
+use axagent_harness::provider_continuation;
 use axagent_harness::runtime_types::conversation::{
     ApiClient, ApiRequest, AssistantEvent, PromptCacheEvent, RuntimeError,
 };
@@ -440,6 +441,31 @@ impl AxAgentApiClient {
     }
 }
 
+/// R4-2：由会话续写状态与本轮历史长度决定「回传哪条 response id + 从第几条历史开始发」。
+///
+/// 返回 `(previous_response_id, history_start)`：
+///
+/// - 链可用（水位非零且严格落后于历史）⇒ `(Some(id), 水位)`，本轮只发增量；
+/// - 链已失效（历史被压缩 / 回退 / 同轮重试）⇒ `(None, 0)` 整段重发，并**清除**失效状态，
+///   否则后续轮次会一直拿陈旧水位裁掉真实上下文。
+/// - 未绑定会话（批处理型调用点）⇒ 恒为 `(None, 0)`，不读也不写状态表。
+fn resolve_continuation(conversation: Option<&str>, history_len: usize) -> (Option<String>, usize) {
+    let cid = match conversation {
+        Some(cid) => cid,
+        None => return (None, 0),
+    };
+    match provider_continuation::global().get(cid) {
+        Some(state) if provider_continuation::can_continue(&state, history_len) => {
+            (Some(state.response_id), state.covered_messages)
+        },
+        Some(_) => {
+            provider_continuation::global().clear(cid);
+            (None, 0)
+        },
+        None => (None, 0),
+    }
+}
+
 impl ApiClient for AxAgentApiClient {
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
         // Apply request delay to avoid rate limits.
@@ -457,8 +483,16 @@ impl ApiClient for AxAgentApiClient {
         // Prepend system_prompt as System messages so they reach the LLM.
         // The runtime separates system_prompt from messages for caching purposes;
         // we merge them here before conversion.
+        //
+        // R4-2 会话级增量续写：若该会话已有可续写的 response 链（provider 登记过 id、
+        // 且水位落在当前历史之内），本轮只发**增量历史**并回传 `previous_response_id`；
+        // 水位非法（历史被压缩 / 回退 / 同轮重试）则丢弃链、整段重发，避免静默丢上下文。
+        let history_len = request.messages.len();
+        let (previous_response_id, history_start) =
+            resolve_continuation(self.ctx.conversation.as_deref(), history_len);
+
         let mut all_conv_messages: Vec<ConversationMessage> =
-            Vec::with_capacity(request.system_prompt.len() + request.messages.len());
+            Vec::with_capacity(request.system_prompt.len() + history_len - history_start);
         for prompt_text in &request.system_prompt {
             all_conv_messages.push(ConversationMessage {
                 role: MessageRole::System,
@@ -466,7 +500,7 @@ impl ApiClient for AxAgentApiClient {
                 usage: None,
             });
         }
-        all_conv_messages.extend_from_slice(&request.messages);
+        all_conv_messages.extend_from_slice(&request.messages[history_start..]);
         let chat_messages = Self::convert_messages(&all_conv_messages, &self.image_urls);
 
         let mut chat_request = ChatRequest {
@@ -482,8 +516,9 @@ impl ApiClient for AxAgentApiClient {
             thinking_param_style: self.thinking_param_style.clone(),
             api_mode: None,
             instructions: None,
-            conversation: None,
-            previous_response_id: None,
+            // 会话 id 同时作为 provider 侧 `prompt_cache_key` 的派生输入。
+            conversation: self.ctx.conversation.clone(),
+            previous_response_id,
             store: None,
             response_format: None,
         };
@@ -496,6 +531,8 @@ impl ApiClient for AxAgentApiClient {
         let cancel = self.cancel_token.clone();
         let llm_config = self.llm_config.clone();
         let on_event = self.on_event.clone();
+        // R4-2：本轮水位 = 裁剪前的完整历史条数（provider 看不到它，故由调用点配对写入）。
+        let continuation_key = self.ctx.conversation.clone();
 
         let process_stream = async move {
             // ── agent/request 瀑布拦截（P2 事件化，缺陷 #3）──
@@ -661,6 +698,14 @@ impl ApiClient for AxAgentApiClient {
                 );
                 let detail = format!("LLM 流式调用失败: {msg}");
                 return Err(RuntimeError::new(detail));
+            }
+
+            // R4-2：本轮成功 ⇒ 把 provider 登记的服务端 response id 与本轮水位
+            // 配对落地（两段写入分开：provider 不知道该会话的完整历史条数）。
+            if let Some(cid) = continuation_key.as_deref()
+                && let Some(response_id) = provider_continuation::global().take_response_id(cid)
+            {
+                provider_continuation::global().record(cid, response_id, history_len);
             }
 
             Ok(events)
@@ -1152,5 +1197,55 @@ mod tests {
             ChatContent::Text(t) => assert_eq!(t, "Hello World"),
             _ => panic!("Expected text content"),
         }
+    }
+
+    // ── R4-2：会话级续写链解析 ──
+
+    #[test]
+    fn resolve_continuation_without_conversation_is_always_fresh() {
+        // 批处理型调用点不绑定会话：既有链存在也不得被消费（恒整段重发）。
+        let store = provider_continuation::global();
+        let cid = "resolve-continuation-unbound";
+        store.clear(cid);
+        store.record(cid, "resp_unbound", 2);
+
+        let (id, start) = resolve_continuation(None, 5);
+        assert_eq!(id, None);
+        assert_eq!(start, 0);
+        // 未绑定会话时不得顺手清掉别人的状态。
+        assert!(store.get(cid).is_some(), "未绑定会话的调用不得清除状态表");
+        store.clear(cid);
+    }
+
+    #[test]
+    fn resolve_continuation_reuses_chain_when_watermark_behind_history() {
+        let store = provider_continuation::global();
+        let cid = "resolve-continuation-behind";
+        store.clear(cid);
+        store.record(cid, "resp_1", 2);
+
+        // 历史 4 条 > 水位 2 ⇒ 可续写：回传 id，且只发第 2 条起的增量。
+        let (id, start) = resolve_continuation(Some(cid), 4);
+        assert_eq!(id, Some("resp_1".to_string()));
+        assert_eq!(start, 2);
+        store.clear(cid);
+    }
+
+    #[test]
+    fn resolve_continuation_drops_stale_chain_and_clears_it() {
+        let store = provider_continuation::global();
+        let cid = "resolve-continuation-stale";
+
+        // 水位齐平（历史未增长，如同轮重试）：不可续写，且必须清掉陈旧状态，
+        // 否则后续轮次会一直拿旧水位裁掉真实上下文。
+        store.clear(cid);
+        store.record(cid, "resp_stale", 3);
+        assert_eq!(resolve_continuation(Some(cid), 3), (None, 0));
+        assert!(store.get(cid).is_none(), "齐平水位应被清除");
+
+        // 水位超前（历史被压缩 / 回退）：同样清掉。
+        store.record(cid, "resp_ahead", 9);
+        assert_eq!(resolve_continuation(Some(cid), 4), (None, 0));
+        assert!(store.get(cid).is_none(), "超前水位应被清除");
     }
 }

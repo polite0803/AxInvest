@@ -75,6 +75,9 @@ struct ResponsesRequest {
     previous_response_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     store: Option<bool>,
+    /// 服务端前缀缓存键（R4-2 / O-3：会话 id + 系统提示哈希）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt_cache_key: Option<String>,
     /// Structured Output 强制契约（Responses API text.format）
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<ResponsesTextConfig>,
@@ -450,6 +453,14 @@ fn build_request(request: &ChatRequest, stream: bool) -> ResponsesRequest {
             .collect()
     });
 
+    // R4-2 / O-3：缓存键 = 会话 id + 系统提示哈希。
+    // `instructions` 由 `build_responses_input` 合并了 system 消息与 extra instructions，
+    // 因此它一变键就变 ⇒ 系统提示变更即时失效；会话 id 不同则键不同 ⇒ 跨会话不撞。
+    let prompt_cache_key = request.conversation.as_ref().map(|conversation| {
+        let system = instructions.as_deref().unwrap_or_default();
+        format!("{conversation}:{}", axagent_harness::util_fns::short_sha256(system))
+    });
+
     ResponsesRequest {
         model: request.model.clone(),
         input,
@@ -470,6 +481,7 @@ fn build_request(request: &ChatRequest, stream: bool) -> ResponsesRequest {
         reasoning,
         previous_response_id: request.previous_response_id.clone(),
         store: request.store,
+        prompt_cache_key,
         text: request.response_format.as_ref().map(convert_responses_text_format),
     }
 }
@@ -552,7 +564,12 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
         request: Arc<ChatRequest>,
     ) -> Result<ChatResponse> {
         let url = Self::chat_url(ctx);
-        let body = build_request(&request, false);
+        let mut body = build_request(&request, false);
+        // R4-2：调用点未显式给续写 id 时，回退到会话级上下文 —— 这是
+        // `ProviderRequestContext::previous_response_id` 唯一的消费点。
+        if body.previous_response_id.is_none() {
+            body.previous_response_id = ctx.previous_response_id.clone();
+        }
 
         let resp = crate::apply_request_headers(
             self.get_client(ctx)?
@@ -603,7 +620,14 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
         let api_key = ctx.api_key.clone();
         let custom_headers = ctx.custom_headers.clone();
         let url = Self::chat_url(ctx);
-        let body = build_request(&request, true);
+        let mut body = build_request(&request, true);
+        // R4-2：同 `chat` —— 回退到会话级续写 id。
+        if body.previous_response_id.is_none() {
+            body.previous_response_id = ctx.previous_response_id.clone();
+        }
+        // R4-2：只有绑定会话（对话型调用）才登记 response id；批处理型调用
+        // （`conversation` 为 None）不写任何续写状态。
+        let conversation = ctx.conversation.clone();
 
         let (mut tx, rx) = futures::channel::mpsc::channel(256);
 
@@ -801,6 +825,16 @@ impl ProviderAdapter for OpenAIResponsesAdapter {
                                     let (usage, mut extra_tool_calls) = if let Ok(evt) =
                                         serde_json::from_str::<StreamCompletedEvent>(data)
                                     {
+                                        // R4-2：登记服务端 response id，供下一轮以
+                                        // `previous_response_id` 续写；消息水位由 agent 侧
+                                        // 调用点在裁剪时配对写入（provider 看不到完整历史）。
+                                        if let Some(cid) = conversation.as_deref()
+                                            && let Some(id) =
+                                                evt.response.as_ref().and_then(|r| r.id.clone())
+                                        {
+                                            axagent_harness::provider_continuation::global()
+                                                .note_response_id(cid, id);
+                                        }
                                         let usage = evt
                                             .response
                                             .as_ref()
@@ -1328,5 +1362,70 @@ mod tests {
         };
         let built = build_request(&request, false);
         assert_eq!(built.max_output_tokens, Some(16));
+    }
+
+    /// R4-2 / O-3：构造「会话 id + 系统提示」两个缓存键输入。
+    fn request_with(conversation: Option<&str>, system: &str) -> ChatRequest {
+        ChatRequest {
+            model: "gpt-5".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: ChatContent::Text(system.to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    thinking: None,
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: ChatContent::Text("hi".to_string()),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    thinking: None,
+                },
+            ],
+            stream: false,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            tools: None,
+            thinking_budget: None,
+            use_max_completion_tokens: None,
+            thinking_param_style: None,
+            api_mode: None,
+            conversation: conversation.map(str::to_string),
+            instructions: None,
+            previous_response_id: None,
+            store: None,
+            response_format: None,
+        }
+    }
+
+    #[test]
+    fn prompt_cache_key_derives_from_conversation_and_system_prompt() {
+        let first = build_request(&request_with(Some("conv-1"), "be terse"), false);
+        let repeat = build_request(&request_with(Some("conv-1"), "be terse"), false);
+        let other_conversation = build_request(&request_with(Some("conv-2"), "be terse"), false);
+        let other_system = build_request(&request_with(Some("conv-1"), "be verbose"), false);
+        let unbound = build_request(&request_with(None, "be terse"), false);
+
+        let key = first.prompt_cache_key.expect("测试：绑定会话应派生缓存键");
+        assert!(key.starts_with("conv-1:"), "键应带会话前缀");
+        assert_eq!(
+            repeat.prompt_cache_key.as_deref(),
+            Some(key.as_str()),
+            "同会话 + 同系统提示必须稳定同键",
+        );
+        assert_ne!(
+            other_conversation.prompt_cache_key.as_deref(),
+            Some(key.as_str()),
+            "跨会话不得撞键",
+        );
+        assert_ne!(
+            other_system.prompt_cache_key.as_deref(),
+            Some(key.as_str()),
+            "系统提示变更必须即时失效",
+        );
+        assert_eq!(unbound.prompt_cache_key, None, "未绑定会话不应派生缓存键");
     }
 }

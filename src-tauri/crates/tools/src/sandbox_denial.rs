@@ -33,7 +33,7 @@ const CODEX_DENIAL_KEYWORDS: [&str; 7] = [
 /// Windows 扩展关键词 —— **对 codex 的刻意偏离**。
 ///
 /// 理由：codex 的 7 条词全部面向 Unix，Windows 侧一条也命中不了。而本仓 Windows
-/// 沙箱（SAFER 受限令牌，见 `win_sandbox.rs`）被拒时，报错文案由操作系统给出、
+/// 沙箱（受限令牌，见 `win_sandbox.rs`）被拒时，报错文案由操作系统给出、
 /// **随系统语言本地化**：本机（zh-CN）实测受限令牌内
 /// `cmd /d /s /c "echo x > C:\Windows\x.txt"` ⇒ stderr 为 GBK 编码的「拒绝访问。」
 /// （退出码 `1`，stdout 为空）。若只照抄 codex 关键词表，`OnFailure` 的

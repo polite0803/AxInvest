@@ -14,6 +14,7 @@ use axagent_harness::conversation_model::{
 };
 use axagent_harness::prompt_provider::NoopPromptProvider;
 use axagent_harness::runtime_types::compact::CompactionConfig;
+use axagent_harness::runtime_types::compact::estimate_session_tokens;
 use axagent_harness::runtime_types::compact::should_compact;
 use axagent_harness::runtime_types::conversation::RuntimeError;
 use axagent_harness::runtime_types::conversation::{ConversationRuntimeHost, TurnSummary};
@@ -875,6 +876,24 @@ impl SessionManager {
                 );
             }
 
+            // 压缩事件落 session_events（P1-1 回放）：摘要 + 覆盖区间 + 压缩前后 token。
+            // 与 runtime-core 侧共用 harness::build_compacted_event_payload，回放侧不必按调用方分叉解析。
+            // session_id 沿用本文件既有 TurnStarted/TurnEnded 的取法（conversation_id），保持一致。
+            if let Some(sink) = self.session_event_sink.read().await.as_ref().map(Arc::clone) {
+                let payload = axagent_harness::build_compacted_event_payload(
+                    &result.summary,
+                    Some((0, result.removed_message_count)),
+                    estimate_session_tokens(session.session()) as u64,
+                    estimate_session_tokens(&result.compacted_session) as u64,
+                );
+                sink.emit(
+                    &conversation_id,
+                    axagent_harness::SessionEventType::Compacted,
+                    Some(payload),
+                )
+                .await;
+            }
+
             let mut compacted = session;
             compacted.session_mut().messages = result.compacted_session.messages;
             compacted
@@ -901,6 +920,13 @@ impl SessionManager {
         };
         runtime.set_max_iterations(max_iters);
         runtime.set_auto_compaction_threshold(AUTO_COMPACTION_TOKEN_THRESHOLD as u32);
+
+        // 把本管理器持有的 session_events sink 透传给 runtime —— runtime-core 内部的
+        // 阈值/轮次压缩因此也能落 `Compacted` 事件（P1-1 回放），而 wiring 层无需为
+        // 每个 ConversationRuntime 单独接线。未注入时 runtime 侧静默跳过。
+        if let Some(sink) = self.session_event_sink.read().await.as_ref().map(Arc::clone) {
+            runtime.set_session_event_sink(sink);
+        }
 
         // Attach cancel token if provided
         if let Some(token) = cancel_token {

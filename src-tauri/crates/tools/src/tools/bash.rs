@@ -365,16 +365,12 @@ fn format_shell_result(
     result
 }
 
-/// 截断输出到 max 字节（按字符边界截断，修复原实现多字节字符 panic 隐患）
+/// 截断输出到 max 字节，**头尾各留一半**（R4-2-③，按字符边界安全切片）。
+///
+/// 命令输出的横幅在头、最终报错在尾，只留头部会把报错整段丢掉；
+/// 权威实现收口在 `axagent_harness::util_fns::truncate_head_tail`。
 fn truncate_lossy(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        return s.to_string();
-    }
-    let mut end = max;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}\n\n[已截断，显示 {}/{} 字节]", &s[..end], end, s.len())
+    axagent_harness::util_fns::truncate_head_tail(s, max)
 }
 
 /// 平台沙箱子进程的统一等待契约。
@@ -503,8 +499,8 @@ async fn ask_user_approval(
 }
 
 /// 沙箱执行路径（PLAN-codex-parity P0-1）：
-/// Windows 走 SAFER restricted token 受限子进程；Linux 走 unshare 命名空间；
-/// 其他平台显式报错（不做静默降级）。
+/// Windows 走 capability SID 版受限令牌（`CreateRestrictedToken`）子进程；
+/// Linux 走 unshare 命名空间；其他平台显式报错（不做静默降级）。
 ///
 /// OnFailure 策略（P0-2）：沙箱内非零退出**且疑似沙箱拒绝**时询问用户，
 /// 批准后沙箱外重试一次。
@@ -540,7 +536,7 @@ async fn run_sandboxed(
         let _ = (policy, cmd, cwd, timeout_secs);
         return Err(ToolError::execution_failed_for(
             "Bash",
-            "沙箱执行支持 Windows（SAFER restricted token）与 Linux（unshare）；macOS 沙箱将在后续阶段接入",
+            "沙箱执行支持 Windows（受限令牌 / capability SID）与 Linux（unshare）；macOS 沙箱将在后续阶段接入",
         ));
     }
 
@@ -691,8 +687,8 @@ mod tests {
     }
 
     /// P0-1 沙箱路径端到端（Windows）：ctx.sandbox 设置后 Bash 走受限令牌，
-    /// 只读命令可用、写系统目录被拒（P0-1b 实测：SAFER NormalUser 保留用户
-    /// Profile 写权限，deny 断言必须落在系统目录，与 win_sandbox 测试一致）。
+    /// 只读命令可用、写系统目录被拒（`ReadOnly` 档不打 capability allow ACE，
+    /// 用户 Profile 同样写不了；断言仍落在系统目录，与 win_sandbox 测试一致）。
     /// 非 Windows 非 Linux 平台应显式报错（不静默降级）。
     #[tokio::test]
     async fn bash_sandboxed_path_end_to_end() {
@@ -831,6 +827,34 @@ mod tests {
             result.content
         );
         let _ = std::fs::remove_file(probe);
+    }
+
+    // ── R4-2-③：head/tail 截断 ──
+
+    #[test]
+    fn truncate_keeps_both_head_and_tail() {
+        let head = "启动横幅".repeat(10);
+        let tail = "最终报错: 权限不足".to_string();
+        let s = format!("{head}{}{tail}", "-".repeat(5000));
+
+        let out = truncate_lossy(&s, 512);
+        assert!(out.starts_with("启动横幅"), "头部横幅必须保留");
+        assert!(out.ends_with("最终报错: 权限不足"), "尾部报错必须保留（只留头部会丢它）");
+        assert!(out.contains("[omitted_bytes="), "中间应以省略字节数标记");
+    }
+
+    #[test]
+    fn truncate_short_input_unchanged() {
+        let s = "short output";
+        assert_eq!(truncate_lossy(s, 512), s);
+    }
+
+    #[test]
+    fn truncate_cjk_boundary_safe() {
+        // 预算落在多字节字符中间时不得 panic，且两端切片都在字符边界上。
+        let s = "中".repeat(1000);
+        let out = truncate_lossy(&s, 101);
+        assert!(out.contains("[omitted_bytes="));
     }
 
     // ── R2-1：批准 → 沉淀 → 免询问 闭环 ─────────────────────────────────

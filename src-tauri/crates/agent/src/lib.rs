@@ -40,6 +40,7 @@ pub mod fine_tune;
 pub mod frontend_adapter;
 pub mod goal_evaluator;
 pub mod graph_insights;
+pub mod guardian;
 pub mod guardrails;
 pub mod health_checker;
 pub mod hierarchical_planner;

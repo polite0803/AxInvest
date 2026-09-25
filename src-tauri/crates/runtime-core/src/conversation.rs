@@ -26,6 +26,7 @@ use crate::permissions::{
 };
 use crate::reactive_compact::{ReactiveCompactResult, classify_trigger, try_reactive_compact};
 use crate::session::{ContentBlock, ConversationMessage, Session};
+use crate::session_token_ledger::CompactionStrategy;
 use crate::usage::{TokenUsage, UsageTracker};
 
 const NP: &NoopPromptProvider = &NoopPromptProvider;
@@ -211,6 +212,12 @@ pub struct ConversationRuntime<C, T> {
     hook_chain: Option<Arc<HookChain>>,
     /// 可选的技能侧反思钩子（T0.9）：工具执行完成后触发进化判定（经 harness trait 注入）。
     skill_evolution_hook: Option<Arc<dyn SkillEvolutionHook>>,
+    /// 可选的 session_events 写入端：压缩发生时落 `Compacted` 事件（P1-1 跨进程回放）。
+    ///
+    /// 由 `SessionManager::run_turn_with_tools` 用其自持的 sink 透传注入
+    /// （`set_session_event_sink`），因此 wiring 层无需为每个 runtime 额外接线。
+    /// 未注入时压缩照常执行，只是不留事件。
+    session_event_sink: Option<Arc<dyn axagent_harness::SessionEventSink>>,
 }
 
 impl<C, T> ConversationRuntime<C, T>
@@ -274,6 +281,7 @@ where
             thought_chain_enabled: feature_config.thought_chain_enabled,
             hook_chain: None,
             skill_evolution_hook: None,
+            session_event_sink: None,
         }
     }
 
@@ -435,6 +443,67 @@ where
             }
             blocks
         })
+    }
+
+    /// runtime-core 侧压缩的**唯一落点**：执行压缩 → 更新会话 → 落 `Compacted` 事件。
+    ///
+    /// 此前 `maybe_auto_compact` 的两条触发分支各自内联「调 `compact_session` + 赋值
+    /// `self.session`」，事件没有单一收敛点可挂。收敛到这里后，任何新增触发条件
+    /// 只需调用本方法，压缩与可回放事件不会脱节。
+    fn apply_compaction(
+        &mut self,
+        result: CompactionResult,
+        strategy: crate::session_token_ledger::CompactionStrategy,
+    ) -> AutoCompactionEvent {
+        let summary = result.summary;
+        let removed_message_count = result.removed_message_count;
+        let tokens_before = estimate_session_tokens(&self.session) as u64;
+        self.session = result.compacted_session;
+        let tokens_after = estimate_session_tokens(&self.session) as u64;
+        self.emit_compacted_event(
+            &summary,
+            removed_message_count,
+            tokens_before,
+            tokens_after,
+            strategy,
+        );
+        AutoCompactionEvent { removed_message_count }
+    }
+
+    /// 向已注入的 sink 发 `Compacted` 事件；未注入时静默跳过。
+    ///
+    /// `run_turn` 是同步方法而 sink 是 async trait，故用 `drive_sync` 原地驱动
+    /// （与 hooks / context contributors 同一模式，不新建 runtime）。
+    fn emit_compacted_event(
+        &self,
+        summary: &str,
+        removed_message_count: usize,
+        tokens_before: u64,
+        tokens_after: u64,
+        strategy: crate::session_token_ledger::CompactionStrategy,
+    ) {
+        let Some(sink) = self.session_event_sink.as_ref().map(Arc::clone) else {
+            return;
+        };
+        let session_id = self.session.session_id.clone();
+        // 覆盖区间为**近似值**：`CompactionResult` 未携带原会话索引，此处按
+        // 「原会话开头 removed 条被摘要取代」记录（重要性评分可能跳过个别消息，
+        // 精确区间需给 `CompactionResult` 增字段 —— 见计划 §5.1 偏离记档）。
+        let payload = axagent_harness::build_compacted_event_payload(
+            summary,
+            Some((0, removed_message_count)),
+            tokens_before,
+            tokens_after,
+        );
+        let event_type = axagent_harness::SessionEventType::Compacted;
+        drive_sync(async move {
+            sink.emit(&session_id, event_type, Some(payload)).await;
+        });
+        tracing::debug!(
+            strategy = strategy.as_str(),
+            removed = removed_message_count,
+            "已落 Compacted 会话事件"
+        );
     }
 
     fn prepare_request_messages(&self) -> Vec<ConversationMessage> {
@@ -1339,7 +1408,17 @@ where
 
     #[must_use]
     pub fn compact(&self, config: CompactionConfig) -> CompactionResult {
-        compact_session(&self.session, config, NP)
+        let result = compact_session(&self.session, config, NP);
+        if result.removed_message_count > 0 {
+            self.emit_compacted_event(
+                &result.summary,
+                result.removed_message_count,
+                estimate_session_tokens(&self.session) as u64,
+                estimate_session_tokens(&result.compacted_session) as u64,
+                CompactionStrategy::Manual,
+            );
+        }
+        result
     }
 
     #[must_use]
@@ -1391,10 +1470,7 @@ where
                     self.turn_count,
                     every_n,
                 );
-                self.session = result.compacted_session;
-                return Some(AutoCompactionEvent {
-                    removed_message_count: result.removed_message_count,
-                });
+                return Some(self.apply_compaction(result, CompactionStrategy::Auto));
             }
         }
 
@@ -1421,8 +1497,7 @@ where
             return None;
         }
 
-        self.session = result.compacted_session;
-        Some(AutoCompactionEvent { removed_message_count: result.removed_message_count })
+        Some(self.apply_compaction(result, CompactionStrategy::Auto))
     }
 
     fn record_turn_started(&self, user_input: &str) {
@@ -1984,6 +2059,10 @@ impl<C: ApiClient + Send, T: ToolExecutor + Send + 'static>
 
     fn set_system_directive(&mut self, directive: String) {
         self.system_directives = vec![directive];
+    }
+
+    fn set_session_event_sink(&mut self, sink: Arc<dyn axagent_harness::SessionEventSink>) {
+        self.session_event_sink = Some(sink);
     }
 
     fn into_session(self: Box<Self>) -> axagent_harness::runtime_types::session::Session {

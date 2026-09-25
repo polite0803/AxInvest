@@ -440,19 +440,12 @@ mod tests {
 /// Maximum output bytes before truncation (16 KiB, matching upstream).
 const MAX_OUTPUT_BYTES: usize = 16_384;
 
-/// Truncate output to `MAX_OUTPUT_BYTES`, appending a marker when trimmed.
+/// Truncate output to `MAX_OUTPUT_BYTES`, keeping **both** head and tail (R4-2-③).
+///
+/// 命令输出的横幅在头、最终报错在尾，只留头部会把报错原文整段丢掉；
+/// 权威实现收口在 `axagent_harness::util_fns::truncate_head_tail`。
 fn truncate_output(s: &str) -> String {
-    if s.len() <= MAX_OUTPUT_BYTES {
-        return s.to_string();
-    }
-    // Find the last valid UTF-8 boundary at or before MAX_OUTPUT_BYTES
-    let mut end = MAX_OUTPUT_BYTES;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    let mut truncated = s[..end].to_string();
-    truncated.push_str("\n\n[output truncated — exceeded 16384 bytes]");
-    truncated
+    axagent_harness::util_fns::truncate_head_tail(s, MAX_OUTPUT_BYTES)
 }
 
 #[cfg(test)]
@@ -466,11 +459,12 @@ mod truncation_tests {
     }
 
     #[test]
-    fn long_output_truncated() {
+    fn long_output_truncated_keeping_both_ends() {
         let s = "x".repeat(20_000);
         let result = truncate_output(&s);
         assert!(result.len() < 20_000);
-        assert!(result.ends_with("[output truncated — exceeded 16384 bytes]"));
+        assert!(result.contains("[omitted_bytes="), "应带省略字节数标记");
+        assert!(result.ends_with(&"x".repeat(100)), "尾部必须保留");
     }
 
     #[test]
@@ -483,6 +477,6 @@ mod truncation_tests {
     fn one_over_boundary_truncated() {
         let s = "a".repeat(MAX_OUTPUT_BYTES + 1);
         let result = truncate_output(&s);
-        assert!(result.contains("[output truncated"));
+        assert!(result.contains("[omitted_bytes=1]"), "只多 1 字节，标记应为 1");
     }
 }

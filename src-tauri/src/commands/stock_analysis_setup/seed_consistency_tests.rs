@@ -2028,8 +2028,10 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
         };
         let args = split_top_level_commas(body);
         let key = args.first().cloned().unwrap_or_default();
-        let last = args.last().cloned().unwrap_or_default();
-        sites.push((key, args.len(), last));
+        // S6/R9b 在 attr_note 之后追加了第 9 实参 `asof_ex`、第 10 实参 `raw_ph_n`
+        // ⇒ attribution_note 不再是末位实参，改按**第 8 位固定**取（形参 `attr_note` 即第 8 个）。
+        let attr = args.get(7).cloned().unwrap_or_else(|| "<第 8 实参缺失>".to_string());
+        sites.push((key, args.len(), attr));
     }
 
     // 正控①：调用点个数。10 = `diagnostics` map 的 10 个分析师。

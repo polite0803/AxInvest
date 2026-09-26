@@ -30,6 +30,7 @@ use std::sync::OnceLock;
 // 运行时状态管理（task_local、全局 Mutex、降级日志等）仍保留在本模块。
 pub use axagent_harness::as_of::{
     AsOfContext, AsOfDataKind, AsOfDataScope, AsOfError, AsOfSource, DegradationEntry,
+    DegradationKind,
 };
 
 tokio::task_local! {
@@ -311,6 +312,15 @@ const GLOBAL_DEGRADATION_CAP: usize = 256;
 /// 反而看不出"到底哪几个维度降级了"。⇒ 同一条目只记一次，累计总数也不重复计数。
 /// 需要区分「同一 method 的不同对象」时，把对象写进 reason（如 `get_news` 带股票代码）。
 pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
+    record_degradation_kind(vendor, method, reason, DegradationKind::Failure);
+}
+
+/// 带**严重度分档**的降级留痕（T14）。
+///
+/// 调用方优先用 `AsofProbe::kind()`（探测过程本身就知道是哪一档）；
+/// 只有 probe 之外的站点（如「个股无场内期权」这类天然不适用维度）才手写档位。
+/// 缺省走 `Failure` —— 宁可多标一档，也不把真故障洗白。
+pub fn record_degradation_kind(vendor: &str, method: &str, reason: &str, kind: DegradationKind) {
     let as_of = match current_as_of() {
         Some(c) => c.as_string(),
         None => return, // live 模式无降级概念
@@ -320,6 +330,7 @@ pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
         method: method.to_string(),
         reason: reason.to_string(),
         as_of,
+        kind,
     };
     let is_duplicate = |e: &DegradationEntry| {
         e.vendor == entry.vendor && e.method == entry.method && e.reason == entry.reason

@@ -890,3 +890,22 @@ export interface HorizonResultEntry {
 
 /** 四周期结果 Map（后端键为 snake_case，前端消费同键） */
 export type HorizonResultsMap = Partial<Record<"ultra_short" | "short" | "mid" | "long", HorizonResultEntry | null>>;
+
+/**
+ * as-of 降级的严重度分档（T14）—— 与后端 `axagent_harness::as_of::DegradationKind`
+ * 的 serde 输出逐值对齐（改一边必须改另一边）。
+ *
+ * 动因：降级条目此前只有一种视觉权重 ⇒「个股没有场内期权」和「接口 301 挂了」
+ * 长得一样，面板读不出「哪条值得去修」。
+ */
+export type AsOfDegradationKind = "failure" | "noData" | "structuralGap";
+
+/** `get_asof_degradation_log` 返回的一条记录 */
+export interface AsOfDegradationEntry {
+  vendor: string;
+  method: string;
+  reason: string;
+  /** 该 DTO 是 wire snake_case 的既成例外（后端字段就叫 as_of），非本仓 camelCase 标准 */
+  as_of: string;
+  kind: AsOfDegradationKind;
+}

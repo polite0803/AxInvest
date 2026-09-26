@@ -516,6 +516,21 @@ struct AsofProbe {
 }
 
 impl AsofProbe {
+    /// 探测过程自己就知道是哪一档严重度（T14 面板分档的数据源）：
+    /// - 有源报错 ⇒ **Failure**（真故障，这一档才需要修）
+    /// - 一条都没探测成（全链未申报通道）⇒ **StructuralGap**（该维度对回放不适用）
+    /// - 探测了、都回答「截止日没有这份数据」⇒ **NoData**（取数面到顶）
+    fn kind(&self) -> crate::as_of::DegradationKind {
+        use crate::as_of::DegradationKind;
+        if !self.failed.is_empty() {
+            DegradationKind::Failure
+        } else if self.probed == 0 {
+            DegradationKind::StructuralGap
+        } else {
+            DegradationKind::NoData
+        }
+    }
+
     /// 三种「拿不到」的语义必须分开写，否则提示会把「确实没有数据」
     /// 与「本模块压根没有历史通道」混为一谈（两融/指数站点已按此口径收敛）。
     ///
@@ -1327,13 +1342,14 @@ impl AStockClient {
         let idx = klines.iter().rposition(|k| k.date.as_str() <= as_of_str.as_str())?;
         let last = &klines[idx];
         if last.date != as_of_str {
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_quote",
                 &format!(
                     "as_of_date={as_of_str} 无行情（休市或停牌),改用之前最近交易日 {}",
                     last.date
                 ),
+                crate::as_of::DegradationKind::NoData,
             );
         }
         let pre_close = if idx > 0 { klines[idx - 1].close } else { 0.0 };
@@ -2420,10 +2436,11 @@ impl AStockClient {
                     }
                 }
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_social_sentiment",
-                &format!("as-of 模式无 {stock_code} 当日舆情快照（该维度无历史语义）"),
+                &format!("as-of 模式无 {stock_code} 当日舆情快照（该维度只有当日快照一条通道）"),
+                crate::as_of::DegradationKind::StructuralGap,
             );
             return Ok(vec![]);
         }
@@ -2730,19 +2747,21 @@ impl AStockClient {
                     );
                     return Ok(archived);
                 }
-                crate::as_of::record_degradation(
+                crate::as_of::record_degradation_kind(
                     "astock-data",
                     "get_news",
                     &format!(
                         "{probe_reason}；news_archive 亦无 {stock_code} 截止日前新闻（该维度结构性为空）"
                     ),
+                    probe.kind(),
                 );
                 return Ok(vec![]);
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_news",
                 &format!("{probe_reason}；且未配置 news_archive sink 兜底"),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -2872,17 +2891,19 @@ impl AStockClient {
                     );
                     return Ok(archived);
                 }
-                crate::as_of::record_degradation(
+                crate::as_of::record_degradation_kind(
                     "astock-data",
                     "get_policy_news",
                     &format!("{probe_reason}；news_archive 亦无政策新闻数据"),
+                    probe.kind(),
                 );
                 return Ok(vec![]);
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_policy_news",
                 &format!("{probe_reason}；且未配置 news_archive sink 兜底"),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -2986,10 +3007,11 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(Some(r));
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_money_flow",
                 &probe.reason(&format!("as-of {stock_code} 历史资金流向")),
+                probe.kind(),
             );
             return Ok(None);
         }
@@ -3354,18 +3376,20 @@ impl AStockClient {
                     return Ok(archived);
                 }
                 // sink 空 → 与回溯层的原因合并成一条（面板要能区分「没通道」与「本地没积累」）
-                crate::as_of::record_degradation(
+                crate::as_of::record_degradation_kind(
                     "astock-data",
                     "search_news",
                     &format!("{probe_reason}；news_archive 亦无该关键词在截止日前的积累"),
+                    probe.kind(),
                 );
                 return Ok(vec![]);
             }
             // sink 未注入:走原有降级路径
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "search_news",
                 &format!("{probe_reason}；且未配置 news_archive sink 兜底"),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -3479,19 +3503,31 @@ impl AStockClient {
                 }
             }
             // 三种「拿不到两融」的语义必须分开，否则提示会把「确实没有」与「本模块没通道」混为一谈
-            let reason = if supported == 0 {
-                format!(
-                    "as-of 模式 {stock_code} 两融无历史通道：{} 个源均未申报 as-of 能力，且无当日快照",
-                    unsupported
+            // （T14：三档也分别对应面板的三个严重度，不能都标红）
+            let (reason, kind) = if supported == 0 {
+                (
+                    format!(
+                        "as-of 模式 {stock_code} 两融无历史通道：{} 个源均未申报 as-of 能力，且无当日快照",
+                        unsupported
+                    ),
+                    crate::as_of::DegradationKind::StructuralGap,
                 )
             } else if all_confirmed_empty {
-                format!("as-of 模式 {stock_code} 无融资融券披露数据（非两融标的，或该日无披露）")
+                (
+                    format!(
+                        "as-of 模式 {stock_code} 无融资融券披露数据（非两融标的，或该日无披露）"
+                    ),
+                    crate::as_of::DegradationKind::NoData,
+                )
             } else {
-                format!(
-                    "as-of 模式 {stock_code} 两融取数失败：{supported} 个有 as-of 通道的源全部报错"
+                (
+                    format!(
+                        "as-of 模式 {stock_code} 两融取数失败：{supported} 个有 as-of 通道的源全部报错"
+                    ),
+                    crate::as_of::DegradationKind::Failure,
                 )
             };
-            crate::as_of::record_degradation("astock-data", "get_margin_data", &reason);
+            crate::as_of::record_degradation_kind("astock-data", "get_margin_data", &reason, kind);
             return Ok(None);
         }
         {
@@ -3612,12 +3648,13 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(Some(r));
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_pledge_data",
                 &probe.reason(&format!(
                     "as-of {stock_code} 质押（当日快照亦未命中，且无截止日前披露）"
                 )),
+                probe.kind(),
             );
             return Ok(None);
         }
@@ -3727,7 +3764,7 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(Some(r));
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_north_bound_holding",
                 // 结构性事实一并写进面板：个股级北向持仓自 2024-08 起交易所停披
@@ -3736,6 +3773,7 @@ impl AStockClient {
                     "{}（个股级北向持仓自 2024-08 起停披，当日快照亦未命中）",
                     probe.reason(&format!("as-of {stock_code} 历史北向持仓"))
                 ),
+                probe.kind(),
             );
             return Ok(None);
         }
@@ -3831,10 +3869,11 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(Some(r));
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_sector_info",
                 &probe.reason(&format!("as-of {stock_code} 行业分类")),
+                probe.kind(),
             );
             return Ok(None);
         }
@@ -3974,10 +4013,11 @@ impl AStockClient {
                 return Ok(reports);
             }
             // T4：`Err` 不再吞成「没有研报」——原因逐源留在这一条汇总里
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_research_reports",
                 &probe.reason(&format!("as-of {stock_code} 研报")),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -4056,13 +4096,14 @@ impl AStockClient {
                     }
                 }
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_consensus_eps",
                 &format!(
                     "{}；基于当前年份的板块均值估算在回放中禁用，且截止日前财报无可用 EPS",
                     probe.reason("as-of 一致预期 EPS")
                 ),
+                probe.kind(),
             );
             return Ok(None);
         }
@@ -4171,10 +4212,11 @@ impl AStockClient {
                 );
                 return Ok(Some(r));
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_concept_blocks",
                 &probe.reason(&format!("as-of {stock_code} 概念板块")),
+                probe.kind(),
             );
             return Ok(None);
         }
@@ -4299,10 +4341,11 @@ impl AStockClient {
                 return Ok(items);
             }
             // 全部源不支持或失败: 返回空而非 live 数据（防止后见信息泄露）
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_market_dragon_tiger",
                 &probe.reason("as-of 全市场龙虎榜"),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -4372,10 +4415,11 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(r);
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_hot_stocks",
                 &probe.reason("as-of 热门股榜单（当日快照亦未命中）"),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -4454,10 +4498,11 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(r);
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_industry_ranking",
                 &probe.reason("as-of 行业排名（当日快照亦未命中）"),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -4505,10 +4550,11 @@ impl AStockClient {
         // as-of：概念板块榜是「当下」语义（板块构成按月度调整，接口不提供历史区间），
         // 回放里返回当下构成＝时间泄露 ⇒ 留痕并返回空。
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "search_concept_boards",
                 &format!("as-of 模式概念板块无历史语义（关键词 {keyword}）"),
+                crate::as_of::DegradationKind::StructuralGap,
             );
             return Ok(vec![]);
         }
@@ -4555,10 +4601,11 @@ impl AStockClient {
         // as-of：板块成分同样是「当下」语义（回放里给今日成分＝时间泄露）
         // ⇒ 留痕并返回空。个股维度请改用 `get_concept_blocks`（那条有每日快照兜底）。
         if crate::as_of::is_asof_active() {
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_concept_board_members",
                 &format!("as-of 模式板块成分无历史语义（板块 {board_code}）"),
+                crate::as_of::DegradationKind::StructuralGap,
             );
             return Ok(vec![]);
         }
@@ -4638,10 +4685,11 @@ impl AStockClient {
                 return Ok(items);
             }
             // 失败原因（当日无条目 / 源报错 / 无通道）由 probe 汇总成一条，不逐源刷屏
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_cls_flash",
                 &probe.reason("as-of 7×24 快讯（当日快照亦未命中）"),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -4982,10 +5030,11 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(r);
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_peers",
                 &probe.reason(&format!("as-of {stock_code} 同行对比")),
+                probe.kind(),
             );
             return Ok(vec![]);
         }
@@ -5039,13 +5088,14 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(Some(r));
             }
-            crate::as_of::record_degradation(
+            crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_option_pcr",
                 &probe.reason(&format!(
                     // 真原因是「标的没有场内期权 ⇒ 本维度天然不适用」，不是路由没配通
                     "as-of {stock_code} 期权 PCR（仅 50/300 等 ETF 期权有公开数据，个股通常不适用）"
                 )),
+                probe.kind(),
             );
             return Ok(None);
         }
@@ -6955,6 +7005,46 @@ mod asof_boundary_tests {
         assert!(
             r3.contains("另有 2 源无 as-of 能力（eastmoney, ths）"),
             "失败分支也必须点名被跳过的源，否则看起来像整条链只有 baidu: {r3}"
+        );
+    }
+
+    /// T14：面板分档的判据来自探测过程本身，不靠调用方回忆「刚才到底是哪种拿不到」。
+    #[test]
+    fn probe_derives_severity_from_what_actually_happened() {
+        use crate::as_of::DegradationKind;
+        let failed = AsofProbe {
+            probed: 1,
+            unsupported: 1,
+            skipped: vec!["ths".into()],
+            probed_names: vec!["baidu_stock".into()],
+            failed: vec!["baidu_stock=接口信封非预期".into()],
+        };
+        assert_eq!(failed.kind(), DegradationKind::Failure, "有源报错就是真故障");
+
+        let no_channel = AsofProbe {
+            probed: 0,
+            unsupported: 1,
+            skipped: vec!["eastmoney".into()],
+            probed_names: vec![],
+            failed: vec![],
+        };
+        assert_eq!(
+            no_channel.kind(),
+            DegradationKind::StructuralGap,
+            "整条链没有通道属结构性，不该占红档"
+        );
+
+        let answered_none = AsofProbe {
+            probed: 1,
+            unsupported: 0,
+            skipped: vec![],
+            probed_names: vec!["eastmoney".into()],
+            failed: vec![],
+        };
+        assert_eq!(
+            answered_none.kind(),
+            DegradationKind::NoData,
+            "源明确回答无数据 ⇒ 取数面到顶，不是故障"
         );
     }
 

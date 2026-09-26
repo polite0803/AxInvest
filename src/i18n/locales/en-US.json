@@ -17820,7 +17820,12 @@
     },
     "degradedMarker": {
       "tooltip": "Some analysis methods are unavailable in replay mode",
-      "labelWithCount": "{{n}} degraded"
+      "labelWithCount": "{{n}} degraded",
+      "kindLabels": {
+        "failure": "Failures (actionable)",
+        "noData": "Data window exhausted",
+        "structuralGap": "Not applicable in replay"
+      }
     },
     "violations": {
       "violations": {

@@ -133,6 +133,33 @@ pub enum AsOfDataKind {
     Rank,
 }
 
+/// 降级的**严重度分档**（T14，2026-09-27）。
+///
+/// 动因：降级条目此前只有一种形态 ⇒ 面板上「个股没有场内期权」和「接口 301 挂了」
+/// 长得一样，用户只能读出「还是没好」，读不出哪条值得去修。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DegradationKind {
+    /// 真故障：被探测的源报错 / 连接被拒 / 接口失效 ⇒ **这一档才需要修**
+    #[default]
+    Failure,
+    /// 取数面到顶，或源明确回答「截止日没有这份数据」（新闻倒序索引窗口、归档未积累）
+    NoData,
+    /// 该维度对回放本就不适用（个股无场内期权、当日榜单语义、快照是唯一通道）
+    StructuralGap,
+}
+
+impl DegradationKind {
+    /// 与 serde 输出**同一套**字符串（避免两处词表）
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Failure => "failure",
+            Self::NoData => "noData",
+            Self::StructuralGap => "structuralGap",
+        }
+    }
+}
+
 /// As-Of 降级条目
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DegradationEntry {
@@ -140,4 +167,27 @@ pub struct DegradationEntry {
     pub method: String,
     pub reason: String,
     pub as_of: String,
+    /// 缺省 `Failure` ⇒ 新增分档时**宁可多标一档，也不把真故障洗白**
+    #[serde(default)]
+    pub kind: DegradationKind,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// T14：面板分档靠 `kind` 走 wire，序列化值就是前端 i18n 的键 ⇒ 改动即断契约
+    #[test]
+    fn degradation_kind_serializes_to_camel_case_and_labels_match() {
+        for (k, name) in [
+            (DegradationKind::Failure, "failure"),
+            (DegradationKind::NoData, "noData"),
+            (DegradationKind::StructuralGap, "structuralGap"),
+        ] {
+            assert_eq!(serde_json::to_value(k).unwrap(), serde_json::json!(name));
+            assert_eq!(k.label(), name, "label 与 serde 必须同一套词表");
+        }
+        // 缺省档 = Failure：新站点漏标只会多标红，不会把真故障洗白
+        assert_eq!(DegradationKind::default(), DegradationKind::Failure);
+    }
 }

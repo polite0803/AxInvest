@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "리플레이 모드에서는 일부 분석 방법을 사용할 수 없습니다",
-      "labelWithCount": "{{n}}개 저하"
+      "labelWithCount": "{{n}}개 저하",
+      "kindLabels": {
+        "failure": "오류(수정 필요)",
+        "noData": "데이터 창 상한 도달",
+        "structuralGap": "리플레이에 적용 불가"
+      }
     },
     "violations": {
       "violations": {

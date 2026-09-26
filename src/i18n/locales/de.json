@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "Einige Analysemethoden sind im Replay-Modus nicht verfügbar",
-      "labelWithCount": "{{n}} eingeschränkt"
+      "labelWithCount": "{{n}} eingeschränkt",
+      "kindLabels": {
+        "failure": "Fehler (behebbar)",
+        "noData": "Datenfenster erschöpft",
+        "structuralGap": "Im Replay nicht anwendbar"
+      }
     },
     "violations": {
       "violations": {

@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "रीप्ले मोड में कुछ विश्लेषण विधियाँ उपलब्ध नहीं हैं",
-      "labelWithCount": "{{n}} अवनत"
+      "labelWithCount": "{{n}} अवनत",
+      "kindLabels": {
+        "failure": "विफलताएँ (ठीक करना ज़रूरी)",
+        "noData": "डेटा विंडो पूरी",
+        "structuralGap": "रीप्ले में लागू नहीं"
+      }
     },
     "violations": {
       "violations": {

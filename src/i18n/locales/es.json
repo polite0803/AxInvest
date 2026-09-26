@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "Algunos métodos de análisis no están disponibles en modo reproducción",
-      "labelWithCount": "{{n}} degradados"
+      "labelWithCount": "{{n}} degradados",
+      "kindLabels": {
+        "failure": "Fallos (accionables)",
+        "noData": "Ventana de datos agotada",
+        "structuralGap": "No aplicable en rejeo"
+      }
     },
     "violations": {
       "violations": {

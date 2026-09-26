@@ -1,16 +1,50 @@
-import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { type DegradationSummary, summarizeDegradations, useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { DatePicker, Segmented, Space, Tag, Tooltip } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 import { AlertTriangle, Clock, Zap } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+/** 严重度 → AntD Tag 颜色：只有真故障才是红/橙，结构性不适用退回中性灰 */
+const DEGRADATION_TAG_COLOR: Record<"failure" | "noData" | "structuralGap", string> = {
+  failure: "red",
+  noData: "orange",
+  structuralGap: "default",
+};
+
+/**
+ * Tooltip 按档分节（每档最多列 5 条，避免长列表撑爆浮层）。
+ * 节标题走 i18n `degradedMarker.kindLabels.*`；条目仍是 `method: reason`，
+ * 因为 reason 已由后端 `AsofProbe::reason` 写成完整可行动的一句话。
+ */
+function renderDegradationTooltip(summary: DegradationSummary, t: (k: string) => string) {
+  if (summary.grouped.length === 0) {
+    return t("timeTravel.degradedMarker.tooltip");
+  }
+  return (
+    <div style={{ whiteSpace: "pre-line", maxWidth: 420 }}>
+      {summary.grouped.map((g) => (
+        <div key={g.kind} style={{ marginBottom: 6 }}>
+          <div style={{ fontWeight: 600 }}>
+            {t(`timeTravel.degradedMarker.kindLabels.${g.kind}`)} · {g.items.length}
+          </div>
+          {g.items.slice(0, 5).map((e) => (
+            <div key={`${e.method}-${e.reason}`}>
+              {e.method}: {e.reason}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /**
  * PageTimeAnchor — 页面级时间锚点(嵌入 `sa-header`)
  *
  * spec §9.2:StockAnalysisPage 顶部加 2 个组件:
  *   - `Segmented` 切换:`实时分析` | `历史回放` 二选一
- *   - `DatePicker`(仅 replay 显示):与 AsOfDatePicker 共用约束
+ *   `DatePicker`(仅 replay 显示):与 AsOfDatePicker 共用约束
  *
  * 与全局 `ModeSwitch`(AppHeader Pill)共享 `timeAnchorStore`,
  * 模式改变会同步触发其他页面的回放遮罩 / 角标。
@@ -23,6 +57,7 @@ export function PageTimeAnchor() {
   const enterLive = useTimeAnchorStore((s) => s.enterLive);
   const degradationCount = useTimeAnchorStore((s) => s.degradationCount);
   const degradationLog = useTimeAnchorStore((s) => s.degradationLog);
+  const summary = summarizeDegradations(degradationLog);
 
   const [pending, setPending] = useState<Dayjs | null>(null);
   // 用户点击"回放"但尚未选日期时，显示 DatePicker 让用户选择
@@ -132,19 +167,14 @@ export function PageTimeAnchor() {
           {
             /* 缺陷 E 修复: replay 模式下显示具体降级计数。
               实时通过 timeAnchorStore 拉取(每 3s 一次),数字就是"被跳过的方法数"。
-              0 时不显示,避免噪声。 */
+              0 时不显示,避免噪声。
+              T14(2026-09-27): 颜色取「最重的一档」——只有结构性不适用时不再标橙，
+              否则「个股没有场内期权」和「接口 301 挂了」看起来是同一件事。 */
           }
           {isReplay && asOfDate && degradationCount > 0 && (
-            <Tooltip
-              title={degradationLog.length > 0
-                ? degradationLog
-                  .slice(-5)
-                  .map((d) => `${d.method}: ${d.reason}`)
-                  .join("\n")
-                : t("timeTravel.degradedMarker.tooltip")}
-            >
+            <Tooltip title={renderDegradationTooltip(summary, t)}>
               <Tag
-                color="orange"
+                color={DEGRADATION_TAG_COLOR[summary.worst ?? "failure"]}
                 icon={<AlertTriangle size={11} />}
                 data-testid="page-time-anchor-degraded"
               >

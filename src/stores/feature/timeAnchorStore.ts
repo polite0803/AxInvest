@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import type { AsOfDegradationEntry, AsOfDegradationKind } from "@/types";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -31,7 +32,7 @@ export interface TimeAnchorState {
   /** 缺陷 E 修复: 实时降级计数(后端 poll) */
   degradationCount: number;
   /** 缺陷 E 修复: 最近 N 条降级详情(供降级面板展示) */
-  degradationLog: Array<{ vendor: string; method: string; reason: string; as_of: string }>;
+  degradationLog: AsOfDegradationEntry[];
 
   setAsOfDate: (date: string | null) => void;
   enterReplay: (date: string) => void;
@@ -149,9 +150,7 @@ export const useTimeAnchorStore = create<TimeAnchorState>()(
         try {
           const [count, log] = await Promise.all([
             invoke<number>("get_asof_degradation_count"),
-            invoke<Array<{ vendor: string; method: string; reason: string; as_of: string }>>(
-              "get_asof_degradation_log",
-            ),
+            invoke<AsOfDegradationEntry[]>("get_asof_degradation_log"),
           ]);
           set({ degradationCount: count, degradationLog: log });
         } catch (e) {
@@ -198,3 +197,37 @@ export const timeAnchorHelpers = {
   todayIso,
   DATE_RE,
 };
+
+/** 严重度从重到轻 —— 面板配色取「最重的一档」 */
+const DEGRADATION_SEVERITY: AsOfDegradationKind[] = ["failure", "noData", "structuralGap"];
+
+export interface DegradationSummary {
+  total: number;
+  counts: Record<AsOfDegradationKind, number>;
+  /** 全空 ⇒ null */
+  worst: AsOfDegradationKind | null;
+  /** 按档分组（组内保持后端顺序），供 Tooltip 分节显示 */
+  grouped: Array<{ kind: AsOfDegradationKind; items: AsOfDegradationEntry[] }>;
+}
+
+/**
+ * T14：把降级条目按严重度分档。
+ *
+ * 动因：这些条目此前只有一种视觉权重 ⇒「个股没有场内期权」（本就不适用）与
+ * 「接口 301 挂了」（真故障）在面板上长得一样，只能读出「还是没好」。
+ * `kind` 缺失（旧后端二进制没发这个字段）时按 `failure` 算 ——
+ * 宁可多标一档红，也不把真故障洗白。
+ */
+export function summarizeDegradations(log: AsOfDegradationEntry[]): DegradationSummary {
+  const counts: Record<AsOfDegradationKind, number> = { failure: 0, noData: 0, structuralGap: 0 };
+  for (const e of log) {
+    const kind = DEGRADATION_SEVERITY.includes(e.kind) ? e.kind : "failure";
+    counts[kind] += 1;
+  }
+  const worst = DEGRADATION_SEVERITY.find((k) => counts[k] > 0) ?? null;
+  const grouped = DEGRADATION_SEVERITY.filter((k) => counts[k] > 0).map((kind) => ({
+    kind,
+    items: log.filter((e) => (DEGRADATION_SEVERITY.includes(e.kind) ? e.kind : "failure") === kind),
+  }));
+  return { total: log.length, counts, worst, grouped };
+}

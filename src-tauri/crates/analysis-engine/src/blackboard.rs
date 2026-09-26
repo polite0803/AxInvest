@@ -304,6 +304,8 @@ mod tests {
             method: "get_industry_ranking".into(),
             reason: "as-of 截断后,排名无 N 日前对比语义".into(),
             as_of: "2026-06-01".into(),
+            // 该维度对回放本就不适用 ⇒ 不进「真故障」档
+            kind: axagent_astock_data::as_of::DegradationKind::StructuralGap,
         }];
         let bb = build_blackboard_snapshot(&HashMap::new(), None, &entries);
         assert_eq!(bb["degraded"]["count"], json!(1));

@@ -17822,7 +17822,12 @@
     },
     "degradedMarker": {
       "tooltip": "部分分析方法在回放模式下不可用",
-      "labelWithCount": "降级 {{n}} 项"
+      "labelWithCount": "降级 {{n}} 项",
+      "kindLabels": {
+        "failure": "真故障（需要修）",
+        "noData": "取数窗口到顶",
+        "structuralGap": "回放不适用（无需修）"
+      }
     },
     "violations": {
       "violations": {

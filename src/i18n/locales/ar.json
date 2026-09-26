@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "بعض طرق التحليل غير متاحة في وضع الإعادة",
-      "labelWithCount": "{{n}} منخفضة"
+      "labelWithCount": "{{n}} منخفضة",
+      "kindLabels": {
+        "failure": "أعطال (تحتاج إصلاحًا)",
+        "noData": "نافذة البيانات مستنفدة",
+        "structuralGap": "غير قابل للتطبيق في الإعادة"
+      }
     },
     "violations": {
       "violations": {

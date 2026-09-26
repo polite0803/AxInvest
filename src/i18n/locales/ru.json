@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "Некоторые методы анализа недоступны в режиме воспроизведения",
-      "labelWithCount": "{{n}} ухудшено"
+      "labelWithCount": "{{n}} ухудшено",
+      "kindLabels": {
+        "failure": "Сбои (требуют правки)",
+        "noData": "Окно данных исчерпано",
+        "structuralGap": "Не применимо в реплее"
+      }
     },
     "violations": {
       "violations": {

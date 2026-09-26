@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "Certaines méthodes d'analyse ne sont pas disponibles en mode relecture",
-      "labelWithCount": "{{n}} dégradées"
+      "labelWithCount": "{{n}} dégradées",
+      "kindLabels": {
+        "failure": "Échecs (à corriger)",
+        "noData": "Fenêtre de données épuisée",
+        "structuralGap": "Non applicable en rejeu"
+      }
     },
     "violations": {
       "violations": {

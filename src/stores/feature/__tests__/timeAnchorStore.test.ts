@@ -1,4 +1,4 @@
-import { timeAnchorHelpers, useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { summarizeDegradations, timeAnchorHelpers, useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { isValidPastDate, todayIso, DATE_RE } = timeAnchorHelpers;
@@ -191,7 +191,7 @@ describe("useTimeAnchorStore — transitions", () => {
     useTimeAnchorStore.setState({
       degradationCount: 5,
       degradationLog: [
-        { vendor: "old", method: "old_method", reason: "stale", as_of: "2026-01-01" },
+        { vendor: "old", method: "old_method", reason: "stale", as_of: "2026-01-01", kind: "failure" },
       ],
     });
     const past = new Date();
@@ -201,5 +201,36 @@ describe("useTimeAnchorStore — transitions", () => {
     const s = useTimeAnchorStore.getState();
     expect(s.degradationCount).toBe(0);
     expect(s.degradationLog).toEqual([]);
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T14（2026-09-27）：降级面板按严重度分档
+// 缺陷形态：`个股没有场内期权` 与 `接口 301 挂了` 在面板上同一种权重，
+// 用户只能读出「还是没好」，读不出哪条值得去修。
+// ────────────────────────────────────────────────────────────
+describe("summarizeDegradations - 严重度分档", () => {
+  const e = (
+    method: string,
+    kind?: string,
+  ) => ({ vendor: "astock-data", method, reason: `${method} 的原因`, as_of: "2026-09-11", kind } as never);
+
+  it("配色取最重的一档：混有真故障时不得退回中性", () => {
+    const s = summarizeDegradations([e("get_hot_stocks", "structuralGap"), e("get_money_flow", "failure")]);
+    expect(s.worst).toBe("failure");
+    expect(s.counts).toEqual({ failure: 1, noData: 0, structuralGap: 1 });
+    expect(s.grouped.map((g) => g.kind)).toEqual(["failure", "structuralGap"]);
+  });
+
+  it("全是结构性不适用 ⇒ worst 退到 structuralGap（面板不再橙色示警）", () => {
+    const s = summarizeDegradations([e("get_option_pcr", "structuralGap"), e("get_social_sentiment", "structuralGap")]);
+    expect(s.worst).toBe("structuralGap");
+    expect(s.total).toBe(2);
+  });
+
+  it("后端旧二进制没发 kind ⇒ 按真故障算，宁可多标红也不洗白", () => {
+    const s = summarizeDegradations([e("get_news", undefined)]);
+    expect(s.counts.failure).toBe(1);
+    expect(s.worst).toBe("failure");
   });
 });

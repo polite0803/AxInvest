@@ -17602,7 +17602,12 @@
     },
     "degradedMarker": {
       "tooltip": "リプレイモードでは一部の方法が利用できません",
-      "labelWithCount": "{{n}} 件劣化"
+      "labelWithCount": "{{n}} 件劣化",
+      "kindLabels": {
+        "failure": "障害（要修正）",
+        "noData": "取得ウィンドウの上限",
+        "structuralGap": "リプレイでは該当なし"
+      }
     },
     "violations": {
       "violations": {

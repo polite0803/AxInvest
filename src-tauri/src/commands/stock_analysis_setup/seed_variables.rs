@@ -416,7 +416,11 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             name: "vendor_sina".into(),
             var_type: "boolean".into(),
             value: serde_json::json!(true),
-            description: Some("新浪财经 — 新闻数据".into()),
+            // 描述必须点名资金流：本机 push2his 连接级拒绝，sina 是回放里
+            // **唯一**可用的按日资金流通道（as-of T17）——关掉它等于资金流维度必降级。
+            description: Some(
+                "新浪财经 — 新闻数据 / 资金流按日历史（回放里唯一的资金流通道）".into(),
+            ),
             is_secret: false,
         },
         Variable {

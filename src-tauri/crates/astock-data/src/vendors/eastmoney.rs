@@ -3045,7 +3045,6 @@ impl StockVendor for EastMoneyVendor {
             // Fallthrough: vendor 返回带 date 字段的全量,lib.rs 截断(已正确)
             "get_financials"
             | "get_news"
-            | "get_money_flow"
             | "get_dragon_tiger"
             | "get_lockup_schedule"
             | "get_north_bound_holding"
@@ -3520,6 +3519,8 @@ mod asof_capability_tests {
             "get_market_dragon_tiger",
             "get_announcements",
             "get_research_reports",
+            // S3(2026-09-26)：「拉全窗 + 本地按截止日过滤」形态，见 get_money_flow_with_asof
+            "get_money_flow",
         ] {
             assert_eq!(
                 v.asof_capability(m),
@@ -3560,7 +3561,6 @@ mod asof_capability_tests {
         for m in &[
             "get_financials",
             "get_news",
-            "get_money_flow",
             "get_dragon_tiger",
             "get_lockup_schedule",
             "get_north_bound_holding",

@@ -907,6 +907,9 @@ pub async fn run_stock_workflow_inner(
                 // task-local 写入在子任务里静默失败 ⇒ 结束时只读 task-local 的消费端
                 // 恒得空表（「0 个降级」假象）。改为运行边界水位 + 全局缓冲切片。
                 let deg_watermark = as_of::global_degradation_seq_watermark();
+                // R5(2026-09-26): 同步写运行基线，供 data-quality 节点的
+                // pm_asof_degraded_methods 按「本轮 seq」过滤，挡掉同截止日旧运行的残留
+                as_of::set_global_degradation_baseline(deg_watermark);
         // 按类型并发上限：tool/file 保持高位，llm/agent 对齐用户设定的 max_concurrent
         // 修复: 默认按类型上限 llm=3 会覆盖全局 max_concurrent，使设置面板的值失效
         let mut type_limits = std::collections::HashMap::new();

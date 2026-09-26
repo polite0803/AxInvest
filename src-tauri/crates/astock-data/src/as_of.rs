@@ -293,6 +293,14 @@ static GLOBAL_DEGRADATION_TOTAL: AtomicU64 = AtomicU64::new(0);
 /// 降级**事件**计数(每次 `record_degradation` 都递增,含重复条目)。
 /// 与 `GLOBAL_DEGRADATION_TOTAL`(只数不同条目)语义不同,勿混用。
 static GLOBAL_DEGRADATION_SEQ: AtomicU64 = AtomicU64::new(0);
+/// 当前工作流运行的降级基线（事件 seq 水位）。由 `stock_workflow/core.rs` 在
+/// 运行入口与 `deg_watermark` 同处写入。
+///
+/// 为什么需要（R5，2026-09-26 实证）：data-quality 的豁免判据若只按 as_of 日期
+/// 过滤缓冲，**同截止日的修复前旧运行**残留的条目会被当成本轮降级 ⇒ 全 10 维
+/// 无差别豁免、真工具故障也被抹掉。基线 = 「本轮开始那一刻」的 seq。
+/// 前提与工作流水位本身一致：工作流有全局 permit 串行，单基线成立。
+static GLOBAL_DEGRADATION_BASELINE: AtomicU64 = AtomicU64::new(0);
 
 const GLOBAL_DEGRADATION_CAP: usize = 256;
 
@@ -434,6 +442,25 @@ pub fn take_global_degradations_since(watermark: u64) -> Vec<DegradationEntry> {
 /// 当前累计降级总数(从进程启动起算,跨 live/replay 切换)。
 pub fn global_degradation_count() -> u64 {
     GLOBAL_DEGRADATION_TOTAL.load(Ordering::Relaxed)
+}
+
+/// 设定当前运行的降级基线（工作流入口调用一次）。
+pub fn set_global_degradation_baseline(baseline: u64) {
+    GLOBAL_DEGRADATION_BASELINE.store(baseline, Ordering::Relaxed);
+}
+
+/// 基线之后被记录（含重复刷新）的降级方法名清单，供 data-quality 节点
+/// 判定「哪些维度本轮确实发生了设计性降级」（R5 豁免收紧的判据源）。
+pub fn global_degraded_methods_since_baseline() -> Vec<String> {
+    let baseline = GLOBAL_DEGRADATION_BASELINE.load(Ordering::Relaxed);
+    let g = GLOBAL_DEGRADATION_LOG.lock();
+    let mut out: Vec<String> = Vec::new();
+    for (seq, e) in g.iter() {
+        if *seq > baseline && !out.contains(&e.method) {
+            out.push(e.method.clone());
+        }
+    }
+    out
 }
 
 /// 清空全局降级缓冲(切换到 live 模式时由前端触发,避免过期条目一直显示)。
@@ -1112,6 +1139,44 @@ mod tests {
                         .count(),
                     1,
                     "前端面板不得因重复记录刷屏"
+                );
+            })
+            .await;
+        })
+        .await;
+        reset_global_degradation_log();
+    }
+
+    /// R5 回归（2026-09-26，实证于 1ad42f59 重跑）：豁免判据必须按**本轮基线**过滤，
+    /// 同截止日旧运行残留的条目不得再触发豁免。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn baseline_excludes_previous_runs_degradations() {
+        let _ = clear_global_asof();
+        reset_global_degradation_log();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 22).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        // 上一轮运行：get_money_flow 已降级并留在缓冲（同 as_of 日期）
+        with_optional_asof(Some(ctx), async {
+            record_degradation("astock-data", "get_money_flow", "as-of 无历史资金流(旧轮)");
+        })
+        .await;
+        // 本轮运行：入口设基线；只有 get_cls_flash 在本轮降级
+        with_optional_asof(Some(ctx), async {
+            with_degradation_log(async {
+                set_global_degradation_baseline(global_degradation_seq_watermark());
+                let child = tokio::spawn(async move {
+                    record_degradation("astock-data", "get_cls_flash", "as-of 快讯不可用(本轮)");
+                });
+                child.await.unwrap();
+                let methods = global_degraded_methods_since_baseline();
+                assert!(
+                    !methods.iter().any(|m| m == "get_money_flow"),
+                    "基线前(旧运行)的条目不得进入本轮豁免清单: {methods:?}"
+                );
+                assert!(
+                    methods.iter().any(|m| m == "get_cls_flash"),
+                    "本轮子任务降级必须进入清单: {methods:?}"
                 );
             })
             .await;

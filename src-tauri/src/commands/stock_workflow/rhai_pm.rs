@@ -183,19 +183,14 @@ pub fn register_pm_functions(engine: &mut Engine) {
     // S2(2026-09-26, PLAN-asof-replay-quality-attribution)：as-of 回放「设计性降级」
     // 的 vendor 方法清单（JSON 数组字符串），供 data-quality.rhai 豁免失败标记扣分。
     // live 模式（无 as-of 上下文）恒返回 "[]"。
-    // 按当前 as_of 日期过滤全局环形缓冲：同一截止日的降级集合是稳定的设计集，
-    // 跨运行混入同日期条目的语义相同，可接受（精确运行边界见 S1 水位切片的
-    // take_global_degradations_since，落库消费在 core.rs，不走本函数）。
+    // R5 收紧(同日)：按「本轮运行基线之后的 seq」过滤（基线由 core.rs 运行入口写入），
+    // 不按 as_of 日期过滤 —— 日期口径挡不住同截止日旧运行留在缓冲里的条目，
+    // 实证（1ad42f59）会把全部 10 维无差别豁免、连真工具故障一起抹掉。
     engine.register_fn("pm_asof_degraded_methods", || -> String {
-        let cur = match axagent_astock_data::as_of::current_as_of() {
-            Some(c) => c.as_string(),
-            None => return "[]".to_string(),
-        };
-        let methods: Vec<String> = axagent_astock_data::as_of::peek_global_degradation_report()
-            .into_iter()
-            .filter(|e| e.as_of == cur)
-            .map(|e| e.method)
-            .collect();
+        if axagent_astock_data::as_of::current_as_of().is_none() {
+            return "[]".to_string();
+        }
+        let methods = axagent_astock_data::as_of::global_degraded_methods_since_baseline();
         serde_json::to_string(&methods).unwrap_or_else(|_| "[]".to_string())
     });
 

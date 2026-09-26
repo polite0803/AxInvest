@@ -413,12 +413,17 @@ impl EastMoneyVendor {
         })?;
 
         if json["success"].as_bool() == Some(false) {
+            let msg = json["message"].as_str().unwrap_or("unknown");
+            // 「返回数据为空」是**答案**（该标的没有质押披露），不是故障。
+            // 此前一律抛 Err ⇒ 面板把它记成红档「取数失败」，与真正的
+            // 参数错误/报表不存在混在同一档（301302 回放实证）。
+            if datacenter_reports_no_data(msg) {
+                tracing::debug!("[eastmoney] get_pledge_data 该标的无质押披露: {msg}");
+                return Ok(None);
+            }
             return Err(DataError::VendorError {
                 vendor: "eastmoney".into(),
-                message: format!(
-                    "get_pledge_data 报表不可用: {}",
-                    json["message"].as_str().unwrap_or("unknown")
-                ),
+                message: format!("get_pledge_data 报表不可用: {msg}"),
             });
         }
 
@@ -1216,6 +1221,18 @@ fn parse_news_jsonp(text: &str) -> Result<Vec<NewsItem>, DataError> {
 ///
 /// 复用 `clean_search_keyword`（取最长连续中文片段）：并列长度时**保留前一个**片段，
 /// 所以「透景生命 政策」→「透景生命」（股票名在前是调用方的常见写法，也是我们要的那段）。
+/// datacenter 报表 `success=false` 的两类含义（实测消息见括号）：
+///
+/// - **空是答案**：`返回数据为空`（如非质押标的的 `RPT_CSDC_LIST`、非两融标的的
+///   `RPTA_WEB_RZRQ_GGMX`）⇒ 调用方按「该标的无此项披露」处理，不留红档故障。
+/// - **确实是故障**：`参数预处理错误`（9501）、`报表配置不存在`、鉴权失败等。
+///
+/// 判据只用消息文本：`code` 的位置与类型随报表变化（9201/9501 都出现过），消息才稳定。
+fn datacenter_reports_no_data(msg: &str) -> bool {
+    let m = msg.trim();
+    m.contains("返回数据为空") || m.contains("无数据") || m.eq_ignore_ascii_case("no data")
+}
+
 fn asof_news_keyword(keyword: &str) -> String {
     let cleaned = crate::clean_search_keyword(keyword);
     if cleaned.is_empty() {
@@ -4788,5 +4805,19 @@ mod board_ranking_tests {
         let msg = e.to_string();
         assert!(msg.contains("push2his 连接被拒"), "真实原因要能进面板: {msg}");
         assert!(!msg.contains("无 as-of 通道"), "失败不得写成机制缺失: {msg}");
+    }
+}
+
+#[cfg(test)]
+mod datacenter_empty_tests {
+    use super::*;
+
+    /// 「空是答案 / 故障是故障」的分档判据（301302 回放实证：非质押标的被记成红档失败）
+    #[test]
+    fn empty_report_answer_is_not_a_failure() {
+        assert!(datacenter_reports_no_data("返回数据为空"));
+        assert!(datacenter_reports_no_data("code:9201, message:返回数据为空"));
+        assert!(!datacenter_reports_no_data("参数预处理错误"), "故障不得被当成空答案");
+        assert!(!datacenter_reports_no_data("报表配置不存在"));
     }
 }

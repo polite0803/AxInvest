@@ -693,7 +693,13 @@ fn asof_designed_degradation_exempts_failure_markers() {
         "低置信仍按自评判 low（avg_conf 语义保留，豁免不掩盖不确定性）"
     );
     let g = gap_reason(&r, "pol");
-    assert!(g.contains("非数据缺口"), "豁免后 gap_reason 不得再是「上游工具数据不完整」：{g}");
+    // S6(2026-09-26)：被豁免且原始报告确有标记 ⇒ 必须说「按设计降级…已豁免」，
+    // 不得再说「报告无失败标记」（豁免后 ph 恒 0，那句话是假话）。
+    assert!(
+        g.contains("按设计降级") && g.contains("已豁免"),
+        "豁免维度的 gap_reason 必须如实归因: {g}"
+    );
+    assert!(!g.contains("报告无失败标记"), "gap_reason 不得声称无标记（原始报告有）: {g}");
     assert_eq!(r["placeholder_total_hits"].as_int().unwrap_or(-1), 0);
     assert!(r["asof_replay"].as_bool().unwrap_or(false));
     let dims = names(&r, "asof_designed_dims");
@@ -737,4 +743,16 @@ fn live_mode_has_no_asof_exemption() {
     assert!(hits(&r, "pol") > 0, "live 模式失败标记照常计入（豁免只属回放）");
     let summary = r["summary"].clone().into_string().unwrap_or_default();
     assert!(!summary.starts_with("【as-of 回放】"), "live summary 不得带回放前缀：{summary}");
+}
+
+#[test]
+fn asof_exempted_dim_without_markers_says_replay_not_false_gap() {
+    // 政策面被设计性降级，但报告写得干净（无失败标记词）且低置信。
+    // 旧口径会落到「非数据缺口：报告无失败标记、字段齐全」——对降级维度同样误导。
+    let clean =
+        "政策面依据既有公开信息做了方向性推断，未见矛盾信号，建议观望等待数据恢复后复核仓位。";
+    let r = run_quality_asof(&[("pol", clean)], &[("pol", 30.0)], r#"["get_policy_news"]"#);
+    let g = gap_reason(&r, "pol");
+    assert!(g.starts_with("as-of 回放"), "无标记但被降级的维度也必须归因到回放: {g}");
+    assert!(!g.contains("字段齐全"), "不得声称字段齐全（上游本轮按设计无数据）: {g}");
 }

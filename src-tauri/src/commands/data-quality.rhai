@@ -1048,8 +1048,13 @@ let grade = if final_score >= 85.0 { "A" }
 //   `attribution_note` 产出后并入 `gap_reason`，复用**既有**展示通道
 //   （弹窗「缺口原因」行 + DecisionBanner 逐节点表的「缺口原因」列），
 //   避免为此新增字段 + 前端行 + 11 语言 key。
-fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note) {
+// S6(2026-09-26)：第 9/10 参 —— 该维度是否被 as-of 设计性降级豁免、豁免前的**原始**
+//   失败标记数。实证（1ad42f59）：豁免后 ph_n 恒 0，若仍走「非数据缺口：报告无失败
+//   标记」分支即成假话 —— 报告里有标记，只是被系统有意不计。
+fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note, asof_ex, raw_ph_n) {
     let has_ph = ph_n > 0;
+    // 豁免生效 = 该维度被设计性降级 且 原始报告确有失败标记
+    let asof_exempted_hit = asof_ex && raw_ph_n > 0;
     // 2026-09-12: status 判定从「只看 LLM 自评 confidence」升级为 **A ∪ B**
     //   A = 报告文本失败标记（客观，placeholder_hits）
     //   B = analyst 自评 confidence（主观）
@@ -1068,10 +1073,14 @@ fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note) {
         "strict_mode 降级（LLM 不可用/超时，confidence 为中性兜底，数据不可信）"
     } else if c < 0.0 {
         "节点未输出 VERDICT 或 confidence 字段缺失（可能原因：LLM 超时/截断/解析失败/strict_mode 降级未注入 confidence）"
+    } else if asof_exempted_hit {
+        `as-of 回放：本维度上游按设计降级（当下语义约束，非工具故障）—— 报告含 ${raw_ph_n} 处失败标记，已豁免不计扣分；置信度自评 ${c}`
     } else if has_ph && c < 50.0 {
         `确定归因：上游工具数据不完整 —— 报告含 ${ph_n} 处失败标记，且置信度自评仅 ${c}`
     } else if has_ph {
         `确定归因：上游工具数据不完整 —— 报告含 ${ph_n} 处失败标记（置信度自评 ${c} 偏高，未反映该缺口）`
+    } else if asof_ex && c < 50.0 {
+        "as-of 回放：本维度上游按设计降级（当下语义约束）；报告未写失败标记，低置信与数据可得性受限一致"
     } else if c < 50.0 {
         "非数据缺口：报告无失败标记、字段齐全 —— 置信度自评低反映的是分析师对自身结论的不确定，而非数据缺失（confidence 语义与系统按「数据充分度」消费的口径不一致）"
     } else { "" };
@@ -1203,24 +1212,24 @@ fn attribution_note(report, tool_calls) {
 //   正控：`output/tmp-151-rhai-arity.mjs` 逐点核对本块的实参个数。
 let diagnostics = #{
     "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u, mk_ph_e.len(), mk_po_e, mk_q,
-        attribution_note(mk_report, mk_tool_calls)),
+        attribution_note(mk_report, mk_tool_calls), asof_sup_mk, mk_ph.len()),
     // 2026-09-21 修正归因（原值把用户引向 t-sentiment-data，而真实缺口在
     // t-dragon-tiger-data ⇒ 归因指向错误会误导排查方向，实证见
     // AUDIT-analyst-low-confidence-2026-09-21.md §八.1）：
     //   情绪面「席位数据缺失」与资金面「龙虎榜席位与北向数据缺失」同源于
     //   t-dragon-tiger-data（龙虎榜营业部明细，独立于 t-sentiment-data 的节点）。
     "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_u, sent_ph_e.len(), sent_po_e, sent_q,
-        attribution_note(sent_report, sent_tool_calls)),
+        attribution_note(sent_report, sent_tool_calls), asof_sup_sent, sent_ph.len()),
     "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph_e.len(), news_po_e, news_q,
-        attribution_note(news_report, news_tool_calls)),
+        attribution_note(news_report, news_tool_calls), asof_sup_news, news_ph.len()),
     // 基本面/催化剂/行业的「同侪 PE/PB 全为 null」同源于 t-fundamentals-data 的
     // get_stock_peers（2026-09-21 已补 PE_TTM/PB_MRQ/市值/涨跌幅；ROE 仍未接入）。
     "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_u, fund_ph_e.len(), fund_po_e, fund_q,
-        attribution_note(fund_report, fund_tool_calls)),
+        attribution_note(fund_report, fund_tool_calls), asof_sup_fund, fund_ph.len()),
     "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u, pol_ph_e.len(), pol_po_e, pol_q,
-        attribution_note(pol_report, pol_tool_calls)),
+        attribution_note(pol_report, pol_tool_calls), asof_sup_pol, pol_ph.len()),
     "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）；龙虎榜席位明细（t-dragon-tiger-data）与北向字段", hm_u, hm_ph_e.len(), hm_po_e, hm_q,
-        attribution_note(hm_report, hm_tool_calls)),
+        attribution_note(hm_report, hm_tool_calls), asof_sup_hm, hm_ph.len()),
     // 2026-09-21(v72) 修正：质押此前**从未接线**（无节点、无白名单授权），
     //   面板却在 expected_data 里写着「质押风险（t-lockup-data）」——**指明了错误的
     //   取数入口**，把使用者的排查方向一起带偏（该工具是解禁+增减持+大宗交易**三方**，
@@ -1228,13 +1237,13 @@ let diagnostics = #{
     //   此处同步为**真实来源**，避免「期望值自证」（拿声明当事实）继续误导。
     // P2-1：本节点正是伪归因的**实证现场**（报告写「工具调用被拒绝」而归因错维度）。
     "lk": diag_for(lk_c, "解禁观察员", "解禁减持、大宗交易（t-lockup-data）；股权质押（t-pledge-data）", lk_u, lk_ph_e.len(), lk_po_e, lk_q,
-        attribution_note(lk_report, lk_tool_calls)),
+        attribution_note(lk_report, lk_tool_calls), asof_sup_lk, lk_ph.len()),
     "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u, res_ph_e.len(), res_po_e, res_q,
-        attribution_note(res_report, res_tool_calls)),
+        attribution_note(res_report, res_tool_calls), asof_sup_res, res_ph.len()),
     "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）；同侪估值（t-fundamentals-data: get_stock_peers）", sec_u, sec_ph_e.len(), sec_po_e, sec_q,
-        attribution_note(sec_report, sec_tool_calls)),
+        attribution_note(sec_report, sec_tool_calls), asof_sup_sec, sec_ph.len()),
     "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_u, cat_ph_e.len(), cat_po_e, cat_q,
-        attribution_note(cat_report, cat_tool_calls))
+        attribution_note(cat_report, cat_tool_calls), asof_sup_cat, cat_ph.len())
 };
 
 let missing_analysts = [];

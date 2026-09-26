@@ -351,7 +351,15 @@ type AlgoToolRow = (
 ///    summary 带「【as-of 回放】」前缀。判据见 `PLAN-asof-replay-quality-attribution.md`，
 ///    门禁在 `rt-workflow/tests/data_quality_placeholder_gate.rs`（S2 四条）。
 ///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
-pub(crate) const TEMPLATE_VERSION: i32 = 82;
+/// ⚠️ **v83（2026-09-26）：S5/S6 —— 回放重跑（1ad42f59）暴露的两处修正**。
+///    S5（宿主侧，rhai_pm.rs/core.rs/as_of.rs）：豁免判据由「按 as_of 日期过滤缓冲」
+///    改为「按本轮运行基线 seq 过滤」——日期口径挡不住同截止日旧运行的残留条目，
+///    实测把全部 10 维无差别豁免、连真工具故障一起抹掉。
+///    S6（本脚本）：`diag_for` 增第 9/10 参（asof_ex / raw_ph_n）。豁免生效后 ph 恒 0，
+///    原「非数据缺口：报告无失败标记」分支对被豁免维度是**假话**（标记存在，只是不计），
+///    现输出「as-of 回放：本维度上游按设计降级…已豁免不计扣分」。
+///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
+pub(crate) const TEMPLATE_VERSION: i32 = 83;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

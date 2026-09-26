@@ -903,6 +903,10 @@ pub async fn run_stock_workflow_inner(
         // P3 修复: 在 spawn 内恢复 AS_OF + DEGRADATION_LOG 作用域
         as_of::with_optional_asof(captured_asof, async {
             as_of::with_degradation_log(async {
+                // R1 修复(2026-09-26): 分析师节点各自 spawn，record_degradation 的
+                // task-local 写入在子任务里静默失败 ⇒ 结束时只读 task-local 的消费端
+                // 恒得空表（「0 个降级」假象）。改为运行边界水位 + 全局缓冲切片。
+                let deg_watermark = as_of::global_degradation_seq_watermark();
         // 按类型并发上限：tool/file 保持高位，llm/agent 对齐用户设定的 max_concurrent
         // 修复: 默认按类型上限 llm=3 会覆盖全局 max_concurrent，使设置面板的值失效
         let mut type_limits = std::collections::HashMap::new();
@@ -1076,7 +1080,7 @@ pub async fn run_stock_workflow_inner(
                         let horizon_price_map = extract_horizon_price_map(&decision_json);
                         // 阶段2：抽四周期独立决策，落 `stock_analyses.horizon_decisions`
                         let horizon_decisions = extract_decisions_by_horizon(&decision_json);
-                        let degradation_report = as_of::take_asof_degradation_report();
+                        let degradation_report = as_of::take_global_degradations_since(deg_watermark);
                         let llm_dj_partial = extract_llm_decision_json(&result);
                         let as_of_for_meta: Option<AsOfContext> = as_of::current_as_of();
                         let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(
@@ -1408,10 +1412,10 @@ pub async fn run_stock_workflow_inner(
                         let mem_dj = decision_json.clone();
                         // 持久化工作流结果到 blackboard_snapshot，供历史回放/报告
                         // 生成/跨日 key_levels 聚合使用。修复 Defect #2。
-                        // B7: 消费 take_asof_degradation_report() 写入 `degraded` 块
-                        // (spec §4.1: vendor 降级报告)
+                        // B7: 消费降级报告写入 `degraded` 块 (spec §4.1: vendor 降级报告)
+                        // R1 修复(2026-09-26): 改按运行水位取全局切片，见 spawn 入口注释
                         let as_of_for_meta: Option<AsOfContext> = as_of::current_as_of();
-                        let degradation_report = as_of::take_asof_degradation_report();
+                        let degradation_report = as_of::take_global_degradations_since(deg_watermark);
                         let bb_snapshot = serde_json::to_string(&build_blackboard_snapshot(
                             &result.results,
                             as_of_for_meta.as_ref(),

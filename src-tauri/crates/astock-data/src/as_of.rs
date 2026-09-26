@@ -282,8 +282,17 @@ tokio::task_local! {
 
 /// 全局降级环形缓冲(缺陷 E 修复):供前端 poll 实时显示降级数量/详情。
 /// 不依赖 task_local 作用域(全局可见),cap 256 条,满了弹出最早。
-static GLOBAL_DEGRADATION_LOG: Mutex<VecDeque<DegradationEntry>> = Mutex::new(VecDeque::new());
+///
+/// 每条携带「最后一次被记录的序号」(`GLOBAL_DEGRADATION_SEQ` 水位):
+/// 重复条目不追加、只刷新其 seq —— 这样「本次运行是否又降级了」可以按
+/// `seq > watermark` 精确切片(见 `take_global_degradations_since`),
+/// 同时前端面板仍保持按 `(vendor, method, reason)` 去重不刷屏。
+static GLOBAL_DEGRADATION_LOG: Mutex<VecDeque<(u64, DegradationEntry)>> =
+    Mutex::new(VecDeque::new());
 static GLOBAL_DEGRADATION_TOTAL: AtomicU64 = AtomicU64::new(0);
+/// 降级**事件**计数(每次 `record_degradation` 都递增,含重复条目)。
+/// 与 `GLOBAL_DEGRADATION_TOTAL`(只数不同条目)语义不同,勿混用。
+static GLOBAL_DEGRADATION_SEQ: AtomicU64 = AtomicU64::new(0);
 
 const GLOBAL_DEGRADATION_CAP: usize = 256;
 
@@ -307,6 +316,8 @@ pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
     let is_duplicate = |e: &DegradationEntry| {
         e.vendor == entry.vendor && e.method == entry.method && e.reason == entry.reason
     };
+    // 事件序号：每次 record（含重复）都消费一个，供运行边界水位切片用
+    let seq = GLOBAL_DEGRADATION_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
     // 任务级尝试：若没在 task_local scope 中，单独初始化一个新 scope
     let _ = DEGRADATION_LOG.try_with(|cell| {
         let mut log = cell.borrow_mut();
@@ -314,16 +325,19 @@ pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
             log.push(entry.clone());
         }
     });
-    // 全局环形缓冲: 累计总数 + 保留最近 N 条详情
+    // 全局环形缓冲: 累计总数只按「不同条目」增长；重复条目刷新 last_seq
     {
         let mut g = GLOBAL_DEGRADATION_LOG.lock();
-        if g.iter().any(is_duplicate) {
+        if let Some(existing) = g.iter_mut().find(|(_, e)| is_duplicate(e)) {
+            // 刷新为本次事件的序号：即使内容早已在缓冲里，
+            // 「本运行内再次降级」这一事实也必须能被水位切片检出。
+            existing.0 = seq;
             return;
         }
         if g.len() >= GLOBAL_DEGRADATION_CAP {
             g.pop_front();
         }
-        g.push_back(entry);
+        g.push_back((seq, entry));
         GLOBAL_DEGRADATION_TOTAL.fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -382,7 +396,39 @@ pub fn take_asof_degradation_report() -> Vec<DegradationEntry> {
 /// 返回按时间顺序排列(旧 → 新)的最近 256 条。
 pub fn peek_global_degradation_report() -> Vec<DegradationEntry> {
     let g = GLOBAL_DEGRADATION_LOG.lock();
-    g.iter().cloned().collect()
+    g.iter().map(|(_, e)| e.clone()).collect()
+}
+
+/// 当前降级事件水位。运行入口在 spawn 内调用一次，结束时把它传给
+/// `take_global_degradations_since` 即得「本次运行期间记录的降级」切片。
+pub fn global_degradation_seq_watermark() -> u64 {
+    GLOBAL_DEGRADATION_SEQ.load(Ordering::Relaxed)
+}
+
+/// 取水位之后（含重复刷新）的全局降级条目，并合并当前任务的 task-local
+/// 条目（按 `(vendor, method, reason)` 去重）。
+///
+/// 为什么不能只用 `take_asof_degradation_report()`（2026-09-26 修复，缺陷 R1）：
+/// 分析师节点各自 `tokio::spawn`，`record_degradation` 对 task-local 的
+/// `try_with` 在子任务里静默失败，只有全局环形缓冲收到 ⇒ 父任务的
+/// task-local 消费端永远拿到空表 ⇒ 回放明明降级 6+ 维度、面板却显示
+/// 「0 个降级」。这与 2026-09-19/09-23 修过的 AS_OF 跨 spawn 问题是同族。
+///
+/// 已知边界：缓冲 cap 256，单次运行内新增不同条目超过 256 时最早条目被
+/// 挤出、切片会漏（实际降级维度远小于该量级）。
+pub fn take_global_degradations_since(watermark: u64) -> Vec<DegradationEntry> {
+    let mut out = take_asof_degradation_report();
+    let g = GLOBAL_DEGRADATION_LOG.lock();
+    for (seq, e) in g.iter() {
+        if *seq > watermark
+            && !out
+                .iter()
+                .any(|x| x.vendor == e.vendor && x.method == e.method && x.reason == e.reason)
+        {
+            out.push(e.clone());
+        }
+    }
+    out
 }
 
 /// 当前累计降级总数(从进程启动起算,跨 live/replay 切换)。
@@ -990,5 +1036,87 @@ mod tests {
         assert!(s.contains("\"data_scope\":\"structured\""), "序列化必须小写枚举名: {s}");
         let back: AsOfContext = serde_json::from_str(&s).unwrap();
         assert_eq!(back, ctx);
+    }
+
+    // ── R1 回归（2026-09-26）：降级报告跨 spawn 丢失 →「0 个降级」假象 ──
+
+    /// 缺陷形态（实测于 300642 as_of=2026-09-22 回放）：分析师节点各自
+    /// `tokio::spawn`，`record_degradation` 对 task-local 的 `try_with` 在子任务
+    /// 里静默失败，只有全局环形缓冲收到；而父任务消费端只读 task-local
+    /// ⇒ 回放降级 6+ 维度、面板却显示「0 个降级」。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn watermark_slice_captures_spawned_child_degradations() {
+        let _ = clear_global_asof();
+        reset_global_degradation_log();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 22).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        // with_optional_asof（真实工作流入口用的就是它）：task_local + 全局同步写入，
+        // 子任务里的 record_degradation 才能通过全局回退确认"处于 as-of 模式"
+        with_optional_asof(Some(ctx), async {
+            with_degradation_log(async {
+                let watermark = global_degradation_seq_watermark();
+                let child = tokio::spawn(async move {
+                    record_degradation("astock-data", "search_stock", "as-of 模式搜索不可用");
+                });
+                child.await.unwrap();
+                // 负控（先证缺陷形态仍在）：task-local 消费端拿不到子任务的记录
+                assert!(
+                    take_asof_degradation_report().is_empty(),
+                    "task-local 竟收到子任务记录 ⇒ spawn 前提失效，本用例失去区分力"
+                );
+                // 被测行为：水位切片必须捕获
+                let slice = take_global_degradations_since(watermark);
+                assert_eq!(slice.len(), 1, "水位切片应捕获子任务降级: {slice:?}");
+                assert_eq!(slice[0].method, "search_stock");
+            })
+            .await;
+        })
+        .await;
+        reset_global_degradation_log();
+    }
+
+    /// 重复条目必须刷新 last_seq：同一 `(vendor, method, reason)` 在**上一轮**
+    /// 已留在缓冲里，本轮再次降级时若不刷新序号，水位切片会检不出来。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn duplicate_record_refreshes_seq_for_watermark_slice() {
+        let _ = clear_global_asof();
+        reset_global_degradation_log();
+        let date = NaiveDate::from_ymd_opt(2026, 9, 22).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        // 上一轮运行：同一降级已写入全局缓冲（无 task-local scope）
+        with_optional_asof(Some(ctx), async {
+            record_degradation("astock-data", "get_cls_flash", "as-of 快讯不可用");
+        })
+        .await;
+        // 本轮运行：子任务再次记录同一降级
+        with_optional_asof(Some(ctx), async {
+            with_degradation_log(async {
+                let watermark = global_degradation_seq_watermark();
+                let child = tokio::spawn(async move {
+                    record_degradation("astock-data", "get_cls_flash", "as-of 快讯不可用");
+                });
+                child.await.unwrap();
+                let slice = take_global_degradations_since(watermark);
+                assert_eq!(
+                    slice.iter().filter(|e| e.method == "get_cls_flash").count(),
+                    1,
+                    "重复条目刷新 seq 后，本轮水位切片必须检得: {slice:?}"
+                );
+                // 累计总数仍只按「不同条目」计，重复不虚增
+                assert_eq!(
+                    peek_global_degradation_report()
+                        .iter()
+                        .filter(|e| e.method == "get_cls_flash")
+                        .count(),
+                    1,
+                    "前端面板不得因重复记录刷屏"
+                );
+            })
+            .await;
+        })
+        .await;
+        reset_global_degradation_log();
     }
 }

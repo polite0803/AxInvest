@@ -845,6 +845,34 @@ const initialState = {
   _workflowErrorRetries: 0,
 };
 
+/**
+ * 让页面顶部「实时分析 / 历史回放」与**本轮实际取数口径**一致。
+ *
+ * 背景（2026-09-27 实测缺陷）：重跑分析刻意沿用原记录的 `as_of_date`（便于同日覆盖、
+ * 迭代工作流），但那段逻辑只写了本 store 的 `mode/asOfDate`；头部 `PageTimeAnchor`
+ * 读的是全局 `useTimeAnchorStore` ⇒ 出现「分析按 as-of 取数、头部仍显示实时分析」。
+ * 反向同理：重跑一条 live 记录时本轮就是实时语义，头部要退回「实时分析」。
+ *
+ * `backtest_sweep` 由扫描工作台自己持有模式，这里不覆盖。
+ * 单独导出是为了让判据能直接断言这一条对应关系（不依赖整个工作流跑通）。
+ */
+export function syncTimeAnchorForRun(
+  anchorMode: "live" | "replay" | "backtest_sweep",
+  asOfDate: string | null,
+): void {
+  if (anchorMode === "backtest_sweep") {
+    return;
+  }
+  const anchor = useTimeAnchorStore.getState();
+  if (asOfDate) {
+    if (anchor.mode !== "replay" || anchor.asOfDate !== asOfDate) {
+      anchor.enterReplay(asOfDate);
+    }
+  } else if (anchor.mode !== "live") {
+    anchor.enterLive();
+  }
+}
+
 export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
   ...initialState,
   _unlisten: null,
@@ -1078,6 +1106,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           ? (anchorMode === "backtest_sweep" ? "backtest_sweep" : "replay")
           : "live",
       });
+      syncTimeAnchorForRun(anchorMode, asOfDate);
       // 版本化分析：透传原始 analysisId 作为 parent，后端新建独立行保留历史版本。
       // 不传则是首次分析（parent_analysis_id = NULL）。
       const runArgs: Record<string, unknown> = {

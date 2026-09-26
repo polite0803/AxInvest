@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invokeMock, listenMock, unlistenMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -12,7 +12,8 @@ vi.mock("@/lib/invoke", () => ({
   isTauri: () => false,
 }));
 
-import { inferStage, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
+import { inferStage, syncTimeAnchorForRun, useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 
 /**
  * 测试覆盖范围（弥补审计中的"Store 逻辑、事件处理、辩论同步、错误路径、进度计算"无覆盖的问题）：
@@ -47,6 +48,7 @@ describe("stockAnalysisStore - feature coverage", () => {
       timeline: [],
       highlightedPanel: null,
     });
+
     listenMock.mockResolvedValue(unlistenMock);
   });
 
@@ -982,5 +984,44 @@ describe("stockAnalysisStore - feature coverage", () => {
       expect(state.status).toBe("error");
       expect(state.errorCode).toBeNull();
     });
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// 重跑分析时「头部模式」与本轮取数口径的对应关系
+// 缺陷形态（2026-09-27 实测）：重跑沿用原记录的 as_of_date ⇒ 分析按 as-of 取数，
+// 页面顶部却仍显示「实时分析」。判据直接打这个纯函数，不依赖整条工作流跑通。
+// ────────────────────────────────────────────────────────────
+describe("syncTimeAnchorForRun - 头部模式与实际取数口径自洽", () => {
+  const resetAnchor = () =>
+    useTimeAnchorStore.setState({ mode: "live", asOfDate: null, degradationCount: 0, degradationLog: [] });
+
+  beforeEach(resetAnchor);
+  afterEach(() => {
+    useTimeAnchorStore.getState().stopDegradationPolling();
+    resetAnchor();
+  });
+
+  it("重跑沿用原记录 as_of_date ⇒ 全局锚点切到 replay 的同一天", () => {
+    syncTimeAnchorForRun("live", "2020-01-05");
+    const s = useTimeAnchorStore.getState();
+    expect(s.mode).toBe("replay");
+    expect(s.asOfDate).toBe("2020-01-05");
+  });
+
+  it("重跑一条 live 记录 ⇒ 从 replay 退回 live，不留「在回放」的假象", () => {
+    useTimeAnchorStore.setState({ mode: "replay", asOfDate: "2020-01-05" });
+    syncTimeAnchorForRun("replay", null);
+    const s = useTimeAnchorStore.getState();
+    expect(s.mode).toBe("live");
+    expect(s.asOfDate).toBeNull();
+  });
+
+  it("backtest_sweep 由扫描工作台持有模式，这里不覆盖", () => {
+    useTimeAnchorStore.setState({ mode: "backtest_sweep", asOfDate: "2020-01-05" });
+    syncTimeAnchorForRun("backtest_sweep", "2019-06-01");
+    const s = useTimeAnchorStore.getState();
+    expect(s.mode).toBe("backtest_sweep");
+    expect(s.asOfDate).toBe("2020-01-05");
   });
 });

@@ -114,8 +114,13 @@ impl EastMoneyVendor {
     ///
     /// 实测（2026-09-26）该接口**不认** `beginTime/endTime`，`sortEnd` 只是分页游标
     /// （传历史日期被忽略，返回的仍是当下最新）⇒ 唯一可用的时间通道就是倒序翻页 +
-    /// 本地裁剪。上限 12 页 ≈ 600 条；翻不到截止日**如实报 Err**，让路由层落到
+    /// 本地裁剪。也试过往 `cmsArticleWebOld` 里塞 `startDate/endDate` —— **不生效**
+    /// （endDate=09-22 仍返回 09-25 的条目），别再找日期参数了。
+    /// 上限 12 页 ≈ 600 条；翻不到截止日**如实报 Err**，让路由层落到
     /// `news_archive`，而不是静默返回空（静默空会被下游读成「该股没有新闻」）。
+    ///
+    /// ⚠ 关键词必须先清洗（见 `asof_news_keyword`）：`sort:"time"` 下服务端不做相关性
+    /// 排序，组合关键词等于在翻全量流，12 页预算根本不够退到截止日。
     async fn news_pages_until_asof(
         &self,
         keyword: &str,
@@ -124,11 +129,12 @@ impl EastMoneyVendor {
     ) -> Result<Vec<NewsItem>, DataError> {
         const PAGE_SIZE: u32 = 50;
         const MAX_PAGES: u32 = 12;
+        let kw = asof_news_keyword(keyword);
         let mut kept: Vec<NewsItem> = Vec::new();
         let mut crossed = false;
         let mut fetched = 0usize;
         for page in 1..=MAX_PAGES {
-            let items = self.news_page(keyword, page, PAGE_SIZE, "time").await?;
+            let items = self.news_page(&kw, page, PAGE_SIZE, "time").await?;
             if items.is_empty() {
                 break;
             }
@@ -143,7 +149,10 @@ impl EastMoneyVendor {
         if kept.is_empty() && !crossed {
             return Err(DataError::VendorError {
                 vendor: "eastmoney".into(),
-                message: format!("时间回溯 {MAX_PAGES} 页(共 {fetched} 条)未覆盖到截止日 {cutoff}"),
+                message: format!(
+                    "时间回溯 {MAX_PAGES} 页(共 {fetched} 条)未覆盖到截止日 {cutoff}（实际检索关键词「{kw}」{}）",
+                    if kw == keyword { "未做清洗" } else { "已由原词清洗而来" }
+                ),
             });
         }
         kept.truncate(need);
@@ -814,6 +823,24 @@ fn parse_news_jsonp(text: &str) -> Result<Vec<NewsItem>, DataError> {
             })
         })
         .collect())
+}
+
+/// as-of 翻页用的关键词清洗（只作用于回放路径，live 的 `search_news` 行为不变）。
+///
+/// 为什么回放要洗而 live 不用：live 拿的是「相关性」排序的第一页，宽词只是噪声多；
+/// 而 `sort:"time"` 下服务端不做相关性排序，组合关键词等于在全量流里逐页倒着翻 ——
+/// 实测「透景生命 政策」第 1 页 50 条全是同一天（09-26），12 页 600 条只退到 09-24，
+/// 永远到不了截止日 09-22；同一时间用纯名「透景生命」1 页即覆盖 09-21→09-25。
+///
+/// 复用 `clean_search_keyword`（取最长连续中文片段）：并列长度时**保留前一个**片段，
+/// 所以「透景生命 政策」→「透景生命」（股票名在前是调用方的常见写法，也是我们要的那段）。
+fn asof_news_keyword(keyword: &str) -> String {
+    let cleaned = crate::clean_search_keyword(keyword);
+    if cleaned.is_empty() {
+        keyword.trim().to_string()
+    } else {
+        cleaned
+    }
 }
 
 /// 从一页（`sort:"time"` 按时间倒序）里挑出 `publish_time <= cutoff` 的条目。
@@ -4122,6 +4149,15 @@ mod news_asof_tests {
             vec!["2026-09-22 09:00:00", "2026-09-22T08:00:00", "2026-09-22"],
             "截止日当天及更早的必须保留，顺序不变"
         );
+    }
+
+    /// 回放路径的关键词清洗：组合词必须退化成股票名片段 —— 不洗的话 12 页预算
+    /// 必然够不到截止日（实测「透景生命 政策」1 页 50 条全在同一天）。
+    #[test]
+    fn asof_keyword_narrows_compound_keyword() {
+        assert_eq!(asof_news_keyword("透景生命 政策"), "透景生命");
+        assert_eq!(asof_news_keyword("300642"), "300642", "纯代码原样（get_news 传的就是代码）");
+        assert_eq!(asof_news_keyword("贵州茅台"), "贵州茅台", "单一片段不动");
     }
 
     /// 收口后的解析器必须同时兼容两种上游形态（M-RES-16 的原始缺陷），

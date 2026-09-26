@@ -45,8 +45,38 @@ impl BaiduStockVendor {
             .await?;
         crate::check_response_429(&resp, "baidu_stock")?;
         let json: Value = resp.json().await?;
+        // 2026-09-26 实测：`gushitong.baidu.com/opendata` 已 301 迁到 `finance.baidu.com`，
+        // 新信封是 `{status, msg, data}`（**没有** `Result`），且对现有参数回 `status=1 参数错误`。
+        // 各方法过去只读 `Result.*`，于是「接口整体失效」被逐层翻译成「该维度没有数据」
+        // ——`get_hot_stocks` 直接 `Ok(vec![])`，回放面板因此写下「被探测的源均回答无数据」，
+        // 而真相是这个源连当下的榜单都拿不到。判据见 `baidu_envelope_error`。
+        if let Some(reason) = baidu_envelope_error(&json) {
+            return Err(DataError::VendorError {
+                vendor: "baidu_stock".into(),
+                message: format!(
+                    "接口信封非预期（{reason}）；域名已 301 迁至 finance.baidu.com，需重接参数"
+                ),
+            });
+        }
         Ok(json)
     }
+}
+
+/// 判定百度 openapi 的响应信封是否已经**不是**我们对接的那一套。
+///
+/// 只有一种组合算失效：顶层没有 `Result`（旧信封的必经字段）**且** `status` 是非零整数
+/// —— 服务端在明确报错。此时返回原因串，由调用方抛 `Err`；
+/// 旧信封（带 `Result`）与 `status=0` 的正常响应一律放行，行为逐字不变。
+fn baidu_envelope_error(json: &Value) -> Option<String> {
+    if !json["Result"].is_null() {
+        return None;
+    }
+    let status = json.get("status").and_then(|v| v.as_i64())?;
+    if status == 0 {
+        return None;
+    }
+    let msg = json.get("msg").and_then(|v| v.as_str()).unwrap_or("(无 msg)");
+    Some(format!("status={status}, msg={msg}"))
 }
 
 #[async_trait]
@@ -812,5 +842,38 @@ mod capability_tests {
                 "baidu.{m} 应为 Fallthrough(lib.rs truncate 正确)"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod envelope_tests {
+    //! 百度 openapi 响应信封判据（2026-09-26 实测）。
+    //!
+    //! 缺陷形态：`gushitong.baidu.com/opendata` 已 301 到 `finance.baidu.com`，
+    //! 新返回 `{"status":1,"msg":"参数错误","data":[]}` —— 没有 `Result`。
+    //! 各方法只读 `Result.*`，读不到就 `Ok(vec![])`，于是「接口整体失效」在降级面板上
+    //! 被写成「被探测的源均回答无数据」（听起来像那天没有榜单）。
+
+    use super::*;
+
+    #[test]
+    fn migrated_error_envelope_is_reported_as_failure() {
+        let raw = serde_json::json!({"status": 1, "msg": "参数错误", "data": []});
+        let reason = baidu_envelope_error(&raw).expect("失效信封必须给出原因");
+        assert!(reason.contains("status=1"), "{reason}");
+        assert!(reason.contains("参数错误"), "服务端 msg 必须原样带上: {reason}");
+    }
+
+    #[test]
+    fn legacy_and_ok_envelopes_pass_through() {
+        // 旧信封：带 Result ⇒ 一律放行，交给各方法自己解析（行为逐字不变）
+        let legacy = serde_json::json!({"Result": {"data": [{"code": "600519"}]}});
+        assert!(baidu_envelope_error(&legacy).is_none());
+        // status=0 的正常响应（即便 Result 缺失）也不算失效
+        let ok = serde_json::json!({"status": 0, "data": []});
+        assert!(baidu_envelope_error(&ok).is_none());
+        // 完全没有 status 字段 ⇒ 不定罪，保持旧行为
+        let shapeless = serde_json::json!({"foo": 1});
+        assert!(baidu_envelope_error(&shapeless).is_none());
     }
 }

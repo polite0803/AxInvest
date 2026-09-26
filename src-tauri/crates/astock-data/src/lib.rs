@@ -529,8 +529,10 @@ impl AsofProbe {
             );
         }
         if self.failed.is_empty() {
+            // 「被探测」与「无通道」是两个互斥的计数，不能写成「其中」（面板曾出现
+            // 「1 个被探测的源…（其中无通道源 1 个）」这种自相矛盾的读感）
             format!(
-                "{subject}：{} 个被探测的源均回答无数据（其中无通道源 {} 个）",
+                "{subject}：被探测的 {} 源均回答无数据；另有 {} 源无 as-of 能力",
                 self.probed, self.unsupported
             )
         } else {
@@ -5358,7 +5360,7 @@ pub(crate) fn news_date_key(s: &str) -> &str {
 /// 1. 已是数字代码/市场代码（600516 / 00700.HK / TSM.US）→ 原样返回
 /// 2. 取关键词中最长的连续 CJK 片段（"方大炭素 石墨烯" → "方大炭素"）
 /// 3. 若片段以公司后缀/查询意图词结尾则截断（"国瓷材料股份有限公司" → "国瓷材料"）
-fn clean_search_keyword(raw: &str) -> String {
+pub(crate) fn clean_search_keyword(raw: &str) -> String {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return String::new();

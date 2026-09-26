@@ -390,10 +390,12 @@ impl StockVendor for TencentVendor {
                 return Ok(Some(MoneyFlow {
                     date: parts[13].to_string(),
                     main_net_inflow: parse(3),
-                    super_large_net: 0.0,
-                    large_net: 0.0,
-                    medium_net: 0.0,
-                    small_net: parse(7), // 散户净流入
+                    // 该接口只给主力与散户两档：其余三档如实 None（此前写 0.0
+                    // 会让下游把「没这个字段」读成「这一档净额为零」）
+                    super_large_net: None,
+                    large_net: None,
+                    medium_net: None,
+                    small_net: parts.get(7).and_then(|s| s.parse::<f64>().ok()), // 散户净流入
                     history: Vec::new(),
                 }));
             }

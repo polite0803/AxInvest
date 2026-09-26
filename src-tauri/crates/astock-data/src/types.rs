@@ -59,15 +59,23 @@ pub struct NewsItem {
 }
 
 /// 资金流向
+///
+/// ⚠ 四档净额是 `Option<f64>`：**`None` = 该数据源不披露这一档**，`Some(0.0)` = 披露了且净额恰为零。
+/// 此前四档是裸 `f64`，各源缺一项就写 `0.0`（tencent 只有散户档、baidu 解析失败也归 0），
+/// 下游把「没有这个字段」读成「这一档净额为零」—— 与全仓「缺失不得兜底成 0/伪造」的口径冲突。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoneyFlow {
     pub date: String,
     pub main_net_inflow: f64,
-    pub super_large_net: f64,
-    pub large_net: f64,
-    pub medium_net: f64,
-    pub small_net: f64,
+    #[serde(default)]
+    pub super_large_net: Option<f64>,
+    #[serde(default)]
+    pub large_net: Option<f64>,
+    #[serde(default)]
+    pub medium_net: Option<f64>,
+    #[serde(default)]
+    pub small_net: Option<f64>,
     /// 近 N 日历史资金流向（按日期降序，第 0 条 = 最新日 = 与顶层字段同一天）。
     /// 只有支持多日查询的 vendor（如 eastmoney）会填充，其他 vendor 留空 Vec。
     /// prompt 要求"连续 3-5 日趋势"分析，单日数据无法支撑。
@@ -75,16 +83,21 @@ pub struct MoneyFlow {
     pub history: Vec<MoneyFlowDaily>,
 }
 
-/// 单日资金流向（历史序列中的一天）
+/// 单日资金流向（历史序列中的一天）—— 四档同样 `Option`，理由见 [`MoneyFlow`]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MoneyFlowDaily {
     pub date: String,
     pub main_net_inflow: f64,
-    pub super_large_net: f64,
-    pub large_net: f64,
-    pub medium_net: f64,
-    pub small_net: f64,
+    // default：改造前写入的快照若缺这些键，反序列化不该整条失败
+    #[serde(default)]
+    pub super_large_net: Option<f64>,
+    #[serde(default)]
+    pub large_net: Option<f64>,
+    #[serde(default)]
+    pub medium_net: Option<f64>,
+    #[serde(default)]
+    pub small_net: Option<f64>,
 }
 
 /// 龙虎榜条目

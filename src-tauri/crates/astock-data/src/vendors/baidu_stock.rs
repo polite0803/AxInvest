@@ -384,10 +384,11 @@ impl StockVendor for BaiduStockVendor {
         Ok(Some(MoneyFlow {
             date: data["date"].as_str().unwrap_or("").to_string(),
             main_net_inflow: val_to_f64(&data["mainNetInflow"]).unwrap_or(0.0),
-            super_large_net: val_to_f64(&data["superLargeNet"]).unwrap_or(0.0),
-            large_net: val_to_f64(&data["largeNet"]).unwrap_or(0.0),
-            medium_net: val_to_f64(&data["mediumNet"]).unwrap_or(0.0),
-            small_net: val_to_f64(&data["smallNet"]).unwrap_or(0.0),
+            // 解析不出来 ⇒ None（该源没给这一档），不再归 0 冒充「净额为零」
+            super_large_net: val_to_f64(&data["superLargeNet"]),
+            large_net: val_to_f64(&data["largeNet"]),
+            medium_net: val_to_f64(&data["mediumNet"]),
+            small_net: val_to_f64(&data["smallNet"]),
             history: Vec::new(),
         }))
     }

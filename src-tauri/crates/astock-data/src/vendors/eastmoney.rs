@@ -850,10 +850,10 @@ pub(crate) fn parse_fflow_klines(klines: &[Value]) -> Vec<MoneyFlowDaily> {
             MoneyFlowDaily {
                 date: parts.first().unwrap_or(&"").to_string(),
                 main_net_inflow: f(1),
-                small_net: f(2),
-                medium_net: f(3),
-                large_net: f(4),
-                super_large_net: f(5),
+                small_net: Some(f(2)),
+                medium_net: Some(f(3)),
+                large_net: Some(f(4)),
+                super_large_net: Some(f(5)),
             }
         })
         .collect()
@@ -4352,10 +4352,11 @@ mod fflow_asof_tests {
         MoneyFlowDaily {
             date: date.into(),
             main_net_inflow: main,
-            small_net: 0.0,
-            medium_net: 0.0,
-            large_net: 0.0,
-            super_large_net: 0.0,
+            // 该夹具只关心 main_net_inflow；四档按「未披露」给 None
+            small_net: None,
+            medium_net: None,
+            large_net: None,
+            super_large_net: None,
         }
     }
 
@@ -4405,10 +4406,10 @@ mod fflow_asof_tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].date, "2024-06-03");
         assert_eq!(rows[0].main_net_inflow, 100.0);
-        assert_eq!(rows[0].small_net, -20.0);
-        assert_eq!(rows[0].medium_net, -30.0);
-        assert_eq!(rows[0].large_net, -40.0);
-        assert_eq!(rows[0].super_large_net, 140.0);
+        assert_eq!(rows[0].small_net, Some(-20.0));
+        assert_eq!(rows[0].medium_net, Some(-30.0));
+        assert_eq!(rows[0].large_net, Some(-40.0));
+        assert_eq!(rows[0].super_large_net, Some(140.0));
     }
 
     /// S7(2026-09-26)：as-of 估值快照 URL 判据 —— 转义/算符写错是**静默空结果**

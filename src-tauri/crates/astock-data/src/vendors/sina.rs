@@ -1,6 +1,7 @@
 use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
+use crate::vendors::eastmoney::{money_flow_from_window, select_fflow_window};
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
 
@@ -119,6 +120,55 @@ impl SinaVendor {
             },
         }
     }
+}
+
+/// `sh600519` / `sz000001` —— live 与 as-of 共用，避免两份前缀实现漂移
+fn sina_daima(stock_code: &str) -> String {
+    let code = stock_code.trim();
+    let market = if code.starts_with('6') || code.starts_with('9') {
+        "sh"
+    } else {
+        "sz"
+    };
+    format!("{market}{code}")
+}
+
+/// 一次取回的历史天数（裁到截止日后取最近 5 条，与 eastmoney 同口径）
+const SINA_FFLOW_HISTORY_ROWS: u32 = 20;
+
+/// 新浪个股资金流**按日历史**接口（实测 2026-09-27：`asc=0` 即按 opendate 降序）
+fn sina_fflow_history_url(daima: &str, num: u32) -> String {
+    format!(
+        "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/        MoneyFlow.ssl_qsfx_zjlrqs?page=1&num={num}&sort=opendate&asc=0&daima={daima}"
+    )
+}
+
+/// 该表只有主力（netamount）与超大单（r0_net）两档 ⇒ 其余三档 `None`，不是 0
+fn parse_sina_fflow_rows(rows: &[serde_json::Value]) -> Vec<MoneyFlowDaily> {
+    let num = |r: &serde_json::Value, k: &str| -> Option<f64> {
+        r.get(k).and_then(|v| match v.as_str() {
+            Some(s) => s.parse::<f64>().ok(),
+            None => v.as_f64(),
+        })
+    };
+    rows.iter()
+        .filter_map(|r| {
+            let date = r["opendate"].as_str().unwrap_or("").to_string();
+            if date.is_empty() {
+                return None;
+            }
+            // 主力净流入缺失 ⇒ 这一行没有可陈述的事实，整行丢弃（不补 0）
+            let main = num(r, "netamount")?;
+            Some(MoneyFlowDaily {
+                date,
+                main_net_inflow: main,
+                super_large_net: num(r, "r0_net"),
+                large_net: None,
+                medium_net: None,
+                small_net: None,
+            })
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -345,14 +395,10 @@ impl StockVendor for SinaVendor {
     }
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
-        // 新浪财经资金流向 API（个股）
-        let market = if stock_code.starts_with('6') || stock_code.starts_with('9') {
-            "sh"
-        } else {
-            "sz"
-        };
+        // 新浪财经资金流向 API（个股，当日单点）
+        let daima = sina_daima(stock_code);
         let url = format!(
-            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssi_ssfx_flzjtj?format=text&daima={market}{stock_code}"
+            "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/MoneyFlow.ssi_ssfx_flzjtj?format=text&daima={daima}"
         );
         let resp = self.sina_get(&url).await?;
         let json: serde_json::Value = resp.json().await?;
@@ -386,12 +432,39 @@ impl StockVendor for SinaVendor {
             date: today,
             // 主力净流入 = 超大单净流入 + 大单净流入
             main_net_inflow: (r0_in - r0_out) + (r1_in - r1_out),
-            super_large_net: r0_in - r0_out,
-            large_net: r1_in - r1_out,
-            medium_net: r2_in - r2_out,
-            small_net: r3_in - r3_out,
+            super_large_net: Some(r0_in - r0_out),
+            large_net: Some(r1_in - r1_out),
+            medium_net: Some(r2_in - r2_out),
+            small_net: Some(r3_in - r3_out),
             history: Vec::new(),
         }))
+    }
+
+    /// T17(2026-09-27)：回放里的资金流。
+    ///
+    /// 为什么换源：日频资金流在 `push2his.eastmoney.com/fflow/daykline`，而本机对该域是
+    /// **连接级拒绝**（2026-08-01、2026-09-27 两次实测；真 Edge + `--disable-ipv6` 也回
+    /// `net::ERR_EMPTY_RESPONSE`）⇒ 直连与内核兜底两条路一起死，`browser_eastmoney` 绕的是
+    /// TLS 指纹与 CORS，绕不了主机不回包。新浪这张表在没被墙的域上，且**接口自带日期序列**
+    /// （`sort=opendate&asc=0` 实测降序）⇒ 取回后按截止日裁，形态与 eastmoney 完全一致。
+    ///
+    /// 只披露主力与超大单两档：大/中/小单如实 `None`（见 `MoneyFlow` 字段的 None≠0 约定），
+    /// 不为凑齐五档写 0。
+    async fn get_money_flow_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<MoneyFlow>, DataError> {
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        let url = sina_fflow_history_url(&sina_daima(stock_code), SINA_FFLOW_HISTORY_ROWS);
+        let resp = self.sina_get(&url).await?;
+        let json: serde_json::Value = resp.json().await?;
+        let rows = match json.as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => return Ok(None),
+        };
+        Ok(money_flow_from_window(select_fflow_window(parse_sina_fflow_rows(rows), &cutoff)))
     }
 
     async fn get_dragon_tiger(&self, _: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
@@ -410,6 +483,9 @@ impl StockVendor for SinaVendor {
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
             "get_quote" => AsOfCapability::SynthesizeFromKline,
+            // T17(2026-09-27)：`MoneyFlow.ssl_qsfx_zjlrqs` 是按日历史（实测 200，
+            // 字段含 opendate / netamount / r0_net），且不落在 push2his 上 ⇒ 回放有真通道
+            "get_money_flow" => AsOfCapability::NativeDateParam,
             _ => AsOfCapability::Fallthrough,
         }
     }
@@ -436,12 +512,87 @@ mod capability_tests {
             "get_news",
             "get_klines",
             "get_financials",
-            "get_money_flow",
             "get_dragon_tiger",
             "get_lockup_schedule",
             "search_stock",
         ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
         }
+    }
+
+    /// T17：资金流在 sina 有按日历史通道 ⇒ 必须申报 NativeDateParam，
+    /// 否则路由层的 as-of 白名单会跳过这个**唯一没被墙**的资金流源。
+    #[test]
+    fn sina_money_flow_is_native_date_param() {
+        let v = make_vendor();
+        assert_eq!(v.asof_capability("get_money_flow"), AsOfCapability::NativeDateParam);
+    }
+}
+
+#[cfg(test)]
+mod sina_fflow_asof_tests {
+    use super::*;
+
+    /// 2026-09-27 实测响应（6 条，opendate 降序）裁剪后的样本
+    fn fixture() -> Vec<serde_json::Value> {
+        ["2026-09-24", "2026-09-23", "2026-09-22", "2026-09-21"]
+            .iter()
+            .enumerate()
+            .map(|(i, d)| {
+                serde_json::json!({
+                    "opendate": d,
+                    "trade": "1238.0000",
+                    "changeratio": "-0.0105815",
+                    "netamount": format!("-{}.0", (i + 1) * 100),
+                    "r0_net": format!("-{}.0", (i + 1) * 90),
+                    "cate_na": "-1501098460.4200"
+                })
+            })
+            .collect()
+    }
+
+    #[test]
+    fn url_carries_daima_and_descending_date_sort() {
+        let url = sina_fflow_history_url(&sina_daima("600519"), 20);
+        assert!(url.contains("daima=sh600519"), "{url}");
+        assert!(url.contains("sort=opendate&asc=0"), "日期降序是裁窗前提: {url}");
+        assert!(url.contains("num=20"), "{url}");
+    }
+
+    #[test]
+    fn unreported_tiers_stay_none_instead_of_zero() {
+        let rows = parse_sina_fflow_rows(&fixture());
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[0].date, "2026-09-24");
+        assert_eq!(rows[0].main_net_inflow, -100.0);
+        assert_eq!(rows[0].super_large_net, Some(-90.0));
+        // 该表不披露大/中/小单 ⇒ None；写成 0.0 会被下游读成「这一档净额为零」
+        assert_eq!(rows[0].large_net, None);
+        assert_eq!(rows[0].medium_net, None);
+        assert_eq!(rows[0].small_net, None);
+    }
+
+    #[test]
+    fn missing_main_amount_drops_the_row() {
+        let rows = parse_sina_fflow_rows(&[
+            serde_json::json!({ "opendate": "2026-09-24", "r0_net": "-900.0" }),
+            serde_json::json!({ "opendate": "2026-09-23", "netamount": "-800.0" }),
+        ]);
+        assert_eq!(rows.len(), 1, "主力净流入缺失的行不补 0，整行丢弃");
+        assert_eq!(rows[0].date, "2026-09-23");
+    }
+
+    /// 与 eastmoney 共用裁窗 + 装配 ⇒ 两条源给出的是同一形态、同一口径
+    #[test]
+    fn asof_window_truncates_to_cutoff_and_keeps_shape() {
+        let mf = money_flow_from_window(select_fflow_window(
+            parse_sina_fflow_rows(&fixture()),
+            "2026-09-22",
+        ))
+        .expect("截止日在窗口内 ⇒ 应有值");
+        assert_eq!(mf.date, "2026-09-22", "顶层必须锚在截止日当天（有披露时）");
+        assert!(mf.history.iter().all(|h| h.date.as_str() <= "2026-09-22"), "{:?}", mf.history);
+        assert_eq!(mf.large_net, None);
+        assert!(mf.history.iter().all(|h| h.large_net.is_none()));
     }
 }

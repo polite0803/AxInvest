@@ -361,10 +361,26 @@ impl StockVendor for BrowserEastMoneyVendor {
                 Ok(Some(MoneyFlow {
                     date: parts[0].to_string(),
                     main_net_inflow: parse(1),
-                    super_large_net: if parts.len() > 2 { parse(2) } else { 0.0 },
-                    large_net: if parts.len() > 3 { parse(3) } else { 0.0 },
-                    medium_net: if parts.len() > 4 { parse(4) } else { 0.0 },
-                    small_net: if parts.len() > 5 { parse(5) } else { 0.0 },
+                    super_large_net: if parts.len() > 2 {
+                        Some(parse(2))
+                    } else {
+                        None
+                    },
+                    large_net: if parts.len() > 3 {
+                        Some(parse(3))
+                    } else {
+                        None
+                    },
+                    medium_net: if parts.len() > 4 {
+                        Some(parse(4))
+                    } else {
+                        None
+                    },
+                    small_net: if parts.len() > 5 {
+                        Some(parse(5))
+                    } else {
+                        None
+                    },
                     history: Vec::new(),
                 }))
             },

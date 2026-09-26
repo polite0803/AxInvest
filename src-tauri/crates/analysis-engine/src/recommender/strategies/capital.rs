@@ -131,11 +131,12 @@ impl CapitalStrategy {
         // 检测"空壳" MoneyFlow：Tencent 等vendor 返回了对象但关键字段全为 0，
         // 这种情况等同于数据不可用，应回退到 K 线量价检测。
         let mf_is_effective = |m: &axagent_astock_data::MoneyFlow| -> bool {
+            // None = 该源未披露这一档 ⇒ 与 0 一样不计入「有内容」，不改变原有判定语义
             m.main_net_inflow != 0.0
-                || m.super_large_net != 0.0
-                || m.large_net != 0.0
-                || m.medium_net != 0.0
-                || m.small_net != 0.0
+                || m.super_large_net.unwrap_or(0.0) != 0.0
+                || m.large_net.unwrap_or(0.0) != 0.0
+                || m.medium_net.unwrap_or(0.0) != 0.0
+                || m.small_net.unwrap_or(0.0) != 0.0
         };
 
         // eastmoney 资金流向被反爬拦截，或 vendor 返回零值空壳数据时回退到 K 线量价检测。

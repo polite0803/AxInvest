@@ -897,6 +897,162 @@ pub(crate) fn money_flow_from_window(recent: Vec<MoneyFlowDaily>) -> Option<Mone
     })
 }
 
+// ─────────────────────────────────────────────────────────────
+// T15（2026-09-27）：行业排名在回放里**不是**「无历史语义」
+//
+// 实测：名单接口 `data.eastmoney.com/dataapi/bkzj/getbkzj` 忽略一切日期参数
+// （`date=2026-09-11` / `date=20260911` 与不带参数返回**完全一致**，煤炭 f3 恒 66），
+// 但它给出的 `f13.f12`（如 `90.BK0437`）正是板块指数的 secid；
+// 板块指数日 K 接口 `push2his.../kline/get` 有**原生** `end=YYYYMMDD` + `lmt`
+// ⇒ 取「截止日与其前一根」两条收盘即可算出当日板块涨跌幅 ⇒ 排序就是那天的行业排名。
+// 成本：二级行业 31 个板块（实测 rows=31）× 1 次小请求，并发 8。
+// ─────────────────────────────────────────────────────────────
+
+/// 行业板块名单（当日成分）。板块归属是慢变量 ⇒ 与 T9 同行对比同口径：
+/// 名单沿用当日，只有**行情数值**按截止日取。
+pub(crate) const INDUSTRY_BOARD_LIST_URL: &str =
+    "https://data.eastmoney.com/dataapi/bkzj/getbkzj?key=f3,f62,f12,f14,f128,f140&code=m:90+s:2";
+
+/// 板块指数日 K（只要 `end` 之前两根收盘）
+pub(crate) fn board_kline_url(secid: &str, cutoff_compact: &str) -> String {
+    format!(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get?\
+        secid={secid}&klt=101&fqt=1&lmt=2&end={cutoff_compact}&\
+        fields1=f1,f2,f3&fields2=f51,f53"
+    )
+}
+
+/// 名单响应 → `[(secid, 板块名)]`（`f13`=市场号 90，`f12`=BK 代码）
+pub(crate) fn industry_board_list(json: &Value) -> Vec<(String, String)> {
+    json["data"]["diff"]
+        .as_array()
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| {
+                    let code = r["f12"].as_str()?;
+                    let name = r["f14"].as_str()?;
+                    if code.is_empty() || name.is_empty() {
+                        return None;
+                    }
+                    let market = r["f13"].as_i64().unwrap_or(90);
+                    Some((format!("{market}.{code}"), name.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 日 K 字符串（`"YYYY-MM-DD,收盘"`，接口按日期升序）→ `(截止日, 当日涨跌幅%)`。
+///
+/// 两处不自证就会说谎的地方：
+/// 1. `end` 参数**不总被尊重**（T1 的先例）⇒ 本地再按 `cutoff` 裁一次，取 `<= cutoff` 的最后两根；
+/// 2. 停牌/新上市板块可能只有一根 ⇒ 没有前收就无法算涨跌幅，如实返回 `None`。
+pub(crate) fn board_change_from_bars(klines: &[Value], cutoff: &str) -> Option<(String, f64)> {
+    let bars: Vec<(String, f64)> = klines
+        .iter()
+        .filter_map(|v| v.as_str())
+        .filter_map(|line| {
+            let mut it = line.split(',');
+            let date = it.next()?.to_string();
+            let close = it.next()?.parse::<f64>().ok()?;
+            Some((date, close))
+        })
+        .filter(|(date, _)| date.as_str() <= cutoff)
+        .collect();
+    if bars.len() < 2 {
+        return None;
+    }
+    let (date, last) = bars[bars.len() - 1].clone();
+    let prev = bars[bars.len() - 2].1;
+    if prev.abs() < f64::EPSILON {
+        return None;
+    }
+    Some((date, (last / prev - 1.0) * 100.0))
+}
+
+/// 板块日 K 的逐板块结果：`(板块名, 截止日涨跌幅或错误)`
+type BoardBarOutcome = (String, Result<Option<(String, f64)>, DataError>);
+
+/// 板块日 K 的并发上限（二级行业 31 个板块 ⇒ 4 轮）
+const BOARD_KLINE_CONCURRENCY: usize = 8;
+
+/// 合成主体：`fetch` 由调用方提供（直连 `em_get` 或内核 `browser_fetch`），
+/// 两个 vendor 共用同一套 URL 与解析 —— 兜底只换传输通道，不换口径。
+pub(crate) async fn synthesize_industry_ranking<'a, F>(
+    vendor: &str,
+    cutoff: &str,
+    fetch: F,
+) -> Result<Vec<IndustryRank>, DataError>
+where
+    F: Fn(String) -> futures::future::BoxFuture<'a, Result<Value, DataError>> + Send + Sync + 'a,
+{
+    use futures::stream::{self, StreamExt};
+    let err = |message: String| DataError::VendorError { vendor: vendor.into(), message };
+    let cutoff_compact = cutoff.replace('-', "");
+    let list = fetch(INDUSTRY_BOARD_LIST_URL.to_string()).await?;
+    let boards = industry_board_list(&list);
+    if boards.is_empty() {
+        return Err(err("行业板块名单为空（接口结构变更?）".into()));
+    }
+    let results: Vec<BoardBarOutcome> = stream::iter(boards)
+        .map(|(secid, name)| {
+            let fut = fetch(board_kline_url(&secid, &cutoff_compact));
+            async move {
+                let changed = match fut.await {
+                    Ok(json) => {
+                        let bars = json["data"]["klines"].as_array().cloned().unwrap_or_default();
+                        Ok(board_change_from_bars(&bars, cutoff))
+                    },
+                    Err(e) => Err(e),
+                };
+                (name, changed)
+            }
+        })
+        .buffer_unordered(BOARD_KLINE_CONCURRENCY)
+        .collect()
+        .await;
+    let mut ranks = Vec::new();
+    let mut first_err: Option<String> = None;
+    let mut latest_bar_date = String::new();
+    for (name, changed) in results {
+        match changed {
+            Ok(Some((date, change_pct))) => {
+                if date.as_str() > latest_bar_date.as_str() {
+                    latest_bar_date = date.clone();
+                }
+                ranks.push(IndustryRank {
+                    industry_name: name,
+                    change_pct,
+                    turnover: None,
+                    main_inflow: None,
+                    leader_code: None,
+                    leader_name: None,
+                    leader_change_pct: None,
+                });
+            },
+            // 不足两根 ⇒ 该板块当日涨跌幅算不出，跳过（不编 0%）
+            Ok(None) => {},
+            Err(e) => {
+                first_err.get_or_insert_with(|| e.to_string());
+            },
+        }
+    }
+    if ranks.is_empty() {
+        return Err(match first_err {
+            Some(e) => err(format!("板块指数日 K 全部取数失败，首个原因: {e}")),
+            None => err("板块指数日 K 均不足两根（算不出截止日涨跌幅）".into()),
+        });
+    }
+    if latest_bar_date.as_str() != cutoff {
+        // 截止日休市 ⇒ 合成出来的是「截止日前最近交易日」的排名（T1 数据自证同口径）
+        tracing::info!(
+            "[astock] 行业排名 as-of：截止日 {cutoff} 无板块收盘，取最近交易日 {latest_bar_date}"
+        );
+    }
+    ranks.sort_by(|a, b| b.change_pct.total_cmp(&a.change_pct));
+    Ok(ranks)
+}
+
 /// A 股：`1.600519`（上海）、`0.000001`（深圳）
 /// 港股：`116.00700`（去掉 .HK 后缀，加 116 前缀）
 /// 美股：`105.AAPL`（去掉 .US 后缀，加 105 前缀）
@@ -3087,6 +3243,26 @@ impl StockVendor for EastMoneyVendor {
     /// - f62: 主力净流入 (元)
     /// - f128: 领涨股名称
     /// - f140: 领涨股代码
+    /// T15(2026-09-27)：行业排名**有**历史通道，此前只是因为没接而被申报成
+    /// `NoHistoricalSemantic`。名单接口忽略日期参数（实测），但名单里的
+    /// `90.BKxxxx` 是板块指数 secid ⇒ 用日 K 的 `end=` 取截止日两根收盘算涨跌幅。
+    /// 主体在 `synthesize_industry_ranking`（与 browser_eastmoney 共用）。
+    async fn get_industry_ranking_with_asof(&self) -> Result<Vec<IndustryRank>, DataError> {
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        synthesize_industry_ranking("eastmoney", &cutoff, |url| {
+            Box::pin(async move {
+                let resp = self.em_get(&url).await?;
+                resp.json().await.map_err(|e| DataError::VendorError {
+                    vendor: "eastmoney".into(),
+                    message: format!("行业排名合成 JSON 解析失败: {e}"),
+                })
+            })
+        })
+        .await
+    }
+
     async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
         // m:90 = 行业板块, s:2 = 二级行业分类(API 默认按 key 中第一个字段降序)
         let url = "https://data.eastmoney.com/dataapi/bkzj/getbkzj?key=f3,f62,f12,f14,f128,f140&code=m:90+s:2";
@@ -3397,11 +3573,15 @@ impl StockVendor for EastMoneyVendor {
             | "get_cls_flash"
             // T9(2026-09-26)：估值报表 RPT_VALUEANALYSIS_DET 支持 TRADE_DATE<= 过滤，
             // 且本就按股票返回多日历史 ⇒ 截止日口径天然可得，见 get_peers_with_asof
-            | "get_peers" => AsOfCapability::NativeDateParam,
+            | "get_peers"
+            // T15(2026-09-27)：板块指数日 K 有原生 end= 参数 ⇒ 行业排名可按截止日合成，
+            // 见 get_industry_ranking_with_asof
+            | "get_industry_ranking" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单（快照唯一通道，给当下值没有意义）
-            "get_hot_stocks" | "get_industry_ranking" => AsOfCapability::NoHistoricalSemantic,
+            // ⚠ 行业排名不在此列（T15 起有合成通道，见 get_industry_ranking_with_asof）
+            "get_hot_stocks" => AsOfCapability::NoHistoricalSemantic,
             // T12(2026-09-27)：板块归属**不是**「无历史语义」而是「只有当下值、且是慢变量」
             // —— 与 `get_sector_info` 同一张 `RPT_F10_CORETHEME_BOARDTYPE`（无日期列）。
             // 此前申报 `NoHistoricalSemantic` 使路由层的 as-of 白名单**跳过本仓唯一还活着的
@@ -3906,6 +4086,8 @@ mod asof_capability_tests {
             "get_cls_flash",
             // T9(2026-09-26)：估值表支持 TRADE_DATE 上限过滤，见 get_peers_with_asof
             "get_peers",
+            // T15(2026-09-27)：板块指数日 K 有原生 end= ⇒ 行业排名可按截止日合成
+            "get_industry_ranking",
         ] {
             assert_eq!(
                 v.asof_capability(m),
@@ -3930,15 +4112,15 @@ mod asof_capability_tests {
     #[test]
     fn no_historical_semantic_methods() {
         let v = make_vendor();
-        // 只有「当日榜单」留在这一档：给当下值对回放没有意义（榜单本身就是那天的产物）。
-        // 板块归属不在此列 —— 见 `fallthrough_methods` 里 T12 那条。
-        for m in &["get_hot_stocks", "get_industry_ranking"] {
-            assert_eq!(
-                v.asof_capability(m),
-                AsOfCapability::NoHistoricalSemantic,
-                "{m} 应该是 NoHistoricalSemantic"
-            );
-        }
+        // 只剩「当日榜单」这一档：给当下值对回放没有意义（榜单本身就是那天的产物）。
+        // 板块归属不在此列（T12，见 `fallthrough_methods`）；行业排名也不在（T15，见
+        // `native_date_param_methods` —— 板块指数日 K 能按截止日合成）。
+        // 行业排名已移出本档（T15 起走日 K 合成，见 `native_date_param_methods`）
+        assert_eq!(
+            v.asof_capability("get_hot_stocks"),
+            AsOfCapability::NoHistoricalSemantic,
+            "get_hot_stocks 应该是 NoHistoricalSemantic"
+        );
     }
 
     #[test]
@@ -4487,5 +4669,123 @@ mod paging_window_tests {
 
         let no_date = audit(None, false, 0, 1).failure("集成电路", "2026-08-01", 20);
         assert!(no_date.contains("未取到任何带日期的条目"), "日期全不可解析时另说: {no_date}");
+    }
+}
+
+#[cfg(test)]
+mod board_ranking_tests {
+    use super::*;
+
+    /// 名单响应按 2026-09-27 实测构造（`f13.f12` 就是板块指数 secid）
+    #[test]
+    fn board_list_yields_secid_from_measured_shape() {
+        let json: Value = serde_json::json!({
+            "data": { "diff": [
+                { "f3": 66, "f12": "BK0437", "f13": 90, "f14": "煤炭", "f62": 549783120 },
+                { "f3": 46, "f12": "BK0436", "f13": 90, "f14": "纺织服饰" },
+                { "f3": 30, "f12": "", "f13": 90, "f14": "无效行" },
+            ] }
+        });
+        let boards = industry_board_list(&json);
+        assert_eq!(
+            boards,
+            vec![
+                ("90.BK0437".to_string(), "煤炭".to_string()),
+                ("90.BK0436".to_string(), "纺织服饰".to_string())
+            ],
+            "空代码行必须剔除，secid 用 f13.f12 拼"
+        );
+    }
+
+    #[test]
+    fn board_kline_url_asks_only_two_bars_up_to_cutoff() {
+        let url = board_kline_url("90.BK0437", "20260911");
+        assert!(url.contains("secid=90.BK0437"), "{url}");
+        assert!(url.contains("end=20260911"), "end 是接口原生日期参数: {url}");
+        assert!(url.contains("lmt=2"), "只要截止日与前收两根: {url}");
+        assert!(url.contains("fields2=f51,f53"), "收盘足够算涨跌幅: {url}");
+    }
+
+    /// 涨跌幅口径：本地再按截止日裁一次（`end` 不被尊重是 T1 的实测教训）
+    #[test]
+    fn board_change_truncates_by_cutoff_and_requires_two_bars() {
+        let bars = |rows: &[&str]| -> Vec<Value> {
+            rows.iter().map(|s| Value::String((*s).into())).collect()
+        };
+        let ok = board_change_from_bars(&bars(&["2026-09-10,100", "2026-09-11,106"]), "2026-09-11")
+            .unwrap();
+        assert_eq!(ok.0, "2026-09-11");
+        assert!((ok.1 - 6.0).abs() < 1e-9, "涨跌幅 = 收盘/前收 - 1: {ok:?}");
+
+        // 越过截止日的那根必须剔掉 ⇒ 裁完只剩一根 ⇒ 算不出涨跌幅，如实 None（不编 0%）
+        assert!(board_change_from_bars(&bars(&["2026-09-11,100", "2026-09-12,180"]), "2026-09-11")
+            .is_none());
+        let shifted = board_change_from_bars(
+            &bars(&["2026-09-09,100", "2026-09-10,102", "2026-09-12,180"]),
+            "2026-09-11",
+        )
+        .unwrap();
+        assert_eq!(shifted.0, "2026-09-10", "截止日休市 ⇒ 取之前最近交易日");
+        assert!((shifted.1 - 2.0).abs() < 1e-9, "{shifted:?}");
+
+        assert!(board_change_from_bars(&bars(&["2026-09-11,100"]), "2026-09-11").is_none());
+        assert!(board_change_from_bars(&bars(&["2026-09-09,0", "2026-09-11,5"]), "2026-09-11")
+            .is_none());
+    }
+
+    /// 合成主体按 URL 分夹具 ⇒ 零真实网络也覆盖到「排序 + 算不出就跳过 + 越界不采信」。
+    #[tokio::test]
+    async fn synthesis_ranks_only_boards_with_two_in_window_bars() {
+        let fetch = |url: String| -> futures::future::BoxFuture<'static, Result<Value, DataError>> {
+            Box::pin(async move {
+                if url.contains("getbkzj") {
+                    return Ok(serde_json::json!({ "data": { "diff": [
+                        { "f12": "BK0437", "f13": 90, "f14": "煤炭" },
+                        { "f12": "BK0436", "f13": 90, "f14": "纺织服饰" },
+                        { "f12": "BK1283", "f13": 90, "f14": "银行" },
+                    ] } }));
+                }
+                if url.contains("BK0437") {
+                    return Ok(serde_json::json!({ "data": { "klines": [
+                        "2026-09-10,100", "2026-09-11,110"
+                    ] } }));
+                }
+                if url.contains("BK0436") {
+                    // 第二根越过截止日 ⇒ 裁完不足两根
+                    return Ok(serde_json::json!({ "data": { "klines": [
+                        "2026-09-11,50", "2026-09-12,90"
+                    ] } }));
+                }
+                Err(DataError::VendorError {
+                    vendor: "eastmoney".into(),
+                    message: "连接被拒".into(),
+                })
+            })
+        };
+        let ranks = synthesize_industry_ranking("eastmoney", "2026-09-11", fetch).await.unwrap();
+        assert_eq!(ranks.len(), 1, "算不出的（越界/失败）板块必须跳过，而不是编成 0%: {ranks:?}");
+        assert_eq!(ranks[0].industry_name, "煤炭");
+        assert!((ranks[0].change_pct - 10.0).abs() < 1e-9, "{:?}", ranks[0]);
+    }
+
+    #[tokio::test]
+    async fn synthesis_reports_failure_instead_of_empty_ok() {
+        let fetch = |url: String| -> futures::future::BoxFuture<'static, Result<Value, DataError>> {
+            Box::pin(async move {
+                if url.contains("getbkzj") {
+                    return Ok(serde_json::json!({ "data": { "diff": [
+                        { "f12": "BK0437", "f13": 90, "f14": "煤炭" }
+                    ] } }));
+                }
+                Err(DataError::VendorError {
+                    vendor: "eastmoney".into(),
+                    message: "push2his 连接被拒".into(),
+                })
+            })
+        };
+        let e = synthesize_industry_ranking("eastmoney", "2026-09-11", fetch).await.unwrap_err();
+        let msg = e.to_string();
+        assert!(msg.contains("push2his 连接被拒"), "真实原因要能进面板: {msg}");
+        assert!(!msg.contains("无 as-of 通道"), "失败不得写成机制缺失: {msg}");
     }
 }

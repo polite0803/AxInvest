@@ -3,7 +3,7 @@ use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::eastmoney::{
     classify_earnings_title, fflow_daykline_url, money_flow_from_window, parse_fflow_klines,
-    select_fflow_window,
+    select_fflow_window, synthesize_industry_ranking,
 };
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
@@ -157,7 +157,10 @@ impl StockVendor for BrowserEastMoneyVendor {
     /// 申报 `NativeDateParam` 后路由层才会真正探测它。其余方法仍按默认 `Fallthrough`
     /// （live 全量 + 路由层截断）走，与本文件既有行为一致。
     fn asof_capability(&self, method: &str) -> AsOfCapability {
-        if method == "get_money_flow" {
+        // T13 资金流 / T15 行业排名：两条都靠内核绕开 push2his 的连接级拒绝，
+        // 必须申报 NativeDateParam，路由层的 as-of 白名单才会真正探测本 vendor。
+        // 其余方法仍按默认 Fallthrough（live 全量 + 路由层截断），与本文件既有行为一致。
+        if method == "get_money_flow" || method == "get_industry_ranking" {
             AsOfCapability::NativeDateParam
         } else {
             AsOfCapability::Fallthrough
@@ -393,6 +396,20 @@ impl StockVendor for BrowserEastMoneyVendor {
             _ => return Ok(None),
         };
         Ok(money_flow_from_window(select_fflow_window(parse_fflow_klines(klines), &cutoff)))
+    }
+
+    /// T15(2026-09-27)：行业排名的截止日合成，与直连**共用** `synthesize_industry_ranking`
+    /// （同一套名单/URL/涨跌幅口径，只是换走内核的 TLS 通道）。
+    async fn get_industry_ranking_with_asof(&self) -> Result<Vec<IndustryRank>, DataError> {
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        let fetcher = self.fetcher.clone();
+        synthesize_industry_ranking("browser_eastmoney", &cutoff, move |url| {
+            let fetcher = fetcher.clone();
+            Box::pin(async move { browser_fetch(fetcher.as_ref(), &url).await })
+        })
+        .await
     }
 
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {

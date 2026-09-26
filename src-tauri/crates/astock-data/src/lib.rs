@@ -4478,14 +4478,14 @@ impl AStockClient {
                 .asof_probe(
                     "get_industry_ranking",
                     &self.routing.industry_ranking,
-                    &[AsOfCapability::NativeDateParam, AsOfCapability::Fallthrough],
-                    |_, vendor, cap| {
+                    // T15：只放 NativeDateParam（板块指数日 K 合成）。
+                    // ⚠ 删掉了原先一并放行的 `Fallthrough` —— 那等于容忍**今天的**榜单进回放，
+                    //   而「今天谁领涨」正是截止日之后的信息；此前该维度被申报成
+                    //   NoHistoricalSemantic，Fallthrough 是唯一能走通的路，如今有真通道就不该再留这条后门。
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _| {
                         Box::pin(async move {
-                            let items = if cap == AsOfCapability::NativeDateParam {
-                                vendor.get_industry_ranking_with_asof().await?
-                            } else {
-                                vendor.get_industry_ranking().await?
-                            };
+                            let items = vendor.get_industry_ranking_with_asof().await?;
                             if items.is_empty() {
                                 Ok(None)
                             } else {
@@ -4496,6 +4496,13 @@ impl AStockClient {
                 )
                 .await;
             if let Some(r) = hit {
+                // 一次回放的合成结果写回每日快照 ⇒ 同一截止日的第二次回放不再打 31 次请求
+                if let (Some(cache), Some(ctx)) = (self.daily_snapshot.as_ref(), as_of.as_ref()) {
+                    let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
+                    if let Ok(json) = serde_json::to_string(&r) {
+                        cache.set_snapshot("get_industry_ranking", &date, &json);
+                    }
+                }
                 return Ok(r);
             }
             crate::as_of::record_degradation_kind(
@@ -6060,16 +6067,10 @@ mod asof_realtime_degrade_tests {
         assert!(r.unwrap().is_empty(), "replay 模式必须返回空列表");
     }
 
-    #[tokio::test]
-    async fn get_industry_ranking_returns_empty_in_asof_scope() {
-        use crate::as_of::AS_OF;
-        let client = AStockClient::new();
-        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
-        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
-        let r = AS_OF.scope(Some(ctx), async { client.get_industry_ranking().await }).await;
-        assert!(r.is_ok());
-        assert!(r.unwrap().is_empty(), "replay 模式必须返回空列表");
-    }
+    // `get_industry_ranking` 的 as-of 守卫判据已迁到
+    // `asof_boundary_tests::industry_ranking_in_asof_never_falls_back_to_today_list`
+    // —— T15 起该维度有真通道（板块指数日 K 合成），「必须返回空列表」的前提被推翻，
+    // 且旧写法用 `AStockClient::new()` 会在单测里真打 32 次网络请求（flaky 之源）。
 
     /// T7 改写（2026-09-26）：原断言「replay 模式必须返回空列表」的前提已被推翻 ——
     /// 7×24 接口有真实的跳日游标（`realSort` = Unix 秒 ×1e6），回放**能**拿到那天的快讯。
@@ -7098,6 +7099,33 @@ mod asof_boundary_tests {
             !hits[0].reason.contains("无 as-of 通道"),
             "不得把取数失败写成机制缺失: {:?}",
             hits[0].reason
+        );
+    }
+
+    /// T15：行业排名的 as-of **没有后门** —— 白名单只放有日期通道的源。
+    /// 替身申报 Fallthrough（等于把今天的榜单塞进回放）⇒ 必须被跳过，
+    /// 宁可可解释地返空，也不给「今天谁领涨」这种截止日之后的信息。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn industry_ranking_in_asof_never_falls_back_to_today_list() {
+        crate::as_of::reset_global_degradation_log();
+        let mut client = stub_client();
+        client.routing.industry_ranking = vec!["stub".to_string()];
+        let r = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_industry_ranking().await })
+            .await
+            .expect("降级路径也应返回 Ok");
+        assert!(r.is_empty(), "今天的榜单不得进回放: {r:?}");
+        let hits: Vec<_> = peek_global_degradation_report()
+            .into_iter()
+            .filter(|e| e.method == "get_industry_ranking")
+            .collect();
+        assert_eq!(hits.len(), 1, "只汇总一条: {hits:?}");
+        assert_eq!(
+            hits[0].kind,
+            crate::as_of::DegradationKind::StructuralGap,
+            "没有日期通道属结构性，不该占红档: {:?}",
+            hits[0]
         );
     }
 }

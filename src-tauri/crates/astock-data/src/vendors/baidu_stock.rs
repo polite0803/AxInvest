@@ -50,11 +50,17 @@ impl BaiduStockVendor {
         // 各方法过去只读 `Result.*`，于是「接口整体失效」被逐层翻译成「该维度没有数据」
         // ——`get_hot_stocks` 直接 `Ok(vec![])`，回放面板因此写下「被探测的源均回答无数据」，
         // 而真相是这个源连当下的榜单都拿不到。判据见 `baidu_envelope_error`。
+        //
+        // 2026-09-27（T16）顺着查清了迁移目的地：页面真实用的是**另一组接口**
+        // `finance.pae.baidu.com/vapi/v1/hotrank?…&day=YYYYMMDD&hour=…`（热股榜，带日期参数）、
+        // `sapi/v1/ranks?bizType=stock_rank`、`vapi/v2/blocks?typeCode=HY`（行业板块）…，
+        // 但这些端点对**未签名的客户端**（含同源 fetch）回 `403 hit risk`，
+        // 只有站点自己带签名的 XHR 是 200 ⇒ 「重接参数」不足以恢复，需逆出签名或改走内核通道。
         if let Some(reason) = baidu_envelope_error(&json) {
             return Err(DataError::VendorError {
                 vendor: "baidu_stock".into(),
                 message: format!(
-                    "接口信封非预期（{reason}）；域名已 301 迁至 finance.baidu.com，需重接参数"
+                    "接口信封非预期（{reason}）；旧 opendata 已迁至 finance.pae.baidu.com 且带风控，需签名或内核通道"
                 ),
             });
         }
@@ -68,7 +74,16 @@ impl BaiduStockVendor {
 /// —— 服务端在明确报错。此时返回原因串，由调用方抛 `Err`；
 /// 旧信封（带 `Result`）与 `status=0` 的正常响应一律放行，行为逐字不变。
 fn baidu_envelope_error(json: &Value) -> Option<String> {
-    if !json["Result"].is_null() {
+    // 风控信封（T16 实测）：`{"QueryID":…,"Result":{"code":403,"isCaptchaEnabled":true,
+    // "msg":"hit risk"},"ResultCode":0}` —— 它**带 Result 字段**，只看「有没有 Result」
+    // 会把它当成正常信封，于是「接口被风控挡住」逐层翻译成「该维度没有数据」。
+    let res = &json["Result"];
+    if res.get("isCaptchaEnabled").is_some() || res["msg"].as_str() == Some("hit risk") {
+        let code = res["code"].as_i64().unwrap_or(0);
+        let msg = res["msg"].as_str().unwrap_or("(无 msg)");
+        return Some(format!("风控拦截 HTTP 侧 code={code}, msg={msg}（需签名/浏览器通道）"));
+    }
+    if !res.is_null() {
         return None;
     }
     let status = json.get("status").and_then(|v| v.as_i64())?;
@@ -875,5 +890,21 @@ mod envelope_tests {
         // 完全没有 status 字段 ⇒ 不定罪，保持旧行为
         let shapeless = serde_json::json!({"foo": 1});
         assert!(baidu_envelope_error(&shapeless).is_none());
+    }
+
+    /// T16(2026-09-27) 实测：新域名 `finance.pae.baidu.com` 的 hotrank/ranks/blocks
+    /// 对未签名客户端回 `{"Result":{"code":403,"isCaptchaEnabled":true,"msg":"hit risk"}}` ——
+    /// **它带 Result 字段**，所以「有没有 Result」这条老判据会放它过去，
+    /// 于是「被风控」又会被翻译成「该维度没有数据」。
+    #[test]
+    fn risk_control_envelope_is_reported_as_failure_not_empty() {
+        let raw = serde_json::json!({
+            "QueryID": "15849643933060082056",
+            "Result": { "code": 403, "isCaptchaEnabled": true, "msg": "hit risk" },
+            "ResultCode": 0
+        });
+        let reason = baidu_envelope_error(&raw).expect("风控信封必须给出原因");
+        assert!(reason.contains("风控"), "{reason}");
+        assert!(reason.contains("hit risk"), "服务端 msg 必须原样带上: {reason}");
     }
 }

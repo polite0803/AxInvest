@@ -119,6 +119,15 @@ pub trait StockVendor: Send + Sync {
         Ok(None)
     }
 
+    /// 质押的 as-of 通道（T5, 2026-09-26）。默认转调 live；只有申报
+    /// `NativeDateParam` 的源（目前 eastmoney：中登报表带 TRADE_DATE 过滤）才会被路由层调用。
+    async fn get_pledge_data_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<PledgeData>, DataError> {
+        self.get_pledge_data(stock_code).await
+    }
+
     async fn get_concept_blocks(
         &self,
         stock_code: &str,

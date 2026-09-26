@@ -13,6 +13,17 @@ impl TencentVendor {
     async fn tencent_get(&self, url: &str) -> Result<reqwest::Response, DataError> {
         let resp = self.http.get(url).send().await?;
         crate::check_response_429(&resp, "tencent")?;
+        // 2026-09-26 实测：腾讯行情域在纯 HTTP 客户端下会返回 WAF 挑战页
+        // （body 是跳转 waf.tencent.com/501page.html 的一段 script，HTTP 501）。
+        // 不识别它的话，错误会以「JSON 解析失败 + 300 字 HTML」的形式污染降级面板，
+        // 看起来像我们的参数写错了。显式命名这一类失败，便于判断该换源还是改参数。
+        if resp.status().as_u16() == 501 {
+            return Err(DataError::VendorError {
+                vendor: "tencent".into(),
+                message: "被腾讯 WAF 拦截（HTTP 501 挑战页，需浏览器内核；本次请求未达数据层）"
+                    .into(),
+            });
+        }
         Ok(resp)
     }
 }

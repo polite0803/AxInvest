@@ -513,6 +513,10 @@ struct AsofProbe {
 impl AsofProbe {
     /// 三种「拿不到」的语义必须分开写，否则提示会把「确实没有数据」
     /// 与「本模块压根没有历史通道」混为一谈（两融/指数站点已按此口径收敛）。
+    ///
+    /// 措辞注意：被探测的源未必真有 as-of 通道 —— `Fallthrough` 也在白名单里时，
+    /// 只是「容忍它给当下值」（板块/榜单类慢变量）。所以这里说「被探测」而不是
+    /// 「有 as-of 通道」，免得把「源没有历史能力」写成「有但没拿到」。
     fn reason(&self, subject: &str) -> String {
         if self.probed == 0 {
             if self.unsupported == 0 {
@@ -525,9 +529,12 @@ impl AsofProbe {
             );
         }
         if self.failed.is_empty() {
-            format!("{subject}：{} 个有 as-of 通道的源均明确回答无数据", self.probed)
+            format!(
+                "{subject}：{} 个被探测的源均回答无数据（其中无通道源 {} 个）",
+                self.probed, self.unsupported
+            )
         } else {
-            format!("{subject}：有 as-of 通道的源取数失败 [{}]", self.failed.join("; "))
+            format!("{subject}：被探测的源取数失败 [{}]", self.failed.join("; "))
         }
     }
 }
@@ -1886,6 +1893,24 @@ impl AStockClient {
                                                 q.pb = snap.pb;
                                                 break;
                                             }
+                                        }
+                                    }
+                                }
+                                // 名称兜底(2026-09-26)：上面的快照回填只认 get_valuation_snapshot_asof，
+                                // 而该能力仅 eastmoney 实现 ⇒ 源被限流/禁用时 name 恒=代码，落库后
+                                // 历史分析记录分组名显示成代码。名称↔代码是映射（T3 回放内穿透），
+                                // search_stock 按代码查即得真简称；失败静默维持 name=代码。
+                                if q.name.is_empty() || q.name == q.code {
+                                    let searched = tokio::time::timeout(
+                                        std::time::Duration::from_secs(2),
+                                        self.search_stock(stock_code),
+                                    )
+                                    .await;
+                                    if let Ok(Ok(hits)) = searched {
+                                        if let Some(hit) = hits.iter().find(|h| {
+                                            h.code == stock_code && !h.name.is_empty() && h.name != h.code
+                                        }) {
+                                            q.name = hit.name.clone();
                                         }
                                     }
                                 }
@@ -3532,10 +3557,9 @@ impl AStockClient {
     /// 重试策略：与 margin 一致 — 真实故障（网络/解析）才重试，空数据直接返回。
     pub async fn get_pledge_data(&self, stock_code: &str) -> Result<Option<PledgeData>, DataError> {
         if crate::as_of::is_asof_active() {
-            // as-of：`PledgeData` 没有任何日期字段（当日快照口径），vendor 侧也没有
-            // `_with_asof` 实现 ⇒ 唯一历史通道是个股级每日快照。此前这里一进 as-of 就
-            // 记一条「所有 vendor 均未提供历史质押数据」然后返回 None —— 话是实话，
-            // 但快照这条路根本没试，于是质押维度在回放里**恒缺**。
+            // T5(2026-09-26)：质押**有**历史通道 —— 中登 `RPT_CSDC_LIST` 带 TRADE_DATE 列
+            // 且支持 `<=` 过滤（实测 cutoff=2026-06-30 ⇒ 返回 06-26 那期）。旧分支只试快照
+            // 就报「该维度无历史语义」，于是回放里质押恒缺。顺序：快照 → vendor 回溯 → 汇总。
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
                 self.try_stock_daily_snapshot("get_pledge_data", stock_code, &date)
@@ -3544,10 +3568,26 @@ impl AStockClient {
                     return Ok(Some(r));
                 }
             }
+            let (hit, probe) = self
+                .asof_probe(
+                    "get_pledge_data",
+                    &self.routing.pledge,
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _| {
+                        let sc = stock_code.to_string();
+                        Box::pin(async move { vendor.get_pledge_data_with_asof(&sc).await })
+                    },
+                )
+                .await;
+            if let Some(r) = hit {
+                return Ok(Some(r));
+            }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_pledge_data",
-                &format!("as-of 模式无 {stock_code} 当日质押快照（该维度无历史语义）"),
+                &probe.reason(&format!(
+                    "as-of {stock_code} 质押（当日快照亦未命中，且无截止日前披露）"
+                )),
             );
             return Ok(None);
         }
@@ -6597,8 +6637,10 @@ mod asof_boundary_tests {
         }
     }
 
-    /// D3/A1 舆情与质押：as-of 唯一正确通道是个股级每日快照 ⇒
-    /// 未命中必须留痕且**不得**返回实时值；命中必须回放快照值。
+    /// D3/A1 舆情与质押：无快照且**源未申报 as-of 通道**时，绝不允许回退到实时值
+    /// （舆情只有快照通道；质押自 T5 起另有 eastmoney 的 TRADE_DATE 回溯，但替身未申报
+    /// 该能力，故本用例锁的仍是「无通道 ⇒ 留痕返空」这条负向不变量）。
+    /// 命中快照时必须回放快照值而非当下值。
     #[tokio::test]
     #[serial(asof)]
     async fn sentiment_and_pledge_use_snapshot_never_live() {

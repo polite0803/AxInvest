@@ -346,6 +346,96 @@ impl EastMoneyVendor {
         Ok(policy_news)
     }
 
+    /// `RPT_CSDC_LIST`（中登质押周报）查询 URL；`cutoff=Some(d)` 时追加
+    /// `(TRADE_DATE<='d')`，取截止日前最近一期。
+    ///
+    /// 实测依据（2026-09-26，300642）：不带日期 = 最新一期 2026-09-24；
+    /// 带 `TRADE_DATE<='2026-06-30'` = 返回 2026-06-26 那期（周报口径，向前取最近披露）。
+    /// 语法注意：日期必须写成 `'YYYY-MM-DD'`（带单引号）——写成 `20260630` 或不带引号
+    /// 会被服务端判成「filter 字段中日期参数格式错误」。
+    fn pledge_report_url(stock_code: &str, cutoff: Option<&str>) -> String {
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        let secucode = to_em_secucode(code);
+        let filter = match cutoff {
+            Some(d) => format!("(SECUCODE%3D%22{secucode}%22)(TRADE_DATE%3C%3D%27{d}%27)"),
+            None => format!("(SECUCODE%3D%22{secucode}%22)"),
+        };
+        format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+            reportName=RPT_CSDC_LIST&columns=ALL&\
+            filter={filter}&\
+            pageSize=5&pageNumber=1&source=WEB&\
+            sortColumns=TRADE_DATE&sortTypes=-1"
+        )
+    }
+
+    /// 发一次质押报表请求并解析首行（live 与 as-of 共用）。
+    /// 返回值第二项是报表自带的 `TRADE_DATE`，供 as-of 侧记录「实际取到的是哪一期」。
+    async fn fetch_pledge(
+        &self,
+        url: &str,
+        stock_code: &str,
+    ) -> Result<Option<(PledgeData, String)>, DataError> {
+        let resp = self.em_get(url).await?;
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_pledge_data JSON 解析失败: {e}"),
+        })?;
+
+        if json["success"].as_bool() == Some(false) {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!(
+                    "get_pledge_data 报表不可用: {}",
+                    json["message"].as_str().unwrap_or("unknown")
+                ),
+            });
+        }
+
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => return Ok(None),
+        };
+
+        let r = &rows[0];
+        let f = |key: &str| -> f64 {
+            r[key].as_f64().or_else(|| r[key].as_str().and_then(|s| s.parse().ok())).unwrap_or(0.0)
+        };
+        let pledge_ratio = f("PLEDGE_RATIO");
+        // RPT_CSDC_LIST 的 REPURCHASE_BALANCE 单位是「万股」，接口契约为「股」
+        let pledge_shares = f("REPURCHASE_BALANCE") * 10_000.0;
+        let pledge_count = r["PLEDGE_DEAL_NUM"].as_i64().unwrap_or(0) as i32;
+        // 报表无控股股东质押比例列，置 0.0 表示未提供（非「控股股东零质押」的强断言）
+        let controlling_pledge_ratio = 0.0;
+        let trade_date = r["TRADE_DATE"].as_str().unwrap_or_default().to_string();
+
+        // 风险等级分类(与 detect_pledge_risk 工具阈值对齐)
+        let risk_level = if pledge_ratio >= 70.0 {
+            "极高风险"
+        } else if pledge_ratio >= 50.0 {
+            "高风险"
+        } else if pledge_ratio >= 30.0 {
+            "中风险"
+        } else if pledge_ratio > 10.0 {
+            "低风险"
+        } else {
+            "安全"
+        };
+
+        Ok(Some((
+            PledgeData {
+                stock_code: stock_code.to_string(),
+                pledge_ratio,
+                pledge_shares,
+                pledge_count,
+                controlling_pledge_ratio,
+                risk_level: risk_level.to_string(),
+            },
+            trade_date,
+        )))
+    }
+
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     /// 429 限流时使用更长等待（2s → 4s → 8s）
     /// 连接级断裂（IncompleteMessage / TLS EOF / RST）时若配置了代理，
@@ -2828,70 +2918,35 @@ impl StockVendor for EastMoneyVendor {
     /// 报表缺失/异常时返回 Err 而非 Ok(None)：Ok(None) 会被上层判为
     /// 「该股无质押（非故障）」而永不回退，正是此前静默空值的成因。
     async fn get_pledge_data(&self, stock_code: &str) -> Result<Option<PledgeData>, DataError> {
-        let code =
-            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let secucode = to_em_secucode(code);
-        let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-            reportName=RPT_CSDC_LIST&columns=ALL&\
-            filter=(SECUCODE%3D%22{secucode}%22)&\
-            pageSize=5&pageNumber=1&source=WEB&\
-            sortColumns=TRADE_DATE&sortTypes=-1"
-        );
+        // 请求与解析收口在 `fetch_pledge`（与 as-of 回溯共用同一报表与口径）
+        let hit = self.fetch_pledge(&Self::pledge_report_url(stock_code, None), stock_code).await?;
+        Ok(hit.map(|(data, _)| data))
+    }
 
-        let resp = self.em_get(&url).await?;
-        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
-            vendor: "eastmoney".into(),
-            message: format!("get_pledge_data JSON 解析失败: {e}"),
+    /// T5：按截止日回溯质押数据（2026-09-26）。
+    ///
+    /// 旧认知「质押无历史语义」是错的：`RPT_CSDC_LIST` 有 `TRADE_DATE` 列且支持
+    /// `<=` 过滤（实测见 `pledge_report_url`）。中登按周披露 ⇒ 回放里拿到的是
+    /// 截止日前最近一期，而不是当日值，这一点用 info 日志留痕。
+    async fn get_pledge_data_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<PledgeData>, DataError> {
+        let ctx = crate::as_of::current_as_of().ok_or_else(|| {
+            DataError::ParseError("get_pledge_data_with_asof 调用时缺 as_of 上下文".into())
         })?;
-
-        if json["success"].as_bool() == Some(false) {
-            return Err(DataError::VendorError {
-                vendor: "eastmoney".into(),
-                message: format!(
-                    "get_pledge_data 报表不可用: {}",
-                    json["message"].as_str().unwrap_or("unknown")
-                ),
-            });
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        let url = Self::pledge_report_url(stock_code, Some(&cutoff));
+        let hit = self.fetch_pledge(&url, stock_code).await?;
+        if let Some((_, date)) = hit.as_ref() {
+            let key = date.split(' ').next().unwrap_or(date.as_str());
+            if key != cutoff.as_str() {
+                tracing::info!(
+                    "[asof] {stock_code} 质押查询截止日 {cutoff}，中登实际披露到 {key}（周报口径），取该期"
+                );
+            }
         }
-
-        let rows = match json["result"]["data"].as_array() {
-            Some(arr) if !arr.is_empty() => arr,
-            _ => return Ok(None),
-        };
-
-        let r = &rows[0];
-        let f = |key: &str| -> f64 {
-            r[key].as_f64().or_else(|| r[key].as_str().and_then(|s| s.parse().ok())).unwrap_or(0.0)
-        };
-        let pledge_ratio = f("PLEDGE_RATIO");
-        // RPT_CSDC_LIST 的 REPURCHASE_BALANCE 单位是「万股」，接口契约为「股」
-        let pledge_shares = f("REPURCHASE_BALANCE") * 10_000.0;
-        let pledge_count = r["PLEDGE_DEAL_NUM"].as_i64().unwrap_or(0) as i32;
-        // 报表无控股股东质押比例列，置 0.0 表示未提供（非「控股股东零质押」的强断言）
-        let controlling_pledge_ratio = 0.0;
-
-        // 风险等级分类(与 detect_pledge_risk 工具阈值对齐)
-        let risk_level = if pledge_ratio >= 70.0 {
-            "极高风险"
-        } else if pledge_ratio >= 50.0 {
-            "高风险"
-        } else if pledge_ratio >= 30.0 {
-            "中风险"
-        } else if pledge_ratio > 10.0 {
-            "低风险"
-        } else {
-            "安全"
-        };
-
-        Ok(Some(PledgeData {
-            stock_code: stock_code.to_string(),
-            pledge_ratio,
-            pledge_shares,
-            pledge_count,
-            controlling_pledge_ratio,
-            risk_level: risk_level.to_string(),
-        }))
+        Ok(hit.map(|(data, _)| data))
     }
 
     /// 修复(2026-07-22): 新增实现。原 eastmoney 未实现此方法(路由降级到
@@ -3087,7 +3142,9 @@ impl StockVendor for EastMoneyVendor {
             // 真实通道（见 get_news_with_asof 注释），不是「接口带日期参数」。
             | "get_news"
             | "get_policy_news"
-            | "search_news" => AsOfCapability::NativeDateParam,
+            | "search_news"
+            // T5(2026-09-26)：中登质押报表支持 TRADE_DATE<= 过滤，见 get_pledge_data_with_asof
+            | "get_pledge_data" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单/分类(本地缓存 P5 启用)
@@ -3587,6 +3644,8 @@ mod asof_capability_tests {
             "get_news",
             "get_policy_news",
             "search_news",
+            // T5(2026-09-26)：TRADE_DATE<= 过滤取截止日前最近一期，见 get_pledge_data_with_asof
+            "get_pledge_data",
         ] {
             assert_eq!(
                 v.asof_capability(m),
@@ -3981,5 +4040,36 @@ mod news_asof_tests {
         assert_eq!(got[0].source, "S2");
         assert_eq!(got[0].url, "u2");
         assert_eq!(got[0].publish_time, "2026-09-21");
+    }
+}
+
+#[cfg(test)]
+mod pledge_asof_tests {
+    //! T5(2026-09-26)：质押 as-of 通道的 URL 判据。
+    //! 旧面板写「该维度无历史语义」是假话 —— `RPT_CSDC_LIST` 有 TRADE_DATE 列，
+    //! 实测 `filter=(SECUCODE=..)(TRADE_DATE<='2026-06-30')` 返回 2026-06-26 那期。
+
+    use super::*;
+
+    #[test]
+    fn pledge_url_carries_cutoff_filter() {
+        let live = EastMoneyVendor::pledge_report_url("300642", None);
+        assert!(live.contains("RPT_CSDC_LIST"), "仍走中登质押报表: {live}");
+        assert!(live.contains("SECUCODE%3D%22300642.SZ%22"), "SECUCODE 需带市场后缀: {live}");
+        assert!(!live.contains("TRADE_DATE%3C%3D"), "live 不应带日期过滤: {live}");
+
+        let replay = EastMoneyVendor::pledge_report_url("300642", Some("2026-06-30"));
+        assert!(
+            replay.contains("TRADE_DATE%3C%3D%272026-06-30%27"),
+            "回放必须带 TRADE_DATE<= 过滤（单引号包日期，实测唯一被服务端接受的写法）: {replay}"
+        );
+        // 仍按 TRADE_DATE 倒序 ⇒ 首行就是「截止日前最近一期」
+        assert!(replay.contains("sortColumns=TRADE_DATE&sortTypes=-1"), "{replay}");
+    }
+
+    #[test]
+    fn pledge_url_normalizes_prefixed_codes() {
+        let u = EastMoneyVendor::pledge_report_url("sz300642", Some("2026-06-30"));
+        assert!(u.contains("SECUCODE%3D%22300642.SZ%22"), "前缀市场位需归一: {u}");
     }
 }

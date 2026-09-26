@@ -827,3 +827,21 @@ fn direction_conflict_no_longer_penalizes_tool_credibility() {
         "冲突信号必须仍以 warnings 呈现（只去扣分不去信号）：{warns:?}"
     );
 }
+
+#[test]
+fn r9b_absence_phrases_suppress_but_true_failures_still_count() {
+    // R9b(2026-09-26)：live 报告抽样出的缺席类语境必须被定向抑制……
+    // ⚠ 样本刻意不用 `数据缺失` —— 它维持硬标记（正文级共现抑制会吞同篇真缺口，见 rhai 注释）。
+    let absent = "北向净流入自 2024 年 8 月起监管停披，该维度数据不可用；\
+                  机构评级均为空（视为无机构覆盖），不影响主结论。";
+    let r = run_quality(&[("hm", absent)], &[("hm", 60.0)]);
+    assert_eq!(hits(&r, "hm"), 0, "缺席类（停披/无机构覆盖）措辞不得计失败标记");
+    let cfg = "当前 auto_stop_loss_pct 未注入，按规则保守取 stopLoss = MA20 附近。";
+    let r3 = run_quality(&[("hm", cfg)], &[("hm", 60.0)]);
+    assert_eq!(hits(&r3, "hm"), 0, "配置参数未注入与数据源无关，应抑制");
+    // ……而真故障句（同一 `数据缺失` 措辞、无缺席否定词）必须照常计入 —— 负控。
+    let real = "get_stock_pledge_data 调用因系统频率限制返回权限错误，质押数据缺失，\
+                无法评估平仓线距离。";
+    let r2 = run_quality(&[("hm", real)], &[("hm", 60.0)]);
+    assert!(hits(&r2, "hm") > 0, "真工具故障不得被 R9b 抑制误杀");
+}

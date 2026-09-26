@@ -366,7 +366,14 @@ type AlgoToolRow = (
 ///    （同 2026-09-24 移除 good_count 惩罚的判据）。只去扣分、不去信号：
 ///    direction_conflict / disagreement 字段与 warnings 全部保留。
 ///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
-pub(crate) const TEMPLATE_VERSION: i32 = 84;
+/// ⚠️ **v85（2026-09-26）：R9b —— 词表缺席类定向抑制（live 误伤修复）**。
+///    40 次 live 运行报告句抽样：标记词大量命中于**合法缺席语境**（北向监管停披、
+///    无机构覆盖、无期权覆盖、auto_stop_loss_pct 配置未注入、「非空值」肯定式）。
+///    `未注入` 降为软标记（只配配置参数否定词）；`数据不可用/无数据/均为空/返回空/空值`
+///    补充缺席否定短语。`数据缺失` **维持硬标记** —— 门禁实证正文级共现抑制会吞同篇
+///    真缺口（clarification/hard_marker 两判据当场抓回）。动词类硬标记判据不变。
+///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
+pub(crate) const TEMPLATE_VERSION: i32 = 85;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

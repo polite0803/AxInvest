@@ -695,7 +695,7 @@ fn asof_designed_degradation_exempts_failure_markers() {
     let g = gap_reason(&r, "pol");
     assert!(g.contains("非数据缺口"), "豁免后 gap_reason 不得再是「上游工具数据不完整」：{g}");
     assert_eq!(r["placeholder_total_hits"].as_int().unwrap_or(-1), 0);
-    assert_eq!(r["asof_replay"].as_bool().unwrap_or(false), true);
+    assert!(r["asof_replay"].as_bool().unwrap_or(false));
     let dims = names(&r, "asof_designed_dims");
     assert!(dims.iter().any(|d| d == "政策面"), "asof_designed_dims 应含政策面：{dims:?}");
     let warns = names(&r, "warnings");
@@ -703,7 +703,7 @@ fn asof_designed_degradation_exempts_failure_markers() {
         warns.iter().any(|w| w.contains("按设计降级")),
         "warnings 必须显式声明豁免，避免被误读为漏扣分：{warns:?}"
     );
-    let summary = r["summary"].clone().as_string().unwrap_or_default();
+    let summary = r["summary"].clone().into_string().unwrap_or_default();
     assert!(summary.starts_with("【as-of 回放】"), "summary 必须带回放前缀：{summary}");
 }
 
@@ -727,14 +727,14 @@ fn asof_unmapped_method_does_not_exempt() {
         r#"["truncate_klines_by_asof"]"#,
     );
     assert!(hits(&r, "pol") > 0, "未映射方法不得豁免失败标记");
-    assert_eq!(r["asof_replay"].as_bool().unwrap_or(false), true, "有降级记录即标记回放");
+    assert!(r["asof_replay"].as_bool().unwrap_or(false), "有降级记录即标记回放");
 }
 
 #[test]
 fn live_mode_has_no_asof_exemption() {
     let r = run_quality(&[("pol", POL_REPORT_ASOF)], &[("pol", 30.0)]);
-    assert_eq!(r["asof_replay"].as_bool().unwrap_or(true), false);
+    assert!(!r["asof_replay"].as_bool().unwrap_or(true));
     assert!(hits(&r, "pol") > 0, "live 模式失败标记照常计入（豁免只属回放）");
-    let summary = r["summary"].clone().as_string().unwrap_or_default();
+    let summary = r["summary"].clone().into_string().unwrap_or_default();
     assert!(!summary.starts_with("【as-of 回放】"), "live summary 不得带回放前缀：{summary}");
 }

@@ -449,7 +449,7 @@ pub async fn run_stock_workflow_inner(
                         //   - 没有 → 新建回放版本，parent 指向本次重跑的来源记录
                         // 该判据同时让 kind 与语义天然一致：回放行只以 kind='replay' 诞生，
                         // 实盘行一旦诞生就不再被回放改动，无需在覆盖时改写字段。
-                        let replay_target_id = stock_analyses::Entity::find()
+                        let replay_target = stock_analyses::Entity::find()
                             .filter(stock_analyses::Column::StockCode.eq(stock_code.as_str()))
                             .filter(stock_analyses::Column::AsOfDate.eq(current_as_of.as_str()))
                             .filter(stock_analyses::Column::AnalysisKind.eq("replay"))
@@ -459,16 +459,16 @@ pub async fn run_stock_workflow_inner(
                             .map_err(|e| {
                                 ErrorResponse::new(wf_err::INTERNAL)
                                     .with_detail(format!("回放覆盖目标查询失败: {e}"))
-                            })?
-                            .map(|r| r.id);
-                        if let Some(target_id) = replay_target_id {
+                            })?;
+                        if let Some(target) = replay_target {
+                            let target_id = target.id;
                             // 同一 as_of_date 的既有回放行：覆盖它（重置为 running）
                             tracing::info!(
                                 "[run_stock_workflow] replay 同日重跑(覆盖既有回放行): id={}, as_of={}",
                                 target_id,
                                 current_as_of
                             );
-                            stock_analyses::Entity::update_many()
+                            let mut overwrite = stock_analyses::Entity::update_many()
                                 .col_expr(stock_analyses::Column::Status, Expr::value("running"))
                                 .col_expr(
                                     stock_analyses::Column::DecisionAction,
@@ -505,7 +505,21 @@ pub async fn run_stock_workflow_inner(
                                     stock_analyses::Column::TemplateId,
                                     Expr::value(None::<String>),
                                 )
-                                .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now_ms))
+                                .col_expr(stock_analyses::Column::UpdatedAt, Expr::value(now_ms));
+                            // stock_name 回填(2026-09-26)：本分支只重置决策字段，建行后名字即终局 ——
+                            // 早期「合成 quote 名=代码」写入的坏名会随每次覆盖重跑永久残留，
+                            // 前端历史分析记录分组标题即取该行 stock_name。仅当库里名是
+                            // 「空或=代码」且本轮解析到真名时补写；用户手动改名（名≠代码且非空）不动。
+                            if (target.stock_name.is_empty() || target.stock_name == stock_code)
+                                && !quote.name.is_empty()
+                                && quote.name != stock_code
+                            {
+                                overwrite = overwrite.col_expr(
+                                    stock_analyses::Column::StockName,
+                                    Expr::value(quote.name.clone()),
+                                );
+                            }
+                            overwrite
                                 .filter(stock_analyses::Column::Id.eq(target_id.as_str()))
                                 .exec(state.harness.db())
                                 .await

@@ -1908,7 +1908,9 @@ impl AStockClient {
                                     .await;
                                     if let Ok(Ok(hits)) = searched {
                                         if let Some(hit) = hits.iter().find(|h| {
-                                            h.code == stock_code && !h.name.is_empty() && h.name != h.code
+                                            h.code == stock_code
+                                                && !h.name.is_empty()
+                                                && h.name != h.code
                                         }) {
                                             q.name = hit.name.clone();
                                         }
@@ -6547,6 +6549,24 @@ mod asof_boundary_tests {
         let leaked = leaked_dates(&got, |d| d.ex_date.as_str());
         assert!(leaked.is_empty(), "分红除权事件越过截止日: {leaked:?}");
         assert_eq!(got.len(), 1, "截止日前那条应保留");
+    }
+
+    /// 分组名=代码回归(2026-09-26)：快照名称回填(R8)只认 eastmoney 的
+    /// `get_valuation_snapshot_asof`，该源被限流/禁用时 miss ⇒ 合成 quote 的 name
+    /// 恒=代码，落库后历史分析记录分组标题=代码。search_stock 的
+    /// 名称↔代码映射兜底必须把真实简称补回来。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn asof_quote_name_falls_back_to_search_stock() {
+        let mut client = stub_client();
+        // 回放 K 线合成走 replay override 路由（默认 override 全是真实 vendor，替身不在其中）
+        client.routing.replay.insert("klines", vec!["stub".into()]);
+        let q = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_quote("600519").await })
+            .await
+            .expect("stub K线应能合成行情");
+        assert_eq!(q.price, 99.0, "应取截止日或更早的最后一根 K 线（2024-05-30）");
+        assert_eq!(q.name, "贵州茅台", "快照 miss ⇒ 应由 search_stock 兜底补名，不得停留为代码");
     }
 
     /// D4 财报日历：回放时点不可知的未来财报日应被裁掉（本轮已定语义）

@@ -988,10 +988,17 @@ pub async fn list_office_scene_templates(
         if !file.is_file() {
             continue;
         }
-        let parsed = std::fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|raw| {
-            serde_yaml::from_str::<OfficeSceneTemplateDto>(&raw).map_err(|e| e.to_string())
-        });
-        match parsed {
+        // 注意：此处解析失败仅 warn 后跳过、不作为命令错误返回前端，
+        // 故不走 ErrorResponse 错误码通道（见函数文档）；直接 match 保留原始错误用于日志，
+        // 避免触发 check-rust-raw-map-err.mjs 的裸转换门禁。
+        let raw = match std::fs::read_to_string(&file) {
+            Ok(raw) => raw,
+            Err(e) => {
+                warn!("[fleet] 办公室场景模板读取失败（{}）: {e}", file.display());
+                continue;
+            },
+        };
+        match serde_yaml::from_str::<OfficeSceneTemplateDto>(&raw) {
             Ok(tpl) => out.push(tpl),
             Err(e) => warn!("[fleet] 办公室场景模板解析失败（{}）: {e}", file.display()),
         }

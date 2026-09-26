@@ -494,6 +494,7 @@ mod tests {
     fn vsnap(date: &str, pe: f64) -> ValuationSnapshot {
         ValuationSnapshot {
             trade_date: date.to_string(),
+            security_name: None,
             pe_ttm: Some(pe),
             pb: Some(1.0),
             ps_ttm: Some(1.0),

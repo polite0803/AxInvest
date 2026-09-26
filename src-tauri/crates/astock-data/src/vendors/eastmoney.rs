@@ -222,6 +222,17 @@ fn extract_report_period(title: &str) -> Option<String> {
 
 /// 构建东方财富 secid
 ///
+/// as-of 单行估值快照 URL（RPT_VALUEANALYSIS_DET，截止日前最近交易日）。
+/// 抽成自由函数供 `fflow_asof_tests` 同款 URL 判据钉住（转义写错是**静默空结果**）。
+fn valuation_snapshot_asof_url(code: &str, cutoff: &str) -> String {
+    format!(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+        reportName=RPT_VALUEANALYSIS_DET&columns=SECURITY_CODE,TRADE_DATE,PE_TTM,PB_MRQ,PS_TTM,PCF_OCF_TTM,CLOSE_PRICE,TOTAL_MARKET_CAP&\
+        filter=(SECURITY_CODE%3D%22{code}%22)(TRADE_DATE%3C%3D%27{cutoff}%27)&\
+        sortColumns=TRADE_DATE&sortTypes=-1&pageSize=1&source=WEB&client=WEB"
+    )
+}
+
 /// 解析 push2his fflow/daykline 的 klines CSV 数组（f51=日期 f52=主力 f53=小单 f54=中单 f55=大单 f56=超大单）。
 /// 接口按日期**升序**返回（2026-09-26 实测），本函数保持原序，排序由调用方显式做。
 fn parse_fflow_klines(klines: &[Value]) -> Vec<MoneyFlowDaily> {
@@ -789,7 +800,7 @@ impl StockVendor for EastMoneyVendor {
         let mut out: Vec<ValuationSnapshot> = Vec::new();
         for page in 1..=max_pages {
             let url = format!(
-                "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_VALUEANALYSIS_DET&columns=SECURITY_CODE,TRADE_DATE,PE_TTM,PB_MRQ,PS_TTM,PCF_OCF_TTM,CLOSE_PRICE,TOTAL_MARKET_CAP&filter=(SECURITY_CODE=\"{code}\")&pageSize={PAGE_SIZE}&pageNumber={page}&sortColumns=TRADE_DATE&sortTypes=-1&source=WEB&client=WEB"
+                "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_VALUEANALYSIS_DET&columns=SECURITY_CODE,SECURITY_NAME_ABBR,TRADE_DATE,PE_TTM,PB_MRQ,PS_TTM,PCF_OCF_TTM,CLOSE_PRICE,TOTAL_MARKET_CAP&filter=(SECURITY_CODE=\"{code}\")&pageSize={PAGE_SIZE}&pageNumber={page}&sortColumns=TRADE_DATE&sortTypes=-1&source=WEB&client=WEB"
             );
             let resp = self.em_get(&url).await?;
             let json: Value = resp.json().await?;
@@ -820,6 +831,7 @@ impl StockVendor for EastMoneyVendor {
                 out.push(ValuationSnapshot {
                     // "2026-09-11 00:00:00" → "2026-09-11"
                     trade_date: date.chars().take(10).collect(),
+                    security_name: r["SECURITY_NAME_ABBR"].as_str().map(|x| x.to_string()),
                     pe_ttm: n("PE_TTM"),
                     pb: n("PB_MRQ"),
                     ps_ttm: n("PS_TTM"),
@@ -834,6 +846,46 @@ impl StockVendor for EastMoneyVendor {
             }
         }
         Ok(out)
+    }
+
+    /// S7(2026-09-26)：截止日单行估值快照（供 as-of 合成 quote 回填 total_mv/PE/PB）。
+    /// 形态对齐两融先例：`TRADE_DATE<=截止日` + 倒序取第一条 —— 等值查会在休市日恒空。
+    async fn get_valuation_snapshot_asof(&self, stock_code: &str) -> Option<ValuationSnapshot> {
+        let as_of = crate::as_of::current_as_of()?;
+        let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        let url = valuation_snapshot_asof_url(code, &cutoff);
+        let resp = self.em_get(&url).await.ok()?;
+        let json: Value = resp.json().await.ok()?;
+        let r = json["result"]["data"].as_array()?.first()?;
+        let n = |key: &str| -> Option<f64> {
+            let v = &r[key];
+            if v.is_null() {
+                return None;
+            }
+            if let Some(s) = v.as_str() {
+                if s.is_empty() || s == "--" || s == "null" {
+                    return None;
+                }
+                return s.parse::<f64>().ok();
+            }
+            v.as_f64()
+        };
+        let date = r["TRADE_DATE"].as_str()?;
+        if date.is_empty() {
+            return None;
+        }
+        Some(ValuationSnapshot {
+            trade_date: date.chars().take(10).collect(),
+            security_name: r["SECURITY_NAME_ABBR"].as_str().map(|x| x.to_string()),
+            pe_ttm: n("PE_TTM"),
+            pb: n("PB_MRQ"),
+            ps_ttm: n("PS_TTM"),
+            pcf: n("PCF_OCF_TTM"),
+            close_price: n("CLOSE_PRICE"),
+            total_market_cap: n("TOTAL_MARKET_CAP"),
+        })
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
@@ -3837,5 +3889,20 @@ mod fflow_asof_tests {
         assert_eq!(rows[0].medium_net, -30.0);
         assert_eq!(rows[0].large_net, -40.0);
         assert_eq!(rows[0].super_large_net, 140.0);
+    }
+
+    /// S7(2026-09-26)：as-of 估值快照 URL 判据 —— 转义/算符写错是**静默空结果**
+    /// （接口对非法 filter 返回 success:false 而非 4xx），只有钉 URL 形态能抓住。
+    #[test]
+    fn valuation_snapshot_asof_url_shape() {
+        let u = valuation_snapshot_asof_url("300642", "2026-09-22");
+        assert!(
+            u.contains("TRADE_DATE%3C%3D%272026-09-22%27"),
+            "必须 `<=截止日`（等值查在休市日恒空，同两融先例）: {u}"
+        );
+        assert!(u.contains("SECURITY_CODE%3D%22300642%22"), "代码等值过滤转义: {u}");
+        assert!(u.contains("sortTypes=-1"), "必须倒序取最近一条: {u}");
+        assert!(u.contains("pageSize=1"), "单行轻量查询: {u}");
+        assert!(u.contains("TOTAL_MARKET_CAP"), "必须取回总市值（DCF 股本链）: {u}");
     }
 }

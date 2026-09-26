@@ -588,6 +588,11 @@ pub struct BoardMember {
 pub struct ValuationSnapshot {
     /// 交易日，YYYY-MM-DD
     pub trade_date: String,
+    /// 证券简称（RPT_VALUEANALYSIS_DET.SECURITY_NAME_ABBR）。
+    /// S8(2026-09-26)：as-of 合成 quote 的 name 恒为代码 ⇒ 历史记录分组名显示成代码，
+    /// 回放路径用本字段回填真实名称。历史序列消费方不读取该字段（serde 增量兼容）。
+    #[serde(default)]
+    pub security_name: Option<String>,
     pub pe_ttm: Option<f64>,
     /// 市净率（MRQ）
     pub pb: Option<f64>,

@@ -1779,6 +1779,36 @@ impl AStockClient {
                     match ks_result {
                         Ok(ks) if !ks.is_empty() => {
                             if let Some(mut q) = Self::quote_from_klines(stock_code, &ks) {
+                                // S7(2026-09-26)：合成 quote 的 total_mv/pe/pb 恒 None ⇒
+                                // compute_valuation 股本链断（total_shares=总市值/现价）⇒
+                                // 回放里 DCF「估值上行空间」因子恒缺。用截止日估值快照回填
+                                // （RPT_VALUEANALYSIS_DET 单行，权威值优先于财务推导值）。
+                                for vname in self.routing.financials.iter() {
+                                    if let Some(vendor) = self.find_vendor(vname) {
+                                        if let Some(snap) =
+                                            vendor.get_valuation_snapshot_asof(stock_code).await
+                                        {
+                                            // R8(2026-09-26)：合成 quote 的 name 恒为代码
+                                            // （quote_from_klines 无名称来源）⇒ 历史分析记录
+                                            // 分组名显示成代码。快照行顺带带回 SECURITY_NAME_ABBR，
+                                            // 零额外请求回填真实简称。
+                                            if (q.name.is_empty() || q.name == q.code)
+                                                && snap
+                                                    .security_name
+                                                    .as_deref()
+                                                    .is_some_and(|n| !n.is_empty())
+                                            {
+                                                q.name = snap.security_name.clone().unwrap();
+                                            }
+                                            if snap.total_market_cap.is_some() {
+                                                q.total_mv = snap.total_market_cap;
+                                                q.pe = snap.pe_ttm;
+                                                q.pb = snap.pb;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                                 // 非阻塞填充 PE/PB — 超时或失败不影响行情立即返回
                                 match tokio::time::timeout(
                                     std::time::Duration::from_secs(2),
@@ -6079,6 +6109,7 @@ mod asof_boundary_tests {
             .iter()
             .map(|d| ValuationSnapshot {
                 trade_date: d.to_string(),
+                security_name: None,
                 pe_ttm: Some(10.0),
                 pb: Some(1.0),
                 ps_ttm: Some(2.0),

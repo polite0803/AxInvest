@@ -146,6 +146,16 @@ pub trait StockVendor: Send + Sync {
         Ok(vec![])
     }
 
+    /// S7(2026-09-26)：as-of 截止日**当日或之前最近**一条估值快照（单行，轻量）。
+    ///
+    /// 用途：`get_quote` 的 as-of 分支由 K 线合成行情，`total_mv/pe/pb` 恒 None ⇒
+    /// `compute_valuation` 的 总股本=总市值/现价 断链 ⇒ DCF「估值上行空间」因子
+    /// 在回放里恒缺（实证 1ad42f59）。本方法给合成 quote 回填这三项。
+    /// 默认 None = 该 vendor 无此能力；失败不报错（回填是增强，不阻断行情）。
+    async fn get_valuation_snapshot_asof(&self, _stock_code: &str) -> Option<ValuationSnapshot> {
+        None
+    }
+
     async fn get_market_dragon_tiger(&self) -> Result<Vec<MarketDragonTiger>, DataError> {
         Ok(vec![])
     }

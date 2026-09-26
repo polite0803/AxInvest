@@ -302,7 +302,9 @@ impl VendorRouting {
             market_dragon_tiger: vec!["ths".into(), "eastmoney".into(), "baidu_stock".into()],
             hot_stocks: vec![
                 "ths".into(),
-                "baidu_stock".into(),
+                // #19(2026-09-27) 实测摘除：baidu 的旧 opendata 全线失效（新端点要前端现算的
+                // Acs-Token，缺则 403 hit risk），留着只在 live 链上白跑一次必死请求。
+                // 与 2026-08-01 对 industry_ranking 摘除 ths/baidu/neodata 是同一条处理。
                 "iwencai".into(),
                 "neodata".into(),
             ],
@@ -4377,7 +4379,7 @@ impl AStockClient {
 
     pub async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
         // P4: 按 vendor 申报的 capability 决策
-        // eastmoney/ths/iwencai NoHistoricalSemantic,baidu Fallthrough
+        // eastmoney/ths/iwencai 申报 NoHistoricalSemantic（当日榜单语义，见上面 #19 的②）
         if crate::as_of::is_asof_active() {
             // P5:先查每日快照缓存
             let as_of = crate::as_of::current_as_of();
@@ -4395,7 +4397,15 @@ impl AStockClient {
                 .asof_probe(
                     "get_hot_stocks",
                     &self.routing.hot_stocks,
-                    &[AsOfCapability::NativeDateParam, AsOfCapability::Fallthrough],
+                    // #19(2026-09-27)：白名单只放 NativeDateParam，**关掉 Fallthrough 后门**。
+                    // 两条理由叠在一起：
+                    //   ① 链上会被 Fallthrough 放行的两个源都已实测必失败 ——
+                    //      baidu_stock 的旧 opendata 全线 301 后回「参数错误」，新端点要
+                    //      Acs-Token 签名（缺则 403 hit risk）；neodata 无凭据（TOKEN_MISSING）。
+                    //      留着等于每次回放白打两次请求，再把面板撑成红档「取数失败」。
+                    //   ② 与 T15 同论证：热股榜是「那一天」的产物，容忍当下值
+                    //      等于把截止日之后的信息塞进回放。宁可可解释地返空。
+                    &[AsOfCapability::NativeDateParam],
                     |_, vendor, cap| {
                         Box::pin(async move {
                             let items = if cap == AsOfCapability::NativeDateParam {
@@ -6057,14 +6067,34 @@ mod asof_realtime_degrade_tests {
     // 以免把 today 之后的数据塞入 backtest 视图。
 
     #[tokio::test]
+    #[serial(asof)]
     async fn get_hot_stocks_returns_empty_in_asof_scope() {
-        use crate::as_of::AS_OF;
+        use crate::as_of::{peek_global_degradation_report, AS_OF};
+        crate::as_of::reset_global_degradation_log();
         let client = AStockClient::new();
         let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
         let r = AS_OF.scope(Some(ctx), async { client.get_hot_stocks().await }).await;
         assert!(r.is_ok());
         assert!(r.unwrap().is_empty(), "replay 模式必须返回空列表");
+        // #19：该维度在回放里是「结构性不适用」，不是红档故障 —— 且链上没有任何源被真正
+        // 探测（关掉 Fallthrough 后门后，不会再为必 403 的源白打请求）。
+        let hits: Vec<_> = peek_global_degradation_report()
+            .into_iter()
+            .filter(|e| e.method == "get_hot_stocks")
+            .collect();
+        assert_eq!(hits.len(), 1, "只一条: {hits:?}");
+        assert_eq!(
+            hits[0].kind,
+            crate::as_of::DegradationKind::StructuralGap,
+            "当日榜单语义 ⇒ 灰档，不该占红档: {:?}",
+            hits[0]
+        );
+        assert!(
+            hits[0].reason.contains("均未申报 as-of 能力"),
+            "文案要说清是「没有日期通道」: {:?}",
+            hits[0].reason
+        );
     }
 
     // `get_industry_ranking` 的 as-of 守卫判据已迁到

@@ -905,6 +905,9 @@ struct WorkerInner {
     host_peer: Mutex<Option<Arc<HostPeer>>>,
     /// 自增配对 ID 的序号（ID 形如 `h1`、`h2`…，`h` 表示 host 侧发起）。
     next_request_id: AtomicU64,
+    /// drain 标志（PLAN §13.3 优雅停机）：置位后 [`SeamInvoker::invoke_with_chain`]
+    /// 拒绝**新**调用，等在途帧自然收尾 —— 停机不再掐死进行中的请求。
+    draining: AtomicBool,
 }
 
 /// 长驻 worker 子进程的传输实现（[`SeamInvoker`] 的主路径实现）。
@@ -962,6 +965,7 @@ impl WorkerInvoker {
             shutdown_timeout: config.shutdown_timeout,
             host_peer: Mutex::new(None),
             next_request_id: AtomicU64::new(0),
+            draining: AtomicBool::new(false),
         });
         let reader = Self::spawn_reader(inner.clone(), Box::new(stdout), &plugin_id)?;
         Ok(Self { inner, reader: Mutex::new(Some(reader)) })
@@ -984,6 +988,7 @@ impl WorkerInvoker {
             shutdown_timeout: Duration::from_millis(200),
             host_peer: Mutex::new(None),
             next_request_id: AtomicU64::new(0),
+            draining: AtomicBool::new(false),
         });
         let thread =
             Self::spawn_reader(inner.clone(), reader, &plugin_id).expect("测试用读线程应能启动");
@@ -1105,6 +1110,29 @@ impl WorkerInvoker {
 
     fn transport_error(&self, reason: impl Into<String>) -> WorkerError {
         WorkerError::Transport { plugin_id: self.inner.plugin_id.clone(), reason: reason.into() }
+    }
+
+    /// 进入 drain：置位拒新单，限时等在途帧自然收尾。
+    ///
+    /// 返回 `true` = 配对表已清空；`false` = 超时仍有悬挂（调用方可继续停机，
+    /// 悬挂者会经读线程退出路径拿到 `Err`，不会永久等待）。
+    /// 只由 [`LoadedPlugin::unload`] 调用；`shutdown` / `Drop` 路径不 drain（急停语义）。
+    pub fn drain(&self, timeout: Duration) -> bool {
+        self.inner.draining.store(true, Ordering::Release);
+        let deadline = Instant::now() + timeout;
+        loop {
+            if self.inner.pending.lock().is_empty() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                tracing::warn!(
+                    plugin_id = %self.inner.plugin_id,
+                    "drain 超时仍有在途调用，继续停机（悬挂调用将以 Transport 错误收尾）"
+                );
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     /// 优雅停机：发 shutdown 帧 → 关 stdin → 限时等退出 → 超时强杀 → 收读线程。
@@ -1254,6 +1282,11 @@ impl SeamInvoker for WorkerInvoker {
         args: Value,
         call_chain: Vec<String>,
     ) -> Result<Value, String> {
+        // drain 闸门（先于环检测之后的新调用准入）：停机窗口内拒绝新帧，
+        // 在途帧不受影响（它们早已过了这一行，在配对表里等响应）。
+        if self.inner.draining.load(Ordering::Acquire) {
+            return Err(format!("插件 `{}` 正在停机（drain），拒绝新调用", self.inner.plugin_id));
+        }
         // 目标端自检（环 + 深度）：在**写帧之前**判定 —— 命中即拒绝、不进入等待。
         let plugin_id = self.inner.plugin_id.clone();
         check_chain(&plugin_id, &call_chain)?;
@@ -2275,8 +2308,16 @@ impl LoadedPlugin {
         Some(bus.subscribe(EventMatcher::any(), subscriber))
     }
 
-    /// 卸载：**逆序**撤销全部可逆句柄（LIFO，见模块头注释）+ 停 worker。
+    /// 卸载：drain 优雅收尾（PLAN §13.3）→ **逆序**撤销全部可逆句柄（LIFO，见模块头注释）
+    /// → 停 worker。
+    ///
+    /// 顺序即语义：先关闸拒新单并等在途帧回完，再摘注册（门面摘除后新消费者取不到），
+    /// 最后停进程 —— 原「直接掐死在途调用」的停机窗口不复存在。
     pub fn unload(mut self) {
+        let drained = self.invoker.drain(self.invoker.inner.shutdown_timeout);
+        if !drained {
+            tracing::warn!(plugin_id = %self.plugin_id, "worker drain 未完成，按急停继续");
+        }
         self.rollback();
         self.invoker.shutdown();
     }
@@ -3021,6 +3062,56 @@ mod tests {
         // 未知 op（既不是 emit 也不是 call_seam）同样明确报错。
         let response = peer.handle_inbound(&FrameRequest::new("nope", Value::Null));
         assert_eq!(response.code.as_deref(), Some(error_codes::PLUGIN_UNKNOWN_OP));
+    }
+
+    /// drain（PLAN §13.3 优雅停机）三段语义：置位后**新调用被拒**、
+    /// **在途调用照常回完**、pending 清空后 `drain` 返回 `true`。
+    #[test]
+    fn drain_refuses_new_calls_and_waits_inflight() {
+        let (host_side, worker_side) = tcp_pair();
+        let host_reader = host_side.try_clone().expect("克隆回环（读端）");
+        let host_teardown = host_side.try_clone().expect("克隆回环（收尾）");
+        let worker_reader = worker_side.try_clone().expect("克隆回环（worker 读端）");
+
+        // 假 worker：`slow` 延迟 300ms 再答 —— 给 drain 制造确定性的在途窗口。
+        let _worker = std::thread::spawn(move || {
+            let mut peer = Peer::new(worker_reader, worker_side);
+            let _ = peer.run(|request, _peer| match request.op.as_str() {
+                "slow" => {
+                    std::thread::sleep(Duration::from_millis(300));
+                    FrameResponse::success(json!({ "done": true }))
+                },
+                other => FrameResponse::error("PLUGIN_UNKNOWN_OP", format!("未知 op：{other}")),
+            });
+        });
+
+        let invoker = Arc::new(WorkerInvoker::from_streams(
+            "drain-test@external",
+            Box::new(host_reader),
+            Box::new(host_side),
+        ));
+
+        // ① 在途调用挂到后台线程（它必须**不受 drain 影响**照常回完）。
+        let inflight_invoker = invoker.clone();
+        let inflight = std::thread::spawn(move || inflight_invoker.invoke("slow", json!({})));
+        // 留足时间让 `slow` 帧写出去并进入 pending。
+        std::thread::sleep(Duration::from_millis(80));
+
+        // ② drain：置位 + 等在途收尾。
+        let drain_invoker = invoker.clone();
+        let drainer = std::thread::spawn(move || drain_invoker.drain(Duration::from_secs(5)));
+
+        // ③ 新调用被拒（drain 置位与拒答间无屏障，先等在途回完再断言，避免竞态）。
+        let inflight_result = inflight.join().expect("在途调用线程不应 panic");
+        assert!(inflight_result.is_ok(), "在途调用必须照常完成：{inflight_result:?}");
+        assert!(drainer.join().expect("drain 线程不应 panic"), "pending 清空后 drain 应返回 true");
+        let refused = invoker.invoke("slow", json!({}));
+        let err = refused.expect_err("drain 之后新调用必须被拒");
+        assert!(err.contains("drain"), "错误应指向 drain 闸门：{err}");
+
+        // 收尾：关 socket 让假 worker 读到 EOF 退出（同配对用例的 teardown 模式）。
+        drop(invoker);
+        let _ = host_teardown.shutdown(Shutdown::Both);
     }
 
     /// §7①：并发 N 个请求 + worker 内回调宿主 —— 响应必须按 `request_id` 正确配对。

@@ -618,8 +618,9 @@ impl PluginManager {
 
     /// 启动（或热替换）插件的 B 层 worker 子进程。
     ///
-    /// 热替换取**最小形态**：先停旧进程再起新进程，无 drain 等待
-    /// （PLAN §13.3 的完整 drain / 孤儿回收 / 双进程热替换尚未实现）。
+    /// 热替换取**先停后起**形态：旧进程的停机已走 drain 优雅收尾
+    /// （[`LoadedPlugin::unload`]，PLAN §13.3）；尚未实现的只剩**双进程并存切换**
+    /// （起新验活后再摘旧，进一步消除接缝空窗）。
     fn start_plugin_worker(
         &mut self,
         plugin_id: &str,

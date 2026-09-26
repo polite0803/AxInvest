@@ -840,7 +840,7 @@ fn valuation_snapshot_asof_url(code: &str, cutoff: &str) -> String {
 
 /// 解析 push2his fflow/daykline 的 klines CSV 数组（f51=日期 f52=主力 f53=小单 f54=中单 f55=大单 f56=超大单）。
 /// 接口按日期**升序**返回（2026-09-26 实测），本函数保持原序，排序由调用方显式做。
-fn parse_fflow_klines(klines: &[Value]) -> Vec<MoneyFlowDaily> {
+pub(crate) fn parse_fflow_klines(klines: &[Value]) -> Vec<MoneyFlowDaily> {
     klines
         .iter()
         .filter_map(|v| v.as_str())
@@ -861,11 +861,40 @@ fn parse_fflow_klines(klines: &[Value]) -> Vec<MoneyFlowDaily> {
 
 /// as-of 窗口选择：入参为**任意序**的日频资金流行，返回 `date <= cutoff` 中最近的
 /// 至多 5 条，按日期**降序**（最新在前，与 MoneyFlow.history 消费口径一致）。
-fn select_fflow_window(mut rows: Vec<MoneyFlowDaily>, cutoff: &str) -> Vec<MoneyFlowDaily> {
+pub(crate) fn select_fflow_window(
+    mut rows: Vec<MoneyFlowDaily>,
+    cutoff: &str,
+) -> Vec<MoneyFlowDaily> {
     rows.retain(|r| r.date.as_str() <= cutoff);
     rows.sort_by(|a, b| b.date.cmp(&a.date));
     rows.truncate(5);
     rows
+}
+
+/// push2his 日频资金流 URL —— eastmoney 直连与 browser_eastmoney 内核兜底**共用同一形态**
+/// （2026-09-27：本机对 push2his 是连接级拒绝，只有走 webview 的那条路拿得到日线，
+/// 两条路必须同 URL，否则兜底源会给出与主源不同口径的资金流）。
+pub(crate) fn fflow_daykline_url(secid: &str) -> String {
+    format!(
+        "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?\
+        lmt=0&klt=101&fields1=f1,f2,f3,f7&\
+        fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65&\
+        secid={secid}"
+    )
+}
+
+/// 「已按截止日裁好的窗口」→ 消费侧的 `MoneyFlow`（空窗口 ⇒ `None`，由调用方留痕）。
+pub(crate) fn money_flow_from_window(recent: Vec<MoneyFlowDaily>) -> Option<MoneyFlow> {
+    let latest = recent.first()?;
+    Some(MoneyFlow {
+        date: latest.date.clone(),
+        main_net_inflow: latest.main_net_inflow,
+        super_large_net: latest.super_large_net,
+        large_net: latest.large_net,
+        medium_net: latest.medium_net,
+        small_net: latest.small_net,
+        history: recent,
+    })
 }
 
 /// A 股：`1.600519`（上海）、`0.000001`（深圳）
@@ -1792,12 +1821,7 @@ impl StockVendor for EastMoneyVendor {
             .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
         let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
         let secid = to_em_secid(stock_code);
-        let url = format!(
-            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?\
-            lmt=0&klt=101&fields1=f1,f2,f3,f7&\
-            fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65&\
-            secid={secid}"
-        );
+        let url = fflow_daykline_url(&secid);
 
         let resp = self.em_get(&url).await?;
         let json: Value = resp.json().await?;
@@ -1822,16 +1846,7 @@ impl StockVendor for EastMoneyVendor {
                 recent[0].date
             );
         }
-        let latest = &recent[0];
-        Ok(Some(MoneyFlow {
-            date: latest.date.clone(),
-            main_net_inflow: latest.main_net_inflow,
-            super_large_net: latest.super_large_net,
-            large_net: latest.large_net,
-            medium_net: latest.medium_net,
-            small_net: latest.small_net,
-            history: recent,
-        }))
+        Ok(money_flow_from_window(recent))
     }
 
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {

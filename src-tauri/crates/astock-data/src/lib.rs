@@ -2966,23 +2966,30 @@ impl AStockClient {
                     return Ok(Some(r));
                 }
             }
-            // ② vendor 的 as-of 通道。无 as-of 能力的源不再逐条记降级（对决策无信息量）
-            for name in self.routing.vendors_for("money_flow", &self.routing.money_flow) {
-                if let Some(vendor) = self.find_vendor(name) {
-                    match vendor.asof_capability("get_money_flow") {
-                        AsOfCapability::NativeDateParam => {
-                            if let Ok(Some(r)) = vendor.get_money_flow_with_asof(stock_code).await {
-                                return Ok(Some(r));
-                            }
-                        },
-                        _ => continue,
-                    }
-                }
+            // ② vendor 的 as-of 通道（T13：改走统一的 asof_probe）
+            // ⚠ 白名单**只放** NativeDateParam：资金流的 live 值就是「今日主力净流入」，
+            //   放进回放等于把截止日之后的信息漏给分析师 ⇒ 不容忍 Fallthrough 源。
+            //   此前这里是手写 `for + if let Ok(Some(..))`：Err 被吞掉后统一落到
+            //   「无 as-of 通道」的写死文案 —— 而 eastmoney/browser_eastmoney 明明都申报了
+            //   通道，面板因此把一个取数失败说成机制缺失（本轮实测的第 2 起同型缺陷）。
+            let (hit, probe) = self
+                .asof_probe(
+                    "get_money_flow",
+                    self.routing.vendors_for("money_flow", &self.routing.money_flow),
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _| {
+                        let sc = stock_code.to_string();
+                        Box::pin(async move { vendor.get_money_flow_with_asof(&sc).await })
+                    },
+                )
+                .await;
+            if let Some(r) = hit {
+                return Ok(Some(r));
             }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_money_flow",
-                &format!("as-of 模式无 {stock_code} 历史资金流向（无 as-of 通道，且无当日快照）"),
+                &probe.reason(&format!("as-of {stock_code} 历史资金流向")),
             );
             return Ok(None);
         }
@@ -3704,25 +3711,31 @@ impl AStockClient {
                     return Ok(Some(r));
                 }
             }
-            // ② vendor 的 as-of 通道。无 as-of 能力的源不再逐条记降级（对决策无信息量）
-            for name in &self.routing.north_bound {
-                if let Some(vendor) = self.find_vendor(name) {
-                    match vendor.asof_capability("get_north_bound_holding") {
-                        AsOfCapability::NativeDateParam => {
-                            if let Ok(Some(r)) =
-                                vendor.get_north_bound_holding_with_asof(stock_code).await
-                            {
-                                return Ok(Some(r));
-                            }
-                        },
-                        _ => continue,
-                    }
-                }
+            // ② vendor 的 as-of 通道（T13：与 get_money_flow 一起收口到手写循环 +
+            // 写死文案的第 2 处；Err 此前同样被 `if let Ok(Some(..))` 吞掉）
+            let (hit, probe) = self
+                .asof_probe(
+                    "get_north_bound_holding",
+                    &self.routing.north_bound,
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _| {
+                        let sc = stock_code.to_string();
+                        Box::pin(async move { vendor.get_north_bound_holding_with_asof(&sc).await })
+                    },
+                )
+                .await;
+            if let Some(r) = hit {
+                return Ok(Some(r));
             }
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_north_bound_holding",
-                &format!("as-of 模式无 {stock_code} 历史北向持仓（无 as-of 通道，且无当日快照）"),
+                // 结构性事实一并写进面板：个股级北向持仓自 2024-08 起交易所停披
+                // （见本函数下方 live 分支的 6 小时冷却注释），不是本仓没接通道。
+                &format!(
+                    "{}（个股级北向持仓自 2024-08 起停披，当日快照亦未命中）",
+                    probe.reason(&format!("as-of {stock_code} 历史北向持仓"))
+                ),
             );
             return Ok(None);
         }
@@ -6460,6 +6473,45 @@ mod asof_boundary_tests {
         async fn get_money_flow(&self, _: &str) -> Result<Option<MoneyFlow>, DataError> {
             Ok(None)
         }
+        /// T13：as-of 版资金流 —— 给**跨截止日**的构造数据（同本模块其它替身口径），
+        /// 并对 600000 如实报 Err，用来锁住「失败必须归因到源，不得写成机制缺失」。
+        async fn get_money_flow_with_asof(
+            &self,
+            stock_code: &str,
+        ) -> Result<Option<MoneyFlow>, DataError> {
+            if stock_code == "600000" {
+                return Err(DataError::VendorError {
+                    vendor: "stub".into(),
+                    message: "push2his 连接被拒".into(),
+                });
+            }
+            Ok(Some(MoneyFlow {
+                date: CUTOFF.into(),
+                main_net_inflow: 100.0,
+                super_large_net: 40.0,
+                large_net: 60.0,
+                medium_net: -20.0,
+                small_net: -40.0,
+                history: vec![
+                    MoneyFlowDaily {
+                        date: CUTOFF.into(),
+                        main_net_inflow: 100.0,
+                        super_large_net: 40.0,
+                        large_net: 60.0,
+                        medium_net: -20.0,
+                        small_net: -40.0,
+                    },
+                    MoneyFlowDaily {
+                        date: "2024-05-31".into(),
+                        main_net_inflow: 80.0,
+                        super_large_net: 30.0,
+                        large_net: 50.0,
+                        medium_net: -10.0,
+                        small_net: -40.0,
+                    },
+                ],
+            }))
+        }
         async fn get_dragon_tiger(&self, _: &str) -> Result<Vec<DragonTigerEntry>, DataError> {
             Ok(vec![])
         }
@@ -6520,7 +6572,8 @@ mod asof_boundary_tests {
             Ok(None)
         }
         fn asof_capability(&self, method: &str) -> AsOfCapability {
-            if method == "get_sector_info" {
+            // T13：资金流的 as-of 通道也声明为「有」（替身内部自证裁窗正确性）
+            if method == "get_sector_info" || method == "get_money_flow" {
                 AsOfCapability::NativeDateParam
             } else {
                 AsOfCapability::Fallthrough
@@ -6902,6 +6955,59 @@ mod asof_boundary_tests {
         assert!(
             r3.contains("另有 2 源无 as-of 能力（eastmoney, ths）"),
             "失败分支也必须点名被跳过的源，否则看起来像整条链只有 baidu: {r3}"
+        );
+    }
+
+    /// T13：资金流在回放里**有** as-of 通道（直连 push2his 失败时由 browser_eastmoney
+    /// 内核兜底），申报了就该被真正探测并命中，且命中后不该留任何降级。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn money_flow_asof_hits_declared_channel_without_degradation() {
+        crate::as_of::reset_global_degradation_log();
+        let mut client = stub_client();
+        client.routing.money_flow = vec!["stub".to_string()];
+        let r = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_money_flow("600519").await })
+            .await
+            .expect("as-of 资金流不应报错")
+            .expect("通道命中 ⇒ 有值");
+        assert_eq!(r.date, CUTOFF, "顶层字段必须锚在截止日");
+        let leaked: Vec<_> =
+            r.history.iter().filter(|h| h.date.as_str() > CUTOFF).map(|h| &h.date).collect();
+        assert!(leaked.is_empty(), "as-of 资金流历史不得越过截止日: {leaked:?}");
+        assert!(
+            peek_global_degradation_report().iter().all(|e| e.method != "get_money_flow"),
+            "命中通道却留了降级: {:?}",
+            peek_global_degradation_report()
+        );
+    }
+
+    /// T13：取数失败**不得**再说成「无 as-of 通道」（本条就是 688072 面板上那句假话的靶）。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn money_flow_asof_attributes_failure_not_missing_channel() {
+        crate::as_of::reset_global_degradation_log();
+        let mut client = stub_client();
+        client.routing.money_flow = vec!["stub".to_string()];
+        let r = AS_OF
+            .scope(Some(cutoff_ctx()), async { client.get_money_flow("600000").await })
+            .await
+            .expect("降级应返回 Ok(None)");
+        assert!(r.is_none());
+        let hits: Vec<_> = peek_global_degradation_report()
+            .into_iter()
+            .filter(|e| e.method == "get_money_flow")
+            .collect();
+        assert_eq!(hits.len(), 1, "逐源失败只汇总成一条: {hits:?}");
+        assert!(
+            hits[0].reason.contains("push2his 连接被拒"),
+            "真实原因必须进面板: {:?}",
+            hits[0].reason
+        );
+        assert!(
+            !hits[0].reason.contains("无 as-of 通道"),
+            "不得把取数失败写成机制缺失: {:?}",
+            hits[0].reason
         );
     }
 }

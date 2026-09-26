@@ -1,6 +1,10 @@
+use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
-use crate::vendors::eastmoney::classify_earnings_title;
+use crate::vendors::eastmoney::{
+    classify_earnings_title, fflow_daykline_url, money_flow_from_window, parse_fflow_klines,
+    select_fflow_window,
+};
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -149,6 +153,17 @@ async fn browser_fetch(
 
 #[async_trait]
 impl StockVendor for BrowserEastMoneyVendor {
+    /// T13：日频资金流的 as-of 通道挂在**本内核兜底源**上（见 `get_money_flow_with_asof`），
+    /// 申报 `NativeDateParam` 后路由层才会真正探测它。其余方法仍按默认 `Fallthrough`
+    /// （live 全量 + 路由层截断）走，与本文件既有行为一致。
+    fn asof_capability(&self, method: &str) -> AsOfCapability {
+        if method == "get_money_flow" {
+            AsOfCapability::NativeDateParam
+        } else {
+            AsOfCapability::Fallthrough
+        }
+    }
+
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
         let secid = to_em_secid(stock_code);
         let url = format!(
@@ -352,6 +367,32 @@ impl StockVendor for BrowserEastMoneyVendor {
             },
             _ => Ok(None),
         }
+    }
+
+    /// T13(2026-09-27)：回放里的资金流**只有这条通道走得通**。
+    ///
+    /// `get_money_flow`（live 版）打的是 `push2...fflow/kline`（1 分钟线、lmt=1），
+    /// 对回放毫无意义；历史资金流在 `push2his.../fflow/daykline`（约 120 个交易日），
+    /// 而本机对 push2his 是**连接级拒绝**（2026-08-01 与 2026-09-27 两次实测：
+    /// curl `(56) schannel: server closed abruptly`、node `socket hang up`，kline 同域一起挂）
+    /// ⇒ 直连源申报了 as-of 通道也拿不到。内核 webview 带真实浏览器 TLS 指纹，
+    /// 是唯一还能取到日频资金流的路，故这里与直连**共用** URL 构造、解析与窗口裁剪
+    /// （`fflow_daykline_url` / `parse_fflow_klines` / `select_fflow_window`），
+    /// 保证两条路给出的是同一个量。
+    async fn get_money_flow_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<MoneyFlow>, DataError> {
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        let url = fflow_daykline_url(&to_em_secid(stock_code));
+        let json = browser_fetch(self.fetcher.as_ref(), &url).await?;
+        let klines = match json["data"]["klines"].as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => return Ok(None),
+        };
+        Ok(money_flow_from_window(select_fflow_window(parse_fflow_klines(klines), &cutoff)))
     }
 
     async fn get_dragon_tiger(&self, stock_code: &str) -> Result<Vec<DragonTigerEntry>, DataError> {

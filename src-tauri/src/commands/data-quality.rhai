@@ -833,14 +833,15 @@ let severe_direction_conflict = weighted_bull_score >= 100.0 && weighted_bear_sc
 // 一般冲突判定（保留基础计数逻辑作为兜底）
 let basic_direction_conflict = bull_dir_count >= 2 && bear_dir_count >= 2;
 let direction_conflict = severe_direction_conflict || basic_direction_conflict;
-if direction_conflict {
-    // 严重冲突扣更多分
-    if severe_direction_conflict {
-        tool_credibility_score = clamp(tool_credibility_score - 20.0, 0.0, 100.0);
-    } else {
-        tool_credibility_score = clamp(tool_credibility_score - 15.0, 0.0, 100.0);
-    }
-}
+// ⚠ R9a(2026-09-26) 决策：**方向冲突不再计入 tool_credibility 扣分**（原 severe −20 / 一般 −15）。
+//   ① 范畴错配：本函数语义是「上游**工具数据**可信度」，而分析师多空分歧与工具可靠性
+//      无因果 —— 分歧是 10 维分析师 + 多空辩论架构的**设计常态**。
+//   ② 实证（40 次 live 运行逐条提取）：severe_direction_conflict 命中 30/40（75%），
+//      判据「两边各 ≥100 加权和」≈「两边各 2 个 conf≥50 的分析师」——10 个分析师
+//      只需 4 个分歧即恒真，一个恒触发的 −20 不是信号而是系统性偏置。
+//   ③ 与 2026-09-24 移除 good_count 惩罚同理：不得把与「上游取数」无关的信号
+//      叠进本指标。分歧度仍以 direction_conflict / disagreement_score 字段与
+//      warnings 呈现，供辩论与决策节点消费 —— 只去扣分，不去信号。
 
 // ── P2-3 新增(2026-08-09): 深度字段校验（Schema Validation） ──
 // 对每个分析师的 verdict 数据进行深度校验：
@@ -1294,9 +1295,9 @@ if avg_conf < 30.0 && avg_conf > 0.0 { warnings.push(`平均置信度过低 (${a
 // P2-2 修复(2026-08-09): 方向冲突告警（升级为加权模式）
 if direction_conflict {
     if severe_direction_conflict {
-        warnings.push(`严重多空分歧：加权看多 ${weighted_bull_score.round()} vs 看空 ${weighted_bear_score.round()}（两边均有高置信度支持，工具可信度已扣 20 分）`);
+        warnings.push(`严重多空分歧：加权看多 ${weighted_bull_score.round()} vs 看空 ${weighted_bear_score.round()}（两边均有高置信度支持；R9a 起只提示不扣分——分歧是辩论架构的设计常态，与上游工具可信度无关）`);
     } else {
-        warnings.push(`分析师结论方向冲突：${bull_dir_count} 个看多 vs ${bear_dir_count} 个看空（数据互相矛盾，工具可信度已扣 15 分）`);
+        warnings.push(`分析师结论方向冲突：${bull_dir_count} 个看多 vs ${bear_dir_count} 个看空（R9a 起只提示不扣分，理由见 direction_conflict 决策注释）`);
     }
 }
 // P2-3 新增(2026-08-09): 深度字段校验告警

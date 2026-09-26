@@ -185,6 +185,26 @@ fn run_quality_asof(
     run_quality_impl(reports, confs, &[], build_engine_with_asof_methods(methods_json))
 }
 
+/// 同 `run_quality`，但 verdict map 里带 `verdict` 方向串（R9a 冲突判据的输入）。
+fn run_quality_dirs(reports: &[(&str, &str)], dirs: &[(&str, f64, &str)]) -> Map {
+    let engine = build_engine();
+    let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
+    let mut scope = Scope::new();
+    for v in EXTERNAL_VARS {
+        scope.push_dynamic(*v, Dynamic::UNIT);
+    }
+    for (abbr, c, d) in dirs {
+        let mut m = Map::new();
+        m.insert("confidence".into(), Dynamic::from(*c));
+        m.insert("verdict".into(), Dynamic::from(d.to_string()));
+        scope.push_dynamic(format!("{abbr}_verdict"), Dynamic::from(m));
+    }
+    for (abbr, text) in reports {
+        scope.push_dynamic(format!("{abbr}_report"), Dynamic::from(text.to_string()));
+    }
+    engine.eval_ast_with_scope::<Map>(&mut scope, &ast).expect("data-quality.rhai 执行失败")
+}
+
 fn run_quality_impl(
     reports: &[(&str, &str)],
     confs: &[(&str, f64)],
@@ -755,4 +775,55 @@ fn asof_exempted_dim_without_markers_says_replay_not_false_gap() {
     let g = gap_reason(&r, "pol");
     assert!(g.starts_with("as-of 回放"), "无标记但被降级的维度也必须归因到回放: {g}");
     assert!(!g.contains("字段齐全"), "不得声称字段齐全（上游本轮按设计无数据）: {g}");
+}
+
+#[test]
+fn direction_conflict_no_longer_penalizes_tool_credibility() {
+    // R9a(2026-09-26)：severe 冲突（两边各 2 个 conf60 ⇒ 加权和 120≥100）是
+    // 辩论架构的设计常态，只提示不扣分。判据：tc == avg_conf == 60。
+    let long = "该维度支持看多方向，依据为既有行情与财务数据，趋势信号一致。";
+    let short = "该维度支持看空方向，依据为既有行情与财务数据，风险信号明显。";
+    // 10 个 verdict 全注入（其余 6 个中性）—— 否则缺失维度按 gap 罚 −40，
+    // 会把「冲突不扣分」的判据淹没在 gap 罚里，用例失去区分力。
+    let neutral = "该维度中性，数据可得，方向信号不显著，维持观望。";
+    let r = run_quality_dirs(
+        &[
+            ("mk", long),
+            ("sent", long),
+            ("news", short),
+            ("fund", short),
+            ("pol", neutral),
+            ("hm", neutral),
+            ("lk", neutral),
+            ("res", neutral),
+            ("sec", neutral),
+            ("cat", neutral),
+        ],
+        &[
+            ("mk", 60.0, "看多"),
+            ("sent", 60.0, "看多"),
+            ("news", 60.0, "看空"),
+            ("fund", 60.0, "看空"),
+            ("pol", 60.0, "中性"),
+            ("hm", 60.0, "中性"),
+            ("lk", 60.0, "中性"),
+            ("res", 60.0, "中性"),
+            ("sec", 60.0, "中性"),
+            ("cat", 60.0, "中性"),
+        ],
+    );
+    assert!(
+        r["severe_direction_conflict"].as_bool().unwrap_or(false),
+        "用例前提：必须构造出 severe 冲突"
+    );
+    let tc = r["tool_credibility_score"].as_float().unwrap_or(0.0);
+    assert!(
+        (tc - 60.0).abs() < 1e-6,
+        "R9a 后 severe 冲突不得扣分（tc 应等于 avg_conf 60，旧口径会是 40）：tc={tc}"
+    );
+    let warns = names(&r, "warnings");
+    assert!(
+        warns.iter().any(|w| w.contains("多空分歧") && w.contains("不扣分")),
+        "冲突信号必须仍以 warnings 呈现（只去扣分不去信号）：{warns:?}"
+    );
 }

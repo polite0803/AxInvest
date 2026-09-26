@@ -359,7 +359,14 @@ type AlgoToolRow = (
 ///    原「非数据缺口：报告无失败标记」分支对被豁免维度是**假话**（标记存在，只是不计），
 ///    现输出「as-of 回放：本维度上游按设计降级…已豁免不计扣分」。
 ///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
-pub(crate) const TEMPLATE_VERSION: i32 = 83;
+/// ⚠️ **v84（2026-09-26）：R9a —— 方向冲突退出 tool_credibility 扣分**。
+///    实证（40 次 live 运行逐条提取）：severe_direction_conflict 命中 30/40，
+///    判据 ≈「10 个分析师里凑出两边各 2 个 conf≥50」——多空辩论架构的设计常态
+///    被当成恒触发的 −20 系统性偏置，且与「上游工具可信度」语义无因果
+///    （同 2026-09-24 移除 good_count 惩罚的判据）。只去扣分、不去信号：
+///    direction_conflict / disagreement 字段与 warnings 全部保留。
+///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
+pub(crate) const TEMPLATE_VERSION: i32 = 84;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

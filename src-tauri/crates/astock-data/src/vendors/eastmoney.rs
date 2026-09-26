@@ -463,6 +463,160 @@ impl EastMoneyVendor {
         Ok((parse_fast_news(items), json["data"]["sortEnd"].as_i64()))
     }
 
+    /// 同行对比主体（live 与 as-of 共用，2026-09-26 T9）。
+    ///
+    /// `cutoff=Some(d)` 时给估值批量查询加 `TRADE_DATE<=d`：该报表本就按股票返回多日历史，
+    /// 「取每只 ≤ 截止日的最新一行」正是回放口径 ⇒ 无需 K 线合成。
+    /// 板块归属是慢变量 ⇒ 同业名单沿用当日成分，只落 info 不改数据面。
+    async fn peers_impl(
+        &self,
+        stock_code: &str,
+        cutoff: Option<&str>,
+    ) -> Result<Vec<PeerComparison>, DataError> {
+        // 修复(2026-07-22): 原 `push2his stock/get` + `clist/get` API 已失效
+        // (IncompleteMessage), 改用 `datacenter-web RPT_F10_CORETHEME_BOARDTYPE` 报表
+        // 两步查询:1) 个股板块归属(IS_PRECISE=1 的精准行业板块)
+        //          2) 反查该板块内所有股票
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        let secucode = to_em_secucode(code);
+
+        // 步骤1: 查询个股所属板块, 选 IS_PRECISE=1 的精准行业板块
+        let board_url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+             reportName=RPT_F10_CORETHEME_BOARDTYPE&columns=ALL&\
+             filter=(SECUCODE%3D%22{secucode}%22)(IS_PRECISE%3D%221%22)&\
+             source=WEB&sortColumns=BOARD_RANK&sortTypes=1&pageNumber=1&pageSize=10"
+        );
+        let resp = self.em_get(&board_url).await?;
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_peers 板块查询 JSON 解析失败: {e}"),
+        })?;
+
+        let data_arr = match json["result"]["data"].as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => {
+                return Err(DataError::VendorError {
+                    vendor: "eastmoney".into(),
+                    message: format!("get_peers 未获取到板块代码(stock_code={stock_code})"),
+                });
+            },
+        };
+
+        // 选第一个精准行业板块 (BOARD_CODE 通常是数字如 "892")
+        let board_code = data_arr
+            .iter()
+            .find_map(|item| item["BOARD_CODE"].as_str().map(|s| s.to_string()))
+            .ok_or_else(|| DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!("get_peers BOARD_CODE 字段为空(stock_code={stock_code})"),
+            })?;
+
+        // 步骤2: 反查该板块内所有股票
+        let peer_url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+             reportName=RPT_F10_CORETHEME_BOARDTYPE&columns=ALL&\
+             filter=(BOARD_CODE%3D%22{board_code}%22)&\
+             source=WEB&sortColumns=SECURITY_CODE&sortTypes=1&pageNumber=1&pageSize=30"
+        );
+        let resp = self.em_get(&peer_url).await?;
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_peers 同业列表 JSON 解析失败: {e}"),
+        })?;
+
+        let rows = match json["result"]["data"].as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => {
+                return Err(DataError::VendorError {
+                    vendor: "eastmoney".into(),
+                    message: format!("get_peers 同业列表为空(board_code={board_code})"),
+                });
+            },
+        };
+
+        // 过滤自身:SECURITY_CODE 是纯数字代码(如 "600887")
+        let peer_rows: Vec<&Value> = rows
+            .iter()
+            .filter(|r| r["SECURITY_CODE"].as_str().map(|c| c != code).unwrap_or(false))
+            .collect();
+        let peer_codes: Vec<String> = peer_rows
+            .iter()
+            .filter_map(|r| r["SECURITY_CODE"].as_str().map(String::from))
+            .collect();
+
+        // ── 2026-09-21 修复：补估值字段（原 pe/pb/roe/change_pct/market_cap 为硬编码 None/0.0）──
+        // 原实现五个字段全部写死（pe/pb/roe = None，change_pct = 0.0，market_cap = None），
+        // 从未实现取值 ⇒ 基本面/催化剂/行业三个分析师都写「同侪 PE/PB 全为 null，
+        // 横向估值锚缺失」。实测 RPT_VALUEANALYSIS_DET 支持 (SECURITY_CODE in (...))
+        // 批量查询，字段含 PE_TTM / PB_MRQ / TOTAL_MARKET_CAP / CHANGE_RATE；
+        // 该报表按股票返回多日历史，故按 code 取 TRADE_DATE 最大的一行。
+        // ROE 不在该报表内（需财报报表），保持 None —— 不猜值、不伪造。
+        type Valuation = (String, Option<f64>, Option<f64>, f64, Option<f64>);
+        let mut valuations: HashMap<String, Valuation> = HashMap::new();
+        if !peer_codes.is_empty() {
+            let in_list: String =
+                peer_codes.iter().map(|c| format!("%22{c}%22")).collect::<Vec<_>>().join(",");
+            // as-of 时同一张报表加 TRADE_DATE 上限 ⇒ 每只票取「≤ 截止日的最新一行」
+            let val_url = peers_valuation_url(&in_list, cutoff, peer_codes.len() * 12 + 10);
+            match self.em_get(&val_url).await {
+                Ok(resp) => match resp.json::<Value>().await {
+                    Ok(json) => {
+                        if let Some(arr) = json["result"]["data"].as_array() {
+                            for v in arr {
+                                let cc = match v["SECURITY_CODE"].as_str() {
+                                    Some(c) => c,
+                                    None => continue,
+                                };
+                                let d = v["TRADE_DATE"].as_str().unwrap_or("").to_string();
+                                let better = match valuations.get(cc) {
+                                    Some((exist, ..)) => d > *exist,
+                                    None => true,
+                                };
+                                if better {
+                                    valuations.insert(
+                                        cc.to_string(),
+                                        (
+                                            d,
+                                            v["PE_TTM"].as_f64(),
+                                            v["PB_MRQ"].as_f64(),
+                                            v["CHANGE_RATE"].as_f64().unwrap_or(0.0),
+                                            v["TOTAL_MARKET_CAP"].as_f64(),
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => tracing::warn!(
+                        "[eastmoney] get_peers 估值批量查询 JSON 解析失败(估值字段留空): {e}"
+                    ),
+                },
+                Err(e) => {
+                    tracing::warn!("[eastmoney] get_peers 估值批量查询失败(估值字段留空): {e}")
+                },
+            }
+        }
+
+        Ok(peer_rows
+            .iter()
+            .map(|r| {
+                let sc = r["SECURITY_CODE"].as_str().unwrap_or("").to_string();
+                let v = valuations.get(&sc);
+                PeerComparison {
+                    stock_code: sc,
+                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
+                    pe: v.and_then(|x| x.1),
+                    pb: v.and_then(|x| x.2),
+                    roe: None,
+                    change_pct: v.map(|x| x.3).unwrap_or(0.0),
+                    market_cap: v.and_then(|x| x.4),
+                }
+            })
+            .collect())
+    }
+
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     /// 429 限流时使用更长等待（2s → 4s → 8s）
     /// 连接级断裂（IncompleteMessage / TLS EOF / RST）时若配置了代理，
@@ -630,6 +784,29 @@ fn extract_report_period(title: &str) -> Option<String> {
 
 /// 构建东方财富 secid
 ///
+/// 同行对比的批量估值查询 URL（`RPT_VALUEANALYSIS_DET` 支持 `SECURITY_CODE in (...)` 批量）。
+///
+/// `cutoff=Some(d)` 时追加 `(TRADE_DATE<='d')`：该报表**按股票返回多日历史**且已按
+/// TRADE_DATE 倒序 ⇒ 配合「每只取首行」就是截止日口径。实测（in=(600519,000001)）：
+/// 不带过滤首行 09-24（pe 18.989 / 5.0458），带 cutoff=2026-09-22 首行 **09-22**
+/// （pe 19.246 / 5.2289，`CHANGE_RATE` 即当日涨跌幅）⇒ 回放不必再做 K 线合成。
+///
+/// ⚠ filter 里的括号必须**字面**出现：整体 `encodeURIComponent` 会打成 `%28`/`%29`，
+/// 服务端 ANTLR 直接报「参数预处理错误」（`<=` 与单引号才需要编码成 `%3C%3D` / `%27`）。
+fn peers_valuation_url(in_list: &str, cutoff: Option<&str>, page_size: usize) -> String {
+    let date_clause = match cutoff {
+        Some(d) => format!("(TRADE_DATE%3C%3D%27{d}%27)"),
+        None => String::new(),
+    };
+    format!(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+         reportName=RPT_VALUEANALYSIS_DET&\
+         columns=SECURITY_CODE,PE_TTM,PB_MRQ,TOTAL_MARKET_CAP,CHANGE_RATE,TRADE_DATE&\
+         filter=(SECURITY_CODE%20in%20({in_list})){date_clause}&\
+         source=WEB&sortColumns=TRADE_DATE&sortTypes=-1&pageNumber=1&pageSize={page_size}"
+    )
+}
+
 /// as-of 单行估值快照 URL（RPT_VALUEANALYSIS_DET，截止日前最近交易日）。
 /// 抽成自由函数供 `fflow_asof_tests` 同款 URL 判据钉住（转义写错是**静默空结果**）。
 fn valuation_snapshot_asof_url(code: &str, cutoff: &str) -> String {
@@ -2727,154 +2904,23 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
-        // 修复(2026-07-22): 原 `push2his stock/get` + `clist/get` API 已失效
-        // (IncompleteMessage), 改用 `datacenter-web RPT_F10_CORETHEME_BOARDTYPE` 报表
-        // 两步查询:1) 个股板块归属(IS_PRECISE=1 的精准行业板块)
-        //          2) 反查该板块内所有股票
-        let code =
-            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let secucode = to_em_secucode(code);
+        self.peers_impl(stock_code, None).await
+    }
 
-        // 步骤1: 查询个股所属板块, 选 IS_PRECISE=1 的精准行业板块
-        let board_url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-             reportName=RPT_F10_CORETHEME_BOARDTYPE&columns=ALL&\
-             filter=(SECUCODE%3D%22{secucode}%22)(IS_PRECISE%3D%221%22)&\
-             source=WEB&sortColumns=BOARD_RANK&sortTypes=1&pageNumber=1&pageSize=10"
-        );
-        let resp = self.em_get(&board_url).await?;
-        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
-            vendor: "eastmoney".into(),
-            message: format!("get_peers 板块查询 JSON 解析失败: {e}"),
+    /// T9：按截止日取同行对比（估值字段走同一张报表的 TRADE_DATE 上限过滤）。
+    async fn get_peers_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Vec<PeerComparison>, DataError> {
+        let ctx = crate::as_of::current_as_of().ok_or_else(|| {
+            DataError::ParseError("get_peers_with_asof 调用时缺 as_of 上下文".into())
         })?;
-
-        let data_arr = match json["result"]["data"].as_array() {
-            Some(arr) if !arr.is_empty() => arr,
-            _ => {
-                return Err(DataError::VendorError {
-                    vendor: "eastmoney".into(),
-                    message: format!("get_peers 未获取到板块代码(stock_code={stock_code})"),
-                });
-            },
-        };
-
-        // 选第一个精准行业板块 (BOARD_CODE 通常是数字如 "892")
-        let board_code = data_arr
-            .iter()
-            .find_map(|item| item["BOARD_CODE"].as_str().map(|s| s.to_string()))
-            .ok_or_else(|| DataError::VendorError {
-                vendor: "eastmoney".into(),
-                message: format!("get_peers BOARD_CODE 字段为空(stock_code={stock_code})"),
-            })?;
-
-        // 步骤2: 反查该板块内所有股票
-        let peer_url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-             reportName=RPT_F10_CORETHEME_BOARDTYPE&columns=ALL&\
-             filter=(BOARD_CODE%3D%22{board_code}%22)&\
-             source=WEB&sortColumns=SECURITY_CODE&sortTypes=1&pageNumber=1&pageSize=30"
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        let rows = self.peers_impl(stock_code, Some(&cutoff)).await?;
+        tracing::info!(
+            "[asof] {stock_code} 同行对比按截止日 {cutoff} 取估值（同业名单沿用当日成分，板块归属为慢变量）"
         );
-        let resp = self.em_get(&peer_url).await?;
-        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
-            vendor: "eastmoney".into(),
-            message: format!("get_peers 同业列表 JSON 解析失败: {e}"),
-        })?;
-
-        let rows = match json["result"]["data"].as_array() {
-            Some(arr) if !arr.is_empty() => arr,
-            _ => {
-                return Err(DataError::VendorError {
-                    vendor: "eastmoney".into(),
-                    message: format!("get_peers 同业列表为空(board_code={board_code})"),
-                });
-            },
-        };
-
-        // 过滤自身:SECURITY_CODE 是纯数字代码(如 "600887")
-        let peer_rows: Vec<&Value> = rows
-            .iter()
-            .filter(|r| r["SECURITY_CODE"].as_str().map(|c| c != code).unwrap_or(false))
-            .collect();
-        let peer_codes: Vec<String> = peer_rows
-            .iter()
-            .filter_map(|r| r["SECURITY_CODE"].as_str().map(String::from))
-            .collect();
-
-        // ── 2026-09-21 修复：补估值字段（原 pe/pb/roe/change_pct/market_cap 为硬编码 None/0.0）──
-        // 原实现五个字段全部写死（pe/pb/roe = None，change_pct = 0.0，market_cap = None），
-        // 从未实现取值 ⇒ 基本面/催化剂/行业三个分析师都写「同侪 PE/PB 全为 null，
-        // 横向估值锚缺失」。实测 RPT_VALUEANALYSIS_DET 支持 (SECURITY_CODE in (...))
-        // 批量查询，字段含 PE_TTM / PB_MRQ / TOTAL_MARKET_CAP / CHANGE_RATE；
-        // 该报表按股票返回多日历史，故按 code 取 TRADE_DATE 最大的一行。
-        // ROE 不在该报表内（需财报报表），保持 None —— 不猜值、不伪造。
-        type Valuation = (String, Option<f64>, Option<f64>, f64, Option<f64>);
-        let mut valuations: HashMap<String, Valuation> = HashMap::new();
-        if !peer_codes.is_empty() {
-            let in_list: String =
-                peer_codes.iter().map(|c| format!("%22{c}%22")).collect::<Vec<_>>().join(",");
-            let val_url = format!(
-                "https://datacenter-web.eastmoney.com/api/data/v1/get?\
-                 reportName=RPT_VALUEANALYSIS_DET&\
-                 columns=SECURITY_CODE,PE_TTM,PB_MRQ,TOTAL_MARKET_CAP,CHANGE_RATE,TRADE_DATE&\
-                 filter=(SECURITY_CODE%20in%20({in_list}))&\
-                 source=WEB&sortColumns=TRADE_DATE&sortTypes=-1&pageNumber=1&pageSize={}",
-                peer_codes.len() * 12 + 10
-            );
-            match self.em_get(&val_url).await {
-                Ok(resp) => match resp.json::<Value>().await {
-                    Ok(json) => {
-                        if let Some(arr) = json["result"]["data"].as_array() {
-                            for v in arr {
-                                let cc = match v["SECURITY_CODE"].as_str() {
-                                    Some(c) => c,
-                                    None => continue,
-                                };
-                                let d = v["TRADE_DATE"].as_str().unwrap_or("").to_string();
-                                let better = match valuations.get(cc) {
-                                    Some((exist, ..)) => d > *exist,
-                                    None => true,
-                                };
-                                if better {
-                                    valuations.insert(
-                                        cc.to_string(),
-                                        (
-                                            d,
-                                            v["PE_TTM"].as_f64(),
-                                            v["PB_MRQ"].as_f64(),
-                                            v["CHANGE_RATE"].as_f64().unwrap_or(0.0),
-                                            v["TOTAL_MARKET_CAP"].as_f64(),
-                                        ),
-                                    );
-                                }
-                            }
-                        }
-                    },
-                    Err(e) => tracing::warn!(
-                        "[eastmoney] get_peers 估值批量查询 JSON 解析失败(估值字段留空): {e}"
-                    ),
-                },
-                Err(e) => {
-                    tracing::warn!("[eastmoney] get_peers 估值批量查询失败(估值字段留空): {e}")
-                },
-            }
-        }
-
-        Ok(peer_rows
-            .iter()
-            .map(|r| {
-                let sc = r["SECURITY_CODE"].as_str().unwrap_or("").to_string();
-                let v = valuations.get(&sc);
-                PeerComparison {
-                    stock_code: sc,
-                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
-                    pe: v.and_then(|x| x.1),
-                    pb: v.and_then(|x| x.2),
-                    roe: None,
-                    change_pct: v.map(|x| x.3).unwrap_or(0.0),
-                    market_cap: v.and_then(|x| x.4),
-                }
-            })
-            .collect())
+        Ok(rows)
     }
 
     async fn get_option_pcr(&self, stock_code: &str) -> Result<Option<OptionPCR>, DataError> {
@@ -3274,7 +3320,10 @@ impl StockVendor for EastMoneyVendor {
             | "get_pledge_data"
             // T7(2026-09-26)：7×24 快讯用 realSort 游标（Unix 秒 ×1e6）直接跳日，
             // 见 get_cls_flash_with_asof —— 它不是「无历史语义」，只是接口不认日期串
-            | "get_cls_flash" => AsOfCapability::NativeDateParam,
+            | "get_cls_flash"
+            // T9(2026-09-26)：估值报表 RPT_VALUEANALYSIS_DET 支持 TRADE_DATE<= 过滤，
+            // 且本就按股票返回多日历史 ⇒ 截止日口径天然可得，见 get_peers_with_asof
+            | "get_peers" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单/分类(本地缓存 P5 启用)
@@ -3292,7 +3341,6 @@ impl StockVendor for EastMoneyVendor {
             | "get_block_trades"
             | "get_institutional_visits"
             | "get_sector_info"
-            | "get_peers"
             | "get_option_pcr"
             | "search_stock" => AsOfCapability::Fallthrough,
             // 未知方法兜底
@@ -3778,6 +3826,8 @@ mod asof_capability_tests {
             "get_pledge_data",
             // T7(2026-09-26)：realSort 游标（Unix 秒 ×1e6）可跳日，见 get_cls_flash_with_asof
             "get_cls_flash",
+            // T9(2026-09-26)：估值表支持 TRADE_DATE 上限过滤，见 get_peers_with_asof
+            "get_peers",
         ] {
             assert_eq!(
                 v.asof_capability(m),
@@ -3825,7 +3875,6 @@ mod asof_capability_tests {
             "get_block_trades",
             "get_institutional_visits",
             "get_sector_info",
-            "get_peers",
             "get_option_pcr",
             "search_stock",
         ] {
@@ -4282,5 +4331,39 @@ mod flash_asof_tests {
             "无 title 时用 summary 兜底（≤80 字）"
         );
         assert_eq!(items[1].source.as_deref(), Some("财联社"));
+    }
+}
+
+#[cfg(test)]
+mod peers_asof_tests {
+    //! T9(2026-09-26)：同行对比「截止日口径」的 URL 判据（零网络）。
+    //! 缺陷形态是「回放里同行 PE/涨跌幅永远是今天」——这里锁住日期上限必须落在
+    //! 同一个 filter 里，且括号保持字面（编码成 %28/%29 会被服务端判参数错误）。
+    use super::*;
+
+    const IN_LIST: &str = "%22600519%22,%22000001%22";
+
+    #[test]
+    fn peers_valuation_url_appends_cutoff() {
+        let live = peers_valuation_url(IN_LIST, None, 34);
+        assert!(live.contains("RPT_VALUEANALYSIS_DET"), "仍走估值明细表: {live}");
+        assert!(
+            live.contains(&format!("(SECURITY_CODE%20in%20({IN_LIST}))")),
+            "in 列表必须带字面括号: {live}"
+        );
+        assert!(!live.contains("TRADE_DATE%3C%3D"), "live 不该有日期上限: {live}");
+        assert!(live.ends_with("pageSize=34"), "分页上限按票数放大: {live}");
+
+        let replay = peers_valuation_url(IN_LIST, Some("2026-09-22"), 34);
+        assert!(
+            replay.contains(&format!(
+                "(SECURITY_CODE%20in%20({IN_LIST}))(TRADE_DATE%3C%3D%272026-09-22%27)"
+            )),
+            "回放必须在同一 filter 内追加 TRADE_DATE 上限: {replay}"
+        );
+        assert!(
+            replay.contains("sortColumns=TRADE_DATE&sortTypes=-1"),
+            "倒序 ⇒ 每只票首行即截止日前最近一期: {replay}"
+        );
     }
 }

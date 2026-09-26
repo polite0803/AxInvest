@@ -116,11 +116,19 @@ impl EastMoneyVendor {
     /// （传历史日期被忽略，返回的仍是当下最新）⇒ 唯一可用的时间通道就是倒序翻页 +
     /// 本地裁剪。也试过往 `cmsArticleWebOld` 里塞 `startDate/endDate` —— **不生效**
     /// （endDate=09-22 仍返回 09-25 的条目），别再找日期参数了。
-    /// 上限 12 页 ≈ 600 条；翻不到截止日**如实报 Err**，让路由层落到
-    /// `news_archive`，而不是静默返回空（静默空会被下游读成「该股没有新闻」）。
+    /// 翻不到截止日**如实报 Err**，让路由层落到 `news_archive`，而不是静默返回空
+    /// （静默空会被下游读成「该股没有新闻」）。
+    ///
+    /// ⚠ 2026-09-27 实测：倒序翻页只在**前 20 页**内是真降序续接，不是「多翻就有」。
+    /// 检索词「集成电路」：页 1–20 各 50 条、日期严格降序（09-27 一路到 09-11）；
+    /// **页 21 起退化**为固定 40 条、且日期区间回跳（09-15 → 09-11）—— 那是接口附送的
+    /// 「相关结果」尾巴，继续翻只会拿到重复/回跳内容而不前进 ⇒ `MAX_PAGES` 硬停 20
+    /// （≈ 1000 条 / 热门词近两周）。
+    /// 于是「退不到截止日」有两种**不同**根因，必须分开说：
+    /// 该词全量本就少（翻到**空页**＝索引见底）vs 超出倒序索引窗口（我方与接口都到顶）。
     ///
     /// ⚠ 关键词必须先清洗（见 `asof_news_keyword`）：`sort:"time"` 下服务端不做相关性
-    /// 排序，组合关键词等于在翻全量流，12 页预算根本不够退到截止日。
+    /// 排序，组合关键词等于在翻全量流，页数预算根本不够退到截止日。
     async fn news_pages_until_asof(
         &self,
         keyword: &str,
@@ -128,17 +136,32 @@ impl EastMoneyVendor {
         need: usize,
     ) -> Result<Vec<NewsItem>, DataError> {
         const PAGE_SIZE: u32 = 50;
-        const MAX_PAGES: u32 = 12;
+        const MAX_PAGES: u32 = 20;
         let kw = asof_news_keyword(keyword);
+        let mut audit = AsofPagingAudit {
+            origin: if kw == keyword {
+                ""
+            } else {
+                "；已由原词清洗而来"
+            },
+            ..Default::default()
+        };
         let mut kept: Vec<NewsItem> = Vec::new();
         let mut crossed = false;
-        let mut fetched = 0usize;
         for page in 1..=MAX_PAGES {
             let items = self.news_page(&kw, page, PAGE_SIZE, "time").await?;
+            audit.pages = page;
             if items.is_empty() {
+                audit.exhausted = true; // 索引见底：这个检索词全量就只有这么多条
                 break;
             }
-            fetched += items.len();
+            audit.fetched += items.len();
+            if let Some(last) = items.last() {
+                let d = crate::news_date_key(&last.publish_time);
+                if !d.is_empty() {
+                    audit.oldest = Some(d.to_string());
+                }
+            }
             let hits = clip_page_to_cutoff(&items, cutoff);
             crossed |= !hits.is_empty();
             kept.extend(hits);
@@ -149,10 +172,7 @@ impl EastMoneyVendor {
         if kept.is_empty() && !crossed {
             return Err(DataError::VendorError {
                 vendor: "eastmoney".into(),
-                message: format!(
-                    "时间回溯 {MAX_PAGES} 页(共 {fetched} 条)未覆盖到截止日 {cutoff}（实际检索关键词「{kw}」{}）",
-                    if kw == keyword { "未做清洗" } else { "已由原词清洗而来" }
-                ),
+                message: audit.failure(&kw, cutoff, MAX_PAGES),
             });
         }
         kept.truncate(need);
@@ -1017,6 +1037,45 @@ fn asof_news_keyword(keyword: &str) -> String {
         keyword.trim().to_string()
     } else {
         cleaned
+    }
+}
+
+/// 倒序翻页的逐页记账 —— 抽成结构体是为了让「退不到截止日」的文案能被单测打到
+/// （否则这段判定埋在 `&self` + HTTP 循环里，只能靠真网络验证）。
+#[derive(Default)]
+struct AsofPagingAudit {
+    /// 关键词清洗痕迹（原词与实检索词不同时说明）
+    origin: &'static str,
+    fetched: usize,
+    pages: u32,
+    /// 已翻页里最晚（最早日期）那条的 `YYYY-MM-DD`
+    oldest: Option<String>,
+    /// 翻到了空页 = 该检索词在索引里全量就这么些条
+    exhausted: bool,
+}
+
+impl AsofPagingAudit {
+    /// 两种「退不到截止日」的根因文案（合并成一句会把人引向错误的下一步：
+    /// 以为多翻几页就有，实际接口的倒序索引窗口就到 `max_pages` 页）。
+    ///
+    /// `exhausted=true` ⇒ 数据面事实（换词或靠 `news_archive` 积累）；
+    /// `exhausted=false` ⇒ 窗口天花板。两者都给出**实际退到的日期**，
+    /// 否则无法判断差多少。
+    fn failure(&self, kw: &str, cutoff: &str, max_pages: u32) -> String {
+        match (&self.oldest, self.exhausted) {
+            (Some(o), true) => format!(
+                "检索词「{kw}」在时间倒序索引里只有 {} 条、最晚到 {o}，已翻到索引底仍不及截止日 {cutoff}{}",
+                self.fetched, self.origin
+            ),
+            (Some(o), false) => format!(
+                "时间回溯 {} 页(共 {} 条)只到 {o}，未覆盖截止日 {cutoff}（该索引的倒序窗口就到 {max_pages} 页）{}",
+                self.pages, self.fetched, self.origin
+            ),
+            _ => format!(
+                "时间回溯 {} 页未取到任何带日期的条目（检索词「{kw}」）{}",
+                self.pages, self.origin
+            ),
+        }
     }
 }
 
@@ -3326,12 +3385,16 @@ impl StockVendor for EastMoneyVendor {
             | "get_peers" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
-            // NoHistoricalSemantic: 当下榜单/分类(本地缓存 P5 启用)
-            "get_hot_stocks" | "get_industry_ranking" | "get_concept_blocks" => {
-                AsOfCapability::NoHistoricalSemantic
-            },
+            // NoHistoricalSemantic: 当下榜单（快照唯一通道，给当下值没有意义）
+            "get_hot_stocks" | "get_industry_ranking" => AsOfCapability::NoHistoricalSemantic,
+            // T12(2026-09-27)：板块归属**不是**「无历史语义」而是「只有当下值、且是慢变量」
+            // —— 与 `get_sector_info` 同一张 `RPT_F10_CORETHEME_BOARDTYPE`（无日期列）。
+            // 此前申报 `NoHistoricalSemantic` 使路由层的 as-of 白名单**跳过本仓唯一还活着的
+            // 归属源**，只去探测申报 Fallthrough 的 baidu_stock（该接口已 301 失效），
+            // 结果整维拿空；而同行业归属在 T10 后是容忍 live 值的 —— 两条口径互相矛盾。
             // Fallthrough: vendor 返回带 date 字段的全量,lib.rs 截断(已正确)
-            "get_financials"
+            "get_concept_blocks"
+            | "get_financials"
             | "get_dragon_tiger"
             | "get_lockup_schedule"
             | "get_north_bound_holding"
@@ -3852,7 +3915,9 @@ mod asof_capability_tests {
     #[test]
     fn no_historical_semantic_methods() {
         let v = make_vendor();
-        for m in &["get_hot_stocks", "get_industry_ranking", "get_concept_blocks"] {
+        // 只有「当日榜单」留在这一档：给当下值对回放没有意义（榜单本身就是那天的产物）。
+        // 板块归属不在此列 —— 见 `fallthrough_methods` 里 T12 那条。
+        for m in &["get_hot_stocks", "get_industry_ranking"] {
             assert_eq!(
                 v.asof_capability(m),
                 AsOfCapability::NoHistoricalSemantic,
@@ -3874,7 +3939,11 @@ mod asof_capability_tests {
             "get_consensus_eps",
             "get_block_trades",
             "get_institutional_visits",
+            // T10(2026-09-27)：与概念板块同一张无日期列的归属表，慢变量 ⇒ 容忍当日值
             "get_sector_info",
+            // T12(2026-09-27)：`get_concept_blocks` 原申报 NoHistoricalSemantic，会让 as-of
+            // 白名单跳过本仓唯一还活着的归属源 ⇒ 整维拿空。归属与行业同源同口径。
+            "get_concept_blocks",
             "get_option_pcr",
             "search_stock",
         ] {
@@ -4365,5 +4434,43 @@ mod peers_asof_tests {
             replay.contains("sortColumns=TRADE_DATE&sortTypes=-1"),
             "倒序 ⇒ 每只票首行即截止日前最近一期: {replay}"
         );
+    }
+}
+
+#[cfg(test)]
+mod paging_window_tests {
+    use super::*;
+
+    fn audit(oldest: Option<&str>, exhausted: bool, fetched: usize, pages: u32) -> AsofPagingAudit {
+        AsofPagingAudit {
+            origin: "；已由原词清洗而来",
+            fetched,
+            pages,
+            oldest: oldest.map(str::to_string),
+            exhausted,
+        }
+    }
+
+    /// T12(2026-09-27)：「退不到截止日」有两种根因，合并成一句话就会把人引向
+    /// 错误的下一步（以为多翻几页就有，实际接口索引窗口就到 20 页）。
+    #[test]
+    fn index_bottom_and_window_cap_are_worded_differently() {
+        let bottom = audit(Some("2026-09-18"), true, 400, 9).failure("集成电路", "2026-09-11", 20);
+        assert!(bottom.contains("已翻到索引底"), "见底必须说明是数据面事实: {bottom}");
+        assert!(
+            bottom.contains("最晚到 2026-09-18"),
+            "要给出实际退到的日期，否则无法判断差多少: {bottom}"
+        );
+        assert!(!bottom.contains("窗口就到"), "见底与窗口天花板不能混写: {bottom}");
+        assert!(bottom.ends_with("已由原词清洗而来"), "清洗痕迹要保留: {bottom}");
+
+        let capped =
+            audit(Some("2026-09-11"), false, 1000, 20).failure("集成电路", "2026-08-01", 20);
+        assert!(capped.contains("倒序窗口就到 20 页"), "窗口天花板要说是接口上限: {capped}");
+        assert!(capped.contains("只到 2026-09-11"), "同样要给出退到的日期: {capped}");
+        assert!(!capped.contains("索引底"), "窗口耗尽不等于该词没有更多新闻: {capped}");
+
+        let no_date = audit(None, false, 0, 1).failure("集成电路", "2026-08-01", 20);
+        assert!(no_date.contains("未取到任何带日期的条目"), "日期全不可解析时另说: {no_date}");
     }
 }

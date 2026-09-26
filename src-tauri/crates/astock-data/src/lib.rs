@@ -542,7 +542,18 @@ impl AsofProbe {
                 self.unsupported
             )
         } else {
-            format!("{subject}：被探测的源取数失败 [{}]", self.failed.join("; "))
+            // 失败分支也要点名被跳过的源：否则「baidu_stock 失败」看起来像
+            // 「整条链只有 baidu」，用户无法判断 eastmoney 是被跳过还是根本没注册
+            let skipped = if self.unsupported == 0 {
+                String::new()
+            } else {
+                format!(
+                    "；另有 {} 源无 as-of 能力（{}）",
+                    self.unsupported,
+                    self.skipped.join(", ")
+                )
+            };
+            format!("{subject}：被探测的源取数失败 [{}]{skipped}", self.failed.join("; "))
         }
     }
 }
@@ -4102,7 +4113,8 @@ impl AStockClient {
         stock_code: &str,
     ) -> Result<Option<ConceptBlocks>, DataError> {
         // P4: 按 vendor 申报的 capability 决策
-        // eastmoney/ths/iwencai 均为 NoHistoricalSemantic
+        // 归属源申报：eastmoney = Fallthrough（T12，只有当下值但属慢变量，容忍），
+        // ths / iwencai = NoHistoricalSemantic（接口本身已死/需 key）
         if crate::as_of::is_asof_active() {
             // P5:先查每日快照缓存
             let as_of = crate::as_of::current_as_of();
@@ -4139,6 +4151,11 @@ impl AStockClient {
                 )
                 .await;
             if let Some(r) = hit {
+                // 与 T9 同行对比同口径：命中 live 兜底源时留 info 而非降级 —— 数据面已满足，
+                // 只是名单是当日的（慢变量），面板不该为此报「取不到」。
+                tracing::info!(
+                    "[astock] get_concept_blocks {stock_code}: as-of 模式下的板块归属取自当日全量（慢变量，容忍）"
+                );
                 return Ok(Some(r));
             }
             crate::as_of::record_degradation(
@@ -6840,6 +6857,51 @@ mod asof_boundary_tests {
             !hits[0].reason.contains("均未提供"),
             "不得把失败写成「源没有数据」: {:?}",
             hits[0].reason
+        );
+    }
+
+    /// T12：三种「拿不到」的文案都要点名相关源 —— 只有数字时，同一方法在不同
+    /// 启用集下数出的「3 个源」「5 个源」无法区分是路由变了还是源被禁了。
+    #[test]
+    fn probe_names_sources_in_every_failure_wording() {
+        // ① 一个都没探测成：整条链都未申报通道
+        let all_skipped = AsofProbe {
+            probed: 0,
+            unsupported: 2,
+            skipped: vec!["ths".into(), "iwencai".into()],
+            probed_names: vec![],
+            failed: vec![],
+        };
+        let r1 = all_skipped.reason("as-of 688072 概念板块");
+        assert!(r1.contains("ths, iwencai"), "未探测分支要点名被跳过的源: {r1}");
+
+        // ② 探测了但都答「没有」：既要点被探测的，也要点被跳过的
+        let answered_none = AsofProbe {
+            probed: 1,
+            unsupported: 1,
+            skipped: vec!["eastmoney".into()],
+            probed_names: vec!["browser_eastmoney".into()],
+            failed: vec![],
+        };
+        let r2 = answered_none.reason("as-of 行业排名");
+        assert!(
+            r2.contains("browser_eastmoney") && r2.contains("eastmoney"),
+            "两种源都要出现: {r2}"
+        );
+
+        // ③ 探测的源报错（本次面板实证）：失败原因 + 被跳过的源名都要在一条里
+        let failed = AsofProbe {
+            probed: 1,
+            unsupported: 2,
+            skipped: vec!["eastmoney".into(), "ths".into()],
+            probed_names: vec!["baidu_stock".into()],
+            failed: vec!["baidu_stock=接口信封非预期".into()],
+        };
+        let r3 = failed.reason("as-of 688072 概念板块");
+        assert!(r3.contains("baidu_stock=接口信封非预期"), "失败原因必须在: {r3}");
+        assert!(
+            r3.contains("另有 2 源无 as-of 能力（eastmoney, ths）"),
+            "失败分支也必须点名被跳过的源，否则看起来像整条链只有 baidu: {r3}"
         );
     }
 }

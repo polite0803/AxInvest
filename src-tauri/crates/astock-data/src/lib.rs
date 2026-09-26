@@ -506,6 +506,11 @@ struct AsofProbe {
     probed: usize,
     /// 未申报 as-of 通道而被跳过的源数
     unsupported: usize,
+    /// 被跳过的源名（为什么写名字：同一方法在不同启用集下会数出「3 个源」「5 个源」，
+    /// 只有数字的面板无法判断是路由变了还是源被禁了）
+    skipped: Vec<String>,
+    /// 有通道、真正被调用的源名
+    probed_names: Vec<String>,
     /// 有通道却取数失败的源，形如 `eastmoney=<原因>`
     failed: Vec<String>,
 }
@@ -515,8 +520,8 @@ impl AsofProbe {
     /// 与「本模块压根没有历史通道」混为一谈（两融/指数站点已按此口径收敛）。
     ///
     /// 措辞注意：被探测的源未必真有 as-of 通道 —— `Fallthrough` 也在白名单里时，
-    /// 只是「容忍它给当下值」（板块/榜单类慢变量）。所以这里说「被探测」而不是
-    /// 「有 as-of 通道」，免得把「源没有历史能力」写成「有但没拿到」。
+    /// 只是「容忍它给当下值」（板块归属/行业分类这类慢变量）。所以这里说「被探测」
+    /// 而不是「有 as-of 通道」，免得把「源没有历史能力」写成「有但没拿到」。
     fn reason(&self, subject: &str) -> String {
         if self.probed == 0 {
             if self.unsupported == 0 {
@@ -524,16 +529,17 @@ impl AsofProbe {
                 return format!("{subject}：路由链上没有可用源（未启用或未注册）");
             }
             return format!(
-                "{subject} 无 as-of 历史通道：{} 个源均未申报 as-of 能力",
-                self.unsupported
+                "{subject} 无 as-of 历史通道：{} 个源均未申报 as-of 能力（{}）",
+                self.unsupported,
+                self.skipped.join(", ")
             );
         }
         if self.failed.is_empty() {
-            // 「被探测」与「无通道」是两个互斥的计数，不能写成「其中」（面板曾出现
-            // 「1 个被探测的源…（其中无通道源 1 个）」这种自相矛盾的读感）
             format!(
-                "{subject}：被探测的 {} 源均回答无数据；另有 {} 源无 as-of 能力",
-                self.probed, self.unsupported
+                "{subject}：被探测的 {} 源均回答无数据（{}）；另有 {} 源无 as-of 能力",
+                self.probed,
+                self.probed_names.join(", "),
+                self.unsupported
             )
         } else {
             format!("{subject}：被探测的源取数失败 [{}]", self.failed.join("; "))
@@ -1642,9 +1648,11 @@ impl AStockClient {
             let cap = self.vendor_asof_capability(name, method);
             if !caps.contains(&cap) {
                 probe.unsupported += 1;
+                probe.skipped.push(name.to_string());
                 continue;
             }
             probe.probed += 1;
+            probe.probed_names.push(name.to_string());
             match fetch(name, vendor, cap).await {
                 Ok(Some(hit)) => return (Some(hit), probe),
                 // 明确回答「截止日没有这份数据」——空是答案，不是失败，继续下一个源
@@ -3773,17 +3781,26 @@ impl AStockClient {
                     }
                 }
             }
-            // T4：逐源「不支持 as-of」不再各留一条，统一由 probe 记账后汇总一条
+            // T10：`Fallthrough` 也放行 —— 行业归属与概念板块同类（`RPT_F10_CORETHEME_BOARDTYPE`
+            // 无日期列、归属是慢变量），此前只放行 NativeDateParam 导致每次回放都报
+            // 「5 个源均未申报 as-of 能力」而拿不到行业名，而同源的 get_concept_blocks 却容忍
+            // live 值，两条口径互相矛盾。
             let (hit, probe) = self
                 .asof_probe(
                     "get_sector_info",
                     &self.routing.sector,
-                    &[AsOfCapability::NativeDateParam],
-                    |_, vendor, _| {
+                    &[AsOfCapability::NativeDateParam, AsOfCapability::Fallthrough],
+                    |_, vendor, cap| {
                         // 与 `try_vendors_retry` 同形：把参数 clone 进 future，
                         // 否则返回的 BoxFuture 借用外部 &'1 str 无法满足 HRTB
                         let sc = stock_code.to_string();
-                        Box::pin(async move { vendor.get_sector_info_with_asof(&sc).await })
+                        Box::pin(async move {
+                            if cap == AsOfCapability::NativeDateParam {
+                                vendor.get_sector_info_with_asof(&sc).await
+                            } else {
+                                vendor.get_sector_info(&sc).await
+                            }
+                        })
                     },
                 )
                 .await;

@@ -180,6 +180,25 @@ pub fn register_pm_functions(engine: &mut Engine) {
         axagent_astock_data::sentiment::compute_text_sentiment(text).unwrap_or(0.0)
     });
 
+    // S2(2026-09-26, PLAN-asof-replay-quality-attribution)：as-of 回放「设计性降级」
+    // 的 vendor 方法清单（JSON 数组字符串），供 data-quality.rhai 豁免失败标记扣分。
+    // live 模式（无 as-of 上下文）恒返回 "[]"。
+    // 按当前 as_of 日期过滤全局环形缓冲：同一截止日的降级集合是稳定的设计集，
+    // 跨运行混入同日期条目的语义相同，可接受（精确运行边界见 S1 水位切片的
+    // take_global_degradations_since，落库消费在 core.rs，不走本函数）。
+    engine.register_fn("pm_asof_degraded_methods", || -> String {
+        let cur = match axagent_astock_data::as_of::current_as_of() {
+            Some(c) => c.as_string(),
+            None => return "[]".to_string(),
+        };
+        let methods: Vec<String> = axagent_astock_data::as_of::peek_global_degradation_report()
+            .into_iter()
+            .filter(|e| e.as_of == cur)
+            .map(|e| e.method)
+            .collect();
+        serde_json::to_string(&methods).unwrap_or_else(|_| "[]".to_string())
+    });
+
     // ── 仿真验证（工作流 `sim-verify` 节点）─────────────────────────────────
     // 供 `sim-verify.rhai` 调用：在**决策之后**自动跑蒙特卡洛压力测试。
     //

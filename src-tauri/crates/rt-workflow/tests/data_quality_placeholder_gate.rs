@@ -106,6 +106,14 @@ const EXTERNAL_VARS: &[&str] = &[
 /// 构造与运行时一致的 Engine（harness::register_common_functions +
 /// rhai_pm::register_pm_functions 的等价子集；`pm_compute_factor_completeness` 用常量替身）。
 fn build_engine() -> Engine {
+    build_engine_with_asof_methods("[]")
+}
+
+/// 同 `build_engine`，但 `pm_asof_degraded_methods` 返回指定 JSON（S2 豁免判据的注入点）。
+///
+/// 生产实现在 `stock_workflow/rhai_pm.rs`：live 恒 "[]"，回放返回本次
+/// 设计性降级的 vendor 方法名数组。
+fn build_engine_with_asof_methods(methods_json: &'static str) -> Engine {
     let mut engine = Engine::new();
     engine.set_max_expr_depths(1024, 1024);
     engine.set_max_operations(2_000_000);
@@ -113,8 +121,23 @@ fn build_engine() -> Engine {
     engine.register_fn("join", |arr: rhai::Array, sep: &str| -> String {
         arr.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(sep)
     });
-    engine.register_fn("json_parse", |_s: &str| -> Dynamic { Dynamic::UNIT });
+    // 替身策略：对象/标量维持原「返回 UNIT」形态（既有测试都直接注入 map，
+    // 不走解析路径）；**字符串数组**给出真实解析 —— S2 的 asof 方法清单判据
+    // 必须能真的解析出数组，否则豁免逻辑在测试里恒为假绿。
+    engine.register_fn("json_parse", |s: &str| -> Dynamic {
+        match serde_json::from_str::<serde_json::Value>(s) {
+            Ok(serde_json::Value::Array(arr)) if arr.iter().all(|v| v.is_string()) => {
+                Dynamic::from(
+                    arr.iter()
+                        .map(|v| Dynamic::from(v.as_str().unwrap_or("").to_string()))
+                        .collect::<rhai::Array>(),
+                )
+            },
+            _ => Dynamic::UNIT,
+        }
+    });
     engine.register_fn("print", |_s: &str| {});
+    engine.register_fn("pm_asof_degraded_methods", move || -> String { methods_json.to_string() });
     // 签名与 src-tauri/src/commands/stock_workflow/rhai_pm.rs 完全一致（9 个 Dynamic 参数）
     engine.register_fn(
         "pm_compute_factor_completeness",
@@ -150,7 +173,24 @@ fn run_quality_with_tool_calls(
     confs: &[(&str, f64)],
     tool_calls: &[(&str, rhai::Array)],
 ) -> Map {
-    let engine = build_engine();
+    run_quality_impl(reports, confs, tool_calls, build_engine())
+}
+
+/// 同 `run_quality`，但注入 as-of 设计性降级方法清单（S2 豁免判据）。
+fn run_quality_asof(
+    reports: &[(&str, &str)],
+    confs: &[(&str, f64)],
+    methods_json: &'static str,
+) -> Map {
+    run_quality_impl(reports, confs, &[], build_engine_with_asof_methods(methods_json))
+}
+
+fn run_quality_impl(
+    reports: &[(&str, &str)],
+    confs: &[(&str, f64)],
+    tool_calls: &[(&str, rhai::Array)],
+    engine: Engine,
+) -> Map {
     let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
     let mut scope = Scope::new();
     for v in EXTERNAL_VARS {
@@ -627,4 +667,74 @@ fn attribution_note_text_is_single_line() {
         );
         assert_eq!(g.trim(), g, "{label} 的归因结论首尾有空白：{g}");
     }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// S2(2026-09-26)：as-of 回放「设计性降级」豁免（PLAN-asof-replay-quality-attribution.md）
+// 实证缺陷（300642 as_of=2026-09-22）：回放中搜索/快讯等按当下语义约束返回空，
+// 分析师如实写「无法获取」被词表按**工具故障**扣分 ⇒ tool_credibility 27、综合 C 级。
+// ───────────────────────────────────────────────────────────────────────────
+
+/// 政策面分析师在回放中的典型报告：含硬标记「无法获取」+ 软标记「返回空」（无抑制短语）。
+const POL_REPORT_ASOF: &str = "宏观政策与行业政策搜索返回空，无法获取政策原文，\
+本维度仅能基于既有信息推断，不构成对政策方向的确认。仓位建议以观望为主，等待数据恢复。";
+
+#[test]
+fn asof_designed_degradation_exempts_failure_markers() {
+    let r = run_quality_asof(
+        &[("pol", POL_REPORT_ASOF)],
+        &[("pol", 30.0)],
+        r#"["search_news","get_policy_news"]"#,
+    );
+    assert_eq!(hits(&r, "pol"), 0, "设计性降级维度不得计失败标记");
+    assert_eq!(
+        status(&r, "pol"),
+        "low",
+        "低置信仍按自评判 low（avg_conf 语义保留，豁免不掩盖不确定性）"
+    );
+    let g = gap_reason(&r, "pol");
+    assert!(g.contains("非数据缺口"), "豁免后 gap_reason 不得再是「上游工具数据不完整」：{g}");
+    assert_eq!(r["placeholder_total_hits"].as_int().unwrap_or(-1), 0);
+    assert_eq!(r["asof_replay"].as_bool().unwrap_or(false), true);
+    let dims = names(&r, "asof_designed_dims");
+    assert!(dims.iter().any(|d| d == "政策面"), "asof_designed_dims 应含政策面：{dims:?}");
+    let warns = names(&r, "warnings");
+    assert!(
+        warns.iter().any(|w| w.contains("按设计降级")),
+        "warnings 必须显式声明豁免，避免被误读为漏扣分：{warns:?}"
+    );
+    let summary = r["summary"].clone().as_string().unwrap_or_default();
+    assert!(summary.starts_with("【as-of 回放】"), "summary 必须带回放前缀：{summary}");
+}
+
+#[test]
+fn asof_exemption_raises_report_quality() {
+    let live = run_quality(&[("pol", POL_REPORT_ASOF)], &[("pol", 30.0)]);
+    let replay =
+        run_quality_asof(&[("pol", POL_REPORT_ASOF)], &[("pol", 30.0)], r#"["get_policy_news"]"#);
+    let lq = live["report_quality_score"].as_float().unwrap_or(0.0);
+    let rq = replay["report_quality_score"].as_float().unwrap_or(0.0);
+    assert!(rq > lq, "豁免跳过 -15 占位扣分后报告质量应抬升：live {lq} vs replay {rq}");
+}
+
+#[test]
+fn asof_unmapped_method_does_not_exempt() {
+    // truncate_* 是「按截止日截断」的正常语义（数据仍在），刻意不在映射表 ⇒ 不豁免。
+    // 同时兜住映射表被误删空的回归：未知方法必须保守地**不**触发豁免。
+    let r = run_quality_asof(
+        &[("pol", POL_REPORT_ASOF)],
+        &[("pol", 30.0)],
+        r#"["truncate_klines_by_asof"]"#,
+    );
+    assert!(hits(&r, "pol") > 0, "未映射方法不得豁免失败标记");
+    assert_eq!(r["asof_replay"].as_bool().unwrap_or(false), true, "有降级记录即标记回放");
+}
+
+#[test]
+fn live_mode_has_no_asof_exemption() {
+    let r = run_quality(&[("pol", POL_REPORT_ASOF)], &[("pol", 30.0)]);
+    assert_eq!(r["asof_replay"].as_bool().unwrap_or(true), false);
+    assert!(hits(&r, "pol") > 0, "live 模式失败标记照常计入（豁免只属回放）");
+    let summary = r["summary"].clone().as_string().unwrap_or_default();
+    assert!(!summary.starts_with("【as-of 回放】"), "live summary 不得带回放前缀：{summary}");
 }

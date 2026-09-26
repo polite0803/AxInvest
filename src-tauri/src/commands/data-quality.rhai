@@ -426,7 +426,10 @@ fn validate_verdict_schema(verdict_data, analyst_name) {
 //   更关键的是 V67 调整因子完整度权重时，论证用的是「报告满分 100」的错误前提
 //   （100×0.45 + 100×0.35 + 50×0.20 = 90 判 A），据此得出的
 //   「5/10 因子缺失仍可达 A 级」结论与实际不符。现补齐至满量程 100。
-fn report_quality(text, conf) {
+// S2(2026-09-26): 第 3 参 `suppress_ph` = 该维度处于 as-of **设计性降级**
+//   （上游按当下语义约束返回空，非工具故障）⇒ 跳过占位符 -15 扣分。
+//   判据来源见下方 asof_design 块与 PLAN-asof-replay-quality-attribution.md。
+fn report_quality(text, conf, suppress_ph) {
     if type_of(text) != "string" || text == "" { return 0.0; }
 
     let chars = count_chars(text);
@@ -441,7 +444,7 @@ fn report_quality(text, conf) {
     let kw_score = kw_groups.to_float() * 8.0;
 
     // 占位符扣分（-15）
-    let placeholder_penalty = if has_placeholder(text) { -15.0 } else { 0.0 };
+    let placeholder_penalty = if !suppress_ph && has_placeholder(text) { -15.0 } else { 0.0 };
 
     // confidence 一致性奖励（10 分）
     // P3-2 修复(2026-08-09): extract_conf 缺失时返回 -1.0，原 conf < 30.0 分支会把
@@ -547,23 +550,108 @@ let lk_po = placeholder_occurrences(lk_r);
 let res_po = placeholder_occurrences(res_r);
 let sec_po = placeholder_occurrences(sec_r);
 let cat_po = placeholder_occurrences(cat_r);
-let placeholder_total_hits = mk_ph.len() + sent_ph.len() + news_ph.len() + fund_ph.len()
-    + pol_ph.len() + hm_ph.len() + lk_ph.len() + res_ph.len() + sec_ph.len() + cat_ph.len();
+
+// ── S2(2026-09-26): as-of 回放「设计性降级」豁免（PLAN-asof-replay-quality-attribution.md）──
+// 回放中 搜索/快讯/新闻 等返回空是**设计语义**（astock-data as_of 决策矩阵：
+// 搜索是当下语义 ⇒ record_degradation 留痕并返回空），不是工具故障。
+// 此前这些设计性缺口与真故障同样被失败标记词表扣分 ⇒ 实证（300642
+// as_of=2026-09-22）：tool_credibility 27、综合 C 级 —— 回放评分既不可与
+// live 横比，还以「工具不可信」的错误归因污染反思链。
+// 豁免口径：宿主函数 `pm_asof_degraded_methods()` 返回本次回放已降级的
+// vendor 方法清单，经下方 method→维度映射，命中的分析师维度其失败标记
+// **不进扣分与失败清单**，改记入 `asof_designed_dims` 单独展示。
+// ⚠ truncate_*（按截止日正常截断，数据仍在）刻意**不在映射表** —— 那不是缺口。
+// ⚠ 映射表按 `astock-data/src/lib.rs` 的 record_degradation 调用点维护；
+//   新增降级方法时若不同步此表，该维度只是**不豁免**（保守方向，不会错扣）。
+fn asof_method_dims() {
+    #{
+        "get_news": ["news"],
+        "search_news": ["news", "pol", "res", "sec", "cat"],
+        "get_policy_news": ["pol"],
+        "get_research_reports": ["res"],
+        "get_consensus_eps": ["res", "fund"],
+        "get_cls_flash": ["cat", "sent"],
+        "get_social_sentiment": ["sent"],
+        "get_margin_data": ["sent", "hm"],
+        "get_north_bound_holding": ["sent", "fund"],
+        "get_money_flow": ["fund", "hm"],
+        "get_hot_stocks": ["hm"],
+        "get_market_dragon_tiger": ["hm", "mk"],
+        "get_industry_ranking": ["sec"],
+        "get_sector_info": ["sec"],
+        "get_concept_blocks": ["sec"],
+        "search_concept_boards": ["sec"],
+        "get_concept_board_members": ["sec"],
+        "search_stock": ["cat"],
+        "get_pledge_data": ["lk"],
+        "get_peers": ["fund", "sec", "cat"],
+        "get_option_pcr": ["sent"],
+        "get_financials": ["fund"],
+        "get_quote": ["mk"],
+        "get_index_quotes": ["mk"],
+    }
+}
+let asof_methods_raw = pm_asof_degraded_methods();
+// 防御式解析：宿主缺失/替身返回 unit 时按「无降级」处理（live 语义）
+let asof_parsed = if asof_methods_raw == "[]" || asof_methods_raw == "" { [] } else { json_parse(asof_methods_raw) };
+let asof_methods = if type_of(asof_parsed) == "array" { asof_parsed } else { [] };
+let asof_map = asof_method_dims();
+let asof_design = #{};   // 维度缩写 → true 表示该维度处于设计性降级
+for i in 0..asof_methods.len() {
+    let dims = asof_map[asof_methods[i]];
+    if type_of(dims) == "array" {
+        for j in 0..dims.len() { asof_design[dims[j]] = true; }
+    }
+}
+let asof_sup_mk = asof_design["mk"] == true;
+let asof_sup_sent = asof_design["sent"] == true;
+let asof_sup_news = asof_design["news"] == true;
+let asof_sup_fund = asof_design["fund"] == true;
+let asof_sup_pol = asof_design["pol"] == true;
+let asof_sup_hm = asof_design["hm"] == true;
+let asof_sup_lk = asof_design["lk"] == true;
+let asof_sup_res = asof_design["res"] == true;
+let asof_sup_sec = asof_design["sec"] == true;
+let asof_sup_cat = asof_design["cat"] == true;
+// 评分口径（_e = effective）：被豁免维度的失败标记不进任何扣分/清单
+let mk_ph_e = if asof_sup_mk { [] } else { mk_ph };
+let sent_ph_e = if asof_sup_sent { [] } else { sent_ph };
+let news_ph_e = if asof_sup_news { [] } else { news_ph };
+let fund_ph_e = if asof_sup_fund { [] } else { fund_ph };
+let pol_ph_e = if asof_sup_pol { [] } else { pol_ph };
+let hm_ph_e = if asof_sup_hm { [] } else { hm_ph };
+let lk_ph_e = if asof_sup_lk { [] } else { lk_ph };
+let res_ph_e = if asof_sup_res { [] } else { res_ph };
+let sec_ph_e = if asof_sup_sec { [] } else { sec_ph };
+let cat_ph_e = if asof_sup_cat { [] } else { cat_ph };
+let mk_po_e = if asof_sup_mk { 0 } else { mk_po };
+let sent_po_e = if asof_sup_sent { 0 } else { sent_po };
+let news_po_e = if asof_sup_news { 0 } else { news_po };
+let fund_po_e = if asof_sup_fund { 0 } else { fund_po };
+let pol_po_e = if asof_sup_pol { 0 } else { pol_po };
+let hm_po_e = if asof_sup_hm { 0 } else { hm_po };
+let lk_po_e = if asof_sup_lk { 0 } else { lk_po };
+let res_po_e = if asof_sup_res { 0 } else { res_po };
+let sec_po_e = if asof_sup_sec { 0 } else { sec_po };
+let cat_po_e = if asof_sup_cat { 0 } else { cat_po };
+
+let placeholder_total_hits = mk_ph_e.len() + sent_ph_e.len() + news_ph_e.len() + fund_ph_e.len()
+    + pol_ph_e.len() + hm_ph_e.len() + lk_ph_e.len() + res_ph_e.len() + sec_ph_e.len() + cat_ph_e.len();
 // 2026-09-21: 与 placeholder_total_hits 同判定集的**实际出现次数**合计（词种数 vs 出现次数）
-let placeholder_total_occurrences = mk_po + sent_po + news_po + fund_po + pol_po
-    + hm_po + lk_po + res_po + sec_po + cat_po;
+let placeholder_total_occurrences = mk_po_e + sent_po_e + news_po_e + fund_po_e + pol_po_e
+    + hm_po_e + lk_po_e + res_po_e + sec_po_e + cat_po_e;
 
 // 单个分析师报告质量分（缺失报告 → 0 分）
-let mk_q = report_quality(mk_r, mk_c);
-let sent_q = report_quality(sent_r, sent_c);
-let news_q = report_quality(news_r, news_c);
-let fund_q = report_quality(fund_r, fund_c);
-let pol_q = report_quality(pol_r, pol_c);
-let hm_q = report_quality(hm_r, hm_c);
-let lk_q = report_quality(lk_r, lk_c);
-let res_q = report_quality(res_r, res_c);
-let sec_q = report_quality(sec_r, sec_c);
-let cat_q = report_quality(cat_r, cat_c);
+let mk_q = report_quality(mk_r, mk_c, asof_sup_mk);
+let sent_q = report_quality(sent_r, sent_c, asof_sup_sent);
+let news_q = report_quality(news_r, news_c, asof_sup_news);
+let fund_q = report_quality(fund_r, fund_c, asof_sup_fund);
+let pol_q = report_quality(pol_r, pol_c, asof_sup_pol);
+let hm_q = report_quality(hm_r, hm_c, asof_sup_hm);
+let lk_q = report_quality(lk_r, lk_c, asof_sup_lk);
+let res_q = report_quality(res_r, res_c, asof_sup_res);
+let sec_q = report_quality(sec_r, sec_c, asof_sup_sec);
+let cat_q = report_quality(cat_r, cat_c, asof_sup_cat);
 
 // gap 推断：confidence < 0（字段缺失/节点失败）才算真正的数据缺口
 let mk_g = mk_c < 0.0;
@@ -629,16 +717,16 @@ let total_conf = 0.0;     // 累加有效 confidence（排除 untrusted）
 //   完全脱钩 ⇒ 置信度虚高的节点（hm cf=55 但报告 5 处「无法获取/返回空」）被计为 good，
 //   虚高 tool_credibility_score。现改为 **A ∪ B**：报告含失败标记即降级（degraded_count），
 //   不再计入 good。degraded 归入 low 语义（low_count = n_int - good - gap 天然包含）。
-if mk_u || mk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += mk_c; if mk_c >= 50.0 { if mk_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if sent_u || sent_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sent_c; if sent_c >= 50.0 { if sent_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if news_u || news_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += news_c; if news_c >= 50.0 { if news_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if fund_u || fund_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += fund_c; if fund_c >= 50.0 { if fund_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if pol_u || pol_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += pol_c; if pol_c >= 50.0 { if pol_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if hm_u || hm_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += hm_c; if hm_c >= 50.0 { if hm_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if lk_u || lk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += lk_c; if lk_c >= 50.0 { if lk_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if res_u || res_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += res_c; if res_c >= 50.0 { if res_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if sec_u || sec_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sec_c; if sec_c >= 50.0 { if sec_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if cat_u || cat_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += cat_c; if cat_c >= 50.0 { if cat_ph.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if mk_u || mk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += mk_c; if mk_c >= 50.0 { if mk_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if sent_u || sent_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sent_c; if sent_c >= 50.0 { if sent_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if news_u || news_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += news_c; if news_c >= 50.0 { if news_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if fund_u || fund_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += fund_c; if fund_c >= 50.0 { if fund_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if pol_u || pol_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += pol_c; if pol_c >= 50.0 { if pol_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if hm_u || hm_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += hm_c; if hm_c >= 50.0 { if hm_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if lk_u || lk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += lk_c; if lk_c >= 50.0 { if lk_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if res_u || res_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += res_c; if res_c >= 50.0 { if res_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if sec_u || sec_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sec_c; if sec_c >= 50.0 { if sec_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if cat_u || cat_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += cat_c; if cat_c >= 50.0 { if cat_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
 
 let avg_conf = if valid_count > 0 { total_conf / valid_count.to_float() } else { 0.0 };
 
@@ -949,7 +1037,7 @@ let grade = if final_score >= 85.0 { "A" }
 // ── 诊断条目生成 ──
 // P3-4 修复(2026-08-09): strict_mode 降级的分析师 confidence=50（中性兜底）原显示
 // "normal"，与 untrusted 语义矛盾。新增 untrusted 参数，降级分析师显示 "untrusted"。
-// 2026-09-21：新增第 7 个参数 `rq` —— 本节点**自己的**报告质量分（`report_quality(text, conf)`）。
+// 2026-09-21：新增第 7 个参数 `rq` —— 本节点**自己的**报告质量分（`report_quality(text, conf, suppress_ph)`）。
 //   此前该值只被累加进全局 `report_quality_avg`，单个节点的得分被平均掉 ⇒
 //   面板顶部只能拿到全局值，10 个分析师弹窗显示同一组数字（用户据此质问「是不是造假」）。
 //   ⚠ 这是**事实量**，不是等级：禁止据此派生 per-node 字母等级 ——
@@ -1114,24 +1202,24 @@ fn attribution_note(report, tool_calls) {
 //   漏一处会让 data-quality 节点整体失败，故新增/删除本函数参数时必须同步这 10 处。
 //   正控：`output/tmp-151-rhai-arity.mjs` 逐点核对本块的实参个数。
 let diagnostics = #{
-    "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u, mk_ph.len(), mk_po, mk_q,
+    "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u, mk_ph_e.len(), mk_po_e, mk_q,
         attribution_note(mk_report, mk_tool_calls)),
     // 2026-09-21 修正归因（原值把用户引向 t-sentiment-data，而真实缺口在
     // t-dragon-tiger-data ⇒ 归因指向错误会误导排查方向，实证见
     // AUDIT-analyst-low-confidence-2026-09-21.md §八.1）：
     //   情绪面「席位数据缺失」与资金面「龙虎榜席位与北向数据缺失」同源于
     //   t-dragon-tiger-data（龙虎榜营业部明细，独立于 t-sentiment-data 的节点）。
-    "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_u, sent_ph.len(), sent_po, sent_q,
+    "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_u, sent_ph_e.len(), sent_po_e, sent_q,
         attribution_note(sent_report, sent_tool_calls)),
-    "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph.len(), news_po, news_q,
+    "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph_e.len(), news_po_e, news_q,
         attribution_note(news_report, news_tool_calls)),
     // 基本面/催化剂/行业的「同侪 PE/PB 全为 null」同源于 t-fundamentals-data 的
     // get_stock_peers（2026-09-21 已补 PE_TTM/PB_MRQ/市值/涨跌幅；ROE 仍未接入）。
-    "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_u, fund_ph.len(), fund_po, fund_q,
+    "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_u, fund_ph_e.len(), fund_po_e, fund_q,
         attribution_note(fund_report, fund_tool_calls)),
-    "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u, pol_ph.len(), pol_po, pol_q,
+    "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u, pol_ph_e.len(), pol_po_e, pol_q,
         attribution_note(pol_report, pol_tool_calls)),
-    "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）；龙虎榜席位明细（t-dragon-tiger-data）与北向字段", hm_u, hm_ph.len(), hm_po, hm_q,
+    "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）；龙虎榜席位明细（t-dragon-tiger-data）与北向字段", hm_u, hm_ph_e.len(), hm_po_e, hm_q,
         attribution_note(hm_report, hm_tool_calls)),
     // 2026-09-21(v72) 修正：质押此前**从未接线**（无节点、无白名单授权），
     //   面板却在 expected_data 里写着「质押风险（t-lockup-data）」——**指明了错误的
@@ -1139,13 +1227,13 @@ let diagnostics = #{
     //   结构上不含质押字段）。现补 `t-pledge-data` 节点 + `get_stock_pledge_data` 授权，
     //   此处同步为**真实来源**，避免「期望值自证」（拿声明当事实）继续误导。
     // P2-1：本节点正是伪归因的**实证现场**（报告写「工具调用被拒绝」而归因错维度）。
-    "lk": diag_for(lk_c, "解禁观察员", "解禁减持、大宗交易（t-lockup-data）；股权质押（t-pledge-data）", lk_u, lk_ph.len(), lk_po, lk_q,
+    "lk": diag_for(lk_c, "解禁观察员", "解禁减持、大宗交易（t-lockup-data）；股权质押（t-pledge-data）", lk_u, lk_ph_e.len(), lk_po_e, lk_q,
         attribution_note(lk_report, lk_tool_calls)),
-    "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u, res_ph.len(), res_po, res_q,
+    "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u, res_ph_e.len(), res_po_e, res_q,
         attribution_note(res_report, res_tool_calls)),
-    "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）；同侪估值（t-fundamentals-data: get_stock_peers）", sec_u, sec_ph.len(), sec_po, sec_q,
+    "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）；同侪估值（t-fundamentals-data: get_stock_peers）", sec_u, sec_ph_e.len(), sec_po_e, sec_q,
         attribution_note(sec_report, sec_tool_calls)),
-    "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_u, cat_ph.len(), cat_po, cat_q,
+    "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_u, cat_ph_e.len(), cat_po_e, cat_q,
         attribution_note(cat_report, cat_tool_calls))
 };
 
@@ -1154,31 +1242,31 @@ let low_confidence_analysts = [];
 // 2026-09-12: 口径与 gap_count / diagnostics.status 对齐
 //   missing = untrusted || c < 0（原实现漏了 untrusted，与 gap_count 不一致）
 //   low     = c < 50 || 报告含失败标记（原实现只看 confidence）
-if mk_u || mk_c < 0.0 { missing_analysts.push("技术面"); } else if mk_c < 50.0 || mk_ph.len() > 0 { low_confidence_analysts.push("技术面"); }
-if sent_u || sent_c < 0.0 { missing_analysts.push("情绪面"); } else if sent_c < 50.0 || sent_ph.len() > 0 { low_confidence_analysts.push("情绪面"); }
-if news_u || news_c < 0.0 { missing_analysts.push("新闻面"); } else if news_c < 50.0 || news_ph.len() > 0 { low_confidence_analysts.push("新闻面"); }
-if fund_u || fund_c < 0.0 { missing_analysts.push("基本面"); } else if fund_c < 50.0 || fund_ph.len() > 0 { low_confidence_analysts.push("基本面"); }
-if pol_u || pol_c < 0.0 { missing_analysts.push("政策面"); } else if pol_c < 50.0 || pol_ph.len() > 0 { low_confidence_analysts.push("政策面"); }
-if hm_u || hm_c < 0.0 { missing_analysts.push("资金面"); } else if hm_c < 50.0 || hm_ph.len() > 0 { low_confidence_analysts.push("资金面"); }
-if lk_u || lk_c < 0.0 { missing_analysts.push("解禁观察"); } else if lk_c < 50.0 || lk_ph.len() > 0 { low_confidence_analysts.push("解禁观察"); }
-if res_u || res_c < 0.0 { missing_analysts.push("研报"); } else if res_c < 50.0 || res_ph.len() > 0 { low_confidence_analysts.push("研报"); }
-if sec_u || sec_c < 0.0 { missing_analysts.push("行业"); } else if sec_c < 50.0 || sec_ph.len() > 0 { low_confidence_analysts.push("行业"); }
-if cat_u || cat_c < 0.0 { missing_analysts.push("催化剂"); } else if cat_c < 50.0 || cat_ph.len() > 0 { low_confidence_analysts.push("催化剂"); }
+if mk_u || mk_c < 0.0 { missing_analysts.push("技术面"); } else if mk_c < 50.0 || mk_ph_e.len() > 0 { low_confidence_analysts.push("技术面"); }
+if sent_u || sent_c < 0.0 { missing_analysts.push("情绪面"); } else if sent_c < 50.0 || sent_ph_e.len() > 0 { low_confidence_analysts.push("情绪面"); }
+if news_u || news_c < 0.0 { missing_analysts.push("新闻面"); } else if news_c < 50.0 || news_ph_e.len() > 0 { low_confidence_analysts.push("新闻面"); }
+if fund_u || fund_c < 0.0 { missing_analysts.push("基本面"); } else if fund_c < 50.0 || fund_ph_e.len() > 0 { low_confidence_analysts.push("基本面"); }
+if pol_u || pol_c < 0.0 { missing_analysts.push("政策面"); } else if pol_c < 50.0 || pol_ph_e.len() > 0 { low_confidence_analysts.push("政策面"); }
+if hm_u || hm_c < 0.0 { missing_analysts.push("资金面"); } else if hm_c < 50.0 || hm_ph_e.len() > 0 { low_confidence_analysts.push("资金面"); }
+if lk_u || lk_c < 0.0 { missing_analysts.push("解禁观察"); } else if lk_c < 50.0 || lk_ph_e.len() > 0 { low_confidence_analysts.push("解禁观察"); }
+if res_u || res_c < 0.0 { missing_analysts.push("研报"); } else if res_c < 50.0 || res_ph_e.len() > 0 { low_confidence_analysts.push("研报"); }
+if sec_u || sec_c < 0.0 { missing_analysts.push("行业"); } else if sec_c < 50.0 || sec_ph_e.len() > 0 { low_confidence_analysts.push("行业"); }
+if cat_u || cat_c < 0.0 { missing_analysts.push("催化剂"); } else if cat_c < 50.0 || cat_ph_e.len() > 0 { low_confidence_analysts.push("催化剂"); }
 
 // 2026-09-12: 报告文本含失败标记的节点逐项清单（原实现把 10 节点 OR 成一个布尔，
 // 前端只能看到「检测到占位符」一句话，无法定位是哪个分析师/工具出问题）。
 let placeholder_nodes = [];      // 中文名，供 UI 展示
 let placeholder_node_ids = [];   // 节点缩写（mk/sent/...），供定位 agent 节点
-if mk_ph.len() > 0 { placeholder_nodes.push("技术面"); placeholder_node_ids.push("mk"); }
-if sent_ph.len() > 0 { placeholder_nodes.push("情绪面"); placeholder_node_ids.push("sent"); }
-if news_ph.len() > 0 { placeholder_nodes.push("新闻面"); placeholder_node_ids.push("news"); }
-if fund_ph.len() > 0 { placeholder_nodes.push("基本面"); placeholder_node_ids.push("fund"); }
-if pol_ph.len() > 0 { placeholder_nodes.push("政策面"); placeholder_node_ids.push("pol"); }
-if hm_ph.len() > 0 { placeholder_nodes.push("资金面"); placeholder_node_ids.push("hm"); }
-if lk_ph.len() > 0 { placeholder_nodes.push("解禁观察"); placeholder_node_ids.push("lk"); }
-if res_ph.len() > 0 { placeholder_nodes.push("研报"); placeholder_node_ids.push("res"); }
-if sec_ph.len() > 0 { placeholder_nodes.push("行业"); placeholder_node_ids.push("sec"); }
-if cat_ph.len() > 0 { placeholder_nodes.push("催化剂"); placeholder_node_ids.push("cat"); }
+if mk_ph_e.len() > 0 { placeholder_nodes.push("技术面"); placeholder_node_ids.push("mk"); }
+if sent_ph_e.len() > 0 { placeholder_nodes.push("情绪面"); placeholder_node_ids.push("sent"); }
+if news_ph_e.len() > 0 { placeholder_nodes.push("新闻面"); placeholder_node_ids.push("news"); }
+if fund_ph_e.len() > 0 { placeholder_nodes.push("基本面"); placeholder_node_ids.push("fund"); }
+if pol_ph_e.len() > 0 { placeholder_nodes.push("政策面"); placeholder_node_ids.push("pol"); }
+if hm_ph_e.len() > 0 { placeholder_nodes.push("资金面"); placeholder_node_ids.push("hm"); }
+if lk_ph_e.len() > 0 { placeholder_nodes.push("解禁观察"); placeholder_node_ids.push("lk"); }
+if res_ph_e.len() > 0 { placeholder_nodes.push("研报"); placeholder_node_ids.push("res"); }
+if sec_ph_e.len() > 0 { placeholder_nodes.push("行业"); placeholder_node_ids.push("sec"); }
+if cat_ph_e.len() > 0 { placeholder_nodes.push("催化剂"); placeholder_node_ids.push("cat"); }
 
 let low_count = n_int - good_count - gap_count;
 
@@ -1226,9 +1314,26 @@ if cat_r != "" && count_chars(cat_r) < 200 { warnings.push("催化剂报告字�
 if placeholder_nodes.len() > 0 {
     warnings.push(`检测到占位符/失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记，共出现 ${placeholder_total_occurrences} 次；节点 ${join_arr(placeholder_node_ids, "/")}）`);
 }
+// S2(2026-09-26): 回放设计性降级 —— 显式声明「这些维度没进扣分」，
+// 避免后续维护者把豁免误读为漏扣分（同 degraded_count 的处置先例）。
+let asof_designed_dims_cn = [];
+if asof_design["mk"] == true { asof_designed_dims_cn.push("技术面"); }
+if asof_design["sent"] == true { asof_designed_dims_cn.push("情绪面"); }
+if asof_design["news"] == true { asof_designed_dims_cn.push("新闻面"); }
+if asof_design["fund"] == true { asof_designed_dims_cn.push("基本面"); }
+if asof_design["pol"] == true { asof_designed_dims_cn.push("政策面"); }
+if asof_design["hm"] == true { asof_designed_dims_cn.push("资金面"); }
+if asof_design["lk"] == true { asof_designed_dims_cn.push("解禁观察"); }
+if asof_design["res"] == true { asof_designed_dims_cn.push("研报"); }
+if asof_design["sec"] == true { asof_designed_dims_cn.push("行业"); }
+if asof_design["cat"] == true { asof_designed_dims_cn.push("催化剂"); }
+if asof_designed_dims_cn.len() > 0 {
+    warnings.push(`as-of 回放：${join_arr(asof_designed_dims_cn, "、")} 上游按设计降级（当下语义约束，非工具故障），其失败标记未计入扣分与失败清单`);
+}
 
+let replay_prefix = if asof_methods.len() > 0 { "【as-of 回放】" } else { "" };
 let summary_text = if grade == "F" || grade == "D" {
-    let base = `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${gap_count} 个缺失，${low_count} 个低置信（其中 ${degraded_count} 个为报告含失败标记但自评偏高），${good_count} 个高置信，${untrusted_analyst_count} 个降级。`;
+    let base = `${replay_prefix}数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${gap_count} 个缺失，${low_count} 个低置信（其中 ${degraded_count} 个为报告含失败标记但自评偏高），${good_count} 个高置信，${untrusted_analyst_count} 个降级。`;
     let miss_part = if missing_analysts.len() > 0 { `缺失：${join_arr(missing_analysts, "、")}。` } else { "" };
     let low_part = if low_confidence_analysts.len() > 0 { `低置信：${join_arr(low_confidence_analysts, "、")}。` } else { "" };
     let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记、共出现 ${placeholder_total_occurrences} 次）。` } else { "" };
@@ -1237,7 +1342,7 @@ let summary_text = if grade == "F" || grade == "D" {
 } else {
     let val_part = if field_validation_issues.len() > 0 { `字段校验问题：${field_validation_issues.len()} 个；` } else { "" };
     let ph_part = if placeholder_nodes.len() > 0 { `报告含失败标记：${join_arr(placeholder_nodes, "、")}（${placeholder_total_hits} 种标记、共出现 ${placeholder_total_occurrences} 次）；` } else { "" };
-    `数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${good_count}/${n_int} 高置信度，${untrusted_analyst_count} 个降级，${ph_part}${val_part}平均置信度 ${avg_conf}。`
+    `${replay_prefix}数据质量 ${grade} 级（综合 ${final_score} = 报告 ${report_quality_score_final} × 0.35 + 工具 ${tool_credibility_score_final} × 0.35 + 因子完整度 ${factor_completeness_pct} × 0.30）：${good_count}/${n_int} 高置信度，${untrusted_analyst_count} 个降级，${ph_part}${val_part}平均置信度 ${avg_conf}。`
 };
 
 #{
@@ -1257,6 +1362,11 @@ let summary_text = if grade == "F" || grade == "D" {
     // 2026-09-12: 报告文本含失败标记的逐节点清单（中文名 / 节点缩写 / 命中总数）
     "placeholder_nodes": placeholder_nodes,
     "placeholder_node_ids": placeholder_node_ids,
+    // S2(2026-09-26): as-of 回放设计性降级留痕 —— 豁免了哪些维度、上游降级了哪些
+    // vendor 方法。live 运行恒为 false / []。前端只消费不重算。
+    "asof_replay": asof_methods.len() > 0,
+    "asof_designed_dims": asof_designed_dims_cn,
+    "asof_degraded_methods": asof_methods,
     "placeholder_total_hits": placeholder_total_hits,
     // 2026-09-21: 与 placeholder_total_hits 同一判定集的实际出现次数（词种数 vs 出现次数）
     "placeholder_total_occurrences": placeholder_total_occurrences,

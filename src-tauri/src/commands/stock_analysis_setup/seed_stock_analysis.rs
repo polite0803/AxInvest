@@ -340,7 +340,18 @@ type AlgoToolRow = (
 ///    「闭包按名调用」写进 `rhai_registry.rs` 的静态门禁防复发；同批扫描发现
 ///    `reflection-comparator.rhai` 的 `sink` 闭包同一写法（会让不可信节点扫描恒空、
 ///    `untrusted_count` 恒 0），一并修正。
-pub(crate) const TEMPLATE_VERSION: i32 = 81;
+/// ⚠️ **v82（2026-09-26）：`data-quality.rhai` as-of 回放「设计性降级」豁免**。
+///    实证（300642 as_of=2026-09-22）：回放中搜索/快讯/政策新闻等按「当下语义」设计性
+///    返回空（astock-data as_of 决策矩阵，record_degradation 留痕），分析师如实写
+///    「无法获取」却被失败标记词表按**工具故障**扣分 ⇒ tool_credibility 27、综合 C 级，
+///    回放评分既不可与 live 横比、又以错误归因污染反思链。
+///    本版：新增宿主函数 `pm_asof_degraded_methods`（rhai_pm.rs，live 恒 "[]"），
+///    脚本按 method→维度映射豁免对应分析师的占位扣分与失败清单，
+///    输出新增 `asof_replay` / `asof_designed_dims` / `asof_degraded_methods` 三字段，
+///    summary 带「【as-of 回放】」前缀。判据见 `PLAN-asof-replay-quality-attribution.md`，
+///    门禁在 `rt-workflow/tests/data_quality_placeholder_gate.rs`（S2 四条）。
+///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
+pub(crate) const TEMPLATE_VERSION: i32 = 82;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

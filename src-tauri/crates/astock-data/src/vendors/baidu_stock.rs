@@ -54,13 +54,18 @@ impl BaiduStockVendor {
         // 2026-09-27（T16）顺着查清了迁移目的地：页面真实用的是**另一组接口**
         // `finance.pae.baidu.com/vapi/v1/hotrank?…&day=YYYYMMDD&hour=…`（热股榜，带日期参数）、
         // `sapi/v1/ranks?bizType=stock_rank`、`vapi/v2/blocks?typeCode=HY`（行业板块）…，
-        // 但这些端点对**未签名的客户端**（含同源 fetch）回 `403 hit risk`，
-        // 只有站点自己带签名的 XHR 是 200 ⇒ 「重接参数」不足以恢复，需逆出签名或改走内核通道。
+        // 但这些端点对**未签名的客户端**回 `403 hit risk` ⇒ 「重接参数」不足以恢复。
+        // 门槛已实测定位（2026-09-27，给页面 XHR 挂探针抓到成功请求的完整头）：
+        //   Accept: application/vnd.finance-web.v1+json
+        //   Acs-Token: <前端 JS 现算的签名串>
+        // 缺 Acs-Token 就连在 finance.baidu.com 页面里发同源 fetch 也 403（对照：当日与
+        // 过去日同样 403 ⇒ 与 day 取值无关）；而 webview 通道救不了它 —— 签名是站点的
+        // 请求层加的，不是浏览器环境自带的。故本 vendor 的榜单类方法结构性不可用。
         if let Some(reason) = baidu_envelope_error(&json) {
             return Err(DataError::VendorError {
                 vendor: "baidu_stock".into(),
                 message: format!(
-                    "接口信封非预期（{reason}）；旧 opendata 已迁至 finance.pae.baidu.com 且带风控，需签名或内核通道"
+                    "接口信封非预期（{reason}）；新接口在 finance.pae.baidu.com 且要求前端签名的 Acs-Token 头，非浏览器请求层拿不到"
                 ),
             });
         }

@@ -436,6 +436,24 @@ impl EastMoneyVendor {
         )))
     }
 
+    /// 抓一页 7×24 快讯（游标语义见 `flash_cursor_at`）。
+    /// 第二项是服务端 echo 的 `data.sortEnd`（下一页游标）；缺省时调用方停止翻页。
+    async fn fetch_flash_page(
+        &self,
+        cursor: i64,
+    ) -> Result<(Vec<ClsFlashItem>, Option<i64>), DataError> {
+        let resp = self.em_get(&flash_list_url(cursor, FLASH_PAGE_SIZE)).await?;
+        let json: Value = resp.json().await?;
+        let items = match json["data"]["fastNewsList"].as_array() {
+            Some(arr) => arr,
+            None => match json["data"].as_array() {
+                Some(arr) => arr,
+                None => return Ok((vec![], None)),
+            },
+        };
+        Ok((parse_fast_news(items), json["data"]["sortEnd"].as_i64()))
+    }
+
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     /// 429 限流时使用更长等待（2s → 4s → 8s）
     /// 连接级断裂（IncompleteMessage / TLS EOF / RST）时若配置了代理，
@@ -812,6 +830,82 @@ fn clip_page_to_cutoff(items: &[NewsItem], cutoff: &str) -> Vec<NewsItem> {
             !key.is_empty() && key <= cutoff
         })
         .cloned()
+        .collect()
+}
+
+/// 7×24 快讯分页大小（实测接口按 20 条/页返回，每页时间跨度约 1~2.5 小时）。
+const FLASH_PAGE_SIZE: u32 = 20;
+/// as-of 回溯时的翻页上限：游标可直接落到截止日当天末尾，正常 1~2 页就够；
+/// 上限只防「当天条目极多」时翻不完，不是用来跨天硬翻的。
+const FLASH_ASOFP_MAX_PAGES: u32 = 4;
+
+/// 北京时间偏移（快讯的 `showTime` 是 CST 墙钟，游标按 UTC 秒计 ⇒ 换算必须钉死 +08）
+fn cn_offset() -> chrono::FixedOffset {
+    chrono::FixedOffset::east_opt(8 * 3600).expect("UTC+8 偏移恒合法")
+}
+
+/// `getFastNewsList` 的 `sortEnd` 游标：**Unix 秒 × 1e6**（响应里 `data.sortEnd` 同族回 echo，
+/// 与条目自带的 `realSort` 一致）。
+///
+/// 实测依据（2026-09-26）：
+/// - 传日期串 `"2026-09-18 15:00:00"` **被忽略**（仍返回当下最新）⇒ 旧注释把参数类型写错了；
+/// - 传 `1789714800000000`（= 2026-09-18 15:00 CST 的秒数 ×1e6）⇒ 返回 14:58:47 起；
+///   +1h ⇒ 15:58:43；+4h ⇒ 18:57:03 —— 线性、可直接跳日；
+/// - 传位数错的值（如 ×1e9）被判越界 ⇒ 静默回落到「当下最新」，所以取数后仍要按日期复核。
+fn flash_cursor_at(dt: &chrono::DateTime<chrono::FixedOffset>) -> i64 {
+    dt.timestamp() * 1_000_000
+}
+
+/// 组装 `getFastNewsList` 请求 URL（`req_trace` 只做埋点，每次新生成）
+fn flash_list_url(cursor: i64, page_size: u32) -> String {
+    let req_trace = chrono::Utc::now().timestamp_millis();
+    format!(
+        "https://np-listapi.eastmoney.com/comm/web/getFastNewsList?client=web&biz=web_7x24&fastColumn=102&page_index=1&pageSize={page_size}&req_trace={req_trace}&sortEnd={cursor}"
+    )
+}
+
+/// 解析 `data.fastNewsList`（字段别名：title↔summary、showTime↔time↔ctime、
+/// source↔mediaName）。`data` 直接是数组的旧形态也兼容。
+fn parse_fast_news(items: &[Value]) -> Vec<ClsFlashItem> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let title = item
+                .get("title")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    item.get("summary")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.chars().take(80).collect::<String>())
+                })?;
+            // title 与 summary 都是空串时上面两支会产出 Some("")，条目会带着空标题
+            // 流进报告（旧 live 代码即如此）；这种条目对分析师没有信息量，直接丢。
+            if title.trim().is_empty() {
+                return None;
+            }
+            let content = item
+                .get("summary")
+                .or_else(|| item.get("content"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let publish_time = item
+                .get("showTime")
+                .or_else(|| item.get("time"))
+                .or_else(|| item.get("ctime"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let source = item
+                .get("source")
+                .or_else(|| item.get("mediaName"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            Some(ClsFlashItem { title, content, publish_time, source })
+        })
         .collect()
 }
 
@@ -2267,62 +2361,68 @@ impl StockVendor for EastMoneyVendor {
 
     async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
         // 2026-08-01 修复：旧接口 getNewsByColumns?column=250（财联社快讯频道）已整体失效
-        // （curl 实测所有 column 均返回空 list）。改用东财 7x24 快讯接口 getFastNewsList：
-        //   - 参数必须 camelCase：pageSize（非 page_size）+ sortEnd（"YYYY-MM-DD HH:MM:SS"）
-        //   - 返回 data.fastNewsList，字段 summary/title/content/time
-        let req_trace = chrono::Utc::now().timestamp_millis();
-        let now_cn = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-        let url = format!(
-            "https://np-listapi.eastmoney.com/comm/web/getFastNewsList?client=web&biz=web_7x24&fastColumn=102&page_index=1&pageSize=20&req_trace={req_trace}&sortEnd={now_cn}"
-        );
+        // （curl 实测所有 column 均返回空 list）。改用东财 7x24 快讯接口 getFastNewsList。
+        // `sortEnd` 的真实口径见 `flash_cursor_at`（游标是 Unix 秒 ×1e6，不是日期串）。
+        let now = chrono::Utc::now().with_timezone(&cn_offset());
+        let (items, _) = self.fetch_flash_page(flash_cursor_at(&now)).await?;
+        Ok(items)
+    }
 
-        let resp = self.em_get(&url).await?;
+    /// T7：按截止日回溯 7×24 快讯（2026-09-26 实测通道）。
+    ///
+    /// 关键点是游标可以直接**跳日**：用截止日当天 23:59:59(CST) 的秒数 ×1e6 起翻，
+    /// 1~2 页即得当日快讯；不必从当下逐页回翻（实测每页 20 条只覆盖约 1~2.5 小时，
+    /// 逐页翻一天要 12+ 页、翻一周要近百页）。当日一条都没有时报 `Err` 而不是返空——
+    /// 空会被下游读成「那天风平浪静」。
+    async fn get_cls_flash_with_asof(&self) -> Result<Vec<ClsFlashItem>, DataError> {
+        let ctx = crate::as_of::current_as_of().ok_or_else(|| {
+            DataError::ParseError("get_cls_flash_with_asof 调用时缺 as_of 上下文".into())
+        })?;
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        let day_end = ctx
+            .as_of_date
+            .and_hms_opt(23, 59, 59)
+            .and_then(|t| t.and_local_timezone(cn_offset()).single())
+            .ok_or_else(|| DataError::ParseError(format!("截止日 {cutoff} 无法构造当日末时刻")))?;
 
-        let json: Value = resp.json().await?;
+        let mut cursor = flash_cursor_at(&day_end);
+        let mut kept: Vec<ClsFlashItem> = Vec::new();
+        let mut passed_the_day = false;
+        for _ in 0..FLASH_ASOFP_MAX_PAGES {
+            let (items, next) = self.fetch_flash_page(cursor).await?;
+            if items.is_empty() {
+                break;
+            }
+            for it in items {
+                let key = crate::news_date_key(&it.publish_time);
+                if key > cutoff.as_str() {
+                    continue; // 游标余量：当日之后的条目
+                }
+                if key < cutoff.as_str() {
+                    passed_the_day = true; // 已翻过当日 ⇒ 后面的页不再属于本维度
+                    break;
+                }
+                kept.push(it);
+            }
+            if passed_the_day || kept.len() >= FLASH_PAGE_SIZE as usize {
+                break;
+            }
+            cursor = match next {
+                Some(c) if c > 0 => c,
+                _ => break,
+            };
+        }
 
-        let items = match json["data"]["fastNewsList"].as_array() {
-            Some(arr) => arr,
-            None => match json["data"].as_array() {
-                Some(arr) => arr,
-                None => return Ok(vec![]),
-            },
-        };
-
-        Ok(items
-            .iter()
-            .filter_map(|item| {
-                let title = item
-                    .get("title")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-                    .or_else(|| {
-                        item.get("summary")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.chars().take(80).collect::<String>())
-                    })?;
-                let content = item
-                    .get("summary")
-                    .or_else(|| item.get("content"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let publish_time = item
-                    .get("showTime")
-                    .or_else(|| item.get("time"))
-                    .or_else(|| item.get("ctime"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let source = item
-                    .get("source")
-                    .or_else(|| item.get("mediaName"))
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-
-                Some(ClsFlashItem { title, content, publish_time, source })
-            })
-            .collect())
+        if kept.is_empty() {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!(
+                    "截止日 {cutoff} 当天未见 7×24 快讯（回溯 {FLASH_ASOFP_MAX_PAGES} 页 ×{FLASH_PAGE_SIZE} 条）"
+                ),
+            });
+        }
+        kept.truncate(FLASH_PAGE_SIZE as usize);
+        Ok(kept)
     }
 
     async fn get_policy_news(
@@ -3144,11 +3244,14 @@ impl StockVendor for EastMoneyVendor {
             | "get_policy_news"
             | "search_news"
             // T5(2026-09-26)：中登质押报表支持 TRADE_DATE<= 过滤，见 get_pledge_data_with_asof
-            | "get_pledge_data" => AsOfCapability::NativeDateParam,
+            | "get_pledge_data"
+            // T7(2026-09-26)：7×24 快讯用 realSort 游标（Unix 秒 ×1e6）直接跳日，
+            // 见 get_cls_flash_with_asof —— 它不是「无历史语义」，只是接口不认日期串
+            | "get_cls_flash" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单/分类(本地缓存 P5 启用)
-            "get_hot_stocks" | "get_industry_ranking" | "get_cls_flash" | "get_concept_blocks" => {
+            "get_hot_stocks" | "get_industry_ranking" | "get_concept_blocks" => {
                 AsOfCapability::NoHistoricalSemantic
             },
             // Fallthrough: vendor 返回带 date 字段的全量,lib.rs 截断(已正确)
@@ -3646,6 +3749,8 @@ mod asof_capability_tests {
             "search_news",
             // T5(2026-09-26)：TRADE_DATE<= 过滤取截止日前最近一期，见 get_pledge_data_with_asof
             "get_pledge_data",
+            // T7(2026-09-26)：realSort 游标（Unix 秒 ×1e6）可跳日，见 get_cls_flash_with_asof
+            "get_cls_flash",
         ] {
             assert_eq!(
                 v.asof_capability(m),
@@ -3670,8 +3775,7 @@ mod asof_capability_tests {
     #[test]
     fn no_historical_semantic_methods() {
         let v = make_vendor();
-        for m in &["get_hot_stocks", "get_industry_ranking", "get_cls_flash", "get_concept_blocks"]
-        {
+        for m in &["get_hot_stocks", "get_industry_ranking", "get_concept_blocks"] {
             assert_eq!(
                 v.asof_capability(m),
                 AsOfCapability::NoHistoricalSemantic,
@@ -4071,5 +4175,76 @@ mod pledge_asof_tests {
     fn pledge_url_normalizes_prefixed_codes() {
         let u = EastMoneyVendor::pledge_report_url("sz300642", Some("2026-06-30"));
         assert!(u.contains("SECUCODE%3D%22300642.SZ%22"), "前缀市场位需归一: {u}");
+    }
+}
+
+#[cfg(test)]
+mod flash_asof_tests {
+    //! T7(2026-09-26)：7×24 快讯回溯的游标与解析判据 —— 零网络。
+    //!
+    //! 实测纠正了两件事：① `sortEnd` **不是**日期字符串（传 `"2026-09-18 15:00:00"` 被忽略，
+    //! 仍返回当下最新，旧注释就这么写错）；② 真游标 = Unix 秒 ×1e6（与条目的 `realSort`
+    //! 同族），位数错（如 ×1e9）会被服务端判越界并**静默回落当下** ⇒ 量级必须锁死，
+    //! 否则回放会以为「拿到了那天的快讯」而实际拿到今天。
+    use super::*;
+    use chrono::{FixedOffset, NaiveDate};
+
+    fn day_end_cst(y: i32, m: u32, d: u32) -> chrono::DateTime<FixedOffset> {
+        NaiveDate::from_ymd_opt(y, m, d)
+            .unwrap()
+            .and_hms_opt(23, 59, 59)
+            .unwrap()
+            .and_local_timezone(cn_offset())
+            .single()
+            .unwrap()
+    }
+
+    /// 游标量级：2020 年代必须落在 16 位（=秒 ×1e6）。这是「跳日」成立的前提，
+    /// 也是实测里唯一会让结果**静默变错**的地方。
+    #[test]
+    fn flash_cursor_is_epoch_micros_not_millis_or_nanos() {
+        let c = flash_cursor_at(&day_end_cst(2026, 9, 18));
+        assert!(
+            (1_000_000_000_000_000..10_000_000_000_000_000).contains(&c),
+            "游标应为 16 位: {c}"
+        );
+        assert_eq!(c / 1_000_000, day_end_cst(2026, 9, 18).timestamp(), "游标 = 秒 ×1e6");
+    }
+
+    /// 游标必须随日期单调推进（跳日靠这个序）
+    #[test]
+    fn flash_cursor_is_monotonic_per_day() {
+        let a = flash_cursor_at(&day_end_cst(2026, 9, 18));
+        let b = flash_cursor_at(&day_end_cst(2026, 9, 19));
+        assert!(b > a, "次日游标必须更大: {a} -> {b}");
+        assert_eq!(b - a, 86_400 * 1_000_000, "一天的跨度换算必须落在 CST 固定偏移上");
+    }
+
+    /// URL 里的游标与分页参数不得走 query 编码路径（服务端按原始数字解析 sortEnd）
+    #[test]
+    fn flash_url_carries_raw_cursor_and_page_size() {
+        let u = flash_list_url(1_789_714_800_000_000, 20);
+        assert!(u.contains("sortEnd=1789714800000000"), "游标必须原样出现在 URL: {u}");
+        assert!(u.contains("pageSize=20"), "{u}");
+        assert!(u.contains("req_trace="), "缺 req_trace 会被判参数缺失: {u}");
+    }
+
+    /// 字段别名链：title 缺失时用 summary 截断，时间/来源同理
+    #[test]
+    fn parse_flash_keeps_field_aliases() {
+        let raw = serde_json::json!([
+            {"title":"央行公告","summary":"正文……","showTime":"2026-09-18 14:58:47","source":"新华社"},
+            {"summary":"只有摘要的一条快讯信息","time":"2026-09-18 14:48:56","mediaName":"财联社"},
+            {"title":"","summary":""},
+        ]);
+        let items = parse_fast_news(raw.as_array().unwrap());
+        assert_eq!(items.len(), 2, "title/summary 全空的条目应被丢弃");
+        assert_eq!(items[0].publish_time, "2026-09-18 14:58:47");
+        assert_eq!(items[0].source.as_deref(), Some("新华社"));
+        assert_eq!(
+            items[1].title, "只有摘要的一条快讯信息",
+            "无 title 时用 summary 兜底（≤80 字）"
+        );
+        assert_eq!(items[1].source.as_deref(), Some("财联社"));
     }
 }

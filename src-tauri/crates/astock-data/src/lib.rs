@@ -4553,7 +4553,8 @@ impl AStockClient {
 
     pub async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
         // P4: 按 vendor 申报的 capability 决策
-        // eastmoney/akshare NoHistoricalSemantic
+        // T7(2026-09-26) 起 eastmoney 申报 NativeDateParam：7×24 接口的 `sortEnd` 真游标是
+        // realSort（Unix 秒 ×1e6），可以直接跳到达标日 ⇒ 快讯在回放里不再只能靠快照。
         if crate::as_of::is_asof_active() {
             // P5:先查每日快照缓存
             let as_of = crate::as_of::current_as_of();
@@ -4567,33 +4568,31 @@ impl AStockClient {
                     }
                 }
             }
-            let mut unsupported = 0usize;
-            for name in &self.routing.cls_flash {
-                if let Some(vendor) = self.find_vendor(name) {
-                    match vendor.asof_capability("get_cls_flash") {
-                        AsOfCapability::NativeDateParam => {
-                            if let Ok(r) = vendor.get_cls_flash_with_asof().await {
-                                if !r.is_empty() {
-                                    return Ok(r);
-                                }
+            let (hit, probe) = self
+                .asof_probe(
+                    "get_cls_flash",
+                    &self.routing.cls_flash,
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _| {
+                        Box::pin(async move {
+                            let items = vendor.get_cls_flash_with_asof().await?;
+                            if items.is_empty() {
+                                Ok(None)
+                            } else {
+                                Ok(Some(items))
                             }
-                        },
-                        // 逐源"没有历史语义"不各记一条 —— 它对决策无信息量，
-                        // 只会把面板刷成同一件事（与 get_margin_data 同口径）
-                        _ => {
-                            unsupported += 1;
-                            continue;
-                        },
-                    }
-                }
+                        })
+                    },
+                )
+                .await;
+            if let Some(items) = hit {
+                return Ok(items);
             }
+            // 失败原因（当日无条目 / 源报错 / 无通道）由 probe 汇总成一条，不逐源刷屏
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_cls_flash",
-                &format!(
-                    "as-of 模式快讯不可用：无当日快照，{unsupported} 个源无 as-of 通道\
-                     （7×24 接口按游标翻页、不支持指定日期）"
-                ),
+                &probe.reason("as-of 7×24 快讯（当日快照亦未命中）"),
             );
             return Ok(vec![]);
         }
@@ -4994,7 +4993,10 @@ impl AStockClient {
             crate::as_of::record_degradation(
                 "astock-data",
                 "get_option_pcr",
-                &probe.reason(&format!("as-of {stock_code} 期权 PCR")),
+                &probe.reason(&format!(
+                    // 真原因是「标的没有场内期权 ⇒ 本维度天然不适用」，不是路由没配通
+                    "as-of {stock_code} 期权 PCR（仅 50/300 等 ETF 期权有公开数据，个股通常不适用）"
+                )),
             );
             return Ok(None);
         }
@@ -5970,15 +5972,28 @@ mod asof_realtime_degrade_tests {
         assert!(r.unwrap().is_empty(), "replay 模式必须返回空列表");
     }
 
+    /// T7 改写（2026-09-26）：原断言「replay 模式必须返回空列表」的前提已被推翻 ——
+    /// 7×24 接口有真实的跳日游标（`realSort` = Unix 秒 ×1e6），回放**能**拿到那天的快讯。
+    /// 于是不变量从「必须为空」升级为「**不得泄露截止日之后**」：拿到就得是当天的，
+    /// 拿不到（无网络 / 当日无条目）允许为空，但绝不能用今天的快讯冒充那天。
     #[tokio::test]
-    async fn get_cls_flash_returns_empty_in_asof_scope() {
+    async fn get_cls_flash_in_asof_never_leaks_later_days() {
         use crate::as_of::AS_OF;
         let client = AStockClient::new();
         let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
         let r = AS_OF.scope(Some(ctx), async { client.get_cls_flash().await }).await;
         assert!(r.is_ok());
-        assert!(r.unwrap().is_empty(), "replay 模式必须返回空列表");
+        let items = r.unwrap();
+        for it in &items {
+            let key = news_date_key(&it.publish_time);
+            assert!(
+                !key.is_empty() && key <= "2026-06-01",
+                "回放里的快讯必须不晚于截止日，实际 {} 「{}」",
+                it.publish_time,
+                it.title
+            );
+        }
     }
 
     // ── vendor trait 大重构 P0 测试 ───────────────────────────

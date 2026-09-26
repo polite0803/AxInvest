@@ -2720,7 +2720,8 @@ impl AStockClient {
 
     pub async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
         // P4: 按 vendor 申报的 capability 决策
-        // 目前所有 vendor 均为 Fallthrough(不支持 as-of 参数),as-of 模式返回 None
+        // 2026-09-26 起 eastmoney 申报 NativeDateParam（get_money_flow_with_asof，
+        // 拉全窗 + 本地按截止日过滤）；更早于取数窗口（约半年）的回放仍走 ③ 降级。
         if crate::as_of::is_asof_active() {
             // ① 个股级每日快照（`run_daily_snapshot_sweep` 当日采过则直接回放）
             let date = crate::as_of::current_date_or_now();

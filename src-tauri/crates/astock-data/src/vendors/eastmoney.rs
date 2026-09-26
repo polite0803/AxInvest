@@ -222,6 +222,36 @@ fn extract_report_period(title: &str) -> Option<String> {
 
 /// 构建东方财富 secid
 ///
+/// 解析 push2his fflow/daykline 的 klines CSV 数组（f51=日期 f52=主力 f53=小单 f54=中单 f55=大单 f56=超大单）。
+/// 接口按日期**升序**返回（2026-09-26 实测），本函数保持原序，排序由调用方显式做。
+fn parse_fflow_klines(klines: &[Value]) -> Vec<MoneyFlowDaily> {
+    klines
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(|line| {
+            let parts: Vec<&str> = line.split(',').collect();
+            let f = |i: usize| -> f64 { parts.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0) };
+            MoneyFlowDaily {
+                date: parts.first().unwrap_or(&"").to_string(),
+                main_net_inflow: f(1),
+                small_net: f(2),
+                medium_net: f(3),
+                large_net: f(4),
+                super_large_net: f(5),
+            }
+        })
+        .collect()
+}
+
+/// as-of 窗口选择：入参为**任意序**的日频资金流行，返回 `date <= cutoff` 中最近的
+/// 至多 5 条，按日期**降序**（最新在前，与 MoneyFlow.history 消费口径一致）。
+fn select_fflow_window(mut rows: Vec<MoneyFlowDaily>, cutoff: &str) -> Vec<MoneyFlowDaily> {
+    rows.retain(|r| r.date.as_str() <= cutoff);
+    rows.sort_by(|a, b| b.date.cmp(&a.date));
+    rows.truncate(5);
+    rows
+}
+
 /// A 股：`1.600519`（上海）、`0.000001`（深圳）
 /// 港股：`116.00700`（去掉 .HK 后缀，加 116 前缀）
 /// 美股：`105.AAPL`（去掉 .US 后缀，加 105 前缀）
@@ -1074,23 +1104,13 @@ impl StockVendor for EastMoneyVendor {
             _ => return Ok(None),
         };
 
-        // 按 f51 日期降序（最新在前）。第 0 条映射到顶层字段，全部 5 条入 history
-        // （prompt 要求"连续 3-5 日趋势"分析）。
-        let parse_row = |line: &str| -> MoneyFlowDaily {
-            let parts: Vec<&str> = line.split(',').collect();
-            let f = |i: usize| -> f64 { parts.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0) };
-            MoneyFlowDaily {
-                date: parts.first().unwrap_or(&"").to_string(),
-                main_net_inflow: f(1),
-                small_net: f(2),
-                medium_net: f(3),
-                large_net: f(4),
-                super_large_net: f(5),
-            }
+        // 修复(2026-09-26): 接口实际按日期**升序**返回（实测 lmt=0 时 first=最早、
+        // last=最新），原代码直接取 history[0] 当「最新」⇒ 顶层字段拿到的是窗口内
+        // **最老一天** 的主力净流入。现显式降序，与注释口径一致。
+        let history = select_fflow_window(parse_fflow_klines(klines), "9999-12-31");
+        let Some(latest) = history.first() else {
+            return Ok(None);
         };
-        let history: Vec<MoneyFlowDaily> =
-            klines.iter().filter_map(|v| v.as_str()).map(parse_row).collect();
-        let latest = &history[0];
         Ok(Some(MoneyFlow {
             date: latest.date.clone(),
             main_net_inflow: latest.main_net_inflow,
@@ -1099,6 +1119,63 @@ impl StockVendor for EastMoneyVendor {
             medium_net: latest.medium_net,
             small_net: latest.small_net,
             history,
+        }))
+    }
+
+    async fn get_money_flow_with_asof(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<MoneyFlow>, DataError> {
+        // S3(2026-09-26, PLAN-asof-replay-quality-attribution)：回放里「主力净流入」
+        // 因子恒缺的修复。此前 eastmoney 对 get_money_flow 申报 Fallthrough，
+        // 而 lib.rs 的 as-of 分支只走快照与 NativeDateParam 两路 ⇒ 直接降级返回 None。
+        // ⚠ push2his fflow/daykline **忽略 beg/end**（2026-09-26 实测：lmt=0 恒返回
+        //   最近 ~120 个交易日，与 end 取值无关）⇒ 只能拉全窗后**本地按截止日过滤**
+        //   （形态对齐 get_north_bound_flow_with_asof 的「升序→截尾→反转」处理）。
+        //   代价：截止日早于窗口头（约半年前）的回放仍拿不到，保持 record_degradation。
+        let as_of = crate::as_of::current_as_of()
+            .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
+        let cutoff = as_of.as_of_date.format("%Y-%m-%d").to_string();
+        let secid = to_em_secid(stock_code);
+        let url = format!(
+            "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?\
+            lmt=0&klt=101&fields1=f1,f2,f3,f7&\
+            fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65&\
+            secid={secid}"
+        );
+
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await?;
+
+        let klines = match json["data"]["klines"].as_array() {
+            Some(arr) if !arr.is_empty() => arr,
+            _ => return Ok(None),
+        };
+
+        // 升序全窗 → 过滤 date<=cutoff → 最近 5 条降序（纯函数，边界测试见 fflow_asof_tests）
+        let recent = select_fflow_window(parse_fflow_klines(klines), &cutoff);
+        if recent.is_empty() {
+            tracing::debug!(
+                "[eastmoney] get_money_flow_with_asof 未匹配到 date<={cutoff} 的资金流数据(stock_code={stock_code})"
+            );
+            return Ok(None);
+        }
+        // 截止日休市时取到的是更早一天 —— 正确行为，留 info 便于事后核对（同两融先例）
+        if recent[0].date != cutoff {
+            tracing::info!(
+                "[eastmoney] 资金流 as-of：{stock_code} 截止日 {cutoff} 无披露，取最近交易日 {}",
+                recent[0].date
+            );
+        }
+        let latest = &recent[0];
+        Ok(Some(MoneyFlow {
+            date: latest.date.clone(),
+            main_net_inflow: latest.main_net_inflow,
+            super_large_net: latest.super_large_net,
+            large_net: latest.large_net,
+            medium_net: latest.medium_net,
+            small_net: latest.small_net,
+            history: recent,
         }))
     }
 
@@ -2950,12 +3027,15 @@ impl StockVendor for EastMoneyVendor {
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
             // NativeDateParam: URL 真的支持日期参数
+            // （get_money_flow 是「拉全窗 + 本地按截止日过滤」形态 —— fflow 接口本身
+            //   忽略 beg/end，见 get_money_flow_with_asof 注释；2026-09-26 起申报）
             "get_klines"
             | "get_margin_data"
             | "get_north_bound_flow"
             | "get_market_dragon_tiger"
             | "get_announcements"
-            | "get_research_reports" => AsOfCapability::NativeDateParam,
+            | "get_research_reports"
+            | "get_money_flow" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单/分类(本地缓存 P5 启用)
@@ -3682,6 +3762,80 @@ mod index_asof_tests {
     #[test]
     fn index_list_is_shared() {
         assert_eq!(EM_INDEX_SECIDS.len(), 3);
-        assert_eq!(EM_INDEX_SECIDS[0], ("1.000001", "上证指数"));
+        assert_eq!(EM_INDEX_SECIDS[0], ("1.000001", "000001", "上证指数"));
+    }
+}
+
+#[cfg(test)]
+mod fflow_asof_tests {
+    //! S3(2026-09-26)：as-of 资金流窗口选择的边界判据。
+    //! 缺陷背景：回放里「主力净流入」因子恒缺 —— eastmoney 此前对 get_money_flow
+    //! 申报 Fallthrough 而 lib.rs as-of 分支只走快照/NativeDateParam 两路 ⇒ 恒 None。
+    //! 修复形态是「拉全窗 + 本地按截止日过滤」，本模块钉住纯函数部分
+    //! （HTTP 部分归 live-network，不在此重复）。
+
+    use super::*;
+
+    fn row(date: &str, main: f64) -> MoneyFlowDaily {
+        MoneyFlowDaily {
+            date: date.into(),
+            main_net_inflow: main,
+            small_net: 0.0,
+            medium_net: 0.0,
+            large_net: 0.0,
+            super_large_net: 0.0,
+        }
+    }
+
+    #[test]
+    fn select_window_excludes_after_cutoff_and_keeps_latest_first() {
+        // 接口升序 + 跨截止日：06-10 是未来数据，绝不得出现在回放结果里（时间泄露桶）；
+        // 顶层字段口径 = history[0] 必须是截止日当天（最新一条）。
+        let rows = vec![row("2024-05-30", 1.0), row("2024-06-03", 3.0), row("2024-06-10", 9.0)];
+        let got = select_fflow_window(rows, "2024-06-03");
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].date, "2024-06-03", "最新一条必须在前（顶层字段取值口径）");
+        assert_eq!(got[1].date, "2024-05-30");
+    }
+
+    #[test]
+    fn select_window_truncates_to_five_and_sorts_any_input_order() {
+        let rows = vec![
+            row("2024-06-05", 5.0),
+            row("2024-06-01", 1.0),
+            row("2024-06-04", 4.0),
+            row("2024-06-02", 2.0),
+            row("2024-06-03", 3.0),
+            row("2024-05-31", 0.5),
+        ];
+        let got = select_fflow_window(rows, "2024-06-05");
+        assert_eq!(got.len(), 5, "history 至多 5 条（prompt 口径：连续 3-5 日趋势）");
+        let dates: Vec<_> = got.iter().map(|r| r.date.as_str()).collect();
+        assert_eq!(
+            dates,
+            vec!["2024-06-05", "2024-06-04", "2024-06-03", "2024-06-02", "2024-06-01"]
+        );
+    }
+
+    #[test]
+    fn select_window_all_after_cutoff_is_empty() {
+        // 截止日早于取数窗口 ⇒ 空（上层据此 record_degradation），不得拿未来数据充数。
+        let rows = vec![row("2024-07-01", 1.0), row("2024-07-02", 2.0)];
+        assert!(select_fflow_window(rows, "2024-06-03").is_empty());
+    }
+
+    #[test]
+    fn parse_fflow_klines_maps_csv_fields() {
+        let v: Vec<Value> = vec![Value::String(
+            "2024-06-03,100.0,-20.0,-30.0,-40.0,140.0,x,y,z,w,u,t,s,r,q".into(),
+        )];
+        let rows = parse_fflow_klines(&v);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].date, "2024-06-03");
+        assert_eq!(rows[0].main_net_inflow, 100.0);
+        assert_eq!(rows[0].small_net, -20.0);
+        assert_eq!(rows[0].medium_net, -30.0);
+        assert_eq!(rows[0].large_net, -40.0);
+        assert_eq!(rows[0].super_large_net, 140.0);
     }
 }

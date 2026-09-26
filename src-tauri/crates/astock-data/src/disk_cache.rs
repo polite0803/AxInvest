@@ -23,6 +23,16 @@ const DEFAULT_CAPACITY: usize = 10_000;
 const EVICT_RATIO: f64 = 0.1;
 const FLUSH_DIRTY_THRESHOLD: usize = 32;
 
+/// 字节预算（两个 DiskCache 实例共用同一默认值）。
+///
+/// **为什么条数上限不够**：`capacity` 只数条目，而 astock 的缓存值体量差三个数量级——
+/// 一条指数行情约 400 B，一条日线约 **70 KB**（`fetch_limit = max(limit, 500)`，
+/// 单根 K 线 JSON 实测 ~144 B，且缓存存的是全量、读时才切最后 limit 根）。
+/// 10_000 条的上限因此等于允许「几百 MB 一个 JSON 文件」，
+/// 而它每次 flush 都是**全量重写**（临时文件 + rename）。
+/// ⇒ 以字节为准再设一道硬预算，超了按 `last_access` LRU 淘汰。
+const DEFAULT_MAX_BYTES: i64 = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEntry {
     value: String,
@@ -51,6 +61,8 @@ pub struct DiskCache {
     path: PathBuf,
     inner: Arc<Mutex<HashMap<String, CacheEntry>>>,
     capacity: usize,
+    /// 字节预算，见 `DEFAULT_MAX_BYTES` 的注释
+    max_bytes: i64,
     dirty_count: AtomicUsize,
     last_flush_unix: AtomicI64,
 }
@@ -58,6 +70,11 @@ pub struct DiskCache {
 impl DiskCache {
     /// 加载磁盘缓存到内存;若文件不存在,初始化空缓存。
     pub fn load_or_default(path: PathBuf) -> Arc<Self> {
+        Self::load_with_budget(path, DEFAULT_CAPACITY, DEFAULT_MAX_BYTES)
+    }
+
+    /// 按指定条数与字节预算加载（测试用小额度验证淘汰；生产走 `load_or_default`）
+    pub fn load_with_budget(path: PathBuf, capacity: usize, max_bytes: i64) -> Arc<Self> {
         let inner = match std::fs::read_to_string(&path) {
             Ok(json) => match serde_json::from_str::<DiskSnapshot>(&json) {
                 Ok(snap) => {
@@ -82,13 +99,54 @@ impl DiskCache {
                 HashMap::new()
             },
         };
-        Arc::new(Self {
+        let cache = Self {
             path,
             inner: Arc::new(Mutex::new(inner)),
-            capacity: DEFAULT_CAPACITY,
+            capacity,
+            max_bytes,
             dirty_count: AtomicUsize::new(0),
             last_flush_unix: AtomicI64::new(0),
-        })
+        };
+        // 旧文件可能是在「只有条数上限」的年代写下的（预算机制上线前已攒到几百 MB）
+        // ⇒ 加载后立刻按预算裁一次并标脏，让本次 flush 就把文件缩回去。
+        {
+            let mut g = cache.inner.lock();
+            if Self::trim_to_budget(&mut g, cache.max_bytes) > 0 {
+                cache.dirty_count.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        Arc::new(cache)
+    }
+
+    /// 单条目占用的字节数（key + value；元数据两三个 i64 忽略不计）
+    fn entry_bytes(key: &str, entry: &CacheEntry) -> i64 {
+        (key.len() + entry.value.len()) as i64
+    }
+
+    /// 按 `last_access` 从最旧开始淘汰，直到总量不超过 `max_bytes`。返回淘汰条数。
+    ///
+    /// 调用方持锁 —— 与 `set` 的条数淘汰共用同一把锁，不额外开临界区。
+    fn trim_to_budget(entries: &mut HashMap<String, CacheEntry>, max_bytes: i64) -> usize {
+        let mut total: i64 = entries.iter().map(|(k, e)| Self::entry_bytes(k, e)).sum();
+        if total <= max_bytes {
+            return 0;
+        }
+        let mut by_age: Vec<(String, i64)> =
+            entries.iter().map(|(k, e)| (k.clone(), e.last_access)).collect();
+        // 同 last_access 时按 key 定序，保证淘汰顺序可复现（测试依赖）
+        by_age.sort();
+        let mut evicted = 0usize;
+        for (k, _) in by_age {
+            if total <= max_bytes {
+                break;
+            }
+            if let Some(e) = entries.remove(&k) {
+                total -= Self::entry_bytes(&k, &e);
+                evicted += 1;
+            }
+        }
+        tracing::info!("[l2] 超字节预算 {max_bytes}，按 LRU 淘汰 {evicted} 条（余 {total} 字节）");
+        evicted
     }
 
     fn now_unix() -> i64 {
@@ -130,6 +188,16 @@ impl DiskCache {
         } else {
             now + ttl_secs
         };
+        // 单条就超预算 ⇒ 直接不存。否则会出现「每写一条都把整个缓存清空」的自杀式淘汰，
+        // 缓存退化成零，而日志被刷满。
+        if (key.len() + value.len()) as i64 > self.max_bytes {
+            tracing::warn!(
+                "[l2] 单条超字节预算（{} > {}），跳过缓存: key={key}",
+                key.len() + value.len(),
+                self.max_bytes
+            );
+            return;
+        }
         let mut inner = self.inner.lock();
 
         // 容量满时 LRU 淘汰
@@ -149,6 +217,8 @@ impl DiskCache {
         }
 
         inner.insert(key, CacheEntry { value, expires_at, last_access: now });
+        // 字节预算淘汰（条数上限拦不住几条 70 KB 的 K 线把文件撑爆）
+        Self::trim_to_budget(&mut inner, self.max_bytes);
         self.dirty_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -199,6 +269,17 @@ impl DiskCache {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// 当前占用字节数（key + value）。字节预算是否真生效，只有这个数能证明。
+    pub fn total_bytes(&self) -> i64 {
+        let g = self.inner.lock();
+        g.iter().map(|(k, e)| Self::entry_bytes(k, e)).sum()
+    }
+
+    /// 本实例的字节预算（见 `DEFAULT_MAX_BYTES`）
+    pub fn max_bytes(&self) -> i64 {
+        self.max_bytes
     }
 
     /// 清空所有条目(测试用)
@@ -349,5 +430,51 @@ mod tests {
             c.set(format!("k{i}"), "v".into(), 60);
         }
         assert!(c.should_flush(), "达到 dirty 阈值应 flush");
+    }
+
+    // ── 字节预算（2026-09-26 新增）─────────────────────────────
+    // 只有条数上限时，几条 70 KB 的 K 线就能把文件撑到几百 MB，而 flush 是**全量重写**
+    // ⇒ 上限必须按字节算，不能只按条数。
+
+    #[test]
+    fn byte_budget_caps_total_size() {
+        let c = DiskCache::load_with_budget(tmp_path("budget"), 10_000, 1_000);
+        for i in 0..20 {
+            c.set(format!("k{i:02}"), "x".repeat(200), 300);
+        }
+        assert!(c.total_bytes() <= 1_000, "超预算必须裁到 1_000 以内，实际 {}", c.total_bytes());
+        assert!(c.len() > 1, "预算淘汰不得退化成清空，否则缓存等于没有");
+    }
+
+    #[test]
+    fn oversized_single_entry_is_skipped_not_wipe_all() {
+        // 反例形态：超预算的单条也先写入再 trim ⇒ 每写一条大的就把整个缓存清空
+        let c = DiskCache::load_with_budget(tmp_path("oversize"), 10_000, 500);
+        c.set("small".into(), "z".repeat(100), 300);
+        c.set("big".into(), "y".repeat(5_000), 300);
+        assert!(c.get("big").is_none(), "单条超预算应跳过写入");
+        assert!(c.get("small").is_some(), "跳过超预算条目不得伤及已有条目");
+    }
+
+    #[test]
+    fn legacy_oversized_file_trimmed_on_load() {
+        let path = tmp_path("legacy");
+        {
+            let c = DiskCache::load_with_budget(path.clone(), 10_000, 10_000);
+            for i in 0..20 {
+                c.set(format!("k{i:02}"), "x".repeat(200), 300);
+            }
+            c.flush_to_disk();
+        }
+        // 更小的预算重新加载 = 模拟「旧文件是只有条数上限的年代攒下的」
+        let c = DiskCache::load_with_budget(path, 10_000, 1_000);
+        assert!(c.total_bytes() <= 1_000, "加载即按新预算裁剪，不得等到第一次写才生效");
+        assert!(c.should_flush(), "裁过必须标脏，让本次 flush 把文件缩回去");
+    }
+
+    #[test]
+    fn default_budget_is_64mb() {
+        let c = DiskCache::load_or_default(tmp_path("default_budget"));
+        assert_eq!(c.max_bytes(), 64 * 1024 * 1024, "默认预算变了 ⇒ 说明有人改了常量");
     }
 }

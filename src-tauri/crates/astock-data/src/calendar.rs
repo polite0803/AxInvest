@@ -29,11 +29,13 @@ fn em_date_to_iso(s: &str) -> String {
 ///
 /// 优先级:
 /// 1. 远程节假日缓存(启动时由 init_holiday_calendar 异步填充,优先于硬编码)
-/// 2. 周末判断(Sat/Sun)
-/// 3. 调休工作日(周末但上班)
-/// 4. 2025-2026 年硬编码节假日
+/// 2. 周末判断(Sat/Sun)—— A 股周末永不开市，调休补班不影响股市
+/// 3. 2025-2026 年硬编码节假日（兜底，已知有条目不准，见下表注释）
 ///
 /// 缺陷 A 修复:2027 年及以后不再依赖硬编码,而是依赖远程缓存(由东方财富 API 拉取 365 天滚动)。
+///
+/// ⚠ 取数**不要**依赖本函数决定"用哪一天的数据"—— 行情/K 线已改为按真实 K 线自证
+/// （见 `AStockClient::quote_from_klines`）；本函数用于休市提示、定时任务跳过等场景。
 pub fn is_trading_day(date: &NaiveDate) -> bool {
     let date_str = date.format("%Y-%m-%d").to_string();
 
@@ -45,17 +47,12 @@ pub fn is_trading_day(date: &NaiveDate) -> bool {
         }
     }
 
-    // 调休工作日（周末但上班）——优先于周末判断
-    let workdays = [
-        "2025-02-08", // 春节调休
-        "2025-04-27", // 清明调休
-        "2025-09-28", // 中秋调休
-        "2025-10-11", // 国庆调休
-    ];
-    if workdays.contains(&date_str.as_str()) {
-        return true;
-    }
-
+    // 2026-09-26 删除「调休工作日」名单。
+    //
+    // 它假设"国务院调休补班的周末股市也开市"——**A 股周末从不开市**，调休只影响上班日。
+    // 实测（上证日 K，web.ifzq.gtimg.cn）：被列为开市的 `2025-02-08`（周六）无 K 线，
+    // 序列是 02-05 / 02-06 / 02-07 / 02-10。留着它会让 `previous_trading_day` /
+    // `latest_trading_day` 算出一个不存在的行情日。
     let w = date.weekday();
     // 周末不交易
     if w == Weekday::Sat || w == Weekday::Sun {
@@ -63,6 +60,12 @@ pub fn is_trading_day(date: &NaiveDate) -> bool {
     }
 
     // 硬编码2025-2026年A股节假日（简化版，不含临时休市）
+    //
+    // ⚠ 这张表只在远程节假日缓存拉不到时兜底，且**已知有条目是错的**——例如
+    //   `2026-09-21` / `2026-09-22` 被列为休市，而真实日 K 显示这两天正常开市
+    //   （实测序列 …09-18、09-21、09-22、09-23）。因此它**不得**再决定"取哪一天的数据"：
+    //   行情/K 线的取数已改为「≤ 截止日的最后一根真实 K 线」自证（见
+    //   `AStockClient::quote_from_klines`），这张表现在只影响休市提示与快照采集的跳过判断。
     let holidays = [
         // 2025年
         "2025-01-01", // 元旦
@@ -323,10 +326,17 @@ mod tests {
         assert!(!is_trading_day(&nd));
     }
 
+    /// 反转回归（2026-09-26）：周末**一律非交易日**，不存在"调休补班所以股市开市"。
+    ///
+    /// 原断言恰好相反（`assert!(is_trading_day(2025-02-08))`），依据是国务院调休安排；
+    /// 但 A 股周末从不开市——实测上证日 K 在 2025-02-08（周六）无数据
+    /// （序列为 02-05/06/07 后直接 02-10）。留着的代价是 `previous_trading_day`
+    /// 会算出一个不存在的行情日，回放里表现为"取到一天根本不存在的数据"。
     #[test]
-    fn test_workday_override() {
-        let workday = NaiveDate::from_ymd_opt(2025, 2, 8).unwrap(); // 春节调休上班
-        assert!(is_trading_day(&workday));
+    fn weekend_never_trades_even_on_makeup_workday() {
+        let sat = NaiveDate::from_ymd_opt(2025, 2, 8).unwrap(); // 春节调休上班的周六
+        assert_eq!(sat.weekday(), Weekday::Sat, "前提核对：这天确实是周六");
+        assert!(!is_trading_day(&sat), "股市周末不开市，与是否调休上班无关");
     }
 
     /// 缺陷 A 修复:远程节假日缓存优先于硬编码

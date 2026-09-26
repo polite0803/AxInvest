@@ -773,6 +773,18 @@ mod capability_tests {
         assert_eq!(v.asof_capability("get_klines"), AsOfCapability::Fallthrough);
     }
 
+    /// trait 默认 `get_index_quotes_with_asof` **不得**回退到实时指数行情。
+    ///
+    /// baidu 没有 override 它（申报里也没有指数能力），正是这条默认实现的使用者：
+    /// 默认若写成 `self.get_index_quotes()`，回放里就会把今天的点位冒充截止日的点位，
+    /// 且下游报告看不出差别（2026-09-25 把默认改成显式失败，此条锁住它）。
+    #[tokio::test]
+    async fn default_index_quotes_with_asof_does_not_leak_live_data() {
+        let v = make_vendor();
+        let r = v.get_index_quotes_with_asof().await;
+        assert!(r.is_err(), "未实现该能力的源必须显式失败，实际返回 {r:?}");
+    }
+
     #[test]
     fn baidu_asof_capability_others_are_fallthrough() {
         let v = make_vendor();

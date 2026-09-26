@@ -289,6 +289,16 @@ pub trait StockVendor: Send + Sync {
         self.get_news(stock_code, limit).await
     }
 
+    /// 按关键词搜索新闻的 as-of 通道（T2, 2026-09-26）。
+    /// 默认转调 live 版本；只有申报 `NativeDateParam` 的源才会被路由层调用。
+    async fn search_news_with_asof(
+        &self,
+        keyword: &str,
+        limit: u32,
+    ) -> Result<Vec<NewsItem>, DataError> {
+        self.search_news(keyword, limit).await
+    }
+
     async fn get_money_flow_with_asof(
         &self,
         stock_code: &str,
@@ -441,7 +451,7 @@ pub trait StockVendor: Send + Sync {
     /// ⚠ **默认实现刻意不调 `get_index_quotes()`**：指数行情是实时快照，
     /// 回放里返回它等于把"今天的点位"当成"截止日的点位"（时间泄露），
     /// 而下游报告无法察觉。未真正实现 as-of 语义（按截止日 K 线合成）的 vendor
-    /// 必须显式失败，由路由层降级并留痕 —— 已实现者见 `eastmoney` 的 override。
+    /// 必须显式失败，由路由层降级并留痕 —— 已实现者见 `eastmoney` / `tencent` 的 override。
     async fn get_index_quotes_with_asof(&self) -> Result<Vec<IndexQuote>, DataError> {
         Err(DataError::VendorError {
             vendor: "all".into(),
@@ -611,4 +621,35 @@ pub async fn fetch_eastmoney_news(
             })
         })
         .collect())
+}
+
+/// 用指数日 K 线合成 as-of 时点的指数行情（eastmoney / tencent 共用）。
+///
+/// `klines` 必须按日期升序且来自**已按截止日取数**的请求
+/// （`end=as_of`，或拿全量后由调用侧裁）；至少两根才能算昨收与涨跌幅。
+/// 点位取末根收盘，昨收取前一根收盘。
+pub(crate) fn index_quote_from_klines(
+    code: &str,
+    name: &str,
+    klines: &[crate::types::KLine],
+) -> Option<crate::types::IndexQuote> {
+    if klines.len() < 2 {
+        return None;
+    }
+    let last = klines.last()?;
+    let pre_close = klines[klines.len() - 2].close;
+    let change_pct = if pre_close > 0.0 {
+        (last.close - pre_close) / pre_close * 100.0
+    } else {
+        0.0
+    };
+    Some(crate::types::IndexQuote {
+        code: code.to_string(),
+        name: name.to_string(),
+        price: last.close,
+        pre_close,
+        change_pct,
+        volume: last.volume,
+        amount: last.amount,
+    })
 }

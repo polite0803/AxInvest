@@ -19,7 +19,14 @@ impl TencentVendor {
 
 /// 将 AxInvest 股票代码转为腾讯财经格式
 /// 600519 → sh600519, 000001 → sz000001, 300750 → sz300750
+///
+/// 已带市场前缀的输入（如指数代码 `sh000001`）**原样透传**：上证综指与平安银行同为
+/// `000001`，靠前缀判市场，重判必错（`sh000001` → `szsh000001` 或深市标的）。
 fn to_tencent_code(stock_code: &str) -> String {
+    if stock_code.starts_with("sh") || stock_code.starts_with("sz") || stock_code.starts_with("bj")
+    {
+        return stock_code.to_string();
+    }
     let prefix = match stock_code.chars().next() {
         Some('6') => "sh",
         Some('0') | Some('3') | Some('2') => "sz",
@@ -27,6 +34,28 @@ fn to_tencent_code(stock_code: &str) -> String {
         _ => "sz",
     };
     format!("{prefix}{stock_code}")
+}
+
+/// 大盘指数清单：`(腾讯代码, 展示代码, 中文名)`，与 eastmoney 侧同三个指数。
+const TC_INDICES: [(&str, &str, &str); 3] = [
+    ("sh000001", "000001", "上证指数"),
+    ("sz399001", "399001", "深证成指"),
+    ("sz399006", "399006", "创业板指"),
+];
+
+/// 日/周/月 K 线 `param` 的 `start,end,count[,fq]` 尾部。
+///
+/// as-of 模式下把 **end 填成截止日**：接口本身支持区间查询，不填就只能拿
+/// "今天往前 N 根"，回放到较早日期时截断后整段为空（东财 push2his 被反爬挡住时，
+/// 这条就是指数/行情唯一的按日期通道）。live 模式 end 为空串，与改前逐字一致。
+fn kline_tail(limit: u32, fq: Option<&str>) -> String {
+    let end = crate::as_of::current_as_of()
+        .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
+        .unwrap_or_default();
+    match fq {
+        Some(fq) => format!(",,{end},{limit},{fq}"),
+        None => format!(",,{end},{limit}"),
+    }
 }
 
 /// 解析腾讯财经实时行情响应
@@ -276,15 +305,16 @@ impl StockVendor for TencentVendor {
         // 复权参数：分钟线不支持复权（mkline端点无复权参数），日/周/月线根据adj选择
         // API端点 (2026年):
         //   分钟线:       kline/mkline (param格式: code,m5,,limit)
-        //   日/周/月不复权: kline/kline  (param格式: code,day,,,limit)
-        //   日/周/月复权:   fqkline/get  (param格式: code,day,,,limit,fq)
+        //   日/周/月不复权: kline/kline  (param格式: code,day,start,end,limit)
+        //   日/周/月复权:   fqkline/get  (param格式: code,day,start,end,limit,fq)
+        // 日/周/月的 start/end 交给 `kline_tail`：as-of 下 end=截止日（见其注释）
         let (fq_prefix, api_endpoint, param_suffix) = if is_minute {
             ("", "kline/mkline", format!(",{limit}"))
         } else {
             match adj {
-                Some(AdjType::Forward) => ("qfq", "fqkline/get", format!(",,,{limit},qfq")),
-                Some(AdjType::Backward) => ("hfq", "fqkline/get", format!(",,,{limit},hfq")),
-                _ => ("", "kline/kline", format!(",,,{limit}")),
+                Some(AdjType::Forward) => ("qfq", "fqkline/get", kline_tail(limit, Some("qfq"))),
+                Some(AdjType::Backward) => ("hfq", "fqkline/get", kline_tail(limit, Some("hfq"))),
+                _ => ("", "kline/kline", kline_tail(limit, None)),
             }
         };
         let url = format!(
@@ -370,7 +400,7 @@ impl StockVendor for TencentVendor {
 
     async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
         let indices: Vec<(&str, &str)> =
-            vec![("sh000001", "上证指数"), ("sz399001", "深证成指"), ("sz399006", "创业板指")];
+            TC_INDICES.iter().map(|&(tc, _, name)| (tc, name)).collect();
         let codes = indices.iter().map(|(c, _)| *c).collect::<Vec<_>>().join(",");
         let url = format!("https://qt.gtimg.cn/q={}", codes);
         let resp = self.tencent_get(&url).await?;
@@ -432,15 +462,50 @@ impl StockVendor for TencentVendor {
         Ok(vec![])
     }
 
+    // ── as-of 指数行情：按截止日日 K 合成（腾讯侧独立通道）──
+    //
+    // 存在的理由不是"多一个源"，而是 **eastmoney push2his 在本机会被反爬挡掉**
+    // （见 lib.rs klines 路由的 2026-08-01 注释：IPv4 快速 RST / IPv6 间歇）。
+    // 只有东财一条通道时，回放里 `get_index_quotes` 就成了"看运气"。
+    // 日 K 请求走 `get_klines`，其 `end` 参数在 as-of 下被 `kline_tail` 填成截止日。
+    async fn get_index_quotes_with_asof(&self) -> Result<Vec<IndexQuote>, DataError> {
+        crate::as_of::current_as_of().ok_or_else(|| {
+            DataError::ParseError("get_index_quotes_with_asof: 无 as_of 上下文".into())
+        })?;
+        let mut out = Vec::with_capacity(TC_INDICES.len());
+        for &(tc_code, code, name) in &TC_INDICES {
+            match self.get_klines(tc_code, "daily", 3, Some(AdjType::None)).await {
+                Ok(ks) => match crate::vendors::index_quote_from_klines(code, name, &ks) {
+                    Some(q) => out.push(q),
+                    None => {
+                        tracing::warn!("[tencent] as-of 指数 {tc_code}({name}) K线不足两根，跳过")
+                    },
+                },
+                Err(e) => {
+                    tracing::warn!("[tencent] as-of 指数 {tc_code}({name}) K线失败: {e}")
+                },
+            }
+        }
+        if out.is_empty() {
+            return Err(DataError::VendorError {
+                vendor: "tencent".into(),
+                message: "as-of 模式下三大指数当日均无可用 K 线".into(),
+            });
+        }
+        Ok(out)
+    }
+
     // ── P3:tencent 能力申报 ──
     // get_quote/get_index_quotes:实时快照 → SynthesizeFromKline
-    // get_klines:诚实申报 Fallthrough —— 本 vendor **没有** override `get_klines_with_asof`
-    //   （trait 默认实现 = 调 live 方法），申报 NativeDateParam 会让路由层误以为它按截止日取数。
-    //   日期区间能力在 eastmoney（`end=` 参数）那侧；这里由 lib.rs 的 truncate_klines_by_asof 兜底。
+    // get_klines:NativeDateParam —— **名副其实**（2026-09-26 起）：`kline_tail` 在 as-of 下
+    //   把接口自带的 end 槽填成截止日，返回的 bars 本身就落在截止日之前。
+    //   此前这里申报 NativeDateParam 却没实现日期参数（trait 默认 with_asof = 调 live），
+    //   一度改成 Fallthrough 以停止谎报；两条路都靠 lib.rs 截断，区别只在于能否取到较早日期。
     // 其他 stub:Fallthrough
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
+            "get_klines" => AsOfCapability::NativeDateParam,
             _ => AsOfCapability::Fallthrough,
         }
     }
@@ -461,16 +526,47 @@ mod capability_tests {
         assert_eq!(v.asof_capability("get_index_quotes"), AsOfCapability::SynthesizeFromKline);
     }
 
-    /// 回归（2026-09-25）：tencent 的 `get_klines` 必须申报 **Fallthrough**。
+    /// get_klines 申报 NativeDateParam，且**有实现兜着**：`kline_tail` 在 as-of 下把接口
+    /// 自带的 end 槽填成截止日（下一条测试逐字比对参数串）。
     ///
-    /// 原申报 `NativeDateParam` 是**假话**：本 vendor 没有 override
-    /// `get_klines_with_asof`，trait 默认实现直接调 live 方法 ⇒ 路由层以为它按截止日取数，
-    /// 实际拿到的是「今天往前的 N 根」。申报改成 Fallthrough 后，路由层走
-    /// 「取全量 + `truncate_klines_by_asof` 截断」这条真实可行的路（结果等价，但不再依赖谎报）。
+    /// 历史：2026-09-25 曾因"申报了却没实现"改成 Fallthrough；本次补上日期参数后改回，
+    /// 申报与实现必须同步变动 —— 只改一边就是下一次时间泄露或下一次"源不支持"的假象。
     #[test]
-    fn tencent_klines_is_fallthrough_not_falsely_native() {
+    fn tencent_klines_is_native() {
         let v = make_vendor();
-        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::Fallthrough);
+        assert_eq!(v.asof_capability("get_klines"), AsOfCapability::NativeDateParam);
+    }
+
+    /// as-of 的日期参数必须真的进 URL —— 这是"不靠截断也能取到较早日期"的唯一保证。
+    ///
+    /// 含反例：live 模式下参数串必须与改造前**逐字一致**，否则这次改动会静默挪动
+    /// 前端图与回测的 K 线窗口口径。
+    #[tokio::test]
+    async fn kline_tail_carries_cutoff_and_live_is_unchanged() {
+        use crate::as_of::{AsOfContext, AsOfSource, AS_OF};
+        use chrono::NaiveDate;
+
+        let live = AS_OF.scope(None, async { kline_tail(120, None) }).await;
+        assert_eq!(live, ",,,120", "live 模式参数串不得变化");
+        let live_fq = AS_OF.scope(None, async { kline_tail(120, Some("qfq")) }).await;
+        assert_eq!(live_fq, ",,,120,qfq");
+
+        let ctx =
+            AsOfContext::new(NaiveDate::from_ymd_opt(2024, 6, 3).unwrap(), AsOfSource::UserReplay)
+                .unwrap();
+        let replay = AS_OF.scope(Some(ctx), async { kline_tail(120, None) }).await;
+        assert_eq!(replay, ",,2024-06-03,120", "as-of 必须把 end 填成截止日");
+    }
+
+    /// 指数代码已带市场前缀时必须透传：`sh000001` 若重判前缀会得到 `szsh000001`；
+    /// 而上证综指与平安银行同为 000001，取错标的不会有任何报错。
+    #[test]
+    fn tencent_code_passes_prefixed_index_codes() {
+        assert_eq!(to_tencent_code("sh000001"), "sh000001");
+        assert_eq!(to_tencent_code("sz399006"), "sz399006");
+        // 股票口径不变
+        assert_eq!(to_tencent_code("600519"), "sh600519");
+        assert_eq!(to_tencent_code("000001"), "sz000001");
     }
 
     #[test]
@@ -488,16 +584,15 @@ mod capability_tests {
         }
     }
 
-    /// 回归（2026-09-25）：未实现 as-of 指数合成的源**必须显式失败**。
+    /// tencent 的 as-of 指数合成**只能在有截止日时运行**：无上下文直接失败。
     ///
-    /// 缺陷形态：trait 默认 `get_index_quotes_with_asof` = `self.get_index_quotes()`，
-    /// 即把「今天的实时点位」当作「截止日的点位」返回 —— tencent 申报的恰是
-    /// `SynthesizeFromKline`，路由层会照着能力去调它，于是回放报告里的「大盘指数」
-    /// 是实时值，时间泄露且无任何提示。
+    /// 守的是那条不变量——指数行情是实时快照，任何"顺手回退到 `get_index_quotes()`"
+    /// 都等于把今天的点位冒充截止日的点位，而下游报告看不出差别。
     #[tokio::test]
-    async fn tencent_index_quotes_with_asof_fails_instead_of_leaking_live_data() {
+    async fn tencent_index_quotes_with_asof_requires_context() {
+        use crate::as_of::AS_OF;
         let v = make_vendor();
-        let r = v.get_index_quotes_with_asof().await;
-        assert!(r.is_err(), "默认实现不得回退到实时指数行情: {r:?}");
+        let r = AS_OF.scope(None, async move { v.get_index_quotes_with_asof().await }).await;
+        assert!(r.is_err(), "无 as_of 上下文必须失败，不得回退到实时指数: {r:?}");
     }
 }

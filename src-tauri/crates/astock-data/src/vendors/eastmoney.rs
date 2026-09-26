@@ -55,6 +55,297 @@ impl EastMoneyVendor {
             .map_err(|e| format!("代理客户端创建失败: {e}"))
     }
 
+    /// 东财搜索接口的**单页**新闻抓取（`get_news` / `search_news` / as-of 回溯共用）。
+    ///
+    /// 收口动因：`get_news` 与 `search_news` 此前各抄一份 110 行的 JSONP 拼参与解析
+    /// （M-RES-16 的 `list` 形态 fallback 修复就重复写了两遍），而 T2 的回溯要翻页 ⇒ 先合一处。
+    async fn news_page(
+        &self,
+        keyword: &str,
+        page_index: u32,
+        page_size: u32,
+        sort: &str,
+    ) -> Result<Vec<NewsItem>, DataError> {
+        let param = serde_json::json!({
+            "uid": "",
+            "keyword": keyword,
+            "type": ["cmsArticleWebOld"],
+            "client": "web",
+            "clientType": "web",
+            "clientVersion": "curr",
+            "param": {
+                "cmsArticleWebOld": {
+                    "searchScope": "default",
+                    "sort": sort,
+                    "pageIndex": page_index,
+                    "pageSize": page_size,
+                    "preTag": "",
+                    "postTag": ""
+                }
+            }
+        });
+
+        let url = format!(
+            "https://search-api-web.eastmoney.com/search/jsonp?cb=jQuery&param={}",
+            urlencoding::encode(&param.to_string())
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Referer", "https://so.eastmoney.com/")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .send()
+            .await
+            .map_err(|e| DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!("新闻搜索请求失败: {e}"),
+            })?;
+
+        let text = resp.text().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("新闻搜索响应读取失败: {e}"),
+        })?;
+
+        parse_news_jsonp(&text)
+    }
+
+    /// T2：`sort:"time"` 按时间倒序翻页，裁到截止日。
+    ///
+    /// 实测（2026-09-26）该接口**不认** `beginTime/endTime`，`sortEnd` 只是分页游标
+    /// （传历史日期被忽略，返回的仍是当下最新）⇒ 唯一可用的时间通道就是倒序翻页 +
+    /// 本地裁剪。上限 12 页 ≈ 600 条；翻不到截止日**如实报 Err**，让路由层落到
+    /// `news_archive`，而不是静默返回空（静默空会被下游读成「该股没有新闻」）。
+    async fn news_pages_until_asof(
+        &self,
+        keyword: &str,
+        cutoff: &str,
+        need: usize,
+    ) -> Result<Vec<NewsItem>, DataError> {
+        const PAGE_SIZE: u32 = 50;
+        const MAX_PAGES: u32 = 12;
+        let mut kept: Vec<NewsItem> = Vec::new();
+        let mut crossed = false;
+        let mut fetched = 0usize;
+        for page in 1..=MAX_PAGES {
+            let items = self.news_page(keyword, page, PAGE_SIZE, "time").await?;
+            if items.is_empty() {
+                break;
+            }
+            fetched += items.len();
+            let hits = clip_page_to_cutoff(&items, cutoff);
+            crossed |= !hits.is_empty();
+            kept.extend(hits);
+            if kept.len() >= need {
+                break;
+            }
+        }
+        if kept.is_empty() && !crossed {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!("时间回溯 {MAX_PAGES} 页(共 {fetched} 条)未覆盖到截止日 {cutoff}"),
+            });
+        }
+        kept.truncate(need);
+        Ok(kept)
+    }
+
+    /// 政策新闻取数主体（live 与 as-of 回溯共用，2026-09-26 T2 收口）。
+    ///
+    /// `asof=true` 时唯一差异：每个关键词的候选不再取当下单页，而是走
+    /// `news_pages_until_asof`（`sort:"time"` 倒序翻页 + 裁到截止日）。
+    async fn policy_news_impl(
+        &self,
+        stock_code: &str,
+        limit: u32,
+        asof: bool,
+    ) -> Result<Vec<NewsItem>, DataError> {
+        // 实现策略(v4, 2026-07-22):
+        //
+        // 问题历史:
+        //   v1: search_news("{行业} 政策") → 中文组合关键词分词差,返回空
+        //   v2: get_news(stock_code) → 纯数字关键词搜索差,返回空
+        //   v3: get_news(股票名) → 政策新闻不提公司名,过滤后为空
+        //
+        // v4 根因分析:政策新闻是宏观的,通常不提具体公司名(如"伊利股份"),
+        //   但会提行业名(如"食品饮料")。例如《国务院关于印发食品安全规划的通知》
+        //   不会出现"伊利股份",但会出现"食品"相关词。
+        //
+        // v4 方案:双路并行搜索 + 政策过滤 + 兜底
+        //   路径A: 行业关键词搜索 - search_news(行业名,如"食品饮料")
+        //         纯中文行业名搜索效果好,行业新闻中常含政策内容
+        //   路径B: 股票名搜索 - search_news(股票名,如"伊利股份")
+        //         获取个股层面新闻,过滤政策相关公告/监管通知
+        //   合并去重 + 按 26 个政策关键词过滤
+        //   兜底:过滤后为空则返回行业新闻(让 LLM 判断相关性)
+        let fetch_limit = limit.clamp(50, 100);
+        let cutoff = if asof {
+            crate::as_of::current_as_of()
+                .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        // 并行获取行业信息和股票名称
+        let (sector_result, search_result) =
+            tokio::join!(self.get_sector_info(stock_code), self.search_stock(stock_code));
+
+        let sector_name =
+            sector_result.ok().and_then(|opt| opt.map(|s| s.sector_name)).unwrap_or_default();
+
+        let stock_name = search_result
+            .ok()
+            .and_then(|results| {
+                results
+                    .iter()
+                    .find(|r| {
+                        r.code
+                            == stock_code
+                                .trim_start_matches("sh")
+                                .trim_start_matches("sz")
+                                .trim_start_matches("bj")
+                    })
+                    .or_else(|| results.first())
+                    .map(|r| r.name.clone())
+            })
+            .unwrap_or_default();
+
+        // 构建搜索关键词列表(纯中文,避免组合分词问题)
+        // 先比较再消费,避免 move 后借用
+        let stock_differs_from_sector =
+            !stock_name.is_empty() && !sector_name.is_empty() && stock_name != sector_name;
+        let mut keywords: Vec<String> = Vec::new();
+        if !sector_name.is_empty() {
+            keywords.push(sector_name);
+        }
+        if stock_differs_from_sector {
+            keywords.push(stock_name);
+        }
+        // 兜底:行业和名称都拿不到时用代码(可能返回空,但至少尝试过)
+        if keywords.is_empty() {
+            keywords.push(stock_code.to_string());
+        }
+
+        // 对每个关键词搜索新闻,合并去重(按标题)
+        let mut seen_titles: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut all_news: Vec<NewsItem> = Vec::new();
+
+        for keyword in &keywords {
+            let fetched = if asof {
+                self.news_pages_until_asof(keyword, &cutoff, fetch_limit as usize).await
+            } else {
+                self.search_news(keyword, fetch_limit).await
+            };
+            match fetched {
+                Ok(news) => {
+                    tracing::debug!(
+                        "[get_policy_news] search_news('{}') 返回 {} 条",
+                        keyword,
+                        news.len()
+                    );
+                    for n in news {
+                        let key = n.title.trim().to_string();
+                        if !key.is_empty() && seen_titles.insert(key) {
+                            // 噪声过滤(2026-09-08): 行业名搜索(如"信息技术")会命中
+                            // ETF/基金类行情资讯(如"港股通信息技术ETF")。这类内容
+                            // 永远不是政策新闻,必须在收集阶段剔除——否则政策关键词
+                            // 过滤失败后,兜底路径会把基金资讯当"政策新闻"喂给
+                            // a-policy 分析师(实测缺陷)。
+                            let hay = format!("{} {}", n.title, n.summary);
+                            if NOISE_KEYWORDS.iter().any(|kw| hay.contains(kw)) {
+                                continue;
+                            }
+                            all_news.push(n);
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::debug!("[get_policy_news] search_news('{}') 失败: {}", keyword, e);
+                },
+            }
+        }
+
+        // 政策相关关键词
+        const POLICY_KEYWORDS: &[&str] = &[
+            "政策",
+            "规划",
+            "通知",
+            "补贴",
+            "监管",
+            "法规",
+            "条例",
+            "办法",
+            "意见",
+            "纲要",
+            "改革",
+            "扶持",
+            "刺激",
+            "减税",
+            "降费",
+            "鼓励",
+            "限制",
+            "禁止",
+            "标准",
+            "五年规划",
+            "中央经济",
+            "工信部",
+            "发改委",
+            "证监会",
+            "农业农村部",
+            "国务院",
+            "常务会议",
+        ];
+
+        // 噪声关键词(2026-09-08): ETF/基金类资讯永远不是政策新闻,
+        // 在收集阶段直接剔除(见上方循环内注释)。
+        const NOISE_KEYWORDS: &[&str] = &["ETF", "etf", "基金", "净值", "份额折算", "LOF"];
+
+        let is_policy_related = |n: &NewsItem| {
+            let haystack = format!("{} {}", n.title, n.summary);
+            POLICY_KEYWORDS.iter().any(|kw| haystack.contains(kw))
+        };
+
+        // 先过滤出政策相关新闻(不消费 all_news,用 iter + cloned)
+        let filtered: Vec<NewsItem> =
+            all_news.iter().filter(|n| is_policy_related(n)).cloned().collect();
+
+        // 决定最终返回:有政策新闻则用过滤结果,否则兜底返回全部行业新闻
+        let mut policy_news: Vec<NewsItem> = if !filtered.is_empty() {
+            filtered
+        } else if !all_news.is_empty() {
+            // 兜底:无政策相关但行业新闻非空 → 返回全部行业新闻让 LLM 判断
+            // (避免工具返回空导致 a-policy 节点无数据可用)。
+            // 2026-09-08 修复:每条打上兜底标记,让下游分析师明确知道这些是
+            // "未命中政策关键词的行业资讯",不是政策新闻命中——防止把行业资讯
+            // 误当成政策原文引用导致上游数据偏差(实测缺陷:军工股收到
+            // "港股通信息技术ETF"资讯被当作政策数据分析)。
+            tracing::debug!(
+                "[get_policy_news] 政策关键词过滤后为空,返回带兜底标记的行业新闻({}条)供 LLM 判断",
+                all_news.len()
+            );
+            all_news
+                .iter()
+                .map(|n| {
+                    let mut marked = n.clone();
+                    marked.summary = format!(
+                        "【兜底数据·未命中政策关键词,仅为该行业近期资讯】{}",
+                        marked.summary
+                    );
+                    marked
+                })
+                .collect()
+        } else {
+            vec![]
+        };
+
+        // 按 publish_time 降序排
+        policy_news.sort_by(|a, b| b.publish_time.cmp(&a.publish_time));
+        policy_news.truncate(limit as usize);
+
+        Ok(policy_news)
+    }
+
     /// em_get 带指数退避重试（连接级别错误：1s → 2s → 4s，最多 3 次）
     /// 429 限流时使用更长等待（2s → 4s → 8s）
     /// 连接级断裂（IncompleteMessage / TLS EOF / RST）时若配置了代理，
@@ -306,40 +597,16 @@ fn to_em_secid(stock_code: &str) -> String {
     format!("{market}.{code}")
 }
 
-/// 大盘指数清单：`(东财 secid, 中文名)`。
+/// 大盘指数清单：`(东财 secid, 展示代码, 中文名)`。
 ///
 /// live 实时快照与 as-of K 线合成共用同一张表，避免两条路径给出不同的指数集合。
 /// secid 的市场位（1=沪 / 0=深）**由本表显式给定** —— 上证综指与平安银行同为
 /// `000001`，按股票首位数字推断市场会静默取回错误的标的。
-pub const EM_INDEX_SECIDS: [(&str, &str); 3] =
-    [("1.000001", "上证指数"), ("0.399001", "深证成指"), ("0.399006", "创业板指")];
-
-/// 用指数日 K 线合成 as-of 时点的指数行情。
-///
-/// `klines` 必须按日期升序（`get_klines*` 已排序），且至少两根才能算涨跌幅；
-/// 点位取末根收盘，昨收取前一根收盘。
-fn index_quote_from_klines(secid: &str, name: &str, klines: &[KLine]) -> Option<IndexQuote> {
-    if klines.len() < 2 {
-        return None;
-    }
-    let last = klines.last()?;
-    let pre_close = klines[klines.len() - 2].close;
-    let change_pct = if pre_close > 0.0 {
-        (last.close - pre_close) / pre_close * 100.0
-    } else {
-        0.0
-    };
-    Some(IndexQuote {
-        // live 路径的 code 来自东财 f57（不带市场位），合成分支保持同一口径
-        code: secid.split('.').nth(1).unwrap_or(secid).to_string(),
-        name: name.to_string(),
-        price: last.close,
-        pre_close,
-        change_pct,
-        volume: last.volume,
-        amount: last.amount,
-    })
-}
+pub const EM_INDEX_SECIDS: [(&str, &str, &str); 3] = [
+    ("1.000001", "000001", "上证指数"),
+    ("0.399001", "399001", "深证成指"),
+    ("0.399006", "399006", "创业板指"),
+];
 
 /// 构建东方财富 SECUCODE（用于 datacenter 报表 API）
 ///
@@ -365,6 +632,97 @@ fn to_em_secucode(stock_code: &str) -> String {
         "SZ"
     };
     format!("{code}.{suffix}")
+}
+
+/// 解析东财搜索接口的 JSONP 响应（`jQuery1830…({…})`）为新闻条目。
+///
+/// 修复 M-RES-16: 兼容 `result.cmsArticleWebOld` 直接是数组、或是 `{list: [...]}`
+/// 两种形态；两者都不是时按「该维度无数据」返回空，并留 debug 便于排查。
+fn parse_news_jsonp(text: &str) -> Result<Vec<NewsItem>, DataError> {
+    let trimmed = text.trim();
+    let json_str = if let Some(start) = trimmed.find('(') {
+        if let Some(end) = trimmed.rfind(')') {
+            &trimmed[start + 1..end]
+        } else {
+            trimmed
+        }
+    } else {
+        trimmed
+    };
+
+    let json: Value = serde_json::from_str(json_str).map_err(|e| {
+        DataError::ParseError(format!(
+            "eastmoney news jsonp parse failed: {e}, raw: {}",
+            &text[..200.min(text.len())]
+        ))
+    })?;
+
+    let items = json["result"]["cmsArticleWebOld"]
+        .as_array()
+        .or_else(|| json["result"]["cmsArticleWebOld"]["list"].as_array());
+    let Some(arr) = items else {
+        tracing::debug!("[eastmoney] cmsArticleWebOld 字段格式非预期（无 list 数组），返回空");
+        return Ok(vec![]);
+    };
+
+    Ok(arr
+        .iter()
+        .filter_map(|item| {
+            let title = item.get("title")?.as_str()?.to_string();
+            let summary = item
+                .get("digest")
+                .or_else(|| item.get("content"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let source = item
+                .get("mediaName")
+                .or_else(|| item.get("source"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("东方财富")
+                .to_string();
+            let article_url = item
+                .get("articleUrl")
+                .or_else(|| item.get("url"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let publish_time = item
+                .get("showTime")
+                .or_else(|| item.get("publishTime"))
+                .or_else(|| item.get("ctime"))
+                .or_else(|| item.get("date"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            Some(NewsItem {
+                title,
+                summary,
+                source,
+                url: article_url,
+                publish_time,
+                sentiment_score: None,
+            })
+        })
+        .collect())
+}
+
+/// 从一页（`sort:"time"` 按时间倒序）里挑出 `publish_time <= cutoff` 的条目。
+///
+/// 日期不可解析的条目一律剔除：as-of 回放里「时效未知」等同于「可能是未来新闻」，
+/// 宁可少给也不能把截止日之后的事件当成当时已知的信息（与路由层
+/// `truncate_news_by_asof` 对 live 路径「保留但留痕」的口径**相反**，因为这里
+/// 没有另一条通道去核实，且回放面要求严格）。
+fn clip_page_to_cutoff(items: &[NewsItem], cutoff: &str) -> Vec<NewsItem> {
+    items
+        .iter()
+        .filter(|n| {
+            let key = crate::news_date_key(&n.publish_time);
+            !key.is_empty() && key <= cutoff
+        })
+        .cloned()
+        .collect()
 }
 
 #[async_trait]
@@ -889,245 +1247,43 @@ impl StockVendor for EastMoneyVendor {
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        // 使用东方财富搜索 API（与 akshare 相同的 endpoint，作为主源）
-        let param = serde_json::json!({
-            "uid": "",
-            "keyword": stock_code,
-            "type": ["cmsArticleWebOld"],
-            "client": "web",
-            "clientType": "web",
-            "clientVersion": "curr",
-            "param": {
-                "cmsArticleWebOld": {
-                    "searchScope": "default",
-                    "sort": "default",
-                    "pageIndex": 1,
-                    "pageSize": limit.min(50),
-                    "preTag": "",
-                    "postTag": ""
-                }
-            }
-        });
+        // 单页抓取收口在 `news_page`：与 `search_news`、as-of 回溯共用同一 endpoint 与解析
+        self.news_page(stock_code, 1, limit.min(50), "default").await
+    }
 
-        let url = format!(
-            "https://search-api-web.eastmoney.com/search/jsonp?cb=jQuery&param={}",
-            urlencoding::encode(&param.to_string())
-        );
-
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://so.eastmoney.com/")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send()
-            .await
-            .map_err(|e| DataError::VendorError {
-                vendor: "eastmoney".into(),
-                message: format!("新闻搜索请求失败: {e}"),
-            })?;
-
-        let text = resp.text().await.map_err(|e| DataError::VendorError {
-            vendor: "eastmoney".into(),
-            message: format!("新闻搜索响应读取失败: {e}"),
+    /// T2：按截止日**回溯**取该股历史新闻（2026-09-26）。
+    ///
+    /// 通道形态见 `news_pages_until_asof`：该搜索接口不认日期参数，靠 `sort:"time"`
+    /// 倒序翻页 + 本地裁剪逼近截止日。翻不到截止日时返回 `Err`（而不是空），
+    /// 让路由层落到 `news_archive` 并把「回溯窗口不足」如实写进降级原因。
+    async fn get_news_with_asof(
+        &self,
+        stock_code: &str,
+        limit: u32,
+    ) -> Result<Vec<NewsItem>, DataError> {
+        let ctx = crate::as_of::current_as_of().ok_or_else(|| {
+            DataError::ParseError("get_news_with_asof 调用时缺 as_of 上下文".into())
         })?;
-
-        // 解析 JSONP 响应: jQuery18306726XXX(...)
-        // 找到第一个 '(' 和最后一个 ')'，提取中间的 JSON 内容
-        let trimmed = text.trim();
-        let json_str = if let Some(start) = trimmed.find('(') {
-            if let Some(end) = trimmed.rfind(')') {
-                &trimmed[start + 1..end]
-            } else {
-                trimmed
-            }
-        } else {
-            trimmed
-        };
-
-        let json: Value = serde_json::from_str(json_str).map_err(|e| {
-            DataError::ParseError(format!(
-                "eastmoney news jsonp parse failed: {e}, raw: {}",
-                &text[..200.min(text.len())]
-            ))
-        })?;
-
-        // 修复 M-RES-16: 添加 fallback 检查 `result.cmsArticleWebOld.list`（旧格式）。
-        // 原实现仅检查 `cmsArticleWebOld` 是否为数组，若上游改为 {list: [...]} 格式
-        // 则静默返回空 vec，调用方无感知。
-        let items = json["result"]["cmsArticleWebOld"]
-            .as_array()
-            .or_else(|| json["result"]["cmsArticleWebOld"]["list"].as_array());
-        let items = match items {
-            Some(arr) => arr,
-            None => {
-                tracing::debug!(
-                    "[eastmoney] cmsArticleWebOld 字段格式非预期（无 list 数组），返回空"
-                );
-                return Ok(vec![]);
-            },
-        };
-
-        Ok(items
-            .iter()
-            .filter_map(|item| {
-                let title = item.get("title")?.as_str()?.to_string();
-                let summary = item
-                    .get("digest")
-                    .or_else(|| item.get("content"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let source = item
-                    .get("mediaName")
-                    .or_else(|| item.get("source"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("东方财富")
-                    .to_string();
-                let article_url = item
-                    .get("articleUrl")
-                    .or_else(|| item.get("url"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let publish_time = item
-                    .get("showTime")
-                    .or_else(|| item.get("publishTime"))
-                    .or_else(|| item.get("ctime"))
-                    .or_else(|| item.get("date"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                Some(NewsItem {
-                    title,
-                    summary,
-                    source,
-                    url: article_url,
-                    publish_time,
-                    sentiment_score: None,
-                })
-            })
-            .collect())
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        self.news_pages_until_asof(stock_code, &cutoff, limit.max(1) as usize).await
     }
 
     async fn search_news(&self, keyword: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
-        // 复用东方财富搜索 API，以 keyword 搜索（与 get_news 同一 endpoint）
-        let param = serde_json::json!({
-            "uid": "",
-            "keyword": keyword,
-            "type": ["cmsArticleWebOld"],
-            "client": "web",
-            "clientType": "web",
-            "clientVersion": "curr",
-            "param": {
-                "cmsArticleWebOld": {
-                    "searchScope": "default",
-                    "sort": "default",
-                    "pageIndex": 1,
-                    "pageSize": limit.min(50),
-                    "preTag": "",
-                    "postTag": ""
-                }
-            }
-        });
+        // 单页抓取收口在 `news_page`：与 `get_news`、as-of 回溯共用同一 endpoint 与解析
+        self.news_page(keyword, 1, limit.min(50), "default").await
+    }
 
-        let url = format!(
-            "https://search-api-web.eastmoney.com/search/jsonp?cb=jQuery&param={}",
-            urlencoding::encode(&param.to_string())
-        );
-
-        let resp = self
-            .http
-            .get(&url)
-            .header("Referer", "https://so.eastmoney.com/")
-            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-            .send()
-            .await
-            .map_err(|e| DataError::VendorError {
-                vendor: "eastmoney".into(),
-                message: format!("新闻搜索请求失败: {e}"),
-            })?;
-
-        let text = resp.text().await.map_err(|e| DataError::VendorError {
-            vendor: "eastmoney".into(),
-            message: format!("新闻搜索响应读取失败: {e}"),
+    /// T2：关键词版的时间回溯（催化剂/行业事件验证用），复用 `news_pages_until_asof`。
+    async fn search_news_with_asof(
+        &self,
+        keyword: &str,
+        limit: u32,
+    ) -> Result<Vec<NewsItem>, DataError> {
+        let ctx = crate::as_of::current_as_of().ok_or_else(|| {
+            DataError::ParseError("search_news_with_asof 调用时缺 as_of 上下文".into())
         })?;
-
-        let trimmed = text.trim();
-        let json_str = if let Some(start) = trimmed.find('(') {
-            if let Some(end) = trimmed.rfind(')') {
-                &trimmed[start + 1..end]
-            } else {
-                trimmed
-            }
-        } else {
-            trimmed
-        };
-
-        let json: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
-            DataError::ParseError(format!(
-                "eastmoney search_news jsonp parse failed: {e}, raw: {}",
-                &text[..200.min(text.len())]
-            ))
-        })?;
-
-        // 修复 M-RES-16: 添加 fallback 检查 `result.cmsArticleWebOld.list`（旧格式）。
-        // 原实现仅检查 `cmsArticleWebOld` 是否为数组，若上游改为 {list: [...]} 格式
-        // 则静默返回空 vec，调用方无感知。
-        let items = json["result"]["cmsArticleWebOld"]
-            .as_array()
-            .or_else(|| json["result"]["cmsArticleWebOld"]["list"].as_array());
-        let items = match items {
-            Some(arr) => arr,
-            None => {
-                tracing::debug!(
-                    "[eastmoney] cmsArticleWebOld 字段格式非预期（无 list 数组），返回空"
-                );
-                return Ok(vec![]);
-            },
-        };
-
-        Ok(items
-            .iter()
-            .filter_map(|item| {
-                let title = item.get("title")?.as_str()?.to_string();
-                let summary = item
-                    .get("digest")
-                    .or_else(|| item.get("content"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let source = item
-                    .get("mediaName")
-                    .or_else(|| item.get("source"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("东方财富")
-                    .to_string();
-                let article_url = item
-                    .get("articleUrl")
-                    .or_else(|| item.get("url"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let publish_time = item
-                    .get("showTime")
-                    .or_else(|| item.get("publishTime"))
-                    .or_else(|| item.get("ctime"))
-                    .or_else(|| item.get("date"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                Some(NewsItem {
-                    title,
-                    summary,
-                    source,
-                    url: article_url,
-                    publish_time,
-                    sentiment_score: None,
-                })
-            })
-            .collect())
+        let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
+        self.news_pages_until_asof(keyword, &cutoff, limit.max(1) as usize).await
     }
 
     async fn get_money_flow(&self, stock_code: &str) -> Result<Option<MoneyFlow>, DataError> {
@@ -2084,178 +2240,16 @@ impl StockVendor for EastMoneyVendor {
         stock_code: &str,
         limit: u32,
     ) -> Result<Vec<NewsItem>, DataError> {
-        // 实现策略(v4, 2026-07-22):
-        //
-        // 问题历史:
-        //   v1: search_news("{行业} 政策") → 中文组合关键词分词差,返回空
-        //   v2: get_news(stock_code) → 纯数字关键词搜索差,返回空
-        //   v3: get_news(股票名) → 政策新闻不提公司名,过滤后为空
-        //
-        // v4 根因分析:政策新闻是宏观的,通常不提具体公司名(如"伊利股份"),
-        //   但会提行业名(如"食品饮料")。例如《国务院关于印发食品安全规划的通知》
-        //   不会出现"伊利股份",但会出现"食品"相关词。
-        //
-        // v4 方案:双路并行搜索 + 政策过滤 + 兜底
-        //   路径A: 行业关键词搜索 - search_news(行业名,如"食品饮料")
-        //         纯中文行业名搜索效果好,行业新闻中常含政策内容
-        //   路径B: 股票名搜索 - search_news(股票名,如"伊利股份")
-        //         获取个股层面新闻,过滤政策相关公告/监管通知
-        //   合并去重 + 按 26 个政策关键词过滤
-        //   兜底:过滤后为空则返回行业新闻(让 LLM 判断相关性)
-        let fetch_limit = limit.clamp(50, 100);
+        self.policy_news_impl(stock_code, limit, false).await
+    }
 
-        // 并行获取行业信息和股票名称
-        let (sector_result, search_result) =
-            tokio::join!(self.get_sector_info(stock_code), self.search_stock(stock_code));
-
-        let sector_name =
-            sector_result.ok().and_then(|opt| opt.map(|s| s.sector_name)).unwrap_or_default();
-
-        let stock_name = search_result
-            .ok()
-            .and_then(|results| {
-                results
-                    .iter()
-                    .find(|r| {
-                        r.code
-                            == stock_code
-                                .trim_start_matches("sh")
-                                .trim_start_matches("sz")
-                                .trim_start_matches("bj")
-                    })
-                    .or_else(|| results.first())
-                    .map(|r| r.name.clone())
-            })
-            .unwrap_or_default();
-
-        // 构建搜索关键词列表(纯中文,避免组合分词问题)
-        // 先比较再消费,避免 move 后借用
-        let stock_differs_from_sector =
-            !stock_name.is_empty() && !sector_name.is_empty() && stock_name != sector_name;
-        let mut keywords: Vec<String> = Vec::new();
-        if !sector_name.is_empty() {
-            keywords.push(sector_name);
-        }
-        if stock_differs_from_sector {
-            keywords.push(stock_name);
-        }
-        // 兜底:行业和名称都拿不到时用代码(可能返回空,但至少尝试过)
-        if keywords.is_empty() {
-            keywords.push(stock_code.to_string());
-        }
-
-        // 对每个关键词搜索新闻,合并去重(按标题)
-        let mut seen_titles: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut all_news: Vec<NewsItem> = Vec::new();
-
-        for keyword in &keywords {
-            match self.search_news(keyword, fetch_limit).await {
-                Ok(news) => {
-                    tracing::debug!(
-                        "[get_policy_news] search_news('{}') 返回 {} 条",
-                        keyword,
-                        news.len()
-                    );
-                    for n in news {
-                        let key = n.title.trim().to_string();
-                        if !key.is_empty() && seen_titles.insert(key) {
-                            // 噪声过滤(2026-09-08): 行业名搜索(如"信息技术")会命中
-                            // ETF/基金类行情资讯(如"港股通信息技术ETF")。这类内容
-                            // 永远不是政策新闻,必须在收集阶段剔除——否则政策关键词
-                            // 过滤失败后,兜底路径会把基金资讯当"政策新闻"喂给
-                            // a-policy 分析师(实测缺陷)。
-                            let hay = format!("{} {}", n.title, n.summary);
-                            if NOISE_KEYWORDS.iter().any(|kw| hay.contains(kw)) {
-                                continue;
-                            }
-                            all_news.push(n);
-                        }
-                    }
-                },
-                Err(e) => {
-                    tracing::debug!("[get_policy_news] search_news('{}') 失败: {}", keyword, e);
-                },
-            }
-        }
-
-        // 政策相关关键词
-        const POLICY_KEYWORDS: &[&str] = &[
-            "政策",
-            "规划",
-            "通知",
-            "补贴",
-            "监管",
-            "法规",
-            "条例",
-            "办法",
-            "意见",
-            "纲要",
-            "改革",
-            "扶持",
-            "刺激",
-            "减税",
-            "降费",
-            "鼓励",
-            "限制",
-            "禁止",
-            "标准",
-            "五年规划",
-            "中央经济",
-            "工信部",
-            "发改委",
-            "证监会",
-            "农业农村部",
-            "国务院",
-            "常务会议",
-        ];
-
-        // 噪声关键词(2026-09-08): ETF/基金类资讯永远不是政策新闻,
-        // 在收集阶段直接剔除(见上方循环内注释)。
-        const NOISE_KEYWORDS: &[&str] = &["ETF", "etf", "基金", "净值", "份额折算", "LOF"];
-
-        let is_policy_related = |n: &NewsItem| {
-            let haystack = format!("{} {}", n.title, n.summary);
-            POLICY_KEYWORDS.iter().any(|kw| haystack.contains(kw))
-        };
-
-        // 先过滤出政策相关新闻(不消费 all_news,用 iter + cloned)
-        let filtered: Vec<NewsItem> =
-            all_news.iter().filter(|n| is_policy_related(n)).cloned().collect();
-
-        // 决定最终返回:有政策新闻则用过滤结果,否则兜底返回全部行业新闻
-        let mut policy_news: Vec<NewsItem> = if !filtered.is_empty() {
-            filtered
-        } else if !all_news.is_empty() {
-            // 兜底:无政策相关但行业新闻非空 → 返回全部行业新闻让 LLM 判断
-            // (避免工具返回空导致 a-policy 节点无数据可用)。
-            // 2026-09-08 修复:每条打上兜底标记,让下游分析师明确知道这些是
-            // "未命中政策关键词的行业资讯",不是政策新闻命中——防止把行业资讯
-            // 误当成政策原文引用导致上游数据偏差(实测缺陷:军工股收到
-            // "港股通信息技术ETF"资讯被当作政策数据分析)。
-            tracing::debug!(
-                "[get_policy_news] 政策关键词过滤后为空,返回带兜底标记的行业新闻({}条)供 LLM 判断",
-                all_news.len()
-            );
-            all_news
-                .iter()
-                .map(|n| {
-                    let mut marked = n.clone();
-                    marked.summary = format!(
-                        "【兜底数据·未命中政策关键词,仅为该行业近期资讯】{}",
-                        marked.summary
-                    );
-                    marked
-                })
-                .collect()
-        } else {
-            vec![]
-        };
-
-        // 按 publish_time 降序排
-        policy_news.sort_by(|a, b| b.publish_time.cmp(&a.publish_time));
-        policy_news.truncate(limit as usize);
-
-        Ok(policy_news)
+    /// T2：政策新闻按截止日回溯（与 live 共用 `policy_news_impl` 主体）。
+    async fn get_policy_news_with_asof(
+        &self,
+        stock_code: &str,
+        limit: u32,
+    ) -> Result<Vec<NewsItem>, DataError> {
+        self.policy_news_impl(stock_code, limit, true).await
     }
 
     async fn get_announcements(&self, stock_code: &str) -> Result<Vec<Announcement>, DataError> {
@@ -2464,7 +2458,7 @@ impl StockVendor for EastMoneyVendor {
 
     async fn get_index_quotes(&self) -> Result<Vec<IndexQuote>, DataError> {
         let mut results = Vec::with_capacity(EM_INDEX_SECIDS.len());
-        for (secid, name) in &EM_INDEX_SECIDS {
+        for (secid, _, name) in &EM_INDEX_SECIDS {
             let url = format!(
                 "https://push2his.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f170"
             );
@@ -3087,7 +3081,13 @@ impl StockVendor for EastMoneyVendor {
             | "get_market_dragon_tiger"
             | "get_announcements"
             | "get_research_reports"
-            | "get_money_flow" => AsOfCapability::NativeDateParam,
+            | "get_money_flow"
+            // T2(2026-09-26)：搜索接口不认 begin/end 日期，但 `sort:"time"` 倒序翻页
+            // 能翻到截止日 ⇒ 申报 NativeDateParam 的是 `news_pages_until_asof` 这条
+            // 真实通道（见 get_news_with_asof 注释），不是「接口带日期参数」。
+            | "get_news"
+            | "get_policy_news"
+            | "search_news" => AsOfCapability::NativeDateParam,
             // SynthesizeFromKline: 实时报价/指数,用 K 线最后一行合成
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单/分类(本地缓存 P5 启用)
@@ -3096,13 +3096,11 @@ impl StockVendor for EastMoneyVendor {
             },
             // Fallthrough: vendor 返回带 date 字段的全量,lib.rs 截断(已正确)
             "get_financials"
-            | "get_news"
             | "get_dragon_tiger"
             | "get_lockup_schedule"
             | "get_north_bound_holding"
             | "get_shareholder_trades"
             | "get_dividend_records"
-            | "get_policy_news"
             | "get_consensus_eps"
             | "get_block_trades"
             | "get_institutional_visits"
@@ -3386,10 +3384,15 @@ impl StockVendor for EastMoneyVendor {
         // 去除 sh/sz/bj 前缀
         let code =
             stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        // ⚠ 必须用 `DATE<=截止日` + 按日期倒序取第一条，**不能**用 `DATE='精确那天'`：
+        //   两融披露只落在交易日（且常晚于收盘），等值查在非交易日/未披露日必然返回空，
+        //   于是回放里所有标的都会被误报成"无融资融券数据"。
+        //   实测（本机 curl）：600519 `DATE='2026-07-19'`（周日）→ success:false 空；
+        //   同标的 `DATE<='2026-07-19'` → 返回 07-17（最近交易日）完整数据。
         let url = format!(
             "https://datacenter-web.eastmoney.com/api/data/v1/get?\
             reportName=RPTA_WEB_RZRQ_GGMX&columns=ALL&\
-            filter=(scode%3D%22{code}%22)(DATE%3D%27{trade_date}%27)&source=WEB&\
+            filter=(scode%3D%22{code}%22)(DATE%3C%3D%27{trade_date}%27)&source=WEB&\
             sortColumns=DATE&sortTypes=-1&pageNumber=1&pageSize=1"
         );
 
@@ -3414,6 +3417,13 @@ impl StockVendor for EastMoneyVendor {
         // DATE 字段格式 "2026-07-03 00:00:00",截取日期部分
         let raw_date = data["DATE"].as_str().unwrap_or(&trade_date);
         let date = raw_date.split_whitespace().next().unwrap_or(&trade_date).to_string();
+        if date != trade_date {
+            // 截止日无披露（休市或数据晚出）时用的是更早一天的值 —— 留一条 info 便于
+            // 事后核对，不记降级（这是正确行为，不是缺陷）
+            tracing::info!(
+                "[eastmoney] 两融 as-of：{code} 截止日 {trade_date} 无披露，取最近披露日 {date}"
+            );
+        }
 
         Ok(Some(MarginData {
             stock_code: stock_code.to_string(),
@@ -3522,10 +3532,10 @@ impl StockVendor for EastMoneyVendor {
             DataError::ParseError("get_index_quotes_with_asof: 无 as_of 上下文".into())
         })?;
         let mut out = Vec::with_capacity(EM_INDEX_SECIDS.len());
-        for &(secid, name) in &EM_INDEX_SECIDS {
+        for &(secid, code, name) in &EM_INDEX_SECIDS {
             // 指数不涉及复权 → fqt=0；取 3 根：末根=截止日点位，前一根=昨收
             match self.get_klines_with_asof(secid, "daily", 3, Some(AdjType::None)).await {
-                Ok(ks) => match index_quote_from_klines(secid, name, &ks) {
+                Ok(ks) => match crate::vendors::index_quote_from_klines(code, name, &ks) {
                     Some(q) => out.push(q),
                     None => {
                         tracing::warn!("[eastmoney] as-of 指数 {secid}({name}) K线不足两根，跳过")
@@ -3573,6 +3583,10 @@ mod asof_capability_tests {
             "get_research_reports",
             // S3(2026-09-26)：「拉全窗 + 本地按截止日过滤」形态，见 get_money_flow_with_asof
             "get_money_flow",
+            // T2(2026-09-26)：`sort:"time"` 倒序翻页回溯，见 get_news_with_asof
+            "get_news",
+            "get_policy_news",
+            "search_news",
         ] {
             assert_eq!(
                 v.asof_capability(m),
@@ -3612,7 +3626,6 @@ mod asof_capability_tests {
         let v = make_vendor();
         for m in &[
             "get_financials",
-            "get_news",
             "get_dragon_tiger",
             "get_lockup_schedule",
             "get_north_bound_holding",
@@ -3770,7 +3783,8 @@ mod index_asof_tests {
     fn index_quote_from_two_klines() {
         let ks =
             vec![k("2026-06-01", 3000.0, 100.0, 1000.0), k("2026-06-02", 3060.0, 200.0, 2000.0)];
-        let q = index_quote_from_klines("1.000001", "上证指数", &ks).expect("应能合成");
+        let q =
+            crate::vendors::index_quote_from_klines("000001", "上证指数", &ks).expect("应能合成");
         assert_eq!(q.code, "000001", "code 必须与 live 路径(f57)同口径，不带市场位");
         assert_eq!(q.name, "上证指数");
         assert_eq!(q.price, 3060.0);
@@ -3783,15 +3797,16 @@ mod index_asof_tests {
     #[test]
     fn index_quote_needs_two_klines() {
         let ks = vec![k("2026-06-02", 3060.0, 200.0, 2000.0)];
-        assert!(index_quote_from_klines("1.000001", "上证指数", &ks).is_none());
-        assert!(index_quote_from_klines("1.000001", "上证指数", &[]).is_none());
+        assert!(crate::vendors::index_quote_from_klines("000001", "上证指数", &ks).is_none());
+        assert!(crate::vendors::index_quote_from_klines("000001", "上证指数", &[]).is_none());
     }
 
     /// 昨收为 0（脏数据）时涨跌幅归零，不得产出 inf/NaN 传给报告。
     #[test]
     fn index_quote_zero_pre_close_yields_no_inf() {
         let ks = vec![k("2026-06-01", 0.0, 0.0, 0.0), k("2026-06-02", 3060.0, 1.0, 1.0)];
-        let q = index_quote_from_klines("0.399001", "深证成指", &ks).expect("应能合成");
+        let q =
+            crate::vendors::index_quote_from_klines("399001", "深证成指", &ks).expect("应能合成");
         assert_eq!(q.change_pct, 0.0);
         assert!(q.change_pct.is_finite());
     }
@@ -3904,5 +3919,67 @@ mod fflow_asof_tests {
         assert!(u.contains("sortTypes=-1"), "必须倒序取最近一条: {u}");
         assert!(u.contains("pageSize=1"), "单行轻量查询: {u}");
         assert!(u.contains("TOTAL_MARKET_CAP"), "必须取回总市值（DCF 股本链）: {u}");
+    }
+}
+
+#[cfg(test)]
+mod news_asof_tests {
+    //! T2(2026-09-26)：新闻 as-of 回溯的纯函数判据 —— 零网络。
+    //!
+    //! 缺陷背景：回放里 `get_news` 只能拿到**当下**新闻，再被路由层裁空
+    //! ⇒ 报告面显示「个股新闻结构性为空」；而翻页裁剪逻辑此前与 live 单页抓取
+    //! 各抄一份（M-RES-16 的修复就重复写了两遍），改一处必漏一处。
+    use super::*;
+
+    fn item(publish_time: &str) -> NewsItem {
+        NewsItem {
+            title: format!("标题 {publish_time}"),
+            summary: String::new(),
+            source: "测试源".into(),
+            url: String::new(),
+            publish_time: publish_time.into(),
+            sentiment_score: None,
+        }
+    }
+
+    /// 晚于截止日的一条不留；日期不可解析按「时效未知」剔除（回放面从严）
+    #[test]
+    fn clip_keeps_only_items_on_or_before_cutoff() {
+        let page = vec![
+            item("2026-09-25 10:00:00"),
+            item("2026-09-22 09:00:00"),
+            item("2026-09-22T08:00:00"),
+            item("2026-09-22"),
+            item(""),
+        ];
+        let kept = clip_page_to_cutoff(&page, "2026-09-22");
+        let dates: Vec<&str> = kept.iter().map(|n| n.publish_time.as_str()).collect();
+        assert_eq!(
+            dates,
+            vec!["2026-09-22 09:00:00", "2026-09-22T08:00:00", "2026-09-22"],
+            "截止日当天及更早的必须保留，顺序不变"
+        );
+    }
+
+    /// 收口后的解析器必须同时兼容两种上游形态（M-RES-16 的原始缺陷），
+    /// 且字段别名（digest/source/url、publishTime）映射不回退。
+    #[test]
+    fn jsonp_parser_handles_flat_and_nested_shapes() {
+        let flat = r#"jQuery18306({"result":{"cmsArticleWebOld":[{"title":"A","digest":"摘要A","mediaName":"S","articleUrl":"u","showTime":"2026-09-20 10:00:00"}]}})"#;
+        let got = parse_news_jsonp(flat).expect("flat 形态应解析成功");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].title, "A");
+        assert_eq!(got[0].summary, "摘要A");
+        assert_eq!(got[0].source, "S");
+        assert_eq!(got[0].publish_time, "2026-09-20 10:00:00");
+
+        let nested = r#"jQuery18306({"result":{"cmsArticleWebOld":{"list":[{"title":"B","content":"正文B","source":"S2","url":"u2","publishTime":"2026-09-21"}]}}})"#;
+        let got = parse_news_jsonp(nested).expect("{list:[...]} 形态应解析成功");
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].title, "B");
+        assert_eq!(got[0].summary, "正文B");
+        assert_eq!(got[0].source, "S2");
+        assert_eq!(got[0].url, "u2");
+        assert_eq!(got[0].publish_time, "2026-09-21");
     }
 }

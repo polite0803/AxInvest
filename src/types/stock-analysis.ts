@@ -754,6 +754,16 @@ export interface RecoPick {
   synthetic?: boolean;
 }
 
+/** 候选池来源构成 — 每个来源实际入池的标的数(去重后) */
+export interface SeedPoolOrigin {
+  /** 来自热股/涨停榜 */
+  hot: number;
+  /** 来自行业排名的领涨龙头 */
+  industry: number;
+  /** 来自内置 FALLBACK_STOCKS 样本池 */
+  fallback: number;
+}
+
 /** 荐股接口响应 — 完整字段版 */
 export interface RecoResponse {
   period: PeriodKey;
@@ -769,6 +779,18 @@ export interface RecoResponse {
   generatedAt: number;
   /** 过滤前的 seed pool 大小(hot + industry 龙头去重后) */
   rawSeedPoolSize: number;
+  /**
+   * 候选池来源构成。内置样本池是无条件混入的 ⇒ 池非空推不出候选是真实的;
+   * hot+industry 均为 0 且 fallback>0 时,本次候选全部来自内置样本池。
+   * 三者全 0 = 调用方自备种子(preseed),来源未知,不得据此报警。
+   */
+  seedPoolOrigin: SeedPoolOrigin;
+  /**
+   * **本次荐股运行**期间的 as-of 降级切片(按运行边界水位取,不是进程全局累计)。
+   * 与降级面板的 `AsOfDegradationEntry` 同形,只少 `as_of`(响应里已有同值 asOfDate)。
+   * live 模式为空数组。前端据此把「候选池为何只剩内置样本」讲成真实归因而非套话。
+   */
+  asofDegradations?: Array<Omit<AsOfDegradationEntry, "as_of">>;
   /** 时间旅行模式截止日 YYYY-MM-DD;live 时 undefined */
   asOfDate?: string;
   /** 模式标签: live / replay / backtest_sweep — 后端 spec §8 注入,必填 */

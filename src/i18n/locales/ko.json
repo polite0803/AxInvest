@@ -16264,6 +16264,7 @@
       "crossCheckTitle": "Analyst Cross-Check (Updated {{updatedAt}})",
       "dataQualitySummary": "{{real}} real · {{synthetic}} fallback hidden",
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
+      "bannerPoolFallbackOnly": "후보 {{fallback}}개가 모두 내장 샘플 풀에서 왔습니다. 인기 종목/업종 리더 랭킹을 가져오지 못해 결과가 시장의 실제 인기 종목을 반영하지 않습니다.",
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",

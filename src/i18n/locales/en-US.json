@@ -16471,6 +16471,7 @@
       "crossCheckTitle": "Analyst Cross-Check (Updated {{updatedAt}})",
       "dataQualitySummary": "{{real}} real · {{synthetic}} fallback hidden",
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
+      "bannerPoolFallbackOnly": "All {{fallback}} candidates came from the built-in sample pool; no hot-stock or industry-leader ranking was retrieved, so the result does not reflect the market's actual leaders.",
       "empty": "No recommendation data",
       "emptyNoCache": "No cached results. Click refresh to get the latest recommendations.",
       "generatedAt": "Generated at {{time}}",

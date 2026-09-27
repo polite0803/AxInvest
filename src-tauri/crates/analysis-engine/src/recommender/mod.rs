@@ -18,7 +18,7 @@ pub mod types;
 
 pub use notify::{build_notification, run_recommendation_scan, RecommendationScan};
 pub use strategy::{RecoContext, RecommendStrategy};
-pub use types::{Period, RecoPick, RecoResponse, Style};
+pub use types::{Period, RecoPick, RecoResponse, SeedPoolOrigin, Style};
 
 /// 回退候选股列表（沪深300核心成分股，覆盖主要行业）
 ///
@@ -365,6 +365,35 @@ pub async fn recommend_stocks(
     template_vars: &[(String, serde_json::Value)],
     preseed: Option<Vec<SeedItem>>,
 ) -> Result<RecoResponse, String> {
+    // H3(2026-09-27)：把降级留痕绑定到**本次运行**。
+    //
+    // 两层作用：
+    //   ① `with_degradation_log` 提供 task-local 容器 —— 本函数全程在同一个 task 里
+    //      （策略与流动性过滤用 FuturesUnordered，不 spawn），父任务的记录只有进了
+    //      容器才不靠全局缓冲兜底；缺容器时 `take_global_degradations_since` 会打
+    //      一条「访问失败」warn（工作流入口 `stock_workflow/core.rs` 就是这么包的）。
+    //   ② 进出各取一次水位 ⇒ 切片只含本次运行新增/复现的降级。直接读全局面板会把
+    //      同截止日上一次运行的残留算进来（R5 基线陷阱同族）。
+    as_of::with_degradation_log(async {
+        let deg_watermark = as_of::global_degradation_seq_watermark();
+        let mut resp = recommend_stocks_inner(client, period, template_vars, preseed).await?;
+        if as_of::current_as_of().is_some() {
+            resp.asof_degradations = as_of::take_global_degradations_since(deg_watermark)
+                .into_iter()
+                .map(Into::into)
+                .collect();
+        }
+        Ok(resp)
+    })
+    .await
+}
+
+async fn recommend_stocks_inner(
+    client: Arc<AStockClient>,
+    period: Period,
+    template_vars: &[(String, serde_json::Value)],
+    preseed: Option<Vec<SeedItem>>,
+) -> Result<RecoResponse, String> {
     // preseed 模式跳过缓存（种子来自 DB 历史推荐，内容可能每次不同，不应命中缓存）
     let use_cache = preseed.is_none();
     if use_cache {
@@ -398,6 +427,8 @@ pub async fn recommend_stocks(
             degraded_reasons: std::collections::HashMap::new(),
             generated_at: chrono::Utc::now().timestamp_millis(),
             raw_seed_pool_size: 0,
+            seed_pool_origin: SeedPoolOrigin::default(),
+            asof_degradations: vec![],
             as_of_date: None,
             mode: "live".to_string(),
             error_detail: Some(detail),
@@ -427,7 +458,8 @@ pub async fn recommend_stocks(
     // 2. seed pool + 流动性过滤
     //    preseed 为 Some 时使用调用方提供的种子（如自动化管道从历史推荐构建），
     //    为 None 时走默认 build_seed_pool（热门股+行业龙头+兜底）。
-    let mut seed = match preseed {
+    //    来源构成随池一起返回：preseed 的来历由调用方决定，本层无法归因 ⇒ 全 0（= 未知）。
+    let (mut seed, seed_pool_origin) = match preseed {
         Some(custom) => {
             tracing::info!(
                 "[recommender] period={:?}, using custom preseed size={}",
@@ -436,10 +468,11 @@ pub async fn recommend_stocks(
             );
             // 去重（同一 code+name 只保留一条）
             let mut seen = std::collections::HashSet::new();
-            custom
+            let deduped: Vec<SeedItem> = custom
                 .into_iter()
                 .filter(|item| seen.insert((item.0.clone(), item.1.clone())))
-                .collect()
+                .collect();
+            (deduped, SeedPoolOrigin::default())
         },
         None => build_seed_pool(&client).await,
     };
@@ -800,6 +833,9 @@ pub async fn recommend_stocks(
         degraded_reasons,
         generated_at: chrono::Utc::now().timestamp_millis(),
         raw_seed_pool_size,
+        seed_pool_origin,
+        // 由外层 `recommend_stocks` 按运行水位回填；inner 本身不感知切片。
+        asof_degradations: vec![],
         as_of_date: as_of_ctx.as_ref().map(|c| c.as_string()),
         mode: as_of_ctx
             .as_ref()
@@ -857,6 +893,8 @@ mod tests {
             degraded_reasons: std::collections::HashMap::new(),
             generated_at,
             raw_seed_pool_size: 1,
+            seed_pool_origin: SeedPoolOrigin::default(),
+            asof_degradations: vec![],
             as_of_date: None,
             mode: mode.to_string(),
             error_detail: None,
@@ -936,6 +974,8 @@ mod tests {
             degraded_reasons: std::collections::HashMap::new(),
             generated_at: 100,
             raw_seed_pool_size: 50,
+            seed_pool_origin: SeedPoolOrigin::default(),
+            asof_degradations: vec![],
             as_of_date: Some("2026-06-01".into()),
             mode: "user_replay".into(),
             error_detail: None,
@@ -956,6 +996,8 @@ mod tests {
             degraded_reasons: std::collections::HashMap::new(),
             generated_at: 100,
             raw_seed_pool_size: 50,
+            seed_pool_origin: SeedPoolOrigin::default(),
+            asof_degradations: vec![],
             as_of_date: None,
             mode: "live".into(),
             error_detail: None,

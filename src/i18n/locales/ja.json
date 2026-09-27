@@ -16264,6 +16264,7 @@
       "crossCheckTitle": "Analyst Cross-Check (Updated {{updatedAt}})",
       "dataQualitySummary": "{{real}} real · {{synthetic}} fallback hidden",
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
+      "bannerPoolFallbackOnly": "候補 {{fallback}} 件はすべて内蔵サンプルプール由来です。人気株／業種リーダーのランキングを取得できなかったため、結果は市場の実際の人気株を反映していません。",
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",

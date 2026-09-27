@@ -305,6 +305,31 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     return { real, synthetic, byStyle };
   }, [data]);
 
+  // 候选池是否「只剩内置样本池」。
+  //
+  // 为什么单独判这个而不复用 dataQuality.synthetic：两者是不同层的兜底 ——
+  // synthetic 说的是**结论**（策略没命中时补的占位 pick），这里说的是**输入**
+  // （扫的池子本身压根不是当日的候选）。as-of 回放的截止日若没有热股榜/行业榜快照，
+  // 池子 100% 是 FALLBACK_STOCKS，策略照样能算出一堆"真实" pick ⇒ 只看 synthetic
+  // 计数完全发现不了，面板呈现出一次正常的荐股。
+  // 三源全 0 = preseed 路径（来源未知），不报警。
+  const poolFallbackOnly = (() => {
+    const o = data?.seedPoolOrigin;
+    if (!o) { return false; }
+    return o.hot === 0 && o.industry === 0 && o.fallback > 0;
+  })();
+
+  // 本次运行里造成「候选池只剩内置样本」的那两条降级归因。
+  // 文案由后端 reason 给出（与 as-of 降级面板同一来源），前端不重写 ⇒ 不加 i18n 键，
+  // 也避免同一个事实在两处各写一遍措辞、日后各说各话。
+  const poolFallbackReasons = useMemo(
+    () =>
+      (data?.asofDegradations ?? [])
+        .filter(e => e.method === "get_hot_stocks" || e.method === "get_industry_ranking")
+        .map(e => e.reason),
+    [data],
+  );
+
   const periodItems = [
     { key: "ultra_short", label: t("stockAnalysis.recommendation.periodUltraShort") },
     { key: "short", label: t("stockAnalysis.recommendation.periodShort") },
@@ -411,6 +436,26 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                 })}
               </span>
             }
+          />
+        )}
+
+        {/* 候选池只剩内置样本池：输入的兜底，与上面的结论兜底（synthetic）分属两层 */}
+        {data && poolFallbackOnly && (
+          <Alert
+            type="warning"
+            showIcon
+            className="text-xs! mb-2!"
+            data-testid="reco-pool-fallback-only"
+            title={
+              <span className="text-xs">
+                {t("stockAnalysis.recommendation.bannerPoolFallbackOnly", {
+                  fallback: data.seedPoolOrigin.fallback,
+                })}
+              </span>
+            }
+            description={poolFallbackReasons.length > 0
+              ? <span className="text-[10px]">{poolFallbackReasons.join("；")}</span>
+              : undefined}
           />
         )}
 

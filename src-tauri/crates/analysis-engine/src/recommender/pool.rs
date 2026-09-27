@@ -4,6 +4,7 @@ use axagent_astock_data::AStockClient;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use super::types::SeedPoolOrigin;
 use super::FALLBACK_STOCKS;
 
 /// 候选池条目：(code, name, sector)
@@ -16,19 +17,32 @@ pub type SeedItem = (String, String, Option<String>);
 /// **冷门补全逻辑**：热门股池天然包含已上涨标的，但策略需要同样扫描未热门的潜在标的。
 /// FALLBACK_STOCKS 覆盖沪深300+行业龙头+硬科技约80只，确保策略有足够多样化样本。
 /// 流动性过滤（≥1亿日均成交额）会进一步筛除不活跃标的。
-pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
+///
+/// 返回 `(池, 来源构成)`。来源构成是**必需的**而非可选的：`FALLBACK_STOCKS` 无条件混入
+/// ⇒ 池子在任何数据源状态下都非空，调用方无法从「有没有候选」反推「候选是不是真实的」。
+/// as-of 回放里两个真实榜源按设计返回 `Ok(vec![])`（见 H4 的归因），此时池 100% 是硬编码
+/// 样本，而荐股结果看起来与 live 无异 —— 这条歧义只能由来源构成来消。
+pub async fn build_seed_pool(client: &AStockClient) -> (Vec<SeedItem>, SeedPoolOrigin) {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<SeedItem> = Vec::new();
+    let mut origin = SeedPoolOrigin::default();
 
     // 1. 热门个股
+    //
+    // ⚠ 成败判据是**非空**，不是 `Result` 的判别式（H1，2026-09-27 实证）。
+    //   astock-data 在 as-of 全 miss 时的返回形态是 `Ok(vec![])`（`lib.rs` 的
+    //   `get_hot_stocks`/`get_industry_ranking` as-of 分支），不是 `Err` ⇒ 旧写法下
+    //   两个 `*_succeeded` 恒为 `true`，下方「仅靠 FALLBACK 兜底」的诊断**一次都不会打印**。
+    //   live 行为不变：live 分支本就把 vendor 空结果转成 `Err`。
     let hot_succeeded = match client.get_hot_stocks().await {
         Ok(hot) => {
             for h in hot.iter().take(50) {
                 if seen.insert(h.stock_code.clone()) {
                     out.push((h.stock_code.clone(), h.stock_name.clone(), h.sector.clone()));
+                    origin.hot += 1;
                 }
             }
-            true
+            !hot.is_empty()
         },
         Err(e) => {
             tracing::warn!("[seed_pool] get_hot_stocks 失败: {e}");
@@ -39,14 +53,17 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
     // 2. 行业排名龙头（扩大到20个行业）
     let industry_succeeded = match client.get_industry_ranking().await {
         Ok(industries) => {
+            let mut taken = 0usize;
             for ind in industries.iter().take(30) {
                 if let (Some(code), Some(name)) = (&ind.leader_code, &ind.leader_name) {
                     if seen.insert(code.clone()) {
                         out.push((code.clone(), name.clone(), Some(ind.industry_name.clone())));
+                        taken += 1;
                     }
                 }
             }
-            true
+            origin.industry = taken;
+            !industries.is_empty()
         },
         Err(e) => {
             tracing::warn!("[seed_pool] get_industry_ranking 失败: {e}");
@@ -54,10 +71,10 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
         },
     };
 
-    // 诊断日志：两个数据源都失败时，种子池仅靠 FALLBACK_STOCKS 兜底
+    // 诊断日志：两个数据源都拿不到真实候选时，种子池仅靠 FALLBACK_STOCKS 兜底
     if !hot_succeeded && !industry_succeeded {
         tracing::warn!(
-            "[seed_pool] hot_stocks 和 industry_ranking 均失败, 种子池仅靠 {} 只 FALLBACK_STOCKS 兜底",
+            "[seed_pool] hot_stocks 和 industry_ranking 均未取到候选, 种子池仅靠 {} 只 FALLBACK_STOCKS 兜底",
             FALLBACK_STOCKS.len()
         );
     }
@@ -67,10 +84,11 @@ pub async fn build_seed_pool(client: &AStockClient) -> Vec<SeedItem> {
     for (code, name) in FALLBACK_STOCKS {
         if seen.insert((*code).to_string()) {
             out.push(((*code).to_string(), (*name).to_string(), None));
+            origin.fallback += 1;
         }
     }
 
-    out
+    (out, origin)
 }
 
 /// 流动性过滤：日均成交额 ≥ 1 亿；排除 ST / 上市 < 60 日

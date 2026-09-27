@@ -175,6 +175,59 @@ pub struct RecoPick {
     pub synthetic: bool,
 }
 
+/// 候选池来源构成 —— 每个来源**实际入池**的标的数（去重后）
+///
+/// 为什么必须有这个结构：`FALLBACK_STOCKS` 是无条件混入的 ⇒ 候选池在任何数据源状态
+/// 下都非空，"有没有候选"完全推不出"候选是不是真实的"。as-of 回放里两个真实榜源
+/// （热股榜 / 行业龙头）按设计返回空，池子 100% 是内置样本，而荐股结果看起来和
+/// live 一模一样 —— 用户据此以为"那天真的没有热门股"。
+///
+/// `hot + industry == 0 && fallback > 0` 是「候选全部来自内置样本池」的机械判据；
+/// 三者全 0 = 走了调用方自备的 preseed（本结构不适用），前端不得据此报警。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeedPoolOrigin {
+    /// 来自热股/涨停榜
+    pub hot: usize,
+    /// 来自行业排名的领涨龙头
+    pub industry: usize,
+    /// 来自内置 `FALLBACK_STOCKS` 样本池
+    pub fallback: usize,
+}
+
+/// 本次荐股运行期间的 as-of 降级留痕（H3）
+///
+/// 与 `DegradationEntry`（权威定义在 harness，降级面板 `get_asof_degradation_log` 用的
+/// 就是它）逐字同形，**只去掉 `as_of`** —— 响应里已有同值的 `asOfDate`，重复一个字段
+/// 只会给前端两个可能不一致的真相。TS 侧因此可直接
+/// `Omit<AsOfDegradationEntry, "as_of">` 复用既有类型，不另建一套。
+///
+/// 之所以不直接塞 `DegradationEntry`：它是 `Serialize`-only（无 `Deserialize`），
+/// 而 `RecoResponse` 两个 derive 都要。`kind` 用 harness 的 `DegradationKind::label()`，
+/// 与降级面板同一套词表（同一批 i18n 键）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoDegradation {
+    pub vendor: String,
+    /// 降级的取数方法名，如 `get_hot_stocks`
+    pub method: String,
+    /// 归因文本（面向用户的中文说明）
+    pub reason: String,
+    /// `failure` | `noData` | `structuralGap`
+    pub kind: String,
+}
+
+impl From<axagent_astock_data::as_of::DegradationEntry> for RecoDegradation {
+    fn from(e: axagent_astock_data::as_of::DegradationEntry) -> Self {
+        Self {
+            vendor: e.vendor,
+            method: e.method,
+            reason: e.reason,
+            kind: e.kind.label().to_string(),
+        }
+    }
+}
+
 /// 荐股响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +254,19 @@ pub struct RecoResponse {
     /// **过滤前**的 seed pool 大小（hot + industry 龙头去重后）
     /// 实际参与扫描的池大小更小（流动性过滤会进一步剔除）
     pub raw_seed_pool_size: usize,
+    /// 候选池的**来源构成**（真实榜 vs 内置样本池）。
+    /// 前端据此声明「本次候选全部来自内置样本池」，消除「池子非空 ⇒ 候选是真实的」歧义。
+    /// preseed 路径（调用方自备种子）下恒为全 0，表示"来源未知"。
+    pub seed_pool_origin: SeedPoolOrigin,
+    /// **本次运行**期间记录的 as-of 降级切片（按运行边界水位取，不是进程全局累计）。
+    ///
+    /// 为什么必须绑定到响应而不是只看降级面板：面板轮询的是进程级全局环形缓冲
+    /// （`get_asof_degradation_log`），同截止日的上一次运行残留会被当成本轮降级 ——
+    /// 与 `as_of.rs` 记过的 R5 基线陷阱同族。用户据此无法判断「热股榜无历史通道」
+    /// 这条到底是这次荐股还是上周那次回放的。
+    /// live 模式恒为空。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub asof_degradations: Vec<RecoDegradation>,
     /// 时间旅行模式截止日 (YYYY-MM-DD)；live 模式为 None
     #[serde(skip_serializing_if = "Option::is_none")]
     pub as_of_date: Option<String>,

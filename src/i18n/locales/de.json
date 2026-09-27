@@ -16264,6 +16264,7 @@
       "crossCheckTitle": "Analyst Cross-Check (Updated {{updatedAt}})",
       "dataQualitySummary": "{{real}} real · {{synthetic}} fallback hidden",
       "styleOnlySynthetic": "No real hits in this style ({{count}} fallback hidden)",
+      "bannerPoolFallbackOnly": "Alle {{fallback}} Kandidaten stammen aus dem integrierten Beispiel-Pool; kein Ranking beliebter Aktien oder Sektor-Anführer verfügbar – die Ergebnisse bilden nicht die tatsächlichen Marktführer ab.",
       "backtestWinrate": "Win Rate",
       "bannerDegraded": "Style {{styles}} truncated due to as-of {{date}}. Output in degraded mode — treat as less reliable than non-degraded styles.",
       "lastAnalysis": "Last Analysis",

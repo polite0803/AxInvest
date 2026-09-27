@@ -16538,6 +16538,7 @@
       "crossCheckTitle": "分析师交叉验证 (更新于 {{updatedAt}})",
       "dataQualitySummary": "{{real}} 条真实候选 · {{synthetic}} 条兜底候选已隐藏",
       "styleOnlySynthetic": "该风格暂无真实命中（{{count}} 条兜底候选已隐藏）",
+      "bannerPoolFallbackOnly": "本次候选池 {{fallback}} 只全部来自内置样本池，未取到热股榜/行业龙头榜——结果不代表市场真实热门。",
       "backtestWinrate": "胜率",
       "bannerDegraded": "资料风格 {{styles}} 因 as-of {{date}} 截断,已以降级模式输出,请低于非降级风格的可信度处理。",
       "lastAnalysis": "上次分析",

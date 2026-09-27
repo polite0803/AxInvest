@@ -31,7 +31,8 @@ data_sources: [get_social_sentiment, get_stock_news, get_stock_money_flow, get_s
 7. **散户仓位规则**（使用融资盘占比作为代理指标）：散户杠杆仓位 ≈ `融资余额 / 流通市值`（融资盘代表散户杠杆持仓）。当该比例处于近 2 年 90 分位以上时（通常 > 5%），视为散户杠杆情绪过热信号（散户满仓=没有增量资金），bear_score 加 15 分。
    - 数据源：`get_stock_margin_data.margin_balance` ÷ `get_stock_quote.circulating_mv`
    - 历史分位参考：A股个股融资盘占比通常在 1%-5% 区间，> 5% 属于偏高，> 8% 属于极端
-   - 若 `margin_balance` 或 `circulating_mv` 缺失，本规则不计分，并在 `data_gaps` 中标注
+   - 工具返回 `{"available": false, "reason": …}` ⇒ 该证券**非融资融券标的**，属**设计性缺席**（市场本就没有这份数据）：本规则不计分，`data_gaps` 与正文须写作「设计性缺席：该券非两融标的」；**禁止**措辞成「数据缺失／获取失败」——那会被数据质量审计归因为工具故障，冤枉取数通道（实证 2026-09-27，001313 运行 c6399466）
+   - 若 `margin_balance` 或 `circulating_mv` 因工具报错拿不到，本规则不计分，并在 `data_gaps` 中标注
 
 ## 工作流程
 

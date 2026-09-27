@@ -390,7 +390,14 @@ type AlgoToolRow = (
 ///    另加 10×KB 级报告压测 `d1_long_reports_fit_production_max_operations` 防复发。
 ///    **必须升版**：坏脚本已以 v86 播种进用户库，版本门 `existing.version >= TEMPLATE_VERSION
 ///    ⇒ skip` 不升版就永不重播种修复后的 `data-quality.rhai`。
-pub(crate) const TEMPLATE_VERSION: i32 = 87;
+/// ⚠️ **v88（2026-09-27）：F3 —— 两融「设计上没有」语境进句级抑制表**。
+///    001313（粤海饲料，非融资融券标的）实证：live 路径把「设计上没有」压成裸 `null`，
+///    分析师如实写「融资余额数据缺失」⇒ 按词表正确扣成工具故障，语义在 handler 层丢失
+///    （运行 `c6399466`，工具可信度 58.2 的主扣分项）。F1 已让 `get_stock_margin_data`
+///    输出结构化 `available:false` + reason，F2 prompt 约定「设计性缺席」措辞，
+///    本版给 `数据缺失`/`获取失败` 追加语境短语「非两融标的 / 设计性缺席」（句级）。
+///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
+pub(crate) const TEMPLATE_VERSION: i32 = 88;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

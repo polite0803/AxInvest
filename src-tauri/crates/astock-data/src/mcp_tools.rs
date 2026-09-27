@@ -200,7 +200,7 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
         }),
         json!({
             "name": "get_stock_margin_data",
-            "description": "获取融资融券数据（融资买入额、余额、融券卖出量、余量）",
+            "description": "获取融资融券数据（融资买入额、余额、融券卖出量、余量）。非两融标的（或该日无披露）时返回 {\"available\":false,\"reason\":…}，这是设计性缺席而非工具故障，结论中应写「设计性缺席」而非「数据缺失/获取失败」",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1088,8 +1088,20 @@ pub async fn execute_mcp_tool(
         "get_stock_margin_data" => {
             let code = parse_code(arguments);
             let code = code.as_str();
-            let margin = client.get_margin_data(code).await.map_err(|e| e.to_string())?;
-            serde_json::to_string(&margin).map_err(|e| e.to_string())
+            match client.get_margin_data(code).await {
+                Ok(Some(m)) => serde_json::to_string(&m).map_err(|e| e.to_string()),
+                // F1（2026-09-27，粤海饲料 001313 运行 c6399466 实证）：live 路径「非两融
+                // 标的」的空数据原先序列化成裸 `null`，分析师看不到原因、如实写「融资余额
+                // 数据缺失」⇒ data-quality 按词表判工具故障是正确执行，错在语义在 handler
+                // 这层丢了。现给出结构化声明（与 as-of 路径 NoData 三档语义同构，
+                // `lib.rs:3498` 先例；北向停披把说明写进 payload 同一手法）。
+                Ok(None) => serde_json::to_string(&serde_json::json!({
+                    "available": false,
+                    "reason": "该证券非融资融券标的（或该日无两融披露），设计上无此数据，属设计性缺席而非取数通道问题"
+                }))
+                .map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            }
         },
         "get_stock_sector_info" => {
             let code = parse_code(arguments);
@@ -5617,5 +5629,39 @@ mod valuation_tests {
         );
         assert!(a.fcf_data_missing, "缺数标记必须为 true");
         assert!(a.is_fallback_anchor, "缺数态锚仍是历史代理，f5 衰减门依赖此标记");
+    }
+}
+
+#[cfg(test)]
+mod margin_contract_tests {
+    //! F1（`PLAN-margin-designified-absent-semantics.md`）：live 无两融数据时
+    //! handler 必须输出**结构化「设计上没有」**，而非与故障同形的裸 `null`。
+    //! 实证（粤海饲料 001313 运行 c6399466）：分析师只见 `content:"null"` 无从归因，
+    //! 如实写「融资余额数据缺失」⇒ data-quality 按词表判工具故障是正确执行，
+    //! 语义在 handler 这一层丢了才是一切扣分的源头。
+
+    use super::execute_mcp_tool;
+
+    #[tokio::test]
+    async fn margin_handler_reports_designified_absence_not_bare_null() {
+        let mut client = crate::AStockClient::new();
+        // 清空 vendor ⇒ live 路由循环必然落到 `return Ok(None)`（lib.rs:3608），零网络
+        client.vendors.clear();
+        let out = execute_mcp_tool(
+            &client,
+            "get_stock_margin_data",
+            &serde_json::json!({ "stock_code": "001313" }),
+        )
+        .await
+        .expect("无数据不得判成工具错误");
+        let v: serde_json::Value = serde_json::from_str(&out).expect("输出必须是 JSON 对象");
+        assert_eq!(
+            v["available"].as_bool(),
+            Some(false),
+            "裸 null 已废弃，必须给 available:false，实得: {out}"
+        );
+        let reason = v["reason"].as_str().unwrap_or_default();
+        assert!(reason.contains("非融资融券标的"), "reason 必须点名设计性缺席: {reason}");
+        assert!(!reason.contains("失败"), "reason 不得用故障措辞: {reason}");
     }
 }

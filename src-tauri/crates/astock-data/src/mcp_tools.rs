@@ -2449,10 +2449,12 @@ const FCF_NP_DIVERGENCE_MIN: f64 = 0.3;
 /// 并被 `value-investor` 按 prompt 指示「直接引用」为 `intrinsic_value_range`
 /// ⇒ `margin_of_safety = −201.7%`、`buffett_verdict = 【减持】`。
 ///
-/// ## 判据形态（两条并列，缺一不可）
+/// ## 判据形态（2026-09-27 起为两形态并列，命中其一即不适用）
 ///
-/// - 当期净利 ≤ 0 —— 公司尚未证明其商业模式能产生利润；
-/// - 锚定 FCF / 市值 < 本阈值 —— 当期现金流**不具定价意义**。
+/// - **双失血**（301302 实证补）：当期净利 ≤ 0 **且** 当期真实 FCF ≤ 0 ——
+///   此时锚必为 fallback 代理，下方收益率会拿代理值自我论证，必须直接拦；
+/// - 当期净利 ≤ 0 **且** 锚定 FCF / 市值 < 本阈值 —— 当期现金流**不具定价意义**
+///   （覆盖「FCF 为小正数」与「缺数态用代理锚」两分支）。
 ///
 /// ⚠️ **不能**简化成「净利 ≤ 0 即不适用」：那会误伤「一次性减值致亏、
 /// 但经营现金流充沛」的正常公司（FCF 收益率 20% 时 DCF 完全成立），
@@ -3346,20 +3348,38 @@ fn compute_dcf(
     //   把「尚未证明商业模式能盈利」的公司误判成已盈利 ⇒ 本条判据整体失明，
     //   而它正是为「净利为负时判据 ② 短路」这个缺口而生的。缺数（`None`）不命中，
     //   与判据 ② 同口径（缺数据 ≠ 模型不成立）。
+    //
+    // 2026-09-27（301302 实证）**补「双失血」形态**：本条原实现只用锚定 FCF 算收益率，
+    //   而净利 ≤ 0 且当期真实 FCF ≤ 0 时锚**必然**是 fallback 代理（近 5 年正净利均值
+    //   ×0.90）⇒ 收益率是代理值的自我论证（实证：锚 1.13 亿 / 市值 30.2 亿 = 3.75%，
+    //   越过 3% 阈值放行；真实当期 FCF ≤ 0 这一最强信号被代理锚吞掉）。这与判据 ②
+    //   当年「必须看 `direct_fcf`，代理值会把符号相反抹掉」（见 L3021 注释）是同一课
+    //   的两门学费。故：双失血 ⇒ 直接判不适用，**不再**看代理锚收益率；
+    //   缺数态（`direct_fcf = None`）不进本形态，仍走下方收益率判据（300308 形态不变）。
     if let Some(np) = ttm_net_profit(financials).filter(|v| *v <= 0.0) {
-        let market_cap = current_price * shares;
-        if market_cap > 0.0 {
-            let fcf_yield = fcf / market_cap;
-            if fcf_yield < FCF_YIELD_INAPPLICABLE_MIN {
-                applicability_signals.push(format!(
-                    "当期净利 {:.2} 亿 ≤ 0 且锚定 FCF 收益率仅 {:.2}%（FCF {:.2} 亿 / 市值 {:.2} 亿）\
-                     < {:.0}%：公司尚未盈利且当期现金流不具定价意义，DCF 口径不成立",
-                    np / 1e8,
-                    fcf_yield * 100.0,
-                    fcf / 1e8,
-                    market_cap / 1e8,
-                    FCF_YIELD_INAPPLICABLE_MIN * 100.0
-                ));
+        if let Some(v) = direct_fcf.filter(|x| *x <= 0.0) {
+            applicability_signals.push(format!(
+                "当期净利 {:.2} 亿 ≤ 0 且当期自由现金流 {:.2} 亿 ≤ 0（账面与现金流双失血）：\
+                 锚只能取近5年正净利年份归一化均值 ×0.90（代理锚），三档估值全是\
+                 「恢复历史盈利再增长」的利好情景、无风险档，DCF 口径不成立",
+                np / 1e8,
+                v / 1e8
+            ));
+        } else {
+            let market_cap = current_price * shares;
+            if market_cap > 0.0 {
+                let fcf_yield = fcf / market_cap;
+                if fcf_yield < FCF_YIELD_INAPPLICABLE_MIN {
+                    applicability_signals.push(format!(
+                        "当期净利 {:.2} 亿 ≤ 0 且锚定 FCF 收益率仅 {:.2}%（FCF {:.2} 亿 / 市值 {:.2} 亿）\
+                         < {:.0}%：公司尚未盈利且当期现金流不具定价意义，DCF 口径不成立",
+                        np / 1e8,
+                        fcf_yield * 100.0,
+                        fcf / 1e8,
+                        market_cap / 1e8,
+                        FCF_YIELD_INAPPLICABLE_MIN * 100.0
+                    ));
+                }
             }
         }
     }
@@ -5535,5 +5555,67 @@ mod valuation_tests {
             a.applicability_signals
         );
         assert_eq!(a.inapplicable_reason, None);
+    }
+
+    /// 判据 ④「双失血」形态 —— **301302 华如科技实参复刻**（2026-09-27，运行 `2bb5bb9d`）。
+    ///
+    /// 修复前的漏网机理：净利 ≤ 0 且当期真实 FCF ≤ 0 时锚**必然**是 fallback 代理
+    /// （近 5 年正净利均值 ×0.90 = 1.13 亿），旧 ④ 拿代理锚算收益率
+    /// （1.13 / 30.2 = 3.75% > 3%）⇒ 用代理值自我论证放行，三档 21.17–71.86
+    /// 全是「恢复历史盈利 × 18–45% 增长」的利好情景。本测试把「代理收益率
+    /// 越过阈值也必拦」钉死。
+    #[test]
+    fn dcf_inapplicable_for_loss_making_with_fallback_anchor_self_certification() {
+        // 近 5 年正净利年报均值 = 1.233 亿 ⇒ 锚 = ×0.90 ≈ 1.11 亿；
+        // 市值 = 21.72 × 1.38996 亿股 ≈ 30.19 亿 ⇒ 代理收益率 ≈ 3.68% ≥ 3%（旧 ④ 放行面）
+        let mut latest = report("2026-06-30", Some(-1.5e8), None);
+        latest.debt_ratio = Some(14.6); // 判据 ① 不触发
+        latest.revenue_yoy = Some(74.8); // 高增长（会被 MAX_GROWTH 封顶到 30%）
+        latest.free_cash_flow = Some(-0.8e8); // 当期真实 FCF ≤ 0（vendor 直供通道）
+        let financials = [
+            latest,
+            report("2025-12-31", Some(1.0e8), None),
+            report("2024-12-31", Some(1.4e8), None),
+            report("2023-12-31", Some(1.3e8), None),
+        ];
+        let a =
+            compute_dcf(&financials, shares_of(1.38996e8), 21.72, None).2.expect("应回传参数快照");
+
+        assert!(
+            !a.applicable,
+            "双失血（净利≤0 且当期 FCF≤0）必须判不适用，哪怕代理锚收益率越过 3% 阈值；\
+             signals={:?}",
+            a.applicability_signals
+        );
+        let reason = a.inapplicable_reason.as_deref().expect("不适用必须给出原因");
+        assert!(reason.contains("双失血"), "原因应点名双失血形态: {reason}");
+        assert!(reason.contains("自由现金流"), "原因应含真实当期 FCF 数值取证: {reason}");
+        assert!(a.is_fallback_anchor, "本形态锚仍是历史代理（零破坏性：三档数值照常产出）");
+    }
+
+    /// **反向断言**：缺数态（`direct_fcf = None`）的亏损公司**不得**被双失血形态误伤 ——
+    /// 「缺数据 ≠ 模型不成立」原则不破，仍只走原代理锚收益率判据（300308 形态行为不变）。
+    #[test]
+    fn dcf_loss_making_missing_cashflow_keeps_yield_only_gate() {
+        let mut latest = report("2026-06-30", Some(-1.5e8), None);
+        latest.debt_ratio = Some(14.6);
+        latest.revenue_yoy = Some(74.8);
+        // 无 free_cash_flow / OCF / capex ⇒ ttm_fcf = None（采集缺陷态，非标的现金流为负）
+        let financials = [
+            latest,
+            report("2025-12-31", Some(1.0e8), None),
+            report("2024-12-31", Some(1.4e8), None),
+            report("2023-12-31", Some(1.3e8), None),
+        ];
+        let a =
+            compute_dcf(&financials, shares_of(1.38996e8), 21.72, None).2.expect("应回传参数快照");
+
+        assert!(
+            a.applicable,
+            "缺数态 + 代理收益率 ≥3% 不应判不适用（行为与修复前一致）: {:?}",
+            a.applicability_signals
+        );
+        assert!(a.fcf_data_missing, "缺数标记必须为 true");
+        assert!(a.is_fallback_anchor, "缺数态锚仍是历史代理，f5 衰减门依赖此标记");
     }
 }

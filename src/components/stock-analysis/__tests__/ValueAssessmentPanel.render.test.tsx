@@ -182,7 +182,10 @@ describe("估值前提标注", () => {
       },
     });
     render(<ValueAssessmentPanel />);
-    expect(screen.getByText("stockAnalysis.valuationApplicability.anchorIsFallback")).toBeTruthy();
+    // J1 闸口后该文案可出现在前提标注 + 结论区两处 ⇒ getAll
+    expect(
+      screen.getAllByText("stockAnalysis.valuationApplicability.anchorIsFallback").length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
   it("两条腿都不可用 ⇒ 报「估值维度整体退出」", () => {
@@ -241,9 +244,22 @@ describe("I1：DCF 不适用时估值区间不进结论区", () => {
   it("**反向锁**：dcfApplicable=true ⇒ 区间照常展示（闸口不是无条件屏蔽）", () => {
     seedStore(REPORT_601399, "601399");
     useStockAnalysisStore.setState({
-      valuationApplicability: { ...NOT_APPLICABLE, dcfApplicable: true, dcfLegUsed: true },
+      valuationApplicability: { ...NOT_APPLICABLE, dcfApplicable: true, anchorIsFallback: false },
     });
     render(<ValueAssessmentPanel />);
     expect(screen.getAllByText(/0\.69/).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("J1：dcfApplicable=true 但锚定是历史代理 ⇒ 区间同样不进结论区（只报口径）", () => {
+    seedStore(REPORT_601399, "601399");
+    useStockAnalysisStore.setState({
+      valuationApplicability: { ...NOT_APPLICABLE, dcfApplicable: true, dcfLegUsed: true },
+    });
+    render(<ValueAssessmentPanel />);
+    expect(screen.queryByText(/0\.69/)).toBeNull();
+    expect(screen.queryByText(/0\.94/)).toBeNull();
+    expect(
+      screen.getAllByText("stockAnalysis.valuationApplicability.anchorIsFallback").length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });

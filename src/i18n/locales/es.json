@@ -15323,7 +15323,7 @@
     },
     "valuationApplicability": {
       "title": "Premisas de valoración",
-      "dcfNotApplicable": "Las premisas del modelo DCF no se cumplen para este valor, por lo que esta rama se ha excluido del factor de valoración (el rango inferior es solo orientativo y no es el valor intrínseco)",
+      "dcfNotApplicable": "Las premisas del modelo DCF no se cumplen para este valor; esta pata se ha eliminado de los factores de valoración; el rango y el margen de seguridad ya no se muestran como conclusión (véase el motivo en la tarjeta de decisión)",
       "anchorIsFallback": "El ancla de flujo de caja libre es un proxy histórico (media de los beneficios anuales positivos de los últimos 5 ejercicios ×0,90), no el flujo real del periodo; el rango es sistemáticamente bajo",
       "grahamGrowthClamped": "La hipótesis de crecimiento de la fórmula de Graham está topada en el límite superior (crecimiento de ingresos superior al 30 %); el valor intrínseco es sistemáticamente bajo y la conclusión bajista queda exagerada",
       "allLegsExcluded": "Ninguna de las dos ramas de valoración es utilizable, por lo que la dimensión de valoración se ha excluido por completo de la decisión (no suma ni resta)",
@@ -16790,6 +16790,7 @@
     "analystReport": {
       "viewRawData": "View Raw Data",
       "completedNoStructure": "Analysis completed but no structured content returned",
+      "verdictOnlyBody": "Solo se proporcionó una etiqueta de conclusión, sin texto de análisis.",
       "dataLimited": "Data Limited",
       "moneyFlow": "Money Flow",
       "moat": "Moat",

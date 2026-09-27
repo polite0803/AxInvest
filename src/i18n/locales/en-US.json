@@ -15542,7 +15542,7 @@
     },
     "valuationApplicability": {
       "title": "Valuation premises",
-      "dcfNotApplicable": "The DCF model's premises do not hold for this stock, so this leg has been removed from the valuation factor (the range below is for reference only and is not intrinsic value)",
+      "dcfNotApplicable": "The DCF model's premises do not hold for this stock, so this leg has been removed from the valuation factors; the valuation range and margin of safety are no longer shown as a conclusion (see the decision card for the exclusion reason)",
       "anchorIsFallback": "The free-cash-flow anchor is a historical proxy (average of positive annual net income over the past 5 years ×0.90), not current-period real cash flow; the range is systematically low",
       "grahamGrowthClamped": "The growth assumption in the Graham formula is capped at its upper bound (revenue growth above 30%), so intrinsic value is systematically low and the bearish conclusion is overstated",
       "allLegsExcluded": "Neither valuation leg is usable, so the valuation dimension has been removed from the decision entirely (it neither adds nor subtracts)",
@@ -17001,6 +17001,7 @@
     "analystReport": {
       "viewRawData": "View Raw Data",
       "completedNoStructure": "Analysis completed but no structured content returned",
+      "verdictOnlyBody": "Only a verdict tag was provided, without analysis text.",
       "dataLimited": "Data Limited",
       "moneyFlow": "Money Flow",
       "moat": "Moat",

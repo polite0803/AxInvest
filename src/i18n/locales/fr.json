@@ -15323,7 +15323,7 @@
     },
     "valuationApplicability": {
       "title": "Hypothèses de valorisation",
-      "dcfNotApplicable": "Les hypothèses du modèle DCF ne s'appliquent pas à ce titre ; cette branche a été retirée du facteur de valorisation (la fourchette ci-dessous est indicative et non une valeur intrinsèque)",
+      "dcfNotApplicable": "Les hypothèses du modèle DCF ne sont pas valides pour ce titre ; cette composante a été retirée des facteurs d'évaluation ; la fourchette et la marge de sécurité ne sont plus affichées comme conclusion (motif du retrait dans la carte de décision)",
       "anchorIsFallback": "L'ancre de flux de trésorerie disponible est un proxy historique (moyenne des bénéfices annuels positifs des 5 derniers exercices ×0,90), et non le flux réel de la période ; la fourchette est systématiquement basse",
       "grahamGrowthClamped": "L'hypothèse de croissance de la formule de Graham est plafonnée (croissance du chiffre d'affaires supérieure à 30 %) ; la valeur intrinsèque est systématiquement basse et la conclusion baissière est exagérée",
       "allLegsExcluded": "Aucune branche de valorisation n'est exploitable ; la dimension de valorisation est entièrement retirée de la décision (ni bonus ni malus)",
@@ -16790,6 +16790,7 @@
     "analystReport": {
       "viewRawData": "View Raw Data",
       "completedNoStructure": "Analysis completed but no structured content returned",
+      "verdictOnlyBody": "Seule une étiquette de conclusion a été fournie, sans texte d'analyse.",
       "dataLimited": "Data Limited",
       "moneyFlow": "Money Flow",
       "moat": "Moat",

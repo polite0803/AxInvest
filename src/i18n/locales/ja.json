@@ -15323,7 +15323,7 @@
     },
     "valuationApplicability": {
       "title": "バリュエーションの前提",
-      "dcfNotApplicable": "DCF モデルの前提が本銘柄に成立しないため、この脚はバリュエーション・ファクターから除外されました（下記レンジは参考値であり、本源的価値ではありません）",
+      "dcfNotApplicable": "DCF モデルの前提が本銘柄に対して成立しないため、この脚は評価ファクターから除外されました。評価レンジと安全域は結論として表示されません（除外理由は判断カードを参照）",
       "anchorIsFallback": "フリーキャッシュフローのアンカーは過去の代理値（直近 5 年の黒字年度純利益平均 ×0.90）であり、当期の実現キャッシュフローではありません。レンジは系統的に低めです",
       "grahamGrowthClamped": "グレアム式の成長率仮説が上限で頭打ち（増収率 30% 超）のため、本源的価値は系統的に低めになり、弱気結論が誇張されます",
       "allLegsExcluded": "両方のバリュエーション脚が利用不可のため、バリュエーション次元は判断から完全に除外されました（加点も減点もありません）",
@@ -16790,6 +16790,7 @@
     "analystReport": {
       "viewRawData": "View Raw Data",
       "completedNoStructure": "Analysis completed but no structured content returned",
+      "verdictOnlyBody": "結論ラベルのみが提供され、分析本文はありません。",
       "dataLimited": "Data Limited",
       "moneyFlow": "Money Flow",
       "moat": "Moat",

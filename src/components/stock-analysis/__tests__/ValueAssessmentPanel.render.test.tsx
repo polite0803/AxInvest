@@ -149,7 +149,9 @@ describe("估值前提标注", () => {
     render(<ValueAssessmentPanel />);
 
     expect(screen.getByText("stockAnalysis.valuationApplicability.title")).toBeTruthy();
-    expect(screen.getByText("stockAnalysis.valuationApplicability.dcfNotApplicable")).toBeTruthy();
+    // I1 闸口后该文案出现在两处：前提标注列表 + 被屏蔽的估值结论区 ⇒ 用 getAll
+    expect(screen.getAllByText("stockAnalysis.valuationApplicability.dcfNotApplicable").length)
+      .toBeGreaterThanOrEqual(1);
     expect(screen.getByText("stockAnalysis.valuationApplicability.grahamGrowthClamped")).toBeTruthy();
     expect(screen.getByText(/0\.14/)).toBeTruthy();
 
@@ -197,5 +199,51 @@ describe("估值前提标注", () => {
     render(<ValueAssessmentPanel />);
     expect(screen.queryByText("stockAnalysis.valuationApplicability.title")).toBeNull();
     expect(screen.queryByText("stockAnalysis.valuationApplicability.allLegsExcluded")).toBeNull();
+  });
+});
+
+/**
+ * I1 确定性闸口（2026-09-28，601399 国机重装实证，运行 `de6b0594`）。
+ *
+ * 病灶：`applicable=false` 时 prompt 硬规则要求 `intrinsic_value_range` 填 null，
+ * 但 LLM 实测填了「0.69-0.94元（…前提不成立，仅供参考）」的带免责声明区间，
+ * 面板原样渲染成「估值结论」——把引擎已判死的结果当结论展示。
+ * 闸口在数据层（结构化布尔 dcfApplicable），不依赖 LLM 守规矩、不解析文案。
+ */
+describe("I1：DCF 不适用时估值区间不进结论区", () => {
+  // 601399 真实违规形态：applicable=false + 字段仍带区间与免责声明
+  const REPORT_601399 = fs.readFileSync(
+    path.resolve(__dirname, "fixtures/value-investor-601399.txt"),
+    "utf8",
+  );
+  const NOT_APPLICABLE = {
+    dcfApplicable: false,
+    dcfLegUsed: false,
+    grahamLegUsed: true,
+    reason: "当期净利 4.83 亿为正但自由现金流 -16.78 亿 ≤ 0（符号相反）：FCF 折现不反映股东可分配",
+    anchorIsFallback: true,
+    grahamGrowthClamped: false,
+  };
+
+  it("applicable=false ⇒ 违规区间串（0.69-0.94）与安全边际不得出现在估值结论区", () => {
+    seedStore(REPORT_601399, "601399");
+    useStockAnalysisStore.setState({ valuationApplicability: NOT_APPLICABLE });
+    render(<ValueAssessmentPanel />);
+    expect(screen.queryByText(/0\.69/)).toBeNull();
+    expect(screen.queryByText(/0\.94/)).toBeNull();
+    // 安全边际独立行必须消失；buffett_verdict 正文里 LLM 引用的 -77.4% 属裁决叙述，不在屏蔽范围
+    expect(screen.queryByText("-77.4%")).toBeNull();
+    // 闸口生效的可见证据：结论区出现「不适用」文案（前提标注 + 结论区至少各一）
+    expect(screen.getAllByText("stockAnalysis.valuationApplicability.dcfNotApplicable").length)
+      .toBeGreaterThanOrEqual(2);
+  });
+
+  it("**反向锁**：dcfApplicable=true ⇒ 区间照常展示（闸口不是无条件屏蔽）", () => {
+    seedStore(REPORT_601399, "601399");
+    useStockAnalysisStore.setState({
+      valuationApplicability: { ...NOT_APPLICABLE, dcfApplicable: true, dcfLegUsed: true },
+    });
+    render(<ValueAssessmentPanel />);
+    expect(screen.getAllByText(/0\.69/).length).toBeGreaterThanOrEqual(1);
   });
 });

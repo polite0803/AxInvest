@@ -56,8 +56,18 @@ interface ValueReportData {
  * 策略：
  * 1. 尝试解析 JSON，成功则按字段提取文本
  * 2. 解析失败则去掉 ```json 代码块标记，直接渲染剩余文本
+ *
+ * ⚠ I1 确定性闸口（2026-09-28，601399 实证 `de6b0594`）：`dcfInapplicable=true` 时
+ *   `intrinsic_value_range` / `margin_of_safety` / `ideal_buy_price` 一律**不展示数值**
+ *   ——prompt 硬规则要求 applicable=false 时字段填 null，但 LLM 实测会填
+ *   「区间 +（仅供参考）」的免责声明形态；带说明的区间依然是把被判死的结果
+ *   当估值结论展示。闸口必须在此（数据层、结构化布尔），不能依赖 LLM 守规矩。
  */
-function extractReadableText(report: string, t: (key: string) => string): string {
+function extractReadableText(
+  report: string,
+  t: (key: string) => string,
+  dcfInapplicable = false,
+): string {
   // 先尝试解析 JSON
   const parsed = tryParseValueReport(report);
   if (parsed) {
@@ -65,7 +75,7 @@ function extractReadableText(report: string, t: (key: string) => string): string
     if (parsed.buffett_verdict) {
       parts.push(`## ${t("stockAnalysis.valueAssessment.outlookVerdict")}\n\n${parsed.buffett_verdict}`);
     }
-    if (parsed.ideal_buy_price) {
+    if (parsed.ideal_buy_price && !dcfInapplicable) {
       parts.push(`${t("stockAnalysis.valueAssessment.idealBuyPriceLabel")}: ${parsed.ideal_buy_price}`);
     }
     if (parsed.business_model) {
@@ -82,9 +92,13 @@ function extractReadableText(report: string, t: (key: string) => string): string
       parts.push(`## ${t("stockAnalysis.valueAssessment.financialHealth")}\n\n${parsed.financial_health}`);
     }
     if (parsed.intrinsic_value_range) {
-      parts.push(`## ${t("stockAnalysis.valueAssessment.valuationConclusion")}\n\n${parsed.intrinsic_value_range}`);
+      parts.push(
+        `## ${t("stockAnalysis.valueAssessment.valuationConclusion")}\n\n${
+          dcfInapplicable ? t("stockAnalysis.valuationApplicability.dcfNotApplicable") : parsed.intrinsic_value_range
+        }`,
+      );
     }
-    if (parsed.margin_of_safety != null) { parts.push(asMarkdownText(parsed.margin_of_safety)); }
+    if (!dcfInapplicable && parsed.margin_of_safety != null) { parts.push(asMarkdownText(parsed.margin_of_safety)); }
     // V72: 现值硬数据行
     const metricParts: string[] = [];
     if (parsed.current_price != null) { metricParts.push(`现价 ${parsed.current_price}`); }
@@ -354,7 +368,16 @@ function asMarkdownText(v: unknown): string {
 }
 
 /** 结构化估值报告渲染 —— 风格与 AnalystReportCard 保持一致 */
-function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: boolean }) {
+function ValueReportRenderer({
+  data,
+  isDark,
+  dcfInapplicable = false,
+}: {
+  data: ValueReportData;
+  isDark: boolean;
+  // I1 闸口语义见 extractReadableText 头注释
+  dcfInapplicable?: boolean;
+}) {
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
@@ -363,7 +386,7 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
         <div>
           <div className="text-xs font-medium mb-1 flex items-center gap-2 flex-wrap" style={{ color: "var(--muted)" }}>
             <span>{t("stockAnalysis.valueAssessment.outlookVerdict")}</span>
-            {data.ideal_buy_price && (
+            {data.ideal_buy_price && !dcfInapplicable && (
               <Tag color="green">{t("stockAnalysis.valueAssessment.idealBuyPriceLabel")}: {data.ideal_buy_price}</Tag>
             )}
           </div>
@@ -414,24 +437,32 @@ function ValueReportRenderer({ data, isDark }: { data: ValueReportData; isDark: 
         </div>
       )}
 
-      {/* 估值结论 */}
+      {/* 估值结论 —— I1 闸口：DCF 被判不适用时区间/安全边际不展示，只说不适用 */}
       {(data.intrinsic_value_range || data.margin_of_safety) && (
         <div>
           <div className="text-xs font-medium mb-1" style={{ color: "var(--muted)" }}>
             {t("stockAnalysis.valueAssessment.valuationConclusion")}
           </div>
-          <div className="space-y-1">
-            {data.intrinsic_value_range && (
+          {dcfInapplicable
+            ? (
               <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
-                <ReportMarkdown content={asMarkdownText(data.intrinsic_value_range)} isDark={isDark} />
+                <ReportMarkdown content={t("stockAnalysis.valuationApplicability.dcfNotApplicable")} isDark={isDark} />
+              </div>
+            )
+            : (
+              <div className="space-y-1">
+                {data.intrinsic_value_range && (
+                  <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
+                    <ReportMarkdown content={asMarkdownText(data.intrinsic_value_range)} isDark={isDark} />
+                  </div>
+                )}
+                {data.margin_of_safety && (
+                  <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
+                    <ReportMarkdown content={asMarkdownText(data.margin_of_safety)} isDark={isDark} />
+                  </div>
+                )}
               </div>
             )}
-            {data.margin_of_safety && (
-              <div className={`prose max-w-none text-xs ${isDark ? "prose-invert" : ""}`}>
-                <ReportMarkdown content={asMarkdownText(data.margin_of_safety)} isDark={isDark} />
-              </div>
-            )}
-          </div>
         </div>
       )}
 
@@ -627,11 +658,13 @@ export function ValueAssessmentPanel() {
     ? valuationApplicability.reason
     : "";
   const hasApplicability = applicabilityNotices.length > 0;
+  // I1 闸口判据（结构化布尔，不解析 LLM 文案）：DCF 前提不成立 ⇒ 面板不展示区间结论
+  const dcfInapplicable = valuationApplicability != null && valuationApplicability.dcfApplicable === false;
 
   const hasAny = hasValue || hasRuleCheck || hasDataQuality || hasRawData || hasApplicability;
 
   const parsed = hasValue ? tryParseValueReport(valueReport) : null;
-  const readableText = hasValue ? extractReadableText(valueReport, t) : "";
+  const readableText = hasValue ? extractReadableText(valueReport, t, dcfInapplicable) : "";
 
   // 暴露调试数据到 window，方便 Console 检查
   useEffect(() => {
@@ -675,7 +708,7 @@ export function ValueAssessmentPanel() {
   // 渲染内容：优先用结构化数据，失败则用可读文本
   const renderContent = () => {
     if (parsed) {
-      return <ValueReportRenderer data={parsed} isDark={isDark} />;
+      return <ValueReportRenderer data={parsed} isDark={isDark} dcfInapplicable={dcfInapplicable} />;
     }
     // 解析失败：渲染提取后的可读文本
     if (readableText) {

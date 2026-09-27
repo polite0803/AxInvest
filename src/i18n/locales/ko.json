@@ -15323,7 +15323,7 @@
     },
     "valuationApplicability": {
       "title": "밸류에이션 전제",
-      "dcfNotApplicable": "DCF 모델의 전제가 본 종목에 성립하지 않아 해당 축을 밸류에이션 팩터에서 제외했습니다(아래 구간값은 참고용이며 내재가치가 아닙니다)",
+      "dcfNotApplicable": "DCF 모델 전제가 이 종목에 성립하지 않아 평가 인자에서 제거되었습니다. 평가 구간과 안전마진은 결론으로 표시되지 않습니다(제거 이유는 의사결정 카드 참조)",
       "anchorIsFallback": "잉여현금흐름 기준값이 역사적 대용치(최근 5년 흑자 연도 순이익 평균 ×0.90)이며 당기 실제 현금흐름이 아닙니다. 구간이 체계적으로 낮게 산출됩니다",
       "grahamGrowthClamped": "그레이엄 공식의 성장률 가정이 상한(매출 성장률 30% 초과)에 걸려 있어 내재가치가 체계적으로 낮게 산출되고 약세 결론이 과장됩니다",
       "allLegsExcluded": "두 밸류에이션 축을 모두 사용할 수 없어 밸류에이션 차원이 의사결정에서 전면 제외되었습니다(가점도 감점도 없음)",
@@ -16790,6 +16790,7 @@
     "analystReport": {
       "viewRawData": "View Raw Data",
       "completedNoStructure": "Analysis completed but no structured content returned",
+      "verdictOnlyBody": "결론 라벨만 제공되었고 분석 본문이 없습니다.",
       "dataLimited": "Data Limited",
       "moneyFlow": "Money Flow",
       "moat": "Moat",

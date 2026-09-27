@@ -15536,7 +15536,7 @@
     },
     "valuationApplicability": {
       "title": "估值前提说明",
-      "dcfNotApplicable": "DCF 模型前提对本标的不成立，该腿已从估值因子中剔除（下方区间数值仅供参考，不代表内在价值）",
+      "dcfNotApplicable": "DCF 模型前提对本标的不成立，该腿已从估值因子中剔除；估值区间与安全边际不再作为结论展示（剔除原因见决策卡）",
       "anchorIsFallback": "自由现金流锚定为历史代理（近 5 年年报正净利均值 ×0.90），并非当期真实现金流；该区间系统性偏低",
       "grahamGrowthClamped": "格雷厄姆公式的增长率假设已被上限封顶（营收增速超过 30%），内在价值系统性偏低，看空结论被夸大",
       "allLegsExcluded": "两条估值腿均不可用，估值维度已整体退出决策（不加分也不扣分）",
@@ -17051,6 +17051,7 @@
     "analystReport": {
       "viewRawData": "查看原始数据",
       "completedNoStructure": "分析完成，但未返回结构化内容",
+      "verdictOnlyBody": "只给出了结论标签，未提供分析正文",
       "dataLimited": "数据受限",
       "moneyFlow": "资金流",
       "moat": "护城河",

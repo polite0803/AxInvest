@@ -380,7 +380,17 @@ type AlgoToolRow = (
 ///    命中同句才豁免该次命中），据此 `数据缺失` 配缺席语境短语、`获取失败` 开窄抑制组
 ///    （「无…信息返回」句式）。无法获取/未能获取/占位/TODO 等真故障动词维持零抑制。
 ///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
-pub(crate) const TEMPLATE_VERSION: i32 = 86;
+/// ⚠️ **v87（2026-09-27）：修复 v86 的生产事故 —— 断句循环烧穿 CodeNode 操作预算**。
+///    v86 的句级断言用逐字符 `sub_string`+拼接实现，10 份 KB 级报告实测触发
+///    `Too many operations`（生产预算 `code_executor.rs:57` `set_max_operations(200_000)`）
+///    ⇒ data-quality 节点整体失败 ⇒ 面板「节点输出缺失」、诊断弹窗全空
+///    （运行 2bb5bb9d 16:54 实锤）。门禁当时未抓到，因测试引擎给了 2_000_000 额度。
+///    本版：断句改**链式 `split`**（C++ 侧一次调用，不计逐字符操作）+ marker 先按
+///    整篇正文预筛、命中才惰性切句；门禁测试引擎额度对齐生产 200_000，
+///    另加 10×KB 级报告压测 `d1_long_reports_fit_production_max_operations` 防复发。
+///    **必须升版**：坏脚本已以 v86 播种进用户库，版本门 `existing.version >= TEMPLATE_VERSION
+///    ⇒ skip` 不升版就永不重播种修复后的 `data-quality.rhai`。
+pub(crate) const TEMPLATE_VERSION: i32 = 87;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

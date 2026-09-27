@@ -267,19 +267,28 @@ fn soft_marker_suppression() {
 }
 
 // split_sentences: 以 。！？；与换行断句（D1 句级抑制的作用域）。
-fn split_sentences(body) {
-    let parts = [];
-    let cur = "";
-    for i in 0..body.len() {
-        let ch = body.sub_string(i, 1);
-        if ch == "。" || ch == "！" || ch == "？" || ch == "；" || ch == "\n" {
-            if cur != "" { parts.push(cur); }
-            cur = "";
-        } else {
-            cur += ch;
+// ⚠ 必须用**链式 split** 实现：生产 CodeNode 引擎 `set_max_operations(200_000)`
+//   （`code_executor.rs:57`），逐字符 `sub_string`+拼接的循环在 10 份 KB 级报告下
+//   实测烧穿限额 ⇒ data-quality 节点整体失败（2026-09-27 16:54 运行 2bb5bb9d 实锤，
+//   "Too many operations (line 575)"）。split 是 C++ 侧一次调用，不计逐字符操作。
+fn split_by_delim(parts, delim) {
+    let out = [];
+    for i in 0..parts.len() {
+        let segs = parts[i].split(delim);
+        for j in 0..segs.len() {
+            if segs[j] != "" { out.push(segs[j]); }
         }
     }
-    if cur != "" { parts.push(cur); }
+    out
+}
+
+fn split_sentences(body) {
+    let parts = [body];
+    parts = split_by_delim(parts, "\n");
+    parts = split_by_delim(parts, "。");
+    parts = split_by_delim(parts, "；");
+    parts = split_by_delim(parts, "！");
+    parts = split_by_delim(parts, "？");
     parts
 }
 
@@ -293,32 +302,42 @@ fn marker_counts(text) {
     let suppression = soft_marker_suppression();
     let long_hit = body.contains("占位报告") || body.contains("placeholder")
         || body.contains("Placeholder") || body.contains("PLACEHOLDER");
-    let sentences = split_sentences(body);
+    let sentences = [];
     let counts = #{};
     for i in 0..markers.len() {
         let m = markers[i];
         if m == "占位" && long_hit { continue; }
+        // 正文级预筛：整个 body 都不含该 marker ⇒ 免进句循环（操作数预算敏感点）
+        if !body.contains(m) { continue; }
         let phrases = suppression[m];
         let has_phrases = type_of(phrases) == "array";
-        let n = 0;
-        for j in 0..sentences.len() {
-            let s = sentences[j];
-            if !s.contains(m) { continue; }
-            // 句级抑制：缺席语境必须与命中**同句**才豁免该次命中
-            if has_phrases && has_any(s, phrases) { continue; }
-            n += s.split(m).len() - 1;
-        }
+        // ⚠ 预算捷径（v87）：无抑制短语组的硬标记不做句级判定 ⇒ 整篇 split 直接计数。
+        //   逐句循环是烧穿生产 `set_max_operations(200_000)` 的热区（16:54 运行 2bb5bb9d
+        //   实锤），而硬标记的命中数与切句后逐句求和**恒等**（marker 不含句读分隔符）。
+        let n = if !has_phrases {
+            body.split(m).len() - 1
+        } else {
+            // 句子切分惰性执行：只有存在**需句级抑制判定**的候选 marker 时才切一次
+            if sentences.is_empty() { sentences = split_sentences(body); }
+            let cnt = 0;
+            for j in 0..sentences.len() {
+                let s = sentences[j];
+                if !s.contains(m) { continue; }
+                // 句级抑制：缺席语境必须与命中**同句**才豁免该次命中
+                if has_any(s, phrases) { continue; }
+                cnt += s.split(m).len() - 1;
+            }
+            cnt
+        };
         if n > 0 { counts[m] = n; }
     }
     counts
 }
 
-// placeholder_hits: 返回报告命中的失败标记清单（供逐节点归因 + 严重度计数）
-// 折叠规则：命中「占位报告」等长词时不再重复计其子串「占位」，避免同一处双计。
-// 2026-09-21：先剥离 VERDICT 块；软标记按定向否定短语抑制（见上方说明）。
-// D1(2026-09-27)：抑制与计数统一走 marker_counts（句级）。
-fn placeholder_hits(text) {
-    let counts = marker_counts(text);
+// hits/occurrences 是同一份 counts 的两个投影 —— 派生函数以 map 为入参，
+// 调用方对同一报告**只算一次** marker_counts（v87 预算：两份 KB 级报告重复
+// 全量统计会烧穿生产 `set_max_operations(200_000)`）。
+fn hits_from_counts(counts) {
     let markers = placeholder_markers();
     let hits = [];
     for i in 0..markers.len() {
@@ -328,14 +347,7 @@ fn placeholder_hits(text) {
     hits
 }
 
-// placeholder_occurrences: 失败标记在正文中的**实际出现次数**（同一词多次出现重复计）
-// 2026-09-21 新增：`placeholder_hits` 按**词种**去重（同一 marker 出现几次都只计 1），
-// 面板显示「N 处」与用户数原文的直觉不符（实证：hm 显示 3 处，原文实际出现 4+ 次）。
-// 本函数给出出现次数的独立口径，供面板并列展示「词种数 / 出现次数」。
-// 剥离 VERDICT 与软标记抑制规则与 placeholder_hits **完全一致** ——
-// 否则两个口径会落在不同判定集上，越显示越矛盾。（D1 起两口径同源于 marker_counts。）
-fn placeholder_occurrences(text) {
-    let counts = marker_counts(text);
+fn occurrences_from_counts(counts) {
     let total = 0;
     for key in counts.keys() {
         total += counts[key];
@@ -343,10 +355,15 @@ fn placeholder_occurrences(text) {
     total
 }
 
-// has_placeholder: 检测报告是否含占位符/失败标记（布尔版，供 report_quality 扣分用）
-fn has_placeholder(text) {
-    placeholder_hits(text).len() > 0
-}
+// placeholder_hits / placeholder_occurrences（v87 起并入派生函数）：
+// 两口径 = 同一份 marker_counts 的两个投影，生产调用方一律先算一次
+// `marker_counts(text)`，再走 hits_from_counts / occurrences_from_counts ——
+// 禁止对同一报告重复全量统计（v86 烧穿生产操作预算的直接原因之一）。
+// placeholder_occurrences 的「出现次数」口径动机（2026-09-21）：placeholder_hits
+// 按**词种**去重（同一 marker 出现几次都只计 1），面板显示「N 处」与用户数原文的
+// 直觉不符（实证：hm 显示 3 处，原文实际出现 4+ 次），故并列展示「词种数 / 出现次数」。
+// 剥离 VERDICT 与软标记抑制规则两口径**完全一致**（同源于 marker_counts）——
+// 否则两个口径会落在不同判定集上，越显示越矛盾。
 
 // ── P2-3 新增(2026-08-09): Schema 驱动的深度字段校验 ──
 // 从 verdict map 中提取 bull_score 数值
@@ -468,7 +485,9 @@ fn validate_verdict_schema(verdict_data, analyst_name) {
 // S2(2026-09-26): 第 3 参 `suppress_ph` = 该维度处于 as-of **设计性降级**
 //   （上游按当下语义约束返回空，非工具故障）⇒ 跳过占位符 -15 扣分。
 //   判据来源见下方 asof_design 块与 PLAN-asof-replay-quality-attribution.md。
-fn report_quality(text, conf, suppress_ph) {
+// has_placeholder 语义并入第 4 参 `counts`（v87）：调用方对同一报告已跑过
+// marker_counts，禁止在 report_quality 内再全量重算一遍（生产预算敏感点）。
+fn report_quality(text, conf, suppress_ph, counts) {
     if type_of(text) != "string" || text == "" { return 0.0; }
 
     let chars = count_chars(text);
@@ -483,7 +502,7 @@ fn report_quality(text, conf, suppress_ph) {
     let kw_score = kw_groups.to_float() * 8.0;
 
     // 占位符扣分（-15）
-    let placeholder_penalty = if !suppress_ph && has_placeholder(text) { -15.0 } else { 0.0 };
+    let placeholder_penalty = if !suppress_ph && counts.len() > 0 { -15.0 } else { 0.0 };
 
     // confidence 一致性奖励（10 分）
     // P3-2 修复(2026-08-09): extract_conf 缺失时返回 -1.0，原 conf < 30.0 分支会把
@@ -568,27 +587,39 @@ let cat_r = extract_report(cat_report);
 //   diag_for 只看 confidence ⇒ 603353 实证：失败标记最多 5 处的 hm(cf=55) 显示「正常」，
 //   而标记为 0、数据齐全的 sec(cf=45) 被判「低置信」。
 // 现按节点分别计算命中数，注入 diag_for 作为 status 的第二证据源。
-let mk_ph = placeholder_hits(mk_r);
-let sent_ph = placeholder_hits(sent_r);
-let news_ph = placeholder_hits(news_r);
-let fund_ph = placeholder_hits(fund_r);
-let pol_ph = placeholder_hits(pol_r);
-let hm_ph = placeholder_hits(hm_r);
-let lk_ph = placeholder_hits(lk_r);
-let res_ph = placeholder_hits(res_r);
-let sec_ph = placeholder_hits(sec_r);
-let cat_ph = placeholder_hits(cat_r);
+// v87：每份报告只跑一次 marker_counts，hits（词种）与 po（出现次数）从同一 counts 派生
+//（此前两口径各自全量重算 ⇒ KB 级报告 ×10 节点烧穿生产操作预算）。
+let mk_mc = marker_counts(mk_r);
+let sent_mc = marker_counts(sent_r);
+let news_mc = marker_counts(news_r);
+let fund_mc = marker_counts(fund_r);
+let pol_mc = marker_counts(pol_r);
+let hm_mc = marker_counts(hm_r);
+let lk_mc = marker_counts(lk_r);
+let res_mc = marker_counts(res_r);
+let sec_mc = marker_counts(sec_r);
+let cat_mc = marker_counts(cat_r);
+let mk_ph = hits_from_counts(mk_mc);
+let sent_ph = hits_from_counts(sent_mc);
+let news_ph = hits_from_counts(news_mc);
+let fund_ph = hits_from_counts(fund_mc);
+let pol_ph = hits_from_counts(pol_mc);
+let hm_ph = hits_from_counts(hm_mc);
+let lk_ph = hits_from_counts(lk_mc);
+let res_ph = hits_from_counts(res_mc);
+let sec_ph = hits_from_counts(sec_mc);
+let cat_ph = hits_from_counts(cat_mc);
 // 2026-09-21: 与 *_ph 同源的实际出现次数（*_ph 是词种数）—— 供面板并列展示
-let mk_po = placeholder_occurrences(mk_r);
-let sent_po = placeholder_occurrences(sent_r);
-let news_po = placeholder_occurrences(news_r);
-let fund_po = placeholder_occurrences(fund_r);
-let pol_po = placeholder_occurrences(pol_r);
-let hm_po = placeholder_occurrences(hm_r);
-let lk_po = placeholder_occurrences(lk_r);
-let res_po = placeholder_occurrences(res_r);
-let sec_po = placeholder_occurrences(sec_r);
-let cat_po = placeholder_occurrences(cat_r);
+let mk_po = occurrences_from_counts(mk_mc);
+let sent_po = occurrences_from_counts(sent_mc);
+let news_po = occurrences_from_counts(news_mc);
+let fund_po = occurrences_from_counts(fund_mc);
+let pol_po = occurrences_from_counts(pol_mc);
+let hm_po = occurrences_from_counts(hm_mc);
+let lk_po = occurrences_from_counts(lk_mc);
+let res_po = occurrences_from_counts(res_mc);
+let sec_po = occurrences_from_counts(sec_mc);
+let cat_po = occurrences_from_counts(cat_mc);
 
 // ── S2(2026-09-26): as-of 回放「设计性降级」豁免（PLAN-asof-replay-quality-attribution.md）──
 // 回放中 搜索/快讯/新闻 等返回空是**设计语义**（astock-data as_of 决策矩阵：
@@ -681,16 +712,17 @@ let placeholder_total_occurrences = mk_po_e + sent_po_e + news_po_e + fund_po_e 
     + hm_po_e + lk_po_e + res_po_e + sec_po_e + cat_po_e;
 
 // 单个分析师报告质量分（缺失报告 → 0 分）
-let mk_q = report_quality(mk_r, mk_c, asof_sup_mk);
-let sent_q = report_quality(sent_r, sent_c, asof_sup_sent);
-let news_q = report_quality(news_r, news_c, asof_sup_news);
-let fund_q = report_quality(fund_r, fund_c, asof_sup_fund);
-let pol_q = report_quality(pol_r, pol_c, asof_sup_pol);
-let hm_q = report_quality(hm_r, hm_c, asof_sup_hm);
-let lk_q = report_quality(lk_r, lk_c, asof_sup_lk);
-let res_q = report_quality(res_r, res_c, asof_sup_res);
-let sec_q = report_quality(sec_r, sec_c, asof_sup_sec);
-let cat_q = report_quality(cat_r, cat_c, asof_sup_cat);
+// v87：第 4 参传上方已算好的 *_mc，杜绝 has_placeholder 再全量重算 marker_counts。
+let mk_q = report_quality(mk_r, mk_c, asof_sup_mk, mk_mc);
+let sent_q = report_quality(sent_r, sent_c, asof_sup_sent, sent_mc);
+let news_q = report_quality(news_r, news_c, asof_sup_news, news_mc);
+let fund_q = report_quality(fund_r, fund_c, asof_sup_fund, fund_mc);
+let pol_q = report_quality(pol_r, pol_c, asof_sup_pol, pol_mc);
+let hm_q = report_quality(hm_r, hm_c, asof_sup_hm, hm_mc);
+let lk_q = report_quality(lk_r, lk_c, asof_sup_lk, lk_mc);
+let res_q = report_quality(res_r, res_c, asof_sup_res, res_mc);
+let sec_q = report_quality(sec_r, sec_c, asof_sup_sec, sec_mc);
+let cat_q = report_quality(cat_r, cat_c, asof_sup_cat, cat_mc);
 
 // gap 推断：confidence < 0（字段缺失/节点失败）才算真正的数据缺口
 let mk_g = mk_c < 0.0;

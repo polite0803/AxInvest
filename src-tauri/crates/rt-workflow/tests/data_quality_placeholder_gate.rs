@@ -116,7 +116,11 @@ fn build_engine() -> Engine {
 fn build_engine_with_asof_methods(methods_json: &'static str) -> Engine {
     let mut engine = Engine::new();
     engine.set_max_expr_depths(1024, 1024);
-    engine.set_max_operations(2_000_000);
+    // ⚠ 与生产 CodeNode 引擎**逐项对齐**（`code_executor.rs:57` `set_max_operations(200_000)`）。
+    //   此处曾放宽到 2_000_000 ⇒ D1 逐字符断句实现烧穿生产限额、data-quality 节点
+    //   整体失败（2026-09-27 16:54 运行 2bb5bb9d），而门禁全绿 —— 测试引擎的
+    //   资源上限本身就是被测契约的一部分，不得比生产宽松。
+    engine.set_max_operations(200_000);
     engine.register_fn("clamp", |v: f64, min: f64, max: f64| -> f64 { v.clamp(min, max) });
     engine.register_fn("join", |arr: rhai::Array, sep: &str| -> String {
         arr.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(sep)
@@ -873,4 +877,28 @@ fn d1_sentence_level_suppression_on_real_reports() {
     let sec = "机构覆盖数=null；历史价格区间/均线/量价结构数据缺失，仅取到当日快照。";
     let r = run_quality(&[("sec", sec)], &[("sec", 45.0)]);
     assert_eq!(hits(&r, "sec"), 1, "=null 枚举维持计数；「数据缺失，仅取到…」同句豁免");
+}
+
+/// D1 后续（2026-09-27）：生产引擎 `max_operations=200_000` 压测。
+/// 16:54 运行 2bb5bb9d 实锤：逐字符断句实现把 data-quality 节点整体打挂
+/// （"Too many operations"），面板逐节点诊断全空。本测试用 10 份 KB 级报告
+/// 复现生产规模 —— 若断句/计数实现再退化为逐字符循环，这里必须变红
+/// （测试引擎上限已与生产逐项对齐，见 `build_engine_with_asof_methods`）。
+#[test]
+fn d1_long_reports_fit_production_max_operations() {
+    let unit =
+        "本季度营收同比增长 12%，毛利率 35%，PE 处于历史中位，成交量温和放大，均线多头排列。";
+    let mut long = String::new();
+    for _ in 0..80 {
+        long.push_str(unit);
+    }
+    long.push_str("唯一缺口：商誉数据缺失，无法完成减值测试。");
+    let nodes = ["mk", "sent", "news", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+    let reports: Vec<(&str, &str)> = nodes.iter().map(|n| (*n, long.as_str())).collect();
+    let confs: Vec<(&str, f64)> = nodes.iter().map(|n| (*n, 60.0)).collect();
+    let r = run_quality(&reports, &confs);
+    // 能走到断言即证明未烧穿操作数上限；语义侧：每份报告恰好 1 次裸「数据缺失」
+    for n in nodes {
+        assert_eq!(hits(&r, n), 1, "节点 {n}：长报告应恰好命中 1 次裸「数据缺失」（无同句语境）");
+    }
 }

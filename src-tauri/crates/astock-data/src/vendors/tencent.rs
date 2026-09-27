@@ -69,6 +69,26 @@ fn kline_tail(limit: u32, fq: Option<&str>) -> String {
     }
 }
 
+/// 日/周/月与分钟线的端点路由（C4，2026-09-27，301302 t-risk 超时根因）：
+/// 原 Forward/Backward 走 `fqkline/get`，该端点已被**腾讯 WAF 拦截**
+/// （实测 501 → waf.tencent.com/501page；普通 `kline/kline` 不受影响）。
+/// 现无论 adj 一律走不复权端点、fq_prefix 为空 ⇒ 返回的 K 线 `adj_factor=None`，
+/// 由 lib 层 `apply_local_adjustment_if_needed`（分红事件本地复权，
+/// 源 datacenter 实测健康）接管 —— tencent 从此与 sina/163 等
+/// 「不支持服务端复权的 vendor」同列。`adj` 参数保留只为把回归锁在测试里。
+/// 返回 (fq_prefix, api_endpoint, param_suffix)。
+fn kline_route(
+    is_minute: bool,
+    limit: u32,
+    _adj: Option<AdjType>,
+) -> (&'static str, &'static str, String) {
+    if is_minute {
+        ("", "kline/mkline", format!(",{limit}"))
+    } else {
+        ("", "kline/kline", kline_tail(limit, None))
+    }
+}
+
 /// 解析腾讯财经实时行情响应
 /// API 格式: v_sh600519="1~贵州茅台~600519~1272.86~1268.00~1278.00~..."
 /// 字段结构 (以 ~ 分隔):
@@ -313,21 +333,10 @@ impl StockVendor for TencentVendor {
             "monthly" | "103" | "Monthly" => ("month", false),
             _ => ("day", false),
         };
-        // 复权参数：分钟线不支持复权（mkline端点无复权参数），日/周/月线根据adj选择
-        // API端点 (2026年):
-        //   分钟线:       kline/mkline (param格式: code,m5,,limit)
-        //   日/周/月不复权: kline/kline  (param格式: code,day,start,end,limit)
-        //   日/周/月复权:   fqkline/get  (param格式: code,day,start,end,limit,fq)
+        // 端点路由见 `kline_route`（C4：复权不再走被 WAF 封的 fqkline，
+        // 返回 adj_factor=None 交 lib 层本地复权）。
         // 日/周/月的 start/end 交给 `kline_tail`：as-of 下 end=截止日（见其注释）
-        let (fq_prefix, api_endpoint, param_suffix) = if is_minute {
-            ("", "kline/mkline", format!(",{limit}"))
-        } else {
-            match adj {
-                Some(AdjType::Forward) => ("qfq", "fqkline/get", kline_tail(limit, Some("qfq"))),
-                Some(AdjType::Backward) => ("hfq", "fqkline/get", kline_tail(limit, Some("hfq"))),
-                _ => ("", "kline/kline", kline_tail(limit, None)),
-            }
-        };
+        let (fq_prefix, api_endpoint, param_suffix) = kline_route(is_minute, limit, adj);
         let url = format!(
             "https://web.ifzq.gtimg.cn/appstock/app/{api_endpoint}?param={tc_code},{period_key}{param_suffix}"
         );
@@ -569,6 +578,30 @@ mod capability_tests {
                 .unwrap();
         let replay = AS_OF.scope(Some(ctx), async { kline_tail(120, None) }).await;
         assert_eq!(replay, ",,2024-06-03,120", "as-of 必须把 end 填成截止日");
+    }
+
+    /// C4 回归（2026-09-27，301302 t-risk 超时根因）：前/后复权**不得**再路由到
+    /// 被腾讯 WAF 封禁的 `fqkline/get`（实测 501）——一律走不复权 `kline/kline`，
+    /// 复权由 lib 层本地 fallback 接管。回归若把 qfq 路由改回来，本测试变红。
+    #[tokio::test]
+    async fn fwd_and_hfq_route_to_plain_kline_endpoint() {
+        use crate::as_of::AS_OF;
+
+        for adj in [Some(AdjType::Forward), Some(AdjType::Backward), None] {
+            let (fq, endpoint, tail) =
+                AS_OF.scope(None, async { kline_route(false, 60, adj) }).await;
+            assert_eq!(endpoint, "kline/kline", "adj={adj:?} 不得走 fqkline/get");
+            assert_eq!(fq, "", "adj={adj:?} 不得带服务端复权前缀（⇒ 返回 adj_factor=None）");
+            assert!(
+                !tail.contains("qfq") && !tail.contains("hfq"),
+                "adj={adj:?} 参数串混入复权标记: {tail}"
+            );
+        }
+        // 分钟线路由不变（本来就不支持复权）
+        let (fq, endpoint, tail) =
+            AS_OF.scope(None, async { kline_route(true, 320, Some(AdjType::Forward)) }).await;
+        assert_eq!((fq, endpoint), ("", "kline/mkline"));
+        assert_eq!(tail, ",320");
     }
 
     /// 指数代码已带市场前缀时必须透传：`sh000001` 若重判前缀会得到 `szsh000001`；

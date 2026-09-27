@@ -12,9 +12,10 @@
 //! K 线缓存单条约 70 KB，几条就能把最旧快照按 LRU 挤掉，回放兜底于是"哪天有、哪天没"。
 //!
 //! 使用模式:
-//! 1. 后台 cron 每天调用 sweep_daily() 一次,存入当日快照
+//! 1. 后台 cron 每小时 tick，采集**最近一个已完成交易日**的快照（归属日判据见
+//!    `snapshot_target_date`；非交易日会话可回填上一交易日）
 //!    （实现在 `src/init/services.rs::start_daily_snapshot_sweep` →
-//!    `commands/stock_analysis.rs::run_daily_snapshot_sweep`，交易日 15:00 后幂等执行）
+//!    `commands/stock_analysis.rs::run_daily_snapshot_sweep`，幂等执行）
 //! 2. replay 模式遇到 NoHistoricalSemantic 方法,先查每日快照
 //! 3. cache miss → 正常走 record_degradation + 返回空(不阻塞回测)
 //!
@@ -63,6 +64,27 @@ pub const PER_STOCK_METHODS: &[&str] = &[
 #[derive(Clone)]
 pub struct DailySnapshotCache {
     disk: Arc<DiskCache>,
+}
+
+/// 快照**归属日**与采集时机的单一判据（G2'，2026-09-27 粤海饲料回放实证）。
+///
+/// 返回 `Some(date)` = 此刻应采集归属日为 `date` 的快照；`None` = 还没到采集时机
+/// （归属日就是今天、且尚未收盘 15:00 ⇒ 盘中只有半日数据，落盘会被回放当完整收盘值）。
+///
+/// 原实现在外层用 `is_trading_day(今天)` 做闸门 ⇒ 非交易日整轮跳过：
+/// 09-24（周四）是最后交易日、09-25 中秋 + 周末的会话全部 skip ⇒ 09-24 的快照
+/// **永远缺**（当日快照文件里只有 09-09 一条，回放行业排名因此 miss 去打已被
+/// 本机阻断的 push2\* 合成链）。而非交易日 vendor 的「今日」接口返回的就是
+/// 上一交易日完整收盘数据 ⇒ 归属日取 `previous_trading_day(今天)` 即可回填。
+pub fn snapshot_target_date(
+    now_local: &chrono::DateTime<chrono::Local>,
+) -> Option<chrono::NaiveDate> {
+    let today = now_local.date_naive();
+    let target = crate::calendar::previous_trading_day(today);
+    if target == today && chrono::Timelike::hour(now_local) < 15 {
+        return None;
+    }
+    Some(target)
 }
 
 impl DailySnapshotCache {
@@ -229,6 +251,27 @@ mod tests {
         assert!(SNAPSHOT_METHODS.contains(&"get_concept_blocks"));
         assert!(SNAPSHOT_METHODS.contains(&"search_stock"));
         assert!(SNAPSHOT_METHODS.contains(&"get_sector_info"));
+    }
+
+    /// G2'（2026-09-27 粤海饲料回放实证）：归属日必须是「最近一个已完成交易日」，
+    /// 非交易日会话要能**回填**上一个交易日的快照，而不是整轮跳过。
+    /// 场景日期逐字取自日历事实：09-24 周四为最后交易日、09-25 周五中秋休市、09-27 周日。
+    #[test]
+    fn snapshot_target_date_backfills_last_trading_day() {
+        use chrono::TimeZone;
+        let at = |y: i32, mo: u32, d: u32, h: u32| {
+            chrono::Local.with_ymd_and_hms(y, mo, d, h, 0, 0).unwrap()
+        };
+        let day_str = |dt: Option<chrono::NaiveDate>| dt.map(|d| d.to_string());
+
+        // 交易日盘中（14:00 < 15:00）⇒ 半日数据，不收
+        assert_eq!(day_str(snapshot_target_date(&at(2026, 9, 24, 14))), None);
+        // 交易日收盘后 ⇒ 收当天
+        assert_eq!(day_str(snapshot_target_date(&at(2026, 9, 24, 15))), Some("2026-09-24".into()));
+        // 中秋休市日（上午也不行？休市日 vendor 返回的就是 09-24 完整收盘）⇒ 回填 09-24
+        assert_eq!(day_str(snapshot_target_date(&at(2026, 9, 25, 10))), Some("2026-09-24".into()));
+        // 周日 19:00 —— 本次实证场景：原实现整轮 skip ⇒ 09-24 快照永远缺
+        assert_eq!(day_str(snapshot_target_date(&at(2026, 9, 27, 19))), Some("2026-09-24".into()));
     }
 
     #[test]

@@ -3579,18 +3579,23 @@ fn start_daily_snapshot_sweep(state: &AppState) {
                 _ = interval.tick() => {},
             }
             let now = chrono::Local::now();
-            // 收盘（15:00）后才采：盘中采到的是半日数据，回放会把它当成当日完整值
-            if chrono::Timelike::hour(&now) < 15 {
+            // G2'（2026-09-27 粤海回放实证）：归属日 = 最近一个**已完成**交易日。
+            // 原实现两道闸门都按「今天」判：`hour<15` 在非交易日无意义地拦、
+            // `!is_trading_day(今天)` 直接让中秋/周末的会话整轮 skip ⇒
+            // 09-24（最后交易日）的快照永远没人补，回放行业排名只能去打被本机
+            // 阻断的 push2\* 合成链（面板「真故障·1」即此）。
+            let Some(target) = axagent_astock_data::daily_snapshot::snapshot_target_date(&now)
+            else {
+                // 交易日盘中：今天只有半日数据，等收盘
                 continue;
-            }
-            if !axagent_astock_data::calendar::is_trading_day(&now.date_naive()) {
-                continue;
-            }
-            let date = now.format("%Y-%m-%d").to_string();
+            };
+            let date = target.format("%Y-%m-%d").to_string();
             if client.has_daily_snapshot("get_index_quotes", &date) {
                 continue;
             }
-            match crate::commands::stock_analysis::run_daily_snapshot_sweep(&client, &db).await {
+            match crate::commands::stock_analysis::run_daily_snapshot_sweep(&client, &db, &date)
+                .await
+            {
                 Ok(summary) => {
                     tracing::info!("[daily-snapshot] 快照采集完成: {summary}");
                 },

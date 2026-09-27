@@ -4177,7 +4177,20 @@ pub async fn save_eastmoney_proxy(
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "采集每日快照")]
 #[tauri::command]
 pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String, String> {
-    run_daily_snapshot_sweep(&state.astock_client, state.harness.db()).await
+    // G2'：归属日 = 最近一个**已完成**交易日。交易日盘中手动触发时 snapshot_target_date 给
+    // None（今天只有半日数据，绝不能按收盘值落盘）⇒ 从**昨天**起回溯上一交易日。
+    // ⚠ 不能回落成 `previous_trading_day(今天)` —— 该函数在 date 本身是交易日时返回 date，
+    //   盘中触发会把半日数据当收盘值写进快照。
+    let now = chrono::Local::now();
+    let date = axagent_astock_data::daily_snapshot::snapshot_target_date(&now)
+        .unwrap_or_else(|| {
+            axagent_astock_data::calendar::previous_trading_day(
+                now.date_naive() - chrono::Duration::days(1),
+            )
+        })
+        .format("%Y-%m-%d")
+        .to_string();
+    run_daily_snapshot_sweep(&state.astock_client, state.harness.db(), &date).await
 }
 
 /// 每日快照采集的公共实现（Tauri 命令与后台定时服务共用）。
@@ -4188,11 +4201,11 @@ pub async fn sweep_daily_snapshots(state: State<'_, AppState>) -> Result<String,
 pub async fn run_daily_snapshot_sweep(
     client: &axagent_astock_data::AStockClient,
     db: &sea_orm::DatabaseConnection,
+    date: &str,
 ) -> Result<String, String> {
     use axagent_astock_data::daily_snapshot::{PER_STOCK_METHODS, SNAPSHOT_METHODS};
-    use chrono::Local;
 
-    let date = Local::now().format("%Y-%m-%d").to_string();
+    let date = date.to_string();
     let mut market_count = 0u32;
     let mut stock_count = 0u32;
 

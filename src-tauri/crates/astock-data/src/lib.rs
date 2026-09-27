@@ -552,11 +552,17 @@ impl AsofProbe {
             );
         }
         if self.failed.is_empty() {
+            // 计数为 0 时不写这一节：301302 面板实测出现过「另有 0 源无 as-of 能力」，
+            // 一句「还有 0 个」既占篇幅又让人怀疑自己看错了数字。
+            let tail = if self.unsupported == 0 {
+                String::new()
+            } else {
+                format!("；另有 {} 源无 as-of 能力", self.unsupported)
+            };
             format!(
-                "{subject}：被探测的 {} 源均回答无数据（{}）；另有 {} 源无 as-of 能力",
+                "{subject}：被探测的 {} 源均回答无数据（{}）{tail}",
                 self.probed,
-                self.probed_names.join(", "),
-                self.unsupported
+                self.probed_names.join(", ")
             )
         } else {
             // 失败分支也要点名被跳过的源：否则「baidu_stock 失败」看起来像
@@ -7037,6 +7043,19 @@ mod asof_boundary_tests {
             r3.contains("另有 2 源无 as-of 能力（eastmoney, ths）"),
             "失败分支也必须点名被跳过的源，否则看起来像整条链只有 baidu: {r3}"
         );
+
+        // ④ 计数为 0 时整节不出现（301302 面板实测过「另有 0 源无 as-of 能力」）
+        let sole_source = AsofProbe {
+            probed: 1,
+            unsupported: 0,
+            skipped: vec![],
+            probed_names: vec!["eastmoney".into()],
+            failed: vec![],
+        };
+        let r4 = sole_source.reason("as-of 301302 质押");
+        assert!(r4.contains("eastmoney"), "被探测的源仍要点名: {r4}");
+        assert!(!r4.contains("另有 0 源"), "0 计数不该占一句: {r4}");
+        assert!(!r4.contains("另有"), "没有跳过源就不该有这一节: {r4}");
     }
 
     /// T14：面板分档的判据来自探测过程本身，不靠调用方回忆「刚才到底是哪种拿不到」。

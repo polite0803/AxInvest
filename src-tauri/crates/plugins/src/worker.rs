@@ -3070,10 +3070,15 @@ mod tests {
     fn drain_refuses_new_calls_and_waits_inflight() {
         let (host_side, worker_side) = tcp_pair();
         let host_reader = host_side.try_clone().expect("克隆回环（读端）");
+        // 收尾句柄：`shutdown` 必须在 `drop(invoker)` **之前** —— 同一 socket 的全部句柄
+        // 共享它，先制造 EOF/读错误，两端阻塞中的读才会醒来退出；顺序反过来，
+        // `Drop for WorkerInvoker` 的 `join_reader()` 会与假 worker 互等到永远
+        // （2026-09-27 实测：全量测试因此卡住 5940s+ 被取消）。
         let host_teardown = host_side.try_clone().expect("克隆回环（收尾）");
         let worker_reader = worker_side.try_clone().expect("克隆回环（worker 读端）");
 
         // 假 worker：`slow` 延迟 300ms 再答 —— 给 drain 制造确定性的在途窗口。
+        // 不 join：本线程阻塞在等下一帧上，直到收尾 `shutdown` 掉 socket 才读到 EOF 退出。
         let _worker = std::thread::spawn(move || {
             let mut peer = Peer::new(worker_reader, worker_side);
             let _ = peer.run(|request, _peer| match request.op.as_str() {
@@ -3091,27 +3096,45 @@ mod tests {
             Box::new(host_side),
         ));
 
-        // ① 在途调用挂到后台线程（它必须**不受 drain 影响**照常回完）。
-        let inflight_invoker = invoker.clone();
-        let inflight = std::thread::spawn(move || inflight_invoker.invoke("slow", json!({})));
-        // 留足时间让 `slow` 帧写出去并进入 pending。
-        std::thread::sleep(Duration::from_millis(80));
+        // ① 在途 + ② drain 在看门狗内跑：超时即判失败，不得挂死 CI（本模块判据）。
+        // `join` 刻意不用 `expect`：线程 panic 也转成普通返回值在外层断言，
+        // 否则看门狗线程先 panic，真正的断言信息会被超时文案掩盖。
+        let watch_invoker = invoker.clone();
+        let (inflight_result, drained): (Result<Value, String>, bool) =
+            with_watchdog(Duration::from_secs(15), "drain 等待在途调用", move || {
+                // ① 在途调用挂到后台线程（它必须**不受 drain 影响**照常回完）。
+                let inflight_invoker = watch_invoker.clone();
+                let inflight =
+                    std::thread::spawn(move || inflight_invoker.invoke("slow", json!({})));
+                // 留足时间让 `slow` 帧写出去并进入 pending。
+                std::thread::sleep(Duration::from_millis(80));
 
-        // ② drain：置位 + 等在途收尾。
-        let drain_invoker = invoker.clone();
-        let drainer = std::thread::spawn(move || drain_invoker.drain(Duration::from_secs(5)));
+                // ② drain：置位 + 等在途收尾（5s 上限，到点返回 false，不永久等）。
+                let drain_invoker = watch_invoker.clone();
+                let drainer =
+                    std::thread::spawn(move || drain_invoker.drain(Duration::from_secs(5)));
 
-        // ③ 新调用被拒（drain 置位与拒答间无屏障，先等在途回完再断言，避免竞态）。
-        let inflight_result = inflight.join().expect("在途调用线程不应 panic");
+                let inflight_result: Result<Value, String> = match inflight.join() {
+                    Ok(result) => result,
+                    Err(_) => Err("在途调用线程 panic".to_string()),
+                };
+                let drained = drainer.join().unwrap_or_default();
+                // 收尾 shutdown 在这里做：`invoker` 原柄此刻还活着，但 socket 已关；
+                // 外层最后的 `drop(invoker)` 只会回收已退出的读线程，不会互等
+                // （同并发配对用例的收尾顺序，见该用例注释）。
+                let _ = host_teardown.shutdown(Shutdown::Both);
+                (inflight_result, drained)
+            });
         assert!(inflight_result.is_ok(), "在途调用必须照常完成：{inflight_result:?}");
-        assert!(drainer.join().expect("drain 线程不应 panic"), "pending 清空后 drain 应返回 true");
+        assert!(drained, "pending 清空后 drain 应返回 true");
+
+        // ③ drain 线程已 join 到 `true`，置位无竞态：新调用必须被拒。
         let refused = invoker.invoke("slow", json!({}));
         let err = refused.expect_err("drain 之后新调用必须被拒");
         assert!(err.contains("drain"), "错误应指向 drain 闸门：{err}");
 
-        // 收尾：关 socket 让假 worker 读到 EOF 退出（同配对用例的 teardown 模式）。
+        // 显式析构：读线程已随 shutdown 退出，`join_reader` 直接返回。
         drop(invoker);
-        let _ = host_teardown.shutdown(Shutdown::Both);
     }
 
     /// §7①：并发 N 个请求 + worker 内回调宿主 —— 响应必须按 `request_id` 正确配对。

@@ -243,10 +243,14 @@ fn strip_verdict_blocks(text) {
 //   ② 无机构覆盖 / 无期权覆盖（小盘股常态）；
 //   ③ 配置参数未注入（auto_stop_loss_pct 等，与数据源无关）；
 //   ④ 「非空值」肯定式措辞。
-//   ⚠ `数据缺失` **维持硬标记**：门禁实证（clarification/hard_marker 两判据）表明
-//   正文级共现抑制会把它连同同篇真缺口一起吞掉（2026-09-21「整篇抑制」警告的复发）——
-//   给它配缺席否定词得不偿失，除非将来升级为**句级**共现判定。
-//   动词类真故障标记（无法获取/获取失败/未能获取）判据不变。
+// D1(2026-09-27) 两点升级（301302 C5 重跑 6 标记全部实证为缺席语义，见
+//   `PLAN-live-kline-cache-calendar-storm.md` §七）：
+//   ⑤ **抑制粒度从整篇降到句级**（以 。！？；换行 断句）：R9b 当时否决「数据缺失」
+//      转软，是因为整篇 co-occur 会吞同报告异句真缺口；句级判定下该顾虑消除 ——
+//      只有与缺席语境**同句**的那次命中被抑制，其它句不受影响；
+//   ⑥ 据此给 `数据缺失` 配缺席语境短语、给动词标记 `获取失败` 开**窄**抑制组
+//      （「无商誉/质押/审计非标信息返回，该维度数据获取失败」= 无该风险记录，非故障）。
+//   动词类真故障标记（无法获取/未能获取/占位/TODO…）维持零抑制：真缺口正是用这些词表达的。
 fn soft_marker_suppression() {
     #{
         "数据不可用": ["而非无数据", "非无数据", "而非数据不可用", "停披", "监管停"],
@@ -255,38 +259,73 @@ fn soft_marker_suppression() {
         "空值": ["暂无数据", "无期权覆盖", "非空值"],
         "均为空": ["暂无数据", "无机构覆盖", "数据源不可得"],
         "未注入": ["auto_stop_loss", "stop_loss_pct", "参数未注入", "配置未注入"],
+        "数据缺失": ["而非无数据", "非无数据", "而非数据不可用", "停披", "监管停",
+                     "无机构", "无覆盖", "无商誉", "未提供", "未披露", "仅取到",
+                     "不存在", "无记录", "需明确标注"],
+        "获取失败": ["无商誉", "无信息", "信息返回", "未提供", "不存在"],
     }
+}
+
+// split_sentences: 以 。！？；与换行断句（D1 句级抑制的作用域）。
+fn split_sentences(body) {
+    let parts = [];
+    let cur = "";
+    for i in 0..body.len() {
+        let ch = body.sub_string(i, 1);
+        if ch == "。" || ch == "！" || ch == "？" || ch == "；" || ch == "\n" {
+            if cur != "" { parts.push(cur); }
+            cur = "";
+        } else {
+            cur += ch;
+        }
+    }
+    if cur != "" { parts.push(cur); }
+    parts
+}
+
+// marker_counts: 每个失败标记的**有效命中次数**（句级抑制后）。
+// 返回 map marker→次数；0 次的 marker 不出现。折叠规则（长词吞子串「占位」）在此统一处理，
+// placeholder_hits（词种清单）与 placeholder_occurrences（总次数）共用，保证两口径同源。
+fn marker_counts(text) {
+    if type_of(text) != "string" || text == "" { return #{}; }
+    let body = strip_verdict_blocks(text);
+    let markers = placeholder_markers();
+    let suppression = soft_marker_suppression();
+    let long_hit = body.contains("占位报告") || body.contains("placeholder")
+        || body.contains("Placeholder") || body.contains("PLACEHOLDER");
+    let sentences = split_sentences(body);
+    let counts = #{};
+    for i in 0..markers.len() {
+        let m = markers[i];
+        if m == "占位" && long_hit { continue; }
+        let phrases = suppression[m];
+        let has_phrases = type_of(phrases) == "array";
+        let n = 0;
+        for j in 0..sentences.len() {
+            let s = sentences[j];
+            if !s.contains(m) { continue; }
+            // 句级抑制：缺席语境必须与命中**同句**才豁免该次命中
+            if has_phrases && has_any(s, phrases) { continue; }
+            n += s.split(m).len() - 1;
+        }
+        if n > 0 { counts[m] = n; }
+    }
+    counts
 }
 
 // placeholder_hits: 返回报告命中的失败标记清单（供逐节点归因 + 严重度计数）
 // 折叠规则：命中「占位报告」等长词时不再重复计其子串「占位」，避免同一处双计。
 // 2026-09-21：先剥离 VERDICT 块；软标记按定向否定短语抑制（见上方说明）。
+// D1(2026-09-27)：抑制与计数统一走 marker_counts（句级）。
 fn placeholder_hits(text) {
-    if type_of(text) != "string" || text == "" { return []; }
-    let body = strip_verdict_blocks(text);
+    let counts = marker_counts(text);
     let markers = placeholder_markers();
-    let suppression = soft_marker_suppression();
     let hits = [];
     for i in 0..markers.len() {
-        if !body.contains(markers[i]) { continue; }
-        // 软标记：正文含该标记的定向否定短语 ⇒ 判为澄清，不计入
-        let phrases = suppression[markers[i]];
-        if type_of(phrases) == "array" && has_any(body, phrases) { continue; }
-        hits.push(markers[i]);
+        // 不存在的键返回 unit ⇒ 以类型判存在，避免依赖 map 的 contains_key
+        if type_of(counts[markers[i]]) == "i64" { hits.push(markers[i]); }
     }
-    let long_hit = false;
-    for i in 0..hits.len() {
-        if hits[i] == "占位报告" || hits[i] == "placeholder"
-            || hits[i] == "Placeholder" || hits[i] == "PLACEHOLDER" {
-            long_hit = true;
-        }
-    }
-    if !long_hit { return hits; }
-    let folded = [];
-    for i in 0..hits.len() {
-        if hits[i] != "占位" { folded.push(hits[i]); }
-    }
-    return folded;
+    hits
 }
 
 // placeholder_occurrences: 失败标记在正文中的**实际出现次数**（同一词多次出现重复计）
@@ -294,24 +333,12 @@ fn placeholder_hits(text) {
 // 面板显示「N 处」与用户数原文的直觉不符（实证：hm 显示 3 处，原文实际出现 4+ 次）。
 // 本函数给出出现次数的独立口径，供面板并列展示「词种数 / 出现次数」。
 // 剥离 VERDICT 与软标记抑制规则与 placeholder_hits **完全一致** ——
-// 否则两个口径会落在不同判定集上，越显示越矛盾。
+// 否则两个口径会落在不同判定集上，越显示越矛盾。（D1 起两口径同源于 marker_counts。）
 fn placeholder_occurrences(text) {
-    if type_of(text) != "string" || text == "" { return 0; }
-    let body = strip_verdict_blocks(text);
-    let markers = placeholder_markers();
-    let suppression = soft_marker_suppression();
-    // 折叠规则与 placeholder_hits 保持一致：长词命中 ⇒ 不再计其子串「占位」
-    let long_hit = body.contains("占位报告") || body.contains("placeholder")
-        || body.contains("Placeholder") || body.contains("PLACEHOLDER");
+    let counts = marker_counts(text);
     let total = 0;
-    for i in 0..markers.len() {
-        let m = markers[i];
-        if m == "占位" && long_hit { continue; }
-        if !body.contains(m) { continue; }
-        let phrases = suppression[m];
-        if type_of(phrases) == "array" && has_any(body, phrases) { continue; }
-        let n = body.split(m).len() - 1;
-        if n > 0 { total += n; }
+    for key in counts.keys() {
+        total += counts[key];
     }
     total
 }

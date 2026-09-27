@@ -845,3 +845,32 @@ fn r9b_absence_phrases_suppress_but_true_failures_still_count() {
     let r2 = run_quality(&[("hm", real)], &[("hm", 60.0)]);
     assert!(hits(&r2, "hm") > 0, "真工具故障不得被 R9b 抑制误杀");
 }
+
+/// D1 回归（2026-09-27，301302 C5 重跑 6 标记逐句实证为合法缺席）：
+/// 抑制粒度降到句级后，用**真实报告语句**钉死「6 → 2」：
+/// fund/hm/sec 的缺席句（语境与命中同句）清零；lk 结论段裸「质押数据缺失」
+/// 与 sec 的「=null」枚举**维持计数**（语境在异句/异段，句级不连坐）。
+#[test]
+fn d1_sentence_level_suppression_on_real_reports() {
+    // fund 两句（真实原文节选）
+    let fund = "数据缺口影响评估：无机构 EPS 覆盖、连续亏损年数缺失、商誉/质押数据缺失，使估值锚定和退市风险评估置信度下降约 15-20 分。\n\
+                无商誉/质押/审计非标信息返回，该维度数据获取失败。";
+    let r = run_quality(&[("fund", fund)], &[("fund", 55.0)]);
+    assert_eq!(hits(&r, "fund"), 0, "fund 两句均含同句缺席语境（无机构/无商誉…信息返回），应清零");
+
+    // hm 句（真实原文节选）：「需明确标注」与命中同句
+    let hm = "无法判断北向对华如科技的买卖方向，该维度数据缺失，需明确标注。";
+    let r = run_quality(&[("hm", hm)], &[("hm", 35.0)]);
+    assert_eq!(hits(&r, "hm"), 0, "北向停披缺席语境与命中同句，应清零");
+
+    // lk 结论段（真实原文节选）：语境（不可得）在另一段 ⇒ 维持计数
+    let lk = "质押风险：pledge_ratio_unavailable（质押数据不可得），无法评估平仓线与纾困敞口。\n\
+              结论：筹码面中期供给偏重；质押数据缺失削弱结论确定性，整体偏空。";
+    let r = run_quality(&[("lk", lk)], &[("lk", 42.0)]);
+    assert_eq!(hits(&r, "lk"), 1, "结论段裸「数据缺失」与语境异句，不得连坐抑制");
+
+    // sec 段（真实原文节选）：「仅取到」同句豁免，「=null」枚举维持
+    let sec = "机构覆盖数=null；历史价格区间/均线/量价结构数据缺失，仅取到当日快照。";
+    let r = run_quality(&[("sec", sec)], &[("sec", 45.0)]);
+    assert_eq!(hits(&r, "sec"), 1, "=null 枚举维持计数；「数据缺失，仅取到…」同句豁免");
+}

@@ -6299,6 +6299,43 @@ mod asof_snapshot_first_tests {
         );
     }
 
+    /// G2''（2026-09-27 001313 回放实证）：回放锚点落在周末 ⇒ 行业排名要命中**上一交易日**
+    /// 的快照，既不打 vendor（push2\* 族在本机被阻断）也不记降级。
+    ///
+    /// 缺陷形态：采集侧的归属日已改成最近已完成交易日，读取侧仍拿 `as_of_date` 原值拼 key
+    /// ⇒ 周日锚点读 `daily:get_industry_ranking:2026-09-27` 永远 miss，面板继续
+    /// 「真故障 · 1」——快照兜底形同不存在。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn industry_ranking_weekend_anchor_hits_prev_trading_day_snapshot() {
+        let client = client_with_snapshots("ind_rank_backfill");
+        let payload = serde_json::to_string(&vec![IndustryRank {
+            industry_name: "半导体".into(),
+            change_pct: 2.5,
+            turnover: None,
+            main_inflow: None,
+            leader_code: Some("688981".into()),
+            leader_name: Some("中芯国际".into()),
+            leader_change_pct: Some(3.1),
+        }])
+        .unwrap();
+        client.set_daily_snapshot("get_industry_ranking", "2026-09-24", &payload);
+        crate::as_of::reset_global_degradation_log();
+
+        let got = AS_OF
+            .scope(Some(replay("2026-09-27")), async { client.get_industry_ranking().await })
+            .await
+            .expect("周末锚点应回填上一交易日快照");
+        assert_eq!(got.len(), 1, "必须回放到 09-24 那条快照: {got:?}");
+        assert_eq!(got[0].industry_name, "半导体");
+        assert_eq!(got[0].change_pct, 2.5);
+        let report = peek_global_degradation_report();
+        assert!(
+            report.iter().all(|e| e.method != "get_industry_ranking"),
+            "命中快照却记了降级: {report:?}"
+        );
+    }
+
     /// 两融：个股级快照（key 含 code）必须能被读回。
     ///
     /// 缺陷形态：sweep 按 `daily:{method}:{code}:{date}` 写入，读取侧却只有不带 code 的

@@ -7,6 +7,8 @@
 //! 存储:**独立 DiskCache 实例 + 独立文件** `astock_daily_snapshot.json`（JSON 落盘 + LRU），
 //! Key 格式 `daily:{method}:{date}`，个股级为 `daily:{method}:{code}:{date}`
 //! （读取侧对应 `get_stock`；2026-09-25 之前它只写无读）。
+//! `{date}` 在读写两侧都先归一到「当天或之前最近交易日」（见 `key_date`）——
+//! 快照的键空间等于交易日，周末/假日锚点的回放因此能回填上一交易日那条。
 //! 为什么强调"独立"：本文件过去写着「与 L2 隔离」，实现却是把 `with_l2_cache` 的
 //! `Arc<DiskCache>` 复用一遍 —— 同一实例、同一 10_000 条容量、同一文件。
 //! K 线缓存单条约 70 KB，几条就能把最旧快照按 LRU 挤掉，回放兜底于是"哪天有、哪天没"。
@@ -87,6 +89,40 @@ pub fn snapshot_target_date(
     Some(target)
 }
 
+/// 快照的**日期键空间只有交易日**：读写两侧的日期一律先归一到
+/// 「该日当天或之前最近的交易日」，再拼 key。
+///
+/// 为什么放在 key 构造处而不是各调用方（2026-09-27 001313 回放实证）：采集侧的归属日
+/// 已由 `snapshot_target_date` 改成最近已完成交易日（周末会话回填 09-24），但读取侧
+/// 仍拿 `as_of_date` **原值** 查 ⇒ 用户把回放锚点选在周日 09-27 时读的是
+/// `daily:{method}:2026-09-27`，永远 miss，兜底形同不存在，面板继续红在被打断的合成链上。
+/// 归一后与 `get_quote` 的休市回退同口径（09-27 → 上一交易日 09-24）；锚点本身是交易日时
+/// `previous_trading_day` 返回原值，语义不变。读写共用同一函数 ⇒ 不可能再各走各的判据。
+fn key_date(date: &str) -> String {
+    match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+        Ok(d) => crate::calendar::previous_trading_day(d).format("%Y-%m-%d").to_string(),
+        // 非 YYYY-MM-DD 的调用方（理论上不应有）保持原样，不做二次猜测
+        Err(_) => date.to_string(),
+    }
+}
+
+/// 空结果不是快照：`"[]"` / `""` / `"null"` 一律按「这一天没有快照」处理。
+///
+/// 为什么必须在缓存层过滤而不是在采集侧逐个 method 判（2026-09-27 实测）：
+/// 采集 09-24 的那一轮里 `daily:get_industry_ranking:2026-09-24` 与
+/// `daily:get_hot_stocks:2026-09-24` 都落成了字面 `"[]"` —— 后台 tick 的采集任务
+/// 没有 task-local 作用域，`current_as_of()` 走**全局栈**兜底，读到当时正在跑的
+/// 回放上下文 ⇒ 走了 as-of 分支（探测 push2\* 失败 → `Ok(vec![])`）→ 采集把空列表
+/// 当有效快照写盘。而闸门是 `has_daily_snapshot("get_index_quotes", date)`，
+/// `"[]"` 也算「已有」⇒ 之后每一轮整轮 skip，**该日的快照永远修不好**。
+/// 在读写与判重的唯一出口处过滤，旧文件里的中毒条目能自愈。
+fn usable(json: Option<String>) -> Option<String> {
+    json.filter(|v| {
+        let t = v.trim();
+        !t.is_empty() && t != "[]" && t != "null"
+    })
+}
+
 impl DailySnapshotCache {
     /// 从已存在的 DiskCache 创建每日快照缓存
     pub fn from_disk(disk: Arc<DiskCache>) -> Self {
@@ -112,18 +148,18 @@ impl DailySnapshotCache {
     }
 
     fn cache_key(method: &str, date: &str) -> String {
-        format!("{SNAPSHOT_PREFIX}:{method}:{date}")
+        format!("{SNAPSHOT_PREFIX}:{method}:{}", key_date(date))
     }
 
     fn stock_cache_key(method: &str, stock_code: &str, date: &str) -> String {
-        format!("{SNAPSHOT_PREFIX}:{method}:{stock_code}:{date}")
+        format!("{SNAPSHOT_PREFIX}:{method}:{stock_code}:{}", key_date(date))
     }
 
     /// 获取指定方法 + 日期的快照
     /// 返回 None 表示未命中缓存(或未启用)
     pub fn get(&self, method: &str, date: &str) -> Option<String> {
         let key = Self::cache_key(method, date);
-        self.disk.get(&key)
+        usable(self.disk.get(&key))
     }
 
     /// 获取个股级快照（key 含股票代码）
@@ -133,7 +169,7 @@ impl DailySnapshotCache {
     /// 采集回来的两融/资金流/北向数据在回放模式下一条也取不到（2026-09-25 补）。
     pub fn get_stock(&self, method: &str, stock_code: &str, date: &str) -> Option<String> {
         let key = Self::stock_cache_key(method, stock_code, date);
-        self.disk.get(&key)
+        usable(self.disk.get(&key))
     }
 
     /// 存入快照(TTL = 0 表示不过期,DiskCache 按 LRU 淘汰)
@@ -145,7 +181,7 @@ impl DailySnapshotCache {
     /// 检查特定方法是否已缓存(避免反序列化大对象)
     pub fn has(&self, method: &str, date: &str) -> bool {
         let key = Self::cache_key(method, date);
-        self.disk.get(&key).is_some()
+        usable(self.disk.get(&key)).is_some()
     }
 
     // ── C5.3 修复：带 keyword 维度的快照 ──
@@ -154,7 +190,7 @@ impl DailySnapshotCache {
     // 新增 keyword 维度，cache_key = daily:{method}:{keyword}:{date}。
 
     fn cache_key_with_keyword(method: &str, keyword: &str, date: &str) -> String {
-        format!("{SNAPSHOT_PREFIX}:{method}:{keyword}:{date}")
+        format!("{SNAPSHOT_PREFIX}:{method}:{keyword}:{}", key_date(date))
     }
 
     /// 存入带 keyword 的快照（用于 search_stock 等方法）
@@ -166,13 +202,13 @@ impl DailySnapshotCache {
     /// 获取带 keyword 的快照
     pub fn get_keyword(&self, method: &str, keyword: &str, date: &str) -> Option<String> {
         let key = Self::cache_key_with_keyword(method, keyword, date);
-        self.disk.get(&key)
+        usable(self.disk.get(&key))
     }
 
     /// 检查带 keyword 的快照是否已缓存
     pub fn has_keyword(&self, method: &str, keyword: &str, date: &str) -> bool {
         let key = Self::cache_key_with_keyword(method, keyword, date);
-        self.disk.get(&key).is_some()
+        usable(self.disk.get(&key)).is_some()
     }
 }
 
@@ -325,5 +361,78 @@ mod tests {
             cache.get("get_margin_data", "2026-06-01").is_none(),
             "不带 code 的全市场 key 读不到个股快照（这正是缺陷形态）"
         );
+    }
+
+    /// G2''（2026-09-27 001313 回放实证）：读取侧的锚点日期必须与采集侧同判据。
+    ///
+    /// 缺陷形态：G2' 只把**归属日**改成最近已完成交易日，读取侧仍用 `as_of_date` 原值拼
+    /// key ⇒ 周日 09-27 的回放读 `daily:{method}:2026-09-27`，永远 miss，
+    /// 行业排名继续红在已被本机阻断的 push2\* 合成链上。
+    #[test]
+    fn non_trading_day_anchor_reads_last_trading_day_snapshot() {
+        let cache = make_cache();
+        cache.set_snapshot("get_industry_ranking", "2026-09-24", "ranking_0924");
+        // 09-25 中秋（周五休市）、09-26 周六、09-27 周日 ⇒ 三个锚点都该回填 09-24 那一条
+        for anchor in ["2026-09-25", "2026-09-26", "2026-09-27"] {
+            assert_eq!(
+                cache.get("get_industry_ranking", anchor).as_deref(),
+                Some("ranking_0924"),
+                "{anchor} 锚点必须回填上一交易日的快照"
+            );
+        }
+        // 锚点本身是交易日 ⇒ 原值，不串到别的交易日
+        assert_eq!(
+            cache.get("get_industry_ranking", "2026-09-24").as_deref(),
+            Some("ranking_0924")
+        );
+        assert!(
+            cache.get("get_industry_ranking", "2026-09-23").is_none(),
+            "归一只允许向后，不得把 09-24 的快照当成 09-23 的数据"
+        );
+    }
+
+    /// 写入侧同判据：回放里合成结果的回写（锚点=周日）落到 09-24 的键上，
+    /// 不留一条谁也读不到的周末孤儿键。
+    #[test]
+    fn weekend_write_lands_on_last_trading_day_key() {
+        let cache = make_cache();
+        cache.set("get_cls_flash", "2026-09-27", "flash_0924");
+        assert_eq!(cache.get("get_cls_flash", "2026-09-24").as_deref(), Some("flash_0924"));
+        assert!(cache.has("get_cls_flash", "2026-09-26"), "判重也必须按交易日归一");
+        cache.set_stock_snapshot("get_announcements", "001313", "2026-09-27", "ann_0924");
+        assert_eq!(
+            cache.get_stock("get_announcements", "001313", "2026-09-25").as_deref(),
+            Some("ann_0924"),
+            "个股级快照同键空间"
+        );
+    }
+
+    /// 采集被回放上下文污染时写下的 `"[]"` 不算快照：读取与判重都按 miss 处理，
+    /// 否则闸门（`has_daily_snapshot`）会把这一日整轮 skip 掉、**永远修不好**。
+    #[test]
+    fn empty_result_is_not_a_snapshot() {
+        let cache = make_cache();
+        for poison in ["[]", "[] ", "", "null"] {
+            cache.set("get_sector_info", "2026-10-09", poison);
+            assert!(
+                cache.get("get_sector_info", "2026-10-09").is_none(),
+                "空结果 {poison:?} 必须按 miss 处理"
+            );
+            assert!(!cache.has("get_sector_info", "2026-10-09"), "判重不得被空快照锁死");
+        }
+        cache.set("get_sector_info", "2026-10-09", "[1]");
+        assert_eq!(cache.get("get_sector_info", "2026-10-09").as_deref(), Some("[1]"));
+        assert!(cache.has("get_sector_info", "2026-10-09"), "有内容才算已采到");
+    }
+
+    /// 个股级与 keyword 级同样过滤（采集侧的空臂不止全市场方法）。
+    #[test]
+    fn empty_stock_and_keyword_snapshots_are_misses() {
+        let cache = make_cache();
+        cache.set_stock_snapshot("get_pledge_data", "001313", "2026-10-09", "[]");
+        assert!(cache.get_stock("get_pledge_data", "001313", "2026-10-09").is_none());
+        cache.set_keyword_snapshot("search_stock", "粤海", "2026-10-09", "[]");
+        assert!(cache.get_keyword("search_stock", "粤海", "2026-10-09").is_none());
+        assert!(!cache.has_keyword("search_stock", "粤海", "2026-10-09"));
     }
 }

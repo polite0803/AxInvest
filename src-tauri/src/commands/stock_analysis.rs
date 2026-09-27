@@ -4206,6 +4206,13 @@ pub async fn run_daily_snapshot_sweep(
     use axagent_astock_data::daily_snapshot::{PER_STOCK_METHODS, SNAPSHOT_METHODS};
 
     let date = date.to_string();
+    // 采集**必须在 live 语义下跑**：快照的定义就是「那一天收盘时的真实世界」。
+    // 后台 tick 的任务没有 task-local 作用域，`current_as_of()` 会回落读进程级全局栈 ⇒
+    // 回放分析在跑时触发采集，各方法就走 as-of 分支（探测失败 → 空列表）并被写进快照。
+    // 实测（09-24）：同一轮里 `daily:get_industry_ranking` 与 `daily:get_hot_stocks`
+    // 都落成了字面 `"[]"`。这里压一层 `None` 显式声明 live（RAII，退出即移除自己那层，
+    // 不影响并发中别的回放作用域）；空值本身另在 `daily_snapshot::usable` 处兜底过滤。
+    let _live_scope = axagent_astock_data::as_of::enter_global_asof(None);
     let mut market_count = 0u32;
     let mut stock_count = 0u32;
 
@@ -4606,6 +4613,11 @@ pub async fn get_cached_recommendation(
         degraded_reasons: HashMap::new(),
         generated_at: generated_at_ms,
         raw_seed_pool_size,
+        // 缓存行只存了 seed_pool_json（code+name 列表），来源构成无从还原 ⇒ 全 0 = 未知。
+        // 前端的「全部来自内置样本池」判据要求 fallback>0，全 0 不会误报警。
+        seed_pool_origin: recommender::SeedPoolOrigin::default(),
+        // 缓存还原不是一次运行 ⇒ 无降级切片
+        asof_degradations: vec![],
         as_of_date: None,
         mode: "cached".to_string(),
         error_detail: None,

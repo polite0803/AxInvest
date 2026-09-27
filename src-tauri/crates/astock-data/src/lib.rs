@@ -1780,6 +1780,29 @@ impl AStockClient {
         self.daily_snapshot.as_ref().and_then(|c| c.get(method, date))
     }
 
+    /// 快照兜底为什么没接住 —— 与 `AsofProbe::reason` 并列的**第二种缺席**（H4，2026-09-27）。
+    ///
+    /// 必须分开写：「无 as-of 历史通道」与「有快照机制但那天的快照没采到」对用户的含义相反 ——
+    /// 前者永远不能解（等也没用、重跑也没用），后者**自今日起累积**就能解。旧文案把两者
+    /// 挤进一个括号（`as-of 热门股榜单（当日快照亦未命中）`），于是：
+    ///   ① 用户对着结构性缺口去找"采集开关"；
+    ///   ② 反过来以为攒够快照就能解掉一个压根没有通道的维度。
+    /// 与 F 轮「设计上没有」的语义分层同口径：能解的和不能解的，不许共用一句话。
+    fn snapshot_absence_clause(&self, method: &str, date: &str) -> &'static str {
+        match self.daily_snapshot.as_ref() {
+            None => "本地每日快照未启用（装配缺失，与数据源无关）",
+            Some(cache) => {
+                if cache.get(method, date).is_some() {
+                    // 走到这里说明快照命中、但反序列化后是空集合（读侧 usable() 已滤掉
+                    // 字面 "[]"，剩下的只有"形状对、内容为空"这一种）
+                    "该截止日快照存在但内容为空"
+                } else {
+                    "该截止日无本地快照（当日未运行采集）；此类榜单只有当日通道，历史日期不可回补，只有自今日起累积才可解"
+                }
+            },
+        }
+    }
+
     /// P5:尝试读取**个股级**每日快照（key 含股票代码）
     ///
     /// `sweep_daily_snapshots` 对 `PER_STOCK_METHODS`（两融/资金流/北向）以及概念板块、
@@ -4416,10 +4439,18 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(r);
             }
+            let snap_date = as_of
+                .as_ref()
+                .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
             crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_hot_stocks",
-                &probe.reason("as-of 热门股榜单（当日快照亦未命中）"),
+                &format!(
+                    "{}；本地快照兜底：{}",
+                    probe.reason("as-of 热门股榜单"),
+                    self.snapshot_absence_clause("get_hot_stocks", &snap_date)
+                ),
                 probe.kind(),
             );
             return Ok(vec![]);
@@ -4506,10 +4537,18 @@ impl AStockClient {
                 }
                 return Ok(r);
             }
+            let snap_date = as_of
+                .as_ref()
+                .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
             crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_industry_ranking",
-                &probe.reason("as-of 行业排名（当日快照亦未命中）"),
+                &format!(
+                    "{}；本地快照兜底：{}",
+                    probe.reason("as-of 行业排名"),
+                    self.snapshot_absence_clause("get_industry_ranking", &snap_date)
+                ),
                 probe.kind(),
             );
             return Ok(vec![]);
@@ -4693,10 +4732,18 @@ impl AStockClient {
                 return Ok(items);
             }
             // 失败原因（当日无条目 / 源报错 / 无通道）由 probe 汇总成一条，不逐源刷屏
+            let snap_date = as_of
+                .as_ref()
+                .map(|c| c.as_of_date.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
             crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_cls_flash",
-                &probe.reason("as-of 7×24 快讯（当日快照亦未命中）"),
+                &format!(
+                    "{}；本地快照兜底：{}",
+                    probe.reason("as-of 7×24 快讯"),
+                    self.snapshot_absence_clause("get_cls_flash", &snap_date)
+                ),
                 probe.kind(),
             );
             return Ok(vec![]);
@@ -6084,6 +6131,63 @@ mod asof_realtime_degrade_tests {
         assert!(
             hits[0].reason.contains("均未申报 as-of 能力"),
             "文案要说清是「没有日期通道」: {:?}",
+            hits[0].reason
+        );
+        // H4(2026-09-27)：同一句话里两种「拿不到」必须分开表述。本用例的 client 没装
+        // 快照缓存 ⇒ 快照侧只能说「未启用」；旧文案统一写「当日快照亦未命中」，等于对着
+        // 一个结构性缺口让用户去找"采集开关"。
+        assert!(
+            hits[0].reason.contains("本地每日快照未启用"),
+            "要同时交代快照兜底为什么没接住: {:?}",
+            hits[0].reason
+        );
+        assert!(
+            !hits[0].reason.contains("当日快照亦未命中"),
+            "反面形态：不得把「无通道」与「快照没采到」挤进同一个括号: {:?}",
+            hits[0].reason
+        );
+    }
+
+    /// H4：装好了快照缓存、但该截止日没有条目 ⇒ 文案必须是「可回填/可累积」那一档，
+    /// 与上一条（缓存未启用、以及无历史通道）**逐字不同**。
+    ///
+    /// 这条区分对用户是有后果的：热股榜只有当日通道，历史日期不可回补，只能自今日起累积；
+    /// 而「未启用」是装配缺失，改配置即可。两者混说，用户要么白等，要么去找不存在的数据源。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn hot_stocks_asof_reason_distinguishes_missing_snapshot_from_no_channel() {
+        use crate::as_of::{peek_global_degradation_report, AS_OF};
+        crate::as_of::reset_global_degradation_log();
+        // 本用例只读不写快照 ⇒ 不需要 flush 任务，返回的 DiskCache 句柄挂着即可。
+        // 路径就地构造：`tmp_cache_path` 属 `asof_snapshot_first_tests` 模块，本模块不可见。
+        let snap_dir = std::env::temp_dir().join("astock_h4_snap_absent");
+        let _ = std::fs::create_dir_all(&snap_dir);
+        let (client, _snap_disk) =
+            AStockClient::new().with_daily_snapshot_cache(snap_dir.join("snapshot.json"));
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let r = AS_OF.scope(Some(ctx), async { client.get_hot_stocks().await }).await;
+        assert!(r.unwrap().is_empty(), "快照 miss + 无通道 ⇒ 仍须返回空列表");
+
+        let hits: Vec<_> = peek_global_degradation_report()
+            .into_iter()
+            .filter(|e| e.method == "get_hot_stocks")
+            .collect();
+        assert_eq!(hits.len(), 1, "只一条: {hits:?}");
+        assert!(
+            hits[0].reason.contains("该截止日无本地快照"),
+            "缓存已启用，就该说「那天的快照没采到」: {:?}",
+            hits[0].reason
+        );
+        assert!(
+            !hits[0].reason.contains("未启用"),
+            "不得把「未启用」扣在一个已经装好缓存的 client 上: {:?}",
+            hits[0].reason
+        );
+        // 通道侧仍要说清是结构性无通道（与快照缺席并列，各占一段）
+        assert!(
+            hits[0].reason.contains("均未申报 as-of 能力"),
+            "通道缺席与快照缺席必须各写一段: {:?}",
             hits[0].reason
         );
     }

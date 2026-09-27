@@ -68,8 +68,11 @@ fn test_is_trading_day() {
     assert!(!is_trading_day(&NaiveDate::from_ymd_opt(2026, 5, 16).unwrap()));
     // 国庆
     assert!(!is_trading_day(&NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()));
-    // 中秋
-    assert!(!is_trading_day(&NaiveDate::from_ymd_opt(2026, 9, 21).unwrap()));
+    // 中秋：2026-09-25（周五）休市。原断言误标 09-21 —— 真实日 K 显示
+    // 09-21/22 正常开市、序列止于 09-24（C1 纠错，见 calendar.rs 表注释）。
+    assert!(!is_trading_day(&NaiveDate::from_ymd_opt(2026, 9, 25).unwrap()));
+    assert!(is_trading_day(&NaiveDate::from_ymd_opt(2026, 9, 21).unwrap()));
+    assert!(is_trading_day(&NaiveDate::from_ymd_opt(2026, 9, 22).unwrap()));
 }
 
 #[test]

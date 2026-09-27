@@ -2247,32 +2247,17 @@ impl AStockClient {
             if let Some(cached) = self.cache_get(&cache_key).await {
                 if let Ok(klines) = serde_json::from_str::<Vec<KLine>>(&cached) {
                     if klines.len() >= limit as usize {
-                        // 修复 M-DS-1: 仅检查长度不够，还需校验最后一条 K 线的日期是否为
-                        // 最新交易日；缓存过期（周末/节假日拉取后过了夜）视为未命中，重拉 vendor。
-                        //
-                        // ⚠ 该判定只适用于 live：回放的 K 线按定义止于截止日，与「今天的最
-                        //   新交易日」比较必然判成过期 ⇒ 回放期间 K 线缓存**永不命中**，
-                        //   每个节点每一轮都重打 vendor。缓存键本身已带 asof- 后缀，不会串味。
-                        let cache_stale = if crate::as_of::is_asof_active() {
-                            false
-                        } else {
-                            let latest_td = crate::calendar::latest_trading_day();
-                            klines
-                                .last()
-                                .and_then(|k| {
-                                    chrono::NaiveDate::parse_from_str(&k.date, "%Y-%m-%d").ok()
-                                })
-                                .map(|d| d < latest_td)
-                                .unwrap_or(true)
-                        };
-                        if !cache_stale {
-                            let start = klines.len().saturating_sub(limit as usize);
-                            return Ok(klines[start..].to_vec());
-                        }
-                        tracing::debug!(
-                            "[astock-data] K 线缓存已过期 (last_date={:?})，重新拉取 vendor",
-                            klines.last().map(|k| k.date.as_str())
-                        );
+                        // C2（2026-09-27，301302 t-risk 超时根因）：删除 M-DS-1 的
+                        // 「last_date ≥ latest_trading_day()」日期判据，新鲜性由 TTL 全权。
+                        // 理由：K 线缓存 TTL=300s，`cache_get` 双侧（L1 expires_at / L2
+                        // get 移除）都真实执行过期。300s 窗口内 `last_date < 最新交易日`
+                        // 的唯一解释是 vendor 本来就没有那天的数据（日历错或数据滞后），
+                        // 重拉必然拿回同样结果 —— 判据只剩害处：日历表缺 2026-09-25（中秋）
+                        // 时它把 live K 线缓存 100% 判过期，每次读都重打 vendor，
+                        // 前复权链又双断（腾讯 fqkline WAF + push2his RST）⇒ t-risk 30s 预算必破。
+                        // 原「周末/节假日拉取后过了夜」的场景本就由 300s TTL 覆盖，判据是冗余。
+                        let start = klines.len().saturating_sub(limit as usize);
+                        return Ok(klines[start..].to_vec());
                     }
                 }
             }

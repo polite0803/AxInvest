@@ -269,9 +269,58 @@ pub fn populate_remote_holidays(holidays: Vec<String>) -> usize {
 
 /// 启动时初始化节假日缓存(异步,fire-and-forget)。
 /// 不阻塞主流程,失败时静默退化(走硬编码)。
+///
+/// ⚠ 2026-09-27：其数据源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线（实测 code=9501
+/// 「报表配置不存在」），本函数的实际接线已被**指数日 K 自证**取代
+/// （`derive_holidays_from_kline_dates`，由 `src/init/state.rs` 启动时调用）。
+/// 保留仅为手动刷新命令（`stock_analysis.rs` 的日历查询）的兼容出口。
 pub async fn init_holiday_calendar() -> Result<usize, String> {
     let holidays = fetch_holiday_calendar().await?;
     Ok(populate_remote_holidays(holidays))
+}
+
+/// C3（2026-09-27，301302 t-risk 超时根因）：用上证指数日 K「自证」交易日历，
+/// 替代已下线的东财报表。纯函数，零全局状态，便于测试。
+///
+/// 输入：指数日 K 的日期序列（vendor 原始，任意顺序）与北京今日。
+/// 规则：取 `[最早, 今日)` 区间内**未开市的工作日** ⇒ 休市：
+/// - 内部空洞（国庆连休等，夹在两根 K 线之间）；
+/// - 尾部空洞（如 2026-09-25 中秋：日 K 止于 09-24，09-25 无 K 线）。
+///
+/// ⚠ 权衡：vendor 数据若滞后一日，会把最近一个工作日误标休市 —— 代价只影响
+/// 休市提示 / 快照采集跳过（K 线缓存新鲜性已由 C2 改为 TTL 全权，不再依赖本表），
+/// 远小于漏标节假日的代价（漏标正是本次缓存风暴的源头）。`today` 本身永不标记。
+pub fn derive_holidays_from_kline_dates(dates: &[String], today: NaiveDate) -> Vec<String> {
+    let parsed: std::collections::BTreeSet<NaiveDate> =
+        dates.iter().filter_map(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()).collect();
+    let Some(&first) = parsed.iter().next() else {
+        return vec![];
+    };
+    let mut out = Vec::new();
+    let mut d = first + Duration::days(1);
+    while d < today {
+        let w = d.weekday();
+        if w != Weekday::Sat && w != Weekday::Sun && !parsed.contains(&d) {
+            out.push(d.format("%Y-%m-%d").to_string());
+        }
+        d += Duration::days(1);
+    }
+    out
+}
+
+/// 把 K 线自证出的休市日**合并**进全局远程缓存（不清空——与其它来源共存）。
+/// 返回本次新增条数。
+pub fn populate_holidays_from_kline_dates(dates: &[String], today: NaiveDate) -> usize {
+    let derived = derive_holidays_from_kline_dates(dates, today);
+    let mut cache = REMOTE_HOLIDAYS.write();
+    let before = cache.len();
+    cache.extend(derived);
+    cache.len() - before
+}
+
+/// 北京时间的今日（启动时 K 线日历自证用）
+pub fn beijing_today() -> NaiveDate {
+    beijing_now().2
 }
 
 /// 仅供测试:清空远程节假日缓存,恢复纯硬编码模式
@@ -389,5 +438,26 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 9, 24).unwrap(),
             "09-25 缺表时这里会错报 09-25 ⇒ live K 线缓存恒判过期（缓存风暴根因）"
         );
+    }
+
+    /// C3 回归（2026-09-27）：指数日 K 自证日历 —— 内部空洞与尾部空洞都要推出，
+    /// today 本身与序列里存在的日期不得误标。用 2027 独立日期段，纯函数零全局副作用。
+    #[test]
+    fn kline_derived_calendar_covers_inner_and_tail_gaps() {
+        // 构造 2027-03：开市日 03-01..03-04、03-08；03-05(五) 模拟内部空洞；
+        // 03-09(一)/03-10(二)/03-11(三) 模拟尾部空洞（K 线止于 03-08）；today=03-12(五)。
+        let dates = ["2027-03-01", "2027-03-02", "2027-03-03", "2027-03-04", "2027-03-08"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let today = NaiveDate::from_ymd_opt(2027, 3, 12).unwrap();
+        let got = derive_holidays_from_kline_dates(&dates, today);
+        assert_eq!(
+            got,
+            vec!["2027-03-05", "2027-03-09", "2027-03-10", "2027-03-11"],
+            "内部空洞 03-05 与尾部空洞 03-09..11 都必须推出；周末与 K 线日期不得混入"
+        );
+        // 空输入 ⇒ 空输出（启动拉取失败时不会误伤任何日期）
+        assert!(derive_holidays_from_kline_dates(&[], today).is_empty());
     }
 }

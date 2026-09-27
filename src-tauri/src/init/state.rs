@@ -1625,6 +1625,30 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 经 tools::global_state 取客户端，AppState 构造时注入一次。
     axagent_tools::global_state::set_astock_client(astock_client.clone());
 
+    // C3（2026-09-27，301302 t-risk 超时根因）：交易日历「上证日 K 自证」接线。
+    // 原远程源 `RPTA_WEB_TRADE_CALENDAR` 报表已下线（9501），且 `init_holiday_calendar`
+    // 此前**从未被启动流程调用** ⇒ is_trading_day 一直走硬编码兜底，缺 2026-09-25 中秋
+    // 时把 live K 线缓存全判过期（缓存风暴）。fire-and-forget，失败静默退化走硬编码。
+    {
+        let client_for_calendar = astock_client.clone();
+        tokio::spawn(async move {
+            match client_for_calendar.get_klines("sh000001", "daily", 60).await {
+                Ok(klines) => {
+                    let dates: Vec<String> = klines.iter().map(|k| k.date.clone()).collect();
+                    let n = axagent_astock_data::calendar::populate_holidays_from_kline_dates(
+                        &dates,
+                        axagent_astock_data::calendar::beijing_today(),
+                    );
+                    tracing::info!(
+                        "[init] 交易日历指数K自证完成: {} 根K线, 新增休市日 {n}",
+                        dates.len()
+                    );
+                },
+                Err(e) => tracing::warn!("[init] 交易日历指数K自证失败，退化硬编码表: {e}"),
+            }
+        });
+    }
+
     // ── stock-analysis 生命周期钩子注册（对话直执行与业务封装路径统一执行语义）──
     // precheck（数据质量预检，仅对话路径） / enhance（业务变量增强，所有路径） /
     // persist（结果持久化，仅对话路径）。业务封装路径通过 opts.input 携带的

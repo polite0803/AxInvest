@@ -357,7 +357,7 @@ impl InternationalVendor {
         let parse_f64 =
             |key: &str| -> f64 { data.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0) };
 
-        // 字段映射参考 browser_eastmoney.rs:169-175 的正确映射
+        // 字段映射参考 browser_eastmoney.rs:184-195 的正确映射
         // f43=最新价 f60=昨收 f46=开盘 f44=最高 f45=最低 f47=成交量(手) f48=成交额(元)
         let price = parse_f64("f43");
         let pre_close = parse_f64("f60");
@@ -387,7 +387,7 @@ impl InternationalVendor {
             turnover_rate,
             pe: Some(parse_f64("f162")),
             pb: Some(parse_f64("f167")),
-            // f116/f117 单位为"元"，与 browser_eastmoney.rs:180-181 保持一致，不乘系数
+            // f116/f117 单位为"元"，与 browser_eastmoney.rs:200-201 保持一致，不乘系数
             total_mv: Some(parse_f64("f116")),
             circulating_mv: Some(parse_f64("f117")),
             limit_up: None,

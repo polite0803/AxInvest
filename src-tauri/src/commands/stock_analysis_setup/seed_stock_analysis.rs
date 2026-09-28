@@ -443,9 +443,51 @@ type AlgoToolRow = (
 ///    **必须升版**：① 节点集新增 `value-verify`；② `value-verify.rhai` 经 `include_str!`
 ///    嵌入本模板节点 `code` 字段。不升版则版本门 `existing.version >= TEMPLATE_VERSION ⇒ skip`
 ///    让存量库永不重播种。
+/// ⚠️ **v92（2026-09-28）：推翻正向 DCF 单一架构 —— 反向 DCF + 相对估值路由 + 必有结论**。
+///    用户裁决（原话）：「你的修改就是个笑话…华大九天（301269）87.56 元的现价，
+///    估值结论 2.16-4.42 元 -97.5%，这不是垃圾是什么？…我希望的方式就是使用获取的
+///    数据用本地算法进行估值运算，然后让 Agent 引用估值结论」。
+///    根因（复算确认，**不是算错、是问错了问题**）：301269 锚定 FCF 仅 0.686 亿
+///    （FCF 收益率 0.14%），而市场按 10 年后的现金流定价 ⇒ 正向 DCF 结构上无法表达
+///    这类成长股（要让 DCF 等于 87.56 元，5 年 FCF 须复合 +130%/年）。
+///    处置（`astock-data` 新增 `valuation.rs`，`compute_valuation` 装配）：
+///      ① **反向 DCF**（`reverseDcf`）：由现价二分反解市场隐含的 FCF 年复合增速，
+///         并把「估值贵不贵」转成「市场假设是否可信」（可行性判据 = 隐含末年 FCF /
+///         预测期营收：>100% Impossible / >50% Strained / 其余 Plausible）。
+///         它**只需一个正锚**即可给出答案 ⇒ 可用面显著大于正向 DCF。
+///      ② **相对估值**（`relative`）：按**数据形态**路由有效指标（PE→PS→PB，
+///         PE≤0 或 PE≥150 视为无定价信息），附自身历史分位与同行分位。
+///         301269 的 PS 处近 4 年 **1.04% 分位**，旧架构只读 PE ⇒ 该证据被完全浪费。
+///      ③ **结论层**（`conclusion`，**必有**）：`build_conclusion` 按
+///         `dcf → reverse_dcf → relative → graham` 路由主口径，输出
+///         `{action, headline, primaryMethod, legs[], notApplicable[]}`；
+///         四腿全不可用时也给 `action="数据不足"`，**严禁空结论**。
+///    消费端接线：value-investor 提示词强制原文引用 `conclusion.headline`；
+///      `portfolio-mgr.rhai` f5 的 band 腿改读**路由后的主指标**分位（不再恒用 PE）；
+///      `value-verify.rhai` 把算法结论**无条件注入**顶层 `valuation_conclusion`（权威值，
+///      不依赖 LLM 是否照抄），并在 `valuation_audit` 留痕。
+///    **必须升版**：本节点 system_prompt、`portfolio-mgr.rhai`、`value-verify.rhai`
+///    三者均经 `include_str!` 嵌入节点/提示词，不升版则存量库永不重播种。
 /// ⚠️ 本版**不抬** `DCF_MIGRATION_VERSION`：一次性门只守护「DCF 参数默认值」，
 ///    本次改动不涉及那三个参数常量，抬门会把用户在面板上调好的参数打回默认。
-pub(crate) const TEMPLATE_VERSION: i32 = 91;
+/// ⚠️ **v93（2026-09-28）：DCF 锚口径改「最近完整会计年度 FCF」优先（用户裁决）**。
+///    根因（600887 伊利实证）：旧锚取 **TTM FCF**（滚动 4 季 OCF − 资本开支），而 A 股
+///    中报会释放营运资本（2026H1 OCF 97.59 亿 vs 2025H1 29.64 亿）⇒ TTM FCF 被抬高到
+///    **182.51 亿**（FY2025 年报仅 113.07 亿），中性档虚高到 51.88 元、判「低估 +49.1%」；
+///    年报锚下保守档 24.9 元 < 现价 26.94 元 ⇒ 结论翻转为「偏高（−7.6%）」。
+///    同一畸变使 000858 五粮液 TTM FCF 落到 **−35.85 亿**（FY2025 为 +277.39 亿）
+///    而被迫走代理锚。
+///    处置（`astock-data/src/mcp_tools.rs`）：
+///      ① 新增 `latest_annual_fcf`（取**最近一份 `-12-31` 年报**的 `OCF − 资本开支`），
+///         锚取值链变为 `年报 FCF → TTM FCF → 净利代理锚`；
+///      ② `assumptions.basis` 三态文案改写为「最近完整年报FCF（OCF−资本开支）」/
+///         「年报现金流数据缺失，回落TTM FCF（OCF−资本开支）」/「现金流量表数据缺失…」；
+///      ③ 适用性判据 ② 的分子由 `direct_fcf`（TTM）改为**锚候选**，否则五粮液
+///         （TTM −35.85 亿 / 年报 +277.39 亿）会被「符号相反 ⇒ 不适用」误杀。
+///    消费端：本节点 system_prompt 与 `value-investor.md` 的 `assumptions.basis` 枚举文案同步；
+///    前端 `ValueAssessmentPanel` 的区间区块标题改标「算法 DCF 估值区间」（原文案误标 LLM）。
+///    **必须升版**：system_prompt / `value-investor.md` 经 `include_str!` 嵌入，不升版则存量库永不重播种。
+pub(crate) const TEMPLATE_VERSION: i32 = 93;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///
@@ -825,7 +867,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // v38(2026-09-12): f5 估值因子「fallback 锚定置信度衰减」+ 决策卡文案格式化。
     //   · 新增 `input_mapping`：`valuation_dcf_anchor_is_fallback`
     //     ← `t-valuation.result.content.dcf.assumptions.is_fallback_anchor`
-    //     （该布尔量由 `compute_dcf` 的 `FCF_FALLBACK_BASIS` 判定并随 assumptions 落库）。
+    //     （该布尔量由 `compute_dcf` 按 `assumptions.basis` 判定并随 assumptions 落库）。
     //   · 消费点 `portfolio-mgr.rhai`：命中 fallback 时 `f5 σ × 0.5`（只压置信度、不动权重）。
     //   · `portfolio-mgr.rhai` 的 reasoning 串改为格式化输出（原 `置信=45.74106680714534`）。
     //   ⚠️ **本版会改变决策数值**（与 v37 不同）：凡是 DCF 走了「当期FCF≤0 ⇒ 近5年报正净利
@@ -2861,6 +2903,44 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                    - result.graham.upsidePct: 格雷厄姆上行空间\n\
                    - result.fScore.score: Piotrosky F-Score（0-9，越高越好）\n\
                    - result.moat.label: 护城河评级\n\
+                 - **【估值结论】result.conclusion（2026-09-28 新增，必读、必引用）**\n\
+                   - result.conclusion.action: 算法给出的明确动作（低估 / 合理偏低 / 合理 / 偏高 / 高估 / 数据不足）\n\
+                   - result.conclusion.headline: **主结论原句**（含关键证据与主口径）\n\
+                   - result.conclusion.primaryMethod: 主口径 —— dcf / reverse_dcf / relative / graham / none\n\
+                   - result.conclusion.legs[]: 每条腿 {{method, stance, evidence}}\n\
+                   - result.conclusion.notApplicable[]: **未纳入**的腿及原因（这是透明度披露，\n\
+                     不是「无结论」—— 结论层是兜底出口，四腿全不可用时也会给「数据不足」）\n\
+                   ⚠️ 旧架构的核心缺陷就是「没有结论」：301269（华大九天）现价 87.56 元，\n\
+                   正向 DCF 给 2.16–4.42 元（−97.5%）—— 既不是结论也不是算错，而是\n\
+                   把「当期几乎不产生 FCF 的成长股」问成了「当期现金流能折出多少钱」。\n\
+                   ⇒ **你的 report 必须原文引用 result.conclusion.headline**（可用你自己的\n\
+                   措辞补充说明，但不得替换、不得给出与之相反的估值结论）。\n\
+                 - **【反向 DCF】result.reverseDcf（2026-09-28 新增）**\n\
+                   - result.reverseDcf.impliedCagrPct: 现价**隐含**的 FCF 年复合增速（%）\n\
+                     （负值 = 市场隐含萎缩）—— 它回答的是「市场假设有多激进」，\n\
+                     **不是**「这只股票值多少钱」\n\
+                   - result.reverseDcf.impliedFcf / impliedFcfPerShare: 隐含末年 FCF 总额 / 每股\n\
+                   - result.reverseDcf.impliedFcfMarginPct: 隐含末年 FCF / 预测期营收（%）\n\
+                   - result.reverseDcf.feasibility: Impossible（>100%，物理不可能）/\n\
+                     Strained（>50%，极度紧张）/ Plausible（经营上可达）\n\
+                   - result.reverseDcf.exceedsSearchRange=true: 现价超出模型搜索上界\n\
+                     ⇒ **定价与当期现金流完全脱钩**（此时 feasibility 仍会给值，但\n\
+                     必须点明「脱钩」这一事实，不得把 Impossible 说成「基本面很差的证据」——\n\
+                     它衡量的是市场预期，不是公司质地）\n\
+                   - result.reverseDcf.note: 口径说明原句\n\
+                   ⚠️ 反向 DCF 的定位：正向 DCF 需要「模型前提成立」才可用，反向 DCF\n\
+                   只需一个**正锚** ⇒ 它是「正向 DCF 不适用」时的主口径（见 conclusion.primaryMethod）。\n\
+                 - **【相对估值】result.relative（2026-09-28 新增）**\n\
+                   - result.relative.primary: **主指标名**（PE / PS / PB 中按数据形态\n\
+                     首个**有效**者；PE ≤ 0 或 PE ≥ 150 视为无效 —— 盈利趋零时 PE 不含定价信息）\n\
+                   - result.relative.verdict: 综合口径（deep_value / undervalued / fair /\n\
+                     expensive / overvalued / unknown）\n\
+                   - result.relative.metrics[]: 每指标含 name/value/valid/invalidReason/\n\
+                     percentile（自身历史分位）、peerPercentile（同行分位）、peerMedian、peerCount\n\
+                   - result.relative.note: 未纳入判定的指标及原因\n\
+                   ⚠️ **不要**只看 PE 就断言高估/低估：301269 的 PE 高得无意义（盈利趋零），\n\
+                   而 **PS 处近 4 年 1.04% 分位**（最便宜档）—— 旧架构完全忽略了后者。\n\
+                   引用相对估值时，请以 result.relative.primary 指向的指标为准。\n\
                  - **结构化基本面硬数据**: 来自 t-risk（真实财报提取，V73 接入）\n\
                    - result.stockRiskProfile.roeTTMPct: ROE(TTM)百分比——护城河评级的权威依据（宽>20/窄15-20/无<15）\n\
                    - result.stockRiskProfile.debtRatioPct: 负债率百分比——财务健康度权威依据（<50健康/50-60良好/60-70一般/>70差）\n\
@@ -2872,6 +2952,21 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  margin_of_safety 应直接引用 result.dcf.upsidePct，\n\
                  ideal_buy_price 应直接引用 result.dcf.idealBuyPrice。\n\
                  以上三个字段**一律引用算法输出，不得自行计算或改写**。\n\
+                 \n\
+                 **【最高优先级】估值结论必须引用 result.conclusion（2026-09-28）**:\n\
+                 你的 verdict 中**必须**包含 valuation_conclusion 字段，其 content **原文**\n\
+                 照抄 result.conclusion.headline；并附 algorithm_conclusion_action =\n\
+                 result.conclusion.action。\n\
+                 ⚠️ 这条与上方「硬不可用 ⇒ intrinsic_value_range 填 null」**不冲突，且优先级更高**：\n\
+                 硬不可用只说明「正向 DCF 三档不能当定价用」，**不等于没有估值结论** ——\n\
+                 conclusion 会改走反向 DCF / 相对估值口径给出动作。\n\
+                 因此：\n\
+                 · intrinsic_value_range / margin_of_safety 仍按硬不可用规则填 null（若命中）；\n\
+                 · 但 valuation_conclusion 与 algorithm_conclusion_action **必须始终有值**，\n\
+                   绝不允许因为「DCF 不可用」就整段不写或写「无法估值」——\n\
+                   数据真的全缺时 conclusion.action 会是「数据不足」，照抄即可。\n\
+                 · 不得给出与 conclusion.action 方向相反的最终建议（看多/看空）。\n\
+                   若你的独立判断与之分歧，请**照实报告分歧**并在 risk_flags 中说明理由。\n\
                  凡在 report 中给出三档数值或理想买入价，**必须**同时转述 result.dcf.pricingCaveat\n\
                  的警示，并点明「仅可用于判断方向（该标的高估/低估），不构成目标价/买入价/清仓线」。\n\
                  ⚠️ 该警示与下方「硬不可用 / 软衰减」判据**正交，互不替代** —— 两者都不命中时\n\
@@ -2883,7 +2978,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  **【硬不可用】处理（V74 原两条 + 2026-09-21 扩第 ③ 条）**:\n\
                  情形 ①  result.dcf.available=false\n\
                  情形 ②  result.dcf.upsidePct=null\n\
-                   （①② 的含义是当期FCF≤0且近5年报无正净利年度＝持续亏损，\n\
+                   （①② 的含义是**锚口径 FCF**（最近完整年报优先，年报现金流缺失才回落 TTM）\n\
+                     ≤0 且近5年报无正净利年度＝持续亏损，\n\
                      DCF/格雷厄姆算法估值均不适用，value_signal=「无法估值」）\n\
                  情形 ③  result.dcf.assumptions.applicable=false\n\
                    含义：**模型前提对该标的不成立**。判据见 assumptions.applicability_signals\n\
@@ -2898,10 +2994,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  估值不可用 ≠ 估值为 0，把 null 当 0 是数据语义污染。\n\
                  \n\
                  **锚定口径披露＝【软衰减】（2026-09-21 新增；与上段并列，勿并入硬不可用）**:\n\
-                 result.dcf.assumptions.is_fallback_anchor=true 表示锚定**不是当期真实自由现金流**，\n\
-                 而是代理锚 —— 口径原文见 assumptions.basis，可能是「当期FCF≤0」「现金流量表数据缺失」\n\
-                 或「当期FCF显著低于净利（FCF/净利<0.6）」（2026-09-27 新增第三态）三者之一，\n\
-                 三者处置相同（均取 净利 × 0.90）。**不要假定是哪一种，一律以 assumptions.basis 原文为准**。\n\
+                 result.dcf.assumptions.is_fallback_anchor=true 表示锚定**不是最近完整年报的\n\
+                 真实自由现金流**，而是代理锚 —— 口径原文见 assumptions.basis（2026-09-28 起锚优先取\n\
+                 「最近完整年报 FCF（OCF−资本开支）」，年报现金流缺失才回落 TTM FCF）。代理锚有三种成因：\n\
+                 「锚口径 FCF≤0」「现金流量表数据缺失」或「锚口径 FCF 显著低于净利（FCF/净利<0.6）」，\n\
+                 三者处置相同（均取 净利 或 近5年报正净利均值 × 0.90）；\n\
+                 **不要假定是哪一种，一律以 assumptions.basis 原文为准**。\n\
                  该代理回溯，对成长/转型标的**系统性偏低**。此时数值**可以引用**（三个字段照常填），\n\
                  但必须：① 在 report 中点明口径，不得陈述成与当期现金流等价的结论；\n\
                  ② 在 risk_flags 中加一条标注该口径；③ 相应**下调 confidence**。\n\
@@ -2988,6 +3086,26 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("dcf_ideal", "t-valuation.result.content.dcf.idealBuyPrice"),
                     ("dcf_available", "t-valuation.result.content.dcf.available"),
                     ("dcf_applicable", "t-valuation.result.content.dcf.assumptions.applicable"),
+                    // ── 2026-09-28：算法结论（无条件注入，见 value-verify.rhai 入口段）──
+                    // 用户裁决「推翻现有估值架构」的直接落点：结论不再依赖 LLM 是否照抄。
+                    (
+                        "valuation_conclusion_action",
+                        "t-valuation.result.content.conclusion.action",
+                    ),
+                    (
+                        "valuation_conclusion_headline",
+                        "t-valuation.result.content.conclusion.headline",
+                    ),
+                    (
+                        "valuation_conclusion_primary_method",
+                        "t-valuation.result.content.conclusion.primaryMethod",
+                    ),
+                    ("valuation_relative_verdict", "t-valuation.result.content.relative.verdict"),
+                    ("valuation_relative_primary", "t-valuation.result.content.relative.primary"),
+                    (
+                        "valuation_reverse_feasibility",
+                        "t-valuation.result.content.reverseDcf.feasibility",
+                    ),
                 ]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -4097,7 +4215,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // t-valuation 输出 DCF/格雷厄姆上行空间，用于 f5_signal 估值因子
                     // 2026-09-09: 穿透 .content（工具端已补 dcf/graham/fScore camelCase 别名块）
                     // P0-I(2026-09-12): 锚定来源标记 —— `true` 表示 FCF 锚定来自
-                    // 「当期FCF≤0 ⇒ 近5年报正净利均值×0.90」的历史代理，而非当期真实 FCF。
+                    // 「代理锚（锚口径 FCF≤0 / 锚口径 FCF 显著低于净利 / 现金流量表缺失
+                    //   ⇒ 近5年正净利均值或净利 × 0.90）」的历史回溯，
+                    // 而非最近完整年报的真实 FCF（2026-09-28 起锚优先取年报，年报缺失才回落 TTM）。
                     // 消费点：portfolio-mgr.rhai 的 f5 置信度衰减（σ × 0.5）。
                     // 注意：新变量只需在 rhai 里用 `present(...)` 包裹即可安全缺省，
                     //   无需在本映射里补占位（rt-workflow V57 会自动补 unit 默认值）。
@@ -4183,6 +4303,41 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     //   消费端漏接（与 DCF 腿的 `applicable` / graham 腿的
                     //   `growthClampedUpper` 两条质量声明同族，唯独本腿此前无声明可用）。
                     ("valuation_band_verdict", "t-valuation-band.result.content.verdict"),
+                    // ── 2026-09-28：估值**结论层** + 相对估值路由（用户裁决「推翻现有估值架构」）──
+                    //
+                    // 旧架构的估值腿只有「正向 DCF + 格雷厄姆 + PE 分位」，在
+                    //   301269（华大九天，现价 87.56 元）上给 `2.16–4.42 元`（−97.5%）。
+                    //   复算证明不是算错，而是**问错了问题**：DCF 锚定当期 FCF（0.686 亿，
+                    //   FCF 收益率 0.14%），市场却按 10 年后的现金流定价。
+                    // `compute_valuation` 现已输出 `conclusion`（必有结论）/ `reverseDcf`
+                    //   （由现价反解隐含 FCF 复合增速）/ `relative`（按数据形态路由
+                    //   PE→PS→PB 主指标 + 同行分位）三块。
+                    //
+                    // 消费点：
+                    //   ① `portfolio-mgr.rhai` f5 —— `valuation_relative` 决定 band 腿读哪个
+                    //      指标的分位（301269 的 PS 处 4 年 1.04% 分位，旧实现恒读 PE ⇒ 被浪费）；
+                    //   ② 同脚本输出的 `valuation_conclusion` 块 —— 让「结论」与 f5 的 σ
+                    //      并列可见，矛盾（结论高估 / σ 为正）一眼可查；
+                    //   ③ `value-verify.rhai` —— 把算法结论**无条件**注入 value-investor 的
+                    //      verdict，不依赖 LLM 是否照抄。
+                    ("valuation_conclusion_action", "t-valuation.result.content.conclusion.action"),
+                    (
+                        "valuation_conclusion_headline",
+                        "t-valuation.result.content.conclusion.headline",
+                    ),
+                    (
+                        "valuation_conclusion_primary_method",
+                        "t-valuation.result.content.conclusion.primaryMethod",
+                    ),
+                    ("valuation_relative_verdict", "t-valuation.result.content.relative.verdict"),
+                    ("valuation_relative_primary", "t-valuation.result.content.relative.primary"),
+                    // 整块 `relative`（map）—— band 腿需按 `primary` 名从 `metrics[]` 取分位，
+                    //   Rhai 无「按名索引数组」⇒ 必须拿到整块而非单个标量。
+                    ("valuation_relative", "t-valuation.result.content.relative"),
+                    (
+                        "valuation_reverse_feasibility",
+                        "t-valuation.result.content.reverseDcf.feasibility",
+                    ),
                     // V52 新增: t-risk 算法风险分类数据源
                     // 用确定性算法替代 LLM 分类器（消除 LLM 不一致性）
                     // v55(2026-09-20) 订正: cls-risk-level 亦已下沉 Rhai ⇒ 本模板内不再存在

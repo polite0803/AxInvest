@@ -30,6 +30,7 @@ pub mod scoring;
 pub mod sentiment;
 pub mod types;
 pub mod validation;
+pub mod valuation;
 pub mod valuation_band;
 pub mod vendor_health;
 pub mod vendors;
@@ -546,7 +547,7 @@ impl AsofProbe {
                 return format!("{subject}：路由链上没有可用源（未启用或未注册）");
             }
             return format!(
-                "{subject} 无 as-of 历史通道：{} 个源均未申报 as-of 能力（{}）",
+                "{subject}：无 as-of 历史通道，{} 个源均未申报 as-of 能力（{}）",
                 self.unsupported,
                 self.skipped.join(", ")
             );
@@ -7187,6 +7188,31 @@ mod asof_boundary_tests {
         assert!(r4.contains("eastmoney"), "被探测的源仍要点名: {r4}");
         assert!(!r4.contains("另有 0 源"), "0 计数不该占一句: {r4}");
         assert!(!r4.contains("另有"), "没有跳过源就不该有这一节: {r4}");
+
+        // ⑤ 五种形态共用同一个分隔符 —— `{subject}：` 之后才是归因。
+        // 「未探测」那一支曾写成 `{subject} 无 as-of 历史通道：`（空格 + 第二个冒号），
+        // 面板上四行摆在一起时，冒号的位置就是「没有通道 / 有通道没拿到」的分界线，
+        // 它一歪，两类语义看起来像同一类。
+        let no_source = AsofProbe {
+            probed: 0,
+            unsupported: 0,
+            skipped: vec![],
+            probed_names: vec![],
+            failed: vec![],
+        };
+        let r5 = no_source.reason("as-of 全市场龙虎榜");
+        for (subject, r) in [
+            ("as-of 688072 概念板块", &r1),
+            ("as-of 行业排名", &r2),
+            ("as-of 688072 概念板块", &r3),
+            ("as-of 301302 质押", &r4),
+            ("as-of 全市场龙虎榜", &r5),
+        ] {
+            assert!(
+                r.starts_with(&format!("{subject}：")),
+                "归因必须紧跟在「{subject}：」之后，分隔符不得随分支变化: {r}"
+            );
+        }
     }
 
     /// T14：面板分档的判据来自探测过程本身，不靠调用方回忆「刚才到底是哪种拿不到」。

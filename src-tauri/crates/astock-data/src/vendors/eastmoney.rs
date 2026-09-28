@@ -947,6 +947,31 @@ pub(crate) fn industry_board_list(json: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
+/// 板块当日行情榜单 URL：`t:1` 地域 / `t:2` 行业 / `t:3` 概念。
+/// 与 `get_industry_ranking` 同用 bkzj 接口（本机对 push2\* 族 RST 阻断背景下**存活**的
+/// 行情通道）；`f3` 为百分数×100（66 = 0.66%），换算约定与 L3309 逐字一致。
+pub(crate) fn block_quotes_url(t: &str) -> String {
+    format!("https://data.eastmoney.com/dataapi/bkzj/getbkzj?key=f3,f12,f14&code=m:90+t:{t}")
+}
+
+/// 若干张榜单响应 → `板块名 → 当日涨跌幅(%)`。join 键用名字而非代码：
+/// F10 成分报表（`RPT_F10_CORETHEME_BOARDTYPE`）只给 BOARD_NAME，不给 BK 代码。
+pub(crate) fn build_block_pct_map(lists: &[Value]) -> HashMap<String, f64> {
+    let mut m = HashMap::new();
+    for json in lists {
+        if let Some(rows) = json["data"]["diff"].as_array() {
+            for r in rows {
+                if let (Some(name), Some(f3)) = (r["f14"].as_str(), r["f3"].as_f64()) {
+                    if !name.is_empty() {
+                        m.insert(name.to_string(), f3 / 100.0);
+                    }
+                }
+            }
+        }
+    }
+    m
+}
+
 /// 日 K 字符串（`"YYYY-MM-DD,收盘"`，接口按日期升序）→ `(截止日, 当日涨跌幅%)`。
 ///
 /// 两处不自证就会说谎的地方：
@@ -3440,6 +3465,24 @@ impl StockVendor for EastMoneyVendor {
             return Ok(None);
         }
 
+        // K1（2026-09-28，长川科技 300604 运行 414a926c 实证）：F10 主题报表**只有成分
+        // 关系、没有涨跌幅列**，`change_pct` 此前被硬编码为 None ⇒ 分析师如实报
+        // 「概念涨幅数据缺失」（该失败标记是对的，错在我方从未拼接行情）。
+        // 现用 bkzj 三张榜单（t:1 地域 / t:2 行业 / t:3 概念）按板块名 join 补当日涨跌幅；
+        // 榜单是旁路增强：任一请求失败 ⇒ 静默跳过（该表成员保持 null），不得拖垮归属主结果。
+        let mut pct_lists: Vec<Value> = Vec::new();
+        for t in ["1", "2", "3"] {
+            if let Ok(resp) = self.em_get(&block_quotes_url(t)).await {
+                if let Ok(v) = resp.json::<Value>().await {
+                    pct_lists.push(v);
+                }
+            }
+        }
+        let pct_map = build_block_pct_map(&pct_lists);
+        for b in &mut concepts {
+            b.change_pct = pct_map.get(&b.name).copied();
+        }
+
         Ok(Some(ConceptBlocks {
             stock_code: stock_code.to_string(),
             industry,
@@ -4713,6 +4756,36 @@ mod board_ranking_tests {
             ],
             "空代码行必须剔除，secid 用 f13.f12 拼"
         );
+    }
+
+    /// K1（2026-09-28，300604 运行 414a926c）：概念板块涨跌幅拼接。
+    /// F10 成分报表无涨跌幅列 ⇒ 用 bkzj 榜单按名字 join；join 不上保持 null（不编 0%）。
+    #[test]
+    fn block_pct_map_joins_by_name_and_keeps_miss_as_null() {
+        let lists: Vec<Value> = vec![
+            serde_json::json!({ "data": { "diff": [
+                { "f3": 140, "f12": "BK1145", "f14": "机器人执行器" },
+                { "f3": -62, "f12": "BK0148", "f14": "吉林板块" },
+                { "f3": 0, "f12": "BK9999", "f14": "" }
+            ] } }),
+            serde_json::json!({ "data": { "diff": [
+                { "f3": 66, "f12": "BK0437", "f14": "半导体设备" }
+            ] } }),
+            serde_json::json!({ "result": null }), // 榜单请求失败的占位：不得 panic
+        ];
+        let m = build_block_pct_map(&lists);
+        assert_eq!(m.get("机器人执行器"), Some(&1.40), "f3=140 ⇒ 1.40%（÷100 约定同行业排名）");
+        assert_eq!(
+            m.get("吉林板块"),
+            Some(&-0.62),
+            "地域表(t:1)并进同一映射，浙江板块这类名字可命中"
+        );
+        assert_eq!(m.get("半导体设备"), Some(&0.66), "跨多张榜单合并");
+        assert!(!m.contains_key(""), "空名行剔除");
+        assert_eq!(m.get("不存在的板块"), None, "join 不上不得编 0%");
+        // URL 判据：三张榜单只差 t 参数，走存活 host
+        assert!(block_quotes_url("3").contains("data.eastmoney.com"));
+        assert!(block_quotes_url("3").ends_with("code=m:90+t:3"));
     }
 
     #[test]

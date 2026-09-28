@@ -1,4 +1,4 @@
-# Runtime 配置：金融投资分析（finance_invest）
+# Runtime 配置：投顾经营（finance_invest）
 # 由 opc-domain-pack-finance-invest crate 迁移而来，version=1
 version: 1
 domain_pack_id: finance_invest

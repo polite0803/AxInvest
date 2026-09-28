@@ -782,7 +782,7 @@ mod tests {
             .await
             .unwrap()
             .expect("finance_invest_harness_workflow 应存在");
-        assert!(!fi.nodes.is_empty(), "金融投资工作流节点不应为空");
+        assert!(!fi.nodes.is_empty(), "投顾经营工作流节点不应为空");
     }
 
     #[tokio::test]
@@ -856,14 +856,14 @@ mod tests {
 
     #[tokio::test]
     async fn finance_pack_injects_astock_tools() {
-        // 金融投资域包工作流种子化验证：验证域包适配器生成正确的工作流结构
+        // 投顾经营域包工作流种子化验证：验证域包适配器生成正确的工作流结构
         let h = axagent_dao::db::create_test_pool().await.unwrap();
         let db = &h.conn;
 
         // 域包工作流由 Rust 种子文件
         seed_opc_capability_packs_from_seed_files(db).await.expect("seed 文件成功");
 
-        // 金融投资域包工作流应存在（由 Rust adapter 生成）
+        // 投顾经营域包工作流应存在（由 Rust adapter 生成）
         use axagent_entities::workflow_template;
         let wf = workflow_template::Entity::find_by_id("finance_invest_harness_workflow")
             .one(db)

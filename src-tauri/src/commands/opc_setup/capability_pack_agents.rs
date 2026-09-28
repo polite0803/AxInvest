@@ -210,7 +210,7 @@ pub async fn seed_all_capability_pack_agents(db: &DatabaseConnection) -> Result<
     )
     .await?;
 
-    // 2. 金融投资
+    // 2. 投顾经营
     seed_capability_pack_experts_inner(
         db,
         "finance-invest",

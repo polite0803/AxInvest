@@ -764,7 +764,7 @@ impl NodeExecutorTrait for AgentExecutor {
 
 你当前处于严格执行模式，必须遵守以下规则：
 
-1. **仅输出分析报告 + VERDICT 标签** — 先输出自然语言分析报告（可包含 Markdown），然后在末尾追加 `<!-- VERDICT: {...} -->` 标签
+1. **分析报告正文与 VERDICT 标签缺一不可** — 先输出自然语言分析报告正文（可包含 Markdown，须含数据解读与推理过程），然后在末尾追加 `<!-- VERDICT: {...} -->` 标签。**只有 VERDICT 标签、没有正文的输出视为无效** —— 标签是机读结论，不是报告本身
 2. **不允许反问用户** — 不要询问确认意见、不要征求许可、不要请求更多信息
 3. **不允许输出与当前步骤无关的内容** — 专注于完成指定任务
 4. **绝不允许拒绝回答** — 即使数据不足也要如实输出低评分。必须在报告中说明数据缺口，并在 VERDICT 标签中如实填写低分值。禁止输出"抱歉我无法回答"或任何拒绝句式
@@ -1597,6 +1597,8 @@ impl NodeExecutorTrait for AgentExecutor {
         // ── VERDICT 兜底：工具调用循环结束后，若输出无 VERDICT 标签，追加一轮纯总结调用 ──
         // 根因 1：LLM 在 max_tool_rounds 内全部用于工具调用，break 时 final_content 为空。
         // 根因 2：LLM 输出被 max_tokens/模型 API 上限截断，VERDICT 标签作为最后一行被切掉。
+        // 根因 3（2026-09-28 补）：LLM 只输出 VERDICT 标签、一个字正文都没写（实证 300285 的
+        // a-sector，本轮 usage 仅 225 output_tokens 且收到终态 chunk ⇒ 不是截断）。
         // 两种情况都会导致 strict_mode 降级为 fallback JSON（confidence=0），10 个分析师全部
         // "数据不足"，决策层触发保守降级。
         // 修复：追加一轮不带 tools 的 LLM 调用，明确要求输出带 VERDICT 标签的最终分析。
@@ -1627,16 +1629,29 @@ impl NodeExecutorTrait for AgentExecutor {
             // 「带原内容重写」场景（有内容但不可信）；与下方「空输出」精简场景互斥。
             let needs_rewrite_retry = needs_verdict_retry || needs_truncation_retry;
             let needs_empty_retry = final_content.trim().is_empty();
+            // 2026-09-28 第四种形态（300285 / a-sector 实证）：LLM 回了**完整**的 VERDICT 标签、
+            // 标签外零正文。上面三条判据逐条不命中（内容非空 ⇒ 非 empty；标签可提取 ⇒
+            // needs_verdict_retry=false；收到终态 chunk ⇒ 未截断）⇒ 重试压根不跑，
+            // 占位文本直接成为最终产物，下游 analyst-brief / 辩论层拿到的这一维度是空的。
+            let needs_bodyless_retry = !needs_rewrite_retry
+                && !needs_empty_retry
+                && verdict_tag_without_body(final_content.trim());
 
-            if needs_rewrite_retry || needs_empty_retry {
+            if needs_rewrite_retry || needs_empty_retry || needs_bodyless_retry {
                 verdict_retry_attempted = true;
                 tracing::info!(
                     node_id = %node.base_id(),
                     content_len = final_content.len(),
                     has_verdict = %!needs_verdict_retry,
                     stream_truncated,
-                    mode = if needs_rewrite_retry { "truncated" } else { "empty" },
-                    "VERDICT 兜底: 输出无 VERDICT 标签，追加纯总结轮次",
+                    mode = if needs_bodyless_retry {
+                        "bodyless"
+                    } else if needs_rewrite_retry {
+                        "truncated"
+                    } else {
+                        "empty"
+                    },
+                    "VERDICT 兜底: 输出不可用（无标签 / 被截断 / 只有结论标签），追加纯总结轮次",
                 );
 
                 // P1 修复(2026-07-25): 截断场景改为重写完整报告而非仅补 VERDICT 标签。
@@ -1645,8 +1660,15 @@ impl NodeExecutorTrait for AgentExecutor {
                 // 新逻辑：传 system prompt + 最近工具结果 + 截断内容，要求基于所有数据
                 // 重新生成完整报告，确保末尾包含 VERDICT 标签（类比空输出场景的 compact 策略）。
                 // 场景 (a): 截断——携带原始上下文让 LLM 重写完整报告
+                // 场景 (a2): 只有结论标签——同一套上下文，但指令点破「标签不是报告」
                 // 场景 (b): 空输出——用精简 messages（system + 工具结果摘要）
-                let retry_messages: Vec<ChatMessage> = if needs_rewrite_retry {
+                // 重写场景共用的机读标签模板（两个分支的措辞不同，标签规格必须同源）
+                const VERDICT_TAG_SPEC: &str = "\
+                    \n<!-- VERDICT: {{\"verdict\": \"看多|偏多|中性|偏空|看空\", \"bull_score\": 0-100整数, \"bear_score\": 0-100整数, \"bull_points\": [\"2-4条看多论据,每条不超过16字\"], \"bear_points\": [\"2-4条看空论据,每条不超过16字\"], \"confidence\": 0-100整数}} -->\
+                    \n缺少 VERDICT 标签或缺少 bull_points/bear_points 的输出将被视为无效。";
+                let retry_messages: Vec<ChatMessage> = if needs_rewrite_retry
+                    || needs_bodyless_retry
+                {
                     let truncated_text = final_content.trim().to_string();
                     // P1: 同空输出策略，保留 system + 最近 2 条工具结果，附加截断内容 +
                     // 重写指令。避免全量 messages 重传导致的 input 膨胀。
@@ -1658,11 +1680,16 @@ impl NodeExecutorTrait for AgentExecutor {
                     for msg in messages.iter().skip(take.max(1)) {
                         compact_messages.push(msg.clone());
                     }
-                    // 附加截断的报告内容
+                    // 附加上一版输出内容（截断版 / 只有标签版）
                     compact_messages.push(ChatMessage {
                         role: "user".to_string(),
                         content: ChatContent::Text(format!(
-                            "以下是被截断的之前版本报告（末尾不完整，供参考）：\n\n{}",
+                            "{}：\n\n{}",
+                            if needs_bodyless_retry {
+                                "以下是上一版输出（只有 VERDICT 结论标签，没有分析正文）"
+                            } else {
+                                "以下是被截断的之前版本报告（末尾不完整，供参考）"
+                            },
                             truncated_text,
                         )),
                         tool_calls: None,
@@ -1670,17 +1697,24 @@ impl NodeExecutorTrait for AgentExecutor {
                         thinking: None,
                     });
                     // 追加重写指令
-                    compact_messages.push(ChatMessage {
-                        role: "system".to_string(),
-                        content: ChatContent::Text(
+                    let directive = if needs_bodyless_retry {
+                        format!(
+                            "你上一轮只输出了 VERDICT 结论标签，没有写分析正文 —— 结论标签不是报告。\
+                             请基于以上工具数据撰写一份**完整的**分析报告正文，\
+                             重点突出关键指标解读和风险评估（正文 800 字以内）。\
+                             报告末尾必须另起一行追加 VERDICT 机读标签（结论可与上一版一致）：{VERDICT_TAG_SPEC}"
+                        )
+                    } else {
+                        format!(
                             "你是一位股票分析师。请基于以上工具数据和被截断的报告，\
                              重新生成一份**完整的**分析报告。\
                              \n报告正文控制在 800 字以内，重点突出关键指标解读和风险评估。\
-                             \n报告末尾必须另起一行追加 VERDICT 机读标签：\
-                             \n<!-- VERDICT: {{\"verdict\": \"看多|偏多|中性|偏空|看空\", \"bull_score\": 0-100整数, \"bear_score\": 0-100整数, \"bull_points\": [\"2-4条看多论据,每条不超过16字\"], \"bear_points\": [\"2-4条看空论据,每条不超过16字\"], \"confidence\": 0-100整数}} -->\
-                             \n缺少 VERDICT 标签或缺少 bull_points/bear_points 的输出将被视为无效。"
-                                .to_string(),
-                        ),
+                             \n报告末尾必须另起一行追加 VERDICT 机读标签：{VERDICT_TAG_SPEC}"
+                        )
+                    };
+                    compact_messages.push(ChatMessage {
+                        role: "system".to_string(),
+                        content: ChatContent::Text(directive),
                         tool_calls: None,
                         tool_call_id: None,
                         thinking: None,
@@ -1804,7 +1838,30 @@ impl NodeExecutorTrait for AgentExecutor {
                             // 原逻辑：检测到 VERDICT 标签后拼接旧截断内容 + 新标签——这在新
                             // 重写模式下会导致旧截断报告 + 新报告标签的错位拼接，内容混乱。
                             // 新逻辑：截断和空输出场景统一用 retry_content 替换 final_content。
-                            if needs_rewrite_retry {
+                            if needs_bodyless_retry {
+                                // 「只有结论标签」场景换不换**由重试产物决定**：原产物虽没正文，
+                                // 但标签完整 ⇒ 下游 verdict.* 下钻与多空分数都取得到。若重试输出
+                                // 仍无正文、或把标签弄丢了，替换等于用「可用的结论」换「不可用的
+                                // 正文」，反而倒退 ⇒ 仅在标签与正文齐备时才替换。
+                                let retry_has_tag =
+                                    extract_verdict_tag(retry_content.trim()).is_some();
+                                if retry_has_tag && !verdict_tag_without_body(retry_content.trim())
+                                {
+                                    final_content = retry_content;
+                                    tracing::info!(
+                                        node_id = %node.base_id(),
+                                        retry_len = final_content.len(),
+                                        "VERDICT 兜底: 只有结论标签场景重试成功（正文 + 标签齐备），替换 final_content",
+                                    );
+                                } else {
+                                    tracing::warn!(
+                                        node_id = %node.base_id(),
+                                        retry_chars = retry_content.len(),
+                                        retry_has_tag,
+                                        "VERDICT 兜底: 只有结论标签场景的重试仍缺正文或丢了标签，保留原标签产物",
+                                    );
+                                }
+                            } else if needs_rewrite_retry {
                                 let verdict_tag = extract_verdict_tag(retry_content.trim());
                                 if verdict_tag.is_some() {
                                     // 重写场景：retry 输出是完整报告 + VERDICT，直接替换
@@ -1907,20 +1964,33 @@ impl NodeExecutorTrait for AgentExecutor {
                 // 用户看到的只有"看多 强度:65"这类结论性标签——完全看不到分析文字。
                 // 根因：LLM 有时忽略"先写分析再追加标签"的指令，只输出标签。
                 // 修复：report 为空时插入标记性占位文本，防止前端渲染为空。
-                let report_text = if report_text.trim().is_empty() {
+                //
+                // 2026-09-28 两处修正：
+                //   ① 措辞去角色化。本分支对 analyst / debater / risk-evaluator 三类节点
+                //      **共用**，而占位串里写死了「辩手」⇒ 分析师卡片会显示辩论措辞
+                //      （实证：a-sector 行业分析师卡片）。
+                //   ② 补机读标记 `__verdict_only`。此前只靠这句**中文展示文案**表达「没有正文」，
+                //      前端只能把它当正文渲染、无法本地化（11 语言下恒为中文），
+                //      辩论面板自带的 `verdictOnlyLabel` i18n 分支也因此永远进不去。
+                //      现在前端按标记走 i18n；`report` 仍保留中性陈述，
+                //      供下游 rhai / LLM 读到「本维度没有分析」而不是空串。
+                let verdict_only = report_text.trim().is_empty();
+                let report_text = if verdict_only {
                     tracing::warn!(
                         node_id = %node.base_id(),
                         verdict = %verdict_json,
                         "VERDICT tag 无正文：LLM 仅输出了 VERDICT 标签，未包含分析报告",
                     );
-                    "(该辩手仅给出了结论标签，未提供详细分析文字)".to_string()
+                    "(该节点仅给出结论标签，未提供分析正文)".to_string()
                 } else {
                     report_text
                 };
                 let report_escaped =
                     serde_json::to_string(&report_text).unwrap_or_else(|_| "\"\"".to_string());
-                let combined =
-                    format!(r#"{{"report":{}, "verdict":{} }}"#, report_escaped, verdict_json);
+                let combined = format!(
+                    r#"{{"report":{}, "verdict":{}, "__verdict_only":{} }}"#,
+                    report_escaped, verdict_json, verdict_only
+                );
                 serde_json::from_str::<serde_json::Value>(&combined).ok()?;
                 Some(combined)
             });
@@ -4528,6 +4598,15 @@ fn strip_verdict_tag(text: &str) -> String {
     result.trim().to_string()
 }
 
+/// 输出是否属于「只有 VERDICT 结论标签、标签外没有任何分析正文」形态。
+///
+/// 2026-09-28 实证（300285 / a-sector，全历史 230 次节点执行里的首例）：模型只生成了 225 token
+/// —— 一行标签、零正文。该形态既不算「无标签」（标签完整可解析）也不算「空输出」（字符串非空），
+/// 是 VERDICT 兜底重试的第四个盲区，故单列判据。
+fn verdict_tag_without_body(text: &str) -> bool {
+    extract_verdict_tag(text).is_some() && strip_verdict_tag(text).is_empty()
+}
+
 /// 构造「流截断 + 无任何可提取结构」时的降级输出（方案 A，2026-09-22）。
 ///
 /// 背景（a-sentiment / 300642 实证，2026-09-22 01:11）：主流在 847 字符处被掐断
@@ -5092,6 +5171,20 @@ mod verdict_extract_tests {
             v["strict_mode_failure_reason"].as_str().unwrap().contains("截断"),
             "归因文案必须写明截断，便于与『JSON 写坏』『空内容』两族降级区分"
         );
+    }
+
+    #[test]
+    fn test_verdict_tag_without_body_detects_tag_only_output() {
+        // 2026-09-28 实证形态（300285 / a-sector，225 token 只够写标签）：
+        // 既不算「无标签」也不算「空输出」，是兜底重试此前的盲区。
+        let tag_only =
+            "<!-- VERDICT: {\"verdict\":\"偏空\",\"bull_score\":30,\"confidence\":45} -->";
+        assert!(verdict_tag_without_body(tag_only));
+        // 反向对照：标签后置 / 前置（prompt 2026-09-10 起允许两种位置），只要带正文就不算
+        assert!(!verdict_tag_without_body(&format!("行业景气度回升。\n{tag_only}")));
+        assert!(!verdict_tag_without_body(&format!("{tag_only}\n\n行业景气度回升。")));
+        // 无标签 ⇒ 归「无标签」族，不由本判据接管
+        assert!(!verdict_tag_without_body("只有正文，没有标签"));
     }
 }
 

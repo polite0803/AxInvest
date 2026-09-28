@@ -194,12 +194,12 @@ pub fn accounting_config() -> CapabilityPackConfig {
     }
 }
 
-// ── 金融投资 ──
+// ── 投顾经营 ──
 
 pub fn finance_invest_config() -> CapabilityPackConfig {
     CapabilityPackConfig {
         domain_pack_id: "finance_invest".to_string(),
-        capability_pack_name: "金融投资".to_string(),
+        capability_pack_name: "投顾经营".to_string(),
         version: 1,
         validations: vec![
             ValidationDef {

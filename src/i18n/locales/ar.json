@@ -3830,9 +3830,8 @@
     "skills": "المهارة",
     "marketMainline": "الاتجاه السوقي الرئيسي",
     "screenshotDiagnosis": "تشخيص لقطة الشاشة",
-    "invest": "استثمار",
     "financeInvestment": "استثمار مالي",
-    "financeAnalysis": "تحليل مالي",
+    "financeAnalysis": "أعمال الاستشارات",
     "financeAccounting": "محاسبة مالية",
     "automationOperations": "العمليات",
     "automationSales": "نمو المبيعات",
@@ -6736,12 +6735,6 @@
     "sectionKnowledge": "المعرفة",
     "sectionDevelopment": "تطوير",
     "agentPanel": "لوحة الوكيل",
-    "sectionInvestDiscover": "Discover",
-    "sectionInvestWorkspace": "مساحة الاستثمار",
-    "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review",
-    "sectionInvestMonitor": "Monitor",
-    "sectionInvest": "الاستثمار",
     "sectionPlugins": "الإضافة",
     "sectionWork": "العمل",
     "sectionDeveloper": "أدوات المطوّر"
@@ -11884,7 +11877,7 @@
     "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
-      "finance_invest": "Finance & Investment",
+      "finance_invest": "أعمال الاستشارات",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
       "consulting": "Industry Consulting",
@@ -11958,10 +11951,6 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "Stock Analysis",
-            "description": "Deep analysis of stock investment value"
-          },
           "fi-financial": {
             "label": "Financial Report",
             "description": "Read key financial report data"
@@ -12516,7 +12505,6 @@
             "label": "Market Analysis",
             "description": "Stock analysis, financial report reading",
             "actions": {
-              "fi_stock": "Stock Analysis",
               "fi_financial": "Financial Report"
             }
           },

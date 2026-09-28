@@ -862,4 +862,239 @@ mod tests {
         );
         assert!(out.output["params"]["category"].is_string(), "params 同步提升（供其它下游引用）");
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // v91 回归：`value-verify` —— 估值数值字段的确定性校验 + **原地覆写**
+    //
+    // 背景（`value-verify.rhai` 头注释详述）：提示词层已三次收口
+    // （v89 / v90 / `value-investor.md`），实证仍失效：
+    //   · 601399（`de6b0594`）：`assumptions.applicable=false` 却把区间填成
+    //     「0.69-0.94元（…仅供参考）」；
+    //   · 601166：算法 +143% 上行，同一条输出给「观望 / 0% 仓位」；
+    //   · 300285：`dcf.mid` 88→89，区间却 8.37→17.35。
+    // ⇒ 「引用算法值」必须在结构上强制，不能靠提示词保证。
+    //
+    // 这些测试刻意**走真实链路**（`execute_rhai_directly` + 真实 input_mapping 路径），
+    // 只 `engine.eval` 覆盖不到三件事：
+    //   ① `resolve_var_path` 对 `t-valuation.result.content.<JSON 字符串>.dcf.*` 的
+    //      中间段 auto_parse，且 `value-investor.content` 终值**保留为字符串**
+    //      （脚本内 `safe_parse` 依赖 `type_of(x) == "string"`）；
+    //   ② input_mapping 的 Number → f64 / Bool → bool 转换（`fmt_num` / `present` 依赖）；
+    //   ③ 覆写后写回的是**同名 output_var**（模板里是 `"value-investor"`），
+    //      下游据此读到修正值 —— 见 `value_verify_execute_declares_shared_output_var`。
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// value-verify 节点的 input_mapping（与 seed 模板逐字对应）。
+    /// ⚠ 与模板同步：路径写错会让「覆写」静默不生效（V57 会把未注入变量补成 unit）。
+    fn value_verify_mapping() -> std::collections::HashMap<String, String> {
+        [
+            ("vi_content", "value-investor.content"),
+            ("dcf_low", "t-valuation.result.content.dcf.low"),
+            ("dcf_high", "t-valuation.result.content.dcf.high"),
+            ("dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
+            ("dcf_ideal", "t-valuation.result.content.dcf.idealBuyPrice"),
+            ("dcf_available", "t-valuation.result.content.dcf.available"),
+            ("dcf_applicable", "t-valuation.result.content.dcf.assumptions.applicable"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+    }
+
+    /// 构造 value-verify 的真实输入形状：
+    ///   · `value-investor.content` 是 **JSON 字符串**（AgentNode 输出形态）；
+    ///   · `t-valuation.result.content` 是 **JSON 字符串**（ToolNode 输出形态），
+    ///     内含 `dcf` 对象。
+    fn ctx_with_value_verify(vi_content: &str, dcf: serde_json::Value) -> ExecutionState {
+        let mut ctx = ExecutionState::new(
+            "value-verify".to_string(),
+            "wf_test".to_string(),
+            serde_json::json!({}),
+        );
+        ctx.variables.insert(
+            "value-investor".to_string(),
+            serde_json::json!({ "role": "value-investor", "content": vi_content }),
+        );
+        ctx.variables.insert(
+            "t-valuation".to_string(),
+            serde_json::json!({
+                "status": "executed",
+                "result": {
+                    "content": serde_json::json!({ "dcf": dcf }).to_string(),
+                    "tool_name": "compute_dcf_valuation",
+                },
+                "node_id": "t-valuation",
+            }),
+        );
+        ctx
+    }
+
+    /// 正例①：**硬不可用**（`assumptions.applicable=false`）⇒
+    /// 区间 / 安全边际覆写为 null、理想买入价覆写为固定文案，`verdict` 定性字段不动。
+    ///
+    /// 这是 601399（`de6b0594`）的直接回归：模型前提不成立时，LLM 仍把区间填成
+    /// 「0.69-0.94元（仅供参考）」—— 该幻觉数字必须在结构上被清掉。
+    #[tokio::test]
+    async fn value_verify_hard_unavailable_overwrites_numeric_fields() {
+        let vi_content = serde_json::json!({
+            "report": "模型前提不成立，估值仅供参考",
+            "verdict": {
+                "buffett_verdict": "观望",
+                "intrinsic_value_range": "0.69-0.94元（仅供参考）",
+                "margin_of_safety": "12.3%",
+                "ideal_buy_price": "0.85元以下",
+            },
+        })
+        .to_string();
+        let dcf = serde_json::json!({
+            "available": false,
+            "low": null,
+            "high": null,
+            "upsidePct": null,
+            "idealBuyPrice": null,
+            "assumptions": { "applicable": false },
+        });
+        let ctx = ctx_with_value_verify(&vi_content, dcf);
+        let code = include_str!("../../../../../src/commands/value-verify.rhai");
+
+        let (result, _params) =
+            execute_rhai_directly("value-verify", code, &value_verify_mapping(), &ctx)
+                .await
+                .expect("硬不可用应正常覆写而非失败");
+
+        let v = &result["verdict"];
+        assert!(v["intrinsic_value_range"].is_null(), "硬不可用必须把幻觉区间清成 null：{result}");
+        assert!(v["margin_of_safety"].is_null(), "硬不可用必须把安全边际清成 null：{result}");
+        assert_eq!(
+            v["ideal_buy_price"], "无算法估值锚（需清算价值/重置成本等替代方法）",
+            "硬不可用应落固定文案：{result}"
+        );
+        // 定性字段只校验、不改写（v91 边界）
+        assert_eq!(v["buffett_verdict"], "观望", "定性字段不得被改写：{result}");
+        assert_eq!(result["report"], "模型前提不成立，估值仅供参考", "report 正文必须保留");
+
+        let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
+        assert_eq!(audit.len(), 3, "三个数值字段各留一条审计：{result}");
+        for entry in audit {
+            assert_eq!(entry["action"], "overwritten", "硬不可用下三个字段都应被覆写：{entry}");
+        }
+    }
+
+    /// 正例②：**可用且合规** ⇒ 三个数值字段原样保留（保留 LLM 更丰富的措辞），
+    /// 审计全 `ok`。证明本节点不是「一律覆写」——否则会丢掉免责声明与代理锚说明。
+    #[tokio::test]
+    async fn value_verify_compliant_output_is_left_intact() {
+        let vi_content = serde_json::json!({
+            "report": "DCF 三档仅可用于判断方向",
+            "verdict": {
+                "intrinsic_value_range": "11.23-15.67元（DCF 三档，参数敏感性大）",
+                "margin_of_safety": "24.5%",
+                "ideal_buy_price": "9.87元以下",
+            },
+        })
+        .to_string();
+        let dcf = serde_json::json!({
+            "available": true,
+            "low": 11.23,
+            "high": 15.67,
+            "upsidePct": 24.5,
+            "idealBuyPrice": 9.87,
+            "assumptions": { "applicable": true },
+        });
+        let ctx = ctx_with_value_verify(&vi_content, dcf);
+        let code = include_str!("../../../../../src/commands/value-verify.rhai");
+
+        let (result, _params) =
+            execute_rhai_directly("value-verify", code, &value_verify_mapping(), &ctx)
+                .await
+                .expect("合规输出应正常透传");
+
+        let v = &result["verdict"];
+        assert_eq!(
+            v["intrinsic_value_range"], "11.23-15.67元（DCF 三档，参数敏感性大）",
+            "合规时不得改写（保住免责声明）：{result}"
+        );
+        assert_eq!(v["margin_of_safety"], "24.5%", "合规时不得改写：{result}");
+        assert_eq!(v["ideal_buy_price"], "9.87元以下", "合规时不得改写：{result}");
+
+        let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
+        assert_eq!(audit.len(), 3, "三个数值字段各留一条审计：{result}");
+        for entry in audit {
+            assert_eq!(entry["action"], "ok", "合规时不应有覆写记录：{entry}");
+        }
+    }
+
+    /// 反例：`value-investor.content` 不是合法 JSON ⇒ **不硬失败、不覆写**，
+    /// 降级为 `{report: <原文>, verdict: {}, valuation_audit: [skipped, …]}`，
+    /// 保住正文可见性（下游 research-mgr 不应因校验节点挂掉）。
+    #[tokio::test]
+    async fn value_verify_unparsable_content_degrades_without_overwrite() {
+        let ctx = ctx_with_value_verify(
+            "这不是 JSON，只是纯文本结论",
+            serde_json::json!({ "available": true, "low": 1.0, "high": 2.0 }),
+        );
+        let code = include_str!("../../../../../src/commands/value-verify.rhai");
+
+        let (result, _params) =
+            execute_rhai_directly("value-verify", code, &value_verify_mapping(), &ctx)
+                .await
+                .expect("解析失败应降级而非失败");
+
+        assert_eq!(result["report"], "这不是 JSON，只是纯文本结论", "原文必须保留");
+        assert_eq!(result["verdict"], serde_json::json!({}), "解析失败时 verdict 为空对象");
+        let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
+        assert_eq!(audit[0]["action"], "skipped", "解析失败必须留 skipped 痕迹：{result}");
+    }
+
+    /// 契约：输出经 `execute()` 包装后，`output_var` 必须与 value-investor **同名**
+    ///（模板里写死 `"value-investor"`），这是「原地覆写」的实现方式 ——
+    /// 引擎按 `output_var` 写 `workflow.results`，下游据此读到修正值。
+    #[tokio::test]
+    async fn value_verify_execute_declares_shared_output_var() {
+        use axagent_harness::workflow_types::{
+            CodeNode, CodeNodeConfig, Position, RetryConfig, WorkflowNodeBase,
+        };
+
+        let node = WorkflowNode::Code(CodeNode {
+            base: WorkflowNodeBase {
+                id: "value-verify".into(),
+                title: "估值字段确定性校验（算法值覆写）".into(),
+                description: None,
+                position: Position { x: 0.0, y: 0.0 },
+                retry: RetryConfig::default(),
+                timeout: Some(10),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: true,
+            },
+            config: CodeNodeConfig {
+                language: "rhai".into(),
+                code: include_str!("../../../../../src/commands/value-verify.rhai").into(),
+                // ⚠ 同名 = 覆写机制，不要改成 "value-verify"
+                output_var: "value-investor".into(),
+                tool_name: None,
+                execute_directly: true,
+                input_mapping: value_verify_mapping(),
+            },
+        });
+
+        let vi_content =
+            serde_json::json!({ "verdict": { "intrinsic_value_range": "9.99-19.99元" } })
+                .to_string();
+        let ctx = ctx_with_value_verify(&vi_content, serde_json::json!({ "available": false }));
+        let out =
+            CodeExecutor::new().execute(&node, &ctx).await.expect("CodeNode 直接执行不应失败");
+
+        assert_eq!(
+            out.output_var.as_deref(),
+            Some("value-investor"),
+            "output_var 必须与 value-investor 同名，否则覆写失效"
+        );
+        assert!(
+            out.output["result"]["verdict"]["intrinsic_value_range"].is_null(),
+            "下游按 `.result.…` 取值，须能读到覆写后的 null：{}",
+            out.output
+        );
+    }
 }

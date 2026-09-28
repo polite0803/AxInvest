@@ -663,10 +663,18 @@ export function reconstructVerdictTag(text: string): string {
     return text;
   }
 
-  const report = parsed.report;
-  const verdict = typeof parsed.verdict === "object"
-    ? JSON.stringify(parsed.verdict)
-    : String(parsed.verdict);
+  // 后端 agent_executor 在「LLM 只回 VERDICT 标签、没有正文」时会往 report 里塞一句中文占位陈述
+  // （给下游 LLM 读「本维度没有分析」），并打 `__verdict_only: true`。那句是**展示文案不是协议值**，
+  // 直接渲染会让 11 种语言下都冒出一句中文、分析师卡片还写着「辩手」⇒ 丢弃它，并把标记并进
+  // VERDICT 标签（标签是卡片唯一的机读通道），让卡片按标记显示本地化的「只有结论」提示。
+  const verdictOnly = parsed.__verdict_only === true;
+  const report = verdictOnly ? "" : parsed.report;
+  const verdictSrc = verdictOnly && parsed.verdict && typeof parsed.verdict === "object"
+    ? { ...(parsed.verdict as Record<string, unknown>), __verdict_only: true }
+    : parsed.verdict;
+  const verdict = typeof verdictSrc === "object"
+    ? JSON.stringify(verdictSrc)
+    : String(verdictSrc);
 
   if (report.trim().length > 0) {
     return `${report}\n\n<!-- VERDICT: ${verdict} -->`;

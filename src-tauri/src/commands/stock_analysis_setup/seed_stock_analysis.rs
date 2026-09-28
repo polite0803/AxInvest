@@ -390,6 +390,20 @@ type AlgoToolRow = (
 ///    另加 10×KB 级报告压测 `d1_long_reports_fit_production_max_operations` 防复发。
 ///    **必须升版**：坏脚本已以 v86 播种进用户库，版本门 `existing.version >= TEMPLATE_VERSION
 ///    ⇒ skip` 不升版就永不重播种修复后的 `data-quality.rhai`。
+/// ⚠️ **v89（2026-09-27）：巴菲特估值根治 —— 安全边际口径统一 + 理想买入价换锚**。
+///    用户实证「工作流的巴菲特估值从来没有一次正确过」，据落库 PG 数据定位三处：
+///    ① `margin_of_safety.pct` 与 `dcf.upsidePct` 是**两套数值**（前者折价率口径、
+///       无界，300285 = −735.9%；后者现价分母、有界）⇒ 同名指标口径打架、三指标方向不一致。
+///       v89 起算法侧 `margin_of_safety.pct ≡ dcf.upsidePct`（同源同值）。
+///    ② 理想买入价原规则让 LLM **直接引用 `dcf.low`（悲观档内在价值）**当买点 ⇒
+///       300285 现价 70 元 / 理想买入价 5.29 元，语义错位。v89 起改引用新增的
+///       `dcf.idealBuyPrice`（= 中性档 × 0.70，即要求 30% 安全边际）。
+///    ③ FCF 锚在「当期 FCF 显著低于净利」时被系统性扣低（扣了扩张性资本开支）⇒
+///       v89 起 `FCF/净利 < 0.6` 时改用 owner earnings 代理锚（净利 × 0.90，标 fallback）。
+///    连带：`value-investor.md` / 本节点 system_prompt 同步改写（口径引用收口到算法输出，
+///    废止 md 里自算的 `max(DCF, 格雷厄姆)` 第三套口径），软衰减文案改为 basis-agnostic。
+///    **必须升版**：节点 system_prompt 与 `agency_experts/.../value-investor.md` 均已改，
+///    不升版则版本门 `existing.version >= TEMPLATE_VERSION ⇒ skip` 让存量库永不重播种。
 /// ⚠️ **v88（2026-09-27）：F3 —— 两融「设计上没有」语境进句级抑制表**。
 ///    001313（粤海饲料，非融资融券标的）实证：live 路径把「设计上没有」压成裸 `null`，
 ///    分析师如实写「融资余额数据缺失」⇒ 按词表正确扣成工具故障，语义在 handler 层丢失
@@ -397,7 +411,41 @@ type AlgoToolRow = (
 ///    输出结构化 `available:false` + reason，F2 prompt 约定「设计性缺席」措辞，
 ///    本版给 `数据缺失`/`获取失败` 追加语境短语「非两融标的 / 设计性缺席」（句级）。
 ///    **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段。
-pub(crate) const TEMPLATE_VERSION: i32 = 88;
+/// ⚠️ **v90（2026-09-28）：降承诺 —— DCF 三档加可机读「定价适用性警示」**。
+///    承接 v89：v89 修掉了口径打架（两套安全边际）与买点错位（引用悲观档），
+///    但**没有**回答「三档数字本身能不能拿来定价」。用户追问「估值区间你都没有做判断，
+///    如何那么有信心说对」⇒ 补做全库复核 + 参数敏感性扫描（`dcf_sensitivity_scan`，标的 300285）。
+///    **实测（2026-09-28）**：在全部合理参数组合内（折现率 6%~10%、永续增长 0%~1.7%、
+///    中期增速 5%~25%），中性档落在 **7.86 ~ 33.31 元**，**倍差 4.24 倍**
+///    ⇒ 三档数值主要由**参数选择**决定，不具备「内在价值点估计」的资格。
+///    处置（降承诺，**不动**模型结构与既有常数）：算法侧新增 `DCF_PRICING_CAVEAT`
+///    并随 `result.dcf.pricingCaveat` 输出；提示词强制「凡给出三档或理想买入价，
+///    必须一并披露该警示、并声明仅可用于判断方向」。
+///    ⚠️ 该警示与既有「硬不可用 / 软衰减」判据**正交，互不替代** —— 前两者不命中时
+///    它**依然成立**（真实 FCF 锚 + 前提成立的标的同参数扫描同样 4.2 倍摆动），
+///    故不得据「判据都没命中」推定三档可作定价。
+///    **必须升版**：`mcp_tools.rs` 输出结构（新增 `pricingCaveat` 键）与
+///    `value-investor.md` / 本节点 system_prompt 均已改，不升版则存量库永不重播种。
+/// ⚠️ **v91（2026-09-28）：结构强制 —— 新增 `value-verify` 节点，数值字段违规原地覆写**。
+///    承接 v89/v90：两版都在**提示词层**收口「估值字段必须引用算法输出」，但实证三次失效：
+///      · 601399（运行 `de6b0594`）：`dcf.assumptions.applicable=false`（模型前提不成立），
+///        节点仍把 `intrinsic_value_range` 填成「0.69-0.94元（…仅供参考）」；
+///      · 601166：算法给 +143% 上行空间，同一条输出里 LLM 给「观望 / 0% 仓位」；
+///      · 300285：`dcf.mid` 88→89，`intrinsic_value_range` 却从 8.37 跳到 17.35。
+///    ⇒ 判据：「引用算法字段」**不能靠提示词保证**，必须在结构上强制。
+///    处置：新增 `value-verify`（CodeNode + `value-verify.rhai`，置于 value-investor 之后），
+///    逐字段比对三个**数值**字段与 t-valuation 算法输出，违规即**原地覆写**并写
+///    `valuation_audit` 审计数组；`verdict` / `report` 等**定性字段只校验、不改写**。
+///    **覆写机制**：该节点 `output_var` 与 `value-investor` 同名 ⇒ 引擎按 `output_var`
+///    写 `workflow.results`，下游（research-mgr 的 context_sources / blackboard 快照 /
+///    落库快照 / 报告命令）全部自动读到修正值，无需改任何消费端。
+///    **本版不动 DCF 模型结构与既有常数**（v90 的 `pricingCaveat` 降承诺保持原样）。
+///    **必须升版**：① 节点集新增 `value-verify`；② `value-verify.rhai` 经 `include_str!`
+///    嵌入本模板节点 `code` 字段。不升版则版本门 `existing.version >= TEMPLATE_VERSION ⇒ skip`
+///    让存量库永不重播种。
+/// ⚠️ 本版**不抬** `DCF_MIGRATION_VERSION`：一次性门只守护「DCF 参数默认值」，
+///    本次改动不涉及那三个参数常量，抬门会把用户在面板上调好的参数打回默认。
+pub(crate) const TEMPLATE_VERSION: i32 = 91;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///
@@ -2796,9 +2844,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  - 辩论共识: 来自 debate-convergence\n\
                  - **客观估值数据**: 来自 t-valuation（结构化算法结果）\n\
                    - result.dcf.{{low,mid,high}}: DCF 内在价值区间（不可用时为 null）\n\
+                   - result.dcf.idealBuyPrice: **理想买入价**（= DCF 中性档 ×0.70，即要求 30% 安全边际；\n\
+                     不可用时为 null）—— 直接引用本字段，**不要**自己拿 low/mid 算买点；\n\
+                     ⚠️ 本值继承三档同一方差，只能作方向性参考，**不得**当挂单价/清仓线的定价数字\n\
+                   - result.dcf.pricingCaveat: **定价适用性警示**（算法随三档输出的固定文案，\n\
+                     2026-09-28 新增）—— 在全部合理参数组合内（折现率 6%~10%、永续 0%~1.7%、\n\
+                     中期增速 5%~25%），中性档实测可摆动 **4.2 倍** ⇒ 三档及其派生值\n\
+                     （含 idealBuyPrice）主要由**参数选择**决定，不是可据以定价的「内在价值」\n\
                    - result.dcf.available / result.dcf.note: DCF 可用性与估值口径说明\n\
                    - result.dcf.upsidePct: **保守档**上行空间百分比（2026-09-23 起基准由 mid 改为 low）\n\
                      —— 即「**最保守增长假设下**」的折价幅度（正值=低估，负值=高估；不可用时为 null）\n\
+                     注：算法侧 margin_of_safety.pct 与本键**同源同值**（2026-09-27 统一口径），\n\
+                     两者取任一即可，不会再出现不一致\n\
                    - result.dcf.midUpsidePct: 中性档上行空间（**仅供叙述**「中性假设下能涨多少」；\n\
                      裁决口径一律用 upsidePct，不得用 midUpsidePct 或直接拿 mid 当「真实价值」）\n\
                    - result.graham.upsidePct: 格雷厄姆上行空间\n\
@@ -2812,7 +2869,14 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  \n\
                  **关键**: t-valuation 是客观算法估值，作为你的估值锚点。\n\
                  你的 intrinsic_value_range 应参考 result.dcf.{{low,mid,high}} 区间，\n\
-                 margin_of_safety 应参考 result.dcf.upsidePct。\n\
+                 margin_of_safety 应直接引用 result.dcf.upsidePct，\n\
+                 ideal_buy_price 应直接引用 result.dcf.idealBuyPrice。\n\
+                 以上三个字段**一律引用算法输出，不得自行计算或改写**。\n\
+                 凡在 report 中给出三档数值或理想买入价，**必须**同时转述 result.dcf.pricingCaveat\n\
+                 的警示，并点明「仅可用于判断方向（该标的高估/低估），不构成目标价/买入价/清仓线」。\n\
+                 ⚠️ 该警示与下方「硬不可用 / 软衰减」判据**正交，互不替代** —— 两者都不命中时\n\
+                 它**依然成立**（真实 FCF 锚 + 前提成立的标的，换一组同样合理的参数，mid 仍差数倍）。\n\
+                 不得因「判据都没命中」就默认三档可以当定价用。\n\
                  对成长股，参考 result.dcf.upsidePct 判断是否「合理偏低」，\n\
                  不要一味给出低于现价的保守估值。\n\
                  \n\
@@ -2835,9 +2899,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                  \n\
                  **锚定口径披露＝【软衰减】（2026-09-21 新增；与上段并列，勿并入硬不可用）**:\n\
                  result.dcf.assumptions.is_fallback_anchor=true 表示锚定**不是当期真实自由现金流**，\n\
-                 而是「近 5 年年报正净利均值 × 0.90」的历史代理（口径原文见 assumptions.basis）。\n\
-                 该代理回溯且**系统性偏低** —— 实测 300308（2026-09-21）代理锚比同期 TTM 自由\n\
-                 现金流低约 5.6 倍，对成长/转型标的尤甚。此时数值**可以引用**（三个字段照常填），\n\
+                 而是代理锚 —— 口径原文见 assumptions.basis，可能是「当期FCF≤0」「现金流量表数据缺失」\n\
+                 或「当期FCF显著低于净利（FCF/净利<0.6）」（2026-09-27 新增第三态）三者之一，\n\
+                 三者处置相同（均取 净利 × 0.90）。**不要假定是哪一种，一律以 assumptions.basis 原文为准**。\n\
+                 该代理回溯，对成长/转型标的**系统性偏低**。此时数值**可以引用**（三个字段照常填），\n\
                  但必须：① 在 report 中点明口径，不得陈述成与当期现金流等价的结论；\n\
                  ② 在 risk_flags 中加一条标注该口径；③ 相应**下调 confidence**。\n\
                  与情形 ③ 同时命中时（真实 FCF ≤ 0 会同时触发两者）**按硬不可用处理**。\n\
@@ -2866,6 +2931,76 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         // 否则 compute_portfolio_risk 的输出不进变量池。
         // 拓扑链：t-valuation → t-risk → value-investor（无回环，t-risk 仅依赖 t-valuation）
         edges.push(edge("e-t-risk-value-investor", "t-risk", vi_id));
+    }
+
+    // ── v91(2026-09-28)：value-verify —— 估值字段的确定性校验 + **原地覆写** ──
+    // 承接 v89/v90 的提示词收口，但把「引用算法值」从**约定**升级为**结构强制**。
+    //
+    // 实证（提示词层三次收口后仍失效）：
+    //   · 601399（`de6b0594`）：`dcf.assumptions.applicable=false` 却把区间填成
+    //     「0.69-0.94元（…仅供参考）」；
+    //   · 601166：算法 +143% 上行空间，LLM 给「观望 / 0% 仓位」；
+    //   · 300285：`dcf.mid` 88→89，区间却 8.37→17.35。
+    //
+    // ⚠️ **覆写机制**：本节点 `output_var` 与 value-investor **同名**。引擎按 `output_var`
+    //   写 `workflow.results`（`engine/mod.rs`）⇒ research-mgr 的 context_sources、
+    //   blackboard 快照、落库快照、报告命令全部自动读到修正值，无需改消费端。
+    //   `build_blackboard_snapshot` 对本节点无顶层 `verdict` 但有 `result` 的形态，
+    //   走既有的「CodeNode 包装 → 提取 result 并序列化为 JSON 字符串」分支（V41 修复），
+    //   故 `value.assessment` 仍是**纯 JSON 字符串**，与 AgentNode 时代的消费契约一致。
+    //
+    // 契约（只覆写数值字段，`verdict`/`report` 等定性字段不碰）见 `value-verify.rhai` 头注释。
+    {
+        let vv_id = "value-verify";
+        let vv_code = include_str!("../value-verify.rhai").to_string();
+        nodes.push(WorkflowNode::Code(CodeNode {
+            base: WorkflowNodeBase {
+                id: vv_id.into(),
+                title: "估值字段确定性校验（算法值覆写）".into(),
+                description: Some(
+                    "逐字段比对 value-investor 的数值字段与 t-valuation 算法输出，违规原地覆写并留审计标记"
+                        .into(),
+                ),
+                position: Position { x: 20.0, y: 1660.0 },
+                retry: RetryConfig::default(),
+                timeout: Some(10),
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                // 与 data-quality 同策：解析异常也不得阻塞 research-mgr → trader 一条链。
+                continue_on_fail: true,
+            },
+            config: CodeNodeConfig {
+                language: "rhai".into(),
+                code: vv_code,
+                // ⚠ 与 value-investor 同名 —— 这是「原地覆写」的实现方式，不要改成 vv_id。
+                output_var: "value-investor".into(),
+                tool_name: None,
+                execute_directly: true,
+                input_mapping: [
+                    ("vi_content", "value-investor.content"),
+                    // 路径形态与 data-quality / portfolio-mgr 对 t-valuation 的取法一致：
+                    // ToolNode 输出为 `{node_id, result: {content: <JSON 字符串>, tool_name}}`，
+                    // `resolve_var_path` 对中间段 `content` 自动 parse。
+                    ("dcf_low", "t-valuation.result.content.dcf.low"),
+                    ("dcf_high", "t-valuation.result.content.dcf.high"),
+                    ("dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
+                    ("dcf_ideal", "t-valuation.result.content.dcf.idealBuyPrice"),
+                    ("dcf_available", "t-valuation.result.content.dcf.available"),
+                    ("dcf_applicable", "t-valuation.result.content.dcf.assumptions.applicable"),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            },
+        }));
+        edges.push(edge("e-value-investor-value-verify", "value-investor", vv_id));
+        // 显式依赖原则：input_mapping 引用了 t-valuation 的 dcf 字段 ⇒ 必须有显式边。
+        edges.push(edge("e-valuation-value-verify", "t-valuation", vv_id));
+        // ⚠️ research-mgr 的 context_sources 含 value-investor，而它的数值必须是**覆写后**的。
+        //   仅保留 `e-value-investor-research-mgr` 会让两者竞态（value-verify 与 research-mgr
+        //   同为 value-investor 的下游，可并行调度）⇒ research-mgr 可能读到未覆写的 LLM 原值。
+        edges.push(edge("e-value-verify-research-mgr", vv_id, "research-mgr"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════

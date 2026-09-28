@@ -3830,9 +3830,8 @@
     "skills": "कौशल",
     "marketMainline": "बाज़ार मुख्य लाइन",
     "screenshotDiagnosis": "स्क्रीनशॉट निदान",
-    "invest": "निवेश",
     "financeInvestment": "वित्तीय निवेश",
-    "financeAnalysis": "वित्तीय विश्लेषण",
+    "financeAnalysis": "सलाहकार व्यवसाय",
     "financeAccounting": "वित्तीय लेखा",
     "automationOperations": "परिचालन प्रबंधन",
     "automationSales": "बिक्री वृद्धि",
@@ -6736,12 +6735,6 @@
     "sectionKnowledge": "ज्ञान",
     "sectionDevelopment": "विकास",
     "agentPanel": "एजेंट पैनल",
-    "sectionInvestDiscover": "Discover",
-    "sectionInvestWorkspace": "निवेश वर्कस्पेस",
-    "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review",
-    "sectionInvestMonitor": "Monitor",
-    "sectionInvest": "निवेश",
     "sectionPlugins": "प्लगइन",
     "sectionWork": "कार्य",
     "sectionDeveloper": "डेवलपर टूल"
@@ -11884,7 +11877,7 @@
     "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
-      "finance_invest": "Finance & Investment",
+      "finance_invest": "सलाहकार व्यवसाय",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
       "consulting": "Industry Consulting",
@@ -11958,10 +11951,6 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "Stock Analysis",
-            "description": "Deep analysis of stock investment value"
-          },
           "fi-financial": {
             "label": "Financial Report",
             "description": "Read key financial report data"
@@ -12516,7 +12505,6 @@
             "label": "Market Analysis",
             "description": "Stock analysis, financial report reading",
             "actions": {
-              "fi_stock": "Stock Analysis",
               "fi_financial": "Financial Report"
             }
           },

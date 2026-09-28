@@ -10,6 +10,7 @@ import {
   normalizeDecision,
   parseDecisionExplanation,
   parseJsonLoose,
+  reconstructVerdictTag,
   tryParseDecision,
 } from "@/lib/agentOutput";
 import type { StockDecision } from "@/types/stock-analysis";
@@ -540,5 +541,39 @@ describe("extractValuationApplicability", () => {
     expect(a?.anchorIsFallback).toBe(false);
     expect(a?.grahamGrowthClamped).toBe(false);
     expect(a?.reason).toBe("");
+  });
+});
+
+/**
+ * 2026-09-28：`a-sector`（行业分析师）实证 —— LLM 只回了 `<!-- VERDICT -->` 标签、没有正文时，
+ * 后端 agent_executor 会往 `report` 里塞一句中文占位陈述（给下游 LLM 读「本维度没有分析」），
+ * 并打 `__verdict_only: true`。那句是**展示文案**，直接当正文渲染会让 11 种语言界面都冒出中文、
+ * 分析师卡片还写着「辩手」。此处锁住：占位串不进呈现流，标记并进 VERDICT 标签。
+ */
+describe("reconstructVerdictTag - __verdict_only 占位陈述不进呈现流", () => {
+  it("有标记 ⇒ 丢弃 report 文案，把标记并进 VERDICT 标签", () => {
+    const out = reconstructVerdictTag(
+      JSON.stringify({
+        report: "(该节点仅给出结论标签，未提供分析正文)",
+        verdict: { verdict: "偏空", bull_score: 30, bear_score: 70 },
+        __verdict_only: true,
+      }),
+    );
+    expect(out).toBe('<!-- VERDICT: {"verdict":"偏空","bull_score":30,"bear_score":70,"__verdict_only":true} -->');
+  });
+
+  it("无标记 ⇒ 正文原样保留（不得误吞分析师写的报告）", () => {
+    const out = reconstructVerdictTag(
+      JSON.stringify({ report: "行业景气度回升，龙头份额集中。", verdict: { verdict: "偏多" } }),
+    );
+    expect(out).toContain("行业景气度回升，龙头份额集中。");
+    expect(out).not.toContain("__verdict_only");
+  });
+
+  it("verdict 为字符串时不因标记而崩", () => {
+    const out = reconstructVerdictTag(
+      JSON.stringify({ report: "占位", verdict: "看空", __verdict_only: true }),
+    );
+    expect(out).toBe("<!-- VERDICT: 看空 -->");
   });
 });

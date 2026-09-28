@@ -4462,7 +4462,7 @@ async function executeCommand<T>(
         },
         {
           id: "workflow-finance-invest",
-          name: "金融投资分析",
+          name: "投顾经营分析",
           description: "财务分析 → 投资建议（CFO 视角）",
           icon: "LineChart",
           tags: ["opc", "finance", "investment"],

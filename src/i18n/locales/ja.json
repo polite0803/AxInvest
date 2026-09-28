@@ -3830,9 +3830,8 @@
     "skills": "技能",
     "marketMainline": "市場メインライン",
     "screenshotDiagnosis": "スクリーンショット診断",
-    "invest": "投資",
     "financeInvestment": "金融投資",
-    "financeAnalysis": "金融分析",
+    "financeAnalysis": "投資助言事業",
     "financeAccounting": "財務会計",
     "automationOperations": "運営管理",
     "automationSales": "販売成長",
@@ -6736,12 +6735,6 @@
     "sectionKnowledge": "知識",
     "sectionDevelopment": "開発",
     "agentPanel": "エージェントパネル",
-    "sectionInvestDiscover": "Discover",
-    "sectionInvestWorkspace": "投資ワークスペース",
-    "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review",
-    "sectionInvestMonitor": "Monitor",
-    "sectionInvest": "投资",
     "sectionPlugins": "插件",
     "sectionWork": "工作",
     "sectionDeveloper": "開発者ツール"
@@ -11884,7 +11877,7 @@
     "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
-      "finance_invest": "Finance & Investment",
+      "finance_invest": "投資助言事業",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
       "consulting": "Industry Consulting",
@@ -11958,10 +11951,6 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "Stock Analysis",
-            "description": "Deep analysis of stock investment value"
-          },
           "fi-financial": {
             "label": "Financial Report",
             "description": "Read key financial report data"
@@ -12516,7 +12505,6 @@
             "label": "Market Analysis",
             "description": "Stock analysis, financial report reading",
             "actions": {
-              "fi_stock": "Stock Analysis",
               "fi_financial": "Financial Report"
             }
           },

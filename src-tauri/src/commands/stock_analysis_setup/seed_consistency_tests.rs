@@ -2115,3 +2115,99 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
         bad_prefix.join("\n  ")
     );
 }
+
+/// 一份 VERDICT 专家提示词的结构性缺陷体检，返回命中的缺陷类别。
+///
+/// 四条判据各自对应「模型学会只回标签」的一条成因，缺一漏一类：
+/// - `fence`：代码围栏未闭合 ⇒ 后续小节整段被当成代码，指令语义走形
+/// - `leaked-tag`：示例的 `<!-- VERDICT -->` 标签泄漏到围栏之外 ⇒ 模型把它当正文读
+/// - `dup-example`：`## 参考示例` 段内同一段示例贴了两遍（实证缺陷的形态）
+/// - `soft-body`：有「关键规则」清单却没把正文写成硬指标
+fn verdict_prompt_defects(src: &str) -> Vec<&'static str> {
+    let mut defects: Vec<&'static str> = Vec::new();
+    let blocks: Vec<&str> = src.split("```").collect();
+    if blocks.len().is_multiple_of(2) {
+        defects.push("fence");
+    }
+    // 只看**独占一行**的标签 —— 行内 `` `<!-- VERDICT: {...} -->` `` 是格式说明，合法。
+    for (i, seg) in blocks.iter().enumerate() {
+        if i % 2 == 0 && seg.lines().any(|l| l.trim_start().starts_with("<!-- VERDICT")) {
+            defects.push("leaked-tag");
+            break;
+        }
+    }
+    // 查重范围必须收在 `## 参考示例` 之内：全文级查重会误伤「强制降级报告」这类
+    // 在别处声明、又在示例里复现的合法重复（hot-money-tracker 实测）。
+    if let Some(start) = src.find("## 参考示例") {
+        let rest = &src[start + "## 参考示例".len()..];
+        let section = rest.find("\n## ").map_or(rest, |k| &rest[..k]);
+        let mut seen: HashSet<String> = HashSet::new();
+        for (i, seg) in section.split("```").enumerate() {
+            let trimmed = seg.trim();
+            if i % 2 == 1 && trimmed.len() > 40 && !seen.insert(trimmed.to_string()) {
+                defects.push("dup-example");
+                break;
+            }
+        }
+    }
+    if src.contains("报告正文是自由自然语言") && !src.contains("没有分析正文的输出视为无效")
+    {
+        defects.push("soft-body");
+    }
+    defects
+}
+
+/// 「只有 VERDICT 标签、没有正文」的示范形态不得留在专家提示词里（2026-09-28 I 轮）。
+///
+/// 背景：`a-sector` 实证一次「模型只回标签、零正文」的输出（225 token、非截断）。查明提示词
+/// 本身在示范这个形态 —— 参考示例的正文只有两行，且同一段示例被**贴了两遍**、第三份正文
+/// 连同 `<!-- VERDICT -->` 标签**泄漏到代码围栏之外**（模型把它当指令正文读），
+/// 连带把 `## 自检` 整段困进未闭合的代码块里。
+#[test]
+fn verdict_expert_prompts_do_not_model_bodyless_output() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("agency_experts")
+        .join("stock-analysis");
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    collect_md_files(&root, &mut files);
+    let targets: Vec<std::path::PathBuf> = files
+        .into_iter()
+        .filter(|p| std::fs::read_to_string(p).is_ok_and(|s| s.contains("VERDICT")))
+        .collect();
+
+    // 自证①：扫描面必须真的装到东西（目录改名会让本测试静默失效）
+    assert!(
+        targets.len() >= 10,
+        "VERDICT 专家 md 扫描面异常：只在 {} 找到 {} 个 —— 若目录结构变了，先修路径，不要放宽断言。",
+        root.display(),
+        targets.len()
+    );
+
+    let mut report: Vec<String> = Vec::new();
+    for f in &targets {
+        let src = std::fs::read_to_string(f).unwrap_or_default();
+        for d in verdict_prompt_defects(&src) {
+            report.push(format!("{} ⇒ {}", f.display(), d));
+        }
+    }
+    assert!(
+        report.is_empty(),
+        "VERDICT 专家提示词存在「示范只回标签」形态的缺陷：\n  {}",
+        report.join("\n  ")
+    );
+
+    // 自证②：判据对**修复前**的真实形态必须命中，否则本门禁等于没装电池。
+    // 样本按 2026-09-28 修复前的 sector-analyst.md 复刻：示例贴两遍 → 第三份正文连标签
+    // 泄漏到围栏外 → 反例块只开不闭（`## 自检` 整段被困进代码块，故围栏总数为奇数）。
+    let corrupted = concat!(
+        "## 输出格式\n\n1. 报告正文是自由自然语言，任意格式都可以\n\n## 参考示例\n\n",
+        "```\n两行正文\n\n<!-- VERDICT: {\"verdict\": \"中性\"} -->\n```\n\n",
+        "```\n两行正文\n\n<!-- VERDICT: {\"verdict\": \"中性\"} -->\n```\n\n",
+        "## 量价分析\n\n一段泄漏的正文。\n\n<!-- VERDICT: {\"verdict\": \"中性\"} -->\n\n",
+        "```\n（反例说明）\n\n## 自检\n\n- [ ] 检查项\n",
+    );
+    let hit = verdict_prompt_defects(corrupted);
+    for want in ["fence", "leaked-tag", "dup-example", "soft-body"] {
+        assert!(hit.contains(&want), "判据 `{want}` 对修复前的真实形态未命中 ⇒ 检法失效");
+    }
+}

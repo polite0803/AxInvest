@@ -22,7 +22,6 @@ import {
   CodeFilled,
   DollarCircleFilled,
   EnvironmentFilled,
-  FundFilled,
   MessageFilled,
   PlaySquareFilled,
   RiseOutlined,
@@ -66,10 +65,10 @@ export const builtinNavItems: NavItem[] = [
     path: BUILTIN_PAGE_PATH["finance-investment"],
     isPlugin: false,
   },
-  // ── 金融域（finance）：金融投研行业包 ──
+  // ── 金融域（finance）：OPC 投顾经营域包 ──
   {
     key: "finance-analysis",
-    icon: navIcon(FundFilled),
+    icon: navIcon(TeamOutlined),
     labelKey: "nav.financeAnalysis",
     path: BUILTIN_PAGE_PATH["finance-analysis"],
     isPlugin: false,

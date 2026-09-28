@@ -1432,28 +1432,26 @@ pub async fn execute_mcp_tool(
                 None
             };
 
-            // ── 安全边际：优先使用 DCF，不可用时 fallback 到格雷厄姆，均不可用为 None ──
-            // P0 修复(2026-09-11): 原实现未对分母（内在价值）做零值防护。当
-            // dcf_mid = Some(0.0) 时 (mid - price)/mid = -inf，DB 实证输出
-            // 「安全边际 -57255189717%(无（高估风险）)」级垃圾值，并污染 value_signal。
-            // 注意: mos_pct 的分母按教科书定义为「内在价值」（折价率口径），
-            // 与 dcf.upsidePct 的「现价」分母（上行空间口径）是两个不同指标，不可互换；
-            // 此处仅加零值防护，不改口径。
-            let mos_pct: Option<f64> = match (dcf_mid, graham_value) {
-                // 守卫改用 iv_floor（相对阈值）：`f64::EPSILON` 挡不住 1e-7 级退化值。
-                // 上界 iv_ceil 为 2026-09-12 补齐 —— 分母超大时 mos → +100，
-                // 会被读成「充足安全边际」，同样是伪造的看多信号（实证见 iv_ceil 注释）。
-                // 注：dcf_mid / graham_value 已在上方遮蔽过，此处守卫是双保险（防将来挪动代码顺序）。
-                (Some(mid), _) if mid > iv_floor && mid < iv_ceil => {
-                    Some(((mid - current_price) / mid) * 100.0)
-                },
-                // 格雷厄姆分支同理：它不经 `total_shares`（不受该单位 bug 影响），
-                // 但 EPS 近零时同样会输出同量级垃圾，需同一把尺子
-                (None, Some(g)) if g > iv_floor && g < iv_ceil => {
-                    Some(((g - current_price) / g) * 100.0)
-                },
-                _ => None,
-            };
+            // ── 安全边际：有界「保守档上行空间」口径（2026-09-27 统一）─────────
+            //
+            // 口径 = `(保守档内在价值 − 现价) / **现价** × 100`，与 `dcf.upsidePct`
+            //   同源同值（同一基准 `dcf_low`、同一分母 `current_price`）。
+            //   基准取 `low` 的理由见下方 `dcf.upsidePct` 的长注释（2026-09-23 裁定
+            //   「安全边际必须在最保守假设下成立」）。
+            //
+            // ⚠️ 旧口径的病灶（本次修复）：`(mid − price)/mid` 是**折价率**口径，
+            //   分母为内在价值 ⇒ **无界**。当内在价值仅为现价零头时（PE>100 标的的
+            //   真实结论），该值可达 −735.9%（300285）、−1430.6%（601698）、
+            //   −1935.2%（300179）；而同一份 payload 里的 `dcf.upsidePct`（现价分母）
+            //   只有 −92.4%。同名指标两套数值 ⇒ 消费方取哪个都可能
+            //   ⇒ `value_signal` / `buffett_verdict` / `margin_of_safety` 三者方向打架。
+            //   统一到现价分母后 `mos_pct ≡ dcf.upsidePct`，不再存在两套口径。
+            //
+            // P0 修复(2026-09-11): 分母改为现价后，新增 `current_price > 0.0` 守卫
+            //   （旧实现靠分母为内在价值回避了除零，换口径后必须显式挡）。
+            //   `dcf_low` / `graham_value` 的量程守卫见上方遮蔽 ⇒ 此处传已遮蔽的值。
+            let mos_pct: Option<f64> =
+                margin_of_safety_pct(dcf_low.or(graham_value), current_price);
             let mos_level: String = match mos_pct {
                 Some(mos) => {
                     let base = if mos > 30.0 {
@@ -1465,7 +1463,8 @@ pub async fn execute_mcp_tool(
                     } else {
                         "无（高估风险）"
                     };
-                    if dcf_mid.is_none() {
+                    // 基准是 `dcf_low`（与 `dcf.upsidePct` 同源）⇒ 该腿缺席才标注来源
+                    if dcf_low.is_none() {
                         format!("{}(格雷厄姆)", base)
                     } else {
                         base.to_string()
@@ -1518,8 +1517,9 @@ pub async fn execute_mcp_tool(
                 )
             } else {
                 format!(
-                    "内在价值(DCF中性)≈{}元 | 格雷厄姆值≈{}元 | 安全边际{}%({}) | F-Score={}/9({}) | 护城河{}/100({}) | OE收益率{:.1}% | 综合判断:{}",
+                    "内在价值(DCF中性/保守)≈{}/{}元 | 格雷厄姆值≈{}元 | 安全边际{}%({}) | F-Score={}/9({}) | 护城河{}/100({}) | OE收益率{:.1}% | 综合判断:{}",
                     dcf_mid.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "不可用".into()),
+                    dcf_low.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "不可用".into()),
                     graham_value.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "不可用".into()),
                     mos_pct.map(|p| format!("{:.0}", p)).unwrap_or_else(|| "无法计算".into()),
                     mos_level, f_score, f_score_level, moat_score, moat_level, oe_yield, value_signal
@@ -1542,6 +1542,16 @@ pub async fn execute_mcp_tool(
                     // 「mid=2.18 是怎么算出来的」必须靠反解，而 3 个方程解 5 个
                     // 未知量 ⇒ 欠定（多组参数同时命中）。落参数后对账即唯一解。
                     "assumptions": dcf_assumptions,
+                    // 理想买入价（2026-09-27 新增）：中性档内在价值 ×(1 − 要求安全边际)。
+                    // ⚠️ 旧实现在提示词里让 LLM 直接引用 `dcf.low`（**悲观档**）当理想
+                    //   买入价 ⇒ 300285 现价 70 元、理想买入价 5.29 元（7.5%），语义完全
+                    //   错位：`low` 是「悲观假设下的内在价值」，不是「打个折的买点」。
+                    //   本字段把它改为「中性档价值打七折」，并作为**唯一权威**输出
+                    //   —— 提示词不再自行计算，只引用本字段。
+                    "idealBuyPrice": num_or_null(ideal_buy_price(dcf_mid), round2),
+                    // 定价适用性警示（2026-09-28）：三档是假设敏感性带，不可作定价。
+                    // 权威定义与实证见 `DCF_PRICING_CAVEAT` 的文档。
+                    "pricingCaveat": DCF_PRICING_CAVEAT,
                 },
                 "graham_intrinsic_value": num_or_null(graham_value, round2),
                 "margin_of_safety": {
@@ -1578,6 +1588,12 @@ pub async fn execute_mcp_tool(
                     // 与 `dcf_valuation.assumptions` 同源同值（同一份快照）——
                     // 两处都放是为了让 `input_mapping` 任一引用路径都能取到。
                     "assumptions": dcf_assumptions,
+                    // 与 `dcf_valuation.idealBuyPrice` 同源同值（`mid × 0.70`）。
+                    // 权威定义见上方该字段的注释。
+                    "idealBuyPrice": num_or_null(ideal_buy_price(dcf_mid), round2),
+                    // 与 `dcf_valuation.pricingCaveat` 同源同值 —— 两处都放的理由同
+                    // `assumptions` / `idealBuyPrice`（任一 `input_mapping` 引用路径都取到）。
+                    "pricingCaveat": DCF_PRICING_CAVEAT,
                 // ── 2026-09-23：`upsidePct` 基准由**中性档 `mid`** 改为**保守档 `low`** ──
                 //
                 // 病根（用户实证 300642 透景生命）：三段 DCF 自报估值域
@@ -2480,6 +2496,74 @@ const FCF_NP_DIVERGENCE_MIN: f64 = 0.3;
 /// 688114 的 1.18%（市值/FCF ≈ 85 倍）正是此类。
 const FCF_YIELD_INAPPLICABLE_MIN: f64 = 0.03;
 
+/// FCF 锚的**质量下限**：当期真实 FCF 与 TTM 净利之比低于此值时，
+/// 「当期 FCF」不再是可信的 DCF 分子，锚改到 owner earnings 代理。
+///
+/// ## 病根（用户实证：工作流的巴菲特估值「从来没有一次正确过」）
+///
+/// 巴菲特口径的所有者收益 ≈ 净利 + 折旧摊销 − **维持性**资本开支；
+/// 而 [`ttm_fcf`] = 经营现金流 − **全部**资本开支（含扩张性）
+/// ⇒ 对扩张期/重资产公司，FCF 被**系统性扣低** ⇒ 锚低 ⇒ 内在价值低 ⇒
+/// 「理想买入价」低到与现价无关。
+///
+/// 实测 300285（2026-09-24 样本）：FCF 2.38 亿 vs TTM 净利 5.49 亿
+/// ⇒ `FCF/净利 = 0.43`，锚比 owner earnings 口径低约 **2.3 倍**。
+///
+/// ## 取值依据
+///
+/// 与判据 ②（[`FCF_NP_DIVERGENCE_MIN`] = 0.3）**同源但不同用途**，故意取不同的值：
+/// · `0.3` 是「该腿整体不适用」的**否决线**（命中即 `applicable = false`）；
+/// · 本阈值 `0.6` 是「允许换锚继续算」的**降级线**，更宽 —— 代价只是把锚换成
+///   owner earnings 代理并标记 `is_fallback_anchor`（f5 自动降权），
+///   而不是把整个 DCF 关掉。
+/// 正常经营企业该比值在 0.7–1.2（折旧与资本开支大致抵消）；`< 0.6` 即
+/// 「FCF 明显低于盈利」，此时净利口径更接近股东真实可得。
+const FCF_TO_NP_MIN_FOR_ANCHOR: f64 = 0.6;
+
+/// 净利 → owner earnings 的代理转化系数。
+///
+/// 沿用本模块既有的 `× 0.90` 惯例（V74 fallback 锚、[`compute_owner_earnings`] 兜底），
+/// **不引入新的标定常数** —— 表达「净利中约 90% 可作为所有者收益」，
+/// 且与 fallback 锚同口径，保证「当期 FCF 偏低」与「当期 FCF ≤ 0」两条路径可比。
+const OWNER_EARNINGS_CONVERSION: f64 = 0.90;
+
+/// 理想买入价要求的安全边际（小数）：
+/// `ideal_buy_price = DCF 中性档内在价值 × (1 − 本值)`。
+///
+/// 取 30% 是价值投资最通用的经验值，且与 `mos_level` 的「充足（> 30%）」档
+/// **同一把尺子** —— 理想买入价即「按中性档估值也给到充足安全边际的价格」。
+const REQUIRED_MARGIN_OF_SAFETY: f64 = 0.30;
+
+/// DCF 三档的**定价适用性警示**（2026-09-28 新增）。
+///
+/// ## 为什么必须随三档一起输出
+///
+/// 2026-09-28 参数扫描实测（`valuation_tests::dcf_sensitivity_scan`，标的 300285）：
+/// 在**全部合理**的参数组合内（折现率 6%~10%、永续增长 0%~1.7%、中期增速 5%~25%），
+/// `mid` 落在 **7.86 ~ 33.31 元**，**倍差 4.2 倍**。
+/// ⇒ 三档数值主要由**参数选择**决定，而非标的内在价值：换一组同样合理的假设，
+/// 同一家公司会得到数倍不同的「内在价值」。
+///
+/// ## 与既有降级标记的分工（正交，互不替代）
+///
+/// · `assumptions.applicable` —— 模型的**前提**是否成立（杠杆 / FCF 与净利背离）；
+/// · `assumptions.is_fallback_anchor` —— **锚**是否用了代理值（非当期真实 FCF）；
+/// · 本常量 —— **数值精度**本身不支撑定价。
+///
+/// ⚠️ 前两者命中时面板 `gated` 会抑制数值展示；但**前两者不命中时本问题依然存在**
+/// —— 真实 FCF 锚 + 前提成立的标的，同参数扫描同样有 4.2 倍摆动。
+/// 因此本警示**不依赖**那两个标记，必须独立随三档输出。
+///
+/// ## 使用约束
+///
+/// 允许：用三档判断**方向**（该标的贵/便宜 —— 扫描显示全参数网格内方向一致）。
+/// 禁止：把三档、或其派生的 [`ideal_buy_price`] 当作**定价**
+/// （目标价 / 买入价 / 清仓线）—— 派生值继承同一方差。
+pub const DCF_PRICING_CAVEAT: &str = concat!(
+    "三档为假设敏感性带（折现率 6%~10%、永续增长 0%~1.7%、中期增速 5%~25% 的合理组合内，",
+    "中性档实测可摆动 4.2 倍）。仅可用于判断方向，不得作为目标价/买入价/清仓线等定价依据。",
+);
+
 // 【**2026-09-23 已撤销**】此处原有判据 ③ 的阈值常量 `TERMINAL_RATIO_MAX = 0.7`，
 // 已随该判据一起删除 —— 终值占比**不再**作为适用性判据。论证见 `compute_dcf` 内
 // 「③ 【已撤销】」段。一句话：`tvr > 0.7` 的**命中集 ≈ {预测期增长率 ≥ 0}**，
@@ -2899,7 +2983,8 @@ struct DcfAssumptions {
     discount_rate: f64,
     /// 预测期年数
     forecast_years: i32,
-    /// FCF 锚定值（元）—— ① 当期 FCF，或 ② 近 5 年报正净利均值 × 0.90
+    /// FCF 锚定值（元）—— ① 当期 FCF；或 ②/①b 代理锚（净利 × 0.90）
+    /// （`当期 FCF ≤ 0`、缺数、或 `FCF/净利 < 0.6` 三态之一）
     fcf_anchor: f64,
     /// 每股 FCF（元/股）
     fcf_per_share: f64,
@@ -2907,7 +2992,7 @@ struct DcfAssumptions {
     total_shares: f64,
     /// 口径说明（`fcf_anchor` 的来源），直接复用 `dcf.note`
     basis: String,
-    /// 锚定是否来自**归一化 fallback**（`当期 FCF ≤ 0` ⇒ 近 5 年报正净利均值 × 0.90）
+    /// 锚定是否来自**代理锚**（`当期 FCF ≤ 0` / 缺数 / `FCF/净利 < 0.6` ⇒ 净利 × 0.90）
     ///
     /// 2026-09-12（P0-I）新增，消费者是 `portfolio-mgr.rhai` 的 f5 估值因子。
     /// 该因子用它做**置信度衰减**：历史均值代理出来的锚定是回溯且偏低的，
@@ -3012,10 +3097,15 @@ fn compute_dcf(
 
     // vendor 返回的财务数据单位均为"元"，无需缩放
     // V74 FCF 取值链:
-    //   ① 当期 FCF > 0 → 直接使用（free_cash_flow / ocf-capex）
+    //   ① 当期 FCF > 0 且与净利相称（`FCF/TTM净利 ≥ 0.6`）→ 直接使用
+    //      （free_cash_flow / ocf-capex）
+    //   ①b 当期 FCF > 0 但 `FCF/TTM净利 < 0.6`（2026-09-27 新增）→ 扩张期/重资产
+    //      公司的 FCF 被「全部资本开支」扣低，改用所有者收益代理锚（TTM净利 × 0.90）
     //   ② 当期 FCF ≤ 0（亏损期/周期底部）→ 近 5 年报正净利均值 × 0.90 归一化锚定
     //      （沿用原 net_profit×0.90 估算惯例，季报为累计值故只取年报口径）
     //   ③ 近 5 年报无正净利年度（持续亏损）→ 返回 None，DCF 不适用
+    // ①②三条代理路径**同口径**（净利 × 0.90 = `OWNER_EARNINGS_CONVERSION`），
+    //   且都标记 `is_fallback_anchor = true`，由 f5 统一降权。
     // P0-I(2026-09-12): fallback 锚定的口径文案提为常量 —— 既用于 `fcf_basis`，
     //   也用于给下游输出 `is_fallback_anchor` 布尔量（避免靠字符串前缀匹配判分支）。
     // P0-I(2026-09-12): fallback 锚定的口径文案提为常量。
@@ -3032,6 +3122,13 @@ fn compute_dcf(
     const FCF_FALLBACK_BASIS: &str = "当期FCF≤0，改用近5年报正净利均值×0.90归一化锚定";
     const FCF_MISSING_BASIS: &str =
         "现金流量表数据缺失（该数据源未提供 OCF/资本开支），改用近5年报正净利均值×0.90归一化代理锚定";
+    // 2026-09-27 新增第三条 basis：**当期 FCF > 0 但显著低于净利**。
+    // 与上面两条的区别：上面两条是「FCF 不可用」（≤0 或缺失），本条是「FCF 可用
+    // 但口径不适用」（扣了扩张性资本开支，见 `FCF_TO_NP_MIN_FOR_ANCHOR` 注释）。
+    // 三者**处置相同**（都改用代理锚、都标 `is_fallback_anchor = true`），
+    // 但诊断必须说真话 —— 不得把「FCF 偏低」说成「周期底部」或「数据缺失」。
+    const FCF_OWNER_EARNINGS_BASIS: &str =
+        "当期FCF显著低于净利（FCF/净利<0.6），改用所有者收益代理锚（TTM净利×0.90）";
     // 2026-09-14：`direct_fcf` 提到外层作用域 —— 适用性判据 ②（`FCF/净利` 背离）
     // 需要看到**当期真实** FCF，而不是 fallback 后的代理值（代理值恒 ≈0.9×净利，
     // 会把「符号相反」这个最强信号抹掉）。
@@ -3040,9 +3137,20 @@ fn compute_dcf(
     //   且因 vendor 侧恒不提供这三列，本变量在生产上**一直是 `None`**。
     let direct_fcf = ttm_fcf(financials);
     let (fcf, fcf_basis) = match direct_fcf {
-        Some(v) if v > 0.0 => (v, "当期FCF".to_string()),
+        // ① 当期 FCF > 0，但显著低于净利 ⇒ 换 owner earnings 代理锚（2026-09-27）。
+        //    判据与理由见 `FCF_TO_NP_MIN_FOR_ANCHOR` 上方长注释：`ttm_fcf` 扣的是
+        //    **全部**资本开支（含扩张性），对扩张期/重资产公司系统性扣低；
+        //    此时用「TTM 净利 × 0.90」更接近股东真实可得。
+        //    ⚠️ 判据用 `ttm_net_profit`（与判据 ② 同源同口径），不是 `latest.net_profit`
+        //    （最新期累计值，中报口径下只有半年 —— 那正是判据 ② 2026-09-23 修掉的坑）。
+        Some(v) if v > 0.0 => match ttm_net_profit(financials).filter(|np| *np > 0.0) {
+            Some(np) if v / np < FCF_TO_NP_MIN_FOR_ANCHOR => {
+                (np * OWNER_EARNINGS_CONVERSION, FCF_OWNER_EARNINGS_BASIS.to_string())
+            },
+            _ => (v, "当期FCF".to_string()),
+        },
         Some(_) => match normalized_annual_profit(financials, 5) {
-            Some(avg_np) => (avg_np * 0.90, FCF_FALLBACK_BASIS.to_string()),
+            Some(avg_np) => (avg_np * OWNER_EARNINGS_CONVERSION, FCF_FALLBACK_BASIS.to_string()),
             None => {
                 return (
                     None,
@@ -3052,7 +3160,7 @@ fn compute_dcf(
             },
         },
         None => match normalized_annual_profit(financials, 5) {
-            Some(avg_np) => (avg_np * 0.90, FCF_MISSING_BASIS.to_string()),
+            Some(avg_np) => (avg_np * OWNER_EARNINGS_CONVERSION, FCF_MISSING_BASIS.to_string()),
             None => {
                 return (
                     None,
@@ -3615,6 +3723,35 @@ fn compute_owner_earnings(financials: &[FinancialReport]) -> Option<f64> {
         0.95
     };
     Some((net * factor).max(0.0))
+}
+
+/// 安全边际（%）= **保守档上行空间**，与 `dcf.upsidePct` 同源同值。
+///
+/// ## 为什么必须是这个口径（2026-09-27 统一）
+///
+/// 旧实现用折价率口径 `(内在价值 − 现价) / **内在价值**`，分母为内在价值 ⇒ **无界**。
+/// 当内在价值仅为现价的零头时（PE>100 标的的真实结论），该值可达 −735.9% / −1935.2%；
+/// 而同一份 payload 里的 `dcf.upsidePct`（现价分母）只有 −92.4% —— **同名指标两套数值**
+/// ⇒ `value_signal` / `buffett_verdict` / `margin_of_safety` 三者方向打架。
+/// 改用现价分母后有界（下限恰为 −100%），且与 `dcf.upsidePct` **逐位相等**，
+/// 关闭了两套口径并存的空间。基准取 `low`（保守档）的理由见 `dcf.upsidePct` 处长注释。
+///
+/// 入参 `base` 须是**已过量程遮蔽**的腿值（`dcf.low` 或 `graham_value`，两者同生同灭）。
+fn margin_of_safety_pct(base: Option<f64>, current_price: f64) -> Option<f64> {
+    match base {
+        Some(v) if current_price > 0.0 => Some((v - current_price) / current_price * 100.0),
+        _ => None,
+    }
+}
+
+/// 理想买入价 = **中性档内在价值 × (1 − `REQUIRED_MARGIN_OF_SAFETY`)**（即打七折）。
+///
+/// 与 `mos_pct`（防御性口径，取保守档 `low`）刻意不同：买点是**行动阈值**，
+/// 应挂在「中性假设的价值」上，再要求一个明确的安全边际；
+/// 而 `low` 本身已是「悲观假设下的价值」，再拿它当买点等于**重复悲观两次**
+/// （旧规则正是如此 ⇒ 300285 现价 70 元 / 理想买入价 5.29 元）。
+fn ideal_buy_price(mid: Option<f64>) -> Option<f64> {
+    mid.map(|m| m * (1.0 - REQUIRED_MARGIN_OF_SAFETY))
 }
 
 /// 算法综合估值档位（`value_signal`）—— 由安全边际 / F-Score / 护城河 / 所有者收益率合成。
@@ -4613,15 +4750,46 @@ mod valuation_tests {
             a.basis
         );
 
-        // (c) 有真实正 FCF ⇒ 不走 fallback，basis 为「当期FCF」，判据 ② 不命中
+        // (c) 有真实正 FCF 且与净利相称 ⇒ 不走 fallback，basis 为「当期FCF」，判据 ② 不命中
         let mut pos = report("2025-12-31", Some(100.0 * y), Some(8.0));
-        pos.operating_cash_flow = Some(80.0 * y);
-        pos.capital_expenditure = Some(30.0 * y); // FCF = +50 亿，FCF/净利 = 0.5
+        pos.operating_cash_flow = Some(110.0 * y);
+        pos.capital_expenditure = Some(30.0 * y); // FCF = +80 亿，FCF/净利 = 0.8 ≥ 0.6
         let a = compute_dcf(&[pos], shares_of(10.0e8), 50.0, None).2.expect("应回传快照");
-        assert!(!a.is_fallback_anchor, "有真实正 FCF 时不应标记为历史代理锚");
+        assert!(!a.is_fallback_anchor, "有真实正 FCF 且与净利相称时不应标记为代理锚");
         assert_eq!(a.basis, "当期FCF");
         assert!(!a.fcf_data_missing, "真实正 FCF 时不存在缺口");
-        assert!(a.applicable, "FCF/净利 = 0.5 ≥ 0.3 不应判不适用: {:?}", a.applicability_signals);
+        assert!(a.applicable, "FCF/净利 = 0.8 ≥ 0.3 不应判不适用: {:?}", a.applicability_signals);
+
+        // (d) 2026-09-27 新增第三态：FCF **为正**但与净利量级脱钩（`FCF/净利 < 0.6`）
+        //     ⇒ 换 owner earnings 代理锚（`ttm_fcf` 扣了扩张性资本开支，对该类标的系统性扣低）。
+        //     ⚠️ 取值落在 [0.3, 0.6)：既触发**换锚**，又**不**触发判据 ② 的否决线
+        //     ⇒ 两个阈值必须各自独立可辨（合并成一个就再也分不出「降级」与「否决」）。
+        let mut thin = report("2025-12-31", Some(100.0 * y), Some(8.0));
+        thin.operating_cash_flow = Some(80.0 * y);
+        thin.capital_expenditure = Some(30.0 * y); // FCF = +50 亿，FCF/净利 = 0.5
+        let a = compute_dcf(&[thin], shares_of(10.0e8), 50.0, None).2.expect("应回传快照");
+        assert!(a.is_fallback_anchor, "FCF/净利 = 0.5 < 0.6 应换代理锚并标记 fallback");
+        assert!(
+            a.basis.contains("所有者收益"),
+            "换锚的诊断必须点明 owner earnings，实得: {}",
+            a.basis
+        );
+        assert!(
+            !a.basis.contains("当期FCF≤0") && !a.basis.contains("缺失"),
+            "本态 FCF 为正且数据齐备，不得谎称周期底部或数据缺失，实得: {}",
+            a.basis
+        );
+        assert!(!a.fcf_data_missing, "本态不是我方采集缺陷，fcf_data_missing 不得为 true");
+        assert!(
+            (a.fcf_anchor - 100.0 * y * 0.90).abs() < 1.0,
+            "锚应改为 TTM 净利 × 0.90 = 90 亿，实得 {} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(
+            a.applicable,
+            "FCF/净利 = 0.5 ≥ 0.3（否决线）⇒ 应换锚继续算而非判不适用: {:?}",
+            a.applicability_signals
+        );
     }
 
     /// ⑥ `value_signal` 必须**能表达「高估」**。
@@ -4658,6 +4826,52 @@ mod valuation_tests {
 
         // mos 缺失时不参与评分（保持原行为）
         assert_eq!(value_signal_of(None, 6, 75, 1.3), "合理偏低");
+    }
+
+    /// ⑦ 2026-09-27：安全边际口径统一 —— 必须是**有界**的保守档上行空间，
+    /// 且与 `dcf.upsidePct` **逐位相等**。
+    ///
+    /// 同名指标两套数值（算法侧无界折价率 vs 面板侧有界上行空间）是
+    /// `value_signal` / `buffett_verdict` / `margin_of_safety` 三指标方向打架的直接成因：
+    /// 300285 算法侧 −735.9%、面板侧 −92.4%，同一条 payload 里两个「安全边际」。
+    #[test]
+    fn margin_of_safety_is_bounded_conservative_upside() {
+        // 零头形态（内在价值仅为现价的 1%）：旧折价率口径得 −6900%（无界），
+        // 新口径 −98.6%（落在 (−100%, 0) 内）—— 有界性本身就是本测试要钉住的性质。
+        let mos = margin_of_safety_pct(Some(1.0), 70.0).expect("现价>0 应可算");
+        assert!(mos > -100.0 && mos < 0.0, "必须落 (−100%, 0) 有界区间，实得 {mos}");
+        // 与 `dcf.upsidePct` 的算式**逐位一致** —— 本次修复的核心不变量
+        assert_eq!(mos, (1.0 - 70.0) / 70.0 * 100.0);
+        assert!(margin_of_safety_pct(Some(100.0), 70.0).unwrap() > 40.0);
+        // 分母为内在价值的老口径在此形态下 ∉ (−100%, 0)，此处以算式对照自证口径已换：
+        let iv = 1.0;
+        let old_discount_rate = (iv - 70.0) / iv * 100.0;
+        assert!(
+            old_discount_rate < -100.0,
+            "旧折价率口径（分母取内在价值）必然越界，说明本测试确实能区分两套口径，实得 {old_discount_rate}"
+        );
+        // 现价非正 / 基准缺失 ⇒ None（不得以 0 或猜测值冒充）
+        assert!(margin_of_safety_pct(Some(10.0), 0.0).is_none());
+        assert!(margin_of_safety_pct(Some(10.0), -5.0).is_none());
+        assert!(margin_of_safety_pct(None, 70.0).is_none());
+    }
+
+    /// ⑧ 2026-09-27：理想买入价 = 中性档 × 0.70（要求 30% 安全边际），
+    /// **不得**再引用悲观档 `low`（旧规则产出现价 70 元 / 买点 5.29 元的错位）。
+    #[test]
+    fn ideal_buy_price_is_mid_x70() {
+        let v = ideal_buy_price(Some(100.0)).expect("mid 可用应可算");
+        assert!((v - 70.0).abs() < 1e-9, "中性档 100 元 ⇒ 买点 70 元，实得 {v}");
+        let v2 = ideal_buy_price(Some(8.37)).expect("应可算");
+        assert!((v2 - 8.37 * 0.7).abs() < 1e-9);
+        // 腿不可用 ⇒ null，不得冒充 0 元（0 是「白送」信号，与「无锚」完全不同）
+        assert_eq!(ideal_buy_price(None), None);
+        // 反向对照：300285 实测 mid=8.37 / low=5.29 ⇒ 买点必须挂在 mid 上；
+        // 若实现退化回「取 low」，两者将相等 ⇒ 本断言报红。
+        assert!(
+            ideal_buy_price(Some(8.37)).unwrap() > 5.29,
+            "买点应挂在 mid 上而非 low（旧规则正是取 low 才产出 5.29 元）"
+        );
     }
 
     /// `report` 的 ROE 变体
@@ -5629,6 +5843,146 @@ mod valuation_tests {
         );
         assert!(a.fcf_data_missing, "缺数标记必须为 true");
         assert!(a.is_fallback_anchor, "缺数态锚仍是历史代理，f5 衰减门依赖此标记");
+    }
+
+    // ── 诊断：DCF 输出对常数的敏感性（`#[ignore]`，手动运行）─────────────
+    //
+    // 立此测试的背景（2026-09-28 全库复核）：21 条有效记录的 `现价 / dcf.mid`
+    // 极差达 0.00~15.34，且**同一股票同日**换模板版本 `mid` 可差 2.07 倍
+    // （300285：tv=88 为 8.37、tv=89 为 17.35，现价同为 70.00）。
+    // 同日同股市场没变，变的只有版本 ⇒ 输出疑似由**参数扰动**支配而非标的差异。
+    // 本测试在固定标的上扫参数网格，把该敏感性量化出来。
+    //
+    // 运行：`__TAURI_WORKSPACE__=true cargo test -p axagent-astock-data \
+    //         valuation_tests::dcf_sensitivity_scan -- --ignored --nocapture`
+    #[test]
+    #[ignore = "诊断用扫描，非门禁断言"]
+    fn dcf_sensitivity_scan() {
+        let y = 1.0e8;
+        // 复现 300285（国瓷材料）落库输入（tv=89 / 2026-09-28）：
+        //   TTM 净利 6.41 亿、真实 FCF 2.38 亿（OCF 3.38 − capex 1.00）
+        //   ⇒ FCF/净利 = 0.371 < 0.6 ⇒ 换 owner earnings 锚 = 6.41 × 0.90 ≈ 5.77 亿
+        //   总股本 997,048,299、现价 70.00、revenue_yoy 16.6377%
+        // 期望：基线 mid 必须复现落库的 17.35，否则扫描的绝对位置失去意义。
+        let yoy = Some(16.637709702208);
+        let make = |yoy: Option<f64>| {
+            let mut r = report_cf("2025-12-31", 6.41 * y, 3.38 * y, 1.00 * y);
+            r.revenue_yoy = yoy;
+            vec![r]
+        };
+        let mid_of = |cfg: Option<&ValuationConfig>, yoy: Option<f64>| -> Option<f64> {
+            compute_dcf(&make(yoy), shares_of(9.97048299 * y), 70.0, cfg).0.map(|t| round2(t.1))
+        };
+
+        let base = mid_of(None, yoy);
+        println!("\n=== 基线（模块常量 + 300285 实参）: mid = {base:?}（落库值 17.35）===\n");
+
+        let ds = [0.06, 0.07, 0.077, 0.08, 0.09, 0.10];
+        let ps = [0.0, 0.013, 0.02, 0.03];
+        let gs = [0.05, 0.12, 0.20, 0.25];
+
+        println!("--- 扫描1: mid 对 折现率(列) x 永续增长(行)，growth 固定 16.64% ---");
+        print!("{:<8}", "p \\ d");
+        for d in ds {
+            print!("{d:>9.3}");
+        }
+        println!();
+        for p in ps {
+            print!("{p:<8.3}");
+            for d in ds {
+                let cfg = ValuationConfig {
+                    discount_rate: Some(d),
+                    perpetual_growth: Some(p),
+                    ..Default::default()
+                };
+                match mid_of(Some(&cfg), yoy) {
+                    Some(m) => print!("{m:>9.2}"),
+                    None => print!("{:>9}", "n/a"),
+                }
+            }
+            println!();
+        }
+
+        println!("\n--- 扫描2: mid 对 增长档(行) x 折现率(列)，revenue_yoy 置空 ---");
+        print!("{:<8}", "g \\ d");
+        for d in ds {
+            print!("{d:>9.3}");
+        }
+        println!();
+        for g in gs {
+            print!("{g:<8.3}");
+            for d in ds {
+                let cfg = ValuationConfig {
+                    discount_rate: Some(d),
+                    default_growth: Some(g),
+                    ..Default::default()
+                };
+                match mid_of(Some(&cfg), None) {
+                    Some(m) => print!("{m:>9.2}"),
+                    None => print!("{:>9}", "n/a"),
+                }
+            }
+            println!();
+        }
+
+        // 判据是「跨度」而非单点：若合理参数区间内 mid 跨越 3 倍以上，
+        // 该模型输出主要由参数选择决定，不具备给出「内在价值区间」的资格。
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for d in ds {
+            for p in ps {
+                let cfg = ValuationConfig {
+                    discount_rate: Some(d),
+                    perpetual_growth: Some(p),
+                    ..Default::default()
+                };
+                if let Some(m) = mid_of(Some(&cfg), yoy) {
+                    lo = lo.min(m);
+                    hi = hi.max(m);
+                }
+            }
+        }
+        println!("\n=== 扫描1 跨度: mid 落在 [{lo:.2}, {hi:.2}]，倍差 {:.2}x ===", hi / lo);
+
+        // ── 把 `DCF_PRICING_CAVEAT` 文案与实测绑定（防文案与事实脱钩）────────
+        //
+        // 文案向用户承诺「中性档实测可摆动 4.2 倍」，该数字必须由本测试**当场测出**
+        // 并与文案比对 —— 否则将来调了模型结构（改常数 / 换公式）却忘改文案，
+        // 警示会退化成一句假话，比不写更糟（同族教训：文案里的量化断言必须可回归）。
+        //
+        // 口径 = 两次扫描的**并集**跨度（折现率 6%~10% × 永续 0%~3% × 中期增速 5%~25%）：
+        // · 上界 33.31 来自扫描2（g=25%, d=6%）—— 增长档是最强敏感源；
+        // · 下界 7.86 来自扫描2（g=5%, d=10%）；
+        // · 扫描1 的 p=2%/3% 两行与 p=1.7% 逐位相同（`MAX_PERPETUAL_GROWTH` 静默截断），
+        //   并入并集不改变上下界，故此处直接取两次扫描的 min/max。
+        let mut lo2 = f64::INFINITY;
+        let mut hi2 = f64::NEG_INFINITY;
+        for d in ds {
+            for g in gs {
+                let cfg = ValuationConfig {
+                    discount_rate: Some(d),
+                    default_growth: Some(g),
+                    ..Default::default()
+                };
+                if let Some(m) = mid_of(Some(&cfg), None) {
+                    lo2 = lo2.min(m);
+                    hi2 = hi2.max(m);
+                }
+            }
+        }
+        let span_lo = lo.min(lo2);
+        let span_hi = hi.max(hi2);
+        let measured = span_hi / span_lo;
+        println!("=== 并集跨度: mid 落在 [{span_lo:.2}, {span_hi:.2}]，倍差 {measured:.2}x ===");
+
+        assert!(
+            DCF_PRICING_CAVEAT.contains("4.2"),
+            "caveat 文案须声明实测倍数（4.2x），当前文案: {DCF_PRICING_CAVEAT}"
+        );
+        assert!(
+            (3.5..=5.0).contains(&measured),
+            "实测倍差 {measured:.2}x 已偏离 caveat 声明的 4.2x 量级，须同步文案: {DCF_PRICING_CAVEAT}"
+        );
     }
 }
 

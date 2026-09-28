@@ -45,6 +45,8 @@ interface R1DebateJson {
   stance?: string;
   strength_score?: number;
   confidence?: number;
+  /** 后端注入的机读标记：本次产物只有结论标签、没有正文（见 agent_executor 的 VERDICT 重构）*/
+  __verdict_only?: boolean;
 }
 
 /** R2 质询输出格式 */
@@ -451,6 +453,10 @@ function processDebateInput(raw: string): DebateContent {
   // 类型规范化收口：LLM 输出的字段类型不受控，必须在进入各 view 之前强制成立。
   // 不加这一步，`final_position` 是对象时 R3View 会整页崩（见 normalizeDebateJson 文档）。
   const parsed = normalizeDebateJson(tryParseDebate(unwrapped));
+
+  // 后端在「LLM 只回结论标签、没有正文」时往 report 里塞了一句中文占位陈述（面向下游 LLM），
+  // 并打 `__verdict_only` 标记。那句不是辩手说的话 ⇒ 丢弃，让下方 verdictOnlyLabel 的本地化分支生效。
+  if (parsed?.__verdict_only === true) { parsed.report = undefined; }
 
   // 检查嵌套 verdict 对象（strict_mode 下 LLM 输出 {report, verdict:{stance,strength_score,confidence}}）
   const hasNestedVerdict = !!parsed && typeof parsed.verdict === "object" && parsed.verdict !== null

@@ -3830,9 +3830,8 @@
     "pipeline": "股票管道",
     "marketMainline": "市场主线",
     "screenshotDiagnosis": "截图诊断",
-    "invest": "投资",
     "financeInvestment": "金融投资",
-    "financeAnalysis": "金融分析",
+    "financeAnalysis": "投顾经营",
     "financeAccounting": "财务会计",
     "automationOperations": "运营管理",
     "automationSales": "销售增长",
@@ -6736,12 +6735,6 @@
     "sectionKnowledge": "知识",
     "sectionDevelopment": "开发",
     "agentPanel": "Agent 面板",
-    "sectionInvest": "投资",
-    "sectionInvestDiscover": "发现",
-    "sectionInvestExecute": "执行",
-    "sectionInvestMonitor": "跟踪",
-    "sectionInvestReview": "复盘",
-    "sectionInvestWorkspace": "投资工作区",
     "sectionPlugins": "插件",
     "sectionWork": "工作",
     "sectionDeveloper": "开发者工具"
@@ -11508,8 +11501,8 @@
       "ai_research_desc": "AI 技术与应用研究：需求分析 → 技术调研 → 原型验证 → 报告输出",
       "software_dev": "软件开发",
       "software_dev_desc": "软件开发全流程：需求分析 → 架构设计 → 编码实现 → 测试部署",
-      "finance_invest": "金融投资",
-      "finance_invest_desc": "投资分析与决策：市场分析 → 财务建模 → 风险评估 → 投资建议",
+      "finance_invest": "投顾经营",
+      "finance_invest_desc": "投顾经营分析与决策：经营概览 → 可投金额 → 投顾风控 → 投顾建议",
       "sales_growth": "销售增长",
       "sales_growth_desc": "销售增长策略：市场定位 → 客户画像 → 获客策略 → 转化优化",
       "content_media": "内容媒体",
@@ -11580,21 +11573,17 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "个股分析",
-            "description": "深度分析单只股票的投资价值"
-          },
           "fi-financial": {
-            "label": "财报解读",
-            "description": "解读企业财务报表关键指标"
+            "label": "经营报表",
+            "description": "解读经营报表关键指标（发票/项目/客户）"
           },
           "fi-valuation": {
-            "label": "估值计算",
-            "description": "使用 DCF 等模型计算合理估值"
+            "label": "可投金额测算",
+            "description": "依据实际经营数据测算可投金额"
           },
           "fi-risk": {
-            "label": "风险评估",
-            "description": "评估投资的主要风险因素"
+            "label": "风险等级评估",
+            "description": "评估投顾业务的主要风险因素"
           }
         },
         "sales-growth": {
@@ -11943,16 +11932,16 @@
         },
         "finance-invest": {
           "wf-fi-1": {
-            "name": "A股深度研究",
-            "description": "行情分析 → 财报解读 → 估值模型 → 投资建议"
+            "name": "经营深度研究",
+            "description": "经营回顾 → 成本分析 → 可投金额 → 投顾建议"
           },
           "wf-fi-2": {
             "name": "行业对比分析",
             "description": "行业扫描 → 对标选择 → 对比分析 → 结论"
           },
           "wf-fi-3": {
-            "name": "投资组合优化",
-            "description": "持仓分析 → 风险评估 → 配置建议 → 调仓方案"
+            "name": "投顾组合优化",
+            "description": "可投金额分析 → 风险等级 → 配置建议 → 调仓方案"
           }
         },
         "sales-growth": {
@@ -12190,18 +12179,17 @@
       "finance_invest": {
         "tabs": {
           "analysis": {
-            "label": "市场分析",
-            "description": "个股分析、财报解读",
+            "label": "经营概览",
+            "description": "经营数据回顾；个股分析请用投资中心",
             "actions": {
-              "fi_stock": "个股分析",
-              "fi_financial": "财报解读"
+              "fi_financial": "经营报表"
             }
           },
           "valuation": {
-            "label": "估值建模",
-            "description": "估值计算、财务分析",
+            "label": "可投金额",
+            "description": "可投金额测算、成本结构分析",
             "actions": {
-              "fi_valuation": "估值计算"
+              "fi_valuation": "可投金额测算"
             },
             "workflows": {
               "wf_fin_cost_analysis": {
@@ -12211,15 +12199,15 @@
             }
           },
           "risk": {
-            "label": "风险管理",
-            "description": "风险评估、投资决策",
+            "label": "投顾风控",
+            "description": "风险等级评估、投顾预算规划",
             "actions": {
-              "fi_risk": "风险评估"
+              "fi_risk": "风险等级评估"
             },
             "workflows": {
               "wf_fin_budget": {
-                "name": "预算规划",
-                "description": "投资预算制定"
+                "name": "投顾预算规划",
+                "description": "可投金额预算制定"
               }
             }
           }

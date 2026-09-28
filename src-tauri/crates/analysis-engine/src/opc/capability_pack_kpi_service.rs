@@ -60,7 +60,7 @@ pub async fn compute_accounting_kpis(
     ])
 }
 
-/// 金融投资 KPI 计算
+/// 投顾经营 KPI 计算
 pub async fn compute_finance_invest_kpis(
     data_service: &Arc<dyn OpcDataService>,
     time_range: &TimeRange,

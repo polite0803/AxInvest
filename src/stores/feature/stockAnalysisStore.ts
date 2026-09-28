@@ -218,7 +218,24 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       }
     } else if (stepId === "value-investor") {
       // 巴菲特框架评估（与 risk-evaluator 并行，在辩论之后运行）
-      valueAssessments[stepId] = output;
+      //
+      // v91 修复：value-investor 的产物会被下游 `value-verify`（CodeNode + Rhai）
+      //   **原地覆写** —— 该校验节点 `output_var` 与 value-investor 同名，引擎按
+      //   `output_var` 写 `workflow.results`（engine/mod.rs 的
+      //   `results.insert(output_var, r)`），故 `results["value-investor"]` 最终是
+      //   **CodeNode 包装** `{status, language, result, input_params, node_id, params}`，
+      //   真正内容在 `.result` 里（与 data-quality 同款）。
+      //   不拆包时 extractContent 会 JSON.stringify 整个包装 ⇒ ValueAssessmentPanel
+      //   的 tryParseValueReport 找不到顶层 `report` / `verdict` ⇒ **面板空白**。
+      //   `.result` 缺失（v91 之前的旧快照 / 校验节点未跑）时回落到原行为。
+      let content = output;
+      if (raw && typeof raw === "object") {
+        const r = raw as Record<string, unknown>;
+        if (r.result != null) {
+          content = typeof r.result === "string" ? r.result : JSON.stringify(r.result);
+        }
+      }
+      valueAssessments[stepId] = content;
     } else if (stepId === "rule-check") {
       ruleCheckResults[stepId] = output;
     } else if (stepId === "data-quality") {
@@ -2231,6 +2248,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         set({ valuationApplicability: extractValuationApplicability(rawOutput ?? text) });
       } else if (nodeId === "value-investor") {
         set({ valueAssessments: { ...s.valueAssessments, [nodeId]: text } });
+      } else if (nodeId === "value-verify") {
+        // v91: 估值字段**校验/覆写**节点（CodeNode + Rhai）。真实 nodeId 是
+        //   `value-verify`，但它的 `output_var` 与 value-investor **同名** ⇒
+        //   结果必须写回同一槽位 —— 否则上方 `value-investor` 分支写入的 LLM
+        //   原值会一直显示，覆写形同不存在（面板仍展示幻觉数字）。
+        //   包装形态与 data-quality 同款，真正内容在 `.result`。
+        let content = text;
+        const raw = (rawOutput ?? null) as Record<string, unknown> | null;
+        if (raw && typeof raw === "object" && raw.result != null) {
+          const r = raw.result;
+          content = typeof r === "string" ? r : JSON.stringify(r);
+        }
+        set({ valueAssessments: { ...s.valueAssessments, "value-investor": content } });
       } else if (nodeId === "data-quality") {
         // V41 修复: data-quality 是 CodeNode + Rhai，原始 output 形如
         //   {status, language, result: {grade, score, diagnostics, ...}, input_params, node_id, params}

@@ -366,6 +366,9 @@ export function AnalystReportCard({ expertId, report }: Props) {
 
   // 有解析结果：尝试结构化渲染
   if (parsed) {
+    // 后端占位陈述（"该节点仅给出结论标签…"）面向下游 LLM，不是分析师正文；
+    // 卡片改由 __verdict_only 标记渲染本地化提示，故在此摘掉，避免中文串漏进非中文界面。
+    if (parsed.__verdict_only === true) { parsed.report = undefined; }
     // strict_mode 下 LLM 输出被重构成 {"report":"...","verdict":{"verdict":"看多","bull_score":7,...}}
     // verdict/bull_score/bear_score/confidence 在嵌套的 verdict 对象里，需要提取到顶层
     if (parsed.verdict && typeof parsed.verdict === "object" && !Array.isArray(parsed.verdict)) {
@@ -459,6 +462,16 @@ export function AnalystReportCard({ expertId, report }: Props) {
                   {t("stockAnalysis.confidence")} {confidence.toFixed(0)}%
                 </span>
               )}
+            </div>
+          )}
+
+          {
+            /* 只有结论标签、没有正文：后端把「本维度没有分析」那句中文留给了下游 LLM，
+              呈现层在此按 __verdict_only 标记出本地化文案（见 agentOutput.reconstructVerdictTag）*/
+          }
+          {parsed.__verdict_only === true && (
+            <div className="text-xs mb-2" style={{ color: "var(--muted)" }}>
+              {t("stockAnalysis.analystReport.verdictOnlyBody")}
             </div>
           )}
 

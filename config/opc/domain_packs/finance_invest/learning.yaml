@@ -1,6 +1,6 @@
 version: 1
 domain_pack_id: "finance-invest"
-domain_pack_name: "金融投资"
+domain_pack_name: "投顾经营"
 
 reflection:
   enabled: true
@@ -50,7 +50,7 @@ reinforcement_learning:
 adapter:
   reflection_template:
     id: "finance-invest-default"
-    name: "金融投资反思模板"
+    name: "投顾经营反思模板"
     quality_weights:
       task_completion: 0.2
       output_quality: 0.35
@@ -63,7 +63,7 @@ adapter:
         description: "评估财务分析和投资建议的准确性"
         weight: 0.5
       - id: "risk-assessment"
-        name: "风险评估"
+        name: "风险等级评估"
         dimension: "risk"
         description: "评估风险识别和控制的有效性"
         weight: 0.3
@@ -86,7 +86,7 @@ adapter:
     max_steps: 20
     forbidden_optimizations:
       - optimization_type: "skip_risk_assessment"
-        reason: "不允许跳过风险评估"
+        reason: "不允许跳过风险等级评估"
     quality_thresholds:
       min_accuracy: 0.85
       min_success_rate: 0.75

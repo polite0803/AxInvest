@@ -3830,9 +3830,8 @@
     "skills": "스킬",
     "marketMainline": "시장 메인라인",
     "screenshotDiagnosis": "스크린샷 진단",
-    "invest": "투자",
     "financeInvestment": "금융 투자",
-    "financeAnalysis": "금융 분석",
+    "financeAnalysis": "투자자문 경영",
     "financeAccounting": "재무 회계",
     "automationOperations": "운영 관리",
     "automationSales": "판매 성장",
@@ -6736,12 +6735,6 @@
     "sectionKnowledge": "지식",
     "sectionDevelopment": "개발",
     "agentPanel": "에이전트 패널",
-    "sectionInvestDiscover": "Discover",
-    "sectionInvestWorkspace": "투자 워크스페이스",
-    "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review",
-    "sectionInvestMonitor": "Monitor",
-    "sectionInvest": "투자",
     "sectionPlugins": "플러그인",
     "sectionWork": "업무",
     "sectionDeveloper": "개발자 도구"
@@ -11884,7 +11877,7 @@
     "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
-      "finance_invest": "Finance & Investment",
+      "finance_invest": "투자자문 경영",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
       "consulting": "Industry Consulting",
@@ -11958,10 +11951,6 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "Stock Analysis",
-            "description": "Deep analysis of stock investment value"
-          },
           "fi-financial": {
             "label": "Financial Report",
             "description": "Read key financial report data"
@@ -12516,7 +12505,6 @@
             "label": "Market Analysis",
             "description": "Stock analysis, financial report reading",
             "actions": {
-              "fi_stock": "Stock Analysis",
               "fi_financial": "Financial Report"
             }
           },

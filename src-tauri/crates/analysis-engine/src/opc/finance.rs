@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! 金融投资领域 — 财务报表 DTO、trait 接口与 SeaORM 实现
+//! 投顾经营领域 — 财务报表 DTO、trait 接口与 SeaORM 实现
 
 use async_trait::async_trait;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};

@@ -3830,9 +3830,8 @@
     "skills": "Навыки",
     "marketMainline": "Основная линия рынка",
     "screenshotDiagnosis": "Диагностика скриншота",
-    "invest": "Инвестиции",
     "financeInvestment": "Финансовые инвестиции",
-    "financeAnalysis": "Финансовый анализ",
+    "financeAnalysis": "Консультационный бизнес",
     "financeAccounting": "Финансовый учет",
     "automationOperations": "Операционное управление",
     "automationSales": "Рост продаж",
@@ -6736,12 +6735,6 @@
     "sectionKnowledge": "Знания",
     "sectionDevelopment": "Разработка",
     "agentPanel": "Панель агента",
-    "sectionInvestDiscover": "Discover",
-    "sectionInvestWorkspace": "Инвест-область",
-    "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review",
-    "sectionInvestMonitor": "Monitor",
-    "sectionInvest": "Инвестиции",
     "sectionPlugins": "Плагин",
     "sectionWork": "Работа",
     "sectionDeveloper": "Инструменты разработчика"
@@ -11884,7 +11877,7 @@
     "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
-      "finance_invest": "Finance & Investment",
+      "finance_invest": "Консультационный бизнес",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
       "consulting": "Industry Consulting",
@@ -11958,10 +11951,6 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "Stock Analysis",
-            "description": "Deep analysis of stock investment value"
-          },
           "fi-financial": {
             "label": "Financial Report",
             "description": "Read key financial report data"
@@ -12516,7 +12505,6 @@
             "label": "Market Analysis",
             "description": "Stock analysis, financial report reading",
             "actions": {
-              "fi_stock": "Stock Analysis",
               "fi_financial": "Financial Report"
             }
           },

@@ -3830,9 +3830,8 @@
     "scheduledAnalysis": "Scheduled",
     "marketMainline": "Market Mainline",
     "screenshotDiagnosis": "Screenshot Diagnosis",
-    "invest": "Invest",
     "financeInvestment": "Finance Investment",
-    "financeAnalysis": "Financial Analysis",
+    "financeAnalysis": "Advisory Business",
     "financeAccounting": "Financial Accounting",
     "automationOperations": "Operations",
     "automationSales": "Sales Growth",
@@ -6738,12 +6737,6 @@
     "agentPanel": "Agent Panel",
     "sectionWork": "Work",
     "sectionPlugins": "Plugins",
-    "sectionInvest": "Invest",
-    "sectionInvestDiscover": "Discover",
-    "sectionInvestWorkspace": "Invest Workspace",
-    "sectionInvestMonitor": "Monitor",
-    "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review",
     "sectionDeveloper": "Developer Tools"
   },
   "skill": {
@@ -11504,7 +11497,7 @@
     "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
-      "finance_invest": "Finance & Investment",
+      "finance_invest": "Advisory Business",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
       "consulting": "Industry Consulting",
@@ -11578,10 +11571,6 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "Stock Analysis",
-            "description": "Deep analysis of stock investment value"
-          },
           "fi-financial": {
             "label": "Financial Report",
             "description": "Interpret key corporate financial statement metrics"
@@ -12191,7 +12180,6 @@
             "label": "Market Analysis",
             "description": "Stock analysis, financial report reading",
             "actions": {
-              "fi_stock": "Stock Analysis",
               "fi_financial": "Financial Report"
             }
           },

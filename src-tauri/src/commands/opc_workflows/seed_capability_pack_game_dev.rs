@@ -10,7 +10,7 @@ use sea_orm::DatabaseConnection;
 use super::seed_domain_helpers::*;
 
 const TEMPLATE_ID: &str = "game_dev_harness_workflow";
-const TEMPLATE_VERSION: i32 = 4;
+const TEMPLATE_VERSION: i32 = 5;
 
 pub async fn seed_capability_pack_game_dev_workflow_template(
     db: &DatabaseConnection,
@@ -27,7 +27,7 @@ pub async fn seed_capability_pack_game_dev_workflow_template(
             "概念设计",
             "你是概念设计专家。执行「概念设计」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
             vec![td("WebSearch")],
-            Some("opc-game_dev_lead-game-concept-designer"),
+            Some("opc-game-concept-designer"),
             "step_game_dev",
             0.0,
             180.0,
@@ -37,7 +37,7 @@ pub async fn seed_capability_pack_game_dev_workflow_template(
             "原型开发",
             "你是原型开发专家。执行「原型开发」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
             vec![td("FileWrite"), td("WebSearch")],
-            Some("opc-game_dev_lead-game-prototype-developer"),
+            Some("opc-game-prototype-developer"),
             "step2_game_dev",
             vec![("input", "step_game_dev")],
             vec!["step_game_dev"],
@@ -57,7 +57,7 @@ pub async fn seed_capability_pack_game_dev_workflow_template(
             "内容生产",
             "你是内容生产专家。执行「内容生产」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
             vec![td("FileWrite")],
-            Some("opc-game_dev_lead-game-content-designer"),
+            Some("opc-game-content-designer"),
             "step3_game_dev",
             vec![("input", "step2_game_dev")],
             vec!["step2_game_dev"],
@@ -82,7 +82,7 @@ pub async fn seed_capability_pack_game_dev_workflow_template(
             "测试优化",
             "你是测试优化专家。执行「测试优化」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
             vec![td("FileRead"), td("WebSearch")],
-            Some("opc-game_dev_lead-game-qa-expert"),
+            Some("opc-game-qa-expert"),
             "step4_game_dev",
             vec![("input", "step3_game_dev")],
             vec!["step3_game_dev"],

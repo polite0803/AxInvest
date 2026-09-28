@@ -49,7 +49,7 @@ pub const ACCOUNTING_PROFILE_TOOLS: &[(&str, &[&str])] = &[
     ("accounting-financial-analyst", &["OpcGetFinancialReport", "OpcRecordKpi", "OpcListKpis"]),
 ];
 
-// ── 金融投资 ──
+// ── 投顾经营 ──
 
 pub const FINANCE_INVEST_EXPERTS: &[(&str, &str, &str)] = &[
     (

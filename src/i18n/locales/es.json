@@ -3830,9 +3830,8 @@
     "skills": "Habilidad",
     "marketMainline": "Tendencia del mercado",
     "screenshotDiagnosis": "Diagnóstico de captura",
-    "invest": "Invertir",
     "financeInvestment": "Inversión financiera",
-    "financeAnalysis": "Análisis financiero",
+    "financeAnalysis": "Gestión de asesoramiento",
     "financeAccounting": "Contabilidad financiera",
     "automationOperations": "Operaciones",
     "automationSales": "Crecimiento de ventas",
@@ -6736,12 +6735,6 @@
     "sectionKnowledge": "Conocimiento",
     "sectionDevelopment": "Desarrollo",
     "agentPanel": "Panel de Agente",
-    "sectionInvestDiscover": "Discover",
-    "sectionInvestWorkspace": "Espacio de Inversión",
-    "sectionInvestExecute": "Execute",
-    "sectionInvestReview": "Review",
-    "sectionInvestMonitor": "Monitor",
-    "sectionInvest": "Inversión",
     "sectionPlugins": "Complemento",
     "sectionWork": "Trabajo",
     "sectionDeveloper": "Herramientas de desarrollador"
@@ -11884,7 +11877,7 @@
     "domains": {
       "ai_research": "AI Research",
       "software_dev": "Software Development",
-      "finance_invest": "Finance & Investment",
+      "finance_invest": "Gestión de asesoramiento",
       "sales_growth": "Sales Growth",
       "content_media": "Content & Media",
       "consulting": "Industry Consulting",
@@ -11958,10 +11951,6 @@
           }
         },
         "finance-invest": {
-          "fi-stock": {
-            "label": "Stock Analysis",
-            "description": "Deep analysis of stock investment value"
-          },
           "fi-financial": {
             "label": "Financial Report",
             "description": "Read key financial report data"
@@ -12516,7 +12505,6 @@
             "label": "Market Analysis",
             "description": "Stock analysis, financial report reading",
             "actions": {
-              "fi_stock": "Stock Analysis",
               "fi_financial": "Financial Report"
             }
           },

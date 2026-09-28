@@ -10,7 +10,7 @@ use sea_orm::DatabaseConnection;
 use super::seed_domain_helpers::*;
 
 const TEMPLATE_ID: &str = "ai_research_harness_workflow";
-const TEMPLATE_VERSION: i32 = 4;
+const TEMPLATE_VERSION: i32 = 5;
 
 pub async fn seed_capability_pack_ai_research_workflow_template(
     db: &DatabaseConnection,
@@ -27,7 +27,7 @@ pub async fn seed_capability_pack_ai_research_workflow_template(
             "需求分析",
             "你是需求分析专家。执行「需求分析」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
             vec![td("OpcListProjects")],
-            Some("opc-ai_researcher-ai-research-director"),
+            Some("opc-ai-research-director"),
             "step_ai_research",
             0.0,
             180.0,
@@ -37,7 +37,7 @@ pub async fn seed_capability_pack_ai_research_workflow_template(
             "文献调研",
             "你是文献调研专家。执行「文献调研」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
             vec![td("OpcSearchWiki"), td("WebSearch")],
-            Some("opc-ai_researcher-ai-literature-analyst"),
+            Some("opc-ai-literature-analyst"),
             "step2_ai_research",
             vec![("input", "step_ai_research")],
             vec!["step_ai_research"],
@@ -57,7 +57,7 @@ pub async fn seed_capability_pack_ai_research_workflow_template(
             "模型评测",
             "你是模型评测专家。执行「模型评测」：结合上游输入，输出结构化 JSON 结果（含关键指标、结论与建议）。",
             vec![td("FileRead"), td("Bash")],
-            Some("opc-ai_researcher-ai-benchmark-analyst"),
+            Some("opc-ai-benchmark-analyst"),
             "step3_ai_research",
             vec![("input", "step2_ai_research")],
             vec!["step2_ai_research"],

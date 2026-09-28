@@ -679,7 +679,7 @@ export function SoftwareDevPage() {
 }
 
 // ==========================================
-// 金融投资行业页面
+// 投顾经营域包页面
 // ==========================================
 const financeInvestConfig: DomainConfig = {
   tabs: [
@@ -690,14 +690,7 @@ const financeInvestConfig: DomainConfig = {
       description: i18n.t("opc.domain.finance_invest.tabs.analysis.description"),
       actions: [
         {
-          key: "fi-stock",
-          icon: <FundProjectionScreenOutlined />,
-          type: "workflow",
-          template_id: "stock-analysis",
-          label: i18n.t("opc.domain.finance_invest.tabs.analysis.actions.fi_stock"),
-        },
-        {
-          key: "fi-financial",
+          key: "fi-financial-report",
           icon: <FileTextOutlined />,
           type: "conversation",
           label: i18n.t("opc.domain.finance_invest.tabs.analysis.actions.fi_financial"),

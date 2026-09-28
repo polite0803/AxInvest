@@ -84,8 +84,11 @@ pub fn build_blackboard_snapshot(
             if let Some(obj) = raw_output.as_object() {
                 if let Some(verdict) = obj.get("verdict") {
                     if let Some(report) = obj.get("report").and_then(|v| v.as_str()) {
-                        let reconstructed = format!("{}<!-- VERDICT: {} -->", report, verdict);
-                        value_to_store = Value::String(reconstructed);
+                        value_to_store = Value::String(reconstruct_verdict_text(
+                            obj.get("__verdict_only"),
+                            report,
+                            verdict,
+                        ));
                     }
                 } else if let Some(result) = obj.get("result") {
                     // V41 修复 (2026-07-24): CodeNode 包装但无 verdict 字段
@@ -117,7 +120,11 @@ pub fn build_blackboard_snapshot(
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(content_str) {
                         if let Some(verdict) = json.get("verdict") {
                             if let Some(report) = json.get("report").and_then(|v| v.as_str()) {
-                                text = format!("{}<!-- VERDICT: {} -->", report, verdict);
+                                text = reconstruct_verdict_text(
+                                    json.get("__verdict_only"),
+                                    report,
+                                    verdict,
+                                );
                             }
                         }
                     }
@@ -202,6 +209,27 @@ fn build_meta(as_of_ctx: Option<&AsOfContext>) -> Value {
         meta.insert("source".into(), json!(ctx.source.to_string()));
     }
     Value::Object(meta)
+}
+
+/// 把 `{report, verdict}` 产物重构成前端识别的 `report<!-- VERDICT: {...} -->` 文本。
+///
+/// `__verdict_only` 是 agent_executor 在「LLM 只回结论标签、没有正文」时打的标记：那句中文占位
+/// 陈述是给下游 LLM 读的（「本维度没有分析」），不是分析师/辩手写的正文。快照是呈现数据源 ⇒
+/// 丢弃该句、只留标签，并把标记并进 verdict JSON，让卡片按标记渲染本地化的「只有结论」提示。
+/// （不能反过来让前端比对那句中文 —— 展示文案当协议值，非中文界面会恒判不命中。）
+fn reconstruct_verdict_text(verdict_only: Option<&Value>, report: &str, verdict: &Value) -> String {
+    if verdict_only != Some(&Value::Bool(true)) {
+        return format!("{report}<!-- VERDICT: {verdict} -->");
+    }
+    let tagged = match verdict {
+        Value::Object(map) => {
+            let mut m = map.clone();
+            m.insert("__verdict_only".into(), Value::Bool(true));
+            Value::Object(m)
+        },
+        other => other.clone(),
+    };
+    format!("<!-- VERDICT: {tagged} -->")
 }
 
 fn extract_node_text(v: &Value) -> String {
@@ -321,5 +349,46 @@ mod tests {
         assert_eq!(extract_node_text(&v2), "x");
         let v3 = json!("raw string");
         assert_eq!(extract_node_text(&v3), "raw string");
+    }
+
+    /// 2026-09-28 实证（300285 / a-sector）：LLM 只回 VERDICT 标签、没有正文时，
+    /// agent_executor 会往 `report` 里塞一句中文占位陈述（面向下游 LLM）并打 `__verdict_only`。
+    /// 快照是呈现数据源 ⇒ 那句不得进快照，标记要并进标签，否则 11 语言界面都显示中文。
+    #[test]
+    fn verdict_only_placeholder_stays_out_of_snapshot_and_tags_the_marker() {
+        let inner = json!({
+            "report": "(该节点仅给出结论标签，未提供分析正文)",
+            "verdict": {"verdict": "偏空", "bull_score": 30, "bear_score": 70},
+            "__verdict_only": true,
+        });
+        let mut results = HashMap::new();
+        results.insert("a-sector".into(), json!({"content": inner.to_string()}));
+        let bb = build_blackboard_snapshot(&results, None, &[]);
+        let text = bb["report.a-sector"].as_str().expect("a-sector 应为文本");
+        assert!(!text.contains("该节点仅给出结论标签"), "占位陈述不得进快照: {text}");
+        assert!(text.starts_with("<!-- VERDICT: "), "无正文时应只剩标签: {text}");
+        // 按语义比对而非字符串等值：serde_json 的 Map 不保序，键序不是契约
+        let meta: serde_json::Value = serde_json::from_str(
+            text.trim_start_matches("<!-- VERDICT: ").trim_end_matches(" -->"),
+        )
+        .expect("标签内必须是合法 JSON");
+        assert_eq!(meta["__verdict_only"], json!(true));
+        assert_eq!(meta["verdict"], json!("偏空"));
+        assert_eq!(meta["bull_score"], json!(30));
+    }
+
+    /// 反向对照：正常有正文的分析师产物必须原样带出报告，且不被打上标记。
+    #[test]
+    fn normal_report_keeps_prose_and_has_no_marker() {
+        let inner = json!({
+            "report": "行业景气度回升，龙头份额集中。",
+            "verdict": {"verdict": "偏多"},
+        });
+        let mut results = HashMap::new();
+        results.insert("a-sector".into(), json!({"content": inner.to_string()}));
+        let bb = build_blackboard_snapshot(&results, None, &[]);
+        let text = bb["report.a-sector"].as_str().expect("a-sector 应为文本");
+        assert!(text.starts_with("行业景气度回升，龙头份额集中。"), "{text}");
+        assert!(!text.contains("__verdict_only"), "{text}");
     }
 }

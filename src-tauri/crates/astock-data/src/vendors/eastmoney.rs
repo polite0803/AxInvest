@@ -45,6 +45,8 @@ impl EastMoneyVendor {
             reqwest::Proxy::all(proxy_url).map_err(|e| format!("代理 URL 解析失败: {e}"))?;
         reqwest::Client::builder()
             .proxy(proxy)
+            // L 轮(2026-09-28)：与主 client 同开 gzip 自动解压（emweb CDN gzip 变体）
+            .gzip(true)
             .timeout(std::time::Duration::from_secs(15))
             .connect_timeout(std::time::Duration::from_secs(10))
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")

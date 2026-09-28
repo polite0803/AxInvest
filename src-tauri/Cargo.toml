@@ -66,7 +66,11 @@ libsqlite3-sys = { version = "0.37", features = ["bundled"] }
 moka = { version = "0.12", features = ["future"] }
 redb = "2"
 regex = "1"
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { version = "0.13", features = ["json", "gzip"] }
+# L 轮(2026-09-28, 002371 实证): emweb 财报接口经 CDN 后同一 URL 会随机返回
+# gzip 变体（浏览器回源被缓存后原样吐给不带 Accept-Encoding 的客户端），
+# 不开 gzip 特性 + builder .gzip(true) 双开关 ⇒ resp.json() 对 gzip 字节
+# 报「error decoding response body」⇒ financials 整链假性全灭。
 # P1-3: rhai 下沉 harness 后需在 workspace 层声明统一版本+特性
 # features：sync（Send+ Sync）+ serde（Dynamic ↔ Value 转换）
 rhai = { version = "1", features = ["sync", "serde"] }

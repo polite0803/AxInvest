@@ -631,6 +631,8 @@ impl AStockClient {
                 // 降级后需保持同等配置，避免降级路径产生无超时的长连接泄漏。
                 let http = reqwest::Client::builder()
                     .dns_resolver(Arc::new(Ipv4OnlyResolver))
+                    // L 轮：与 try_new 同开 gzip 自动解压（emweb CDN 随机 gzip 变体）
+                    .gzip(true)
                     .timeout(std::time::Duration::from_secs(30))
                     .connect_timeout(std::time::Duration::from_secs(15))
                     .pool_max_idle_per_host(32)
@@ -724,6 +726,9 @@ impl AStockClient {
             .pool_max_idle_per_host(32)
             .pool_idle_timeout(std::time::Duration::from_secs(30))
             .tcp_keepalive(std::time::Duration::from_secs(60))
+            // L 轮(2026-09-28, 002371)：开 gzip 自动解压。emweb 财报接口经 CDN 后
+            // 同一 URL 会随机返回 gzip 变体，不开 ⇒ resp.json() 解码失败、整链假性全灭。
+            .gzip(true)
             .min_tls_version(reqwest::tls::Version::TLS_1_2)
             // 2026-08-01: 强制 IPv4 解析。本机 IPv6 链路到东财 push2his/push2 被 RST，
             // 客户端默认优先 IPv6 导致全部请求失败（误判为反爬封锁），IPv4 完全正常。

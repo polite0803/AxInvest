@@ -80,8 +80,19 @@ pub struct RecoPick {
     pub position_pct: f64,
     /// 持有天数
     pub holding_days: u32,
-    /// 置信度 0-100
+    /// 置信度 0-100（**绝对口径**：该档先验与该风格评分在 logit 空间合成后的概率）
     pub confidence: u8,
+    /// 同风格组内的**当日分位** 0-100（旧实现用它覆写 `confidence`，使绝对概率语义丢失；
+    /// 现两者分列，见 `PLAN-reco-horizon-science-alignment.md` R-C）。缺组内差异 ⇒ `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence_percentile: Option<u8>,
+    /// 先验来源：`shrunk` / `own` / `pooled` / `neutral_default` / `absent`
+    ///（与分析链 `horizon_prior` 同一词表，不另造）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_source: Option<String>,
+    /// 该档参与收缩的历史样本数（0 = 无样本，先验退化合并基准）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prior_samples: Option<u32>,
     /// 命中理由
     pub reasons: Vec<String>,
     /// 风险提示
@@ -89,6 +100,15 @@ pub struct RecoPick {
     /// 次选风格（同票被多策略命中时记录）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secondary_styles: Vec<Style>,
+    /// 止损/止盈的**口径来源**：`vol` = k·σ_daily·√h（波动率推导）；
+    /// `fallback_pct` = σ 不可得，退回策略自带的固定百分比（`risk.rs`，Phase R-D）。
+    /// 与分析链 `portfolio-mgr.rhai` 的 `stopSource` 同一词表，不另造一套。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_source: Option<String>,
+    /// 仓位口径来源：`risk_budget` = min(策略上限, 100·R/止损%)；
+    /// `fallback_kelly_x_mult` = 止损不可得，退回「base × 置信 × 经验周期乘数」。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_source: Option<String>,
     /// 是否为兜底合成 pick（true = 系统初筛 / 数据稀疏兜底，无技术信号支撑；
     /// false = 主策略真实命中）。前端用此字段显示"真实/兜底"标识。
     #[serde(default)]

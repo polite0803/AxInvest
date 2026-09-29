@@ -3,6 +3,7 @@ import { normalizeDecision } from "../agentOutput";
 import {
   HORIZON_CAMEL_TO_SNAKE,
   HORIZON_T_SUFFIX,
+  horizonIcAbsenceKey,
   horizonSourceLabelKey,
   horizonSuffix,
   readHorizonActions,
@@ -104,5 +105,35 @@ describe("normalizeDecision 透传逐档口径标注", () => {
     expect(ultra?.stopSource).toBe("fallback_pct");
     expect(ultra?.positionSource).toBe("kelly_only");
     expect(parsed!.decisionsByHorizon?.short?.scoreSource).toBe("tier_native");
+  });
+});
+
+/**
+ * rank IC 的缺席必须**分句**：四种缺席各自对应不同的下一步动作
+ * （补字段 / 攒样本 / 该档取值本无差异 / 等口径换代），并成一句「暂无数据」
+ * 就是把结构性缺口压成歧义。这里锁映射表本身，而不是锁某句译文。
+ */
+describe("horizonIcAbsenceKey（IC 缺席四分句）", () => {
+  it("四种缺席各占一键，且互不相同", () => {
+    const keys = [
+      "no_confidence",
+      "insufficient_ic_samples",
+      "degenerate_variance",
+      "pre_snr_regime",
+    ].map((st) => horizonIcAbsenceKey(st));
+    expect(keys.every((k) => k !== null)).toBe(true);
+    expect(new Set(keys).size).toBe(4);
+    expect(horizonIcAbsenceKey("pre_snr_regime")).toBe(
+      "stockAnalysis.reflection.hitrateIcPreRegime",
+    );
+  });
+
+  it("ok 不是缺席、未知状态不猜翻译 ⇒ 都返回 null", () => {
+    expect(horizonIcAbsenceKey("ok")).toBeNull();
+    expect(horizonIcAbsenceKey("nope_not_a_status")).toBeNull();
+    expect(horizonIcAbsenceKey(null)).toBeNull();
+    expect(horizonIcAbsenceKey(undefined)).toBeNull();
+    // 空串（旧记录 Default 出来的形态）同样不得被猜成某一句
+    expect(horizonIcAbsenceKey("")).toBeNull();
   });
 });

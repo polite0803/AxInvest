@@ -36,16 +36,29 @@ impl ReversionStrategy {
         sector: Option<String>,
         vars: &HashMap<String, Value>,
     ) -> Option<RecoPick> {
-        let kline_limit = read_f64(vars, "rev_kline_limit", 250.0) as u32;
-        let klines = client.get_klines(code, "daily", kline_limit, None).await.ok()?;
-        let min_kline_len = read_f64(vars, "rev_min_kline_len", 30.0) as usize;
-        if klines.len() < min_kline_len {
+        // 尺度由档位决定；取数根数与出分所需最少 bar 数都来自 `ScaleProfile`
+        //（旧形态自带 `rev_kline_limit=250` / `rev_min_kline_len=30` 一份日线口径的数，
+        //  周线/季线上毫无对应含义 ⇒ 两个变量随之从种子表与面板摘除）。
+        let (klines, profile) =
+            match crate::recommender::scale::fetch(client, code, self.period).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::debug!("[reversion] {code} 档位 {:?} 取数失败: {e}", self.period);
+                    return None;
+                },
+            };
+        if !crate::recommender::scale::enough_bars(&klines, &profile) {
             return None;
         }
         let price = klines.last()?.close;
 
         // ── 新增：底背离检测 + 看涨 K 线形态检测 ──
-        let lookback = read_f64(vars, "rev_divergence_lookback", 14.0) as usize;
+        // 背离回看窗：日历 14 日 → 当前尺度的 bar 数（下限 5 根，否则粗尺度上变成「拿 1 根比高低」）
+        let lookback = (crate::recommender::scale::bars_for_daily_span(
+            read_f64(vars, "rev_divergence_lookback_days", 14.0) as usize,
+            &profile,
+        ))
+        .max(5);
         let min_divergence_strength = read_f64(vars, "rev_min_divergence_strength", 0.3);
         let divergence_result = divergence::detect_all_divergences(&klines, 14, lookback);
         let has_bullish_divergence = divergence_result.iter().any(|d| {
@@ -72,7 +85,11 @@ impl ReversionStrategy {
         };
         // ── 新增结束 ──
 
-        let rsi_period = read_f64(vars, "rev_rsi_period", 6.0) as usize;
+        let rsi_period = (crate::recommender::scale::bars_for_daily_span(
+            read_f64(vars, "rev_rsi_period_days", 6.0) as usize,
+            &profile,
+        ))
+        .max(5);
         let rsi_value = indicators::rsi(&klines, rsi_period)?;
 
         let (pass, reasons) = match self.period {
@@ -183,7 +200,7 @@ impl ReversionStrategy {
             read_f64(vars, "rev_conf_market", 0.0),
             read_f64(vars, "rev_conf_base", 1.0),
         );
-        let position = calc_position(base_position, conf, self.period);
+        let position = calc_position(base_position, conf);
 
         // 底背离 → 在 risk_notes 中减弱"抄底过早"警告
         let mut risk_notes = vec!["下跌趋势未尽 / 抄底过早".to_string()];
@@ -208,6 +225,12 @@ impl ReversionStrategy {
             reasons,
             risk_notes,
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: false,
         })
     }

@@ -391,8 +391,12 @@ fn per_tier_prior_is_wired_into_the_fusion() {
         "prior_for 与本测试副本已漂移（逐档先验取值器是 Phase C 的承重件）"
     );
     assert!(
-        pm.contains("clamp(hp[\"value\"] + avg * evidence_scale"),
+        pm.contains("clamp(hp[\"value\"] + avg * hscale"),
         "逐档后验必须用该档先验 hp[\"value\"]；写回裸 `prior` 就是退回四档共用先验（E1）"
+    );
+    assert!(
+        !pm.contains("avg * evidence_scale"),
+        "逐档融合又吃回主链 evidence_scale ⇒ 5(a) 失效（分母必须按该档乘数缩放）"
     );
     assert!(
         pm.contains("let hp = prior_for.call(h);"),
@@ -432,4 +436,167 @@ fn stop_and_take_profit_are_volatility_derived_with_labeled_fallback() {
         pm.contains("let stop_vol_mult_v = if present(stop_vol_mult)"),
         "k1 必须经 present() 守卫读取（旧快照缺该变量时不得抛 Variable not found）"
     );
+}
+/// 生产脚本的 `leg_bases` + `max_weight` 累加（逐字副本；漂移由
+/// `evidence_max_reduces_to_max_weight` 里的包含断言拦下）。
+const LEG_BASES_SRC: &str = r#"
+let leg_bases = [
+    #{ key: "f1", base: f1_default },
+    #{ key: "f2", base: f2_default },
+    #{ key: "f3", base: f3_default },
+    #{ key: "f4", base: f4_default },
+    #{ key: "f5", base: f5_default },
+    #{ key: "f6", base: f6_default },
+    #{ key: "f7", base: f7_default },
+    #{ key: "f9", base: f9_default },
+    #{ key: "f10", base: f10_default },
+    #{ key: "f11", base: f11_default },
+    #{ key: "f12", base: f12_default },
+    #{ key: "f13", base: f13_default },
+];
+let max_weight = 0.0;
+for row in leg_bases {
+    // f13 的计入条件原样保留：非瓶颈路径下它不是活跃因子，不得进分母（见上方注释）
+    if row.key == "f13" && f13_weight <= 0.0 { continue; }
+    max_weight += row.base;
+}
+"#;
+
+/// 生产脚本的逐档证据分母闭包（逐字副本）。
+const EVIDENCE_MAX_SRC: &str = r#"
+let evidence_max_for = |h| {
+    let acc = 0.0;
+    for row in leg_bases {
+        if row.key == "f13" && f13_weight <= 0.0 { continue; }
+        acc += row.base * leg_mult.call(h, row.key);
+    }
+    acc
+};
+"#;
+
+/// 组装可运行骨架：基线默认权重 + 乘数表 + 三段生产代码，输出主链/各档分母。
+fn evidence_script(f13_weight: &str, table: &str) -> String {
+    let mut s = String::new();
+    for (k, v) in [
+        ("f1", "0.15"),
+        ("f2", "0.25"),
+        ("f3", "0.20"),
+        ("f4", "0.15"),
+        ("f5", "0.15"),
+        ("f6", "0.15"),
+        ("f7", "0.10"),
+        ("f9", "0.08"),
+        ("f10", "0.08"),
+        ("f11", "0.08"),
+        ("f12", "0.10"),
+        ("f13", "0.10"),
+    ] {
+        s.push_str(&format!(
+            "let {k}_default = {v};
+"
+        ));
+    }
+    s.push_str(&format!(
+        "let f13_weight = {f13_weight};
+"
+    ));
+    s.push_str(&format!(
+        "let horizon_leg_weights_json = {table};
+"
+    ));
+    s.push_str(
+        "let horizon_leg_weights_ok = true;
+",
+    );
+    s.push_str(LEG_MULT_FN);
+    s.push_str(LEG_BASES_SRC);
+    s.push_str(EVIDENCE_MAX_SRC);
+    s.push_str(
+        r#"
+#{
+    "max": max_weight,
+    "ultra": evidence_max_for.call("ultra_short"),
+    "short": evidence_max_for.call("short"),
+    "mid": evidence_max_for.call("mid"),
+    "long": evidence_max_for.call("long")
+}
+"#,
+    );
+    s
+}
+
+fn evidence_eval(src: &str) -> rhai::Map {
+    let engine = rhai::Engine::new();
+    let mut scope = rhai::Scope::new();
+    engine
+        .eval_with_scope::<rhai::Dynamic>(&mut scope, src)
+        .expect("逐档证据分母骨架应可执行")
+        .try_cast::<rhai::Map>()
+        .expect("结果应为 map")
+}
+
+fn m(map: &rhai::Map, key: &str) -> f64 {
+    map.iter()
+        .find(|(k, _)| k.as_str() == key)
+        .unwrap_or_else(|| panic!("缺键 {key}"))
+        .1
+        .clone()
+        .as_float()
+        .unwrap_or_else(|_| panic!("{key} 应为 float"))
+}
+
+/// 零回归 + 逐档生效：乘数全 1 时逐档分母**逐位等于**主链 `max_weight`；
+/// 乘数一 skew，四档必须各自不同（否则 5(a) 等于没做）。
+#[test]
+fn evidence_max_reduces_to_max_weight() {
+    let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
+    // 防漂移：两段副本必须还在生产脚本里（改生产不改测试会在这里红）
+    assert!(pm.contains(LEG_BASES_SRC.trim()), "leg_bases/max_weight 段与副本已漂移");
+    assert!(pm.contains(EVIDENCE_MAX_SRC.trim()), "evidence_max_for 与副本已漂移");
+    // 反向锁：手抄 literal 与「融合吃主链 scale」都不得回来
+    assert!(!pm.contains("0.15 + 0.25 + 0.20"), "max_weight 又回到 11 项手抄 literal");
+    assert!(pm.contains("avg * hscale"), "逐档融合又吃主链 evidence_scale");
+    assert!(pm.contains("let f7_default = 0.10;"), "f7 基线权重又是裸值");
+
+    // ① 乘数全 1（表存在但每档查不到腿 ⇒ leg_mult 回落 1.0）⇒ 四档 == 主链
+    let unity = r#"#{ "ultra_short": #{}, "short": #{}, "mid": #{}, "long": #{} }"#;
+    let r = evidence_eval(&evidence_script("0.0", unity));
+    let max = m(&r, "max");
+    // 1.49 是原注释里的四舍五入读数；逐项累加的真实值 = 1.4900000000000004
+    // （原 literal 同样是逐项相加，故二者一致 ⇒ 这里锁的是「值没漂」，不是「等于 1.49」）。
+    assert!(
+        (max - 1.4900000000000004).abs() < 1e-12,
+        "f13 未激活时分母必须仍是原 literal 的合计，否则 evidence_pct 阈值整体漂移，实得 {max:?}"
+    );
+    for k in ["ultra", "short", "mid", "long"] {
+        assert_eq!(m(&r, k), max, "乘数全 1 时 {k} 档分母应逐位等于主链");
+    }
+
+    // ② f13 激活 ⇒ 1.59（原 literal 的 + f13_default 分支）
+    let r2 = evidence_eval(&evidence_script("0.10", unity));
+    assert!(
+        (m(&r2, "max") - 1.5900000000000003).abs() < 1e-12,
+        "f13 激活时分母应是原 literal 的合计（≈1.59），实得 {:?}",
+        m(&r2, "max")
+    );
+    assert_eq!(m(&r2, "mid"), m(&r2, "max"));
+
+    // ③ skew 表：短档放大技术腿、压估值腿 ⇒ 各档分母互不相同且都不等于主链。
+    //    ⚠ 分母是**加权和**，一升一降可能正好抵消：第一版给 long 配 `f5×1.8 + f3×0.4`
+    //    （+0.12 − 0.12 = 0）⇒ 该档与主链逐位相同，断言以为「乘数没进到分母」而红 ——
+    //    红的是夹具，不是生产。选值必须让每档的净增减非零。
+    let skew = r#"#{ "ultra_short": #{ "f1": 2.0, "f2": 0.5 }, "short": #{ "f1": 1.3 }, "mid": #{ "f5": 0.3 }, "long": #{ "f5": 1.8, "f3": 0.6 } }"#;
+    let r3 = evidence_eval(&evidence_script("0.0", skew));
+    let vals = [m(&r3, "ultra"), m(&r3, "short"), m(&r3, "mid"), m(&r3, "long")];
+    for (i, v) in vals.iter().enumerate() {
+        assert!((v - max).abs() > 1e-9, "第 {i} 档分母仍等于主链 ⇒ 逐档 evidence_scale 没生效");
+    }
+    for i in 0..vals.len() {
+        for j in i + 1..vals.len() {
+            assert!(
+                (vals[i] - vals[j]).abs() > 1e-9,
+                "档 {i} 与档 {j} 分母相同 ⇒ 乘数没进到分母（四档分母={vals:?}）"
+            );
+        }
+    }
 }

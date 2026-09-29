@@ -184,9 +184,15 @@ export function AnalystDataQualityModal({
     ];
   }, [diag, t]);
 
+  // 上报失败必须可见：自我进化的输入是否送达，不能只有 console 知道。
+  const [feedbackSaveError, setFeedbackSaveError] = useState<string | null>(null);
+
   // 面板打开时上报诊断结果给后端，供节点自我进化消费。
   // 2026-09-14: 上报内容由「前端自算的 grade/score」改为「data-quality 节点的权威输出 +
   //   本节点诊断」—— 前者会让自我进化基于第二套口径学习，与决策链实际消费的等级不一致。
+  // ⚠ 2026-09-29：这条调用此前**从未成功**（命令参数名 `req` vs 前端键 `request`、
+  //   且 DTO 缺 camelCase 注解），而 `.catch` 只 console.warn ⇒ 真库 analyst_feedbacks 恒 0 行。
+  //   现在失败要落到界面上：缺输入是「拿不到」，静默是「伪装成正常」。
   useEffect(() => {
     if (!open || !report || !diag) { return; }
 
@@ -205,6 +211,7 @@ export function AnalystDataQualityModal({
       node_placeholder_hits: diag.placeholder_hits ?? 0,
     };
 
+    setFeedbackSaveError(null);
     invoke("save_node_feedback", {
       request: {
         nodeType,
@@ -227,7 +234,8 @@ export function AnalystDataQualityModal({
         qualityMetricsJson: JSON.stringify(qualityMetrics),
       },
     }).catch((err) => {
-      console.warn(`Failed to save ${nodeTypeName} feedback for self-evolution:`, err);
+      console.error(`Failed to save ${nodeTypeName} feedback for self-evolution:`, err);
+      setFeedbackSaveError(String(err instanceof Error ? err.message : err));
     });
   }, [open, report, diag, nodeType, expertId, stockCode, executionId, nodeTypeName]);
 
@@ -321,6 +329,15 @@ export function AnalystDataQualityModal({
             )}
             {evolutionStatus === "error" && (
               <Tag color="error">{t("stockAnalysis.analystReport.evolutionFailed", { nodeName: nodeTypeUiName })}</Tag>
+            )}
+            {
+              /* 上报失败的独立声明：与「进化状态」分列——两者是不同的断点
+                （进化状态取决于后端统计，本条取决于这次 IPC 是否送达）。 */
+            }
+            {feedbackSaveError !== null && (
+              <Tag color="error">
+                {t("stockAnalysis.analystReport.feedbackUploadFailed", { nodeName: nodeTypeUiName })}
+              </Tag>
             )}
           </div>
           {/* 右侧：操作按钮 */}

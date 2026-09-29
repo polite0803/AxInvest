@@ -72,20 +72,22 @@ describe("RecommendationPanel — as-of propagation", () => {
     expect(call?.[1]).toEqual({ period: "short" });
   });
 
-  it("replay 模式: 挂载时调用 recommend_stocks(period, asOfDate),带 asOfDate", async () => {
+  it("replay 模式: 挂载时调用 recommend_stocks_all_periods(asOfDate)，带 asOfDate", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
     renderWithProviders();
-    // replay 模式下 loadCache 走 fallback,直接调 recommend_stocks
-    await waitFor(() => expect(findCall("recommend_stocks")).toBeDefined());
-    const call = findCall("recommend_stocks");
+    // R-0：replay 也走「一次拿四档」批量命令（候选池后端只建一次）
+    await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
+    const call = findCall("recommend_stocks_all_periods");
     expect(call).toBeDefined();
-    expect(call?.[1]).toMatchObject({ period: "short", asOfDate: "2026-06-01" });
+    expect(call?.[1]).toMatchObject({ asOfDate: "2026-06-01" });
+    expect(findCall("recommend_stocks")).toBeUndefined();
   });
 
-  it("live 模式: 不调用 recommend_stocks (用户没点刷新)", async () => {
+  it("live 模式: 不调用扫描命令 (用户没点刷新)", async () => {
     renderWithProviders();
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
     expect(findCall("recommend_stocks")).toBeUndefined();
+    expect(findCall("recommend_stocks_all_periods")).toBeUndefined();
   });
 
   it("replay 模式: 不调用 get_cached_recommendation (缓存永远是 live 产物)", async () => {
@@ -167,7 +169,7 @@ describe("RecommendationPanel — as-of propagation", () => {
     });
   });
 
-  it("live 模式下点击刷新按钮调用 recommend_stocks", async () => {
+  it("live 模式下点击刷新按钮调用 recommend_stocks_all_periods", async () => {
     invokeMock.mockReset();
     invokeMock.mockResolvedValue(null);
     renderWithProviders();
@@ -178,16 +180,12 @@ describe("RecommendationPanel — as-of propagation", () => {
       expect(btn).not.toHaveClass("ant-btn-loading");
     });
     invokeMock.mockClear();
-    invokeMock.mockResolvedValue({
-      period: "short",
-      picks: {},
-      disabledStyles: [],
-      generatedAt: Date.now(),
-      rawSeedPoolSize: 0,
-    });
+    invokeMock.mockResolvedValue({ byHorizon: {}, failedHorizons: {} });
     fireEvent.click(findRefreshButton());
-    await waitFor(() => expect(findCall("recommend_stocks")).toBeDefined());
-    expect(findCall("recommend_stocks")?.[1]).toEqual({ period: "short", asOfDate: null });
+    await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
+    // 批量命令不带 period：四档一次取（R-0）
+    expect(findCall("recommend_stocks_all_periods")?.[1]).toEqual({ asOfDate: null });
+    expect(findCall("recommend_stocks")).toBeUndefined();
   });
 
   it("切换 period 重新调用 get_cached_recommendation(newPeriod)", async () => {
@@ -206,32 +204,21 @@ describe("RecommendationPanel — as-of propagation", () => {
     expect(findCall("get_cached_recommendation")?.[1]).toEqual({ period: "mid" });
   });
 
-  it("replay 模式下点击刷新按钮调用 recommend_stocks 带 asOfDate", async () => {
+  it("replay 模式下点击刷新按钮调用 recommend_stocks_all_periods 带 asOfDate", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
     invokeMock.mockReset();
-    invokeMock.mockResolvedValue({
-      period: "short",
-      picks: {},
-      disabledStyles: [],
-      generatedAt: Date.now(),
-      rawSeedPoolSize: 0,
-    });
+    invokeMock.mockResolvedValue({ byHorizon: {}, failedHorizons: {} });
     renderWithProviders();
-    await waitFor(() => expect(findCall("recommend_stocks")).toBeDefined());
+    await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
     await waitFor(() => {
       const btn = findRefreshButton();
       expect(btn).not.toHaveClass("ant-btn-loading");
     });
     invokeMock.mockClear();
-    invokeMock.mockResolvedValue({
-      period: "short",
-      picks: {},
-      disabledStyles: [],
-      generatedAt: Date.now(),
-      rawSeedPoolSize: 0,
-    });
+    invokeMock.mockResolvedValue({ byHorizon: {}, failedHorizons: {} });
     fireEvent.click(findRefreshButton());
     await waitFor(() => expect(invokeMock).toHaveBeenCalled());
-    expect(findCall("recommend_stocks")?.[1]).toMatchObject({ period: "short", asOfDate: "2026-06-01" });
+    expect(findCall("recommend_stocks_all_periods")?.[1]).toMatchObject({ asOfDate: "2026-06-01" });
+    expect(findCall("recommend_stocks")).toBeUndefined();
   });
 });

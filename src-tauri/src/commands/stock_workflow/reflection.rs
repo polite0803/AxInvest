@@ -2933,6 +2933,9 @@ fn build_horizon_results_json(
                         "targetPrice": decision.target_price,
                         "stopLoss": decision.stop_loss,
                         "confidence": decision.confidence,
+                        // 判定口径水印（v104 起才有）：缺它 = 上一代 confidence 刻度，
+                        // rank IC 必须把它挡在分母外（详见 reflection_stats 的同名测试）。
+                        "snrAnchorDays": decision.snr_anchor_days,
                     },
                     "market": market_json,
                     "evaluation": eval_json,

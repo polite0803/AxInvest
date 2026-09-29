@@ -38,25 +38,38 @@ impl CapitalStrategy {
     ) -> Option<RecoPick> {
         let quote = client.get_quote(code).await.ok()?;
         let price = quote.price;
-        let klines = client.get_klines(code, "daily", 60).await.ok()?;
-        if klines.len() < 20 {
+        // 尺度由档位决定（K线代理回退也须按档取尺度，否则「长档看 20 个交易日」这种
+        // 与 90 天持有期脱节的口径会继续留在产出里）。
+        let (klines, profile) =
+            match crate::recommender::scale::fetch(client, code, self.period).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::debug!("[capital] {code} 档位 {:?} 取数失败: {e}", self.period);
+                    return None;
+                },
+            };
+        if !crate::recommender::scale::enough_bars(&klines, &profile) {
             return None;
         }
 
         // 量价信号：最近 5 日平均量 / 20 日平均量 > 阈值
-        let volumes_5: Vec<f64> = klines.iter().rev().take(5).map(|k| k.amount).collect();
-        let avg_vol_5 = volumes_5.iter().sum::<f64>() / volumes_5.len() as f64;
-        let avg_vol_20: f64 = klines.iter().rev().take(20).map(|k| k.amount).sum::<f64>() / 20.0;
+        // 窗口按**日历日**换算到当前尺度（5 日 / 20 日），并保证至少 5 根 bar 才算「平均」
+        let w5 = (crate::recommender::scale::bars_for_daily_span(5, &profile)).max(5);
+        let w20 = (crate::recommender::scale::bars_for_daily_span(20, &profile)).max(5);
+        let vols_5: Vec<f64> = klines.iter().rev().take(w5).map(|k| k.amount).collect();
+        let avg_vol_5 = vols_5.iter().sum::<f64>() / (vols_5.len() as f64).max(1.0);
+        let vols_20: Vec<f64> = klines.iter().rev().take(w20).map(|k| k.amount).collect();
+        let avg_vol_20 = vols_20.iter().sum::<f64>() / (vols_20.len() as f64).max(1.0);
         let vol_ratio = if avg_vol_20 > 0.0 {
             avg_vol_5 / avg_vol_20
         } else {
             1.0
         };
 
-        // 价格动量：最近 5 日涨幅
+        // 价格动量：近 w5 根 bar 的涨幅（= 日历 5 个交易日换算来的 bar 数）
         let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
-        let mom_5 = if closes.len() >= 6 {
-            closes[closes.len() - 1] / closes[closes.len() - 6] - 1.0
+        let mom_5 = if closes.len() > w5 {
+            closes[closes.len() - 1] / closes[closes.len() - 1 - w5] - 1.0
         } else {
             0.0
         };
@@ -74,18 +87,18 @@ impl CapitalStrategy {
         let mom_score = ((mom_5 - mom_5_min) / (mom_5_max - mom_5_min)).clamp(0.0, 1.0);
         let conf_raw = 0.6 * vol_score + 0.4 * mom_score;
 
-        let (entry_low, entry_high, stop_loss, target, base_position, holding_days) =
-            match self.period {
-                Period::UltraShort => {
-                    (price * 0.998, price * 1.005, price * 0.97, price * 1.05, 3.0, 2)
-                },
-                Period::Short => (price * 0.97, price * 1.03, price * 0.93, price * 1.10, 5.0, 7),
-                Period::Mid => (price * 0.95, price * 1.05, price * 0.90, price * 1.20, 8.0, 28),
-                Period::Long => (price * 0.95, price * 1.05, price * 0.88, price * 1.30, 10.0, 90),
-            };
+        // 持有天数一律取 `Period::default_holding_days()`（全仓唯一天数源，`harness::holding_period`）。
+        // 此前这里自带一张逐档表且 short=**7**，而权威源 short=**5** ⇒ 荐股按 7 天判成熟、
+        // 反思/回测按 5 天分档，两处各自都「没 bug」但互相错档（门 a 的第一条靶）。
+        let (entry_low, entry_high, stop_loss, target, base_position) = match self.period {
+            Period::UltraShort => (price * 0.998, price * 1.005, price * 0.97, price * 1.05, 3.0),
+            Period::Short => (price * 0.97, price * 1.03, price * 0.93, price * 1.10, 5.0),
+            Period::Mid => (price * 0.95, price * 1.05, price * 0.90, price * 1.20, 8.0),
+            Period::Long => (price * 0.95, price * 1.05, price * 0.88, price * 1.30, 10.0),
+        };
 
         let conf = (conf_raw * 100.0).round() as u8;
-        let position = calc_position(base_position, conf, self.period);
+        let position = calc_position(base_position, conf);
 
         Some(RecoPick {
             stock_code: code.into(),
@@ -99,7 +112,7 @@ impl CapitalStrategy {
             stop_loss,
             target_price: target,
             position_pct: position,
-            holding_days,
+            holding_days: self.period.default_holding_days(),
             confidence: conf,
             reasons: vec![
                 format!("K线量比 {:.2}x", vol_ratio),
@@ -107,6 +120,12 @@ impl CapitalStrategy {
             ],
             risk_notes: vec!["K线代理模式：无资金流向数据，仅基于量价".to_string()],
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: true,
         })
     }
@@ -285,7 +304,7 @@ impl CapitalStrategy {
             read_f64(vars, "cap_conf_market", 0.0),
             1.0, // turnover_anomaly: 资金驱动策略无量比数据（有 money_flow），默认无惩罚
         );
-        let position = calc_position(base_position, conf, self.period);
+        let position = calc_position(base_position, conf);
 
         let risk = match self.period {
             Period::UltraShort => vec!["次日冲高回落 / T+1 无法止损".to_string()],
@@ -311,6 +330,12 @@ impl CapitalStrategy {
             reasons,
             risk_notes: risk,
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: false,
         })
     }

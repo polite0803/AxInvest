@@ -1365,8 +1365,27 @@ export function horizonSuffix(key: string): string | null {
   return HORIZON_T_SUFFIX[snake] ?? null;
 }
 
-/** 主档来源标签：`formula` = 本地公式定档，`model` = 采信模型自报（历史形态）。 */
-export function horizonSourceLabelKey(source?: string | null): string | null {
+/**
+ * rank IC 缺席原因 → i18n 键。**四种缺席各占一句**：把它们并成一句「暂无数据」，
+ * 就等于告诉用户「这里没东西」，而真实情况分别是「要补字段」「要攒样本」
+ * 「取值无差异（本档算不出相关系数）」、「要等口径换代」——要做的事完全不同。
+ *
+ * 状态字符串的权威在后端 `reflection_stats.rs::HitrateGroup::ic_status`；
+ * 未登记的状态**返回 null**（渲染方回退「暂无数据」），而不是猜一个最接近的翻译。
+ */
+export function horizonIcAbsenceKey(status?: string | null): string | null {
+  const map: Record<string, string> = {
+    no_confidence: "stockAnalysis.reflection.hitrateIcNoConfidence",
+    insufficient_ic_samples: "stockAnalysis.reflection.hitrateIcInsufficient",
+    degenerate_variance: "stockAnalysis.reflection.hitrateIcDegenerate",
+    pre_snr_regime: "stockAnalysis.reflection.hitrateIcPreRegime",
+  };
+  return status ? (map[status] ?? null) : null;
+}
+
+/** 主档来源标签：`formula` = 本地公式定档，`model` = 采信模型自报（历史形态）。 */ export function horizonSourceLabelKey(
+  source?: string | null,
+): string | null {
   if (source === "formula") { return "stockAnalysis.horizonSourceFormula"; }
   if (source === "model") { return "stockAnalysis.horizonSourceModel"; }
   return null;

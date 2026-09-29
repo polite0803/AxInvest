@@ -4422,19 +4422,53 @@ pub async fn persist_reco_picks(
 /// 拉取智能荐股结果（按周期）
 ///
 /// 前端传 period 序列化为 [Period] 枚举（"short" | "mid" | "long"）
-/// 可选 `as_of_date` 触发时间旅行模式：as_of_date 之前的数据用于回测，
-/// 之后的数据被严格屏蔽。
-/// 响应见 [RecoResponse]
-#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "智能荐股")]
-#[tauri::command]
-pub async fn recommend_stocks(
-    state: State<'_, AppState>,
-    period: axagent_analysis_engine::recommender::Period,
-    as_of_date: Option<String>,
-) -> Result<RecoResponse, String> {
-    // 解析 as_of_date；非法/未来 → 4xx-style 错误
-    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
+/// 一次「四档荐股」的批量响应。
+///
+/// 键空间：`Period` 序列化为 snake_case（`ultra_short` / `short` / `mid` / `long`），
+/// 与前端 `PeriodKey`（`src/types/stock-analysis.ts`）以及 `byHorizon` 系列既有键空间一致。
+///
+/// 两字段必须**同时**渲染：`byHorizon` 缺某档 + `failedHorizons` 有某档 = 该档本轮失败；
+/// 只渲染前者会让「失败」在 UI 上表现为「该档没有推荐」。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoBatchResponse {
+    pub by_horizon:
+        std::collections::BTreeMap<axagent_analysis_engine::recommender::Period, RecoResponse>,
+    pub failed_horizons:
+        std::collections::BTreeMap<axagent_analysis_engine::recommender::Period, String>,
+}
 
+/// 逐档先验表（Phase R-C）：荐股链的逐档置信合成与分析决策链**共用同一实现**
+/// （`analysis-engine::horizon_prior::horizon_prior_map`，κ 也复用同一可调变量 `horizon_prior_kappa`）。
+///
+/// 为什么不在 recommender 里自己算一份：收缩估计的口径（`prior_h=(n·p_h+κ·p_pool)/(n+κ)`）
+/// 只要两处各写一遍，早晚会在「荐股面板」与「分析面板」给出不同的该档先验 —— 本仓已为
+/// 这类「同源逻辑各写一份」付过多次代价（禁区 12）。
+///
+/// 统计读不到 ⇒ `None`：调用链把每票的 `priorSource` 标成 `absent`，
+/// 而不是拿一个 0.5 假装「该档有自己的先验」。
+pub(crate) async fn reco_horizon_prior(
+    db: &sea_orm::DatabaseConnection,
+    served_vars: &[(String, serde_json::Value)],
+) -> Option<serde_json::Value> {
+    let stats =
+        crate::commands::stock_workflow::reflection_stats::build_hitrate_stats(db).await.ok()?;
+    let kappa = served_vars
+        .iter()
+        .find(|(k, _)| k == "horizon_prior_kappa")
+        .and_then(|(_, v)| v.as_f64())
+        .unwrap_or(axagent_analysis_engine::horizon_prior::DEFAULT_KAPPA);
+    Some(axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa))
+}
+
+/// 读取荐股实际消费的模板变量（含演化权重回流覆盖）。
+///
+/// 单档 `recommend_stocks` 与多档 `recommend_stocks_all_periods` **必须**走同一个函数：
+/// 两处各写一份的话，「自学习闭环覆盖静态权重」这条规则只需要在一处漂移就会让
+/// 两条链算出不同的分（本仓已为这类「同源逻辑各写一份」付过代价）。
+async fn load_reco_served_vars(
+    state: &AppState,
+) -> Result<Vec<(String, serde_json::Value)>, String> {
     // 读取 workflow template 变量用于 vendor 启用检测
     let db = state.harness.db();
     let template = axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
@@ -4455,81 +4489,210 @@ pub async fn recommend_stocks(
     //
     // 覆盖时机判定：仅当演化表非空时才覆盖，否则回退模板静态值（全新安装、尚无演化记录时
     // 保留原样，避免凭空抹掉模板里已有的权重配置）。
-    let served_vars: Vec<(String, serde_json::Value)> = {
-        let evolved = axagent_analysis_engine::evolution_drift::load_current_weights(db).await?;
-        if evolved.is_empty() {
-            vars
+    let evolved = axagent_analysis_engine::evolution_drift::load_current_weights(db).await?;
+    if evolved.is_empty() {
+        return Ok(vars);
+    }
+    // load_current_weights 返回 ((strategy_id, period), weight)，
+    // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
+    let mut obj = serde_json::Map::new();
+    for ((s, p), w) in evolved {
+        obj.insert(format!("{s}_{p}"), serde_json::json!(w));
+    }
+    let mut v = vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
+    v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
+    Ok(v)
+}
+
+/// 从 served_vars 取策略权重快照（用于回溯某次荐股时的权重配置）。
+/// 用 served_vars（已被演化权重覆盖）而非原始模板 vars，保证快照忠实反映评分链"实际用到的权重"。
+fn reco_strategy_weights_snapshot(served_vars: &[(String, serde_json::Value)]) -> Option<String> {
+    served_vars.iter().find(|(k, _)| k == "reco_strategy_weights").and_then(|(_, v)| {
+        if v.is_object() {
+            Some(v.to_string())
         } else {
-            // load_current_weights 返回 ((strategy_id, period), weight)，
-            // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
-            let mut obj = serde_json::Map::new();
-            for ((s, p), w) in evolved {
-                obj.insert(format!("{s}_{p}"), serde_json::json!(w));
-            }
-            let mut v =
-                vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
-            v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
-            v
+            None
         }
-    };
+    })
+}
+
+/// 把一次扫描响应的 picks 落库（live 模式）。返回落库行数。
+///
+/// `generated_at` 由调用方给出，保证同一批（多档）各档可各自成一行历史。
+async fn persist_reco_response_picks(
+    state: &AppState,
+    response: &RecoResponse,
+    served_vars: &[(String, serde_json::Value)],
+    generated_at: &str,
+) -> usize {
+    // 构建候选池快照（用于回测的负向样本）
+    // P3 修复(2026-08-01): 直接复用扫描实际使用的池（流动性过滤后 seed），不再二次 build_seed_pool ——
+    // 旧逻辑浪费 get_hot_stocks + get_industry_ranking 两次请求，
+    // 且两次构建间数据变化会导致快照与真实扫描池不一致（preseed 模式更严重）。
+    let seed_pool_json = response.seed_pool_snapshot.clone().unwrap_or_else(|| "[]".to_string());
+    let flat: Vec<RecoPick> = response.picks.values().flat_map(|v| v.iter().cloned()).collect();
+    let written = persist_reco_picks(
+        state.harness.db(),
+        &flat,
+        Some(seed_pool_json),
+        reco_strategy_weights_snapshot(served_vars),
+        generated_at,
+    )
+    .await;
+    tracing::info!(
+        "[recommend_stocks] 落库 reco_picks: {written}/{} 行 (period={})",
+        flat.len(),
+        response.period.as_str()
+    );
+    written
+}
+
+/// 可选 `as_of_date` 触发时间旅行模式：as_of_date 之前的数据用于回测，
+/// 之后的数据被严格屏蔽。
+/// 响应见 [RecoResponse]
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "智能荐股")]
+#[tauri::command]
+pub async fn recommend_stocks(
+    state: State<'_, AppState>,
+    period: axagent_analysis_engine::recommender::Period,
+    as_of_date: Option<String>,
+) -> Result<RecoResponse, String> {
+    // 解析 as_of_date；非法/未来 → 4xx-style 错误
+    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
+
+    let served_vars = load_reco_served_vars(&state).await?;
 
     // state.astock_client 已是 Arc<AStockClient>，直接 clone Arc 即可
     let client: std::sync::Arc<_> = state.astock_client.clone();
+    let prior = reco_horizon_prior(state.harness.db(), &served_vars).await;
     let response = if let Some(ctx) = as_of_ctx {
         axagent_astock_data::as_of::AS_OF
             .scope(Some(ctx), async {
-                recommender::recommend_stocks(client, period, &served_vars, None).await
+                recommender::recommend_stocks(client, period, &served_vars, None, prior).await
             })
             .await
     } else {
-        recommender::recommend_stocks(client, period, &served_vars, None).await
+        recommender::recommend_stocks(client, period, &served_vars, None, prior).await
     }?;
 
     // ── 持久化荐股结果（仅 live 模式） ──
     if as_of_date.is_none() {
         let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
-
-        // 构建策略权重快照（用于回溯某次荐股时的权重配置）。
-        // 用 served_vars（已被演化权重覆盖）而非原始模板 vars，
-        // 保证快照忠实反映评分链"实际用到的权重"。
-        let strategy_weights_json: Option<String> = {
-            let served_clone: Vec<(String, serde_json::Value)> = served_vars.clone();
-            served_clone.iter().find(|(k, _)| k == "reco_strategy_weights").and_then(|(_, v)| {
-                if v.is_object() {
-                    Some(v.to_string())
-                } else {
-                    None
-                }
-            })
-        };
-
-        // 构建候选池快照（用于回测的负向样本）
-        // P3 修复(2026-08-01): 直接复用 recommend_stocks 扫描实际使用的池
-        // （流动性过滤后 seed），不再二次 build_seed_pool ——
-        // 旧逻辑浪费 get_hot_stocks + get_industry_ranking 两次请求，
-        // 且两次构建间数据变化会导致快照与真实扫描池不一致（preseed 模式更严重）。
-        let seed_pool_json =
-            response.seed_pool_snapshot.clone().unwrap_or_else(|| "[]".to_string());
-
-        // 展平 picks（BTreeMap<Style, Vec<RecoPick>>）后交共享落库函数，
-        // 保证与定时任务链路写的是同一张表、同一套字段。
-        let flat: Vec<RecoPick> = response.picks.values().flat_map(|v| v.iter().cloned()).collect();
-        let written = persist_reco_picks(
-            state.harness.db(),
-            &flat,
-            Some(seed_pool_json),
-            strategy_weights_json,
-            &generated_at,
-        )
-        .await;
-        tracing::info!(
-            "[recommend_stocks] 落库 reco_picks: {written}/{} 行 (period={})",
-            flat.len(),
-            period.as_str()
-        );
+        persist_reco_response_picks(&state, &response, &served_vars, &generated_at).await;
     }
 
     Ok(response)
+}
+
+/// 一次拿**四档**荐股结果（候选池只建一次）。
+///
+/// 为什么要有这条命令：四周期科学化要求四档是四个独立预测，而单档命令下
+/// 「看四档」= 四次全量扫描，且四次之间的建池/流动性过滤完全重复（`recommender` 侧
+/// 因此拆出 `PreparedScan`，见 `PLAN-reco-horizon-science-alignment.md` Phase R-0）。
+///
+/// 失败**逐档**报告：某档扫描失败不抹掉整批，也不静默少一档 —— `failedHorizons`
+/// 必须与 `byHorizon` 一起渲染，否则 UI 会把「这一档失败了」读成「这一档没内容」。
+#[agent_command(
+    domain = "finance",
+    safety = Safe,
+    call_mode = StateInput,
+    description = "智能荐股（四档一次取）"
+)]
+#[tauri::command]
+pub async fn recommend_stocks_all_periods(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<RecoBatchResponse, String> {
+    use axagent_analysis_engine::recommender::Period;
+
+    let as_of_ctx = AsOfContext::parse_optional(as_of_date.as_deref())?;
+    let served_vars = load_reco_served_vars(&state).await?;
+    let client: std::sync::Arc<_> = state.astock_client.clone();
+
+    let prior = reco_horizon_prior(state.harness.db(), &served_vars).await;
+    let results = if let Some(ctx) = as_of_ctx {
+        axagent_astock_data::as_of::AS_OF
+            .scope(Some(ctx), async {
+                recommender::recommend_stocks_multi(client, &Period::ALL, &served_vars, None, prior)
+                    .await
+            })
+            .await
+    } else {
+        recommender::recommend_stocks_multi(client, &Period::ALL, &served_vars, None, prior).await
+    };
+
+    let mut by_horizon: std::collections::BTreeMap<Period, RecoResponse> =
+        std::collections::BTreeMap::new();
+    let mut failed_horizons: std::collections::BTreeMap<Period, String> =
+        std::collections::BTreeMap::new();
+    let live = as_of_date.is_none();
+    let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
+    for (period, res) in results {
+        match res {
+            Ok(response) => {
+                if live {
+                    persist_reco_response_picks(&state, &response, &served_vars, &generated_at)
+                        .await;
+                }
+                by_horizon.insert(period, response);
+            },
+            Err(e) => {
+                tracing::warn!("[recommend_stocks_all_periods] period {period:?} 扫描失败: {e}");
+                failed_horizons.insert(period, e);
+            },
+        }
+    }
+    // 整批全失败才回 Err —— 逐档失败由 `failedHorizons` 显式承载，前端必须分句显示。
+    if by_horizon.is_empty() && !failed_horizons.is_empty() {
+        let detail = failed_horizons
+            .iter()
+            .map(|(p, e)| format!("{}: {e}", p.as_str()))
+            .collect::<Vec<_>>()
+            .join("；");
+        return Err(detail);
+    }
+    Ok(RecoBatchResponse { by_horizon, failed_horizons })
+}
+
+/// 荐股链的逐档预测力度量（Phase R-E）：从 `decision_validations` 取
+/// 「当时的置信度」与「T+N 实际收盘价」成对样本，按 `(风格, 档位)` 算 rank IC 与预测半衰期。
+///
+/// **只报数，不回写任何权重**（IC 面板未稳就自调 = 用噪声标定噪声）。
+/// 缺席必须分句：样本不足 / 一侧方差退化 / 档位不够拟合半衰期，三者要做的事完全不同。
+#[agent_command(
+    domain = "finance",
+    safety = Safe,
+    call_mode = StateInput,
+    description = "荐股逐档 rank IC 与预测半衰期"
+)]
+#[tauri::command]
+pub async fn reco_ic_stats(
+    state: State<'_, AppState>,
+) -> Result<axagent_analysis_engine::recommender::ic::RecoIcStats, String> {
+    use axagent_analysis_engine::recommender::ic::{RecoIcRow, aggregate_reco_ic};
+    use sea_orm::EntityTrait;
+
+    let rows = axagent_entities::decision_validations::Entity::find()
+        .all(state.harness.db())
+        .await
+        .map_err(|e| format!("{e}"))?;
+    let samples: Vec<RecoIcRow> = rows
+        .iter()
+        .filter_map(|r| {
+            let after = r.t_plus_n_price?;
+            if !(r.entry_price > 0.0) || !after.is_finite() || !r.entry_price.is_finite() {
+                return None;
+            }
+            Some(RecoIcRow {
+                style: r.style.clone(),
+                period: r.period.clone(),
+                confidence: r.confidence as f64,
+                realized_return_pct: (after / r.entry_price - 1.0) * 100.0,
+                holding_days: r.t_plus_n.max(0) as u32,
+            })
+        })
+        .collect();
+    Ok(aggregate_reco_ic(&samples))
 }
 
 /// 读取最近一次 live 荐股结果(缓存) —— 智能荐股页打开时优先调此命令,
@@ -6717,6 +6880,85 @@ mod valuation_defaults_tests {
         assert!(
             within(sv::DEFAULT_DCF_DISCOUNT_RATE_PCT / 100.0, m::DISCOUNT_RATE),
             "discount 往返偏离真相源"
+        );
+    }
+}
+
+#[cfg(test)]
+mod reco_batch_contract_tests {
+    use super::*;
+    use axagent_analysis_engine::recommender::{Period, RecoResponse, SeedPoolOrigin};
+
+    fn sample_response(period: Period) -> RecoResponse {
+        RecoResponse {
+            period,
+            picks: Default::default(),
+            disabled_styles: vec![],
+            degraded_styles: vec![],
+            degraded_reasons: Default::default(),
+            generated_at: 0,
+            raw_seed_pool_size: 0,
+            seed_pool_origin: SeedPoolOrigin::default(),
+            asof_degradations: vec![],
+            as_of_date: None,
+            mode: "live".to_string(),
+            error_detail: None,
+            seed_pool_snapshot: None,
+        }
+    }
+
+    /// IPC 契约（禁区 13）：一次拿四档的批量响应跨边界必须输出 camelCase，
+    /// 而**档位键空间**保持 `Period` 的 snake_case 序列化值（与前端 `PeriodKey` 一致）。
+    ///
+    /// 为什么必须写在这里而不是靠脚本扫描：`check:serde` 长期红且不在 CI，注解缺失
+    /// 既不会编译失败也不会报红，前端按 camelCase 读只会**恒为 undefined**
+    /// —— 命中率整张卡就是这么静默失效的（同 `hitrate_dto_serializes_camel_case_for_ipc`）。
+    /// 缺 `#[serde(rename_all = "camelCase")]` 时本测试必红，它先于修复就是那个检法。
+    #[test]
+    fn reco_batch_response_serializes_camel_case_for_ipc() {
+        let mut by_horizon: std::collections::BTreeMap<Period, RecoResponse> =
+            std::collections::BTreeMap::new();
+        by_horizon.insert(Period::UltraShort, sample_response(Period::UltraShort));
+        let mut failed_horizons: std::collections::BTreeMap<Period, String> =
+            std::collections::BTreeMap::new();
+        failed_horizons.insert(Period::Long, "该档扫描失败".to_string());
+
+        let value =
+            serde_json::to_value(RecoBatchResponse { by_horizon, failed_horizons }).unwrap();
+        let top = value.as_object().unwrap();
+        assert!(top.contains_key("byHorizon"), "顶层缺 camelCase 键 byHorizon：{top:?}");
+        assert!(top.contains_key("failedHorizons"), "顶层缺 camelCase 键 failedHorizons：{top:?}");
+        assert!(!top.contains_key("by_horizon"), "snake_case 不得回到 IPC 边界");
+        assert!(!top.contains_key("failed_horizons"), "snake_case 不得回到 IPC 边界");
+
+        let bh = top["byHorizon"].as_object().unwrap();
+        assert!(bh.contains_key("ultra_short"), "档位键必须是 Period 的 snake 值：{bh:?}");
+        let fh = top["failedHorizons"].as_object().unwrap();
+        assert!(fh.contains_key("long"), "失败档键必须是 Period 的 snake 值：{fh:?}");
+    }
+
+    /// 契约实况（**实施时更正**）：`BTreeMap<Period, _>` 只固定 **Rust 侧迭代序**（= 档位声明序）；
+    /// 一旦进入 `serde_json::Value`（`Map` = `BTreeMap<String, Value>`，本仓未启用 `preserve_order`），
+    /// JSON 键序变成**字符串字典序** `long, mid, short, ultra_short` —— 可复现，但**不是档位序**。
+    /// ⇒ 「四档按短→长排」是**消费方契约**（前端/回测按 `Period::ALL` 排），不得依赖 JSON 键序。
+    /// 首版按档位序断言并当场报红，本条即据实更正后的判据。
+    #[test]
+    fn reco_batch_by_horizon_json_key_order_is_lexicographic_not_tier_order() {
+        let mut by_horizon: std::collections::BTreeMap<Period, RecoResponse> =
+            std::collections::BTreeMap::new();
+        for p in [Period::Long, Period::UltraShort, Period::Mid, Period::Short] {
+            by_horizon.insert(p, sample_response(p));
+        }
+        let value = serde_json::to_value(RecoBatchResponse {
+            by_horizon,
+            failed_horizons: Default::default(),
+        })
+        .unwrap();
+        let keys: Vec<&String> = value["byHorizon"].as_object().unwrap().keys().collect();
+        assert_eq!(
+            keys,
+            vec!["long", "mid", "short", "ultra_short"],
+            "JSON 键序必须是可复现的字典序；若变成乱序或档位序，说明序列化层（preserve_order）被动过"
         );
     }
 }

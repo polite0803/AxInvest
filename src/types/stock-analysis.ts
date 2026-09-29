@@ -210,6 +210,15 @@ export interface HorizonDecision {
   /** 仓位口径：risk_budget = min(凯利, 100·R/止损%)；kelly_only / fallback_kelly_x_mult = 降级 */
   positionSource?: string;
   /**
+   * 该档证据完整度（×100）：分子=本档实际权重和，分母=逐腿基线表按本档乘数缩放。
+   * 与主链 `evidence_pct` 不同口径是有意的（第 5(a) 条）——乘数表缺失时二者相等。
+   */
+  evidenceScale?: number;
+  /** 该档下注的实际赔率 = 止盈% ÷ 止损%（价带之比，第 5(b) 条） */
+  odds?: number;
+  /** 赔率来源：ladder_ratio = 由本档价带导出；no_stop = 无止损价带（空仓档）⇒ 赔率 0 */
+  oddsSource?: string;
+  /**
    * 与哪些档的 `posterior` **恒等**（Phase F 同源标注）。
    * 非空不代表算错 —— 它说的是「这两个数字无法互相佐证」，展示层必须注脚化。
    */
@@ -772,8 +781,18 @@ export interface RecoPick {
   positionPct: number;
   /** 持有天数(后端 u32) */
   holdingDays: number;
-  /** 置信度 0-100(后端 u8) */
+  /** 置信度 0-100（后端 u8，**绝对口径**：逐档先验与评分在 logit 空间合成后的概率） */
   confidence: number;
+  /** 组内当日分位 0-100（后端 Phase R-C 起与绝对置信分列；同组无差异时缺字段） */
+  confidencePercentile?: number;
+  /** 该档先验来源：shrunk / own / pooled / neutral_default / absent（absent = 无历史样本，仅评分） */
+  priorSource?: string;
+  /** 参与该档先验收缩的历史样本数（0 = 无样本） */
+  priorSamples?: number;
+  /** 止损/止盈口径：vol = k·σ·√h；fallback_pct = σ 不可得退回固定百分比（必须显式呈现） */
+  stopSource?: string;
+  /** 仓位口径：risk_budget = 风险预算；fallback_kelly_x_mult = 退回经验周期乘数 */
+  positionSource?: string;
   /** 命中理由(可能为空数组) */
   reasons: string[];
   /** 风险提示(可能为空数组) */
@@ -827,6 +846,48 @@ export interface RecoResponse {
   mode: string;
   /** 数据获取错误详情(picks 为空时的具体原因)。后端填充,前端据此显示具体错误文本而非泛化的"连接失败" */
   errorDetail?: string;
+}
+
+/**
+ * 一次拿四档的批量响应（后端 `commands/stock_analysis.rs` 的 `RecoBatchResponse`）。
+ *
+ * 两个字段必须**一起**渲染：`byHorizon` 缺某档且 `failedHorizons` 有该档 = 该档本轮扫描失败；
+ * 只渲染前者会把「失败」显示成「这一档没有推荐」。
+ * 键空间是 `Period` 的 snake_case 序列化值（与 `PeriodKey` 一致），不是 camelCase 档名。
+ */
+export interface RecoBatchResponse {
+  byHorizon: Partial<Record<PeriodKey, RecoResponse>>;
+  failedHorizons: Partial<Record<PeriodKey, string>>;
+}
+
+/**
+ * 荐股链逐 (风格, 档位) 的 rank IC 单元（后端 `analysis-engine::recommender::ic::RecoIcCell`）。
+ * 门槛与缺席词表与分析链命中率 IC **同一套**（`IC_MIN_SAMPLE=8`；缺席文案复用 reflection 既有键）。
+ */
+export interface RecoIcCell {
+  style: string;
+  period: PeriodKey;
+  /** Spearman ρ；null = 不可得（原因见 icStatus） */
+  rankIc: number | null;
+  samples: number;
+  icStatus: "ok" | "insufficient_ic_samples" | "degenerate_variance";
+  holdingDays?: number | null;
+}
+
+/** 单风格汇总：cells 按 `Period::ALL`（短→长）排好，前端不再二次排序。 */
+export interface RecoStyleIc {
+  style: string;
+  cells: RecoIcCell[];
+  halfLifeDays: number | null;
+  halfLifeStatus: string;
+}
+
+/** `reco_ic_stats` 的响应（Phase R-E：只报数，不回写权重）。 */
+export interface RecoIcStats {
+  styles: RecoStyleIc[];
+  totalCells: number;
+  usableCells: number;
+  totalSamples: number;
 }
 
 // ── 决策时间线类型 ──
@@ -883,8 +944,13 @@ export interface HitrateGroup {
   rankIc: number | null;
   /** 参与 IC 计算的样本数（同时有置信度与收益者），与 `samples` 不同口径 */
   icSamples: number;
-  /** IC 缺席原因：ok / insufficient_ic_samples / no_confidence / degenerate_variance */
+  /**
+   * IC 缺席原因：ok / insufficient_ic_samples / no_confidence / degenerate_variance /
+   * pre_snr_regime（有置信度但全部缺判定口径水印 ⇒ v104 前的旧记录）
+   */
   icStatus: string;
+  /** 因「缺判定口径水印」被挡在 IC 分母外的条数（换代进度；归零即全部为当代样本） */
+  icRegimeExcluded: number;
   /** 该档期望持有交易日（半衰期拟合自变量）；action 分组与 unknown → null */
   holdingDays: number | null;
 }

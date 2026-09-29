@@ -1,7 +1,7 @@
 import i18n from "@/i18n";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -102,6 +102,25 @@ function renderWithI18n(node: React.ReactNode) {
   );
 }
 
+/** invoke 第一次以 `command` 被调用的参数（同 RecommendationPanel.asOfDate.test） */
+function findCall(command: string): unknown[] | undefined {
+  return invokeMock.mock.calls.find((c) => c[0] === command);
+}
+
+/** 在 Card extra 中寻找「刷新」按钮（避免匹配到空状态文案里的「刷新」字样） */
+function findRefreshButton(): HTMLButtonElement {
+  const extra = document.querySelector(".ant-card-extra");
+  if (!extra) { throw new Error("card extra not found"); }
+  const btn = extra.querySelector("button");
+  if (!btn) { throw new Error("refresh button not found"); }
+  return btn as HTMLButtonElement;
+}
+
+/** 等 loading 结束（刷新按钮带 ant-btn-loading 时点击无效） */
+async function waitNotLoading() {
+  await waitFor(() => expect(findRefreshButton()).not.toHaveClass("ant-btn-loading"));
+}
+
 beforeEach(() => {
   invokeMock.mockReset();
   useTimeAnchorStore.setState({
@@ -165,6 +184,58 @@ describe("兜底合成候选（F6）", () => {
   });
 });
 
+describe("逐档 rank IC 观测面（R-E）", () => {
+  it("有 IC 的格报数，够不到门槛的格必须分句报「样本不足」而不是留空", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "reco_ic_stats") {
+        return Promise.resolve({
+          styles: [{
+            style: "trend",
+            halfLifeDays: null,
+            halfLifeStatus: "insufficient_tiers",
+            cells: [
+              { style: "trend", period: "ultra_short", rankIc: 0.42, samples: 12, icStatus: "ok", holdingDays: 2 },
+              {
+                style: "trend",
+                period: "short",
+                rankIc: null,
+                samples: 3,
+                icStatus: "insufficient_ic_samples",
+                holdingDays: 5,
+              },
+            ],
+          }],
+          totalCells: 2,
+          usableCells: 1,
+          totalSamples: 15,
+        });
+      }
+      return Promise.resolve(comparisonResponse([stats("trend", "ultra_short", 60, 9)]));
+    });
+    renderWithI18n(
+      <RecoStrategyMatrix
+        data={comparisonResponse([stats("trend", "ultra_short", 60, 9), stats("trend", "short", 55, 8)])}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(/IC 0\.420 · n=12/)).toBeTruthy());
+    // 样本不够 ≠ 无数据：必须给「需 ≥8」这类可行动的缺席句
+    await waitFor(() => expect(screen.getAllByText(/样本/).length).toBeGreaterThan(0));
+  });
+
+  it("完全没有已验证样本的格也要显式说明，不显示成空白", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "reco_ic_stats") {
+        return Promise.resolve({ styles: [], totalCells: 0, usableCells: 0, totalSamples: 0 });
+      }
+      return Promise.resolve(comparisonResponse([stats("trend", "short", 55, 8)]));
+    });
+    renderWithI18n(
+      <RecoStrategyMatrix data={comparisonResponse([stats("trend", "short", 55, 8)])} />,
+    );
+    await waitFor(() => expect(screen.getAllByTestId("reco-ic-none").length).toBeGreaterThan(0));
+  });
+});
+
 describe("回测徽章按当前档取值，不跨档平均（F3）", () => {
   it("当前档 short=60% 时徽章是 60%，不是四档算术平均的 50%", async () => {
     invokeMock.mockImplementation((cmd: string) => {
@@ -215,16 +286,21 @@ describe("降级归因消费（F5）", () => {
   it("replay 下渲染后端逐风格 degradedReasons 文本", async () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-06-01", mode: "replay" });
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "recommend_stocks") {
-        return Promise.resolve(recoResponse(
-          { trend: [makePick()] },
-          {
-            degradedStyles: ["trend"],
-            degradedReasons: { trend: "PE-TTM 仅有当日快照，无截止日历史" },
-            asOfDate: "2026-06-01",
-            mode: "replay",
+      if (cmd === "recommend_stocks_all_periods") {
+        return Promise.resolve({
+          byHorizon: {
+            short: recoResponse(
+              { trend: [makePick()] },
+              {
+                degradedStyles: ["trend"],
+                degradedReasons: { trend: "PE-TTM 仅有当日快照，无截止日历史" },
+                asOfDate: "2026-06-01",
+                mode: "replay",
+              },
+            ),
           },
-        ));
+          failedHorizons: {},
+        });
       }
       return Promise.resolve({});
     });
@@ -232,5 +308,116 @@ describe("降级归因消费（F5）", () => {
 
     await waitFor(() => expect(screen.getAllByText("测试甲").length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getByText(/PE-TTM 仅有当日快照，无截止日历史/)).toBeTruthy());
+  });
+});
+
+describe("口径标注透传与跨档同分（R-C / R-D / R-F）", () => {
+  /** 批量响应带上 short + mid 两档同一只票（同分对照用），并让缓存路径也能出票 */
+  function mockBatchShort(pick: Record<string, unknown>) {
+    const tier = recoResponse({ trend: [pick] });
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "recommend_stocks_all_periods") {
+        return Promise.resolve({
+          byHorizon: { short: tier, mid: tier },
+          failedHorizons: {},
+        });
+      }
+      if (cmd === "get_cached_recommendation") { return Promise.resolve(tier); }
+      return Promise.resolve(null);
+    });
+    return tier;
+  }
+
+  /** 挂载 → 等缓存出票 → 点刷新（批量命令只有刷新才发，R-0 契约） */
+  async function mountAndRefresh() {
+    renderWithI18n(<RecommendationPanel />);
+    await waitFor(() => expect(screen.getByText("测试甲")).toBeTruthy());
+    await waitNotLoading();
+    fireEvent.click(findRefreshButton());
+    await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
+  }
+
+  it("σ 不可得时把止损口径标成固定百分比，不冒充波动率推导", async () => {
+    mockBatchShort(makePick({ stopSource: "fallback_pct" }));
+    await mountAndRefresh();
+    expect(screen.getAllByText(/固定百分比/).length).toBeGreaterThan(0);
+  });
+
+  it("无历史先验样本时声明「仅由评分得出」，不假装四档各有先验", async () => {
+    mockBatchShort(makePick({ priorSource: "absent" }));
+    await mountAndRefresh();
+    expect(screen.getAllByText(/仅由该风格评分得出/).length).toBeGreaterThan(0);
+  });
+
+  it("分位与绝对置信并存：展示分位但**不覆写** confidence", async () => {
+    mockBatchShort(makePick({ confidence: 62, confidencePercentile: 30 }));
+    await mountAndRefresh();
+    expect(screen.getAllByText(/组内当日分位 30/).length).toBeGreaterThan(0);
+    // 绝对置信仍是 62（旧实现会把 62 覆写成分位 30 ⇒ 概率与分位混成同一个数）
+    expect(screen.getAllByText(/62/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/置信度\s*30/)).toBeNull();
+  });
+
+  it("同一票在另一档同分 ⇒ 必须点名（分不清收敛与复制不可接受）", async () => {
+    mockBatchShort(makePick({ confidence: 70 }));
+    await mountAndRefresh();
+    await waitFor(() => expect(screen.getByTestId("reco-same-score-peer")).toBeTruthy());
+    expect(screen.getByTestId("reco-same-score-peer").textContent).toContain("中期");
+  });
+});
+
+describe("一次拿四档（R-0）", () => {
+  /** 四档都有真实产出的批量响应 */
+  function batchFourTiers() {
+    const byHorizon: Record<string, unknown> = {};
+    for (const p of ["ultra_short", "short", "mid", "long"]) {
+      byHorizon[p] = recoResponse({ trend: [makePick({ period: p, stockName: `票-${p}` })] }, { period: p });
+    }
+    return { byHorizon, failedHorizons: {} };
+  }
+
+  it("刷新走批量命令；切到另一档不再发任何扫描/缓存请求", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "recommend_stocks_all_periods") { return Promise.resolve(batchFourTiers()); }
+      if (cmd === "get_cached_recommendation") { return Promise.resolve(null); }
+      return Promise.resolve({});
+    });
+    renderWithI18n(<RecommendationPanel />);
+    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
+    await waitNotLoading();
+
+    // 点刷新 → 一次批量扫描
+    const refresh = findRefreshButton();
+    fireEvent.click(refresh);
+    await waitFor(() => expect(findCall("recommend_stocks_all_periods")).toBeDefined());
+    const callsAfterRefresh = invokeMock.mock.calls.length;
+    expect(screen.getByText("票-short")).toBeTruthy();
+
+    // 切档：整批已在手，不得再发请求（旧形态是每档各扫一遍 / 各读一次缓存）
+    fireEvent.click(screen.getByText("超短线"));
+    await waitFor(() => expect(screen.getByText("票-ultra_short")).toBeTruthy());
+    expect(invokeMock.mock.calls.length).toBe(callsAfterRefresh);
+  });
+
+  it("某一档失败时独立成句，不渲染成「该档没有推荐」", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "recommend_stocks_all_periods") {
+        return Promise.resolve({
+          byHorizon: { short: recoResponse({ trend: [makePick()] }) },
+          failedHorizons: { short: "东财榜单接口超时" },
+        });
+      }
+      return Promise.resolve(null);
+    });
+    renderWithI18n(<RecommendationPanel />);
+    await waitFor(() => expect(findCall("get_cached_recommendation")).toBeDefined());
+    await waitNotLoading();
+    fireEvent.click(findRefreshButton());
+
+    await waitFor(() => expect(screen.getByTestId("reco-horizon-failed")).toBeTruthy());
+    const alertEl = screen.getByTestId("reco-horizon-failed");
+    // 归因文本与档位名由 i18n 插值拆成多个文本节点，按整串断言
+    expect(alertEl.textContent).toContain("东财榜单接口超时");
+    expect(alertEl.textContent).toContain("短线");
   });
 });

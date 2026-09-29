@@ -1,6 +1,7 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
 import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { invoke, listen } from "@/lib/invoke";
+import { horizonIcAbsenceKey } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import type { HitrateGroup, HitrateStats, HorizonResultsMap, ReflectionFeedbackResult } from "@/types";
 import {
@@ -164,6 +165,16 @@ export function ReflectionPanel() {
       render: (v: string) => horizonKeyLabel(v),
     },
     {
+      // 档位持有期**取自后端权威表**（`harness::Period::default_holding_days` 经
+      // `byHorizon[].holdingDays` 出边界）。此前这四个档名 i18n 标签各自手抄过天数
+      // （「超短线 (1-3天)」，而权威是 2 交易日）⇒ 抄本会腐烂，改成从数据渲染。
+      title: t("stockAnalysis.reflection.horizonExpectedHolding"),
+      dataIndex: "holdingDays",
+      key: "holdingDays",
+      width: 90,
+      render: (v: number | null) => v == null ? "—" : t("stockAnalysis.reflection.horizonTradingDays", { days: v }),
+    },
+    {
       title: t("stockAnalysis.reflection.hitrateMatureSamples"),
       dataIndex: "samples",
       key: "samples",
@@ -195,22 +206,24 @@ export function ReflectionPanel() {
     },
     {
       // Phase E 观测面：rank IC（置信度 × 实际收益的 Spearman 秩相关）。
-      // null 必须点名**哪一种**缺席 —— 三种缺席要补的东西完全不同（补字段 / 攒样本 /
-      // 换标的），渲染成一个笼统的「暂无数据」就是把结构性缺口压成歧义。
+      // null 必须点名**哪一种**缺席 —— 四种缺席要补的东西完全不同（补字段 / 攒样本 /
+      // 该档取值本无差异 / 等口径换代），并成一句笼统的「暂无数据」就是把结构性缺口压成歧义。
       title: t("stockAnalysis.reflection.hitrateRankIc"),
       dataIndex: "rankIc",
       key: "rankIc",
       width: 110,
       render: (v: number | null, row: HitrateGroup) => {
-        if (v == null) {
-          const missing: Record<string, string> = {
-            no_confidence: t("stockAnalysis.reflection.hitrateIcNoConfidence"),
-            insufficient_ic_samples: t("stockAnalysis.reflection.hitrateIcInsufficient"),
-            degenerate_variance: t("stockAnalysis.reflection.hitrateIcDegenerate"),
-          };
-          return missing[row.icStatus] ?? t("stockAnalysis.reflection.noData");
+        if (v != null) {
+          return v.toFixed(3);
         }
-        return v.toFixed(3);
+        // 缺席原因 → 文案的映射收在 utils（`horizonIcAbsenceKey`），四种缺席各占一句；
+        // 认不出的状态回退「暂无数据」，不猜一个最接近的翻译。
+        const key = horizonIcAbsenceKey(row.icStatus);
+        const absent = key ? t(key) : t("stockAnalysis.reflection.noData");
+        // 换代缺席要顺带报「已挡掉多少条」——否则这条状态会一直挂着而没人知道还要等多久。
+        return key === "stockAnalysis.reflection.hitrateIcPreRegime" && row.icRegimeExcluded > 0
+          ? `${absent}（${row.icRegimeExcluded}）`
+          : absent;
       },
     },
     {

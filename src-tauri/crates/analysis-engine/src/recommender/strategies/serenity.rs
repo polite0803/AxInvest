@@ -229,7 +229,7 @@ impl SerenityStrategy {
             price_momentum,
             turnover_anomaly,
         );
-        let position = calc_position(base_position, conf, self.period);
+        let position = calc_position(base_position, conf);
 
         // 构建 reasons（含 workflow 诊断信息）
         let mut reasons = vec![
@@ -314,6 +314,12 @@ impl SerenityStrategy {
             reasons,
             risk_notes,
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: false,
         })
     }

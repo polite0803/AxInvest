@@ -13,7 +13,7 @@ use std::sync::Arc;
 use axagent_astock_data::AStockClient;
 
 use super::types::{Period, RecoPick};
-use super::{recommend_stocks, RecoResponse};
+use super::{recommend_stocks_multi, RecoResponse};
 
 /// 一次定时荐股扫描的完整结果。
 ///
@@ -30,7 +30,8 @@ pub struct RecommendationScan {
 /// 跑一次"定时荐股扫描"，返回符合要求的 picks（按 confidence 降序）
 ///
 /// 流程：
-/// 1. 并行跑 `recommend_stocks(p)` × `periods` 中每个周期
+/// 1. **一次拿多档**（`recommend_stocks_multi`）——候选池只建一次；此前这里是
+///    对每个 period `tokio::spawn(recommend_stocks(p))`，四档即 4× 建池 + 4× 流动性过滤
 /// 2. 合并所有 RecoResponse.picks（去重：同 stock_code 留 confidence 最高）
 /// 3. 过滤 `synthetic == true`（兜底合成）—— **关键** 用户要求不推兜底
 /// 4. 过滤 `confidence < min_confidence`
@@ -42,36 +43,27 @@ pub async fn run_recommendation_scan(
     template_vars: &[(String, serde_json::Value)],
     min_confidence: u8,
     top_n: usize,
+    horizon_prior: Option<serde_json::Value>,
 ) -> RecommendationScan {
     if periods.is_empty() || top_n == 0 {
         return RecommendationScan { picks: Vec::new(), seed_pool_snapshot: None };
     }
 
-    // 1. 拉取所有 period 的 RecoResponse
-    //    先把 periods 复制成 owned Vec，避免借用逃逸到 spawned task
-    let owned_periods: Vec<Period> = periods.to_vec();
-    let mut futs = Vec::with_capacity(owned_periods.len());
-    for p in owned_periods {
-        let client = client.clone();
-        let vars: Vec<(String, serde_json::Value)> = template_vars.to_vec();
-        futs.push(tokio::spawn(async move { (p, recommend_stocks(client, p, &vars, None).await) }));
-    }
+    // 1. 一次拿所有 period（共享同一个候选池）
+    let results = recommend_stocks_multi(client, periods, template_vars, None, horizon_prior).await;
 
     let mut all_picks: Vec<RecoPick> = Vec::new();
     let mut seed_pool_snapshot: Option<String> = None;
-    for h in futs {
-        match h.await {
-            Ok((_period, Ok(resp))) => {
+    for (period, res) in results {
+        match res {
+            Ok(resp) => {
                 if seed_pool_snapshot.is_none() {
                     seed_pool_snapshot = resp.seed_pool_snapshot.clone();
                 }
                 collect_real_picks(&resp, &mut all_picks)
             },
-            Ok((_period, Err(e))) => {
-                tracing::warn!("[recommendation_cron] period {:?} 扫描失败: {e}", _period);
-            },
             Err(e) => {
-                tracing::warn!("[recommendation_cron] join error: {e}");
+                tracing::warn!("[recommendation_cron] period {:?} 扫描失败: {e}", period);
             },
         }
     }
@@ -178,6 +170,11 @@ mod tests {
             target_price: target,
             position_pct: 5.0,
             holding_days: 5,
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
             confidence: conf,
             reasons: vec![],
             risk_notes: vec![],

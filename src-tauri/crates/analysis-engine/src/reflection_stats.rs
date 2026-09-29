@@ -27,6 +27,10 @@ pub const MIN_SAMPLE: usize = 5;
 /// 阈值宁可提供「样本不足」这一诚实缺席，也不产出无法与噪声区分的数字。
 pub const IC_MIN_SAMPLE: usize = 8;
 
+/// 判定口径水印的锚定天数（与 `portfolio-mgr.rhai` 的 `SNR_ANCHOR_DAYS` 同值）。
+/// 引擎侧只把它当「有没有」的水印用，不参与任何数值计算。
+pub const SNR_ANCHOR: i64 = 28;
+
 /// 四周期反思状态。`Immature` 与 `Unavailable` 不得产生确定性胜负结论。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -53,6 +57,14 @@ pub struct HorizonDecision {
     pub stop_loss: Option<f64>,
     #[serde(alias = "conf_lower_bound")]
     pub conf_lower_bound: Option<f64>,
+    /// **判定口径水印**（Phase D-2 起才有，值 = 该次决策 SNR 折算的锚定天数）。
+    ///
+    /// 为什么必须一路带进反思 JSON：v104 之前逐档 `confidence` = 生效后验，v104 起
+    /// = `0.5+(生效后验−0.5)·√(h/28)`。两者**跨版本混在同一档里会改变排序**（同一档内
+    /// 各自单调，但两代的刻度不同），rank IC 因此被污染。有水印才允许进 IC 分母，
+    /// 没水印就是「上一代口径的记录」，如实标出来而不是默默混算。
+    #[serde(alias = "snr_anchor_days", default)]
+    pub snr_anchor_days: Option<i64>,
 }
 
 /// 兼容主周期所需的最小反思结果。
@@ -178,6 +190,11 @@ pub struct DecisionPerformanceSample {
     /// legacy 回退路径拿不到逐档置信度，归 None ⇒ 进不了 IC 分母，不冒充「0 置信」。
     #[serde(default)]
     pub confidence: Option<f64>,
+    /// 该样本所属的**判定口径水印**（见 [`HorizonDecision::snr_anchor_days`]）。
+    /// `None` = 上一代口径（v104 前）的记录 ⇒ 其 confidence 与本档其余样本不同刻度，
+    /// **不进 IC 分母**，并被计入 [`HitrateGroup::ic_regime_excluded`] 如实报出。
+    #[serde(default)]
+    pub snr_anchor_days: Option<i64>,
     /// 数据源标识（四周期展开 / legacy 回退）
     pub data_source: SampleDataSource,
 }
@@ -210,8 +227,14 @@ pub struct HitrateGroup {
     pub ic_samples: usize,
     /// IC 计算的**口径标注**（Phase F 的结构性缺席原则：不可得必须说清为什么）。
     /// `"ok"` = 正常产出；`"insufficient_ic_samples"` = 有预测值的样本太少；
-    /// `"no_confidence"` = 该组一条置信度都没有（legacy 回退样本）。
+    /// `"no_confidence"` = 该组一条置信度都没有（legacy 回退样本）；
+    /// `"degenerate_variance"` = 样本够但秩无方差（ρ 无定义）；
+    /// `"pre_snr_regime"` = 有置信度但**全部缺判定口径水印**（v104 前的旧记录），
+    /// 与上一类「没有置信度」是两件事：那要补字段，这要等样本换代累积。
     pub ic_status: String,
+    /// 因「缺判定口径水印」被排除出 IC 分母的样本数（换代进度可见：它归零即说明
+    /// 该档样本已全部属于当前口径）。
+    pub ic_regime_excluded: usize,
     /// 该档的期望持有交易日（半衰期拟合的自变量）；未知档 → None
     pub holding_days: Option<i64>,
 }
@@ -278,7 +301,11 @@ struct GroupAggregate {
     /// 超额收益序列（仅含 alpha_pct 有值的样本）
     alphas: Vec<f64>,
     /// IC 样本对：(决策置信度, 实际净收益%)。缺任一不进此列 —— 宁缺毋伪。
+    /// ⚠ 还要求该样本**带判定口径水印**（见 [`DecisionPerformanceSample::snr_anchor_days`]）：
+    ///   v104 前后的 confidence 不是同一把尺，混在一档里会把秩排错，进而把 IC 算歪。
     ic_pairs: Vec<(f64, f64)>,
+    /// 有置信度但缺水印 ⇒ 因口径换代被排除的条数（计入 `ic_regime_excluded`）。
+    ic_regime_excluded: usize,
 }
 
 /// rank IC 的唯一实现来自 [`axagent_harness::indicators::spearman_rank_ic`]（秩相关 =
@@ -375,7 +402,13 @@ where
             entry.alphas.push(alpha);
         }
         if let Some(conf) = s.confidence {
-            entry.ic_pairs.push((conf, s.return_pct));
+            // 水印缺失 = 上一代口径的 confidence，与同档其他样本不同尺 ⇒ 不进 IC，
+            // 但要计数报出去（「样本还不够新」和「根本没有预测值」是两件不同的事）。
+            if s.snr_anchor_days.is_some() {
+                entry.ic_pairs.push((conf, s.return_pct));
+            } else {
+                entry.ic_regime_excluded += 1;
+            }
         }
         if !order.contains(&key) {
             order.push(key);
@@ -386,7 +419,12 @@ where
         .map(|key| {
             let a = agg.remove(&key).unwrap_or_default();
             let ic_status = if a.ic_pairs.is_empty() {
-                "no_confidence"
+                // 有预测值但全缺水印 ⇒ 是「口径换代、新样本还没攒够」，不是「没有预测值」
+                if a.ic_regime_excluded > 0 {
+                    "pre_snr_regime"
+                } else {
+                    "no_confidence"
+                }
             } else if a.ic_pairs.len() < IC_MIN_SAMPLE {
                 "insufficient_ic_samples"
             } else {
@@ -414,6 +452,7 @@ where
                 rank_ic,
                 ic_samples: a.ic_pairs.len(),
                 ic_status: ic_status.to_string(),
+                ic_regime_excluded: a.ic_regime_excluded,
                 holding_days: days_of(&key),
             }
         })
@@ -506,6 +545,7 @@ mod reflection_stats_tests {
             alpha_pct: None,
             target_reached: None,
             confidence: None,
+            snr_anchor_days: None,
             data_source: SampleDataSource::Reflection,
         }
     }
@@ -751,9 +791,18 @@ mod reflection_stats_tests {
 
     // ── Phase E：rank IC 与预测半衰期 ──
 
+    /// 当代（v104+）带水印样本：IC 分母只收这种。
     fn conf_sample(horizon: &str, conf: f64, ret: f64) -> DecisionPerformanceSample {
         let mut s = sample(Some("买入"), Some(horizon), 1, ret);
         s.confidence = Some(conf);
+        s.snr_anchor_days = Some(SNR_ANCHOR);
+        s
+    }
+
+    /// 上一代记录：有 confidence 但**没有口径水印** ⇒ 不得进 IC 分母。
+    fn legacy_conf_sample(horizon: &str, conf: f64, ret: f64) -> DecisionPerformanceSample {
+        let mut s = conf_sample(horizon, conf, ret);
+        s.snr_anchor_days = None;
         s
     }
 
@@ -806,6 +855,53 @@ mod reflection_stats_tests {
         let g = stats.by_horizon.iter().find(|g| g.key == "short").unwrap();
         assert_eq!(g.ic_status, "ok");
         assert_eq!(g.rank_ic, Some(1.0));
+    }
+
+    /// 判定口径换代（v104 给逐档 confidence 加了 SNR √h 折算）不能让上一代记录混进 IC。
+    ///
+    /// 我第一版在这里写错过一句论证：「同一档内换算是单调 ⇒ 秩不变 ⇒ IC 不变」。
+    /// **那是错的**：单调性只在同一代刻度内成立，跨代混在一档里时，两代的相对顺序本身
+    /// 会被各自不同的系数打乱 ⇒ 池化秩被改，IC 也随之偏。故按水印筛，而不是靠性质免疫。
+    #[test]
+    fn pre_watermark_records_are_excluded_and_named_separately() {
+        let find = |stats: &HitrateStats, key: &str| -> HitrateGroup {
+            stats.by_horizon.iter().find(|g| g.key == key).unwrap().clone()
+        };
+
+        // ① 全上一代：有 confidence 但无水印 ⇒ 不产 IC，状态必须说「换代」而非「没置信度」
+        let stale: Vec<_> = (0..8).map(|i| legacy_conf_sample("mid", i as f64, i as f64)).collect();
+        let g = find(&compute_reflection_stats(&stale), "mid");
+        assert_eq!(g.rank_ic, None, "缺水印的样本不得进 IC");
+        assert_eq!(g.ic_samples, 0);
+        assert_eq!(g.ic_regime_excluded, 8, "排除条数必须报出来（换代进度可见）");
+        assert_eq!(g.ic_status, "pre_snr_regime");
+
+        // ② 与「根本没有置信度」区分开：那条状态仍是 no_confidence
+        let noconf: Vec<_> =
+            (0..8).map(|i| sample(Some("买入"), Some("mid"), 1, i as f64)).collect();
+        let g2 = find(&compute_reflection_stats(&noconf), "mid");
+        assert_eq!(g2.ic_status, "no_confidence");
+        assert_eq!(g2.ic_regime_excluded, 0);
+
+        // ③ 混代：只数当代的 3 条 ⇒ insufficient_ic_samples（门槛 8），排除数 5
+        let mut mixed: Vec<_> =
+            (0..5).map(|i| legacy_conf_sample("mid", i as f64, i as f64)).collect();
+        mixed.extend((5..8).map(|i| conf_sample("mid", i as f64, i as f64)));
+        let g3 = find(&compute_reflection_stats(&mixed), "mid");
+        assert_eq!(g3.ic_samples, 3);
+        assert_eq!(g3.ic_regime_excluded, 5);
+        assert_eq!(g3.ic_status, "insufficient_ic_samples");
+        assert_eq!(g3.rank_ic, None);
+
+        // ④ 换代攒够 8 条后同一形态就该出数（证明排除按水印而非按数量）
+        let mut fresh: Vec<_> =
+            mixed.iter().filter(|s| s.snr_anchor_days.is_some()).cloned().collect();
+        fresh.extend((8..13).map(|i| conf_sample("mid", i as f64, i as f64)));
+        let g4 = find(&compute_reflection_stats(&fresh), "mid");
+        assert_eq!(g4.ic_samples, 8);
+        assert_eq!(g4.ic_regime_excluded, 0);
+        assert_eq!(g4.ic_status, "ok");
+        assert_eq!(g4.rank_ic, Some(1.0));
     }
 
     #[test]
@@ -879,6 +975,7 @@ mod reflection_stats_tests {
             for (i, &ret) in perm.iter().enumerate() {
                 let mut s = sample(Some("买入"), Some(h), 1, ret as f64);
                 s.confidence = Some(i as f64);
+                s.snr_anchor_days = Some(SNR_ANCHOR);
                 samples.push(s);
             }
         }
@@ -898,13 +995,7 @@ mod reflection_stats_tests {
         assert!(t_half > 0.0 && t_half < 200.0, "半衰期数量级不合理：{t_half}");
 
         // 只有一档够样本 ⇒ 拟合无从谈起，两个字段必须一起沉默
-        let single: Vec<_> = (0..8)
-            .map(|i| {
-                let mut s = sample(Some("买入"), Some("short"), 1, i as f64);
-                s.confidence = Some(i as f64);
-                s
-            })
-            .collect();
+        let single: Vec<_> = (0..8).map(|i| conf_sample("short", i as f64, i as f64)).collect();
         let stats = compute_reflection_stats(&single);
         assert_eq!(stats.usable_ic_tiers, 1);
         assert_eq!(stats.signal_half_life_days, None);
@@ -986,6 +1077,7 @@ mod reflection_stats_tests {
             "rankIc",
             "icSamples",
             "icStatus",
+            "icRegimeExcluded",
             "holdingDays",
         ] {
             assert!(group.contains_key(key), "HitrateGroup 缺 camelCase 键 {key}：{group:?}");

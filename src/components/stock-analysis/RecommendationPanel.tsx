@@ -15,6 +15,7 @@ import type {
   BacktestComparisonResponse,
   LatestAnalysisSummary,
   PeriodKey,
+  RecoBatchResponse,
   RecoPick,
   RecoResponse,
   StockConsensus,
@@ -66,6 +67,14 @@ function fmt(value: unknown, decimals = 2, fallback = FALLBACK): string {
   return value.toFixed(decimals);
 }
 
+/** 扫描时刻显示（load / loadCache / 同批切档共用，避免两处各写一份时区与精度） */
+function formatGeneratedAtText(generatedAtMs: number, lang: string): string {
+  return new Date(generatedAtMs).toLocaleTimeString(lang === "zh-CN" ? "zh-CN" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function RecommendationPanel({ onOpenDataSourceSettings }: RecommendationPanelProps = {}) {
   const { t, i18n } = useTranslation();
   const { openDataSourceSettings: ctxOpenSettings } = useStockAnalysisPage();
@@ -75,6 +84,16 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
 
   const [period, setPeriod] = useState<PeriodKey>("short");
   const [data, setData] = useState<RecoResponse | null>(null);
+  // 一次拿四档（R-0）：整批结果含**逐档失败归因**；`data` 是当前档的切片。
+  // 整批必须留在状态里，否则切档又要各扫一遍，且「本档失败」与「本档无推荐」会分不清。
+  const [batch, setBatchState] = useState<RecoBatchResponse | null>(null);
+  // ref 镜像：`loadCache` 只**读**整批而不把它列进依赖 —— 把 state 列进依赖会让每次写入
+  // 重新触发挂载 effect，进而用新的 reqToken 丢弃上一次在途响应（replay 下自激循环）。
+  const batchRef = useRef<RecoBatchResponse | null>(null);
+  const setBatch = useCallback((b: RecoBatchResponse | null) => {
+    batchRef.current = b;
+    setBatchState(b);
+  }, []);
   const [loading, setLoading] = useState(false);
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -139,8 +158,10 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     setEmptyKind(null);
     setErrorDetail(null);
     try {
-      const r = await invoke<RecoResponse>("recommend_stocks", { period, asOfDate });
+      const batchResp = await invoke<RecoBatchResponse>("recommend_stocks_all_periods", { asOfDate });
       if (myToken !== reqTokenRef.current) { return; }
+      setBatch(batchResp ?? null);
+      const r = batchResp?.byHorizon?.[period] ?? null;
       if (!r || !r.picks || Object.keys(r.picks).length === 0) {
         setData(r ?? null);
         if (r?.errorDetail) {
@@ -156,13 +177,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         return;
       }
       setData(r);
-      const d = new Date(r.generatedAt);
-      setGeneratedAtText(
-        d.toLocaleTimeString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
+      setGeneratedAtText(formatGeneratedAtText(r.generatedAt, i18n.language));
       // 荐股成功后异步触发策略回测统计（fire-and-forget，不阻塞 UI）
       void triggerBacktest();
 
@@ -214,6 +229,17 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       void load();
       return;
     }
+    // 本会话已经一次拿过四档 ⇒ 切档直接取整批切片，不再发任何请求
+    // （整批结果里带着逐档失败归因，读缓存命令给不了这个信息）
+    const inBatch = batchRef.current?.byHorizon?.[period];
+    if (inBatch) {
+      setData(inBatch);
+      setEmptyKind(null);
+      setErrorDetail(null);
+      setIsCached(false);
+      setGeneratedAtText(formatGeneratedAtText(inBatch.generatedAt, i18n.language));
+      return;
+    }
     const myToken = ++reqTokenRef.current;
     setLoading(true);
     setEmptyKind(null);
@@ -234,13 +260,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       }
       setData(r);
       setIsCached(true);
-      const d = new Date(r.generatedAt);
-      setGeneratedAtText(
-        d.toLocaleTimeString(i18n.language === "zh-CN" ? "zh-CN" : "en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-      );
+      setGeneratedAtText(formatGeneratedAtText(r.generatedAt, i18n.language));
     } catch (e: unknown) {
       console.error("[RecommendationPanel] loadCache failed:", e);
       if (myToken !== reqTokenRef.current) { return; }
@@ -250,7 +270,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setEmptyKind("connectionFailed");
     }
     if (myToken === reqTokenRef.current) { setLoading(false); }
-  }, [period, anchorMode, i18n.language, load]);
+  }, [period, anchorMode, i18n.language, load, setBatch]);
 
   // Period 切换时优先读缓存；首次挂载（Tab 切走后 destroyOnHidden 重新渲染）
   // 也走缓存，避免每次切回 Tab 都后台刷新（用户原话："简直就是傻逼逻辑"）。
@@ -270,6 +290,37 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   // Bug 7 修复: 该函数已合并进 load() 内部,避免 useEffect 和 onClick
   // 各自发起一次重复请求,造成 RPC 浪费。
   // （保留此注释作为变更记录。）
+
+  // 本档本轮扫描失败（其余档不受影响）。它与「该档没有推荐」是两件事，必须独立成句。
+  const horizonFailure = batch?.failedHorizons?.[period] ?? null;
+  const currentHorizonLabel = (() => {
+    const suffix = horizonSuffix(period);
+    return suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : period;
+  })();
+
+  /**
+   * 同一只票在**其它档**上是否与本档给出完全相同的置信度（R-F）。
+   *
+   * 四档同向可以是真的（收敛），但同分又同风格同分位时更可能是**同一个预测被贴四个标签**（复制）。
+   * 二者必须可分辨 ⇒ 同分必须点名，不能让面板只显示「四档都建议买入」。
+   * 比较的是展示口径（四舍五入后的 confidence 整数），与用户所见一致。
+   */
+  const sameScorePeers = useCallback((code: string, conf: number, selfTier: PeriodKey) => {
+    const peers: string[] = [];
+    for (const tier of PERIOD_ORDER) {
+      if (tier === selfTier) { continue; }
+      const other = batch?.byHorizon?.[tier];
+      if (!other) { continue; }
+      for (const arr of Object.values(other.picks ?? {})) {
+        if ((arr ?? []).some((p) => p.stockCode === code && p.confidence === conf)) {
+          const suffix = horizonSuffix(tier);
+          peers.push(suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : tier);
+          break;
+        }
+      }
+    }
+    return peers;
+  }, [batch, t]);
 
   const disabledStyleSet = useMemo(() => new Set(data?.disabledStyles ?? []), [data]);
   const disabledStyleNames = useMemo(() => {
@@ -502,6 +553,23 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
         )}
 
         {/* 数据可用性错误详情：后端返回 errorDetail 时显示具体原因 */}
+        {horizonFailure && (
+          <Alert
+            type="error"
+            showIcon
+            className="text-xs! mb-2!"
+            data-testid="reco-horizon-failed"
+            title={
+              <span className="text-xs">
+                {t("stockAnalysis.recommendation.horizonFailed", {
+                  horizon: currentHorizonLabel,
+                  reason: horizonFailure,
+                })}
+              </span>
+            }
+          />
+        )}
+
         {errorDetail && (
           <Alert
             type="warning"
@@ -669,6 +737,7 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                           <PickRow
                             pick={p}
                             latestAnalysis={latestAnalyses[p.stockCode] ?? null}
+                            sameScorePeers={sameScorePeers(p.stockCode, p.confidence, period)}
                           />
                         )}
                       />
@@ -763,9 +832,11 @@ function CrossCheckBadge({
 }
 
 function PickRow(
-  { pick, latestAnalysis }: {
+  { pick, latestAnalysis, sameScorePeers = [] }: {
     pick: RecoPick;
     latestAnalysis: LatestAnalysisSummary | null;
+    /** 与本票本档置信度**完全相同**的其它档（R-F：同分必须点名） */
+    sameScorePeers?: string[];
   },
 ) {
   const { t } = useTranslation();
@@ -881,6 +952,26 @@ function PickRow(
         <Tag color="blue" className="m-0 text-[10px]">
           {t("stockAnalysis.recommendation.row.confidence")} {fmt(pick.confidence, 0)}
         </Tag>
+        {pick.stopSource === "fallback_pct" && (
+          <Tag color="orange" className="m-0 text-[10px]">
+            {t("stockAnalysis.recommendation.row.rowStopFallback")}
+          </Tag>
+        )}
+        {pick.priorSource === "absent" && (
+          <Tag color="default" className="m-0 text-[10px]">
+            {t("stockAnalysis.recommendation.row.rowPriorAbsent")}
+          </Tag>
+        )}
+        {typeof pick.confidencePercentile === "number" && (
+          <span className="text-gray-400">
+            {t("stockAnalysis.recommendation.row.rowPercentile", { p: pick.confidencePercentile })}
+          </span>
+        )}
+        {sameScorePeers.length > 0 && (
+          <Tag color="purple" className="m-0 text-[10px]" data-testid="reco-same-score-peer">
+            {t("stockAnalysis.recommendation.row.rowSameScorePeer", { tiers: sameScorePeers.join("、") })}
+          </Tag>
+        )}
         {pick.secondaryStyles && pick.secondaryStyles.length > 0 && (
           <span className="text-gray-400">
             ({t("stockAnalysis.recommendation.row.secondaryStyle")}:

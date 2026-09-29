@@ -2325,12 +2325,15 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     };
 
                 // 3. 扫描（多周期并行，内部已过滤 synthetic 与低于阈值的 pick）
+                let prior =
+                    crate::commands::stock_analysis::reco_horizon_prior(&db, &vars).await;
                 let scan = axagent_analysis_engine::recommender::run_recommendation_scan(
                     client,
                     &config.periods,
                     &vars,
                     config.min_confidence,
                     config.top_n,
+                    prior,
                 )
                 .await;
                 let picks = scan.picks;

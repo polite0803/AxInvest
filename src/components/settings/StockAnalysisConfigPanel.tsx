@@ -163,6 +163,11 @@ export function getDefaultVariables(): Variable[] {
   b("reco_capital_enabled", true, "stockAnalysis.configDescriptions.recoCapitalEnabled", "boolean");
   b("reco_watchlist_enabled", true, "stockAnalysis.configDescriptions.recoWatchlistEnabled", "boolean");
   b("reco_min_confidence", 60, "stockAnalysis.configDescriptions.recoMinConfidence", "number");
+  b("reco_stop_vol_mult", 1.2, "stockAnalysis.configDescriptions.recoStopVolMult", "number");
+  b("reco_target_vol_mult", 2.0, "stockAnalysis.configDescriptions.recoTargetVolMult", "number");
+  b("reco_risk_budget_pct", 1.5, "stockAnalysis.configDescriptions.recoRiskBudgetPct", "number");
+  b("reco_round_trip_cost_pct", 0.6, "stockAnalysis.configDescriptions.recoRoundTripCostPct", "number");
+  b("reco_conf_sensitivity", 1.0, "stockAnalysis.configDescriptions.recoConfSensitivity", "number");
   // 决策回溯（decision_tracker.rs）
   b("decision_max_history_per_stock", 50, "stockAnalysis.configDescriptions.decisionMaxHistoryPerStock", "number");
   // 技术指标周期（indicators.rs IndicatorConfig）
@@ -548,6 +553,11 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "reco_capital_enabled",
           "reco_watchlist_enabled",
           "reco_min_confidence",
+          "reco_stop_vol_mult",
+          "reco_target_vol_mult",
+          "reco_risk_budget_pct",
+          "reco_round_trip_cost_pct",
+          "reco_conf_sensitivity",
           "decision_max_history_per_stock",
         ]),
       },
@@ -716,25 +726,21 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "syn_long_base_pos",
           "syn_long_entry_high",
           "syn_long_entry_low",
-          "syn_long_holding_days",
           "syn_long_stop",
           "syn_long_target",
           "syn_mid_base_pos",
           "syn_mid_entry_high",
           "syn_mid_entry_low",
-          "syn_mid_holding_days",
           "syn_mid_stop",
           "syn_mid_target",
           "syn_short_base_pos",
           "syn_short_entry_high",
           "syn_short_entry_low",
-          "syn_short_holding_days",
           "syn_short_stop",
           "syn_short_target",
           "syn_ultra_short_base_pos",
           "syn_ultra_short_entry_high",
           "syn_ultra_short_entry_low",
-          "syn_ultra_short_holding_days",
           "syn_ultra_short_stop",
           "syn_ultra_short_target",
           "val_long_base_pos",
@@ -763,25 +769,21 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "wl_long_base_pos",
           "wl_long_entry_high",
           "wl_long_entry_low",
-          "wl_long_holding_days",
           "wl_long_stop",
           "wl_long_target",
           "wl_mid_base_pos",
           "wl_mid_entry_high",
           "wl_mid_entry_low",
-          "wl_mid_holding_days",
           "wl_mid_stop",
           "wl_mid_target",
           "wl_short_base_pos",
           "wl_short_entry_high",
           "wl_short_entry_low",
-          "wl_short_holding_days",
           "wl_short_stop",
           "wl_short_target",
           "wl_ultra_short_base_pos",
           "wl_ultra_short_entry_high",
           "wl_ultra_short_entry_low",
-          "wl_ultra_short_holding_days",
           "wl_ultra_short_stop",
           "wl_ultra_short_target",
         ]),

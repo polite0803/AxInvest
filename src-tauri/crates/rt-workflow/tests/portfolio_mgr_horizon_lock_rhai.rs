@@ -127,6 +127,16 @@ fn primary_tier_block_matches_source_verbatim() {
         pm.contains("\"fallback_kelly_x_mult\"") && pm.contains("\"risk_budget\""),
         "仓位来源标注必须两值齐备 —— 缺一个就等于把降级伪装成主口径"
     );
+    // 第 5(b) 条：赔率必须由本档价带推导，且不得回到「置信阶梯 → 赔率」的拍表。
+    // 反向锁是必需的一半 —— 只锁正向，有人把 hconf 表塞回去但保留注释时门仍绿。
+    assert!(
+        pm.contains("let hodds = if slh > 0.0 { tph / slh } else { 0.0 };"),
+        "逐档赔率不再由价带推导 ⇒ 5(b) 失效"
+    );
+    assert!(
+        !pm.contains("if hconf >= 0.70 { 2.5 }"),
+        "「置信阶梯 → 保守赔率」的旧表又回来了（同一个信念既定 p 又定 b，自指）"
+    );
     assert!(
         pm.contains("let hconf = pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS);"),
         "「长线更值得」走判定侧 SNR √h，这行不在则收益侧周期优势又变回仓位乘数"

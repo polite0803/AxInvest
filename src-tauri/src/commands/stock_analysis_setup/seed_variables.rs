@@ -757,6 +757,41 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             ),
             is_secret: false,
         },
+        Variable {
+            name: "reco_conf_sensitivity".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.0),
+            description: Some("评分进入逐档先验 logit 合成的斜率 s（0=只认先验，越大越信评分；Phase R-C）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_stop_vol_mult".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.2),
+            description: Some("荐股止损倍数 k1：止损距离 = k1 × 日线σ × √持有天数（Phase R-D）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_target_vol_mult".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(2.0),
+            description: Some("荐股止盈倍数 k2：目标位移 = k2 × 日线σ × √持有天数".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_risk_budget_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.5),
+            description: Some("单票风险预算 R（%）：仓位 = min(策略上限, 100×R/止损%) ⇒ 止损被打掉时组合恰损失 R%".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "reco_round_trip_cost_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0.6),
+            description: Some("往返换手成本（%）：按该档目标位移摊薄成成本拖累，短档自动多扣".into()),
+            is_secret: false,
+        },
         // ── 决策回溯参数 ──
         Variable {
             name: "decision_max_history_per_stock".into(),
@@ -1651,13 +1686,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
-            name: "syn_long_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(90),
-            description: Some("合成兜底策略：建议持有天数｜长线".into()),
-            is_secret: false,
-        },
-        Variable {
             name: "syn_long_stop".into(),
             var_type: "number".into(),
             value: serde_json::json!(0.88),
@@ -1690,13 +1718,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(0.97),
             description: Some("合成兜底策略：入场区间下沿（现价 × 该比例）｜中线".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "syn_mid_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(28),
-            description: Some("合成兜底策略：建议持有天数｜中线".into()),
             is_secret: false,
         },
         Variable {
@@ -1735,13 +1756,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
-            name: "syn_short_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(5),
-            description: Some("合成兜底策略：建议持有天数｜短线".into()),
-            is_secret: false,
-        },
-        Variable {
             name: "syn_short_stop".into(),
             var_type: "number".into(),
             value: serde_json::json!(0.96),
@@ -1774,13 +1788,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(0.998),
             description: Some("合成兜底策略：入场区间下沿（现价 × 该比例）｜超短线".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "syn_ultra_short_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(2),
-            description: Some("合成兜底策略：建议持有天数｜超短线".into()),
             is_secret: false,
         },
         Variable {
@@ -1980,13 +1987,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
-            name: "wl_long_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(90),
-            description: Some("自选股策略：建议持有天数｜长线".into()),
-            is_secret: false,
-        },
-        Variable {
             name: "wl_long_stop".into(),
             var_type: "number".into(),
             value: serde_json::json!(0.88),
@@ -2019,13 +2019,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(0.97),
             description: Some("自选股策略：入场区间下沿（现价 × 该比例）｜中线".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "wl_mid_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(28),
-            description: Some("自选股策略：建议持有天数｜中线".into()),
             is_secret: false,
         },
         Variable {
@@ -2064,13 +2057,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
-            name: "wl_short_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(5),
-            description: Some("自选股策略：建议持有天数｜短线".into()),
-            is_secret: false,
-        },
-        Variable {
             name: "wl_short_stop".into(),
             var_type: "number".into(),
             value: serde_json::json!(0.96),
@@ -2103,13 +2089,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(0.998),
             description: Some("自选股策略：入场区间下沿（现价 × 该比例）｜超短线".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "wl_ultra_short_holding_days".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(2),
-            description: Some("自选股策略：建议持有天数｜超短线".into()),
             is_secret: false,
         },
         Variable {

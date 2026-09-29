@@ -26,7 +26,13 @@
  * ① 后端每档的每个分析师，前端必须都有且值相等（缺键 / 多键 / 值不等都算红）；
  * ② 桥表引用的每个分析师 id，必须在**四档**后端表里都存在；
  * ③ 扫描面非零（4 档 × 每档 ≥ 11 键），否则视为解析失效（exit 2）——
- *    「扫到 0 条」的门等于没有门（本仓已多次为这类假绿付过代价）。
+ *    「扫到 0 条」的门等于没有门（本仓已多次为这类假绿付过代价）；
+ * ④ **四档显示名不得再手抄天数**：持有天数的唯一来源是 Rust
+ *    `harness/src/holding_period.rs` 的 `default_holding_days`（2/5/28/90）。
+ *    实证缺陷（2026-09-29 审计）：`stockAnalysis.reflection.horizonUltraShort` 在 11 个语言里
+ *    写「(1-3天)」，而权威是 **2 交易日** —— 抄本腐烂了，且没有任何门会响。
+ *    所以判据不是「数字要对」而是「标签里不许出现数字」：要显示天数，就渲染
+ *    `byHorizon[].holdingDays`（后端权威表经 DTO 出边界），别再抄一遍。
  *
  * 用法：
  *   node scripts/check-horizon-weight-parity.mjs            # 比对
@@ -40,6 +46,9 @@ import process from "node:process";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const BACKEND = "src-tauri/crates/analysis-engine/src/evidence_weight.rs";
 const FRONTEND = "src/lib/stock-analysis-utils.ts";
+const HOLDING = "src-tauri/crates/harness/src/holding_period.rs";
+const LOCALE_DIR = "src/i18n/locales";
+const LABEL_KEYS = ["horizonUltraShort", "horizonShort", "horizonMid", "horizonLong"];
 const TIERS = ["ultra_short", "short", "mid", "long"];
 
 /** 解析后端 `get_horizon_base_weights`：`"tier" => { w.insert("id", 1.3); … }`。 */
@@ -136,6 +145,51 @@ function surfaceCheck(backend, frontend) {
   return errs;
 }
 
+/** ④ 天数唯一来源：Rust 权威表 `default_holding_days`（用于确认它还在、还解析得出）。 */
+function parseAuthorityDays(src) {
+  const start = src.indexOf("pub fn default_holding_days");
+  if (start < 0) { return { ok: false, reason: "未见 default_holding_days（改名或搬家？）" }; }
+  const body = src.slice(start, start + 900);
+  const re = /Period::(UltraShort|Short|Mid|Long)\s*=>\s*(\d+)/g;
+  const days = {};
+  let m;
+  while ((m = re.exec(body)) !== null) { days[m[1].toLowerCase()] = Number(m[2]); }
+  const missing = ["ultrashort", "short", "mid", "long"].filter((k) => !(k in days));
+  if (missing.length) { return { ok: false, reason: `权威表只解析到 ${Object.keys(days).length} 档，缺 ${missing.join("/")}` }; }
+  return { ok: true, days };
+}
+
+/**
+ * ④ 四档显示名不得手抄天数：命中「值里出现数字」即红。
+ * 天数要显示就渲染 `byHorizon[].holdingDays`（权威表出边界的那一份）。
+ */
+function checkLabelsCarryNoDayRange(localeObjs) {
+  const errs = [];
+  for (const [lang, obj] of Object.entries(localeObjs)) {
+    for (const key of LABEL_KEYS) {
+      const v = obj[key];
+      if (typeof v !== "string") { errs.push(`${lang}: reflection.${key} 缺失或非字符串`); continue; }
+      if (/\d/.test(v)) { errs.push(`${lang}: reflection.${key} = ${JSON.stringify(v)} 里手抄了天数 ⇒ 权威表一改就静默腐烂`); }
+    }
+  }
+  return errs;
+}
+
+/** 读 11 个语言里 reflection 段的四个档名（解析不出 ⇒ 护栏）。 */
+function readHorizonLabels() {
+  const dir = path.join(ROOT, LOCALE_DIR);
+  const out = {};
+  for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".json"))) {
+    const lang = f.slice(0, -5);
+    let d;
+    try { d = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")); }
+    catch { out[lang] = { __broken: true }; continue; }
+    const ref = d?.stockAnalysis?.reflection ?? {};
+    out[lang] = Object.fromEntries(LABEL_KEYS.map((k) => [k, ref[k]]));
+  }
+  return out;
+}
+
 function run() {
   const be = parseBackend(fs.readFileSync(path.join(ROOT, BACKEND), "utf8"));
   if (!be.ok) { console.log(`❌ 后端解析失败: ${be.reason}`); return 2; }
@@ -147,14 +201,29 @@ function run() {
     return 2;
   }
   const problems = compare(be, fe);
+  // ④ 天数唯一来源 = Rust 权威表；标签里出现数字即红
+  const auth = parseAuthorityDays(fs.readFileSync(path.join(ROOT, HOLDING), "utf8"));
+  if (!auth.ok) {
+    console.log(`❌ 权威天数表解析失败: ${auth.reason}`);
+    return 2;
+  }
+  const labels = readHorizonLabels();
+  const labelErrs = checkLabelsCarryNoDayRange(labels);
+  if (Object.keys(labels).length < 11) {
+    console.log(`❌ 只读到 ${Object.keys(labels).length} 个语言文件（< 11）⇒ 判据 ④ 覆盖面失效`);
+    return 2;
+  }
   const keys = TIERS.reduce((n, t) => n + Object.keys(be.tiers[t]).length, 0);
-  console.log(`比对面：4 档 × 后端合计 ${keys} 键 | 桥表 ${be.bridge.length} 腿`);
-  if (problems.length === 0) {
-    console.log("✅ 通过：前后端逐字段一致，且桥表引用的分析师在四档均有权重");
+  console.log(
+    `比对面：4 档 × 后端合计 ${keys} 键 | 桥表 ${be.bridge.length} 腿 | 档名 ${Object.keys(labels).length} 语言 × ${LABEL_KEYS.length} 键（权威天数 ${auth.days.ultrashort}/${auth.days.short}/${auth.days.mid}/${auth.days.long} 交易日）`,
+  );
+  if (problems.length === 0 && labelErrs.length === 0) {
+    console.log("✅ 通过：前后端逐字段一致、桥表分析师四档均有权重、且档名标签未手抄天数");
     return 0;
   }
   problems.forEach((p) => console.log(`✖ ${p}`));
-  console.log(`\n❌ ${problems.length} 处不一致（真相源 = 后端 get_horizon_base_weights，改前端对齐它）`);
+  labelErrs.forEach((p) => console.log(`✖ ${p}`));
+  console.log("\n❌ 存在不一致（权重真相源 = 后端 get_horizon_base_weights；天数真相源 = holding_period.rs 的 default_holding_days）");
   return 1;
 }
 
@@ -189,6 +258,34 @@ function selftest() {
 
   const emptyParse = { tiers: {}, bridge: [] };
   cases.push({ name: "★护栏 解析面为 0 ⇒ surfaceCheck 必须报错", got: surfaceCheck(emptyParse, emptyParse).length > 0 ? 1 : 0, want: 1 });
+
+  // ── 判据 ④：档名标签不得手抄天数（天数唯一来源 = Rust 权威表）──
+  const realLabels = readHorizonLabels();
+  cases.push({ name: "④负控 磁盘现状（标签已剥离天数）⇒ 应无问题", got: checkLabelsCarryNoDayRange(realLabels).length, want: 0 });
+
+  const rebaked = structuredClone(realLabels);
+  rebaked["zh-CN"].horizonUltraShort = "超短线 (1-3天)";
+  cases.push({ name: "④正控 把「(1-3天)」抄回一个标签 ⇒ 必须报 1 处", got: checkLabelsCarryNoDayRange(rebaked).length, want: 1 });
+
+  const allBad = {};
+  for (const lang of Object.keys(realLabels)) {
+    allBad[lang] = { horizonUltraShort: "超短线 (1-3天)", horizonShort: "短线 (5天)", horizonMid: "中线 (28天)", horizonLong: "长线 (90天)" };
+  }
+  cases.push({ name: "④规模 11 语言全抄 ⇒ 必须报 44 处（不是只报第一处）", got: checkLabelsCarryNoDayRange(allBad).length, want: 44 });
+
+  cases.push({
+    name: "④护栏 权威表解析失效（改名）⇒ 必须 ok:false",
+    got: parseAuthorityDays("pub fn renamed_away() {}").ok ? 1 : 0,
+    want: 0,
+  });
+  cases.push({
+    name: "④护栏 权威表真实可读（2/5/28/90）",
+    got: (() => {
+      const a = parseAuthorityDays(fs.readFileSync(path.join(ROOT, HOLDING), "utf8"));
+      return a.ok && a.days.ultrashort === 2 && a.days.long === 90 ? 1 : 0;
+    })(),
+    want: 1,
+  });
 
   let failed = 0;
   console.log("=== 门禁自检（正负对照）===");

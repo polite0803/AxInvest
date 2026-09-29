@@ -42,20 +42,33 @@ impl ValueStrategy {
             return None;
         }
 
+        // 尺度由档位决定，且四个分支**共用同一份取数**（旧形态是每个分支各取一次日线）。
+        // 取不到该尺度 / bar 数不足 ⇒ 本风格本档不出票，不退回日线冒充。
+        let (klines, profile) =
+            match crate::recommender::scale::fetch(client, code, self.period).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::debug!("[value] {code} 档位 {:?} 取数失败: {e}", self.period);
+                    return None;
+                },
+            };
+        if !crate::recommender::scale::enough_bars(&klines, &profile) {
+            return None;
+        }
+        let cs: Vec<f64> = klines.iter().map(|k| k.close).collect();
+
         let (pre_filter_ok, mut reasons) = match self.period {
             Period::UltraShort => {
                 let pe_max = read_f64(vars, "val_ultra_short_pe_max", 60.0);
                 if pe > 0.0 && pe > pe_max {
                     return None;
                 }
-                let kline_limit = read_f64(vars, "val_ultra_short_kline_limit", 10.0) as u32;
-                let klines = client.get_klines(code, "daily", kline_limit, None).await.ok()?;
-                let min_kline_len = read_f64(vars, "val_ultra_short_min_kline_len", 5.0) as usize;
-                if klines.len() < min_kline_len {
-                    return None;
-                }
-                let cs: Vec<f64> = klines.iter().map(|k| k.close).collect();
-                let ma_period = read_f64(vars, "val_ultra_short_ma_period", 10.0) as usize;
+                // 均线窗口 = 日历 10 日换算到当前尺度的 bar 数（下限 5 根）
+                let ma_period = (crate::recommender::scale::bars_for_daily_span(
+                    read_f64(vars, "val_ultra_short_ma_period", 10.0) as usize,
+                    &profile,
+                ))
+                .max(5);
                 let ma10 = crate::recommender::indicators::sma(&cs, ma_period)?;
                 let ma_mult = read_f64(vars, "val_ultra_short_ma_mult", 1.005);
                 if price > ma10 * ma_mult {
@@ -76,14 +89,11 @@ impl ValueStrategy {
                 if pe > 0.0 && pe > pe_max {
                     return None;
                 }
-                let kline_limit = read_f64(vars, "val_short_kline_limit", 30.0) as u32;
-                let klines = client.get_klines(code, "daily", kline_limit, None).await.ok()?;
-                let min_kline_len = read_f64(vars, "val_short_min_kline_len", 20.0) as usize;
-                if klines.len() < min_kline_len {
-                    return None;
-                }
-                let cs: Vec<f64> = klines.iter().map(|k| k.close).collect();
-                let ma_period = read_f64(vars, "val_short_ma_period", 20.0) as usize;
+                let ma_period = (crate::recommender::scale::bars_for_daily_span(
+                    read_f64(vars, "val_short_ma_period", 20.0) as usize,
+                    &profile,
+                ))
+                .max(5);
                 let ma20 = crate::recommender::indicators::sma(&cs, ma_period)?;
                 let ma_mult = read_f64(vars, "val_short_ma_mult", 1.005);
                 if price > ma20 * ma_mult {
@@ -176,21 +186,19 @@ impl ValueStrategy {
             },
         };
 
-        // 长线要求股价在 60 日均线之上（趋势过滤）
+        // 长线要求股价在「日历 60 日」均线之上（趋势过滤），用的是同一份按档取来的 bar 序列
         if matches!(self.period, Period::Long) {
-            let long_kline_limit = read_f64(vars, "val_long_kline_limit", 70.0) as u32;
-            if let Ok(klines) = client.get_klines(code, "daily", long_kline_limit, None).await {
-                let ma_period = read_f64(vars, "val_long_ma_period", 60.0) as usize;
-                if let Some(ma60) = crate::recommender::indicators::sma(
-                    &klines.iter().map(|k| k.close).collect::<Vec<_>>(),
-                    ma_period,
-                ) {
-                    let ma60_mult = read_f64(vars, "val_long_ma60_mult", 0.90);
-                    if price < ma60 * ma60_mult {
-                        return None;
-                    }
-                    reasons.push(format!("站上 MA{} {:.2}", ma_period, ma60));
+            let ma_period = (crate::recommender::scale::bars_for_daily_span(
+                read_f64(vars, "val_long_ma_period", 60.0) as usize,
+                &profile,
+            ))
+            .max(5);
+            if let Some(ma) = crate::recommender::indicators::sma(&cs, ma_period) {
+                let ma_mult = read_f64(vars, "val_long_ma60_mult", 0.90);
+                if price < ma * ma_mult {
+                    return None;
                 }
+                reasons.push(format!("站上 MA{} {:.2}", ma_period, ma));
             }
         }
 
@@ -201,7 +209,7 @@ impl ValueStrategy {
             read_f64(vars, "val_conf_market", 0.0),
             1.0, // turnover_anomaly: 价值策略无量比数据，默认无惩罚
         );
-        let position = calc_position(base_position, conf, self.period);
+        let position = calc_position(base_position, conf);
 
         let _risk = if matches!(self.period, Period::UltraShort) {
             "超短线估值博弈，次日即需监控"
@@ -226,6 +234,12 @@ impl ValueStrategy {
             reasons,
             risk_notes: vec![_risk.to_string()],
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: false,
         })
     }

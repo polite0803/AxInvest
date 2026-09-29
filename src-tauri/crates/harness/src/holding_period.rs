@@ -20,7 +20,13 @@ use serde::{Deserialize, Serialize};
 /// 序列化成 `ultrashort`（无下划线），与前端 `PeriodKey = "ultra_short"` 不符，
 /// 导致 `CompactRecommendation` 等按 `response.period` 分支的组件把超短线
 /// 误落到 else 分支显示成"长线"。`alias` 保留以兼容历史存档里的旧写法。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// 序（`PartialOrd`/`Ord`）= **变体声明序** = 由短到长（ultra_short &lt; short &lt; mid &lt; long）。
+/// 作用范围要说清：它固定的是 **Rust 侧 `BTreeMap<Period, _>` 的迭代序**（批量任务、逐档聚合可复现）。
+/// 它**固定不了 JSON 键序** —— `serde_json::Value` 的 `Map` 按字符串字典序排（本仓未启用 `preserve_order`），
+/// 所以「按短→长展示」是消费方契约（按 `Period::ALL` 排），不是序列化层的属性。
+/// （2026-09-29 实测：按档位序断言 JSON 键序的测试报红，据此更正，见
+/// `commands/stock_analysis.rs` 的 `reco_batch_by_horizon_json_key_order_is_lexicographic_not_tier_order`。）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Period {
     /// 超短线 1-3 天（T+1 隔夜/事件驱动/情绪博弈）
@@ -153,5 +159,17 @@ mod tests {
     fn ultra_short_serializes_with_underscore_and_reads_both() {
         assert_eq!(serde_json::to_string(&Period::UltraShort).unwrap(), "\"ultra_short\"");
         assert_eq!(serde_json::from_str::<Period>("\"ultrashort\"").unwrap(), Period::UltraShort);
+    }
+
+    /// `Ord` = 变体声明序 = 由短到长。批量响应靠 `BTreeMap<Period, _>` 固定 JSON 键序，
+    /// 若变体被重排，这里必须红（而不是让键序静默变化）。
+    #[test]
+    fn ord_matches_declaration_order() {
+        let mut map = std::collections::BTreeMap::new();
+        for p in Period::ALL.iter().rev() {
+            map.insert(*p, ());
+        }
+        let ordered: Vec<Period> = map.keys().copied().collect();
+        assert_eq!(ordered, Period::ALL.to_vec());
     }
 }

@@ -8,17 +8,21 @@
 //! ## 公开 API
 //! - [`recommend_stocks`] — Tauri command 调用
 
+pub mod ic;
 pub mod indicators;
 pub mod notify;
 pub mod pool;
+pub mod risk;
+pub mod scale;
 pub mod scoring;
 pub mod strategies;
 pub mod strategy;
+pub mod style_matrix;
 pub mod types;
 
 pub use notify::{build_notification, run_recommendation_scan, RecommendationScan};
 pub use strategy::{RecoContext, RecommendStrategy};
-pub use types::{Period, RecoPick, RecoResponse, SeedPoolOrigin, Style};
+pub use types::{Period, RecoDegradation, RecoPick, RecoResponse, SeedPoolOrigin, Style};
 
 /// 回退候选股列表（沪深300核心成分股，覆盖主要行业）
 ///
@@ -79,7 +83,6 @@ pub(crate) const FALLBACK_STOCKS: &[(&str, &str)] = &[
 use axagent_astock_data::as_of;
 use axagent_astock_data::AStockClient;
 use parking_lot::RwLock;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
@@ -364,6 +367,7 @@ pub async fn recommend_stocks(
     period: Period,
     template_vars: &[(String, serde_json::Value)],
     preseed: Option<Vec<SeedItem>>,
+    horizon_prior: Option<serde_json::Value>,
 ) -> Result<RecoResponse, String> {
     // H3(2026-09-27)：把降级留痕绑定到**本次运行**。
     //
@@ -376,7 +380,8 @@ pub async fn recommend_stocks(
     //      同截止日上一次运行的残留算进来（R5 基线陷阱同族）。
     as_of::with_degradation_log(async {
         let deg_watermark = as_of::global_degradation_seq_watermark();
-        let mut resp = recommend_stocks_inner(client, period, template_vars, preseed).await?;
+        let mut resp =
+            recommend_stocks_inner(client, period, template_vars, preseed, horizon_prior).await?;
         if as_of::current_as_of().is_some() {
             resp.asof_degradations = as_of::take_global_degradations_since(deg_watermark)
                 .into_iter()
@@ -388,11 +393,198 @@ pub async fn recommend_stocks(
     .await
 }
 
+/// 行情 + K 线两源全挂时的空响应（带归因，不静默出空表）。
+fn empty_error_response(period: Period, detail: String) -> RecoResponse {
+    RecoResponse {
+        period,
+        picks: std::collections::BTreeMap::new(),
+        disabled_styles: vec![],
+        degraded_styles: vec![],
+        degraded_reasons: std::collections::HashMap::new(),
+        generated_at: chrono::Utc::now().timestamp_millis(),
+        raw_seed_pool_size: 0,
+        seed_pool_origin: SeedPoolOrigin::default(),
+        asof_degradations: vec![],
+        as_of_date: None,
+        mode: "live".to_string(),
+        error_detail: Some(detail),
+        seed_pool_snapshot: None,
+    }
+}
+
+/// 一次拿多档（面板默认四档全取）：候选池**只建一次**，逐档并发扫描。
+///
+/// 与逐次调用 `recommend_stocks` 的区别就是这次共享：建池 + 流动性过滤（每股一次
+/// 60 日 K 线）此前按档各做一遍，四档即 4× 全量取数。
+///
+/// 档位级缓存仍在**每档**粒度生效（TTL 60 s）：命中的档不重扫 ⇒ 刷新某一档不会
+/// 让另外三档过期。as-of 模式下的降级留痕按「本次运行」整体切片，只挂在**本轮真正扫描过**
+/// 的响应上；命中缓存的档保留其原始那轮自己的切片（否则把上一次运行的降级算成本轮）。
+///
+/// 返回顺序与 `periods` 一致；单档失败只影响该档（逐档 `Result`），不让整批变成一次错误。
+pub async fn recommend_stocks_multi(
+    client: Arc<AStockClient>,
+    periods: &[Period],
+    template_vars: &[(String, serde_json::Value)],
+    preseed: Option<Vec<SeedItem>>,
+    horizon_prior: Option<serde_json::Value>,
+) -> Vec<(Period, Result<RecoResponse, String>)> {
+    if periods.is_empty() {
+        return Vec::new();
+    }
+    let use_cache = preseed.is_none();
+    as_of::with_degradation_log(async {
+        let deg_watermark = as_of::global_degradation_seq_watermark();
+        let mut hits: std::collections::HashMap<Period, Result<RecoResponse, String>> =
+            std::collections::HashMap::new();
+        let mut misses: Vec<Period> = Vec::new();
+        for &p in periods.iter() {
+            match if use_cache { cache_get(p) } else { None } {
+                Some(cached) => {
+                    hits.insert(p, Ok(cached));
+                },
+                None => misses.push(p),
+            }
+        }
+        if !misses.is_empty() {
+            let prepared = prepare_scan(client, template_vars, preseed, horizon_prior).await;
+            let as_of_active = as_of::current_as_of().is_some();
+            let slice: Vec<RecoDegradation> = if as_of_active {
+                as_of::take_global_degradations_since(deg_watermark)
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let scanned =
+                futures::future::join_all(misses.iter().map(|p| scan_period(&prepared, *p))).await;
+            for (p, resp) in misses.iter().zip(scanned) {
+                hits.insert(
+                    *p,
+                    resp.map(|mut r| {
+                        if as_of_active {
+                            r.asof_degradations = slice.clone();
+                        }
+                        r
+                    }),
+                );
+            }
+        }
+        periods
+            .iter()
+            .map(|p| (*p, hits.remove(p).unwrap_or_else(|| Err("内部：该档未被扫描".to_string()))))
+            .collect()
+    })
+    .await
+}
+
+/// 一次扫描中**与持有档位无关**的准备结果：健康探测、候选池、流动性过滤、Serenity 注入、
+/// 推荐器配置、自适应权重、per-code 互斥锁。
+///
+/// 为什么要单独成结构：此前「建池 + 流动性过滤」与「按档跑策略」焊在同一个函数里，
+/// 于是「一次拿四档」只能调四次 ⇒ 同一个候选池被建 4 次、流动性过滤（每股一次 60 日
+/// K 线）做 4 次。定时任务 `run_recommendation_scan` 并行 spawn 四个 period 时正是
+/// 这个形态（4× 全量取数，纯属重复）。拆出来之后四档共享一份池与一把 per-code 锁。
+struct PreparedScan {
+    client: Arc<AStockClient>,
+    /// 流动性过滤 + Serenity 注入后的实际扫描池（非 Watchlist 策略消费它）
+    seed: Vec<SeedItem>,
+    /// 过滤前的原始池（Watchlist 与合成兜底消费它）
+    raw_seed: Vec<SeedItem>,
+    seed_pool_origin: SeedPoolOrigin,
+    raw_seed_pool_size: usize,
+    vars_map: HashMap<String, serde_json::Value>,
+    reco_cfg: RecoConfig,
+    strategy_weights: HashMap<(Style, Period), f64>,
+    /// 跨档共享：同一只票在四档之间也串行，避免并发打爆 vendor
+    per_code_locks: Arc<PerCodeLocks>,
+    /// `preseed` 路径不读写结果缓存
+    use_cache: bool,
+    /// 行情 + K 线两源全挂时的归因文本；非 `None` 时逐档直接出降级响应（不静默出空表）
+    all_sources_down: Option<String>,
+    /// 扫描时刻的市场状态键（`"bull"` / `"bear"` / `""`），供信号校准的先验。
+    /// `""` = 指数K线取不到 ⇒ 被调方走无差别先验，**不是在调用点写死 `"neutral"`**（那等于谎称已知市场状态）。
+    market_regime: String,
+    /// 同风格跨四档的合并胜率 p_pool（质量校准基准）。缺该风格样本 ⇒ 该风格**不校准**，而不是拿 0.50 假装。
+    style_baseline: HashMap<String, f64>,
+    /// 逐档先验表（`horizon_prior::horizon_prior_map` 的输出，与分析链**同一份实现**）：
+    /// `{档位: {prior, samples, source}}`。`None` ⇒ 该档退回纯评分并标 `priorSource="absent"`。
+    horizon_prior: Option<serde_json::Value>,
+    /// 评分进入 logit 合成的斜率（`reco_conf_sensitivity`）。
+    conf_sensitivity: f64,
+}
+
+/// 计算「同风格跨四档合并胜率」p_pool（按信号数加权），作为逐档质量校准的**基准**。
+///
+/// 为什么不能沿用固定 0.50：0.50 是掷硬币先验，它使每个风格的因子都围绕同一个常数缩放，
+/// 于是「这档比该风格自己的平均水准好多少」这一真实信息被丢掉，不同风格之间的差异也全部
+/// 变成同一个尺子下的伪差异。
+fn compute_style_baselines() -> HashMap<String, f64> {
+    use crate::backtest_strategy::get_signal_quality;
+    let styles = [
+        "trend",
+        "value",
+        "capital",
+        "reversion",
+        "watchlist",
+        "bottleneck",
+        "policy",
+        "earnings",
+        "capital_flow",
+        "event",
+        "technical",
+        "serenity",
+    ];
+    let mut out = HashMap::new();
+    for style in styles {
+        let mut weighted = 0.0;
+        let mut signals = 0u32;
+        for p in Period::ALL {
+            if let Some(q) = get_signal_quality(&format!("{style}_{p}", p = p.as_str())) {
+                if q.total_signals > 0 {
+                    weighted += q.win_rate_pct * q.total_signals as f64;
+                    signals += q.total_signals;
+                }
+            }
+        }
+        if signals > 0 {
+            out.insert(style.to_string(), weighted / signals as f64 / 100.0);
+        }
+    }
+    out
+}
+
+/// 取扫描时刻的市场状态（用上证综指日线跑 [`RegimeDetector`]）。
+///
+/// 取不到就返回空串 —— 宁可「不知道」并在下游走无差别先验，也不在调用点硬写 `"neutral"` 假装知道。
+async fn detect_market_regime(client: &AStockClient) -> String {
+    let klines = match client.get_klines("000001.SH", "daily", 60).await {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::warn!(
+                "[recommender] 指数K线不可得，市场状态按未知处理（不假装 neutral）: {e}"
+            );
+            return String::new();
+        },
+    };
+    let report = axagent_astock_data::regime::RegimeDetector::detect(&klines);
+    match report.regime {
+        axagent_astock_data::regime::MarketRegime::Bull => "bull".to_string(),
+        axagent_astock_data::regime::MarketRegime::Bear => "bear".to_string(),
+        other => {
+            tracing::info!("[recommender] 市场状态={}，校准先验取无差别分支", other.label());
+            String::new()
+        },
+    }
+}
+
 async fn recommend_stocks_inner(
     client: Arc<AStockClient>,
     period: Period,
     template_vars: &[(String, serde_json::Value)],
     preseed: Option<Vec<SeedItem>>,
+    horizon_prior: Option<serde_json::Value>,
 ) -> Result<RecoResponse, String> {
     // preseed 模式跳过缓存（种子来自 DB 历史推荐，内容可能每次不同，不应命中缓存）
     let use_cache = preseed.is_none();
@@ -401,16 +593,28 @@ async fn recommend_stocks_inner(
             return Ok(cached);
         }
     }
+    let prepared = prepare_scan(client, template_vars, preseed, horizon_prior).await;
+    scan_period(&prepared, period).await
+}
+
+/// 一次「多档」荐股的共享准备（候选池只建一次）。
+async fn prepare_scan(
+    client: Arc<AStockClient>,
+    template_vars: &[(String, serde_json::Value)],
+    preseed: Option<Vec<SeedItem>>,
+    horizon_prior: Option<serde_json::Value>,
+) -> PreparedScan {
+    let use_cache = preseed.is_none();
 
     // ── 前置健康探测 ──
-    // 同时探测 quote 和 K 线，两者都失败时直接短路，避免 200 次无效 API 调用
+    // 同时探测 quote 和 K 线，两者都失败时短路，避免 200 次无效 API 调用
     let quote_probe = client.get_quote("000001").await;
     let kline_probe = client.get_klines("000001", "daily", 5).await;
 
     let quote_ok = quote_probe.is_ok();
     let kline_ok = kline_probe.as_ref().is_ok_and(|k| k.len() >= 2);
 
-    if !quote_ok && !kline_ok {
+    let all_sources_down = if !quote_ok && !kline_ok {
         let quote_err = quote_probe.err().map(|e| e.to_string());
         let kline_err = kline_probe.err().map(|e| e.to_string());
         let detail = format!(
@@ -419,26 +623,10 @@ async fn recommend_stocks_inner(
             kline_err.as_deref().unwrap_or("返回不足(<2条)"),
         );
         tracing::warn!("[recommender] {detail}");
-        let resp = RecoResponse {
-            period,
-            picks: std::collections::BTreeMap::new(),
-            disabled_styles: vec![],
-            degraded_styles: vec![],
-            degraded_reasons: std::collections::HashMap::new(),
-            generated_at: chrono::Utc::now().timestamp_millis(),
-            raw_seed_pool_size: 0,
-            seed_pool_origin: SeedPoolOrigin::default(),
-            asof_degradations: vec![],
-            as_of_date: None,
-            mode: "live".to_string(),
-            error_detail: Some(detail),
-            seed_pool_snapshot: None,
-        };
-        if use_cache {
-            cache_put(period, resp.clone());
-        }
-        return Ok(resp);
-    }
+        Some(detail)
+    } else {
+        None
+    };
 
     if !kline_ok {
         tracing::warn!("[recommender] K 线数据源当前不可用, 趋势/资金/超跌策略将跳过");
@@ -461,11 +649,7 @@ async fn recommend_stocks_inner(
     //    来源构成随池一起返回：preseed 的来历由调用方决定，本层无法归因 ⇒ 全 0（= 未知）。
     let (mut seed, seed_pool_origin) = match preseed {
         Some(custom) => {
-            tracing::info!(
-                "[recommender] period={:?}, using custom preseed size={}",
-                period,
-                custom.len()
-            );
+            tracing::info!("[recommender] using custom preseed size={}", custom.len());
             // 去重（同一 code+name 只保留一条）
             let mut seen = std::collections::HashSet::new();
             let deduped: Vec<SeedItem> = custom
@@ -477,7 +661,7 @@ async fn recommend_stocks_inner(
         None => build_seed_pool(&client).await,
     };
     let raw_seed_pool_size = seed.len();
-    tracing::info!("[recommender] period={:?}, raw_seed_pool_size={}", period, raw_seed_pool_size);
+    tracing::info!("[recommender] raw_seed_pool_size={}", raw_seed_pool_size);
     // 保留 raw_seed 给 WatchlistStrategy（它只依赖 quote，不依赖 K 线）
     let raw_seed = seed.clone();
     // P3-D12: 根据 vendor 健康度动态调节流动性过滤并发数
@@ -542,42 +726,74 @@ async fn recommend_stocks_inner(
     //    workflow template 中往往 vendor_* 变量为空，导致 4 个 style 全 disabled。
     //    现在所有 style 都跑；data 真的取不到时该 style 自然返回空 picks，
     //    前端展示 "no data" 而非误报 "数据源未启用"）
-    let all_strategies: Vec<Box<dyn RecommendStrategy>> = match period {
-        Period::UltraShort => vec![
-            Box::new(TrendStrategy::ultra_short()),
-            Box::new(ValueStrategy::ultra_short()),
-            Box::new(CapitalStrategy::ultra_short()),
-            // ReversionStrategy ultra_short 不做（超跌反弹至少需要中线）
-            Box::new(WatchlistStrategy::ultra_short()),
-        ],
-        Period::Short => vec![
-            Box::new(TrendStrategy::short()),
-            Box::new(ValueStrategy::short()),
-            Box::new(CapitalStrategy::short()),
-            Box::new(ReversionStrategy::short()),
-            Box::new(WatchlistStrategy::short()),
-        ],
-        Period::Mid => vec![
-            Box::new(TrendStrategy::mid()),
-            Box::new(ValueStrategy::mid()),
-            Box::new(CapitalStrategy::mid()),
-            Box::new(ReversionStrategy::mid()),
-            Box::new(SerenityStrategy::mid()),
-            Box::new(WatchlistStrategy::mid()),
-        ],
-        Period::Long => vec![
-            Box::new(TrendStrategy::long()),
-            Box::new(ValueStrategy::long()),
-            Box::new(CapitalStrategy::long()),
-            // ReversionStrategy long 不做
-            Box::new(SerenityStrategy::long()),
-            Box::new(WatchlistStrategy::long()),
-        ],
-    };
+    // 市场状态取一次，四档共享（`client` 随后被移入结构，故必须在构造前取）
+    let market_regime = detect_market_regime(&client).await;
 
-    let reco_cfg = parse_reco_config(template_vars);
-    // 复盘→进化：按 (style, period) 注入自适应权重
-    let strategy_weights = parse_strategy_weights(template_vars);
+    PreparedScan {
+        client,
+        seed,
+        raw_seed,
+        seed_pool_origin,
+        raw_seed_pool_size,
+        vars_map: template_vars.iter().cloned().collect(),
+        reco_cfg: parse_reco_config(template_vars),
+        // 复盘→进化：按 (style, period) 注入自适应权重
+        strategy_weights: parse_strategy_weights(template_vars),
+        // 跨档共享同一把 per-code 锁：四档并发扫同一只票时串行，避免并发打爆 vendor
+        per_code_locks: PerCodeLocks::new(),
+        use_cache,
+        all_sources_down,
+        // 市场状态与风格基准各取一次，供四档共享（此前是每个 pick 现算、且基准写死 0.50）
+        market_regime,
+        style_baseline: compute_style_baselines(),
+        horizon_prior,
+        conf_sensitivity: template_vars
+            .iter()
+            .find(|(k, _)| k == "reco_conf_sensitivity")
+            .and_then(|(_, v)| v.as_f64())
+            .unwrap_or(1.0)
+            .clamp(0.0, 4.0),
+    }
+}
+
+/// 对**单个档位**执行策略扫描（消费已准备好的 [`PreparedScan`]）。
+///
+/// 档位之间可并发调用本函数（共享同一个 `PreparedScan`），也可单独调用 ——
+/// `recommend_stocks` 就是「准备一次 + 扫一档」，`recommend_stocks_multi` 是「准备一次 + 扫四档」。
+async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResponse, String> {
+    // 两源全挂：该档直接出带归因的空响应（不静默出空表，也不建池不扫描）
+    if let Some(detail) = &prepared.all_sources_down {
+        let resp = empty_error_response(period, detail.clone());
+        if prepared.use_cache {
+            cache_put(period, resp.clone());
+        }
+        return Ok(resp);
+    }
+
+    let client = prepared.client.clone();
+    let seed = prepared.seed.clone();
+    let raw_seed = prepared.raw_seed.clone();
+    let seed_pool_origin = prepared.seed_pool_origin;
+    let raw_seed_pool_size = prepared.raw_seed_pool_size;
+    let vars_map = prepared.vars_map.clone();
+    let reco_cfg = &prepared.reco_cfg;
+    let strategy_weights = &prepared.strategy_weights;
+    let per_code_locks = prepared.per_code_locks.clone();
+    let use_cache = prepared.use_cache;
+    let market_regime = prepared.market_regime.clone();
+    let style_baseline = prepared.style_baseline.clone();
+    let horizon_prior = prepared.horizon_prior.clone();
+    let conf_sensitivity = prepared.conf_sensitivity;
+
+    // 3. 选定该 period 下的所有子策略（不再做 vendor 禁用检查——
+    //    原本要求 "enabled_vendors" 至少覆盖一个 required vendor，但生产环境
+    //    workflow template 中往往 vendor_* 变量为空，导致 4 个 style 全 disabled。
+    //    现在所有 style 都跑；data 真的取不到时该 style 自然返回空 picks，
+    //    前端展示 "no data" 而非误报 "数据源未启用"）
+    // 策略选择由 `style_matrix` 驱动（24 格契约表），不再在本函数里各档手抄一份清单；
+    // 每格「做 / 按设计不做 + 理由码」的唯一来源是那张表（门 e / 单测双向锁）。
+    let all_strategies: Vec<Box<dyn RecommendStrategy>> = strategies_for_period(period);
+
     let mut disabled_styles_set: std::collections::HashSet<Style> =
         std::collections::HashSet::new();
     let enabled: Vec<Box<dyn RecommendStrategy>> = all_strategies
@@ -603,11 +819,20 @@ async fn recommend_stocks_inner(
         })
         .collect();
 
-    // 4. 并行执行（per-code 互斥锁：不同 code 真正并行，同 code 4 策略间串行）
-    let per_code_locks = PerCodeLocks::new();
+    // 4. 并行执行（per-code 互斥锁：不同 code 真正并行，同 code 4 策略间串行；
+    //    锁与池来自 `PreparedScan`，四档并发时同一只票跨档也串行）
+    // 波动率风控参数（Phase R-D）。默认值即 PLAN §九 Q5 拍板值：k1=1.2、k2=2.0、R=1.5%、
+    // 往返成本 0.6%。这四个键同时登记在 seed 变量表与股票分析设置面板（五点对账）。
+    let read_par = |name: &str, default: f64| -> f64 {
+        vars_map.get(name).and_then(|v| v.as_f64()).unwrap_or(default)
+    };
+    let stop_k1 = read_par("reco_stop_vol_mult", 1.2);
+    let target_k2 = read_par("reco_target_vol_mult", 2.0);
+    let risk_budget_pct = read_par("reco_risk_budget_pct", 1.5);
+    let round_trip_cost_pct = read_par("reco_round_trip_cost_pct", 0.6);
+
     let ctx_pool = seed.clone();
     let raw_ctx_pool = raw_seed.clone();
-    let vars_map: HashMap<String, Value> = template_vars.iter().cloned().collect();
     let mut futures = Vec::new();
     for s in enabled.iter() {
         // WatchlistStrategy 用 raw_seed（不过流动性过滤），
@@ -623,6 +848,11 @@ async fn recommend_stocks_inner(
         };
         let period_val = period;
         let vars_for_future = vars_map.clone();
+        // 每个策略任务各自带走一份（市场状态与风格基准是**整批共享的同一份值**，
+        // 逐策略 clone 只为满足所有权，不重算）
+        let market_regime = market_regime.clone();
+        let style_baseline = style_baseline.clone();
+        let horizon_prior = horizon_prior.clone();
         // 复盘→进化：该 (style, period) 当前的权重
         let style_weight = strategy_weights.get(&(s.style(), period)).copied().unwrap_or(1.0);
         let fut = async move {
@@ -637,42 +867,130 @@ async fn recommend_stocks_inner(
             // 应用自适应权重：confidence 与 position_pct 同步缩放
             for p in raw.iter_mut() {
                 let old_conf = p.confidence;
-                let new_conf = (old_conf as f64 * style_weight).clamp(0.0, 100.0) as u8;
-                // 权重缩放后仓位重新经过 calc_position（含 period_factor），
-                // 而非独立 scaling——确保缩放后的置信度与仓位参数一致。
-                //
-                // 注意：策略 scan 产出的 position_pct 已包含 period_factor
-                // （position_pct = base × old_conf/100 × period_factor）。
-                // 还原 base 时必须同时除掉 old_conf/100 与 period_factor，
-                // 否则 calc_position 会再乘一次 period_factor，导致因子被平方（×f²）。
-                let denom = (old_conf as f64 / 100.0) * period_val.factor();
-                let base = if denom > 0.0 {
-                    p.position_pct / denom
+                // ── 逐档置信（Phase R-C）──
+                // 旧形态：`calc_confidence` 根本没有 period 参数 ⇒ 同一票同一风格在四个档上
+                // 是**同一个数**，档间差异只剩一个经验乘数（诊断 R1/E1）。
+                // 现：该档先验（该档历史方向命中率经经验贝叶斯收缩，实现与分析链共用
+                // `horizon_prior_map`）与该风格评分在 logit 空间合成；先验不可得 ⇒ 退回纯评分
+                // 并把 `priorSource="absent"` 标出来，不假装四档各自成立。
+                let score = old_conf as f64 / 100.0;
+                let tier_row = horizon_prior.as_ref().and_then(|j| j.get(period_val.as_str()));
+                let prior = tier_row.and_then(|r| r.get("prior")).and_then(|v| v.as_f64());
+                p.prior_source = Some(
+                    tier_row
+                        .and_then(|r| r.get("source"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("absent")
+                        .to_string(),
+                );
+                p.prior_samples = tier_row
+                    .and_then(|r| r.get("samples"))
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                let blended =
+                    crate::recommender::scoring::blend_confidence(prior, score, conf_sensitivity)
+                        .unwrap_or((score * 100.0).round() as u8);
+                let new_conf = (blended as f64 * style_weight).clamp(0.0, 100.0) as u8;
+                // 还原策略给出的 base：主路径已**不乘**经验周期乘数（见 scoring.rs 注释），
+                // 故这里只除掉置信度一项。
+                let base = if old_conf > 0 {
+                    p.position_pct / (old_conf as f64 / 100.0)
                 } else {
                     p.position_pct
                 };
                 p.confidence = new_conf;
-                p.position_pct = crate::recommender::scoring::calc_position(
-                    base, // 还原出的真实 base
-                    new_conf, period_val,
-                );
-                // 信号质量校准（加权平滑 + 反身性）：
-                //   三层框架 — 统计学(开仓勇气) × 反身性(持仓理性) × 加权平滑(空仓定力)
+
+                // ── 波动率风控（Phase R-D）──
+                // σ 一律取**日线**口径（`harness::indicators::realized_vol_pct`，全仓唯一实现），
+                // 因为跨档可比的是「日波动 × √持有天数」，用各档自己的 bar 算 σ 会让四档不可比。
+                // 取不到 σ ⇒ 显式退回策略自带的固定百分比，并把来源标出来，不伪装成波动率口径。
+                let h = period_val.default_holding_days() as usize;
+                let closes =
+                    crate::recommender::risk::daily_closes(&client_ref, &p.stock_code).await;
+                let vol_stop =
+                    closes.as_ref().and_then(|c| crate::recommender::risk::stop_pct(c, h, stop_k1));
+                let vol_target = closes
+                    .as_ref()
+                    .and_then(|c| crate::recommender::risk::target_pct(c, h, target_k2));
+                let price_ok = p.price.is_finite() && p.price > 0.0;
+
+                let band_stop_pct = if price_ok && p.stop_loss > 0.0 {
+                    ((p.price - p.stop_loss) / p.price * 100.0).max(0.0)
+                } else {
+                    0.0
+                };
+                let band_target_pct = if price_ok && p.target_price > 0.0 {
+                    ((p.target_price - p.price) / p.price * 100.0).max(0.0)
+                } else {
+                    0.0
+                };
+
+                let (used_stop_pct, stop_src) = match vol_stop {
+                    Some(v) => (v, "vol"),
+                    None => (band_stop_pct, "fallback_pct"),
+                };
+                let used_target_pct = vol_target.unwrap_or(band_target_pct);
+                if price_ok && used_stop_pct > 0.0 {
+                    p.stop_loss = (p.price * (1.0 - used_stop_pct / 100.0) * 100.0).round() / 100.0;
+                }
+                if price_ok && used_target_pct > 0.0 {
+                    p.target_price =
+                        (p.price * (1.0 + used_target_pct / 100.0) * 100.0).round() / 100.0;
+                }
+                p.stop_source = Some(stop_src.to_string());
+
+                // ── 仓位 = min(策略上限, 该档风险预算) × 成本拖累 ──
+                // 风险预算仓位是「止损被打掉时组合恰好损失 R%」的定义式；σ 不可得 ⇒ 止损宽度
+                // 来自固定百分比，风险预算仍能算，但来源标成 fallback；连止损都没有 ⇒ 退乘数分支。
+                let strategy_cap = base * (new_conf as f64 / 100.0);
+                let budget =
+                    crate::recommender::risk::risk_budget_position(used_stop_pct, risk_budget_pct);
+                let (pos_before_drag, pos_src) = match budget {
+                    Some(b) => (strategy_cap.min(b), "risk_budget"),
+                    None => (
+                        crate::recommender::scoring::calc_position_fallback_mult(
+                            base, new_conf, period_val,
+                        ),
+                        "fallback_kelly_x_mult",
+                    ),
+                };
+                let drag = vol_target
+                    .or(if band_target_pct > 0.0 {
+                        Some(band_target_pct)
+                    } else {
+                        None
+                    })
+                    .map(|t| crate::recommender::risk::cost_drag_factor(t, round_trip_cost_pct))
+                    .unwrap_or(1.0);
+                p.position_pct = (pos_before_drag * drag).clamp(0.0, 95.0);
+                p.position_source = Some(pos_src.to_string());
+                p.reasons.push(format!(
+                    "风控: 止损 {:.2}% ({}) · 目标 {:.2}% · 仓位上限 {:.1}% × 风险预算 {:.1}% × 成本拖累 {:.2}",
+                    used_stop_pct,
+                    stop_src,
+                    used_target_pct,
+                    strategy_cap,
+                    budget.unwrap_or(0.0),
+                    drag
+                ));
+                // 信号质量校准：把「该 (style, period) 的后验胜率」相对**该风格自己的跨档合并胜率**
+                // p_pool 来放大/缩小。基准来自数据而不是写死的 0.50（掷硬币先验）；
+                // p_pool 取不到 ⇒ 该风格**不校准**（factor=1.0），而不是拿 0.50 假装校准过。
                 let quality_id = format!("{}_{}", p.style.as_str(), p.period.as_str());
                 let (posterior_win_rate, sample_count, _prior) =
-                    crate::backtest_strategy::weighted_signal_calibration(&quality_id, "neutral");
-                let quality_factor = if sample_count >= 5 {
-                    // 贝叶斯后验映射到 [0.7, 1.3]
-                    ((posterior_win_rate / 0.50) - 0.20).clamp(0.7, 1.3)
-                } else {
-                    1.0
-                };
-                // 反身性：高风险策略信号噪声大 → 额外折扣
-                let refl = match p.period {
-                    crate::recommender::types::Period::UltraShort => 0.85, // 超短线博弈性强
+                    crate::backtest_strategy::weighted_signal_calibration(
+                        &quality_id,
+                        &market_regime,
+                    );
+                let quality_factor = match style_baseline.get(p.style.as_str()) {
+                    Some(pool) if *pool > 0.0 && sample_count >= 5 => {
+                        ((posterior_win_rate / pool) - 0.20).clamp(0.7, 1.3)
+                    },
                     _ => 1.0,
                 };
-                let combined = quality_factor * refl;
+                // 旧「反身性」折扣（只对超短 ×0.85）已删：它是拍的数、无推导，
+                // 且「短持有期该更保守」这件事的正确形态是**换手成本按 1/持有天数摊薄**（Phase R-D）。
+                let combined = quality_factor;
                 let delta = if combined > 1.0 {
                     combined - 1.0
                 } else {
@@ -857,6 +1175,47 @@ async fn recommend_stocks_inner(
     Ok(resp)
 }
 
+/// 按档位构造策略集合 —— **选择来自 [`style_matrix`]**，构造仍是逐 `(style, tier)` 显式。
+///
+/// 一致性由单测 `matrix_matches_strategy_selection` 锁：表里出票的格必须真能构造出策略，
+/// 反之亦然（表改了代码没改 = 红）。
+pub(crate) fn strategies_for_period(period: Period) -> Vec<Box<dyn RecommendStrategy>> {
+    let mut out: Vec<Box<dyn RecommendStrategy>> = Vec::new();
+    for style in style_matrix::styles_for(period) {
+        let s: Option<Box<dyn RecommendStrategy>> = match (style, period) {
+            (Style::Trend, Period::UltraShort) => Some(Box::new(TrendStrategy::ultra_short())),
+            (Style::Trend, Period::Short) => Some(Box::new(TrendStrategy::short())),
+            (Style::Trend, Period::Mid) => Some(Box::new(TrendStrategy::mid())),
+            (Style::Trend, Period::Long) => Some(Box::new(TrendStrategy::long())),
+            (Style::Value, Period::UltraShort) => Some(Box::new(ValueStrategy::ultra_short())),
+            (Style::Value, Period::Short) => Some(Box::new(ValueStrategy::short())),
+            (Style::Value, Period::Mid) => Some(Box::new(ValueStrategy::mid())),
+            (Style::Value, Period::Long) => Some(Box::new(ValueStrategy::long())),
+            (Style::Capital, Period::UltraShort) => Some(Box::new(CapitalStrategy::ultra_short())),
+            (Style::Capital, Period::Short) => Some(Box::new(CapitalStrategy::short())),
+            (Style::Capital, Period::Mid) => Some(Box::new(CapitalStrategy::mid())),
+            (Style::Capital, Period::Long) => Some(Box::new(CapitalStrategy::long())),
+            (Style::Reversion, Period::Short) => Some(Box::new(ReversionStrategy::short())),
+            (Style::Reversion, Period::Mid) => Some(Box::new(ReversionStrategy::mid())),
+            (Style::Watchlist, Period::UltraShort) => {
+                Some(Box::new(WatchlistStrategy::ultra_short()))
+            },
+            (Style::Watchlist, Period::Short) => Some(Box::new(WatchlistStrategy::short())),
+            (Style::Watchlist, Period::Mid) => Some(Box::new(WatchlistStrategy::mid())),
+            (Style::Watchlist, Period::Long) => Some(Box::new(WatchlistStrategy::long())),
+            (Style::Bottleneck, Period::Mid) => Some(Box::new(SerenityStrategy::mid())),
+            (Style::Bottleneck, Period::Long) => Some(Box::new(SerenityStrategy::long())),
+            _ => None,
+        };
+        match s {
+            Some(boxed) => out.push(boxed),
+            // 表说该格出票、构造却落 `_ => None` ⇒ 显式 panic（静默少一个风格就是「表与实现漂移」）
+            None => panic!("style_matrix 声明 {style:?}×{period:?} 出票，但没有对应构造函数"),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -881,6 +1240,12 @@ mod tests {
             reasons: vec!["测试".into()],
             risk_notes: vec![],
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: false,
         };
         let mut picks = std::collections::BTreeMap::new();
@@ -1026,6 +1391,12 @@ mod tests {
             reasons: vec!["test".into()],
             risk_notes: vec![],
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: false,
         }
     }
@@ -1098,5 +1469,37 @@ mod tests {
         let vars = vec![("reco_trend_enabled".to_string(), serde_json::json!(true))];
         let m = parse_strategy_weights(&vars);
         assert!(m.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod style_matrix_wiring_tests {
+    use super::*;
+
+    /// 表 ⇔ 实现：每档构造出的策略风格集合必须与矩阵登记的出票格**逐项相等**。
+    #[test]
+    fn matrix_matches_strategy_selection() {
+        for period in Period::ALL {
+            let from_matrix: Vec<String> = {
+                let mut v: Vec<String> = style_matrix::styles_for(period)
+                    .iter()
+                    .map(|s| s.as_str().to_string())
+                    .collect();
+                v.sort();
+                v
+            };
+            // 两侧同名目比较：矩阵里 `serenity` 映射到 `Style::Bottleneck`（SerenityStrategy::style() 同值）
+            let mut built: Vec<String> = strategies_for_period(period)
+                .iter()
+                .map(|s| s.style().as_str().to_string())
+                .collect();
+            built.sort();
+            built.dedup();
+            assert_eq!(from_matrix, built, "档位 {period:?} 的矩阵与实现漂移");
+            assert!(
+                !built.is_empty(),
+                "档位 {period:?} 一个策略都没构造出来（矩阵或构造表被清空）"
+            );
+        }
     }
 }

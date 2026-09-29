@@ -1,11 +1,16 @@
 //! 智能荐股 — 置信度、仓位、去重、缓存
 
 use crate::recommender::types::{Period, RecoPick, Style};
-use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap};
 
-/// 自适应评分权重（初始值为默认值，可通过回测/反思反馈调优）
-#[derive(Debug, Clone)]
+/// 评分权重（一致性 / 信号强度 / 流动性 / 动量）。
+///
+/// ⚠ 这里**没有**「自适应」：旧实现挂着一个 `Mutex<ScoringWeights>` + `nudge_scoring_weights`
+/// （EWMA 0.7/0.3）注释写「可通过回测/反思反馈调优」，但全仓**没有任何调用方**写它
+/// ⇒ 四档永远读到的是出厂常量，而注释让人以为它已被数据校准过（纸面可调）。
+/// 已删该死机制；真要接回写通路，得与 `weighted_signal_calibration` / 逐档 IC（Phase R-E）
+/// 一起设计，而不是留一份没人写的表在这里充当证据。
+#[derive(Debug, Clone, Copy)]
 pub struct ScoringWeights {
     pub consistency: f64,
     pub signal_strength: f64,
@@ -19,48 +24,36 @@ impl Default for ScoringWeights {
     }
 }
 
-static ADAPTIVE_WEIGHTS: Mutex<ScoringWeights> = Mutex::new(ScoringWeights {
+pub const WEIGHTS: ScoringWeights = ScoringWeights {
     consistency: 0.45,
     signal_strength: 0.35,
     liquidity: 0.15,
     price_momentum: 0.05,
-});
+};
 
-/// 读取当前自适应权重
-pub fn get_scoring_weights() -> ScoringWeights {
-    ADAPTIVE_WEIGHTS.lock().clone()
-}
-
-/// 更新自适应权重（EWMA: new = old × 0.7 + suggested × 0.3）
-pub fn nudge_scoring_weights(suggested: &ScoringWeights) {
-    let mut w = ADAPTIVE_WEIGHTS.lock();
-    w.consistency = w.consistency * 0.7 + suggested.consistency * 0.3;
-    w.signal_strength = w.signal_strength * 0.7 + suggested.signal_strength * 0.3;
-    w.liquidity = w.liquidity * 0.7 + suggested.liquidity * 0.3;
-    w.price_momentum = w.price_momentum * 0.7 + suggested.price_momentum * 0.3;
-    // 归一化确保总和=1.0
-    let total = w.consistency + w.signal_strength + w.liquidity + w.price_momentum;
-    if total > 0.0 {
-        w.consistency /= total;
-        w.signal_strength /= total;
-        w.liquidity /= total;
-        w.price_momentum /= total;
+/// 把「该档先验胜率」与「该风格内的评分」在 **logit 空间**合成为一个绝对置信度（Phase R-C）。
+///
+/// `logit(conf) = logit(prior) + 2·s·(score − 0.5)`
+///
+/// - 先验来自 `horizon_prior::horizon_prior_map`（该档历史方向命中率经经验贝叶斯收缩，
+///   κ 可调）⇒ **四档各自有自己的锚**，不再是共用一个数（诊断 E1 在荐股链的形态 R1）。
+/// - 斜率 `s` 是唯一新增可调量（`reco_conf_sensitivity`，出厂 1.0）：s=0 ⇒ 只承认先验、
+///   评分不起作用；s 越大越信评分。写成 logit 加法而不是线性相加，是为了让「先验 0.5 附近
+///   的小改进」与「先验极端处的小改进」有可比的信息量（对数几率的可加性）。
+/// - 先验不可得 ⇒ 退回 `score`（调用方必须标 `priorSource="absent"`），不假装合成过。
+pub fn blend_confidence(prior_win_rate: Option<f64>, score: f64, sensitivity: f64) -> Option<u8> {
+    let p = prior_win_rate?;
+    if !(p > 0.0 && p < 1.0) || !score.is_finite() {
+        return None;
     }
+    let logit = (p / (1.0 - p)).ln() + 2.0 * sensitivity * (score - 0.5);
+    let blended = 1.0 / (1.0 + (-logit).exp());
+    if !blended.is_finite() {
+        return None;
+    }
+    Some((blended * 100.0).clamp(0.0, 100.0).round() as u8)
 }
 
-/// 置信度计算
-///
-/// - `score_consistency`: 子策略内多因子方向一致率 (0-1)
-/// - `signal_strength`: 关键因子偏离度分位 (0-1)
-/// - `liquidity_score`: 成交额 / 换手率分位 (0-1)
-/// - `price_momentum`: 距均线偏离 / 近期涨跌幅分位 (-0.5 ~ +0.5)，正=趋势有利
-/// - `turnover_anomaly`: 今日成交额 / 20日均 (> 1.0 为正常，> 3.0 视为异常)
-///
-/// 权重分配依据：
-///   - consistency(0.45) 为第一权重：多因子方向一致是置信度的核心
-///   - signal_strength(0.35) 为第二权重：关键指标偏离度代表信号稀缺性
-///   - liquidity(0.15) 为辅助权重：流动性能保证策略可执行
-///   - price_momentum(0.05) 为微调权重：避免严重逆势入场
 pub fn calc_confidence(
     score_consistency: f64,
     signal_strength: f64,
@@ -82,7 +75,7 @@ pub fn calc_confidence(
     let price_momentum = clean(price_momentum);
     let turnover_anomaly = clean(turnover_anomaly);
 
-    let w = get_scoring_weights();
+    let w = WEIGHTS;
     let mut c = w.consistency * score_consistency
         + w.signal_strength * signal_strength
         + w.liquidity * liquidity_score
@@ -125,8 +118,8 @@ pub fn calc_confidence(
 ///   consistency ≥ 0.6 → 无惩罚 (×1.0)
 ///   consistency 0.3 → ×0.85
 ///   consistency 0.0 → ×0.60
-pub fn calc_position(base: f64, confidence: u8, period: Period) -> f64 {
-    calc_position_with_consistency(base, confidence, 1.0, period)
+pub fn calc_position(base: f64, confidence: u8) -> f64 {
+    calc_position_with_consistency(base, confidence, 1.0)
 }
 
 /// 带一致性惩罚的仓位计算
@@ -134,17 +127,14 @@ pub fn calc_position(base: f64, confidence: u8, period: Period) -> f64 {
 /// `consistency` (0-1)：同一策略内多因子方向一致率，
 ///   例如 4 个因子中 3 个方向一致 → 0.75。
 ///   低一致性时应用线性惩罚降仓。
-pub fn calc_position_with_consistency(
-    base: f64,
-    confidence: u8,
-    consistency: f64,
-    period: Period,
-) -> f64 {
+pub fn calc_position_with_consistency(base: f64, confidence: u8, consistency: f64) -> f64 {
     if base.is_nan() {
         return 0.0;
     }
     let c = confidence as f64 / 100.0;
-    let raw = base * c * period.factor();
+    // 主路径**不乘**经验周期乘数：仓位由 `risk::risk_budget_position`（风险预算）承载，
+    // 乘数只在 σ 不可得时作为降级分支出现（`calc_position_fallback_mult`，门 b 锁这一点）。
+    let raw = base * c;
     // 一致性惩罚：consistency 0.0→0.60, 0.3→0.85, 0.6→1.0
     let penalty = if consistency >= 0.6 {
         1.0
@@ -156,6 +146,16 @@ pub fn calc_position_with_consistency(
         0.60 + consistency / 0.3 * 0.25
     };
     (raw * penalty * 100.0).round() / 100.0
+}
+
+/// 降级分支：σ 不可得时，仓位退回「base × 置信 × 经验周期乘数」。
+///
+/// 之所以单独成函数而不是混在主路径里：`Period::factor()`（0.4/0.6/0.8/1.0）是**没有推导的
+/// 经验数**（诊断 E6），它只能出现在「拿不到波动率」这条分支上，且调用方必须把
+/// `positionSource` 标成 `fallback_kelly_x_mult` —— 否则用户读到的是「按风险预算定的仓位」。
+pub fn calc_position_fallback_mult(base: f64, confidence: u8, period: Period) -> f64 {
+    let c = confidence as f64 / 100.0;
+    (base * c * period.factor() * 100.0).round() / 100.0
 }
 
 /// 同票去重：保留 confidence 最高，标注次选风格
@@ -220,10 +220,17 @@ pub fn group_by_style_and_trim(
         }
         let range = (max_conf - min_conf) as f64;
         for p in v.iter_mut() {
+            // 覆写 `confidence` 会把「该档胜率 62%」变成「今天组内第二好」——
+            // 分位数与概率是两个量纲，混写会让按 conf 做的命中率/IC 标定全部失真（诊断 R9）。
+            // 现在分位单独进 `confidence_percentile`，绝对置信度原样保留。
             let original = p.confidence;
             let normalized = ((original as f64 - min_conf as f64) / range * 100.0).round() as u8;
-            p.confidence = normalized.clamp(1, 100);
-            p.reasons.push(format!("置信度归一化: {}→{}", original, p.confidence));
+            p.confidence_percentile = Some(normalized.clamp(1, 100));
+            p.reasons.push(format!(
+                "组内当日分位 {}（绝对置信 {} 未改写）",
+                normalized.clamp(1, 100),
+                original
+            ));
         }
         v.sort_by_key(|b| std::cmp::Reverse(b.confidence));
         v.truncate(per_style_limit);
@@ -262,18 +269,26 @@ mod tests {
         assert_eq!(c, 100);
     }
 
+    /// 主路径仓位 = base × 置信，**不乘**经验周期乘数（Phase R-D）。
+    /// 旧断言写的是 `5×0.6×0.6=1.8`（含 short factor 0.6），那是「周期仓位差异靠一个拍脑袋
+    /// 乘数」的形态；现在周期差异由波动率风险预算承载（`risk::risk_budget_position`）。
     #[test]
-    fn position_short_low_conf() {
-        // base=5, conf=60, short factor 0.6 → 5*0.6*0.6 = 1.8
-        let p = calc_position(5.0, 60, Period::Short);
-        assert!((p - 1.8).abs() < 0.01, "got {}", p);
+    fn position_main_path_does_not_multiply_period_factor() {
+        let p = calc_position(5.0, 60);
+        assert!((p - 3.0).abs() < 0.01, "base×conf = 5×0.6 = 3.0，实际 {p}");
+        let q = calc_position(10.0, 80);
+        assert!((q - 8.0).abs() < 0.01, "base×conf = 10×0.8 = 8.0，实际 {q}");
+        // 主路径仓位上限与档位**无关**：周期差异全部由该档止损宽度经风险预算折算而来
+        // （`risk::risk_budget_position` + `recommender::mod.rs` 后处理），故签名不再收 period。
     }
 
+    /// 降级分支仍然乘经验乘数，且这是它**唯一**存在的理由（门 b 锁消费面只在 fallback）。
     #[test]
-    fn position_long_high_conf() {
-        // base=10, conf=80, long factor 1.0 → 10*0.8*1.0 = 8.0
-        let p = calc_position(10.0, 80, Period::Long);
-        assert!((p - 8.0).abs() < 0.01, "got {}", p);
+    fn fallback_mult_branch_keeps_period_multiplier() {
+        let p = calc_position_fallback_mult(5.0, 60, Period::Short);
+        assert!((p - 1.8).abs() < 0.01, "5×0.6×0.6 = 1.8，实际 {p}");
+        let q = calc_position_fallback_mult(5.0, 60, Period::UltraShort);
+        assert!((q - 1.2).abs() < 0.01, "超短 factor 0.4 ⇒ 1.2，实际 {q}");
     }
 
     #[test]
@@ -296,6 +311,12 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                confidence_percentile: None,
+                prior_source: None,
+                prior_samples: None,
+                stop_source: None,
+                position_source: None,
+
                 synthetic: false,
             },
             RecoPick {
@@ -315,6 +336,12 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                confidence_percentile: None,
+                prior_source: None,
+                prior_samples: None,
+                stop_source: None,
+                position_source: None,
+
                 synthetic: false,
             },
         ];
@@ -347,6 +374,12 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![Style::Value],
+                confidence_percentile: None,
+                prior_source: None,
+                prior_samples: None,
+                stop_source: None,
+                position_source: None,
+
                 synthetic: false,
             },
             RecoPick {
@@ -366,6 +399,12 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                confidence_percentile: None,
+                prior_source: None,
+                prior_samples: None,
+                stop_source: None,
+                position_source: None,
+
                 synthetic: false,
             },
         ];
@@ -398,6 +437,12 @@ mod tests {
                 reasons: vec![],
                 risk_notes: vec![],
                 secondary_styles: vec![],
+                confidence_percentile: None,
+                prior_source: None,
+                prior_samples: None,
+                stop_source: None,
+                position_source: None,
+
                 synthetic: false,
             })
             .collect();

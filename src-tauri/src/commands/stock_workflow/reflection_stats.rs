@@ -109,6 +109,12 @@ fn expand_horizon_samples(json: &str) -> Option<Vec<DecisionPerformanceSample>> 
                 .and_then(|d| d.get("confidence"))
                 .and_then(|v| v.as_f64())
                 .filter(|v| v.is_finite()),
+            // 判定口径水印：v104 前逐档 confidence = 生效后验，v104 起 = SNR √h 折算值，
+            // 两代混在一档里会打乱池化秩 ⇒ 引擎按此位决定是否进 IC 分母。
+            snr_anchor_days: entry
+                .get("decision")
+                .and_then(|d| d.get("snrAnchorDays").or_else(|| d.get("snr_anchor_days")))
+                .and_then(|v| v.as_i64()),
             data_source: if status == "legacy" {
                 SampleDataSource::Legacy
             } else {
@@ -218,6 +224,7 @@ pub(crate) async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<Hitra
             // legacy 回退路径没有逐档决策，置信度只能是 None —— 该样本进命中率
             // 分母，但**不进 IC 分母**（IC 缺席由 `ic_status="no_confidence"` 点名）。
             confidence: None,
+            snr_anchor_days: None,
             data_source: SampleDataSource::Legacy,
         });
     }
@@ -254,7 +261,7 @@ mod reflection_stats_command_tests {
         serde_json::json!({
             "ultra_short": {
                 "status": "mature",
-                "decision": { "action": "买入", "confidence": 62.0 },
+                "decision": { "action": "买入", "confidence": 62.0, "snrAnchorDays": 28 },
                 "market": { "returnPct": 3.1, "alphaPct": 1.4, "targetReached": true },
                 "evaluation": { "wasCorrect": 1 }
             },
@@ -291,6 +298,8 @@ mod reflection_stats_command_tests {
         // IC 的预测侧：键名与产出方（`reflection.rs::build_horizon_results_json` 的
         // `"confidence": decision.confidence`）逐字对齐，口径是 0–100 不是 0–1。
         assert_eq!(s.confidence, Some(62.0));
+        // 判定口径水印必须一路带到统计层（v104 前后 confidence 不同尺，IC 靠它筛样本）
+        assert_eq!(s.snr_anchor_days, Some(28));
         assert_eq!(s.data_source, SampleDataSource::Reflection);
     }
 
@@ -324,6 +333,39 @@ mod reflection_stats_command_tests {
         })
         .to_string();
         assert_eq!(expand_horizon_samples(&nan).unwrap()[0].confidence, None);
+    }
+
+    /// 水印的两种键名形态都要认（现网 camelCase、旧快照/手拼 snake_case），
+    /// 而**缺水印**必须原样落 None —— 那是「上一代口径」的判据本身，兜底成 28 等于
+    /// 把所有旧记录都说成当代样本，正是本轮要挡住的混算。
+    #[test]
+    fn snr_watermark_is_read_verbatim_in_both_key_forms_and_never_invented() {
+        let camel = serde_json::json!({
+            "mid": {
+                "status": "mature",
+                "decision": { "action": "买入", "confidence": 55.0, "snrAnchorDays": 28 },
+                "market": { "returnPct": 1.5 },
+                "evaluation": { "wasCorrect": 1 }
+            }
+        })
+        .to_string();
+        assert_eq!(expand_horizon_samples(&camel).unwrap()[0].snr_anchor_days, Some(28));
+
+        let snake = camel.replace("snrAnchorDays", "snr_anchor_days");
+        assert_eq!(expand_horizon_samples(&snake).unwrap()[0].snr_anchor_days, Some(28));
+
+        let none = serde_json::json!({
+            "mid": {
+                "status": "mature",
+                "decision": { "action": "买入", "confidence": 55.0 },
+                "market": { "returnPct": 1.5 },
+                "evaluation": { "wasCorrect": 1 }
+            }
+        })
+        .to_string();
+        let s = &expand_horizon_samples(&none).unwrap()[0];
+        assert_eq!(s.confidence, Some(55.0), "没有水印不等于没有置信度，两者要分开表达");
+        assert_eq!(s.snr_anchor_days, None);
     }
 
     #[test]

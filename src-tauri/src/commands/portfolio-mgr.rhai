@@ -1146,7 +1146,10 @@ let f7_signal = if present(trader_direction) && type_of(trader_direction) == "st
 //       占着 0.10 权重，使 no_f7 版与主版产生**虚假差异**）。
 //   ③ `f7_weight_pct`（落库，供 compute_decision_agreement 的防自指标记）：
 //      σ = 0 时为 0，含义是「本次公式未吸收 trader 观点」—— 比旧值的 0.10/total 更准确。
-let f7_weight = if f7_signal != 0.0 { 0.10 } else { 0.0 };
+let f7_default = 0.10;
+// ↑ 基线权重此前以裸值同时出现在「权重分支」与下方 `max_weight` 手抄 literal 两处，
+//   抽成具名与其余 11 条腿同形态（值不变，仍 0.10）。
+let f7_weight = if f7_signal != 0.0 { f7_default } else { 0.0 };
 
 // ── P1 新增: 因子 9 — 资金面（主力资金流向）──
 // 数据源: t-hotmoney-data → get_stock_money_flow（单日净流入/流出，单位：元）
@@ -1682,8 +1685,32 @@ let avg_signal = if total_weight > 0.0 { weighted_signal / total_weight } else {
 //   `f13_weight`，则熊市/高波动下分母随市况漂移，`evidence_scale` 就不再是稳定的
 //   基线比值（同一份证据在不同市况下得到不同的 evidence_pct）。
 //   ⇒ 此处继续用 `f13_default`，与其余市况自适应因子**同形态**。
-let max_weight = 0.15 + 0.25 + 0.20 + 0.15 + 0.15 + 0.15 + 0.10 + 0.08 + 0.08 + 0.08 + 0.10
-    + (if f13_weight > 0.0 { f13_default } else { 0.0 });
+// 逐腿基线默认权重表 —— `max_weight` 与**逐档**证据分母的唯一来源（第 5(a) 条）。
+// 原来这里是一条 11 项手抄 literal（合计 1.49，f13 激活时 1.59），与各腿的 `fN_default`
+// 变量是同一张表的两份形态：改任何一条腿的默认值，literal 都不会跟着动，而
+// `evidence_scale` / `evidence_pct` / `weights_collapsed` 三个判据全吃这个分母。
+// 累加顺序刻意与原 literal 逐项一致 ⇒ 浮点求和**逐位不变**（零回归，由
+// `portfolio_mgr_tier_params_rhai.rs::evidence_max_reduces_to_max_weight` 锁住）。
+let leg_bases = [
+    #{ key: "f1", base: f1_default },
+    #{ key: "f2", base: f2_default },
+    #{ key: "f3", base: f3_default },
+    #{ key: "f4", base: f4_default },
+    #{ key: "f5", base: f5_default },
+    #{ key: "f6", base: f6_default },
+    #{ key: "f7", base: f7_default },
+    #{ key: "f9", base: f9_default },
+    #{ key: "f10", base: f10_default },
+    #{ key: "f11", base: f11_default },
+    #{ key: "f12", base: f12_default },
+    #{ key: "f13", base: f13_default },
+];
+let max_weight = 0.0;
+for row in leg_bases {
+    // f13 的计入条件原样保留：非瓶颈路径下它不是活跃因子，不得进分母（见上方注释）
+    if row.key == "f13" && f13_weight <= 0.0 { continue; }
+    max_weight += row.base;
+}
 // ── P2-1+P3-1: 证据缩放 — 调用 Rust 函数（非线性 sqrt 曲线）──
 let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	// V49 修复: trader 否决权 — 技术面（滞后指标）不应覆盖 LLM trader 的实时判断
@@ -2796,6 +2823,20 @@ let leg_mult = |h, leg| {
     }
 };
 
+// 该档的证据分母 = 同一张 leg_bases 按该档乘数缩放（f13 的计入条件与主链同规则）。
+// 为什么必须逐档：分子 `tw` 已经是「该档实际权重之和」，分母若仍用主链那份，
+// 短档把技术腿放大 1.3×、估值腿压到 0.3× 之后，算出的「证据完整度」与该档无关 ——
+// 融合灵敏度档间共用正是 E1 的残留形态（第 5(a) 条）。
+// 乘数全 1（表缺失走 fallback_unity）时逐位等于 `max_weight` ⇒ 主链口径零回归。
+let evidence_max_for = |h| {
+    let acc = 0.0;
+    for row in leg_bases {
+        if row.key == "f13" && f13_weight <= 0.0 { continue; }
+        acc += row.base * leg_mult.call(h, row.key);
+    }
+    acc
+};
+
 // ── 逐档先验（Phase C）──
 // 旧形态：四档共用同一个 `prior`（由市场状态派生 0.55/0.50/0.45）⇒ 这是诊断 E1 的根。
 // 现：Rust 按档算方向命中率并与全档合并基准做经验贝叶斯收缩后注入 `horizon_prior_json`；
@@ -2829,7 +2870,11 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
     }
     let avg = if tw > 0.0 { ws / tw } else { 0.0 };
     let hp = prior_for.call(h);
-    let hpost = clamp(hp["value"] + avg * evidence_scale, 0.0, 1.0);
+    // 逐档证据完整度（第 5(a) 条）：分子是本档实际权重和 `tw`，分母是同一张基线表
+    // 按本档乘数缩放。乘数表缺失 ⇒ 分母逐位回到主链 `max_weight`，hscale 也与主链同值。
+    let hmax = evidence_max_for.call(h);
+    let hscale = if hmax > 0.0 { pm_evidence_scale(tw, hmax) } else { evidence_scale };
+    let hpost = clamp(hp["value"] + avg * hscale, 0.0, 1.0);
     let heff = clamp(hpost + risk_bias, 0.0, 1.0);
     // 「长线更值得」放在**判定侧**（用户裁定，Phase D-2）：恒定日边缘下信噪比 ∝ √h，
     // 故该档胜率 = 0.5 + (heff − 0.5) × √(h / 锚定天数)，锚 = 中线 28 日（h=28 时不改）。
@@ -2842,9 +2887,14 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
         else if hconf >= ACTION_WATCH_THRESHOLD { "观望" }
         else if hconf >= ACTION_REDUCE_THRESHOLD { "减持" }
         else { "卖出" };
-    // 同主链 odds_fallback 表（证据强度 → 保守赔率），保证「下注概率」与「赔率」同源
-    let hodds = if hconf >= 0.70 { 2.5 } else if hconf >= 0.60 { 2.0 }
-        else if hconf >= 0.50 { 1.5 } else if hconf >= 0.42 { 1.5 } else { 0.0 };
+    // 赔率 = **本档价带之比** 止盈% ÷ 止损%（第 5(b) 条，替代「置信阶梯 → 保守赔率」的拍表）。
+    // 推导：该档 TP/SL 由 `k · σ_daily · √h` 出（Phase D），故
+    //   odds = (k2·σ·√h) / (k1·σ·√h) = k2/k1 —— σ 与 h **同时约掉**。
+    // 这与直觉相反但自洽：持有期变长时赔率不该自动变大（变的是「位移幅度」，已在价带里），
+    // 旧表把「置信高」当成「赔率好」，等于用同一个信念既定下注概率又定回报倍数（自指）。
+    // 凯利因此变成 `p` 与**我们自己设下的价带**的函数：改盈亏比只有 `k1/k2` 一个入口（设置面板可调）。
+    // σ 不可得时走兜底百分比档，比值仍是该档实际价带（例：短档 10/5 = 2.0），仍是自洽口径。
+    let hodds = if slh > 0.0 { tph / slh } else { 0.0 };
     // 仓位：凯利（信念上限）与**该档风险预算**（损失上限）取小；σ 不可得时风险预算仍按
     // 兜底止损算得出，若止损也为 0 则退回裸凯利。
     let hpos_raw = if hconf >= 0.50 && hodds > 0.001 { pm_kelly_position(hconf, hodds, COST_PCT, overall_risk) }
@@ -2876,6 +2926,13 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
         "stopSource": stop_source_for.call(h),
         "priorSource": hp["source"],
         "priorSamples": hp["samples"],
+        // 该档证据完整度（分子=本档实际权重和，分母=同一张基线表按本档乘数缩放）。
+        // 与主链 `evidence_pct` 不同口径是**有意的**：分母跟着该档的腿间配比走。
+        "evidenceScale": (hscale * 100.0).round() / 10.0,
+        // 该档下注的实际赔率（= 价带之比）。报出来是为了让「档间仓位差异」可归因：
+        // 没有这个字段，读者只能看到凯利结果，看不出是 p 变了还是 b 变了。
+        "odds": (hodds * 100.0).round() / 100.0,
+        "oddsSource": if slh > 0.0 { "ladder_ratio" } else { "no_stop" },
         "stopLossPct": if hpos>0.0 { slh } else { 0.0 },
         "takeProfitPct": if hpos>0.0 { tph } else { 0.0 },
         "expectedHoldingDays": daysh,

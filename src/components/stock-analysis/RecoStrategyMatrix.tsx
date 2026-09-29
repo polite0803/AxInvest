@@ -1,6 +1,6 @@
 import { invoke } from "@/lib/invoke";
-import { horizonSuffix } from "@/lib/stock-analysis-utils";
-import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
+import { horizonIcAbsenceKey, horizonSuffix } from "@/lib/stock-analysis-utils";
+import type { BacktestComparisonResponse, RecoIcCell, RecoIcStats, StrategyStats } from "@/types/stock-analysis";
 import { Card, Empty, Segmented, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -36,6 +36,8 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [error, _setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  // Phase R-E：逐 (风格, 档位) rank IC —— 只报数，不回写任何权重
+  const [ic, setIc] = useState<RecoIcStats | null>(null);
   const [group, setGroup] = useState<"positive" | "negative">("positive");
 
   useEffect(() => {
@@ -59,6 +61,40 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
       cancelled = true;
     };
   }, [group, externalData]);
+
+  // IC 与回测同源不同表：单独取，失败静默（面板退化成「只有胜率」而不报错）
+  useEffect(() => {
+    let cancelled = false;
+    // 用 async IIFE 而不是 .then：invoke 被 mock 成同步返回 undefined 时，
+    // 直接 .then 会抛 TypeError 把整张表带崩（观测面拿不到不该影响主表）。
+    void (async () => {
+      try {
+        const r = await invoke<RecoIcStats>("reco_ic_stats");
+        if (!cancelled) { setIc(r ?? null); }
+      } catch { /* 观测面不可得时不干扰主表 */ }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const icCells = useMemo(() => {
+    const map: Record<string, Record<string, RecoIcCell>> = {};
+    for (const st of ic?.styles ?? []) {
+      map[st.style] = {};
+      for (const c of st.cells) { map[st.style][c.period] = c; }
+    }
+    return map;
+  }, [ic]);
+
+  const halfLifeOf = (style: string): string | null => {
+    const st = ic?.styles.find((x) => x.style === style);
+    if (!st) { return null; }
+    if (st.halfLifeDays != null) {
+      return t("stockAnalysis.reflection.hitrateHalfLifeDays", { days: st.halfLifeDays.toFixed(1) });
+    }
+    return t("stockAnalysis.reflection.hitrateHalfLifeNone", { n: 0 });
+  };
 
   // 数据源
   const data = externalData ?? internalData;
@@ -138,6 +174,24 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
             <tr key={style} style={{ borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
               <td style={{ padding: "8px 10px", fontWeight: 500 }}>
                 {t(`stockAnalysis.recommendation.style${style.charAt(0).toUpperCase() + style.slice(1)}`)}
+                {(() => {
+                  const hl = halfLifeOf(style);
+                  if (!hl) {
+                    return null;
+                  }
+                  const st = ic?.styles.find((x) =>
+                    x.style === style
+                  );
+                  return (
+                    <div
+                      style={{ fontSize: 10, fontWeight: 400, color: "var(--color-text-tertiary)" }}
+                      data-testid="reco-ic-half-life"
+                    >
+                      {`${t("stockAnalysis.reflection.hitrateHalfLife")}: ${hl}`}
+                      {st && st.halfLifeDays == null ? `（${st.halfLifeStatus}）` : ""}
+                    </div>
+                  );
+                })()}
               </td>
               {PERIOD_KEYS.map((period) => {
                 const s = matrix[style]?.[period];
@@ -214,6 +268,30 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                     <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 2 }}>
                       {`S ${s.sharpeRatio != null ? s.sharpeRatio.toFixed(1) : "—"} · ${s.totalSignals}`}
                     </div>
+                    {(() => {
+                      const cell = icCells[style]?.[period];
+                      if (!cell) {
+                        // 一格都没有实现样本：与「样本不够」不同，得说不清的方向
+                        return (
+                          <div style={{ fontSize: 10, color: "var(--color-text-tertiary)" }} data-testid="reco-ic-none">
+                            {t("stockAnalysis.backtest.icNoValidatedSample")}
+                          </div>
+                        );
+                      }
+                      if (cell.rankIc != null) {
+                        return (
+                          <div style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}>
+                            {`IC ${cell.rankIc.toFixed(3)} · n=${cell.samples}`}
+                          </div>
+                        );
+                      }
+                      const key = horizonIcAbsenceKey(cell.icStatus);
+                      return (
+                        <div style={{ fontSize: 10, color: "var(--sa-warning, #faad14)" }}>
+                          {key ? t(key) : cell.icStatus}
+                        </div>
+                      );
+                    })()}
                   </td>
                 );
               })}

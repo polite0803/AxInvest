@@ -18,25 +18,91 @@ use std::collections::HashMap;
 // 删除的 per-period 变量（如 trend_ultra_short_entry_low）默认 fallback 到硬编码。
 
 const DEFAULT_AMOUNT_RATIO_MIN: f64 = 0.8;
-const DEFAULT_MA20_TOLERANCE: f64 = 0.985; // Short：距 MA20 最小比例
-const DEFAULT_MA60_THRESHOLD: f64 = 0.985; // Mid：距 MA60 最小比例
-const DEFAULT_HIGH_20_THRESHOLD: f64 = 0.97; // Short：距 20 日高最小比例
-const DEFAULT_HIGH_60_THRESHOLD: f64 = 0.94; // Mid：距 60 日高最小比例
 const DEFAULT_ENTRY_TIGHTNESS: f64 = 1.0; // 入场范围乘数（1.0=标准，1.5=更宽松）
 const DEFAULT_STOP_MULT: f64 = 1.0; // 止损乘数（1.0=标准，0.8=更紧）
 const DEFAULT_TARGET_MULT: f64 = 1.0; // 目标乘数（1.0=标准，1.2=更激进）
 const DEFAULT_POS_ADJ: f64 = 1.0; // 仓位调整（1.0=标准，0.5=半仓）
 
-/// 按周期返回硬编码的 (entry_low, entry_high, stop_loss, target, base_pos, kline_limit, min_kline)
-#[inline]
-fn period_defaults(p: Period) -> (f64, f64, f64, f64, f64, u32, usize) {
+/// 尺度窗口组（单位=**该档尺度的 bar**，不是日历日；由 `recommender::scale` 决定尺度）。
+///
+/// 为什么必须自带一组而不是「日线窗口换个条数」：`fast/slow/anchor` 要覆盖该档的决策视野 ——
+/// 超短看几小时到两天，长线看数季到两年。换算依据写在各档注释里（1 小时线=0.25 交易日、
+/// 1 周线=5 日、1 季线=60 日）。
+#[derive(Clone, Copy)]
+struct Windows {
+    fast: usize,
+    slow: usize,
+    anchor: usize,
+    high_window: usize,
+    amount_window: usize,
+    /// 是否要求突破近期高点（长线看的是「回踩未破」，不要求创新高）
+    require_high_breakout: bool,
+    /// 是否加 MACD 方向条件（仅中线原形态有此条件，不擅自扩到别的档）
+    require_macd: bool,
+}
+
+fn windows_for(p: Period) -> Windows {
     match p {
-        Period::UltraShort => (0.995, 1.005, 0.98, 1.05, 3.0, 20, 15),
-        Period::Short => (0.99, 1.015, 0.95, 1.10, 5.0, 60, 30),
-        Period::Mid => (0.97, 1.05, 0.92, 1.20, 8.0, 150, 60),
-        Period::Long => (0.95, 1.03, 0.85, 1.30, 10.0, 300, 120),
+        // 小时线：8 根=2 日、16 根=4 日、40 根=10 日；高点看 2 日
+        Period::UltraShort => Windows {
+            fast: 8,
+            slow: 16,
+            anchor: 40,
+            high_window: 8,
+            amount_window: 20,
+            require_high_breakout: true,
+            require_macd: false,
+        },
+        // 日线：原形态 5/10/20
+        Period::Short => Windows {
+            fast: 5,
+            slow: 10,
+            anchor: 20,
+            high_window: 20,
+            amount_window: 20,
+            require_high_breakout: true,
+            require_macd: false,
+        },
+        // 周线：4 周=20 日、8 周=40 日、13 周=一季度；高点看 8 周
+        Period::Mid => Windows {
+            fast: 4,
+            slow: 8,
+            anchor: 13,
+            high_window: 8,
+            amount_window: 13,
+            require_high_breakout: true,
+            require_macd: true,
+        },
+        // 季线：3 季=9 月、6 季=18 月、8 季=2 年；长档不要求创新高（原形态是「回踩未破 MA60」）
+        Period::Long => Windows {
+            fast: 3,
+            slow: 6,
+            anchor: 8,
+            high_window: 4,
+            amount_window: 8,
+            require_high_breakout: false,
+            require_macd: false,
+        },
     }
 }
+
+/// 按档位返回硬编码的 (entry_low, entry_high, stop_loss, target, base_pos)。
+///
+/// ⚠ 入场/止损/目标仍是**百分比带宽**：尺度归一由 Phase R-D（波动率风控）处理，本阶段不混做。
+#[inline]
+fn price_bands(p: Period) -> (f64, f64, f64, f64, f64) {
+    match p {
+        Period::UltraShort => (0.995, 1.005, 0.98, 1.05, 3.0),
+        Period::Short => (0.99, 1.015, 0.95, 1.10, 5.0),
+        Period::Mid => (0.97, 1.05, 0.92, 1.20, 8.0),
+        Period::Long => (0.95, 1.03, 0.85, 1.30, 10.0),
+    }
+}
+
+/// 日线口径的均线容差基准（「收盘价不低于 MA × 该比例」）。用户可覆盖，覆盖值同样按尺度归一。
+const DAILY_MA_TOLERANCE: f64 = 0.99;
+/// 日线口径的高点容差基准（「突破 N 日高 × 该比例」）。
+const DAILY_HIGH_TOLERANCE: f64 = 0.97;
 
 pub struct TrendStrategy {
     pub period: Period,
@@ -64,10 +130,20 @@ impl TrendStrategy {
         sector: Option<String>,
         vars: &HashMap<String, Value>,
     ) -> Option<RecoPick> {
-        let (el, eh, sl, tg, bp, kline_limit, min_kline_len) = period_defaults(self.period);
+        let (el, eh, sl, tg, bp) = price_bands(self.period);
+        let w = windows_for(self.period);
 
-        let klines = client.get_klines(code, "daily", kline_limit, None).await.ok()?;
-        if klines.len() < min_kline_len {
+        // 尺度由档位决定（超短=60 分钟、短=日线、中=周线、长=季度）。取不到该尺度、
+        // 或聚合后 bar 数不足 ⇒ **该风格在该档不出票**，绝不退回日线冒充（门 f 锁这一点）。
+        let (klines, profile) =
+            match crate::recommender::scale::fetch(client, code, self.period).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::debug!("[trend] {code} 档位 {:?} 取数失败: {e}", self.period);
+                    return None;
+                },
+            };
+        if !crate::recommender::scale::enough_bars(&klines, &profile) {
             return None;
         }
 
@@ -75,10 +151,10 @@ impl TrendStrategy {
         let last = *cs.last()?;
 
         // 量比
-        let avg_20 = indicators::avg_amount_20d(&klines).unwrap_or(0.0);
+        let avg_amt = indicators::avg_amount_n(&klines, w.amount_window).unwrap_or(0.0);
         let today_amount = klines.last().map(|k| k.amount).unwrap_or(0.0);
-        let turnover_anomaly = if avg_20 > 0.0 {
-            today_amount / avg_20
+        let turnover_anomaly = if avg_amt > 0.0 {
+            today_amount / avg_amt
         } else {
             1.0
         };
@@ -90,98 +166,52 @@ impl TrendStrategy {
         let target_mult = read_f64(vars, "trend_target_mult", DEFAULT_TARGET_MULT);
         let pos_adj = read_f64(vars, "trend_position_adj", DEFAULT_POS_ADJ);
 
-        let (reasons, price_ref) = match self.period {
-            Period::UltraShort => {
-                // MA5 > MA10
-                let ma5 = indicators::sma(&cs, 5)?;
-                let ma10 = indicators::sma(&cs, 10)?;
-                if ma5 <= ma10 {
-                    return None;
-                }
-                let high_5 = indicators::highest(&klines, 5)?;
-                let high_th = read_f64(vars, "trend_high_20_threshold", DEFAULT_HIGH_20_THRESHOLD);
-                if last < high_5 * high_th {
-                    return None;
-                }
-                let amt_min = read_f64(vars, "trend_amount_ratio_min", DEFAULT_AMOUNT_RATIO_MIN);
-                if amount_ratio < amt_min {
-                    return None;
-                }
-                let r = vec![
-                    format!("MA5 {:.2} > MA10 {:.2}", ma5, ma10),
-                    format!("突破 5 日高 {:.2}", high_5),
-                    format!("量比 {:.2}", amount_ratio),
-                ];
-                (r, ma5)
-            },
-            Period::Short => {
-                let ma5 = indicators::sma(&cs, 5)?;
-                let ma10 = indicators::sma(&cs, 10)?;
-                let ma20 = indicators::sma(&cs, 20)?;
-                let tol = read_f64(vars, "trend_short_ma20_tolerance", DEFAULT_MA20_TOLERANCE);
-                if !(ma5 > ma10 && last >= ma20 * tol) {
-                    return None;
-                }
-                let high_20 = indicators::highest(&klines, 20)?;
-                let high_th = read_f64(vars, "trend_high_20_threshold", DEFAULT_HIGH_20_THRESHOLD);
-                if last < high_20 * high_th {
-                    return None;
-                }
-                let amt_min = read_f64(vars, "trend_amount_ratio_min", DEFAULT_AMOUNT_RATIO_MIN);
-                if amount_ratio < amt_min {
-                    return None;
-                }
-                let ma_align = if ma10 > ma20 {
-                    "多头排列"
-                } else {
-                    "站上均线"
-                };
-                let r = vec![
-                    format!("MA5 {:.2} > MA10 {:.2}, {} MA20 {:.2}", ma5, ma10, ma_align, ma20),
-                    format!("突破 20 日高 {:.2}", high_20),
-                    format!("量比 {:.2}", amount_ratio),
-                ];
-                (r, ma5)
-            },
-            Period::Mid => {
-                let ma20 = indicators::sma(&cs, 20)?;
-                let ma60 = indicators::sma(&cs, 60)?;
-                let ma60_th = read_f64(vars, "trend_ma60_threshold", DEFAULT_MA60_THRESHOLD);
-                if ma60.is_nan() || last < ma60 * ma60_th {
-                    return None;
-                }
-                let high_60 = indicators::highest(&klines, 60)?;
-                let high_th = read_f64(vars, "trend_high_60_threshold", DEFAULT_HIGH_60_THRESHOLD);
-                if last < high_60 * high_th {
-                    return None;
-                }
-                let (dif, dea, macd_bar) = indicators::macd(&klines, 12, 26, 9)?;
-                if dif <= dea {
-                    return None;
-                }
-                let r = vec![
-                    format!("站上 MA60 {:.2}", ma60),
-                    format!("突破 60 日高 {:.2}", high_60),
-                    format!("MACD 红柱 {:.2}", macd_bar),
-                ];
-                (r, ma20)
-            },
-            Period::Long => {
-                let ma60 = indicators::sma(&cs, 60)?;
-                let ma250 = indicators::sma(&cs, 250)?;
-                if ma250.is_nan() || ma60 < ma250 * 0.95 {
-                    return None;
-                }
-                if last < ma60 * 0.95 {
-                    return None;
-                }
-                let r = vec![
-                    format!("MA60 {:.2} > MA250 {:.2} 长期多头", ma60, ma250),
-                    "回踩未破 MA60".to_string(),
-                ];
-                (r, ma60)
-            },
-        };
+        // 容差按尺度归一：`trend_ma_tolerance_daily` / `trend_high_tolerance_daily` 是
+        // **日线口径**基准（用户可覆盖，覆盖值同样按尺度换算），放到每根覆盖 d 个交易日的
+        // bar 上按 √d 放宽/收紧 —— 消灭「每张策略各自手抄一档阈值」的形态（诊断 E3②）。
+        let ma_tol = crate::recommender::scale::dev_tolerance(
+            read_f64(vars, "trend_ma_tolerance_daily", DAILY_MA_TOLERANCE),
+            &profile,
+        );
+        let high_tol = crate::recommender::scale::dev_tolerance(
+            read_f64(vars, "trend_high_tolerance_daily", DAILY_HIGH_TOLERANCE),
+            &profile,
+        );
+        let amt_min = read_f64(vars, "trend_amount_ratio_min", DEFAULT_AMOUNT_RATIO_MIN);
+
+        let fast = indicators::sma(&cs, w.fast)?;
+        let slow = indicators::sma(&cs, w.slow)?;
+        let anchor = indicators::sma(&cs, w.anchor)?;
+        if fast <= slow {
+            return None;
+        }
+        if last < anchor * ma_tol {
+            return None;
+        }
+        if amount_ratio < amt_min {
+            return None;
+        }
+        let scale_name = crate::recommender::scale::scale_name(self.period);
+        let mut reasons: Vec<String> = vec![
+            format!("MA{} {:.2} > MA{} {:.2}（尺度 {}）", w.fast, fast, w.slow, slow, scale_name),
+            format!("站上 MA{} {:.2}", w.anchor, anchor),
+        ];
+        if w.require_high_breakout {
+            let high_n = indicators::highest(&klines, w.high_window)?;
+            if last < high_n * high_tol {
+                return None;
+            }
+            reasons.push(format!("接近 {} 根 bar 高点 {:.2}", w.high_window, high_n));
+        }
+        if w.require_macd {
+            let (dif, dea, macd_bar) = indicators::macd(&klines, 12, 26, 9)?;
+            if dif <= dea {
+                return None;
+            }
+            reasons.push(format!("MACD 红柱 {:.2}", macd_bar));
+        }
+        reasons.push(format!("量比 {:.2}", amount_ratio));
+        let price_ref = fast;
 
         // 应用共享乘数到硬编码默认值
         let entry_low = price_ref * (1.0 - (1.0 - el) * entry_tightness);
@@ -201,8 +231,7 @@ impl TrendStrategy {
             conf_market,
             turnover_anomaly,
         );
-        let position =
-            calc_position_with_consistency(base_position, conf, conf_consistency, self.period);
+        let position = calc_position_with_consistency(base_position, conf, conf_consistency);
 
         Some(RecoPick {
             stock_code: code.into(),
@@ -221,6 +250,12 @@ impl TrendStrategy {
             reasons,
             risk_notes: vec!["个股回调 / 跌破短期均线风险".to_string()],
             secondary_styles: vec![],
+            confidence_percentile: None,
+            prior_source: None,
+            prior_samples: None,
+            stop_source: None,
+            position_source: None,
+
             synthetic: false,
         })
     }

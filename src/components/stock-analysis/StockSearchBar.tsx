@@ -131,10 +131,6 @@ export function StockSearchBar() {
           stockName: parsed.stockQuery || parsed.stockCode,
           searchKeyword: value,
         });
-        // 如果有时间周期，传递到 store
-        if (parsed.timeHorizon) {
-          useStockAnalysisStore.setState({ selectedHorizon: parsed.timeHorizon } as never);
-        }
         // 如果查询词就是股票代码/名称，直接获取行情
         getStockQuote(parsed.stockCode);
         getStockKline(parsed.stockCode, "daily", 120);
@@ -213,7 +209,12 @@ export function StockSearchBar() {
           <Tag color="blue" className="text-xs">{intent.stockQuery || intent.stockCode}</Tag>
           {intent.timeHorizon && (
             <Tag color="green" className="text-xs">
-              {t(`stockAnalysis.period.${HORIZON_LABELS[intent.timeHorizon]}`) || intent.timeHorizon}
+              {t(`stockAnalysis.recommendation.${
+                HORIZON_LABELS[intent.timeHorizon] === "ultraShort"
+                  ? "periodUltraShort"
+                  : "period" + HORIZON_LABELS[intent.timeHorizon][0].toUpperCase()
+                    + HORIZON_LABELS[intent.timeHorizon].slice(1)
+              }`)}
             </Tag>
           )}
           <span className="text-xs">{intent.description}</span>

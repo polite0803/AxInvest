@@ -57,6 +57,18 @@ pub struct Model {
     pub as_of_date: Option<String>,
     /// 时间维度: "ultra_short" | "short" | "mid" | "long"
     pub decision_time_horizon: Option<String>,
+    /// `decision_time_horizon` 的**来源**（〇-B v2）：
+    /// `"formula"` = 由 `portfolio-mgr.rhai` 的确定性后验阈值映射定档（v2 唯一产出路径）；
+    /// `"model"`   = v2 之前「采信 trader 自报」的历史记录；
+    /// `"user"`    = v1 曾在入口提供的「用户锁档」形态（该通路已撤除，无生产数据）。
+    ///
+    /// 为什么必须与周期本身分列存放：同一个值 `short` 可能来自公式、也可能来自模型自报，
+    /// 两者的可复核性完全不同 —— 只有 `formula` 的记录才能被「重跑必同档」验证；
+    /// 合并成一列则该判据不存在，反思与设置面板也无从区分。
+    ///
+    /// `NULL` 语义 = 本列引入前的记录，来源未知（同 `template_version` 的约定，
+    /// **不得**按 `"formula"` 解释）。
+    pub decision_horizon_source: Option<String>,
     /// 期望持有天数（交易日）
     pub decision_expected_holding_days: Option<i64>,
     /// 决策所用 LLM 的版本标识（用于复现实验）

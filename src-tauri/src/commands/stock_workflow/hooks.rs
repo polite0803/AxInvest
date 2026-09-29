@@ -27,13 +27,13 @@ use crate::commands::stock_workflow::core::{
 use crate::commands::stock_workflow::decision::{
     QualityPrecheckResult, data_quality_precheck, extract_decision_fields,
     extract_decision_from_results_map, extract_decisions_by_horizon, extract_horizon_price_map,
-    extract_position_state, normalize_action_for_storage,
+    extract_horizon_source, extract_position_state, normalize_action_for_storage,
 };
 use axagent_astock_data::AStockClient;
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
 use axagent_harness::workflow_types::Variable;
-use axagent_harness::{HookExecContext, HookOutcome, WorkflowLifecycleHook};
+use axagent_harness::{HookExecContext, HookOutcome, Period, WorkflowLifecycleHook};
 use axagent_rt_workflow::work_engine::WorkEngine;
 use sea_orm::DatabaseConnection;
 use sea_orm::{ActiveModelTrait, EntityTrait, Set};
@@ -193,6 +193,34 @@ fn var_str<'a>(vars: &'a [Variable], name: &str) -> Option<&'a str> {
 /// `base_vars`：已有变量（工作区路径传模板变量；钩子传 ctx.variables）。
 /// `analysis_id`：Some 时写 `lesson_applications`（业务路径）；
 /// 对话直执行路径传 None（记录尚未创建，post_exec 才建）。
+/// 取该股**最近一条已产出主档**的分析的 `decision_time_horizon`，作为对话直执行路径
+/// 注入反思教训时的「本轮周期」代理。
+///
+/// 返回 `None` 的两种情形（都按「不按档过滤」处理并 WARN，不冒充某档）：
+///   ① 该股从未有过带主档的分析（首次分析）；
+///   ② DB 查询失败（基础设施问题，不该升级为决策错误）。
+///
+/// 为什么不能直接用公式主档：v2 的主档由 `portfolio-mgr.rhai` 按后验阈值定档，
+/// 而本函数所在的增强钩子在 `portfolio-mgr` **之前**执行 —— 那一刻还没有后验。
+async fn latest_known_horizon(stock_code: &str, db: &DatabaseConnection) -> Option<String> {
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+    let row = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::StockCode.eq(stock_code))
+        .filter(stock_analyses::Column::DecisionTimeHorizon.is_not_null())
+        .order_by_desc(stock_analyses::Column::CreatedAt)
+        .one(db)
+        .await
+        .ok()
+        .flatten();
+    let h = row.and_then(|a| a.decision_time_horizon).filter(|s| !s.is_empty());
+    if h.is_none() {
+        tracing::warn!(
+            "[stock-analysis] {stock_code} 无既有主档可代理 ⇒ 本轮教训注入不按档过滤（跨档混合，非事实陈述）"
+        );
+    }
+    h
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn build_stock_analysis_variables(
     db: &DatabaseConnection,
@@ -218,6 +246,28 @@ pub(crate) async fn build_stock_analysis_variables(
                 var_type: "string".into(),
                 value,
                 description: Some(desc.into()),
+                is_secret: false,
+            });
+        }
+    }
+    // ── 周期常量表注入（horizon_consts_json：每档 {days, mult}）──
+    // `portfolio-mgr.rhai` 的 `horizon_const` / `days_for` / 周期仓位乘数自 2026-09-28 起
+    // 消费本变量，脚本侧不再手抄天数或乘数（唯一权威源
+    // `axagent_harness::holding_period::Period::decision_consts_map`）。
+    // ⚠ 必须**无条件恒注入**（同 `stock_lessons` 的先例）：缺失会让脚本直接 throw，
+    //   这是有意选择 —— 未知周期静默兜 5 天会让中/长线记录带着错档的期望持有期入库。
+    {
+        let consts = Period::decision_consts_map();
+        if let Some(existing) = merged_vars.iter_mut().find(|v| v.name == "horizon_consts_json") {
+            existing.value = consts;
+        } else {
+            merged_vars.push(Variable {
+                name: "horizon_consts_json".into(),
+                var_type: "object".into(),
+                value: consts,
+                description: Some(
+                    "周期常量表（每档 {days, mult}，权威源 Period::decision_consts_map）".into(),
+                ),
                 is_secret: false,
             });
         }
@@ -574,7 +624,13 @@ pub(crate) async fn build_stock_analysis_variables(
     // 注入历史反思教训（stock_reflections 表最近的结构化反思结果）
     // 必须始终注入，即使为空，否则 value-investor/research-mgr/trader 等节点
     // 的 input_mapping 引用 {{stock_lessons}} 会报 VARIABLE_NOT_FOUND。
-    let (lessons_str, applied_lesson_ids) = fetch_stock_lessons(stock_code, db).await;
+    // 〇-B v2 第 4 条 / PLAN 断点⑤：教训**按档隔离**后再注入。
+    // 对话直执行路径的增强钩子跑在 `portfolio-mgr` **之前**，本轮主档（公式定档）
+    // 此刻还不存在 ⇒ 用「该股最近一条已产出主档」作同档代理；取不到则不过滤并 WARN，
+    // 不静默冒充某档（缺数 ≠ 默认）。
+    let lesson_horizon = latest_known_horizon(stock_code, db).await;
+    let (lessons_str, applied_lesson_ids) =
+        fetch_stock_lessons(stock_code, db, lesson_horizon.as_deref()).await;
     let default_lessons = "（暂无历史反思）".to_string();
     let lessons_val = lessons_str.unwrap_or_else(|| default_lessons.clone());
     merged_vars.push(Variable {
@@ -792,6 +848,7 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
         let decision_json_str = extract_decision_from_results_map(&outcome.results);
         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
             extract_decision_fields(&decision_json_str);
+        let horizon_source = extract_horizon_source(&decision_json_str);
         // 阶段1：抽四周期价位映射，与 core.rs 落库点共用同一提取实现
         let horizon_price_map = extract_horizon_price_map(&decision_json_str);
         // 阶段2：抽四周期独立决策，与 core.rs 落库点共用同一提取实现
@@ -836,6 +893,8 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             template_id: Set(None),
             data_snapshot_id: Set(None),
             outcome: Set(None),
+            // Phase 1：周期来源（由 portfolio-mgr.rhai 判定，见 decision.rs 的唯一读入口）
+            decision_horizon_source: Set(horizon_source),
             decision_time_horizon: Set(time_horizon),
             decision_expected_holding_days: Set(expected_holding_days.map(|v| v as i64)),
             parent_analysis_id: Set(None),
@@ -881,6 +940,8 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             let pending_id = uuid::Uuid::new_v4().to_string();
             let _ = stock_reflections::ActiveModel {
                 id: Set(pending_id.clone()),
+                // 〇-B v2 第 4 条：pending 未复盘任何档 ⇒ NULL；盖章在反思收尾写入
+                horizon: Set(None),
                 stock_code: Set(stock_code.clone()),
                 stock_name: Set(stock_name.clone()),
                 original_analysis_id: Set(analysis_id.clone()),

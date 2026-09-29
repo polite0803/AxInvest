@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use axagent_harness::Period;
 use serde::{Deserialize, Serialize};
 
 /// 命中率的最低样本数：低于此值不产出命中率数值（诚实性铁律）
@@ -93,14 +94,15 @@ pub fn legacy_horizon_result(
 }
 
 /// 四周期缺省期望持有期（交易日）。
+///
+/// 天数从 `Period::default_holding_days` 取（唯一权威源，见
+/// `axagent_harness::holding_period` 模块头）；本函数只做「周期字符串 → 档位」的解析，
+/// 不再手抄一份天数表。未知/缺失周期沿用中线档（与既有行为一致）。
 pub fn default_expected_holding_days(horizon: &str) -> i64 {
-    match horizon {
-        "ultra_short" => 2,
-        "short" => 5,
-        "mid" => 28,
-        "long" => 90,
-        _ => 28,
-    }
+    horizon
+        .parse::<Period>()
+        .map(|p| p.default_holding_days() as i64)
+        .unwrap_or(Period::Mid.default_holding_days() as i64)
 }
 
 /// 构造行情不可用或未成熟等状态的评价，禁止用 0% 收益冒充事实。

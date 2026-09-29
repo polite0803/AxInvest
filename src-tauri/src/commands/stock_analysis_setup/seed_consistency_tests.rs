@@ -21,6 +21,7 @@
 //!   ⚠ 2026-09-21 才补上这条：缺它时，用位置参数声明的节点会**完全躲过**本门禁
 //!   （见 `tool_node_positional_tool_names` 的说明与报告 §6.14）。
 
+use regex::Regex;
 use std::collections::HashSet;
 
 /// 抽 `tool_node(...)` **位置参数**形态声明的工具名（第 3 个顶层实参，**仅字面量**）。
@@ -2210,4 +2211,192 @@ fn verdict_expert_prompts_do_not_model_bodyless_output() {
     for want in ["fence", "leaked-tag", "dup-example", "soft-body"] {
         assert!(hit.contains(&want), "判据 `{want}` 对修复前的真实形态未命中 ⇒ 检法失效");
     }
+}
+
+/// Phase 2（PLAN-horizon-four-cycle-closure.md）：专家提示词里的 `{{占位符}}`
+/// 必须**有注入来源** —— 要么注册为种子模板变量，要么是所属 AgentNode `input_mapping` 的 target。
+///
+/// 为什么值得单独一道门：渲染由 `prompt_template.rs::render_prompt` 完成，
+/// **两条路都没有的占位符在运行期**才报 `VARIABLE_NOT_FOUND`
+/// （`agent_executor.rs` 映射到 `error_code::VARIABLE_NOT_FOUND`）。
+/// 也就是说 prompt 里多写一个变量名，`cargo check` / `cargo test` / clippy **全绿**，
+/// 要到真实跑分析时才炸 —— 本门把这类缺陷前移到构建期。
+///
+/// ⚠ 判据必须是「并集」而不是「变量表」：`{{stock_code}}` / `{{market_regime}}` 这类
+///   占位符**不在** `build_template_variables()` 里，而由所属节点的 `input_mapping`
+///   注入（先例见 `seed_stock_analysis.rs` 的 reflection-agent 映射表）。
+///   首版本门只查变量表，对全项目 60+ 个合法占位符**全部误报** —— 一道满屏假阳性的门
+///   等于逼人把它关掉，故补节点侧清单 + 负控自证。
+#[test]
+fn expert_prompt_placeholders_all_have_an_injection_source() {
+    use regex::Regex;
+
+    let re = Regex::new(r"\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)").expect("占位符正则应合法");
+    let root_of = |ph: &str| ph.split('.').next().unwrap_or(ph).to_string();
+
+    // 来源 1：种子模板变量表
+    let var_names: std::collections::HashSet<String> =
+        super::seed_variables::build_template_variables()
+            .into_iter()
+            .map(|v| root_of(&v.name))
+            .collect();
+
+    // 来源 2：各 AgentNode 的 input_mapping target（key 侧）。
+    //   节点太多且映射表由 `agent()` 辅助函数分散构造，此处以「整份 seed 源文本里
+    //   出现的 ("target", "source") 元组第一项」为清单 —— 宁可宽（漏判）也不误报，
+    //   真正的窄门由 `audit-inject-coverage.mjs` 在 Rhai 侧承担。
+    let seed_src = include_str!("seed_stock_analysis.rs");
+    let tuple_re = Regex::new(r##"\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,"##).expect("元组正则应合法");
+    let mapping_targets: std::collections::HashSet<String> =
+        tuple_re.captures_iter(seed_src).map(|c| c[1].to_string()).collect();
+
+    // 来源 3：**运行期注入**的工作流变量（enhance 钩子 / 反思播种现场 push 进 variables）。
+    //   `stock_name` / `market_regime` / `bull_lessons` / `original_time_horizon` 等
+    //   既不在种子变量表、也不是 input_mapping 手写项，而是 `Variable { name: "x" … }`
+    //   结构体字面量现场注入 —— 首版门只查前两路，把这批全打成假阳性。
+    let name_re = Regex::new(r##"name:\s*"([A-Za-z_][A-Za-z0-9_]*)""##).expect("变量名正则应合法");
+    let runtime_names: std::collections::HashSet<String> = [
+        include_str!("../../commands/stock_workflow/hooks.rs"),
+        include_str!("../../commands/stock_workflow/reflection.rs"),
+        include_str!("../mod.rs"),
+    ]
+    .into_iter()
+    .flat_map(|src| name_re.captures_iter(src).map(|c| c[1].to_string()))
+    .collect();
+
+    let mut unsourced: Vec<String> = Vec::new();
+    for (id, md) in super::EMBEDDED_PROMPTS {
+        for cap in re.captures_iter(md) {
+            let ph = root_of(&cap[1]);
+            if !var_names.contains(&ph)
+                && !mapping_targets.contains(&ph)
+                && !runtime_names.contains(&ph)
+            {
+                unsourced.push(format!("{id}: {{{{{ph}}}}}"));
+            }
+        }
+    }
+    assert!(
+        unsourced.is_empty(),
+        "以下占位符既非注册变量也非 input_mapping target ⇒ 运行期必报 VARIABLE_NOT_FOUND: {unsourced:?}"
+    );
+
+    // ── 负控（新检法必须自证命中）──
+    // ① 判据能认出「注册过的」：stock_lessons 是 reflection-agent 的真变量，不得被误判为缺失
+    assert!(
+        var_names.contains("stock_lessons"),
+        "变量表应含 stock_lessons（判据的输入面本身失效）"
+    );
+    // ①' 运行期注入面也要被认出来：regime_prompt_bias 由 hooks.rs 现场注入，
+    //     若第三路来源失效（正则/文件路径漂了），它会重新被误报 ⇒ 判据当场自证失效。
+    assert!(
+        runtime_names.contains("regime_prompt_bias"),
+        "运行期注入面扫描失效：hooks.rs 的 regime_prompt_bias 没被抓到"
+    );
+    // ② 判据能认出「未注册的」：一个绝不存在的名字必须落进 unsourced 桶
+    let probe = root_of("__definitely_not_a_placeholder__");
+    assert!(
+        !var_names.contains(&probe)
+            && !mapping_targets.contains(&probe)
+            && !runtime_names.contains(&probe),
+        "负控失效：判据抓不到无来源占位符"
+    );
+    // ③ 正则真的能从文本里抓出占位符（否则上面两条都是空转）
+    let hit = re
+        .captures("正文 {{__definitely_not_a_placeholder__}} 结尾")
+        .expect("正则应命中占位符形态");
+    assert_eq!(&hit[1], "__definitely_not_a_placeholder__");
+}
+
+/// Phase 3（〇-B v2 第 3 条）：可调参数的「三处齐备」必须有门。
+///
+/// 判据（`seed_stock_analysis.rs` 头部注释写明的规矩）：登记进
+/// `PORTFOLIO_MGR_TUNABLE_PARAMS` 的每一个参数名，
+///   ① 在 `seed_variables::build_template_variables()` 里有同名变量定义；
+///   ② 在 `portfolio-mgr.rhai` 里被 `present(<名>)` 真读。
+///
+/// 为什么这两条都要机械检查（V71 实证形态）：只加清单不加变量 ⇒ `present()` 恒假
+/// ⇒ 参数**静默走脚本硬编码**，面板显示「可配置」但改了没有任何效果；
+/// 只加变量不读 ⇒ 反思建议按名回写了一个没人消费的变量。两种都不报错、不打日志，
+/// `cargo check` / clippy / 编译期 Rhai parse 门全绿。
+#[test]
+fn tunable_params_have_variable_and_rhai_guard() {
+    use super::seed_stock_analysis::PORTFOLIO_MGR_TUNABLE_PARAMS;
+    use super::seed_variables::build_template_variables;
+
+    let var_names: std::collections::HashSet<String> =
+        build_template_variables().into_iter().map(|v| v.name).collect();
+    let rhai = include_str!("../../commands/portfolio-mgr.rhai");
+
+    let mut missing_var: Vec<&str> = Vec::new();
+    let mut unread_in_rhai: Vec<&str> = Vec::new();
+    for name in PORTFOLIO_MGR_TUNABLE_PARAMS.iter() {
+        if !var_names.contains(*name) {
+            missing_var.push(name);
+        }
+        if !rhai.contains(&format!("present({name})")) {
+            unread_in_rhai.push(name);
+        }
+    }
+    assert!(
+        missing_var.is_empty(),
+        "以下可调参数登记了清单但没有变量定义 ⇒ 静默走硬编码默认值: {missing_var:?}"
+    );
+    assert!(
+        unread_in_rhai.is_empty(),
+        "以下可调参数有变量/清单但 portfolio-mgr.rhai 不读 ⇒ 配置与反思建议均无消费方: {unread_in_rhai:?}"
+    );
+
+    // 负控（新检法必须自证命中）：本仓既有的两个逐周期档位参数必须真的在三门里齐备，
+    // 且判据能识别「一个不存在的名字」—— 否则上面两条断言是空转。
+    for probe in ["sl_pct_ultra_short", "tp_pct_long"] {
+        assert!(var_names.contains(probe), "档位参数应已注册为变量: {probe}");
+        assert!(rhai.contains(&format!("present({probe})")), "档位参数应被脚本读取: {probe}");
+    }
+    let ghost = "__definitely_not_a_tunable__";
+    assert!(!var_names.contains(ghost) && !rhai.contains(&format!("present({ghost})")));
+}
+
+/// Phase 7 结构性门：**同一份节点构造块不得在 seed 里出现两次**（窗口式编辑错锚的检法）。
+///
+/// 实证（2026-09-28，本轮我自己造成）：用 `str.index()` 定位「删我自己那 2 行注释」时，
+/// 起点与终点各自解析到**不同份**的同形文本 ⇒ 窗口跨越 500 余行，把整个 portfolio-mgr
+/// 节点构造块**复制成两份**。它照样能编译（只是 `let pm` 被遮蔽），所以
+/// `cargo check` 全绿；`fast_seed_skips_when_identical_*` 也抓不到（重复块文本自等）；
+/// 只有 clippy 的 unused-variable 会响，而 **clippy 遇首个 error 即短路**，不保证覆盖到。
+///
+/// 判据取「同一 `id` 字面量在整文件出现两次」—— 节点 id 必须唯一，重复即后者静默覆盖前者。
+#[test]
+fn seed_node_constructors_are_not_duplicated() {
+    let src = include_str!("seed_stock_analysis.rs");
+    let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+    for cap in
+        Regex::new(r#"(?m)^\s{8,}id: "([a-zA-Z0-9_\-]+)"\.into\(\),"#).unwrap().captures_iter(src)
+    {
+        *counts.entry(cap[1].to_string()).or_insert(0) += 1;
+    }
+    let dups: Vec<(&String, &usize)> = counts.iter().filter(|(_, n)| **n > 1).collect();
+    assert!(
+        dups.is_empty(),
+        "以下节点 id 在 seed 里被构造了多次 ⇒ 极可能是窗口式编辑复制出的整块重复: {dups:?}"
+    );
+
+    // 负控（自证判别力）：把事故形态在内存里复刻一遍 —— 复制 pm 构造块，判据必须报出 portfolio-mgr。
+    let start =
+        src.find("    let pm = WorkflowNode::Code(CodeNode {").expect("负控起点：pm 构造块");
+    let end =
+        src.find("    nodes.push(pm);").expect("负控终点：pm 入表") + "    nodes.push(pm);".len();
+    let mutated = format!("{}\n{}{}", &src[..end], &src[start..end], &src[end..]);
+    let mut mc: std::collections::BTreeMap<String, usize> = Default::default();
+    for cap in Regex::new(r#"(?m)^\s{8,}id: "([a-zA-Z0-9_\-]+)"\.into\(\),"#)
+        .unwrap()
+        .captures_iter(&mutated)
+    {
+        *mc.entry(cap[1].to_string()).or_insert(0) += 1;
+    }
+    assert_eq!(
+        mc.get("portfolio-mgr"),
+        Some(&2),
+        "负控失效：复刻整块重复后判据抓不到（则该门是空转的）"
+    );
 }

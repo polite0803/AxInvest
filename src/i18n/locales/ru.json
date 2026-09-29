@@ -6520,62 +6520,6 @@
       "confirm-delete": "Удалить эту задачу рекомендаций?",
       "empty-description": "Нет запланированных задач рекомендаций"
     },
-    "strategyPack": {
-      "title": "Управление стратегиями",
-      "searchPlaceholder": "Поиск по названию, описанию или ID",
-      "empty": "Нет стратегий",
-      "detailTitle": "Подробности стратегии",
-      "editorTitle": "Редактор стратегий",
-      "editorIdLabel": "ID стратегии (используется для сохранения в каталог пользователя)",
-      "editorYamlLabel": "Содержимое YAML",
-      "editorYamlTip": "Определите стратегию в формате YAML. Поля см. во встроенных стратегиях.",
-      "editorYamlPlaceholder": "Введите содержимое YAML здесь...",
-      "confirmDelete": "Удалить эту пользовательскую стратегию?",
-      "yes": "Да",
-      "no": "Нет",
-      "stat": {
-        "total": "Всего стратегий",
-        "builtin": "Встроенные стратегии",
-        "user": "Пользовательские стратегии"
-      },
-      "source": {
-        "builtin": "Встроенная",
-        "user": "Пользовательская"
-      },
-      "column": {
-        "name": "Название",
-        "description": "Описание",
-        "source": "Источник",
-        "strategies": "Кол-во стратегий",
-        "minConfidence": "Мин. уверенность",
-        "maxPicks": "Макс. рекомендаций",
-        "actions": "Действия",
-        "style": "Стиль",
-        "period": "Период",
-        "enabled": "Включено",
-        "weight": "Вес"
-      },
-      "action": {
-        "detail": "Подробности",
-        "copy": "Копировать",
-        "refresh": "Обновить",
-        "new": "Создать",
-        "validate": "Проверить",
-        "save": "Сохранить",
-        "cancel": "Отмена",
-        "close": "Закрыть"
-      },
-      "period": {
-        "ultra_short": "Ультракороткий",
-        "short": "Короткий",
-        "mid": "Средний",
-        "long": "Длинный"
-      },
-      "editorTemplate": {
-        "name": "Моя стратегия",
-        "description": "Пользовательская стратегия"
-      }
-    },
     "globalShortcut": "Глобальная горячая клавиша",
     "globalShortcutRegisterOk": "Глобальные горячие клавиши зарегистрированы: {{count}}",
     "globalShortcutRegisterPartial": "Регистрация горячих клавиш: {{ok}} успешно, {{fail}} ошибок",
@@ -14713,6 +14657,7 @@
     "boolYes": "Да",
     "boolNo": "Нет",
     "backendCallFailed": "Ошибка вызова бэкенда",
+    "tierScopeHint": "Горизонт: только средний срок (катализаторы узких мест/политики/прибыли раскрываются недели-месяцы); короткий и сверхкороткий горизонты неприменимы, хранимый period всегда mid с эталонными 28 днями этой ступени.",
     "emptyHistoryWarning": "История Serenity пуста: list_reco_history вернул 0 строк (возможно, в БД нет истории со стилем serenity/bottleneck, или сбой backend-команды был тихо проигнорирован)",
     "timeBasis": "Временная база: {{date}} · рекомендуемое окно ~{{days}} дн. (до {{until}})"
   },
@@ -15115,6 +15060,8 @@
     "timeHorizonShort": "Краткосрочно",
     "timeHorizonMid": "Среднесрочно",
     "timeHorizonLong": "Долгосрочно",
+    "horizonSourceFormula": "формула",
+    "horizonSourceModel": "от модели",
     "horizonConflictTitle": "Конфликт направления горизонта",
     "horizonConflictHint": "Разные временные горизонты имеют противоречивые сигналы покупки/продажи. Проверьте каждый горизонт.",
     "horizonOverview": "Обзор: ",
@@ -15346,7 +15293,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "Долговая нагрузка",
       "grossMarginLabel": "Валовая маржа",
-      "revenueGrowthLabel": "Рост выручки"
+      "revenueGrowthLabel": "Рост выручки",
+      "algorithmConclusion": "Вывод алгоритмической оценки",
+      "algorithmConclusionNote": "Рассчитано локальным алгоритмом по исходным данным (прямой DCF / обратный DCF / относительная оценка). Диапазон ниже — это вывод DCF этого алгоритма, а не мнение LLM",
+      "algorithmRangeBand": "Диапазон оценки по алгоритмическому DCF (консервативный-оптимистичный)"
     },
     "workflow": {
       "analyst": {
@@ -15518,8 +15468,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "Стратегии"
+        "recommendation": "Recommendations"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -15596,6 +15545,7 @@
         "portfolioMgrAction": "Порог решения по портфелю (portfolio-mgr)",
         "portfolioMgrFusion": "Шлюз слияния факторов (portfolio-mgr)",
         "portfolioMgrCost": "Торговые издержки (portfolio-mgr)",
+        "portfolioMgrHorizon": "Уровни горизонта (стоп-лосс / тейк-профит)",
         "portfolioMgrRisk": "Порог классификации рисков (portfolio-mgr)",
         "simulation": "Симуляция Монте-Карло",
         "refCodes": "Отраслевой эталонный инструмент",
@@ -16546,6 +16496,7 @@
       "horizonShort": "Краткий (5 дн.)",
       "horizonMid": "Средний (28 дн.)",
       "horizonLong": "Долгий (90+ дн.)",
+      "horizonAuto": "По основной ступени",
       "horizonUnknown": "Неизвестный горизонт",
       "horizonStatusLabel": "Статус: ",
       "horizonStatusMature": "Созрел",
@@ -17412,7 +17363,9 @@
       "unsupported": "Без данных",
       "source": "Источник",
       "extractFailed": "Не удалось извлечь доказательства",
-      "matchConfidence": "Уверенность совпадения"
+      "matchConfidence": "Уверенность совпадения",
+      "notApplicable": "Аудит ссылок на доказательства неприменим (решение не сформировано)",
+      "notApplicableDetail": "Этот запуск не сформировал решение (action={{action}} — служебное значение отсутствия данных, а не вывод); поле обоснования содержит диагностику деградации и не содержит аудитуемых доказательств аналитиков. Поэтому показатель поддержки здесь не определён и не отображается как 0 %."
     },
     "charts": {
       "noSectorData": "Нет данных по секторам",

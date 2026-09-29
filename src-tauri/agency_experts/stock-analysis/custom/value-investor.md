@@ -206,9 +206,10 @@ output_format: json
 **② 【软衰减】—— 数值**可以引用**，但必须披露口径、不得拔高 `confidence`**：
 
 3. `t-valuation.result.dcf.assumptions.is_fallback_anchor == true`。
-   表示锚定**不是当期真实自由现金流**，而是代理锚 —— 口径原文见 `dcf.assumptions.basis`，
-   可能是「当期FCF≤0」/「现金流量表数据缺失」/「当期FCF显著低于净利（FCF/净利<0.6）」
-   （2026-09-27 新增第三态）三者之一，三者处置相同（均取 净利 × 0.90）。
+   表示锚定**不是最近完整年报的真实自由现金流**，而是代理锚 —— 口径原文见 `dcf.assumptions.basis`，
+   有三类成因：「锚口径 FCF≤0」/「现金流量表数据缺失」/「锚口径 FCF 显著低于净利（FCF/净利<0.6）」
+   （2026-09-28 改：锚优先取「最近完整年报 FCF（OCF−资本开支）」，年报现金流缺失才回落 TTM），
+   三者处置相同（均取 净利 或 近5年报正净利均值 × 0.90）。
    **不要假定是哪一种，一律以 `assumptions.basis` 原文为准。**
    该代理回溯，对成长/转型标的**系统性偏低**。
    ⇒ 此时 `intrinsic_value_range` / `margin_of_safety` / `ideal_buy_price` **照常填**，但必须：

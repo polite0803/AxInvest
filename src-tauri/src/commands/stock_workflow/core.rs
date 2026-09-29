@@ -2,9 +2,9 @@ use super::decision::QualityPrecheckResult;
 use super::decision::{
     build_dashboard_from_workflow_result, compute_decision_agreement, data_quality_precheck,
     extract_decision_fields, extract_decision_json, extract_decisions_by_horizon,
-    extract_formula_decision_json, extract_horizon_price_map, extract_llm_decision_json,
-    extract_position_state, load_and_inject_template, normalize_action_for_storage,
-    parse_asof_param, resolve_runtime_options,
+    extract_formula_decision_json, extract_horizon_price_map, extract_horizon_source,
+    extract_llm_decision_json, extract_position_state, load_and_inject_template,
+    normalize_action_for_storage, parse_asof_param, resolve_runtime_options,
 };
 use crate::AppState;
 use crate::commands::error::{ErrorCategory, ErrorResponse};
@@ -212,7 +212,6 @@ pub async fn run_stock_workflow(
 ) -> Result<serde_json::Value, String> {
     // 解析 as_of_date；非法或未来日期直接 4xx-style 错误
     let as_of_ctx = parse_asof_param(as_of_date.clone())?;
-
     if let Some(ctx) = as_of_ctx {
         as_of::AS_OF
             .scope(Some(ctx), async {
@@ -599,6 +598,8 @@ pub async fn run_stock_workflow_inner(
             template_id: Set(Some(template_id.clone())),
             data_snapshot_id: Set(None),
             outcome: Set(None),
+            // Phase 1：周期来源（user=用户选定 / model=模型自报）；建行时尚未决策，留 NULL
+            decision_horizon_source: Set(None),
             decision_time_horizon: Set(None),
             decision_expected_holding_days: Set(None),
             parent_analysis_id: Set(parent_for_record.clone()),
@@ -1093,6 +1094,7 @@ pub async fn run_stock_workflow_inner(
                             };
                         let (action, position_pct, reasoning, time_horizon, expected_holding_days) =
                             extract_decision_fields(&decision_json);
+                            let horizon_source = extract_horizon_source(&decision_json);
                         // 阶段1：抽四周期价位映射，落 `stock_analyses.horizon_price_map`
                         let horizon_price_map = extract_horizon_price_map(&decision_json);
                         // 阶段2：抽四周期独立决策，落 `stock_analyses.horizon_decisions`
@@ -1137,6 +1139,10 @@ pub async fn run_stock_workflow_inner(
                             .col_expr(
                                 stock_analyses::Column::DecisionTimeHorizon,
                                 Expr::value(time_horizon),
+                                )
+                                .col_expr(
+                                    stock_analyses::Column::DecisionHorizonSource,
+                                Expr::value(horizon_source),
                             )
                             .col_expr(
                                 stock_analyses::Column::DecisionExpectedHoldingDays,
@@ -1414,6 +1420,7 @@ pub async fn run_stock_workflow_inner(
                             time_horizon,
                             expected_holding_days,
                         ) = extract_decision_fields(&decision_json);
+                        let horizon_source = extract_horizon_source(&decision_json);
                         // 阶段1：抽四周期价位映射，落 `stock_analyses.horizon_price_map`
                         let horizon_price_map = extract_horizon_price_map(&decision_json);
                         // 阶段2：抽四周期独立决策，落 `stock_analyses.horizon_decisions`
@@ -1471,6 +1478,10 @@ pub async fn run_stock_workflow_inner(
                             .col_expr(
                                 stock_analyses::Column::DecisionTimeHorizon,
                                 Expr::value(time_horizon),
+                                )
+                                .col_expr(
+                                    stock_analyses::Column::DecisionHorizonSource,
+                                Expr::value(horizon_source),
                             )
                             .col_expr(
                                 stock_analyses::Column::DecisionExpectedHoldingDays,
@@ -1870,6 +1881,8 @@ pub async fn run_single_stock_analysis(
         template_id: Set(Some(template_id.to_string())),
         data_snapshot_id: Set(None),
         outcome: Set(None),
+        // Phase 1：周期来源（user=用户选定 / model=模型自报）；建行时尚未决策，留 NULL
+        decision_horizon_source: Set(None),
         decision_time_horizon: Set(None),
         decision_expected_holding_days: Set(expected_holding_days.map(|d| d as i64)),
         parent_analysis_id: Set(None),
@@ -2092,6 +2105,9 @@ pub async fn run_single_stock_analysis(
                 hindsight_date: Set(hindsight_date_str),
                 min_confidence_threshold: Set(70),
                 reflection_depth: Set("light".to_string()),
+                // 〇-B v2 第 4 条：pending 阶段尚未复盘任何档 ⇒ 显式 NULL
+                //   （NULL = 复盘档未知，读侧不得当作某档；真正盖章在反思收尾写入）
+                horizon: Set(None),
                 actual_outcome: Set(String::new()),
                 // v008 (C3 借鉴): 结构化 outcome,pending 阶段全 None
                 raw_return: Set(None),
@@ -2211,16 +2227,30 @@ pub(crate) async fn fetch_similar_cases(
 pub(crate) async fn fetch_stock_lessons(
     stock_code: &str,
     db: &sea_orm::DatabaseConnection,
+    // 〇-B v2 第 4 条 / PLAN 断点⑤：教训**按档隔离**。
+    // `horizon = Some(x)` ⇒ 只取「复盘 x 档产出的反思」+ 本列引入前的 NULL 行
+    // （NULL = 复盘档未知，按既有行为继续注入并在文本里声明，不冒充某档）；
+    // `horizon = None` ⇒ 不过滤（兼容旧调用方，行为与改前逐位一致）。
+    horizon: Option<&str>,
 ) -> (Option<String>, Vec<String>) {
     use chrono::Utc;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
     // ── same_ticker: 3 条同 ticker 近 90 天已完成反思 ──
     let three_months_ago = Utc::now() - chrono::Duration::days(90);
-    let same_ticker: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
+    let same_ticker_q = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::StockCode.eq(stock_code))
         .filter(stock_reflections::Column::Status.eq("completed")) // 只注入已 resolve 的教训
-        .filter(stock_reflections::Column::CreatedAt.gte(three_months_ago.timestamp_millis()))
+        .filter(stock_reflections::Column::CreatedAt.gte(three_months_ago.timestamp_millis()));
+    let same_ticker_q = match horizon {
+        Some(h) => same_ticker_q.filter(
+            sea_orm::Condition::any()
+                .add(stock_reflections::Column::Horizon.eq(h))
+                .add(stock_reflections::Column::Horizon.is_null()),
+        ),
+        None => same_ticker_q,
+    };
+    let same_ticker: Vec<stock_reflections::Model> = same_ticker_q
         .order_by_desc(stock_reflections::Column::CreatedAt)
         .all(db)
         .await
@@ -2231,9 +2261,18 @@ pub(crate) async fn fetch_stock_lessons(
 
     // ── all_recent: 2 条所有 ticker 近 7 天(跨 ticker 市场级教训)──
     let seven_days_ago = Utc::now() - chrono::Duration::days(7);
-    let all_recent: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
+    let all_recent_q = stock_reflections::Entity::find()
         .filter(stock_reflections::Column::CreatedAt.gte(seven_days_ago.timestamp_millis()))
-        .filter(stock_reflections::Column::Status.eq("completed")) // 只看已 resolve 的
+        .filter(stock_reflections::Column::Status.eq("completed")); // 只看已 resolve 的
+    let all_recent_q = match horizon {
+        Some(h) => all_recent_q.filter(
+            sea_orm::Condition::any()
+                .add(stock_reflections::Column::Horizon.eq(h))
+                .add(stock_reflections::Column::Horizon.is_null()),
+        ),
+        None => all_recent_q,
+    };
+    let all_recent: Vec<stock_reflections::Model> = all_recent_q
         .order_by_desc(stock_reflections::Column::CreatedAt)
         .all(db)
         .await
@@ -2245,7 +2284,7 @@ pub(crate) async fn fetch_stock_lessons(
 
     if same_ticker.is_empty() && all_recent.is_empty() {
         // 仍需查询规则化教训（可能存在）
-        return fetch_rule_lessons(stock_code, db).await;
+        return fetch_rule_lessons(stock_code, db, horizon).await;
     }
 
     let mut lines: Vec<String> = Vec::new();
@@ -2287,7 +2326,7 @@ pub(crate) async fn fetch_stock_lessons(
     }
 
     // 追加规则化教训 + 收集被引用的 lesson_ids
-    let (rule_lines, lesson_ids) = fetch_rule_lessons(stock_code, db).await;
+    let (rule_lines, lesson_ids) = fetch_rule_lessons(stock_code, db, horizon).await;
     if let Some(rule_text) = rule_lines {
         lines.push(rule_text);
     }
@@ -2311,6 +2350,7 @@ pub(crate) async fn fetch_stock_lessons(
 async fn fetch_rule_lessons(
     stock_code: &str,
     db: &sea_orm::DatabaseConnection,
+    horizon: Option<&str>,
 ) -> (Option<String>, Vec<String>) {
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
@@ -2320,9 +2360,19 @@ async fn fetch_rule_lessons(
     // 但原 fetch_stock_lessons 只查 stock_reflections,规则化教训永远不被消费。
     // 现补充查询 reflection_lessons 表的规则化教训（按 confidence 降序取前 5 条）。
     use axagent_entities::reflection_lessons;
-    let rule_lessons: Vec<reflection_lessons::Model> = reflection_lessons::Entity::find()
+    // 〇-B v2 第 4 条：同档优先 + 通用规则（horizon NULL）；**跨档不进 prompt**。
+    let q = reflection_lessons::Entity::find()
         .filter(reflection_lessons::Column::StockCode.eq(stock_code))
-        .filter(reflection_lessons::Column::Confidence.gte(0.3)) // 过滤低质量/已废弃规则
+        .filter(reflection_lessons::Column::Confidence.gte(0.3)); // 过滤低质量/已废弃规则
+    let q = match horizon {
+        Some(h) => q.filter(
+            sea_orm::Condition::any()
+                .add(reflection_lessons::Column::Horizon.eq(h))
+                .add(reflection_lessons::Column::Horizon.is_null()),
+        ),
+        None => q,
+    };
+    let rule_lessons: Vec<reflection_lessons::Model> = q
         .order_by_desc(reflection_lessons::Column::Confidence)
         .all(db)
         .await

@@ -50,6 +50,11 @@ const RUNTIME_INJECTED = new Set([
   "serenity_context",
   "holdings_json",
   "portfolio_cash",
+  // 周期常量表（2 / 5 / 28 / 90 天 + 仓位乘数）：权威源是
+  // `crates/harness/src/holding_period.rs` 的 `Period::decision_consts_map()`，
+  // 由 `stock_workflow/hooks.rs` **无条件注入**，不是用户可调的模板变量 ⇒ 不进 seed 变量表。
+  // portfolio-mgr.rhai 的 `horizon_const` 缺它会显式 throw（不静默兜底）。
+  "horizon_consts_json",
 ]);
 
 /**

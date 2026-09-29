@@ -48,7 +48,61 @@ interface ValueReportData {
   debt_ratio_pct?: number | string | null;
   gross_margin_pct?: number | string | null;
   revenue_growth_yoy_pct?: number | string | null;
+  // V92(2026-09-28): **本地算法估值结论**（`value-verify` 无条件注入，顶层键）。
+  //   存在理由：`intrinsic_value_range` 是 LLM 口径，实测 301269 现价 87.56 元却给出
+  //   「2.16-4.42 元 / -97.5%」——正向 DCF 锚定当期 FCF（收益率 0.14%）时结构性失效。
+  //   本块是算法（反向 DCF + 相对估值）的权威结论，冲突时以它为准。
+  //   字段名与值由 Rhai 手写，故为 camelCase 子键（非 snake_case）。
+  valuation_conclusion?: AlgorithmValuationConclusion | null;
   [key: string]: unknown;
+}
+
+/** 算法估值结论（`value-verify.rhai` 的 `algo_conclusion()` 产物形状）。 */
+interface AlgorithmValuationConclusion {
+  /** 结论档位：低估 / 合理偏低 / 合理 / 偏高 / 高估 / 数据不足。 */
+  action?: string;
+  /** 一句话结论（含证据），由 `astock-data::valuation::build_conclusion` 生成。 */
+  headline?: string;
+  /** 主口径：`dcf` / `reverse_dcf` / `relative` / `graham` / `none`。 */
+  primaryMethod?: string;
+  /** 相对估值的判定（如 `cheap` / `fair` / `rich`）。 */
+  relativeVerdict?: string;
+  /** 相对估值主指标（`PE` / `PS` / `PB`）。 */
+  relativePrimary?: string;
+  /** 反向 DCF 可行性：`ok` / `Strained` / `Impossible` 等。 */
+  reverseFeasibility?: string;
+}
+
+/** 结论档位 → Ant Design Tag 颜色（未知档位回落 default）。 */
+function conclusionTagColor(action: string): string {
+  switch (action) {
+    case "低估":
+    case "合理偏低":
+      return "green";
+    case "合理":
+      return "blue";
+    case "偏高":
+      return "orange";
+    case "高估":
+      return "red";
+    default:
+      return "default";
+  }
+}
+
+/** 结论档位 → Alert 类型；只有明确的「高估」才用 error，避免把数据不足渲染成告警。 */
+function conclusionAlertType(action: string): "success" | "info" | "warning" | "error" {
+  switch (action) {
+    case "低估":
+    case "合理偏低":
+      return "success";
+    case "偏高":
+      return "warning";
+    case "高估":
+      return "error";
+    default:
+      return "info";
+  }
 }
 
 /**
@@ -76,6 +130,17 @@ function extractReadableText(
   const parsed = tryParseValueReport(report);
   if (parsed) {
     const parts: string[] = [];
+    // V92: 算法结论排在最前 —— 它是本地算法（反向 DCF / 相对估值）的权威输出；
+    //   文本兜底路径此前只有 LLM 叙述，冲突时用户读到的是 LLM 口径。
+    const algo = parsed.valuation_conclusion;
+    if (algo && (algo.headline || algo.action)) {
+      const meta = [algo.action, algo.primaryMethod && `口径 ${algo.primaryMethod}`]
+        .filter(Boolean)
+        .join(" · ");
+      parts.push(
+        `## ${t("stockAnalysis.valueAssessment.algorithmConclusion")}\n\n${meta}\n\n${algo.headline || ""}`,
+      );
+    }
     if (parsed.buffett_verdict) {
       parts.push(`## ${t("stockAnalysis.valueAssessment.outlookVerdict")}\n\n${parsed.buffett_verdict}`);
     }
@@ -376,11 +441,18 @@ function ValueReportRenderer({
   data,
   isDark,
   gateNoticeKey = null,
+  rangeIsAlgorithmOutput = false,
 }: {
   data: ValueReportData;
   isDark: boolean;
   // I1/J1 闸口语义见 extractReadableText 头注释
   gateNoticeKey?: string | null;
+  // V92(2026-09-28 归属修正): `intrinsic_value_range` / `margin_of_safety` **不是 LLM 观点**
+  //   —— `value-verify.rhai` 已把它们原地覆写为算法 DCF 的 `low-high` / `upsidePct`，
+  //   覆写不命中时也只在「LLM 原文已含算法数值」时才放行 ⇒ 两个字段恒为算法输出。
+  //   故有算法结论时标题必须写「算法 DCF 估值区间」，绝不能写「LLM 估值区间」
+  //   （实测 600887：用户看到标注 LLM 的 40.16-59.63 元，误以为估值仍由 LLM 产生）。
+  rangeIsAlgorithmOutput?: boolean;
 }) {
   const { t } = useTranslation();
   const gated = gateNoticeKey != null;
@@ -446,7 +518,11 @@ function ValueReportRenderer({
       {(data.intrinsic_value_range || data.margin_of_safety) && (
         <div>
           <div className="text-xs font-medium mb-1" style={{ color: "var(--muted)" }}>
-            {t("stockAnalysis.valueAssessment.valuationConclusion")}
+            {t(
+              rangeIsAlgorithmOutput
+                ? "stockAnalysis.valueAssessment.algorithmRangeBand"
+                : "stockAnalysis.valueAssessment.valuationConclusion",
+            )}
           </div>
           {gated
             ? (
@@ -678,6 +754,10 @@ export function ValueAssessmentPanel() {
 
   const parsed = hasValue ? tryParseValueReport(valueReport) : null;
   const readableText = hasValue ? extractReadableText(valueReport, t, gateNoticeKey) : "";
+  // V92(2026-09-28): 本地算法估值结论（`value-verify` 无条件注入的顶层键）。
+  //   面板此前只渲染 LLM 口径的 `intrinsic_value_range`（301269 给出「-97.5%」），
+  //   算法侧结论完全不可见 ⇒ 用户以为那就是结论。此处把它提到最上方。
+  const algoConclusion = parsed?.valuation_conclusion ?? null;
 
   // 暴露调试数据到 window，方便 Console 检查
   useEffect(() => {
@@ -721,7 +801,14 @@ export function ValueAssessmentPanel() {
   // 渲染内容：优先用结构化数据，失败则用可读文本
   const renderContent = () => {
     if (parsed) {
-      return <ValueReportRenderer data={parsed} isDark={isDark} gateNoticeKey={gateNoticeKey} />;
+      return (
+        <ValueReportRenderer
+          data={parsed}
+          isDark={isDark}
+          gateNoticeKey={gateNoticeKey}
+          rangeIsAlgorithmOutput={algoConclusion != null}
+        />
+      );
     }
     // 解析失败：渲染提取后的可读文本
     if (readableText) {
@@ -783,6 +870,45 @@ export function ValueAssessmentPanel() {
             <ValuationBandChart data={valuationBand} loading={valuationBandLoading} />
           </Spin>
         </Card>
+      )}
+
+      {
+        /* V92(2026-09-28): 算法估值结论 —— 本地算法（反向 DCF / 相对估值）的权威输出，
+          必须排在最上方（先结论、后依据、最后才是估值区间与前提标注）。 */
+      }
+      {algoConclusion && (algoConclusion.headline || algoConclusion.action) && (
+        <Alert
+          type={conclusionAlertType(algoConclusion.action ?? "")}
+          showIcon
+          message={
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>{t("stockAnalysis.valueAssessment.algorithmConclusion")}</span>
+              {algoConclusion.action && (
+                <Tag color={conclusionTagColor(algoConclusion.action)} className="m-0">
+                  {algoConclusion.action}
+                </Tag>
+              )}
+              {algoConclusion.primaryMethod && <Tag className="m-0">口径 {algoConclusion.primaryMethod}</Tag>}
+              {algoConclusion.relativePrimary && (
+                <Tag className="m-0">
+                  {algoConclusion.relativePrimary}
+                  {algoConclusion.relativeVerdict ? ` ${algoConclusion.relativeVerdict}` : ""}
+                </Tag>
+              )}
+              {algoConclusion.reverseFeasibility && (
+                <Tag className="m-0">反向 DCF {algoConclusion.reverseFeasibility}</Tag>
+              )}
+            </div>
+          }
+          description={
+            <>
+              {algoConclusion.headline && <div>{algoConclusion.headline}</div>}
+              <div className="mt-1 opacity-80">
+                {t("stockAnalysis.valueAssessment.algorithmConclusionNote")}
+              </div>
+            </>
+          }
+        />
       )}
 
       {

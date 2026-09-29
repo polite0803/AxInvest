@@ -32,7 +32,7 @@ use crate::commands::error_code::stock_setup;
 /// 新增可调参数时三处齐备才生效：① `seed_variables.rs` 定义变量；
 /// ② `portfolio-mgr.rhai` 顶部加 `if present(x) { x } else { 默认 }` 守卫；
 /// ③ 在此数组登记。
-pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 28] = [
+pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 36] = [
     // ── 市况先验（决策起点：无个股证据时对上涨的基础概率，0-1）──
     "regime_prior_bull",
     "regime_prior_sideways",
@@ -74,6 +74,17 @@ pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 28] = [
     "risk_growth_low",
     // ── 交易成本（1-成本 折损，凯利仓位修正）──
     "cost_pct",
+    // ── 〇-B v2 第 3 条：逐周期止损/止盈档位（八项，默认值见 seed_variables）──
+    //   登记进来的唯一理由：设置面板分组与**反思的可调清单**都由本常量派生；
+    //   漏登记则「变量存在但反思看不见」，正是 V71 那类静默失效形态。
+    "sl_pct_ultra_short",
+    "tp_pct_ultra_short",
+    "sl_pct_short",
+    "tp_pct_short",
+    "sl_pct_mid",
+    "tp_pct_mid",
+    "sl_pct_long",
+    "tp_pct_long",
 ];
 
 /// `algo_tools` 表行类型：(节点 id, 标题, 工具名, 参数名, 额外扁平映射, x, y)。
@@ -487,7 +498,57 @@ type AlgoToolRow = (
 ///    消费端：本节点 system_prompt 与 `value-investor.md` 的 `assumptions.basis` 枚举文案同步；
 ///    前端 `ValueAssessmentPanel` 的区间区块标题改标「算法 DCF 估值区间」（原文案误标 LLM）。
 ///    **必须升版**：system_prompt / `value-investor.md` 经 `include_str!` 嵌入，不升版则存量库永不重播种。
-pub(crate) const TEMPLATE_VERSION: i32 = 93;
+/// ⚠️ **v94（2026-09-28）：trader「持有/观望不输出 targetPrice」由软劝告改为一致性约束**。
+///    根因（002371 北方华创实证，replay 2026-09-28）：trader 的 `decision_trail` 原话是
+///    「观望状态不输出方向性 targetPrice（避免无效价格信号）」，**同一份输出的
+///    `verdict.targetPrice` 却等于 `currentPrice`（633.93 == 633.93）** ⇒ 命中
+///    `portfolio-mgr.rhai` 的 R-204（`|targetPrice−currentPrice|/currentPrice < 0.5%`）
+///    ⇒ `data_gaps` 出现「trader目标价(等于现价、无方向信息)」⇒ UI 显示
+///    「⚠️ 决策可信度受限 / 数据缺口 1 项」。
+///    归因：**不是模型不听话，是本模板的约束自相矛盾** —— 同一段 prompt 内两条互斥要求：
+///      · 上一行仍写「输出入场价、目标价、止损价、仓位比例」（旧文，隐含「目标价必填」）；
+///      · 下一段又写「持有/观望：不要输出 targetPrice」；
+///      · `agency_experts/stock-analysis/trader.md` 的「强制一致性约束」表更写着
+///        持有/观望 → targetPrice ∈ [现价×0.95, 现价×1.05] —— 该区间**允许**等值，
+///        模型取区间内最自然的值就是现价。
+///    模型在互斥要求下只能「照格式填一个数」，于是填了现价。
+///    处置（**只改约束文本，不动任何判定 / 数值口径**）：
+///      ① 本节 system_prompt：删去「必须输出目标价」的表述；「持有/观望」改为
+///         **`targetPrice` 直接留空该字段**，并显式禁止 null / 0 / 抄现价三种占位形态；
+///         补「targetPrice 留空时 stopLoss 不受两侧分居约束」（否则两条约束在留空场景打架）；
+///      ② trader 输出 JSON schema 的 `targetPrice` 描述同步同一句话；
+///      ③ `agency_experts/stock-analysis/trader.md` 约束表改为「留空」，
+///         并同步其「设定入场价、目标价、止损价」步骤表述；
+///      ④ `config/llm-output-schemas.json` 的 `trader_output.required` 移除 `targetPrice`
+///         （该文件是**规格文档、运行时零加载**，但它是注释里被引用的「权威清单」，
+///         留着「必填」会把同一个矛盾再传播给下一个读者）。
+///    **必须升版**：system_prompt 与 output_schema 均随本模板落库，不升版则存量库永不重播种。
+///    ⚠️ 本版**不覆盖任何判定**：等值仍由 R-204 判无效并留痕（那是「事后检出」，
+///       本版补的是「事前不产生」）；公式侧绝对价位输出（v77 起）保持权威。
+///    ⚠️ 本版**不抬** `DCF_MIGRATION_VERSION`：不涉及 DCF 参数默认值。
+///    **v95(2026-09-28)**：四周期持有天数表收编为唯一权威源 —— portfolio-mgr.rhai 不再
+///    手抄 `days_for` 表，改为消费工作流变量 `horizon_consts_json`（由 `stock_workflow/hooks.rs`
+///    无条件注入，源头 `axagent_harness::holding_period::Period`）。**必须升版**：本节点的
+///    `input_mapping` 多出该同名映射，而 input_mapping 随模板快照落库，不重播种则存量库的
+///    脚本读不到变量 ⇒ `days_for` 恒 throw ⇒ 决策节点全红。
+///    **v96(2026-09-28)**：Phase 1 周期入口 —— 命令 `run_stock_workflow` 增 `userTimeHorizon`，
+///    经 hooks 注入为变量 `user_time_horizon`；portfolio-mgr.rhai 据此锁主周期并输出
+///    `horizonSource`，落库新增列 `stock_analyses.decision_horizon_source`。
+///    **必须升版**：本节点 input_mapping 多出该映射、且 trader system_prompt 新增
+///    `{{user_time_horizon}}` 占位，两者都随模板快照落库，不重播种则占位符报
+///    VARIABLE_NOT_FOUND、rhai 侧恒为 auto。
+///    **v97(2026-09-28)**：〇-B v2 —— 周期不再是分析入口参数（撤 `user_time_horizon`），
+///    主周期改由公式确定性定档（`horizonSource="formula"`）；逐周期止损/止盈档位变量化
+///    （`sl_pct_{period}` / `tp_pct_{period}` 八项进变量表 + 可调清单 + 设置面板分组）。
+///    **必须升版**：变量表与 portfolio-mgr 的 `input_mapping` 都随模板快照落库，
+///    不重播种则脚本读不到新档位变量（静默走默认值）、面板新分组空白。
+///    **v98(2026-09-29)**：把 v97 遗留的**第二份档位手抄表**接回同一批函数 ——
+///    `decisionsByHorizon` 的 short/mid/long 原先传字面量（5/10/5、8/18/28、12/30/90）、
+///    超短线块硬写 3/5，导致面板调档与反思建议只作用于主决策和 `horizonPriceMap`，
+///    四档 Tab 纹丝不动 ⇒ 同一份 JSON 里档位%与价位反解打架。现全部改经
+///    `sl_pct_for.call(h)` / `tp_pct_for.call(h)` / `days_for.call(h)`。
+///    **必须升版**：脚本正文随模板快照落库，不重播种则四档仍是旧字面量。
+pub(crate) const TEMPLATE_VERSION: i32 = 98;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///
@@ -4043,15 +4104,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
              - 共识评分: 参考【consensus_score】\n\
              - 风险分歧: 参考【risk_disagreement】(>50 时保守)\n\
              - 数据质量: 参考【dqi_score】(<50 时保守)\n\
-             基于上述数据直接制定交易方案，输出入场价、目标价、止损价、仓位比例。\n\
+             基于上述数据直接制定交易方案，输出仓位比例、止损价与持有周期（目标价是否输出见下方方向语义）。\n\
              \n--- 价位字段方向语义（必须遵守）---\n\
-             - targetPrice 是**方向性目标**：看多(买入/增持)取 > reference_price 的上涨目标；\n\
+             - targetPrice 是**方向性目标**，只有方向明确时才输出：看多(买入/增持)取 > reference_price 的上涨目标；\n\
                看空(减持/卖出)取 < reference_price 的下跌目标。\n\
-             - stopLoss 与 targetPrice 必须分居 reference_price 两侧，禁止 targetPrice <= stopLoss。\n\
-             - **持有/观望：不要输出 targetPrice**。若确实要输出，禁止填成等于 reference_price 的数值\n\
-               —— 等于现价不含任何方向信息，会被下游判为「无效价格信号」丢弃，\n\
-               还会让仪表盘「目标价」显示成与估值结论（内在价值/理想买入价）看似矛盾的数值。\n\
-             - 目标价偏离现价超过 70% 会被判为异常数据，请保持量级合理。",
+             - **持有/观望：`targetPrice` 必须留空 —— 直接不写这个字段**。\n\
+               禁止写 null、禁止写 0、**禁止抄 reference_price**：持有/观望不含方向信息，\n\
+               任何填进去的数值都会被下游判为「无效价格信号」丢弃，\n\
+               填成等于现价还会让仪表盘「目标价」与估值结论（内在价值/理想买入价）读起来自相矛盾。\n\
+             - stopLoss 与 targetPrice 同时输出时必须分居 reference_price 两侧，禁止 targetPrice <= stopLoss；\n\
+               targetPrice 留空时本约束不适用，stopLoss 仍应按风险位正常给出。\n\
+             - 目标价偏离现价超过 70% 会被判为异常数据，请保持量级合理。\n\
+             - ⚠️ 禁止用「填一个占位数值」来凑字段完整性：宁可不写 targetPrice，也不要输出等值或臆造的方向价。",
             a.config.system_prompt
         );
         a.config.max_tool_rounds = Some(0); // 禁用工具调用轮次
@@ -4196,8 +4260,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("current_price", "t-scoring.result.content.currentPrice"),
                     ("trader_target_price", "trader.content.verdict.targetPrice"),
                     ("trader_stop_loss", "trader.content.verdict.stopLoss"),
-                    ("trader_time_horizon", "trader.content.verdict.timeHorizon"),
-                    ("trader_holding_days", "trader.content.verdict.expectedHoldingDays"),
                     // V65 新增: trader 对比字段
                     // 2026-09-19 订正: 原注释「trader 6 维度对比字段（f7 可消费更丰富的 LLM 信号）」
                     //   与代码事实不符 —— 实测 f7 只消费**下面保留的 2 个**
@@ -4375,6 +4437,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // X1 桥接: Serenity 瓶颈分析上下文（serenity_score / bottleneck_product 等）
                     // 由 core.rs 在 screening_source=serenity 时注入为工作流变量
                     ("serenity_context", "serenity_context"),
+                    // 周期常量表（每档 {days, mult}；唯一权威源
+                    // `axagent_harness::holding_period::Period::decision_consts_map`，由
+                    // `stock_workflow/hooks.rs` 无条件恒注入）。portfolio-mgr.rhai 的
+                    // `horizon_const` 消费本变量 —— 缺它即 throw，脚本侧不留静默兜错档的退路。
+                    ("horizon_consts_json", "horizon_consts_json"),
                     // ── P1 新增: 资金面因子 f9 数据源 ──
                     // t-hotmoney-data 输出 get_stock_money_flow 的 JSON 字符串
                     // Rhai 中用 json_parse() 解析后提取主力净流入占比
@@ -5098,8 +5165,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         JsonSchemaProperty {
             schema_type: "number".to_string(),
             description: Some(
-                "目标价。方向语义必须与 action 一致：看多(买入/增持)须 > currentPrice；\
-                 看空(减持/卖出)须 < currentPrice；持有/观望**不要输出该字段**。\
+                "目标价（元）。只有方向明确时才输出：看多(买入/增持)须 > currentPrice；\
+                 看空(减持/卖出)须 < currentPrice；**持有/观望必须留空该字段**\
+                 （不写该键、不写 null、不写 0、不得抄 currentPrice）。\
                  禁止输出等于 currentPrice 的数值——等值不含方向信息，会被下游判为无效价格信号。"
                     .to_string(),
             ),
@@ -7886,17 +7954,15 @@ mod fast_workflow_derivation_tests {
         );
 
         // ③ 前缀改写：全图无旧前缀残留，且 9 条 trader 路径逐条指向新前缀
-        //    （8 条在 `portfolio-mgr` + 1 条在 `portfolio-risk-gate`）。
+        //    （6 条在 `portfolio-mgr` + 1 条在 `portfolio-risk-gate`）。
         //    ⚠ 判据**不能**是「key 以 `trader_` 开头」—— `portfolio-mgr` 另有
         //    `trader_cap_min_weight` 这类**面板变量自映射**（值就是变量名本身，
         //    走「参数四道门」的变量通路，与 trader 节点输出无关）。
-        let expected_trader_paths: [(&str, &str, &str); 9] = [
+        let expected_trader_paths: [(&str, &str, &str); 7] = [
             ("portfolio-mgr", "trader_direction", "verdict"),
             ("portfolio-mgr", "trader_confidence", "confidence"),
             ("portfolio-mgr", "trader_target_price", "targetPrice"),
             ("portfolio-mgr", "trader_stop_loss", "stopLoss"),
-            ("portfolio-mgr", "trader_time_horizon", "timeHorizon"),
-            ("portfolio-mgr", "trader_holding_days", "expectedHoldingDays"),
             ("portfolio-mgr", "trader_risk_level", "riskLevel"),
             ("portfolio-mgr", "trader_evidence_count", "evidence_cited"),
             ("portfolio-risk-gate", "target_price", "targetPrice"),

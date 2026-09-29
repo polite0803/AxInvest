@@ -47,6 +47,8 @@ interface ReflectionRow {
   missedSignals: string | null;
   fixForFuture: string | null;
   reflectionDepth: string;
+  /** 本次反思复盘的周期档（〇-B v2）；null = 该列引入前的旧记录 */
+  horizon?: string | null;
   minConfidenceThreshold: number;
   status: string;
   createdAt: number;
@@ -92,6 +94,8 @@ export function ReflectionPanel() {
 
   const [manualAsOf, setManualAsOf] = useState<Dayjs | null>(null);
   const [manualDepth, setManualDepth] = useState("light");
+  // 〇-B v2 第 4 条：手动反思「本次只复盘哪一档」；"" = 不指定（后端用该分析的公式主档）
+  const [manualHorizon, setManualHorizon] = useState("");
   const [running, setRunning] = useState(false);
 
   // [方向4/5] 反思反馈 Modal 状态
@@ -283,6 +287,8 @@ export function ReflectionPanel() {
         stockName: r.stockName,
         asOfDate: r.asOfDate,
         reflectionDepth: r.reflectionDepth,
+        // 〇-B v2：重跑沿用该行的复盘档；旧行无档则交后端按公式主档兜（不在此伪造某档）
+        horizon: r.horizon ?? undefined,
       });
       message.success(t("stockAnalysis.reflection.rerunSuccess"));
       await load();
@@ -485,6 +491,7 @@ export function ReflectionPanel() {
         stockName: "",
         asOfDate: manualAsOf.format("YYYY-MM-DD"),
         reflectionDepth: manualDepth,
+        horizon: manualHorizon || undefined,
       });
       message.success(t("stockAnalysis.reflection.triggerSuccess"));
       await load();
@@ -527,6 +534,23 @@ export function ReflectionPanel() {
                 { label: t("stockAnalysis.reflection.depthDeep"), value: "deep" },
               ]}
               style={{ width: 100 }}
+            />
+            {
+              /* 〇-B v2 第 4 条：一次反思只复盘一个周期档。留空 = 不指定，
+                由后端取该分析的**公式主档**（不是在此伪造某档）。 */
+            }
+            <Select
+              allowClear
+              value={manualHorizon || undefined}
+              onChange={(v) => setManualHorizon(v ?? "")}
+              placeholder={t("stockAnalysis.reflection.horizonAuto")}
+              options={[
+                { label: horizonKeyLabel("ultra_short"), value: "ultra_short" },
+                { label: horizonKeyLabel("short"), value: "short" },
+                { label: horizonKeyLabel("mid"), value: "mid" },
+                { label: horizonKeyLabel("long"), value: "long" },
+              ]}
+              style={{ width: 140 }}
             />
             <Button
               type="primary"

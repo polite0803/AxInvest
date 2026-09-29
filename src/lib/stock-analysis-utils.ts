@@ -1320,3 +1320,57 @@ export async function computeEvidenceDrivenConsensus(
 }
 
 // ── 分析师名称映射（已迁移至 i18n: stockAnalysis.workflow.analyst.*）──
+
+/**
+ * 四档周期的 i18n 标签后缀。
+ *
+ * 与 `DecisionBanner` 的 `HORIZON_KEYS` 共用同一批键（`stockAnalysis.timeHorizon*`）——
+ * 档位显示名全仓只此一套，历史列表与时间线不得各写一套（2026-09-29）。
+ */
+export const HORIZON_T_SUFFIX: Readonly<Record<string, string>> = {
+  ultra_short: "UltraShort",
+  short: "Short",
+  mid: "Mid",
+  long: "Long",
+};
+
+/** 主档来源标签：`formula` = 本地公式定档，`model` = 采信模型自报（历史形态）。 */
+export function horizonSourceLabelKey(source?: string | null): string | null {
+  if (source === "formula") { return "stockAnalysis.horizonSourceFormula"; }
+  if (source === "model") { return "stockAnalysis.horizonSourceModel"; }
+  return null;
+}
+
+/**
+ * 从分析记录的 `decisionJson` 里取「四档各自的 Action」。
+ *
+ * 一次分析产四档决策（`decisionsByHorizon`，portfolio-mgr.rhai），历史行此前只渲染主档那条。
+ * 键兼容 camelCase（现网产出）与 snake_case（旧快照 / `agentOutput` 同规矩）；解析不出任何一档
+ * 时返回空数组 ⇒ 调用方**不渲染**，不得回退成「四档同主档」。
+ */
+export function readHorizonActions(decisionJson?: string | null): Array<{ key: string; action: string }> {
+  if (!decisionJson) { return []; }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(decisionJson) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const raw = parsed.decisionsByHorizon ?? parsed.decisions_by_horizon;
+  if (raw == null || typeof raw !== "object") { return []; }
+  const map = raw as Record<string, { action?: unknown } | null>;
+  const out: Array<{ key: string; action: string }> = [];
+  for (
+    const [camel, snake] of [
+      ["ultraShort", "ultra_short"],
+      ["short", "short"],
+      ["mid", "mid"],
+      ["long", "long"],
+    ]
+  ) {
+    const row = map[camel] ?? map[snake];
+    const action = row && typeof row.action === "string" ? row.action : "";
+    if (action) { out.push({ key: snake, action }); }
+  }
+  return out;
+}

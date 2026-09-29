@@ -662,7 +662,11 @@ interface StockAnalysisState {
   ) => Promise<void>;
   startAnalysis: (
     stockCode: string,
-    options?: { parentAnalysisId?: string; language?: string; templateId?: string },
+    options?: {
+      parentAnalysisId?: string;
+      language?: string;
+      templateId?: string;
+    },
   ) => Promise<void>;
   rerunDecision: (analysisId: string) => Promise<void>;
   cancelAnalysis: () => Promise<void>;
@@ -1022,7 +1026,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
 
   startAnalysis: async (
     stockCode: string,
-    options?: { parentAnalysisId?: string; language?: string; templateId?: string },
+    options?: {
+      parentAnalysisId?: string;
+      language?: string;
+      templateId?: string;
+    },
   ) => {
     const { status } = get();
     if (status === "loading" || status === "running") {

@@ -470,6 +470,25 @@ export function StockAnalysisConfigPanel(_props: Props) {
         vars: resolve(["cost_pct"]),
       },
       {
+        // 〇-B v2 第 3 条：逐周期止损/止盈档位。默认值与兜底在 `portfolio-mgr.rhai`，
+        // 变量定义在 `seed_variables.rs`，登记在 `PORTFOLIO_MGR_TUNABLE_PARAMS` ⇒ 反思可建议。
+        // ⚠ 注释必须在 `tool:` 之前：`StockAnalysisConfigPanel.test.tsx` 的分组解析器按
+        //   「label 行的下一行就是 vars」匹配，注释插在 label 与 vars 之间会让整组**不被识别**
+        //   ⇒ 表现为「权威源登记了却没有任何面板分组暴露」（2026-09-29 实测踩中）。
+        tool: "portfolio_mgr_horizon",
+        label: t("stockAnalysis.settings.group.portfolioMgrHorizon"),
+        vars: resolve([
+          "sl_pct_ultra_short",
+          "tp_pct_ultra_short",
+          "sl_pct_short",
+          "tp_pct_short",
+          "sl_pct_mid",
+          "tp_pct_mid",
+          "sl_pct_long",
+          "tp_pct_long",
+        ]),
+      },
+      {
         tool: "rules",
         label: t("stockAnalysis.settings.group.rule"),
         vars: resolve([

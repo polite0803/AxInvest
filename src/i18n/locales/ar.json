@@ -6520,62 +6520,6 @@
       "confirm-delete": "حذف مهمة التوصية هذه؟",
       "empty-description": "لا توجد مهام توصية مجدولة"
     },
-    "strategyPack": {
-      "title": "إدارة حزم الاستراتيجية",
-      "searchPlaceholder": "البحث بالاسم أو الوصف أو المعرّف",
-      "empty": "لا توجد حزم استراتيجية",
-      "detailTitle": "تفاصيل حزمة الاستراتيجية",
-      "editorTitle": "محرر حزمة الاستراتيجية",
-      "editorIdLabel": "معرّف حزمة الاستراتيجية (يُستخدم للحفظ في دليل المستخدم)",
-      "editorYamlLabel": "محتوى YAML",
-      "editorYamlTip": "حدّد حزمة الاستراتيجية بتنسيق YAML. راجع الحزم المدمجة لمعرفة الحقول.",
-      "editorYamlPlaceholder": "أدخل محتوى YAML هنا...",
-      "confirmDelete": "حذف حزمة الاستراتيجية هذه الخاصة بالمستخدم؟",
-      "yes": "نعم",
-      "no": "لا",
-      "stat": {
-        "total": "إجمالي الحزم",
-        "builtin": "الحزم المدمجة",
-        "user": "حزم المستخدم"
-      },
-      "source": {
-        "builtin": "مدمج",
-        "user": "مستخدم"
-      },
-      "column": {
-        "name": "الاسم",
-        "description": "الوصف",
-        "source": "المصدر",
-        "strategies": "عدد الاستراتيجيات",
-        "minConfidence": "الثقة الدنيا",
-        "maxPicks": "أقصى عدد توصيات",
-        "actions": "إجراءات",
-        "style": "النمط",
-        "period": "الفترة",
-        "enabled": "مُفعّل",
-        "weight": "الوزن"
-      },
-      "action": {
-        "detail": "التفاصيل",
-        "copy": "نسخ",
-        "refresh": "تحديث",
-        "new": "جديد",
-        "validate": "تحقق",
-        "save": "حفظ",
-        "cancel": "إلغاء",
-        "close": "إغلاق"
-      },
-      "period": {
-        "ultra_short": "فائق القصر",
-        "short": "قصير",
-        "mid": "متوسط",
-        "long": "طويل"
-      },
-      "editorTemplate": {
-        "name": "حزمتي الاستراتيجية",
-        "description": "حزمة استراتيجية مخصصة"
-      }
-    },
     "globalShortcut": "اختصار عام",
     "globalShortcutRegisterOk": "تم تسجيل الاختصارات العامة: {{count}}",
     "globalShortcutRegisterPartial": "تسجيل الاختصارات العامة: {{ok}} نجح، {{fail}} فشل",
@@ -14713,6 +14657,7 @@
     "boolYes": "نعم",
     "boolNo": "لا",
     "backendCallFailed": "فشل استدعاء الواجهة الخلفية",
+    "tierScopeHint": "نطاق الفئة: متوسط الأجل فقط (عوامل الاختناق/السياسة/الأرباح تتكشف عبر أسابيع-أشهر)؛ فئتا القصير والقصير جدًا غير مطبقتين، والفترة المحفوظة تبقى mid مع 28 يومًا المرجعية لتلك الفئة.",
     "emptyHistoryWarning": "سجل Serenity فارغ: أعاد list_reco_history 0 صفوف (ربما لا يوجد سجل بنمط serenity/bottleneck في قاعدة البيانات، أو تم تجاهل فشل أمر الواجهة الخلفية بصمت)",
     "timeBasis": "الأساس الزمني: {{date}} · نافذة مقترحة ~{{days}} يومًا (حتى {{until}})"
   },
@@ -15115,6 +15060,8 @@
     "timeHorizonShort": "Short Term",
     "timeHorizonMid": "Mid Term",
     "timeHorizonLong": "Long Term",
+    "horizonSourceFormula": "صيغة",
+    "horizonSourceModel": "تقرير النموذج",
     "horizonConflictTitle": "تعارض اتجاه الأفق الزمني",
     "horizonConflictHint": "الآفاق الزمنية المختلفة لديها إشارات شراء/بيع متعارضة. راجع تفاصيل كل أفق.",
     "horizonOverview": "نظرة عامة: ",
@@ -15346,7 +15293,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "نسبة الدين",
       "grossMarginLabel": "هامش الربح الإجمالي",
-      "revenueGrowthLabel": "نمو الإيرادات"
+      "revenueGrowthLabel": "نمو الإيرادات",
+      "algorithmConclusion": "خلاصة التقييم الخوارزمي",
+      "algorithmConclusionNote": "محسوبة محليًا من البيانات الأولية (DCF الأمامي / DCF العكسي / التقييم النسبي). نطاق التقييم أدناه هو ناتج DCF لهذه الخوارزمية وليس رأي النموذج اللغوي",
+      "algorithmRangeBand": "نطاق تقييم DCF الخوارزمي (المتحفظ-المتفائل)"
     },
     "workflow": {
       "analyst": {
@@ -15518,8 +15468,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "حزم الاستراتيجية"
+        "recommendation": "Recommendations"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -15596,6 +15545,7 @@
         "portfolioMgrAction": "حدود قرار المحفظة (portfolio-mgr)",
         "portfolioMgrFusion": "بوابة دمج العوامل (portfolio-mgr)",
         "portfolioMgrCost": "تكلفة التداول (portfolio-mgr)",
+        "portfolioMgrHorizon": "مستويات أفق الاحتفاظ (وقف الخسارة / جني الأرباح)",
         "portfolioMgrRisk": "حدود تصنيف المخاطر (portfolio-mgr)",
         "simulation": "محاكاة مونت كارلو",
         "refCodes": "الأوراق المرجعية القطاعية",
@@ -16546,6 +16496,7 @@
       "horizonShort": "قصير (5 أيام)",
       "horizonMid": "متوسط (28 يومًا)",
       "horizonLong": "طويل (90+ يومًا)",
+      "horizonAuto": "حسب الفئة الرئيسية",
       "horizonUnknown": "أفق غير معروف",
       "horizonStatusLabel": "الحالة: ",
       "horizonStatusMature": "ناضج",
@@ -17412,7 +17363,9 @@
       "unsupported": "بدون بيانات",
       "source": "المصدر",
       "extractFailed": "فشل استخراج الأدلة",
-      "matchConfidence": "ثقة المطابقة"
+      "matchConfidence": "ثقة المطابقة",
+      "notApplicable": "تدقيق الاستشهاد بالأدلة غير منطبق (لم يُنتَج أي قرار)",
+      "notApplicableDetail": "لم يُنتج هذا التشغيل أي قرار (action={{action}} هي علامة غياب البيانات وليست نتيجة)؛ لذا يحتوي حقل التبرير على معلومات تشخيصية للتراجع ولا يحتوي على أدلة قابلة للتدقيق من المحللين. ولهذا لا تُعرَّف نسبة الدعم في هذه الحالة ولا تُعرض على أنها 0%."
     },
     "charts": {
       "noSectorData": "لا توجد بيانات القطاع",

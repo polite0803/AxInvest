@@ -1,7 +1,15 @@
 import { List } from "@/components/common/AntdList";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
-import { FAST_TEMPLATE_ID, getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import {
+  FAST_TEMPLATE_ID,
+  getActionTagStyle,
+  getActionTKey,
+  HORIZON_T_SUFFIX,
+  horizonSourceLabelKey,
+  readHorizonActions,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import { SearchOutlined } from "@ant-design/icons";
 import { App, Button, Card, Checkbox, Collapse, Empty, Input, Spin, Statistic, Tag } from "antd";
 import { useEffect, useMemo, useState } from "react";
@@ -32,6 +40,13 @@ interface AnalysisRecord {
    * `undefined` / `null` = 未知（本列引入前的记录或非模板产出）—— 不打标识。
    */
   templateId?: string | null;
+  /**
+   * 主结论所属档位（`ultra_short` / `short` / `mid` / `long`）。
+   * `null` / `undefined` = 本列引入前的记录 ⇒ 按「未知周期」显示，**不得**推断成某档。
+   */
+  decisionTimeHorizon?: string | null;
+  /** 档位来源：`formula` = 本地公式定档；`model` = 采信模型自报（历史形态）；`null` = 未知。 */
+  decisionHorizonSource?: string | null;
 }
 
 interface BacktestResult {
@@ -525,6 +540,31 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                               {t("stockAnalysis.fastAnalysis")}
                             </Tag>
                           )}
+                          {
+                            /* 主档 + 来源（2026-09-29）：列表里唯一那条 Action 必须说明它属于
+                              哪一档、档位由何而来。缺列的历史记录显式标「未知周期」，不回填成某档。 */
+                          }
+                          <Tag
+                            className="m-0"
+                            style={{
+                              margin: 0,
+                              fontSize: 10,
+                              lineHeight: "16px",
+                              padding: "0 4px",
+                              borderRadius: 3,
+                              border: "1px solid var(--color-t-tertiary, #888)",
+                              color: "var(--color-t-tertiary, #888)",
+                              background: "transparent",
+                            }}
+                          >
+                            {r.decisionTimeHorizon && HORIZON_T_SUFFIX[r.decisionTimeHorizon]
+                              ? t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[r.decisionTimeHorizon]}`)
+                              : t("stockAnalysis.reflection.horizonUnknown")}
+                            {(() => {
+                              const srcKey = horizonSourceLabelKey(r.decisionHorizonSource);
+                              return srcKey ? ` · ${t(srcKey)}` : "";
+                            })()}
+                          </Tag>
                         </div>
                         {r.createdAt > 0 && (
                           <div className="text-[10px]" style={{ color: "var(--color-t-tertiary, #888)" }}>
@@ -545,6 +585,36 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                           return (
                             <div className="text-[10px]" style={{ color: "var(--color-t-tertiary, #888)" }}>
                               {parts.join(" · ")}
+                            </div>
+                          );
+                        })()}
+                        {
+                          /* 四档 Action（2026-09-29）：一次分析同时产四档决策，历史行原先只显示
+                            主档那条 ⇒ 四档明细虽在 decisionJson 里下发却无人渲染。此处逐档并列；
+                            旧记录没有该结构时**不渲染**（缺席不伪造）。 */
+                        }
+                        {(() => {
+                          const tiers = readHorizonActions(r.decisionJson);
+                          if (tiers.length === 0) { return null; }
+                          return (
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {tiers.map((x) => (
+                                <Tag
+                                  key={x.key}
+                                  className="m-0"
+                                  style={{
+                                    ...getActionTagStyle(x.action),
+                                    margin: 0,
+                                    fontSize: 10,
+                                    lineHeight: "14px",
+                                    padding: "0 3px",
+                                  }}
+                                >
+                                  {t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[x.key]}`)}
+                                  {": "}
+                                  {t(getActionTKey(x.action))}
+                                </Tag>
+                              ))}
                             </div>
                           );
                         })()}

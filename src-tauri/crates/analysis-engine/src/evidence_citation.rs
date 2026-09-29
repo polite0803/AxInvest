@@ -89,6 +89,15 @@ pub struct CitationReport {
     pub support_rate: f64,
     /// 参与的分析师数量
     pub analyst_count: usize,
+    /// 本轮**决策未产出**（action 为 `Unavailable` 哨兵），故不存在可审计的决策理由。
+    ///
+    /// 为什么必须是独立标志而不是「`total_claims == 0`」或「`support_rate == 0`」：
+    /// 降级路径会把异常诊断串（`portfolio-mgr Rhai 执行异常，已降级为保守决策: …`）
+    /// 写进 `decision_reasoning`，那条串与任何分析师正文零重合 ⇒ 匹配必然全 miss
+    /// ⇒ 支撑率读出 **0%**。而 0% 在展示层与「理由确有陈述、但没有数据支撑」**同形**
+    /// ——「拿不到」被伪装成「查了且查出来是零分」。闸口按 `decision_action` 哨兵判，
+    /// 不按 reasoning 文本猜（文本形态会变，哨兵是权威来源）。
+    pub decision_degraded: bool,
 }
 
 /// 分析师 ID → 中文名的映射
@@ -118,17 +127,42 @@ fn analyst_display_name(id: &str) -> String {
 ///
 /// - `decision_reasoning`: 决策中的理由文本（由 trader 节点生成）
 /// - `blackboard_snapshot`: 工作流结束时保存的黑板快照 JSON 字符串
+/// - `decision_degraded`: 本轮决策未产出（action 为 `Unavailable` 哨兵）。为真时
+///   **不做任何匹配**，直接返回带标志的空报告 —— 见 [`CitationReport::decision_degraded`]。
 ///
 /// 返回按匹配置信度降序排列的引用列表。
-pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) -> CitationReport {
+pub fn extract_citations(
+    decision_reasoning: &str,
+    blackboard_snapshot: &str,
+    decision_degraded: bool,
+) -> CitationReport {
     let mut citations = Vec::new();
+
+    if decision_degraded {
+        return CitationReport {
+            stock_code: String::new(),
+            stock_name: String::new(),
+            analysis_date: String::new(),
+            decision_action: String::new(),
+            decision_confidence: 0.0,
+            decision_reasoning: decision_reasoning.to_string(),
+            citations: Vec::new(),
+            supported_claims: 0,
+            total_claims: 0,
+            support_rate: 0.0,
+            analyst_count: 0,
+            decision_degraded: true,
+        };
+    }
 
     // 1. 解析黑板快照
     let bb: HashMap<String, serde_json::Value> =
         serde_json::from_str(blackboard_snapshot).unwrap_or_default();
 
     // 2. 提取所有分析师报告（report.* 前缀的键）
-    let mut analyst_reports: Vec<(String, String)> = Vec::new();
+    //    同时预抽每份报告的**数字 token 集合**：数字重合必须按 token 判，不能按子串
+    //    （见 `text_has_number`，2026-09-28 假高分修复）。
+    let mut analyst_reports: Vec<(String, String, std::collections::HashSet<u64>)> = Vec::new();
     for (key, value) in &bb {
         if key.starts_with("report.") {
             let analyst_id = key.strip_prefix("report.").unwrap_or(key).to_string();
@@ -136,11 +170,19 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
                 serde_json::Value::String(s) => s.clone(),
                 v => v.to_string(),
             };
-            analyst_reports.push((analyst_id, text));
+            // f64 不满足 Hash/Eq ⇒ 以 `to_bits()` 入集：同源十进制字面量解析出的
+            // 等值浮点，位型必然相同（本模块不产 NaN，extract_numbers 解析失败即丢弃）。
+            let nums = extract_numbers(&text).into_iter().map(f64::to_bits).collect();
+            analyst_reports.push((analyst_id, text, nums));
         }
     }
 
     // 3. 按句拆分理由文本
+    //    ⚠ 分隔符**不加 `|`**（2026-09-28 实测否决并留档）：portfolio-mgr 的计算轨迹串以
+    //    ` | ` 分段，按段拆后 3 条真实重跑行的 claim 由 1 变 5–8，但每段太短，字符集
+    //    Jaccard 恒低于 MATCH_THRESHOLD ⇒ 逐段全落「未识别来源」，支撑率从饱和的 100%
+    //    变成饱和的 0%（假高分换成假低分，不是改进）。公式轨迹与分析师叙述之间的
+    //    引用关系不是文本相似度能量的量 —— 该口径问题另议，不靠调本表判据解决。
     let claims: Vec<&str> = decision_reasoning
         .split(&['。', '！', '？', '\n'][..])
         .map(|s| s.trim())
@@ -152,10 +194,11 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
     for claim in &claims {
         let claim_chars: std::collections::HashSet<char> = claim.chars().collect();
         let claim_len = claim_chars.len() as f64;
+        let claim_nums: Vec<f64> = extract_numbers(claim);
 
         let mut best_match: Option<(String, f64, String)> = None;
 
-        for (analyst_id, report_text) in &analyst_reports {
+        for (analyst_id, report_text, report_nums) in &analyst_reports {
             // 用 Jaccard 相似度做简单匹配
             let report_chars: std::collections::HashSet<char> =
                 report_text.chars().take(2000).collect();
@@ -167,11 +210,13 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
                 0.0
             };
 
-            // 也检查是否包含相同的财务数字模式
-            let number_overlap = extract_numbers(claim)
-                .iter()
-                .filter(|n| report_text.contains(&n.to_string()))
-                .count();
+            // 也检查是否包含相同的财务数字模式。
+            // ⚠ 必须按**数字 token** 判（`report_nums.contains(n)`），不能用
+            //   `report_text.contains(&n.to_string())`：后者让 `0` 命中 `2025`、
+            //   `20` 命中 `20.5` ⇒ 计算轨迹串里那些 `仓位=0.0`、`凯利=0.0` 的零值
+            //   会在 11/11 份报告里「命中」，支撑率饱和到 100%（2026-09-28 假高分修复）。
+            let number_overlap =
+                claim_nums.iter().filter(|n| report_nums.contains(&n.to_bits())).count();
 
             let score =
                 jaccard * W_JACCARD + (number_overlap as f64 / claim_len.max(1.0)) * W_NUMBER;
@@ -186,9 +231,9 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
         }
 
         if let Some((analyst_id, score, snippet)) = best_match {
-            let has_data = extract_numbers(claim)
+            let has_data = claim_nums
                 .iter()
-                .any(|n| analyst_reports.iter().any(|(_, text)| text.contains(&n.to_string())));
+                .any(|n| analyst_reports.iter().any(|(_, _, nums)| nums.contains(&n.to_bits())));
             if has_data {
                 supported += 1;
             }
@@ -248,6 +293,7 @@ pub fn extract_citations(decision_reasoning: &str, blackboard_snapshot: &str) ->
         total_claims: total,
         support_rate,
         analyst_count: unique_count.len(),
+        decision_degraded: false,
     }
 }
 
@@ -411,9 +457,41 @@ mod tests {
 
     #[test]
     fn test_empty_input() {
-        let report = extract_citations("", "{}");
+        let report = extract_citations("", "{}", false);
         assert_eq!(report.total_claims, 0);
         assert_eq!(report.analyst_count, 0);
+    }
+
+    /// 回归（2026-09-28）：**决策未产出**时不得读出「支撑率 0%」。
+    ///
+    /// 判据用降级路径的**真实形态**自证：`portfolio-mgr.rhai` 的 catch 块把异常诊断串
+    /// 写进 `reasoning`（`决策=…` 之外的唯一 reasoning 生产者），而快照里分析师报告齐备。
+    /// 走闸口前这条输入会拆出 1 条 claim、与任何中文报告零重合 ⇒ `support_rate = 0.0`
+    /// ⇒ 面板显示 0%，与「理由无数据支撑」同形。
+    #[test]
+    fn degraded_decision_produces_no_zero_percent_reading() {
+        let degraded_reasoning = "portfolio-mgr Rhai 执行异常，已降级为保守决策: \
+            #{\"error\": \"ErrorVariableNotFound\", \"line\": 2817, \"variable\": \"rel\"}";
+        let snapshot = r#"{
+            "report.a-fundamentals": "该股ROE连续3年超过20%，盈利能力突出",
+            "report.a-sector": "白酒行业整体营收增长15%，景气度较高"
+        }"#;
+
+        let report = extract_citations(degraded_reasoning, snapshot, true);
+        assert!(report.decision_degraded, "降级输入必须带显式标志");
+        assert_eq!(report.total_claims, 0, "降级态不得拆出 claim —— 诊断串不是决策理由");
+        assert!(report.citations.is_empty(), "降级态不得产出引用条目");
+
+        // 负对照：同一份输入未经闸口时**确实**产出 0%（证明本闸口拦住的正是该形态）。
+        let unguarded = extract_citations(degraded_reasoning, snapshot, false);
+        assert!(
+            unguarded.total_claims > 0 && unguarded.support_rate == 0.0,
+            "负对照失效：未经闸口的降级串本应读出 0%（实际 claims={}, rate={}）—— \
+             匹配逻辑或输入形态已变，上面的断言失去区分力",
+            unguarded.total_claims,
+            unguarded.support_rate
+        );
+        assert!(!unguarded.decision_degraded, "闸口关闭时标志必须为 false");
     }
 
     #[test]
@@ -423,11 +501,43 @@ mod tests {
             "report.a-fundamentals": "该股ROE连续3年超过20%，盈利能力突出",
             "report.a-sector": "白酒行业整体营收增长15%，景气度较高"
         }"#;
-        let report = extract_citations(reasoning, snapshot);
+        let report = extract_citations(reasoning, snapshot, false);
         assert!(report.total_claims > 0);
         // 至少有一个理由匹配上了
         let matched = report.citations.iter().filter(|c| c.match_confidence.get() > 0.0).count();
         assert!(matched > 0, "应有至少一个理由匹配到分析师报告");
+    }
+
+    /// 回归（2026-09-28 假高分）：数字重合必须按**整个数字 token** 判。
+    ///
+    /// 修复前的失真（DB 实测：301269 / 300604 / 605376 三条正常重跑行全部读出 100%）：
+    /// `report_text.contains(&n.to_string())` 让 `0.0` 渲染成 `"0"` 后命中 `20.0` / `2025`
+    /// 这类**包含它**的其它数字 ⇒ 轨迹串里成片的零值（仓位/凯利/成本）恒被判「有数据支撑」。
+    #[test]
+    fn number_overlap_requires_whole_token() {
+        // ① 边界：claim 的数字只有 `0.0`，报告里只有 `20.0` —— 子串判据会误判为重合。
+        let reasoning_boundary = "低仓位 0.0 成本";
+        let snapshot_boundary = r#"{"report.a-fundamentals":"低仓位 20.0 成本"}"#;
+        let r1 = extract_citations(reasoning_boundary, snapshot_boundary, false);
+        assert_eq!(r1.total_claims, 1, "该输入应拆出 1 条 claim");
+        assert!(
+            r1.citations[0].match_confidence.get() > 0.0,
+            "文本高度重合，应命中来源（否则本用例测不到支撑判据）"
+        );
+        assert!(
+            !r1.citations[0].has_data_support,
+            "`0.0` 不得因报告里的 `20.0` 含字符 0 而被判为有数据支撑（修复前此处恒真）"
+        );
+        assert_eq!(r1.support_rate, 0.0, "无重合数字时支撑率应为 0，而不是被零值撑满");
+
+        // ② 留档：按 `|` 逐段拆轨迹串的方案已实测否决（见上方 split 注释）——
+        //    这里锁住「整串仍是一条 claim」这一既定口径，防止有人再靠拆段去救 100%。
+        let trail = "决策=减持 置信=59.1 仓位=0.0% | 先验=0.5(sideways) 后验=0.42 生效后验=0.34";
+        let snapshot_trail = r#"{
+            "report.investment-plan": "建仓 59.1 万元，分 2 期打满，仓位上限 0.5"
+        }"#;
+        let r2 = extract_citations(trail, snapshot_trail, false);
+        assert_eq!(r2.total_claims, 1, "轨迹串按现口径是 1 条 claim（拆段方案已否决并留档）");
     }
 
     /// 验证中文字符串不会因 UTF-8 字节切片导致 panic
@@ -463,7 +573,7 @@ mod tests {
         // 3 个数字 + 约 21 个去重字符 ⇒ 正是触发旧公式 `×30.0` 的形态
         let reasoning = "ROE 22.3% 且营收 150 亿且增长 5.2% 超预期。";
         let snapshot = r#"{"report.a-fundamentals":"ROE 22.3 营收 150 增长 5.2 均超预期"}"#;
-        let report = extract_citations(reasoning, snapshot);
+        let report = extract_citations(reasoning, snapshot, false);
 
         assert!(report.total_claims > 0, "应至少拆出一句理由");
         let max = report.citations.iter().map(|c| c.match_confidence.get()).fold(0.0_f64, f64::max);

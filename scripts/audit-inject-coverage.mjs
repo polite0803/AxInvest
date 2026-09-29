@@ -138,7 +138,121 @@ export function scanRhaiscript(rhaiText) {
   return { presentRaw, fnParams, localVars, referenced };
 }
 
-/** 抽取某节点 input_mapping 的手写 target 集合 + 常量派生的可调参数。 */
+/** 按**顶层逗号**切分实参（尊重嵌套括号与两种引号字符串）。 */
+function splitArgs(body) {
+  const out = [];
+  let depth = 0;
+  let cur = "";
+  let i = 0;
+  while (i < body.length) {
+    const c = body[i];
+    if (c === '"' || c === "`") {
+      cur += c;
+      i++;
+      while (i < body.length) {
+        if (body[i] === "\\") {
+          cur += body[i] + (body[i + 1] ?? "");
+          i += 2;
+          continue;
+        }
+        cur += body[i];
+        if (body[i] === c) {
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    if (c === "(" || c === "[" || c === "{") depth++;
+    else if (c === ")" || c === "]" || c === "}") depth--;
+    if (c === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+      i++;
+      continue;
+    }
+    cur += c;
+    i++;
+  }
+  if (cur.trim() !== "") out.push(cur.trim());
+  return out;
+}
+
+/**
+ * 抽取「可调用定义」：`fn name(a, b) {` 与 `let name = |a, b| {`。
+ * 返回 `{ name, params, body }`，body 用于判断形参是否被 `present(形参)` 守卫。
+ */
+export function scanCallables(text) {
+  const defs = [];
+  const add = (name, paramsRaw, braceStart) => {
+    const end = bracketEnd(text, braceStart, "{", "}");
+    if (!name || end < 0) return;
+    const params = paramsRaw
+      .split(",")
+      .map((p) => p.trim().replace(/^mut\s+/, "").split(/[\s:]/)[0])
+      .filter(Boolean);
+    defs.push({ name, params, body: text.slice(braceStart, end + 1) });
+  };
+  for (const m of text.matchAll(/^[ \t]*fn\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*\{/gm)) {
+    add(m[1], m[2], m.index + m[0].length - 1);
+  }
+  for (const m of text.matchAll(/^[ \t]*(?:let|const)\s+([A-Za-z_]\w*)\s*=\s*\|([^|]*)\|\s*\{/gm)) {
+    add(m[1], m[2], m.index + m[0].length - 1);
+  }
+  return defs;
+}
+
+/** 收集某定义的全部调用点实参列表（`name.call(…)` 与 `name(…)`，跳过定义自身）。 */
+function callSiteArgs(text, name) {
+  const out = [];
+  const re = new RegExp(`\\b${name}(?:\\.call)?\\s*\\(`, "g");
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const before = text.slice(0, m.index);
+    if (/(?:^|\s)(?:fn|let|const)\s+$/.test(before)) continue; // 定义行，不是调用点
+    const open = m.index + m[0].length - 1;
+    const close = bracketEnd(text, open, "(", ")");
+    if (close < 0) continue;
+    out.push(splitArgs(text.slice(open + 1, close)));
+  }
+  return out;
+}
+
+/**
+ * 判据 ③：形参不能只被「排除」，要反过来查它的**实参来源**。
+ *
+ * 背景（2026-09-29 实测）：`ts` 是 `horizon_decision` 闭包的形参，被 `present(ts)` 守卫。
+ * 旧版扫描器只识别 `fn` 形参、不识别闭包形参 ⇒ ① 恒报 `ts`「无注入来源」，
+ * 而**真链路是齐的**（三个调用点传 `totalScore_short/mid/long`，都有 input_mapping）。
+ * 只把闭包形参加进排除名单会变成「用假阳性换假阴性」：若某天调用点全改传字面量，
+ * `present(ts)` 恒假、该档评分静默退化成日线评分 —— 正是本脚本要抓的形态。
+ * 故：名单排除**以「至少一个调用点的对应实参是已注入变量或脚本内自给变量」为条件**。
+ */
+export function checkParams(fullText, defs, presentNames, sources, localVars) {
+  const sourced = [];
+  const unwired = [];
+  for (const d of defs) {
+    if (!d.params.some((p) => presentNames.has(p))) continue;
+    const sites = callSiteArgs(fullText, d.name);
+    d.params.forEach((p, idx) => {
+      if (!presentNames.has(p)) return; // 未被 present() 守卫 ⇒ 不属本判据
+      const got = sites.map((args) => args[idx]).filter((a) => a !== undefined && a !== "");
+      const hit = got.filter((a) => sources.has(a) || localVars.has(a));
+      if (hit.length > 0) {
+        sourced.push({ name: d.name, param: p, from: [...new Set(hit)].sort() });
+      } else {
+        unwired.push({
+          name: d.name,
+          param: p,
+          why: got.length === 0 ? "无调用点或实参个数不足" : `实参均非注入变量（${[...new Set(got)].join(" | ")}）`,
+        });
+      }
+    });
+  }
+  return { sourced, unwired };
+}
+
 export function scanSeed(seedText, opts) {
   const lines = seedText.split(/\r?\n/);
   const startIdx = lines.findIndex((l) => l.includes(opts.includeMarker));
@@ -181,22 +295,48 @@ export function audit(rhaiText, seedText, opts) {
   if (!seed.ok) return { ok: false, reason: seed.reason };
 
   const effective = new Set([...seed.mappingTargets, ...seed.tunables]);
-  const selfProvided = rhai.referenced.filter((v) => rhai.localVars.has(v)).sort();
-  const uncovered = rhai.referenced.filter((v) => !effective.has(v) && !rhai.localVars.has(v));
+  // 定义/调用点解析跑在**剥注释**后的文本上：注释里的示例 `fn`/`present(x)` 不是代码。
+  const stripped = stripRustComments(rhaiText);
+  const defs = scanCallables(stripped);
+  const { sourced: paramSourced, unwired: paramUnwired } = checkParams(
+    stripped,
+    defs,
+    rhai.presentRaw,
+    effective,
+    rhai.localVars,
+  );
+  // ① 的排除名单只收「已被 ③ 证明实参有来源」的形参 ⇒ 不是拿假阳性换假阴性。
+  const provenParams = new Set(paramSourced.map((x) => x.param));
+  const referenced = rhai.referenced.filter((v) => !provenParams.has(v));
+
+  const selfProvided = referenced.filter((v) => rhai.localVars.has(v)).sort();
+  const uncovered = referenced.filter((v) => !effective.has(v) && !rhai.localVars.has(v));
   // 倒查用「脚本全文是否提过这个名字」，而非只看 present()：有些变量无守卫直接使用。
   const dangling = [...seed.mappingTargets]
     .filter((t) => !new RegExp(`\\b${t}\\b`).test(rhaiText))
     .sort();
 
-  return { ok: true, rhai, seed, effective, selfProvided, uncovered, dangling };
+  return {
+    ok: true,
+    rhai,
+    seed,
+    effective,
+    defs,
+    referenced,
+    selfProvided,
+    uncovered,
+    paramSourced,
+    paramUnwired,
+    dangling,
+  };
 }
 
 function report(result, opts) {
-  const { rhai, seed, effective, selfProvided, uncovered, dangling } = result;
+  const { rhai, seed, effective, referenced, selfProvided, uncovered, paramSourced, paramUnwired, dangling } = result;
   console.log(`脚本: ${opts.script}`);
-  console.log(`  ${opts.script.split("/").pop()}：${rhai.referenced.length} 个被引用变量`);
+  console.log(`  ${opts.script.split("/").pop()}：${referenced.length} 个被引用变量`);
   console.log(`  函数形参（已排除）: ${[...rhai.fnParams].sort().join(", ") || "(无)"}`);
-  console.log(`  present() 原始命中 ${rhai.presentRaw.size} 个 → 排除形参后 ${rhai.referenced.length} 个`);
+  console.log(`  present() 原始命中 ${rhai.presentRaw.size} 个 → 排除形参后 ${referenced.length} 个`);
   console.log(`input_mapping 形态: ${seed.shape} | 手写 target ${seed.mappingTargets.size} 个`);
   console.log(
     `${opts.constName}: 声明 ${seed.declaredCount} 项 / 解析到 ${seed.tunables.length} 项`,
@@ -221,7 +361,19 @@ function report(result, opts) {
     dangling.forEach((v) => console.log(`  · ${v}`));
     console.log(`  ⇒ ${dangling.length} 个映射悬空（白注入，无功能危害；v51 曾同心处理 stock_sector）。`);
   }
-  return { uncovered, dangling };
+  console.log(`
+=== ③ 被 present() 守卫的形参，其实参是否有注入来源 ===`);
+  if (paramSourced.length > 0) {
+    paramSourced.forEach((x) => console.log(`  ✓ ${x.name}.${x.param} ← ${x.from.join(", ")}`));
+  }
+  if (paramUnwired.length === 0) {
+    console.log("  (无悬空形参) ✅");
+  } else {
+    paramUnwired.forEach((x) => console.log(`  ✗ ${x.name}.${x.param} —— ${x.why}`));
+    console.log(`  ⇒ 这 ${paramUnwired.length} 个形参上的 present() 恒假 ⇒ 该分支静默退化（它们已从 ① 剔除，不会重复出现在上面）。`);
+  }
+
+  return { uncovered, paramUnwired, dangling };
 }
 
 // ── 正负对照：证明扫描器**会告警**，而不是恒报空 ──
@@ -246,7 +398,7 @@ ${targets.map((t) => `                    ("${t}", "src.${t}"),`).join("\n")}
         "tunable_one",
     ];
   `;
-  const run = (name, rhaiText, seedText, expectUncovered, expectDangling) => {
+  const run = (name, rhaiText, seedText, expectUncovered, expectDangling, expectParam = []) => {
     const r = audit(rhaiText, seedText, opts);
     if (!r.ok) {
       cases.push({ name, pass: false, note: `audit 失败: ${r.reason}` });
@@ -254,11 +406,16 @@ ${targets.map((t) => `                    ("${t}", "src.${t}"),`).join("\n")}
     }
     const gotU = r.uncovered.sort().join(",");
     const gotD = r.dangling.sort().join(",");
+    const gotP = r.paramUnwired.map((x) => `${x.name}.${x.param}`).sort().join(",");
+    const pass =
+      gotU === [...expectUncovered].sort().join(",") &&
+      gotD === [...expectDangling].sort().join(",") &&
+      gotP === [...expectParam].sort().join(",");
     const pass = gotU === [...expectUncovered].sort().join(",") && gotD === [...expectDangling].sort().join(",");
     cases.push({
       name,
       pass,
-      note: pass ? "ok" : `uncovered=[${gotU}] dangling=[${gotD}]`,
+    note: pass ? "ok" : `uncovered=[${gotU}] dangling=[${gotD}] paramUnwired=[${gotP}]`,
     });
   };
 
@@ -310,6 +467,42 @@ ${targets.map((t) => `                    ("${t}", "src.${t}"),`).join("\n")}
     [],
   );
 
+  // 正控④：闭包形参被 present() 守卫、调用点实参是已注入变量 ⇒ ①③ 都不报（`ts` 的真实形态）
+  run(
+    "正控④ 闭包形参实参有注入 ⇒ 不报",
+    `fn present(x) { type_of(x) != "()" }
+let decide = |h, sc| { if present(sc) { sc } else { 0.0 } };
+let r = decide.call("mid", totalScore_mid);
+`,
+    fakeSeed(["totalScore_mid"]),
+    [],
+    [],
+    [],
+  );
+  // 正控⑤：同形参但调用点改传字面量 ⇒ 必须报 decide.sc（排除形参不得退化成假阴性）
+  run(
+    "正控⑤ 闭包形参实参全字面量 ⇒ 报悬空形参",
+    `fn present(x) { type_of(x) != "()" }
+let decide = |h, sc| { if present(sc) { sc } else { 0.0 } };
+let r = decide.call("mid", 50.0);
+`,
+    fakeSeed(["totalScore_mid"]),
+    [],
+    ["totalScore_mid"],
+    ["decide.sc"],
+  );
+  // 正控⑥：守卫形参所在闭包无任何调用点 ⇒ 同样报出
+  run(
+    "正控⑥ 守卫形参无调用点 ⇒ 报悬空形参",
+    `fn present(x) { type_of(x) != "()" }
+let dead = |v| { if present(v) { v } else { 0.0 } };
+`,
+    fakeSeed(["b"]),
+    [],
+    ["b"],
+    ["dead.v"],
+  );
+
   console.log("=== 扫描器自检（正负对照）===");
   let failed = 0;
   for (const c of cases) {
@@ -352,8 +545,8 @@ function main() {
     console.log(`❌ 审计无法进行: ${result.reason}`);
     process.exit(2);
   }
-  const { uncovered } = report(result, opts);
-  if (strict && uncovered.length > 0) {
+  const { uncovered, paramUnwired } = report(result, opts);
+  if (strict && (uncovered.length > 0 || paramUnwired.length > 0)) {
     console.log(`\nSTRICT FAIL: ${uncovered.length} 个被引用变量无注入来源`);
     process.exit(1);
   }

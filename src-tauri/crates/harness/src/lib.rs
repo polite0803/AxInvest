@@ -678,6 +678,9 @@ pub use workflow_optimization::{
 // 同时被 profile::UserProfile::update_style 和 trajectory 的 RealTimeLearning 使用
 pub mod adaptation;
 pub use adaptation::{ContentFormat, TechnicalLevel, Verbosity};
+// ── 持有周期四档（Period）唯一权威源，见 holding_period.rs 模块头 ──
+pub mod holding_period;
+pub use holding_period::Period;
 pub mod profile;
 pub use profile::{
     CodePattern, CodingStyleProfile, CommentStyle, CommunicationProfile, DetailLevel,
@@ -909,12 +912,6 @@ pub mod strategy_contract;
 pub use strategy_contract::{
     Bar, CloseReason, EquityPoint, Fill, Order, OrderType, Position, Side, Signal, SignalAction,
     Strategy, StrategyCtx, Trade,
-};
-
-// ── 荐股策略包契约（YAML 自然语言策略包格式，让用户可配置策略参数） ──
-pub mod strategy_pack;
-pub use strategy_pack::{
-    StrategyPack, StrategyPackManifest, StrategyPackSpec, StrategyPackStrategyEntry,
 };
 
 // ── 统一事件总线契约（跨 crate 事件流标准入口） ──

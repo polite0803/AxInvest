@@ -6520,62 +6520,6 @@
       "confirm-delete": "이 추천 작업을 삭제하시겠습니까?",
       "empty-description": "예약된 추천 작업이 없습니다"
     },
-    "strategyPack": {
-      "title": "전략 팩 관리",
-      "searchPlaceholder": "전략 팩 이름, 설명 또는 ID로 검색",
-      "empty": "전략 팩이 없습니다",
-      "detailTitle": "전략 팩 상세",
-      "editorTitle": "전략 팩 편집기",
-      "editorIdLabel": "전략 팩 ID (사용자 디렉토리에 저장하는 데 사용)",
-      "editorYamlLabel": "YAML 내용",
-      "editorYamlTip": "YAML 형식으로 전략 팩을 정의하세요. 필드는 내장 전략 팩을 참조하세요.",
-      "editorYamlPlaceholder": "여기에 YAML 내용을 입력하세요...",
-      "confirmDelete": "이 사용자 전략 팩을 삭제하시겠습니까?",
-      "yes": "예",
-      "no": "아니오",
-      "stat": {
-        "total": "전략 팩 총 수",
-        "builtin": "내장 전략 팩",
-        "user": "사용자 전략 팩"
-      },
-      "source": {
-        "builtin": "내장",
-        "user": "사용자"
-      },
-      "column": {
-        "name": "이름",
-        "description": "설명",
-        "source": "출처",
-        "strategies": "전략 수",
-        "minConfidence": "최소 신뢰도",
-        "maxPicks": "최대 추천 수",
-        "actions": "작업",
-        "style": "스타일",
-        "period": "기간",
-        "enabled": "활성화",
-        "weight": "가중치"
-      },
-      "action": {
-        "detail": "상세",
-        "copy": "복사",
-        "refresh": "새로고침",
-        "new": "신규",
-        "validate": "검증",
-        "save": "저장",
-        "cancel": "취소",
-        "close": "닫기"
-      },
-      "period": {
-        "ultra_short": "초단기",
-        "short": "단기",
-        "mid": "중기",
-        "long": "장기"
-      },
-      "editorTemplate": {
-        "name": "나의 전략 팩",
-        "description": "사용자 정의 전략 팩"
-      }
-    },
     "globalShortcut": "전역 단축키",
     "globalShortcutRegisterOk": "전역 단축키 등록됨: {{count}}",
     "globalShortcutRegisterPartial": "전역 단축키 등록: {{ok}} 성공, {{fail}} 실패",
@@ -14713,6 +14657,7 @@
     "boolYes": "예",
     "boolNo": "아니오",
     "backendCallFailed": "백엔드 호출 실패",
+    "tierScopeHint": "구간 기준: 중선 전용(병목·정책·실적 촉매는 주~월 단위로 전개). 단기/초단기 구간은 적용되지 않으며 저장 period는 항상 mid, 보유 기간은 해당 구간의 권위 값인 28일.",
     "emptyHistoryWarning": "세레니티 히스토리가 비어 있습니다: list_reco_history가 0개 행을 반환했습니다 (DB에 serenity/bottleneck 스타일 히스토리가 없거나 백엔드 명령 실패가 조용히 무시되었을 수 있습니다)",
     "timeBasis": "시간 기준: {{date}} · 권장 기간 약 {{days}}일 (~{{until}})"
   },
@@ -15115,6 +15060,8 @@
     "timeHorizonShort": "단기",
     "timeHorizonMid": "중기",
     "timeHorizonLong": "장기",
+    "horizonSourceFormula": "수식 판정",
+    "horizonSourceModel": "모델 자체 보고",
     "horizonConflictTitle": "기간 방향 충돌",
     "horizonConflictHint": "서로 다른 기간에서 매수/매도 신호가 충돌합니다. 각 기간별 세부 정보를 확인하세요.",
     "horizonOverview": "기간 개요: ",
@@ -15346,7 +15293,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "부채 비율",
       "grossMarginLabel": "매출총이익률",
-      "revenueGrowthLabel": "매출 성장률"
+      "revenueGrowthLabel": "매출 성장률",
+      "algorithmConclusion": "알고리즘 밸류에이션 결론",
+      "algorithmConclusionNote": "로컬 알고리즘이 원시 데이터로 산출(정방향 DCF/역방향 DCF/상대 평가). 아래 밸류에이션 범위는 해당 알고리즘의 DCF 출력이며 LLM 견해가 아닙니다",
+      "algorithmRangeBand": "알고리즘 DCF 밸류에이션 범위(보수~낙관)"
     },
     "workflow": {
       "analyst": {
@@ -15518,8 +15468,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "전략 팩"
+        "recommendation": "Recommendations"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -15596,6 +15545,7 @@
         "portfolioMgrAction": "포트폴리오 결정 임계값(portfolio-mgr)",
         "portfolioMgrFusion": "팩터 융합 게이트 (portfolio-mgr)",
         "portfolioMgrCost": "거래 비용 (portfolio-mgr)",
+        "portfolioMgrHorizon": "보유 기간 구간(손절/익절)",
         "portfolioMgrRisk": "리스크 분류 임계값(portfolio-mgr)",
         "simulation": "몬테카를로 시뮬레이션",
         "refCodes": "업종 참고 종목",
@@ -16546,6 +16496,7 @@
       "horizonShort": "단기 (5일)",
       "horizonMid": "중기 (28일)",
       "horizonLong": "장기 (90일 이상)",
+      "horizonAuto": "주 단계 기준",
       "horizonUnknown": "알 수 없는 주기",
       "horizonStatusLabel": "상태: ",
       "horizonStatusMature": "성숙",
@@ -17412,7 +17363,9 @@
       "unsupported": "데이터 없음",
       "source": "출처",
       "extractFailed": "증거 추출 실패",
-      "matchConfidence": "매칭 신뢰도"
+      "matchConfidence": "매칭 신뢰도",
+      "notApplicable": "증거 인용 감사 대상 아님(이번 실행에서 판정이 산출되지 않음)",
+      "notApplicableDetail": "이번 실행에서는 판정이 산출되지 않았습니다(action={{action}}는 결론이 아닌 데이터 부재 표시값). 사유 칸에는 강등 진단 정보가 저장되어 감사 가능한 애널리스트 증거가 없습니다. 따라서 지원율은 이 상황에서 정의되지 않으며 0%로 표시되지 않습니다."
     },
     "charts": {
       "noSectorData": "섹터 배분 데이터 없음",

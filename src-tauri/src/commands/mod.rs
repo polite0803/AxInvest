@@ -175,7 +175,6 @@ mod stock_analysis_bridge_tests;
 pub mod stock_analysis_setup;
 pub mod stock_pipeline;
 pub mod stock_workflow;
-pub mod strategy_pack;
 pub mod trade_intent;
 pub mod wf_des;
 // 工作流执行引擎命令:含审批(HITL)命令 list_pending_approvals/resume_approval/cancel_approval、

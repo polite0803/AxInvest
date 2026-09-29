@@ -142,6 +142,11 @@ pub async fn run_reflection_workflow(
     hindsight_date: &str,
     min_confidence_threshold: u8,
     reflection_depth: &str,
+    // 〇-B v2 第 4 条：本次反思**只复盘一个周期档**。
+    //   `Some(x)` = 调用方显式指定（手动反思 / 分档定时任务）；
+    //   `None`    = 沿用原分析的**公式主档** `decision_time_horizon`（v2 下恒为 formula 产出）。
+    //   值域 = `Period::as_str()`；命令入口已校验，非法值不会进到这里。
+    review_horizon: Option<&str>,
     // [B2/B3 借鉴] 反思 row ID(B1 阶段落盘的 pending row)。
     // 传入则 UPDATE 现有 row;传 None 则按 v1 行为 INSERT 新 row,保持旧调用方兼容。
     reflection_id: Option<String>,
@@ -204,6 +209,9 @@ pub async fn run_reflection_workflow(
             hindsight_date: Set(hindsight_date.to_string()),
             min_confidence_threshold: Set(min_confidence_threshold as i32),
             reflection_depth: Set(reflection_depth.to_string()),
+            // 〇-B v2 第 4 条：兼容旧调用方的 INSERT 路径同样显式置 NULL，
+            //   复盘档由反思收尾按 `primary_horizon` 盖章（见 HorizonResultsJson 处）。
+            horizon: Set(None),
             actual_outcome: Set(actual_outcome.to_string()),
             // v008 (C3 借鉴): 4 个结构化 outcome
             raw_return: Set(raw_return),
@@ -278,10 +286,16 @@ pub async fn run_reflection_workflow(
     });
 
     // 派生主周期快照：用于 comparator 顶层变量注入 + strategy_performance 单条写入
-    let primary_horizon = original_analysis
-        .as_ref()
-        .and_then(|a| a.decision_time_horizon.as_deref())
-        .unwrap_or("short");
+    let primary_horizon = review_horizon.unwrap_or_else(|| {
+        original_analysis.as_ref().and_then(|a| a.decision_time_horizon.as_deref()).unwrap_or_else(
+            || {
+                tracing::warn!(
+                    "[reflection] 无显式复盘档且原分析无主档 ⇒ 按 short 复盘（代理，非事实陈述）"
+                );
+                "short"
+            },
+        )
+    });
     let primary_snapshot = horizon_snapshots.get(primary_horizon).and_then(|s| s.as_ref());
 
     // 4a. 从 blackboard_snapshot 构造 sub-analysis 变量（分析工作流记忆）
@@ -406,7 +420,8 @@ pub async fn run_reflection_workflow(
             name: "stock_lessons".into(),
             var_type: "string".into(),
             value: serde_json::Value::String(
-                fetch_stock_lessons(stock_code, db)
+                // 〇-B v2 第 4 条：反思自身也只喂**本次复盘档**的教训
+                fetch_stock_lessons(stock_code, db, Some(primary_horizon))
                     .await
                     .0
                     .unwrap_or_else(|| "（暂无历史反思）".to_string()),
@@ -620,6 +635,12 @@ pub async fn run_reflection_workflow(
                     stock_reflections::Column::HorizonResultsJson,
                     Expr::value(horizon_json),
                 )
+                // 〇-B v2 第 4 条：本行**只复盘这一档**（其余三档只有客观判定，
+                // 没有反思叙述/教训）。该章是 lesson 与档位参数建议的归属依据。
+                .col_expr(
+                    stock_reflections::Column::Horizon,
+                    Expr::value(Some(primary_horizon.to_string())),
+                )
                 .col_expr(
                     stock_reflections::Column::WhatWentWrong,
                     Expr::value(what_went_wrong.clone()),
@@ -703,10 +724,13 @@ pub async fn run_reflection_workflow(
                     })
                     .map(|c| c.round().clamp(0.0, 100.0) as i32)
                     .unwrap_or(0);
+                // 〇-B v2 第 4 条：本行是「复盘某一档」的绩效，period 必须带档，
+                //   否则四档共写 period="reflection" ⇒ 按档统计读不出差异（PLAN 断点⑤）。
+                //   保留 `reflection:` 前缀：既有消费方按前缀识别反思来源，不做破坏性改名。
                 let sp_insert = strategy_performance::ActiveModel {
                     id: Set(sp_id.clone()),
                     strategy_id: Set("reflection_verdict".to_string()),
-                    period: Set("reflection".to_string()),
+                    period: Set(format!("reflection:{primary_horizon}")),
                     stock_code: Set(stock_code.to_string()),
                     stock_name: Set(stock_name.to_string()),
                     decision_at: Set(decision_at),
@@ -715,7 +739,17 @@ pub async fn run_reflection_workflow(
                     return_pct: Set(raw_return.unwrap_or(0.0)),
                     was_correct: Set(was_correct),
                     decision_confidence: Set(decision_confidence),
-                    horizon_pnl_json: Set(None),
+                    // 复盘档的客观判定切片（其余三档在 horizon_results_json）
+                    horizon_pnl_json: Set(Some(
+                        serde_json::json!({
+                            primary_horizon: {
+                                "returnPct": raw_return,
+                                "wasCorrect": was_correct,
+                                "holdingDays": holding_days,
+                            }
+                        })
+                        .to_string(),
+                    )),
                     agreement_score: Set(None),
                     created_at: Set(now_ms),
                 }
@@ -910,6 +944,7 @@ pub async fn run_reflection_workflow(
                         &analysis_id,
                         &ls,
                         verdict_for_rule.as_deref(),
+                        primary_horizon,
                     )
                     .await;
                 }
@@ -1244,6 +1279,9 @@ async fn extract_lesson_to_rule(
     source_reflection_id: &str,
     lesson_summary: &str,
     verdict: Option<&str>,
+    // 本次反思复盘的档位（〇-B v2 第 4 条：一次反思 = 一个周期）。
+    // 由调用点传入 `primary_horizon`，**不是** LLM 自由填写的字段。
+    horizon: &str,
 ) -> Result<(), String> {
     use axagent_entities::reflection_lessons;
     use sea_orm::ActiveModelTrait;
@@ -1264,6 +1302,9 @@ async fn extract_lesson_to_rule(
     let existing = reflection_lessons::Entity::find()
         .filter(reflection_lessons::Column::StockCode.eq(stock_code))
         .filter(reflection_lessons::Column::LessonSummary.eq(trimmed))
+        // 去重键含 horizon：同一条文字教训在**不同档**是两条规则（短线与长线的
+        // 「止损节奏」本就不同），合表会把两条压成一条并静默丢掉另一档的统计。
+        .filter(reflection_lessons::Column::Horizon.eq(horizon))
         .one(db)
         .await
         .map_err(|e| {
@@ -1301,6 +1342,8 @@ async fn extract_lesson_to_rule(
         rule_pattern: Set(None), // 后续由 F1 迭代扩展: LLM 分析 lesson_summary 自动提取
         source_reflection_id: Set(Some(source_reflection_id.to_string())),
         stock_code: Set(Some(stock_code.to_string())),
+        // 周期章：由本次复盘档位盖章（值域 = Period::as_str），读侧据此同档过滤
+        horizon: Set(Some(horizon.to_string())),
         applicable_scenarios: Set(None),
         times_applied: Set(0),
         success_count: Set(0),
@@ -1717,6 +1760,8 @@ async fn perform_single_reflection(
     )
     .await;
 
+    // 〇-B v2 第 4 条：本函数的复盘档 = 原分析的公式主档；
+    //   显式透传给 run_reflection_workflow，避免两条路径各自兜一次「short」而分叉。
     let primary_horizon = analysis.decision_time_horizon.as_deref().unwrap_or("short");
     let primary_snap_opt =
         snapshots_raw.get(primary_horizon).and_then(|r| r.as_ref().ok()).cloned();
@@ -1768,6 +1813,7 @@ async fn perform_single_reflection(
         &today_str,
         pending_row.min_confidence_threshold.clamp(0, 255) as u8,
         effective_depth,
+        Some(primary_horizon),
         Some(pending_row.id.clone()),
         trajectory_storage,
         &horizon_snapshots,
@@ -3113,6 +3159,7 @@ mod market_snapshot_tests {
             analysis_kind: "live".to_string(),
             as_of_date: Some("2026-08-01".to_string()),
             decision_time_horizon: Some("mid".to_string()),
+            decision_horizon_source: None,
             decision_expected_holding_days: Some(28),
             model_version: None,
             // A4：NULL = 采集时点无版本信息（A4 之前的存量行、chat 通道写入均为此形态）
@@ -3240,5 +3287,81 @@ mod deterministic_was_correct_tests {
     #[test]
     fn unrecognized_action_not_judged() {
         assert_eq!(deterministic_was_correct(Some("乱写"), Some(&snap(-5.78, false))), None);
+    }
+    /// Phase 5（〇-B v2 第 4 条）：教训按周期档隔离 —— 这是「四周期闭环」的最后一环。
+    ///
+    /// 缺陷原形态（PLAN 断点⑤，改前实证）：`reflection_lessons` **没有周期列**，
+    /// 去重键 = `(stock_code, lesson_summary)`，消费入口 `fetch_stock_lessons(stock_code)`
+    /// 也不带档 ⇒ 超短线的教训（「次日冲高回落就走」）被原样注入长线分析的 prompt。
+    ///
+    /// 本测试同时验三件事：
+    ///   ① 新列由「实体声明 + schema 自愈」自动建出（**没有**手写 migration）；
+    ///   ② 同档与通用（NULL）教训可读，**跨档教训被排除**；
+    ///   ③ 同一条文字教训在不同档**不被去重合并**（否则两档统计互相吞掉）。
+    #[tokio::test]
+    async fn lessons_are_isolated_per_horizon() {
+        use axagent_entities::reflection_lessons;
+        use sea_orm::{ActiveValue, Set};
+
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应可创建").conn;
+        let code = "600519";
+        let now = 1_700_000_000_000_i64;
+        let mk = |id: &str, h: Option<&str>| reflection_lessons::ActiveModel {
+            id: Set(id.to_string()),
+            lesson_summary: Set(format!("教训文本 {id}，足够长可以过长度门")),
+            rule_pattern: ActiveValue::NotSet,
+            source_reflection_id: Set(Some("r-1".to_string())),
+            stock_code: Set(Some(code.to_string())),
+            horizon: Set(h.map(str::to_string)),
+            applicable_scenarios: ActiveValue::NotSet,
+            times_applied: Set(0),
+            success_count: Set(0),
+            confidence: Set(0.9),
+            status: Set("active".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        for (id, h) in [("l-same", Some("long")), ("l-other", Some("short")), ("l-any", None)] {
+            mk(id, h).insert(&db).await.expect("插入 lesson 应成功");
+        }
+
+        let (text, ids) = super::super::core::fetch_stock_lessons(code, &db, Some("long")).await;
+        let text = text.unwrap_or_default();
+        assert!(text.contains("教训文本 l-same"), "同档教训应被注入: {text}");
+        assert!(text.contains("教训文本 l-any"), "通用（NULL 档）教训应被注入: {text}");
+        assert!(!text.contains("教训文本 l-other"), "跨档（short）教训不得进长线 prompt: {text}");
+        let _ = ids;
+
+        // ③ 去重键含 horizon：同一文字教训在两档是两行
+        async fn cnt(db: &sea_orm::DatabaseConnection, h: &str) -> usize {
+            reflection_lessons::Entity::find()
+                .filter(
+                    reflection_lessons::Column::LessonSummary.eq("重复教训文本，长度足够通过门槛"),
+                )
+                .filter(reflection_lessons::Column::Horizon.eq(h))
+                .all(db)
+                .await
+                .unwrap()
+                .len()
+        }
+        let dup = |id: &str, h: &str| reflection_lessons::ActiveModel {
+            id: Set(id.to_string()),
+            lesson_summary: Set("重复教训文本，长度足够通过门槛".to_string()),
+            rule_pattern: ActiveValue::NotSet,
+            source_reflection_id: Set(Some("r-2".to_string())),
+            stock_code: Set(Some(code.to_string())),
+            horizon: Set(Some(h.to_string())),
+            applicable_scenarios: ActiveValue::NotSet,
+            times_applied: Set(0),
+            success_count: Set(0),
+            confidence: Set(0.7),
+            status: Set("active".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        dup("d-long", "long").insert(&db).await.expect("插入 long 档重复教训");
+        dup("d-short", "short").insert(&db).await.expect("插入 short 档重复教训");
+        assert_eq!(cnt(&db, "long").await, 1, "long 档应恰有一行");
+        assert_eq!(cnt(&db, "short").await, 1, "short 档应恰有一行（未被 long 档去重吞掉）");
     }
 }

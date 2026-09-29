@@ -82,7 +82,6 @@
         "confidence",
         "riskLevel",
         "currentPrice",
-        "targetPrice",
         "stopLoss",
         "stopLossPct",
         "takeProfitPct",
@@ -127,7 +126,7 @@
         "targetPrice": {
           "type": "number",
           "minimum": 0.01,
-          "description": "目标价（元），与 action/verdict 关系一致（看多→targetPrice > currentPrice×1.05）"
+          "description": "目标价（元）。方向明确时才输出：看多(买入/增持)→targetPrice > currentPrice×1.05；看空(卖出/减持)→targetPrice < currentPrice×0.95；持有/观望→**留空该字段**（不得填 currentPrice 或相差 <5% 的数值，等值会被下游判为无效价格信号）"
         },
         "stopLoss": {
           "type": "number",
@@ -453,7 +452,7 @@
       "enabled": true
     },
     "backward_compatibility": {
-      "description": "V65: targetPrice/stopLoss 恢复为必填字段（双视角对比需要价位维度）；direction 字段被 verdict 取代",
+      "description": "V65: targetPrice/stopLoss 恢复为价位维度（双视角对比需要）；V94(2026-09-28): targetPrice 由必填改为**条件字段** —— 持有/观望留空（等值会被下游判为无效价格信号，002371 实证），stopLoss 仍必填；direction 字段被 verdict 取代",
       "deprecated_fields": ["direction"],
       "grace_period": "2026-09-01"
     },
@@ -461,7 +460,7 @@
       "description": "trader 节点 strict_mode 校验规则（违反任一规则注入 __untrusted=true）",
       "rules": [
         "action 与 verdict 严格一致（买入/增持→看多，卖出/减持→看空，持有/观望→中性）",
-        "action 与 targetPrice/currentPrice 关系一致",
+        "action 与 targetPrice/currentPrice 关系一致（持有/观望须留空 targetPrice，禁止填等值——等值由 portfolio-mgr R-204 判为无效价格信号）",
         "positionPct 与 riskLevel 反相关（极高风险≤10，高风险≤35，中风险≤50，低风险≤95）",
         "positionPct 与 action 匹配（买入≥15，增持≥10，观望/卖出=0，减持≤15）",
         "stopLossPct 与 timeHorizon 匹配（ultra_short:2-4, short:4-7, mid:6-12, long:10-15）",

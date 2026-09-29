@@ -895,6 +895,16 @@ mod tests {
             ("dcf_ideal", "t-valuation.result.content.dcf.idealBuyPrice"),
             ("dcf_available", "t-valuation.result.content.dcf.available"),
             ("dcf_applicable", "t-valuation.result.content.dcf.assumptions.applicable"),
+            // 2026-09-28：算法结论（无条件注入）
+            ("valuation_conclusion_action", "t-valuation.result.content.conclusion.action"),
+            ("valuation_conclusion_headline", "t-valuation.result.content.conclusion.headline"),
+            (
+                "valuation_conclusion_primary_method",
+                "t-valuation.result.content.conclusion.primaryMethod",
+            ),
+            ("valuation_relative_verdict", "t-valuation.result.content.relative.verdict"),
+            ("valuation_relative_primary", "t-valuation.result.content.relative.primary"),
+            ("valuation_reverse_feasibility", "t-valuation.result.content.reverseDcf.feasibility"),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -920,7 +930,20 @@ mod tests {
             serde_json::json!({
                 "status": "executed",
                 "result": {
-                    "content": serde_json::json!({ "dcf": dcf }).to_string(),
+                    // 2026-09-28：连同算法**结论层**一起构造 —— 生产端 `compute_valuation`
+                    // 在同一份 content 里输出 `dcf` / `conclusion` / `relative` / `reverseDcf`，
+                    // 本替身必须同形，否则「结论注入」测不到真实形态。
+                    "content": serde_json::json!({
+                        "dcf": dcf,
+                        "conclusion": {
+                            "action": "高估",
+                            "headline": "反向 DCF 显示现价隐含 FCF 年复合 130% ⇒ 判为「高估」。",
+                            "primaryMethod": "reverse_dcf",
+                        },
+                        "relative": { "primary": "PS", "verdict": "fair" },
+                        "reverseDcf": { "feasibility": "Impossible" },
+                    })
+                    .to_string(),
                     "tool_name": "compute_dcf_valuation",
                 },
                 "node_id": "t-valuation",
@@ -974,10 +997,21 @@ mod tests {
         assert_eq!(result["report"], "模型前提不成立，估值仅供参考", "report 正文必须保留");
 
         let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
-        assert_eq!(audit.len(), 3, "三个数值字段各留一条审计：{result}");
-        for entry in audit {
+        // 3 个数值字段 + 1 条结论注入（2026-09-28）
+        assert_eq!(audit.len(), 4, "三个数值字段 + 结论注入各留一条审计：{result}");
+        for entry in audit.iter().filter(|e| e["field"] != "valuation_conclusion") {
             assert_eq!(entry["action"], "overwritten", "硬不可用下三个字段都应被覆写：{entry}");
         }
+        // 正向 DCF 硬不可用时，算法结论**仍必须存在**（改走反向 DCF / 相对估值口径）——
+        // 这正是「估值不可用 ≠ 没有结论」的结构化保证。
+        assert_eq!(
+            result["valuation_conclusion"]["action"], "高估",
+            "硬不可用不得导致结论缺失：{result}"
+        );
+        assert_eq!(
+            result["valuation_conclusion"]["primaryMethod"], "reverse_dcf",
+            "结论层必须披露主口径：{result}"
+        );
     }
 
     /// 正例②：**可用且合规** ⇒ 三个数值字段原样保留（保留 LLM 更丰富的措辞），
@@ -1018,10 +1052,19 @@ mod tests {
         assert_eq!(v["ideal_buy_price"], "9.87元以下", "合规时不得改写：{result}");
 
         let audit = result["valuation_audit"].as_array().expect("审计数组必须存在");
-        assert_eq!(audit.len(), 3, "三个数值字段各留一条审计：{result}");
-        for entry in audit {
+        // 3 个数值字段 + 1 条结论注入（2026-09-28）
+        assert_eq!(audit.len(), 4, "三个数值字段 + 结论注入各留一条审计：{result}");
+        for entry in audit.iter().filter(|e| e["field"] != "valuation_conclusion") {
             assert_eq!(entry["action"], "ok", "合规时不应有覆写记录：{entry}");
         }
+        // LLM 未写 valuation_conclusion ⇒ 本节点**主动注入**（action = injected）
+        let c_entry =
+            audit.iter().find(|e| e["field"] == "valuation_conclusion").expect("结论注入必须留痕");
+        assert_eq!(c_entry["action"], "injected", "LLM 未写时应记为 injected：{c_entry}");
+        assert_eq!(
+            result["valuation_conclusion"]["relativePrimary"], "PS",
+            "相对估值主指标必须随结论透出：{result}"
+        );
     }
 
     /// 反例：`value-investor.content` 不是合法 JSON ⇒ **不硬失败、不覆写**，

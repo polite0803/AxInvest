@@ -233,6 +233,8 @@ impl TradeIntentService {
             analysis_kind: Set("live".to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
+            // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
+            decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
@@ -510,6 +512,7 @@ mod tests {
                 analysis_kind TEXT NOT NULL DEFAULT 'live',
                 as_of_date TEXT,
                 decision_time_horizon TEXT,
+                decision_horizon_source TEXT,
                 decision_expected_holding_days INTEGER,
                 model_version TEXT,
                 template_version INTEGER,
@@ -586,6 +589,8 @@ mod tests {
             analysis_kind: Set("live".to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
+            // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
+            decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
@@ -657,6 +662,8 @@ mod tests {
             analysis_kind: Set("live".to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
+            // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
+            decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
@@ -725,6 +732,8 @@ mod tests {
             analysis_kind: Set("live".to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
+            // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
+            decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
@@ -808,6 +817,8 @@ mod tests {
             analysis_kind: Set("live".to_string()),
             as_of_date: Set(None),
             decision_time_horizon: Set(None),
+            // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
+            decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
             model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」

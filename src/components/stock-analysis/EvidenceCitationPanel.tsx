@@ -37,6 +37,8 @@ interface CitationReport {
   decisionAction: string;
   decisionConfidence: number;
   citations: EvidenceCitation[];
+  /** 本轮决策未产出（后端按 `Unavailable` 哨兵判定），支撑率**不适用** */
+  decisionDegraded: boolean;
   supportedClaims: number;
   totalClaims: number;
   supportRate: number;
@@ -54,6 +56,9 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 依赖只留 analysisId：react-i18next 的 `t` 每轮渲染都是新引用，放进 deps 会让本
+  // callback 每轮重建 ⇒ 下方 effect 每轮重跑（实测一次挂载把这条 IPC 刷了 38 次）。
+  // 故 callback 内不引用 t，「无消息可用」时的文案兜底挪到渲染处。
   const loadCitations = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -63,13 +68,11 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
       });
       setReport(result);
     } catch (e: unknown) {
-      setError(
-        typeof e === "string" ? e : e instanceof Error ? e.message : t("stockAnalysis.evidenceCitation.extractFailed"),
-      );
+      setError(typeof e === "string" ? e : e instanceof Error ? e.message : "");
     } finally {
       setLoading(false);
     }
-  }, [analysisId, t]);
+  }, [analysisId]);
 
   useEffect(() => {
     if (visible && analysisId) {
@@ -87,13 +90,31 @@ export function EvidenceCitationPanel({ analysisId, visible = true }: Props) {
     );
   }
 
-  if (error) {
+  // 用 `!== null` 而非真值判断：错误已发生但消息为空串时，也必须停在错误态，
+  // 不能落到下面的「暂无数据」（那会把「取数失败」说成「没有数据」）。
+  if (error !== null) {
     return (
       <Alert
         type="error"
         title={t("stockAnalysis.evidenceCitation.error")}
-        description={error}
+        description={error || t("stockAnalysis.evidenceCitation.extractFailed")}
         showIcon
+      />
+    );
+  }
+
+  // 决策未产出：理由栏装的是降级诊断串，没有任何「引用」可审计。
+  // ⚠ 必须**先于**下方 citations 空态分支，且**不得**渲染统计卡 —— 支撑率 0/0 显示成
+  // 「0%」会把「拿不到」伪装成「查了、结果是零分」，与「理由无数据支撑」同形。
+  if (report?.decisionDegraded) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title={t("stockAnalysis.evidenceCitation.notApplicable")}
+        description={t("stockAnalysis.evidenceCitation.notApplicableDetail", {
+          action: report.decisionAction,
+        })}
       />
     );
   }

@@ -965,6 +965,39 @@ pub async fn run_serenity_screening(
     // 未传时退化为 workflow id（旧调用方仍可用）。
     let event_run_id = run_id.clone().unwrap_or_else(|| wf_id.clone());
 
+    // ── 〇-B v2 / Phase 6：趋势智选的档位口径**显式声明** ──
+    // `SerenityStrategy` 只注册在 Mid/Long（`recommender/strategies/serenity.rs:22-29`
+    // 「只做中长期」，瓶颈/政策/业绩类催化剂以周-月展开），本工作流落库档因此固定为中线。
+    // 此前这里是**裸字面量** `"mid"` / 止损 ×0.80 / 目标 ×1.30 / 持有 20 天：
+    //   ① 20 天与 `Period::Mid` 的 28 天**口径互相矛盾**（同一行 reco_picks 里
+    //      period=mid 却 holding_days=20，反思按天判成熟即错位）；
+    //   ② 乘数与策略包变量（`serenity_*_mult`，可在设置面板改）分叉 —— 面板调了、
+    //      工作流落库价仍然按老常数算，「可配置」形同虚设。
+    // 现统一：乘数读同一份模板变量，天数读 `Period::default_holding_days` 唯一权威表。
+    // ⚠ 短/超短档**不支持**是产品定位而非遗漏：不产该档记录，
+    //   也不把别的档静默标成 mid（G4「退化即声明」）。
+    let serenity_tier = axagent_harness::Period::Mid;
+    let serenity_tier_period = serenity_tier.as_str().to_string();
+    let serenity_tier_days = serenity_tier.default_holding_days() as i64;
+    let serenity_tier_mults = {
+        let read = |name: &str, default: f64| -> f64 {
+            variables
+                .as_ref()
+                .and_then(|vs| vs.iter().find(|v| v.name == name))
+                .and_then(|v| v.value.as_f64())
+                .unwrap_or(default)
+        };
+        (
+            read("serenity_stop_mult", 0.80),
+            read("serenity_target_mult", 1.30),
+            read("serenity_entry_range", 0.05),
+        )
+    };
+    let (serenity_stop_mult, serenity_target_mult, serenity_entry_range) = serenity_tier_mults;
+    tracing::info!(
+        "[serenity] 档位口径: period={serenity_tier_period} days={serenity_tier_days}          stop×{serenity_stop_mult} target×{serenity_target_mult} entry±{serenity_entry_range}          （短/超短档不适用：SerenityStrategy 仅注册 Mid/Long）"
+    );
+
     // 3. 进度回调
     let progress_app = app.clone();
     let progress_wf_id = wf_id.clone();
@@ -1347,8 +1380,14 @@ pub async fn run_serenity_screening(
                     let client = &state.astock_client;
                     let quote = client.get_quote(code).await.ok();
                     let price = quote.as_ref().map(|q| q.price).unwrap_or(0.0);
+                    // 乘数来自上方与策略同源的模板变量（不再手抄 0.95/1.05/0.80/1.30）
                     let (entry_low, entry_high, stop_loss, target_price) = if price > 0.0 {
-                        (price * 0.95, price * 1.05, price * 0.80, price * 1.30)
+                        (
+                            price * (1.0 - serenity_entry_range),
+                            price * (1.0 + serenity_entry_range),
+                            price * serenity_stop_mult,
+                            price * serenity_target_mult,
+                        )
                     } else {
                         tracing::warn!("[serenity] {}: 行情获取失败，价格字段保持 0", code);
                         (0.0, 0.0, 0.0, 0.0)
@@ -1358,14 +1397,18 @@ pub async fn run_serenity_screening(
                         "stockName": name,
                         "style": "serenity",
                         "strategy_type": c.get("strategy_type").and_then(|v| v.as_str()).unwrap_or("bottleneck"),
-                        "period": "mid",
+                        "period": serenity_tier_period,
                         "price": price,
                         "entryLow": entry_low,
                         "entryHigh": entry_high,
                         "stopLoss": stop_loss,
                         "targetPrice": target_price,
                         "positionPct": c.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(5.0),
-                        "holdingDays": c.get("holdingDays").and_then(|v| v.as_i64()).unwrap_or(20),
+                        "holdingDays": c
+                            .get("holdingDays")
+                            .and_then(|v| v.as_i64())
+                            // 兜底天数 = 该档权威天数（此前写死 20，与 mid=28 自相矛盾）
+                            .unwrap_or(serenity_tier_days),
                         "confidence": conf,
                         "reasons": c.get("reasons").and_then(|v| v.as_array()).map(|a| {
                             a.iter().filter_map(|v| v.as_str().map(|s| s.to_owned())).collect::<Vec<_>>()
@@ -1381,7 +1424,7 @@ pub async fn run_serenity_screening(
                     let pick = reco_picks::ActiveModel {
                         id: Set(pick_id),
                         generated_at: Set(now_str.clone()),
-                        period: Set("mid".to_string()),
+                        period: Set(serenity_tier_period.clone()),
                         stock_code: Set(code.to_string()),
                         stock_name: Set(name.to_string()),
                         style: Set("serenity".to_string()),

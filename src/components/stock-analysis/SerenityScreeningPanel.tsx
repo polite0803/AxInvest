@@ -1140,9 +1140,18 @@ export function SerenityScreeningPanel() {
 
       {/* 操作栏 */}
       <div className="flex items-center justify-between">
-        <Text type="secondary" className="text-xs">
-          {t("serenityPanel.desc")}
-        </Text>
+        <div className="flex flex-col">
+          <Text type="secondary" className="text-xs">
+            {t("serenityPanel.desc")}
+          </Text>
+          {
+            /* 〇-B v2：档位口径**必须显式声明**——趋势智选结构性只服务中/长线，
+              落库 period 恒为 mid（不是「没选档」，而是短/超短档不适用）。 */
+          }
+          <Text type="secondary" className="text-xs" style={{ opacity: 0.75 }}>
+            {t("serenityPanel.tierScopeHint")}
+          </Text>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             size="small"

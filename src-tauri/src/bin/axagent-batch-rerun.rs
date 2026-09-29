@@ -332,6 +332,8 @@ async fn ensure_pending_reflection(
             // 应改为共享函数（见本函数文档首段）。
             min_confidence_threshold: Set(70),
             reflection_depth: Set("light".to_string()),
+            // 〇-B v2 第 4 条：占位行未复盘任何档 ⇒ NULL（盖章在反思收尾按 primary_horizon 写入）
+            horizon: Set(None),
             actual_outcome: Set(String::new()),
             raw_return: Set(None),
             alpha_return: Set(None),

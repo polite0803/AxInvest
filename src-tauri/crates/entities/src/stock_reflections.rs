@@ -20,6 +20,16 @@ pub struct Model {
     pub min_confidence_threshold: i32,
     /// 反思深度：light | deep（deep 会详述 reasoning chain）
     pub reflection_depth: String,
+    /// 本次反思**复盘的持有周期档**（〇-B v2 第 4 条：一次反思 = 一个周期）。
+    ///
+    /// 值域 = `axagent_harness::holding_period::Period::as_str()`；由反思链路按
+    /// 「原分析的主档」盖章写入（不是 LLM 自报）。
+    ///
+    /// 为什么必须落库：`lesson` / 参数建议都只在**本档**有效，无此列时
+    /// 教训与档位参数建议会被后续任意档的分析共同引用 ⇒ 跨周期污染。
+    /// `NULL` 语义 = 本列引入前的记录，复盘档未知（读侧**不得**当作某档使用）。
+    #[sea_orm(indexed)]
+    pub horizon: Option<String>,
     /// 实际走势描述，如 "30天跌-8.3% → 失败"
     pub actual_outcome: String,
     // ── v008 升级（借鉴 TradingAgents 反思机制）──

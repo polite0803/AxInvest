@@ -207,9 +207,36 @@ fn verify(root, dcf_low, dcf_high, dcf_upside, dcf_ideal, dcf_available, dcf_app
     root
 }
 
+/// 算法估值结论（2026-09-28）—— 原样封装 `t-valuation.result.content.conclusion`
+/// 与 `relative` / `reverseDcf` 的骨架字段。
+///
+/// 为什么在本节点**重新封装**而不是直接透传：本节点是估值链的**唯一确定性出口**，
+/// 下游（research-mgr 的 context_sources、blackboard 快照、落库、报告命令）读的都是
+/// 本节点的 `output_var`。把结论放在这里 ⇒ 它不依赖 LLM 是否照抄，也不依赖
+/// `value-investor.content` 是否能解析成功。
+fn algo_conclusion(action, headline, method, rel_verdict, rel_primary, rev_feasibility) {
+    #{
+        "action": as_text(action),
+        "headline": as_text(headline),
+        "primaryMethod": as_text(method),
+        "relativeVerdict": as_text(rel_verdict),
+        "relativePrimary": as_text(rel_primary),
+        "reverseFeasibility": as_text(rev_feasibility),
+    }
+}
+
 // ── 入口 ────────────────────────────────────────────────────────────────
 // ⚠️ 顶层不用 `return`（Rhai 顶层 return 语义依版本而异），改用 if/else 表达式。
 let payload = safe_parse(vi_content);
+
+// LLM 侧的 conclusion 原值（审计用）—— 必须在 `verify()` 改写之前取。
+// 取法与 `verify()` 内一致：有 `verdict` 时看 `verdict`，否则看顶层。
+let llm_conclusion_before = if type_of(payload) != "map" {
+    ""
+} else {
+    let nested = type_of(payload["verdict"]) == "map";
+    as_text((if nested { payload["verdict"] } else { payload })["valuation_conclusion"])
+};
 
 let output = if type_of(payload) != "map" {
     // 解析失败：不覆写（保 LLM 原文作为 report），只留痕
@@ -230,5 +257,35 @@ let output = if type_of(payload) != "map" {
 } else {
     verify(payload, dcf_low, dcf_high, dcf_upside, dcf_ideal, dcf_available, dcf_applicable)
 };
+
+// ── 2026-09-28：算法估值结论**无条件**注入（顶层，权威值）──────────────
+//
+// 为什么放在这里、而不是在 `verify()` 内：`verify()` 在解析失败时**不被调用**，
+//   而「结论必须存在」是用户的硬约束 ⇒ 注入点必须覆盖**全部**分支。
+// 为什么放顶层而不是 verdict 内：解析失败分支没有 `verdict` map（只有 `#{}`）。
+//   顶层恒定存在，且 `build_blackboard_snapshot` 对「无顶层 verdict」的形态走
+//   「提取 result 序列化」分支 ⇒ 顶层键同样进入快照，不丢信息。
+//
+// ⚠️ 本注入与 LLM 文本**无关**：headline 为空（上游未注入，如旧模板）时
+//   `valuation_conclusion.headline` 为空串、审计记 `skipped`，不伪造结论。
+let conclusion = algo_conclusion(
+    valuation_conclusion_action,
+    valuation_conclusion_headline,
+    valuation_conclusion_primary_method,
+    valuation_relative_verdict,
+    valuation_relative_primary,
+    valuation_reverse_feasibility,
+);
+output["valuation_conclusion"] = conclusion;
+
+let audit_out = output["valuation_audit"];
+if type_of(audit_out) == "array" {
+    let algo_text = conclusion["action"] + "：" + conclusion["headline"];
+    let act = if conclusion["headline"] == "" { "skipped" }
+        else if llm_conclusion_before == "" { "injected" }
+        else { "overwritten" };
+    audit_out.push(audit_entry("valuation_conclusion", llm_conclusion_before, algo_text, act));
+    output["valuation_audit"] = audit_out;
+}
 
 output

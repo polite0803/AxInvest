@@ -1193,6 +1193,15 @@ pub struct StockAnalysisListItem {
     /// `None` = 该记录产生于本列引入之前（或非模板产出，如对话直执行 / 条件单补记）
     /// —— **不得**据此推断链路，按「未知」渲染。
     pub template_id: Option<String>,
+    /// 本记录主结论**属于哪一档**（`ultra_short` / `short` / `mid` / `long`）。
+    ///
+    /// 2026-09-29 新增：历史列表原先只有一条 Action，却不说明它是给哪个周期的 ⇒
+    /// 「看似有周期、实为不知道」的歧义形态（四档明细虽在 `decision_json` 里，
+    /// 列表也未解析）。`None` = 本列引入前的记录，按「档位未知」渲染，**不得**回退成某档。
+    pub decision_time_horizon: Option<String>,
+    /// 主档来源：`"formula"` = 本地公式定档；`"model"` = 采信模型自报（历史形态）。
+    /// `None` = 本列引入前的记录。
+    pub decision_horizon_source: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -1230,6 +1239,8 @@ pub async fn list_stock_analyses(
         .column(stock_analyses::Column::AsOfDate)
         .column(stock_analyses::Column::ParentAnalysisId)
         .column(stock_analyses::Column::TemplateId)
+        .column(stock_analyses::Column::DecisionTimeHorizon)
+        .column(stock_analyses::Column::DecisionHorizonSource)
         .column(stock_analyses::Column::CreatedAt)
         .column(stock_analyses::Column::UpdatedAt)
         .order_by_desc(stock_analyses::Column::CreatedAt)
@@ -1506,17 +1517,24 @@ pub async fn extract_evidence_citations(
     let reasoning = analysis.decision_reasoning.unwrap_or_default();
     let snapshot = analysis.blackboard_snapshot.unwrap_or_else(|| "{}".into());
 
-    let mut report = extract_citations(&reasoning, &snapshot);
-    report.stock_code = analysis.stock_code;
-    report.stock_name = analysis.stock_name;
-    report.analysis_date = analysis.analysis_date;
     // P0-5(2026-09-14): 决策缺失统一下发显式哨兵。
     // 原实现 `unwrap_or_default()` 得到空串，前端 `parseAction("")` 退化成「观望」——
     // 把「没有决策」伪装成一条业务结论。空串/纯空白同样按缺失处理。
-    report.decision_action =
+    let decision_action =
         analysis.decision_action.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| {
             axagent_analysis_engine::decision_action::ACTION_UNAVAILABLE.to_string()
         });
+    // 2026-09-28：决策未产出 ⇒ 本轮 `decision_reasoning` 是降级路径的诊断串（异常文本），
+    // 不是「决策理由」。把它送进匹配器会必然全 miss ⇒ 支撑率读出 **0%**，与
+    // 「理由确有陈述、但没有数据支撑」在 UI 上同形。闸口按上面的**权威哨兵**判，
+    // 不按 reasoning 文本形态猜。
+    let degraded = axagent_analysis_engine::decision_action::is_unavailable(&decision_action);
+
+    let mut report = extract_citations(&reasoning, &snapshot, degraded);
+    report.stock_code = analysis.stock_code;
+    report.stock_name = analysis.stock_name;
+    report.analysis_date = analysis.analysis_date;
+    report.decision_action = decision_action;
     report.decision_confidence = 0.0; // 从 decision_json 解析
 
     // 尝试从 decision_json 解析置信度
@@ -5147,6 +5165,8 @@ pub async fn list_reflections(
                 "hindsightDate": r.hindsight_date,
                 "minConfidenceThreshold": r.min_confidence_threshold,
                 "reflectionDepth": r.reflection_depth,
+                // 〇-B v2 第 4 条：本次反思**复盘的档位**（NULL = 本列引入前，档未知）
+                "horizon": r.horizon,
                 "actualOutcome": r.actual_outcome,
                 "whatWentWrong": r.what_went_wrong,
                 "missedSignals": r.missed_signals,
@@ -5206,6 +5226,8 @@ pub async fn run_reflection_now(
     // [实际行情] 可选人工覆盖；留空 ⇒ 后端自动拉取真实行情生成
     actual_outcome: Option<String>,
     reflection_depth: Option<String>,
+    // 〇-B v2 第 4 条：手动反思指定复盘哪一档（不传 = 用该分析的公式主档）。
+    horizon: Option<String>,
 ) -> Result<String, String> {
     let db = state.harness.db();
     let client = &state.astock_client;
@@ -5214,6 +5236,21 @@ pub async fn run_reflection_now(
     let mk = state.harness.master_key();
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let depth = reflection_depth.unwrap_or_else(|| "light".to_string());
+
+    // 〇-B v2 第 4 条：手动反思可显式指定「本次复盘哪一档」。
+    //   值域 = Period 四档；脏值**在建反思行之前**拒绝 —— 静默兜成某档会留下一行
+    //   `stock_reflections.horizon` 标错档的记录，后续按档过滤的教训全部错位。
+    let review_horizon: Option<String> = match horizon.as_deref() {
+        None | Some("") => None,
+        Some(h) => match h.parse::<axagent_analysis_engine::recommender::Period>() {
+            Ok(p) => Some(p.as_str().to_string()),
+            Err(_) => {
+                return Err(ErrorResponse::new(wf_err::VALIDATION_FAILED)
+                    .with_detail(format!("未知复盘周期: {h}（可用值：ultra_short/short/mid/long）"))
+                    .to_string());
+            },
+        },
+    };
 
     // Bug 3 修复: 前端表单未让用户填 stockName(避免冗余输入),
     // 后端必须用 stock_code 反查股票名,确保反思历史 / RAG 索引都有正确名称。
@@ -5315,6 +5352,8 @@ pub async fn run_reflection_now(
         &today,
         0u8, // min_confidence_threshold — 手动触发时全量
         &depth,
+        // 〇-B v2 第 4 条：显式复盘档（None ⇒ 沿用原分析的公式主档）
+        review_horizon.as_deref(),
         // [B2/B3 借鉴] 手动反思场景无 B1 阶段落盘的 pending row,传 None 走 INSERT 路径
         None,
         // [方向3] 手动反思也持久化 trajectory，为 ExperiencePipeline 提供数据源

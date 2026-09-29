@@ -2686,6 +2686,68 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             description: Some("营收增速过低阈值 (%)".into()),
             is_secret: false,
         },
+        // ── 〇-B v2 第 3 条：逐周期交易档位（可配置 + 可被反思优化）──
+        // 此前这四对数字只硬编码在 `portfolio-mgr.rhai` 的 `sl_pct_for` / `tp_pct_for`，
+        // 既不进设置面板、也不在反思的「可调参数清单」里 ⇒ 反思永远无法纠正档位错配。
+        // 三处齐备（同 PORTFOLIO_MGR_TUNABLE_PARAMS 头部注释的规矩）：本表定义 + 脚本 present() 守卫
+        // + 常量登记。⚠ **持有天数不在此列** —— 它是逐档成熟判定的基准，唯一权威源是
+        //   `axagent_harness::holding_period::Period`，做成可调会一次改动就废掉全部按档统计。
+        Variable {
+            name: "sl_pct_ultra_short".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(3.0),
+            description: Some("止损档位（相对现价 %，超短线·缺省持有 2 交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "tp_pct_ultra_short".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5.0),
+            description: Some("止盈档位（相对现价 %，超短线·缺省持有 2 交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "sl_pct_short".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(5.0),
+            description: Some("止损档位（相对现价 %，短线·缺省持有 5 交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "tp_pct_short".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(10.0),
+            description: Some("止盈档位（相对现价 %，短线·缺省持有 5 交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "sl_pct_mid".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(8.0),
+            description: Some("止损档位（相对现价 %，中线·缺省持有 28 交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "tp_pct_mid".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(18.0),
+            description: Some("止盈档位（相对现价 %，中线·缺省持有 28 交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "sl_pct_long".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(12.0),
+            description: Some("止损档位（相对现价 %，长线·缺省持有 90 交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "tp_pct_long".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(30.0),
+            description: Some("止盈档位（相对现价 %，长线·缺省持有 90 交易日）".into()),
+            is_secret: false,
+        },
         // 注：cost_pct（交易成本率）已在「金融模型补充参数」段定义，此处不重复。
     ]
 }

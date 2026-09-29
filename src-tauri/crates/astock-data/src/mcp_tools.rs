@@ -1489,6 +1489,107 @@ pub async fn execute_mcp_tool(
                     0.0
                 };
 
+            // ── 反向 DCF + 相对估值 + 结论合成（2026-09-28）────────────────────
+            //
+            // 背景（用户裁决「推翻现有估值架构」）：旧架构只有正向 DCF + 格雷厄姆，
+            // 对「当期几乎不产生 FCF」的成长股**结构性失效** —— 301269（华大九天）
+            // 现价 87.56 元，正向 DCF 给 `2.16–4.42 元`（−97.5%）。复算证明不是算错，
+            // 而是问错了问题：DCF 锚定当期 FCF（0.686 亿，FCF 收益率 0.14%），
+            // 而市场按 10 年后的现金流定价。本次补两件旧架构缺的能力：
+            //   ① **反向 DCF**：由现价反解市场隐含的 FCF 复合增速，把「估值贵不贵」
+            //      转成「市场假设是否可信」—— 不需要模型前提成立，**永远有答案**；
+            //   ② **相对估值**：按数据形态路由有效指标（PE/PS/PB）+ 同行分位。
+            // 最后由 `build_conclusion` 合成**必有**的结论（用户硬约束：严禁
+            // 「一路加判据导致全部标的被排除」）。
+            //
+            // 两路取数都可能失败，一律降级（`.unwrap_or_default()` / `.ok()`），
+            // 不阻断主结论 —— 结论层的每条腿各自独立可缺。
+            let (peers_res, hist_res) = tokio::join!(
+                client.get_peers(code),
+                client.get_valuation_history(code, VALUATION_BAND_WINDOW_YEARS)
+            );
+            let peers = peers_res.unwrap_or_default();
+            // PS 当前值：`StockQuote` **没有 ps 字段**，只能从历史估值序列的最新一条取；
+            // 其分位同样来自该序列。序列取不到时 PS 腿自动失效（下游回落 PB）。
+            let band = hist_res.ok().map(|snaps| {
+                let since =
+                    crate::valuation_band::since_date_from_years(VALUATION_BAND_WINDOW_YEARS);
+                let snaps = crate::valuation_band::clip_valuation_history(snaps, &since);
+                crate::valuation_band::compute_valuation_band(code, &snaps, snaps.last())
+            });
+            let peer_pe: Vec<f64> =
+                peers.iter().filter_map(|p| p.pe).filter(|v| *v > 0.0).collect();
+            let peer_pb: Vec<f64> =
+                peers.iter().filter_map(|p| p.pb).filter(|v| *v > 0.0).collect();
+            // 顺序即优先级（PE → PS → PB）：`relative_valuation` 取首个**有效**者为主指标。
+            // 此处的「有效」按数据形态判（≤0 或 PE ≥ 150 视为无定价信息，见 `metric_validity`）。
+            let metric_inputs = [
+                crate::valuation::MetricInput {
+                    name: "PE",
+                    value: pe,
+                    percentile: band.as_ref().and_then(|b| b.metric_pe.current_percentile),
+                    peer_values: peer_pe,
+                },
+                crate::valuation::MetricInput {
+                    name: "PS",
+                    value: band.as_ref().and_then(|b| b.metric_ps.current),
+                    percentile: band.as_ref().and_then(|b| b.metric_ps.current_percentile),
+                    // 同行样本无 PS 字段（`PeerComparison` 不含 ps）⇒ 只有自身历史分位。
+                    peer_values: Vec::new(),
+                },
+                crate::valuation::MetricInput {
+                    name: "PB",
+                    value: pb,
+                    percentile: band.as_ref().and_then(|b| b.metric_pb.current_percentile),
+                    peer_values: peer_pb,
+                },
+            ];
+            let relative = crate::valuation::relative_valuation(&metric_inputs);
+
+            // 反向 DCF：锚定 FCF 与正向 DCF **同源**（同一份 `DcfAssumptions`），
+            // 且复用其**实际生效**的折现率/永续增长率（含符号一致性压回后的值），
+            // 避免正/反两个口径各用一套参数而互相矛盾。
+            let latest_fin = financials.first();
+            let reverse = dcf_assumptions.as_ref().and_then(|a| {
+                crate::valuation::reverse_dcf(crate::valuation::ReverseDcfInputs {
+                    fcf_anchor: a.fcf_anchor,
+                    total_shares: a.total_shares,
+                    current_price,
+                    discount_rate: a.discount_rate,
+                    perpetual_growth: a.perpetual_growth,
+                    min_terminal_spread: MIN_TERMINAL_SPREAD,
+                    forecast_years: a.forecast_years,
+                    revenue_0: latest_fin.and_then(|f| f.revenue),
+                    revenue_yoy: latest_fin.and_then(|f| f.revenue_yoy),
+                })
+            });
+
+            // 锚定 FCF 收益率 —— 决定正向 DCF 是否有资格当主口径
+            // （判据见 `valuation::FCF_YIELD_MIN_FOR_DCF_PRIMARY`）。
+            let fcf_yield = match (total_mv, dcf_assumptions.as_ref()) {
+                (Some(mv), Some(a)) if mv > 0.0 => Some(a.fcf_anchor / mv),
+                _ => None,
+            };
+            let dcf_upside_pct = match (dcf_low, current_price > 0.0) {
+                (Some(low), true) => Some((low - current_price) / current_price * 100.0),
+                _ => None,
+            };
+            let graham_upside_pct = match (graham_value, current_price > 0.0) {
+                (Some(g), true) => Some((g - current_price) / current_price * 100.0),
+                _ => None,
+            };
+            // 结论层是**兜底出口**：四腿全不可用时也输出 `action="数据不足"`，
+            // 绝不返回空结论。
+            let conclusion =
+                crate::valuation::build_conclusion(crate::valuation::ConclusionInputs {
+                    dcf_applicable: dcf_assumptions.as_ref().is_some_and(|a| a.applicable),
+                    dcf_upside_pct,
+                    fcf_yield,
+                    reverse: reverse.as_ref(),
+                    relative: &relative,
+                    graham_upside_pct,
+                });
+
             // ── 综合估值判断 ──
             // V74: DCF 与格雷厄姆均不可用时输出「无法估值」——无估值锚 ≠ 高估，
             // 旧逻辑会因 score 兜底恒为「高估」污染下游 value-investor 判断
@@ -1668,6 +1769,49 @@ pub async fn execute_mcp_tool(
                     "score": f_score,
                     "level": f_score_level,
                 },
+                // ── 反向 DCF（2026-09-28）──
+                // 由现价反解「市场隐含的 FCF 复合增速」。锚为正时**恒有值** ⇒ 它是
+                // 「正向 DCF 锚不成立」时的主口径。字段语义见 `valuation.rs::ReverseDcf`。
+                // `feasibility`：`Impossible`（隐含末年 FCF 超过全部营收）/ `Strained`
+                // （须把过半营收转为自由现金流）/ `Plausible`（经营上可达）。
+                "reverseDcf": match &reverse {
+                    Some(r) => json!({
+                        "impliedCagrPct": round1(r.implied_cagr * 100.0),
+                        "impliedMultiple": round2(r.implied_multiple),
+                        "impliedFcf": round2(r.implied_fcf),
+                        "impliedFcfPerShare": round2(r.implied_fcf_per_share),
+                        "forecastYears": r.forecast_years,
+                        // 隐含末年 FCF / 预测期营收（百分数）—— 可行性判据本体
+                        "impliedFcfMarginPct": r
+                            .implied_fcf_margin_on_implied_revenue
+                            .map(|m| round1(m * 100.0)),
+                        "feasibility": r.feasibility,
+                        "exceedsSearchRange": r.exceeds_search_range,
+                        "note": r.note,
+                    }),
+                    None => serde_json::Value::Null,
+                },
+                // ── 相对估值（2026-09-28）──
+                // 按**数据形态**路由有效指标（PE → PS → PB，首个有效者为主指标），
+                // 每指标附自身历史分位与同行分位。旧架构的定性判定只用 PE+PB，
+                // 导致 301269「PS 处 4 年 1.04% 分位」被完全忽略 —— 本块就是修这个。
+                "relative": {
+                    "primary": relative.primary,
+                    "verdict": relative.verdict,
+                    "metrics": relative.metrics,
+                    "note": relative.note,
+                },
+                // ── 估值结论（2026-09-28）—— **必读** ──
+                // 用户硬约束：必须有结论，下游 Agent **必须引用 `headline`**。
+                // `primaryMethod` 说明主口径（`dcf` / `reverse_dcf` / `relative` / `graham`），
+                // `notApplicable` 列出未纳入的腿及原因（透明度，不是拒答）。
+                "conclusion": {
+                    "action": conclusion.action,
+                    "headline": conclusion.headline,
+                    "primaryMethod": conclusion.primary_method,
+                    "legs": conclusion.legs,
+                    "notApplicable": conclusion.not_applicable,
+                },
                 "owner_earnings_yield_pct": round1(oe_yield),
                 "value_signal": value_signal,
                 "summary": summary,
@@ -1703,7 +1847,7 @@ pub async fn execute_mcp_tool(
                 serde_json::Value::String(s) => s.trim().parse::<u32>().ok(),
                 _ => None,
             }
-            .unwrap_or(5);
+            .unwrap_or(VALUATION_BAND_WINDOW_YEARS);
             let snaps =
                 client.get_valuation_history(code, years).await.map_err(|e| e.to_string())?;
             // ⚠ 必须裁剪：`get_valuation_history(years)` 会多取约 2 页（≈2 年），
@@ -2400,6 +2544,17 @@ const MIN_TERMINAL_SPREAD: f64 = 0.015;
 const RISK_STRESS_SPREAD: f64 = 0.01;
 pub const FORECAST_YEARS: i32 = 5;
 
+/// 估值带 / 相对估值的历史窗口（年）—— **唯一来源**。
+///
+/// 两条消费路径共享它：`compute_valuation`（相对估值腿的自身历史分位）与
+/// `compute_valuation_band` 工具分支（工作流 `t-valuation-band` 节点）。
+/// 若两边各写各的窗口，同一只股票会在「结论」与「估值带图」上拿到两个分位
+/// （`since_date_from_years` 的文档已记录该失效形态）。
+///
+/// 取 5 的理由：A 股一轮完整估值周期约 4–5 年；窗口过短时近端分位噪声大，
+/// 过长则混入商业模式已变的旧样本（301269 上市仅数年，窗口即其全部上市历史）。
+const VALUATION_BAND_WINDOW_YEARS: u32 = 5;
+
 // ── DCF 模型适用性判据（2026-09-14）─────────────────────────────────────────
 //
 // ## 为什么不按行业写
@@ -2805,6 +2960,42 @@ fn ttm_fcf(financials: &[FinancialReport]) -> Option<f64> {
     ttm.or(latest.free_cash_flow)
 }
 
+/// 最近一个**完整会计年度**的自由现金流（元）—— 正向 DCF 的默认锚口径。
+///
+/// 2026-09-28（用户裁决「DCF 锚口径改成年报锚」）：锚优先取最近一条 `-12-31`
+/// 年报的 `OCF − 资本开支`（该两列缺失时回落 vendor 直供的 `free_cash_flow`）；
+/// **只有年报现金流整列缺失**才回落到 [`ttm_fcf`]。
+///
+/// ## 为什么不能用 TTM 单期锚（实测 600887 伊利股份，现价 26.94 元）
+///
+/// TTM 锚 = 年报 OCF 143.44 + 本期 OCF 97.59 − 上年同期 OCF 29.64 = 211.39 亿，
+/// 减 TTM 资本开支 28.88 亿 ⇒ **TTM FCF = 182.51 亿**，是最近完整年报
+/// （FY2025 = 143.44 − 30.37 = **113.07 亿**）的 **1.61 倍** —— 而同期营收只 +4.13%。
+/// 差额几乎全是**中报营运资本一次性释放**（2026H1 OCF 97.59 亿 vs 2025H1 29.64 亿），
+/// 不是可持续的股东现金流 ⇒ 锚被系统性抬高 ⇒ 中性档给 51.88 元（现价 +92.6%），
+/// 结论「低估 +49.1%」。
+///
+/// 换最近完整年报锚（113.07 亿，与 FY2025 净利 115.65 亿相称，FCF/净利 ≈ 0.98）
+/// 复算：`fcf_ps = 113.07/62.94 = 1.797` 元、倍数 17.896 ⇒ 中性档 **≈32.1 元**、
+/// 保守档 **≈24.9 元**。`upsidePct` 基准是**保守档**（见该字段处长注释）⇒
+/// `(24.9 − 26.94)/26.94 = −7.6%` ⇒ 结论由「低估 +49.1%」翻转为**「偏高」**
+/// （现价已略高于保守档安全边际价，但仍在乐观档 37.0 元之下）。
+///
+/// 另两个对照标的：000858 五粮液 TTM FCF 为 **−35.85 亿**（旧架构被迫走代理锚），
+/// 而 FY2025 = +277.39 亿 ⇒ 年报锚把「现金流为负」的错判一并修正；
+/// 600519 贵州茅台 TTM 1167 亿 vs FY2025 584 亿 ⇒ 年报锚回到已结算（审计）口径。
+///
+/// ⚠️ 依赖调用方**按报告期倒序**传入 `financials`（vendor 原始顺序，`[0]` 最新，
+/// 见 [`ttm_fcf`] 的说明）—— 故 `find` 命中的即**最新**年报，无需自行排序。
+fn latest_annual_fcf(financials: &[FinancialReport]) -> Option<f64> {
+    let annual = financials.iter().find(|r| r.report_date.contains("-12-31"))?;
+    annual
+        .operating_cash_flow
+        .zip(annual.capital_expenditure)
+        .map(|(ocf, capex)| ocf - capex)
+        .or(annual.free_cash_flow)
+}
+
 /// 当期归母净利润（TTM 口径，元）—— 与 [`ttm_fcf`] 同构。
 ///
 /// 用于 `compute_owner_earnings` 的最后兜底（`净利 × 0.85~0.95` 代理）。
@@ -2939,7 +3130,7 @@ pub(crate) fn annualized_roe(financials: &[FinancialReport]) -> Option<f64> {
 ///
 /// V74(2026-09-10) 返回值语义变更：
 /// - `Some((三档值, 口径说明))`：估值有效
-/// - `None` + 原因：估值不可用（无股本 / 当期FCF≤0 且近5年报无正净利年度）
+/// - `None` + 原因：估值不可用（无股本 / 锚口径 FCF≤0 且近5年报无正净利年度）
 ///
 /// 旧实现把「不可用」编码成 `(0,0,0)`，下游把 0 当成真实估值，
 /// 产出「理想买入价 0 元 / 安全边际 0% / DCF 三档全 0」级退化输出。
@@ -3014,11 +3205,12 @@ struct DcfAssumptions {
     /// 与 `is_fallback_anchor` **正交**：后者表达「锚是历史代理」（两态都为 `true`），
     /// 本字段表达「**为什么**用代理」——
     ///   · `true`  = 现金流量表数据缺失 ⇒ **我方取数失败**，属应上报的缺口；
-    ///   · `false` = 当期 FCF 真为负     ⇒ 标的经营状态，**不是**缺口（不得上报）。
+    ///   · `false` = 锚口径 FCF 真为负（年报优先，年报缺失才回落 TTM）
+    ///     ⇒ 标的经营状态，**不是**缺口（不得上报）。
     ///
     /// 为什么不让下游按 `basis` 文案判分支：`basis` 是给人与 LLM 看的诊断文本，
     /// 文案一改判据就**静默失效** —— `is_fallback_anchor` 当初正是为此从
-    /// `== FCF_FALLBACK_BASIS` 的等值比较改成布尔量（见下方 P0-I 注释）。
+    /// `== <fallback 文案常量>` 的等值比较改成布尔量（见下方 P0-I 注释）。
     /// 本字段沿用同一纪律。三态区分本身由测试 `dcf_basis_tells_three_states_apart` 钉住。
     ///
     /// 消费点：`data-quality.rhai` 的 `upstream_data_gaps`（**只告警、不扣分**，
@@ -3096,19 +3288,19 @@ fn compute_dcf(
     };
 
     // vendor 返回的财务数据单位均为"元"，无需缩放
-    // V74 FCF 取值链:
-    //   ① 当期 FCF > 0 且与净利相称（`FCF/TTM净利 ≥ 0.6`）→ 直接使用
-    //      （free_cash_flow / ocf-capex）
-    //   ①b 当期 FCF > 0 但 `FCF/TTM净利 < 0.6`（2026-09-27 新增）→ 扩张期/重资产
+    // V74 FCF 取值链（2026-09-28 锚口径由 TTM 改为**年报优先**）:
+    //   ⓪ 锚候选 = [`latest_annual_fcf`]（最近完整年报 OCF − 资本开支）；
+    //      年报现金流整列缺失才回落 [`ttm_fcf`]（TTM 还原 + vendor 直供兜底）。
+    //   ① 锚 > 0 且与净利相称（`FCF/TTM净利 ≥ 0.6`）→ 直接使用
+    //   ①b 锚 > 0 但 `FCF/TTM净利 < 0.6`（2026-09-27 新增）→ 扩张期/重资产
     //      公司的 FCF 被「全部资本开支」扣低，改用所有者收益代理锚（TTM净利 × 0.90）
-    //   ② 当期 FCF ≤ 0（亏损期/周期底部）→ 近 5 年报正净利均值 × 0.90 归一化锚定
+    //   ② 锚 ≤ 0（亏损期/周期底部）→ 近 5 年报正净利均值 × 0.90 归一化锚定
     //      （沿用原 net_profit×0.90 估算惯例，季报为累计值故只取年报口径）
     //   ③ 近 5 年报无正净利年度（持续亏损）→ 返回 None，DCF 不适用
-    // ①②三条代理路径**同口径**（净利 × 0.90 = `OWNER_EARNINGS_CONVERSION`），
+    // ①②③三条代理路径**同口径**（净利 × 0.90 = `OWNER_EARNINGS_CONVERSION`），
     //   且都标记 `is_fallback_anchor = true`，由 f5 统一降权。
-    // P0-I(2026-09-12): fallback 锚定的口径文案提为常量 —— 既用于 `fcf_basis`，
+    // P0-I(2026-09-12): 锚口径文案提为常量 —— 既用于 `fcf_basis`，
     //   也用于给下游输出 `is_fallback_anchor` 布尔量（避免靠字符串前缀匹配判分支）。
-    // P0-I(2026-09-12): fallback 锚定的口径文案提为常量。
     //
     // 2026-09-21 拆成**两条**：原实现只有一条，且文案写死「（周期底部）」，
     // 把「FCF 真为负」与「现金流量表数据缺失」两种**性质完全不同**的情形
@@ -3119,16 +3311,15 @@ fn compute_dcf(
     // 断言「周期底部」，且该句被 value-investor 原样引用进 `risk_flags`
     // （「当期FCF≤0，DCF基于归一化锚定，绝对估值锚偏低」）⇒ 假诊断流入结论。
     // 两态**处置相同**（都用历史代理锚），但诊断必须说真话。
-    const FCF_FALLBACK_BASIS: &str = "当期FCF≤0，改用近5年报正净利均值×0.90归一化锚定";
+    // 2026-09-28：两个**真实锚口径**常量 —— 供 `is_fallback_anchor` 判据与诊断文案共用。
+    //   ⚠️ 代理锚（锚 ≤0 / 缺数）与「锚口径内 FCF 偏低」两句诊断**不再各写整句字面量**
+    //   （原 `FCF_FALLBACK_BASIS` / `FCF_OWNER_EARNINGS_BASIS` 都把「当期FCF」写死），
+    //   改为在 `anchor_basis`（本次实际生效的锚口径）之上 `format!` 拼接 ——
+    //   否则锚已改年报、文案仍写「当期FCF」，诊断又变成撒谎。
+    const FCF_ANNUAL_BASIS: &str = "最近完整年报FCF（OCF−资本开支）";
+    const FCF_TTM_BASIS: &str = "年报现金流数据缺失，回落TTM FCF（OCF−资本开支）";
     const FCF_MISSING_BASIS: &str =
         "现金流量表数据缺失（该数据源未提供 OCF/资本开支），改用近5年报正净利均值×0.90归一化代理锚定";
-    // 2026-09-27 新增第三条 basis：**当期 FCF > 0 但显著低于净利**。
-    // 与上面两条的区别：上面两条是「FCF 不可用」（≤0 或缺失），本条是「FCF 可用
-    // 但口径不适用」（扣了扩张性资本开支，见 `FCF_TO_NP_MIN_FOR_ANCHOR` 注释）。
-    // 三者**处置相同**（都改用代理锚、都标 `is_fallback_anchor = true`），
-    // 但诊断必须说真话 —— 不得把「FCF 偏低」说成「周期底部」或「数据缺失」。
-    const FCF_OWNER_EARNINGS_BASIS: &str =
-        "当期FCF显著低于净利（FCF/净利<0.6），改用所有者收益代理锚（TTM净利×0.90）";
     // 2026-09-14：`direct_fcf` 提到外层作用域 —— 适用性判据 ②（`FCF/净利` 背离）
     // 需要看到**当期真实** FCF，而不是 fallback 后的代理值（代理值恒 ≈0.9×净利，
     // 会把「符号相反」这个最强信号抹掉）。
@@ -3136,25 +3327,41 @@ fn compute_dcf(
     //   原实现读 `financials[0]` 的**年内累计值**，中报口径下 OCF 只有半年；
     //   且因 vendor 侧恒不提供这三列，本变量在生产上**一直是 `None`**。
     let direct_fcf = ttm_fcf(financials);
-    let (fcf, fcf_basis) = match direct_fcf {
-        // ① 当期 FCF > 0，但显著低于净利 ⇒ 换 owner earnings 代理锚（2026-09-27）。
-        //    判据与理由见 `FCF_TO_NP_MIN_FOR_ANCHOR` 上方长注释：`ttm_fcf` 扣的是
+    // 2026-09-28（a1「改成年报锚」）：锚候选 = 年报优先，年报现金流**整列缺失**才回落 TTM。
+    //   ⚠️ 适用性判据 ②（`FCF/净利` 背离）同步改用 `anchor_raw` 而非 `direct_fcf` ——
+    //   否则「TTM 为负、年报为正」的标的（000858 五粮液：TTM −35.85 亿 vs FY2025
+    //   +277.39 亿）会被判「符号相反 ⇒ 模型不适用」，把刚修好的年报锚整条腿掐掉，
+    //   用户裁决的收益归零。判据 ③（双失血）语义**不变**，仍看 `direct_fcf`（当期真实 FCF）。
+    let (anchor_raw, anchor_basis) = match latest_annual_fcf(financials) {
+        Some(v) => (Some(v), FCF_ANNUAL_BASIS),
+        None => (direct_fcf, FCF_TTM_BASIS),
+    };
+    let (fcf, fcf_basis) = match anchor_raw {
+        // ① 锚 > 0，但显著低于净利 ⇒ 换 owner earnings 代理锚（2026-09-27）。
+        //    判据与理由见 `FCF_TO_NP_MIN_FOR_ANCHOR` 上方长注释：FCF 口径扣的是
         //    **全部**资本开支（含扩张性），对扩张期/重资产公司系统性扣低；
         //    此时用「TTM 净利 × 0.90」更接近股东真实可得。
         //    ⚠️ 判据用 `ttm_net_profit`（与判据 ② 同源同口径），不是 `latest.net_profit`
         //    （最新期累计值，中报口径下只有半年 —— 那正是判据 ② 2026-09-23 修掉的坑）。
         Some(v) if v > 0.0 => match ttm_net_profit(financials).filter(|np| *np > 0.0) {
-            Some(np) if v / np < FCF_TO_NP_MIN_FOR_ANCHOR => {
-                (np * OWNER_EARNINGS_CONVERSION, FCF_OWNER_EARNINGS_BASIS.to_string())
-            },
-            _ => (v, "当期FCF".to_string()),
+            Some(np) if v / np < FCF_TO_NP_MIN_FOR_ANCHOR => (
+                np * OWNER_EARNINGS_CONVERSION,
+                format!(
+                    "{anchor_basis}显著低于净利（FCF/净利<0.6），\
+                     改用所有者收益代理锚（TTM净利×0.90）"
+                ),
+            ),
+            _ => (v, anchor_basis.to_string()),
         },
         Some(_) => match normalized_annual_profit(financials, 5) {
-            Some(avg_np) => (avg_np * OWNER_EARNINGS_CONVERSION, FCF_FALLBACK_BASIS.to_string()),
+            Some(avg_np) => (
+                avg_np * OWNER_EARNINGS_CONVERSION,
+                format!("{anchor_basis}≤0，改用近5年报正净利均值×0.90归一化锚定"),
+            ),
             None => {
                 return (
                     None,
-                    "当期FCF≤0且近5年报无正净利年度（持续亏损），DCF模型不适用".to_string(),
+                    format!("{anchor_basis}≤0且近5年报无正净利年度（持续亏损），DCF模型不适用"),
                     None,
                 )
             },
@@ -3171,12 +3378,15 @@ fn compute_dcf(
         },
     };
     // P0-I(2026-09-12): 锚定来源标记，随 `DcfAssumptions` 落库，供 f5 做置信度衰减。
-    // 2026-09-21：判据由「等值于某一条 fallback 文案」改为「**不是**当期真实 FCF」
+    // 2026-09-21：判据由「等值于某一条 fallback 文案」改为「**不是**真实锚口径」
     //   —— 语义没变（该布尔量表达的就是「锚定是历史代理」），但两态 fallback
     //   现在都正确标记为 true。原实现用 `== FCF_FALLBACK_BASIS` 等值比较，
     //   拆分文案后若不改，缺失态会被**静默**标成 false ⇒ f5 的衰减门（V77）
     //   会在「数据缺失」这一最需要衰减的路径上失效。
-    let is_fallback_anchor = fcf_basis != "当期FCF";
+    // 2026-09-28：真实口径有**两个**（年报 / TTM 回落），故判据须同时排除二者；
+    //   代理锚三态（owner earnings / 锚≤0 / 缺数）的文案都以 `anchor_basis` 为前缀，
+    //   天然与这两个常量**不等**，故仍能正确落 `true`。
+    let is_fallback_anchor = fcf_basis != FCF_ANNUAL_BASIS && fcf_basis != FCF_TTM_BASIS;
     // 2026-09-21：与 `is_fallback_anchor` **正交**的第二判别 —— 只在「缺数」态为 true。
     //   与上面那条同源使用**常量**（不是字面量）比较：两处引用同一 `const`，文案再改也不会漂移。
     //   注意**不能**用 `fcf_basis.contains("缺失")` 之类的子串匹配去替：那只是把等值比较
@@ -3254,29 +3464,10 @@ fn compute_dcf(
     let perpetual_clamped_by_config = perpetual_growth > max_perpetual_allowed + f64::EPSILON;
     let perpetual_growth = perpetual_growth.min(max_perpetual_allowed);
 
-    // 两阶段 DCF，返回 `(总现值, 永续终值现值)`。
-    //
-    // 2026-09-14：由返回 `f64` 改为返回二元组 —— 适用性判据 ③ 需要「终值现值 /
-    // 总现值」占比（越接近 1 说明结论越依赖永续假设、越不依赖可验证的预测期）。
-    // ⚠️ 这里必须用 `//` 而非 `///`：`dcf_two_stage` 是 `let` 绑定的闭包语句，
-    //   rustdoc 不为语句生成文档 ⇒ `///` 触发 `unused_doc_comments` warning，
-    //   而 CI 跑 `clippy -D warnings` ⇒ 直接失败。
-    let dcf_two_stage = |fcf_ps: f64, g: f64, p: f64, d: f64| -> (f64, f64) {
-        let mut pv = 0.0;
-        let mut current_fcf = fcf_ps;
-        for year in 1..=forecast_years {
-            current_fcf *= 1.0 + g;
-            pv += current_fcf / (1.0 + d).powi(year);
-        }
-        let terminal_fcf = current_fcf * (1.0 + p);
-        // 2026-09-23：地板由裸字面量 `0.001` 换为具名常量 `MIN_TERMINAL_SPREAD`（1.5pp）。
-        // 正常配置下**不可达**（`p` 已被 `max_perpetual_by_spread` 钳到 `d − 地板` 之下），
-        // 故本行是纯粹的第二道保险 —— 若它真的生效，说明前面那道守卫被绕过。
-        let terminal_spread = (d - p).max(MIN_TERMINAL_SPREAD);
-        let terminal_value = terminal_fcf / terminal_spread;
-        let terminal_pv = terminal_value / (1.0 + d).powi(forecast_years);
-        (pv + terminal_pv, terminal_pv)
-    };
+    // 两阶段 DCF 的现值计算已提为模块级共享函数（见 `crate::valuation::two_stage_dcf`，
+    // 2026-09-28）：正向 DCF 与反向 DCF 必须共用**同一份公式**，否则两处实现会漂移。
+    // 它返回 `(总现值, 永续终值现值)` —— 后者供终值占比 `terminal_value_ratio` 使用。
+    // 参数 `forecast_years` / `MIN_TERMINAL_SPREAD` 仍由本模块常量区提供（唯一权威）。
 
     // 悲观情景：增长率**向悲观方向**缩放，永续增长率打 7 折，**要求回报 +1pp**。
     //
@@ -3299,14 +3490,27 @@ fn compute_dcf(
     };
     let low_perpetual = (perpetual_growth * LOW_PERPETUAL_SCALE_POS).max(MIN_PERPETUAL_GROWTH);
     let low_discount_rate = discount_rate + RISK_STRESS_SPREAD;
-    let (low, _) = dcf_two_stage(fcf_per_share, low_growth, low_perpetual, low_discount_rate);
+    let (low, _) = crate::valuation::two_stage_dcf(
+        fcf_per_share,
+        low_growth,
+        low_perpetual,
+        low_discount_rate,
+        forecast_years,
+        MIN_TERMINAL_SPREAD,
+    );
 
     // 基准情景：原始增长率（已 clamp 到 `[min_growth, max_growth]`）与永续增长率。
     // ⚠️ 本档**不是**内在价值的点估计 —— 它只是「基准假设下的值」。区间非概率区间
     //   ⇒ 从区间里挑任何一档当点估计都是任意的（此处正是原 `upsidePct` 的错源）。
     let mid_growth = growth;
-    let (mid, mid_terminal_pv) =
-        dcf_two_stage(fcf_per_share, mid_growth, perpetual_growth, discount_rate);
+    let (mid, mid_terminal_pv) = crate::valuation::two_stage_dcf(
+        fcf_per_share,
+        mid_growth,
+        perpetual_growth,
+        discount_rate,
+        forecast_years,
+        MIN_TERMINAL_SPREAD,
+    );
 
     // 乐观情景：增长率**向乐观方向**缩放，永续增长率放大 1.3 倍；折现率保持基准
     //   （见 `RISK_STRESS_SPREAD` 文档：上界不得靠下调要求回报灌水）。
@@ -3331,7 +3535,14 @@ fn compute_dcf(
     let high_perpetual = (perpetual_growth * HIGH_PERPETUAL_SCALE_POS)
         .min(MAX_PERPETUAL_GROWTH)
         .min(max_perpetual_by_spread);
-    let (high, _) = dcf_two_stage(fcf_per_share, high_growth, high_perpetual, discount_rate);
+    let (high, _) = crate::valuation::two_stage_dcf(
+        fcf_per_share,
+        high_growth,
+        high_perpetual,
+        discount_rate,
+        forecast_years,
+        MIN_TERMINAL_SPREAD,
+    );
 
     // 终值现值占中性档估值的比例（0–1）。取**生效值**（符号一致性约束之后），
     // 因为它才是真正流向下游与面板的那个结论的构成。
@@ -3364,12 +3575,17 @@ fn compute_dcf(
     //
     // 2026-09-23 口径收敛：净利改走 [`ttm_net_profit`]，**不再读 `latest.net_profit`**。
     //
-    // 病根：同一判据的两侧口径不一致 —— 分子 `direct_fcf` 走 [`ttm_fcf`]（TTM 还原），
+    // 病根：同一判据的两侧口径不一致 —— 分子走 [`ttm_fcf`]（TTM 还原），
     //   分母却是 `latest.net_profit`（**最新期累计值**，中报口径下只有半年）。
     //   而 `ttm_net_profit` 早在 `compute_owner_earnings` 的兜底分支里就用过，
     //   其文档注释记录了同源事故（「修复前直接取 financials[0].net_profit，在中报
     //   口径下是半年累计 ⇒ 与同一份输出里按 TTM 计算的 PE/EPS 口径不一致」）
     //   —— **只是判据侧漏接了**。
+    //
+    // 2026-09-28：分子由 `direct_fcf`（TTM）改为 `anchor_raw`（**年报优先**的锚候选）
+    //   —— 判据必须与**估值实际采用的口径**一致。否则「TTM 为负、年报为正」的标的
+    //   （000858 五粮液）会被判「符号相反 ⇒ 不适用」，把年报锚整条腿掐掉。
+    //   分子分母仍同为约 12 个月量（年报 FCF vs TTM 净利），不构成量纲错误。
     //
     // 为什么是方向性偏差而非精度问题：中报口径把分母腰斩 ⇒ 比值被系统性放大 2 倍 ⇒
     //   · 上侧（现金流远超盈利）被**虚假放大**；
@@ -3379,7 +3595,7 @@ fn compute_dcf(
     // 实证 300642（报告期 2026-06-30）：`latest.net_profit` = 1047 万（半年累计），
     //   与 TTM FCF 1.352 亿相比 ratio = 12.92 ⇒ 旧口径下背离被夸大 2 倍以上。
     if let Some(np) = ttm_net_profit(financials).filter(|v| *v > 0.0) {
-        match direct_fcf {
+        match anchor_raw {
             // 符号相反是**最强信号** —— 账面盈利但现金净流出，FCF 折现无意义
             Some(v) if v <= 0.0 => applicability_signals.push(format!(
                 "当期净利 {:.2} 亿为正但自由现金流 {:.2} 亿 ≤ 0（符号相反）：\
@@ -4710,13 +4926,18 @@ mod valuation_tests {
     fn dcf_basis_tells_three_states_apart() {
         let y = 1.0e8;
 
-        // (a) 真为负：净利为正而真实 FCF ≤ 0 ⇒ 文案说「当期FCF≤0」且判据 ② 命中
+        // (a) 真为负：净利为正而真实 FCF ≤ 0 ⇒ 文案须点明**哪个口径**的 FCF ≤ 0
+        //     （2026-09-28 锚改为年报优先后，本形态走 `FCF_ANNUAL_BASIS` 文案前缀）
         let mut neg = report("2025-12-31", Some(100.0 * y), Some(8.0));
         neg.operating_cash_flow = Some(10.0 * y);
         neg.capital_expenditure = Some(30.0 * y); // FCF = −20 亿
         let a = compute_dcf(&[neg], shares_of(10.0e8), 50.0, None).2.expect("应回传快照");
         assert!(a.is_fallback_anchor, "负 FCF 应走 fallback 锚定");
-        assert!(a.basis.contains("当期FCF≤0"), "真为负应说明当期FCF≤0，实得: {}", a.basis);
+        assert!(
+            a.basis.contains("最近完整年报FCF") && a.basis.contains("≤0"),
+            "真为负应说明**年报锚**≤0，实得: {}",
+            a.basis
+        );
         assert!(!a.basis.contains("缺失"), "真为负不是数据缺失，实得: {}", a.basis);
         // 2026-09-21：`fcf_data_missing` 必须与 `is_fallback_anchor` **方向相反**才对 ——
         // 本分支两者都是 fallback，但**缺数标记必须为 false**（标的现金流属性 ≠ 我方采集缺陷）。
@@ -4729,7 +4950,8 @@ mod valuation_tests {
             a.applicability_signals
         );
 
-        // (b) 数据缺失：文案必须说「缺失」，**不得**谎称当期FCF≤0，
+        // (b) 数据缺失：文案必须说「缺失」，**不得**谎称锚≤0
+        //     （标的现金流属性 ≠ 我方采集缺陷），
         //     且仍须标记为历史代理锚（否则 f5 衰减门在最该衰减的路径上失效）
         let a = compute_dcf(
             &[report("2025-12-31", Some(100.0 * y), Some(8.0))],
@@ -4745,18 +4967,18 @@ mod valuation_tests {
         // 与 (a) 合并成一组「同 is_fallback_anchor、异 fcf_data_missing」的对照。
         assert!(a.fcf_data_missing, "现金流量表数据缺失属我方采集缺陷，必须标记");
         assert!(
-            !a.basis.contains("当期FCF≤0"),
-            "缺数时不得谎称当期FCF≤0（我方采集缺陷 ≠ 标的现金流为负），实得: {}",
+            !a.basis.contains("≤0"),
+            "缺数时不得谎称锚≤0（我方采集缺陷 ≠ 标的现金流为负），实得: {}",
             a.basis
         );
 
-        // (c) 有真实正 FCF 且与净利相称 ⇒ 不走 fallback，basis 为「当期FCF」，判据 ② 不命中
+        // (c) 有真实正 FCF 且与净利相称 ⇒ 不走 fallback，basis 为**年报锚口径**，判据 ② 不命中
         let mut pos = report("2025-12-31", Some(100.0 * y), Some(8.0));
         pos.operating_cash_flow = Some(110.0 * y);
         pos.capital_expenditure = Some(30.0 * y); // FCF = +80 亿，FCF/净利 = 0.8 ≥ 0.6
         let a = compute_dcf(&[pos], shares_of(10.0e8), 50.0, None).2.expect("应回传快照");
         assert!(!a.is_fallback_anchor, "有真实正 FCF 且与净利相称时不应标记为代理锚");
-        assert_eq!(a.basis, "当期FCF");
+        assert_eq!(a.basis, "最近完整年报FCF（OCF−资本开支）");
         assert!(!a.fcf_data_missing, "真实正 FCF 时不存在缺口");
         assert!(a.applicable, "FCF/净利 = 0.8 ≥ 0.3 不应判不适用: {:?}", a.applicability_signals);
 
@@ -4775,7 +4997,7 @@ mod valuation_tests {
             a.basis
         );
         assert!(
-            !a.basis.contains("当期FCF≤0") && !a.basis.contains("缺失"),
+            !a.basis.contains("≤0") && !a.basis.contains("缺失"),
             "本态 FCF 为正且数据齐备，不得谎称周期底部或数据缺失，实得: {}",
             a.basis
         );
@@ -4965,6 +5187,9 @@ mod valuation_tests {
     }
 
     /// V74: 当期盈利（直接 FCF 口径）路径不受影响
+    ///
+    /// 2026-09-28：fixture 是**年报**行 ⇒ 锚口径文案为「最近完整年报FCF」
+    /// （此前为「当期FCF」；锚数值不变，仍是 vendor 直供的 6 亿）。
     #[test]
     fn dcf_direct_fcf_path_unchanged() {
         let mut financials = vec![report("2025-12-31", Some(10.0e8), Some(0.6))];
@@ -4972,12 +5197,122 @@ mod valuation_tests {
         let (tiers, note, a) = compute_dcf(&financials, shares_of(10.0e8), 15.0, None);
         let (_, mid, _) = tiers.expect("正常 FCF 应可用");
         assert!(mid > 0.0);
-        assert_eq!(note, "当期FCF");
+        assert_eq!(note, "最近完整年报FCF（OCF−资本开支）");
         // P0-I(2026-09-12): **反向断言** —— 当期真实 FCF 分支不得被标为 fallback。
         // 若实现退化成「一律置 true」，真实锚定的估值信号也会被无谓腰斩，
         // 这是与上一条断言方向相反、必须同时存在的护栏。
         let a = a.expect("应回传参数快照");
         assert!(!a.is_fallback_anchor, "当期真实 FCF 被误标为 fallback ⇒ 真实估值信号被无谓衰减");
+    }
+
+    /// 【2026-09-28 用户裁决「改成年报锚」】600887 伊利股份实参复刻。
+    ///
+    /// 病根：TTM 锚被**中报营运资本一次性释放**抬高 —— 2026H1 OCF 97.59 亿 vs
+    /// 2025H1 29.64 亿，而同期营收只 +4.13%（差额是回款/占款的时点差，不是可持续
+    /// 现金流）。TTM FCF = 143.44 + 97.59 − 29.64 − (30.37 + 13.04 − 14.53)
+    /// = **182.51 亿**，是最近完整年报（FY2025 = 143.44 − 30.37 = **113.07 亿**）
+    /// 的 1.61 倍 ⇒ 中性档 51.88 元（现价 26.94 的 +92.6%）⇒ 面板判「低估 +49.1%」。
+    /// 用户实测截图即此值。
+    ///
+    /// 本用例钉死两点：① 锚取**年报口径**（113.07 亿）而非 TTM（182.51 亿）；
+    /// ② `FCF/净利 = 113.07/101.24 = 1.12 ≥ 0.6` ⇒ 不得被 owner-earnings 代理锚替换。
+    #[test]
+    fn dcf_anchor_prefers_latest_annual_over_inflated_ttm() {
+        let y = 1.0e8;
+        let mut h1_2026 = report("2026-06-30", Some(57.59 * y), None);
+        h1_2026.operating_cash_flow = Some(97.59 * y);
+        h1_2026.capital_expenditure = Some(13.04 * y);
+        h1_2026.revenue_yoy = Some(4.13);
+        let mut fy_2025 = report("2025-12-31", Some(115.65 * y), None);
+        fy_2025.operating_cash_flow = Some(143.44 * y);
+        fy_2025.capital_expenditure = Some(30.37 * y);
+        let mut h1_2025 = report("2025-06-30", Some(72.00 * y), None);
+        h1_2025.operating_cash_flow = Some(29.64 * y);
+        h1_2025.capital_expenditure = Some(14.53 * y);
+
+        let (tiers, note, a) =
+            compute_dcf(&[h1_2026, fy_2025, h1_2025], shares_of(62.94e8), 26.94, None);
+        let (low, mid, high) = tiers.expect("年报锚可用");
+        let a = a.expect("应回传参数快照");
+
+        // ① 锚 = 年报 FCF（113.07 亿），**不是** TTM（182.51 亿）
+        assert!(
+            (a.fcf_anchor - 113.07 * y).abs() < 0.05 * y,
+            "锚应取 FY2025 年报 FCF 113.07 亿，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(
+            a.fcf_anchor < 182.51 * y * 0.9,
+            "锚不得被 TTM FCF（182.51 亿）抬高，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert_eq!(note, "最近完整年报FCF（OCF−资本开支）");
+        assert!(!a.is_fallback_anchor, "FCF/净利 = 1.12 ≥ 0.6 ⇒ 不得换代理锚");
+        assert!(a.applicable, "不应命中适用性判据: {:?}", a.applicability_signals);
+        // ② 中性档随之回到与 ¥115.65 亿年报净利相称的量级（TTM 锚下为 51.88 元）
+        assert!(
+            (31.0..33.5).contains(&mid),
+            "中性档应≈32.1 元（TTM 锚下为 51.88 元），实得 {mid:.2}"
+        );
+        // ③ 结论方向随之翻转：`upsidePct` 以**保守档** `low` 为基准 ⇒ 年锚下保守档
+        //    落到 24.9 元（< 现价 26.94）⇒ 不再判「低估 +49.1%」，而是「偏高（−7.6%）」。
+        assert!(
+            low < 26.94,
+            "保守档应低于现价 ⇒ 不得再判「低估」（TTM 锚下保守档为 40.16 元），实得 {low:.2}"
+        );
+        assert!(high > 26.94, "乐观档仍在现价之上，实得 {high:.2}");
+    }
+
+    /// 【2026-09-28 用户裁决「改成年报锚」】000858 五粮液实参复刻 —— 钉住
+    /// **适用性判据 ② 必须看锚候选（年报优先）而非 TTM**。
+    ///
+    /// 病根：五粮液的 TTM FCF 为**负**（−35.85 亿，中报口径营运资本占用），而最近完整
+    /// 年报（FY2025）FCF 为 **+277.39 亿**。若判据 ② 仍以 `direct_fcf`（TTM）为分子，
+    /// `np > 0 但 FCF ≤ 0 ⇒ 符号相反` 会直接判 `applicable = false`，把刚修好的年报锚
+    /// 整条腿掐掉 —— 与 600887 的修法收益相互抵消。本用例是该耦合的**唯一护栏**。
+    ///
+    /// 构造（单位亿元，与真实报表同量级）：FY2025 OCF 350.00 − capex 72.61 = FCF 277.39；
+    /// 2026H1 OCF −250.00 − capex 50.00 = FCF −300.00；2025H1 OCF 30.00 − capex 16.76
+    /// = FCF 13.24 ⇒ TTM FCF = 277.39 − 300.00 − 13.24 = **−35.85**（复刻真实值）。
+    #[test]
+    fn dcf_anchor_uses_annual_even_when_ttm_fcf_is_negative() {
+        let y = 1.0e8;
+        let mut h1_2026 = report("2026-06-30", Some(180.00 * y), None);
+        h1_2026.operating_cash_flow = Some(-250.00 * y);
+        h1_2026.capital_expenditure = Some(50.00 * y);
+        let mut fy_2025 = report("2025-12-31", Some(318.53 * y), None);
+        fy_2025.operating_cash_flow = Some(350.00 * y);
+        fy_2025.capital_expenditure = Some(72.61 * y);
+        let mut h1_2025 = report("2025-06-30", Some(190.00 * y), None);
+        h1_2025.operating_cash_flow = Some(30.00 * y);
+        h1_2025.capital_expenditure = Some(16.76 * y);
+
+        let financials = [h1_2026, fy_2025, h1_2025];
+        // 前提校验：TTM 口径确实为负（否则本用例失去意义）
+        let ttm = ttm_fcf(&financials).expect("TTM 双通道可用");
+        assert!(
+            (ttm - (-35.85 * y)).abs() < 0.05 * y,
+            "TTM FCF 应复刻真实值 −35.85 亿，实得 {:.2} 亿",
+            ttm / y
+        );
+
+        let (tiers, note, a) = compute_dcf(&financials, shares_of(38.82e8), 130.0, None);
+        let (_, mid, _) = tiers.expect("年报锚可用");
+        let a = a.expect("应回传参数快照");
+
+        assert_eq!(note, "最近完整年报FCF（OCF−资本开支）", "锚应走年报口径");
+        assert!(
+            (a.fcf_anchor - 277.39 * y).abs() < 0.05 * y,
+            "锚应取 FY2025 年报 FCF 277.39 亿，实得 {:.2} 亿",
+            a.fcf_anchor / y
+        );
+        assert!(
+            a.applicable,
+            "TTM FCF 为负不得据判据 ② 判「符号相反 ⇒ 不适用」（判据须看锚候选）: {:?}",
+            a.applicability_signals
+        );
+        assert!(!a.is_fallback_anchor, "年报锚是真实锚，不得标 fallback");
+        assert!(mid > 0.0, "中性档应为正，实得 {mid:.2}");
     }
 
     /// V74: 股本缺失 → None，不再输出 (0,0,0)
@@ -5756,7 +6091,11 @@ mod valuation_tests {
         let reason = a.inapplicable_reason.as_deref().expect("不适用必须给出原因");
         assert!(reason.contains("FCF 收益率"), "原因应含 FCF 收益率判据: {reason}");
         // 零破坏性：不适用 ≠ 不可用，三档数值仍须产出。
-        assert_eq!(a.basis, "当期FCF", "锚仍应是当期真实 FCF");
+        // 该样本只有中报（无 `-12-31` 年报）⇒ 锚回落 TTM 的 vendor 直供 FCF。
+        assert_eq!(
+            a.basis, "年报现金流数据缺失，回落TTM FCF（OCF−资本开支）",
+            "无年报数据 ⇒ 锚应回落 TTM FCF"
+        );
         assert!(!a.is_fallback_anchor, "本条不是 fallback 锚定，两个标记正交");
     }
 

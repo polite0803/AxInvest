@@ -20,6 +20,15 @@
 
 // ── Rhai 全局函数（必须位于全局作用域，Rhai 不允许在 try/块内定义函数）──
 fn present(x) { type_of(x) != "()" }
+//
+// ⚠️ **`fn` 体内读不到工作流变量**（本仓实测，2026-09-28）：
+//   `code_executor` 用 `engine.compile(code)` 生成 AST —— 即**无 scope 编译**，
+//   只有「编译期已知的常量」才能被 fn 体解析。故 `fn` 只能操作**自己的参数**
+//   （下方 `present` / `safe_parse` / `get_weight` 全部如此）。
+//   要消费 input_mapping 注入的变量，必须写成**闭包**（`let f = |x| …`）：
+//   闭包按定义时的 scope 解析，`eval_ast_with_scope` 下可见。
+//   症状差异：fn 形态在真执行时才报 `Variable not found`，而 `all_rhai_scripts_compile`
+//   这类**纯编译门不会暴露它**。
 fn safe_parse(raw) {
     if !present(raw) { return (); }
     if type_of(raw) != "string" || raw == "" { return (); }
@@ -234,7 +243,7 @@ let f_weights = if present(regime_factor_weights) && type_of(regime_factor_weigh
 //   ⚠️ f12 的 fallback 值订正（2026-09-20）—— 本行原写「fallback 0.08」，是**声明错误**：
 //      2026-09-11 建本表时按 f11(pace) 那一行**成批抄写**（两行措辞原本逐字相同），
 //      未把 f12 的真实值改写。判定为错误的依据（三处独立证据 + 一条机制论证）：
-//        · 代码 `:1037` `let f12_default = 0.10;`
+//        · 代码 `let f12_default = 0.10;`（本文件内）
 //        · `max_weight`(`:1357`) 第 11 项亦为 `0.10`（**硬编码字面量，不引用变量**），
 //          与 `:1339` 注释「v19: + f12=0.10 → 1.49」自洽（复算 11 项和 = 1.49 ✓）
 //        · 机制：`momentum` 不在 regime-weights 的 `factor_names` 白名单内，
@@ -242,7 +251,7 @@ let f_weights = if present(regime_factor_weights) && type_of(regime_factor_weigh
 //          （`astock-data/src/mcp_tools.rs:1254`「因子回测引擎未实现」）
 //          ⇒ `get_weight` 在**两条路径下都**回落 `f12_default`
 //          ⇒ **0.10 是 f12 权重的唯一实际取值来源**（历史全部运行皆用 0.10）。
-//      ⇒ 本次仅订正**声明**（零运行时影响）。⚠ 切勿据此把 `:1037` 改成 0.08：
+//      ⇒ 本次仅订正**声明**（零运行时影响）。⚠ 切勿据此把 `f12_default` 改成 0.08：
 //        那会动参数标定，且 `max_weight` 是手抄字面量（不引用变量）⇒ 只改一处会让
 //        分子/分母失配（比例 0.9866，系统性偏低 1.34%），正是 `:1344-1350` 警告的
 //        `weights_collapsed` 边界误触发形态（同 V66）。
@@ -660,6 +669,104 @@ let f5_has_valuation = dcf_leg_usable || graham_leg_usable;
 let f5_weight = if f5_has_valuation {
     get_weight(f_weights, "valuation", f5_default)
 } else { 0.0 };
+// ⚠️ 2026-09-28：本段必须位于顶层（不能放进 f5_signal 的 if 块）。
+//   Rhai 的 let 作用域到块结尾为止，而结论层透出（pm_result.valuation_conclusion）
+//   要读 rel / band_pct / band_leg_usable —— 在块内声明会让该块外的引用报
+//   Variable not found，把整个决策静默降级为保守兜底。
+// ── V79(2026-09-21): PE 历史分位 = 第三条锚腿 ──
+// `valuation_pe_percentile` ← `t-valuation-band.result.content.metricPe.currentPercentile`
+//   （0 = 近 5 年最便宜，100 = 最贵），来自 `astock-data::valuation_band`，
+//   数据源是 `financial_snapshots` 的**日频 5 年**序列（DB 实况 15597 行 / 13 只，
+//   `pe_ttm`/`pb`/`ps_ttm` 填充率 100%）。
+//
+// 为什么加它 —— 现有两腿都有**共同的失效面**：
+//   ① DCF 腿：依赖 FCF 口径。`applicable=false`（杠杆/FCF 背离/负增长独裁）时整腿剔除，
+//      而命中的恰是银行/保险/券商/地产/重资产周期 ⇒ 这批标的**只剩 graham 一条腿**，
+//      而 graham 是纯 PE 恒等式（EPS 约掉，见 §二），近乎不含公司特定信息。
+//   ② graham 腿：高增长标的 `revenue_yoy` 被封顶到 30% ⇒ 内在价值系统性偏低。
+//   ⇒ 需要一个**既不依赖 FCF、也不依赖增长率假设**的锚。PE 分位只问
+//   「当前 PE 在它自己的 5 年分布里处于什么位置」，两者都不依赖。
+//
+// ⚠️ 它与 graham 的信息**不重复**：graham 给的是「当前 PE 相对 8.5+2g / 债券收益率
+//   基准的偏离」（绝对口径），本腿给的是「当前 PE 相对**自身历史**的位置」（相对口径）。
+//   同一只股票完全可能「graham 说高估、历史分位说便宜」（处于估值中枢下移期）。
+//
+// 信号映射用**线性**而非 pm_saturate：分位本身已是 [0,100] 的有界量，
+//   50 是天然中性点 ⇒ `(50 − pct)/50` 恰好给出 [−1, +1]，且 pct=25 → +0.5、
+//   pct=75 → −0.5，与 `valuation_band` 自带的 25/75 阈值口径逐字一致。
+//   若改用 pm_saturate 需再引入一个标定常数（且极值只到 ±0.5），徒增一个可调旋钮。
+//
+// ⚠️ 有效性门必须**按数据形态**判（不用 `present` 就够）：`currentPercentile`
+//   在「PE ≤ 0（亏损）」与「有效样本 < 20」两种情形下为 null/缺；即便有值，
+//   `compute_valuation_band` 的 verdict 也可能因样本不足为 `insufficient`。
+//   故此处只接「值落在 [0,100]」的分位；越界或缺失 ⇒ 该腿不可用、按可用腿归一化。
+// ── 2026-09-23：把上方的**声明**变成**实现**（补质量门，读 `verdict`）──
+//
+// 上方原注释写「即便有值，`compute_valuation_band` 的 verdict 也可能因样本不足为
+// `insufficient` ⇒ 故此处只接「值落在 [0,100]」的分位」—— 这句「故」在逻辑上是断的：
+// 承认了 verdict 可能不可靠，处置却是**只查值域**，等于**从未读过 verdict**。
+// 实测（2026-09-23）：`valuation_band_verdict` 在 Rhai 侧、在整个 `_raw` 输入映射里
+// **零注入**（只有 `valuation_pe_percentile` 一条）⇒ 该门此后形同虚设。
+//
+// 为什么这构成实质缺陷而不是「少一道保险」：
+//   `valuation_band.rs` 对样本不足的处置是 `verdict = "insufficient"`
+//   （`pe.sample_size < 20 || pb.sample_size < 20`），但 `current_percentile`
+//   **在该状态下仍可能有值**（只要 `current > 0` 且历史序列非空）
+//   ⇒ 该腿会以**满强度**（线性映射到 ±1，是本组量程最大的腿）进入融合，
+//   拿一个「仅供参考」的分位去和 DCF/graham 平均。
+//   与 DCF 腿的 `applicable`、graham 腿的 `growthClampedUpper` 相比，
+//   本腿是**唯一没有任何质量声明可消费**的一条 —— 根因是声明没被接线，不是没有声明。
+//
+// 向后兼容：旧模板未注入 `valuation_band_verdict` ⇒ `present()` 为 false ⇒
+//   `band_insufficient` 恒 false ⇒ 行为与改动前**逐位一致**。
+//   ⚠️ 本改动**只**消费 verdict 的「质量」语义（`insufficient`），**不用**它的方向
+//   （`overvalued` / `deep_value` 等）—— 方向已由 `currentPercentile` 线性表达，
+//   若同时用 verdict 定方向会造成同一信息二次计入。
+//
+// ── 2026-09-28：本腿改读**路由后的主指标**分位（不再恒用 PE）──
+//
+// 旧实现恒取 `valuation_pe_percentile`。301269（华大九天，现价 87.56 元）实证
+//   暴露其失效面：当期盈利趋零 ⇒ PE 顶到数百（`valuation::PE_VALID_MAX=150`
+//   判其「已不含定价信息」），而真正有信息的是 **PS —— 4 年 1.04% 分位**。
+//   旧实现下本腿要么以无意义的 PE 分位满强度进入融合，要么整腿不可用，
+//   两种情形都浪费了当时**唯一**可用的相对估值证据。
+// 现在改为读 `t-valuation.result.content.relative`：主指标（PE→PS→PB 中首个
+//   按数据形态**有效**者）及其自身历史分位 —— 与结论层 `conclusion.primaryMethod`
+//   同源，PE 无效时自动让位给 PS/PB。
+// ⚠️ 向后兼容：`valuation_relative` 缺失（旧模板未注入）⇒ 回落 `valuation_pe_percentile`，
+//   行为与改动前**逐位一致**。
+let rel = if present(valuation_relative) && type_of(valuation_relative) == "map" {
+    valuation_relative
+} else { () };
+let rel_primary = if type_of(rel) == "map" { rel["primary"] } else { () };
+// Rhai 无「按名取数组元素」⇒ 线性扫描 metrics 取主指标自己的分位。
+let rel_primary_pct = if type_of(rel) == "map" && present(rel_primary) {
+    let ms = rel["metrics"];
+    let found = ();
+    if type_of(ms) == "array" {
+        for m in ms {
+            if type_of(m) == "map" && m["name"] == rel_primary {
+                found = m["percentile"];
+            }
+        }
+    }
+    found
+} else { () };
+let band_pct = if type_of(rel) == "map" {
+    rel_primary_pct
+} else if present(valuation_pe_percentile) {
+    valuation_pe_percentile
+} else { () };
+let band_insufficient = present(valuation_band_verdict)
+    && type_of(valuation_band_verdict) == "string"
+    && valuation_band_verdict == "insufficient";
+let band_leg_usable = !band_insufficient && present(band_pct)
+    && band_pct >= 0.0
+    && band_pct <= 100.0;
+let band_sig = if band_leg_usable {
+    clamp((50.0 - band_pct) / 50.0, -1.0, 1.0)
+} else { 0.0 };
+
 let f5_signal = if f5_weight > 0.0 {
     // 估值上行空间 → 信号映射：低估→正，过高→负。
     // dcf_upside / graham_upside 均为百分数（如 -40.8 表示下跌空间 40.8%）。
@@ -714,64 +821,6 @@ let f5_signal = if f5_weight > 0.0 {
     //     - graham 保留 30% 作低 PB 校正（银行/地产等 PB<1 样本下可给正信号，
     //       本轮 12 样本全为高 PB，证据不足以直接剔除）。
     //   权重按实际可用项归一（fusion_wsum），避免单边缺失时信号按比例缩水。
-    // ── V79(2026-09-21): PE 历史分位 = 第三条锚腿 ──
-    // `valuation_pe_percentile` ← `t-valuation-band.result.content.metricPe.currentPercentile`
-    //   （0 = 近 5 年最便宜，100 = 最贵），来自 `astock-data::valuation_band`，
-    //   数据源是 `financial_snapshots` 的**日频 5 年**序列（DB 实况 15597 行 / 13 只，
-    //   `pe_ttm`/`pb`/`ps_ttm` 填充率 100%）。
-    //
-    // 为什么加它 —— 现有两腿都有**共同的失效面**：
-    //   ① DCF 腿：依赖 FCF 口径。`applicable=false`（杠杆/FCF 背离/负增长独裁）时整腿剔除，
-    //      而命中的恰是银行/保险/券商/地产/重资产周期 ⇒ 这批标的**只剩 graham 一条腿**，
-    //      而 graham 是纯 PE 恒等式（EPS 约掉，见 §二），近乎不含公司特定信息。
-    //   ② graham 腿：高增长标的 `revenue_yoy` 被封顶到 30% ⇒ 内在价值系统性偏低。
-    //   ⇒ 需要一个**既不依赖 FCF、也不依赖增长率假设**的锚。PE 分位只问
-    //   「当前 PE 在它自己的 5 年分布里处于什么位置」，两者都不依赖。
-    //
-    // ⚠️ 它与 graham 的信息**不重复**：graham 给的是「当前 PE 相对 8.5+2g / 债券收益率
-    //   基准的偏离」（绝对口径），本腿给的是「当前 PE 相对**自身历史**的位置」（相对口径）。
-    //   同一只股票完全可能「graham 说高估、历史分位说便宜」（处于估值中枢下移期）。
-    //
-    // 信号映射用**线性**而非 pm_saturate：分位本身已是 [0,100] 的有界量，
-    //   50 是天然中性点 ⇒ `(50 − pct)/50` 恰好给出 [−1, +1]，且 pct=25 → +0.5、
-    //   pct=75 → −0.5，与 `valuation_band` 自带的 25/75 阈值口径逐字一致。
-    //   若改用 pm_saturate 需再引入一个标定常数（且极值只到 ±0.5），徒增一个可调旋钮。
-    //
-    // ⚠️ 有效性门必须**按数据形态**判（不用 `present` 就够）：`currentPercentile`
-    //   在「PE ≤ 0（亏损）」与「有效样本 < 20」两种情形下为 null/缺；即便有值，
-    //   `compute_valuation_band` 的 verdict 也可能因样本不足为 `insufficient`。
-    //   故此处只接「值落在 [0,100]」的分位；越界或缺失 ⇒ 该腿不可用、按可用腿归一化。
-    // ── 2026-09-23：把上方的**声明**变成**实现**（补质量门，读 `verdict`）──
-    //
-    // 上方原注释写「即便有值，`compute_valuation_band` 的 verdict 也可能因样本不足为
-    // `insufficient` ⇒ 故此处只接「值落在 [0,100]」的分位」—— 这句「故」在逻辑上是断的：
-    // 承认了 verdict 可能不可靠，处置却是**只查值域**，等于**从未读过 verdict**。
-    // 实测（2026-09-23）：`valuation_band_verdict` 在 Rhai 侧、在整个 `_raw` 输入映射里
-    // **零注入**（只有 `valuation_pe_percentile` 一条）⇒ 该门此后形同虚设。
-    //
-    // 为什么这构成实质缺陷而不是「少一道保险」：
-    //   `valuation_band.rs` 对样本不足的处置是 `verdict = "insufficient"`
-    //   （`pe.sample_size < 20 || pb.sample_size < 20`），但 `current_percentile`
-    //   **在该状态下仍可能有值**（只要 `current > 0` 且历史序列非空）
-    //   ⇒ 该腿会以**满强度**（线性映射到 ±1，是本组量程最大的腿）进入融合，
-    //   拿一个「仅供参考」的分位去和 DCF/graham 平均。
-    //   与 DCF 腿的 `applicable`、graham 腿的 `growthClampedUpper` 相比，
-    //   本腿是**唯一没有任何质量声明可消费**的一条 —— 根因是声明没被接线，不是没有声明。
-    //
-    // 向后兼容：旧模板未注入 `valuation_band_verdict` ⇒ `present()` 为 false ⇒
-    //   `band_insufficient` 恒 false ⇒ 行为与改动前**逐位一致**。
-    //   ⚠️ 本改动**只**消费 verdict 的「质量」语义（`insufficient`），**不用**它的方向
-    //   （`overvalued` / `deep_value` 等）—— 方向已由 `currentPercentile` 线性表达，
-    //   若同时用 verdict 定方向会造成同一信息二次计入。
-    let band_insufficient = present(valuation_band_verdict)
-        && type_of(valuation_band_verdict) == "string"
-        && valuation_band_verdict == "insufficient";
-    let band_leg_usable = !band_insufficient && present(valuation_pe_percentile)
-        && valuation_pe_percentile >= 0.0
-        && valuation_pe_percentile <= 100.0;
-    let band_sig = if band_leg_usable {
-        clamp((50.0 - valuation_pe_percentile) / 50.0, -1.0, 1.0)
-    } else { 0.0 };
     // 权重 0.56 / 0.24 / 0.20 —— 前两腿**保持 7:3 内部比例**（0.56:0.24 = 7:3），且三者同缩
     //   到 0.8 的基数上，于是 band 腿缺位时归一化结果**逐位等于改动前的 0.7/0.3**：
     //   `wsum = 0.56 + 0.24 = 0.8`，dcf 份额 `0.56/0.8 = 0.7`、graham `0.24/0.8 = 0.3`。
@@ -781,8 +830,33 @@ let f5_signal = if f5_weight > 0.0 {
     //   两者的差别只在「band 可用时 dcf 份额」：0.56 vs 0.583。选 0.56 的理由是
     //   三者和恰为 1.0 ⇒ **band 腿份额恒为 0.20**（后者为 0.2/1.2 = 0.167），
     //   「新腿占两成」这句话才在两种状态下都成立、可直接断言。
-    let fusion_wsum = (if dcf_leg_usable { 0.56 } else { 0.0 })
-        + (if graham_leg_usable { 0.24 } else { 0.0 })
+    // ── 〇-B v2 / Phase 4：估值的**周期闸口** ──
+    // DCF 与格雷厄姆都是「长期现金流/内在价值」口径：它们的上行空间天然只对中长线成立。
+    //   v2 一次分析恒产四档决策，但 f5 这一腿此前**不分周期**—— ultra_short 档也在拿
+    //   「10 年现金流折现」的证据定仓位（PLAN 断点④：估值与周期完全无关、无短周期警示）。
+    // 处置 = **分腿衰减 + 显式留痕**（不是整腿剔除）：
+    //   · 短/超短档 DCF ×0.30、格雷厄姆 ×0.50：数值仍有信息量，只是不该主导短档；
+    //   · PE/PS/PB 历史分位带（band 腿）衡量「相对自身贵贱」，与持有期近乎无关 ⇒ 不衰减；
+    //   · 衰减后**必须**进 data_gaps 声明，否则短档面板读不出「估值腿已被周期降权」
+    //     （结构性缺席可接受、伪装成正常结果不可接受）。
+    //   ⚠ 与 V77 的 `applicable=false` 区分：那是「数值没有经济含义」⇒ 整腿剔除；
+    //     这里是「有含义但不服务于本周期」⇒ 降权，两者不可混用。
+    let valuation_horizon_decay = if time_horizon == "ultra_short" || time_horizon == "short" {
+        data_gaps.push(if time_horizon == "ultra_short" {
+            "估值腿周期降权(超短线：DCF×0.30/格雷厄姆×0.50，长期口径不服务于本档)"
+        } else {
+            "估值腿周期降权(短线：DCF×0.30/格雷厄姆×0.50，长期口径不服务于本档)"
+        });
+        [0.30, 0.50]
+    } else {
+        [1.0, 1.0]
+    };
+    let dcf_horizon_decay = valuation_horizon_decay[0];
+    let graham_horizon_decay = valuation_horizon_decay[1];
+    // 权重按「可用 × 周期衰减」归一：中/长档衰减为 1.0 ⇒ fusion_wsum 与衰减引入前逐位相同
+    //   （0.56+0.24+0.20=1.0），即**本闸口对中长线是恒等变换**，只改变短档。
+    let fusion_wsum = (if dcf_leg_usable { 0.56 * dcf_horizon_decay } else { 0.0 })
+        + (if graham_leg_usable { 0.24 * graham_horizon_decay } else { 0.0 })
         + (if band_leg_usable { 0.20 } else { 0.0 });
     // V79: P0-I 的 fallback 衰减从「作用于融合后总值」改为**只作用于 DCF 腿自身**。
     //   定义提前到此处（原在下文 clamp 前），因为分腿衰减必须在**融合之内**生效。
@@ -793,8 +867,8 @@ let f5_signal = if f5_weight > 0.0 {
     let fused_sig = if fusion_wsum <= 0.0 {
         0.0
     } else {
-        ((if dcf_leg_usable { dcf_sig * dcf_anchor_decay * 0.56 } else { 0.0 })
-            + (if graham_leg_usable { graham_sig * 0.24 } else { 0.0 })
+        ((if dcf_leg_usable { dcf_sig * dcf_anchor_decay * 0.56 * dcf_horizon_decay } else { 0.0 })
+            + (if graham_leg_usable { graham_sig * 0.24 * graham_horizon_decay } else { 0.0 })
             + (if band_leg_usable { band_sig * 0.20 } else { 0.0 })) / fusion_wsum
     };
     // ── 护城河乘子（P2 新增；2026-09-21 取值域对齐 + V79 方向对称）──
@@ -1772,13 +1846,61 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	// 内部处理: 半凯利 + 交易成本扣减 + 风险等级上限
 	// 当概率 <0.50 或 odds≤0.001 时返回 0.0（凯利不适用）
 	// 2026-09-23: 概率量统一为 `effective_posterior`（理由见上方 kelly_raw 段）
+	// ── 主周期定档 + 周期仓位乘数（〇-B v2：必须在仓位计算之前）──
+	// 原先本段位于「── 时间 ──」区（仓位之后），HorizonLayer 的乘数因此无法参与主决策
+	// —— 它只能事后展示。现在定档在前、仓位在后，**同一份乘数**既进决策链也进权重层。
+	// ── 周期常量表访问闭包（〇-B v2）──
+	// 唯一权威源 `axagent_harness::holding_period::Period::decision_consts_map()`，由
+	// `stock_workflow/hooks.rs` 无条件注入为 `horizon_consts_json`
+	// （形如 {ultra_short:{days:2,mult:0.6}, …}）。脚本侧**不得**再手抄天数或仓位乘数。
+	//   原先这里是 `switch h { … _ => 5 }`（同一文件出现两处手抄）：未知周期静默落到
+	//   短线 5 天 ⇒ 中/长线记录带着错档的期望持有期入库，反思据此判成熟即错档（G4 违例）。
+	//   现缺表 / 缺档位 / 缺字段一律 throw ⇒ 由本脚本末尾的外层 catch 接住，显式降级为
+	//   「数据缺失」，而不是静默产出一条错档结论。
+	// ⚠ **必须是闭包而非 `fn`**（见文件头「fn 读不到工作流变量」条）。
+	// ⚠ 用 `is_empty()` 而非 `has_key()`：后者未在共享 Rhai 引擎注册（实测 Function not found）。
+	let horizon_const = |h, field| {
+	    if type_of(horizon_consts_json) != "map" || horizon_consts_json.is_empty() {
+	        throw "决策中止：缺少工作流变量 horizon_consts_json（周期常量表，权威源 crates/harness/src/holding_period.rs 的 Period::decision_consts_map，由 stock_workflow/hooks.rs 注入）";
+	    }
+	    let found = false;
+	    for tier_key in horizon_consts_json.keys() {
+	        if tier_key == h { found = true; }
+	    }
+	    if !found {
+	        throw `决策中止：周期 '${h}' 不在周期常量表中（应为 ultra_short/short/mid/long 之一）`;
+	    }
+	    let row = horizon_consts_json[h];
+	    if type_of(row) != "map" || type_of(row[field]) == "()" {
+	        throw `决策中止：周期常量表缺字段 '${field}'（周期 ${h}）`;
+	    }
+	    row[field]
+	};
+	// 天数闭包（本段与下方价位段共用）。
+	let days_for = |h| horizon_const.call(h, "days");
+	// ⚠ 这里**不做**四档 switch —— 四档各自的决策由下方 decisionsByHorizon 逐档产出，
+	//   主档只是「本轮最值得看的那一档」的指针。
+	let time_horizon = if effective_posterior >= 0.65 { "long" } else if effective_posterior >= 0.50 { "mid" } else if effective_posterior >= 0.35 { "short" } else { "ultra_short" };
+	let horizon_source = "formula";
+	// 周期仓位乘数：与 evidence_weight.rs 的 `compute_recommended_position` 消费**同一个**
+	//   `Period::position_multiplier`（超短 0.6 / 短 0.8 / 中 1.0 / 长 1.2）。
+	let horizon_position_mult = horizon_const.call(time_horizon, "mult");
+	// 主档期望持有天数**只从权威表取**，不再采信 LLM 的自由数字 —— 否则同一决策里
+	//   「哪个周期」是公式定的、「该周期多久」却是模型随口报的，反思按天判成熟即错档。
+	let expected_holding_days = days_for.call(time_horizon);
 	let base_position_pct = pm_kelly_position(effective_posterior, odds, COST_PCT, overall_risk);
 	// V59(2026-09-10): trader 数据异常从「清零」改为「降级」——仓位上限 10%。
 	//   原代码 !trader_data_valid → position 0，单点 LLM 价格异常就全盘空仓，
 	//   与 V56「单点失败不应全盘观望」的分级降级理念自相矛盾。
 	//   odds 已走 fallback 路径（trader 异常时不满足看多条件 → odds_fallback），
 	//   凯利值本身已经是无 trader 数据的保守估计，只需加护栏而非归零。
-	let position_pct = if !trader_data_valid { clamp(base_position_pct, 0.0, 10.0) } else { base_position_pct };
+	// 〇-B v2：主决策仓位**乘上周期乘数**（`Period::position_multiplier`，与 evidence_weight
+	//   层同一权威源）。此前 HorizonLayer 的乘数只在**旁路**（前端交叉验证）里算，主决策
+	//   从不消费 ⇒「四周期决策 100% 本地公式」在仓位这一维是断的（PLAN Phase 3）。
+	//   ⚠ 乘数在风险封顶**之后**再乘：pm_kelly_position 内部按风险等级封顶，
+	//     先乘后封会让长线 1.2 的加成被封顶吃掉、极高风险档则可能突破 10% 护栏。
+	let position_pct_raw = if !trader_data_valid { clamp(base_position_pct, 0.0, 10.0) } else { base_position_pct };
+	let position_pct = clamp(position_pct_raw * horizon_position_mult, 0.0, 95.0);
 	// ── P0-11 修复(2026-09-12): 「仓位充足度」与「仓位上限」解耦 ──
 	// 旧实现: action 判定（下方 L1409/L1412）直接读 position_pct —— 而它是
 	//   pm_kelly_position 的返回值，已在函数内部按风险等级封顶（极高10 / 高35 / 中50）。
@@ -2371,11 +2493,11 @@ let evidence_pct_raw = (total_weight / max_weight * 100.0).to_int();
 let evidence_pct = if evidence_pct_raw > 100 { 100 } else { evidence_pct_raw };
 
 // ── 时间 ──
-let time_horizon = if present(trader_time_horizon) && present(trader_holding_days)
-    && trader_holding_days > 0.0 { trader_time_horizon } else if posterior >= 0.65 { "long" } else if posterior >= 0.50 { "mid" } else if posterior >= 0.35 { "short" } else { "ultra_short" };
-let expected_holding_days = if present(trader_holding_days) && trader_holding_days > 0.0 {
-    trader_holding_days.to_int()
-} else { switch time_horizon { "ultra_short"=>2, "short"=>5, "mid"=>28, "long"=>90, _=>5 } };
+// 定档 / 天数 / 乘数已整体上移到「凯利仓位」之前（〇-B v2），本区仅剩下方 target_timeframe。
+
+
+
+
 let target_timeframe = switch time_horizon {
     "ultra_short"=>"1d-2d", "short"=>"1w", "mid"=>"1m", "long"=>"3m", _=>"1m"
 };
@@ -2471,10 +2593,46 @@ let position_state = if position_pct <= 0.0 {
 //   档位值收敛为三张逐一对应的「周期 → 值」转换函数（sl_pct_for / tp_pct_for /
 //   days_for），**主档位** `sl_pct`/`tp_pct` 由 `time_horizon` 经函数取，**四周期
 //   价位映射** `horizonPriceMap` 亦由同一批函数逐周期生成 ⇒ 档位数值在仓库里出现
-//   且只出现一遍（此前已注释声明「档位表禁止在文件内出现三份」，本改进一步收敛）。⚠ 下面是**闭包**（`let f = |...|` ⇒ 变量里是 FnPtr）：调用**一律** `f.call(...)`，按名 `f(...)` 恒抛 Function not found（同 strategy-scorer.rhai:9 约定）。
-let sl_pct_for = |h| switch h { "ultra_short" => 3.0, "short" => 5.0, "mid" => 8.0, "long" => 12.0, _ => 5.0 };
-let tp_pct_for = |h| switch h { "ultra_short" => 5.0, "short" => 10.0, "mid" => 18.0, "long" => 30.0, _ => 10.0 };
-let days_for = |h| switch h { "ultra_short" => 2, "short" => 5, "mid" => 28, "long" => 90, _ => 5 };
+//   且只出现一遍（此前已注释声明「档位表禁止在文件内出现三份」，本改进一步收敛）。
+//   ⚠ 该自述在 2026-09-29 之前**是假的**：阶段2 的 `decisionsByHorizon` 另抄了一份
+//   档位字面量（5/10/5、8/18/28、12/30/90 + 超短线 3/5），面板调档只作用于主决策与本
+//   映射 ⇒ 同一份 JSON 内 `stopLossPct` 与 `stopLoss` 反解不一致。现已全部改经
+//   `sl_pct_for.call(h)` / `tp_pct_for.call(h)` / `days_for.call(h)`，本行才是真话。
+//   ⚠ 2026-09-28：`days_for` 已从本段**移除手抄表**，改为消费 Rust 注入的
+//   `horizon_consts_json`（定义上移到「── 时间 ──」段前，见该处注释）⇒ 三张表中
+//   止损/止盈两张表仍在本文件，但**数值已变量化**（`sl_pct_{period}` / `tp_pct_{period}`，
+//   缺省值就地兜底），设置面板可改、反思可建议。
+//   ⚠ 下面是**闭包**（`let f = |...|` ⇒ 变量里是 FnPtr）：调用**一律** `f.call(...)`，按名 `f(...)` 恒抛 Function not found（同 strategy-scorer.rhai:9 约定）。
+// ── 逐周期止损/止盈档位（〇-B v2 第 3 条：从硬编码升级为「设置项 + 可被反思优化」）──
+// 缺省值即下表；同名变量由 `PORTFOLIO_MGR_TUNABLE_PARAMS` 派生的 input_mapping 注入
+// （定义见 `seed_variables.rs`）。反思产出的参数建议经 `apply_param_suggestions`
+// 回写本组变量 ⇒ 档位可被单周期反思（〇-B 第 4 条）逐档纠正。
+// ⚠ 缺变量时退回下表**默认值**是刻意的：旧模板快照 / 反思未跑过时档位必须仍可决策，
+//   这与 `days_for`（缺注入即 throw）相反 —— 天数是统计基准、错了会错档判成熟，
+//   档位是策略参数、错了只是保守或激进，两者不可混用同一兜底纪律。
+let sl_pct_ultra_short_v = if present(sl_pct_ultra_short) { sl_pct_ultra_short } else { 3.0 };
+let sl_pct_short_v = if present(sl_pct_short) { sl_pct_short } else { 5.0 };
+let sl_pct_mid_v = if present(sl_pct_mid) { sl_pct_mid } else { 8.0 };
+let sl_pct_long_v = if present(sl_pct_long) { sl_pct_long } else { 12.0 };
+let tp_pct_ultra_short_v = if present(tp_pct_ultra_short) { tp_pct_ultra_short } else { 5.0 };
+let tp_pct_short_v = if present(tp_pct_short) { tp_pct_short } else { 10.0 };
+let tp_pct_mid_v = if present(tp_pct_mid) { tp_pct_mid } else { 18.0 };
+let tp_pct_long_v = if present(tp_pct_long) { tp_pct_long } else { 30.0 };
+let sl_pct_for = |h| switch h {
+    "ultra_short" => sl_pct_ultra_short_v,
+    "short" => sl_pct_short_v,
+    "mid" => sl_pct_mid_v,
+    "long" => sl_pct_long_v,
+    _ => 5.0,
+};
+let tp_pct_for = |h| switch h {
+    "ultra_short" => tp_pct_ultra_short_v,
+    "short" => tp_pct_short_v,
+    "mid" => tp_pct_mid_v,
+    "long" => tp_pct_long_v,
+    _ => 10.0,
+};
+// `days_for` 已上移到「凯利仓位」之前的定档段（与 `expected_holding_days` 同源）。
 let sl_pct = if position_pct > 0.0 { sl_pct_for.call(time_horizon) } else { 0.0 };
 let tp_pct = if position_pct > 0.0 { tp_pct_for.call(time_horizon) } else { 0.0 };
 
@@ -2559,7 +2717,7 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
 };
 
 // 超短线（方案B）：单后验 = 主链 effective_posterior（日线已是最短摄入周期，无更短评分源），
-//   档位固定 3/5/2；因单后验信息不足，输出置信下限 0.35 + 文案，供前端提示「超短线为
+//   档位取 `sl_pct_for`/`tp_pct_for`/`days_for`（与主链、价位映射同一批函数，2026-09-29 收口后不再是硬编码）；因单后验信息不足，输出置信下限 0.35 + 文案，供前端提示「超短线为
 //   低确信档」，不以独立评分强算虚假置信。
 let us_action = if effective_posterior >= ACTION_BUY_THRESHOLD { "买入" }
     else if effective_posterior >= ACTION_INCREASE_THRESHOLD { "增持" }
@@ -2571,17 +2729,19 @@ let us_odds = if effective_posterior >= 0.70 { 2.5 } else if effective_posterior
     else if effective_posterior >= 0.50 { 1.5 } else if effective_posterior >= 0.42 { 1.5 } else { 0.0 };
 let us_pos = if effective_posterior >= 0.50 && us_odds > 0.001 { pm_kelly_position(effective_posterior, us_odds, COST_PCT, overall_risk) }
     else { 0.0 };
+let us_sl = sl_pct_for.call("ultra_short");
+let us_tp = tp_pct_for.call("ultra_short");
 let ultra_short_dec = #{
     "action": us_action,
     "verdict": `决策=${us_action} 置信=${(effective_posterior*100.0*10.0).round()/10.0}[超短线单后验，置信下限35%]`,
     "positionPct": (us_pos*10.0).round()/10.0,
     "confidence": ((effective_posterior*100.0)*10.0).round()/10.0,
     "posterior": ((effective_posterior*100.0)*10.0).round()/10.0,
-    "stopLossPct": if us_pos>0.0 { 3.0 } else { 0.0 },
-    "takeProfitPct": if us_pos>0.0 { 5.0 } else { 0.0 },
-    "expectedHoldingDays": 2,
-    "targetPrice": if us_pos>0.0 && price_ok { (current_price*(1.0+5.0/100.0)*100.0).round()/100.0 } else { () },
-    "stopLoss": if us_pos>0.0 && price_ok { (current_price*(1.0-3.0/100.0)*100.0).round()/100.0 } else { () },
+    "stopLossPct": if us_pos>0.0 { us_sl } else { 0.0 },
+    "takeProfitPct": if us_pos>0.0 { us_tp } else { 0.0 },
+    "expectedHoldingDays": days_for.call("ultra_short"),
+    "targetPrice": if us_pos>0.0 && price_ok { (current_price*(1.0+us_tp/100.0)*100.0).round()/100.0 } else { () },
+    "stopLoss": if us_pos>0.0 && price_ok { (current_price*(1.0-us_sl/100.0)*100.0).round()/100.0 } else { () },
     "confLowerBound": 0.35,
 };
 
@@ -2589,9 +2749,9 @@ let ultra_short_dec = #{
 // 短/中/长分别注入对应周期评分（seed 新增 t-scoring-week / t-scoring-month 节点供给）
 let decisions_by_horizon = #{
     "ultraShort": ultra_short_dec,
-    "short": horizon_decision.call("short", totalScore_short, 5.0, 10.0, 5),
-    "mid": horizon_decision.call("mid", totalScore_mid, 8.0, 18.0, 28),
-    "long": horizon_decision.call("long", totalScore_long, 12.0, 30.0, 90),
+    "short": horizon_decision.call("short", totalScore_short, sl_pct_for.call("short"), tp_pct_for.call("short"), days_for.call("short")),
+    "mid": horizon_decision.call("mid", totalScore_mid, sl_pct_for.call("mid"), tp_pct_for.call("mid"), days_for.call("mid")),
+    "long": horizon_decision.call("long", totalScore_long, sl_pct_for.call("long"), tp_pct_for.call("long"), days_for.call("long")),
 };
 
 // ── 输出 ──
@@ -2673,6 +2833,8 @@ let decisions_by_horizon = #{
     "reasoning": `决策=${final_action} 置信=${(final_confidence*10.0).round()/10.0} 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}`,
     "data_gaps": data_gaps,
     "timeHorizon": time_horizon,
+    // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source
+    "horizonSource": horizon_source,
     "expectedHoldingDays": expected_holding_days,
     // V74 修复(2026-09-12): 与 sanity 检查 1 同源缺陷。
     //   旧定义 `targetPrice <= stopLoss` 隐含做多语义，对看空方案
@@ -2757,6 +2919,32 @@ let decisions_by_horizon = #{
         "anchorIsFallback": if present(valuation_dcf_anchor_is_fallback) { valuation_dcf_anchor_is_fallback } else { false },
         "grahamGrowthClamped": if present(valuation_graham_growth_clamped) { valuation_graham_growth_clamped } else { false },
     },
+    // ── 2026-09-28：估值**结论层**（用户裁决「推翻现有估值架构」）──
+    //
+    // 为什么必须透出：`valuationApplicability` 只回答「哪些腿被用了」，
+    //   不回答「所以结论是什么」。用户对旧架构的核心指控正是**没有结论** ——
+    //   301269 面板给「2.16–4.42 元 / −97.5%」，而现价 87.56 元，
+    //   这个数字既不是结论也不是错误，它是「问错了问题」的产物。
+    //   新架构由 `astock-data::valuation::build_conclusion` 合成**必有**的结论
+    //   （`dcf` → `reverse_dcf` → `relative` → `graham` 主口径路由），
+    //   本块把它提到决策层可见面：① 面板直接展示；② 与 f5 的 σ 并列可对账
+    //   （「结论说高估，f5 σ 却是正」这类矛盾必须一眼可见，而不是埋在两张卡里）。
+    // 缺省全空 —— 旧模板未注入时不改变既有输出形态。
+    "valuation_conclusion": #{
+        "action": if present(valuation_conclusion_action) { valuation_conclusion_action } else { "" },
+        "headline": if present(valuation_conclusion_headline) { valuation_conclusion_headline } else { "" },
+        "primaryMethod": if present(valuation_conclusion_primary_method) { valuation_conclusion_primary_method } else { "" },
+        // 相对估值路由结果（主指标 + 综合口径）—— 与 band 腿读的同一份数据
+        "relativePrimary": if present(valuation_relative_primary) { valuation_relative_primary } else { "" },
+        "relativeVerdict": if present(valuation_relative_verdict) { valuation_relative_verdict } else { "" },
+        // 反向 DCF 可行性（Impossible / Strained / Plausible）
+        "reverseFeasibility": if present(valuation_reverse_feasibility) { valuation_reverse_feasibility } else { "" },
+        // band 腿本次实际读的分位来自哪个指标（"PE" / "PS" / "PB" / ""）——
+        //   旧模板回落 PE 时此处为空串（口径：非空才表示「已按主指标路由」）
+        "bandMetric": if type_of(rel) == "map" { rel_primary } else { "" },
+        "bandPercentile": if present(band_pct) { (band_pct*10.0).round()/10.0 } else { () },
+        "bandLegUsed": band_leg_usable,
+    },
     "decision_trail": decision_trail,
     "pre_sim_action": pre_sim_action,
     "pre_sim_position_pct": pre_sim_position_pct,
@@ -2813,6 +3001,17 @@ let decisions_by_horizon = #{
         // 因子融合门（f7 权重低于此值时其看空信号不再封顶后验）—— 原漏登记，
         //   导致反思只能看到「f7_weight」却看不到判定它是否达标的那把尺子。
         "trader_cap_min_weight": TRADER_CAP_MIN_WEIGHT,
+        // 〇-B v2 第 3 条：逐周期止损/止盈档位（面板可调 + 反思可建议 ⇒ 必须可观测）。
+        //   这里输出的是**本次实际生效值**（`*_v` 已含「缺变量时退默认」的兜底），
+        //   与主决策、`horizonPriceMap`、`decisionsByHorizon` 走同一批函数 ⇒ 无反解分歧。
+        "sl_pct_ultra_short": sl_pct_ultra_short_v,
+        "sl_pct_short": sl_pct_short_v,
+        "sl_pct_mid": sl_pct_mid_v,
+        "sl_pct_long": sl_pct_long_v,
+        "tp_pct_ultra_short": tp_pct_ultra_short_v,
+        "tp_pct_short": tp_pct_short_v,
+        "tp_pct_mid": tp_pct_mid_v,
+        "tp_pct_long": tp_pct_long_v,
         "action_buy_threshold": ACTION_BUY_THRESHOLD,
         "action_increase_threshold": ACTION_INCREASE_THRESHOLD,
         "action_hold_threshold": ACTION_HOLD_THRESHOLD,

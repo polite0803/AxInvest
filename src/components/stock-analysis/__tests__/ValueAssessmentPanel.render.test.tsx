@@ -263,3 +263,55 @@ describe("I1：DCF 不适用时估值区间不进结论区", () => {
     ).toBeGreaterThanOrEqual(1);
   });
 });
+
+/**
+ * V92（2026-09-28，301269 华大九天实证：现价 87.56 元，LLM 给出「2.16–4.42 元 / -97.5%」）。
+ *
+ * 病灶：面板只渲染 LLM 口径的 `intrinsic_value_range` 并把它标成「估值结论」，
+ * 本地算法（反向 DCF + 相对估值）的结论完全不可见 ⇒ 用户以为那就是结论。
+ * 处置：`value-verify` 无条件注入顶层 `valuation_conclusion`，面板置顶展示档位与
+ * 一句话结论；区间区块标题按归属标为「算法 DCF 估值区间」（V93 修正：该区间本就是
+ * `value-verify` 覆写后的算法输出，标成「LLM 估值区间」是归属错误）。
+ */
+describe("V92：算法估值结论置顶", () => {
+  const REPORT_WITH_CONCLUSION = JSON.stringify({
+    buffett_verdict: "裁决正文",
+    intrinsic_value_range: "2.16-4.42元",
+    margin_of_safety: "-97.5%",
+    valuation_conclusion: {
+      action: "高估",
+      headline: "反向 DCF 显示现价隐含 FCF 年复合 130% ⇒ 判为「高估」。",
+      primaryMethod: "reverse_dcf",
+      relativeVerdict: "rich",
+      relativePrimary: "PS",
+      reverseFeasibility: "Impossible",
+    },
+  });
+
+  it("有 valuation_conclusion ⇒ 结论置顶且区块标题标为算法 DCF 区间", () => {
+    seedStore(REPORT_WITH_CONCLUSION, "301269");
+    render(<ValueAssessmentPanel />);
+
+    expect(screen.getByText("stockAnalysis.valueAssessment.algorithmConclusion")).toBeTruthy();
+    expect(screen.getByText(/130%/)).toBeTruthy();
+    expect(screen.getByText("高估")).toBeTruthy();
+    // 信息不丢：区间仍渲染，但标题必须标为算法 DCF 输出，不能标成「LLM 估值区间」
+    expect(screen.getByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeTruthy();
+    expect(screen.queryByText("stockAnalysis.valueAssessment.valuationConclusion")).toBeNull();
+
+    // 顺序断言：算法结论必须先于价值评估卡片出现
+    const html = document.body.innerHTML;
+    const algoIdx = html.indexOf("stockAnalysis.valueAssessment.algorithmConclusion");
+    const cardIdx = html.indexOf("stockAnalysis.valueAssessment.title");
+    expect(algoIdx).toBeGreaterThan(-1);
+    expect(cardIdx).toBeGreaterThan(-1);
+    expect(algoIdx).toBeLessThan(cardIdx);
+  });
+
+  it("**反向锁**：无 valuation_conclusion ⇒ 不显示结论区（不伪造算法结论）", () => {
+    seedStore(REPORT_300620, "300620");
+    render(<ValueAssessmentPanel />);
+    expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmConclusion")).toBeNull();
+    expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeNull();
+  });
+});

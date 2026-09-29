@@ -20,6 +20,15 @@ pub struct Model {
     /// 适用 ticker（None=通用规则）
     #[sea_orm(indexed)]
     pub stock_code: Option<String>,
+    /// 本教训**所属的持有周期档**：`ultra_short` / `short` / `mid` / `long`；
+    /// `None` = 周期无关的通用规则（两侧都可注入）。
+    ///
+    /// 为什么必须由「本次复盘的那一档」盖章（〇-B v2 第 4 条 + PLAN 断点⑤）：
+    /// 一次反思只复盘一个周期，而 lesson 此前**没有周期维度** ⇒ 超短线的教训
+    /// （如「次日冲高回落就走」）会被原样注入长线分析的 prompt，跨周期污染决策。
+    /// 值域 = `axagent_harness::holding_period::Period::as_str()`，不得另造字符串。
+    #[sea_orm(indexed)]
+    pub horizon: Option<String>,
     /// JSON 数组：适用场景标签（如 ["短线", "高估值"]）
     pub applicable_scenarios: Option<String>,
     /// 已应用次数

@@ -6521,62 +6521,6 @@
       "confirm-delete": "确认删除该荐股任务？",
       "empty-description": "暂无荐股定时任务"
     },
-    "strategyPack": {
-      "title": "策略包管理",
-      "searchPlaceholder": "搜索策略包名称、描述或 ID",
-      "empty": "暂无策略包",
-      "detailTitle": "策略包详情",
-      "editorTitle": "策略包编辑器",
-      "editorIdLabel": "策略包 ID（用于保存到用户目录）",
-      "editorYamlLabel": "YAML 内容",
-      "editorYamlTip": "使用 YAML 格式定义策略包，字段参考内置策略包",
-      "editorYamlPlaceholder": "在此输入 YAML 内容...",
-      "confirmDelete": "确认删除该用户策略包？",
-      "yes": "是",
-      "no": "否",
-      "stat": {
-        "total": "策略包总数",
-        "builtin": "内置策略包",
-        "user": "用户策略包"
-      },
-      "source": {
-        "builtin": "内置",
-        "user": "用户"
-      },
-      "column": {
-        "name": "名称",
-        "description": "描述",
-        "source": "来源",
-        "strategies": "策略数",
-        "minConfidence": "最低置信度",
-        "maxPicks": "最大推荐数",
-        "actions": "操作",
-        "style": "风格",
-        "period": "周期",
-        "enabled": "启用",
-        "weight": "权重"
-      },
-      "action": {
-        "detail": "详情",
-        "copy": "复制",
-        "refresh": "刷新",
-        "new": "新建",
-        "validate": "校验",
-        "save": "保存",
-        "cancel": "取消",
-        "close": "关闭"
-      },
-      "period": {
-        "ultra_short": "超短",
-        "short": "短线",
-        "mid": "中线",
-        "long": "长线"
-      },
-      "editorTemplate": {
-        "name": "我的策略包",
-        "description": "自定义策略包"
-      }
-    },
     "globalShortcut": "全局唤起快捷键",
     "globalShortcutRegisterOk": "全局快捷键注册成功：{{count}} 项",
     "globalShortcutRegisterPartial": "全局快捷键注册结果：成功 {{ok}} 项，失败 {{fail}} 项",
@@ -14878,6 +14822,7 @@
     "boolYes": "是",
     "boolNo": "否",
     "backendCallFailed": "后端调用失败",
+    "tierScopeHint": "档位口径：仅服务中线（瓶颈/政策/业绩催化剂以周-月展开）；短/超短档不适用，落库 period 恒为 mid、持有期按该档权威 28 天。",
     "emptyHistoryWarning": "趋势智选历史为空：list_reco_history 返回 0 行（可能是 DB 暂无风格为 serenity/bottleneck 的历史，或后端命令失败被静默）",
     "timeBasis": "时间基线: {{date}} · 建议窗口约 {{days}} 天（至 {{until}}）"
   },
@@ -15339,6 +15284,8 @@
     "timeHorizonShort": "短线",
     "timeHorizonMid": "中期",
     "timeHorizonLong": "长期",
+    "horizonSourceFormula": "公式定档",
+    "horizonSourceModel": "模型自报",
     "horizonConflictTitle": "周期方向矛盾",
     "horizonConflictHint": "不同周期的多空判定存在分歧，请查看各周期详情",
     "horizonOverview": "周期概览：",
@@ -15559,7 +15506,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "负债率",
       "grossMarginLabel": "毛利率",
-      "revenueGrowthLabel": "营收增速"
+      "revenueGrowthLabel": "营收增速",
+      "algorithmConclusion": "算法估值结论",
+      "algorithmConclusionNote": "由本地算法基于原始数据计算（正向 DCF / 反向 DCF / 相对估值）；下方估值区间即该算法的 DCF 输出，非 LLM 观点",
+      "algorithmRangeBand": "算法 DCF 估值区间（保守档—乐观档）"
     },
     "workflow": {
       "analyst": {
@@ -15731,8 +15681,7 @@
         "profiles": "档案",
         "data": "数据",
         "params": "参数",
-        "recommendation": "荐股推送",
-        "strategyPack": "策略包"
+        "recommendation": "荐股推送"
       },
       "check": "检测",
       "loadFailed": "配置加载失败",
@@ -15809,6 +15758,7 @@
         "portfolioMgrAction": "组合决策阈值（portfolio-mgr）",
         "portfolioMgrFusion": "因子融合门（portfolio-mgr）",
         "portfolioMgrCost": "交易成本（portfolio-mgr）",
+        "portfolioMgrHorizon": "持有周期档位（止损/止盈）",
         "portfolioMgrRisk": "风险分类阈值（portfolio-mgr）",
         "simulation": "蒙特卡洛仿真",
         "refCodes": "行业参考标的",
@@ -16892,6 +16842,7 @@
       "horizonShort": "短线 (5天)",
       "horizonMid": "中线 (28天)",
       "horizonLong": "长线 (90+天)",
+      "horizonAuto": "按主档",
       "horizonUnknown": "未知周期",
       "horizonStatusLabel": "状态：",
       "horizonStatusMature": "已成熟",
@@ -17632,7 +17583,9 @@
       "unsupported": "无数据",
       "source": "来源",
       "extractFailed": "证据提取失败",
-      "matchConfidence": "匹配置信度"
+      "matchConfidence": "匹配置信度",
+      "notApplicable": "证据引用审计不适用（本轮决策未产出）",
+      "notApplicableDetail": "本轮决策未产出（action={{action}} 是数据缺失哨兵，不是结论），理由栏装的是降级诊断信息，没有可审计的分析师证据。支撑率在此情形下没有定义，故不显示为 0%。"
     },
     "charts": {
       "noSectorData": "无行业配置数据",

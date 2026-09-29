@@ -622,6 +622,34 @@ pub(crate) fn extract_decision_fields(
     (action, position_pct, reasoning, time_horizon, expected_holding_days)
 }
 
+/// Phase 1：从决策 JSON 取 `horizonSource` —— `stock_analyses.decision_horizon_source` 的
+/// **唯一读入口**（三个落库点共用，同 `normalize_action_for_storage` 的收口纪律）。
+///
+/// 值域由 `portfolio-mgr.rhai` 单点判定（〇-B v2）：`"formula"` = 本轮主档由确定性
+/// 后验阈值映射产出（v2 唯一产出路径）；`"model"` = v2 之前采信 trader 自报的历史记录；
+/// `"user"` = v1 的入口锁档形态（通路已撤除）。Rust 侧**不得**再按入参二次推断 ——
+/// 否则「主档怎么来的」这条判据在 Rust 与 Rhai 各写一遍、必然漂移。
+///
+/// `None` 语义 = 该轮脚本未产出该字段（旧模板快照）⇒ 落 NULL ⇒ 读取侧按「来源未知」处理。
+pub(crate) fn extract_horizon_source(decision_json: &Option<String>) -> Option<String> {
+    let raw = decision_json.as_deref()?;
+    let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let v = parsed
+        .get("horizonSource")
+        .or_else(|| parsed.get("horizon_source"))
+        .and_then(|x| x.as_str())?;
+    // 值域只有三个合法值；脚本产出的必须是 `formula`。其余字面量（旧模板的
+    // `user` / `model`、或未来漂移）一律归一为 `model` = 「非公式定档的历史形态」，
+    // 而不是原样入库 —— 否则读侧的 `== "formula"` 判据会被脏值假阴性吞掉。
+    Some(
+        match v {
+            "formula" => "formula",
+            _ => "model",
+        }
+        .to_string(),
+    )
+}
+
 /// 落库前的 action 归一化 —— `stock_analyses.decision_action` 的**唯一写入口**。
 ///
 /// 为什么必须唯一：`decision_action` 有两个落库点（`stock_workflow/core.rs` 的
@@ -3147,6 +3175,8 @@ pub async fn rerun_decision(
     let reasoning = decision_value.get("reasoning").and_then(|v| v.as_str()).map(|s| s.to_string());
     let time_horizon =
         decision_value.get("timeHorizon").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let horizon_source =
+        decision_value.get("horizonSource").and_then(|v| v.as_str()).map(|s| s.to_string());
     let holding_days = decision_value.get("expectedHoldingDays").and_then(|v| {
         if let Some(f) = v.as_f64() {
             Some(f as i64)
@@ -3182,6 +3212,7 @@ pub async fn rerun_decision(
         // 复算器必须能区分这两者，才不至于把「用新公式复算旧输入」误判成数据不一致。
         .col_expr(stock_analyses::Column::TemplateVersion, Expr::value(template.version))
         .col_expr(stock_analyses::Column::DecisionTimeHorizon, Expr::value(time_horizon))
+        .col_expr(stock_analyses::Column::DecisionHorizonSource, Expr::value(horizon_source))
         .col_expr(stock_analyses::Column::DecisionExpectedHoldingDays, Expr::value(holding_days))
         .col_expr(
             stock_analyses::Column::UpdatedAt,

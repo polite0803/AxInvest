@@ -229,10 +229,15 @@ pub fn clip_valuation_history(
     snaps
 }
 
-fn verdict_from_bands(pe: &MetricBand, pb: &MetricBand) -> &'static str {
-    let pe_pct = pe.current_percentile.unwrap_or(50.0);
-    let pb_pct = pb.current_percentile.unwrap_or(50.0);
-    let avg = (pe_pct + pb_pct) / 2.0;
+/// 由「平均分位」给出综合口径 —— **全仓唯一实现**。
+///
+/// 调用方：
+/// - [`verdict_from_bands`]（历史 PE/PB 带，估值带主口径）；
+/// - `valuation::relative_valuation`（按数据形态路由后的多指标口径，2026-09-28 新增）。
+///
+/// 两处**必须**共用同一组阈值：否则同一只股票会在「估值带图」与「估值结论」里
+/// 得到两个不同的定性判定（`undervalued` vs `fair`），且无任何报错。
+pub(crate) fn verdict_from_avg_percentile(avg: f64) -> &'static str {
     if avg < 25.0 {
         "deep_value"
     } else if avg < 40.0 {
@@ -244,6 +249,12 @@ fn verdict_from_bands(pe: &MetricBand, pb: &MetricBand) -> &'static str {
     } else {
         "fair"
     }
+}
+
+fn verdict_from_bands(pe: &MetricBand, pb: &MetricBand) -> &'static str {
+    let pe_pct = pe.current_percentile.unwrap_or(50.0);
+    let pb_pct = pb.current_percentile.unwrap_or(50.0);
+    verdict_from_avg_percentile((pe_pct + pb_pct) / 2.0)
 }
 
 /// 最小化的"快照"接口,避免与 ORM 模型耦合。

@@ -6521,62 +6521,6 @@
       "confirm-delete": "Delete this recommendation task?",
       "empty-description": "No recommendation scheduled tasks"
     },
-    "strategyPack": {
-      "title": "Strategy Pack Management",
-      "searchPlaceholder": "Search by name, description or ID",
-      "empty": "No strategy packs",
-      "detailTitle": "Strategy Pack Details",
-      "editorTitle": "Strategy Pack Editor",
-      "editorIdLabel": "Strategy Pack ID (used for saving to user directory)",
-      "editorYamlLabel": "YAML Content",
-      "editorYamlTip": "Define the strategy pack in YAML format. Refer to built-in packs for field definitions.",
-      "editorYamlPlaceholder": "Enter YAML content here...",
-      "confirmDelete": "Delete this user strategy pack?",
-      "yes": "Yes",
-      "no": "No",
-      "stat": {
-        "total": "Total Packs",
-        "builtin": "Built-in Packs",
-        "user": "User Packs"
-      },
-      "source": {
-        "builtin": "Built-in",
-        "user": "User"
-      },
-      "column": {
-        "name": "Name",
-        "description": "Description",
-        "source": "Source",
-        "strategies": "Strategies",
-        "minConfidence": "Min Confidence",
-        "maxPicks": "Max Picks",
-        "actions": "Actions",
-        "style": "Style",
-        "period": "Period",
-        "enabled": "Enabled",
-        "weight": "Weight"
-      },
-      "action": {
-        "detail": "Details",
-        "copy": "Copy",
-        "refresh": "Refresh",
-        "new": "New",
-        "validate": "Validate",
-        "save": "Save",
-        "cancel": "Cancel",
-        "close": "Close"
-      },
-      "period": {
-        "ultra_short": "Ultra Short",
-        "short": "Short",
-        "mid": "Mid",
-        "long": "Long"
-      },
-      "editorTemplate": {
-        "name": "My Strategy Pack",
-        "description": "Custom strategy pack"
-      }
-    },
     "appConfigDesc": "Model selection, feature flags, agent management & hook configuration",
     "globalShortcut": "Global Shortcut",
     "globalShortcutRegisterOk": "Global shortcuts registered: {{count}}",
@@ -14912,6 +14856,7 @@
     "boolYes": "Yes",
     "boolNo": "No",
     "backendCallFailed": "Backend call failed",
+    "tierScopeHint": "Tier scope: mid-term only (bottleneck / policy / earnings catalysts unfold over weeks-months); short and ultra-short tiers do not apply, stored period is always mid with the tier's authoritative 28-day holding period.",
     "emptyHistoryWarning": "Serenity history is empty: list_reco_history returned 0 rows (possibly no serenity/bottleneck style history in DB, or backend command failure was silently ignored)",
     "timeBasis": "Time basis: {{date}} · suggested window ~{{days}} days (until {{until}})"
   },
@@ -15120,6 +15065,8 @@
     "timeHorizonShort": "Short Term",
     "timeHorizonMid": "Mid Term",
     "timeHorizonLong": "Long Term",
+    "horizonSourceFormula": "Formula",
+    "horizonSourceModel": "Model-reported",
     "horizonConflictTitle": "Horizon Direction Conflict",
     "horizonConflictHint": "Different time horizons have conflicting buy/sell signals. Review each horizon for details.",
     "horizonOverview": "Overview: ",
@@ -15565,7 +15512,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "Debt ratio",
       "grossMarginLabel": "Gross margin",
-      "revenueGrowthLabel": "Revenue growth"
+      "revenueGrowthLabel": "Revenue growth",
+      "algorithmConclusion": "Algorithm valuation conclusion",
+      "algorithmConclusionNote": "Computed locally from raw data (forward DCF / reverse DCF / relative valuation). The valuation range below is this algorithm's DCF output, not an LLM opinion",
+      "algorithmRangeBand": "Algorithmic DCF valuation range (conservative-optimistic band)"
     },
     "workflow": {
       "analyst": {
@@ -15742,6 +15692,7 @@
         "portfolioMgrAction": "Portfolio Decision Thresholds (portfolio-mgr)",
         "portfolioMgrFusion": "Factor fusion gate (portfolio-mgr)",
         "portfolioMgrCost": "Trading cost (portfolio-mgr)",
+        "portfolioMgrHorizon": "Horizon tiers (stop-loss / take-profit)",
         "portfolioMgrRisk": "Risk Classification Thresholds (portfolio-mgr)",
         "simulation": "Monte Carlo Simulation",
         "refCodes": "Industry Reference Codes",
@@ -15873,8 +15824,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "Strategy Packs"
+        "recommendation": "Recommendations"
       },
       "temperature": "Temperature",
       "tencentFinance": "Tencent Finance",
@@ -16659,6 +16609,7 @@
       "horizonShort": "Short (5d)",
       "horizonMid": "Mid (28d)",
       "horizonLong": "Long (90+d)",
+      "horizonAuto": "By primary tier",
       "horizonUnknown": "Unknown horizon",
       "horizonStatusLabel": "Status: ",
       "horizonStatusMature": "Mature",
@@ -17630,7 +17581,9 @@
       "unsupported": "No Data",
       "source": "Source",
       "extractFailed": "Evidence extraction failed",
-      "matchConfidence": "Match confidence"
+      "matchConfidence": "Match confidence",
+      "notApplicable": "Evidence citation audit not applicable (no decision was produced)",
+      "notApplicableDetail": "This run produced no decision (action={{action}} is the missing-data sentinel, not a conclusion), so the reasoning field holds degradation diagnostics with no auditable analyst evidence. The support rate is undefined in this case, so it is not shown as 0%."
     },
     "charts": {
       "noSectorData": "No Sector Allocation Data",

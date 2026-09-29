@@ -6520,62 +6520,6 @@
       "confirm-delete": "Supprimer cette tâche de recommandation ?",
       "empty-description": "Aucune tâche planifiée de recommandation"
     },
-    "strategyPack": {
-      "title": "Gestion des packs de stratégie",
-      "searchPlaceholder": "Rechercher par nom, description ou ID",
-      "empty": "Aucun pack de stratégie",
-      "detailTitle": "Détails du pack de stratégie",
-      "editorTitle": "Éditeur de pack de stratégie",
-      "editorIdLabel": "ID du pack de stratégie (utilisé pour l'enregistrement dans le répertoire utilisateur)",
-      "editorYamlLabel": "Contenu YAML",
-      "editorYamlTip": "Définissez le pack de stratégie au format YAML. Consultez les packs intégrés pour les champs.",
-      "editorYamlPlaceholder": "Saisissez le contenu YAML ici...",
-      "confirmDelete": "Supprimer ce pack de stratégie utilisateur ?",
-      "yes": "Oui",
-      "no": "Non",
-      "stat": {
-        "total": "Total des packs",
-        "builtin": "Packs intégrés",
-        "user": "Packs utilisateur"
-      },
-      "source": {
-        "builtin": "Intégré",
-        "user": "Utilisateur"
-      },
-      "column": {
-        "name": "Nom",
-        "description": "Description",
-        "source": "Source",
-        "strategies": "Nb de stratégies",
-        "minConfidence": "Confiance min.",
-        "maxPicks": "Sélections max.",
-        "actions": "Actions",
-        "style": "Style",
-        "period": "Période",
-        "enabled": "Activé",
-        "weight": "Pondération"
-      },
-      "action": {
-        "detail": "Détails",
-        "copy": "Copier",
-        "refresh": "Actualiser",
-        "new": "Nouveau",
-        "validate": "Valider",
-        "save": "Enregistrer",
-        "cancel": "Annuler",
-        "close": "Fermer"
-      },
-      "period": {
-        "ultra_short": "Ultra court",
-        "short": "Court",
-        "mid": "Moyen",
-        "long": "Long"
-      },
-      "editorTemplate": {
-        "name": "Mon pack de stratégie",
-        "description": "Pack de stratégie personnalisé"
-      }
-    },
     "globalShortcut": "Raccourci global",
     "globalShortcutRegisterOk": "Raccourcis globaux enregistrés : {{count}}",
     "globalShortcutRegisterPartial": "Enregistrement des raccourcis globaux : {{ok}} réussis, {{fail}} échoués",
@@ -14713,6 +14657,7 @@
     "boolYes": "Oui",
     "boolNo": "Non",
     "backendCallFailed": "Échec de l'appel backend",
+    "tierScopeHint": "Portée du palier : moyen terme uniquement (catalyseurs goulot/politique/résultats se déploient en semaines-mois) ; les paliers court et très court ne s'appliquent pas, la période enregistrée est toujours mid avec les 28 jours de référence de ce palier.",
     "emptyHistoryWarning": "L'historique Serenity est vide : list_reco_history a renvoyé 0 ligne (peut-être aucun historique de style serenity/bottleneck dans la BD, ou l'échec de la commande backend a été silencieusement ignoré)",
     "timeBasis": "Base temporelle : {{date}} · fenêtre suggérée ~{{days}} jours (jusqu'au {{until}})"
   },
@@ -15115,6 +15060,8 @@
     "timeHorizonShort": "Court terme",
     "timeHorizonMid": "Moyen terme",
     "timeHorizonLong": "Long terme",
+    "horizonSourceFormula": "formule",
+    "horizonSourceModel": "signalé par le modèle",
     "horizonConflictTitle": "Conflit de direction d'horizon",
     "horizonConflictHint": "Différents horizons temporels ont des signaux d'achat/vente contradictoires. Consultez chaque horizon.",
     "horizonOverview": "Aperçu : ",
@@ -15346,7 +15293,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "Ratio d'endettement",
       "grossMarginLabel": "Marge brute",
-      "revenueGrowthLabel": "Croissance du CA"
+      "revenueGrowthLabel": "Croissance du CA",
+      "algorithmConclusion": "Conclusion d'évaluation algorithmique",
+      "algorithmConclusionNote": "Calculée localement à partir des données brutes (DCF direct / DCF inversé / évaluation relative). La fourchette ci-dessous est la sortie DCF de cet algorithme, non un avis du LLM",
+      "algorithmRangeBand": "Fourchette de valorisation DCF algorithmique (conservatrice-optimiste)"
     },
     "workflow": {
       "analyst": {
@@ -15518,8 +15468,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "Packs de stratégie"
+        "recommendation": "Recommendations"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -15596,6 +15545,7 @@
         "portfolioMgrAction": "Seuil de décision du portefeuille (portfolio-mgr)",
         "portfolioMgrFusion": "Porte de fusion des facteurs (portfolio-mgr)",
         "portfolioMgrCost": "Coût de transaction (portfolio-mgr)",
+        "portfolioMgrHorizon": "Paliers de détention (stop-loss / take-profit)",
         "portfolioMgrRisk": "Seuil de classification des risques (portfolio-mgr)",
         "simulation": "Simulation Monte-Carlo",
         "refCodes": "Titre de référence du secteur",
@@ -16546,6 +16496,7 @@
       "horizonShort": "Court (5 j)",
       "horizonMid": "Moyen (28 j)",
       "horizonLong": "Long (90+ j)",
+      "horizonAuto": "Selon le palier principal",
       "horizonUnknown": "Horizon inconnu",
       "horizonStatusLabel": "Statut : ",
       "horizonStatusMature": "Mature",
@@ -17412,7 +17363,9 @@
       "unsupported": "Sans données",
       "source": "Source",
       "extractFailed": "Échec de l'extraction des preuves",
-      "matchConfidence": "Confiance de correspondance"
+      "matchConfidence": "Confiance de correspondance",
+      "notApplicable": "Audit des citations de preuves non applicable (aucune décision produite)",
+      "notApplicableDetail": "Cette exécution n'a produit aucune décision (action={{action}} est la sentinelle d'absence de données, pas une conclusion) ; le champ de motivation contient donc un diagnostic de repli, sans preuve d'analyste auditable. Le taux d'étayage n'est pas défini dans ce cas et n'est pas affiché comme 0 %."
     },
     "charts": {
       "noSectorData": "Aucune donnée de répartition sectorielle",

@@ -6520,62 +6520,6 @@
       "confirm-delete": "Diese Empfehlungsaufgabe löschen?",
       "empty-description": "Keine geplanten Empfehlungsaufgaben"
     },
-    "strategyPack": {
-      "title": "Strategiepaket-Verwaltung",
-      "searchPlaceholder": "Nach Name, Beschreibung oder ID suchen",
-      "empty": "Keine Strategiepakete",
-      "detailTitle": "Strategiepaket-Details",
-      "editorTitle": "Strategiepaket-Editor",
-      "editorIdLabel": "Strategiepaket-ID (zum Speichern im Benutzerverzeichnis)",
-      "editorYamlLabel": "YAML-Inhalt",
-      "editorYamlTip": "Definieren Sie das Strategiepaket im YAML-Format. Felder siehe integrierte Pakete.",
-      "editorYamlPlaceholder": "YAML-Inhalt hier eingeben...",
-      "confirmDelete": "Dieses Benutzer-Strategiepaket löschen?",
-      "yes": "Ja",
-      "no": "Nein",
-      "stat": {
-        "total": "Gesamte Pakete",
-        "builtin": "Eingebaute Pakete",
-        "user": "Benutzerpakete"
-      },
-      "source": {
-        "builtin": "Eingebaut",
-        "user": "Benutzer"
-      },
-      "column": {
-        "name": "Name",
-        "description": "Beschreibung",
-        "source": "Quelle",
-        "strategies": "Strategien",
-        "minConfidence": "Min. Konfidenz",
-        "maxPicks": "Max. Auswahl",
-        "actions": "Aktionen",
-        "style": "Stil",
-        "period": "Periode",
-        "enabled": "Aktiviert",
-        "weight": "Gewichtung"
-      },
-      "action": {
-        "detail": "Details",
-        "copy": "Kopieren",
-        "refresh": "Aktualisieren",
-        "new": "Neu",
-        "validate": "Validieren",
-        "save": "Speichern",
-        "cancel": "Abbrechen",
-        "close": "Schließen"
-      },
-      "period": {
-        "ultra_short": "Ultra kurz",
-        "short": "Kurz",
-        "mid": "Mittel",
-        "long": "Lang"
-      },
-      "editorTemplate": {
-        "name": "Mein Strategiepaket",
-        "description": "Benutzerdefiniertes Strategiepaket"
-      }
-    },
     "globalShortcut": "Globales Tastenkürzel",
     "globalShortcutRegisterOk": "Globale Tastenkürzel registriert: {{count}}",
     "globalShortcutRegisterPartial": "Globale Tastenkürzel-Registrierung: {{ok}} erfolgreich, {{fail}} fehlgeschlagen",
@@ -14713,6 +14657,7 @@
     "boolYes": "Ja",
     "boolNo": "Nein",
     "backendCallFailed": "Backend-Aufruf fehlgeschlagen",
+    "tierScopeHint": "Stufenumfang: nur mittelfristig (Engpass-/Politik-/Gewinnkatalysatoren entfalten sich über Wochen–Monate); kurz- und ultrakurzfristige Stufen gelten nicht, gespeicherter Zeitraum ist stets mid mit den maßgeblichen 28 Tagen dieser Stufe.",
     "emptyHistoryWarning": "Serenity-Verlauf ist leer: list_reco_history hat 0 Zeilen zurückgegeben (möglicherweise keine Historie mit Stil serenity/bottleneck in DB oder Backend-Befehlsfehler wurde stillschweigend ignoriert)",
     "timeBasis": "Zeitbasis: {{date}} · vorgeschlagenes Fenster ~{{days}} Tage (bis {{until}})"
   },
@@ -15115,6 +15060,8 @@
     "timeHorizonShort": "Kurzfristig",
     "timeHorizonMid": "Mittelfristig",
     "timeHorizonLong": "Langfristig",
+    "horizonSourceFormula": "Formel",
+    "horizonSourceModel": "Modellangabe",
     "horizonConflictTitle": "Horizont-Richtungskonflikt",
     "horizonConflictHint": "Unterschiedliche Zeithorizonte haben widersprüchliche Kauf-/Verkaufssignale. Details in jedem Horizont prüfen.",
     "horizonOverview": "Übersicht: ",
@@ -15346,7 +15293,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "Verschuldungsquote",
       "grossMarginLabel": "Bruttomarge",
-      "revenueGrowthLabel": "Umsatzwachstum"
+      "revenueGrowthLabel": "Umsatzwachstum",
+      "algorithmConclusion": "Algorithmisches Bewertungsergebnis",
+      "algorithmConclusionNote": "Lokal aus Rohdaten berechnet (Forward-DCF / Reverse-DCF / relative Bewertung). Die Spanne unten ist der DCF-Output dieses Algorithmus, keine LLM-Meinung",
+      "algorithmRangeBand": "Algorithmische DCF-Bewertungsspanne (konservativ-optimistisch)"
     },
     "workflow": {
       "analyst": {
@@ -15518,8 +15468,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "Strategiepakete"
+        "recommendation": "Recommendations"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -15596,6 +15545,7 @@
         "portfolioMgrAction": "Schwellenwert für Portfolio-Entscheidungen (portfolio-mgr)",
         "portfolioMgrFusion": "Faktor-Fusions-Gate (portfolio-mgr)",
         "portfolioMgrCost": "Handelskosten (portfolio-mgr)",
+        "portfolioMgrHorizon": "Haltezeit-Stufen (Stop-Loss / Take-Profit)",
         "portfolioMgrRisk": "Schwellenwert für Risikoklassifizierung (portfolio-mgr)",
         "simulation": "Monte-Carlo-Simulation",
         "refCodes": "Branchen-Referenzwert",
@@ -16546,6 +16496,7 @@
       "horizonShort": "Kurz (5 Tage)",
       "horizonMid": "Mittel (28 Tage)",
       "horizonLong": "Lang (90+ Tage)",
+      "horizonAuto": "Nach Hauptstufe",
       "horizonUnknown": "Unbekannter Horizont",
       "horizonStatusLabel": "Status: ",
       "horizonStatusMature": "Ausgereift",
@@ -17412,7 +17363,9 @@
       "unsupported": "Ohne Daten",
       "source": "Quelle",
       "extractFailed": "Belegextraktion fehlgeschlagen",
-      "matchConfidence": "Übereinstimmungskonfidenz"
+      "matchConfidence": "Übereinstimmungskonfidenz",
+      "notApplicable": "Nachweis-Audit nicht anwendbar (keine Entscheidung erzeugt)",
+      "notApplicableDetail": "Dieser Lauf hat keine Entscheidung erzeugt (action={{action}} ist der Sentinel für fehlende Daten, keine Schlussfolgerung); das Begründungsfeld enthält daher Fallback-Diagnose statt auditierbarer Analystennachweise. Die Stützungsrate ist in diesem Fall nicht definiert und wird nicht als 0 % angezeigt."
     },
     "charts": {
       "noSectorData": "Keine Sektorallokationsdaten",

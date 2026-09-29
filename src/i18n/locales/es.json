@@ -6520,62 +6520,6 @@
       "confirm-delete": "¿Eliminar esta tarea de recomendación?",
       "empty-description": "No hay tareas de recomendación programadas"
     },
-    "strategyPack": {
-      "title": "Gestión de paquetes de estrategia",
-      "searchPlaceholder": "Buscar por nombre, descripción o ID",
-      "empty": "Sin paquetes de estrategia",
-      "detailTitle": "Detalles del paquete de estrategia",
-      "editorTitle": "Editor de paquete de estrategia",
-      "editorIdLabel": "ID del paquete de estrategia (para guardar en el directorio de usuario)",
-      "editorYamlLabel": "Contenido YAML",
-      "editorYamlTip": "Defina el paquete de estrategia en formato YAML. Consulte los paquetes integrados para los campos.",
-      "editorYamlPlaceholder": "Ingrese el contenido YAML aquí...",
-      "confirmDelete": "¿Eliminar este paquete de estrategia de usuario?",
-      "yes": "Sí",
-      "no": "No",
-      "stat": {
-        "total": "Total de paquetes",
-        "builtin": "Paquetes integrados",
-        "user": "Paquetes de usuario"
-      },
-      "source": {
-        "builtin": "Integrado",
-        "user": "Usuario"
-      },
-      "column": {
-        "name": "Nombre",
-        "description": "Descripción",
-        "source": "Origen",
-        "strategies": "N.º de estrategias",
-        "minConfidence": "Confianza mín.",
-        "maxPicks": "Selecciones máx.",
-        "actions": "Acciones",
-        "style": "Estilo",
-        "period": "Periodo",
-        "enabled": "Activado",
-        "weight": "Ponderación"
-      },
-      "action": {
-        "detail": "Detalles",
-        "copy": "Copiar",
-        "refresh": "Actualizar",
-        "new": "Nuevo",
-        "validate": "Validar",
-        "save": "Guardar",
-        "cancel": "Cancelar",
-        "close": "Cerrar"
-      },
-      "period": {
-        "ultra_short": "Ultra corto",
-        "short": "Corto",
-        "mid": "Medio",
-        "long": "Largo"
-      },
-      "editorTemplate": {
-        "name": "Mi paquete de estrategia",
-        "description": "Paquete de estrategia personalizado"
-      }
-    },
     "globalShortcut": "Atajo global",
     "globalShortcutRegisterOk": "Atajos globales registrados: {{count}}",
     "globalShortcutRegisterPartial": "Registro de atajos globales: {{ok}} correctos, {{fail}} fallidos",
@@ -14713,6 +14657,7 @@
     "boolYes": "Sí",
     "boolNo": "No",
     "backendCallFailed": "Error en la llamada al backend",
+    "tierScopeHint": "Alcance del nivel: solo medio plazo (los catalizadores de cuello/beneficios se despliegan en semanas-meses); los niveles corto y muy corto no aplican, el periodo guardado es siempre mid con los 28 días autoritativos de ese nivel.",
     "emptyHistoryWarning": "El historial de Serenity está vacío: list_reco_history devolvió 0 filas (posiblemente no hay historial con estilo serenity/bottleneck en la BD o el error del comando backend se ignoró silenciosamente)",
     "timeBasis": "Base temporal: {{date}} · ventana sugerida ~{{days}} días (hasta {{until}})"
   },
@@ -15115,6 +15060,8 @@
     "timeHorizonShort": "Corto plazo",
     "timeHorizonMid": "Medio plazo",
     "timeHorizonLong": "Largo plazo",
+    "horizonSourceFormula": "fórmula",
+    "horizonSourceModel": "reportado por el modelo",
     "horizonConflictTitle": "Conflicto de dirección entre horizontes",
     "horizonConflictHint": "Diferentes horizontes temporales tienen señales de compra/venta contradictorias. Revise cada horizonte.",
     "horizonOverview": "Resumen: ",
@@ -15346,7 +15293,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "Ratio de deuda",
       "grossMarginLabel": "Margen bruto",
-      "revenueGrowthLabel": "Crecimiento de ingresos"
+      "revenueGrowthLabel": "Crecimiento de ingresos",
+      "algorithmConclusion": "Conclusión de valoración algorítmica",
+      "algorithmConclusionNote": "Calculado localmente a partir de datos brutos (DCF directo / DCF inverso / valoración relativa). El rango de abajo es la salida DCF de este algoritmo, no una opinión del LLM",
+      "algorithmRangeBand": "Rango de valoración DCF algorítmico (conservador-optimista)"
     },
     "workflow": {
       "analyst": {
@@ -15518,8 +15468,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "Paquetes de estrategia"
+        "recommendation": "Recommendations"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -15596,6 +15545,7 @@
         "portfolioMgrAction": "Umbral de decisión de cartera (portfolio-mgr)",
         "portfolioMgrFusion": "Puerta de fusión de factores (portfolio-mgr)",
         "portfolioMgrCost": "Coste de transacción (portfolio-mgr)",
+        "portfolioMgrHorizon": "Niveles de tenencia (stop-loss / take-profit)",
         "portfolioMgrRisk": "Umbral de clasificación de riesgo (portfolio-mgr)",
         "simulation": "Simulación Monte Carlo",
         "refCodes": "Referencia del sector",
@@ -16546,6 +16496,7 @@
       "horizonShort": "Corto (5 días)",
       "horizonMid": "Medio (28 días)",
       "horizonLong": "Largo (90+ días)",
+      "horizonAuto": "Según el nivel principal",
       "horizonUnknown": "Horizonte desconocido",
       "horizonStatusLabel": "Estado: ",
       "horizonStatusMature": "Madurado",
@@ -17412,7 +17363,9 @@
       "unsupported": "Sin datos",
       "source": "Fuente",
       "extractFailed": "Error al extraer evidencia",
-      "matchConfidence": "Confianza de coincidencia"
+      "matchConfidence": "Confianza de coincidencia",
+      "notApplicable": "Auditoría de citas de evidencia no aplicable (no se produjo ninguna decisión)",
+      "notApplicableDetail": "Esta ejecución no produjo decisión (action={{action}} es el centinela de datos ausentes, no una conclusión); el campo de motivación contiene un diagnóstico de degradación, sin evidencia auditable de analistas. Por ello la tasa de respaldo no está definida en este caso y no se muestra como 0 %."
     },
     "charts": {
       "noSectorData": "Sin datos de asignación sectorial",

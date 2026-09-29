@@ -17,6 +17,7 @@
 //! 3. **输出结构**:
 //!    - `EvidenceWeightReport`: 包含每个分析师的最终权重、决策方向、置信度、门控条件
 
+use axagent_harness::Period;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::debug;
@@ -242,6 +243,9 @@ pub struct EvidenceWeightReport {
 // ── 核心计算 ──
 
 /// 时间维度基础权重表 (与前端 ANALYST_TIME_HORIZON_WEIGHT 对应)
+///
+/// ⚠ 四档必须**逐档显式**：`mid` 曾靠 `_` 兜底命中，
+/// 新增档位或脏值都会静默套用中线权重（〇-B G4「退化即声明」）。
 fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
     let mut w = HashMap::new();
     match horizon {
@@ -293,8 +297,8 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("a-technical", 0.6);
             w.insert("a-market", 0.6);
         },
-        // mid (default)
-        _ => {
+        // 中线：四档中唯一接近「不加权」的基准档，显式列出不靠 `_` 兜底
+        "mid" => {
             w.insert("a-fundamentals", 1.2);
             w.insert("fundamental", 1.2);
             w.insert("value-investor", 1.2);
@@ -309,6 +313,11 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("a-news", 1.0);
             w.insert("a-hot-money", 0.9);
             w.insert("capital", 0.9);
+        },
+        // 未知周期：按中线基准，但**必须留可检痕迹**（日志/面板可区分声明与兜底）
+        _ => {
+            tracing::warn!("[evidence_weight] 未知持有周期 '{horizon}'，按中线基准加权");
+            return get_horizon_base_weights("mid");
         },
     }
     w
@@ -600,7 +609,10 @@ fn compute_evidence_consensus(analysts: &[AnalystWeight]) -> EvidenceConsensus {
 }
 
 /// 计算推荐仓位
-fn compute_recommended_position(
+///
+/// `pub(crate)`：单周期乘数的判据需要**绕过** HorizonLayer 的分析师权重
+/// （那会同时改变共识置信度，端到端比值就不是纯乘数），直测这一段算术。
+pub(crate) fn compute_recommended_position(
     consensus: &EvidenceConsensus,
     hold_gate: &HoldGateResult,
     horizon: &str,
@@ -617,13 +629,11 @@ fn compute_recommended_position(
         _ => 0.0,
     };
 
-    // 周期修正: 长线可给更高仓位
-    let horizon_mult = match horizon {
-        "ultra_short" => 0.6, // 超短线仓位轻
-        "short" => 0.8,
-        "long" => 1.2,
-        _ => 1.0, // mid
-    };
+    // 周期修正（〇-B v2：决策链仓位乘数的唯一权威源是 `Period::position_multiplier`，
+    //   见 `axagent_harness::holding_period`；`portfolio-mgr.rhai` 主决策消费**同一个**数字）。
+    //   旧实现在此处再抄一份 0.6/0.8/1.0/1.2 且用 `_ => 1.0` 把 mid 混进「未知兜底」——
+    //   两份数字一旦分叉，面板与决策就会各说各话。
+    let horizon_mult = horizon.parse::<Period>().unwrap_or(Period::Mid).position_multiplier();
 
     ((base_pct * horizon_mult * 100.0).round() / 100.0).clamp(0.0, 80.0)
 }
@@ -1027,5 +1037,56 @@ mod tests {
             money.final_weight,
             value.final_weight
         );
+    }
+
+    /// 〇-B v2 第 3 条（Phase 3）：决策链的**周期仓位乘数**逐档 = `Period::position_multiplier`。
+    ///
+    /// 为什么直测 `compute_recommended_position` 而不是端到端跑 `compute_evidence_weights`：
+    /// 换 horizon 时 HorizonLayer 的**分析师权重**也在变 ⇒ 共识置信度随之变 ⇒
+    /// 端到端仓位不是 mid 的整数倍（实测：ultra_short 得 0.689×mid 而非 0.6×）。
+    /// 乘数判据必须与权重判据分开，否则这道门测的是两者的乘积。
+    #[test]
+    fn recommended_position_scales_by_period_multiplier_only() {
+        let consensus = EvidenceConsensus {
+            bullish_score: 60.0,
+            bearish_score: 10.0,
+            neutral_score: 10.0,
+            total_weight: 80.0,
+            net_score: 50.0,
+            consensus: "bullish".into(),
+            confidence: 30.0, // 30 × 0.8 = 24% 基准 ⇒ ×1.2 = 28.8，远在 0-80 值域内
+        };
+        let gate = HoldGateResult {
+            hold_allowed: false,
+            reason: "test".into(),
+            technical_has_trend: true,
+            moneyflow_has_direction: true,
+            fundamental_has_catalyst: true,
+            suggested_action: "BUY".into(),
+        };
+        for (h, m) in [
+            ("ultra_short", Period::UltraShort.position_multiplier()),
+            ("short", Period::Short.position_multiplier()),
+            ("mid", Period::Mid.position_multiplier()),
+            ("long", Period::Long.position_multiplier()),
+        ] {
+            let got = compute_recommended_position(&consensus, &gate, h);
+            let expect = (24.0 * m * 100.0).round() / 100.0;
+            assert!((got - expect).abs() <= 0.001, "{h} 档应 {expect}，实得 {got}");
+        }
+        // 未知周期兜底 mid（与 get_horizon_base_weights 同一档语义）
+        let got = compute_recommended_position(&consensus, &gate, "medium_term");
+        assert!((got - 24.0).abs() <= 0.001, "未知周期应兜底 mid 基准 24，实得 {got}");
+    }
+
+    /// 乘数本身逐档显式且单调（防有人把 mid 重新塞回 `_` 兜底或改动档位序）。
+    #[test]
+    fn period_position_multiplier_tiers_are_ordered_and_explicit() {
+        let u = Period::UltraShort.position_multiplier();
+        let s = Period::Short.position_multiplier();
+        let m = Period::Mid.position_multiplier();
+        let l = Period::Long.position_multiplier();
+        assert!(u < s && s < m && m < l, "乘数应随周期单调递增: {u}/{s}/{m}/{l}");
+        assert_eq!((u, s, m, l), (0.6, 0.8, 1.0, 1.2));
     }
 }

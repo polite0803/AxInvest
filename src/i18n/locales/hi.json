@@ -6520,62 +6520,6 @@
       "confirm-delete": "इस सिफारिश कार्य को हटाएं?",
       "empty-description": "कोई शेड्यूल किए गए सिफारिश कार्य नहीं"
     },
-    "strategyPack": {
-      "title": "रणनीति पैक प्रबंधन",
-      "searchPlaceholder": "नाम, विवरण या ID द्वारा खोजें",
-      "empty": "कोई रणनीति पैक नहीं",
-      "detailTitle": "रणनीति पैक विवरण",
-      "editorTitle": "रणनीति पैक संपादक",
-      "editorIdLabel": "रणनीति पैक ID (उपयोगकर्ता निर्देशिका में सहेजने के लिए उपयोग)",
-      "editorYamlLabel": "YAML सामग्री",
-      "editorYamlTip": "YAML प्रारूप में रणनीति पैक परिभाषित करें। फ़ील्ड के लिए अंतर्निहित पैक देखें।",
-      "editorYamlPlaceholder": "यहां YAML सामग्री दर्ज करें...",
-      "confirmDelete": "इस उपयोगकर्ता रणनीति पैक को हटाएं?",
-      "yes": "हां",
-      "no": "नहीं",
-      "stat": {
-        "total": "कुल पैक",
-        "builtin": "अंतर्निहित पैक",
-        "user": "उपयोगकर्ता पैक"
-      },
-      "source": {
-        "builtin": "अंतर्निहित",
-        "user": "उपयोगकर्ता"
-      },
-      "column": {
-        "name": "नाम",
-        "description": "विवरण",
-        "source": "स्रोत",
-        "strategies": "रणनीतियों की संख्या",
-        "minConfidence": "न्यूनतम विश्वास",
-        "maxPicks": "अधिकतम चयन",
-        "actions": "कार्रवाइयां",
-        "style": "शैली",
-        "period": "अवधि",
-        "enabled": "सक्षम",
-        "weight": "भार"
-      },
-      "action": {
-        "detail": "विवरण",
-        "copy": "कॉपी",
-        "refresh": "रिफ्रेश",
-        "new": "नया",
-        "validate": "मान्य करें",
-        "save": "सहेजें",
-        "cancel": "रद्द करें",
-        "close": "बंद करें"
-      },
-      "period": {
-        "ultra_short": "अति अल्प",
-        "short": "अल्प",
-        "mid": "मध्यम",
-        "long": "दीर्घ"
-      },
-      "editorTemplate": {
-        "name": "मेरा रणनीति पैक",
-        "description": "कस्टम रणनीति पैक"
-      }
-    },
     "globalShortcut": "वैश्विक शॉर्टकट",
     "globalShortcutRegisterOk": "वैश्विक शॉर्टकट पंजीकृत: {{count}}",
     "globalShortcutRegisterPartial": "वैश्विक शॉर्टकट पंजीकरण: {{ok}} सफल, {{fail}} विफल",
@@ -14713,6 +14657,7 @@
     "boolYes": "हाँ",
     "boolNo": "नहीं",
     "backendCallFailed": "बैकएंड कॉल विफल",
+    "tierScopeHint": "स्तर दायरा: केवल मध्यम अवधि (बॉटलनेक/नीति/अर्ज उत्प्रेरक सप्ताह-महीने में खुलते हैं); अल्प और अत्यल्प स्तर लागू नहीं, सहेजा गया period सदैव mid है और उस स्तर की प्रामाणिक 28 दिनधारणा लागू।",
     "emptyHistoryWarning": "Serenity इतिहास खाली है: list_reco_history ने 0 पंक्तियाँ लौटाईं (संभव है कि DB में serenity/bottleneck शैली का कोई इतिहास न हो, या बैकएंड कमांड विफलता को चुपचाप अनदेखा कर दिया गया हो)",
     "timeBasis": "समय आधार: {{date}} · सुझाई गई अवधि ~{{days}} दिन ({{until}} तक)"
   },
@@ -15115,6 +15060,8 @@
     "timeHorizonShort": "अल्पकालिक",
     "timeHorizonMid": "मध्यमकालिक",
     "timeHorizonLong": "दीर्घकालिक",
+    "horizonSourceFormula": "सूत्र",
+    "horizonSourceModel": "मॉडल रिपोर्ट",
     "horizonConflictTitle": "समय सीमा दिशा विरोधाभास",
     "horizonConflictHint": "विभिन्न समय सीमाओं में खरीद/बिक्री के विरोधाभासी संकेत हैं। प्रत्येक सीमा का विवरण देखें।",
     "horizonOverview": "अवलोकन: ",
@@ -15346,7 +15293,10 @@
       "roeLabel": "ROE",
       "debtRatioLabel": "ऋण अनुपात",
       "grossMarginLabel": "सकल मार्जिन",
-      "revenueGrowthLabel": "राजस्व वृद्धि"
+      "revenueGrowthLabel": "राजस्व वृद्धि",
+      "algorithmConclusion": "एल्गोरिदम मूल्यांकन निष्कर्ष",
+      "algorithmConclusionNote": "स्थानीय एल्गोरिदम द्वारा कच्चे डेटा से गणना (फ़ॉरवर्ड DCF / रिवर्स DCF / सापेक्ष मूल्यांकन)। नीचे दी गई मूल्यांकन रेंज इसी एल्गोरिदम का DCF आउटपुट है, LLM की राय नहीं",
+      "algorithmRangeBand": "एल्गोरिदमिक DCF मूल्यांकन रेंज (रूढ़िवादी-आशावादी)"
     },
     "workflow": {
       "analyst": {
@@ -15518,8 +15468,7 @@
         "profiles": "Profiles",
         "data": "Data",
         "params": "Params",
-        "recommendation": "Recommendations",
-        "strategyPack": "रणनीति पैक"
+        "recommendation": "Recommendations"
       },
       "check": "Check",
       "loadFailed": "Failed to load config",
@@ -15596,6 +15545,7 @@
         "portfolioMgrAction": "पोर्टफ़ोलियो निर्णय सीमा (portfolio-mgr)",
         "portfolioMgrFusion": "कारक संलयन गेट (portfolio-mgr)",
         "portfolioMgrCost": "ट्रेडिंग लागत (portfolio-mgr)",
+        "portfolioMgrHorizon": "धारण स्तर (स्टॉप-लॉस / टिक-प्रॉफिट)",
         "portfolioMgrRisk": "जोखिम वर्गीकरण सीमा (portfolio-mgr)",
         "simulation": "मोंटे कार्लो सिमुलेशन",
         "refCodes": "उद्योग संदर्भ बेंचमार्क",
@@ -16546,6 +16496,7 @@
       "horizonShort": "शॉर्ट (5 दिन)",
       "horizonMid": "मिड (28 दिन)",
       "horizonLong": "लॉन्ग (90+ दिन)",
+      "horizonAuto": "मुख्य स्तर अनुसार",
       "horizonUnknown": "अज्ञात अवधि",
       "horizonStatusLabel": "स्थिति: ",
       "horizonStatusMature": "परिपक्व",
@@ -17412,7 +17363,9 @@
       "unsupported": "डेटा रहित",
       "source": "स्रोत",
       "extractFailed": "साक्ष्य निष्कर्षण विफल",
-      "matchConfidence": "मिलान विश्वास स्तर"
+      "matchConfidence": "मिलान विश्वास स्तर",
+      "notApplicable": "प्रमाण उद्धरण ऑडिट लागू नहीं (इस रन में निर्णय उत्पन्न नहीं हुआ)",
+      "notApplicableDetail": "इस रन में कोई निर्णय उत्पन्न नहीं हुआ (action={{action}} डेटा-अनुपलब्धता का sentinel है, निष्कर्ष नहीं); अतः कारण फ़ील्ड में फ़ॉलबैक निदान जानकारी है, ऑडिट-योग्य विश्लेषक प्रमाण नहीं। इसलिए समर्थन दर यहाँ परिभाषित नहीं है और इसे 0% के रूप में नहीं दिखाया जाता।"
     },
     "charts": {
       "noSectorData": "कोई क्षेत्र डेटा नहीं",

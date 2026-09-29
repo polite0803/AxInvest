@@ -37,7 +37,7 @@ const ROW_ALL_MATURE = {
   horizonResults: {
     ultra_short: {
       status: "mature",
-      expectedHoldingDays: 3,
+      expectedHoldingDays: 2, // 权威值 2（Period::UltraShort），见 PLAN-horizon-four-cycle-closure.md Phase 0
       actualHoldingDays: 3,
       decision: { action: "ULTRA_BUY", confidence: 0.7, positionPct: 0.1 },
       market: { returnPct: 3.5, alphaPct: 1.2 },
@@ -88,7 +88,7 @@ const ROW_PARTIAL = {
   horizonResults: {
     ultra_short: {
       status: "mature",
-      expectedHoldingDays: 3,
+      expectedHoldingDays: 2, // 权威值 2（Period::UltraShort），见 PLAN-horizon-four-cycle-closure.md Phase 0
       actualHoldingDays: 3,
       decision: { action: "PARTIAL_ULTRA_BUY", confidence: 0.7 },
       market: { returnPct: 4.25 },

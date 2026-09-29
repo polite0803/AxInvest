@@ -1,5 +1,13 @@
 import { invoke } from "@/lib/invoke";
-import { FAST_TEMPLATE_ID, getActionTagStyle, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import {
+  FAST_TEMPLATE_ID,
+  getActionTagStyle,
+  getActionTKey,
+  HORIZON_T_SUFFIX,
+  horizonSourceLabelKey,
+  readHorizonActions,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import { App, Button, Dropdown, Input, Tag } from "antd";
 import { Check, History, Pencil, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +39,13 @@ interface AnalysisRecord {
    * `undefined` / `null` = 未知（本列引入前的记录或非模板产出）—— 不打标识。
    */
   templateId?: string | null;
+  /**
+   * 主结论所属档位（`ultra_short` / `short` / `mid` / `long`）；null = 本列引入前的记录，
+   * 按「未知周期」显示，不得推断成某档。
+   */
+  decisionTimeHorizon?: string | null;
+  /** 档位来源：`formula` = 本地公式定档；`model` = 采信模型自报；null = 未知。 */
+  decisionHorizonSource?: string | null;
 }
 
 /** 个股分析页搜索框下方的历史分析快捷按钮 */
@@ -330,6 +345,25 @@ export function AnalysisHistoryButton() {
                                 </Tag>
                               );
                             })()}
+                            <Tag
+                              style={{
+                                margin: 0,
+                                fontSize: 10,
+                                lineHeight: "16px",
+                                padding: "0 4px",
+                                border: "1px solid var(--muted, #888)",
+                                color: "var(--muted, #888)",
+                                background: "transparent",
+                              }}
+                            >
+                              {r.decisionTimeHorizon && HORIZON_T_SUFFIX[r.decisionTimeHorizon]
+                                ? t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[r.decisionTimeHorizon]}`)
+                                : t("stockAnalysis.reflection.horizonUnknown")}
+                              {(() => {
+                                const srcKey = horizonSourceLabelKey(r.decisionHorizonSource);
+                                return srcKey ? ` · ${t(srcKey)}` : "";
+                              })()}
+                            </Tag>
                           </div>
                           {timeLabel(r) && (
                             <div style={{ fontSize: 10, color: "var(--muted, #888)", lineHeight: 1.2 }}>
@@ -351,6 +385,36 @@ export function AnalysisHistoryButton() {
                             return (
                               <div style={{ fontSize: 10, color: "var(--muted, #888)", lineHeight: 1.2 }}>
                                 {parts.join(" · ")}
+                              </div>
+                            );
+                          })()}
+
+                          {
+                            /* 四档 Action（2026-09-29）：一次分析产四档决策，历史行原先只显示主档
+                            那条 ⇒ 四档明细虽在 decisionJson 里下发却无人渲染。旧记录无该结构时
+                            不渲染（缺席不伪造）。 */
+                          }
+                          {(() => {
+                            const tiers = readHorizonActions(r.decisionJson);
+                            if (tiers.length === 0) { return null; }
+                            return (
+                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                {tiers.map((x) => (
+                                  <Tag
+                                    key={x.key}
+                                    style={{
+                                      ...getActionTagStyle(x.action),
+                                      margin: 0,
+                                      fontSize: 10,
+                                      lineHeight: "14px",
+                                      padding: "0 3px",
+                                    }}
+                                  >
+                                    {t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[x.key]}`)}
+                                    {": "}
+                                    {t(getActionTKey(x.action))}
+                                  </Tag>
+                                ))}
                               </div>
                             );
                           })()}

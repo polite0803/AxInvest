@@ -633,9 +633,9 @@ fn extract_contract_table(pm: &str) -> Vec<ContractRow> {
 ///   契约表「声明 ↔ 实现」，且负对照测试逐条证明每条规则真的会告警。
 ///
 /// ★ 裁决记录（原登记理由是「无法判定哪侧权威」，取证后**被推翻**）：
-///   契约表 `portfolio-mgr.rhai:227` 原写「回测 IC 权重（fallback 0.08）」，代码 `:1037`
+///   契约表（`portfolio-mgr.rhai` 顶部「权重政策契约表」）原写「回测 IC 权重（fallback 0.08）」，代码 `let f12_default`
 ///   是 `let f12_default = 0.10;`。三处独立证据 + 一条机制论证一致指向 **0.10 才是真值**：
-///     · `:1037` `f12_default`；`:1357` `max_weight` 第 11 项（**硬编码字面量，不引用变量**）；
+///     · `let f12_default`；`let max_weight` 第 11 项（**硬编码字面量，不引用变量**）；
 ///       `:1339` 注释「v19: + f12=0.10 → 1.49」（复算该行 11 项和 = 1.49 ✓）
 ///     · `momentum` 不在 regime-weights 的 `factor_names` 内，且 `factor_weights` 的来源
 ///       `factor_backtest.factors` 是**占位空 map**（`astock-data/src/mcp_tools.rs:1254`
@@ -643,7 +643,7 @@ fn extract_contract_table(pm: &str) -> Vec<ContractRow> {
 ///       ⇒ **0.10 是 f12 权重的唯一实际取值来源**（历史全部运行皆用 0.10）。
 ///   ⇒ 改**契约表**（注释）即闭口，**零运行时影响**。原注释那句「改任一方向都会改变
 ///     posterior 权重」是**错的** —— 只有改**代码**才动 posterior；且 `max_weight` 是手抄
-///     字面量，只改 `:1037` 一处会让分子/分母失配（比例 0.9866 ⇒ 系统性偏低 1.34%），
+///     字面量，只改 `let f12_default` 一处会让分子/分母失配（比例 0.9866 ⇒ 系统性偏低 1.34%），
 ///     正是 `:1344-1350` 警告的 `weights_collapsed` 边界误触发形态（同 V66）。
 ///   ⇒ 本表已清空（`portfolio-mgr.rhai:227` 已改为 0.10）。**机制保留**：未来若再命中无法
 ///     即时裁决的不一致，仍需此槽位；配套断言已改为「非空才要求留痕」。
@@ -1051,4 +1051,38 @@ fn portfolio_risk_gate_syncs_derived_fields() {
             "变异「{name}」未被判据检出 —— 该条判据没有区分力"
         );
     }
+}
+
+/// Phase 7 语言约束门：**`fn` 体内不得读注入的工作流变量**（点名禁止 + 事故自证）。
+///
+/// 实证（2026-09-28 我自己造成）：把 `horizon_const` 写成 `fn` 去读 `horizon_consts_json`，
+/// 本文件的纯 `compile` 门**全绿**，真执行才 `Variable not found`。同台实验定性：
+///   `fn` + const scope + 裸 `compile` + `eval_ast_with_scope` ⇒ Err（生产正是这条路径）
+///   闭包 + 同三段式 ⇒ Ok ⇒ **闭包是唯一在任何编译形态下都稳的形态**
+/// 通用静态扫描不做的理由（同为实测结论）：`reflection-comparator.rhai` 等脚本的
+/// `fn main(trader_action, …)` **本来就是靠参数接收注入值**，纯文本判据会大量假阳性
+/// （还需剥注释/字符串、并解析外层作用域）⇒ 宁可只锁已知复发点，也不装一道满假阳性的门。
+#[test]
+fn fn_bodies_do_not_read_injected_workflow_vars() {
+    let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
+    let risk_gate = include_str!("../../../src/commands/portfolio-risk-gate.rhai");
+    for (name, src) in [("portfolio-mgr.rhai", pm), ("portfolio-risk-gate.rhai", risk_gate)] {
+        assert!(
+            !src.contains("fn horizon_const"),
+            "{name}：horizon_const 必须是闭包（`let horizon_const = |h, field| {{…}}`），fn 体读不到注入变量"
+        );
+        assert!(
+            !src.contains("fn present(") || src.contains("fn present(x)"),
+            "{name}：present 只操作自身参数，不得改成读 scope 变量的形态"
+        );
+    }
+    // 闭包必须按 `.call(...)` 调用：按名调用在本仓 Rhai 下恒 Function not found（同日实测）。
+    let closure_decl = "let horizon_const = |h, field| {";
+    assert!(pm.contains(closure_decl), "portfolio-mgr.rhai 应保留 horizon_const 闭包定义");
+    let decl_at = pm.find(closure_decl).expect("闭包定义应可定位");
+    let usage = &pm[decl_at..];
+    let by_name = usage.matches("horizon_const(").count();
+    let by_call = usage.matches("horizon_const.call(").count();
+    assert_eq!(by_name, 0, "闭包不得按名调用（发现 {by_name} 处），一律 horizon_const.call(...)");
+    assert!(by_call >= 2, "days_for 与乘数两处都应经 horizon_const.call 取值，实得 {by_call}");
 }

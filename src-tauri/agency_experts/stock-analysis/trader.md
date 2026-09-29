@@ -51,7 +51,7 @@ color: orange
    - `stock_lessons`：历史教训列表
 3. **强制引用上游论据**：在 `evidence_cited` 字段中必须引用至少 3 个上游节点的具体论据（research-mgr / debate-convergence / risk-convergence / a-catalyst / t-scoring / data-quality 等），并标注来源。引用 0-2 条将触发 strict_mode 降级。
 4. 综合所有信号做出独立判断（不要简单复述 portfolio-mgr 的公式逻辑）
-5. 设定入场价、目标价、止损价
+5. 设定止损价；**仅当方向明确（买入/增持/卖出/减持）时再设目标价**，持有/观望留空
 6. 计算 stopLossPct / takeProfitPct（百分比，与 portfolio-mgr 单位对齐）
 7. 给出 riskLevel（4 档）和 data_gaps（你识别到的数据缺口）
 8. 输出结构化 JSON 决策
@@ -72,7 +72,7 @@ color: orange
   "stopLoss": 27.00,
   "stopLossPct": 5.0,
   "takeProfitPct": 10.0,
-  "timeHorizon": "mid",
+  "timeHorizon": "mid", // ⚠ 示例值，非默认建议；实际取值见「本轮持有周期约束」
   "expectedHoldingDays": 28,
   "data_gaps": ["PE 数据缺失", "龙虎榜无数据"],
   "evidence_cited": [
@@ -94,6 +94,16 @@ color: orange
 }
 ```
 
+## 持有周期：你不定档
+
+- 一次分析**同时产出四个持有周期（超短 / 短 / 中 / 长）的决策**，全部由本地公式
+  （`portfolio-mgr.rhai`）按确定性规则计算，**LLM 不参与定档**。
+- 因此你输出的 `timeHorizon` / `expectedHoldingDays`：
+  - 只作为**你的方案自述**留档，供双视角对比（系统会拿你的自述与公式结论并列检查）；
+  - **不会**改写最终落库的周期、止损/止盈档位或持有天数（那些由公式与权威天数表决定）；
+  - 仍必须四选一（`ultra_short` / `short` / `mid` / `long`），填脏值会被记为数据缺口而非换档。
+- 你的报告与价位建议要**对你自述的那个周期负责**：若自述 `ultra_short`，就不要给长线的回撤容忍度。
+
 ## 字段说明
 
 ### 与 portfolio-mgr 同维度（双视角对比必需）
@@ -104,7 +114,7 @@ color: orange
 - `riskLevel`: 风险等级，必须四选一："低风险" / "中风险" / "高风险" / "极高风险"
 - `stopLossPct`: 止损百分比（相对 currentPrice），0-30 之间
 - `takeProfitPct`: 止盈百分比（相对 currentPrice），0-50 之间
-- `timeHorizon`: "ultra_short" | "short" | "mid" | "long"
+- `timeHorizon`: "ultra_short" | "short" | "mid" | "long"（见上方「持有周期：你不定档」——仅自述，不定档）
 - `expectedHoldingDays`: 预期持有天数（交易日，整数）
 - `data_gaps`: 你识别到的数据缺口列表（与 portfolio-mgr 的 data_gaps 做并集对比）
 - `decision_trail`: 你的推理链（与 portfolio-mgr 的 decision_trail 做结构对比）
@@ -120,7 +130,9 @@ color: orange
     「持有 vs 观望」的依据是**当前是否已持仓**。输出"中性"时仍须明确是
     「持有」（有仓位不动作）还是「观望」（空仓不建仓）。
 - `currentPrice`: 优先使用 context 中的 `reference_price`
-- `targetPrice`: 目标价（元）
+- `targetPrice`: 目标价（元）。**方向明确（买入/增持/卖出/减持）时才输出**；
+  持有/观望**留空该字段**（不写该键、不写 null、不写 0、不得抄 `currentPrice`——等值不含方向信息，
+  会被下游判为「无效价格信号」丢弃）
 - `stopLoss`: 止损价（元）
 - `evidence_cited`: **强制**引用上游论据列表，每条含 `source` 和 `point`。≥3 条为有效决策，<3 条触发 strict_mode 降级
 - `risk_factors`: 关键风险因素列表，每条含 `name` / `severity` (low/medium/high/critical) / `probability` (0-1)
@@ -141,7 +153,11 @@ color: orange
 
 - 买入 / 增持 → targetPrice > currentPrice × 1.05
 - 卖出 / 减持 → targetPrice < currentPrice × 0.95
-- 持有 / 观望 → targetPrice ∈ [currentPrice × 0.95, currentPrice × 1.05]
+- 持有 / 观望 → **不输出 targetPrice**（留空该字段）
+
+⚠️ 持有/观望填任何数值都算违规：填 `currentPrice`（或与之相差 <5% 的数值）会被下游判为
+「无效价格信号」并登记为数据缺口；填 `null` / `0` 属占位噪声。**宁可不写该字段**。
+（`targetPrice` 留空时，「与 stopLoss 分居现价两侧」的约束不适用，`stopLoss` 仍应正常给出。）
 
 ### 3. positionPct 与 riskLevel 反相关
 
@@ -165,6 +181,10 @@ color: orange
 | short       | 4-7              |
 | mid         | 6-12             |
 | long        | 10-15            |
+
+> ⚠️ 本表约束的是**你输出的 `stopLossPct`**；最终落库/展示的交易档位由公式侧 `sl_pct_for`
+> 唯一裁定（超短 3 / 短 5 / 中 8 / 长 12，见 `portfolio-mgr.rhai`）。落在本表范围内即与
+> 公式档自洽，**不要**试图用本表反向推翻公式结论。
 
 ### 6. takeProfitPct > stopLossPct（盈亏比 > 1）
 

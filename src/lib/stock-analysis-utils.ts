@@ -1347,6 +1347,24 @@ export const HORIZON_T_SUFFIX: Readonly<Record<string, string>> = {
   long: "Long",
 };
 
+/**
+ * `decisionsByHorizon` 的键是 camelCase，而 i18n 后缀表按 snake_case 建模
+ * （`stock_reflections.horizon_results_json`、命中率的 `byHorizon` 都用 snake）⇒
+ * 同一档位两套键名并存是既成事实，互转只在此单点做一次。
+ */
+export const HORIZON_CAMEL_TO_SNAKE: Readonly<Record<string, string>> = {
+  ultraShort: "ultra_short",
+  short: "short",
+  mid: "mid",
+  long: "long",
+};
+
+/** 任意形态档名（camel 或 snake）→ i18n 后缀；认不出 → null（调用方给原始键，不得瞎猜档位）。 */
+export function horizonSuffix(key: string): string | null {
+  const snake = HORIZON_CAMEL_TO_SNAKE[key] ?? key;
+  return HORIZON_T_SUFFIX[snake] ?? null;
+}
+
 /** 主档来源标签：`formula` = 本地公式定档，`model` = 采信模型自报（历史形态）。 */
 export function horizonSourceLabelKey(source?: string | null): string | null {
   if (source === "formula") { return "stockAnalysis.horizonSourceFormula"; }

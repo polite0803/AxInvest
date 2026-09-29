@@ -1,11 +1,13 @@
 import { invoke } from "@/lib/invoke";
+import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import type { BacktestComparisonResponse, StrategyStats } from "@/types/stock-analysis";
 import { Card, Empty, Segmented, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const STYLE_KEYS = ["trend", "value", "capital", "reversion"] as const;
-const PERIOD_KEYS = ["short", "mid", "long"] as const;
+/** 四档全枚举。此前缺 `ultra_short` ⇒ 该档的回测统计在矩阵里静默不存在，用户读不出是「没这档」还是「这档没问题」。 */
+const PERIOD_KEYS = ["ultra_short", "short", "mid", "long"] as const;
 
 /** 色标辅助 */
 function rateColor(rate: number): string {
@@ -121,11 +123,14 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
             <th style={{ padding: "8px 10px", textAlign: "left", fontWeight: 500, width: 100 }}>
               {t("stockAnalysis.backtest.colStyle")}
             </th>
-            {PERIOD_KEYS.map((p) => (
-              <th key={p} style={{ padding: "8px 10px", textAlign: "center", fontWeight: 500 }}>
-                {t(`stockAnalysis.recommendation.period${p.charAt(0).toUpperCase() + p.slice(1)}`)}
-              </th>
-            ))}
+            {PERIOD_KEYS.map((p) => {
+              const suffix = horizonSuffix(p);
+              return (
+                <th key={p} style={{ padding: "8px 10px", textAlign: "center", fontWeight: 500 }}>
+                  {suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : p}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>

@@ -3,6 +3,7 @@
  * 输入:推荐响应 { period, picks: { style: Pick[] } }
  * 输出:Top 3 最高信心度股票 + 风格标签
  */
+import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -52,19 +53,31 @@ function normalize(data: CompactRecommendationProps["data"]): RecoResponseShape 
 export function CompactRecommendation({ data }: CompactRecommendationProps) {
   const { t } = useTranslation();
   const response = useMemo(() => normalize(data), [data]);
-  const picks = useMemo(() => {
-    if (!response.picks) { return []; }
+  const { picks, hiddenSynthetic } = useMemo(() => {
     const all: RecoPick[] = [];
-    for (const arr of Object.values(response.picks)) {
+    for (const arr of Object.values(response.picks ?? {})) {
       if (Array.isArray(arr)) { all.push(...arr); }
     }
-    return all.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0)).slice(0, 3);
+    // 与主面板同一口径：兜底合成票不进列表（此前这里没过滤，占位票可进 Top3 且看起来正常）
+    const real = all.filter((p) => !p.synthetic);
+    return {
+      picks: real
+        .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+        .slice(0, 3),
+      hiddenSynthetic: all.length - real.length,
+    };
   }, [response]);
+  // 认不出的档名返回 null ⇒ 原样显示键名。旧的三元只判 short/mid，else 落「长线」，
+  // 把 ultra_short 显示成长线是造假，不是简化。
+  const periodSuffix = response.period ? horizonSuffix(response.period) : null;
 
   if (picks.length === 0) {
     return (
       <div className="text-[12px] italic" style={{ color: "var(--muted)" }}>
-        {t("workflow.aiPanel.noRecommendations")}
+        {/* 隐藏了兜底候选就必须报数量：「暂无推荐」和「只有兜底候选」是两件事 */}
+        {hiddenSynthetic > 0
+          ? t("stockAnalysis.recommendation.dataQualitySummary", { real: 0, synthetic: hiddenSynthetic })
+          : t("workflow.aiPanel.noRecommendations")}
       </div>
     );
   }
@@ -75,11 +88,7 @@ export function CompactRecommendation({ data }: CompactRecommendationProps) {
         <span style={{ color: "var(--muted)" }}>Top {picks.length}</span>
         {response.period && (
           <span style={{ color: "var(--muted)" }}>
-            {response.period === "short"
-              ? t("stockAnalysis.period.short")
-              : response.period === "mid"
-              ? t("stockAnalysis.period.mid")
-              : t("stockAnalysis.period.long")}
+            {periodSuffix ? t(`stockAnalysis.timeHorizon${periodSuffix}`) : response.period}
           </span>
         )}
       </div>

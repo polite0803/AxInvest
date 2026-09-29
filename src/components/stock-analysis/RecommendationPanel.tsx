@@ -2,7 +2,13 @@ import { List } from "@/components/common/AntdList";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { useStockJump } from "@/hooks/useStockJump";
 import { invoke } from "@/lib/invoke";
-import { actionToDirection, getActionColor, getActionTKey, resolveDisplayAction } from "@/lib/stock-analysis-utils";
+import {
+  actionToDirection,
+  getActionColor,
+  getActionTKey,
+  horizonSuffix,
+  resolveDisplayAction,
+} from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type {
@@ -40,6 +46,8 @@ const noop = () => {};
 // 这里不再保留本地 panel-specific 富化类型。
 
 const STYLE_KEYS: StyleKey[] = ["trend", "value", "capital", "reversion", "watchlist", "serenity"];
+/** 档位顺序：徽章默认只显示当前档，Tooltip 按本表逐档列出（不合并、不平均）。 */
+const PERIOD_ORDER: PeriodKey[] = ["ultra_short", "short", "mid", "long"];
 const STYLE_COLOR: Record<StyleKey, string> = {
   trend: "blue",
   value: "gold",
@@ -76,9 +84,9 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
   const [isCached, setIsCached] = useState(false);
   // P0-1: 荐股面板关联历史分析数据
   const [latestAnalyses, setLatestAnalyses] = useState<Record<string, LatestAnalysisSummary | null>>({});
-  // P0-2: 策略回测统计（每个风格的 win rate + Sharpe）
+  // P0-2: 策略回测统计 —— 逐 (style, period) 保留，不在前端合并档位
   const [strategyStats, setStrategyStats] = useState<
-    Record<string, { winRate: number; sharpe: number | null; signalCount: number }> | null
+    Record<string, Record<string, { winRate: number; sharpe: number | null; signalCount: number }>> | null
   >(null);
   const [strategyStatsLoading, setStrategyStatsLoading] = useState(false);
 
@@ -94,26 +102,22 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
       setStrategyStatsLoading(true);
       const result = await invoke<BacktestComparisonResponse>("backtest_reco_strategies");
       if (!result) { return; }
-      // 按 style 聚合所有 period 的统计
-      const byStyle: Record<string, { winRates: number[]; sharpes: number[]; signals: number }> = {};
+      // 逐 (style, period) 原样保留。旧实现把四档胜率做**算术平均**、信号数直接相加，
+      // 而后端 `StrategyStats` 本就带 period ⇒ 平均出来的数既不是任何一档、也不是按
+      // 信号数加权的可信总体，等于主动抹掉周期维度。
+      const byStylePeriod: Record<
+        string,
+        Record<string, { winRate: number; sharpe: number | null; signalCount: number }>
+      > = {};
       for (const [, s] of Object.entries(result.positive.strategies)) {
-        const style = s.style;
-        if (!byStyle[style]) { byStyle[style] = { winRates: [], sharpes: [], signals: 0 }; }
-        byStyle[style].winRates.push(s.winRatePct);
-        if (s.sharpeRatio != null) { byStyle[style].sharpes.push(s.sharpeRatio); }
-        byStyle[style].signals += s.totalSignals;
-      }
-      const agg: Record<string, { winRate: number; sharpe: number | null; signalCount: number }> = {};
-      for (const [style, v] of Object.entries(byStyle)) {
-        const avgWr = v.winRates.reduce((a, b) => a + b, 0) / v.winRates.length;
-        const avgSh = v.sharpes.length > 0 ? v.sharpes.reduce((a, b) => a + b, 0) / v.sharpes.length : null;
-        agg[style] = {
-          winRate: Math.round(avgWr * 10) / 10,
-          sharpe: avgSh != null ? Math.round(avgSh * 100) / 100 : null,
-          signalCount: v.signals,
+        if (!byStylePeriod[s.style]) { byStylePeriod[s.style] = {}; }
+        byStylePeriod[s.style][s.period] = {
+          winRate: Math.round(s.winRatePct * 10) / 10,
+          sharpe: s.sharpeRatio != null ? Math.round(s.sharpeRatio * 100) / 100 : null,
+          signalCount: s.totalSignals,
         };
       }
-      setStrategyStats(agg);
+      setStrategyStats(byStylePeriod);
     } catch {
       // 回测失败时静默，不打扰用户
       backtestTriggeredRef.current = false;
@@ -330,12 +334,13 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
     [data],
   );
 
-  const periodItems = [
-    { key: "ultra_short", label: t("stockAnalysis.recommendation.periodUltraShort") },
-    { key: "short", label: t("stockAnalysis.recommendation.periodShort") },
-    { key: "mid", label: t("stockAnalysis.recommendation.periodMid") },
-    { key: "long", label: t("stockAnalysis.recommendation.periodLong") },
-  ];
+  // 档位 Tab 显示名与徽章/回测矩阵同一套键（`stockAnalysis.timeHorizon*`）。
+  // 此前本面板 Tab 用第三套键 `recommendation.period*`（「短期」），同屏两处对同一档
+  // 各说一套措辞；认不出的档名原样显示键名，不猜档。
+  const periodItems = PERIOD_ORDER.map((pKey) => {
+    const suffix = horizonSuffix(pKey);
+    return { key: pKey, label: suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : pKey };
+  });
 
   const isReplay = anchorMode === "replay" && asOfDate !== null;
 
@@ -459,7 +464,11 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
           />
         )}
 
-        {/* B15: 降级风格提示 —— 与 disabled 不同,degraded 是"可用但效果减弱",用橙色 info 区分 */}
+        {
+          /* B15: 降级风格提示 —— 与 disabled 不同,degraded 是"可用但效果减弱",用橙色 info 区分。
+            后端逐风格的 `degradedReasons` 归因文本此前从未被消费（只列风格名），
+            用户读不到「为什么这个风格在这个截止日降级」。 */
+        }
         {data && hasDegraded && asOfDate && (
           <Alert
             type="warning"
@@ -475,6 +484,20 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                 })}
               </span>
             }
+            description={Array.from(degradedStyleSet)
+                .filter((s) => data.degradedReasons?.[s])
+                .length > 0
+              ? (
+                <span className="text-[10px]">
+                  {Array.from(degradedStyleSet)
+                    .filter((s) => data.degradedReasons?.[s])
+                    .map((s) =>
+                      `${t(`stockAnalysis.recommendation.style${capitalize(s)}`)}：${data.degradedReasons?.[s]}`
+                    )
+                    .join("；")}
+                </span>
+              )
+              : undefined}
           />
         )}
 
@@ -541,6 +564,8 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                 // 且未来若提供「显示兜底候选」开关即可直接复用）。
                 const picks = (data?.picks?.[style])?.filter(p => !p.synthetic) ?? [];
                 const hiddenSynthetic = dataQuality.byStyle[style]?.synthetic ?? 0;
+                // 徽章只取**当前档**该风格的统计；其余档在 Tooltip 里逐档列出
+                const styleStats = strategyStats?.[style]?.[period];
                 const isDisabled = disabledStyleSet.has(style);
                 const isDegraded = degradedStyleSet.has(style);
                 // P2-3: when a style is disabled, still show the section (expandable)
@@ -553,37 +578,60 @@ export function RecommendationPanel({ onOpenDataSourceSettings }: Recommendation
                         {t(`stockAnalysis.recommendation.style${capitalize(style)}`)}
                       </Tag>
                       {/* P0-2: 策略回测徽章 */}
-                      {!strategyStatsLoading && strategyStats?.[style] && (
+                      {!strategyStatsLoading && styleStats && (
                         <>
-                          <Tag
-                            className="m-0 text-[10px] leading-4"
-                            color={strategyStats[style].winRate >= 55
-                              ? "green"
-                              : strategyStats[style].winRate >= 45
-                              ? "orange"
-                              : "red"}
+                          <Tooltip
+                            title={
+                              <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+                                {PERIOD_ORDER.map((pKey) => {
+                                  const s = strategyStats?.[style]?.[pKey];
+                                  const suffix = horizonSuffix(pKey);
+                                  return (
+                                    <div key={pKey}>
+                                      {`${suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : pKey}: ${
+                                        s ? `${s.winRate}% / ${s.signalCount}` : "—"
+                                      }`}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            }
                           >
-                            {`${strategyStats[style].winRate}%`}
-                          </Tag>
-                          {strategyStats[style].sharpe != null && (
                             <Tag
                               className="m-0 text-[10px] leading-4"
-                              color={strategyStats[style].sharpe! >= 1
+                              color={styleStats.winRate >= 55
                                 ? "green"
-                                : strategyStats[style].sharpe! >= 0.5
+                                : styleStats.winRate >= 45
                                 ? "orange"
                                 : "red"}
                             >
-                              {`S ${strategyStats[style].sharpe!.toFixed(1)}`}
+                              {`${styleStats.winRate}%`}
+                            </Tag>
+                          </Tooltip>
+                          {styleStats.sharpe != null && (
+                            <Tag
+                              className="m-0 text-[10px] leading-4"
+                              color={styleStats.sharpe >= 1
+                                ? "green"
+                                : styleStats.sharpe >= 0.5
+                                ? "orange"
+                                : "red"}
+                            >
+                              {`S ${styleStats.sharpe.toFixed(1)}`}
                             </Tag>
                           )}
                         </>
                       )}
                       {/* B15: 降级风格在 label 处加 ⛔ 徽标(橙色),区别于 disabled 的灰 */}
                       {isDegraded && (
-                        <Tag color="orange" className="m-0 text-[10px]">
-                          ⛔ {t("stockAnalysis.recommendation.degradedStylesTitle")}
-                        </Tag>
+                        <Tooltip
+                          title={data?.degradedReasons?.[style]
+                            ?? t("stockAnalysis.recommendation.degradedStylesTitle")}
+                        >
+                          <Tag color="orange" className="m-0 text-[10px]">
+                            ⛔ {t("stockAnalysis.recommendation.degradedStylesTitle")}
+                          </Tag>
+                        </Tooltip>
                       )}
                       <span className="text-xs text-gray-500">
                         {isDisabled
@@ -826,10 +874,12 @@ function PickRow(
           {t("stockAnalysis.recommendation.row.position")} {fmt(pick.positionPct, 1)}%
         </span>
         <span>
-          {t("stockAnalysis.recommendation.row.holding")} {fmt(pick.holdingDays, 0, fmt(0, 0))}d
+          {/* 缺失显示「—」而不是「0d」：0 天是一个读数，不是缺席声明 */}
+          {t("stockAnalysis.recommendation.row.holding")}{" "}
+          {isFiniteNumber(pick.holdingDays) ? `${pick.holdingDays}d` : FALLBACK}
         </span>
         <Tag color="blue" className="m-0 text-[10px]">
-          {t("stockAnalysis.recommendation.row.confidence")} {fmt(pick.confidence, 0, "0")}
+          {t("stockAnalysis.recommendation.row.confidence")} {fmt(pick.confidence, 0)}
         </Tag>
         {pick.secondaryStyles && pick.secondaryStyles.length > 0 && (
           <span className="text-gray-400">

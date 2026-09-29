@@ -2,6 +2,7 @@
 import { List } from "@/components/common/AntdList";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores/feature/stockAnalysisStore";
 import { App, Button, Card, Checkbox, Collapse, Empty, Modal, Table, Tag, Typography } from "antd";
 const { Text } = Typography;
@@ -45,6 +46,18 @@ const STYLE_COLOR: Record<string, string> = {
   policy: "geekblue",
   technical: "blue",
 };
+
+/**
+ * 档位标签。显示名走全仓唯一一套键（`stockAnalysis.timeHorizon*`，经 `horizonSuffix`）；
+ * 此前这里手抄第三套键族（`stockAnalysis.period*`），而历史**详情**条目根本不渲染档位
+ * ⇒ 同一份数据在列表与详情两处口径不同，且复盘时无从对照「当初荐它是哪一档」。
+ * 认不出的档名原样显示键名，不猜档。
+ */
+function PeriodTag({ period }: { period: string }) {
+  const { t } = useTranslation();
+  const suffix = horizonSuffix(period);
+  return <Tag className="text-[10px] m-0">{suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : period}</Tag>;
+}
 
 export function RecoHistoryModal() {
   const { t } = useTranslation();
@@ -223,15 +236,7 @@ export function RecoHistoryModal() {
               title: t("stockAnalysis.recommendation.recoHistory.period"),
               dataIndex: "period",
               key: "period",
-              render: (v: string) => {
-                const camel = v.replace(/(_[a-z])/g, (m) => m[1].toUpperCase());
-                const periodKey = `stockAnalysis.period${camel.charAt(0).toUpperCase() + camel.slice(1)}`;
-                return (
-                  <Tag className="text-[10px] m-0">
-                    {t(periodKey)}
-                  </Tag>
-                );
-              },
+              render: (v: string) => <PeriodTag period={v} />,
             },
             {
               title: t("stockAnalysis.recommendation.recoHistory.stockCount"),
@@ -318,6 +323,7 @@ export function RecoHistoryModal() {
                             <div className="flex items-center gap-1.5">
                               <Tag className="m-0 text-[10px]">{p.stockCode}</Tag>
                               <span className="font-medium truncate flex-1">{p.stockName}</span>
+                              <PeriodTag period={p.period} />
                               <Tag color="volcano" className="m-0 text-[10px]">BUY</Tag>
                               {p.synthetic === 1 && (
                                 <Tag color="orange" className="m-0 text-[10px]">

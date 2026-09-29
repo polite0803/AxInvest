@@ -250,7 +250,7 @@ fn fuse(tier: &str, weights: rhai::Map) -> f64 {
         }),
     ]);
     scope.push_constant("legs", rhai::Dynamic::from(legs));
-    let ast = engine.compile(&format!("{LEG_MULT_FN}{FUSE}")).expect("融合骨架应可编译");
+    let ast = engine.compile(format!("{LEG_MULT_FN}{FUSE}")).expect("融合骨架应可编译");
     engine
         .eval_ast_with_scope::<rhai::Map>(&mut scope, &ast)
         .expect("融合骨架应可求值")
@@ -303,7 +303,7 @@ fn missing_table_falls_back_to_unity() {
         "legs",
         rhai::Dynamic::from(rhai::Array::from(vec![rhai::Dynamic::from(m)])),
     );
-    let ast = engine.compile(&format!("{LEG_MULT_FN}{FUSE}")).expect("应可编译");
+    let ast = engine.compile(format!("{LEG_MULT_FN}{FUSE}")).expect("应可编译");
     let got = engine
         .eval_ast_with_scope::<rhai::Map>(&mut scope, &ast)
         .expect("缺表时融合仍应可求值")
@@ -311,4 +311,86 @@ fn missing_table_falls_back_to_unity() {
         .and_then(|v| v.clone().try_cast::<f64>())
         .expect("avg");
     assert!((got - (-0.6)).abs() < 1e-9, "缺表应退化为原始信号加权（乘数恒 1.0），实得 {got}");
+}
+
+/// 逐档先验取值器 —— 与 `portfolio-mgr.rhai` 的 `prior_for` 逐字一致（Phase C）。
+const PRIOR_FOR_FN: &str = r#"
+let prior_for = |h| {
+    let row = horizon_prior_ok ? horizon_prior_json[h] : ();
+    if type_of(row) == "map" && type_of(row["prior"]) != "()" {
+        #{ "value": row["prior"], "source": row["source"], "samples": row["samples"] }
+    } else {
+        #{ "value": prior, "source": "shared_regime_prior", "samples": 0 }
+    }
+};
+"#;
+
+/// 探针：命中档 / 表里没有的档，各取什么值、标什么来源。
+const PRIOR_PROBE: &str = r#"
+#{
+    "own_value": prior_for.call("mid")["value"],
+    "own_source": prior_for.call("mid")["source"],
+    "miss_source": prior_for.call("nope")["source"],
+    "miss_value": prior_for.call("nope")["value"],
+}
+"#;
+
+fn prior_probe(table: rhai::Map) -> (f64, String, String, f64) {
+    let engine = Engine::new();
+    let mut scope = rhai::Scope::new();
+    scope.push_constant("prior", rhai::Dynamic::from(0.52_f64));
+    scope.push_constant("horizon_prior_ok", rhai::Dynamic::from(true));
+    scope.push_constant("horizon_prior_json", rhai::Dynamic::from(table));
+    let ast = engine.compile(format!("{PRIOR_FOR_FN}{PRIOR_PROBE}")).expect("先验段应可编译");
+    let r = engine.eval_ast_with_scope::<rhai::Map>(&mut scope, &ast).expect("先验段应可求值");
+    let g = |k: &str| r.get(k).cloned().unwrap();
+    (
+        g("own_value").try_cast::<f64>().expect("own_value"),
+        g("own_source").try_cast::<String>().expect("own_source"),
+        g("miss_source").try_cast::<String>().expect("miss_source"),
+        g("miss_value").try_cast::<f64>().expect("miss_value"),
+    )
+}
+
+fn prior_row(prior: f64, source: &str, samples: i64) -> rhai::Map {
+    let mut m = rhai::Map::new();
+    m.insert("prior".into(), rhai::Dynamic::from(prior));
+    m.insert("source".into(), rhai::Dynamic::from(source.to_string()));
+    m.insert("samples".into(), rhai::Dynamic::from(samples));
+    m
+}
+
+/// 逐档先验必须真的被取用：命中档取该档收缩值并带来源；表里没有的档退回共用 prior
+/// 且**标成 `shared_regime_prior`**（不得伪装成本档统计）。
+#[test]
+fn prior_for_uses_the_tier_estimate_and_labels_the_fallback() {
+    let mut table = rhai::Map::new();
+    table.insert("mid".into(), rhai::Dynamic::from(prior_row(0.61, "shrunk", 88)));
+    let (own_val, own_src, miss_src, miss_val) = prior_probe(table);
+    assert_eq!((own_val, own_src.as_str()), (0.61, "shrunk"), "命中档应取该档收缩先验");
+    assert_eq!(miss_src, "shared_regime_prior", "缺档必须标成共用先验");
+    assert_eq!(miss_val, 0.52, "缺档退回值必须是主链 prior");
+}
+
+/// 防漂移 + 防「取而不用」：脚本必须逐字含 `prior_for`，且融合里后验用的是 `hp["value"]`
+/// 而不是四档共用的裸 `prior`（后者正是 E1 的实现形态）。
+#[test]
+fn per_tier_prior_is_wired_into_the_fusion() {
+    let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
+    assert!(
+        pm.contains(PRIOR_FOR_FN.trim()),
+        "prior_for 与本测试副本已漂移（逐档先验取值器是 Phase C 的承重件）"
+    );
+    assert!(
+        pm.contains("clamp(hp[\"value\"] + avg * evidence_scale"),
+        "逐档后验必须用该档先验 hp[\"value\"]；写回裸 `prior` 就是退回四档共用先验（E1）"
+    );
+    assert!(
+        pm.contains("let hp = prior_for.call(h);"),
+        "prior_for 是闭包，必须 .call（按名调用恒 Function not found）"
+    );
+    assert!(
+        pm.contains("\"priorSource\": hp[\"source\"]"),
+        "每档必须透出先验来源，否则「收缩自本档」与「退回共用」在产出里不可区分"
+    );
 }

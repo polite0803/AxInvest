@@ -2713,6 +2713,23 @@ let leg_mult = |h, leg| {
     }
 };
 
+// ── 逐档先验（Phase C）──
+// 旧形态：四档共用同一个 `prior`（由市场状态派生 0.55/0.50/0.45）⇒ 这是诊断 E1 的根。
+// 现：Rust 按档算方向命中率并与全档合并基准做经验贝叶斯收缩后注入 `horizon_prior_json`；
+// 取不到（统计读失败 / 旧模板快照）⇒ 退回共用 prior，并在每档 `priorSource` 如实标注。
+let horizon_prior_ok = type_of(horizon_prior_json) == "map" && !horizon_prior_json.is_empty();
+if !horizon_prior_ok {
+    data_gaps.push("逐档先验表缺失 ⇒ 四档退回共用 prior（市场状态先验），档间先验无差异");
+}
+let prior_for = |h| {
+    let row = horizon_prior_ok ? horizon_prior_json[h] : ();
+    if type_of(row) == "map" && type_of(row["prior"]) != "()" {
+        #{ "value": row["prior"], "source": row["source"], "samples": row["samples"] }
+    } else {
+        #{ "value": prior, "source": "shared_regime_prior", "samples": 0 }
+    }
+};
+
 // 单周期决策闭包。参数 ts = 该周期 totalScore（未注入时 input_mapping 已补 unit）。
 // 用闭包而非 `fn`：rhai 的 `fn` 读不到本文件顶层的 `let` 常量，闭包可捕获外层作用域。
 let horizon_decision = |h, ts, slh, tph, daysh| {
@@ -2726,7 +2743,8 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
         ws += w * sig;
     }
     let avg = if tw > 0.0 { ws / tw } else { 0.0 };
-    let hpost = clamp(prior + avg * evidence_scale, 0.0, 1.0);
+    let hp = prior_for.call(h);
+    let hpost = clamp(hp["value"] + avg * evidence_scale, 0.0, 1.0);
     let heff = clamp(hpost + risk_bias, 0.0, 1.0);
     // 纯阈值阶梯（与主链 action 同源常量；省略 kelly 门以降复杂度，见阶段2说明）
     let haction = if heff >= ACTION_BUY_THRESHOLD { "买入" }
@@ -2752,6 +2770,8 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
         "confidence": ((heff*100.0)*10.0).round()/10.0,
         "posterior": ((hpost*100.0)*10.0).round()/10.0,
         "weightsSource": if horizon_leg_weights_ok { "table" } else { "fallback_unity" },
+        "priorSource": hp["source"],
+        "priorSamples": hp["samples"],
         "stopLossPct": if hpos>0.0 { slh } else { 0.0 },
         "takeProfitPct": if hpos>0.0 { tph } else { 0.0 },
         "expectedHoldingDays": daysh,
@@ -2760,16 +2780,18 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
     }
 };
 
-// 超短线（方案B）：单后验 = 主链 effective_posterior（日线已是最短摄入周期，无更短评分源），
-//   档位取 `sl_pct_for`/`tp_pct_for`/`days_for`（与主链、价位映射同一批函数，2026-09-29 收口后不再是硬编码）；因单后验信息不足，输出置信下限 0.35 + 文案，供前端提示「超短线为
-//   低确信档」，不以独立评分强算虚假置信。
-// 超短线（Phase A 起重做）：走**同一逐档融合**（该档分析师乘数 + 日线技术评分），
-//   不再直接取主链 effective_posterior —— 旧「方案B」让超短档与主档恒等，还把
-//   「日线是最短摄入粒度」与「该档没有独立证据权重」两件事混成一件。
-//   粒度限制本身仍然真实，故保留 confLowerBound 0.35 与文案（Phase B 打通 60 分钟通路后重估）。
-let ultra_short_dec = horizon_decision.call("ultra_short", totalScore, sl_pct_for.call("ultra_short"), tp_pct_for.call("ultra_short"), days_for.call("ultra_short"));
+// 超短线档（Phase A 重做融合 + Phase B-3 换尺度）：
+//   · 融合走**同一个** `horizon_decision`（该档分析师乘数 + 该档技术评分），
+//     不再直接取主链 `effective_posterior` —— 旧「方案B」让超短档与主档恒等，
+//     还把「最短摄入粒度」与「该档没有独立证据权重」两件事混成一件；
+//   · 技术评分取 `totalScore_ultra_short` ← 新节点 t-scoring-hour（compute_scoring period=hourly，
+//     vendor klt=60）。取不到小时线时该参数为 unit ⇒ 闭包退回主链日线 f1 并在 verdict 标
+//     「该周期评分缺失，按日线退化」（**不静默**）；
+//   · 仍保留 confLowerBound 0.35：60 分钟是本链可达的最细粒度，2 个交易日的窗口信息量有限，
+//     这是**声明下限**而不是把粗尺度硬算成高置信。
+let ultra_short_dec = horizon_decision.call("ultra_short", totalScore_ultra_short, sl_pct_for.call("ultra_short"), tp_pct_for.call("ultra_short"), days_for.call("ultra_short"));
 ultra_short_dec["confLowerBound"] = 0.35;
-ultra_short_dec["verdict"] = ultra_short_dec["verdict"] + "[超短复用日线评分粒度，置信下限35%]";
+ultra_short_dec["verdict"] = ultra_short_dec["verdict"] + "[超短取 60 分钟粒度评分，置信下限35%]";
 
 // 四周期独立决策汇总（camelCase 键，供前端按周期 Tab 分组展示）
 // 短/中/长分别注入对应周期评分（seed 新增 t-scoring-week / t-scoring-month 节点供给）
@@ -3038,6 +3060,8 @@ let decisions_by_horizon = #{
         "tp_pct_short": tp_pct_short_v,
         "tp_pct_mid": tp_pct_mid_v,
         "tp_pct_long": tp_pct_long_v,
+        // 逐档先验收缩强度（Phase C）：反思要归因「这档先验有几分来自本档」必须看到 κ。
+        "horizon_prior_kappa": horizon_prior_kappa,
         "action_buy_threshold": ACTION_BUY_THRESHOLD,
         "action_increase_threshold": ACTION_INCREASE_THRESHOLD,
         "action_hold_threshold": ACTION_HOLD_THRESHOLD,

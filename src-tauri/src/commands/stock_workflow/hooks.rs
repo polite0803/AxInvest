@@ -295,6 +295,46 @@ pub(crate) async fn build_stock_analysis_variables(
             });
         }
     }
+    // ── 逐档先验注入（horizon_prior_json，四周期科学化 Phase C）──
+    // 四档不再共用同一个 `prior`：先由反思统计算出**每档自己的方向命中率**，再与全档
+    // 合并基准做经验贝叶斯收缩 `prior_h = (n·p_h + κ·p_pool)/(n+κ)`。
+    // κ = 模板变量 `horizon_prior_kappa`（进设置面板、可被反思建议覆盖）。
+    // 统计取数与 `reflection_stats` 命令**共用** `build_hitrate_stats`（禁区 12：不重复实现）。
+    // 取数失败 ⇒ 注入 null，脚本按主链共用 prior 退化并在每档 `priorSource` 标注（不静默）。
+    {
+        use axagent_analysis_engine::horizon_prior::DEFAULT_KAPPA;
+        let kappa = merged_vars
+            .iter()
+            .find(|v| v.name == "horizon_prior_kappa")
+            .and_then(|v| v.value.as_f64())
+            .unwrap_or(DEFAULT_KAPPA);
+        let prior_map =
+            match crate::commands::stock_workflow::reflection_stats::build_hitrate_stats(db).await {
+                Ok(stats) => {
+                    axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa)
+                },
+                Err(e) => {
+                    tracing::warn!(
+                        "[stock_workflow] 逐档先验统计取数失败 ⇒ 四档退回共用 prior: {e}"
+                    );
+                    serde_json::Value::Null
+                },
+            };
+        if let Some(existing) = merged_vars.iter_mut().find(|v| v.name == "horizon_prior_json") {
+            existing.value = prior_map;
+        } else {
+            merged_vars.push(Variable {
+                name: "horizon_prior_json".into(),
+                var_type: "object".into(),
+                value: prior_map,
+                description: Some(
+                    "逐档收缩先验 {档:{prior,samples,source}}（权威源 reflection_stats 按档命中率 + κ 收缩）"
+                        .into(),
+                ),
+                is_secret: false,
+            });
+        }
+    }
     if let Some(d) = as_of_date {
         merged_vars.push(Variable {
             name: "as_of_date".into(),

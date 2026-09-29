@@ -32,7 +32,7 @@ use crate::commands::error_code::stock_setup;
 /// 新增可调参数时三处齐备才生效：① `seed_variables.rs` 定义变量；
 /// ② `portfolio-mgr.rhai` 顶部加 `if present(x) { x } else { 默认 }` 守卫；
 /// ③ 在此数组登记。
-pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 36] = [
+pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 37] = [
     // ── 市况先验（决策起点：无个股证据时对上涨的基础概率，0-1）──
     "regime_prior_bull",
     "regime_prior_sideways",
@@ -85,6 +85,8 @@ pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 36] = [
     "tp_pct_mid",
     "sl_pct_long",
     "tp_pct_long",
+    // 四周期科学化 Phase C：逐档先验收缩强度 κ（进设置面板 ⇒ 反思可建议）
+    "horizon_prior_kappa",
 ];
 
 /// `algo_tools` 表行类型：(节点 id, 标题, 工具名, 参数名, 额外扁平映射, x, y)。
@@ -553,7 +555,19 @@ type AlgoToolRow = (
 /// `horizon_leg_weights_json`（权威源 `evidence_weight::horizon_leg_multipliers()`，
 /// 由 hooks 恒注入）+ 同名 input_mapping；超短档从「直接取主链后验」改为走同一逐档融合。
 /// **必须升版**：脚本正文与新映射都随模板快照落库，不重播种则四档仍是旧口径。
-pub(crate) const TEMPLATE_VERSION: i32 = 99;
+/// **v100(2026-09-29)**：四周期科学化 Phase B —— 长档改吃**季线**评分
+/// （新节点 `t-scoring-quarter`，由 `compute_scoring(period="quarterly")` 把月线按自然季度
+/// 本地聚合；`totalScore_long` 映射随之改指）。旧形态是 mid/long 共用月线 ⇒ 两档方向永远一样。
+/// **必须升版**：节点、边与映射都随模板快照落库。
+/// **v101(2026-09-29)**：Phase B-3 —— 超短档不再吃日线技术评分。新节点 `t-scoring-hour`
+/// （`compute_scoring(period="hourly")`，vendor klt=60）+ 新映射 `totalScore_ultra_short`，
+/// 脚本侧超短档技术腿改指该值；取不到小时线时脚本按既有机制退化并在 verdict 标
+/// 「该周期评分缺失，按日线退化」（**不静默**）。**必须升版**：节点/边/映射随模板快照落库。
+/// **v102(2026-09-29)**：Phase C —— 四档不再共用同一个先验。hooks 读反思统计按档算方向命中率，
+/// 与全档合并基准做经验贝叶斯收缩 `prior_h=(n·p_h+κ·p_pool)/(n+κ)` 后注入 `horizon_prior_json`；
+/// 新可调参数 `horizon_prior_kappa`（默认 = `horizon_prior::DEFAULT_KAPPA`）。
+/// **必须升版**：变量表与 input_mapping 随模板快照落库。
+pub(crate) const TEMPLATE_VERSION: i32 = 102;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///
@@ -3560,6 +3574,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // ⚠️ 不并入 `algo_tools` / `raw_input_sources`：raw-data 聚合的「16 个工具节点」计数与
     //   description 是写死的，且这两档评分只供 portfolio-mgr 消费，无需进 raw 聚合。
     nodes.push(tool_node(
+        "t-scoring-hour",
+        "技术评分（60 分钟）",
+        "compute_scoring",
+        "t-scoring-hour",
+        "stock_code",
+        &[("period", "hourly")],
+        None,
+        1020.0,
+        2700.0,
+    ));
+    nodes.push(tool_node(
         "t-scoring-week",
         "技术评分（周线）",
         "compute_scoring",
@@ -3581,11 +3606,29 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         1260.0,
         2700.0,
     ));
+    nodes.push(tool_node(
+        "t-scoring-quarter",
+        "技术评分（季度）",
+        "compute_scoring",
+        "t-scoring-quarter",
+        "stock_code",
+        &[("period", "quarterly")],
+        None,
+        1380.0,
+        2700.0,
+    ));
+    edges.push(edge("e-t-scoring-t-scoring-hour", "t-scoring", "t-scoring-hour"));
     edges.push(edge("e-t-scoring-t-scoring-week", "t-scoring", "t-scoring-week"));
     edges.push(edge("e-t-scoring-week-t-scoring-month", "t-scoring-week", "t-scoring-month"));
-    // 长档复用月线评分（月线已是最长期权周期，不新增季度节点——阶段2按此拍板）
+    // 四周期科学化 Phase B：长档不再复用月线评分 —— 季线由月线在 `compute_scoring` 内
+    // 按自然季度聚合而来（vendor 无稳定季度 klt，故本地聚合，见 `astock-data/src/scale.rs`）。
+    // 旧注释「月线已是最长期权周期，不新增季度节点」是**按取数便利**而非**按 90 交易日口径**
+    // 做的决定，后果是 mid/long 两档的评分输入恒等 ⇒ 两档方向永远一样。
+    edges.push(edge("e-t-scoring-month-t-scoring-quarter", "t-scoring-month", "t-scoring-quarter"));
+    edges.push(edge("e-t-scoring-hour-portfolio-mgr", "t-scoring-hour", "portfolio-mgr"));
     edges.push(edge("e-t-scoring-week-portfolio-mgr", "t-scoring-week", "portfolio-mgr"));
     edges.push(edge("e-t-scoring-month-portfolio-mgr", "t-scoring-month", "portfolio-mgr"));
+    edges.push(edge("e-t-scoring-quarter-portfolio-mgr", "t-scoring-quarter", "portfolio-mgr"));
 
     // ── P0-H L3（2026-09-12）: 报告导出所需的 2 个数据节点 ──
     // 背景：`generate_stock_report` 的「机构调研」与「大盘指数」两个板块此前恒空。
@@ -4202,9 +4245,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // 供 portfolio-mgr.rhai 的 decisionsByHorizon 做 f1 周期重融合；未注入（上游
                     //   缺陷/数据不足）时 input_mapping 自动补 unit ⇒ rhai 端退化为日线档。
                     //   短=周线 / 中=月线 / 长=月线（长档复用月线，阶段2拍板不新增季度节点）。
+                    ("totalScore_ultra_short", "t-scoring-hour.result.content.totalScore"),
                     ("totalScore_short", "t-scoring-week.result.content.totalScore"),
                     ("totalScore_mid", "t-scoring-month.result.content.totalScore"),
-                    ("totalScore_long", "t-scoring-month.result.content.totalScore"),
+                    ("totalScore_long", "t-scoring-quarter.result.content.totalScore"),
                     // AgentNode 输出包裹在 {role, content: <json_string>, ...} 中
                     // V29 修复: data-quality 是 AgentNode，无 .result 字段，必须走 .content.
                     // V58 修复: data-quality 实为 CodeNode（Rhai），输出结构为
@@ -5825,8 +5869,10 @@ const FAST_REQUIRED_NODE_IDS: &[&str] = &[
     "t-valuation",
     "t-valuation-band",
     "t-risk",
+    "t-scoring-hour",
     "t-scoring-week",
     "t-scoring-month",
+    "t-scoring-quarter",
     // 段 A · 聚合与简报
     "raw-data",
     "analyst-brief",
@@ -5893,7 +5939,7 @@ const FAST_EXPLAINER_NODE_ID: &str = "decision-explainer";
 /// 值一律取 `<节点>.result.content`：ToolNode 的 `content` 是 JSON **字符串**，而
 /// `resolve_var_path` 终值不 auto-parse（见 `executors/mod.rs` 的同名注释）⇒
 /// `raw-digest.rhai` 内统一 `load()` 解析。这与 `data-quality` 的同类映射同口径。
-const FAST_BRIEF_INPUTS: [(&str, &str); 20] = [
+const FAST_BRIEF_INPUTS: [(&str, &str); 22] = [
     ("market_data", "t-market-data.result.content"),
     ("sentiment_data", "t-sentiment-data.result.content"),
     ("news_data", "t-news-data.result.content"),
@@ -5912,8 +5958,10 @@ const FAST_BRIEF_INPUTS: [(&str, &str); 20] = [
     ("algo_valuation", "t-valuation.result.content"),
     ("algo_valuation_band", "t-valuation-band.result.content"),
     ("algo_risk", "t-risk.result.content"),
+    ("algo_scoring_hour", "t-scoring-hour.result.content"),
     ("algo_scoring_week", "t-scoring-week.result.content"),
     ("algo_scoring_month", "t-scoring-month.result.content"),
+    ("algo_scoring_quarter", "t-scoring-quarter.result.content"),
 ];
 
 /// 快速链下 `data-quality` 的**逐维度输入重指向**表：`(诊断缩写, Jev 判定节点 id, 简报段键)`。

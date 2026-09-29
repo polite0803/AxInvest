@@ -2748,6 +2748,16 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             description: Some("止盈档位（相对现价 %，长线·缺省持有 90 交易日）".into()),
             is_secret: false,
         },
+        Variable {
+            // 四周期科学化 Phase C：逐档先验收缩强度 κ。
+            // prior_h = (n_h·p_h + κ·p_pool)/(n_h+κ) —— κ→0 完全采信该档自身命中率，
+            // κ→∞ 退回四档共用先验（即旧行为）。默认值与 `horizon_prior::DEFAULT_KAPPA` 同值。
+            name: "horizon_prior_kappa".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(axagent_analysis_engine::horizon_prior::DEFAULT_KAPPA),
+            description: Some("逐档先验收缩强度 κ（越大越保守地退回全档合并基准）".into()),
+            is_secret: false,
+        },
         // 注：cost_pct（交易成本率）已在「金融模型补充参数」段定义，此处不重复。
     ]
 }

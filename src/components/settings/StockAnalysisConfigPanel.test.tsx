@@ -55,6 +55,11 @@ const RUNTIME_INJECTED = new Set([
   // 由 `stock_workflow/hooks.rs` **无条件注入**，不是用户可调的模板变量 ⇒ 不进 seed 变量表。
   // portfolio-mgr.rhai 的 `horizon_const` 缺它会显式 throw（不静默兜底）。
   "horizon_consts_json",
+  // 逐档×逐腿证据乘数表：权威源是
+  // `crates/analysis-engine/src/evidence_weight.rs` 的 `horizon_leg_multipliers()`，
+  // 经 `DECISION_LEG_ANALYST` 桥表投影到决策腿，由 `stock_workflow/hooks.rs` **恒注入**，
+  // 不是用户可调的模板变量 ⇒ 不进 seed 变量表。缺失时脚本按全 1.0 退化并显式标注。
+  "horizon_leg_weights_json",
 ]);
 
 /**

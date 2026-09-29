@@ -25,6 +25,7 @@ pub mod evolution_optimizer;
 pub mod exit_recommend;
 pub mod factor_analysis;
 pub mod hit_rate_backtest;
+pub mod horizon_prior;
 // G3 产业链传导映射（P2-8 从 astock-data 迁回）
 pub mod industry_chain;
 pub mod intent_parser;

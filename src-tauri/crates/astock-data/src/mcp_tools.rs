@@ -113,7 +113,7 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "type": "object",
                 "properties": {
                     "stock_code": { "type": "string", "description": "6位股票代码" },
-                    "period": { "type": "string", "description": "周期：daily/weekly/monthly", "default": "daily" },
+                    "period": { "type": "string", "description": "周期：daily/weekly/monthly/60（60 分钟线）；季线不在此取数（由 compute_scoring 本地按月聚合）", "default": "daily" },
                     "limit": { "type": "integer", "description": "K线数量（1-500）", "default": 120 }
                 },
                 "required": ["stock_code"]
@@ -436,7 +436,7 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "properties": {
                     "stock_code": { "type": "string", "description": "6位股票代码" },
                     "kline_json": { "type": "string", "description": "上游K线节点输出的JSON" },
-                    "period": { "type": "string", "description": "K线周期：daily/weekly/monthly，决定技术指标与评分所在周期（PROPOSAL 阶段2 四周期独立决策）", "default": "daily" }
+                    "period": { "type": "string", "description": "评分尺度：hourly/daily/weekly/monthly/quarterly（季线由月线本地按自然季度聚合）。**未知值直接报错，不静默回退 daily**；阈值按 √(每 bar 交易日数) 缩放", "default": "daily" }
                 },
                 "required": ["stock_code"]
             }
@@ -1264,7 +1264,10 @@ pub async fn execute_mcp_tool(
             }
             let ind = crate::indicators::compute_indicators(code, &klines);
             let latest_price = klines.last().map(|k| k.close).unwrap_or(0.0);
-            let score = crate::scoring::ScoringEngine::score(&ind, latest_price, None);
+            // 阈值随尺度缩放（日线 f=1.0 ⇒ 与历史逐分一致，零回归）
+            let bands = crate::scoring::ScoreBands::scaled_for(&profile);
+            let score =
+                crate::scoring::ScoringEngine::score_with_bands(&ind, latest_price, None, &bands);
             // #7 修复(2026-07-22): 原实现只返回 ObjectiveScore 评分结构,
             // 缺少 totalScore/currentPrice/indicators/factor_backtest 字段,
             // 导致下游 input_mapping 引用(t-scoring.result.indicators.rsi14 等)全部为 null,

@@ -116,6 +116,38 @@ impl Default for ScoreBands {
 /// 100分评分引擎
 pub struct ScoringEngine;
 
+impl ScoreBands {
+    /// 按**评分尺度**缩放「价格偏离度」与「支撑位容差」两类阈值（四周期科学化 Phase B-1）。
+    ///
+    /// 为什么必须缩放：`deviation_band_*` 是「收盘价对 MA5 的偏离百分比」的分档边界，
+    /// 而偏离的**典型幅度**随 bar 覆盖的时间跨度增长 —— 对随机游走价格，
+    /// 位移的标准差 ∝ √时间，故周线的典型偏离约为日线的 √5 倍、月线 √20、季线 √60。
+    /// 沿用日线标定的 1%/2%/3%/5%/8% 去评周/月/季线，会让粗尺度的偏离**长期落在最高档**
+    /// （或最低档），同一只票的四个尺度分数不可比 —— 这正是「四档只是换个标签」的算法根因之一。
+    ///
+    /// **刻意不缩放**的字段（每个都有理由，不是漏掉）：
+    /// - `rsi_*`：RSI 有界于 0-100 且按「涨跌相对幅度」归一，本身尺度无关；
+    /// - `boll_half_std_factor`：布林带用**该尺度自身** bar 的标准差算，已自适配；
+    /// - `deviation_score_*`：分档分值是打分刻度（序数），不是价格量纲。
+    pub fn scaled_for(profile: &crate::scale::ScaleProfile) -> Self {
+        let mut bands = Self::default();
+        let f = profile.trading_days_per_bar.sqrt();
+        if (f - 1.0).abs() > 1e-12 {
+            for band in [
+                &mut bands.deviation_band_1,
+                &mut bands.deviation_band_2,
+                &mut bands.deviation_band_3,
+                &mut bands.deviation_band_4,
+                &mut bands.deviation_band_5,
+                &mut bands.support_tolerance_pct,
+            ] {
+                *band *= f;
+            }
+        }
+        bands
+    }
+}
+
 impl ScoringEngine {
     /// 从技术指标计算客观评分
     pub fn score(
@@ -505,5 +537,68 @@ mod tests {
             s.fundamental_adjustment + s.industry_adjustment,
             "恒等式：totalAdjustment == fundamentalAdjustment + industryAdjustment"
         );
+    }
+}
+
+/// 阈值尺度归一（四周期科学化 Phase B-1）的行为锁。
+#[cfg(test)]
+mod scale_band_tests {
+    use super::*;
+    use crate::scale::ScaleProfile;
+
+    fn bands_of(period: &str) -> ScoreBands {
+        ScoreBands::scaled_for(&ScaleProfile::resolve(period).expect("合法尺度"))
+    }
+
+    /// 日线必须与历史逐分一致（f = 1.0 ⇒ 零回归；这是敢改其他尺度的前提）。
+    #[test]
+    fn daily_is_untouched() {
+        assert_eq!(bands_of("daily").deviation_band_1, ScoreBands::default().deviation_band_1);
+        assert_eq!(bands_of("daily").support_tolerance_pct, 0.03);
+    }
+
+    /// 偏离度阈值按 √(每 bar 交易日数) 缩放，且随尺度单调变宽。
+    #[test]
+    fn deviation_bands_scale_by_sqrt_of_bar_horizon() {
+        let d = bands_of("daily").deviation_band_1;
+        let w = bands_of("weekly").deviation_band_1;
+        let m = bands_of("monthly").deviation_band_1;
+        let q = bands_of("quarterly").deviation_band_1;
+        let h = bands_of("hourly").deviation_band_1;
+        assert!((w - d * 5.0_f64.sqrt()).abs() < 1e-9, "周线应是日线的 √5 倍，实得 {w}");
+        assert!((q - d * 60.0_f64.sqrt()).abs() < 1e-9, "季线应是日线的 √60 倍，实得 {q}");
+        assert!((h - d * 0.5).abs() < 1e-9, "小时线应收窄到一半，实得 {h}");
+        assert!(h < d && d < w && w < m && m < q, "阈值必须随尺度单调变宽: {h}/{d}/{w}/{m}/{q}");
+    }
+
+    /// 可比性核心命题：同一「相对该尺度典型波动的偏离」应得到同一档分。
+    #[test]
+    fn same_normalized_deviation_scores_the_same_across_scales() {
+        let daily = bands_of("daily");
+        let weekly = bands_of("weekly");
+        let f = 5.0_f64.sqrt();
+        for bias in [0.5, 1.5, 2.5, 4.0, 9.0] {
+            let at_daily = ScoringEngine::score_deviation(bias, &daily);
+            let at_weekly = ScoringEngine::score_deviation(bias * f, &weekly);
+            assert_eq!(
+                at_daily,
+                at_weekly,
+                "偏离 {bias}%(日线) 与 {}%(周线) 是同一相对幅度，分数不该不同",
+                bias * f
+            );
+        }
+    }
+
+    /// 尺度无关的字段不得被顺手改掉（RSI 有界、BOLL 用本尺度标准差、分值是序数量纲）。
+    #[test]
+    fn scale_invariant_fields_are_deliberately_untouched() {
+        let def = ScoreBands::default();
+        for period in ["hourly", "daily", "weekly", "monthly", "quarterly"] {
+            let b = bands_of(period);
+            assert_eq!(b.rsi_oversold, def.rsi_oversold, "{period} 动了 RSI 阈值");
+            assert_eq!(b.rsi_overbought, def.rsi_overbought, "{period} 动了 RSI 阈值");
+            assert_eq!(b.boll_half_std_factor, def.boll_half_std_factor, "{period} 动了 BOLL 因子");
+            assert_eq!(b.deviation_score_1, def.deviation_score_1, "{period} 动了分值");
+        }
     }
 }

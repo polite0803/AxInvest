@@ -486,6 +486,8 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "tp_pct_mid",
           "sl_pct_long",
           "tp_pct_long",
+          // 逐档先验收缩强度 κ（Phase C）：与上面八项同组 —— 同为「反思可建议」的策略参数。
+          "horizon_prior_kappa",
         ]),
       },
       {

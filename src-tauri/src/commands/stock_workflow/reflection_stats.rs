@@ -25,7 +25,7 @@ use axagent_analysis_engine::reflection_stats::{
     DecisionPerformanceSample, HitrateStats, SampleDataSource, compute_reflection_stats,
 };
 use axagent_entities::{stock_analyses, stock_reflections, strategy_performance};
-use sea_orm::EntityTrait;
+use sea_orm::{DatabaseConnection, EntityTrait};
 
 use crate::AppState;
 
@@ -125,11 +125,18 @@ fn nearest_analysis_dimensions<'a>(
         .min_by_key(|a| (a.created_at - decision_at).abs())
 }
 
-/// 命中率统计（只读）：聚合 strategy_performance 全部已结算样本。
+/// 命中率统计（只读命令）：取数与聚合的唯一实现在 [`build_hitrate_stats`]。
 #[tauri::command]
 pub async fn reflection_stats(state: State<'_, AppState>) -> Result<HitrateStats, String> {
-    let db = state.harness.db();
+    build_hitrate_stats(state.harness.db()).await
+}
 
+/// 取数 + 逐周期展开 + 聚合的**唯一实现**。
+///
+/// 2026-09-29 从命令体抽出：四周期科学化 Phase C 要在**工作流启动时**读同一份统计
+/// （`hooks.rs` 据此注入 `horizon_prior_json` 逐档先验）。若留在命令体里，hooks 只能
+/// 再抄一遍取数 = 违禁区 12（重复实现），且两份口径迟早漂移。
+pub(crate) async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats, String> {
     let sp_rows = strategy_performance::Entity::find()
         .all(db)
         .await

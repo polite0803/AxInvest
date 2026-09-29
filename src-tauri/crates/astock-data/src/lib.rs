@@ -26,6 +26,7 @@ pub mod mcp_tools;
 pub mod quality;
 pub mod realtime_quote;
 pub mod regime;
+pub mod scale;
 pub mod scoring;
 pub mod sentiment;
 pub mod types;

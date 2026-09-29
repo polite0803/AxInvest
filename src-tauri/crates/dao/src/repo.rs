@@ -58,6 +58,7 @@ pub mod session_state;
 pub mod settings;
 pub mod skill;
 pub mod stock_analysis_snapshot;
+pub mod stock_lesson_queries;
 pub mod stored_file;
 pub mod sync_audit_log;
 pub mod sync_change_log;

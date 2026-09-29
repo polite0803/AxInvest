@@ -203,16 +203,14 @@ fn var_str<'a>(vars: &'a [Variable], name: &str) -> Option<&'a str> {
 /// 为什么不能直接用公式主档：v2 的主档由 `portfolio-mgr.rhai` 按后验阈值定档，
 /// 而本函数所在的增强钩子在 `portfolio-mgr` **之前**执行 —— 那一刻还没有后验。
 async fn latest_known_horizon(stock_code: &str, db: &DatabaseConnection) -> Option<String> {
-    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
-    let row = stock_analyses::Entity::find()
-        .filter(stock_analyses::Column::StockCode.eq(stock_code))
-        .filter(stock_analyses::Column::DecisionTimeHorizon.is_not_null())
-        .order_by_desc(stock_analyses::Column::CreatedAt)
-        .one(db)
+    // 查询经 dao 下沉（`axagent_dao::repo::stock_lesson_queries`），命令层不得直连
+    //（分层门禁规则 1）。`Err`（DB 故障）与 `Ok(None)`（无既有主档）都按「不按档过滤」
+    // 处理并 WARN，不冒充某档 —— 与下沉前逐位一致。
+    let h = axagent_dao::repo::stock_lesson_queries::latest_analysis_horizon(db, stock_code)
         .await
         .ok()
-        .flatten();
-    let h = row.and_then(|a| a.decision_time_horizon).filter(|s| !s.is_empty());
+        .flatten()
+        .filter(|s| !s.is_empty());
     if h.is_none() {
         tracing::warn!(
             "[stock-analysis] {stock_code} 无既有主档可代理 ⇒ 本轮教训注入不按档过滤（跨档混合，非事实陈述）"
@@ -267,6 +265,31 @@ pub(crate) async fn build_stock_analysis_variables(
                 value: consts,
                 description: Some(
                     "周期常量表（每档 {days, mult}，权威源 Period::decision_consts_map）".into(),
+                ),
+                is_secret: false,
+            });
+        }
+    }
+    // ── 逐档 × 逐腿证据乘数表注入（horizon_leg_weights_json）──
+    // 四周期科学化 Phase A：四档要「同一批证据、逐档重新加权」，故把按分析师索引的
+    // 周期权重表（`evidence_weight::get_horizon_base_weights`）经桥表
+    // `DECISION_LEG_ANALYST` 投影到决策脚本的因子腿上，脚本侧禁止再手抄任何倍数。
+    // 恒注入：缺失 ⇒ 脚本按「该档乘数全 1.0」退化并显式标注（证据腿不再逐档不同是可观测的
+    // 降级，不是错档），故不像 horizon_consts_json 那样 throw。
+    {
+        let leg_weights = axagent_analysis_engine::evidence_weight::horizon_leg_multipliers();
+        if let Some(existing) =
+            merged_vars.iter_mut().find(|v| v.name == "horizon_leg_weights_json")
+        {
+            existing.value = leg_weights;
+        } else {
+            merged_vars.push(Variable {
+                name: "horizon_leg_weights_json".into(),
+                var_type: "object".into(),
+                value: leg_weights,
+                description: Some(
+                    "逐档×逐腿证据乘数表（派生自 evidence_weight 周期权重表，权威源 DECISION_LEG_ANALYST 桥）"
+                        .into(),
                 ),
                 is_secret: false,
             });

@@ -548,7 +548,12 @@ type AlgoToolRow = (
 ///    四档 Tab 纹丝不动 ⇒ 同一份 JSON 里档位%与价位反解打架。现全部改经
 ///    `sl_pct_for.call(h)` / `tp_pct_for.call(h)` / `days_for.call(h)`。
 ///    **必须升版**：脚本正文随模板快照落库，不重播种则四档仍是旧字面量。
-pub(crate) const TEMPLATE_VERSION: i32 = 98;
+/// **v99(2026-09-29)**：四周期科学化 Phase A —— 四档不再「共用主链权重、只换技术分」，
+/// 改为每档把全部证据腿按该档分析师权重重新加权后融合。新增注入变量
+/// `horizon_leg_weights_json`（权威源 `evidence_weight::horizon_leg_multipliers()`，
+/// 由 hooks 恒注入）+ 同名 input_mapping；超短档从「直接取主链后验」改为走同一逐档融合。
+/// **必须升版**：脚本正文与新映射都随模板快照落库，不重播种则四档仍是旧口径。
+pub(crate) const TEMPLATE_VERSION: i32 = 99;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///
@@ -4442,6 +4447,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // `stock_workflow/hooks.rs` 无条件恒注入）。portfolio-mgr.rhai 的
                     // `horizon_const` 消费本变量 —— 缺它即 throw，脚本侧不留静默兜错档的退路。
                     ("horizon_consts_json", "horizon_consts_json"),
+                    // 逐档 × 逐腿证据乘数表（四周期科学化 Phase A）：权威源
+                    // `analysis-engine::evidence_weight::horizon_leg_multipliers()`（由
+                    // `stock_workflow/hooks.rs` 恒注入）。portfolio-mgr.rhai 的 `leg_mult` 消费，
+                    // 缺它 ⇒ 全腿乘数 1.0 并在每档 `weightsSource` 标 fallback_unity（可检降级）。
+                    ("horizon_leg_weights_json", "horizon_leg_weights_json"),
                     // ── P1 新增: 资金面因子 f9 数据源 ──
                     // t-hotmoney-data 输出 get_stock_money_flow 的 JSON 字符串
                     // Rhai 中用 json_parse() 解析后提取主力净流入占比

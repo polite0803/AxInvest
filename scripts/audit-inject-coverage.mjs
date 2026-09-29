@@ -229,16 +229,33 @@ function callSiteArgs(text, name) {
  * `present(ts)` 恒假、该档评分静默退化成日线评分 —— 正是本脚本要抓的形态。
  * 故：名单排除**以「至少一个调用点的对应实参是已注入变量或脚本内自给变量」为条件**。
  */
+/** 守卫函数自身：它的形参按定义就是「被检测的那个值」，不是工作流变量 ⇒ 不参与 ③。 */
+const GUARD_FN_NAMES = new Set(["present"]);
+
 export function checkParams(fullText, defs, presentNames, sources, localVars) {
   const sourced = [];
   const unwired = [];
   for (const d of defs) {
+    if (GUARD_FN_NAMES.has(d.name)) { continue; }
     if (!d.params.some((p) => presentNames.has(p))) continue;
     const sites = callSiteArgs(fullText, d.name);
+    // 无任何调用点的定义属「死代码」族（另有检法），不在本判据内 —— 否则会把
+    // `safe_parse` 这类只被注释/测试引用的守卫当成悬空形参，噪声淹掉真缺陷。
+    if (sites.length === 0) { continue; }
     d.params.forEach((p, idx) => {
       if (!presentNames.has(p)) return; // 未被 present() 守卫 ⇒ 不属本判据
       const got = sites.map((args) => args[idx]).filter((a) => a !== undefined && a !== "");
-      const hit = got.filter((a) => sources.has(a) || localVars.has(a));
+      // 实参写成 `bar["amount"]` / `mf.mainNetInflow` 时，来源是**根标识符**（一个本地 map
+      // 或注入变量），不是整个表达式 —— 只比整串会把这类合法实参误判成「无来源」。
+      const rootOf = (expr) => {
+        const m2 = /^\s*([A-Za-z_]\w*)/.exec(expr);
+        return m2 ? m2[1] : null;
+      };
+      const hit = got.filter((a) => {
+        if (sources.has(a) || localVars.has(a)) { return true; }
+        const root = rootOf(a);
+        return root !== null && (sources.has(root) || localVars.has(root));
+      });
       if (hit.length > 0) {
         sourced.push({ name: d.name, param: p, from: [...new Set(hit)].sort() });
       } else {
@@ -305,9 +322,10 @@ export function audit(rhaiText, seedText, opts) {
     effective,
     rhai.localVars,
   );
-  // ① 的排除名单只收「已被 ③ 证明实参有来源」的形参 ⇒ 不是拿假阳性换假阴性。
-  const provenParams = new Set(paramSourced.map((x) => x.param));
-  const referenced = rhai.referenced.filter((v) => !provenParams.has(v));
+  // 形参一律不进 ①（① 只管「工作流变量有没有人注入」）；它们改由 ③ 逐一定位到
+  // 「哪个定义的哪个位置的实参没有来源」—— 比 ① 的裸变量名更可诊断，也不会两处重复报。
+  const defParams = new Set(defs.flatMap((d) => d.params));
+  const referenced = rhai.referenced.filter((v) => !defParams.has(v));
 
   const selfProvided = referenced.filter((v) => rhai.localVars.has(v)).sort();
   const uncovered = referenced.filter((v) => !effective.has(v) && !rhai.localVars.has(v));
@@ -411,7 +429,6 @@ ${targets.map((t) => `                    ("${t}", "src.${t}"),`).join("\n")}
       gotU === [...expectUncovered].sort().join(",") &&
       gotD === [...expectDangling].sort().join(",") &&
       gotP === [...expectParam].sort().join(",");
-    const pass = gotU === [...expectUncovered].sort().join(",") && gotD === [...expectDangling].sort().join(",");
     cases.push({
       name,
       pass,
@@ -491,16 +508,28 @@ let r = decide.call("mid", 50.0);
     ["totalScore_mid"],
     ["decide.sc"],
   );
-  // 正控⑥：守卫形参所在闭包无任何调用点 ⇒ 同样报出
+  // 正控⑥：调用点实参是个**未注入的名字** ⇒ 报（与⑤的「字面量」形态区分）
   run(
-    "正控⑥ 守卫形参无调用点 ⇒ 报悬空形参",
+    "正控⑥ 守卫形参实参是未注入变量 ⇒ 报悬空形参",
     `fn present(x) { type_of(x) != "()" }
-let dead = |v| { if present(v) { v } else { 0.0 } };
+let decide = |h, sc| { if present(sc) { sc } else { 0.0 } };
+let r = decide.call("mid", someUnknownThing);
+`,
+    fakeSeed(["totalScore_mid"]),
+    [],
+    ["totalScore_mid"],
+    ["decide.sc"],
+  );
+  // 正控⑦：守卫函数自身的形参不得被当成悬空形参（否则每个脚本都恒报 present.x）
+  run(
+    "正控⑦ present 自身形参 ⇒ 不报",
+    `fn present(x) { type_of(x) != "()" }
+if present(b) { b }
 `,
     fakeSeed(["b"]),
     [],
-    ["b"],
-    ["dead.v"],
+    [],
+    [],
   );
 
   console.log("=== 扫描器自检（正负对照）===");
@@ -547,7 +576,9 @@ function main() {
   }
   const { uncovered, paramUnwired } = report(result, opts);
   if (strict && (uncovered.length > 0 || paramUnwired.length > 0)) {
-    console.log(`\nSTRICT FAIL: ${uncovered.length} 个被引用变量无注入来源`);
+    console.log(
+      `STRICT FAIL: ① ${uncovered.length} 个被引用变量无注入来源 | ③ ${paramUnwired.length} 个守卫形参实参无来源`,
+    );
     process.exit(1);
   }
   console.log("\n（默认非门禁模式：退出码 0。要卡 ① 请加 --strict）");

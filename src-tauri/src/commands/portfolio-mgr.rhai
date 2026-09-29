@@ -2669,19 +2669,62 @@ let horizon_price_map = #{
 // ── 阶段2（PROPOSAL-stock-decision-four-horizon.md）：四周期独立决策 ──
 // 语义：主决策（pm_result）保持日线口径**不动**；本节为 short/mid/long 各出一档「用该周期
 //   技术评分重新融合的独立决策」，ultra_short 走方案B（单后验 + 档位映射 + 置信下限）。
-// 口径：非技术因子（f2~f13，基本面/情绪/资金/风险）在四周期共用主链同一组信号 —— 它们
-//   本身依附日线证据，逐周期重算无落地来源；仅技术面（f1，滞后趋势）按周期**独立评分**后
-//   把 f1 权重与 f1 信号替换、再融回原贝叶斯式 → 得到该周期自己的 posterior/effective。
-// 数据不足（ts 未注入）时该周期退化用主链 f1_signal，verdict 附「该周期评分缺失」注。
-let non_tech_total_weight = total_weight - f1_weight;
-let non_tech_weighted_signal = weighted_signal - f1_weight * f1_signal;
+// 口径（四周期科学化 Phase A，2026-09-29 重做）：
+//   旧口径 = 「非技术因子四档共用主链同一组权重，只替换 f1 的信号值」—— 那等于**一个预测贴
+//   四个标签**（诊断见 `PLAN-multi-horizon-decision-science.md` 的 E1/E4）。
+//   新口径 = 每档把**全部证据腿**按该档的分析师权重表重新加权后再融合；乘数来自 Rust 注入的
+//   `horizon_leg_weights_json`（权威源 `evidence_weight::get_horizon_base_weights` 经
+//   `DECISION_LEG_ANALYST` 桥投影），脚本侧不写任何倍数；技术腿 f1 除重加权外还换成该档自己的评分。
+//   乘数表缺失 ⇒ 全腿按 1.0 退化 + data_gaps 记一条 + 每档 `weightsSource="fallback_unity"`
+//   （退化可检，不伪装成逐档加权）。
+// 数据不足（ts 未注入）时该档技术腿退回主链 f1_signal，verdict 附「该周期评分缺失」注。
+// 全部证据腿的 (权重, 信号) 一览 —— 逐档重新加权的**唯一被乘对象**。
+// 腿名与 `evidence_weight::DECISION_LEG_ANALYST` 桥表一一对应（f8 不存在，编号沿用历史）。
+let decision_legs = [
+    #{ key: "f1", weight: f1_weight, signal: f1_signal },
+    #{ key: "f2", weight: f2_weight, signal: f2_signal },
+    #{ key: "f3", weight: f3_weight, signal: f3_signal },
+    #{ key: "f4", weight: f4_weight, signal: f4_adjusted },
+    #{ key: "f5", weight: f5_weight, signal: f5_signal },
+    #{ key: "f6", weight: f6_weight, signal: f6_signal },
+    #{ key: "f7", weight: f7_weight, signal: f7_signal },
+    #{ key: "f9", weight: f9_weight, signal: f9_signal },
+    #{ key: "f10", weight: f10_weight, signal: f10_signal },
+    #{ key: "f11", weight: f11_weight, signal: f11_signal },
+    #{ key: "f12", weight: f12_weight, signal: f12_signal },
+    #{ key: "f13", weight: f13_weight, signal: f13_signal },
+];
+// 逐档 × 逐腿乘数：由 Rust 注入（权威源 `get_horizon_base_weights` + 桥表），脚本不写任何倍数。
+let horizon_leg_weights_ok = type_of(horizon_leg_weights_json) == "map" && !horizon_leg_weights_json.is_empty();
+if !horizon_leg_weights_ok {
+    data_gaps.push("逐档证据乘数表缺失 ⇒ 四档证据权重退化为全 1.0（档间只剩各自技术评分之差），本条已在每档 weightsSource 标为 fallback_unity");
+}
+let leg_mult = |h, leg| {
+    if !horizon_leg_weights_ok {
+        1.0
+    } else {
+        let row = horizon_leg_weights_json[h];
+        if type_of(row) != "map" {
+            1.0
+        } else {
+            let m = row[leg];
+            if type_of(m) == "()" { 1.0 } else { m }
+        }
+    }
+};
 
 // 单周期决策闭包。参数 ts = 该周期 totalScore（未注入时 input_mapping 已补 unit）。
 // 用闭包而非 `fn`：rhai 的 `fn` 读不到本文件顶层的 `let` 常量，闭包可捕获外层作用域。
 let horizon_decision = |h, ts, slh, tph, daysh| {
     let f1s = if present(ts) { (ts - 50.0) / 50.0 } else { f1_signal };
-    let tw = f1_weight + non_tech_total_weight;
-    let ws = f1_weight * f1s + non_tech_weighted_signal;
+    let tw = 0.0;
+    let ws = 0.0;
+    for leg in decision_legs {
+        let sig = if leg.key == "f1" { f1s } else { leg.signal };
+        let w = leg.weight * leg_mult.call(h, leg.key);
+        tw += w;
+        ws += w * sig;
+    }
     let avg = if tw > 0.0 { ws / tw } else { 0.0 };
     let hpost = clamp(prior + avg * evidence_scale, 0.0, 1.0);
     let heff = clamp(hpost + risk_bias, 0.0, 1.0);
@@ -2708,6 +2751,7 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
         "positionPct": (hpos*10.0).round()/10.0,
         "confidence": ((heff*100.0)*10.0).round()/10.0,
         "posterior": ((hpost*100.0)*10.0).round()/10.0,
+        "weightsSource": if horizon_leg_weights_ok { "table" } else { "fallback_unity" },
         "stopLossPct": if hpos>0.0 { slh } else { 0.0 },
         "takeProfitPct": if hpos>0.0 { tph } else { 0.0 },
         "expectedHoldingDays": daysh,
@@ -2719,31 +2763,13 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
 // 超短线（方案B）：单后验 = 主链 effective_posterior（日线已是最短摄入周期，无更短评分源），
 //   档位取 `sl_pct_for`/`tp_pct_for`/`days_for`（与主链、价位映射同一批函数，2026-09-29 收口后不再是硬编码）；因单后验信息不足，输出置信下限 0.35 + 文案，供前端提示「超短线为
 //   低确信档」，不以独立评分强算虚假置信。
-let us_action = if effective_posterior >= ACTION_BUY_THRESHOLD { "买入" }
-    else if effective_posterior >= ACTION_INCREASE_THRESHOLD { "增持" }
-    else if effective_posterior >= ACTION_HOLD_THRESHOLD { "持有" }
-    else if effective_posterior >= ACTION_WATCH_THRESHOLD { "观望" }
-    else if effective_posterior >= ACTION_REDUCE_THRESHOLD { "减持" }
-    else { "卖出" };
-let us_odds = if effective_posterior >= 0.70 { 2.5 } else if effective_posterior >= 0.60 { 2.0 }
-    else if effective_posterior >= 0.50 { 1.5 } else if effective_posterior >= 0.42 { 1.5 } else { 0.0 };
-let us_pos = if effective_posterior >= 0.50 && us_odds > 0.001 { pm_kelly_position(effective_posterior, us_odds, COST_PCT, overall_risk) }
-    else { 0.0 };
-let us_sl = sl_pct_for.call("ultra_short");
-let us_tp = tp_pct_for.call("ultra_short");
-let ultra_short_dec = #{
-    "action": us_action,
-    "verdict": `决策=${us_action} 置信=${(effective_posterior*100.0*10.0).round()/10.0}[超短线单后验，置信下限35%]`,
-    "positionPct": (us_pos*10.0).round()/10.0,
-    "confidence": ((effective_posterior*100.0)*10.0).round()/10.0,
-    "posterior": ((effective_posterior*100.0)*10.0).round()/10.0,
-    "stopLossPct": if us_pos>0.0 { us_sl } else { 0.0 },
-    "takeProfitPct": if us_pos>0.0 { us_tp } else { 0.0 },
-    "expectedHoldingDays": days_for.call("ultra_short"),
-    "targetPrice": if us_pos>0.0 && price_ok { (current_price*(1.0+us_tp/100.0)*100.0).round()/100.0 } else { () },
-    "stopLoss": if us_pos>0.0 && price_ok { (current_price*(1.0-us_sl/100.0)*100.0).round()/100.0 } else { () },
-    "confLowerBound": 0.35,
-};
+// 超短线（Phase A 起重做）：走**同一逐档融合**（该档分析师乘数 + 日线技术评分），
+//   不再直接取主链 effective_posterior —— 旧「方案B」让超短档与主档恒等，还把
+//   「日线是最短摄入粒度」与「该档没有独立证据权重」两件事混成一件。
+//   粒度限制本身仍然真实，故保留 confLowerBound 0.35 与文案（Phase B 打通 60 分钟通路后重估）。
+let ultra_short_dec = horizon_decision.call("ultra_short", totalScore, sl_pct_for.call("ultra_short"), tp_pct_for.call("ultra_short"), days_for.call("ultra_short"));
+ultra_short_dec["confLowerBound"] = 0.35;
+ultra_short_dec["verdict"] = ultra_short_dec["verdict"] + "[超短复用日线评分粒度，置信下限35%]";
 
 // 四周期独立决策汇总（camelCase 键，供前端按周期 Tab 分组展示）
 // 短/中/长分别注入对应周期评分（seed 新增 t-scoring-week / t-scoring-month 节点供给）

@@ -323,6 +323,61 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
     w
 }
 
+/// 决策腿（`portfolio-mgr.rhai` 的 f1~f13）→ 分析师 id 的**唯一桥表**。
+///
+/// 为什么必须有它（四周期科学化 Phase A）：「同一批证据、逐档重新加权」要求把
+/// 按**分析师 id** 索引的周期权重表，作用到按**因子腿**融合的决策脚本上；两侧没有
+/// 登记的桥就会各写一套倍数 ⇒ 又回到手抄多副本。
+///
+/// `None` 的腿**不是分析师证据**（风险分类、数据质量、trader 观点都是元约束），
+/// 逐档乘数恒 1.0 —— 不得为了「看起来四档有差异」硬塞一个分析师进去。
+pub const DECISION_LEG_ANALYST: &[(&str, Option<&str>)] = &[
+    ("f1", Some("a-technical")),    // 技术面 / 趋势
+    ("f2", Some("research-mgr")),   // 分析师共识
+    ("f3", Some("a-news")),         // 催化剂 / 公告
+    ("f4", None),                   // 风险分类（元约束）
+    ("f5", Some("value-investor")), // 估值（DCF / 格雷厄姆腿）
+    ("f6", None),                   // 数据质量（元约束）
+    ("f7", None),                   // trader 观点（不属于四档分析师证据）
+    ("f9", Some("capital")),        // 资金流
+    ("f10", Some("a-hot-money")),   // 筹码面（增减持 / 解禁 / 大宗）
+    ("f11", Some("a-sentiment")),   // PACE 情绪
+    ("f12", Some("a-technical")),   // 动量（技术侧）
+    ("f13", Some("a-sector")),      // 产业链瓶颈
+];
+
+/// 注入 Rhai 的「逐档 × 逐腿」乘数表：`{ultra_short: {f1: 1.3, …}, …}`。
+///
+/// 数值**全部派生**自 [`get_horizon_base_weights`]，本函数不新增任何一个数字；
+/// 表里查不到该分析师 ⇒ 乘数 1.0（该腿不变）并 `warn`，不静默。
+/// 由 `stock_workflow/hooks.rs` 注入为变量 `horizon_leg_weights_json`，
+/// 脚本侧**禁止**再手抄任何一档的权重倍数（同 `horizon_consts_json` 的纪律）。
+pub fn horizon_leg_multipliers() -> serde_json::Value {
+    let mut tiers = serde_json::Map::new();
+    for p in Period::ALL {
+        let weights = get_horizon_base_weights(p.as_str());
+        let mut legs = serde_json::Map::new();
+        for (leg, analyst) in DECISION_LEG_ANALYST {
+            let mult = match analyst {
+                Some(id) => match weights.get(*id) {
+                    Some(v) => *v,
+                    None => {
+                        tracing::warn!(
+                            "[evidence_weight] 周期权重表缺分析师 '{id}'（腿 {leg}，档 {}）⇒ 该腿乘数按 1.0",
+                            p.as_str()
+                        );
+                        1.0
+                    },
+                },
+                None => 1.0,
+            };
+            legs.insert((*leg).to_string(), serde_json::Value::from(mult));
+        }
+        tiers.insert(p.as_str().to_string(), serde_json::Value::Object(legs));
+    }
+    serde_json::Value::Object(tiers)
+}
+
 /// 计算市场周期调节系数
 ///
 /// 核心逻辑:
@@ -1088,5 +1143,74 @@ mod tests {
         let l = Period::Long.position_multiplier();
         assert!(u < s && s < m && m < l, "乘数应随周期单调递增: {u}/{s}/{m}/{l}");
         assert_eq!((u, s, m, l), (0.6, 0.8, 1.0, 1.2));
+    }
+
+    /// 逐档 × 逐腿乘数表必须四档齐、腿数与桥表一致（缺档 ⇒ 脚本侧该档无从取值）。
+    #[test]
+    fn horizon_leg_multipliers_covers_every_tier_and_leg() {
+        let map = horizon_leg_multipliers();
+        for p in Period::ALL {
+            let row = map.get(p.as_str()).unwrap_or_else(|| panic!("乘数表缺档 {}", p.as_str()));
+            let obj = row.as_object().unwrap_or_else(|| panic!("档 {} 不是对象", p.as_str()));
+            assert_eq!(
+                obj.len(),
+                DECISION_LEG_ANALYST.len(),
+                "档 {} 腿数 {} ≠ 桥表 {}",
+                p.as_str(),
+                obj.len(),
+                DECISION_LEG_ANALYST.len()
+            );
+        }
+    }
+
+    /// 元约束腿（风险分类 / 数据质量 / trader 观点）**不得随周期变** —— 它们不是分析师证据。
+    #[test]
+    fn meta_legs_are_scale_invariant() {
+        let map = horizon_leg_multipliers();
+        for leg in ["f4", "f6", "f7"] {
+            for p in Period::ALL {
+                let got = map[p.as_str()][leg].as_f64().unwrap_or_else(|| panic!("腿 {leg} 缺值"));
+                assert_eq!(got, 1.0, "元约束腿 {leg} 在档 {} 被改了乘数", p.as_str());
+            }
+        }
+    }
+
+    /// 派生性：表里每个数都必须等于该档分析师权重，**不得有任何新数字**。
+    #[test]
+    fn multipliers_are_derived_from_the_horizon_table() {
+        let map = horizon_leg_multipliers();
+        for p in Period::ALL {
+            let weights = get_horizon_base_weights(p.as_str());
+            for (leg, analyst) in DECISION_LEG_ANALYST {
+                let got = map[p.as_str()][*leg].as_f64().expect("腿应有值");
+                let want = match analyst {
+                    Some(id) => *weights.get(*id).unwrap_or(&1.0),
+                    None => 1.0,
+                };
+                assert!(
+                    (got - want).abs() <= f64::EPSILON,
+                    "档 {} 腿 {leg}：表给 {got}，权重表给 {want} ⇒ 乘数表被另写了数字",
+                    p.as_str()
+                );
+            }
+        }
+    }
+
+    /// 尺度语义锁：技术腿随周期衰减、估值腿随周期增长（防有人把表改平）。
+    #[test]
+    fn technical_leg_decays_and_valuation_leg_grows_with_horizon() {
+        let map = horizon_leg_multipliers();
+        let at = |leg: &str, tier: Period| map[tier.as_str()][leg].as_f64().expect("腿应有值");
+        let (u, s, m, l) = (Period::UltraShort, Period::Short, Period::Mid, Period::Long);
+        assert!(
+            at("f1", l) < at("f1", m) && at("f1", m) < at("f1", s) && at("f1", u) > at("f1", l),
+            "技术腿应随周期变弱: {}",
+            ["ultra_short", "short", "mid", "long"].map(|t| map[t]["f1"].to_string()).join("/")
+        );
+        assert!(
+            at("f5", u) < at("f5", m) && at("f5", m) < at("f5", l),
+            "估值腿应随周期变强: {}",
+            ["ultra_short", "short", "mid", "long"].map(|t| map[t]["f5"].to_string()).join("/")
+        );
     }
 }

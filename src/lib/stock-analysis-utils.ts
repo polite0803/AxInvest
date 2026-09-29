@@ -1115,6 +1115,13 @@ export interface StockConsensus {
 }
 
 /** 分析师按 ID 后缀的领域权重：value=价值/长线, technical=技术/短线, sentiment=情绪, macro=宏观 */
+/**
+ * ⚠ 本表是后端 `evidence_weight::get_horizon_base_weights` 的**离线兜底副本**
+ * （仅在 `compute_evidence_weights` 命令失败时由 `computeStockConsensus` 使用）。
+ * 逐字段一致性由 `node scripts/check-horizon-weight-parity.mjs` 把守 —— 缺键会被
+ * `getAnalystWeight` 的 default 静默吸收成 1.0（2026-09-29 实测曾缺 6 项）。
+ * 新增/改动档位权重：先改后端权威源，再同步本表，然后跑该门。
+ */
 const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
   // 中线决策：基本面与技术面均衡，各分析师权重接近
   mid: {
@@ -1161,6 +1168,9 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
     "a-sentiment": 1.3,
     "sentiment": 1.3,
     "a-news": 1.2,
+    "macro": 0.7,
+    "a-sector": 0.8,
+    "research-mgr": 1.0,
     "value-investor": 0.5,
     "a-fundamentals": 0.6,
     "fundamental": 0.6,
@@ -1176,6 +1186,9 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
     "a-news": 1.5,
     "a-market": 1.3,
     "value-investor": 0.3,
+    "a-technical": 1.3,
+    "macro": 0.3,
+    "a-sector": 0.5,
     "a-fundamentals": 0.3,
     "fundamental": 0.3,
     "a-macro": 0.3,

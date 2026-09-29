@@ -1230,21 +1230,38 @@ pub async fn execute_mcp_tool(
             if code.is_empty() {
                 return Err("compute_scoring 缺少 stock_code 参数".to_string());
             }
-            // 允许调用方传入 kline_json（避免重复拉取）；若未提供则现场拉取 K 线。
-            // PROPOSAL 阶段 2（四周期独立决策）：`period` 决定技术指标与评分所在周期
-            //（daily/weekly/monthly）。缺省 daily —— 与历史行为一致，无参路径零回归。
-            let period = arguments["period"].as_str().unwrap_or("daily");
-            let period = if period == "weekly" || period == "monthly" {
-                period
-            } else {
-                "daily"
-            };
-            let klines = if let Some(kj) = arguments["kline_json"].as_str() {
+            // 允许调用方传入 kline_json（避免重复拉取）；若未提供则按尺度现场拉取。
+            // 四周期科学化 Phase B：`period` 由 `scale::ScaleProfile::resolve` 解析 ——
+            // 五尺度（hourly/daily/weekly/monthly/quarterly），**未知值显式失败**，
+            // 不再像旧实现那样把任何拼错/未支持的取值静默归成 daily。
+            // 缺省仍是 daily（无参路径零回归）。
+            let period_arg = arguments["period"].as_str().unwrap_or("daily");
+            let profile =
+                crate::scale::ScaleProfile::resolve(period_arg).map_err(|e| e.to_string())?;
+            let mut klines = if let Some(kj) = arguments["kline_json"].as_str() {
+                // ⚠ 传入的 kline_json 必须与 `profile.vendor_period` 同口径
+                //   （季线尺度传的是**月线**，本函数会就地聚合）。
                 serde_json::from_str::<Vec<crate::types::KLine>>(kj)
                     .map_err(|e| format!("kline_json 解析失败: {e}"))?
             } else {
-                client.get_klines(code, period, 120).await.map_err(|e| e.to_string())?
+                client
+                    .get_klines(code, profile.vendor_period, profile.fetch_limit)
+                    .await
+                    .map_err(|e| e.to_string())?
             };
+            if profile.scale == crate::scale::Scale::Quarterly {
+                klines = crate::scale::aggregate_monthly_to_quarterly(&klines);
+            }
+            // 样本不足 ⇒ 拒绝出分。用 3 根 bar 算 MA60 会产出一个「看起来正常」的假分数，
+            // 正是本项目最反对的形态（拿不到可以，伪装不行）。
+            if klines.len() < profile.min_bars {
+                return Err(format!(
+                    "compute_scoring: 尺度 {} 仅 {} 根 bar，少于出分所需的 {} 根 ⇒ 拒绝出分",
+                    profile.period,
+                    klines.len(),
+                    profile.min_bars
+                ));
+            }
             let ind = crate::indicators::compute_indicators(code, &klines);
             let latest_price = klines.last().map(|k| k.close).unwrap_or(0.0);
             let score = crate::scoring::ScoringEngine::score(&ind, latest_price, None);
@@ -1287,7 +1304,7 @@ pub async fn execute_mcp_tool(
                 // ── #7 新增: 别名 + 原始指标 + 占位字段 ──
                 "totalScore": score_json["total"], // 别名,供 input_mapping 引用
                 "currentPrice": latest_price,       // 最新收盘价
-                "period": period,                   // 本次评分所在周期（daily/weekly/monthly），供多周期决策区分档位
+                "period": profile.period,                 // 本次评分所在尺度（hourly/daily/weekly/monthly/quarterly），供多周期决策区分档位
                 "indicators": ind_json,             // 完整技术指标(ma5/ma20/bias_ma5/macd_dif/rsi14/boll_upper 等)
                 // kline_json: K 线原始数据（数量=limit），供 trader 节点的 ATR/Kelly/MC 工具使用
                 "kline_json": kline_json,

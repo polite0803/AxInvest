@@ -15,6 +15,7 @@ use axagent_analysis_engine::blackboard::build_blackboard_snapshot;
 use axagent_analysis_engine::stock_reflection::{AnalysisStepResult, StockAnalysisOutcome};
 use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::price_alerts;
+use axagent_entities::reflection_lessons;
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
 use axagent_harness::IpcEventName;
@@ -2234,25 +2235,18 @@ pub(crate) async fn fetch_stock_lessons(
     horizon: Option<&str>,
 ) -> (Option<String>, Vec<String>) {
     use chrono::Utc;
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
     // ── same_ticker: 3 条同 ticker 近 90 天已完成反思 ──
+    // 查询经 dao 下沉（`axagent_dao::repo::stock_lesson_queries`），命令层不得直连
+    //（分层门禁规则 1）；档过滤语义见该模块文档，调用方只做 take(3) 截断。
     let three_months_ago = Utc::now() - chrono::Duration::days(90);
-    let same_ticker_q = stock_reflections::Entity::find()
-        .filter(stock_reflections::Column::StockCode.eq(stock_code))
-        .filter(stock_reflections::Column::Status.eq("completed")) // 只注入已 resolve 的教训
-        .filter(stock_reflections::Column::CreatedAt.gte(three_months_ago.timestamp_millis()));
-    let same_ticker_q = match horizon {
-        Some(h) => same_ticker_q.filter(
-            sea_orm::Condition::any()
-                .add(stock_reflections::Column::Horizon.eq(h))
-                .add(stock_reflections::Column::Horizon.is_null()),
-        ),
-        None => same_ticker_q,
-    };
-    let same_ticker: Vec<stock_reflections::Model> = same_ticker_q
-        .order_by_desc(stock_reflections::Column::CreatedAt)
-        .all(db)
+    let same_ticker: Vec<stock_reflections::Model> =
+        axagent_dao::repo::stock_lesson_queries::fetch_same_ticker_completed(
+            db,
+            stock_code,
+            three_months_ago.timestamp_millis(),
+            horizon,
+        )
         .await
         .unwrap_or_default()
         .into_iter()
@@ -2260,21 +2254,14 @@ pub(crate) async fn fetch_stock_lessons(
         .collect();
 
     // ── all_recent: 2 条所有 ticker 近 7 天(跨 ticker 市场级教训)──
+    // 同上经 dao 下沉；调用方只做「排除本股 + take(2)」。
     let seven_days_ago = Utc::now() - chrono::Duration::days(7);
-    let all_recent_q = stock_reflections::Entity::find()
-        .filter(stock_reflections::Column::CreatedAt.gte(seven_days_ago.timestamp_millis()))
-        .filter(stock_reflections::Column::Status.eq("completed")); // 只看已 resolve 的
-    let all_recent_q = match horizon {
-        Some(h) => all_recent_q.filter(
-            sea_orm::Condition::any()
-                .add(stock_reflections::Column::Horizon.eq(h))
-                .add(stock_reflections::Column::Horizon.is_null()),
-        ),
-        None => all_recent_q,
-    };
-    let all_recent: Vec<stock_reflections::Model> = all_recent_q
-        .order_by_desc(stock_reflections::Column::CreatedAt)
-        .all(db)
+    let all_recent: Vec<stock_reflections::Model> =
+        axagent_dao::repo::stock_lesson_queries::fetch_recent_completed(
+            db,
+            seven_days_ago.timestamp_millis(),
+            horizon,
+        )
         .await
         .unwrap_or_default()
         .into_iter()
@@ -2352,34 +2339,19 @@ async fn fetch_rule_lessons(
     db: &sea_orm::DatabaseConnection,
     horizon: Option<&str>,
 ) -> (Option<String>, Vec<String>) {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
-
     // ── [F1 闭环] 规则化教训：从 reflection_lessons 表查询 ──
     // 修复首轮分析发现的"reflection_lessons 闭环断裂"问题：
     // extract_lesson_to_rule 会把高质量 lesson_summary 写入 reflection_lessons,
     // 但原 fetch_stock_lessons 只查 stock_reflections,规则化教训永远不被消费。
     // 现补充查询 reflection_lessons 表的规则化教训（按 confidence 降序取前 5 条）。
-    use axagent_entities::reflection_lessons;
-    // 〇-B v2 第 4 条：同档优先 + 通用规则（horizon NULL）；**跨档不进 prompt**。
-    let q = reflection_lessons::Entity::find()
-        .filter(reflection_lessons::Column::StockCode.eq(stock_code))
-        .filter(reflection_lessons::Column::Confidence.gte(0.3)); // 过滤低质量/已废弃规则
-    let q = match horizon {
-        Some(h) => q.filter(
-            sea_orm::Condition::any()
-                .add(reflection_lessons::Column::Horizon.eq(h))
-                .add(reflection_lessons::Column::Horizon.is_null()),
-        ),
-        None => q,
-    };
-    let rule_lessons: Vec<reflection_lessons::Model> = q
-        .order_by_desc(reflection_lessons::Column::Confidence)
-        .all(db)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .take(5)
-        .collect();
+    // 查询经 dao 下沉（置信度下限与档过滤见模块文档），调用方只做 take(5)。
+    let rule_lessons: Vec<reflection_lessons::Model> =
+        axagent_dao::repo::stock_lesson_queries::fetch_rule_lessons(db, stock_code, 0.3, horizon)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .take(5)
+            .collect();
 
     if rule_lessons.is_empty() {
         return (None, Vec::new());

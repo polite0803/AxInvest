@@ -102,6 +102,13 @@ fn expand_horizon_samples(json: &str) -> Option<Vec<DecisionPerformanceSample>> 
                 .and_then(|v| v.as_f64())
                 .filter(|v| v.is_finite()),
             target_reached: market.and_then(|m| m.get("targetReached")).and_then(|v| v.as_bool()),
+            // Phase E：IC 的预测侧。旧记录无 confidence 字段 → None（不进 IC 分母），
+            // 不做「用 action 反推置信度」这类填充 —— 那是把缺失伪装成测量。
+            confidence: entry
+                .get("decision")
+                .and_then(|d| d.get("confidence"))
+                .and_then(|v| v.as_f64())
+                .filter(|v| v.is_finite()),
             data_source: if status == "legacy" {
                 SampleDataSource::Legacy
             } else {
@@ -208,6 +215,9 @@ pub(crate) async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<Hitra
             return_pct: sp.return_pct,
             alpha_pct,
             target_reached,
+            // legacy 回退路径没有逐档决策，置信度只能是 None —— 该样本进命中率
+            // 分母，但**不进 IC 分母**（IC 缺席由 `ic_status="no_confidence"` 点名）。
+            confidence: None,
             data_source: SampleDataSource::Legacy,
         });
     }
@@ -244,7 +254,7 @@ mod reflection_stats_command_tests {
         serde_json::json!({
             "ultra_short": {
                 "status": "mature",
-                "decision": { "action": "买入" },
+                "decision": { "action": "买入", "confidence": 62.0 },
                 "market": { "returnPct": 3.1, "alphaPct": 1.4, "targetReached": true },
                 "evaluation": { "wasCorrect": 1 }
             },
@@ -278,7 +288,42 @@ mod reflection_stats_command_tests {
         assert_eq!(s.return_pct, 3.1);
         assert_eq!(s.alpha_pct, Some(1.4));
         assert_eq!(s.target_reached, Some(true));
+        // IC 的预测侧：键名与产出方（`reflection.rs::build_horizon_results_json` 的
+        // `"confidence": decision.confidence`）逐字对齐，口径是 0–100 不是 0–1。
+        assert_eq!(s.confidence, Some(62.0));
         assert_eq!(s.data_source, SampleDataSource::Reflection);
+    }
+
+    /// 旧记录 / 产出方漏写 confidence 时必须是 None ⇒ 该样本进命中率但**不进 IC 分母**，
+    /// 由 `ic_status="no_confidence"` 点名。若这里兜底成 0，IC 会被一批假 0 拉成负相关 ——
+    /// 把「拿不到」伪装成「测到 0」正是本轮要避免的形态。
+    #[test]
+    fn missing_confidence_stays_none_instead_of_zero_fill() {
+        let json = serde_json::json!({
+            "short": {
+                "status": "mature",
+                "decision": { "action": "买入" },
+                "market": { "returnPct": 2.0 },
+                "evaluation": { "wasCorrect": 1 }
+            }
+        })
+        .to_string();
+        let samples = expand_horizon_samples(&json).unwrap();
+        assert_eq!(samples.len(), 1);
+        assert_eq!(samples[0].confidence, None);
+        assert_eq!(samples[0].was_correct, 1);
+
+        // 非有限值同样归 None（产出方写出 NaN/INF 时不进 IC）
+        let nan = serde_json::json!({
+            "short": {
+                "status": "mature",
+                "decision": { "action": "买入", "confidence": null },
+                "market": { "returnPct": 2.0 },
+                "evaluation": { "wasCorrect": 1 }
+            }
+        })
+        .to_string();
+        assert_eq!(expand_horizon_samples(&nan).unwrap()[0].confidence, None);
     }
 
     #[test]

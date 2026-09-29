@@ -2749,6 +2749,34 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
+            // Phase D-2：单标的风险预算 R（% of 组合）。仓位 = min(凯利%, 100×R/止损%)
+            // ⇒ 止损被打掉时组合恰损失 R%。它替代「经验周期乘数」承担跨档差异。
+            name: "risk_budget_pct".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.5),
+            description: Some("单标的风险预算 R（% of 组合，止损被打掉时的组合损失上限）".into()),
+            is_secret: false,
+        },
+        Variable {
+            // 四周期科学化 Phase D：止损 = k1 × σ_daily × √持有天数。
+            // 1.2 的含义是「止损放在该持有期典型位移的 1.2 倍处」，与标的波动、持有期自动同变；
+            // 缺 σ 时脚本退回固定百分比档并在 stopSource 标 fallback_pct。
+            name: "stop_vol_mult".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(1.2),
+            description: Some("止损波动率乘数 k1（止损 = k1 × σ_daily × √持有天数）".into()),
+            is_secret: false,
+        },
+        Variable {
+            // 同上，止盈侧（默认 2.0 ⇒ 盈亏比 1:1.67，与旧固定档 5/3≈1.67 同量级，
+            // 改动只把「不看波动的绝对数」换成「按波动的相对数」，不改变风险回报偏好）。
+            name: "take_profit_vol_mult".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(2.0),
+            description: Some("止盈波动率乘数 k2（止盈 = k2 × σ_daily × √持有天数）".into()),
+            is_secret: false,
+        },
+        Variable {
             // 四周期科学化 Phase C：逐档先验收缩强度 κ。
             // prior_h = (n_h·p_h + κ·p_pool)/(n_h+κ) —— κ→0 完全采信该档自身命中率，
             // κ→∞ 退回四档共用先验（即旧行为）。默认值与 `horizon_prior::DEFAULT_KAPPA` 同值。

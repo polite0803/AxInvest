@@ -27,14 +27,19 @@ let tp_pct_ultra_short_v = if present(tp_pct_ultra_short) { tp_pct_ultra_short }
 let tp_pct_short_v = if present(tp_pct_short) { tp_pct_short } else { 10.0 };
 let tp_pct_mid_v = if present(tp_pct_mid) { tp_pct_mid } else { 18.0 };
 let tp_pct_long_v = if present(tp_pct_long) { tp_pct_long } else { 30.0 };
-let sl_pct_for = |h| switch h {
+"#;
+
+/// Phase D 起固定百分比档退为「σ 不可得时的兜底」，纯「档 → 值」映射；
+/// 与脚本 `sl_pct_fallback_for` / `tp_pct_fallback_for` 逐字一致。
+const TIER_FALLBACK_SRC: &str = r#"
+let sl_pct_fallback_for = |h| switch h {
     "ultra_short" => sl_pct_ultra_short_v,
     "short" => sl_pct_short_v,
     "mid" => sl_pct_mid_v,
     "long" => sl_pct_long_v,
     _ => 5.0,
 };
-let tp_pct_for = |h| switch h {
+let tp_pct_fallback_for = |h| switch h {
     "ultra_short" => tp_pct_ultra_short_v,
     "short" => tp_pct_short_v,
     "mid" => tp_pct_mid_v,
@@ -46,10 +51,10 @@ let tp_pct_for = |h| switch h {
 /// 输出四档各自的档位%，供断言。
 const OUT: &str = r#"
 #{
-    "ultra_short": #{ "sl": sl_pct_for.call("ultra_short"), "tp": tp_pct_for.call("ultra_short") },
-    "short": #{ "sl": sl_pct_for.call("short"), "tp": tp_pct_for.call("short") },
-    "mid": #{ "sl": sl_pct_for.call("mid"), "tp": tp_pct_for.call("mid") },
-    "long": #{ "sl": sl_pct_for.call("long"), "tp": tp_pct_for.call("long") },
+    "ultra_short": #{ "sl": sl_pct_fallback_for.call("ultra_short"), "tp": tp_pct_fallback_for.call("ultra_short") },
+    "short": #{ "sl": sl_pct_fallback_for.call("short"), "tp": tp_pct_fallback_for.call("short") },
+    "mid": #{ "sl": sl_pct_fallback_for.call("mid"), "tp": tp_pct_fallback_for.call("mid") },
+    "long": #{ "sl": sl_pct_fallback_for.call("long"), "tp": tp_pct_fallback_for.call("long") },
 }
 "#;
 
@@ -60,7 +65,7 @@ type Tier = (String, f64, f64);
 /// `tuned` 为空 = 八项全部注入 `unit`（V57 对 `present(x)` 名字的缺省填充），走脚本内默认值。
 fn tiers(tuned: &[(&str, f64)]) -> Vec<Tier> {
     let engine = Engine::new();
-    let script = format!("{PRESENT_FN}{TIER_PARAMS_SRC}{OUT}");
+    let script = format!("{PRESENT_FN}{TIER_PARAMS_SRC}{TIER_FALLBACK_SRC}{OUT}");
     let mut scope = rhai::Scope::new();
     for name in [
         "sl_pct_ultra_short",
@@ -105,7 +110,11 @@ fn tier_params_block_matches_source_verbatim() {
     let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
     assert!(
         pm.contains(TIER_PARAMS_SRC.trim()),
-        "portfolio-mgr.rhai 的逐档止损/止盈段与本测试副本已漂移，请同步"
+        "portfolio-mgr.rhai 的八项档位缺省段与本测试副本已漂移，请同步"
+    );
+    assert!(
+        pm.contains(TIER_FALLBACK_SRC.trim()),
+        "portfolio-mgr.rhai 的兜底档位映射（sl_pct_fallback_for / tp_pct_fallback_for）与副本已漂移"
     );
     assert!(pm.contains(PRESENT_FN.trim()), "present 定义已变，请同步本副本");
     assert!(
@@ -316,7 +325,7 @@ fn missing_table_falls_back_to_unity() {
 /// 逐档先验取值器 —— 与 `portfolio-mgr.rhai` 的 `prior_for` 逐字一致（Phase C）。
 const PRIOR_FOR_FN: &str = r#"
 let prior_for = |h| {
-    let row = horizon_prior_ok ? horizon_prior_json[h] : ();
+    let row = if horizon_prior_ok { horizon_prior_json[h] } else { () };
     if type_of(row) == "map" && type_of(row["prior"]) != "()" {
         #{ "value": row["prior"], "source": row["source"], "samples": row["samples"] }
     } else {
@@ -392,5 +401,35 @@ fn per_tier_prior_is_wired_into_the_fusion() {
     assert!(
         pm.contains("\"priorSource\": hp[\"source\"]"),
         "每档必须透出先验来源，否则「收缩自本档」与「退回共用」在产出里不可区分"
+    );
+}
+
+/// 锁（Phase D）：止损/止盈必须由「σ_daily × √持有天数」推导，且降级路径与来源标注齐全。
+/// 这条锁的判别力：若有人把 `sl_pct_for` 改回纯 switch（不看波动），
+/// 前两断言当场红；若删掉降级标注，第三条红 —— 正是「同屏两个读数」被禁止的形态。
+#[test]
+fn stop_and_take_profit_are_volatility_derived_with_labeled_fallback() {
+    let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
+    assert!(
+        pm.contains("clamp(stop_vol_mult_v * mv, 0.5, STOP_CAP_PCT)")
+            && pm.contains("clamp(tp_vol_mult_v * mv, 1.0, TP_CAP_PCT)"),
+        "止损/止盈应由 k·σ·√h 推导（含语义上限截断），实得形态不符"
+    );
+    assert!(
+        pm.contains("pm_vol_move_pct(kline_bars, VOL_LOOKBACK_DAYS, days_for.call(h))"),
+        "该档位移必须按**该档持有天数**算（days_for），不能四档共用一个数"
+    );
+    assert!(
+        pm.contains("if mv <= 0.0 {\n        sl_pct_fallback_for.call(h)"),
+        "σ 不可得时必须退回可调百分比档（而不是算出 0% 止损）"
+    );
+    assert!(
+        pm.contains("\"stopSource\": stop_source_for.call(h)")
+            && pm.contains("\"stopSource\": stop_source_for.call(time_horizon)"),
+        "每档与主档都要输出 stopSource，否则「波动率口径」与「退回固定档」在产出里无法区分"
+    );
+    assert!(
+        pm.contains("let stop_vol_mult_v = if present(stop_vol_mult)"),
+        "k1 必须经 present() 守卫读取（旧快照缺该变量时不得抛 Variable not found）"
     );
 }

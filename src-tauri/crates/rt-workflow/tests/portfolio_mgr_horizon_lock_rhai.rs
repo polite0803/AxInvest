@@ -111,10 +111,25 @@ fn primary_tier_block_matches_source_verbatim() {
         tier_at < kelly_at,
         "定档段必须在凯利仓位之前：周期乘数当前在 char {tier_at}，仓位在 {kelly_at}"
     );
-    // 反向锁③：仓位必须真的乘上它（而不是只算不用）
+    // 反向锁③：仓位必须真的消费周期量（而不是只算不用）。Phase D-2 后主口径是
+    // **风险预算**，经验乘数只在 σ 不可得的降级分支存活 ⇒ 两条分支都逐字锁住，
+    // 且锁 `position_source` 的两种取值：谁被用上了必须在输出里可反解。
     assert!(
-        pm.contains("position_pct_raw * horizon_position_mult"),
-        "主决策仓位必须消费 horizon_position_mult"
+        pm.contains(
+            "\tlet position_pct = if type_of(main_risk_budget_pct) == \"()\" {\n\t\t\
+             clamp(position_pct_raw * horizon_position_mult, 0.0, 95.0)\n\t\
+             } else {\n\t\t\
+             clamp(min(position_pct_raw, main_risk_budget_pct), 0.0, 95.0)\n\t};"
+        ),
+        "主决策仓位口径已漂移：risk_budget（min(凯利, 100·R/止损%)）与降级分支（凯利×周期乘数）必须逐字如上"
+    );
+    assert!(
+        pm.contains("\"fallback_kelly_x_mult\"") && pm.contains("\"risk_budget\""),
+        "仓位来源标注必须两值齐备 —— 缺一个就等于把降级伪装成主口径"
+    );
+    assert!(
+        pm.contains("let hconf = pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS);"),
+        "「长线更值得」走判定侧 SNR √h，这行不在则收益侧周期优势又变回仓位乘数"
     );
 }
 

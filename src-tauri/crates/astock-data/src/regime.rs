@@ -137,22 +137,22 @@ impl RegimeDetector {
         report
     }
 
-    /// 20 日波动率(年化,%)
-    /// sigma_daily * sqrt(252) * 100
+    /// 20 日波动率(年化,%) = `σ_daily(样本) × √252`
+    ///
+    /// 2026-09-29 口径统一（四周期科学化 Phase D）：此前本函数用**总体方差 ÷n**，
+    /// 而本仓 `harness::indicators::sharpe_components` 早已修成**样本方差 ÷(n−1)**
+    /// （测试名 `sharpe_matches_astock_data_legacy_formula_after_fix` 记录了那次修复），
+    /// `harness::indicators::realized_vol_pct` 也是样本口径 ⇒ 同一仓库两种 σ 就是口径漂移。
+    /// 现统一委托给 `realized_vol_pct`，本仓只剩一份 σ 实现。
+    ///
+    /// 两处**已知且刻意**的行为变化：
+    /// 1. 数值整体抬高 `√(n/(n−1))`（n=20 ⇒ ×1.026，即 +2.6%）。分类阈值 50/30/15 是
+    ///    **市场波动水平的经济刻度**，不是估计器刻度 ⇒ 不随之平移；边界附近的样本
+    ///    （如旧值 49.0% → 新值 50.3%）改判属于偏差修正，不是回归。
+    /// 2. 含非正价格时返回 `None`（旧实现会算出 inf/NaN 并继续参与打分）。
     fn volatility(closes: &[f64], n: usize) -> Option<f64> {
-        if closes.len() < n + 1 {
-            return None;
-        }
-        let slice = &closes[closes.len() - n - 1..];
-        let returns: Vec<f64> = slice.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
-        if returns.is_empty() {
-            return None;
-        }
-        let mean: f64 = returns.iter().sum::<f64>() / returns.len() as f64;
-        let variance: f64 =
-            returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / returns.len() as f64;
-        let std_daily = variance.sqrt();
-        Some(std_daily * (252_f64).sqrt() * 100.0)
+        axagent_harness::indicators::realized_vol_pct(closes, n)
+            .map(|sigma_daily_pct| sigma_daily_pct * (252_f64).sqrt())
     }
 
     /// 布林带宽度(upper - lower) / mid
@@ -386,5 +386,32 @@ mod tests {
         let vol = RegimeDetector::volatility(&prices, 20);
         assert!(vol.is_some());
         assert!(vol.unwrap() > 0.0);
+    }
+
+    /// 口径统一的**量化影响**必须可复算：新值 = 旧总体方差值 × √(n/(n−1))。
+    /// 有人日后说「σ 没变」时，这条测试会替他纠正。
+    #[test]
+    fn volatility_now_uses_sample_variance_and_the_shift_is_exactly_sqrt_n_over_n_minus_1() {
+        let prices: Vec<f64> = (0..30).map(|i| 10.0 + (i as f64 * 0.37).sin()).collect();
+        let n = 20usize;
+        let slice = &prices[prices.len() - n - 1..];
+        let rets: Vec<f64> = slice.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
+        let m = rets.iter().sum::<f64>() / rets.len() as f64;
+        let nn = rets.len() as f64;
+        let pop = (rets.iter().map(|r| (r - m).powi(2)).sum::<f64>() / nn).sqrt();
+        let want = pop * (nn / (nn - 1.0)).sqrt() * (252_f64).sqrt() * 100.0;
+        let got = RegimeDetector::volatility(&prices, n).expect("应可计算");
+        assert!(
+            (got - want).abs() < 1e-8,
+            "σ 口径与「总体 × √(n/(n−1))」不符：got {got}, want {want}"
+        );
+    }
+
+    /// 含非正价格 ⇒ 收益率无定义，返回 None（旧实现会算出 inf/NaN 继续参与打分）。
+    #[test]
+    fn volatility_rejects_non_positive_prices() {
+        let mut prices: Vec<f64> = (0..30).map(|_| 10.0).collect();
+        prices[15] = 0.0;
+        assert!(RegimeDetector::volatility(&prices, 20).is_none());
     }
 }

@@ -193,7 +193,44 @@ export function ReflectionPanel() {
       key: "avgAlphaPct",
       render: (v: number | null) => formatMetric(v),
     },
+    {
+      // Phase E 观测面：rank IC（置信度 × 实际收益的 Spearman 秩相关）。
+      // null 必须点名**哪一种**缺席 —— 三种缺席要补的东西完全不同（补字段 / 攒样本 /
+      // 换标的），渲染成一个笼统的「暂无数据」就是把结构性缺口压成歧义。
+      title: t("stockAnalysis.reflection.hitrateRankIc"),
+      dataIndex: "rankIc",
+      key: "rankIc",
+      width: 110,
+      render: (v: number | null, row: HitrateGroup) => {
+        if (v == null) {
+          const missing: Record<string, string> = {
+            no_confidence: t("stockAnalysis.reflection.hitrateIcNoConfidence"),
+            insufficient_ic_samples: t("stockAnalysis.reflection.hitrateIcInsufficient"),
+            degenerate_variance: t("stockAnalysis.reflection.hitrateIcDegenerate"),
+          };
+          return missing[row.icStatus] ?? t("stockAnalysis.reflection.noData");
+        }
+        return v.toFixed(3);
+      },
+    },
+    {
+      title: t("stockAnalysis.reflection.hitrateIcSamples"),
+      dataIndex: "icSamples",
+      key: "icSamples",
+      width: 80,
+    },
   ];
+  /** 预测半衰期：三档以上递减 IC 才拟合得出；缺席必须带档数，否则读不出「差多少」 */
+  const halfLifeLabel = (): string => {
+    if (hitrate?.signalHalfLifeDays != null) {
+      return t("stockAnalysis.reflection.hitrateHalfLifeDays", {
+        days: hitrate.signalHalfLifeDays.toFixed(1),
+      });
+    }
+    return t("stockAnalysis.reflection.hitrateHalfLifeNone", {
+      n: hitrate?.usableIcTiers ?? 0,
+    });
+  };
   const load = async () => {
     const myToken = ++loadTokenRef.current;
     setLoading(true); // P1-5 修复
@@ -664,6 +701,9 @@ export function ReflectionPanel() {
             {hitrate?.avgAlphaPct == null
               ? t("stockAnalysis.reflection.noData")
               : `${hitrate.avgAlphaPct.toFixed(2)}%`}
+          </Descriptions.Item>
+          <Descriptions.Item label={t("stockAnalysis.reflection.hitrateHalfLife")}>
+            {halfLifeLabel()}
           </Descriptions.Item>
         </Descriptions>
         {/* 四周期独立统计：每个 horizon 独立应用 MIN_SAMPLE=5，未成熟/无行情不进分母 */}

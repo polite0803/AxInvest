@@ -133,29 +133,15 @@ pub fn compute_sharpe(returns_pct: &[f64], annualization: f64) -> Option<f64> {
 }
 
 /// Pearson 相关系数（长度必须一致，>5 个点）
+///
+/// 数学实现复用 [`axagent_harness::indicators::pearson`]（禁区 12：本仓此前在
+/// `hit_rate_backtest` 另有一份）；本函数只保留自己的**门槛**：少于 5 点在本模块
+/// 的用途（组合相关性）下不足以谈相关。
 pub fn pearson_correlation(x: &[f64], y: &[f64]) -> Option<f64> {
     if x.len() != y.len() || x.len() < 5 {
         return None;
     }
-    let n = x.len() as f64;
-    let mx = x.iter().sum::<f64>() / n;
-    let my = y.iter().sum::<f64>() / n;
-    let mut num = 0.0;
-    let mut dx2 = 0.0;
-    let mut dy2 = 0.0;
-    for (a, b) in x.iter().zip(y.iter()) {
-        let da = a - mx;
-        let db = b - my;
-        num += da * db;
-        dx2 += da * da;
-        dy2 += db * db;
-    }
-    let denom = (dx2 * dy2).sqrt();
-    if denom < 1e-9 {
-        None
-    } else {
-        Some((num / denom).clamp(-1.0, 1.0))
-    }
+    axagent_harness::indicators::pearson(x, y)
 }
 
 /// 组合 beta = Cov(组合, 市场) / Var(市场)

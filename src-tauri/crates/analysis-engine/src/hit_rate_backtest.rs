@@ -383,62 +383,12 @@ pub fn compute_factor_ic(validations: &[PickValidation]) -> HashMap<String, f64>
             ics.insert(factor_id, 0.0);
             continue;
         }
-        let xs: Vec<f64> = pairs.iter().map(|(x, _)| *x).collect();
-        let ys: Vec<f64> = pairs.iter().map(|(_, y)| *y).collect();
-        let rank_x = rank_average(&xs);
-        let rank_y = rank_average(&ys);
-        ics.insert(factor_id, pearson_correlation(&rank_x, &rank_y));
+        // 退化（一侧秩无方差 ⇒ ρ 无定义）沿用本模块既有口径：记 0.0 = 无预测力。
+        // 与 `reflection_stats` 的 IC 表不同——那里把缺席分状态报出来，因为它是
+        // **给人读的观测面**；本表的消费方是权重调整，只消费数值。
+        ics.insert(factor_id, axagent_harness::indicators::spearman_rank_ic(&pairs).unwrap_or(0.0));
     }
     ics
-}
-
-/// 平均秩次（处理 ties：取所有相同值的平均秩）
-fn rank_average(values: &[f64]) -> Vec<f64> {
-    let n = values.len();
-    let mut indexed: Vec<(usize, f64)> = values.iter().copied().enumerate().collect();
-    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-
-    let mut ranks = vec![0.0; n];
-    let mut i = 0;
-    while i < n {
-        let mut j = i;
-        while j < n && (indexed[j].1 - indexed[i].1).abs() < 1e-9 {
-            j += 1;
-        }
-        // i..j 都是相同的值
-        let avg_rank = ((i + 1) + j) as f64 / 2.0; // 1-indexed 平均
-        for k in i..j {
-            ranks[indexed[k].0] = avg_rank;
-        }
-        i = j;
-    }
-    ranks
-}
-
-/// Pearson 相关系数
-fn pearson_correlation(xs: &[f64], ys: &[f64]) -> f64 {
-    if xs.len() != ys.len() || xs.is_empty() {
-        return 0.0;
-    }
-    let n = xs.len() as f64;
-    let mean_x = xs.iter().sum::<f64>() / n;
-    let mean_y = ys.iter().sum::<f64>() / n;
-    let mut cov = 0.0;
-    let mut var_x = 0.0;
-    let mut var_y = 0.0;
-    for i in 0..xs.len() {
-        let dx = xs[i] - mean_x;
-        let dy = ys[i] - mean_y;
-        cov += dx * dy;
-        var_x += dx * dx;
-        var_y += dy * dy;
-    }
-    let denom = (var_x * var_y).sqrt();
-    if denom < 1e-9 {
-        0.0
-    } else {
-        cov / denom
-    }
 }
 
 // ── 工具函数：把 RecoPick 转 PickValidation ──

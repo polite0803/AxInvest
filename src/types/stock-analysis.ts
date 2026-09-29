@@ -176,6 +176,10 @@ export interface HorizonDecision {
   verdict: string;
   positionPct: number;
   confidence: number;
+  /**
+   * 该档后验（×100，四舍五入到 0.1）—— Phase C 逐档先验 + 逐档证据加权的结果。
+   * `confidence` 是它叠加 risk_bias 再按 √h 折算后的**判定值**，两者不同口径别混读。
+   */
   posterior: number;
   stopLossPct: number;
   takeProfitPct: number;
@@ -184,6 +188,32 @@ export interface HorizonDecision {
   stopLoss: number | null;
   /** 仅超短线（方案 B 降级路径标注） */
   confLowerBound?: number;
+  /** 叠加 risk_bias 后的生效后验（SNR 折算前） */
+  posteriorEffective?: number;
+  /** SNR 折算的锚定持有天数（中线 28 交易日 ⇒ 该档不改） */
+  snrAnchorDays?: number;
+  /**
+   * 该档技术腿吃的是哪一份评分（Phase F 结构性缺席声明）：
+   * `tier_native` = 本档专属粒度评分节点出数；
+   * `daily_fallback` = 该粒度评分没出数（超短无 60 分钟 / 长线无季度），f1 腿退回主链日线。
+   * ⚠ 缺席必须成句，不得压成「评分低」或干脆不显示 —— 见 AGENTS.md 禁区 12 与本轮 §七-F。
+   */
+  scoreSource?: string;
+  /** 证据权重来源：table = 逐档乘数表；fallback_unity = 表缺失，全腿按 1.0 退化 */
+  weightsSource?: string;
+  /** 该档先验来源：tier = 本档回测收缩；pooled = 全档合并；shared_regime_prior = 共用先验 */
+  priorSource?: string;
+  /** 该档先验样本数（配合 κ 判断收缩强度是否够可信） */
+  priorSamples?: number;
+  /** 止损口径：vol = k·σ·√h 导出；fallback_pct = σ 不可得，退回固定百分比档 */
+  stopSource?: string;
+  /** 仓位口径：risk_budget = min(凯利, 100·R/止损%)；kelly_only / fallback_kelly_x_mult = 降级 */
+  positionSource?: string;
+  /**
+   * 与哪些档的 `posterior` **恒等**（Phase F 同源标注）。
+   * 非空不代表算错 —— 它说的是「这两个数字无法互相佐证」，展示层必须注脚化。
+   */
+  sharesPosteriorWith?: string[];
 }
 
 /** 阶段 2：四周期独立决策映射（键 camelCase，对齐 `decisions_by_horizon`） */
@@ -846,6 +876,17 @@ export interface HitrateGroup {
   avgRawReturnPct: number | null;
   /** 该组平均超额收益（%）；无 alpha 样本 → null */
   avgAlphaPct: number | null;
+  /**
+   * 该组 rank IC（Spearman ρ：决策置信度 vs 实际净收益）—— Phase E 观测面。
+   * null 的真实原因由 `icStatus` 点名，不看数字猜。
+   */
+  rankIc: number | null;
+  /** 参与 IC 计算的样本数（同时有置信度与收益者），与 `samples` 不同口径 */
+  icSamples: number;
+  /** IC 缺席原因：ok / insufficient_ic_samples / no_confidence / degenerate_variance */
+  icStatus: string;
+  /** 该档期望持有交易日（半衰期拟合自变量）；action 分组与 unknown → null */
+  holdingDays: number | null;
 }
 
 /** 四周期命中率分组（key 为 ultra_short / short / mid / long / unknown） */
@@ -862,6 +903,14 @@ export interface HitrateStats {
   legacySamples: number;
   byAction: HitrateGroup[];
   byHorizon: HitrateGroup[];
+  /**
+   * 预测半衰期（交易日）：由逐档 rank IC 的指数衰减拟合导出（IC(h)≈IC₀·e^(−λh)）。
+   * null = 无法拟合（有效档 < 3 / IC 非正 / 拟合优度不达标），不是「无限长」。
+   * Phase E 仅观测，不回写任何权重。
+   */
+  signalHalfLifeDays: number | null;
+  /** 参与半衰期拟合的档数（有持有期且 IC 有值） */
+  usableIcTiers: number;
 }
 
 // ── 四周期反思结果（批次 3/4：horizon_results_json 结构化）──

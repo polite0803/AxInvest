@@ -1391,14 +1391,8 @@ export function readHorizonActions(decisionJson?: string | null): Array<{ key: s
   if (raw == null || typeof raw !== "object") { return []; }
   const map = raw as Record<string, { action?: unknown } | null>;
   const out: Array<{ key: string; action: string }> = [];
-  for (
-    const [camel, snake] of [
-      ["ultraShort", "ultra_short"],
-      ["short", "short"],
-      ["mid", "mid"],
-      ["long", "long"],
-    ]
-  ) {
+  // 键表来自 `HORIZON_CAMEL_TO_SNAKE`（单点），不在此重复一份档位表
+  for (const [camel, snake] of Object.entries(HORIZON_CAMEL_TO_SNAKE)) {
     const row = map[camel] ?? map[snake];
     const action = row && typeof row.action === "string" ? row.action : "";
     if (action) { out.push({ key: snake, action }); }

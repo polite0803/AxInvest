@@ -1503,6 +1503,37 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           {t("stockAnalysis.confLowerBoundHint", { bound: d.confLowerBound })}
                         </div>
                       )}
+                      {
+                        /* Phase F：结构性缺席与同源各占一句。
+                          「该档没有独立粒度的输入」与「该档算出低分」是两件事，合并成一句
+                          （或干脆不显示）就是让读者把退化读成结论。 */
+                      }
+                      {d.scoreSource === "daily_fallback" && (
+                        <div
+                          className="text-xs"
+                          style={{
+                            color: "var(--sa-amber, #f59e0b)",
+                            borderLeft: "2px solid var(--sa-amber, #f59e0b)",
+                            paddingLeft: 6,
+                          }}
+                        >
+                          {t("stockAnalysis.horizonScoreFallbackHint")}
+                        </div>
+                      )}
+                      {(d.sharesPosteriorWith?.length ?? 0) > 0 && (
+                        <div className="text-xs" style={{ color: "var(--muted)" }}>
+                          {t("stockAnalysis.horizonSharesPosteriorHint", {
+                            peers: (d.sharesPosteriorWith ?? [])
+                              .map((k) => {
+                                const hit = HORIZON_KEYS.find((h) =>
+                                  h.key === k
+                                );
+                                return hit ? t(`stockAnalysis.timeHorizon${hit.tSuffix}`) : k;
+                              })
+                              .join("、"),
+                          })}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

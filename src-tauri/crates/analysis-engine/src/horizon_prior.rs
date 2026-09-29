@@ -138,9 +138,7 @@ mod horizon_prior_tests {
             key: key.to_string(),
             samples,
             direction_hit_rate: rate,
-            target_hit_rate: None,
-            avg_raw_return_pct: None,
-            avg_alpha_pct: None,
+            ..Default::default()
         }
     }
 

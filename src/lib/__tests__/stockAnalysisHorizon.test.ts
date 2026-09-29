@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { HORIZON_T_SUFFIX, horizonSourceLabelKey, readHorizonActions } from "../stock-analysis-utils";
+import { normalizeDecision } from "../agentOutput";
+import {
+  HORIZON_CAMEL_TO_SNAKE,
+  HORIZON_T_SUFFIX,
+  horizonSourceLabelKey,
+  horizonSuffix,
+  readHorizonActions,
+} from "../stock-analysis-utils";
 
 /**
  * 历史列表的档位呈现（2026-09-29）：四档 Action 取自 `decisionJson.decisionsByHorizon`，
@@ -47,5 +54,55 @@ describe("档位标签与来源", () => {
     expect(horizonSourceLabelKey(null)).toBeNull();
     expect(horizonSourceLabelKey(undefined)).toBeNull();
     expect(horizonSourceLabelKey("")).toBeNull();
+  });
+});
+
+/**
+ * Phase F 同源标注：`sharesPosteriorWith` 里装的是 `decisionsByHorizon` 的**键名**
+ * （camelCase），而 i18n 后缀表按 snake_case 建模 ⇒ 互转只有 `horizonSuffix` 这一处。
+ * 它一旦退化（比如直接查 camel 键查不到就显示原始键），注脚会显示成「与 ultraShort 相同」。
+ */
+describe("horizonSuffix（两族键名的单点互转）", () => {
+  it("camelCase 与 snake_case 都映射到同一后缀", () => {
+    expect(horizonSuffix("ultraShort")).toBe("UltraShort");
+    expect(horizonSuffix("ultra_short")).toBe("UltraShort");
+    for (const [camel, snake] of Object.entries(HORIZON_CAMEL_TO_SNAKE)) {
+      expect(horizonSuffix(camel)).toBe(HORIZON_T_SUFFIX[snake]);
+    }
+  });
+
+  it("认不出的档名返回 null，不猜档位", () => {
+    expect(horizonSuffix("medium")).toBeNull();
+    expect(horizonSuffix("")).toBeNull();
+  });
+});
+
+describe("normalizeDecision 透传逐档口径标注", () => {
+  it("scoreSource / sharesPosteriorWith / stopSource / positionSource 原样到达展示层", () => {
+    const raw = {
+      action: "BUY",
+      confidence: 62,
+      decisionsByHorizon: {
+        ultraShort: {
+          action: "观望",
+          posterior: 55.0,
+          scoreSource: "daily_fallback",
+          sharesPosteriorWith: ["short"],
+          stopSource: "fallback_pct",
+          positionSource: "kelly_only",
+        },
+        short: { action: "观望", posterior: 55.0, scoreSource: "tier_native", sharesPosteriorWith: ["ultraShort"] },
+      },
+    };
+    const parsed = normalizeDecision(raw);
+    expect(parsed).not.toBeNull();
+    const ultra = parsed!.decisionsByHorizon?.ultraShort;
+    // 这些键是**结构性缺席声明**本身：normalizeDecision 走白名单构造返回体，
+    // 漏加一个键就等于把「该档按日线退化」这条信息在 IPC 之后静默丢弃。
+    expect(ultra?.scoreSource).toBe("daily_fallback");
+    expect(ultra?.sharesPosteriorWith).toEqual(["short"]);
+    expect(ultra?.stopSource).toBe("fallback_pct");
+    expect(ultra?.positionSource).toBe("kelly_only");
+    expect(parsed!.decisionsByHorizon?.short?.scoreSource).toBe("tier_native");
   });
 });

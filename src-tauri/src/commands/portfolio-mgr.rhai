@@ -2615,9 +2615,10 @@ let target_timeframe = switch time_horizon {
 
 // ── 推理 ──
 let prior_src = if present(market_regime_state) { `(${market_regime_state})` } else { "" };
-let gap_note = if data_gaps.len() > 0 {
-    ` | 缺口(${data_gaps.len()}) 证据=${evidence_pct}%`
-} else { "" };
+// ⚠ `gap_note` 的定义**挪到 Phase F 逐档缺口 push 之后**（见 `decisions_by_horizon` 段末）：
+//   它在 2618 行时 data_gaps 还只有上游节点缺口，而逐档退化声明要到四档算完才 push ⇒
+//   留在原位会让推理文案写「缺口(3)」、同一份输出的 data_gaps 却有 5 条。
+//   计数与清单必须同源同刻。
 // v40(2026-09-13) 修复「posterior 一物三义」：
 //   原文案只写 `后验=<posterior×100>`，而 `posterior` 是**未叠加 risk_bias 的原始
 //   后验概率**（0.51），同一次决策的 `decision_json.posterior` 字段却是**生效后验**
@@ -2864,6 +2865,13 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
         "posteriorEffective": ((heff*100.0)*10.0).round()/10.0,
         "snrAnchorDays": SNR_ANCHOR_DAYS,
         "positionSource": hpos_source,
+        // Phase F：该档技术腿吃的是**哪一份**评分。`daily_fallback` = 本档专属粒度评分
+        // 节点没出数（超短没 60 分钟 / 长线没季度），融合里的 f1 腿退回主链日线信号。
+        // 这是**结构性缺席**，不是「算出低分」⇒ 必须独立成字段，让 UI 与门禁都能点名，
+        // 缺了它「四档同分」就分不清是收敛还是复制。
+        "scoreSource": if present(ts) { "tier_native" } else { "daily_fallback" },
+        // 由下方同源环填覆盖；先占位是**契约稳定**（缺键会让前端 `?? []` 与门禁两种写法混用）。
+        "sharesPosteriorWith": [],
         "weightsSource": if horizon_leg_weights_ok { "table" } else { "fallback_unity" },
         "stopSource": stop_source_for.call(h),
         "priorSource": hp["source"],
@@ -2887,7 +2895,14 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
 //     这是**声明下限**而不是把粗尺度硬算成高置信。
 let ultra_short_dec = horizon_decision.call("ultra_short", totalScore_ultra_short, sl_pct_for.call("ultra_short"), tp_pct_for.call("ultra_short"), days_for.call("ultra_short"));
 ultra_short_dec["confLowerBound"] = 0.35;
-ultra_short_dec["verdict"] = ultra_short_dec["verdict"] + "[超短取 60 分钟粒度评分，置信下限35%]";
+// ⚠ 这句必须**分条件**：无条件写「超短取 60 分钟粒度评分」时，若该档评分其实没取到，
+//   闭包已在同一串 verdict 里写了「该周期评分缺失，按日线退化」⇒ 一条结论里同时声称
+//   「吃了 60 分钟」和「退化成日线」，是互斥自证。取到才声明来源，没取到只声明下限本身。
+ultra_short_dec["verdict"] = ultra_short_dec["verdict"] + if ultra_short_dec["scoreSource"] == "tier_native" {
+    "[超短取 60 分钟粒度评分，置信下限35%]"
+} else {
+    "[置信下限35%]"
+};
 
 // 四周期独立决策汇总（camelCase 键，供前端按周期 Tab 分组展示）
 // 短/中/长分别注入对应周期评分（seed 新增 t-scoring-week / t-scoring-month 节点供给）
@@ -2897,6 +2912,44 @@ let decisions_by_horizon = #{
     "mid": horizon_decision.call("mid", totalScore_mid, sl_pct_for.call("mid"), tp_pct_for.call("mid"), days_for.call("mid")),
     "long": horizon_decision.call("long", totalScore_long, sl_pct_for.call("long"), tp_pct_for.call("long"), days_for.call("long")),
 };
+
+// ── Phase F：结构性缺席显式声明 + 同源标注 ──
+// 两档 posterior **恒等**时，读者分不清这是「独立算完恰好收敛」还是「同一份输入复制两遍」。
+// 本段不裁决（四档确实可能同档），只做两件机器可检的事：
+//   ① 逐档点名 `scoreSource`（上面已出），凡按日线退化的档各写一条 data_gaps；
+//   ② 给同 posterior 的档互填 `sharesPosteriorWith` ⇒ 展示层必须把它渲染成注脚，
+//      门禁（`portfolio_mgr_same_source_rhai.rs`）锁「同 posterior 必带标注」这条不变量。
+// ⚠ 比较的是**输出值**（已按 0.1 粒度四舍五入）——与面板所见同口径，注脚才有意义；
+//   拿融合前的 hpost 比会得到「没同源」而面板上显示同分，正是本段要消灭的错位。
+let horizon_tier_keys = ["ultraShort", "short", "mid", "long"];
+// 缺口文案要给人读 ⇒ 用中文档名，不要把 `decisionsByHorizon` 的 camelCase 键名插进中文句子。
+// （键名本身留给 `sharesPosteriorWith` 等**机器字段**用，两者职责不同。）
+let tier_cn = |k| switch k {
+    "ultraShort" => "超短线", "short" => "短线", "mid" => "中线", "long" => "长线", _ => k
+};
+for t in horizon_tier_keys {
+    if decisions_by_horizon[t]["scoreSource"] == "daily_fallback" {
+        data_gaps.push(`该周期独立评分未产出 ⇒ ${tier_cn.call(t)}档技术腿按日线退化（结构性缺席，不是低分）`);
+    }
+}
+for a in horizon_tier_keys {
+    let peers = [];
+    for b in horizon_tier_keys {
+        if a != b && decisions_by_horizon[a]["posterior"] == decisions_by_horizon[b]["posterior"] {
+            peers.push(b);
+        }
+    }
+    if peers.len() > 0 {
+        decisions_by_horizon[a]["sharesPosteriorWith"] = peers;
+    }
+}
+
+// gap_note：本条**必须在逐档缺口 push 之后**求值（原定义在「── 推理 ──」段，已随之迁移）。
+//   留在原位 ⇒ 推理文案的 `缺口(N)` 少算逐档退化那几条，与同一份输出里的 data_gaps
+//   长度不符（口径分裂就是「拿不到」伪装成「一切正常」的那类缺陷）。
+let gap_note = if data_gaps.len() > 0 {
+    ` | 缺口(${data_gaps.len()}) 证据=${evidence_pct}%`
+} else { "" };
 
 // ── 输出 ──
 	pm_result = #{

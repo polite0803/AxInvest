@@ -32,7 +32,7 @@ use crate::commands::error_code::stock_setup;
 /// 新增可调参数时三处齐备才生效：① `seed_variables.rs` 定义变量；
 /// ② `portfolio-mgr.rhai` 顶部加 `if present(x) { x } else { 默认 }` 守卫；
 /// ③ 在此数组登记。
-pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 37] = [
+pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 40] = [
     // ── 市况先验（决策起点：无个股证据时对上涨的基础概率，0-1）──
     "regime_prior_bull",
     "regime_prior_sideways",
@@ -87,6 +87,11 @@ pub(crate) const PORTFOLIO_MGR_TUNABLE_PARAMS: [&str; 37] = [
     "tp_pct_long",
     // 四周期科学化 Phase C：逐档先验收缩强度 κ（进设置面板 ⇒ 反思可建议）
     "horizon_prior_kappa",
+    // 四周期科学化 Phase D：波动率档位乘数（进面板 ⇒ 反思可建议）
+    "stop_vol_mult",
+    "take_profit_vol_mult",
+    // Phase D-2：风险预算仓位（进面板 ⇒ 反思可建议）
+    "risk_budget_pct",
 ];
 
 /// `algo_tools` 表行类型：(节点 id, 标题, 工具名, 参数名, 额外扁平映射, x, y)。
@@ -567,7 +572,23 @@ type AlgoToolRow = (
 /// 与全档合并基准做经验贝叶斯收缩 `prior_h=(n·p_h+κ·p_pool)/(n+κ)` 后注入 `horizon_prior_json`；
 /// 新可调参数 `horizon_prior_kappa`（默认 = `horizon_prior::DEFAULT_KAPPA`）。
 /// **必须升版**：变量表与 input_mapping 随模板快照落库。
-pub(crate) const TEMPLATE_VERSION: i32 = 102;
+/// **v103(2026-09-29)**：Phase D —— 止损/止盈不再用「不看波动的固定百分比」，改为
+/// `k1/k2 × σ_daily × √持有天数`（σ 由 `harness::indicators::vol_move_pct` 经 `pm_vol_move_pct`
+/// 提供，口径与单测都在 Rust）；σ 不可得 ⇒ 退回可调百分比并标 `stopSource=fallback_pct`。
+/// 新可调参数 `stop_vol_mult`(1.2) / `take_profit_vol_mult`(2.0)。
+/// **必须升版**：变量表、映射与脚本正文都随模板快照落库。
+/// **v104(2026-09-29)**：Phase D-2 —— 仓位主口径改为**风险预算** `min(凯利%, 100×R/止损%)`
+/// （R = 新可调参数 `risk_budget_pct`，默认 1.5）；经验周期乘数 0.6/0.8/1.0/1.2 退为
+/// σ 不可得时的降级分支，并输出 `positionSource`。「长线更值得」改由判定侧承担：
+/// 逐档胜率 = `0.5 + (后验−0.5)·√(h/28)`（`pm_snr_confidence`，中线为锚、多空对称）。
+/// **必须升版**：变量表、映射与脚本正文都随模板快照落库。
+/// **v105(2026-09-29)**：Phase F —— 四档各自的**结构性缺席**与**同源**必须可被机器检出：
+/// 逐档新增 `scoreSource`（`tier_native` / `daily_fallback`，后者 = 该档专属粒度评分节点
+/// 没出数、技术腿退回主链日线），凡退化各写一条 `data_gaps`；再对 `posterior` **恒等**的档
+/// 互填 `sharesPosteriorWith`（比较的是四舍五入后的**输出值**，与面板同口径）。
+/// 动机：「四档同向」本身可以是真的，不可接受的是**分不清收敛还是复制**。
+/// **必须升版**：脚本正文随模板快照落库，不重播种则四档仍是无标注的旧形态。
+pub(crate) const TEMPLATE_VERSION: i32 = 105;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

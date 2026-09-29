@@ -299,6 +299,143 @@ pub fn sharpe_ratio_annual(returns: &[f64], risk_free_annual: f64, days_per_year
 
 // ===================== 单元测试 =====================
 
+/// 已实现波动率（**日**，单位 %）：simple return 序列的样本标准差 ×100。
+///
+/// 用途（四周期科学化 Phase D）：止损/止盈不再用「按日线经验拍的固定百分比」，
+/// 而按 `k · σ_daily · √持有天数` 推导 —— 位移的标准差随时间按 √ 增长，
+/// 这是波动率目标法（volatility targeting）与三阶障碍法上下轨设定的共同基础。
+///
+/// 口径：**样本标准差（÷(n−1)）**，与本文件 `sharpe_components` 一致
+/// （该处曾修过 astock-data 的「总体方差 bug」，见 `sharpe_matches_astock_data_legacy_formula_after_fix`）。
+/// 2026-09-29 起 `astock-data/src/regime.rs::volatility` 也委托到本函数 ⇒ 全仓只剩这一份 σ
+/// （切换使 20 日年化波动率整体 ×√(n/(n−1)) ≈ +2.6%，regime 的阈值是**序数口径**，档位不漂移）。
+///
+/// 返回 `None` 的情形（调用方必须显式降级，**不得当成 0 波动**）：
+/// 样本不足 `lookback + 1`、序列含非正价格（收益率无定义）、结果非有限。
+pub fn realized_vol_pct(closes: &[f64], lookback: usize) -> Option<f64> {
+    if lookback < 2 || closes.len() < lookback + 1 {
+        return None;
+    }
+    let slice = &closes[closes.len() - (lookback + 1)..];
+    if slice.iter().any(|c| !c.is_finite() || *c <= 0.0) {
+        return None;
+    }
+    let returns: Vec<f64> = slice.windows(2).map(|w| (w[1] - w[0]) / w[0]).collect();
+    let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+    let sd = stddev_sample(&returns, mean);
+    if !sd.is_finite() {
+        return None;
+    }
+    Some(sd * 100.0)
+}
+
+/// 该持有期的**典型位移幅度**（%）= `σ_daily × √持有天数`。
+///
+/// 为什么在 Rust 侧算：本仓共享 Rhai 引擎未注册 `sqrt`/`Math`（脚本内 0 处使用），
+/// 让脚本自己开方要么新增注册面、要么写成幂运算 —— 都不如把这一行放进已带单测的口径函数里。
+/// `σ` 不可得 ⇒ `None`（调用方必须显式降级，见 [`realized_vol_pct`] 的口径说明）。
+pub fn vol_move_pct(closes: &[f64], lookback: usize, holding_days: usize) -> Option<f64> {
+    if holding_days == 0 {
+        return None;
+    }
+    realized_vol_pct(closes, lookback).map(|sigma| sigma * (holding_days as f64).sqrt())
+}
+
+/// 把「当前后验胜率」按持有期折算成**该持有期的胜率**（判定侧的时间换空间）。
+///
+/// 依据：恒定日边缘下，信号均值随 h 线性累积、噪声随 √h 累积 ⇒ 信噪比 ∝ √h。
+/// 故以中线为锚做开方折算：`conf = 0.5 + (p − 0.5) × √(h / anchor)`，
+/// h = anchor 时不改；h 更短 ⇒ 边缘向 0.5 收缩；h 更长 ⇒ 边缘放大。
+/// **对称**：负边缘（看空）同样被时间放大 —— 这是 SNR 的性质，不是对多空的态度。
+///
+/// 为什么放在判定侧而不是仓位侧：仓位只应承载可推导的量（σ、h、风险预算 R），
+/// 「长线更值得」是收益/概率命题，塞进仓位乘数就等于把偏好伪装成计算。
+///
+/// 退化：`anchor == 0` 或 `h == 0` ⇒ 原样返回 `p`（无从折算，不猜）。
+pub fn snr_confidence(p: f64, holding_days: usize, anchor_days: usize) -> f64 {
+    if holding_days == 0 || anchor_days == 0 || !p.is_finite() {
+        return p;
+    }
+    let scaled = 0.5 + (p - 0.5) * ((holding_days as f64) / (anchor_days as f64)).sqrt();
+    scaled.clamp(0.0, 1.0)
+}
+
+/// 平均秩（mid-rank）：并列值取其占据秩区间的均值，1-indexed。
+///
+/// 并列判据用 `|a−b| < 1e-9` 而非 `==` —— 与本仓既有实现（`hit_rate_backtest::rank_average`）
+/// 一致：因子分/置信度是计算得出的浮点，二进制相等但数学相等的值若不算并列，
+/// Spearman 的闭式解 `1 − 6Σd²/(n(n²−1))` 就不再成立。
+/// 输入含非有限值时按 `partial_cmp` 的 `Equal` 归入同组（调用方应先自行过滤）。
+pub fn average_ranks(values: &[f64]) -> Vec<f64> {
+    let n = values.len();
+    let mut indexed: Vec<(usize, f64)> = values.iter().copied().enumerate().collect();
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut ranks = vec![0.0; n];
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j < n && (indexed[j].1 - indexed[i].1).abs() < 1e-9 {
+            j += 1;
+        }
+        // i..j 是同一并列组（1-indexed 秩区间为 i+1..=j）
+        let avg = ((i + 1) + j) as f64 / 2.0;
+        for k in i..j {
+            ranks[indexed[k].0] = avg;
+        }
+        i = j;
+    }
+    ranks
+}
+
+/// Pearson 相关系数。
+///
+/// 返回 `None`（= 该量在此样本上**无定义**，不得当 0 用）：长度不等 / 不足 2 点 /
+/// 含非有限值 / 任一侧方差为 0。
+pub fn pearson(xs: &[f64], ys: &[f64]) -> Option<f64> {
+    if xs.len() != ys.len() || xs.len() < 2 {
+        return None;
+    }
+    if xs.iter().chain(ys.iter()).any(|v| !v.is_finite()) {
+        return None;
+    }
+    let n = xs.len() as f64;
+    let mx = xs.iter().sum::<f64>() / n;
+    let my = ys.iter().sum::<f64>() / n;
+    let mut cov = 0.0;
+    let mut vx = 0.0;
+    let mut vy = 0.0;
+    for i in 0..xs.len() {
+        let dx = xs[i] - mx;
+        let dy = ys[i] - my;
+        cov += dx * dy;
+        vx += dx * dx;
+        vy += dy * dy;
+    }
+    let denom = (vx * vy).sqrt();
+    if denom < 1e-9 {
+        return None;
+    }
+    Some((cov / denom).clamp(-1.0, 1.0))
+}
+
+/// Spearman 秩相关（rank IC 的标准口径）= `pearson(rank(x), rank(y))`。
+///
+/// 为什么用秩不用 Pearson 原值：收益分布重尾，个别 −20%/+30% 的样本会把线性相关
+/// 整条拖走；IC 关心的是**排序是否正确**（预测强的样本是否真的收益更高），
+/// 秩相关对此天然稳健。
+///
+/// 返回 `None` 的情形与 [`pearson`] 同：秩无定义（样本 <2 / 含非有限 / 一侧无方差）。
+/// 「样本够不够多」是**调用方**的门槛（统计显著性取决于用途），不在这里替所有人定。
+pub fn spearman_rank_ic(pairs: &[(f64, f64)]) -> Option<f64> {
+    if pairs.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+        return None;
+    }
+    let xs: Vec<f64> = pairs.iter().map(|p| p.0).collect();
+    let ys: Vec<f64> = pairs.iter().map(|p| p.1).collect();
+    pearson(&average_ranks(&xs), &average_ranks(&ys))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,5 +652,113 @@ mod tests {
         assert!(variance_sample > variance_population);
         let r = sharpe_components(&returns, 0.0, 244.0);
         assert!((r.stddev - variance_sample.sqrt()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn realized_vol_pct_matches_hand_computed_sample_stdev() {
+        // 收盘价 100 → 102 → 101 → 103：三条 return 已知，手算样本标准差
+        let closes = [100.0, 102.0, 101.0, 103.0];
+        let got = realized_vol_pct(&closes, 3).expect("应可计算");
+        let rets = [0.02, -1.0 / 102.0, 2.0 / 101.0];
+        let m = rets.iter().sum::<f64>() / 3.0;
+        let v = rets.iter().map(|r| (r - m).powi(2)).sum::<f64>() / 2.0;
+        assert!((got - v.sqrt() * 100.0).abs() < 1e-9, "实得 {got}");
+    }
+
+    #[test]
+    fn realized_vol_pct_refuses_insufficient_and_invalid_samples() {
+        // 样本不足 ⇒ None（不是 0.0 —— 0 波动会让止损宽度塌成 0）
+        assert!(realized_vol_pct(&[10.0, 10.1], 20).is_none());
+        assert!(realized_vol_pct(&[], 2).is_none());
+        // lookback < 2 无定义
+        assert!(realized_vol_pct(&[10.0, 11.0, 12.0], 1).is_none());
+        // 含非正价格 ⇒ 收益率无定义，不得静默跳过
+        assert!(realized_vol_pct(&[10.0, 0.0, 11.0, 12.0], 2).is_none());
+        assert!(realized_vol_pct(&[10.0, f64::NAN, 11.0, 12.0], 2).is_none());
+    }
+
+    #[test]
+    fn realized_vol_pct_uses_sample_not_population_variance() {
+        // 与总体方差口径可区分：n=3 个 return 时两者相差 √(3/2)
+        let closes = [100.0, 102.0, 99.0, 103.0];
+        let sample = realized_vol_pct(&closes, 3).expect("应可计算");
+        let rets = [0.02, -3.0 / 102.0, 4.0 / 99.0];
+        let m = rets.iter().sum::<f64>() / 3.0;
+        let pop = (rets.iter().map(|r| (r - m).powi(2)).sum::<f64>() / 3.0).sqrt() * 100.0;
+        assert!(
+            (sample - pop * (3.0_f64 / 2.0).sqrt()).abs() < 1e-9,
+            "σ 口径漂移：样本 {sample} vs 总体 {pop}"
+        );
+    }
+
+    /// √t 缩放：h=4 的位移应是 h=1 的两倍；h=0 与样本不足都拒绝出数。
+    #[test]
+    fn vol_move_pct_scales_by_sqrt_of_holding_days() {
+        let closes: Vec<f64> = (0..25).map(|i| 100.0 + (i % 5) as f64).collect();
+        let one = vol_move_pct(&closes, 20, 1).expect("h=1 应可计算");
+        let four = vol_move_pct(&closes, 20, 4).expect("h=4 应可计算");
+        let nine = vol_move_pct(&closes, 20, 9).expect("h=9 应可计算");
+        assert!((four - one * 2.0).abs() < 1e-9, "√4 应为 2 倍，实得 {four}/{one}");
+        assert!((nine - one * 3.0).abs() < 1e-9, "√9 应为 3 倍，实得 {nine}/{one}");
+        assert!(vol_move_pct(&closes, 20, 0).is_none(), "持有 0 天无定义");
+        assert!(vol_move_pct(&[100.0, 101.0], 20, 5).is_none(), "样本不足不得硬算");
+    }
+
+    /// SNR 折算：锚定档不改、短档收缩、长档放大，且对 0.5 两侧对称。
+    #[test]
+    fn snr_confidence_scales_edge_by_sqrt_of_horizon() {
+        assert!((snr_confidence(0.60, 28, 28) - 0.60).abs() < 1e-12, "锚定档不应改变");
+        let up7 = snr_confidence(0.60, 63, 28); // √(63/28)=1.5
+        assert!((up7 - 0.65).abs() < 1e-9, "长线应把 +0.10 边缘放大到 +0.15，实得 {up7}");
+        let down = snr_confidence(0.40, 63, 28);
+        assert!((down - 0.35).abs() < 1e-9, "看空必须对称放大，实得 {down}");
+        let short = snr_confidence(0.60, 7, 28); // √0.25=0.5
+        assert!((short - 0.55).abs() < 1e-9, "短线应收敛到 +0.05，实得 {short}");
+    }
+
+    #[test]
+    fn snr_confidence_clamps_and_degrades_without_guessing() {
+        assert_eq!(snr_confidence(0.99, 90, 28), 1.0, "放大后必须夹在 [0,1]");
+        assert_eq!(snr_confidence(0.01, 90, 28), 0.0);
+        assert_eq!(snr_confidence(0.62, 0, 28), 0.62, "h=0 无从折算 ⇒ 原样返回");
+        assert_eq!(snr_confidence(0.62, 90, 0), 0.62, "anchor=0 无从折算 ⇒ 原样返回");
+        assert!(snr_confidence(f64::NAN, 90, 28).is_nan(), "NaN 不得被夹成 0");
+    }
+
+    // ── 秩相关（rank IC 的唯一实现，Phase E 收编三处重复）──
+
+    #[test]
+    fn average_ranks_uses_one_based_mid_ranks_with_epsilon_ties() {
+        // 精确并列与 1e-12 差值都要归入同组（沿用 hit_rate_backtest 的 ties 判据）
+        assert_eq!(average_ranks(&[10.0, 10.0, 30.0]), vec![1.5, 1.5, 3.0]);
+        // 1e-13 差值算并列 ⇒ 两者取 2、3 位的均值 2.5，最小者秩 1
+        assert_eq!(average_ranks(&[20.0, 20.0000000000001, 5.0]), vec![2.5, 2.5, 1.0]);
+        // 降序输入不影响秩分配（秩按值大小，不按位置）
+        assert_eq!(average_ranks(&[30.0, 20.0, 10.0]), vec![3.0, 2.0, 1.0]);
+        assert!(average_ranks(&[]).is_empty());
+    }
+
+    #[test]
+    fn pearson_none_when_undefined_never_fake_zero() {
+        assert!((pearson(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0]).unwrap() - 1.0).abs() < 1e-12);
+        assert!((pearson(&[1.0, 2.0, 3.0], &[6.0, 4.0, 2.0]).unwrap() + 1.0).abs() < 1e-12);
+        // 长度不等 / 不足 2 点 / 一侧无方差 / 含非有限 ⇒ 全部 None
+        assert_eq!(pearson(&[1.0, 2.0], &[1.0, 2.0, 3.0]), None);
+        assert_eq!(pearson(&[1.0], &[1.0]), None);
+        assert_eq!(pearson(&[3.0, 3.0, 3.0], &[1.0, 2.0, 3.0]), None);
+        assert_eq!(pearson(&[f64::NAN, 2.0, 3.0], &[1.0, 2.0, 3.0]), None);
+    }
+
+    #[test]
+    fn spearman_is_order_only_and_pins_closed_form_for_ties() {
+        // 严格单调 ⇒ 1（与缩放量级无关）
+        let mono: Vec<(f64, f64)> = (0..9).map(|i| (i as f64, (i as f64).powi(3))).collect();
+        assert_eq!(spearman_rank_ic(&mono), Some(1.0));
+        // 有并列：x=[1,1,2,3] y=[1,2,3,4] ⇒ 闭式解 4.5/√22.5 = 0.9486833
+        let tied = vec![(1.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)];
+        assert!((spearman_rank_ic(&tied).unwrap() - 0.948_683_3).abs() < 1e-6);
+        // 无定义 ⇒ None（不是 0）
+        assert_eq!(spearman_rank_ic(&[(0.5, 1.0), (0.5, 2.0), (0.5, 3.0)]), None);
+        assert_eq!(spearman_rank_ic(&[(0.5, f64::NAN)]), None);
     }
 }

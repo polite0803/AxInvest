@@ -488,6 +488,11 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "tp_pct_long",
           // 逐档先验收缩强度 κ（Phase C）：与上面八项同组 —— 同为「反思可建议」的策略参数。
           "horizon_prior_kappa",
+          // 波动率档位乘数（Phase D）：与八项百分比同组 —— 百分比是 σ 不可得时的兜底档。
+          "stop_vol_mult",
+          "take_profit_vol_mult",
+          // 风险预算 R（Phase D-2）：仓位主口径，替代经验周期乘数。
+          "risk_budget_pct",
         ]),
       },
       {

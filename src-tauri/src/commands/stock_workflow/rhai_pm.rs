@@ -223,4 +223,53 @@ pub fn register_pm_functions(engine: &mut Engine) {
             crate::market_sim_service::run_mc_preset(&code, price, &preset)
         },
     );
+    // ── 已实现日波动率（四周期科学化 Phase D）──
+    // 止损/止盈不再用「按日线经验拍的固定百分比」，而按 `k · σ_daily · √持有天数` 推导
+    // （波动率目标法与三阶障碍法的共同基础：位移标准差 ∝ √时间）。
+    // **口径实现只有一份**：`axagent_harness::indicators::realized_vol_pct`（样本标准差，
+    // 与本文件其余 pm_* 一样在 Rust 侧实现并带单测）—— 不在 Rhai 里再抄一遍标准差，
+    // 那正是「同一算法两处实现迟早漂移」的常见来源。
+    // 返回 0.0 = **不可得**（样本不足 / 含非正价格 / 解析失败 / 持有 0 天）；脚本必须显式降级为
+    // 固定百分比档并标 `stopSource = "fallback_pct"`，不得把 0 当成「零波动」算出 0 止损。
+    engine.register_fn(
+        "pm_vol_move_pct",
+        |bars: rhai::Array, lookback: i64, holding_days: i64| -> f64 {
+            let closes = closes_from_bars(&bars);
+            axagent_harness::indicators::vol_move_pct(
+                &closes,
+                lookback.max(0) as usize,
+                holding_days.max(0) as usize,
+            )
+            .unwrap_or(0.0)
+        },
+    );
+    // 「长线更值得」的判定侧折算（Phase D-2）：见 `harness::indicators::snr_confidence` 的推导。
+    // 同样在 Rust 侧开方 —— 本仓共享 Rhai 引擎没有 sqrt/Math。
+    engine.register_fn("pm_snr_confidence", |p: f64, holding_days: i64, anchor_days: i64| -> f64 {
+        axagent_harness::indicators::snr_confidence(
+            p,
+            holding_days.max(0) as usize,
+            anchor_days.max(0) as usize,
+        )
+    });
+}
+
+/// 从 K 线数组提取收盘价序列（兼容 `close` 为 f64 / i64 / 数字字符串三种上游形态）。
+///
+/// 解析不出来的 bar 直接跳过 —— 与 `portfolio-mgr.rhai` 里 `num_of` 的宽容读取同口径；
+/// 但**样本总数不足**时 `realized_vol_pct` 会返回 `None`（不是拿残缺序列硬算一个数）。
+fn closes_from_bars(bars: &[rhai::Dynamic]) -> Vec<f64> {
+    bars.iter()
+        .filter_map(|b| {
+            let map = b.clone().try_cast::<rhai::Map>()?;
+            let close = map.get("close")?.clone();
+            if let Some(v) = close.clone().try_cast::<f64>() {
+                return Some(v);
+            }
+            if let Some(i) = close.clone().try_cast::<i64>() {
+                return Some(i as f64);
+            }
+            close.into_immutable_string().ok().and_then(|s| s.trim().parse::<f64>().ok())
+        })
+        .collect()
 }

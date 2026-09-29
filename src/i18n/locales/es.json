@@ -15194,7 +15194,17 @@
       "backtestHint": "El backtest usará datos históricos para simular el rendimiento de la estrategia",
       "tabMonteCarlo": "Monte Carlo",
       "tabQuantSim": "Simulación cuantitativa",
-      "tabSimulation": "Simulación"
+      "tabSimulation": "Simulación",
+      "matrixNoSample": "Aún no hay muestra validada",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "Por diseño: la evidencia de cuello de botella requiere un horizonte de una semana o más",
+        "oversold_rebound_needs_at_least_mid_horizon": "Por diseño: el rebote de sobreventa necesita al menos un horizonte medio",
+        "oversold_rebound_not_applied_to_long_horizon": "Por diseño: el rebote de sobreventa no se aplica al horizonte largo",
+        "cell_not_in_matrix": "Celda ausente en la tabla de contrato (posible omisión, no por diseño)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Desajuste conocido: la valoración necesita semanas; se conserva por decisión"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16163,6 +16173,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "Notas de riesgo",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "Base del stop: porcentaje fijo (σ diaria no disponible, no derivada de la volatilidad)",
         "rowPriorAbsent": "Sin muestras de a priori históricas para este horizonte; la confianza sale solo de la puntuación del estilo",

@@ -15194,7 +15194,17 @@
       "backtestHint": "बैकटेस्ट ऐतिहासिक डेटा का उपयोग करके रणनीति के प्रदर्शन का अनुकरण करेगा",
       "tabMonteCarlo": "मोंटे कार्लो",
       "tabQuantSim": "क्वांटिटेटिव सिमुलेशन",
-      "tabSimulation": "सिमुलेशन"
+      "tabSimulation": "सिमुलेशन",
+      "matrixNoSample": "अभी कोई सत्यापित नमूना नहीं",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "डिज़ाइन अनुसार: बोतल-गर्दन प्रमाण को एक सप्ताह या उससे लंबा क्षितिज चाहिए",
+        "oversold_rebound_needs_at_least_mid_horizon": "डिज़ाइन अनुसार: अति-विक्रय प्रतिगमन को कम-से-कम मध्यम अवधि चाहिए",
+        "oversold_rebound_not_applied_to_long_horizon": "डिज़ाइन अनुसार: अति-विक्रय प्रतिगमन दीर्घ अवधि पर लागू नहीं",
+        "cell_not_in_matrix": "अनुबंध तालिका में यह सेल ग़ायब (संभवतः कार्यान्वयन अंतर, डिज़ाइन नहीं)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "ज्ञात विसंगति: मूल्यांकन को सप्ताह लगते; निर्णय अनुसार रखा गया"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16163,9 +16173,10 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "जोखिम टिप्पणियाँ",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "स्टॉप आधार: स्थिर प्रतिशत (दैनिक σ उपलब्ध नहीं, आवृत्ति-व्युत्पन्न नहीं)",
-        "rowPriorAbsent": "इस क्षितिज के लिए ऐतिहासिक पूर्वानुमान नमूने नहीं;置信 केवल शैली स्कोर से",
+        "rowPriorAbsent": "इस क्षितिज के लिए ऐतिहासिक पूर्वानुमान नमूने नहीं; आत्मविश्वास केवल शैली स्कोर से मिलता है",
         "rowPercentile": "शैली के भीतर आज का प्रतिशत: {{p}}",
         "rowSameScorePeer": "{{tiers}} के समान स्कोर (अभिसरण बनाम प्रतिलिपि पहचानें)",
         "entry": "Entry Range",

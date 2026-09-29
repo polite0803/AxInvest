@@ -15194,7 +15194,17 @@
       "backtestHint": "سيستخدم الاختبار الرجعي البيانات التاريخية لمحاكاة أداء الاستراتيجية",
       "tabMonteCarlo": "مونت كارلو",
       "tabQuantSim": "المحاكاة الكمية",
-      "tabSimulation": "المحاكاة"
+      "tabSimulation": "المحاكاة",
+      "matrixNoSample": "لا توجد عينة موثّقة بعد",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "حسب التصميم: دليل الاختناق يحتاج أفق أسبوع أو أكثر",
+        "oversold_rebound_needs_at_least_mid_horizon": "حسب التصميم: ارتداد التشبع السلبي يحتاج أفقًا متوسطًا على الأقل",
+        "oversold_rebound_not_applied_to_long_horizon": "حسب التصميم: ارتداد التشبع السلبي لا يُطبَّق على الأفق الطويل",
+        "cell_not_in_matrix": "الخلية مفقودة من جدول العقد (ربما ثغرة تنفيذية وليس حسب التصميم)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "عدم تطابق معروف: التقييم يحتاج أسابيع ليتحقق; أُبقي بقرار"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16163,6 +16173,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "ملاحظات المخاطر",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "أساس الوقف: نسبة ثابتة (تعذّر توفر σ اليومية، وليست مشتقة من التقلب)",
         "rowPriorAbsent": "لا عينات مرجع قبلي تاريخي لهذا الأفق؛ تُشتق الثقة من درجة الأسلوب فقط",

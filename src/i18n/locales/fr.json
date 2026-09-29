@@ -15194,7 +15194,17 @@
       "backtestHint": "Le backtest utilisera des données historiques pour simuler la performance de la stratégie",
       "tabMonteCarlo": "Monte-Carlo",
       "tabQuantSim": "Simulation quantitative",
-      "tabSimulation": "Simulation"
+      "tabSimulation": "Simulation",
+      "matrixNoSample": "Aucun échantillon validé",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "Par conception : la preuve de goulot d'étranglement exige un horizon d'une semaine ou plus",
+        "oversold_rebound_needs_at_least_mid_horizon": "Par conception : le rebond de survente exige au moins un horizon moyen",
+        "oversold_rebound_not_applied_to_long_horizon": "Par conception : le rebond de survente ne s'applique pas à l'horizon long",
+        "cell_not_in_matrix": "Case absente du tableau de contrat (écart d'implémentation, pas par conception)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Inadéquation connue : l'évaluation exige des semaines ; conservé par décision"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16163,6 +16173,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "Notes de risque",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "Base d'arrêt : pourcentage fixe (σ journalière indisponible, non dérivée de la volatilité)",
         "rowPriorAbsent": "Aucun échantillon d'a priori historique pour cet horizon ; la confiance vient du seul score du style",

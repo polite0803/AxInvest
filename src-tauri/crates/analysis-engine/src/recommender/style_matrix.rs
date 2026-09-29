@@ -76,10 +76,24 @@ pub fn styles_for(period: Period) -> Vec<Style> {
         .collect()
 }
 
+/// `Style` → 矩阵名目。
+///
+/// 必须走这一层：MATRIX 的风格列用的是**名目**（`serenity`），而 `Style::Bottleneck.as_str()`
+/// 是**落库写法**（`bottleneck`）。两者混用会让 `Style` 入参的查询对 serenity **恒查不到该行**，
+/// 于是 `absence_reason` 返回 `cell_not_in_matrix`、`is_active` 恒 `false` ——
+/// 即「按设计不做」被误报成「实现漏格」，而趋势智选在 mid/long 两档明明出票。
+/// 本轮给它第一个消费者时才暴露（此前这俩函数无人调用）。
+fn matrix_name_of(style: Style) -> &'static str {
+    match style {
+        Style::Bottleneck => "serenity",
+        other => other.as_str(),
+    }
+}
+
 /// 该格按设计不成立的理由码（`None` = 出票）。查不到该格 ⇒ `Some("cell_not_in_matrix")`，
 /// 让「实现漏格」也走显式声明而不是静默当作不做。
 pub fn absence_reason(style: Style, period: Period) -> Option<&'static str> {
-    let s = style.as_str();
+    let s = matrix_name_of(style);
     let t = period.as_str();
     MATRIX
         .iter()
@@ -90,9 +104,55 @@ pub fn absence_reason(style: Style, period: Period) -> Option<&'static str> {
 
 /// 该格是否出票。
 pub fn is_active(style: Style, period: Period) -> bool {
-    let s = style.as_str();
+    let s = matrix_name_of(style);
     let t = period.as_str();
     MATRIX.iter().any(|(ms, mt, absent)| *ms == s && *mt == t && absent.is_none())
+}
+
+/// 矩阵里的风格名目（按 MATRIX 出现序去重）——前端矩阵**行序的唯一来源**。
+///
+/// 为什么需要：`RecoStrategyMatrix.tsx` 曾自带一份 4 项 `STYLE_KEYS`（trend/value/capital/
+/// reversion），于是 watchlist 与 serenity 两行**在矩阵里根本不存在** —— 趋势智选「短/超短
+/// 按设计不做」这件事连被声明的位置都没有。契约表既然存在，行集合就不该由消费方再抄一遍。
+pub fn style_keys() -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for (s, _, _) in MATRIX.iter() {
+        if !out.contains(s) {
+            out.push(s);
+        }
+    }
+    out
+}
+
+/// 矩阵名目 → 该风格在落库/回测里**实际出现的写法**。
+///
+/// `serenity` 一名两写是历史事实：工作流链落 `style="serenity"`
+/// （`commands/stock_workflow/serenity.rs`），荐股策略链按子风格落 `bottleneck`
+/// （`SerenityStrategy::style()`）。消费方拿矩阵名目去匹配统计时必须知道这层别名，
+/// 否则「趋势智选」行永远匹配不到它自己的回测数据 ⇒ 又变成空白格。
+pub fn db_style_aliases(style_key: &'static str) -> Vec<&'static str> {
+    match style_key {
+        "serenity" => vec!["serenity", "bottleneck"],
+        other => vec![other],
+    }
+}
+
+/// 按**矩阵名目**（字符串，非 `Style`）取该格状态码，供序列化层使用：
+/// `cell_is_active` | 具体不成立理由码 | `cell_not_in_matrix`（矩阵漏格 = 实现漏了，不是按设计不做）。
+pub fn reason_code_by_key(style_key: &str, period: Period) -> &'static str {
+    match style_from_str(style_key) {
+        Some(style) => absence_reason(style, period).unwrap_or("cell_not_in_matrix"),
+        None => "cell_not_in_matrix",
+    }
+}
+
+/// 该格是否登记为「出票但已知档-因子错配」，返回错配理由码（`None` = 无错配声明）。
+pub fn misfit_reason(style_key: &str, period: Period) -> Option<&'static str> {
+    let t = period.as_str();
+    MISFIT_DECLARATIONS
+        .iter()
+        .find(|(s, pt, _)| *s == style_key && *pt == t)
+        .map(|(_, _, reason)| *reason)
 }
 
 fn style_from_str(s: &str) -> Option<Style> {
@@ -156,5 +216,34 @@ mod tests {
         assert_eq!(styles_for(Period::Short).len(), 5, "短线再加 reversion");
         assert_eq!(styles_for(Period::Mid).len(), 6, "中线全开");
         assert_eq!(styles_for(Period::Long).len(), 5, "长线无 reversion");
+    }
+
+    /// 名目空间锁：`Style::Bottleneck`（落库写法）必须解析到矩阵行名目 `serenity`。
+    ///
+    /// 修复前真实形态（本断言当时必红）：`absence_reason` / `is_active` 直接拿
+    /// `style.as_str()`（= `bottleneck`）去比矩阵的风格列（= `serenity`）⇒ serenity 四格
+    /// **全都查不到**：`is_active` 恒 `false`（中线明明出票）、`absence_reason` 恒
+    /// `cell_not_in_matrix`（「按设计不做」被误报成「实现漏格」）。
+    /// 这两个函数此前零消费者 ⇒ 潜伏至今，本轮 `contract_cells()` 第一次调用它就当场暴露。
+    #[test]
+    fn bottleneck_style_resolves_to_the_serenity_row() {
+        assert!(is_active(Style::Bottleneck, Period::Mid), "serenity×中线应按设计出票");
+        assert!(is_active(Style::Bottleneck, Period::Long));
+        assert!(!is_active(Style::Bottleneck, Period::UltraShort));
+        assert_eq!(
+            absence_reason(Style::Bottleneck, Period::UltraShort),
+            Some("serenity_needs_week_or_longer_realization"),
+            "不得把「按设计不做」报成 cell_not_in_matrix"
+        );
+        assert_eq!(absence_reason(Style::Bottleneck, Period::Mid), Some("cell_is_active"));
+        // Style 入参与矩阵名目入参必须给同一个答案（两处消费方不得各算一套）
+        for p in [Period::UltraShort, Period::Short, Period::Mid, Period::Long] {
+            assert_eq!(
+                reason_code_by_key("serenity", p),
+                absence_reason(Style::Bottleneck, p).unwrap_or("cell_not_in_matrix"),
+                "档位 {}",
+                p.as_str()
+            );
+        }
     }
 }

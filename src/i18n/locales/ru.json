@@ -15194,7 +15194,17 @@
       "backtestHint": "Бэктест будет использовать исторические данные для моделирования поведения стратегии",
       "tabMonteCarlo": "Монте-Карло",
       "tabQuantSim": "Количественное моделирование",
-      "tabSimulation": "Моделирование"
+      "tabSimulation": "Моделирование",
+      "matrixNoSample": "Пока нет проверенных сэмплов",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "По замыслу: подтверждения узкого места требуют горизонта не менее недели",
+        "oversold_rebound_needs_at_least_mid_horizon": "По замыслу: отскок перепроданности требует как минимум среднесрочного горизонта",
+        "oversold_rebound_not_applied_to_long_horizon": "По замыслу: отскок перепроданности не применяется к долгосрочному горизонту",
+        "cell_not_in_matrix": "Ячейка отсутствует в договорной таблице (возможно, пробел реализации, а не по замыслу)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Известное несоответствие: оценке нужны недели для реализации; оставлено по решению"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16163,6 +16173,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "Примечания по риску",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "База стопа: фиксированный процент (дневная σ недоступна, не из волатильности)",
         "rowPriorAbsent": "Нет исторических выборок априори для этого горизонта; уверенность только из оценки стиля",

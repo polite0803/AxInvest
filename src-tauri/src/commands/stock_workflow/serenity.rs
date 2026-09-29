@@ -979,21 +979,22 @@ pub async fn run_serenity_screening(
     let serenity_tier = axagent_harness::Period::Mid;
     let serenity_tier_period = serenity_tier.as_str().to_string();
     let serenity_tier_days = serenity_tier.default_holding_days() as i64;
-    let serenity_tier_mults = {
-        let read = |name: &str, default: f64| -> f64 {
-            variables
-                .as_ref()
-                .and_then(|vs| vs.iter().find(|v| v.name == name))
-                .and_then(|v| v.value.as_f64())
-                .unwrap_or(default)
-        };
-        (
-            read("serenity_stop_mult", 0.80),
-            read("serenity_target_mult", 1.30),
-            read("serenity_entry_range", 0.05),
-        )
+    let read_var = |name: &str, default: f64| -> f64 {
+        variables
+            .as_ref()
+            .and_then(|vs| vs.iter().find(|v| v.name == name))
+            .and_then(|v| v.value.as_f64())
+            .unwrap_or(default)
     };
-    let (serenity_stop_mult, serenity_target_mult, serenity_entry_range) = serenity_tier_mults;
+    let serenity_stop_mult = read_var("serenity_stop_mult", 0.80);
+    let serenity_target_mult = read_var("serenity_target_mult", 1.30);
+    let serenity_entry_range = read_var("serenity_entry_range", 0.05);
+    // 波动率风控参数（Phase R-D）：键名与默认值与 `recommender/mod.rs` 的 R-D 读取**逐字一致**，
+    // 否则同一只票经两条链会拿到不同 k1/k2/R/成本 —— 那正是本轮要合流的缺陷。
+    let reco_stop_k1 = read_var("reco_stop_vol_mult", 1.2);
+    let reco_target_k2 = read_var("reco_target_vol_mult", 2.0);
+    let reco_risk_budget_pct = read_var("reco_risk_budget_pct", 1.5);
+    let reco_round_trip_cost_pct = read_var("reco_round_trip_cost_pct", 0.6);
     tracing::info!(
         "[serenity] 档位口径: period={serenity_tier_period} days={serenity_tier_days}          stop×{serenity_stop_mult} target×{serenity_target_mult} entry±{serenity_entry_range}          （短/超短档不适用：SerenityStrategy 仅注册 Mid/Long）"
     );
@@ -1380,17 +1381,97 @@ pub async fn run_serenity_screening(
                     let client = &state.astock_client;
                     let quote = client.get_quote(code).await.ok();
                     let price = quote.as_ref().map(|q| q.price).unwrap_or(0.0);
-                    // 乘数来自上方与策略同源的模板变量（不再手抄 0.95/1.05/0.80/1.30）
+                    // ── 止损/目标/仓位：与荐股策略链**同一实现**（Phase R-D 口径合流）──
+                    // 旧形态：本链按 `price × serenity_stop_mult` 出固定百分比止损，而策略链经
+                    // `recommender/mod.rs` 的 `k1·σ_daily·√h` + 风险预算仓位 ⇒ 同一张 reco_picks、
+                    // 同一个趋势智选历史列表里并存两套风控口径，且不声明哪一套不是波动率口径。
+                    let h_days = serenity_tier.default_holding_days() as usize;
+                    let closes =
+                        axagent_analysis_engine::recommender::risk::daily_closes(client, code)
+                            .await;
+                    let vol_stop = closes.as_ref().and_then(|closes| {
+                        axagent_analysis_engine::recommender::risk::stop_pct(
+                            closes,
+                            h_days,
+                            reco_stop_k1,
+                        )
+                    });
+                    let vol_target = closes.as_ref().and_then(|closes| {
+                        axagent_analysis_engine::recommender::risk::target_pct(
+                            closes,
+                            h_days,
+                            reco_target_k2,
+                        )
+                    });
+                    // σ 不可得 ⇒ 显式退回固定乘数并标来源，不伪装成波动率口径
+                    let band_stop_pct = (1.0 - serenity_stop_mult) * 100.0;
+                    let band_target_pct = (serenity_target_mult - 1.0) * 100.0;
+                    let (used_stop_pct, stop_src) = match vol_stop {
+                        Some(v) => (v, "vol"),
+                        None => (band_stop_pct, "fallback_pct"),
+                    };
+                    let used_target_pct = vol_target.unwrap_or(band_target_pct);
                     let (entry_low, entry_high, stop_loss, target_price) = if price > 0.0 {
                         (
                             price * (1.0 - serenity_entry_range),
                             price * (1.0 + serenity_entry_range),
-                            price * serenity_stop_mult,
-                            price * serenity_target_mult,
+                            price * (1.0 - used_stop_pct / 100.0),
+                            price * (1.0 + used_target_pct / 100.0),
                         )
                     } else {
                         tracing::warn!("[serenity] {}: 行情获取失败，价格字段保持 0", code);
                         (0.0, 0.0, 0.0, 0.0)
+                    };
+                    // 仓位 = min(候选上限, 该档风险预算) × 成本拖累。
+                    // 候选的 positionPct **已是**最终建议权重（不是策略 base），故不再乘置信 ——
+                    // 乘了就是把「策略链 base×置信」的公式套到已经乘过置信的数上，二次折扣。
+                    let cap_position = c.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(5.0);
+                    let budget = axagent_analysis_engine::recommender::risk::risk_budget_position(
+                        used_stop_pct,
+                        reco_risk_budget_pct,
+                    );
+                    let (pos_before_drag, pos_src) = match budget {
+                        Some(b) => (cap_position.min(b), "risk_budget"),
+                        None => (cap_position, "fallback_base"),
+                    };
+                    let drag = axagent_analysis_engine::recommender::risk::cost_drag_factor(
+                        used_target_pct,
+                        reco_round_trip_cost_pct,
+                    );
+                    let position_pct = (pos_before_drag * drag).clamp(0.0, 95.0);
+                    let mut pick_reasons: Vec<String> = c
+                        .get("reasons")
+                        .and_then(|v| v.as_array())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_owned()))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    pick_reasons.push(format!(
+                        "风控: 止损 {used_stop_pct:.2}% ({stop_src}) · 目标 {used_target_pct:.2}% · 持有 {h_days} 天 · 仓位上限 {cap_position:.1}% → 风险预算 {:.1}% × 成本拖累 {drag:.2}",
+                        budget.unwrap_or(0.0)
+                    ));
+                    // 逐档先验只在荐股策略链合成（`mod.rs` 的 R-C 段）；本链 confidence 是工作流
+                    // 候选评分 ⇒ 沿用既有词表 `absent` 声明「本次未吸收该档先验」，不新造说法。
+                    let mut pick_risk_notes: Vec<String> = Vec::new();
+                    if stop_src == "fallback_pct" {
+                        pick_risk_notes.push(format!(
+                            "⚠ 未取到日线波动率 ⇒ 止损退回固定乘数 ×{serenity_stop_mult}（stopSource=fallback_pct，非波动率口径）"
+                        ));
+                    }
+                    // 候选自带持有期若与该档权威天数不符 ⇒ 按权威落库并**声明覆盖**，
+                    // 不静默改写（旧缺陷形态：period=mid 却 holding_days=20，反思按天判成熟即错位）。
+                    let holding_days_input = c.get("holdingDays").and_then(|v| v.as_i64());
+                    let holding_days = match holding_days_input {
+                        Some(d) if d != serenity_tier_days => {
+                            pick_reasons.push(format!(
+                                "候选持有期 {d} 天与 {serenity_tier_period} 档权威 {serenity_tier_days} 天不一致 ⇒ 按权威落库"
+                            ));
+                            serenity_tier_days
+                        },
+                        Some(d) => d,
+                        None => serenity_tier_days,
                     };
                     let pick_data_val = serde_json::json!({
                         "stockCode": code,
@@ -1403,18 +1484,16 @@ pub async fn run_serenity_screening(
                         "entryHigh": entry_high,
                         "stopLoss": stop_loss,
                         "targetPrice": target_price,
-                        "positionPct": c.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(5.0),
-                        "holdingDays": c
-                            .get("holdingDays")
-                            .and_then(|v| v.as_i64())
-                            // 兜底天数 = 该档权威天数（此前写死 20，与 mid=28 自相矛盾）
-                            .unwrap_or(serenity_tier_days),
+                        "positionPct": position_pct,
+                        "holdingDays": holding_days,
                         "confidence": conf,
-                        "reasons": c.get("reasons").and_then(|v| v.as_array()).map(|a| {
-                            a.iter().filter_map(|v| v.as_str().map(|s| s.to_owned())).collect::<Vec<_>>()
-                        }).unwrap_or_default(),
-                        "riskNotes": [],
+                        "reasons": pick_reasons,
+                        "riskNotes": pick_risk_notes,
                         "secondaryStyles": [],
+                        // 三个风控来源键与 `recommender/types.rs` 的 RecoPick 同名同义（camelCase）
+                        "stopSource": stop_src,
+                        "positionSource": pos_src,
+                        "priorSource": "absent",
                         "synthetic": false,
                     });
                     // 持久化到 reco_picks

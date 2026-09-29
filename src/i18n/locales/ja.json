@@ -15194,7 +15194,17 @@
       "backtestHint": "回测将使用历史数据模拟策略表现",
       "tabMonteCarlo": "蒙特卡洛",
       "tabQuantSim": "量化仿真",
-      "tabSimulation": "仿真"
+      "tabSimulation": "仿真",
+      "matrixNoSample": "検証済みサンプルなし",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "設計上なし：ボトルネック証拠は週単位以上の実現が必要",
+        "oversold_rebound_needs_at_least_mid_horizon": "設計上なし：売られすぎ反発は最低でも中期の実現が必要",
+        "oversold_rebound_not_applied_to_long_horizon": "設計上なし：売られすぎ反発は長期には適用しません",
+        "cell_not_in_matrix": "契約表にこのセルが無い（設計ではなく実装漏れの可能性）"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "既知のミスマッチ：評価額は実現に数週間、決定により採用継続"
+      }
     },
     "export": {
       "analystReports": "分析师报告",
@@ -16163,6 +16173,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "リスク注記",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "損切り基準：固定パーセント（この銘柄の日次σが取得できず、ボラティリティ由来ではない）",
         "rowPriorAbsent": "この保有期間の歴史的先験サンプルなし。信頼度はスタイル評点のみが由来",

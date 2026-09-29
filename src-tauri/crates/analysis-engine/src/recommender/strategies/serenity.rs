@@ -121,35 +121,63 @@ impl SerenityStrategy {
         let max_3m_gain = read_f64(vars, "serenity_max_3m_gain_pct", 80.0);
         let max_12m_gain = read_f64(vars, "serenity_max_12m_gain_pct", 300.0);
 
-        if let Ok(klines) = client.get_klines_with_adj(code, "daily", 252, None).await {
-            let latest_close = klines.last().map(|k| k.close).unwrap_or(price);
-            // 近3月（约63个交易日）：数据不足63根时无法计算，跳过该过滤
-            // 避免 saturating_sub 退化为取首根（上市以来涨幅）而误剔除次新股
-            if klines.len() >= 63 {
-                let k3m_idx = klines.len() - 63;
-                let close_3m_back = klines[k3m_idx].close;
-                if latest_close > 0.0 && serenity_score < 85.0 {
-                    let gain_3m = (latest_close - close_3m_back) / close_3m_back * 100.0;
+        // 涨幅过滤的**执行状态**。此前三处静默跳过（日线不足 63 根 / 取数失败 / 评分豁免），
+        // 卡片却照样显示「确定性财务验证通过」⇒ 次新股与取数失败的票等于自动放行。
+        let mut gain_filter_skips: Vec<String> = Vec::new();
+        // 判据是**日历窗口**（近 3 月 / 近 12 月），日线就是它的正确尺度 ⇒ 刻意不接 scale 层：
+        // 换成档位尺度后「63 根」在季线尺度会变成 63 季 ≈ 15 年，语义漂移完全不可见。
+        // reco-scale-exempt: calendar-window（门 f 据此登记豁免；没有登记就视为未豁免）
+        match client.get_klines_with_adj(code, "daily", 252, None).await {
+            Ok(klines) => {
+                let bars = klines.len();
+                let latest_close = klines.last().map(|k| k.close).unwrap_or(price);
+                // 近3月 = 63 个交易日
+                if bars < 63 {
+                    gain_filter_skips.push(format!("近3月（需 63 根日线，实际 {bars} 根）"));
+                } else if klines[bars - 63].close <= 0.0 || latest_close <= 0.0 {
+                    gain_filter_skips.push("近3月（基期或现价为 0，涨幅不可算）".to_string());
+                } else {
+                    let base_3m = klines[bars - 63].close;
+                    let gain_3m = (latest_close - base_3m) / base_3m * 100.0;
                     if gain_3m > max_3m_gain {
-                        tracing::info!(
-                            "{code}: 近3月涨幅 {gain_3m:.0}% > {max_3m_gain}%, 因短期涨幅过大排除"
-                        );
-                        return None;
+                        if serenity_score >= 85.0 {
+                            gain_filter_skips.push(format!(
+                                "近3月（涨幅 {gain_3m:.0}% 超 {max_3m_gain}% 阈值，按瓶颈评分 {serenity_score:.0}≥85 豁免）"
+                            ));
+                        } else {
+                            tracing::info!(
+                                "{code}: 近3月涨幅 {gain_3m:.0}% > {max_3m_gain}%, 因短期涨幅过大排除"
+                            );
+                            return None;
+                        }
                     }
                 }
-            }
-            // 近12月（约252个交易日）
-            if let Some(first) = klines.first() {
-                if first.close > 0.0 && latest_close > 0.0 && serenity_score < 85.0 {
-                    let gain_12m = (latest_close - first.close) / first.close * 100.0;
+                // 近12月 = 252 个交易日。**旧实现直接取 klines.first()**：不足 252 根的次新股
+                // 会把「上市以来涨幅」当成「近 12 月涨幅」去比 300% 阈值 ⇒ 窗口比阈值短、判据偏松。
+                if bars < 252 {
+                    gain_filter_skips.push(format!("近12月（需 252 根日线，实际 {bars} 根）"));
+                } else if klines[0].close <= 0.0 || latest_close <= 0.0 {
+                    gain_filter_skips.push("近12月（基期或现价为 0，涨幅不可算）".to_string());
+                } else {
+                    let base_12m = klines[0].close;
+                    let gain_12m = (latest_close - base_12m) / base_12m * 100.0;
                     if gain_12m > max_12m_gain {
-                        tracing::info!(
-                            "{code}: 近12月涨幅 {gain_12m:.0}% > {max_12m_gain}%, 因长期涨幅过大排除"
-                        );
-                        return None;
+                        if serenity_score >= 85.0 {
+                            gain_filter_skips.push(format!(
+                                "近12月（涨幅 {gain_12m:.0}% 超 {max_12m_gain}% 阈值，按瓶颈评分 {serenity_score:.0}≥85 豁免）"
+                            ));
+                        } else {
+                            tracing::info!(
+                                "{code}: 近12月涨幅 {gain_12m:.0}% > {max_12m_gain}%, 因长期涨幅过大排除"
+                            );
+                            return None;
+                        }
                     }
                 }
-            }
+            },
+            Err(e) => {
+                gain_filter_skips.push(format!("近3月/近12月（日线取数失败：{e}）"));
+            },
         }
 
         // ── 估值过滤结束 ──
@@ -262,6 +290,10 @@ impl SerenityStrategy {
             "瓶颈环节可能因技术变革或竞争格局变化而失效".to_string(),
             "建议作为投资组合的弹性增强部分，而非全部".to_string(),
         ];
+        // 未生效的涨幅过滤进风险提示：缺的是「这项没验」的声明，不能让它冒充「验过了」。
+        for skipped in gain_filter_skips {
+            risk_notes.push(format!("⚠ 涨幅过滤未生效：{skipped}"));
+        }
         // workflow 诊断的主风险
         if let Some(primary_risk) = detail["primary_risk"].as_str() {
             if !primary_risk.is_empty() {

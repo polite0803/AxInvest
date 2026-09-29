@@ -15194,7 +15194,17 @@
       "backtestHint": "Der Backtest simuliert die Strategieperformance anhand historischer Daten",
       "tabMonteCarlo": "Monte Carlo",
       "tabQuantSim": "Quantitative Simulation",
-      "tabSimulation": "Simulation"
+      "tabSimulation": "Simulation",
+      "matrixNoSample": "Noch keine validierte Stichprobe",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "Per Design: Engpass-Nachweis braucht einen Horizont von einer Woche oder länger",
+        "oversold_rebound_needs_at_least_mid_horizon": "Per Design: Overdraft-Rebounds brauchen mindestens einen mittelfristigen Horizont",
+        "oversold_rebound_not_applied_to_long_horizon": "Per Design: Overdraft-Rebounds werden auf den langfristigen Horizont nicht angewandt",
+        "cell_not_in_matrix": "Zelle fehlt in der Tabelle (möglicherweise Implementierungslücke, nicht per Design)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Bekannte Fehlpaarung: Bewertung braucht Wochen zur Realisierung; per Entscheidung behalten"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16163,6 +16173,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "Risikohinweise",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "Stop-Basis: fester Prozentsatz (Tages-σ nicht verfügbar, nicht volatitätsabgeleitet)",
         "rowPriorAbsent": "Keine historischen A-priori-Stichproben für diesen Horizont; Konfidenz nur aus der Stilbewertung",

@@ -1,12 +1,26 @@
 import { invoke } from "@/lib/invoke";
 import { horizonIcAbsenceKey, horizonSuffix } from "@/lib/stock-analysis-utils";
-import type { BacktestComparisonResponse, RecoIcCell, RecoIcStats, StrategyStats } from "@/types/stock-analysis";
+import type {
+  BacktestComparisonResponse,
+  RecoIcCell,
+  RecoIcStats,
+  RecoMatrixCell,
+  StrategyStats,
+} from "@/types/stock-analysis";
 import { Card, Empty, Segmented, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-const STYLE_KEYS = ["trend", "value", "capital", "reversion"] as const;
-/** 四档全枚举。此前缺 `ultra_short` ⇒ 该档的回测统计在矩阵里静默不存在，用户读不出是「没这档」还是「这档没问题」。 */
+/** 观测面（`reco_ic_stats`）取不到时的**兜底行集合**。
+ *  正常渲染必须由后端契约 `matrix` 驱动（6 行，含 watchlist / serenity）——
+ *  行集合的权威在 `recommender/style_matrix.rs`，本列表只保证「契约没到货时主表仍出得来 4 行」。
+ *  旧形态是这里自带 4 项清单 ⇒ serenity 与 watchlist 两行连声明位置都没有。 */
+const STYLE_KEYS = [
+  "trend",
+  "value",
+  "capital",
+  "reversion",
+] as const; /** 四档全枚举。此前缺 `ultra_short` ⇒ 该档的回测统计在矩阵里静默不存在，用户读不出是「没这档」还是「这档没问题」。 */
 const PERIOD_KEYS = ["ultra_short", "short", "mid", "long"] as const;
 
 /** 色标辅助 */
@@ -78,6 +92,13 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     };
   }, []);
 
+  /** 契约名目 → 落库/回测写法。`serenity` 一名两写（工作流链 `serenity` / 策略链 `bottleneck`），
+   *  别名由后端契约给出，前端不再自己猜。契约没到货时退化成「名目即写法」。 */
+  const aliasesOf = (style: string): string[] => {
+    const cell = ic?.matrix?.find((c) => c.style === style);
+    return cell && cell.dbStyles.length > 0 ? cell.dbStyles : [style];
+  };
+
   const icCells = useMemo(() => {
     const map: Record<string, Record<string, RecoIcCell>> = {};
     for (const st of ic?.styles ?? []) {
@@ -88,13 +109,22 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
   }, [ic]);
 
   const halfLifeOf = (style: string): string | null => {
-    const st = ic?.styles.find((x) => x.style === style);
+    const st = (ic?.styles ?? []).find((x) => aliasesOf(style).includes(x.style));
     if (!st) { return null; }
     if (st.halfLifeDays != null) {
       return t("stockAnalysis.reflection.hitrateHalfLifeDays", { days: st.halfLifeDays.toFixed(1) });
     }
     return t("stockAnalysis.reflection.hitrateHalfLifeNone", { n: 0 });
   };
+
+  /** 矩阵行集合：契约在 ⇒ 用契约的 6 个风格；观测面取不到 ⇒ 兜底 4 行（声明不能带崩主表）。 */
+  const styleKeys = useMemo(() => {
+    const keys: string[] = [];
+    for (const c of ic?.matrix ?? []) {
+      if (!keys.includes(c.style)) { keys.push(c.style); }
+    }
+    return keys.length > 0 ? keys : (STYLE_KEYS as readonly string[]).slice();
+  }, [ic]);
 
   // 数据源
   const data = externalData ?? internalData;
@@ -110,6 +140,31 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
     }
     return map;
   }, [data, group]);
+
+  /** 契约格：这一格「出票 / 按设计不做 / 漏登记」的状态由后端 24 格表给出。 */
+  const contractOf = (style: string, period: string): RecoMatrixCell | undefined =>
+    ic?.matrix?.find((c) => c.style === style && c.period === period);
+
+  /** 别名归一后的回测统计（`serenity` 行的数据可能落在 `bottleneck` 名下）。 */
+  const statsOf = (style: string, period: string): StrategyStats | undefined => {
+    for (const alias of aliasesOf(style)) {
+      const s = matrix?.[alias]?.[period];
+      if (s) { return s; }
+    }
+    return undefined;
+  };
+
+  /** 别名归一后的 IC 观测格。 */
+  const icCellOf = (style: string, period: string): RecoIcCell | undefined => {
+    for (const alias of aliasesOf(style)) {
+      const c = icCells[alias]?.[period];
+      if (c) { return c; }
+    }
+    return undefined;
+  };
+
+  /** 理由码 → 文案；**缺译时退回理由码原文**，让「没翻译」在 UI 上是可见的缺陷而不是空白。 */
+  const reasonText = (prefix: string, code: string): string => t(`${prefix}.${code}`, { defaultValue: code });
 
   if (loading) {
     return <Spin size="small" style={{ display: "block", margin: "24px auto" }} />;
@@ -170,7 +225,7 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
           </tr>
         </thead>
         <tbody>
-          {STYLE_KEYS.map((style) => (
+          {styleKeys.map((style) => (
             <tr key={style} style={{ borderBottom: "0.5px solid var(--color-border-tertiary)" }}>
               <td style={{ padding: "8px 10px", fontWeight: 500 }}>
                 {t(`stockAnalysis.recommendation.style${style.charAt(0).toUpperCase() + style.slice(1)}`)}
@@ -194,23 +249,37 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                 })()}
               </td>
               {PERIOD_KEYS.map((period) => {
-                const s = matrix[style]?.[period];
+                const view = contractOf(style, period);
+                const s = statsOf(style, period);
                 const sid = `${style}_${period}`;
                 const isSelected = selected === sid;
 
-                // reversion_long 不存在
-                if (style === "reversion" && period === "long") {
+                // 「按设计不做」必须带理由（旧形态：`style === "reversion" && period === "long"`
+                // 硬编码一格出「—」，而 serenity×短/超短同样不成立却根本没有这一行）
+                if (view && !view.active) {
                   return (
                     <td key={period} style={{ padding: "8px 10px", textAlign: "center" }}>
-                      <span style={{ color: "var(--color-text-tertiary)", fontSize: 11 }}>—</span>
+                      <span
+                        style={{ color: "var(--color-text-tertiary)", fontSize: 11 }}
+                        data-testid="matrix-absence"
+                      >
+                        {reasonText("stockAnalysis.backtest.matrixAbsence", view.reasonCode)}
+                      </span>
                     </td>
                   );
                 }
 
+                // 出票但还没有已验证样本 ⇒ 与「按设计不做」是两件事，各自一句
                 if (!s || s.totalSignals === 0) {
                   return (
                     <td key={period} style={{ padding: "8px 10px", textAlign: "center" }}>
                       <span style={{ color: "var(--color-text-tertiary)", fontSize: 11 }}>—</span>
+                      <div
+                        style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}
+                        data-testid="matrix-no-sample"
+                      >
+                        {t("stockAnalysis.backtest.matrixNoSample")}
+                      </div>
                     </td>
                   );
                 }
@@ -268,8 +337,19 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                     <div style={{ fontSize: 10, color: "var(--color-text-tertiary)", marginTop: 2 }}>
                       {`S ${s.sharpeRatio != null ? s.sharpeRatio.toFixed(1) : "—"} · ${s.totalSignals}`}
                     </div>
+                    {/* 第三种状态：出票但该方法论在该尺度上兑现不了（按裁定保留，必须带声明） */}
+                    {view?.misfitCode
+                      ? (
+                        <div
+                          style={{ fontSize: 10, color: "var(--sa-warning, #faad14)" }}
+                          data-testid="matrix-misfit"
+                        >
+                          {reasonText("stockAnalysis.backtest.matrixMisfit", view.misfitCode)}
+                        </div>
+                      )
+                      : null}
                     {(() => {
-                      const cell = icCells[style]?.[period];
+                      const cell = icCellOf(style, period);
                       if (!cell) {
                         // 一格都没有实现样本：与「样本不够」不同，得说不清的方向
                         return (

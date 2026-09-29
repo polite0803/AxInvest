@@ -493,12 +493,43 @@ pub struct RawPluginAgentDef {
     pub system_prompt: Option<String>,
 }
 
+/// `plugin.json` 的 `author` 容错解析：**字符串与对象两种写法都收**。
+///
+/// Claude Code 的清单契约（即 `.claude-plugin/plugin.json`）允许 `author` 写成对象
+/// （`{"name": …, "email": …, "url": …}`），而本仓原先把它声明为 `Option<String>` ⇒
+/// 遇到对象写法 serde 直接报 `invalid type: map, expected a string`，**整份清单加载失败**。
+/// 实测（2026-09-30）：`~/.agents/skills/connect-apps-plugin/.claude-plugin/plugin.json`
+/// 的 `author` 就是对象，该插件因此永远进不了注册表（`Skill load failure` WARN）。
+///
+/// 判据：`author` 在加载链上**只用于展示**（`PluginMetadata` 甚至不携带它），
+/// 不该成为「能不能加载」的门 —— 故这里收敛两种写法：优先 `name`，退化到 `email`，
+/// 都没有则记 `None`；数字 / 布尔 / 数组等其余形态同样按「未声明」处理。
+fn deserialize_author_lenient<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match Option::<Value>::deserialize(deserializer)? {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) => Some(name),
+        Some(Value::Object(map)) => match (
+            map.get("name").and_then(Value::as_str),
+            map.get("email").and_then(Value::as_str),
+        ) {
+            (Some(name), Some(email)) => Some(format!("{name} <{email}>")),
+            (Some(name), None) => Some(name.to_string()),
+            (None, Some(email)) => Some(email.to_string()),
+            (None, None) => None,
+        },
+        Some(_) => None,
+    })
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct RawPluginManifest {
     pub name: String,
     pub version: String,
     pub description: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_author_lenient")]
     pub author: Option<String>,
     #[serde(default)]
     pub permissions: Vec<String>,

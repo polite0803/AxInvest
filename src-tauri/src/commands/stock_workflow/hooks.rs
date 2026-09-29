@@ -308,18 +308,15 @@ pub(crate) async fn build_stock_analysis_variables(
             .find(|v| v.name == "horizon_prior_kappa")
             .and_then(|v| v.value.as_f64())
             .unwrap_or(DEFAULT_KAPPA);
-        let prior_map =
-            match crate::commands::stock_workflow::reflection_stats::build_hitrate_stats(db).await {
-                Ok(stats) => {
-                    axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa)
-                },
-                Err(e) => {
-                    tracing::warn!(
-                        "[stock_workflow] 逐档先验统计取数失败 ⇒ 四档退回共用 prior: {e}"
-                    );
-                    serde_json::Value::Null
-                },
-            };
+        let prior_map = match axagent_analysis_engine::reflection_stats::build_hitrate_stats(db)
+            .await
+        {
+            Ok(stats) => axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa),
+            Err(e) => {
+                tracing::warn!("[stock_workflow] 逐档先验统计取数失败 ⇒ 四档退回共用 prior: {e}");
+                serde_json::Value::Null
+            },
+        };
         if let Some(existing) = merged_vars.iter_mut().find(|v| v.name == "horizon_prior_json") {
             existing.value = prior_map;
         } else {

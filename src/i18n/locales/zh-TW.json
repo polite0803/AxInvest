@@ -15339,7 +15339,17 @@
       "backtestHint": "回测将使用历史数据模拟策略表现",
       "tabMonteCarlo": "蒙特卡洛",
       "tabQuantSim": "量化仿真",
-      "tabSimulation": "仿真"
+      "tabSimulation": "仿真",
+      "matrixNoSample": "暫無已驗證樣本",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "按設計不做：瓶頸證據需以周為單位兌現",
+        "oversold_rebound_needs_at_least_mid_horizon": "按設計不做：超跌反彈需至少中線兌現",
+        "oversold_rebound_not_applied_to_long_horizon": "按設計不做：超跌反彈不適用於長線",
+        "cell_not_in_matrix": "契約表缺該格（可能是實作漏了，不是按設計不做）"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "已知錯配：估值需數周兌現，按裁定保留出票"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16387,6 +16397,7 @@
       "row": {
         "reasons": "理由",
         "risks": "风险",
+        "riskNotes": "風控註釋",
         "secondaryStyle": "次要风格",
         "rowStopFallback": "止損口徑：固定百分比（該票日線 σ 不可得，非波動率推導）",
         "rowPriorAbsent": "該檔無歷史先驗樣本，置信度僅由該風格評分得出",

@@ -59,6 +59,25 @@ function PeriodTag({ period }: { period: string }) {
   return <Tag className="text-[10px] m-0">{suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : period}</Tag>;
 }
 
+/**
+ * 详情卡的 `pick_data` 解析。
+ *
+ * 后端已把风控口径（波动率 / 固定百分比退化）与「涨幅过滤未生效」写进 `reasons` / `riskNotes`
+ * ——与荐股面板同一套字段，这里只负责渲染。此前详情卡只有代码/名称/置信度，
+ * 趋势智选两条链的口径差异在**历史上完全不可见**（复盘时无从对照当初用的是哪套止损）。
+ */
+function parsePickNotes(raw?: string | null): { reasons: string[]; riskNotes: string[] } {
+  if (!raw) { return { reasons: [], riskNotes: [] }; }
+  try {
+    const v = JSON.parse(raw) as { reasons?: unknown; riskNotes?: unknown };
+    const toStrings = (x: unknown): string[] =>
+      Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : [];
+    return { reasons: toStrings(v.reasons), riskNotes: toStrings(v.riskNotes) };
+  } catch {
+    return { reasons: [], riskNotes: [] };
+  }
+}
+
 export function RecoHistoryModal() {
   const { t } = useTranslation();
   const { message: messageApi } = App.useApp();
@@ -311,37 +330,56 @@ export function RecoHistoryModal() {
                   <List
                     size="small"
                     dataSource={items}
-                    renderItem={(p) => (
-                      <List.Item className="py-1">
-                        <Card
-                          size="small"
-                          hoverable
-                          className="w-full"
-                          onClick={() => handleAnalyze(p.stockCode)}
-                        >
-                          <div className="text-xs w-full flex flex-col gap-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <Tag className="m-0 text-[10px]">{p.stockCode}</Tag>
-                              <span className="font-medium truncate flex-1">{p.stockName}</span>
-                              <PeriodTag period={p.period} />
-                              <Tag color="volcano" className="m-0 text-[10px]">BUY</Tag>
-                              {p.synthetic === 1 && (
-                                <Tag color="orange" className="m-0 text-[10px]">
-                                  {t("stockAnalysis.recommendation.tagSynthetic")}
+                    renderItem={(p) => {
+                      const notes = parsePickNotes(p.pickData);
+                      return (
+                        <List.Item className="py-1">
+                          <Card
+                            size="small"
+                            hoverable
+                            className="w-full"
+                            onClick={() => handleAnalyze(p.stockCode)}
+                          >
+                            <div className="text-xs w-full flex flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <Tag className="m-0 text-[10px]">{p.stockCode}</Tag>
+                                <span className="font-medium truncate flex-1">{p.stockName}</span>
+                                <PeriodTag period={p.period} />
+                                <Tag color="volcano" className="m-0 text-[10px]">BUY</Tag>
+                                {p.synthetic === 1 && (
+                                  <Tag color="orange" className="m-0 text-[10px]">
+                                    {t("stockAnalysis.recommendation.tagSynthetic")}
+                                  </Tag>
+                                )}
+                                <Tag color="blue" className="m-0 text-[10px]">
+                                  {t("stockAnalysis.recommendation.row.confidence")} {p.confidence}
                                 </Tag>
+                              </div>
+                              <Text type="secondary" className="text-[10px]">
+                                {t("stockAnalysis.recommendation.recoHistory.generatedAt")}:{" "}
+                                {new Date(p.generatedAt).toLocaleString()}
+                              </Text>
+                              {notes.reasons.length > 0 && (
+                                <div className="text-[10px] text-green-600">
+                                  {t("stockAnalysis.recommendation.row.reasons")}：
+                                  <ul className="m-0 pl-4">
+                                    {notes.reasons.map((r, i) => <li key={i}>{r}</li>)}
+                                  </ul>
+                                </div>
                               )}
-                              <Tag color="blue" className="m-0 text-[10px]">
-                                {t("stockAnalysis.recommendation.row.confidence")} {p.confidence}
-                              </Tag>
+                              {notes.riskNotes.length > 0 && (
+                                <div className="text-[10px] text-red-600">
+                                  {t("stockAnalysis.recommendation.row.riskNotes")}：
+                                  <ul className="m-0 pl-4">
+                                    {notes.riskNotes.map((r, i) => <li key={i}>{r}</li>)}
+                                  </ul>
+                                </div>
+                              )}
                             </div>
-                            <Text type="secondary" className="text-[10px]">
-                              {t("stockAnalysis.recommendation.recoHistory.generatedAt")}:{" "}
-                              {new Date(p.generatedAt).toLocaleString()}
-                            </Text>
-                          </div>
-                        </Card>
-                      </List.Item>
-                    )}
+                          </Card>
+                        </List.Item>
+                      );
+                    }}
                   />
                 ),
               }))}

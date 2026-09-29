@@ -15194,7 +15194,17 @@
       "backtestHint": "백테스트는 과거 데이터를 사용하여 전략 성과를 시뮬레이션합니다",
       "tabMonteCarlo": "몬테카를로",
       "tabQuantSim": "퀀트 시뮬레이션",
-      "tabSimulation": "시뮬레이션"
+      "tabSimulation": "시뮬레이션",
+      "matrixNoSample": "검증된 표본 없음",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "설계상 제외: 병목 근거는 주 단위 이상 실현 필요",
+        "oversold_rebound_needs_at_least_mid_horizon": "설계상 제외: 과매도 반등은 최소 중기 실현 필요",
+        "oversold_rebound_not_applied_to_long_horizon": "설계상 제외: 과매도 반등은 장기에 적용하지 않음",
+        "cell_not_in_matrix": "계약 표에 이 셀이 없음(설계가 아니라 구현 누락일 수 있음)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "알려진 불일치: 밸류에이션 실현엔 수 주, 결정에 따라 유지"
+      }
     },
     "export": {
       "analystReports": "analystReports",
@@ -16163,6 +16173,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "리스크 메모",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "손절 기준: 고정 백분율(일간 σ 확보 불가, 변동성 유도 아님)",
         "rowPriorAbsent": "해당 보유 기간의 역사적 사전 표본 없음. 신뢰도는 스타일 점수에서만 도출",

@@ -72,6 +72,9 @@ pub struct RecoIcStats {
     pub total_cells: usize,
     pub usable_cells: usize,
     pub total_samples: usize,
+    /// 24 格契约视图（`contract_cells()`）——行的存在性与不成立理由的**唯一来源**。
+    /// 与 `styles`（观测）分列：某格没有样本 ≠ 该格不存在。
+    pub matrix: Vec<MatrixCellView>,
 }
 
 /// 秩相关不可得时区分「样本不够」与「某一侧全是同一个值（方差退化）」。
@@ -84,6 +87,49 @@ fn classify(pairs: &[(f64, f64)]) -> (&'static str, Option<f64>) {
         Some(v) => ("ok", Some(v)),
         None => ("degenerate_variance", None),
     }
+}
+
+/// 契约视图的一格 —— 来自 `style_matrix`，**与有没有数据无关**：没出票的格也照样在表里，
+/// 并带上「为什么不成立」的理由码。
+///
+/// 为什么单列而不是塞进 `RecoIcCell`：`RecoIcCell` 是**观测**（有样本才存在），
+/// 契约是**声明**（24 格恒在）。把两者混成一格，就会出现「按设计不做的格」与
+/// 「还没跑出样本的格」在 UI 上同为空白 —— 这正是 `style_matrix` 立项时要消灭的形态。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixCellView {
+    /// 矩阵名目（`serenity`，不是落库的 `bottleneck`）
+    pub style: String,
+    pub period: &'static str,
+    /// 该格是否出票
+    pub active: bool,
+    /// `cell_is_active` | 不成立理由码 | `cell_not_in_matrix`
+    pub reason_code: &'static str,
+    /// 出票但已知档-因子错配的理由码（`None` = 无错配声明）
+    pub misfit_code: Option<&'static str>,
+    /// 该风格在落库/回测里的实际写法（`serenity` ⇒ `["serenity","bottleneck"]`）
+    pub db_styles: Vec<&'static str>,
+}
+
+/// 24 格契约视图（行=风格×列=档位）。前端矩阵的行/格集合必须由本表驱动，
+/// 不得再自带一份风格清单（旧 `RecoStrategyMatrix.tsx` 的 4 项 `STYLE_KEYS` 让
+/// watchlist 与 serenity 两行连声明位置都没有）。
+pub fn contract_cells() -> Vec<MatrixCellView> {
+    let mut out = Vec::new();
+    for style in crate::recommender::style_matrix::style_keys() {
+        for period in Period::ALL.iter() {
+            let reason = crate::recommender::style_matrix::reason_code_by_key(style, *period);
+            out.push(MatrixCellView {
+                style: style.to_string(),
+                period: period.as_str(),
+                active: reason == "cell_is_active",
+                misfit_code: crate::recommender::style_matrix::misfit_reason(style, *period),
+                reason_code: reason,
+                db_styles: crate::recommender::style_matrix::db_style_aliases(style),
+            });
+        }
+    }
+    out
 }
 
 /// 聚合：按 (风格, 档位) 分组算 rank IC，再按风格拟合预测半衰期。
@@ -149,7 +195,13 @@ pub fn aggregate_reco_ic(rows: &[RecoIcRow]) -> RecoIcStats {
         out_styles.push(StyleIc { style, cells, half_life_days: hl, half_life_status: hl_status });
     }
 
-    RecoIcStats { styles: out_styles, total_cells, usable_cells, total_samples: rows.len() }
+    RecoIcStats {
+        styles: out_styles,
+        total_cells,
+        usable_cells,
+        total_samples: rows.len(),
+        matrix: contract_cells(),
+    }
 }
 
 #[cfg(test)]
@@ -261,7 +313,7 @@ mod tests {
         let rows = vec![row("trend", "short", 55.0, 1.0, 5)];
         let value = serde_json::to_value(aggregate_reco_ic(&rows)).unwrap();
         let top = value.as_object().unwrap();
-        for key in ["styles", "totalCells", "usableCells", "totalSamples"] {
+        for key in ["styles", "totalCells", "usableCells", "totalSamples", "matrix"] {
             assert!(top.contains_key(key), "RecoIcStats 缺 camelCase 键 {key}: {top:?}");
         }
         assert!(!top.contains_key("total_cells"), "snake_case 不得回到 IPC 边界");
@@ -271,5 +323,62 @@ mod tests {
         }
         assert!(!cell.contains_key("rank_ic"));
         assert!(!cell.contains_key("ic_status"));
+        let view = value["matrix"].as_array().unwrap()[0].as_object().unwrap().clone();
+        for key in ["reasonCode", "misfitCode", "dbStyles", "active", "style", "period"] {
+            assert!(view.contains_key(key), "MatrixCellView 缺 camelCase 键 {key}: {view:?}");
+        }
+        assert!(!view.contains_key("reason_code"));
+    }
+
+    /// 契约视图必须**恒出 24 格**（6 风格 × 4 档），与有没有回测样本无关：
+    /// 「按设计不做」的格也得在表里，否则前端只能渲染成空白。
+    #[test]
+    fn contract_cells_cover_the_matrix_regardless_of_samples() {
+        let cells = contract_cells();
+        assert_eq!(cells.len(), 24, "6 风格 × 4 档位 = 24 格");
+        // 空表（无任何回测样本）时契约视图照样齐 —— 行的存在性不依赖观测
+        let stats = aggregate_reco_ic(&[]);
+        assert_eq!(stats.matrix.len(), 24);
+        let serenity: Vec<&MatrixCellView> =
+            cells.iter().filter(|c| c.style == "serenity").collect();
+        assert_eq!(serenity.len(), 4, "趋势智选必须有完整四列，短/超短以理由码声明不适用");
+        for c in &serenity {
+            match c.period {
+                "mid" | "long" => {
+                    assert!(c.active, "serenity×{} 应按设计出票", c.period);
+                    assert_eq!(c.reason_code, "cell_is_active");
+                },
+                _ => {
+                    assert!(!c.active, "serenity×{} 不应出票", c.period);
+                    assert_eq!(c.reason_code, "serenity_needs_week_or_longer_realization");
+                },
+            }
+        }
+    }
+
+    /// 一个名目两写（工作流链 `serenity` / 策略链 `bottleneck`）必须在契约里带上别名，
+    /// 否则「趋势智选」行永远匹配不到自己的统计，格子又是空白 —— 只是换了个原因的空白。
+    #[test]
+    fn serenity_row_carries_its_db_style_aliases() {
+        let cells = contract_cells();
+        let view = cells.iter().find(|c| c.style == "serenity" && c.period == "mid").unwrap();
+        assert_eq!(view.db_styles, vec!["serenity", "bottleneck"]);
+        let trend = cells.iter().find(|c| c.style == "trend" && c.period == "mid").unwrap();
+        assert_eq!(trend.db_styles, vec!["trend"]);
+    }
+
+    /// 错配声明（出票但该方法论在该尺度兑现不了）单独成字段，不与「不成立」混同。
+    #[test]
+    fn misfit_is_a_third_state_not_absence() {
+        let cells = contract_cells();
+        let value_short =
+            cells.iter().find(|c| c.style == "value" && c.period == "ultra_short").unwrap();
+        assert!(value_short.active, "value×超短 按用户裁定保留出票");
+        assert_eq!(
+            value_short.misfit_code,
+            Some("valuation_needs_weeks_to_realize_kept_by_user_decision")
+        );
+        let plain = cells.iter().find(|c| c.style == "trend" && c.period == "short").unwrap();
+        assert_eq!(plain.misfit_code, None);
     }
 }

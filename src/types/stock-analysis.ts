@@ -882,12 +882,29 @@ export interface RecoStyleIc {
   halfLifeStatus: string;
 }
 
+/** 矩阵的一格**契约**（来自后端 `style_matrix`，与有没有回测样本无关）。 */
+export interface RecoMatrixCell {
+  /** 矩阵名目（`serenity`，不是落库写法 `bottleneck`） */
+  style: string;
+  period: string;
+  /** 该格是否出票 */
+  active: boolean;
+  /** `cell_is_active` | 不成立理由码 | `cell_not_in_matrix` */
+  reasonCode: string;
+  /** 出票但已知档-因子错配的理由码 */
+  misfitCode?: string | null;
+  /** 该风格在落库/回测里的实际写法（`serenity` → `["serenity","bottleneck"]`） */
+  dbStyles: string[];
+}
+
 /** `reco_ic_stats` 的响应（Phase R-E：只报数，不回写权重）。 */
 export interface RecoIcStats {
   styles: RecoStyleIc[];
   totalCells: number;
   usableCells: number;
   totalSamples: number;
+  /** 24 格契约视图：矩阵行/格集合与「为什么不成立」的唯一来源 */
+  matrix?: RecoMatrixCell[];
 }
 
 // ── 决策时间线类型 ──

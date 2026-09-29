@@ -29,8 +29,8 @@ use axagent_astock_data::batch::{BatchRequest, BatchResult, BatchRunner, MarketB
 use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, FundamentalsReport};
 use axagent_astock_data::{FinancialReport, StockQuote};
 use axagent_entities::{
-    financial_snapshots, portfolio_holdings, price_alerts, reco_picks, stock_analyses, trades,
-    watchlist_items,
+    decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
+    stock_analyses, trades, watchlist_items,
 };
 use axagent_harness::market_data::KLine;
 use chrono::Datelike;
@@ -722,7 +722,8 @@ pub async fn replay_tool_chain(
 }
 use sea_orm::sea_query::Expr;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect, Set,
 };
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -4448,11 +4449,10 @@ pub struct RecoBatchResponse {
 /// 统计读不到 ⇒ `None`：调用链把每票的 `priorSource` 标成 `absent`，
 /// 而不是拿一个 0.5 假装「该档有自己的先验」。
 pub(crate) async fn reco_horizon_prior(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     served_vars: &[(String, serde_json::Value)],
 ) -> Option<serde_json::Value> {
-    let stats =
-        crate::commands::stock_workflow::reflection_stats::build_hitrate_stats(db).await.ok()?;
+    let stats = axagent_analysis_engine::reflection_stats::build_hitrate_stats(db).await.ok()?;
     let kappa = served_vars
         .iter()
         .find(|(k, _)| k == "horizon_prior_kappa")
@@ -4670,9 +4670,8 @@ pub async fn reco_ic_stats(
     state: State<'_, AppState>,
 ) -> Result<axagent_analysis_engine::recommender::ic::RecoIcStats, String> {
     use axagent_analysis_engine::recommender::ic::{RecoIcRow, aggregate_reco_ic};
-    use sea_orm::EntityTrait;
 
-    let rows = axagent_entities::decision_validations::Entity::find()
+    let rows = decision_validations::Entity::find()
         .all(state.harness.db())
         .await
         .map_err(|e| format!("{e}"))?;

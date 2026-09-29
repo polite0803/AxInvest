@@ -15413,7 +15413,17 @@
       "backtestHint": "Backtest simulates strategy performance using historical data",
       "tabMonteCarlo": "Monte Carlo",
       "tabQuantSim": "Quant Sim",
-      "tabSimulation": "Simulation"
+      "tabSimulation": "Simulation",
+      "matrixNoSample": "No validated sample yet",
+      "matrixAbsence": {
+        "serenity_needs_week_or_longer_realization": "By design: bottleneck evidence needs a week-or-longer horizon",
+        "oversold_rebound_needs_at_least_mid_horizon": "By design: oversold rebound needs at least a mid-term horizon",
+        "oversold_rebound_not_applied_to_long_horizon": "By design: oversold rebound is not applied to the long horizon",
+        "cell_not_in_matrix": "Cell missing from the contract table (possibly an implementation gap, not by design)"
+      },
+      "matrixMisfit": {
+        "valuation_needs_weeks_to_realize_kept_by_user_decision": "Known mismatch: valuation needs weeks to realize; kept by user decision"
+      }
     },
     "export": {
       "analystReports": "Analyst Reports",
@@ -16433,6 +16443,7 @@
       "row": {
         "reasons": "Reasons",
         "risks": "Risks",
+        "riskNotes": "Risk notes",
         "secondaryStyle": "Secondary Style",
         "rowStopFallback": "Stop basis: fixed percentage (daily σ unavailable, not volatility-derived)",
         "rowPriorAbsent": "No historical prior samples for this horizon; confidence comes from the style score only",

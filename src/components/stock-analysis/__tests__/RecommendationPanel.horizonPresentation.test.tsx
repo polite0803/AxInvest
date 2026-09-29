@@ -421,3 +421,121 @@ describe("一次拿四档（R-0）", () => {
     expect(alertEl.textContent).toContain("短线");
   });
 });
+
+/**
+ * 矩阵的**契约驱动**呈现（S4：缺席不冒充空白）。
+ *
+ * 反控形态（修复前必红）：
+ *  - 行集合来自组件自带的 4 项 `STYLE_KEYS` ⇒ 趋势智选连一行都没有；
+ *  - `style === "reversion" && period === "long"` 硬编码一格「—」，其余不成立格（含 serenity
+ *    的短/超短两格）静默走「无数据」分支 ⇒ 「按设计不做」与「还没跑出样本」同为空白；
+ *  - 一名两写（工作流链 `serenity` / 策略链 `bottleneck`）没有别名表 ⇒ 趋势智选行永远匹配不到数据。
+ */
+type MatrixCell = {
+  style: string;
+  period: string;
+  active: boolean;
+  reasonCode: string;
+  misfitCode: string | null;
+  dbStyles: string[];
+};
+
+/** 24 格契约夹具 —— 逐格与 `recommender/style_matrix.rs` 的 MATRIX / MISFIT_DECLARATIONS 对齐。 */
+function contractFixture(): MatrixCell[] {
+  const periods = ["ultra_short", "short", "mid", "long"];
+  const inactive: Record<string, Record<string, string>> = {
+    reversion: {
+      ultra_short: "oversold_rebound_needs_at_least_mid_horizon",
+      long: "oversold_rebound_not_applied_to_long_horizon",
+    },
+    serenity: {
+      ultra_short: "serenity_needs_week_or_longer_realization",
+      short: "serenity_needs_week_or_longer_realization",
+    },
+  };
+  const out: MatrixCell[] = [];
+  for (const style of ["trend", "value", "capital", "reversion", "watchlist", "serenity"]) {
+    for (const period of periods) {
+      const reason = inactive[style]?.[period];
+      out.push({
+        style,
+        period,
+        active: reason === undefined,
+        reasonCode: reason ?? "cell_is_active",
+        misfitCode: style === "value" && period === "ultra_short"
+          ? "valuation_needs_weeks_to_realize_kept_by_user_decision"
+          : null,
+        dbStyles: style === "serenity" ? ["serenity", "bottleneck"] : [style],
+      });
+    }
+  }
+  return out;
+}
+
+function icStats(matrix: MatrixCell[] | undefined): Record<string, unknown> {
+  return {
+    styles: [],
+    totalCells: 0,
+    usableCells: 0,
+    totalSamples: 0,
+    ...(matrix ? { matrix } : {}),
+  };
+}
+
+describe("矩阵契约驱动（S4）", () => {
+  it("趋势智选有自己的行，四个不成立格各带理由而不是空白", async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "reco_ic_stats"
+        ? Promise.resolve(icStats(contractFixture()))
+        : Promise.resolve(comparisonResponse([]))
+    );
+    renderWithI18n(<RecoStrategyMatrix data={comparisonResponse([])} />);
+    await waitFor(() => expect(screen.getAllByText("趋势智选").length).toBeGreaterThan(0));
+    const cells = await waitFor(() => {
+      const els = screen.getAllByTestId("matrix-absence");
+      expect(els.length).toBe(4);
+      return els;
+    });
+    const text = cells.map((el) => el.textContent).join(" | ");
+    expect(text).toContain("瓶颈证据需以周为单位兑现");
+    expect(text).toContain("超跌反弹不适用于长线");
+    expect(text).toContain("超跌反弹需至少中线兑现");
+    // 出票但没样本的格走另一条句（与「按设计不做」分开）
+    expect(screen.getAllByTestId("matrix-no-sample").length).toBeGreaterThan(0);
+  });
+
+  it("serenity 行的统计经 dbStyles 别名归一（落库写 bottleneck 也算趋势智选）", async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "reco_ic_stats"
+        ? Promise.resolve(icStats(contractFixture()))
+        : Promise.resolve(comparisonResponse([stats("bottleneck", "mid", 58, 7)]))
+    );
+    renderWithI18n(<RecoStrategyMatrix data={comparisonResponse([stats("bottleneck", "mid", 58, 7)])} />);
+    await waitFor(() => expect(screen.getByText("58.0%")).toBeTruthy());
+  });
+
+  it("出票但已知档-因子错配的格带错配声明（第三种状态，不混进不成立）", async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "reco_ic_stats"
+        ? Promise.resolve(icStats(contractFixture()))
+        : Promise.resolve(comparisonResponse([stats("value", "ultra_short", 51, 9)]))
+    );
+    renderWithI18n(
+      <RecoStrategyMatrix data={comparisonResponse([stats("value", "ultra_short", 51, 9)])} />,
+    );
+    const el = await waitFor(() => screen.getByTestId("matrix-misfit"));
+    expect(el.textContent).toContain("估值需数周兑现");
+  });
+
+  it("观测面取不到时退回兜底行集合，主表不崩也不白屏", async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "reco_ic_stats"
+        ? Promise.reject(new Error("观测面不可得"))
+        : Promise.resolve(comparisonResponse([stats("trend", "short", 55, 8)]))
+    );
+    renderWithI18n(<RecoStrategyMatrix data={comparisonResponse([stats("trend", "short", 55, 8)])} />);
+    await waitFor(() => expect(screen.getByText("趋势跟踪")).toBeTruthy());
+    // 兜底集合就是原 4 行：契约缺席时不得凭空多出/少掉行
+    expect(screen.queryByText("趋势智选")).toBeNull();
+  });
+});

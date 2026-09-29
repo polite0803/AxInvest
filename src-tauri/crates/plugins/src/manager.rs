@@ -2849,6 +2849,34 @@ mod tests {
         assert!(list.iter().all(|plugin| !plugin.panels.is_empty()));
     }
 
+    /// 2026-09-30 实测缺陷回归：Claude Code 清单的 `author` 是**对象**写法
+    /// （`{"name": …, "email": …}`）时，原先 `RawPluginManifest.author: Option<String>`
+    /// 让**整份清单**反序列化失败（`invalid type: map, expected a string`），
+    /// 插件从此再也加载不出来。复现源为
+    /// `~/.agents/skills/connect-apps-plugin/.claude-plugin/plugin.json`。
+    #[test]
+    fn load_plugin_from_directory_accepts_object_author_in_claude_code_manifest() {
+        let root = temp_dir("authorobj");
+        let manifest_path = root.join(MANIFEST_RELATIVE_PATH);
+        std::fs::create_dir_all(manifest_path.parent().expect("清单路径应有父目录"))
+            .expect("创建 .claude-plugin 目录");
+        std::fs::write(
+            &manifest_path,
+            r#"{
+                "name": "connect-apps",
+                "version": "1.0.0",
+                "description": "Manage auth and connect to apps.",
+                "author": {"name": "Composio", "email": "support@composio.dev"}
+            }"#,
+        )
+        .expect("写入 manifest");
+
+        let manifest = load_plugin_from_directory(&root).expect("对象写法 author 不应导致加载失败");
+        assert_eq!(manifest.author.as_deref(), Some("Composio <support@composio.dev>"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn plugin_capabilities_register_and_rollback() {
         let registry = CapabilityRegistry::new();

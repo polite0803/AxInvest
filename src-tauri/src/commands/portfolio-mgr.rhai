@@ -1888,6 +1888,101 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	// 主档期望持有天数**只从权威表取**，不再采信 LLM 的自由数字 —— 否则同一决策里
 	//   「哪个周期」是公式定的、「该周期多久」却是模型随口报的，反思按天判成熟即错档。
 	let expected_holding_days = days_for.call(time_horizon);
+// ── 逐周期止损/止盈档位（〇-B v2 第 3 条：从硬编码升级为「设置项 + 可被反思优化」）──
+// 缺省值即下表；同名变量由 `PORTFOLIO_MGR_TUNABLE_PARAMS` 派生的 input_mapping 注入
+// （定义见 `seed_variables.rs`）。反思产出的参数建议经 `apply_param_suggestions`
+// 回写本组变量 ⇒ 档位可被单周期反思（〇-B 第 4 条）逐档纠正。
+// ⚠ 缺变量时退回下表**默认值**是刻意的：旧模板快照 / 反思未跑过时档位必须仍可决策，
+//   这与 `days_for`（缺注入即 throw）相反 —— 天数是统计基准、错了会错档判成熟，
+//   档位是策略参数、错了只是保守或激进，两者不可混用同一兜底纪律。
+let sl_pct_ultra_short_v = if present(sl_pct_ultra_short) { sl_pct_ultra_short } else { 3.0 };
+let sl_pct_short_v = if present(sl_pct_short) { sl_pct_short } else { 5.0 };
+let sl_pct_mid_v = if present(sl_pct_mid) { sl_pct_mid } else { 8.0 };
+let sl_pct_long_v = if present(sl_pct_long) { sl_pct_long } else { 12.0 };
+let tp_pct_ultra_short_v = if present(tp_pct_ultra_short) { tp_pct_ultra_short } else { 5.0 };
+let tp_pct_short_v = if present(tp_pct_short) { tp_pct_short } else { 10.0 };
+let tp_pct_mid_v = if present(tp_pct_mid) { tp_pct_mid } else { 18.0 };
+let tp_pct_long_v = if present(tp_pct_long) { tp_pct_long } else { 30.0 };
+// ── 波动率派生档位（四周期科学化 Phase D）──
+// 该档持有 h 天的**典型位移** = σ_daily × √h（口径与单测都在 Rust：
+// `harness::indicators::vol_move_pct`，本仓共享 Rhai 引擎没有 sqrt 故不开新注册面）。
+// 止损 = k1 × 位移、止盈 = k2 × 位移 ⇒ 高波标的自动放宽、低波收紧，且随持有期按 √t 增长。
+// 旧的固定阶梯（3/5/8/12）既不看波动也不按 √t 长：2% 日波动的标的配 90 天持有只到 0.63σ，
+// 几乎必然被噪声打掉 —— 这是「长线止损比短线还紧」的反直觉形态的根源。
+// σ 不可得（样本不足 / 旧快照无 kline_json）⇒ 整档退回上面的可调百分比，
+// 并在 `stopSource` 标 `fallback_pct`（可检降级，不伪装成波动率口径）。
+let VOL_LOOKBACK_DAYS = 20;
+// 截断声明：止损 > 30% 或止盈 > 100% 时该档已失去风控语义（等于不设止损），截住并保留可见性。
+let STOP_CAP_PCT = 30.0;
+let TP_CAP_PCT = 100.0;
+let kline_bars = if type_of(kline_json) == "array" {
+    kline_json
+} else if type_of(kline_json) == "string" && kline_json != "" {
+    safe_parse(kline_json)
+} else {
+    ()
+};
+let vol_bars_ok = type_of(kline_bars) == "array";
+let sigma_daily_pct = if vol_bars_ok { pm_vol_move_pct(kline_bars, VOL_LOOKBACK_DAYS, 1) } else { 0.0 };
+let vol_move_for = |h| {
+    if !vol_bars_ok {
+        0.0
+    } else {
+        pm_vol_move_pct(kline_bars, VOL_LOOKBACK_DAYS, days_for.call(h))
+    }
+};
+let stop_vol_mult_v = if present(stop_vol_mult) { stop_vol_mult } else { 1.2 };
+let tp_vol_mult_v = if present(take_profit_vol_mult) { take_profit_vol_mult } else { 2.0 };
+let sl_pct_fallback_for = |h| switch h {
+    "ultra_short" => sl_pct_ultra_short_v,
+    "short" => sl_pct_short_v,
+    "mid" => sl_pct_mid_v,
+    "long" => sl_pct_long_v,
+    _ => 5.0,
+};
+let tp_pct_fallback_for = |h| switch h {
+    "ultra_short" => tp_pct_ultra_short_v,
+    "short" => tp_pct_short_v,
+    "mid" => tp_pct_mid_v,
+    "long" => tp_pct_long_v,
+    _ => 10.0,
+};
+let sl_pct_for = |h| {
+    let mv = vol_move_for.call(h);
+    if mv <= 0.0 {
+        sl_pct_fallback_for.call(h)
+    } else {
+        clamp(stop_vol_mult_v * mv, 0.5, STOP_CAP_PCT)
+    }
+};
+let tp_pct_for = |h| {
+    let mv = vol_move_for.call(h);
+    if mv <= 0.0 {
+        tp_pct_fallback_for.call(h)
+    } else {
+        clamp(tp_vol_mult_v * mv, 1.0, TP_CAP_PCT)
+    }
+};
+// 每档档位是**怎么来的**必须可见：vol = 波动率派生，fallback_pct = 退回可调百分比。
+let stop_source_for = |h| {
+    if vol_move_for.call(h) > 0.0 { "vol" } else { "fallback_pct" }
+};
+// ── 风险预算仓位（Phase D-2）──
+// weight% = 100 × R / 止损距离% ⇒ 止损被打掉时组合恰好损失 R%（R = `risk_budget_pct`）。
+// 止损由 `sl_pct_for` 给出 ⇒ 与波动率口径天然闭环：σ 不可得时它也退成固定百分比，
+// 此时本函数仍可用，但主链会另走 `fallback_kelly_x_mult` 分支标注。
+// SNR 判定的锚定天数：中线（28 交易日）不改，短档收窄、长档放大。
+let SNR_ANCHOR_DAYS = 28;
+let risk_budget_pct_v = if present(risk_budget_pct) { risk_budget_pct } else { 1.5 };
+let risk_budget_position = |h| {
+    let stop_pct = sl_pct_for.call(h);
+    if stop_pct <= 0.0 {
+        ()
+    } else {
+        clamp(100.0 * risk_budget_pct_v / stop_pct, 0.0, 95.0)
+    }
+};
+
 	let base_position_pct = pm_kelly_position(effective_posterior, odds, COST_PCT, overall_risk);
 	// V59(2026-09-10): trader 数据异常从「清零」改为「降级」——仓位上限 10%。
 	//   原代码 !trader_data_valid → position 0，单点 LLM 价格异常就全盘空仓，
@@ -1900,7 +1995,19 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	//   ⚠ 乘数在风险封顶**之后**再乘：pm_kelly_position 内部按风险等级封顶，
 	//     先乘后封会让长线 1.2 的加成被封顶吃掉、极高风险档则可能突破 10% 护栏。
 	let position_pct_raw = if !trader_data_valid { clamp(base_position_pct, 0.0, 10.0) } else { base_position_pct };
-	let position_pct = clamp(position_pct_raw * horizon_position_mult, 0.0, 95.0);
+	// ── 仓位口径（Phase D-2，用户裁定）──
+	// 主口径 = **风险预算**：`min(凯利%, 100×R/止损%)`。凯利是「信念上限」、
+	// 风险预算是「损失上限」，两者正交，取小不是取巧。
+	// 「长线更值得」**不放在这里** —— 它走判定侧的 SNR √h（`pm_snr_confidence`），
+	// 因为仓位这一维只应承载可推导的量（σ、h、R）。
+	// 旧经验乘数 0.6/0.8/1.0/1.2 只保留在 σ 不可得的降级分支，且必须标出来。
+	let main_risk_budget_pct = risk_budget_position.call(time_horizon);
+	let position_pct = if type_of(main_risk_budget_pct) == "()" {
+		clamp(position_pct_raw * horizon_position_mult, 0.0, 95.0)
+	} else {
+		clamp(min(position_pct_raw, main_risk_budget_pct), 0.0, 95.0)
+	};
+	let position_source = if type_of(main_risk_budget_pct) == "()" { "fallback_kelly_x_mult" } else { "risk_budget" };
 	// ── P0-11 修复(2026-09-12): 「仓位充足度」与「仓位上限」解耦 ──
 	// 旧实现: action 判定（下方 L1409/L1412）直接读 position_pct —— 而它是
 	//   pm_kelly_position 的返回值，已在函数内部按风险等级封顶（极高10 / 高35 / 中50）。
@@ -2448,6 +2555,10 @@ if !present(dragon_tiger) { data_gaps.push("龙虎榜数据(t-dragon-tiger-data)
 // 先例：`risk_pe` 的判据已按同一口径补内容级检查（下方 2026-09-21 订正处：
 //   `!present` 与 `== 0.0` 才算缺口，负值＝亏损属已知事实）。
 // 该信号只登记缺口、不参与评分（评分口径见文件末的决策注释），与 trader_price_no_info 一致。
+
+if !vol_bars_ok || sigma_daily_pct <= 0.0 {
+    data_gaps.push("已实现波动率不可得 ⇒ 止损/止盈退回固定百分比档（stopSource=fallback_pct），非波动率口径");
+}
 let dt_seat_blank = false;
 if present(dragon_tiger) && type_of(dragon_tiger) == "string" && dragon_tiger != "" {
     let dt_v = safe_parse(dragon_tiger);
@@ -2603,35 +2714,6 @@ let position_state = if position_pct <= 0.0 {
 //   止损/止盈两张表仍在本文件，但**数值已变量化**（`sl_pct_{period}` / `tp_pct_{period}`，
 //   缺省值就地兜底），设置面板可改、反思可建议。
 //   ⚠ 下面是**闭包**（`let f = |...|` ⇒ 变量里是 FnPtr）：调用**一律** `f.call(...)`，按名 `f(...)` 恒抛 Function not found（同 strategy-scorer.rhai:9 约定）。
-// ── 逐周期止损/止盈档位（〇-B v2 第 3 条：从硬编码升级为「设置项 + 可被反思优化」）──
-// 缺省值即下表；同名变量由 `PORTFOLIO_MGR_TUNABLE_PARAMS` 派生的 input_mapping 注入
-// （定义见 `seed_variables.rs`）。反思产出的参数建议经 `apply_param_suggestions`
-// 回写本组变量 ⇒ 档位可被单周期反思（〇-B 第 4 条）逐档纠正。
-// ⚠ 缺变量时退回下表**默认值**是刻意的：旧模板快照 / 反思未跑过时档位必须仍可决策，
-//   这与 `days_for`（缺注入即 throw）相反 —— 天数是统计基准、错了会错档判成熟，
-//   档位是策略参数、错了只是保守或激进，两者不可混用同一兜底纪律。
-let sl_pct_ultra_short_v = if present(sl_pct_ultra_short) { sl_pct_ultra_short } else { 3.0 };
-let sl_pct_short_v = if present(sl_pct_short) { sl_pct_short } else { 5.0 };
-let sl_pct_mid_v = if present(sl_pct_mid) { sl_pct_mid } else { 8.0 };
-let sl_pct_long_v = if present(sl_pct_long) { sl_pct_long } else { 12.0 };
-let tp_pct_ultra_short_v = if present(tp_pct_ultra_short) { tp_pct_ultra_short } else { 5.0 };
-let tp_pct_short_v = if present(tp_pct_short) { tp_pct_short } else { 10.0 };
-let tp_pct_mid_v = if present(tp_pct_mid) { tp_pct_mid } else { 18.0 };
-let tp_pct_long_v = if present(tp_pct_long) { tp_pct_long } else { 30.0 };
-let sl_pct_for = |h| switch h {
-    "ultra_short" => sl_pct_ultra_short_v,
-    "short" => sl_pct_short_v,
-    "mid" => sl_pct_mid_v,
-    "long" => sl_pct_long_v,
-    _ => 5.0,
-};
-let tp_pct_for = |h| switch h {
-    "ultra_short" => tp_pct_ultra_short_v,
-    "short" => tp_pct_short_v,
-    "mid" => tp_pct_mid_v,
-    "long" => tp_pct_long_v,
-    _ => 10.0,
-};
 // `days_for` 已上移到「凯利仓位」之前的定档段（与 `expected_holding_days` 同源）。
 let sl_pct = if position_pct > 0.0 { sl_pct_for.call(time_horizon) } else { 0.0 };
 let tp_pct = if position_pct > 0.0 { tp_pct_for.call(time_horizon) } else { 0.0 };
@@ -2721,8 +2803,10 @@ let horizon_prior_ok = type_of(horizon_prior_json) == "map" && !horizon_prior_js
 if !horizon_prior_ok {
     data_gaps.push("逐档先验表缺失 ⇒ 四档退回共用 prior（市场状态先验），档间先验无差异");
 }
+// ⚠ 条件取值一律写 if/else 表达式：本仓共享 Rhai 引擎不认三元 `? :`
+//   （生产编译门实测报 `Unknown operator: '?'`，而纯语法门可能放过）。
 let prior_for = |h| {
-    let row = horizon_prior_ok ? horizon_prior_json[h] : ();
+    let row = if horizon_prior_ok { horizon_prior_json[h] } else { () };
     if type_of(row) == "map" && type_of(row["prior"]) != "()" {
         #{ "value": row["prior"], "source": row["source"], "samples": row["samples"] }
     } else {
@@ -2746,30 +2830,42 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
     let hp = prior_for.call(h);
     let hpost = clamp(hp["value"] + avg * evidence_scale, 0.0, 1.0);
     let heff = clamp(hpost + risk_bias, 0.0, 1.0);
+    // 「长线更值得」放在**判定侧**（用户裁定，Phase D-2）：恒定日边缘下信噪比 ∝ √h，
+    // 故该档胜率 = 0.5 + (heff − 0.5) × √(h / 锚定天数)，锚 = 中线 28 日（h=28 时不改）。
+    // 看空对称放大 —— 负边缘同样需要时间兑现，这是 SNR 的性质而不是偏好。
+    let hconf = pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS);
     // 纯阈值阶梯（与主链 action 同源常量；省略 kelly 门以降复杂度，见阶段2说明）
-    let haction = if heff >= ACTION_BUY_THRESHOLD { "买入" }
-        else if heff >= ACTION_INCREASE_THRESHOLD { "增持" }
-        else if heff >= ACTION_HOLD_THRESHOLD { "持有" }
-        else if heff >= ACTION_WATCH_THRESHOLD { "观望" }
-        else if heff >= ACTION_REDUCE_THRESHOLD { "减持" }
+    let haction = if hconf >= ACTION_BUY_THRESHOLD { "买入" }
+        else if hconf >= ACTION_INCREASE_THRESHOLD { "增持" }
+        else if hconf >= ACTION_HOLD_THRESHOLD { "持有" }
+        else if hconf >= ACTION_WATCH_THRESHOLD { "观望" }
+        else if hconf >= ACTION_REDUCE_THRESHOLD { "减持" }
         else { "卖出" };
     // 同主链 odds_fallback 表（证据强度 → 保守赔率），保证「下注概率」与「赔率」同源
-    let hodds = if heff >= 0.70 { 2.5 } else if heff >= 0.60 { 2.0 }
-        else if heff >= 0.50 { 1.5 } else if heff >= 0.42 { 1.5 } else { 0.0 };
-    // 仓位复用 pm_kelly_position（半凯利 + 成本 + 风险上限），与主链同一函数
-    let hpos = if heff >= 0.50 && hodds > 0.001 { pm_kelly_position(heff, hodds, COST_PCT, overall_risk) }
+    let hodds = if hconf >= 0.70 { 2.5 } else if hconf >= 0.60 { 2.0 }
+        else if hconf >= 0.50 { 1.5 } else if hconf >= 0.42 { 1.5 } else { 0.0 };
+    // 仓位：凯利（信念上限）与**该档风险预算**（损失上限）取小；σ 不可得时风险预算仍按
+    // 兜底止损算得出，若止损也为 0 则退回裸凯利。
+    let hpos_raw = if hconf >= 0.50 && hodds > 0.001 { pm_kelly_position(hconf, hodds, COST_PCT, overall_risk) }
         else { 0.0 };
+    let h_risk_budget = risk_budget_position.call(h);
+    let hpos = if type_of(h_risk_budget) == "()" { hpos_raw } else { min(hpos_raw, h_risk_budget) };
+    let hpos_source = if type_of(h_risk_budget) == "()" { "kelly_only" } else { "risk_budget" };
     let hgap = if present(ts) { "" } else { "[该周期评分缺失，按日线退化]" };
-    let hverdict = `决策=${haction} 置信=${(heff*100.0*10.0).round()/10.0}${hgap}`;
+    let hverdict = `决策=${haction} 置信=${(hconf*100.0*10.0).round()/10.0}${hgap}`;
     let htarget = if hpos > 0.0 && price_ok { (current_price*(1.0+tph/100.0)*100.0).round()/100.0 } else { () };
     let hstop = if hpos > 0.0 && price_ok { (current_price*(1.0-slh/100.0)*100.0).round()/100.0 } else { () };
     #{
         "action": haction,
         "verdict": hverdict,
         "positionPct": (hpos*10.0).round()/10.0,
-        "confidence": ((heff*100.0)*10.0).round()/10.0,
+        "confidence": ((hconf*100.0)*10.0).round()/10.0,
         "posterior": ((hpost*100.0)*10.0).round()/10.0,
+        "posteriorEffective": ((heff*100.0)*10.0).round()/10.0,
+        "snrAnchorDays": SNR_ANCHOR_DAYS,
+        "positionSource": hpos_source,
         "weightsSource": if horizon_leg_weights_ok { "table" } else { "fallback_unity" },
+        "stopSource": stop_source_for.call(h),
         "priorSource": hp["source"],
         "priorSamples": hp["samples"],
         "stopLossPct": if hpos>0.0 { slh } else { 0.0 },
@@ -2883,6 +2979,11 @@ let decisions_by_horizon = #{
     "timeHorizon": time_horizon,
     // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source
     "horizonSource": horizon_source,
+    // 主档风控档位的**来历**（Phase D）：σ 不可得时它是退回的固定百分比，不是波动率口径。
+    "stopSource": stop_source_for.call(time_horizon),
+    // 仓位是怎么定出来的：risk_budget（凯利∧风险预算取小）还是降级分支。
+    "positionSource": position_source,
+    "realizedVolDailyPct": (sigma_daily_pct * 100.0).round() / 100.0,
     "expectedHoldingDays": expected_holding_days,
     // V74 修复(2026-09-12): 与 sanity 检查 1 同源缺陷。
     //   旧定义 `targetPrice <= stopLoss` 隐含做多语义，对看空方案
@@ -3061,7 +3162,14 @@ let decisions_by_horizon = #{
         "tp_pct_mid": tp_pct_mid_v,
         "tp_pct_long": tp_pct_long_v,
         // 逐档先验收缩强度（Phase C）：反思要归因「这档先验有几分来自本档」必须看到 κ。
-        "horizon_prior_kappa": horizon_prior_kappa,
+        // 走 `present()` 守卫（同其余可调参数）：旧模板快照没这个变量时输出 null，
+        // 而不是让整个决策脚本抛 Variable not found。
+        "horizon_prior_kappa": if present(horizon_prior_kappa) { horizon_prior_kappa } else { () },
+        // 波动率档位乘数（Phase D）与本次实际采用的 σ_daily（%）：
+        // 反思要建议 k1/k2，必须先能看到「这次的档位是波动率派生的还是退回的、σ 是多少」。
+        "stop_vol_mult": stop_vol_mult_v,
+        "take_profit_vol_mult": tp_vol_mult_v,
+        "risk_budget_pct": risk_budget_pct_v,
         "action_buy_threshold": ACTION_BUY_THRESHOLD,
         "action_increase_threshold": ACTION_INCREASE_THRESHOLD,
         "action_hold_threshold": ACTION_HOLD_THRESHOLD,

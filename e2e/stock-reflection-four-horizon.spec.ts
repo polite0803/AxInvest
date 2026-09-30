@@ -205,8 +205,13 @@ function activePane(expanded: Locator): Locator {
   return expanded.locator('[role="tabpanel"][aria-hidden="false"]');
 }
 
-function horizonTab(expanded: Locator, labelPrefix: string): Locator {
-  return expanded.locator(".ant-tabs-tab", { hasText: labelPrefix });
+/** 展开行内按**完整可访问名**取周期 Tab（`getByRole` 名称是精确匹配）。
+ *
+ * 注意：页签文本是裸档名（"短线"），它是"超短线"的子串 ⇒ 不能用子串包含定位，
+ * 必须精确到含状态徽标的完整文本（如 "🟢 短线"）。徽标由该周期 status 决定
+ *（mature 🟢 / immature 🟠 / unavailable ⚪ / legacy 🟣），用例按 fixture 写死。 */
+function horizonTab(expanded: Locator, accessibleName: string): Locator {
+  return expanded.getByRole("tab", { name: accessibleName });
 }
 
 test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
@@ -224,7 +229,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).toContainText("✓ 正确");
 
     // 切到短线：显示自己的方向/收益，不得带上超短线的值
-    await horizonTab(expanded, "短线 (5天)").click();
+    await horizonTab(expanded, "🟢 短线").click();
     await expect(activePane(expanded)).toContainText("SHORT_SELL");
     await expect(activePane(expanded)).toContainText("-2.25%");
     await expect(activePane(expanded)).toContainText("✗ 错误");
@@ -232,7 +237,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).not.toContainText("+3.50%");
 
     // 切到长线：同样不得串用中线/短线
-    await horizonTab(expanded, "长线 (90+天)").click();
+    await horizonTab(expanded, "🟢 长线").click();
     await expect(activePane(expanded)).toContainText("LONG_ACCUMULATE");
     await expect(activePane(expanded)).toContainText("+12.75%");
     await expect(activePane(expanded)).not.toContainText("MID_HOLD");
@@ -251,7 +256,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).toContainText("✓ 正确");
 
     // 短线未到期
-    await horizonTab(expanded, "短线 (5天)").click();
+    await horizonTab(expanded, "🟠 短线").click();
     await expect(activePane(expanded)).toContainText("未到期");
     await expect(activePane(expanded)).toContainText("行情尚未到达期望持有期");
     await expect(activePane(expanded)).not.toContainText("✓ 正确");
@@ -261,7 +266,7 @@ test.describe("四周期反思面板（批次 5 fixture 验收）", () => {
     await expect(activePane(expanded)).not.toContainText("0.00%");
 
     // 中线行情不可用
-    await horizonTab(expanded, "中线 (28天)").click();
+    await horizonTab(expanded, "⚪ 中线").click();
     await expect(activePane(expanded)).toContainText("无数据");
     await expect(activePane(expanded)).toContainText("该周期行情数据不可用");
     await expect(activePane(expanded)).not.toContainText("行情事实");

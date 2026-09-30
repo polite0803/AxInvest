@@ -398,6 +398,12 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
       "reflection_depth",
       "stock_lessons",
       "actual_market_text",
+      // [v3 单档复盘] reflection 模板变量（与上面四项同源）：运行时由
+      // run_reflection_workflow 注入/覆盖（review_horizon 用盖章后的 primary_horizon
+      // 覆盖），非 stock-analysis 用户配置参数 ⇒ 不进面板。
+      "review_horizon",
+      "review_expected_holding_days",
+      "analysis_primary_horizon",
     ]);
     const missingInPanel = [...rust]
       .filter((k) => !k.startsWith("vendor_"))

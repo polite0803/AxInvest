@@ -372,6 +372,47 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
                         </div>
                       );
                     })()}
+                    {
+                      /* 闭环态（Phase D）：校准过什么、为什么没校准，逐格分句；
+                        「未校准」不得与「已校准且良好」在格子里同形 */
+                    }
+                    {(() => {
+                      const lc = (ic?.loop?.cells ?? []).find((x) =>
+                        aliasesOf(style).includes(x.style) && x.period === period
+                      );
+                      if (!lc || lc.status === "not_in_matrix") {
+                        return null;
+                      }
+                      if (lc.status === "insufficient_samples" || lc.status === "ic_unmeasurable") {
+                        return (
+                          <div
+                            style={{ fontSize: 10, color: "var(--color-text-tertiary)" }}
+                            data-testid="reco-loop-uncalibrated"
+                          >
+                            {t(
+                              lc.status === "insufficient_samples"
+                                ? "stockAnalysis.backtest.loopUncalibratedSamples"
+                                : "stockAnalysis.backtest.loopUncalibratedIc",
+                            )}
+                          </div>
+                        );
+                      }
+                      const demoted = lc.status === "demoted_negative_ic";
+                      return (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            color: demoted ? "var(--sa-warning, #faad14)" : "var(--color-text-tertiary)",
+                          }}
+                          data-testid="reco-loop-weight"
+                        >
+                          {t(demoted ? "stockAnalysis.backtest.loopDemoted" : "stockAnalysis.backtest.loopCalibrated", {
+                            weight: lc.newWeight.toFixed(2),
+                            ic: lc.rankIc != null ? lc.rankIc.toFixed(3) : "—",
+                          })}
+                        </div>
+                      );
+                    })()}
                   </td>
                 );
               })}
@@ -379,6 +420,26 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
           ))}
         </tbody>
       </table>
+
+      {/* 闭环生效闸（Q2 shadow 起步）：shadow=只算分不进评分；on=覆盖静态权重；off=完全停用 */}
+      {ic?.loop
+        ? (
+          <div style={{ marginTop: 8, fontSize: 10, color: "var(--color-text-tertiary)" }} data-testid="reco-loop-gate">
+            {t(
+              ic.loop.gate === "on"
+                ? "stockAnalysis.backtest.loopGateOn"
+                : ic.loop.gate === "shadow"
+                ? "stockAnalysis.backtest.loopGateShadow"
+                : "stockAnalysis.backtest.loopGateOff",
+              {
+                time: ic.loop.lastRecalcAt > 0
+                  ? new Date(ic.loop.lastRecalcAt).toLocaleString()
+                  : t("stockAnalysis.backtest.loopNeverRecalc"),
+              },
+            )}
+          </div>
+        )
+        : null}
 
       {data?.skipped && data.skipped.length > 0 && (
         <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>

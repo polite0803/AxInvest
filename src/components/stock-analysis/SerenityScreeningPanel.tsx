@@ -80,19 +80,47 @@ interface RecoDetailItem {
 /// 优先解析 seed_pool_json（serenity-screening 工作流写的 candidate 对象），
 /// 失败时用基础列构造兜底候选（智能荐股 bottleneck 行的 seed_pool_json 是
 /// 推荐池 [[code,name]] 数组，无法解析为单个候选，必须走 fallback）。
+/** `pick_data` 里的逐档风控字段（Q1/Q2 落库侧写的那几个键）。 */
+interface PickRiskFields {
+  holdingDays?: number;
+  period?: string;
+  price?: number;
+  stopLoss?: number;
+  targetPrice?: number;
+  entryLow?: number;
+  entryHigh?: number;
+  positionPct?: number;
+  stopSource?: string;
+  entrySource?: string;
+}
+
 function restoreCandidate(item: RecoDetailItem): SerenityCandidate | null {
-  // 时间基线回填：行级 generated_at + pick_data.holdingDays（否则卡片
-  // 时间基线兜底为渲染当日，历史记录显示的推荐日失真）
+  // 时间基线与风控字段回填：行级 generated_at + pick_data.*（否则卡片
+  // 时间基线兜底为渲染当日，历史记录显示的推荐日失真；风控字段则整片不可见）
   const withBaseline = (c: SerenityCandidate): SerenityCandidate => {
-    let holdingDays: number | undefined;
+    let pick: PickRiskFields = {};
     if (item.pickData) {
       try {
-        holdingDays = (JSON.parse(item.pickData) as { holdingDays?: number })?.holdingDays;
+        pick = JSON.parse(item.pickData) as PickRiskFields;
       } catch {
-        // pick_data 损坏时缺省，卡片自行兜底 20 天
+        // pick_data 损坏时保持全缺省 ⇒ 卡片逐字段出「未标档/无风控口径」声明，
+        // 不得兜底成数字（旧形态兜底 20 天，与 `Period::Mid` 的 28 天互相矛盾）
       }
     }
-    return { ...c, generated_at: item.generatedAt, holding_days: holdingDays };
+    return {
+      ...c,
+      generated_at: item.generatedAt,
+      holding_days: pick.holdingDays,
+      period: pick.period,
+      price: pick.price,
+      stopLoss: pick.stopLoss,
+      targetPrice: pick.targetPrice,
+      entryLow: pick.entryLow,
+      entryHigh: pick.entryHigh,
+      positionPct: pick.positionPct,
+      stopSource: pick.stopSource,
+      entrySource: pick.entrySource,
+    };
   };
   if (item.seedPoolJson) {
     try {
@@ -906,9 +934,24 @@ export function SerenityScreeningPanel() {
           styleFilter: restoreStyle,
         });
         if (cancelled) { return; }
-        const restored = (detail ?? [])
+        const restoredRaw = (detail ?? [])
           .map(restoreCandidate)
           .filter((c): c is SerenityCandidate => c != null);
+        // Q2 之后一次运行**逐档各一行**（mid、long）。这里不折叠成一行：
+        // 用户裁定 A = 同票逐档两张卡，档位是这张卡的口径维度之一；折叠会把产出层的变化
+        // 挡在呈现层之外（我上一版就是那么做的，已改裁撤掉）。
+        // 只做排序：同票相邻、档由近到远，避免两张卡被彼此隔开。
+        const codeOf = (c: SerenityCandidate): string => c.stock_code ?? c.stockCode ?? "";
+        const TIER_ORDER = ["ultra_short", "short", "mid", "long"];
+        const tierRank = (c: SerenityCandidate): number => {
+          const i = c.period ? TIER_ORDER.indexOf(c.period) : -1;
+          // 实时候选不带档 ⇒ 排在落库行之后，而不是冒充某一档
+          return i >= 0 ? i : TIER_ORDER.length;
+        };
+        const restored = restoredRaw.slice().sort((a, b) => {
+          const byCode = codeOf(a).localeCompare(codeOf(b));
+          return byCode !== 0 ? byCode : tierRank(a) - tierRank(b);
+        });
         if (restored.length > 0) {
           setCandidates(restored);
         }
@@ -1145,8 +1188,10 @@ export function SerenityScreeningPanel() {
             {t("serenityPanel.desc")}
           </Text>
           {
-            /* 〇-B v2：档位口径**必须显式声明**——趋势智选结构性只服务中/长线，
-              落库 period 恒为 mid（不是「没选档」，而是短/超短档不适用）。 */
+            /* 〇-B v2 / Q2：档位口径**必须显式声明**——趋势智选结构性只服务中/长线，
+              落库按档各一行（mid、long；短/超短不是「没选档」，而是按设计不做，
+              理由码 serenity_needs_week_or_longer_realization）。文案由 serenityPanel.tierScopeHint
+              给，门 h/i 锁它与代码的档位集合一致。 */
           }
           <Text type="secondary" className="text-xs" style={{ opacity: 0.75 }}>
             {t("serenityPanel.tierScopeHint")}
@@ -1612,7 +1657,23 @@ export function SerenityScreeningPanel() {
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <Title level={5} className="m-0">
+              {
+                /* Q2 后计数单位是「逐档候选行数」而非票数（同票 mid/long 各一张卡）⇒
+                  两者不等时必须并列给出，否则「15 条」会被读成「15 只」 */
+              }
               {t("serenityPanel.candidateTitle")} ({candidates.length})
+              {(() => {
+                const stocks = new Set(
+                  candidates.map((c) => c.stock_code ?? c.stockCode ?? ""),
+                ).size;
+                return stocks !== candidates.length
+                  ? (
+                    <Text type="secondary" className="text-xs font-normal ml-2">
+                      {t("serenityPanel.candidateTierRowsNote", { stocks })}
+                    </Text>
+                  )
+                  : null;
+              })()}
             </Title>
             <Button
               size="small"

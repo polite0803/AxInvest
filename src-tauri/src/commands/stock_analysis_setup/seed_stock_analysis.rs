@@ -609,8 +609,11 @@ type AlgoToolRow = (
 /// ② 5(b)：逐档赔率 = 该档价带之比 `止盈% ÷ 止损%`（= k2/k1，σ 与 √h 同时约掉），
 ///    替代「置信阶梯 → 保守赔率」的拍表 —— 旧表拿同一个信念既定下注概率又定回报倍数（自指）。
 ///    新增逐档输出 `evidenceScale` / `odds` / `oddsSource`，使档间仓位差可归因。
+/// ③ 109：新增荐股反思闭环生效闸 `reco_ic_gate`（off|shadow|on，出厂 shadow，
+///    `PLAN-reco-reflection-closure.md` Q2）。不重播种则存量 DB 无该变量、消费侧恒按
+///    shadow 兜底 ⇒ 闭环永远进不了 on。**必须升版**让新变量落到模板。
 /// **必须升版**：两者都改变四档 posterior 与仓位数值，不重播种则存量 DB 仍按旧口径出决策。
-pub(crate) const TEMPLATE_VERSION: i32 = 108;
+pub(crate) const TEMPLATE_VERSION: i32 = 109;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///

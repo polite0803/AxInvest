@@ -1,5 +1,6 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import { useStockJump } from "@/hooks/useStockJump";
+import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import type { AttentionMetrics, Catalyst, ExitSignals, SerenityCandidate } from "@/stores/feature/serenityStore";
 import { AimOutlined, AlertOutlined, ClockCircleOutlined, FireOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { Card, Progress, Tag, Typography } from "antd";
@@ -125,17 +126,28 @@ export function SerenityCandidateCard({ candidate }: Props) {
   const exitSignals: ExitSignals | undefined = candidate.exit_signals ?? candidate.exitSignals;
   const attention: AttentionMetrics | undefined = candidate.attention_metrics ?? candidate.attentionMetrics;
 
-  // 时间基线显式化：推荐时点 + 建议窗口（与其他算法对照的前提是时钟一致）
-  const holdingDays = candidate.holdingDays ?? candidate.holding_days ?? 20;
+  // 时间基线显式化：推荐时点 + 建议窗口（与其他算法对照的前提是时钟一致）。
+  // ⚠ 这里**不得**再兜底成某个天数（旧值 20 与 `Period::Mid` 的权威 28 天互相矛盾，
+  //  而落库侧同一个矛盾已修，呈现层留着它等于继续报错误的窗口）。无 `holding_days`
+  //  = 实时候选未标档 ⇒ 出「无建议窗口」句，不猜档、不填数。
+  const holdingDays = candidate.holdingDays ?? candidate.holding_days;
   const basisRaw = candidate.generatedAt ?? candidate.generated_at;
   const basisDate = basisRaw && !Number.isNaN(new Date(basisRaw).getTime())
     ? basisRaw.slice(0, 10)
     : new Date().toISOString().slice(0, 10);
-  const basisUntil = new Date(
-    new Date(basisDate).getTime() + holdingDays * 86400000,
-  )
-    .toISOString()
-    .slice(0, 10);
+  const basisUntil = holdingDays === undefined
+    ? ""
+    : new Date(new Date(basisDate).getTime() + holdingDays * 86400000).toISOString().slice(0, 10);
+
+  // 档位徽标：唯一键族 `stockAnalysis.timeHorizon*`（经 horizonSuffix），与荐股/分析面板同一套档名。
+  // 认不出或没有 ⇒ 出「未知周期」，绝不落到某一档上（实时候选本来就不带档）。
+  const suffix = candidate.period ? horizonSuffix(candidate.period) : null;
+  const price = candidate.price;
+  const entryBandPct = price && price > 0 && candidate.entryLow !== undefined && candidate.entryHigh !== undefined
+    ? ((candidate.entryHigh - candidate.entryLow) / 2 / price) * 100
+    : undefined;
+  const num = (v: number | undefined, digits = 2): string =>
+    v !== undefined && Number.isFinite(v) ? v.toFixed(digits) : "—";
 
   const tier = scoreTier(score);
   const tierColor = TIER_COLOR[tier];
@@ -162,6 +174,12 @@ export function SerenityCandidateCard({ candidate }: Props) {
             </Tag>
           )}
           {renderStrategyTag(t, candidate.strategy_type ?? candidate.strategyType)}
+          {/* 档位徽标（Q2：一次运行逐档各一张卡，档是这张卡的口径维度，不能只藏在历史里） */}
+          <Tag color={suffix ? "geekblue" : "default"} className="text-xs m-0" data-testid="serenity-tier">
+            {suffix
+              ? t(`stockAnalysis.timeHorizon${suffix}`)
+              : t("stockAnalysis.reflection.horizonUnknown")}
+          </Tag>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex items-baseline gap-1">
@@ -176,9 +194,46 @@ export function SerenityCandidateCard({ candidate }: Props) {
         <div className="flex items-center gap-1 text-[10px] text-gray-400">
           <ClockCircleOutlined />
           <span>
-            {t("serenityPanel.timeBasis", { date: basisDate, days: holdingDays, until: basisUntil })}
+            {holdingDays === undefined
+              ? t("serenityPanel.timeBasisNoTier")
+              : t("serenityPanel.timeBasis", { date: basisDate, days: holdingDays, until: basisUntil })}
           </span>
         </div>
+
+        {/* ── 逐档风控（Q1=B 建仓带 / σ 止损口径）——只有落库行才有，实时候选不出这一行 ── */}
+        {(candidate.stopLoss !== undefined
+          || candidate.targetPrice !== undefined
+          || candidate.positionPct !== undefined) && (
+          <div className="flex flex-col gap-0.5 text-[10px] text-gray-500">
+            <div className="flex flex-wrap items-center gap-2">
+              <span>
+                {t("stockAnalysis.recommendation.row.stopLoss")} {num(candidate.stopLoss)}
+              </span>
+              <span>
+                {t("stockAnalysis.recommendation.row.target")} {num(candidate.targetPrice)}
+              </span>
+              <span>
+                {t("stockAnalysis.recommendation.row.position")} {num(candidate.positionPct, 1)}%
+              </span>
+              {entryBandPct !== undefined && (
+                <span>{t("serenityPanel.entryBand", { pct: entryBandPct.toFixed(2) })}</span>
+              )}
+            </div>
+            {/* 退化必须点名：固定乘数止损不是波动率口径，混在一起读就是把两套口径压成一类 */}
+            {candidate.stopSource === "fallback_pct" && (
+              <div style={{ color: "var(--sa-warning, #faad14)" }}>
+                {t("stockAnalysis.recommendation.row.rowStopFallback")}
+              </div>
+            )}
+            {candidate.entrySource && candidate.entrySource !== "half_stop" && (
+              <div style={{ color: "var(--sa-warning, #faad14)" }}>
+                {candidate.entrySource === "half_stop_fallback_pct"
+                  ? t("serenityPanel.entryBandHalfFallback")
+                  : t("serenityPanel.entryBandRangeFallback")}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── 瓶颈产品 + 主要风险 ── */}
         {(bottleneckProduct || primaryRisk) && (

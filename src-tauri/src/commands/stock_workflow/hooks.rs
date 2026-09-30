@@ -31,7 +31,6 @@ use crate::commands::stock_workflow::decision::{
 };
 use axagent_astock_data::AStockClient;
 use axagent_entities::stock_analyses;
-use axagent_entities::stock_reflections;
 use axagent_harness::workflow_types::Variable;
 use axagent_harness::{HookExecContext, HookOutcome, Period, WorkflowLifecycleHook};
 use axagent_rt_workflow::work_engine::WorkEngine;
@@ -933,7 +932,7 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             decision_reasoning: Set(reasoning.clone()),
             decision_json: Set(decision_json_str.clone()),
             horizon_price_map: Set(horizon_price_map),
-            horizon_decisions: Set(horizon_decisions),
+            horizon_decisions: Set(horizon_decisions.clone()),
             llm_decision_json: Set(None),
             blackboard_snapshot: Set(Some(
                 serde_json::to_string(&outcome.results).unwrap_or_else(|_| "{}".to_string()),
@@ -955,7 +954,7 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             outcome: Set(None),
             // Phase 1：周期来源（由 portfolio-mgr.rhai 判定，见 decision.rs 的唯一读入口）
             decision_horizon_source: Set(horizon_source),
-            decision_time_horizon: Set(time_horizon),
+            decision_time_horizon: Set(time_horizon.clone()),
             decision_expected_holding_days: Set(expected_holding_days.map(|v| v as i64)),
             parent_analysis_id: Set(None),
             trade_intent_status: Set("pending".into()),
@@ -988,51 +987,33 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
         // 判据：**先问这条链路有没有 as-of 入口**，再决定锚点用 now 还是 as-of。
         if status == "completed" {
             let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            let hold_days = expected_holding_days.unwrap_or(28) as i64;
-            let hindsight_date_str = {
-                let h = chrono::NaiveDate::parse_from_str(&today_str, "%Y-%m-%d")
-                    .map(|d| d + chrono::Duration::days(hold_days))
-                    .unwrap_or_else(|_| {
-                        chrono::Local::now().date_naive() + chrono::Duration::days(hold_days)
-                    });
-                h.format("%Y-%m-%d").to_string()
-            };
-            let pending_id = uuid::Uuid::new_v4().to_string();
-            let _ = stock_reflections::ActiveModel {
-                id: Set(pending_id.clone()),
-                // 〇-B v2 第 4 条：pending 未复盘任何档 ⇒ NULL；盖章在反思收尾写入
-                horizon: Set(None),
-                stock_code: Set(stock_code.clone()),
-                stock_name: Set(stock_name.clone()),
-                original_analysis_id: Set(analysis_id.clone()),
-                as_of_date: Set(today_str.clone()),
-                hindsight_date: Set(hindsight_date_str),
-                min_confidence_threshold: Set(70),
-                reflection_depth: Set("light".to_string()),
-                actual_outcome: Set(String::new()),
-                raw_return: Set(None),
-                alpha_return: Set(None),
-                holding_days: Set(None),
-                benchmark_name: Set(None),
-                verdict: Set(None),
-                alpha_cited: Set(None),
-                lesson_summary: Set(None),
-                what_went_wrong: Set(None),
-                missed_signals: Set(None),
-                fix_for_future: Set(None),
-                parameter_suggestions_json: Set(None),
-                horizon_results_json: Set(None),
-                decision_json: Set(None),
-                blackboard_snapshot: Set(None),
-                model_version: Set(None),
-                status: Set("pending".to_string()),
-                created_at: Set(now_ms),
-                updated_at: Set(now_ms),
+            // 〇-B v2 第 4 条 / `PLAN-reflection-per-horizon-row`：**一行 pending = 一个复盘档**。
+            //   本通道已落 `horizon_decisions`（四档独立决策）⇒ 逐档方向可判，按有方向的档各建一行。
+            let pending_rows = super::reflection::build_pending_reflection_rows(
+                &super::reflection::PendingReflectionSeed {
+                    analysis_id: &analysis_id,
+                    stock_code: &stock_code,
+                    stock_name: &stock_name,
+                    analysis_date: &today_str,
+                    horizon_decisions: horizon_decisions.as_deref(),
+                    primary_horizon: time_horizon.as_deref(),
+                    primary_holding_days: expected_holding_days.map(|v| v as i64),
+                    min_confidence_threshold: super::reflection::DEFAULT_REFLECTION_MIN_CONFIDENCE,
+                    reflection_depth: super::reflection::DEFAULT_REFLECTION_DEPTH,
+                    now_ms,
+                },
+            );
+            let pending_count = pending_rows.len();
+            for row in pending_rows {
+                // 建行失败必须留痕：少一行 = 少一个档的复盘样本
+                if let Err(e) = row.insert(&self.db).await {
+                    tracing::warn!(
+                        "[stock-analysis-persist] {stock_code} 建 pending 反思行失败: {e}"
+                    );
+                }
             }
-            .insert(&self.db)
-            .await;
             tracing::info!(
-                "[stock-analysis-persist] {stock_code} 已落盘 pending reflection {pending_id}"
+                "[stock-analysis-persist] {stock_code} 已落盘 {pending_count} 行 pending reflection（每档一行）"
             );
         }
         Ok(())

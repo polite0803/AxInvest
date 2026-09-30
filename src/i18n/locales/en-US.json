@@ -2683,6 +2683,10 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Plugin source build failed",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Rust toolchain or target platform unavailable",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Insufficient disk space or memory to build the plugin",
+    "PLUGIN_PANEL_ASSET_UNAVAILABLE": "The dashboard panel has no renderable content source: the plugin declares no frontendEntry, the asset file is missing, or the plugin/panel is not installed",
+    "PLUGIN_PANEL_ASSET_BLOCKED": "Panel asset rejected by the security policy: path escapes the plugin directory, extension not allowlisted, or size cap exceeded",
+    "PLUGIN_PANEL_ASSET_UNPINNED": "This plugin has no integrity anchor from install time, so its panel content cannot be verified; reinstall the plugin to enable it",
+    "PLUGIN_PANEL_ASSET_TAMPERED": "The plugin's install directory no longer matches the hash pinned at install time, so its panel content is hidden; remove or reinstall the plugin",
     "PLUGIN_PROFILE_IO_FAILED": "Failed to persist plugin bundle profile",
     "PROVIDER_ADAPTER_NOT_FOUND": "Provider adapter not found",
     "PROVIDER_CREATE_FAILED": "Failed to create provider",
@@ -4912,7 +4916,6 @@
       "strategyMerge": "Merge (keep existing)",
       "strategyDryRun": "Dry run (validate only)"
     },
-    "policyDashboard": "RL Policy Dashboard",
     "experiences": "Experiences",
     "avgReward": "Avg Reward",
     "createPolicy": "Create New Policy",
@@ -14856,7 +14859,12 @@
     "boolYes": "Yes",
     "boolNo": "No",
     "backendCallFailed": "Backend call failed",
-    "tierScopeHint": "Tier scope: mid-term only (bottleneck / policy / earnings catalysts unfold over weeks-months); short and ultra-short tiers do not apply, stored period is always mid with the tier's authoritative 28-day holding period.",
+    "tierScopeHint": "Horizon scope: serves the mid and long tiers (bottleneck / policy / earnings catalysts play out over weeks to months); ultra-short and short are not produced by design — one row per tier, holding period from that tier's authoritative days.",
+    "timeBasisNoTier": "Live candidate has no tier ⇒ no suggested window (per-tier rows are in Serenity history)",
+    "entryBand": "Entry band ±{{pct}}%",
+    "entryBandHalfFallback": "Entry band is half a fixed stop multiplier ⇒ not volatility-derived",
+    "entryBandRangeFallback": "Stop distance unavailable ⇒ entry band falls back to the template range",
+    "candidateTierRowsNote": "{{stocks}} symbols · one row per tier",
     "emptyHistoryWarning": "Serenity history is empty: list_reco_history returned 0 rows (possibly no serenity/bottleneck style history in DB, or backend command failure was silently ignored)",
     "timeBasis": "Time basis: {{date}} · suggested window ~{{days}} days (until {{until}})"
   },
@@ -15423,7 +15431,15 @@
       },
       "matrixMisfit": {
         "valuation_needs_weeks_to_realize_kept_by_user_decision": "Known mismatch: valuation needs weeks to realize; kept by user decision"
-      }
+      },
+      "loopUncalibratedSamples": "Loop not calibrated: insufficient samples",
+      "loopUncalibratedIc": "Loop not calibrated: IC unmeasurable",
+      "loopCalibrated": "Loop calibrated, weight {weight}",
+      "loopDemoted": "Loop demoted to {weight} (negative IC {ic})",
+      "loopGateOn": "Reflection loop active (on), last recalculated {time}",
+      "loopGateShadow": "Reflection loop in shadow mode: computed but not applied, last recalculated {time}",
+      "loopGateOff": "Reflection loop disabled (off), last recalculated {time}",
+      "loopNeverRecalc": "never recalculated"
     },
     "export": {
       "analystReports": "Analyst Reports",
@@ -16639,6 +16655,9 @@
       "horizonLong": "Long",
       "horizonAuto": "By primary tier",
       "horizonUnknown": "Unknown horizon",
+      "colHorizon": "Review horizon",
+      "horizonReviewTag": "Reviewed here",
+      "horizonNoNarration": "Objective verdict only — no reflection narrative",
       "horizonStatusLabel": "Status: ",
       "horizonStatusMature": "Mature",
       "horizonStatusImmature": "Not yet due",
@@ -17601,7 +17620,8 @@
       "limitUpThHigh": "Limit-up potential - high potential threshold",
       "limitUpThMed": "Limit-up potential - medium potential threshold",
       "limitUpThLow": "Limit-up potential - low potential threshold",
-      "analysisDryRun": "Dry-run mode: no LLM calls, use mock output to validate the flow"
+      "analysisDryRun": "Dry-run mode: no LLM calls, use mock output to validate the flow",
+      "recoIcGate": "Reco reflection loop gate: off=disabled; shadow=compute and record only, not applied to scoring; on=override static weights with per-cell loop weights (demote-only)"
     },
     "evidenceCitation": {
       "loading": "Extracting Evidence Citations...",

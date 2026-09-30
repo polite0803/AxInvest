@@ -90,7 +90,22 @@ pub struct StrategySummaryRow {
 pub async fn load_current_weights(
     db: &DatabaseConnection,
 ) -> Result<HashMap<(String, String), f64>, String> {
-    let all = strategy_weight_history::Entity::find()
+    load_current_weights_by_trigger(db, None).await
+}
+
+/// 同 [`load_current_weights`]，但可按 trigger 过滤键空间 —— 荐股闭环
+/// （`recommender::reco_loop`，trigger=`"reco-loop"`）与分析链演化权重**不得互相消费**
+/// （`PLAN-reco-reflection-closure.md` Q3：归属分离）。
+pub async fn load_current_weights_by_trigger(
+    db: &DatabaseConnection,
+    trigger: Option<&str>,
+) -> Result<HashMap<(String, String), f64>, String> {
+    let query = strategy_weight_history::Entity::find();
+    let query = match trigger {
+        Some(t) => query.filter(strategy_weight_history::Column::Trigger.eq(t)),
+        None => query,
+    };
+    let all = query
         .order_by_desc(strategy_weight_history::Column::AppliedAt)
         .all(db)
         .await

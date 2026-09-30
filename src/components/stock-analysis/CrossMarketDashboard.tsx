@@ -18,7 +18,7 @@
 
 import { KLineChart } from "@/components/stock-analysis/KLineChart";
 import { useCrossMarketStore } from "@/stores";
-import { App, Button, Empty, Input, Select, Space, Statistic, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Empty, Input, Select, Space, Statistic, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -38,6 +38,23 @@ interface IntlQuoteRow {
 const DEFAULT_BENCHMARKS = ["SPX", "IXIC", "HSI", "000001.SH", "399006"];
 const DEFAULT_FOREX = ["USD/CNY", "HKD/CNY"];
 
+/**
+ * 区级取数失败提示 —— 必须与「暂无数据」区分：
+ * 上游被断/超时是「拿不到」，Empty 是「拿到了但是空的」，二者不可共用一个呈现。
+ */
+function SectionError({ detail }: { detail: string }) {
+  const { t } = useTranslation();
+  return (
+    <Alert
+      type="error"
+      showIcon
+      style={{ marginBottom: 12 }}
+      message={t("error.loadFailed")}
+      description={detail}
+    />
+  );
+}
+
 export function CrossMarketDashboard() {
   const { message: messageApi } = App.useApp();
   const { t } = useTranslation();
@@ -50,12 +67,11 @@ export function CrossMarketDashboard() {
     loadingKline,
     loadingBenchmark,
     loadingForex,
-    error,
+    errors,
     fetchIntlQuote,
     fetchIntlKline,
     fetchBenchmarkKline,
     fetchForexKline,
-    clearError,
   } = useCrossMarketStore();
 
   const [codeInput, setCodeInput] = useState("");
@@ -68,14 +84,6 @@ export function CrossMarketDashboard() {
     fetchBenchmarkKline("SPX");
     fetchForexKline("USD/CNY");
   }, [fetchBenchmarkKline, fetchForexKline]);
-
-  // 错误统一 toast
-  useEffect(() => {
-    if (error) {
-      messageApi.error(error);
-      clearError();
-    }
-  }, [error, clearError]);
 
   const handleAddCode = async () => {
     const code = codeInput.trim();
@@ -168,6 +176,8 @@ export function CrossMarketDashboard() {
             </Button>
           </Space>
 
+          {errors.quote && <SectionError detail={errors.quote} />}
+
           {quoteRows.length === 0 ? <Empty description={t("crossMarket.noQuotes")} /> : (
             <Table
               columns={quoteColumns}
@@ -192,7 +202,9 @@ export function CrossMarketDashboard() {
             <Title level={5}>
               {t("crossMarket.klineTitle", { code: activeIntlCode })}
             </Title>
-            {loadingKline
+            {errors.kline
+              ? <SectionError detail={errors.kline} />
+              : loadingKline
               ? <Paragraph>{t("crossMarket.loading")}</Paragraph>
               : intlKline && intlKline.length > 0
               ? <KLineChart klines={intlKline} height={320} />
@@ -217,7 +229,9 @@ export function CrossMarketDashboard() {
               {t("crossMarket.refresh")}
             </Button>
           </Space>
-          {loadingBenchmark
+          {errors.benchmark
+            ? <SectionError detail={errors.benchmark} />
+            : loadingBenchmark
             ? <Paragraph>{t("crossMarket.loading")}</Paragraph>
             : benchmarkKlines[benchmarkKey] && benchmarkKlines[benchmarkKey].length > 0
             ? (
@@ -253,7 +267,9 @@ export function CrossMarketDashboard() {
               {t("crossMarket.refresh")}
             </Button>
           </Space>
-          {loadingForex
+          {errors.forex
+            ? <SectionError detail={errors.forex} />
+            : loadingForex
             ? <Paragraph>{t("crossMarket.loading")}</Paragraph>
             : forexKlines[forexKey] && forexKlines[forexKey].length > 0
             ? (

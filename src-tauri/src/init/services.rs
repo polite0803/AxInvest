@@ -2147,6 +2147,52 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             });
             return;
         }
+        // ── A 股链交易日闸门（2026-09-30，PLAN-daily-automation-pipeline B）──
+        //
+        // 周末/节假日到点不跑：荐股与趋势智选会产空转批次、候选池分析会拿旧行情
+        // 烧模型配额。闸门只拦「本轮产物依赖当日行情」的任务；batch-reflection /
+        // validate-decisions 消费的是 pending 队列（休市无新数据可反思，skip 无害，
+        // 到期记录顺延到下一个交易日，队列不丢）。
+        //
+        // trend-screening 本身走下方 workflow_id 兜底分支，闸门按 task_type
+        // 标记拦在它进入兜底分支之前。
+        //
+        // skip 也 record_run：任务列表里如实显示「非交易日，跳过」。静默 return 的
+        // 话，「跑了但被闸门拦下」与「没跑」两种缺席在界面上长得一样。
+        {
+            let gated = matches!(
+                job.task_type.as_deref(),
+                Some("stock-recommendation")
+                    | Some("watchlist-scan")
+                    | Some("pool-scan")
+                    | Some("batch-reflection")
+                    | Some("validate-decisions")
+                    | Some(crate::commands::recommendation_cron::TREND_SCREENING_TASK_TYPE)
+            );
+            if gated {
+                let today = chrono::Local::now().date_naive();
+                if !axagent_astock_data::calendar::is_trading_day(&today) {
+                    tracing::info!("[CronScheduler] 非交易日，跳过任务 '{}' ({})", job.name, job.id);
+                    let store = cron_store.clone();
+                    let job_id = job.id.clone();
+                    let started = axagent_runtime_core::cron_job::now_millis();
+                    let result = axagent_runtime_core::TaskRunResult {
+                        success: true,
+                        output: Some(format!(
+                            "非交易日（{}），本轮跳过",
+                            today.format("%Y-%m-%d")
+                        )),
+                        error: None,
+                        duration_ms: 0,
+                        executed_at: started,
+                    };
+                    tokio::spawn(async move {
+                        store.record_run(&job_id, result).await;
+                    });
+                    return;
+                }
+            }
+        }
         // 需求订阅扫描：task_type = opc_demand_scan（v133）
         //
         // 按订阅词表挑出到期订阅逐个扫描，命中推送门槛的线索才走 delivery ——
@@ -2294,26 +2340,16 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     },
                 };
 
-                // 2. 读模板变量：vendor 启用集合 + reco_*_enabled + 各策略阈值。
+                // 2. 读荐股实际消费的模板变量（vendor 启用集合 + reco_*_enabled + 各策略阈值
+                //    + 闭环权重覆盖）。**必须与命令层共用 `load_reco_served_vars_db`**（缺陷 D2，
+                //    `PLAN-reco-reflection-closure.md`）：此前本分支裸读 template vars，
+                //    定时扫描（落库主生产者）从不消费演化权重 ⇒ 闭环只对「手动刷新」生效，
+                //    两条入口一套权重两种分。
                 //    读不到不算失败（走代码内硬编码默认值），但要留痕，
                 //    否则「面板上调了阈值却毫无效果」会变成无从下手的现象。
-                use sea_orm::EntityTrait;
                 let vars =
-                    match axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
-                        .one(&db)
-                        .await
-                    {
-                        Ok(Some(t)) => {
-                            crate::commands::stock_analysis::extract_template_vars(&t)
-                        },
-                        Ok(None) => {
-                            tracing::warn!(
-                                "[CronScheduler] 荐股任务 '{}': 未找到 stock-analysis 模板，\
-                                 本次扫描按硬编码默认参数执行",
-                                job_name
-                            );
-                            Vec::new()
-                        },
+                    match crate::commands::stock_analysis::load_reco_served_vars_db(&db).await {
+                        Ok(v) => v,
                         Err(e) => {
                             tracing::warn!(
                                 "[CronScheduler] 荐股任务 '{}': 读取模板变量失败 ({e})，\
@@ -2323,6 +2359,13 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             Vec::new()
                         },
                     };
+                if vars.is_empty() {
+                    tracing::warn!(
+                        "[CronScheduler] 荐股任务 '{}': 模板变量为空（模板不存在或无变量），\
+                         本次扫描按硬编码默认参数执行",
+                        job_name
+                    );
+                }
 
                 // 3. 扫描（多周期并行，内部已过滤 synthetic 与低于阈值的 pick）
                 let prior =
@@ -2903,9 +2946,14 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             job_name,
                             summary
                         );
+                        // 闭环链式重算（Phase E，`PLAN-reco-reflection-closure.md`）：
+                        // 刚写入的 T+N 验证必须紧跟重算，否则「自动触发」只自动了一半。
+                        // gate=off 停用；shadow 照算照留痕但不进评分（闸在消费侧）。
+                        let loop_msg =
+                            crate::commands::stock_analysis::maybe_recalc_reco_loop(&db).await;
                         axagent_runtime_core::TaskRunResult {
                             success: true,
-                            output: Some(summary),
+                            output: Some(format!("{summary} ｜ {loop_msg}")),
                             error: None,
                             duration_ms: elapsed(),
                             executed_at: started,

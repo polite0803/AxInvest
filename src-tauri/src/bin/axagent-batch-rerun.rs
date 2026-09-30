@@ -318,47 +318,49 @@ async fn ensure_pending_reflection(
         .await
         .map_err(|e| format!("查反思行失败: {e}"))?;
 
-    if existing.is_empty() {
-        let id = uuid::Uuid::new_v4().to_string();
-        stock_reflections::ActiveModel {
-            id: Set(id.clone()),
-            stock_code: Set(rec.stock_code.clone()),
-            stock_name: Set(rec.stock_name.clone()),
-            original_analysis_id: Set(analysis_id.to_string()),
-            as_of_date: Set(anchor),
-            hindsight_date: Set(hindsight),
-            // 与 `hooks.rs:888`（对话通道）/ `core.rs`（单股通道）的产品默认值一致。
-            // ⚠ 这是**手抄常量**：三处各写一份，变更时需同步；产品侧缺口修复后
-            // 应改为共享函数（见本函数文档首段）。
-            min_confidence_threshold: Set(70),
-            reflection_depth: Set("light".to_string()),
-            // 〇-B v2 第 4 条：占位行未复盘任何档 ⇒ NULL（盖章在反思收尾按 primary_horizon 写入）
-            horizon: Set(None),
-            actual_outcome: Set(String::new()),
-            raw_return: Set(None),
-            alpha_return: Set(None),
-            holding_days: Set(None),
-            benchmark_name: Set(None),
-            verdict: Set(None),
-            alpha_cited: Set(None),
-            lesson_summary: Set(None),
-            what_went_wrong: Set(None),
-            missed_signals: Set(None),
-            fix_for_future: Set(None),
-            parameter_suggestions_json: Set(None),
-            decision_json: Set(None),
-            blackboard_snapshot: Set(None),
-            horizon_results_json: Set(None),
-            model_version: Set(None),
-            status: Set("pending".to_string()),
-            created_at: Set(now),
-            updated_at: Set(now),
+    // 〇-B v2 第 4 条 / `PLAN-reflection-per-horizon-row`：**一行 = 一个复盘档**。
+    //   补建判据从「该分析有没有反思行」改成「**缺哪几档**」——
+    //   每档一行后 `existing.is_empty()` 只在完全没跑过时成立，部分跑过的分析会漏补。
+    let existing_horizons: std::collections::HashSet<String> =
+        existing.iter().filter_map(|r| r.horizon.clone()).collect();
+    let missing_horizons: Vec<(String, i64)> = axagent_lib::reviewable_horizons(
+        rec.horizon_decisions.as_deref(),
+        rec.decision_time_horizon.as_deref(),
+        rec.decision_expected_holding_days,
+    )
+    .into_iter()
+    .filter(|(h, _)| !existing_horizons.contains(h))
+    .collect();
+
+    let mut created_ids: Vec<String> = Vec::new();
+    if !missing_horizons.is_empty() {
+        let rows = axagent_lib::build_pending_reflection_rows_for(
+            &axagent_lib::PendingReflectionSeed {
+                analysis_id,
+                stock_code: &rec.stock_code,
+                stock_name: &rec.stock_name,
+                analysis_date: &anchor,
+                horizon_decisions: rec.horizon_decisions.as_deref(),
+                primary_horizon: rec.decision_time_horizon.as_deref(),
+                primary_holding_days: rec.decision_expected_holding_days,
+                min_confidence_threshold: axagent_lib::DEFAULT_REFLECTION_MIN_CONFIDENCE,
+                reflection_depth: axagent_lib::DEFAULT_REFLECTION_DEPTH,
+                now_ms: now,
+            },
+            missing_horizons,
+        );
+        for row in rows {
+            let m = row.insert(db).await.map_err(|e| format!("写反思 pending 行失败: {e}"))?;
+            created_ids.push(m.id);
         }
-        .insert(db)
-        .await
-        .map_err(|e| format!("写反思 pending 行失败: {e}"))?;
+    }
+
+    if existing.is_empty() {
         let sp = delete_stale_reflection_perf(db, &rec.stock_code).await;
-        return Ok((true, fmt_reflect_note(&format!("补建 pending {id}"), sp)));
+        return Ok((
+            true,
+            fmt_reflect_note(&format!("补建 pending {}", created_ids.join(", ")), sp),
+        ));
     }
 
     // 已存在 ⇒ 重置为 pending（重跑已覆盖原分析，旧反思结论失效）。

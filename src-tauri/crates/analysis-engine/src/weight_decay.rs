@@ -64,8 +64,24 @@ pub fn compute_adjusted_weights(
     cfg: &WeightDecayConfig,
     current_weights: &HashMap<(String, String), f64>,
 ) -> HashMap<(String, String), AdjustedWeight> {
+    compute_adjusted_weights_at(
+        history,
+        cfg,
+        current_weights,
+        chrono::Utc::now().timestamp_millis(),
+    )
+}
+
+/// 同 [`compute_adjusted_weights`]，但窗口右端由调用方给出 —— as-of 回放必须能指定
+/// 「把哪天当今天」，否则历史样本全被 `Utc::now()` 的窗口左缘滤掉，闭环的 A/B 回放
+/// （`PLAN-reco-reflection-closure.md` Phase E）无法复现当时的权重状态。
+pub fn compute_adjusted_weights_at(
+    history: &[StrategyPerformanceRow],
+    cfg: &WeightDecayConfig,
+    current_weights: &HashMap<(String, String), f64>,
+    now_ms: i64,
+) -> HashMap<(String, String), AdjustedWeight> {
     // 1. 时间窗口过滤
-    let now_ms = chrono::Utc::now().timestamp_millis();
     let cutoff_ms = now_ms - (cfg.lookback_days as i64) * 86_400_000;
 
     // 2. 按 (strategy_id, period) 聚合 wins / total

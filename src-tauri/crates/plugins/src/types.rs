@@ -170,6 +170,20 @@ pub struct DashboardPluginInfo {
     pub panels: Vec<PluginDashboardPanel>,
 }
 
+/// `plugin_read_panel_asset` 的返回形状：面板沙箱 iframe 的内容文本。
+///
+/// 只应交给 `sandbox="allow-scripts"` 的 iframe，**不得**进主文档执行
+/// （见 `PLAN-dashboard-consolidation.md` §6.4 变体 C 的隔离前提）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPanelAsset {
+    pub plugin_id: String,
+    pub panel_id: String,
+    /// 相对插件安装目录的入口路径（已含扩展名白名单与 canonicalize 校验）。
+    pub entry: String,
+    pub source: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub name: String,
@@ -863,6 +877,14 @@ pub struct InstalledPluginRecord {
     pub source: PluginInstallSource,
     pub installed_at_unix_ms: u128,
     pub updated_at_unix_ms: u128,
+    /// 安装完成时对**整个安装目录**算出的哈希（trust-on-install 钉死）。
+    ///
+    /// 为什么不复用 manifest 里的 `PluginIntegrity`：那个字段写在被哈希的目录内，
+    /// 而 `hash_plugin_directory` 会把 manifest 自身算进去 ⇒ 自指，任何声明都无法自证。
+    /// 锚点必须落在被哈希范围之外，registry 记录正是这样一个外部锚。
+    /// `#[serde(default)]` 保证旧 registry（无此字段）仍可读取，读取时按「未钉死」处理。
+    #[serde(default)]
+    pub integrity: Option<PluginIntegrity>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

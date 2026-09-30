@@ -2683,6 +2683,10 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Échec de la compilation du code source du plugin",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Chaîne d'outils Rust ou plateforme cible indisponible",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Espace disque ou mémoire insuffisants pour compiler le plugin",
+    "PLUGIN_PANEL_ASSET_UNAVAILABLE": "Le panneau de tableau de bord n'a aucune source de contenu affichable : le plugin ne déclare pas de frontendEntry, le fichier d'ressource est absent, ou le plugin/panneau n'est pas installé",
+    "PLUGIN_PANEL_ASSET_BLOCKED": "Ressource du panneau refusée par la politique de sécurité : chemin hors du répertoire du plugin, extension non autorisée ou taille maximale dépassée",
+    "PLUGIN_PANEL_ASSET_UNPINNED": "Ce plugin ne dispose pas d'ancre d'intégrité depuis l'installation ; son contenu de panneau ne peut pas être vérifié. Réinstallez le plugin.",
+    "PLUGIN_PANEL_ASSET_TAMPERED": "Le répertoire d'installation du plugin ne correspond plus à l'empreinte figée lors de l'installation ; le contenu du panneau est masqué. Retirez ou réinstallez le plugin.",
     "PLUGIN_PROFILE_IO_FAILED": "Impossible de persister le profil de bundle de plugins",
     "PROVIDER_ADAPTER_NOT_FOUND": "Adaptateur de fournisseur introuvable",
     "PROVIDER_CREATE_FAILED": "Échec de la création du fournisseur",
@@ -4912,7 +4916,6 @@
       "strategyMerge": "Fusionner (conserver existant)",
       "strategyDryRun": "Essai à blanc (validation uniquement)"
     },
-    "policyDashboard": "Panneau de stratégie RL",
     "experiences": "Expérience",
     "avgReward": "Récompense moyenne",
     "createPolicy": "Créer une nouvelle stratégie",
@@ -14657,7 +14660,12 @@
     "boolYes": "Oui",
     "boolNo": "Non",
     "backendCallFailed": "Échec de l'appel backend",
-    "tierScopeHint": "Portée du palier : moyen terme uniquement (catalyseurs goulot/politique/résultats se déploient en semaines-mois) ; les paliers court et très court ne s'appliquent pas, la période enregistrée est toujours mid avec les 28 jours de référence de ce palier.",
+    "tierScopeHint": "Horizon : couvre les niveaux moyen et long (les catalyseurs goulot / politique / résultats se realized en semaines à mois) ; très court et court ne sont pas produits par conception — une ligne par niveau, durée de détention issue du niveau de référence.",
+    "timeBasisNoTier": "Candidat en direct sans palier ⇒ pas de fenêtre suggérée (lignes par palier dans l'historique)",
+    "entryBand": "Bande d'entrée ±{{pct}}%",
+    "entryBandHalfFallback": "Bande = moitié d'un multiplicateur fixe ⇒ non dérivée de la volatilité",
+    "entryBandRangeFallback": "Distance de stop indisponible ⇒ la bande retombe sur le modèle",
+    "candidateTierRowsNote": "{{stocks}} titres · une ligne par palier",
     "emptyHistoryWarning": "L'historique Serenity est vide : list_reco_history a renvoyé 0 ligne (peut-être aucun historique de style serenity/bottleneck dans la BD, ou l'échec de la commande backend a été silencieusement ignoré)",
     "timeBasis": "Base temporelle : {{date}} · fenêtre suggérée ~{{days}} jours (jusqu'au {{until}})"
   },
@@ -15204,7 +15212,15 @@
       },
       "matrixMisfit": {
         "valuation_needs_weeks_to_realize_kept_by_user_decision": "Inadéquation connue : l'évaluation exige des semaines ; conservé par décision"
-      }
+      },
+      "loopUncalibratedSamples": "Boucle non calibrée : échantillons insuffisants",
+      "loopUncalibratedIc": "Boucle non calibrée : IC imesurable",
+      "loopCalibrated": "Boucle calibrée, poids {weight}",
+      "loopDemoted": "Boucle dégradée à {weight} (IC négatif {ic})",
+      "loopGateOn": "Boucle de réflexion active (on), dernier recalcul {time}",
+      "loopGateShadow": "Boucle de réflexion en mode fantôme : calculée sans application, dernier recalcul {time}",
+      "loopGateOff": "Boucle de réflexion désactivée (off), dernier recalcul {time}",
+      "loopNeverRecalc": "jamais recalculate"
     },
     "export": {
       "analystReports": "analystReports",
@@ -16526,6 +16542,9 @@
       "horizonLong": "Long",
       "horizonAuto": "Selon le palier principal",
       "horizonUnknown": "Horizon inconnu",
+      "colHorizon": "Horizon analysé",
+      "horizonReviewTag": "Analysé ici",
+      "horizonNoNarration": "Verdict objectif seul, sans récit de revue",
       "horizonStatusLabel": "Statut : ",
       "horizonStatusMature": "Mature",
       "horizonStatusImmature": "Pas encore échu",
@@ -17383,7 +17402,8 @@
       "limitUpThHigh": "Potentiel d'arrêt à la hausse - Seuil de fort potentiel",
       "limitUpThMed": "Potentiel d'arrêt à la hausse - Seuil de potentiel moyen",
       "limitUpThLow": "Potentiel d'arrêt à la hausse - Seuil de faible potentiel",
-      "analysisDryRun": "Mode dry run : n'appelle pas le LLM, utilise un mock pour vérifier le processus"
+      "analysisDryRun": "Mode dry run : n'appelle pas le LLM, utilise un mock pour vérifier le processus",
+      "recoIcGate": "Porte de la boucle de réflexion des recommandations : off=désactivée ; shadow=calcul et journalisation seuls, sans application au score ; on=remplace les poids statiques par les poids par cellule (dégradation seule)"
     },
     "evidenceCitation": {
       "loading": "Extraction des citations...",

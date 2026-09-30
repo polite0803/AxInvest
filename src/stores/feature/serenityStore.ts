@@ -67,9 +67,22 @@ export interface SerenityCandidate {
   /** 推荐生成时间（历史记录回填时携带；实时候选缺省，前端按当前时间兜底） */
   generated_at?: string;
   generatedAt?: string;
-  /** 建议持有天数（缺省 20，serenity 固定 mid 周期） */
+  /** 建议持有天数。落库行来自该档权威表（mid=28、long=90）；实时候选不带 ⇒ 卡片出「未标档」句，
+   *  **不得**再兜底成某个固定数字（旧值 20 与 `Period::Mid` 的 28 天互相矛盾） */
   holding_days?: number;
   holdingDays?: number;
+  /** 逐档落库（Q2）后一行一档：`period` 缺失 = 实时候选未标档，不等于「中线」 */
+  period?: string;
+  price?: number;
+  stopLoss?: number;
+  targetPrice?: number;
+  entryLow?: number;
+  entryHigh?: number;
+  positionPct?: number;
+  /** 风控口径来源（`vol` | `fallback_pct`）——缺失就是「没落库这一档的风控」，不是 vol */
+  stopSource?: string;
+  /** 建仓带来源（`half_stop` | `half_stop_fallback_pct` | `fallback_range`） */
+  entrySource?: string;
 }
 
 export interface TrendInfo {

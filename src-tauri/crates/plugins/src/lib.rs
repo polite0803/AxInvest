@@ -822,6 +822,7 @@ mod tests {
                 source: PluginInstallSource::LocalPath { path: bundled_root.join("stale") },
                 installed_at_unix_ms: 1,
                 updated_at_unix_ms: 1,
+                integrity: None,
             },
         );
         manager.store_registry(&registry).expect("store registry");
@@ -875,6 +876,7 @@ mod tests {
                 source: PluginInstallSource::LocalPath { path: external_install_path.clone() },
                 installed_at_unix_ms: 1,
                 updated_at_unix_ms: 1,
+                integrity: None,
             },
         );
         manager.store_registry(&registry).expect("store registry");
@@ -917,6 +919,7 @@ mod tests {
                 source: PluginInstallSource::LocalPath { path: missing_install_path.clone() },
                 installed_at_unix_ms: 1,
                 updated_at_unix_ms: 1,
+                integrity: None,
             },
         );
         manager.store_registry(&registry).expect("store registry");

@@ -676,15 +676,24 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
     // 索引 1：stock_analyses.id → Model
     let ana_by_id: HashMap<&str, &stock_analyses::Model> =
         ana_rows.iter().map(|a| (a.id.as_str(), a)).collect();
-    // 索引 2：反思行按 (stock_code, created_at) 批匹配（同批写入的时间戳相同）
-    let mut ref_by_batch: HashMap<(String, i64), &stock_reflections::Model> = HashMap::new();
+    // 索引 2：反思行按 (stock_code, created_at, 复盘档) 批匹配（同批写入的时间戳相同）。
+    //
+    // 为什么键里必须带档：〇-B v2 起**一行反思 = 一个周期档**，同一条分析产出的四个档行
+    // 由建点用**同一个 now_ms** 写入 `created_at` ⇒ 只用 (stock_code, created_at) 做键时
+    // 四行同键，`.or_insert` 会**随机丢掉三档**（命中率统计的档间差异被抹平）。
+    // sp 侧的档来自 `period` 的 `reflection:{档}` 后缀（写入点：
+    // `commands/stock_workflow/reflection.rs` 的 strategy_performance 构造）。
+    // 老数据两侧同构：sp.period 无后缀 ⇔ 反思行 horizon NULL ⇒ 仍按 None 相配。
+    let mut ref_by_batch: HashMap<(String, i64, Option<String>), &stock_reflections::Model> =
+        HashMap::new();
     for r in &ref_rows {
-        ref_by_batch.entry((r.stock_code.clone(), r.created_at)).or_insert(r);
+        ref_by_batch.entry((r.stock_code.clone(), r.created_at, r.horizon.clone())).or_insert(r);
     }
 
     let mut samples = Vec::with_capacity(sp_rows.len());
     for sp in &sp_rows {
-        let matched = ref_by_batch.get(&(sp.stock_code.clone(), sp.created_at));
+        let sp_horizon = sp.period.strip_prefix("reflection:").map(str::to_string);
+        let matched = ref_by_batch.get(&(sp.stock_code.clone(), sp.created_at, sp_horizon.clone()));
 
         // 路径 1：反思行有四周期结果 JSON → 按周期独立展开（每周期一条样本）
         if let Some(expanded) =

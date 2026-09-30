@@ -97,18 +97,56 @@ pub struct UpdateOutcome {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginManifestValidationError {
-    EmptyField { field: &'static str },
-    EmptyEntryField { kind: &'static str, field: &'static str, name: Option<String> },
-    InvalidPermission { permission: String },
-    DuplicatePermission { permission: String },
-    DuplicateEntry { kind: &'static str, name: String },
-    MissingPath { kind: &'static str, path: PathBuf },
-    PathIsDirectory { kind: &'static str, path: PathBuf },
-    InvalidToolInputSchema { tool_name: String },
-    InvalidToolRequiredPermission { tool_name: String, permission: String },
-    UnsupportedManifestContract { detail: String },
-    DependencyNotSatisfied { plugin_name: String, min_version: Option<String> },
-    IntegrityCheckFailed { algorithm: String, expected: String, actual: String },
+    EmptyField {
+        field: &'static str,
+    },
+    EmptyEntryField {
+        kind: &'static str,
+        field: &'static str,
+        name: Option<String>,
+    },
+    InvalidPermission {
+        permission: String,
+    },
+    DuplicatePermission {
+        permission: String,
+    },
+    DuplicateEntry {
+        kind: &'static str,
+        name: String,
+    },
+    MissingPath {
+        kind: &'static str,
+        path: PathBuf,
+    },
+    PathIsDirectory {
+        kind: &'static str,
+        path: PathBuf,
+    },
+    InvalidToolInputSchema {
+        tool_name: String,
+    },
+    InvalidToolRequiredPermission {
+        tool_name: String,
+        permission: String,
+    },
+    UnsupportedManifestContract {
+        detail: String,
+    },
+    DependencyNotSatisfied {
+        plugin_name: String,
+        min_version: Option<String>,
+    },
+    IntegrityCheckFailed {
+        algorithm: String,
+        expected: String,
+        actual: String,
+    },
+    /// 面板声明的前端资产（`frontendEntry`）形状非法：绝对路径 / 逃逸 / 扩展名不在白名单
+    InvalidPanelAsset {
+        panel: String,
+        detail: String,
+    },
 }
 
 impl Display for PluginManifestValidationError {
@@ -162,6 +200,9 @@ impl Display for PluginManifestValidationError {
                     "plugin integrity check failed ({algorithm}): expected {expected}, got {actual}"
                 )
             },
+            Self::InvalidPanelAsset { panel, detail } => {
+                write!(f, "plugin dashboard panel `{panel}` has an invalid frontendEntry: {detail}")
+            },
         }
     }
 }
@@ -179,6 +220,12 @@ pub enum PluginError {
     /// `subprocess_execution` 权限等）。与 `CommandFailed` 区分以便上层
     /// 做权限引导而非通用错误处理。
     PermissionDenied(String),
+    /// 面板资产的完整性锚点缺失：该插件安装时没钉下目录哈希（早于此机制安装，
+    /// 或安装当场哈希失败）。用户动作 = 重装一次；**不得**报成「内容被篡改」。
+    IntegrityUnpinned(String),
+    /// 安装目录内容与安装时钉下的哈希不一致（被改动）。用户动作 = 移除或重装，
+    /// 性质是安全拒绝，与「插件本来没声明内容」相反，故两个码分开。
+    IntegrityMismatch(String),
     /// 插件已安装冲突 — install 时检测到 plugin_id 已存在,
     /// 调用方应提示用户使用 update 而非 install。
     AlreadyExists(String),
@@ -211,6 +258,8 @@ impl Display for PluginError {
             | Self::NotFound(message)
             | Self::CommandFailed(message)
             | Self::PermissionDenied(message)
+            | Self::IntegrityUnpinned(message)
+            | Self::IntegrityMismatch(message)
             | Self::AlreadyExists(message) => write!(f, "{message}"),
         }
     }
@@ -353,25 +402,75 @@ impl PluginManager {
         plugin_root: &Path,
         integrity: &PluginIntegrity,
     ) -> Result<(), PluginError> {
-        match integrity.algorithm.as_str() {
-            "sha256" => {
-                let hash = hash_plugin_directory(plugin_root)?;
-                if hash.eq_ignore_ascii_case(&integrity.hash) {
-                    Ok(())
-                } else {
-                    Err(PluginError::ManifestValidation(vec![
-                        PluginManifestValidationError::IntegrityCheckFailed {
-                            algorithm: integrity.algorithm.clone(),
-                            expected: integrity.hash.clone(),
-                            actual: hash,
-                        },
-                    ]))
-                }
-            },
-            other => {
-                Err(PluginError::CommandFailed(format!("unsupported integrity algorithm: {other}")))
-            },
+        verify_declared_integrity(plugin_root, integrity)
+    }
+
+    /// 读取某个仪表盘面板声明的前端资产（沙箱 iframe 的内容来源）。
+    ///
+    /// 四道防线，各挡一类：manifest 载入期的形状/ id 校验（坏声明进仓）→
+    /// registry 钉死哈希核对（安装后被改动）→ canonicalize 包含性（符号链接逃逸）→
+    /// 扩展名 + 大小上限（白名单外与内存放大）。
+    ///
+    /// fail-closed：安装时没钉下哈希的插件（早于此机制安装）**一律拒绝**，需重装才恢复 ——
+    /// 与「插件未声明内容」是两个不同错误，不可混成一个提示。
+    pub fn read_panel_asset(
+        &self,
+        plugin_id: &str,
+        panel_id: &str,
+    ) -> Result<PluginPanelAsset, PluginError> {
+        let registry = self.load_registry()?;
+        let record = registry.plugins.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(format!("plugin `{plugin_id}` is not installed"))
+        })?;
+        // 走完整载入链而非直接读盘：这样完整性核对无法被绕过
+        let manifest = load_plugin_from_directory(&record.install_path)?;
+        let panel =
+            manifest.dashboard_panels.iter().find(|p| p.id == panel_id).ok_or_else(|| {
+                PluginError::NotFound(format!(
+                    "plugin `{plugin_id}` has no dashboard panel `{panel_id}`"
+                ))
+            })?;
+        let entry = panel.frontend_entry.as_deref().ok_or_else(|| {
+            PluginError::NotFound(format!(
+                "dashboard panel `{panel_id}` declares no frontendEntry (metadata-only panel)"
+            ))
+        })?;
+        if let Some(detail) = panel_asset_shape_error(entry) {
+            return Err(PluginError::PermissionDenied(detail));
         }
+        // 完整性核对（锚点在 registry，不在 manifest —— 后者自指不成立）
+        let pinned = record.integrity.as_ref().ok_or_else(|| {
+            PluginError::IntegrityUnpinned(format!(
+                "plugin `{plugin_id}` has no pinned install hash; reinstall it to enable dashboard panel assets"
+            ))
+        })?;
+        verify_declared_integrity(&record.install_path, pinned).map_err(|error| {
+            PluginError::IntegrityMismatch(format!(
+                "plugin `{plugin_id}` install directory no longer matches its pinned hash: {error}"
+            ))
+        })?;
+        let install_dir = record.install_path.canonicalize()?;
+        let requested = install_dir.join(entry);
+        let canonical = requested.canonicalize().map_err(|_| {
+            PluginError::NotFound(format!("panel asset not found: {}", requested.display()))
+        })?;
+        if !canonical.starts_with(&install_dir) {
+            return Err(PluginError::PermissionDenied(format!(
+                "Access denied: panel asset is outside plugin directory ({entry})"
+            )));
+        }
+        let size_bytes = fs::metadata(&canonical)?.len();
+        if size_bytes > PANEL_ASSET_MAX_BYTES {
+            return Err(PluginError::PermissionDenied(format!(
+                "panel asset `{entry}` is {size_bytes} bytes, over the {PANEL_ASSET_MAX_BYTES}-byte cap"
+            )));
+        }
+        Ok(PluginPanelAsset {
+            plugin_id: plugin_id.to_string(),
+            panel_id: panel_id.to_string(),
+            entry: entry.to_string(),
+            source: fs::read_to_string(&canonical)?,
+        })
     }
 
     pub fn plugin_registry_report(&self) -> Result<PluginRegistryReport, PluginError> {
@@ -535,6 +634,21 @@ impl PluginManager {
         }
 
         let now = unix_time_ms();
+        // trust-on-install 钉死：拷贝完成后立刻对**整个安装目录**算哈希并写进 registry。
+        // 锚点必须落在被保护范围之外 —— manifest 自身就在目录里，`manifest.integrity`
+        // 因此是自指、永远无法自证（见 PLAN-dashboard-consolidation.md §6.5）。
+        // 算不出哈希不阻断安装，但记录留空，面板资产读取会 fail-closed 拒绝，需重装才恢复。
+        let pinned_integrity = match hash_plugin_directory(&install_path) {
+            Ok(hash) => Some(PluginIntegrity { algorithm: "sha256".to_string(), hash }),
+            Err(error) => {
+                tracing::warn!(
+                    plugin_id = %plugin_id,
+                    error = %error,
+                    "插件安装哈希失败：该插件的仪表盘面板资产将被拒绝，直到重新安装"
+                );
+                None
+            },
+        };
         let record = InstalledPluginRecord {
             kind: PluginKind::External,
             id: plugin_id.clone(),
@@ -545,6 +659,7 @@ impl PluginManager {
             source: install_source,
             installed_at_unix_ms: now,
             updated_at_unix_ms: now,
+            integrity: pinned_integrity,
         };
 
         let mut registry = self.load_registry()?;
@@ -1061,10 +1176,23 @@ impl PluginManager {
             }
         }
 
+        // 更新会整目录替换 ⇒ 旧钉死值立刻失效，必须对新目录重算（否则把新内容判成篡改）。
+        let repinned_integrity = match hash_plugin_directory(&record.install_path) {
+            Ok(hash) => Some(PluginIntegrity { algorithm: "sha256".to_string(), hash }),
+            Err(error) => {
+                tracing::warn!(
+                    plugin_id = %plugin_id,
+                    error = %error,
+                    "插件更新后哈希重算失败：该插件的仪表盘面板资产将被拒绝，直到重新安装"
+                );
+                None
+            },
+        };
         let updated_record = InstalledPluginRecord {
             version: manifest.version.clone(),
             description: manifest.description,
             updated_at_unix_ms: unix_time_ms(),
+            integrity: repinned_integrity,
             ..record.clone()
         };
         registry.plugins.insert(plugin_id.to_string(), updated_record);
@@ -1259,6 +1387,15 @@ impl PluginManager {
                 remove_dir_all_with_retry(&install_path, 3)?;
             }
             copy_dir_all(&source_root, &install_path)?;
+            // bundled 同步同样是「整目录替换」⇒ 与 install/update 一致地重钉哈希，
+            // 否则三类来源里只有 bundled 的面板资产没有完整性锚点。
+            let pinned_integrity = match hash_plugin_directory(&install_path) {
+                Ok(hash) => Some(PluginIntegrity { algorithm: "sha256".to_string(), hash }),
+                Err(error) => {
+                    tracing::warn!(path = %install_path.display(), error = %error, "bundled 插件哈希失败");
+                    None
+                },
+            };
 
             let installed_at_unix_ms =
                 existing_record.map_or(now, |record| record.installed_at_unix_ms);
@@ -1274,6 +1411,7 @@ impl PluginManager {
                     source: PluginInstallSource::LocalPath { path: source_root },
                     installed_at_unix_ms,
                     updated_at_unix_ms: now,
+                    integrity: pinned_integrity,
                 },
             );
             changed = true;
@@ -1862,6 +2000,7 @@ fn build_plugin_manifest(
     validate_command_entries(root, raw.lifecycle.shutdown.iter(), "lifecycle command", &mut errors);
     let tools = build_manifest_tools(root, raw.tools, &mut errors);
     let commands = build_manifest_commands(root, raw.commands, &mut errors);
+    validate_dashboard_panels(&raw.dashboard_panels, &mut errors);
 
     if !errors.is_empty() {
         return Err(PluginError::ManifestValidation(errors));
@@ -2689,6 +2828,99 @@ fn strip_prerelease(version: &str) -> &str {
     version.split('-').next().unwrap_or(version)
 }
 
+/// 校验 manifest 声明的完整性（`PluginIntegrity`）。
+///
+/// 由 `build_plugin_manifest` 在**每次** manifest 载入时调用 ⇒ 安装后遭篡改会在下一次
+/// 加载即失败，而不是只在 install 当场校验一次。
+pub(crate) fn verify_declared_integrity(
+    plugin_root: &Path,
+    integrity: &PluginIntegrity,
+) -> Result<(), PluginError> {
+    match integrity.algorithm.as_str() {
+        "sha256" => {
+            let hash = hash_plugin_directory(plugin_root)?;
+            if hash.eq_ignore_ascii_case(&integrity.hash) {
+                Ok(())
+            } else {
+                Err(PluginError::ManifestValidation(vec![
+                    PluginManifestValidationError::IntegrityCheckFailed {
+                        algorithm: integrity.algorithm.clone(),
+                        expected: integrity.hash.clone(),
+                        actual: hash,
+                    },
+                ]))
+            }
+        },
+        other => {
+            Err(PluginError::CommandFailed(format!("unsupported integrity algorithm: {other}")))
+        },
+    }
+}
+
+/// 插件面板前端资产的允许扩展名 —— 沙箱 iframe 只需这四种文本资产。
+pub(crate) const PANEL_ASSET_ALLOWED_EXTS: &[&str] = &["html", "htm", "js", "css"];
+
+/// 面板资产大小上限。`skill_read_asset` 无上限，此处**刻意收紧**：
+/// 读的是第三方代码，巨型文件既无正当用途又是内存放大面。
+pub(crate) const PANEL_ASSET_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// manifest 侧的**形状**校验（不做 I/O）：绝对路径 / 逃逸 / 扩展名。
+/// 真正的越界防线在 `read_panel_asset` 的 canonicalize 校验，这里是加载期的第一道。
+fn panel_asset_shape_error(entry: &str) -> Option<String> {
+    if entry.trim().is_empty() {
+        return Some("frontendEntry cannot be empty".to_string());
+    }
+    if entry.starts_with('/') || entry.starts_with('\\') {
+        return Some(format!("frontendEntry must be relative to the plugin directory: {entry}"));
+    }
+    let bytes = entry.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return Some(format!("frontendEntry must not be an absolute path: {entry}"));
+    }
+    if entry.split(['/', '\\']).any(|seg| seg == "..") {
+        return Some(format!("frontendEntry must not escape the plugin directory: {entry}"));
+    }
+    match Path::new(entry).extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase) {
+        Some(ext) if PANEL_ASSET_ALLOWED_EXTS.contains(&ext.as_str()) => None,
+        Some(ext) => Some(format!(
+            "frontendEntry extension `.{ext}` is not allowed (expected one of {})",
+            PANEL_ASSET_ALLOWED_EXTS.join(", ")
+        )),
+        None => Some(format!("frontendEntry must have a file extension: {entry}")),
+    }
+}
+
+fn validate_dashboard_panels(
+    panels: &[PluginDashboardPanel],
+    errors: &mut Vec<PluginManifestValidationError>,
+) {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for panel in panels {
+        if panel.id.trim().is_empty() {
+            errors.push(PluginManifestValidationError::EmptyEntryField {
+                kind: "dashboard panel",
+                field: "id",
+                name: None,
+            });
+            continue;
+        }
+        if !seen.insert(panel.id.as_str()) {
+            errors.push(PluginManifestValidationError::DuplicateEntry {
+                kind: "dashboard panel",
+                name: panel.id.clone(),
+            });
+        }
+        if let Some(entry) = &panel.frontend_entry
+            && let Some(detail) = panel_asset_shape_error(entry)
+        {
+            errors.push(PluginManifestValidationError::InvalidPanelAsset {
+                panel: panel.id.clone(),
+                detail,
+            });
+        }
+    }
+}
+
 fn hash_plugin_directory(plugin_root: &Path) -> Result<String, PluginError> {
     let mut hasher = sha2::Sha256::new();
     let mut files: Vec<PathBuf> = Vec::new();
@@ -2847,6 +3079,182 @@ mod tests {
         assert_eq!(entry.author.as_deref(), Some("ax"));
         // 无面板声明的内置/bundled 插件不得混入投影。
         assert!(list.iter().all(|plugin| !plugin.panels.is_empty()));
+    }
+
+    /// 写一份只含两个面板（一有资产、一无资产）的已安装插件 + registry，返回 manager。
+    fn manager_with_panel_pack(temp: &Path, panel_json: &str) -> PluginManager {
+        let installed = temp.join("plugins").join("installed").join("ui-pack");
+        std::fs::create_dir_all(installed.join("ui")).expect("创建插件目录");
+        std::fs::write(
+            installed.join(MANIFEST_FILE_NAME),
+            format!(
+                r#"{{
+                    "name": "ui-pack",
+                    "version": "1.0.0",
+                    "description": "ui",
+                    "dashboard_panels": {panel_json}
+                }}"#
+            ),
+        )
+        .expect("写入 manifest");
+        std::fs::write(installed.join("ui").join("panel.html"), "<html>hi</html>")
+            .expect("写入面板资产");
+
+        let manager = PluginManager::new(PluginManagerConfig::new(temp.to_path_buf()));
+        let mut registry = InstalledPluginRegistry::default();
+        // 与真实 install 同形：钉下目录哈希。不钉则 read_panel_asset 按 fail-closed 拒绝，
+        // 夹具就会把「未建立锚点」误验成「资产读取本身可用」。
+        let pinned = hash_plugin_directory(&installed)
+            .ok()
+            .map(|hash| PluginIntegrity { algorithm: "sha256".to_string(), hash });
+        registry.plugins.insert(
+            "ui-pack".to_string(),
+            InstalledPluginRecord {
+                kind: PluginKind::External,
+                id: "ui-pack".to_string(),
+                name: "ui-pack".to_string(),
+                version: "1.0.0".to_string(),
+                description: "ui".to_string(),
+                install_path: installed.clone(),
+                source: PluginInstallSource::LocalPath { path: installed },
+                installed_at_unix_ms: 1,
+                updated_at_unix_ms: 1,
+                integrity: pinned,
+            },
+        );
+        manager.store_registry(&registry).expect("写 registry");
+        manager
+    }
+
+    /// 面板 `frontendEntry` 的越界/绝对/非法扩展名形态必须在 **manifest 载入期**即被拒：
+    /// manifest 是长期驻留的声明面，等到前端取资产才拦就等于允许坏声明进仓。
+    #[test]
+    fn load_rejects_invalid_panel_frontend_entry() {
+        for (label, entry) in [
+            ("escape", "../evil.html"),
+            ("absolute", "/etc/passwd.html"),
+            ("drive", "C:/Windows/x.html"),
+            ("ext", "panel.exe"),
+        ] {
+            let temp = temp_dir(&format!("panel-{label}"));
+            let manager = manager_with_panel_pack(
+                &temp,
+                r#"[{ "id": "p1", "title": "P1", "componentName": "ui-pack.p1", "frontendEntry": "PLACEHOLDER" }]"#,
+            );
+            // 用 manager_with_panel_pack 建好目录后，改写 manifest 里的 entry 为本轮形态
+            let manifest_path =
+                temp.join("plugins").join("installed").join("ui-pack").join(MANIFEST_FILE_NAME);
+            let body = std::fs::read_to_string(&manifest_path).expect("读 manifest");
+            std::fs::write(&manifest_path, body.replace("PLACEHOLDER", entry))
+                .expect("改写 manifest");
+
+            let err = load_plugin_from_directory(manifest_path.parent().expect("插件目录"))
+                .expect_err(&format!("{label} 形态的 frontendEntry 应被拒绝"));
+            let text = err.to_string();
+            assert!(text.contains("frontendEntry"), "{label}: 实际错误 = {text}");
+            // 面板资产读取同样不得放行（形状校验是同一函数，两处共用）
+            assert!(manager.read_panel_asset("ui-pack", "p1").is_err());
+            let _ = std::fs::remove_dir_all(&temp);
+        }
+    }
+
+    /// 空 id / 重复 id 在载入期即拒 —— 前端渲染与资产寻址都以 panel.id 为键。
+    #[test]
+    fn load_rejects_duplicate_or_empty_panel_id() {
+        for (label, panel_json, expect) in [
+            (
+                "dup",
+                r#"[
+                    { "id": "p1", "title": "A", "componentName": "c.a" },
+                    { "id": "p1", "title": "B", "componentName": "c.b" }
+                ]"#,
+                "is duplicated",
+            ),
+            (
+                "empty",
+                r#"[{ "id": "  ", "title": "A", "componentName": "c.a" }]"#,
+                "cannot be empty",
+            ),
+        ] {
+            let temp = temp_dir(&format!("panel-{label}"));
+            manager_with_panel_pack(&temp, panel_json);
+            let dir = temp.join("plugins").join("installed").join("ui-pack");
+            let err = load_plugin_from_directory(&dir).expect_err(&format!("{label} 应被拒绝"));
+            let text = err.to_string();
+            assert!(
+                text.contains("dashboard panel") && text.contains(expect),
+                "{label}: 实际 = {text}"
+            );
+            let _ = std::fs::remove_dir_all(&temp);
+        }
+    }
+
+    /// 合法声明能读到资产文本；未声明 `frontendEntry` 的面板是**元数据面板**，
+    /// 必须显式报「无内容来源」而不是返回空串（空串会被前端渲染成空白面板冒充正常结果）。
+    #[test]
+    fn read_panel_asset_serves_declared_source_and_flags_metadata_only() {
+        let temp = temp_dir("panel-read");
+        let manager = manager_with_panel_pack(
+            &temp,
+            r#"[
+                { "id": "chart", "title": "C", "componentName": "ui-pack.chart", "frontendEntry": "ui/panel.html" },
+                { "id": "meta", "title": "M", "componentName": "ui-pack.meta" }
+            ]"#,
+        );
+
+        let asset = manager.read_panel_asset("ui-pack", "chart").expect("应读到面板资产");
+        assert_eq!(asset.source, "<html>hi</html>");
+        assert_eq!(asset.entry, "ui/panel.html");
+        assert_eq!(asset.plugin_id, "ui-pack");
+        assert_eq!(asset.panel_id, "chart");
+
+        let meta_err = manager.read_panel_asset("ui-pack", "meta").expect_err("元数据面板没有资产");
+        assert!(meta_err.to_string().contains("no frontendEntry"), "实际 = {meta_err}");
+        assert!(manager.read_panel_asset("ui-pack", "absent").is_err());
+        assert!(manager.read_panel_asset("no-such-plugin", "chart").is_err());
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 钉死锚点后篡改目录内容必须被拒，且报的是「被改动」而非「没声明内容」——
+    /// 两者的用户动作不同（重装 vs 移除），塌成一个提示就等于把安全事件说成配置缺失。
+    #[test]
+    fn read_panel_asset_refuses_tampered_install() {
+        let temp = temp_dir("panel-tamper");
+        let manager = manager_with_panel_pack(
+            &temp,
+            r#"[{ "id": "chart", "title": "C", "componentName": "ui-pack.chart", "frontendEntry": "ui/panel.html" }]"#,
+        );
+        let asset_dir = temp.join("plugins").join("installed").join("ui-pack");
+        std::fs::write(asset_dir.join("ui").join("panel.html"), "<html>tampered</html>")
+            .expect("改写资产");
+
+        let err = manager.read_panel_asset("ui-pack", "chart").expect_err("篡改后应拒绝");
+        assert!(
+            matches!(err, PluginError::IntegrityMismatch(_)),
+            "应报 IntegrityMismatch，实际 = {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// 早于本机制安装（或安装当场哈希失败）的插件没有锚点 ⇒ fail-closed 拒绝，
+    /// 但必须与「被篡改」区分开：内容其实没变，只是无从证明。
+    #[test]
+    fn read_panel_asset_refuses_unpinned_install() {
+        let temp = temp_dir("panel-unpinned");
+        let manager = manager_with_panel_pack(
+            &temp,
+            r#"[{ "id": "chart", "title": "C", "componentName": "ui-pack.chart", "frontendEntry": "ui/panel.html" }]"#,
+        );
+        let mut registry = manager.load_registry().expect("读 registry");
+        registry.plugins.get_mut("ui-pack").expect("夹具应有该插件").integrity = None;
+        manager.store_registry(&registry).expect("改写 registry");
+
+        let err = manager.read_panel_asset("ui-pack", "chart").expect_err("无锚点应拒绝");
+        assert!(
+            matches!(err, PluginError::IntegrityUnpinned(_)),
+            "应报 IntegrityUnpinned，实际 = {err:?}"
+        );
+        let _ = std::fs::remove_dir_all(&temp);
     }
 
     /// 2026-09-30 实测缺陷回归：Claude Code 清单的 `author` 是**对象**写法

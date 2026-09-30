@@ -1661,6 +1661,10 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             config: AgentNodeConfig {
                 system_prompt: "你的任务：对历史股票分析进行反思复盘。\n\
                     目标股票代码: {{stock_code}}，股票名称: {{stock_name}}\n\
+                    ——本次复盘唯一针对的周期档——\n\
+                    复盘档: {{review_horizon}}（该档期望持有 {{review_expected_holding_days}} 个交易日）\n\
+                    上面「实际走势结果」与所有硬数字（收益率/超额/持有天数/价格事实）\n\
+                    都是**这一档窗口**的口径，与其余三档无关。\n\
                     实际走势结果: {{actual_outcome}}（非空 → 反思模式）\n\
                     ——结构化 outcome 变量（v008 C3 借鉴:硬数字,避免 LLM 脑补）——\n\
                     原始收益率: {{raw_return_pct}}%\n\
@@ -1693,7 +1697,12 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     5. 反思深度=deep 时给出可执行的检查清单（具体指标阈值、信号确认步骤）。\n\
                     6. 用 verdict 字段标记本次反思判定（correct/partial/wrong 三选一）。\n\
                     7. 如果复盘发现本可优化决策，在 alpha_cited 字段说明关键 alpha 信号。\n\
-                    8. 不要输出交易决策（买入/卖出/持有），不要输出 confidence/positionPct。\n\n\
+                    8. 不要输出交易决策（买入/卖出/持有），不要输出 confidence/positionPct。\n\
+                    9. 只复盘 {{review_horizon}} 这一档：lesson_summary / what_went_wrong /\n\
+                       missed_signals / fix_for_future / params_suggestion 全部只能针对该档产出，\n\
+                       禁止写「适用于所有周期」的结论。\n\
+                    10. 其余三档的逐周期判定（deviation_report.horizon_correct）只作背景参照，\n\
+                        **不得**为它们写教训或参数建议；跨周期矛盾只能作为本档结论的风险提示。\n\n\
                     你必须输出严格 JSON 格式（不要 Markdown 代码块，不要多余文本），字段如下：\n\
                     {\n\
                       \"verdict\": \"correct | partial | wrong\",\n\
@@ -1738,6 +1747,13 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
                     // 由 run_reflection_workflow 顶层注入。不接会让 prompt 里的
                     // {{actual_market_text}} 渲染为空或 VARIABLE_NOT_FOUND。
                     ("actual_market_text".to_string(), "actual_market_text".to_string()),
+                    // 〇-B v2 第 4 条：本次复盘档。同样由 run_reflection_workflow 顶层注入，
+                    // 漏映射 ⇒ {{review_horizon}} VARIABLE_NOT_FOUND ⇒ 整条反思链 Failed。
+                    ("review_horizon".to_string(), "review_horizon".to_string()),
+                    (
+                        "review_expected_holding_days".to_string(),
+                        "review_expected_holding_days".to_string(),
+                    ),
                 ]
                 .into_iter()
                 .collect(),
@@ -1878,6 +1894,29 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
             ),
             is_secret: false,
         },
+        // [v3 单档复盘] 〇-B v2 第 4 条：一行反思 = 一个周期档。
+        // 运行时由 run_reflection_workflow 用盖章后的 primary_horizon 覆盖。
+        Variable {
+            name: "review_horizon".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(String::new()),
+            description: Some("本次反思唯一复盘的周期档（ultra_short/short/mid/long）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "review_expected_holding_days".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(0),
+            description: Some("本次复盘档的期望持有天数（交易日）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "analysis_primary_horizon".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String("none".into()),
+            description: Some("原分析公式定档的主周期档，未必等于本次复盘档".into()),
+            is_secret: false,
+        },
     ];
 
     // serenity-reflection 模板版本。
@@ -1890,8 +1929,15 @@ async fn seed_reflection_workflow_template(db: &sea_orm::DatabaseConnection) -> 
     //   ③ 新增变量定义 actual_market_text / actual_market_json（由 run_reflection_workflow
     //      **无条件注入** —— 缺失会让 comparator 与 prompt 双双 VARIABLE_NOT_FOUND）。
     //
+    // v3 (2026-09-30)：一行反思 = 一个周期档 ——
+    //   ① reflection-agent 新增 {{review_horizon}} / {{review_expected_holding_days}}，
+    //      prompt 由「四周期分别判断」改为**单档复盘原则**（其余三档只作背景参照）；
+    //   ② 新增变量 analysis_primary_horizon（原分析主档，与复盘档分开陈述，两者可不一致）；
+    //   ③ 专家档案 reflection.md 同步改写 —— prompt 有**两处**（本节点内联 system_prompt
+    //      与 reflection.md），只改一处不生效。
+    //
     // ⚠ 升版必做：不升版 DB 里会保留 v1 模板行，本次全部改动静默失效。
-    const REFLECTION_TEMPLATE_VERSION: i32 = 2;
+    const REFLECTION_TEMPLATE_VERSION: i32 = 3;
 
     // 版本检查：已有同版本或更新的记录则跳过
     if let Some(ref existing) =

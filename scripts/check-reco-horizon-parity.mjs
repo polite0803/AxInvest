@@ -181,27 +181,44 @@ const LOCALE_LANGS = ["ar", "de", "en-US", "es", "fr", "hi", "ja", "ko", "ru", "
 const LOCALES_DIR = "src/i18n/locales";
 
 /**
+ * 取 `const <name>… = [ … ];` 的数组体。
+ * 必须锚在 `= [` 上：直接找第一个 `[` 会先吃到**类型标注**（`[Cell; 24]`、
+ * `[(&str, &str, &str); 1]`）⇒ 解析到的是类型而不是数据，集合恒空而门照样绿。
+ * 名字前必须带**词边界**：`RENAMED_MATRIX` 里含 `MATRIX`，无边界时改名后的常量
+ * 仍被当成原契约解析 ⇒ 「判据失效」这一支永远不会红（本仓的负控夹具实测把它撞了出来，
+ * 与门 f 的 `get_klines(` 漏检同族形态）。
+ */
+function arrayBody(src, name) {
+  const m = src.match(new RegExp("(?:^|[^A-Za-z0-9_])" + name + "[^=]*=\\s*\\[([\\s\\S]*?)\\]\\s*;", "m"));
+  return m ? m[1] : "";
+}
+
+/**
  * 门 g：矩阵的每个理由码都必须在**全部 11 语言**里有文案。
  *
  * 为什么锁这条：`style_matrix` 的立项理由就是「不成立的格必须带机器可读的理由码」，
  * 而理由码只有后端有、前端没翻译时，UI 依旧只能退回原始码或空白 —— 契约写对了，
  * 呈现层仍然是歧义。缺席声明的**最后一公里**是翻译，本门把两者钉在一起。
+ *
+ * 扫描面只取 **MATRIX / MISFIT 声明体**：全文匹配 `Some("…")` 会把测试正文里的断言
+ * （例：`assert_eq!(absence_reason(…), Some("cell_is_active"))`）当成契约码，
+ * 门于是去要一个根本不存在的翻译 —— 红得毫无道理，且下次没人再看这条门。
  */
 function checkAbsenceReasonTranslated(src) {
   const violations = [];
   let scanned = 0;
   const absence = new Set();
-  for (const m of src.matchAll(/Some\("([a-z0-9_]+)"\)/g)) { absence.add(m[1]); }
+  const mat = arrayBody(src, "MATRIX");
+  if (mat.length === 0) {
+    violations.push(`${MATRIX_SRC}: 未解析到 MATRIX 声明体 ⇒ 判据失效`);
+  }
+  for (const m of mat.matchAll(/Some\("([a-z0-9_]+)"\)/g)) { absence.add(m[1]); }
   // 兜底码：矩阵漏格时后端也输出它，同样必须有文案（否则「漏格」这一最危险的状态没解释）
   absence.add("cell_not_in_matrix");
   const misfit = new Set();
-  // 锚在 `= [ … ];` 上：类型标注 `[(&str, &str, &str); 1]` 里也含 `[`/`;`，
-  // 只找第一个 `[` 会把**类型**当成数组来解析 ⇒ 错配码集合恒空（门静默失效）。
-  const mis = src.match(/MISFIT_DECLARATIONS[\s\S]*?=\s*\[([\s\S]*?)\]\s*;/);
-  if (mis) {
-    for (const m of mis[1].matchAll(/\(\s*"[a-z_]+",\s*"[a-z_]+",\s*"([a-z0-9_]+)"\s*\)/g)) {
-      misfit.add(m[1]);
-    }
+  const mis = arrayBody(src, "MISFIT_DECLARATIONS");
+  for (const m of mis.matchAll(/\(\s*"[a-z_]+",\s*"[a-z_]+",\s*"([a-z0-9_]+)"\s*\)/g)) {
+    misfit.add(m[1]);
   }
   for (const lang of LOCALE_LANGS) {
     let json;
@@ -232,6 +249,7 @@ function checkAbsenceReasonTranslated(src) {
 
 const SERENITY_WORKFLOW = "src-tauri/src/commands/stock_workflow/serenity.rs";
 const SERENITY_STRATEGY = `${STRATEGIES_DIR}/serenity.rs`;
+const RECO_RISK = "src-tauri/crates/analysis-engine/src/recommender/risk.rs";
 
 /**
  * 门 h：趋势智选**两条链**的风控口径必须同源（`PLAN-serenity-horizon-adaptation.md` S1/S2）。
@@ -244,7 +262,64 @@ const SERENITY_STRATEGY = `${STRATEGIES_DIR}/serenity.rs`;
  *  - 策略链的近 12 月涨幅过滤直接取 `klines.first()` ⇒ 次新股拿「上市以来涨幅」比 12 月阈值；
  *    K 线不足 / 取数失败时**静不过滤**，卡片照样显示「确定性财务验证通过」。
  */
-function checkSerenityRiskParity(workflowSrc, strategySrc) {
+/** 取 zh-CN 的 `serenityPanel.tierScopeHint` —— 档位口径的**声明面**（对照代码的产出面）。 */
+function serenityTierScopeHint() {
+  try {
+    const j = JSON.parse(read(`${LOCALES_DIR}/zh-CN.json`));
+    return ((j.serenityPanel ?? {}).tierScopeHint) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** 剥掉**整行注释**后再做契约比对。
+ *
+ * 实证（本轮）：反向锁 `price * serenity_stop_mult` 命中了我自己写的说明注释
+ * 「旧形态：本链按 `price * serenity_stop_mult` 出固定百分比止损」⇒ 门对一段
+ * 描述历史的散文报红。反向锁若能被注释触红，后果不是修代码而是删注释 —— 判据失效。
+ * 只剥整行注释、不碰行尾注释与字符串：门 f 的豁免标记 `reco-scale-exempt:` 恰恰写在
+ * 注释里，那边**必须**保留注释，所以本函数只在门 h 内使用。
+ */
+function stripFullLineComments(src) {
+  return src
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+}
+
+/**
+ * 门 i：面板「档位口径」文案必须与代码的档位集合一致。
+ *
+ * 为什么单独锁：Q2 裁定工作流链从恒 mid 改成 mid + long 各一行 —— 代码改了而
+ * `serenityPanel.tierScopeHint` 还写着「仅服务中线 / 落库 period 恒为 mid」，就是
+ * **UI 与产出互相矛盾的第二份真相**（用户按文案理解，数据却两档）。
+ * 同时锁住「不得把权威天数抄进文案」：28/90 的唯一来源是 `Period::default_holding_days`，
+ * 抄进 i18n 就成了改了权威表也不会跟着变的死数字（同 `check-horizon-weight-parity.mjs` ④）。
+ */
+function checkTierScopeHint(hint) {
+  const violations = [];
+  let scanned = 0;
+  scanned += 1;
+  if (!hint) { return { violations: ["tierScopeHint 为空 ⇒ 无从核对档位口径"], scanned }; }
+  for (const [pat, why] of [
+    [/恒为\s*mid/, "文案仍声明「落库恒为 mid」⇒ 与代码的 mid+long 双档矛盾"],
+    [/仅服务中线|只服务中\/长线/, "文案仍声明单档 ⇒ 与代码的 mid+long 双档矛盾"],
+  ]) {
+    scanned += 1;
+    if (pat.test(hint)) { violations.push(why); }
+  }
+  scanned += 1;
+  if (!/长线/.test(hint)) { violations.push("文案未声明服务长线 ⇒ Q2 的双档在 UI 上不可见"); }
+  scanned += 1;
+  if (/\b(28|90)\s*天/.test(hint)) {
+    violations.push("文案抄了权威天数（28/90）⇒ 与 `Period::default_holding_days` 两处真相");
+  }
+  return { violations, scanned };
+}
+
+function checkSerenityRiskParity(workflowSrcRaw, strategySrcRaw, riskSrc) {
+  const workflowSrc = stripFullLineComments(workflowSrcRaw);
+  const strategySrc = stripFullLineComments(strategySrcRaw);
   const violations = [];
   let scanned = 0;
   const require = (src, needle, why, label) => {
@@ -266,12 +341,65 @@ function checkSerenityRiskParity(workflowSrc, strategySrc) {
   for (const key of ["reco_stop_vol_mult", "reco_target_vol_mult", "reco_risk_budget_pct", "reco_round_trip_cost_pct"]) {
     require(workflowSrc, `"${key}"`, "风控参数键与荐股链不同源 ⇒ 同一票两链算出不同的 k1/k2/R", "工作流链");
   }
-  require(strategySrc, "reco-scale-exempt: calendar-window", "日历窗口取数未登记豁免 ⇒ 门 f 应当报红", "策略链");
   require(strategySrc, "bars < 252", "近12月过滤缺长度守卫 ⇒ 次新股按「上市以来涨幅」比 12 月阈值", "策略链");
   require(strategySrc, "gain_filter_skips", "过滤未执行没有状态记录 ⇒ 静默放行", "策略链");
   require(strategySrc, "涨幅过滤未生效", "未生效时未成句声明 ⇒ 卡片冒充「验证通过」", "策略链");
+  // Q1 裁定 B：建仓带 = 该档止损距离的一半，且**两链调同一个函数**（各自写一遍公式就是两套口径）
+  require(workflowSrc, "risk::entry_band_pct(", "工作流链建仓带没走 Q1=B 的唯一推导", "工作流链");
+  require(strategySrc, "risk::entry_band_pct(", "策略链建仓带没走 Q1=B 的唯一推导", "策略链");
+  forbid(workflowSrc, "price * (1.0 - serenity_entry_range)", "固定 ±range 建仓带又回来了", "工作流链");
+  forbid(strategySrc, "price * (1.0 - entry_range)", "固定 ±range 建仓带又回来了", "策略链");
+  require(workflowSrc, `"entrySource"`, "落库缺建仓带来源键 ⇒ 退化时无从声明", "工作流链");
+  // Q2 裁定：工作流链按 serenity 的出票档（mid + long）各落一行，与 style_matrix 的 serenity 行一致
+  require(workflowSrc, "for tier in serenity_tiers", "工作流链仍只出单档 ⇒ Q2 的双档没落地", "工作流链");
+  require(
+    workflowSrc,
+    "Period::Mid, axagent_harness::Period::Long",
+    "serenity 档位集合没读进落库循环 ⇒ 与 style_matrix 的 serenity 行脱钩",
+    "工作流链",
+  );
+  require(
+    workflowSrc,
+    "{tier_period}",
+    "reco_picks id 不带档位后缀 ⇒ mid/long 两行主键相撞，后者静默丢",
+    "工作流链",
+  );
+  // 建仓带公式的**唯一性**：定义一处、两链调用，链文件里不得再内联 `/ 2.0`
+  require(riskSrc, "pub fn entry_band_pct(", "建仓带没有唯一实现 ⇒ 两链必然各写一套", "risk 层");
+  forbid(workflowSrc, "stop_pct / 2.0", "工作流链内联推导建仓带（应调 risk::entry_band_pct）", "工作流链");
+  forbid(strategySrc, "stop_pct / 2.0", "策略链内联推导建仓带（应调 risk::entry_band_pct）", "策略链");
   return { violations, scanned };
 }
+
+/**
+ * 门 j：趋势智选**候选卡片**必须把档位与风控口径呈现出来（用户裁定 A）。
+ *
+ * 为什么单独锁：Q2 把产出层改成逐档两行后，呈现层若不跟着改，「四周期适配」就只存在于
+ * 数据库与历史弹窗里 —— 面板看上去和改之前一模一样（本轮实测就是这状态）。
+ * 三件事钉死：① 卡上有档徽标（且走全仓唯一档名键族，不许再造第三套）；
+ * ② 没有 `?? 20` 这种把「未标档」压成读数 20 的兜底（与 `Period::Mid` 的 28 天矛盾）；
+ * ③ 未标档必须走独立成句的 `timeBasisNoTier`，不是留空也不是猜档。
+ */
+function checkSerenityCardTierDisplay(cardSrc) {
+  const violations = [];
+  let scanned = 0;
+  const require = (needle, why) => {
+    scanned += 1;
+    if (!cardSrc.includes(needle)) { violations.push(`趋势智选卡片: 缺 ${needle} ⇒ ${why}`); }
+  };
+  const forbid = (needle, why) => {
+    scanned += 1;
+    if (cardSrc.includes(needle)) { violations.push(`趋势智选卡片: 仍含 ${needle} ⇒ ${why}`); }
+  };
+  require("horizonSuffix(", "档名没走唯一键族 stockAnalysis.timeHorizon*（会造出第三套档名）");
+  require('data-testid="serenity-tier"', "卡上没有档位徽标 ⇒ Q2 的逐档产出在面板不可见");
+  require("timeBasisNoTier", "未标档没有独立成句 ⇒ 会被读成「有窗口但没显示」");
+  require("holdingDays === undefined", "时间基线不分「有天数/无天数」两支 ⇒ 未标档也照渲一个窗口");
+  forbid("?? 20", "把「无天数」兜底成 20 天 ⇒ 与 mid 权威 28 天矛盾（落库侧已修，呈现层不得留）");
+  return { violations, scanned };
+}
+
+const SERENITY_CARD = "src/components/stock-analysis/SerenityCandidateCard.tsx";
 
 /** 读取 strategies/ 全部 .rs（门 a/f 的扫描对象）。selftest 与 main 共用同一份，避免两建面不同。 */
 function readStrategyFiles() {
@@ -376,16 +504,37 @@ function selftest() {
     {
       // 新加理由码却忘了补 11 语言翻译 —— 正是本轮要在动手前就被拦住的形态
       name: "g 负控（新不成立理由码没翻译）应红",
-      got: checkAbsenceReasonTranslated('("trend", "long", Some("brand_new_absence_code")),')
-        .violations.length,
+      got: checkAbsenceReasonTranslated(
+        'pub const MATRIX: [Cell; 1] = [("trend", "long", Some("brand_new_absence_code"))];',
+      ).violations.length,
       want: 11,
     },
     {
       name: "g 负控（新错配码没翻译）应红",
       got: checkAbsenceReasonTranslated(
-        'pub const MISFIT_DECLARATIONS: [(&str, &str, &str); 1] =\n    [("value", "ultra_short", "brand_new_misfit_code")];',
+        'pub const MATRIX: [Cell; 1] = [("trend", "long", None)];\n'
+          + 'pub const MISFIT_DECLARATIONS: [(&str, &str, &str); 1] =\n    [("value", "ultra_short", "brand_new_misfit_code")];',
       ).violations.length,
       want: 11,
+    },
+    {
+      // 判据失效自证：常量改名 / 声明体解析不到 ⇒ 必须红，不得静默当成「没有理由码要翻译」。
+      // 夹具刻意用 `RENAMED_MATRIX`（含 MATRIX 子串）——它同时锁住「名字必须带词边界」这件事。
+      // want=1 的依据：只报「判据失效」这一条；集合里剩下的 `cell_not_in_matrix` 是真表里
+      // **已有翻译**的兜底码，所以不该重复计红（12 是我第一次算错的样子，留此备注防再算错）。
+      name: "g 负控（MATRIX 声明体解析不到）应红",
+      got: checkAbsenceReasonTranslated('pub const RENAMED_MATRIX: [Cell; 1] = [("a", "b", None)];')
+        .violations.length,
+      want: 1,
+    },
+    {
+      // 本门的扫描面判据本身：契约码只从声明体取，测试正文里的 `Some("cell_is_active")`
+      // 是「出票」哨兵而不是理由码，不能拿它去要翻译（本仓实测被它红过一次）
+      name: "g 正控（哨兵码不出现在声明体）应绿",
+      got: checkAbsenceReasonTranslated(
+        'pub const MATRIX: [Cell; 1] = [("trend", "long", None)];\n#[cfg(test)] mod tests { fn t() { assert_eq!(reason, Some("cell_is_active")); } }',
+      ).violations.length,
+      want: 0,
     },
     {
       // 修复前的工作流链真实形态：固定乘数出止损/目标 + 落库无来源键（策略链用现盘文件，0 违规）
@@ -395,8 +544,9 @@ function selftest() {
           + "            (price * (1.0 - serenity_entry_range), price * serenity_stop_mult, price * serenity_target_mult)\n"
           + '        };\n                        "positionPct": 5.0,\n                        "riskNotes": [],\n',
         read(SERENITY_STRATEGY),
+        read(RECO_RISK),
       ).violations.length,
-      want: 14,
+      min: 15,
     },
     {
       name: "h 负控（策略链静默放行涨幅过滤）应红",
@@ -404,20 +554,71 @@ function selftest() {
         read(SERENITY_WORKFLOW),
         '        if let Ok(klines) = client.get_klines_with_adj(code, "daily", 252, None).await {\n'
           + "            if let Some(first) = klines.first() {\n                let gain = (latest - first.close) / first.close;\n            }\n        }\n",
+        read(RECO_RISK),
+      ).violations.length,
+      min: 3,
+    },
+    {
+      // 建仓带公式被抄回链文件（Q1=B 的「一处实现」塌成两处）⇒ 必须红
+      name: "h 负控（两链各自内联建仓带公式）应红",
+      got: checkSerenityRiskParity(
+        '                        let (entry_low, entry_high) = (price * (1.0 - used_stop_pct / 2.0), price * (1.0 + used_stop_pct / 2.0));\n',
+        '        let (entry_low, entry_high) = (price * (1.0 - entry_half_pct / 2.0), price);\n',
+        "",
+      ).violations.length,
+      min: 2,
+    },
+    {
+      name: "h 正控（当前两链形态）应绿",
+      got: checkSerenityRiskParity(
+        read(SERENITY_WORKFLOW),
+        read(SERENITY_STRATEGY),
+        read(RECO_RISK),
+      ).violations.length,
+      want: 0,
+    },
+    {
+      // Q2 落地前的真实文案（面板已随双档改造，这段是它当时的样子）：
+      // 单档声明 + 抄了权威表的 28 天 ⇒ 三条各红一次（恒为 mid、缺长线、抄天数）
+      name: "i 负控（文案仍声明单档且抄权威天数）应红",
+      got: checkTierScopeHint(
+        "档位口径：仅服务中线（瓶颈/政策/业绩催化剂以周-月兑现）；短/超短档不适用，落库 period 恒为 mid、持有期按该档权威 28 天。",
       ).violations.length,
       want: 4,
     },
     {
-      name: "h 正控（当前两链形态）应绿",
-      got: checkSerenityRiskParity(read(SERENITY_WORKFLOW), read(SERENITY_STRATEGY)).violations.length,
+      name: "i 负控（文案为空 ⇒ 无从核对）应红",
+      got: checkTierScopeHint("").violations.length,
+      want: 1,
+    },
+    {
+      name: "i 正控（当前 zh-CN 文案与双档一致）应绿",
+      got: checkTierScopeHint(serenityTierScopeHint()).violations.length,
+      want: 0,
+    },
+    {
+      // A 裁定前的卡片真实形态：`?? 20` 兜底 + 无档徽标 + 时间基线不分支
+      name: "j 负控（卡片无档徽标且兜底 20 天）应红",
+      got: checkSerenityCardTierDisplay(
+        '  const holdingDays = candidate.holdingDays ?? candidate.holding_days ?? 20;\n'
+          + '  {t("serenityPanel.timeBasis", { date: basisDate, days: holdingDays, until: basisUntil })}',
+      ).violations.length,
+      want: 5,
+    },
+    {
+      name: "j 正控（当前卡片形态）应绿",
+      got: checkSerenityCardTierDisplay(read(SERENITY_CARD)).violations.length,
       want: 0,
     },
   ];
   let bad = 0;
   for (const c of cases) {
-    const ok = c.got === c.want;
+    // `min`：只要求「至少红 N 条」——用于**多判据复合夹具**（逐条数违规数我连着算错两次，
+    // 每次算错都要回头改夹具而不是改生产，那种门会把人训练成调数字）。精确数仍用 `want`。
+    const ok = c.min === undefined ? c.got === c.want : c.got >= c.min;
     if (!ok) { bad += 1; }
-    console.log(`${ok ? "PASS" : "FAIL"} ${c.name}（got=${c.got} want=${c.want}）`);
+    const budget = c.min === undefined ? `want=${c.want}` : `min=${c.min}`;
+    console.log(`${ok ? "PASS" : "FAIL"} ${c.name}（got=${c.got} ${budget}）`);
   }
   // 门 d 的负控要求真文件确实可解析（解析不到 = 判据失效）
   const d = checkTierOrderSingleSource();
@@ -485,8 +686,19 @@ function main() {
     [
       "h 趋势智选两链风控同源",
       fs.existsSync(path.join(ROOT, SERENITY_WORKFLOW)) && fs.existsSync(path.join(ROOT, SERENITY_STRATEGY))
-        ? checkSerenityRiskParity(read(SERENITY_WORKFLOW), read(SERENITY_STRATEGY))
+        ? checkSerenityRiskParity(
+            read(SERENITY_WORKFLOW),
+            read(SERENITY_STRATEGY),
+            read(RECO_RISK),
+          )
         : { violations: [`${SERENITY_WORKFLOW} 或 策略链文件不存在 ⇒ 无从比对`], scanned: 0 },
+    ],
+    ["i 面板档位口径文案与代码一致", checkTierScopeHint(serenityTierScopeHint())],
+    [
+      "j 趋势智选卡片呈现档位与风控",
+      fs.existsSync(path.join(ROOT, SERENITY_CARD))
+        ? checkSerenityCardTierDisplay(read(SERENITY_CARD))
+        : { violations: [`${SERENITY_CARD} 不存在`], scanned: 0 },
     ],
   ];
 

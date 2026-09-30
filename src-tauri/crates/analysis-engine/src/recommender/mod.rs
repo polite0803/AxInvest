@@ -12,6 +12,7 @@ pub mod ic;
 pub mod indicators;
 pub mod notify;
 pub mod pool;
+pub mod reco_loop;
 pub mod risk;
 pub mod scale;
 pub mod scoring;

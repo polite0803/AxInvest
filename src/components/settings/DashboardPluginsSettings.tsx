@@ -2,6 +2,7 @@
 
 import { invoke } from "@/lib/invoke";
 import { message } from "@/lib/toast";
+import type { DashboardPluginInfoDto, PluginDashboardPanelDto } from "@/types";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Card, Empty, Spin, Switch, Table, Tag, Typography } from "antd";
 import { FolderOpen, PanelRight, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -9,26 +10,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 const { Text, Paragraph, Title } = Typography;
-
-interface DashboardPanel {
-  id: string;
-  title: string;
-  componentName: string;
-  position: "main" | "sidebar" | "header" | "footer";
-  size: "small" | "medium" | "large" | "fullWidth";
-  props?: Record<string, unknown>;
-  frontendEntry?: string;
-}
-
-interface DashboardPluginInfo {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  author?: string;
-  panels: DashboardPanel[];
-  enabled: boolean;
-}
 
 const POSITION_COLORS: Record<string, string> = {
   main: "blue",
@@ -39,7 +20,7 @@ const POSITION_COLORS: Record<string, string> = {
 
 export function DashboardPluginsSettings() {
   const { t } = useTranslation();
-  const [plugins, setPlugins] = useState<DashboardPluginInfo[]>([]);
+  const [plugins, setPlugins] = useState<DashboardPluginInfoDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -47,7 +28,7 @@ export function DashboardPluginsSettings() {
 
   const loadPlugins = useCallback(async () => {
     try {
-      const result = await invoke<DashboardPluginInfo[]>(
+      const result = await invoke<DashboardPluginInfoDto[]>(
         "dashboard_list_plugins",
       );
       setPlugins(Array.isArray(result) ? result : []);
@@ -61,7 +42,7 @@ export function DashboardPluginsSettings() {
   useEffect(() => {
     const load = async () => {
       try {
-        const result = await invoke<DashboardPluginInfo[]>(
+        const result = await invoke<DashboardPluginInfoDto[]>(
           "dashboard_list_plugins",
         );
         setPlugins(Array.isArray(result) ? result : []);
@@ -156,7 +137,7 @@ export function DashboardPluginsSettings() {
       dataIndex: "name",
       key: "name",
       width: 200,
-      render: (name: string, record: DashboardPluginInfo) => (
+      render: (name: string, record: DashboardPluginInfoDto) => (
         <div>
           <Text strong>{name}</Text>
           <br />
@@ -185,7 +166,7 @@ export function DashboardPluginsSettings() {
       dataIndex: "panels",
       key: "panels",
       width: 200,
-      render: (panels: DashboardPanel[]) => (
+      render: (panels: PluginDashboardPanelDto[]) => (
         <div className="flex flex-wrap gap-1">
           {panels.map((panel) => (
             <Tag
@@ -204,7 +185,7 @@ export function DashboardPluginsSettings() {
       dataIndex: "enabled",
       key: "enabled",
       width: 100,
-      render: (enabled: boolean, record: DashboardPluginInfo) => (
+      render: (enabled: boolean, record: DashboardPluginInfoDto) => (
         <Switch
           id="dashboard-plugins-settings-switch-50"
           checked={enabled}
@@ -216,7 +197,7 @@ export function DashboardPluginsSettings() {
       title: "",
       key: "actions",
       width: 120,
-      render: (_: unknown, record: DashboardPluginInfo) => (
+      render: (_: unknown, record: DashboardPluginInfoDto) => (
         <Button
           type="text"
           danger

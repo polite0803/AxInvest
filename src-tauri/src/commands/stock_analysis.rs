@@ -4461,16 +4461,25 @@ pub(crate) async fn reco_horizon_prior(
     Some(axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa))
 }
 
-/// 读取荐股实际消费的模板变量（含演化权重回流覆盖）。
+/// 读取荐股实际消费的模板变量（含闭环权重覆盖）。
 ///
-/// 单档 `recommend_stocks` 与多档 `recommend_stocks_all_periods` **必须**走同一个函数：
-/// 两处各写一份的话，「自学习闭环覆盖静态权重」这条规则只需要在一处漂移就会让
-/// 两条链算出不同的分（本仓已为这类「同源逻辑各写一份」付过代价）。
-async fn load_reco_served_vars(
-    state: &AppState,
+/// 单档 `recommend_stocks`、多档 `recommend_stocks_all_periods` 与 **cron 定时扫描**
+/// 三条入口**必须**走同一个函数（缺陷 D2 的教训：cron 曾读裸模板变量，闭环权重只对
+/// 手动刷新生效，两条链算两套分）。cron 拿不到 `State`，故实现抽在 db 层。
+///
+/// 覆盖源（Q3 归属分离，`PLAN-reco-reflection-closure.md`）：荐股权重**只**认荐股链
+/// 自己的已验证样本（`recommender::reco_loop`，留痕 trigger=`"reco-loop"`）。旧 B1
+/// 形态覆盖的是分析链「action→伪风格」回测权重（`map_action_to_strategy_id` 产物），
+/// 与分析链决策胜率同名不同义，已退出荐股键空间；分析链对荐股的影响只走逐档先验线。
+///
+/// 生效闸（Q2 shadow 起步）：`reco_ic_gate`（模板可调变量，缺省 `shadow`）——
+/// - `off`／`shadow` ⇒ 不覆盖（闭环照算照留痕，只是不进评分）；
+/// - `on` ⇒ 用 reco-loop 权重覆盖模板静态值。
+///   变量读不到按 `shadow`（新装/模板缺失时保持现状，不假装闭环已转正）。
+pub(crate) async fn load_reco_served_vars_db(
+    db: &sea_orm::DatabaseConnection,
 ) -> Result<Vec<(String, serde_json::Value)>, String> {
     // 读取 workflow template 变量用于 vendor 启用检测
-    let db = state.harness.db();
     let template = axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
         .one(db)
         .await
@@ -4483,25 +4492,38 @@ async fn load_reco_served_vars(
         None => Vec::new(),
     };
 
-    // ⚙️ B1: 演化权重回流 —— 用 strategy_weight_history 的最新演化权重覆盖模板静态权重，
-    // 让评分链（recommender::parse_strategy_weights → 按 (style, period) 缩放 confidence）
-    // 读到的就是「自学习闭环」真正调过的权重，而非 workflow_template 里写死的静态值。
-    //
-    // 覆盖时机判定：仅当演化表非空时才覆盖，否则回退模板静态值（全新安装、尚无演化记录时
-    // 保留原样，避免凭空抹掉模板里已有的权重配置）。
-    let evolved = axagent_analysis_engine::evolution_drift::load_current_weights(db).await?;
-    if evolved.is_empty() {
+    let gate = vars
+        .iter()
+        .find(|(k, _)| k == "reco_ic_gate")
+        .and_then(|(_, v)| v.as_str())
+        .unwrap_or("shadow");
+    if gate != "on" {
         return Ok(vars);
     }
-    // load_current_weights 返回 ((strategy_id, period), weight)，
+
+    let looped = axagent_analysis_engine::evolution_drift::load_current_weights_by_trigger(
+        db,
+        Some(axagent_analysis_engine::recommender::reco_loop::RECO_LOOP_TRIGGER),
+    )
+    .await?;
+    if looped.is_empty() {
+        return Ok(vars);
+    }
+    // load_current_weights_by_trigger 返回 ((strategy, period), weight)，
     // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
     let mut obj = serde_json::Map::new();
-    for ((s, p), w) in evolved {
+    for ((s, p), w) in looped {
         obj.insert(format!("{s}_{p}"), serde_json::json!(w));
     }
     let mut v = vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
     v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
     Ok(v)
+}
+
+async fn load_reco_served_vars(
+    state: &AppState,
+) -> Result<Vec<(String, serde_json::Value)>, String> {
+    load_reco_served_vars_db(state.harness.db()).await
 }
 
 /// 从 served_vars 取策略权重快照（用于回溯某次荐股时的权重配置）。
@@ -4671,6 +4693,7 @@ pub async fn reco_ic_stats(
 ) -> Result<axagent_analysis_engine::recommender::ic::RecoIcStats, String> {
     use axagent_analysis_engine::recommender::ic::{RecoIcRow, aggregate_reco_ic};
 
+    let served_vars = load_reco_served_vars(&state).await?;
     let rows = decision_validations::Entity::find()
         .all(state.harness.db())
         .await
@@ -4679,7 +4702,7 @@ pub async fn reco_ic_stats(
         .iter()
         .filter_map(|r| {
             let after = r.t_plus_n_price?;
-            if !(r.entry_price > 0.0) || !after.is_finite() || !r.entry_price.is_finite() {
+            if !after.is_finite() || !r.entry_price.is_finite() || r.entry_price <= 0.0 {
                 return None;
             }
             Some(RecoIcRow {
@@ -4691,7 +4714,111 @@ pub async fn reco_ic_stats(
             })
         })
         .collect();
-    Ok(aggregate_reco_ic(&samples))
+    let mut stats = aggregate_reco_ic(&samples);
+    stats.loop_view = reco_loop_view(state.harness.db(), &served_vars).await;
+    Ok(stats)
+}
+
+/// 闭环视图（Phase D 的表头与逐格状态来源）。
+///
+/// 观测面降级不得崩主表：样本/留痕查询失败 ⇒ 空格 + 照报 gate，与前端
+/// 「IC 取不到时矩阵照样出」同一取舍。
+pub(crate) async fn reco_loop_view(
+    db: &sea_orm::DatabaseConnection,
+    served_vars: &[(String, serde_json::Value)],
+) -> axagent_analysis_engine::recommender::reco_loop::RecoLoopView {
+    use axagent_analysis_engine::recommender::reco_loop::*;
+    let gate = served_vars
+        .iter()
+        .find(|(k, _)| k == "reco_ic_gate")
+        .and_then(|(_, v)| v.as_str().map(str::to_string))
+        .unwrap_or_else(|| "shadow".to_string());
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let samples = match load_reco_loop_samples(db).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("[reco_loop_view] {e}");
+            return RecoLoopView { gate, cells: Vec::new(), last_recalc_at: 0 };
+        },
+    };
+    let current = axagent_analysis_engine::evolution_drift::load_current_weights_by_trigger(
+        db,
+        Some(RECO_LOOP_TRIGGER),
+    )
+    .await
+    .unwrap_or_default();
+    let cells = compute_loop_cell_weights(&samples, &current, now_ms);
+    let last_recalc_at = axagent_entities::strategy_weight_history::Entity::find()
+        .filter(axagent_entities::strategy_weight_history::Column::Trigger.eq(RECO_LOOP_TRIGGER))
+        .order_by_desc(axagent_entities::strategy_weight_history::Column::AppliedAt)
+        .limit(1)
+        .one(db)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| r.applied_at)
+        .unwrap_or(0);
+    RecoLoopView { gate, cells, last_recalc_at }
+}
+
+/// 手动重算荐股闭环权重（shadow 期观察留痕、转正前 A/B 都走这里）。
+#[agent_command(
+    domain = "finance",
+    safety = Caution,
+    call_mode = StateInput,
+    description = "重算荐股闭环逐格权重"
+)]
+#[tauri::command]
+pub async fn recalc_reco_loop_weights(
+    state: State<'_, AppState>,
+    as_of_date: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let (written, cells) =
+        axagent_analysis_engine::recommender::reco_loop::recalc_and_persist_reco_loop(
+            state.harness.db(),
+            as_of_date.as_deref(),
+        )
+        .await?;
+    Ok(serde_json::json!({ "written": written, "cells": cells }))
+}
+
+/// 决策回测跑完后链式重算闭环权重（`PLAN-reco-reflection-closure.md` Phase E）。
+///
+/// 供 cron `decision-backtest` 分支复用：回测刚把新一批 T+N 验证写进
+/// decision_validations，闭环必须紧跟这批样本重算，否则「自动触发」只自动了一半。
+/// `reco_ic_gate=off` ⇒ 完全停用（连计算都不做）；shadow/on ⇒ 计算并留痕，
+/// 是否进评分由消费侧 `load_reco_served_vars_db` 的闸决定。
+pub(crate) async fn maybe_recalc_reco_loop(db: &sea_orm::DatabaseConnection) -> String {
+    let served_vars = match load_reco_served_vars_db(db).await {
+        Ok(v) => v,
+        Err(e) => {
+            let msg = format!("闭环重算跳过（读模板变量失败）: {e}");
+            tracing::warn!("[reco_loop] {msg}");
+            return msg;
+        },
+    };
+    let gate = served_vars
+        .iter()
+        .find(|(k, _)| k == "reco_ic_gate")
+        .and_then(|(_, v)| v.as_str())
+        .unwrap_or("shadow");
+    if gate == "off" {
+        return "闭环停用（gate=off），未重算".to_string();
+    }
+    match axagent_analysis_engine::recommender::reco_loop::recalc_and_persist_reco_loop(db, None)
+        .await
+    {
+        Ok((written, _)) => {
+            let msg = format!("闭环重算完成（gate={gate}），留痕 {written} 条");
+            tracing::info!("[reco_loop] {msg}");
+            msg
+        },
+        Err(e) => {
+            let msg = format!("闭环重算失败: {e}");
+            tracing::warn!("[reco_loop] {msg}");
+            msg
+        },
+    }
 }
 
 /// 读取最近一次 live 荐股结果(缓存) —— 智能荐股页打开时优先调此命令,
@@ -5414,6 +5541,47 @@ pub async fn run_reflection_now(
         },
     };
 
+    // 缺陷 ③ 修复：复盘档必须在**取行情之前**定下来。
+    //   原实现此处无条件取 "short" 快照（注释「手动反思以 short 为主周期」早于
+    //   review_horizon 引入），于是用户选 long 复盘时，落到 horizon=long 那一行的
+    //   actual_outcome / raw_return / alpha / holding_days 全是 short 窗口的数字。
+    //   留空 ⇒ 沿用该 (股票, 分析日) 已完成分析的公式主档（与批量反思同一口径）；
+    //   反查不到 ⇒ 明确失败要用户指定，**不再静默兜档**。
+    let review_horizon: String = match review_horizon {
+        Some(h) => h,
+        None => {
+            let primary_of_analysis = stock_analyses::Entity::find()
+                .filter(stock_analyses::Column::StockCode.eq(&stock_code))
+                .filter(stock_analyses::Column::AsOfDate.eq(&as_of_date))
+                .filter(stock_analyses::Column::Status.eq("completed"))
+                .order_by_desc(stock_analyses::Column::CreatedAt)
+                .one(db)
+                .await
+                .map_err(|e| {
+                    ErrorResponse::new(wf_err::INTERNAL)
+                        .with_detail(format!("查原分析失败: {e}"))
+                        .to_string()
+                })?
+                .and_then(|a| a.decision_time_horizon)
+                .and_then(|h| {
+                    h.parse::<axagent_analysis_engine::recommender::Period>()
+                        .ok()
+                        .map(|p| p.as_str().to_string())
+                });
+            match primary_of_analysis {
+                Some(h) => h,
+                None => {
+                    return Err(ErrorResponse::new(wf_err::VALIDATION_FAILED)
+                        .with_detail(format!(
+                            "{stock_code} 在 {as_of_date} 没有可据以定档的已完成分析，\
+                             请在「复盘周期」中指定一档（ultra_short/short/mid/long）"
+                        ))
+                        .to_string());
+                },
+            }
+        },
+    };
+
     // Bug 3 修复: 前端表单未让用户填 stockName(避免冗余输入),
     // 后端必须用 stock_code 反查股票名,确保反思历史 / RAG 索引都有正确名称。
     // 失败时回退到原值(空字符串),但不阻塞流程。
@@ -5456,26 +5624,28 @@ pub async fn run_reflection_now(
     )
     .await;
 
-    // 手动反思以 short 为主周期（无 original_analysis ⇒ 无法确定 primary_horizon）
-    let primary_snap = match snapshots_raw.get("short").and_then(|r| r.as_ref().ok()) {
+    // 取**本次复盘档**的行情快照（缺陷 ③：原实现写死 "short"）
+    let primary_snap = match snapshots_raw.get(&review_horizon).and_then(|r| r.as_ref().ok()) {
         Some(s) if s.trading_days >= 1 => s.clone(),
         Some(s) => {
             return Err(ErrorResponse::new(wf_err::INTERNAL)
                 .with_detail(format!(
                     "{stock_code} 在 {as_of_date} 之后仅 {} 个交易日的新行情，\
-                     不足以构成「分析结论 vs 实际行情」对比",
+                     不足以构成「{review_horizon} 分析结论 vs 实际行情」对比",
                     s.trading_days
                 ))
                 .to_string());
         },
         None => {
             return Err(ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("{stock_code} 实际行情获取失败，无法反思"))
+                .with_detail(format!(
+                    "{stock_code} 的 {review_horizon} 档实际行情获取失败，无法反思"
+                ))
                 .to_string());
         },
     };
     tracing::info!(
-        "[run_reflection_now] {} 行情快照: {} → {} 涨跌 {:+.2}%（净 {:+.2}%）回撤 {:.2}%",
+        "[run_reflection_now] {} 复盘档 {review_horizon} 行情快照: {} → {} 涨跌 {:+.2}%（净 {:+.2}%）回撤 {:.2}%",
         stock_code,
         primary_snap.entry_date,
         primary_snap.latest_date,
@@ -5514,8 +5684,8 @@ pub async fn run_reflection_now(
         &today,
         0u8, // min_confidence_threshold — 手动触发时全量
         &depth,
-        // 〇-B v2 第 4 条：显式复盘档（None ⇒ 沿用原分析的公式主档）
-        review_horizon.as_deref(),
+        // 〇-B v2 第 4 条：复盘档（已在取行情之前定档，None 分支已消除）
+        Some(review_horizon.as_str()),
         // [B2/B3 借鉴] 手动反思场景无 B1 阶段落盘的 pending row,传 None 走 INSERT 路径
         None,
         // [方向3] 手动反思也持久化 trajectory，为 ExperiencePipeline 提供数据源
@@ -5561,6 +5731,8 @@ pub async fn list_param_suggestions(
                 "stockCode": r.stock_code,
                 "stockName": r.stock_name,
                 "asOfDate": r.as_of_date,
+                // 一行建议 = 一个复盘档：不带档会让四档的建议在审核面板里看起来同源混池
+                "horizon": r.horizon,
                 "createdAt": r.created_at,
                 "suggestions": suggestions,
             }))
@@ -6035,20 +6207,21 @@ pub async fn manual_recalc_strategy_weights(
 
 /// 把"当前生效的策略权重"组装成 reco_strategy_weights JSON,
 /// 由前端 recommendStocks 时一并传给模板 vars。
+///
+/// 现改为**投影 `load_reco_served_vars_db` 的实际输出**：前端展示什么，评分链就消费什么。
+/// 旧形态直接读 `load_current_weights`（未按 trigger 过滤、未过闸），会与 gate/换源语义漂移
+/// ——面板显示一套权重、荐股实际用另一套（`PLAN-reco-reflection-closure.md` Q3 归属分离）。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取荐股策略权重")]
 #[tauri::command]
 pub async fn get_reco_strategy_weights(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let db = state.harness.db();
-    let weights = axagent_analysis_engine::evolution_drift::load_current_weights(db).await?;
-    // 转成 JSON 对象 {"trend_short": 1.2, ...}
-    let mut obj = serde_json::Map::new();
-    for ((s, p), w) in weights {
-        let key = format!("{s}_{p}");
-        obj.insert(key, serde_json::json!(w));
-    }
-    Ok(serde_json::Value::Object(obj))
+    let served = load_reco_served_vars(&state).await?;
+    Ok(served
+        .into_iter()
+        .find(|(k, _)| k == "reco_strategy_weights")
+        .map(|(_, v)| v)
+        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())))
 }
 
 // ─── P2-6: RealtimeMonitor T+0 自动重跑配置 ───

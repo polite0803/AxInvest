@@ -175,6 +175,59 @@ function checkLabelsCarryNoDayRange(localeObjs) {
   return errs;
 }
 
+/** ⑤ pending 行只能由共享构造器建（三处建点各抄默认值 = 缺陷 ④ 的成因）。 */
+const PENDING_SITES = [
+  "src-tauri/src/commands/stock_workflow/core.rs",
+  "src-tauri/src/commands/stock_workflow/hooks.rs",
+  "src-tauri/src/bin/axagent-batch-rerun.rs",
+];
+const REFLECTION_RS = "src-tauri/src/commands/stock_workflow/reflection.rs";
+const REFLECTION_MD = "src-tauri/agency_experts/stock-analysis/reflection.md";
+const SETUP_MOD = "src-tauri/src/commands/stock_analysis_setup/mod.rs";
+
+function checkPendingBuilderSingleSource(read) {
+  const errs = [];
+  const builder = read(REFLECTION_RS);
+  if (builder === null) { return [`⑤ ${REFLECTION_RS} 读不到 ⇒ 判据失效`]; }
+  if (!builder.includes("pub fn build_pending_reflection_rows_for")) {
+    errs.push("⑤ 共享构造器 build_pending_reflection_rows_for 不见了 ⇒ 判据失去锚点（改名请同步本门）");
+  }
+  for (const f of PENDING_SITES) {
+    const src = read(f);
+    if (src === null) { errs.push(`⑤ ${f} 读不到 ⇒ 该建点已失踪还是搬家？`); continue; }
+    const n = (src.match(/stock_reflections::ActiveModel\s*\{/g) ?? []).length;
+    if (n > 0) {
+      errs.push(`⑤ ${f} 有 ${n} 处 stock_reflections::ActiveModel { 字面量构造 ⇒ 必须走 build_pending_reflection_rows（否则三处默认值/档口径再度分叉）`);
+    }
+  }
+  return errs;
+}
+
+/** ⑥ 反思 prompt 必须「单档」：复盘档进了 prompt，且不许再要求跨档产出。 */
+const BANNED_CROSS_HORIZON = [/对四个周期分别判断/, /必须.*四.*周期.*分别/];
+
+function checkReflectionPromptSingleHorizon(read) {
+  const errs = [];
+  const md = read(REFLECTION_MD);
+  const mod = read(SETUP_MOD);
+  if (md === null) { return [`⑥ ${REFLECTION_MD} 读不到 ⇒ 判据失效`]; }
+  if (mod === null) { return [`⑥ ${SETUP_MOD} 读不到 ⇒ 判据失效`]; }
+  if (!md.includes("{{review_horizon}}")) {
+    errs.push("⑥ reflection.md 未引用 {{review_horizon}} ⇒ 复盘档没进生成层（缺陷 ① 复发）");
+  }
+  for (const re of BANNED_CROSS_HORIZON) {
+    if (re.test(md)) {
+      errs.push(`⑥ reflection.md 命中跨档产出指令 ${re} ⇒ 与「一次反思只复盘一档」裁定冲突（缺陷 ②）`);
+    }
+  }
+  // 两处 prompt 同源：节点内联 system_prompt 与 input_mapping 都要接上复盘档
+  const hits = (mod.match(/review_horizon/g) ?? []).length;
+  if (hits < 2) {
+    errs.push(`⑥ ${SETUP_MOD} 仅 ${hits} 处引用 review_horizon（system_prompt + input_mapping 至少各 1）⇒ 漏一处即 VARIABLE_NOT_FOUND`);
+  }
+  return errs;
+}
+
 /** 读 11 个语言里 reflection 段的四个档名（解析不出 ⇒ 护栏）。 */
 function readHorizonLabels() {
   const dir = path.join(ROOT, LOCALE_DIR);
@@ -207,6 +260,15 @@ function run() {
     console.log(`❌ 权威天数表解析失败: ${auth.reason}`);
     return 2;
   }
+  const readRel = (rel) => {
+    try { return fs.readFileSync(path.join(ROOT, rel), "utf8"); } catch { return null; }
+  };
+  const builderErrs = checkPendingBuilderSingleSource(readRel);
+  const promptErrs = checkReflectionPromptSingleHorizon(readRel);
+  if (builderErrs.length || promptErrs.length) {
+    [...builderErrs, ...promptErrs].forEach((e) => console.log(`❌ ${e}`));
+    return 2;
+  }
   const labels = readHorizonLabels();
   const labelErrs = checkLabelsCarryNoDayRange(labels);
   if (Object.keys(labels).length < 11) {
@@ -233,6 +295,9 @@ function run() {
  * 负控用磁盘上的当前形态（应无问题）。
  */
 function selftest() {
+  const readRelDisk = (rel) => {
+    try { return fs.readFileSync(path.join(ROOT, rel), "utf8"); } catch { return null; }
+  };
   const be = parseBackend(fs.readFileSync(path.join(ROOT, BACKEND), "utf8"));
   const fe = parseFrontend(fs.readFileSync(path.join(ROOT, FRONTEND), "utf8"));
   if (!be.ok || !fe.ok) {
@@ -272,6 +337,46 @@ function selftest() {
     allBad[lang] = { horizonUltraShort: "超短线 (1-3天)", horizonShort: "短线 (5天)", horizonMid: "中线 (28天)", horizonLong: "长线 (90天)" };
   }
   cases.push({ name: "④规模 11 语言全抄 ⇒ 必须报 44 处（不是只报第一处）", got: checkLabelsCarryNoDayRange(allBad).length, want: 44 });
+
+  // ⑤/⑥ 新门自证：用**修复前的真实形态**喂进去，必须红
+  const fakeRead = (map) => (rel) => (rel in map ? map[rel] : null);
+  const cleanSites = Object.fromEntries(PENDING_SITES.map((f) => [f, "let x = 1;"]));
+  cases.push({
+    name: "⑤负控 三建点均走共享构造器 ⇒ 应无问题",
+    got: checkPendingBuilderSingleSource(fakeRead({ [REFLECTION_RS]: "pub fn build_pending_reflection_rows_for", ...cleanSites })).length,
+    want: 0,
+  });
+  cases.push({
+    name: "⑤正控 某建点退回字面量构造 ⇒ 必须报 1 处",
+    got: checkPendingBuilderSingleSource(
+      fakeRead({
+        [REFLECTION_RS]: "pub fn build_pending_reflection_rows_for",
+        [PENDING_SITES[0]]: "let _ = stock_reflections::ActiveModel { id: Set(x) };",
+        ...PENDING_SITES.slice(1).reduce((m, f) => ({ ...m, [f]: "" }), {}),
+      }),
+    ).length,
+    want: 1,
+  });
+  cases.push({
+    name: "⑤护栏 构造器改名/失踪 ⇒ 必须报（判据不能静默放行）",
+    got: checkPendingBuilderSingleSource(fakeRead({ [REFLECTION_RS]: "", ...cleanSites })).length,
+    want: 1,
+  });
+  cases.push({
+    name: "⑥负控 磁盘现状 ⇒ 应无问题",
+    got: checkReflectionPromptSingleHorizon(readRelDisk).length,
+    want: 0,
+  });
+  cases.push({
+    name: "⑥正控 还原批次 3 的跨档指令 ⇒ 必须报 4 处（2 条跨档指令 + 缺 review_horizon + 内联 prompt 未接）",
+    got: checkReflectionPromptSingleHorizon(
+      fakeRead({
+        [REFLECTION_MD]: "1. 逐周期分析：必须对四个周期分别判断决策对错。",
+        [SETUP_MOD]: "input_mapping 只有 actual_market_text",
+      }),
+    ).length,
+    want: 4,
+  });
 
   cases.push({
     name: "④护栏 权威表解析失效（改名）⇒ 必须 ok:false",

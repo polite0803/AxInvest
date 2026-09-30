@@ -897,6 +897,20 @@ export interface RecoMatrixCell {
   dbStyles: string[];
 }
 
+/** 一格闭环态（后端 `recommender::reco_loop::LoopCellResult`，Phase D）。
+ *  「未校准」与「已校准」必须分句 —— 没校准的格不得在 UI 上看起来像校准过。 */
+export interface RecoLoopCell {
+  /** 矩阵名目（`serenity`，非落库写法） */
+  style: string;
+  period: string;
+  status: "insufficient_samples" | "ic_unmeasurable" | "not_in_matrix" | "ic_non_negative" | "demoted_negative_ic";
+  rankIc: number | null;
+  samples: number;
+  winRate: number | null;
+  oldWeight: number;
+  newWeight: number;
+}
+
 /** `reco_ic_stats` 的响应（Phase R-E：只报数，不回写权重）。 */
 export interface RecoIcStats {
   styles: RecoStyleIc[];
@@ -905,6 +919,16 @@ export interface RecoIcStats {
   totalSamples: number;
   /** 24 格契约视图：矩阵行/格集合与「为什么不成立」的唯一来源 */
   matrix?: RecoMatrixCell[];
+  /** 24 格闭环视图：权重来源、生效闸状态与逐格缺席理由（`recommender::reco_loop`） */
+  loop?: RecoLoopView;
+}
+
+/** 闭环整体视图：逐格结果 + 生效闸（off/shadow/on）。 */
+export interface RecoLoopView {
+  gate: string;
+  cells: RecoLoopCell[];
+  /** 最近一次闭环重算时刻（ms）；0 = 从未重算 */
+  lastRecalcAt: number;
 }
 
 // ── 决策时间线类型 ──

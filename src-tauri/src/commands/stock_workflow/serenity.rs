@@ -965,20 +965,19 @@ pub async fn run_serenity_screening(
     // 未传时退化为 workflow id（旧调用方仍可用）。
     let event_run_id = run_id.clone().unwrap_or_else(|| wf_id.clone());
 
-    // ── 〇-B v2 / Phase 6：趋势智选的档位口径**显式声明** ──
-    // `SerenityStrategy` 只注册在 Mid/Long（`recommender/strategies/serenity.rs:22-29`
-    // 「只做中长期」，瓶颈/政策/业绩类催化剂以周-月展开），本工作流落库档因此固定为中线。
-    // 此前这里是**裸字面量** `"mid"` / 止损 ×0.80 / 目标 ×1.30 / 持有 20 天：
+    // ── 〇-B v2 / Phase 6 / Q2 裁定：趋势智选服务 **mid + long 两档**，短/超短按设计不做 ──
+    // 档位集合的唯一权威是 `recommender/style_matrix.rs` 的 serenity 行（= {mid, long}），
+    // 与策略链注册表同源（`SerenityStrategy::mid()/long()`，`strategies/serenity.rs:22-29`
+    // 「只做中长期」，瓶颈/政策/业绩类催化剂以周-月展开）。
+    // 旧形态本链**恒 mid 一档**，而策略链已注册两档 ⇒ 同一个「趋势智选」名目下
+    // 两条链的档位集合不一致（Q2 裁定：收口为两档各落一行，而不是把策略链砍成一档）。
+    // 再往前这里是裸字面量 `"mid"` / 止损 ×0.80 / 目标 ×1.30 / 持有 20 天：
     //   ① 20 天与 `Period::Mid` 的 28 天**口径互相矛盾**（同一行 reco_picks 里
     //      period=mid 却 holding_days=20，反思按天判成熟即错位）；
     //   ② 乘数与策略包变量（`serenity_*_mult`，可在设置面板改）分叉 —— 面板调了、
     //      工作流落库价仍然按老常数算，「可配置」形同虚设。
-    // 现统一：乘数读同一份模板变量，天数读 `Period::default_holding_days` 唯一权威表。
-    // ⚠ 短/超短档**不支持**是产品定位而非遗漏：不产该档记录，
-    //   也不把别的档静默标成 mid（G4「退化即声明」）。
-    let serenity_tier = axagent_harness::Period::Mid;
-    let serenity_tier_period = serenity_tier.as_str().to_string();
-    let serenity_tier_days = serenity_tier.default_holding_days() as i64;
+    // ⚠ 短/超短档**不支持**是产品定位而非遗漏：不产该档记录，也不把别的档静默标成 mid。
+    let serenity_tiers = [axagent_harness::Period::Mid, axagent_harness::Period::Long];
     let read_var = |name: &str, default: f64| -> f64 {
         variables
             .as_ref()
@@ -995,8 +994,13 @@ pub async fn run_serenity_screening(
     let reco_target_k2 = read_var("reco_target_vol_mult", 2.0);
     let reco_risk_budget_pct = read_var("reco_risk_budget_pct", 1.5);
     let reco_round_trip_cost_pct = read_var("reco_round_trip_cost_pct", 0.6);
+    let serenity_tier_desc = serenity_tiers
+        .iter()
+        .map(|t| format!("{}({}天)", t.as_str(), t.default_holding_days()))
+        .collect::<Vec<_>>()
+        .join("+");
     tracing::info!(
-        "[serenity] 档位口径: period={serenity_tier_period} days={serenity_tier_days}          stop×{serenity_stop_mult} target×{serenity_target_mult} entry±{serenity_entry_range}          （短/超短档不适用：SerenityStrategy 仅注册 Mid/Long）"
+        "[serenity] 档位口径: {serenity_tier_desc}          止损/目标=k·σ_daily·√h（k1={reco_stop_k1} k2={reco_target_k2}），σ 不可得退 stop×{serenity_stop_mult}/target×{serenity_target_mult}          建仓带=该档止损距离一半（Q1=B）          （短/超短档不适用：serenity 行按设计不做）"
     );
 
     // 3. 进度回调
@@ -1381,65 +1385,20 @@ pub async fn run_serenity_screening(
                     let client = &state.astock_client;
                     let quote = client.get_quote(code).await.ok();
                     let price = quote.as_ref().map(|q| q.price).unwrap_or(0.0);
-                    // ── 止损/目标/仓位：与荐股策略链**同一实现**（Phase R-D 口径合流）──
-                    // 旧形态：本链按 `price × serenity_stop_mult` 出固定百分比止损，而策略链经
-                    // `recommender/mod.rs` 的 `k1·σ_daily·√h` + 风险预算仓位 ⇒ 同一张 reco_picks、
-                    // 同一个趋势智选历史列表里并存两套风控口径，且不声明哪一套不是波动率口径。
-                    let h_days = serenity_tier.default_holding_days() as usize;
+                    // ── 止损/目标/仓位/建仓带：与荐股策略链**同一实现**（Phase R-D + Q1/Q2）──
+                    // 旧形态：本链按 `price * serenity_stop_mult` 出固定百分比止损，且恒 mid 一档 ⇒
+                    // 同一张 reco_picks、同一个趋势智选历史列表里并存两套风控口径 + 两套档位集合。
+                    // 现：每个候选按 serenity 的出票档（mid、long）**各落一行**，h 取该档权威天数，
+                    // 止损/目标 = k·σ_daily·√h，仓位 = min(候选上限, 风险预算) × 成本拖累，
+                    // 建仓带 = 该档止损距离的一半（Q1 裁定 B）。
+                    // σ 不可得 ⇒ 显式退回固定乘数并标来源，不伪装成波动率口径。
                     let closes =
                         axagent_analysis_engine::recommender::risk::daily_closes(client, code)
                             .await;
-                    let vol_stop = closes.as_ref().and_then(|closes| {
-                        axagent_analysis_engine::recommender::risk::stop_pct(
-                            closes,
-                            h_days,
-                            reco_stop_k1,
-                        )
-                    });
-                    let vol_target = closes.as_ref().and_then(|closes| {
-                        axagent_analysis_engine::recommender::risk::target_pct(
-                            closes,
-                            h_days,
-                            reco_target_k2,
-                        )
-                    });
-                    // σ 不可得 ⇒ 显式退回固定乘数并标来源，不伪装成波动率口径
-                    let band_stop_pct = (1.0 - serenity_stop_mult) * 100.0;
-                    let band_target_pct = (serenity_target_mult - 1.0) * 100.0;
-                    let (used_stop_pct, stop_src) = match vol_stop {
-                        Some(v) => (v, "vol"),
-                        None => (band_stop_pct, "fallback_pct"),
-                    };
-                    let used_target_pct = vol_target.unwrap_or(band_target_pct);
-                    let (entry_low, entry_high, stop_loss, target_price) = if price > 0.0 {
-                        (
-                            price * (1.0 - serenity_entry_range),
-                            price * (1.0 + serenity_entry_range),
-                            price * (1.0 - used_stop_pct / 100.0),
-                            price * (1.0 + used_target_pct / 100.0),
-                        )
-                    } else {
-                        tracing::warn!("[serenity] {}: 行情获取失败，价格字段保持 0", code);
-                        (0.0, 0.0, 0.0, 0.0)
-                    };
-                    // 仓位 = min(候选上限, 该档风险预算) × 成本拖累。
                     // 候选的 positionPct **已是**最终建议权重（不是策略 base），故不再乘置信 ——
                     // 乘了就是把「策略链 base×置信」的公式套到已经乘过置信的数上，二次折扣。
                     let cap_position = c.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(5.0);
-                    let budget = axagent_analysis_engine::recommender::risk::risk_budget_position(
-                        used_stop_pct,
-                        reco_risk_budget_pct,
-                    );
-                    let (pos_before_drag, pos_src) = match budget {
-                        Some(b) => (cap_position.min(b), "risk_budget"),
-                        None => (cap_position, "fallback_base"),
-                    };
-                    let drag = axagent_analysis_engine::recommender::risk::cost_drag_factor(
-                        used_target_pct,
-                        reco_round_trip_cost_pct,
-                    );
-                    let position_pct = (pos_before_drag * drag).clamp(0.0, 95.0);
-                    let mut pick_reasons: Vec<String> = c
+                    let reasons_base: Vec<String> = c
                         .get("reasons")
                         .and_then(|v| v.as_array())
                         .map(|a| {
@@ -1448,82 +1407,146 @@ pub async fn run_serenity_screening(
                                 .collect::<Vec<_>>()
                         })
                         .unwrap_or_default();
-                    pick_reasons.push(format!(
-                        "风控: 止损 {used_stop_pct:.2}% ({stop_src}) · 目标 {used_target_pct:.2}% · 持有 {h_days} 天 · 仓位上限 {cap_position:.1}% → 风险预算 {:.1}% × 成本拖累 {drag:.2}",
-                        budget.unwrap_or(0.0)
-                    ));
-                    // 逐档先验只在荐股策略链合成（`mod.rs` 的 R-C 段）；本链 confidence 是工作流
-                    // 候选评分 ⇒ 沿用既有词表 `absent` 声明「本次未吸收该档先验」，不新造说法。
-                    let mut pick_risk_notes: Vec<String> = Vec::new();
-                    if stop_src == "fallback_pct" {
-                        pick_risk_notes.push(format!(
-                            "⚠ 未取到日线波动率 ⇒ 止损退回固定乘数 ×{serenity_stop_mult}（stopSource=fallback_pct，非波动率口径）"
-                        ));
-                    }
-                    // 候选自带持有期若与该档权威天数不符 ⇒ 按权威落库并**声明覆盖**，
-                    // 不静默改写（旧缺陷形态：period=mid 却 holding_days=20，反思按天判成熟即错位）。
                     let holding_days_input = c.get("holdingDays").and_then(|v| v.as_i64());
-                    let holding_days = match holding_days_input {
-                        Some(d) if d != serenity_tier_days => {
-                            pick_reasons.push(format!(
-                                "候选持有期 {d} 天与 {serenity_tier_period} 档权威 {serenity_tier_days} 天不一致 ⇒ 按权威落库"
+                    let band_stop_pct = (1.0 - serenity_stop_mult) * 100.0;
+                    let band_target_pct = (serenity_target_mult - 1.0) * 100.0;
+                    for tier in serenity_tiers {
+                        let tier_period = tier.as_str();
+                        let tier_days = tier.default_holding_days() as i64;
+                        let h_days = tier_days as usize;
+                        let vol_stop = closes.as_ref().and_then(|closes| {
+                            axagent_analysis_engine::recommender::risk::stop_pct(
+                                closes,
+                                h_days,
+                                reco_stop_k1,
+                            )
+                        });
+                        let vol_target = closes.as_ref().and_then(|closes| {
+                            axagent_analysis_engine::recommender::risk::target_pct(
+                                closes,
+                                h_days,
+                                reco_target_k2,
+                            )
+                        });
+                        let (used_stop_pct, stop_src) = match vol_stop {
+                            Some(v) => (v, "vol"),
+                            None => (band_stop_pct, "fallback_pct"),
+                        };
+                        let used_target_pct = vol_target.unwrap_or(band_target_pct);
+                        // Q1=B：建仓带 = 该档止损距离的一半 —— 推导收在 `risk::entry_band_pct`，
+                        // 与荐股策略链共用同一个函数（两链各自写一遍正是本轮要消灭的形态）。
+                        // 连止损乘数都不可用时才退模板 ±range，来源照实标出。
+                        let (entry_half_pct, entry_src) =
+                            axagent_analysis_engine::recommender::risk::entry_band_pct(
+                                vol_stop,
+                                band_stop_pct,
+                                serenity_entry_range * 100.0,
+                            );
+                        let (entry_low, entry_high, stop_loss, target_price) = if price > 0.0 {
+                            (
+                                price * (1.0 - entry_half_pct / 100.0),
+                                price * (1.0 + entry_half_pct / 100.0),
+                                price * (1.0 - used_stop_pct / 100.0),
+                                price * (1.0 + used_target_pct / 100.0),
+                            )
+                        } else {
+                            tracing::warn!("[serenity] {code}: 行情获取失败，价格字段保持 0");
+                            (0.0, 0.0, 0.0, 0.0)
+                        };
+                        let budget =
+                            axagent_analysis_engine::recommender::risk::risk_budget_position(
+                                used_stop_pct,
+                                reco_risk_budget_pct,
+                            );
+                        let (pos_before_drag, pos_src) = match budget {
+                            Some(b) => (cap_position.min(b), "risk_budget"),
+                            None => (cap_position, "fallback_base"),
+                        };
+                        let drag = axagent_analysis_engine::recommender::risk::cost_drag_factor(
+                            used_target_pct,
+                            reco_round_trip_cost_pct,
+                        );
+                        let position_pct = (pos_before_drag * drag).clamp(0.0, 95.0);
+                        let mut pick_reasons = reasons_base.clone();
+                        pick_reasons.push(format!(
+                            "风控({tier_period} {h_days} 天): 止损 {used_stop_pct:.2}% ({stop_src}) · 目标 {used_target_pct:.2}% · 建仓带 ±{entry_half_pct:.2}% ({entry_src}) · 仓位上限 {cap_position:.1}% → 风险预算 {:.1}% × 成本拖累 {drag:.2}",
+                            budget.unwrap_or(0.0)
+                        ));
+                        // 逐档先验只在荐股策略链合成（`mod.rs` 的 R-C 段）；本链 confidence 是工作流
+                        // 候选评分 ⇒ 沿用既有词表 `absent` 声明「本次未吸收该档先验」，不新造说法。
+                        let mut pick_risk_notes: Vec<String> = Vec::new();
+                        if stop_src == "fallback_pct" {
+                            pick_risk_notes.push(format!(
+                                "⚠ 未取到日线波动率 ⇒ {tier_period} 档止损退回固定乘数 ×{serenity_stop_mult}（stopSource=fallback_pct，非波动率口径）"
                             ));
-                            serenity_tier_days
-                        },
-                        Some(d) => d,
-                        None => serenity_tier_days,
-                    };
-                    let pick_data_val = serde_json::json!({
-                        "stockCode": code,
-                        "stockName": name,
-                        "style": "serenity",
-                        "strategy_type": c.get("strategy_type").and_then(|v| v.as_str()).unwrap_or("bottleneck"),
-                        "period": serenity_tier_period,
-                        "price": price,
-                        "entryLow": entry_low,
-                        "entryHigh": entry_high,
-                        "stopLoss": stop_loss,
-                        "targetPrice": target_price,
-                        "positionPct": position_pct,
-                        "holdingDays": holding_days,
-                        "confidence": conf,
-                        "reasons": pick_reasons,
-                        "riskNotes": pick_risk_notes,
-                        "secondaryStyles": [],
-                        // 三个风控来源键与 `recommender/types.rs` 的 RecoPick 同名同义（camelCase）
-                        "stopSource": stop_src,
-                        "positionSource": pos_src,
-                        "priorSource": "absent",
-                        "synthetic": false,
-                    });
-                    // 持久化到 reco_picks
-                    // 修复：style 统一设置为 "serenity"，便于前端查询历史时过滤
-                    // 策略类型信息（bottleneck/policy/earnings 等）已存储在 pick_data.strategy_type 中
-                    let pick_id = format!("serenity-{ts_ms}-{i}-{code}");
-                    let pick = reco_picks::ActiveModel {
-                        id: Set(pick_id),
-                        generated_at: Set(now_str.clone()),
-                        period: Set(serenity_tier_period.clone()),
-                        stock_code: Set(code.to_string()),
-                        stock_name: Set(name.to_string()),
-                        style: Set("serenity".to_string()),
-                        confidence: Set(conf),
-                        synthetic: Set(0),
-                        seed_pool_json: Set(Some(serde_json::to_string(c).unwrap_or_default())),
-                        strategy_weights_json: Set(None),
-                        pick_data: Set(Some(
-                            serde_json::to_string(&pick_data_val).unwrap_or_default(),
-                        )),
-                        created_at: Set(now_str.clone()),
-                    };
-                    if let Err(e) = pick.insert(db).await {
-                        tracing::warn!("[serenity] 写入 reco_picks 失败 ({}): {e}", code);
-                        persistence_success = false;
-                        // 只保留**首个**失败的结构化三元组；多只失败时上方逐只 `warn!` 已记录全量原因。
-                        // 此前为覆盖赋值 ⇒ 多只失败只留最后一只的整句，既不完整又不可本地化。
-                        if persistence_stock_code.is_empty() {
-                            persistence_stock_code = code.to_string();
-                            persistence_detail = e.to_string();
+                        }
+                        // 持有期只认该档权威天数（旧缺陷形态：period=mid 却 holding_days=20，
+                        // 反思按天判成熟即错位）。候选自带值与当前档不符 ⇒ 声明后按权威落库，
+                        // 不静默改写；另一档更是无从沿用。
+                        let holding_days = if holding_days_input == Some(tier_days) {
+                            tier_days
+                        } else {
+                            if let Some(d) = holding_days_input {
+                                pick_reasons.push(format!(
+                                    "候选持有期 {d} 天与 {tier_period} 档权威 {tier_days} 天不一致 ⇒ 按权威落库"
+                                ));
+                            }
+                            tier_days
+                        };
+                        let pick_data_val = serde_json::json!({
+                            "stockCode": code,
+                            "stockName": name,
+                            "style": "serenity",
+                            "strategy_type": c.get("strategy_type").and_then(|v| v.as_str()).unwrap_or("bottleneck"),
+                            "period": tier_period,
+                            "price": price,
+                            "entryLow": entry_low,
+                            "entryHigh": entry_high,
+                            "stopLoss": stop_loss,
+                            "targetPrice": target_price,
+                            "positionPct": position_pct,
+                            "holdingDays": holding_days,
+                            "confidence": conf,
+                            "reasons": pick_reasons,
+                            "riskNotes": pick_risk_notes,
+                            "secondaryStyles": [],
+                            // 风控来源键与 `recommender/types.rs` 的 RecoPick 同名同义（camelCase）
+                            "stopSource": stop_src,
+                            "positionSource": pos_src,
+                            "entrySource": entry_src,
+                            "priorSource": "absent",
+                            "synthetic": false,
+                        });
+                        // 持久化到 reco_picks。style 统一为 "serenity" 便于历史过滤；
+                        // 策略子类型（bottleneck/policy/earnings…）仍在 pick_data.strategy_type 里。
+                        // id 带档位后缀：一次运行每票产 mid/long 两行，无后缀会主键相撞（后者静默丢）
+                        let pick_id = format!("serenity-{ts_ms}-{i}-{code}-{tier_period}");
+                        let pick = reco_picks::ActiveModel {
+                            id: Set(pick_id),
+                            generated_at: Set(now_str.clone()),
+                            period: Set(tier_period.to_string()),
+                            stock_code: Set(code.to_string()),
+                            stock_name: Set(name.to_string()),
+                            style: Set("serenity".to_string()),
+                            confidence: Set(conf),
+                            synthetic: Set(0),
+                            seed_pool_json: Set(Some(serde_json::to_string(c).unwrap_or_default())),
+                            strategy_weights_json: Set(None),
+                            pick_data: Set(Some(
+                                serde_json::to_string(&pick_data_val).unwrap_or_default(),
+                            )),
+                            created_at: Set(now_str.clone()),
+                        };
+                        if let Err(e) = pick.insert(db).await {
+                            tracing::warn!(
+                                "[serenity] 写入 reco_picks 失败 ({code} {tier_period}): {e}"
+                            );
+                            persistence_success = false;
+                            // 只保留**首个**失败的结构化三元组；多只失败时上方逐只 `warn!` 已记录全量原因。
+                            if persistence_stock_code.is_empty() {
+                                persistence_stock_code = code.to_string();
+                                persistence_detail = e.to_string();
+                            }
                         }
                     }
                     // 构建全量数据缓存

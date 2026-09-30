@@ -17,6 +17,7 @@ import { CodeRefactorSettingsModal } from "@/components/settings/CodeRefactorSet
 import { LiteraryCreationSettingsModal } from "@/components/settings/LiteraryCreationSettingsModal";
 import { useConversationStore, useSettingsStore } from "@/stores";
 
+import { DomainDashboard } from "./DomainComponents";
 import type { ActionItem, DomainConfig, DomainTab, DomainWorkflow } from "./types";
 import { useDomainData } from "./useDomainData";
 import { WorkflowWizard } from "./WorkflowWizard";
@@ -178,6 +179,17 @@ export function DomainTabContent({ capabilityPackId, config, tabKey }: DomainTab
           type="info"
           showIcon
           message={tab.description}
+        />
+      )}
+
+      {/* 仪表盘是域级数据而非 tab 级，只随落地 tab 出现一次 */}
+      {config.tabs?.[0]?.key === tabKey && (
+        <DomainDashboard
+          dashboard={data.dashboard}
+          loading={data.dashboardLoading}
+          kpiTimeRange={data.kpiTimeRange}
+          onTimeRangeChange={data.setKpiTimeRange}
+          onRefresh={data.loadDashboard}
         />
       )}
 

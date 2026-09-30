@@ -837,6 +837,13 @@ export function ReflectionPanel() {
                 <Table.Column title={t("stockAnalysis.reflection.colName")} dataIndex="stockName" width={100} />
                 <Table.Column title={t("stockAnalysis.reflection.colAsOf")} dataIndex="asOfDate" width={100} />
                 <Table.Column
+                  title={t("stockAnalysis.reflection.colHorizon")}
+                  dataIndex="horizon"
+                  width={90}
+                  // 一行 = 一只股票 × 一条分析 × 一个复盘档；缺列老记录显式「未知周期」不回填
+                  render={(v: string | null) => horizonKeyLabel(v ?? "unknown")}
+                />
+                <Table.Column
                   title={t("stockAnalysis.reflection.colResult")}
                   dataIndex="actualOutcome"
                   width={160}
@@ -1349,6 +1356,16 @@ export function ExpandedReflectionRow(
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {
+                    /* 一行反思 = 一个复盘档：矩阵里必须能看出哪一档是本次复盘对象，
+                      其余三档只有客观判定、没有反思叙述（缺席不冒充已复盘） */
+                  }
+                  {key === row.horizon && <Tag color="blue">{t("stockAnalysis.reflection.horizonReviewTag")}</Tag>}
+                  {key !== row.horizon && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {t("stockAnalysis.reflection.horizonNoNarration")}
+                    </Text>
+                  )}
                   <Text strong>{t("stockAnalysis.reflection.horizonStatusLabel")}</Text>
                   {statusTag(entry.status)}
                   {!isMature && (

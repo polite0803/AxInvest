@@ -2014,6 +2014,48 @@ export interface InstallOutcomeDto {
   installPath: string;
 }
 
+/**
+ * 仪表盘面板落位区域 —— 后端 `plugins::types::PluginDashboardPanelPosition`，
+ * serde `rename_all = "lowercase"`。
+ */
+export type PluginDashboardPanelPositionDto = "main" | "sidebar" | "header" | "footer";
+
+/** 仪表盘面板尺寸 —— 后端 `PluginDashboardPanelSize`，注意 `fullWidth` 是唯一非全小写值 */
+export type PluginDashboardPanelSizeDto = "small" | "medium" | "large" | "fullWidth";
+
+/**
+ * 插件贡献的仪表盘面板声明（面板声明的唯一权威结构）。
+ *
+ * 命名面有一处不对称，勿望文生义：`PluginManifest` 结构体**没有** `rename_all`
+ * （只逐字段 `#[serde(rename = "defaultEnabled")]`），故 manifest 上的键是 snake_case
+ * `dashboard_panels`；而其列表投影 `DashboardPluginInfo` 带 `rename_all = "camelCase"`，
+ * 面板字段是 camelCase。本类型对齐的是**投影**形状。
+ *
+ * 后端对带 `#[serde(default)]` 的字段无 `skip_serializing_if` ⇒ **恒被序列化**：
+ * `props` 空时为 `{}`、`frontendEntry` 缺时为 `null`，所以这里建模为非可选 / 显式可空，而非 `?:`。
+ */
+export interface PluginDashboardPanelDto {
+  id: string;
+  title: string;
+  /** 渲染期由 ComponentRegistry 按此名解析（P4 插件贡献点）；当前无消费方。 */
+  componentName: string;
+  position: PluginDashboardPanelPositionDto;
+  size: PluginDashboardPanelSizeDto;
+  props: Record<string, unknown>;
+  frontendEntry: string | null;
+}
+
+/** `dashboard_list_plugins` 的返回形状（PluginManager 清单的只读投影）。 */
+export interface DashboardPluginInfoDto {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string | null;
+  enabled: boolean;
+  panels: PluginDashboardPanelDto[];
+}
+
 export interface UpdateOutcomeDto {
   pluginId: string;
   oldVersion: string;

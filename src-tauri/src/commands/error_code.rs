@@ -718,6 +718,17 @@ pub mod plugin {
         "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE";
     /// 磁盘空间或内存低于编译下限（PLAN §14.3 前置探测未通过）
     pub const SOURCE_BUILD_RESOURCE_LOW: &str = "PLUGIN_SOURCE_BUILD_RESOURCE_LOW";
+    /// 面板没有可渲染的内容来源：未装该插件 / 无该面板 / 面板未声明 `frontendEntry`
+    /// / 资产文件不存在。与 `PANEL_ASSET_BLOCKED` **用户可操作性相反** ——
+    /// 前者是「这个面板本来就只有标题」，后者是「插件声明了越界内容，需要作者修 manifest」。
+    pub const PANEL_ASSET_UNAVAILABLE: &str = "PLUGIN_PANEL_ASSET_UNAVAILABLE";
+    /// 面板资产被安全策略拒绝：路径逃逸出插件安装目录、扩展名不在白名单、或超过大小上限。
+    pub const PANEL_ASSET_BLOCKED: &str = "PLUGIN_PANEL_ASSET_BLOCKED";
+    /// 该插件安装时没钉下完整性锚点（早于此机制安装，或安装当场哈希失败）。
+    /// 与 `PANEL_ASSET_TAMPERED` **用户可读结论相反**：这里内容没被改过，只是无从证明。
+    pub const PANEL_ASSET_UNPINNED: &str = "PLUGIN_PANEL_ASSET_UNPINNED";
+    /// 安装目录内容与安装时钉下的哈希不一致 —— 真的被改过，属安全拒绝。
+    pub const PANEL_ASSET_TAMPERED: &str = "PLUGIN_PANEL_ASSET_TAMPERED";
 }
 
 /// 进化引擎相关错误码

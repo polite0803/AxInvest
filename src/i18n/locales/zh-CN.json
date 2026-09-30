@@ -2683,6 +2683,10 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "插件源码编译失败",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "缺少可用的 Rust 编译工具链或目标平台",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "磁盘空间或内存不足，无法完成插件编译",
+    "PLUGIN_PANEL_ASSET_UNAVAILABLE": "仪表盘面板没有可渲染的内容来源：插件未声明 frontendEntry、资产文件不存在，或该插件/面板未安装",
+    "PLUGIN_PANEL_ASSET_BLOCKED": "面板资产被安全策略拒绝：路径越出插件目录、扩展名不在白名单，或超过大小上限",
+    "PLUGIN_PANEL_ASSET_UNPINNED": "该插件安装时未建立完整性锚点，面板内容无从校验；重新安装该插件后方可显示",
+    "PLUGIN_PANEL_ASSET_TAMPERED": "插件安装目录与安装时记录的校验值不一致，已停止显示其面板内容；请移除或重新安装该插件",
     "PLUGIN_PROFILE_IO_FAILED": "插件组合 Profile 持久化失败",
     "PROVIDER_ADAPTER_NOT_FOUND": "提供商适配器未找到",
     "PROVIDER_CREATE_FAILED": "创建提供商失败",
@@ -4912,7 +4916,6 @@
       "strategyMerge": "Merge (keep existing)",
       "strategyDryRun": "Dry run (validate only)"
     },
-    "policyDashboard": "RL 策略面板",
     "experiences": "经验",
     "avgReward": "平均奖励",
     "createPolicy": "创建新策略",
@@ -14822,7 +14825,12 @@
     "boolYes": "是",
     "boolNo": "否",
     "backendCallFailed": "后端调用失败",
-    "tierScopeHint": "档位口径：仅服务中线（瓶颈/政策/业绩催化剂以周-月展开）；短/超短档不适用，落库 period 恒为 mid、持有期按该档权威 28 天。",
+    "tierScopeHint": "档位口径：服务中线与长线两档（瓶颈/政策/业绩催化剂以周-月兑现）；短/超短档按设计不做，落库按档各一行、持有期取该档权威天数。",
+    "timeBasisNoTier": "实时候选未标档 ⇒ 无建议窗口（逐档记录见趋势智选历史）",
+    "entryBand": "建仓带 ±{{pct}}%",
+    "entryBandHalfFallback": "建仓带取自固定止损乘数的一半 ⇒ 非波动率推导",
+    "entryBandRangeFallback": "止损距离不可得 ⇒ 建仓带退回模板固定幅度",
+    "candidateTierRowsNote": "{{stocks}} 只 · 逐档各一行",
     "emptyHistoryWarning": "趋势智选历史为空：list_reco_history 返回 0 行（可能是 DB 暂无风格为 serenity/bottleneck 的历史，或后端命令失败被静默）",
     "timeBasis": "时间基线: {{date}} · 建议窗口约 {{days}} 天（至 {{until}}）"
   },
@@ -15417,7 +15425,15 @@
       },
       "matrixMisfit": {
         "valuation_needs_weeks_to_realize_kept_by_user_decision": "已知错配：估值需数周兑现，按裁定保留出票"
-      }
+      },
+      "loopUncalibratedSamples": "闭环未校准：样本不足",
+      "loopUncalibratedIc": "闭环未校准：IC 测不出力度",
+      "loopCalibrated": "闭环已校准 权重 {weight}",
+      "loopDemoted": "闭环降权 {weight}（负 IC {ic}）",
+      "loopGateOn": "反思闭环已生效（on），最近重算 {time}",
+      "loopGateShadow": "反思闭环影子模式（shadow）：只计算不参与评分，最近重算 {time}",
+      "loopGateOff": "反思闭环未启用（off），最近重算 {time}",
+      "loopNeverRecalc": "从未重算"
     },
     "export": {
       "analystReports": "分析师报告",
@@ -16872,6 +16888,9 @@
       "horizonLong": "长线",
       "horizonAuto": "按主档",
       "horizonUnknown": "未知周期",
+      "colHorizon": "复盘档",
+      "horizonReviewTag": "本次复盘档",
+      "horizonNoNarration": "该档仅有客观判定，未做反思叙述",
       "horizonStatusLabel": "状态：",
       "horizonStatusMature": "已成熟",
       "horizonStatusImmature": "未到期",
@@ -17603,7 +17622,8 @@
       "limitUpThHigh": "涨停潜力 - 高潜力阈值",
       "limitUpThMed": "涨停潜力 - 中潜力阈值",
       "limitUpThLow": "涨停潜力 - 低潜力阈值",
-      "analysisDryRun": "干跑模式：不调用 LLM，用 mock 输出验证流程"
+      "analysisDryRun": "干跑模式：不调用 LLM，用 mock 输出验证流程",
+      "recoIcGate": "荐股反思闭环生效闸：off=停用；shadow=影子模式（只计算与留痕，不参与评分）；on=按逐格闭环权重覆盖静态权重（只降不升）"
     },
     "evidenceCitation": {
       "loading": "提取证据引用中...",

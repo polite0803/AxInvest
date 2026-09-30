@@ -2683,6 +2683,10 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Build des Plugin-Quellcodes fehlgeschlagen",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Rust-Toolchain oder Zielplattform nicht verfügbar",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Nicht genügend Speicherplatz oder Arbeitsspeicher für den Plugin-Build",
+    "PLUGIN_PANEL_ASSET_UNAVAILABLE": "Das Dashboard-Panel hat keine darstellbare Inhaltsquelle: das Plugin deklariert kein frontendEntry, die Asset-Datei fehlt oder Plugin/Panel sind nicht installiert",
+    "PLUGIN_PANEL_ASSET_BLOCKED": "Panel-Asset durch Sicherheitsrichtlinie abgelehnt: Pfad liegt außerhalb des Plugin-Verzeichnisses, Erweiterung nicht auf der Zulassungsliste oder Größenlimit überschritten",
+    "PLUGIN_PANEL_ASSET_UNPINNED": "Für dieses Plugin fehlt der Integritätsanker aus der Installation, daher kann der Panelinhalt nicht geprüft werden; bitte das Plugin neu installieren",
+    "PLUGIN_PANEL_ASSET_TAMPERED": "Das Installationsverzeichnis des Plugins stimmt nicht mehr mit dem bei der Installation gespeicherten Hash überein; der Panelinhalt wird nicht angezeigt. Bitte entfernen oder neu installieren",
     "PLUGIN_PROFILE_IO_FAILED": "Plugin-Bundle-Profil konnte nicht gespeichert werden",
     "PROVIDER_ADAPTER_NOT_FOUND": "Anbieter-Adapter nicht gefunden",
     "PROVIDER_CREATE_FAILED": "Erstellen des Anbieters fehlgeschlagen",
@@ -4912,7 +4916,6 @@
       "strategyMerge": "Zusammenführen (vorhandene behalten)",
       "strategyDryRun": "Probelauf (nur validieren)"
     },
-    "policyDashboard": "RL-Strategie-Panel",
     "experiences": "Erfahrung",
     "avgReward": "Durchschnittliche Belohnung",
     "createPolicy": "Neue Strategie erstellen",
@@ -14657,7 +14660,12 @@
     "boolYes": "Ja",
     "boolNo": "Nein",
     "backendCallFailed": "Backend-Aufruf fehlgeschlagen",
-    "tierScopeHint": "Stufenumfang: nur mittelfristig (Engpass-/Politik-/Gewinnkatalysatoren entfalten sich über Wochen–Monate); kurz- und ultrakurzfristige Stufen gelten nicht, gespeicherter Zeitraum ist stets mid mit den maßgeblichen 28 Tagen dieser Stufe.",
+    "tierScopeHint": "Horizont: bedient die mittleren und langen Stufen (Engpass-/Politik-/Gewinnkatalysatoren wirken über Wochen bis Monate); ultrakurz und kurz entfallen per Design — eine Zeile je Stufe, Haltedauer aus der maßgeblichen Stufe.",
+    "timeBasisNoTier": "Live-Kandidat ohne Stufe ⇒ kein empfohlenes Fenster (Stufendetails im Verlauf)",
+    "entryBand": "Einstiegsband ±{{pct}}%",
+    "entryBandHalfFallback": "Band = Hälfte des festen Stop-Multiplikators ⇒ nicht volabilitätsabgeleitet",
+    "entryBandRangeFallback": "Stop-Distanz nicht verfügbar ⇒ Band fällt auf die Vorlage zurück",
+    "candidateTierRowsNote": "{{stocks}} Titel · eine Zeile je Stufe",
     "emptyHistoryWarning": "Serenity-Verlauf ist leer: list_reco_history hat 0 Zeilen zurückgegeben (möglicherweise keine Historie mit Stil serenity/bottleneck in DB oder Backend-Befehlsfehler wurde stillschweigend ignoriert)",
     "timeBasis": "Zeitbasis: {{date}} · vorgeschlagenes Fenster ~{{days}} Tage (bis {{until}})"
   },
@@ -15204,7 +15212,15 @@
       },
       "matrixMisfit": {
         "valuation_needs_weeks_to_realize_kept_by_user_decision": "Bekannte Fehlpaarung: Bewertung braucht Wochen zur Realisierung; per Entscheidung behalten"
-      }
+      },
+      "loopUncalibratedSamples": "Loop nicht kalibriert: zu wenig Stichproben",
+      "loopUncalibratedIc": "Loop nicht kalibriert: IC nicht messbar",
+      "loopCalibrated": "Loop kalibriert, Gewicht {weight}",
+      "loopDemoted": "Loop abgewertet auf {weight} (negativer IC {ic})",
+      "loopGateOn": "Reflexions-Loop aktiv (on), letzte Neuberechnung {time}",
+      "loopGateShadow": "Reflexions-Loop im Schattenmodus: nur berechnet, nicht angewendet, letzte Neuberechnung {time}",
+      "loopGateOff": "Reflexions-Loop deaktiviert (off), letzte Neuberechnung {time}",
+      "loopNeverRecalc": "nie neu berechnet"
     },
     "export": {
       "analystReports": "analystReports",
@@ -16526,6 +16542,9 @@
       "horizonLong": "Lang",
       "horizonAuto": "Nach Hauptstufe",
       "horizonUnknown": "Unbekannter Horizont",
+      "colHorizon": "Review-Horizont",
+      "horizonReviewTag": "Hier reviewed",
+      "horizonNoNarration": "Nur objektive Bewertung – kein Reflexionstext",
       "horizonStatusLabel": "Status: ",
       "horizonStatusMature": "Ausgereift",
       "horizonStatusImmature": "Noch nicht fällig",
@@ -17383,7 +17402,8 @@
       "limitUpThHigh": "Limit-Up-Potenzial - Hochpotenzial-Schwellenwert",
       "limitUpThMed": "Limit-Up-Potenzial - Mittelpotenzial-Schwellenwert",
       "limitUpThLow": "Limit-Up-Potenzial - Niedrigpotenzial-Schwellenwert",
-      "analysisDryRun": "Trockenlauf-Modus: Kein LLM-Aufruf, Mock-Ausgabe zur Prozessvalidierung"
+      "analysisDryRun": "Trockenlauf-Modus: Kein LLM-Aufruf, Mock-Ausgabe zur Prozessvalidierung",
+      "recoIcGate": "Tor des Empfehlungs-Reflexions-Loops: off=deaktiviert; shadow=nur Berechnung und Protokoll, nicht in der Bewertung; on=statische Gewichte mit Loop-Gewichten je Zelle überschreiben (nur Abwertung)"
     },
     "evidenceCitation": {
       "loading": "Extrahiere Belegzitate...",

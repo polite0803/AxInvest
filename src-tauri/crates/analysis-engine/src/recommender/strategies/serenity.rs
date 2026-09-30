@@ -213,6 +213,25 @@ impl SerenityStrategy {
         let stop_mult = read_f64(vars, "serenity_stop_mult", 0.80);
         let entry_range = read_f64(vars, "serenity_entry_range", 0.05);
 
+        // 建仓带 = **该档止损距离的一半**（Q1 裁定 B），与工作流链同一推导：
+        // 「带内成交 → 触止损」之间的额外亏损结构在 mid/long 两档保持一致，
+        // 而旧的固定 ±5% 与档位、与标的波动都无关（同一组数字既套 28 天也套 90 天）。
+        // 止损距离在此现算（`risk::stop_pct`，σ_daily·√h），取的是与 `mod.rs` R-D 后处理
+        // **同一个 σ、同一个 h** ⇒ 两处数值一致；止损与目标本身仍归后处理独占，不在这里改。
+        // 「取半」这一步与工作流链调同一个 `risk::entry_band_pct`（禁区 12：两链各写一遍就是两套口径）。
+        let h_days = self.period.default_holding_days() as usize;
+        let vol_stop_pct =
+            super::super::risk::daily_closes(client, code).await.as_ref().and_then(|closes| {
+                super::super::risk::stop_pct(
+                    closes,
+                    h_days,
+                    read_f64(vars, "reco_stop_vol_mult", 1.2),
+                )
+            });
+        let band_stop_pct = (1.0 - stop_mult) * 100.0;
+        let (entry_half_pct, entry_src) =
+            super::super::risk::entry_band_pct(vol_stop_pct, band_stop_pct, entry_range * 100.0);
+
         let target_price = if let Some(eps) = latest.eps {
             let target_pe = read_f64(vars, "serenity_target_pe", 25.0);
             (eps * target_pe).max(price * target_mult)
@@ -220,8 +239,8 @@ impl SerenityStrategy {
             price * target_mult
         };
         let stop_loss = price * stop_mult;
-        let entry_low = price * (1.0 - entry_range);
-        let entry_high = price * (1.0 + entry_range);
+        let entry_low = price * (1.0 - entry_half_pct / 100.0);
+        let entry_high = price * (1.0 + entry_half_pct / 100.0);
         let base_position = read_f64(vars, "serenity_base_position", 10.0);
 
         // 置信度计算（含 workflow 诊断因子）
@@ -269,6 +288,11 @@ impl SerenityStrategy {
         if serenity_score > 0.0 {
             reasons.push(format!("瓶颈分析评分: {:.0}/100", serenity_score));
         }
+        reasons.push(format!(
+            "建仓带 ±{:.2}%（{} 档止损距离的一半，来源 {entry_src}）",
+            entry_half_pct,
+            self.period.as_str()
+        ));
         if roe_ok {
             reasons.push(format!("ROE {:.1}% > 15% 显示资本回报效率高", roe));
         }

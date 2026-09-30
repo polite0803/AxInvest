@@ -75,6 +75,10 @@ pub struct RecoIcStats {
     /// 24 格契约视图（`contract_cells()`）——行的存在性与不成立理由的**唯一来源**。
     /// 与 `styles`（观测）分列：某格没有样本 ≠ 该格不存在。
     pub matrix: Vec<MatrixCellView>,
+    /// 闭环视图（Phase D）——命令层用 `reco_loop::compute_loop_cell_weights` 现算填充；
+    /// `aggregate_reco_ic` 自身只给默认（shadow / 空格），使本函数的纯契约不变。
+    #[serde(rename = "loop")]
+    pub loop_view: crate::recommender::reco_loop::RecoLoopView,
 }
 
 /// 秩相关不可得时区分「样本不够」与「某一侧全是同一个值（方差退化）」。
@@ -201,6 +205,7 @@ pub fn aggregate_reco_ic(rows: &[RecoIcRow]) -> RecoIcStats {
         usable_cells,
         total_samples: rows.len(),
         matrix: contract_cells(),
+        loop_view: crate::recommender::reco_loop::RecoLoopView::default(),
     }
 }
 
@@ -313,7 +318,7 @@ mod tests {
         let rows = vec![row("trend", "short", 55.0, 1.0, 5)];
         let value = serde_json::to_value(aggregate_reco_ic(&rows)).unwrap();
         let top = value.as_object().unwrap();
-        for key in ["styles", "totalCells", "usableCells", "totalSamples", "matrix"] {
+        for key in ["styles", "totalCells", "usableCells", "totalSamples", "matrix", "loop"] {
             assert!(top.contains_key(key), "RecoIcStats 缺 camelCase 键 {key}: {top:?}");
         }
         assert!(!top.contains_key("total_cells"), "snake_case 不得回到 IPC 边界");

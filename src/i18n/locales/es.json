@@ -2683,6 +2683,10 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "Error al compilar el código fuente del plugin",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "Cadena de herramientas Rust o plataforma de destino no disponible",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "Espacio en disco o memoria insuficientes para compilar el plugin",
+    "PLUGIN_PANEL_ASSET_UNAVAILABLE": "El panel del panel de control no tiene fuente de contenido renderizable: el plugin no declara frontendEntry, falta el archivo de recurso, o el plugin/panel no está instalado",
+    "PLUGIN_PANEL_ASSET_BLOCKED": "Recurso del panel rechazado por la política de seguridad: la ruta sale del directorio del plugin, la extensión no está permitida o se supera el límite de tamaño",
+    "PLUGIN_PANEL_ASSET_UNPINNED": "Este plugin no tiene ancla de integridad de la instalación, por lo que no se puede verificar su contenido de panel; reinstale el plugin.",
+    "PLUGIN_PANEL_ASSET_TAMPERED": "El directorio de instalación del plugin ya no coincide con el hash fijado durante la instalación; se oculta su contenido de panel; retire o reinstale el plugin.",
     "PLUGIN_PROFILE_IO_FAILED": "No se pudo guardar el perfil de paquete de plugins",
     "PROVIDER_ADAPTER_NOT_FOUND": "Adaptador de proveedor no encontrado",
     "PROVIDER_CREATE_FAILED": "Error al crear el proveedor",
@@ -4912,7 +4916,6 @@
       "strategyMerge": "Combinar (conservar existentes)",
       "strategyDryRun": "Prueba en seco (solo validar)"
     },
-    "policyDashboard": "Panel de estrategia RL",
     "experiences": "Experiencia",
     "avgReward": "Recompensa media",
     "createPolicy": "Crear nueva estrategia",
@@ -14657,7 +14660,12 @@
     "boolYes": "Sí",
     "boolNo": "No",
     "backendCallFailed": "Error en la llamada al backend",
-    "tierScopeHint": "Alcance del nivel: solo medio plazo (los catalizadores de cuello/beneficios se despliegan en semanas-meses); los niveles corto y muy corto no aplican, el periodo guardado es siempre mid con los 28 días autoritativos de ese nivel.",
+    "tierScopeHint": "Horizonte: atiende los niveles medio y largo (los catalizadores de cuello de botella / política / resultados se materializan en semanas o meses); ultra corto y corto no se producen por diseño: una fila por nivel, con los días autorizados de cada nivel.",
+    "timeBasisNoTier": "Candidato en vivo sin nivel ⇒ sin ventana sugerida (filas por nivel en el historial)",
+    "entryBand": "Banda de entrada ±{{pct}}%",
+    "entryBandHalfFallback": "La banda es la mitad de un multiplicador fijo ⇒ no derivada de volatilidad",
+    "entryBandRangeFallback": "Distancia de stop no disponible ⇒ la banda vuelve a la plantilla",
+    "candidateTierRowsNote": "{{stocks}} símbolos · una fila por nivel",
     "emptyHistoryWarning": "El historial de Serenity está vacío: list_reco_history devolvió 0 filas (posiblemente no hay historial con estilo serenity/bottleneck en la BD o el error del comando backend se ignoró silenciosamente)",
     "timeBasis": "Base temporal: {{date}} · ventana sugerida ~{{days}} días (hasta {{until}})"
   },
@@ -15204,7 +15212,15 @@
       },
       "matrixMisfit": {
         "valuation_needs_weeks_to_realize_kept_by_user_decision": "Desajuste conocido: la valoración necesita semanas; se conserva por decisión"
-      }
+      },
+      "loopUncalibratedSamples": "Bucle sin calibrar: muestras insuficientes",
+      "loopUncalibratedIc": "Bucle sin calibrar: IC no medible",
+      "loopCalibrated": "Bucle calibrado, peso {weight}",
+      "loopDemoted": "Bucle degradado a {weight} (IC negativo {ic})",
+      "loopGateOn": "Bucle de reflexión activo (on), último recálculo {time}",
+      "loopGateShadow": "Bucle de reflexión en modo sombra: solo calculado, sin aplicar, último recálculo {time}",
+      "loopGateOff": "Bucle de reflexión desactivado (off), último recálculo {time}",
+      "loopNeverRecalc": "nunca recalculado"
     },
     "export": {
       "analystReports": "analystReports",
@@ -16526,6 +16542,9 @@
       "horizonLong": "Largo",
       "horizonAuto": "Según el nivel principal",
       "horizonUnknown": "Horizonte desconocido",
+      "colHorizon": "Horizonte revisado",
+      "horizonReviewTag": "Revisado aquí",
+      "horizonNoNarration": "Solo veredicto objetivo, sin narración",
       "horizonStatusLabel": "Estado: ",
       "horizonStatusMature": "Madurado",
       "horizonStatusImmature": "Aún no vencido",
@@ -17383,7 +17402,8 @@
       "limitUpThHigh": "Umbral de alto potencial de límite diario",
       "limitUpThMed": "Umbral de medio potencial de límite diario",
       "limitUpThLow": "Umbral de bajo potencial de límite diario",
-      "analysisDryRun": "Modo de simulación sin LLM: usar salida simulada para verificar el flujo"
+      "analysisDryRun": "Modo de simulación sin LLM: usar salida simulada para verificar el flujo",
+      "recoIcGate": "Compuerta del bucle de reflexión de recomendaciones: off=desactivado; shadow=solo cálculo y registro, sin aplicar a la puntuación; on=sobrescribe pesos estáticos con pesos por celda (solo degradar)"
     },
     "evidenceCitation": {
       "loading": "Extrayendo citas...",

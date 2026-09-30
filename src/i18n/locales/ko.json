@@ -2683,6 +2683,10 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "플러그인 소스 빌드에 실패했습니다",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "사용 가능한 Rust 툴체인 또는 대상 플랫폼이 없습니다",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "디스크 공간 또는 메모리가 부족하여 플러그인을 빌드할 수 없습니다",
+    "PLUGIN_PANEL_ASSET_UNAVAILABLE": "대시보드 패널에 렌더링할 내용 원본이 없습니다: 플러그인이 frontendEntry를 선언하지 않았거나, 에셋 파일이 없거나, 플러그인/패널이 설치되지 않았습니다",
+    "PLUGIN_PANEL_ASSET_BLOCKED": "패널 에셋이 보안 정책에 의해 거부되었습니다: 경로가 플러그인 디렉터리를 벗어나거나, 확장자가 허용 목록에 없거나, 크기 상한을 초과했습니다",
+    "PLUGIN_PANEL_ASSET_UNPINNED": "이 플러그인에는 설치 시점의 무결성 앵커가 없어 패널 내용을 검증할 수 없습니다. 다시 설치하면 활성화됩니다",
+    "PLUGIN_PANEL_ASSET_TAMPERED": "플러그인 설치 디렉터리가 설치 시 고정된 해시와 일치하지 않아 패널 내용 표시를 중단했습니다. 플러그인을 삭제하거나 다시 설치하세요",
     "PLUGIN_PROFILE_IO_FAILED": "플러그인 번들 프로필 저장에 실패했습니다",
     "PROVIDER_ADAPTER_NOT_FOUND": "제공자 어댑터를 찾을 수 없습니다",
     "PROVIDER_CREATE_FAILED": "제공자 생성에 실패했습니다",
@@ -4912,7 +4916,6 @@
       "strategyMerge": "병합 (기존 유지)",
       "strategyDryRun": "시험 실행 (검증만)"
     },
-    "policyDashboard": "RL 전략 패널",
     "experiences": "경험",
     "avgReward": "평균 보상",
     "createPolicy": "새 전략 생성",
@@ -14657,7 +14660,12 @@
     "boolYes": "예",
     "boolNo": "아니오",
     "backendCallFailed": "백엔드 호출 실패",
-    "tierScopeHint": "구간 기준: 중선 전용(병목·정책·실적 촉매는 주~월 단위로 전개). 단기/초단기 구간은 적용되지 않으며 저장 period는 항상 mid, 보유 기간은 해당 구간의 권위 값인 28일.",
+    "tierScopeHint": "등급 기준: 중기·장기 두 등급을 담당(병목/정책/실적 촉매는 주~월 단위 실현). 초단기·단기는 설계상 미제공 — 등급별로 한 행씩 저장, 보유일수는 각 등급의 권위 값 사용.",
+    "timeBasisNoTier": "실시간 후보는 등급 미표기 ⇒ 권장 보유 창 없음(등급별 행은 이력 참조)",
+    "entryBand": "진입 밴드 ±{{pct}}%",
+    "entryBandHalfFallback": "밴드는 고정 스탑 배수의 절반 ⇒ 변동성 유도가 아님",
+    "entryBandRangeFallback": "스톱 거리를 얻지 못해 ⇒ 밴드가 템플릿 값으로 퇴피",
+    "candidateTierRowsNote": "{{stocks}} 종목 · 등급별 1행",
     "emptyHistoryWarning": "세레니티 히스토리가 비어 있습니다: list_reco_history가 0개 행을 반환했습니다 (DB에 serenity/bottleneck 스타일 히스토리가 없거나 백엔드 명령 실패가 조용히 무시되었을 수 있습니다)",
     "timeBasis": "시간 기준: {{date}} · 권장 기간 약 {{days}}일 (~{{until}})"
   },
@@ -15204,7 +15212,15 @@
       },
       "matrixMisfit": {
         "valuation_needs_weeks_to_realize_kept_by_user_decision": "알려진 불일치: 밸류에이션 실현엔 수 주, 결정에 따라 유지"
-      }
+      },
+      "loopUncalibratedSamples": "루프 미보정: 표본 부족",
+      "loopUncalibratedIc": "루프 미보정: IC로 강도를 측정할 수 없음",
+      "loopCalibrated": "루프 보정됨 가중치 {weight}",
+      "loopDemoted": "루프 가중치 하향 {weight}(음수 IC {ic})",
+      "loopGateOn": "반성 루프 활성(on), 마지막 재계산 {time}",
+      "loopGateShadow": "반성 루프 섀도우 모드: 계산만 하고 채점에는 미사용, 마지막 재계산 {time}",
+      "loopGateOff": "반성 루프 비활성(off), 마지막 재계산 {time}",
+      "loopNeverRecalc": "재계산 기록 없음"
     },
     "export": {
       "analystReports": "analystReports",
@@ -16526,6 +16542,9 @@
       "horizonLong": "장기",
       "horizonAuto": "주 단계 기준",
       "horizonUnknown": "알 수 없는 주기",
+      "colHorizon": "복기 구간",
+      "horizonReviewTag": "이번 복기 대상",
+      "horizonNoNarration": "객관 판정만 있고 복기 서술은 없음",
       "horizonStatusLabel": "상태: ",
       "horizonStatusMature": "성숙",
       "horizonStatusImmature": "미도래",
@@ -17383,7 +17402,8 @@
       "limitUpThHigh": "상한가 잠재력 - 고잠재력 임계값",
       "limitUpThMed": "상한가 잠재력 - 중잠재력 임계값",
       "limitUpThLow": "상한가 잠재력 - 저잠재력 임계값",
-      "analysisDryRun": "모의 실행 모드: LLM 미호출, mock 출력으로 프로세스 검증"
+      "analysisDryRun": "모의 실행 모드: LLM 미호출, mock 출력으로 프로세스 검증",
+      "recoIcGate": "추천 피드백 루프 게이트: off=중지; shadow=계산·기록만(채점 미사용); on=격자 루프 가중치로 정적 가중치 덮어쓰기(하향만)"
     },
     "evidenceCitation": {
       "loading": "증거 인용 추출 중...",

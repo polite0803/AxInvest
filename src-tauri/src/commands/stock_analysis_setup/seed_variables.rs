@@ -765,6 +765,20 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
+            name: "reco_ic_gate".into(),
+            var_type: "string".into(),
+            // Q2 裁定「shadow 起步」：闭环照算、照留痕、面板可读，但不覆盖评分消费的权重；
+            // as-of 回放 A/B 过判据后才人工转 on。读不到本变量时消费侧同样按 shadow 处理。
+            value: serde_json::json!("shadow"),
+            description: Some(
+                "荐股反思闭环生效闸：off=停用；shadow=只计算不参与评分；on=用 reco-loop 逐格权重\
+                 覆盖静态 reco_strategy_weights（样本不足/IC 不可测的格自动回基线 1.0，只降不升；\
+                 PLAN-reco-reflection-closure.md）"
+                    .into(),
+            ),
+            is_secret: false,
+        },
+        Variable {
             name: "reco_stop_vol_mult".into(),
             var_type: "number".into(),
             value: serde_json::json!(1.2),

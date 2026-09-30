@@ -114,6 +114,32 @@ pub fn cost_drag_factor(target_pct: f64, round_trip_cost_pct: f64) -> f64 {
     (1.0 - round_trip_cost_pct / target_pct).clamp(0.0, 1.0)
 }
 
+/// 建仓带（%）= **该档止损距离的一半**（Q1 裁定 B）——两条链必须走这一个函数。
+///
+/// 依据：建仓带的语义是「在现价上下多少还能接受建仓」。把它绑到该档止损距离上，
+/// 「带内成交 → 触止损」之间的额外亏损结构就在 mid/long（以及 σ 不同的标的）之间保持一致；
+/// 旧的固定 ±5% 既与档位无关、也与波动无关（同一组数字既套 28 天也套 90 天）。
+///
+/// 三种状态都要可判读：
+/// - `half_stop`：σ·√h 的止损距离 ⇒ 带随档与波动自动变化；
+/// - `half_stop_fallback_pct`：σ 不可得，用调用方的固定止损乘数换算的距离取半（仍标来源）；
+/// - `fallback_range`：连止损乘数都不可用（`stop_mult ≥ 1` 的错配配置）才退模板 ±range。
+pub fn entry_band_pct(
+    vol_stop_pct: Option<f64>,
+    band_stop_pct: f64,
+    fallback_range_pct: f64,
+) -> (f64, &'static str) {
+    if let Some(v) = vol_stop_pct {
+        if v.is_finite() && v > 0.0 {
+            return (v / 2.0, "half_stop");
+        }
+    }
+    if band_stop_pct.is_finite() && band_stop_pct > 0.0 {
+        return (band_stop_pct / 2.0, "half_stop_fallback_pct");
+    }
+    (fallback_range_pct.max(0.0), "fallback_range")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +187,32 @@ mod tests {
         assert!((far - 0.97).abs() < 1e-9);
         assert!((cost_drag_factor(0.0, 0.6) - 1.0).abs() < 1e-12, "位移不可得 ⇒ 不假装修正");
         assert!(cost_drag_factor(0.1, 0.6) == 0.0, "成本超过位移 ⇒ 拖到 0（净期望为负）");
+    }
+
+    /// 建仓带 = 该档止损距离的一半，且**随持有期放大**（√h）。
+    /// 旧形态是固定 ±5%：28 天与 90 天同带，既与档位无关、也与标的波动无关。
+    #[test]
+    fn entry_band_is_half_stop_and_grows_with_horizon() {
+        let low: Vec<f64> = (0..60).map(|i| if i % 2 == 0 { 100.0 } else { 101.0 }).collect();
+        let mid = stop_pct(&low, 28, 1.2).expect("可算");
+        let long = stop_pct(&low, 90, 1.2).expect("可算");
+        let (band_mid, src_mid) = entry_band_pct(Some(mid), 20.0, 5.0);
+        let (band_long, src_long) = entry_band_pct(Some(long), 20.0, 5.0);
+        assert_eq!((src_mid, src_long), ("half_stop", "half_stop"));
+        assert!((band_mid - mid / 2.0).abs() < 1e-12, "建仓带必须恰是该档止损距离的一半");
+        assert!(band_long > band_mid, "建仓带必须随持有期放宽: {band_mid} → {band_long}");
+    }
+
+    /// 三档来源必须**可区分**：σ 可得 / σ 不可得但乘数可用 / 连乘数都不可用。
+    /// 退化本身可以接受，把它标成 `half_stop` 冒充波动率口径不行（诚实性铁律）。
+    #[test]
+    fn entry_band_fallbacks_are_distinguishable() {
+        assert_eq!(entry_band_pct(None, 20.0, 5.0), (10.0, "half_stop_fallback_pct"));
+        assert_eq!(entry_band_pct(None, 0.0, 5.0), (5.0, "fallback_range"));
+        assert_eq!(
+            entry_band_pct(Some(f64::NAN), 0.0, 5.0),
+            (5.0, "fallback_range"),
+            "NaN 不得被当成「止损距离可得」"
+        );
     }
 }

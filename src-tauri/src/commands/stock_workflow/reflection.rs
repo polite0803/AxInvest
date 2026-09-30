@@ -269,9 +269,13 @@ pub async fn run_reflection_workflow(
     //      保持不变，resolve_var_path 会从注入的变量中按路径下钻。
     //
     // 手动触发时 original_analysis_id="" → 无记忆可加载，注入空对象降级。
-    // 但反思 prompt 模板 (reflection.md:17-18) hard-code 引用
-    // {{original_time_horizon}} / {{original_holding_days}},所以必须注入占位值
-    // (否则 work_engine 报 VARIABLE_NOT_FOUND,reflection-agent 节点 Failed,
+    // 但两处 prompt 都会 hard-code 引用变量，缺一个就整条链 Failed：
+    //   - 专家档案 reflection.md「你收到的输入包括」+「单档复盘原则」两节引用
+    //     {{review_horizon}} / {{review_expected_holding_days}} / {{analysis_primary_horizon}}
+    //     / {{actual_outcome}} / {{reflection_depth}} / {{stock_lessons}} / {{tunable_params_catalog}}；
+    //   - reflection-comparator 的 input_mapping 另消费 original_time_horizon /
+    //     original_holding_days（值已按复盘档口径，见下方 `review_days`）。
+    // (缺失会 work_engine 报 VARIABLE_NOT_FOUND,reflection-agent 节点 Failed,
     // 数据库 what_went_wrong 等字段全 null)。
     let original_analysis: Option<stock_analyses::Model> = if original_analysis_id.is_empty() {
         None
@@ -465,21 +469,58 @@ pub async fn run_reflection_workflow(
         is_secret: false,
     });
 
-    if let Some((time_horizon, holding_days)) = original_ctx {
+    // 〇-B v2 第 4 条：把「本次只复盘这一档」显式交给生成层。
+    //   值取盖章后的 `primary_horizon`（不是入参原值）⇒ 手动 / 批量两条路径同源，
+    //   不会出现行上标 A 档、prompt 里写 B 档。
+    // 本次复盘档的期望持有天数：该档快照自带，行情不可用时退回 Period 默认天数表。
+    //   ⚠ comparator 的 `horizon_mismatch` 用 (original_time_horizon, original_holding_days)
+    //   与 `holding_days` 三者对比（`reflection-comparator.rhai:192`）⇒ 复盘档既已收窄成
+    //   单一档位，这一对就必须**同档**，否则复盘 long 时拿主档 5 天去比 90 天窗口。
+    let review_days = primary_snapshot
+        .and_then(|s| s.expected_holding_days)
+        .unwrap_or_else(|| default_expected_holding_days(primary_horizon));
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "review_horizon".into(),
+        var_type: "string".into(),
+        value: serde_json::Value::String(primary_horizon.to_string()),
+        description: Some("本次反思唯一复盘的周期档（ultra_short/short/mid/long）".into()),
+        is_secret: false,
+    });
+    variables.push(axagent_harness::workflow_types::Variable {
+        name: "review_expected_holding_days".into(),
+        var_type: "number".into(),
+        value: serde_json::json!(review_days),
+        description: Some("本次复盘档的期望持有天数（交易日）".into()),
+        is_secret: false,
+    });
+
+    if let Some((time_horizon, _analysis_holding_days)) = original_ctx {
         variables.push(axagent_harness::workflow_types::Variable {
             name: "original_time_horizon".into(),
             var_type: "string".into(),
-            value: serde_json::Value::String(time_horizon),
+            value: serde_json::Value::String(time_horizon.clone()),
             description: Some(
-                "原始决策的时间维度：ultra_short(1-3天)/short(5天)/mid(28天)/long(90天+)".into(),
+                "本次复盘档（反思链与 review_horizon 同源，供既有模板继续消费）".into(),
             ),
             is_secret: false,
         });
         variables.push(axagent_harness::workflow_types::Variable {
             name: "original_holding_days".into(),
             var_type: "number".into(),
-            value: serde_json::json!(holding_days),
-            description: Some("原始决策期望持有天数（交易日）".into()),
+            // 名字保留 `original_*` 是给既有 comparator / 模板继续消费；**值**已换成复盘档口径
+            value: serde_json::json!(review_days),
+            description: Some(
+                "本次复盘档的期望持有天数（交易日；与 review_expected_holding_days 同值）".into(),
+            ),
+            is_secret: false,
+        });
+        // 复盘档 ≠ 原分析主档时（用户手动逐档复盘），必须把两者分开陈述：
+        // 混为一谈会让 LLM 拿别的档的决策口径来解释本档结果。
+        variables.push(axagent_harness::workflow_types::Variable {
+            name: "analysis_primary_horizon".into(),
+            var_type: "string".into(),
+            value: serde_json::Value::String(time_horizon),
+            description: Some("原分析公式定档出的主周期档（未必等于本次复盘档）".into()),
             is_secret: false,
         });
     } else {
@@ -488,19 +529,30 @@ pub async fn run_reflection_workflow(
         variables.push(axagent_harness::workflow_types::Variable {
             name: "original_time_horizon".into(),
             var_type: "string".into(),
-            value: serde_json::Value::String("manual".into()),
-            description: Some("原始决策的时间维度(手动反思场景无原始分析,固定为 'manual')".into()),
+            value: serde_json::Value::String(primary_horizon.to_string()),
+            description: Some("本次复盘档(手动反思无原始分析,与 review_horizon 同值)".into()),
             is_secret: false,
         });
         variables.push(axagent_harness::workflow_types::Variable {
             name: "original_holding_days".into(),
             var_type: "number".into(),
-            value: serde_json::json!(0),
-            description: Some("原始决策期望持有天数(手动反思场景无原始分析,固定为 0)".into()),
+            value: serde_json::json!(review_days),
+            description: Some(
+                "本次复盘档的期望持有天数（手动反思无原始分析，与 review_expected_holding_days 同值）".into(),
+            ),
+            is_secret: false,
+        });
+        variables.push(axagent_harness::workflow_types::Variable {
+            name: "analysis_primary_horizon".into(),
+            var_type: "string".into(),
+            // 手动反思无原分析 ⇒ 无主档可陈述。值必须是显式字面量，不能漏注入：
+            // reflection.md 引用该变量，缺失会让 work_engine 报 VARIABLE_NOT_FOUND 使整条链 Failed。
+            value: serde_json::Value::String("none".into()),
+            description: Some("原分析主周期档(手动反思场景无原始分析,固定为 'none')".into()),
             is_secret: false,
         });
         tracing::info!(
-            "[reflection] {}: 手动反思场景,注入占位 original_time_horizon='manual' / original_holding_days=0",
+            "[reflection] {}: 手动反思场景,复盘档 {primary_horizon},注入 original_holding_days=0",
             stock_code
         );
     }
@@ -835,9 +887,13 @@ pub async fn run_reflection_workflow(
 
             // 索引到 Memory RAG
             if let Some(ref w) = what_went_wrong {
+                // 检索片段必须自带**复盘档**：向量检索按语义相似度命中，不看档位
+                // （`search_with_filter` 只能按 document_id 列表过滤，档不是 document_id）。
+                // 与其改检索接口，不如让每条片段自述档位 ⇒ LLM 能据此拒绝跨档套用，
+                // 也让「另一档的教训」在上下文里就是可识别的（缺席不冒充通用）。
                 let memory_content = format!(
-                    "反思:股票:{} {} 原始决策时间:{} 结果:{}\n错因:{}",
-                    stock_code, stock_name, as_of_date, actual_outcome, w
+                    "反思:股票:{} {} 复盘档:{} 分析日:{} 该档结果:{}\n错因:{}",
+                    stock_code, stock_name, primary_horizon, as_of_date, actual_outcome, w
                 );
                 let _ = crate::indexing::index_memory_item(
                     db,
@@ -1588,7 +1644,8 @@ pub async fn run_lesson_validation_command(
 ///
 /// 语义：
 /// - `period = None` ⇒ 不限档位，处理全部 pending（保持既有行为）
-/// - `period = Some(p)` ⇒ 只处理「其原分析的期望持有天数最近邻归一到 p」的 pending
+/// - `period = Some(p)` ⇒ 只处理**复盘档为 p** 的 pending（一行一档，档在建点即盖章）。
+///   该列 NULL 的老行退回「原分析期望持有天数最近邻归一到 p」的旧口径。
 /// - `due_only = true` ⇒ 额外要求计划评估时点 `hindsight_date` 已到（严格的"按间隔"）
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1613,19 +1670,26 @@ pub struct ReflectionFilter {
 impl ReflectionFilter {
     /// 该 pending 是否命中本筛选。
     ///
+    /// - `row_horizon`：本行**自己的**复盘档（〇-B v2 第 4 条起建点即写）。
+    ///   `Some(h)` ⇒ 直接按档比对，不再用天数反推；
+    ///   `None`（该列引入前的老行）⇒ 退回 `expected_days` 最近邻归一的旧口径。
     /// - `expected_days`：原分析声明的期望持有天数（`None` ⇒ 按反思侧既有兜底口径
     ///   视为 28 天，与 `run_batch_reflection_inner` 内的一致）
     /// - `hindsight_due`：计划评估时点是否已到
     /// - `min_confidence_threshold`：pending row 自带的置信度阈值
     pub fn matches(
         &self,
+        row_horizon: Option<&str>,
         expected_days: Option<i64>,
         hindsight_due: bool,
         min_confidence_threshold: i32,
     ) -> bool {
         if let Some(p) = self.period {
-            let days = expected_days.unwrap_or(28);
-            if Period::nearest_for_holding_days(days) != p {
+            let hit = match row_horizon.and_then(|h| h.parse::<Period>().ok()) {
+                Some(h) => h == p,
+                None => Period::nearest_for_holding_days(expected_days.unwrap_or(28)) == p,
+            };
+            if !hit {
                 return false;
             }
         }
@@ -1674,6 +1738,180 @@ impl BatchReflectionConfig {
             depth_override: None,
         }
     }
+}
+
+// ── 一行 pending = 一个复盘档（PLAN-reflection-per-horizon-row §2）──
+
+/// 反思产品默认置信度阈值。三个建点此前各抄一份字面量 `70`
+/// （`bin/axagent-batch-rerun.rs` 的注释自证：「手抄常量，三处各写一份」），
+/// 现收在唯一常量，建 pending 行只能经 `build_pending_reflection_rows`。
+pub const DEFAULT_REFLECTION_MIN_CONFIDENCE: u8 = 70;
+/// 反思深度默认值（同上，此前手抄三处）。
+pub const DEFAULT_REFLECTION_DEPTH: &str = "light";
+
+/// 建 pending 行所需的**最小**分析侧事实。
+pub struct PendingReflectionSeed<'a> {
+    pub analysis_id: &'a str,
+    pub stock_code: &'a str,
+    pub stock_name: &'a str,
+    /// 分析锚点日（`YYYY-MM-DD`）。live 通道 = 今天；as-of 重放通道 = `as_of_date`。
+    pub analysis_date: &'a str,
+    /// `stock_analyses.horizon_decisions` 原文（四档独立决策）。None / 空 ⇒ 无逐档方向可判，
+    /// 退回**只复盘主档一行**（不伪造其余三档的方向）。
+    pub horizon_decisions: Option<&'a str>,
+    /// `stock_analyses.decision_time_horizon`（公式主档）
+    pub primary_horizon: Option<&'a str>,
+    /// `stock_analyses.decision_expected_holding_days`
+    pub primary_holding_days: Option<i64>,
+    pub min_confidence_threshold: u8,
+    pub reflection_depth: &'a str,
+    pub now_ms: i64,
+}
+
+/// 本次可复盘的档集 = 四档里**决策有明确方向**的那些（裁定 Q1）。
+///
+/// 观望/持有/不确定/无法判断的档没有多空可判（`deterministic_was_correct` 对它们返回
+/// `None`），为其反思只会产出空洞叙述并沉淀成脏教训 ⇒ 不建行。
+/// 返回 `(档名, 该档期望持有交易日)`；天数优先取该档决策声明值，缺失回 `Period` 默认表。
+pub fn reviewable_horizons(
+    horizon_decisions: Option<&str>,
+    primary_horizon: Option<&str>,
+    primary_holding_days: Option<i64>,
+) -> Vec<(String, i64)> {
+    let parsed = horizon_decisions
+        .filter(|s| !s.is_empty())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.as_object().map(|o| parse_horizon_decisions(o).unwrap_or_default()))
+        .unwrap_or_default();
+
+    let directional = |action: &str| {
+        matches!(
+            normalize_action(action),
+            Some(ActionKind::Buy | ActionKind::Increase | ActionKind::Sell | ActionKind::Reduce)
+        )
+    };
+
+    let mut out: Vec<(String, i64)> = Period::ALL
+        .iter()
+        .filter_map(|p| {
+            let d = parsed.get(p.as_str())?;
+            if !directional(&d.action) {
+                return None;
+            }
+            Some((
+                p.as_str().to_string(),
+                d.expected_holding_days
+                    .unwrap_or_else(|| default_expected_holding_days(p.as_str())),
+            ))
+        })
+        .collect();
+    if !out.is_empty() {
+        return out;
+    }
+
+    // 无逐档决策（老模板 / 该次分析未产出 decisionsByHorizon）⇒ 只有主档可复盘。
+    // 主档缺失时**不采信 LLM 自报的 timeHorizon**（〇-B v2 第 2 条），改由期望天数
+    // 最近邻归一到 Period —— 与 `ReflectionFilter::matches` 同一口径。
+    let primary = match primary_horizon.and_then(|h| h.parse::<Period>().ok()) {
+        Some(p) => p,
+        None => match primary_holding_days.filter(|d| *d > 0) {
+            Some(d) => {
+                let p = Period::nearest_for_holding_days(d);
+                tracing::warn!(
+                    "[reflection pending] 无逐档决策且原分析无主档 ⇒ 按期望 {d} 天最近邻归到 {} 建单行（代理，非事实陈述）",
+                    p.as_str()
+                );
+                p
+            },
+            None => {
+                tracing::warn!(
+                    "[reflection pending] 无逐档决策、无主档、无期望天数 ⇒ 按 short 建单行（代理，非事实陈述）"
+                );
+                Period::Short
+            },
+        },
+    };
+    let days = primary_holding_days
+        .filter(|d| *d > 0)
+        .unwrap_or_else(|| default_expected_holding_days(primary.as_str()));
+    out.push((primary.as_str().to_string(), days));
+    out
+}
+
+/// 按复盘档集生成 pending 行（每档一行，`horizon` 建点即写、不留 NULL）。
+///
+/// 三个建点（`core.rs` 单股通道 / `hooks.rs` 对话通道 / `bin/axagent-batch-rerun.rs`
+/// 回放补建）必须统一走本函数 —— 各自 `stock_reflections::ActiveModel {` 字面量构造
+/// 是缺陷 ④ 的成因（默认值手抄、档口径分叉）。
+pub fn build_pending_reflection_rows(
+    seed: &PendingReflectionSeed<'_>,
+) -> Vec<axagent_entities::stock_reflections::ActiveModel> {
+    build_pending_reflection_rows_for(
+        seed,
+        reviewable_horizons(
+            seed.horizon_decisions,
+            seed.primary_horizon,
+            seed.primary_holding_days,
+        ),
+    )
+}
+
+/// 按**给定档集**建 pending 行。
+///
+/// 与 `build_pending_reflection_rows` 分开，是给「已有部分档行、只补缺档」的调用方用的
+/// （`bin/axagent-batch-rerun.rs` 的重跑补建：同一条分析可能已有 ultra_short 行，
+/// 本次只需补 short/mid/long）。
+pub fn build_pending_reflection_rows_for(
+    seed: &PendingReflectionSeed<'_>,
+    horizons: Vec<(String, i64)>,
+) -> Vec<axagent_entities::stock_reflections::ActiveModel> {
+    let analysis_nd = chrono::NaiveDate::parse_from_str(seed.analysis_date, "%Y-%m-%d")
+        .unwrap_or_else(|_| {
+            tracing::warn!(
+                "[reflection pending] 锚点日 {:?} 解析失败 ⇒ 退回本地日期",
+                seed.analysis_date
+            );
+            chrono::Local::now().date_naive()
+        });
+
+    horizons
+        .into_iter()
+        .map(|(horizon, days)| {
+            let hindsight_date =
+                (analysis_nd + chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
+            axagent_entities::stock_reflections::ActiveModel {
+                id: Set(uuid::Uuid::new_v4().to_string()),
+                stock_code: Set(seed.stock_code.to_string()),
+                stock_name: Set(seed.stock_name.to_string()),
+                original_analysis_id: Set(seed.analysis_id.to_string()),
+                as_of_date: Set(seed.analysis_date.to_string()),
+                hindsight_date: Set(hindsight_date),
+                min_confidence_threshold: Set(seed.min_confidence_threshold as i32),
+                reflection_depth: Set(seed.reflection_depth.to_string()),
+                // 〇-B v2 第 4 条：本行从建点起就**只属于这一档**（不再留 NULL 等收尾盖章）
+                horizon: Set(Some(horizon)),
+                actual_outcome: Set(String::new()),
+                raw_return: Set(None),
+                alpha_return: Set(None),
+                holding_days: Set(None),
+                benchmark_name: Set(None),
+                verdict: Set(None),
+                alpha_cited: Set(None),
+                lesson_summary: Set(None),
+                what_went_wrong: Set(None),
+                missed_signals: Set(None),
+                fix_for_future: Set(None),
+                parameter_suggestions_json: Set(None),
+                horizon_results_json: Set(None),
+                decision_json: Set(None),
+                blackboard_snapshot: Set(None),
+                model_version: Set(None),
+                status: Set("pending".to_string()),
+                created_at: Set(seed.now_ms),
+                updated_at: Set(seed.now_ms),
+            }
+        })
+        .collect()
 }
 
 /// `validate-decisions` 定时任务的配置（JSON 存 `CronJob.prompt`）。
@@ -1760,9 +1998,20 @@ async fn perform_single_reflection(
     )
     .await;
 
-    // 〇-B v2 第 4 条：本函数的复盘档 = 原分析的公式主档；
-    //   显式透传给 run_reflection_workflow，避免两条路径各自兜一次「short」而分叉。
-    let primary_horizon = analysis.decision_time_horizon.as_deref().unwrap_or("short");
+    // 〇-B v2 第 4 条 / `PLAN-reflection-per-horizon-row`：**本行的复盘档 = 行自身的 horizon**
+    //   （建 pending 时即盖章，一行一档）。老 pending 行（该列 NULL）⇒ 退回原分析主档并 warn，
+    //   不再无条件读 `analysis.decision_time_horizon` —— 那会让四个档共用主档复盘。
+    let primary_horizon = match pending_row.horizon.as_deref() {
+        Some(h) => h,
+        None => analysis.decision_time_horizon.as_deref().unwrap_or_else(|| {
+            tracing::warn!(
+                "[{log_prefix}] {} ({}) 本行无复盘档且原分析无主档 ⇒ 按 short 复盘（代理，非事实陈述）",
+                pending_row.id,
+                pending_row.stock_code
+            );
+            "short"
+        }),
+    };
     let primary_snap_opt =
         snapshots_raw.get(primary_horizon).and_then(|r| r.as_ref().ok()).cloned();
 
@@ -1891,15 +2140,47 @@ pub async fn run_batch_reflection_inner(
     let reclaimed = reclaim_stale_running(db, STALE_RUNNING_HOURS).await;
 
     // 1. 扫所有 pending row,按 created_at ASC(最老的先处理,避免积压)
-    let pendings: Vec<stock_reflections::Model> = stock_reflections::Entity::find()
-        .filter(stock_reflections::Column::Status.eq("pending"))
-        .order_by_asc(stock_reflections::Column::CreatedAt)
-        .all(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("run_batch_reflection_inner 扫 pending row 失败: {e}"))
-        })?;
+    //
+    // ⚠ 到期筛选必须下推到**本查询**，而不是留给循环里的 `filter.matches`：
+    // 下方 `take(max_count)` 发生在 filter **之前** —— 若在 SQL 里不过滤到期，
+    // 一堆未到期的老 pending 会耗光配额，使当日到期记录一条都轮不到
+    // （「18:00 只反思到期记录」的诉求会静默失效）。
+    let today_str = {
+        use chrono::TimeZone;
+        let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+        offset
+            .from_utc_datetime(&chrono::Utc::now().naive_utc())
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+    let mut pending_query =
+        stock_reflections::Entity::find().filter(stock_reflections::Column::Status.eq("pending"));
+    if filter.is_some_and(|f| f.due_only) {
+        // hindsight_date 是 YYYY-MM-DD ⇒ 字典序与日期序一致；NULL 行（该列引入前的
+        // 老数据）不满足 lte ⇒ 不进到期队列，诚实缺席（提前反思通路仍由
+        // due_only=false 的 6h 兜底服务承担）。
+        pending_query =
+            pending_query.filter(stock_reflections::Column::HindsightDate.lte(&today_str));
+    }
+    if let Some(p) = filter.and_then(|f| f.period) {
+        // 档位筛选同样必须下推（与上面 due_only 同因）：一行一档之后 pending 池 ×4，
+        // 若留给循环里的 `filter.matches`，`take(max_count)` 会被其它档的行占满，
+        // 「只反思 long 档」的定时任务可能整轮 0 条却仍报 totalPending>0。
+        // NULL 老行留在队列内（该列引入前建的），由 matches() 按天数最近邻兜旧口径。
+        pending_query = pending_query.filter(
+            sea_orm::Condition::any()
+                .add(stock_reflections::Column::Horizon.eq(p.as_str()))
+                .add(stock_reflections::Column::Horizon.is_null()),
+        );
+    }
+    let pendings: Vec<stock_reflections::Model> =
+        pending_query.order_by_asc(stock_reflections::Column::CreatedAt).all(db).await.map_err(
+            |e| {
+                ErrorResponse::new(wf_err::INTERNAL)
+                    .with_detail(format!("run_batch_reflection_inner 扫 pending row 失败: {e}"))
+            },
+        )?;
 
     tracing::info!(
         "[D1 batch_reflection] 扫到 {} 条 pending row, max_count={}",
@@ -1937,11 +2218,8 @@ pub async fn run_batch_reflection_inner(
         let analysis_nd = chrono::NaiveDate::parse_from_str(analysis_date, "%Y-%m-%d").ok();
         let hindsight_nd = chrono::NaiveDate::parse_from_str(hindsight_date, "%Y-%m-%d").ok();
 
-        let today_nd = {
-            use chrono::TimeZone;
-            let offset = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
-            offset.from_utc_datetime(&chrono::Utc::now().naive_utc()).date_naive()
-        };
+        let today_nd = chrono::NaiveDate::parse_from_str(&today_str, "%Y-%m-%d")
+            .expect("today_str 由本函数按同一格式生成");
 
         if let Some(h) = hindsight_nd {
             if h > today_nd {
@@ -1962,6 +2240,7 @@ pub async fn run_batch_reflection_inner(
         if let Some(f) = filter {
             let hindsight_due = hindsight_nd.is_some_and(|h| h <= today_nd);
             if !f.matches(
+                p.horizon.as_deref(),
                 analysis.decision_expected_holding_days,
                 hindsight_due,
                 p.min_confidence_threshold,
@@ -3366,5 +3645,112 @@ mod deterministic_was_correct_tests {
         dup("d-short", "short").insert(&db).await.expect("插入 short 档重复教训");
         assert_eq!(cnt(&db, "long").await, 1, "long 档应恰有一行");
         assert_eq!(cnt(&db, "short").await, 1, "short 档应恰有一行（未被 long 档去重吞掉）");
+    }
+}
+
+// ── 一行 pending = 一个复盘档（PLAN-reflection-per-horizon-row 门）──
+#[cfg(test)]
+mod pending_rows_per_horizon_tests {
+    use super::*;
+    use sea_orm::ActiveValue;
+
+    type Am = axagent_entities::stock_reflections::ActiveModel;
+
+    fn seed<'a>(
+        hd: Option<&'a str>,
+        primary: Option<&'a str>,
+        days: Option<i64>,
+    ) -> PendingReflectionSeed<'a> {
+        PendingReflectionSeed {
+            analysis_id: "a-1",
+            stock_code: "600519",
+            stock_name: "贵州茅台",
+            analysis_date: "2026-08-03",
+            horizon_decisions: hd,
+            primary_horizon: primary,
+            primary_holding_days: days,
+            min_confidence_threshold: DEFAULT_REFLECTION_MIN_CONFIDENCE,
+            reflection_depth: DEFAULT_REFLECTION_DEPTH,
+            now_ms: 1_754_200_000_000,
+        }
+    }
+
+    fn horizon_of(am: &Am) -> Option<String> {
+        match &am.horizon {
+            ActiveValue::Set(v) => v.clone(),
+            _ => panic!("horizon 必须在建点即 Set（不再留 NULL 等收尾盖章）"),
+        }
+    }
+
+    fn hindsight_of(am: &Am) -> String {
+        match &am.hindsight_date {
+            ActiveValue::Set(v) => v.clone(),
+            _ => panic!("hindsight_date 未设"),
+        }
+    }
+
+    /// 裁定 Q1：四档里只有**决策有方向**的档建行；观望/持有档不产空洞教训。
+    #[test]
+    fn only_directional_horizons_get_a_row() {
+        let hd = r#"{"ultra_short":{"action":"买入"},"short":{"action":"观望"},
+                     "mid":{"action":"持有"},"long":{"action":"减持"}}"#;
+        let rows = build_pending_reflection_rows(&seed(Some(hd), Some("mid"), Some(28)));
+        let got: Vec<String> = rows.iter().map(|r| horizon_of(r).unwrap()).collect();
+        assert_eq!(
+            got,
+            vec!["ultra_short".to_string(), "long".to_string()],
+            "档序须按 Period::ALL"
+        );
+    }
+
+    /// 每档的 hindsight_date 必须按**该档**天数外推，不能四档共用主档一个窗口。
+    #[test]
+    fn each_row_carries_its_own_horizon_hindsight_date() {
+        let hd = r#"{"ultra_short":{"action":"买入"},"short":{"action":"增持"},
+                     "mid":{"action":"减持"},"long":{"action":"卖出"}}"#;
+        let rows = build_pending_reflection_rows(&seed(Some(hd), Some("mid"), Some(28)));
+        assert_eq!(rows.len(), 4);
+        let by: std::collections::BTreeMap<String, String> =
+            rows.iter().map(|r| (horizon_of(r).unwrap(), hindsight_of(r))).collect();
+        assert!(
+            by["ultra_short"] < by["short"] && by["short"] < by["mid"] && by["mid"] < by["long"],
+            "hindsight 必须随档位天数单调后移：{by:?}"
+        );
+    }
+
+    /// 缺陷 ④ 的旧形态（一分析一行、档留 NULL）不得复发：无逐档决策时也只建**一行**，
+    /// 且该行档位名必须 ∈ Period::ALL。
+    #[test]
+    fn missing_horizon_decisions_yield_single_primary_row() {
+        let rows = build_pending_reflection_rows(&seed(None, Some("long"), Some(90)));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(horizon_of(&rows[0]).as_deref(), Some("long"));
+
+        // 负控：主档也缺失但声明了期望天数 ⇒ 按最近邻归一（不采信 LLM 措辞）
+        let rows2 = build_pending_reflection_rows(&seed(None, None, Some(6)));
+        assert_eq!(horizon_of(&rows2[0]).as_deref(), Some("short"));
+
+        // 负控：四档全中性 ⇒ 无逐档方向可判，退回主档单行而不是四行伪复盘
+        let all_neutral = r#"{"ultra_short":{"action":"观望"},"short":{"action":"持有"},
+                              "mid":{"action":"观望"},"long":{"action":"持有"}}"#;
+        let rows3 = build_pending_reflection_rows(&seed(Some(all_neutral), Some("mid"), Some(28)));
+        assert_eq!(rows3.len(), 1);
+        assert_eq!(horizon_of(&rows3[0]).as_deref(), Some("mid"));
+    }
+
+    /// `build_pending_reflection_rows_for` 只补给定档集（bin 的「缺哪档补哪档」）。
+    #[test]
+    fn rows_for_subset_builds_only_that_horizon() {
+        // 种子本身有 4 个**有方向**的档，而这里只传 [long] ⇒ 必须恰建 1 行。
+        // 负控：若 `_for` 忽略 horizons 参数、自己重算 ⇒ 会建 4 行，本用例当场红
+        // （第一版就是这么写的，靠这条才发现参数被吞掉）。
+        let hd = r#"{"ultra_short":{"action":"买入"},"short":{"action":"增持"},
+                     "mid":{"action":"减持"},"long":{"action":"卖出"}}"#;
+        let rows = build_pending_reflection_rows_for(
+            &seed(Some(hd), Some("mid"), Some(28)),
+            vec![("long".to_string(), 90)],
+        );
+        assert_eq!(rows.len(), 1, "_for 必须只建传入的档集，不得自行重算四档");
+        assert_eq!(horizon_of(&rows[0]).as_deref(), Some("long"));
     }
 }

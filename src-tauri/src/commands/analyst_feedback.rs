@@ -10,6 +10,7 @@
 //!    `missing required key request`（命令参数名 = JS 侧键名，见 AGENTS.md 禁区 13）；
 //! 2. **字段名**：六个 DTO 缺 `#[serde(rename_all = "camelCase")]` ⇒ 即便参数名对了，
 //!    camelCase 的载荷也满足不了必填的 snake_case 字段。
+//!
 //! 而调用点是 fire-and-forget + `.catch()` ⇒ 两道失败都被吞成一条 console.warn，界面毫无痕迹。
 //!
 //! `check-serde-annotations` 只扫 `harness/` 与 `commands/`，本文件**在扫描面内却一直报红**

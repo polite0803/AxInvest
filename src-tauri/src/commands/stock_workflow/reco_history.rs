@@ -33,8 +33,11 @@ pub async fn list_reco_history(
     // 按 backend 分支：PG 用 string_agg + $N；SQLite 保持原样。
     // 2026-08-01 修复：GROUP BY 必须包含非聚合列 period——
     // PG 强制 "SELECT 非聚合列必须出现在 GROUP BY"，SQLite 宽松不报（编译测不出，
-    // 运行时报错被前端 catch 静默 → 历史列表仍为空）。一次执行只对应一个 period，
-    // 加 period 到 GROUP BY 不会拆分分组。
+    // 运行时报错被前端 catch 静默 → 历史列表仍为空）。
+    // ⚠ 「一次执行只对应一个 period」这个前提**已不成立**：智能荐股本来就逐档各写一行，
+    //   趋势智选自 Phase Q2（用户裁定 mid+long 双档）起也逐档落库 ⇒ 同一 generated_at 会
+    //   拆成**多条**历史。这是预期形态（档位本就是列表的一列），不是重复计数；
+    //   面板恢复候选时按 stock_code 去重、保留较短持有期那一档（见 SerenityScreeningPanel）。
     let is_pg = db.get_database_backend() == sea_orm::DbBackend::Postgres;
     tracing::info!(
         "[list_reco_history] backend={:?} style_filter={:?} exclude_styles={:?} limit={:?} offset={:?}",

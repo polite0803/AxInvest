@@ -2041,6 +2041,11 @@ pub async fn run_single_stock_analysis(
             // 消费端应按 positionPct 自行派生，不得读成 EMPTY。
             let decision_position_state = extract_position_state(&decision_json_str);
 
+            // 四档独立决策（`decisionsByHorizon`）。本通道此前**从不回填**该列（建分析时
+            // 直接 `Set(None)`），于是「每档一行反思」在本通道退化成主档单行 —— 不是设计，
+            // 是缺数据。现在与 `run_stock_workflow_inner` 通道同样落库。
+            let horizon_decisions = extract_decisions_by_horizon(&decision_json_str);
+
             let _ = stock_analyses::Entity::update(stock_analyses::ActiveModel {
                 id: Set(analysis_id.clone()),
                 status: Set("completed".into()),
@@ -2048,6 +2053,7 @@ pub async fn run_single_stock_analysis(
                 decision_position_state: Set(decision_position_state),
                 decision_json: Set(decision_json_str),
                 decision_expected_holding_days: Set(effective_holding_days.map(|d| d as i64)),
+                horizon_decisions: Set(horizon_decisions.clone()),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
                 ..Default::default()
             })
@@ -2068,7 +2074,6 @@ pub async fn run_single_stock_analysis(
             //   作为 AS_OF 锚点查看"截至评估时点的实际走势"。
             //   - expected_holding_days 缺失时默认 28 天（与批量任务默认值一致）
             //   - 若计算出的 hindsight_date 在未来，批量任务会 skip 直到日期到达
-            let pending_id = uuid::Uuid::new_v4().to_string();
             // ⚠ 锚点用 `Utc::now()` 在本函数是**正确的**，不要照搬 as-of 语义。
             //
             // 判据（先问「本函数有没有 as-of 入口」，再决定锚点用 now 还是 as-of）：
@@ -2090,51 +2095,32 @@ pub async fn run_single_stock_analysis(
             // 编译报 E0425 `cannot find value current_as_of` —— 本函数内根本没有该上下文。
             // 那是一次**把 live-only 通道误判为 replay 通道**的误改，已回退。
             let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            let hindsight_date_str = {
-                let hold_days = effective_holding_days.unwrap_or(28) as i64;
-                let analysis_naive = chrono::NaiveDate::parse_from_str(&today_str, "%Y-%m-%d")
-                    .unwrap_or_else(|_| chrono::Local::now().date_naive());
-                let h = analysis_naive + chrono::Duration::days(hold_days);
-                h.format("%Y-%m-%d").to_string()
-            };
-            let _ = stock_reflections::ActiveModel {
-                id: Set(pending_id.clone()),
-                stock_code: Set(stock_code.to_string()),
-                stock_name: Set(stock_name.to_string()),
-                original_analysis_id: Set(analysis_id.clone()),
-                as_of_date: Set(today_str.clone()),
-                hindsight_date: Set(hindsight_date_str),
-                min_confidence_threshold: Set(70),
-                reflection_depth: Set("light".to_string()),
-                // 〇-B v2 第 4 条：pending 阶段尚未复盘任何档 ⇒ 显式 NULL
-                //   （NULL = 复盘档未知，读侧不得当作某档；真正盖章在反思收尾写入）
-                horizon: Set(None),
-                actual_outcome: Set(String::new()),
-                // v008 (C3 借鉴): 结构化 outcome,pending 阶段全 None
-                raw_return: Set(None),
-                alpha_return: Set(None),
-                holding_days: Set(None),
-                benchmark_name: Set(None),
-                // v008 (C2 借鉴): 输出 schema,pending 阶段全 None
-                verdict: Set(None),
-                alpha_cited: Set(None),
-                lesson_summary: Set(None),
-                what_went_wrong: Set(None),
-                missed_signals: Set(None),
-                fix_for_future: Set(None),
-                parameter_suggestions_json: Set(None),
-                horizon_results_json: Set(None),
-                decision_json: Set(None),
-                blackboard_snapshot: Set(None),
-                model_version: Set(None),
-                status: Set("pending".to_string()),
-                created_at: Set(chrono::Utc::now().timestamp_millis()),
-                updated_at: Set(chrono::Utc::now().timestamp_millis()),
+            // 〇-B v2 第 4 条 / `PLAN-reflection-per-horizon-row`：**一行 pending = 一个复盘档**。
+            //   建点统一走 `build_pending_reflection_rows`（三处通道共用），不再各抄一份默认值。
+            let pending_rows = super::reflection::build_pending_reflection_rows(
+                &super::reflection::PendingReflectionSeed {
+                    analysis_id: &analysis_id,
+                    stock_code,
+                    stock_name,
+                    analysis_date: &today_str,
+                    horizon_decisions: horizon_decisions.as_deref(),
+                    // 本通道不写 `decision_time_horizon` ⇒ 主档由期望天数最近邻派生
+                    primary_horizon: None,
+                    primary_holding_days: effective_holding_days.map(|d| d as i64),
+                    min_confidence_threshold: super::reflection::DEFAULT_REFLECTION_MIN_CONFIDENCE,
+                    reflection_depth: super::reflection::DEFAULT_REFLECTION_DEPTH,
+                    now_ms: chrono::Utc::now().timestamp_millis(),
+                },
+            );
+            let pending_count = pending_rows.len();
+            for row in pending_rows {
+                // 建行失败必须留痕：少一行 = 少一个档的复盘样本，静默丢会让四档覆盖率不可知
+                if let Err(e) = row.insert(db).await {
+                    tracing::warn!("[B1 batch_analysis] {stock_code} 建 pending 反思行失败: {e}");
+                }
             }
-            .insert(db)
-            .await;
             tracing::info!(
-                "[B1 batch_analysis] {stock_code} ({stock_name}) 已落盘 pending reflection {pending_id},等 D1 持仓期到达 resolve"
+                "[B1 batch_analysis] {stock_code} ({stock_name}) 已落盘 {pending_count} 行 pending reflection（每档一行）,等 D1 按档 resolve"
             );
 
             tracing::info!(

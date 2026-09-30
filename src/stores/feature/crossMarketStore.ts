@@ -13,9 +13,20 @@
  * - get_forex_kline
  */
 
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import type { KLine, StockQuote } from "@/types";
 import { create } from "zustand";
+
+/** 取数区 —— 每个区的失败必须独立记，一区失败不得覆盖另一区 */
+export type CrossMarketSection = "quote" | "kline" | "benchmark" | "forex";
+
+const NO_ERRORS: Record<CrossMarketSection, string | null> = {
+  quote: null,
+  kline: null,
+  benchmark: null,
+  forex: null,
+};
 
 export interface CrossMarketState {
   // 国际股票行情缓存（key: stock_code）
@@ -31,7 +42,8 @@ export interface CrossMarketState {
   loadingKline: boolean;
   loadingBenchmark: boolean;
   loadingForex: boolean;
-  error: string | null;
+  /** 各区最近一次取数失败的原因（已翻译）；null = 无失败。持久保留，不用瞬态提示冒充「暂无数据」 */
+  errors: Record<CrossMarketSection, string | null>;
 
   // ── Actions ──
   fetchIntlQuote: (stockCode: string, force?: boolean) => Promise<StockQuote | null>;
@@ -50,7 +62,6 @@ export interface CrossMarketState {
     period?: string,
     limit?: number,
   ) => Promise<KLine[] | null>;
-  clearError: () => void;
 }
 
 export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
@@ -63,13 +74,13 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
   loadingKline: false,
   loadingBenchmark: false,
   loadingForex: false,
-  error: null,
+  errors: NO_ERRORS,
 
   fetchIntlQuote: async (stockCode, force) => {
     if (!force && get().intlQuotes[stockCode]) {
       return get().intlQuotes[stockCode];
     }
-    set({ loadingQuote: true, error: null });
+    set((s) => ({ loadingQuote: true, errors: { ...s.errors, quote: null } }));
     try {
       const quote = await invoke<StockQuote>("get_international_stock_quote", {
         stockCode,
@@ -80,7 +91,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return quote;
     } catch (e) {
-      set({ loadingQuote: false, error: String(e) });
+      set((s) => ({ loadingQuote: false, errors: { ...s.errors, quote: translateBackendError(e) } }));
       return null;
     }
   },
@@ -90,7 +101,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
     if (get().intlKlines[key]) {
       return get().intlKlines[key];
     }
-    set({ loadingKline: true, error: null });
+    set((s) => ({ loadingKline: true, errors: { ...s.errors, kline: null } }));
     try {
       const klines = await invoke<KLine[]>("get_international_stock_kline", {
         stockCode,
@@ -103,7 +114,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return klines;
     } catch (e) {
-      set({ loadingKline: false, error: String(e) });
+      set((s) => ({ loadingKline: false, errors: { ...s.errors, kline: translateBackendError(e) } }));
       return null;
     }
   },
@@ -113,7 +124,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
     if (get().benchmarkKlines[key]) {
       return get().benchmarkKlines[key];
     }
-    set({ loadingBenchmark: true, error: null });
+    set((s) => ({ loadingBenchmark: true, errors: { ...s.errors, benchmark: null } }));
     try {
       const klines = await invoke<KLine[]>("get_benchmark_kline", {
         benchmarkCode,
@@ -126,7 +137,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return klines;
     } catch (e) {
-      set({ loadingBenchmark: false, error: String(e) });
+      set((s) => ({ loadingBenchmark: false, errors: { ...s.errors, benchmark: translateBackendError(e) } }));
       return null;
     }
   },
@@ -136,7 +147,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
     if (get().forexKlines[key]) {
       return get().forexKlines[key];
     }
-    set({ loadingForex: true, error: null });
+    set((s) => ({ loadingForex: true, errors: { ...s.errors, forex: null } }));
     try {
       const klines = await invoke<KLine[]>("get_forex_kline", {
         pair,
@@ -149,10 +160,8 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return klines;
     } catch (e) {
-      set({ loadingForex: false, error: String(e) });
+      set((s) => ({ loadingForex: false, errors: { ...s.errors, forex: translateBackendError(e) } }));
       return null;
     }
   },
-
-  clearError: () => set({ error: null }),
 }));

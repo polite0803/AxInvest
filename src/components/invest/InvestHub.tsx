@@ -23,11 +23,15 @@ const LazyPaperPortfolio = lazy(() =>
 );
 const LazyQuantLab = lazy(() => import("@/pages/QuantLabPage").then((m) => ({ default: m.QuantLabPage })));
 const LazyPipeline = lazy(() => import("@/pages/PipelinePage").then((m) => ({ default: m.PipelinePage })));
+const LazyCrossMarket = lazy(() =>
+  import("@/components/stock-analysis/CrossMarketDashboard").then((m) => ({ default: m.CrossMarketDashboard }))
+);
 
-/** 投资业务 tab key — 按操作逻辑排序：发现 → 单股深度 → 外部导入 → 持仓跟踪 → 策略验证 → 流程编排 */
+/** 投资业务 tab key — 按操作逻辑排序：发现 → 单股深度 → 跨市场参照 → 外部导入 → 持仓跟踪 → 策略验证 → 流程编排 */
 export type InvestTabKey =
   | "screener"
   | "workspace"
+  | "cross-market"
   | "screenshot-diagnosis"
   | "paper-portfolio"
   | "quant"
@@ -40,6 +44,7 @@ const DEFAULT_TAB: InvestTabKey = "screener";
 const VALID_TABS: Set<InvestTabKey> = new Set([
   "screener",
   "workspace",
+  "cross-market",
   "screenshot-diagnosis",
   "paper-portfolio",
   "quant",
@@ -69,8 +74,8 @@ function SafeTab({ children }: { children: React.ReactNode }) {
  *
  * 将 7 个 AxInvest 独有的股票业务页面集成到一个页面内的 Tab 中，按业务操作逻辑排序：
  *   1. 市场主线（全局视角） → 2. 选股（发现候选） → 3. 工作区（单股深度）
- *   → 4. 截图诊断（外部导入） → 5. 模拟观察（持仓跟踪）
- *   → 6. 量化（策略验证） → 7. 管道（流程编排）
+ *   → 4. 跨市场行情（外部市场参照） → 5. 截图诊断（外部导入） → 6. 模拟观察（持仓跟踪）
+ *   → 7. 量化（策略验证） → 8. 管道（流程编排）
  *
  * URL 参数：
  *   - ?tab=xxx — 当前激活的 tab（刷新保持）
@@ -122,6 +127,16 @@ export function InvestHub() {
         children: (
           <SafeTab>
             <LazyStockWorkspace />
+          </SafeTab>
+        ),
+      },
+      {
+        // 标签复用 crossMarket.title（11 语言已收录），不新增 i18n 键
+        key: "cross-market",
+        label: t("crossMarket.title"),
+        children: (
+          <SafeTab>
+            <LazyCrossMarket />
           </SafeTab>
         ),
       },

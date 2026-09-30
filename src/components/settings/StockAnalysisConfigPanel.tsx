@@ -168,6 +168,7 @@ export function getDefaultVariables(): Variable[] {
   b("reco_risk_budget_pct", 1.5, "stockAnalysis.configDescriptions.recoRiskBudgetPct", "number");
   b("reco_round_trip_cost_pct", 0.6, "stockAnalysis.configDescriptions.recoRoundTripCostPct", "number");
   b("reco_conf_sensitivity", 1.0, "stockAnalysis.configDescriptions.recoConfSensitivity", "number");
+  b("reco_ic_gate", "shadow", "stockAnalysis.configDescriptions.recoIcGate", "string");
   // 决策回溯（decision_tracker.rs）
   b("decision_max_history_per_stock", 50, "stockAnalysis.configDescriptions.decisionMaxHistoryPerStock", "number");
   // 技术指标周期（indicators.rs IndicatorConfig）
@@ -558,6 +559,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "reco_risk_budget_pct",
           "reco_round_trip_cost_pct",
           "reco_conf_sensitivity",
+          "reco_ic_gate",
           "decision_max_history_per_stock",
         ]),
       },

@@ -2683,6 +2683,10 @@
     "PLUGIN_SOURCE_BUILD_FAILED": "プラグインのソースビルドに失敗しました",
     "PLUGIN_SOURCE_BUILD_TOOLCHAIN_UNAVAILABLE": "利用可能な Rust ツールチェーンまたはターゲットがありません",
     "PLUGIN_SOURCE_BUILD_RESOURCE_LOW": "ディスク容量またはメモリが不足しているため、プラグインをビルドできません",
+    "PLUGIN_PANEL_ASSET_UNAVAILABLE": "ダッシュボードパネルに描画できる内容ソースがありません：プラグインが frontendEntry を未宣言、アセットファイルが存在しない、またはプラグイン／パネルが未インストール",
+    "PLUGIN_PANEL_ASSET_BLOCKED": "パネルアセットはセキュリティポリシーにより拒否されました：パスがプラグインディレクトリ外、拡張子が許可リスト外、またはサイズ上限超過",
+    "PLUGIN_PANEL_ASSET_UNPINNED": "このプラグインにはインストール時の完全性アンカーがないため、パネル内容を検証できません。再インストール後に利用できます",
+    "PLUGIN_PANEL_ASSET_TAMPERED": "インストール ディレクトリがインストール時に確定したハッシュと一致しないため、パネル内容の表示を停止しました。プラグインを削除または再インストールしてください",
     "PLUGIN_PROFILE_IO_FAILED": "プラグインバンドルプロファイルの永続化に失敗しました",
     "PROVIDER_ADAPTER_NOT_FOUND": "プロバイダーアダプターが見つかりません",
     "PROVIDER_CREATE_FAILED": "プロバイダーの作成に失敗しました",
@@ -4912,7 +4916,6 @@
       "strategyMerge": "マージ（既存を保持）",
       "strategyDryRun": "ドライラン（検証のみ）"
     },
-    "policyDashboard": "RL 策略面板",
     "experiences": "经验",
     "avgReward": "平均奖励",
     "createPolicy": "创建新策略",
@@ -14657,7 +14660,12 @@
     "boolYes": "はい",
     "boolNo": "いいえ",
     "backendCallFailed": "バックエンド呼び出しに失敗しました",
-    "tierScopeHint": "档位口径：中期のみ対象（ボトルネック／政策／業績触媒は週〜単位で展開）。短期・超短期は適用外、保存 period は常に mid、保有期間は同档の権威値 28 日。",
+    "tierScopeHint": "档位口径：中期・長期の2档を担当（ボトルネック/政策/業績カタリストは週〜月単位で実現）。超短期・短期は設計上提供せず、档ごとに1行ずつ保存し、保有日数は各档の権威値を使用。",
+    "timeBasisNoTier": "リアルタイム候補は档位なし ⇒ 推奨ウィンドウなし（档位別の明細は履歴参照）",
+    "entryBand": "建玉バンド ±{{pct}}%",
+    "entryBandHalfFallback": "バンドは固定ストップ倍率の半分 ⇒ ボラティリティ由来ではない",
+    "entryBandRangeFallback": "ストップ距離が取れない ⇒ バンドはテンプレ値に退避",
+    "candidateTierRowsNote": "{{stocks}} 銘柄 · 档位ごとに1行",
     "emptyHistoryWarning": "セレニティ履歴が空です：list_reco_history が 0 行を返しました（DB に serenity/bottleneck スタイルの履歴がないか、バックエンドコマンドの失敗が静かに無視された可能性があります）",
     "timeBasis": "時間基準: {{date}} · 推奨期間約{{days}}日（〜{{until}}）"
   },
@@ -15204,7 +15212,15 @@
       },
       "matrixMisfit": {
         "valuation_needs_weeks_to_realize_kept_by_user_decision": "既知のミスマッチ：評価額は実現に数週間、決定により採用継続"
-      }
+      },
+      "loopUncalibratedSamples": "ループ未校正：サンプル不足",
+      "loopUncalibratedIc": "ループ未校正：IC で強度を測定不可",
+      "loopCalibrated": "ループ校正済み 重み {weight}",
+      "loopDemoted": "ループ減重 {weight}（負の IC {ic}）",
+      "loopGateOn": "振り返りループ有効（on）、最終再計算 {time}",
+      "loopGateShadow": "振り返りループはシャドウモード：計算のみで採点には不使用、最終再計算 {time}",
+      "loopGateOff": "振り返りループ無効（off）、最終再計算 {time}",
+      "loopNeverRecalc": "再計算されたことはありません"
     },
     "export": {
       "analystReports": "分析师报告",
@@ -16526,6 +16542,9 @@
       "horizonLong": "長期",
       "horizonAuto": "主档に従う",
       "horizonUnknown": "不明な期間",
+      "colHorizon": "復盤期間",
+      "horizonReviewTag": "今回の復盤対象",
+      "horizonNoNarration": "客観判定のみ、復盤の記述なし",
       "horizonStatusLabel": "ステータス：",
       "horizonStatusMature": "成熟済み",
       "horizonStatusImmature": "未到来",
@@ -17383,7 +17402,8 @@
       "limitUpThHigh": "ストップ高ポテンシャル - 高ポテンシャル閾値",
       "limitUpThMed": "ストップ高ポテンシャル - 中ポテンシャル閾値",
       "limitUpThLow": "ストップ高ポテンシャル - 低ポテンシャル閾値",
-      "analysisDryRun": "ドライランモード：LLMを呼び出さず、モック出力でフローを検証"
+      "analysisDryRun": "ドライランモード：LLMを呼び出さず、モック出力でフローを検証",
+      "recoIcGate": "推薦反映ループゲート：off=無効；shadow=計算と記録のみ（採点に不使用）；on=マスごループ重みで静的重みを上書き（減重のみ）"
     },
     "evidenceCitation": {
       "loading": "証拠引用を抽出中...",

@@ -412,6 +412,43 @@ pub async fn plugin_ui_action(
     .map_err(|e| format!("plugin ui action task panicked: {e}"))?
 }
 
+/// 读取插件仪表盘面板声明的前端资产 —— 面板渲染宿主（沙箱 iframe）的内容来源。
+///
+/// 路径形状、canonicalize 逃逸校验、大小上限全部收在 `PluginManager::read_panel_asset` 内；
+/// 本命令只做**错误归类**：「这个面板没有内容」与「内容被安全策略拒绝」的用户动作相反
+/// （前者是插件的配置态，后者需要插件作者改 manifest），故分两个码。
+#[agent_command(
+    domain = plugin,
+    safety = Safe,
+    call_mode = StateInput,
+    description = "读取插件仪表盘面板的前端资产"
+)]
+#[command]
+pub fn plugin_read_panel_asset(
+    state: State<'_, AppState>,
+    plugin_id: String,
+    panel_id: String,
+) -> Result<axagent_plugins::PluginPanelAsset, String> {
+    let plugin_manager = state.plugin_manager.clone();
+    let manager = plugin_manager.blocking_read();
+    manager.read_panel_asset(&plugin_id, &panel_id).map_err(|e| {
+        use crate::commands::error::ErrorCategory as Cat;
+        let (code, category) = match &e {
+            axagent_plugins::PluginError::PermissionDenied(_) => {
+                (plugin_err::PANEL_ASSET_BLOCKED, Cat::PermissionDenied)
+            },
+            axagent_plugins::PluginError::IntegrityUnpinned(_) => {
+                (plugin_err::PANEL_ASSET_UNPINNED, Cat::Validation)
+            },
+            axagent_plugins::PluginError::IntegrityMismatch(_) => {
+                (plugin_err::PANEL_ASSET_TAMPERED, Cat::Unrecoverable)
+            },
+            _ => (plugin_err::PANEL_ASSET_UNAVAILABLE, Cat::Validation),
+        };
+        String::from(ErrorResponse::from_error_with_code(code, e, category))
+    })
+}
+
 #[agent_command(domain = plugin, safety = Caution, call_mode = StateInput, description = "更新指定插件")]
 #[command]
 pub async fn plugin_update(

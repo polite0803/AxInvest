@@ -575,7 +575,7 @@ pub async fn observe_from_trajectory(
             let delay = last_ts.saturating_sub(step.timestamp_ms);
             let outcome_ok = outcome_is_positive(t.outcome);
             for r in results {
-                let positive = !r.is_error == outcome_ok;
+                let positive = o_edge_hit(r.is_error, outcome_ok);
                 if !push_observation(
                     db,
                     &tool_entity(&r.tool_name),
@@ -631,6 +631,15 @@ async fn push_observation(
     observe_edge(db, cause, effect, positive, delay_ms, trajectory_id).await?;
     *observed += 1;
     Ok(true)
+}
+
+/// O 边命中判据 —— 「工具表现」与「最终结果」是否一致（工具报错 且 结果失败 才算一致）。
+///
+/// 抽成纯函数的理由不是审美：原测试把判据式子**重写一遍**再断言，
+/// 于是 `!=` 被改成 `==` 时测试照样绿 —— 它测的是自己抄的那份，不是生产。
+/// 生产与测试共用本函数后，被测对象才真是判据本身。
+fn o_edge_hit(tool_errored: bool, outcome_ok: bool) -> bool {
+    tool_errored != outcome_ok
 }
 
 /// 轨迹结果是否为正向（成功或部分成功）
@@ -811,7 +820,7 @@ mod tests {
             (true, true, false),   // 工具报错 + 成功：不一致
         ];
         for (is_error, outcome_ok, expected) in cases {
-            assert_eq!(!is_error == outcome_ok, expected, "case {is_error}/{outcome_ok}");
+            assert_eq!(o_edge_hit(is_error, outcome_ok), expected, "case {is_error}/{outcome_ok}");
         }
     }
 }

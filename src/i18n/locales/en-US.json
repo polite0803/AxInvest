@@ -11748,7 +11748,8 @@
         "type": {
           "workflow": "Workflow",
           "conversation": "Conversation"
-        }
+        },
+        "runtime": "Runtime & Learning"
       },
       "wizard": {
         "start": "Start",
@@ -11789,6 +11790,7 @@
         "trend_improving": "Improving",
         "trend_stable": "Stable",
         "trend_declining": "Declining",
+        "trend_insufficient_data": "Not enough samples to judge the trend",
         "trend_": "Trend"
       },
       "noProviderConfig": "Please configure a default AI provider first",
@@ -11816,6 +11818,8 @@
         "disabled": "Disabled",
         "conditions": "Trigger Conditions",
         "actions": "Execute Actions",
+        "noConditions": "No conditions",
+        "noActions": "No actions",
         "noData": "No automation rules available",
         "triggered": "{{count}} rules triggered",
         "nothingTriggered": "No rules triggered",
@@ -15447,6 +15451,59 @@
       "loopGateShadow": "Reflection loop in shadow mode: computed but not applied, last recalculated {time}",
       "loopGateOff": "Reflection loop disabled (off), last recalculated {time}",
       "loopNeverRecalc": "never recalculated"
+    },
+    "moverRecall": {
+      "title": "Window Gain Recall Check",
+      "refresh": "Recheck",
+      "boundary": "Checkable range {{from}} ~ {{to}}; close snapshots start from {{since}} (earlier dates were never collected — no backfill inference)",
+      "universe": "Universe: {{size}} stocks, {{confirmed}} fully confirmed",
+      "universeDegraded": "Incomplete universe ({{confirmed}}/{{size}} fully confirmed): the gap is filled from local picks — big movers outside the pool may be missing from the sample",
+      "rateReachability": "Reachability (ever pooled)",
+      "rateCoverage": "Coverage (picked in pool)",
+      "rateUnexplained": "Unexplained share",
+      "rateUnavailable": "Not enough samples",
+      "events": "{{events}} qualifying events / {{misses}} misses",
+      "empty": "No qualifying events in this range (criterion: cumulative window gain)",
+      "emptyNotYet": "Window not yet filled: unfilled tiers are not yet decidable; filled tiers have no qualifying events ({{have}} trading days collected; see tier notes below)",
+      "windowOpen": "Window not yet filled ({{have}}/{{need}} trading days collected)",
+      "rulesTitle": "Four-tier criteria (thresholds are template variables; window days come from the single tier source)",
+      "rule": "{{tier}}: cumulative window gain ≥ {{gain}}% ({{days}} trading days; variable {{var}})",
+      "rulesMissing": "{{count}} tier criteria not established (threshold variable not positive); excluded from this check",
+      "layersTitle": "Attribution layers",
+      "layer": {
+        "recommended": "Recommended (hit)",
+        "late_timing": "Late timing",
+        "not_in_pool": "Not in candidate pool",
+        "pool_degraded": "Pool degraded",
+        "by_design": "No picks by design",
+        "l3_scored_out": "Scored out of top-N",
+        "other_period": "Picked in another tier",
+        "unexplained": "Unexplained (insufficient traces)"
+      },
+      "missesTitle": "Miss details (by cumulative gain desc, up to 200)",
+      "colName": "Stock",
+      "colTier": "Tier",
+      "colCum": "Cum. gain",
+      "colMaxDaily": "Max 1-day",
+      "colLayer": "Layer",
+      "scoredOut": "Trim trace: {{styles}}",
+      "noteByDesign": "Tiers that produce no picks by design (e.g. Serenity ultra-short/short) appear only as notes and are excluded from the miss denominator.",
+      "notePoolDegraded": "Degraded pools are a data-reachability issue, not an algorithm fault.",
+      "noteShadow": "Miss-based demotion only feeds the stock-reco loop (governed by the reco_ic_gate switch); no separate weight writes.",
+      "failed": "Check cannot run: {{detail}}",
+      "malformed": "Unexpected payload shape (missing {{fields}}) ⇒ panel cannot render",
+      "marketType": {
+        "hk": "HK",
+        "us": "US",
+        "star": "STAR Market",
+        "main_sh": "Shanghai Main",
+        "main_sz": "Shenzhen Main",
+        "chinext": "ChiNext",
+        "bj": "Beijing SE",
+        "neeq": "NEEQ",
+        "b_share": "B-shares",
+        "unknown": "Unknown"
+      }
     },
     "export": {
       "analystReports": "Analyst Reports",

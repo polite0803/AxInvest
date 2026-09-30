@@ -12125,6 +12125,7 @@
         "trend_improving": "Amélioration",
         "trend_stable": "Stable",
         "trend_declining": "Déclin",
+        "trend_insufficient_data": "Échantillons insuffisants pour juger la tendance",
         "trend_": "Tendance"
       },
       "noProviderConfig": "Please configure a default AI provider first",
@@ -12141,6 +12142,8 @@
         "disabled": "Désactivées",
         "conditions": "Conditions de déclenchement",
         "actions": "Actions à exécuter",
+        "noConditions": "Aucune condition",
+        "noActions": "Aucune action",
         "noData": "Aucune règle d'automatisation",
         "triggered": "{{count}} règles déclenchées",
         "nothingTriggered": "Aucune règle déclenchée",
@@ -13077,7 +13080,8 @@
         "type": {
           "workflow": "Workflow",
           "conversation": "Conversation"
-        }
+        },
+        "runtime": "Exécution et apprentissage"
       },
       "wizard": {
         "start": "Start",
@@ -15228,6 +15232,59 @@
       "loopGateShadow": "Boucle de réflexion en mode fantôme : calculée sans application, dernier recalcul {time}",
       "loopGateOff": "Boucle de réflexion désactivée (off), dernier recalcul {time}",
       "loopNeverRecalc": "jamais recalculate"
+    },
+    "moverRecall": {
+      "title": "Contrôle de rappel sur gain de fenêtre",
+      "refresh": "Vérifier à nouveau",
+      "boundary": "Plage vérifiable {{from}} ~ {{to}} ; instantanés de clôture depuis {{since}} (les dates antérieures n'ont jamais été collectées — aucune extrapolation)",
+      "universe": "Univers : {{size}} actions, dont {{confirmed}} confirmées intégralement",
+      "universeDegraded": "Univers incomplet ({{confirmed}}/{{size}} confirmées) : le manque est comblé par des valeurs locales — de fortes hausses hors panier peuvent manquer",
+      "rateReachability": "Atteignabilité (déjà en panier)",
+      "rateCoverage": "Couverture (recommandé en panier)",
+      "rateUnexplained": "Part inexpliquée",
+      "rateUnavailable": "Échantillons insuffisants",
+      "events": "{{events}} événements qualifiés / {{misses}} manqués",
+      "empty": "Aucun événement qualifié sur cette plage (critère : gain cumulé de la fenêtre)",
+      "emptyNotYet": "Fenêtre incomplète : paliers incomplets non encore évaluables, paliers complets sans événement qualifié ({{have}} jours de bourse collectés ; voir notes de palier ci-dessous)",
+      "windowOpen": "Fenêtre incomplète ({{have}}/{{need}} jours de bourse collectés)",
+      "rulesTitle": "Critères à quatre paliers (seuils = variables de modèle ; jours = source unique des paliers)",
+      "rule": "{{tier}} : gain cumulé de la fenêtre ≥ {{gain}} % ({{days}} jours de bourse ; variable {{var}})",
+      "rulesMissing": "{{count}} critères de palier non établis (variable de seuil non positive) ; exclus de ce contrôle",
+      "layersTitle": "Couches d'attribution",
+      "layer": {
+        "recommended": "Recommandé (touché)",
+        "late_timing": "Recommandation tardive",
+        "not_in_pool": "Hors panier candidat",
+        "pool_degraded": "Panier dégradé",
+        "by_design": "Aucune sélection par conception",
+        "l3_scored_out": "Écarté du top-N",
+        "other_period": "Recommandé sur un autre palier",
+        "unexplained": "Inexpliqué (traces insuffisantes)"
+      },
+      "missesTitle": "Détail des manqués (par gain cumulé décroissant, max. 200)",
+      "colName": "Action",
+      "colTier": "Palier",
+      "colCum": "Gain cumulé",
+      "colMaxDaily": "Max 1 jour",
+      "colLayer": "Couche",
+      "scoredOut": "Trace d'écartement : {{styles}}",
+      "noteByDesign": "Les paliers sans sélection par conception (p. ex. Serenity ultra-court/court) n'apparaissent qu'en note et ne comptent pas dans le dénominateur des manqués.",
+      "notePoolDegraded": "Un panier dégradé relève de l'accès aux données, pas de l'algorithme.",
+      "noteShadow": "La dépriorisation issue des manqués n'alimente que la boucle de recommandation (commutateur reco_ic_gate) ; aucun poids n'est écrit séparément.",
+      "failed": "Contrôle impossible : {{detail}}",
+      "malformed": "Forme de données inattendue ({{fields}} manquant) ⇒ panneau non affichable",
+      "marketType": {
+        "hk": "Hong Kong",
+        "us": "États-Unis",
+        "star": "Marché STAR",
+        "main_sh": "Shanghai principal",
+        "main_sz": "Shenzhen principal",
+        "chinext": "ChiNext",
+        "bj": "Bourse de Pékin",
+        "neeq": "NEEQ",
+        "b_share": "Actions B",
+        "unknown": "Inconnu"
+      }
     },
     "export": {
       "analystReports": "analystReports",

@@ -202,30 +202,42 @@ export interface DomainDashboardResponse {
   dashboard: DomainDashboard;
 }
 
-/** 工作流步骤信息 */
+/**
+ * 工作流步骤 —— 逐字段对齐 `opc_get_capability_pack_workflow_steps` 的实际下发形状。
+ *
+ * 原类型声明了 `workflow_id` / `step_type` / `avg_duration_ms` / `success_rate` /
+ * `execution_count`，而后端 `WorkflowStep` 只有 `id/name/description/order`（**无执行统计源**），
+ * 命令也只下发那四个。组件读 `step.step_order` 得到 `undefined`（渲染成「步骤 undefined」），
+ * 读 `success_rate > 0.9` 恒 false（全部灰 wait）—— 幽灵字段一律删除，
+ * 宁可少显示，也不拿不存在的运行态冒充结果。字段名同时按全站 camelCase 规范收正（禁区 13）。
+ */
 export interface WorkflowStepInfo {
   id: string;
-  workflow_id: string;
-  step_order: number;
-  step_type: string;
   name: string;
   description: string;
-  avg_duration_ms: number;
-  success_rate: number;
-  execution_count: number;
+  stepOrder: number;
 }
 
-/** 自动化规则信息 */
+/**
+ * 自动化规则 —— 逐字段对齐 `opc::automation::AutomationRule` 的原样序列化。
+ *
+ * 命令直接透传该结构体，且**没有** `rename_all` ⇒ 字段是 snake_case、枚举值是
+ * PascalCase。原类型写的 `trigger_event` / `condition` / `action` / `enabled` /
+ * `last_triggered` / `trigger_count` 后端一个都不下发，于是组件把触发条件与动作
+ * 渲染成空 Tag、启停徽标恒「未启用」。
+ *
+ * 数据来源边界（不是 bug）：命令走 `get_enabled_rules`，返回的本就是启用项，
+ * 故 `is_enabled === false` 这一支当前不可达。
+ */
 export interface AutomationRuleInfo {
-  id: string;
+  id: number;
   name: string;
   description: string;
-  trigger_event: string;
-  condition: string;
-  action: string;
-  enabled: boolean;
-  last_triggered: number | null;
-  trigger_count: number;
+  trigger: "Manual" | "Scheduled" | "EventDriven" | "MetricThreshold" | "TimeBased";
+  conditions: { field: string; operator: string; value: unknown }[];
+  actions: { action_type: string; target: string; params: unknown }[];
+  is_enabled: boolean;
+  execution_mode: "Synchronous" | "Asynchronous" | "Batched";
 }
 
 /**
@@ -268,12 +280,9 @@ export interface DomainLearningMetrics {
   decision_accuracy: number;
   risk_prediction_accuracy: number;
   avg_feedback_score: number;
-  improvement_trend: "improving" | "stable" | "declining";
-  reflection_count: number;
-  evolution_count: number;
-  improvement_count: number;
-  avg_improvement_score: number;
-  last_reflection_at: number | null;
-  last_evolution_at: number | null;
-  last_improvement_at: number | null;
+  /**
+   * 后端 `ImprovementTrend` 四值，无样本时是 `insufficient_data` —— 原类型漏了这一支，
+   * 于是组件的 else 分支把它渲染成红色「恶化」：拿不到数据被伪装成负面结论。
+   */
+  improvement_trend: "improving" | "stable" | "declining" | "insufficient_data";
 }

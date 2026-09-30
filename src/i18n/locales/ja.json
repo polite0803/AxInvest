@@ -12125,6 +12125,7 @@
         "trend_improving": "改善傾向",
         "trend_stable": "安定",
         "trend_declining": "低下傾向",
+        "trend_insufficient_data": "サンプル不足のため傾向を判定できません",
         "trend_": "趋势"
       },
       "noProviderConfig": "Please configure a default AI provider first",
@@ -12141,6 +12142,8 @@
         "disabled": "無効",
         "conditions": "トリガー条件",
         "actions": "実行アクション",
+        "noConditions": "トリガー条件なし",
+        "noActions": "実行アクションなし",
         "noData": "自動化ルールがありません",
         "triggered": "{{count}} 件のルールがトリガーされました",
         "nothingTriggered": "トリガーされたルールはありません",
@@ -13077,7 +13080,8 @@
         "type": {
           "workflow": "Workflow",
           "conversation": "Conversation"
-        }
+        },
+        "runtime": "実行と学習"
       },
       "wizard": {
         "start": "Start",
@@ -15228,6 +15232,59 @@
       "loopGateShadow": "振り返りループはシャドウモード：計算のみで採点には不使用、最終再計算 {time}",
       "loopGateOff": "振り返りループ無効（off）、最終再計算 {time}",
       "loopNeverRecalc": "再計算されたことはありません"
+    },
+    "moverRecall": {
+      "title": "ウィンドウ上昇率達成の未検出チェック",
+      "refresh": "再チェック",
+      "boundary": "チェック可能期間 {{from}} ~ {{to}}；終値スナップショットは {{since}} 以降（それ以前は未収集、遡及補完はしない）",
+      "universe": "ユニバース {{size}} 銘柄、うち {{confirmed}} 銘柄が全量確認済み",
+      "universeDegraded": "ユニバース不完全（{{confirmed}}/{{size}} が全量確認済み）：不足分はローカル銘柄で補完 — プール外の急騰銘柄が標本に含まれない可能性がある",
+      "rateReachability": "到達率（プール入り）",
+      "rateCoverage": "カバレッジ（プール内で推奨）",
+      "rateUnexplained": "原因不明率",
+      "rateUnavailable": "標本不足で算出不可",
+      "events": "達成イベント {{events}} 件 / 未検出 {{misses}} 件",
+      "empty": "本期間に達成イベントなし（判定基準はウィンドウ累計上昇率）",
+      "emptyNotYet": "ウィンドウ未充足：未充足の段階は判定不能、充足済みの段階は達成イベントなし（収集済み {{have}} 営業日、下記の段階注記参照）",
+      "windowOpen": "ウィンドウ未充足（収集済み {{have}} / 必要 {{need}} 営業日）",
+      "rulesTitle": "4 段階の判定基準（閾値はテンプレート変数、日数は段階の唯一の情報源）",
+      "rule": "{{tier}}：ウィンドウ累計上昇率 ≥ {{gain}}%（{{days}} 営業日；変数 {{var}}）",
+      "rulesMissing": "{{count}} 段階の判定基準が不成立（閾値変数が正でない）、本チェック対象外",
+      "layersTitle": "原因レイヤー",
+      "layer": {
+        "recommended": "推奨済み（ヒット）",
+        "late_timing": "推奨が遅い",
+        "not_in_pool": "候補プール未入り",
+        "pool_degraded": "プール縮退",
+        "by_design": "設計上出票しない",
+        "l3_scored_out": "top-N 外で除外",
+        "other_period": "他段階で推奨済み",
+        "unexplained": "原因不明（記録不足）"
+      },
+      "missesTitle": "未検出の明細（累計上昇率の降順、最大 200 件）",
+      "colName": "銘柄",
+      "colTier": "段階",
+      "colCum": "累計上昇率",
+      "colMaxDaily": "最大単日",
+      "colLayer": "原因",
+      "scoredOut": "除外記録：{{styles}}",
+      "noteByDesign": "設計上出票しない段階（例：トレンド厳選の超短/短）は説明欄のみで、未検出の分母には含めない。",
+      "notePoolDegraded": "プール縮退はデータ到達性の問題であり、アルゴリズムの責任ではない。",
+      "noteShadow": "未検出による減権は推薦クローズドループ（reco_ic_gate スイッチ）にのみ統合され、個別の重み書き込みは行わない。",
+      "failed": "チェック実行不可：{{detail}}",
+      "malformed": "戻り値の形状が一致しません（{{fields}} が欠落）⇒ 本パネルは描画できません",
+      "marketType": {
+        "hk": "香港株",
+        "us": "米国株",
+        "star": "科創板",
+        "main_sh": "上海主板",
+        "main_sz": "深圳主板",
+        "chinext": "創業板",
+        "bj": "北京証券取引所",
+        "neeq": "新三板",
+        "b_share": "B株",
+        "unknown": "未識別"
+      }
     },
     "export": {
       "analystReports": "分析师报告",

@@ -778,6 +778,38 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             ),
             is_secret: false,
         },
+        // 窗口涨幅达标漏检核查的四档阈值（`PLAN-mover-recall-attribution.md`）。
+        // 出厂值来自用户裁定：超短 10%、短 20%、中 30%、长 40%。
+        // 口径边界：**绝对涨幅，不含板块涨停语义**，故变量名与文案一律不得写「涨停」；
+        // 窗口天数不在这里（唯一来源是 `harness::holding_period::default_holding_days`）。
+        Variable {
+            name: "mover_gain_ultra_short".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(10.0),
+            description: Some("超短档窗口累计涨幅达标阈值（%）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "mover_gain_short".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(20.0),
+            description: Some("短档窗口累计涨幅达标阈值（%）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "mover_gain_mid".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(30.0),
+            description: Some("中档窗口累计涨幅达标阈值（%）".into()),
+            is_secret: false,
+        },
+        Variable {
+            name: "mover_gain_long".into(),
+            var_type: "number".into(),
+            value: serde_json::json!(40.0),
+            description: Some("长档窗口累计涨幅达标阈值（%）".into()),
+            is_secret: false,
+        },
         Variable {
             name: "reco_stop_vol_mult".into(),
             var_type: "number".into(),

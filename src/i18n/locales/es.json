@@ -12125,6 +12125,7 @@
         "trend_improving": "Mejora",
         "trend_stable": "Estable",
         "trend_declining": "Descenso",
+        "trend_insufficient_data": "Muestras insuficientes para juzgar la tendencia",
         "trend_": "Tendencia"
       },
       "noProviderConfig": "Please configure a default AI provider first",
@@ -12141,6 +12142,8 @@
         "disabled": "Deshabilitadas",
         "conditions": "Condiciones de activación",
         "actions": "Acciones a ejecutar",
+        "noConditions": "Sin condiciones",
+        "noActions": "Sin acciones",
         "noData": "Sin reglas de automatización",
         "triggered": "{{count}} reglas activadas",
         "nothingTriggered": "Ninguna regla activada",
@@ -13077,7 +13080,8 @@
         "type": {
           "workflow": "Workflow",
           "conversation": "Conversation"
-        }
+        },
+        "runtime": "Ejecución y aprendizaje"
       },
       "wizard": {
         "start": "Start",
@@ -15228,6 +15232,59 @@
       "loopGateShadow": "Bucle de reflexión en modo sombra: solo calculado, sin aplicar, último recálculo {time}",
       "loopGateOff": "Bucle de reflexión desactivado (off), último recálculo {time}",
       "loopNeverRecalc": "nunca recalculado"
+    },
+    "moverRecall": {
+      "title": "Verificación de recall por ganancia en ventana",
+      "refresh": "Revisar de nuevo",
+      "boundary": "Rango verificable {{from}} ~ {{to}}; instantáneas de cierre desde {{since}} (fechas anteriores no se recopilaron — sin retrocálculo)",
+      "universe": "Universo: {{size}} acciones, {{confirmed}} confirmadas por completo",
+      "universeDegraded": "Universo incompleto ({{confirmed}}/{{size}} confirmadas): el hueco se rellena con valores locales — puede que falten grandes subidas fuera de la cartera",
+      "rateReachability": "Alcance (alguna vez en cartera)",
+      "rateCoverage": "Cobertura (recomendado en cartera)",
+      "rateUnexplained": "Proporción sin explicar",
+      "rateUnavailable": "Muestras insuficientes",
+      "events": "{{events}} eventos calificados / {{misses}} no detectados",
+      "empty": "Sin eventos calificados en este rango (criterio: ganancia acumulada de la ventana)",
+      "emptyNotYet": "Ventana incompleta: niveles incompletos aún no evaluables; niveles completos sin eventos calificados ({{have}} días de negociación recopilados; ver notas de nivel abajo)",
+      "windowOpen": "Ventana incompleta ({{have}}/{{need}} días de negociación recopilados)",
+      "rulesTitle": "Criterios de cuatro niveles (umbrales como variables de plantilla; días desde la única fuente de niveles)",
+      "rule": "{{tier}}: ganancia acumulada de la ventana ≥ {{gain}}% ({{days}} días de negociación; variable {{var}})",
+      "rulesMissing": "{{count}} criterios de nivel no establecidos (variable de umbral no positiva); excluidos de esta verificación",
+      "layersTitle": "Capas de atribución",
+      "layer": {
+        "recommended": "Recomendado (acierto)",
+        "late_timing": "Recomendación tardía",
+        "not_in_pool": "Fuera de la cartera candidata",
+        "pool_degraded": "Cartera degradada",
+        "by_design": "Sin señales por diseño",
+        "l3_scored_out": "Excluido del top-N",
+        "other_period": "Recomendado en otro nivel",
+        "unexplained": "Sin explicar (pocas trazas)"
+      },
+      "missesTitle": "Detalle de no detectados (por ganancia acumulada desc., máx. 200)",
+      "colName": "Acción",
+      "colTier": "Nivel",
+      "colCum": "Ganancia acum.",
+      "colMaxDaily": "Máx. 1 día",
+      "colLayer": "Capa",
+      "scoredOut": "Traza de exclusión: {{styles}}",
+      "noteByDesign": "Los niveles que por diseño no emiten señales (p. ej. Serenity ultra-corto/corto) solo aparecen como nota y no cuentan en el denominador de no detectados.",
+      "notePoolDegraded": "Las carteras degradadas son un problema de acceso a datos, no un fallo del algoritmo.",
+      "noteShadow": "La despriorización por no detectados solo alimenta el bucle de recomendación (interruptor reco_ic_gate); no escribe pesos por separado.",
+      "failed": "La verificación no puede ejecutarse: {{detail}}",
+      "malformed": "Forma de datos inesperada (falta {{fields}}) ⇒ el panel no se puede mostrar",
+      "marketType": {
+        "hk": "Hong Kong",
+        "us": "EE. UU.",
+        "star": "Mercado STAR",
+        "main_sh": "Shanghái principal",
+        "main_sz": "Shenzhen principal",
+        "chinext": "ChiNext",
+        "bj": "Bolsa de Pekín",
+        "neeq": "NEEQ",
+        "b_share": "Acciones B",
+        "unknown": "Desconocido"
+      }
     },
     "export": {
       "analystReports": "analystReports",

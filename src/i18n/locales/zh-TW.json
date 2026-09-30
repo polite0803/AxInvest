@@ -12125,6 +12125,7 @@
         "trend_improving": "上升趨勢",
         "trend_stable": "穩定",
         "trend_declining": "下降趨勢",
+        "trend_insufficient_data": "樣本不足，暫無法判定趨勢",
         "trend_": "趋势"
       },
       "noProviderConfig": "Please configure a default AI provider first",
@@ -12141,6 +12142,8 @@
         "disabled": "已停用",
         "conditions": "觸發條件",
         "actions": "執行動作",
+        "noConditions": "無觸發條件",
+        "noActions": "無執行動作",
         "noData": "暫無自動化規則",
         "triggered": "已觸發 {{count}} 條規則",
         "nothingTriggered": "沒有規則被觸發",
@@ -13077,7 +13080,8 @@
         "type": {
           "workflow": "Workflow",
           "conversation": "Conversation"
-        }
+        },
+        "runtime": "執行與學習"
       },
       "wizard": {
         "start": "开始",
@@ -15373,6 +15377,59 @@
       "loopGateShadow": "反思迴圈影子模式（shadow）：僅計算不參與評分，最近重算 {time}",
       "loopGateOff": "反思迴圈未啟用（off），最近重算 {time}",
       "loopNeverRecalc": "從未重算"
+    },
+    "moverRecall": {
+      "title": "視窗漲幅達標漏檢核查",
+      "refresh": "重新核查",
+      "boundary": "可核查區間 {{from}} ~ {{to}}；收盤快照自 {{since}} 起（更早日期未採集，不做回填推斷）",
+      "universe": "枚舉域 {{size}} 檔，其中 {{confirmed}} 檔經全量確認",
+      "universeDegraded": "枚舉域不完整（{{confirmed}}/{{size}} 經全量確認）：缺口由本地票拼成，池外大漲股可能不在樣本內",
+      "rateReachability": "可及率（曾入池）",
+      "rateCoverage": "覆蓋率（池內被推薦）",
+      "rateUnexplained": "不可歸因率",
+      "rateUnavailable": "樣本不足，算不出",
+      "events": "達標事件 {{events}} 件 / 漏檢 {{misses}} 件",
+      "empty": "本區間無達標事件（判據為視窗累計漲幅）",
+      "emptyNotYet": "視窗未滿：未滿檔位尚無法判定，已滿檔位無達標事件（已採 {{have}} 個交易日，見下方檔位標註）",
+      "windowOpen": "視窗未滿（已採 {{have}} 個 / 需 {{need}} 個交易日）",
+      "rulesTitle": "四檔判據（閾值走範本變數，視窗天數取檔位唯一來源）",
+      "rule": "{{tier}}檔：視窗累計漲幅 ≥ {{gain}}%（{{days}} 個交易日；變數 {{var}}）",
+      "rulesMissing": "{{count}} 檔判據不成立（閾值變數非正數），本檔未參與核查",
+      "layersTitle": "歸因分層",
+      "layer": {
+        "recommended": "已推薦（命中）",
+        "late_timing": "晚推薦",
+        "not_in_pool": "未入候選池",
+        "pool_degraded": "候選池降級",
+        "by_design": "按設計不出票",
+        "l3_scored_out": "入池但被評出 top-N",
+        "other_period": "其他檔位已推薦",
+        "unexplained": "不可歸因（留痕不足）"
+      },
+      "missesTitle": "漏檢明細（按視窗累計漲幅降序，最多 200 件）",
+      "colName": "股票",
+      "colTier": "檔位",
+      "colCum": "累計漲幅",
+      "colMaxDaily": "最大單日",
+      "colLayer": "歸因",
+      "scoredOut": "截斷留痕：{{styles}}",
+      "noteByDesign": "按設計不出票的檔位（如趨勢智選超短/短）只出現在說明段，不計入漏檢分母。",
+      "notePoolDegraded": "候選池降級層是資料可達性問題，不記演算法帳。",
+      "noteShadow": "漏檢降權只併入薦股閉環（隨 reco_ic_gate 閘生效），不單獨寫權重。",
+      "failed": "核查不可執行：{{detail}}",
+      "malformed": "回傳資料形狀不符（缺 {{fields}}）⇒ 本面板無法渲染",
+      "marketType": {
+        "hk": "港股",
+        "us": "美股",
+        "star": "科創板",
+        "main_sh": "滬市主板",
+        "main_sz": "深市主板",
+        "chinext": "創業板",
+        "bj": "北交所",
+        "neeq": "新三板",
+        "b_share": "B股",
+        "unknown": "未識別"
+      }
     },
     "export": {
       "analystReports": "analystReports",

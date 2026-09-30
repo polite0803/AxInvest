@@ -207,6 +207,17 @@ if (canRunFrontend) {
     "node scripts/check-valuation-defaults-parity.mjs",
   );
 
+  // ── 荐股链四周期口径一致（2026-09-30 补，PLAN-reco-horizon-science-alignment.md Phase R）──
+  // 为什么需要：同一档位事实（天数 / 仓位因子 / 校准常数 / 档位序 / 矩阵格 / 取数尺度 /
+  //   理由码 / 两链风控 / 面板与卡片文案 / 窗口阈值 / 禁「涨停」）横跨 Rust 引擎与前端，
+  //   历史上「两处各自都自洽、两边打架」—— `cargo check` / `typecheck` 全绿也照样存在，
+  //   且四条档位预注册判据（命中率不降 / 覆盖率提升 / rank IC 不劣化）全靠它守。
+  //   判据 #0：任何一门解析到 0 命中即 exit 2 —— 「扫到 0 条」的门等于没有门。
+  //   自检复刻各门修复前形态（负样本），每类都必须真的报红。
+  //   与 `.github/workflows/ci.yml` 的「Check reco horizon parity」**命令行逐字同源**。
+  step("荐股四周期口径一致自检（正负对照）", "node scripts/check-reco-horizon-parity.mjs --selftest");
+  step("荐股四周期口径一致（a–l 十二门）", "node scripts/check-reco-horizon-parity.mjs");
+
   // ── 补两条 CI 早已有、本地镜像却缺的门禁（2026-09-14：漂移修复）──
   // 为什么必须补：它们此前**只挂在 CI**，本地跑 `ci-check` 一路绿 ⇒ 本地绿冒充 CI 绿。
   // 典型后果是「推送后才发现」——本地反馈环里根本看不见这类缺陷。

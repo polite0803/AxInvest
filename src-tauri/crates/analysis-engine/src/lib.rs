@@ -47,6 +47,7 @@ pub mod conditional_order_bridge;
 pub mod cross_stock_aggregator;
 // P3-2: 板块联动分析 — 基于 ConceptIndex 识别同板块龙头-从属传导模式
 pub mod key_levels;
+pub mod market_close_store;
 pub mod market_mainline;
 pub mod market_regime;
 // G3 产业链 MCP 工具集（P2-8 从 astock-data 迁回）
@@ -155,5 +156,6 @@ pub use node_quality::{
 
 // ── 通用节点自我进化引擎 ──
 // 支持所有节点类型的进化：分析师/辩论/决策/工具/估值/风险
+pub mod mover_recall;
 pub mod node_evolution;
 pub use node_evolution::{evolve_node, get_node_evolution_status, NodeEvolutionStatus};

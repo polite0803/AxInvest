@@ -12125,6 +12125,7 @@
         "trend_improving": "Verbesserung",
         "trend_stable": "Stabil",
         "trend_declining": "Rückgang",
+        "trend_insufficient_data": "Zu wenige Stichproben für eine Trendbewertung",
         "trend_": "Trend"
       },
       "noProviderConfig": "Please configure a default AI provider first",
@@ -12141,6 +12142,8 @@
         "disabled": "Deaktiviert",
         "conditions": "Auslösungsbedingungen",
         "actions": "Aktionsausführung",
+        "noConditions": "Keine Bedingungen",
+        "noActions": "Keine Aktionen",
         "noData": "Keine Automationsregeln verfügbar",
         "triggered": "{{count}} Regeln ausgelöst",
         "nothingTriggered": "Keine Regeln ausgelöst",
@@ -13077,7 +13080,8 @@
         "type": {
           "workflow": "Workflow",
           "conversation": "Conversation"
-        }
+        },
+        "runtime": "Laufzeit & Lernen"
       },
       "wizard": {
         "start": "Start",
@@ -15228,6 +15232,59 @@
       "loopGateShadow": "Reflexions-Loop im Schattenmodus: nur berechnet, nicht angewendet, letzte Neuberechnung {time}",
       "loopGateOff": "Reflexions-Loop deaktiviert (off), letzte Neuberechnung {time}",
       "loopNeverRecalc": "nie neu berechnet"
+    },
+    "moverRecall": {
+      "title": "Recall-Prüfung: Kursgewinn im Fenster",
+      "refresh": "Erneut prüfen",
+      "boundary": "Prüfbarer Zeitraum {{from}} ~ {{to}}; Schlusskurs-Snapshots ab {{since}} (frühere Daten wurden nie erfasst — keine Rückrechnung)",
+      "universe": "Universum: {{size}} Aktien, davon {{confirmed}} vollständig bestätigt",
+      "universeDegraded": "Unvollständiges Universum ({{confirmed}}/{{size}} vollständig bestätigt): Lücken werden aus lokalen Titeln gefüllt — große Ausreißer außerhalb des Pools fehlen möglicherweise",
+      "rateReachability": "Erreichbarkeit (je im Pool)",
+      "rateCoverage": "Abdeckung (im Pool empfohlen)",
+      "rateUnexplained": "Ungeklärter Anteil",
+      "rateUnavailable": "Zu wenige Stichproben",
+      "events": "{{events}} qualifizierte Ereignisse / {{misses}} verpasst",
+      "empty": "Keine qualifizierten Ereignisse in diesem Zeitraum (Kriterium: kumulierter Fenstergewinn)",
+      "emptyNotYet": "Fenster unvollständig: unvollständige Stufen noch nicht entscheidbar, vollständige Stufen ohne qualifizierte Ereignisse ({{have}} Handelstage erfasst; siehe Stufenhinweise unten)",
+      "windowOpen": "Fenster unvollständig ({{have}}/{{need}} Handelstage erfasst)",
+      "rulesTitle": "Vier-Stufen-Kriterien (Schwellen sind Template-Variablen; Tage aus der einzigen Stufenquelle)",
+      "rule": "{{tier}}: kumulierter Fenstergewinn ≥ {{gain}} % ({{days}} Handelstage; Variable {{var}})",
+      "rulesMissing": "{{count}} Stufenkriterien nicht erfüllt (Schwellenvariable nicht positiv); von dieser Prüfung ausgeschlossen",
+      "layersTitle": "Zuordnungsebenen",
+      "layer": {
+        "recommended": "Empfohlen (Treffer)",
+        "late_timing": "Zu spät empfohlen",
+        "not_in_pool": "Nicht im Kandidatenpool",
+        "pool_degraded": "Pool beeinträchtigt",
+        "by_design": "Per Design ohne Empfehlung",
+        "l3_scored_out": "Aus Top-N verdrängt",
+        "other_period": "In anderer Stufe empfohlen",
+        "unexplained": "Ungeklärt (zu wenig Spuren)"
+      },
+      "missesTitle": "Verpasste Details (nach kumuliertem Gewinn absteigend, max. 200)",
+      "colName": "Aktie",
+      "colTier": "Stufe",
+      "colCum": "Kum. Gewinn",
+      "colMaxDaily": "Max. 1 Tag",
+      "colLayer": "Ebene",
+      "scoredOut": "Verdrängungsspur: {{styles}}",
+      "noteByDesign": "Stufen ohne Empfehlung per Design (z. B. Serenity Ultra-Kurz/Kurz) erscheinen nur als Hinweis und zählen nicht zum Nenner der verpassten Fälle.",
+      "notePoolDegraded": "Beeinträchtigte Pools sind ein Problem der Datenverfügbarkeit, kein Algorithmusfehler.",
+      "noteShadow": "Die Herabstufung aus verpassten Fällen fließt nur in den Empfehlungs-Regelkreis (Schalter reco_ic_gate); es werden keine separaten Gewichte geschrieben.",
+      "failed": "Prüfung nicht ausführbar: {{detail}}",
+      "malformed": "Unerwartete Datenform (fehlt: {{fields}}) ⇒ Panel kann nicht gerendert werden",
+      "marketType": {
+        "hk": "Hongkong",
+        "us": "USA",
+        "star": "STAR-Markt",
+        "main_sh": "Shanghai Haupt",
+        "main_sz": "Shenzhen Haupt",
+        "chinext": "ChiNext",
+        "bj": "Peking-Börse",
+        "neeq": "NEEQ",
+        "b_share": "B-Aktien",
+        "unknown": "Unbekannt"
+      }
     },
     "export": {
       "analystReports": "analystReports",

@@ -6,6 +6,7 @@
  * 注意：所有 invoke 调用使用 camelCase 参数名（Tauri v2 IPC 默认 rename_all=camelCase）
  */
 
+import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import type { DomainLearningConfig } from "@/types";
 import { useCallback, useEffect, useState } from "react";
@@ -20,6 +21,20 @@ import type {
   WorkflowExecutionResult,
   WorkflowStepInfo,
 } from "./types";
+
+/**
+ * 域级取数分区。
+ *
+ * 每个分区独立记录错误：失败前先把该分区的 `errors[section]` 置为**用户可见文本**，
+ * 组件据此渲染错误态而非空态 —— 「拿不到」与「确实没有」在 UI 上必须分开。
+ */
+export type DomainDataSection =
+  | "dashboard"
+  | "steps"
+  | "rules"
+  | "metrics"
+  | "learningConfig"
+  | "decision";
 
 /** 行业数据 Hook 返回值 */
 export interface UseDomainDataReturn {
@@ -43,6 +58,8 @@ export interface UseDomainDataReturn {
   workflowExecuting: boolean;
   learningMetrics: DomainLearningMetrics | null;
   metricsLoading: boolean;
+  /** 逐分区取数失败原因（已译）；键缺席 = 该分区本轮无错 */
+  errors: Partial<Record<DomainDataSection, string>>;
 
   // 操作
   setKpiTimeRange: (range: "7" | "30" | "90") => void;
@@ -70,13 +87,16 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
   const [loading, setLoading] = useState(true);
   const [manifest, setManifest] = useState<DomainManifest | null>(null);
   const [learningConfig, setLearningConfig] = useState<DomainLearningConfig | null>(null);
-  const [learningLoading, setLearningLoading] = useState(false);
+  const [learningLoading, setLearningLoading] = useState(true);
   const [dashboard, setDashboard] = useState<DomainDashboard | null>(null);
-  const [dashboardLoading, setDashboardLoading] = useState(false);
+  // ⚠ 取数标志初值为 true：「尚未得到答案」与「答案是没有」是两件事 —— 初值若为 false，
+  // 首帧会在加载 effect 跑起来之前渲染出 `Empty`（「暂无数据」/「配置未找到」），
+  // 即把「还没问」显示成「后端说没有」。
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStepInfo[]>([]);
-  const [stepsLoading, setStepsLoading] = useState(false);
+  const [stepsLoading, setStepsLoading] = useState(true);
   const [automationRules, setAutomationRules] = useState<AutomationRuleInfo[]>([]);
-  const [rulesLoading, setRulesLoading] = useState(false);
+  const [rulesLoading, setRulesLoading] = useState(true);
   const [rulesRunning, setRulesRunning] = useState(false);
   const [kpiTimeRange, setKpiTimeRange] = useState<"7" | "30" | "90">("30");
   const [decision, setDecision] = useState<OpcDomainDecision | null>(null);
@@ -85,7 +105,22 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
   const [workflowResult, setWorkflowResult] = useState<WorkflowExecutionResult | null>(null);
   const [workflowExecuting, setWorkflowExecuting] = useState(false);
   const [learningMetrics, setLearningMetrics] = useState<DomainLearningMetrics | null>(null);
-  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  const [errors, setErrors] = useState<Partial<Record<DomainDataSection, string>>>({});
+
+  const setSectionError = useCallback((section: DomainDataSection, reason: string | null) => {
+    setErrors((prev) => {
+      if (reason === null) {
+        if (!(section in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[section];
+        return next;
+      }
+      return { ...prev, [section]: reason };
+    });
+  }, []);
 
   // 加载行业清单
   useEffect(() => {
@@ -115,6 +150,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
   // 加载仪表盘
   const loadDashboard = useCallback(async () => {
     if (!capabilityPackId) {
+      setDashboardLoading(false);
       return;
     }
     setDashboardLoading(true);
@@ -126,16 +162,19 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
         { capabilityPackId, days },
       );
       setDashboard(result?.dashboard ?? null);
+      setSectionError("dashboard", null);
     } catch (e) {
       console.error("[useDomainData] load dashboard failed:", e);
+      setSectionError("dashboard", translateBackendError(e));
     } finally {
       setDashboardLoading(false);
     }
-  }, [capabilityPackId, kpiTimeRange]);
+  }, [capabilityPackId, kpiTimeRange, setSectionError]);
 
   // 加载工作流步骤
   const loadWorkflowSteps = useCallback(async () => {
     if (!capabilityPackId) {
+      setStepsLoading(false);
       return;
     }
     setStepsLoading(true);
@@ -145,17 +184,20 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
         { capabilityPackId },
       );
       setWorkflowSteps(result.steps || []);
+      setSectionError("steps", null);
     } catch (e) {
       console.error("[useDomainData] load workflow steps failed:", e);
       setWorkflowSteps([]);
+      setSectionError("steps", translateBackendError(e));
     } finally {
       setStepsLoading(false);
     }
-  }, [capabilityPackId]);
+  }, [capabilityPackId, setSectionError]);
 
   // 加载自动化规则
   const loadAutomationRules = useCallback(async () => {
     if (!capabilityPackId) {
+      setRulesLoading(false);
       return;
     }
     setRulesLoading(true);
@@ -165,13 +207,15 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
         { capabilityPackId },
       );
       setAutomationRules(result.rules || []);
+      setSectionError("rules", null);
     } catch (e) {
       console.error("[useDomainData] load automation rules failed:", e);
       setAutomationRules([]);
+      setSectionError("rules", translateBackendError(e));
     } finally {
       setRulesLoading(false);
     }
-  }, [capabilityPackId]);
+  }, [capabilityPackId, setSectionError]);
 
   // 加载决策（使用 opc_execute_analysis 命令）
   const loadDecision = useCallback(async () => {
@@ -185,16 +229,20 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
         days: decisionDays,
       });
       setDecision(result);
+      setSectionError("decision", null);
     } catch (e) {
       console.error("[useDomainData] load decision failed:", e);
+      setDecision(null);
+      setSectionError("decision", translateBackendError(e));
     } finally {
       setDecisionLoading(false);
     }
-  }, [capabilityPackId, decisionDays]);
+  }, [capabilityPackId, decisionDays, setSectionError]);
 
   // 加载学习指标（使用 opc_get_learning_metrics 命令）
   const loadLearningMetrics = useCallback(async () => {
     if (!capabilityPackId) {
+      setMetricsLoading(false);
       return;
     }
     setMetricsLoading(true);
@@ -204,16 +252,20 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
         { capabilityPackId },
       );
       setLearningMetrics(result);
+      setSectionError("metrics", null);
     } catch (e) {
       console.error("[useDomainData] load learning metrics failed:", e);
+      setLearningMetrics(null);
+      setSectionError("metrics", translateBackendError(e));
     } finally {
       setMetricsLoading(false);
     }
-  }, [capabilityPackId]);
+  }, [capabilityPackId, setSectionError]);
 
   // 加载学习配置（使用 opc_get_learning_config 命令）
   const loadLearningConfig = useCallback(async () => {
     if (!capabilityPackId) {
+      setLearningLoading(false);
       return;
     }
     setLearningLoading(true);
@@ -223,29 +275,33 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
         { capabilityPackId },
       );
       setLearningConfig(result);
+      setSectionError("learningConfig", null);
     } catch (e) {
       console.error("[useDomainData] load learning config failed:", e);
+      setLearningConfig(null);
+      setSectionError("learningConfig", translateBackendError(e));
     } finally {
       setLearningLoading(false);
     }
-  }, [capabilityPackId]);
+  }, [capabilityPackId, setSectionError]);
 
-  // 执行自动化规则
+  /**
+   * 执行自动化规则。
+   *
+   * **不吞异常**：调用方需要区分「跑完但没规则命中」与「根本没跑成」——
+   * 原实现在 catch 里 `return []`，把失败伪装成「没有规则被触发」。
+   */
   const runAutomationRules = useCallback(async (): Promise<string[]> => {
     if (!capabilityPackId) {
       return [];
     }
     setRulesRunning(true);
     try {
-      const triggered = await invoke<string[]>("opc_run_automation_rules", {
+      return await invoke<string[]>("opc_run_automation_rules", {
         capabilityPackId,
         entityType: "customer",
         entityId: "manual_trigger",
       });
-      return triggered;
-    } catch (e) {
-      console.error("[useDomainData] run automation rules failed:", e);
-      return [];
     } finally {
       setRulesRunning(false);
     }
@@ -346,26 +402,26 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     [capabilityPackId, loadLearningMetrics],
   );
 
-  // 初始化加载
+  // 初始化加载：只随能力包切换重跑。
+  // ⚠ 不得把 loadDashboard 并入本 effect —— 它依赖 kpiTimeRange，一旦入列，
+  // 切换 KPI 区间会连带把步骤/规则/指标/学习配置全部重拉一遍（4 次多余 IPC）。
   useEffect(() => {
     if (!capabilityPackId) {
       return;
     }
-    loadDashboard();
     loadWorkflowSteps();
     loadAutomationRules();
     loadLearningMetrics();
     loadLearningConfig();
   }, [
     capabilityPackId,
-    loadDashboard,
     loadWorkflowSteps,
     loadAutomationRules,
     loadLearningMetrics,
     loadLearningConfig,
   ]);
 
-  // KPI 时间范围变化时刷新
+  // 仪表盘取数：挂载时与 KPI 区间变化时各一次（初始化 effect 不再重复发起）
   useEffect(() => {
     if (!capabilityPackId) {
       return;
@@ -395,6 +451,7 @@ export function useDomainData(capabilityPackId: string | null): UseDomainDataRet
     workflowExecuting,
     learningMetrics,
     metricsLoading,
+    errors,
     loadDashboard,
     loadWorkflowSteps,
     loadAutomationRules,

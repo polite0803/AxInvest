@@ -23,7 +23,9 @@ pub mod types;
 
 pub use notify::{build_notification, run_recommendation_scan, RecommendationScan};
 pub use strategy::{RecoContext, RecommendStrategy};
-pub use types::{Period, RecoDegradation, RecoPick, RecoResponse, SeedPoolOrigin, Style};
+pub use types::{
+    Period, RecoDegradation, RecoPick, RecoResponse, SeedPoolOrigin, Style, TrimmedPick,
+};
 
 /// 回退候选股列表（沪深300核心成分股，覆盖主要行业）
 ///
@@ -95,7 +97,7 @@ use crate::recommender::pool::{
     liquidity_filter_and_truncate_with_concurrency, load_enabled_vendors_from_template,
     set_cached_vendors,
 };
-use crate::recommender::scoring::{dedup_and_merge, group_by_style_and_trim};
+use crate::recommender::scoring::{dedup_and_merge, group_by_style_and_trim_with_audit};
 use crate::recommender::strategies::{
     emit_synthetic_picks, CapitalStrategy, ReversionStrategy, SerenityStrategy, TrendStrategy,
     ValueStrategy, WatchlistStrategy,
@@ -191,34 +193,35 @@ pub(crate) fn parse_strategy_weights(
         let Some(obj) = value.as_object() else { continue };
         for (key, val) in obj {
             let Some(weight) = val.as_f64() else { continue };
-            // key 形如 "trend_short" / "trend_ultra_short" / "value_mid" / "watchlist_long"
-            // 用 splitn(2, '_') 处理 ultra_short 自带下划线的情况
-            let mut parts = key.splitn(2, '_');
-            let style = match parts.next() {
-                Some("trend") => Style::Trend,
-                Some("value") => Style::Value,
-                Some("capital") => Style::Capital,
-                Some("reversion") => Style::Reversion,
-                Some("watchlist") => Style::Watchlist,
-                Some("serenity") | Some("bottleneck") => Style::Bottleneck,
-                Some("policy") => Style::Policy,
-                Some("earnings") => Style::Earnings,
-                Some("capital_flow") => Style::CapitalFlow,
-                Some("event") => Style::Event,
-                Some("technical") => Style::Technical,
-                _ => continue,
-            };
-            let period = match parts.next() {
-                Some("ultra_short") => Period::UltraShort,
-                Some("short") => Period::Short,
-                Some("mid") => Period::Mid,
-                Some("long") => Period::Long,
-                _ => continue,
-            };
+            let Some((style, period)) = parse_style_period_key(key) else { continue };
             out.insert((style, period), weight.clamp(0.0, 2.0));
         }
     }
     out
+}
+
+/// 解析 `"{style}_{period}"` 权重键（`load_reco_served_vars_db` 的写入形态）。
+///
+/// 不能按首个 `_` 切分：**风格名与档位名各自都可能含下划线**（`capital_flow`、
+/// `ultra_short`），`splitn(2, '_')` 会把 `capital_flow_mid` 切成
+/// (`capital`, `flow_mid`) ⇒ 该键被静默丢弃 —— 闭环写回的权重对
+/// `capital_flow` 一族**永远不生效且无任何日志**。这里改为「逐风格试前缀 +
+/// 余段必须整体解析成档位」：试 `capital` 时余段 `flow_mid` 不合法而跳过，
+/// 试 `capital_flow` 时余段 `mid` 命中 ⇒ 与键的生成侧
+/// （`format!("{s}_{p}")`）严格互为往返。
+/// `serenity` / `bottleneck` 两种写法都接受（见 `Style::key_names`）。
+pub(crate) fn parse_style_period_key(key: &str) -> Option<(Style, Period)> {
+    for style in Style::ALL {
+        for name in style.key_names() {
+            let Some(rest) = key.strip_prefix(name).and_then(|r| r.strip_prefix('_')) else {
+                continue;
+            };
+            if let Ok(period) = rest.parse::<Period>() {
+                return Some((style, period));
+            }
+        }
+    }
+    None
 }
 
 // ── 缓存 ──
@@ -410,6 +413,7 @@ fn empty_error_response(period: Period, detail: String) -> RecoResponse {
         mode: "live".to_string(),
         error_detail: Some(detail),
         seed_pool_snapshot: None,
+        scan_audit: vec![],
     }
 }
 
@@ -1076,8 +1080,8 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
         tracing::info!("[recommender] after confidence filter, picks={}", all_picks.len());
     }
 
-    // 7. 按风格分组 + 限 10
-    let mut by_style = group_by_style_and_trim(&mut all_picks, 10);
+    // 7. 按风格分组 + 限 10（截断尾部留痕，供 L3 归因与 Phase 4 降权）
+    let (mut by_style, scan_audit) = group_by_style_and_trim_with_audit(&mut all_picks, 10);
     for (style, picks) in &by_style {
         tracing::info!("[recommender] final bucket: style={:?}, picks={}", style, picks.len());
     }
@@ -1169,6 +1173,7 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
             )
             .unwrap_or_default(),
         ),
+        scan_audit,
     };
     if use_cache {
         cache_put(period, resp.clone());
@@ -1265,6 +1270,7 @@ mod tests {
             mode: mode.to_string(),
             error_detail: None,
             seed_pool_snapshot: None,
+            scan_audit: vec![],
         }
     }
 
@@ -1346,6 +1352,7 @@ mod tests {
             mode: "user_replay".into(),
             error_detail: None,
             seed_pool_snapshot: None,
+            scan_audit: vec![],
         };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(s.contains("\"asOfDate\":\"2026-06-01\""));
@@ -1368,6 +1375,7 @@ mod tests {
             mode: "live".into(),
             error_detail: None,
             seed_pool_snapshot: None,
+            scan_audit: vec![],
         };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(!s.contains("asOfDate"), "as_of_date should be skipped when None");
@@ -1502,5 +1510,64 @@ mod style_matrix_wiring_tests {
                 "档位 {period:?} 一个策略都没构造出来（矩阵或构造表被清空）"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod strategy_weight_key_tests {
+    use super::*;
+
+    /// 键空间**往返恒等**：写侧 `format!("{style}_{period}")` 产出的每个键，
+    /// 读侧都必须解析回同一个 (风格, 档位)。
+    ///
+    /// 这条是 `capital_flow_*` 静默丢弃（`splitn(2,'_')` 时代）的定点锁：
+    /// 含下划线的风格名一旦新增/改名，此处先红，而不是等到「闭环权重不生效」才被怀疑。
+    #[test]
+    fn style_period_keys_round_trip() {
+        for style in Style::ALL {
+            for period in Period::ALL {
+                for name in style.key_names() {
+                    let key = format!("{name}_{}", period.as_str());
+                    assert_eq!(
+                        parse_style_period_key(&key),
+                        Some((style, period)),
+                        "键 `{key}` 未解析回 ({style:?}, {period:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// 多词风格名不得被更短的风格前缀截胡：`capital_flow_mid` 属 CapitalFlow，
+    /// 不能落进 Capital（余段 `flow_mid` 不是档位）。
+    #[test]
+    fn multiword_style_is_not_stolen_by_shorter_prefix() {
+        assert_eq!(
+            parse_style_period_key("capital_flow_ultra_short"),
+            Some((Style::CapitalFlow, Period::UltraShort))
+        );
+        assert_eq!(parse_style_period_key("capital_mid"), Some((Style::Capital, Period::Mid)));
+        // serenity 一名两写：两种写法都必须落到 Bottleneck
+        assert_eq!(
+            parse_style_period_key("serenity_long"),
+            Some((Style::Bottleneck, Period::Long))
+        );
+        assert_eq!(
+            parse_style_period_key("bottleneck_long"),
+            Some((Style::Bottleneck, Period::Long))
+        );
+    }
+
+    /// 端到端：闭环写回的 `capital_flow` 键必须被 `parse_strategy_weights` 消费到
+    /// （旧实现下该断言恒假 —— 键被静默丢弃，权重表里根本没有这一格）。
+    #[test]
+    fn capital_flow_weight_reaches_the_table() {
+        let vars = vec![(
+            "reco_strategy_weights".to_string(),
+            serde_json::json!({ "capital_flow_mid": 0.7, "serenity_short": 0.9 }),
+        )];
+        let m = parse_strategy_weights(&vars);
+        assert_eq!(m.get(&(Style::CapitalFlow, Period::Mid)).copied(), Some(0.7));
+        assert_eq!(m.get(&(Style::Bottleneck, Period::Short)).copied(), Some(0.9));
     }
 }

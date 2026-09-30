@@ -10,6 +10,7 @@ import type {
 import { Card, Empty, Segmented, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MoverRecallPanel } from "./MoverRecallPanel";
 
 /** 观测面（`reco_ic_stats`）取不到时的**兜底行集合**。
  *  正常渲染必须由后端契约 `matrix` 驱动（6 行，含 watchlist / serenity）——
@@ -450,6 +451,14 @@ export function RecoStrategyMatrix({ data: externalData, onSelectStrategy }: Rec
           ))}
         </div>
       )}
+
+      {
+        /* 窗口涨幅达标漏检核查（PLAN-mover-recall-attribution Phase 5）：
+          与闭环视图同区呈现 —— 「降权为什么发生」的证据链就在旁边 */
+      }
+      <div style={{ marginTop: 10 }}>
+        <MoverRecallPanel />
+      </div>
     </Card>
   );
 }

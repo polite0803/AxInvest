@@ -95,6 +95,7 @@ pub async fn start_background_services(
     start_batch_reflection(state);
     start_demand_discovery_cron(app, state);
     start_daily_snapshot_sweep(state);
+    start_market_close_sweep(state);
     spawn_opc_workflows_seeding(state);
     // register_dojo_sdk_executor 中的 DojoSdkExecutorImpl 注册（依赖 astock_client）已移除，
     // 仅保留 Plan 三件套正常后台任务——PLANS_REGISTRY TTL 清理
@@ -2347,8 +2348,10 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 //    两条入口一套权重两种分。
                 //    读不到不算失败（走代码内硬编码默认值），但要留痕，
                 //    否则「面板上调了阈值却毫无效果」会变成无从下手的现象。
-                let vars =
-                    match crate::commands::stock_analysis::load_reco_served_vars_db(&db).await {
+                let vars = match axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(
+                    &db,
+                )
+                .await {
                         Ok(v) => v,
                         Err(e) => {
                             tracing::warn!(
@@ -3680,4 +3683,104 @@ fn spawn_opc_workflows_seeding(state: &AppState) {
             },
         }
     });
+}
+
+/// 全市场收盘快照采集（`PLAN-mover-recall-attribution.md` Phase 1）。
+///
+/// 同一个每小时 tick 里做两件有先后依赖的事：
+/// 1. **分 tick 摊薄扩清单**：东财 `clist` 连爬 60 页实测 11/60 成功即触发连接级封禁
+///    （`AUDIT-mover-universe-feasibility-2026-09-30.md`），所以每 tick 只取 6 页、
+///    页号按轮次滚动；封禁期失败只记日志，下 tick 继续，不阻塞第 2 步。
+/// 2. **收盘快照**：清单非空且该交易日行数不足 ⇒ 走腾讯批量落 `market_daily_close`。
+///    「采齐」判据取「行数 ≥ 清单规模的一半」这个宽阈值——宁可重复跑一次（幂等 upsert），
+///    也不要因为一次网络抖动把整天留成空洞。
+fn start_market_close_sweep(state: &AppState) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let db = state.harness.db().clone();
+    let client = state.astock_client.clone();
+    let shutdown = state.shutdown_token.clone();
+
+    tauri::async_runtime::spawn(async move {
+        // bootstrap：先把本地已有代码补进清单，保证首轮就有可用的枚举域
+        match axagent_analysis_engine::market_close_store::bootstrap_universe_from_local(&db).await
+        {
+            Ok(n) => {
+                tracing::info!("[market-close] 清单 bootstrap 补录 {n} 只（本地来源，非全市场）")
+            },
+            Err(e) => tracing::warn!("[market-close] 清单 bootstrap 失败: {e}"),
+        }
+
+        let tick = AtomicUsize::new(0);
+        tokio::time::sleep(std::time::Duration::from_secs(420)).await;
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        loop {
+            tokio::select! {
+                _ = shutdown.cancelled() => break,
+                _ = interval.tick() => {},
+            }
+            let Some(target) =
+                axagent_astock_data::daily_snapshot::snapshot_target_date(&chrono::Local::now())
+            else {
+                // 交易日盘中：今天只有半日数据，等收盘
+                continue;
+            };
+            let date = target.format("%Y-%m-%d").to_string();
+
+            // 1) 扩清单：每 tick 6 页，10 个 tick 走完 60 页
+            let round = tick.fetch_add(1, Ordering::Relaxed) % 10;
+            let base = (round * 6 + 1) as u32;
+            let pages: Vec<u32> = (base..base + 6).collect();
+            match axagent_analysis_engine::market_close_store::refresh_universe_pages(
+                &db, &client, &pages,
+            )
+            .await
+            {
+                Ok(r) => tracing::info!(
+                    "[market-close] 清单第 {:?} 页: 落库 {} 只, 失败页 {}, 全市场申报 {} 只, 清单现有 {}",
+                    pages,
+                    r.rows_upserted,
+                    r.pages_failed,
+                    r.reported_total,
+                    r.universe_size
+                ),
+                Err(e) => tracing::warn!("[market-close] 清单扩页失败: {e}"),
+            }
+
+            // 2) 收盘快照
+            let size =
+                axagent_analysis_engine::market_close_store::universe_size(&db).await.unwrap_or(0);
+            let have = axagent_analysis_engine::market_close_store::rows_for_date(&db, &date)
+                .await
+                .unwrap_or(0);
+            if size == 0 || have * 2 >= size {
+                continue;
+            }
+            match axagent_analysis_engine::market_close_store::run_close_sweep(
+                &db,
+                &client,
+                &date,
+                axagent_analysis_engine::market_close_store::DEFAULT_BATCH_SIZE,
+                axagent_analysis_engine::market_close_store::DEFAULT_BATCH_INTERVAL_MS,
+            )
+            .await
+            {
+                Ok(r) => tracing::info!(
+                    "[market-close] {date} 快照: 落库 {}/{}, 无有效值 {}, 失败批次 {}/{}{}",
+                    r.written,
+                    r.universe_size,
+                    r.skipped_no_data,
+                    r.failed_batches,
+                    r.batches,
+                    if r.failed_batches > 0 {
+                        "（本轮数据不完整）"
+                    } else {
+                        ""
+                    }
+                ),
+                Err(e) => tracing::warn!("[market-close] 快照采集失败: {e}"),
+            }
+        }
+    });
+    tracing::info!("[startup] 全市场收盘快照采集已启动（交易日 15:00 后，每小时幂等 tick）");
 }

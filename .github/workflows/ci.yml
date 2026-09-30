@@ -206,6 +206,19 @@ jobs:
           node scripts/check-valuation-defaults-parity.mjs --selftest
           node scripts/check-valuation-defaults-parity.mjs
 
+      # 荐股链四周期「口径一致」十二门（a–l）：档位天数 / 仓位因子只在 fallback /
+      #   拍脑袋校准数归零 / 档位序单源 / 策略×档位矩阵 24 格完备 / 取数尺度单源 /
+      #   理由码 11 语言 / 趋势智选两链风控同源 / 面板与候选卡片呈现 / 窗口涨幅阈值与
+      #   窗口天数单源 / 用户可见文案禁「涨停」—— 全是「两处各自都自洽、两边打架」的形态，
+      #   `cargo check` / `typecheck` 全绿也照样存在（`PLAN-reco-horizon-science-alignment.md` Phase R）。
+      # 判据 #0：任何一门解析到 **0 命中**即 exit 2 —— 「扫到 0 条」的门等于没有门。
+      # `--selftest` 复刻各门的修复前形态（负样本）证明它会红；缺它则「本门通过」不具区分力。
+      # 本步两行 `run` 与 scripts/ci-check.mjs 的对应两条 step **命令行逐字同源**。
+      - name: Check reco horizon parity (a-l twelve gates)
+        run: |
+          node scripts/check-reco-horizon-parity.mjs --selftest
+          node scripts/check-reco-horizon-parity.mjs
+
       - name: Check frontend formatting (dprint)
         run: npm run format:check
 

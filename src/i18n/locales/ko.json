@@ -12125,6 +12125,7 @@
         "trend_improving": "개선 추세",
         "trend_stable": "안정",
         "trend_declining": "하락 추세",
+        "trend_insufficient_data": "표본이 부족하여 추세를 판단할 수 없습니다",
         "trend_": "추세"
       },
       "noProviderConfig": "Please configure a default AI provider first",
@@ -12141,6 +12142,8 @@
         "disabled": "비활성화",
         "conditions": "트리거 조건",
         "actions": "실행 작업",
+        "noConditions": "조건 없음",
+        "noActions": "동작 없음",
         "noData": "자동화 규칙이 없습니다",
         "triggered": "{{count}}개 규칙이 트리거되었습니다",
         "nothingTriggered": "트리거된 규칙이 없습니다",
@@ -13077,7 +13080,8 @@
         "type": {
           "workflow": "Workflow",
           "conversation": "Conversation"
-        }
+        },
+        "runtime": "실행 및 학습"
       },
       "wizard": {
         "start": "Start",
@@ -15228,6 +15232,59 @@
       "loopGateShadow": "반성 루프 섀도우 모드: 계산만 하고 채점에는 미사용, 마지막 재계산 {time}",
       "loopGateOff": "반성 루프 비활성(off), 마지막 재계산 {time}",
       "loopNeverRecalc": "재계산 기록 없음"
+    },
+    "moverRecall": {
+      "title": "윈도우 상승률 기준 미검출 점검",
+      "refresh": "재점검",
+      "boundary": "점검 가능 구간 {{from}} ~ {{to}}; 종가 스냅샷은 {{since}}부터 (그 이전 날짜는 미수집, 소급 추정 없음)",
+      "universe": "유니버스 {{size}}종목, 그중 {{confirmed}}종목 전량 확인됨",
+      "universeDegraded": "유니버스 불완전({{confirmed}}/{{size}} 전량 확인): 누락분은 로컬 종목으로 구성 — 풀 밖 급등주가 표본에 없을 수 있음",
+      "rateReachability": "도달률(풀 진입)",
+      "rateCoverage": "커버리지(풀 내 추천)",
+      "rateUnexplained": "원인 불명 비율",
+      "rateUnavailable": "표본 부족으로 산출 불가",
+      "events": "기준 달성 이벤트 {{events}}건 / 미검출 {{misses}}건",
+      "empty": "이 구간에 기준 달성 이벤트 없음(기준: 윈도우 누적 상승률)",
+      "emptyNotYet": "윈도우 미충족: 미충족 단계는 아직 판정 불가, 충족 단계는 기준 달성 이벤트 없음(수집 {{have}} 거래일, 아래 단계 표기 참조)",
+      "windowOpen": "윈도우 미충족(수집 {{have}}/필요 {{need}} 거래일)",
+      "rulesTitle": "4단계 기준(임계값은 템플릿 변수, 일수는 단계의 단일 출처)",
+      "rule": "{{tier}}: 윈도우 누적 상승률 ≥ {{gain}}%({{days}} 거래일; 변수 {{var}})",
+      "rulesMissing": "{{count}}개 단계 기준 불성립(임계값 변수가 양수가 아님), 이번 점검에서 제외",
+      "layersTitle": "원인 레이어",
+      "layer": {
+        "recommended": "추천됨(적중)",
+        "late_timing": "늦은 추천",
+        "not_in_pool": "후보 풀 미진입",
+        "pool_degraded": "풀 성능 저하",
+        "by_design": "설계상 미출력",
+        "l3_scored_out": "top-N 밖으로 제외",
+        "other_period": "다른 단계에서 추천됨",
+        "unexplained": "원인 불명(기록 부족)"
+      },
+      "missesTitle": "미검출 상세(누적 상승률 내림차순, 최대 200건)",
+      "colName": "종목",
+      "colTier": "단계",
+      "colCum": "누적 상승률",
+      "colMaxDaily": "최대 일간",
+      "colLayer": "원인",
+      "scoredOut": "제외 기록: {{styles}}",
+      "noteByDesign": "설계상 미출력 단계(예: 트렌드 정선 초단기/단기)는 설명에만 표시되며 미검출 분모에 포함되지 않는다.",
+      "notePoolDegraded": "풀 성능 저하는 데이터 도달성 문제이며 알고리즘 책임이 아니다.",
+      "noteShadow": "미검출 기반 감점은 추천 폐루프(reco_ic_gate 스위치)에만 반영되며 별도의 가중치를 쓰지 않는다.",
+      "failed": "점검 실행 불가: {{detail}}",
+      "malformed": "반환 데이터 형식이 맞지 않음({{fields}} 누락) ⇒ 이 패널을 렌더링할 수 없습니다",
+      "marketType": {
+        "hk": "홍콩주",
+        "us": "미국주",
+        "star": "과창판",
+        "main_sh": "상하이 메인보드",
+        "main_sz": "선전 메인보드",
+        "chinext": "창업판",
+        "bj": "베이징증권거래소",
+        "neeq": "NEEQ",
+        "b_share": "B주",
+        "unknown": "미식별"
+      }
     },
     "export": {
       "analystReports": "analystReports",

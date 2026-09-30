@@ -27,6 +27,8 @@ use sea_orm::{DatabaseConnection, EntityTrait, Set};
 use serde::Serialize;
 
 use axagent_entities::decision_validations;
+use axagent_entities::workflow_template;
+use axagent_harness::workflow_types::Variable;
 
 use crate::hit_rate_backtest::hit_outcome_to_binary_outcome;
 use crate::recommender::style_matrix::{db_style_aliases, style_keys};
@@ -205,24 +207,71 @@ pub struct LoopCellResult {
     pub win_rate: Option<f64>,
     pub old_weight: f64,
     pub new_weight: f64,
+    /// mover 漏检线（Phase 4）的降权乘数（`None` = 该格证据不足，未参与合成）。
+    /// 只降不升：取值域 `(WEIGHT_FLOOR, 1]`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mover_penalty: Option<f64>,
+    /// 该格在核查窗口内「算出了它却被 top-N 淘汰」的事件数（留痕缺失时恒 0）
+    pub scored_out: usize,
 }
 
-/// 逐格合成（纯函数）：胜率线（`weight_decay` 基元）× 力度线（`ic` 基元）。
+/// 逐格 mover 证据（Phase 4）：该格在核查窗口里「看到了却没要」与「要了」的事件数。
+///
+/// 口径与生成侧：[[`crate::mover_recall::load_trim_evidence`]] 给「看到了却没要」
+/// （`reco_scan_audit` 有行 = 策略算出过却排在组内 top-N 之外），
+/// `reco_picks` 给「要了」。**无留痕 ≠ 没淘汰**，因此 `scored_out=0` 时本线不参与合成。
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct MoverCellSignal {
+    /// (矩阵名目, 档位键) → (scored_out, hits)
+    pub cells: HashMap<(String, String), (usize, usize)>,
+}
+
+/// 逐个参数的推导（不写死「每漏一次降 5%」这类无出处常数）：
+/// 惩罚 = Laplace 平滑后的**转化率** `(hits+1)/(hits+scored_out+1)`，
+/// 即「该格看到的达标机会里，要下来而不是推出去的比例」——
+/// 全要中 ⇒ 1.0（不降）；一半推出去 ⇒ ≈0.5。样本不足（见 `MOVER_MIN_EVIDENCE`）
+/// 或没有留痕证据 ⇒ `None`（不动权重，宁可不动也不猜）。
+pub const MOVER_MIN_EVIDENCE: usize = 3;
+
+impl MoverCellSignal {
+    /// 该格的降权乘数；`None` = 证据不足，保持原权重。
+    pub fn penalty(&self, style_key: &str, period: &str) -> Option<f64> {
+        let (scored_out, hits) =
+            self.cells.get(&(style_key.to_string(), period.to_string())).copied().unwrap_or((0, 0));
+        // 没有「看到了却没要」的证据 ⇒ 本线无从判断（不是「表现完美」）
+        if scored_out == 0 || scored_out + hits < MOVER_MIN_EVIDENCE {
+            return None;
+        }
+        let rate = (hits as f64 + 1.0) / ((hits + scored_out) as f64 + 1.0);
+        Some(rate.clamp(WEIGHT_FLOOR, 1.0))
+    }
+}
+
+/// 逐格合成（纯函数）：胜率线（`weight_decay` 基元）× 力度线（`ic` 基元）
+/// × mover 线（`reco_scan_audit` 截断留痕，Phase 4）。
 ///
 /// 规则（对齐已批方案 Q1/P2/Q5）：
 /// - 矩阵不成立格 ⇒ `NotInMatrix`，不产权重；
 /// - 该档窗口（`default_holding_days`，Q5 按档对齐）内样本 < `IC_MIN_SAMPLE` ⇒ 基线 1.0（`InsufficientSamples`）；
 /// - IC 可测但一侧方差退化 ⇒ 基线 1.0（`IcUnmeasurable`），不在测不出力度的格上做校准；
 /// - IC ≥ 0 ⇒ 只吃胜率降权（`min(aw, 1.0)`，上限即基线 ⇒ 只降不升）；
-/// - IC < 0 ⇒ 胜率权重再乘 `NEGATIVE_IC_PENALTY`，下限 `WEIGHT_FLOOR`。
+/// - IC < 0 ⇒ 胜率权重再乘 `NEGATIVE_IC_PENALTY`，下限 `WEIGHT_FLOOR`；
+/// - 最后（无论 IC 线是否校准）叠乘 `mover` 线：只降不升，且**永不提权**
+///   （`PLAN-mover-recall-attribution.md` §Phase 4 明文禁止用 mover 数据提权）。
 pub fn compute_loop_cell_weights(
     samples: &[RecoLoopSample],
     current: &HashMap<(String, String), f64>,
     now_ms: i64,
+    mover: &MoverCellSignal,
 ) -> Vec<LoopCellResult> {
     let mut out = Vec::new();
     for style_key in style_keys() {
         for period in Period::ALL.iter() {
+            let mover_penalty = mover.penalty(style_key, period.as_str());
+            let scored_out = mover
+                .cells
+                .get(&(style_key.to_string(), period.as_str().to_string()))
+                .map_or(0, |(out, _)| *out);
             let reason = crate::recommender::style_matrix::reason_code_by_key(style_key, *period);
             if reason != "cell_is_active" {
                 out.push(LoopCellResult {
@@ -234,6 +283,9 @@ pub fn compute_loop_cell_weights(
                     win_rate: None,
                     old_weight: BASELINE_WEIGHT,
                     new_weight: BASELINE_WEIGHT,
+                    // 按设计不出票的格不适用 mover 线（也就不该出现在降权清单里）
+                    mover_penalty: None,
+                    scored_out: 0,
                 });
                 continue;
             }
@@ -257,7 +309,11 @@ pub fn compute_loop_cell_weights(
                     samples: cell.len(),
                     win_rate: None,
                     old_weight,
-                    new_weight: BASELINE_WEIGHT,
+                    new_weight: mover_penalty.map_or(BASELINE_WEIGHT, |p| {
+                        (BASELINE_WEIGHT * p).clamp(WEIGHT_FLOOR, BASELINE_WEIGHT)
+                    }),
+                    mover_penalty,
+                    scored_out,
                 });
                 continue;
             }
@@ -303,6 +359,11 @@ pub fn compute_loop_cell_weights(
             } else {
                 (LoopCellStatus::IcNonNegative, win_w.unwrap_or(BASELINE_WEIGHT))
             };
+            // mover 线在 IC/胜率线之后叠乘：只降不升，样本不足时不动
+            let blended = match mover_penalty {
+                Some(p) => new_weight * p,
+                None => new_weight,
+            };
             out.push(LoopCellResult {
                 style: style_key,
                 period: period.as_str(),
@@ -311,7 +372,9 @@ pub fn compute_loop_cell_weights(
                 samples: cell.len(),
                 win_rate,
                 old_weight,
-                new_weight: new_weight.clamp(WEIGHT_FLOOR, BASELINE_WEIGHT),
+                new_weight: blended.clamp(WEIGHT_FLOOR, BASELINE_WEIGHT),
+                mover_penalty,
+                scored_out,
             });
         }
     }
@@ -343,6 +406,7 @@ impl Default for RecoLoopView {
 pub async fn recalc_and_persist_reco_loop(
     db: &DatabaseConnection,
     as_of_date: Option<&str>,
+    mover: &MoverCellSignal,
 ) -> Result<(usize, Vec<LoopCellResult>), String> {
     use axagent_entities::strategy_weight_history;
 
@@ -361,7 +425,7 @@ pub async fn recalc_and_persist_reco_loop(
     let current =
         crate::evolution_drift::load_current_weights_by_trigger(db, Some(RECO_LOOP_TRIGGER))
             .await?;
-    let results = compute_loop_cell_weights(&samples, &current, now_ms);
+    let results = compute_loop_cell_weights(&samples, &current, now_ms, mover);
 
     let applied_at = chrono::Utc::now().timestamp_millis();
     let mut written = 0usize;
@@ -420,6 +484,73 @@ pub async fn recalc_and_persist_reco_loop(
         written += 1;
     }
     Ok((written, results))
+}
+
+/// 从 `workflow_template.variables` JSON 解析出 `(name, value)` 对。
+///
+/// `variables` 存的是 `Vec<Variable>` 序列；解析失败 ⇒ 空（调用方按缺省闸处理，
+/// 不把"模板损坏"升级成"参数缺失"的静默行为）。
+pub fn extract_template_vars(t: &workflow_template::Model) -> Vec<(String, serde_json::Value)> {
+    let raw = match t.variables.as_ref() {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+    match serde_json::from_str::<Vec<Variable>>(raw) {
+        Ok(vs) => vs.into_iter().map(|v| (v.name, v.value)).collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// 读取荐股实际消费的模板变量（含闭环权重覆盖）。
+///
+/// 单档 `recommend_stocks`、多档 `recommend_stocks_all_periods`、cron 定时扫描与
+/// 漏检核查四条入口**必须**走同一个函数（缺陷 D2 的教训：曾有入口读裸模板变量，
+/// 闭环权重只对手动刷新生效，多条链算多套分）。cron/核查拿不到 `State`，故实现抽在
+/// db 层。本函数 2026-09-30 从 `commands/stock_analysis.rs` 搬入：放命令层会导致
+/// 跨模块调命令（分层门禁规则 2 `commands-no-sibling-call`），放这里四处都只是调库。
+///
+/// 生效闸（Q2 shadow 起步）：`reco_ic_gate`（模板可调变量，缺省 `shadow`）——
+/// - `off`／`shadow` ⇒ 不覆盖（闭环照算照留痕，只是不进评分）；
+/// - `on` ⇒ 用 reco-loop 权重覆盖模板静态值。
+///   变量读不到按 `shadow`（新装/模板缺失时保持现状，不假装闭环已转正）。
+pub async fn load_reco_served_vars_db(
+    db: &DatabaseConnection,
+) -> Result<Vec<(String, serde_json::Value)>, String> {
+    // 读取 workflow template 变量用于 vendor 启用检测
+    let template = workflow_template::Entity::find_by_id("stock-analysis")
+        .one(db)
+        .await
+        .map_err(|e| format!("查询模板失败: {e}"))?;
+
+    let vars: Vec<(String, serde_json::Value)> = match template {
+        Some(t) => extract_template_vars(&t),
+        None => Vec::new(),
+    };
+
+    let gate = vars
+        .iter()
+        .find(|(k, _)| k == "reco_ic_gate")
+        .and_then(|(_, v)| v.as_str())
+        .unwrap_or("shadow");
+    if gate != "on" {
+        return Ok(vars);
+    }
+
+    let looped =
+        crate::evolution_drift::load_current_weights_by_trigger(db, Some(RECO_LOOP_TRIGGER))
+            .await?;
+    if looped.is_empty() {
+        return Ok(vars);
+    }
+    // load_current_weights_by_trigger 返回 ((strategy, period), weight)，
+    // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
+    let mut obj = serde_json::Map::new();
+    for ((s, p), w) in looped {
+        obj.insert(format!("{s}_{p}"), serde_json::json!(w));
+    }
+    let mut v = vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
+    v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
+    Ok(v)
 }
 
 #[cfg(test)]
@@ -592,7 +723,8 @@ mod tests {
         let samples: Vec<_> = (0..8)
             .map(|i| mk("trend", Period::Short, 10.0 + i as f64 * 10.0, -i as f64, i < 5, now))
             .collect();
-        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now);
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let c = cell(&res, "trend", "short");
         assert_eq!(c.status, LoopCellStatus::DemotedNegativeIc, "{c:?}");
         assert!(c.new_weight < BASELINE_WEIGHT, "负 IC 必须降权，实际 {}", c.new_weight);
@@ -607,7 +739,8 @@ mod tests {
         let samples: Vec<_> = (0..8)
             .map(|i| mk("trend", Period::Short, 10.0 + i as f64 * 10.0, i as f64, true, now))
             .collect();
-        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now);
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let c = cell(&res, "trend", "short");
         assert_eq!(c.status, LoopCellStatus::IcNonNegative, "{c:?}");
         assert!(
@@ -624,7 +757,8 @@ mod tests {
         let samples: Vec<_> = (0..3)
             .map(|i| mk("trend", Period::Mid, 60.0 + i as f64, i as f64, true, now))
             .collect();
-        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now);
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let c = cell(&res, "trend", "mid");
         assert_eq!(c.status, LoopCellStatus::InsufficientSamples, "{c:?}");
         assert_eq!(c.new_weight, BASELINE_WEIGHT);
@@ -636,7 +770,8 @@ mod tests {
         let now = 1_700_000_000_000i64;
         let samples: Vec<_> =
             (0..8).map(|i| mk("trend", Period::Mid, 60.0, i as f64, true, now)).collect();
-        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now);
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let c = cell(&res, "trend", "mid");
         assert_eq!(c.status, LoopCellStatus::IcUnmeasurable, "{c:?}");
         assert_eq!(c.new_weight, BASELINE_WEIGHT);
@@ -652,7 +787,8 @@ mod tests {
                 mk("trend", Period::UltraShort, 10.0 + i as f64, -i as f64, true, now - 3 * day)
             })
             .collect();
-        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now);
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let c = cell(&res, "trend", "ultra_short");
         assert_eq!(c.status, LoopCellStatus::InsufficientSamples, "3 天前样本应出超短 2 天窗");
         assert_eq!(c.new_weight, BASELINE_WEIGHT);
@@ -665,7 +801,8 @@ mod tests {
         let samples: Vec<_> = (0..8)
             .map(|i| mk("reversion", Period::UltraShort, 10.0 + i as f64, -i as f64, false, now))
             .collect();
-        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now);
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let c = cell(&res, "reversion", "ultra_short");
         assert_eq!(c.status, LoopCellStatus::NotInMatrix, "{c:?}");
         assert_eq!(c.new_weight, BASELINE_WEIGHT);
@@ -678,7 +815,8 @@ mod tests {
         let samples: Vec<_> = (0..8)
             .map(|i| mk("trend", Period::Short, 10.0 + i as f64 * 10.0, -i as f64, true, now))
             .collect();
-        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now);
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
         let value = serde_json::to_value(cell(&res, "trend", "short")).unwrap();
         let obj = value.as_object().unwrap();
         for key in
@@ -688,5 +826,77 @@ mod tests {
         }
         assert!(!obj.contains_key("rank_ic"));
         assert_eq!(obj["status"].as_str(), Some("demoted_negative_ic"), "status 须 snake_case");
+    }
+
+    // ── Phase 4：mover 漏检线 ──
+
+    /// Laplace 转化率 + 两条守卫：无截断留痕（scored_out=0）不算证据；
+    /// 总样本 < `MOVER_MIN_EVIDENCE` 不猜。
+    #[test]
+    fn mover_penalty_requires_evidence_and_uses_laplace_ratio() {
+        let empty = MoverCellSignal::default();
+        assert_eq!(empty.penalty("trend", "short"), None, "无任何证据必须 None");
+
+        let mut s = MoverCellSignal::default();
+        // 只有命中、没有任何截断留痕 ⇒ 仍算无证据（不是「表现完美」）
+        s.cells.insert(("trend".into(), "short".into()), (0, 5));
+        assert_eq!(s.penalty("trend", "short"), None);
+
+        // 有留痕但总样本不足 ⇒ None
+        s.cells.insert(("trend".into(), "short".into()), (2, 0));
+        assert_eq!(s.penalty("trend", "short"), None);
+
+        // 9 个推出去、0 个要中 ⇒ (0+1)/(9+1) = 0.1
+        s.cells.insert(("trend".into(), "short".into()), (9, 0));
+        let p = s.penalty("trend", "short").unwrap();
+        assert!((p - 0.1).abs() < 1e-9, "得 {p}");
+
+        // 3 个推出去、1 个要中 ⇒ (1+1)/(3+1+1) = 0.4
+        s.cells.insert(("trend".into(), "short".into()), (3, 1));
+        let p = s.penalty("trend", "short").unwrap();
+        assert!((p - 0.4).abs() < 1e-9, "得 {p}");
+
+        // 永不提权：几乎全要中时也 ≤ 1.0
+        s.cells.insert(("trend".into(), "short".into()), (1, 100));
+        let p = s.penalty("trend", "short").unwrap();
+        assert!(p <= 1.0 && p > 0.98, "得 {p}");
+    }
+
+    /// mover 线叠乘在 IC/胜率线之后：比无惩罚更低，下限不破 `WEIGHT_FLOOR`，
+    /// 且惩罚值与留痕条数都进 DTO（呈现层要显示「为什么降」）。
+    #[test]
+    fn mover_line_demotes_after_ic_line() {
+        let now = 1_700_000_000_000i64;
+        let samples: Vec<_> = (0..8)
+            .map(|i| mk("trend", Period::Short, 10.0 + i as f64 * 10.0, i as f64, true, now))
+            .collect();
+        let base =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
+        let base_w = cell(&base, "trend", "short").new_weight;
+        assert!(base_w > WEIGHT_FLOOR, "前提：无 mover 证据时该格已校准出 {base_w}");
+
+        let mut sig = MoverCellSignal::default();
+        sig.cells.insert(("trend".into(), "short".into()), (9, 0));
+        let with_mover = compute_loop_cell_weights(&samples, &HashMap::new(), now, &sig);
+        let c = cell(&with_mover, "trend", "short");
+        let expected = (base_w * 0.1).clamp(WEIGHT_FLOOR, BASELINE_WEIGHT);
+        assert!(
+            (c.new_weight - expected).abs() < 1e-9,
+            "mover 线须以乘数叠加：{} vs 期望 {expected}",
+            c.new_weight
+        );
+        assert!(c.new_weight < base_w, "降权必须真实生效");
+        assert_eq!(c.mover_penalty, Some(0.1), "乘数须进 DTO");
+        assert_eq!(c.scored_out, 9, "留痕条数须进 DTO");
+
+        // 按设计不出票的格不吃 mover 线（也就不该出现在降权清单里）
+        let sig2 = MoverCellSignal {
+            cells: vec![(("reversion".into(), "ultra_short".into()), (9, 0))].into_iter().collect(),
+        };
+        let res = compute_loop_cell_weights(&samples, &HashMap::new(), now, &sig2);
+        let c = cell(&res, "reversion", "ultra_short");
+        assert_eq!(c.status, LoopCellStatus::NotInMatrix);
+        assert_eq!(c.mover_penalty, None);
+        assert_eq!(c.scored_out, 0);
     }
 }

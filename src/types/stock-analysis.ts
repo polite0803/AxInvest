@@ -931,6 +931,73 @@ export interface RecoLoopView {
   lastRecalcAt: number;
 }
 
+// ── 窗口涨幅达标漏检核查（`analyze_mover_recall`，PLAN-mover-recall-attribution）──
+
+/** 一档判据：阈值走模板变量（`varName`），窗口天数取唯一档位表（`Period::default_holding_days`）。 */
+export interface MoverTierRule {
+  period: string;
+  /** 模板变量全名（`mover_gain_ultra_short`）——面板据此指认阈值来源，不抄数字 */
+  varName: string;
+  gainPct: number;
+  windowDays: number;
+}
+
+/** 三个率。`null` = 分母为 0，**算不出来**（≠ 0%，两者在 UI 上必须不同形）。 */
+export interface MoverRecallRates {
+  reachability: number | null;
+  coverage: number | null;
+  unexplainedShare: number | null;
+  events: number;
+  misses: number;
+}
+
+/** 一条窗口涨幅达标事件（口径：绝对涨幅，不含板块涨停语义）。 */
+export interface MoverEvent {
+  stockCode: string;
+  stockName: string;
+  period: string;
+  /** 窗口右端（= 达标确认日）ISO 日期 */
+  anchorDate: string;
+  windowDays: number;
+  cumGainPct: number;
+  maxDailyPct: number;
+  thresholdPct: number;
+  /** 板块归属（仅用于分组，避免混池假象） */
+  marketType: string;
+  recommended: boolean;
+}
+
+/** 漏检明细行。`scoredOutStyles` 非空 ⇒ 可归因到具体风格（截断留痕命中）。 */
+export interface MoverMissRow {
+  event: MoverEvent;
+  layer: string;
+  pickedAnyPeriod: boolean;
+  scoredOutStyles: string[];
+}
+
+/** 归因分层小计（含板块分组）。 */
+export interface MoverLayerRow {
+  layer: string;
+  count: number;
+  byMarketType: [string, number][];
+}
+
+/** `analyze_mover_recall` 响应（字段与 Rust DTO 一一对应，禁区 13）。 */
+export interface MoverRecallView {
+  from: string;
+  to: string;
+  /** 数据起点声明：早于此没有快照 ⇒ 面板必须原文显示这句，不得留白 */
+  dataSince: string;
+  /** 已采集交易日数：某档可判定 ⇔ ≥ 该档 windowDays（未达阈 ⇒ 「尚不可判定」而非「无事件」） */
+  collectedDays: number;
+  universeSize: number;
+  universeConfirmed: number;
+  rules: MoverTierRule[];
+  rates: MoverRecallRates;
+  layers: MoverLayerRow[];
+  misses: MoverMissRow[];
+}
+
 // ── 决策时间线类型 ──
 
 /** 时间线 4 阶段：扫描 → 诊断 → 辩论 → 决策 */

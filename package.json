@@ -115,6 +115,8 @@
     "check:valuation-parity": "node scripts/check-valuation-defaults-parity.mjs",
     "check:horizon-parity": "node scripts/check-horizon-weight-parity.mjs",
     "check:horizon-parity:selftest": "node scripts/check-horizon-weight-parity.mjs --selftest",
+    "check:reco-horizon": "node scripts/check-reco-horizon-parity.mjs",
+    "check:reco-horizon:selftest": "node scripts/check-reco-horizon-parity.mjs --selftest",
     "check:valuation-parity:selftest": "node scripts/check-valuation-defaults-parity.mjs --selftest"
   },
   "dependencies": {

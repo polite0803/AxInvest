@@ -30,7 +30,7 @@ use axagent_astock_data::fundamentals_report::{FundamentalsAnalyzer, Fundamental
 use axagent_astock_data::{FinancialReport, StockQuote};
 use axagent_entities::{
     decision_validations, financial_snapshots, portfolio_holdings, price_alerts, reco_picks,
-    stock_analyses, trades, watchlist_items,
+    reco_scan_audit, stock_analyses, trades, watchlist_items,
 };
 use axagent_harness::market_data::KLine;
 use chrono::Datelike;
@@ -3951,7 +3951,7 @@ pub async fn check_vendor_health(state: State<'_, AppState>, vendor: String) -> 
                 ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询模板失败: {e}"))
             })?;
         if let Some(t) = template {
-            let vars = extract_template_vars(&t);
+            let vars = axagent_analysis_engine::recommender::reco_loop::extract_template_vars(&t);
             for (name, value) in &vars {
                 if name == "vendor_xueqiu_token" {
                     if let serde_json::Value::String(token) = value {
@@ -4376,31 +4376,30 @@ pub async fn run_daily_snapshot_sweep(
 /// - `generated_at`：本次扫描的批次标识（同批次所有行共用一个值，供
 ///   `get_cached_recommendation` 按 `generated_at` 取回整批）
 pub async fn persist_reco_picks(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     picks: &[RecoPick],
     seed_pool_json: Option<String>,
     strategy_weights_json: Option<String>,
     generated_at: &str,
 ) -> usize {
-    use sea_orm::ActiveModelTrait;
     let mut written = 0usize;
     for pick in picks {
         // 序列化完整 pick 到 pick_data —— get_cached_recommendation 会读这一列
         // 还原 cache，与实时拉取结果 schema 完全等价。
         let pick_data = serde_json::to_string(pick).ok();
         let am = reco_picks::ActiveModel {
-            id: sea_orm::Set(uuid::Uuid::new_v4().to_string()),
-            generated_at: sea_orm::Set(generated_at.to_string()),
-            period: sea_orm::Set(pick.period.as_str().to_string()),
-            stock_code: sea_orm::Set(pick.stock_code.clone()),
-            stock_name: sea_orm::Set(pick.stock_name.clone()),
-            style: sea_orm::Set(pick.style.as_str().to_string()),
-            confidence: sea_orm::Set(pick.confidence as i32),
-            synthetic: sea_orm::Set(if pick.synthetic { 1 } else { 0 }),
-            seed_pool_json: sea_orm::Set(seed_pool_json.clone()),
-            strategy_weights_json: sea_orm::Set(strategy_weights_json.clone()),
-            pick_data: sea_orm::Set(pick_data),
-            created_at: sea_orm::Set(generated_at.to_string()),
+            id: Set(uuid::Uuid::new_v4().to_string()),
+            generated_at: Set(generated_at.to_string()),
+            period: Set(pick.period.as_str().to_string()),
+            stock_code: Set(pick.stock_code.clone()),
+            stock_name: Set(pick.stock_name.clone()),
+            style: Set(pick.style.as_str().to_string()),
+            confidence: Set(pick.confidence as i32),
+            synthetic: Set(if pick.synthetic { 1 } else { 0 }),
+            seed_pool_json: Set(seed_pool_json.clone()),
+            strategy_weights_json: Set(strategy_weights_json.clone()),
+            pick_data: Set(pick_data),
+            created_at: Set(generated_at.to_string()),
         };
         // 插入失败不静默：此前 `let _ = insert(...)` 失败无感知，
         // 前端表现为"无缓存"，定时链路表现为"候选池为空"。
@@ -4412,6 +4411,47 @@ pub async fn persist_reco_picks(
                     pick.period.as_str(),
                     pick.stock_code,
                     pick.style.as_str(),
+                    e
+                );
+            },
+        }
+    }
+    written
+}
+
+/// 落 L3 截断留痕（`reco_scan_audit`，`PLAN-mover-recall-attribution.md` Phase 4 前置）。
+///
+/// 语义边界见实体文档：**有行** = 该风格算出了该票、只是组内 top-N 排不上；
+/// **无行** ≠ 该风格把它选出去了。写失败不静默（与 `persist_reco_picks` 同口径），
+/// 少留痕只会让漏检归因落到 `Unexplained`，但日志里必须看得见。
+pub async fn persist_reco_scan_audit(
+    db: &sea_orm::DatabaseConnection,
+    trimmed: &[recommender::TrimmedPick],
+    period: axagent_analysis_engine::recommender::Period,
+    generated_at: &str,
+) -> usize {
+    use sea_orm::ActiveModelTrait;
+    let mut written = 0usize;
+    for t in trimmed {
+        let am = reco_scan_audit::ActiveModel {
+            id: Set(uuid::Uuid::new_v4().to_string()),
+            generated_at: Set(generated_at.to_string()),
+            period: Set(period.as_str().to_string()),
+            stock_code: Set(t.stock_code.clone()),
+            stock_name: Set(t.stock_name.clone()),
+            style: Set(t.style.as_str().to_string()),
+            confidence: Set(t.confidence),
+            rank: Set(t.rank),
+            created_at: Set(generated_at.to_string()),
+        };
+        match am.insert(db).await {
+            Ok(_) => written += 1,
+            Err(e) => {
+                tracing::warn!(
+                    "[persist_reco_scan_audit] 写入失败 ({} {} {}): {}",
+                    period.as_str(),
+                    t.stock_code,
+                    t.style.as_str(),
                     e
                 );
             },
@@ -4461,69 +4501,11 @@ pub(crate) async fn reco_horizon_prior(
     Some(axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa))
 }
 
-/// 读取荐股实际消费的模板变量（含闭环权重覆盖）。
-///
-/// 单档 `recommend_stocks`、多档 `recommend_stocks_all_periods` 与 **cron 定时扫描**
-/// 三条入口**必须**走同一个函数（缺陷 D2 的教训：cron 曾读裸模板变量，闭环权重只对
-/// 手动刷新生效，两条链算两套分）。cron 拿不到 `State`，故实现抽在 db 层。
-///
-/// 覆盖源（Q3 归属分离，`PLAN-reco-reflection-closure.md`）：荐股权重**只**认荐股链
-/// 自己的已验证样本（`recommender::reco_loop`，留痕 trigger=`"reco-loop"`）。旧 B1
-/// 形态覆盖的是分析链「action→伪风格」回测权重（`map_action_to_strategy_id` 产物），
-/// 与分析链决策胜率同名不同义，已退出荐股键空间；分析链对荐股的影响只走逐档先验线。
-///
-/// 生效闸（Q2 shadow 起步）：`reco_ic_gate`（模板可调变量，缺省 `shadow`）——
-/// - `off`／`shadow` ⇒ 不覆盖（闭环照算照留痕，只是不进评分）；
-/// - `on` ⇒ 用 reco-loop 权重覆盖模板静态值。
-///   变量读不到按 `shadow`（新装/模板缺失时保持现状，不假装闭环已转正）。
-pub(crate) async fn load_reco_served_vars_db(
-    db: &DatabaseConnection,
-) -> Result<Vec<(String, serde_json::Value)>, String> {
-    // 读取 workflow template 变量用于 vendor 启用检测
-    let template = axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
-        .one(db)
-        .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询模板失败: {e}"))
-        })?;
-
-    let vars: Vec<(String, serde_json::Value)> = match template {
-        Some(t) => extract_template_vars(&t),
-        None => Vec::new(),
-    };
-
-    let gate = vars
-        .iter()
-        .find(|(k, _)| k == "reco_ic_gate")
-        .and_then(|(_, v)| v.as_str())
-        .unwrap_or("shadow");
-    if gate != "on" {
-        return Ok(vars);
-    }
-
-    let looped = axagent_analysis_engine::evolution_drift::load_current_weights_by_trigger(
-        db,
-        Some(axagent_analysis_engine::recommender::reco_loop::RECO_LOOP_TRIGGER),
-    )
-    .await?;
-    if looped.is_empty() {
-        return Ok(vars);
-    }
-    // load_current_weights_by_trigger 返回 ((strategy, period), weight)，
-    // 需换算成 parse_strategy_weights 约定的 "{style}_{period}" key 形态。
-    let mut obj = serde_json::Map::new();
-    for ((s, p), w) in looped {
-        obj.insert(format!("{s}_{p}"), serde_json::json!(w));
-    }
-    let mut v = vars.into_iter().filter(|(k, _)| k != "reco_strategy_weights").collect::<Vec<_>>();
-    v.push(("reco_strategy_weights".to_string(), serde_json::Value::Object(obj)));
-    Ok(v)
-}
-
 async fn load_reco_served_vars(
     state: &AppState,
 ) -> Result<Vec<(String, serde_json::Value)>, String> {
-    load_reco_served_vars_db(state.harness.db()).await
+    axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(state.harness.db())
+        .await
 }
 
 /// 从 served_vars 取策略权重快照（用于回溯某次荐股时的权重配置）。
@@ -4566,6 +4548,21 @@ async fn persist_reco_response_picks(
         flat.len(),
         response.period.as_str()
     );
+    // L3 截断留痕：与同一批 picks 共 generated_at，便于按批对齐
+    if !response.scan_audit.is_empty() {
+        let audit = persist_reco_scan_audit(
+            state.harness.db(),
+            &response.scan_audit,
+            response.period,
+            generated_at,
+        )
+        .await;
+        tracing::info!(
+            "[recommend_stocks] 落库 scan_audit: {audit}/{} 行 (period={})",
+            response.scan_audit.len(),
+            response.period.as_str()
+        );
+    }
     written
 }
 
@@ -4747,7 +4744,18 @@ pub(crate) async fn reco_loop_view(
     )
     .await
     .unwrap_or_default();
-    let cells = compute_loop_cell_weights(&samples, &current, now_ms);
+    // Phase 4：mover 线必须在**同一份**装配下算，否则面板显示与落库权重不同源
+    let mover =
+        match axagent_analysis_engine::mover_recall::load_mover_cell_signal(db, served_vars, None)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("[reco_loop_view] mover 证据装配失败，本视图按无证据出: {e}");
+                Default::default()
+            },
+        };
+    let cells = compute_loop_cell_weights(&samples, &current, now_ms, &mover);
     let last_recalc_at =
         axagent_analysis_engine::evolution_drift::latest_recalc_applied_at(db, RECO_LOOP_TRIGGER)
             .await
@@ -4769,10 +4777,20 @@ pub async fn recalc_reco_loop_weights(
     state: State<'_, AppState>,
     as_of_date: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let db = state.harness.db();
+    let served_vars =
+        axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await?;
+    let mover = axagent_analysis_engine::mover_recall::load_mover_cell_signal(
+        db,
+        &served_vars,
+        as_of_date.as_deref(),
+    )
+    .await?;
     let (written, cells) =
         axagent_analysis_engine::recommender::reco_loop::recalc_and_persist_reco_loop(
-            state.harness.db(),
+            db,
             as_of_date.as_deref(),
+            &mover,
         )
         .await?;
     Ok(serde_json::json!({ "written": written, "cells": cells }))
@@ -4785,14 +4803,15 @@ pub async fn recalc_reco_loop_weights(
 /// `reco_ic_gate=off` ⇒ 完全停用（连计算都不做）；shadow/on ⇒ 计算并留痕，
 /// 是否进评分由消费侧 `load_reco_served_vars_db` 的闸决定。
 pub(crate) async fn maybe_recalc_reco_loop(db: &DatabaseConnection) -> String {
-    let served_vars = match load_reco_served_vars_db(db).await {
-        Ok(v) => v,
-        Err(e) => {
-            let msg = format!("闭环重算跳过（读模板变量失败）: {e}");
-            tracing::warn!("[reco_loop] {msg}");
-            return msg;
-        },
-    };
+    let served_vars =
+        match axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db).await {
+            Ok(v) => v,
+            Err(e) => {
+                let msg = format!("闭环重算跳过（读模板变量失败）: {e}");
+                tracing::warn!("[reco_loop] {msg}");
+                return msg;
+            },
+        };
     let gate = served_vars
         .iter()
         .find(|(k, _)| k == "reco_ic_gate")
@@ -4801,8 +4820,20 @@ pub(crate) async fn maybe_recalc_reco_loop(db: &DatabaseConnection) -> String {
     if gate == "off" {
         return "闭环停用（gate=off），未重算".to_string();
     }
-    match axagent_analysis_engine::recommender::reco_loop::recalc_and_persist_reco_loop(db, None)
-        .await
+    let mover =
+        match axagent_analysis_engine::mover_recall::load_mover_cell_signal(db, &served_vars, None)
+            .await
+        {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("[reco_loop] mover 证据装配失败，本轮按无证据重算: {e}");
+                Default::default()
+            },
+        };
+    match axagent_analysis_engine::recommender::reco_loop::recalc_and_persist_reco_loop(
+        db, None, &mover,
+    )
+    .await
     {
         Ok((written, _)) => {
             let msg = format!("闭环重算完成（gate={gate}），留痕 {written} 条");
@@ -4926,6 +4957,8 @@ pub async fn get_cached_recommendation(
         error_detail: None,
         // 缓存还原路径无需携带 seed 快照（serde skip 不传给前端；表内已有）
         seed_pool_snapshot: None,
+        // 缓存还原不是一次扫描 ⇒ 无本批截断留痕（留痕只在 persist 时写库）
+        scan_audit: vec![],
     }))
 }
 
@@ -5126,25 +5159,6 @@ pub async fn get_latest_analyses_for_stocks(
     }
 
     Ok(result)
-}
-
-/// 从 workflow_template 实体提取 (name, value) 列表
-///
-/// `pub(crate)`：`init/services.rs` 的荐股 cron handler 需要同一份解析逻辑
-/// （荐股扫描的开关与各策略阈值全部来自模板变量，不读它就会退回硬编码默认值）。
-/// 这里保持单一实现，禁止在调用侧再写一份。
-pub(crate) fn extract_template_vars(
-    t: &axagent_entities::workflow_template::Model,
-) -> Vec<(String, serde_json::Value)> {
-    use axagent_harness::workflow_types::Variable;
-    let raw = match t.variables.as_ref() {
-        Some(s) => s,
-        None => return Vec::new(),
-    };
-    match serde_json::from_str::<Vec<Variable>>(raw) {
-        Ok(vs) => vs.into_iter().map(|v| (v.name, v.value)).collect(),
-        Err(_) => Vec::new(),
-    }
 }
 
 // ── 自选股自动扫描定时任务 ──
@@ -7072,6 +7086,7 @@ mod reco_batch_contract_tests {
             mode: "live".to_string(),
             error_detail: None,
             seed_pool_snapshot: None,
+            scan_audit: vec![],
         }
     }
 

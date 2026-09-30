@@ -17,9 +17,8 @@ import { CodeRefactorSettingsModal } from "@/components/settings/CodeRefactorSet
 import { LiteraryCreationSettingsModal } from "@/components/settings/LiteraryCreationSettingsModal";
 import { useConversationStore, useSettingsStore } from "@/stores";
 
-import { DomainDashboard } from "./DomainComponents";
 import type { ActionItem, DomainConfig, DomainTab, DomainWorkflow } from "./types";
-import { useDomainData } from "./useDomainData";
+import type { UseDomainDataReturn } from "./useDomainData";
 import { WorkflowWizard } from "./WorkflowWizard";
 
 const { Text } = Typography;
@@ -28,6 +27,13 @@ interface DomainTabContentProps {
   capabilityPackId: string;
   config: DomainConfig;
   tabKey: string;
+  /**
+   * 域级数据由 `CapabilityPackHub` 单实例持有后下传。
+   *
+   * 原实现在本组件内调 `useDomainData`，而 antd Tabs 会把访问过的 tab 全部保留挂载
+   * （`destroyOnHidden={false}`）⇒ 每多访问一个 tab 就多一份实例、多一轮 5 次 IPC。
+   */
+  data: UseDomainDataReturn;
 }
 
 function findTab(config: DomainConfig, tabKey: string): DomainTab | undefined {
@@ -61,12 +67,11 @@ function resolveTemplateId(
   return undefined;
 }
 
-export function DomainTabContent({ capabilityPackId, config, tabKey }: DomainTabContentProps) {
+export function DomainTabContent({ capabilityPackId, config, tabKey, data }: DomainTabContentProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const createConversation = useConversationStore((s) => s.createConversation);
   const settings = useSettingsStore((s) => s.settings);
-  const data = useDomainData(capabilityPackId);
 
   const tab = useMemo(() => findTab(config, tabKey), [config, tabKey]);
 
@@ -182,16 +187,10 @@ export function DomainTabContent({ capabilityPackId, config, tabKey }: DomainTab
         />
       )}
 
-      {/* 仪表盘是域级数据而非 tab 级，只随落地 tab 出现一次 */}
-      {config.tabs?.[0]?.key === tabKey && (
-        <DomainDashboard
-          dashboard={data.dashboard}
-          loading={data.dashboardLoading}
-          kpiTimeRange={data.kpiTimeRange}
-          onTimeRangeChange={data.setKpiTimeRange}
-          onRefresh={data.loadDashboard}
-        />
-      )}
+      {
+        /* 仪表盘等域级面板不在本组件：它们是域级数据而非 tab 级，
+          统一收在 `DomainPackLevelTab` 的一个 tab 里，本组件只渲染该业务阶段自身的内容 */
+      }
 
       {tab.actions && tab.actions.length > 0 && (
         <Card

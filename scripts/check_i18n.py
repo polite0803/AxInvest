@@ -24,6 +24,13 @@ import re
 import sys
 from pathlib import Path
 
+# Windows GBK 控制台无法编码 emoji（✅/❌/📊 等），pre-push 钩子在此环境运行会
+# 直接崩溃（UnicodeEncodeError）导致误报失败。重编码 stdout 为 UTF-8 兜底。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 ROOT = Path(__file__).parent.parent
 LOCALES_DIR = ROOT / 'src' / 'i18n' / 'locales'
 SRC_DIR = ROOT / 'src'

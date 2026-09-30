@@ -4398,6 +4398,74 @@ impl AStockClient {
         }
     }
 
+    /// 全市场日涨幅快照的**批量**通道（腾讯多码拼接）。
+    ///
+    /// as-of 下无历史语义 ⇒ 与 `get_hot_stocks` 同一处置（#19 裁定：榜单类是「那一天」
+    /// 的产物，容忍当下值等于把未来信息塞进回放）：显式记降级并返回空，不回落到逐票。
+    /// 历史日期只能由 `market_daily_close` 表自身提供（表按日落库，回放读表不读网络）。
+    pub async fn market_snapshot_batch(
+        &self,
+        codes: &[String],
+    ) -> Result<Vec<types::StockQuote>, DataError> {
+        if crate::as_of::is_asof_active() {
+            crate::as_of::record_degradation_kind(
+                "astock-data",
+                "market_snapshot_batch",
+                "as-of 模式批量快照无历史语义（历史只读 market_daily_close 表）",
+                crate::as_of::DegradationKind::StructuralGap,
+            );
+            return Ok(vec![]);
+        }
+        vendors::tencent::fetch_quotes_batch(&self.http, codes).await
+    }
+
+    /// 东财 `push2 clist` **单页**全市场清单（100 只/页，`pz` 服务端硬上限 100）。
+    ///
+    /// 刻意只提供单页：连续 60 页实测 11/60 成功即触发连接级封禁
+    /// （`AUDIT-mover-universe-feasibility-2026-09-30.md`），所以全量刷新必须由调用方
+    /// 跨 tick 摊薄 + 断点续传，网络层不给「一次爬完」的诱惑。
+    /// 返回 `((代码, 名称) 列表, 总数)`；总数用于判断是否已爬完。
+    pub async fn market_list_page(
+        &self,
+        page: u32,
+    ) -> Result<(Vec<(String, String)>, i64), DataError> {
+        if crate::as_of::is_asof_active() {
+            crate::as_of::record_degradation_kind(
+                "astock-data",
+                "market_list_page",
+                "as-of 模式全市场清单无历史语义",
+                crate::as_of::DegradationKind::StructuralGap,
+            );
+            return Ok((vec![], 0));
+        }
+        let url = format!(
+            "https://push2.eastmoney.com/api/qt/clist/get?pn={page}&pz=100&po=0&np=1&fltt=2\
+             &invt=2&fid=f12&fs=m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048&fields=f12,f14"
+        );
+        let resp = self
+            .http
+            .get(&url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            .header("Referer", "https://quote.eastmoney.com/")
+            .send()
+            .await?;
+        crate::check_response_429(&resp, "eastmoney")?;
+        let json: serde_json::Value = resp.json().await?;
+        let data = &json["data"];
+        let total = data["total"].as_i64().unwrap_or(0);
+        let empty = vec![];
+        let diff = data["diff"].as_array().unwrap_or(&empty);
+        let entries = diff
+            .iter()
+            .filter_map(|d| {
+                let code = d["f12"].as_str()?.to_string();
+                let name = d["f14"].as_str().unwrap_or("").to_string();
+                Some((code, name))
+            })
+            .collect();
+        Ok((entries, total))
+    }
+
     pub async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
         // P4: 按 vendor 申报的 capability 决策
         // eastmoney/ths/iwencai 申报 NoHistoricalSemantic（当日榜单语义，见上面 #19 的②）

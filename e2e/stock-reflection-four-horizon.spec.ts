@@ -209,7 +209,7 @@ function activePane(expanded: Locator): Locator {
  *
  * 注意：页签文本是裸档名（"短线"），它是"超短线"的子串 ⇒ 不能用子串包含定位，
  * 必须精确到含状态徽标的完整文本（如 "🟢 短线"）。徽标由该周期 status 决定
- *（mature 🟢 / immature 🟠 / unavailable ⚪ / legacy 🟣），用例按 fixture 写死。 */
+ * （mature 🟢 / immature 🟠 / unavailable ⚪ / legacy 🟣），用例按 fixture 写死。 */
 function horizonTab(expanded: Locator, accessibleName: string): Locator {
   return expanded.getByRole("tab", { name: accessibleName });
 }

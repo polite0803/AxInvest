@@ -57,6 +57,9 @@ pub struct CapabilityPackLearningMetrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+// 不加这条会序列化成 PascalCase（`"Improving"`），而消费侧按 snake_case 比字符串 ⇒
+// 判反颜色 + `t("trend_" + trend)` 拼出缺键、界面显示原始 key 串。全站枚举一律 snake_case（禁区 13）。
+#[serde(rename_all = "snake_case")]
 pub enum ImprovementTrend {
     Improving,
     Stable,

@@ -16,6 +16,14 @@ use std::sync::LazyLock;
 static REMOTE_HOLIDAYS: LazyLock<RwLock<HashSet<String>>> =
     LazyLock::new(|| RwLock::new(HashSet::new()));
 
+/// K 线自证出的「**确已开市**」日期(YYYY-MM-DD)。与 `REMOTE_HOLIDAYS` 互补：
+/// 后者只会从「缺失的工作日」推休市（只增不减），对「把真实交易日误标成休市」无能为力 ——
+/// 而那正是硬编码兜底表的失分形态（表里**未来日期**的条目在当天到来前无从证伪）。
+/// 2026-09-30 实机验证实证：`2026-09-28/29/30` 被表误列连休 ⇒ `previous_trading_day(09-30)`
+/// 错落 09-24，收盘采集把 09-30 的行情值标成 09-24 落库。本集合优先级**高于**兜底表。
+static REMOTE_TRADING_DAYS: LazyLock<RwLock<HashSet<String>>> =
+    LazyLock::new(|| RwLock::new(HashSet::new()));
+
 /// 把东方财富返回的 "20250101" 格式转换为 "2025-01-01"
 fn em_date_to_iso(s: &str) -> String {
     if s.len() == 8 && s.chars().all(|c| c.is_ascii_digit()) {
@@ -28,9 +36,11 @@ fn em_date_to_iso(s: &str) -> String {
 /// 判断是否为A股交易日。
 ///
 /// 优先级:
-/// 1. 远程节假日缓存(启动时由 init_holiday_calendar 异步填充,优先于硬编码)
+/// 0. K 线自证「确已开市」命中 → 交易日（**优先于其余全部判据**；未来日期唯一可推翻
+///    兜底表误标的机制，见 `REMOTE_TRADING_DAYS`）
+/// 1. 远程/K 线自证的休市集合命中 → 非交易日
 /// 2. 周末判断(Sat/Sun)—— A 股周末永不开市，调休补班不影响股市
-/// 3. 2025-2026 年硬编码节假日（兜底，已知有条目不准，见下表注释）
+/// 3. 2025-2026 年硬编码节假日（兜底，已知有条目不准，见 `HARDCODED_HOLIDAYS` 注释）
 ///
 /// 缺陷 A 修复:2027 年及以后不再依赖硬编码,而是依赖远程缓存(由东方财富 API 拉取 365 天滚动)。
 ///
@@ -38,95 +48,95 @@ fn em_date_to_iso(s: &str) -> String {
 /// （见 `AStockClient::quote_from_klines`）；本函数用于休市提示、定时任务跳过等场景。
 pub fn is_trading_day(date: &NaiveDate) -> bool {
     let date_str = date.format("%Y-%m-%d").to_string();
+    is_trading_day_with(&date_str, &REMOTE_TRADING_DAYS.read(), &REMOTE_HOLIDAYS.read())
+}
 
-    // 1) 远程节假日缓存命中 → 非交易日
-    {
-        let cache = REMOTE_HOLIDAYS.read();
-        if cache.contains(&date_str) {
-            return false;
-        }
+/// 判据本体（纯函数，便于用局部集合测试，零全局副作用）。
+///
+/// `proven`: K 线自证「**确已开市**」；`remote`: 远程 / K 线自证休市。
+/// 顺序即优先级——**正向自证先于一切**：兜底表里**未来日期**的条目在当天到来前
+/// 无从证伪，只有「该日真实存在 K 线」能推翻它（2026-09-28/29/30 被误列连休即此形态）。
+fn is_trading_day_with(date_str: &str, proven: &HashSet<String>, remote: &HashSet<String>) -> bool {
+    if proven.contains(date_str) {
+        return true;
     }
-
-    // 2026-09-26 删除「调休工作日」名单。
-    //
-    // 它假设"国务院调休补班的周末股市也开市"——**A 股周末从不开市**，调休只影响上班日。
-    // 实测（上证日 K，web.ifzq.gtimg.cn）：被列为开市的 `2025-02-08`（周六）无 K 线，
-    // 序列是 02-05 / 02-06 / 02-07 / 02-10。留着它会让 `previous_trading_day` /
-    // `latest_trading_day` 算出一个不存在的行情日。
+    if remote.contains(date_str) {
+        return false;
+    }
+    let Ok(date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") else {
+        return false;
+    };
+    // A 股周末永不开市，调休补班不影响股市（2026-09-26 删除「调休工作日」名单：
+    // 被列为开市的 `2025-02-08`（周六）实测无 K 线，序列 02-05 / 02-06 / 02-07 / 02-10；
+    // 留着它会让 `previous_trading_day` / `latest_trading_day` 算出不存在的行情日）。
     let w = date.weekday();
-    // 周末不交易
     if w == Weekday::Sat || w == Weekday::Sun {
         return false;
     }
-
-    // 硬编码2025-2026年A股节假日（简化版，不含临时休市）
-    //
-    // ⚠ 这张表只在远程节假日缓存拉不到时兜底。2026-09-27 纠错（301302 t-risk 超时
-    //   根因，见 `PLAN-live-kline-cache-calendar-storm.md` C1）：
-    //   - 摘除 `2026-09-21` / `2026-09-22`——真实日 K 显示这两天正常开市
-    //     （实测序列 …09-18、09-21、09-22、09-23）；
-    //   - 补 `2026-09-25`（中秋，周五休市）——腾讯日 K 止于 09-24 自证；
-    //     该条目缺失曾使 `latest_trading_day()` 误报 09-25，击穿 K 线缓存
-    //     新鲜性判据 ⇒ live 缓存风暴。
-    //   即便如此，它**不得**再决定"取哪一天的数据"：行情/K 线的取数已改为
-    //   「≤ 截止日的最后一根真实 K 线」自证（见 `AStockClient::quote_from_klines`），
-    //   这张表现在只影响休市提示与快照采集的跳过判断。
-    let holidays = [
-        // 2025年
-        "2025-01-01", // 元旦
-        "2025-01-28",
-        "2025-01-29",
-        "2025-01-30",
-        "2025-01-31",
-        "2025-02-03",
-        "2025-02-04", // 春节
-        "2025-04-04",
-        "2025-04-07", // 清明
-        "2025-05-01",
-        "2025-05-02",
-        "2025-05-05", // 劳动节
-        "2025-06-02", // 端午
-        "2025-09-15",
-        "2025-09-16", // 中秋
-        "2025-10-01",
-        "2025-10-02",
-        "2025-10-03",
-        "2025-10-06",
-        "2025-10-07",
-        "2025-10-08", // 国庆
-        // 2026年
-        "2026-01-01",
-        "2026-01-02",
-        "2026-02-16",
-        "2026-02-17",
-        "2026-02-18",
-        "2026-02-19",
-        "2026-02-20",
-        "2026-02-23",
-        "2026-02-24",
-        "2026-03-23",
-        "2026-03-24",
-        "2026-04-20",
-        "2026-04-21",
-        "2026-05-18",
-        "2026-05-19",
-        "2026-06-08",
-        "2026-06-09",
-        "2026-09-25", // 中秋（周五休市；腾讯日 K 止于 09-24 自证）
-        "2026-09-28",
-        "2026-09-29",
-        "2026-09-30",
-        "2026-10-01",
-        "2026-10-02",
-    ];
-
-    let date_str2 = date.format("%Y-%m-%d").to_string();
-    if holidays.contains(&date_str2.as_str()) {
-        return false;
-    }
-
-    true
+    !HARDCODED_HOLIDAYS.contains(&date_str)
 }
+
+/// 硬编码兜底表（2025-2026 年节假日，简化版，不含临时休市）。
+///
+/// ⚠ 只在远程与 K 线自证都拿不到时兜底。两次纠错的共同教训是**表里的未来日期在当天
+/// 到来前无从证伪**；现已由 `REMOTE_TRADING_DAYS`（K 线正向自证）推翻，纠错不必再等实机发现：
+///
+/// - 2026-09-27（301302 t-risk 超时根因，见 `PLAN-live-kline-cache-calendar-storm.md` C1）：
+///   摘除 `2026-09-21` / `2026-09-22`（真实日 K 显示这两天正常开市，序列 …09-18、09-21、09-22、09-23）；
+///   补 `2026-09-25`（中秋，周五休市）——腾讯日 K 止于 09-24 自证；该条目缺失曾使
+///   `latest_trading_day()` 误报 09-25，击穿 K 线缓存新鲜性判据 ⇒ live 缓存风暴。
+/// - 2026-09-30（实机验证）：摘除误列的 `2026-09-28/29/30`。上证日 K 有这三天、09-25 无；
+///   库内 `601231` 行 close=23.74 与腾讯 09-30 收盘逐字相等 ⇒ 连休三天让
+///   `previous_trading_day(09-30)` 错落 09-24，收盘采集把 09-30 的行情值贴 09-24 标签落库。
+///
+/// ⚠ 它**不得**决定"取哪一天的数据"：行情/K 线取数已改为「≤ 截止日的最后一根真实 K 线」
+/// 自证（见 `AStockClient::quote_from_klines`），这张表只影响休市提示与快照采集的跳过判断。
+const HARDCODED_HOLIDAYS: &[&str] = &[
+    // 2025年
+    "2025-01-01", // 元旦
+    "2025-01-28",
+    "2025-01-29",
+    "2025-01-30",
+    "2025-01-31",
+    "2025-02-03",
+    "2025-02-04", // 春节
+    "2025-04-04",
+    "2025-04-07", // 清明
+    "2025-05-01",
+    "2025-05-02",
+    "2025-05-05", // 劳动节
+    "2025-06-02", // 端午
+    "2025-09-15",
+    "2025-09-16", // 中秋
+    "2025-10-01",
+    "2025-10-02",
+    "2025-10-03",
+    "2025-10-06",
+    "2025-10-07",
+    "2025-10-08", // 国庆
+    // 2026年
+    "2026-01-01",
+    "2026-01-02",
+    "2026-02-16",
+    "2026-02-17",
+    "2026-02-18",
+    "2026-02-19",
+    "2026-02-20",
+    "2026-02-23",
+    "2026-02-24",
+    "2026-03-23",
+    "2026-03-24",
+    "2026-04-20",
+    "2026-04-21",
+    "2026-05-18",
+    "2026-05-19",
+    "2026-06-08",
+    "2026-06-09",
+    "2026-09-25", // 中秋（周五休市；腾讯日 K 止于 09-24 自证）
+    // 2026-09-28 / 29 / 30 已摘除：误列连休，见上方实证
+    "2026-10-01",
+    "2026-10-02",
+];
 
 /// 获取当前北京时间对应的"最新交易日"。
 ///
@@ -134,8 +144,8 @@ pub fn is_trading_day(date: &NaiveDate) -> bool {
 /// - 若今天（北京日期）是交易日，返回今天；
 /// - 否则返回 previous_trading_day(today)。
 ///
-/// 用于 K 线缓存命中校验：缓存最后一条 K 线日期必须 >= 该日期，
-/// 否则视为缓存过期，触发重新拉取 vendor。
+/// ⚠ K 线缓存新鲜性自 C2（2026-09-27）起由 TTL 全权，不再比对本日期
+/// （见 `lib.rs` 的 `get_klines_with_adj`）；本函数现用于休市提示等展示场景。
 pub fn latest_trading_day() -> NaiveDate {
     let (_, _, today) = beijing_now();
     previous_trading_day(today)
@@ -308,14 +318,24 @@ pub fn derive_holidays_from_kline_dates(dates: &[String], today: NaiveDate) -> V
     out
 }
 
-/// 把 K 线自证出的休市日**合并**进全局远程缓存（不清空——与其它来源共存）。
-/// 返回本次新增条数。
+/// 把 K 线自证出的休市日**合并**进全局远程缓存（不清空——与其它来源共存），
+/// 同时把「确已开市」日期并入 `REMOTE_TRADING_DAYS`（正向自证，可推翻兜底表误标；
+/// 2026-09-30 实机：09-28/29/30 被表误列连休，正向集合是唯一纠错机制）。
+/// 返回本次新增的休市日条数。
 pub fn populate_holidays_from_kline_dates(dates: &[String], today: NaiveDate) -> usize {
     let derived = derive_holidays_from_kline_dates(dates, today);
-    let mut cache = REMOTE_HOLIDAYS.write();
-    let before = cache.len();
-    cache.extend(derived);
-    cache.len() - before
+    // 两份集合分开取写锁（不嵌套）：is_trading_day 读侧先 TRADING 后 HOLIDAYS，
+    // 若这里持其一再取另一，读侧持另一把等待本锁即构成死锁环。
+    let added = {
+        let mut cache = REMOTE_HOLIDAYS.write();
+        let before = cache.len();
+        cache.extend(derived);
+        cache.len() - before
+    };
+    REMOTE_TRADING_DAYS
+        .write()
+        .extend(dates.iter().filter(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").is_ok()).cloned());
+    added
 }
 
 /// 北京时间的今日（启动时 K 线日历自证用）
@@ -326,8 +346,8 @@ pub fn beijing_today() -> NaiveDate {
 /// 仅供测试:清空远程节假日缓存,恢复纯硬编码模式
 #[cfg(test)]
 pub fn clear_remote_holidays_for_test() {
-    let mut cache = REMOTE_HOLIDAYS.write();
-    cache.clear();
+    REMOTE_HOLIDAYS.write().clear();
+    REMOTE_TRADING_DAYS.write().clear();
 }
 
 /// 获取距离下一个交易时间的描述
@@ -352,6 +372,12 @@ pub fn next_trading_time_desc() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 全局态测试串行锁（`is_trading_day` 的两份自证集合是进程级共享）。
+    /// 凡对全局态 populate / clear 的测试必须持锁：两个写入方并行时，
+    /// 一方的 clear 可能落在另一方的 populate 与 assert 之间 ⇒ flaky。
+    static GLOBAL_STATE_TS: LazyLock<parking_lot::Mutex<()>> =
+        LazyLock::new(|| parking_lot::Mutex::new(()));
 
     #[test]
     fn test_weekend_not_trading() {
@@ -395,6 +421,7 @@ mod tests {
     /// 缺陷 A 修复:远程节假日缓存优先于硬编码
     #[test]
     fn test_remote_holiday_overrides_default() {
+        let _serial = GLOBAL_STATE_TS.lock();
         clear_remote_holidays_for_test();
         // 2027-01-01 元旦 — 硬编码 2025-2026 没覆盖,默认会被认为"是交易日"
         let future = NaiveDate::from_ymd_opt(2027, 1, 1).unwrap();
@@ -459,5 +486,47 @@ mod tests {
         );
         // 空输入 ⇒ 空输出（启动拉取失败时不会误伤任何日期）
         assert!(derive_holidays_from_kline_dates(&[], today).is_empty());
+    }
+
+    /// 2026-09-30 实机纠错回归：兜底表摘除误列的 09-28/29/30（上证日 K 有这三天）；
+    /// 且 K 线「确已开市」正向自证必须能推翻表内条目（未来日期唯一可推翻机制）。
+    /// 用局部集合调纯函数，零全局副作用（不与全局态测试互扰）。
+    #[test]
+    fn hardcoded_mislabel_removed_and_proven_overrides_table() {
+        let empty = HashSet::new();
+        // ① 误列条目摘除：无任何自证也判开市（09-28/29/30 是周一/二/三，非周末）
+        for d in [28u32, 29, 30] {
+            assert!(
+                is_trading_day_with(&format!("2026-09-{d:02}"), &empty, &empty),
+                "2026-09-{d:02} 实际开市（上证日 K 自证），不得再列连休；误标会让 previous_trading_day(09-30) 错落 09-24，当日行情被贴上 09-24 标签落库"
+            );
+        }
+        // ② 表内其余条目仍然生效（无自证时 10-01 国庆判休市）——证明兜底表未被整体摘除
+        assert!(!is_trading_day_with("2026-10-01", &empty, &empty));
+        // ③ 正向自证可推翻表内条目：模拟「表里未来日期又标错」，K 线自证能纠
+        let proven: HashSet<String> = HashSet::from(["2026-10-01".to_string()]);
+        assert!(is_trading_day_with("2026-10-01", &proven, &empty));
+        // ④ 两自证集合同日冲突（理论上互斥，防回归）：以「确有成交」为准
+        let remote: HashSet<String> = HashSet::from(["2026-10-01".to_string()]);
+        assert!(is_trading_day_with("2026-10-01", &proven, &remote));
+        // ⑤ 周末不受影响（09-25 周五休市 ⇒ 09-26 周六）
+        assert!(!is_trading_day_with("2026-09-26", &empty, &empty));
+    }
+
+    /// 接线回归（2026-09-30）：启动路径 `populate_holidays_from_kline_dates` 必须把
+    /// K 线日期并入「确已开市」集合，`is_trading_day` 据此翻转 —— 2029-06-16 是周六，
+    /// 默认判休市，仅当正向集合被真正写入才会变交易日。持全局锁防并行 clear 竞态。
+    #[test]
+    fn populate_kline_dates_wires_proven_trading_days() {
+        let _serial = GLOBAL_STATE_TS.lock();
+        clear_remote_holidays_for_test();
+        let sat = NaiveDate::from_ymd_opt(2029, 6, 16).unwrap();
+        assert_eq!(sat.weekday(), Weekday::Sat, "前提核对：2029-06-16 是周六");
+        assert!(!is_trading_day(&sat), "周六默认非交易日（基线）");
+        let today = NaiveDate::from_ymd_opt(2029, 6, 18).unwrap();
+        let n = populate_holidays_from_kline_dates(&["2029-06-16".to_string()], today);
+        assert_eq!(n, 0, "该序列无缺失工作日（06-17 是周日）⇒ 无新增休市日");
+        assert!(is_trading_day(&sat), "K 线里存在的日期必须被自证为交易日（推翻周末/表内误标）");
+        clear_remote_holidays_for_test();
     }
 }

@@ -554,8 +554,7 @@ pub async fn opc_get_capability_pack_workflow_steps(
                 "id": s.id,
                 "name": s.name,
                 "description": s.description,
-                "order": s.order,
-                "status": "pending",
+                "stepOrder": s.order,
             })
         })
         .collect();

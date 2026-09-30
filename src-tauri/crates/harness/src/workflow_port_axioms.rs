@@ -123,7 +123,7 @@ pub const HANDLE_DECLS: &[HandleDecl] = &[
         handle: "acceptable",
         kind: HandleKind::SemanticLabel,
         meaning: "语义分支：数据质量可接受（stock-analysis 的 quality-gate）",
-        evidence: "src/commands/stock_analysis_setup/seed_stock_analysis.rs:3554（对应 case label :3500）",
+        evidence: "src/commands/stock_analysis_setup/seed_stock_analysis.rs:4974（对应 case label :4921）",
     },
 ];
 

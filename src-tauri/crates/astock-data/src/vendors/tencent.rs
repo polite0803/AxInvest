@@ -288,6 +288,38 @@ fn parse_klines(raw: &str, period_key: &str, fq_prefix: &str) -> Result<Vec<KLin
     Ok(result)
 }
 
+/// 批量实时行情 —— 腾讯 `qt.gtimg.cn/q=` 支持逗号拼接多码（实测 80 码/请求完整兑现）。
+///
+/// 为什么必须有批量通道：全市场日涨幅快照是「窗口涨幅达标漏检核查」的事件地基
+/// （`PLAN-mover-recall-attribution.md` Phase 1）。逐票取需 5921 次请求，东财 `clist`
+/// 连续 60 页实测 11/60 成功即触发连接级封禁；腾讯批量 74 请求 ≈42s 零失败
+/// （`AUDIT-mover-universe-feasibility-2026-09-30.md`）。
+///
+/// 解析**逐行复用单票 `parse_quote`** —— 批量响应的每一行与单票响应同形，
+/// 不再写第二套 `~` 字段映射（返回字段数不足的行按「取不到」丢弃，不补 0）。
+pub(crate) async fn fetch_quotes_batch(
+    http: &reqwest::Client,
+    codes: &[String],
+) -> Result<Vec<StockQuote>, DataError> {
+    let q = codes.iter().map(|c| to_tencent_code(c)).collect::<Vec<_>>().join(",");
+    let url = format!("https://qt.gtimg.cn/q={q}");
+    let resp = http
+        .get(&url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+        .header("Referer", "https://gu.qq.com/")
+        .send()
+        .await?;
+    crate::check_response_429(&resp, "tencent")?;
+    let bytes = resp.bytes().await?;
+    // 腾讯财经 API 使用 GBK 编码，需手动转 UTF-8
+    let text = encoding_rs::GBK.decode(&bytes).0;
+    Ok(text
+        .split(';')
+        .filter(|line| line.contains("=\""))
+        .filter_map(|line| parse_quote(line).ok())
+        .collect())
+}
+
 #[async_trait]
 impl StockVendor for TencentVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {

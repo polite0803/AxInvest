@@ -5,14 +5,12 @@
  * 行业 UI 组件 — 可复用的行业展示组件
  */
 
-import { useConversationStore, useSettingsStore } from "@/stores";
+import { translateBackendError } from "@/lib/errorI18n";
 import {
   ApiOutlined,
   BarChartOutlined,
   BulbOutlined,
-  CodeOutlined,
   DashboardOutlined,
-  FileTextOutlined,
   FundProjectionScreenOutlined,
   LineChartOutlined,
   PlayCircleOutlined,
@@ -22,11 +20,11 @@ import {
 } from "@ant-design/icons";
 import {
   Alert,
+  App,
   Badge,
   Button,
   Card,
   Col,
-  Collapse,
   Divider,
   Empty,
   Progress,
@@ -40,13 +38,11 @@ import {
   Timeline,
   Typography,
 } from "antd";
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
-import type { ActionItem, DomainConfig, DomainWorkflow, KpiValue, RiskLevel } from "./types";
+import type { KpiValue, RiskLevel } from "./types";
 import { useDomainData } from "./useDomainData";
 
-const { Title, Paragraph, Text } = Typography;
+const { Text } = Typography;
 
 /**
  * 风险等级 → 展示样式。
@@ -72,6 +68,20 @@ const RISK_COLOR: Record<RiskLevel, string> = {
   medium: "#d48806",
   low: "#3f8600",
 };
+
+/**
+ * 分区取数失败提示。
+ *
+ * 失败与「确实没有」在 UI 上必须分开：`Empty` 表达的是「后端答了，说没有」，
+ * 取数失败时若也落进 `Empty`，就是把「拿不到」伪装成一条正常结论。
+ * 有该提示在场时，各组件一律不再渲染 `Empty`。
+ */
+function SectionError({ error }: { error?: string | null }) {
+  if (!error) {
+    return null;
+  }
+  return <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} />;
+}
 
 /**
  * 单个 KPI 卡片 —— **仪表盘面板与决策面板共用同一个实现**。
@@ -121,24 +131,17 @@ function KpiStatCard({ kpi }: { kpi: KpiValue }) {
   );
 }
 
-/** 行业页面属性 */
-export interface DomainPageProps {
-  capabilityPackId: string;
-  config: DomainConfig;
-}
-
-/**
- * 行业仪表盘组件
- */
 export function DomainDashboard({
   dashboard,
   loading,
+  error,
   kpiTimeRange,
   onTimeRangeChange,
   onRefresh,
 }: {
   dashboard: ReturnType<typeof useDomainData>["dashboard"];
   loading: boolean;
+  error?: string | null;
   kpiTimeRange: "7" | "30" | "90";
   onTimeRangeChange: (range: "7" | "30" | "90") => void;
   onRefresh: () => void;
@@ -180,12 +183,13 @@ export function DomainDashboard({
         : dashboard && dashboard.kpis.length > 0
         ? (
           <>
+            <SectionError error={error} />
             {dashboard.risk_level && dashboard.violations.length > 0 && (
               <Alert
                 type={RISK_ALERT_TYPE[dashboard.risk_level]}
                 showIcon
                 style={{ marginBottom: 16 }}
-                message={t("opc.domain.analysis.riskLevel") + ": " + dashboard.risk_level}
+                title={t("opc.domain.analysis.riskLevel") + ": " + dashboard.risk_level}
                 description={
                   <ul style={{ margin: 0, paddingLeft: 20 }}>
                     {dashboard.violations.map((v) => <li key={v.rule}>{v.message}</li>)}
@@ -203,10 +207,15 @@ export function DomainDashboard({
           </>
         )
         : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("opc.domain.dashboard.noData")}
-          />
+          <>
+            <SectionError error={error} />
+            {!error && (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("opc.domain.dashboard.noData")}
+              />
+            )}
+          </>
         )}
     </Card>
   );
@@ -218,9 +227,11 @@ export function DomainDashboard({
 export function DomainWorkflowSteps({
   steps,
   loading,
+  error,
 }: {
   steps: ReturnType<typeof useDomainData>["workflowSteps"];
   loading: boolean;
+  error?: string | null;
 }) {
   const { t } = useTranslation();
 
@@ -234,6 +245,7 @@ export function DomainWorkflowSteps({
         </span>
       }
     >
+      <SectionError error={error} />
       {loading
         ? (
           <div style={{ textAlign: "center", padding: 40 }}>
@@ -243,22 +255,23 @@ export function DomainWorkflowSteps({
         : steps.length > 0
         ? (
           <Steps
-            direction="vertical"
+            orientation="vertical"
             current={-1}
             items={steps.map((step) => ({
               title: (
                 <Space>
                   <Text strong>{step.name}</Text>
                   <Tag color="blue">
-                    {t("opc.domain.workflowSteps.step")} {step.step_order}
+                    {t("opc.domain.workflowSteps.step")} {step.stepOrder}
                   </Tag>
                 </Space>
               ),
-              description: step.description,
-              status: step.success_rate > 0.9 ? "finish" : step.success_rate > 0.5 ? "process" : "wait",
+              content: step.description,
             }))}
           />
         )
+        : error
+        ? null
         : (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -275,15 +288,32 @@ export function DomainWorkflowSteps({
 export function DomainAutomationRules({
   rules,
   loading,
+  error,
   running,
   onRunAll,
 }: {
   rules: ReturnType<typeof useDomainData>["automationRules"];
   loading: boolean;
+  error?: string | null;
   running: boolean;
   onRunAll: () => Promise<string[]>;
 }) {
   const { t } = useTranslation();
+  const { message } = App.useApp();
+
+  const handleRunAll = async () => {
+    try {
+      const triggered = await onRunAll();
+      if (triggered.length > 0) {
+        message.success(t("opc.domain.rules.triggered", { count: triggered.length }));
+      } else {
+        message.info(t("opc.domain.rules.nothingTriggered"));
+      }
+    } catch (e) {
+      // 「跑没跑成」与「跑完没命中」必须分开报 —— 前者用 `runFailed`，后者才是 nothingTriggered
+      message.error(t("opc.domain.rules.runFailed", { error: translateBackendError(e) }));
+    }
+  };
 
   return (
     <Card
@@ -300,13 +330,14 @@ export function DomainAutomationRules({
           size="small"
           icon={<PlayCircleOutlined />}
           loading={running}
-          onClick={onRunAll}
-          disabled={rules.filter((r) => r.enabled).length === 0}
+          onClick={handleRunAll}
+          disabled={rules.filter((r) => r.is_enabled).length === 0}
         >
           {t("opc.domain.rules.runAll")}
         </Button>
       }
     >
+      <SectionError error={error} />
       {loading
         ? (
           <div style={{ textAlign: "center", padding: 40 }}>
@@ -324,8 +355,8 @@ export function DomainAutomationRules({
                     <Space>
                       <Text strong>{rule.name}</Text>
                       <Badge
-                        status={rule.enabled ? "success" : "default"}
-                        text={rule.enabled
+                        status={rule.is_enabled ? "success" : "default"}
+                        text={rule.is_enabled
                           ? t("opc.domain.rules.enabled")
                           : t("opc.domain.rules.disabled")}
                       />
@@ -337,7 +368,11 @@ export function DomainAutomationRules({
                       {t("opc.domain.rules.conditions")}:
                     </Text>
                     <div style={{ marginTop: 4 }}>
-                      <Tag color="blue">{rule.trigger_event}</Tag>
+                      <Tag color="blue">{rule.trigger}</Tag>
+                      {rule.conditions.map((c, i) => <Tag key={`c-${c.field}-${i}`}>{c.field} {c.operator}</Tag>)}
+                      {rule.conditions.length === 0 && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>{t("opc.domain.rules.noConditions")}</Text>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -345,7 +380,12 @@ export function DomainAutomationRules({
                       {t("opc.domain.rules.actions")}:
                     </Text>
                     <div style={{ marginTop: 4 }}>
-                      <Tag color="green">{rule.action}</Tag>
+                      {rule.actions.map((a, i) => (
+                        <Tag color="green" key={`a-${a.action_type}-${i}`}>{a.action_type}</Tag>
+                      ))}
+                      {rule.actions.length === 0 && (
+                        <Text type="secondary" style={{ fontSize: 12 }}>{t("opc.domain.rules.noActions")}</Text>
+                      )}
                     </div>
                   </div>
                 </Card>
@@ -353,6 +393,8 @@ export function DomainAutomationRules({
             ))}
           </Row>
         )
+        : error
+        ? null
         : (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -369,12 +411,14 @@ export function DomainAutomationRules({
 export function DomainAnalysisDecision({
   decision,
   loading,
+  error,
   decisionDays,
   onDaysChange,
   onExecute,
 }: {
   decision: ReturnType<typeof useDomainData>["decision"];
   loading: boolean;
+  error?: string | null;
   decisionDays: number;
   onDaysChange: (days: number) => void;
   onExecute: () => Promise<void>;
@@ -421,10 +465,11 @@ export function DomainAnalysisDecision({
         : decision
         ? (
           <>
+            <SectionError error={error} />
             <Alert
               type={RISK_ALERT_TYPE[decision.risk_level]}
               showIcon
-              message={decision.summary}
+              title={decision.summary}
               description={t("opc.domain.analysis.riskLevel") + ": " + decision.risk_level}
               style={{ marginBottom: 16 }}
             />
@@ -477,10 +522,15 @@ export function DomainAnalysisDecision({
           </>
         )
         : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("opc.domain.analysis.noData")}
-          />
+          <>
+            <SectionError error={error} />
+            {!error && (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("opc.domain.analysis.noData")}
+              />
+            )}
+          </>
         )}
     </Card>
   );
@@ -492,10 +542,12 @@ export function DomainAnalysisDecision({
 export function DomainLearningMetrics({
   metrics,
   loading,
+  error,
   onRefresh,
 }: {
   metrics: ReturnType<typeof useDomainData>["learningMetrics"];
   loading: boolean;
+  error?: string | null;
   onRefresh: () => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -515,6 +567,7 @@ export function DomainLearningMetrics({
         </Button>
       }
     >
+      <SectionError error={error} />
       {loading
         ? (
           <div style={{ textAlign: "center", padding: 40 }}>
@@ -562,327 +615,26 @@ export function DomainLearningMetrics({
                     ? "green"
                     : metrics.improvement_trend === "stable"
                     ? "blue"
-                    : "red"}
+                    : metrics.improvement_trend === "declining"
+                    ? "red"
+                    : "default"}
                   style={{ marginTop: 8 }}
                 >
-                  {t("opc.domain.metrics.trend_" + metrics.improvement_trend)}
+                  {t(`opc.domain.metrics.trend_${metrics.improvement_trend}`)}
                 </Tag>
               </Card>
             </Col>
           </Row>
         )
         : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("opc.domain.metrics.noData")}
-          />
-        )}
-    </Card>
-  );
-}
-
-/**
- * 行业操作面板组件
- */
-export function DomainActionsPanel({
-  capabilityPackId,
-  actions,
-}: {
-  capabilityPackId: string;
-  actions: ActionItem[];
-}) {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const createConversation = useConversationStore((s) => s.createConversation);
-  const settings = useSettingsStore((s) => s.settings);
-  const { message } = (window as unknown as {
-    antd?: { app?: { useApp: () => { message: { warning: (msg: string) => void; error: (msg: string) => void } } } };
-  }).antd?.app?.useApp() || {
-    message: { warning: (msg: string) => console.warn(msg), error: (msg: string) => console.error(msg) },
-  };
-
-  const actionsPrefix = `opc.domain.actions.${capabilityPackId}`;
-
-  const handleAction = async (action: ActionItem) => {
-    if (!settings?.defaultModel?.a || !settings?.defaultModel?.b) {
-      message.warning(t("opc.domain.noProviderConfig"));
-      navigate("/settings/providers");
-      return;
-    }
-
-    if (action.type === "workflow") {
-      const templateId = action.template_id || action.key;
-      navigate(`/workflow/new?domain=${capabilityPackId}&template=${templateId}`);
-      return;
-    }
-
-    const actionLabel = action.label || action.key;
-
-    try {
-      const { invoke } = await import("@/lib/invoke");
-      const promptConfig = await invoke<{
-        systemPrompt: string;
-        userPrompt: string;
-        actionKey: string;
-        actionLabel: string;
-        capabilityPackId: string;
-      }>("opc_build_capability_pack_prompt", {
-        capabilityPackId,
-        actionKey: action.key,
-      });
-
-      const conv = await createConversation(
-        promptConfig.actionLabel,
-        settings.defaultModel.b,
-        settings.defaultModel.a,
-        {
-          systemPrompt: promptConfig.systemPrompt,
-        },
-      );
-      if (conv?.id) {
-        navigate(`/chat?conversationId=${conv.id}&prompt=${encodeURIComponent(promptConfig.userPrompt)}`);
-      }
-    } catch {
-      const conv = await createConversation(
-        actionLabel,
-        settings.defaultModel.b,
-        settings.defaultModel.a,
-        {
-          systemPrompt:
-            `你是一位专业的${capabilityPackId}领域助手，擅长${actionLabel}相关的分析和咨询。请根据用户需求提供高质量的分析和建议。`,
-        },
-      );
-      if (conv?.id) {
-        navigate(`/chat?conversationId=${conv.id}&prompt=${encodeURIComponent(actionLabel)}`);
-      }
-    }
-  };
-
-  return (
-    <Card style={{ marginBottom: 24 }} styles={{ body: { padding: 20 } }}>
-      <Title level={5} style={{ marginBottom: 16 }}>
-        <ThunderboltOutlined style={{ marginRight: 8 }} />
-        {t("opc.domain.exclusiveActions")}
-      </Title>
-      <Row gutter={[16, 16]}>
-        {actions.map((action) => (
-          <Col xs={24} sm={12} md={12} lg={6} key={action.key}>
-            <Card
-              hoverable
-              size="small"
-              onClick={() => handleAction(action)}
-              style={{
-                cursor: "pointer",
-                border: "1px solid var(--color-border)",
-                transition: "all 0.2s",
-              }}
-              styles={{ body: { padding: 16 } }}
-            >
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
-                <div
-                  style={{
-                    fontSize: 28,
-                    color: "var(--color-primary)",
-                    flexShrink: 0,
-                  }}
-                >
-                  {action.icon}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <Text strong style={{ display: "block", marginBottom: 4 }}>
-                    {t(`${actionsPrefix}.${action.key}.label`)}
-                  </Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {t(`${actionsPrefix}.${action.key}.description`)}
-                  </Text>
-                  {action.type === "workflow" && (
-                    <Tag color="orange" style={{ marginTop: 8 }}>
-                      {t("opc.domain.workflowTag")}
-                    </Tag>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-    </Card>
-  );
-}
-
-/**
- * 行业工作流面板组件
- */
-export function DomainWorkflowsPanel({
-  capabilityPackId,
-  workflows,
-}: {
-  capabilityPackId: string;
-  workflows: DomainWorkflow[];
-}) {
-  const { t } = useTranslation();
-  const navigate = useNavigate();
-  const createConversation = useConversationStore((s) => s.createConversation);
-  const settings = useSettingsStore((s) => s.settings);
-  const { message } = (window as unknown as {
-    antd?: { app?: { useApp: () => { message: { warning: (msg: string) => void; error: (msg: string) => void } } } };
-  }).antd?.app?.useApp() || {
-    message: { warning: (msg: string) => console.warn(msg), error: (msg: string) => console.error(msg) },
-  };
-
-  const workflowsPrefix = `opc.domain.workflows.${capabilityPackId}`;
-
-  const handleUseWorkflow = async (wf: DomainWorkflow) => {
-    if (!settings?.defaultModel?.a || !settings?.defaultModel?.b) {
-      message.warning(t("opc.domain.noProviderConfig"));
-      navigate("/settings/providers");
-      return;
-    }
-
-    try {
-      const conv = await createConversation(
-        t("opc.domain.executeSuffix", { name: wf.name || wf.id }),
-        settings.defaultModel.b,
-        settings.defaultModel.a,
-      );
-      if (conv?.id) {
-        navigate(`/chat?conversationId=${conv.id}&workflow=${wf.id}`);
-      }
-    } catch (e) {
-      message.error(t("opc.domain.loadFailed", { error: String(e) }));
-    }
-  };
-
-  return (
-    <Card
-      title={
-        <span>
-          <CodeOutlined style={{ marginRight: 8 }} />
-          {t("opc.domain.exclusiveWorkflows")}
-        </span>
-      }
-    >
-      <Row gutter={[16, 16]}>
-        {workflows.map((wf) => (
-          <Col xs={24} sm={12} md={8} key={wf.id}>
-            <Card
-              size="small"
-              title={
-                <Space>
-                  <FileTextOutlined />
-                  {t(`${workflowsPrefix}.${wf.id}.name`)}
-                </Space>
-              }
-              extra={<Tag color="blue">v{wf.version}</Tag>}
-            >
-              <Paragraph type="secondary" style={{ fontSize: 13, marginBottom: 12 }}>
-                {t(`${workflowsPrefix}.${wf.id}.description`)}
-              </Paragraph>
-              <Button
-                type="primary"
-                size="small"
-                icon={<PlayCircleOutlined />}
-                block
-                onClick={() => handleUseWorkflow(wf)}
-              >
-                {t("opc.domain.useThisWorkflow")}
-              </Button>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-    </Card>
-  );
-}
-
-/**
- * 行业工作流执行组件
- */
-export function DomainWorkflowExecution({
-  workflowResult,
-  executing,
-  onExecute,
-}: {
-  workflowResult: ReturnType<typeof useDomainData>["workflowResult"];
-  executing: boolean;
-  onExecute: () => Promise<void>;
-}) {
-  const { t } = useTranslation();
-
-  return (
-    <Card
-      style={{ marginBottom: 24 }}
-      title={
-        <span>
-          <ThunderboltOutlined style={{ marginRight: 8 }} />
-          {t("opc.domain.workflow.executionTitle")}
-        </span>
-      }
-      extra={
-        <Button
-          type="primary"
-          icon={<PlayCircleOutlined />}
-          loading={executing}
-          onClick={onExecute}
-        >
-          {t("opc.domain.workflow.execute")}
-        </Button>
-      }
-    >
-      {executing
-        ? (
-          <div style={{ textAlign: "center", padding: 40 }}>
-            <Spin tip={t("opc.domain.workflow.executing")} />
-          </div>
-        )
-        : workflowResult
-        ? (
           <>
-            <Alert
-              type={workflowResult.status === "success" ? "success" : "error"}
-              showIcon
-              message={t("opc.domain.workflow.status_" + workflowResult.status)}
-              description={workflowResult.error
-                || `${t("opc.domain.workflow.duration")}: ${(workflowResult.duration_ms / 1000).toFixed(2)}s`}
-              style={{ marginBottom: 16 }}
-            />
-            {workflowResult.output && (
-              <Collapse
-                items={[
-                  {
-                    key: "output",
-                    label: (
-                      <Space>
-                        <Tag color={workflowResult.status === "success" ? "green" : "red"}>
-                          {workflowResult.status}
-                        </Tag>
-                        <Text strong>Output</Text>
-                      </Space>
-                    ),
-                    children: (
-                      <pre
-                        style={{
-                          maxHeight: 300,
-                          overflow: "auto",
-                          background: "#f5f5f5",
-                          padding: 8,
-                          borderRadius: 4,
-                        }}
-                      >
-                      {JSON.stringify(workflowResult.output, null, 2)}
-                      </pre>
-                    ),
-                  },
-                ]}
+            {!error && (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("opc.domain.metrics.noData")}
               />
             )}
           </>
-        )
-        : (
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("opc.domain.workflow.noData")}
-          />
         )}
     </Card>
   );
@@ -892,24 +644,22 @@ export function DomainWorkflowExecution({
  * 学习与进化配置面板
  */
 export function DomainLearningPanel({
-  capabilityPackId: _capabilityPackId,
   learningConfig,
+  loading,
+  error,
   onReflect,
   onEvolve,
   onSelfImprove,
 }: {
-  capabilityPackId: string;
   learningConfig: NonNullable<ReturnType<typeof useDomainData>["learningConfig"]> | null;
+  loading: boolean;
+  error?: string | null;
   onReflect: () => Promise<void>;
   onEvolve: () => Promise<void>;
   onSelfImprove: () => Promise<void>;
 }) {
   const { t } = useTranslation();
-  const { message } =
-    (window as unknown as { antd?: { app?: { useApp: () => { message: { warning: (msg: string) => void } } } } }).antd
-      ?.app?.useApp() || {
-      message: { warning: (msg: string) => console.warn(msg) },
-    };
+  const { message } = App.useApp();
 
   if (!learningConfig) {
     return (
@@ -921,10 +671,19 @@ export function DomainLearningPanel({
           </span>
         }
       >
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description={t("opc.domain.learning.actions.configNotFound")}
-        />
+        <SectionError error={error} />
+        {loading
+          ? (
+            <div style={{ textAlign: "center", padding: 40 }}>
+              <Spin />
+            </div>
+          )
+          : !error && (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("opc.domain.learning.actions.configNotFound")}
+            />
+          )}
       </Card>
     );
   }
@@ -942,7 +701,7 @@ export function DomainLearningPanel({
         {/* 反思 */}
         <Col xs={24} sm={12} md={6}>
           <Card size="small" style={{ height: "100%" }}>
-            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Space orientation="vertical" size={8} style={{ width: "100%" }}>
               <Space>
                 <BulbOutlined />
                 <strong>{t("opc.domain.learning.reflection.label")}</strong>
@@ -977,7 +736,7 @@ export function DomainLearningPanel({
         {/* 进化 */}
         <Col xs={24} sm={12} md={6}>
           <Card size="small" style={{ height: "100%" }}>
-            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Space orientation="vertical" size={8} style={{ width: "100%" }}>
               <Space>
                 <ThunderboltOutlined />
                 <strong>{t("opc.domain.learning.evolution.label")}</strong>
@@ -1012,7 +771,7 @@ export function DomainLearningPanel({
         {/* 自我改进 */}
         <Col xs={24} sm={12} md={6}>
           <Card size="small" style={{ height: "100%" }}>
-            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Space orientation="vertical" size={8} style={{ width: "100%" }}>
               <Space>
                 <PlayCircleOutlined />
                 <strong>{t("opc.domain.learning.selfImprovement.label")}</strong>
@@ -1047,7 +806,7 @@ export function DomainLearningPanel({
         {/* 强化学习 */}
         <Col xs={24} sm={12} md={6}>
           <Card size="small" style={{ height: "100%" }}>
-            <Space direction="vertical" size={8} style={{ width: "100%" }}>
+            <Space orientation="vertical" size={8} style={{ width: "100%" }}>
               <Space>
                 <FundProjectionScreenOutlined />
                 <strong>{t("opc.domain.learning.reinforcementLearning.label")}</strong>
@@ -1065,174 +824,5 @@ export function DomainLearningPanel({
         </Col>
       </Row>
     </Card>
-  );
-}
-
-/**
- * 行业页面头部
- */
-export function DomainHeader({
-  capabilityPackId,
-  manifest,
-  onRefresh,
-  refreshing,
-}: {
-  capabilityPackId: string;
-  manifest: { icon: string; name: string } | null;
-  onRefresh: () => void;
-  refreshing: boolean;
-}) {
-  const { t } = useTranslation();
-  const domainKey = capabilityPackId.replace(/-/g, "_");
-
-  return (
-    <div style={{ marginBottom: 24 }}>
-      <Space align="center" style={{ width: "100%", justifyContent: "space-between" }}>
-        <div>
-          <Title level={3} style={{ marginBottom: 8 }}>
-            <span style={{ fontSize: 28, marginRight: 12 }}>{manifest?.icon || "🏢"}</span>
-            {t(`opc.domains.${domainKey}`)}
-          </Title>
-          <Paragraph type="secondary">{t(`opc.domains.${domainKey}_desc`)}</Paragraph>
-        </div>
-        <Button icon={<SyncOutlined spin={refreshing} />} onClick={onRefresh}>
-          {t("opc.domain.refresh")}
-        </Button>
-      </Space>
-    </div>
-  );
-}
-
-/**
- * 基础行业页面布局
- */
-export function DomainPageLayout({
-  capabilityPackId,
-  config,
-  children,
-}: DomainPageProps & { children?: ReactNode }) {
-  const { t } = useTranslation();
-  const data = useDomainData(capabilityPackId);
-
-  if (data.loading) {
-    return (
-      <div style={{ padding: 48, textAlign: "center" }}>
-        <Spin size="large" />
-      </div>
-    );
-  }
-
-  if (!data.manifest) {
-    return (
-      <div style={{ padding: 48, textAlign: "center" }}>
-        <Empty description={t("opc.domain.notFound")} />
-      </div>
-    );
-  }
-
-  const handleRefreshAll = () => {
-    data.loadDashboard();
-    data.loadWorkflowSteps();
-    data.loadAutomationRules();
-    data.loadLearningMetrics();
-  };
-
-  const handleRunRules = async (): Promise<string[]> => {
-    const triggered = await data.runAutomationRules();
-    const { message } = (window as unknown as {
-      antd?: { app?: { useApp: () => { message: { success: (msg: string) => void; info: (msg: string) => void } } } };
-    }).antd?.app?.useApp() || {
-      message: { success: (msg: string) => console.log(msg), info: (msg: string) => console.log(msg) },
-    };
-    if (triggered.length > 0) {
-      message.success(t("opc.domain.rules.triggered", { count: triggered.length }));
-    } else {
-      message.info(t("opc.domain.rules.nothingTriggered"));
-    }
-    return triggered;
-  };
-
-  const handleExecuteAnalysis = async () => {
-    await data.loadDecision();
-  };
-
-  const handleExecuteWorkflow = async () => {
-    await data.executeWorkflow(capabilityPackId);
-  };
-
-  return (
-    <div style={{ padding: 24, height: "100%", overflow: "auto" }}>
-      <DomainHeader
-        capabilityPackId={capabilityPackId}
-        manifest={data.manifest}
-        onRefresh={handleRefreshAll}
-        refreshing={data.dashboardLoading || data.stepsLoading || data.rulesLoading}
-      />
-
-      {/* KPI 仪表盘 */}
-      <DomainDashboard
-        dashboard={data.dashboard}
-        loading={data.dashboardLoading}
-        kpiTimeRange={data.kpiTimeRange}
-        onTimeRangeChange={data.setKpiTimeRange}
-        onRefresh={data.loadDashboard}
-      />
-
-      {/* 行业专属内容（可由子类定制） */}
-      {children}
-
-      {/* 工作流步骤 */}
-      <DomainWorkflowSteps steps={data.workflowSteps} loading={data.stepsLoading} />
-
-      {/* 自动化规则 */}
-      <DomainAutomationRules
-        rules={data.automationRules}
-        loading={data.rulesLoading}
-        running={data.rulesRunning}
-        onRunAll={handleRunRules}
-      />
-
-      {/* 分析决策 */}
-      <DomainAnalysisDecision
-        decision={data.decision}
-        loading={data.decisionLoading}
-        decisionDays={data.decisionDays}
-        onDaysChange={data.setDecisionDays}
-        onExecute={handleExecuteAnalysis}
-      />
-
-      {/* 工作流执行 */}
-      <DomainWorkflowExecution
-        workflowResult={data.workflowResult}
-        executing={data.workflowExecuting}
-        onExecute={handleExecuteWorkflow}
-      />
-
-      {/* 学习指标 */}
-      <DomainLearningMetrics
-        metrics={data.learningMetrics}
-        loading={data.metricsLoading}
-        onRefresh={data.loadLearningMetrics}
-      />
-
-      {/* 专属操作 */}
-      {config.actions && config.actions.length > 0 && (
-        <DomainActionsPanel capabilityPackId={capabilityPackId} actions={config.actions} />
-      )}
-
-      {/* 专属工作流 */}
-      {config.workflows && config.workflows.length > 0 && (
-        <DomainWorkflowsPanel capabilityPackId={capabilityPackId} workflows={config.workflows} />
-      )}
-
-      {/* 学习与进化配置 */}
-      <DomainLearningPanel
-        capabilityPackId={capabilityPackId}
-        learningConfig={data.learningConfig}
-        onReflect={data.reflectOnWorkflow}
-        onEvolve={data.evolveWorkflow}
-        onSelfImprove={data.runSelfImprovement}
-      />
-    </div>
   );
 }

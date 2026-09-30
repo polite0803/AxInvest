@@ -33,6 +33,21 @@ pub enum Style {
 }
 
 impl Style {
+    /// 全部风格（枚举无 `Iterator`，遍历/键空间解析的**唯一名单**在此；不得在消费方另抄）
+    pub const ALL: [Style; 11] = [
+        Style::Trend,
+        Style::Value,
+        Style::Capital,
+        Style::Reversion,
+        Style::Watchlist,
+        Style::Bottleneck,
+        Style::Policy,
+        Style::Earnings,
+        Style::CapitalFlow,
+        Style::Event,
+        Style::Technical,
+    ];
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Style::Trend => "trend",
@@ -48,6 +63,32 @@ impl Style {
             Style::Technical => "technical",
         }
     }
+
+    /// 该风格在 `"{style}_{period}"` 权重键里**可能出现的全部写法**。
+    ///
+    /// `serenity` ⇔ `bottleneck` 一名两写是历史事实（同 `style_matrix::db_style_aliases`）：
+    /// 矩阵名目写 `serenity`、落库按子风格写 `bottleneck`，解析时两种都得认。
+    pub fn key_names(&self) -> Vec<&'static str> {
+        match self {
+            Style::Bottleneck => vec!["bottleneck", "serenity"],
+            other => vec![other.as_str()],
+        }
+    }
+}
+
+/// 「策略已算出、但被组内 top-N 截断」的候选（`reco_scan_audit` 的行来源）。
+///
+/// 与 `RecoPick` 的区别是语义而非字段：留存侧是**出票**，本类型是**被排序淘汰**。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrimmedPick {
+    pub stock_code: String,
+    pub stock_name: String,
+    pub style: Style,
+    /// 截断前的原始置信度（0-100）
+    pub confidence: i32,
+    /// 组内名次（1 = 第一个被截掉的）
+    pub rank: i32,
 }
 
 // 「持有周期四档」的唯一权威定义在 `axagent_harness::holding_period`（Period）。
@@ -225,4 +266,11 @@ pub struct RecoResponse {
     /// `#[serde(skip)]`：不参与前端 JSON 序列化，前端契约不变。
     #[serde(skip)]
     pub seed_pool_snapshot: Option<String>,
+    /// 本次扫描**被组内 top-N 截断**的候选（L3 留痕；`#[serde(skip)]`，仅命令层落库用）。
+    ///
+    /// 为空 = 本批没有「算了却排不上」的候选，不代表没有淘汰（策略内部否决不在此留痕，
+    /// 语义边界见 `axagent_entities::reco_scan_audit`）。as-of/replay 同样落库，
+    /// 保证回放核查与 live 同一口径。
+    #[serde(skip)]
+    pub scan_audit: Vec<TrimmedPick>,
 }

@@ -1,6 +1,6 @@
 //! 智能荐股 — 置信度、仓位、去重、缓存
 
-use crate::recommender::types::{Period, RecoPick, Style};
+use crate::recommender::types::{Period, RecoPick, Style, TrimmedPick};
 use std::collections::{BTreeMap, HashMap};
 
 /// 评分权重（一致性 / 信号强度 / 流动性 / 动量）。
@@ -192,15 +192,32 @@ pub fn dedup_and_merge(picks: &mut Vec<RecoPick>) {
 }
 
 /// 按风格分组 + 每组 top N + 同组置信度归一化
+///
+/// 只关心出票集合的调用方走这里；需要「被截断的候选」时用
+/// [`group_by_style_and_trim_with_audit`]（同一实现，不另写一份排序）。
 pub fn group_by_style_and_trim(
     picks: &mut Vec<RecoPick>,
     per_style_limit: usize,
 ) -> BTreeMap<Style, Vec<RecoPick>> {
+    group_by_style_and_trim_with_audit(picks, per_style_limit).0
+}
+
+/// 同 [`group_by_style_and_trim`]，额外交出**被 top-N 截断**的候选（L3 留痕来源）。
+///
+/// 为什么在这里留：截断点只有这一处，而「策略确实返回了它、只是组内排序没进前 N」
+/// 正是唯一无歧义的「评分压出」证据（见 `entities::reco_scan_audit` 的语义边界）。
+/// `rank` 是组内名次（1 = 第一个被截掉的），与保留侧的排序同一次比较。
+pub fn group_by_style_and_trim_with_audit(
+    picks: &mut Vec<RecoPick>,
+    per_style_limit: usize,
+) -> (BTreeMap<Style, Vec<RecoPick>>, Vec<TrimmedPick>) {
+    let mut trimmed: Vec<TrimmedPick> = Vec::new();
     let mut by_style: BTreeMap<Style, Vec<RecoPick>> = BTreeMap::new();
     for p in picks.drain(..) {
         by_style.entry(p.style).or_default().push(p);
     }
-    for v in by_style.values_mut() {
+    for (style, v) in by_style.iter_mut() {
+        let style = *style;
         // 同一风格内的置信度 min-max 归一化，解决不同策略置信度不可比问题
         let min_conf = v.iter().map(|p| p.confidence).min().unwrap_or(0);
         let max_conf = v.iter().map(|p| p.confidence).max().unwrap_or(100);
@@ -215,7 +232,7 @@ pub fn group_by_style_and_trim(
             // 再被 clamp 到下限 1 —— 真实 pick 的置信度被整体压成 1，
             // 反而低于 synthetic 兜底（conf=40），真实信号在展示上被假数据反超。
             v.sort_by_key(|b| std::cmp::Reverse(b.confidence));
-            v.truncate(per_style_limit);
+            trimmed.extend(drain_trimmed(v, style, per_style_limit));
             continue;
         }
         let range = (max_conf - min_conf) as f64;
@@ -233,9 +250,27 @@ pub fn group_by_style_and_trim(
             ));
         }
         v.sort_by_key(|b| std::cmp::Reverse(b.confidence));
-        v.truncate(per_style_limit);
+        trimmed.extend(drain_trimmed(v, style, per_style_limit));
     }
-    by_style
+    (by_style, trimmed)
+}
+
+/// 截断并交出尾部（名次从 1 起，1 = 第一个被截掉的）。
+fn drain_trimmed(v: &mut Vec<RecoPick>, style: Style, limit: usize) -> Vec<TrimmedPick> {
+    if v.len() <= limit {
+        return Vec::new();
+    }
+    v.split_off(limit)
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| TrimmedPick {
+            stock_code: p.stock_code,
+            stock_name: p.stock_name,
+            style,
+            confidence: p.confidence as i32,
+            rank: (i + 1) as i32,
+        })
+        .collect()
 }
 
 #[cfg(test)]

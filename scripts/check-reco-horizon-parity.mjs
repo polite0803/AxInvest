@@ -401,6 +401,137 @@ function checkSerenityCardTierDisplay(cardSrc) {
 
 const SERENITY_CARD = "src/components/stock-analysis/SerenityCandidateCard.tsx";
 
+// ── 窗口涨幅达标漏检核查（`PLAN-mover-recall-attribution.md`）──
+const MOVER_ENGINE = "src-tauri/crates/analysis-engine/src/mover_recall.rs";
+const MOVER_CMD = "src-tauri/src/commands/mover_recall.rs";
+const MOVER_PANEL = "src/components/stock-analysis/MoverRecallPanel.tsx";
+const SEED_VARS = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
+const MOVER_TIERS = ["ultra_short", "short", "mid", "long"];
+
+/** 剥掉**整行注释**（行首为 `//`、块注释起止行、星号续行）——口径边界句写在注释里是合法的，
+ *  判据只锁**呈现面**；不剥注释会让「我没写涨停」的说明句自己把门撞红。 */
+function stripCommentLines(src) {
+  return src
+    .split("\n")
+    .filter((l) => {
+      const s = l.trim();
+      return !(s.startsWith("//") || s.startsWith("/*") || s.startsWith("*") || s.startsWith("*/"));
+    })
+    .join("\n");
+}
+
+/**
+ * 门 k：窗口涨幅达标的四档阈值 + 窗口天数必须单源。
+ *
+ * 修复前的真实形态（本门对它必须报红）：
+ *  - 缺省阈值同时写在引擎常量表与模板变量种子里 —— 两处各写一份 ⇒ 改了变量不改代码，
+ *    「用户调过的阈值」与「代码兜底值」静默漂移，而任何编译器/单测都不会报；
+ *  - 窗口天数若就地写死（如 `window_days: 5`）⇒ 与 `Period::default_holding_days`
+ *    形成第二套档位尺度（同门 a / 门 f 的同族形态）。
+ */
+function checkMoverThresholdSingleSource(engineSrc, seedSrc) {
+  const violations = [];
+  let scanned = 0;
+  const body = arrayBody(engineSrc, "DEFAULT_GAIN_THRESHOLDS");
+  if (body.length === 0) {
+    return { violations: [`${MOVER_ENGINE}: 未解析到 DEFAULT_GAIN_THRESHOLDS ⇒ 判据失效`], scanned };
+  }
+  const rows = [...body.matchAll(/\("([a-z0-9_]+)",\s*([0-9.]+)\)/g)].map((m) => [m[1], m[2]]);
+  for (const tier of MOVER_TIERS) {
+    scanned += 1;
+    const row = rows.find(([name]) => name === `mover_gain_${tier}`);
+    if (!row) {
+      violations.push(`${MOVER_ENGINE}: 缺档位 ${tier} 的出厂阈值（四档必须逐档登记）`);
+      continue;
+    }
+    // 种子变量的 value 与 name 之间可能夹着 var_type/description 行 —— 限窗内匹配
+    const seed = seedSrc.match(
+      new RegExp(`name:\\s*"mover_gain_${tier}"[\\s\\S]{0,400}?value:\\s*serde_json::json!\\(([0-9.]+)\\)`),
+    );
+    scanned += 1;
+    if (!seed) {
+      violations.push(`${SEED_VARS}: 缺模板变量 mover_gain_${tier} ⇒ 该档阈值无用户可调入口`);
+    } else if (Number(seed[1]) !== Number(row[1])) {
+      // 按**数值**比而不是按字面量：`json!(10)` 与 `10.0` 是同一个阈值，
+      // 按串比会把十进制定点的写法差异报成「两处真相」——判据失焦。
+      violations.push(
+        `阈值漂移：mover_gain_${tier} 引擎出厂 ${row[1]} ≠ 种子默认 ${seed[1]}（两处真相）`,
+      );
+    }
+  }
+  scanned += 1;
+  if (!engineSrc.includes("default_holding_days()")) {
+    violations.push(`${MOVER_ENGINE}: 未取 default_holding_days ⇒ 窗口天数成了第二套档位尺度`);
+  }
+  for (const m of engineSrc.matchAll(/window_days:\s*([0-9]+)\b/g)) {
+    scanned += 1;
+    violations.push(`${MOVER_ENGINE}: window_days 写死字面量 ${m[1]} ⇒ 天数必须取 default_holding_days()`);
+  }
+  return { violations, scanned };
+}
+
+/**
+ * 从种子文件里只取 `mover_gain_*` 四个变量的 description 文案。
+ *
+ * 判据窗口必须**窄到这几条**：同一文件里另有「涨停潜力评分」等其它功能的变量
+ * （`limit_pct_main` 一族，天生就该写「涨停」），整文件扫描会红得毫无道理；
+ * 源码里的**注释**同理（口径边界句正写在注释里），故只取字符串字面量。
+ */
+function moverVarDescriptions(seedSrc) {
+  const out = [];
+  for (const tier of MOVER_TIERS) {
+    const m = seedSrc.match(
+      new RegExp(`name:\\s*"mover_gain_${tier}"[\\s\\S]{0,400}?description:\\s*Some\\("([^"]*)"`),
+    );
+    if (m) { out.push([tier, m[1]]); }
+  }
+  return out;
+}
+
+/**
+ * 门 l：口径边界 —— 判据是**绝对涨幅**，用户可见文案一律不得出现「涨停」字样。
+ *
+ * 名大于内容即为歧义：若面板/文案写「涨停」，用户会以为事件判据含板块涨停语义
+ * （主板 10% / 创业科 20% / 北交 30%），而实际判据是不分板块的绝对涨幅。
+ * 扫描面 = 引擎 + 命令 + 面板（剥整行注释）+ `mover_gain_*` 变量描述 + 11 语言的
+ * `stockAnalysis.moverRecall` 全部值。
+ */
+function checkNoPriceLimitWording(files, seedSrc) {
+  const violations = [];
+  let scanned = 0;
+  for (const { name, src } of files) {
+    scanned += 1;
+    const stripped = stripCommentLines(src);
+    if (stripped.includes("涨停")) {
+      const line = stripped.split("\n").findIndex((l) => l.includes("涨停")) + 1;
+      violations.push(`${name}:${line} 出现「涨停」字样 ⇒ 口径是绝对涨幅，名大于内容即为歧义`);
+    }
+  }
+  const descs = moverVarDescriptions(seedSrc);
+  if (descs.length < MOVER_TIERS.length) {
+    violations.push(`${SEED_VARS}: 只解析到 ${descs.length}/4 条 mover_gain_* 变量描述 ⇒ 判据失效`);
+  }
+  for (const [tier, desc] of descs) {
+    scanned += 1;
+    if (desc.includes("涨停")) {
+      violations.push(`${SEED_VARS}: mover_gain_${tier} 的变量描述写「涨停」⇒ 阈值文案与绝对涨幅口径矛盾`);
+    }
+  }
+  for (const lang of LOCALE_LANGS) {
+    scanned += 1;
+    try {
+      const json = JSON.parse(read(`${LOCALES_DIR}/${lang}.json`));
+      const section = JSON.stringify((json.stockAnalysis ?? {}).moverRecall ?? {});
+      if (section.includes("涨停")) {
+        violations.push(`${lang}.json: moverRecall 文案出现「涨停」⇒ 与绝对涨幅口径矛盾`);
+      }
+    } catch {
+      violations.push(`${lang}.json 解析失败 ⇒ 无法核对口径边界`);
+    }
+  }
+  return { violations, scanned };
+}
+
 /** 读取 strategies/ 全部 .rs（门 a/f 的扫描对象）。selftest 与 main 共用同一份，避免两建面不同。 */
 function readStrategyFiles() {
   return fs
@@ -411,6 +542,17 @@ function readStrategyFiles() {
 
 /** --selftest：把每门的「修复前真实形态」当夹具喂进判据，必须红。 */
 function selftest() {
+  /** 门 k/l 的种子夹具：默认四档与引擎出厂一致；`vals` / `descs` 覆盖单档。 */
+  const seedFixture = (vals = {}, descs = {}) =>
+    MOVER_TIERS.map((t) => {
+      const def = { ultra_short: 10.0, short: 20.0, mid: 30.0, long: 40.0 };
+      return `        Variable {\n`
+        + `            name: "mover_gain_${t}".into(),\n`
+        + `            var_type: "number".into(),\n`
+        + `            value: serde_json::json!(${vals[t] ?? def[t]}),\n`
+        + `            description: Some("${descs[t] ?? `第 ${t} 档窗口累计涨幅达标阈值（%）`}"),\n`
+        + `        },`;
+    }).join("\n");
   const cases = [
     {
       name: "a 正控（默认天数）应绿",
@@ -610,6 +752,87 @@ function selftest() {
       got: checkSerenityCardTierDisplay(read(SERENITY_CARD)).violations.length,
       want: 0,
     },
+    {
+      // 修复前真实形态：同一条阈值在引擎常量表与模板变量种子里各写一份
+      name: "k 负控（引擎出厂阈值与种子默认漂移）应红",
+      got: checkMoverThresholdSingleSource(
+        'pub const DEFAULT_GAIN_THRESHOLDS: [(&str, f64); 4] = [\n'
+          + '    ("mover_gain_ultra_short", 10.0),\n'
+          + '    ("mover_gain_short", 25.0),\n'
+          + '    ("mover_gain_mid", 30.0),\n'
+          + '    ("mover_gain_long", 40.0),\n'
+          + '];\n'
+          + 'let window_days = period.default_holding_days();',
+        seedFixture(),
+      ).violations.length,
+      want: 1,
+    },
+    {
+      name: "k 负控（四档缺档登记）应红",
+      got: checkMoverThresholdSingleSource(
+        'pub const DEFAULT_GAIN_THRESHOLDS: [(&str, f64); 3] = [\n'
+          + '    ("mover_gain_ultra_short", 10.0),\n'
+          + '    ("mover_gain_short", 20.0),\n'
+          + '    ("mover_gain_mid", 30.0),\n'
+          + '];\n'
+          + 'let window_days = period.default_holding_days();',
+        seedFixture(),
+      ).violations.length,
+      want: 1,
+    },
+    {
+      name: "k 负控（window_days 写死字面量）应红",
+      got: checkMoverThresholdSingleSource(
+        'pub const DEFAULT_GAIN_THRESHOLDS: [(&str, f64); 4] = [\n'
+          + '    ("mover_gain_ultra_short", 10.0),\n'
+          + '    ("mover_gain_short", 20.0),\n'
+          + '    ("mover_gain_mid", 30.0),\n'
+          + '    ("mover_gain_long", 40.0),\n'
+          + '];\n'
+          + 'let window_days = period.default_holding_days();\n'
+          + 'TierRule { period, var_name, gain_pct, window_days: 5 }',
+        seedFixture(),
+      ).violations.length,
+      want: 1,
+    },
+    {
+      name: "k 负控（常量声明解析不到 ⇒ 判据失效）应红",
+      got: checkMoverThresholdSingleSource("// 空\n", "// 空\n").violations.length,
+      want: 1,
+    },
+    {
+      name: "k 正控（当前真实文件）应绿",
+      got: checkMoverThresholdSingleSource(read(MOVER_ENGINE), read(SEED_VARS)).violations.length,
+      want: 0,
+    },
+    {
+      name: "l 负控（呈现代码写「涨停」）应红",
+      got: checkNoPriceLimitWording(
+        [{ name: "x.tsx", src: '  <span>{t("stockAnalysis.moverRecall.rule")}：涨停</span>' }],
+        seedFixture(),
+      ).violations.length,
+      want: 1,
+    },
+    {
+      name: "l 负控（变量描述写「涨停」）应红",
+      got: checkNoPriceLimitWording(
+        [{ name: "x.rs", src: "let a = 1;\n" }],
+        seedFixture({}, { ultra_short: "超短档窗口累计涨幅达标阈值（%，判据不含板块涨停语义）" }),
+      ).violations.length,
+      want: 1,
+    },
+    {
+      name: "l 正控（注释里写「涨停」不计入 + 真实文件全绿）应绿",
+      got: checkNoPriceLimitWording(
+        [{ name: "x.rs", src: "// 口径边界：判据不含板块涨停语义\nlet a = 1;\n" }],
+        seedFixture(),
+      ).violations.length
+        + checkNoPriceLimitWording(
+          [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL].map((f) => ({ name: f, src: read(f) })),
+          read(SEED_VARS),
+        ).violations.length,
+      want: 0,
+    },
   ];
   let bad = 0;
   for (const c of cases) {
@@ -699,6 +922,21 @@ function main() {
       fs.existsSync(path.join(ROOT, SERENITY_CARD))
         ? checkSerenityCardTierDisplay(read(SERENITY_CARD))
         : { violations: [`${SERENITY_CARD} 不存在`], scanned: 0 },
+    ],
+    [
+      "k 窗口涨幅达标阈值/天数单源",
+      [MOVER_ENGINE, SEED_VARS].every((f) => fs.existsSync(path.join(ROOT, f)))
+        ? checkMoverThresholdSingleSource(read(MOVER_ENGINE), read(SEED_VARS))
+        : { violations: [`${MOVER_ENGINE} 或 ${SEED_VARS} 不存在 ⇒ 无从比对阈值单源`], scanned: 0 },
+    ],
+    [
+      "l 口径边界（用户可见文案不得出现「涨停」）",
+      [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL, SEED_VARS].every((f) => fs.existsSync(path.join(ROOT, f)))
+        ? checkNoPriceLimitWording(
+            [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL].map((f) => ({ name: f, src: read(f) })),
+            read(SEED_VARS),
+          )
+        : { violations: ["mover 链文件缺失 ⇒ 口径边界无从核对"], scanned: 0 },
     ],
   ];
 

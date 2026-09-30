@@ -2111,6 +2111,13 @@
     "agentFailed": "失敗",
     "agentTotalSessions": "總會話數",
     "avgCostPerSession": "每會話平均費用",
+    "pluginPanels": {
+      "title": "外掛程式面板",
+      "providedBy": "由 {{plugin}} 提供",
+      "noSource": "該面板只宣告了標題，未提供內容來源（{{component}}）",
+      "commandDenied": "面板要求了不允許的通道：{{command}}",
+      "empty": "沒有已啟用的外掛程式宣告儀表板面板"
+    },
     "costByProvider": "按供應商成本分佈",
     "costOverview": "成本概覽",
     "dailyAvgTokens": "每日平均Token数",

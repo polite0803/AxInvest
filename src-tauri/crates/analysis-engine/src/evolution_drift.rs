@@ -120,6 +120,23 @@ pub async fn load_current_weights_by_trigger(
     Ok(map)
 }
 
+/// 指定 trigger 最近一次闭环重算的落库时刻（`strategy_weight_history.applied_at`）。
+///
+/// `reco_loop_view` 的 `last_recalc_at` 唯一来源：无行 ⇒ `Ok(None)`
+/// （调用方按 0 展示；"查不到"与"没算过"在展示层同形，故返回 Option 而非保底值）。
+pub async fn latest_recalc_applied_at(
+    db: &DatabaseConnection,
+    trigger: &str,
+) -> Result<Option<i64>, sea_orm::DbErr> {
+    let row = strategy_weight_history::Entity::find()
+        .filter(strategy_weight_history::Column::Trigger.eq(trigger))
+        .order_by_desc(strategy_weight_history::Column::AppliedAt)
+        .limit(1)
+        .one(db)
+        .await?;
+    Ok(row.map(|r| r.applied_at))
+}
+
 /// 读取 strategy_performance 在窗口内的所有行
 pub async fn load_performance_window(
     db: &DatabaseConnection,

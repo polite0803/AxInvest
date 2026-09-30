@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  示例插件面板 —— 运行在 sandbox="allow-scripts" 的 iframe 内，不在主 origin。
+  作者代码只拿到 ctx = { api, ui, store }（见 sdk/sandboxTemplate.ts:214-216），
+  其中 api.invoke 只放行 plugin_ui_action / plugin_execute_command 两条通道，
+  且 pluginId 由宿主绑定。
+-->
+<html lang="zh">
+  <head><meta charset="utf-8" /></head>
+  <body style="margin:0;font:13px/1.6 system-ui,sans-serif;color:inherit">
+    <div id="root">加载中…</div>
+
+    <script>
+      window.onSkillMount = function (ctx, props) {
+        var root = document.getElementById("root");
+        var caption = (props && props.caption) || "（未收到 props）";
+
+        root.textContent = "面板内容由插件自带 HTML 渲染 · " + caption;
+
+        var button = document.createElement("button");
+        button.type = "button";
+        button.textContent = "试一次 worker 回流";
+        button.style.cssText = "margin-top:8px";
+        button.addEventListener("click", function () {
+          ctx.api
+            .invoke("plugin_ui_action", { action: { type: "ping" } })
+            .then(function (result) {
+              root.textContent = "回流成功：" + JSON.stringify(result);
+            })
+            .catch(function (error) {
+              // 本示例插件未声明 worker，这里预期就是「不可用」——把原因显示出来，
+              // 不静默、也不伪装成空结果
+              root.textContent = "回流未成立：" + String(error);
+            });
+        });
+        root.appendChild(document.createElement("br"));
+        root.appendChild(button);
+      };
+    </script>
+  </body>
+</html>

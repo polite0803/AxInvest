@@ -2831,7 +2831,7 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
     // ── 每日自动化闭环四任务种子化（存在即跳过，不改用户配置；失败不阻塞启动） ──
     // 00:00 智能荐股 / 01:00 趋势智选 / 02:00 候选池分析 / 18:00 到期反思
     // （PLAN-daily-automation-pipeline，时刻均为本地时区口径，休市日由 executor 闸门跳过）
-    if let Err(e) = crate::commands::seed_stock_automation_cron::seed_stock_automation_crons(
+    if let Err(e) = crate::init::stock_automation_cron_seed::seed_stock_automation_crons(
         &app_state.cron_job_store,
         false,
     )

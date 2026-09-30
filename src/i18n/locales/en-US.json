@@ -2111,6 +2111,13 @@
     "agentFailed": "Failed",
     "agentTotalSessions": "Total Sessions",
     "avgCostPerSession": "Avg Cost / Session",
+    "pluginPanels": {
+      "title": "Plugin Panels",
+      "providedBy": "Provided by {{plugin}}",
+      "noSource": "This panel declares only a title and no content source ({{component}})",
+      "commandDenied": "The panel requested a disallowed channel: {{command}}",
+      "empty": "No enabled plugin declares a dashboard panel"
+    },
     "costByProvider": "Cost by Provider",
     "costOverview": "Cost Overview",
     "dailyAvgTokens": "Daily Avg Tokens",

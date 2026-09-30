@@ -2111,6 +2111,13 @@
     "agentFailed": "Fehlgeschlagen",
     "agentTotalSessions": "Sitzungen gesamt",
     "avgCostPerSession": "Durchschnittskosten/Sitzung",
+    "pluginPanels": {
+      "title": "Plugin-Panels",
+      "providedBy": "Bereitgestellt von {{plugin}}",
+      "noSource": "Dieses Panel deklariert nur einen Titel ohne Inhaltsquelle ({{component}})",
+      "commandDenied": "Das Panel hat einen nicht erlaubten Kanal angefragt: {{command}}",
+      "empty": "Kein aktives Plugin deklariert ein Dashboard-Panel"
+    },
     "costByProvider": "Kosten nach Anbieter",
     "costOverview": "Kostenübersicht",
     "dailyAvgTokens": "Tägliche Durchschnittstoken",

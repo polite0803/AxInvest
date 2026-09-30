@@ -25,6 +25,18 @@
 use axagent_entities::{reflection_lessons, stock_analyses, stock_reflections};
 use sea_orm::{ColumnTrait, Condition, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
 
+/// 「同档 OR 复盘档未知(NULL)」组合子（〇-B v2 第 4 条）。
+///
+/// `fetch_*` 三函数内的同源逻辑；`reflection.rs` 的 pending 扫描因查询主体各异
+/// 无法共用整查询函数，但档过滤子句同源 ⇒ 提成泛型 helper，避免各写一遍
+/// `Condition::any()`（命令层写它即分层门禁规则 1 命中）。
+pub fn horizon_eq_or_null<C>(col: C, horizon: &str) -> Condition
+where
+    C: ColumnTrait,
+{
+    Condition::any().add(col.eq(horizon)).add(col.is_null())
+}
+
 /// 同 ticker 近期已完成反思（按 `CreatedAt` 倒序）。
 ///
 /// 调用方（`fetch_stock_lessons` 的 same_ticker 段）传「90 天前毫秒时间戳」，

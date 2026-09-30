@@ -16,6 +16,7 @@ pub mod opc_knowledge;
 pub mod plugins;
 pub mod services;
 pub mod state;
+pub mod stock_automation_cron_seed;
 pub mod trigger_recovery;
 pub mod workflow_injections;
 

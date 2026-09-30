@@ -2111,6 +2111,13 @@
     "agentFailed": "فشل",
     "agentTotalSessions": "إجمالي الجلسات",
     "avgCostPerSession": "متوسط التكلفة / الجلسة",
+    "pluginPanels": {
+      "title": "لوحات الملحقات",
+      "providedBy": "مقدمة من {{plugin}}",
+      "noSource": "تعلن هذه اللوحة العنوان فقط دون مصدر محتوى ({{component}})",
+      "commandDenied": "طلبت اللوحة قناة غير مسموحة: {{command}}",
+      "empty": "لا توجد إضافة مفعّلة تعلن لوحة معلومات"
+    },
     "costByProvider": "التكلفة حسب المزود",
     "costOverview": "نظرة عامة على التكلفة",
     "dailyAvgTokens": "متوسط الرموز اليومي",

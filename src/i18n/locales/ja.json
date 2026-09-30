@@ -2111,6 +2111,13 @@
     "agentFailed": "失敗",
     "agentTotalSessions": "セッション総数",
     "avgCostPerSession": "セッションあたりの平均コスト",
+    "pluginPanels": {
+      "title": "プラグインパネル",
+      "providedBy": "{{plugin}} が提供",
+      "noSource": "このパネルはタイトルのみを宣言しており、内容ソースがありません（{{component}}）",
+      "commandDenied": "パネルが許可されていないチャネルを要求しました：{{command}}",
+      "empty": "ダッシュボードパネルを宣言している有効なプラグインがありません"
+    },
     "costByProvider": "プロバイダー別コスト",
     "costOverview": "コスト概要",
     "dailyAvgTokens": "1日あたりの平均トークン",

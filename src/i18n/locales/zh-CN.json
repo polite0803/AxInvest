@@ -2111,6 +2111,13 @@
     "agentFailed": "失败",
     "agentTotalSessions": "总会话数",
     "avgCostPerSession": "每会话平均费用",
+    "pluginPanels": {
+      "title": "插件面板",
+      "providedBy": "由 {{plugin}} 提供",
+      "noSource": "该面板只声明了标题，未提供内容来源（{{component}}）",
+      "commandDenied": "面板请求了不被允许的通道：{{command}}",
+      "empty": "没有已启用的插件声明仪表盘面板"
+    },
     "costByProvider": "按供应商成本分布",
     "costOverview": "成本概览",
     "dailyAvgTokens": "日均Token",

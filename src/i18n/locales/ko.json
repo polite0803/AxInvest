@@ -2111,6 +2111,13 @@
     "agentFailed": "uc2e4패",
     "agentTotalSessions": "cdotal 세션 수",
     "avgCostPerSession": "세션당 평균 비용",
+    "pluginPanels": {
+      "title": "플러그인 패널",
+      "providedBy": "{{plugin}} 제공",
+      "noSource": "이 패널은 제목만 선언하고 내용 원본이 없습니다({{component}})",
+      "commandDenied": "패널이 허용되지 않은 채널을 요청했습니다: {{command}}",
+      "empty": "대시보드 패널을 선언한 활성화된 플러그인이 없습니다"
+    },
     "costByProvider": "공급자별 비용",
     "costOverview": "비용 개요",
     "dailyAvgTokens": "일평균 토큰",

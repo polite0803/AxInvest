@@ -2111,6 +2111,13 @@
     "agentFailed": "Ошибок",
     "agentTotalSessions": "Всего сессий",
     "avgCostPerSession": "Средняя стоимость/сессия",
+    "pluginPanels": {
+      "title": "Панели плагинов",
+      "providedBy": "Предоставлено: {{plugin}}",
+      "noSource": "Эта панель объявляет только заголовок без источника содержимого ({{component}})",
+      "commandDenied": "Панель запросила запрещённый канал: {{command}}",
+      "empty": "Ни один включённый плагин не объявляет панель дашборда"
+    },
     "costByProvider": "Затраты по провайдерам",
     "costOverview": "Обзор затрат",
     "dailyAvgTokens": "Среднедневные токены",

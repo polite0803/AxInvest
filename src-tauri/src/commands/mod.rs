@@ -129,7 +129,6 @@ pub mod scheduled_task;
 #[cfg(not(mobile))]
 pub mod screen_vision;
 pub mod search;
-pub mod seed_stock_automation_cron;
 pub mod session_share;
 pub mod skill_workflow;
 // G18: 会话多格式导出（messages.jsonl / openai_dataset_jsonl / markdown / manifest_json）

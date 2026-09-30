@@ -4477,7 +4477,7 @@ pub(crate) async fn reco_horizon_prior(
 /// - `on` ⇒ 用 reco-loop 权重覆盖模板静态值。
 ///   变量读不到按 `shadow`（新装/模板缺失时保持现状，不假装闭环已转正）。
 pub(crate) async fn load_reco_served_vars_db(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
 ) -> Result<Vec<(String, serde_json::Value)>, String> {
     // 读取 workflow template 变量用于 vendor 启用检测
     let template = axagent_entities::workflow_template::Entity::find_by_id("stock-analysis")
@@ -4724,7 +4724,7 @@ pub async fn reco_ic_stats(
 /// 观测面降级不得崩主表：样本/留痕查询失败 ⇒ 空格 + 照报 gate，与前端
 /// 「IC 取不到时矩阵照样出」同一取舍。
 pub(crate) async fn reco_loop_view(
-    db: &sea_orm::DatabaseConnection,
+    db: &DatabaseConnection,
     served_vars: &[(String, serde_json::Value)],
 ) -> axagent_analysis_engine::recommender::reco_loop::RecoLoopView {
     use axagent_analysis_engine::recommender::reco_loop::*;
@@ -4748,16 +4748,12 @@ pub(crate) async fn reco_loop_view(
     .await
     .unwrap_or_default();
     let cells = compute_loop_cell_weights(&samples, &current, now_ms);
-    let last_recalc_at = axagent_entities::strategy_weight_history::Entity::find()
-        .filter(axagent_entities::strategy_weight_history::Column::Trigger.eq(RECO_LOOP_TRIGGER))
-        .order_by_desc(axagent_entities::strategy_weight_history::Column::AppliedAt)
-        .limit(1)
-        .one(db)
-        .await
-        .ok()
-        .flatten()
-        .map(|r| r.applied_at)
-        .unwrap_or(0);
+    let last_recalc_at =
+        axagent_analysis_engine::evolution_drift::latest_recalc_applied_at(db, RECO_LOOP_TRIGGER)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(0);
     RecoLoopView { gate, cells, last_recalc_at }
 }
 
@@ -4788,7 +4784,7 @@ pub async fn recalc_reco_loop_weights(
 /// decision_validations，闭环必须紧跟这批样本重算，否则「自动触发」只自动了一半。
 /// `reco_ic_gate=off` ⇒ 完全停用（连计算都不做）；shadow/on ⇒ 计算并留痕，
 /// 是否进评分由消费侧 `load_reco_served_vars_db` 的闸决定。
-pub(crate) async fn maybe_recalc_reco_loop(db: &sea_orm::DatabaseConnection) -> String {
+pub(crate) async fn maybe_recalc_reco_loop(db: &DatabaseConnection) -> String {
     let served_vars = match load_reco_served_vars_db(db).await {
         Ok(v) => v,
         Err(e) => {

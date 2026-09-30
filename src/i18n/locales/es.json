@@ -2111,6 +2111,13 @@
     "agentFailed": "Fallido",
     "agentTotalSessions": "Sesiones totales",
     "avgCostPerSession": "Costo promedio / sesión",
+    "pluginPanels": {
+      "title": "Paneles de plugins",
+      "providedBy": "Proporcionado por {{plugin}}",
+      "noSource": "Este panel solo declara un titulo sin fuente de contenido ({{component}})",
+      "commandDenied": "El panel solicito un canal no permitido: {{command}}",
+      "empty": "Ningun plugin activado declara un panel de panel de control"
+    },
     "costByProvider": "Costo por proveedor",
     "costOverview": "Resumen de costos",
     "dailyAvgTokens": "Tokens promedio diarios",

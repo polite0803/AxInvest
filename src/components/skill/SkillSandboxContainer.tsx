@@ -31,6 +31,20 @@ export interface SkillSandboxContainerProps {
   componentConfig: Record<string, unknown>;
   permissions?: SkillPermissions;
   style?: React.CSSProperties;
+  /**
+   * 可选的资产来源注入点 —— 缺省走 `skill_read_asset`。
+   *
+   * 存在的理由不是复用便利，而是**不复制安全生命周期**：监听先于 `srcdoc`、30s 超时、
+   * unmount 清双桥这几段是安全关键路径，插件面板宿主若另写一份，两处漂移的代价不对等。
+   * 传空串等异常一律由调用方 throw，容器统一落到 `SkillErrorFallback`。
+   */
+  loadAsset?: (entry: string) => Promise<string>;
+  /**
+   * 可选的宿主 API 注入点 —— 缺省为 skill 那套（通用 invoke + 命令白名单）。
+   * 插件面板必须传自己的实现：能力面要收窄到该插件的两条通道，
+   * 且**由宿主绑定 pluginId**，不接受 iframe 传来的值。
+   */
+  hostApiOverride?: SkillHostApi;
 }
 
 export function SkillSandboxContainer({
@@ -39,6 +53,8 @@ export function SkillSandboxContainer({
   componentConfig,
   permissions,
   style,
+  loadAsset,
+  hostApiOverride,
 }: SkillSandboxContainerProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const bridgeRef = useRef<HostRpcBridge | null>(null);
@@ -81,7 +97,7 @@ export function SkillSandboxContainer({
       tools: permissions?.tools ?? [],
     };
 
-    const hostApi: SkillHostApi = {
+    const defaultHostApi: SkillHostApi = {
       invoke: async <T = unknown>(
         command: string,
         args?: Record<string, unknown>,
@@ -94,6 +110,7 @@ export function SkillSandboxContainer({
         );
       },
     };
+    const hostApi = hostApiOverride ?? defaultHostApi;
 
     const hostUi: SkillHostUi = {
       navigate: (path: string): void => {
@@ -201,10 +218,12 @@ export function SkillSandboxContainer({
 
     try {
       // SK-P0-3: 后端期望参数名 name/file_name,而非 skillName/path
-      const htmlContent = await invoke<string>("skill_read_asset", {
-        name: skillName,
-        fileName: entry,
-      });
+      const htmlContent = loadAsset
+        ? await loadAsset(entry)
+        : await invoke<string>("skill_read_asset", {
+          name: skillName,
+          fileName: entry,
+        });
 
       if (!htmlContent || htmlContent.trim().length === 0) {
         throw new Error(i18n.t("skill.entryFileEmpty", { entry }));
@@ -304,6 +323,8 @@ export function SkillSandboxContainer({
     componentId,
     componentConfig,
     permissions,
+    loadAsset,
+    hostApiOverride,
     navigate,
     notification,
   ]);

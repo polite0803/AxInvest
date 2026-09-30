@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { OfficeTab } from "@/components/office/OfficeTab";
+import { PluginDashboardPanels } from "@/components/plugin/PluginPanelHost";
 import { formatNumber } from "@/lib/format";
 import { invoke, logIpcError } from "@/lib/invoke";
 import {
@@ -859,6 +860,8 @@ function OverviewTab() {
             </Card>
           </div>
         )}
+
+      <PluginDashboardPanels />
     </div>
   );
 }

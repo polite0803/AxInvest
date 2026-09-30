@@ -11,7 +11,7 @@ use axagent_analysis_engine::reflection_stats::{
     parse_horizon_decisions,
 };
 use axagent_astock_data::as_of::{self, AsOfContext};
-use axagent_entities::stock_analyses;
+use axagent_entities::{stock_analyses, stock_reflections};
 use axagent_harness::{ActionKind, normalize_action};
 use sea_orm::DatabaseConnection;
 use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, Set};
@@ -160,8 +160,6 @@ pub async fn run_reflection_workflow(
     // Key = 周期名（ultra_short / short / mid / long），Value = Some(MarketSnapshot) 或 None（该周期行情不可用）。
     horizon_snapshots: &std::collections::BTreeMap<String, Option<MarketSnapshot>>,
 ) -> Result<String, String> {
-    use axagent_entities::stock_reflections;
-
     use sea_orm::sea_query::Expr;
 
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -1091,7 +1089,6 @@ pub async fn run_batch_reflection(
     max_count: Option<u32>,
 ) -> Result<serde_json::Value, String> {
     use axagent_entities::stock_analyses;
-    use axagent_entities::stock_reflections;
 
     let max_count = max_count.unwrap_or(20) as usize;
     let db = state.harness.db();
@@ -1439,7 +1436,6 @@ pub async fn run_lesson_validation(
     };
     use axagent_entities::lesson_applications;
     use axagent_entities::reflection_lessons;
-    use axagent_entities::stock_reflections;
 
     // 0. P2-F15 预处理：同步 lesson_applications.outcome_at_validation
     // 扫描所有 outcome_at_validation IS NULL 的行，从 stock_analyses.outcome 回写。
@@ -1845,7 +1841,7 @@ pub fn reviewable_horizons(
 /// 是缺陷 ④ 的成因（默认值手抄、档口径分叉）。
 pub fn build_pending_reflection_rows(
     seed: &PendingReflectionSeed<'_>,
-) -> Vec<axagent_entities::stock_reflections::ActiveModel> {
+) -> Vec<stock_reflections::ActiveModel> {
     build_pending_reflection_rows_for(
         seed,
         reviewable_horizons(
@@ -1864,7 +1860,7 @@ pub fn build_pending_reflection_rows(
 pub fn build_pending_reflection_rows_for(
     seed: &PendingReflectionSeed<'_>,
     horizons: Vec<(String, i64)>,
-) -> Vec<axagent_entities::stock_reflections::ActiveModel> {
+) -> Vec<stock_reflections::ActiveModel> {
     let analysis_nd = chrono::NaiveDate::parse_from_str(seed.analysis_date, "%Y-%m-%d")
         .unwrap_or_else(|_| {
             tracing::warn!(
@@ -1879,7 +1875,7 @@ pub fn build_pending_reflection_rows_for(
         .map(|(horizon, days)| {
             let hindsight_date =
                 (analysis_nd + chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
-            axagent_entities::stock_reflections::ActiveModel {
+            stock_reflections::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
                 stock_code: Set(seed.stock_code.to_string()),
                 stock_name: Set(seed.stock_name.to_string()),
@@ -2089,7 +2085,6 @@ pub const STALE_RUNNING_HOURS: i64 = 6;
 /// 停在 7-28，一个多月无人回收；同期 `resolved` 数为 **0** ——「自动反思从未产出
 /// 过结论」的直接原因之一（见 `AUDIT-scheduled-tasks-2026-09-13.md`）。
 pub async fn reclaim_stale_running(db: &DatabaseConnection, stale_hours: i64) -> u64 {
-    use axagent_entities::stock_reflections;
     use sea_orm::sea_query::Expr;
     let now_ms = chrono::Utc::now().timestamp_millis();
     let cutoff_ms = now_ms - stale_hours * 3_600_000;
@@ -2130,7 +2125,6 @@ pub async fn run_batch_reflection_inner(
 ) -> Result<serde_json::Value, String> {
     use crate::commands::error::ErrorResponse;
     use axagent_entities::stock_analyses;
-    use axagent_entities::stock_reflections;
 
     let max_count = max_count.unwrap_or(20) as usize;
     let today_ms = chrono::Utc::now().timestamp_millis();
@@ -2168,11 +2162,11 @@ pub async fn run_batch_reflection_inner(
         // 若留给循环里的 `filter.matches`，`take(max_count)` 会被其它档的行占满，
         // 「只反思 long 档」的定时任务可能整轮 0 条却仍报 totalPending>0。
         // NULL 老行留在队列内（该列引入前建的），由 matches() 按天数最近邻兜旧口径。
-        pending_query = pending_query.filter(
-            sea_orm::Condition::any()
-                .add(stock_reflections::Column::Horizon.eq(p.as_str()))
-                .add(stock_reflections::Column::Horizon.is_null()),
-        );
+        pending_query =
+            pending_query.filter(axagent_dao::repo::stock_lesson_queries::horizon_eq_or_null(
+                stock_reflections::Column::Horizon,
+                p.as_str(),
+            ));
     }
     let pendings: Vec<stock_reflections::Model> =
         pending_query.order_by_asc(stock_reflections::Column::CreatedAt).all(db).await.map_err(

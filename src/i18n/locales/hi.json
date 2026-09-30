@@ -2111,6 +2111,13 @@
     "agentFailed": "विफल",
     "agentTotalSessions": "कुल सत्र",
     "avgCostPerSession": "औसत लागत / सत्र",
+    "pluginPanels": {
+      "title": "प्लगइन पैनल",
+      "providedBy": "{{plugin}} द्वारा प्रदान",
+      "noSource": "यह पैनल केवल शीर्षक घोषित करता है, सामग्री स्रोत नहीं ({{component}})",
+      "commandDenied": "पैनल ने अनुमति-विहीन चैनल का अनुरोध किया: {{command}}",
+      "empty": "कोई सक्षम प्लगइन डैशबोर्ड पैनल घोषित नहीं करता"
+    },
     "costByProvider": "प्रदाता द्वारा लागत",
     "costOverview": "लागत अवलोकन",
     "dailyAvgTokens": "दैनिक औसत टोकन",

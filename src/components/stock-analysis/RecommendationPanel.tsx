@@ -21,8 +21,8 @@ import type {
   StockConsensus,
   StyleKey,
 } from "@/types/stock-analysis";
-
 import { Alert, App, Button, Card, Checkbox, Collapse, Empty, Modal, Spin, Tabs, Tag, Tooltip } from "antd";
+import type { TFunction } from "i18next";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
@@ -1017,7 +1017,7 @@ function PickRow(
 }
 
 /** 自动校准按钮：预览 → 确认 → 应用 */
-function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
+function AutoCalibrateButton({ t }: { t: TFunction }) {
   const { message: messageApi } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -1050,7 +1050,8 @@ function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
       setChecked(result.weights.map((w) => w.strategyId));
       setModalOpen(true);
     } catch (e) {
-      messageApi.error(t("stockAnalysis.recommendation.calibratePreviewFailed") + String(e));
+      const msg = typeof e === "string" ? e : e instanceof Error ? e.message : String(e);
+      messageApi.error(t("stockAnalysis.recommendation.calibratePreviewFailed", { error: msg }));
     } finally {
       setLoading(false);
     }
@@ -1084,7 +1085,7 @@ function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
       const result = await invoke<{ applied: number }>("apply_reco_weights", {
         weights: validPayload,
       });
-      messageApi.success(t("stockAnalysis.recommendation.calibrateApplied") + " " + result.applied);
+      messageApi.success(t("stockAnalysis.recommendation.calibrateApplied", { count: result.applied }));
       setModalOpen(false);
     } catch (e) {
       // 后端在 weights=null 时返回 "请先调用 preview...",
@@ -1120,7 +1121,7 @@ function AutoCalibrateButton({ t }: { t: (key: string) => string }) {
             disabled={applying || checked.length === 0}
             onClick={handleApply}
           >
-            {t("stockAnalysis.recommendation.calibrateApplySelected") + " (" + checked.length + ")"}
+            {t("stockAnalysis.recommendation.calibrateApplySelected", { count: checked.length })}
           </Button>,
         ]}
         width={600}

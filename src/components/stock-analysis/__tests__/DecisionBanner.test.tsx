@@ -34,6 +34,13 @@ const storeState = {
     confidence: number;
     targetPrice?: number;
     stopLoss?: number;
+    decisionsByHorizon?:
+      | Record<
+        string,
+        { action: string; positionPct?: number; confidence?: number }
+      >
+      | null;
+    weightAdjustments?: Array<{ tier: string; leg: string; multiplier: number }>;
   } | null,
   stockCode: "600519" as string | null,
   stockName: "茅台",
@@ -110,6 +117,54 @@ describe("DecisionBanner", () => {
     expect(container.firstChild).not.toBeNull();
     expect(container.textContent).toContain("stockAnalysis.actionBuy");
     expect(container.textContent).toContain("10%");
+  });
+
+  // ── 2026-10-01：口径调整（本档主动降权）从 data_gaps 拆出后的**落点** ──────────
+  // 断言必须定位到「挂在哪一档」：只断言文案出现，无法区分它被挂在 ultra_short 还是
+  // short 上（两档都有降权条目，混挂/全挂都能让「出现过」成立）—— 那正是本仓反复
+  // 点名的「拿读数当结论」。故这里选中第一档（ultraShort）后，断言 ×0.3 在、×0.5 不在。
+  it("口径调整挂在该档自己的脚注上（ultraShort 显示 ×0.3，不显示 short 的 ×0.5）", () => {
+    storeState.decision = {
+      action: "BUY",
+      positionPct: 10.0,
+      reasoning: "技术面突破",
+      riskLevel: "中",
+      confidence: 0.8,
+      decisionsByHorizon: {
+        ultraShort: { action: "BUY", positionPct: 10, confidence: 60 },
+        mid: { action: "HOLD", positionPct: 5, confidence: 55 },
+      },
+      weightAdjustments: [
+        { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
+        { tier: "short", leg: "f5", multiplier: 0.5 },
+      ],
+    };
+    storeState.stockCode = "600519";
+    render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("stockAnalysis.horizonLegDownweight|mult=0.3")).toBeTruthy();
+    expect(screen.queryByText("stockAnalysis.horizonLegDownweight|mult=0.5")).toBeNull();
+  });
+
+  it("无口径调整时不挂该脚注（不得对每档都铺一句「已降权」）", () => {
+    storeState.decision = {
+      action: "BUY",
+      positionPct: 10.0,
+      reasoning: "技术面突破",
+      riskLevel: "中",
+      confidence: 0.8,
+      decisionsByHorizon: { ultraShort: { action: "BUY", positionPct: 10, confidence: 60 } },
+    };
+    storeState.stockCode = "600519";
+    render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/stockAnalysis\.horizonLegDownweight/)).toBeNull();
   });
 });
 

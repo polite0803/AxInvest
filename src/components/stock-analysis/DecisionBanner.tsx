@@ -14,6 +14,7 @@ import {
   getActionTKey,
   getRiskColor,
   getRiskTKey,
+  HORIZON_CAMEL_TO_SNAKE,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
@@ -1534,6 +1535,30 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           })}
                         </div>
                       )}
+                      {
+                        /* 口径调整（**不是**数据缺口）：本档按周期主动降权的腿。
+                          后端只登记**真被下调**的档（`weightAdjustments`，结构化 tier/leg/multiplier，
+                          见 `@/types` 该字段文档）。此前它与真缺口同挤 `data_gaps` ⇒
+                          每张带估值数据的卡都恒亮「决策可信度受限 / 数据缺口 2 项」
+                          （f5 的 0.3/0.5 是权威表里的常量，凡有估值证据必命中）。
+                          现落在**该档自己的**脚注上：点哪一档，就看得到那一档哪条腿被降权、乘数多少。
+                          `leg === "f5"` 是本注脚文案的前置（文案本身写的就是估值腿）——
+                          未来若第二条腿也要降权，须同时补文案键，而不是让这句话去描述别的腿。 */
+                      }
+                      {(decision.weightAdjustments ?? [])
+                        .filter((a) =>
+                          a.leg === "f5"
+                          && a.tier === (HORIZON_CAMEL_TO_SNAKE[activeEntry.key] ?? activeEntry.key)
+                        )
+                        .map((a) => (
+                          <div
+                            key={`${a.tier}-${a.leg}`}
+                            className="text-xs"
+                            style={{ color: "var(--muted)" }}
+                          >
+                            {t("stockAnalysis.horizonLegDownweight", { mult: a.multiplier })}
+                          </div>
+                        ))}
                     </div>
                   );
                 })()}

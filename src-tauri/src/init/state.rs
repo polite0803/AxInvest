@@ -1902,6 +1902,13 @@ async fn register_all_capabilities(
             }
             let plugins = report.into_registry_allowing_failures();
             for p in plugins.summaries() {
+                // 让出调度：`passports_for_plugin_in` 每个插件仍要重解析一次自己的 manifest
+                // 并读 SKILL.md 正文（同步文件 IO）。逐插件调用会长时间占住 worker ——
+                // 实测启动期出现 40 秒调度空档（探针 tick 被推迟 40s），并连带 `index_queue`
+                // 报 `Connection pool timed out`（池里当时有 12 个空闲连接，是 acquire 的
+                // future 被饿过 `acquire_timeout`(15s)，不是池不够用）。
+                // O(N²) 的全量重扫已由 `passports_for_plugin_in` 消除，剩下的单次解析仍需让出。
+                tokio::task::yield_now().await;
                 let meta = &p.metadata;
                 if meta.kind != axagent_plugins::PluginKind::Builtin {
                     continue;
@@ -1909,7 +1916,7 @@ async fn register_all_capabilities(
                 // 从 plugin manager 取带 prompt_body 的 Skill 护照（读 SKILL.md 文件）
                 let mut skill_prompt_body = None;
                 let mut skill_description = meta.description.clone();
-                for pp in plugin_manager.passports_for_plugin(&meta.id) {
+                for pp in plugin_manager.passports_for_plugin_in(&plugins, &meta.id) {
                     if pp.kind == CapabilityKind::Skill && pp.name == meta.name {
                         skill_prompt_body = pp.prompt_body.clone();
                         if !pp.description.is_empty() {
@@ -1980,12 +1987,17 @@ async fn register_all_capabilities(
         use axagent_harness::CapabilitySource;
         let plugin_manager = skill_state.plugin_manager.read().await;
         if let Ok(report) = plugin_manager.plugin_registry_report() {
-            for p in report.into_registry_allowing_failures().summaries() {
+            // 先绑定 registry：下面的 `passports_for_plugin_in` 要引用它，复用同一次加载
+            //（原写法在 `passports_for_plugin` 内部逐插件全量重扫 ⇒ 总体 O(N²)）。
+            let plugins = report.into_registry_allowing_failures();
+            for p in plugins.summaries() {
+                // 每个插件仍会重解析一次自己的 manifest（同步 IO），让出调度避免饿死定时器
+                tokio::task::yield_now().await;
                 if p.metadata.kind == axagent_plugins::PluginKind::Builtin {
                     continue;
                 }
                 let plugin_id = &p.metadata.id;
-                for passport in plugin_manager.passports_for_plugin(plugin_id) {
+                for passport in plugin_manager.passports_for_plugin_in(&plugins, plugin_id) {
                     // 双保险：仅收集明确标记为插件来源的护照
                     if passport.source == CapabilitySource::Plugin {
                         passports.push(passport);

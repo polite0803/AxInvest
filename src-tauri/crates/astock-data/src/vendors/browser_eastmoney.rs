@@ -2,8 +2,9 @@ use crate::as_of_capability::AsOfCapability;
 use crate::error::DataError;
 use crate::types::*;
 use crate::vendors::eastmoney::{
-    classify_earnings_title, fflow_daykline_url, money_flow_from_window, parse_fflow_klines,
-    select_fflow_window, synthesize_industry_ranking,
+    earnings_from_notice_json, fflow_daykline_url, money_flow_from_window, notice_ann_url,
+    parse_fflow_klines, select_fflow_window, synthesize_industry_ranking,
+    EARNINGS_NOTICE_PAGE_SIZE,
 };
 use crate::vendors::StockVendor;
 use async_trait::async_trait;
@@ -67,15 +68,24 @@ impl BrowserEastMoneyVendor {
 }
 
 /// 构建东方财富 secid (1.600519, 0.000001)
+///
+/// 显式市场标记（`000001.SH` / `sh000001`）按标记取市场；裸码才按首位推断。
+/// 此前本函数**不剥任何前缀**，`sh600887` 会拼成 `1.sh600887` 恒查不到（与 eastmoney.rs
+/// 侧 2026-07-22 修过的同一个坑，两份实现漂移了）。
 fn to_em_secid(stock_code: &str) -> String {
-    let market = if stock_code.starts_with('6') || stock_code.starts_with('9') {
-        "1"
-    } else if stock_code.starts_with('8') || stock_code.starts_with('4') {
-        "0"
-    } else {
-        "0"
+    let (code, explicit) = match crate::code_form::split_explicit_market(stock_code) {
+        Some((bare, ex)) => (bare, Some(ex.em_market())),
+        None => (
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj"),
+            None,
+        ),
     };
-    format!("{market}.{stock_code}")
+    let market = match explicit {
+        Some(m) => m,
+        None if code.starts_with('6') || code.starts_with('9') => "1",
+        None => "0",
+    };
+    format!("{market}.{code}")
 }
 
 /// 通过浏览器页面导航发送 GET 请求，解析 JSON 响应
@@ -652,53 +662,20 @@ impl StockVendor for BrowserEastMoneyVendor {
         }))
     }
 
-    /// P3 修复(2026-07-25): 实现 earnings_calendar,作为 eastmoney datacenter-web
-    /// 反爬时的浏览器 fallback 通道。复用 eastmoney.rs 的 classify_earnings_title
-    /// 保持分类逻辑一致,通过 browser_fetch 绕过 JA3 TLS 指纹封锁。
+    /// earnings_calendar 的浏览器内核通道 —— eastmoney 直连被 JA3 封锁时的兜底。
+    ///
+    /// 修复(2026-10-01): 与直连版**同一故障**，只是换了通道 —— 原 `RPTA_WEB_NOTICE`
+    /// 报表已被东财下线，用浏览器内核请求它同样只拿到 `success:false` +「报表配置不存在」，
+    /// 而旧实现把 `result.data` 缺失当「无事件」返空 ⇒ 兜底通道与主通道一起静默。
+    /// 现两处共用 `notice_ann_url` + `earnings_from_notice_json`：URL 形态与信封校验
+    /// 只有一份，改一处即可同时生效（此前两处各抄一份，改一处必漏一处）。
     async fn get_earnings_calendar(
         &self,
         stock_code: &str,
     ) -> Result<Vec<EarningsEvent>, DataError> {
-        let code =
-            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_NOTICE&columns=SECURITY_CODE,SECURITY_NAME_ABBR,NOTICE_DATE,TITLE,EQUITY_NOTICE_TYPE&filter=(SECURITY_CODE=\"{code}\")&pageSize=30&sortColumns=NOTICE_DATE&sortTypes=-1&pageNumber=1"
-        );
+        let url = notice_ann_url(stock_code, EARNINGS_NOTICE_PAGE_SIZE);
         let json = browser_fetch(self.fetcher.as_ref(), &url).await?;
-
-        let rows = match json["result"]["data"].as_array() {
-            Some(arr) => arr,
-            None => return Ok(vec![]),
-        };
-
-        Ok(rows
-            .iter()
-            .filter_map(|r| {
-                let title = r["TITLE"].as_str().unwrap_or("");
-                let notice_date = r["NOTICE_DATE"].as_str().unwrap_or("");
-                if title.is_empty() || notice_date.is_empty() {
-                    return None;
-                }
-
-                let (event_type, period) = classify_earnings_title(title);
-
-                // 只保留财报相关事件（与 eastmoney.rs 一致）
-                if event_type == "other" && !title.contains("报告") && !title.contains("业绩") {
-                    return None;
-                }
-
-                Some(EarningsEvent {
-                    stock_code: stock_code.to_string(),
-                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
-                    event_date: notice_date.to_string(),
-                    event_type: event_type.to_string(),
-                    period,
-                    detail: Some(title.to_string()),
-                    source: Some("browser_eastmoney".to_string()),
-                    created_at: chrono::Utc::now().timestamp(),
-                })
-            })
-            .collect())
+        earnings_from_notice_json(stock_code, "browser_eastmoney", &json)
     }
 
     async fn get_cls_flash(&self) -> Result<Vec<ClsFlashItem>, DataError> {
@@ -742,5 +719,23 @@ impl StockVendor for BrowserEastMoneyVendor {
                 Some(ClsFlashItem { title, content, publish_time, source })
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod code_form_tests {
+    use super::*;
+
+    /// 本函数此前**不剥任何市场标记**：`sh600887` 拼成 `1.sh600887` 恒查不到，
+    /// `000001.SH` 拼成 `0.000001.SH`（上证指数被判成深市且代码带尾巴）。
+    /// 与 eastmoney.rs 侧 2026-07-22 的同名修复对齐 —— 两份实现漂移过一次。
+    #[test]
+    fn secid_honours_explicit_market_and_strips_prefix() {
+        assert_eq!(to_em_secid("000001.SH"), "1.000001");
+        assert_eq!(to_em_secid("sh600887"), "1.600887");
+        assert_eq!(to_em_secid("399006.SZ"), "0.399006");
+        // 裸码口径不变
+        assert_eq!(to_em_secid("600519"), "1.600519");
+        assert_eq!(to_em_secid("000001"), "0.000001");
     }
 }

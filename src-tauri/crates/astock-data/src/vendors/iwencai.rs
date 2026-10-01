@@ -341,6 +341,9 @@ impl StockVendor for IwencaiVendor {
                     pe,
                     pb,
                     roe,
+                    // 本通道（问财）的 `roe` 是**问财口径的当期值**，不保证与东财的年报口径一致
+                    // ⇒ 如实标 `None`（不知道就是不知道），不拿一个猜出来的日期冒充口径。
+                    roe_period: None,
                     change_pct,
                     market_cap,
                 })

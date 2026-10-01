@@ -101,7 +101,7 @@ export function BenchmarkReportView({ report }: BenchmarkReportViewProps) {
         <Col span={6}>
           <Card size="small">
             <Statistic
-              title={t("benchmark.taskCount")}
+              title={t("benchmark.task")}
               value={report.summary.totalTasks}
               suffix={`/ ${report.summary.passedTasks} ${t("benchmark.passed")}`}
             />

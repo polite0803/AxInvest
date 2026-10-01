@@ -266,6 +266,19 @@ jobs:
         # 首次接入时实测 11 语言 15130 条路径完全一致 ⇒ 无既存违规，不存在红基线。
         run: node scripts/check-i18n-key-parity.mjs
 
+      - name: Check i18n placeholder usage (value must not echo its key; {{x}} must be interpolated)
+        # 2026-10-01 补的**盲区修复**。上面四道 i18n 门禁的判据都停在「键在不在、值空不空、
+        # 值是不是中文」，**没有任何一条把「资源值」和「调用点」对上**。于是两类缺陷能静默上线，
+        # 用户在界面上直接看到模板原文（实测截图：按钮渲染成 `应用选中项 ({{COUNT}}) (0)`）：
+        #   ① 批量补译脚本把**键本身**当译文写进 locale —— 值 == 完整点分路径；
+        #   ② 资源是 `…({{count}})`，调用点写成 `t(key) + " (" + n + ")"` —— 占位符从未插值。
+        # 本步两条判据均**零基线**（判据机械，不存在「合法但长得像缺陷」的存量）；
+        # 唯一合法例外（文案本身在讲解 `{{input}}` 语法）走
+        # scripts/i18n-placeholder-usage-allowlist.json，按「文件 + 键」匹配、不写行号，
+        # 且**豁免失效即判红**，防止清单只增不减把判据面写窄。
+        # 接入时实测：R1 修掉 14 处（zh-TW 10 / zh-CN 2 / ja 2）、R2 修掉 18 处调用点后归零。
+        run: node scripts/check-i18n-placeholder-usage.mjs
+
       - name: Check ID validation (prevent undefined/null string corruption)
         run: node scripts/check-id-validation.mjs
 

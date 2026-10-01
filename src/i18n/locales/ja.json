@@ -15086,6 +15086,7 @@
     "horizonOverview": "期間概要：",
     "confLowerBoundHint": "信頼度下限: {{bound}}（超短期デグレードパス）",
     "horizonScoreFallbackHint": "この期間の独自スコアが未取得のため技術レッグは日足に退化（構造的欠落、低評価ではない）",
+    "horizonLegDownweight": "この期間ではバリュエーション・レッグを ×{{mult}} に低減（長期キャッシュフロー基準はこの期間に適合しない）",
     "horizonSharesPosteriorHint": "{{peers}} と後験が完全一致 —— 相互検証不可、同一源として解釈",
     "financialMetrics": "Financial Metrics",
     "goToTrade": "Go to Trade",
@@ -15861,12 +15862,9 @@
       "001": "定时"
     },
     "stock-analysis_RecommendationPanel": {
-      "001": "title",
+      "001": "Auto-Calibration Suggestions",
       "002": "请先勾选要应用的策略",
       "003": "所选项的权重值无效(NaN/缺失),无法应用"
-    },
-    "stock-analysis_StockAnalysisPage": {
-      "001": "title"
     },
     "round": "Round ",
     "round2Responses": "R2 Responses",
@@ -16372,11 +16370,9 @@
       "risks": "风险"
     },
     "dailyReview": {
-      "alerts": "stockAnalysis.dailyReview.alerts",
       "empty": "暂无复盘记录",
       "generate": "生成复盘",
       "noWatchlist": "暂无自选股",
-      "recommendations": "stockAnalysis.dailyReview.recommendations",
       "regenerate": "重新生成",
       "title": "株式分析",
       "watchlist": "自选股复盘",

@@ -270,6 +270,57 @@ fn soft_marker_suppression() {
     }
 }
 
+// absence_context_phrases: **与标记词无关**的「设计上就不存在该数据」声明（G1，2026-10-01）。
+//
+// 为什么必须与上面的按标记表分开：上面那张表是**按标记词各配一份**的，而这三条描述的是
+// 「数据为什么不存在」（设计/规则/事件型榜单），与分析师恰好选了哪个标记词**无关**。
+// 两表混在一起就会出现**同一句话、两种标记、两种判决**的不对称：
+//   实证（002371 运行 97d79306，**情绪面**分析师报告原文）：
+//     「获取的社交情绪数据源为空（**设计性缺席**或**无数据**），无法直接量化散户/舆情极端度」
+//   —— `数据缺失`/`获取失败` 的组里有「设计性缺席」⇒ 前半个词被豁免；`无数据` 的组里没有
+//   ⇒ 后半个词照计一处缺口。**同一事实、同一句，被判成一处真缺口**。
+//   判据：缺席语境的判定粒度应是**事实**（该数据是否存在），不是**措辞**（分析师写了哪个词）。
+// 命中范围（刻意只放三条，宁窄勿宽）：
+//   · `设计性缺席` —— F2/F3 约定的分析师声明词（工具已结构化申报 available:false）；
+//   · `非两融标的` —— 两融工具对非标的券的规则性缺席；
+//   · `未上龙虎榜` —— 事件型榜单：**没上榜**是「本就没有这条记录」，不是取数失败。
+//     实证（600406 运行 a7e590a4，情绪面报告原文）：
+//       「国电南瑞近一年**未上龙虎榜**，拉萨天团、封单比两项规则**无数据**可用，
+//         属该券低波动白马属性导致，不做强/弱封板推断」⇒ 曾被计为 1 处真缺口。
+// ⚠ 只作用于**软标记**（`marker_counts` 里走句级循环的那批）：动词类硬标记
+//   （无法获取/未能获取/占位/TODO…）维持零抑制 —— 真缺口正是用这些动词表达的。
+fn absence_context_phrases() {
+    ["设计性缺席", "非两融标的", "未上龙虎榜"]
+}
+
+// market_level_absence_phrases: **市场级口径停披** —— 唯一被允许豁免**动词类硬标记**的缺席语境（G2，2026-10-01）。
+//
+// ## 为什么它必须有别于 `absence_context_phrases`（两层判据，处置相反）
+//
+// · **个股级**（未上龙虎榜 / 非两融标的 / 设计性缺席）：断言的是「**这只票**在这个维度上本就
+//   没有该记录」。它**不足以**排除工具故障 —— 同一句里完全可能既说「没上榜」又出现「接口超时」
+//   ⇒ 故对动词类硬标记**不**豁免（「硬标记零抑制」这条教条在此继续成立，见 G1 的负控⑤）。
+// · **市场级**（监管停披）：断言的是「**整个市场**的这个口径自某日起不再披露」——
+//   有监管日期、可外部核验、与本次工具调用**正交**。它**不可能**是「本次工具坏了」的证据
+//   （工具坏了不会让交易所停止披露），故豁免它不会掩盖真故障，这是两层判据唯一的分界点。
+//
+// ## 实证（600887 运行 f474ec9b，2026-10-01 15:39，资金面报告原文）
+//
+//   「**北向资金**：受2024年8月监管停披影响，近期（2026-09-30）仅披露沪深股通成交额
+//     （分别为101.26亿、106.68亿元），**未能获取**单股精确净买入数据。」
+//
+// 报告**如实且正确**地说明了「该口径永久缺席」，却因动词 `未能获取` 属硬标记而照计一处缺口
+// ⇒ 资金面被判「⚠️ 低置信」、`gap_reason` 归因「上游工具数据不完整」（真因是监管口径）。
+// ⚠ 北向个股净流入自 **2024-08-16** 起停披是**永久**事实 ⇒ 凡报告提及北向净流入的轮次都会复发
+// （近 14 轮里 8 份 `hm_report` 含「停披」）。R9b 已把 `停披` 放进三个**软标记**的定向组，
+// 但当时没有覆盖动词路径 —— 分析师换个动词就绕过了。
+// 词表刻意只留「停披」一词：它是本仓文档里的既有术语（北向停披），语义单一。
+// 不收录「不再披露/未披露」——那些也可能是**公司**行为（如「公司不再披露分部数据」），
+// 而公司不披露恰恰可能是真缺口，收进来会误杀。
+fn market_level_absence_phrases() {
+    ["停披"]
+}
+
 // split_sentences: 以 。！？；与换行断句（D1 句级抑制的作用域）。
 // ⚠ 必须用**链式 split** 实现：生产 CodeNode 引擎 `set_max_operations(200_000)`
 //   （`code_executor.rs:57`），逐字符 `sub_string`+拼接的循环在 10 份 KB 级报告下
@@ -299,11 +350,20 @@ fn split_sentences(body) {
 // marker_counts: 每个失败标记的**有效命中次数**（句级抑制后）。
 // 返回 map marker→次数；0 次的 marker 不出现。折叠规则（长词吞子串「占位」）在此统一处理，
 // placeholder_hits（词种清单）与 placeholder_occurrences（总次数）共用，保证两口径同源。
+//
+// G1(2026-10-01)：句级抑制有两个来源 —— 按标记的定向组（`soft_marker_suppression`）
+//   ＋ 与标记无关的缺席语境组（`absence_context_phrases`，只作用于软标记）。
+//   后者修的正是「同一句话、两种标记、两种判决」的不对称，见该函数注释。
 fn marker_counts(text) {
     if type_of(text) != "string" || text == "" { return #{}; }
     let body = strip_verdict_blocks(text);
     let markers = placeholder_markers();
     let suppression = soft_marker_suppression();
+    // 循环外取一次：本函数对同一报告最多走 20 个 marker，数组字面量不必每次重建
+    let absence = absence_context_phrases();
+    let market = market_level_absence_phrases();
+    // 市场级停披的**正文级预筛**：绝大多数报告不含它 ⇒ 硬标记仍走 v87 的预算捷径（不切句）
+    let has_market_absence = has_any(body, market);
     let long_hit = body.contains("占位报告") || body.contains("placeholder")
         || body.contains("Placeholder") || body.contains("PLACEHOLDER");
     let sentences = [];
@@ -318,8 +378,23 @@ fn marker_counts(text) {
         // ⚠ 预算捷径（v87）：无抑制短语组的硬标记不做句级判定 ⇒ 整篇 split 直接计数。
         //   逐句循环是烧穿生产 `set_max_operations(200_000)` 的热区（16:54 运行 2bb5bb9d
         //   实锤），而硬标记的命中数与切句后逐句求和**恒等**（marker 不含句读分隔符）。
+        // G2(2026-10-01)：该捷径加一道**例外** —— 正文含市场级停披措辞时才切句，
+        //   因为「监管停披 + 动词」必须被豁免（见 `market_level_absence_phrases` 的两层判据）。
+        //   ⚠ 例外**不**扩到个股级缺席组：那会破坏「硬标记零抑制」（G1 负控⑤锁着）。
         let n = if !has_phrases {
-            body.split(m).len() - 1
+            if !has_market_absence {
+                body.split(m).len() - 1
+            } else {
+                if sentences.is_empty() { sentences = split_sentences(body); }
+                let cnt = 0;
+                for j in 0..sentences.len() {
+                    let s = sentences[j];
+                    if !s.contains(m) { continue; }
+                    if has_any(s, market) { continue; }
+                    cnt += s.split(m).len() - 1;
+                }
+                cnt
+            }
         } else {
             // 句子切分惰性执行：只有存在**需句级抑制判定**的候选 marker 时才切一次
             if sentences.is_empty() { sentences = split_sentences(body); }
@@ -328,7 +403,8 @@ fn marker_counts(text) {
                 let s = sentences[j];
                 if !s.contains(m) { continue; }
                 // 句级抑制：缺席语境必须与命中**同句**才豁免该次命中
-                if has_any(s, phrases) { continue; }
+                //   · `phrases` 按标记定向；`absence` 个股级；`market` 市场级（两层都含软标记通路）
+                if has_any(s, phrases) || has_any(s, absence) || has_any(s, market) { continue; }
                 cnt += s.split(m).len() - 1;
             }
             cnt

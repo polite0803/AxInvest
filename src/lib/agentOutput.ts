@@ -16,7 +16,7 @@ import {
   parseRiskLevel,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import type { StockDecision } from "@/types/stock-analysis";
+import type { StockDecision, WeightAdjustment } from "@/types/stock-analysis";
 
 /** 清理 LLM 原始输出中的工具调用标签、think 标签和乱码 */
 export function cleanToolCallTags(text: string): string {
@@ -198,6 +198,20 @@ export function extractContent(value: unknown): string {
 }
 
 /**
+ * 形状校验：一条「口径调整」必须三字段齐备且乘数为有限数。
+ *
+ * 残缺条目**丢弃**而不是补默认值 —— 补出来的 `multiplier: 1.0`（= 没降权）或空 `tier`
+ * 会让展示层挂出一条自相矛盾的注脚（「×1.0」却说被降权）。宁可少显示一条。
+ */
+export function isWeightAdjustment(v: unknown): v is WeightAdjustment {
+  if (v === null || typeof v !== "object") { return false; }
+  const o = v as Record<string, unknown>;
+  return typeof o.tier === "string" && o.tier !== ""
+    && typeof o.leg === "string" && o.leg !== ""
+    && typeof o.multiplier === "number" && Number.isFinite(o.multiplier);
+}
+
+/**
  * 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护
  *
  * 返回 null 表示"空壳决策"：raw 完全没有可解析的有意义字段
@@ -358,6 +372,15 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
   const dataGaps = Array.isArray(dataGapsRaw)
     ? dataGapsRaw.filter((g): g is string => typeof g === "string")
     : undefined;
+  // ── 口径调整（**不是**数据缺口）：本档按周期主动降权的证据腿 ──
+  // 与 `data_gaps` 分列的理由见 `@/types` 的 `weightAdjustments` 文档，简言之：
+  // 设计性降权曾与真缺口同挤 data_gaps，而它**恒**有两条（f5 的 0.3/0.5 是常量）⇒
+  // 每张带估值数据的决策卡恒亮「决策可信度受限 / 数据缺口 2 项」。
+  // 后端 2026-10-01 起产出 camelCase `weightAdjustments`；兼容 snake_case 以便将来统一不破。
+  const weightAdjustmentsRaw = source.weightAdjustments ?? source.weight_adjustments;
+  const weightAdjustments = Array.isArray(weightAdjustmentsRaw)
+    ? weightAdjustmentsRaw.filter(isWeightAdjustment)
+    : undefined;
   const isContradictoryRaw = source.isContradictory ?? source.is_contradictory;
   const crossCheckRaw = source.crossCheck ?? source.cross_check;
   // P1-2(2026-09-14): 持仓状态 —— 与 action 正交的第二轴，portfolio-mgr.rhai 输出 camelCase
@@ -417,6 +440,8 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
       : undefined,
     // ── 数据缺口（portfolio-mgr 消费的上游节点缺失清单）──
     dataGaps: dataGaps && dataGaps.length > 0 ? dataGaps : undefined,
+    // ── 口径调整（本档主动降权的腿；与缺口分列，**不**参与可信度警示的触发）──
+    weightAdjustments: weightAdjustments && weightAdjustments.length > 0 ? weightAdjustments : undefined,
     // ── 跨系统 / 自洽性标记 ──
     isContradictory: isContradictoryRaw === true,
     crossCheck: crossCheckRaw != null && typeof crossCheckRaw === "object"

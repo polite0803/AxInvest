@@ -127,10 +127,10 @@ export function NotificationCenter({ trigger }: NotificationCenterProps) {
       return t("notification.justNow");
     }
     if (diff < 3600000) {
-      return `${Math.floor(diff / 60000)} ${t("notification.minutesAgo")}`;
+      return t("notification.minutesAgo", { count: Math.floor(diff / 60000) });
     }
     if (diff < 86400000) {
-      return `${Math.floor(diff / 3600000)} ${t("notification.hoursAgo")}`;
+      return t("notification.hoursAgo", { count: Math.floor(diff / 3600000) });
     }
     return new Date(timestamp).toLocaleDateString();
   };

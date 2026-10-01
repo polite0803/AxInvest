@@ -1,0 +1,282 @@
+{
+  "_comment": "scripts/check-i18n-placeholder-usage.mjs 的 R2 豁免清单。按「文件 + 键」匹配，不写行号（行号会腐烂）。条目若已无命中，门禁判失效并失败 —— 只增不减的清单等于把判据面写窄。",
+  "exceptions": [
+    {
+      "file": "src/components/decomposition/ToolGenerationPreview.tsx",
+      "key": "decomposition.promptTemplateDesc",
+      "reason": "该文案本身在讲解模板语法（「模板中包含 {{input}} 占位符」），界面上要显示的就是这对花括号原文；调用点不传插值参数才是正确行为。"
+    }
+  ],
+  "residue-exceptions": [
+    {
+      "locale": "ar",
+      "key": "profile.options.PascalCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ar",
+      "key": "profile.options.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ar",
+      "key": "profile.options.kebab-case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ar",
+      "key": "profile.options.snake_case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ar",
+      "key": "style.labels.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "de",
+      "key": "profile.options.PascalCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "de",
+      "key": "profile.options.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "de",
+      "key": "profile.options.kebab-case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "de",
+      "key": "profile.options.snake_case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "de",
+      "key": "style.labels.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "en-US",
+      "key": "backup.copies",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「份」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "chat.agentStats.tokens",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「个令牌」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "chat.selected",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「已选」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "chat.tokens",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「个令牌」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "plan.authorization.source.unknown",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「未知来源」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "profile.options.PascalCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "en-US",
+      "key": "profile.options.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "en-US",
+      "key": "profile.options.kebab-case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "en-US",
+      "key": "profile.options.snake_case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "en-US",
+      "key": "settings.knowledge.chars",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「字符」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "settings.searchProviders.results",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「条结果」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "settingsSearch.capabilityDomains.alias",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「别名」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "style.labels.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "en-US",
+      "key": "workflow.debateNode.rounds",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「轮」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "workflow.importExport.or",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「或」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "workflow.props.body",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「请求体」），非未译残留。"
+    },
+    {
+      "locale": "en-US",
+      "key": "workflow.swarmNode.rounds",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「轮」），非未译残留。"
+    },
+    {
+      "locale": "es",
+      "key": "chat.agentStats.tokens",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「个令牌」），非未译残留。"
+    },
+    {
+      "locale": "es",
+      "key": "chat.tokens",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「个令牌」），非未译残留。"
+    },
+    {
+      "locale": "es",
+      "key": "profile.options.PascalCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "es",
+      "key": "profile.options.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "es",
+      "key": "profile.options.kebab-case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "es",
+      "key": "profile.options.snake_case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "es",
+      "key": "settingsSearch.capabilityDomains.alias",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「别名」），非未译残留。"
+    },
+    {
+      "locale": "es",
+      "key": "style.labels.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "fr",
+      "key": "backup.copies",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「份」），非未译残留。"
+    },
+    {
+      "locale": "fr",
+      "key": "profile.options.PascalCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "fr",
+      "key": "profile.options.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "fr",
+      "key": "profile.options.kebab-case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "fr",
+      "key": "profile.options.snake_case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "fr",
+      "key": "quant.wfDes.yuan",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「元」），非未译残留。"
+    },
+    {
+      "locale": "fr",
+      "key": "settingsSearch.capabilityDomains.alias",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「别名」），非未译残留。"
+    },
+    {
+      "locale": "fr",
+      "key": "stockAnalysis.portfolio.yuan",
+      "reason": "该语言里此标签的正确写法与键名同形（zh-CN=「元」），非未译残留。"
+    },
+    {
+      "locale": "fr",
+      "key": "style.labels.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "hi",
+      "key": "profile.options.PascalCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "hi",
+      "key": "profile.options.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "hi",
+      "key": "profile.options.kebab-case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "hi",
+      "key": "profile.options.snake_case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "hi",
+      "key": "style.labels.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ru",
+      "key": "profile.options.PascalCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ru",
+      "key": "profile.options.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ru",
+      "key": "profile.options.kebab-case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ru",
+      "key": "profile.options.snake_case",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    },
+    {
+      "locale": "ru",
+      "key": "style.labels.camelCase",
+      "reason": "命名法标签在非 CJK 语言按仓内既有范式保留字面标识符（同 locale 的 profile.options.* 一致）。"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ pub mod batch;
 pub mod board;
 pub mod calendar;
 pub mod candlestick_pattern;
+mod code_form;
 pub mod daily_snapshot;
 pub mod disk_cache;
 pub mod divergence;
@@ -206,10 +207,12 @@ impl VendorRouting {
         Self {
             quote: vec![
                 "tencent".into(),
-                "mootdx".into(),
+                // 2026-10-01 摘除 mootdx：本机对 TDX 行情端口 7709 的出站被整体拦掉
+                //（22 台候选服务器全 connect timeout，两轮运行日志实证），代码侧无解；
+                // 留着只会每 2 分钟（sustained 探测间隔）白打一次。注册保留，网络放开即可加回。
                 "sina".into(),
                 "xueqiu".into(),
-                "eastmoney".into(),
+                "eastmoney_push2".into(),
                 // P1 修复(2026-07-25): eastmoney push2his 反爬触发时自动 fallback 到
                 // 浏览器内核(绕过 JA3 TLS 指纹封锁)。仅桌面端 fetcher 已注入时生效。
                 "browser_eastmoney".into(),
@@ -218,17 +221,28 @@ impl VendorRouting {
             // 2026-08-01：push2his.eastmoney.com 在本机被连接拒绝（IPv4 快速 RST / IPv6 间歇），
             // eastmoney 首选 kline 每次失败 → 累计降级 → 连累 dataapi/bkzj 等正常域名全被跳过
             // （趋势智选全空链路）。tencent kline 一直健康，改首选；eastmoney 仅作 fallback。
+            // 2026-10-01：改用 `eastmoney_push2`（push2 族专属桶，划分见 `register_vendor` 处
+            // 的说明）—— 上面那句「连累 dataapi/bkzj 等正常域名全被跳过」正是被连坐的后果，
+            // 拆桶后不复存在。
             klines: vec![
                 "tencent".into(),
-                "eastmoney".into(),
+                // 2026-10-01：sina 补**分钟级**通道（`CN_MarketData.getKLineData`，实测
+                // 原生支持 5/15/30/60 且在三源全灭时仍可达）。此前 sina 对所有非日线周期
+                // 直接返空、也不在本表内，等于 m60 上白少一个源（002041/688806 日志实证）。
+                // 注：replay 覆盖表未同步 —— 那是回放通道，改动须单独实测，不在此次范围。
+                "sina".into(),
+                "eastmoney_push2".into(),
                 "xueqiu".into(),
-                "mootdx".into(),
+                // mootdx 一并摘除（理由见 quote 路由的注释）
                 "browser_eastmoney".into(),
             ],
             financials: vec![
                 "eastmoney".into(),
                 "browser_eastmoney".into(),
-                "baidu_stock".into(), // P2-1 修复(2026-07-22): 新增 baidu_stock 作为备选，避免 eastmoney IncompleteMessage + browser_eastmoney/xueqiu/neodata token 缺失时无可用源
+                // 2026-10-01 摘除 baidu_stock（原 P2-1 加的备选）：其新接口在
+                // finance.pae.baidu.com，要求前端签名的 Acs-Token，非浏览器请求层拿不到 ⇒
+                // 每次命中都是必死请求，还会因被记为「真故障」而阻止 `round_all_empty`，
+                // 让整链白重试 1s+3s（日志实证）。与 hot_stocks 的摘除同一条处理。
                 "xueqiu".into(),
                 "akshare".into(),
                 "neodata".into(), // 末位兜底
@@ -251,42 +265,32 @@ impl VendorRouting {
             // v_pv_none_match)，每次 money_flow 调用都白白浪费一次请求再 fallback。
             // eastmoney push2his fflow/daykline 实测恢复可用，提到首位。
             money_flow: vec![
-                "eastmoney".into(),
+                // push2his fflow/daykline ⇒ push2 族（划分见 `register_vendor` 处说明）
+                "eastmoney_push2".into(),
                 "tencent".into(),
                 "sina".into(),
                 "browser_eastmoney".into(),
-                "baidu_stock".into(),
             ],
-            dragon_tiger: vec![
-                "eastmoney".into(),
-                "browser_eastmoney".into(),
-                "baidu_stock".into(),
-            ],
-            lockup: vec!["eastmoney".into(), "baidu_stock".into()],
-            search: vec![
-                "eastmoney".into(),
-                "iwencai".into(),
-                "baidu_stock".into(),
-                "neodata".into(),
-            ],
+            dragon_tiger: vec!["eastmoney".into(), "browser_eastmoney".into()],
+            lockup: vec!["eastmoney".into()],
+            search: vec!["eastmoney".into(), "iwencai".into(), "neodata".into()],
             search_news: vec![
                 "eastmoney".into(),
                 "browser_eastmoney".into(),
                 "akshare".into(),
                 "neodata".into(),
             ],
-            margin: vec!["eastmoney".into(), "browser_eastmoney".into(), "baidu_stock".into()],
-            north_bound: vec!["eastmoney".into(), "browser_eastmoney".into(), "baidu_stock".into()],
+            margin: vec!["eastmoney".into(), "browser_eastmoney".into()],
+            north_bound: vec!["eastmoney".into(), "browser_eastmoney".into()],
             sector: vec![
                 "eastmoney".into(),
                 "ths".into(),
-                "baidu_stock".into(),
                 "iwencai".into(),
                 "neodata".into(), // 末位兜底（自然语言查询行业归属）
             ],
-            shareholder_trades: vec!["eastmoney".into(), "baidu_stock".into()],
-            dividend: vec!["eastmoney".into(), "baidu_stock".into()],
-            research_reports: vec!["eastmoney".into(), "baidu_stock".into()],
+            shareholder_trades: vec!["eastmoney".into()],
+            dividend: vec!["eastmoney".into()],
+            research_reports: vec!["eastmoney".into()],
             // P1-2: eastmoney 首选（reportapi 接口稳定），ths/akshare fallback，iwencai 需 api_key
             consensus_eps: vec![
                 "eastmoney".into(),
@@ -294,14 +298,9 @@ impl VendorRouting {
                 "akshare".into(),
                 "iwencai".into(),
             ],
-            concept_blocks: vec![
-                "eastmoney".into(),
-                "ths".into(),
-                "baidu_stock".into(),
-                "iwencai".into(),
-            ],
+            concept_blocks: vec!["eastmoney".into(), "ths".into(), "iwencai".into()],
             announcements: vec!["cninfo".into(), "eastmoney".into()],
-            market_dragon_tiger: vec!["ths".into(), "eastmoney".into(), "baidu_stock".into()],
+            market_dragon_tiger: vec!["ths".into(), "eastmoney".into()],
             hot_stocks: vec![
                 "ths".into(),
                 // #19(2026-09-27) 实测摘除：baidu 的旧 opendata 全线失效（新端点要前端现算的
@@ -320,25 +319,28 @@ impl VendorRouting {
             // baidu_stock（gushitong resource_id=5359 → 参数错误）、neodata（TOKEN_MISSING 无凭据）
             // 三个 vendor 必失败且"空数据不降级"→ 永远霸占健康列表，把唯一可靠的 eastmoney
             // 挤在轮询外（趋势智选全链空根因之一）。瘦身为 eastmoney + browser_eastmoney。
+            // industry_ranking 的 as-of 分支走 `board_kline_url`（push2his 板块 K 线，
+            // 31 个板块并发）——⚠ 但**不据此归 push2 桶**：那 31 次取数是 vendor 内部直接
+            // `em_get`，健康记账（只在 lib.rs 重试层）一次都不记 ⇒ 灌桶的说法与实现不符；
+            // 而它 live 走 `dataapi/bkzj`（dc 域、实测健康），归 push2 桶会让它被 push2 族的
+            // RST 连坐跳过。详见下方 `register_vendor` 处的 2026-10-01 修正说明。
             industry_ranking: vec!["eastmoney".into(), "browser_eastmoney".into()],
+            // 概念板块**列表**走 `searchapi.eastmoney.com`（非 push2）⇒ 留在 dc 桶
             concept_boards: vec!["eastmoney".into()],
-            board_members: vec!["eastmoney".into()],
+            // 板块**成分**走 `push2.eastmoney.com/api/qt/clist/get` ⇒ push2 桶
+            board_members: vec!["eastmoney_push2".into()],
             cls_flash: vec!["eastmoney".into(), "browser_eastmoney".into(), "akshare".into()],
-            north_bound_flow: vec![
-                "eastmoney".into(),
-                "browser_eastmoney".into(),
-                "ths".into(),
-                "baidu_stock".into(),
-            ],
-            block_trades: vec!["eastmoney".into(), "baidu_stock".into()],
-            // 政策新闻:优先 eastmoney(基于行业关键词搜索),baidu_stock 作为备选(个股新闻+政策过滤),
+            north_bound_flow: vec!["eastmoney".into(), "browser_eastmoney".into(), "ths".into()],
+            block_trades: vec!["eastmoney".into()],
+            // 政策新闻:优先 eastmoney(基于行业关键词搜索)。
             // akshare 未实现 get_policy_news(默认返回空),实际不生效。
-            // P1-2 修复(2026-07-22): 新增 baidu_stock 作为有效备选，避免 eastmoney 单点故障。
-            policy_news: vec!["eastmoney".into(), "baidu_stock".into(), "akshare".into()],
+            // 2026-10-01 摘除 baidu_stock（原 P1-2 加的备选）—— 其接口要 Acs-Token，
+            // 保留只会让每次调用多一次必死请求并让整链白重试（与 financials 同一处理）。
+            policy_news: vec!["eastmoney".into(), "akshare".into()],
             institutional_visits: vec!["eastmoney".into(), "browser_eastmoney".into()],
-            index_quotes: vec!["eastmoney".into(), "tencent".into(), "neodata".into()],
+            index_quotes: vec!["eastmoney_push2".into(), "tencent".into(), "neodata".into()],
             peers: vec!["eastmoney".into(), "iwencai".into(), "neodata".into()], // neodata 末位兜底
-            option_pcr: vec!["eastmoney".into()],
+            option_pcr: vec!["eastmoney_push2".into()],
             // #4: 股权质押数据 — eastmoney datacenter 接口稳定
             pledge: vec!["eastmoney".into()],
             // P2-4 修复: 在 replay 模式下, 把 3 个核心方法切到对历史日期支持最好的 vendor。
@@ -351,14 +353,14 @@ impl VendorRouting {
             // 其他方法保持默认 routing(只在 live 模式有意义的 vendor 排名)。
             replay: {
                 let mut m: HashMap<&'static str, Vec<String>> = HashMap::new();
-                m.insert("quote", vec!["tencent".into(), "mootdx".into(), "eastmoney".into()]);
+                // mootdx 已从 live 路由摘除（本机 7709 出口被封），replay 一并去掉
+                m.insert("quote", vec!["tencent".into(), "eastmoney_push2".into()]);
                 m.insert(
                     "klines",
                     vec![
                         "tencent".into(),
-                        "eastmoney".into(),
+                        "eastmoney_push2".into(),
                         "browser_eastmoney".into(),
-                        "mootdx".into(),
                         "xueqiu".into(),
                     ],
                 );
@@ -680,8 +682,46 @@ impl AStockClient {
     /// 注册默认 vendor 集合（try_new 与降级路径共用）
     fn register_default_vendors(&mut self, http: reqwest::Client) {
         self.register_vendor("tencent", Box::new(TencentVendor { http: http.clone() }));
+        // 2026-10-01：`eastmoney` 按**域名族**拆成两个注册名（同一个实现类型、两个实例
+        // ⇒ 两个独立的健康桶）。起因：push2his 的连接级 RST 会填满 `eastmoney` 的 30s
+        // 失败窗口，把走 datacenter-web（完全健康）的 dividend/pledge/sector 等一起降级 ——
+        // 而分红链路摘掉 baidu 后只剩这一个源，被连坐即等于失效（日志实证：
+        // `[health] dividend 603501 所有 vendor 已降级，首次尝试回退完整列表`）。
+        // 划分依据（`vendors/eastmoney.rs` 各方法的 URL）：
+        //   · `eastmoney_push2` —— 走 push2his / push2 族的方法：quote / klines /
+        //     money_flow / index_quotes / option_pcr / board_members。
+        //   · `eastmoney`（默认）—— 其余全部：datacenter-web / emweb / reportapi /
+        //     np-anotice-stock / np-listapi / searchadapter / data.eastmoney.com/dataapi。
+        //     ⚠ 已知例外：`north_bound_flow` 的 **as-of** 分支走 push2his kamt.kline，
+        //     归此桶是因为 live 才是日常路径；回放时它的失败会污染 dc 桶（单次影响有限）。
+        // ⚠ 两个名字指向同一实现，桶的纯净靠**路由约定**维持而非类型约束：
+        //   新增工具时若其方法**的每次取数**都走 push2*，必须写 "eastmoney_push2"。
+        //
+        // ⚠ 2026-10-01 修正一处**与实现不符**的归桶理由（`industry_ranking`）：
+        //   拆分当日它以「as-of 分支并发 31 次 push2his 板块 K 线、灌桶最快」为由被归进
+        //   `eastmoney_push2`。**该理由不成立** —— 健康记账只发生在本文件的**重试层**
+        //   （`record_success`/`record_failure` 全仓仅 3 个调用点，均在 `try_vendors_retry`
+        //   与两个手写重试循环里），而 `synthesize_industry_ranking` 的 31 次板块取数是
+        //   vendor 内部直接 `em_get` ⇒ **一次都不记账**（`asof_probe` 亦然，它只回传 probe 结论）。
+        //   后果恰好相反：它 **live** 走 `data.eastmoney.com/dataapi/bkzj`（dc 域，实测
+        //   200/0.49s、31 个二级行业，形态 `code=m:90+s:2` 正确），本是健康的，却因这条路由
+        //   被绑进 push2 桶；而 push2 族在本机被连接级 RST 秒断（`push2.eastmoney.com` 实测
+        //   http=000 / 0.13s）⇒ 每轮把桶打到 Degraded（sustained，30 分钟硬恢复）⇒
+        //   **健康的取数通道被同桶故障连坐跳过**，只剩 browser_eastmoney 兜底（未注入浏览器
+        //   内核时返回空数组）。实证：600887 `f474ec9b` / 600406 `a7e590a4` 的 `t-sector-data`
+        //   均为 `[]`，而同轮 dc 域方法（financials / peers / dividend）全部正常。
+        //   ⇒ 已改为归 dc 桶；暴露面有界（每次运行最多 2 次尝试 ⇒ 最多 2 次记账）。
+        //   判据形态提醒：**归桶依据必须是「这个方法实际经由哪条传输记账」，不是「它某条
+        //   分支会打哪个域名」** —— 记账发生在哪一层，才是桶之间会不会互相连坐的分界线。
         self.register_vendor(
             "eastmoney",
+            Box::new(EastMoneyVendor {
+                http: http.clone(),
+                proxy_http: self.eastmoney_proxy.clone(),
+            }),
+        );
+        self.register_vendor(
+            "eastmoney_push2",
             Box::new(EastMoneyVendor {
                 http: http.clone(),
                 proxy_http: self.eastmoney_proxy.clone(),
@@ -690,6 +730,10 @@ impl AStockClient {
         self.register_vendor("sina", Box::new(SinaVendor { http: http.clone() }));
         self.register_vendor("ths", Box::new(ThsVendor { http: http.clone() }));
         self.register_vendor("cninfo", Box::new(CninfoVendor { http: http.clone() }));
+        // 2026-10-01：`baidu_stock` 在 `default_routing()` 里的**所有**引用已摘除
+        // （其新接口要求前端签名的 Acs-Token，非浏览器请求层必然失败，且失败会被记为
+        // 「真故障」而阻止 `round_all_empty` ⇒ 整链白重试）。保留注册只为便于日后接好
+        // 签名后一键恢复：把各行路由里的 "baidu_stock".into() 加回去即可。
         self.register_vendor("baidu_stock", Box::new(BaiduStockVendor { http: http.clone() }));
         self.register_vendor(
             "iwencai",
@@ -1455,7 +1499,11 @@ impl AStockClient {
             // （实锤：北向个股持仓全源永久为空，单只 8.5s 里有 4s 是无效退避）。
             let mut round_all_empty = true;
 
-            // 健康过滤：排除已降级的 vendor
+            // 健康过滤：排除已降级的 vendor。
+            // ⚠ 这条剔除此前**完全静默**（只有「全部已降级」才打 [health]）：链尾兜底
+            // vendor（如 browser_eastmoney）一旦降级就从路由里消失且不留痕迹，排查
+            // 「某个源为什么从没被调用」时无据可查（2026-10-01 实测踩到）。下面用
+            // debug 级补痕迹：这是常态分支，单轮荐股扫描可命中上百次，info 会刷掉告警。
             let healthy_names = self
                 .health_tracker
                 .try_vendors(&vendor_names_list)
@@ -1463,6 +1511,19 @@ impl AStockClient {
                 .into_iter()
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>();
+            if healthy_names.len() < vendor_names_list.len() {
+                let mut skipped: Vec<&str> = Vec::new();
+                for name in &vendor_names_list {
+                    if !healthy_names.contains(name) {
+                        skipped.push(name.as_str());
+                    }
+                }
+                tracing::debug!(
+                    "[health] {} {} 跳过已降级 vendor: {skipped:?}",
+                    route_key,
+                    stock_code,
+                );
+            }
 
             // V48 修复: 所有 vendor 均降级时不回退完整列表
             // 原逻辑"回退完整列表→重试已降级 vendor→再失败→再降级"形成无效重试循环。
@@ -4982,6 +5043,55 @@ impl AStockClient {
     ///
     /// 设计：聚合函数，单源失败时返回部分结果 + 在 JSON 中注入 `errors` 字段
     /// 记录失败原因，避免 `unwrap_or_default()` 完全静默吞错导致下游无法感知数据缺失。
+    /// 股东户数（筹码集中度）—— 新增(2026-10-01)。
+    ///
+    /// 消费方：`get_lockup_bundle` 的第四方（解禁观察员据此判「户数下降=筹码集中」）。
+    /// 为什么加它：`lockup-watcher.md` 的方法论/工作流程/自检清单**三处**都要求
+    /// 「股东人数（户均持股）」，而此前既无工具也无人接线 ⇒ 该分析师每轮只能写
+    /// 「`data_gaps`：股东人数数据缺失」⇒ 命中失败标记词表 ⇒ 判「⚠️ 低置信」
+    /// （300604 运行 `cd044375` 实证：自评 75.0 却被这一处标记压成低置信）。
+    ///
+    /// ⚠ **无 as-of 通道**（能力申报 `NoHistoricalSemantic`）：回放时按**结构性缺口**留痕
+    /// 并返回 `None` —— 这与「北向净流入停披」同类（报表本身是「最新一期」快照），
+    /// 不是「工具坏了」。历史多期在 `RPT_F10_EH_HOLDERNUM`，接它属下一轮。
+    pub async fn get_holder_count(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<HolderCount>, DataError> {
+        if crate::as_of::is_asof_active() {
+            crate::as_of::record_degradation_kind(
+                "astock-data",
+                "get_holder_count",
+                "股东户数取「最新一期」快照（RPT_HOLDERNUMLATEST），无 as-of 通道；\
+                 历史多期在 RPT_F10_EH_HOLDERNUM，接它属下一轮",
+                crate::as_of::DegradationKind::StructuralGap,
+            );
+            return Ok(None);
+        }
+        // 与质押/两融同域（datacenter-web）⇒ 复用 `shareholder_trades` 路由（dc 桶）
+        let vendor_names: Vec<String> =
+            self.routing.shareholder_trades.iter().map(|n| n.to_string()).collect();
+        // ⚠ 必须把代码 clone 成**owned** 再进 async 块：`try_vendors_retry` 的闭包是
+        //   `for<'a> Fn(&'a str, &'a dyn StockVendor) -> BoxFuture<'a, _>` —— 若 async 块
+        //   捕获外层 `&str`，那个借用与 `'a` 无关 ⇒ 编译器要求 `'x: 'a` 对任意 'a 成立，
+        //   直接报 E0756「lifetime may not live long enough」（本函数首版即踩）。
+        let code = stock_code.to_string();
+        match self
+            .try_vendors_retry(stock_code, "holder_count", &vendor_names, 2, |_name, vendor| {
+                let code = code.clone();
+                Box::pin(async move { vendor.get_holder_count(&code).await })
+            })
+            .await
+        {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                // 拿不到不等于整条链失败（bundle 里只是一段缺失），故回落 None + 留痕
+                tracing::warn!("[get_holder_count] 所有 vendor 均不可用, 返回空: {e}");
+                Ok(None)
+            },
+        }
+    }
+
     pub async fn get_lockup_bundle(
         &self,
         stock_code: &str,
@@ -5009,6 +5119,15 @@ impl AStockClient {
                 vec![]
             },
         };
+        // 第四方（2026-10-01）：股东户数 —— 筹码集中度，见 `get_holder_count` 的说明。
+        //   它返回 `Option`（无披露 ⇒ None 是业务事实，不是故障）⇒ 只有 `Err` 才进 errors。
+        let holders = match self.get_holder_count(stock_code).await {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(format!("holder_count: {e}"));
+                None
+            },
+        };
 
         if !errors.is_empty() {
             tracing::warn!(
@@ -5021,6 +5140,7 @@ impl AStockClient {
             "lockup_schedule": lockup,
             "shareholder_trades": trades,
             "block_trades": block,
+            "holder_count": holders,
             "errors": errors,
         }))
     }
@@ -7402,5 +7522,88 @@ mod asof_boundary_tests {
             "没有日期通道属结构性，不该占红档: {:?}",
             hits[0]
         );
+    }
+
+    /// 2026-10-01：**桶隔离不变量** —— `industry_ranking` 不得与 push2 族方法共桶。
+    ///
+    /// 被判的缺陷（600887 `f474ec9b` / 600406 `a7e590a4` 的 `t-sector-data` 均为 `[]`）：
+    /// 该方法的 **live** 传输是 `data.eastmoney.com/dataapi/bkzj`（dc 域，实测 200 / 31 个二级行业），
+    /// 却因「as-of 分支会并发 31 次 push2his」被归进 `eastmoney_push2` 桶 —— 而那条理由与实现
+    /// 不符（健康记账只在 `lib.rs` 重试层，`synthesize_industry_ranking` 内部直接 `em_get`
+    /// 一次都不记）⇒ 它被 push2 族的 RST 连坐跳过，健康的通道白搭。
+    ///
+    /// 这条门锁的是**归桶依据**：一条路由写错不会报错、不会编译失败，只会让某方法在别的域的
+    /// 故障期静默缺席 —— 正是上面那个形态。改路由时若有人想把它挪回 push2 桶，这里必须变红，
+    /// 并被迫先回答「它的失败到底在哪一层记账」。
+    #[test]
+    fn industry_ranking_is_not_bucketed_with_push2_family() {
+        // ⚠ 用**默认路由**（`AStockClient::new()`）而不是 `stub_client()`：后者会把
+        //   `board_members` 等路由改写成 `["stub"]` ⇒ 反向对照会假红（本测试首版即踩）。
+        let routing = AStockClient::new().routing;
+        assert!(
+            !routing.industry_ranking.iter().any(|v| v == "eastmoney_push2"),
+            "industry_ranking 的 live 走 dc 域（dataapi/bkzj），不得归 push2 桶 —— \
+             否则 push2 族（本机 RST 秒断）降级时会把它一起跳过。当前: {:?}",
+            routing.industry_ranking
+        );
+        // 正向锁：首个 vendor 必须是 dc 桶（默认名 `eastmoney`），不是浏览器兜底
+        assert_eq!(
+            routing.industry_ranking.first().map(String::as_str),
+            Some("eastmoney"),
+            "dc 域方法应以 dc 桶为首选: {:?}",
+            routing.industry_ranking
+        );
+        // 反面对照（自证判据不是恒真）：push2 族的方法**必须**留在 push2 桶
+        for (m, routes) in
+            [("board_members", &routing.board_members), ("option_pcr", &routing.option_pcr)]
+        {
+            assert!(
+                routes.iter().any(|v| v == "eastmoney_push2"),
+                "`{m}` 每次取数都走 push2 域，必须归 push2 桶（否则它的失败会污染 dc 桶）: {routes:?}"
+            );
+        }
+    }
+
+    /// 2026-10-01：**live 端到端冒烟**（`#[ignore]`，需外网，手动跑）。
+    ///
+    /// 上一条门只锁「路由归属」，证明不了「dc 域这条通道真的能取到并解析出行业」。
+    /// 该端点在 2026-10-01 实测 `http=200 / 0.49s / 31 个二级行业`；本冒烟把这一事实钉在
+    /// **本仓自己的代码路径**上（含 UA / cookie store / JSON 解析）。
+    /// 跑法：`cargo test -p axagent-astock-data --lib industry_ranking_live -- --ignored --nocapture`
+    /// ⚠ 故意不进 CI：依赖外网与数据源可用性，进常态门禁会 flaky。
+    #[tokio::test]
+    #[ignore = "需外网：手动运行以核对 live 行业排名取数端到端"]
+    async fn industry_ranking_live_smoke() {
+        let client = AStockClient::new();
+        let r = client.get_industry_ranking().await.expect("live 取数应返回 Ok");
+        let head: Vec<(&str, f64)> =
+            r.iter().take(3).map(|x| (x.industry_name.as_str(), x.change_pct)).collect();
+        println!("live industry_ranking: {} 个二级行业；前 3 = {head:?}", r.len());
+        assert!(
+            r.len() >= 10,
+            "二级行业分类应有 30 个左右（实测 31）；拿到 {} 个 ⇒ 通道或解析有问题",
+            r.len()
+        );
+        assert!(r.iter().all(|x| !x.industry_name.is_empty()), "行业名不得为空");
+    }
+
+    /// 2026-10-01：**live 端到端**（`#[ignore]`）—— `get_lockup_bundle` 的第四方
+    /// 「股东户数」真的取得到。上面只有 URL/解析的零网络判据，证不了「组装后的 bundle 里有这段」。
+    /// 跑法：`cargo test -p axagent-astock-data --lib holder_count_live -- --ignored --nocapture`
+    /// 实测基线（300604，2026-10-01）：`HOLDER_NUM=120196`、`HOLDER_NUM_RATIO=72.36`（户数上升=分散）。
+    #[tokio::test]
+    #[ignore = "需外网：手动运行以核对 bundle 第四方（股东户数）段"]
+    async fn lockup_bundle_holder_count_live_smoke() {
+        let client = AStockClient::new();
+        let b = client.get_lockup_bundle("300604").await.expect("bundle 应返回 Ok");
+        let hc = &b["holder_count"];
+        println!("holder_count = {hc}");
+        assert!(!hc.is_null(), "holder_count 段不得为空（lockup-watcher 三处都要求这一维度）");
+        assert!(hc["holderNum"].as_f64().unwrap_or(0.0) > 0.0, "股东户数应为正: {hc}");
+        assert!(!hc["endDate"].as_str().unwrap_or("").is_empty(), "缺截止日: {hc}");
+        // 四方齐全（自证 bundle 组装没被改坏）
+        for k in ["lockup_schedule", "shareholder_trades", "block_trades", "holder_count"] {
+            assert!(b.get(k).is_some(), "bundle 缺段 `{k}`");
+        }
     }
 }

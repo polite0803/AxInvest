@@ -862,6 +862,28 @@ impl PluginManager {
         let Ok(registry) = self.plugin_registry() else {
             return Vec::new();
         };
+        self.passports_for_plugin_in(&registry, plugin_id)
+    }
+
+    /// 与 [`passports_for_plugin`](Self::passports_for_plugin) 同源，但**复用调用方已加载的
+    /// registry**。
+    ///
+    /// 为什么必须有这个入口（2026-10-01 启动期调度饥饿实锤）：`passports_for_plugin` 内部
+    /// 会调 `plugin_registry()`，而那是**全量重扫**（读所有插件目录 + 解析所有 manifest）；
+    /// 启动收集（`init/state.rs::register_all_capabilities` 第 4/4b 步）是**逐插件**调用它
+    /// ⇒ 每个插件都多付一次 N 倍全量扫描，总体 **O(N²)**，20+ 秒同步文件 IO 把 tokio worker
+    /// 占满（探针实测 40 秒调度空档，并连带 `index_queue` 报 `Connection pool timed out` ——
+    /// 池里当时有 12 个空闲连接）。本入口把 registry 交给调用方加载一次，降为 **O(N)**。
+    ///
+    /// 单个插件的 manifest 仍会重解析一次：`PluginMetadata` 不含 skills/agents，无法从
+    /// registry 复用（要做只能扩展 `PluginDefinition` 保存整份 manifest，影响面更大）。
+    ///
+    /// 原方法保持"每次与磁盘即时一致"的语义不动 —— 启用/禁用/卸载路径依赖它。
+    pub fn passports_for_plugin_in(
+        &self,
+        registry: &PluginRegistry,
+        plugin_id: &str,
+    ) -> Vec<CapabilityPassportDto> {
         let Some(record) = registry.get(plugin_id) else {
             return Vec::new();
         };

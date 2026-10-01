@@ -7,14 +7,37 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+/// 通达信行情服务器候选（2026-10-01 按 pytdx 现行 `hq_hosts` 重整）。
+///
+/// 原列表只有 7 个且串行 failover ⇒ 最坏耗时 = 7 × 超时。配合 `race_with` 的
+/// 并行 racing 后，「列表长度」不再影响最坏耗时，因此这里放开到覆盖各运营商
+/// （电信/联通/移动/云行情）—— TDX 服务器按机房与运营商分布，跨网时换一个往往就通
+/// （原 7 个里有 6 个今日仍在 pytdx 列表中，说明地址本身没错，是可达性问题）。
 const TDX_SERVERS: &[(&str, u16)] = &[
-    ("119.147.212.81", 7709),
-    ("112.74.214.43", 7709),
-    ("221.231.141.60", 7709),
-    ("101.227.73.20", 7709),
-    ("101.227.77.254", 7709),
-    ("14.215.128.18", 7709),
-    ("59.173.18.140", 7709),
+    ("119.147.212.81", 7709),  // 招商证券深圳
+    ("221.231.141.60", 7709),  // 华泰证券(南京电信)
+    ("101.227.73.20", 7709),   // 华泰证券(上海电信)
+    ("101.227.77.254", 7709),  // 华泰证券(上海电信二)
+    ("14.215.128.18", 7709),   // 华泰证券(深圳电信)
+    ("59.173.18.140", 7709),   // 华泰证券(武汉电信)
+    ("218.108.98.244", 7709),  // 杭州华数主站J1
+    ("218.108.47.69", 7709),   // 杭州华数主站J2
+    ("60.191.117.167", 7709),  // 杭州电信主站J1
+    ("115.238.56.198", 7709),  // 杭州电信主站J2
+    ("218.75.126.9", 7709),    // 杭州电信主站J3
+    ("115.238.90.165", 7709),  // 杭州电信主站J4
+    ("124.160.88.183", 7709),  // 杭州联通主站J1
+    ("60.12.136.250", 7709),   // 杭州联通主站J2
+    ("218.6.170.47", 7709),    // 上证云成都电信一
+    ("123.125.108.14", 7709),  // 上证云北京联通一
+    ("180.153.18.170", 7709),  // 上海电信主站Z1
+    ("180.153.18.171", 7709),  // 上海电信主站Z2
+    ("180.153.39.51", 7709),   // 上海电信主站Z3
+    ("202.108.253.130", 7709), // 北京联通主站Z1
+    ("202.108.253.131", 7709), // 北京联通主站Z2
+    ("114.80.63.12", 7709),    // 云行情上海电信Z1
+    ("114.80.63.35", 7709),    // 云行情上海电信Z2
+    ("14.17.75.71", 7709),     // 深圳电信主站Z1
 ];
 
 const RSP_HEADER_LEN: usize = 0x10;
@@ -22,10 +45,10 @@ const RSP_HEADER_LEN: usize = 0x10;
 pub struct MootdxVendor {
     pub host: String,
     pub port: u16,
-    /// H1.6 修复:轮询负载均衡索引,记录上次成功的 TDX_SERVERS 下标。
-    /// 下次查询从该索引开始遍历,失败时自动 failover 到下一个 server,
-    /// 成功后更新此索引(避免每次都从 TDX_SERVERS[0] 开始浪费时间)。
-    /// AtomicUsize 因为 vendor 方法签名是 `&self`,需要内部可变性。
+    /// 上次握手成功的 `TDX_SERVERS` 下标（**胜者记忆**）。
+    /// `race_with` 先直连它（多数调用一次命中、不产生并发连接），只有它失败才
+    /// racing 全表，胜出者再写回这里。AtomicUsize 是因为 vendor 方法签名是 `&self`，
+    /// 需要内部可变性。
     current_server_idx: AtomicUsize,
 }
 
@@ -36,8 +59,13 @@ impl MootdxVendor {
     }
 
     async fn connect(&self) -> Result<TdxConnection, DataError> {
+        // 单服务器超时 2s。`race_with` 用并行 racing ⇒ 最坏耗时 ≈ **单次**超时，
+        // 与服务器列表长度无关；2s 对 TCP 握手（RTT 量级）足够宽裕，再长只会让
+        // 「全表不可达」时白等更久。注意这类**慢失败永远触不了降级**（健康窗口是
+        // 「30s 内失败 8 次」，而它 30s 只失败 1 次），所以超时必须短 —— 这是
+        // racing 之外的第二道保险（见 2026-10-01 日志：每次 klines 白等 ~30s）。
         let stream = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(2),
             TcpStream::connect((&*self.host, self.port)),
         )
         .await
@@ -56,6 +84,73 @@ impl MootdxVendor {
         Ok(conn)
     }
 
+    /// 构造指向指定服务器的临时 vendor（`connect` 读的是 `self.host` / `self.port`）
+    fn at_server(idx: usize, host: &str, port: u16) -> Self {
+        Self { host: host.to_string(), port, current_server_idx: AtomicUsize::new(idx) }
+    }
+
+    /// 并行 racing + **取数验证**：每个候选连上后立刻执行 `probe`，第一个真正拿到
+    /// 数据的才胜出（只握手成功不算）。
+    ///
+    /// 为什么必须把取数纳入 racing（2026-10-01 运行日志实证）：
+    /// ① 串行 failover 的最坏耗时 = 服务器数 × 超时（实测每次 klines 白等 ~30s），
+    ///    且这种「慢失败」永远触不了降级（窗口要 30s 内 8 次，它 30s 只失败 1 次）；
+    /// ② 更要紧的是 **TDX 服务器能力并不一致** ——「能握手」≠「能给你要的数据」。
+    ///    racing 修好连接后，第一个连上的服务器直接返回 `no quote data from TDX server`；
+    ///    若只看连接成功就记成胜者，后续会反复复用这台给不出数据的服务器。
+    /// 故胜者判据是 `probe` 成功，而非 TCP 握手成功。`probe` 会被每个候选各调用一次，
+    /// 因此要求 `Clone`。
+    async fn race_with<T, F>(&self, probe: F) -> Result<T, DataError>
+    where
+        T: Send + 'static,
+        F: Fn(TdxConnection) -> futures::future::BoxFuture<'static, Result<T, DataError>>
+            + Send
+            + Sync
+            + Clone
+            + 'static,
+    {
+        type Attempt<T> = futures::future::BoxFuture<'static, Result<(usize, T), DataError>>;
+
+        let preferred = self.current_server_idx.load(Ordering::Relaxed);
+        if let Some(&(host, port)) = TDX_SERVERS.get(preferred) {
+            // 先试上次的胜者：多数调用一次命中，不产生并发连接
+            if let Ok(conn) = Self::at_server(preferred, host, port).connect().await {
+                if let Some(value) = probe(conn).await.ok() {
+                    return Ok(value);
+                }
+            }
+        }
+
+        let mut attempts: Vec<Attempt<T>> = Vec::with_capacity(TDX_SERVERS.len());
+        for (idx, &(host, port)) in TDX_SERVERS.iter().enumerate() {
+            if idx == preferred {
+                continue; // 刚试过，不必重复
+            }
+            let probe = probe.clone();
+            let fut: Attempt<T> = Box::pin(async move {
+                let conn = MootdxVendor::at_server(idx, host, port).connect().await?;
+                let value = probe(conn).await?;
+                Ok((idx, value))
+            });
+            attempts.push(fut);
+        }
+        if attempts.is_empty() {
+            return Err(DataError::VendorError {
+                vendor: "mootdx".into(),
+                message: "TDX 候选服务器为空（列表只剩上次的胜者）".into(),
+            });
+        }
+
+        match futures::future::select_ok(attempts).await {
+            Ok(((idx, value), _slower)) => {
+                // 记住胜者，下次优先直连（避免每次调用都并发一轮）
+                self.current_server_idx.store(idx, Ordering::Relaxed);
+                Ok(value)
+            },
+            Err(e) => Err(e),
+        }
+    }
+
     fn market_code(stock_code: &str) -> u8 {
         if stock_code.starts_with('6') || stock_code.starts_with('9') {
             1
@@ -63,6 +158,18 @@ impl MootdxVendor {
             2
         } else {
             0
+        }
+    }
+
+    /// 通达信查询目标 `(市场号, 裸码)`。
+    ///
+    /// 带显式市场标记的输入（`000001.SH` / `sh000001`）必须**同时**换成裸码：
+    /// 整串送进 TDX 查不到任何标的，而市场位按「首位 0」推断会把上证综指当深市股票
+    /// （上证综指在 TDX 是市场 1 + `000001`）。
+    fn tdx_target(stock_code: &str) -> (u8, &str) {
+        match crate::code_form::split_explicit_market(stock_code) {
+            Some((bare, ex)) => (ex.tdx_market(), bare),
+            None => (Self::market_code(stock_code), stock_code),
         }
     }
 
@@ -552,77 +659,55 @@ fn decompress_zlib(data: &[u8], expected_size: usize) -> Result<Vec<u8>, DataErr
 #[async_trait]
 impl StockVendor for MootdxVendor {
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
-        let market = Self::market_code(stock_code);
-        let mut last_err = None;
-        // H1.6 修复:从 current_server_idx 开始遍历所有 TDX_SERVERS,
-        // 失败时 failover 到下一个,成功时记录使用的 idx(下次优先从此 server 开始)
-        let start_idx = self.current_server_idx.load(Ordering::Relaxed);
-        let len = TDX_SERVERS.len();
-        for offset in 0..len {
-            let idx = (start_idx + offset) % len;
-            let (host, port) = TDX_SERVERS[idx];
-            let vendor = MootdxVendor {
-                host: host.to_string(),
-                port,
-                current_server_idx: AtomicUsize::new(idx),
-            };
-            match vendor.connect().await {
-                Ok(mut conn) => {
-                    let stocks = vec![(market, stock_code)];
-                    match conn.get_security_quotes(&stocks).await {
-                        Ok(quotes) if !quotes.is_empty() => {
-                            // H1.6:成功后更新 current_server_idx,下次优先用此 server
-                            self.current_server_idx.store(idx, Ordering::Relaxed);
-                            let q = &quotes[0];
-                            let change_pct = if q.last_close > 0.0 {
-                                (q.price - q.last_close) / q.last_close * 100.0
-                            } else {
-                                0.0
-                            };
-                            return Ok(StockQuote {
-                                code: q.code.clone(),
-                                name: String::new(),
-                                price: q.price,
-                                pre_close: q.last_close,
-                                open: q.open,
-                                high: q.high,
-                                low: q.low,
-                                volume: q.vol * 100.0, // 通达信行情 vol 单位为"手"，×100 转为"股"
-                                amount: q.amount,
-                                change_pct,
-                                turnover_rate: 0.0,
-                                pe: None,
-                                pb: None,
-                                total_mv: None,
-                                circulating_mv: None,
-                                limit_up: None,
-                                limit_down: None,
-                                is_st: false,
-                                timestamp: chrono::Utc::now()
-                                    .format("%Y-%m-%d %H:%M:%S")
-                                    .to_string(),
-                            });
-                        },
-                        Ok(_) => {
-                            last_err = Some(DataError::VendorError {
-                                vendor: "mootdx".into(),
-                                message: "no quote data from TDX server".into(),
-                            });
-                        },
-                        Err(e) => {
-                            last_err = Some(e);
-                        },
+        let (market, code) = Self::tdx_target(stock_code);
+        // 服务器选择与**取数验证**一并交给 `race_with`：不同 TDX 服务器的能力并不一致，
+        // 「能握手」不等于「能给行情」（2026-10-01 日志：连上后直接 no quote data）。
+        // code 需 owned 才能在 'static 的 racing future 里被多个候选复用，
+        // 故先转 String、每次 probe 各 clone 一份。
+        let code = code.to_string();
+        let quotes = self
+            .race_with(move |mut conn| {
+                let code = code.clone();
+                Box::pin(async move {
+                    let stocks = vec![(market, code.as_str())];
+                    let quotes = conn.get_security_quotes(&stocks).await?;
+                    if quotes.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "mootdx".into(),
+                            message: "no quote data from TDX server".into(),
+                        });
                     }
-                },
-                Err(e) => {
-                    last_err = Some(e);
-                },
-            }
-        }
-        Err(last_err.unwrap_or_else(|| DataError::VendorError {
-            vendor: "mootdx".into(),
-            message: "all TDX servers failed".into(),
-        }))
+                    Ok(quotes)
+                })
+            })
+            .await?;
+        let q = &quotes[0];
+        let change_pct = if q.last_close > 0.0 {
+            (q.price - q.last_close) / q.last_close * 100.0
+        } else {
+            0.0
+        };
+        Ok(StockQuote {
+            code: q.code.clone(),
+            name: String::new(),
+            price: q.price,
+            pre_close: q.last_close,
+            open: q.open,
+            high: q.high,
+            low: q.low,
+            volume: q.vol * 100.0, // 通达信行情 vol 单位为"手"，×100 转为"股"
+            amount: q.amount,
+            change_pct,
+            turnover_rate: 0.0,
+            pe: None,
+            pb: None,
+            total_mv: None,
+            circulating_mv: None,
+            limit_up: None,
+            limit_down: None,
+            is_st: false,
+            timestamp: chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        })
     }
 
     async fn get_klines(
@@ -632,66 +717,44 @@ impl StockVendor for MootdxVendor {
         limit: u32,
         _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
-        let market = Self::market_code(stock_code) as u16;
+        let (market_u8, code) = Self::tdx_target(stock_code);
+        let market = market_u8 as u16;
         let category = Self::kline_category(period);
-        let mut last_err = None;
-        // H1.6 修复:从 current_server_idx 开始遍历所有 TDX_SERVERS,
-        // 失败时 failover 到下一个,成功时记录使用的 idx
-        let start_idx = self.current_server_idx.load(Ordering::Relaxed);
-        let len = TDX_SERVERS.len();
-        for offset in 0..len {
-            let idx = (start_idx + offset) % len;
-            let (host, port) = TDX_SERVERS[idx];
-            let vendor = MootdxVendor {
-                host: host.to_string(),
-                port,
-                current_server_idx: AtomicUsize::new(idx),
-            };
-            match vendor.connect().await {
-                Ok(mut conn) => {
-                    match conn
-                        .get_security_bars(category, market, stock_code, 0, limit as u16)
-                        .await
-                    {
-                        Ok(bars) if !bars.is_empty() => {
-                            // H1.6:成功后更新 current_server_idx
-                            self.current_server_idx.store(idx, Ordering::Relaxed);
-                            return Ok(bars
-                                .into_iter()
-                                .map(|b| KLine {
-                                    date: b.date,
-                                    open: b.open,
-                                    high: b.high,
-                                    low: b.low,
-                                    close: b.close,
-                                    volume: b.vol * 100.0, // 通达信 K线 vol 单位为"手"，×100 转为"股"
-                                    amount: b.amount,
-                                    turnover_rate: None,
-                                    // P1-4: vendor 默认不复权
-                                    adj_factor: None,
-                                })
-                                .collect());
-                        },
-                        Ok(_) => {
-                            last_err = Some(DataError::VendorError {
-                                vendor: "mootdx".into(),
-                                message: "no kline data from TDX server".into(),
-                            });
-                        },
-                        Err(e) => {
-                            last_err = Some(e);
-                        },
+        // 与 get_quote 同一收口：服务器选择 + 取数验证都在 `race_with` 内完成
+        // （见其文档：不同服务器能力不一致，「能握手」不等于「能给你这个周期的 K 线」）。
+        let code = code.to_string();
+        let bars = self
+            .race_with(move |mut conn| {
+                let code = code.clone();
+                Box::pin(async move {
+                    let bars = conn
+                        .get_security_bars(category, market, code.as_str(), 0, limit as u16)
+                        .await?;
+                    if bars.is_empty() {
+                        return Err(DataError::VendorError {
+                            vendor: "mootdx".into(),
+                            message: "no kline data from TDX server".into(),
+                        });
                     }
-                },
-                Err(e) => {
-                    last_err = Some(e);
-                },
-            }
-        }
-        Err(last_err.unwrap_or_else(|| DataError::VendorError {
-            vendor: "mootdx".into(),
-            message: "all TDX servers failed for klines".into(),
-        }))
+                    Ok(bars)
+                })
+            })
+            .await?;
+        Ok(bars
+            .into_iter()
+            .map(|b| KLine {
+                date: b.date,
+                open: b.open,
+                high: b.high,
+                low: b.low,
+                close: b.close,
+                volume: b.vol * 100.0, // 通达信 K线 vol 单位为"手"，×100 转为"股"
+                amount: b.amount,
+                turnover_rate: None,
+                // P1-4: vendor 默认不复权
+                adj_factor: None,
+            })
+            .collect())
     }
 
     async fn get_financials(&self, _: &str) -> Result<Vec<FinancialReport>, DataError> {
@@ -758,5 +821,19 @@ mod capability_tests {
         ] {
             assert_eq!(v.asof_capability(m), AsOfCapability::Fallthrough);
         }
+    }
+
+    /// TDX 查询目标必须「市场位 + 裸码」一起换：带显式标记的输入若只改市场位、
+    /// 把 `000001.SH` 整串送进 TDX，会查不到标的（表现为整源空转）；只剥标记不改
+    /// 市场位则把上证综指当深市股票问。
+    #[test]
+    fn tdx_target_pairs_market_with_bare_code() {
+        assert_eq!(MootdxVendor::tdx_target("000001.SH"), (1, "000001"));
+        assert_eq!(MootdxVendor::tdx_target("sh000001"), (1, "000001"));
+        assert_eq!(MootdxVendor::tdx_target("399006.SZ"), (0, "399006"));
+        assert_eq!(MootdxVendor::tdx_target("430047.BJ"), (2, "430047"));
+        // 裸码口径不变
+        assert_eq!(MootdxVendor::tdx_target("600519"), (1, "600519"));
+        assert_eq!(MootdxVendor::tdx_target("000001"), (0, "000001"));
     }
 }

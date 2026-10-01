@@ -31,12 +31,12 @@ impl TencentVendor {
 /// 将 AxInvest 股票代码转为腾讯财经格式
 /// 600519 → sh600519, 000001 → sz000001, 300750 → sz300750
 ///
-/// 已带市场前缀的输入（如指数代码 `sh000001`）**原样透传**：上证综指与平安银行同为
-/// `000001`，靠前缀判市场，重判必错（`sh000001` → `szsh000001` 或深市标的）。
+/// 已带市场标记的输入（`sh000001` 前缀、`000001.SH` 后缀）**按标记取市场**：上证综指与
+/// 平安银行同为 `000001`，靠首位数字重判必错（`sh000001` → `szsh000001`，`000001.SH` →
+/// `sz000001.SH` ⇒ 接口回 `param error`、日志表现为「K线数据中未找到股票代码键」）。
 fn to_tencent_code(stock_code: &str) -> String {
-    if stock_code.starts_with("sh") || stock_code.starts_with("sz") || stock_code.starts_with("bj")
-    {
-        return stock_code.to_string();
+    if let Some((bare, ex)) = crate::code_form::split_explicit_market(stock_code) {
+        return format!("{}{bare}", ex.tencent_prefix());
     }
     let prefix = match stock_code.chars().next() {
         Some('6') => "sh",
@@ -645,6 +645,21 @@ mod capability_tests {
         // 股票口径不变
         assert_eq!(to_tencent_code("600519"), "sh600519");
         assert_eq!(to_tencent_code("000001"), "sz000001");
+    }
+
+    /// 后缀形态（`000001.SH`）必须换成市场前缀。
+    ///
+    /// 缺陷实证（2026-10-01 运行日志）：它此前被拼成 `sz000001.SH`，接口回
+    /// `param error` ⇒ 腾讯整源空转（表现为「K线数据中未找到股票代码键」）。
+    /// 实测 `param=sh000001` 返 3951 点的真上证指数，`param=sz000001.SH` 返 param error。
+    #[test]
+    fn tencent_code_converts_suffixed_exchange_tags() {
+        assert_eq!(to_tencent_code("000001.SH"), "sh000001");
+        assert_eq!(to_tencent_code("399006.SZ"), "sz399006");
+        assert_eq!(to_tencent_code("430047.BJ"), "bj430047");
+        // 大小写混写也归一（分析任务文本里两种都出现过）
+        assert_eq!(to_tencent_code("SH000001"), "sh000001");
+        assert_eq!(to_tencent_code("600519.sh"), "sh600519");
     }
 
     #[test]

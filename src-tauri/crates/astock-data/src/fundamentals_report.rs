@@ -537,4 +537,46 @@ mod tests {
         assert!(md.contains("资产负债率"));
         assert!(report.key_takeaways.iter().any(|t| t.contains("资产负债率偏高")));
     }
+
+    /// 2026-10-01：商誉 / 应收账款的**增量对账门** —— 补齐这两个字段到底改了什么。
+    ///
+    /// 背景：`eastmoney::get_financials` 此前把 `goodwill` / `accounts_receivable` 写死
+    /// `None`，于是本文件 `to_markdown` 的「风险 | 商誉 / 应收账款」两行**整行不渲染**
+    /// （`if let Some(v)` 条件渲染），而提示词却声称「已包含在预聚合报告中，直接引用即可」
+    /// ⇒ 分析师只能报「A 股特色风险维度数据缺失」（600887 运行 `f474ec9b` 实证）。
+    ///
+    /// 为什么这条必须单独存在：补这两个字段**不是「多两个数」** ——
+    /// `completeness` 的 16 项里含它们 ⇒ `data_completeness` **+2/16 = +12.5%**
+    /// （600887 实测 69% → 约 81%），而 `data_completeness` / `health_score` 会进估值与决策。
+    /// 增量写进断言里，任何人日后调整这两项都会先看到「口径变了多少」。
+    #[test]
+    fn goodwill_and_receivables_raise_data_completeness_and_render_rows() {
+        let q = sample_quote(1800.0);
+        let before = sample_financials();
+        let mut after = sample_financials();
+        after[0].goodwill = Some(6.33e8);
+        after[0].accounts_receivable = Some(4.08e9);
+
+        let c0 = FundamentalsAnalyzer::completeness(&FundamentalsAnalyzer::compute_ratios(
+            &q,
+            before.first(),
+        ));
+        let c1 = FundamentalsAnalyzer::completeness(&FundamentalsAnalyzer::compute_ratios(
+            &q,
+            after.first(),
+        ));
+        assert!(
+            (c1 - c0 - 2.0 / 16.0).abs() < 1e-6,
+            "补齐 商誉+应收账款 应恰好抬高 2/16 完整度（实测 69%→81% 同口径）：before={c0} after={c1}"
+        );
+
+        // 只填字段不渲染 = 没修：markdown 必须真的多出那两行
+        let md_before = FundamentalsAnalyzer::generate("600519", &q, &before).to_markdown();
+        let md_after = FundamentalsAnalyzer::generate("600519", &q, &after).to_markdown();
+        assert!(!md_before.contains("商誉"), "前置：缺字段时该行整体不渲染: {md_before}");
+        assert!(
+            md_after.contains("商誉") && md_after.contains("应收账款"),
+            "补齐后「风险 | 商誉 / 应收账款」两行必须出现（分析师据此才不再报缺口）: {md_after}"
+        );
+    }
 }

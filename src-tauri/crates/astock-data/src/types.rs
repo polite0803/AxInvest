@@ -167,6 +167,30 @@ pub struct PledgeData {
     pub risk_level: String,
 }
 
+/// 股东户数（筹码集中度）—— `RPT_HOLDERNUMLATEST` 的「最新一期」快照。
+///
+/// 新增(2026-10-01)：`lockup-watcher.md` 的方法论/工作流程/自检清单**三处**都要求
+/// 「股东人数（户均持股）」，而它当时既不在该分析师的 `data_sources`（只有
+/// `get_stock_lockup_bundle` + `get_stock_pledge_data`），也没有任何工具能取 ——
+/// 分析师只能写「`data_gaps`：股东人数数据缺失」⇒ 命中失败标记词表 ⇒ 判「⚠️ 低置信」
+/// （300604 运行 `cd044375` 实证，自评 75.0 却因这一处标记被判低置信）。
+/// 消费方：`get_stock_lockup_bundle` 的 `holder_count` 段（bundle 第四方）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HolderCount {
+    pub stock_code: String,
+    /// 数据截止日（`END_DATE`，`YYYY-MM-DD`）
+    pub end_date: String,
+    /// 股东户数（户）
+    pub holder_num: Option<f64>,
+    /// 户数较上期变化率(%，`HOLDER_NUM_RATIO`)：**下降=筹码集中**（通常偏多），上升=分散
+    pub holder_num_ratio: Option<f64>,
+    /// 户均持股（股，`AVG_HOLD_NUM`）
+    pub avg_hold_num: Option<f64>,
+    /// 公告日（`HOLD_NOTICE_DATE`，`YYYY-MM-DD`）—— 判「数据是否已过时」要看它而非截止日
+    pub notice_date: Option<String>,
+}
+
 /// 行业分类
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -461,6 +485,14 @@ pub struct PeerComparison {
     pub pe: Option<f64>,
     pub pb: Option<f64>,
     pub roe: Option<f64>,
+    /// `roe` 的**实际口径**（报告期，`YYYY-MM-DD`；取不到时为 `None`）。
+    ///
+    /// 为什么必须与值一起返回：`ROEJQ` 是**年内累计值**，一季报/中报/三季报都不是全年数，
+    /// 而本结构的 `roe` 消费端是**横截面**比较（同行 vs 本公司）。不带口径时，
+    /// 「只披露到中报的同侪」会被读成「盈利能力只有年报同侪的一半」——
+    /// 实测 600887 中报 10.09 vs 年报 20.87（差 2.07 倍）。取数侧统一按**年报优先**挑选
+    /// （见 `eastmoney::pick_peer_roe`），此字段把该口径如实暴露给消费端。
+    pub roe_period: Option<String>,
     pub change_pct: f64,
     pub market_cap: Option<f64>,
 }

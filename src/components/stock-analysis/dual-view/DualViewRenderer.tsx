@@ -93,7 +93,7 @@ export function DualViewRenderer({
           type="button"
           className="sa-header-back"
           onClick={() => setExpanded(!expanded)}
-          title={expanded ? t("dualView.collapse") : t("dualView.expand")}
+          title={expanded ? t("dualView.collapse") : t("dualView.expand", { title: view.title })}
         >
           {expanded ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
         </button>

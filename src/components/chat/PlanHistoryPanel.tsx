@@ -67,11 +67,11 @@ export function PlanHistoryPanel({ conversationId }: PlanHistoryPanelProps) {
       return t("plan.justNow");
     }
     if (diffMin < 60) {
-      return t("plan.minutesAgo").replace("{{n}}", String(diffMin));
+      return t("plan.minutesAgo", { count: diffMin });
     }
     const diffHr = Math.floor(diffMin / 60);
     if (diffHr < 24) {
-      return t("plan.hoursAgo").replace("{{n}}", String(diffHr));
+      return t("plan.hoursAgo", { count: diffHr });
     }
     return d.toLocaleDateString();
   };

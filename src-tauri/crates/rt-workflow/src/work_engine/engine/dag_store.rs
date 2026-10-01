@@ -315,7 +315,20 @@ impl WorkEngine {
             .collect();
 
         // [DIAG] 当 ready 为空但存在 pending 节点时，打印 remaining_deps 精确诊断
-        if ready.is_empty() {
+        //
+        // ⚠ 门禁：`ready` 为空**必须**与「无节点在途」合取，否则本诊断会把正常状态报成停滞。
+        //   本函数只把 `Pending | Ready` 视作就绪（见上方 filter），`Running` **不算就绪**
+        //   ⇒ 当「能跑的都已经在跑」时 `ready` 必然为空，而这不代表任何异常。
+        //   本函数由 `get_ready_steps_for_execution` 在**每次节点完成后**的早调度探测里调用
+        //   ⇒ 少了这道门禁，一个慢节点压住整个下游期间，其余每个节点的完成都会打一条
+        //   「返回空」+ 全体 pending 节点的 `deps_dump`（实测单条数 KB；2026-10-01 的
+        //   600887 运行因 a-market-analyst / a-catalyst 慢，连打 8 次）。噪声的代价不是
+        //   日志体积，而是**真停滞的那一条被淹掉**。
+        //   真停滞由引擎的跳过传播 + 终态判定负责（node_states 全部落终态时才收尾）；
+        //   本诊断只在「无人在跑且无活可干」时才有信息量。
+        let has_running =
+            workflow.node_states.values().any(|s| matches!(s.status, NodeStatus::Running));
+        if ready.is_empty() && !has_running {
             let pending_ids: Vec<String> = workflow
                 .nodes
                 .iter()

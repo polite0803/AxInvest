@@ -242,7 +242,7 @@ export function TrajectoryReplay({ conversationId }: TrajectoryReplayProps) {
                   {t("chat.agentPanel.quality")}: {(trajectory.quality.overall * 100).toFixed(0)}%
                 </span>
                 <span>
-                  {t("chat.timeline.completed")}: {(trajectory.durationMs / 1000).toFixed(1)}s
+                  {t("chat.workflow.status.completed")}: {(trajectory.durationMs / 1000).toFixed(1)}s
                 </span>
                 <span>
                   {t("chat.agentPanel.steps")}: {trajectory.steps.length}

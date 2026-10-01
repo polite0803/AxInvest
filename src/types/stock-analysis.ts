@@ -295,12 +295,29 @@ export interface StockDecision {
   /**
    * portfolio-mgr 消费的上游节点中**缺失数据**的清单（如「资金流向(t-hotmoney-data)」）。
    *
+   * ⚠️ 本字段的语义**只有一种**：「本该拿到的数据没拿到」（上游节点缺席 / 字段不可得）。
+   * **设计性降权不属于这里** —— 它是「本档按周期主动下调某腿权重」，零数据缺失，
+   * 走 `weightAdjustments`。2026-10-01 之前两者同挤本字段，后果是**常驻误报**：
+   * 估值腿的 0.3/0.5 是常量 ⇒ 凡带估值数据的分析恒推 2 条 ⇒ 每条决策卡都亮
+   * 「决策可信度受限 / 数据缺口 2 项」，真缺口被淹没。
+   *
    * 命名说明：后端 portfolio-mgr 决策 JSON 里该字段是顶层 snake_case 的 `data_gaps`
    * （唯一一个非 camelCase 的顶层键，且 `stock_workflow/decision.rs` V65 的
    * 一致性算法也按此名读取，故不能改名）；`normalizeDecision` 已统一收敛为
    * 前端 camelCase 的 `dataGaps`，消费处只读 `decision.dataGaps`。
    */
   dataGaps?: string[];
+  /**
+   * **口径调整**（不是数据缺口）：本档按周期主动降权的证据腿。
+   *
+   * 与 `dataGaps` 的分界：`dataGaps` = 「本该拿到的数据没拿到」；本字段 = 「本档按设计下调了
+   * 某腿权重」，一个字节的数据都没缺。后端 `portfolio-mgr.rhai` 输出顶层 camelCase
+   * `weightAdjustments`（结构化，2026-10-01 起），只登记**真被下调**（乘数 < 1）的档。
+   *
+   * 展示层：按档挂在四档决策面板的注脚上；**不得**计入「数据缺口 N 项」，也**不得**据此
+   * 点亮「决策可信度受限」警示条（那正是本字段从 `dataGaps` 拆出来的原因）。
+   */
+  weightAdjustments?: WeightAdjustment[];
   /** 时间维度: "ultra_short" | "short" | "mid" | "long" */
   timeHorizon?: string | null;
   /** 期望持有天数（交易日） */
@@ -317,6 +334,23 @@ export interface StockDecision {
   agreementBreakdown?: AgreementBreakdown;
   /** 跨系统互证：近 14 天趋势智选推荐 vs 本次工作流决策（后端在决策持久化时注入） */
   crossCheck?: RecoCrossCheck;
+}
+
+/**
+ * 一条「口径调整」：某档对某条决策腿按周期主动降权。
+ *
+ * 权威来源是 Rust `analysis-engine::evidence_weight::horizon_leg_multipliers()`
+ * （经桥表 `DECISION_LEG_ANALYST` 注入为脚本变量 `horizon_leg_weights_json`）——
+ * 脚本侧**只读**该表，不手抄任何倍数。故本结构里的 `multiplier` 不是「面板读数」，
+ * 而是**公式实际使用的那个数**，可逐位对账。
+ */
+export interface WeightAdjustment {
+  /** 权威档名 snake_case（= `Period::as_str()` = `HORIZON_CAMEL_TO_SNAKE` 的值域） */
+  tier: string;
+  /** 决策腿（`f5` = 估值；腿→分析师桥表见 `DECISION_LEG_ANALYST`） */
+  leg: string;
+  /** 该档对该腿的乘数（< 1 = 降权；后端只输出被下调的档） */
+  multiplier: number;
 }
 
 /** 跨系统互证字段（后端 stock_workflow::hooks::inject_reco_crosscheck 注入，camelCase 对齐） */

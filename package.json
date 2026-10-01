@@ -96,6 +96,8 @@
     "check:i18n:untranslated:strict": "node scripts/check-i18n-untranslated.mjs --strict-all",
     "check:i18n:untranslated:baseline": "node scripts/check-i18n-untranslated.mjs --update-baseline",
     "check:i18n:key-parity": "node scripts/check-i18n-key-parity.mjs",
+    "check:i18n:placeholder": "node scripts/check-i18n-placeholder-usage.mjs",
+    "check:i18n:placeholder:selftest": "node scripts/check-i18n-placeholder-usage.mjs --selftest",
     "check:ngram": "node scripts/check-ngram-consistency.mjs",
     "check:layers": "node scripts/check-layer-discipline.mjs",
     "check:layers:selftest": "node scripts/check-layer-discipline.mjs --selftest",
@@ -214,7 +216,7 @@
     "vitest": "4.1.11"
   },
   "simple-git-hooks": {
-    "pre-commit": "npm run check:eol && npx dprint check && npx tsc --noEmit && cd src-tauri && cargo fmt --check",
+    "pre-commit": "npm run check:eol && npx dprint check && npx tsc --noEmit && node scripts/check-i18n-placeholder-usage.mjs && cd src-tauri && cargo fmt --check",
     "pre-push": "npm run ci:check:quick"
   }
 }

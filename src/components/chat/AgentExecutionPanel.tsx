@@ -232,7 +232,7 @@ export function AgentExecutionPanel({
           )}
           {poolSummary.failed > 0 && (
             <span style={{ color: token.colorError }}>
-              {poolSummary.failed} {t("chat.timeline.failed")}
+              {t("chat.timeline.failed", { failed: poolSummary.failed })}
             </span>
           )}
           <div style={{ flex: 1 }} />

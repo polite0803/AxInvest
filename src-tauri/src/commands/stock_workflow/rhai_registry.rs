@@ -769,4 +769,379 @@ mod tests {
             engine.eval("let f = |x| x + 1; f.call(1)").expect("f.call(1) 应当可用");
         assert_eq!(via_call, 2, "闭包经 .call() 调用的返回值不符");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 运行期契约：`portfolio-mgr.rhai` 必须**真的跑完**（而不是只编译过）
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// portfolio-mgr 节点 `input_mapping` 的 key 侧（= 该脚本**唯一**的注入通道）。
+    ///
+    /// 抽取面只取**本节点窗口**（`id: "portfolio-mgr"` → `nodes.push(pm);`）：全 seed 宽口径会把
+    /// 别的节点的映射算成本节点的来源 —— 那正是 2026-10-01 漏判的形态（口径越宽，越只能漏判）。
+    /// 窗口失效由紧随其后的规模自证兜住，不会静默变宽/变窄。
+    fn portfolio_mgr_mapping_names(seed: &str) -> std::collections::BTreeSet<String> {
+        let win_start = seed
+            .find(r#"id: "portfolio-mgr".into()"#)
+            .expect("seed 里应能定位 portfolio-mgr 节点（改名/搬迁须同步本门）");
+        let win_end = seed[win_start..]
+            .find("nodes.push(pm);")
+            .map(|i| win_start + i)
+            .expect("portfolio-mgr 节点窗口的终点 `nodes.push(pm);` 已变，须同步本门");
+        let tuple_re = regex::Regex::new(r##"\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,"##).unwrap();
+        let mut names: std::collections::BTreeSet<String> =
+            tuple_re.captures_iter(&seed[win_start..win_end]).map(|c| c[1].to_string()).collect();
+        // 可调参数由常量派生（源文本里**没有**字面量）⇒ 显式并入（它们同样进该节点的映射）。
+        names.extend(
+            crate::commands::stock_analysis_setup::seed_stock_analysis::PORTFOLIO_MGR_TUNABLE_PARAMS
+                .iter()
+                .map(|n| (*n).to_string()),
+        );
+        // 前提自证：抽取面必须真的张开（窗口或常量一旦失效，本门会退化成「什么都没扫到」）。
+        for probe in ["horizon_leg_weights_json", "valuation_dcf_upside", "action_buy_threshold"] {
+            assert!(
+                names.contains(probe),
+                "注入面抽取失效：缺 `{probe}`（窗口/常量已漂移，实际 {names:?}）"
+            );
+        }
+        names
+    }
+
+    /// 脚本里 `present(x)` 的名字（V57 会为它们补 unit）。含脚本自己的 `let` / `fn` 形参也无妨：
+    /// 它们会遮蔽同名注入变量（`allow_shadowing` 默认 true，生产同样如此）。
+    fn present_guard_names(script: &str) -> std::collections::BTreeSet<String> {
+        let present_re = regex::Regex::new(r"present\(\s*([A-Za-z_][A-Za-z0-9_]*)").unwrap();
+        present_re.captures_iter(script).map(|c| c[1].to_string()).collect()
+    }
+
+    /// 生产注入面 —— 造 scope 必须按 `code_executor::execute_rhai_directly` 的**同一份规则**，
+    /// 否则本测试要么造出「生产不会发生的失败」（误报），要么放过「生产必然发生的失败」（假绿）。
+    ///
+    /// 规则（`code_executor.rs` 的 `execute_rhai_directly`）：
+    ///   ① 逐条 `input_mapping`（`target_key ← source_key`）解析后 `push_constant`
+    ///      （解析不到 ⇒ unit）⇒ **脚本能看到的注入名 = 本节点 input_mapping 的 key 侧**；
+    ///   ② 其外再给**脚本里 `present(x)` 的未注入名字**补 unit（V57）—— 这一步
+    ///      **只覆盖 `present()` 的面**：裸引用不在其判据面上。
+    ///
+    /// ⚠ 2026-10-01 收紧（首版正是**在这一点上瞎了**）：初版把 `hooks.rs` 里所有
+    ///   `Variable { name: "x" }` 也算作注入面 ⇒ 「hooks 注入了 `horizon_prior_json`、
+    ///   但 portfolio-mgr 的 `input_mapping` **漏了同名映射**」这一格恰好落在门的盲区里：
+    ///   门替它补了 unit ⇒ 恒绿；而生产在 `portfolio-mgr.rhai:2853` 抛
+    ///   `Variable not found: horizon_prior_json`（实测 2026-10-01 09:37 的 live 运行）。
+    ///   ⇒ **hooks 的 `name:` 字面量不能算来源**：它只证明「变量进了黑板的 variables」，
+    ///   不证明「进了这个脚本的 scope」；后者由该节点的 `input_mapping` 单独决定。
+    ///   （同一份「hooks 名字」改由下面 `every_injected_var_read_bare_has_a_mapping` 当**反例来源**用。）
+    ///
+    /// ⚠ 清单从**源码文本**派生而不是手抄：手抄清单会在下一次 seed / 脚本改动时静默失效。
+    fn production_injection_names(script: &str) -> std::collections::BTreeSet<String> {
+        let mut names = portfolio_mgr_mapping_names(include_str!(
+            "../stock_analysis_setup/seed_stock_analysis.rs"
+        ));
+        names.extend(present_guard_names(script));
+        names
+    }
+
+    /// 按生产注入面造 scope 并执行 `portfolio-mgr.rhai`，返回脚本输出的 JSON。
+    ///
+    /// 「有估值证据」是本函数的**引爆条件**：`f5_weight > 0` 才会走进 f5 融合段 ——
+    /// 2026-09-30 的生产事故正落在该段（裸引用 `time_horizon` ⇒ 运行期 `Variable not found`
+    /// ⇒ 被文件末尾的 catch 整体兜成 `action="数据缺失"`）。估值腿两腿给值即可引爆。
+    fn run_portfolio_mgr(script: &str) -> serde_json::Value {
+        let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+        let ast = engine
+            .compile(script)
+            .unwrap_or_else(|e| panic!("portfolio-mgr.rhai 编译失败（生产同配置）: {e}"));
+
+        let mut scope = rhai::Scope::new();
+        for name in production_injection_names(script) {
+            scope.push_constant(name, rhai::Dynamic::UNIT);
+        }
+        // 周期常量表：缺失会让脚本**按设计** throw（未知周期静默兜天数 = 错档入库）⇒ 必须给真表。
+        // 权威源 `Period::decision_consts_map`，本测试不手抄天数/乘数。
+        scope.push_constant(
+            "horizon_consts_json",
+            axagent_harness::json_value_to_dynamic(
+                &axagent_harness::holding_period::Period::decision_consts_map(),
+            ),
+        );
+        // 逐档 × 逐腿乘数表：同样给真表 —— 短/超短档的「估值腿周期降权」（f5 = 0.3 / 0.5）
+        // 正是靠它承担（主链已不再手抄 0.30/0.50）。
+        scope.push_constant(
+            "horizon_leg_weights_json",
+            axagent_harness::json_value_to_dynamic(
+                &axagent_analysis_engine::evidence_weight::horizon_leg_multipliers(),
+            ),
+        );
+        // 估值两腿有值 ⇒ f5_weight > 0 ⇒ 进入 f5 融合段（本次回归的引爆条件）。
+        // 其余 input_mapping 键保持 unit = 「上游节点失败」这一生产常态。
+        scope.push_constant("valuation_dcf_upside", -12.5_f64);
+        scope.push_constant("valuation_graham_upside", -25.0_f64);
+        scope.push_constant("valuation_dcf_applicable", true);
+        scope.push_constant("valuation_dcf_anchor_is_fallback", false);
+
+        let out: rhai::Dynamic = engine
+            .eval_ast_with_scope(&mut scope, &ast)
+            .unwrap_or_else(|e| panic!("portfolio-mgr.rhai 执行失败（非 catch 路径）: {e}"));
+        axagent_harness::dynamic_to_json_value(&out)
+    }
+
+    /// 运行期契约：**有估值证据**时脚本必须跑完全程，不得落进 catch 兜底。
+    ///
+    /// ## 为什么必须有这道门（2026-09-30 生产实证）
+    ///
+    /// f5 融合段曾经裸引用 `time_horizon` —— 它的定义在文件**后面的定档段**（Rhai 顺序求值
+    /// ⇒ 运行期 `Variable not found`），被文件末尾的 catch 整体兜成 `action="数据缺失"`。
+    /// 即**凡有估值数据的分析全部静默降级为保守决策**，而当时**没有任何门禁**能发现它：
+    ///
+    /// | 既有门 | 为什么看不见 |
+    /// |---|---|
+    /// | `rhai_syntax_check::all_rhai_scripts_compile` | 只 `compile`；Rhai 编译期**不校验变量** |
+    /// | `code_executor` 的 V57 补 unit | 只覆盖 `present(x)` 里的名字，**裸引用不在判据面上** |
+    /// | `portfolio_mgr_*_rhai.rs` 各门 | 只跑**抽出来的片段**，从不执行整脚本 |
+    ///
+    /// ⇒ 本门是「整脚本真执行」这一格的第一道。断言分三层，缺一层就会假绿：
+    ///   ① **没降级**：`reasoning` 不含「执行异常」、`action != "数据缺失"`（catch 的指纹）；
+    ///   ② **四档真的产出**：`decisionsByHorizon` 四档齐备、逐档 `weightsSource == "table"`
+    ///      （否则「跑完了」可能只是「乘数表缺失退化成 fallback_unity」）；
+    ///   ③ **周期降权留痕**：短/超短档各写一条 `weightAdjustments` 条目（Phase 4 的声明面
+    ///      —— 走**口径调整**通道，**不是** `data_gaps`：那是「本该拿到的数据没拿到」，
+    ///      而本档主动降权没有任何数据缺失），且中/长档（权威乘数 1.2 / 2.0 = 上调）
+    ///      **不得**被写成「降权」；并反向锁「不得回流 data_gaps」（常驻误报的复发形态）。
+    /// 末尾附**负控**：把脚本改回「裸引用一个未定义名字」的形态，断言上面的判据真的会报红 ——
+    /// 否则本门只是一组恒真断言（本仓对每道新门都要求这一步）。
+    #[test]
+    fn portfolio_mgr_runs_with_valuation_evidence_without_degrading() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+
+        let out = run_portfolio_mgr(src);
+
+        // ── ① 没降级 ──
+        let reasoning = out["reasoning"].as_str().unwrap_or_default();
+        assert!(
+            !reasoning.contains("执行异常"),
+            "portfolio-mgr.rhai 落进了 catch 兜底（脚本崩了 ≠ 判断为保守）: {reasoning}"
+        );
+        assert_ne!(
+            out["action"].as_str(),
+            Some("数据缺失"),
+            "catch 兜底指纹：action=\"数据缺失\"。完整输出: {out}"
+        );
+
+        // ── ② 四档真的产出，且权重来自权威乘数表 ──
+        let tiers = out["decisionsByHorizon"].as_object().unwrap_or_else(|| {
+            panic!("decisionsByHorizon 应为四档 map，实际: {}", out["decisionsByHorizon"])
+        });
+        assert_eq!(
+            tiers.len(),
+            4,
+            "四档决策应齐备，实际键: {:?}",
+            tiers.keys().collect::<Vec<_>>()
+        );
+        for (k, v) in tiers {
+            assert_eq!(
+                v["weightsSource"],
+                serde_json::json!("table"),
+                "{k} 档的逐档乘数表未生效（weightsSource 应为 table）: {v}"
+            );
+        }
+
+        // ── ③ 估值腿周期降权必须留痕，且只在**真被下调**的档声明 ──
+        let gaps: Vec<String> = out["data_gaps"]
+            .as_array()
+            .unwrap_or_else(|| panic!("data_gaps 应为数组: {}", out["data_gaps"]))
+            .iter()
+            .filter_map(|g| g.as_str().map(str::to_string))
+            .collect();
+        // 权威乘数：f5(ultra_short)=0.3 / f5(short)=0.5 ⇒ 这两档必须各有一条降权条目。
+        // 条目是**结构化**的（tier/leg/multiplier），故断言直接比字段而**不是**比中文文案 ——
+        // 比文案等于把措辞当契约，改一个字就静默失配。
+        let adjustments = out["weightAdjustments"]
+            .as_array()
+            .unwrap_or_else(|| panic!("weightAdjustments 应为数组: {}", out["weightAdjustments"]));
+        for (tier, mult) in [("ultra_short", 0.3_f64), ("short", 0.5_f64)] {
+            let hit = adjustments.iter().any(|a| {
+                a["tier"] == serde_json::json!(tier)
+                    && a["leg"] == serde_json::json!("f5")
+                    && (a["multiplier"].as_f64().unwrap_or(f64::NAN) - mult).abs() < 1e-9
+            });
+            assert!(
+                hit,
+                "估值腿周期降权未留痕（tier={tier} / leg=f5 / 乘数={mult}）\
+                 ⇒ 短档面板读不出该腿已被降权。weightAdjustments={adjustments:?}"
+            );
+        }
+        // 反向 ①：中/长档的乘数 > 1（上调）⇒ 不得被写成「降权」，否则是把「加权」说成「减权」。
+        assert!(
+            !adjustments.iter().any(|a| {
+                a["tier"] == serde_json::json!("mid") || a["tier"] == serde_json::json!("long")
+            }),
+            "中/长档（权威乘数 1.2 / 2.0 = 上调，不是降权）被写进了降权条目: {adjustments:?}"
+        );
+        // 反向 ②：口径调整**不得**回流 `data_gaps`。
+        //   两个通道的语义不同：`data_gaps` = 「本该拿到的数据没拿到」，而本档主动降权是
+        //   **设计选择**（一个字节的数据都没缺）。回流后的实证形态是**常驻误报**：f5 的
+        //   0.3/0.5 是常量 ⇒ 凡带估值数据的分析恒推 2 条 ⇒ UI 恒亮「决策可信度受限 /
+        //   数据缺口 2 项」，`PE数据(t-risk)` 这类真缺口被淹没；且公式侧恒多两条 LLM 侧
+        //   不可能产出的串，把双视角 data_gaps 一致性（Jaccard）系统性压低。
+        assert!(
+            !gaps.iter().any(|g| g.contains("估值腿周期降权")),
+            "设计性降权又回到了 data_gaps（常驻误报形态复发）: data_gaps={gaps:?}"
+        );
+
+        // ── 负控：判据必须能报出「生产事故形态」──
+        // 把 f5 段的入口改成**裸引用一个从未定义的名字**（= 修复前的 `time_horizon` 形态；
+        // 注意它不在任何 `present(...)` 里 ⇒ 连 V57 也不会补 unit ⇒ 生产同样必崩）。
+        // ⚠ 名字必须是**合法标识符**且不带前导双下划线：Rhai 对 `__x__` 这类名字直接报
+        //   `Variable name is not proper`（编译期），那会变成「编译失败」而不是「运行期降级」，
+        //   负控就测不到本门真正要测的那条路径（首版实测踩到）。
+        let mutated = src.replace(
+            "let f5_weight = if f5_has_valuation {",
+            "let f5_weight = if forward_ref_probe == true { 0.0 } else if f5_has_valuation {",
+        );
+        assert_ne!(mutated, src, "负控变异点未命中 —— 判据与被测对象已脱节，须同步本测试");
+        let degraded = run_portfolio_mgr(&mutated);
+        let degraded_reasoning = degraded["reasoning"].as_str().unwrap_or_default();
+        assert!(
+            degraded_reasoning.contains("执行异常")
+                && degraded_reasoning.contains("Variable not found"),
+            "负控失效：裸引用未定义变量时脚本没有降级 ⇒ 上面的断言没有区分力。实际: {degraded_reasoning}"
+        );
+        assert_eq!(
+            degraded["action"].as_str(),
+            Some("数据缺失"),
+            "负控失效：降级路径的 action 指纹不符"
+        );
+    }
+
+    /// 纯判据：`(hooks/模板变量) ∩ 脚本裸读 ∩ ¬映射 ∩ ¬present ∩ ¬脚本局部`。
+    ///
+    /// 抽成纯函数是为了让**负控**能喂一份「摘掉映射行」的 seed 文本（见下方测试），
+    /// 否则负控只能改磁盘上的生产文件 —— 那正是本仓反复禁止的形态。
+    fn bare_injected_reads(
+        script: &str,
+        seed: &str,
+        injected_elsewhere: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
+        // 剥注释：注释里提到的工作流变量名不算「读」（本文件注释里大量出现变量名）。
+        let code: String = script
+            .lines()
+            .map(|l| {
+                if l.trim_start().starts_with("//") {
+                    ""
+                } else {
+                    l.split("//").next().unwrap_or(l)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mapping = portfolio_mgr_mapping_names(seed);
+        let present = present_guard_names(script);
+
+        // 脚本自己的局部名：`let x` / `for x in` / `fn f(a, b)` 形参 / 闭包 `|a, b|` 形参。
+        let is_ident = |s: &str| {
+            !s.is_empty() && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        };
+        let mut locals: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for pat in [r"\blet\s+([A-Za-z_][A-Za-z0-9_]*)", r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b"]
+        {
+            let re = regex::Regex::new(pat).unwrap();
+            locals.extend(re.captures_iter(&code).map(|c| c[1].to_string()));
+        }
+        for pat in [r"\bfn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^)]*)\)", r"\|\s*([^|]*?)\s*\|"] {
+            let re = regex::Regex::new(pat).unwrap();
+            for c in re.captures_iter(&code) {
+                for p in c[1].split(',') {
+                    let n = p.trim();
+                    if is_ident(n) {
+                        locals.insert(n.to_string());
+                    }
+                }
+            }
+        }
+
+        let mut out: Vec<String> = injected_elsewhere
+            .iter()
+            .filter(|n| !mapping.contains(*n) && !present.contains(*n) && !locals.contains(*n))
+            .filter(|n| {
+                regex::Regex::new(&format!(r"\b{}\b", regex::escape(n.as_str())))
+                    .unwrap()
+                    .is_match(&code)
+            })
+            .cloned()
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// 防回归：**「别处注入了」不等于「这个脚本看得到」** —— 凡被 hooks / 模板变量表注入、
+    /// 又在 `portfolio-mgr.rhai` 里**裸读**（不在 `present()` 里）的名字，必须在本节点的
+    /// `input_mapping` 里有同名条目；否则运行期 `Variable not found`，并被脚本自身的 catch
+    /// 兜成 `action="数据缺失"`（**不是**降级为共用先验／默认值）。
+    ///
+    /// ## 为什么单独立这道门（与上面的真执行门互补）
+    ///
+    /// 真执行门只点亮**它那条夹具走到的分支**；本门是**全文件静态**判据，与分支覆盖无关。
+    /// 两者的分工正是 2026-10-01 那次事故暴露的：Phase C（v102）只加了
+    /// 「hooks 注入 `horizon_prior_json` + 脚本 `prior_for` 裸读」，**漏了本节点映射** ——
+    /// 该缺陷被同一文件更早的崩溃（line 844 前向引用）遮住，直到 v112 修掉前者才在
+    /// line 2853 爆出来（实测那一轮 live 运行）。注入面三个点（hooks 注入 / 节点映射 /
+    /// 脚本消费）少任何一个，症状都是同一条「数据缺失」，看不出缺的是哪一环。
+    ///
+    /// 判据口径（三处都靠源码文本派生，避免手抄清单漂移）：候选面 = hooks/seed-mod 的
+    /// `Variable { name }` ∪ 模板变量表；排除面 = 本节点 `input_mapping` ∪ 脚本 `present(x)`
+    /// ∪ 脚本局部名（`let` / `for..in` / `fn` 形参 / 闭包形参）；命中面 = 剥注释后按词边界
+    /// 在脚本里出现。**四段都带规模自证**，任一段失效即报红而不是静默通过。
+    #[test]
+    fn every_injected_var_read_bare_has_a_mapping() {
+        let script = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+        let seed = include_str!("../stock_analysis_setup/seed_stock_analysis.rs");
+
+        // 候选面：hooks / seed-mod 现场注入 ∪ 模板变量表（`build_template_variables` 是权威源）。
+        let name_re = regex::Regex::new(r##"name:\s*"([A-Za-z_][A-Za-z0-9_]*)"##).unwrap();
+        let mut elsewhere: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for src in [include_str!("hooks.rs"), include_str!("../stock_analysis_setup/mod.rs")] {
+            elsewhere.extend(name_re.captures_iter(src).map(|c| c[1].to_string()));
+        }
+        elsewhere.extend(
+            crate::commands::stock_analysis_setup::seed_variables::build_template_variables()
+                .into_iter()
+                .map(|v| v.name),
+        );
+
+        // 前提自证：候选面与排除面都必须真的张开（否则「没问题」只是没扫到 —— 本仓 #704/#711）。
+        assert!(elsewhere.len() >= 100, "候选注入面抽取失效（只抽到 {} 个名字）", elsewhere.len());
+        assert!(
+            portfolio_mgr_mapping_names(seed).len() >= 50,
+            "本节点映射抽取失效（只抽到 {} 条）",
+            portfolio_mgr_mapping_names(seed).len()
+        );
+        assert!(
+            present_guard_names(script).len() >= 50,
+            "present 面抽取失效（只抽到 {} 个）",
+            present_guard_names(script).len()
+        );
+
+        let bad = bare_injected_reads(script, &seed, &elsewhere);
+        assert!(
+            bad.is_empty(),
+            "以下名字被 hooks/模板注入、在 portfolio-mgr.rhai 里**裸读**，却没有本节点 input_mapping \
+             ⇒ 运行期 `Variable not found` 并被 catch 兜成「数据缺失」: {bad:?}"
+        );
+
+        // ── 负控：把刚补上的那行映射摘掉 ⇒ 判据必须报出 `horizon_prior_json`（事故的真实形态）──
+        let mutated = seed.replace(r#"("horizon_prior_json", "horizon_prior_json"),"#, "");
+        assert_ne!(mutated, seed, "负控变异点未命中 —— 映射行已改名，须同步本测试");
+        let bad2 = bare_injected_reads(script, &mutated, &elsewhere);
+        assert!(
+            bad2.contains(&"horizon_prior_json".to_string()),
+            "负控失效：摘掉 `horizon_prior_json` 的映射后判据没报出来，实际 {bad2:?}"
+        );
+    }
 }

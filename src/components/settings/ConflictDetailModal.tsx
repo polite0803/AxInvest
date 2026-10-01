@@ -107,7 +107,7 @@ export function ConflictDetailModal({
       </Descriptions>
 
       <Divider>
-        <Text strong>{t("deviceSync.conflictSummary")}</Text>
+        <Text strong>{t("deviceSync.conflictData")}</Text>
       </Divider>
 
       <Space direction="vertical" style={{ width: "100%" }}>

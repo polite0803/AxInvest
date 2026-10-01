@@ -265,8 +265,129 @@ pub async fn create_pool(db_path: &str) -> Result<DbHandle> {
     // 注意：预设模板不再在启动时自动播种。
     // 工作流模板按需导入，通过前端工作流管理页面的"从预设导入"按钮触发 seed_preset_templates Tauri 命令。
 
+    // 临时连接池探针（仅当 AXAGENT_POOL_PROBE=1 时启动；不设置则零开销）。用完即删。
+    spawn_pool_probe(&conn);
+
     info!("Database initialized at {}", db_path);
     Ok(DbHandle { conn, path: db_path.to_string() })
+}
+
+// ─────────────────────────────────────────────────────────────────
+// 临时连接池探针 —— 诊断 `Connection pool timed out`（用完即删）
+// ─────────────────────────────────────────────────────────────────
+//
+// 用法：**直接启动即可**（默认开）→ 跑一轮荐股扫描 → 看 `[pool-probe]` 行；
+// 想关掉设 `AXAGENT_POOL_PROBE=0`。这是临时代码，诊断完按本段末尾清单删除。
+//
+// 为什么默认开：`npm run tauri dev` 的环境变量要穿过 npm → cargo → tauri 三层子进程，
+// 实测容易在半路丢掉，于是「探针没输出」会与「池没问题」混为一谈（2026-10-01 实测踩到）。
+//
+// 为什么不是「打印 size/idle」就够：那两个数只说明池的**占用**，回答不了
+// 「此刻还能不能拿到连接」。所以探针每轮都**真的 acquire 一个连接并计时**
+// （拿到立即释放），这样 `index_queue` 报出的 pool timeout 才能在时间轴上对上。
+//
+// 判据：
+// · `idle=0` 且 `acquire_ms` 贴近 `acquire_timeout`(15s) ⇒ 池被慢操作占满
+// · 负载停止 60 秒后 `idle` 仍回不到 `min_connections`(2) ⇒ **连接泄漏**
+// · 平时 `acquire_ms` < 10ms 却仍偶发 timeout ⇒ 是瞬时尖峰，把间隔调到 1 秒再抓
+fn spawn_pool_probe(conn: &DatabaseConnection) {
+    // 默认**开**；`AXAGENT_POOL_PROBE=0` 可关。理由见上方注释块（env 跨三层子进程易丢）。
+    if std::env::var("AXAGENT_POOL_PROBE").ok().as_deref() == Some("0") {
+        return;
+    }
+    const PROBE_INTERVAL_SECS: u64 = 5;
+    const ACQUIRE_BUDGET_MS: u64 = 20_000;
+
+    let conn = conn.clone();
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(PROBE_INTERVAL_SECS));
+        loop {
+            ticker.tick().await;
+            let (size, idle, max) = pool_stats(&conn);
+            let t0 = std::time::Instant::now();
+            let outcome =
+                probe_acquire(&conn, std::time::Duration::from_millis(ACQUIRE_BUDGET_MS)).await;
+            let waited_ms = t0.elapsed().as_millis();
+            // 归一「能否拿到连接」：Ok(true)=拿到；Ok(false)=超预算；Err=池自身报错
+            // （sqlx 的 acquire_timeout 是 15s，所以池真被占满时会先走 Err(pool timed out)，
+            // 而不是这里的 20s 外层预算）。
+            let verdict = match outcome {
+                Ok(true) => None,
+                Ok(false) => Some(format!("超过 {ACQUIRE_BUDGET_MS}ms 预算仍未取到")),
+                Err(e) => Some(e),
+            };
+            match verdict {
+                None => {
+                    info!("[pool-probe] size={size}/{max} idle={idle} acquire_ms={waited_ms}")
+                },
+                Some(why) => tracing::error!(
+                    "[pool-probe] size={size}/{max} idle={idle} acquire_ms={waited_ms} ⇒ 取不到连接: {why}"
+                ),
+            }
+        }
+    });
+}
+
+/// 池的 `(当前连接数, 空闲数, 上限)`；非 SQLite/PG 返回全 0。
+///
+/// ⚠ 不能 `match conn { DatabaseConnection::Sqlite(p) => .. }`：SeaORM 2.0 的
+/// `DatabaseConnection` 是**结构体**（池在 `pub inner: DatabaseConnectionType` 里），
+/// 官方入口是 `get_database_backend()` + `get_sqlite_connection_pool()` /
+/// `get_postgres_connection_pool()`（源码 `src/database/db_connection.rs`）。
+///
+/// `get_max_connections()` 是 sqlx 0.7+ 的方法名（本仓 sqlx 0.9）；若版本降到 0.6，
+/// 改回字段访问 `options().max_connections`。
+fn pool_stats(conn: &DatabaseConnection) -> (u32, usize, u32) {
+    match conn.get_database_backend() {
+        DbBackend::Sqlite => {
+            let p = conn.get_sqlite_connection_pool();
+            let max = p.options().get_max_connections();
+            (p.size(), p.num_idle(), max)
+        },
+        DbBackend::Postgres => {
+            let p = conn.get_postgres_connection_pool();
+            let max = p.options().get_max_connections();
+            (p.size(), p.num_idle(), max)
+        },
+        _ => (0, 0, 0),
+    }
+}
+
+/// 在 `budget` 内取一个连接（拿到即归还）：`Ok(true)` 拿到、`Ok(false)` 超时、
+/// `Err` 池本身报错。
+///
+/// 注意返回类型写成 `std::result::Result`：本文件顶部
+/// `use axagent_harness::core_error::Result` 是单泛型别名，直接用 `Result<T, E>`
+/// 会编译失败。
+async fn probe_acquire(
+    conn: &DatabaseConnection,
+    budget: std::time::Duration,
+) -> std::result::Result<bool, String> {
+    match conn.get_database_backend() {
+        DbBackend::Sqlite => {
+            let pool = conn.get_sqlite_connection_pool();
+            match tokio::time::timeout(budget, pool.acquire()).await {
+                Ok(Ok(c)) => {
+                    drop(c);
+                    Ok(true)
+                },
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Ok(false),
+            }
+        },
+        DbBackend::Postgres => {
+            let pool = conn.get_postgres_connection_pool();
+            match tokio::time::timeout(budget, pool.acquire()).await {
+                Ok(Ok(c)) => {
+                    drop(c);
+                    Ok(true)
+                },
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Ok(false),
+            }
+        },
+        _ => Ok(true),
+    }
 }
 
 pub fn default_db_path() -> String {

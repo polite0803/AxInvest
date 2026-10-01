@@ -830,33 +830,43 @@ let f5_signal = if f5_weight > 0.0 {
     //   两者的差别只在「band 可用时 dcf 份额」：0.56 vs 0.583。选 0.56 的理由是
     //   三者和恰为 1.0 ⇒ **band 腿份额恒为 0.20**（后者为 0.2/1.2 = 0.167），
     //   「新腿占两成」这句话才在两种状态下都成立、可直接断言。
-    // ── 〇-B v2 / Phase 4：估值的**周期闸口** ──
-    // DCF 与格雷厄姆都是「长期现金流/内在价值」口径：它们的上行空间天然只对中长线成立。
-    //   v2 一次分析恒产四档决策，但 f5 这一腿此前**不分周期**—— ultra_short 档也在拿
-    //   「10 年现金流折现」的证据定仓位（PLAN 断点④：估值与周期完全无关、无短周期警示）。
-    // 处置 = **分腿衰减 + 显式留痕**（不是整腿剔除）：
-    //   · 短/超短档 DCF ×0.30、格雷厄姆 ×0.50：数值仍有信息量，只是不该主导短档；
-    //   · PE/PS/PB 历史分位带（band 腿）衡量「相对自身贵贱」，与持有期近乎无关 ⇒ 不衰减；
-    //   · 衰减后**必须**进 data_gaps 声明，否则短档面板读不出「估值腿已被周期降权」
-    //     （结构性缺席可接受、伪装成正常结果不可接受）。
-    //   ⚠ 与 V77 的 `applicable=false` 区分：那是「数值没有经济含义」⇒ 整腿剔除；
-    //     这里是「有含义但不服务于本周期」⇒ 降权，两者不可混用。
-    let valuation_horizon_decay = if time_horizon == "ultra_short" || time_horizon == "short" {
-        data_gaps.push(if time_horizon == "ultra_short" {
-            "估值腿周期降权(超短线：DCF×0.30/格雷厄姆×0.50，长期口径不服务于本档)"
-        } else {
-            "估值腿周期降权(短线：DCF×0.30/格雷厄姆×0.50，长期口径不服务于本档)"
-        });
-        [0.30, 0.50]
-    } else {
-        [1.0, 1.0]
-    };
-    let dcf_horizon_decay = valuation_horizon_decay[0];
-    let graham_horizon_decay = valuation_horizon_decay[1];
-    // 权重按「可用 × 周期衰减」归一：中/长档衰减为 1.0 ⇒ fusion_wsum 与衰减引入前逐位相同
-    //   （0.56+0.24+0.20=1.0），即**本闸口对中长线是恒等变换**，只改变短档。
-    let fusion_wsum = (if dcf_leg_usable { 0.56 * dcf_horizon_decay } else { 0.0 })
-        + (if graham_leg_usable { 0.24 * graham_horizon_decay } else { 0.0 })
+    // ── 〇-B v2 / Phase 4 的估值周期闸口：**不放主链**（2026-10-01 根因修复）──
+    //
+    // 需求本身成立（PLAN-horizon-four-cycle-closure.md 断点④）：DCF/格雷厄姆都是
+    //   「长期现金流/内在价值」口径，其上行空间天然只对中长线成立，不该主导短/超短档。
+    // 但本段**曾经**的落地形态（按 `time_horizon` 分支、在手抄的 0.56/0.24/0.20 上再乘
+    //   DCF×0.30 / 格雷厄姆×0.50）有两个各自独立、且都致命的缺陷：
+    //
+    // ① **运行期前向引用**（生产实证，2026-09-30 用户报障）：
+    //    `time_horizon` 的定义在**本文件后面的定档段**（〇-B v2 Phase 3 把定档段上移到
+    //    「凯利仓位」之前，即原 `:1910`），`data_gaps` 更在其后（`:2567`）。Rhai 是
+    //    **顺序求值**：裸引用一个「尚未执行到 let」的名字 ⇒ 运行期抛
+    //    `Variable not found: time_horizon`（实报 line 844），被文件末尾的 catch 整体
+    //    兜成 `action="数据缺失"` ⇒ **凡有估值数据的分析全部静默降级**。
+    //    ⚠ 为什么两道编译门都没拦住：`code_executor` 的 V57 自动补 unit 只覆盖
+    //    `present(x)` 里的名字（裸引用不在其判据面），而 `Engine::compile` 默认
+    //    **不校验变量**（Rhai 的变量解析在运行期）⇒ 「语法门 + 纯 compile 门」双绿。
+    //
+    // ② **循环依赖**（就算把定义提前也仍然错）：
+    //    主档 `time_horizon` 由 `effective_posterior` 的阈值定出，而 `effective_posterior`
+    //    正是「含 f5 腿」的融合结果 ⇒ 本段想用「主档」决定该腿衰减、再用衰减后的腿决定
+    //    「主档」，是一个自指环。两遍法/不动点在 Rhai 侧既不可控也无处声明收敛条件。
+    //
+    // 处置 = **主链不做周期降权，降权交回权威逐档乘数**：
+    //   · 四档各自的 `decisionsByHorizon` 走 `leg_mult`（Rust `evidence_weight::
+    //     horizon_leg_multipliers()` 经桥表 `DECISION_LEG_ANALYST` 注入），f5 在
+    //     ultra_short/short/mid/long = **0.3 / 0.5 / 1.2 / 2.0** ⇒ 短档的估值证据
+    //     本来就已被按周期降权，且数值只有**一个**来源（脚本侧禁止手抄任何档位倍数，
+    //     同 `days_for` / `horizon_const` 的纪律）。
+    //   · `fusion_wsum` / `fused_sig` 恢复为 0.56/0.24/0.20 的**纯可用腿归一**，
+    //     与本次回归前（`7629f089e^`）逐位相同 ⇒ 主链零语义漂移，只是不再崩。
+    //   · 「降权必须留痕」这条要求由 Phase F 段承担（读**权威乘数**判断本档是否被降权，
+    //     见下方 `weight_adjustments` 声明处），留痕不再是主链的前向引用；该留痕走
+    //     **口径调整**通道而非 `data_gaps`（它不是数据缺失，理由见该段「通道」注释）。
+    //   ⚠ 与 V77 的 `applicable=false` 区分保持不变：那是「数值没有经济含义」⇒ 整腿剔除；
+    //     周期闸口是「有含义但不服务于本档」⇒ 降权，两者不可混用。
+    let fusion_wsum = (if dcf_leg_usable { 0.56 } else { 0.0 })
+        + (if graham_leg_usable { 0.24 } else { 0.0 })
         + (if band_leg_usable { 0.20 } else { 0.0 });
     // V79: P0-I 的 fallback 衰减从「作用于融合后总值」改为**只作用于 DCF 腿自身**。
     //   定义提前到此处（原在下文 clamp 前），因为分腿衰减必须在**融合之内**生效。
@@ -867,8 +877,8 @@ let f5_signal = if f5_weight > 0.0 {
     let fused_sig = if fusion_wsum <= 0.0 {
         0.0
     } else {
-        ((if dcf_leg_usable { dcf_sig * dcf_anchor_decay * 0.56 * dcf_horizon_decay } else { 0.0 })
-            + (if graham_leg_usable { graham_sig * 0.24 * graham_horizon_decay } else { 0.0 })
+        ((if dcf_leg_usable { dcf_sig * dcf_anchor_decay * 0.56 } else { 0.0 })
+            + (if graham_leg_usable { graham_sig * 0.24 } else { 0.0 })
             + (if band_leg_usable { band_sig * 0.20 } else { 0.0 })) / fusion_wsum
     };
     // ── 护城河乘子（P2 新增；2026-09-21 取值域对齐 + V79 方向对称）──
@@ -2989,6 +2999,42 @@ for t in horizon_tier_keys {
         data_gaps.push(`该周期独立评分未产出 ⇒ ${tier_cn.call(t)}档技术腿按日线退化（结构性缺席，不是低分）`);
     }
 }
+// ── 估值腿（f5）的**周期降权留痕**（〇-B v2 / Phase 4 的声明面）──
+// 主链**不做**周期降权（根因：前向引用 + 自指环，见上方 f5 段），降权由权威逐档乘数承担：
+//   f5 在 ultra_short/short/mid/long = 0.3/0.5/1.2/2.0。故留痕必须**读同一份乘数**判断，
+//   不得在脚本里再手抄一套 0.30/0.50 —— 两处数字必然漂移（本仓的老形态）。
+// 判据分两层，缺一层就会写出**误导性**条目：
+//   · `f5_has_valuation`：没有估值证据时不该说「估值腿被降权」——那是把「无数据」说成
+//     「有数据但被降权」，与「伪装成正常结果」同族的反向错误；
+//   · `m < 1.0`：本档乘数确实下调了该腿（中/长档是上调，不是降权，不声明）。
+//
+// ⚠ **通道：进 `weight_adjustments`，不进 `data_gaps`**（2026-10-01 修正）。
+//   `data_gaps` 的语义是「本该拿到的数据没拿到」（上游节点缺席 / 字段不可得）；而「本档主动
+//   降权」是**设计选择**，一个字节的数据都没缺。此前写进 data_gaps 的实证后果是**常驻误报**：
+//   f5 的 0.3 / 0.5 是常量（`horizon_leg_multipliers()`），只要 `f5_has_valuation` 为真就
+//   必然命中恰好 2 条 ⇒ 每一条带估值数据的分析都恒亮「决策可信度受限 / 数据缺口 2 项」，
+//   真缺口（`PE数据(t-risk)` 等）被淹没成噪声；且公式侧恒多两条 LLM 侧不可能产出的串，
+//   把「公式 vs LLM」的 data_gaps 一致性维度（Jaccard）系统性压低。
+//   判据双向锁在 `rhai_registry.rs::portfolio_mgr_runs_with_valuation_evidence_without_degrading`：
+//   新通道必须有这两条、`data_gaps` 里必须一条都没有。
+// camelCase 档键 → 权威表用的 snake_case 档名（`Period::as_str()`）：`leg_mult` 的入参是后者。
+let tier_snake = |k| switch k {
+    "ultraShort" => "ultra_short", "short" => "short", "mid" => "mid", "long" => "long", _ => k
+};
+// 结构化条目（`tier` 取 snake_case = `Period::as_str()` = 前端 `HORIZON_CAMEL_TO_SNAKE` 的值域）
+// ⇒ 展示层按档挂注脚时**不必**解析中文文案（那是把措辞当契约，改一个字就静默失配）。
+// 人读文案由前端 i18n 拼（11 语言），本处只出事实：哪一档、哪条腿、乘数是多少。
+let weight_adjustments = [];
+if f5_has_valuation {
+    for t in horizon_tier_keys {
+        let m = leg_mult.call(tier_snake.call(t), "f5");
+        if type_of(m) == "f64" && m < 1.0 {
+            weight_adjustments.push(#{
+                "tier": tier_snake.call(t), "leg": "f5", "multiplier": m
+            });
+        }
+    }
+}
 for a in horizon_tier_keys {
     let peers = [];
     for b in horizon_tier_keys {
@@ -3086,6 +3132,9 @@ let gap_note = if data_gaps.len() > 0 {
     //   见上方说明：结论名必须由确定性后验阶梯唯一决定，不得掺入仓位/LLM 措辞。
     "reasoning": `决策=${final_action} 置信=${(final_confidence*10.0).round()/10.0} 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}`,
     "data_gaps": data_gaps,
+    // 口径调整（**不是**缺口）：本档主动按周期降权的腿 —— 见上方「通道」说明。
+    // 与 data_gaps 分列，好让 UI 的「数据缺口 N 项」计数不被设计选择污染。
+    "weightAdjustments": weight_adjustments,
     "timeHorizon": time_horizon,
     // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source
     "horizonSource": horizon_source,
@@ -3334,6 +3383,8 @@ catch (err) {
         "stopLoss": (),
         "reasoning": "portfolio-mgr Rhai 执行异常，已降级为保守决策: " + err,
         "data_gaps": [],
+        // 与成功路径同 key 集（理由见上方）：异常路径没有任何口径结论 ⇒ 显式空数组。
+        "weightAdjustments": [],
         "timeHorizon": "short",
         "expectedHoldingDays": 5,
         "isContradictory": false,

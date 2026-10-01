@@ -15310,6 +15310,7 @@
     "horizonOverview": "周期概览：",
     "confLowerBoundHint": "置信度下限: {{bound}}（超短线降级路径）",
     "horizonScoreFallbackHint": "该周期独立评分未产出，技术腿已按日线退化（结构性缺席，非低分）",
+    "horizonLegDownweight": "本档估值腿按周期降权 ×{{mult}}（长期现金流口径不服务于本档）",
     "horizonSharesPosteriorHint": "与 {{peers}} 后验完全相同 —— 无法互证独立，请按同源解读",
     "financialMetrics": "财务指标",
     "goToTrade": "去交易",
@@ -16058,12 +16059,9 @@
       "001": "定时"
     },
     "stock-analysis_RecommendationPanel": {
-      "001": "title",
+      "001": "自动校准建议",
       "002": "请先勾选要应用的策略",
       "003": "所选项的权重值无效(NaN/缺失),无法应用"
-    },
-    "stock-analysis_StockAnalysisPage": {
-      "001": "title"
     },
     "round": "第",
     "round2Responses": "逐条回应 R2 质询",
@@ -16661,11 +16659,9 @@
       "colGrade": "评级"
     },
     "dailyReview": {
-      "alerts": "stockAnalysis.dailyReview.alerts",
       "empty": "暂无复盘记录",
       "generate": "生成复盘",
       "noWatchlist": "暂无自选股",
-      "recommendations": "stockAnalysis.dailyReview.recommendations",
       "regenerate": "重新生成",
       "title": "每日复盘",
       "watchlist": "自选股复盘",

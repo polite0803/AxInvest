@@ -6,6 +6,7 @@ import {
   extractDecision,
   extractJevJudgment,
   extractValuationApplicability,
+  isWeightAdjustment,
   type JevJudgment,
   normalizeDecision,
   parseDecisionExplanation,
@@ -1740,6 +1741,11 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         untrustedCount: d.untrustedCount != null ? Number(d.untrustedCount) : undefined,
         dataGaps: Array.isArray(d.data_gaps)
           ? (d.data_gaps as unknown[]).filter((g): g is string => typeof g === "string")
+          : undefined,
+        // 口径调整（**不是**缺口）：同样与 `normalizeDecision` 对齐 —— 漏了则重跑后四档面板
+        // 的降权注脚整体消失（同一类「重跑路径漏字段 ⇒ 提示消失」缺陷，2026-09-21 已踩过）。
+        weightAdjustments: Array.isArray(d.weightAdjustments)
+          ? (d.weightAdjustments as unknown[]).filter(isWeightAdjustment)
           : undefined,
         isContradictory: d.isContradictory === true,
       };

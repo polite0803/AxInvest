@@ -401,6 +401,67 @@ impl EastMoneyVendor {
         )
     }
 
+    /// `RPT_SHAREBONUS_DET`（东财「分红送配」）查询 URL。抽成关联函数只为可单测 ——
+    /// 「报表名被改回已下线的旧值」与「漏掉倒序」都是**静默**退化，只有钉 URL 形态能抓住。
+    ///
+    /// - `sortTypes=-1` 必带：该报表默认按报告期**升序**返回，不加排序时第 1 页是上市初期的
+    ///   除权记录（实测 600519 首条为 2002-07-18），近期分红一条都取不到 ——
+    ///   而 dividend 的消费面（股息率、连续分红年数、复权）只看近期。
+    /// - `pageSize=50`：分红是事件型数据，且 `asof_capability` 对
+    ///   `get_dividend_records` 申报 `Fallthrough` ⇒ as-of 回放要求把截止日之前的
+    ///   **整段历史**取回，再由 `lib.rs` 的 `truncate_dividend_by_asof` 按 `ex_date` 截断。
+    ///   单只票全史在几十条量级（实测 600519 为 28 条），50 一页拿下。
+    fn dividend_report_url(stock_code: &str) -> String {
+        // 修复(2026-07-22)沿用: SECURITY_CODE 字段需纯数字代码,去除 sh/sz/bj 前缀
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+            reportName=RPT_SHAREBONUS_DET&\
+            columns=SECURITY_CODE,EX_DIVIDEND_DATE,EQUITY_RECORD_DATE,PRETAX_BONUS_RMB,BONUS_RATIO,IT_RATIO&\
+            filter=(SECURITY_CODE=\"{code}\")&\
+            pageSize=50&pageNumber=1&\
+            sortColumns=EX_DIVIDEND_DATE&sortTypes=-1"
+        )
+    }
+
+    /// `RPT_SHAREBONUS_DET` 行 → `DividendRecord`（纯函数，零网络，钉住两处易错换算）。
+    ///
+    /// 1. **单位是「每 10 股」**：`PRETAX_BONUS_RMB` = 每 10 股派息（元，税前）、
+    ///    `BONUS_RATIO` = 每 10 股送股、`IT_RATIO` = 每 10 股转增；而 `DividendRecord`
+    ///    的契约是**每股**（消费端见 `adjustment.rs` 的 `1.0/(1.0+bonus_share_ratio)`
+    ///    复权步长），故三项统一 ÷10。实测 600519 于 2026-06-26 除权那条
+    ///    `PRETAX_BONUS_RMB=280.2423`（茅台每 10 股派 280.24 元）⇒ 每股 28.02 元。
+    /// 2. **日期要截到 10 位**：报表返回 `"YYYY-MM-DD 00:00:00"`，而消费端按 `%Y-%m-%d`
+    ///    做**字符串**比较（`truncate_dividend_by_asof`：`d.ex_date <= cutoff`）。不截断时
+    ///    `"2025-06-26 00:00:00" > "2025-06-26"` 成立 ⇒ 截止日**当天**的除权记录会被
+    ///    误判成未来信息剔除。无 `EX_DIVIDEND_DATE` 的行（预案未定/已取消）直接丢弃。
+    fn parse_dividend_rows(stock_code: &str, rows: &[Value]) -> Vec<DividendRecord> {
+        rows.iter()
+            .filter_map(|r| {
+                // 金额/比例列在同类报表里既可能是 number 也可能是字符串（"6"/"1.5"），
+                // null（未送转/无派息）一律记 0；取法与 `fetch_pledge` 内的 f 闭包一致。
+                let f = |key: &str| -> f64 {
+                    // 用 match 而非 `as_f64().or_else(...)` 长链：链宽需留在 rustfmt 的
+                    // chain_width(60) 内，否则 `cargo fmt --check` 会把该行拆开。
+                    match &r[key] {
+                        Value::String(s) => s.parse().unwrap_or(0.0),
+                        other => other.as_f64().unwrap_or(0.0),
+                    }
+                };
+                let ex_date = r["EX_DIVIDEND_DATE"].as_str().and_then(|d| d.get(..10))?;
+                let record_date = r["EQUITY_RECORD_DATE"].as_str().and_then(|d| d.get(..10));
+                Some(DividendRecord {
+                    stock_code: stock_code.to_string(),
+                    ex_date: ex_date.to_string(),
+                    dividend_per_share: f("PRETAX_BONUS_RMB") / 10.0,
+                    bonus_share_ratio: (f("BONUS_RATIO") + f("IT_RATIO")) / 10.0,
+                    record_date: record_date.unwrap_or("").to_string(),
+                })
+            })
+            .collect()
+    }
+
     /// 发一次质押报表请求并解析首行（live 与 as-of 共用）。
     /// 返回值第二项是报表自带的 `TRADE_DATE`，供 as-of 侧记录「实际取到的是哪一期」。
     async fn fetch_pledge(
@@ -626,17 +687,48 @@ impl EastMoneyVendor {
             }
         }
 
+        // ── 2026-10-01 修复：同侪 ROE（此前恒 `None`，详见 `peers_roe_url` 的说明）──
+        // 与估值批量**分开一次请求**（不同报表，无法合并 columns）；取数失败只 warn ⇒
+        // `roe` 留 None（与 pe/pb 的容错口径一致：拿不到不等于整条 peers 失败）。
+        let mut roe_map: HashMap<String, (String, f64)> = HashMap::new();
+        if !peer_codes.is_empty() {
+            let in_list: String = peer_codes
+                .iter()
+                .map(|c| format!("%22{}%22", to_em_secucode(c)))
+                .collect::<Vec<_>>()
+                .join(",");
+            // 每只票要能覆盖「最近年报 + 最近几期」⇒ 按票数放大页大小（实测 3 票 12 行）
+            let roe_url = peers_roe_url(&in_list, cutoff, peer_codes.len() * 6 + 10);
+            match self.em_get(&roe_url).await {
+                Ok(resp) => match resp.json::<Value>().await {
+                    Ok(json) => {
+                        if let Some(arr) = json["result"]["data"].as_array() {
+                            roe_map = pick_peer_roe(arr);
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!("[eastmoney] get_peers ROE 批量查询 JSON 解析失败: {e}")
+                    },
+                },
+                Err(e) => tracing::warn!("[eastmoney] get_peers ROE 批量查询失败: {e}"),
+            }
+        }
+
         Ok(peer_rows
             .iter()
             .map(|r| {
                 let sc = r["SECURITY_CODE"].as_str().unwrap_or("").to_string();
                 let v = valuations.get(&sc);
+                let roe = roe_map.get(&sc);
                 PeerComparison {
                     stock_code: sc,
                     stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
                     pe: v.and_then(|x| x.1),
                     pb: v.and_then(|x| x.2),
-                    roe: None,
+                    roe: roe.map(|x| x.1),
+                    // 口径随值一起返回：消费端（分析师 prompt / 面板）必须看得见
+                    // 「这个 ROE 是哪一期」，否则横截面会被不同报告期悄悄污染。
+                    roe_period: roe.map(|x| x.0.clone()),
                     change_pct: v.map(|x| x.3).unwrap_or(0.0),
                     market_cap: v.and_then(|x| x.4),
                 }
@@ -834,6 +926,138 @@ fn peers_valuation_url(in_list: &str, cutoff: Option<&str>, page_size: usize) ->
     )
 }
 
+/// 同侪 ROE 批量查询 URL（`RPT_F10_FINANCE_MAINFINADATA`「主要财务指标」）。
+///
+/// ## 为什么必须换报表（`PeerComparison.roe` 长期恒 `None` 的真因）
+///
+/// 估值批量走的是 `RPT_VALUEANALYSIS_DET`，它的字段集实测只有
+/// `PE_TTM / PB_MRQ / PS_TTM / PCF_OCF_* / TOTAL_MARKET_CAP / CHANGE_RATE / CLOSE_PRICE`
+/// —— **结构上不含 ROE**（2026-09-21 修 pe/pb 时留下的注释只说「ROE 不在该报表内」，
+/// 没给出替代入口，于是 `roe` 一直写死 `None`）。实测 `RPT_F10_FINANCE_MAINFINADATA`
+/// 支持 `(SECUCODE in (...))` **批量**且含 `ROEJQ`（加权平均 ROE，与逐股财报路径
+/// `get_financials` 取的是**同一个字段**）⇒ 一次请求即可补齐全部同侪。
+///
+/// `cutoff=Some(d)` 时加 `REPORT_DATE<=d`：该表按股票返回多期，回放口径应取「≤ 截止日」的那期。
+///
+/// ⚠ filter 里的括号必须**字面**出现（同 `peers_valuation_url` 的教训）：
+/// 整体 `encodeURIComponent` 会打成 `%28`/`%29` ⇒ 服务端 ANTLR 报「参数预处理错误」。
+fn peers_roe_url(in_list: &str, cutoff: Option<&str>, page_size: usize) -> String {
+    let date_clause = match cutoff {
+        Some(d) => format!("(REPORT_DATE%3C%3D%27{d}%27)"),
+        None => String::new(),
+    };
+    format!(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+         reportName=RPT_F10_FINANCE_MAINFINADATA&\
+         columns=SECUCODE,REPORT_DATE,ROEJQ&\
+         filter=(SECUCODE%20in%20({in_list})){date_clause}&\
+         source=WEB&sortColumns=REPORT_DATE&sortTypes=-1&pageNumber=1&pageSize={page_size}"
+    )
+}
+
+/// 同侪 ROE 行的选取：**年报（12-31）优先**，无年报才退到最近一期。
+/// 返回 `纯代码 → (实际口径的报告期, ROE)`；报告期由调用方写进 `PeerComparison.roe_period`。
+///
+/// ## 为什么不能「直接取最新一期」
+///
+/// `ROEJQ` 是**年内累计值**：一季报/中报/三季报都不是全年数。而 `PeerComparison.roe` 的
+/// 消费端是**横截面**比较（「同行 ROE 均值 vs 本公司」）—— 混期会让「只披露到中报的同侪」
+/// 看起来只有年报同侪的一半。实测（600887 伊利，2026-10-01）：
+/// `2026-06-30 = 10.09` vs `2025-12-31 = 20.87`，**差 2.07 倍**；若混在一起，
+/// 分析师会得出「同行盈利能力腰斩」的假结论。
+///
+/// 本仓已有**同型**教训可直接引用：`fundamentals_report.rs` 的 2026-09-14 口径修正 ——
+/// 半年 ROE 4.8 与年化 PE 5.09 并列，让「估值极低」与「盈利严重恶化」同时成立
+/// （601166 实证）。故此处统一取**同一年报**，并把口径显式返回给消费端。
+///
+/// 行按 `REPORT_DATE` **倒序**返回（URL 里 `sortTypes=-1`）⇒ 每个代码首次见到即最新。
+fn pick_peer_roe(rows: &[Value]) -> HashMap<String, (String, f64)> {
+    let mut annual: HashMap<String, (String, f64)> = HashMap::new();
+    let mut latest: HashMap<String, (String, f64)> = HashMap::new();
+    for r in rows {
+        // `SECUCODE` 形如 `600887.SH`；`PeerComparison.stock_code` 是纯数字 ⇒ 去后缀对齐。
+        let (Some(secucode), Some(date), Some(roe)) =
+            (r["SECUCODE"].as_str(), r["REPORT_DATE"].as_str(), r["ROEJQ"].as_f64())
+        else {
+            continue;
+        };
+        let code = secucode.split('.').next().unwrap_or(secucode).to_string();
+        let day = date.get(..10).unwrap_or(date).to_string();
+        latest.entry(code.clone()).or_insert_with(|| (day.clone(), roe));
+        if day.ends_with("12-31") {
+            annual.entry(code).or_insert((day, roe));
+        }
+    }
+    // 年报优先；缺年报的同侪退到最近一期（口径不同 ⇒ 由 roe_period 如实暴露）
+    for (code, v) in latest {
+        annual.entry(code).or_insert(v);
+    }
+    annual
+}
+
+/// 股东户数 URL（`RPT_HOLDERNUMLATEST`，东财 F10）。
+///
+/// 为什么选「最新一期」而非多期历史：`lockup-watcher.md` 要的是**当前筹码集中度及其变化**
+/// —— 该表一行里同时给了 `HOLDER_NUM`（户数）、`HOLDER_NUM_RATIO`（较上期变化率）、
+/// `AVG_HOLD_NUM`（户均持股）、`END_DATE` + `HOLD_NOTICE_DATE`（判是否过时），
+/// 一次请求即可回答，不需要历史序列。多期历史（`RPT_F10_EH_HOLDERNUM`）留待需要趋势时再接。
+fn holder_count_url(secucode: &str) -> String {
+    format!(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+         reportName=RPT_HOLDERNUMLATEST&\
+         columns=SECUCODE,END_DATE,HOLDER_NUM,HOLDER_NUM_RATIO,AVG_HOLD_NUM,HOLD_NOTICE_DATE&\
+         filter=(SECUCODE%3D%22{secucode}%22)&\
+         source=WEB&pageNumber=1&pageSize=1"
+    )
+}
+
+/// 行 → `HolderCount`（纯函数，零网络可测）。
+/// 日期统一截到 10 位：接口返回 `"2026-06-30 00:00:00"`，而消费端（LLM / 面板）按 `YYYY-MM-DD` 读。
+fn parse_holder_count(stock_code: &str, row: &Value) -> HolderCount {
+    let day = |k: &str| -> Option<String> {
+        row[k].as_str().map(|s| s.get(..10).unwrap_or(s).to_string())
+    };
+    HolderCount {
+        stock_code: stock_code.to_string(),
+        end_date: day("END_DATE").unwrap_or_default(),
+        holder_num: row["HOLDER_NUM"].as_f64(),
+        holder_num_ratio: row["HOLDER_NUM_RATIO"].as_f64(),
+        avg_hold_num: row["AVG_HOLD_NUM"].as_f64(),
+        notice_date: day("HOLD_NOTICE_DATE"),
+    }
+}
+
+/// 资产负债表 URL（`RPT_F10_FINANCE_GBALANCE`）—— 取 `GOODWILL` / `ACCOUNTS_RECE`。
+///
+/// 为什么用这张表：`ZYZBAjaxNew`（主要指标，逐股财报路径的现用接口）**不含资产负债表科目**，
+/// 而 `fundamentals_report` 的「A 股特色风险」段要渲染 `商誉 / 应收账款` 两行
+/// （`if let Some(v)` 条件渲染 ⇒ 拿不到就整行消失，见 `get_financials` ③-b 段的说明）。
+/// 实测该表按 `SECUCODE` 返回**多期**，正好与 `get_financials` 的多期结构逐期对齐。
+fn balance_sheet_url(secucode: &str) -> String {
+    format!(
+        "https://datacenter-web.eastmoney.com/api/data/v1/get?\
+         reportName=RPT_F10_FINANCE_GBALANCE&\
+         columns=SECUCODE,REPORT_DATE,GOODWILL,ACCOUNTS_RECE&\
+         filter=(SECUCODE%3D%22{secucode}%22)&\
+         source=WEB&sortColumns=REPORT_DATE&sortTypes=-1&pageNumber=1&pageSize=20"
+    )
+}
+
+/// 资产负债表行 → `报告期(前 10 位) → (商誉, 应收账款)`。
+///
+/// 逐期建表（**不做**「取最新一期」的降级）：商誉/应收是**存量**科目，只对本期有意义，
+/// 拿邻期值填本期会在 DCF/风险判断里制造看不出来的口径漂移。某期缺该行就留空。
+/// 单列为纯函数是为了能用**真实响应切片**做零网络断言（见 `balance_sheet_tests`）。
+fn pick_balance_sheet(rows: &[Value]) -> HashMap<String, (Option<f64>, Option<f64>)> {
+    let mut m: HashMap<String, (Option<f64>, Option<f64>)> = HashMap::new();
+    for r in rows {
+        let Some(date) = r["REPORT_DATE"].as_str() else { continue };
+        let day = date.get(..10).unwrap_or(date).to_string();
+        m.insert(day, (r["GOODWILL"].as_f64(), r["ACCOUNTS_RECE"].as_f64()));
+    }
+    m
+}
+
 /// as-of 单行估值快照 URL（RPT_VALUEANALYSIS_DET，截止日前最近交易日）。
 /// 抽成自由函数供 `fflow_asof_tests` 同款 URL 判据钉住（转义写错是**静默空结果**）。
 fn valuation_snapshot_asof_url(code: &str, cutoff: &str) -> String {
@@ -843,6 +1067,93 @@ fn valuation_snapshot_asof_url(code: &str, cutoff: &str) -> String {
         filter=(SECURITY_CODE%3D%22{code}%22)(TRADE_DATE%3C%3D%27{cutoff}%27)&\
         sortColumns=TRADE_DATE&sortTypes=-1&pageSize=1&source=WEB&client=WEB"
     )
+}
+
+/// 东财公告查询 URL —— earnings_calendar 的**两个通道共用**（eastmoney 直连 /
+/// browser_eastmoney 浏览器内核）。
+///
+/// 不传 `cb` 参数：实测该接口在**不带** `cb` 时返回纯 JSON
+/// （`{"data":{"list":[...]},"error":"","success":1}`），带上 `cb=jQuery` 才是 JSONP；
+/// 而 JSONP 会让 `browser_eastmoney` 的 `browser_fetch`（直接 `serde_json::from_str`）
+/// 解析失败 —— 那条通道是东财 JA3 封锁时唯一的兜底，不能因信封形态被掐掉。
+///
+/// 与 `get_announcements` 的内联 URL 形态相近但**有意不合并**：那两处（live / as-of）
+/// 带 `cb` 与 `begin_time/end_time` 日期窗口，属回放通道，合并会改动未经实测的回放路径。
+pub(crate) fn notice_ann_url(stock_code: &str, page_size: u32) -> String {
+    // 与 dividend / earnings 同一处归一化：公告接口的 stock_list 用纯数字代码
+    let code =
+        stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+    format!(
+        "https://np-anotice-stock.eastmoney.com/api/security/ann?\
+        sr=-1&page_size={page_size}&page_index=1&ann_type=A&client_source=web&\
+        stock_list={code}&f_node=0&s_node=0"
+    )
+}
+
+/// 财报日历一次取回的公告条数。
+///
+/// 为什么不是 `RPTA_WEB_NOTICE` 时代的 30：公告是按时间倒序的**全类目**流，
+/// 同一天可能连发几十条（实测 600519 在 2026-08-15 单日就有 5+ 条，其中只有
+/// 1 条是「半年度报告摘要」），条数太少会把真正的财报公告挤出窗口。
+pub(crate) const EARNINGS_NOTICE_PAGE_SIZE: u32 = 50;
+
+/// 东财公告接口响应 → `EarningsEvent`（两个通道共用，避免各抄一份、改一处漏一处）。
+///
+/// **故障与空的区分**（与 dividend 同一族修复，勿退回）：`success != 1` 或信封里没有
+/// `data.list` ⇒ 抛 Err。`RPTA_WEB_NOTICE` 下线时正是「取不到 → `Ok(vec![])`」把接口
+/// 失效伪装成「该股没有财报事件」，全站静默 —— 这次不能再留同款后门。
+pub(crate) fn earnings_from_notice_json(
+    stock_code: &str,
+    source: &str,
+    json: &Value,
+) -> Result<Vec<EarningsEvent>, DataError> {
+    let ok = json["success"].as_i64() == Some(1) || json["success"].as_bool() == Some(true);
+    if !ok {
+        let msg = json["error"].as_str().unwrap_or("unknown");
+        return Err(DataError::VendorError {
+            vendor: source.to_string(),
+            message: format!("财报日历公告接口不可用: {msg}"),
+        });
+    }
+    let items = match json["data"]["list"].as_array() {
+        Some(arr) => arr,
+        None => {
+            return Err(DataError::VendorError {
+                vendor: source.to_string(),
+                message: "财报日历公告接口信封异常: 缺少 data.list".into(),
+            });
+        },
+    };
+
+    Ok(items
+        .iter()
+        .filter_map(|item| {
+            let title = item["title"].as_str().unwrap_or("");
+            // 公告时间是 "YYYY-MM-DD HH:MM:SS"；`truncate_earnings_by_asof` 按 `%Y-%m-%d`
+            // 做字符串比较，不截断会让截止日**当天**的公告被判成未来信息剔除。
+            let notice_date = item["notice_date"].as_str().and_then(|d| d.get(..10))?;
+            if title.is_empty() {
+                return None;
+            }
+
+            let (event_type, period) = classify_earnings_title(title);
+            // 只保留财报相关事件（沿用既有口径：分类为 other 但标题仍含"报告/业绩"的保留）
+            if event_type == "other" && !title.contains("报告") && !title.contains("业绩") {
+                return None;
+            }
+
+            Some(EarningsEvent {
+                stock_code: stock_code.to_string(),
+                stock_name: item["codes"][0]["short_name"].as_str().unwrap_or("").to_string(),
+                event_date: notice_date.to_string(),
+                event_type: event_type.to_string(),
+                period,
+                detail: Some(title.to_string()),
+                source: Some(source.to_string()),
+                created_at: chrono::Utc::now().timestamp(),
+            })
+        })
+        .collect())
 }
 
 /// 解析 push2his fflow/daykline 的 klines CSV 数组（f51=日期 f52=主力 f53=小单 f54=中单 f55=大单 f56=超大单）。
@@ -1100,6 +1411,11 @@ fn to_em_secid(stock_code: &str) -> String {
         {
             return stock_code.to_string();
         }
+    }
+    // 显式市场标记（`000001.SH` / `sh000001`）优先于首位数字推断：上证综指与平安银行
+    // 同为 `000001`，把 `sh000001` 去掉前缀再按首位推断会静默取回平安银行的 K 线。
+    if let Some((bare, ex)) = crate::code_form::split_explicit_market(stock_code) {
+        return format!("{}.{bare}", ex.em_market());
     }
     // 修复(2026-07-22): 去除 sh/sz/bj 前缀,否则后续 starts_with('6') 判断会失效,
     // 误把 "sh600887" 当作深圳市场股票,生成 secid="0.sh600887" 导致所有 API 调用返回空数据。
@@ -1600,6 +1916,42 @@ impl StockVendor for EastMoneyVendor {
             rows.sort_by_key(|r| std::cmp::Reverse(date_of(r)));
         }
 
+        // ③-b 资产负债表补充（2026-10-01）：**商誉 / 应收账款**。
+        //
+        // 此前两个字段写死 `None`，原注释只说「当前利润表接口未提供，后续可通过 ZcfzbAjaxNew
+        // 资产负债表接口补全」—— 后果不是「少两个数」，而是 `fundamentals_report` 的 markdown
+        // **整行不渲染**（`if let Some(v)` 条件渲染）⇒ 而 `fundamentals-analyst.md` 又声称
+        // 「商誉/应收账款已包含在预聚合报告中，直接引用即可」⇒ 分析师只能写
+        // 「无审计意见/商誉/质押信息 ⇒ A 股特色风险维度数据缺失」⇒ 命中失败标记词表 ⇒ 判低置信
+        // （600887 运行 `f474ec9b` 实证）。
+        //
+        // 实测 `RPT_F10_FINANCE_GBALANCE`（datacenter-web，按 SECUCODE）含
+        // `GOODWILL` / `ACCOUNTS_RECE`，且**按报告期返回多行** ⇒ 与本函数的「多期」结构天然对齐，
+        // 逐期填、不串期（用日期前 10 位对齐两表的报告期串）。
+        // 取数失败只 warn：这是增强项，不该让整条财报链硬失败（同 type=1 年报补充请求的口径）。
+        //
+        // ⚠ 副作用已计量：`FundamentalsAnalyzer::completeness` 的 16 个字段里含这两项
+        //   ⇒ 填上后 `data_completeness` **+2/16 = +12.5%**（600887 实测 69% → 约 81%），
+        //   并可能影响 `health_score` 的 A 股特色风险分档。该增量由
+        //   `fundamentals_report::tests::goodwill_and_receivables_raise_data_completeness`
+        //   逐字锁住，不靠人记。
+        let mut balance: HashMap<String, (Option<f64>, Option<f64>)> = HashMap::new();
+        match self.em_get(&balance_sheet_url(&to_em_secucode(code))).await {
+            Ok(resp) => match resp.json::<Value>().await {
+                Ok(j) => {
+                    if let Some(arr) = j["result"]["data"].as_array() {
+                        balance = pick_balance_sheet(arr);
+                    }
+                },
+                Err(e) => tracing::warn!(
+                    "[eastmoney] get_financials 资产负债表 JSON 解析失败(商誉/应收留空): {e}"
+                ),
+            },
+            Err(e) => {
+                tracing::warn!("[eastmoney] get_financials 资产负债表请求失败(商誉/应收留空): {e}")
+            },
+        }
+
         let mut reports: Vec<FinancialReport> = rows
             .iter()
             .take(40) // 去重后实测 16 条（9 期 + 7 个更早年报）；上限防异常返回
@@ -1641,10 +1993,15 @@ impl StockVendor for EastMoneyVendor {
                     free_cash_flow: None,
                     current_ratio: n("LD"), // 流动比率
                     quick_ratio: n("SD"),   // 速动比率
-                    // #8 修复(2026-07-22): 商誉/应收账款字段——当前利润表接口未提供,
-                    // 后续可通过 ZcfzbAjaxNew 资产负债表接口补全
-                    goodwill: None,
-                    accounts_receivable: None,
+                    // 商誉/应收账款：由 ③-b 的资产负债表批量取数**按报告期**填（2026-10-01 起）。
+                    //   两表的报告期串格式一致（`YYYY-MM-DD 00:00:00`），此处比前 10 位；
+                    //   该期没有对应行时留 `None`（不拿邻期的值冒充本期）。
+                    goodwill: balance
+                        .get(s("REPORT_DATE").get(..10).unwrap_or(s("REPORT_DATE")))
+                        .and_then(|b| b.0),
+                    accounts_receivable: balance
+                        .get(s("REPORT_DATE").get(..10).unwrap_or(s("REPORT_DATE")))
+                        .and_then(|b| b.1),
                     estimated: Some(false),
                 }
             })
@@ -2626,37 +2983,55 @@ impl StockVendor for EastMoneyVendor {
         &self,
         stock_code: &str,
     ) -> Result<Vec<DividendRecord>, DataError> {
-        // 东方财富数据中心: 分红送配数据
-        // 修复(2026-07-22): SECURITY_CODE 字段需纯数字代码,去除 sh/sz/bj 前缀
-        let code =
-            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_DIVIDEND&columns=SECURITY_CODE,EX_DIVIDEND_DATE,DIVIDEND_PER_SHARE,BONUS_SHARE_RATIO,RECORD_DATE&filter=(SECURITY_CODE=\"{code}\")&pageSize=10&pageNumber=1"
-        );
+        // 东方财富数据中心: 分红送配数据。
+        //
+        // 修复(2026-10-01): 原 `RPTA_WEB_DIVIDEND` 报表已被东财下线 —— 该 URL 恒返回
+        //   `{"result":null,"success":false,"message":"报表配置不存在,RPTA_WEB_DIVIDEND","code":9501}`
+        // 而旧实现遇 `result.data` 缺失即 `Ok(vec![])`，上层据此判「该股无分红」⇒
+        // 全市场 dividend **静默**返空，既不降级也不重试（2026-10-01 02:02 运行日志实证：
+        // 600519/601318 等必然有分红的票全部报「分红数据为空」）。现改用同一数据中心的
+        // `RPT_SHAREBONUS_DET`（东财「分红送配」页数据源，实测 600519 全史 28 条）。
+        let url = Self::dividend_report_url(stock_code);
         let resp = self.em_get(&url).await?;
-        let json: Value = resp.json().await?;
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_dividend_records JSON 解析失败: {e}"),
+        })?;
+
+        // `success=false` 有两类含义，判据复用 `datacenter_reports_no_data`（勿手写关键词）：
+        //   「返回数据为空」⇒ 该标的确实没有分红，是**答案**，返空即可；
+        //   「报表配置不存在 / 参数预处理错误」⇒ **故障**，必须抛 Err 走降级与重试，
+        //   否则报表再次下线时又会退化成「静默无分红」—— 本次要防的正是这个。
+        // 注意文案不得含「为空/无数据」等词，否则会被 lib.rs 的 `is_empty_data` 再判成
+        // 「非故障空数据」，把降级路径重新堵死。
+        if json["success"].as_bool() == Some(false) {
+            let msg = json["message"].as_str().unwrap_or("unknown");
+            if datacenter_reports_no_data(msg) {
+                tracing::debug!("[eastmoney] get_dividend_records 该标的无分红记录: {msg}");
+                return Ok(vec![]);
+            }
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!("get_dividend_records 报表不可用: {msg}"),
+            });
+        }
 
         let rows = match json["result"]["data"].as_array() {
             Some(arr) => arr,
             None => return Ok(vec![]),
         };
 
-        rows.iter()
-            .map(|r| {
-                Ok(DividendRecord {
-                    stock_code: stock_code.to_string(),
-                    ex_date: r["EX_DIVIDEND_DATE"].as_str().unwrap_or("").to_string(),
-                    dividend_per_share: r["DIVIDEND_PER_SHARE"].as_f64().unwrap_or(0.0),
-                    bonus_share_ratio: r["BONUS_SHARE_RATIO"].as_f64().unwrap_or(0.0),
-                    record_date: r["RECORD_DATE"].as_str().unwrap_or("").to_string(),
-                })
-            })
-            .collect()
+        Ok(Self::parse_dividend_rows(stock_code, rows))
     }
 
     /// 获取财报日历事件
     ///
-    /// 使用东方财富公告 API（RPTA_WEB_NOTICE），按标题关键词分类：
+    /// 修复(2026-10-01): 原 `RPTA_WEB_NOTICE`（datacenter-web）报表已被东财下线 —— 实测
+    /// 该 URL 恒返回 `{"result":null,"success":false,"message":"报表配置不存在,...","code":9501}`，
+    /// 而旧实现遇 `result.data` 缺失即 `Ok(vec![])` ⇒ 财报日历静默为空（与 dividend 同一族故障：
+    /// 「接口失效」被当成「该股没有此数据」，既不降级也不重试）。现改用东财公告接口
+    /// （`np-anotice-stock`，实测可用），仍按标题分类：分类复用 `classify_earnings_title`，
+    /// 信封校验与解析复用 `earnings_from_notice_json`（浏览器兜底通道共用同一份）。
     /// - "业绩预告" → preliminary
     /// - "业绩快报" → express
     /// - "定期报告"/"年报"/"季报" → formal
@@ -2666,49 +3041,13 @@ impl StockVendor for EastMoneyVendor {
         &self,
         stock_code: &str,
     ) -> Result<Vec<EarningsEvent>, DataError> {
-        // 修复(2026-07-22): SECURITY_CODE 字段需纯数字代码,去除 sh/sz/bj 前缀
-        let code =
-            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
-        let url = format!(
-            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPTA_WEB_NOTICE&columns=SECURITY_CODE,SECURITY_NAME_ABBR,NOTICE_DATE,TITLE,EQUITY_NOTICE_TYPE&filter=(SECURITY_CODE=\"{code}\")&pageSize=30&sortColumns=NOTICE_DATE&sortTypes=-1&pageNumber=1"
-        );
+        let url = notice_ann_url(stock_code, EARNINGS_NOTICE_PAGE_SIZE);
         let resp = self.em_get(&url).await?;
-        let json: Value = resp.json().await?;
-
-        let rows = match json["result"]["data"].as_array() {
-            Some(arr) => arr,
-            None => return Ok(vec![]),
-        };
-
-        Ok(rows
-            .iter()
-            .filter_map(|r| {
-                let title = r["TITLE"].as_str().unwrap_or("");
-                let notice_date = r["NOTICE_DATE"].as_str().unwrap_or("");
-                if title.is_empty() || notice_date.is_empty() {
-                    return None;
-                }
-
-                // 按标题关键词分类
-                let (event_type, period) = classify_earnings_title(title);
-
-                // 只保留财报相关事件
-                if event_type == "other" && !title.contains("报告") && !title.contains("业绩") {
-                    return None;
-                }
-
-                Some(EarningsEvent {
-                    stock_code: stock_code.to_string(),
-                    stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
-                    event_date: notice_date.to_string(),
-                    event_type: event_type.to_string(),
-                    period,
-                    detail: Some(title.to_string()),
-                    source: Some("eastmoney".to_string()),
-                    created_at: chrono::Utc::now().timestamp(),
-                })
-            })
-            .collect())
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_earnings_calendar JSON 解析失败: {e}"),
+        })?;
+        earnings_from_notice_json(stock_code, "eastmoney", &json)
     }
 
     async fn search_stock(&self, keyword: &str) -> Result<Vec<StockSearchResult>, DataError> {
@@ -3390,6 +3729,26 @@ impl StockVendor for EastMoneyVendor {
         Ok(hit.map(|(data, _)| data))
     }
 
+    /// 股东户数（筹码集中度），新增(2026-10-01)。
+    ///
+    /// 报表：`RPT_HOLDERNUMLATEST`（东财 F10「股东户数」最新一期）。
+    /// **无记录时返回 `Ok(None)`**（该股确实没披露过，不是故障）—— 与质押的处理相反，
+    /// 因为这里的「没有」是可判定的业务事实（新上市公司/未披露），而不是解析口径问题。
+    async fn get_holder_count(&self, stock_code: &str) -> Result<Option<HolderCount>, DataError> {
+        let code =
+            stock_code.trim_start_matches("sh").trim_start_matches("sz").trim_start_matches("bj");
+        let url = holder_count_url(&to_em_secucode(code));
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "eastmoney".into(),
+            message: format!("get_holder_count JSON 解析失败: {e}"),
+        })?;
+        let Some(row) = json["result"]["data"].as_array().and_then(|a| a.first()) else {
+            return Ok(None);
+        };
+        Ok(Some(parse_holder_count(code, row)))
+    }
+
     /// T5：按截止日回溯质押数据（2026-09-26）。
     ///
     /// 旧认知「质押无历史语义」是错的：`RPT_CSDC_LIST` 有 `TRADE_DATE` 列且支持
@@ -3643,7 +4002,10 @@ impl StockVendor for EastMoneyVendor {
             "get_quote" | "get_index_quotes" => AsOfCapability::SynthesizeFromKline,
             // NoHistoricalSemantic: 当下榜单（快照唯一通道，给当下值没有意义）
             // ⚠ 行业排名不在此列（T15 起有合成通道，见 get_industry_ranking_with_asof）
-            "get_hot_stocks" => AsOfCapability::NoHistoricalSemantic,
+            // ⚠ get_holder_count（2026-10-01）同列：`RPT_HOLDERNUMLATEST` 本身就是
+            //   「最新一期」快照表，没有日期参数可收窄；历史多期在 `RPT_F10_EH_HOLDERNUM`，
+            //   接它属下一轮（届时改申报 NativeDateParam）。当下回放按**结构性缺口**留痕。
+            "get_hot_stocks" | "get_holder_count" => AsOfCapability::NoHistoricalSemantic,
             // T12(2026-09-27)：板块归属**不是**「无历史语义」而是「只有当下值、且是慢变量」
             // —— 与 `get_sector_info` 同一张 `RPT_F10_CORETHEME_BOARDTYPE`（无日期列）。
             // 此前申报 `NoHistoricalSemantic` 使路由层的 as-of 白名单**跳过本仓唯一还活着的
@@ -4398,6 +4760,21 @@ mod index_asof_tests {
         assert_eq!(EM_INDEX_SECIDS.len(), 3);
         assert_eq!(EM_INDEX_SECIDS[0], ("1.000001", "000001", "上证指数"));
     }
+
+    /// 带显式市场标记的输入按**标记**取市场位，两种写法都要落回指数本体。
+    ///
+    /// 缺陷实证（2026-10-01 运行日志）：荐股链 `get_klines("000001.SH")` 在此被拼成
+    /// `secid=0.000001.SH`（全链路取空，市场状态恒「未知」）；而把 `sh000001` 剥前缀再
+    /// 按首位推断会得到 `0.000001` = **平安银行** —— 那是静默取回错误标的，比取空更坏。
+    #[test]
+    fn explicit_market_tag_wins_over_first_digit_inference() {
+        assert_eq!(to_em_secid("000001.SH"), "1.000001");
+        assert_eq!(to_em_secid("sh000001"), "1.000001");
+        assert_eq!(to_em_secid("399006.SZ"), "0.399006");
+        // 标记与首位推断一致时结果不变（股票口径零位移）
+        assert_eq!(to_em_secid("600519.SH"), "1.600519");
+        assert_eq!(to_em_secid("000001.SZ"), "0.000001");
+    }
 }
 
 #[cfg(test)]
@@ -4695,6 +5072,177 @@ mod peers_asof_tests {
             "倒序 ⇒ 每只票首行即截止日前最近一期: {replay}"
         );
     }
+
+    /// 2026-10-01：同侪 ROE 的 URL 判据（`RPT_F10_FINANCE_MAINFINADATA`，零网络）。
+    ///
+    /// 锁三件事：① 报表名必须换掉 —— `RPT_VALUEANALYSIS_DET` **结构上不含 ROE**，
+    /// 光改解析不改 URL 会得到一个恒空的 map（静默，等于没修）；
+    /// ② 日期上限与 live 形态；③ 分页上限随票数放大（每只票要多期才能挑年报）。
+    #[test]
+    fn peers_roe_url_uses_mainfinadata_and_appends_cutoff() {
+        let live = peers_roe_url(IN_LIST, None, 34);
+        assert!(
+            live.contains("RPT_F10_FINANCE_MAINFINADATA"),
+            "ROE 必须走主要财务指标表（估值表没有 ROEJQ 字段）: {live}"
+        );
+        assert!(live.contains("ROEJQ"), "必须取 ROEJQ（与逐股财报路径同字段）: {live}");
+        assert!(
+            live.contains(&format!("(SECUCODE%20in%20({IN_LIST}))")),
+            "in 列表必须带字面括号（编码成 %28/%29 会被服务端判参数错误）: {live}"
+        );
+        assert!(!live.contains("REPORT_DATE%3C%3D"), "live 不该有日期上限: {live}");
+        assert!(live.ends_with("pageSize=34"), "分页上限按票数放大: {live}");
+
+        let replay = peers_roe_url(IN_LIST, Some("2026-09-22"), 34);
+        assert!(
+            replay.contains(&format!(
+                "(SECUCODE%20in%20({IN_LIST}))(REPORT_DATE%3C%3D%272026-09-22%27)"
+            )),
+            "回放必须在同一 filter 内追加 REPORT_DATE 上限: {replay}"
+        );
+        assert!(
+            replay.contains("sortColumns=REPORT_DATE&sortTypes=-1"),
+            "倒序是 `pick_peer_roe` 的前提（首见即最新）: {replay}"
+        );
+    }
+
+    /// 2026-10-01：同侪 ROE 的**选取**判据 —— 年报优先、代码去后缀、缺年报退到最近一期。
+    ///
+    /// 夹具是**真实响应切片**（2026-10-01 实拉，600887/000596/000568 三票）：
+    /// 600887 的 2026-06-30 是 10.09、2025-12-31 是 20.87 —— 若「直接取最新一期」，
+    /// 横截面会把这家中报同侪读成「盈利能力只有年报同侪的一半」（差 2.07 倍）。
+    #[test]
+    fn pick_peer_roe_prefers_annual_and_normalizes_code() {
+        let rows: Vec<Value> = serde_json::from_str(
+            r#"[
+              {"SECUCODE":"600887.SH","REPORT_DATE":"2026-06-30 00:00:00","ROEJQ":10.09},
+              {"SECUCODE":"600887.SH","REPORT_DATE":"2026-03-31 00:00:00","ROEJQ":9.44},
+              {"SECUCODE":"600887.SH","REPORT_DATE":"2025-12-31 00:00:00","ROEJQ":20.87},
+              {"SECUCODE":"600887.SH","REPORT_DATE":"2025-09-30 00:00:00","ROEJQ":18.6},
+              {"SECUCODE":"000596.SZ","REPORT_DATE":"2026-06-30 00:00:00","ROEJQ":8.42},
+              {"SECUCODE":"300999.SZ","REPORT_DATE":"2026-06-30 00:00:00","ROEJQ":null},
+              {"SECUCODE":"000568.SZ","REPORT_DATE":null,"ROEJQ":8.62}
+            ]"#,
+        )
+        .expect("夹具应是合法 JSON");
+        let m = pick_peer_roe(&rows);
+
+        // ① 年报优先：取 2025-12-31 的 20.87，而不是最新的 2026-06-30 的 10.09
+        assert_eq!(
+            m.get("600887"),
+            Some(&("2025-12-31".to_string(), 20.87)),
+            "必须优先年报（混期会让横截面失真 2 倍）"
+        );
+        // ② 代码归一：SECUCODE 的 `.SH/.SZ` 后缀必须去掉，否则与 SECURITY_CODE 对不上
+        assert!(
+            m.contains_key("000596"),
+            "键应是纯数字代码，实际: {:?}",
+            m.keys().collect::<Vec<_>>()
+        );
+        assert!(!m.keys().any(|k| k.contains('.')), "键不得带交易所后缀");
+        // ③ 无年报 ⇒ 退到最近一期，且**口径如实标出**（消费端据此知道不可与年报同侪直接比）
+        assert_eq!(m.get("000596"), Some(&("2026-06-30".to_string(), 8.42)));
+        // ④ 无值/无日期的行必须被丢弃（不制造 0.0 假值，也不猜日期）
+        assert!(!m.contains_key("300999"), "ROEJQ 为 null 的行不得入表");
+        assert!(!m.contains_key("000568"), "REPORT_DATE 缺失的行不得入表");
+    }
+}
+
+#[cfg(test)]
+mod balance_sheet_tests {
+    //! 2026-10-01：商誉/应收账款的 URL 与逐期选取判据（零网络）。
+    //! 被判缺陷：`financials` 路径把这两个字段写死 `None`，导致
+    //! `fundamentals_report` 的「风险 | 商誉 / 应收账款」两行**整行不渲染**，
+    //! 而提示词却声称「已包含在预聚合报告中」⇒ 分析师只能报「A 股特色风险维度数据缺失」。
+    //! 夹具是**真实响应切片**（2026-10-01 实拉 600887）。
+    use super::*;
+
+    #[test]
+    fn balance_sheet_url_pins_report_and_columns() {
+        let u = balance_sheet_url("600887.SH");
+        assert!(u.contains("RPT_F10_FINANCE_GBALANCE"), "报表名: {u}");
+        assert!(u.contains("GOODWILL") && u.contains("ACCOUNTS_RECE"), "两个科目都要: {u}");
+        assert!(
+            u.contains("(SECUCODE%3D%22600887.SH%22)"),
+            "按 SECUCODE 精确过滤（括号与引号需字面编码）: {u}"
+        );
+        assert!(
+            u.contains("sortColumns=REPORT_DATE&sortTypes=-1"),
+            "倒序返回；逐期建表不依赖顺序，但 URL 形态要钉住: {u}"
+        );
+    }
+
+    #[test]
+    fn pick_balance_sheet_keeps_each_period_separate() {
+        let rows: Vec<Value> = serde_json::from_str(
+            r#"[
+              {"SECUCODE":"600887.SH","REPORT_DATE":"2026-06-30 00:00:00","GOODWILL":633004681.58,"ACCOUNTS_RECE":4077520954.97},
+              {"SECUCODE":"600887.SH","REPORT_DATE":"2026-03-31 00:00:00","GOODWILL":2173279390.31,"ACCOUNTS_RECE":3562528703.34},
+              {"SECUCODE":"600887.SH","REPORT_DATE":"2025-12-31 00:00:00","GOODWILL":2181530707.86,"ACCOUNTS_RECE":null},
+              {"SECUCODE":"600887.SH","REPORT_DATE":null,"GOODWILL":1.0,"ACCOUNTS_RECE":1.0}
+            ]"#,
+        )
+        .expect("夹具应是合法 JSON");
+        let m = pick_balance_sheet(&rows);
+        // ① 逐期独立：中报与一季报的商誉差 3.4 倍（633.0M vs 2173.3M）——
+        //    这正是「取最新一期填全表」会抹掉的信息
+        assert_eq!(m.get("2026-06-30"), Some(&(Some(633004681.58), Some(4077520954.97))));
+        assert_eq!(m.get("2026-03-31"), Some(&(Some(2173279390.31), Some(3562528703.34))));
+        // ② 单科目为空也要保留该期（另一个科目仍是真值）
+        assert_eq!(m.get("2025-12-31"), Some(&(Some(2181530707.86), None)));
+        // ③ 无报告期的行丢弃
+        assert_eq!(m.len(), 3, "无 REPORT_DATE 的行不得入表: {m:?}");
+    }
+}
+
+#[cfg(test)]
+mod holder_count_tests {
+    //! 2026-10-01：股东户数的 URL 与解析判据（零网络）。
+    //! 被判缺陷：`lockup-watcher.md` 三处要求「股东人数（户均持股）」，却没有任何通道
+    //! ⇒ 分析师只能写「`data_gaps`：股东人数数据缺失」⇒ 被判「⚠️ 低置信」（300604 实证）。
+    //! 夹具是**真实响应切片**（2026-10-01 实拉 300604）。
+    use super::*;
+
+    #[test]
+    fn holder_count_url_pins_report_and_columns() {
+        let u = holder_count_url("300604.SZ");
+        assert!(u.contains("RPT_HOLDERNUMLATEST"), "报表名: {u}");
+        for col in
+            ["HOLDER_NUM", "HOLDER_NUM_RATIO", "AVG_HOLD_NUM", "END_DATE", "HOLD_NOTICE_DATE"]
+        {
+            assert!(u.contains(col), "缺列 {col}: {u}");
+        }
+        assert!(u.contains("(SECUCODE%3D%22300604.SZ%22)"), "按 SECUCODE 过滤: {u}");
+        assert!(u.ends_with("pageSize=1"), "该表只有最新一期，取 1 行即可: {u}");
+    }
+
+    #[test]
+    fn parse_holder_count_truncates_dates_and_keeps_ratio() {
+        let row: Value = serde_json::from_str(
+            r#"{"SECUCODE":"300604.SZ","END_DATE":"2026-06-30 00:00:00","HOLDER_NUM":120196,
+                "HOLDER_NUM_RATIO":72.356138061574,"AVG_HOLD_NUM":5278.20072215382,
+                "HOLD_NOTICE_DATE":"2026-08-28 00:00:00"}"#,
+        )
+        .expect("夹具应是合法 JSON");
+        let h = parse_holder_count("300604", &row);
+        assert_eq!(h.stock_code, "300604");
+        // 日期截到 10 位（消费端按 YYYY-MM-DD 读）
+        assert_eq!(h.end_date, "2026-06-30");
+        assert_eq!(h.notice_date.as_deref(), Some("2026-08-28"));
+        assert_eq!(h.holder_num, Some(120196.0));
+        // 变化率必须保留符号语义：正 72.36 = 户数上升 = **分散**（解读口径写在提示词里）
+        assert!((h.holder_num_ratio.unwrap_or(0.0) - 72.356138061574).abs() < 1e-9);
+        assert!((h.avg_hold_num.unwrap_or(0.0) - 5278.20072215382).abs() < 1e-6);
+    }
+
+    /// 缺列/缺行时不得伪造 0 值（「没有」与「是 0」必须可区分）。
+    #[test]
+    fn parse_holder_count_leaves_missing_fields_none() {
+        let row: Value = serde_json::from_str(r#"{"SECUCODE":"300604.SZ"}"#).unwrap();
+        let h = parse_holder_count("300604", &row);
+        assert_eq!(h.end_date, "");
+        assert!(h.holder_num.is_none() && h.holder_num_ratio.is_none() && h.notice_date.is_none());
+    }
 }
 
 #[cfg(test)]
@@ -4894,5 +5442,162 @@ mod datacenter_empty_tests {
         assert!(datacenter_reports_no_data("code:9201, message:返回数据为空"));
         assert!(!datacenter_reports_no_data("参数预处理错误"), "故障不得被当成空答案");
         assert!(!datacenter_reports_no_data("报表配置不存在"));
+    }
+}
+
+#[cfg(test)]
+mod dividend_report_tests {
+    //! 2026-10-01：分红报表下线的防回归判据（零网络）。
+    //!
+    //! 缺陷背景：`RPTA_WEB_DIVIDEND` 被东财下线后恒返回
+    //! `{"result":null,"success":false,"message":"报表配置不存在,...","code":9501}`，
+    //! 旧实现把它当「该股无分红」⇒ 全市场 dividend 静默为空，日志里只有一行
+    //! 「返回空数据(非故障)，不触发 vendor 降级」。三个易错点必须钉住：报表名、
+    //! 倒序分页、以及「每 10 股 → 每股」的单位换算。
+
+    use super::*;
+
+    /// 报表名 + 倒序 + 分页：任一丢失都会静默退化（整表空，或只取到二十年前的记录）
+    #[test]
+    fn dividend_url_pins_report_and_desc_sort() {
+        let u = EastMoneyVendor::dividend_report_url("600519");
+        assert!(u.contains("reportName=RPT_SHAREBONUS_DET"), "仍走分红送配报表: {u}");
+        assert!(!u.contains("RPTA_WEB_DIVIDEND"), "不得回退到已下线的旧报表: {u}");
+        assert!(u.contains("sortColumns=EX_DIVIDEND_DATE&sortTypes=-1"), "必须按除权日倒序: {u}");
+        assert!(u.contains("pageSize=50"), "as-of 回放需要整段历史: {u}");
+        assert!(u.contains(r#"SECURITY_CODE="600519""#), "纯数字代码等值过滤: {u}");
+    }
+
+    /// 带 sh/sz/bj 前缀的代码必须归一，否则 filter 恒空（2026-07-22 同类修复）
+    #[test]
+    fn dividend_url_normalizes_prefixed_codes() {
+        let sh = EastMoneyVendor::dividend_report_url("sh600519");
+        assert!(sh.contains(r#"SECURITY_CODE="600519""#), "{sh}");
+        let sz = EastMoneyVendor::dividend_report_url("sz000063");
+        assert!(sz.contains(r#"SECURITY_CODE="000063""#), "{sz}");
+    }
+
+    /// 每 10 股口径 → 每股；无送转记 0；日期截到 10 位（否则截止日当天会被 as-of 剔除）
+    #[test]
+    fn dividend_rows_convert_per_ten_shares_and_clip_date() {
+        let row = serde_json::json!({
+            "SECURITY_CODE": "600519",
+            "EX_DIVIDEND_DATE": "2026-06-26 00:00:00",
+            "EQUITY_RECORD_DATE": "2026-06-25 00:00:00",
+            "PRETAX_BONUS_RMB": 280.2423,
+            "BONUS_RATIO": null,
+            "IT_RATIO": null,
+        });
+        let got = EastMoneyVendor::parse_dividend_rows("600519", &[row]);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].ex_date, "2026-06-26", "必须截到 YYYY-MM-DD 才能与 cutoff 比较");
+        assert_eq!(got[0].record_date, "2026-06-25");
+        assert!((got[0].dividend_per_share - 28.02423).abs() < 1e-9, "{:?}", got[0]);
+        assert!((got[0].bonus_share_ratio - 0.0).abs() < 1e-9, "无送转记为 0: {:?}", got[0]);
+    }
+
+    /// 字符串型数值同样接受；送股与转增**相加**（每 10 股送 1 转 3 ⇒ 每股 0.4）
+    #[test]
+    fn dividend_rows_accept_string_numbers_and_sum_bonus() {
+        let row = serde_json::json!({
+            "EX_DIVIDEND_DATE": "2003-07-14 00:00:00",
+            "EQUITY_RECORD_DATE": "2003-07-11 00:00:00",
+            "PRETAX_BONUS_RMB": "2",
+            "BONUS_RATIO": "1",
+            "IT_RATIO": "3",
+        });
+        let got = EastMoneyVendor::parse_dividend_rows("600519", &[row]);
+        assert_eq!(got.len(), 1);
+        assert!((got[0].dividend_per_share - 0.2).abs() < 1e-9, "{:?}", got[0]);
+        assert!((got[0].bonus_share_ratio - 0.4).abs() < 1e-9, "{:?}", got[0]);
+    }
+
+    /// 无除权日的行（预案未定/已取消）不进结果：空 `ex_date` 会被 as-of 判为「时效未知」，
+    /// 在回放里留下语义空洞，而它本就不构成一次除权除息事件。
+    #[test]
+    fn dividend_rows_drop_rows_without_ex_date() {
+        let rows = [
+            serde_json::json!({ "EX_DIVIDEND_DATE": null, "PRETAX_BONUS_RMB": 5 }),
+            serde_json::json!({ "EX_DIVIDEND_DATE": "", "PRETAX_BONUS_RMB": 5 }),
+            serde_json::json!({ "EX_DIVIDEND_DATE": "2025-06-26", "PRETAX_BONUS_RMB": 5 }),
+        ];
+        let got = EastMoneyVendor::parse_dividend_rows("600519", &rows);
+        assert_eq!(got.len(), 1, "只有带除权日的那条保留");
+        assert_eq!(got[0].ex_date, "2025-06-26");
+    }
+}
+
+#[cfg(test)]
+mod earnings_notice_tests {
+    //! 2026-10-01：财报日历换用公告接口后的防回归判据（零网络）。
+    //!
+    //! 缺陷背景：`RPTA_WEB_NOTICE` 被东财下线后恒返回「报表配置不存在」，旧实现把
+    //! `result.data` 缺失当「该股无财报事件」返空 ⇒ 主通道与浏览器兜底一起静默。
+    //! 故这里既钉 URL 形态（纯数字代码 / 不带 cb），也钉「故障抛 Err、空才返空」。
+
+    use super::*;
+
+    /// 公告接口 URL：代码归一为纯数字，且**不带 `cb`**（JSONP 会让浏览器通道解析失败）
+    #[test]
+    fn notice_url_is_json_not_jsonp() {
+        let u = notice_ann_url("sh600519", EARNINGS_NOTICE_PAGE_SIZE);
+        assert!(u.contains("stock_list=600519"), "前缀需归一: {u}");
+        assert!(!u.contains("cb="), "不能带 cb（JSONP 会让浏览器通道解析失败）: {u}");
+        assert!(u.contains("np-anotice-stock.eastmoney.com"), "需在实测可用的公告域: {u}");
+        assert!(u.contains(&format!("page_size={EARNINGS_NOTICE_PAGE_SIZE}")), "{u}");
+    }
+
+    /// 「接口失效」必须抛 Err，不得伪装成「该股没有财报事件」
+    #[test]
+    fn interface_failure_is_not_an_empty_answer() {
+        let dead = serde_json::json!({
+            "result": null,
+            "success": false,
+            "message": "报表配置不存在,RPTA_WEB_NOTICE",
+            "code": 9501,
+        });
+        assert!(earnings_from_notice_json("600519", "eastmoney", &dead).is_err(), "必须报错");
+
+        // 信封缺 data.list 同样是故障（风控页 / 接口变更），不是「无公告」
+        let malformed = serde_json::json!({ "error": "", "success": 1 });
+        assert!(earnings_from_notice_json("600519", "eastmoney", &malformed).is_err());
+
+        // 真正的「无公告」：success=1 且 list 为空数组 ⇒ 返空，不报错
+        let empty = serde_json::json!({
+            "data": { "list": [], "total_hits": 0 },
+            "error": "",
+            "success": 1,
+        });
+        let got = earnings_from_notice_json("600519", "eastmoney", &empty).expect("空不是故障");
+        assert!(got.is_empty());
+    }
+
+    /// 解析：日期截到 10 位、分类沿用 `classify_earnings_title`、非财报公告被滤掉
+    #[test]
+    fn notice_rows_map_to_earnings_events() {
+        let json = serde_json::json!({
+            "data": { "list": [
+                {
+                    "title": "贵州茅台:贵州茅台2026年半年度报告摘要",
+                    "notice_date": "2026-08-15 00:00:00",
+                    "codes": [{ "short_name": "贵州茅台" }],
+                },
+                {
+                    "title": "贵州茅台:关于会计政策变更的公告",
+                    "notice_date": "2026-08-15 00:00:00",
+                    "codes": [{ "short_name": "贵州茅台" }],
+                },
+            ], "total_hits": 2 },
+            "error": "",
+            "success": 1,
+        });
+        let got = earnings_from_notice_json("600519", "browser_eastmoney", &json);
+        let got = got.expect("应解析成功");
+        assert_eq!(got.len(), 1, "非财报公告应被滤掉");
+        assert_eq!(got[0].event_date, "2026-08-15", "必须截到 10 位才能与 as-of 比较");
+        assert_eq!(got[0].event_type, "formal");
+        assert_eq!(got[0].period.as_deref(), Some("2026Q2"));
+        assert_eq!(got[0].stock_name, "贵州茅台");
+        assert_eq!(got[0].source.as_deref(), Some("browser_eastmoney"));
     }
 }

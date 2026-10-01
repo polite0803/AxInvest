@@ -296,7 +296,7 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
                     ? [{
                       key: "versionHistory",
                       icon: <History size={16} />,
-                      label: t("workflow.versionHistory.title"),
+                      label: t("workflow.versionHistory.title", { name }),
                       onClick: onOpenVersionHistory,
                     }]
                     : []),
@@ -496,13 +496,13 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
               </Tooltip>
             )}
             {onOpenVersionHistory && (
-              <Tooltip title={t("workflow.versionHistory.title")}>
+              <Tooltip title={t("workflow.versionHistory.title", { name })}>
                 <Button
                   type="text"
                   data-testid="workflow-version-history-btn"
                   icon={<History size={18} />}
                   onClick={onOpenVersionHistory}
-                  aria-label={t("workflow.versionHistory.title")}
+                  aria-label={t("workflow.versionHistory.title", { name })}
                   style={{ color: token.colorTextSecondary }}
                 />
               </Tooltip>

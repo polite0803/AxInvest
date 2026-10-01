@@ -362,11 +362,11 @@ export const ExecutionTimeline = React.memo(function ExecutionTimeline({
               }}
             >
               {evt.status === "completed"
-                ? t("chat.timeline.completed")
+                ? t("chat.workflow.status.completed")
                 : evt.status === "failed"
-                ? t("chat.timeline.failed")
+                ? t("chat.workflow.status.failed")
                 : evt.status === "running"
-                ? t("chat.timeline.running")
+                ? t("chat.workflow.status.running")
                 : evt.status === "cancelled"
                 ? t("chat.timeline.cancelled")
                 : t("chat.timeline.pending")}

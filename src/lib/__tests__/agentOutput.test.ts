@@ -338,6 +338,41 @@ describe("normalizeDecision 决策前提字段透传（防回归）", () => {
     ).toEqual(["a"]);
   });
 
+  // ── 2026-10-01：口径调整（本档主动降权）与数据缺口分列 ──────────────────────
+  // 分列的理由见 `@/types` 的 `weightAdjustments` 文档：设计性降权曾与真缺口同挤
+  // data_gaps，而它恒有两条（f5 的 0.3/0.5 是常量）⇒ 每张带估值数据的卡都恒亮
+  // 「决策可信度受限 / 数据缺口 2 项」。故这两条断言必须成对：新字段在、旧字段不被污染。
+  it("保留 weightAdjustments 口径调整，且不写进 dataGaps（通道不得混）", () => {
+    const adjustments = [
+      { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
+      { tier: "short", leg: "f5", multiplier: 0.5 },
+    ];
+    const d = normalizeDecision({ action: "观望", confidence: 45, weightAdjustments: adjustments });
+    expect(d?.weightAdjustments).toEqual(adjustments);
+    expect(d?.dataGaps).toBeUndefined();
+  });
+
+  it("weightAdjustments 兼容 snake_case，且残缺条目丢弃（不补默认值）", () => {
+    expect(
+      normalizeDecision({ action: "观望", confidence: 45, weightAdjustments: [] })?.weightAdjustments,
+    ).toBeUndefined();
+    const dirty = normalizeDecision({
+      action: "观望",
+      confidence: 45,
+      weight_adjustments: [
+        { tier: "short", leg: "f5", multiplier: 0.5 },
+        { tier: "short", leg: "f5" }, // 缺 multiplier ⇒ 补默认值会挂出「×1.0 却说降权」的假注脚
+        { leg: "f5", multiplier: 0.5 }, // 缺 tier
+        { tier: "", leg: "f5", multiplier: 0.5 }, // 空 tier
+        { tier: "short", leg: "f5", multiplier: "0.5" }, // 字符串乘数
+        null,
+        1,
+        "x",
+      ],
+    });
+    expect(dirty?.weightAdjustments).toEqual([{ tier: "short", leg: "f5", multiplier: 0.5 }]);
+  });
+
   it("保留 crossCheck 跨系统互证字段（hooks.rs 注入）", () => {
     const crossCheck = { recoConfidence: 70, divergent: true };
     const d = normalizeDecision({ action: "观望", confidence: 45, crossCheck });
@@ -354,6 +389,7 @@ describe("normalizeDecision 决策前提字段透传（防回归）", () => {
     expect(d?.weightsCollapsed).toBe(false);
     expect(d?.collapseReason).toBeUndefined();
     expect(d?.dataGaps).toBeUndefined();
+    expect(d?.weightAdjustments).toBeUndefined();
     expect(d?.crossCheck).toBeUndefined();
     expect(d?.isContradictory).toBe(false);
   });

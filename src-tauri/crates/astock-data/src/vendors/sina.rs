@@ -120,6 +120,71 @@ impl SinaVendor {
             },
         }
     }
+
+    /// 新浪 K 线通道（分钟级；日线继续走网易通道，未做切换）。
+    ///
+    /// 口径说明：
+    /// - `volume` 实测单位已是**股**（002041 / 688806 / 600519 三个市场的量级都对得上），
+    ///   不再做 ×100 换算（网易通道那份是「手」，两处口径不同，各自注释标明）。
+    /// - 接口**不返回成交额** ⇒ `amount = 0.0`。不拿 `volume * close` 估算：那是编造值，
+    ///   会污染下游一切「额」类指标。
+    /// - 不复权（`ma=no`）⇒ `adj_factor = None`，由 lib 层按 adj_type 本地复权。
+    async fn get_klines_from_sina(
+        &self,
+        stock_code: &str,
+        period: &str,
+        limit: u32,
+    ) -> Result<Vec<KLine>, DataError> {
+        let url = match sina_kline_url(stock_code, period, limit) {
+            Some(u) => u,
+            // 未映射的周期（如年线）：维持原「空」行为，交上层继续 fallback
+            None => return Ok(vec![]),
+        };
+        let resp = self.sina_get(&url).await?;
+        let json: serde_json::Value = resp.json().await.map_err(|e| DataError::VendorError {
+            vendor: "sina".into(),
+            message: format!("新浪K线 JSON 解析失败: {e}"),
+        })?;
+        let items = match json.as_array() {
+            Some(arr) => arr,
+            // 非数组 ⇒ 接口形态变了（或命中风控页）。报错而不是返空，否则会退化成
+            // 「静默无K线」—— 正是本次修复要防的那种失效。
+            None => {
+                return Err(DataError::VendorError {
+                    vendor: "sina".into(),
+                    message: "新浪K线返回非数组（接口形态变更或风控拦截）".into(),
+                });
+            },
+        };
+
+        Ok(items
+            .iter()
+            .filter_map(|item| {
+                let date = item["day"].as_str()?;
+                if date.is_empty() {
+                    return None;
+                }
+                // match 而非长链：链宽留在 chain_width(60) 内，避免 fmt --check 拆行
+                let f = |key: &str| -> f64 {
+                    match &item[key] {
+                        serde_json::Value::String(s) => s.parse().unwrap_or(0.0),
+                        other => other.as_f64().unwrap_or(0.0),
+                    }
+                };
+                Some(KLine {
+                    date: date.to_string(),
+                    open: f("open"),
+                    high: f("high"),
+                    low: f("low"),
+                    close: f("close"),
+                    volume: f("volume"),
+                    amount: 0.0,
+                    turnover_rate: None,
+                    adj_factor: None,
+                })
+            })
+            .collect())
+    }
 }
 
 /// `sh600519` / `sz000001` —— live 与 as-of 共用，避免两份前缀实现漂移
@@ -127,10 +192,53 @@ fn sina_daima(stock_code: &str) -> String {
     let code = stock_code.trim();
     let market = if code.starts_with('6') || code.starts_with('9') {
         "sh"
+    } else if code.starts_with('4') || code.starts_with('8') {
+        // 北交所（4/8 开头）实测 `bj430047` 可用；此前一律落进 `sz` ⇒ 请求恒空 ——
+        // 而且新浪对不存在的 symbol 返回的是**空数组**而非错误，静默无声。
+        "bj"
     } else {
         "sz"
     };
     format!("{market}{code}")
+}
+
+/// 新浪 K 线 URL（`CN_MarketData.getKLineData`）—— **分钟级通道**。
+///
+/// 为什么需要它（2026-10-01 修正）：原实现注释称「新浪无直接K线接口，用163补」，
+/// 并据此把**所有非日线周期直接返空**（`Ok(vec![])`）。该前提不成立 —— 实测该接口
+/// 原生支持 scale=5/15/30/60 分钟与 240 日线，且是当时**唯一**同时满足「支持 m60」
+/// 与「可达」的源：2026-10-01 运行日志里 002041 / 688806 的 m60 请求正是
+/// push2his（连接被掐断）、web.ifzq.gtimg.cn（连不上）、TDX 7709（超时）三源全灭。
+///
+/// `daily → 240` 现已启用：`get_klines` 的日线也走本函数。原先日线走网易 chddata，
+/// 但该接口 2026-10-01 实测 `502 Bad Gateway`、运行日志里日线亦恒空（见 `get_klines`
+/// 的注释），故日线统一到这条已实测可用的通道。
+///
+/// 周/月线现已映射：`1200`=周线、`7200`=月线（实测依据见下方 match 内注释）。
+/// 此前两者都缺失，使周/月线在整条路由上无源可依。
+fn sina_kline_url(stock_code: &str, period: &str, limit: u32) -> Option<String> {
+    let scale = match period {
+        "5" | "Min5" => 5,
+        "15" | "Min15" => 15,
+        "30" | "Min30" => 30,
+        "60" | "Min60" => 60,
+        "daily" | "101" | "Daily" => 240,
+        // 周/月线：实测 `scale=1200` 返回周线（每交易日一个采样）、`7200` 返回月线
+        // （2026-07-31 / 08-31 / 09-30，每月末一条）。此前不映射 ⇒ 周/月线**全链无源**
+        // （2026-10-01 日志：002164 的 `klt=103` 在 tencent/eastmoney/xueqiu/sina/mootdx
+        // 五个源上全空）。未映射的周期仍返 None，不猜。
+        "weekly" | "102" | "Weekly" => 1200,
+        "monthly" | "103" | "Monthly" => 7200,
+        _ => return None,
+    };
+    // datalen 保守上限 1000：接口对超大 datalen 的行为未实测，超出部分由
+    // 「拉到多少算多少」兜住，不值得为多要几条去冒被拒的风险。
+    let datalen = limit.min(1000);
+    let daima = sina_daima(stock_code);
+    Some(format!(
+        "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/\
+        CN_MarketData.getKLineData?symbol={daima}&scale={scale}&ma=no&datalen={datalen}"
+    ))
 }
 
 /// 一次取回的历史天数（裁到截止日后取最近 5 条，与 eastmoney 同口径）
@@ -237,107 +345,34 @@ impl StockVendor for SinaVendor {
         limit: u32,
         _adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
-        // 网易163 chddata API 仅支持日K线；分钟/周/月线由高优先级 vendor 承担，
-        // 非日K周期直接返回空，避免返回错误周期的数据
-        if !matches!(period, "daily" | "101" | "Daily") {
-            return Ok(vec![]);
-        }
-        // 网易K线API code格式：0+沪市代码, 1+深市代码（与财务API的sh/sz前缀不同）
-        let market = if stock_code.starts_with('6') || stock_code.starts_with('9') {
-            "0"
-        } else {
-            "1"
-        };
-        // 网易财经历史日K线API（新浪无直接K线接口，用163补）
-        // fields顺序: date, TCLOSE(收盘), HIGH(最高), LOW(最低), TOPEN(开盘), LCLOSE(昨收), VOTURNOVER(成交量,手), VATURNOVER(成交额,元)
-        let url = format!(
-            "https://quotes.money.163.com/service/chddata.html?code={market}{stock_code}&start=20200101&end=20500101&fields=TCLOSE;HIGH;LOW;TOPEN;LCLOSE;VOTURNOVER;VATURNOVER"
-        );
-        let resp = self.http.get(&url).header("Referer", "https://money.163.com/").send().await?;
-        crate::check_response_429(&resp, "sina")?;
-        let body = resp.text().await?;
-        let mut klines = Vec::new();
-        for line in body.lines().skip(1) {
-            let fields: Vec<&str> = line.split(',').collect();
-            if fields.len() < 8 {
-                continue;
-            }
-            let f = |i: usize| -> f64 {
-                fields.get(i).and_then(|s| s.trim().parse().ok()).unwrap_or(0.0)
-            };
-            let date = fields[0].trim().trim_matches('\'').to_string();
-            if date.is_empty() {
-                continue;
-            }
-            klines.push(KLine {
-                date,
-                open: f(4),           // TOPEN(开盘)
-                high: f(2),           // HIGH(最高)
-                low: f(3),            // LOW(最低)
-                close: f(1),          // TCLOSE(收盘)
-                volume: f(6) * 100.0, // VOTURNOVER(手) → 股
-                amount: f(7),         // VATURNOVER(元)
-                turnover_rate: None,
-                adj_factor: None, // 网易不支持复权
-            });
-        }
-        klines.sort_by(|a, b| a.date.cmp(&b.date));
-        if klines.len() > limit as usize {
-            let start = klines.len() - limit as usize;
-            klines = klines[start..].to_vec();
-        }
-        Ok(klines)
+        // 日线与分钟级统一走新浪 `CN_MarketData.getKLineData`。
+        //
+        // 依据（2026-10-01 运行日志 + 独立实测）：原实现让日线走网易 chddata，而该接口
+        // 已实测返回 `502 Bad Gateway`，body 里没有可用 CSV ⇒ 解析出 0 条 ⇒ 上层判
+        // 「返回空数据(非故障)」，**日线静默全空且不降级**（日志里
+        // `klines 000001 sina 失败: K线返回空` 走的正是这条已死的网易路径）。
+        // 新浪日线（scale=240）实测对沪深与科创板均可用（002041 / 688806 / 600519），
+        // 与分钟级同源，故不再维护两个通道 —— 网易那段实现连同其 code 与字段口径一并
+        // 移除（需要恢复时见 git 历史：code=市场位(0沪/1深)+代码，字段顺序
+        // date,TCLOSE,HIGH,LOW,TOPEN,LCLOSE,VOTURNOVER(手),VATURNOVER(元)）。
+        self.get_klines_from_sina(stock_code, period, limit).await
     }
 
     async fn get_financials(&self, stock_code: &str) -> Result<Vec<FinancialReport>, DataError> {
-        let market = if stock_code.starts_with('6') {
-            "sh"
-        } else {
-            "sz"
-        };
-        // 网易财经财务指标 API
-        let url = format!(
-            "https://quotes.money.163.com/service/zycwzb_{market}{stock_code}.html?type=report&start=2020&end=2026"
-        );
-        let resp = self.http.get(&url).header("Referer", "https://money.163.com/").send().await?;
-        crate::check_response_429(&resp, "sina")?;
-        let body = resp.text().await?;
-        let mut reports = Vec::new();
-        for line in body.lines().skip(2) {
-            let fields: Vec<&str> = line.split(',').collect();
-            if fields.len() < 12 {
-                continue;
-            }
-            let f = |i: usize| -> Option<f64> { fields.get(i).and_then(|s| s.trim().parse().ok()) };
-            let report_date = fields[0].trim().to_string();
-            if report_date.is_empty() || report_date.contains("报告期") {
-                continue;
-            }
-            reports.push(FinancialReport {
-                stock_code: stock_code.to_string(),
-                report_date,
-                revenue: f(1),
-                net_profit: f(2),
-                eps: f(3),
-                bps: f(4),
-                roe: f(5),
-                debt_ratio: f(6),
-                gross_margin: f(7),
-                net_margin: f(8),
-                revenue_yoy: f(9),
-                profit_yoy: f(10),
-                total_assets: f(11),
-                operating_cash_flow: None,
-                capital_expenditure: None,
-                free_cash_flow: None,
-                current_ratio: None,
-                quick_ratio: None,
-                goodwill: None,
-                accounts_receivable: None,
-                estimated: Some(false),
-            });
-        }
-        Ok(reports)
+        // 原实现走网易 `quotes.money.163.com/service/zycwzb_*`（财务指标 CSV）。
+        // 2026-10-01 实测该域名恒返回 `502 Bad Gateway`（与其 kline 的 chddata 同域同时
+        // 失效），通道整体不可用 ⇒ 整段删除，而不是留着"能连上但解析出 0 条"的版本 ——
+        // 后者会伪装成「该股没有财报」，正是本轮系列修复要消除的失效形态。
+        //
+        // 另注：本 vendor **不在** `financials` 路由表内（见 `lib.rs` 的 `default_routing`），
+        // 所以此处改动当前不产生行为变化；保留一个**显式 Err** 是为了将来若有人把它加回
+        // 路由时，第一次调用就能看到明确原因，而不是静默返空。
+        // 要真正启用，须先接一条实测可用的源（新浪的财务页是 HTML，解析成本另计）。
+        let _ = stock_code;
+        Err(DataError::VendorError {
+            vendor: "sina".into(),
+            message: "sina 财务通道已下线（网易 zycwzb 502）".into(),
+        })
     }
 
     async fn get_news(&self, stock_code: &str, limit: u32) -> Result<Vec<NewsItem>, DataError> {
@@ -594,5 +629,63 @@ mod sina_fflow_asof_tests {
         assert!(mf.history.iter().all(|h| h.date.as_str() <= "2026-09-22"), "{:?}", mf.history);
         assert_eq!(mf.large_net, None);
         assert!(mf.history.iter().all(|h| h.large_net.is_none()));
+    }
+}
+
+#[cfg(test)]
+mod sina_kline_tests {
+    //! 2026-10-01：新浪 K 线（分钟级）通道的判据（零网络）。
+    //!
+    //! 缺陷背景：原实现认为「新浪无直接K线接口」，把所有非日线周期直接返空，
+    //! 于是 m60 在 push2his / 腾讯 / TDX 三源全灭时无源可用。这里钉住
+    //! ①分钟周期真的生成新浪 URL（而不是又一次返空）②日线映射到 scale=240
+    //! ③datalen 有保守上限。
+
+    use super::*;
+
+    #[test]
+    fn minute_periods_map_to_sina_scale() {
+        let u = sina_kline_url("sz002041", "60", 500).expect("m60 必须有新浪通道");
+        assert!(u.contains("symbol=sz002041"), "{u}");
+        assert!(u.contains("scale=60"), "60 分钟必须映射到 scale=60: {u}");
+        assert!(u.contains("ma=no"), "不复权交由 lib 层本地应用: {u}");
+        // ⚠ 2026-10-01 补：`sina_kline_url` 新增第 3 参 `limit` 时，本处是**唯一**漏改的
+        //   调用点（同模块其余调用点都已带实参）⇒ 整个 crate 的测试目标编译失败。
+        //   取值与上一行同用例的 60 分钟分支一致（`500`）；本断言只看 `scale=5`。
+        let m5 = sina_kline_url("600519", "Min5", 500).expect("Min5 必须有通道");
+        assert!(m5.contains("symbol=sh600519"), "{m5}");
+        assert!(m5.contains("scale=5"), "{m5}");
+    }
+
+    /// 日线 → 240；周线 → 1200；月线 → 7200。周/月线此前缺映射 ⇒ 全链无源
+    /// （2026-10-01 日志：002164 的 `klt=103` 在五个源上全空）
+    #[test]
+    fn daily_weekly_monthly_map_to_sina_scale() {
+        let d = sina_kline_url("600519", "daily", 100).expect("daily");
+        assert!(d.contains("scale=240"), "{d}");
+        let w = sina_kline_url("600519", "weekly", 100).expect("weekly");
+        assert!(w.contains("scale=1200"), "{w}");
+        assert!(sina_kline_url("600519", "102", 100).is_some(), "102 是周线");
+        let m = sina_kline_url("600519", "103", 100).expect("103 是月线");
+        assert!(m.contains("scale=7200"), "{m}");
+        // 未映射的周期仍返 None：不猜周期，让上层继续 fallback
+        assert!(sina_kline_url("600519", "yearly", 100).is_none());
+    }
+
+    /// 北交所（4/8 开头）必须走 `bj` 前缀：实测 `bj430047` 可用，
+    /// 而原先一律落进 `sz` ⇒ 请求恒空（新浪对不存在的 symbol 返回空数组，不报错）
+    #[test]
+    fn beijing_exchange_uses_bj_prefix() {
+        let d = sina_kline_url("430047", "daily", 100).expect("daily");
+        assert!(d.contains("symbol=bj430047"), "{d}");
+        let m = sina_kline_url("833171", "60", 100).expect("m60");
+        assert!(m.contains("symbol=bj833171"), "{m}");
+    }
+
+    /// datalen 有保守上限：接口对超大值的容忍度未实测，不能被一个超大 limit 带崩
+    #[test]
+    fn datalen_is_capped() {
+        let u = sina_kline_url("600519", "60", 9999).expect("m60");
+        assert!(u.contains("datalen=1000"), "应被压到保守上限: {u}");
     }
 }

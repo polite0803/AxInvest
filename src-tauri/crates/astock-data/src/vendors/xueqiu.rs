@@ -44,23 +44,22 @@ impl XueqiuVendor {
 }
 
 /// 将股票代码转换为雪球 symbol_id 格式（SH/SZ/BJ + 纯数字代码）。
-/// 自动去除 sh/sz/bj 前缀（大小写不敏感），避免 "sh600519" → "SHsh600519" 的错误。
+///
+/// 显式市场标记优先：`sh000001` 剥前缀后按首位推断会得到 `SZ000001`（平安银行），
+/// `000001.SH` 则根本剥不掉标记、拼成 `SZ000001.SH` —— 两者都**静默查错标的**，
+/// 而雪球只有一条 `000001` 是对的（`SH000001` 上证指数）。
 fn to_xq_symbol(code: &str) -> String {
-    // 去除可能的市场前缀（sh/sz/bj，大小写不敏感）
-    let bare = code
-        .strip_prefix("sh")
-        .or_else(|| code.strip_prefix("SH"))
-        .or_else(|| code.strip_prefix("sz"))
-        .or_else(|| code.strip_prefix("SZ"))
-        .or_else(|| code.strip_prefix("bj"))
-        .or_else(|| code.strip_prefix("BJ"))
-        .unwrap_or(code);
-    if bare.starts_with('6') || bare.starts_with('9') {
-        format!("SH{bare}")
-    } else if bare.starts_with('8') || bare.starts_with('4') {
-        format!("BJ{bare}")
+    if let Some((bare, ex)) = crate::code_form::split_explicit_market(code) {
+        return format!("{}{bare}", ex.xueqiu_tag());
+    }
+    // 到这里输入必然不带市场标记（上一步已把 sh/sz/bj 前缀与 .SH/.SZ/.BJ 后缀都收走），
+    // 按首位数字推断即股票的老规矩。
+    if code.starts_with('6') || code.starts_with('9') {
+        format!("SH{code}")
+    } else if code.starts_with('8') || code.starts_with('4') {
+        format!("BJ{code}")
     } else {
-        format!("SZ{bare}")
+        format!("SZ{code}")
     }
 }
 
@@ -354,5 +353,24 @@ impl StockVendor for XueqiuVendor {
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         let _ = method;
         AsOfCapability::Fallthrough
+    }
+}
+
+#[cfg(test)]
+mod code_form_tests {
+    use super::*;
+
+    /// 显式市场标记优先于首位推断：`sh000001` 此前剥前缀后按首位「0」推断会得到
+    /// `SZ000001`（平安银行）—— 静默查错标的；`000001.SH` 更是根本剥不掉标记，
+    /// 拼成 `SZ000001.SH`。两者都不报错，只在下游表现为「K线返回空」。
+    #[test]
+    fn explicit_market_tag_wins_over_first_digit_inference() {
+        assert_eq!(to_xq_symbol("000001.SH"), "SH000001");
+        assert_eq!(to_xq_symbol("sh000001"), "SH000001");
+        assert_eq!(to_xq_symbol("399006.SZ"), "SZ399006");
+        assert_eq!(to_xq_symbol("430047.BJ"), "BJ430047");
+        // 裸码口径不变
+        assert_eq!(to_xq_symbol("600519"), "SH600519");
+        assert_eq!(to_xq_symbol("000001"), "SZ000001");
     }
 }

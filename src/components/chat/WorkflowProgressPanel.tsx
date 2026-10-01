@@ -635,7 +635,7 @@ const StepRow = memo(function StepRow({
           {/* 运行中节点的详细执行状态 */}
           {step.status === "running" && step.elapsed_ms !== undefined && (
             <div className="flex gap-4 items-center">
-              <span className="text-zinc-500">{t("chat.workflow.executionTime")}</span>
+              <span className="text-zinc-500">{t("chat.workflow.duration")}</span>
               <span style={{ color: token.colorPrimary }}>
                 {formatElapsed(step.elapsed_ms)}
               </span>

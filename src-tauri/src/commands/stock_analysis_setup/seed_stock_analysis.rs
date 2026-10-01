@@ -208,7 +208,8 @@ type AlgoToolRow = (
 /// （调 MCP 工具 `get_stock_pledge_data`）。补的是**契约缺口**：
 /// `lockup-watcher.md` 的方法论与自检要求分析「质押比例 > 50% 高警戒线 / 质押风险敞口」，
 /// 但该文件的 `data_sources` 与 `PROFILE_TOOLS` 白名单**都不含质押工具**，其唯一上游
-/// `t-lockup-data` 调的 `get_stock_lockup_bundle` 只聚合解禁 / 增减持 / 大宗交易**三方**。
+/// `t-lockup-data` 调的 `get_stock_lockup_bundle` 当时只聚合解禁 / 增减持 / 大宗交易**三方**
+/// （2026-10-01 起为**四方**，补了股东户数，见 v117 条）。
 /// ⇒ 每轮都在逼模型给一个**取不到的维度**编理由。全库实测：15 轮里 12 轮写了质押缺口，
 /// 措辞从「质押数据缺失」（相对准确）漂移到「质押数据获取失败（工具调用被拒绝）」
 /// 这种**伪归因**（详见 `AUDIT-pledge-attribution-2026-09-21.md`）。
@@ -617,7 +618,99 @@ type AlgoToolRow = (
 ///    `PLAN-reco-reflection-closure.md` Q2）。不重播种则存量 DB 无该变量、消费侧恒按
 ///    shadow 兜底 ⇒ 闭环永远进不了 on。**必须升版**让新变量落到模板。
 /// **必须升版**：两者都改变四档 posterior 与仓位数值，不重播种则存量 DB 仍按旧口径出决策。
-pub(crate) const TEMPLATE_VERSION: i32 = 110;
+/// **v111(2026-10-01)**：源图去重 —— `e-pace-calc-portfolio-mgr` 原先被 push **两次**
+/// （「补齐缺失的显式边」段与 pace-calc 节点段各一次，六字段全同），删掉后者。
+/// 该重边此前一直由快速链派生器兜住（合并 + `建议修正源图` 告警），但**那层保护只覆盖快速链**：
+/// 源链是把重边原样带进运行图的（实测 600887 运行的 `deps_dump` 里 portfolio-mgr 的入边
+/// 有两条 `pace-calc`，依赖计数 19 而非 18）。修源图而不是继续在派生器里兜 —— 派生器的
+/// 合并是防御，不是许可证。
+/// **必须升版**：边表随模板快照落库，不重播种则存量 DB 仍带重边。
+/// **v112(2026-10-01)**：修 `portfolio-mgr.rhai` f5 段的**运行期前向引用**（生产实证）——
+/// 「估值周期闸口」曾按 `time_horizon` 分支，而该变量定义在文件**后面的定档段**
+/// （`data_gaps` 更在其后）⇒ Rhai 顺序求值下运行期抛 `Variable not found: time_horizon`，
+/// 整条决策被脚本末尾的 catch 兜成 `action="数据缺失"` ⇒ **凡有估值数据的分析全部静默降级**。
+/// 处置：主链恢复 0.56/0.24/0.20 的**纯可用腿归一**（与回归前 `7629f089e^` 逐位相同，
+/// 即主链零语义漂移、只是不再崩）；周期降权交回**权威逐档乘数**
+/// （`evidence_weight::horizon_leg_multipliers()` → 脚本 `leg_mult`，f5 在
+/// ultra_short/short/mid/long = 0.3/0.5/1.2/2.0），并在 Phase F 段**按该乘数**补
+/// `data_gaps` 留痕（口径只有一处；脚本侧不再手抄 0.30/0.50）。
+/// **必须升版**：脚本正文随模板快照落库，不重播种则存量 DB 仍跑那份会崩的公式。
+/// **v113(2026-10-01)**：补 `horizon_prior_json` 的**同名 `input_mapping`**（Phase C 遗留）——
+/// v102 只做了「hooks 恒注入 + 脚本 `prior_for` 裸读」，**漏了本节点映射**；而脚本能看到的
+/// 注入名由 `input_mapping` 的 key 侧单独决定（hooks 写进黑板 `variables` 并不等于进了 scope，
+/// `code_executor` 只按映射注入）⇒ 运行期 `Variable not found: horizon_prior_json`
+/// （实测 line 2853），整条决策被 catch 兜成「数据缺失」。该缺陷被 v112 修掉的前向引用崩溃
+/// **遮蔽**（那次在 line 844 就先崩了），故两处必须分开修。
+/// 判据：`rhai_registry.rs::portfolio_mgr_runs_with_valuation_evidence_without_degrading`
+/// 已收紧为按**本节点 input_mapping ∪ 脚本 `present(x)`** 造 scope 真执行整脚本，
+/// 并在注入前跑之前它就会以同一条报文报红（首版把 hooks 的 `Variable.name` 也算来源 ⇒ 正好瞎在这一格）。
+/// **必须升版**：`input_mapping` 随模板快照落库，不重播种则存量 DB 仍缺该映射。
+/// **v114(2026-10-01)**：`portfolio-mgr.rhai` 的**估值腿周期降权留痕换通道** ——
+/// 由 `data_gaps` 迁到新增字段 `weightAdjustments`（结构化：`tier` / `leg` / `multiplier`）。
+/// 根因：f5 的 0.3 / 0.5 是 `evidence_weight::horizon_leg_multipliers()` 里的**常量**，
+/// 凡 `f5_has_valuation` 为真就恒推恰好 2 条 ⇒ **每一条**带估值数据的分析都恒亮
+/// 「决策可信度受限 / 数据缺口 2 项」，把「本档主动降权」（设计选择，零数据缺失）说成数据
+/// 缺口，`PE数据(t-risk)` 这类真缺口被淹没成噪声；且公式侧恒多两条 LLM 侧不可能产出的串，
+/// 系统性压低双视角 `data_gaps` 一致性（Jaccard）维度。
+/// 判据：`rhai_registry.rs::portfolio_mgr_runs_with_valuation_evidence_without_degrading`
+/// 双向锁死（新通道必须有那两条、`data_gaps` 里必须一条都没有）。
+/// 消费侧：四档面板按档渲染该注脚；`DecisionTrustNotice` 不再据它计「数据缺口 N 项」、
+/// 也不再据它亮**每张卡恒亮**的警示条。
+/// **必须升版**：脚本正文经 `include_str!` 随模板快照落库，不重播种则存量 DB 仍跑那份把
+/// 降权写进 `data_gaps` 的旧脚本。历史记录里已落库的那两条缺口条目**不回填**（是既有事实）。
+/// **v115(2026-10-01)**：`t-market-data` 接上 K 线根数 `kline_limit`（120 → 250）——
+/// `market-analyst.md` 方法论第 1 条要求「30/60/120/250 日均线状态」，而 `get_stock_kline`
+/// 的 `limit` 缺省为 **120**，且 `kline_limit` 变量自建立以来**全仓零消费方**
+/// （只在种子定义、设置面板、单测里出现）⇒ 实际恒取 120 根，**MA250 物理上算不出来**。
+/// 实证（600406 运行 `a7e590a4`）：`t-market-data.result.content` 恰 120 根、首根 2026-04-09，
+/// 技术面报告写「**250日均线数据缺失**（数据仅覆盖4月至今）」⇒ 命中失败标记词表 ⇒ 该节点被判
+/// 「⚠️ 低置信」，`gap_reason` 归因到「上游工具数据不完整」。这不是分析师措辞问题，是
+/// **提示词要的数据没给**（判据：同一轮里 120 = `unwrap_or(120)`，不是 vendor 只给这么多）。
+/// **必须升版 + 强制覆写**：`merge_variable_values` 的语义是「新定义 + 无条件保留旧值」，
+/// DB 存量 120 会在升级时盖回来 ⇒ 只改默认值是**假修复**（同 v74 的 DCF 先例，
+/// 见 `seed_variables::DEFAULT_ANALYST_KLINE_LIMIT` 与 `KLINE_LIMIT_MIGRATION_VERSION`）。
+/// **v116(2026-10-01)**：`t-pledge-data` 接到 `a-fundamentals`（供给边 + `context_sources` 成对），
+/// 并订正 `fundamentals-analyst.md` 里一处**条件性假声明**。实证（600887 运行 `f474ec9b`）：
+/// 该提示词要求「检查 A 股特色风险（…**质押比例**）」，而本轮质押数据**已经取到**
+/// （`{"pledgeRatio":0.01,"riskLevel":"安全"}`，解禁观察员那边正常引用），只因
+/// `a-fundamentals` 的 `context_sources` 只列了自己的 `t-fundamentals-data` ⇒ 它看不到，
+/// 只能写「无审计意见/商誉/**质押**信息 ⇒ A 股特色风险维度数据缺失」⇒ 命中失败标记词表
+/// ⇒ 判「⚠️ 低置信」。**判据：供给存在 ≠ 供给到达** —— DAG 拉到不等于进了该分析师的 prompt
+/// （`agent_executor` 的「--- 上游节点输出 ---」段只遍历 `context_sources`）。
+/// 同时订正提示词第 4 条：原文写「商誉/应收账款等…**已包含在预聚合报告中，直接引用即可**」，
+/// 而生成端（`astock-data/src/fundamentals_report.rs`）是 `if let Some(v)` **条件渲染**——
+/// 字段缺就整行不出现，于是「报告里没有」被分析师读成「数据缺失」（真因是上游财报无该字段）。
+/// 现改为条件式表述 + 指定「设计性缺席」措辞，与该判据的词表口径对齐。
+/// **同日并入（仍记 v116）**：同侪 ROE 取数补齐（`astock-data` 侧）后，
+/// `PeerComparison` 新增 `roePeriod` 字段暴露口径 ⇒ 提示词第 3 条同步要求
+/// 「同行 ROE 必须连同 `roePeriod` 一起读，非 12-31 的同侪不得与年报同侪横比」。
+/// （`ROEJQ` 是年内累计值：600887 实测中报 10.09 vs 年报 20.87，混期差 2.07 倍。）
+/// **必须升版**：`context_sources` / 边 / 提示词正文三者都随模板快照落库。
+/// **v117(2026-10-01)**：① `get_stock_lockup_bundle` 补**第四方**「股东户数」
+/// （`RPT_HOLDERNUMLATEST`：户数/变化率/户均持股/截止日/公告日）；② 政策面提示词补
+/// 「通道只给新闻摘要、不含政策原文」的**既定边界**说明。
+/// 实证（300604 运行 `cd044375`）：v116 后 10 个分析师里 8 个正常，只剩两处失败标记 ——
+///   · `lk`「`data_gaps`：股东人数数据缺失」：`lockup-watcher.md` 的方法论/工作流程/自检
+///     **三处**都要求股东人数，而它既不在 `data_sources`（只有 bundle + pledge）也无任何工具能取
+///     ⇒ 与 v72 的质押缺口**同型**（提示词要一个取不到的维度）。本轮把通道接上（bundle 第四方），
+///     分析师从此能真引用 `holderNumRatio`（**下降=筹码集中**）；
+///   · `pol`「未能获取具体部委文件编号与《规划》文本条款」：政策通道是
+///     `search_news`/`get_stock_news`/`get_cls_flash`，**结构上只有摘要**（该限制此前只写在种子
+///     注释里，从未写进提示词）⇒ 分析师把「通道边界」报成了「取数失败」。本轮改为在提示词里
+///     写明边界 + 指定措辞（「系媒体转述、未逐条核实」），不写成失败动词。
+/// **必须升版**：提示词正文与 bundle 契约都随模板快照落库；且 `holder_count` 段要让存量 DB 用到
+/// 需重播种（节点/边不变，但提示词的「四方」口径必须与 bundle 同步）。
+pub(crate) const TEMPLATE_VERSION: i32 = 117;
+
+/// `kline_limit` **一次性**迁移门的水位线。
+///
+/// 语义：`previous_version < 本值` ⇒ 强制把 DB 存量的 `kline_limit` 覆写为
+/// `seed_variables::DEFAULT_ANALYST_KLINE_LIMIT`。取值判据与 `DCF_MIGRATION_VERSION` 完全一致：
+/// **「被守护的常量最后一次变更时对应的 `TEMPLATE_VERSION`」**，不是「比上一版 +1」。
+/// 为什么需要它：`merge_variable_values` 对同名变量**无条件保留旧值**，而旧值 120
+/// 正是本轮要修掉的那个数（旧种子的缺省，不是用户的深思熟虑）⇒ 不覆写等于没改。
+/// ⚠ 与 DCF 门并列的同一约束仍成立：`TEMPLATE_VERSION ≥ 本值`（下方编译期断言）。
+pub(crate) const KLINE_LIMIT_MIGRATION_VERSION: i32 = 115;
 
 /// DCF 估值参数**一次性**迁移门的水位线。
 ///
@@ -641,6 +734,16 @@ const _: () = assert!(
     "版本号与 DCF 迁移门水位线倒挂：`TEMPLATE_VERSION` 必须 ≥ `DCF_MIGRATION_VERSION`。\
      落库写的是前者、门读的是后者 ⇒ 倒挂会让 DB 停在低于门的版本上，门永远关不上，\
      下次无关升版会把用户面板调好的 DCF 参数打回默认。详见两个常量的文档注释。"
+);
+
+// 同一约束的第二条实例：`TEMPLATE_VERSION ≥ KLINE_LIMIT_MIGRATION_VERSION`（v115 新增）。
+// 与 DCF 那条**同因同果**，故并列一份而不是把两个门合并成一个常量 —— 合并会让
+// 「抬其中一个门」连带把另一个门也抬起来，把无关变量再打回一次默认值。
+const _: () = assert!(
+    TEMPLATE_VERSION >= KLINE_LIMIT_MIGRATION_VERSION,
+    "版本号与 K 线根数迁移门水位线倒挂：`TEMPLATE_VERSION` 必须 ≥ `KLINE_LIMIT_MIGRATION_VERSION`。\
+     危害与 DCF 门同型（门关不上 ⇒ 每次无关升版都把 kline_limit 打回 250），\
+     详见 `KLINE_LIMIT_MIGRATION_VERSION` 的文档注释。"
 );
 
 // ## 为什么提到模块级
@@ -2328,7 +2431,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // 契约缺口背景（详见 `AUDIT-pledge-attribution-2026-09-21.md`）：
     //   `lockup-watcher.md` 的方法论第 4 条与自检清单都要求分析「质押比例 > 50%
     //   高警戒线 / 质押风险敞口」，而其唯一上游 `t-lockup-data` 调的是
-    //   `get_stock_lockup_bundle`（解禁 + 增减持 + 大宗交易**三方**聚合，
+    //   `get_stock_lockup_bundle`（当时是解禁 + 增减持 + 大宗交易**三方**聚合；
+    //   2026-10-01 v117 起为**四方**，补了股东户数），
     //   结构上不含质押）⇒ 该维度**每轮必缺**，模型只能自己给缺口编原因
     //   （全库 15 轮里 12 轮写了质押缺口，最远漂到「工具调用被拒绝」的伪归因）。
     //
@@ -2413,6 +2517,23 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         let row = i / 3;
         let x_tool = col_x[col];
         let y = row_y_base + row as f64 * row_dy;
+        // ── v115(2026-10-01)：唯一带额外工具参数的节点 —— K 线根数 ──
+        // `kline_limit` 自建立以来全仓**零消费方**（只在 seed_variables / 设置面板 /
+        // 单测里出现），而 `get_stock_kline` 的 `limit` 缺省是 120
+        // （`astock-data/src/mcp_tools.rs`：`unwrap_or(120).min(500)`）
+        // ⇒ `market-analyst.md:29` 要求的「30/60/120/250 日均线」里 **MA250 恒不可算**，
+        // 技术面报告于是写「250日均线数据缺失（数据仅覆盖4月至今）」⇒ 该节点被判「低置信」。
+        // 实证与取值理由见 `seed_variables::DEFAULT_KLINE_LIMIT`。
+        //
+        // ⚠ 刻意**不**接 `kline_period`（同批发现的另一个「声明未消费」变量）：
+        //   接上后用户一旦把它设成 weekly/monthly，`kline_limit=250` 就变成
+        //   「250 根周线」（≈5 年，且与本节点「**日**均线」的消费语义相反）。
+        //   那是**另一个**需要单独论证的决定，不夹带在本轮修复里。
+        let extra: &[(&str, &str)] = if *tool_id == "t-market-data" {
+            &[("limit", "kline_limit")]
+        } else {
+            &[]
+        };
         nodes.push(tool_node(
             tool_id,
             // F-2 修复: 原本硬编码 "获取数据" 导致 9 个 tool 节点 title 完全一致、
@@ -2421,7 +2542,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             tool_name,
             tool_id,
             arg_key,
-            &[],
+            extra,
             Some("p-analysts"),
             x_tool,
             y,
@@ -2467,6 +2588,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // 出边：质押数据 → a-lockup。这条边是**供给**，`context_sources` 是**消费声明**，
     //   两者必须同时存在（只写一边 ⇒ 变量仍不进 `context.variables`）。
     edges.push(edge("e-t-pledge-data-a-lockup", PLEDGE_TOOL_ID, "a-lockup"));
+    // v116(2026-10-01)：同一份质押数据 → a-fundamentals（理由见下方 context_sources 处）。
+    //   ⚠ 供给边与消费声明**成对**：只加 `context_sources` 而不加边，节点不会等
+    //     `t-pledge-data` 完成 ⇒ 取到的是「还没跑完」的空变量（时序竞态，比恒缺更隐蔽）。
+    edges.push(edge("e-t-pledge-data-a-fundamentals", PLEDGE_TOOL_ID, "a-fundamentals"));
 
     // 工具由模板节点 config.tools 统一管理
     // 第 10 个 a-catalyst 放置在 3×3 网格下方（col 0, row 3），作为额外独立行
@@ -2484,7 +2609,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             //   不进 `context.variables` ⇒ 分析师报告里这一维度恒缺。与 portfolio-mgr
             //   那批「写进 input_mapping ≠ 有人供给」是**同一失效机制**（见本文件
             //   「修复 portfolio-mgr 因子输入全空」段的注释）。
-            a.config.context_sources = if *id == "a-lockup" {
+            // v116(2026-10-01)：**同一机制的第二例** —— a-fundamentals 也要质押。
+            //   实证（600887 运行 `f474ec9b`）：`fundamentals-analyst.md` 方法论第 5 条要求
+            //   「检查 A 股特色风险（ST/退市/审计非标/商誉过高/**质押比例**）」，而本轮
+            //   `t-pledge-data` **已经取到**（`{"pledgeRatio":0.01,"riskLevel":"安全"}`），
+            //   只因 `context_sources` 只列了自己的 `t-fundamentals-data` ⇒ 基本面分析师
+            //   看不到它，只能写「无审计意见/商誉/**质押**信息 ⇒ A 股特色风险维度数据缺失」
+            //   ⇒ 命中失败标记词表 ⇒ 判「⚠️ 低置信」（同一份数据，解禁观察员那边是正常引用）。
+            //   判据：**供给存在 ≠ 供给到达** —— 节点被 DAG 拉到的数据，必须在该分析师的
+            //   `context_sources` 里列名才会进它的 prompt（`agent_executor` 的
+            //   「--- 上游节点输出 ---」段只遍历 `context_sources`）。报「数据缺失」前先问
+            //   「本轮到底取到了没有」。
+            a.config.context_sources = if *id == "a-lockup" || *id == "a-fundamentals" {
                 vec![tool_id.to_string(), PLEDGE_TOOL_ID.to_string()]
             } else {
                 vec![tool_id.to_string()]
@@ -4546,6 +4682,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // `stock_workflow/hooks.rs` 恒注入）。portfolio-mgr.rhai 的 `leg_mult` 消费，
                     // 缺它 ⇒ 全腿乘数 1.0 并在每档 `weightsSource` 标 fallback_unity（可检降级）。
                     ("horizon_leg_weights_json", "horizon_leg_weights_json"),
+                    // 逐档收缩先验表（四周期科学化 Phase C）：权威源
+                    // `reflection_stats::build_hitrate_stats` + `horizon_prior::horizon_prior_map`
+                    // （由 `stock_workflow/hooks.rs` 恒注入：取数失败时值是 null）。
+                    // portfolio-mgr.rhai 的 `prior_for` **裸读**本名（不在 `present()` 里）
+                    // ⇒ 缺映射不是「降级为共用 prior」，而是运行期 `Variable not found`、
+                    // 整条决策被 catch 兜成「数据缺失」。
+                    // ⚠ v102（Phase C）只加了 hooks 注入与脚本消费，**漏了这一条映射** ——
+                    // 该缺陷被同一时期 f5 段的前向引用崩溃遮住，直到 v112 修掉前者才暴露
+                    // （2026-10-01 09:37 的 live 运行实报 line 2853）。
+                    // 判据：`rhai_registry.rs::portfolio_mgr_runs_with_valuation_evidence_without_degrading`
+                    // 按**本节点 input_mapping ∪ present(x)** 造 scope 真执行整脚本。
+                    ("horizon_prior_json", "horizon_prior_json"),
                     // ── P1 新增: 资金面因子 f9 数据源 ──
                     // t-hotmoney-data 输出 get_stock_money_flow 的 JSON 字符串
                     // Rhai 中用 json_parse() 解析后提取主力净流入占比
@@ -4831,8 +4979,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         // P0 修复(2026-07-22): 添加 pace-calc → a-catalyst 依赖边
         // 原缺失此边导致 pace-calc 在 a-catalyst 完成前就执行，llm_events 恒为 null
         edges.push(edge("e-a-catalyst-pace-calc", "a-catalyst", pace_id));
-        // pace-calc → portfolio-mgr: pace_signal 作为 f11 输入
-        edges.push(edge("e-pace-calc-portfolio-mgr", pace_id, "portfolio-mgr"));
+        // pace-calc → portfolio-mgr（pace_signal 作为 f11 输入）**已在上面「修复 portfolio-mgr
+        // 因子输入全空」段接线，此处不得再 push 一次**：v111(2026-10-01) 之前这里正是同形的
+        // 第二条，源图因此自带重边（快速链派生器每轮都要合并 + 告警，源链则把重边直接带进
+        // 运行图，portfolio-mgr 的入边表里 pace-calc 出现两次、依赖计数虚高）。
     }
 
     // ── P3 (real-nodes): rule-check 规则检查 Agent ──
@@ -5454,6 +5604,24 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             &v,
             "value_dcf_growth_rate",
             serde_json::json!(super::seed_variables::DEFAULT_DCF_GROWTH_RATE_PCT),
+        )
+    } else {
+        variables_val
+    };
+
+    // ── v115(2026-10-01)：`kline_limit` 存量覆写（与上面 DCF 门同型的一次性门）──
+    // 为什么**必须**覆写而不能只改 `seed_variables` 的默认值：`merge_variable_values`
+    // 的语义是「新定义 + **无条件保留旧值**」，DB 里那个 120（旧种子缺省，非用户深思）
+    // 会在升级时原样盖回来 ⇒ 改默认值是**假修复**（同 v74 的 DCF 先例，见
+    // `seed_variables::DEFAULT_DCF_GROWTH_RATE_PCT` 的「为什么需要第 2 处引用」段）。
+    // 水位线取 `KLINE_LIMIT_MIGRATION_VERSION`（模块级，含编译期断言）。
+    // ⚠ 两个门**分开**判断（不并成一条 `||`）：合并会让抬其中一门时连带把无关变量
+    //   再打回一次默认值，抹掉用户在面板里对另一项的调整。
+    let variables_val = if previous_version.is_none_or(|v| v < KLINE_LIMIT_MIGRATION_VERSION) {
+        force_variable_value(
+            &variables_val,
+            "kline_limit",
+            serde_json::json!(super::seed_variables::DEFAULT_ANALYST_KLINE_LIMIT),
         )
     } else {
         variables_val
@@ -7407,10 +7575,14 @@ fn derive_fast_workflow_graph(
 
     // ④ 边裁剪 + **完全同形的重复边**合并
     //
-    // ⚠ 源图**自身**就带重复边：`e-pace-calc-portfolio-mgr` 在源链里被 push 了两次
-    //   （portfolio-mgr 依赖段与 pace-calc 段各一次，两端与 handle 完全相同，纯冗余）。
-    //   H1 禁止改源图，而快速链的 `validate_fast_workflow_graph` ① 要求边 id 唯一
-    //   ⇒ 在此合并（保留首条）并打 warn，让该源图缺陷**可见**，而不是静默带进新图。
+    // 合并分支的由来：源图曾**自身**带着重复边 —— `e-pace-calc-portfolio-mgr` 在源链里
+    //   被 push 了两次（portfolio-mgr 依赖段与 pace-calc 段各一次，两端与 handle 完全相同，
+    //   纯冗余）；v111(2026-10-01) 已回到源图删掉后者（见 `TEMPLATE_VERSION` 的 v111 条）。
+    //   ⚠ 但**这段合并逻辑保留**，不是历史残留：派生是通用机制，源图日后只要再出现同形重边，
+    //   这里就该**可见地**合并 + 告警，而不是报错卡死或静默带进新图（快速链的
+    //   `validate_fast_workflow_graph` ① 要求边 id 唯一，源链没有这道门）。
+    //   H1 管的是**派生过程**不得改源图（派生只读源图）；源图里的缺陷要回到种子代码里修 ——
+    //   派生器的合并是防御，不是许可证。
     //
     // 判据边界（**不可**放宽为「按 id 去重」）：只有 6 个字段全同才算冗余副本；
     //   若 id 相同而两端 / handle / 类型不同，那是**真冲突**（两条不同依赖共用一个 id），
@@ -8502,5 +8674,145 @@ mod fast_workflow_derivation_tests {
                 "`{FAST_EXPLAINER_NODE_ID}` 原有的 `{id}` 来源被覆盖 —— 本步只允许追加"
             );
         }
+    }
+
+    /// v115(2026-10-01)：`t-market-data` **落库后**必须真把 `kline_limit` 传给 `get_stock_kline`，
+    /// 且存量安装的旧值 120 必须被一次性门覆写为 250。
+    ///
+    /// ## 为什么必须是**落库后的对象**断言（而不是源码文本断言）
+    ///
+    /// 文本断言只能证明「源码里写了这行」，证明不了「种子化后的节点 config 里真有这条映射」。
+    /// 本缺陷的历史形态正是**两侧各自自洽、合起来不成立**：变量表里有 `kline_limit`
+    /// （默认值/描述/面板入口齐全），工具侧有缺省值（不传也不报错）⇒ 任一单侧测试都绿，
+    /// 而实际取到的恒是 `get_stock_kline` 的缺省 **120** 根 ⇒ MA250 物理上算不出来
+    /// （实证：600406 运行 `a7e590a4`，技术面报告写「250日均线数据缺失（数据仅覆盖4月至今）」，
+    /// 该句命中失败标记词表 ⇒ 节点被判「⚠️ 低置信」，归因还指向「上游工具数据不完整」）。
+    /// 源码面由 `seed_consistency_tests::kline_limit_is_wired_to_market_data_node` 守；
+    /// 本条守对象面，两条互补、都不是多余的。
+    ///
+    /// ## 为什么还要测「存量覆写」
+    ///
+    /// `merge_variable_values` 对同名变量**无条件保留旧值** ⇒ 只改 `seed_variables` 的默认值
+    /// 是「仓库里改了、用户库里没改」的**假修复**（v74 的 DCF 参数即此形态，实测低估 35%）。
+    /// 故必须模拟「存量行 version < 门 且 value=120」，重播种后断言被抬到 250。
+    #[tokio::test]
+    async fn market_data_node_passes_kline_limit_and_migrates_stale_value() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_stock_analysis_workflow_template(db).await.expect("原链种子化应成功");
+
+        // ① 节点 config：`limit` → `kline_limit`（且不得挤掉 `stock_code`）
+        let model = row(db, SOURCE_TEMPLATE_ID).await;
+        let nodes = parse_nodes(&model);
+        let tool = nodes
+            .iter()
+            .find_map(|n| match n {
+                WorkflowNode::Tool(t) if t.base.id == "t-market-data" => Some(t),
+                _ => None,
+            })
+            .expect("源图应含 `t-market-data` 工具节点");
+        assert_eq!(
+            tool.config.input_mapping.get("limit").map(String::as_str),
+            Some("kline_limit"),
+            "`t-market-data` 必须把 `kline_limit` 映射到 `get_stock_kline` 的 `limit` 参数；\
+             缺失 ⇒ 落回工具缺省 120 根 ⇒ MA250 恒不可算，技术面报告会写「250日均线数据缺失」"
+        );
+        assert_eq!(
+            tool.config.input_mapping.get("stock_code").map(String::as_str),
+            Some("stock_code"),
+            "接线不得挤掉原有的 `stock_code` 映射"
+        );
+
+        // ② 变量表落库值必须够算 250 日均线
+        //    ⚠ `variables` 列可空（`Option<String>`）⇒ 取值统一走 `as_deref`，
+        //    不让「读到 None」与「读到空数组」两种失败混成一个 from_str panic。
+        let kline_limit = |m: &workflow_template::Model| -> u64 {
+            let raw = m.variables.as_deref().unwrap_or("[]");
+            let vars: Vec<serde_json::Value> =
+                serde_json::from_str(raw).expect("variables 应是 JSON 数组");
+            vars.iter()
+                .find(|v| v.get("name").and_then(|n| n.as_str()) == Some("kline_limit"))
+                .and_then(|v| v.get("value"))
+                .and_then(|v| v.as_u64())
+                .expect("变量表应含数值型 `kline_limit`")
+        };
+        let seeded = kline_limit(&model);
+        assert!(seeded >= 250, "落库的 kline_limit={seeded} 不足以计算 250 日均线（须 ≥ 250）");
+
+        // ③ 存量覆写：把值打回旧缺省 120、版本降到迁移门之前 ⇒ 重播种必须抬回 250
+        let mut vars: Vec<serde_json::Value> =
+            serde_json::from_str(model.variables.as_deref().unwrap_or("[]"))
+                .expect("variables 应是 JSON 数组");
+        for v in vars.iter_mut() {
+            if v.get("name").and_then(|n| n.as_str()) == Some("kline_limit") {
+                v["value"] = serde_json::json!(120);
+            }
+        }
+        let mut stale: workflow_template::ActiveModel = model.into();
+        stale.variables = Set(Some(serde_json::to_string(&vars).expect("序列化失败")));
+        // ⚠ 按**门**取水位，不要写 `TEMPLATE_VERSION - 1`：两者相等时它「碰巧」正确，
+        //   而只看版本次日就失效 —— 本测试首版正是这么写的，v115→v116 一升版立刻红
+        //   （`115 < 115` 为假 ⇒ 覆写不触发 ⇒ 断言读到 120）。要模拟的是
+        //   「存量行 version < 门」，与承载它的 `TEMPLATE_VERSION` 是两条独立水位线
+        //   （沿革见 `KLINE_LIMIT_MIGRATION_VERSION` 的文档注释）。
+        stale.version = Set(super::KLINE_LIMIT_MIGRATION_VERSION - 1);
+        stale.update(db).await.expect("模拟存量行失败");
+        assert_eq!(kline_limit(&row(db, SOURCE_TEMPLATE_ID).await), 120, "前置：存量值应为 120");
+
+        seed_stock_analysis_workflow_template(db).await.expect("重播种应成功");
+        assert_eq!(
+            kline_limit(&row(db, SOURCE_TEMPLATE_ID).await),
+            u64::from(super::super::seed_variables::DEFAULT_ANALYST_KLINE_LIMIT),
+            "存量覆写未生效：merge_variable_values 保留了 DB 旧值 120 ⇒ 本修复对存量安装是假修复"
+        );
+    }
+
+    /// v116(2026-10-01)：`a-fundamentals` 必须真的拿到 `t-pledge-data`（**供给边 + 消费声明成对**）。
+    ///
+    /// 实证（600887 运行 `f474ec9b`）：`fundamentals-analyst.md` 要求检查「质押比例」，
+    /// 而本轮 `t-pledge-data` **已经取到**（`{"pledgeRatio":0.01,"riskLevel":"安全"}`，
+    /// 解禁观察员那边正常引用），只因该分析师的 `context_sources` 没列它 ⇒ 数据到不了 prompt
+    /// ⇒ 报告写「无审计意见/商誉/**质押**信息 ⇒ A 股特色风险维度数据缺失」⇒ 命中失败标记词表
+    /// ⇒ 判「⚠️ 低置信」。**判据：供给存在 ≠ 供给到达**。
+    ///
+    /// 两侧都必须锁（缺任一侧的形态不同）：
+    ///   · `context_sources` 缺 ⇒ 变量**不进** prompt（`agent_executor` 的
+    ///     「--- 上游节点输出 ---」段只遍历 `context_sources`）；
+    ///   · 供给边缺 ⇒ 该节点**不等**工具完成 ⇒ 拿到「还没跑完」的空变量（时序竞态，更难查）。
+    #[tokio::test]
+    async fn fundamentals_analyst_receives_pledge_data_through_edge_and_context_source() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_stock_analysis_workflow_template(db).await.expect("原链种子化应成功");
+        let model = row(db, SOURCE_TEMPLATE_ID).await;
+        let nodes = parse_nodes(&model);
+        let edges = parse_edges(&model);
+
+        let sources = |id: &str| -> Vec<String> {
+            nodes
+                .iter()
+                .find_map(|n| match n {
+                    WorkflowNode::Agent(a) if a.base.id == id => {
+                        Some(a.config.context_sources.clone())
+                    },
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("源图应含分析师节点 `{id}`"))
+        };
+        for id in ["a-fundamentals", "a-lockup"] {
+            assert!(
+                sources(id).iter().any(|s| s == "t-pledge-data"),
+                "`{id}` 的 `context_sources` 必须含 `t-pledge-data` \
+                 （否则质押数据取到了也进不了它的 prompt ⇒ 报告只能写「质押信息缺失」）"
+            );
+        }
+        assert!(
+            edges
+                .iter()
+                .any(|e| e.source.as_str() == "t-pledge-data"
+                    && e.target.as_str() == "a-fundamentals"),
+            "缺「t-pledge-data → a-fundamentals」供给边：只写 `context_sources` 不写边 ⇒ \
+             该节点不等工具完成，取到的是空变量（时序竞态）"
+        );
     }
 }

@@ -27,15 +27,21 @@ data_sources: [get_stock_lockup_bundle, get_stock_pledge_data]
 
 ## 数据来源（各维度的取数入口）
 
-| 维度             | 工具                        | 取数方式                                                                           |
-| ---------------- | --------------------------- | ---------------------------------------------------------------------------------- |
-| 限售解禁清单     | `get_stock_lockup_bundle`   | 上游节点 `t-lockup-data` 已预拉                                                    |
-| 大股东增减持     | `get_stock_lockup_bundle`   | 同上（bundle 第二方）                                                              |
-| 大宗交易         | `get_stock_lockup_bundle`   | 同上（bundle 第三方）                                                              |
-| **股权质押比例** | **`get_stock_pledge_data`** | 上游节点 `t-pledge-data` 已预拉；需更细颗粒（质押笔数 / 控股股东口径）时可自行调用 |
+| 维度                    | 工具                          | 取数方式                                                                                                                                                               |
+| ----------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 限售解禁清单            | `get_stock_lockup_bundle`     | 上游节点 `t-lockup-data` 已预拉                                                                                                                                        |
+| 大股东增减持            | `get_stock_lockup_bundle`     | 同上（`shareholder_trades` 段）                                                                                                                                        |
+| 大宗交易                | `get_stock_lockup_bundle`     | 同上（`block_trades` 段）                                                                                                                                              |
+| **股东户数 / 户均持股** | **`get_stock_lockup_bundle`** | 同上（`holder_count` 段，2026-10-01 起并入）：`holderNum` 股东户数、`holderNumRatio` 较上期变化率(%)、`avgHoldNum` 户均持股、`endDate` 数据截止日、`noticeDate` 公告日 |
+| **股权质押比例**        | **`get_stock_pledge_data`**   | 上游节点 `t-pledge-data` 已预拉；需更细颗粒（质押笔数 / 控股股东口径）时可自行调用                                                                                     |
 
-**命名易错点**：`get_stock_lockup_bundle` 是「解禁 + 增减持 + 大宗交易」**三方**聚合，
+**命名易错点**：`get_stock_lockup_bundle` 是「解禁 + 增减持 + 大宗交易 + 股东户数」**四方**聚合，
 **结构上不含质押字段**——不要从它里面找质押比例。
+
+**股东户数的解读口径（强制）**：`holderNumRatio` **下降 = 筹码集中**（户数减少通常偏多），
+上升 = 分散；判「是否已过时」看 `noticeDate`（公告日）而不是 `endDate`。
+⚠ 若 `holder_count` 为 `null`（该股从未披露），按下面的表述约定记为
+`holder_count_unavailable（股东户数不可得）` —— **不要**写成「数据缺失/未能获取」。
 
 **缺失时的表述约定（强制）**：若质押维度确实取不到，只写
 `pledge_ratio_unavailable（质押数据不可得）` 并计入 `data_gaps`。

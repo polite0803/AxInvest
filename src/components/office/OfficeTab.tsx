@@ -222,7 +222,7 @@ export function OfficeTab() {
           roomId: formState.roomId,
         });
         if (member) {
-          messageApi.success(t("office.addMember.success"));
+          messageApi.success(t("office.addMember.success", { name: member.displayName || slug }));
           return;
         }
         throw new Error("add member failed");

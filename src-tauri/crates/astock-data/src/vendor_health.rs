@@ -161,6 +161,13 @@ fn is_sustained_connection_error(error: &str) -> bool {
         || e.contains("empty response")
         || e.contains("server closed")
         || e.contains("error on write")
+        // 连接超时同属「环境级」：TCP 握手都没完成（TDX 行情端口 7709 在本机被整体拦掉，
+        // 实测 22 台服务器全超时）。缺这两条时它按 30s 窗口老化恢复 ⇒ 每轮都重新白等满
+        // 超时（2026-10-01 日志：mootdx 每 ~4.5s 失败一次，8 次降级后半分钟又回来）。
+        // 加入后走硬超时恢复（默认 30 分钟），与 RST 类同等待遇。
+        // ⚠ 仍须先达到降级阈值（30s 内 8 次）才会标记，偶发单次超时不受影响。
+        || e.contains("connect timeout")
+        || e.contains("timed out")
 }
 
 use std::collections::{HashMap, VecDeque};

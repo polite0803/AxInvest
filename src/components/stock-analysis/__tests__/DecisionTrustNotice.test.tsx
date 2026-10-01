@@ -213,4 +213,46 @@ describe("DecisionTrustNotice", () => {
     // tag 形态不铺开完整文案，只保留短标签
     expect(screen.queryByText(/被动降级，非看空判断/)).toBeNull();
   });
+
+  // ── 2026-10-01 回归锁定：口径调整（本档主动降权）**不是**数据缺口 ──────────────
+  // 此前「估值腿周期降权」与真缺口同挤 `data_gaps`，而它**恒**有两条（f5 的 0.3/0.5 是
+  // `horizon_leg_multipliers()` 里的常量，凡有估值证据必命中）⇒ 每一条带估值数据的
+  // 分析都恒亮本警示条，「数据缺口 2 项」把 `PE数据(t-risk)` 这类真缺口淹没成噪声。
+  // 现走 `weightAdjustments`，由四档面板按档挂注脚（见 DecisionBanner 的用例）。
+  it("只有口径调整（weightAdjustments）时完全不渲染 —— 设计性降权不是可信度受限", () => {
+    const { container } = render(
+      <DecisionTrustNotice
+        decision={mkDecision({
+          weightAdjustments: [
+            { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
+            { tier: "short", leg: "f5", multiplier: 0.5 },
+          ],
+        })}
+        variant="banner"
+      />,
+    );
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByText(/数据缺口/)).toBeNull();
+  });
+
+  it("口径调整不参与「数据缺口 N 项」计数（缺口 1 项 + 调整 2 项 ⇒ 仍显示 1 项）", () => {
+    render(
+      <DecisionTrustNotice
+        decision={mkDecision({
+          action: "WAIT",
+          positionPct: 8.4,
+          dataGaps: ["PE数据(t-risk)"],
+          weightAdjustments: [
+            { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
+            { tier: "short", leg: "f5", multiplier: 0.5 },
+          ],
+        })}
+        variant="banner"
+      />,
+    );
+    expect(screen.getByText(/数据缺口 1 项/)).toBeTruthy();
+    expect(screen.queryByText(/数据缺口 3 项/)).toBeNull();
+    // 本组件**不**渲染该通道（落点在四档面板）；渲染了就说明又混回了缺口清单
+    expect(screen.queryByText(/×0\.3/)).toBeNull();
+  });
 });

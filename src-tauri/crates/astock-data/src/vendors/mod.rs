@@ -128,6 +128,15 @@ pub trait StockVendor: Send + Sync {
         self.get_pledge_data(stock_code).await
     }
 
+    /// 获取股东户数（筹码集中度）。新增(2026-10-01)：默认 `None`，由 eastmoney 覆盖。
+    ///
+    /// 无 as-of 通道（申报 `NoHistoricalSemantic`）：`RPT_HOLDERNUMLATEST` 只有「最新一期」，
+    /// 历史多期在另一张报表（`RPT_F10_EH_HOLDERNUM`）；接它属下一轮，本轮先让 live 不再恒缺。
+    async fn get_holder_count(&self, stock_code: &str) -> Result<Option<HolderCount>, DataError> {
+        let _ = stock_code;
+        Ok(None)
+    }
+
     async fn get_concept_blocks(
         &self,
         stock_code: &str,

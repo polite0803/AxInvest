@@ -30,7 +30,11 @@ export function getDefaultVariables(): Variable[] {
   b("max_concurrent", 12, "stockAnalysis.configDescriptions.maxConcurrent", "number");
   // 数据源参数
   b("kline_period", "daily", "stockAnalysis.configDescriptions.klinePeriod", "enum");
-  b("kline_limit", 120, "stockAnalysis.configDescriptions.klineLimit", "number");
+  // v115（2026-10-01）：120 → 250。权威源是后端 `seed_variables::DEFAULT_ANALYST_KLINE_LIMIT`，
+  // 此处只是「后端变量表取不到时的兜底」——但两者不同步会让人误判参数没生效
+  // （`numberBounds.inferNumberBounds` 还会按本值推滑杆量程：120→上限 180，
+  //  250→上限 380，量程小于真实值时用户一拖就把取数根数改小）。
+  b("kline_limit", 250, "stockAnalysis.configDescriptions.klineLimit", "number");
   b("news_limit", 30, "stockAnalysis.configDescriptions.newsLimit", "number");
   // Agent 节点 LLM 参数
   b("agent_temperature", 0.3, "stockAnalysis.configDescriptions.agentTemperature", "number");

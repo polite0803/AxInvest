@@ -2400,3 +2400,76 @@ fn seed_node_constructors_are_not_duplicated() {
         "负控失效：复刻整块重复后判据抓不到（则该门是空转的）"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v115(2026-10-01)：`kline_limit` 的**跨侧接线**守护（「声明了但没人消费」型缺陷）
+//
+// 被判缺陷（600406 运行 `a7e590a4` 实证）：`market-analyst.md` 方法论第 1 条要求
+// 「30/60/120/250 日均线状态」，而 `kline_limit` 变量自建立以来**全仓零消费方** ——
+// 只出现在 `seed_variables.rs`（声明）、设置面板（可调）、单测里，
+// `seed_stock_analysis.rs` 一次都没引用 ⇒ `get_stock_kline` 恒走缺省 120 根
+// （`mcp_tools.rs`：`unwrap_or(120).min(500)`）⇒ **MA250 物理上算不出来**
+// ⇒ 报告写「250日均线数据缺失」⇒ 该节点被判「⚠️ 低置信」，归因还写成「上游工具数据不完整」。
+//
+// 为什么必须**跨两侧**断言：这类缺陷的形状是「两处各自自洽、合起来不成立」——
+//   · 声明端：变量表里 `kline_limit` 一应俱全（默认值、描述、面板入口）；
+//   · 消费端：tool 节点**合法地**不传 `limit`（工具侧有缺省值，不传不报错）。
+// 任一单侧测试都会绿。只有把「变量名出现在 tool 节点的 input_mapping 里」钉住，
+// 下一次「重构 tool 节点」才不会静默摘掉接线。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 折叠空白，便于对**跨行**书写做不敏感匹配（rustfmt 会按行宽重排参数列表）。
+fn normalize_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn kline_limit_is_wired_to_market_data_node() {
+    let src = read_seed_source_file("seed_stock_analysis.rs");
+
+    // ① 接线本体：`t-market-data` 必须把 `kline_limit` 映射到工具的 `limit` 参数。
+    //    只在 tool 节点构造循环内找（切到首次 `nodes.push(tool_node(` 为止），
+    //    避免命中别处的同形字面量而**假绿**。
+    let start = src
+        .find(
+            "for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate()",
+        )
+        .expect("找不到 tool 节点构造循环（seed 结构已变，请同步本判据）");
+    let region = &src[start..];
+    let end = region.find("nodes.push(tool_node(").expect("循环体内找不到 tool_node 调用");
+    let norm = normalize_ws(&region[..end]);
+    assert!(
+        norm.contains(r#""t-market-data""#),
+        "判据的定位前提失效：该循环体内未出现 t-market-data ⇒ 本测试会退化为恒绿，请检查 seed 结构"
+    );
+    assert!(
+        norm.contains(r#"("limit", "kline_limit")"#),
+        "`t-market-data` 必须把 `kline_limit` 接到工具的 `limit` 参数上。\
+         缺失 ⇒ 又回到 `get_stock_kline` 的缺省 120 根 ⇒ MA250 恒不可算\
+         （实证：技术面报告写「250日均线数据缺失（数据仅覆盖4月至今）」→ 该节点被判低置信）"
+    );
+
+    // ② 默认值必须够算 250 日均线（MA250 = 最近 250 根收盘 ⇒ 至少 250 根）。
+    //    ⚠ 这一条**刻意不在本测试里**断言：`assert!(CONST >= 250)` 是**运行期**断言，
+    //    clippy `assertions_on_constants` 在 `-D warnings` 下当场报红（本测试首版即踩）。
+    //    已改为 `seed_variables.rs` 里紧随该常量的**编译期**断言
+    //    （`const _: () = assert!(DEFAULT_ANALYST_KLINE_LIMIT >= 250, …)`）——
+    //    形态更强（不依赖有人记得跑测试），且与 DCF/K 线两个迁移门的断言同型。
+    //    「落库后的变量值也够 250」由对象面测试
+    //    `seed_stock_analysis::fast_workflow_derivation_tests::market_data_node_passes_kline_limit_and_migrates_stale_value` 覆盖。
+
+    // ③ 存量覆写与一次性门必须仍在。
+    //    `merge_variable_values` 对同名变量**无条件保留旧值**（用户 DB 里是旧种子缺省 120）
+    //    ⇒ 只改默认值是「仓库里改了、用户库里没改」的假修复（v74 的 DCF 同型实证）。
+    //    也不得去掉门：无门则每次无关升版都把它打回默认，抹掉用户面板里的调整。
+    let norm_all = normalize_ws(&src);
+    assert!(
+        norm_all.contains(r#"force_variable_value( &variables_val, "kline_limit","#),
+        "`kline_limit` 的存量覆写（force_variable_value）缺失或被改写：\
+         merge_variable_values 会保留 DB 旧值 120 ⇒ 本修复对存量安装不生效（假修复）"
+    );
+    assert!(
+        norm_all.contains("KLINE_LIMIT_MIGRATION_VERSION"),
+        "存量覆写必须由一次性门 `KLINE_LIMIT_MIGRATION_VERSION` 守护"
+    );
+}

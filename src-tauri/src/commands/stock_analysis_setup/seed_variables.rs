@@ -12,6 +12,47 @@ use axagent_harness::workflow_types::Variable;
 ///   2. `seed_stock_analysis.rs` 借 `resolve_debate_rounds` 从旧变量解析建图轮数。
 pub(crate) const DEFAULT_DEBATE_ROUNDS: u32 = 3;
 
+/// `kline_limit` 的默认值（**单一权威源**）—— 分析师链的 K 线取数根数。
+///
+/// ## 为什么名字带 `ANALYST`（而不是复用已有的 `DEFAULT_KLINE_LIMIT`）
+///
+/// 仓内已有一个**同名**常量 `axagent_quant::kline_provider::DEFAULT_KLINE_LIMIT = 504`
+/// （回测取数，`~2 年日线`；前端 `quant/tabs/WfDesTab.tsx` 另有本地的 600）。
+/// 那不是同一个量：**回测要的是「够切 5+ fold」，分析师要的是「够算 250 日均线」**，
+/// 同值复用会把回测的 fold 需求塞进一次分析请求（504 根 ≈ 2 倍提示词体积）。
+/// 按 `AGENTS.md` 禁区 12「禁止重复定义」，做法**不是**新造一个同名的 250（那才是重定义），
+/// 而是**换名消歧**并在此写明三者不同源 —— 三处各自的消费语义见本条与那句注释。
+///
+/// ## 为什么是 250（而不是历史值 120）
+///
+/// `agency_experts/stock-analysis/market-analyst.md` 的方法论第 1 条明确要求：
+/// 「读 K 线数据（**30/60/120/250 日均线**状态、近期高低点、成交量变化）」——
+/// 即提示词的**硬需求**是 250 根日线。而 `get_stock_kline` 的 `limit` 缺省值恰为
+/// **120**（`crates/astock-data/src/mcp_tools.rs` 的 `unwrap_or(120).min(500)`），
+/// 且本变量自建立以来**从未接进任何 tool 节点**（全仓 grep：只出现在种子定义、设置面板
+/// 与单测里，`seed_stock_analysis.rs` 一次都没引用）⇒ 实际取到的恒是 120 根。
+///
+/// 实证（2026-10-01 运行 `a7e590a4`，600406 国电南瑞）：`t-market-data` 的
+/// `result.content` 是 **120 根**、首根 2026-04-09，而技术面分析师报告原文写着
+/// 「**250日均线数据缺失**（数据仅覆盖4月至今）」——该句命中失败标记词表、
+/// 把技术面节点压进「⚠️ 低置信」。这不是分析师措辞问题，是**提示词要的数据物理上没给**：
+/// 120 根算得出 MA120，**算不出 MA250**（且该形态每轮每只票都存在，只是分析师未必写出来）。
+///
+/// 取 250 而非更大：MA250 = 最近 250 根收盘的均值，250 根**恰好**够；
+/// 工具上限 500，留档位给用户在面板上调深。
+pub(crate) const DEFAULT_ANALYST_KLINE_LIMIT: u32 = 250;
+
+// 编译期断言：本值必须够算 250 日均线（提示词 `market-analyst.md` 的硬需求）。
+// 为什么是**编译期**而不是测试：这是「常量 vs 需求」的跨文件约束，
+// 测试要靠人记得跑，而它的失效形态恰恰是「有人为了省 token 把它调小、没人注意到」
+// （同 `seed_stock_analysis.rs` 里 DCF/K 线两个迁移门断言的安置理由）。
+// 用 `const _: () = assert!(…)` 形态：仓内既有先例，clippy 不报 `assertions_on_constants`
+// （该 lint 只作用于运行期断言 —— 首个版本写在测试里，`-D warnings` 当场红）。
+const _: () = assert!(
+    DEFAULT_ANALYST_KLINE_LIMIT >= 250,
+    "kline_limit 默认值不足以计算 250 日均线（须 ≥ 250）：market-analyst.md 第 1 条要求「30/60/120/250 日均线状态」"
+);
+
 /// DCF 估值参数的默认值（**单一权威源**，单位 = 百分数）。
 ///
 /// 被两处引用，避免同名散成多套值：
@@ -100,8 +141,12 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "kline_limit".into(),
             var_type: "number".into(),
-            value: serde_json::json!(120),
-            description: Some("K线获取根数 (1-500)".into()),
+            // ⚠ 「值」与「有消费方」是两件事：本变量长期只是**声明**（默认 120、面板可调、
+            //   全仓无人引用），v115 才由 `t-market-data` 节点真正接上
+            //   （`seed_stock_analysis.rs`：`tool_node(…, &[("limit", "kline_limit")], …)`）。
+            //   默认值取 250 的理由见 `DEFAULT_ANALYST_KLINE_LIMIT` 的文档注释。
+            value: serde_json::json!(DEFAULT_ANALYST_KLINE_LIMIT),
+            description: Some("K线获取根数 (1-500)；≥250 才够 30/60/120/250 日均线口径".into()),
             is_secret: false,
         },
         Variable {

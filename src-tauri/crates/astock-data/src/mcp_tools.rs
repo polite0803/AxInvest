@@ -4259,6 +4259,41 @@ async fn compute_bottleneck_signals_impl(
     Ok(result)
 }
 
+/// 「研报共识」所需的最少研报篇数（近 90 天窗口内）。
+///
+/// 为什么必须有：`consensus_gap` 的语义是「**共识**目标价 vs 现价」，而单篇研报的目标价
+/// 只是**个别券商观点** —— 券商研报分布天然右偏（看多为主、极端目标价常见），单篇即可把
+/// 整个维度判成「明显低估」。取 3 与 `coverage_change_3m` 的「低覆盖（< 3 篇）」分档同值：
+/// 覆盖不足 3 篇时本来就该说「无共识」，而不是编一个共识出来。
+const MIN_CONSENSUS_REPORTS: usize = 3;
+
+/// 由「共识目标价中位数 + 现价 + 有效研报篇数」判定共识差档位。
+///
+/// 抽成**纯函数**是为了可单测：原实现内联在 `compute_attention_score_impl` 里，
+/// 而该函数必调 4 个网络接口 ⇒ 判据本身永远进不了测试（本次修复的缺陷正是这样漏出去的）。
+fn classify_consensus_gap(
+    target_median: Option<f64>,
+    current_price: f64,
+    report_count: usize,
+) -> &'static str {
+    if report_count < MIN_CONSENSUS_REPORTS {
+        return "无研报共识";
+    }
+    let (Some(target), true) = (target_median, current_price > 0.0) else {
+        return "无研报共识";
+    };
+    let gap_pct = (target - current_price) / current_price * 100.0;
+    if gap_pct > 30.0 {
+        "明显低估"
+    } else if gap_pct > 10.0 {
+        "合理偏低"
+    } else if gap_pct > -10.0 {
+        "合理"
+    } else {
+        "高估"
+    }
+}
+
 /// compute_attention_score：关注度评分
 /// 输出契约（mapper_prompt attention_metrics 期望）：
 ///   attention_score / coverage_change_3m / search_heat / relative_volume / consensus_gap
@@ -4320,25 +4355,32 @@ async fn compute_attention_score_impl(
         format!("高于均值 {:.0}%", (turnover - 2.0) * 50.0)
     };
 
-    // 共识差：研报评级 vs 当前价
-    // 简化：用研报数量 + 平均目标价 vs 当前价判断
-    let avg_target = reports.iter().filter_map(|r| r.target_price).next(); // 取最新一篇的目标价
+    // 共识差：研报目标价 vs 当前价
+    //
+    // ⚠ 2026-10-01 修复（由「两个子系统对同一维度不应给出相反结论」这条不变量驱动）：
+    //   原实现是 `reports.iter().filter_map(|r| r.target_price).next()` —— 它取的是
+    //   **迭代器首元素**（数据源返回序），与上方注释所称的「平均目标价」和行尾注释所称的
+    //   「最新一篇」**都不符**；且用的是**未按 90 天过滤**的原始列表，与上方
+    //   `research_count` 的窗口不一致。单篇极端目标价即可把整个维度判成「明显低估」。
+    //
+    //   实证（300604 / 002371，2026-10-01 两票）：本字段都给出「明显低估」，而**同一轮**
+    //   分析链里覆盖同一维度的 `a-sector` 分析师拿的是 PE 82.87 / 78.6、PB 17.75、
+    //   当日电子板块主力净流出 150 亿（全市场之首），结论是「高估值 + 高位资金撤离」。
+    //   两个子系统对同一维度相反 ⇒ 问题出在本字段的单篇口径上（不是分析链）。
+    //
+    //   现口径：近 90 天研报（与 `research_count` 同窗口）目标价的**中位数**
+    //   （`crate::valuation::median_of` 是 crate 内既有实现，不另写一份）；中位数而非
+    //   均值，是因为券商目标价分布天然右偏，均值会被单篇极端值拉离「共识」语义；
+    //   样本不足 `MIN_CONSENSUS_REPORTS` 篇则如实标「无研报共识」，**不拿单篇冒充共识**。
+    let targets: Vec<f64> = recent_reports
+        .iter()
+        .filter_map(|r| r.target_price)
+        .filter(|t| t.is_finite() && *t > 0.0)
+        .collect();
+    let target_count = targets.len();
+    let target_median = crate::valuation::median_of(targets);
     let current_price = quote.as_ref().map(|q| q.price).unwrap_or(0.0);
-    let consensus_gap = match (avg_target, current_price > 0.0) {
-        (Some(target), true) => {
-            let gap_pct = (target - current_price) / current_price * 100.0;
-            if gap_pct > 30.0 {
-                "明显低估"
-            } else if gap_pct > 10.0 {
-                "合理偏低"
-            } else if gap_pct > -10.0 {
-                "合理"
-            } else {
-                "高估"
-            }
-        },
-        _ => "无研报共识",
-    };
+    let consensus_gap = classify_consensus_gap(target_median, current_price, target_count);
 
     // 机构调研数
     let visit_count = visits.len();
@@ -4365,7 +4407,10 @@ async fn compute_attention_score_impl(
             "visit_count": visit_count,
             "turnover_rate_pct": round2(turnover),
             "current_price": round2(current_price),
-            "avg_target_price": avg_target.map(round2)
+            // ⚠ 2026-10-01：原键 `avg_target_price` 名不符实（实为迭代器首元素而非均值），
+            //   改为中位数口径并显式报出样本数 —— 读者必须能看出「这个共识是几篇研报算的」。
+            "consensus_target_median": target_median.map(round2),
+            "consensus_reports": target_count
         },
         "summary": format!(
             "关注度评分:{}/100 | 研报:{research_count}篇 | 新闻:{news_count_30d}条 | 换手率:{turnover:.2}% | 机构调研:{visit_count}次",
@@ -6376,5 +6421,70 @@ mod margin_contract_tests {
         let reason = v["reason"].as_str().unwrap_or_default();
         assert!(reason.contains("非融资融券标的"), "reason 必须点名设计性缺席: {reason}");
         assert!(!reason.contains("失败"), "reason 不得用故障措辞: {reason}");
+    }
+}
+
+#[cfg(test)]
+mod consensus_gap_tests {
+    //! 2026-10-01：`consensus_gap` 的单篇口径缺陷回归 —— 由「两个子系统对同一维度不应给出
+    //! 相反结论」这条不变量驱动。
+    //!
+    //! 旧实现 `reports.iter().filter_map(|r| r.target_price).next()` 取的是**迭代器首元素**
+    //! （数据源返回序），单篇极端目标价即可把整个维度判成「明显低估」。实证：300604 / 002371
+    //! 两票都被判「明显低估」，而**同一轮**分析链里覆盖同一维度的 `a-sector` 分析师拿到的是
+    //! PE 82.87 / 78.6、当日电子板块主力净流出 150 亿，结论为「高估值 + 高位资金撤离」。
+    //!
+    //! ⚠ 本模块必须在文件**末尾**（`clippy::items_after_test_module` 只在 clippy 下暴露）。
+
+    use super::{classify_consensus_gap, MIN_CONSENSUS_REPORTS};
+
+    /// **核心回归**：样本不足时不得给方向性判断 —— 单篇是「个别券商观点」，不是共识。
+    /// 旧实现在此输入下（单篇目标价 = 现价 3 倍）必然输出「明显低估」。
+    #[test]
+    fn single_report_never_yields_a_directional_verdict() {
+        assert_eq!(
+            classify_consensus_gap(Some(300.0), 100.0, 1),
+            "无研报共识",
+            "1 篇研报不是共识，不得输出方向（这正是实测两票被误判的形态）"
+        );
+        assert_eq!(
+            classify_consensus_gap(Some(300.0), 100.0, MIN_CONSENSUS_REPORTS - 1),
+            "无研报共识"
+        );
+    }
+
+    /// 样本够时判方向，且**分档阈值与旧口径逐位一致**（本次只换口径，不换阈值）。
+    #[test]
+    fn enough_reports_keep_the_original_bands() {
+        let n = MIN_CONSENSUS_REPORTS;
+        assert_eq!(classify_consensus_gap(Some(131.0), 100.0, n), "明显低估"); // +31%
+        assert_eq!(classify_consensus_gap(Some(130.0), 100.0, n), "合理偏低"); // +30% 不满足 >
+        assert_eq!(classify_consensus_gap(Some(111.0), 100.0, n), "合理偏低"); // +11%
+        assert_eq!(classify_consensus_gap(Some(110.0), 100.0, n), "合理"); // +10% 不满足 >
+        assert_eq!(classify_consensus_gap(Some(91.0), 100.0, n), "合理"); // -9%
+        assert_eq!(classify_consensus_gap(Some(90.0), 100.0, n), "高估"); // -10% 不满足 >
+        assert_eq!(classify_consensus_gap(Some(50.0), 100.0, n), "高估");
+    }
+
+    /// 中位数抗单篇离群：3 篇里 1 篇喊 3 倍时，两种口径给出**不同的档位**。
+    /// 本测试把这个差异直接钉住 —— 它正是「单篇冒充共识」会让估值维度判反的机制。
+    #[test]
+    fn median_resists_a_single_outlier() {
+        let samples = vec![100.0, 111.0, 300.0];
+        let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+        let median = crate::valuation::median_of(samples).expect("3 篇应有中位数");
+        assert_eq!(median, 111.0, "中位数必须取中间那篇，而不是被 300 拉走的均值");
+        assert!(mean > 170.0, "均值会被离群值拉到 170 以上，实得 {mean}");
+        // 同一批研报：均值口径判「明显低估」（+70%），中位数口径判「合理偏低」（+11%）。
+        assert_eq!(classify_consensus_gap(Some(mean), 100.0, 3), "明显低估");
+        assert_eq!(classify_consensus_gap(Some(median), 100.0, 3), "合理偏低");
+    }
+
+    /// 退化输入一律「无研报共识」：不 panic、不编方向。
+    #[test]
+    fn degenerate_inputs_are_declared_absent() {
+        assert_eq!(classify_consensus_gap(None, 100.0, 5), "无研报共识", "无目标价");
+        assert_eq!(classify_consensus_gap(Some(130.0), 0.0, 5), "无研报共识", "现价无效");
+        assert_eq!(classify_consensus_gap(None, 0.0, 0), "无研报共识", "双缺");
     }
 }

@@ -341,11 +341,39 @@ pub fn vol_move_pct(closes: &[f64], lookback: usize, holding_days: usize) -> Opt
     realized_vol_pct(closes, lookback).map(|sigma| sigma * (holding_days as f64).sqrt())
 }
 
+/// SNR 时间折算的**放大上限**（倍数）。
+///
+/// 为什么需要（2026-10-01 实证）：`√(h/anchor)` 的推导前提是「日边缘在整个持有期内
+/// **恒定**」，而该前提在长档并不成立 —— 信号的预测力会随时间衰减（本仓已有
+/// `reflection_stats` 的 `signal_half_life_days`，专门从逐档 rank IC 的指数衰减
+/// 拟合这件事，其存在本身就说明「恒定边缘」只是短窗近似）。
+///
+/// 不加上限时，long 档（90 天 / 锚 28 天）拿到 `√(90/28) = 1.79×`：后验 0.43 这种
+/// **弱看空**会被放大到 0.367（跨过 `ACTION_WATCH_THRESHOLD = 0.38`）⇒ 结构性**只在中/
+/// 长档出票**的趋势智选候选，在分析里恒为「长期减持/卖出」，两个子系统的时间偏好
+/// 精确对冲（用户实测：300604 / 002371 四档恒为 观望/观望/减持/卖出）。
+///
+/// 取 1.5：等价于「放大最多按**一个季度**（63 天）口径」—— `√(63/28) ≈ 1.5`。
+/// 它只截断**超出季度**的部分，故 `short`（0.42）与 `mid`（1.0）行为**逐位不变**，
+/// `long` 仍严格大于 `mid`（「长线更值得」的方向与单调性都保留），
+/// 而弱边缘不再被放大成极端结论。
+///
+/// ⚠ 本常量是**口径常量**（同 `holdings` 的锚定天数），不是标定参数；若将来要按标的 /
+/// 市况调整，应走「参数四道门」进设置面板由反思校准，而不是在调用点各写一个倍数。
+///
+/// ⚠ **未闭合的一致性点**（2026-10-01，留待裁决）：本变更改了**判定口径**，而
+/// `reflection_stats` 的判定口径水印 `snr_anchor_days` 仍写 28 ⇒ 变更前后的 long 档
+/// 样本在 IC 统计里会同池比较。影响面有限（`ic_pairs` 只在**同档内**算秩，故只波及
+/// long 档，且 confidence 幅度差约 2pt），但严格闭合需给水印增加一个**独立的口径版本
+/// 维度**（跨 entity / 前端类型 / 迁移三处），故本次**未擅自展开**，仅在此显式声明该缺口。
+pub const SNR_SCALE_CAP: f64 = 1.5;
+
 /// 把「当前后验胜率」按持有期折算成**该持有期的胜率**（判定侧的时间换空间）。
 ///
 /// 依据：恒定日边缘下，信号均值随 h 线性累积、噪声随 √h 累积 ⇒ 信噪比 ∝ √h。
 /// 故以中线为锚做开方折算：`conf = 0.5 + (p − 0.5) × √(h / anchor)`，
-/// h = anchor 时不改；h 更短 ⇒ 边缘向 0.5 收缩；h 更长 ⇒ 边缘放大。
+/// h = anchor 时不改；h 更短 ⇒ 边缘向 0.5 收缩；h 更长 ⇒ 边缘放大（**最多
+/// [`SNR_SCALE_CAP`] 倍**，理由见该常量）。
 /// **对称**：负边缘（看空）同样被时间放大 —— 这是 SNR 的性质，不是对多空的态度。
 ///
 /// 为什么放在判定侧而不是仓位侧：仓位只应承载可推导的量（σ、h、风险预算 R），
@@ -356,7 +384,8 @@ pub fn snr_confidence(p: f64, holding_days: usize, anchor_days: usize) -> f64 {
     if holding_days == 0 || anchor_days == 0 || !p.is_finite() {
         return p;
     }
-    let scaled = 0.5 + (p - 0.5) * ((holding_days as f64) / (anchor_days as f64)).sqrt();
+    let scale = ((holding_days as f64) / (anchor_days as f64)).sqrt().min(SNR_SCALE_CAP);
+    let scaled = 0.5 + (p - 0.5) * scale;
     scaled.clamp(0.0, 1.0)
 }
 
@@ -723,6 +752,41 @@ mod tests {
         assert_eq!(snr_confidence(0.62, 0, 28), 0.62, "h=0 无从折算 ⇒ 原样返回");
         assert_eq!(snr_confidence(0.62, 90, 0), 0.62, "anchor=0 无从折算 ⇒ 原样返回");
         assert!(snr_confidence(f64::NAN, 90, 28).is_nan(), "NaN 不得被夹成 0");
+    }
+
+    /// **根因 3 的回归测试**（2026-10-01 实证）：长档放大必须有上限。
+    ///
+    /// 无上限时 long 档（90 天 / 锚 28 天）拿到 `√(90/28) = 1.79×` ⇒ 弱看空被放大成
+    /// 极端看空；而趋势智选**结构性只在中/长档出票**（`style_matrix`：超短/短档
+    /// 带 `serenity_needs_week_or_longer_realization` 理由码）⇒ 两个子系统的时间偏好
+    /// 精确对冲。实测 300604 / 002371 四档恒为 观望/观望/减持/卖出。
+    #[test]
+    fn snr_confidence_caps_long_horizon_amplification() {
+        // 超出季度的部分被截断到 cap（而非 1.79×）
+        let long = snr_confidence(0.40, 90, 28);
+        let expected = 0.5 + (0.40 - 0.5) * SNR_SCALE_CAP;
+        assert!(
+            (long - expected).abs() < 1e-12,
+            "long 档放大必须截断到 {SNR_SCALE_CAP}，实得 {long}（期望 {expected}）"
+        );
+        // 未超上限的档位**逐位不变**（63 天恰好是 cap 的临界点 ⇒ 既有行为零回归）
+        assert!((snr_confidence(0.40, 63, 28) - 0.35).abs() < 1e-12);
+        assert!((snr_confidence(0.60, 63, 28) - 0.65).abs() < 1e-12);
+        // 「长线更值得」的**方向与单调性保留**：long 仍严格大于 mid，mid 仍严格大于 short
+        assert!(snr_confidence(0.60, 90, 28) > snr_confidence(0.60, 28, 28));
+        assert!(snr_confidence(0.60, 28, 28) > snr_confidence(0.60, 5, 28));
+        // 修复根因 1+2 后的真实形态（弱看空 heff ≈ 0.43）：long 档不得再跨过「观望」阈值 0.38。
+        // ⚠ 本断言正是 cap 的存在理由 —— 去掉 cap 时该值降到 0.3745（= 减持区间）。
+        let weak_bear = snr_confidence(0.43, 90, 28);
+        assert!(weak_bear >= 0.38, "弱看空(0.43)在 long 档不得跌入减持区间，实得 {weak_bear}");
+    }
+
+    /// 上限只作用于**放大**侧：短档的收缩（系数 < 1.0）不得被 cap 影响。
+    #[test]
+    fn snr_scale_cap_does_not_touch_shrinking_side() {
+        let short = snr_confidence(0.60, 7, 28); // √0.25 = 0.5
+        assert!((short - 0.55).abs() < 1e-12, "短档收缩系数必须仍是 0.5，实得 {short}");
+        assert!(snr_confidence(0.60, 1, 28) < 0.60, "h 极短时必须仍向 0.5 收缩");
     }
 
     // ── 秩相关（rank IC 的唯一实现，Phase E 收编三处重复）──

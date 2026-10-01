@@ -121,7 +121,12 @@ pub struct RecoPick {
     pub position_pct: f64,
     /// 持有天数
     pub holding_days: u32,
-    /// 置信度 0-100（**绝对口径**：该档先验与该风格评分在 logit 空间合成后的概率）
+    /// 该档**上涨胜率** 0-100（绝对口径，与股票分析决策链同标尺）：
+    /// `逐档先验 → 与风格评分在 logit 空间合成 → snr_confidence 按该档持有期折算`。
+    ///
+    /// ⚠ 最后一步（时间折算，2026-10-01 补）是**档位差异的全部来源** —— 逐档先验在各档
+    /// 样本不足时是**四档同值**的（`prior_source="pooled"`）。故本字段可以直接与
+    /// `stock_analyses.horizon_decisions` 里该档的 `confidence` 对比，两者同义。
     pub confidence: u8,
     /// 同风格组内的**当日分位** 0-100（旧实现用它覆写 `confidence`，使绝对概率语义丢失；
     /// 现两者分列，见 `PLAN-reco-horizon-science-alignment.md` R-C）。缺组内差异 ⇒ `None`。

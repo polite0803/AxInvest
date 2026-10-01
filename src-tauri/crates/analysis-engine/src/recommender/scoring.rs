@@ -31,27 +31,57 @@ pub const WEIGHTS: ScoringWeights = ScoringWeights {
     price_momentum: 0.05,
 };
 
-/// 把「该档先验胜率」与「该风格内的评分」在 **logit 空间**合成为一个绝对置信度（Phase R-C）。
+/// 把「该档先验胜率」与「该风格内的评分」合成为该档的**上涨胜率**（0-1）。
 ///
-/// `logit(conf) = logit(prior) + 2·s·(score − 0.5)`
+/// 口径与股票分析决策链**同标尺**（Phase R-C + 2026-10-01 口径统一）。两步缺一不可：
 ///
-/// - 先验来自 `horizon_prior::horizon_prior_map`（该档历史方向命中率经经验贝叶斯收缩，
-///   κ 可调）⇒ **四档各自有自己的锚**，不再是共用一个数（诊断 E1 在荐股链的形态 R1）。
-/// - 斜率 `s` 是唯一新增可调量（`reco_conf_sensitivity`，出厂 1.0）：s=0 ⇒ 只承认先验、
-///   评分不起作用；s 越大越信评分。写成 logit 加法而不是线性相加，是为了让「先验 0.5 附近
-///   的小改进」与「先验极端处的小改进」有可比的信息量（对数几率的可加性）。
-/// - 先验不可得 ⇒ 退回 `score`（调用方必须标 `priorSource="absent"`），不假装合成过。
-pub fn blend_confidence(prior_win_rate: Option<f64>, score: f64, sensitivity: f64) -> Option<u8> {
+/// ① **证据合成（logit 空间）**：`logit(后验) = logit(prior) + 2·s·(score − 0.5)`
+///    - 先验来自 `horizon_prior::horizon_prior_map`（与分析链 `horizon_prior_json`
+///      **同一份实现**）；
+///    - 斜率 `s` 是唯一可调量（`reco_conf_sensitivity`，出厂 1.0）：s=0 ⇒ 只承认先验、
+///      评分不起作用。写成 logit 加法而不是线性相加，是让「先验 0.5 附近的小改进」与
+///      「先验极端处的小改进」有可比的信息量（对数几率的可加性）。
+///
+/// ② **时间折算**：`snr_confidence(后验, 该档持有天数, 锚定天数)`
+///    —— 与分析链 `portfolio-mgr.rhai` 的 `pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS)`
+///    **同一函数、同一锚**：锚定档不改，短档向 0.5 收缩，长档放大（含 1.5× 上限）。
+///
+/// ⚠ 为什么必须补第 ② 步（2026-10-01 用户裁定「统一口径」）：
+///   原实现到第 ① 步为止 ⇒ 荐股的「该档胜率」**没有时间维度**，而分析链有四档的
+///   confidence 在两侧是两把尺子 —— 同一个「长期」概念，分析链里会被放大
+///   （负边缘同样放大），荐股链里纹丝不动。
+///   实证佐证：逐档先验在样本不足时四档**同值**（`source="pooled"`，实测 0.375）
+///   ⇒ 档位差异**全部**来自本步折算；荐股链缺它，等于四档 confidence 只差一个先验，
+///   而那个先验当时还四档同值 —— 即四档数值实质上无区别。
+///
+/// 先验不可得 ⇒ 返回 `None`（调用方退回纯评分并标 `priorSource="absent"`，
+/// 不假装合成过）。
+pub fn blend_win_rate(
+    prior_win_rate: Option<f64>,
+    score: f64,
+    sensitivity: f64,
+    holding_days: u32,
+    anchor_days: u32,
+) -> Option<f64> {
     let p = prior_win_rate?;
     if !(p > 0.0 && p < 1.0) || !score.is_finite() {
         return None;
     }
     let logit = (p / (1.0 - p)).ln() + 2.0 * sensitivity * (score - 0.5);
-    let blended = 1.0 / (1.0 + (-logit).exp());
-    if !blended.is_finite() {
+    let posterior = 1.0 / (1.0 + (-logit).exp());
+    if !posterior.is_finite() {
         return None;
     }
-    Some((blended * 100.0).clamp(0.0, 100.0).round() as u8)
+    let win_rate = axagent_harness::indicators::snr_confidence(
+        posterior,
+        holding_days as usize,
+        anchor_days as usize,
+    );
+    if win_rate.is_finite() {
+        Some(win_rate)
+    } else {
+        None
+    }
 }
 
 pub fn calc_confidence(
@@ -483,5 +513,69 @@ mod tests {
             .collect();
         let grouped = group_by_style_and_trim(&mut picks, 10);
         assert_eq!(grouped.get(&Style::Trend).unwrap().len(), 10);
+    }
+
+    /// **口径统一回归**（2026-10-01）：荐股胜率 = logit 合成 **∘** 时间折算 ——
+    /// 第二步必须与分析链**同一函数**（`harness::indicators::snr_confidence`）逐位一致。
+    #[test]
+    fn blend_win_rate_composes_logit_then_the_shared_time_scaling() {
+        let anchor = 28u32;
+        let prior: f64 = 0.62;
+        let score: f64 = 0.7;
+        let sensitivity: f64 = 1.0;
+        // 独立复算第一步（logit 合成），再断言第二步 == snr_confidence(该后验)
+        let posterior = {
+            let logit = (prior / (1.0 - prior)).ln() + 2.0 * sensitivity * (score - 0.5);
+            1.0 / (1.0 + (-logit).exp())
+        };
+        for h in [2u32, 5, 28, 90] {
+            let got = blend_win_rate(Some(prior), score, sensitivity, h, anchor).expect("有先验");
+            let want =
+                axagent_harness::indicators::snr_confidence(posterior, h as usize, anchor as usize);
+            assert!(
+                (got - want).abs() < 1e-12,
+                "h={h} 必须与分析链同函数折算：got={got} want={want}"
+            );
+        }
+        // 锚定档不改：h == anchor 时第二步是恒等 ⇒ 结果就是纯 logit 合成值
+        let mid = blend_win_rate(Some(prior), score, sensitivity, anchor, anchor).expect("有先验");
+        assert!((mid - posterior).abs() < 1e-12, "锚定档不得被折算改变，实得 {mid}");
+    }
+
+    /// **本次修复的直接回归**：同一先验 + 同一评分，档间必须拉开差距。
+    /// 原实现（只做 logit 合成、无时间折算）下四档**逐位相同**。
+    #[test]
+    fn time_scaling_makes_tiers_differ_in_both_directions() {
+        let anchor = 28;
+        // 看多边缘（posterior 0.60 ⇒ score 中性、先验即后验）：长档放大、短档收缩
+        let bull_short = blend_win_rate(Some(0.60), 0.5, 1.0, 5, anchor).expect("有先验");
+        let bull_long = blend_win_rate(Some(0.60), 0.5, 1.0, 90, anchor).expect("有先验");
+        assert!(bull_short < 0.60, "短档应向 0.5 收缩，实得 {bull_short}");
+        assert!(bull_long > 0.60, "长档应放大，实得 {bull_long}");
+        // 看空边缘（posterior 0.40）：**对称**放大 ⇒ 长档更悲观
+        let bear_short = blend_win_rate(Some(0.40), 0.5, 1.0, 5, anchor).expect("有先验");
+        let bear_long = blend_win_rate(Some(0.40), 0.5, 1.0, 90, anchor).expect("有先验");
+        assert!(bear_short > 0.40, "短档应向 0.5 收缩，实得 {bear_short}");
+        assert!(
+            bear_long < bear_short,
+            "看空边缘在长档必须更悲观：long={bear_long} short={bear_short}"
+        );
+        assert!(
+            (bear_long - bear_short).abs() > 0.05,
+            "档间必须拉开可观测差距（原实现为 0）：{}",
+            (bear_long - bear_short).abs()
+        );
+    }
+
+    /// 退化输入：先验缺失 / 无效 ⇒ `None`（调用方退回纯评分并标 `absent`，不假装合成过）；
+    /// `sensitivity=0` ⇒ 评分不起作用，只剩先验。
+    #[test]
+    fn blend_win_rate_declines_invalid_priors_and_honours_zero_sensitivity() {
+        assert!(blend_win_rate(None, 0.9, 1.0, 28, 28).is_none(), "先验缺失");
+        assert!(blend_win_rate(Some(0.0), 0.9, 1.0, 28, 28).is_none(), "先验 0 无效");
+        assert!(blend_win_rate(Some(1.0), 0.9, 1.0, 28, 28).is_none(), "先验 1 无效");
+        assert!(blend_win_rate(Some(0.5), f64::NAN, 1.0, 28, 28).is_none(), "评分 NaN 无效");
+        let s0 = blend_win_rate(Some(0.60), 0.99, 0.0, 28, 28).expect("s=0 仍应有值");
+        assert!((s0 - 0.60).abs() < 1e-12, "s=0 必须只承认先验，实得 {s0}");
     }
 }

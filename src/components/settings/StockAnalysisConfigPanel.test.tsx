@@ -47,6 +47,11 @@ const RUNTIME_INJECTED = new Set([
   "sim_impact",
   "stock_code",
   "stock_sector",
+  // ⚠️ 2026-10-01 去重裁定后 `serenity_context` **没有任何生产者**（`hooks.rs` 刻意不注入，
+  // 避免与 `a-sector` 重复计入决策）。保留在册的理由：seed 模板的 input_mapping 仍在
+  // （`seed_stock_analysis.rs` 的 `("serenity_context", "serenity_context")`），
+  // 而本集合是「不在 seed 变量表里、但也不属于断链」的**排除名单** —— 从名单里删掉它，
+  // 下面的断言会把它当作断链而变红。
   "serenity_context",
   "holdings_json",
   "portfolio_cash",
@@ -60,6 +65,12 @@ const RUNTIME_INJECTED = new Set([
   // 经 `DECISION_LEG_ANALYST` 桥表投影到决策腿，由 `stock_workflow/hooks.rs` **恒注入**，
   // 不是用户可调的模板变量 ⇒ 不进 seed 变量表。缺失时脚本按全 1.0 退化并显式标注。
   "horizon_leg_weights_json",
+  // 逐档收缩先验表：权威源 `crates/analysis-engine/src/horizon_prior.rs` 的
+  // `horizon_prior_map`（按档方向命中率 + κ 收缩），由 `stock_workflow/hooks.rs` 注入。
+  // 不是用户可调的模板变量 ⇒ 不进 seed 变量表。
+  // ⚠️ v113（2026-10-01）给 seed 补了它的同名 `input_mapping`（修 Phase C 遗留的
+  // `Variable not found`），但**漏了同步本白名单** ⇒ 断言把已接线的变量误报成断链。
+  "horizon_prior_json",
 ]);
 
 /**

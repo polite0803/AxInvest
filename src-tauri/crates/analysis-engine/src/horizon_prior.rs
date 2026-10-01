@@ -28,6 +28,20 @@ use axagent_harness::Period;
 /// 三处若各写一份，改一处忘一处就会让「面板显示 20 / 实际用别的数」这种漂移无从发现）。
 pub const DEFAULT_KAPPA: f64 = 20.0;
 
+/// 合并基准 `p_pool` **自身**的样本量收缩伪计数（把中性 0.5 当作这么多次观测）。
+///
+/// 为什么需要（2026-10-01 实证）：`p_pool` 是全档合并方向命中率，会被 [`shrink_prior`]
+/// 的 `pooled` 分支**直接当作**「该档无自身样本时的上涨先验」。而本机实测该值 = **0.375**，
+/// 其样本只有**个位数**（`strategy_performance` 8 行、含周期展开的反思行 1 行）。
+/// 个位数样本的命中率同时混着「这套体系有没有 edge」与「市场基准涨跌」两件事，
+/// 不是上涨概率的可靠估计 ⇒ 原样采用会把**四档先验全部钉死在同一个 0.375**
+/// （比市况先验 0.45 低 7.5pt，四档后验因此系统性低于主链）。
+/// 这正是本文件开头警告的 E1（「四个持有期共享同一个上涨先验」）以新数值复发。
+///
+/// 取 20 与 [`DEFAULT_KAPPA`] 同量级：样本 < 20 时中性值占主导，样本充足后实测命中率
+/// 才逐步接管。收缩强度本身仍由 κ 统一控制，本常量只管**基准自身的可靠性**。
+pub const POOL_PSEUDO_COUNT: f64 = 20.0;
+
 /// 收缩后可见性要求：先验不得取 0 或 1（那会把后验钉死，让证据失去作用）。
 /// 取 [0.05, 0.95] 与拉普拉斯平滑同族，是**防饱和**而不是对收益的假设。
 const PRIOR_FLOOR: f64 = 0.05;
@@ -86,22 +100,26 @@ pub fn shrink_prior(
 /// 合并基准取 `HitrateStats` 的整体方向命中率（`overall` 字段名以结构为准 —— 这里用
 /// 全档样本加权，避免「样本多的档主导」以外的第二种偏置）。
 pub fn horizon_prior_map(stats: &HitrateStats, kappa: f64) -> serde_json::Value {
-    let total: usize = stats.by_horizon.iter().map(|g| g.samples).sum();
-    let pooled = stats
-        .by_horizon
-        .iter()
-        .filter(|g| g.samples >= MIN_SAMPLE)
-        .filter_map(|g| g.direction_hit_rate.map(|r| (r, g.samples)))
-        .map(|(r, n)| r * n as f64)
-        .sum::<f64>();
-    let pooled_rate = if total > 0 {
-        let weighted_n: usize =
-            stats.by_horizon.iter().filter(|g| g.samples >= MIN_SAMPLE).map(|g| g.samples).sum();
-        if weighted_n > 0 {
-            Some(pooled / weighted_n as f64)
-        } else {
-            None
+    // 全档合并命中率：只统计**样本达 MIN_SAMPLE** 的档，按样本量加权
+    //（「样本多的档主导」以外的第二种偏置不再引入）。
+    let mut pooled_num = 0.0;
+    let mut pooled_n: usize = 0;
+    for g in &stats.by_horizon {
+        if g.samples < MIN_SAMPLE {
+            continue;
         }
+        if let Some(r) = g.direction_hit_rate {
+            pooled_num += r * g.samples as f64;
+            pooled_n += g.samples;
+        }
+    }
+    // 再把该基准**按自身样本量向中性 0.5 收缩**（见 POOL_PSEUDO_COUNT 的实证理由）：
+    // 个位数样本的命中率不得被当作确定的上涨先验去钉死四档。
+    let pooled_rate = if pooled_n > 0 {
+        let raw = pooled_num / pooled_n as f64;
+        let n = pooled_n as f64;
+        let k = POOL_PSEUDO_COUNT;
+        Some((n * raw + k * 0.5) / (n + k))
     } else {
         None
     };
@@ -211,5 +229,48 @@ mod horizon_prior_tests {
         }
         assert_eq!(map["short"]["source"], "shrunk");
         assert_eq!(map["mid"]["source"], "pooled");
+    }
+
+    /// **根因 2 的回归测试**（2026-10-01 实证）。
+    ///
+    /// 实测形态：`mid` 档**自身样本为 0**（`source = "pooled"`）而合并基准 `p_pool` = 0.375
+    /// 只来自个位数样本 ⇒ 原实现把 0.375 原样当作该档上涨先验，四档被同一个值钉死
+    ///（比市况先验 0.45 低 7.5pt，四档后验系统性低于主链）。
+    ///
+    /// ⚠ 构造必须让被测档**自身样本不足**（`direction_hit_rate = None`）才会走 `pooled`
+    /// 分支 —— 若给该档 ≥ `MIN_SAMPLE` 条样本，走的是 `shrunk`，测不到本修复的作用点。
+    #[test]
+    fn small_pool_is_shrunk_toward_neutral() {
+        let stats = HitrateStats {
+            by_horizon: vec![
+                group("short", 8, Some(0.375)), // 唯一达 MIN_SAMPLE 的档 ⇒ 合并基准的来源
+                group("mid", 2, None),          // 自身样本不足 ⇒ own = None ⇒ 吃合并基准
+            ],
+            ..Default::default()
+        };
+        let map = horizon_prior_map(&stats, 20.0);
+        let expected = (8.0 * 0.375 + POOL_PSEUDO_COUNT * 0.5) / (8.0 + POOL_PSEUDO_COUNT);
+        let got = map["mid"]["prior"].as_f64().expect("mid 档必须有 prior");
+        assert_eq!(map["mid"]["source"], "pooled", "该档样本不足 ⇒ 来源须如实标为合并基准");
+        assert!(
+            (got - expected).abs() < 1e-4,
+            "合并基准必须按样本量向中性收缩：期望 {expected}，实得 {got}"
+        );
+        assert!(got > 0.375, "不得原样采用小样本命中率（那会把四档先验钉死在 0.375）");
+        assert!(got < 0.5, "收缩不得越过中性值");
+    }
+
+    /// 反向：基准来源的样本充足时几乎不被收缩 —— 收缩不得把有效统计一起抹平。
+    #[test]
+    fn large_pool_is_barely_shrunk() {
+        let stats = HitrateStats {
+            by_horizon: vec![group("short", 1000, Some(0.60)), group("mid", 2, None)],
+            ..Default::default()
+        };
+        let map = horizon_prior_map(&stats, 20.0);
+        let expected = (1000.0 * 0.60 + POOL_PSEUDO_COUNT * 0.5) / (1000.0 + POOL_PSEUDO_COUNT);
+        let got = map["mid"]["prior"].as_f64().expect("mid 档必须有 prior");
+        assert!((got - expected).abs() < 1e-4, "大样本应几乎不被收缩：期望 {expected}，实得 {got}");
+        assert!(got > 0.59, "1000 样本时收缩幅度应小于 1pt，实得 {got}");
     }
 }

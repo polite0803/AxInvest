@@ -1436,10 +1436,24 @@ let f12_weight = if f12_signal != 0.0 { get_weight(f_weights, "momentum", f12_de
 //
 // 激活条件：仅当 `serenity_context` 存在且 `serenity_score` 可解析为数值时激活；
 //   其余场景权重归零（**不占证据覆盖**），与 f11/f12 的「数据缺失 → 权重 0」一致。
-//   `screening_source != "serenity"` 时上游根本不注入该变量 ⇒ `present()` 守卫
-//   保证旧模板 / 非瓶颈路径下安全跳过（rt-workflow V57 会为 present() 内未注入
-//   变量补 unit 默认值）。
+//   `present()` 守卫保证旧模板 / 非瓶颈路径下安全跳过（rt-workflow V57 会为 present()
+//   内未注入变量补 unit 默认值）。
 //   哨兵取 −1.0：`serenity_score` 恒 ≥ 0，故负值可无歧义地表示「缺失/非数值」。
+//
+//   ⚠️ 2026-10-01 去重裁定（**本因子是刻意不激活的，勿当断链"修"**）：
+//   上游 `stock_workflow/hooks.rs` **刻意不再注入** `serenity_context`，故 `f13_weight`
+//   恒为 0（`present()` 守卫使其安全跳过，信号留在 0、权重留在 0）。
+//   理由（同一要素不得重复产生决策影响）：
+//     · `DECISION_LEG_ANALYST` 把 f13 映射到 **`a-sector`**；
+//     · `a-sector`（"行业景气度与轮动分析"）**本来就在股票分析链里跑**，其观点经
+//       「多空辩论 → `debate-convergence.consensus_score` → f2（权重 0.25）」进入决策；
+//     · 趋势智选引以为据的政策 / 消息 / 产业链瓶颈 / 催化剂叙事，在分析链里分别由
+//       `a-policy` / `a-news` / `a-sector` / `a-catalyst` 覆盖。
+//   ⇒ 再接一次就是把同一维度**第二次**计入后验，属本仓 P1-1「因子协方差衰减」要消除的
+//     重复计数形态（同 f3↔f11 公告重叠降权 35%、f1↔f9 趋势-资金共振降权 25%）。
+//   实测：f13 权重近 20 条分析、10 只股票**恒为 0** —— 那是隔离起效，不是断链。
+//   本因子**行为未变**（判据仍是 `serenity_score` 可解析），故本次只更订声明，
+//   `TEMPLATE_VERSION` 无需升版 —— DB 模板里的旧注释会保留，以本行为准。
 let f13_default = 0.10;
 let f13_signal = 0.0;
 let f13_weight = 0.0;

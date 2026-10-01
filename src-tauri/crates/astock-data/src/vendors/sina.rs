@@ -187,9 +187,27 @@ impl SinaVendor {
     }
 }
 
-/// `sh600519` / `sz000001` —— live 与 as-of 共用，避免两份前缀实现漂移
+/// `sh600519` / `sz000001` —— live 与 as-of 共用，避免两份前缀实现漂移。
+///
+/// ⚠ 2026-10-01：先走 `code_form::split_explicit_market` 认**显式市场标记**（大小写不敏感），
+/// 无标记时才按首位数字推断 —— 与东财 / 腾讯 / 雪球同一口径，不再自写一份剥离逻辑。
+///
+/// 修的是两个同源缺陷（都由 `minute_periods_map_to_sina_scale` 那行长期为红的断言暴露）：
+///   ① **前缀被叠两次**：原实现直接按首字符判市场，`sz002041` 的首字符 `s` 既不满足
+///      `6/9` 也不满足 `4/8` ⇒ 落进 `sz` ⇒ 拼出 `szsz002041`。而新浪对不存在的 symbol
+///      返回的是**空数组而非错误**（见下方北交所注释）⇒ 静默退化成「该股无 K 线」。
+///   ② **指数被错判市场**：`000001` 同时是上证综指（沪）与平安银行（深），按首位推断
+///      恒判深市 —— 这正是 `code_form.rs` 模块文档记载的缺陷形态（"该推断对股票成立、
+///      对指数必错"）。东财 2026-07-22、akshare 2026-09-10 已先后改用显式标记，sina 是漏网的。
+///
+/// 对**纯数字股票码**（既有调用点的唯一形态）行为逐位不变：它们没有显式标记，
+/// 仍走首位推断（见 `get_klines_from_sina` 段注释的 `002041 / 688806 / 600519`）。
 fn sina_daima(stock_code: &str) -> String {
     let code = stock_code.trim();
+    // 显式市场标记优先（`sh600519` / `SZ002041` / `000001.SH`）。
+    if let Some((bare, ex)) = crate::code_form::split_explicit_market(code) {
+        return format!("{}{bare}", ex.tencent_prefix());
+    }
     let market = if code.starts_with('6') || code.starts_with('9') {
         "sh"
     } else if code.starts_with('4') || code.starts_with('8') {
@@ -687,5 +705,38 @@ mod sina_kline_tests {
     fn datalen_is_capped() {
         let u = sina_kline_url("600519", "60", 9999).expect("m60");
         assert!(u.contains("datalen=1000"), "应被压到保守上限: {u}");
+    }
+
+    /// **带前缀的入参不得被叠成 `szsz002041`**（2026-10-01 修复）。
+    ///
+    /// 新浪对不存在的 symbol 返回的是**空数组而非错误** ⇒ 叠前缀不会报错，只会静默
+    /// 退化成「该股无 K 线」。本文件 `minute_periods_map_to_sina_scale` 里那行
+    /// `sz002041` 断言此前长期为红，暴露的正是这一点。
+    #[test]
+    fn prefixed_codes_are_not_double_prefixed() {
+        assert_eq!(sina_daima("sz002041"), "sz002041");
+        assert_eq!(sina_daima("sh600519"), "sh600519");
+        assert_eq!(sina_daima("bj430047"), "bj430047");
+        assert_eq!(sina_daima("SZ002041"), "sz002041", "前缀识别必须大小写不敏感");
+        assert_eq!(sina_daima("  600519  "), "sh600519", "首尾空白仍需 trim");
+        // 纯数字入参（既有调用点的唯一形态）行为逐位不变
+        assert_eq!(sina_daima("002041"), "sz002041");
+        assert_eq!(sina_daima("600519"), "sh600519");
+        assert_eq!(sina_daima("430047"), "bj430047");
+        assert_eq!(sina_daima("833171"), "bj833171");
+        assert_eq!(sina_daima("300604"), "sz300604");
+    }
+
+    /// **显式市场标记必须胜出首位数字推断**（2026-10-01 第二次修复）。
+    ///
+    /// `000001` 同时是上证综指（沪）与平安银行（深）—— 按首位推断恒判深市，于是
+    /// `000001.SH` 会静默取回平安银行的 K 线。这是 `code_form.rs` 模块文档记载的缺陷形态
+    /// （"该推断对股票成立、对指数必错"），东财 / 腾讯 / 雪球早已改正，sina 是漏网的。
+    #[test]
+    fn explicit_market_tag_wins_over_first_digit_inference() {
+        assert_eq!(sina_daima("000001.SH"), "sh000001", "上证综指：显式标记必须胜出");
+        assert_eq!(sina_daima("sz000001"), "sz000001", "平安银行：显式标记必须胜出");
+        // 裸码无标记 ⇒ 仍按首位推断（既有行为不变）
+        assert_eq!(sina_daima("000001"), "sz000001", "裸 000001 仍判深市（平安银行）");
     }
 }

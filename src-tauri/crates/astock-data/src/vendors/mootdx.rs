@@ -115,7 +115,10 @@ impl MootdxVendor {
         if let Some(&(host, port)) = TDX_SERVERS.get(preferred) {
             // 先试上次的胜者：多数调用一次命中，不产生并发连接
             if let Ok(conn) = Self::at_server(preferred, host, port).connect().await {
-                if let Some(value) = probe(conn).await.ok() {
+                // `if let Ok(v) = r` 与旧写法 `if let Some(v) = r.ok()` 逐情形等价
+                //（`Result::ok()` 只是 `Ok(v) => Some(v)`），此处不涉及浮点/NaN 边界，
+                // 故按 clippy 建议收敛（`clippy::match_result_ok`）。
+                if let Ok(value) = probe(conn).await {
                     return Ok(value);
                 }
             }

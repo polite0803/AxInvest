@@ -892,10 +892,22 @@ async fn scan_period(prepared: &PreparedScan, period: Period) -> Result<RecoResp
                     .and_then(|r| r.get("samples"))
                     .and_then(|v| v.as_u64())
                     .map(|v| v as u32);
-                let blended =
-                    crate::recommender::scoring::blend_confidence(prior, score, conf_sensitivity)
-                        .unwrap_or((score * 100.0).round() as u8);
-                let new_conf = (blended as f64 * style_weight).clamp(0.0, 100.0) as u8;
+                // 口径与分析链**同标尺**：先 logit 空间合成先验与评分，再按该档持有期做
+                // 时间折算（`snr_confidence`，锚 `reflection_stats::SNR_ANCHOR` —— 与脚本侧
+                // `pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS)` 同函数、同值）。
+                // 2026-10-01 用户裁定「统一口径」：补上时间折算，否则荐股的四档胜率
+                // 没有时间维度，而分析链有 ⇒ 同一个「长期」概念在两侧是两把尺子。
+                let new_conf = match crate::recommender::scoring::blend_win_rate(
+                    prior,
+                    score,
+                    conf_sensitivity,
+                    period_val.default_holding_days(),
+                    crate::reflection_stats::SNR_ANCHOR as u32,
+                ) {
+                    Some(win_rate) => (win_rate * 100.0 * style_weight).clamp(0.0, 100.0) as u8,
+                    // 先验不可得 ⇒ 退回纯评分（逐位保持原行为，含 round 时机）
+                    None => ((score * 100.0).round() * style_weight).clamp(0.0, 100.0) as u8,
+                };
                 // 还原策略给出的 base：主路径已**不乘**经验周期乘数（见 scoring.rs 注释），
                 // 故这里只除掉置信度一项。
                 let base = if old_conf > 0 {

@@ -337,7 +337,11 @@ fn metric_validity(name: &str, value: Option<f64>) -> (Option<f64>, String) {
 }
 
 /// 中位数（偶数个取中间两个的均值）；空样本返回 `None`。
-fn median_of(mut v: Vec<f64>) -> Option<f64> {
+///
+/// `pub(crate)`：`mcp_tools::compute_attention_score_impl` 的「研报共识目标价」口径
+/// 也吃这一份实现（共识必须抗单篇离群值，均值做不到）—— 全 crate 只此一份，
+/// 不为第二个调用点另写一遍（禁区 12）。
+pub(crate) fn median_of(mut v: Vec<f64>) -> Option<f64> {
     if v.is_empty() {
         return None;
     }

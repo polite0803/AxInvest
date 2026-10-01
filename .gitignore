@@ -168,3 +168,6 @@ temp_test.pdb
 /errfiles.txt
 /dto_sizes.txt
 /axagent_dto_fix.ps1
+
+# 本地 ACL 备份/检查报告（工具生成的机器本地产物，不入库）
+.dsh-acl-report/

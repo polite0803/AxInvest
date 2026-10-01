@@ -43,39 +43,6 @@ use std::sync::Arc;
 
 // ── 跨系统互证（智选推荐 vs 工作流决策）────────────────────────────
 
-/// 查该股近 `max_age_days` 天内**最新一条**趋势智选推荐（`serenity` / `bottleneck` 风格）。
-///
-/// 为什么收敛成一个函数：[`fetch_reco_prior`]（跨系统互证先验）与
-/// [`fetch_serenity_context`]（f13 瓶颈因子的输入）读的是**同一张表、同一个风格集合、
-/// 同一个时间窗**，各写一份查询必然漂移出「一个改了窗口另一个没改」的分歧。
-async fn fetch_latest_reco_pick(
-    db: &DatabaseConnection,
-    stock_code: &str,
-    max_age_days: i64,
-) -> Option<axagent_entities::reco_picks::Model> {
-    use axagent_entities::reco_picks;
-    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
-
-    // created_at 是 ISO 8601 字符串列（"%Y-%m-%dT%H:%M:%S%.3f"），字典序即时间序
-    let cutoff = (chrono::Local::now() - chrono::Duration::days(max_age_days))
-        .format("%Y-%m-%dT%H:%M:%S")
-        .to_string();
-    match reco_picks::Entity::find()
-        .filter(reco_picks::Column::StockCode.eq(stock_code))
-        .filter(reco_picks::Column::Style.is_in(["serenity", "bottleneck"]))
-        .filter(reco_picks::Column::CreatedAt.gte(cutoff))
-        .order_by_desc(reco_picks::Column::CreatedAt)
-        .one(db)
-        .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("[reco_pick] 查询智选推荐失败 ({}): {e}", stock_code);
-            None
-        },
-    }
-}
-
 /// 查询某股票近 `max_age_days` 天内的智选推荐（趋势智选面板同源的
 /// serenity / bottleneck 风格记录），返回融合先验 JSON（camelCase）。
 ///
@@ -83,12 +50,35 @@ async fn fetch_latest_reco_pick(
 /// 1. [`build_stock_analysis_variables`] 注入 `reco_prior` 变量（黑板可见，
 ///    仅供 LLM 上下文先验 —— report B2 已核：全仓 rhai 无 `reco_prior` 字面量消费）
 /// 2. 决策持久化时构建 `crossCheck` 字段（跨系统互证，core.rs / decision.rs 独立调用）
+///
+/// ⚠ 本函数**只**服务上述两处「展示 / 互证」用途，**不得**被用来给决策链喂因子 ——
+/// 理由见 `build_stock_analysis_variables` 里 `serenity_context` 段的注释（去重裁定）。
 pub(crate) async fn fetch_reco_prior(
     db: &DatabaseConnection,
     stock_code: &str,
     max_age_days: i64,
 ) -> Option<serde_json::Value> {
-    let pick = fetch_latest_reco_pick(db, stock_code, max_age_days).await?;
+    use axagent_entities::reco_picks;
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+
+    // created_at 是 ISO 8601 字符串列（"%Y-%m-%dT%H:%M:%S%.3f"），字典序即时间序
+    let cutoff = (chrono::Local::now() - chrono::Duration::days(max_age_days))
+        .format("%Y-%m-%dT%H:%M:%S")
+        .to_string();
+    let pick = match reco_picks::Entity::find()
+        .filter(reco_picks::Column::StockCode.eq(stock_code))
+        .filter(reco_picks::Column::Style.is_in(["serenity", "bottleneck"]))
+        .filter(reco_picks::Column::CreatedAt.gte(cutoff))
+        .order_by_desc(reco_picks::Column::CreatedAt)
+        .one(db)
+        .await
+    {
+        Ok(p) => p?,
+        Err(e) => {
+            tracing::warn!("[reco_prior] 查询智选推荐失败 ({}): {e}", stock_code);
+            return None;
+        },
+    };
     let pick_data: serde_json::Value = pick
         .pick_data
         .as_deref()
@@ -126,58 +116,6 @@ pub(crate) async fn fetch_reco_prior(
         "attentionHeat": seed["attention_metrics"]["search_heat"].as_str().unwrap_or(""),
         "catalysts": catalysts,
     }))
-}
-
-/// 取该股的 Serenity 瓶颈上下文（工作流变量 `serenity_context`），供
-/// `portfolio-mgr.rhai` 的 **f13 瓶颈因子**消费（读 `serenity_score` → σ）。
-///
-/// 两级来源，缺一不可：
-///   ① 候选内存缓存（`get_serenity_candidate_detail`）—— 仅在趋势智选**刚跑完**的
-///      `SERENITY_CACHE_TTL`（**1 小时**）内新鲜，字段最全；
-///   ② **持久化回源** `reco_picks.seed_pool_json` —— 缓存过期后的**常态**路径。
-///
-/// 为什么必须回源（2026-10-01 实证）：内存缓存 TTL 仅 1 小时，而分析距趋势智选产出
-/// 常达数天（300604 / 002371 的推荐在 09-28、分析在 10-01）⇒ 旧实现
-/// 「`screening_source == Some("serenity")` **且** 缓存命中」两个条件不可能同时成立
-/// （前端全仓零引用 `screeningSource`，见下），`serenity_context` 恒为 null、
-/// f13 权重恒为 0 —— 近 20 条分析、10 只股票 **100% 复现**，瓶颈评分从未进入过任何一次决策。
-///
-/// 注入形态与缓存版**同构**（`seed_pool_json` 就是同一份产物落库的），故下游
-/// `portfolio-mgr.rhai` 与 `seed_stock_analysis.rs` 的 input_mapping 零改动。
-pub(crate) async fn fetch_serenity_context(
-    db: &DatabaseConnection,
-    stock_code: &str,
-    max_age_days: i64,
-) -> Option<serde_json::Value> {
-    // ① 内存缓存：要求含**数值型** `serenity_score`（f13 的唯一消费键），
-    //    缺它则视为不可用并继续回源（缓存里可能是别的候选形态）。
-    if let Some(detail) =
-        axagent_analysis_engine::recommender::get_serenity_candidate_detail(stock_code)
-    {
-        if detail.get("serenity_score").and_then(|v| v.as_f64()).is_some() {
-            return Some(detail);
-        }
-    }
-    // ② 回源：先看 seed_pool_json（趋势智选候选的完整落库形态）
-    let pick = fetch_latest_reco_pick(db, stock_code, max_age_days).await?;
-    for raw in [&pick.seed_pool_json, &pick.pick_data] {
-        let Some(parsed) =
-            raw.as_deref().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        else {
-            continue;
-        };
-        if parsed.get("serenity_score").and_then(|v| v.as_f64()).is_some() {
-            return Some(parsed);
-        }
-    }
-    // 命中推荐但两个 JSON 列都取不到瓶颈评分 —— **必须留痕**，否则与「无推荐」
-    // 在日志上无法区分，又回到「数据到了门口没人开门」的不可归因形态。
-    tracing::warn!(
-        "[stock-analysis] {} 命中 reco_picks（style={}）但无 serenity_score ⇒ f13 不激活",
-        stock_code,
-        pick.style
-    );
-    None
 }
 
 /// 将智选推荐先验与工作流决策做跨系统互证，把 `crossCheck` 就地写入决策 JSON。
@@ -424,43 +362,33 @@ pub(crate) async fn build_stock_analysis_variables(
             }
         }
     }
-    // f13 瓶颈因子的输入 —— **不再要求 `screening_source == "serenity"`**。
+    // ── f13 瓶颈因子的输入：**刻意不注入**（2026-10-01 去重裁定）──
     //
-    // 判据改为「该股近期确实被趋势智选命中即注入」，与紧随其后的 `reco_prior`
-    // 同一条惯例（下面那段注释：无论 screening_source 是什么，只要命中过就注入）。
+    // `serenity_context` 是 `portfolio-mgr.rhai` 的 f13 因子唯一输入。它**不再注入**，
+    // 理由是同一要素不得重复产生决策影响：
     //
-    // 根因（2026-10-01 实证）：旧实现要求「显式标记 == serenity」**且**「候选内存缓存
-    // 命中（TTL 仅 1 小时）」同时成立，而前端全仓零引用 `screeningSource`
-    // （`src/` 下 `grep -i screeningsource` 零命中）⇒ 第一个条件恒 false，
-    // `serenity_context` 恒为 null、`portfolio-mgr.rhai` 的 f13 权重恒为 0。
-    // 后果：系统一边生成「智选推荐 vs 工作流否决」分歧报告，一边**不让推荐影响任何计算**，
-    // 用户看到的四档结论（超短观望/短观望/中期减持/长期卖出）与荐股理由完全脱节。
+    //   · `DECISION_LEG_ANALYST` 把 f13 明确映射到 **`a-sector`**
+    //     （`crates/analysis-engine/src/evidence_weight.rs`）；
+    //   · 而 `a-sector`（"行业景气度与轮动分析"，`seed_stock_analysis.rs` 的 analysts
+    //     数组第 9 项）**本来就在股票分析链里跑**，其观点经「多空辩论 →
+    //     debate-convergence.consensus_score → f2（权重 0.25）」进入决策；
+    //   · 趋势智选引以为据的政策 / 消息 / 产业链瓶颈 / 催化剂叙事，在分析链里
+    //     分别由 `a-policy` / `a-news` / `a-sector` / `a-catalyst` 覆盖。
+    //   ⇒ 再把趋势智选的 `serenity_score` 接成 f13，等于把同一维度**第二次**计入后验，
+    //     正是本仓 P1-1「因子协方差衰减」要消除的重复计数形态
+    //     （同 f3↔f11 公告重叠降权 35%、f1↔f9 趋势-资金共振降权 25%）。
     //
-    // `screening_source` 变量本身仍在上面注入（保留显式来源声明的语义），
-    // 但不再是本变量注入的**必要条件**。
-    if let Some(detail) = fetch_serenity_context(db, stock_code, 14).await {
-        tracing::info!(
-            "[stock-analysis] 注入 serenity_context: code={} score={} bottleneck={} (screening_source={:?})",
-            stock_code,
-            detail["serenity_score"].as_f64().unwrap_or(0.0),
-            detail["bottleneck_product"].as_str().unwrap_or(""),
-            screening_source.unwrap_or("")
-        );
-        if let Some(existing) = merged_vars.iter_mut().find(|v| v.name == "serenity_context") {
-            existing.value = detail;
-        } else {
-            merged_vars.push(Variable {
-                name: "serenity_context".into(),
-                var_type: "object".into(),
-                value: detail,
-                description: Some(
-                    "Serenity 瓶颈分析上下文（serenity_score / bottleneck_product / catalysts 等）"
-                        .into(),
-                ),
-                is_secret: false,
-            });
-        }
-    }
+    // 反面实证（为何曾有「断链」一说）：f13 权重实测恒为 0（近 20 条分析、10 只股票
+    // 100% 复现）—— 但那**不是**缺陷，而是隔离起效。曾以「数据到了门口没人开门」
+    // 为由把它接上（v52 / `AUDIT-codebase-review-roadmap-2026-09-19.md` A1），
+    // 该处置与去重纪律冲突，2026-10-01 用户裁定以**去重**为准。
+    //
+    // ⚠ 因此：**不要**为了「让荐股理由进入决策」而重新注入本变量。两个子系统的观点差异
+    //   应当通过修**错的那一方**来收敛（实证：趋势智选侧 `consensus_gap` 用单篇研报
+    //   目标价冒充共识 ⇒ 误判「明显低估」，已在 `astock-data` 的 `compute_attention_score`
+    //   中修正为「近 90 天中位数 + 最小样本数」），而不是把结论搬进对方的算式里强行对齐。
+    //
+    // `screening_source` 变量本身仍在上面注入（保留显式来源声明的语义）。
 
     // ── 跨系统互证：注入近 14 天智选推荐先验（reco_prior）──
     // 无论 screening_source 是什么，只要该股近期被趋势智选命中过就注入。

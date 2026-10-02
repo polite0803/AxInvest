@@ -2,6 +2,7 @@
 
 import { type DropdownItem, DropdownMenu } from "@/components/layout/DropdownMenu";
 import { Tooltip } from "@/components/layout/Tooltip";
+import { ModelIcon } from "@/components/shared/LazyModelIcon";
 import { getConvIcon } from "@/lib/convIcon";
 import {
   type TabItem,
@@ -12,7 +13,6 @@ import {
   useStreamStore,
   useTabStore,
 } from "@/stores";
-import { ModelIcon } from "@lobehub/icons";
 import { theme } from "antd";
 import { Avatar } from "antd";
 import { HelpCircle, MessageSquarePlus, X } from "lucide-react";

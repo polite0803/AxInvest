@@ -97,6 +97,12 @@ const EXTERNAL_VARS: &[&str] = &[
     //   ⚠️ 这类漏声明是**静默**的（`rhai_syntax_check` 只编译不执行，照样绿）
     //   ⇒ 本清单与 input_mapping 的双向锁（`external_vars_match_node_input_mapping`）是唯一哨兵。
     "valuation_dcf_fcf_data_missing",
+    // 2026-10-02 补：DCF **不可用机读原因码**（第四类缺席的判据输入）。
+    //   与上面那次漏同步同形 —— 加 `input_mapping` 键必须同时加进本清单，
+    //   否则脚本首跑即 `ErrorVariableNotFound`、本文件全红。
+    "valuation_dcf_unavailable_reason",
+    //   2026-10-02 同批：`dcf.available` 是第四类缺席的**伞形**判据（遮蔽态无码）。
+    "valuation_dcf_available",
     "money_flow",
     "lockup_bundle",
     "announcements",
@@ -1037,5 +1043,571 @@ fn g2_market_level_absence_suppresses_hard_marker_but_stock_level_does_not() {
     let r = run_quality(&reports, &confs);
     for n in nodes {
         assert_eq!(hits(&r, n), 0, "节点 {n}：停披句内的动词命中应被豁免（且未烧穿操作预算）");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R1（2026-10-02）：VERDICT 专属字段未产出 —— 第三类缺席的检出与分列
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 通用 6 键 —— 与 `agent_executor.rs` 的 `VERDICT_MACHINE_FIELDS` 同一集合。
+/// 本文件刻意**不**从 Rhai 侧读声明表，而是用「跑一遍看它报哪些字段缺」来反推，
+/// 这样 `required_verdict_fields()` 与角色 `.md` 之间的绑定是**行为对行为**，
+/// 不是两份文本清单的字符串比对（后者一改格式就静默失效）。
+const GENERIC_VERDICT_FIELDS: [&str; 6] =
+    ["verdict", "bull_score", "bear_score", "bull_points", "bear_points", "confidence"];
+
+/// 同 `run_quality`，但可注入**完整**的 verdict map（覆盖 `{abbr}_verdict` 输入）。
+///
+/// 存在的理由：`run_quality_impl` 的 `confs` 只造 `{confidence}` 一种形态，
+/// 无法表达「分析师产出了专属字段」这一正控 —— 那正是本组判据唯一能区分两种
+/// 缺席（模型漏字段 vs 该维度真无催化剂）的输入。
+fn run_quality_with_verdicts(reports: &[(&str, &str)], verdicts: &[(&str, Map)]) -> Map {
+    let engine = build_engine();
+    let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
+    let mut scope = Scope::new();
+    for v in EXTERNAL_VARS {
+        scope.push_dynamic(*v, Dynamic::UNIT);
+    }
+    for (abbr, text) in reports {
+        scope.push_dynamic(format!("{abbr}_report"), Dynamic::from(text.to_string()));
+    }
+    for (abbr, verdict) in verdicts {
+        scope.push_dynamic(format!("{abbr}_verdict"), Dynamic::from(verdict.clone()));
+    }
+    engine
+        .eval_ast_with_scope::<Map>(&mut scope, &ast)
+        .expect("data-quality.rhai 执行失败（检查是否引用了未注册的宿主函数）")
+}
+
+/// 造一份 verdict map：给定键 → 字符串值，`confidence` 单独给数值。
+fn verdict_with(conf: f64, extras: &[(&str, &str)]) -> Map {
+    let mut m = Map::new();
+    m.insert("verdict".into(), Dynamic::from("偏空".to_string()));
+    m.insert("bull_score".into(), Dynamic::from(45_i64));
+    m.insert("bear_score".into(), Dynamic::from(60_i64));
+    m.insert("bull_points".into(), Dynamic::from(rhai::Array::new()));
+    m.insert("bear_points".into(), Dynamic::from(rhai::Array::new()));
+    m.insert("confidence".into(), Dynamic::from(conf));
+    for (k, v) in extras {
+        m.insert((*k).to_string().into(), Dynamic::from(v.to_string()));
+    }
+    m
+}
+
+/// 取 `verdict_field_gaps` 的字符串清单。
+fn field_gaps(result: &Map) -> Vec<String> {
+    let arr = result["verdict_field_gaps"]
+        .clone()
+        .try_cast::<rhai::Array>()
+        .expect("verdict_field_gaps 不是数组");
+    arr.iter().map(|d| d.to_string()).collect()
+}
+
+/// 从缺口描述串里取出**字段名**（形如 `催化剂分析师：VERDICT 缺字段 catalyst_level`）。
+fn gap_field(desc: &str) -> String {
+    desc.rsplit(' ').next().unwrap_or(desc).to_string()
+}
+
+/// R1-b 主判据：分析师已出 VERDICT、但缺角色专属字段 ⇒ 计入 `verdict_field_gaps`，
+/// 且**不并入** `missing_factors`（两表并存，各自语义独立）。
+///
+/// 被判的真实缺陷（688498 运行 `129745a7`）：a-catalyst 五个工具调用全成功、
+/// 正文写了「L2业绩拐点级利好」，verdict 却只剩通用 6 键 ⇒ 三个专属字段同时消失。
+/// 修复前该事实在 UI 上**完全不可见**，只表现为「缺失因子：催化剂等级」，
+/// 与真取数故障无法区分（用户据此去查数据源，而数据源是好的）。
+#[test]
+fn r1_missing_verdict_field_is_a_third_kind_of_absence() {
+    let report =
+        "催化剂级别判断依据：中报净利 6.07 亿元构成 L2 业绩拐点级利好，实控人拟减持构成利空。";
+
+    // ① 修复前真实形态：只有通用 6 键 ⇒ 三个专属字段全部记为「未产出」
+    let r = run_quality_with_verdicts(&[("cat", report)], &[("cat", verdict_with(45.0, &[]))]);
+    let gaps = field_gaps(&r);
+    assert_eq!(gaps.len(), 3, "三个专属字段同时缺失：{gaps:?}");
+    let fields: Vec<String> = gaps.iter().map(|g| gap_field(g)).collect();
+    for f in ["catalyst_level", "institutional_trace", "narrative_completeness"] {
+        assert!(fields.contains(&f.to_string()), "应报出缺字段 {f}，实得 {fields:?}");
+    }
+    // 两表并存：因子侧仍记「催化剂等级」缺席（它确实没值，与分母口径绑死）
+    let mf = names(&r, "missing_factors");
+    assert!(mf.contains(&"催化剂等级".to_string()), "missing_factors 仍须含「催化剂等级」：{mf:?}");
+    // 且**不得**把本类缺席混进上游取数缺口（那栏说的是「工具没取到数」）
+    assert!(names(&r, "upstream_data_gaps").is_empty(), "模型漏字段不是上游取数故障");
+
+    // ② 正控：专属字段齐全 ⇒ 本表为空（`catalyst_level: "无"` 是**有效产出**，
+    //    含义是「该维度确无催化剂」，不得被当成字段缺失）
+    let full = verdict_with(
+        70.0,
+        &[
+            ("catalyst_level", "无"),
+            ("institutional_trace", "无"),
+            ("narrative_completeness", "40"),
+        ],
+    );
+    let r = run_quality_with_verdicts(&[("cat", report)], &[("cat", full)]);
+    assert!(field_gaps(&r).is_empty(), "字段齐全（即便取值为「无」）不得报未产出");
+
+    // ③ 根本没有 VERDICT（scope 里是 `()`）⇒ 属 status=missing / missing_analysts 的
+    //    语义，**不属**本类。误并会让一个缺陷在两张表里各报一次。
+    let r = run_quality_with_verdicts(&[("cat", report)], &[]);
+    assert!(field_gaps(&r).is_empty(), "无 VERDICT 产出时不得记「字段未产出」");
+
+    // ④ strict_mode 降级：verdict 是引擎合成的通用壳，缺字段是降级的**必然结果**
+    //    ⇒ 跳过，由 status=untrusted 表达（同 validate_verdict_schema 的 `!xx_u` 守卫）
+    let mut degraded = verdict_with(0.0, &[]);
+    degraded.insert("__untrusted".into(), Dynamic::from(true));
+    degraded.insert("strict_mode_fallback".into(), Dynamic::from(true));
+    let r = run_quality_with_verdicts(&[("cat", report)], &[("cat", degraded)]);
+    assert!(field_gaps(&r).is_empty(), "降级壳不得重复报字段缺失");
+
+    // ⑤ 快速链判定器形态（`j-*`，带 `node_id`）不是分析师 VERDICT ⇒ 不适用本判据。
+    //    不锁这条 ⇒ 快速链每次运行都会凭空多出三条假「字段未产出」。
+    let mut classifier = Map::new();
+    classifier.insert("category".into(), Dynamic::from("中性".to_string()));
+    classifier.insert("node_id".into(), Dynamic::from("j-catalyst".to_string()));
+    let r = run_quality_with_verdicts(&[("cat", report)], &[("cat", classifier)]);
+    assert!(field_gaps(&r).is_empty(), "判定器形态不适用分析师字段判据");
+}
+
+/// R1 防漂移绑定：`data-quality.rhai` 声明的催化剂专属字段 **必须逐字等于**
+/// `catalyst-analyst.md`「输出格式」VERDICT 模板行里、通用 6 键之外的那批键。
+///
+/// 为什么必须锁：两侧任一方单独演进都会**静默**失效 ——
+///   · md 加了字段、Rhai 没加 ⇒ 该字段漏产出无人检出（回到修复前的不可见状态）；
+///   · Rhai 加了字段、md 没写 ⇒ 分析师被要求产出它从未见过的字段，恒报缺失。
+/// 判据取「行为对行为」：Rhai 侧的清单由 ① 跑一遍它自己报出的字段名反推，
+/// 不解析 Rhai 文本。
+#[test]
+fn r1_required_field_list_is_bound_to_the_expert_md_template() {
+    const CATALYST_MD: &str =
+        include_str!("../../../agency_experts/stock-analysis/catalyst-analyst.md");
+
+    // 规范行 = 带 `|` 枚举占位的那一行（示例行写的是具体值，不含 `|`）
+    let spec_line = CATALYST_MD
+        .lines()
+        .find(|l| l.starts_with("<!-- VERDICT: ") && l.contains("\"verdict\":\"看多|"))
+        .expect("catalyst-analyst.md 找不到规范 VERDICT 模板行（格式变了？绑定测试需同步）");
+    let md_fields = template_keys(spec_line);
+    let mut md_extras: Vec<String> = md_fields
+        .iter()
+        .filter(|k| !GENERIC_VERDICT_FIELDS.contains(&k.as_str()))
+        .cloned()
+        .collect();
+    md_extras.sort();
+    assert!(!md_extras.is_empty(), "规范模板行除通用 6 键外必须有专属字段，否则本绑定无意义");
+
+    // Rhai 侧：让催化剂分析师只产出通用 6 键，它报出的字段名就是它的声明清单
+    let r = run_quality_with_verdicts(&[], &[("cat", verdict_with(45.0, &[]))]);
+    let mut rhai_extras: Vec<String> = field_gaps(&r).iter().map(|g| gap_field(g)).collect();
+    rhai_extras.sort();
+
+    assert_eq!(
+        rhai_extras, md_extras,
+        "Rhai 的 required_verdict_fields 与 catalyst-analyst.md 模板行漂移了。\
+         md 侧 {md_extras:?} / Rhai 侧 {rhai_extras:?}"
+    );
+}
+
+/// 从 `<!-- VERDICT: {...} -->` 一行里取出**顶层**键名（不依赖 serde：
+/// 模板值是 `0-100整数` 这类非 JSON 占位串，整行不是合法 JSON）。
+fn template_keys(line: &str) -> Vec<String> {
+    let bytes: Vec<char> = line.chars().collect();
+    let mut keys = Vec::new();
+    let mut depth = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            '{' | '[' => depth += 1,
+            '}' | ']' => depth = depth.saturating_sub(1),
+            '"' if depth == 1 => {
+                // 只在顶层取「紧跟冒号」的字符串 —— 即键名
+                let mut j = i + 1;
+                let mut buf = String::new();
+                while j < bytes.len() && bytes[j] != '"' {
+                    buf.push(bytes[j]);
+                    j += 1;
+                }
+                if j + 1 < bytes.len() && bytes[j + 1] == ':' {
+                    keys.push(buf);
+                }
+                i = j;
+            },
+            _ => {},
+        }
+        i += 1;
+    }
+    keys
+}
+
+/// N1/N2/N3（2026-10-02，603986 运行 `8d46751f`）：**提示词里指定的措辞必须逐字可验证**
+/// 不会被失败标记词表计入 —— 否则「改提示词」只是一句没有后验的承诺。
+///
+/// 三处提示词（`catalyst-analyst.md` / `news-analyst.md` / `hot-money-tracker.md`）各新增一段
+/// 「通道先天边界」，规定分析师**必须**用哪个说法、禁止用哪个说法。本测试锁两件事：
+///   ① 指定措辞 ⇒ 命中 0（改措辞确实能摘掉那三行假「低置信」）；
+///   ② 被禁止的措辞 ⇒ 仍命中 1（证明判据本身没被放宽，收紧的是**产出**不是**尺子**；
+///      若哪天有人为了让 ① 通过而去放宽词表，② 会立刻红）。
+/// 度量口径两侧完全相同（同一个 `marker_counts`、同一套句级抑制），差别只在输入文本。
+#[test]
+fn n1_n3_prescribed_wordings_are_clean_while_forbidden_wordings_still_count() {
+    // ──  催化剂：指定「正文未解析（结构性）」，禁止「PDF关键数据缺失」──
+    let cat_ok = "长电科技处于L3催化剂与中报高增长叠加期，定增扩产打开产能空间，\
+                  但PE 59倍估值已透支部分预期且公告通道仅标题级信息、正文未解析（结构性）。";
+    let r = run_quality(&[("cat", cat_ok)], &[("cat", 55.0)]);
+    assert_eq!(hits(&r, "cat"), 0, "催化剂指定措辞不得计失败标记：{cat_ok}");
+
+    let cat_bad = "PE 59倍估值已透支部分预期且PDF关键数据缺失，整体偏多看待。";
+    let r = run_quality(&[("cat", cat_bad)], &[("cat", 55.0)]);
+    assert_eq!(hits(&r, "cat"), 1, "被禁止的「PDF关键数据缺失」必须照计（尺子未放宽）");
+
+    // ──  新闻面：指定「本系统无监管文书数据源（结构性）」，禁止「该维度按"无数据"处理」──
+    let news_ok = "## 风险与数据缺口\n本系统无监管文书数据源（结构性），\
+                   问询函/立案只能从公告标题间接识别；若存在未披露问询则可能推高空头。";
+    let r = run_quality(&[("news", news_ok)], &[("news", 60.0)]);
+    assert_eq!(hits(&r, "news"), 0, "新闻面指定措辞不得计失败标记：{news_ok}");
+
+    let news_bad = "未获取到监管函/问询函/立案等A股特色风险源数据，该维度按\"无数据\"处理。";
+    let r = run_quality(&[("news", news_bad)], &[("news", 60.0)]);
+    assert_eq!(hits(&r, "news"), 1, "被禁止的「按\"无数据\"处理」必须照计");
+
+    // ──  资金面：逐维度各写各的原因（北向带「停披」），禁止合并成「数据缺失维度（北向/两融）」──
+    let hm_ok = "**风险提示：**\n北向个股净买入自 2024-08 起监管停披，仅有沪深股通成交额；\
+                 两融侧该券属设计性缺席（非两融标的）。";
+    let r = run_quality(&[("hm", hm_ok)], &[("hm", 85.0)]);
+    assert_eq!(hits(&r, "hm"), 0, "资金面逐维度指定措辞不得计失败标记：{hm_ok}");
+
+    let hm_bad = "1. 机构持续流出可能引发连锁抛售 2. 数据缺失维度（北向/两融）可能隐藏额外风险";
+    let r = run_quality(&[("hm", hm_bad)], &[("hm", 85.0)]);
+    assert_eq!(hits(&r, "hm"), 1, "被禁止的合并式「数据缺失维度」必须照计");
+}
+
+/// N1/N2/N3 的**提示词侧**绑定：三份 md 里必须真的写着指定的那个措辞。
+///
+/// 为什么必须锁：判据侧（上一条测试）只保证「那句话不计入」，它**看不见**提示词。
+/// 若有人改提示词时把指定措辞换掉（或整段删掉），分析师会退回失败动词，
+/// 而两条测试**都还是绿的** —— 那正是本仓反复踩过的「声明的机制 ≠ 运行的机制」。
+/// 判据取 md 正文里的**引号内字面串**，与上一条测试用的是同一串，改一侧必红。
+#[test]
+fn n1_n3_expert_prompts_actually_prescribe_those_wordings() {
+    const CAT_MD: &str = include_str!("../../../agency_experts/stock-analysis/catalyst-analyst.md");
+    const NEWS_MD: &str = include_str!("../../../agency_experts/stock-analysis/news-analyst.md");
+    const HM_MD: &str = include_str!("../../../agency_experts/stock-analysis/hot-money-tracker.md");
+
+    assert!(
+        CAT_MD.contains("正文未解析（结构性）") && CAT_MD.contains("PDF关键数据缺失"),
+        "catalyst-analyst.md 的「公告通道先天边界」段缺失：\
+         必须同时含指定措辞与被禁止措辞（后者是禁止清单，缺了就无法验证收紧的是产出不是尺子）"
+    );
+    assert!(
+        NEWS_MD.contains("本系统无监管文书数据源（结构性）")
+            && NEWS_MD.contains("该维度按\"无数据\"处理"),
+        "news-analyst.md 的「无独立监管文书数据源」段缺失"
+    );
+    assert!(
+        HM_MD.contains("监管停披") && HM_MD.contains("数据缺失维度（北向/两融）"),
+        "hot-money-tracker.md 的「逐维度写原因、禁止合并式数据缺失」段缺失"
+    );
+    // N3 追加维度（000710 运行 `92849db2`）：游资席位/涨停接力
+    assert!(
+        HM_MD.contains("该窗口无游资席位上榜记录") && HM_MD.contains("涨停接力数据缺失"),
+        "hot-money-tracker.md 的「游资席位/涨停接力」边界段缺失：\
+         该维度是本轮唯一在 N3 落地后仍被计标记的资金面缺口"
+    );
+}
+
+/// N4（2026-10-02，000710 运行 `92849db2`）：`=null` / `为 null` 归入**状态词**并按句级抑制。
+///
+/// 被判的真实缺陷：研报分析师写「`consensusEps=null (2026)` 表明当前**无机构**对该股提供
+/// 2026 年 EPS 预测」——三个工具调用全 ok，该 null 是「无 2026 年覆盖」的真实状态，
+/// 却因 `=null` 此前**没有任何抑制组**（走 v87「硬标记不做句级判定」捷径）被计 1 处失败标记
+/// ⇒ 判「⚠️ 低置信」、归因「上游工具数据不完整」。
+///
+/// 本测试同时锁「尺子没放宽」的三侧：裸 `=null` 照计、跨句不连坐、动词类硬标记不受影响。
+#[test]
+fn n4_null_state_marker_is_sentence_suppressed_while_bare_null_still_counts() {
+    // ① 真证明文：`=null` 与「无机构」同句 ⇒ 豁免
+    let ok = "`consensusEps=null (2026)` 表明当前无机构对该股提供 2026 年 EPS 预测，\
+              机构对 EPS 的认知无法被追踪。";
+    let r = run_quality(&[("res", ok)], &[("res", 25.0)]);
+    assert_eq!(hits(&r, "res"), 0, "=null 与无机构覆盖语境同句 ⇒ 不得计数据缺口：{ok}");
+
+    // ② 负控：裸 `=null`、无任何缺席语境 ⇒ 照计（收紧的是分类，不是标准）
+    let bare = "一致预期字段 consensusEps=null，本轮无法给出估值锚。";
+    let r = run_quality(&[("res", bare)], &[("res", 60.0)]);
+    assert_eq!(hits(&r, "res"), 1, "无缺席语境的裸 `=null` 必须照计");
+
+    // ③ 跨句不连坐：无覆盖在第 1 句、`=null` 在第 2 句 ⇒ 第 2 句照计
+    let cross = "该股暂无机构跟踪。\n研报接口返回的 consensusEps=null。";
+    let r = run_quality(&[("res", cross)], &[("res", 60.0)]);
+    assert_eq!(hits(&r, "res"), 1, "句级抑制必须逐句生效，不得跨句连坐");
+
+    // ④ 动词类硬标记不受本次归类影响（`无法获取` 仍零抑制）
+    let verb = "调用估值接口超时，无法获取一致预期数据。";
+    let r = run_quality(&[("res", verb)], &[("res", 60.0)]);
+    assert_eq!(hits(&r, "res"), 1, "动词类真故障标记必须维持零抑制");
+
+    // ⑤ `为 null` 同族同判据（两串必须一起改，否则分析师换个写法就绕过）
+    let asof = "北向个股净买入字段为 null（自 2024-08 起监管停披）。";
+    let r = run_quality(&[("hm", asof)], &[("hm", 70.0)]);
+    assert_eq!(hits(&r, "hm"), 0, "`为 null` 与停披语境同句 ⇒ 与 `=null` 同判据：{asof}");
+
+    // ⑥ **归因对照**（非破坏性自证）：把命中的词换成动词类硬标记、**语境一字不改** ⇒ 必须照计。
+    //    这条锁的是「豁免到底来自分组归属还是来自句子本身」——若有人日后把 `无法获取`
+    //    也塞进抑制组，本条即红（那才是真的放宽尺子）。
+    let verb_same_ctx = "一致预期无机构覆盖，无法获取 consensusEps。";
+    let r = run_quality(&[("res", verb_same_ctx)], &[("res", 60.0)]);
+    assert_eq!(
+        hits(&r, "res"),
+        1,
+        "同一句「无机构」语境下，动词类硬标记必须照计 ⇒ ① 的豁免来自分组归属，不是来自文本"
+    );
+}
+
+/// 同 `run_quality_with_verdicts`，但可注入**任意标量**外部输入。
+///
+/// 存在的理由：第四类缺席的判据是 `valuation_dcf_unavailable_reason`（一个字符串码），
+/// `confs` / `verdicts` 两条通道都表达不了它 ⇒ 没有这个入口，该判据在门禁里恒不可达。
+fn run_quality_with_scalars(reports: &[(&str, &str)], scalars: &[(&str, Dynamic)]) -> Map {
+    let engine = build_engine();
+    let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
+    let mut scope = Scope::new();
+    for v in EXTERNAL_VARS {
+        scope.push_dynamic(*v, Dynamic::UNIT);
+    }
+    for (abbr, text) in reports {
+        scope.push_dynamic(format!("{abbr}_report"), Dynamic::from(text.to_string()));
+    }
+    // 后 push 覆盖前面的 UNIT（Rhai scope 同名取最后一个）—— 与 run_quality_impl 同机制
+    for (k, val) in scalars {
+        scope.push_dynamic((*k).to_string(), val.clone());
+    }
+    engine
+        .eval_ast_with_scope::<Map>(&mut scope, &ast)
+        .expect("data-quality.rhai 执行失败（检查是否引用了未注册的宿主函数）")
+}
+
+/// 项3（2026-10-02，000710 运行 `92849db2`）：**第四类缺席** —— 估值方法对本标的不适用。
+///
+/// 被判的真实缺陷：PE −18、近5年报无正净利 ⇒ DCF 结构性不适用、`upsidePct` 恒 null，
+/// 而 `missing_factors` 的判据只有 `!present(valuation_dcf_upside)` 一条 ⇒
+/// 面板显示「缺失因子：估值上行空间」，把**标的属性**伪装成**我方取数缺口**。
+///
+/// 四张表的边界（本测试逐条锁住，防止后人合并）：
+///   因子没值 / 上游没取到数 / 分析师漏字段 / **方法对本标的不适用**。
+#[test]
+fn item3_dcf_not_applicable_is_a_fourth_kind_of_absence() {
+    let report = "该股持续亏损，估值以 PS 相对口径给出。";
+    // 伞形判据 `available=false` + 细分码；两者必须一起注入（遮蔽态只有伞、没有码）
+    let unavailable = |code: Option<&str>| {
+        let mut v: Vec<(&str, Dynamic)> = vec![("valuation_dcf_available", Dynamic::from(false))];
+        if let Some(c) = code {
+            v.push(("valuation_dcf_unavailable_reason", Dynamic::from(c.to_string())));
+        }
+        v
+    };
+
+    // ① 标的属性：DCF 不适用（持续亏损）⇒ 记进第四张表，且**不**混进上游取数缺口
+    let r = run_quality_with_scalars(&[("mk", report)], &unavailable(Some("persistent_loss")));
+    let na = names(&r, "method_not_applicable");
+    assert_eq!(na.len(), 1, "持续亏损应记一条方法不适用：{na:?}");
+    assert!(na[0].contains("估值上行空间"), "须点明是哪个因子不适用：{}", na[0]);
+    assert!(names(&r, "upstream_data_gaps").is_empty(), "标的属性不是我方采集缺陷");
+    // 分母绑定不破：因子侧仍记缺失（`pm_compute_factor_completeness` 同样判它没值）
+    assert!(
+        names(&r, "missing_factors").contains(&"估值上行空间".to_string()),
+        "missing_factors 仍须含「估值上行空间」—— 列表长度与公式分母绑死，不得摘除"
+    );
+
+    // ② 我方采集缺陷：同一路径的另一个码 ⇒ 记进**上游缺口**，且**不**记方法不适用
+    let r = run_quality_with_scalars(&[("mk", report)], &unavailable(Some("fcf_data_missing")));
+    assert!(names(&r, "method_not_applicable").is_empty(), "缺数不是「方法不适用」");
+    assert_eq!(names(&r, "upstream_data_gaps").len(), 1, "缺数必须回到上游缺口那一栏");
+
+    // ②b 遮蔽态：`available=false` 但**没有码**（中性档超出 现价×1%~×10000% 被遮蔽）
+    //   ⇒ 仍属第四类缺席。只判码会漏掉这一路，遮蔽态又会只剩「缺失因子」一条孤讯。
+    let r = run_quality_with_scalars(&[("mk", report)], &unavailable(None));
+    let na = names(&r, "method_not_applicable");
+    assert_eq!(na.len(), 1, "遮蔽态必须记一条方法不适用：{na:?}");
+    assert!(na[0].contains("超出量程被遮蔽"), "应说明是遮蔽而非取数故障：{}", na[0]);
+    assert!(names(&r, "upstream_data_gaps").is_empty(), "遮蔽不是采集缺陷，不得串栏");
+
+    // ③ 只告警**不扣分**：同一个标的，报不报方法不适用，综合分必须一致
+    //   （与 upstream_data_gaps / verdict_field_gaps 同一处置纪律）
+    let scored = run_quality_with_scalars(&[("mk", report)], &unavailable(Some("persistent_loss")));
+    let plain = run_quality_with_scalars(
+        &[("mk", report)],
+        &[("valuation_dcf_available", Dynamic::from(true))],
+    );
+    assert_eq!(
+        scored["score"].clone().try_cast::<f64>().expect("score 应为浮点"),
+        plain["score"].clone().try_cast::<f64>().expect("score 应为浮点"),
+        "第四类缺席不得改变 score —— 改变即说明它被接进了扣分路径"
+    );
+    assert_eq!(
+        scored["grade"].clone().try_cast::<String>().expect("grade 应为字符串"),
+        plain["grade"].clone().try_cast::<String>().expect("grade 应为字符串"),
+        "第四类缺席不得改变 grade"
+    );
+    assert!(names(&plain, "method_not_applicable").is_empty(), "DCF 可用时不得凭空造出告警");
+
+    // ④ 旧快照 / 快速链降级：该路解析不到值 ⇒ 不得因此误报
+    let r = run_quality_with_scalars(&[("mk", report)], &[]);
+    assert!(names(&r, "method_not_applicable").is_empty(), "取不到值 ⇒ 保持沉默，不得猜");
+}
+
+/// M1（2026-10-02，000710 运行 `92849db2`）：状态三分类必须是**真划分**，且与逐节点表同源。
+///
+/// 被判的真实缺陷：弹窗把 `good_count / degraded_count / gap_count` 并排渲染成
+/// 「对 10 个分析师的三分类」（下面标着「10 个分析师」），但 `degraded_count` 是
+/// 「自评 ≥50 且含失败标记」的**虚高子集**、不是与 good 并列的桶，另有
+/// 「自评 <50、无标记」一类三个都不落 ⇒ 表格显示 **2** 行「⚠️ 低置信」而芯片显示 8/1/0，
+/// 加总 9 ≠ 10，**一个分析师在视觉上凭空消失**。
+#[test]
+fn status_counts_form_a_partition_of_total() {
+    // 复刻该轮形态：资金面 conf 55 含标记（虚高）、研报 conf 25 含标记（单纯低把握）、
+    // 技术面 conf 75 干净；其余 7 位本轮无 verdict。
+    let hm = "北向净买入接口调用超时，未能获取单股精确净买入数据。";
+    let res = "一致预期字段 consensusEps=null，本轮无估值锚。";
+    let mk = "均线多头排列，量能温和放大，RSI 处于中性区。";
+    let r = run_quality(
+        &[("hm", hm), ("res", res), ("mk", mk)],
+        &[("hm", 55.0), ("res", 25.0), ("mk", 75.0)],
+    );
+
+    let num =
+        |k: &str| -> i64 { r[k].clone().try_cast::<i64>().expect("计数字段应为整数") };
+    let normal = num("status_normal_count");
+    let low = num("status_low_count");
+    let missing = num("status_missing_count");
+    let total = num("status_total_count");
+
+    // ① 真划分：三栏加总 = 总数 = diagnostics 条目数
+    assert_eq!(normal + low + missing, total, "三分类必须加总等于总数");
+    let d = r["diagnostics"].clone().try_cast::<Map>().expect("diagnostics 不是 map");
+    assert_eq!(total, d.len() as i64, "总数必须等于逐节点表行数（同源）");
+
+    // ② 与表格「状态」列逐行对得上
+    assert_eq!(low, 2, "资金面 + 研报两行应计 2 个低置信");
+    assert_eq!(normal, 1, "技术面一行应计 1 个正常");
+    assert_eq!(missing, 7, "其余 7 位无 verdict ⇒ 计缺失/不可信");
+    for abbr in ["hm", "res"] {
+        assert_eq!(status(&r, abbr), "low", "节点 {abbr} 表格应显示低置信");
+    }
+
+    // ③ **本条测试存在的全部理由**：旧芯片用的 degraded_count 在此只有 1
+    //   （它只数「自评 ≥50 且含标记」的虚高那一个），若继续拿它当分类位，
+    //   面板就会在表格显示 2 行低置信的同时标出 1 —— 正是被修的缺陷。
+    assert_eq!(num("degraded_count"), 1, "degraded 是 low 的子集，不是并列桶");
+    assert_ne!(
+        low,
+        num("degraded_count"),
+        "低置信数与虚高数必须**可以不等** —— 相等只是巧合，用它当分类位必然少报"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// R2（2026-10-02）：措辞性缺席 —— 失败标记的成立条件从「文本出现了哪个词」
+// 换成「本轮该节点的工具调用有没有失败」。
+//
+// 触发实证（000710 后续运行 `80a41e56`）：基本面 / 资金面 / 技术面 / 研报**四行**低置信，
+// 而它们说的是**同一个事实** —— `get_stock_institutional_visits` 返回 `[]`，四种措辞：
+//   「机构调研数据缺失」「调用返回空数组 []，属该股票当前暂无机构调研记录（事件型缺席，
+//    非工具故障）」「机构调研返回空数组」「confidence 60 如实反映行业维度数据缺失」。
+// 资金面那句**已经把性质写对了**却仍被计入 —— `返回空` 的豁免表里只有字面「暂无数据」，
+// 实文是「暂无机构调研记录」，差两个字豁免失效。
+// ⇒ 只要判据看措辞，补多少短语都收敛不了（措辞是开放集）。本组测试锁新轴。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 真证明文：分析师如实描述「该维度没有记录」，措辞正确。
+const R2_HONEST_ABSENCE: &str =
+    "机构调研：调用返回空数组 []，属该股票当前暂无机构调研记录（事件型缺席，非工具故障）。";
+
+#[test]
+fn r2_state_word_absence_is_cleared_only_by_clean_successful_tool_calls() {
+    // ① 有调用记录且零失败 ⇒ 不计标记、不降置信，但**必须留痕**（静默吞掉=另一种造假）
+    let ok_calls =
+        vec![tc("get_stock_institutional_visits", false), tc("get_stock_consensus_eps", false)];
+    let r = run_quality_with_tool_calls(
+        &[("hm", R2_HONEST_ABSENCE)],
+        &[("hm", 55.0)],
+        &[("hm", ok_calls.clone())],
+    );
+    assert_eq!(hits(&r, "hm"), 0, "状态词缺席 + 工具全成功 ⇒ 不得计数据缺口");
+    assert_eq!(status(&r, "hm"), "normal", "不得因被豁免的措辞降 low");
+    let g = gap_reason(&r, "hm");
+    assert!(g.contains("无一失败"), "豁免必须说清理由，实得: {g}");
+    assert!(g.contains("没有记录"), "理由要指到「该维度没有记录」这一性质，实得: {g}");
+
+    // ② 负控（假阴性防线）：**有一条失败记录** ⇒ 标记成立，不得豁免
+    let mut mixed = ok_calls.clone();
+    mixed.push(tc("get_stock_dragon_tiger", true));
+    let r = run_quality_with_tool_calls(
+        &[("hm", R2_HONEST_ABSENCE)],
+        &[("hm", 55.0)],
+        &[("hm", mixed)],
+    );
+    assert_eq!(hits(&r, "hm"), 1, "本轮确有失败调用 ⇒ 缺席措辞成立，不得被吞");
+    assert_eq!(status(&r, "hm"), "low", "有失败证据时照判低置信");
+
+    // ③ 负控（守卫①）：**无可核对记录** ⇒ 不判。
+    //    「测不出」不能当成「没问题」——旧快照缺字段、或该节点本就无工具时都走这条。
+    let r = run_quality(&[("hm", R2_HONEST_ABSENCE)], &[("hm", 55.0)]);
+    assert_eq!(hits(&r, "hm"), 1, "无调用记录时不得豁免（否则空记录即可洗白一切措辞）");
+    let empty_calls: Vec<Dynamic> = vec![];
+    let r = run_quality_with_tool_calls(
+        &[("hm", R2_HONEST_ABSENCE)],
+        &[("hm", 55.0)],
+        &[("hm", empty_calls)],
+    );
+    assert_eq!(hits(&r, "hm"), 1, "空数组记录同样不可核对 ⇒ 不得豁免");
+
+    // ④ 负控（动词零豁免）：换成动词类措辞、工具全成功 ⇒ **照计**。
+    //    真缺口正是用动词表达的，这条是「宁漏不误伤真故障」的边界锁。
+    let verb = "机构调研接口异常，无法获取调研记录。";
+    let r =
+        run_quality_with_tool_calls(&[("hm", verb)], &[("hm", 55.0)], &[("hm", ok_calls.clone())]);
+    assert_eq!(hits(&r, "hm"), 1, "动词类硬标记不得因「工具无失败」被豁免");
+    assert_eq!(status(&r, "hm"), "low", "动词类仍判低置信");
+
+    // ⑤ 混合：同节点既有状态词又有动词 ⇒ **整体不豁免**（保守），两处措辞都保留计数
+    let both = format!("{}\n{}", R2_HONEST_ABSENCE, "龙虎榜席位无法获取当日明细。");
+    let r = run_quality_with_tool_calls(&[("hm", &both)], &[("hm", 55.0)], &[("hm", ok_calls)]);
+    assert_eq!(hits(&r, "hm"), 2, "含动词时不得整节点豁免：状态词与动词两处都须保留");
+}
+
+/// R2 的**真实语料**回归：把 `80a41e56` 那轮四条命中的原句一起灌进来，
+/// 断言在「各自工具调用全成功」下**四行全部转正常**。
+///
+/// 为什么单独一条：① 用的是我改写的例句，本条用的是**面板上真实出现过**的四句 ——
+/// 判据换轴若只对自己造的样本成立，等于没修。
+#[test]
+fn r2_clears_the_four_real_reports_from_run_80a41e56() {
+    let cases: [(&str, &str, &str); 4] = [
+        // 研报：一句里同时出现两个状态词（数据缺失 + 返回空）
+        (
+            "res",
+            "**机构调研数据缺失**：`get_stock_institutional_visits`返回空数组，无法判断近期是否有密集机构调研带来的认知增量，该维度对本次结论影响中等（调研缺席本身可解读为关注度阶段性下降）。",
+            "get_stock_institutional_visits",
+        ),
+        ("hm", R2_HONEST_ABSENCE, "get_stock_institutional_visits"),
+        (
+            "fund",
+            "机构调研返回空数组，无法判断近期机构行为方向，按“无机构覆盖/数据源未取到”处理，降低资金面置信度。",
+            "get_stock_institutional_visits",
+        ),
+        // 技术面：说的是**别的分析师**那个维度的缺席
+        ("mk", "confidence 60 如实反映行业维度数据缺失，本次不据此调整评分。", "compute_scoring"),
+    ];
+
+    for (abbr, text, tool) in cases {
+        let calls = vec![tc(tool, false)];
+        let r = run_quality_with_tool_calls(&[(abbr, text)], &[(abbr, 60.0)], &[(abbr, calls)]);
+        assert_eq!(
+            hits(&r, abbr),
+            0,
+            "节点 {abbr} 的真实原句应被事实判据豁免（面板上它曾被计标记并判低置信）"
+        );
+        assert_eq!(status(&r, abbr), "normal", "节点 {abbr} 应回到正常");
     }
 }

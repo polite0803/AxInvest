@@ -826,6 +826,18 @@ export interface ValuationApplicability {
   anchorIsFallback: boolean;
   /** 格雷厄姆的增长率假设被上限封顶（内在价值系统性偏低 ⇒ 看空被夸大）。 */
   grahamGrowthClamped: boolean;
+  /**
+   * 三档预测期增速**全部 ≤ 0**（K3，2026-10-02）。
+   *
+   * `true` 时那个区间实际是「持续衰退带」—— 连乐观档都假设营收逐年萎缩，
+   * 面板不得再自称「保守档—乐观档」。实证（600276 恒瑞）：三档增速
+   * -2.71%/-1.94%/-1.16%，而 UI 标题写「乐观档」⇒ 标签与模型假设不符。
+   *
+   * 与 `dcfApplicable` / `anchorIsFallback` **正交**：恒瑞那一次两者皆 false
+   * （锚是真实年报 FCF、前提成立），所以前两道闸口全部放行 —— 本字段是第四族
+   * 缺陷的呈现层出口。
+   */
+  growthBandAllNegative: boolean;
 }
 
 /** 递归找第一个指定 key（限深，避免在长文本/深嵌套上爆栈）。 */
@@ -884,6 +896,9 @@ export function extractValuationApplicability(value: unknown): ValuationApplicab
         reason: typeof rec.reason === "string" ? rec.reason : "",
         anchorIsFallback: rec.anchorIsFallback === true,
         grahamGrowthClamped: rec.grahamGrowthClamped === true,
+        // K3(2026-10-02)：三档增速全部 ≤ 0 ⇒ 区间实为「持续衰退带」，不得自称乐观档。
+        // 用 `=== true` 而非 `!== false`：缺字段（旧模板）属「不知道」，不得判成「已确认全负」。
+        growthBandAllNegative: rec.growthBandAllNegative === true,
       };
     }
   }

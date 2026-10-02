@@ -175,12 +175,27 @@ export interface HorizonDecision {
   action: string;
   verdict: string;
   positionPct: number;
+  /**
+   * 该档**上涨胜率**（×100）—— **纯证据口径**：逐档先验 → 逐档证据加权 → 按 √h 折算，
+   * **不含** `riskBias`。与荐股链的 `confidence`（`blend_win_rate` /
+   * `candidate_score_to_win_rate`）**同一量纲，可直接比较**。
+   *
+   * 2026-10-02 改：此前本字段是「叠加风险偏置后的**判定值**」⇒ 同一份 JSON 里两个
+   * 「置信度」不同口径，并排展示时会把「高风险」误读成「胜率低」，也无法与荐股比较
+   * （实测 002812：荐股 78 vs 本字段 39.7，看着像两系统严重对立，实为量纲错配）。
+   * 判定值现单列 `confidenceRiskAdjusted`。
+   */
   confidence: number;
   /**
-   * 该档后验（×100，四舍五入到 0.1）—— Phase C 逐档先验 + 逐档证据加权的结果。
-   * `confidence` 是它叠加 risk_bias 再按 √h 折算后的**判定值**，两者不同口径别混读。
+   * 该档后验（×100，四舍五入到 0.1）—— Phase C 逐档先验 + 逐档证据加权的结果
+   * （**不含**风险偏置，SNR 折算前）。
    */
   posterior: number;
+  /**
+   * **风险调整后**的置信度（= 本档 `action` 阶梯实际所用值，含风险偏置）。
+   * 与 `confidence` 的差额 = 风险门槛造成的下调，供归因。
+   */
+  confidenceRiskAdjusted?: number;
   stopLossPct: number;
   takeProfitPct: number;
   expectedHoldingDays: number;
@@ -385,6 +400,27 @@ export interface RecoCrossCheck {
   decisionPositionState?: string | null;
   /** 是否构成跨系统分歧（智选推荐 vs 工作流否决/观望） */
   divergent: boolean;
+  /**
+   * 分歧归因（后端 `divergence_attribution` 从决策 JSON **已有**字段派生，不新算一套）。
+   *
+   * 存在的理由：`divergent` 只说「两个系统不一致」，用户读到的仍是两个并排数字。
+   * 本字段回答「谁把工作流结论压下去的」——`drivers` 是判据码（叙事交 i18n），
+   * `legs` 是贡献最负的至多三条证据腿，三个后验数字用于「风险门槛跨线」那句话。
+   *
+   * ⚠ 全部**可缺**：字段缺失即不产该条（宁缺毋滥），渲染端不得补默认值。
+   */
+  divergence?: {
+    /** 判据码：negative_legs / risk_gate_downgrade / below_hold_threshold / dcf_leg_excluded / data_gap */
+    drivers?: string[];
+    /** 贡献最负的至多三条证据腿（sigma×weight 由最负起排） */
+    legs?: { name: string; sigma: number; weight: number }[];
+    /** 原始后验（×100，不含风险偏置）——缺阈值时不存在 */
+    posteriorRaw?: number;
+    /** 生效后验（×100，含风险偏置）——action 阶梯实际所用 */
+    posteriorEffective?: number;
+    /** 本次决策实际生效的「持有」线（×100），不是常量表抄来的 */
+    holdThreshold?: number;
+  };
 }
 
 // ── 决策仪表盘报告（借鉴 daily_stock_analysis 推送格式）──
@@ -608,6 +644,39 @@ export interface DataQualityReport {
    * ⚠️ 只告警不扣分：本字段出现**不改变** `score` / `grade`。
    */
   upstream_data_gaps?: string[];
+  /**
+   * 2026-10-02 新增：**VERDICT 专属字段未产出**（第三类缺席）。
+   *
+   * 三种缺席各占一栏，不可合并（详见 `data-quality.rhai` 定义处注释）：
+   *   · `missing_factors`    = 本节点消费的**因子**没值；
+   *   · `upstream_data_gaps` = **上游工具**没取到数（我方采集缺陷）；
+   *   · 本列表               = 分析师已出结论标签，但角色规范声明的**专属字段**没写
+   *     —— 既不是「该维度没有数据」，也不是「没取到数据」，是产出形态缺陷。
+   *
+   * 实证（688498 运行 `129745a7`）：a-catalyst 五个工具调用全成功、正文判了
+   * 「L2业绩拐点级」，verdict 却只剩通用 6 键 ⇒ 修复前 UI 只显示「缺失因子：催化剂等级」，
+   * 与真取数故障无法区分。
+   * ⚠️ 只告警不扣分：本字段出现**不改变** `score` / `grade` / `factor_completeness_pct`。
+   * 旧快照无此字段 ⇒ 可选；面板须能降级展示（不显示该行）。
+   */
+  verdict_field_gaps?: string[];
+  /**
+   * 2026-10-02 新增：**估值方法对本标的不适用**（第四类缺席）。
+   *
+   * 四张表各说一件事，不可合并（详见 `data-quality.rhai` 定义处注释）：
+   *   · `missing_factors`           = 本节点消费的**因子**没值；
+   *   · `upstream_data_gaps`        = **上游工具**没取到数（我方采集缺陷）；
+   *   · `verdict_field_gaps`        = 分析师已出结论标签但**漏写**角色专属字段；
+   *   · 本列表                      = 该标的**本就不适用**这一估值方法（**标的属性**）。
+   *
+   * 实证（000710 运行 `92849db2`）：PE −18、近5年报无正净利 ⇒ DCF 结构性不适用、
+   * `upsidePct` 恒 null，而面板只显示「缺失因子：估值上行空间」⇒ 用户按取数故障去查链路，
+   * 而链路是好的。判据是机读码 `dcf.unavailableReason == "persistent_loss"`，不看文案。
+   * ⚠️ 只告警不扣分：本字段出现**不改变** `score` / `grade` / `factor_completeness_pct`
+   *   （由 `item3_dcf_not_applicable_is_a_fourth_kind_of_absence` 锁住）。
+   * 旧快照无此字段 ⇒ 可选；面板须能降级展示（不显示该行）。
+   */
+  method_not_applicable?: string[];
   gap_count: number;
   good_count: number;
   /**
@@ -615,6 +684,29 @@ export interface DataQualityReport {
    * 这些节点原被计入 good_count（虚高工具可信度），现按 A ∪ B 降级，计入 low 语义。
    */
   degraded_count?: number;
+  /**
+   * 2026-10-02 新增：分析师**状态三分类**计数 —— 真划分，三者加总 = `status_total_count`。
+   *
+   * 修掉的歧义：弹窗原先把 `good_count / degraded_count / gap_count` 并排渲染成
+   * 「对 N 个分析师的三分类」，但那三者**不是同一根轴** —— `degraded_count` 是
+   * 「自评 ≥50 且报告含失败标记」的**虚高子集**（属低置信内部），`gap_count` 是
+   * 「untrusted 或无 VERDICT」另一维度，还有「自评 <50 且无标记」一类三个都不落。
+   * 实证（000710 运行 `92849db2`）：逐节点表显示 2 行「⚠️ 低置信」，芯片显示 8/1/0，
+   * 加总 9 ≠ 10 ⇒ 一个分析师在视觉上凭空消失。
+   *
+   * 本组字段由 `data-quality.rhai` **逐项数 `diagnostics.status`** 得出，
+   * 与下表「状态」列同源同判据 ⇒ 结构上不可能再对不上。
+   * `status_missing_count` = 表格里的 `missing` + `untrusted` 两态（都属「本轮无可信结论」，
+   *   具体原因在各行「差距原因」列分别说明）。
+   * ⚠️ 旧快照无这些字段 ⇒ 弹窗整排不渲染，**不回退**到旧三量（那会把同一歧义再显示一遍）。
+   */
+  status_normal_count?: number;
+  /** 见 `status_normal_count` 的说明。 */
+  status_low_count?: number;
+  /** 见 `status_normal_count` 的说明。 */
+  status_missing_count?: number;
+  /** 见 `status_normal_count` 的说明；等于逐节点表行数。 */
+  status_total_count?: number;
   /** 2026-09-12 新增：报告文本含失败标记的分析师中文名清单（如 ["资金面","解禁观察"]） */
   placeholder_nodes?: string[];
   /** 2026-09-12 新增：报告文本含失败标记的节点缩写清单（如 ["hm","lk"]），用于定位 agent 节点 */

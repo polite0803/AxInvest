@@ -15574,6 +15574,7 @@
       "dcfNotApplicable": "The DCF model's premises do not hold for this stock, so this leg has been removed from the valuation factors; the valuation range and margin of safety are no longer shown as a conclusion (see the decision card for the exclusion reason)",
       "anchorIsFallback": "The free-cash-flow anchor is a historical proxy (average of positive annual net income over the past 5 years ×0.90), not current-period real cash flow; the range is systematically low",
       "grahamGrowthClamped": "The growth assumption in the Graham formula is capped at its upper bound (revenue growth above 30%), so intrinsic value is systematically low and the bearish conclusion is overstated",
+      "growthBandAllNegative": "All three DCF forecast-period growth tiers are <= 0: the band assumes revenue keeps shrinking, the so-called optimistic tier included. It is a decline band, not a margin-of-safety to target-price band; usable for direction only.",
       "allLegsExcluded": "Neither valuation leg is usable, so the valuation dimension has been removed from the decision entirely (it neither adds nor subtracts)",
       "reasonLabel": "Reason"
     },
@@ -15609,7 +15610,8 @@
       "revenueGrowthLabel": "Revenue growth",
       "algorithmConclusion": "Algorithm valuation conclusion",
       "algorithmConclusionNote": "Computed locally from raw data (forward DCF / reverse DCF / relative valuation). The valuation range below is this algorithm's DCF output, not an LLM opinion",
-      "algorithmRangeBand": "Algorithmic DCF valuation range (conservative-optimistic band)"
+      "algorithmRangeBand": "Algorithmic DCF valuation range (conservative-optimistic band)",
+      "algorithmRangeBandDecline": "Algorithmic DCF valuation range (all three growth tiers negative - decline band)"
     },
     "workflow": {
       "analyst": {
@@ -16098,6 +16100,8 @@
     "factorCompleteness": "Factor Completeness",
     "missingFactors": "Missing Factors:",
     "upstreamDataGaps": "Upstream data gaps:",
+    "verdictFieldGaps": "Verdict fields not emitted (analyst omitted them — not an upstream fetch failure):",
+    "methodNotApplicable": "Method not applicable (a property of the stock — not a fetch failure):",
     "allFactorsComplete": "✓ All factors complete",
     "analystDataGapDetails": "Analyst Data Gap Details",
     "dqTableAnalyst": "Analyst",
@@ -16361,7 +16365,30 @@
       "attentionHeat": "Attention: {{heat}}",
       "workflowSays": "Analysis workflow verdict: {{action}}, position {{position}}%",
       "divergenceNote": "Two clocks differ — the pick bets on catalysts (~{{recoDays}}d), the workflow prices current odds (~{{decisionDays}}d)",
-      "catalystLabel": "Catalyst ({{confidence}})"
+      "catalystLabel": "Catalyst ({{confidence}})",
+      "leg": {
+        "trend": "Trend",
+        "consensus": "Consensus",
+        "catalyst": "Catalyst",
+        "risk": "Risk",
+        "valuation": "Valuation",
+        "data_quality": "Data quality",
+        "trade_signal": "Trade signal",
+        "money_flow": "Money flow",
+        "chip": "Chip distribution",
+        "pace": "Pace",
+        "momentum": "Momentum",
+        "bottleneck": "Bottleneck"
+      },
+      "attributionLabel": "Rejection drivers (from fields this decision already computed):",
+      "legContribution": "{{leg}} contributed {{sigma}} (weight {{weight}})",
+      "driver": {
+        "negative_legs": "Negative evidence legs: {{legs}}",
+        "risk_gate_downgrade": "Risk gate cut the posterior from {{raw}}% to {{eff}}%, crossing the {{thr}}% hold line ⇒ downgrade",
+        "below_hold_threshold": "Effective posterior {{eff}}% is below the {{thr}}% hold line",
+        "dcf_leg_excluded": "DCF valuation leg not applicable and fully excluded (neither credit nor penalty)",
+        "data_gap": "{{n}} upstream data gaps"
+      }
     },
     "empty": {
       "_fallback": "No recommendation data",
@@ -17063,9 +17090,9 @@
       "dataQualityDataGaps": "Data Gaps",
       "dataQualityConsistency": "Logical Consistency",
       "dataQualityOverall": "Overall Rating",
-      "dataQualityGood": "Good",
-      "dataQualityWarning": "Needs Attention",
-      "dataQualityIssue": "Issue",
+      "dataQualityGood": "Normal: self-rated >=50 with no failure markers in the report",
+      "dataQualityWarning": "Low confidence: the report carries failure markers, or self-rating <50",
+      "dataQualityIssue": "Missing / untrusted: no VERDICT emitted, or strict_mode degraded fallback",
       "dataQualityMissing": "Missing",
       "dataQualityPresent": "Present",
       "dqAnalystCount": "{{count}} analysts",

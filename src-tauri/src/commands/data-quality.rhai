@@ -267,6 +267,21 @@ fn soft_marker_suppression() {
                      "不存在", "无记录", "需明确标注", "非两融标的", "设计性缺席"],
         "获取失败": ["无商誉", "无信息", "信息返回", "未提供", "不存在",
                      "非两融标的", "设计性缺席"],
+        // N4(2026-10-02)：`=null` / `为 null` 从「硬标记」改归**状态词**，与同族的
+        //   `空值`/`均为空`/`返回空` 一致。此前它们**没有任何抑制组** ⇒ 走 v87 的「硬标记
+        //   不做句级判定」捷径，于是分析师即便在同句写明「无机构覆盖」也永远豁免不掉。
+        //   分类依据是本文件自己立的界线（:223）：不设抑制的是**动词类**
+        //   （无法获取 / 获取失败 / 未能获取 / 占位…）—— 真缺口正是用动词表达的；
+        //   `=null` 描述的是**字段取值状态**，与动词无关，把它算作硬标记属分类错放，
+        //   不是「放宽标准」。
+        // 实证（000710 运行 `92849db2`，研报分析师）：原文
+        //   「`consensusEps=null (2026)` 表明当前**无机构**对该股提供 2026 年 EPS 预测」
+        //   —— 三个工具调用全 ok，该 null 是「无 2026 年覆盖」的真实状态，却被计 1 处
+        //   失败标记 ⇒ 判「⚠️ 低置信」、归因「上游工具数据不完整」。
+        // ⚠ 短语集刻意与 `数据缺失` 同形（含**裸**「无机构」）：该例写的是「无机构对该股…」，
+        //   不含连续的「无机构覆盖」四字 ⇒ 用 `返回空` 那组的口径会漏豁免。
+        "=null": ["无机构", "无覆盖", "暂无数据", "非空值", "无记录", "不存在", "未纳入"],
+        "为 null": ["无机构", "无覆盖", "暂无数据", "非空值", "无记录", "不存在", "未纳入"],
     }
 }
 
@@ -763,27 +778,139 @@ let asof_sup_lk = asof_design["lk"] == true;
 let asof_sup_res = asof_design["res"] == true;
 let asof_sup_sec = asof_design["sec"] == true;
 let asof_sup_cat = asof_design["cat"] == true;
+// ── R2(2026-10-02)：措辞性缺席的判据原语 ──
+// 为什么必须换判据轴（实证 000710 后续运行 `80a41e56`）：
+//   四位分析师（基本面 / 资金面 / 技术面 / 研报）各被计 1–2 处失败标记，
+//   而它们说的是**同一个事实** —— `get_stock_institutional_visits` 返回 `[]`，
+//   四种措辞：「机构调研数据缺失」「调用返回空数组 []，属该股票当前暂无机构调研记录
+//   （事件型缺席，非工具故障）」「机构调研返回空数组」「confidence 60 如实反映行业维度数据缺失」。
+//   资金面那句**已经把性质写对了**，却仍被计入 —— 因为 `返回空` 的豁免表里只有字面
+//   「暂无数据」，实文是「暂无机构调研记录」，**差两个字豁免失效**。
+// ⇒ 只要判据看的是「文本里出现了哪个词」，补多少短语都收敛不了：措辞是开放集。
+//   本组函数把判据换成**可核对的事实**：本轮该节点的工具调用有没有失败。
+// ⚠ 定义位置约束：本组函数被 :782 的 `_e` 派生消费，故**必须**排在
+//   `rejection_summary` / `join_arr`（均在文件后半）之前 ⇒ 刻意不依赖它们，
+//   失败计数在此自足（同一判据的两处实现由 `r2_*` 门禁锁住，见测试文件）。
+
+/// 状态词 vs 动词类硬标记的分界：**出现在 `soft_marker_suppression` 表里 = 状态词**。
+/// 沿用 :223 既有纪律 —— 真缺口是用**动词**表达的（无法获取 / 获取失败 / 未能获取 / 占位…），
+/// 故动词类**永不**因「工具调用无失败」而豁免；只有描述取值状态的词才走事实判据。
+fn is_state_marker(m) {
+    type_of(soft_marker_suppression()[m]) == "array"
+}
+
+fn only_state_markers(hits) {
+    let out = [];
+    for i in 0..hits.len() {
+        if is_state_marker(hits[i]) { out.push(hits[i]); }
+    }
+    out
+}
+
+fn has_verb_marker(hits) {
+    for i in 0..hits.len() {
+        if !is_state_marker(hits[i]) { return true; }
+    }
+    false
+}
+
+/// 本轮工具调用的失败数。返回值语义**三态**，不可压成布尔：
+///   `-1` = 无可核对记录（旧快照缺字段 / 该节点本就无工具）⇒ **不判**；
+///    `0` = 有记录且全部成功；
+///   `>0` = 有失败记录。
+/// 判据取 -1 与 0 分开处理，是为了不把「测不出」当成「没问题」（假阴性）。
+fn count_failed_tool_calls(tool_calls) {
+    if !present(tool_calls) || type_of(tool_calls) != "array" || tool_calls.len() == 0 {
+        return -1;
+    }
+    let n = 0;
+    for tc in tool_calls {
+        if tc.is_error == true { n += 1; }
+    }
+    n
+}
+
+/// 该节点的失败标记是否属「措辞性缺席」⇒ 可从评分/清单中豁免。
+/// 三个条件缺一即不豁免（**宁漏不误伤真故障**）：
+///   ① 命中里**没有**动词类硬标记；② 确有状态词命中；③ 本轮工具调用**有记录且零失败**。
+fn is_wording_only_absence(hits, tool_calls) {
+    if hits.len() == 0 { return false; }
+    if has_verb_marker(hits) { return false; }
+    if only_state_markers(hits).len() == 0 { return false; }
+    count_failed_tool_calls(tool_calls) == 0
+}
+
+/// 豁免时给一句**人话**（并入既有「差距原因」列，不新增面板行、不新增 11 语言 key）。
+/// 必须留痕：静默吞掉标记 = 另一种「伪装成正常结果」，比误报更糟。
+fn wording_absence_note(hits, tool_calls) {
+    if !is_wording_only_absence(hits, tool_calls) { return ""; }
+    let state = only_state_markers(hits);
+    `措辞性缺席：报告以「${join_two(state, "、")}」描述某维度无数据，但本轮 ${tool_calls.len()} 次工具调用**无一失败** ⇒ 属「该维度没有记录」而非「我方取数故障」，不计入数据缺口`
+}
+
+/// 两个可选说明串的合并（任一为空则取另一个）—— 供 `attribution_note` 与本判据共用
+/// 既有 `attr_note` 通道，避免为此新增输出字段 + 前端行 + 11 语言 key。
+fn join_two(items, sep) {
+    let s = "";
+    for i in 0..items.len() {
+        if i > 0 { s += sep; }
+        s += items[i];
+    }
+    s
+}
+
+fn merge_two_notes(a, b) {
+    let ok_a = type_of(a) == "string" && a != "";
+    let ok_b = type_of(b) == "string" && b != "";
+    if !ok_a && !ok_b { return ""; }
+    if !ok_a { return b; }
+    if !ok_b { return a; }
+    `${a} ｜ ${b}`
+}
+
 // 评分口径（_e = effective）：被豁免维度的失败标记不进任何扣分/清单
-let mk_ph_e = if asof_sup_mk { [] } else { mk_ph };
-let sent_ph_e = if asof_sup_sent { [] } else { sent_ph };
-let news_ph_e = if asof_sup_news { [] } else { news_ph };
-let fund_ph_e = if asof_sup_fund { [] } else { fund_ph };
-let pol_ph_e = if asof_sup_pol { [] } else { pol_ph };
-let hm_ph_e = if asof_sup_hm { [] } else { hm_ph };
-let lk_ph_e = if asof_sup_lk { [] } else { lk_ph };
-let res_ph_e = if asof_sup_res { [] } else { res_ph };
-let sec_ph_e = if asof_sup_sec { [] } else { sec_ph };
-let cat_ph_e = if asof_sup_cat { [] } else { cat_ph };
-let mk_po_e = if asof_sup_mk { 0 } else { mk_po };
-let sent_po_e = if asof_sup_sent { 0 } else { sent_po };
-let news_po_e = if asof_sup_news { 0 } else { news_po };
-let fund_po_e = if asof_sup_fund { 0 } else { fund_po };
-let pol_po_e = if asof_sup_pol { 0 } else { pol_po };
-let hm_po_e = if asof_sup_hm { 0 } else { hm_po };
-let lk_po_e = if asof_sup_lk { 0 } else { lk_po };
-let res_po_e = if asof_sup_res { 0 } else { res_po };
-let sec_po_e = if asof_sup_sec { 0 } else { sec_po };
-let cat_po_e = if asof_sup_cat { 0 } else { cat_po };
+// R2 追加第二类豁免条件 `*_word_sup`（措辞性缺席），与 as-of 设计性降级**并列**、互不遮蔽。
+let mk_word_sup = is_wording_only_absence(mk_ph, mk_tool_calls);
+let sent_word_sup = is_wording_only_absence(sent_ph, sent_tool_calls);
+let news_word_sup = is_wording_only_absence(news_ph, news_tool_calls);
+let fund_word_sup = is_wording_only_absence(fund_ph, fund_tool_calls);
+let pol_word_sup = is_wording_only_absence(pol_ph, pol_tool_calls);
+let hm_word_sup = is_wording_only_absence(hm_ph, hm_tool_calls);
+let lk_word_sup = is_wording_only_absence(lk_ph, lk_tool_calls);
+let res_word_sup = is_wording_only_absence(res_ph, res_tool_calls);
+let sec_word_sup = is_wording_only_absence(sec_ph, sec_tool_calls);
+let cat_word_sup = is_wording_only_absence(cat_ph, cat_tool_calls);
+let mk_word_note = wording_absence_note(mk_ph, mk_tool_calls);
+let sent_word_note = wording_absence_note(sent_ph, sent_tool_calls);
+let news_word_note = wording_absence_note(news_ph, news_tool_calls);
+let fund_word_note = wording_absence_note(fund_ph, fund_tool_calls);
+let pol_word_note = wording_absence_note(pol_ph, pol_tool_calls);
+let hm_word_note = wording_absence_note(hm_ph, hm_tool_calls);
+let lk_word_note = wording_absence_note(lk_ph, lk_tool_calls);
+let res_word_note = wording_absence_note(res_ph, res_tool_calls);
+let sec_word_note = wording_absence_note(sec_ph, sec_tool_calls);
+let cat_word_note = wording_absence_note(cat_ph, cat_tool_calls);
+
+let mk_ph_e = if asof_sup_mk || mk_word_sup { [] } else { mk_ph };
+let sent_ph_e = if asof_sup_sent || sent_word_sup { [] } else { sent_ph };
+let news_ph_e = if asof_sup_news || news_word_sup { [] } else { news_ph };
+let fund_ph_e = if asof_sup_fund || fund_word_sup { [] } else { fund_ph };
+let pol_ph_e = if asof_sup_pol || pol_word_sup { [] } else { pol_ph };
+let hm_ph_e = if asof_sup_hm || hm_word_sup { [] } else { hm_ph };
+let lk_ph_e = if asof_sup_lk || lk_word_sup { [] } else { lk_ph };
+let res_ph_e = if asof_sup_res || res_word_sup { [] } else { res_ph };
+let sec_ph_e = if asof_sup_sec || sec_word_sup { [] } else { sec_ph };
+let cat_ph_e = if asof_sup_cat || cat_word_sup { [] } else { cat_ph };
+let mk_po_e = if asof_sup_mk || mk_word_sup { 0 } else { mk_po };
+let sent_po_e = if asof_sup_sent || sent_word_sup { 0 } else { sent_po };
+let news_po_e = if asof_sup_news || news_word_sup { 0 } else { news_po };
+let fund_po_e = if asof_sup_fund || fund_word_sup { 0 } else { fund_po };
+let pol_po_e = if asof_sup_pol || pol_word_sup { 0 } else { pol_po };
+let hm_po_e = if asof_sup_hm || hm_word_sup { 0 } else { hm_po };
+let lk_po_e = if asof_sup_lk || lk_word_sup { 0 } else { lk_po };
+let res_po_e = if asof_sup_res || res_word_sup { 0 } else { res_po };
+let sec_po_e = if asof_sup_sec || sec_word_sup { 0 } else { sec_po };
+let cat_po_e = if asof_sup_cat || cat_word_sup { 0 } else { cat_po };
 
 let placeholder_total_hits = mk_ph_e.len() + sent_ph_e.len() + news_ph_e.len() + fund_ph_e.len()
     + pol_ph_e.len() + hm_ph_e.len() + lk_ph_e.len() + res_ph_e.len() + sec_ph_e.len() + cat_ph_e.len();
@@ -1104,6 +1231,52 @@ fn extract_announcements_len(raw) {
     ()
 }
 
+// verdict_map: 把 `*_verdict` 归一为 map（与 `extract_conf` 同一形态兼容口径：
+// 扁平 / 嵌套 `{report, verdict}` / JSON 字符串三种）。
+// 取不到 map ⇒ 返回 ()，含义是「该分析师根本没有 VERDICT 产出」，
+// 那属 `missing_analysts` 与 status=missing 的语义，**不属**「字段未产出」。
+fn verdict_map(v) {
+    let m = if type_of(v) == "string" { safe_parse(v) } else { v };
+    if type_of(m) != "map" { return (); }
+    let inner = m["verdict"];
+    if type_of(inner) == "map" { return inner; }
+    m
+}
+
+// required_verdict_fields: 各分析师在**通用 6 键之外**的专属必填字段。
+// 刻意不重复声明通用键（verdict / bull_score / bear_score / bull_points /
+// bear_points / confidence）—— 那组由 `agent_executor.rs` 的 `VERDICT_MACHINE_FIELDS`
+// 与四处 VERDICT 提醒语守住，本表再列一遍就是第二权威来源。
+// ⚠ 本表必须与各角色 `.md`「输出格式」一节的 VERDICT 模板行一致，
+//   由 `data_quality_placeholder_gate.rs` 的绑定测试机械守住（改任一侧即红）。
+fn required_verdict_fields() {
+    #{
+        "催化剂分析师": ["catalyst_level", "institutional_trace", "narrative_completeness"],
+    }
+}
+
+// verdict_field_gaps_for: 某分析师已产出 VERDICT、但缺角色规范声明的专属字段 ⇒ 缺口描述串。
+// 病灶实证（688498 运行 129745a7）：a-catalyst 5 次工具调用全 ok、正文写了
+// 「L2业绩拐点级利好」，verdict 却只剩通用 6 键 —— 三个专属字段**同时**消失
+//（形状与引擎提醒语所列的清单逐字一致）。修复前该事实在 UI 上完全不可见，
+// 只表现为「缺失因子：催化剂等级」，用户据此去查数据源，而数据源是好的。
+fn verdict_field_gaps_for(vname, verdict_data) {
+    let out = [];
+    let m = verdict_map(verdict_data);
+    if type_of(m) != "map" { return out; }
+    // 判定器形态（快速链 `j-*`）不是分析师 VERDICT ⇒ 本判据不适用。
+    // 判据仍取 `node_id` 而非 `category`，与 `extract_conf` 的 H2 纪律同源。
+    if present(m["node_id"]) { return out; }
+    let need = required_verdict_fields()[vname];
+    if type_of(need) != "array" { return out; }
+    for i in 0..need.len() {
+        if !present(m[need[i]]) {
+            out.push(`${vname}：VERDICT 缺字段 ${need[i]}`);
+        }
+    }
+    out
+}
+
 let mf_main_net_inflow = extract_main_net_inflow(money_flow);
 let lb_shareholder_trades_len = extract_shareholder_trades_len(lockup_bundle);
 let ann_count = extract_announcements_len(announcements);
@@ -1163,6 +1336,61 @@ let upstream_data_gaps = [];
 if present(valuation_dcf_fcf_data_missing) && valuation_dcf_fcf_data_missing == true {
     upstream_data_gaps.push("现金流量表数据缺失（DCF 锚定退化为近5年净利均值代理）");
 }
+// ── 2026-10-02: 估值方法对本标的**不适用**（第四类缺席）──
+// 四种缺席各占一栏，不可合并：
+//   · `missing_factors`           = 本节点消费的因子没值（与 factor_completeness 分母绑死）；
+//   · `upstream_data_gaps`        = **上游工具**没取到数（我方采集缺陷）；
+//   · `verdict_field_gaps`        = 分析师出了结论标签但**漏写**角色专属字段（产出形态缺陷）；
+//   · 本表 `method_not_applicable` = 该标的**本就不适用**这一估值方法（标的属性，非我方故障）。
+// 病灶实证（000710 运行 `92849db2`）：PE −18、近5年报无正净利 ⇒ DCF 结构性不适用，
+// `upsidePct` 恒 null ⇒ 面板只显示「缺失因子：估值上行空间」。用户据此去查取数链路，
+// 而链路是好的 —— 这是**标的属性**被显示成**我方缺口**，与 v119 修的催化剂那条同型、不同槽位。
+// 判据取 `dcf.unavailableReason` **机读码**，不取 `dcf.note` 文案（同 P0-I 弃用 `basis` 文案的纪律）。
+// ⚠ 判据取 `dcf.unavailableReason` **机读码**，不取 `dcf.note` 文案（同 P0-I 弃用 `basis` 文案的纪律）。
+//   但**码不是全集**：`available=false` 还有第二条路径 —— 算出来了却**超出量程被遮蔽**
+//   （中性档落在 现价×1% ~ 现价×10000% 之外），那条**没有码**。只判码 ⇒ 遮蔽态仍会被
+//   显示成「缺失因子」而无解释，与本版要消除的歧义同型 ⇒ 用 `available` 兜伞、用码细分性质。
+// ⚠ 另外三个码是**我方问题** ⇒ 归 `upstream_data_gaps` 而非本表；此前 DCF 早退时
+//   `assumptions` 恒为 `None`，那路 `fcf_data_missing` 取不到值 ⇒「缺数」在早退路径上
+//   **全链路零告警**（正是 :1152 点名的病灶形态），本块一并补上。
+// ⚠ 与另两表同一处置纪律：**只告警不扣分**，不进 score / grade / factor_completeness。
+let method_not_applicable = [];
+if present(valuation_dcf_available) && valuation_dcf_available == false {
+    let dcf_na_code = if present(valuation_dcf_unavailable_reason)
+        && type_of(valuation_dcf_unavailable_reason) == "string" {
+        valuation_dcf_unavailable_reason
+    } else { "" };
+    if dcf_na_code == "persistent_loss" {
+        method_not_applicable.push("估值上行空间：DCF 对本标的**不适用**（近5年报无正净利年度，持续亏损）—— 属标的属性而非我方取数故障，本轮估值判定采用相对估值口径");
+    } else if dcf_na_code == "fcf_data_missing" {
+        upstream_data_gaps.push("现金流量表数据缺失且近5年无正净利，DCF 无法计算（我方采集缺陷）");
+    } else if dcf_na_code == "shares_unavailable" {
+        upstream_data_gaps.push("总股本不可用，DCF 无法计算（我方采集缺陷）");
+    } else if dcf_na_code == "no_financials" {
+        upstream_data_gaps.push("财务数据整表为空，DCF 无法计算（我方采集缺陷）");
+    } else {
+        method_not_applicable.push("估值上行空间：DCF 已算出但中性档**超出量程被遮蔽**（现价 ×1% ~ ×10000% 之外）—— 该口径对本标的不可信，本轮不采用其上行空间");
+    }
+}
+
+// ── 2026-10-02: VERDICT 专属字段未产出（**第三类缺席**，与前两张表都不同）──
+// 三种缺席各占一栏，不可合并：
+//   · `missing_factors`    = 本节点消费的**因子**没值（与 factor_completeness 分母绑死）；
+//   · `upstream_data_gaps` = **上游工具**没取到数（我方采集缺陷）；
+//   · 本表                 = 分析师**已出结论标签、但缺角色规范声明的专属字段**
+//     —— 既不是「这个维度没有数据」，也不是「没取到数据」，是**产出形态**缺陷。
+// 压在一起会造成歧义：模型漏字段被显示成数据缺口，用户按数据缺口去查上游，白跑一轮。
+// ⚠ 与 `upstream_data_gaps` 同一处置纪律：**只告警不扣分**，不进 score / grade /
+//   factor_completeness。是否扣分属独立设计。
+// ⚠ strict_mode 降级时 verdict 是引擎合成的通用壳（`agent_executor.rs` 的
+//   `strict_mode_fallback` 分支），缺字段是**降级的必然结果**而非独立事实 ⇒ 跳过，
+//   该情形由 status=untrusted 与 `missing_analysts` 表达（同 `validate_verdict_schema`
+//   对每个节点 `if !xx_u` 的守卫口径）。
+let verdict_field_gaps = [];
+if !cat_u {
+    let cat_fg = verdict_field_gaps_for("催化剂分析师", cat_verdict);
+    for i in 0..cat_fg.len() { verdict_field_gaps.push(cat_fg[i]); }
+}
 
 // 综合评分公式：报告质量 35% + 工具可信度 35% + 因子完整度 30%
 // V67 修复(2026-07-29): 因子完整度权重从 0.20 提高到 0.30。
@@ -1195,7 +1423,7 @@ let grade = if final_score >= 85.0 { "A" }
 //   ⚠ 这是**事实量**，不是等级：禁止据此派生 per-node 字母等级 ——
 //     那会再造出「两套同名等级」，正是 2026-09-14 才修掉的坑。
 // 2026-09-21(P2-1)：新增第 8 个参数 `attr_note` —— 归因核对结论
-//   （`attribution_note(lk_report, lk_tool_calls)` 的返回值，`""` = 无异常）。
+//   （`merge_two_notes(attribution_note(lk_report, lk_tool_calls), lk_word_note)` 的返回值，`""` = 无异常）。
 //   刻意**不复用** `gap_reason` 的内部计算，也不新增结构化字段：结论统一由
 //   `attribution_note` 产出后并入 `gap_reason`，复用**既有**展示通道
 //   （弹窗「缺口原因」行 + DecisionBanner 逐节点表的「缺口原因」列），
@@ -1203,7 +1431,7 @@ let grade = if final_score >= 85.0 { "A" }
 // S6(2026-09-26)：第 9/10 参 —— 该维度是否被 as-of 设计性降级豁免、豁免前的**原始**
 //   失败标记数。实证（1ad42f59）：豁免后 ph_n 恒 0，若仍走「非数据缺口：报告无失败
 //   标记」分支即成假话 —— 报告里有标记，只是被系统有意不计。
-fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note, asof_ex, raw_ph_n) {
+fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note, asof_ex, raw_ph_n, word_ex) {
     let has_ph = ph_n > 0;
     // 豁免生效 = 该维度被设计性降级 且 原始报告确有失败标记
     let asof_exempted_hit = asof_ex && raw_ph_n > 0;
@@ -1227,6 +1455,12 @@ fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note, asof_ex, ra
         "节点未输出 VERDICT 或 confidence 字段缺失（可能原因：LLM 超时/截断/解析失败/strict_mode 降级未注入 confidence）"
     } else if asof_exempted_hit {
         `as-of 回放：本维度上游按设计降级（当下语义约束，非工具故障）—— 报告含 ${raw_ph_n} 处失败标记，已豁免不计扣分；置信度自评 ${c}`
+    } else if word_ex {
+        // R2(2026-10-02)：措辞性缺席已被豁免 ⇒ `has_ph` 恒 false。
+        // 若不加这一支，会落到下面「非数据缺口：报告无失败标记」——那是**假话**
+        // （报告里确实写了缺席措辞，只是被事实判据豁免），与并入本格的豁免说明自相矛盾。
+        // 与 as-of 豁免同一处置纪律：见上方 S6 的「豁免生效必须说出来」。
+        `措辞性缺席：报告写了 ${raw_ph_n} 处缺席措辞，但本轮工具调用无一失败 ⇒ 按「该维度没有记录」处理，不计数据缺口、不因此降置信`
     } else if has_ph && c < 50.0 {
         `确定归因：上游工具数据不完整 —— 报告含 ${ph_n} 处失败标记，且置信度自评仅 ${c}`
     } else if has_ph {
@@ -1364,24 +1598,24 @@ fn attribution_note(report, tool_calls) {
 //   正控：`output/tmp-151-rhai-arity.mjs` 逐点核对本块的实参个数。
 let diagnostics = #{
     "mk": diag_for(mk_c, "技术面分析师", "K线形态、MACD/RSI、支撑阻力位、成交量（t-market-data）", mk_u, mk_ph_e.len(), mk_po_e, mk_q,
-        attribution_note(mk_report, mk_tool_calls), asof_sup_mk, mk_ph.len()),
+        merge_two_notes(attribution_note(mk_report, mk_tool_calls), mk_word_note), asof_sup_mk, mk_ph.len(), mk_word_sup),
     // 2026-09-21 修正归因（原值把用户引向 t-sentiment-data，而真实缺口在
     // t-dragon-tiger-data ⇒ 归因指向错误会误导排查方向，实证见
     // AUDIT-analyst-low-confidence-2026-09-21.md §八.1）：
     //   情绪面「席位数据缺失」与资金面「龙虎榜席位与北向数据缺失」同源于
     //   t-dragon-tiger-data（龙虎榜营业部明细，独立于 t-sentiment-data 的节点）。
     "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_u, sent_ph_e.len(), sent_po_e, sent_q,
-        attribution_note(sent_report, sent_tool_calls), asof_sup_sent, sent_ph.len()),
+        merge_two_notes(attribution_note(sent_report, sent_tool_calls), sent_word_note), asof_sup_sent, sent_ph.len(), sent_word_sup),
     "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph_e.len(), news_po_e, news_q,
-        attribution_note(news_report, news_tool_calls), asof_sup_news, news_ph.len()),
+        merge_two_notes(attribution_note(news_report, news_tool_calls), news_word_note), asof_sup_news, news_ph.len(), news_word_sup),
     // 基本面/催化剂/行业的「同侪 PE/PB 全为 null」同源于 t-fundamentals-data 的
     // get_stock_peers（2026-09-21 已补 PE_TTM/PB_MRQ/市值/涨跌幅；ROE 仍未接入）。
     "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_u, fund_ph_e.len(), fund_po_e, fund_q,
-        attribution_note(fund_report, fund_tool_calls), asof_sup_fund, fund_ph.len()),
+        merge_two_notes(attribution_note(fund_report, fund_tool_calls), fund_word_note), asof_sup_fund, fund_ph.len(), fund_word_sup),
     "pol": diag_for(pol_c, "政策面分析师", "宏观政策与行业政策影响（t-policy-data）", pol_u, pol_ph_e.len(), pol_po_e, pol_q,
-        attribution_note(pol_report, pol_tool_calls), asof_sup_pol, pol_ph.len()),
+        merge_two_notes(attribution_note(pol_report, pol_tool_calls), pol_word_note), asof_sup_pol, pol_ph.len(), pol_word_sup),
     "hm": diag_for(hm_c, "资金面分析师", "游资动向、主力资金净流入（t-hotmoney-data: get_stock_money_flow）；龙虎榜席位明细（t-dragon-tiger-data）与北向字段", hm_u, hm_ph_e.len(), hm_po_e, hm_q,
-        attribution_note(hm_report, hm_tool_calls), asof_sup_hm, hm_ph.len()),
+        merge_two_notes(attribution_note(hm_report, hm_tool_calls), hm_word_note), asof_sup_hm, hm_ph.len(), hm_word_sup),
     // 2026-09-21(v72) 修正：质押此前**从未接线**（无节点、无白名单授权），
     //   面板却在 expected_data 里写着「质押风险（t-lockup-data）」——**指明了错误的
     //   取数入口**，把使用者的排查方向一起带偏（该工具是解禁+增减持+大宗交易**三方**，
@@ -1389,14 +1623,33 @@ let diagnostics = #{
     //   此处同步为**真实来源**，避免「期望值自证」（拿声明当事实）继续误导。
     // P2-1：本节点正是伪归因的**实证现场**（报告写「工具调用被拒绝」而归因错维度）。
     "lk": diag_for(lk_c, "解禁观察员", "解禁减持、大宗交易（t-lockup-data）；股权质押（t-pledge-data）", lk_u, lk_ph_e.len(), lk_po_e, lk_q,
-        attribution_note(lk_report, lk_tool_calls), asof_sup_lk, lk_ph.len()),
+        merge_two_notes(attribution_note(lk_report, lk_tool_calls), lk_word_note), asof_sup_lk, lk_ph.len(), lk_word_sup),
     "res": diag_for(res_c, "研报分析师", "券商研报观点汇总、目标价（t-research-data）", res_u, res_ph_e.len(), res_po_e, res_q,
-        attribution_note(res_report, res_tool_calls), asof_sup_res, res_ph.len()),
+        merge_two_notes(attribution_note(res_report, res_tool_calls), res_word_note), asof_sup_res, res_ph.len(), res_word_sup),
     "sec": diag_for(sec_c, "行业分析师", "行业景气度、轮动分析（t-sector-data）；同侪估值（t-fundamentals-data: get_stock_peers）", sec_u, sec_ph_e.len(), sec_po_e, sec_q,
-        attribution_note(sec_report, sec_tool_calls), asof_sup_sec, sec_ph.len()),
+        merge_two_notes(attribution_note(sec_report, sec_tool_calls), sec_word_note), asof_sup_sec, sec_ph.len(), sec_word_sup),
     "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_u, cat_ph_e.len(), cat_po_e, cat_q,
-        attribution_note(cat_report, cat_tool_calls), asof_sup_cat, cat_ph.len())
+        merge_two_notes(attribution_note(cat_report, cat_tool_calls), cat_word_note), asof_sup_cat, cat_ph.len(), cat_word_sup)
 };
+
+// ── 2026-10-02: 状态三分类计数 —— 逐项数 `diagnostics.status`，与逐节点表同源 ──
+// 见输出 map 处 `status_normal_count` 的长注释（为什么不能用 good/degraded/gap 三者当分类）。
+// `missing` 与 `untrusted` 合并成一栏：它们都属「该分析师本轮没有可信结论」，
+// 且诊断串已在逐节点行的「差距原因」列分别说明，无需在芯片上再分一层。
+let status_normal_count = 0;
+let status_low_count = 0;
+let status_missing_count = 0;
+for k in diagnostics.keys() {
+    let st = diagnostics[k]["status"].to_string();
+    if st == "normal" {
+        status_normal_count += 1;
+    } else if st == "low" {
+        status_low_count += 1;
+    } else {
+        status_missing_count += 1;
+    }
+}
+let status_total_count = status_normal_count + status_low_count + status_missing_count;
 
 let missing_analysts = [];
 let low_confidence_analysts = [];
@@ -1516,8 +1769,34 @@ let summary_text = if grade == "F" || grade == "D" {
     // 2026-09-21: 上游**取数**缺口（与 missing_factors 是两张表，见其定义处注释）。
     //   只告警不扣分 ⇒ 本字段出现不会改变 score / grade。
     "upstream_data_gaps": upstream_data_gaps,
+    // 2026-10-02: VERDICT 专属字段未产出（第三类缺席，见其定义处注释）。
+    //   同样只告警不扣分。
+    "verdict_field_gaps": verdict_field_gaps,
+    // 2026-10-02: 估值方法对本标的**不适用**（第四类缺席，见其定义处注释）。
+    //   同样只告警不扣分。
+    "method_not_applicable": method_not_applicable,
     "gap_count": gap_count,
     "good_count": good_count,
+    // ── 2026-10-02: 状态三分类计数（**真划分**，加总 = status_total_count）──
+    // 病灶：弹窗把 `good_count / degraded_count / gap_count` 并排渲染成「对 10 个分析师的
+    //   三分类」（下面标着「N 个分析师」），但这三个量**不是同一根轴**：
+    //     · good     = 自评 ≥50 且非 untrusted 且报告无失败标记
+    //     · degraded = 自评 ≥50 **且含失败标记**（置信度虚高）—— 它是「低置信」的**子集**，
+    //                  不是与 good 并列的桶；
+    //     · gap      = untrusted 或 confidence<0（数据完全缺失）；
+    //     · 还有一类**三个都不落**：自评 <50、无失败标记、非 untrusted（分析师单纯没把握）。
+    //   实证（000710 运行 `92849db2`）：逐节点表显示 **2** 行「⚠️ 低置信」，
+    //   而芯片显示 8 / 1 / 0 —— 加总 9 ≠ 10，**一个分析师在视觉上凭空消失**。
+    // 判据**不另立**：直接对 `diagnostics` 逐项数 status（见其定义处的 `diag_for`），
+    //   与表格「状态」列同源同判据 ⇒ 结构上不可能再出现「表格 2 行、芯片 1 个」。
+    //   ⚠ 不用 `n_int - missing - low` 那种减法：`n_int` 只数**有 verdict** 的分析师，
+    //     而 `missing_analysts` 含无 verdict 者 ⇒ 有人缺席时会**下溢成负数**。
+    // ⚠ `degraded_count` 保留原义（它喂 `summary` 与 warnings），但**不得**再当分类位用。
+    //   守护：`data_quality_placeholder_gate.rs::status_counts_form_a_partition_of_total`。
+    "status_normal_count": status_normal_count,
+    "status_low_count": status_low_count,
+    "status_missing_count": status_missing_count,
+    "status_total_count": status_total_count,
     // 2026-09-12: 报告含失败标记但自评 confidence >= 50 的节点数（置信度虚高）
     "degraded_count": degraded_count,
     // 2026-09-12: 报告文本含失败标记的逐节点清单（中文名 / 节点缩写 / 命中总数）

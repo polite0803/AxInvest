@@ -733,6 +733,49 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
             return serde_json::Value::Null;
         },
     };
+    let first = serenity_extract_from_content(content);
+    if serenity_has_candidates(&first) {
+        return first;
+    }
+    // rt-workflow 的 strict_mode 在 tool_json 块解析失败时，会把整段原文压进
+    // `{"report": "…", "verdict": {…}}`（agent_executor 的 VERDICT 重构分支）。
+    // 此时 content 是**合法 JSON**，只是换了形状：下面四层提取与修复链全部空转，
+    // 文本兜底又匹配不到（report 内的引号已被 JSON 转义成 `\"candidates\"`）。
+    // 实测 2026-10-02 轮：5 只候选完整躺在 report 里，趋势智选产出 0。解包重跑一次。
+    //
+    // ⚠ 与 `data-verifier.rhai` 的路径4（同为 report 解包）**不是重复实现**：路径4 是
+    // 整体 json_parse，只对**语法完好**的 report 生效；能走到这里说明上游三层
+    // （verifier 路径4 → 本函数四层提取 → 文本兜底）都已对该 report 空手而归。
+    // 本层靠 `extract_candidates_one_by_one` 的**逐对象**提取，才能在被截断/多括号的
+    // 坏块里回收损坏点之后的候选。
+    let Some(report) = serenity_strict_mode_report(content) else {
+        return first;
+    };
+    let inner = serenity_extract_from_content(&report);
+    if serenity_has_candidates(&inner) {
+        tracing::info!(
+            "[serenity] strict_mode report 解包重跑成功，回收 {} 个候选",
+            inner["candidates"].as_array().map_or(0, |a| a.len())
+        );
+        return inner;
+    }
+    first
+}
+
+/// strict_mode VERDICT 包装里的 `report` 文本；content 不是该形状时返回 None。
+fn serenity_strict_mode_report(content: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(content).ok()?;
+    let report = parsed.get("report")?.as_str()?;
+    (!report.is_empty()).then(|| report.to_string())
+}
+
+/// 提取结果是否已含非空 candidates 数组。
+fn serenity_has_candidates(v: &serde_json::Value) -> bool {
+    v.get("candidates").and_then(|c| c.as_array()).is_some_and(|a| !a.is_empty())
+}
+
+/// 对一段候选文本执行四层提取 + 修复链（`serenity_extract_from_node` 的实现体）。
+fn serenity_extract_from_content(content: &str) -> serde_json::Value {
     let extracted = axagent_kit::utils::extract_json_from_llm_response(content);
     let parsed: serde_json::Value = match serde_json::from_str(extracted) {
         Ok(v) => v,
@@ -1362,13 +1405,59 @@ pub async fn run_serenity_screening(
                 let mut detail_cache: std::collections::HashMap<String, serde_json::Value> =
                     std::collections::HashMap::new();
                 let mut serenity_seed: Vec<(String, String, Option<String>)> = Vec::new();
+                // ── 逐档先验 + 置信灵敏度（口径统一，2026-10-02）──
+                // 本链原先把工作流 LLM 给的候选评分**直接落库**、`priorSource` 硬编码
+                // `absent` ⇒ 那个 confidence 是「候选有多符合瓶颈策略」的**评分**，不是
+                // 「该档上涨胜率」；而分析链 `horizon_decisions[档].confidence` 是胜率
+                // ⇒ UI 并排展示时「荐股 78 vs 分析 46」是两个不同量纲的数在比（实测
+                // 002812：荐股 78 / 分析中期 40.1）。
+                // 现改为与**另外两条链**同一份实现：`candidate_score_to_win_rate`
+                // = 逐档先验 → logit 合成 → `snr_confidence` 时间折算。
+                // 取数复用 `load_reco_served_vars`（演化权重覆盖过的变量表），
+                // 失败**不阻断**趋势智选主流程，退化为「无先验 ⇒ 纯评分 + absent」。
+                // 取数走 **engine 层**（`reco_loop` / `horizon_prior`），不经
+                // `commands::stock_analysis` —— 后者会撞分层护栏 `commands-no-sibling-call`
+                //（`src/commands/**` 不得跨模块互调）。这也是那两个函数被下沉到 engine 的原因。
+                let served_vars =
+                    axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(
+                        state.harness.db(),
+                    )
+                    .await
+                    .unwrap_or_else(|e| {
+                        tracing::warn!(
+                            "[serenity] served vars 取数失败 ⇒ 逐档先验缺失，置信度退回纯候选评分: {e}"
+                        );
+                        Vec::new()
+                    });
+                let prior_kappa = served_vars
+                    .iter()
+                    .find(|(k, _)| k == "horizon_prior_kappa")
+                    .and_then(|(_, v)| v.as_f64())
+                    .unwrap_or(axagent_analysis_engine::horizon_prior::DEFAULT_KAPPA);
+                let horizon_prior = axagent_analysis_engine::horizon_prior::horizon_prior_from_db(
+                    state.harness.db(),
+                    prior_kappa,
+                )
+                .await;
+                if horizon_prior.is_none() {
+                    tracing::warn!(
+                        "[serenity] 逐档先验取不到 ⇒ confidence 退回纯候选评分并标 absent（不假装合成过）"
+                    );
+                }
+                let conf_sensitivity = served_vars
+                    .iter()
+                    .find(|(k, _)| k == "reco_conf_sensitivity")
+                    .and_then(|(_, v)| v.as_f64())
+                    .unwrap_or(1.0);
                 // 去重：同一 stock_code 只保留第一个（置信度最高的）候选
                 let mut seen_codes: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
                 for (i, c) in candidate_list.iter().enumerate() {
                     let code = c["stock_code"].as_str().unwrap_or("");
                     let name = c["stock_name"].as_str().unwrap_or("");
-                    let conf = c["confidence"].as_i64().unwrap_or(50) as i32;
+                    // 工作流候选评分（0-100）—— 是「符合瓶颈策略的程度」，**不是概率**；
+                    // 落库前在下面按该档折算成上涨胜率（口径统一）。
+                    let conf_input = c["confidence"].as_i64().unwrap_or(50) as i32;
                     if code.is_empty() {
                         continue;
                     }
@@ -1414,6 +1503,18 @@ pub async fn run_serenity_screening(
                         let tier_period = tier.as_str();
                         let tier_days = tier.default_holding_days() as i64;
                         let h_days = tier_days as usize;
+                        // ── 口径统一（2026-10-02）：候选评分 → 该档上涨胜率 ──
+                        // 与荐股策略链（`recommender/mod.rs` 的 R-C 段）、分析决策链
+                        // （`portfolio-mgr.rhai` 的 `pm_snr_confidence`）**同一份实现**：
+                        // 逐档先验 → logit 合成 → `snr_confidence` 时间折算。
+                        // 先验不可得 ⇒ 原样评分 + `absent`（不假装合成过）。
+                        let (conf, prior_source) = axagent_analysis_engine::recommender::scoring::candidate_score_to_win_rate(
+                            conf_input,
+                            horizon_prior.as_ref().and_then(|j| j.get(tier_period)),
+                            conf_sensitivity,
+                            tier_days as u32,
+                            axagent_analysis_engine::reflection_stats::SNR_ANCHOR as u32,
+                        );
                         let vol_stop = closes.as_ref().and_then(|closes| {
                             axagent_analysis_engine::recommender::risk::stop_pct(
                                 closes,
@@ -1514,7 +1615,10 @@ pub async fn run_serenity_screening(
                             "stopSource": stop_src,
                             "positionSource": pos_src,
                             "entrySource": entry_src,
-                            "priorSource": "absent",
+                            // 逐档先验来源（`pooled`/`shrunk`/`own`/`neutral_default`），
+                            // 或 `absent`（先验取不到 ⇒ confidence 是原始候选评分）。
+                            // 2026-10-02 前此处硬编码 `absent`，与另外两条链的词表脱节。
+                            "priorSource": prior_source,
                             "synthetic": false,
                         });
                         // 持久化到 reco_picks。style 统一为 "serenity" 便于历史过滤；
@@ -1528,7 +1632,8 @@ pub async fn run_serenity_screening(
                             stock_code: Set(code.to_string()),
                             stock_name: Set(name.to_string()),
                             style: Set("serenity".to_string()),
-                            confidence: Set(conf),
+                            // `reco_picks.confidence` 是 i32（列类型）；折算函数给 u8（胜率 0-100）
+                            confidence: Set(conf as i32),
                             synthetic: Set(0),
                             seed_pool_json: Set(Some(serde_json::to_string(c).unwrap_or_default())),
                             strategy_weights_json: Set(None),
@@ -1561,7 +1666,9 @@ pub async fn run_serenity_screening(
                             "bottleneck_product": c["bottleneck_product"],
                             "primary_risk": c["primary_risk"],
                             "relevance": c["relevance"],
-                            "confidence": conf,
+                            // 这里是**候选本身**的原始评分（不是该档胜率）：该缓存描述
+                            // 「这个候选有多符合瓶颈策略」，供策略链/展示读取，故不折算。
+                            "confidence": conf_input,
                         }),
                     );
                     // 构建种子列表
@@ -2180,5 +2287,68 @@ mod serenity_extract_tests {
         let e = serde_json::from_str::<serde_json::Value>(text).unwrap_err();
         let w = parse_error_window(text, &e, 10);
         assert!(w.contains("??"), "窗口应包含损坏点，实际: {w}");
+    }
+
+    /// strict_mode 信封：tool_json 块严格解析失败后，agent_executor 把整段原文塞进
+    /// `report` 并附 `verdict`，content 本身变成合法 JSON、只是换了形状。
+    /// 2026-10-02 实证形态：模型在最后一个候选对象边界多打一个 `}`。
+    fn strict_mode_envelope() -> serde_json::Value {
+        let report = concat!(
+            "```tool_json\n",
+            r#"{"name": "submit_candidates", "arguments": {"candidates": ["#,
+            r#"{"stock_code": "688114", "stock_name": "华大智造", "serenity_score": 68, "#,
+            r#""exit_signals": {"overall_exit_urgency": "watch"}},"#,
+            r#"{"stock_code": "300676", "stock_name": "华大基因", "serenity_reason": "较低"}}], "#,
+            r#""summary": "共筛选2个候选"}}"#,
+            "\n```",
+        );
+        serde_json::json!({
+            "report": report,
+            "verdict": {"verdict": "偏多", "bull_score": 65, "confidence": 50},
+            "__verdict_only": false,
+        })
+    }
+
+    // ── 15) 修复前形态自证：信封喂给解包前的实现体必须返回 Null（这正是 0 候选的成因）──
+    #[test]
+    fn content_only_extract_returns_null_on_strict_mode_envelope() {
+        let envelope = strict_mode_envelope();
+        assert!(
+            serenity_extract_from_content(&envelope.to_string()).is_null(),
+            "信封形状下实现体必须空手而归，否则 report 解包这一层没有存在的理由"
+        );
+    }
+
+    // ── 16) report 解包重跑：逐个提取必须回收全部候选（含损坏点之后的）──
+    #[test]
+    fn extract_recovers_candidates_from_strict_mode_report() {
+        let envelope = strict_mode_envelope();
+        let node_out = serde_json::json!({"content": envelope.to_string()});
+        let got = serenity_extract_from_node(&node_out);
+        let arr = got["candidates"].as_array().expect("report 解包后应回收候选");
+        assert_eq!(arr.len(), 2, "损坏点之后的候选也必须回收");
+        assert_eq!(arr[0]["stock_code"], "688114");
+        assert_eq!(arr[1]["stock_code"], "300676");
+    }
+
+    // ── 17) 正常形态零影响：首轮命中即返回，不进解包分支 ──
+    #[test]
+    fn extract_short_circuits_when_candidates_present() {
+        let content = r#"{"candidates": [{"stock_code": "600552", "stock_name": "中国海油"}]}"#;
+        let node_out = serde_json::json!({"content": content});
+        let got = serenity_extract_from_node(&node_out);
+        assert_eq!(got["candidates"].as_array().map_or(0, |a| a.len()), 1);
+    }
+
+    // ── 18) 解包不出候选时保留原结果（空候选 + summary 的「为什么不出票」不能丢）──
+    #[test]
+    fn extract_keeps_summary_when_report_unwrap_finds_nothing() {
+        let envelope = serde_json::json!({
+            "report": "上游趋势数据缺失，无法识别有效候选标的",
+            "verdict": {"verdict": "观望", "confidence": 50},
+        });
+        let node_out = serde_json::json!({"content": envelope.to_string()});
+        let got = serenity_extract_from_node(&node_out);
+        assert!(got.is_null(), "既无候选也无 summary 时保持原判定");
     }
 }

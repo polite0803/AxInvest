@@ -421,20 +421,39 @@ export function AnalystDataQualityModal({
                 </div>
               </Col>
               <Col span={8} style={{ textAlign: "center", paddingTop: 20 }}>
-                <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
-                  <Tooltip title={t("stockAnalysis.analystReport.dataQualityGood")}>
-                    <Tag color="success">{report.good_count}</Tag>
-                  </Tooltip>
-                  <Tooltip title={t("stockAnalysis.analystReport.dataQualityWarning")}>
-                    <Tag color="warning">{report.degraded_count ?? 0}</Tag>
-                  </Tooltip>
-                  <Tooltip title={t("stockAnalysis.analystReport.dataQualityIssue")}>
-                    <Tag color="error">{report.gap_count}</Tag>
-                  </Tooltip>
-                </div>
+                {
+                  /*
+                  2026-10-02: 三个芯片改用**状态三分类**（正常 / 低置信 / 缺失·不可信）。
+                  此前用的是 good_count / degraded_count / gap_count —— 那三者不是同一根轴：
+                    · degraded 是「自评 ≥50 且报告含失败标记」的**虚高子集**，属低置信内部；
+                    · gap 是「untrusted 或无 VERDICT」，另一维度；
+                    · 还有「自评 <50 且无标记」一类**三个都不落**。
+                  而下面标着「N 个分析师」⇒ 视觉上是对 N 的三分类，实际加总 9 ≠ 10，
+                  表格显示 2 行「⚠️ 低置信」时芯片只报 1（实证 000710 运行 `92849db2`）。
+                  新计数由 data-quality 逐项数 `diagnostics.status` 得出，与下表「状态」列
+                  **同源同判据**，结构上不可能再对不上。
+                  ⚠️ 旧快照无这三个字段 ⇒ 整排**不渲染**，刻意**不回退**到旧三量 ——
+                    回退等于把同一个歧义再显示一遍。
+                */
+                }
+                {report.status_total_count !== undefined && (
+                  <div style={{ display: "flex", justifyContent: "center", gap: 12 }}>
+                    <Tooltip title={t("stockAnalysis.analystReport.dataQualityGood")}>
+                      <Tag color="success">{report.status_normal_count}</Tag>
+                    </Tooltip>
+                    <Tooltip title={t("stockAnalysis.analystReport.dataQualityWarning")}>
+                      <Tag color="warning">{report.status_low_count}</Tag>
+                    </Tooltip>
+                    <Tooltip title={t("stockAnalysis.analystReport.dataQualityIssue")}>
+                      <Tag color="error">{report.status_missing_count}</Tag>
+                    </Tooltip>
+                  </div>
+                )}
                 <div style={{ marginTop: 4 }}>
                   <Text style={{ fontSize: 12, color: "var(--muted)" }}>
-                    {t("stockAnalysis.analystReport.dqAnalystCount", { count: report.total_analysts })}
+                    {t("stockAnalysis.analystReport.dqAnalystCount", {
+                      count: report.status_total_count ?? report.total_analysts,
+                    })}
                   </Text>
                 </div>
               </Col>

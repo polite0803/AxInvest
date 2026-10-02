@@ -1748,6 +1748,12 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
           ? (d.weightAdjustments as unknown[]).filter(isWeightAdjustment)
           : undefined,
         isContradictory: d.isContradictory === true,
+        // 跨系统互证（趋势智选 vs 工作流 分歧报告 + 归因）：后端 `rerun_decision` 已回注
+        // （decision.rs 的 inject_reco_crosscheck），此处漏拷贝 ⇒ 重跑后报告整体消失，
+        // 直到刷新页面才回来。与 `agentOutput::normalizeDecision` 同口径整体透传。
+        crossCheck: d.crossCheck != null && typeof d.crossCheck === "object"
+          ? (d.crossCheck as unknown as StockDecision["crossCheck"])
+          : undefined,
       };
       // 恢复 LLM 决策（trader 原始输出，rerun 不重跑 LLM 节点，从 DB 读回旧值）
       const llmDecisionJson = result.llm_decision_json ?? null;

@@ -4492,13 +4492,15 @@ pub(crate) async fn reco_horizon_prior(
     db: &DatabaseConnection,
     served_vars: &[(String, serde_json::Value)],
 ) -> Option<serde_json::Value> {
-    let stats = axagent_analysis_engine::reflection_stats::build_hitrate_stats(db).await.ok()?;
+    // 取数与收缩的唯一实现在 `horizon_prior_from_db`（下沉到 engine 层，见其注释：
+    // 趋势智选链也要同一份先验，若留在此处就会诱发 commands 跨模块调用）。
+    // 本函数只剩「从变量表读出 κ」这一件与模板变量相关的事。
     let kappa = served_vars
         .iter()
         .find(|(k, _)| k == "horizon_prior_kappa")
         .and_then(|(_, v)| v.as_f64())
         .unwrap_or(axagent_analysis_engine::horizon_prior::DEFAULT_KAPPA);
-    Some(axagent_analysis_engine::horizon_prior::horizon_prior_map(&stats, kappa))
+    axagent_analysis_engine::horizon_prior::horizon_prior_from_db(db, kappa).await
 }
 
 async fn load_reco_served_vars(

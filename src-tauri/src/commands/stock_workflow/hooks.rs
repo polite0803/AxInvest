@@ -118,6 +118,119 @@ pub(crate) async fn fetch_reco_prior(
     }))
 }
 
+/// 分歧归因：把「工作流为什么给不出利好」拆成**可点名的判据**。
+///
+/// 为什么需要它（2026-10-02）：分歧报告此前只并排两列数字（智选 78 / 分析 观望 0%），
+/// 用户读到的是「两个系统打架」而不是「谁把结论压下去的」。实测 002812：原始后验
+/// 49.3% 落在持有带，风险门槛压成生效后验 41.3% ⇒ 跨过持有线落到观望 —— 这条因果
+/// 全程躺在决策 JSON 里，报告却没说。
+///
+/// 纪律与 [`inject_reco_crosscheck`] 一致：**只读**决策链已算出的字段，不另起一套计算、
+/// 不硬编码阈值（阈值取本次决策实际生效的 `effective_params`）；字段缺失 ⇒ 不产该条，
+/// 宁缺毋滥。产出一律结构化码 + 数值，叙事交前端 i18n。
+fn divergence_attribution(decision: &serde_json::Value) -> serde_json::Value {
+    let mut drivers: Vec<&'static str> = Vec::new();
+    let mut out = serde_json::Map::new();
+
+    // ── 1) 贡献最负的至多三条证据腿（|sigma × weight| 降序，sigma 与权重都是决策实际用的那份）──
+    let legs: Vec<serde_json::Value> = decision
+        .pointer("/evidence/factors")
+        .and_then(serde_json::Value::as_object)
+        .map(|factors| {
+            let mut neg: Vec<(f64, serde_json::Value)> = factors
+                .values()
+                .filter_map(|f| {
+                    let sigma = f.get("sigma")?.as_f64()?;
+                    let weight = f.get("weight")?.as_f64()?;
+                    if sigma < 0.0 && weight > 0.0 {
+                        Some((
+                            sigma * weight,
+                            json!({ "name": f.get("name")?, "sigma": sigma, "weight": weight }),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            neg.sort_by(|a, b| a.0.total_cmp(&b.0));
+            neg.into_iter().take(3).map(|(_, v)| v).collect()
+        })
+        .unwrap_or_default();
+    if !legs.is_empty() {
+        drivers.push("negative_legs");
+        out.insert("legs".into(), serde_json::Value::Array(legs));
+    }
+
+    // ── 2) 风险门槛是否**改变了档位** ──
+    // `posteriorRaw` = 原始后验，`posterior` = 生效后验（含 risk_bias），两者同为 ×100。
+    let thr = |k: &str| {
+        decision
+            .pointer(&format!("/effective_params/action_{k}_threshold"))
+            .and_then(serde_json::Value::as_f64)
+    };
+    let (buy, increase, hold, watch, reduce) =
+        (thr("buy"), thr("increase"), thr("hold"), thr("watch"), thr("reduce"));
+    if let (Some((raw, eff)), (Some(buy), Some(inc), Some(hold), Some(watch), Some(reduce))) = (
+        decision
+            .get("posteriorRaw")
+            .and_then(serde_json::Value::as_f64)
+            .zip(decision.get("posterior").and_then(serde_json::Value::as_f64)),
+        (buy, increase, hold, watch, reduce),
+    ) {
+        // 越高越看多：0 买入 … 5 卖出（与本文件既有 action 阶梯同序）
+        let tier_of = |p: f64| -> u8 {
+            if p >= buy {
+                0
+            } else if p >= inc {
+                1
+            } else if p >= hold {
+                2
+            } else if p >= watch {
+                3
+            } else if p >= reduce {
+                4
+            } else {
+                5
+            }
+        };
+        let (raw_t, eff_t, hold_x100) = (tier_of(raw / 100.0), tier_of(eff / 100.0), hold * 100.0);
+        out.insert("posteriorRaw".into(), json!(raw));
+        out.insert("posteriorEffective".into(), json!(eff));
+        out.insert("holdThreshold".into(), json!(hold_x100));
+        // 门槛确实压低后验 **且** 压到换了档 ⇒ 才归因给风险门槛；同档内的下调不构成分歧主因
+        if raw > eff && raw_t < eff_t {
+            drivers.push("risk_gate_downgrade");
+        } else if eff_t >= 3 {
+            // 已经在观望/减持/卖出带：报「低于持有线」，这是「为什么不是利好」的直接答
+            drivers.push("below_hold_threshold");
+        }
+    }
+
+    // ── 3) 估值腿被整条剔除（DCF 不适用）⇒ 方向档少一条腿的证据 ──
+    if decision
+        .pointer("/valuationApplicability/dcfApplicable")
+        .and_then(serde_json::Value::as_bool)
+        == Some(false)
+    {
+        drivers.push("dcf_leg_excluded");
+    }
+
+    // ── 4) 数据缺口（证据不完整，与「判据为负」是两件事，必须分列）──
+    if decision
+        .pointer("/data_gaps")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|v| !v.is_empty())
+    {
+        drivers.push("data_gap");
+    }
+
+    out.insert(
+        "drivers".into(),
+        serde_json::Value::Array(drivers.iter().map(|d| json!(*d)).collect()),
+    );
+    serde_json::Value::Object(out)
+}
+
 /// 将智选推荐先验与工作流决策做跨系统互证，把 `crossCheck` 就地写入决策 JSON。
 ///
 /// 分歧判定：智选 confidence≥60 且建议仓位>0，而工作流 action=观望/卖出 或仓位≤0
@@ -127,6 +240,8 @@ pub(crate) fn inject_reco_crosscheck(
     decision_value: &mut serde_json::Value,
     reco_prior: &serde_json::Value,
 ) {
+    // 归因必须在取 `as_object_mut` 之前算：它只读，读的是决策链刚写完的那份字段。
+    let divergence = divergence_attribution(decision_value);
     let Some(obj) = decision_value.as_object_mut() else {
         return;
     };
@@ -164,6 +279,7 @@ pub(crate) fn inject_reco_crosscheck(
             "decisionPositionState": decision_state,
             "decisionPositionPct": decision_pos,
             "divergent": divergent,
+            "divergence": divergence,
         }),
     );
 }
@@ -1043,4 +1159,164 @@ pub(crate) async fn register_stock_analysis_hooks(
         .await;
     engine.register_lifecycle_hook(Arc::new(StockAnalysisPersistHook::new(db))).await;
     tracing::info!("[stock_workflow] 生命周期钩子已注册: precheck / enhance / persist");
+}
+
+#[cfg(test)]
+mod divergence_attribution_tests {
+    use super::*;
+
+    /// 夹具 = 库里读出的真实形态（2026-10-02，`stock_analyses.id=75aac757…`，002812）。
+    /// 证据后验 49.3% 本落在持有带，风险门槛压成生效后验 41.3% ⇒ 跨线到观望；
+    /// 同票智选给 78 分 / 4.85% 试探仓。这正是用户问的「智选推荐、分析否决」。
+    fn real_case_002812() -> serde_json::Value {
+        json!({
+            "action": "观望",
+            "posterior": 41.3,
+            "posteriorRaw": 49.3,
+            "positionPct": 0.0,
+            "evidence": { "factors": {
+                "f1": {"name":"trend","sigma":0.26,"weight":0.105},
+                "f2": {"name":"consensus","sigma":0.2,"weight":0.25},
+                "f4": {"name":"risk","sigma":-0.351,"weight":0.15},
+                "f5": {"name":"valuation","sigma":0.093,"weight":0.21},
+                "f6": {"name":"data_quality","sigma":0.0,"weight":0.0},
+                "f7": {"name":"trade_signal","sigma":0.0,"weight":0.0},
+                "f10": {"name":"chip","sigma":-0.076,"weight":0.104},
+                "f12": {"name":"momentum","sigma":-0.7,"weight":0.075},
+                "f13": {"name":"bottleneck","sigma":0.0,"weight":0.0}
+            }},
+            "valuationApplicability": {"dcfApplicable": false},
+            "data_gaps": [],
+            "effective_params": {
+                "action_buy_threshold": 0.63,
+                "action_increase_threshold": 0.53,
+                "action_hold_threshold": 0.48,
+                "action_watch_threshold": 0.38,
+                "action_reduce_threshold": 0.3
+            }
+        })
+    }
+
+    /// 夹具 = 真实形态（`id=94044f37…`，688498）：原始后验 == 生效后验 38.0，
+    /// 风险门槛没动手 ⇒ 观望由证据本身给出（估值 / 一致预期 / 交易信号三条腿为负）。
+    fn real_case_688498() -> serde_json::Value {
+        json!({
+            "action": "观望",
+            "posterior": 38.0,
+            "posteriorRaw": 38.0,
+            "positionPct": 0.0,
+            "evidence": { "factors": {
+                "f1": {"name":"trend","sigma":0.32,"weight":0.105},
+                "f2": {"name":"consensus","sigma":-0.2,"weight":0.25},
+                "f3": {"name":"catalyst","sigma":-0.06,"weight":0.1},
+                "f4": {"name":"risk","sigma":-0.107,"weight":0.15},
+                "f5": {"name":"valuation","sigma":-0.485,"weight":0.21},
+                "f6": {"name":"data_quality","sigma":0.0,"weight":0.0},
+                "f7": {"name":"trade_signal","sigma":-0.362,"weight":0.1},
+                "f9": {"name":"money_flow","sigma":-0.005,"weight":0.063},
+                "f10": {"name":"chip","sigma":-0.076,"weight":0.104},
+                "f12": {"name":"momentum","sigma":0.3,"weight":0.075}
+            }},
+            "valuationApplicability": {"dcfApplicable": false},
+            "data_gaps": ["催化剂评估(a-catalyst)"],
+            "effective_params": {
+                "action_buy_threshold": 0.63,
+                "action_increase_threshold": 0.53,
+                "action_hold_threshold": 0.48,
+                "action_watch_threshold": 0.38,
+                "action_reduce_threshold": 0.3
+            }
+        })
+    }
+
+    fn drivers_of(d: &serde_json::Value) -> Vec<String> {
+        d["drivers"]
+            .as_array()
+            .expect("drivers 必须是数组")
+            .iter()
+            .map(|v| v.as_str().expect("驱动项必须是字符串").to_string())
+            .collect()
+    }
+
+    fn legs_of(d: &serde_json::Value) -> Vec<String> {
+        d["legs"]
+            .as_array()
+            .expect("legs 必须是数组")
+            .iter()
+            .map(|l| l["name"].as_str().expect("腿名必须是字符串").to_string())
+            .collect()
+    }
+
+    /// 跨了线的风险门槛必须被点名，且不重复报「低于持有线」（同一件事两个说法）。
+    #[test]
+    fn risk_gate_is_named_when_it_changed_the_tier() {
+        let d = divergence_attribution(&real_case_002812());
+        let drivers = drivers_of(&d);
+        assert!(
+            drivers.contains(&"risk_gate_downgrade".to_string()),
+            "改变档位的风险门槛必须是首名归因，实得 {drivers:?}"
+        );
+        assert!(
+            !drivers.contains(&"below_hold_threshold".to_string()),
+            "已由 risk_gate 解释 ⇒ 不再重复报低于持有线，实得 {drivers:?}"
+        );
+        assert_eq!(d["posteriorRaw"], json!(49.3));
+        assert_eq!(d["posteriorEffective"], json!(41.3));
+        assert_eq!(d["holdThreshold"], json!(48.0));
+        // 负贡献按 sigma×weight 由最负起排：risk −0.0527 < momentum −0.0525 < chip −0.0079
+        assert_eq!(legs_of(&d), vec!["risk", "momentum", "chip"]);
+    }
+
+    /// 门槛没动手时，归因落到「证据本身」：观望带 ⇒ 低于持有线 + 最负的三条腿。
+    #[test]
+    fn watch_band_is_attributed_to_evidence_when_no_gate_fired() {
+        let d = divergence_attribution(&real_case_688498());
+        let drivers = drivers_of(&d);
+        assert!(
+            !drivers.contains(&"risk_gate_downgrade".to_string()),
+            "原始=生效后验，门槛没改档位，不得谎报风险归因，实得 {drivers:?}"
+        );
+        assert!(drivers.contains(&"below_hold_threshold".to_string()));
+        assert!(drivers.contains(&"dcf_leg_excluded".to_string()));
+        assert!(drivers.contains(&"data_gap".to_string()));
+        assert_eq!(legs_of(&d), vec!["valuation", "consensus", "trade_signal"]);
+    }
+
+    /// 权重为 0 的腿（该档被降权/退出）与 sigma≥0 的腿都不得进负贡献清单。
+    #[test]
+    fn zero_weight_and_positive_legs_are_excluded() {
+        let d = divergence_attribution(&real_case_688498());
+        assert!(
+            !legs_of(&d).contains(&"data_quality".to_string()),
+            "f6 权重 0 ⇒ 未参与决策，不得列为否决来源，实得 {:?}",
+            legs_of(&d)
+        );
+        assert!(d["legs"].as_array().expect("legs").len() <= 3, "至多三条，避免长串刷屏");
+    }
+
+    /// 字段缺失 ⇒ 一条归因都不产（不得用默认阈值/借用别票后验把空白填成结论）。
+    #[test]
+    fn missing_fields_produce_no_claims() {
+        let d = divergence_attribution(&json!({}));
+        assert!(drivers_of(&d).is_empty(), "空决策不得产任何归因");
+        assert!(d.get("posteriorRaw").is_none(), "无 effective_params ⇒ 不报档位归因也不回显后验");
+        assert!(d.get("legs").is_none(), "无 factors ⇒ 不写 legs 键");
+    }
+
+    /// 接线自证：归因必须随 `crossCheck` 一起落进决策 JSON（改前此处无 divergence 键 ⇒ 红）。
+    #[test]
+    fn crosscheck_carries_the_attribution() {
+        let mut decision = real_case_002812();
+        inject_reco_crosscheck(
+            &mut decision,
+            &json!({ "recoConfidence": 78.0, "recoPositionPct": 4.85, "recoPeriod": "mid" }),
+        );
+        let cc = &decision["crossCheck"];
+        assert_eq!(cc["divergent"], json!(true), "智选有仓 + 工作流观望 ⇒ 分歧成立");
+        assert!(
+            drivers_of(&cc["divergence"]).contains(&"risk_gate_downgrade".to_string()),
+            "分歧报告必须带上归因，实得 {}",
+            cc["divergence"]
+        );
+    }
 }

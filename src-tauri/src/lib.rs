@@ -44,6 +44,7 @@ pub mod paths;
 pub use paths::axagent_home;
 mod semantic_cache;
 mod smart_router;
+mod startup_timing;
 pub mod state;
 
 #[cfg(desktop)]
@@ -171,6 +172,8 @@ where
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup_timing::note_process_start();
+
     // ── 日志 / tracing（必须在 panic hook 之前初始化） ─
     #[cfg(target_os = "android")]
     {
@@ -343,6 +346,9 @@ pub fn run() {
                 dir
             };
 
+            startup_timing::init_log_file(&app_dir);
+            startup_timing::record_since_start("setup_home_ready");
+
             // 清理目录导入遗留的临时解包目录（崩溃 / 强杀可能残留）
             crate::commands::knowledge::cleanup_import_tmp_dirs();
 
@@ -353,6 +359,7 @@ pub fn run() {
             //   spawn_block_on 的临时 current_thread runtime 被 drop 后，连接池
             //   内部任务孤儿化 → 后续 acquire() 触发 acquire_timeout(15s) 超时，
             //   精确导致启动时 15 秒空白。
+            let t_db = std::time::Instant::now();
             let db_result = match tauri::async_runtime::block_on(init::init_database_with_dir(app_dir.clone())) {
                 Ok(result) => result,
                 Err(e) => {
@@ -369,6 +376,7 @@ pub fn run() {
             };
 
             android_utils::mark_startup_phase("db_init_done");
+            startup_timing::record("db_init", t_db.elapsed().as_millis());
 
             android_utils::mark_startup_phase("state_init_start");
             let t_state = std::time::Instant::now();
@@ -381,6 +389,8 @@ pub fn run() {
                 }
             };
             tracing::info!(elapsed = %t_state.elapsed().as_millis(), "[startup] create_app_state (block_on) 完成");
+            startup_timing::record("create_app_state", t_state.elapsed().as_millis());
+            startup_timing::record_since_start("setup_sync_path_done");
 
             android_utils::mark_startup_phase("state_init_done");
 
@@ -640,6 +650,7 @@ pub fn run() {
                     elapsed = %t_async.elapsed().as_millis(),
                     "[startup] 异步初始化完成"
                 );
+                startup_timing::record("async_init_complete", t_async.elapsed().as_millis());
             });
 
             android_utils::mark_startup_phase("setup_complete");

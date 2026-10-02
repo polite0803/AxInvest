@@ -15355,6 +15355,7 @@
       "dcfNotApplicable": "DCF モデルの前提が本銘柄に対して成立しないため、この脚は評価ファクターから除外されました。評価レンジと安全域は結論として表示されません（除外理由は判断カードを参照）",
       "anchorIsFallback": "フリーキャッシュフローのアンカーは過去の代理値（直近 5 年の黒字年度純利益平均 ×0.90）であり、当期の実現キャッシュフローではありません。レンジは系統的に低めです",
       "grahamGrowthClamped": "グレアム式の成長率仮説が上限で頭打ち（増収率 30% 超）のため、本源的価値は系統的に低めになり、弱気結論が誇張されます",
+      "growthBandAllNegative": "DCFの3段階の予測期成長率がすべて0以下：このレンジは所謂楽観シナリオも含め、売上が年々縮小すると仮定しています。安全余裕〜目標価の帯ではなく、方向判断のみに使えます。",
       "allLegsExcluded": "両方のバリュエーション脚が利用不可のため、バリュエーション次元は判断から完全に除外されました（加点も減点もありません）",
       "reasonLabel": "不適用の理由"
     },
@@ -15390,7 +15391,8 @@
       "revenueGrowthLabel": "売上成長率",
       "algorithmConclusion": "アルゴリズム評価結論",
       "algorithmConclusionNote": "ローカルアルゴリズムが生データから算出（順DCF／逆DCF／相対評価）。下記の評価レンジは同アルゴリズムのDCF出力であり、LLMの見解ではありません",
-      "algorithmRangeBand": "アルゴリズムDCF評価レンジ（保守〜楽観）"
+      "algorithmRangeBand": "アルゴリズムDCF評価レンジ（保守〜楽観）",
+      "algorithmRangeBandDecline": "アルゴリズムDCF評価レンジ（3段階とも成長率が負 · 縮小継続シナリオ）"
     },
     "workflow": {
       "analyst": {
@@ -15880,6 +15882,8 @@
     "factorCompleteness": "📊 因子完整度",
     "missingFactors": "缺失因子：",
     "upstreamDataGaps": "上流データ取得の欠落：",
+    "verdictFieldGaps": "フィールド未出力（アナリストが出力せず。上流の取得障害ではありません）：",
+    "methodNotApplicable": "手法は本銘柄に不适用（銘柄側の属性。取得障害ではありません）：",
     "allFactorsComplete": "✓ 所有因子数据完整",
     "analystDataGapDetails": "分析师数据差距详情",
     "dqTableAnalyst": "分析师",
@@ -16057,7 +16061,30 @@
       "attentionHeat": "注目度: {{heat}}",
       "workflowSays": "分析ワークフロー判定: {{action}}、ポジション {{position}}%",
       "divergenceNote": "2つの時計が異なる——選択側は触媒の実現に賭け（約{{recoDays}}日）、ワークフローは現在のオッズで評価（約{{decisionDays}}日）",
-      "catalystLabel": "触媒({{confidence}}点)"
+      "catalystLabel": "触媒({{confidence}}点)",
+      "leg": {
+        "trend": "トレンド",
+        "consensus": "コンセンサス",
+        "catalyst": "触媒",
+        "risk": "リスク",
+        "valuation": "バリュエーション",
+        "data_quality": "データ品質",
+        "trade_signal": "売買シグナル",
+        "money_flow": "資金フロー",
+        "chip": "保有構造",
+        "pace": "ペース",
+        "momentum": "モメンタム",
+        "bottleneck": "ボトルネック"
+      },
+      "attributionLabel": "拒否要因（本決定が計算済みのフィールドから）:",
+      "legContribution": "{{leg}} 寄与 {{sigma}}（重み {{weight}}）",
+      "driver": {
+        "negative_legs": "負寄与の証跡項目: {{legs}}",
+        "risk_gate_downgrade": "リスクゲートが事後確率を {{raw}}% から {{eff}}% に下げ、保有ライン {{thr}}% を跨ぎ降格",
+        "below_hold_threshold": "有効事後確率 {{eff}}% が保有ライン {{thr}}% 未満",
+        "dcf_leg_excluded": "バリュエーションの DCF 項目は適用外のため全面除外（加点も減点もなし）",
+        "data_gap": "上流データ欠損 {{n}} 件"
+      }
     },
     "compare": {
       "title": "Compare",
@@ -16852,9 +16879,9 @@
       "dataQualityDataGaps": "数据缺口",
       "dataQualityConsistency": "逻辑一致性",
       "dataQualityOverall": "综合评级",
-      "dataQualityGood": "良好",
-      "dataQualityWarning": "需关注",
-      "dataQualityIssue": "问题",
+      "dataQualityGood": "正常：自己評価 >=50 かつ報告に失敗マーカーなし",
+      "dataQualityWarning": "低信頼：報告に失敗マーカーがあるか、自己評価 <50",
+      "dataQualityIssue": "欠落・信頼不可：VERDICT 未出力、または strict_mode 降格フォールバック",
       "dataQualityMissing": "缺失",
       "dataQualityPresent": "存在",
       "dqAnalystCount": "アナリスト {{count}} 名",

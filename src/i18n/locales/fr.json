@@ -15355,6 +15355,7 @@
       "dcfNotApplicable": "Les hypothèses du modèle DCF ne sont pas valides pour ce titre ; cette composante a été retirée des facteurs d'évaluation ; la fourchette et la marge de sécurité ne sont plus affichées comme conclusion (motif du retrait dans la carte de décision)",
       "anchorIsFallback": "L'ancre de flux de trésorerie disponible est un proxy historique (moyenne des bénéfices annuels positifs des 5 derniers exercices ×0,90), et non le flux réel de la période ; la fourchette est systématiquement basse",
       "grahamGrowthClamped": "L'hypothèse de croissance de la formule de Graham est plafonnée (croissance du chiffre d'affaires supérieure à 30 %) ; la valeur intrinsèque est systématiquement basse et la conclusion baissière est exagérée",
+      "growthBandAllNegative": "Les trois niveaux de croissance previsionnels du DCF sont <= 0 : la fourchette suppose des revenus en baisse, y compris le niveau optimiste. C'est une bande de recul, pas une bande marge de securite - objectif de cours ; a n'utiliser que pour la direction.",
       "allLegsExcluded": "Aucune branche de valorisation n'est exploitable ; la dimension de valorisation est entièrement retirée de la décision (ni bonus ni malus)",
       "reasonLabel": "Motif"
     },
@@ -15390,7 +15391,8 @@
       "revenueGrowthLabel": "Croissance du CA",
       "algorithmConclusion": "Conclusion d'évaluation algorithmique",
       "algorithmConclusionNote": "Calculée localement à partir des données brutes (DCF direct / DCF inversé / évaluation relative). La fourchette ci-dessous est la sortie DCF de cet algorithme, non un avis du LLM",
-      "algorithmRangeBand": "Fourchette de valorisation DCF algorithmique (conservatrice-optimiste)"
+      "algorithmRangeBand": "Fourchette de valorisation DCF algorithmique (conservatrice-optimiste)",
+      "algorithmRangeBandDecline": "Fourchette de valorisation DCF algorithmique (les trois niveaux de croissance sont negatifs - bande de recul)"
     },
     "workflow": {
       "analyst": {
@@ -15880,6 +15882,8 @@
     "factorCompleteness": "Complétude des facteurs",
     "missingFactors": "Facteurs manquants :",
     "upstreamDataGaps": "Données amont manquantes :",
+    "verdictFieldGaps": "Champ non émis (omis par l'analyste — pas une panne de récupération amont) :",
+    "methodNotApplicable": "Méthode non applicable (propriété du titre — pas une panne de récupération amont) :",
     "allFactorsComplete": "✓ Tous les facteurs complets",
     "analystDataGapDetails": "Détails des lacunes de données analystes",
     "dqTableAnalyst": "Analyste",
@@ -16057,7 +16061,30 @@
       "attentionHeat": "Attention : {{heat}}",
       "workflowSays": "Verdict du workflow d'analyse : {{action}}, position {{position}} %",
       "divergenceNote": "Deux horloges différentes — la sélection parie sur les catalyseurs (~{{recoDays}} j), le workflow évalue les cotes actuelles (~{{decisionDays}} j)",
-      "catalystLabel": "Catalyseur ({{confidence}})"
+      "catalystLabel": "Catalyseur ({{confidence}})",
+      "leg": {
+        "trend": "Tendance",
+        "consensus": "Consensus",
+        "catalyst": "Catalyseur",
+        "risk": "Risque",
+        "valuation": "Valorisation",
+        "data_quality": "Qualité des données",
+        "trade_signal": "Signal de trading",
+        "money_flow": "Flux de capitaux",
+        "chip": "Structure du flottant",
+        "pace": "Rythme",
+        "momentum": "Momentum",
+        "bottleneck": "Goulot d'étranglement"
+      },
+      "attributionLabel": "Motifs du refus (issus des champs déjà calculés de cette décision) :",
+      "legContribution": "{{leg}} contribution {{sigma}} (poids {{weight}})",
+      "driver": {
+        "negative_legs": "Jambes de preuve négatives : {{legs}}",
+        "risk_gate_downgrade": "La barrière de risque a réduit la probabilité a posteriori de {{raw}} % à {{eff}} %, franchissant le seuil de détention {{thr}} % ⇒ déclassement",
+        "below_hold_threshold": "Valeur a posteriori effective {{eff}} % sous le seuil de détention {{thr}} %",
+        "dcf_leg_excluded": "Jambe DCF de valorisation inapplicable, entièrement exclue (ni bonus ni malus)",
+        "data_gap": "{{n}} manques dans les données amont"
+      }
     },
     "compare": {
       "title": "Compare",
@@ -16852,9 +16879,9 @@
       "dataQualityDataGaps": "Lacunes de données",
       "dataQualityConsistency": "Cohérence logique",
       "dataQualityOverall": "Note globale",
-      "dataQualityGood": "Bon",
-      "dataQualityWarning": "À surveiller",
-      "dataQualityIssue": "Problème",
+      "dataQualityGood": "Normal : auto-evaluation >=50 sans marqueur d'echec dans le rapport",
+      "dataQualityWarning": "Confiance faible : le rapport contient un marqueur d'echec ou auto-evaluation <50",
+      "dataQualityIssue": "Manquant / non fiable : aucun VERDICT emis ou repli degrade strict_mode",
       "dataQualityMissing": "Manquant",
       "dataQualityPresent": "Présent",
       "dqAnalystCount": "{{count}} analystes",

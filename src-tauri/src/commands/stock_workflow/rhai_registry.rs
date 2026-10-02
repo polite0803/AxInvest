@@ -877,6 +877,9 @@ mod tests {
         scope.push_constant("valuation_graham_upside", -25.0_f64);
         scope.push_constant("valuation_dcf_applicable", true);
         scope.push_constant("valuation_dcf_anchor_is_fallback", false);
+        // K3(2026-10-02)：三档增速全负标记。此处给 `false` = 「区间确实是保守—乐观带」，
+        // 使本组既有测试的断言不被新变量改变（缺省留 unit 会让面板走另一条文案分支）。
+        scope.push_constant("valuation_dcf_growth_band_all_negative", false);
 
         let out: rhai::Dynamic = engine
             .eval_ast_with_scope(&mut scope, &ast)

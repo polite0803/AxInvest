@@ -2130,6 +2130,10 @@ let disagreement_mod = if present(risk_disagreement) {
 	//   "数据质量检查不可用 ⇒ 结论更可信"。现按最保守档处理。
 	let dqi_grade_str = if present(dqi_grade) && type_of(dqi_grade) == "string" { dqi_grade } else { "" };
 	let bayes_confidence = pm_compute_bayes_confidence(prior, effective_posterior);
+	// 纯口径（不含 risk_bias）：对外报的 `confidence` 用这一支，使它与荐股链的
+	// 「该档上涨胜率」同量纲。风险只体现在 action 阶梯、仓位上限与
+	// `confidenceRiskAdjusted`，不再把「高风险」伪装成「胜率更低」。
+	let bayes_confidence_pure = pm_compute_bayes_confidence(prior, posterior);
 	let confidence_quality_cap = if dqi_grade_str == "A" {
 	    99.9
 	} else if dqi_grade_str == "B" {
@@ -2147,6 +2151,10 @@ let disagreement_mod = if present(risk_disagreement) {
 	} * 100.0;
 	let signal_strength_raw = (effective_posterior - 0.5).abs() * 200.0;
 	let final_confidence = clamp(bayes_confidence * disagreement_mod, 0.0, confidence_quality_cap);
+	// 纯口径版本（同上，不含 risk_bias）—— 对外报它；`disagreement_mod` 与
+	// `confidence_quality_cap` 属**数据质量/一致性约束**（不是风险溢价），两者都保留。
+	let final_confidence_pure =
+	    clamp(bayes_confidence_pure * disagreement_mod, 0.0, confidence_quality_cap);
 
 	// ── M2 修复：LLM 失败级联兜底 ──
 	// V55 扩展: 上游 AgentNode 走 strict_mode 兜底时（LLM 输出无法解析为合法 JSON），
@@ -2904,6 +2912,13 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
     // 故该档胜率 = 0.5 + (heff − 0.5) × √(h / 锚定天数)，锚 = 中线 28 日（h=28 时不改）。
     // 看空对称放大 —— 负边缘同样需要时间兑现，这是 SNR 的性质而不是偏好。
     let hconf = pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS);
+    // 对外口径：**纯胜率**（不含 risk_bias）。
+    // 2026-10-02 用户裁定「同一要素不得重复产生决策影响」+「统一口径」：
+    //   `risk_bias` 让「高风险」这一个要素同时作用于 ①方向（减概率）②仓位上限，
+    //   而「高风险 ⇒ 上涨胜率更低」本身就是把**约束**伪装成**事实**。
+    //   故对外报纯胜率（与本仓另两条链同量纲），风险仍由下面的 action 阶梯
+    //   （用 `hconf`）与仓位上限承担。两者都报，差额可归因。
+    let hconf_pure = pm_snr_confidence(hpost, daysh, SNR_ANCHOR_DAYS);
     // 纯阈值阶梯（与主链 action 同源常量；省略 kelly 门以降复杂度，见阶段2说明）
     let haction = if hconf >= ACTION_BUY_THRESHOLD { "买入" }
         else if hconf >= ACTION_INCREASE_THRESHOLD { "增持" }
@@ -2927,14 +2942,22 @@ let horizon_decision = |h, ts, slh, tph, daysh| {
     let hpos = if type_of(h_risk_budget) == "()" { hpos_raw } else { min(hpos_raw, h_risk_budget) };
     let hpos_source = if type_of(h_risk_budget) == "()" { "kelly_only" } else { "risk_budget" };
     let hgap = if present(ts) { "" } else { "[该周期评分缺失，按日线退化]" };
-    let hverdict = `决策=${haction} 置信=${(hconf*100.0*10.0).round()/10.0}${hgap}`;
+    // 置信报**纯胜率**（与 `confidence` 字段一致、跨系统可比）；风险门槛造成的差额
+    // 紧跟其后标出 —— 否则「48% 却是观望」会被读成自相矛盾。
+    let hrisk_tag = if risk_bias != 0.0 {
+        `(风险门槛后 ${(hconf*100.0*10.0).round()/10.0}%)`
+    } else { "" };
+    let hverdict = `决策=${haction} 置信=${(hconf_pure*100.0*10.0).round()/10.0}%${hrisk_tag}${hgap}`;
     let htarget = if hpos > 0.0 && price_ok { (current_price*(1.0+tph/100.0)*100.0).round()/100.0 } else { () };
     let hstop = if hpos > 0.0 && price_ok { (current_price*(1.0-slh/100.0)*100.0).round()/100.0 } else { () };
     #{
         "action": haction,
         "verdict": hverdict,
         "positionPct": (hpos*10.0).round()/10.0,
-        "confidence": ((hconf*100.0)*10.0).round()/10.0,
+        // 跨系统可比的**该档上涨胜率**（纯证据，不含风险溢价）——与荐股链同一口径。
+        "confidence": ((hconf_pure*100.0)*10.0).round()/10.0,
+        // 风险调整后（= 本档 `action` 阶梯实际所用值）。两值都报 ⇒ 差额可归因到风险门槛。
+        "confidenceRiskAdjusted": ((hconf*100.0)*10.0).round()/10.0,
         "posterior": ((hpost*100.0)*10.0).round()/10.0,
         "posteriorEffective": ((heff*100.0)*10.0).round()/10.0,
         "snrAnchorDays": SNR_ANCHOR_DAYS,
@@ -3081,7 +3104,12 @@ let gap_note = if data_gaps.len() > 0 {
     "portfolioExposureWarning": if position_pct > 33.3 {
         `⚠️仓位${position_pct}%超过33%——组合层面若持有3个以上同仓位标的，总敞口将超100%`
     } else { "" },  // P0-2: 组合敞口预警（33%=3标的中性仓位阈值）
-    "confidence": (final_confidence * 10.0).round() / 10.0,
+    // 跨系统可比口径：**不含 risk_bias** 的置信度（见 `bayes_confidence_pure`）。
+    // 2026-10-02 改：此前本字段含风险溢价，与荐股链的「该档上涨胜率」不同量纲
+    //（用户实测 002812：荐股 78 vs 本字段 39.7，混读会误以为两系统严重对立）。
+    "confidence": (final_confidence_pure * 10.0).round() / 10.0,
+    // 风险调整后的置信度（= action 阶梯实际所用值），保留以支持归因。
+    "confidenceRiskAdjusted": (final_confidence * 10.0).round() / 10.0,
     // v40(2026-09-13) 口径澄清：本字段 = **生效后验** × 100（= posterior + risk_bias）。
     //   此前注释写成「原始上涨概率 posterior × 100」，与实现不符 —— 实证 601166：
     //   本字段 35.7，而未含风险偏置的原始后验为 50.7（见 evidence.posterior /
@@ -3144,7 +3172,7 @@ let gap_note = if data_gaps.len() > 0 {
     //   沿用本文件既有写法 `${(x*10.0).round()/10.0}`（见 bearish_downgrade_note 的 to_int 惯例）。
     // 2026-09-22: 结论名回归 `final_action`（方向档）—— 展示档派生已移除，
     //   见上方说明：结论名必须由确定性后验阶梯唯一决定，不得掺入仓位/LLM 措辞。
-    "reasoning": `决策=${final_action} 置信=${(final_confidence*10.0).round()/10.0} 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}`,
+    "reasoning": `决策=${final_action} 置信=${(final_confidence_pure*10.0).round()/10.0} 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}`,
     "data_gaps": data_gaps,
     // 口径调整（**不是**缺口）：本档主动按周期降权的腿 —— 见上方「通道」说明。
     // 与 data_gaps 分列，好让 UI 的「数据缺口 N 项」计数不被设计选择污染。
@@ -3240,6 +3268,14 @@ let gap_note = if data_gaps.len() > 0 {
         // 缺省 false（旧模板未注入时行为与改动前完全一致）。
         "anchorIsFallback": if present(valuation_dcf_anchor_is_fallback) { valuation_dcf_anchor_is_fallback } else { false },
         "grahamGrowthClamped": if present(valuation_graham_growth_clamped) { valuation_graham_growth_clamped } else { false },
+        // ── K3(2026-10-02)：三档增速全部 ≤ 0 ──
+        // 为什么必须透出（600276 恒瑞医药实证）：面板把三档标成「保守档—乐观档」，
+        //   而该形态下**连乐观档都假设营收逐年萎缩**（实测 -2.71%/-1.94%/-1.16%）
+        //   ⇒ 那个区间是「持续衰退带」，标签与实际假设不符。
+        // 与 `dcfApplicable` / `anchorIsFallback` **正交**：本例锚是真实年报 FCF、
+        //   前提成立，前两道闸口全部放行 —— 这是第四族缺陷的呈现层出口。
+        // 缺省 false（旧模板未注入时行为与改动前完全一致）。
+        "growthBandAllNegative": if present(valuation_dcf_growth_band_all_negative) { valuation_dcf_growth_band_all_negative } else { false },
     },
     // ── 2026-09-28：估值**结论层**（用户裁决「推翻现有估值架构」）──
     //

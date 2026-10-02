@@ -700,7 +700,69 @@ type AlgoToolRow = (
 ///     写明边界 + 指定措辞（「系媒体转述、未逐条核实」），不写成失败动词。
 /// **必须升版**：提示词正文与 bundle 契约都随模板快照落库；且 `holder_count` 段要让存量 DB 用到
 /// 需重播种（节点/边不变，但提示词的「四方」口径必须与 bundle 同步）。
-pub(crate) const TEMPLATE_VERSION: i32 = 117;
+///
+/// **v118(2026-10-02)**：`portfolio-mgr.rhai` 的**置信度口径统一** —— 用户裁定
+///   「同一要素不得重复产生决策影响」+「统一口径」：
+///   ① 四档 `confidence` 与主决策 `confidence` 改为**纯胜率**（**不含** `risk_bias`），
+///      与本仓另两条链（荐股策略链 `blend_win_rate`、趋势智选链
+///      `candidate_score_to_win_rate`）**同量纲**，可直接比较；
+///   ② `risk_bias` 此前让「高风险」这一个要素同时作用于**方向**（减概率）与**仓位上限**
+///      ⇒ 把约束伪装成事实。现风险仍由 action 阶梯（用含 risk_bias 的值）与仓位上限承担，
+///      该值另存 `confidenceRiskAdjusted`，两值之差即风险门槛造成的下调，可归因；
+///   ③ 四档 `verdict` 同步：报纯胜率，风险门槛差额在括号内标出（否则「48% 却是观望」
+///      会被读成自相矛盾）。
+///   属**公式内容变更** ⇒ 必须升版，否则 DB 里 `portfolio-mgr` 的 CodeNode.code 仍是旧公式
+///   （即 v50 注释所记的「改完不生效」生成物陷阱）。
+///
+/// **v119(2026-10-02)**：`data-quality.rhai` 新增**第三类缺席** `verdict_field_gaps` ——
+///   分析师已产出 VERDICT、但缺角色规范声明的**专属字段**（实证 688498 运行 `129745a7`：
+///   a-catalyst 五个工具调用全 ok、正文判了「L2业绩拐点级」，verdict 里
+///   `catalyst_level`/`institutional_trace`/`narrative_completeness` 三字段同时消失，
+///   而 UI 只显示「缺失因子：催化剂等级」⇒ 与真取数故障无法区分）。
+///   本类与 `missing_factors`（因子没值）、`upstream_data_gaps`（上游没取到数）**三表分列**，
+///   只告警不扣分。
+/// **必须升版**：`data-quality.rhai` 的脚本正文以 `include_str!` 嵌入本模板节点的 `code`
+///   字段落库（同 v50/v118 所记的生成物陷阱）—— 实测：不升版时改完重启、重跑一轮，
+///   该字段在节点输出里**零出现**（运行的是 DB 里的旧脚本正文），而二进制里已含新串。
+///
+/// **v120(2026-10-02)**：`data-quality` 新增第四类缺席 `method_not_applicable` ——
+///   估值方法对本标的**不适用**（标的属性），与前三种缺席（因子没值 / 上游没取到数 /
+///   分析师漏字段）分列。实证（000710 运行 `92849db2`）：PE −18、近5年报无正净利
+///   ⇒ DCF 结构性不适用、`upsidePct` 恒 null，而面板只显示「缺失因子：估值上行空间」，
+///   把标的属性伪装成我方取数缺口（与 v119 修的催化剂那条**同型、不同槽位**）。
+///   判据是新增的机读码 `dcf.unavailableReason`（`persistent_loss` / `fcf_data_missing` /
+///   `shares_unavailable` / `no_financials`），**不**取 `dcf.note` 文案 —— 同 P0-I 纪律。
+///   顺带闭合一处旧病灶：DCF 早退时 `assumptions` 恒为 `None` ⇒ v116 那路
+///   `fcf_data_missing` 取不到值 ⇒「缺数」在早退路径上**全链路零告警**，本版的
+///   `fcf_data_missing` 码把它接回 `upstream_data_gaps`。
+/// **必须升版**：本版的 `input_mapping` **新增了键** `valuation_dcf_unavailable_reason`，
+///   存量库不重播种就取不到值 ⇒ 新分支恒不命中（且是**静默**不命中）。
+///
+/// **v121(2026-10-02)**：`data-quality.rhai` 的失败标记判据**换轴** —— 从「文本出现了哪个词」
+///   改为「本轮该节点的工具调用有没有失败」（措辞性缺席豁免）。
+///   触发实证（000710 运行 `80a41e56`）：基本面/资金面/技术面/研报**四行**低置信，
+///   而四句说的是**同一个事实** —— `get_stock_institutional_visits` 返回 `[]`，四种措辞。
+///   资金面那句已把性质写对（「属该股票当前暂无机构调研记录，事件型缺席，非工具故障」）
+///   却仍被计入 —— `返回空` 的豁免表只有字面「暂无数据」，实文「暂无机构调研记录」**差两个字**。
+///   ⇒ 判据看措辞就收敛不了（措辞是开放集），此前 v116/v117/N1~N3 逐条补短语即反复复发的原因。
+///   新轴三条件缺一不豁免：① 命中里无动词类硬标记 ② 确有状态词 ③ 本轮工具调用**有记录且零失败**；
+///   无调用记录时**不判**（不把「测不出」当「没问题」）；豁免必须在「差距原因」列留痕（不静默吞）。
+/// **必须升版**：判据正文随模板快照落库，不升版则存量库仍跑旧判据（v119 那次实测过）。
+///
+/// **v122(2026-10-02)**：DCF 增长率取数稳健化 + 全带负增长的呈现纠偏（K1~K4，
+///   见 `PLAN-dcf-growth-single-point.md`）。本模板侧两处变更：
+///   ① `input_mapping` 新增键 `valuation_dcf_growth_band_all_negative`
+///     ← `dcf.assumptions.growth_band_all_negative`；
+///   ② `portfolio-mgr.rhai` 的 `valuationApplicability` 新增输出键
+///     `growthBandAllNegative`（脚本正文随模板快照落库）。
+///   实证（600276 恒瑞运行 `21cdd00e`）：三档预测期增速 -2.71% / -1.94% / -1.16%
+///   **全部为负** —— 连「乐观档」都假设营收逐年萎缩，而面板标题写「算法 DCF 估值区间
+///   （保守档—乐观档）」⇒ 标签与模型实际假设不符。
+///   该形态与既有两道闸口**正交**：`dcfApplicable=true`、`anchorIsFallback=false`
+///   （锚是真实年报 FCF 82.73 亿）⇒ I1/J1 的屏蔽全部放行，故必须新开一条出口。
+/// **必须升版**：① 不重播种则该键恒缺，Rhai 侧 `present()` 走缺省 `false` ⇒
+///   **静默**不报，面板继续用「乐观档」措辞（与 v120 新增键同一类失效形态）。
+pub(crate) const TEMPLATE_VERSION: i32 = 122;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -4170,6 +4232,27 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                         "valuation_dcf_fcf_data_missing",
                         "t-valuation.result.content.dcf.assumptions.fcf_data_missing",
                     ),
+                    // 2026-10-02: DCF **不可用的机读原因码** ← `dcf.unavailableReason`。
+                    //   为什么 `fcf_data_missing` 不够：DCF 早退时 `assumptions` 恒为 `None`
+                    //   ⇒ 上面那路解析不到值，data-quality 只剩 `!present(valuation_dcf_upside)`
+                    //   一条判据 ⇒ 对任何持续亏损的标的**恒报**「缺失因子：估值上行空间」，
+                    //   把「DCF 对本标的不适用」伪装成「我方取数缺口」
+                    //   （实证 000710 运行 `92849db2`：PE −18、note 明写「近5年报无正净利年度
+                    //   （持续亏损），DCF模型不适用」，面板仍显示缺失因子）。
+                    //   码值：`persistent_loss`（标的属性）/ `fcf_data_missing`（我方采集缺陷）/
+                    //   `shares_unavailable` / `no_financials` / `null`（可用）。
+                    //   ⚠️ 按**码**判，不按 `dcf.note` 文案判 —— 与 P0-I 弃用 `basis` 文案同纪律。
+                    (
+                        "valuation_dcf_unavailable_reason",
+                        "t-valuation.result.content.dcf.unavailableReason",
+                    ),
+                    // 2026-10-02: DCF **是否可用**的伞形布尔 ← `dcf.available`。
+                    //   为什么 `unavailableReason` 一个键不够：`available=false` 有**两条**路径 ——
+                    //   ① `compute_dcf` 早退（有原因码）；② 算出来了但中性档**超出量程被遮蔽**
+                    //   （`m ∈ (现价×1%, 现价×100×)` 之外，见 `mcp_tools.rs` 的 `iv_floor`/`iv_ceil`），
+                    //   后者**没有**原因码。只判码 ⇒ 遮蔽态仍会被显示成「缺失因子」而无解释，
+                    //   与本版要消除的歧义同型。故用 `available` 兜伞、用码细分性质。
+                    ("valuation_dcf_available", "t-valuation.result.content.dcf.available"),
                     // 2026-09-12: 原 `trader_direction` → "trader.content.verdict.verdict"
                     // 映射已删除（死映射）。data-quality 是 trader 的**上游**（trader 的
                     // dqi_score 来自本节点），而 trader → data-quality 的边因循环依赖被移除
@@ -4539,6 +4622,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     (
                         "valuation_dcf_inapplicable_reason",
                         "t-valuation.result.content.dcf.assumptions.inapplicable_reason",
+                    ),
+                    // K3(2026-10-02): **三档预测期增速全部 ≤ 0** 的标记。
+                    // 存在理由（600276 恒瑞实证）：该形态下面板仍写「算法 DCF 估值区间
+                    // （保守档—乐观档）」，而实际三档增速是 -2.71%/-1.94%/-1.16% ——
+                    // **连乐观档都假设营收逐年萎缩**，那个区间是「持续衰退带」，标签撒谎。
+                    // 与 `valuation_dcf_applicable` **正交**：applicable=true 时照样可能出现
+                    // （锚是真的，负增长是标的属性或取数结果，不属「模型前提不成立」），
+                    // 故既有 I1/J1 两道闸口都拦不住它 —— 这是第四族缺陷的呈现层出口。
+                    (
+                        "valuation_dcf_growth_band_all_negative",
+                        "t-valuation.result.content.dcf.assumptions.growth_band_all_negative",
                     ),
                     ("valuation_dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
                     ("valuation_graham_upside", "t-valuation.result.content.graham.upsidePct"),

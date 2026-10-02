@@ -1543,11 +1543,13 @@ impl NodeExecutorTrait for AgentExecutor {
                 messages.push(ChatMessage {
                     role: "system".to_string(),
                     content: ChatContent::Text(
-                        "工具数据已获取。请基于上述工具结果直接输出最终分析结果，不要再调用工具。\
+                        format!(
+                            "{}{VERDICT_SPEC_NOT_EXHAUSTIVE}",
+                            "工具数据已获取。请基于上述工具结果直接输出最终分析结果，不要再调用工具。\
                          \n**重要**：分析报告末尾必须另起一行追加 VERDICT 标签，格式如下：\
                          \n<!-- VERDICT: {\"verdict\": \"看多|偏多|中性|偏空|看空\", \"bull_score\": 0-100, \"bear_score\": 0-100, \"bull_points\": [\"2-4条看多论据\"], \"bear_points\": [\"2-4条看空论据\"], \"confidence\": 0-100} -->\
                          \n缺少 VERDICT 标签或缺少 bull_points/bear_points 的输出将被系统视为无效。"
-                            .to_string(),
+                        ),
                     ),
                     tool_calls: None,
                     tool_call_id: None,
@@ -1580,12 +1582,14 @@ impl NodeExecutorTrait for AgentExecutor {
                 messages.push(ChatMessage {
                     role: "system".to_string(),
                     content: ChatContent::Text(
-                        "你已经获得了足够的工具数据。现在请基于这些数据直接输出最终分析结果，不要再调用任何工具。\
+                        format!(
+                            "{}{VERDICT_SPEC_NOT_EXHAUSTIVE}",
+                            "你已经获得了足够的工具数据。现在请基于这些数据直接输出最终分析结果，不要再调用任何工具。\
                          \n如果你已获得需要的数据，直接输出最终分析报告。不需要额外确认。\
                          \n**重要**：报告末尾必须另起一行追加 VERDICT 标签，格式如下：\
                          \n<!-- VERDICT: {\"verdict\": \"看多|偏多|中性|偏空|看空\", \"bull_score\": 0-100, \"bear_score\": 0-100, \"bull_points\": [\"2-4条看多论据\"], \"bear_points\": [\"2-4条看空论据\"], \"confidence\": 0-100} -->\
                          \n缺少 VERDICT 标签或缺少 bull_points/bear_points 的输出将被系统视为无效。"
-                            .to_string(),
+                        ),
                     ),
                     tool_calls: None,
                     tool_call_id: None,
@@ -1702,14 +1706,14 @@ impl NodeExecutorTrait for AgentExecutor {
                             "你上一轮只输出了 VERDICT 结论标签，没有写分析正文 —— 结论标签不是报告。\
                              请基于以上工具数据撰写一份**完整的**分析报告正文，\
                              重点突出关键指标解读和风险评估（正文 800 字以内）。\
-                             报告末尾必须另起一行追加 VERDICT 机读标签（结论可与上一版一致）：{VERDICT_TAG_SPEC}"
+                             报告末尾必须另起一行追加 VERDICT 机读标签（结论可与上一版一致）：{VERDICT_TAG_SPEC}{VERDICT_SPEC_NOT_EXHAUSTIVE}"
                         )
                     } else {
                         format!(
                             "你是一位股票分析师。请基于以上工具数据和被截断的报告，\
                              重新生成一份**完整的**分析报告。\
                              \n报告正文控制在 800 字以内，重点突出关键指标解读和风险评估。\
-                             \n报告末尾必须另起一行追加 VERDICT 机读标签：{VERDICT_TAG_SPEC}"
+                             \n报告末尾必须另起一行追加 VERDICT 机读标签：{VERDICT_TAG_SPEC}{VERDICT_SPEC_NOT_EXHAUSTIVE}"
                         )
                     };
                     compact_messages.push(ChatMessage {
@@ -1737,10 +1741,12 @@ impl NodeExecutorTrait for AgentExecutor {
                     compact_messages.push(ChatMessage {
                         role: "system".to_string(),
                         content: ChatContent::Text(
-                            "请基于上述数据输出最终分析报告（控制在 500 字以内），末尾追加 VERDICT 标签。\
+                            format!(
+                                "{}{VERDICT_SPEC_NOT_EXHAUSTIVE}",
+                                "请基于上述数据输出最终分析报告（控制在 500 字以内），末尾追加 VERDICT 标签。\
                              \n<!-- VERDICT: {\"verdict\": \"看多|偏多|中性|偏空|看空\", \"bull_score\": 0-100, \"bear_score\": 0-100, \"bull_points\": [\"2-4条看多论据\"], \"bear_points\": [\"2-4条看空论据\"], \"confidence\": 0-100} -->\
                              \n缺少 VERDICT 标签或缺少 bull_points/bear_points 的输出将被视为无效。"
-                                .to_string(),
+                            ),
                         ),
                         tool_calls: None,
                         tool_call_id: None,
@@ -4366,8 +4372,8 @@ fn extract_tool_json_block(text: &str) -> Option<String> {
                 // 从第一个 { 截到闭合围栏前最后一个 }
                 if let Some(end) = candidate.rfind('}') {
                     let candidate = &candidate[..=end];
-                    if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
-                        return Some(candidate.to_string());
+                    if let Some(salvaged) = parse_tool_json_candidate(candidate) {
+                        return Some(salvaged);
                     }
                 }
             }
@@ -4398,8 +4404,8 @@ fn extract_tool_json_block(text: &str) -> Option<String> {
                 let body = &rest[start..];
                 if let Some(end) = body.rfind('}') {
                     let candidate = &body[..=end];
-                    if serde_json::from_str::<serde_json::Value>(candidate).is_ok() {
-                        return Some(candidate.to_string());
+                    if let Some(salvaged) = parse_tool_json_candidate(candidate) {
+                        return Some(salvaged);
                     }
                 }
             }
@@ -4409,12 +4415,105 @@ fn extract_tool_json_block(text: &str) -> Option<String> {
     None
 }
 
+/// 校验 / 修复 ```tool_json 代码块内的 JSON 文本，返回可交给下游拆包的字符串。
+///
+/// 严格解析通过 ⇒ 原样返回（既有行为，不放宽）。失败时走修复链：
+/// ① `repair_json`（缺逗号、尾逗号、字符串内未转义引号）；
+/// ② `strip_stray_closers`（对象边界多打的闭合括号）。
+/// 修复结果必须**仍是 `name` + `arguments` 的工具协议对象**才认，否则宁可不认
+/// （与 `extract_verdict_tag` 的字段验收同一条路数）——把正文片段当成结构化输出，
+/// 比退回文本更糟。
+///
+/// 实证（2026-10-02 轮 `a-candidate-mapper`）：模型在最后一个候选对象后多写一个 `}`，
+/// 严格解析失败 ⇒ 本函数旧实现返回 None ⇒ strict_mode 把整段原文压进 `report` 字符串，
+/// 趋势智选因此产出 0 候选（5 只标的其实都在）。
+fn parse_tool_json_candidate(candidate: &str) -> Option<String> {
+    if serde_json::from_str::<Value>(candidate).is_ok() {
+        return Some(candidate.to_string());
+    }
+    for attempt in [repair_json(candidate), strip_stray_closers(candidate)] {
+        if serde_json::from_str::<Value>(&attempt).is_ok_and(|v| is_tool_protocol_object(&v)) {
+            tracing::info!(
+                tool_json_len = attempt.len(),
+                "通用后处理: tool_json 块修复后可解析，采用修复结果"
+            );
+            return Some(attempt);
+        }
+    }
+    None
+}
+
+/// 工具协议对象形状：`{"name": "<非空>", "arguments": ...}`。
+fn is_tool_protocol_object(v: &Value) -> bool {
+    v.get("name").and_then(|n| n.as_str()).is_some_and(|s| !s.is_empty())
+        && (v.get("arguments").is_some() || v.get("input").is_some())
+}
+
+/// 剔除「多余的闭合括号」：逐字符扫描（跳过字符串字面量）维护容器栈，
+/// 遇到与栈顶不匹配的 `}` / `]` 即判定为手滑多打的一个，丢弃不入结果。
+///
+/// 目标坏形（2026-09-30 / 10-02 两轮实测）：
+/// `"serenity_reason": "…较低"}}], "summary": …` —— 候选对象边界多一个 `}`，
+/// 使整块 tool_json 严格解析失败。注意本函数只治「多一个闭合括号」这一族；
+/// 缺闭合括号或未转义引号的坏形修不动，由调用方验收挡下、交下游逐个提取兜底。
+fn strip_stray_closers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut stack: Vec<char> = Vec::new();
+    let mut in_str = false;
+    let mut escaped = false;
+    for ch in text.chars() {
+        if in_str {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_str = true;
+                out.push(ch);
+            },
+            '{' | '[' => {
+                stack.push(ch);
+                out.push(ch);
+            },
+            '}' | ']' => {
+                let want = if ch == '}' { '{' } else { '[' };
+                if stack.last() == Some(&want) {
+                    stack.pop();
+                    out.push(ch);
+                }
+            },
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// `VERDICT` 标签内必须出现的分析师机读字段白名单 —— 截断修复结果的验收条件。
 /// 存在的理由：截断修复（见 `extract_verdict_tag` 末尾分支）会把半截 JSON 闭合成
 /// 合法对象；若不做字段校验，正文中任何以 `{` 起始的片段都可能被"修复"成空壳对象
 /// 并被下游当成结构化结论消费。
 const VERDICT_MACHINE_FIELDS: [&str; 6] =
     ["verdict", "bull_score", "bear_score", "bull_points", "bear_points", "confidence"];
+
+/// 四处 VERDICT 提醒语共用的「本清单非完整」声明。
+///
+/// 存在的理由：提醒语按 `VERDICT_MACHINE_FIELDS` 只列通用 6 键，而部分角色在自身
+/// 「输出格式」一节还声明了**专属**字段（catalyst-analyst 的 `catalyst_level` /
+/// `institutional_trace` / `narrative_completeness`）。模型会把提醒语读作**完整**清单
+/// ⇒ 工具调用轮次越多、提醒重复注入次数越多，专属字段整组被丢弃的概率越高。
+///
+/// 实证（688498 运行 `129745a7`，a-catalyst 5 次工具调用全 ok）：三个专属字段同时消失，
+/// verdict 只剩通用 6 键 —— 形状与本提醒语的清单逐字一致。后果是 data-quality /
+/// portfolio-mgr(f3) / pace-calc / rule-checker(catalyst_override) 四个消费方静默按
+/// 「无催化剂」降级，而 UI 只显示「缺失因子：催化剂等级」，与真取数故障无法区分。
+const VERDICT_SPEC_NOT_EXHAUSTIVE: &str = "\n注意：以上只列通用必需字段，**不是完整清单** —— 若上文角色规范的「输出格式」一节还声明了其它字段，必须一并输出，不得省略。";
 
 fn extract_verdict_tag(text: &str) -> Option<String> {
     // 查找最后一个 <!-- VERDICT: 出现位置（取最后一个，因为正文中可能也有 HTML 注释）
@@ -5267,5 +5366,60 @@ mod llm_error_code_tests {
         assert!(!crate::work_engine::node_executor_trait::is_non_retryable_error(&new));
         let old = format!("{}: Agent LLM stream error", error_code::UNSUPPORTED_PROVIDER);
         assert!(!crate::work_engine::node_executor_trait::is_non_retryable_error(&old));
+    }
+}
+
+#[cfg(test)]
+mod tool_json_salvage_tests {
+    use super::*;
+
+    /// 生产坏形（2026-10-02 轮 `a-candidate-mapper`）：最后一个候选对象边界多打一个 `}`。
+    const STRAY_CLOSER_JSON: &str = concat!(
+        r#"{"name": "submit_candidates", "arguments": {"candidates": ["#,
+        r#"{"stock_code": "688114", "exit_signals": {"overall_exit_urgency": "watch"}},"#,
+        r#"{"stock_code": "300676", "serenity_reason": "较低"}}],"#,
+        r#" "summary": "共筛选2个候选"}}"#,
+    );
+
+    /// 修复前形态自证：该坏形严格解析必须失败 —— 旧实现正是在这里返回 None，
+    /// 继而让 strict_mode 把整段原文压进 report，趋势智选产出 0 候选。
+    #[test]
+    fn stray_closer_fixture_fails_strict_parse() {
+        assert!(serde_json::from_str::<Value>(STRAY_CLOSER_JSON).is_err());
+    }
+
+    #[test]
+    fn stray_closer_is_salvaged_into_tool_protocol() {
+        let salvaged =
+            parse_tool_json_candidate(STRAY_CLOSER_JSON).expect("应剔除多余闭合括号后可解析");
+        let v: Value = serde_json::from_str(&salvaged).expect(".salvage 结果必须可解析");
+        let cands = v["arguments"]["candidates"].as_array().expect("candidates 数组");
+        assert_eq!(cands.len(), 2, "损坏点之后的候选也要保住");
+        assert_eq!(cands[1]["stock_code"], "300676");
+    }
+
+    #[test]
+    fn valid_block_passes_through_unchanged() {
+        let ok = r#"{"name": "submit_candidates", "arguments": {"candidates": []}}"#;
+        assert_eq!(parse_tool_json_candidate(ok).as_deref(), Some(ok));
+    }
+
+    /// 验收闸口：修复后可解析但不是工具协议对象（缺 name/arguments）时宁可不认，
+    /// 防止把正文片段当成结构化输出。
+    #[test]
+    fn salvage_refuses_non_protocol_shape() {
+        let broken = r#"{"trends": [{"name": "AI"},]}"#;
+        assert!(serde_json::from_str::<Value>(broken).is_err());
+        assert!(parse_tool_json_candidate(broken).is_none());
+    }
+
+    /// 端到端：带围栏的坏块经 extract_tool_json_block 后必须拿到结构化 JSON，
+    /// 而不是退回文本让下游全部下钻失败。
+    #[test]
+    fn extract_tool_json_block_salvages_fenced_block() {
+        let fenced = format!("```tool_json\n{STRAY_CLOSER_JSON}\n```");
+        let inner = extract_tool_json_block(&fenced).expect("围栏内坏块应被救回");
+        let v: Value = serde_json::from_str(&inner).expect("返回文本必须可解析");
+        assert_eq!(v["name"], "submit_candidates");
     }
 }

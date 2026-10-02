@@ -15355,6 +15355,7 @@
       "dcfNotApplicable": "Die Prämissen des DCF-Modells treffen auf diese Aktie nicht zu; dieser Zweig wurde aus den Bewertungsfaktoren entfernt. Bewertungsband und Sicherheitsmarge werden nicht mehr als Ergebnis angezeigt (Ausschlussgrund siehe Entscheidungsfeld)",
       "anchorIsFallback": "Der Free-Cashflow-Anker ist ein historischer Näherungswert (Durchschnitt der positiven Jahresüberschüsse der letzten 5 Jahre ×0,90) und nicht der reale Cashflow der Periode; die Spanne ist systematisch zu niedrig",
       "grahamGrowthClamped": "Die Wachstumsannahme der Graham-Formel ist an der Obergrenze gedeckelt (Umsatzwachstum über 30 %); der innere Wert ist systematisch zu niedrig und die bearishe Aussage überzeichnet",
+      "growthBandAllNegative": "Alle drei DCF-Wachstumsstufen im Prognosezeitraum sind <= 0: Die Spanne unterstellt weiter sinkende Umsaetze, auch die optimistische Stufe. Das ist ein Rueckgangsband, keine Sicherheitsmarge-Zielpreis-Spanne; nur fuer die Richtungsangabe nutzbar.",
       "allLegsExcluded": "Kein Bewertungszweig ist nutzbar; die Bewertungsdimension wurde vollständig aus der Entscheidung entfernt (sie zählt weder positiv noch negativ)",
       "reasonLabel": "Grund"
     },
@@ -15390,7 +15391,8 @@
       "revenueGrowthLabel": "Umsatzwachstum",
       "algorithmConclusion": "Algorithmisches Bewertungsergebnis",
       "algorithmConclusionNote": "Lokal aus Rohdaten berechnet (Forward-DCF / Reverse-DCF / relative Bewertung). Die Spanne unten ist der DCF-Output dieses Algorithmus, keine LLM-Meinung",
-      "algorithmRangeBand": "Algorithmische DCF-Bewertungsspanne (konservativ-optimistisch)"
+      "algorithmRangeBand": "Algorithmische DCF-Bewertungsspanne (konservativ-optimistisch)",
+      "algorithmRangeBandDecline": "Algorithmische DCF-Bewertungsspanne (alle drei Wachstumsstufen negativ - Rückgangsband)"
     },
     "workflow": {
       "analyst": {
@@ -15880,6 +15882,8 @@
     "factorCompleteness": "Faktor-Vollständigkeit",
     "missingFactors": "Fehlende Faktoren:",
     "upstreamDataGaps": "Fehlende Upstream-Daten:",
+    "verdictFieldGaps": "Feld nicht ausgegeben (vom Analysten ausgelassen – kein Upstream-Abruffehler):",
+    "methodNotApplicable": "Methode nicht anwendbar (Eigenschaft des Titels – kein Upstream-Abruffehler):",
     "allFactorsComplete": "✓ Alle Faktoren vollständig",
     "analystDataGapDetails": "Details zu Analysten-Datenlücken",
     "dqTableAnalyst": "Analyst",
@@ -16057,7 +16061,30 @@
       "attentionHeat": "Aufmerksamkeit: {{heat}}",
       "workflowSays": "Analyse-Workflow-Urteil: {{action}}, Position {{position}} %",
       "divergenceNote": "Zwei Uhren — die Auswahl setzt auf Katalysatoren (~{{recoDays}} T.), der Workflow bewertet aktuelle Quoten (~{{decisionDays}} T.)",
-      "catalystLabel": "Katalysator ({{confidence}})"
+      "catalystLabel": "Katalysator ({{confidence}})",
+      "leg": {
+        "trend": "Trend",
+        "consensus": "Konsens",
+        "catalyst": "Katalysator",
+        "risk": "Risiko",
+        "valuation": "Bewertung",
+        "data_quality": "Datenqualität",
+        "trade_signal": "Handelssignal",
+        "money_flow": "Geldfluss",
+        "chip": "Chipverteilung",
+        "pace": "Tempo",
+        "momentum": "Momentum",
+        "bottleneck": "Engpass"
+      },
+      "attributionLabel": "Gründe der Ablehnung (aus bereits berechneten Feldern dieser Entscheidung):",
+      "legContribution": "{{leg}} Beitrag {{sigma}} (Gewicht {{weight}})",
+      "driver": {
+        "negative_legs": "Negative Beweisbeine: {{legs}}",
+        "risk_gate_downgrade": "Das Risikotor senkte die A-posteriori-Wahrscheinlichkeit von {{raw}} % auf {{eff}} % über die Halten-Linie {{thr}} % ⇒ Herabstufung",
+        "below_hold_threshold": "Effektiver Wert {{eff}} % unter der Halten-Linie {{thr}} %",
+        "dcf_leg_excluded": "DCF-Bein der Bewertung nicht anwendbar und vollständig ausgeschlossen (weder Auf- noch Abwertung)",
+        "data_gap": "{{n}} Lücken in den Upstream-Daten"
+      }
     },
     "compare": {
       "title": "Compare",
@@ -16852,9 +16879,9 @@
       "dataQualityDataGaps": "Datenlücken",
       "dataQualityConsistency": "Logische Konsistenz",
       "dataQualityOverall": "Gesamtbewertung",
-      "dataQualityGood": "Gut",
-      "dataQualityWarning": "Beobachten",
-      "dataQualityIssue": "Problem",
+      "dataQualityGood": "Normal: Selbstbewertung >=50 ohne Fehlermarkierungen im Bericht",
+      "dataQualityWarning": "Geringe Sicherheit: Bericht enthaelt Fehlermarkierungen oder Selbstbewertung <50",
+      "dataQualityIssue": "Fehlend / nicht vertrauenswuerdig: kein VERDICT oder strict_mode-Downgrade",
       "dataQualityMissing": "Fehlend",
       "dataQualityPresent": "Vorhanden",
       "dqAnalystCount": "{{count}} Analysten",

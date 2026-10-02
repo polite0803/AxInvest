@@ -2063,6 +2063,44 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       position: decision.crossCheck.decisionPositionPct,
                     })}
                   </div>
+                  {(decision.crossCheck.divergence?.drivers?.length ?? 0) > 0 && (
+                    <div className="space-y-0.5">
+                      {
+                        /* 分歧归因：点名「谁把工作流结论压下去」。判据码到文案走
+                            crossCheck.driver.<码>，与荐股链理由码同一形态；
+                            字段可缺 ⇒ 缺即不渲染、不补默认值。 */
+                      }
+                      <div className="text-[11px]" style={{ color: "var(--muted)" }}>
+                        {t("stockAnalysis.crossCheck.attributionLabel")}
+                      </div>
+                      {decision.crossCheck.divergence?.drivers?.map((code) => (
+                        <div
+                          key={code}
+                          className="text-[11px]"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          {t(`stockAnalysis.crossCheck.driver.${code}`, {
+                            defaultValue: code,
+                            legs: (decision.crossCheck?.divergence?.legs ?? [])
+                              .map((leg) =>
+                                t("stockAnalysis.crossCheck.legContribution", {
+                                  leg: t(`stockAnalysis.crossCheck.leg.${leg.name}`, {
+                                    defaultValue: leg.name,
+                                  }),
+                                  sigma: leg.sigma.toFixed(2),
+                                  weight: leg.weight.toFixed(2),
+                                })
+                              )
+                              .join(" · "),
+                            raw: decision.crossCheck?.divergence?.posteriorRaw ?? "?",
+                            eff: decision.crossCheck?.divergence?.posteriorEffective ?? "?",
+                            thr: decision.crossCheck?.divergence?.holdThreshold ?? "?",
+                            n: decision.dataGaps?.length ?? 0,
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="text-[11px]" style={{ color: "var(--muted)" }}>
                     {t("stockAnalysis.crossCheck.divergenceNote", {
                       recoDays: decision.crossCheck.recoHoldingDays,
@@ -2307,6 +2345,52 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       <span className="font-medium">{t("stockAnalysis.upstreamDataGaps")}</span>
                       {dataQualityReport.upstream_data_gaps.map((g) => (
                         <div key={g} className="ml-1" style={{ color: "#f59e0b" }}>
+                          {g}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {
+                    /*
+                    2026-10-02: 第三类缺席 —— VERDICT 专属字段未产出，与前两行**分列**。
+                    语义：分析师已出结论标签，但角色规范声明的专属字段没写进 verdict。
+                    既不是「该维度没有数据」（那属标的属性），也不是「上游没取到数」
+                    （那属我方采集缺陷），是产出形态缺陷 ⇒ 用紫色与红/橙区分，
+                    并在 i18n 文案里明写「非上游取数故障」，避免用户按数据缺口去查数据源。
+                    ⚠️ 同样不得并进 missing_factors：那会让列表长度与
+                    `pm_compute_factor_completeness` 的分母口径不一致。
+                  */
+                  }
+                  {dataQualityReport.verdict_field_gaps
+                    && dataQualityReport.verdict_field_gaps.length > 0 && (
+                    <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                      <span className="font-medium">{t("stockAnalysis.verdictFieldGaps")}</span>
+                      {dataQualityReport.verdict_field_gaps.map((g) => (
+                        <div key={g} className="ml-1" style={{ color: "#7c3aed" }}>
+                          {g}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {
+                    /*
+                    2026-10-02: 第四类缺席 —— 估值方法对本标的**不适用**（标的属性）。
+                    与上面三行的区别：缺失因子=本节点要消费的因子没值；上游缺口=我方没取到数；
+                    字段未产出=分析师漏写专属字段；**本行=这只票本就不适用该方法**
+                    （如持续亏损 ⇒ DCF 不适用，本轮估值改走相对口径）。
+                    用蓝色（中性说明）而非红/橙/紫，避免被读成「出了问题」。
+                    ⚠️ 同样不得并进 missing_factors（分母口径绑死），也不得并进上游缺口
+                    （那不是我方采集缺陷）。
+                  */
+                  }
+                  {dataQualityReport.method_not_applicable
+                    && dataQualityReport.method_not_applicable.length > 0 && (
+                    <div className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                      <span className="font-medium">
+                        {t("stockAnalysis.methodNotApplicable")}
+                      </span>
+                      {dataQualityReport.method_not_applicable.map((g) => (
+                        <div key={g} className="ml-1" style={{ color: "#2563eb" }}>
                           {g}
                         </div>
                       ))}

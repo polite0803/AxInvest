@@ -442,6 +442,7 @@ function ValueReportRenderer({
   isDark,
   gateNoticeKey = null,
   rangeIsAlgorithmOutput = false,
+  rangeBandIsDecline = false,
 }: {
   data: ValueReportData;
   isDark: boolean;
@@ -453,9 +454,19 @@ function ValueReportRenderer({
   //   故有算法结论时标题必须写「算法 DCF 估值区间」，绝不能写「LLM 估值区间」
   //   （实测 600887：用户看到标注 LLM 的 40.16-59.63 元，误以为估值仍由 LLM 产生）。
   rangeIsAlgorithmOutput?: boolean;
+  // K3(2026-10-02): 三档增速全部 ≤ 0 ⇒ 区间是「持续衰退带」，标题不得再写「保守档—乐观档」。
+  //   与 `gateNoticeKey` 那道闸口正交：闸口拦的是「前提不成立 / 锚是代理」，
+  //   而本形态下锚是真的（年报 FCF）、前提是成立的，两道闸口全部放行（600276 实证）。
+  rangeBandIsDecline?: boolean;
 }) {
   const { t } = useTranslation();
   const gated = gateNoticeKey != null;
+  // K3：三档全负时换掉「保守档—乐观档」这个自称（写成链式三元，避免嵌套触发 lint）。
+  const rangeBandLabelKey = rangeBandIsDecline && rangeIsAlgorithmOutput
+    ? "stockAnalysis.valueAssessment.algorithmRangeBandDecline"
+    : rangeIsAlgorithmOutput
+    ? "stockAnalysis.valueAssessment.algorithmRangeBand"
+    : "stockAnalysis.valueAssessment.valuationConclusion";
   return (
     <div className="space-y-3">
       {/* 展望说明 / 巴菲特裁决 */}
@@ -518,11 +529,7 @@ function ValueReportRenderer({
       {(data.intrinsic_value_range || data.margin_of_safety) && (
         <div>
           <div className="text-xs font-medium mb-1" style={{ color: "var(--muted)" }}>
-            {t(
-              rangeIsAlgorithmOutput
-                ? "stockAnalysis.valueAssessment.algorithmRangeBand"
-                : "stockAnalysis.valueAssessment.valuationConclusion",
-            )}
+            {t(rangeBandLabelKey)}
           </div>
           {gated
             ? (
@@ -722,6 +729,16 @@ export function ValueAssessmentPanel() {
         tone: "warning",
       });
     }
+    // K3(2026-10-02)：三档增速全负 ⇒ 区间是「持续衰退带」。与上面两条**并列**而非互斥：
+    //   本形态下 dcfApplicable=true、anchorIsFallback=false（600276 实证），
+    //   即前两道闸口全部放行，这条是唯一能拦住「乐观档」这个自称的出口。
+    //   DCF 腿已被剔除时不再报（区间本来就不展示）。
+    if (a.dcfApplicable && a.growthBandAllNegative) {
+      applicabilityNotices.push({
+        key: "stockAnalysis.valuationApplicability.growthBandAllNegative",
+        tone: "warning",
+      });
+    }
     if (a.grahamGrowthClamped) {
       applicabilityNotices.push({
         key: "stockAnalysis.valuationApplicability.grahamGrowthClamped",
@@ -807,6 +824,7 @@ export function ValueAssessmentPanel() {
           isDark={isDark}
           gateNoticeKey={gateNoticeKey}
           rangeIsAlgorithmOutput={algoConclusion != null}
+          rangeBandIsDecline={valuationApplicability?.growthBandAllNegative === true}
         />
       );
     }

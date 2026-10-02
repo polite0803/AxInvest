@@ -219,3 +219,49 @@ describe("stockAnalysisStore", () => {
     });
   });
 });
+
+// 重跑路径的「手工归一」历史上反复漏字段（2026-09-21 漏 dataGaps / weightAdjustments）。
+// 后端 rerun_decision 会重新注入 crossCheck（decision.rs::inject_reco_crosscheck），
+// store 若不整体透传 ⇒ 重跑后「趋势智选 vs 工作流」分歧报告与其归因整体消失。
+describe("rerunDecision 透传跨系统互证", () => {
+  it("保留 crossCheck.divergence 归因（缺此拷贝时本断言红）", async () => {
+    useStockAnalysisStore.setState({ decision: null, status: "completed" });
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd !== "rerun_decision") { return {}; }
+      return {
+        analysis_id: "a-1",
+        decision: {
+          action: "观望",
+          positionPct: 0,
+          confidence: 38,
+          riskLevel: "中风险",
+          reasoning: "决策=观望 置信=38",
+          data_gaps: ["催化剂评估(a-catalyst)"],
+          crossCheck: {
+            divergent: true,
+            recoConfidence: 61,
+            recoPositionPct: 4.925,
+            decisionAction: "观望",
+            decisionPositionPct: 0,
+            divergence: {
+              drivers: ["negative_legs", "below_hold_threshold", "dcf_leg_excluded", "data_gap"],
+              legs: [{ name: "valuation", sigma: -0.485, weight: 0.21 }],
+              posteriorRaw: 38,
+              posteriorEffective: 38,
+              holdThreshold: 48,
+            },
+          },
+        },
+        llm_decision_json: null,
+      };
+    });
+
+    await useStockAnalysisStore.getState().rerunDecision("a-1");
+
+    const d = useStockAnalysisStore.getState().decision;
+    expect(d?.crossCheck?.divergent).toBe(true);
+    expect(d?.crossCheck?.divergence?.legs?.[0]?.name).toBe("valuation");
+    expect(d?.crossCheck?.divergence?.drivers).toContain("dcf_leg_excluded");
+    expect(d?.dataGaps).toEqual(["催化剂评估(a-catalyst)"]);
+  });
+});

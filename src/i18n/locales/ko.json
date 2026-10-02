@@ -15355,6 +15355,7 @@
       "dcfNotApplicable": "DCF 모델 전제가 이 종목에 성립하지 않아 평가 인자에서 제거되었습니다. 평가 구간과 안전마진은 결론으로 표시되지 않습니다(제거 이유는 의사결정 카드 참조)",
       "anchorIsFallback": "잉여현금흐름 기준값이 역사적 대용치(최근 5년 흑자 연도 순이익 평균 ×0.90)이며 당기 실제 현금흐름이 아닙니다. 구간이 체계적으로 낮게 산출됩니다",
       "grahamGrowthClamped": "그레이엄 공식의 성장률 가정이 상한(매출 성장률 30% 초과)에 걸려 있어 내재가치가 체계적으로 낮게 산출되고 약세 결론이 과장됩니다",
+      "growthBandAllNegative": "DCF 예측 기간 3단계 성장률이 모두 0 이하입니다. 이 범위는 이른바 낙관 시나리오를 포함해 매출이 계속 줄어든다고 가정합니다. 안전마진~목표가 밴드가 아니라 축소 밴드이므로 방향 판단에만 쓸 수 있습니다.",
       "allLegsExcluded": "두 밸류에이션 축을 모두 사용할 수 없어 밸류에이션 차원이 의사결정에서 전면 제외되었습니다(가점도 감점도 없음)",
       "reasonLabel": "적용 불가 사유"
     },
@@ -15390,7 +15391,8 @@
       "revenueGrowthLabel": "매출 성장률",
       "algorithmConclusion": "알고리즘 밸류에이션 결론",
       "algorithmConclusionNote": "로컬 알고리즘이 원시 데이터로 산출(정방향 DCF/역방향 DCF/상대 평가). 아래 밸류에이션 범위는 해당 알고리즘의 DCF 출력이며 LLM 견해가 아닙니다",
-      "algorithmRangeBand": "알고리즘 DCF 밸류에이션 범위(보수~낙관)"
+      "algorithmRangeBand": "알고리즘 DCF 밸류에이션 범위(보수~낙관)",
+      "algorithmRangeBandDecline": "알고리즘 DCF 평가 범위(3단계 성장률 모두 음수 · 지속 축소 구간)"
     },
     "workflow": {
       "analyst": {
@@ -15880,6 +15882,8 @@
     "factorCompleteness": "팩터 완전성",
     "missingFactors": "누락 팩터:",
     "upstreamDataGaps": "업스트림 데이터 누락:",
+    "verdictFieldGaps": "필드 미출력(분석가가 해당 필드를 출력하지 않음 — 업스트림 조회 오류 아님):",
+    "methodNotApplicable": "적용 불가(종목의 속성 — 업스트림 조회 오류 아님):",
     "allFactorsComplete": "✓ 모든 팩터 완비",
     "analystDataGapDetails": "애널리스트 데이터 격차 상세",
     "dqTableAnalyst": "애널리스트",
@@ -16057,7 +16061,30 @@
       "attentionHeat": "관심도: {{heat}}",
       "workflowSays": "분석 워크플로 판정: {{action}}, 포지션 {{position}}%",
       "divergenceNote": "두 시계가 다름 — 픽은 촉매 실현에 베팅(약 {{recoDays}}일), 워크플로는 현재 배당률로 평가(약 {{decisionDays}}일)",
-      "catalystLabel": "촉매({{confidence}}점)"
+      "catalystLabel": "촉매({{confidence}}점)",
+      "leg": {
+        "trend": "추세",
+        "consensus": "컨센서스",
+        "catalyst": "촉매",
+        "risk": "리스크",
+        "valuation": "밸류에이션",
+        "data_quality": "데이터 품질",
+        "trade_signal": "매매 시그널",
+        "money_flow": "자금 흐름",
+        "chip": "보유 구조",
+        "pace": "속도",
+        "momentum": "모멘텀",
+        "bottleneck": "병목"
+      },
+      "attributionLabel": "거부 요인(이번 결정의 계산된 필드에서):",
+      "legContribution": "{{leg}} 기여 {{sigma}}(가중치 {{weight}})",
+      "driver": {
+        "negative_legs": "음의 증거 항목: {{legs}}",
+        "risk_gate_downgrade": "리스크 게이트가 사후 확률을 {{raw}}%에서 {{eff}}%로 낮춰 보유 라인 {{thr}}%를 넘어 강등",
+        "below_hold_threshold": "유효 사후 확률 {{eff}}%가 보유 라인 {{thr}}% 미만",
+        "dcf_leg_excluded": "밸류에이션 DCF 항목은 적용 불가로 전체 제외(가점·감점 없음)",
+        "data_gap": "업스트림 데이터 결손 {{n}}건"
+      }
     },
     "compare": {
       "title": "Compare",
@@ -16852,9 +16879,9 @@
       "dataQualityDataGaps": "데이터 공백",
       "dataQualityConsistency": "논리 일관성",
       "dataQualityOverall": "종합 등급",
-      "dataQualityGood": "양호",
-      "dataQualityWarning": "주의 필요",
-      "dataQualityIssue": "문제",
+      "dataQualityGood": "정상: 자체 평가 >=50이고 보고서에 실패 표지 없음",
+      "dataQualityWarning": "낮은 신뢰도: 보고서에 실패 표지가 있거나 자체 평가 <50",
+      "dataQualityIssue": "누락·신뢰 불가: VERDICT 미산출 또는 strict_mode 강등 폴백",
       "dataQualityMissing": "누락",
       "dataQualityPresent": "존재",
       "dqAnalystCount": "분석가 {{count}}명",

@@ -146,6 +146,24 @@ pub fn horizon_prior_map(stats: &HitrateStats, kappa: f64) -> serde_json::Value 
     serde_json::Value::Object(obj)
 }
 
+/// 从 DB 取统计并产出逐档先验表 —— 取数与收缩的**唯一实现**。
+///
+/// 为什么需要它（2026-10-02）：本函数原先只存在于命令层
+///（`commands/stock_analysis.rs` 的 `reco_horizon_prior`），而趋势智选链
+///（`commands/stock_workflow/serenity.rs`）也要吃同一份先验 ⇒ 只能跨 commands 模块调用，
+/// 撞上分层护栏 `commands-no-sibling-call`。正确解法是把**取数**下沉到本层，命令层两侧
+/// 都只做「读出 κ 后调本函数」的薄包装 —— 既消除跨模块调用，也保证收缩口径只有一份（禁区 12）。
+///
+/// `kappa` 由调用方从变量表读出（`horizon_prior_kappa`，可被反思建议覆盖）：
+/// 本层不读变量表 —— 它不该知道模板变量的存在。
+pub async fn horizon_prior_from_db(
+    db: &sea_orm::DatabaseConnection,
+    kappa: f64,
+) -> Option<serde_json::Value> {
+    let stats = crate::reflection_stats::build_hitrate_stats(db).await.ok()?;
+    Some(horizon_prior_map(&stats, kappa))
+}
+
 #[cfg(test)]
 mod horizon_prior_tests {
     use super::*;

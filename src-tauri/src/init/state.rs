@@ -1588,6 +1588,9 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // ① vendor 结果只在进程内 moka L1 存活，重启即冷启动全量打 vendor；
     // ② `daily_snapshot` 恒为 None ⇒ 回放模式的「每日快照」兜底整条不可用，
     //   `sweep_daily_snapshots` 采回来的数据全部写进 no-op（与 09-24 news sink 同一族断链）。
+    // 「关键路径完成（首帧可渲染）」那条日志之后仍有 100+ 行接线（L2 磁盘缓存整文件
+    // 载入、快照缓存、browser fetcher、KPI 钩子注册），此前全程无计时 ⇒ 首屏慢无法归因。
+    let t_wiring = std::time::Instant::now();
     let astock_client = {
         let news_archive_sink = Arc::new(crate::init::news_archive_sink::NewsArchiveSinkImpl::new(
             harness.db().clone(),
@@ -1596,8 +1599,10 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         // 因此不能继续链式调用，先解构再逐项注入。
         // 文件名对齐 `disk_cache.rs` 头部文档声明的 `astock_l2_cache.json`
         // （此前写作 astock_l2.json，注释与实现两个名字）。
+        let t_l2 = std::time::Instant::now();
         let (client, l2) = axagent_astock_data::AStockClient::new()
             .with_l2_cache(app_dir.join("astock_l2_cache.json"));
+        crate::startup_timing::record("l2_disk_cache_load", t_l2.elapsed().as_millis());
         #[cfg(not(mobile))]
         let client = client.with_browser_fetcher(Arc::new(
             crate::init::browser_fetcher::PlaywrightBrowserFetcher::new(browser_client.clone()),
@@ -1607,8 +1612,10 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
             client.with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher));
         // 每日快照用**独立文件 + 独立实例**：与 vendor L2 共用 10_000 条容量时，
         // K 线缓存（单条约 70 KB）会把最旧快照按 LRU 挤掉，回放兜底变成"哪天有哪天没"。
+        let t_snap = std::time::Instant::now();
         let (client, snapshot_disk) =
             client.with_daily_snapshot_cache(app_dir.join("astock_daily_snapshot.json"));
+        crate::startup_timing::record("daily_snapshot_cache_load", t_snap.elapsed().as_millis());
         let client = client.with_news_archive_sink(news_archive_sink);
         // 两个 DiskCache 都是「写内存 + 30s 脏检查落盘」，必须各有 flush 任务持有；
         // 随 shutdown_token 一起优雅退出，退出前各做最后一次 flush。
@@ -1676,6 +1683,9 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         )
         .await;
     }
+
+    crate::startup_timing::record("state_wiring", t_wiring.elapsed().as_millis());
+    crate::startup_timing::record("create_app_state_total", t_start.elapsed().as_millis());
 
     Ok(AppState {
         harness,

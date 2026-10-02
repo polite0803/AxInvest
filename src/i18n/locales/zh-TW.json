@@ -15499,6 +15499,7 @@
       "dcfNotApplicable": "DCF 模型前提對本標的不成立，該腿已從估值因子中剔除；估值區間與安全邊際不再作為結論展示（剔除原因見決策卡）",
       "anchorIsFallback": "自由現金流錨定為歷史代理（近 5 年年報正淨利均值 ×0.90），並非當期真實現金流；該區間系統性偏低",
       "grahamGrowthClamped": "葛拉漢公式的成長率假設已被上限封頂（營收增速超過 30%），內在價值系統性偏低，看空結論被誇大",
+      "growthBandAllNegative": "DCF 三檔預測期增速全部 ≤ 0：該區間假設營收逐年萎縮（含所謂樂觀檔）。它是持續衰退帶，不是安全邊際—目標價帶，只可用於判斷方向。",
       "allLegsExcluded": "兩條估值腿均不可用，估值維度已整體退出決策（不加分也不扣分）",
       "reasonLabel": "不適用原因"
     },
@@ -15534,7 +15535,8 @@
       "revenueGrowthLabel": "營收增速",
       "algorithmConclusion": "演算法估值結論",
       "algorithmConclusionNote": "由本地演算法基於原始資料計算（正向 DCF／反向 DCF／相對估值）；下方估值區間即該演算法的 DCF 輸出，非 LLM 觀點",
-      "algorithmRangeBand": "演算法 DCF 估值區間（保守檔—樂觀檔）"
+      "algorithmRangeBand": "演算法 DCF 估值區間（保守檔—樂觀檔）",
+      "algorithmRangeBandDecline": "演算法 DCF 估值區間（三檔增速均為負 · 持續衰退帶）"
     },
     "workflow": {
       "analyst": {
@@ -16104,6 +16106,8 @@
     "factorCompleteness": "📊 因子完整度",
     "missingFactors": "缺失因子：",
     "upstreamDataGaps": "上游取數缺口：",
+    "verdictFieldGaps": "欄位未產出（分析師未輸出該欄位，非上游取數故障）：",
+    "methodNotApplicable": "方法不適用（標的属性，非取數故障）：",
     "allFactorsComplete": "✓ 所有因子数据完整",
     "analystDataGapDetails": "分析师数据差距详情",
     "dqTableAnalyst": "分析师",
@@ -16281,7 +16285,30 @@
       "attentionHeat": "關注度: {{heat}}",
       "workflowSays": "股票分析工作流判定: {{action}}，倉位 {{position}}%",
       "divergenceNote": "兩個時鐘不同——智選賭催化劑兌現（約 {{recoDays}} 天），工作流按當下賠率定價（約 {{decisionDays}} 天）",
-      "catalystLabel": "催化劑({{confidence}}分)"
+      "catalystLabel": "催化劑({{confidence}}分)",
+      "leg": {
+        "trend": "趨勢",
+        "consensus": "一致預期",
+        "catalyst": "催化劑",
+        "risk": "風險",
+        "valuation": "估值",
+        "data_quality": "資料品質",
+        "trade_signal": "交易訊號",
+        "money_flow": "資金流",
+        "chip": "籌碼",
+        "pace": "節奏",
+        "momentum": "動量",
+        "bottleneck": "瓶頸"
+      },
+      "attributionLabel": "否決歸因（取自本次決策已算出的欄位）:",
+      "legContribution": "{{leg}} 貢獻 {{sigma}}（權重 {{weight}}）",
+      "driver": {
+        "negative_legs": "負向證據腿：{{legs}}",
+        "risk_gate_downgrade": "風險門檻把後驗 {{raw}}% 壓到 {{eff}}%，跨越持有線 {{thr}}% ⇒ 降檔",
+        "below_hold_threshold": "生效後驗 {{eff}}% 低於持有線 {{thr}}%",
+        "dcf_leg_excluded": "估值 DCF 腿不適用，已整條剔除（不加分也不扣分）",
+        "data_gap": "上游資料缺口 {{n}} 項"
+      }
     },
     "compare": {
       "title": "多股對比",
@@ -17154,9 +17181,9 @@
       "dataQualityDataGaps": "資料缺口",
       "dataQualityConsistency": "邏輯一致性",
       "dataQualityOverall": "綜合評級",
-      "dataQualityGood": "良好",
-      "dataQualityWarning": "需關注",
-      "dataQualityIssue": "問題",
+      "dataQualityGood": "正常：自評 ≥50 且報告無失敗標記",
+      "dataQualityWarning": "低置信：報告含失敗標記，或自評 <50",
+      "dataQualityIssue": "缺失 / 不可信：未產出 VERDICT，或 strict_mode 降級兜底",
       "dataQualityMissing": "缺失",
       "dataQualityPresent": "存在",
       "dqAnalystCount": "{{count}} 位分析師",

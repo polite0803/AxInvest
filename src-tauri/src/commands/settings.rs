@@ -14,6 +14,7 @@ use tauri::State;
     description = "获取应用设置"
 )]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
+    crate::startup_timing::note_first_get_settings();
     let mut settings =
         axagent_dao::repo::settings::get_settings(state.harness.db()).await.map_err(|e| {
             String::from(crate::commands::error::ErrorResponse::from_error(

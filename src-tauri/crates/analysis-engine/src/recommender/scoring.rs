@@ -84,6 +84,36 @@ pub fn blend_win_rate(
     }
 }
 
+/// 把「工作流候选评分（0-100）」折算成该档**上涨胜率（0-100）**，返回 `(胜率, priorSource)`。
+///
+/// 口径与本仓另外两条链**完全一致**（`blend_win_rate`）：先验 → logit 合成 → 时间折算。
+///
+/// ⚠ 为什么需要它（2026-10-02 实测）：趋势智选链（`stock_workflow/serenity.rs`）原先把
+/// 工作流 LLM 产出的候选评分**直接落库**，并把 `priorSource` 硬编码为 `absent`
+/// ⇒ 该 `confidence` **不是概率**（它是"这候选有多符合瓶颈策略"的评分），而分析链的
+/// `horizon_decisions[档].confidence` 是"该档上涨胜率" ⇒ 两者在 UI 上并排展示时，
+/// 「荐股 78 vs 分析 46」是**两个不同量纲的数在比**，不是观点分歧。
+///
+/// 先验不可得 ⇒ 如实退回纯评分并标 `absent`（不假装合成过）—— 与策略链同一条退化纪律。
+pub fn candidate_score_to_win_rate(
+    conf_pct: i32,
+    tier_prior: Option<&serde_json::Value>,
+    sensitivity: f64,
+    holding_days: u32,
+    anchor_days: u32,
+) -> (u8, String) {
+    let prior = tier_prior.and_then(|r| r.get("prior")).and_then(|v| v.as_f64());
+    let source = tier_prior
+        .and_then(|r| r.get("source"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("absent")
+        .to_string();
+    match blend_win_rate(prior, conf_pct as f64 / 100.0, sensitivity, holding_days, anchor_days) {
+        Some(wr) => ((wr * 100.0).round().clamp(0.0, 100.0) as u8, source),
+        None => (conf_pct.clamp(0, 100) as u8, "absent".to_string()),
+    }
+}
+
 pub fn calc_confidence(
     score_consistency: f64,
     signal_strength: f64,
@@ -577,5 +607,32 @@ mod tests {
         assert!(blend_win_rate(Some(0.5), f64::NAN, 1.0, 28, 28).is_none(), "评分 NaN 无效");
         let s0 = blend_win_rate(Some(0.60), 0.99, 0.0, 28, 28).expect("s=0 仍应有值");
         assert!((s0 - 0.60).abs() < 1e-12, "s=0 必须只承认先验，实得 {s0}");
+    }
+
+    /// **口径统一回归（2026-10-02）**：趋势智选链的候选评分必须经同一套合成，
+    /// 不得再原样落库（实测形态：候选评分 78 直接入库，`priorSource` 硬编码 `absent`）。
+    #[test]
+    fn candidate_score_is_folded_into_the_shared_win_rate_scale() {
+        let anchor = 28u32;
+        // 实测形态：prior=0.4643 / source=pooled（修复后的真实注入值）
+        let prior_row = serde_json::json!({"prior": 0.4643, "samples": 0, "source": "pooled"});
+        let (mid, src) = candidate_score_to_win_rate(78, Some(&prior_row), 1.0, 28, anchor);
+        assert_eq!(src, "pooled", "priorSource 必须如实反映来源，不得再硬编码 absent");
+        assert!(mid < 78, "候选评分必须经先验合成后再落库，实得 {mid}");
+        assert!(mid > 46, "但不应被压到分析链的 46 附近（证据源本就不同），实得 {mid}");
+        // 时间折算必须存在：同一评分在 long 档与 mid 档必须不同（原实现两档逐位相同）
+        let (long, _) = candidate_score_to_win_rate(78, Some(&prior_row), 1.0, 90, anchor);
+        assert_ne!(long, mid, "long 档必须与 mid 档不同（时间折算），实得 {long} vs {mid}");
+        assert!(long > mid, "看多评分在长档应被放大，实得 {long} vs {mid}");
+    }
+
+    /// 退化：无先验 ⇒ 原样评分 + `absent`（不假装合成过）；档位在表里缺失同理。
+    #[test]
+    fn candidate_score_without_prior_degrades_to_absent() {
+        let (c, src) = candidate_score_to_win_rate(78, None, 1.0, 28, 28);
+        assert_eq!((c, src.as_str()), (78, "absent"));
+        let table = serde_json::json!({"mid": {"prior": 0.4643, "source": "pooled"}});
+        let (c2, src2) = candidate_score_to_win_rate(78, table.get("long"), 1.0, 90, 28);
+        assert_eq!((c2, src2.as_str()), (78, "absent"), "缺该档也不得借用别档先验");
     }
 }

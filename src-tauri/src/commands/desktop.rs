@@ -71,6 +71,7 @@ pub async fn apply_startup_settings(
     always_on_top: bool,
     close_to_tray: bool,
 ) -> Result<(), String> {
+    crate::startup_timing::note_window_show_gate();
     window.set_always_on_top(always_on_top).map_err(|e| {
         String::from(crate::commands::error::ErrorResponse::from_error(
             e,

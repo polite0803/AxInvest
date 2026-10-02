@@ -15355,6 +15355,7 @@
       "dcfNotApplicable": "Las premisas del modelo DCF no se cumplen para este valor; esta pata se ha eliminado de los factores de valoración; el rango y el margen de seguridad ya no se muestran como conclusión (véase el motivo en la tarjeta de decisión)",
       "anchorIsFallback": "El ancla de flujo de caja libre es un proxy histórico (media de los beneficios anuales positivos de los últimos 5 ejercicios ×0,90), no el flujo real del periodo; el rango es sistemáticamente bajo",
       "grahamGrowthClamped": "La hipótesis de crecimiento de la fórmula de Graham está topada en el límite superior (crecimiento de ingresos superior al 30 %); el valor intrínseco es sistemáticamente bajo y la conclusión bajista queda exagerada",
+      "growthBandAllNegative": "Los tres niveles de crecimiento del DCF en el periodo de proyeccion son <= 0: el rango supone ingresos decrecientes, incluido el nivel optimista. Es una banda de retroceso, no un rango de margen de seguridad a precio objetivo; util solo para la direccion.",
       "allLegsExcluded": "Ninguna de las dos ramas de valoración es utilizable, por lo que la dimensión de valoración se ha excluido por completo de la decisión (no suma ni resta)",
       "reasonLabel": "Motivo"
     },
@@ -15390,7 +15391,8 @@
       "revenueGrowthLabel": "Crecimiento de ingresos",
       "algorithmConclusion": "Conclusión de valoración algorítmica",
       "algorithmConclusionNote": "Calculado localmente a partir de datos brutos (DCF directo / DCF inverso / valoración relativa). El rango de abajo es la salida DCF de este algoritmo, no una opinión del LLM",
-      "algorithmRangeBand": "Rango de valoración DCF algorítmico (conservador-optimista)"
+      "algorithmRangeBand": "Rango de valoración DCF algorítmico (conservador-optimista)",
+      "algorithmRangeBandDecline": "Rango de valoracion DCF algoritmico (los tres niveles de crecimiento son negativos - banda de retroceso)"
     },
     "workflow": {
       "analyst": {
@@ -15880,6 +15882,8 @@
     "factorCompleteness": "Completitud de factores",
     "missingFactors": "Factores faltantes:",
     "upstreamDataGaps": "Datos de origen faltantes:",
+    "verdictFieldGaps": "Campo no emitido (el analista lo omitió; no es un fallo de recuperación):",
+    "methodNotApplicable": "Método no aplicable (propiedad del valor; no es un fallo de recuperación):",
     "allFactorsComplete": "✓ Todos los factores completos",
     "analystDataGapDetails": "Detalles de brechas de datos de analistas",
     "dqTableAnalyst": "Analista",
@@ -16057,7 +16061,30 @@
       "attentionHeat": "Atención: {{heat}}",
       "workflowSays": "Veredicto del flujo de análisis: {{action}}, posición {{position}}%",
       "divergenceNote": "Dos relojes distintos: la selección apuesta a los catalizadores (~{{recoDays}} d), el flujo valora las probabilidades actuales (~{{decisionDays}} d)",
-      "catalystLabel": "Catalizador ({{confidence}})"
+      "catalystLabel": "Catalizador ({{confidence}})",
+      "leg": {
+        "trend": "Tendencia",
+        "consensus": "Consenso",
+        "catalyst": "Catalizador",
+        "risk": "Riesgo",
+        "valuation": "Valoración",
+        "data_quality": "Calidad de datos",
+        "trade_signal": "Señal de trading",
+        "money_flow": "Flujo de capital",
+        "chip": "Distribución de posiciones",
+        "pace": "Ritmo",
+        "momentum": "Momento",
+        "bottleneck": "Cuello de botella"
+      },
+      "attributionLabel": "Motivos del rechazo (de campos ya calculados de esta decisión):",
+      "legContribution": "{{leg}} contribución {{sigma}} (peso {{weight}})",
+      "driver": {
+        "negative_legs": "Piernas de evidencia negativas: {{legs}}",
+        "risk_gate_downgrade": "La barrera de riesgo redujo la probabilidad posterior del {{raw}} % al {{eff}} %, cruzando la línea de mantener del {{thr}} % ⇒ degradación",
+        "below_hold_threshold": "Posterior efectiva {{eff}} % por debajo de la línea de mantener {{thr}} %",
+        "dcf_leg_excluded": "La pierna DCF de valoración no aplica y se excluye por completo (ni suma ni resta)",
+        "data_gap": "{{n}} huecos en datos de origen"
+      }
     },
     "compare": {
       "title": "Compare",
@@ -16852,9 +16879,9 @@
       "dataQualityDataGaps": "Vacío de datos",
       "dataQualityConsistency": "Consistencia lógica",
       "dataQualityOverall": "Calificación general",
-      "dataQualityGood": "Bueno",
-      "dataQualityWarning": "Requiere atención",
-      "dataQualityIssue": "Problema",
+      "dataQualityGood": "Normal: autoevaluacion >=50 sin marcas de fallo en el informe",
+      "dataQualityWarning": "Confianza baja: el informe tiene marcas de fallo o autoevaluacion <50",
+      "dataQualityIssue": "Faltante / no confiable: sin VERDICT o respaldo degradado de strict_mode",
       "dataQualityMissing": "Faltante",
       "dataQualityPresent": "Presente",
       "dqAnalystCount": "{{count}} analistas",

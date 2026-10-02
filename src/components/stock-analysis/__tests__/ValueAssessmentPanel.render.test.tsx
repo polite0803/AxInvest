@@ -141,6 +141,7 @@ describe("估值前提标注", () => {
     reason: "净利为正但当期真实自由现金流与盈利量级脱钩（FCF/净利 = 0.14 < 0.3）",
     anchorIsFallback: true,
     grahamGrowthClamped: true,
+    growthBandAllNegative: false,
   };
 
   it("命中不适用 / 封顶 ⇒ 渲染标注，且**排在估值卡片之前**", () => {
@@ -226,6 +227,7 @@ describe("I1：DCF 不适用时估值区间不进结论区", () => {
     reason: "当期净利 4.83 亿为正但自由现金流 -16.78 亿 ≤ 0（符号相反）：FCF 折现不反映股东可分配",
     anchorIsFallback: true,
     grahamGrowthClamped: false,
+    growthBandAllNegative: false,
   };
 
   it("applicable=false ⇒ 违规区间串（0.69-0.94）与安全边际不得出现在估值结论区", () => {
@@ -273,21 +275,21 @@ describe("I1：DCF 不适用时估值区间不进结论区", () => {
  * 一句话结论；区间区块标题按归属标为「算法 DCF 估值区间」（V93 修正：该区间本就是
  * `value-verify` 覆写后的算法输出，标成「LLM 估值区间」是归属错误）。
  */
-describe("V92：算法估值结论置顶", () => {
-  const REPORT_WITH_CONCLUSION = JSON.stringify({
-    buffett_verdict: "裁决正文",
-    intrinsic_value_range: "2.16-4.42元",
-    margin_of_safety: "-97.5%",
-    valuation_conclusion: {
-      action: "高估",
-      headline: "反向 DCF 显示现价隐含 FCF 年复合 130% ⇒ 判为「高估」。",
-      primaryMethod: "reverse_dcf",
-      relativeVerdict: "rich",
-      relativePrimary: "PS",
-      reverseFeasibility: "Impossible",
-    },
-  });
+const REPORT_WITH_CONCLUSION = JSON.stringify({
+  buffett_verdict: "裁决正文",
+  intrinsic_value_range: "2.16-4.42元",
+  margin_of_safety: "-97.5%",
+  valuation_conclusion: {
+    action: "高估",
+    headline: "反向 DCF 显示现价隐含 FCF 年复合 130% ⇒ 判为「高估」。",
+    primaryMethod: "reverse_dcf",
+    relativeVerdict: "rich",
+    relativePrimary: "PS",
+    reverseFeasibility: "Impossible",
+  },
+});
 
+describe("V92：算法估值结论置顶", () => {
   it("有 valuation_conclusion ⇒ 结论置顶且区块标题标为算法 DCF 区间", () => {
     seedStore(REPORT_WITH_CONCLUSION, "301269");
     render(<ValueAssessmentPanel />);
@@ -313,5 +315,68 @@ describe("V92：算法估值结论置顶", () => {
     render(<ValueAssessmentPanel />);
     expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmConclusion")).toBeNull();
     expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeNull();
+  });
+});
+
+/**
+ * K3（2026-10-02，600276 恒瑞医药实证，样本 `21cdd00e`）。
+ *
+ * 病灶：三档预测期增速 -2.71% / -1.94% / -1.16% **全部为负** —— 连「乐观档」都假设营收
+ * 逐年萎缩，而面板标题写「算法 DCF 估值区间（保守档—乐观档）」⇒ 标签与模型实际假设不符。
+ * 该形态下 `dcfApplicable=true` 且 `anchorIsFallback=false`（锚是真实年报 FCF 82.73 亿），
+ * 所以 I1/J1 两道闸口**全部放行** —— 这是前两轮修复覆盖不到的第四族出口。
+ * 判据走结构化布尔（`growthBandAllNegative`），不解析 LLM 文案。
+ */
+describe("K3：三档增速全负时区间必须改口", () => {
+  const DECLINE = {
+    dcfApplicable: true,
+    dcfLegUsed: true,
+    grahamLegUsed: true,
+    reason: "",
+    anchorIsFallback: false,
+    grahamGrowthClamped: false,
+    growthBandAllNegative: true,
+  };
+
+  it("命中 ⇒ 标题换成衰退带 + 前提标注出现，且旧标题不残留", () => {
+    seedStore(REPORT_WITH_CONCLUSION, "301269");
+    useStockAnalysisStore.setState({ valuationApplicability: DECLINE });
+    render(<ValueAssessmentPanel />);
+    expect(
+      screen.getByText("stockAnalysis.valueAssessment.algorithmRangeBandDecline"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("stockAnalysis.valuationApplicability.growthBandAllNegative"),
+    ).toBeTruthy();
+    // 同时出现两个标题 = 给了两个口径，属新增歧义 ⇒ 必须互斥
+    expect(screen.queryByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeNull();
+    // 区间数值本身**仍然展示**：K3 只纠措辞，不屏蔽（锚是真的，数值可用）
+    expect(screen.getByText(/2\.16-4\.42/)).toBeTruthy();
+  });
+
+  it("**反向锁**：growthBandAllNegative=false ⇒ 两条新文案都不得出现", () => {
+    seedStore(REPORT_WITH_CONCLUSION, "301269");
+    useStockAnalysisStore.setState({
+      valuationApplicability: { ...DECLINE, growthBandAllNegative: false },
+    });
+    render(<ValueAssessmentPanel />);
+    expect(
+      screen.queryByText("stockAnalysis.valueAssessment.algorithmRangeBandDecline"),
+    ).toBeNull();
+    expect(
+      screen.queryByText("stockAnalysis.valuationApplicability.growthBandAllNegative"),
+    ).toBeNull();
+    expect(screen.getByText("stockAnalysis.valueAssessment.algorithmRangeBand")).toBeTruthy();
+  });
+
+  it("DCF 腿已被剔除 ⇒ 不重复报（区间本就不展示，报了是噪声）", () => {
+    seedStore(REPORT_WITH_CONCLUSION, "301269");
+    useStockAnalysisStore.setState({
+      valuationApplicability: { ...DECLINE, dcfApplicable: false },
+    });
+    render(<ValueAssessmentPanel />);
+    expect(
+      screen.queryByText("stockAnalysis.valuationApplicability.growthBandAllNegative"),
+    ).toBeNull();
   });
 });

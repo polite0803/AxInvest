@@ -954,7 +954,12 @@ pub async fn run_stock_workflow_inner(
             output_schema: output_schema.clone(),
             dry_run: dry_run.unwrap_or(false),
             // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
-            tool_permissions: Some(super::strict_tool_permissions()),
+            // P1-8（2026-10-03）：把本轮 as-of 上下文显式带进**每个节点任务**。
+            // 引擎为每个节点单独 spawn，而 `task_local` 不跨 spawn ⇒ 此前节点只能读
+            // 进程级兜底栈（全局单值），并发执行会互相看见对方的截止日。
+            node_task_scope: Some(axagent_rt_workflow::work_engine::engine::node_task_scope_hook(
+                move |fut| as_of::with_optional_asof(captured_asof, fut),
+            )),
             ..Default::default()
         };
         // 变量增强（market_regime/sim_metrics/holdings/sector/regime 偏向/

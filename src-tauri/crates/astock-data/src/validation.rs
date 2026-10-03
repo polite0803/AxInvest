@@ -340,6 +340,7 @@ mod tests {
             goodwill: None,
             accounts_receivable: None,
             estimated: Some(false),
+            disclosure_date: None,
         };
         let r = validate_financial(&f);
         assert!(!r.ok);
@@ -369,6 +370,7 @@ mod tests {
             goodwill: None,
             accounts_receivable: None,
             estimated: Some(false),
+            disclosure_date: None,
         };
         let r = validate_financial(&f);
         assert!(r.ok);

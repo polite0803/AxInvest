@@ -77,11 +77,40 @@ impl SerenityStrategy {
         }
 
         // 4. 营收增速校验（成熟瓶颈可能增速不高，默认 5%（可调），评分 >= 85 时豁免）
+        //
+        // K5(2026-10-02)：取数由「最新单期同比」改为与正向 DCF **同源**的多年稳健增速
+        // （`robust_annual_growth` = 近 5 年报营收同比的对数截尾均值）。
+        // 为什么这里**也**该用多年口径（不是顺手复用）：本值同时充当
+        //   ① 排除门槛（< 5% 出局）与 ② **高 PE 的豁免依据**（下方 5a 的 growth_exempt_pct=50%）。
+        //   「用增长撑起估值倍数」问的是**可持续**增长 —— 单期尖峰（一次性授权收入、
+        //   周期顶点）恰恰是最危险的豁免依据：它会在标的最贵的时候给它最宽的放行。
+        //   反向同样成立：600276 恒瑞 2026H1 单期 **-1.94%**（上年同期一次性收入造成的高基数），
+        //   而近 5 年报为 +13.02/+22.63/+7.26/−17.87/−6.59 ⇒ 单期口径会把一家多年增长的
+        //   公司以「增速过低」**整只排除**（在本链里比估值偏低后果更硬）。
+        //
+        // ⚠️ 缺数与零增长**分列**：原实现 `unwrap_or(0.0)` 让「没取到增速」与
+        //   「增长为零」同形 ⇒ 缺数标的被「增速过低」误排，且日志给出的理由是错的。
+        //   筛选强度**不变**（缺数仍然出局），改的是语义：缺席要说是缺席。
         let min_rev_growth = read_f64(vars, "serenity_min_revenue_growth", 5.0);
-        let rev_growth = latest.revenue_yoy.unwrap_or(0.0);
+        let (rev_growth_raw, growth_basis) =
+            match axagent_astock_data::mcp_tools::robust_annual_growth(&financials) {
+                Some((g, n)) => (Some(g * 100.0), format!("近 {n} 个年报营收同比截尾均值")),
+                None => (latest.revenue_yoy, "年报同比缺失，回落最新单期".to_string()),
+            };
+        let rev_growth = match rev_growth_raw {
+            Some(v) => v,
+            None => {
+                tracing::info!(
+                    "{code}: 营收增速**数据缺失**（{growth_basis}）⇒ 按筛选纪律排除；\
+                     理由是「取不到增速」而非「增速过低」，两者不得混为一谈 \
+                     (serenity_score={serenity_score:.0})"
+                );
+                return None;
+            },
+        };
         if rev_growth < min_rev_growth && serenity_score < 85.0 {
             tracing::info!(
-                "{code}: 营收增速 {rev_growth:.1}% < {min_rev_growth}%, 因增速过低排除 (serenity_score={serenity_score:.0})"
+                "{code}: 营收增速 {rev_growth:.1}%（{growth_basis}）< {min_rev_growth}%, 因增速过低排除 (serenity_score={serenity_score:.0})"
             );
             return None;
         }
@@ -100,7 +129,7 @@ impl SerenityStrategy {
                 // 高增长标的PE常偏高，营收增速超过阈值时豁免PE检查
                 if rev_growth < growth_exempt_pct {
                     tracing::info!(
-                        "{code}: PE={pe:.1} > {max_pe} 且增长率={rev_growth:.1}%<{growth_exempt_pct}%, 因估值过高排除"
+                        "{code}: PE={pe:.1} > {max_pe} 且增长率={rev_growth:.1}%（{growth_basis}）<{growth_exempt_pct}%, 因估值过高排除"
                     );
                     return None;
                 }

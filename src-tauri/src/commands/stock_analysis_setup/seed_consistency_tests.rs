@@ -271,6 +271,141 @@ fn assert_all_resolvable(seed_rs: &str) {
     );
 }
 
+/// P2 写侧结构门：每个 `reco_picks::ActiveModel` 字面量都必须给 `reco_version`。
+///
+/// 为什么锁写入而不是读取：算法归属是**不可逆**的 —— 今天不盖章的样本，将来无论
+/// 怎么补筛都拿不回来（只能整批当「未知代」排除）。而荐股闭环是按 rank IC 降权的，
+/// 没有归属就是把「旧算法的预测」和「新算法的预测」配进同一格。
+#[test]
+fn every_reco_picks_insert_stamps_algorithm_version() {
+    let files = ["src/commands/stock_analysis.rs", "src/commands/stock_workflow/serenity.rs"];
+    let mut checked = 0usize;
+    for rel in files {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+        let src = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读取 {rel} 失败: {e}"));
+        for (i, line) in src.lines().enumerate() {
+            if !line.contains("reco_picks::ActiveModel {") {
+                continue;
+            }
+            checked += 1;
+            // 字面量向后扫到闭合（同层 `};`），其间必须出现 reco_version
+            let rest = &src[src.find(line).unwrap()..];
+            let body = rest
+                .split(
+                    "
+        };",
+                )
+                .next()
+                .unwrap_or(rest);
+            let body = body
+                .split(
+                    "
+            };",
+                )
+                .next()
+                .unwrap_or(body);
+            assert!(
+                body.contains("reco_version:"),
+                "[{rel}:{}] `reco_picks` 建行没盖章 `reco_version` ⇒ 该批样本算法归属永久未知，                 闭环 IC 只能整批排除它（或更糟：混进当前代）。",
+                i + 1
+            );
+        }
+    }
+    assert_eq!(checked, 2, "预期扫到 2 处 reco_picks 建行点，实际 {checked} —— 有新增写入点未入册");
+}
+
+/// P2 依赖锁：`reco_ic_gate` 要能翻到 `on`，前提是 IC 聚合已按算法版本筛同代样本。
+///
+/// 现状（实证）：库里**根本没有** `reco_ic_gate` 这个变量 ⇒ 走代码缺省 `shadow`
+/// （`reco_loop.rs:530-537`），所以跨代混池**当前未激活**，但它离激活只差一个变量。
+/// 本锁把这条依赖固定下来：一旦 `IC 行结构` 里出现 `algorithm_version`（即筛样已实现），
+/// 才允许 seed 里出现 `on`；否则 seed 出现 `on` 即红。
+#[test]
+fn ic_gate_can_only_turn_on_after_version_screening_exists() {
+    let ic_src = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("crates/analysis-engine/src/recommender/ic.rs");
+        std::fs::read_to_string(&path).expect("读取 recommender/ic.rs 失败")
+    };
+    let screening_ready = ic_src.contains("algorithm_version");
+    let seed_turns_on = {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/commands/stock_analysis_setup/seed_variables.rs");
+        std::fs::read_to_string(&path).expect("读取 seed_variables.rs 失败")
+    };
+    let gate_on_seeded =
+        seed_turns_on.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\""));
+    assert!(
+        !gate_on_seeded || screening_ready,
+        "seed 把 reco_ic_gate 设成 on，但 `RecoIcRow` 还不带 algorithm_version ⇒          IC 会把跨代样本混成一格后自动降权。先做同代筛样，再翻闸。"
+    );
+}
+
+/// 负控：筛样判据本身要能红 —— 造一段「seed 已 on 且 ic 无版本谓词」的文本必须被识别。
+#[test]
+fn ic_gate_dependency_lock_detects_the_bad_pairing() {
+    let bad_seed = "    (\"reco_ic_gate\".into(), \"on\".into()),";
+    let hits = bad_seed.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\""));
+    assert!(hits, "负控失效：判据认不出「seed=on」");
+    let good_seed = "    (\"reco_ic_gate\".into(), \"shadow\".into()),";
+    assert!(!good_seed.lines().any(|l| l.contains("reco_ic_gate") && l.contains("\"on\"")));
+}
+
+/// P1-11（2026-10-03，需求③「时间旅行模式下不得让模型联网取数」）。
+///
+/// 现状是**结构性**满足：股票模板的工具面是白名单，里面没有联网类工具，
+/// 且 `crates/providers/` 里根本不存在搜索开关（普查实证零命中）。
+/// 但这条性质此前**无人看守** —— 谁给某个分析师挂上 WebFetch/WebSearch，
+/// 回放就会让模型读到截止日之后的内容，而库里读不出任何异常。
+/// 于是把它做成门：模板声明的工具 ∩ registry 里 `ToolCategory::Network` = 空集。
+fn assert_no_network_tools(seed_rs: &str) {
+    let (declared, _) = seed_tool_def_names(seed_rs);
+    let mut registry = axagent_tools::registry::ToolRegistry::new();
+    axagent_tools::tools::register_all(&mut registry);
+    let network: HashSet<String> = registry
+        .list_all()
+        .into_iter()
+        .filter(|t| t.category == axagent_harness::tool::ToolCategory::Network)
+        .map(|t| t.name)
+        .collect();
+    let hits: Vec<String> = declared.iter().filter(|n| network.contains(*n)).cloned().collect();
+    assert!(
+        hits.is_empty(),
+        "[{seed_rs}] 声明了联网类工具 {hits:?}。时间旅行回放里这等于让模型看截止日之后的内容，         且 provider 层没有可用的搜索开关 —— 要放行请先改判据并显式登记豁免理由。"
+    );
+}
+
+/// 正负对照：判据本身要能红（把联网工具名塞进声明文本，必须被点名）。
+#[test]
+fn network_tool_gate_fires_on_webfetch_and_stays_clean_on_real_seeds() {
+    let mut registry = axagent_tools::registry::ToolRegistry::new();
+    axagent_tools::tools::register_all(&mut registry);
+    let network: Vec<String> = registry
+        .list_all()
+        .into_iter()
+        .filter(|t| t.category == axagent_harness::tool::ToolCategory::Network)
+        .map(|t| t.name)
+        .collect();
+    assert!(!network.is_empty(), "registry 里应当存在 Network 类工具，否则本门恒真是空判据");
+    // 负控文本：真实存在的一个联网工具名写进 `name: "..."` 形态，必须被抽到并命中
+    let fake = format!("    let t = ToolDef {{ name: \"{}\".into(), ..}};", network[0]);
+    let declared: Vec<String> = {
+        let mut v = Vec::new();
+        for line in fake.lines() {
+            if let Some(start) = line.find("name: \"") {
+                let rest = &line[start + 7..];
+                if let Some(end) = rest.find('"') {
+                    v.push(rest[..end].to_string());
+                }
+            }
+        }
+        v
+    };
+    assert!(declared.contains(&network[0]), "负控应抽到联网工具名：{declared:?}");
+    assert_no_network_tools("seed_stock_analysis.rs");
+    assert_no_network_tools("seed_serenity.rs");
+}
+
 #[test]
 fn seed_stock_analysis_tools_all_resolvable() {
     assert_all_resolvable("seed_stock_analysis.rs");
@@ -2087,7 +2222,30 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
     let mut bad_vars: Vec<String> = Vec::new();
     let mut bad_prefix: Vec<String> = Vec::new();
     for (key, _, last) in &sites {
-        let Some(inner) = last.strip_prefix("attribution_note(").and_then(|r| r.strip_suffix(')'))
+        // R2(2026-10-02)：第 8 实参允许被 `merge_two_notes(...)` 包一层 —— 措辞性缺席的说明串
+        //   与归因核对结论**共用既有的 `attr_note` 通道**（不为此新增输出字段 + 前端行 + 11 语言 key）。
+        //   解包后本段原有三项检查**一条不减**：内层仍是 `attribution_note(x, y)`、
+        //   两变量仍须在 `input_mapping` 声明过、仍须同属一个分析师；
+        //   并**再加一项**：外层第二实参须是 `<分析师前缀>_word_note` 且该变量在脚本里真的 `let` 过
+        //   —— Rhai 引用未定义变量不报错、只静默给 unit，与本段开头 ③ 的原始动机同一条。
+        let (attr_expr, word_note) =
+            match last.strip_prefix("merge_two_notes(").and_then(|r| r.strip_suffix(')')) {
+                Some(inner) => {
+                    let mut parts = split_top_level_commas(inner);
+                    if parts.len() != 2 {
+                        bad_vars.push(format!(
+                            "调用点 {key} 的 merge_two_notes 有 {} 个实参（应为 2）：{inner}",
+                            parts.len()
+                        ));
+                        continue;
+                    }
+                    let note = parts.pop().expect("已判 len==2");
+                    (parts.pop().expect("已判 len==2"), Some(note.trim().to_string()))
+                },
+                None => (last.clone(), None),
+            };
+        let Some(inner) =
+            attr_expr.strip_prefix("attribution_note(").and_then(|r| r.strip_suffix(')'))
         else {
             bad_vars.push(format!("调用点 {key} 的第 8 实参形态非 attribution_note(x, y)：{last}"));
             continue;
@@ -2107,6 +2265,19 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
         // 结构核对：报告与调用记录必须属于**同一个**分析师（前缀一致）
         if a.split('_').next() != b.split('_').next() {
             bad_prefix.push(format!("调用点 {key}：`{a}` 与 `{b}` 不是同一个分析师"));
+        }
+        if let Some(n) = &word_note {
+            let prefix = a.split('_').next().unwrap_or_default();
+            let want = format!("{prefix}_word_note");
+            if *n != want {
+                bad_vars.push(format!(
+                    "调用点 {key} 的 merge_two_notes 第二实参应为 `{want}`（与内层同一分析师），实得 `{n}`"
+                ));
+            } else if !src.contains(&format!("let {want} =")) {
+                bad_vars.push(format!(
+                    "`{want}` 在脚本里没有 `let` 定义 ⇒ Rhai 静默得到 unit、措辞性缺席的说明串永远为空"
+                ));
+            }
         }
     }
     assert!(bad_vars.is_empty(), "`attribution_note` 的实参有问题：\n  {}", bad_vars.join("\n  "));
@@ -2471,5 +2642,56 @@ fn kline_limit_is_wired_to_market_data_node() {
     assert!(
         norm_all.contains("KLINE_LIMIT_MIGRATION_VERSION"),
         "存量覆写必须由一次性门 `KLINE_LIMIT_MIGRATION_VERSION` 守护"
+    );
+}
+
+/// 逐档因子清单**只能有一份**：权威表 `Period::verdict_spec()`。
+///
+/// 专家 md 里出现因子名 = 手抄了第二份，必然与表漂移（「md 写七项、门按八项判」）。
+/// P3′ 已把契约改成执行期按表注入（`agent_executor.rs` 的 4j 段 + `verdict_contract_prompt()`），
+/// 本门锁住这个不变量。
+fn hand_copied_horizon_factors(src: &str) -> Vec<&'static str> {
+    axagent_harness::Period::verdict_factors().iter().copied().filter(|f| src.contains(f)).collect()
+}
+
+#[test]
+fn expert_prompts_do_not_hand_copy_per_horizon_factor_lists() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("agency_experts");
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    collect_md_files(&root, &mut files);
+
+    // 自证①：扫描面必须真的装到东西 —— 目录改名会让本门静默失效
+    assert!(
+        files.len() >= 20,
+        "专家 md 扫描面异常：{} 只找到 {} 个 —— 若目录结构变了，先修路径，不要放宽断言。",
+        root.display(),
+        files.len()
+    );
+
+    let report: Vec<String> = files
+        .iter()
+        .filter_map(|f| {
+            let src = std::fs::read_to_string(f).unwrap_or_default();
+            let hits = hand_copied_horizon_factors(&src);
+            (!hits.is_empty()).then(|| format!("{} ⇒ 手抄了 {:?}", f.display(), hits))
+        })
+        .collect();
+    assert!(
+        report.is_empty(),
+        "专家提示词里出现逐档因子名。契约应由 verdict_spec() 注入，不得复制进 md：\n  {}",
+        report.join("\n  ")
+    );
+
+    // 自证②：负控 —— 合成一份手抄文本，判据必须命中，否则本门等于没装电池。
+    // （不靠改生产码来证明门会红：坏样本喂给判据函数本身。）
+    let synth = "本档必须输出：momentumSignal、flowPersistence、valuationBand、notApplicableFlow";
+    let hit = hand_copied_horizon_factors(synth);
+    assert_eq!(hit.len(), 3, "负控未命中 ⇒ 检法失效，实得 {hit:?}");
+    // 通用 6 键（confidence/bull_score…）**允许**留在 md —— 它们是跨档共用核心，
+    // 不在因子全集里，所以下面这条必须为空命中：证明本门只拦逐档因子、不拦通用键。
+    assert!(
+        hand_copied_horizon_factors("confidence 0-100 整数，bull_score/bear_score 之和接近 100")
+            .is_empty(),
+        "误拦通用键：本门只该管逐档因子"
     );
 }

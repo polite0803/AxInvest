@@ -15690,7 +15690,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "poolSummary": "{{date}} · {{count}} hausses limites · taux de tenue {{rate}}% · {{break}} ouvertures",
+        "boardDays": "{{boards}} hausses limites en {{days}} jours",
+        "breakTimes": "{{n}}× ouvertures",
+        "sealAmount": "Ordres",
+        "rank": "Rang",
+        "hotValue": "Popularité"
       },
       "optimize": {
         "success": "Weights optimized",

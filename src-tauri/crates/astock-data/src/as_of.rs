@@ -30,7 +30,7 @@ use std::sync::OnceLock;
 // 运行时状态管理（task_local、全局 Mutex、降级日志等）仍保留在本模块。
 pub use axagent_harness::as_of::{
     AsOfContext, AsOfDataKind, AsOfDataScope, AsOfError, AsOfSource, DegradationEntry,
-    DegradationKind,
+    DegradationKind, DEGRADATION_MODE_ASOF, DEGRADATION_MODE_LIVE,
 };
 
 tokio::task_local! {
@@ -321,9 +321,14 @@ pub fn record_degradation(vendor: &str, method: &str, reason: &str) {
 /// 只有 probe 之外的站点（如「个股无场内期权」这类天然不适用维度）才手写档位。
 /// 缺省走 `Failure` —— 宁可多标一档，也不把真故障洗白。
 pub fn record_degradation_kind(vendor: &str, method: &str, reason: &str, kind: DegradationKind) {
-    let as_of = match current_as_of() {
-        Some(c) => c.as_string(),
-        None => return, // live 模式无降级概念
+    // Q10（2026-10-03）：live 也留痕。此前这里直接 return（注释称「live 模式无降级概念」），
+    // 于是实盘里「接口挂了 / 窗口到顶 / 本就不适用」三种语义全部不可观测，
+    // 而需求上「取数质量的提升优先于事后降权」正要求这份读数。
+    // 代价：豁免面（`global_degraded_methods_since_baseline`）必须按 mode 过滤，
+    // 否则实盘条目会被回放误认成本轮降级。
+    let (as_of, mode) = match current_as_of() {
+        Some(c) => (c.as_string(), axagent_harness::as_of::DEGRADATION_MODE_ASOF),
+        None => (String::new(), axagent_harness::as_of::DEGRADATION_MODE_LIVE),
     };
     let entry = DegradationEntry {
         vendor: vendor.to_string(),
@@ -331,6 +336,7 @@ pub fn record_degradation_kind(vendor: &str, method: &str, reason: &str, kind: D
         reason: reason.to_string(),
         as_of,
         kind,
+        mode: mode.to_string(),
     };
     let is_duplicate = |e: &DegradationEntry| {
         e.vendor == entry.vendor && e.method == entry.method && e.reason == entry.reason
@@ -467,7 +473,11 @@ pub fn global_degraded_methods_since_baseline() -> Vec<String> {
     let g = GLOBAL_DEGRADATION_LOG.lock();
     let mut out: Vec<String> = Vec::new();
     for (seq, e) in g.iter() {
-        if *seq > baseline && !out.contains(&e.method) {
+        // 只认回放条目（Q10 之后缓冲里混有 live 条目 ⇒ 不过滤就会误豁免）
+        if *seq > baseline
+            && e.mode == axagent_harness::as_of::DEGRADATION_MODE_ASOF
+            && !out.contains(&e.method)
+        {
             out.push(e.method.clone());
         }
     }
@@ -475,6 +485,20 @@ pub fn global_degraded_methods_since_baseline() -> Vec<String> {
 }
 
 /// 清空全局降级缓冲(切换到 live 模式时由前端触发,避免过期条目一直显示)。
+/// 按模式取全局降级条目（Q10，2026-10-03：缓冲里现在混有 live 与 asOf 两档）。
+///
+/// 名字里带 as-of 的消费方**必须**按 `DEGRADATION_MODE_ASOF` 过滤，
+/// 否则实盘降级会被读成回放降级 —— 正是「结构性缺席不得在 UI 造成歧义」这条红线。
+pub fn global_degradations_for_mode(mode: &str) -> Vec<DegradationEntry> {
+    let g = GLOBAL_DEGRADATION_LOG.lock();
+    g.iter().map(|(_, e)| e.clone()).filter(|e| e.mode == mode).collect()
+}
+
+/// 只数回放条目（与 `global_degradation_count` 的区别：后者含 live）。
+pub fn global_asof_degradation_count() -> usize {
+    global_degradations_for_mode(axagent_harness::as_of::DEGRADATION_MODE_ASOF).len()
+}
+
 pub fn reset_global_degradation_log() {
     let mut g = GLOBAL_DEGRADATION_LOG.lock();
     g.clear();

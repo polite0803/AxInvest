@@ -332,6 +332,7 @@ mod tests {
             method: "get_industry_ranking".into(),
             reason: "as-of 截断后,排名无 N 日前对比语义".into(),
             as_of: "2026-06-01".into(),
+            mode: axagent_astock_data::as_of::DEGRADATION_MODE_ASOF.into(),
             // 该维度对回放本就不适用 ⇒ 不进「真故障」档
             kind: axagent_astock_data::as_of::DegradationKind::StructuralGap,
         }];

@@ -107,6 +107,20 @@ pub trait StockVendor: Send + Sync {
         Ok(vec![])
     }
 
+    /// 涨停池（连板数 / 涨停天数 / 换手 / 封单 / 炸板次数 / 板型）。
+    ///
+    /// `requested_date` = `Some(ISO)` 时实现方**必须**按该日返回，并用 `LimitUpPool.pool_date`
+    /// 自证生效日期；调用方比对不等即判「该日不可得」，不得把空池读成「当天没有涨停」。
+    /// 已接：`ths`（实测 `date` 生效并回显，申报 `NativeDateParam`，覆盖约一年）。
+    /// 已撤：`eastmoney` 的 `push2ex/getTopicZTPool`（实测 `date` 不被采纳，`qdate` 恒为最新交易日）。
+    /// 没有该能力的 vendor 回 `Ok(None)`。
+    async fn get_limit_up_pool(
+        &self,
+        _requested_date: Option<&str>,
+    ) -> Result<Option<LimitUpPool>, DataError> {
+        Ok(None)
+    }
+
     async fn get_consensus_eps(&self, stock_code: &str) -> Result<Option<ConsensusEPS>, DataError> {
         let _ = stock_code;
         Ok(None)

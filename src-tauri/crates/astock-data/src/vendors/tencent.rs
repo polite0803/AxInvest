@@ -77,13 +77,28 @@ fn kline_tail(limit: u32, fq: Option<&str>) -> String {
 /// 源 datacenter 实测健康）接管 —— tencent 从此与 sina/163 等
 /// 「不支持服务端复权的 vendor」同列。`adj` 参数保留只为把回归锁在测试里。
 /// 返回 (fq_prefix, api_endpoint, param_suffix)。
+/// 分钟 K 必须用 `ifzq.gtimg.cn`：`web.ifzq.gtimg.cn` 上的 `kline/mkline` 会 301 到
+/// `web3.ifzq.gtimg.cn`，而该域名**无 A 记录** ⇒ reqwest 跟随重定向必然 ENOTFOUND
+/// （P1-9，2026-10-03 实测：同 path 换 host 直接 200 / 320 根）。
+/// 日/周/月仍走 `web.ifzq` —— `kline/kline` 不重定向，改它反而会坏。
+fn kline_host(is_minute: bool) -> &'static str {
+    if is_minute {
+        "ifzq.gtimg.cn"
+    } else {
+        "web.ifzq.gtimg.cn"
+    }
+}
+
 fn kline_route(
     is_minute: bool,
     limit: u32,
     _adj: Option<AdjType>,
 ) -> (&'static str, &'static str, String) {
     if is_minute {
-        ("", "kline/mkline", format!(",{limit}"))
+        // 必须是 `,,{limit}`（第 2、3 位是空的 start/end 槽）：实测 `param=sh600519,m60,320`
+        // 会回 **HTTP 200 但 m60 数组为空** —— 320 被当成 start 吃掉，
+        // 于是「拿不到分钟线」在库里表现为「该股没有分钟数据」，比报错更坏（P1-9b，2026-10-03）。
+        ("", "kline/mkline", format!(",,{limit}"))
     } else {
         ("", "kline/kline", kline_tail(limit, None))
     }
@@ -363,14 +378,20 @@ impl StockVendor for TencentVendor {
             "60" | "Min60" => ("m60", true),
             "weekly" | "102" | "Weekly" => ("week", false),
             "monthly" | "103" | "Monthly" => ("month", false),
-            _ => ("day", false),
+            "daily" | "101" | "Daily" | "day" => ("day", false),
+            other => {
+                return Err(DataError::ParseError(format!(
+                    "[tencent] 不支持的 K 线周期 {other:?}（白名单：5/15/30/60 与 daily/weekly/monthly 别名）                     ⇒ 显式失败交由路由换源（P1-7）"
+                )));
+            },
         };
         // 端点路由见 `kline_route`（C4：复权不再走被 WAF 封的 fqkline，
         // 返回 adj_factor=None 交 lib 层本地复权）。
         // 日/周/月的 start/end 交给 `kline_tail`：as-of 下 end=截止日（见其注释）
         let (fq_prefix, api_endpoint, param_suffix) = kline_route(is_minute, limit, adj);
+        let host = kline_host(is_minute);
         let url = format!(
-            "https://web.ifzq.gtimg.cn/appstock/app/{api_endpoint}?param={tc_code},{period_key}{param_suffix}"
+            "https://{host}/appstock/app/{api_endpoint}?param={tc_code},{period_key}{param_suffix}"
         );
 
         let mut klines = match self.http.get(&url).send().await {
@@ -386,7 +407,7 @@ impl StockVendor for TencentVendor {
         if klines.as_ref().is_ok_and(|v| v.is_empty()) && stock_code.starts_with("00") {
             let sh_code = format!("sh{stock_code}");
             let sh_url = format!(
-                "https://web.ifzq.gtimg.cn/appstock/app/{api_endpoint}?param={sh_code},{period_key}{param_suffix}"
+                "https://{host}/appstock/app/{api_endpoint}?param={sh_code},{period_key}{param_suffix}"
             );
             if let Ok(r) = self.http.get(&sh_url).send().await {
                 if let Ok(body) = r.text().await {
@@ -633,7 +654,8 @@ mod capability_tests {
         let (fq, endpoint, tail) =
             AS_OF.scope(None, async { kline_route(true, 320, Some(AdjType::Forward)) }).await;
         assert_eq!((fq, endpoint), ("", "kline/mkline"));
-        assert_eq!(tail, ",320");
+        // 两个空槽是接口格式的一部分：少一个逗号 ⇒ 200 + 零根（见 `kline_route` 注释）
+        assert_eq!(tail, ",,320");
     }
 
     /// 指数代码已带市场前缀时必须透传：`sh000001` 若重判前缀会得到 `szsh000001`；
@@ -643,6 +665,19 @@ mod capability_tests {
         assert_eq!(to_tencent_code("sh000001"), "sh000001");
         assert_eq!(to_tencent_code("sz399006"), "sz399006");
         // 股票口径不变
+    }
+
+    /// P1-9（2026-10-03 实测）：分钟 K 的 host 必须是 `ifzq.gtimg.cn`。
+    /// `web.ifzq.gtimg.cn` 上的 `kline/mkline` 会 301 到 `web3.ifzq.gtimg.cn`，
+    /// 而后者**无 A 记录** ⇒ 跟随重定向必然 ENOTFOUND（日 K 不受影响，故只切分钟）。
+    #[test]
+    fn minute_kline_host_is_the_non_redirecting_domain() {
+        assert_eq!(kline_host(true), "ifzq.gtimg.cn");
+        assert_eq!(kline_host(false), "web.ifzq.gtimg.cn");
+    }
+
+    #[test]
+    fn tencent_code_keeps_plain_stock_codes_prefixed() {
         assert_eq!(to_tencent_code("600519"), "sh600519");
         assert_eq!(to_tencent_code("000001"), "sz000001");
     }

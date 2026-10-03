@@ -1,20 +1,31 @@
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Table, Tag } from "antd";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PanelEmpty, type PanelEmptyKind } from "./PanelEmpty";
 import { useStockAnalysisPage } from "./StockAnalysisPageContext";
 import { checkVendorEnabled, PANEL_VENDORS } from "./vendorCheck";
 
+/**
+ * 与后端 DTO 对齐（`astock-data::types::HotStock`，serde camelCase）。
+ *
+ * 名目收编(2026-10-03)：本面板此前读的是同花顺**涨停池**前 20 行（`get_hot_stocks`
+ * 打的却是 `limit_up/limit_up_pool`），所以列里有「最新价」——那个字段**从来不在 DTO 里**，
+ * 渲染恒为 `-`。现在后端给的是真热度榜，列改成榜内名次与热度值；
+ * 换手率热股榜不提供（真值在涨停池面板那边），故不再占一列。
+ */
 interface HotStock {
   stockCode: string;
   stockName: string;
-  price: number;
   changePct: number;
   turnoverRate: number | null;
   reasonTags: string[];
   sector: string | null;
+  /** 榜内名次（1 起，实测榜长恒 100） */
+  rank: number | null;
+  /** 热度值（只有同期可比，量级随口径变化） */
+  hotValue: number | null;
 }
 
 interface HotStocksPanelProps {
@@ -33,23 +44,21 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
   const [emptyKind, setEmptyKind] = useState<PanelEmptyKind | null>(null);
   const [emptyVendors, setEmptyVendors] = useState<string[] | undefined>(undefined);
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     setLoading(true);
     setEmptyKind(null);
     setEmptyVendors(undefined);
     try {
-      const check = await checkVendorEnabled("screener", { silent });
+      const check = await checkVendorEnabled("hotstocks", { silent });
       if (check.status === "disabled") {
         setStocks([]);
         setEmptyKind("vendorDisabled");
         setEmptyVendors(check.vendors);
-        setLoading(false);
         return;
       }
       if (check.status === "backend_offline") {
         setStocks([]);
         setEmptyKind("backendOffline");
-        setLoading(false);
         return;
       }
       const data = await invoke<HotStock[]>("get_hot_stocks");
@@ -62,56 +71,15 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
     } catch {
       setStocks([]);
       setEmptyKind("connectionFailed");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.resolve().then(() => {
-      if (cancelled) { return; }
-      setLoading(true);
-      setEmptyKind(null);
-      setEmptyVendors(undefined);
-      return checkVendorEnabled("screener", { silent: true });
-    })
-      .then((check) => {
-        if (cancelled || !check) { return; }
-        if (check.status === "disabled") {
-          setStocks([]);
-          setEmptyKind("vendorDisabled");
-          setEmptyVendors(check.vendors);
-          return;
-        }
-        if (check.status === "backend_offline") {
-          setStocks([]);
-          setEmptyKind("backendOffline");
-          return;
-        }
-        return invoke<HotStock[]>("get_hot_stocks");
-      })
-      .then((data) => {
-        if (cancelled || !data) { return; }
-        if (Array.isArray(data) && data.length > 0) {
-          setStocks(data);
-        } else {
-          setStocks([]);
-          setEmptyKind("noData");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStocks([]);
-          setEmptyKind("connectionFailed");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) { setLoading(false); }
-      });
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  // 首屏加载与「刷新」按钮走同一段逻辑（此前是 Promise 链抄了一遍，两处会各自漂移）
+  useEffect(() => {
+    void load(true);
+  }, [load]);
 
   const analyze = async (code: string) => {
     await getStockQuote(code);
@@ -120,6 +88,13 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
   };
 
   const columns = [
+    {
+      title: t("stockAnalysis.settings.panels.rank"),
+      dataIndex: "rank",
+      key: "rank",
+      width: 56,
+      render: (v: number | null) => (v != null ? `#${v}` : "-"),
+    },
     {
       title: t("stockAnalysis.alert.code"),
       dataIndex: "stockCode",
@@ -135,11 +110,11 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
       render: (v: string | null) => v ?? "-",
     },
     {
-      title: t("stockAnalysis.price"),
-      dataIndex: "price",
-      key: "price",
-      width: 70,
-      render: (v: number | null | undefined) => v != null ? v.toFixed(2) : "-",
+      title: t("stockAnalysis.settings.panels.hotValue"),
+      dataIndex: "hotValue",
+      key: "hotValue",
+      width: 80,
+      render: (v: number | null) => (v != null ? v.toLocaleString() : "-"),
     },
     {
       title: t("stockAnalysis.change"),
@@ -151,13 +126,6 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
         const color = v >= 0 ? "var(--sa-red)" : "var(--sa-green)";
         return <span style={{ color, fontWeight: "bold" }}>{v >= 0 ? "+" : ""}{v.toFixed(2)}%</span>;
       },
-    },
-    {
-      title: t("stockAnalysis.settings.panels.turnover"),
-      dataIndex: "turnoverRate",
-      key: "turnoverRate",
-      width: 60,
-      render: (v: number | null | undefined) => v != null ? `${v.toFixed(1)}%` : "-",
     },
     {
       title: t("stockAnalysis.settings.panels.tags"),
@@ -189,7 +157,7 @@ export function HotStocksPanel({ bordered = true }: HotStocksPanelProps = {}) {
         ? (
           <PanelEmpty
             kind={emptyKind}
-            vendorNames={emptyVendors ?? PANEL_VENDORS.screener}
+            vendorNames={emptyVendors ?? PANEL_VENDORS.hotstocks}
             description={emptyKind === "noData" ? t("stockAnalysis.settings.panels.noHot") : undefined}
             onOpenSettings={openDataSourceSettings}
           />

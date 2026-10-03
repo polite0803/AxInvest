@@ -217,6 +217,13 @@ if (canRunFrontend) {
   //   与 `.github/workflows/ci.yml` 的「Check reco horizon parity」**命令行逐字同源**。
   step("荐股四周期口径一致自检（正负对照）", "node scripts/check-reco-horizon-parity.mjs --selftest");
   step("荐股四周期口径一致（a–l 十二门）", "node scripts/check-reco-horizon-parity.mjs");
+  // P6 收口（2026-10-03）：这两道门此前**不在 CI** —— 前者是「纸面可调」的正面防线
+  // （可调参数五点对账：seed 变量 / input_mapping / 面板 b() / 面板分组 / rhai effective_params，
+  //  漏任一处 `cargo check` 与 `typecheck` 全绿也照样存在，实证见 PLAN §四 需求⑤），
+  // 后者自称「审计工具不是门禁」。本轮实测两者当前读数均为 0 命中 ⇒ 直接提为门禁。
+  // `--strict` 卡判据①（注入来源缺失）；②③ 本来就会报。
+  step("前后端档位权重逐字段一致（含档名不手抄天数）", "node scripts/check-horizon-weight-parity.mjs");
+  step("可调参数注入覆盖（五点对账，strict）", "node scripts/audit-inject-coverage.mjs --strict");
 
   // ── 补两条 CI 早已有、本地镜像却缺的门禁（2026-09-14：漂移修复）──
   // 为什么必须补：它们此前**只挂在 CI**，本地跑 `ci-check` 一路绿 ⇒ 本地绿冒充 CI 绿。

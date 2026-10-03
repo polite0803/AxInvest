@@ -1640,6 +1640,11 @@ pub async fn run_serenity_screening(
                             pick_data: Set(Some(
                                 serde_json::to_string(&pick_data_val).unwrap_or_default(),
                             )),
+                            reco_version: Set(Some(
+                                axagent_analysis_engine::recommender::RECO_ALGORITHM_VERSION,
+                            )),
+                            // 智选链与工作流链共用同一版本常量：两链同名目、同一张 reco_picks，
+                            // 分版就会造出「同一批 pick 两种归属」。
                             created_at: Set(now_str.clone()),
                         };
                         if let Err(e) = pick.insert(db).await {

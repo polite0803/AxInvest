@@ -15690,7 +15690,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "poolSummary": "{{date}} · {{count}} लिमिट-अप · सील दर {{rate}}% · {{break}} बोर्ड ब्रेक",
+        "boardDays": "{{days}} दिनों में {{boards}} लिमिट-अप",
+        "breakTimes": "{{n}}× ब्रेक",
+        "sealAmount": "सील",
+        "rank": "क्रमांक",
+        "hotValue": "लोकप्रियता"
       },
       "optimize": {
         "success": "Weights optimized",

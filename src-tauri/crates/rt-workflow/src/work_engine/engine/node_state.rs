@@ -357,7 +357,7 @@ pub(crate) fn compute_backoff(
     delay.min(max_delay_ms)
 }
 
-pub(crate) struct NodeResult {
+pub struct NodeResult {
     pub(crate) node_id: String,
     pub(crate) node: WorkflowNode,
     pub(crate) input_snapshot: serde_json::Value,

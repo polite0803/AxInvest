@@ -15834,7 +15834,13 @@
         "noSector": "暂无板块数据",
         "northTitle": "北向资金 {{dir}} ({{date}})",
         "shFlow": "沪股通",
-        "szFlow": "深股通"
+        "szFlow": "深股通",
+        "poolSummary": "{{date}} · 漲停 {{count}} 家 · 封板率 {{rate}}% · 炸板 {{break}} 家",
+        "boardDays": "{{days}}天{{boards}}板",
+        "breakTimes": "{{n}}次炸板",
+        "sealAmount": "封單",
+        "rank": "名次",
+        "hotValue": "熱度值"
       },
       "optimize": {
         "success": "评分权重已优化",

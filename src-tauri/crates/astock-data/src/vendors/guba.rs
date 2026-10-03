@@ -19,6 +19,64 @@ impl GubaVendor {
         Self { http }
     }
 
+    /// 东财**股吧**人气榜名次（`emappdata.eastmoney.com/stockrank/getAllCurrentList`）。
+    ///
+    /// 这是 `SocialSentiment.hot_rank`（文档口径「热度排名（平台内）」）唯一语义对得上的
+    /// 供应方 —— 与帖子数同平台。实测（2026-10-03）：
+    /// - `pageNo=1 & pageSize=100` 回 `data` 100 行，形如 `{"sc":"SH601127","rk":1,"rc":0,"hisRc":0}`；
+    /// - `pageNo>=2` 或 `pageSize>100` 都回 `code=0` + **空数组** —— 「参数被拒」伪装成「无数据」，
+    ///   与涨停池 `limit>200` 是同族陷阱，故 `pageSize` 锁死 100 且把「首轮回空」判为接口异常；
+    /// - 榜外 ⇒ `None`，语义是「没进前 100」，**不是**「第 101 名」。
+    ///
+    /// 回填是增强：任何失败都只 warn + `None`，不阻断舆情主流程
+    /// （与 `get_valuation_snapshot_asof` 的「失败不报错」同一处置）。
+    async fn guba_hot_rank(&self, pure_code: &str) -> Option<u32> {
+        let body = serde_json::json!({
+            "appId": "001",
+            "fc": "",
+            "globalList": true,
+            "marketType": "nas.cn",
+            "pageNo": 1,
+            "pageSize": 100,
+            "sourceSite": "Web",
+            "sourceId": "Web03",
+        });
+        let resp = self
+            .http
+            .post("https://emappdata.eastmoney.com/stockrank/getAllCurrentList")
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .header("Referer", "https://guba.eastmoney.com/")
+            .header("Origin", "https://guba.eastmoney.com")
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| tracing::warn!("[guba] 人气榜请求失败: {e}"))
+            .ok()?;
+        crate::check_response_429(&resp, "guba").ok()?;
+        let json: Value = resp
+            .json()
+            .await
+            .map_err(|e| {
+                tracing::warn!("[guba] 人气榜响应非 JSON: {e}");
+                e
+            })
+            .ok()?;
+        if json.get("code").and_then(Value::as_i64) != Some(0) {
+            tracing::warn!("[guba] 人气榜接口拒绝: code={:?}", json.get("code"));
+            return None;
+        }
+        let rows = json.get("data").and_then(Value::as_array).cloned().unwrap_or_default();
+        if rows.is_empty() {
+            tracing::warn!(
+                "[guba] 人气榜回空（实测正常应有 100 行）⇒ 判接口异常，不当成「该票无人气」"
+            );
+            return None;
+        }
+        // `sc` 带交易所前缀（SH600519 / SZ000001），只比数字段即可与 pure_code 对齐
+        pick_guba_rank(&rows, pure_code)
+    }
+
     /// 带反爬头的 GET 请求（返回 HTML 文本）
     ///
     /// 修复(2026-07-21): 原接口 `guba.eastmoney.com/interface/GetData.aspx`
@@ -233,6 +291,15 @@ impl StockVendor for GubaVendor {
         let url = format!("https://guba.eastmoney.com/list,{pure_code}.html");
         let html = self.guba_get_html(&url).await?;
 
+        // 同平台人气榜名次（东财 stockrank，实测只到前 100）。
+        // ⚠ as-of 回放刻意不取：人气榜只有当下语义，把今天的排名塞进历史判定是时间泄露，
+        //   而 `hot_rank: None` 至少不会说谎。
+        let hot_rank = if crate::as_of::is_asof_active() {
+            None
+        } else {
+            self.guba_hot_rank(pure_code).await
+        };
+
         // 从 HTML 中提取 article_list JSON 数组 + 顶层 bar_name 字段
         let (json_str, bar_name) =
             Self::extract_article_list(&html).ok_or_else(|| DataError::VendorError {
@@ -258,7 +325,7 @@ impl StockVendor for GubaVendor {
                 stock_name,
                 platform: "guba".to_string(),
                 post_count: 0,
-                hot_rank: None,
+                hot_rank,
                 sentiment_score: None,
                 bull_ratio: None,
                 fetched_at: chrono::Utc::now().timestamp(),
@@ -315,12 +382,26 @@ impl StockVendor for GubaVendor {
             stock_name,
             platform: "guba".to_string(),
             post_count,
-            hot_rank: None,
+            hot_rank,
             sentiment_score,
             bull_ratio,
             fetched_at: chrono::Utc::now().timestamp(),
         }])
     }
+}
+
+/// 从人气榜行里取该票的名次（`sc` 形如 `SH600519`，只比数字段即可与去前缀代码对齐）。
+///
+/// 抽成自由函数是为了让「榜外 ⇒ None（而不是第 101 名）」这条判据能零网络测到。
+fn pick_guba_rank(rows: &[Value], pure_code: &str) -> Option<u32> {
+    rows.iter().find_map(|r| {
+        let sc = r.get("sc").and_then(Value::as_str)?;
+        let digits: String = sc.chars().filter(|c| c.is_ascii_digit()).collect();
+        if digits != pure_code {
+            return None;
+        }
+        r.get("rk").and_then(Value::as_u64).map(|v| v as u32)
+    })
 }
 
 #[cfg(test)]
@@ -383,5 +464,29 @@ mod tests {
         let html = r#"<script>var article_list={"re":[],"bar_name": "伊利股份"};    var other_list={};</script>"#;
         let (_json_str, bar_name) = GubaVendor::extract_article_list(html).unwrap();
         assert_eq!(bar_name, Some("伊利股份"));
+    }
+
+    /// 名次提取：`sc` 带交易所前缀，只比数字段；榜外判 `None` 而不是「第 101 名」。
+    #[test]
+    fn rank_matches_by_digits_only() {
+        let rows = serde_json::json!([
+            {"sc": "SH600519", "rk": 1, "rc": 0, "hisRc": 0},
+            {"sc": "SZ000002", "rk": 2, "rc": 1, "hisRc": -1},
+            {"sc": "BJ871245", "rk": 3, "rc": 0, "hisRc": 0}
+        ]);
+        let arr = rows.as_array().unwrap();
+        assert_eq!(pick_guba_rank(arr, "600519"), Some(1));
+        assert_eq!(pick_guba_rank(arr, "000002"), Some(2));
+        assert_eq!(pick_guba_rank(arr, "871245"), Some(3));
+        assert_eq!(pick_guba_rank(arr, "600520"), None, "榜外应是缺席，不是第 101 名");
+    }
+
+    /// `rk` 缺失或非数值 ⇒ 不编名次。
+    #[test]
+    fn missing_rank_stays_absent() {
+        let rows = serde_json::json!([{"sc": "SH600519"}, {"sc": "SH600520", "rk": "x"}]);
+        let arr = rows.as_array().unwrap();
+        assert_eq!(pick_guba_rank(arr, "600519"), None);
+        assert_eq!(pick_guba_rank(arr, "600520"), None);
     }
 }

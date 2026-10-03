@@ -71,6 +71,11 @@ pub struct FundamentalsReport {
     pub stock_code: String,
     pub stock_name: String,
     pub report_date: String,
+    /// 该期财报的披露日与来源（`reported` = vendor 自证 / `estimated` = 按法定披露截止日推断 / 空 = 无法确定）。报告期只说明是哪一期，不说明何时**可见**。
+    #[serde(default)]
+    pub disclosure_date: String,
+    #[serde(default)]
+    pub disclosure_source: String,
     pub ratios: FinancialRatios,
     pub health_score: u32,
     pub health_level: HealthLevel,
@@ -109,6 +114,14 @@ impl FundamentalsAnalyzer {
             report_date: latest
                 .map(|f| f.report_date.clone())
                 .unwrap_or_else(|| quote.timestamp.clone()),
+            disclosure_date: latest
+                .and_then(|f| f.effective_disclosure_date())
+                .map(|(d, _)| d)
+                .unwrap_or_default(),
+            disclosure_source: latest
+                .and_then(|f| f.effective_disclosure_date())
+                .map(|(_, src)| src.to_string())
+                .unwrap_or_default(),
             ratios,
             health_score,
             health_level,
@@ -328,6 +341,15 @@ fn bps_is_valid(bps: Option<f64>) -> bool {
 }
 
 impl FundamentalsReport {
+    /// 财报「何时可见」的一行说明；无法确定时返回空串（不编造）。
+    fn disclosure_vintage(&self) -> String {
+        match (self.disclosure_date.as_str(), self.disclosure_source.as_str()) {
+            ("", _) => String::new(),
+            (d, "estimated") => format!("{d}（按法定披露截止日推断）"),
+            (d, _) => d.to_string(),
+        }
+    }
+
     pub fn to_markdown(&self) -> String {
         let mut s = String::new();
         s.push_str(&format!("## {} ({}) 基本面报告\n\n", self.stock_name, self.stock_code));
@@ -338,6 +360,15 @@ impl FundamentalsReport {
             self.health_score,
             self.health_level.label()
         ));
+        let vintage = self.disclosure_vintage();
+        if !vintage.is_empty() {
+            s.push_str(&format!(
+                "- 披露可见性：{}
+
+",
+                vintage
+            ));
+        }
 
         s.push_str("### 关键指标\n\n");
         s.push_str("| 维度 | 指标 | 数值 |\n|---|---|---|\n");
@@ -453,6 +484,7 @@ mod tests {
             goodwill: None,
             accounts_receivable: None,
             estimated: Some(false),
+            disclosure_date: None,
         }]
     }
 

@@ -357,6 +357,7 @@ impl StockVendor for NeoDataVendor {
             goodwill: None,
             accounts_receivable: None,
             estimated: Some(false),
+            disclosure_date: None,
         }])
     }
 
@@ -442,51 +443,6 @@ impl StockVendor for NeoDataVendor {
         }
         Ok(results)
     }
-
-    async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
-        let query = "今日A股热门股票排名";
-        let json = self.nd_query(query).await?;
-
-        let mut stocks = Vec::new();
-        if let Some(content) = extract_api_content(&json, "basic_info") {
-            // 尝试从文本中解析热门股列表
-            for line in content.lines() {
-                if let Some(pos) = line.find(|c: char| c.is_ascii_digit()) {
-                    let number_part = &line[pos..];
-                    let parts: Vec<&str> = number_part.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        let change_pct = parts[1].replace('%', "").parse::<f64>().unwrap_or(0.0);
-                        stocks.push(HotStock {
-                            stock_code: parts[0].to_string(),
-                            stock_name: line[..pos].trim().to_string(),
-                            change_pct,
-                            turnover_rate: None,
-                            reason_tags: vec![],
-                            sector: None,
-                        });
-                    }
-                }
-            }
-        }
-        // 也尝试从 docData 提取热点板块信息
-        if stocks.is_empty() {
-            if let Some(content) = extract_api_content(&json, "hot_sector") {
-                tracing::debug!(
-                    "[neodata] 热门板块数据: {}",
-                    content.chars().take(200).collect::<String>()
-                );
-            }
-        }
-
-        if stocks.is_empty() {
-            return Err(DataError::VendorError {
-                vendor: "neodata".into(),
-                message: "NeoData 热门股票数据为空".into(),
-            });
-        }
-        Ok(stocks)
-    }
-
     async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
         let query = "今日行业板块涨跌幅排名";
         let json = self.nd_query(query).await?;

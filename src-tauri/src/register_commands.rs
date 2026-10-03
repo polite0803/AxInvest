@@ -1225,6 +1225,7 @@ macro_rules! register_all_commands {
             commands::stock_analysis::get_international_stock_quote,
             commands::stock_analysis::get_latest_analyses_for_stocks,
             commands::stock_analysis::get_latest_analysis_for_stock,
+            commands::stock_analysis::get_limit_up_pool,
             commands::stock_analysis::get_lockup_schedule,
             commands::stock_analysis::get_market_dragon_tiger,
             commands::stock_analysis::get_market_status,

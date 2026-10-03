@@ -19,6 +19,42 @@ pub struct EastMoneyVendor {
 }
 
 impl EastMoneyVendor {
+    /// 官方一致预期聚合（`RPT_WEB_RESPREDICT`）——比本函数原先的「自己拿 20 条研报取均值〝
+    /// 权威：`RATING_ORG_NUM` 是全部报告机构数（实测茅台 43 家），且给到未来四年的 `EPSn`。
+    ///
+    /// **取哪一年是这里唯一的陷阱**：实测行里 `YEAR1=2025, YEAR_MARK1="A"`（A = 已披露实际值）、
+    /// `YEAR2=2026, YEAR_MARK2="E"`（E = 预测）。按字段顺序取 `EPS1` 就把**实际值当成预期**，
+    /// 既是语义错配也是前视。⇒ 只取第一个 mark 为 `E` 的年份。
+    async fn fetch_consensus_official(
+        &self,
+        stock_code: &str,
+    ) -> Result<Option<ConsensusEPS>, DataError> {
+        let url = format!(
+            "https://datacenter-web.eastmoney.com/api/data/v1/get?reportName=RPT_WEB_RESPREDICT\
+             &columns=ALL&pageSize=2&pageNumber=1&source=WEB&client=WEB\
+             &filter=(SECURITY_CODE%3D\"{}\")",
+            stock_code
+        );
+        let resp = self.em_get(&url).await?;
+        let json: Value = resp.json().await?;
+        if json.get("success").and_then(Value::as_bool) == Some(false) {
+            return Err(DataError::VendorError {
+                vendor: "eastmoney".into(),
+                message: format!(
+                    "RPT_WEB_RESPREDICT: {}",
+                    json.get("message").and_then(Value::as_str).unwrap_or("")
+                ),
+            });
+        }
+        let rows: Vec<Value> = json
+            .get("result")
+            .and_then(|r| r.get("data"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(parse_consensus_forward(stock_code, &rows))
+    }
+
     /// 从环境变量 EASTMONEY_PROXY 读取初始代理（如 http://127.0.0.1:12026）
     pub fn build_proxy_client() -> Option<reqwest::Client> {
         let proxy_url = std::env::var("EASTMONEY_PROXY").ok()?;
@@ -1789,7 +1825,11 @@ impl StockVendor for EastMoneyVendor {
             "daily" | "101" | "Daily" => "101",
             "weekly" | "102" | "Weekly" => "102",
             "monthly" | "103" | "Monthly" => "103",
-            _ => "101",
+            other => {
+                return Err(DataError::ParseError(format!(
+                    "[eastmoney] 不支持的 K 线周期 {other:?}（白名单：15/30/60/daily/weekly/monthly 及 101/102/103 别名）。                     **拒绝静默归日线** —— 拿日线冒充 60 分钟时，下游 `scoreSource` 仍会标 `tier_native`，                     超短档的错档在库里完全查不出来（P1-7，2026-10-03）。"
+                )));
+            },
         };
         let secid = to_em_secid(stock_code);
         // 修复 R3: 根据 adj 参数选择 fqt（0=不复权, 1=前复权, 2=后复权）
@@ -2003,6 +2043,7 @@ impl StockVendor for EastMoneyVendor {
                         .get(s("REPORT_DATE").get(..10).unwrap_or(s("REPORT_DATE")))
                         .and_then(|b| b.1),
                     estimated: Some(false),
+                    disclosure_date: None,
                 }
             })
             .collect();
@@ -2638,6 +2679,10 @@ impl StockVendor for EastMoneyVendor {
     // 原代码用 predictThisYearPe(预测PE) 直接当目标价，语义错误。
     // 正确做法: 目标价 = 预测PE × 预测EPS，二者均可用时才算出目标价。
     async fn get_consensus_eps(&self, stock_code: &str) -> Result<Option<ConsensusEPS>, DataError> {
+        // 优先官方聚合；取不到才退到下面的研报均值（两者都是真数据，区别只在权威口径，\n        // 不存在「缺数时编一个」的分支）。
+        if let Some(c) = self.fetch_consensus_official(stock_code).await? {
+            return Ok(Some(c));
+        }
         let url = format!(
             "https://reportapi.eastmoney.com/report/list?industryCode=*&pageSize=20&industry=%2A&rating=&ratingChange=&beginTime=2000-01-01&endTime=2030-01-01&pageNo=1&fields=&qType=0&orgCode=&code={}&rcode=&p=1&pageNum=1&pageNumber=1",
             stock_code
@@ -4005,7 +4050,13 @@ impl StockVendor for EastMoneyVendor {
             // ⚠ get_holder_count（2026-10-01）同列：`RPT_HOLDERNUMLATEST` 本身就是
             //   「最新一期」快照表，没有日期参数可收窄；历史多期在 `RPT_F10_EH_HOLDERNUM`，
             //   接它属下一轮（届时改申报 NativeDateParam）。当下回放按**结构性缺口**留痕。
-            "get_hot_stocks" | "get_holder_count" => AsOfCapability::NoHistoricalSemantic,
+            // P9-3（2026-10-03）：一致预期从 `Fallthrough` **改为** `NoHistoricalSemantic`。
+            // 它是**点时序列**（每天随新研报变化），而官方聚合行里**没有任何日期列**（实测）
+            // ⇒ 回放时给当下值等于把未来信息当进入决策（原申报的容忍语义「慢变量」对它不成立）。
+            // 回放要想拿到，只能靠每日归档（PLAN P9-5），不用任何近似值顶替。
+            "get_hot_stocks" | "get_holder_count" | "get_consensus_eps" => {
+                AsOfCapability::NoHistoricalSemantic
+            }
             // T12(2026-09-27)：板块归属**不是**「无历史语义」而是「只有当下值、且是慢变量」
             // —— 与 `get_sector_info` 同一张 `RPT_F10_CORETHEME_BOARDTYPE`（无日期列）。
             // 此前申报 `NoHistoricalSemantic` 使路由层的 as-of 白名单**跳过本仓唯一还活着的
@@ -4019,7 +4070,6 @@ impl StockVendor for EastMoneyVendor {
             | "get_north_bound_holding"
             | "get_shareholder_trades"
             | "get_dividend_records"
-            | "get_consensus_eps"
             | "get_block_trades"
             | "get_institutional_visits"
             | "get_sector_info"
@@ -4227,7 +4277,11 @@ impl StockVendor for EastMoneyVendor {
             "daily" | "101" | "Daily" => "101",
             "weekly" | "102" | "Weekly" => "102",
             "monthly" | "103" | "Monthly" => "103",
-            _ => "101",
+            other => {
+                return Err(DataError::ParseError(format!(
+                    "[eastmoney] 不支持的 K 线周期 {other:?}（白名单：15/30/60/daily/weekly/monthly 及 101/102/103 别名）。                     **拒绝静默归日线** —— 拿日线冒充 60 分钟时，下游 `scoreSource` 仍会标 `tier_native`，                     超短档的错档在库里完全查不出来（P1-7，2026-10-03）。"
+                )));
+            },
         };
         let as_of = crate::as_of::current_as_of()
             .ok_or_else(|| DataError::ParseError("no as_of context".into()))?;
@@ -4545,6 +4599,15 @@ mod asof_capability_tests {
             AsOfCapability::NoHistoricalSemantic,
             "get_hot_stocks 应该是 NoHistoricalSemantic"
         );
+
+        // P9-3(2026-10-03)：一致预期是点时序列且官方行**没有日期列** ⇒ 回放不容忍当下值。
+        // 原申报 `Fallthrough`（= 容忍当日值，为「慢变量」而设）对它是错的：
+        // 拿今天的机构一致预期进三个月前的回放，等于把未来信息喂进决策。
+        assert_eq!(
+            v.asof_capability("get_consensus_eps"),
+            AsOfCapability::NoHistoricalSemantic,
+            "get_consensus_eps 应申报 NoHistoricalSemantic"
+        );
     }
 
     #[test]
@@ -4557,7 +4620,6 @@ mod asof_capability_tests {
             "get_north_bound_holding",
             "get_shareholder_trades",
             "get_dividend_records",
-            "get_consensus_eps",
             "get_block_trades",
             "get_institutional_visits",
             // T10(2026-09-27)：与概念板块同一张无日期列的归属表，慢变量 ⇒ 容忍当日值
@@ -5599,5 +5661,111 @@ mod earnings_notice_tests {
         assert_eq!(got[0].period.as_deref(), Some("2026Q2"));
         assert_eq!(got[0].stock_name, "贵州茅台");
         assert_eq!(got[0].source.as_deref(), Some("browser_eastmoney"));
+    }
+}
+
+/// 从 `RPT_WEB_RESPREDICT` 行取「第一个预测年（`YEAR_MARKn == "E"`）」的一致预期。
+///
+/// `A` 是**已披露实际值**（实测 `YEAR1=2025 / MARK1=A / EPS1=65.85`），按字段顺序取就把
+/// 实际值当成了预期 ⇒ 语义错配兼前视。目标价取区间中值，不拿上沿当「合理估值」。
+fn parse_consensus_forward(stock_code: &str, rows: &[Value]) -> Option<ConsensusEPS> {
+    let r = rows.first()?;
+    let num = |k: &str| r.get(k).and_then(Value::as_f64);
+    let is_estimate = |i: usize| -> bool {
+        let key = format!("YEAR_MARK{i}");
+        r.get(key).and_then(Value::as_str).is_some_and(|s| s.trim().eq_ignore_ascii_case("e"))
+    };
+    let mut picked: Option<(i32, f64)> = None;
+    for i in 1..=4usize {
+        if !is_estimate(i) {
+            continue;
+        }
+        let key_y = format!("YEAR{i}");
+        let key_e = format!("EPS{i}");
+        let pair = match (num(&key_y), num(&key_e)) {
+            (Some(y), Some(e)) if y > 0.0 && e > 0.0 => Some((y as i32, e)),
+            _ => None,
+        };
+        if let Some(p) = pair {
+            picked = Some(p);
+            break;
+        }
+    }
+    let (year, eps) = picked?;
+    let (lo, hi) = (num("DEC_AIMPRICEMIN"), num("DEC_AIMPRICEMAX"));
+    let target = match (lo, hi) {
+        (Some(a), Some(b)) if a > 0.0 && b > 0.0 => Some((a + b) / 2.0),
+        (Some(a), _) if a > 0.0 => Some(a),
+        (_, Some(b)) if b > 0.0 => Some(b),
+        _ => None,
+    };
+    Some(ConsensusEPS {
+        stock_code: stock_code.to_string(),
+        consensus_eps: Some(eps),
+        consensus_target_price: target,
+        // 官方行给的是评级**分布**而不是单一评级名，不编造名称
+        rating_avg: None,
+        rating_count: num("RATING_ORG_NUM").map(|v| v as i32),
+        year: year.to_string(),
+        is_estimated: false,
+        estimate_source: None,
+    })
+}
+
+#[cfg(test)]
+mod consensus_official_tests {
+    use super::*;
+
+    fn row(y1: i32, m1: &str, e1: f64, y2: i32, m2: &str, e2: f64) -> serde_json::Value {
+        serde_json::json!({
+            "SECUCODE": "600519.SH", "SECURITY_CODE": "600519", "SECURITY_NAME_ABBR": "贵州茅台",
+            "RATING_ORG_NUM": 43, "RATING_BUY_NUM": 34, "RATING_ADD_NUM": 9,
+            "YEAR1": y1, "YEAR_MARK1": m1, "EPS1": e1,
+            "YEAR2": y2, "YEAR_MARK2": m2, "EPS2": e2,
+            "DEC_AIMPRICEMAX": 2030.0, "DEC_AIMPRICEMIN": 1430.0,
+        })
+    }
+
+    /// 核心判据：必须跳过 `A`（已披露实际值）取第一个 `E`。
+    #[test]
+    fn takes_first_estimate_year_not_the_actual_one() {
+        let rows = vec![row(2025, "A", 65.85, 2026, "E", 67.25)];
+        let c = parse_consensus_forward("600519", &rows).expect("应取到预测年");
+        assert_eq!(c.year, "2026");
+        assert_eq!(c.consensus_eps, Some(67.25));
+        assert!(!c.is_estimated, "官方聚合是真数据，不是估算");
+        assert_eq!(c.rating_count, Some(43));
+        // 目标价区间取中值，而不是拿上沿当「合理估值」
+        assert_eq!(c.consensus_target_price, Some(1730.0));
+    }
+
+    #[test]
+    fn returns_none_when_no_forward_estimate_exists() {
+        let rows = vec![row(2025, "A", 65.85, 2024, "A", 62.0)];
+        assert!(parse_consensus_forward("600519", &rows).is_none());
+        assert!(parse_consensus_forward("600519", &[]).is_none());
+    }
+
+    /// 真接口冒烟（`#[ignore]`，手工跑：
+    /// `cargo test -p axagent-astock-data consensus_live -- --ignored --nocapture`）。
+    ///
+    /// 验的是**走 vendor 通道**能否拿到官方一致预期，以及是否**取的预测年而不是实际年**
+    /// （实测官方行 `YEAR1` 标 `A` = 已披露实际值 ⇒ 若结果等于 2025 那一列就是拿错了）。
+    #[tokio::test]
+    #[ignore = "需真实网络；仅在手工验证一致预期通道时跑"]
+    async fn consensus_live_smoke() {
+        let v = EastMoneyVendor {
+            http: reqwest::Client::new(),
+            proxy_http: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        };
+        let got = v.fetch_consensus_official("600519").await.expect("官方一致预期接口应可达");
+        let c = got.unwrap_or_else(|| panic!("茅台必有机构预测，取不到说明解析或字段变了"));
+        assert!(!c.is_estimated);
+        assert!(c.consensus_eps.unwrap_or(0.0) > 0.0);
+        assert!(c.rating_count.unwrap_or(0) > 10, "官方口径应覆盖全部发布机构，实测 43 家");
+        println!(
+            "consensus: year={} eps={:?} target={:?} orgs={:?}",
+            c.year, c.consensus_eps, c.consensus_target_price, c.rating_count
+        );
     }
 }

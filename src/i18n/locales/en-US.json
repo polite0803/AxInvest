@@ -15855,7 +15855,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "poolSummary": "{{date}} · {{count}} limit-ups · seal rate {{rate}}% · {{break}} board breaks",
+        "boardDays": "{{boards}} boards in {{days}} days",
+        "breakTimes": "{{n}}× board break",
+        "sealAmount": "Seal",
+        "rank": "Rank",
+        "hotValue": "Heat"
       },
       "periodDaily": "Daily",
       "periodMonthly": "Monthly",

@@ -15690,7 +15690,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "poolSummary": "{{date}} · лимит-ап {{count}} шт · удержание {{rate}}% · {{break}} вскрытий",
+        "boardDays": "{{boards}} лимит-ап за {{days}} дн.",
+        "breakTimes": "{{n}}× вскрытий",
+        "sealAmount": "Исполнение",
+        "rank": "Ранг",
+        "hotValue": "Популярность"
       },
       "optimize": {
         "success": "Weights optimized",

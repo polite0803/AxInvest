@@ -244,41 +244,6 @@ impl StockVendor for IwencaiVendor {
             regions: vec![],
         }))
     }
-
-    async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
-        let question = "今日涨幅前20的股票";
-        let json = self.query(question, 20, 1).await?;
-        let code_list = self.extract_code_list(&json);
-
-        Ok(code_list
-            .iter()
-            .filter_map(|item| {
-                let code = item.get("code")?.as_str()?.to_string();
-                let name = item.get("name")?.as_str()?.to_string();
-                let change_pct = item
-                    .get("change_pct")
-                    .or_else(|| item.get("涨跌幅"))
-                    .and_then(val_to_f64)
-                    .unwrap_or(0.0);
-                let turnover_rate =
-                    item.get("turnover_ratio").or_else(|| item.get("换手率")).and_then(val_to_f64);
-                let sector = item
-                    .get("industry")
-                    .or_else(|| item.get("行业"))
-                    .and_then(|v| v.as_str().map(|s| s.to_string()));
-
-                Some(HotStock {
-                    stock_code: code,
-                    stock_name: name,
-                    change_pct,
-                    turnover_rate,
-                    reason_tags: vec![],
-                    sector,
-                })
-            })
-            .collect())
-    }
-
     async fn get_peers(&self, stock_code: &str) -> Result<Vec<PeerComparison>, DataError> {
         // iwencai 的 query 是按问题搜索股票列表，"{stock_code} 同行业股票" 应返回该行业股票
         let question = format!("{stock_code} 同行业股票");
@@ -407,14 +372,14 @@ impl StockVendor for IwencaiVendor {
     // - search_stock:搜索是当下语义 → NoHistoricalSemantic
     // - get_consensus_eps:带 year 字段 → Fallthrough
     // - get_concept_blocks:当下概念分类 → NoHistoricalSemantic
-    // - get_hot_stocks:当下热门榜单 → NoHistoricalSemantic
     // - get_sector_info:当下行业分类 → NoHistoricalSemantic
     // - get_peers:同行业股票查询是当下语义 → NoHistoricalSemantic
     // 其他 stub:Fallthrough
     fn asof_capability(&self, method: &str) -> AsOfCapability {
         match method {
-            "search_stock" | "get_concept_blocks" | "get_hot_stocks" | "get_sector_info"
-            | "get_peers" => AsOfCapability::NoHistoricalSemantic,
+            "search_stock" | "get_concept_blocks" | "get_sector_info" | "get_peers" => {
+                AsOfCapability::NoHistoricalSemantic
+            },
             _ => AsOfCapability::Fallthrough,
         }
     }
@@ -431,13 +396,7 @@ mod capability_tests {
     #[test]
     fn iwencai_no_historical_methods() {
         let v = make_vendor();
-        for m in &[
-            "search_stock",
-            "get_concept_blocks",
-            "get_hot_stocks",
-            "get_sector_info",
-            "get_peers",
-        ] {
+        for m in &["search_stock", "get_concept_blocks", "get_sector_info", "get_peers"] {
             assert_eq!(v.asof_capability(m), AsOfCapability::NoHistoricalSemantic);
         }
     }

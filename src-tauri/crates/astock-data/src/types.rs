@@ -22,6 +22,8 @@ pub fn estimated_financial_report(stock_code: &str) -> FinancialReport {
     FinancialReport {
         stock_code: stock_code.to_string(),
         report_date: today,
+        // 行业均值兜底报告没有真实披露日（P1-1：as-of 按披露日裁，缺即判不可得）
+        disclosure_date: None,
         revenue: Some(eps * 20.0 * 100_000_000.0),
         net_profit: Some(eps * 100_000_000.0),
         eps: Some(eps),
@@ -313,16 +315,29 @@ pub struct ConsensusEPS {
     pub estimate_source: Option<String>,
 }
 
-/// 同花顺强势股
+/// 热股榜一行（同花顺 fuyao `hot_list`，真·热度榜）。
+///
+/// 名目收编(2026-10-03)：本类型此前被三个源各自灌入**不同语义** ——
+/// `vendors/ths.rs` 灌涨停池前 20 行、`vendors/iwencai.rs` 灌「今日涨幅前20」、
+/// `vendors/neodata.rs` 从模型生成的文本里刮行 —— 而面板标题与 `SocialSentiment.hot_rank`
+/// 回填都按「热度榜」读它。现只有同花顺真热股榜供应，并带上名次与热度值。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HotStock {
     pub stock_code: String,
     pub stock_name: String,
+    /// 涨跌幅 %（热股榜的 `rise_and_fall` **实测已是百分比原值**，勿再乘 100）
     pub change_pct: f64,
+    /// 换手率 % —— 热股榜不提供，恒 `None`（真值在 `LimitUpPoolEntry` 那边）
     pub turnover_rate: Option<f64>,
+    /// 题材标签（热股榜 `tag.concept_tag`）
     pub reason_tags: Vec<String>,
+    /// 行业名 —— 热股榜不提供，恒 `None`
     pub sector: Option<String>,
+    /// 榜内名次（`order`，1 起；榜单长度实测恒 100）
+    pub rank: Option<u32>,
+    /// 热度值（`rate`，字符串原值转 f64；`type=hour` 与 `type=day` 量级不同，只可同期比较）
+    pub hot_value: Option<f64>,
 }
 
 /// 概念板块三维归属
@@ -765,5 +780,101 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("贵州茅台"));
         let _parsed: StockSearchResult = serde_json::from_str(&json).unwrap();
+    }
+}
+
+/// 涨停池一行（同花顺 `data.10jqka.com.cn/dataapi/limit_up/limit_up_pool`）。
+///
+/// 一行同时给出**妖股三条初筛判据里的两条**（连板数 `limit_up_streak`、换手率 `turnover_rate`）
+/// 加上封板资金与炸板次数。除 `stock_code`/`stock_name` 外一律 `Option`：
+/// 实测 `open_num`（炸板次数）约 2/3 的行是 `null`，`limit_up_suc_rate` 偶发 `null`，
+/// 把它们折成 `0.0` 就是把「接口没说」伪装成「接口说是零」。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitUpPoolEntry {
+    pub stock_code: String,
+    pub stock_name: String,
+    /// 连板数（`high_days_value` 高 16 位；「3天2板」里的「2板」）
+    pub limit_up_streak: Option<i32>,
+    /// 涨停天数（`high_days_value` 低 16 位；「3天2板」里的「3天」）
+    ///
+    /// 与连板数不同轴：3天2板 是断过板的弱连板，7天7板 是连续板 —— 妖股判据要区分。
+    pub limit_up_days: Option<i32>,
+    /// 当日换手率 %（`turnover_rate`，接口原值）
+    pub turnover_rate: Option<f64>,
+    /// 涨跌幅 %（`change_rate`）
+    pub change_pct: Option<f64>,
+    /// 封单金额（元，`order_amount`）
+    pub seal_amount: Option<f64>,
+    /// 封单量（股，`order_volume`）
+    pub seal_volume: Option<f64>,
+    /// 炸板次数（`open_num`；实测多为 `null`）
+    pub break_count: Option<i32>,
+    /// 首次封板时间 `HH:MM:SS`（`first_limit_up_time`，字符串 Unix 秒按 UTC+8 换算）
+    pub first_seal_time: Option<String>,
+    /// 最后封板时间 `HH:MM:SS`（`last_limit_up_time` 同上）
+    pub last_seal_time: Option<String>,
+    /// 板型：一字板 / 换手板 / T字板（`limit_up_type`，实测仅此三值）
+    pub limit_up_type: Option<String>,
+    /// 炸板后又回封（`is_again_limit`；实测 =1 的行同时带 `change_tag="LIMIT_BACK"`）
+    pub re_sealed: Option<bool>,
+    /// 流通市值（元，`currency_value`）
+    pub float_market_cap: Option<f64>,
+    /// 池中快照价（元，`latest`）—— 面板显示现价用，省掉逐只再打一次 quote
+    pub latest_price: Option<f64>,
+    /// 涨停逻辑标签（`reason_type`，**实测分隔符是 `+` 不是逗号**）
+    pub reason_tags: Vec<String>,
+}
+
+/// 涨停池的当日盘面情绪汇总（接口 `limit_up_count.today` / `limit_down_count.today`）。
+///
+/// 只取 `today` 段：`yesterday` 段能靠再请求前一交易日拿到，而回放要的正是「按日取」，
+/// 把两日的数塞进同一行会让「哪一天」重新变成歧义。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitUpBreadth {
+    /// 收盘涨停家数
+    pub limit_up_count: i32,
+    /// 触板次数（含炸板），`history_num`
+    pub touched_count: Option<i32>,
+    /// 封板率 = 涨停家数 / 触板次数
+    pub seal_rate: Option<f64>,
+    /// 炸板家数
+    pub break_count: Option<i32>,
+    /// 收盘跌停家数
+    pub limit_down_count: Option<i32>,
+}
+
+/// 一次涨停池查询的结果。
+///
+/// 实测（2026-10-03）同花顺该接口**真正按 `date` 返回历史池**：`data.date` 恒等于请求日，
+/// 越界日期回 `status_code=-1 / status_msg="date参数不合法"`，非交易日回 `total=0`。
+/// ⇒ 三种情形天然可分：回显不等 = 接口行为变了（实现侧直接报错），
+/// `status_code != 0` = **该日不可得**，`total=0` 且回显相等 = **该日确无涨停**。
+///
+/// 对照：东财 `push2ex/getTopicZTPool` 的 `date` 参数**不被采纳**（`qdate` 恒为最新交易日），
+/// 故本仓涨停池只走同花顺一条通道。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitUpPool {
+    /// 接口自报的生效日期 `YYYY-MM-DD`（来自 `data.date`，紧凑形已展开成 ISO）
+    pub pool_date: String,
+    /// 调用方请求的日期；`None` = 取当下
+    pub requested_date: Option<String>,
+    pub entries: Vec<LimitUpPoolEntry>,
+    /// 盘面情绪汇总（接口未给该段时为 `None`，不编造）
+    pub breadth: Option<LimitUpBreadth>,
+}
+
+impl LimitUpPool {
+    /// 这份池子是否真的属于请求的那一天。
+    ///
+    /// 未指定请求日期（取当下）时恒为真 —— 此时 `pool_date` 就是答案本身。
+    /// ⚠ 消费方拿到 `false` 时必须按「不可得」处理，**不得**读成「当天没有涨停」。
+    pub fn is_for_requested_date(&self) -> bool {
+        match self.requested_date.as_deref() {
+            None => true,
+            Some(req) => self.pool_date == req,
+        }
     }
 }

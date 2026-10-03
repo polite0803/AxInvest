@@ -1,5 +1,6 @@
 // i18n-exempt: 业务逻辑/格式化/日志字符串，非 UI 展示文本
 import { List } from "@/components/common/AntdList";
+import { formatYi } from "@/lib/format";
 import { invoke } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Spin, Tag } from "antd";
@@ -17,12 +18,6 @@ interface DragonTigerEntry {
   buyAmount: number;
   sellAmount: number;
   reason?: string;
-}
-
-function fmtYi(v: number): string {
-  if (Math.abs(v) >= 1e8) { return `${(v / 1e8).toFixed(2)}亿`; }
-  if (Math.abs(v) >= 1e4) { return `${(v / 1e4).toFixed(0)}万`; }
-  return `${v.toFixed(0)}`;
 }
 
 interface DragonTigerPanelProps {
@@ -188,7 +183,7 @@ export function DragonTigerPanel({ bordered = true }: DragonTigerPanelProps = {}
                       className="text-xs m-0"
                     >
                       {up ? t("stockAnalysis.settings.panels.netBuy") : t("stockAnalysis.settings.panels.netSell")}{" "}
-                      {fmtYi(e.netBuy)}
+                      {formatYi(e.netBuy)}
                     </Tag>,
                   ]}
                 >

@@ -15690,7 +15690,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "poolSummary": "{{date}} · ストップ高 {{count}} 銘柄 · 張り付き率 {{rate}}% · 崩れ {{break}} 銘柄",
+        "boardDays": "{{days}}日間で{{boards}}ストップ高",
+        "breakTimes": "{{n}}回崩れ",
+        "sealAmount": "買い板",
+        "rank": "順位",
+        "hotValue": "人気度"
       },
       "optimize": {
         "success": "Weights optimized",

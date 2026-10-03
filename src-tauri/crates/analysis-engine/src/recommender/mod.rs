@@ -9,6 +9,16 @@
 //! - [`recommend_stocks`] — Tauri command 调用
 
 pub mod ic;
+
+/// 荐股算法的**自身版本**（与 `stock_analysis_setup` 的工作流 `TEMPLATE_VERSION` 无关 ——
+/// 荐股链不跑工作流模板，它的「算法」= 本 crate 的策略集 + 判据 + 尺度映射）。
+///
+/// 升版判据（需求⑩原则 5）：**因子增删、判据口径改动、档位×风格矩阵变动** ⇒ +1。
+/// 只调参数值（权重/阈值）**不**升版 —— 那些走 `reco_strategy_weights` 的历史表可追溯。
+///
+/// 为什么由代码常量而不是模板变量承载：荐股链没有「重种」语义，变量可被面板随手改，
+/// 而版本必须是样本的**不可变归属**，否则同代筛样本身就是可伪造的。
+pub const RECO_ALGORITHM_VERSION: i32 = 1;
 pub mod indicators;
 pub mod notify;
 pub mod pool;

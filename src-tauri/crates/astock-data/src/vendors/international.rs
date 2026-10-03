@@ -261,7 +261,11 @@ impl StockVendor for InternationalVendor {
             "daily" => "101",
             "weekly" => "102",
             "monthly" => "103",
-            _ => "101",
+            other => {
+                return Err(DataError::ParseError(format!(
+                    "[international] 该源只有日/周/月三档，不支持周期 {other:?} ⇒ 显式失败交由路由换源（P1-7）"
+                )));
+            },
         };
         let url = format!(
             "https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57&klt={}&fqt={}&end=20500101&lmt={}",

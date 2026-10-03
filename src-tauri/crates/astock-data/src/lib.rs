@@ -37,7 +37,6 @@ pub mod valuation_band;
 pub mod vendor_health;
 pub mod vendors;
 
-use chrono::Local;
 use futures::future::BoxFuture;
 use moka::future::Cache as MokaCache;
 use std::collections::HashMap;
@@ -164,6 +163,9 @@ struct VendorRouting {
     announcements: Vec<String>,
     market_dragon_tiger: Vec<String>,
     hot_stocks: Vec<String>,
+    /// 涨停池（P9-4）。与 `hot_stocks` 是**同一个接口的两种读法**，故路由独立成键：
+    /// 那条按「当下热度榜」用，这条按「某一天的涨停池」用（vendor 侧申报 `NativeDateParam`）。
+    limit_up_pool: Vec<String>,
     earnings_calendar: Vec<String>,
     social_sentiment: Vec<String>,
     industry_ranking: Vec<String>,
@@ -300,15 +302,25 @@ impl VendorRouting {
             ],
             concept_blocks: vec!["eastmoney".into(), "ths".into(), "iwencai".into()],
             announcements: vec!["cninfo".into(), "eastmoney".into()],
-            market_dragon_tiger: vec!["ths".into(), "eastmoney".into()],
+            // P1-4（2026-10-03）：摘除 `ths` 首位。它并没有龙虎榜口径 ——
+            // `vendors/ths.rs::get_market_dragon_tiger` 是**拿涨停池拼的**：
+            // `net_buy/buy_amount/sell_amount` 恒 0.0、`date` 空串、`reason` 取涨停原因，
+            // 而排在首位 ⇒ 全市场龙虎榜常年返回伪记录，且下游读不出它是假的
+            // （游资/席位分析会把「金额全 0」当成「没资金上榜」）。
+            market_dragon_tiger: vec!["eastmoney".into()],
             hot_stocks: vec![
+                // #19 名目收编(2026-10-03)：**只剩同花顺一条真热度榜**（fuyao hot_list）。
+                // 此前 iwencai 用「今日涨幅前20」、neodata 从模型生成的文本里刮行来回答这个
+                // 名目 —— 那是拿近似榜冒充热度榜，两个 override 已随本条一起删掉；
+                // baidu 另于 #19(2026-09-27) 实测摘除（旧 opendata 全线失效，新端点要前端现算
+                // 的 Acs-Token，缺则 403 hit risk）。留它们在路由里 = 允许假数据顶上真名目。
                 "ths".into(),
-                // #19(2026-09-27) 实测摘除：baidu 的旧 opendata 全线失效（新端点要前端现算的
-                // Acs-Token，缺则 403 hit risk），留着只在 live 链上白跑一次必死请求。
-                // 与 2026-08-01 对 industry_ranking 摘除 ths/baidu/neodata 是同一条处理。
-                "iwencai".into(),
-                "neodata".into(),
             ],
+            // P9-4(2026-10-03)：涨停池只有同花顺一条通道 —— 实测它按 `date` 返回当日池并回显
+            // `data.date`（唯一可按日回溯的涨停源，故申报 `NativeDateParam`）。
+            // 东财 `push2ex/getTopicZTPool` 曾接进来，实测它的 `date` 不被采纳（`qdate` 恒为
+            // 最新交易日）⇒ 与 ths 同业务名目且能力更弱，已整体撤除，不要再加回路由。
+            limit_up_pool: vec!["ths".into()],
             // P3 修复(2026-07-25): 移除 neodata(走 trait 默认 Ok(vec![]) 会把 vendor 故障
             // 误报为"成功无数据");加入 browser_eastmoney 作为反爬 fallback。
             // 现在语义清晰:eastmoney 故障 → fallback 到 browser_eastmoney;
@@ -1026,9 +1038,12 @@ impl AStockClient {
 
     /// 修复 P1-5: 在 is_asof_active_for(kind) 为 true 但 current_as_of() 返回 None
     /// 的 race condition 场景下，原代码使用 .expect(...) 会导致 panic。
-    /// 改为退化为 None（让调用方原样返回数据，不截断）并通过 record_degradation
-    /// 记录降级原因，使决策可观测。这与 is_asof_active_for=false 的行为一致——
-    /// "as_of 未生效时数据不截断"，是更安全的失败方向（避免错误丢弃数据）。
+    /// 返回 `None` 时**调用方必须丢弃数据，不得原样返回**（P1-5 于 2026-10-03 由 fail-open
+    /// 改为 fail-closed）。原注释称「不截断是更安全的失败方向」，该论证是错的：
+    /// `is_asof_active_for=false` 是 live 模式，不截断**正确**；而这里是**回放模式**，
+    /// 不截断等于把截止日之后的行情/财报交给分析师，且只留一条 warn ——
+    /// 正是本仓「拿不到可以，伪装成正常结果不行」这条红线。
+    /// 留痕（`record_degradation`）保留，供降级面板点名。
     fn as_of_ctx_or_degrade(method: &str) -> Option<crate::as_of::AsOfContext> {
         match crate::as_of::current_as_of() {
             Some(c) => Some(c),
@@ -1082,7 +1097,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_klines_by_asof") {
             Some(c) => c,
-            None => return klines,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         let before = klines.len();
@@ -1117,7 +1132,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_news_by_asof") {
             Some(c) => c,
-            None => return news,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         let mut empty_date_count = 0;
@@ -1145,7 +1160,14 @@ impl AStockClient {
         filtered
     }
 
-    /// 按当前 AsOfContext 截断 FinancialReport：保留 report_date <= as_of_date 的项。
+    /// 按当前 AsOfContext 截断 FinancialReport：保留**披露日**不晚于 as_of_date 的项。
+    ///
+    /// 为什么不是按 `report_date`（P1-1，2026-10-03）：报告期 9-30 的财报可以在 10 月底
+    /// 才披露，按报告期截断会让回放「提前看到」它 = 前视泄露，而且原先**不记降级** ⇒
+    /// 报告照写、结论照下。vendor 不给公告日时按 A 股法定披露截止日保守推断
+    /// （见 `FinancialReport::effective_disclosure_date`）：推断值要求截止日**已过**才算公开，
+    /// vendor 自证的公告日当天即算。代价是长档财报在回放里最多滞后一个披露季 ——
+    /// 滞后可以接受，前视不可接受。
     /// **Phase 1 混合 as-of**：仅结构化数据走 as-of。
     fn truncate_financials_by_asof(reports: Vec<FinancialReport>) -> Vec<FinancialReport> {
         if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
@@ -1153,10 +1175,54 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_financials_by_asof") {
             Some(c) => c,
-            None => return reports,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
-        reports.into_iter().filter(|r| r.report_date.as_str() <= cutoff.as_str()).collect()
+        let mut unpublished = 0usize;
+        let mut undated = 0usize;
+        let kept: Vec<FinancialReport> = reports
+            .into_iter()
+            .filter(|r| match r.effective_disclosure_date() {
+                Some((d, "reported")) => {
+                    let ok = d.as_str() <= cutoff.as_str();
+                    if !ok {
+                        unpublished += 1;
+                    }
+                    ok
+                },
+                Some((d, _)) => {
+                    let ok = d.as_str() < cutoff.as_str();
+                    if !ok {
+                        unpublished += 1;
+                    }
+                    ok
+                },
+                None => {
+                    undated += 1;
+                    false
+                },
+            })
+            .collect();
+        if unpublished > 0 {
+            crate::as_of::record_degradation_kind(
+                "financials",
+                "truncate_financials_by_asof",
+                &format!(
+                    "{} 条财报披露日未早于截止日,回放里按「当时尚未公开」裁掉(前视防线)",
+                    unpublished
+                ),
+                crate::as_of::DegradationKind::NoData,
+            );
+        }
+        if undated > 0 {
+            crate::as_of::record_degradation_kind(
+                "financials",
+                "truncate_financials_by_asof",
+                &format!("{} 条财报报告期不是四类期末,无法推断披露日,已裁掉", undated),
+                crate::as_of::DegradationKind::Failure,
+            );
+        }
+        kept
     }
 
     /// 按当前 AsOfContext 截断 DragonTigerEntry：保留 date <= as_of_date 的项。
@@ -1167,7 +1233,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_dragon_tiger_by_asof") {
             Some(c) => c,
-            None => return entries,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         entries.into_iter().filter(|e| e.date.as_str() <= cutoff.as_str()).collect()
@@ -1186,7 +1252,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_announcements_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         let mut empty_date_count = 0;
@@ -1221,7 +1287,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_research_reports_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1239,7 +1305,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_lockup_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1256,7 +1322,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_dividend_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1276,7 +1342,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_earnings_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1296,7 +1362,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_valuation_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1313,7 +1379,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_shareholder_trades_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1330,7 +1396,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_block_trades_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1349,7 +1415,7 @@ impl AStockClient {
         }
         let ctx = match Self::as_of_ctx_or_degrade("truncate_institutional_visits_by_asof") {
             Some(c) => c,
-            None => return items,
+            None => return Vec::new(),
         };
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         items
@@ -1365,10 +1431,9 @@ impl AStockClient {
         if !crate::as_of::is_asof_active_for(crate::as_of::AsOfDataKind::Structured) {
             return item;
         }
-        let ctx = match Self::as_of_ctx_or_degrade("truncate_north_bound_flow_by_asof") {
-            Some(c) => c,
-            None => return item,
-        };
+        // `?` 即 fail-closed：拿不到上下文 ⇒ `None`（本函数是 14 处里唯一返回 Option 的，
+        // 其余返回 Vec ⇒ 只能显式 `return Vec::new()`）。
+        let ctx = Self::as_of_ctx_or_degrade("truncate_north_bound_flow_by_asof")?;
         let mut item = item?;
         let cutoff = ctx.as_of_date.format("%Y-%m-%d").to_string();
         // 主字段 date > cutoff → 整体丢弃
@@ -2531,46 +2596,19 @@ impl AStockClient {
         let vendor_names: Vec<String> =
             self.routing.social_sentiment.iter().map(|n| n.to_string()).collect();
         let sc = stock_code.to_string();
-        let mut sentiments = self
+        let sentiments = self
             .try_vendors_retry(stock_code, "social_sentiment", &vendor_names, 1, |_name, vendor| {
                 let sc = sc.clone();
                 Box::pin(async move { vendor.get_social_sentiment(&sc).await })
             })
             .await?;
 
-        // 修复 M-HOT-1: vendor(guba)无法直接提供 hot_rank（跨股票热度排名），
-        // 调用 get_hot_stocks 查找当前股票在热度榜中的位置，填充 hot_rank 字段。
-        // 失败时不影响主流程（hot_rank 保持 None）。
-        let needs_hot_rank = sentiments.iter().any(|s| s.hot_rank.is_none());
-        if needs_hot_rank {
-            if let Ok(hot_stocks) = self.get_hot_stocks().await {
-                let normalized_code = stock_code
-                    .trim_start_matches("sh")
-                    .trim_start_matches("sz")
-                    .trim_start_matches("bj");
-                for (idx, hs) in hot_stocks.iter().enumerate() {
-                    let hs_code = hs
-                        .stock_code
-                        .trim_start_matches("sh")
-                        .trim_start_matches("sz")
-                        .trim_start_matches("bj");
-                    if hs_code == normalized_code {
-                        let rank = (idx + 1) as u32;
-                        for s in sentiments.iter_mut() {
-                            if s.hot_rank.is_none() {
-                                s.hot_rank = Some(rank);
-                            }
-                        }
-                        break;
-                    }
-                }
-                if sentiments.iter().all(|s| s.hot_rank.is_none()) {
-                    tracing::debug!(
-                        "[astock] get_social_sentiment: 股票 {stock_code} 未在热度榜中，hot_rank 保持 None"
-                    );
-                }
-            }
-        }
+        // 名目收编(2026-10-03)：这里原有「修复 M-HOT-1」一段 —— 拿 `get_hot_stocks()` 的
+        // **数组下标**填进 `SocialSentiment.hot_rank`（该字段的文档口径是「热度排名（平台内）」）。
+        // 而当时的 `get_hot_stocks` 走的是同花顺涨停池 ⇒ 「涨停池里排第几」被当成
+        // 「股吧热度排名」序列化进分析师上下文，是跨平台口径的假数。
+        // 现在名次由 guba 侧用东财人气榜**同平台**原地回填（见 `vendors/guba.rs::guba_hot_rank`），
+        // 这里不再跨源借位。
 
         Ok(sentiments)
     }
@@ -3176,10 +3214,9 @@ impl AStockClient {
                     let result = vendor.get_dragon_tiger(&sc).await?;
                     let truncated = Self::truncate_dragon_tiger_by_asof(result);
                     if truncated.is_empty() {
-                        return Err(DataError::VendorError {
-                            vendor: name.to_string(),
-                            message: "龙虎榜数据为空".into(),
-                        });
+                        // 「源答完了，答案是零行」用 `NotFound` 表达（继续试下一个源），
+                        // 与「源本身失败」分开 —— 见 `dragon_tiger_absent_is_legit_answer`。
+                        return Err(DataError::NotFound(format!("{name} 该期未上榜")));
                     }
                     Ok(truncated)
                 })
@@ -3191,15 +3228,42 @@ impl AStockClient {
                 self.cache_set_serialized(cache_key, &result, 3600).await;
                 Ok(result)
             },
+            Err(e) if Self::dragon_tiger_absent_is_legit_answer(&e) => {
+                // 源给的是「这只票当期没上榜」这个**答案**，不是故障 ⇒ 空数组是正确的。
+                tracing::debug!("[get_dragon_tiger] {stock_code} 当期无上榜记录");
+                Ok(vec![])
+            },
             Err(e) => {
-                // H1.5 修复:不再静默吞错,记录 vendor 错误详情便于排查
+                // P1-3（2026-10-03）：仍然**不 launder**，但区分走「记降级」而不是「让节点失败」。
+                // 原状：两种结局都回 `Ok(vec![])` ⇒「接口挂了」与「该股没上榜」在 payload 层不可分辨。
+                // 中途一度改为向上抛，实测会把 `t-dragon-tiger-data` 判成 TOOL_CALL_FAILED
+                // （`rt-workflow/executors/tool_executor.rs:89`）并经 fail-closed 级联跳过下游 ⇒
+                // 一次榜单抖动拖垮整条分析链，比静默空更坏。
+                // 现解法：载荷仍回空数组（节点继续跑），但**必留一条 Failure 级降级**；
+                // P1-6 的 `mode` 维度保证 live 也留痕 ⇒ 两种语义在降级面板与
+                // `blackboard_snapshot.degraded` 里可分辨，决策侧不受影响。
                 tracing::warn!(
                     "[get_dragon_tiger] 所有 vendor 失败(stock_code={}): {e}",
                     stock_code
                 );
+                crate::as_of::record_degradation_kind(
+                    "astock-data",
+                    "get_dragon_tiger",
+                    &format!(
+                        "龙虎榜取数失败（非「该股未上榜」）：{e}；载荷以空数组下发，判据见降级档"
+                    ),
+                    crate::as_of::DegradationKind::Failure,
+                );
                 Ok(vec![])
             },
         }
+    }
+
+    /// 判「空」是**答案**还是**故障**（P1-3）：只有 `NotFound` 是源给出的答案（该股未上榜），
+    /// 此时**不记**降级；其余错误 ⇒ 记一条 `Failure` 级降级。两种情况载荷都回空数组，
+    /// 以免节点失败触发级联跳过（取舍理由见 `get_dragon_tiger` 的错误臂注释）。
+    fn dragon_tiger_absent_is_legit_answer(err: &DataError) -> bool {
+        matches!(err, DataError::NotFound(_))
     }
 
     pub async fn get_lockup_schedule(
@@ -4159,27 +4223,10 @@ impl AStockClient {
             if let Some(r) = hit {
                 return Ok(Some(r));
             }
-            // as-of 下尝试从最新财报计算 trailing EPS（get_financials 自带截止日截断）
-            if let Ok(fins) = self.get_financials(stock_code).await {
-                if let Some(latest) = fins.into_iter().next() {
-                    if let Some(eps) = latest.eps.filter(|&v| v > 0.0) {
-                        let year = crate::as_of::current_as_of()
-                            .map(|ctx| ctx.as_of_date.format("%Y").to_string())
-                            .unwrap_or_else(|| Local::now().format("%Y").to_string());
-                        return Ok(Some(ConsensusEPS {
-                            stock_code: stock_code.to_string(),
-                            consensus_eps: Some(eps),
-                            consensus_target_price: None,
-                            rating_avg: None,
-                            rating_count: None,
-                            year,
-                            // 来自最新财报的 trailing EPS ⇒ 真实数据，非估算
-                            is_estimated: false,
-                            estimate_source: None,
-                        }));
-                    }
-                }
-            }
+            // P9-3（2026-10-03）：删除「用最近一期财报 trailing EPS 充当一致预期」的代理分支。
+            // 它是「换个语义的真数字冒充预期」——用户裁定（P9）明确要求补真实数据源，
+            // 而不是用近似值顶替。真源（RPT_WEB_RESPREDICT）已接入且**只有当前值**
+            // ⇒ 回放拿不到就明确拿不到，由下面的降级留痑承接；可回放的历史值等每日归档（P9-5）。
             crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_consensus_eps",
@@ -4622,6 +4669,72 @@ impl AStockClient {
             Err(e) => {
                 tracing::warn!("[get_hot_stocks] 所有 vendor 均不可用, 返回空列表. 详细: {e}");
                 Ok(vec![])
+            },
+        }
+    }
+
+    /// 涨停池（`vendors/ths.rs` 打同花顺 `dataapi/limit_up/limit_up_pool`）。
+    ///
+    /// ⚠ 与 `get_hot_stocks` 是**同一接口的两种读法**：那条当「当下热度榜」（申报
+    /// `NoHistoricalSemantic`，as-of 靠每日快照），这条当「某一天的涨停池」（申报
+    /// `NativeDateParam`）。后者是实测事实：`data.date` 恒等于请求日，越界日期由 vendor
+    /// 如实报 `Err`（⇒「该日不可得」），非交易日回 `total=0`（⇒「该日确无涨停」）。
+    /// ⇒ 本方法**不查快照缓存、也不需要归档表**，直接把日期交给接口。
+    pub async fn get_limit_up_pool(
+        &self,
+        requested_date: Option<&str>,
+    ) -> Result<Option<LimitUpPool>, DataError> {
+        // as-of 下调用方没给日期时，取数日就是截止日 —— 传 None 会把今天的池当成
+        // 回放那天的答案，那是时间泄露。
+        let date: Option<String> = match requested_date {
+            Some(d) => Some(d.to_string()),
+            None => crate::as_of::current_as_of()
+                .as_ref()
+                .map(|c| c.as_of_date.format("%Y-%m-%d").to_string()),
+        };
+        let vendor_names = self.routing.limit_up_pool.clone();
+        if crate::as_of::is_asof_active() {
+            let (hit, probe) = self
+                .asof_probe(
+                    "get_limit_up_pool",
+                    &vendor_names,
+                    &[AsOfCapability::NativeDateParam],
+                    |_, vendor, _cap| {
+                        let d = date.clone();
+                        Box::pin(async move { vendor.get_limit_up_pool(d.as_deref()).await })
+                    },
+                )
+                .await;
+            return match hit {
+                Some(pool) => Ok(Some(pool)),
+                None => {
+                    // 回 None 而不是 Some(空池)：空池会被下游读成「那天没有涨停」。
+                    crate::as_of::record_degradation_kind(
+                        "astock-data",
+                        "get_limit_up_pool",
+                        &probe.reason("as-of 涨停池"),
+                        probe.kind(),
+                    );
+                    Ok(None)
+                },
+            };
+        }
+        match self
+            .try_vendors_retry("", "limit_up_pool", &vendor_names, 2, |name, vendor| {
+                let d = date.clone();
+                Box::pin(async move {
+                    vendor.get_limit_up_pool(d.as_deref()).await.map_err(|e| {
+                        tracing::warn!("[get_limit_up_pool] vendor {name} 失败: {e}");
+                        e
+                    })
+                })
+            })
+            .await
+        {
+            Ok(pool) => Ok(pool),
+            Err(e) => {
+                tracing::warn!("[get_limit_up_pool] 所有 vendor 均不可用: {e}");
+                Err(e)
             },
         }
     }
@@ -5918,6 +6031,7 @@ mod asof_truncate_tests {
             goodwill: None,
             accounts_receivable: None,
             estimated: Some(false),
+            disclosure_date: None,
         }
     }
 
@@ -6104,6 +6218,103 @@ mod asof_truncate_tests {
         assert_eq!(news_date_key("2026-06-01"), "2026-06-01");
         assert_eq!(news_date_key(""), "");
         assert_eq!(news_date_key("garbage"), "");
+    }
+
+    // ── P1-1（2026-10-03）：财报「报告期」≠「可见期」──
+    // 旧判据按 `report_date <= as_of` 截断，会让尚未披露的报告期进入回放 = 前视泄露。
+
+    /// 半年报（法定截止 08-31）在 10-01 已可看；三季报（法定截止 10-31）当时还没公开 ⇒ 裁掉。
+    #[tokio::test]
+    async fn truncate_financials_drops_reports_not_yet_disclosed_at_asof() {
+        use crate::as_of::AS_OF;
+        let q3 = fin("2026-09-30");
+        // 先把「旧判据会留它」锁住：报告期确实不晚于截止日。
+        assert!(q3.report_date.as_str() <= "2026-10-01");
+        let ctx =
+            AsOfContext::new(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), AsOfSource::UserReplay)
+                .unwrap();
+        let out = AS_OF
+            .scope(Some(ctx), async {
+                AStockClient::truncate_financials_by_asof(vec![fin("2026-06-30"), q3])
+            })
+            .await;
+        assert_eq!(out.len(), 1, "三季报在 10-01 尚未披露");
+        assert_eq!(out[0].report_date, "2026-06-30");
+    }
+
+    /// vendor 自证公告日时**不过度裁剪**：公告 09-28 ⇒ 10-01 可看，即使法定截止日还没到。
+    #[tokio::test]
+    async fn truncate_financials_keeps_report_with_reported_notice_date() {
+        use crate::as_of::AS_OF;
+        let mut r = fin("2026-09-30");
+        r.disclosure_date = Some("2026-09-28".into());
+        let ctx =
+            AsOfContext::new(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), AsOfSource::UserReplay)
+                .unwrap();
+        let out = AS_OF
+            .scope(Some(ctx), async { AStockClient::truncate_financials_by_asof(vec![r]) })
+            .await;
+        assert_eq!(out.len(), 1, "已披露是事实，优先于推断的截止日");
+    }
+
+    /// 推断的截止日必须**已过**；自证的公告日当天即算。这条不对称本身要被锁住。
+    #[tokio::test]
+    async fn estimated_deadline_must_precede_asof_but_reported_date_may_equal_it() {
+        use crate::as_of::AS_OF;
+        let est = fin("2026-06-30"); // 法定截止 2026-08-31
+        let mut rep = fin("2026-06-30");
+        rep.disclosure_date = Some("2026-08-31".into());
+        let on_deadline =
+            AsOfContext::new(NaiveDate::from_ymd_opt(2026, 8, 31).unwrap(), AsOfSource::UserReplay)
+                .unwrap();
+        let out = AS_OF
+            .scope(Some(on_deadline), async {
+                AStockClient::truncate_financials_by_asof(vec![est.clone(), rep])
+            })
+            .await;
+        assert_eq!(out.len(), 1, "推断截止日当天不算已公开，自证公告日当天算");
+        assert_eq!(out[0].disclosure_date.as_deref(), Some("2026-08-31"));
+
+        let day_after =
+            AsOfContext::new(NaiveDate::from_ymd_opt(2026, 9, 1).unwrap(), AsOfSource::UserReplay)
+                .unwrap();
+        let out2 = AS_OF
+            .scope(Some(day_after), async { AStockClient::truncate_financials_by_asof(vec![est]) })
+            .await;
+        assert_eq!(out2.len(), 1, "截止日已过 ⇒ 推断可保留");
+    }
+
+    /// 报告期不是四类期末 ⇒ 无法推断披露日 ⇒ 丢弃**且必须留痕**，
+    /// 否则下游会把「证明不了」读成「该股没有财报」。
+    #[tokio::test]
+    async fn truncate_financials_drops_offcycle_period_and_records_degradation() {
+        use crate::as_of::{self, AS_OF};
+        let wm = as_of::global_degradation_seq_watermark();
+        let r = fin("2026-08-15");
+        let ctx =
+            AsOfContext::new(NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(), AsOfSource::UserReplay)
+                .unwrap();
+        let out = AS_OF
+            .scope(Some(ctx), async { AStockClient::truncate_financials_by_asof(vec![r]) })
+            .await;
+        assert!(out.is_empty(), "非期末报告期证明不了已公开 ⇒ 丢弃");
+        let fresh = as_of::take_global_degradations_since(wm);
+        assert!(
+            fresh.iter().any(|e| {
+                e.method == "truncate_financials_by_asof"
+                    && e.kind == crate::as_of::DegradationKind::Failure
+            }),
+            "丢弃必须记一条 Failure 级降级"
+        );
+    }
+
+    /// live 模式完全不裁（判据只在回放里生效），也不记降级。
+    #[test]
+    fn truncate_financials_is_noop_in_live_mode() {
+        let _ = crate::as_of::clear_global_asof();
+        let rs = vec![fin("2026-09-30"), fin("2026-08-15")];
+        let out = AStockClient::truncate_financials_by_asof(rs);
+        assert_eq!(out.len(), 2, "live 不裁披露日");
     }
 }
 

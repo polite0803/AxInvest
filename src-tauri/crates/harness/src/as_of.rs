@@ -133,6 +133,11 @@ pub enum AsOfDataKind {
     Rank,
 }
 
+/// 降级条目的模式取值（与 serde 输出同一套词表，避免两处漂移）
+pub const DEGRADATION_MODE_ASOF: &str = "asOf";
+/// 实盘（无 as-of 上下文）模式
+pub const DEGRADATION_MODE_LIVE: &str = "live";
+
 /// 降级的**严重度分档**（T14，2026-09-27）。
 ///
 /// 动因：降级条目此前只有一种形态 ⇒ 面板上「个股没有场内期权」和「接口 301 挂了」
@@ -167,6 +172,12 @@ pub struct DegradationEntry {
     pub method: String,
     pub reason: String,
     pub as_of: String,
+    /// 这条降级发生在哪个模式：`asOf`（回放）或 `live`（实盘）。
+    /// Q10（2026-10-03）之前 live 根本不记 ⇒「取数质量优先于事后降权」在实盘无读数。
+    /// 判据消费方**必须按 mode 过滤**：回放的豁免逻辑若把 live 条目也算进来，
+    /// 就会把「实盘降级过」当成「本轮回放降级过」而误豁免（同 `asof_degraded_methods` 的 R5 教训）。
+    #[serde(default)]
+    pub mode: String,
     /// 缺省 `Failure` ⇒ 新增分档时**宁可多标一档，也不把真故障洗白**
     #[serde(default)]
     pub kind: DegradationKind,

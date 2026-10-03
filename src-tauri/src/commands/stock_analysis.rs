@@ -734,7 +734,8 @@ use tauri::State;
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取降级条目总数")]
 #[tauri::command]
 pub fn get_asof_degradation_count() -> u64 {
-    as_of::global_degradation_count()
+    // Q10 之后缓冲含 live 条目 ⇒ 只数回放档
+    as_of::global_asof_degradation_count() as u64
 }
 
 /// 拉取最近 256 条全局降级日志(快照,不清空)。
@@ -742,7 +743,7 @@ pub fn get_asof_degradation_count() -> u64 {
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取降级日志")]
 #[tauri::command]
 pub fn get_asof_degradation_log() -> Vec<as_of::DegradationEntry> {
-    as_of::peek_global_degradation_report()
+    as_of::global_degradations_for_mode(axagent_astock_data::as_of::DEGRADATION_MODE_ASOF)
 }
 
 /// 清空全局降级缓冲(用户从 replay 切回 live 时调用,避免过期条目一直显示)。
@@ -3717,6 +3718,17 @@ pub async fn get_hot_stocks(
     })
 }
 
+#[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取涨停池")]
+#[tauri::command]
+pub async fn get_limit_up_pool(
+    state: State<'_, AppState>,
+    date: Option<String>,
+) -> Result<Option<axagent_astock_data::LimitUpPool>, String> {
+    state.astock_client.get_limit_up_pool(date.as_deref()).await.map_err(|e| {
+        ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("获取涨停池失败: {e}")).to_string()
+    })
+}
+
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "获取行业排名")]
 #[tauri::command]
 pub async fn get_industry_ranking(
@@ -4399,6 +4411,8 @@ pub async fn persist_reco_picks(
             seed_pool_json: Set(seed_pool_json.clone()),
             strategy_weights_json: Set(strategy_weights_json.clone()),
             pick_data: Set(pick_data),
+            // P2：算法归属必须随样本落库，否则闭环 IC 会把跨代样本混成一格（见常量文档）
+            reco_version: Set(Some(axagent_analysis_engine::recommender::RECO_ALGORITHM_VERSION)),
             created_at: Set(generated_at.to_string()),
         };
         // 插入失败不静默：此前 `let _ = insert(...)` 失败无感知，

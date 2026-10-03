@@ -92,6 +92,19 @@ export function formatCNY(v: number): string {
 }
 
 /**
+ * 金额 / 成交量等大数 → 中文计数单位串（`1.23亿`、`4567万`、`890`）。
+ *
+ * 单位是中文「亿/万」而非 SI 的 M/B —— 这是行情展示的既有口径（原为
+ * `DragonTigerPanel` 与 `IndustryRankingPanel` 的两份逐字副本，2026-10-03 收敛到此）。
+ * 需要本地化单位时另建函数，不要改本函数的口径。
+ */
+export function formatYi(v: number): string {
+  if (Math.abs(v) >= 1e8) { return `${(v / 1e8).toFixed(2)}亿`; }
+  if (Math.abs(v) >= 1e4) { return `${(v / 1e4).toFixed(0)}万`; }
+  return `${v.toFixed(0)}`;
+}
+
+/**
  * 字节数 → 文件大小（如 "—"、"0 B"、"1.5 MB"）。
  *
  * ⚠ 与 `formatBytes` 存在**三处口径差异，不可互换**（合并前须先做口径决策）：

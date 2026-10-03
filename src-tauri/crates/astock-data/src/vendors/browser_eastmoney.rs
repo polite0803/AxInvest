@@ -227,8 +227,18 @@ impl StockVendor for BrowserEastMoneyVendor {
         let klt = match period {
             "daily" | "101" | "Daily" => "101",
             "weekly" | "102" | "Weekly" => "102",
+            // 与直连 eastmoney 同表。此前**没有 15/30/60 分支** ⇒ 小时线落
+            // `_ => "101"`，webview 兜底静默把 60 分钟换成日线而 `scoreSource` 仍标
+            // `tier_native`（P1-7，2026-10-03 探分钟线可达性时查出）。
+            "15" | "Min15" => "15",
+            "30" | "Min30" => "30",
+            "60" | "Min60" => "60",
             "monthly" | "103" | "Monthly" => "103",
-            _ => "101",
+            other => {
+                return Err(DataError::ParseError(format!(
+                    "[browser_eastmoney] 不支持的 K 线周期 {other:?}（白名单：15/30/60/daily/weekly/monthly 及 101/102/103 别名）。                     **拒绝静默归日线** —— 拿日线冒充 60 分钟时，下游 `scoreSource` 仍会标 `tier_native`，                     超短档的错档在库里完全查不出来（P1-7，2026-10-03）。"
+                )));
+            },
         };
         // 修复 R3: 与 eastmoney vendor 一致，根据 adj 参数选择 fqt
         let fqt = match adj {
@@ -323,6 +333,7 @@ impl StockVendor for BrowserEastMoneyVendor {
                 goodwill: None,
                 accounts_receivable: None,
                 estimated: Some(false),
+                disclosure_date: None,
             });
         }
         Ok(result)

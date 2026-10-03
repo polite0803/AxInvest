@@ -219,6 +219,15 @@ jobs:
           node scripts/check-reco-horizon-parity.mjs --selftest
           node scripts/check-reco-horizon-parity.mjs
 
+      # P6 收口（2026-10-03）：这两道门此前只存在于 scripts/ 下、**不在 CI**，
+      # 而「可调参数五点对账」缺任一处时 `cargo check` 与 `typecheck` 全绿也照样存在
+      # （实证：`debate_rounds` 面板可调但不重展图 —— PLAN-four-horizon-workflow-alignment §四 需求⑤）。
+      # 本轮实测两者当前读数均为 0 命中 ⇒ 提为门禁。与本仓 scripts/ci-check.mjs 对应两条 step **逐字同源**。
+      - name: Check horizon weight parity + tunable-param injection coverage
+        run: |
+          node scripts/check-horizon-weight-parity.mjs
+          node scripts/audit-inject-coverage.mjs --strict
+
       - name: Check frontend formatting (dprint)
         run: npm run format:check
 

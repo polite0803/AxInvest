@@ -351,7 +351,28 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
         }),
         json!({
             "name": "get_hot_stocks",
-            "description": "获取同花顺强势股（当日强势股+题材归因标签）",
+            "description": "获取热股榜（同花顺真·热度榜：榜内名次、热度值、涨跌幅、题材标签）。注意这是人气口径，不是涨停池（涨停要查 get_limit_up_pool）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_limit_up_pool",
+            "description": "获取涨停池：逐票连板数/涨停天数（「3天2板」两轴分开）/封单额量/炸板次数/首末封板时间/板型/涨停逻辑，另给当日涨停家数·触板·封板率·炸板家数。date 省略即取当下；超出可回溯范围会明确报错（该日不可得），不会把空池当成「那天没有涨停」",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "YYYY-MM-DD，可选；回放时传分析截止日"
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "macro_data_snapshot",
+            "description": "获取中国宏观指标快照（GDP/CPI/PPI/制造业与非制造业 PMI 等，带统计期与发布日）。按发布日口径收窄：as-of 回放只取截止日已发布的期次，取不到的指标留空而不是用未来值",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -909,6 +930,9 @@ pub async fn execute_mcp_tool(
             | "search_news"
             | "get_market_dragon_tiger"
             | "get_hot_stocks"
+            // 涨停池与宏观快照都是**全市场**维度，没有个股参数（`date` 可选）
+            | "get_limit_up_pool"
+            | "macro_data_snapshot"
             | "get_industry_ranking"
             | "get_cls_flash"
             | "get_north_bound_flow"
@@ -1182,6 +1206,23 @@ pub async fn execute_mcp_tool(
         "get_hot_stocks" => {
             let hot = client.get_hot_stocks().await.map_err(|e| e.to_string())?;
             serde_json::to_string(&hot).map_err(|e| e.to_string())
+        },
+        "get_limit_up_pool" => {
+            // 空串按「未指定」处理：LLM 常把可选 string 传成 ""，直接透传会让
+            // vendor 拿 `date=` 打一次必失败的请求。
+            let date = arguments
+                .get("date")
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let pool = client.get_limit_up_pool(date).await.map_err(|e| e.to_string())?;
+            serde_json::to_string(&pool).map_err(|e| e.to_string())
+        },
+        "macro_data_snapshot" => {
+            // 与 Tauri 命令 `macro_data_snapshot` 同一实现（`MacroDataClient::snapshot`
+            // 内部已按 as-of 截止日收窄），不再复制一份口径。
+            let snap = crate::macro_data::MacroDataClient::new().snapshot().await;
+            serde_json::to_string(&snap).map_err(|e| e.to_string())
         },
         "get_industry_ranking" => {
             let ranking = client.get_industry_ranking().await.map_err(|e| e.to_string())?;
@@ -3126,7 +3167,12 @@ fn latest_annual_revenue(financials: &[FinancialReport]) -> Option<f64> {
 ///
 /// ⚠️ 依赖调用方**按报告期倒序**传入 `financials`（与 [`latest_annual_fcf`] 同一条前提）
 /// —— `take(N)` 取的即**最近** N 个年报。
-fn robust_annual_growth(financials: &[FinancialReport]) -> Option<(f64, usize)> {
+///
+/// `pub`：荐股链（趋势智选 `serenity`）的营收增速门**共用同一份口径**，
+/// 见 `PLAN-dcf-growth-single-point.md` §5 第 4 条（K5）—— 那条链原来也吃
+/// `financials[0].revenue_yoy` 单期值，同一个坏数据点在它那里不是「估值偏低」
+/// 而是「整只股票被增速门排除」，后果更硬。两处共用一份实现，不写第二遍（禁区 12）。
+pub fn robust_annual_growth(financials: &[FinancialReport]) -> Option<(f64, usize)> {
     let mut logs: Vec<f64> = financials
         .iter()
         .filter(|r| r.report_date.contains("-12-31"))
@@ -5069,6 +5115,7 @@ mod valuation_tests {
             goodwill: None,
             accounts_receivable: None,
             estimated: Some(false),
+            disclosure_date: None,
         }
     }
 

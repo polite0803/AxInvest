@@ -122,6 +122,14 @@ pub struct FinancialReport {
     /// 标记该报告是否为估值/行业均值 fallback（非真实财报数据）
     #[serde(default)]
     pub estimated: Option<bool>,
+    /// 该期报告的**实际披露（公告）日** `YYYY-MM-DD`。
+    ///
+    /// vendor 自证时填此字段；多数财务接口只回报告期不回公告日 ⇒ 留 `None`，
+    /// 由 [`FinancialReport::effective_disclosure_date`] 按 A 股法定披露截止日保守推断。
+    /// 为什么必须有它：as-of 回放按 `report_date` 截断会让「报告期 9-30、10 月底才披露」
+    /// 的财报在 10-01 就可见 = 前视泄露（P1-1，2026-10-03）。
+    #[serde(default)]
+    pub disclosure_date: Option<String>,
 }
 
 impl FinancialReport {
@@ -137,6 +145,39 @@ impl FinancialReport {
             || self.net_margin.is_some()
             || self.revenue_yoy.is_some()
             || self.profit_yoy.is_some()
+    }
+
+    /// 该期报告在 A 股规则下的**法定披露截止日**（定期报告：季报 +2 个月、半年报 +2 个月、
+    /// 年报次年 4-30）。只认四类期末，其它报告期返回 `None` —— 不猜。
+    pub fn statutory_disclosure_deadline(&self) -> Option<String> {
+        let d = self.report_date.get(..10)?;
+        let b = d.as_bytes();
+        if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+            return None;
+        }
+        let year: i32 = d.get(0..4)?.parse().ok()?;
+        let md = d.get(5..10)?;
+        let (y, rest) = match md {
+            "03-31" => (year, "04-30"),
+            "06-30" => (year, "08-31"),
+            "09-30" => (year, "10-31"),
+            "12-31" => (year + 1, "04-30"),
+            _ => return None,
+        };
+        Some(format!("{y:04}-{rest}"))
+    }
+
+    /// as-of 判「截止日时该期数据是否已公开」所用的披露日。
+    ///
+    /// `(日期, 来源)`：vendor 自证 ⇒ `reported`；只有报告期 ⇒ 按法定截止日推断 ⇒ `estimated`；
+    /// 两者都拿不到 ⇒ `None` ⇒ 调用方在回放里**必须丢弃**，不得当成「已公开」。
+    pub fn effective_disclosure_date(&self) -> Option<(String, &'static str)> {
+        if let Some(dd) =
+            self.disclosure_date.as_deref().and_then(|s| s.get(..10)).filter(|s| !s.is_empty())
+        {
+            return Some((dd.to_string(), "reported"));
+        }
+        self.statutory_disclosure_deadline().map(|d| (d, "estimated"))
     }
 }
 
@@ -265,5 +306,87 @@ pub fn get_st_price_limit_pct(is_st: bool, market_type: &str) -> f64 {
         5.0
     } else {
         get_price_limit_pct(market_type)
+    }
+}
+
+#[cfg(test)]
+mod financial_disclosure_tests {
+    use super::*;
+
+    fn rep(report_date: &str, disclosure_date: Option<&str>) -> FinancialReport {
+        FinancialReport {
+            stock_code: "000001".into(),
+            report_date: report_date.into(),
+            revenue: None,
+            net_profit: None,
+            eps: None,
+            bps: None,
+            roe: None,
+            debt_ratio: None,
+            gross_margin: None,
+            net_margin: None,
+            revenue_yoy: None,
+            profit_yoy: None,
+            total_assets: None,
+            operating_cash_flow: None,
+            capital_expenditure: None,
+            free_cash_flow: None,
+            current_ratio: None,
+            quick_ratio: None,
+            goodwill: None,
+            accounts_receivable: None,
+            estimated: Some(false),
+            disclosure_date: disclosure_date.map(Into::into),
+        }
+    }
+
+    #[test]
+    fn statutory_deadline_covers_four_period_ends_and_rolls_the_year() {
+        assert_eq!(
+            rep("2026-03-31", None).statutory_disclosure_deadline().as_deref(),
+            Some("2026-04-30")
+        );
+        assert_eq!(
+            rep("2026-06-30", None).statutory_disclosure_deadline().as_deref(),
+            Some("2026-08-31")
+        );
+        assert_eq!(
+            rep("2026-09-30", None).statutory_disclosure_deadline().as_deref(),
+            Some("2026-10-31")
+        );
+        // 年报落到**次年** 4-30 —— 跨年是最容易写错的一处
+        assert_eq!(
+            rep("2025-12-31", None).statutory_disclosure_deadline().as_deref(),
+            Some("2026-04-30")
+        );
+    }
+
+    #[test]
+    fn statutory_deadline_refuses_to_guess_offcycle_periods() {
+        // 带时间戳的期末（"2026-09-30 00:00:00"）**应当**推断，见下面那条测试；
+        // 这里只列真正不是期末的形态。
+        for d in ["2026-08-15", "", "garbage", "26-09-30", "2026-9-30"] {
+            assert_eq!(
+                rep(d, None).statutory_disclosure_deadline(),
+                None,
+                "非四类期末不推断: {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn effective_disclosure_date_prefers_vendor_notice_date() {
+        let r = rep("2026-09-30", Some("2026-10-08 00:00:00"));
+        assert_eq!(r.effective_disclosure_date(), Some(("2026-10-08".to_string(), "reported")));
+        // 公告日为空串 ⇒ 退回推断（而不是把空串当日期比出去）
+        let r2 = rep("2026-09-30", Some(""));
+        assert_eq!(r2.effective_disclosure_date(), Some(("2026-10-31".to_string(), "estimated")));
+    }
+
+    #[test]
+    fn long_timestamp_report_date_still_resolves_deadline() {
+        // 多数 vendor 回 "YYYY-MM-DD 00:00:00"
+        let r = rep("2026-12-31 00:00:00", None);
+        assert_eq!(r.statutory_disclosure_deadline().as_deref(), Some("2027-04-30"));
     }
 }

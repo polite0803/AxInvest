@@ -4,7 +4,13 @@ import i18next from "i18next";
 
 /** 面板 → 必需 vendor 列表（前端 UI 直接使用）*/
 export const PANEL_VENDORS: Record<string, string[]> = {
-  limitup: ["ths", "baidu_stock", "iwencai"],
+  // P9-4(2026-10-03)：涨停池收敛为**单源** —— 只有同花顺 `limit_up_pool` 按 `date` 返回当日池。
+  // 此前带 baidu_stock/iwencai 是跟着「热门股榜」的旧通道填的：本面板改吃 `get_limit_up_pool`
+  // 后那两个源一个都不提供该数据，留着会让 gate 在「只启了 baidu」时误判 ok、面板却空。
+  limitup: ["ths"],
+  // 热股榜同样只认同花顺 —— 旧的 screener 清单（eastmoney/tencent/ths/baidu/iwencai/akshare）
+  // 里除 ths 外没有一个供应热度榜，ANY-of 会让 gate 误判 ok 而面板空。
+  hotstocks: ["ths"],
   dragontiger: ["eastmoney", "baidu_stock"],
   sectors: ["ths", "baidu_stock"],
   north: ["ths", "baidu_stock"],

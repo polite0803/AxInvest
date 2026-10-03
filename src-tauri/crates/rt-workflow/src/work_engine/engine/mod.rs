@@ -97,6 +97,50 @@ pub type ToolResolver = Arc<
 >;
 
 /// 工作流运行选项
+/// 节点任务级作用域钩子：把「节点 future」包一层再交给调度器。
+///
+/// 为什么需要它（P1-8，2026-10-03）：`tokio::task_local` **不跨 spawn 传播**
+/// （本仓已用探针实证：`LocalKey` 没有同步 `enter`，只有 `scope`），
+/// 而引擎为每个节点单独 spawn 任务。实现层（`axagent-astock-data` 的 as-of 上下文）
+/// 于是只能靠一个**进程级**兜底栈读截止日 —— 那是全局单值：两条并发执行
+/// （不同截止日的回放，或回放与用户实盘分析）会互相读到对方的截止日。
+/// 这不是假设，是已发生过的事故（`astock-data/src/as_of.rs:64-70` 记录 2026-09-23
+/// 批量重跑把同进程的后续反思整体锁进回放模式，一条 `strategy_performance` 都没写）。
+///
+/// 引擎不认识任何具体语义（分层约束也不允许它认识），只做透明包装；`None` 时零额外逻辑。
+/// **多票批量并行回放（P8-⑦）必须先经本钩子传播 as-of，否则不安全。**
+pub type NodeTaskScopeHook = std::sync::Arc<dyn Fn(NodeTaskFuture) -> NodeTaskFuture + Send + Sync>;
+
+/// 节点任务 future 的装箱形态（本模块内部别名，避免引入 `futures` 依赖）。
+type NodeTaskFuture =
+    std::pin::Pin<std::boxed::Box<dyn std::future::Future<Output = NodeResult> + Send + 'static>>;
+
+/// 应用节点任务作用域钩子。
+fn apply_node_scope<F>(hook: &Option<NodeTaskScopeHook>, fut: F) -> NodeTaskFuture
+where
+    F: std::future::Future<Output = NodeResult> + Send + 'static,
+{
+    let boxed: NodeTaskFuture = std::boxed::Box::pin(fut);
+    match hook {
+        Some(h) => h(boxed),
+        None => boxed,
+    }
+}
+
+/// [`NodeTaskScopeHook`] 的唯一注册入口。
+///
+/// 调用方只提供「把 future 包一层」的高阶函数，**无需命名引擎内部类型**
+/// （参数类型由本函数签名反推）⇒ `NodeResult` 不会变成业务层的依赖。
+pub fn node_task_scope_hook<F, Fut>(wrap: F) -> NodeTaskScopeHook
+where
+    F: Fn(NodeTaskFuture) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = NodeResult> + Send + 'static,
+{
+    std::sync::Arc::new(move |fut: NodeTaskFuture| {
+        std::boxed::Box::pin(wrap(fut)) as NodeTaskFuture
+    })
+}
+
 #[derive(Clone)]
 pub struct RunOptions {
     pub max_concurrent: usize,
@@ -145,6 +189,8 @@ pub struct RunOptions {
     /// VERDICT tag 重构/strict JSON 校验/降级三道防线。
     /// None = 不启用（保持历史默认行为，所有 strict 代码路径不激活）。
     pub tool_permissions: Option<Arc<axagent_harness::tool::ToolPermissions>>,
+    /// 节点任务级作用域钩子，见 [`NodeTaskScopeHook`]
+    pub node_task_scope: Option<NodeTaskScopeHook>,
 }
 
 /// 心跳回调类型
@@ -194,6 +240,7 @@ impl std::fmt::Debug for RunOptions {
             .field("heartbeat_interval", &self.heartbeat_interval)
             .field("heartbeat_callback", &self.heartbeat_callback.is_some())
             .field("timeout_warning_callback", &self.timeout_warning_callback.is_some())
+            .field("node_task_scope", &self.node_task_scope.is_some())
             .field("tool_permissions", &self.tool_permissions.is_some())
             .finish()
     }
@@ -230,6 +277,7 @@ impl Default for RunOptions {
             heartbeat_callback: None,
             timeout_warning_callback: None,
             tool_permissions: None,
+            node_task_scope: None,
         }
     }
 }
@@ -3035,6 +3083,7 @@ impl WorkEngine {
                 set.extend(batch.iter().cloned());
             }
 
+            let node_scope_hook = options.node_task_scope.clone();
             let mut join_set: tokio::task::JoinSet<NodeResult> = tokio::task::JoinSet::new();
 
             for node_id in &batch {
@@ -3543,7 +3592,7 @@ impl WorkEngine {
                 let hb_started_at = started_at;
                 let hb_timeout = node_timeout;
 
-                join_set.spawn(async move {
+                join_set.spawn(apply_node_scope(&node_scope_hook, async move {
                     // ── 心跳机制：在节点执行期间定期发送心跳事件 ──
                     let heartbeat_cancel = CancellationToken::new();
                     let hb_node_id_for_hb = hb_node_id.clone();
@@ -3687,7 +3736,7 @@ impl WorkEngine {
                         elapsed_ms,
                         dispatch_result: result,
                     }
-                });
+                }));
             }
 
             let mut workflow_cancelled = false;
@@ -4575,7 +4624,7 @@ impl WorkEngine {
                             .clone()
                             .unwrap_or_else(|| cancel_token.clone());
 
-                        join_set.spawn(async move {
+                        join_set.spawn(apply_node_scope(&node_scope_hook, async move {
                             // 引擎级节点超时兜底：超时时 tokio::time::timeout 会 drop
                             // dispatch future，本节点 subworkflow 仍在 thread-local runtime
                             // 运行成孤儿执行。先克隆本节点子执行跟踪器，超时后 cancel 回收。
@@ -4609,7 +4658,7 @@ impl WorkEngine {
                                 elapsed_ms,
                                 dispatch_result: result,
                             }
-                        });
+                        }));
                     }
                 }
 

@@ -34,8 +34,10 @@ data_sources: [get_cls_flash, get_industry_ranking, get_stock_concept_blocks, ge
 
 你会收到以下数据：
 
-- **注意：个股热度数据（get_hot_stocks）已在 Phase 0 中移除**，因为该接口源于涨停板池，
-  与 Serenity "找未被定价的瓶颈"理念冲突。趋势扫描应依赖行业级信号而非个股热度。
+- **注意：`get_hot_stocks` 未列入本专家数据源，理由与旧文档不同。** 它在 Phase 0 被移除时，底层
+  打的其实是同花顺**涨停池**（2026-10-03 名目收编后已改成真·热度榜 fuyao hot_list）；当时那句
+  「因为该接口源于涨停板池」已不再成立，但结论不变——趋势扫描要的是行业级信号，个股人气对
+  「找未被定价的瓶颈」没有贡献。
 - `get_cls_flash()` 返回当日财联社实时快讯
 - `get_industry_ranking()` 返回行业涨跌排名
 - `get_concept_blocks()` 返回概念板块热度

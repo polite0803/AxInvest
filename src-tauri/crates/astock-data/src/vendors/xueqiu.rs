@@ -124,18 +124,28 @@ impl StockVendor for XueqiuVendor {
             return Ok(vec![]);
         }
         let symbol = to_xq_symbol(stock_code);
-        let period_map = |p: &str| -> &str {
+        let period_map = |p: &str| -> Option<&'static str> {
             match p {
-                "5" | "Min5" => "5m",
-                "15" | "Min15" => "15m",
-                "30" | "Min30" => "30m",
-                "60" | "Min60" => "60m",
-                "daily" | "101" | "Daily" => "day",
-                "weekly" | "102" | "Weekly" => "week",
-                "monthly" | "103" | "Monthly" => "month",
-                _ => "day",
+                "5" | "Min5" => Some("5m"),
+                "15" | "Min15" => Some("15m"),
+                "30" | "Min30" => Some("30m"),
+                "60" | "Min60" => Some("60m"),
+                "daily" | "101" | "Daily" => Some("day"),
+                "weekly" | "102" | "Weekly" => Some("week"),
+                "monthly" | "103" | "Monthly" => Some("month"),
+                // 未知周期 ⇒ None（P1-7）：原先 `_ => "day"` 会把 60 分钟静默换成日线，
+                // 而下游 `scoreSource` 仍标 `tier_native`，错档在库里查不出来。
+                other => {
+                    tracing::warn!("[xueqiu] 不支持的 K 线周期 {other:?}，显式失败交由路由换源");
+                    None
+                },
             }
         };
+        let xq_period = period_map(period).ok_or_else(|| {
+            DataError::ParseError(format!(
+                "[xueqiu] 不支持的 K 线周期 {period:?}（白名单：5/15/30/60 与 daily/weekly/monthly 别名）"
+            ))
+        })?;
         // 雪球复权: none=不复权, before=前复权, after=后复权
         let adj_type = match _adj {
             Some(AdjType::None) | None => "none",
@@ -146,7 +156,7 @@ impl StockVendor for XueqiuVendor {
         // begin=0 表示从最早开始
         let url = format!(
             "https://stock.xueqiu.com/v5/stock/chart/kline.json?symbol={symbol}&begin=0&period={}&type={}&count=-{}&indicator=kline,pe,pb",
-            period_map(period),
+            xq_period,
             adj_type,
             limit
         );
@@ -229,6 +239,7 @@ impl StockVendor for XueqiuVendor {
                     goodwill: None,
                     accounts_receivable: None,
                     estimated: Some(false),
+                    disclosure_date: None,
                 }
             })
             .collect())

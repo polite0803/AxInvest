@@ -869,6 +869,57 @@ impl NodeExecutorTrait for AgentExecutor {
             }
         }
 
+        // 4j. 逐档 VERDICT 字段契约注入（P3′ / R-11）
+        //
+        // 契约文本由 `Period::verdict_contract_prompt()` 按档位**渲染**，不手抄进各专家 md ——
+        // 手抄的清单必然与 `verdict_spec()` 漂移，而这张表同时是 prompt、Rhai 校验、CI 门三方的
+        // 唯一源。改表即改 prompt，不存在「md 写七项、门按八项判」那种中间态。
+        //
+        // 档位取值两条路都认（P4′ 之前不定死用哪条）：
+        //   ① 分支子工作流直接写一个 `horizon` 变量；
+        //   ② 节点 `input_mapping` 里 target_key 为 `horizon` 的映射（值按源路径解析）。
+        // **现状**分析师无档运行 ⇒ 两条路都取不到 ⇒ 不注入，现网 prompt 逐字不变；
+        // 本件因此可以独立落，不会造成「分析师出四档、打分只读一档」的两套分。
+        let horizon_val: Option<Value> = context.variables.get("horizon").cloned().or_else(|| {
+            an.config
+                .input_mapping
+                .iter()
+                .find(|(target, _)| target.as_str() == "horizon")
+                .and_then(|(_, source)| super::resolve_var_path(source, &context.variables))
+        });
+        let contract_horizon: Option<axagent_harness::Period> = match &horizon_val {
+            Some(hv) => {
+                match hv.as_str().and_then(|raw| raw.parse::<axagent_harness::Period>().ok()) {
+                    Some(period) => {
+                        tracing::debug!(
+                            node_id = %an.base.id,
+                            horizon = period.as_str(),
+                            "逐档 VERDICT 契约已按 verdict_spec 表注入"
+                        );
+                        Some(period)
+                    },
+                    // 取到了值但不是四档之一 = 配置错误。静默不注入会让「契约没生效」在现场
+                    // 看起来像「模型不守约」，必须留下能指回配置的声音（与 4g 悬空 mapping 同判据）。
+                    None => {
+                        tracing::warn!(
+                            node_id = %an.base.id,
+                            horizon = %hv,
+                            "horizon 不是四档之一（ultra_short|short|mid|long）⇒ 逐档 VERDICT 契约未注入"
+                        );
+                        None
+                    },
+                }
+            },
+            None => None,
+        };
+        if let Some(period) = contract_horizon {
+            all_segments.push(TemplateSegment::Static(period.verdict_contract_prompt()));
+        }
+        // 提醒语的「本清单非完整」声明要跟着契约走：四处工具轮提醒语原本只复述通用 6 键，
+        // 而在有契约的档位上，那等于在尾部又把模型收窄回 6 键 —— 688498 那次
+        // 「角色专属字段整组消失」的机制正是这样造出来的。
+        let spec_note = verdict_spec_note(contract_horizon);
+
         let compiled = CompiledPrompt { segments: all_segments, variable_refs: Vec::new() };
 
         // 拉取内建变量(可选)。由主 crate 在 as-of 模式下注入 data_freshness / as_of_date 等
@@ -1544,7 +1595,7 @@ impl NodeExecutorTrait for AgentExecutor {
                     role: "system".to_string(),
                     content: ChatContent::Text(
                         format!(
-                            "{}{VERDICT_SPEC_NOT_EXHAUSTIVE}",
+                            "{}{spec_note}",
                             "工具数据已获取。请基于上述工具结果直接输出最终分析结果，不要再调用工具。\
                          \n**重要**：分析报告末尾必须另起一行追加 VERDICT 标签，格式如下：\
                          \n<!-- VERDICT: {\"verdict\": \"看多|偏多|中性|偏空|看空\", \"bull_score\": 0-100, \"bear_score\": 0-100, \"bull_points\": [\"2-4条看多论据\"], \"bear_points\": [\"2-4条看空论据\"], \"confidence\": 0-100} -->\
@@ -1583,7 +1634,7 @@ impl NodeExecutorTrait for AgentExecutor {
                     role: "system".to_string(),
                     content: ChatContent::Text(
                         format!(
-                            "{}{VERDICT_SPEC_NOT_EXHAUSTIVE}",
+                            "{}{spec_note}",
                             "你已经获得了足够的工具数据。现在请基于这些数据直接输出最终分析结果，不要再调用任何工具。\
                          \n如果你已获得需要的数据，直接输出最终分析报告。不需要额外确认。\
                          \n**重要**：报告末尾必须另起一行追加 VERDICT 标签，格式如下：\
@@ -1706,14 +1757,14 @@ impl NodeExecutorTrait for AgentExecutor {
                             "你上一轮只输出了 VERDICT 结论标签，没有写分析正文 —— 结论标签不是报告。\
                              请基于以上工具数据撰写一份**完整的**分析报告正文，\
                              重点突出关键指标解读和风险评估（正文 800 字以内）。\
-                             报告末尾必须另起一行追加 VERDICT 机读标签（结论可与上一版一致）：{VERDICT_TAG_SPEC}{VERDICT_SPEC_NOT_EXHAUSTIVE}"
+                             报告末尾必须另起一行追加 VERDICT 机读标签（结论可与上一版一致）：{VERDICT_TAG_SPEC}{spec_note}"
                         )
                     } else {
                         format!(
                             "你是一位股票分析师。请基于以上工具数据和被截断的报告，\
                              重新生成一份**完整的**分析报告。\
                              \n报告正文控制在 800 字以内，重点突出关键指标解读和风险评估。\
-                             \n报告末尾必须另起一行追加 VERDICT 机读标签：{VERDICT_TAG_SPEC}{VERDICT_SPEC_NOT_EXHAUSTIVE}"
+                             \n报告末尾必须另起一行追加 VERDICT 机读标签：{VERDICT_TAG_SPEC}{spec_note}"
                         )
                     };
                     compact_messages.push(ChatMessage {
@@ -1742,7 +1793,7 @@ impl NodeExecutorTrait for AgentExecutor {
                         role: "system".to_string(),
                         content: ChatContent::Text(
                             format!(
-                                "{}{VERDICT_SPEC_NOT_EXHAUSTIVE}",
+                                "{}{spec_note}",
                                 "请基于上述数据输出最终分析报告（控制在 500 字以内），末尾追加 VERDICT 标签。\
                              \n<!-- VERDICT: {\"verdict\": \"看多|偏多|中性|偏空|看空\", \"bull_score\": 0-100, \"bear_score\": 0-100, \"bull_points\": [\"2-4条看多论据\"], \"bear_points\": [\"2-4条看空论据\"], \"confidence\": 0-100} -->\
                              \n缺少 VERDICT 标签或缺少 bull_points/bear_points 的输出将被视为无效。"
@@ -4515,6 +4566,24 @@ const VERDICT_MACHINE_FIELDS: [&str; 6] =
 /// 「无催化剂」降级，而 UI 只显示「缺失因子：催化剂等级」，与真取数故障无法区分。
 const VERDICT_SPEC_NOT_EXHAUSTIVE: &str = "\n注意：以上只列通用必需字段，**不是完整清单** —— 若上文角色规范的「输出格式」一节还声明了其它字段，必须一并输出，不得省略。";
 
+/// 提醒语的「本清单非完整」声明 —— 有档位时再加一句指向注入的逐档契约。
+///
+/// 为什么必须加：四处提醒语只复述通用 6 键。分档分支里尾部已注入该档因子清单，
+/// 提醒语若仍只列 6 键，等于在**最后一条消息**里把模型收窄回 6 键；
+/// 实证过的同型缺陷是 688498（a-catalyst 的 `catalyst_level` 等三个专属字段整组消失，
+/// 形状与该提醒语的清单逐字一致）。
+fn verdict_spec_note(horizon: Option<axagent_harness::Period>) -> String {
+    let mut note = VERDICT_SPEC_NOT_EXHAUSTIVE.to_string();
+    if let Some(p) = horizon {
+        note.push_str(&format!(
+            "\n且本节点属于 `{}` 档：还必须输出提示词尾部「本档 VERDICT 字段契约」列出的全部因子字段，
+并按契约写出 `notApplicable` / `qualified` —— 只回通用 6 键视为未按契约输出。",
+            p.as_str()
+        ));
+    }
+    note
+}
+
 fn extract_verdict_tag(text: &str) -> Option<String> {
     // 查找最后一个 <!-- VERDICT: 出现位置（取最后一个，因为正文中可能也有 HTML 注释）
     // 安全做法：直接在全文本上 rfind，不手动做字节切片
@@ -5421,5 +5490,30 @@ mod tool_json_salvage_tests {
         let inner = extract_tool_json_block(&fenced).expect("围栏内坏块应被救回");
         let v: Value = serde_json::from_str(&inner).expect("返回文本必须可解析");
         assert_eq!(v["name"], "submit_candidates");
+    }
+}
+
+#[cfg(test)]
+mod verdict_spec_note_tests {
+    use super::*;
+
+    /// 无档位时提醒语必须逐字等于原常量 —— 保证现网（分析师无档）文本零漂移。
+    #[test]
+    fn no_horizon_keeps_the_legacy_note_verbatim() {
+        assert_eq!(verdict_spec_note(None), VERDICT_SPEC_NOT_EXHAUSTIVE);
+    }
+
+    /// 有档位时必须点名该档并指向注入的契约；且仍保留原声明（角色专属字段那条不能丢）。
+    #[test]
+    fn per_horizon_note_points_at_the_injected_contract() {
+        let mid = verdict_spec_note(Some(axagent_harness::Period::Mid));
+        assert!(mid.contains("`mid`"), "没点出档位：{mid}");
+        assert!(mid.contains("本档 VERDICT 字段契约"), "没指向注入的契约：{mid}");
+        assert!(mid.starts_with(VERDICT_SPEC_NOT_EXHAUSTIVE), "把原有的「非完整清单」声明弄丢了");
+        assert_ne!(mid, verdict_spec_note(None), "四档提醒语与无档完全相同 ⇒ 分档指针没生效");
+        assert_ne!(
+            verdict_spec_note(Some(axagent_harness::Period::UltraShort)),
+            verdict_spec_note(Some(axagent_harness::Period::Long)),
+        );
     }
 }

@@ -95,6 +95,7 @@ impl StockVendor for AkshareVendor {
                     goodwill: None,
                     accounts_receivable: None,
                     estimated: Some(false),
+                    disclosure_date: None,
                 }
             })
             .collect())

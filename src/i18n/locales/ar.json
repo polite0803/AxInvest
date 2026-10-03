@@ -15690,7 +15690,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "poolSummary": "{{date}} · {{count}} سهم عند الحد الأقصى · نسبة الإغلاق {{rate}}% · {{break}} فتح اللوح",
+        "boardDays": "{{boards}} صعود بالحد الأقصى خلال {{days}} يوم",
+        "breakTimes": "{{n}}× فتح اللوح",
+        "sealAmount": "أوامر الشراء",
+        "rank": "الترتيب",
+        "hotValue": "الشعبية"
       },
       "optimize": {
         "success": "Weights optimized",

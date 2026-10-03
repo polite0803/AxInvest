@@ -163,7 +163,11 @@ impl StockVendor for BaiduStockVendor {
             "daily" | "101" | "Daily" | "8" => "day",
             "weekly" | "102" | "Weekly" | "9" => "week",
             "monthly" | "103" | "Monthly" | "10" => "month",
-            _ => "day",
+            other => {
+                return Err(DataError::ParseError(format!(
+                    "[baidu] 该源不支持分钟线，收到周期 {other:?} ⇒ 显式失败交由路由换源（P1-7）"
+                )));
+            },
         };
         let url = self.build_url(5353, &code, &format!("&type={ktype}&count={limit}"));
         let json = self.fetch_json(&url).await?;
@@ -243,6 +247,7 @@ impl StockVendor for BaiduStockVendor {
                 goodwill: None,
                 accounts_receivable: None,
                 estimated: Some(false),
+                disclosure_date: None,
             })
             .collect();
 
@@ -675,47 +680,6 @@ impl StockVendor for BaiduStockVendor {
             regions: vec![],
         }))
     }
-
-    async fn get_hot_stocks(&self) -> Result<Vec<HotStock>, DataError> {
-        let url = self.build_url(5359, "", "&type=hot");
-        let json = self.fetch_json(&url).await?;
-
-        let items = match json["Result"]["data"].as_array() {
-            Some(arr) => arr,
-            None => return Ok(vec![]),
-        };
-
-        Ok(items
-            .iter()
-            .filter_map(|item| {
-                let code = item.get("code")?.as_str()?.to_string();
-                let name = item.get("name")?.as_str()?.to_string();
-                let change_pct = item
-                    .get("changePct")
-                    .or_else(|| item.get("changepercent"))
-                    .and_then(val_to_f64)
-                    .unwrap_or(0.0);
-                let turnover_rate = item.get("turnoverRatio").and_then(val_to_f64);
-                let reason_tags = item
-                    .get("reasonTags")
-                    .and_then(|v| {
-                        v.as_str().map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
-                    })
-                    .unwrap_or_default();
-                let sector = item.get("industry").and_then(|v| v.as_str().map(|s| s.to_string()));
-
-                Some(HotStock {
-                    stock_code: code,
-                    stock_name: name,
-                    change_pct,
-                    turnover_rate,
-                    reason_tags,
-                    sector,
-                })
-            })
-            .collect())
-    }
-
     async fn get_industry_ranking(&self) -> Result<Vec<IndustryRank>, DataError> {
         let url = self.build_url(5359, "", "&type=ranking");
         let json = self.fetch_json(&url).await?;
@@ -853,7 +817,6 @@ mod capability_tests {
             "search_stock",
             "get_research_reports",
             "get_concept_blocks",
-            "get_hot_stocks",
             "get_industry_ranking",
             "get_north_bound_flow",
         ] {

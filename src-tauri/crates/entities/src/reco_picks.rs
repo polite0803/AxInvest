@@ -34,6 +34,15 @@ pub struct Model {
     /// 命令把上一次的荐股结果完整还原到前端,与实时拉取结果 schema 完全等价。
     /// 旧行(本 migration 之前生成的)此字段为 NULL,缓存读时被跳过。
     pub pick_data: Option<String>,
+    /// 产生这条推荐时的**荐股算法版本**（`recommender::RECO_ALGORITHM_VERSION`）。
+    ///
+    /// 为什么必须有：荐股闭环会按 rank IC 自动降权（`reco_loop` + `weight_decay`）。
+    /// 没有这一列，IC 就把「旧算法的预测」与「新算法的预测」混在同一格里配对 ⇒
+    /// 降权降的是混合体，而写回的权重作用于新算法。需求⑩原则 1/5（版本冻结、因子增删即升版）
+    /// 在这条链上此前**没有任何载体**。
+    /// `NULL` = 本列引入前的存量行，算法归属未知 ⇒ 同代筛样必须排除它（不得当作某版）。
+    #[serde(default)]
+    pub reco_version: Option<i32>,
     /// 记录创建时间
     pub created_at: String,
 }

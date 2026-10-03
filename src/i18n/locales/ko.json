@@ -15690,7 +15690,13 @@
         "noSector": "No sector data",
         "northTitle": "North Bound {{dir}} ({{date}})",
         "shFlow": "SH Connect",
-        "szFlow": "SZ Connect"
+        "szFlow": "SZ Connect",
+        "poolSummary": "{{date}} · 상한가 {{count}} 종목 · 봉착률 {{rate}}% · 이탈 {{break}} 종목",
+        "boardDays": "{{days}}일 간 {{boards}} 상한가",
+        "breakTimes": "{{n}}회 이탈",
+        "sealAmount": "매물봉",
+        "rank": "순위",
+        "hotValue": "인기도"
       },
       "optimize": {
         "success": "Weights optimized",

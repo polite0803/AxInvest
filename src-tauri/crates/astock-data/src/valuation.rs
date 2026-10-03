@@ -773,27 +773,46 @@ pub fn build_conclusion(i: ConclusionInputs<'_>) -> ValuationConclusion {
 
     // ── 腿间方向冲突（2026-10-02 K4）──────────────────────────────────────
     //
-    // 只判**方向相反**，不仲裁「谁对」—— 没有任何判据能说清正向 DCF 与相对估值
+    // 只判**方向相反**，不仲裁「谁对」—— 没有任何判据能说清现金流腿与相对估值
     // 谁更可信，硬选一个就是把猜测伪装成结论。故出口是**并列披露**，且随 headline
     // 一起输出（下游 Agent 与面板读的都是 headline，单独放字段里等于没说）。
+    //
+    // ⚠ 「现金流腿」取 `dcf` **或** `reverse_dcf` —— 覆盖面是实测补的：K2 会把高倍数
+    //   标的的 DCF 腿摘掉，此时矛盾**搬到** `reverse_dcf × relative`。只认 `dcf` 的后果
+    //   实测过：600276 修完 K1+K2 后 DCF 腿退出 legs，冲突分支**反而不再触发** ⇒
+    //   「PE 处自身四年 7% 分位」与「现价隐含需 21.6% 年复合」又只剩一句，等于没修。
+    //
+    // 文案**不解释谁对**：只并排两条证据 + 点明两者口径不可通约。现金流折现腿答
+    // 「绝对定价需要多激进的假设」，相对估值答「与自身历史/同行比在哪个分位」，
+    // 这两个问题**可以同时为真**——相对自己便宜，并不等于绝对定价不需要增长。
+    let cash_leg = legs
+        .iter()
+        .find(|l| (l.method == "dcf" || l.method == "reverse_dcf") && l.stance != "neutral");
     let conflicts: Vec<String> = match (
-        legs.iter().find(|l| l.method == "dcf").map(|l| l.stance.as_str()),
+        cash_leg.map(|l| l.stance.as_str()),
         relative_stance(&i.relative.verdict),
     ) {
-        (Some("bearish"), "bullish") => vec![format!(
-            "⚠ 腿间方向冲突：正向 DCF 判偏高，相对估值却判 {}（主指标 {}；{}）—— \
-             两句不可能同时为真。本模型对锚定 FCF 的折现倍数上界约 1/(折现率−永续增长率)，\
-             市场倍数高于该上界时正向 DCF **必然**报负 ⇒ 该负值属模型边界，不是高估幅度。",
-            i.relative.verdict,
-            i.relative.primary.clone().unwrap_or_default(),
-            i.relative.note
-        )],
-        (Some("bullish"), "bearish") => vec![format!(
-            "⚠ 腿间方向冲突：正向 DCF 判低估，相对估值却判 {}（主指标 {}；{}）—— 两句不可能同时为真。",
-            i.relative.verdict,
-            i.relative.primary.clone().unwrap_or_default(),
-            i.relative.note
-        )],
+        (Some(cash_stance), r_stance)
+            if (cash_stance == "bearish" && r_stance == "bullish")
+                || (cash_stance == "bullish" && r_stance == "bearish") =>
+        {
+            let cash = cash_leg.expect("match 已保证 cash_leg 存在");
+            let rel_evidence = legs
+                .iter()
+                .find(|l| l.method == "relative")
+                .map(|l| l.evidence.clone())
+                .unwrap_or_else(|| format!("相对估值口径 {}", i.relative.verdict));
+            vec![format!(
+                "⚠ 腿间方向冲突（两条必须一起读，不得只取一条当结论）：{}说「{}」；{}。                 两者口径不可通约 ⇒ 同时为真并不矛盾：绝对定价要多少增长，                 与这只股票相对自己历史贵不贵，是两个问题。",
+                if cash.method == "dcf" {
+                    "正向 DCF"
+                } else {
+                    "反向 DCF"
+                },
+                cash.evidence,
+                rel_evidence
+            )]
+        },
         _ => Vec::new(),
     };
     let headline = if conflicts.is_empty() {
@@ -1200,5 +1219,48 @@ mod tests {
             1,
             "DCF 看多 × 相对估值看空 ⇒ 反向冲突必须报"
         );
+    }
+
+    /// K4 的**覆盖面锁**（实施中实测补的）：K2 把 DCF 腿摘掉后，恒瑞的矛盾搬到
+    /// `reverse_dcf × relative`。若冲突判据只认 `dcf` 腿，则修完 K1+K2 后这条分支
+    /// **反而不再触发** ⇒ 用户看到的仍是单腿结论，等于没修。
+    #[test]
+    fn conflict_still_fires_when_dcf_leg_is_dropped_by_coverage_gate() {
+        let r = reverse_dcf(ReverseDcfInputs {
+            fcf_anchor: 82.73e8,
+            total_shares: 63.79e8,
+            current_price: 47.20,
+            discount_rate: 0.077,
+            perpetual_growth: 0.013,
+            min_terminal_spread: 0.015,
+            forecast_years: 5,
+            revenue_0: Some(316.29e8),
+            revenue_yoy: Some(4.23),
+        })
+        .expect("正锚 + 正现价 ⇒ 必有解");
+        let rel = relative_valuation(&[MetricInput {
+            name: "PE",
+            value: Some(40.5),
+            percentile: Some(7.0),
+            peer_values: vec![],
+        }]);
+        let c = build_conclusion(ConclusionInputs {
+            dcf_applicable: true,
+            dcf_upside_pct: Some(-61.8),
+            // K1 后的恒瑞：收益率 2.75% 过第一条地板，但乐观档只覆盖现价 56.9%
+            fcf_yield: Some(0.0275),
+            dcf_high_to_price: Some(0.569),
+            reverse: Some(&r),
+            relative: &rel,
+            graham_upside_pct: Some(-88.5),
+        });
+        // 前置：DCF 腿确实被摘（否则本测试没测到覆盖面）
+        assert_eq!(c.primary_method, "reverse_dcf");
+        assert!(!c.legs.iter().any(|l| l.method == "dcf"), "DCF 腿应已被覆盖率地板摘掉");
+        assert!(c.legs.iter().any(|l| l.method == "reverse_dcf" && l.stance == "bearish"));
+        assert_eq!(c.conflicts.len(), 1, "reverse_dcf × relative 反向 ⇒ 必须仍报冲突");
+        assert!(c.headline.contains("腿间方向冲突"), "{}", c.headline);
+        assert!(c.headline.contains("反向 DCF"), "冲突句要指名是哪条现金流腿：{}", c.headline);
+        assert!(c.headline.contains("deep_value"), "必须并排给出反向证据：{}", c.headline);
     }
 }

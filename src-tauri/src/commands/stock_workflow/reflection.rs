@@ -818,6 +818,8 @@ pub async fn run_reflection_workflow(
                     return_pct: Set(raw_return.unwrap_or(0.0)),
                     was_correct: Set(was_correct),
                     decision_confidence: Set(decision_confidence),
+                    // #31：与反思行同一个建点盖章 —— 被复盘决策的代际（权威仍是分析行）。
+                    template_version: Set(reflected_generation),
                     // 复盘档的客观判定切片（其余三档在 horizon_results_json）
                     horizon_pnl_json: Set(Some(
                         serde_json::json!({

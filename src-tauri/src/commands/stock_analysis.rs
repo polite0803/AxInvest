@@ -1940,6 +1940,11 @@ pub async fn backtest_analysis(
         decision_confidence as i32,
         None,
         None, // agreement_score: 回测无 LLM 对比
+        // #31：本通道拿不到代际（入参只有 analysis_date，没有 analysis_id ⇒ 同日多条分析时
+        // 归到哪一代是**猜**）⇒ 如实传 None。代价是这些样本不进权重分母（由起算代下限规则决定），
+        // 而仪表盘会把它计入「代际未知 N 条被排除」——可见，不是静默。要真接上得先把
+        // analysis_id 透传到本命令参数里（登记在 #31 的剩余项）。
+        None,
     )
     .await
     .map_err(|e| tracing::warn!("[backtest_analysis] record_performance 失败: {e}"))

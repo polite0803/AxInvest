@@ -34,6 +34,14 @@ pub struct Model {
     pub horizon_pnl_json: Option<String>,
     /// 公式 vs LLM 决策一致性分数（0-100，Phase 3 新增）
     pub agreement_score: Option<i32>,
+    /// 本行所**复盘的那条分析**所属的算法代际（= `stock_analyses.template_version` 的建点副本，
+    /// 与 `stock_reflections.template_version` 同源同值）。
+    ///
+    /// 为什么权重线也需要它：`compute_adjusted_weights` 的胜率就是「同一 (策略, 档) 的历史样本」，
+    /// 跨代混池算出来的胜率是两套判据的加权平均（#31 / PLAN §五十一-②）。
+    /// 读侧按 `HORIZON_BRANCH_GENERATION_FLOOR` **下限**筛（不是等号：等号每次换代都会清零窗口）。
+    /// NULL = 代际未知（本列引入前的存量行、对话直执行通道）⇒ 不进分母。
+    pub template_version: Option<i32>,
     pub created_at: i64,
 }
 

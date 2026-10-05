@@ -43,6 +43,10 @@ pub struct EvolutionDriftDashboard {
     pub recent_changes: Vec<RecentChangeRow>,
     /// 各策略汇总视图（按 strategy_id 聚合）
     pub strategy_summary: Vec<StrategySummaryRow>,
+    /// #31：窗口内因「早于起算代」被排除的样本数（旧代样本永久不可比）
+    pub excluded_pre_floor_generation: usize,
+    /// #31：窗口内因「代际未知」被排除的样本数（会随写侧补章而减少）
+    pub excluded_unknown_generation: usize,
 }
 
 /// 单条 (strategy, period) 统计
@@ -143,18 +147,16 @@ pub async fn load_performance_window(
     lookback_days: u32,
     as_of_date: Option<&str>,
 ) -> Result<Vec<StrategyPerformanceRow>, String> {
-    let cutoff = if let Some(d) = as_of_date {
-        // Replay 模式：以 as_of_date 当作"今天"
-        let date = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
-            .map_err(|e| format!("as_of_date 格式错误: {e}"))?;
-        let dt = date.and_hms_opt(0, 0, 0).ok_or_else(|| "无效日期".to_string())?;
-        dt.and_utc().timestamp_millis() - (lookback_days as i64) * 86_400_000
-    } else {
-        Utc::now().timestamp_millis() - (lookback_days as i64) * 86_400_000
-    };
+    let cutoff = window_cutoff_ms(lookback_days, as_of_date)?;
 
+    // #31 / PLAN §五十一-②：按**起算代际**筛样（下限，不是等号 —— 等号会让每次换代清零整个窗口）。
+    // 与统计侧（`reflection_stats`）同一条规则、同一个常量；NULL（代际未知）**不进分母**。
     let rows = strategy_performance::Entity::find()
         .filter(strategy_performance::Column::ExitAt.gte(cutoff))
+        .filter(
+            strategy_performance::Column::TemplateVersion
+                .gte(axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR),
+        )
         .all(db)
         .await
         .map_err(|e| format!("读取 strategy_performance 失败: {e}"))?;
@@ -168,6 +170,48 @@ pub async fn load_performance_window(
             exit_at: r.exit_at,
         })
         .collect())
+}
+
+/// 窗口内**因代际被排除**的样本数（早于起算代 / 代际未知分开计数）。
+///
+/// 为什么单独一个函数而不是塞进 `load_performance_window` 的返回值：那个函数被三条路径共用
+/// （重算 / 仪表盘 / 进化搜索），它们的返回类型各不相同；而「被排除多少」只有仪表盘要展示。
+/// 分开也避免了「为了报个数而改三处签名」。
+pub async fn count_excluded_performance_window(
+    db: &DatabaseConnection,
+    lookback_days: u32,
+    as_of_date: Option<&str>,
+) -> Result<(usize, usize), String> {
+    let cutoff = window_cutoff_ms(lookback_days, as_of_date)?;
+    let rows = strategy_performance::Entity::find()
+        .filter(strategy_performance::Column::ExitAt.gte(cutoff))
+        .all(db)
+        .await
+        .map_err(|e| format!("读取 strategy_performance 失败: {e}"))?;
+    let floor = axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
+    let mut pre_floor = 0usize;
+    let mut unknown = 0usize;
+    for r in &rows {
+        match r.template_version {
+            Some(v) if v >= floor => {},
+            Some(_) => pre_floor += 1,
+            None => unknown += 1,
+        }
+    }
+    Ok((pre_floor, unknown))
+}
+
+/// 时间窗左端（ms）—— 三条路径共用，避免同一条到期口径被抄三遍。
+fn window_cutoff_ms(lookback_days: u32, as_of_date: Option<&str>) -> Result<i64, String> {
+    if let Some(d) = as_of_date {
+        // Replay 模式：以 as_of_date 当作"今天"
+        let date = chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+            .map_err(|e| format!("as_of_date 格式错误: {e}"))?;
+        let dt = date.and_hms_opt(0, 0, 0).ok_or_else(|| "无效日期".to_string())?;
+        Ok(dt.and_utc().timestamp_millis() - (lookback_days as i64) * 86_400_000)
+    } else {
+        Ok(Utc::now().timestamp_millis() - (lookback_days as i64) * 86_400_000)
+    }
 }
 
 /// 重算并写回所有 (strategy, period) 权重调整
@@ -342,12 +386,19 @@ pub async fn get_dashboard(
     let weight_only: HashMap<(String, String), f64> =
         new_map.iter().map(|(k, v)| (k.clone(), v.new_weight)).collect();
 
+    // #31：把「被代际排除多少」一并报出 —— 否则面板只看到样本变少，
+    // 分不清「旧代不可比」与「还没盖章」（两者处置不同）。
+    let (excluded_pre_floor_generation, excluded_unknown_generation) =
+        count_excluded_performance_window(db, cfg.lookback_days, as_of_date).await?;
+
     Ok(EvolutionDriftDashboard {
         current_weights: weight_only,
         last_recalc_at,
         stats,
         recent_changes,
         strategy_summary,
+        excluded_pre_floor_generation,
+        excluded_unknown_generation,
     })
 }
 
@@ -405,6 +456,11 @@ pub async fn record_performance(
     decision_confidence: i32,
     horizon_pnl_json: Option<&str>,
     agreement_score: Option<i32>,
+    // #31：本行对应的**决策所属算法代际**（权威 = 被复盘分析的 `template_version`）。
+    // 调用方拿不到就传 `None` —— 那表示「代际未知」，读侧（`load_performance_window`）
+    // 按 `HORIZON_BRANCH_GENERATION_FLOOR` 的下限规则把它排除在权重分母外。
+    // ⚠ **不要在这里退回任何默认代**：把「不知道」写成「就是这一代」会让跨代样本混进胜率。
+    template_version: Option<i32>,
 ) -> Result<String, String> {
     let now = Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
@@ -422,6 +478,7 @@ pub async fn record_performance(
         decision_confidence: Set(decision_confidence),
         horizon_pnl_json: Set(horizon_pnl_json.map(|s| s.to_string())),
         agreement_score: Set(agreement_score),
+        template_version: Set(template_version),
         created_at: Set(now),
     };
     strategy_performance::Entity::insert(am)
@@ -443,6 +500,8 @@ mod tests {
             stats: vec![],
             recent_changes: vec![],
             strategy_summary: vec![],
+            excluded_pre_floor_generation: 3,
+            excluded_unknown_generation: 5,
         };
         let json = serde_json::to_string(&d).unwrap();
         assert!(json.contains("\"currentWeights\""), "camelCase 序列化");
@@ -543,5 +602,61 @@ mod tests {
         let map2 = load_current_weights(db).await.unwrap();
         let got2 = map2.get(&("s1".to_string(), "short".to_string())).copied();
         assert_eq!(got2, Some(0.42), "负控：演化权重改写后读取结果必须随之变（正负对照区分力）");
+    }
+
+    /// #31：权重窗口**按起算代际**筛样（下限），且两类排除分开计数。
+    ///
+    /// 为什么这条必须有：权重线的分母是「同 (策略, 档) 的历史样本」，跨代混池算出的胜率
+    /// 是两套判据的加权平均 —— 而它直接决定下一轮的策略权重。
+    /// 夹具刻意放四个代际：`floor-1`（旧代）/`floor`（恰在起算代）/`floor+4`（起算代之后）/
+    /// NULL（代际未知）⇒ 只要有人把实现改成**等号**，`floor+4` 那条当场掉出分母。
+    #[tokio::test]
+    async fn performance_window_filters_pre_floor_and_unknown_generations() {
+        use axagent_entities::strategy_performance;
+        use sea_orm::{EntityTrait, Set};
+
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应可创建").conn;
+        let floor = axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
+        let now = Utc::now().timestamp_millis();
+        // ⚠ `gen` 在 Rust 2024 是**保留字**（generator）⇒ 形参只能叫别的名字
+        let row = |sid: &str, generation: Option<i32>| strategy_performance::ActiveModel {
+            id: Set(Uuid::new_v4().to_string()),
+            strategy_id: Set(sid.to_string()),
+            period: Set("reflection:mid".to_string()),
+            stock_code: Set("600519".to_string()),
+            stock_name: Set("贵州茅台".to_string()),
+            decision_at: Set(now - 5 * 86_400_000),
+            exit_at: Set(now),
+            holding_days: Set(5),
+            return_pct: Set(1.0),
+            was_correct: Set(1),
+            decision_confidence: Set(50),
+            horizon_pnl_json: Set(None),
+            agreement_score: Set(None),
+            template_version: Set(generation),
+            created_at: Set(now),
+        };
+        for (sid, generation) in [
+            ("w-old", Some(floor - 1)),
+            ("w-at", Some(floor)),
+            ("w-after", Some(floor + 4)),
+            ("w-unknown", None),
+        ] {
+            strategy_performance::Entity::insert(row(sid, generation))
+                .exec(&db)
+                .await
+                .expect("插入绩效行应成功");
+        }
+
+        let rows = load_performance_window(&db, 30, None).await.expect("窗口装载应成功");
+        let ids: Vec<&str> = rows.iter().map(|r| r.strategy_id.as_str()).collect();
+        assert!(ids.contains(&"w-at"), "恰在起算代的样本必须进窗口: {ids:?}");
+        assert!(ids.contains(&"w-after"), "起算代之后的样本必须进窗口（等号实现会误杀）: {ids:?}");
+        assert!(!ids.contains(&"w-old"), "早于起算代的样本不得进权重窗口: {ids:?}");
+        assert!(!ids.contains(&"w-unknown"), "代际未知的样本不得进权重窗口: {ids:?}");
+
+        let (pre, unk) =
+            count_excluded_performance_window(&db, 30, None).await.expect("计数应成功");
+        assert_eq!((pre, unk), (1, 1), "两类排除必须分开计数且如实（合成一个数就看不出处置差异）");
     }
 }

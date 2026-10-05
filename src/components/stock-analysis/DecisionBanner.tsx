@@ -6,15 +6,18 @@ import { invoke } from "@/lib/invoke";
 import { exportAnalysisReport } from "@/lib/stock-analysis-export";
 import { type ExportData, type ExportFormat } from "@/lib/stock-analysis-export";
 import {
+  actionSourceLabelKey,
   actionToDirection,
   agreementBgColor,
   agreementColor,
   computeStockConsensus,
+  confidenceSourceLabelKey,
   getActionColor,
   getActionTKey,
   getRiskColor,
   getRiskTKey,
-  HORIZON_CAMEL_TO_SNAKE,
+  HORIZON_T_SUFFIX,
+  readDecisionProvenance,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
@@ -666,6 +669,47 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     }`)
     : null;
 
+  // ── 主档来历（v127，PLAN §五十三 ①）──
+  // 档是分支选的、action 可能被后置规则**单向降级** ⇒ 不成句说明就会与下方四档并列互斥
+  //   （000710 实测「主档持有 / 超短线 chip 买入」，唯一解释藏在 reasoning 的中文句子里）。
+  // v127 之前的记录没有 `actionSource` ⇒ 整行不渲染，不给旧记录编一个它没有的来历。
+  // 定义在此而非内联：工作区嵌入版标题行与主标题行**都要用**，两处各写一份迟早漂移。
+  const provenanceLine = (() => {
+    const prov = readDecisionProvenance({
+      actionSource: decision.actionSource,
+      confidenceSource: decision.confidenceSource,
+      timeHorizon: decision.timeHorizon ?? undefined,
+      decisionsByHorizon: decision.decisionsByHorizon ?? undefined,
+    } as Record<string, unknown>);
+    if (!prov) { return null; }
+    const srcLabel = actionSourceLabelKey(prov.actionSource);
+    if (!srcLabel) { return null; }
+    const horizonName = prov.horizon && HORIZON_T_SUFFIX[prov.horizon]
+      ? t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[prov.horizon]}`)
+      : timeHorizonLabel ?? "";
+    const actionText = t(getActionTKey(decision.action));
+    const body = prov.kind === "downgraded"
+      ? t("stockAnalysis.decisionProvenanceDowngraded", {
+        horizon: horizonName,
+        branchAction: t(getActionTKey(prov.branchAction ?? "")),
+        reason: t(srcLabel),
+        action: actionText,
+      })
+      : prov.kind === "direct"
+      ? t("stockAnalysis.decisionProvenanceDirect", { horizon: horizonName, action: actionText })
+      : t(srcLabel);
+    // 置信口径只在**不是**所选档时点名（那才是读者会误读的一格）
+    const confSrcKey = prov.confidenceSource === "main_chain_posterior"
+      ? confidenceSourceLabelKey(prov.confidenceSource)
+      : null;
+    return (
+      <span className="text-xs" style={{ color: "var(--muted)" }}>
+        {body}
+        {confSrcKey ? ` · ${t(confSrcKey)}` : ""}
+      </span>
+    );
+  })();
+
   // 阶段1（PROPOSAL-stock-decision-four-horizon.md）：四周期价位映射展示。
   // 遍历固定的四个键 → i18n 标签，仅在有值（stopLossPct > 0，即该周期有交易计划）时渲染。
   const HORIZON_KEYS: ReadonlyArray<{ key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string }> = [
@@ -740,6 +784,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                 {timeHorizonLabel}
               </Tag>
             )}
+            {provenanceLine}
             {
               /* 决策可信度受限（权重坍缩 + 数据缺口）：由共享组件统一渲染。
                 原实现只覆盖 weightsCollapsed，且该字段被 normalizeDecision 的
@@ -914,6 +959,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                       }`)}
                     </Tag>
                   )}
+                  {provenanceLine}
                   {/* 决策可信度受限：标题行用紧凑标签，完整警示条在下方正文区 */}
                   <DecisionTrustNotice decision={decision} variant="tag" />
                 </div>
@@ -1498,12 +1544,6 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           {d.verdict}
                         </div>
                       )}
-                      {/* 超短线 confLowerBound 标注 */}
-                      {d.confLowerBound != null && (
-                        <div className="text-xs" style={{ color: "var(--muted)" }}>
-                          {t("stockAnalysis.confLowerBoundHint", { bound: d.confLowerBound })}
-                        </div>
-                      )}
                       {
                         /* Phase F：结构性缺席与同源各占一句。
                           「该档没有独立粒度的输入」与「该档算出低分」是两件事，合并成一句
@@ -1521,44 +1561,142 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           {t("stockAnalysis.horizonScoreFallbackHint")}
                         </div>
                       )}
-                      {(d.sharesPosteriorWith?.length ?? 0) > 0 && (
-                        <div className="text-xs" style={{ color: "var(--muted)" }}>
-                          {t("stockAnalysis.horizonSharesPosteriorHint", {
-                            peers: (d.sharesPosteriorWith ?? [])
-                              .map((k) => {
-                                const hit = HORIZON_KEYS.find((h) =>
-                                  h.key === k
-                                );
-                                return hit ? t(`stockAnalysis.timeHorizon${hit.tSuffix}`) : k;
-                              })
-                              .join("、"),
-                          })}
+                      {
+                        /* 阶段1（PLAN §四十八 Q2-B，2026-10-04 拍板）：方向成立但**无可执行计划**。
+                          本档 action 是方向族（买/卖族）而仓位为 0 或赔率为 0（σ 带 / 止盈止损不可得）时，
+                          「买入」只是一个方向标签，不是一注可执行的交易。裁定是**保留方向**
+                          （不悄悄降级成观望），但必须并列成句 —— 否则「买入 · 仓位 0%」并排出现
+                          就是让读者自己猜哪一个是真的。观望/持有不触发：0 仓位对它们是正常态。 */
+                      }
+                      {(dir === "buy" || dir === "sell")
+                        && (d.positionPct ?? 0) <= 0
+                        && (d.odds ?? 0) <= 0 && (
+                        <div
+                          className="text-xs"
+                          style={{
+                            color: "var(--sa-amber, #f59e0b)",
+                            borderLeft: "2px solid var(--sa-amber, #f59e0b)",
+                            paddingLeft: 6,
+                          }}
+                        >
+                          {t("stockAnalysis.horizonNoExecutablePlan")}
                         </div>
                       )}
                       {
-                        /* 口径调整（**不是**数据缺口）：本档按周期主动降权的腿。
-                          后端只登记**真被下调**的档（`weightAdjustments`，结构化 tier/leg/multiplier，
-                          见 `@/types` 该字段文档）。此前它与真缺口同挤 `data_gaps` ⇒
-                          每张带估值数据的卡都恒亮「决策可信度受限 / 数据缺口 2 项」
-                          （f5 的 0.3/0.5 是权威表里的常量，凡有估值证据必命中）。
-                          现落在**该档自己的**脚注上：点哪一档，就看得到那一档哪条腿被降权、乘数多少。
-                          `leg === "f5"` 是本注脚文案的前置（文案本身写的就是估值腿）——
-                          未来若第二条腿也要降权，须同时补文案键，而不是让这句话去描述别的腿。 */
+                        /* 阶段1（Q3-A）：逐档证据上屏。四档结论不同是**算法与腿集**不同造成的
+                          （R-11），只给四个 action 就等于把「为什么不同」留在后端 —— 读者只能把
+                          差异读成噪声或矛盾。以下每一项都直接取分支自证字段，不在前端重算。
+                          ⚠ 口径值（gate/exitRule/confidenceMethod 等）是 Rust 权威表的**机器 token**，
+                          刻意原样显示（mono）而非翻成中文：翻一份就得维护第二套值域，
+                          而值域权威在 `evidence_weight::horizon_branch_specs`。 */
                       }
-                      {(decision.weightAdjustments ?? [])
-                        .filter((a) =>
-                          a.leg === "f5"
-                          && a.tier === (HORIZON_CAMEL_TO_SNAKE[activeEntry.key] ?? activeEntry.key)
-                        )
-                        .map((a) => (
-                          <div
-                            key={`${a.tier}-${a.leg}`}
-                            className="text-xs"
-                            style={{ color: "var(--muted)" }}
-                          >
-                            {t("stockAnalysis.horizonLegDownweight", { mult: a.multiplier })}
-                          </div>
-                        ))}
+                      <div className="flex items-center gap-1.5 text-xs flex-wrap" style={{ color: "var(--muted)" }}>
+                        {d.entryGate && (
+                          <span>
+                            {t("stockAnalysis.horizonEntryGateLabel")}
+                            : <span className="font-mono">{d.entryGate}</span> {d.entryGatePassed
+                              ? t("stockAnalysis.horizonGatePassed")
+                              : d.gateBasis === "unjudged"
+                              ? t("stockAnalysis.horizonGateUnjudged")
+                              : t("stockAnalysis.horizonGateFailed")}
+                          </span>
+                        )}
+                        {d.exitRule && (
+                          <span>
+                            {t("stockAnalysis.horizonExitRuleLabel")}
+                            : <span className="font-mono">{d.exitRule}</span>
+                          </span>
+                        )}
+                        {d.confidenceMethod && (
+                          <span>
+                            {t("stockAnalysis.horizonConfidenceMethodLabel")}
+                            : <span className="font-mono">{d.confidenceMethod}</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs flex-wrap" style={{ color: "var(--muted)" }}>
+                        {d.odds != null && (
+                          <span>
+                            {t("stockAnalysis.horizonOddsLabel")}
+                            : <span className="font-mono">{d.odds}</span>
+                          </span>
+                        )}
+                        {d.evidenceScale != null && (
+                          <span>
+                            {t("stockAnalysis.horizonEvidenceScaleLabel")}
+                            : <span className="font-mono">{d.evidenceScale}%</span>
+                          </span>
+                        )}
+                        {d.priorSource && (
+                          <span>
+                            {t("stockAnalysis.horizonPriorLabel", {
+                              source: d.priorSource,
+                              n: d.priorSamples ?? 0,
+                            })}
+                          </span>
+                        )}
+                      </div>
+                      {
+                        /* 先验样本为 0 ⇒ 单列成句：这一档的「先验」其实借自全档合并基准，
+                          不是本档自己的历史命中率（R-11 想要的逐档先验在该票上尚未成立）。 */
+                      }
+                      {d.priorSource != null && (d.priorSamples ?? 0) === 0 && (
+                        <div className="text-xs" style={{ color: "var(--sa-amber, #f59e0b)" }}>
+                          {t("stockAnalysis.horizonPriorNoSamples")}
+                        </div>
+                      )}
+                      {((d.legs?.length ?? 0) > 0 || (d.absentLegs?.length ?? 0) > 0) && (
+                        <div className="text-xs" style={{ color: "var(--muted)" }}>
+                          {(d.legs?.length ?? 0) > 0 && (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span>{t("stockAnalysis.horizonLegsLabel", { count: d.legs?.length ?? 0 })}</span>
+                              {(d.legs ?? []).map((l) => (
+                                <span
+                                  key={`${activeEntry.key}-leg-${l.factor}`}
+                                  className="font-mono"
+                                  style={{ color: "var(--color-text-secondary)" }}
+                                >
+                                  {l.factor}
+                                  {l.role && l.role !== "direction" ? `(${l.role})` : ""}
+                                  {l.weight != null ? `×${l.weight}` : ""}
+                                  {l.signal != null ? `=${l.signal}` : ""}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {(d.absentLegs?.length ?? 0) > 0 && (
+                            <div
+                              className="flex items-center gap-1.5 flex-wrap"
+                              style={{ color: "var(--sa-amber, #f59e0b)" }}
+                            >
+                              <span>
+                                {t("stockAnalysis.horizonAbsentLegsLabel", { count: d.absentLegs?.length ?? 0 })}
+                              </span>
+                              {(d.absentLegs ?? []).map((f) => (
+                                <span key={`${activeEntry.key}-absent-${f}`} className="font-mono">
+                                  {f}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {(d.dataGaps?.length ?? 0) > 0 && (
+                        <div className="text-xs" style={{ color: "var(--muted)" }}>
+                          <div>{t("stockAnalysis.horizonTierGapsLabel", { count: d.dataGaps?.length ?? 0 })}</div>
+                          {(d.dataGaps ?? []).map((g, i) => (
+                            <div key={`${activeEntry.key}-gap-${i}`} style={{ color: "var(--color-text-secondary)" }}>
+                              · {g}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {
+                        /* 2026-10-04 R-11 退役三块脚注：`confLowerBound`（方案B 已撤）、
+                          `sharesPosteriorWith`（同源注脚随闭包退役）、`weightAdjustments`
+                          （逐档乘数表退役 ⇒ 后端恒空）。留在这里会变成「读一个永不到货的字段」，
+                          与本文件其余判据相反：缺席要成句，而这三句的主语已经不存在了。 */
+                      }
                     </div>
                   );
                 })()}

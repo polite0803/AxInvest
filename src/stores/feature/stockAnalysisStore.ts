@@ -6,7 +6,6 @@ import {
   extractDecision,
   extractJevJudgment,
   extractValuationApplicability,
-  isWeightAdjustment,
   type JevJudgment,
   normalizeDecision,
   parseDecisionExplanation,
@@ -1742,11 +1741,6 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         dataGaps: Array.isArray(d.data_gaps)
           ? (d.data_gaps as unknown[]).filter((g): g is string => typeof g === "string")
           : undefined,
-        // 口径调整（**不是**缺口）：同样与 `normalizeDecision` 对齐 —— 漏了则重跑后四档面板
-        // 的降权注脚整体消失（同一类「重跑路径漏字段 ⇒ 提示消失」缺陷，2026-09-21 已踩过）。
-        weightAdjustments: Array.isArray(d.weightAdjustments)
-          ? (d.weightAdjustments as unknown[]).filter(isWeightAdjustment)
-          : undefined,
         isContradictory: d.isContradictory === true,
         // 跨系统互证（趋势智选 vs 工作流 分歧报告 + 归因）：后端 `rerun_decision` 已回注
         // （decision.rs 的 inject_reco_crosscheck），此处漏拷贝 ⇒ 重跑后报告整体消失，
@@ -3001,7 +2995,18 @@ const NODE_CLASS_TABLE: NodeClassEntry[] = [
     exact: true,
   },
   {
-    match: ["agg-risk", "cls-risk-level", "v-validate", "notify-result"],
+    match: [
+      "agg-risk",
+      "cls-risk-level",
+      // v128（B1）四个逐档风险节点与全局节点同阶段（决策后处理），
+      // 漏一个则该节点的进度事件落不进阶段 4 —— 运行期表现为「卡片少一格」而非报错。
+      "cls-risk-level-ultra-short",
+      "cls-risk-level-short",
+      "cls-risk-level-mid",
+      "cls-risk-level-long",
+      "v-validate",
+      "notify-result",
+    ],
     stage: 4,
     phase: null,
     evidence: [],

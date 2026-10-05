@@ -1,10 +1,13 @@
 import { invoke } from "@/lib/invoke";
 import {
+  actionSourceLabelKey,
+  confidenceSourceLabelKey,
   FAST_TEMPLATE_ID,
   getActionTagStyle,
   getActionTKey,
   HORIZON_T_SUFFIX,
   horizonSourceLabelKey,
+  readDecisionProvenance,
   readHorizonActions,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
@@ -385,6 +388,44 @@ export function AnalysisHistoryButton() {
                             return (
                               <div style={{ fontSize: 10, color: "var(--muted, #888)", lineHeight: 1.2 }}>
                                 {parts.join(" · ")}
+                              </div>
+                            );
+                          })()}
+
+                          {
+                            /* 主档来历（§五十三 ①，v127）：与 HistoricalAnalysisPanel 同一判据 ——
+                              主档可能是「所选档被后置规则单向降级」的结果，不成句说明就会与
+                              四档 chips 同屏互斥。v127 之前的记录无此字段 ⇒ 不渲染、不编造。 */
+                          }
+                          {(() => {
+                            const prov = readDecisionProvenance(r.decisionJson);
+                            if (!prov) { return null; }
+                            const srcLabel = actionSourceLabelKey(prov.actionSource);
+                            if (!srcLabel) { return null; }
+                            const horizonName = prov.horizon && HORIZON_T_SUFFIX[prov.horizon]
+                              ? t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[prov.horizon]}`)
+                              : "";
+                            const actionText = t(getActionTKey(decisionInfo(r)?.action ?? ""));
+                            const body = prov.kind === "downgraded"
+                              ? t("stockAnalysis.decisionProvenanceDowngraded", {
+                                horizon: horizonName,
+                                branchAction: t(getActionTKey(prov.branchAction ?? "")),
+                                reason: t(srcLabel),
+                                action: actionText,
+                              })
+                              : prov.kind === "direct"
+                              ? t("stockAnalysis.decisionProvenanceDirect", {
+                                horizon: horizonName,
+                                action: actionText,
+                              })
+                              : t(srcLabel);
+                            const confSrcKey = prov.confidenceSource === "main_chain_posterior"
+                              ? confidenceSourceLabelKey(prov.confidenceSource)
+                              : null;
+                            return (
+                              <div style={{ fontSize: 10, color: "var(--muted, #888)", lineHeight: 1.2 }}>
+                                {body}
+                                {confSrcKey ? ` · ${t(confSrcKey)}` : ""}
                               </div>
                             );
                           })()}

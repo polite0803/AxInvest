@@ -225,8 +225,41 @@ jobs:
       # 本轮实测两者当前读数均为 0 命中 ⇒ 提为门禁。与本仓 scripts/ci-check.mjs 对应两条 step **逐字同源**。
       - name: Check horizon weight parity + tunable-param injection coverage
         run: |
+          node scripts/check-horizon-weight-parity.mjs --selftest
           node scripts/check-horizon-weight-parity.mjs
           node scripts/audit-inject-coverage.mjs --strict
+
+      # JSON 数字进 Rhai 有两条通道：顶层标量落 f64、**嵌层整数落 i64**（code_executor 先
+      # as_f64 / json_value_to_dynamic 先 as_i64）⇒ `type_of(x)=="f64"` 读嵌层值时把整数
+      # **静默判成缺席**；64-bit 构建下 `type_of` 给 "i64"，`== "int"` 那条恒不成立。
+      # 两类都是「数字进得来、结果恒 0」，cargo check / 编译门 / clippy 全绿也照样存在
+      # （实证：分支表 days 是整数 ⇒ 四档价带恒 0，PLAN-four-horizon-workflow-alignment §四十九/§五十二）。
+      # 判据 #0 与负样本自证同上；本步两行与 scripts/ci-check.mjs 对应两条 step **命令行逐字同源**。
+      - name: Check rhai numeric typing guards
+        run: |
+          node scripts/check-rhai-numeric-typing.mjs --selftest
+          node scripts/check-rhai-numeric-typing.mjs
+
+      # #34：逐档决策键集（四份分支脚本输出 ↔ TS HorizonDecision ↔ 主链装配追加）。
+      # 命令行与 scripts/ci-check.mjs 对应两条 step **逐字同源**（漂移过一次，别再制造第二份）。
+      - name: Check horizon decision key parity
+        run: |
+          node scripts/check-horizon-decision-keys.mjs --selftest
+          node scripts/check-horizon-decision-keys.mjs
+
+      # #20①（2026-10-05）：每日快照白名单一致性 —— 「申报 NoHistoricalSemantic 的方法必须
+      # 在 SNAPSHOT_METHODS 里」。抓到过的活断链：eastmoney 已申报一致预期为 NHS，白名单却漏了它
+      # ⇒ 读侧 `contains` 挡掉、恒 miss，as-of 一致预期必然降级而降级文案还说「等每日归档」。
+      # 与 scripts/ci-check.mjs 对应两条 step **命令行逐字同源**。
+      - name: Check daily-snapshot whitelist consistency
+        run: |
+          node scripts/check-snapshot-whitelist.mjs --selftest
+          node scripts/check-snapshot-whitelist.mjs
+      # B2-1 前置：分析师 id 形态门（base 域唯一 / 带档后缀只能由 helper 产出 / 裸匹配基线只许降）
+      - name: Analyst id shape gate
+        run: |
+          node scripts/check-analyst-id-shape.mjs --selftest
+          node scripts/check-analyst-id-shape.mjs
 
       - name: Check frontend formatting (dprint)
         run: npm run format:check

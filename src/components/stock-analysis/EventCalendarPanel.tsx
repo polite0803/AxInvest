@@ -22,6 +22,16 @@ interface EventItem {
   period?: string;
 }
 
+/**
+ * 解禁行的展示串。日内份额不可得时**只写名目、不写百分数** ——
+ * 旧实现是 `Number(x ?? 0).toFixed(1)%`，把「不知道」渲染成「0.0%」，
+ * 读起来就是「这笔没有解禁量」，与事实相反（#23 的呈现层一半）。
+ */
+function lockupDetail(sharePct: unknown, label: string): string {
+  const n = typeof sharePct === "number" && Number.isFinite(sharePct) ? sharePct : null;
+  return n === null ? label : `${n.toFixed(1)}% ${label}`;
+}
+
 export function EventCalendarPanel() {
   const { t } = useTranslation();
   const { openDataSourceSettings } = useStockAnalysisPage();
@@ -53,9 +63,7 @@ export function EventCalendarPanel() {
             code,
             name,
             date,
-            detail: `${(Number(l.unlockRatio ?? l.unlock_ratio ?? 0)).toFixed(1)}% ${
-              t("stockAnalysis.settings.panels.lockup")
-            }`,
+            detail: lockupDetail(l.intradaySharePct, t("stockAnalysis.settings.panels.lockup")),
           });
         }
       }
@@ -191,9 +199,7 @@ export function EventCalendarPanel() {
                     code: stockCode,
                     name: stockName ?? stockCode,
                     date,
-                    detail: `${(Number(item.unlockRatio ?? item.unlock_ratio ?? 0)).toFixed(1)}% ${
-                      t("stockAnalysis.settings.panels.lockup")
-                    }`,
+                    detail: lockupDetail(item.intradaySharePct, t("stockAnalysis.settings.panels.lockup")),
                   });
                 }
               }
@@ -260,9 +266,7 @@ export function EventCalendarPanel() {
                       code,
                       name,
                       date,
-                      detail: `${(Number(l.unlockRatio ?? l.unlock_ratio ?? 0)).toFixed(1)}% ${
-                        t("stockAnalysis.settings.panels.lockup")
-                      }`,
+                      detail: lockupDetail(l.intradaySharePct, t("stockAnalysis.settings.panels.lockup")),
                     });
                   }
                 }

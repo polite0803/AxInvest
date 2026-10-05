@@ -733,6 +733,21 @@ export function ReflectionPanel() {
             {t("stockAnalysis.reflection.hitrateLegacyHint", { samples: hitrate?.legacySamples })}
           </Text>
         )}
+        {
+          /* §五十一-② 起算代际的口径声明：分母变小是**静默**的（面板只看到样本数少了），
+            必须写清「为什么」——「样本早于起算代」与「代际未知」的处置完全不同。 */
+        }
+        {hitrate != null && (
+          <div style={{ marginTop: 8 }}>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              {t("stockAnalysis.reflection.hitrateGenerationScope", {
+                generation: hitrate.generationFloor ?? 0,
+                foreign: hitrate.excludedPreFloorGeneration ?? 0,
+                unknown: hitrate.excludedUnknownGeneration ?? 0,
+              })}
+            </Text>
+          </div>
+        )}
         <Table
           size="small"
           rowKey="key"

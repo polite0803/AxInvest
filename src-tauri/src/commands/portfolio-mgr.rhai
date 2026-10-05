@@ -68,15 +68,10 @@ fn has_negation(text, kw, negs) {
     }
     false
 }
-// num_of: 统一数值读取 —— JSON 整数解析为 i64、小数解析为 f64，
-// 旧代码只判 type_of(x)=="f64" 会漏读 i64 字段（静默归零）。
-// 缺失或非数值返回 ()（unit），由调用点决定兜底语义。
-// 必须位于全局作用域（Rhai 不允许在块内定义函数）
-fn num_of(x) {
-    if type_of(x) == "f64" { x }
-    else if type_of(x) == "i64" || type_of(x) == "int" { x.to_float() }
-    else { () }
-}
+// `num_of` 现在是**引擎侧注册的全局函数**（权威源 `crates/harness/src/rhai_engine.rs`
+// 的 `register_common_functions`）—— 此前本文件、`risk-level.rhai`、`trader-proxy.rhai`
+// 各写了一份同语义实现（铁律 4 的重复定义），2026-10-04 收编为一处。
+// 语义：JSON 数字（f64 或嵌层 i64）→ f64；缺失/非数值 → unit，由调用点决定缺席口径。
 // pm_avg_turnover: 从 kline_json（日线数组）估算近 N 日平均成交额（元）。
 // 上游 amount 字段常为 0.0（未填充），故以 volume × close 兜底估算。
 // 无有效样本时返回 ()，调用点需自行降级。
@@ -388,13 +383,15 @@ let f3_signal = if f3_weight > 0.0 {
     //   触发 catch 块导致整个 portfolio-mgr 降级为保守决策。
     //   修复: llm_signal 只在 f3_has_catalyst=true 时计算,否则为 0.0。
     let llm_signal = if f3_has_catalyst {
-        if catalyst_level.contains("L-3") || catalyst_level.contains("退市") || catalyst_level.contains("造假") { -0.8 }
-        else if catalyst_level.contains("L-2") || catalyst_level.contains("业绩暴雷") { -0.5 }
-        else if catalyst_level.contains("L-1") || catalyst_level.contains("普通利空") { -0.2 }
-        else if catalyst_level.contains("L3") || catalyst_level.contains("估值体系级") { 0.8 }
-        else if catalyst_level.contains("L2") || catalyst_level.contains("业绩拐点级") { 0.5 }
-        else if catalyst_level.contains("L1") || catalyst_level.contains("普通消息") { 0.2 }
-        else { 0.0 }
+        // 阶梯的**唯一实现**在 Rust 侧（`analysis-engine::leg_signal` 的 `eventCatalyst` 分支，
+        // 四份逐档分支脚本共用同一份）。此处原本手抄过一份同构阶梯 ⇒ 正是「同一算法两处实现
+        // 迟早漂移」的形态（PLAN §十一-3 退役项）。
+        // 等价性逐情形：空串 / "无" / 词表外标签，原写法落 `else { 0.0 }`，
+        // `leg_signal` 对这三种情形返回 `None` ⇒ 这里统一映射成 0.0，行为逐情形不变。
+        // 黄金值由两侧各自的单测钉住（`leg_signal::tests::catalyst_ladder_is_order_sensitive…`
+        // 与本文件搬运前的实测值），改动即红。
+        let ladder = pm_leg_signal("eventCatalyst", #{ catalystLevel: catalyst_level });
+        if type_of(ladder) == "()" { 0.0 } else { ladder }
     } else { 0.0 };
     // P2 修复: 叠加公告关键词风险信号，让公告标题层面的风险/利好修正催化剂强度
     // 公告信号权重 0.3，催化剂 LLM 信号权重 0.7，二者加权
@@ -410,6 +407,50 @@ let f3_signal = if f3_weight > 0.0 {
     // 无 LLM 催化剂但有公告信号 → 直接用公告信号（权重减半避免过度影响）
     announcement_modifier * 0.5
 } else { 0.0 };
+
+	// ── 主档改由四档分支结论选出（Q1=C，PLAN §四十八 阶段2；2026-10-04 拍板）──────
+	// 语义换代：主档不再是「主链后验阈值落的那一档」，而是「本轮四档里最该看的那一档」——
+	//   定档与主 action 都取自该档分支，主链日线口径退为归因/证据列（posterior / evidence
+	//   那几项照旧输出）。退役的是「effective_posterior 阈值定档」这一条（〇-B v2 立的）。
+	// 判据（写死在此，并被 `rhai_registry` 整脚本门锁住）：
+	//   ① 先筛**可执行档**（`positionPct > 0`），在可执行档里取 `confidence` 最大；
+	//   ② 四档全部不可执行 ⇒ 仍取 `confidence` 最大档 —— 方向成立但无可执行计划由呈现层
+	//      成句声明（§四十八 Q2-B），不在这里把方向悄悄降级成观望；
+	//   ③ 一路都没产出 ⇒ 退回旧的阈值定档，来源标成 `formula_no_branch`（缺席本身由下方
+//      装配段逐档写进 data_gaps，这里不重复报，也不在此处引用尚未声明的 data_gaps）。
+	//      留这条兜底是因为**未重播种的存量库**四路必然全缺席；若直接判「数据缺失」，
+	//      全部历史记录会一次性失效 —— 兜底可以，但必须显式声明自己是兜底。
+	// ⚠ 「这一行是不是分支的有效输出」只此一份判定（`branch_row_ok`），下方装配段复用
+	//   同一闭包 —— 两处各写一遍就会漂移成「选档认为有效、装配认为无效」的同屏矛盾。
+	//   自证字段两条：`confidenceMethod`（这条结论用哪种置信算法算的）与 `stopSource`
+	//   （这个止损是哪种口径给的）。后者自 2026-10-04 起是**必需**的 —— 主档出场数值改为
+	//   直接取所选档行之后，「主档止损的来历」必须由那一行自己说，主链再猜就是冒充。
+	let branch_row_ok = |r| type_of(r) == "map" && !r.is_empty() && present(r["confidenceMethod"]) && present(r["stopSource"]);
+	// 顺序 = 展示顺序；camel 给前端键，snake 与仲裁/反思/权威周期表对齐。
+	let branch_tiers = [
+	    #{ camel: "ultraShort", snake: "ultra_short", row: h_ultra_short },
+	    #{ camel: "short", snake: "short", row: h_short },
+	    #{ camel: "mid", snake: "mid", row: h_mid },
+	    #{ camel: "long", snake: "long", row: h_long },
+	];
+	let picked_row = ();
+	let picked_tier = "";
+	let best_conf = -1.0;
+	let exec_row = ();
+	let exec_tier = "";
+	let best_exec_conf = -1.0;
+	for t in branch_tiers {
+	    if branch_row_ok.call(t.row) == false { continue; }
+	    let c = if present(t.row["confidence"]) { t.row["confidence"] } else { 0.0 };
+	    let p = if present(t.row["positionPct"]) { t.row["positionPct"] } else { 0.0 };
+	    if c > best_conf { best_conf = c; picked_row = t.row; picked_tier = t.snake; }
+	    if p > 0.0 && c > best_exec_conf {
+	        best_exec_conf = c; exec_row = t.row; exec_tier = t.snake;
+	    }
+	}
+	// 可执行优先；全不可执行时保留「方向最强但无可执行计划」那一档。
+	if exec_tier != "" { picked_row = exec_row; picked_tier = exec_tier; }
+	let branch_picked = picked_tier != "";
 
 // ── P1-7 修复: 确定性风险分类（优先算法，另一个口径仅作 fallback）──
 // 基于 t-risk.stockRiskProfile 的量化指标做规则分类，结果覆盖 overall_risk，
@@ -498,6 +539,56 @@ if !risk_classified && present(overall_risk_llm) {
 }
 
 // A 股校准（V54 放宽）后，用风险等级的 rank 校准 f4 惩罚强度
+// ── v131（#45，PLAN §五十八 第 2 件）：风险档**本身**按所选档收紧 ⇒ f4 / risk_bias / cap 随之按档 ──
+// v128 只把按档风险用在**否决**一处（当时的 `risk_for_veto`），而 f4 的惩罚强度（本版之后是
+//   下方 `risk_rank_val`）与 `risk_bias` 仍读 60 日全局档 —— 那是「一个算法 + 一套全局参数」的
+//   残留形态，与 R-11 相冲。本版把增量落进 `overall_risk` 自己身上：它一旦按档，下游
+//   f4 强度 / f4_signal 的 LLM 口径 / risk_bias / 仓位 cap / `pm_risk_veto` 全部自动跟着走，
+//   **不需要为每档另配一组参数**（R-11 的理由在 v128 已经写清，这里只是把它做到底）。
+// 归因纪律照用 v128：**只在同一体系内度量增量** —— 本档节点档 vs 全局节点档 `overall_risk_llm`
+//   （同一套 prompt 规则、其余七条输入两节点同源同值），「本档 > 全局」当且仅当本档回撤深度臂
+//   （v128 的 depth 轴）命中。不拿它与 V54 算法档 `overall_risk` 直接比大小 —— 那是两套阈值体系
+//   （实测 6 处不同、v55 影子比对档位一致率仅 64.4%，见 `seed_stock_analysis.rs` 的 v55 记录），
+//   直接 max 会让每一次加严都**无法归因**。
+// ⚠ **只升不降**：本档更松 ⇒ 不采用，`overall_risk` 保持算法档。按档不能成为放松风险的通道，
+//   与 `pm_risk_veto`／action 后置规则「单向降级」、荐股反思「只降不升」是同一条纪律。
+// ⚠ 四路全缺席（`branch_picked == false`，未重播种的存量库）⇒ 本段整体不生效，主链继续用
+//   60 日全局档，与 v128 逐位相同。兜底路径的定档此时**还没发生**（它要等 `effective_posterior`，
+//   见下方定档段的 ② 循环依赖那条），所以这里不能替它决定风险档 —— 那既是前向引用，
+//   又是「拿还没定的档去算 f4、再拿 f4 去定档」的自指环。
+let risk_tier = if !branch_picked {
+    ()
+} else if picked_tier == "ultra_short" {
+    overall_risk_ultra_short
+} else if picked_tier == "short" {
+    overall_risk_short
+} else if picked_tier == "mid" {
+    overall_risk_mid
+} else {
+    overall_risk_long
+};
+// 缺席 / 非字符串一律不参与比较 —— 否则 `risk_rank(unit)` 的默认档 1（中风险）会把
+// 「没接到」伪装成「该档是中风险」，进而在低风险标的上凭空抬高一档（放大器，v128 已锁过这条）。
+let tier_llm_usable = type_of(risk_tier) == "string" && present(risk_tier);
+// 基准格 `overall_risk_llm` 同样必须在：没有同体系基准就**不加严**，
+// 宁可不改数值，也不发布一次归因不了的改动。
+let depth_upgrade = tier_llm_usable
+    && present(overall_risk_llm) && type_of(overall_risk_llm) == "string"
+    && risk_rank(risk_tier) > risk_rank(overall_risk_llm);
+// 两道都要过：① 与同体系全局节点比，增量可归因；② 与本档比算法档确实更松 ⇒ 才收紧。
+let risk_tier_applied = depth_upgrade && risk_rank(risk_tier) > risk_rank(overall_risk);
+// 收紧前的算法档留一份：R-211 的留痕必须说得清「从哪档改到哪档」，而 `overall_risk`
+// 一旦被覆盖，下游就再也读不到原值（留痕退化成「本档是 X」= 没有归因）。
+let overall_risk_algo = overall_risk;
+if risk_tier_applied {
+    overall_risk = risk_tier;
+}
+// f4_signal 读的是 **prompt 体系**的分类（与本档节点档同体系 ⇒ 取它不是跨体系混用）。
+// 这里同样**只升不降**：只有本档比全局节点档**更严**（`depth_upgrade`）才换上它 —— 否则「按档」
+// 会给 f4 送一个更漂亮的证据，等于从**证据轴**把风险放松，与 `overall_risk` 那条是同一条纪律。
+// 本档缺席 / 更松 ⇒ 退回全局节点档，与 v128 逐位一致。
+let risk_llm_eff = if depth_upgrade { risk_tier } else { overall_risk_llm };
+
 let risk_rank_val = risk_rank(overall_risk);
 
 // ── 因子 4: 风险 ──
@@ -517,7 +608,7 @@ let f4_weight = f4_default;   // overall_risk 始终存在（算法分类确保�
 // overall_risk 已基于量化指标计算，f4_quant_adjust 又用同样的指标做修正
 // 为避免双重惩罚，f4_signal 改为只读 LLM 的独立风险判断
 // 当 LLM 分类缺失（算法兜底场景）时 f4_signal=0.0，由 f4_quant_adjust 独立承担
-let f4_signal = if present(overall_risk_llm) && type_of(overall_risk_llm) == "string" {
+let f4_signal = if present(risk_llm_eff) && type_of(risk_llm_eff) == "string" {
     // ── 2026-09-23: `中风险` 由 `-0.05` 订正为 **`0.0`**（映射零点订正）──
     //
     // 依据（可判定，非标定）：本 switch 是「风险等级 → 证据信号」的映射，其**零点**必须是
@@ -533,7 +624,7 @@ let f4_signal = if present(overall_risk_llm) && type_of(overall_risk_llm) == "st
     // ⚠️ 只改零点，**不改幅度与不对称**：`低 +0.30 / 高 -0.25 / 极高 -0.50` 的负侧幅度
     // 大于正侧，是**有意**的（风险的负向影响大于正向，且高风险的处置由 `pm_risk_veto`
     // 与 `POS_CAP_*` 独立承担）。本次不动它们，避免把「零点订正」扩大成「重新标定」。
-    switch overall_risk_llm {
+    switch risk_llm_eff {
         "低风险"|"低" => 0.30,
         "中风险"|"中" => 0.0,
         "高风险"|"高" => -0.25,
@@ -852,17 +943,19 @@ let f5_signal = if f5_weight > 0.0 {
     //    正是「含 f5 腿」的融合结果 ⇒ 本段想用「主档」决定该腿衰减、再用衰减后的腿决定
     //    「主档」，是一个自指环。两遍法/不动点在 Rhai 侧既不可控也无处声明收敛条件。
     //
-    // 处置 = **主链不做周期降权，降权交回权威逐档乘数**：
-    //   · 四档各自的 `decisionsByHorizon` 走 `leg_mult`（Rust `evidence_weight::
-    //     horizon_leg_multipliers()` 经桥表 `DECISION_LEG_ANALYST` 注入），f5 在
-    //     ultra_short/short/mid/long = **0.3 / 0.5 / 1.2 / 2.0** ⇒ 短档的估值证据
-    //     本来就已被按周期降权，且数值只有**一个**来源（脚本侧禁止手抄任何档位倍数，
-    //     同 `days_for` / `horizon_const` 的纪律）。
+    // 处置 = **主链不做周期降权**（2026-10-04 更新：原先写的「交回权威逐档乘数」已随 R-11 退役）：
+    //   · 逐档差异不再由乘数表达，而由**该档的腿集**表达 —— 分支表
+    //     （`evidence_weight::horizon_branch_specs`，权威源 `Period::verdict_spec`）决定
+    //     某因子在该档是方向腿、条件腿，还是**按构造不适用**（超短/短档就没有 `valuationBand` 腿，
+    //     不是「有腿但被压到 0.3」）。乘数语义退役后，`leg_mult` / `horizon_leg_multipliers`
+    //     在脚本里已不存在；主链 f5 依旧不做周期降权（本段的两条根因不变）。
     //   · `fusion_wsum` / `fused_sig` 恢复为 0.56/0.24/0.20 的**纯可用腿归一**，
     //     与本次回归前（`7629f089e^`）逐位相同 ⇒ 主链零语义漂移，只是不再崩。
-    //   · 「降权必须留痕」这条要求由 Phase F 段承担（读**权威乘数**判断本档是否被降权，
-    //     见下方 `weight_adjustments` 声明处），留痕不再是主链的前向引用；该留痕走
-    //     **口径调整**通道而非 `data_gaps`（它不是数据缺失，理由见该段「通道」注释）。
+    //   · 「差异必须可读出」这条要求现在由**分支表**承担：每档自己输出
+    //     `legs` / `absentLegs` / `confidenceMethod`（见四份 portfolio-mgr-h-*.rhai 末尾那段），
+    //     读者直接看得到「这一档有哪些腿、缺哪些腿、用的哪种口径」。原先那份「降权留痕」
+    //     （主链声明 `weight_adjustments` 并随决策输出）已随乘数语义一起删除 —— 它记录的是
+    //     「同一条腿被乘了几」，而这个问题现在不存在了。
     //   ⚠ 与 V77 的 `applicable=false` 区分保持不变：那是「数值没有经济含义」⇒ 整腿剔除；
     //     周期闸口是「有含义但不服务于本档」⇒ 降权，两者不可混用。
     let fusion_wsum = (if dcf_leg_usable { 0.56 } else { 0.0 })
@@ -1244,7 +1337,7 @@ let f10_signal = if present(lockup_bundle) && type_of(lockup_bundle) == "string"
                 for i in 0..len {
                     let t = trades[i];
                     if type_of(t) == "map" {
-                        let vol = if type_of(t["shares"]) == "f64" { t["shares"] } else { 0.0 };
+                        let vol = num_of(t["shares"], 0.0);
                         let typ = if type_of(t["trade_type"]) == "string" { t["trade_type"] } else { "" };
                         if typ == "增持" || typ == "买入" || typ == "increase" {
                             net_direction = net_direction + vol;
@@ -1261,24 +1354,32 @@ let f10_signal = if present(lockup_bundle) && type_of(lockup_bundle) == "string"
             }
         }
         // ② 限售解禁压力（权重 0.25）
-        let lockup = lb["lockup_schedule"];
-        if type_of(lockup) == "array" && lockup.len() > 0 {
-            let upcoming_ratio = 0.0;
-            for i in 0..lockup.len() {
-                let l = lockup[i];
-                if type_of(l) == "map" {
-                    // unlockRatio 表示解禁股占总股本比例
-                    let ratio = if type_of(l["unlockRatio"]) == "f64" { l["unlockRatio"] } else { 0.0 };
-                    upcoming_ratio = upcoming_ratio + ratio;
+        // 真值来自取数层的 `supply_shock` 块（任务 #23 / v132）：
+        //   `ratio` = 该档**交易日窗**内的解禁市值 ÷ 流通市值，**小数**占比（0.10 = 十分之一盘）。
+        // 旧实现是 `for l in lockup_schedule { sum += l.unlockRatio }` 再比 5.0 —— 而那个字段
+        // 是「单股东 ÷ 当日解禁合计 ×10000」（`astock-data/src/vendors/eastmoney.rs:2599`），
+        // 既不是占比、也不筛窗口（过去 50 行一起加）。现网读数：154 次执行里 **152 次**求和 >20
+        // ⇒ `clamp(…, -0.35, 0)` 恒取边界 ⇒ 这一臂长期是**常数偏置**，零信息量。
+        // 档位口径：有选档就用选档那一个窗口（与 v129「主档数值取所选档」同向）；
+        // 没选档（四路全缺席的存量库）回落 mid —— **不是新参数**，本段标题自己写的
+        // 「未来 30 天解禁市值占比」就是 mid 的 28 交易日窗口。
+        // 深度上界沿用旧该臂的 0.35×0.25：本批改的是**量纲与窗口**，不顺带重标定贡献深度，
+        // 否则数值变化归因不到到底是哪一条（两套判据的差值不能当改进发布）。
+        let ss = lb["supply_shock"];
+        let ss_tier = if branch_picked { picked_tier } else { "mid" };
+        if type_of(ss) == "map" && ss["available"] == true {
+            let w = ss["windows"][ss_tier];
+            if type_of(w) == "map" {
+                // 缺 ratio 键 ⇒ num_of 给 -1.0（负值即「本臂不参与」，不当成 0 压力）
+                let r = num_of(w["ratio"], -1.0);
+                if r >= 0.0 {
+                    // 线性到满强度，与 `leg_signal` 的 supplyShock **同一条**（0.10 ⇒ 1.0）。
+                    // 刻意不用 `pm_saturate`：它是有理饱和 `r/(|r|+k)`（10% 只给 0.5）——
+                    // 同一个量在分支腿和主链腿长成两种读法，就是本批在修的那类病。
+                    let pressure = clamp(r / 0.10, 0.0, 1.0);
+                    chip_sig = chip_sig - pressure * 0.35 * 0.25;
                 }
             }
-            // 解禁比例>5% 产生显著负信号
-            if upcoming_ratio > 5.0 {
-                chip_sig = chip_sig + clamp(-upcoming_ratio / 20.0, -0.35, 0.0) * 0.25;
-            } else if upcoming_ratio > 1.0 {
-                chip_sig = chip_sig + (-0.05) * 0.25;
-            }
-            // 解禁比例<1% 忽略
         }
         // ③ 大宗交易折溢价（权重 0.15）
         let blocks = lb["block_trades"];
@@ -1289,7 +1390,7 @@ let f10_signal = if present(lockup_bundle) && type_of(lockup_bundle) == "string"
                 let b = blocks[i];
                 if type_of(b) == "map" {
                     // discount_pct 正值=折价（低于市价成交），负值=溢价；已由 vendor 计算
-                    let disc = if type_of(b["discount_pct"]) == "f64" { b["discount_pct"] } else { 0.0 };
+                    let disc = num_of(b["discount_pct"], 0.0);
                     avg_discount = avg_discount + disc;
                     count = count + 1;
                 }
@@ -1321,8 +1422,8 @@ let f10_signal = if present(lockup_bundle) && type_of(lockup_bundle) == "string"
                     for i in 0..entries.len() {
                         let e = entries[i];
                         if type_of(e) == "map" {
-                            let buy_amt = if type_of(e["buyAmount"]) == "f64" { e["buyAmount"] } else { 0.0 };
-                            let sell_amt = if type_of(e["sellAmount"]) == "f64" { e["sellAmount"] } else { 0.0 };
+                            let buy_amt = num_of(e["buyAmount"], 0.0);
+                            let sell_amt = num_of(e["sellAmount"], 0.0);
                             let dept = if type_of(e["deptName"]) == "string" { e["deptName"] } else { "" };
                             // 机构专用席位买入/卖出
                             if dept.contains("机构") || dept.contains("机构专用") || dept.contains("special") || dept.contains("institution") {
@@ -1376,26 +1477,25 @@ let f11_weight = if f11_signal != 0.0 { get_weight(f_weights, "pace", f11_defaul
 //   RSI 调制: 50~75 动量健康 +0.2; >75 过热 -0.2（>80 已被 R-401 否决）
 // 数据缺失 → 信号 0（权重归零，不占证据覆盖）。
 let f12_default = 0.10;
-let f12_signal = 0.0;
-if present(macd_dif) && type_of(macd_dif) == "f64" && present(macd_dea) && type_of(macd_dea) == "f64" {
-    if macd_dif > 0.0 && macd_dif > macd_dea {
-        f12_signal = 0.7;
-    } else if macd_dif > 0.0 {
-        f12_signal = 0.3;
-    } else if macd_dif > macd_dea {
-        f12_signal = 0.3;
-    } else {
-        f12_signal = -0.7;
+// 阶梯的**唯一实现**在 Rust 侧（`analysis-engine::leg_signal` 的 `momentumSignal` 分支，
+// 四份逐档分支脚本与之共用同一份）。此处原本手抄过一份同构阶梯（四态 + RSI 调制）。
+// 逐情形等价性（搬运时逐条对过）：
+//   · 四态阶梯与 `leg_signal.rs:59-65` 的合并形态同值（「多头回调」与「零下金叉修复」都是 +0.3）；
+//   · RSI 调制区间一致（50~75 ⇒ +0.2；>75 ⇒ −0.2；其余不调制）；
+//   · 主链原本额外要求 `type_of(...) == "f64"` ⇒ 这里照旧把非 f64 桥成缺席，
+//     不放大成「字符串数字也算有值」（放开会令 R-40x 否决门的输入变宽）；
+//   · 缺 MACD ⇒ 原行为是信号 0 且权重归零；`leg_signal` 返回 `None` ⇒ 统一映射成 0.0。
+// 黄金值由 `leg_signal::tests::momentum_ladder_matches_the_rhai_it_was_ported_from` 钉住
+// （那些期望值是**搬运前**在本脚本上逐情形实测出来的）。
+let f12_raw = pm_leg_signal(
+    "momentumSignal",
+    #{
+        macdDif: if present(macd_dif) && type_of(macd_dif) == "f64" { macd_dif } else { () },
+        macdDea: if present(macd_dea) && type_of(macd_dea) == "f64" { macd_dea } else { () },
+        rsi14: if present(rsi_14) && type_of(rsi_14) == "f64" { rsi_14 } else { () },
     }
-    if present(rsi_14) && type_of(rsi_14) == "f64" {
-        if rsi_14 >= 50.0 && rsi_14 <= 75.0 {
-            f12_signal = f12_signal + 0.2;
-        } else if rsi_14 > 75.0 {
-            f12_signal = f12_signal - 0.2;
-        }
-    }
-    f12_signal = clamp(f12_signal, -1.0, 1.0);
-}
+);
+let f12_signal = if type_of(f12_raw) == "()" { 0.0 } else { f12_raw };
 let f12_weight = if f12_signal != 0.0 { get_weight(f_weights, "momentum", f12_default) } else { 0.0 };
 
 // ── f13 瓶颈因子（2026-09-19 新增）──
@@ -1929,16 +2029,30 @@ let evidence_scale = pm_evidence_scale(total_weight, max_weight);
 	};
 	// 天数闭包（本段与下方价位段共用）。
 	let days_for = |h| horizon_const.call(h, "days");
+
+
 	// ⚠ 这里**不做**四档 switch —— 四档各自的决策由下方 decisionsByHorizon 逐档产出，
-	//   主档只是「本轮最值得看的那一档」的指针。
-	let time_horizon = if effective_posterior >= 0.65 { "long" } else if effective_posterior >= 0.50 { "mid" } else if effective_posterior >= 0.35 { "short" } else { "ultra_short" };
-	let horizon_source = "formula";
+	//   主档只是「本轮最值得看的那一档」的指针（该指针现在由四档结论选出，见上）。
+	let time_horizon = if branch_picked {
+	    picked_tier
+	} else if effective_posterior >= 0.65 { "long" } else if effective_posterior >= 0.50 { "mid" } else if effective_posterior >= 0.35 { "short" } else { "ultra_short" };
+	// 「谁定的档」出口：`branch_pick` = 四档分支选的；`formula_no_branch` = 四路全缺席时
+	// 退回后验阈值定档（**不是**静默兜底，值域权威在 harness 的 HorizonSource）。
+	let horizon_source = if branch_picked { "branch_pick" } else { "formula_no_branch" };
+	// ⚠ v131：按档风险的**取值与收紧**已整体上移到风险分类段之后（`risk_tier` / `depth_upgrade` /
+	//   `risk_tier_applied`，见 :542 前那段），因为 f4 与 risk_bias 都排在选档段之前 —— 留在原地就
+	//   只能管否决一处。本段现在**只**负责把已按档的 `overall_risk` 交给下方 veto/cap。
+
 	// 周期仓位乘数：与 evidence_weight.rs 的 `compute_recommended_position` 消费**同一个**
 	//   `Period::position_multiplier`（超短 0.6 / 短 0.8 / 中 1.0 / 长 1.2）。
 	let horizon_position_mult = horizon_const.call(time_horizon, "mult");
-	// 主档期望持有天数**只从权威表取**，不再采信 LLM 的自由数字 —— 否则同一决策里
+	// 主档期望持有天数：取**所选档分支自报**的那个数（它本来就是分支表 `days`，见各脚本输出），
+	//   四路全缺席时退回权威表。两条都**不采信 LLM 的自由数字** —— 否则同一决策里
 	//   「哪个周期」是公式定的、「该周期多久」却是模型随口报的，反思按天判成熟即错档。
-	let expected_holding_days = days_for.call(time_horizon);
+	let picked_days = if branch_picked { num_of(picked_row["expectedHoldingDays"]) } else { () };
+	//   两条来源归一到 **i64**：权威表 `days` 是嵌层整数（注入即 i64），分支行可能是 `28` 或 `28.0`
+	//   ⇒ 不桥则同一列在两代样本里落两种 JSON 型别，下游按整数读的那条会读空。
+	let expected_holding_days = if present(picked_days) { picked_days.to_int() } else { days_for.call(time_horizon) };
 // ── 逐周期止损/止盈档位（〇-B v2 第 3 条：从硬编码升级为「设置项 + 可被反思优化」）──
 // 缺省值即下表；同名变量由 `PORTFOLIO_MGR_TUNABLE_PARAMS` 派生的 input_mapping 注入
 // （定义见 `seed_variables.rs`）。反思产出的参数建议经 `apply_param_suggestions`
@@ -2049,16 +2163,39 @@ let risk_budget_position = |h| {
 	// ── 仓位口径（Phase D-2，用户裁定）──
 	// 主口径 = **风险预算**：`min(凯利%, 100×R/止损%)`。凯利是「信念上限」、
 	// 风险预算是「损失上限」，两者正交，取小不是取巧。
-	// 「长线更值得」**不放在这里** —— 它走判定侧的 SNR √h（`pm_snr_confidence`），
-	// 因为仓位这一维只应承载可推导的量（σ、h、R）。
+	// 「长线更值得」**不放在这里**，也不再有任何跨期折算 —— 旧的 SNR √(h/28)
+	// （`pm_snr_confidence`）与「一个算法四套参数」一同于 2026-10-04 退役（PLAN §十一-3）：
+	// 持有期只进**该档自己的**价带（σ_daily·√days）与出场口径，四档各算各的。
+	// 仓位这一维仍只承载可推导的量（σ、h、R），不承载「哪档更值得」的信念。
 	// 旧经验乘数 0.6/0.8/1.0/1.2 只保留在 σ 不可得的降级分支，且必须标出来。
 	let main_risk_budget_pct = risk_budget_position.call(time_horizon);
-	let position_pct = if type_of(main_risk_budget_pct) == "()" {
+	// ── 阶段3′（2026-10-04 批准 ①）：主档仓位**取所选档分支的结论**，主链风险预算退为上限 ──
+	// 判据：档既然是四档结论选出来的（裁定 C），该档的仓位与价位也必须是那一路算出来的。
+	//   否则同一份输出里「主档=中线」的仓位来自日线口径（主链凯利 ∧ 风险预算），而中线 Tab
+	//   的仓位来自中线分支自己 ⇒ 同一档两个数 —— 与用户本轮抱怨的矛盾只差一层，
+	//   而且 R-11 判废的正是「一个算法 + 四套参数」这种两套算法并存形态。
+	// 主链公式在此只剩两个用途：**上限**（`min`，只降不升）与**兜底**（四路全缺席那代）。
+	//   风险预算是「损失上限」、分支凯利是「信念上限」，取小与 Phase D-2 的裁定同构。
+	// 过 `num_of` 而不是裸取原值：分支行经生产注入落 Rhai 时，整数形态的仓位是 i64
+	//   （嵌层数字 `as_i64` 优先），而下面 `clamp` / `min` 的形参是 f64 —— 先桥成同一个型别，
+	//   既不让「模型报 12 还是 12.0」改变可执行性判定，也不依赖宿主是否自动升格。
+	let branch_position_pct = if branch_picked { num_of(picked_row["positionPct"]) } else { () };
+	let position_pct = if type_of(branch_position_pct) != "()" {
+		if type_of(main_risk_budget_pct) == "()" {
+			clamp(branch_position_pct, 0.0, 95.0)
+		} else {
+			clamp(min(branch_position_pct, main_risk_budget_pct), 0.0, 95.0)
+		}
+	} else if type_of(main_risk_budget_pct) == "()" {
 		clamp(position_pct_raw * horizon_position_mult, 0.0, 95.0)
 	} else {
 		clamp(min(position_pct_raw, main_risk_budget_pct), 0.0, 95.0)
 	};
-	let position_source = if type_of(main_risk_budget_pct) == "()" { "fallback_kelly_x_mult" } else { "risk_budget" };
+	// 四值而非两值：谁被用上必须能从输出反解。`branch_position*` = 分支结论（后者被风险预算截过），
+	// `risk_budget` / `fallback_kelly_x_mult` = 四路全缺席时的主链口径。**缺一个值就等于把降级伪装成主口径**。
+	let position_source = if type_of(branch_position_pct) != "()" {
+		if type_of(main_risk_budget_pct) == "()" { "branch_position" } else { "branch_position_capped" }
+	} else if type_of(main_risk_budget_pct) == "()" { "fallback_kelly_x_mult" } else { "risk_budget" };
 	// ── P0-11 修复(2026-09-12): 「仓位充足度」与「仓位上限」解耦 ──
 	// 旧实现: action 判定（下方 L1409/L1412）直接读 position_pct —— 而它是
 	//   pm_kelly_position 的返回值，已在函数内部按风险等级封顶（极高10 / 高35 / 中50）。
@@ -2155,6 +2292,21 @@ let disagreement_mod = if present(risk_disagreement) {
 	// `confidence_quality_cap` 属**数据质量/一致性约束**（不是风险溢价），两者都保留。
 	let final_confidence_pure =
 	    clamp(bayes_confidence_pure * disagreement_mod, 0.0, confidence_quality_cap);
+
+	// ── 主档置信度与**所选档**同源（§五十三 ①，2026-10-04 批准）──
+	// 为什么必须同源：v125 已把仓位/止损/止盈/天数搬到所选档，但 `confidence` 仍是主链日线口径
+	//   ⇒ 000710 实测同屏两个置信度（主档 46.9 vs 超短线分支 87.8），且**无从反解谁是准的**。
+	// 保留的是主链的两个**档位无关**约束（分析师视角分歧 `disagreement_mod` 与数据质量上限
+	//   `confidence_quality_cap`）—— 它们不是「哪一档」的属性，对任何来源的置信度都该生效；
+	//   丢掉它们就等于让分支口径绕过质量闸门（那是升级，不是同源）。
+	// 来源必须显式：`confidenceSource` 两值，缺档时如实标 `main_chain_posterior`。
+	let branch_conf = if branch_picked { num_of(picked_row["confidence"]) } else { () };
+	let main_confidence = if present(branch_conf) {
+		clamp(branch_conf * disagreement_mod, 0.0, confidence_quality_cap)
+	} else {
+		final_confidence_pure
+	};
+	let confidence_source = if present(branch_conf) { "branch_row" } else { "main_chain_posterior" };
 
 	// ── M2 修复：LLM 失败级联兜底 ──
 	// V55 扩展: 上游 AgentNode 走 strict_mode 兜底时（LLM 输出无法解析为合法 JSON），
@@ -2337,6 +2489,17 @@ let weights_collapsed = !dqi_a_level && (
 	    base_action = "减持";
 	}
 
+	// ── 主 action 取自所选档（Q1=C，PLAN §四十八 阶段2）──
+	// **位置即判据**：替换发生在阶梯之后、`trader_data_valid` 封顶 / 试探仓 / `pm_risk_veto`
+	// / 技术与模拟盘闸门**之前** ⇒ 主链门槛只可能把分支结论往保守方向改，不可能反向升级
+	// （与既有裁定「反思建议只降不升」同族）。若有人把这段挪到 veto 之后，分支结论就会盖掉
+	// 风控 ⇒ 整脚本门 `rhai_registry` 锁住这条顺序（见 §四十八 阶段2 门禁）。
+	// 四路全缺席（branch_picked==false）时不动 ⇒ 主链日线阶梯继续生效，且 horizon_source
+	// 已把这次决策标成 formula_no_branch 兜底，读侧与统计据此分代、不与分支代混池。
+	if branch_picked {
+		base_action = picked_row["action"];
+	}
+
 	// V59: 试探仓激活 → 观望升级为持有（仓位>0 必须与行动对齐，否则 V42 对齐段清零）
 	// V75(2026-09-12): 仓位赋值收敛到此块，与「观望」档严格绑定 —— 试探仓是「观望→持有」的
 	//   升级机制，若 action 阶梯已判「减持/卖出」（effective_posterior<0.38），说明证据净向负，
@@ -2394,6 +2557,12 @@ let weights_collapsed = !dqi_a_level && (
 
 	// ── P3-1: 风控否决 — 调用 Rust 函数 ──
 	// 高风险→禁止买入/增持(降级为持有), 极高风险→禁止买入/增持/持有(降级为观望)
+	// ⚠ v131：入参回到 `overall_risk` **本身**，但它的含义已经换代 —— 自本版起
+	//   `overall_risk` 在有分支结论时就是**按主档收紧后**的风险档（见 :542 前那段
+	//   `risk_tier` / `depth_upgrade` / `risk_tier_applied`），不再是「只给否决用的一路旁挂」。
+	//   于是 f4 惩罚强度、f4_signal 的 prompt 口径、`risk_bias`、仓位 cap 与 veto **同源同档**，
+	//   「一个算法 + 一套全局参数」的残留形态在这里收口（R-11）。
+	//   四路全缺席时 `risk_tier_applied` 为假 ⇒ `overall_risk` 仍是 60 日算法档，与 v128 逐位相同。
 	let original_action = final_action;
 	final_action = pm_risk_veto(final_action, overall_risk);
 	// 检测是否触发了风控降级，供 decision_trail 和 reasoning 使用
@@ -2405,6 +2574,17 @@ let weights_collapsed = !dqi_a_level && (
 	        ` | ⚠️高风险风控否决:${original_action}→${final_action}(高风险禁止加仓)`
 	    } else { "" }
 	} else { "" };
+	// 按档加严只在**真的改了风险档**时留痕（没改就不占一行 —— 面板噪声）。
+	// 留痕写的是「哪一档、从什么档收到什么档、影响到哪些下游」——因为自 v131 起这一行
+	// 解释的是**整条主链**的风险口径，不再只是否决一处。
+	if risk_tier_applied {
+	    decision_trail.push(#{
+	        "rule_id": "R-211",
+	        "status": "INFO",
+	        "detail": `风险档按主档(${picked_tier})收紧:算法档 ${overall_risk_algo} → 本档 ${risk_tier}(只升不降；f4/risk_bias/仓位 cap/否决同源)`,
+	        "timestamp": 0.0,
+	    });
+	}
 
 	// P0-1 修复: R-200 移至 risk_downgraded 定义之后（原位置前向引用为死代码）
 	// 记录风险否决
@@ -2595,6 +2775,23 @@ if present(sim_stability) && type_of(sim_stability) == "f64"
     }
 }
 
+// ── 主档 action 的**来历**必须可反解（§五十三 ①，2026-10-04 批准）──
+// 为什么不能只靠 reasoning 文本：000710 实测「主档=持有 + 标签=超短线分支选档 + 超短线 chip=买入」
+//   三处同屏互斥，唯一能说明它的是自由文本里那句「高风险风控否决:买入→持有」——
+//   展示层要成句、反思要按档统计，都不能靠解析中文句子（同 `positionSource` 立四值的理由）。
+// 判据是**最后改写者优先**（与主链实际执行顺序反着问）：模拟盘 S-501 → 空头预测否决 →
+//   风控否决 → 数据异常/单点低置信封顶 → 分支结论 → 主链日线阶梯。
+// ⚠ `partial_low_confidence_cap` 那条的触发条件读的是**主链后验口径**的置信度，而本版对外报的
+//   `confidence` 已改为所选档口径 ⇒ 「高置信却被降级」在这一格仍可能出现，标签把它点名而不是隐藏；
+//   把该闸门也改读分支置信度是另一件事（会同时改多处数值），已登记为后续项，不在本版偷偷做。
+let action_source = if sim_vetoed && sim_veto_rule == "S-501" { "sim_veto_downgrade" }
+	else if bearish_downgraded { "bearish_veto_downgrade" }
+	else if risk_downgraded { "risk_veto_downgrade" }
+	else if !trader_data_valid && (base_action == "买入" || base_action == "增持") { "sanity_cap_downgrade" }
+	else if partial_low_confidence && (base_action == "买入" || base_action == "增持") { "partial_low_confidence_cap" }
+	else if branch_picked { "branch_pick" }
+	else { "main_chain" };
+
 // ── 缺失数据 ──
 let data_gaps = [];
 if !present(totalScore) { data_gaps.push("技术服务评分(t-scoring)"); }
@@ -2687,7 +2884,9 @@ let prior_src = if present(market_regime_state) { `(${market_regime_state})` } e
 //   ⚠️ 2026-09-13 二次修复：除数笔误 `*100/10`（0.54 → 5.4，与相邻的 `后验` 不同量纲）。
 //   两个量必须同刻度：`*100` 取整再 `/100` ⇒ 0.54 / 0.36 这类小数，与 `后验` 可直接对比。
 let bayes_note = ` | 先验=${prior}${prior_src} 后验=${(posterior*100.0).round()/100.0} 生效后验=${(effective_posterior*100.0).round()/100.0}`;
-let kelly_note = ` | 赔率=${(odds*10.0).round()/10.0}(${odds_source}) 凯利=${(kelly_raw*1000.0).round()/1000.0} 成本=${(COST_PCT*100.0).to_int()}%` + if trader_price_no_info { " | ⚠️trader目标价=现价(价格信号无信息量)" } else { "" };
+// `kelly_note` 的定义**下移到出场段之后**（见 `main_stop_source` 处）—— 它报的赔率必须与
+//   **实际采用的出场对**同源，而 tp/sl 要到那里才定稿（v125 起可能整体取自所选档）。
+//   留在原位就会产出 000710 那种自相矛盾：`赔率=0.0(波动率fallback)` 与同屏 tp=6.15/sl=7.38 并存。
 // V50: 分歧度修正标注（仅在 disagreement 显著时标记）
 let disagreement_note = if present(risk_disagreement) && risk_disagreement > 50 {
     ` | ⚠️风险分歧(${risk_disagreement})置信修正×${(disagreement_mod*100.0).round().to_int()}%`
@@ -2775,314 +2974,124 @@ let position_state = if position_pct <= 0.0 {
 //   缺省值就地兜底），设置面板可改、反思可建议。
 //   ⚠ 下面是**闭包**（`let f = |...|` ⇒ 变量里是 FnPtr）：调用**一律** `f.call(...)`，按名 `f(...)` 恒抛 Function not found（同 strategy-scorer.rhai:9 约定）。
 // `days_for` 已上移到「凯利仓位」之前的定档段（与 `expected_holding_days` 同源）。
-let sl_pct = if position_pct > 0.0 { sl_pct_for.call(time_horizon) } else { 0.0 };
-let tp_pct = if position_pct > 0.0 { tp_pct_for.call(time_horizon) } else { 0.0 };
+// ── 阶段3′（批准 ①）：主档出场数值同样取**所选档分支**的结论，与仓位同一条判据 ──
+// ⚠ 空仓不变式与来源无关：`position_pct <= 0` ⇒ 档位 0、价位 null。
+//   换代新增了一格「分支想要仓位、主链风险预算把它封成 0」—— 只改来源而不重过这道门，
+//   就会给一条空仓记录配出一对目标价/止损价（展示层读成「有个价等着我」= 把不下注伪装成等执行）。
+let b_sl = if branch_picked && position_pct > 0.0 { num_of(picked_row["stopLossPct"]) } else { () };
+let b_tp = if branch_picked && position_pct > 0.0 { num_of(picked_row["takeProfitPct"]) } else { () };
+let sl_pct = if type_of(b_sl) != "()" { b_sl } else if position_pct > 0.0 { sl_pct_for.call(time_horizon) } else { 0.0 };
+let tp_pct = if type_of(b_tp) != "()" { b_tp } else if position_pct > 0.0 { tp_pct_for.call(time_horizon) } else { 0.0 };
+// 主档止损的**来历**必须与实际被用的那条算法一致：被分支结论顶替时，标签也取分支行自带的那条
+//   （四份脚本各自的 `vol_band` / `sigma_band` / `thesis_falsified_half_band`）。
+//   为此 `branch_row_ok` 把 `stopSource` 一并算进自证字段 —— 一行说不出自己止损的来历，
+//   就不能被当主档用（否则这里会退回主链标签，那描述的是一条没被采用的算法）。
+let main_stop_source = if type_of(b_sl) != "()" { picked_row["stopSource"] } else { stop_source_for.call(time_horizon) };
 
-// ── 四周期价位映射（阶段1 新增）──
-// PROPOSAL 阶段1：不改变 action/仓位语义，仅把目标价/止损价扩展为四周期映射，
-//   为阶段2「四周期独立决策」打数据与契约垫脚石。主档位 targetPrice/stopLoss
-//   仍由 `time_horizon` 决定并保留（兼容既有消费方与列表摘要）；本映射按四周期
-//   各出一组「档位% + 持有天数 + 绝对价」。
-// 语义与主档位一致：空仓档（`position_pct <= 0`）整组输出 ()（JSON null）——
-//   下游以 `stopLossPct > 0.0` 判断该周期是否有交易计划，不产出半截价位。
-// 绝对价口径与主档位相同：`现价 × (1 ∓ 档位%)` —— 风控档位换算，非价格预测。
+// ── 赔率口径与**实际采用的出场对**同源（§五十三 ① 附带项）──
+//   主链凯利段的 `odds` 在 σ 不可得时恒 0（标 `波动率fallback`），而 v125 起 tp/sl 可能整对
+//   取自所选档 ⇒ 归因文本继续报主链赔率，就会与同屏的真实止盈/止损打架。
+//   有可用出场对时按 `tp/sl` 重算并标 `adopted_exit_pair`，否则原样退回主链口径与其来源标签。
+let adopted_odds = if tp_pct > 0.0 && sl_pct > 0.0 { tp_pct / sl_pct } else { () };
+let odds_display = if present(adopted_odds) { adopted_odds } else { odds };
+let odds_source_display = if present(adopted_odds) { "adopted_exit_pair" } else { odds_source };
+let kelly_note = ` | 赔率=${(odds_display*10.0).round()/10.0}(${odds_source_display}) 凯利=${(kelly_raw*1000.0).round()/1000.0} 成本=${(COST_PCT*100.0).to_int()}%` + if trader_price_no_info { " | ⚠️trader目标价=现价(价格信号无信息量)" } else { "" };
+
+// ── 四周期价位映射：本段**只剩 `price_ok`**，映射本体已搬到装配段之后（见 assembly-end 后那段）──
+// 为什么搬（2026-10-04 批准 ①）：原实现在这里用**主链同一公式**对四档各算一遍
+//   `sl_pct_for` / `tp_pct_for` / `days_for` —— 那正是 R-11 判废的「一个算法 + 四套参数」，
+//   而且它与逐档 Tab 并列上屏（`DecisionBanner` 按周期读 `horizonPriceMap`），
+//   于是同一档名有两个价位来源。现在全链只剩一个来源：分支自己的输出（`decisionsByHorizon`），
+//   本映射改为对它的**投影**，不再产出任何新数值。
+// 消费方的两个不变式随投影而变（都在展示层按「键缺席」处理，不按 0 处理）：
+//   ① 缺席档**不出键**（与已批口径 A 一致）；② 空仓档由分支自己给 `targetPrice`/`stopLoss`
+//   为 null（装配段那条 `price_ok && pos > 0.0` 判据），这里不再二次判定。
 let price_ok = present(current_price) && current_price > 0.0;
-let horizon_price_of = |h, sl, tp, days| if price_ok {
-    #{
-        "stopLossPct": sl, "takeProfitPct": tp,
-        "expectedHoldingDays": days,
-        "targetPrice": (current_price * (1.0 + tp / 100.0) * 100.0).round() / 100.0,
-        "stopLoss": (current_price * (1.0 - sl / 100.0) * 100.0).round() / 100.0,
-    }
-} else {
-    #{
-        "stopLossPct": 0.0, "takeProfitPct": 0.0,
-        "expectedHoldingDays": days,
-        "targetPrice": (), "stopLoss": (),
-    }
-};
-let horizon_price_map = #{
-    "ultra_short": horizon_price_of.call("ultra_short", sl_pct_for.call("ultra_short"), tp_pct_for.call("ultra_short"), days_for.call("ultra_short")),
-    "short":       horizon_price_of.call("short",       sl_pct_for.call("short"),       tp_pct_for.call("short"),       days_for.call("short")),
-    "mid":         horizon_price_of.call("mid",         sl_pct_for.call("mid"),         tp_pct_for.call("mid"),         days_for.call("mid")),
-    "long":        horizon_price_of.call("long",        sl_pct_for.call("long"),        tp_pct_for.call("long"),        days_for.call("long")),
-};
 
-// ── 阶段2（PROPOSAL-stock-decision-four-horizon.md）：四周期独立决策 ──
-// 语义：主决策（pm_result）保持日线口径**不动**；本节为 short/mid/long 各出一档「用该周期
-//   技术评分重新融合的独立决策」，ultra_short 走方案B（单后验 + 档位映射 + 置信下限）。
-// 口径（四周期科学化 Phase A，2026-09-29 重做）：
-//   旧口径 = 「非技术因子四档共用主链同一组权重，只替换 f1 的信号值」—— 那等于**一个预测贴
-//   四个标签**（诊断见 `PLAN-multi-horizon-decision-science.md` 的 E1/E4）。
-//   新口径 = 每档把**全部证据腿**按该档的分析师权重表重新加权后再融合；乘数来自 Rust 注入的
-//   `horizon_leg_weights_json`（权威源 `evidence_weight::get_horizon_base_weights` 经
-//   `DECISION_LEG_ANALYST` 桥投影），脚本侧不写任何倍数；技术腿 f1 除重加权外还换成该档自己的评分。
-//   乘数表缺失 ⇒ 全腿按 1.0 退化 + data_gaps 记一条 + 每档 `weightsSource="fallback_unity"`
-//   （退化可检，不伪装成逐档加权）。
-// 数据不足（ts 未注入）时该档技术腿退回主链 f1_signal，verdict 附「该周期评分缺失」注。
-// 全部证据腿的 (权重, 信号) 一览 —— 逐档重新加权的**唯一被乘对象**。
-// 腿名与 `evidence_weight::DECISION_LEG_ANALYST` 桥表一一对应（f8 不存在，编号沿用历史）。
-let decision_legs = [
-    #{ key: "f1", weight: f1_weight, signal: f1_signal },
-    #{ key: "f2", weight: f2_weight, signal: f2_signal },
-    #{ key: "f3", weight: f3_weight, signal: f3_signal },
-    #{ key: "f4", weight: f4_weight, signal: f4_adjusted },
-    #{ key: "f5", weight: f5_weight, signal: f5_signal },
-    #{ key: "f6", weight: f6_weight, signal: f6_signal },
-    #{ key: "f7", weight: f7_weight, signal: f7_signal },
-    #{ key: "f9", weight: f9_weight, signal: f9_signal },
-    #{ key: "f10", weight: f10_weight, signal: f10_signal },
-    #{ key: "f11", weight: f11_weight, signal: f11_signal },
-    #{ key: "f12", weight: f12_weight, signal: f12_signal },
-    #{ key: "f13", weight: f13_weight, signal: f13_signal },
-];
-// 逐档 × 逐腿乘数：由 Rust 注入（权威源 `get_horizon_base_weights` + 桥表），脚本不写任何倍数。
-let horizon_leg_weights_ok = type_of(horizon_leg_weights_json) == "map" && !horizon_leg_weights_json.is_empty();
-if !horizon_leg_weights_ok {
-    data_gaps.push("逐档证据乘数表缺失 ⇒ 四档证据权重退化为全 1.0（档间只剩各自技术评分之差），本条已在每档 weightsSource 标为 fallback_unity");
-}
-let leg_mult = |h, leg| {
-    if !horizon_leg_weights_ok {
-        1.0
-    } else {
-        let row = horizon_leg_weights_json[h];
-        if type_of(row) != "map" {
-            1.0
-        } else {
-            let m = row[leg];
-            if type_of(m) == "()" { 1.0 } else { m }
-        }
-    }
-};
-
-// 该档的证据分母 = 同一张 leg_bases 按该档乘数缩放（f13 的计入条件与主链同规则）。
-// 为什么必须逐档：分子 `tw` 已经是「该档实际权重之和」，分母若仍用主链那份，
-// 短档把技术腿放大 1.3×、估值腿压到 0.3× 之后，算出的「证据完整度」与该档无关 ——
-// 融合灵敏度档间共用正是 E1 的残留形态（第 5(a) 条）。
-// 乘数全 1（表缺失走 fallback_unity）时逐位等于 `max_weight` ⇒ 主链口径零回归。
-let evidence_max_for = |h| {
-    let acc = 0.0;
-    for row in leg_bases {
-        if row.key == "f13" && f13_weight <= 0.0 { continue; }
-        acc += row.base * leg_mult.call(h, row.key);
-    }
-    acc
-};
-
-// ── 逐档先验（Phase C）──
-// 旧形态：四档共用同一个 `prior`（由市场状态派生 0.55/0.50/0.45）⇒ 这是诊断 E1 的根。
-// 现：Rust 按档算方向命中率并与全档合并基准做经验贝叶斯收缩后注入 `horizon_prior_json`；
-// 取不到（统计读失败 / 旧模板快照）⇒ 退回共用 prior，并在每档 `priorSource` 如实标注。
-let horizon_prior_ok = type_of(horizon_prior_json) == "map" && !horizon_prior_json.is_empty();
-if !horizon_prior_ok {
-    data_gaps.push("逐档先验表缺失 ⇒ 四档退回共用 prior（市场状态先验），档间先验无差异");
-}
-// ⚠ 条件取值一律写 if/else 表达式：本仓共享 Rhai 引擎不认三元 `? :`
-//   （生产编译门实测报 `Unknown operator: '?'`，而纯语法门可能放过）。
-let prior_for = |h| {
-    let row = if horizon_prior_ok { horizon_prior_json[h] } else { () };
-    if type_of(row) == "map" && type_of(row["prior"]) != "()" {
-        #{ "value": row["prior"], "source": row["source"], "samples": row["samples"] }
-    } else {
-        #{ "value": prior, "source": "shared_regime_prior", "samples": 0 }
-    }
-};
-
-// 单周期决策闭包。参数 ts = 该周期 totalScore（未注入时 input_mapping 已补 unit）。
-// 用闭包而非 `fn`：rhai 的 `fn` 读不到本文件顶层的 `let` 常量，闭包可捕获外层作用域。
-let horizon_decision = |h, ts, slh, tph, daysh| {
-    let f1s = if present(ts) { (ts - 50.0) / 50.0 } else { f1_signal };
-    let tw = 0.0;
-    let ws = 0.0;
-    for leg in decision_legs {
-        let sig = if leg.key == "f1" { f1s } else { leg.signal };
-        let w = leg.weight * leg_mult.call(h, leg.key);
-        tw += w;
-        ws += w * sig;
-    }
-    let avg = if tw > 0.0 { ws / tw } else { 0.0 };
-    let hp = prior_for.call(h);
-    // 逐档证据完整度（第 5(a) 条）：分子是本档实际权重和 `tw`，分母是同一张基线表
-    // 按本档乘数缩放。乘数表缺失 ⇒ 分母逐位回到主链 `max_weight`，hscale 也与主链同值。
-    let hmax = evidence_max_for.call(h);
-    let hscale = if hmax > 0.0 { pm_evidence_scale(tw, hmax) } else { evidence_scale };
-    let hpost = clamp(hp["value"] + avg * hscale, 0.0, 1.0);
-    let heff = clamp(hpost + risk_bias, 0.0, 1.0);
-    // 「长线更值得」放在**判定侧**（用户裁定，Phase D-2）：恒定日边缘下信噪比 ∝ √h，
-    // 故该档胜率 = 0.5 + (heff − 0.5) × √(h / 锚定天数)，锚 = 中线 28 日（h=28 时不改）。
-    // 看空对称放大 —— 负边缘同样需要时间兑现，这是 SNR 的性质而不是偏好。
-    let hconf = pm_snr_confidence(heff, daysh, SNR_ANCHOR_DAYS);
-    // 对外口径：**纯胜率**（不含 risk_bias）。
-    // 2026-10-02 用户裁定「同一要素不得重复产生决策影响」+「统一口径」：
-    //   `risk_bias` 让「高风险」这一个要素同时作用于 ①方向（减概率）②仓位上限，
-    //   而「高风险 ⇒ 上涨胜率更低」本身就是把**约束**伪装成**事实**。
-    //   故对外报纯胜率（与本仓另两条链同量纲），风险仍由下面的 action 阶梯
-    //   （用 `hconf`）与仓位上限承担。两者都报，差额可归因。
-    let hconf_pure = pm_snr_confidence(hpost, daysh, SNR_ANCHOR_DAYS);
-    // 纯阈值阶梯（与主链 action 同源常量；省略 kelly 门以降复杂度，见阶段2说明）
-    let haction = if hconf >= ACTION_BUY_THRESHOLD { "买入" }
-        else if hconf >= ACTION_INCREASE_THRESHOLD { "增持" }
-        else if hconf >= ACTION_HOLD_THRESHOLD { "持有" }
-        else if hconf >= ACTION_WATCH_THRESHOLD { "观望" }
-        else if hconf >= ACTION_REDUCE_THRESHOLD { "减持" }
-        else { "卖出" };
-    // 赔率 = **本档价带之比** 止盈% ÷ 止损%（第 5(b) 条，替代「置信阶梯 → 保守赔率」的拍表）。
-    // 推导：该档 TP/SL 由 `k · σ_daily · √h` 出（Phase D），故
-    //   odds = (k2·σ·√h) / (k1·σ·√h) = k2/k1 —— σ 与 h **同时约掉**。
-    // 这与直觉相反但自洽：持有期变长时赔率不该自动变大（变的是「位移幅度」，已在价带里），
-    // 旧表把「置信高」当成「赔率好」，等于用同一个信念既定下注概率又定回报倍数（自指）。
-    // 凯利因此变成 `p` 与**我们自己设下的价带**的函数：改盈亏比只有 `k1/k2` 一个入口（设置面板可调）。
-    // σ 不可得时走兜底百分比档，比值仍是该档实际价带（例：短档 10/5 = 2.0），仍是自洽口径。
-    let hodds = if slh > 0.0 { tph / slh } else { 0.0 };
-    // 仓位：凯利（信念上限）与**该档风险预算**（损失上限）取小；σ 不可得时风险预算仍按
-    // 兜底止损算得出，若止损也为 0 则退回裸凯利。
-    let hpos_raw = if hconf >= 0.50 && hodds > 0.001 { pm_kelly_position(hconf, hodds, COST_PCT, overall_risk) }
-        else { 0.0 };
-    let h_risk_budget = risk_budget_position.call(h);
-    let hpos = if type_of(h_risk_budget) == "()" { hpos_raw } else { min(hpos_raw, h_risk_budget) };
-    let hpos_source = if type_of(h_risk_budget) == "()" { "kelly_only" } else { "risk_budget" };
-    let hgap = if present(ts) { "" } else { "[该周期评分缺失，按日线退化]" };
-    // 置信报**纯胜率**（与 `confidence` 字段一致、跨系统可比）；风险门槛造成的差额
-    // 紧跟其后标出 —— 否则「48% 却是观望」会被读成自相矛盾。
-    let hrisk_tag = if risk_bias != 0.0 {
-        `(风险门槛后 ${(hconf*100.0*10.0).round()/10.0}%)`
-    } else { "" };
-    let hverdict = `决策=${haction} 置信=${(hconf_pure*100.0*10.0).round()/10.0}%${hrisk_tag}${hgap}`;
-    let htarget = if hpos > 0.0 && price_ok { (current_price*(1.0+tph/100.0)*100.0).round()/100.0 } else { () };
-    let hstop = if hpos > 0.0 && price_ok { (current_price*(1.0-slh/100.0)*100.0).round()/100.0 } else { () };
-    #{
-        "action": haction,
-        "verdict": hverdict,
-        "positionPct": (hpos*10.0).round()/10.0,
-        // 跨系统可比的**该档上涨胜率**（纯证据，不含风险溢价）——与荐股链同一口径。
-        "confidence": ((hconf_pure*100.0)*10.0).round()/10.0,
-        // 风险调整后（= 本档 `action` 阶梯实际所用值）。两值都报 ⇒ 差额可归因到风险门槛。
-        "confidenceRiskAdjusted": ((hconf*100.0)*10.0).round()/10.0,
-        "posterior": ((hpost*100.0)*10.0).round()/10.0,
-        "posteriorEffective": ((heff*100.0)*10.0).round()/10.0,
-        "snrAnchorDays": SNR_ANCHOR_DAYS,
-        "positionSource": hpos_source,
-        // Phase F：该档技术腿吃的是**哪一份**评分。`daily_fallback` = 本档专属粒度评分
-        // 节点没出数（超短没 60 分钟 / 长线没季度），融合里的 f1 腿退回主链日线信号。
-        // 这是**结构性缺席**，不是「算出低分」⇒ 必须独立成字段，让 UI 与门禁都能点名，
-        // 缺了它「四档同分」就分不清是收敛还是复制。
-        "scoreSource": if present(ts) { "tier_native" } else { "daily_fallback" },
-        // 由下方同源环填覆盖；先占位是**契约稳定**（缺键会让前端 `?? []` 与门禁两种写法混用）。
-        "sharesPosteriorWith": [],
-        "weightsSource": if horizon_leg_weights_ok { "table" } else { "fallback_unity" },
-        "stopSource": stop_source_for.call(h),
-        "priorSource": hp["source"],
-        "priorSamples": hp["samples"],
-        // 该档证据完整度（分子=本档实际权重和，分母=同一张基线表按本档乘数缩放）。
-        // 与主链 `evidence_pct` 不同口径是**有意的**：分母跟着该档的腿间配比走。
-        "evidenceScale": (hscale * 100.0).round() / 10.0,
-        // 该档下注的实际赔率（= 价带之比）。报出来是为了让「档间仓位差异」可归因：
-        // 没有这个字段，读者只能看到凯利结果，看不出是 p 变了还是 b 变了。
-        "odds": (hodds * 100.0).round() / 100.0,
-        "oddsSource": if slh > 0.0 { "ladder_ratio" } else { "no_stop" },
-        "stopLossPct": if hpos>0.0 { slh } else { 0.0 },
-        "takeProfitPct": if hpos>0.0 { tph } else { 0.0 },
-        "expectedHoldingDays": daysh,
-        "targetPrice": htarget,
-        "stopLoss": hstop,
-    }
-};
-
-// 超短线档（Phase A 重做融合 + Phase B-3 换尺度）：
-//   · 融合走**同一个** `horizon_decision`（该档分析师乘数 + 该档技术评分），
-//     不再直接取主链 `effective_posterior` —— 旧「方案B」让超短档与主档恒等，
-//     还把「最短摄入粒度」与「该档没有独立证据权重」两件事混成一件；
-//   · 技术评分取 `totalScore_ultra_short` ← 新节点 t-scoring-hour（compute_scoring period=hourly，
-//     vendor klt=60）。取不到小时线时该参数为 unit ⇒ 闭包退回主链日线 f1 并在 verdict 标
-//     「该周期评分缺失，按日线退化」（**不静默**）；
-//   · 仍保留 confLowerBound 0.35：60 分钟是本链可达的最细粒度，2 个交易日的窗口信息量有限，
-//     这是**声明下限**而不是把粗尺度硬算成高置信。
-let ultra_short_dec = horizon_decision.call("ultra_short", totalScore_ultra_short, sl_pct_for.call("ultra_short"), tp_pct_for.call("ultra_short"), days_for.call("ultra_short"));
-ultra_short_dec["confLowerBound"] = 0.35;
-// ⚠ 这句必须**分条件**：无条件写「超短取 60 分钟粒度评分」时，若该档评分其实没取到，
-//   闭包已在同一串 verdict 里写了「该周期评分缺失，按日线退化」⇒ 一条结论里同时声称
-//   「吃了 60 分钟」和「退化成日线」，是互斥自证。取到才声明来源，没取到只声明下限本身。
-ultra_short_dec["verdict"] = ultra_short_dec["verdict"] + if ultra_short_dec["scoreSource"] == "tier_native" {
-    "[超短取 60 分钟粒度评分，置信下限35%]"
-} else {
-    "[置信下限35%]"
-};
-
-// 四周期独立决策汇总（camelCase 键，供前端按周期 Tab 分组展示）
-// 短/中/长分别注入对应周期评分（seed 新增 t-scoring-week / t-scoring-month 节点供给）
-let decisions_by_horizon = #{
-    "ultraShort": ultra_short_dec,
-    "short": horizon_decision.call("short", totalScore_short, sl_pct_for.call("short"), tp_pct_for.call("short"), days_for.call("short")),
-    "mid": horizon_decision.call("mid", totalScore_mid, sl_pct_for.call("mid"), tp_pct_for.call("mid"), days_for.call("mid")),
-    "long": horizon_decision.call("long", totalScore_long, sl_pct_for.call("long"), tp_pct_for.call("long"), days_for.call("long")),
-};
-
-// ── Phase F：结构性缺席显式声明 + 同源标注 ──
-// 两档 posterior **恒等**时，读者分不清这是「独立算完恰好收敛」还是「同一份输入复制两遍」。
-// 本段不裁决（四档确实可能同档），只做两件机器可检的事：
-//   ① 逐档点名 `scoreSource`（上面已出），凡按日线退化的档各写一条 data_gaps；
-//   ② 给同 posterior 的档互填 `sharesPosteriorWith` ⇒ 展示层必须把它渲染成注脚，
-//      门禁（`portfolio_mgr_same_source_rhai.rs`）锁「同 posterior 必带标注」这条不变量。
-// ⚠ 比较的是**输出值**（已按 0.1 粒度四舍五入）——与面板所见同口径，注脚才有意义；
-//   拿融合前的 hpost 比会得到「没同源」而面板上显示同分，正是本段要消灭的错位。
-let horizon_tier_keys = ["ultraShort", "short", "mid", "long"];
-// 缺口文案要给人读 ⇒ 用中文档名，不要把 `decisionsByHorizon` 的 camelCase 键名插进中文句子。
-// （键名本身留给 `sharesPosteriorWith` 等**机器字段**用，两者职责不同。）
-let tier_cn = |k| switch k {
+// ── R-11 换心脏：`decisionsByHorizon` 的生产者是**四路分支节点**，不再是主脚本里的闭包 ──
+//
+// 退役掉的旧形态（2026-10-04，PLAN §十一-3 / §四十二）：`horizon_decision` 闭包 + `leg_mult`
+//   （逐档 × 逐腿乘数）+ `pm_snr_confidence`（√(h/28) 置信折算）+ `totalScore_*` 四条入边。
+//   三样合起来正是「一个算法 + 四套参数」：四档的**腿集、门形态、置信口径、出场口径**全相同，
+//   只有乘数和天数不同 ⇒ R-11 判为构造性错误。四档现已各有一份真不同的算法
+//   （`portfolio-mgr-h-{ultra-short,short,mid,long}.rhai`，分支表权威 =
+//   `evidence_weight::horizon_branch_specs`），主脚本在这里**只做装配**：
+//   价位换算 + 缺席留痕，不做任何逐档计算。
+//
+// 已批口径（PLAN §四十一，用户 2026-10-04 拍板 = A）：某一路分支节点没产出 ⇒ **该档不出现在
+//   `decisionsByHorizon` 里**，并在 `data_gaps` 点名。三条禁止的替代做法都写在这段注释里，
+//   因为它们是这类装配代码最自然会长成的样子：
+//   ① 补一行 `action:"无结论"` —— 视觉上仍是「这一档有结论」，把归因负担压给展示层；
+//   ② 退回闭包代算 —— 等于把刚判为构造性错误的那份算法请回来，且面板无法区分两者；
+//   ③ 用主链后验凑一个数 —— 就是「四档同分」的老病灶（当初靠 `sharesPosteriorWith` 打注脚，
+//      那是给伪装加标签而不是去掉伪装；注脚字段与乘数留痕通道本次一并删除，见段末说明）。
+let cn_tier = |k| switch k {
     "ultraShort" => "超短线", "short" => "短线", "mid" => "中线", "long" => "长线", _ => k
 };
-for t in horizon_tier_keys {
-    if decisions_by_horizon[t]["scoreSource"] == "daily_fallback" {
-        data_gaps.push(`该周期独立评分未产出 ⇒ ${tier_cn.call(t)}档技术腿按日线退化（结构性缺席，不是低分）`);
+// 顺序 = 展示顺序（前端按 camelCase 键分组，snake 档名进 `horizon` 字段与仲裁/反思对齐）。
+// 行清单**只有一份**（`branch_tiers`，定义在选档段）：这里再造一份就会与选档漂移成
+// 「选档认为那一路有效、装配认为它无效」的同屏矛盾；有效性判定同样复用 `branch_row_ok`。
+// 8< assembly-begin（测试锚点，勿改名）
+let decisions_by_horizon = #{};
+// 价位映射的行清单与上面同源（同一个 `b`），值在下面逐行投影 ⇒ 不可能与 `decisionsByHorizon` 漂移。
+let horizon_price_map = #{};
+for b in branch_tiers {
+    let row = b.row;
+    // 「节点失败」与「节点没接」在这一层同形（都是 unit）⇒ 文案必须同时点名两种可能，
+    // 否则读者会以为只是上游偶发失败，而真因是子模板接线缺失（§三十五 那条生产语义）。
+    if type_of(row) != "map" || row.is_empty() {
+        data_gaps.push(`${cn_tier.call(b.camel)}分支未产出（该路节点失败或未接线）⇒ 本档无独立结论，不退回主链算法代算`);
+        continue;
     }
+    if branch_row_ok.call(row) == false {
+        // 分支脚本自带档位自证；缺这些键说明读到的不是分支输出（接线接错对象），必须报而不是照装配
+        data_gaps.push(`${cn_tier.call(b.camel)}分支输出缺自证字段（confidenceMethod / stopSource）⇒ 疑接错节点，本档按缺席处理`);
+        continue;
+    }
+    let pctl = if present(row["takeProfitPct"]) { row["takeProfitPct"] } else { 0.0 };
+    let slpct = if present(row["stopLossPct"]) { row["stopLossPct"] } else { 0.0 };
+    let pos = if present(row["positionPct"]) { row["positionPct"] } else { 0.0 };
+    // 绝对价只在**真出仓位**时才有意义（与退役前 `htarget`/`hstop` 同判据）：
+    // 空仓档报一个目标价，读者会以为「有个价等着我」——那是把「不下注」伪装成「等执行」。
+    if price_ok && pos > 0.0 {
+        row["targetPrice"] = (current_price * (1.0 + pctl / 100.0) * 100.0).round() / 100.0;
+        row["stopLoss"] = (current_price * (1.0 - slpct / 100.0) * 100.0).round() / 100.0;
+    } else {
+        row["targetPrice"] = ();
+        row["stopLoss"] = ();
+    }
+    // 逐档评分退化必须在**顶层** data_gaps 也留一条（分支行自带的 dataGaps 只在该档对象里）：
+    // 顶层条数驱动「数据缺口 N 项」横幅，缺这条就等于把「该档技术腿其实是日线」压给展示层。
+    if row["scoreSource"] == "daily_fallback" {
+        data_gaps.push(`${cn_tier.call(b.camel)}档技术腿按日线退化（该周期独立评分未产出 ⇒ 结构性缺席，不是低分）`);
+    }
+    decisions_by_horizon[b.camel] = row;
+    // `horizonPriceMap` = 上面这行的**投影**（阶段3′，2026-10-04 批准 ①）。
+    // 值**只搬运不计算**：在这里重算一遍档位就是 R-11 判废的「一个算法 + 四套参数」复发，
+    //   而它原先与逐档 Tab 并列上屏 ⇒ 同一档两个价位来源。
+    // 键改为 **camelCase**（与被投影的 `decisionsByHorizon` 同一拼写）。这顺带修掉一个既有缺陷：
+    //   映射原按 snake 出键，而展示层 `DecisionBanner` 的 `HORIZON_KEYS` 按 camel 读、
+    //   `agentOutput` 的透传是**类型断言不是键转换** ⇒ 只有 `ultra_short` 这一族的拼写会错开，
+    //   表现为「超短档价位行从来不显示，另外三档正常」。实证（000710 现网行的映射键）：
+    //   `mid / long / short / ultra_short` —— 四键齐备而面板只出三行。
+    // 缺席档不出键（与已批口径 A 同构）：展示层按「键缺席」处理，不得按 0 处理。
+    horizon_price_map[b.camel] = #{
+        "stopLossPct": row["stopLossPct"],
+        "takeProfitPct": row["takeProfitPct"],
+        "expectedHoldingDays": row["expectedHoldingDays"],
+        "targetPrice": row["targetPrice"],
+        "stopLoss": row["stopLoss"],
+    };
 }
-// ── 估值腿（f5）的**周期降权留痕**（〇-B v2 / Phase 4 的声明面）──
-// 主链**不做**周期降权（根因：前向引用 + 自指环，见上方 f5 段），降权由权威逐档乘数承担：
-//   f5 在 ultra_short/short/mid/long = 0.3/0.5/1.2/2.0。故留痕必须**读同一份乘数**判断，
-//   不得在脚本里再手抄一套 0.30/0.50 —— 两处数字必然漂移（本仓的老形态）。
-// 判据分两层，缺一层就会写出**误导性**条目：
-//   · `f5_has_valuation`：没有估值证据时不该说「估值腿被降权」——那是把「无数据」说成
-//     「有数据但被降权」，与「伪装成正常结果」同族的反向错误；
-//   · `m < 1.0`：本档乘数确实下调了该腿（中/长档是上调，不是降权，不声明）。
-//
-// ⚠ **通道：进 `weight_adjustments`，不进 `data_gaps`**（2026-10-01 修正）。
-//   `data_gaps` 的语义是「本该拿到的数据没拿到」（上游节点缺席 / 字段不可得）；而「本档主动
-//   降权」是**设计选择**，一个字节的数据都没缺。此前写进 data_gaps 的实证后果是**常驻误报**：
-//   f5 的 0.3 / 0.5 是常量（`horizon_leg_multipliers()`），只要 `f5_has_valuation` 为真就
-//   必然命中恰好 2 条 ⇒ 每一条带估值数据的分析都恒亮「决策可信度受限 / 数据缺口 2 项」，
-//   真缺口（`PE数据(t-risk)` 等）被淹没成噪声；且公式侧恒多两条 LLM 侧不可能产出的串，
-//   把「公式 vs LLM」的 data_gaps 一致性维度（Jaccard）系统性压低。
-//   判据双向锁在 `rhai_registry.rs::portfolio_mgr_runs_with_valuation_evidence_without_degrading`：
-//   新通道必须有这两条、`data_gaps` 里必须一条都没有。
-// camelCase 档键 → 权威表用的 snake_case 档名（`Period::as_str()`）：`leg_mult` 的入参是后者。
-let tier_snake = |k| switch k {
-    "ultraShort" => "ultra_short", "short" => "short", "mid" => "mid", "long" => "long", _ => k
-};
-// 结构化条目（`tier` 取 snake_case = `Period::as_str()` = 前端 `HORIZON_CAMEL_TO_SNAKE` 的值域）
-// ⇒ 展示层按档挂注脚时**不必**解析中文文案（那是把措辞当契约，改一个字就静默失配）。
-// 人读文案由前端 i18n 拼（11 语言），本处只出事实：哪一档、哪条腿、乘数是多少。
-let weight_adjustments = [];
-if f5_has_valuation {
-    for t in horizon_tier_keys {
-        let m = leg_mult.call(tier_snake.call(t), "f5");
-        if type_of(m) == "f64" && m < 1.0 {
-            weight_adjustments.push(#{
-                "tier": tier_snake.call(t), "leg": "f5", "multiplier": m
-            });
-        }
-    }
-}
-for a in horizon_tier_keys {
-    let peers = [];
-    for b in horizon_tier_keys {
-        if a != b && decisions_by_horizon[a]["posterior"] == decisions_by_horizon[b]["posterior"] {
-            peers.push(b);
-        }
-    }
-    if peers.len() > 0 {
-        decisions_by_horizon[a]["sharesPosteriorWith"] = peers;
-    }
-}
+// 8< assembly-end（测试锚点，勿改名）
+// `weightAdjustments`（逐档乘数留痕）通道已整体删除（3b-β，2026-10-04）：它记的是
+// 「同一条腿在本档被乘了几」，而乘数语义随 R-11 一并退役 ⇒ 留一个永不成立的键不如删掉，
+// 前端类型 / `DecisionBanner` 渲染 / 11 语言 i18n 键同批移除（反向锁见
+// `rhai_registry::portfolio_mgr_runs_with_valuation_evidence_without_degrading` 的 ③）。
+// 同源注脚 `sharesPosteriorWith` 随本次一起退役：判据「两档 posterior 相同 ⇒ 必须加注脚」
+// 本质是给伪装贴标签，而四档算法既已真的不同，同分不再等价于复制。现在真正拦住「假分支」的是
+// 两份产地不同的门：`seed_consistency_tests::horizon_branch_rhai_scripts_compile_and_are_genuinely_forked`
+// （四份脚本两两不同 + 各自读注入分支表）与 `rhai_registry` 整脚本门 ②（每档必须自带 confidenceMethod 自证）。
 
 // gap_note：本条**必须在逐档缺口 push 之后**求值（原定义在「── 推理 ──」段，已随之迁移）。
 //   留在原位 ⇒ 推理文案的 `缺口(N)` 少算逐档退化那几条，与同一份输出里的 data_gaps
@@ -3107,7 +3116,12 @@ let gap_note = if data_gaps.len() > 0 {
     // 跨系统可比口径：**不含 risk_bias** 的置信度（见 `bayes_confidence_pure`）。
     // 2026-10-02 改：此前本字段含风险溢价，与荐股链的「该档上涨胜率」不同量纲
     //（用户实测 002812：荐股 78 vs 本字段 39.7，混读会误以为两系统严重对立）。
-    "confidence": (final_confidence_pure * 10.0).round() / 10.0,
+    "confidence": (main_confidence * 10.0).round() / 10.0,
+    // 置信度与 action 的**来历**（§五十三 ①）：展示层与反思统计按这两个标签成句/分组，
+    //   不得回去解析 reasoning 的中文句子。值域见 `src/types/stock-analysis.ts` 与
+    //   `rhai_registry` 整脚本门 ⑦ 的枚举断言（三载体必须同集合）。
+    "confidenceSource": confidence_source,
+    "actionSource": action_source,
     // 风险调整后的置信度（= action 阶梯实际所用值），保留以支持归因。
     "confidenceRiskAdjusted": (final_confidence * 10.0).round() / 10.0,
     // v40(2026-09-13) 口径澄清：本字段 = **生效后验** × 100（= posterior + risk_bias）。
@@ -3172,16 +3186,13 @@ let gap_note = if data_gaps.len() > 0 {
     //   沿用本文件既有写法 `${(x*10.0).round()/10.0}`（见 bearish_downgrade_note 的 to_int 惯例）。
     // 2026-09-22: 结论名回归 `final_action`（方向档）—— 展示档派生已移除，
     //   见上方说明：结论名必须由确定性后验阶梯唯一决定，不得掺入仓位/LLM 措辞。
-    "reasoning": `决策=${final_action} 置信=${(final_confidence_pure*10.0).round()/10.0} 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}`,
+    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}`,
     "data_gaps": data_gaps,
-    // 口径调整（**不是**缺口）：本档主动按周期降权的腿 —— 见上方「通道」说明。
-    // 与 data_gaps 分列，好让 UI 的「数据缺口 N 项」计数不被设计选择污染。
-    "weightAdjustments": weight_adjustments,
     "timeHorizon": time_horizon,
     // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source
     "horizonSource": horizon_source,
     // 主档风控档位的**来历**（Phase D）：σ 不可得时它是退回的固定百分比，不是波动率口径。
-    "stopSource": stop_source_for.call(time_horizon),
+    "stopSource": main_stop_source,
     // 仓位是怎么定出来的：risk_budget（凯利∧风险预算取小）还是降级分支。
     "positionSource": position_source,
     "realizedVolDailyPct": (sigma_daily_pct * 100.0).round() / 100.0,
@@ -3198,7 +3209,7 @@ let gap_note = if data_gaps.len() > 0 {
         "prior": prior, "posterior": (posterior*1000.0).round()/1000.0,
         "avgSignal": (avg_signal*100.0).round()/100.0,
         "activeFactors": total_weight, "totalWeight": total_weight,
-        "oddsSource": if trader_price_no_info { "trader价格信号无效" } else { odds_source },
+        "oddsSource": if trader_price_no_info { "trader价格信号无效" } else { odds_source_display },
         "tradingCostPct": (COST_PCT*100.0).to_int(),
         "f9_money_flow_signal": (f9_signal*100.0).round()/100.0,
         "f10_chip_signal": (f10_signal*100.0).round()/100.0,
@@ -3432,9 +3443,16 @@ catch (err) {
         "targetPrice": (),
         "stopLoss": (),
         "reasoning": "portfolio-mgr Rhai 执行异常，已降级为保守决策: " + err,
-        "data_gaps": [],
-        // 与成功路径同 key 集（理由见上方）：异常路径没有任何口径结论 ⇒ 显式空数组。
-        "weightAdjustments": [],
+        // 缺席必须成句：本路径四档结论与价位映射都是空的，但「为什么空」不能只写在 reasoning 里
+        // ——`data_gaps` 是 UI 的「数据缺口 N 项」与审计读的那一列，留空数组就等于把
+        // 「一次都没算出来」伪装成「算完了且没有任何缺口」。
+        "data_gaps": ["Rhai 执行异常 ⇒ 主链未产出决策；四路逐档分支的结论未装配（不是「该档看空」）"],
+        // 与成功路径同 key 集：**显式空 map**，而不是缺键。缺键在落库侧的既有语义是
+        // 「该记录产生于 stage1/stage2 字段引入之前」（`extract_horizon_price_map` /
+        // `extract_decisions_by_horizon` 都按 NULL = 无此信息处理）⇒ 把「一次都没算出来」
+        // 混进「旧版本」那一族，正是本仓禁止的「缺席伪装成别的缺席」。
+        "horizonPriceMap": #{},
+        "decisionsByHorizon": #{},
         "timeHorizon": "short",
         "expectedHoldingDays": 5,
         "isContradictory": false,

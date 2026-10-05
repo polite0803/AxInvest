@@ -5,6 +5,7 @@ import { Button, Card, Modal, Spin, Tag } from "antd";
 import * as echarts from "echarts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HorizonScopeNotice } from "./HorizonScopeNotice";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { extractReadableFromRiskReport, parseVerdictField } from "./utils";
 
@@ -422,6 +423,16 @@ export function RiskMatrix() {
 
   return (
     <>
+      {
+        /* v128（B1）起风险分类有一根轴按档：四个 `cls-risk-level-{tier}` 各读本档窗口的回撤深度；
+          v129（#45）起**消费侧也按档** —— 主链的 f4 风险证据、`risk_bias`、仓位上限与风控否决
+          读的都是「按所选档收紧后的 `overall_risk`」（两条轴都只升不降）。
+          仍共用一份的是波动率/夏普（60 日全局）与基本面四项（最新财报）
+          ⇒ 声明词表 = `risk-level.rhai` 的 `axisScope`，两侧一致性由
+          `HorizonScopeNotice.test.tsx` 的三条负控锁（含「声明落后数据层一版」那一类）。
+          见 PLAN §五十四 B1 执行记录与 §五十九 后一条。 */
+      }
+      <HorizonScopeNotice scope="risk" />
       <Card
         size="small"
         title={t("stockAnalysis.riskAssessment")}

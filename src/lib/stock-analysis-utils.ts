@@ -1117,6 +1117,9 @@ export interface StockConsensus {
 /** 分析师按 ID 后缀的领域权重：value=价值/长线, technical=技术/短线, sentiment=情绪, macro=宏观 */
 /**
  * ⚠ 本表是后端 `evidence_weight::get_horizon_base_weights` 的**离线兜底副本**
+ * ⚠ 键必须是后端 `EVIDENCE_ANALYST_IDS` 里的**分析师节点 id** —— 历史上这里混着
+ *   `a-market`/`a-technical`/`capital`/`macro`/`fundamental`/`sentiment` 六个图里不存在的名字，
+ *   后端精确查表全部落空、逐档权重静默退 1.0（2026-10-03 统一，见 A 落地记录）。
  * （仅在 `compute_evidence_weights` 命令失败时由 `computeStockConsensus` 使用）。
  * 逐字段一致性由 `node scripts/check-horizon-weight-parity.mjs` 把守 —— 缺键会被
  * `getAnalystWeight` 的 default 静默吸收成 1.0（2026-09-29 实测曾缺 6 项）。
@@ -1125,81 +1128,76 @@ export interface StockConsensus {
 const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
   // 中线决策：基本面与技术面均衡，各分析师权重接近
   mid: {
+    "a-market-analyst": 1.0,
     "a-fundamentals": 1.2,
-    "fundamental": 1.2,
     "value-investor": 1.2,
-    "a-macro": 1.1,
-    "macro": 1.1,
-    "a-sector": 1.1,
+    "a-research": 1.0,
     "research-mgr": 1.1,
-    "a-market": 1.0,
-    "a-technical": 1.0,
-    "a-sentiment": 1.0,
-    "sentiment": 1.0,
     "a-news": 1.0,
+    "a-catalyst": 1.0,
+    "a-sentiment": 1.0,
     "a-hot-money": 0.9,
-    "capital": 0.9,
+    "a-lockup": 1.0,
+    "a-sector": 1.1,
+    "a-policy": 1.0,
     default: 1.0,
   },
   // 长线决策：价值投资者和分析师权重最高，技术面被削弱
   long: {
-    "fundamental": 1.5,
+    "a-market-analyst": 0.6,
     "a-fundamentals": 1.5,
     "value-investor": 2.0,
-    "a-macro": 1.3,
-    "macro": 1.3,
-    "a-sector": 1.2,
+    "a-research": 1.0,
     "research-mgr": 1.5,
     "a-news": 0.7,
-    "sentiment": 0.7,
+    "a-catalyst": 1.0,
     "a-sentiment": 0.7,
     "a-hot-money": 0.5,
-    "capital": 0.5,
-    "a-technical": 0.6,
-    "a-market": 0.6,
+    "a-lockup": 1.0,
+    "a-sector": 1.2,
+    "a-policy": 1.0,
     default: 1.0,
   },
   // 短线决策：技术面、资金面、情绪权重最高
   short: {
-    "a-market": 1.5,
-    "a-technical": 1.5,
-    "a-hot-money": 1.5,
-    "capital": 1.5,
-    "a-sentiment": 1.3,
-    "sentiment": 1.3,
-    "a-news": 1.2,
-    "macro": 0.7,
-    "a-sector": 0.8,
-    "research-mgr": 1.0,
-    "value-investor": 0.5,
+    "a-market-analyst": 1.5,
     "a-fundamentals": 0.6,
-    "fundamental": 0.6,
-    "a-macro": 0.7,
+    "value-investor": 0.5,
+    "a-research": 1.0,
+    "research-mgr": 1.0,
+    "a-news": 1.2,
+    "a-catalyst": 1.0,
+    "a-sentiment": 1.3,
+    "a-hot-money": 1.5,
+    "a-lockup": 1.0,
+    "a-sector": 0.8,
+    "a-policy": 1.0,
     default: 1.0,
   },
   // 超短线：资金面、情绪权重最高，基本面几乎不考虑
   ultra_short: {
-    "a-hot-money": 2.0,
-    "capital": 2.0,
-    "a-sentiment": 1.5,
-    "sentiment": 1.5,
-    "a-news": 1.5,
-    "a-market": 1.3,
-    "value-investor": 0.3,
-    "a-technical": 1.3,
-    "macro": 0.3,
-    "a-sector": 0.5,
+    "a-market-analyst": 1.3,
     "a-fundamentals": 0.3,
-    "fundamental": 0.3,
-    "a-macro": 0.3,
+    "value-investor": 0.3,
+    "a-research": 1.0,
     "research-mgr": 0.5,
+    "a-news": 1.5,
+    "a-catalyst": 1.0,
+    "a-sentiment": 1.5,
+    "a-hot-money": 2.0,
+    "a-lockup": 1.0,
+    "a-sector": 0.5,
+    "a-policy": 1.0,
     default: 1.0,
   },
 };
 
 /** 根据分析师 ID 获取时间维度权重 */
-function getAnalystWeight(analystId: string, timeHorizon?: string | null): number {
+function getAnalystWeight(rawId: string, timeHorizon?: string | null): number {
   const weights = ANALYST_TIME_HORIZON_WEIGHT[timeHorizon || "mid"] || ANALYST_TIME_HORIZON_WEIGHT.mid;
+  // 黑版键带 `report.` 前缀（blackboard.rs 的 report.{节点 id} 规则），本表按裸节点 id 索引
+  // —— 与后端 `evidence_weight::analyst_key` 同一归一，两侧才不会一个是 1.0 一个是 0.3。
+  const analystId = rawId.replace(/^report\./, "");
   // 精确匹配
   if (weights[analystId] != null) { return weights[analystId]; }
   // 后缀模糊匹配
@@ -1347,6 +1345,29 @@ export const HORIZON_T_SUFFIX: Readonly<Record<string, string>> = {
   long: "Long",
 };
 
+/** 档位后缀分隔符 —— 与 Rust 侧 `harness::holding_period::ANALYST_TIER_SEP` 同一常量。 */
+export const ANALYST_TIER_SEP = "--";
+
+/** 某档分析师实例的节点 id（产端由种子生成，见 Rust 侧 `analyst_node_id`）。 */
+export function analystNodeId(base: string, tierSnake: string): string {
+  return `${base}${ANALYST_TIER_SEP}${tierSnake}`;
+}
+
+/**
+ * 从节点 id 剥回 base，供面板按 base 查显示名 / 权重 / 行 key。
+ *
+ * 不是 `base--已知档` 形状就返回 `null` 而**不猜**：历史分析行与快速链里是裸 base id
+ * （改造前产的），后缀不是四档之一则说明接线接错了对象。档位域取自 `HORIZON_T_SUFFIX`
+ * ⇒ 值域加档而这里没同步时，症状是「剥不到、那一格显示为未知」，不会把别档的读数顶上来。
+ */
+export function analystBaseOf(nodeId: string): string | null {
+  const i = nodeId.indexOf(ANALYST_TIER_SEP);
+  if (i <= 0) { return null; }
+  const tier = nodeId.slice(i + ANALYST_TIER_SEP.length);
+  if (!Object.prototype.hasOwnProperty.call(HORIZON_T_SUFFIX, tier)) { return null; }
+  return nodeId.slice(0, i);
+}
+
 /**
  * `decisionsByHorizon` 的键是 camelCase，而 i18n 后缀表按 snake_case 建模
  * （`stock_reflections.horizon_results_json`、命中率的 `byHorizon` 都用 snake）⇒
@@ -1383,12 +1404,79 @@ export function horizonIcAbsenceKey(status?: string | null): string | null {
   return status ? (map[status] ?? null) : null;
 }
 
-/** 主档来源标签：`formula` = 本地公式定档，`model` = 采信模型自报（历史形态）。 */ export function horizonSourceLabelKey(
+/**
+ * 主档来源标签。值域权威是 `crates/harness/src/holding_period.rs` 的 `HORIZON_SOURCES`
+ * （产出方 `portfolio-mgr.rhai`、落库白名单 `decision::extract_horizon_source` 都读那一份），
+ * 本函数是它的**第三处载体** ⇒ 必须逐值覆盖：漏一个值不是「少个标签」，
+ * 而是那一代记录的「谁定的档」在界面上直接消失（返回 null ⇒ 调用方不渲染）。
+ *
+ * · `branch_pick` = 主档由四档分支结论选出（现网正常路径）
+ * · `formula_no_branch` = 四路分支全部未产出 ⇒ 退回后验阈值定档（兜底，必须与上一值可区分）
+ * · `formula` / `model` / `user` = 历史值（旧快照与存量行）
+ */
+export function horizonSourceLabelKey(
   source?: string | null,
 ): string | null {
+  if (source === "branch_pick") { return "stockAnalysis.horizonSourceBranchPick"; }
+  if (source === "formula_no_branch") { return "stockAnalysis.horizonSourceNoBranch"; }
   if (source === "formula") { return "stockAnalysis.horizonSourceFormula"; }
   if (source === "model") { return "stockAnalysis.horizonSourceModel"; }
   return null;
+}
+
+/**
+ * 主档 action 改写的**值域权威在产出方** `src-tauri/src/commands/portfolio-mgr.rhai`
+ * 的 `action_source`（按「最后改写者优先」判定），本数组是第三处载体 ⇒ 必须逐值覆盖，
+ * 并由 `stockAnalysisHorizon.test.ts` 的并集门双向核对（漏一个值 = 那一类记录的来历在界面上直接消失）。
+ */
+export const ACTION_SOURCES: readonly string[] = [
+  "branch_pick",
+  "risk_veto_downgrade",
+  "bearish_veto_downgrade",
+  "sim_veto_downgrade",
+  "sanity_cap_downgrade",
+  "partial_low_confidence_cap",
+  "main_chain",
+];
+
+/** 主档置信度口径的值域（产出方同上，`confidence_source`）。 */
+export const CONFIDENCE_SOURCES: readonly string[] = ["branch_row", "main_chain_posterior"];
+
+/**
+ * action 来历 → i18n key。**未命中返回 null**（= 该记录产生于 v127 之前，无此信息），
+ * 调用方不渲染，不得回退成「分支选档」那种乐观默认（把旧记录说成新口径就是伪装）。
+ */
+export function actionSourceLabelKey(source?: string | null): string | null {
+  switch (source) {
+    case "branch_pick":
+      return "stockAnalysis.actionSourceBranchPick";
+    case "risk_veto_downgrade":
+      return "stockAnalysis.actionSourceRiskVeto";
+    case "bearish_veto_downgrade":
+      return "stockAnalysis.actionSourceBearishVeto";
+    case "sim_veto_downgrade":
+      return "stockAnalysis.actionSourceSimVeto";
+    case "sanity_cap_downgrade":
+      return "stockAnalysis.actionSourceSanityCap";
+    case "partial_low_confidence_cap":
+      return "stockAnalysis.actionSourcePartialLowConf";
+    case "main_chain":
+      return "stockAnalysis.actionSourceMainChain";
+    default:
+      return null;
+  }
+}
+
+/** 置信度口径 → i18n key（未命中同样返回 null，语义同上）。 */
+export function confidenceSourceLabelKey(source?: string | null): string | null {
+  switch (source) {
+    case "branch_row":
+      return "stockAnalysis.confidenceSourceBranchRow";
+    case "main_chain_posterior":
+      return "stockAnalysis.confidenceSourceMainChain";
+    default:
+      return null;
+  }
 }
 
 /**
@@ -1417,4 +1505,80 @@ export function readHorizonActions(decisionJson?: string | null): Array<{ key: s
     if (action) { out.push({ key: snake, action }); }
   }
   return out;
+}
+
+/** 主档 action 被**后置规则改写**的那几类来源（`branch_pick` / `main_chain` 之外的降级格）。 */
+const DOWNGRADE_ACTION_SOURCES: readonly string[] = [
+  "risk_veto_downgrade",
+  "bearish_veto_downgrade",
+  "sim_veto_downgrade",
+  "sanity_cap_downgrade",
+  "partial_low_confidence_cap",
+];
+
+/** 主档来历（`stockAnalysis.decisionProvenance*` 两条模板的入参）。 */
+export type DecisionProvenance = {
+  /** `direct` = 主档就是所选档；`downgraded` = 被后置规则单向降级；`label` = 只报来历不成句 */
+  kind: "direct" | "downgraded" | "label";
+  actionSource: string;
+  confidenceSource?: string;
+  /** 所选档档名（snake_case）；主链定档那代没有分支行 ⇒ 可能缺 */
+  horizon?: string;
+  /** 改写前、所选档分支自己给的 action */
+  branchAction?: string;
+};
+
+/**
+ * 从 `decisionJson` 读「主档这条是怎么来的」（§五十三 ①，v127 起产端才发这两个字段）。
+ *
+ * ⚠ 返回 `null` 的语义是**无此信息**（该记录产生于 v127 之前），调用方必须不渲染 ——
+ *   不得回退成「分支选档」，那是给旧记录编一个它没有的来历（同 `horizonPriceMap` 的
+ *   「缺席 ≠ 空」规矩）。降级格但读不到分支原 action 时退成 `label`（只说「风控否决降级」，
+ *   不编造「买入→持有」里的那个「买入」）。
+ */
+export function readDecisionProvenance(
+  source?: string | Record<string, unknown> | null,
+): DecisionProvenance | null {
+  if (!source) { return null; }
+  let parsed: Record<string, unknown>;
+  if (typeof source === "string") {
+    try {
+      parsed = JSON.parse(source) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  } else {
+    parsed = source;
+  }
+  const pick = (camel: string, snake: string): string | undefined => {
+    const v = parsed[camel] ?? parsed[snake];
+    return typeof v === "string" && v ? v : undefined;
+  };
+  const actionSource = pick("actionSource", "action_source");
+  if (!actionSource) { return null; }
+  const confidenceSource = pick("confidenceSource", "confidence_source");
+  const horizonRaw = pick("timeHorizon", "time_horizon");
+  let horizon: string | undefined;
+  let branchAction: string | undefined;
+  if (horizonRaw) {
+    for (const [camel, snake] of Object.entries(HORIZON_CAMEL_TO_SNAKE)) {
+      if (horizonRaw !== camel && horizonRaw !== snake) { continue; }
+      horizon = snake;
+      const raw = parsed.decisionsByHorizon ?? parsed.decisions_by_horizon;
+      const row = raw && typeof raw === "object"
+        ? (raw as Record<string, { action?: unknown }>)[camel] ?? (raw as Record<string, { action?: unknown }>)[snake]
+        : undefined;
+      if (row && typeof row.action === "string" && row.action) { branchAction = row.action; }
+      break;
+    }
+  }
+  if (DOWNGRADE_ACTION_SOURCES.includes(actionSource)) {
+    return branchAction
+      ? { kind: "downgraded", actionSource, confidenceSource, horizon, branchAction }
+      : { kind: "label", actionSource, confidenceSource, horizon };
+  }
+  if (actionSource === "branch_pick" && horizon) {
+    return { kind: "direct", actionSource, confidenceSource, horizon, branchAction };
+  }
+  return { kind: "label", actionSource, confidenceSource, horizon };
 }

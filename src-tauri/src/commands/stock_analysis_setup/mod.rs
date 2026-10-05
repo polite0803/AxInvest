@@ -488,6 +488,8 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_stock_margin_data",
             "get_stock_quote",
             "search_stock",
+            // P9-4：涨停池的**广度面**（涨停家数 / 触板数 / 封板率 / 炸板数）⇒ `breadthState`。
+            "get_limit_up_pool",
         ],
     ),
     (
@@ -520,7 +522,18 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "detect_earnings_surprise",
         ],
     ),
-    ("policy-analyst", &["search_news", "get_stock_news", "get_cls_flash", "search_stock"]),
+    (
+        "policy-analyst",
+        &[
+            "search_news",
+            "get_stock_news",
+            "get_cls_flash",
+            "search_stock",
+            // P9-1：宏观真源快照 —— `macroRegime` 因子的数据侧。节点已前置取数，
+            // 这里授权是给 LLM 一个按同口径重取的出口，**不是**让模型自己填日期。
+            "macro_data_snapshot",
+        ],
+    ),
     (
         "hot-money-tracker",
         &[
@@ -533,6 +546,9 @@ pub(crate) static PROFILE_TOOLS: &[(&str, &[&str])] = &[
             "get_north_bound_flow",
             "get_stock_institutional_visits",
             "get_stock_margin_data",
+            // P9-4：涨停池的**资金面**（封单额/量、炸板次数、连板结构）⇒ `microstructure`。
+            // 与 a-sentiment 同读一个工具不是重复计数：两个因子取的是响应里的两组字段。
+            "get_limit_up_pool",
             "search_stock",
         ],
     ),
@@ -2542,6 +2558,17 @@ mod version_gate_tests {
         serde_json::from_str(&model.nodes).expect("nodes 应是 JSON 数组")
     }
 
+    /// 边清单（供给关系）。`input_mapping` 只声明「读谁」，不保证「它已跑完」——
+    /// 所以边的缺失是**独立**的一格失效面，必须由门单独看。
+    async fn edges_of(db: &DatabaseConnection) -> Vec<serde_json::Value> {
+        let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .expect("模板应已存在");
+        serde_json::from_str(&model.edges).expect("edges 应是 JSON 数组")
+    }
+
     /// 把 version 强改为指定值 —— 模拟「DB 现值被别的路径写高 / 写低」。
     async fn force_version(db: &DatabaseConnection, v: i32) {
         let model = workflow_template::Entity::find_by_id(TEMPLATE_ID)
@@ -2628,8 +2655,8 @@ mod version_gate_tests {
         // 反向判据：「两份实现被缝在一起」的**真实形态** = 一个节点同时带
         // `code` 与 `prompt` 字段 ⇒ 断言旧 LlmClassifierNode 的专属字段已消失。
         //
-        // ⚠️⚠️ 不可写成「`code` 不得含 prompt 原文」—— `risk-level.rhai:111-113`
-        //   写明该段 prompt「**完整保留作为本脚本的口径权威来源**」，第 115 行注释里
+        // ⚠️⚠️ 不可写成「`code` 不得含 prompt 原文」—— `risk-level.rhai:113-114`
+        //   写明该段 prompt「**完整保留作为本脚本的口径权威来源**」，第 116 行注释里
         //   就有「你是专业风险分析师…」这句。种子用 `include_str!` 嵌入**整个文件**，
         //   故该串**必然**出现在 `config.code` 里。按「不得含」写法本测试在 v59 上
         //   必红（false red），且检不出真正的缝合形态 —— 它只是把判据锚错了对象。
@@ -2654,6 +2681,196 @@ mod version_gate_tests {
             Some("cls-risk-level.result.category"),
             "portfolio-mgr 的 overall_risk_llm 必须指向 `cls-risk-level.result.category`\
              （CodeNode 输出多一层 `result` 包装）—— 否则风险档位整段读不到"
+        );
+    }
+
+    /// v128（B1）「节点 id 后缀 ↔ `riskWindows` 的 camelCase 键 ↔ 档位 snake 键」对齐表。
+    ///
+    /// 三形并存是既成约定（节点 id 走 kebab、DTO 字段走 camelCase、档位值域走 snake），
+    /// **本表是它们唯一的对齐点** —— 抄错任一处（超短节点去读 `mid` 那一格）当场红。
+    const B1_TIER_KEYS: [(&str, &str, &str); 4] = [
+        ("ultra-short", "ultraShort", "ultra_short"),
+        ("short", "short", "short"),
+        ("mid", "mid", "mid"),
+        ("long", "long", "long"),
+    ];
+
+    const B1_GLOBAL_KEYS: [&str; 7] = [
+        "risk_volatility",
+        "risk_drawdown",
+        "risk_sharpe",
+        "risk_roe",
+        "risk_gross_margin",
+        "risk_debt_ratio",
+        "risk_revenue_growth",
+    ];
+
+    /// 按档风险图的**谓词**（写成纯函数是为了能被**变异样本**调用 —— 见下面两条负控）。
+    ///
+    /// 判据面（缺任一格都能假绿）：
+    ///   ① 四个 `cls-risk-level-{tier}` 齐备且是 CodeNode，其 code 含按档深度判据；
+    ///   ② 每个节点的**按档两键**指向自己那一格（`riskWindows.<camelTier>.…`）——
+    ///      「复制四遍得到四份相同结论」那种伪装，只有这一格检得出来（数节点数量检不出）；
+    ///   ③ 七条全局键仍指全局（本版没按档的轴，声明必须与事实一致）；
+    ///   ④ 四路分支 `pm-h-{snake}` 的 `overall_risk` 读**本档**节点；
+    ///   ⑤ 主链 `portfolio-mgr` 四个 `overall_risk_{snake}` 键齐备（脚本内按所选档 switch）；
+    ///   ⑥ 供给边：`t-risk → 本档节点`、`本档节点 → 对应分支`、`本档节点 → 主链`；
+    ///   ⑦ 全局节点仍在**且不注入**按档两键（注入了它就跟着加严 ⇒ 等于偷偷把 60 日整票
+    ///      口径换成按档口径，research-mgr 与 `LLM回退` 两条消费面会跟着漂）。
+    fn check_horizon_scoped_risk(
+        nodes: &[serde_json::Value],
+        edges: &[serde_json::Value],
+    ) -> Result<(), String> {
+        let find = |id: &str| nodes.iter().find(|n| n["id"].as_str() == Some(id));
+        let has_edge = |src: &str, dst: &str| {
+            edges
+                .iter()
+                .any(|e| e["source"].as_str() == Some(src) && e["target"].as_str() == Some(dst))
+        };
+        let mapping = |node: &serde_json::Value, key: &str| -> String {
+            node.pointer(&format!("/config/input_mapping/{key}"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+
+        let pm = find("portfolio-mgr").ok_or_else(|| "缺 portfolio-mgr 节点".to_string())?;
+        for (suffix, camel, snake) in B1_TIER_KEYS {
+            let node_id = format!("cls-risk-level-{suffix}");
+            let n = find(&node_id)
+                .ok_or_else(|| format!("缺按档风险节点 {node_id}（B1 的四节点没落库）"))?;
+            if n["type"].as_str() != Some("code") {
+                return Err(format!("{node_id} 必须是 CodeNode"));
+            }
+            let code = n["config"]["code"].as_str().unwrap_or_default();
+            if !code.contains("DEEP_DISPLACEMENT_RATIO") {
+                return Err(format!(
+                    "{node_id} 的 code 不含按档深度判据 —— include_str! 拿到的是旧版 risk-level.rhai？"
+                ));
+            }
+            let want_depth =
+                format!("t-risk.result.content.stockRiskProfile.riskWindows.{camel}.drawdownDepth");
+            let got_depth = mapping(n, "risk_drawdown_depth");
+            if got_depth != want_depth {
+                return Err(format!(
+                    "{node_id} 的 risk_drawdown_depth = {got_depth}，应为 {want_depth} \
+                     —— 读错档就等于四份复制"
+                ));
+            }
+            let want_days =
+                format!("t-risk.result.content.stockRiskProfile.riskWindows.{camel}.windowDays");
+            let got_days = mapping(n, "risk_window_days");
+            if got_days != want_days {
+                return Err(format!(
+                    "{node_id} 的 risk_window_days = {got_days}，应为 {want_days}"
+                ));
+            }
+            for key in B1_GLOBAL_KEYS {
+                let p = mapping(n, key);
+                if p.is_empty() {
+                    return Err(format!("{node_id} 缺全局键 {key}（七条轴必须齐）"));
+                }
+                if p.contains("riskWindows") {
+                    return Err(format!(
+                        "{node_id} 的 {key} 指向 riskWindows（本版只有 depth/windowDays 两键按档，\
+                         其余七条仍须 60 日全局 —— 声明与事实不能分叉）"
+                    ));
+                }
+            }
+
+            // ⚠ 分支节点 id 用 **kebab 后缀**（`pm-h-ultra-short`），主链注入键用 **snake**
+            //   （`overall_risk_ultra_short`）—— 同一档两种拼写，写错一族就是「门找不到节点」
+            //   （实测首版按 snake 拼 `pm-h-ultra_short` ⇒ 当场红，属门的 bug 不是图的 bug）。
+            let branch_id = format!("pm-h-{suffix}");
+            let branch = find(&branch_id).ok_or_else(|| format!("缺分支节点 {branch_id}"))?;
+            let want_cat = format!("{node_id}.result.category");
+            if mapping(branch, "overall_risk") != want_cat {
+                return Err(format!(
+                    "{branch_id} 的 overall_risk = {}，应为 {want_cat}（本档必须读本档那一格）",
+                    mapping(branch, "overall_risk")
+                ));
+            }
+            if !has_edge("t-risk", &node_id) {
+                return Err(format!("缺供给边 t-risk → {node_id}"));
+            }
+            if !has_edge(&node_id, &branch_id) {
+                return Err(format!("缺供给边 {node_id} → {branch_id}"));
+            }
+            let pm_key = format!("overall_risk_{snake}");
+            if mapping(pm, &pm_key) != want_cat {
+                return Err(format!(
+                    "portfolio-mgr 的 {pm_key} = {}，应为 {want_cat}（主链按所选档 switch 的四格之一没接）",
+                    mapping(pm, &pm_key)
+                ));
+            }
+            if !has_edge(&node_id, "portfolio-mgr") {
+                return Err(format!("缺供给边 {node_id} → portfolio-mgr"));
+            }
+        }
+
+        let g =
+            find("cls-risk-level").ok_or_else(|| "全局 cls-risk-level 节点应保留".to_string())?;
+        for key in ["risk_drawdown_depth", "risk_window_days"] {
+            if !mapping(g, key).is_empty() {
+                return Err(format!(
+                    "全局节点不应注入按档键 {key} —— 它供 research-mgr 上下文与主链回退分支，\
+                     要的是 60 日整票档；注入即等于把它的口径换成按档"
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// v128（B1）：按档风险图必须**真落库**（版本号对 ≠ 内容对 —— 同 v55 那条理由）。
+    #[tokio::test]
+    async fn seeded_template_carries_horizon_scoped_risk_nodes() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+
+        let nodes = nodes_of(db).await;
+        let edges = edges_of(db).await;
+        if let Err(e) = check_horizon_scoped_risk(&nodes, &edges) {
+            panic!("v128 按档风险图不完整: {e}");
+        }
+
+        // 负控 ①：把 mid 节点的深度改指 long 那一格（形状合法、档错位）⇒ 必须红。
+        // 没有这一条，上面那句「读自己那一格」就是恒真断言（四份复制恰好长那样）。
+        let mut swapped = nodes.clone();
+        let mid = swapped
+            .iter_mut()
+            .find(|n| n["id"].as_str() == Some("cls-risk-level-mid"))
+            .expect("夹具：mid 节点应存在");
+        mid["config"]["input_mapping"]["risk_drawdown_depth"] = serde_json::json!(
+            "t-risk.result.content.stockRiskProfile.riskWindows.long.drawdownDepth"
+        );
+        assert!(
+            check_horizon_scoped_risk(&swapped, &edges).is_err(),
+            "mid 节点改成读 long 那一格后判据仍通过 ⇒ 它检不出「四份复制」这一原始缺陷"
+        );
+
+        // 负控 ②：短线分支改回读全局格 ⇒ 必须红（按档接线本身被锁，不只是节点存在）。
+        let mut reverted = nodes.clone();
+        let br = reverted
+            .iter_mut()
+            .find(|n| n["id"].as_str() == Some("pm-h-short"))
+            .expect("夹具：pm-h-short 应存在");
+        br["config"]["input_mapping"]["overall_risk"] =
+            serde_json::json!("cls-risk-level.result.category");
+        assert!(
+            check_horizon_scoped_risk(&reverted, &edges).is_err(),
+            "分支改回读全局格后仍绿 ⇒ 「按档接线」没被锁住"
+        );
+
+        // 负控 ③：删掉一条供给边 ⇒ 必须红（时序竞态是独立失效面）。
+        let mut edgeless = edges.clone();
+        edgeless.retain(|e| {
+            !(e["source"].as_str() == Some("cls-risk-level-mid")
+                && e["target"].as_str() == Some("portfolio-mgr"))
+        });
+        assert!(
+            check_horizon_scoped_risk(&nodes, &edgeless).is_err(),
+            "撤掉 mid → portfolio-mgr 的边后仍绿 ⇒ 边面不在判据面上"
         );
     }
 

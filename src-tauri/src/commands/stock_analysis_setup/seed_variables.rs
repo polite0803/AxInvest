@@ -124,8 +124,11 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         Variable {
             name: "max_concurrent".into(),
             var_type: "number".into(),
-            // 2026-09-08: 3→8。DB 存量 v7 实际值仍为 3（旧种子遗留），3 个并发槽被
+            // 2026-09-08: 3→8。当时 DB 存量 v7 实际值仍是 3（旧种子遗留）：3 个并发槽被
             // 429 重试节点占住不放时其余分析师排队等待，事实串行化（PG 时间线实证）。
+            // ⚠ 本值**只管新建/参数缺失**：已存在的行不会被种子覆盖（现网 2026-10-05 为 10，
+            //   是用户在设置面板改过的运行时值，属正常）。前端同名兜底（`StockAnalysisConfigPanel`
+            //   的 `getDefaultVariables`）已按本条收敛为 8 —— 它在「模板 variables 为空」时会写回库。
             value: serde_json::json!(8),
             description: Some("并行分析的 Agent 数量上限".into()),
             is_secret: false,

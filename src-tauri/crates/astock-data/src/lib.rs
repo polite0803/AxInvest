@@ -4205,9 +4205,20 @@ impl AStockClient {
         &self,
         stock_code: &str,
     ) -> Result<Option<ConsensusEPS>, DataError> {
-        // P4: 按 vendor 申报的 capability 决策
-        // 所有 vendor 均为 Fallthrough(as-of 模式跳过,不执行 C-fallback 估算)
+        // P4: 按 vendor 申报的 capability 决策。
+        // ⚠ 原注释写「所有 vendor 均为 Fallthrough」已过时：eastmoney 自 P9-3 起申报
+        //   `NoHistoricalSemantic` 且弃用了「用最近财报 trailing EPS 充当一致预期」的代理。
         if crate::as_of::is_asof_active() {
+            // ① 个股级每日快照（`run_daily_snapshot_sweep` 当日采过则直接回放）。
+            // 与资金流/两融同形：快照是这类「当日值」在回放里的**唯一**历史通道。
+            let date = crate::as_of::current_date_or_now();
+            if let Some(cached) =
+                self.try_stock_daily_snapshot("get_consensus_eps", stock_code, &date)
+            {
+                if let Ok(Some(r)) = serde_json::from_str::<Option<ConsensusEPS>>(&cached) {
+                    return Ok(Some(r));
+                }
+            }
             let names = self.routing.vendors_for("consensus_eps", &self.routing.consensus_eps);
             let (hit, probe) = self
                 .asof_probe(
@@ -4226,7 +4237,9 @@ impl AStockClient {
             // P9-3（2026-10-03）：删除「用最近一期财报 trailing EPS 充当一致预期」的代理分支。
             // 它是「换个语义的真数字冒充预期」——用户裁定（P9）明确要求补真实数据源，
             // 而不是用近似值顶替。真源（RPT_WEB_RESPREDICT）已接入且**只有当前值**
-            // ⇒ 回放拿不到就明确拿不到，由下面的降级留痑承接；可回放的历史值等每日归档（P9-5）。
+            // ⇒ 回放拿不到就明确拿不到，由下面的降级承接。
+            // #20①（2026-10-05）：历史值通道已接（① 的个股快照 + 采集侧登记）——
+            // 因此这条降级的含义是「**该截止日**没采到」，随采集累积可解，不是机制缺失。
             crate::as_of::record_degradation_kind(
                 "astock-data",
                 "get_consensus_eps",
@@ -5205,6 +5218,102 @@ impl AStockClient {
         }
     }
 
+    /// 从 `anchor`（**不含**当日）往后数 `n` 个交易日，返回窗口右端日期（含）。
+    ///
+    /// 为什么真数交易日而不是 `n × 7/5` 换成自然日：节假日分布不均，换算会把「未来 2 日」
+    /// 放大成 3–5 个自然日，长假前的一次解禁会被算进本不该包含它的窗口。
+    /// 日历取数不可用时 `is_trading_day` 自行回落「工作日且不在兜底假日表」⇒ 本循环不会悬挂；
+    /// 仍带迭代上限做硬保护（日历数据若整体异常，宁可截断窗口也不许卡住一次取数）。
+    fn trading_day_deadline(anchor: chrono::NaiveDate, n: i64) -> Option<chrono::NaiveDate> {
+        let mut day = anchor;
+        let mut left = n;
+        // 上限 = 需求交易日数 × 3 + 60：足够跨过任何长假，又保证必然终止
+        for _ in 0..(n * 3 + 60) {
+            day = day.checked_add_signed(chrono::Duration::days(1))?;
+            if crate::calendar::is_trading_day(&day) {
+                left -= 1;
+                if left <= 0 {
+                    return Some(day);
+                }
+            }
+        }
+        None
+    }
+
+    /// 落在 `(anchor, deadline]` 内的解禁股数合计（股）。发布/解禁日不可解析 ⇒ 不计入（不 panic）。
+    fn unlock_shares_in_window(
+        rows: &[crate::types::LockupSchedule],
+        anchor: chrono::NaiveDate,
+        deadline: chrono::NaiveDate,
+    ) -> f64 {
+        rows.iter()
+            .filter_map(|r| {
+                let d = chrono::NaiveDate::parse_from_str(&r.unlock_date, "%Y-%m-%d").ok()?;
+                (d > anchor && d <= deadline).then_some(r.unlock_shares.max(0.0))
+            })
+            .sum()
+    }
+
+    /// `supplyShock` 载荷块（任务 #23）：四档各算一个
+    /// **未来该档交易日窗内的解禁市值 ÷ 流通市值**，单位是**小数**占比
+    /// （0.013 = 1.3%），与 `analysis-engine::leg_signal` 里 0.10 满强度那条分母同量纲。
+    ///
+    /// 为什么住在取数层：窗口要**交易日历**、分母要**行情**，Rhai 侧两样都没有；
+    /// 而按 B1 已经立过的裁定（`取数层扩窗，不复制节点`），四档共用同一次取数、各读本档那一个值。
+    /// 判据本体拆成上面的纯函数，理由与 #46 同：这条的缺陷全在**锚点与窗口**，
+    /// 锚点若内联成墙钟就写不出门（测试只能随真实日期漂移）⇒ `anchor` 由调用方显式传入。
+    fn supply_shock_block(
+        rows: &[crate::types::LockupSchedule],
+        quote: &axagent_harness::market_data::StockQuote,
+        anchor: chrono::NaiveDate,
+    ) -> serde_json::Value {
+        let circulating_mv = quote.circulating_mv.unwrap_or(0.0);
+        // 「严格为正」写成 partial_cmp 而不是 `!(v > 0.0)`（clippy 的
+        // `neg_cmp_op_on_partial_ord`），也**不能**图省事写成 `v <= 0.0` 取反：
+        // 浮点偏序下 NaN 与 0 的两个不等式都不成立 ⇒ `<=` 会把 NaN 判成「有效分母」，
+        // 而 `!(…)` 是对的却被 lint 禁掉。partial_cmp 返回 None 即「不可比 ⇒ 缺席」，
+        // 与本函数的其它缺席分支同一处理（拿不准就不给数，而不是给一个 0）。
+        let strictly_positive =
+            |v: f64| matches!(v.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater));
+        if !strictly_positive(quote.price) || !strictly_positive(circulating_mv) {
+            // 分母不可得 ⇒ **不输出 0**（0 会被下游读成「没有解禁压力」，正是本批在修的那类形态）
+            return serde_json::json!({
+                "available": false,
+                "unavailableReason": "no_float_market_cap",
+                "anchorDate": anchor.format("%Y-%m-%d").to_string(),
+            });
+        }
+        let mut windows = serde_json::Map::new();
+        let mut deadline_missing = 0usize;
+        for p in axagent_harness::holding_period::Period::ALL {
+            let n = p.default_holding_days() as i64;
+            let Some(deadline) = Self::trading_day_deadline(anchor, n) else {
+                deadline_missing += 1;
+                continue;
+            };
+            let shares = Self::unlock_shares_in_window(rows, anchor, deadline);
+            windows.insert(
+                p.as_str().to_string(),
+                serde_json::json!({
+                    "tradingDays": n,
+                    "deadline": deadline.format("%Y-%m-%d").to_string(),
+                    "unlockShares": shares,
+                    "ratio": shares * quote.price / circulating_mv,
+                }),
+            );
+        }
+        serde_json::json!({
+            "available": !windows.is_empty(),
+            "anchorDate": anchor.format("%Y-%m-%d").to_string(),
+            // 分母自证：写清楚它是**流通市值**（元），不是总市值 —— 两者差几倍的票很多。
+            "denominator": "circulating_mv",
+            "circulatingMv": circulating_mv,
+            "price": quote.price,
+            "windows": windows,
+            "deadlineUnavailableCount": deadline_missing,
+        })
+    }
+
     pub async fn get_lockup_bundle(
         &self,
         stock_code: &str,
@@ -5249,11 +5358,35 @@ impl AStockClient {
             );
         }
 
+        // 分母来自行情。⚠ quote 失败**不能拖垮整包**（解禁/增减持/大宗/户数本身仍然有效）
+        // ⇒ 出一块 `available=false` + 原因码，下游按缺席处理，而不是把整包判成故障。
+        // 锚点走 `as_of::current_date_or_now()`（北京时区、回放取截止日）——
+        // 与 #46 同一条判据：窗口边界绝不用 `Utc::now()`，否则回放用墙钟、数据用截止日。
+        let anchor =
+            chrono::NaiveDate::parse_from_str(&crate::as_of::current_date_or_now(), "%Y-%m-%d");
+        let supply_shock = match anchor {
+            Ok(day) => match self.get_quote(stock_code).await {
+                Ok(q) => Self::supply_shock_block(&lockup, &q, day),
+                Err(e) => serde_json::json!({
+                    "available": false,
+                    "unavailableReason": "quote_failed",
+                    "anchorDate": day.format("%Y-%m-%d").to_string(),
+                    "note": format!("{e}"),
+                }),
+            },
+            Err(_) => serde_json::json!({
+                "available": false,
+                "unavailableReason": "anchor_unparsable",
+            }),
+        };
+
         Ok(serde_json::json!({
             "lockup_schedule": lockup,
             "shareholder_trades": trades,
             "block_trades": block,
             "holder_count": holders,
+            // 外层键与本包其余兄弟键同形（snake），块内键与行 DTO 的 serde 输出同形（camel）
+            "supply_shock": supply_shock,
             "errors": errors,
         }))
     }
@@ -7816,5 +7949,130 @@ mod asof_boundary_tests {
         for k in ["lockup_schedule", "shareholder_trades", "block_trades", "holder_count"] {
             assert!(b.get(k).is_some(), "bundle 缺段 `{k}`");
         }
+    }
+}
+
+#[cfg(test)]
+mod supply_shock_tests {
+    use super::*;
+    use axagent_harness::market_data::StockQuote;
+
+    fn d(s: &str) -> chrono::NaiveDate {
+        chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").expect("测试日期必须是 YYYY-MM-DD")
+    }
+
+    fn row(date: &str, shares: f64) -> crate::types::LockupSchedule {
+        crate::types::LockupSchedule {
+            stock_code: "600000".into(),
+            stock_name: "测试".into(),
+            unlock_date: date.into(),
+            unlock_shares: shares,
+            intraday_share_pct: None,
+            shareholder: None,
+        }
+    }
+
+    fn quote(price: f64, circulating_mv: Option<f64>) -> StockQuote {
+        StockQuote {
+            code: "600000".into(),
+            name: "测试".into(),
+            price,
+            pre_close: price,
+            open: price,
+            high: price,
+            low: price,
+            volume: 0.0,
+            amount: 0.0,
+            change_pct: 0.0,
+            turnover_rate: 0.0,
+            pe: None,
+            pb: None,
+            total_mv: None,
+            circulating_mv,
+            limit_up: None,
+            limit_down: None,
+            is_st: false,
+            timestamp: String::new(),
+        }
+    }
+
+    /// 窗口按**交易日**数：2026-03-02 是周一 ⇒ +2=周三、+4=周五、+5=下周一（跳过周末）。
+    /// 这条锁的是「乘 7/5 换自然日」那版会算错的形状。
+    #[test]
+    fn deadline_counts_trading_days_and_skips_weekend() {
+        let anchor = d("2026-03-02");
+        assert_eq!(AStockClient::trading_day_deadline(anchor, 2), Some(d("2026-03-04")));
+        assert_eq!(AStockClient::trading_day_deadline(anchor, 4), Some(d("2026-03-06")));
+        assert_eq!(AStockClient::trading_day_deadline(anchor, 5), Some(d("2026-03-09")));
+    }
+
+    /// 窗口是 `(anchor, deadline]`：当日**不算**未来解禁，过去的整段排除，
+    /// 不可解析的日期不计入（不得 panic、也不得当成 0 天边）。
+    #[test]
+    fn window_excludes_anchor_day_past_and_unparsable_dates() {
+        let rows = vec![
+            row("2026-03-02", 9.0), // = anchor，排除
+            row("2026-03-01", 9.0), // 过去，排除
+            row("2026-03-03", 1.0),
+            row("2026-03-04", 2.0), // = deadline，含
+            row("2026-03-05", 7.0), // 越界
+            row("近期", 7.0),       // 不可解析
+        ];
+        assert_eq!(
+            AStockClient::unlock_shares_in_window(&rows, d("2026-03-02"), d("2026-03-04")),
+            3.0
+        );
+    }
+
+    /// 比值必须是**小数**（0.1 = 10%），与 leg_signal 的 0.10 满强度同量纲。
+    /// 这正是 #23 的病根形态：旧实现把逐条「占当日解禁合计 ×10000」当百分数求和，
+    /// 现网 152/154 次执行因此恒饱和 —— 单位错而数字看着仍像话。
+    #[test]
+    fn ratio_is_decimal_share_of_float_market_value() {
+        let rows = vec![row("2026-03-03", 1000.0)];
+        let anchor = d("2026-03-02");
+        let block = AStockClient::supply_shock_block(&rows, &quote(10.0, Some(100_000.0)), anchor);
+        assert_eq!(block["available"], serde_json::json!(true));
+        let r = block["windows"]["short"]["ratio"].as_f64().expect("short 档必须有值");
+        // 1000 股 × 10 元 ÷ 10 万流通市值 = 0.1
+        assert!((r - 0.1).abs() < 1e-12, "应为 0.1，实得 {r}");
+        assert!(r <= 1.0, "占比不得超过 1（>1 说明又写成了百分数）");
+        // 四档都在，且天数来自 harness 权威表（2/5/28/90）
+        for (tier, days) in [("ultra_short", 2), ("short", 5), ("mid", 28), ("long", 90)] {
+            assert_eq!(
+                block["windows"][tier]["tradingDays"],
+                serde_json::json!(days),
+                "{tier} 档天数不符权威表"
+            );
+        }
+        // 窗口单调：长档右端不早于短档
+        assert!(
+            block["windows"]["long"]["deadline"].as_str()
+                > block["windows"]["short"]["deadline"].as_str(),
+            "长档窗口必须比短档远"
+        );
+    }
+
+    /// 分母不可得 ⇒ `available=false` + 原因码，**不输出 ratio: 0**
+    /// （0 会被下游读成「没有解禁压力」，就是本批要消灭的那类伪装）。
+    #[test]
+    fn absent_denominator_is_declared_not_zeroed() {
+        let rows = vec![row("2026-03-03", 1000.0)];
+        let no_mv = AStockClient::supply_shock_block(&rows, &quote(10.0, None), d("2026-03-02"));
+        assert_eq!(no_mv["unavailableReason"], "no_float_market_cap");
+        assert!(no_mv.get("windows").is_none(), "不可得时不得给出一套看似有值的窗口");
+
+        let zero_price =
+            AStockClient::supply_shock_block(&rows, &quote(0.0, Some(1.0e9)), d("2026-03-02"));
+        assert_eq!(zero_price["unavailableReason"], "no_float_market_cap");
+        // NaN 也必须走「缺席」而不是「有分母」：`v <= 0.0` 对 NaN 恒 false，
+        // 那样它就成了一个合法的正数分母 ⇒ 算出 NaN 占比或除零式垃圾。
+        let nan_mv = AStockClient::supply_shock_block(
+            &rows,
+            &quote(f64::NAN, Some(f64::NAN)),
+            d("2026-03-02"),
+        );
+        assert_eq!(nan_mv["unavailableReason"], "no_float_market_cap");
+        assert!(nan_mv.get("windows").is_none(), "NaN 分母不得产出一套窗口");
     }
 }

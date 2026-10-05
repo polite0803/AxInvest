@@ -844,9 +844,9 @@ describe("stockAnalysisStore - feature coverage", () => {
         evidenceRefs: [],
       });
       store.pushTimelineNode({
-        id: "a-tech-analyst",
+        id: "a-market-analyst",
         phase: "diagnose",
-        agentId: "a-tech-analyst",
+        agentId: "a-market-analyst",
         agentName: "Tech Analyst",
         title: "Tech Analyst",
         summary: "技术面偏多",
@@ -919,9 +919,9 @@ describe("stockAnalysisStore - feature coverage", () => {
     it("clearTimeline 清空", () => {
       const store = useStockAnalysisStore.getState();
       store.pushTimelineNode({
-        id: "a-market",
+        id: "a-sentiment",
         phase: "diagnose",
-        agentId: "a-market",
+        agentId: "a-sentiment",
         agentName: "Market",
         title: "Market",
         summary: "x",

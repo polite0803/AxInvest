@@ -2590,23 +2590,24 @@ impl StockVendor for EastMoneyVendor {
                 let date = raw_date.split_whitespace().next().unwrap_or(raw_date).to_string();
                 // 解禁数量(本次新增可上市股份,单位:股)
                 let unlock_shares = r["ADD_LISTING_SHARES"].as_f64().unwrap_or(0.0);
-                // P2-3 修复: 解禁比例计算
-                // RPT_LIFT_GD 不返回 TOTAL_SHARES_NUM,但返回 LIFT_SHARES_ALL(当日总解禁股数)
-                // 和 ADD_LISTING_SHARES(单股东解禁股数)。
-                // unlock_ratio 表示该股东解禁占当日总解禁的比例,非占总股本比例。
-                // 若需占总股本比例,上层 LLM 可用 unlock_shares / total_shares 计算。
+                // P2-3 → #23（2026-10-05 语义收口）：这里算的是「该股东 ÷ 当日解禁合计」，
+                // 一个**日内份额**，与本票的股本/流通盘无关 —— 旧名 `unlock_ratio` 让下游
+                // （主链筹码面、前端日历）都按「占比」读它，且旧公式还多乘了一次 100
+                // （`×100×100` ⇒ 0.21% 的日内份额被写成 21，前端再打上 `%`）。
+                // 现在：真百分数 + 不可得 ⇒ `None`。腿要的窗内占比在 `get_lockup_bundle`
+                // 的 `supply_shock` 块里算，不在这一行。
                 let lift_shares_all = r["LIFT_SHARES_ALL"].as_f64().unwrap_or(0.0);
-                let unlock_ratio = if lift_shares_all > 0.0 {
-                    (unlock_shares / lift_shares_all * 100.0 * 100.0).round() / 100.0
+                let intraday_share_pct = if lift_shares_all > 0.0 {
+                    Some(((unlock_shares / lift_shares_all * 100.0).round() / 100.0).min(100.0))
                 } else {
-                    0.0
+                    None
                 };
                 LockupSchedule {
                     stock_code: stock_code.to_string(),
                     stock_name: r["SECURITY_NAME_ABBR"].as_str().unwrap_or("").to_string(),
                     unlock_date: date,
                     unlock_shares,
-                    unlock_ratio,
+                    intraday_share_pct,
                     shareholder: r["LIMITED_HOLDER_NAME"].as_str().map(|s| s.to_string()),
                 }
             })

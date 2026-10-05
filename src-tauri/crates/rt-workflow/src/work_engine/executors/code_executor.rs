@@ -1140,4 +1140,106 @@ mod tests {
             out.output
         );
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // B1（v128）回归：风险分类**按档**，且「按档」只能加严、不能放松
+    //
+    // 这三条断言合起来才是判据，缺任何一条都能假绿：
+    //   ① 不注入按档两键 ⇒ 结论与 v127 **逐位相同**（锁「全局节点没被顺手改判据」——
+    //      种子明写该节点不注入它们，若脚本里那一条新臂在无输入时也生效，全链档位就漂了）；
+    //   ② 注入 depth>1.58 ⇒ 升档，且留痕点名是深度臂（锁「按档真的能改结论」）；
+    //   ③ 注入 depth≤1.58（含正好压线）⇒ 不升档（②的负控：不是「只要注入就加严」）。
+    // ══════════════════════════════════════════════════════════════════════
+
+    /// 在 profile 上挂某档窗口那一格（形状 = `compute_portfolio_risk` 的输出契约）
+    fn profile_with_tier(
+        profile: serde_json::Value,
+        tier: &str,
+        depth: serde_json::Value,
+        days: i64,
+    ) -> serde_json::Value {
+        let mut p = profile.as_object().expect("profile 应是对象").clone();
+        p.insert(
+            "riskWindows".into(),
+            serde_json::json!({
+                tier: {
+                    "windowDays": days,
+                    "windowBars": days + 1,
+                    "maxDrawdownPct": 12.0,
+                    "drawdownDepth": depth,
+                }
+            }),
+        );
+        serde_json::Value::Object(p)
+    }
+
+    /// 全局 7 键映射 + 两条按档键（路径形状与种子里四个节点**逐字同形**）
+    fn tier_mapping(tier: &str) -> std::collections::HashMap<String, String> {
+        let mut m = risk_mapping(None);
+        m.insert(
+            "risk_drawdown_depth".into(),
+            format!("t-risk.result.content.stockRiskProfile.riskWindows.{tier}.drawdownDepth"),
+        );
+        m.insert(
+            "risk_window_days".into(),
+            format!("t-risk.result.content.stockRiskProfile.riskWindows.{tier}.windowDays"),
+        );
+        m
+    }
+
+    /// ① 全局节点形态（不注入按档键）：档位与 v127 一致，深度缺席必须落 null + "absent"
+    #[tokio::test]
+    async fn v128_global_node_without_tier_inputs_keeps_v127_verdict() {
+        let ctx = ctx_with_t_risk(full_profile());
+        let code = include_str!("../../../../../src/commands/risk-level.rhai");
+        let (result, _p) = execute_rhai_directly("cls-risk-level", code, &risk_mapping(None), &ctx)
+            .await
+            .expect("全局节点不应失败");
+
+        assert_eq!(
+            result["category"], "中风险",
+            "不注入按档两键时，结论必须与 v127（FALLBACK 中风险）逐位相同：{result}"
+        );
+        assert!(
+            result["metrics"]["drawdown_depth"].is_null(),
+            "缺席必须落 null，不得用 0.0 冒充「深度为 0（很安全）」：{}",
+            result["metrics"]
+        );
+        assert_eq!(result["axisScope"]["drawdownDepth"], "absent");
+        assert_eq!(result["axisScope"]["volatility"], "global60");
+    }
+
+    /// ② + ③：同一份 60 日全局输入，只有本档深度不同 ⇒ 只有越过 1.58 那条线才升档
+    #[tokio::test]
+    async fn v128_tier_depth_raises_only_above_the_line() {
+        let code = include_str!("../../../../../src/commands/risk-level.rhai");
+
+        // full_profile(): vol=22.7 / sharpe=0.403 / dd=9.5 ⇒ 量化三臂全不命中，
+        // roe=2.2 ⇒ 基本面有风险点 ⇒ 升档与否**只可能**由深度臂决定（这正是夹具要的形状）。
+        for (depth, want, note) in [
+            (serde_json::json!(2.5), "高风险", "越过 p90 线"),
+            (serde_json::json!(1.58), "中风险", "正好压线（判据是严格大于）"),
+            (serde_json::json!(1.2), "中风险", "线内"),
+        ] {
+            let ctx = ctx_with_t_risk(profile_with_tier(full_profile(), "mid", depth, 28));
+            let (result, _p) =
+                execute_rhai_directly("cls-risk-level-mid", code, &tier_mapping("mid"), &ctx)
+                    .await
+                    .unwrap_or_else(|e| panic!("mid 节点不应失败（{note}）: {e}"));
+            assert_eq!(result["category"], want, "depth 场景「{note}」应判 {want}，实际: {result}");
+            assert_eq!(result["axisScope"]["drawdownDepth"], "tierWindow", "{result}");
+            assert_eq!(
+                result["metrics"]["window_days"].as_f64(),
+                Some(28.0),
+                "windowDays 是嵌层整数（注入即 i64），必须经 num_of 桥成数而不是塌成缺席：{result}"
+            );
+            if want == "高风险" {
+                let rules = serde_json::to_string(&result["matched_rules"]).unwrap();
+                assert!(
+                    rules.contains("HIGH-A") && rules.contains("回撤深度"),
+                    "升档留痕必须点名是深度臂，否则事后无从归因: {rules}"
+                );
+            }
+        }
+    }
 }

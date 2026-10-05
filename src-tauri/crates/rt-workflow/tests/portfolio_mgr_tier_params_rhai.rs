@@ -117,10 +117,12 @@ fn tier_params_block_matches_source_verbatim() {
         "portfolio-mgr.rhai 的兜底档位映射（sl_pct_fallback_for / tp_pct_fallback_for）与副本已漂移"
     );
     assert!(pm.contains(PRESENT_FN.trim()), "present 定义已变，请同步本副本");
-    assert!(
-        pm.contains(LEG_MULT_FN.trim()),
-        "portfolio-mgr.rhai 的 leg_mult 与本测试副本已漂移（逐档乘数取值器是 A1 的承重件）"
-    );
+    // ⚠ 2026-10-04 R-11 退役：`leg_mult` / 乘数表整条链没了，原本的「LEG_MULT_FN 逐字一致」
+    //   锁随之删除（对象不存在时，逐字锁会退化成恒假断言 + 一次改名即红的假门）。
+    //   同一条「档间必须有真实差异」的判据换了产地：
+    //   `seed_consistency_tests::horizon_branch_rhai_scripts_compile_and_are_genuinely_forked`
+    //   （四份分支脚本两两不同 + 禁词 + 必须读注入分支表）与
+    //   `rhai_registry::portfolio_mgr_runs_with_valuation_evidence_without_degrading` 的 ②/④。
 }
 
 /// 缺省值必须仍是 3/5、5/10、8/18、12/30（与设置面板展示的默认值同源）。
@@ -145,22 +147,78 @@ fn injected_tier_params_take_effect_per_tier() {
     assert_eq!((find("ultra_short").1, find("ultra_short").2), (3.0, 5.0), "未调档位被误联动");
 }
 
-/// 核心锁：四档独立决策必须经 `sl_pct_for` / `tp_pct_for` / `days_for` 取值，
-/// 且脚本里**不得再出现任何档位字面量调用形态**（v97 缺陷的复发方向就是抄回字面量）。
+/// 核心锁（R-11 换心脏后改了方向）：`decisionsByHorizon` 只**装配**四路分支输出，
+/// 装配区里不得再出现任何逐档计算 —— 原先这条锁的是「四档必须经 `sl_pct_for`/`tp_pct_for`/`days_for`
+/// 取值」（那时逐档决策由主链闭包算），而闭包本身已被判为「一个算法 + 四套参数」。
+/// 现在同一格的期望形态反过来：主链若又去取逐档参数，就是代算。
 #[test]
-fn decisions_by_horizon_reads_the_single_tier_source() {
+fn decisions_by_horizon_assembles_and_never_recomputes() {
     let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
-    let block_start = pm.find("let decisions_by_horizon = #{").expect("四档独立决策段应存在");
-    let block = &pm[block_start..block_start + 900];
-    for h in ["short", "mid", "long"] {
-        for f in ["sl_pct_for", "tp_pct_for", "days_for"] {
-            assert!(
-                block.contains(&format!("{f}.call(\"{h}\")")),
-                "decisionsByHorizon 的 {h} 档未经 {f} 取值 ⇒ 又抄回字面量表了"
-            );
-        }
+    let region_start =
+        pm.find("// 8< assembly-begin").expect("装配段起始锚点应存在（换心脏的落点）");
+    let region_end =
+        pm.find("// 8< assembly-end").expect("装配段结束锚点应存在（锚点变了要同步本测试）");
+    assert!(region_end > region_start, "装配区边界反了");
+    let region = &pm[region_start..region_end];
+    // 阶段2：四路输入清单**只有一份**（`branch_tiers`，定义在选档段），装配区必须迭代它。
+    // 另立一份的坏处不是重复，而是「选档用一份、装配用另一份」⇒ 两处的有效性判定会漂移。
+    assert!(region.contains("for b in branch_tiers"), "装配区不再复用选档段的行清单");
+    for src in ["h_ultra_short", "h_short", "h_mid", "h_long"] {
+        assert!(
+            pm.contains(&format!("row: {src}")),
+            "四路输入清单里没接 {src} ⇒ 该路分支输出根本没进主链"
+        );
     }
-    // 反向锁：v97 之前的字面量形态不得回来。
+    // 反向锁：主链不得在装配区里逐档取值/融合/折算。
+    // ⚠ 每个禁词都**带调用标点**（`.call(` / `(`）：装配区上方留着三段退役说明注释，逐字提到
+    //   `leg_mult` / `horizon_decision` / `pm_snr_confidence` —— 那是给后来者
+    //   解释「这里为什么没有乘数」的。裸名判定会把注释也算进去 ⇒ 假红（2026-10-04 实测踩过）。
+    //   判据本来就是「不得**调用**逐档函数」，带上括号既更准，也天然免疫注释。
+    for dead in [
+        "sl_pct_for.call(",
+        "tp_pct_for.call(",
+        "days_for.call(",
+        "leg_mult(",
+        "horizon_decision(",
+        "pm_snr_confidence(",
+        "evidence_max_for(",
+        "prior_for(",
+    ] {
+        assert!(
+            !region.contains(dead),
+            "装配区又出现 `{dead}` ⇒ 主链开始代算逐档参数（R-11 已把这件事交回各分支脚本）"
+        );
+    }
+    // 自证（禁词不是恒真）：把退役调用插进装配区，同一套锚点必须能把它抓出来。
+    let bad = pm.replace(
+        "let decisions_by_horizon = #{};",
+        "let decisions_by_horizon = #{};\nlet __probe = pm_snr_confidence(1.0, 5.0, 28.0);",
+    );
+    assert_ne!(bad, pm, "负控变异点未命中 ⇒ 上面的禁词已失去区分力");
+    let bad_start = bad.find("// 8< assembly-begin").expect("装配段起始锚点应存在");
+    let bad_end = bad.find("// 8< assembly-end").expect("装配段结束锚点应存在");
+    assert!(
+        bad[bad_start..bad_end].contains("pm_snr_confidence("),
+        "负控失效：装配区里真出现退役调用时禁词没报 ⇒ 本锁恒真"
+    );
+    // 缺席必须走「不出键 + 点名」，而不是补一行占位（已批口径 A，PLAN §四十一）。
+    assert!(
+        region.contains("data_gaps.push(`") && region.contains("分支未产出"),
+        "缺席档没在 data_gaps 点名 ⇒ 结构性缺口会在呈现层变成歧义"
+    );
+    assert!(region.contains("continue;"), "缺席分支必须跳过该档（continue），而不是产出空行");
+    // 逐档退化也要在**顶层** data_gaps 留痕（旧主链就有，换心脏时一度被装配段丢掉）。
+    assert!(
+        region.contains("row[\"scoreSource\"] == \"daily_fallback\""),
+        "装配段不再把「该档技术腿按日线退化」推进顶层 data_gaps ⇒ 缺口横幅会少计，UI 只剩档内注脚"
+    );
+    // 顺序契约：`gap_note` 必须在逐档 push **之后**求值，否则文案写「缺口(3)」而实有 5 条。
+    let gap_note_at = pm.find("let gap_note = if data_gaps.len()").expect("gap_note 应存在");
+    assert!(
+        gap_note_at > region_end,
+        "gap_note 的定义跑到了装配段之前 ⇒ 逐档缺口不计入推理文案：note={gap_note_at} 装配段末={region_end}"
+    );
+    // 旧的字面量抄本与「超短直接取主链后验」两族形态继续锁住（它们与换心脏无关，仍是禁区）。
     for lit in [
         "totalScore_short, 5.0, 10.0, 5",
         "totalScore_mid, 8.0, 18.0, 28",
@@ -168,244 +226,15 @@ fn decisions_by_horizon_reads_the_single_tier_source() {
     ] {
         assert!(!pm.contains(lit), "脚本残留档位字面量抄本: {lit}");
     }
-    // 超短档（v99 起重做）：必须走**同一逐档融合**，不得再直接取主链后验。
-    assert!(
-        pm.contains("let ultra_short_dec = horizon_decision.call(\"ultra_short\""),
-        "超短档应经 horizon_decision 逐档融合（旧「单后验方案B」与主档恒等，已被判为构造性错误）"
-    );
     assert!(
         !pm.contains("let us_action = if effective_posterior"),
         "超短档不得退回直接取主链 effective_posterior 的形态"
     );
     assert!(!pm.contains("\"stopLossPct\": if us_pos>0.0 { 3.0 }"), "超短档不得再硬写 3.0");
-}
-
-/// 核心锁（四周期科学化 Phase A）：每档融合必须**逐腿乘该档权重**，
-/// 且旧的「非技术腿整块共用主链」捷径不得复活 —— 那是 E1（一个预测贴四个标签）的实现形态。
-#[test]
-fn every_leg_is_reweighted_per_tier() {
-    let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
-    assert!(
-        pm.contains("leg.weight * leg_mult.call(h, leg.key)"),
-        "逐档融合必须对每条证据腿乘该档乘数，而不是只替换 f1 信号"
-    );
-    assert!(
-        pm.contains("let decision_legs = ["),
-        "应有统一的证据腿表（腿名与 evidence_weight::DECISION_LEG_ANALYST 桥对应）"
-    );
-    for dead in ["non_tech_total_weight", "non_tech_weighted_signal"] {
-        assert!(
-            !pm.contains(dead),
-            "{dead} 是非技术腿四档共用的捷径变量，Phase A 起必须不存在（留着它 = 回到 E1）"
-        );
-    }
-    // 降级必须可检：乘数表缺失时要标注来源，不得静默当成逐档加权。
-    assert!(
-        pm.contains("\"weightsSource\": if horizon_leg_weights_ok"),
-        "每档应输出 weightsSource（table | fallback_unity），让降级可见"
-    );
-}
-
-/// 逐档乘数取值器 —— 与 `portfolio-mgr.rhai` 的 `leg_mult` 逐字一致（防漂移靠下方断言）。
-const LEG_MULT_FN: &str = r#"
-let leg_mult = |h, leg| {
-    if !horizon_leg_weights_ok {
-        1.0
-    } else {
-        let row = horizon_leg_weights_json[h];
-        if type_of(row) != "map" {
-            1.0
-        } else {
-            let m = row[leg];
-            if type_of(m) == "()" { 1.0 } else { m }
-        }
-    }
-};
-"#;
-
-/// 融合循环骨架 —— 与脚本 `horizon_decision` 内的逐腿加权段同构（腿表用固定夹具，
-/// 目的是验「乘数真的进了融合」，不是验腿名）。
-const FUSE: &str = r#"
-let tw = 0.0;
-let ws = 0.0;
-for leg in legs {
-    let w = leg.weight * leg_mult.call(H, leg.key);
-    tw += w;
-    ws += w * leg.signal;
-}
-#{ "avg": if tw > 0.0 { ws / tw } else { 0.0 } }
-"#;
-
-fn fuse(tier: &str, weights: rhai::Map) -> f64 {
-    let engine = Engine::new();
-    let mut scope = rhai::Scope::new();
-    scope.push_constant("H", rhai::Dynamic::from(tier.to_string()));
-    scope.push_constant("horizon_leg_weights_ok", rhai::Dynamic::from(true));
-    scope.push_constant("horizon_leg_weights_json", rhai::Dynamic::from(weights));
-    let legs = rhai::Array::from(vec![
-        rhai::Dynamic::from({
-            let mut m = rhai::Map::new();
-            m.insert("key".into(), rhai::Dynamic::from("f1"));
-            m.insert("weight".into(), rhai::Dynamic::from(0.15));
-            m.insert("signal".into(), rhai::Dynamic::from(0.4));
-            m
-        }),
-        rhai::Dynamic::from({
-            let mut m = rhai::Map::new();
-            m.insert("key".into(), rhai::Dynamic::from("f5"));
-            m.insert("weight".into(), rhai::Dynamic::from(0.2));
-            m.insert("signal".into(), rhai::Dynamic::from(-0.6));
-            m
-        }),
-    ]);
-    scope.push_constant("legs", rhai::Dynamic::from(legs));
-    let ast = engine.compile(format!("{LEG_MULT_FN}{FUSE}")).expect("融合骨架应可编译");
-    engine
-        .eval_ast_with_scope::<rhai::Map>(&mut scope, &ast)
-        .expect("融合骨架应可求值")
-        .get("avg")
-        .and_then(|v| v.clone().try_cast::<f64>())
-        .expect("avg 应为浮点")
-}
-
-fn tier_row(pairs: &[(&str, f64)]) -> rhai::Map {
-    let mut m = rhai::Map::new();
-    for (k, v) in pairs {
-        m.insert((*k).into(), rhai::Dynamic::from(*v));
-    }
-    m
-}
-
-/// 判别力：同一批腿、同一批信号，**只有乘数表不同** ⇒ 融合结果必须不同。
-/// 这条锁的是「乘数真的进了融合」；若有人把融合改回「只换 f1 信号」，两档会算出同一个数。
-#[test]
-fn tier_multipliers_actually_change_the_fusion() {
-    let mut weights = rhai::Map::new();
-    weights.insert("mid".into(), rhai::Dynamic::from(tier_row(&[("f1", 1.0), ("f5", 1.0)])));
-    weights.insert("long".into(), rhai::Dynamic::from(tier_row(&[("f1", 0.6), ("f5", 2.0)])));
-    let mid = fuse("mid", weights.clone());
-    let long = fuse("long", weights);
-    assert!(
-        (mid - long).abs() > 1e-6,
-        "乘数表不同却算出同一个 avg（{mid}）⇒ 乘数没进融合，四档仍是共用权重"
-    );
-    // 负控：两档乘数完全相同 ⇒ avg 必须相同（证明差异只来自乘数，不是夹具里的随机性）
-    let mut same = rhai::Map::new();
-    same.insert("mid".into(), rhai::Dynamic::from(tier_row(&[("f1", 1.0), ("f5", 1.0)])));
-    same.insert("long".into(), rhai::Dynamic::from(tier_row(&[("f1", 1.0), ("f5", 1.0)])));
-    assert_eq!(fuse("mid", same.clone()), fuse("long", same));
-}
-
-/// 缺表 ⇒ 恒 1.0（可检降级），且此时各档必然同值 —— 正是 `weightsSource` 要暴露的形态。
-#[test]
-fn missing_table_falls_back_to_unity() {
-    let engine = Engine::new();
-    let mut scope = rhai::Scope::new();
-    scope.push_constant("H", rhai::Dynamic::from("long"));
-    scope.push_constant("horizon_leg_weights_ok", rhai::Dynamic::from(false));
-    scope.push_constant("horizon_leg_weights_json", rhai::Dynamic::UNIT);
-    let mut m = rhai::Map::new();
-    m.insert("key".into(), rhai::Dynamic::from("f5"));
-    m.insert("weight".into(), rhai::Dynamic::from(0.2));
-    m.insert("signal".into(), rhai::Dynamic::from(-0.6));
-    scope.push_constant(
-        "legs",
-        rhai::Dynamic::from(rhai::Array::from(vec![rhai::Dynamic::from(m)])),
-    );
-    let ast = engine.compile(format!("{LEG_MULT_FN}{FUSE}")).expect("应可编译");
-    let got = engine
-        .eval_ast_with_scope::<rhai::Map>(&mut scope, &ast)
-        .expect("缺表时融合仍应可求值")
-        .get("avg")
-        .and_then(|v| v.clone().try_cast::<f64>())
-        .expect("avg");
-    assert!((got - (-0.6)).abs() < 1e-9, "缺表应退化为原始信号加权（乘数恒 1.0），实得 {got}");
-}
-
-/// 逐档先验取值器 —— 与 `portfolio-mgr.rhai` 的 `prior_for` 逐字一致（Phase C）。
-const PRIOR_FOR_FN: &str = r#"
-let prior_for = |h| {
-    let row = if horizon_prior_ok { horizon_prior_json[h] } else { () };
-    if type_of(row) == "map" && type_of(row["prior"]) != "()" {
-        #{ "value": row["prior"], "source": row["source"], "samples": row["samples"] }
-    } else {
-        #{ "value": prior, "source": "shared_regime_prior", "samples": 0 }
-    }
-};
-"#;
-
-/// 探针：命中档 / 表里没有的档，各取什么值、标什么来源。
-const PRIOR_PROBE: &str = r#"
-#{
-    "own_value": prior_for.call("mid")["value"],
-    "own_source": prior_for.call("mid")["source"],
-    "miss_source": prior_for.call("nope")["source"],
-    "miss_value": prior_for.call("nope")["value"],
-}
-"#;
-
-fn prior_probe(table: rhai::Map) -> (f64, String, String, f64) {
-    let engine = Engine::new();
-    let mut scope = rhai::Scope::new();
-    scope.push_constant("prior", rhai::Dynamic::from(0.52_f64));
-    scope.push_constant("horizon_prior_ok", rhai::Dynamic::from(true));
-    scope.push_constant("horizon_prior_json", rhai::Dynamic::from(table));
-    let ast = engine.compile(format!("{PRIOR_FOR_FN}{PRIOR_PROBE}")).expect("先验段应可编译");
-    let r = engine.eval_ast_with_scope::<rhai::Map>(&mut scope, &ast).expect("先验段应可求值");
-    let g = |k: &str| r.get(k).cloned().unwrap();
-    (
-        g("own_value").try_cast::<f64>().expect("own_value"),
-        g("own_source").try_cast::<String>().expect("own_source"),
-        g("miss_source").try_cast::<String>().expect("miss_source"),
-        g("miss_value").try_cast::<f64>().expect("miss_value"),
-    )
-}
-
-fn prior_row(prior: f64, source: &str, samples: i64) -> rhai::Map {
-    let mut m = rhai::Map::new();
-    m.insert("prior".into(), rhai::Dynamic::from(prior));
-    m.insert("source".into(), rhai::Dynamic::from(source.to_string()));
-    m.insert("samples".into(), rhai::Dynamic::from(samples));
-    m
-}
-
-/// 逐档先验必须真的被取用：命中档取该档收缩值并带来源；表里没有的档退回共用 prior
-/// 且**标成 `shared_regime_prior`**（不得伪装成本档统计）。
-#[test]
-fn prior_for_uses_the_tier_estimate_and_labels_the_fallback() {
-    let mut table = rhai::Map::new();
-    table.insert("mid".into(), rhai::Dynamic::from(prior_row(0.61, "shrunk", 88)));
-    let (own_val, own_src, miss_src, miss_val) = prior_probe(table);
-    assert_eq!((own_val, own_src.as_str()), (0.61, "shrunk"), "命中档应取该档收缩先验");
-    assert_eq!(miss_src, "shared_regime_prior", "缺档必须标成共用先验");
-    assert_eq!(miss_val, 0.52, "缺档退回值必须是主链 prior");
-}
-
-/// 防漂移 + 防「取而不用」：脚本必须逐字含 `prior_for`，且融合里后验用的是 `hp["value"]`
-/// 而不是四档共用的裸 `prior`（后者正是 E1 的实现形态）。
-#[test]
-fn per_tier_prior_is_wired_into_the_fusion() {
-    let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
-    assert!(
-        pm.contains(PRIOR_FOR_FN.trim()),
-        "prior_for 与本测试副本已漂移（逐档先验取值器是 Phase C 的承重件）"
-    );
-    assert!(
-        pm.contains("clamp(hp[\"value\"] + avg * hscale"),
-        "逐档后验必须用该档先验 hp[\"value\"]；写回裸 `prior` 就是退回四档共用先验（E1）"
-    );
-    assert!(
-        !pm.contains("avg * evidence_scale"),
-        "逐档融合又吃回主链 evidence_scale ⇒ 5(a) 失效（分母必须按该档乘数缩放）"
-    );
-    assert!(
-        pm.contains("let hp = prior_for.call(h);"),
-        "prior_for 是闭包，必须 .call（按名调用恒 Function not found）"
-    );
-    assert!(
-        pm.contains("\"priorSource\": hp[\"source\"]"),
-        "每档必须透出先验来源，否则「收缩自本档」与「退回共用」在产出里不可区分"
-    );
+    // ⚠ 退役字段（`weightsSource` / `sharesPosteriorWith` / `snrAnchorDays`）与退役算法的**全文级**
+    //   禁词门不在本文件：主链脚本里留着三段退役说明注释逐字提到这些名字，裸文本判定必然假红，
+    //   而「剥注释后再查代码域」需要的 `code_only()` 在主 crate（本 crate 拿不到，也不该复制一份）。
+    //   ⇒ 那条门搬到 `seed_consistency_tests::main_script_keeps_retired_per_tier_algebra_out_of_code`。
 }
 
 /// 锁（Phase D）：止损/止盈必须由「σ_daily × √持有天数」推导，且降级路径与来源标注齐全。
@@ -427,176 +256,50 @@ fn stop_and_take_profit_are_volatility_derived_with_labeled_fallback() {
         pm.contains("if mv <= 0.0 {\n        sl_pct_fallback_for.call(h)"),
         "σ 不可得时必须退回可调百分比档（而不是算出 0% 止损）"
     );
+    // 主档必须输出 stopSource，而且**标签说的是实际被采用的那条算法**
+    // （2026-10-04 R-11 把逐档出场口径交给分支脚本；v125 批准 ① 又把主档数值改成取自
+    //   所选档 ⇒ 来历标签必须跟着走。否则分支算出的止损会被署上主链的 `vol`/`fallback_pct`，
+    //   那是给一条**没被采用的算法**署名 —— 与「兜底伪装成主口径」同一族缺陷）。
     assert!(
-        pm.contains("\"stopSource\": stop_source_for.call(h)")
-            && pm.contains("\"stopSource\": stop_source_for.call(time_horizon)"),
-        "每档与主档都要输出 stopSource，否则「波动率口径」与「退回固定档」在产出里无法区分"
+        pm.contains(
+            "let main_stop_source = if type_of(b_sl) != \"()\" { picked_row[\"stopSource\"] } else { stop_source_for.call(time_horizon) };"
+        ),
+        "主档 stopSource 的来源不再是「被采用那条算法自己的标签」"
     );
+    assert!(
+        pm.contains("\"stopSource\": main_stop_source"),
+        "主档没有 stopSource ⇒ 「波动率口径」与「退回固定档」在产出里无法区分"
+    );
+    const PER_TIER_STOP_SOURCE: &str = "\"stopSource\": stop_source_for.call(h)";
+    assert!(
+        !pm.contains(PER_TIER_STOP_SOURCE),
+        "主链又逐档写 stopSource ⇒ 逐档出场口径回到主链代算（应在分支脚本里）"
+    );
+    assert!(
+        pm.replace(
+            "let decisions_by_horizon = #{};",
+            &format!(
+                "let probe = #{{ {} }};\nlet decisions_by_horizon = #{{}};",
+                PER_TIER_STOP_SOURCE
+            )
+        )
+        .contains(PER_TIER_STOP_SOURCE),
+        "负控失效：逐档 stopSource 真回到主链时这条禁词抓不出来 ⇒ 上面的断言恒真"
+    );
+    // 逐档那一份必须由分支脚本产出（否则「翻向」= 把判据删了，两头都没锁）。
+    for (tier, code) in [
+        ("ultra_short", include_str!("../../../src/commands/portfolio-mgr-h-ultra-short.rhai")),
+        ("short", include_str!("../../../src/commands/portfolio-mgr-h-short.rhai")),
+        ("mid", include_str!("../../../src/commands/portfolio-mgr-h-mid.rhai")),
+        ("long", include_str!("../../../src/commands/portfolio-mgr-h-long.rhai")),
+    ] {
+        assert!(
+            code.contains("stopSource:") && code.contains("fallback_pct"),
+            "分支脚本 {tier} 不再输出自己的止损口径 ⇒ 逐档 stopSource 这一族信息整体丢失"
+        );
+    }
     assert!(
         pm.contains("let stop_vol_mult_v = if present(stop_vol_mult)"),
         "k1 必须经 present() 守卫读取（旧快照缺该变量时不得抛 Variable not found）"
     );
-}
-/// 生产脚本的 `leg_bases` + `max_weight` 累加（逐字副本；漂移由
-/// `evidence_max_reduces_to_max_weight` 里的包含断言拦下）。
-const LEG_BASES_SRC: &str = r#"
-let leg_bases = [
-    #{ key: "f1", base: f1_default },
-    #{ key: "f2", base: f2_default },
-    #{ key: "f3", base: f3_default },
-    #{ key: "f4", base: f4_default },
-    #{ key: "f5", base: f5_default },
-    #{ key: "f6", base: f6_default },
-    #{ key: "f7", base: f7_default },
-    #{ key: "f9", base: f9_default },
-    #{ key: "f10", base: f10_default },
-    #{ key: "f11", base: f11_default },
-    #{ key: "f12", base: f12_default },
-    #{ key: "f13", base: f13_default },
-];
-let max_weight = 0.0;
-for row in leg_bases {
-    // f13 的计入条件原样保留：非瓶颈路径下它不是活跃因子，不得进分母（见上方注释）
-    if row.key == "f13" && f13_weight <= 0.0 { continue; }
-    max_weight += row.base;
-}
-"#;
-
-/// 生产脚本的逐档证据分母闭包（逐字副本）。
-const EVIDENCE_MAX_SRC: &str = r#"
-let evidence_max_for = |h| {
-    let acc = 0.0;
-    for row in leg_bases {
-        if row.key == "f13" && f13_weight <= 0.0 { continue; }
-        acc += row.base * leg_mult.call(h, row.key);
-    }
-    acc
-};
-"#;
-
-/// 组装可运行骨架：基线默认权重 + 乘数表 + 三段生产代码，输出主链/各档分母。
-fn evidence_script(f13_weight: &str, table: &str) -> String {
-    let mut s = String::new();
-    for (k, v) in [
-        ("f1", "0.15"),
-        ("f2", "0.25"),
-        ("f3", "0.20"),
-        ("f4", "0.15"),
-        ("f5", "0.15"),
-        ("f6", "0.15"),
-        ("f7", "0.10"),
-        ("f9", "0.08"),
-        ("f10", "0.08"),
-        ("f11", "0.08"),
-        ("f12", "0.10"),
-        ("f13", "0.10"),
-    ] {
-        s.push_str(&format!(
-            "let {k}_default = {v};
-"
-        ));
-    }
-    s.push_str(&format!(
-        "let f13_weight = {f13_weight};
-"
-    ));
-    s.push_str(&format!(
-        "let horizon_leg_weights_json = {table};
-"
-    ));
-    s.push_str(
-        "let horizon_leg_weights_ok = true;
-",
-    );
-    s.push_str(LEG_MULT_FN);
-    s.push_str(LEG_BASES_SRC);
-    s.push_str(EVIDENCE_MAX_SRC);
-    s.push_str(
-        r#"
-#{
-    "max": max_weight,
-    "ultra": evidence_max_for.call("ultra_short"),
-    "short": evidence_max_for.call("short"),
-    "mid": evidence_max_for.call("mid"),
-    "long": evidence_max_for.call("long")
-}
-"#,
-    );
-    s
-}
-
-fn evidence_eval(src: &str) -> rhai::Map {
-    let engine = rhai::Engine::new();
-    let mut scope = rhai::Scope::new();
-    engine
-        .eval_with_scope::<rhai::Dynamic>(&mut scope, src)
-        .expect("逐档证据分母骨架应可执行")
-        .try_cast::<rhai::Map>()
-        .expect("结果应为 map")
-}
-
-fn m(map: &rhai::Map, key: &str) -> f64 {
-    map.iter()
-        .find(|(k, _)| k.as_str() == key)
-        .unwrap_or_else(|| panic!("缺键 {key}"))
-        .1
-        .clone()
-        .as_float()
-        .unwrap_or_else(|_| panic!("{key} 应为 float"))
-}
-
-/// 零回归 + 逐档生效：乘数全 1 时逐档分母**逐位等于**主链 `max_weight`；
-/// 乘数一 skew，四档必须各自不同（否则 5(a) 等于没做）。
-#[test]
-fn evidence_max_reduces_to_max_weight() {
-    let pm = include_str!("../../../src/commands/portfolio-mgr.rhai");
-    // 防漂移：两段副本必须还在生产脚本里（改生产不改测试会在这里红）
-    assert!(pm.contains(LEG_BASES_SRC.trim()), "leg_bases/max_weight 段与副本已漂移");
-    assert!(pm.contains(EVIDENCE_MAX_SRC.trim()), "evidence_max_for 与副本已漂移");
-    // 反向锁：手抄 literal 与「融合吃主链 scale」都不得回来
-    assert!(!pm.contains("0.15 + 0.25 + 0.20"), "max_weight 又回到 11 项手抄 literal");
-    assert!(pm.contains("avg * hscale"), "逐档融合又吃主链 evidence_scale");
-    assert!(pm.contains("let f7_default = 0.10;"), "f7 基线权重又是裸值");
-
-    // ① 乘数全 1（表存在但每档查不到腿 ⇒ leg_mult 回落 1.0）⇒ 四档 == 主链
-    let unity = r#"#{ "ultra_short": #{}, "short": #{}, "mid": #{}, "long": #{} }"#;
-    let r = evidence_eval(&evidence_script("0.0", unity));
-    let max = m(&r, "max");
-    // 1.49 是原注释里的四舍五入读数；逐项累加的真实值 = 1.4900000000000004
-    // （原 literal 同样是逐项相加，故二者一致 ⇒ 这里锁的是「值没漂」，不是「等于 1.49」）。
-    assert!(
-        (max - 1.4900000000000004).abs() < 1e-12,
-        "f13 未激活时分母必须仍是原 literal 的合计，否则 evidence_pct 阈值整体漂移，实得 {max:?}"
-    );
-    for k in ["ultra", "short", "mid", "long"] {
-        assert_eq!(m(&r, k), max, "乘数全 1 时 {k} 档分母应逐位等于主链");
-    }
-
-    // ② f13 激活 ⇒ 1.59（原 literal 的 + f13_default 分支）
-    let r2 = evidence_eval(&evidence_script("0.10", unity));
-    assert!(
-        (m(&r2, "max") - 1.5900000000000003).abs() < 1e-12,
-        "f13 激活时分母应是原 literal 的合计（≈1.59），实得 {:?}",
-        m(&r2, "max")
-    );
-    assert_eq!(m(&r2, "mid"), m(&r2, "max"));
-
-    // ③ skew 表：短档放大技术腿、压估值腿 ⇒ 各档分母互不相同且都不等于主链。
-    //    ⚠ 分母是**加权和**，一升一降可能正好抵消：第一版给 long 配 `f5×1.8 + f3×0.4`
-    //    （+0.12 − 0.12 = 0）⇒ 该档与主链逐位相同，断言以为「乘数没进到分母」而红 ——
-    //    红的是夹具，不是生产。选值必须让每档的净增减非零。
-    let skew = r#"#{ "ultra_short": #{ "f1": 2.0, "f2": 0.5 }, "short": #{ "f1": 1.3 }, "mid": #{ "f5": 0.3 }, "long": #{ "f5": 1.8, "f3": 0.6 } }"#;
-    let r3 = evidence_eval(&evidence_script("0.0", skew));
-    let vals = [m(&r3, "ultra"), m(&r3, "short"), m(&r3, "mid"), m(&r3, "long")];
-    for (i, v) in vals.iter().enumerate() {
-        assert!((v - max).abs() > 1e-9, "第 {i} 档分母仍等于主链 ⇒ 逐档 evidence_scale 没生效");
-    }
-    for i in 0..vals.len() {
-        for j in i + 1..vals.len() {
-            assert!(
-                (vals[i] - vals[j]).abs() > 1e-9,
-                "档 {i} 与档 {j} 分母相同 ⇒ 乘数没进到分母（四档分母={vals:?}）"
-            );
-        }
-    }
 }

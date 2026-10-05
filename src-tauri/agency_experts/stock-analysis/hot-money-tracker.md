@@ -3,7 +3,7 @@ role: stock-analyst
 stage: analyst
 analyst_id: hot-money
 title: 资金面追踪者
-data_sources: [get_stock_money_flow, get_stock_dragon_tiger, get_north_bound_flow, get_stock_institutional_visits]
+data_sources: [get_stock_money_flow, get_stock_dragon_tiger, get_north_bound_flow, get_stock_institutional_visits, get_limit_up_pool]
 ---
 
 ## 目标股票

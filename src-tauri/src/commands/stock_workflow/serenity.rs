@@ -661,18 +661,15 @@ fn extract_candidates_one_by_one(text: &str) -> Option<Vec<serde_json::Value>> {
 
 /// 从文本内容中尝试启发式提取候选列表
 /// 用于最终兜底：当所有结构化提取都失败时，直接从 LLM 文本输出中挖
-/// 返回 (candidates 数组, 是否包含 summary 字段)
-fn try_extract_candidates_from_text(text: &str) -> Option<(Vec<serde_json::Value>, bool)> {
+///
+/// 契约：返回 `None` 或**非空**数组 —— 两条路径都以「挖到候选」为成功条件，
+/// 调用方拿到 `Some` 就可以直接判定兜底命中，不需要再判空。
+fn try_extract_candidates_from_text(text: &str) -> Option<Vec<serde_json::Value>> {
     // 尝试1: 找 "candidates": [ ... ] 块，逐个提取
     // 逐个提取相比于全量解析更稳健——即使某个候选对象内部有语法错误，
     // 其他候选仍能被回收。（LLM 高频问题：字符串值中未转义的引号）
     if let Some(found) = extract_candidates_one_by_one(text) {
-        let summary_pos = text.find("\"summary\"").map(|p| p.saturating_sub(500));
-        let has_summary = summary_pos.is_some_and(|sp| {
-            let region = &text[sp..sp.saturating_add(200)];
-            region.contains(": \"") || region.contains(":\"")
-        });
-        return Some((found, has_summary));
+        return Some(found);
     }
 
     // 尝试2: 搜索 "stock_code": "XXXXXX" 模式，提取周围的对象
@@ -712,11 +709,7 @@ fn try_extract_candidates_from_text(text: &str) -> Option<(Vec<serde_json::Value
         search_start = abs_pos + 13; // 跳过已搜索部分
     }
 
-    if found.is_empty() {
-        None
-    } else {
-        Some((found, false))
-    }
+    if found.is_empty() { None } else { Some(found) }
 }
 
 /// 从节点原始输出中直接提取 candidates 数组
@@ -752,10 +745,16 @@ fn serenity_extract_from_node(raw: &serde_json::Value) -> serde_json::Value {
         return first;
     };
     let inner = serenity_extract_from_content(&report);
-    if serenity_has_candidates(&inner) {
+    // 命中判据 = 回收到的候选 **或** 模型自己给出的缺席理由。只认候选会把后者一并丢掉，
+    // 界面就退回「无候选、也无原因」—— 与本轮刚修掉的层 4 那句编造的「上游数据不足」
+    // 是同一族的两面：一面凭空造原因，一面把真原因扔掉。
+    let inner_has_reason =
+        inner.get("summary").and_then(|s| s.as_str()).is_some_and(|s| !s.trim().is_empty());
+    if serenity_has_candidates(&inner) || inner_has_reason {
         tracing::info!(
-            "[serenity] strict_mode report 解包重跑成功，回收 {} 个候选",
-            inner["candidates"].as_array().map_or(0, |a| a.len())
+            candidates = inner["candidates"].as_array().map_or(0, |a| a.len()),
+            keeps_reason = inner_has_reason,
+            "[serenity] strict_mode report 解包重跑成功"
         );
         return inner;
     }
@@ -810,11 +809,15 @@ fn serenity_extract_from_content(content: &str) -> serde_json::Value {
             }
             // 第四层：文本启发式兜底
             tracing::warn!("[serenity] 修复链前三层均失败，尝试文本兜底提取");
-            if let Some((found, has_summary)) = try_extract_candidates_from_text(content) {
-                if has_summary {
-                    tracing::info!("[serenity] 文本兜底提取成功，0 个候选 + summary 字段");
-                    return serde_json::json!({"candidates": [], "summary": "上游数据不足，无法识别有效候选标的"});
-                }
+            // 兜底命中即采用回收到的候选 —— 这里**没有**「有 summary 就返回空候选」的
+            // 分支了（2026-10-05 归因）：旧分支靠 `has_summary` 先判，而本函数契约是
+            // `Some` ⇒ 非空数组，于是它唯一能触发的时机恰恰是「候选已回收」那次，
+            // 结果把候选整段丢弃、换成一句硬编码的「上游数据不足」—— 既产出 0 候选，
+            // 又向用户编造了一句模型自己没说过的缺席原因。
+            // 模型真的拒绝出票时输出语法完好（`{"candidates": [], "summary": "…"}`），
+            // 在层 0 就带着**模型原文的** summary 返回，不经兜底。
+            if let Some(found) = try_extract_candidates_from_text(content) {
+                tracing::info!("[serenity] 文本兜底提取成功，回收 {} 个候选", found.len());
                 return serde_json::json!({"candidates": found});
             }
             return serde_json::Value::Null;
@@ -1295,14 +1298,12 @@ pub async fn run_serenity_screening(
                     if let Some(content) =
                         candidates_raw_fallback.get("content").and_then(|c| c.as_str())
                     {
-                        if let Some((found, _)) = try_extract_candidates_from_text(content) {
-                            if !found.is_empty() {
-                                tracing::info!(
-                                    "[serenity] 文本兜底提取成功，找到 {} 个候选",
-                                    found.len()
-                                );
-                                candidate_array = serde_json::json!(found);
-                            }
+                        if let Some(found) = try_extract_candidates_from_text(content) {
+                            tracing::info!(
+                                "[serenity] 文本兜底提取成功，找到 {} 个候选",
+                                found.len()
+                            );
+                            candidate_array = serde_json::json!(found);
                         }
                     }
                 }
@@ -2345,9 +2346,9 @@ mod serenity_extract_tests {
         assert_eq!(got["candidates"].as_array().map_or(0, |a| a.len()), 1);
     }
 
-    // ── 18) 解包不出候选时保留原结果（空候选 + summary 的「为什么不出票」不能丢）──
+    // ── 18) 解包既拿不到候选、也拿不到模型理由时才保留原判定（信封里是纯散文）──
     #[test]
-    fn extract_keeps_summary_when_report_unwrap_finds_nothing() {
+    fn extract_falls_back_to_first_when_unwrap_yields_nothing() {
         let envelope = serde_json::json!({
             "report": "上游趋势数据缺失，无法识别有效候选标的",
             "verdict": {"verdict": "观望", "confidence": 50},
@@ -2355,5 +2356,69 @@ mod serenity_extract_tests {
         let node_out = serde_json::json!({"content": envelope.to_string()});
         let got = serenity_extract_from_node(&node_out);
         assert!(got.is_null(), "既无候选也无 summary 时保持原判定");
+    }
+
+    // ── 19) 负控：report 语法完好时不得重复计数 ──
+    //      解包层与四层提取链叠加，最坏形态是「同一批候选被两条路径各挖一次」⇒ 候选数翻倍。
+    //      完好 report 在解包后的层 0 就命中，压根不进逐对象兜底；这条锁住那个前提。
+    #[test]
+    fn extract_does_not_double_count_well_formed_report() {
+        let report = concat!(
+            "```tool_json\n",
+            r#"{"name": "submit_candidates", "arguments": {"candidates": "#,
+            r#"[{"stock_code": "688114"}, {"stock_code": "300676"}], "summary": "共筛选2个候选"}}"#,
+            "\n```",
+        );
+        let envelope = serde_json::json!({"report": report, "verdict": {"verdict": "偏多"}});
+        let node_out = serde_json::json!({"content": envelope.to_string()});
+        let got = serenity_extract_from_node(&node_out);
+        let arr = got["candidates"].as_array().expect("完好 report 应产出候选");
+        assert_eq!(arr.len(), 2, "不得重复计数（每条候选只出现一次）");
+        let codes: Vec<&str> = arr.iter().filter_map(|c| c["stock_code"].as_str()).collect();
+        assert_eq!(codes, vec!["688114", "300676"]);
+        // summary 取模型原文，不是兜底层编的句子
+        assert_eq!(got["summary"], "共筛选2个候选");
+    }
+
+    // ── 20) 负控：模型真的拒绝出票时，空候选 + 它自己的理由必须原样保留 ──
+    //      这条锁的是旧 `has_summary` 分支**本意**想服务的那个场景 —— 旧实现里它永远
+    //      服务不到（兜底命中 ⇒ 候选非空），反而把有候选的轮次压成 0 候选 + 一句硬编码
+    //      「上游数据不足」。该场景语法完好，走层 0，summary 是模型原文。
+    #[test]
+    fn declined_round_keeps_model_own_reason_and_empty_candidates() {
+        let content = r#"{"candidates": [], "summary": "上游趋势数据缺失，无法识别有效候选标的"}"#;
+        let node_out = serde_json::json!({"content": content});
+        let got = serenity_extract_from_node(&node_out);
+        assert_eq!(got["candidates"].as_array().map_or(99, |a| a.len()), 0);
+        assert_eq!(got["summary"], "上游趋势数据缺失，无法识别有效候选标的");
+        assert_ne!(
+            got["summary"].as_str().unwrap_or_default(),
+            "上游数据不足，无法识别有效候选标的",
+            "缺席原因必须来自模型原文，不得由提取层合成"
+        );
+    }
+
+    // ── 21) 负控：report 里是「模型拒绝出票」的完好输出 ⇒ 缺席理由必须活着到界面 ──
+    //      这一路 candidates 为空，旧命中判据（只认候选）把 inner 整个丢弃、退回 first=Null，
+    //      用户看到「无候选且无原因」，而模型其实写明了为什么（与 #26 修的层 4 同族）。
+    #[test]
+    fn extract_preserves_model_reason_from_wrapped_decline() {
+        // 自证这条锁有电（旧命中判据只认候选 ⇒ 对本夹具必须为空手而归，否则它什么也没锁）。
+        let report = concat!(
+            "```tool_json\n",
+            r#"{"candidates": [], "summary": "三个瓶颈节点均 data_gaps=true，拒绝编造候选"}"#,
+            "\n```",
+        );
+        let inner = serenity_extract_from_content(report);
+        assert!(inner.get("summary").is_some(), "夹具必须带模型理由");
+        assert!(
+            !serenity_has_candidates(&inner),
+            "夹具必须落在「候选为空但有理由」那一侧，旧判据才会丢掉它"
+        );
+        let envelope = serde_json::json!({"report": report, "verdict": {"verdict": "观望"}});
+        let node_out = serde_json::json!({"content": envelope.to_string()});
+        let got = serenity_extract_from_node(&node_out);
+        assert_eq!(got["candidates"].as_array().map_or(99, |a| a.len()), 0, "候选确实为空");
+        assert_eq!(got["summary"], "三个瓶颈节点均 data_gaps=true，拒绝编造候选");
     }
 }

@@ -45,7 +45,22 @@ pub type RhaiToolFn = Arc<dyn Fn(String, JsonValue) -> Result<JsonValue, String>
 // 通用 Rhai 函数注册（下沉自 rt-workflow::code_executor，消除 quant 同义重复定义）
 // ────────────────────────────────────────────────────────────────────────────
 
-/// 注册通用 Rhai 函数（clamp / join / json_parse）。
+/// JSON 数字 → f64；非数值（unit / string / bool / 地图…）→ `None`。
+///
+/// 整数走 `as_int`（嵌层注入的整数是 i64，见 [`register_common_functions`] 的口径说明），
+/// 浮点走 `as_float`。**不做字符串解析** —— 上游契约是 JSON Number，把 `"22.7"` 当数字
+/// 参与比较会静默产出错误档位（`risk-level.rhai` / `trader-proxy.rhai` 的同口径注释）。
+fn num_to_f64(x: &rhai::Dynamic) -> Option<f64> {
+    if let Ok(i) = x.as_int() {
+        // `f64: From<i64>` / `TryFrom<i64>` 都不存在（可能损精度，std 只给 i32 及更窄的），
+        // 故用 `as`：价带/天数/置信度这些量纲远小于 2^53，损精度不是本域的实际风险；
+        // 真要保精度应当整链改成定点小数，那是另一件事。
+        return Some(i as f64);
+    }
+    x.as_float().ok()
+}
+
+/// 注册通用 Rhai 函数（clamp / join / json_parse / num_of）。
 ///
 /// 所有执行 Rhai 脚本的 Engine 实例都应调用此函数，确保脚本可用的
 /// 自定义函数集一致，避免分散注册导致遗漏。
@@ -66,6 +81,31 @@ pub fn register_common_functions(engine: &mut Engine) {
         } else {
             value
         }
+    });
+    // ── 数值桥 `num_of`：脚本侧读 JSON 数字的**唯一**正确姿势 ──
+    //
+    // 为什么必须是引擎级共享函数，而不是各脚本各写一份本地 `fn num_of`：
+    // JSON 数字落进 Rhai 有**两条形态不同的注入通道** ——
+    //   · 顶层标量参数：`code_executor` 的 `Value::Number` 分支先 `as_f64` ⇒ 一律 f64；
+    //   · 嵌在 map/array 里的（含**顶层 map/array 参数的每一层**、`json_parse()` 的产物）：
+    //     走本 crate 的 [`json_value_to_dynamic`]，`as_i64` 优先 ⇒ **整数是 i64**。
+    // 于是 `type_of(x) == "f64"` 只在第一种形态下等价于「x 是个数」，拿它当数值判据
+    // 会把整数**静默判成缺席**（2026-10-04 实证：分支表 `days`/`volLookbackDays` 是整数 ⇒
+    // 四档价带恒 0）。此前 `portfolio-mgr.rhai` / `risk-level.rhai` / `trader-proxy.rhai`
+    // 各有一份同语义实现（铁律 4 的重复定义），现统一到这里；`"int"` 那个分支在 64-bit
+    // 构建下恒不成立（`type_of` 给 `"i64"`），故不再保留。
+    //
+    // 两个元数语义不同，都注册：
+    //   · `num_of(x)` → f64，非数值 → unit（调用点自己决定缺席语义，**不许**用哨兵值伪装读数）；
+    //   · `num_of(x, dflt)` → f64 或 `dflt`（既有两个脚本用的就是这版，逐字保留语义）。
+    engine.register_fn("num_of", |x: rhai::Dynamic| -> rhai::Dynamic {
+        match num_to_f64(&x) {
+            Some(f) => rhai::Dynamic::from(f),
+            None => rhai::Dynamic::UNIT,
+        }
+    });
+    engine.register_fn("num_of", |x: rhai::Dynamic, dflt: f64| -> f64 {
+        num_to_f64(&x).unwrap_or(dflt)
     });
     engine.register_fn("join", |arr: rhai::Array, sep: &str| -> String {
         arr.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(sep)
@@ -245,6 +285,53 @@ mod tests {
         // join
         let r: String = engine.eval_expression::<String>("join([1, 2, 3], \", \")").unwrap();
         assert_eq!(r, "1, 2, 3");
+    }
+
+    /// 数值桥 `num_of` 的三件事：**嵌层整数算数**、**缺席保持显式**、**默认值形态**。
+    ///
+    /// 为什么单独立一条门而不是只靠脚本侧注释：`type_of(x) == "f64"` 对嵌层整数恒假
+    /// （注入落 i64），这条缺陷的形态是「数字进得来、结果恒 0」，编译门与 clippy 都查不出，
+    /// 只有拿**真整数**跑一次生产注入路径才会红。
+    #[test]
+    fn num_of_bridges_nested_integers_and_keeps_absence_explicit() {
+        let mut engine = Engine::new();
+        register_common_functions(&mut engine);
+
+        // ① 嵌层整数（json_parse ⇒ i64）必须被读成数，而不是判成缺席。
+        let days: f64 = engine
+            .eval::<f64>(r#"let m = json_parse(`{"days": 28}`); num_of(m["days"])"#)
+            .expect("嵌层整数应被 num_of 桥成 f64");
+        assert_eq!(days, 28.0);
+
+        // ② 缺席/非数值 → unit：不许用哨兵值把「拿不到」伪装成一个读数。
+        let absent_unit: bool = engine
+            .eval::<bool>(r#"let m = json_parse(`{"x": "22.7"}`); type_of(num_of(m["x"])) == "()""#)
+            .expect("非数值应可读回类型");
+        assert!(absent_unit, "字符串不得被 num_of 当数值（上游契约是 JSON Number）");
+
+        // ③ 带默认值形态（原 `risk-level.rhai` / `trader-proxy.rhai` 的两参语义）。
+        let defaulted: f64 = engine
+            .eval::<f64>(r#"let m = json_parse(`{"x": "22.7"}`); num_of(m["x"], -1.0)"#)
+            .expect("非数值应落默认值");
+        assert_eq!(defaulted, -1.0);
+
+        // ④ 桥后与 f64 形参函数（clamp）无型别分歧 —— 这是「整数注入会不会打断下游调用」的实证。
+        let clamped: f64 = engine
+            .eval::<f64>(r#"let m = json_parse(`{"p": 7}`); clamp(num_of(m["p"]), 0.0, 5.0)"#)
+            .expect("num_of 的输出应可直接进 clamp");
+        assert_eq!(clamped, 5.0);
+
+        // ⑤ **探针**：不经桥、把嵌层整数直接喂给 f64 形参的 `clamp`。
+        //   这条事实决定「桥是不是必需」——v125 主链把分支行的 `positionPct` 直接喂 `clamp`，
+        //   若 Rhai 不自动升格，那条路一旦遇到整数分支就是运行期 `Function not found`（整脚本降级），
+        //   而编译门看不出来。读数由本条测试给，不靠推断。
+        let raw_int_to_clamp =
+            engine.eval::<f64>(r#"let m = json_parse(`{"p": 7}`); clamp(m["p"], 0.0, 5.0)"#);
+        assert!(
+            raw_int_to_clamp.is_err(),
+            "Rhai 竟把 i64 自动升格进了 f64 形参（返回 {raw_int_to_clamp:?}）⇒ \
+             桥的必要性论证要改写（不代表可以不解这条缺陷：type_of==\"f64\" 仍恒假）"
+        );
     }
 
     #[test]

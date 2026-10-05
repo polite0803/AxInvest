@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use axagent_entities::{stock_analyses, stock_reflections, strategy_performance};
+use axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
 use axagent_harness::Period;
 use sea_orm::{DatabaseConnection, EntityTrait};
 use serde::{Deserialize, Serialize};
@@ -197,6 +198,14 @@ pub struct DecisionPerformanceSample {
     /// **不进 IC 分母**，并被计入 [`HitrateGroup::ic_regime_excluded`] 如实报出。
     #[serde(default)]
     pub snr_anchor_days: Option<i64>,
+    /// 该样本所属的**算法代际**（= 被复盘那条分析的 `template_version`，§五十一-②/§七十三）。
+    /// 筛选规则是**下限** [`HORIZON_BRANCH_GENERATION_FLOOR`]：`>= floor` 进分母；
+    /// 早于 floor 的（`generation_pre_floor`）与 `None`（代际未知）都**排除**并分别计数 ——
+    /// 两者处置不同：旧代样本永久不可比，未知代的要等写侧补章/重跑。
+    /// 与 `snr_anchor_days` 的区别：那个水印管的是**IC 的置信度刻度**，这个管的是
+    /// **全部统计量的分母**（命中率/IC/先验/权重），两者不可互相顶替。
+    #[serde(default)]
+    pub template_version: Option<i32>,
     /// 数据源标识（四周期展开 / legacy 回退）
     pub data_source: SampleDataSource,
 }
@@ -267,6 +276,18 @@ pub struct HitrateStats {
     pub signal_half_life_days: Option<f64>,
     /// 参与半衰期拟合的档数（有持有期且 rank IC 有值的档）
     pub usable_ic_tiers: usize,
+    /// 本次统计采用的**起算代际** = [`HORIZON_BRANCH_GENERATION_FLOOR`]（§五十一-②）。
+    /// 回传它是为了让面板能说清「分母为什么变小」——这个数是判据参数，不是运行时状态。
+    #[serde(default)]
+    pub generation_floor: i32,
+    /// 因「早于起算代」被排除出**全部统计分母**的样本数。
+    /// 与 `ic_regime_excluded` 的区别：那个只管 IC 这一项，这个管命中率/收益/IC/先验全套。
+    #[serde(default)]
+    pub excluded_pre_floor_generation: usize,
+    /// 因「代际未知(NULL)」被排除的样本数 —— 与上一项分开计数，因为处置不同：
+    /// 旧代样本**永远不会**再进分母（算法不可比），代际未知的会随写侧补章而减少。
+    #[serde(default)]
+    pub excluded_unknown_generation: usize,
 }
 
 /// 命中率：分母为 0 或样本不足 → None
@@ -518,6 +539,10 @@ pub fn compute_reflection_stats(samples: &[DecisionPerformanceSample]) -> Hitrat
         by_horizon,
         signal_half_life_days,
         usable_ic_tiers,
+        // 代际三项由取数侧（`build_hitrate_stats`）填 —— 纯函数不做筛样。
+        generation_floor: 0,
+        excluded_pre_floor_generation: 0,
+        excluded_unknown_generation: 0,
     }
 }
 
@@ -576,7 +601,10 @@ fn find_bool_recursive(value: &serde_json::Value, key: &str) -> Option<bool> {
 /// - 已成熟周期的 action / 收益 / alpha / 目标价全部取自该周期自身条目，不与其他周期串线。
 ///
 /// 返回 `None` 表示该 JSON 不是四周期对象（无法解析 / 非对象），调用方回退 legacy 单周期字段。
-fn expand_horizon_samples(json: &str) -> Option<Vec<DecisionPerformanceSample>> {
+fn expand_horizon_samples(
+    json: &str,
+    template_version: Option<i32>,
+) -> Option<Vec<DecisionPerformanceSample>> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let map = value.as_object()?;
     let mut samples = Vec::new();
@@ -630,6 +658,7 @@ fn expand_horizon_samples(json: &str) -> Option<Vec<DecisionPerformanceSample>> 
                 .get("decision")
                 .and_then(|d| d.get("snrAnchorDays").or_else(|| d.get("snr_anchor_days")))
                 .and_then(|v| v.as_i64()),
+            template_version,
             data_source: if status == "legacy" {
                 SampleDataSource::Legacy
             } else {
@@ -694,10 +723,19 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
     for sp in &sp_rows {
         let sp_horizon = sp.period.strip_prefix("reflection:").map(str::to_string);
         let matched = ref_by_batch.get(&(sp.stock_code.clone(), sp.created_at, sp_horizon.clone()));
+        // §七十三 代际归属：优先取**反思行的建点盖章**（#5 落的列），配不上反思行的 sp 行
+        // 退到分析行的时间窗匹配（`nearest_analysis_dimensions` 与上面 action/horizon 同源）。
+        // 两条都拿不到 ⇒ None = 代际未知，**不退回编译期版本**（那会把「不知道」写成「就是这一代」）。
+        let sp_template_version: Option<i32> =
+            matched.and_then(|r| r.template_version).or_else(|| {
+                nearest_analysis_dimensions(&ana_rows, &sp.stock_code, sp.decision_at)
+                    .and_then(|a| a.template_version)
+            });
 
         // 路径 1：反思行有四周期结果 JSON → 按周期独立展开（每周期一条样本）
-        if let Some(expanded) =
-            matched.and_then(|r| r.horizon_results_json.as_deref()).and_then(expand_horizon_samples)
+        if let Some(expanded) = matched
+            .and_then(|r| r.horizon_results_json.as_deref())
+            .and_then(|j| expand_horizon_samples(j, sp_template_version))
         {
             samples.extend(expanded);
             continue;
@@ -744,11 +782,45 @@ pub async fn build_hitrate_stats(db: &DatabaseConnection) -> Result<HitrateStats
             // 分母，但**不进 IC 分母**（IC 缺席由 `ic_status="no_confidence"` 点名）。
             confidence: None,
             snr_anchor_days: None,
+            template_version: sp_template_version,
             data_source: SampleDataSource::Legacy,
         });
     }
 
-    Ok(compute_reflection_stats(&samples))
+    // §七十三 按代筛样：把**全部统计量的分母**收窄到当前代。
+    // 为什么必须筛：跨代混池算出来的命中率/IC/先验是「两套判据的加权平均」，
+    // 既不是旧代的结论也不是新代的结论（本仓已为此付过代价：换算法后指标的含义悄悄变了）。
+    // 为什么两类排除要**分开计数**：异代样本是永久性剔除，代际未知的会随存量补章而减少 ——
+    // 合成一个数字就看不出「样本为什么变少」到底是哪一种。
+    let (kept, pre_floor, unknown) =
+        filter_by_generation_floor(samples, HORIZON_BRANCH_GENERATION_FLOOR);
+    let mut stats = compute_reflection_stats(&kept);
+    stats.generation_floor = HORIZON_BRANCH_GENERATION_FLOOR;
+    stats.excluded_pre_floor_generation = pre_floor;
+    stats.excluded_unknown_generation = unknown;
+    Ok(stats)
+}
+
+/// 按**起算代际**筛样 + 两类排除计数（§五十一-②/§七十三）。纯函数，便于打表直接锁行为。
+///
+/// 规则是下限 `>= floor`（不是等号，理由见常量注释）。两类排除分开计数而不是合成一个数：
+/// 旧代样本永久性剔除（不会回到分母），代际未知的会随写侧补章而减少 ——
+/// 合成一个数就看不出「分母为什么变小」是哪一种。
+fn filter_by_generation_floor(
+    samples: Vec<DecisionPerformanceSample>,
+    floor: i32,
+) -> (Vec<DecisionPerformanceSample>, usize, usize) {
+    let mut kept = Vec::with_capacity(samples.len());
+    let mut pre_floor = 0usize;
+    let mut unknown = 0usize;
+    for s in samples {
+        match s.template_version {
+            Some(v) if v >= floor => kept.push(s),
+            Some(_) => pre_floor += 1,
+            None => unknown += 1,
+        }
+    }
+    (kept, pre_floor, unknown)
 }
 
 // ── 单元测试 ── 追加在文件末尾（防 clippy::items_after_test_module）
@@ -769,6 +841,17 @@ mod reflection_stats_tests {
         was_correct: i32,
         return_pct: f64,
     ) -> DecisionPerformanceSample {
+        sample_gen(action, horizon, was_correct, return_pct, None)
+    }
+
+    /// 同 `sample`，但指定样本所属代际（§五十一-② 的按代筛样用）。
+    fn sample_gen(
+        action: Option<&str>,
+        horizon: Option<&str>,
+        was_correct: i32,
+        return_pct: f64,
+        template_version: Option<i32>,
+    ) -> DecisionPerformanceSample {
         DecisionPerformanceSample {
             action: action.map(str::to_string),
             horizon: horizon.map(str::to_string),
@@ -778,6 +861,7 @@ mod reflection_stats_tests {
             target_reached: None,
             confidence: None,
             snr_anchor_days: None,
+            template_version,
             data_source: SampleDataSource::Reflection,
         }
     }
@@ -1281,6 +1365,10 @@ mod reflection_stats_tests {
             }],
             signal_half_life_days: Some(13.86),
             usable_ic_tiers: 3,
+            // §五十一-②/§七十三 三字段：同样进 IPC ⇒ 必须一起锁 camelCase 键（见下方断言）
+            generation_floor: 125,
+            excluded_pre_floor_generation: 4,
+            excluded_unknown_generation: 7,
         };
         let value = serde_json::to_value(&stats).unwrap();
         let top = value.as_object().unwrap();
@@ -1295,6 +1383,9 @@ mod reflection_stats_tests {
             "byHorizon",
             "signalHalfLifeDays",
             "usableIcTiers",
+            "generationFloor",
+            "excludedPreFloorGeneration",
+            "excludedUnknownGeneration",
         ] {
             assert!(top.contains_key(key), "HitrateStats 顶层缺 camelCase 键 {key}：{top:?}");
         }
@@ -1368,7 +1459,7 @@ mod reflection_stats_tests {
 
     #[test]
     fn expand_only_mature_and_legacy_horizons() {
-        let samples = expand_horizon_samples(&four_horizon_json()).unwrap();
+        let samples = expand_horizon_samples(&four_horizon_json(), None).unwrap();
         // 未到期 / 无行情 / 缺失周期一律不进样本，也不进命中率分母
         assert_eq!(samples.len(), 1);
         let s = &samples[0];
@@ -1400,7 +1491,7 @@ mod reflection_stats_tests {
             }
         })
         .to_string();
-        let samples = expand_horizon_samples(&json).unwrap();
+        let samples = expand_horizon_samples(&json, None).unwrap();
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].confidence, None);
         assert_eq!(samples[0].was_correct, 1);
@@ -1415,7 +1506,7 @@ mod reflection_stats_tests {
             }
         })
         .to_string();
-        assert_eq!(expand_horizon_samples(&nan).unwrap()[0].confidence, None);
+        assert_eq!(expand_horizon_samples(&nan, None).unwrap()[0].confidence, None);
     }
 
     /// 水印的两种键名形态都要认（现网 camelCase、旧快照/手拼 snake_case），
@@ -1432,10 +1523,10 @@ mod reflection_stats_tests {
             }
         })
         .to_string();
-        assert_eq!(expand_horizon_samples(&camel).unwrap()[0].snr_anchor_days, Some(28));
+        assert_eq!(expand_horizon_samples(&camel, None).unwrap()[0].snr_anchor_days, Some(28));
 
         let snake = camel.replace("snrAnchorDays", "snr_anchor_days");
-        assert_eq!(expand_horizon_samples(&snake).unwrap()[0].snr_anchor_days, Some(28));
+        assert_eq!(expand_horizon_samples(&snake, None).unwrap()[0].snr_anchor_days, Some(28));
 
         let none = serde_json::json!({
             "mid": {
@@ -1446,7 +1537,7 @@ mod reflection_stats_tests {
             }
         })
         .to_string();
-        let s = &expand_horizon_samples(&none).unwrap()[0];
+        let s = &expand_horizon_samples(&none, None).unwrap()[0];
         assert_eq!(s.confidence, Some(55.0), "没有水印不等于没有置信度，两者要分开表达");
         assert_eq!(s.snr_anchor_days, None);
     }
@@ -1469,7 +1560,7 @@ mod reflection_stats_tests {
         })
         .to_string();
         // 中性档不可判定、收益缺失不可伪报 0% → 两者都不成样本
-        assert!(expand_horizon_samples(&json).unwrap().is_empty());
+        assert!(expand_horizon_samples(&json, None).unwrap().is_empty());
     }
 
     #[test]
@@ -1483,13 +1574,48 @@ mod reflection_stats_tests {
             }
         })
         .to_string();
-        let samples = expand_horizon_samples(&json).unwrap();
+        let samples = expand_horizon_samples(&json, None).unwrap();
         assert_eq!(samples.len(), 1);
         assert_eq!(samples[0].data_source, SampleDataSource::Legacy);
         assert_eq!(samples[0].alpha_pct, None);
         assert_eq!(samples[0].target_reached, Some(false));
 
-        assert!(expand_horizon_samples("[]").is_none());
-        assert!(expand_horizon_samples("not-json").is_none());
+        assert!(expand_horizon_samples("[]", None).is_none());
+        assert!(expand_horizon_samples("not-json", None).is_none());
+    }
+
+    /// §五十一-② 统计分母按**起算代际**筛样：`>= floor` 进分母，旧代与代际未知**分开计数**。
+    ///
+    /// 为什么这条必须有：分母变小是**静默**的（面板只看到样本数少了）。丢掉「被排除多少」，
+    /// 就会出现「面板样本 0、没人知道为什么」—— 而「样本早于起算代」与「存量样本还没盖章」
+    /// 的处置完全不同（前者等新样本积累或抬 floor，后者要补章/重跑）。
+    ///
+    /// ⚠ 判据必须是**下限**：夹具里专门放了 `floor - 1`、`floor`、`floor + 4` 三个值，
+    /// 若有人把实现改成等号，`floor + 4` 那条会掉出分母 ⇒ 本用例当场红。
+    #[test]
+    fn generation_floor_keeps_at_or_after_and_counts_the_rest_separately() {
+        let f = HORIZON_BRANCH_GENERATION_FLOOR;
+        let samples = vec![
+            sample_gen(Some("买入"), Some("short"), 1, 5.0, Some(f)), // 恰在起算代
+            sample_gen(Some("买入"), Some("short"), 1, 3.0, Some(f + 4)), // 起算代之后（等号实现会误杀）
+            sample_gen(Some("卖出"), Some("mid"), 0, -2.0, Some(f - 1)),  // 旧代
+            sample_gen(Some("卖出"), Some("mid"), 1, 1.0, None),          // 代际未知
+        ];
+        let (kept, pre_floor, unknown) = filter_by_generation_floor(samples, f);
+        assert_eq!(kept.len(), 2, "floor 及其之后都必须留在分母里");
+        assert_eq!((pre_floor, unknown), (1, 1));
+        assert!(
+            kept.iter().all(|s| s.template_version.is_some_and(|v| v >= f)),
+            "留下的每个样本都必须 >= 起算代"
+        );
+
+        // 负控：全部旧代 ⇒ 分母归 0，但**排除计数必须等于原样本数**（「为什么是 0」的唯一解释来源）。
+        let all_old = vec![
+            sample_gen(Some("买入"), Some("short"), 1, 5.0, Some(f - 5)),
+            sample_gen(Some("买入"), Some("short"), 1, 3.0, Some(f - 1)),
+        ];
+        let (kept, pre_floor, unknown) = filter_by_generation_floor(all_old, f);
+        assert!(kept.is_empty(), "旧代样本不得进分母");
+        assert_eq!((pre_floor, unknown), (2, 0), "排除量必须如实等于被剔掉的样本数");
     }
 }

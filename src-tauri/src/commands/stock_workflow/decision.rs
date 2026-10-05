@@ -625,10 +625,11 @@ pub(crate) fn extract_decision_fields(
 /// Phase 1：从决策 JSON 取 `horizonSource` —— `stock_analyses.decision_horizon_source` 的
 /// **唯一读入口**（三个落库点共用，同 `normalize_action_for_storage` 的收口纪律）。
 ///
-/// 值域由 `portfolio-mgr.rhai` 单点判定（〇-B v2）：`"formula"` = 本轮主档由确定性
-/// 后验阈值映射产出（v2 唯一产出路径）；`"model"` = v2 之前采信 trader 自报的历史记录；
-/// `"user"` = v1 的入口锁档形态（通路已撤除）。Rust 侧**不得**再按入参二次推断 ——
-/// 否则「主档怎么来的」这条判据在 Rust 与 Rhai 各写一遍、必然漂移。
+/// 值域由 `harness::holding_period::HORIZON_SOURCES` 单点声明，产出方是 `portfolio-mgr.rhai`：
+/// `"branch_pick"` = 主档由四档分支结论选出（现网正常路径，Q1=C）；
+/// `"formula_no_branch"` = 四路分支全部未产出 ⇒ 退回后验阈值定档（兜底，与上一值必须可区分）；
+/// `"formula"` / `"model"` / `"user"` = 历史值（旧模板快照与存量行）。Rust 侧**不得**再按入参
+/// 二次推断 —— 否则「主档怎么来的」这条判据在 Rust 与 Rhai 各写一遍、必然漂移。
 ///
 /// `None` 语义 = 该轮脚本未产出该字段（旧模板快照）⇒ 落 NULL ⇒ 读取侧按「来源未知」处理。
 pub(crate) fn extract_horizon_source(decision_json: &Option<String>) -> Option<String> {
@@ -638,13 +639,16 @@ pub(crate) fn extract_horizon_source(decision_json: &Option<String>) -> Option<S
         .get("horizonSource")
         .or_else(|| parsed.get("horizon_source"))
         .and_then(|x| x.as_str())?;
-    // 值域只有三个合法值；脚本产出的必须是 `formula`。其余字面量（旧模板的
-    // `user` / `model`、或未来漂移）一律归一为 `model` = 「非公式定档的历史形态」，
-    // 而不是原样入库 —— 否则读侧的 `== "formula"` 判据会被脏值假阴性吞掉。
+    // 白名单**读权威值域**而不是在此再列一遍（首版就是在此手写 `"formula"` 一个值 ⇒
+    // 脚本新增 `branch_pick` 的当天就会被这条 `_ => "model"` 归一成「采信模型自报」，
+    // 一个真值被静默换成假值，且没有任何一处会报错）。
+    // 值域外的字面量仍归 `"model"`：那是「非公式、非分支」的历史兜底桶，
+    // 宁可错进一个可识别的桶里，也不要让脏值直接入库（读侧的等值判据会被脏值吞掉）。
     Some(
-        match v {
-            "formula" => "formula",
-            _ => "model",
+        if axagent_harness::holding_period::is_horizon_source(v) {
+            v
+        } else {
+            "model"
         }
         .to_string(),
     )
@@ -689,17 +693,26 @@ pub(crate) fn extract_position_state(decision_json: &Option<String>) -> Option<S
         .filter(|s| !s.is_empty())
 }
 
-/// 从决策 JSON 中提取**四周期价位映射**（阶段1，PROPOSAL-stock-decision-four-horizon.md）。
+/// 从决策 JSON 中提取**四周期价位映射**（阶段1 引入，v125 起改为主链的**投影**）。
 ///
-/// 值形态：`{"ultra_short":{...},"short":{...},"mid":{...},"long":{...}}`，每组含
-/// `stopLossPct`/`takeProfitPct`/`expectedHoldingDays`/`targetPrice`/`stopLoss`。
-/// 该值由 `portfolio-mgr.rhai` 产出并嵌套在 `decision_json` 全文里，本函数把它
-/// 抽成独立 JSON 子串落 `stock_analyses.horizon_price_map`（避免落库后全文反键）。
+/// 值形态：`{"ultraShort":{...},"short":{...},"mid":{...},"long":{...}}`（v125 起与
+/// `horizon_decisions` **同族 camelCase**；v124 及更早的存量行是 snake_case `ultra_short`），
+/// 每组含 `stopLossPct`/`takeProfitPct`/`expectedHoldingDays`/`targetPrice`/`stopLoss`。
+///
+/// ⚠ 键形态换代修的是一个**静默丢行**缺陷：本列旧按 snake 出键，而展示层 `HORIZON_KEYS`
+///   按 camel 读、透传处只做类型断言不转键 ⇒ 四个键里只有 `ultraShort` 一族拼写错开
+///   （`short`/`mid`/`long` 两族同名），表现为「超短档价位行从来不显示」而库里数据齐备。
+///   读侧（`src/lib/agentOutput.ts`）因此**两族都收**，存量行才能继续显示四行。
+///
+/// ⚠ 2026-10-04（批准 ①）起，这些数**不再是主链算的**：本映射由 `decisionsByHorizon`
+///   逐行投影（只搬运不计算），缺席档不出键。此前它由主链用同一公式对四档各算一遍，
+///   与逐档 Tab 并列上屏 ⇒ 同一档两个价位来源（R-11 判废的形状）。同源断言见
+///   `rhai_registry` 整脚本门 ⑦。
 ///
 /// **缺省语义**：键缺失 / 空串 / 解析失败 → `None`（NULL = 采集时点无此信息，
 /// 或该决策产生于 stage1 字段引入前）。消费端**不得**读成空映射，应按主档位
 /// `decision_json` 的 `targetPrice`/`stopLoss` 回退。这与 `extract_position_state`
-/// 的 NULL 约定一致。
+/// 的 NULL 约定一致。**单个档缺席**则是该键不在映射里（不是值为 null）。
 pub(crate) fn extract_horizon_price_map(decision_json: &Option<String>) -> Option<String> {
     let raw = decision_json.as_deref().filter(|s| !s.is_empty())?;
     let parsed: serde_json::Value = serde_json::from_str(raw).ok()?;
@@ -713,12 +726,20 @@ pub(crate) fn extract_horizon_price_map(decision_json: &Option<String>) -> Optio
 
 /// 从决策 JSON 中提取**四周期独立决策**（阶段2，PROPOSAL-stock-decision-four-horizon.md）。
 ///
-/// 值形态：`{"ultra_short":{...},"short":{...},"mid":{...},"long":{...}}`，每组含
+/// 值形态：`{"ultraShort":{...},"short":{...},"mid":{...},"long":{...}}`（键 camelCase，
+/// 由主链装配段 `decisions_by_horizon[b.camel]` 决定），每组含
 /// `action`/`verdict`/`positionPct`/`confidence`/`stopLossPct`/`takeProfitPct`/
-/// `expectedHoldingDays`，仅 `ultra_short` 额外含 `confLowerBound`（方案B，固定 0.35）。
-/// 该值由 `portfolio-mgr.rhai` 产出并嵌套在 `decision_json` 全文里，本函数把它抽成
-/// 独立 JSON 子串落 `stock_analyses.horizon_decisions`（与 `extract_horizon_price_map`
-/// 同 text 形态、同理由：避免落库后全文反键）。
+/// `expectedHoldingDays`，外加该档分支自己的自证字段（`confidenceMethod`/`exitRule`/
+/// `entryGate`/`legs`/`absentLegs`/`dataGaps` 等）。键集的权威清单是
+/// `src/types/stock-analysis.ts` 的 `HorizonDecision` —— ⚠ 该清单与四份分支脚本的返回段
+/// **目前靠人工对齐**（本轮 35↔35 就是手工核的），仓内没有锁它的门；这正是九个「脚本从不产出、
+/// 类型里却声明着」的幽灵字段能活到上一轮的原因，补门的事已单独记账。
+/// 曾经声明过的 `confLowerBound` 等九个键是**幽灵字段**（脚本从不产出），已删 —— 留着会让
+/// 读侧以为「字段缺失 = 该值为 0」，那正是把缺席读成结论的形态。
+/// 生产者自 R-11 起是四份 `portfolio-mgr-h-*.rhai`（主链只装配）；某路失败或未接线 ⇒
+/// **该档不出键**（已批口径 A），缺席在顶层 `data_gaps` 逐档点名。
+/// 本函数把该对象抽成独立 JSON 子串落 `stock_analyses.horizon_decisions`
+/// （与 `extract_horizon_price_map` 同 text 形态、同理由：避免落库后全文反键）。
 ///
 /// **缺省语义**：键缺失 / 空串 / 解析失败 → `None`（NULL = 采集时点无此信息，或该决策
 /// 产生于 stage2 字段引入前）。消费端**不得**读成空映射，应按主档位 `decision_action`
@@ -1848,6 +1869,30 @@ mod tests {
     use super::*;
     use axagent_harness::workflow_types::Variable;
     use serde_json::json;
+
+    /// `decision_horizon_source` 的白名单必须**等于** harness 值域，且值域里每个合法值都能原样入库。
+    ///
+    /// 存在理由（2026-10-04 实测的失败形态）：首版白名单手写 `"formula" => "formula", _ => "model"`，
+    /// 而脚本新增了 `branch_pick` 之后，这个真值会在落库前被静默改写成 `model`
+    /// （= 「采信模型自报」）—— 一个真值被换成一句假话，且三处（脚本 / 落库 / 前端）都不报错。
+    /// ⇒ 本条把「值域变了但白名单没跟上」变成硬红。
+    #[test]
+    fn horizon_source_whitelist_is_exactly_the_harness_domain() {
+        for v in axagent_harness::holding_period::HORIZON_SOURCES {
+            let dj = Some(json!({ "horizonSource": v }).to_string());
+            assert_eq!(
+                extract_horizon_source(&dj).as_deref(),
+                Some(*v),
+                "合法值 {v} 被归一掉了 ⇒ 白名单与 harness 值域已脱节"
+            );
+        }
+        // 值域外 ⇒ 仍归 `model` 桶（脏值不得原样入库）。
+        let bad = Some(json!({ "horizonSource": "gut_feeling" }).to_string());
+        assert_eq!(extract_horizon_source(&bad).as_deref(), Some("model"));
+        // 键缺失 ⇒ None（落 NULL = 来源未知），不得凭空补一个合法值。
+        let none = Some(json!({ "action": "持有" }).to_string());
+        assert_eq!(extract_horizon_source(&none), None);
+    }
 
     /// 回归测试：t-scoring 三种真实包装形态必须能剥到 {total, signal}（600089 实证）。
     #[test]

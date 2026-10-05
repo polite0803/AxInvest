@@ -21,6 +21,10 @@
 //!   ⚠ 2026-09-21 才补上这条：缺它时，用位置参数声明的节点会**完全躲过**本门禁
 //!   （见 `tool_node_positional_tool_names` 的说明与报告 §6.14）。
 
+// 生产 Rhai 引擎工厂（与 `code_executor` 同一份配置）。本文件四道「按生产同配置真执行」的门
+// 共用它 ⇒ 单点在模块级 import：横向引用从 8 处全路径收到 1 处（分层棘轮 `commands-no-sibling-call`
+// 按行计数，逐处写全路径会把同一个依赖记成 8 个坑）。
+use crate::commands::stock_workflow::rhai_registry::{RhaiSandboxLimits, build_stock_rhai_engine};
 use regex::Regex;
 use std::collections::HashSet;
 
@@ -534,7 +538,7 @@ fn profile_tools_have_no_orphans() {
 // 用户看到的是「启动失败」。
 //
 // 判据：辩手节点 id 的正确形态是 `bull-r{round}` / `bear-r{round}`，轮数由
-// `debate_max_rounds` 派生（`seed_stock_analysis.rs:2490` 的 `for round in
+// `debate_max_rounds` 派生（`seed_stock_analysis.rs:3313` 的 `for round in
 // 0..debate_max_rounds`）。因此任何**以字符串字面量形式**出现在「边的 source /
 // target」位置的 `bull-rN` / `bear-rN` 都是定时炸弹：轮数一变即悬空。
 //
@@ -1835,9 +1839,7 @@ fn portfolio_mgr_rhai_compiles() {
     // ── ② 直接用**生产那个引擎工厂**：「同配置」由是同一个函数保证，而非靠比对 ──
     // ⚠ 不要退回「本地 `Engine::new()` + 手抄 register + 手抄 set_max_expr_depths」：
     //   那样函数集与档位又变成两份副本，漂移后本测试照样全绿（**假绿**）。
-    let engine = crate::commands::stock_workflow::rhai_registry::build_stock_rhai_engine(
-        crate::commands::stock_workflow::rhai_registry::RhaiSandboxLimits::PORTFOLIO,
-    );
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
     axagent_harness::get_or_compile_ast("portfolio-mgr-syntax-gate", code, &engine).unwrap_or_else(
         |e| {
             panic!(
@@ -2694,4 +2696,762 @@ fn expert_prompts_do_not_hand_copy_per_horizon_factor_lists() {
             .is_empty(),
         "误拦通用键：本门只该管逐档因子"
     );
+}
+
+/// P4′-b：四份**逐档决策脚本**的三道结构门（R-11 的机械证明，不靠人工 review）。
+///
+/// ① **禁词**：退役形态不得回归 —— `leg_mult` / `horizon_leg_multipliers` /
+///    `pm_snr_confidence` / `horizon_decision` / `snrAnchorDays`。
+///    存在理由：这三样是「一个算法 + 四套参数」在代码里的藏身处；分支脚本里再出现任何一个，
+///    就说明档间差异又退回了「同一个数乘不同标量」。
+/// ② **正向断言**：每份都必须真的读 `branch_json` 并调 `pm_leg_signal` ——
+///    只查禁词的话，把整段融合删掉也能过门（本仓为「恒真/恒假断言」付过代价）。
+/// ③ **四份必须两两不同**：复制粘贴四份再改档位名，是最省事也最危险的假分支形态。
+/// ④ **编译**：用生产同一个引擎工厂与同一个沙箱档位（`RhaiSandboxLimits::PORTFOLIO`），
+///    「同配置」由是同一个函数保证，而不是靠比对参数表。
+#[test]
+fn horizon_branch_rhai_scripts_compile_and_are_genuinely_forked() {
+    const BANNED: &[&str] = &[
+        "leg_mult",
+        "horizon_leg_multipliers",
+        "pm_snr_confidence",
+        "horizon_decision",
+        "snrAnchorDays",
+    ];
+    let scripts: [(&str, &str); 4] = [
+        ("ultra_short", include_str!("../portfolio-mgr-h-ultra-short.rhai")),
+        ("short", include_str!("../portfolio-mgr-h-short.rhai")),
+        ("mid", include_str!("../portfolio-mgr-h-mid.rhai")),
+        ("long", include_str!("../portfolio-mgr-h-long.rhai")),
+    ];
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+
+    for (tier, code) in &scripts {
+        let body = code_only(code);
+        assert!(
+            body.lines().count() > 40,
+            "档 {tier} 剥注释后只剩 {} 行 ⇒ 注释剥离把代码也吃了，本门的结论不可信",
+            body.lines().count()
+        );
+        for b in BANNED {
+            assert!(
+                !body.contains(b),
+                "档 {tier} 的分支脚本**代码里**出现退役形态 `{b}` ⇒ 又走回共享算法"
+            );
+        }
+        assert!(
+            body.contains("branch_json"),
+            "档 {tier} 未读注入的分支表 ⇒ 腿集合与配比又变成脚本内手抄"
+        );
+        assert!(
+            body.contains("pm_leg_signal"),
+            "档 {tier} 未调 pm_leg_signal ⇒ 因子信号口径又各自实现一份（迟早漂移）"
+        );
+        assert!(
+            body.contains(&format!("\"{tier}\"")),
+            "档 {tier} 未声明自己的档位标签 ⇒ 分支表错配检测（tier != h）会静默失效"
+        );
+        axagent_harness::get_or_compile_ast(&format!("horizon-branch-{tier}"), code, &engine)
+            .unwrap_or_else(|e| panic!("档 {tier} 的分支脚本在生产同配置下编译失败：{e}"));
+    }
+
+    // 两两不同：四份的**融合段**（从 `let tw` 到动作阶梯）必须互不相同
+    for i in 0..scripts.len() {
+        for j in (i + 1)..scripts.len() {
+            assert_ne!(
+                scripts[i].1.replace(char::is_whitespace, ""),
+                scripts[j].1.replace(char::is_whitespace, ""),
+                "分支脚本 {} 与 {} 逐字相同 ⇒ 四路是复制出来的假分支",
+                scripts[i].0,
+                scripts[j].0
+            );
+        }
+    }
+}
+
+/// v129（#45）的**代码域**禁词与结构锁：主链风险档必须整条按档，不许留「只有否决按档」的旁路。
+///
+/// 为什么住在本文件而不是 `rhai_registry.rs`：这里才有 `code_only()`（四份分支脚本的禁词门
+/// 共用同一份剥离实现）。不剥注释就查 `risk_for_veto` 必然假红 —— 退役说明与本轮的
+/// 归因注释都要提到那个已退役的变量名，禁词门若把注释也算进去，改的是注释而不是判据。
+#[test]
+fn main_chain_risk_grade_is_tier_scoped_in_code_domain() {
+    let raw = include_str!("../portfolio-mgr.rhai");
+    let code = code_only(raw);
+    // ① 退役变量不得在**代码域**复活（prose 里提它是合法的，故必须先剥）。
+    assert!(
+        !code.contains("risk_for_veto"),
+        "退役变量 `risk_for_veto` 又出现在代码里 ⇒ v129 的「主链风险档整体按档」被旁路化"
+    );
+    // 自证剥离没吃掉代码：把同一 token 放进真代码行，判据必须抓到。
+    let probe = code_only(&format!("{code}\nlet risk_for_veto = overall_risk;"));
+    assert!(probe.contains("risk_for_veto"), "自证失效：注入代码行后 code_only 读不到该 token");
+    // ② 否决回到 `overall_risk`，且全脚本恰一处（两处意味着另有一条并行口径）。
+    assert_eq!(
+        code.matches("pm_risk_veto(final_action, overall_risk)").count(),
+        1,
+        "应恰有一处 `pm_risk_veto(final_action, overall_risk)`"
+    );
+    // ③ 按档结果必须覆盖 `overall_risk` 本身 —— f4 强度、f4_signal 口径、risk_bias、仓位 cap
+    //    全都读它；只挂给否决就是回到 v128 的半按档形态。
+    assert!(
+        code.contains("overall_risk = risk_tier;"),
+        "按档值没落进 `overall_risk` 本体 ⇒ 下游三处（f4 / risk_bias / cap）仍在读全局档"
+    );
+    // ④ 顺序即判据（代码域版）：覆盖发生在 `risk_rank_val` 之前，否则 f4 惩罚强度用不上本档。
+    let cover = code.find("overall_risk = risk_tier;").expect("③ 已锁存在");
+    let rank = code.find("let risk_rank_val = risk_rank(overall_risk);").expect("f4 强度段应存在");
+    assert!(cover < rank, "按档覆盖必须早于 f4 惩罚强度：覆盖={cover} 强度={rank}");
+}
+
+/// 「谁定的档」这条值的**三处载体**必须同源：脚本产出的字面量 ⊆ harness 值域，
+/// 且值域里每个现役值都真的有人产出。
+///
+/// 存在理由（2026-10-04 实测的失败形态）：`decision_horizon_source` 的落库白名单原本是
+/// `"formula" => "formula", _ => "model"` 的手写清单。脚本换成产出 `branch_pick` 之后，
+/// 这个真值会在落库前被静默改写成 `model`（= 采信模型自报）—— **一个真值被换成一句假话，三处都不报错**。本门把「值域 ↔ 产出」的双向覆盖钉死：
+///   ① 脚本里出现的每个 `horizonSource` 字面量都必须在 harness 值域内（防脚本自造值）；
+///   ② 值域里的**现役**值（非历史）必须能在脚本里找到（防值域与产出一边倒：加了枚举没人产出，
+///      面板就会永远不出现该标签，与本仓「永不亮起的分支」同族）。
+#[test]
+fn horizon_source_literals_are_two_way_covered_by_the_harness_domain() {
+    use axagent_harness::holding_period::HORIZON_SOURCES;
+    let code = code_only(include_str!("../portfolio-mgr.rhai"));
+    // ① 脚本产出的值 ∈ 值域。
+    let mut emitted: Vec<&str> = Vec::new();
+    for v in HORIZON_SOURCES {
+        if code.contains(&format!("\"{v}\"")) {
+            emitted.push(v);
+        }
+    }
+    // 兜底与正常路径两条都必须在场（缺一条就是通路断了）。
+    for must in ["branch_pick", "formula_no_branch"] {
+        assert!(
+            HORIZON_SOURCES.contains(&must),
+            "harness 值域缺现役值 {must} ⇒ 落库白名单会把它归一成 model（假话）"
+        );
+        assert!(emitted.contains(&must), "脚本不再产出 {must} ⇒ 该值成了只登记不产出的死枚举");
+    }
+    // 脚本里不得出现值域外的来源字面量（扫 `let horizon_source = ...` 那一行的引号串）。
+    let line =
+        code.lines().find(|l| l.contains("let horizon_source =")).expect("定档来源赋值应存在");
+    for cap in ["\"formula\"", "\"model\"", "\"user\"", "\"branch_pick\"", "\"formula_no_branch\""]
+    {
+        if line.contains(cap) {
+            let bare = cap.trim_matches('"');
+            assert!(
+                HORIZON_SOURCES.contains(&bare),
+                "脚本产出来源值 {bare} 不在 harness 值域内 ⇒ 会被落库白名单吞掉"
+            );
+        }
+    }
+    // 自证（判据①有牙）：合成一个值域外的产出，判据必须能抓到。
+    let bad_line = "let horizon_source = if branch_picked { \"gut_feeling\" } else { \"x\" };";
+    let leaked =
+        ["\"formula\"", "\"model\"", "\"user\"", "\"branch_pick\"", "\"formula_no_branch\""]
+            .iter()
+            .any(|cap| bad_line.contains(cap));
+    assert!(!leaked, "自证失效：合成坏样本里混进了合法值，判据①的样本不纯");
+    assert!(
+        !HORIZON_SOURCES.contains(&"gut_feeling"),
+        "自证失效：gut_feeling 竟在值域内 ⇒ 上面的反向锁没有对象"
+    );
+}
+
+/// 波动带窗口的**两份载体**必须逐字相等：分支表注入的
+/// `axagent_analysis_engine::evidence_weight::VOL_LOOKBACK_DAYS` 与主链脚本里的
+/// `let VOL_LOOKBACK_DAYS = …;`。
+///
+/// 存在理由：四份分支脚本改读注入值之后，主链仍保留自己的脚本内常量（退役动作与图改动同批做）。
+/// 两处同名的数字若各自漂移，得到的是「短档用 20 日波动、超短用 30 日波动」这种**档间不一致**，
+/// 而两侧都self-consistent ⇒ 没有任何一侧会报错。
+#[test]
+fn main_chain_vol_lookback_matches_injected_const() {
+    let code = include_str!("../portfolio-mgr.rhai");
+    let needle = format!(
+        "let VOL_LOOKBACK_DAYS = {};",
+        axagent_analysis_engine::evidence_weight::VOL_LOOKBACK_DAYS
+    );
+    assert!(
+        code.contains(&needle),
+        "主链脚本的波动带窗口不再是 {} 日（或写法变了）⇒ 与分支表注入值分叉，两处会给出不同口径的价带。当前应能在 portfolio-mgr.rhai 找到：{needle}",
+        axagent_analysis_engine::evidence_weight::VOL_LOOKBACK_DAYS
+    );
+}
+
+/// R-11 换心脏的**收口门**：主链脚本 `portfolio-mgr.rhai` 的**代码域**里不得再出现逐档算法
+/// 与三个退役输出字段。
+///
+/// 为什么这条必须在主 crate、且必须剥注释（2026-10-04 实测）：首版把它写在
+/// `crates/rt-workflow/tests/portfolio_mgr_tier_params_rhai.rs` 里、按**裸文本**判定，
+/// 当场假红 —— 主链留有五段退役说明注释（`:861`、`:2054`、`:2816`、`:2829`、`:2870`、`:2875`），
+/// 逐字提到 `leg_mult` / `horizon_decision` / `pm_snr_confidence` / `sharesPosteriorWith`。
+/// 那些注释是「这里为什么不再有乘数」的因果留痕，删不得；而禁词门查的应该是**代码**。
+/// 本 crate 有模块级 `code_only()`（四份分支脚本的禁词门共用同一实现），rt-workflow 拿不到它，
+/// 也不该复制第二份剥离器（铁律 12）。
+#[test]
+fn main_script_keeps_retired_per_tier_algebra_out_of_code() {
+    // 只列**代码域**判据能表达的形态：三个退役输出字段 + 五个退役算法名 + 注入键。
+    const BANNED: &[&str] = &[
+        "leg_mult",
+        "horizon_decision",
+        "pm_snr_confidence",
+        "prior_for",
+        "evidence_max_for",
+        "horizon_leg_weights_json",
+        "weightsSource",
+        "sharesPosteriorWith",
+        "snrAnchorDays",
+    ];
+    let code = include_str!("../portfolio-mgr.rhai");
+    let body = code_only(code);
+
+    // 自证①（剥离器没吃代码）：主链是 3200+ 行的脚本，剥注释后必须仍留下可判定的代码体。
+    assert!(
+        body.lines().count() > 2_000,
+        "剥注释后只剩 {} 行 ⇒ 剥离器把代码也吃了，下面的禁词结论不可信",
+        body.lines().count()
+    );
+    for needle in [
+        "let decisions_by_horizon = #{};",
+        "decisions_by_horizon[b.camel] = row",
+        "let risk_source = \"算法\"",
+        "sl_pct_for.call(",
+    ] {
+        assert!(
+            body.contains(needle),
+            "剥注释后连 `{needle}` 都没了 ⇒ 扫描面已不是代码，本门的禁词断言无意义"
+        );
+    }
+
+    for b in BANNED {
+        assert!(
+            !body.contains(b),
+            "主链**代码里**出现退役形态 `{b}` ⇒ 「一个算法 + 四套参数」或退役字段回归（逐档算法应在 portfolio-mgr-h-*.rhai）"
+        );
+    }
+
+    // 正向：装配段确实读四路分支输出（只查禁词的话，把整段装配删掉也能过门）。
+    for src in ["h_ultra_short", "h_short", "h_mid", "h_long"] {
+        assert!(body.contains(src), "主链代码不再读 {src} ⇒ 该路分支输出没接进来");
+    }
+
+    // 自证②（门的扫描面是代码而不是全文）：同一个禁词写成注释必须**不**命中。
+    let comment_only =
+        code_only("let keep = 1;\n// leg_mult(\"mid\", \"f5\")\n/* horizon_decision */");
+    assert!(
+        !comment_only.contains("leg_mult") && !comment_only.contains("horizon_decision"),
+        "剥离器没起作用 ⇒ 上面的禁词门会退化成「注释里不许提到退役形态」"
+    );
+    // 自证③（坏样本必须红）：把退役调用写进代码，判据必须抓得住，否则禁词是恒假断言。
+    let bad = code_only(&format!("{code}\nlet __probe = leg_mult(\"mid\", \"f5\");"));
+    assert!(bad.contains("leg_mult"), "负控失效：退役形态进了代码也查不出来 ⇒ 本门恒真");
+}
+
+/// P5 仲裁节点 `portfolio-mgr-arbiter.rhai` 的**运行门**（存在理由同 §28：Rhai 编译期
+/// 既不解析函数名也不查变量，`pm_kelly_growth` 的签名对不上要等真跑才发现）。
+///
+/// 四条裁定各钉一遍：
+/// ① 可比档按「每日对数增长率」取最大 ⇒ **短档凭时间效率胜出**，证明排名不是「看谁仓位大」；
+/// ② 缺席档进 `absentTiers` 且**不参与比较**（不得被当成 0 增长 = 看空）；
+/// ③ 有结论但零仓位 ⇒ `ineligibleTiers`，与缺席**分列**；
+/// ④ 一档都不入选 ⇒ `primaryTier` 为空串 + 说明原因，**不硬选**。
+#[test]
+fn arbiter_rhai_executes_and_never_scores_absence_as_bearish() {
+    use axagent_rt_workflow::expression_engine::rhai_eval::value_to_dynamic;
+    use rhai::{Dynamic, Map, Scope};
+    use serde_json::json;
+
+    let code = include_str!("../portfolio-mgr-arbiter.rhai");
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+    let ast = engine.compile(code).expect("arbiter 脚本应在生产同配置下编译通过");
+
+    let branch = |tier: &str, conf: f64, pos: f64, days: i64| {
+        json!({
+            "horizon": tier,
+            "action": if pos > 0.0 { "买入" } else { "观望" },
+            "confidence": conf,
+            "odds": 1.0,
+            "positionPct": pos,
+            "expectedHoldingDays": days,
+        })
+    };
+    let eval = |injected: &[(&str, &serde_json::Value)]| -> Map {
+        let mut scope = Scope::new();
+        for name in ["r_ultra_short", "r_short", "r_mid", "r_long"] {
+            scope.push_constant(name, Dynamic::UNIT);
+        }
+        for (k, v) in injected {
+            scope.push_constant(*k, value_to_dynamic(v));
+        }
+        engine
+            .eval_ast_with_scope::<Map>(&mut scope, &ast)
+            .unwrap_or_else(|e| panic!("arbiter 运行失败：{e}"))
+    };
+    let text = |m: &Map, k: &str| -> String {
+        m.get(k).and_then(|v| v.clone().try_cast::<String>()).unwrap_or_default()
+    };
+    let list_len = |m: &Map, k: &str| -> usize {
+        // 缺键必须炸，不能静默算 0 —— 否则「契约名拼错」与「确实没有缺席档」在断言里长得一样
+        // （本门第一版就是这么漏掉 absent/ineligible 两个键名的）。
+        let v = m
+            .get(k)
+            .unwrap_or_else(|| panic!("arbiter 输出里没有键 {k} ⇒ 契约名拼错或脚本改了输出形状"));
+        v.clone()
+            .try_cast::<rhai::Array>()
+            .unwrap_or_else(|| panic!("arbiter 的键 {k} 不是数组"))
+            .len()
+    };
+
+    // ① 四档齐备：同胜率同赔率下，锁 2 天的 8% 仓胜过锁 90 天的 30% 仓（时间归一生效）
+    let all_four = eval(&[
+        ("r_ultra_short", &branch("ultra_short", 66.0, 8.0, 2)),
+        ("r_short", &branch("short", 66.0, 10.0, 5)),
+        ("r_mid", &branch("mid", 66.0, 20.0, 28)),
+        ("r_long", &branch("long", 66.0, 30.0, 90)),
+    ]);
+    assert_eq!(
+        text(&all_four, "primaryTier"),
+        "ultra_short",
+        "① 排名应看单位时间增长：{all_four:?}"
+    );
+    assert_eq!(text(&all_four, "coverage"), "4/4");
+    assert_eq!(text(&all_four, "basis"), "kelly_growth_rate_per_holding_day");
+    assert_eq!(text(&all_four, "scope"), "capital_allocation_only", "仲裁只做资金投向（裁定 Q3）");
+
+    // ② 超短缺席 ⇒ 记 absent，并在其余三档里选（缺席不得变成最低分）
+    let miss_one = eval(&[
+        ("r_short", &branch("short", 66.0, 10.0, 5)),
+        ("r_mid", &branch("mid", 66.0, 20.0, 28)),
+        ("r_long", &branch("long", 66.0, 30.0, 90)),
+    ]);
+    assert_eq!(list_len(&miss_one, "absentTiers"), 1, "② 应恰有一档缺席：{miss_one:?}");
+    assert_eq!(text(&miss_one, "primaryTier"), "short", "② 缺席档不得参与胜出");
+    assert_eq!(text(&miss_one, "coverage"), "3/4");
+
+    // ③ 四档全在、但长线零仓位 ⇒ ineligible 恰 1、absent 必须 0（两类语义分列），
+    //    胜出仍是超短 —— 若把「零仓位」错算成缺席，absent 会变 1，本断言立刻抓到。
+    let with_zero = eval(&[
+        ("r_ultra_short", &branch("ultra_short", 66.0, 8.0, 2)),
+        ("r_short", &branch("short", 66.0, 10.0, 5)),
+        ("r_mid", &branch("mid", 66.0, 20.0, 28)),
+        ("r_long", &branch("long", 66.0, 0.0, 90)),
+    ]);
+    assert_eq!(list_len(&with_zero, "ineligibleTiers"), 1, "③ 零仓位应判不可比：{with_zero:?}");
+    assert_eq!(list_len(&with_zero, "absentTiers"), 0, "③ 四路都注入了 ⇒ 不该有任何档算缺席");
+    assert_eq!(text(&with_zero, "primaryTier"), "ultra_short");
+    assert_eq!(text(&with_zero, "coverage"), "3/4");
+
+    // ④ 全缺席 ⇒ 不硬选
+    let nothing = eval(&[]);
+    assert_eq!(text(&nothing, "primaryTier"), "", "④ 无可仲裁时不得凭空指定：{nothing:?}");
+    assert!(text(&nothing, "reason").contains("不指定投向"), "④ 原因要点名：{nothing:?}");
+    assert_eq!(text(&nothing, "coverage"), "0/4");
+}
+
+/// 剥掉注释后再判定 —— 从 `horizon_branch_rhai_scripts_compile_and_are_genuinely_forked`
+/// 内部提到模块级，本文件多个门共用**同一份**剥离实现（铁律 12：同一算法两处实现迟早漂移）。
+/// 局限：不处理字符串字面量里的 `//`（这些脚本与映射区块里都没有 URL，扩用前先加词法）。
+fn code_only(src: &str) -> String {
+    let no_line: String = src
+        .lines()
+        .map(|l| match l.find("//") {
+            Some(i) => &l[..i],
+            None => l,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut out = String::with_capacity(no_line.len());
+    let mut depth = 0usize;
+    let chars: Vec<char> = no_line.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            depth += 1;
+            i += 2;
+            continue;
+        }
+        if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '/' && depth > 0 {
+            depth -= 1;
+            i += 2;
+            continue;
+        }
+        if depth == 0 {
+            out.push(chars[i]);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// **分支节点的注入面必须恰好等于脚本运行时要的自由变量面**（2026-10-04 实测缺陷的锁）。
+///
+/// 为什么前一条运行门拦不住（同日实锤）：`horizon_branch_rhai_scripts_execute_end_to_end`
+/// 的 scope 来自**测试自己手写的 24 项清单**，而生产里 `pm-h-ultra-short` 只注入 11 项 ⇒
+/// 脚本读 `catalyst_level` / `flow_persistence` / `pool_in_pool` 这三个**节点没映射**的名字时，
+/// 测试里它们是 unit（顺利通过），生产里是 `Variable not found` ⇒ **整节点失败**
+/// （`code_executor.rs:184` 只把 `input_mapping` 的 key 推进 scope；「解析不到才是 unit」
+/// 说的是**映射过的键**，没映射的键连名字都不存在）。
+/// 也就是说「未接线 = 诚实缺席」这个前提，在宽 scope 的测试里成立、在生产里不成立 ——
+/// 而它正是 R-11 分支最容易犯的形态（四份脚本各写一遍，越界读取各不相同）。
+///
+/// 本门把 scope 的**唯一来源换成种子**：解析该节点 `input_mapping` 区块的键集合，
+/// 只用这些键构造 scope，跑生产同一个引擎工厂 + 同一个沙箱档位 ⇒ 越界读取当场红。
+/// 内置负控：少注入一个脚本真读的名字 ⇒ 必须**运行失败**，证明「红」来自 scope 而不是别的。
+///
+/// ⚠ 覆盖面限定（不自夸）：Rhai 的变量查找发生在**运行时**，只有执行到的路径上的越界会报；
+/// 未被走到的分支里的越界读取仍会漏。静态穷查需要词法器 —— 那条门已因自证失败被删
+/// （PLAN §三十 30-3），这里不重犯，只掐掉「测试 scope ⊋ 生产 scope」这个假绿来源。
+#[test]
+fn branch_node_scope_is_exactly_the_seed_mapping() {
+    use axagent_rt_workflow::expression_engine::rhai_eval::value_to_dynamic;
+    use rhai::{Dynamic, Map, Scope};
+
+    let seed = include_str!("seed_stock_analysis.rs");
+
+    /// 从种子里抽出某节点 `input_mapping: [ … ]` 区块的 **target 键名**。
+    /// 做法：定位该节点 `include_str!` 行 ⇒ **先剥注释** ⇒ 取到 `input_mapping: [` ⇒
+    /// 找闭合 `]` ⇒ 抽字符串字面量 ⇒ 奇偶交替即 (target, source)。
+    /// `required_key` 是**该形态节点必接的键**（分支节点 = `branch_json`，仲裁节点 = 四路之一的
+    /// `r_ultra_short`）：抽不到就说明区块被提前截断，让解析失败在**解析期**暴露，
+    /// 而不是变成一条指向生产代码的假缺陷。
+    /// 两个次序都是实测换来的：
+    /// ① 不用正则 —— rustfmt 会把长名元组拆成跨行（本文件另一处门为此踩过三次），
+    ///    而字面量序列不受换行影响；
+    /// ② **必须在找 `]` 之前剥注释** —— 映射区块上方的说明里写过 `#[serde(rename_all="…")]`
+    ///    这种**自带 `]` 的 Rust 属性示例**，拿原文找闭合会在区块中途截断。
+    ///    本门首跑正是这样少收了 `seal_rate`/`pool_break_count`，反过来把**门自己的解析缺陷**
+    ///    报成「节点没注入」⇒ 见下面的三条结构自证。
+    fn mapping_keys(
+        seed: &str,
+        basename: &str,
+        required_key: &str,
+        min_keys: usize,
+    ) -> Vec<String> {
+        let anchor = format!("include_str!(\"../{basename}\")");
+        let start = seed
+            .find(&anchor)
+            .unwrap_or_else(|| panic!("种子里找不到 {basename} 的节点区块（接线被删？）"));
+        let rest = code_only(&seed[start..]);
+        let open_mark = "input_mapping: [";
+        let open = rest
+            .find(open_mark)
+            .unwrap_or_else(|| panic!("{basename} 的节点不是 `{open_mark}` 形态"));
+        let after = &rest[open + open_mark.len()..];
+        let close = after.find(']').unwrap_or_else(|| panic!("{basename} 的 input_mapping 未闭合"));
+        let block = &after[..close];
+        let mut lits: Vec<String> = Vec::new();
+        let chars: Vec<char> = block.chars().collect();
+        let mut i = 0usize;
+        while i < chars.len() {
+            if chars[i] == '"' {
+                let mut s = String::new();
+                i += 1;
+                while i < chars.len() && chars[i] != '"' {
+                    s.push(chars[i]);
+                    i += 1;
+                }
+                lits.push(s);
+            }
+            i += 1;
+        }
+        assert!(
+            lits.len().is_multiple_of(2),
+            "{basename} 的映射区块里字符串数是奇数 ⇒ 解析姿势不对（区块里混进了非配对字面量），实得 {lits:?}"
+        );
+        let keys: Vec<String> = lits.into_iter().step_by(2).collect();
+        // 结构自证三条（缺一条本门就可能是「扫到半个区块」却报成功）：
+        // ① 该形态节点必接的键必须抽得到 ⇒ 少它就是区块被提前截断；
+        // ② 键必须像 Rust 标识符 ⇒ 抽到注释残渣/属性片段会当场红；
+        // ③ 键数下限（分支节点 ≥ 8；仲裁节点由调用方自己给下限）。
+        assert!(
+            keys.iter().any(|k| k == required_key),
+            "{basename} 的映射里抽不到 {required_key:?} ⇒ 区块被提前截断或形态变了，实得 {keys:?}"
+        );
+        for k in &keys {
+            assert!(
+                k.chars().next().is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+                    && k.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                "{basename} 的映射键 {k:?} 不是小写标识符 ⇒ 解析器抓到了非键内容（注释/属性/路径）"
+            );
+        }
+        assert!(
+            keys.len() >= min_keys,
+            "{basename} 的映射键只有 {} 个（下限 {min_keys}）⇒ 区块解析跑偏：{keys:?}",
+            keys.len()
+        );
+        keys
+    }
+
+    let branch_all = axagent_analysis_engine::evidence_weight::horizon_branch_specs();
+    // 退化态用的**空先验表**（必须是具名绑定，不能内联 `&json!({})` —— 那会在借用仍存活时被释放）
+    let empty_prior_table = serde_json::json!({});
+    let prior_table = serde_json::json!({
+        "ultra_short": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
+        "short": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
+        "mid": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
+        "long": { "prior": 0.5, "source": "gate_hitrate", "samples": 12.0 },
+    });
+    // 夹具必须是**有离散度**的价格序列：单调等差数列的日收益率标准差只有 1e-5 量级，
+    // `k·σ·√h` 四舍五入到两位小数后恒为 0 ⇒ 「价带算出来了」这条断言会失去区分力。
+    let bars: serde_json::Value = (0..25)
+        .map(|i| {
+            let cyc = [10.0_f64, 10.42, 10.08, 10.63, 10.21][i as usize % 5];
+            serde_json::json!({ "close": cyc + (i as f64) * 0.01 })
+        })
+        .collect();
+    let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+    const ACTIONS: &[&str] = &["买入", "增持", "持有", "观望", "减持", "卖出"];
+
+    // 已接线的档：(档位, 脚本文件, 负控要剥的那个名字)。新增接线时在这里加一行 —— 漏加会在下面的
+    // match 分支**点名**是哪个文件没登记源，而不是静默少测一档。
+    // `peel` 必须是该档脚本**无条件执行到的读取**（都在 `raw`/门判定里），否则剥了也不报错，
+    // 负控会退化成空跑。
+    let wired: [(&str, &str, &str); 4] = [
+        ("ultra_short", "portfolio-mgr-h-ultra-short.rhai", "seal_rate"),
+        ("short", "portfolio-mgr-h-short.rhai", "seal_rate"),
+        ("mid", "portfolio-mgr-h-mid.rhai", "pe_percentile"),
+        ("long", "portfolio-mgr-h-long.rhai", "valuation_dcf_upside"),
+    ];
+
+    for (tier, basename, peel) in wired {
+        let code = match basename {
+            "portfolio-mgr-h-ultra-short.rhai" => {
+                include_str!("../portfolio-mgr-h-ultra-short.rhai")
+            },
+            "portfolio-mgr-h-short.rhai" => include_str!("../portfolio-mgr-h-short.rhai"),
+            "portfolio-mgr-h-mid.rhai" => include_str!("../portfolio-mgr-h-mid.rhai"),
+            "portfolio-mgr-h-long.rhai" => include_str!("../portfolio-mgr-h-long.rhai"),
+            other => panic!("分支脚本 {other} 未在本门登记源，无法按节点 scope 运行"),
+        };
+        let keys = mapping_keys(seed, basename, "branch_json", 8);
+
+        // 「齐备态」的值表：每个键都要有真值样本。新接一个键却没在这里登记 ⇒ 红，
+        // 否则「齐备态」会悄悄变成「那个键其实是 unit」，测的已经不是齐备输入。
+        fn value_for(k: &str) -> Option<serde_json::Value> {
+            Some(match k {
+                "tier_score" => serde_json::json!(62.0),
+                "macd_dif" => serde_json::json!(0.12),
+                "macd_dea" => serde_json::json!(0.04),
+                "rsi_14" => serde_json::json!(58.0),
+                "seal_rate" => serde_json::json!(0.72),
+                "pool_break_count" => serde_json::json!(0.0),
+                "stop_vol_mult" => serde_json::json!(1.2),
+                "take_profit_vol_mult" => serde_json::json!(2.0),
+                "pe_percentile" => serde_json::json!(18.0),
+                "f_score" => serde_json::json!(7.0),
+                "consensus_eps" => serde_json::json!(3.0),
+                // 齐备态必须是**非估算**的一致预期，否则中/长档的脚本会正确地按缺席处理
+                "consensus_estimated" => serde_json::json!(false),
+                // #24（v131）：预期修正腿的**分母**（年报口径 EPS）与它的缺席原因码。
+                // 齐备态必须给「有值 + basis=annual_report」形态，否则本门测的就不是齐备输入。
+                "latest_eps" => serde_json::json!(1.2),
+                "latest_eps_basis" => serde_json::json!("annual_report"),
+                // #23（v132）：解禁供给占比（小数）。齐备态必须给**有值**形态；
+                // `lockup_supply_reason` 只在缺席时才有意义，这里给一个真值是为了
+                // 「齐备态 = 每个映射键都有料」这条不缩水（它在齐备态里不参与任何分支，
+                // 正因如此才更要登记 —— 否则脚本那条条件式从没被求值过）。
+                "lockup_float_ratio" => serde_json::json!(0.03),
+                "lockup_supply_reason" => serde_json::json!("no_float_market_cap"),
+                "flow_persistence" => serde_json::json!(0.4),
+                "pmi" => serde_json::json!(51.0),
+                "valuation_dcf_upside" => serde_json::json!(38.0),
+                "valuation_dcf_applicable" => serde_json::json!(true),
+                _ => return None,
+            })
+        }
+
+        let run_with = |names: &[String], full: bool| -> Result<Map, String> {
+            let mut scope = Scope::new();
+            let mut unhandled: Vec<&str> = Vec::new();
+            for name in names {
+                let dyn_value = match name.as_str() {
+                    "branch_json" => value_to_dynamic(&branch_all[tier]),
+                    // 退化态故意给**空表**：脚本必须把「表在但没有本档那行」也判成先验不可得
+                    "horizon_prior_json" => value_to_dynamic(if full {
+                        &prior_table
+                    } else {
+                        &empty_prior_table
+                    }),
+                    "overall_risk" => Dynamic::from("中风险"),
+                    "kline_bars" => value_to_dynamic(&bars),
+                    other => match (full, value_for(other)) {
+                        (true, Some(v)) => value_to_dynamic(&v),
+                        (false, _) => Dynamic::UNIT,
+                        (true, None) => {
+                            unhandled.push(other);
+                            Dynamic::UNIT
+                        },
+                    },
+                };
+                scope.push_constant(name.as_str(), dyn_value);
+            }
+            assert!(
+                unhandled.is_empty(),
+                "档 {tier} 有映射键在本门的值表里登记不到：{unhandled:?} ⇒ 「齐备态」其实缺料，先补值表再改门"
+            );
+            let ast = engine.compile(code).expect("分支脚本应可编译");
+            engine.eval_ast_with_scope::<Map>(&mut scope, &ast).map_err(|e| format!("{e}"))
+        };
+
+        // ① 齐备态：按**节点真实 scope** 必须跑通，且形状与上一门一致
+        let out = run_with(&keys, true).unwrap_or_else(|e| {
+            panic!(
+                "档 {tier} 按节点真实 scope（{} 个键）运行失败：{e}\n键集合 {keys:?}",
+                keys.len()
+            )
+        });
+        let action =
+            out.get("action").and_then(|v| v.clone().try_cast::<String>()).unwrap_or_default();
+        assert!(ACTIONS.contains(&action.as_str()), "档 {tier} 动作不在六档词表：{action:?}");
+        assert_eq!(
+            out.get("horizon").and_then(|v| v.clone().try_cast::<String>()).as_deref(),
+            Some(tier),
+            "档 {tier} 自报档位不符"
+        );
+        let legs =
+            out.get("legs").and_then(|v| v.clone().try_cast::<rhai::Array>()).unwrap_or_default();
+        assert!(!legs.is_empty(), "档 {tier} 齐备态一条腿都没有 ⇒ 腿名与分支表漂移");
+        // ①′ #24（v131）：中/长档齐备态必须**真的有** `expectationRevision` 这条腿。
+        //     v130 及以前它在两档恒缺席（分母没有数据面），所以这条在改前是红的 ——
+        //     它锁的是「分母接到了」这件事本身，而不是这条腿最后贡献多少。
+        if matches!(tier, "mid" | "long") {
+            let has_er = legs.iter().any(|l| {
+                l.clone()
+                    .try_cast::<Map>()
+                    .and_then(|m| m.get("factor").cloned().and_then(|f| f.try_cast::<String>()))
+                    .as_deref()
+                    == Some("expectationRevision")
+            });
+            assert!(
+                has_er,
+                "档 {tier} 齐备态没有 expectationRevision 腿 ⇒ latestEps 没进 raw，\
+                 或 latest_eps 的映射路径断了"
+            );
+        }
+
+        // ①″ #23（v132）：short 与 mid 齐备态必须**有** `supplyShock` 这条腿（超短/长档腿集里没有 ⇒ 不查）。
+        //     short 是方向腿、mid 是 riskNote，两者都要求「取到数」—— 旧形态下这条腿要么恒缺席，
+        //     要么（主链那一条）恒满负，两种都是常数而不是证据。
+        if matches!(tier, "short" | "mid") {
+            let has_ss = legs.iter().any(|l| {
+                l.clone()
+                    .try_cast::<Map>()
+                    .and_then(|m| m.get("factor").cloned().and_then(|f| f.try_cast::<String>()))
+                    .as_deref()
+                    == Some("supplyShock")
+            });
+            assert!(has_ss, "档 {tier} 齐备态没有 supplyShock 腿 ⇒ supply_shock 块没产出入，");
+        }
+        // 以下四条从被删除的「手抄 scope 运行门」迁移过来（那条门的 scope 比生产宽，是假绿来源；
+        // 独有覆盖不能跟着删 ⇒ 见 4f 的「删 + 交代」规矩）：置信值域 / 缺席点名 / 退化留痕 / 点名先验。
+        let conf = out.get("confidence").and_then(|v| v.clone().try_cast::<f64>()).unwrap_or(-1.0);
+        assert!((0.0..=100.0).contains(&conf), "档 {tier} 置信越出 0-100：{conf}");
+
+        // ①′ 齐备态必须**真的算出波动率价带**（2026-10-04 实证：000710 四档的
+        //     stopLossPct / takeProfitPct / odds / positionPct 全为 0，而 `stopSource` 谎报
+        //     `fallback_pct` —— 固定百分比兜底其实从未参与）。根因：分支表的 `days` /
+        //     `volLookbackDays` 是 JSON **整数**，经 `json_value_to_dynamic` 落成 Rhai i64，
+        //     而脚本只认 "f64" ⇒ band_* 恒 0 ⇒ 宿主调用被整段跳过。这类「按类型漏判」
+        //     编译门与旧断言（只看形状）都查不出 ⇒ 必须按**数值**断。
+        let band_of =
+            |k: &str| out.get(k).and_then(|v| v.clone().try_cast::<f64>()).unwrap_or(-1.0);
+        let (g_stop, g_take, g_odds) =
+            (band_of("stopLossPct"), band_of("takeProfitPct"), band_of("odds"));
+        assert!(
+            g_stop > 0.0 && g_take > 0.0 && g_odds > 0.0,
+            "档 {tier} 齐备态价带没算出来（止损 {g_stop} / 止盈 {g_take} / 赔率 {g_odds}）\
+             ⇒ 波动率口径整段落空，仓位必然恒 0"
+        );
+        let g_src =
+            out.get("stopSource").and_then(|v| v.clone().try_cast::<String>()).unwrap_or_default();
+        assert_ne!(
+            g_src, "fallback_pct",
+            "档 {tier} 齐备态却走了固定百分比兜底 ⇒ 上方数值断言与 stopSource 说的是两件事"
+        );
+        // 前提自证：夹具给的是**生产形态**的分支表（整数天数）。哪天产出端把 days 改成浮点，
+        // 这条会红 —— 那意味着本门不再覆盖 i64 分支，而不是判据可以删。
+        assert!(
+            value_to_dynamic(&branch_all[tier]["days"]).is_int()
+                && value_to_dynamic(&branch_all[tier]["volLookbackDays"]).is_int(),
+            "档 {tier} 分支表的 days/volLookbackDays 不再是 JSON 整数 ⇒ 本门的 i64 判据覆盖失效，\
+             须换样本而不是删断言"
+        );
+
+        // ② 退化态（全 unit，只给分支表 + 空先验表）：拒绝出结论、不产仓位
+        let empty =
+            run_with(&keys, false).unwrap_or_else(|e| panic!("档 {tier} 退化态运行失败：{e}"));
+        assert_eq!(
+            empty.get("action").and_then(|v| v.clone().try_cast::<String>()).unwrap_or_default(),
+            "观望",
+            "档 {tier} 无腿无先验却给出非观望动作：{empty:?}"
+        );
+        let pos =
+            empty.get("positionPct").and_then(|v| v.clone().try_cast::<f64>()).unwrap_or(99.0);
+        assert!(pos <= 0.0, "档 {tier} 无输入仍给出仓位 {pos} ⇒ 伪装有结论");
+        let absent = empty
+            .get("absentLegs")
+            .and_then(|v| v.clone().try_cast::<rhai::Array>())
+            .unwrap_or_default();
+        assert!(!absent.is_empty(), "档 {tier} 全无输入却不报任何缺席腿 ⇒ 缺席被当成了中性");
+        let gaps = empty
+            .get("dataGaps")
+            .and_then(|v| v.clone().try_cast::<rhai::Array>())
+            .unwrap_or_default();
+        assert!(!gaps.is_empty(), "档 {tier} 退化时必须在 dataGaps 留痕");
+        assert!(
+            gaps.iter().any(|g| g.clone().try_cast::<String>().is_some_and(|s| s.contains("先验"))),
+            "档 {tier} 退化原因必须点名「先验不可得」，实得 {gaps:?}"
+        );
+
+        // ③ 负控（本门自证）：剥掉一个脚本真读的名字 ⇒ 必须**运行失败**且点名它。
+        //    若这里也跑通，说明门测的不是节点 scope（或脚本根本不读它），本门对该档就是空的。
+        let narrowed: Vec<String> = keys.iter().filter(|&k| k != peel).cloned().collect();
+        assert_eq!(
+            narrowed.len(),
+            keys.len() - 1,
+            "负控失效：节点映射里没有 `{peel}` 可剥，键集合 {keys:?}"
+        );
+        let err = run_with(&narrowed, true).err();
+        assert!(err.is_some(), "剥掉 `{peel}` 后仍跑通 ⇒ 越界读取查不出来，本门对档 {tier} 无效");
+        let msg = err.unwrap_or_default();
+        assert!(msg.contains(peel), "负控报的不是被剥掉的名字，可能被别的错误掩盖：{msg}");
+    }
+
+    // ── 仲裁节点（P5）：同一个判据，换一份 scope 来源 ──
+    // 它只读四路分支的 `result` ⇒ 「节点映射 = 脚本要的自由变量面」对它同样成立。
+    // 产出形状与分支不同（没有 legs/action 词表那一套），所以这里只验两件事：
+    //   ① 四路全不注入值时**不硬选**（`primaryTier` 必须是空串）——缺席不是看空；
+    //   ② 剥掉其中一路 ⇒ 必须**运行失败且点名那一路**（负控，证明门有电池）。
+    let arbiter_keys = mapping_keys(seed, "portfolio-mgr-arbiter.rhai", "r_ultra_short", 4);
+    let arbiter_code = include_str!("../portfolio-mgr-arbiter.rhai");
+    let mut arbiter_scope_names: Vec<&str> = arbiter_keys.iter().map(String::as_str).collect();
+    arbiter_scope_names.sort();
+    assert_eq!(
+        arbiter_scope_names,
+        vec!["r_long", "r_mid", "r_short", "r_ultra_short"],
+        "仲裁节点的注入面应当恰好是四路分支输出，实得 {arbiter_keys:?}"
+    );
+    let run_arbiter = |names: &[String]| -> Result<Map, String> {
+        let mut scope = Scope::new();
+        for name in names {
+            // 四路全部按「没接到」注入 unit ⇒ 脚本必须判缺席，而不是拿 0 参与比较
+            scope.push_constant(name.as_str(), Dynamic::UNIT);
+        }
+        let ast = engine.compile(arbiter_code).expect("仲裁脚本应可编译");
+        engine.eval_ast_with_scope::<Map>(&mut scope, &ast).map_err(|e| format!("{e}"))
+    };
+    let all_absent = run_arbiter(&arbiter_keys).expect("四路缺席时仲裁必须能跑完，而不是崩");
+    assert_eq!(
+        all_absent
+            .get("primaryTier")
+            .and_then(|v| v.clone().try_cast::<String>())
+            .unwrap_or_default(),
+        "",
+        "四路都缺席却指定了投向 ⇒ 拿「没数据」当成了结论：{all_absent:?}"
+    );
+    let peeled: Vec<String> = arbiter_keys.iter().filter(|&k| k != "r_mid").cloned().collect();
+    let arbiter_err = run_arbiter(&peeled).err();
+    assert!(arbiter_err.is_some(), "剥掉 `r_mid` 后仲裁仍跑通 ⇒ 本门对仲裁节点是空的");
+    assert!(arbiter_err.unwrap_or_default().contains("r_mid"), "仲裁负控没点名被剥的那一路");
 }

@@ -108,10 +108,24 @@ pub fn extract_json_from_llm_response(text: &str) -> &str {
     // 尝试从 ``` 围栏中提取
     if let Some(start) = trimmed.find("```") {
         let inner = &trimmed[start + 3..];
-        if let Some(end) = inner.find("```") {
-            return inner[..end].trim();
-        }
-        return inner.trim();
+        let body = match inner.find("```") {
+            Some(end) => &inner[..end],
+            None => inner,
+        };
+        // 围栏的信息串（`tool_json` 这类语言标记）不属于 JSON 本体，必须剥掉。
+        //   上一段专门处理了 ```json，所以走到这里的标记是**别的名字**（智选链的
+        //   `submit_candidates` 工具块就是 `tool_json`）。不剥的后果不是「少一点宽容」
+        //   而是**必败**：返回体以 `tool_json` 开头 ⇒ 下游 `from_str` / repair_json /
+        //   文本兜底四层全空转，候选明明完整躺在 report 里却产出 0（#26 的实测形态）。
+        let body = body.trim();
+        let body = if body.starts_with('{') || body.starts_with('[') {
+            body
+        } else if let Some(nl) = body.find('\n') {
+            body[nl + 1..].trim()
+        } else {
+            body
+        };
+        return body;
     }
 
     trimmed
@@ -137,5 +151,22 @@ mod tests {
     fn extract_json_from_plain_fence() {
         let raw = "before\n```\n[1,2,3]\n```\nafter";
         assert_eq!(extract_json_from_llm_response(raw), "[1,2,3]");
+    }
+
+    /// 非 `json` 的语言标记（智选链的 `tool_json`）：信息串必须剥掉，否则返回体以
+    /// `tool_json` 开头 ⇒ 下游整条修复链必败（#26 的根因）。
+    #[test]
+    fn extract_json_strips_non_json_fence_language_tag() {
+        let raw = "```tool_json\n{\"a\":1}\n```";
+        assert_eq!(extract_json_from_llm_response(raw), "{\"a\":1}");
+    }
+
+    /// 负控方向：没有信息串时**不许**把第一行当标记吃掉（裸围栏 + 缩进 JSON 是常见形态）。
+    #[test]
+    fn extract_json_keeps_first_line_when_it_is_the_payload() {
+        let raw = "```\n  {\"a\":1}\n```";
+        assert_eq!(extract_json_from_llm_response(raw), "{\"a\":1}");
+        let raw2 = "```\n[{\"a\":1}]\n```";
+        assert_eq!(extract_json_from_llm_response(raw2), "[{\"a\":1}]");
     }
 }

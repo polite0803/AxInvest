@@ -1201,7 +1201,11 @@ pub struct StockAnalysisListItem {
     /// 「看似有周期、实为不知道」的歧义形态（四档明细虽在 `decision_json` 里，
     /// 列表也未解析）。`None` = 本列引入前的记录，按「档位未知」渲染，**不得**回退成某档。
     pub decision_time_horizon: Option<String>,
-    /// 主档来源：`"formula"` = 本地公式定档；`"model"` = 采信模型自报（历史形态）。
+    /// 主档来源（值域权威 = `harness::holding_period::HORIZON_SOURCES`）：
+    /// `"branch_pick"` = 四路逐档分支结论选出（v124 起的主路径）；
+    /// `"formula_no_branch"` = 四路全缺席时退回后验阈值定档（兜底，与上一条语义不同）；
+    /// `"formula"` = 本换代前的公式定档（存量）；`"model"` = 采信模型自报（更早的历史形态）；
+    /// `"user"` = v1 的用户锁档（通路已撤除，无生产数据）。
     /// `None` = 本列引入前的记录。
     pub decision_horizon_source: Option<String>,
     pub created_at: i64,
@@ -4283,6 +4287,14 @@ pub async fn run_daily_snapshot_sweep(
                         _ => continue,
                     },
                     "get_pledge_data" => match client.get_pledge_data(code).await {
+                        Ok(Some(r)) => serde_json::to_string(&r).unwrap_or_default(),
+                        _ => continue,
+                    },
+                    // #20①：一致预期同样只有「当下值」（真源 RPT_WEB_RESPREDICT 无日期参数，
+                    // eastmoney 已申报 NoHistoricalSemantic）⇒ 每日快照是它在回放里的唯一通道。
+                    // 存的是内层 `ConsensusEPS`（读取侧按 `Option<ConsensusEPS>` 反序列化，
+                    // 与资金流/质押同形）。
+                    "get_consensus_eps" => match client.get_consensus_eps(code).await {
                         Ok(Some(r)) => serde_json::to_string(&r).unwrap_or_default(),
                         _ => continue,
                     },

@@ -243,6 +243,19 @@ pub fn register_pm_functions(engine: &mut Engine) {
             .unwrap_or(0.0)
         },
     );
+    // P4′-b：波动带内的标准化位置（`(末价 − SMA) / σ_价`，Bollinger 式 z 值）。
+    // 中档的 `inside_sigma_band` 门与长档的带内/带外判断都读它。
+    // 口径只有一份（`harness::indicators::band_z`）—— 让四份分支脚本各自在 Rhai 里
+    // 现算均值与标准差，就是给同一个统计量造四份实现，迟早漂移（禁区 12）。
+    // 返回 unit = 窗口退化（停盘/一字板 σ=0）或样本不足 ⇒ 脚本必须点名「门未判定」，
+    // 不得把「算不出」当成「正居中」。
+    engine.register_fn("pm_band_z", |bars: rhai::Array, lookback: i64| -> rhai::Dynamic {
+        let closes = closes_from_bars(&bars);
+        match axagent_harness::indicators::band_z(&closes, lookback.max(0) as usize) {
+            Some(z) => rhai::Dynamic::from(z),
+            None => rhai::Dynamic::UNIT,
+        }
+    });
     // 「长线更值得」的判定侧折算（Phase D-2）：见 `harness::indicators::snr_confidence` 的推导。
     // 同样在 Rust 侧开方 —— 本仓共享 Rhai 引擎没有 sqrt/Math。
     engine.register_fn("pm_snr_confidence", |p: f64, holding_days: i64, anchor_days: i64| -> f64 {
@@ -252,11 +265,50 @@ pub fn register_pm_functions(engine: &mut Engine) {
             anchor_days.max(0) as usize,
         )
     });
+    // P5 仲裁：把「资金投向哪档」化为可比的**每日对数增长率**（Kelly 增长率 / 持有天数）。
+    // 口径与理由只有一份，在 `portfolio_formula::kelly_growth_rate`（含单测）。
+    // 返回 unit = 该档**不参与比较**（无仓位 / 赔率非正 / 持有 0 天 …）——
+    // arbiter 必须把它当「退出」，不能当 0；当 0 就是「缺席 = 看空」（PLAN §十一 11-5）。
+    engine.register_fn(
+        "pm_kelly_growth",
+        |posterior: f64, odds: f64, position_pct: f64, holding_days: i64| -> rhai::Dynamic {
+            match axagent_analysis_engine::portfolio_formula::kelly_growth_rate(
+                posterior,
+                odds,
+                position_pct,
+                holding_days.max(0) as u32,
+            ) {
+                Some(g) => rhai::Dynamic::from(g),
+                None => rhai::Dynamic::UNIT,
+            }
+        },
+    );
+    // ── P4′-b：逐档分支的**腿信号**（因子原始量 → [-1,1]）────────────────────
+    // 单一实现在 `analysis-engine::leg_signal`，四份逐档决策脚本共用：同一因子的信号口径
+    // 若按档各写一遍，就又回到「四份手抄阶梯迟早漂移」（AGENTS 禁区 12 / PLAN §二十四）。
+    // 「档间不同」由 `horizon_branch_specs` 提供（腿集合 / 角色 / 配比 / 门 / 出场口径），
+    // 不由这里各档一份实现提供。
+    // 返回 Dynamic 而不是 Option<f64>：本仓共享引擎在 Rhai 1.25 上多 Option 参数/返回
+    // 注册不稳（见上文 `pm_classify_risk` 的历史修复），缺席一律落成 unit，
+    // 脚本用 `type_of(s) == "()"` 点名「该腿缺席」—— 缺席 ≠ 中性 0。
+    engine.register_fn("pm_leg_signal", |factor: &str, inputs: rhai::Map| -> rhai::Dynamic {
+        let packed = rhai::Dynamic::from(inputs.clone());
+        let json =
+            axagent_rt_workflow::work_engine::executors::data_transformer_executor::dynamic_to_json(
+                packed,
+            );
+        match axagent_analysis_engine::leg_signal::leg_signal(factor, &json) {
+            Some(v) => rhai::Dynamic::from(v),
+            None => rhai::Dynamic::UNIT,
+        }
+    });
 }
 
 /// 从 K 线数组提取收盘价序列（兼容 `close` 为 f64 / i64 / 数字字符串三种上游形态）。
 ///
-/// 解析不出来的 bar 直接跳过 —— 与 `portfolio-mgr.rhai` 里 `num_of` 的宽容读取同口径；
+/// 解析不出来的 bar 直接跳过 —— 口径**比引擎侧 `num_of` 更宽**：`num_of`
+/// （权威源 `crates/harness/src/rhai_engine.rs` 的 `register_common_functions`）只收 JSON Number
+/// （f64 / 嵌层 i64），这里额外收「数字字符串」，因为工具节点的 K 线历史上就以字符串透出过 close。
 /// 但**样本总数不足**时 `realized_vol_pct` 会返回 `None`（不是拿残缺序列硬算一个数）。
 fn closes_from_bars(bars: &[rhai::Dynamic]) -> Vec<f64> {
     bars.iter()

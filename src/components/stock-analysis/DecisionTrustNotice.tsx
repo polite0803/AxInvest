@@ -25,13 +25,12 @@ import { useTranslation } from "react-i18next";
  *     `data_gaps`，为决策 JSON 里唯一的顶层 snake_case 字段）。
  *
  * ⚠️ 2026-10-01：`dataGaps` 的语义收紧为**只装「本该拿到的数据没拿到」**。
- *   「本档按周期主动降权」是**设计选择**（一个字节的数据都没缺），走
- *   `decision.weightAdjustments`，由四档决策面板（`DecisionBanner`）按档挂脚注，
- *   **不进本组件**。此前它与真缺口同挤 `data_gaps`，而它恒有两条（f5 的 0.3/0.5 是
- *   `horizon_leg_multipliers()` 里的常量，凡有估值证据必命中）⇒ 本警示条在
- *   **每一条带估值数据的分析**上恒亮，「数据缺口 2 项」把 `PE数据(t-risk)` 这类真缺口
- *   淹没成噪声。判据：`DecisionTrustNotice.test.tsx` 锁住「只有 weightAdjustments
- *   时本组件不渲染、也不计数」。
+ *   当时的做法是把「本档按周期主动降权」拆到新字段 `decision.weightAdjustments`，由四档
+ *   面板按档挂脚注。2026-10-04 R-11 把逐档乘数表整体退役后，那条通道**连字段一起删除**了
+ *   —— 逐档的腿齐不齐现在写在该档自己的 `decisionsByHorizon[].absentLegs / dataGaps` 里。
+ *   恒亮教训仍然成立，且换了复发方向：**不得**把逐档注脚并进顶层「数据缺口 N 项」
+ *   （那等于把「这一档的腿齐不齐」压成全局的「可信度受限」）。
+ *   判据：`DecisionTrustNotice.test.tsx` 锁住「逐档缺席不参与本组件计数、也不由本组件渲染」。
  *
  * 注意：这些字段在 2026-09-11 之前被 `normalizeDecision` 的白名单构造丢弃，
  * 导致 DecisionBanner 里早已写好的 collapse Tag 从未显示过。若本组件不生效，

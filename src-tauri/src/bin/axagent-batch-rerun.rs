@@ -45,6 +45,9 @@ use axagent_astock_data::as_of::{self, AsOfContext};
 use axagent_entities::stock_analyses;
 use axagent_entities::stock_reflections;
 use axagent_entities::strategy_performance;
+use axagent_entities::workflow_template;
+use axagent_entities::workflow_template_version;
+use axagent_lib::TEMPLATE_VERSION;
 use axagent_lib::{
     AppState, axagent_home, create_app_state, init_database_with_dir, run_stock_workflow_inner,
 };
@@ -52,6 +55,10 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set,
 };
 
+// 被测模板 id。权威定义在 `seed_stock_analysis.rs` 的 `TEMPLATE_ID`，但那个 const 在
+// **函数体内**、模块外不可见 ⇒ 这里另取一份（同 `stock_analysis_setup/mod.rs` 的
+// `version_gate_tests::TEMPLATE_ID`，那里也写了同一条理由）。两处若要改必须一起改。
+const STOCK_ANALYSIS_TEMPLATE_ID: &str = "stock-analysis";
 const HELP: &str = "\
 axagent-batch-rerun —— 批量 as-of 重跑历史股票分析
 
@@ -65,6 +72,9 @@ axagent-batch-rerun —— 批量 as-of 重跑历史股票分析
   --since <YYYY-MM-DD> 只处理 analysis_date >= 该日
   --until <YYYY-MM-DD> 只处理 analysis_date <= 该日
   --only-stale         只处理 template_version IS NULL 的记录
+  --template-version <N> 只处理 template_version = N 的记录（按代筛样，#13）
+  --snapshot-report      只打印代际/快照完整性报告后退出（**不重跑任何分析**；
+                       但仍会连库并走一次启动期 schema 对账 —— 说「不改库」是假的）
   --reflect-after      重跑完成后，在同一进程内立即跑一轮批量反思
   --reflect-max <N>    --reflect-after 单轮反思条数上限（默认 20）
   -h, --help           显示本帮助
@@ -101,6 +111,10 @@ struct Args {
     since: Option<String>,
     until: Option<String>,
     only_stale: bool,
+    /// 按代筛样：只处理 `template_version = N` 的记录（任务 #13）。
+    template_version: Option<i32>,
+    /// 只打印代际/快照完整性报告后退出（不改库，供排障先看现状）。
+    snapshot_report: bool,
     /// 重跑完成后，在同一进程内立即跑一轮批量反思。
     reflect_after: bool,
     /// 反思的 `max_count`（None ⇒ 用 `run_batch_reflection_inner` 内部默认 20）。
@@ -115,6 +129,13 @@ impl Args {
             match arg.as_str() {
                 "--apply" => a.apply = true,
                 "--only-stale" => a.only_stale = true,
+                "--snapshot-report" => a.snapshot_report = true,
+                "--template-version" => {
+                    let v =
+                        it.next().ok_or_else(|| "--template-version 需要一个整数".to_string())?;
+                    a.template_version =
+                        Some(v.parse().map_err(|e| format!("--template-version 解析失败: {e}"))?);
+                },
                 "--reflect-after" => a.reflect_after = true,
                 "--limit" => {
                     let v = it.next().ok_or_else(|| "--limit 需要一个数字".to_string())?;
@@ -345,6 +366,9 @@ async fn ensure_pending_reflection(
                 primary_holding_days: rec.decision_expected_holding_days,
                 min_confidence_threshold: axagent_lib::DEFAULT_REFLECTION_MIN_CONFIDENCE,
                 reflection_depth: axagent_lib::DEFAULT_REFLECTION_DEPTH,
+                // §七十一 按版归属：重放补建的反思行归属到**这条分析自己的代际**（不是重放
+                // 时跑的图）—— 复盘的是那一代做出的决策。分析行是 NULL 时保持 NULL。
+                analysis_template_version: rec.template_version,
                 now_ms: now,
             },
             missing_horizons,
@@ -397,9 +421,6 @@ async fn ensure_pending_reflection(
         //
         // （本条曾被我按「与决策绑定」误判为应清空，已纠正。判据：
         //  先问**这个量在物理上依赖决策内容吗**，再问它是否该随版本失效。）
-        //
-        // `model_version` 恒为 NULL（全仓只有 `Set(None)` 写入点、无实值赋值，
-        // 见 PLAN D7）⇒ 无需处理。
         am.updated_at = Set(now);
         am.update(db).await.map_err(|e| format!("重置反思 {id} 失败: {e}"))?;
     }
@@ -484,10 +505,96 @@ async fn run() -> Result<(), String> {
         ));
     }
 
+    // ── 代际 / 快照完整性联查（任务 #13，P2-F/G）──
+    // 三个数必须**分开**说，合成一句就会误导人：
+    //   ① `TEMPLATE_VERSION`（代码里的代）⇒ 新播种后才会生效的那一代图；
+    //   ② 库里 `workflow_templates.version`（已播种到的代）⇒ 本次重跑**实际用的图**；
+    //      ① ≠ ② 时若不说清，就会被读成「同版本号却不同判据」那类假象；
+    //   ③ 该代的**图定义**还能不能回查：当前代在 `workflow_templates` 主表、历史代看
+    //      `workflow_template_versions` 快照 —— 两处都没有才是真缺档（只查快照表会把
+    //      「本代无快照」这个正常形态误报成缺口，见下方三分支）。
+    // 结构性事实（2026-10-05 现网实测）：快照是「升级前把**旧**版本另存一行」
+    // （`crates/dao/src/repo/workflow_template.rs` 的 D9 分支与各 seed 站点同形），所以**最新一代
+    // 在快照表里恒无行**。这**不是**回查看不到 —— 当前代的图就在 `workflow_templates` 主表，
+    // `get_template_by_version` 第一步读的就是它。真正的缺口只有「历史代有缺档」
+    // （stock-analysis 76 份覆盖 0..128，并非每代都存过）。两种「无快照」必须分开说，
+    // 否则就是拿一句假缺席盖住一条真缺口。
+    let live_tpl = workflow_template::Entity::find_by_id(STOCK_ANALYSIS_TEMPLATE_ID)
+        .one(&db)
+        .await
+        .map_err(|e| format!("查 workflow_templates 失败: {e}"))?;
+    let snaps = workflow_template_version::Entity::find()
+        .filter(workflow_template_version::Column::TemplateId.eq(STOCK_ANALYSIS_TEMPLATE_ID))
+        .all(&db)
+        .await
+        .map_err(|e| format!("查 workflow_template_versions 失败: {e}"))?;
+    let mut snap_versions: Vec<i32> = snaps.iter().map(|r| r.version).collect();
+    snap_versions.sort_unstable();
+    snap_versions.dedup();
+    println!(
+        "[batch-rerun] 代际联查：代码模板版本={TEMPLATE_VERSION}，库里已播种版本={}，快照 {} 份（覆盖 {}..{}）",
+        match &live_tpl {
+            Some(t) => t.version.to_string(),
+            None => "无该行".to_string(),
+        },
+        snap_versions.len(),
+        snap_versions.first().map_or_else(|| "-".to_string(), |v| v.to_string()),
+        snap_versions.last().map_or_else(|| "-".to_string(), |v| v.to_string()),
+    );
+    if let Some(t) = &live_tpl {
+        if t.version != TEMPLATE_VERSION {
+            println!(
+                "  ⚠ 库里播种到 {} 代、代码是 {} 代 ⇒ 本次重跑用的**仍是 {} 代的图**。要按代码这一代跑，先重启应用让种子升到 {} 代（不是加参数能绕的）。",
+                t.version, TEMPLATE_VERSION, t.version, TEMPLATE_VERSION
+            );
+        }
+    } else {
+        println!(
+            "  ⚠ 库里没有 id={STOCK_ANALYSIS_TEMPLATE_ID} 的模板行 ⇒ 无法判断已播种到哪一代，本次重跑的图代未知"
+        );
+    }
+    if let Some(n) = args.template_version {
+        // 三种「有没有图定义」要说清，不能只按快照表里那一行判生死（§七十一订正 #13 的读数）：
+        //   ① n == 库里已播种的当前代 ⇒ 图在 `workflow_templates` 主表，**无需**快照；
+        //   ② n 在快照表里 ⇒ 按代回查当时的图；
+        //   ③ 其余 ⇒ 真缺档：既不是当前代、又没存过快照 ⇒ 无从回查，只能按当前图重放。
+        let is_live = live_tpl.as_ref().is_some_and(|t| t.version == n);
+        if is_live {
+            println!(
+                "  {n} 代**就是库里当前已播种的那一代** ⇒ 图定义在 workflow_templates 主表，按代回查走主表（快照表按设计只存升级前的旧代，故本代无行属正常）。"
+            );
+        } else if snap_versions.contains(&n) {
+            println!("  {n} 代**有**快照 ⇒ 可按代回查当时的图定义（workflow_template_versions）。");
+        } else {
+            println!(
+                "  ⚠ {n} 代既不是库里当前代、在 workflow_template_versions 里又**没有快照** ⇒ 这一批行只能按当前图重放，与那一代的历史读数不可直接比较。这是历史存版的缺档（并非每代都存过），不是取数失败。"
+            );
+        }
+    }
+    if args.only_stale {
+        println!(
+            "  ⚠ --only-stale 选的是 template_version IS NULL 的存量行（写侧落代际之前产生的）⇒ 它们**没有代可归**；重跑成功后会落到本次实际使用的那一代"
+        );
+    }
+    if args.snapshot_report {
+        println!("[batch-rerun] --snapshot-report：只报告代际与快照现状，本次不重跑。");
+        return Ok(());
+    }
     // ── 目标集合 ──
+    // `--only-stale`（IS NULL）与 `--template-version`（= N）同时给 ⇒ 恒空集。
+    // 不在这里硬报错，运维就会把「没有要重跑的」当成正常结果（假绿的一种形态）。
+    if args.only_stale && args.template_version.is_some() {
+        return Err(
+            "--only-stale 与 --template-version 不能同时给（前者要 IS NULL、后者要 = N ⇒ 恒空集）"
+                .to_string(),
+        );
+    }
     let mut q = stock_analyses::Entity::find();
     if args.only_stale {
         q = q.filter(stock_analyses::Column::TemplateVersion.is_null());
+    }
+    if let Some(n) = args.template_version {
+        q = q.filter(stock_analyses::Column::TemplateVersion.eq(n));
     }
     if !args.codes.is_empty() {
         q = q.filter(stock_analyses::Column::StockCode.is_in(args.codes.clone()));

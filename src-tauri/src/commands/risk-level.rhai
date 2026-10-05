@@ -19,6 +19,13 @@
 //   risk_gross_margin    ← ...grossMarginPct
 //   risk_debt_ratio      ← ...debtRatioPct
 //   risk_revenue_growth  ← ...revenueGrowthYoYPct
+//   ── v128 新增（B1 风险按档，仅 `cls-risk-level-{tier}` 四节点注入）──
+//   risk_drawdown_depth  ← t-risk.result.content.stockRiskProfile.riskWindows.<tier>.drawdownDepth
+//   risk_window_days     ← ...riskWindows.<tier>.windowDays
+//   全局节点 `cls-risk-level` **不注入**这两个 ⇒ 由 V57 防御自动补 unit ⇒ 两条新判据天然缺席
+//   （缺席不报错、也不拿 0 冒充「深度为 0」——见下方 has_depth 的用法）。
+//   ⚠ 本脚本的波动率/夏普/回撤/基本面四项**仍是 60 日全局口径**；按档的只有「回撤深度」一条轴。
+//     这条边界由输出的 `axisScope` 字段自证，前端声明（HorizonScopeNotice）必须与之一致。
 //
 // ⚠️ 类型契约（2026-09-20 对生产库实证，非推断）──
 //   `t-risk.output.result.content` 是**字符串**（JSON 文本）；`executors/mod.rs::resolve_var_path`
@@ -96,12 +103,9 @@ fn maybe(ok, v) {
     if ok { v } else { () }
 }
 
-// num_of: 取数值，缺失返回默认值（默认值仅用于判定，绝不进输出）
-fn num_of(x, dflt) {
-    if type_of(x) == "f64" { return x; }
-    if type_of(x) == "i64" || type_of(x) == "int" { return x.to_float(); }
-    dflt
-}
+// `num_of(x, dflt)` 由引擎侧注册（权威源 `crates/harness/src/rhai_engine.rs` 的
+// `register_common_functions`）—— 本文件原先自带一份同语义实现，2026-10-04 收编为一处，
+// 与 `trader-proxy.rhai` 共用同一个数值口径（整数注入落 i64 也算数，字符串不算）。
 
 fn join_arr(arr, sep) {
     let s = "";
@@ -175,6 +179,10 @@ let has_roe = present(risk_roe) && has(risk_roe);
 let has_gm = present(risk_gross_margin) && has(risk_gross_margin);
 let has_debt = present(risk_debt_ratio) && has(risk_debt_ratio);
 let has_growth = present(risk_revenue_growth) && has(risk_revenue_growth);
+// v128（B1）：本档窗口的「回撤深度」与本档窗口天数。两个都必须先过 present() ——
+// 全局节点根本不注入它们（V57 防御补 unit），漏一层就会整节点 `Variable not found`。
+let has_depth = present(risk_drawdown_depth) && has(risk_drawdown_depth);
+let has_window = present(risk_window_days) && has(risk_window_days);
 
 // 指标取值：缺失用哨兵（而非 0，避免"缺失"被当成"读数很低"参与判定）。
 // 哨兵**只参与判定**，绝不进输出 —— 输出一律经 maybe() 转 null。
@@ -185,6 +193,26 @@ let roe = num_of(risk_roe, 0.0);
 let gm = num_of(risk_gross_margin, 0.0);
 let debt = num_of(risk_debt_ratio, 0.0);
 let growth = num_of(risk_revenue_growth, 0.0);
+// v128（B1）：本档窗口的回撤深度与窗口天数。走 num_of 而非裸取值 ——
+// 嵌层整数注入落 i64，`clamp(i64, 0.0, …)` 在 Rhai 里是「函数不存在」⇒ 整脚本被 catch 降级。
+let depth = num_of(risk_drawdown_depth, -1.0);
+let window_days = num_of(risk_window_days, 0.0);
+
+// 「本档窗口内跌掉几个典型位移」的判定线 —— 只作为**加严**项参与高风险。
+//   分母口径（关键，错过一次）：`depth` 用的是**本窗口自己的** σ_w × √w
+//   （`compute_portfolio_risk` 内 `harness::indicators::realized_vol_pct` 逐窗算好透出），
+//   **不是** 60 日全局 σ。本批首版误用全局 σ 做分母，实测立刻打回原形：那样 2 日窗口的
+//   depth 历史最大值只有 1.49 ⇒ 任何 ≥1.5 的线在超短/短档**恒不命中**，
+//   「按档」又退化成放松 —— 与用绝对阈值判短窗是同一个错的另一种形态。
+//   推导（不是拍的）：原判据「回撤 >45% 算量化高风险」是写在 60 日窗口上的绝对值。
+//   真库 131 份实测（样本集与两条测量 SQL 见 `PLAN-four-horizon-workflow-alignment.md` §五十四 B1）：
+//     · 60 日窗口中位年化波动 57.4% ⇒ σ_daily ≈ 3.68%、σ_60 = σ_daily×√60 ≈ 28.5%
+//     · 于是 45% ≈ 1.58 × σ√60；同批（本窗口 σ 口径）depth 的 p90 在 2/5/28/60/90 日分别是
+//       1.62 / 1.38 / 1.42 / 1.50 / 1.49 —— 五个窗口的**尾部对齐在 ±0.12 内**
+//       （中位以下不对齐，而分级判据用的正是尾部；1.58 这条线各档的命中面约 6%–11%）。
+//   ⇒ 取 1.58 ＝「本窗口回撤落在自身 p90 之外」。窗口尺度已被分母约掉 ⇒ 四档共用同一条线，
+//     不需要为每一档另配一组参数（R-11：不搞「一套算法 + 四组参数」）。
+const DEEP_DISPLACEMENT_RATIO = 1.58;
 
 // 核心指标（波动率）缺失 ⇒ 无法做任何量化判定，直接兜底。
 // 兜底档取「高风险」（**保守档**，2026-09-20 裁决）—— 依据三条：
@@ -228,10 +256,18 @@ if !degraded {
 // ── 高风险（谨慎参与，小仓位）──
 if !degraded && level == "" {
     // 高风险-A：量化维度高风险 且 基本面至少一个风险点
-    let quant_high = (has_vol && vol > 40.0) || (has_sharpe && sharpe < 0.0) || (has_dd && dd > 45.0);
+    // v128（B1）第四臂 `depth > DEEP_DISPLACEMENT_RATIO`：本档窗口内的回撤深度超出自身 p90。
+    //   刻意只加在**或**侧（量化维度更容易算「高」），LOW / 极高 / 中风险各臂一字未动
+    //   ⇒ 任一档的结论只会 ≥ 旧的全局档，按档不会变成放松的通道
+    //     （与本仓「后置规则只单向降级 action」「反思只降不升」是同一条纪律）。
+    let quant_high = (has_vol && vol > 40.0) || (has_sharpe && sharpe < 0.0) || (has_dd && dd > 45.0)
+        || (has_depth && depth > DEEP_DISPLACEMENT_RATIO);
     let fundamental_risk = (has_roe && roe < 5.0) || (has_gm && gm < 10.0) || (has_debt && debt > 65.0);
     if quant_high && fundamental_risk {
-        matched_rules.push("HIGH-A: 量化高风险（波动率>40% 或 夏普<0 或 回撤>45%）且 基本面有风险点（ROE<5% 或 毛利率<10% 或 负债率>65%）");
+        let dd_arm = if has_depth && depth > DEEP_DISPLACEMENT_RATIO {
+            `本档窗口回撤深度 ${depth}/σ√h（> ${DEEP_DISPLACEMENT_RATIO}）`
+        } else { "回撤未超深度线" };
+        matched_rules.push(`HIGH-A: 量化高风险（波动率>40% 或 夏普<0 或 回撤>45% 或 ${dd_arm}）且 基本面有风险点（ROE<5% 或 毛利率<10% 或 负债率>65%）`);
         level = "高风险";
     }
     // 高风险-B：量化偏高 且 基本面无亮点
@@ -317,7 +353,19 @@ if degraded {
         "roe_ttm_pct": maybe(has_roe, roe),
         "gross_margin_pct": maybe(has_gm, gm),
         "debt_ratio_pct": maybe(has_debt, debt),
-        "revenue_growth_yoy_pct": maybe(has_growth, growth)
+        "revenue_growth_yoy_pct": maybe(has_growth, growth),
+        // v128（B1）：本档窗口的两个按档量。缺失 → null（全局节点没有它们）。
+        "drawdown_depth": maybe(has_depth, depth),
+        "window_days": maybe(has_window, window_days)
+    },
+    // 按档边界自证（B4「声明与事实一致」的机器读面）：四条轴里**只有回撤深度**按档，
+    // 其余三条是 60 日全局 / 财报口径。前端 `HorizonScopeNotice` 的 risk 声明必须与此同判据
+    // —— 写宽了就是伪装成「风险已全按档」，与真实数据不符。
+    "axisScope": #{
+        "volatility": "global60",
+        "sharpe": "global60",
+        "fundamentals": "latestReport",
+        "drawdownDepth": if has_depth { "tierWindow" } else { "absent" }
     },
     "warnings": warnings
 }

@@ -109,13 +109,22 @@ mod tests {
     ///
     /// 孤儿脚本（无 seed / 无 DB 节点，如 `bottleneck-calc.rhai`）同样纳入：
     /// 它们仍会被测试或手工路径加载，函数集必须同样完整。
-    const PRODUCTION_SCRIPTS: [(&str, &str); 17] = [
+    const PRODUCTION_SCRIPTS: [(&str, &str); 22] = [
         ("analyst-brief", include_str!("../analyst-brief.rhai")),
         ("bottleneck-calc", include_str!("../bottleneck-calc.rhai")),
         ("consistency-check", include_str!("../consistency-check.rhai")),
         ("data-quality", include_str!("../data-quality.rhai")),
         ("data-verifier", include_str!("../data-verifier.rhai")),
         ("pace-calc", include_str!("../pace-calc.rhai")),
+        // P4′-c（R-11 逐档分支）：四条分支脚本 + 仲裁节点也吃宿主函数
+        // （`pm_leg_signal` / `pm_vol_move_pct` / `pm_band_z` / `pm_kelly_position` /
+        //  `pm_kelly_growth`），注册面判据必须覆盖到它们 —— 本清单**漏一条脚本**，
+        // 那一条的「调了没注册的函数」就回到 V54 事故的原点（运行期才 Function not found）。
+        ("portfolio-mgr-arbiter", include_str!("../portfolio-mgr-arbiter.rhai")),
+        ("portfolio-mgr-h-long", include_str!("../portfolio-mgr-h-long.rhai")),
+        ("portfolio-mgr-h-mid", include_str!("../portfolio-mgr-h-mid.rhai")),
+        ("portfolio-mgr-h-short", include_str!("../portfolio-mgr-h-short.rhai")),
+        ("portfolio-mgr-h-ultra-short", include_str!("../portfolio-mgr-h-ultra-short.rhai")),
         ("portfolio-mgr", include_str!("../portfolio-mgr.rhai")),
         ("portfolio-risk-gate", include_str!("../portfolio-risk-gate.rhai")),
         ("raw-digest", include_str!("../raw-digest.rhai")),
@@ -709,14 +718,15 @@ mod tests {
         // 正对照：扫描器必须真的抽出闭包名，否则下面的空断言恒真。
         // 四个名字各有分工：
         // - `sl_pct_for`：单参 + 一体式 `switch`（本次缺陷本体）；
-        // - `horizon_price_of`：4 参 + 多行体（锁住多参形态）；
+        // - `horizon_const`：2 参 + 多行体（锁住多参形态）。原样本 `horizon_price_of` 随
+        //   v125「价位映射改投影」退役 ⇒ 判据不删、只换样本（否则多参这条覆盖面静默消失）；
         // - `sink`：定义在 `fn main()` **内部**（锁住「不只在顶层」）；
         // - `read_weight`：`strategy-scorer.rhai:57` 定义了却从未调用（锁住「定义即入集」）。
         let all: HashSet<String> = PRODUCTION_SCRIPTS
             .iter()
             .flat_map(|(_, src)| closure_var_names(&strip_comments_and_strings(src)))
             .collect();
-        for expect in ["sl_pct_for", "horizon_price_of", "sink", "read_weight"] {
+        for expect in ["sl_pct_for", "horizon_const", "sink", "read_weight"] {
             assert!(
                 all.contains(expect),
                 "闭包扫描没抽到 `{expect}`（实际抽出 {all:?}）—— 判据可能已失效，\
@@ -797,7 +807,11 @@ mod tests {
                 .map(|n| (*n).to_string()),
         );
         // 前提自证：抽取面必须真的张开（窗口或常量一旦失效，本门会退化成「什么都没扫到」）。
-        for probe in ["horizon_leg_weights_json", "valuation_dcf_upside", "action_buy_threshold"] {
+        // ⚠ 探针名要跟着注入面走：`horizon_leg_weights_json` 已随 R-11 退役（乘数语义 =
+        //   「一个算法四套参数」的藏身处，PLAN §十一-3），拿退役名当探针会让本门
+        //   在**映射真的被删掉时**恰好报「抽取失效」而看不出是接线被删。
+        //   现用 `h_ultra_short`（换心脏后的四路分支输出之一）当代替它承担那一格。
+        for probe in ["h_ultra_short", "valuation_dcf_upside", "action_buy_threshold"] {
             assert!(
                 names.contains(probe),
                 "注入面抽取失效：缺 `{probe}`（窗口/常量已漂移，实际 {names:?}）"
@@ -825,8 +839,11 @@ mod tests {
     /// ⚠ 2026-10-01 收紧（首版正是**在这一点上瞎了**）：初版把 `hooks.rs` 里所有
     ///   `Variable { name: "x" }` 也算作注入面 ⇒ 「hooks 注入了 `horizon_prior_json`、
     ///   但 portfolio-mgr 的 `input_mapping` **漏了同名映射**」这一格恰好落在门的盲区里：
-    ///   门替它补了 unit ⇒ 恒绿；而生产在 `portfolio-mgr.rhai:2853` 抛
+    ///   门替它补了 unit ⇒ 恒绿；而生产在 `portfolio-mgr.rhai` **当日 2853 行**抛
     ///   `Variable not found: horizon_prior_json`（实测 2026-10-01 09:37 的 live 运行）。
+    ///   ⚠ 该数字**只存于当日日志**：`horizon_prior_json` 的裸读已随 R-11 重做退役，
+    ///   按现行号去定位会指到空行（`check-single-source-facts` 正是这样抓到过它）——
+    ///   历史事故引用行号时，必须同时写明它是「当日行号」而不是「当前第 N 行」。
     ///   ⇒ **hooks 的 `name:` 字面量不能算来源**：它只证明「变量进了黑板的 variables」，
     ///   不证明「进了这个脚本的 scope」；后者由该节点的 `input_mapping` 单独决定。
     ///   （同一份「hooks 名字」改由下面 `every_injected_var_read_bare_has_a_mapping` 当**反例来源**用。）
@@ -840,12 +857,84 @@ mod tests {
         names
     }
 
+    /// 一路分支的**输出夹具**（形状 = `portfolio-mgr-h-*.rhai` 的返回段，逐键对齐）。
+    ///
+    /// 为什么在这儿造而不是读真节点输出：本门测的是**装配段 + 选档段**，输入就是
+    /// 「某路节点交上来的东西」。值本身不必与生产同（那些数由分支脚本与门
+    /// `branch_node_scope_is_exactly_the_seed_mapping` 各自钉），但**键集合必须真** ——
+    /// 装配段靠 `confidenceMethod` 自证字段判断「这是分支输出」，
+    /// 键名写错就会走「缺自证 ⇒ 按缺席处理」那条路，正是要被本门看见的形态。
+    ///
+    /// ⚠ 四档的 `confidence` / `positionPct` **刻意不同**（阶段2 选档判据需要可区分的输入）：
+    ///   long 置信最高但仓位 0、mid 置信次高且仓位 >0 ⇒ 「可执行优先」若被写反，
+    ///   选档会落到 long，本门的 `timeHorizon` 断言当场红。全给同一个数就等于没测。
+    fn branch_row_fixture(tier: &str, method: &str) -> serde_json::Value {
+        // 四档的置信 / 仓位 / 天数 / 价带**全部不同**：阶段2 的选档判据与阶段3′ 的
+        // 「主档数值取自所选档」都需要可区分的输入 —— 任何一项给成同一个数，对应那条
+        // 断言就退化成恒真（原夹具四档同天数同档位，就是这么漏掉「两数同屏」的）。
+        // ⚠ 天数一律**整数字面量**：分支表经生产注入落 Rhai i64（见 `spec_int` 的口径注），
+        //   夹具写 5.0 会既测不到 i64 通路，又让断言侧的 `as_i64()` 拿到 None。
+        let (conf, pos, action, days, sl, tp) = match tier {
+            "ultra_short" => (48.0_f64, 0.0_f64, "观望", 2_i64, 2.6_f64, 2.6_f64),
+            "short" => (55.0, 0.0, "观望", 5, 6.0, 12.0),
+            "mid" => (61.0, 12.0, "增持", 28, 4.0, 8.0),
+            "long" => (70.0, 0.0, "观望", 90, 15.5, 41.0),
+            _ => (52.0, 0.0, "观望", 5, 6.0, 12.0),
+        };
+        serde_json::json!({
+            "horizon": tier,
+            "action": action,
+            "verdict": format!("决策={action} 置信={conf}% 档={tier}"),
+            "positionPct": pos,
+            "confidence": conf,
+            "posterior": conf / 100.0,
+            "expectedHoldingDays": days,
+            "stopLossPct": sl,
+            "takeProfitPct": tp,
+            "odds": (tp / sl * 100.0).round() / 100.0,
+            "evidenceScale": 60.0,
+            "scoreSource": "tier_native",
+            "priorSource": "gate_hitrate",
+            "priorSamples": 12.0,
+            "stopSource": "vol_band",
+            "positionSource": "kelly_x_position_multiplier",
+            "confidenceMethod": method,
+            "exitRule": "time_stop+fixed_stop",
+            "entryGate": "none",
+            "entryGatePassed": true,
+            "legs": [],
+            "absentLegs": [],
+            "dataGaps": [],
+        })
+    }
+
     /// 按生产注入面造 scope 并执行 `portfolio-mgr.rhai`，返回脚本输出的 JSON。
     ///
     /// 「有估值证据」是本函数的**引爆条件**：`f5_weight > 0` 才会走进 f5 融合段 ——
     /// 2026-09-30 的生产事故正落在该段（裸引用 `time_horizon` ⇒ 运行期 `Variable not found`
     /// ⇒ 被文件末尾的 catch 整体兜成 `action="数据缺失"`）。估值腿两腿给值即可引爆。
     fn run_portfolio_mgr(script: &str) -> serde_json::Value {
+        run_portfolio_mgr_with(script, &[])
+    }
+
+    /// `absent` 列出**不注入**的分支档名（`ultra_short` / `short` / `mid` / `long`）。
+    /// 缺席不是「传 0」：装配段读到的必须是**没这个键**（生产里 = 该路节点失败或未接线 ⇒ unit），
+    /// 才能验已批口径 A（PLAN §四十一）——该档不出现，且 `data_gaps` 必须点名。
+    fn run_portfolio_mgr_with(script: &str, absent: &[&str]) -> serde_json::Value {
+        run_portfolio_mgr_fully(script, absent, &[])
+    }
+
+    /// `overrides` 把某些注入名从「unit（= 上游节点失败这一常态）」换成**具体值**。
+    ///
+    /// B1(v128) 用它喂四档风险档（`overall_risk_ultra_short` / `_short` / `_mid` / `_long`）：
+    /// 那四个键生产里是字符串档名，其余既有测试继续走 unit，两条通路互不影响。
+    /// ⚠ 覆盖名在补 unit 的循环里**显式跳过** —— 同名 push 两次要靠 Rhai「后入遮蔽」才对，
+    ///   而那是实现细节不是契约；本门不给自己造「scope 里两条都在」的模糊态。
+    fn run_portfolio_mgr_fully(
+        script: &str,
+        absent: &[&str],
+        overrides: &[(&str, serde_json::Value)],
+    ) -> serde_json::Value {
         let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
         let ast = engine
             .compile(script)
@@ -853,6 +942,9 @@ mod tests {
 
         let mut scope = rhai::Scope::new();
         for name in production_injection_names(script) {
+            if overrides.iter().any(|(k, _)| *k == name) {
+                continue;
+            }
             scope.push_constant(name, rhai::Dynamic::UNIT);
         }
         // 周期常量表：缺失会让脚本**按设计** throw（未知周期静默兜天数 = 错档入库）⇒ 必须给真表。
@@ -863,14 +955,23 @@ mod tests {
                 &axagent_harness::holding_period::Period::decision_consts_map(),
             ),
         );
-        // 逐档 × 逐腿乘数表：同样给真表 —— 短/超短档的「估值腿周期降权」（f5 = 0.3 / 0.5）
-        // 正是靠它承担（主链已不再手抄 0.30/0.50）。
-        scope.push_constant(
-            "horizon_leg_weights_json",
-            axagent_harness::json_value_to_dynamic(
-                &axagent_analysis_engine::evidence_weight::horizon_leg_multipliers(),
-            ),
-        );
+        // R-11 换心脏后的四路输入：装配段的**唯一**逐档来源。
+        // 退役掉的 `horizon_leg_weights_json`（乘数表）不再注入 —— 脚本侧若还有人读它，
+        // 会在这里以 `Variable not found` 红出来，而不是靠一张没人消费的表把它喂活。
+        for (key, tier, method) in [
+            ("h_ultra_short", "ultra_short", "no_cross_horizon_scaling"),
+            ("h_short", "short", "no_cross_horizon_scaling"),
+            ("h_mid", "mid", "inside_sigma_band"),
+            ("h_long", "long", "snr_free_target_and_falsified"),
+        ] {
+            if absent.contains(&tier) {
+                continue;
+            }
+            scope.push_constant(
+                key,
+                axagent_harness::json_value_to_dynamic(&branch_row_fixture(tier, method)),
+            );
+        }
         // 估值两腿有值 ⇒ f5_weight > 0 ⇒ 进入 f5 融合段（本次回归的引爆条件）。
         // 其余 input_mapping 键保持 unit = 「上游节点失败」这一生产常态。
         scope.push_constant("valuation_dcf_upside", -12.5_f64);
@@ -880,6 +981,10 @@ mod tests {
         // K3(2026-10-02)：三档增速全负标记。此处给 `false` = 「区间确实是保守—乐观带」，
         // 使本组既有测试的断言不被新变量改变（缺省留 unit 会让面板走另一条文案分支）。
         scope.push_constant("valuation_dcf_growth_band_all_negative", false);
+
+        for ov in overrides {
+            scope.push_constant(ov.0, axagent_harness::json_value_to_dynamic(&ov.1));
+        }
 
         let out: rhai::Dynamic = engine
             .eval_ast_with_scope(&mut scope, &ast)
@@ -901,14 +1006,17 @@ mod tests {
     /// | `code_executor` 的 V57 补 unit | 只覆盖 `present(x)` 里的名字，**裸引用不在判据面上** |
     /// | `portfolio_mgr_*_rhai.rs` 各门 | 只跑**抽出来的片段**，从不执行整脚本 |
     ///
-    /// ⇒ 本门是「整脚本真执行」这一格的第一道。断言分三层，缺一层就会假绿：
+    /// ⇒ 本门是「整脚本真执行」这一格的第一道。断言分四层，缺一层就会假绿：
     ///   ① **没降级**：`reasoning` 不含「执行异常」、`action != "数据缺失"`（catch 的指纹）；
-    ///   ② **四档真的产出**：`decisionsByHorizon` 四档齐备、逐档 `weightsSource == "table"`
-    ///      （否则「跑完了」可能只是「乘数表缺失退化成 fallback_unity」）；
-    ///   ③ **周期降权留痕**：短/超短档各写一条 `weightAdjustments` 条目（Phase 4 的声明面
-    ///      —— 走**口径调整**通道，**不是** `data_gaps`：那是「本该拿到的数据没拿到」，
-    ///      而本档主动降权没有任何数据缺失），且中/长档（权威乘数 1.2 / 2.0 = 上调）
-    ///      **不得**被写成「降权」；并反向锁「不得回流 data_gaps」（常驻误报的复发形态）。
+    ///   ② **四档真的来自四路分支**：`decisionsByHorizon` 四行齐备、逐行带分支自证
+    ///      （`confidenceMethod` 非空 + `horizon` 与档位键匹配）。
+    ///      退役前这一格断的是 `weightsSource == "table"`（乘数表生效）—— 乘数语义随 R-11 退役后
+    ///      换成读分支自己的口径，否则「跑完了」可能只是主链代算出四行。
+    ///   ③ **乘数通道必须整体不存在**：`weightAdjustments` 这个键不得出现在输出里
+    ///      （3b-α 恒空 → 3b-β 删字段），且反向锁「降权/乘数类文案不得回流 `data_gaps`」
+    ///      —— 那正是本仓为「常驻误报」付过代价的复发形态；
+    ///   ④ **已批口径 A**（PLAN §四十一）：抽掉一路输入 ⇒ `decisionsByHorizon` **少一个键**
+    ///      （不是补一行「无结论」、更不是退回闭包代算），且 `data_gaps` 必须点名那一路。
     /// 末尾附**负控**：把脚本改回「裸引用一个未定义名字」的形态，断言上面的判据真的会报红 ——
     /// 否则本门只是一组恒真断言（本仓对每道新门都要求这一步）。
     #[test]
@@ -943,55 +1051,294 @@ mod tests {
             "四档决策应齐备，实际键: {:?}",
             tiers.keys().collect::<Vec<_>>()
         );
+        // 每行必须是**分支节点交上来的东西**（自证键在），而不是主链代算出来的一行。
+        // 退役前的断言是 `weightsSource == "table"`（乘数表生效），那个字段随 `leg_mult` 一起没了 ⇒
+        // 换成读分支自己的口径自证：`confidenceMethod` 由 `horizon_branch_specs` 给，
+        // 装配段还额外用它判「接错节点」（缺自证字段 ⇒ 按缺席处理），所以这一断言同时锁两件事。
         for (k, v) in tiers {
+            assert!(
+                v["confidenceMethod"].as_str().is_some_and(|s| !s.is_empty()),
+                "{k} 行没有分支自证字段 confidenceMethod ⇒ 不是四路分支的输出（疑主链代算或接错节点）: {v}"
+            );
             assert_eq!(
-                v["weightsSource"],
-                serde_json::json!("table"),
-                "{k} 档的逐档乘数表未生效（weightsSource 应为 table）: {v}"
+                v["horizon"].as_str().unwrap_or_default(),
+                match k.as_str() {
+                    "ultraShort" => "ultra_short",
+                    other => other,
+                },
+                "{k} 行的 horizon 与档位键不匹配（装配段接错路）: {v}"
             );
         }
 
-        // ── ③ 估值腿周期降权必须留痕，且只在**真被下调**的档声明 ──
+        // ── ③ 乘数通道整体退役 ⇒ 输出里不得再出现 `weightAdjustments` 这个键 ──
+        // 判据翻过一次：3b-α 时它**恒空**（前端仍读该键，留空数组避免走进另一条渲染分支），
+        // 3b-β 连字段一起删除 ⇒ 现在要求「不存在」。留一个永不成立的键和留一个永不亮起的
+        // 面板分支是同一件事的两面 —— 都让读者以为那条通道还活着。
         let gaps: Vec<String> = out["data_gaps"]
             .as_array()
             .unwrap_or_else(|| panic!("data_gaps 应为数组: {}", out["data_gaps"]))
             .iter()
             .filter_map(|g| g.as_str().map(str::to_string))
             .collect();
-        // 权威乘数：f5(ultra_short)=0.3 / f5(short)=0.5 ⇒ 这两档必须各有一条降权条目。
-        // 条目是**结构化**的（tier/leg/multiplier），故断言直接比字段而**不是**比中文文案 ——
-        // 比文案等于把措辞当契约，改一个字就静默失配。
-        let adjustments = out["weightAdjustments"]
-            .as_array()
-            .unwrap_or_else(|| panic!("weightAdjustments 应为数组: {}", out["weightAdjustments"]));
-        for (tier, mult) in [("ultra_short", 0.3_f64), ("short", 0.5_f64)] {
-            let hit = adjustments.iter().any(|a| {
-                a["tier"] == serde_json::json!(tier)
-                    && a["leg"] == serde_json::json!("f5")
-                    && (a["multiplier"].as_f64().unwrap_or(f64::NAN) - mult).abs() < 1e-9
+        assert!(
+            out.get("weightAdjustments").is_none(),
+            "weightAdjustments 应随逐档乘数一起退役（前端类型 / 渲染 / 11 语言键同批删除），\
+             输出里不该再有这个键: {:?}",
+            out.get("weightAdjustments")
+        );
+        // 反向锁（常驻误报的复发形态，与退役前同一判据）：设计选择不得占用「数据缺口」通道。
+        assert!(
+            !gaps.iter().any(|g| g.contains("估值腿周期降权") || g.contains("乘数")),
+            "降权/乘数类文案又回到 data_gaps（该通道语义是「本该拿到的数据没拿到」）: {gaps:?}"
+        );
+
+        // ── ④ 已批口径 A（PLAN §四十一）：某一路没产出 ⇒ 该档**不出现在** decisionsByHorizon ──
+        // 三种「不允许的替代做法」都在这里被反向锁住：补一行无结论 / 退回闭包代算 / 用主链后验凑数。
+        //
+        // ⚠ 逐档**各剥一遍**（2026-10-05 补齐，任务 #14 的覆盖面缺口）：首版只剥 mid 一路，
+        //   若某一路在装配段被特殊对待（例如超短的 days/position 走另一支、或某档的缺席
+        //   没有进 data_gaps），单路样本永远看不见 —— 「只测一路」等于另外三路没有门。
+        // ⚠ 三个名字族各有拼写，用错一族就恒真：`absent` 参数按 **snake**（夹具 `tier` 用它），
+        //   `decisionsByHorizon` 的键按 **camel**（装配段 `decisions_by_horizon[b.camel]`，
+        //   :3026 明文「前端按 camelCase 键分组」），而 data_gaps 的文案用**中文档名**
+        //   （`cn_tier` 闭包 :2988）。`ultra_short` 是唯一 snake≠camel 的那一族 ⇒ 首版正是它会被漏掉。
+        for (snake, camel, cn) in [
+            ("ultra_short", "ultraShort", "超短线"),
+            ("short", "short", "短线"),
+            ("mid", "mid", "中线"),
+            ("long", "long", "长线"),
+        ] {
+            let one_missing = run_portfolio_mgr_with(src, &[snake]);
+            let tiers2 = one_missing["decisionsByHorizon"].as_object().unwrap_or_else(|| {
+                panic!(
+                    "{snake} 缺席时 decisionsByHorizon 应为 map，实际: {}",
+                    one_missing["decisionsByHorizon"]
+                )
             });
+            assert_eq!(
+                tiers2.len(),
+                3,
+                "{snake} 少注入一路却仍有四行 ⇒ 装配段在代算，缺席被伪装成结论: {:?}",
+                tiers2.keys().collect::<Vec<_>>()
+            );
             assert!(
-                hit,
-                "估值腿周期降权未留痕（tier={tier} / leg=f5 / 乘数={mult}）\
-                 ⇒ 短档面板读不出该腿已被降权。weightAdjustments={adjustments:?}"
+                !tiers2.contains_key(camel),
+                "{camel} 缺席档仍以空行/占位行出现（口径 A 要求不出键）: {:?}",
+                tiers2.keys().collect::<Vec<_>>()
+            );
+            let gaps2: Vec<String> = one_missing["data_gaps"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|g| g.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            assert!(
+                gaps2.iter().any(|g| g.contains(&format!("{cn}分支未产出"))),
+                "{snake} 的缺席必须在 data_gaps 点名（结构性缺口不得在呈现层造成歧义），实际 {gaps2:?}"
             );
         }
-        // 反向 ①：中/长档的乘数 > 1（上调）⇒ 不得被写成「降权」，否则是把「加权」说成「减权」。
-        assert!(
-            !adjustments.iter().any(|a| {
-                a["tier"] == serde_json::json!("mid") || a["tier"] == serde_json::json!("long")
-            }),
-            "中/长档（权威乘数 1.2 / 2.0 = 上调，不是降权）被写进了降权条目: {adjustments:?}"
+
+        // ── ⑤ 阶段2（Q1=C）：主档由四档结论选出，且**可执行优先于置信最大** ──
+        // 夹具里 long 置信最高（70）但仓位 0、mid 次高（61）且仓位 12 ⇒ 正确产物是 mid。
+        // 判据写反（只按 confidence 取最大）就会落到 long，本断言当场红 —— 这就是夹具
+        // 四档数值刻意不同的理由。
+        assert_eq!(
+            out["horizonSource"].as_str(),
+            Some("branch_pick"),
+            "四路都在场时主档来源必须是 branch_pick（不再是后验阈值映射），实际: {}",
+            out["horizonSource"]
         );
-        // 反向 ②：口径调整**不得**回流 `data_gaps`。
-        //   两个通道的语义不同：`data_gaps` = 「本该拿到的数据没拿到」，而本档主动降权是
-        //   **设计选择**（一个字节的数据都没缺）。回流后的实证形态是**常驻误报**：f5 的
-        //   0.3/0.5 是常量 ⇒ 凡带估值数据的分析恒推 2 条 ⇒ UI 恒亮「决策可信度受限 /
-        //   数据缺口 2 项」，`PE数据(t-risk)` 这类真缺口被淹没；且公式侧恒多两条 LLM 侧
-        //   不可能产出的串，把双视角 data_gaps 一致性（Jaccard）系统性压低。
+        assert_eq!(
+            out["timeHorizon"].as_str(),
+            Some("mid"),
+            "选档没体现「可执行优先」（夹具里只有 mid 仓位 >0）: {}",
+            out["timeHorizon"]
+        );
+        assert_eq!(
+            out["action"].as_str(),
+            Some("增持"),
+            "主 action 必须取自所选档（夹具里 mid 是「增持」）；落回主链阶梯或被判风控改档都要在这里暴露: {}",
+            out["action"]
+        );
+        // 抽掉所选那一档 ⇒ 必须换档而不是消失（防止「主档指向一行根本不在面板里的输出」）。
+        // 夹具里撤掉 mid 后已无可执行档 ⇒ 按判据②取剩余置信最大的 long（70）。
+        let pick_gone = run_portfolio_mgr_with(src, &["mid"]);
+        assert_eq!(
+            pick_gone["timeHorizon"].as_str(),
+            Some("long"),
+            "撤掉被选中的 mid 后应改选剩余最强档（long 置信 70），实得 {}",
+            pick_gone["timeHorizon"]
+        );
+        assert_eq!(
+            pick_gone["horizonSource"].as_str(),
+            Some("branch_pick"),
+            "换档后来源仍须是 branch_pick，实得 {}",
+            pick_gone["horizonSource"]
+        );
+
+        // ──  阶段2 兜底通路：四路全缺席 ⇒ 退回阈值定档，但**必须自报兜底身份** ──
+        // 未重播种的存量库正是这个形态。允许兜底（否则历史记录一次性失效），
+        // 不允许的是「兜底冒充正常路径」—— 所以来源值与 data_gaps 两条都要锁。
+        let no_branch = run_portfolio_mgr_with(src, &["ultra_short", "short", "mid", "long"]);
+        assert_eq!(
+            no_branch["horizonSource"].as_str(),
+            Some("formula_no_branch"),
+            "四路全缺席时必须标 formula_no_branch，不得静默冒充 branch_pick: {}",
+            no_branch["horizonSource"]
+        );
         assert!(
-            !gaps.iter().any(|g| g.contains("估值腿周期降权")),
-            "设计性降权又回到了 data_gaps（常驻误报形态复发）: data_gaps={gaps:?}"
+            no_branch["decisionsByHorizon"].as_object().is_some_and(|m| m.is_empty()),
+            "四路全缺席却仍产出逐档行 ⇒ 主链在代算: {}",
+            no_branch["decisionsByHorizon"]
+        );
+        let gaps3: Vec<String> = no_branch["data_gaps"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|g| g.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            gaps3.iter().filter(|g| g.contains("分支未产出")).count(),
+            4,
+            "四路缺席必须逐档各点一条（合并成一条就看不出缺哪几路），实际 {gaps3:?}"
+        );
+
+        // ── ⑦ 阶段3′（批准 ①）：主档的**数值**也必须取自所选档，不得由主链重算 ──
+        // 夹具里 mid 行是 仓位 12 / 止损 4 / 止盈 8 / 天数 28 / stopSource=vol_band，
+        // 而主链日线口径在同一输入下给的是**另一组数**（mid 兜底档位 8/18、stopSource 只会是
+        // `vol` 或 `fallback_pct`）⇒ 下面每一条都在「改回主链公式」时必红。
+        // 这一族断言的存在理由就是用户本轮的抱怨：档是分支选的、数却是主链算的，同屏两个口径。
+        let mid_row = &out["decisionsByHorizon"]["mid"];
+        assert!(!mid_row.is_null(), "主档选中 mid，但 decisionsByHorizon 里没有 mid 行");
+        let row_pos = mid_row["positionPct"].as_f64().unwrap_or(-1.0);
+        let main_pos = out["positionPct"].as_f64().unwrap_or(-1.0);
+        // 只锁**方向**（只降不升），不锁非零：主档在选出之后还要过若干同样只做减法的封顶
+        // （证据不足 ⇒ 空仓、风险等级上限、试探仓），本门的合成输入正命中其中一条 ⇒ 主档 0
+        // 是合法产物。「主档确实拿到过分支那个数」由 `positionSource` 那条断言负责，
+        // 「非零仓位在真数据下成立」由阶段 5 的实机重放核对负责 —— 各锁各的层次。
+        assert!(
+            main_pos <= row_pos,
+            "主档仓位只能被**往下**封顶（分支 {row_pos}，主档 {main_pos}）⇒ 出现抬升就是两处口径互相加成"
+        );
+        assert_eq!(
+            out["expectedHoldingDays"].as_i64(),
+            mid_row["expectedHoldingDays"].as_i64(),
+            "主档持有天数与所选档不符（两套算法又同屏）: 主档 {} vs 行内 {}",
+            out["expectedHoldingDays"],
+            mid_row["expectedHoldingDays"]
+        );
+        // 出场三件（止损 / 止盈 / 来历标签）与**空仓不变式**绑定：主档被风险预算封成 0 仓位时，
+        // 档位必须归零、标签退回主链 —— 那时它本来就没有采用分支的数，硬要求相等反而是假锁。
+        if main_pos > 0.0 {
+            assert_eq!(
+                out["stopLossPct"].as_f64(),
+                mid_row["stopLossPct"].as_f64(),
+                "主档止损% 与所选档不符: 主档 {} vs 行内 {}",
+                out["stopLossPct"],
+                mid_row["stopLossPct"]
+            );
+            assert_eq!(
+                out["takeProfitPct"].as_f64(),
+                mid_row["takeProfitPct"].as_f64(),
+                "主档止盈% 与所选档不符: 主档 {} vs 行内 {}",
+                out["takeProfitPct"],
+                mid_row["takeProfitPct"]
+            );
+            assert_eq!(
+                out["stopSource"].as_str(),
+                mid_row["stopSource"].as_str(),
+                "主档止损的来历必须是被采用那条算法**自己**的标签（退回主链标签就是在冒充）"
+            );
+        } else {
+            assert_eq!(
+                out["stopLossPct"].as_f64(),
+                Some(0.0),
+                "空仓主档却带非零止损 ⇒ 把「不下注」伪装成「等执行」: {}",
+                out["stopLossPct"]
+            );
+        }
+        let psrc = out["positionSource"].as_str().unwrap_or_default();
+        assert!(
+            psrc == "branch_position" || psrc == "branch_position_capped",
+            "选中了分支档却标注主链仓位来源 ⇒ 「谁定的数」再次不可反解: {psrc}"
+        );
+        // ── ′ 主档 action / confidence 的来历（§五十三 ①，v127）──
+        //   000710 实测的形态：档是超短线选的、分支给的是「买入」，主档却是「持有」，
+        //   唯一解释在 reasoning 的中文句子里 ⇒ 展示层要成句、反思要按档统计都不能靠解析文本。
+        //   本段把「标签与实际路径必须自洽」钉住：标签说直取，action 就必须等于该档 action。
+        const ACTION_SOURCES: [&str; 7] = [
+            "branch_pick",
+            "risk_veto_downgrade",
+            "bearish_veto_downgrade",
+            "sim_veto_downgrade",
+            "sanity_cap_downgrade",
+            "partial_low_confidence_cap",
+            "main_chain",
+        ];
+        let asrc = out["actionSource"].as_str().unwrap_or_default();
+        assert!(
+            ACTION_SOURCES.contains(&asrc),
+            "actionSource 缺失或落在值域外 ⇒ 主档 action 的来历又不可反解: {:?}",
+            out["actionSource"]
+        );
+        let main_act = out["action"].as_str().unwrap_or_default();
+        let row_act = mid_row["action"].as_str().unwrap_or_default();
+        if asrc == "branch_pick" {
+            assert_eq!(
+                main_act, row_act,
+                "actionSource 说「直取所选档」，action 却不等于该档 action ⇒ 标签在说谎"
+            );
+        }
+        assert_ne!(asrc, "main_chain", "本门四路输入齐备（branch_picked 必真），却标成主链定档");
+        let csrc = out["confidenceSource"].as_str().unwrap_or_default();
+        assert!(
+            csrc == "branch_row" || csrc == "main_chain_posterior",
+            "confidenceSource 缺失或值域外 ⇒ 同屏两个置信度又无从分辨: {:?}",
+            out["confidenceSource"]
+        );
+        if csrc == "branch_row" {
+            let row_conf = mid_row["confidence"].as_f64().unwrap_or(-1.0);
+            let main_conf = out["confidence"].as_f64().unwrap_or(-1.0);
+            assert!(
+                main_conf <= row_conf + f64::EPSILON,
+                "主档置信度**高于**所选档自己报的数 ⇒ 「同源 + 只降不升」被绕过: 主 {main_conf} vs 档 {row_conf}"
+            );
+        }
+        // 价位映射 = 逐档行的**投影**：任何字段不相等都说明它又自己算了一遍。
+        let price_mid = &out["horizonPriceMap"]["mid"];
+        assert_eq!(
+            price_mid["stopLossPct"].as_f64(),
+            mid_row["stopLossPct"].as_f64(),
+            "horizonPriceMap 与 decisionsByHorizon 不同源 ⇒ 同一档两个价位（R-11 判废的形状）"
+        );
+        assert_eq!(
+            price_mid["stopLoss"].as_f64(),
+            mid_row["stopLoss"].as_f64(),
+            "绝对止损价不同源（投影被改成了重算）"
+        );
+        assert_eq!(
+            price_mid["expectedHoldingDays"].as_i64(),
+            mid_row["expectedHoldingDays"].as_i64(),
+            "持有天数不同源"
+        );
+        assert!(
+            out["horizonPriceMap"].get("short").is_some(),
+            "在场档（short 节点有输出）却没进价位映射 ⇒ 投影的缺席判据用错了对象"
+        );
+        // 键拼写：映射必须与它投影的 `decisionsByHorizon` 同族（camelCase）。
+        // 这条锁的是本轮顺手修掉的既有缺陷 —— 旧映射出 snake 键，而展示层按 camel 读、
+        // 透传只做类型断言不转键 ⇒ 四键里只有 `ultraShort` 拼写错开（其余三档两族同名），
+        // 表现为「超短档价位行从来不显示」，而库里数据是齐的（000710 现网行四键都在）。
+        assert!(
+            out["horizonPriceMap"].get("ultraShort").is_some(),
+            "价位映射没出 camel 键 ⇒ 超短档那一行会在展示层静默丢失: {}",
+            out["horizonPriceMap"]
+        );
+        assert!(
+            out["horizonPriceMap"].get("ultra_short").is_none(),
+            "价位映射又出 snake 键（与 decisionsByHorizon 不同族，历史形态）"
+        );
+        // 口径 A 的延伸：四路全缺席 ⇒ 价位映射也必须**空**（不得由主链代算四档价位）。
+        assert!(
+            no_branch["horizonPriceMap"].as_object().is_some_and(|m| m.is_empty()),
+            "四路缺席却仍有价位映射条目 ⇒ 主链在代算逐档价位: {}",
+            no_branch["horizonPriceMap"]
         );
 
         // ── 负控：判据必须能报出「生产事故形态」──
@@ -1090,7 +1437,9 @@ mod tests {
     /// 两者的分工正是 2026-10-01 那次事故暴露的：Phase C（v102）只加了
     /// 「hooks 注入 `horizon_prior_json` + 脚本 `prior_for` 裸读」，**漏了本节点映射** ——
     /// 该缺陷被同一文件更早的崩溃（line 844 前向引用）遮住，直到 v112 修掉前者才在
-    /// line 2853 爆出来（实测那一轮 live 运行）。注入面三个点（hooks 注入 / 节点映射 /
+    /// **当日 line 2853** 爆出来（实测那一轮 live 运行；该变量的裸读已随 R-11 重做退役，
+    /// 两个数字都只是「当时第几行」，不可按现行号解析 —— 见 `production_injection_names` 的同类注）。
+    /// 注入面三个点（hooks 注入 / 节点映射 /
     /// 脚本消费）少任何一个，症状都是同一条「数据缺失」，看不出缺的是哪一环。
     ///
     /// 判据口径（三处都靠源码文本派生，避免手抄清单漂移）：候选面 = hooks/seed-mod 的
@@ -1138,13 +1487,220 @@ mod tests {
              ⇒ 运行期 `Variable not found` 并被 catch 兜成「数据缺失」: {bad:?}"
         );
 
-        // ── 负控：把刚补上的那行映射摘掉 ⇒ 判据必须报出 `horizon_prior_json`（事故的真实形态）──
-        let mutated = seed.replace(r#"("horizon_prior_json", "horizon_prior_json"),"#, "");
+        // ── 负控：摘掉一行**主脚本真读**的映射 ⇒ 判据必须报出那个名字 ──
+        // 首版这里用 `horizon_prior_json`（v113 事故的那个键）。3b 之后逐档先验表改由四路
+        // 分支节点自己映射，主链不再读它 ⇒ 摘掉主链那行映射不再产生「裸读无映射」，
+        // 负控当场失效（实测：`实际 []`）。换一个仍然三条件齐备的名字（hooks 注入 +
+        // 主脚本裸读 + 本节点同名映射，且该行在 seed 里唯一，replace 不会误伤别处）。
+        let mutated = seed.replace(r#"("horizon_consts_json", "horizon_consts_json"),"#, "");
         assert_ne!(mutated, seed, "负控变异点未命中 —— 映射行已改名，须同步本测试");
         let bad2 = bare_injected_reads(script, &mutated, &elsewhere);
         assert!(
-            bad2.contains(&"horizon_prior_json".to_string()),
-            "负控失效：摘掉 `horizon_prior_json` 的映射后判据没报出来，实际 {bad2:?}"
+            bad2.contains(&"horizon_consts_json".to_string()),
+            "负控失效：摘掉 `horizon_consts_json` 的映射后判据没报出来，实际 {bad2:?}"
         );
+    }
+
+    /// pace-calc：LLM 手写 JSON 里的**整数置信度**必须当数读，不得塌成 0.5 兜底。
+    ///
+    /// 缺陷形态（`PLAN-four-horizon-workflow-alignment.md` §五十二 ②，已批）：
+    /// `llm_events` = `a-catalyst.content`，是**模型手写的 JSON**，置信度写成整数（`85` / `1`）
+    /// 是常态；脚本侧 `json_parse` 走 `json_value_to_dynamic`（`as_i64` 优先）⇒ 它是 i64，
+    /// 而原判据 `type_of(..) == "f64"` 恒假、紧跟的 `== "int"` 在 64-bit 构建下也恒假 ⇒
+    /// 落 `0.5` 兜底 —— 把「模型给了 85%」呈现成「50% 中性」，属用近似值顶替而非显式缺席。
+    ///
+    /// 三次同输入对照，缺任何一个都区分不出「桥没桥」：
+    ///   ① `85`（i64）与 ② `85.0`（f64）必须**逐维相等** —— 型别不该改变结论；
+    ///   ③ 不给 `confidence`（真缺席）必须与 ① **不相等** —— 这条就是负控：一旦有人把桥改回
+    ///      f64 单型判据，① 立刻塌成 ③，本断言当场红（不需要另外变异源文件）。
+    ///
+    /// 夹具不手抄注入清单：`present(x)` 面从脚本自己派生，映射键则逐条对 seed 断言存在
+    /// （改名即红，同 `production_injection_names` 那条「手抄清单会静默失效」的教训）。
+    #[test]
+    fn pace_calc_integer_confidence_is_not_read_as_absent() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "pace-calc")
+            .expect("脚本清单缺 pace-calc")
+            .1;
+        let seed = include_str!("../stock_analysis_setup/seed_stock_analysis.rs");
+        let mut names = present_guard_names(src);
+        for key in [
+            "announcement_events",
+            "money_flow_net",
+            "money_flow_history",
+            "sector_etf_direction",
+            "p_history",
+            "llm_events",
+        ] {
+            assert!(
+                seed.contains(&format!("(\"{key}\",")),
+                "pace-calc 节点的映射键 `{key}` 在 seed 里已改名/搬走 ⇒ 本测试的注入面须同步"
+            );
+            names.insert(key.to_string());
+        }
+
+        let run = |content: &str| -> serde_json::Value {
+            let engine = build_stock_rhai_engine(RhaiSandboxLimits::PORTFOLIO);
+            let ast = engine
+                .compile(src)
+                .unwrap_or_else(|e| panic!("pace-calc.rhai 编译失败（生产同配置）: {e}"));
+            let mut scope = rhai::Scope::new();
+            for name in &names {
+                scope.push_constant(name.as_str(), rhai::Dynamic::UNIT);
+            }
+            // 生产形态：input_mapping 给的是 {role, content} 包装对象（V69 实证过的那条）。
+            scope.push_constant(
+                "llm_events",
+                axagent_harness::json_value_to_dynamic(&serde_json::json!({
+                    "role": "a-catalyst",
+                    "content": content,
+                })),
+            );
+            let out: rhai::Dynamic = engine
+                .eval_ast_with_scope(&mut scope, &ast)
+                .unwrap_or_else(|e| panic!("pace-calc.rhai 执行失败: {e}"));
+            axagent_harness::dynamic_to_json_value(&out)
+        };
+
+        let with_conf = |conf: &str| {
+            format!(
+                r#"{{"report":"催化剂评估","verdict":{{"catalyst_level":"L2政策利好","confidence":{conf},"verdict":"看多"}}}}"#
+            )
+        };
+        let as_int = run(&with_conf("85"));
+        let as_float = run(&with_conf("85.0"));
+        let absent = run(
+            r#"{"report":"催化剂评估","verdict":{"catalyst_level":"L2政策利好","verdict":"看多"}}"#,
+        );
+
+        // 前提自证：夹具真的引爆了事件路径，否则下面比的是两个 0。
+        assert!(
+            as_int["valid_events"].as_i64().unwrap_or(0) >= 1,
+            "夹具未产出有效事件（valid_events={:?}）⇒ 三维对照不具区分力",
+            as_int["valid_events"]
+        );
+        for dim in ["P", "A", "C", "E"] {
+            assert_eq!(
+                as_int["pace_vector"][dim], as_float["pace_vector"][dim],
+                "同一置信度写成 `85` 与 `85.0` 竟得出不同的 {dim} 维 ⇒ 有一种型别被判成了缺席"
+            );
+        }
+        assert_ne!(
+            as_int["pace_vector"]["C"], absent["pace_vector"]["C"],
+            "负控命中：整数 `85` 的结果与「根本不给置信度」一致 ⇒ `num_of` 桥失效，整数置信度又被读成 0.5"
+        );
+    }
+
+    /// v128（B1）：主链**否决**按所选档收紧，且 ① 只升不降 ② 增量必须可归因。
+    ///
+    /// 四段一组，缺任一段都能假绿（v129 把 v128 的「只有否决按档」扩成整条主链按档）：
+    ///   A 基线（四格与全局节点档全 unit）⇒ 不得出现 R-211 ——
+    ///     `risk_rank(unit)` 的默认档是 1（中风险），不加 `present()` 守卫就会把「没接到」
+    ///     读成「该档是中风险」，在低风险标的上凭空抬一档（放大器）。
+    ///   B 归因基准缺失（只给本档格、不给全局节点档）⇒ **必须不加严、不留痕**：
+    ///     两套规则体系（主链 V54 算法 vs prompt 规则）之间没有可归因的差值，
+    ///     拿它们直接比就是我这条更正要挡的形态。
+    ///   C 同体系内更严（本档 > 全局节点档）⇒ 必须留痕 R-211，且否决入参确实换了（源码锁）。
+    ///   D 更松（本档 ≤ 全局节点档）⇒ action 与基线**逐字相同**且无 R-211 ——
+    ///     这是「按档不能成为放松通道」唯一的检出点。
+    #[test]
+    fn v129_tier_risk_scopes_the_whole_main_chain_one_way_only() {
+        let src = PRODUCTION_SCRIPTS
+            .iter()
+            .find(|(l, _)| *l == "portfolio-mgr")
+            .expect("脚本清单缺 portfolio-mgr")
+            .1;
+
+        let trail_ids = |out: &serde_json::Value| -> Vec<String> {
+            // ⚠ 键名是 **snake** `decision_trail`（产出点 `portfolio-mgr.rhai:3291`，
+            //   catch 兜底那份 :3441 也是同名）。首版按 camel 读 `decisionTrail` ⇒ 每次都是空数组：
+            //   三条「不该留痕」的断言**恒真**，只有「必须留痕」那条会红 —— 而这正是本测试
+            //   自己必须非空的意义：它同时是另外三条负控的**读面自证**。
+            out["decision_trail"]
+                .as_array()
+                .map(|a| {
+                    a.iter().filter_map(|e| e["rule_id"].as_str().map(str::to_string)).collect()
+                })
+                .unwrap_or_default()
+        };
+        let has = |out: &serde_json::Value, id: &str| trail_ids(out).iter().any(|x| x == id);
+
+        let baseline = run_portfolio_mgr_fully(src, &[], &[]);
+        // B：只有本档格，没有同体系基准
+        let no_baseline = run_portfolio_mgr_fully(
+            src,
+            &[],
+            &[("overall_risk_mid", serde_json::json!("极高风险"))],
+        );
+        // C：本档 > 全局节点档（差值只可能来自深度臂）
+        let strict = run_portfolio_mgr_fully(
+            src,
+            &[],
+            &[
+                ("overall_risk_llm", serde_json::json!("中风险")),
+                ("overall_risk_mid", serde_json::json!("极高风险")),
+            ],
+        );
+        // D：同体系内不比全局更严 ⇒ 即便比主链自算档更严也不加严
+        let same_as_global = run_portfolio_mgr_fully(
+            src,
+            &[],
+            &[
+                ("overall_risk_llm", serde_json::json!("极高风险")),
+                ("overall_risk_mid", serde_json::json!("极高风险")),
+            ],
+        );
+        // E：本档更松
+        let mild = run_portfolio_mgr_fully(
+            src,
+            &[],
+            &[
+                ("overall_risk_llm", serde_json::json!("中风险")),
+                ("overall_risk_mid", serde_json::json!("低风险")),
+            ],
+        );
+
+        for (name, out) in [
+            ("A 基线（全缺席）", &baseline),
+            ("B 缺同体系基准", &no_baseline),
+            ("D 本档与全局同档", &same_as_global),
+            ("E 本档更松", &mild),
+        ] {
+            assert!(!has(out, "R-211"), "{name} 不该加严却留了 R-211: {:?}", trail_ids(out));
+        }
+        assert_eq!(
+            baseline["action"], mild["action"],
+            "所选档更松时结论必须逐字不变 —— 按档不是放松风险的通道"
+        );
+        assert!(
+            has(&strict, "R-211"),
+            "同体系内本档更严必须留痕（R-211）: {:?}",
+            trail_ids(&strict)
+        );
+
+        // 行为面（仅当基线 action 落在极高风险否决的处理档时可观测）
+        let base_action = baseline["action"].as_str().unwrap_or_default();
+        if matches!(base_action, "买入" | "增持" | "持有") {
+            assert_ne!(
+                strict["action"], baseline["action"],
+                "基线 action={base_action} 属极高风险否决的处理档，却未被降级 ⇒ `pm_risk_veto` 仍在读全局档"
+            );
+        }
+
+        // 源码锁（v129 翻向）：否决实参回到 `overall_risk`，而**按档发生在 `overall_risk` 自己身上**
+        // —— v128 那两条断言（必须传 `risk_for_veto`、不得传 `overall_risk`）在本版逐条反过来，
+        // 保留旧写法就是给「只有否决一处按档」的形态背书。
+        assert_eq!(
+            src.matches("pm_risk_veto(final_action, overall_risk)").count(),
+            1,
+            "portfolio-mgr.rhai 应恰有一处 `pm_risk_veto(final_action, overall_risk)`"
+        );
+        // ⚠ 另两条同判据的锁（`risk_for_veto` 不得复活 / 按档值必须落进 `overall_risk` 本体）
+        //   **不在这里查**：本文件拿不到 `code_only()`，不剥注释就 contains 必然假红
+        //   （首轮实测就红在退役注释上 —— 提到退役变量名是合法散文）。
+        //   代码域那两条住在
+        //   `seed_consistency_tests::main_chain_risk_grade_is_tier_scoped_in_code_domain`
+        //   —— 门的存放位置由可用基础设施决定，判据只有一位主人。
     }
 }

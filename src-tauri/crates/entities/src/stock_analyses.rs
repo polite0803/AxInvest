@@ -57,22 +57,29 @@ pub struct Model {
     pub as_of_date: Option<String>,
     /// 时间维度: "ultra_short" | "short" | "mid" | "long"
     pub decision_time_horizon: Option<String>,
-    /// `decision_time_horizon` 的**来源**（〇-B v2）：
-    /// `"formula"` = 由 `portfolio-mgr.rhai` 的确定性后验阈值映射定档（v2 唯一产出路径）；
+    /// `decision_time_horizon` 的**来源**（值域权威 = `harness::holding_period::HORIZON_SOURCES`）：
+    /// `"branch_pick"` = 由四路逐档分支的结论选出（v124 起的主路径：可执行优先 → 置信最大）；
+    /// `"formula_no_branch"` = 四路全缺席时退回后验阈值映射 —— 它与上一条**必须**分得开：
+    ///   这一档不是按各档结论定的，只是「有档可落」；
+    /// `"formula"` = v2~v123 期间「确定性后验阈值映射」定档（该通路已退居兜底，存量记录仍有效）；
     /// `"model"`   = v2 之前「采信 trader 自报」的历史记录；
     /// `"user"`    = v1 曾在入口提供的「用户锁档」形态（该通路已撤除，无生产数据）。
     ///
-    /// 为什么必须与周期本身分列存放：同一个值 `short` 可能来自公式、也可能来自模型自报，
-    /// 两者的可复核性完全不同 —— 只有 `formula` 的记录才能被「重跑必同档」验证；
-    /// 合并成一列则该判据不存在，反思与设置面板也无从区分。
+    /// 为什么必须与周期本身分列存放：同一个值 `short` 可能来自分支结论、公式兜底，也可能来自
+    /// 模型自报，三者的可复核性完全不同 —— 只有公式与分支那几条才谈得上「重跑必同档」，
+    /// 模型自报那条永远不成立；合并成一列则该判据不存在，反思与设置面板也无从区分。
+    ///
+    /// ⚠ 新旧值域混在同一条列上 ⇒ 按**代**筛样（IC / 命中率 / 错题本跨代比较）尚未收口，
+    ///   见 `PLAN-four-horizon-workflow-alignment.md` §四十九。
+    ///
+    /// `NULL` 语义 = 本列引入前的记录，来源未知（同 `template_version` 的约定，
+    /// **不得**按 `"formula"` 解释）。
     ///
     /// `NULL` 语义 = 本列引入前的记录，来源未知（同 `template_version` 的约定，
     /// **不得**按 `"formula"` 解释）。
     pub decision_horizon_source: Option<String>,
     /// 期望持有天数（交易日）
     pub decision_expected_holding_days: Option<i64>,
-    /// 决策所用 LLM 的版本标识（用于复现实验）
-    pub model_version: Option<String>,
     /// 生成该决策时的**工作流模板版本**（取 `workflow_templates.version` 的当时值）。
     ///
     /// 为什么必须落库：模板版本是**决策公式的合法代理** —— `portfolio-mgr.rhai` 等
@@ -104,8 +111,6 @@ pub struct Model {
     /// 确证为快速链的历史记录（判据 `blackboard_snapshot::jsonb ? 'j-winner'`）
     /// 由一次性 SQL 手工回填，不进版本化迁移。
     pub template_id: Option<String>,
-    /// 关联到 L2 disk-cache 的快照 ID
-    pub data_snapshot_id: Option<String>,
     /// 决策校验结果：pending / win / loss
     #[sea_orm(indexed)]
     pub outcome: Option<String>,

@@ -60,7 +60,11 @@ fn json_to_dynamic(value: &serde_json::Value) -> rhai::Dynamic {
 }
 
 /// Convert a Rhai Dynamic back to serde_json::Value.
-fn dynamic_to_json(value: rhai::Dynamic) -> serde_json::Value {
+///
+/// 2026-10-03 提为 `pub`：`pm_leg_signal`（wiring 层 `stock_workflow/rhai_pm.rs`）要把
+/// 脚本传入的 Rhai map 交给 `analysis-engine::leg_signal` 的 serde 口径实现。
+/// 提公开而不是在 wiring 层再写一份转换 —— 同一份类型转换有两处实现迟早漂移（禁区 12）。
+pub fn dynamic_to_json(value: rhai::Dynamic) -> serde_json::Value {
     if value.is::<rhai::Map>() {
         let map = value.cast::<rhai::Map>();
         let mut obj = serde_json::Map::new();

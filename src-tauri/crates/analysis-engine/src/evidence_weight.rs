@@ -37,23 +37,50 @@ pub const CONSENSUS_CONFIDENCE_DIVIDED_SCALE: f64 = 50.0;
 /// 分歧时置信度上限
 pub const CONSENSUS_CONFIDENCE_DIVIDED_MAX: f64 = 60.0;
 
-/// 分析师 ID 列表（用于权重映射）
-pub const ANALYST_IDS: &[&str] = &[
+/// **产出证据的分析师节点 id —— 全仓唯一权威清单。**
+///
+/// 为什么需要它（2026-10-03 实测）：本仓一度并存**三套**分析师 id 写法 ——
+/// 逐档权重表用 `a-market`/`a-technical`/`capital`/`macro`/`fundamental`/`sentiment`、
+/// 腿桥表用 `a-technical`/`capital`、`stock_workflow/decision.rs` 的 `expert_mapping` 用
+/// 专家 id（`market-analyst` …），而运行时 `reports` 的键是**图里的节点 id**。
+/// 逐档权重是 `horizon_weights.get(analyst_id)` **精确查表、无兜底** ⇒ 表里那些
+/// 不存在的名字一律静默退 1.0：技术面与研报两档最要紧的权重差从未生效，
+/// 而 `classify_role` 有 `contains` 后缀兜底，域分类看着正常，反而把查表落空盖住了。
+///
+/// 判据 = 「seed 里真有这样的 Agent 节点，且其输出进黑版 `report.*`」
+/// （键形态来自 `crates/analysis-engine/src/blackboard.rs` 的
+/// `id.starts_with("a-") => format!("report.{id}")`；`value-investor`/`research-mgr`
+/// 两个证据方节点无 `a-` 前缀）。
+///
+/// ⚠ **不含 `a-macro`** —— 图里没有宏观分析师节点（宏观进决策流 = PLAN 的 P9-2，未做）。
+/// 留着一个「有权重、无证据来源」的键，正是本清单要消灭的形态。
+pub const EVIDENCE_ANALYST_IDS: &[&str] = &[
+    "a-market-analyst",
     "a-fundamentals",
-    "fundamental",
     "value-investor",
-    "a-macro",
-    "macro",
-    "a-sector",
+    "a-research",
     "research-mgr",
-    "a-market",
-    "a-technical",
-    "a-sentiment",
-    "sentiment",
     "a-news",
+    "a-catalyst",
+    "a-sentiment",
     "a-hot-money",
-    "capital",
+    "a-lockup",
+    "a-sector",
+    "a-policy",
 ];
+
+/// 历史名，内容等价于 [`EVIDENCE_ANALYST_IDS`]；新代码请用后者。
+pub const ANALYST_IDS: &[&str] = EVIDENCE_ANALYST_IDS;
+
+/// 把黑版报告键归一成裸节点 id（`report.a-fundamentals` → `a-fundamentals`）。
+///
+/// 权重表、腿桥表、前端表都按裸节点 id 索引；只有黑版键带 `report.` 前缀
+/// （见 `crates/analysis-engine/src/blackboard.rs` 的 `report.{id}` 规则）。
+/// 归一放在查表入口这一处，而不是让每个消费端各自 `replace`（历史上
+/// `HistoricalAnalysisPanel` 就是自己 replace 了一次，别处全忘）。
+fn analyst_key(id: &str) -> &str {
+    id.strip_prefix("report.").unwrap_or(id)
+}
 
 /// 分析师**角色**分类（**不是**能力域 `CapabilityDomain`）——基本面/宏观/技术面/情绪/裁决，
 /// 是投资域内部的分工粒度，不可复用为通用能力轴。划界见 `PLAN-domain-single-source.md` §5。
@@ -73,16 +100,25 @@ pub enum AnalystRole {
 }
 
 fn classify_role(analyst_id: &str) -> AnalystRole {
+    // B2-1 接线：先剥档位后缀再分类。裸 base id 与 `value-investor` / `research-mgr`
+    // 这类无分隔符的名目会原样通过（`analyst_base_of` 对它们返回 `None`），所以今天的行为
+    // 逐字不变；等带档分析师节点（`a-sentiment--mid`）出现后，这里不会静默落到后缀推断。
+    let analyst_id =
+        axagent_harness::holding_period::analyst_base_of(analyst_id).unwrap_or(analyst_id);
     match analyst_id {
-        "fundamental" | "a-fundamentals" | "value-investor" => AnalystRole::Fundamental,
-        "macro" | "a-macro" | "a-sector" => AnalystRole::Macro,
-        "a-market" | "a-technical" => AnalystRole::Technical,
-        "sentiment" | "a-sentiment" | "a-news" | "a-hot-money" | "capital" => {
+        "a-fundamentals" | "value-investor" => AnalystRole::Fundamental,
+        "a-sector" | "a-policy" => AnalystRole::Macro,
+        "a-market-analyst" => AnalystRole::Technical,
+        "a-sentiment" | "a-news" | "a-hot-money" | "a-lockup" | "a-catalyst" => {
             AnalystRole::Sentiment
         },
-        "research-mgr" => AnalystRole::Research,
+        "research-mgr" | "a-research" => AnalystRole::Research,
         _ => {
-            // 按关键词后缀推断
+            // 未登记名：仍按关键词后缀推断（保持既有分类结果），但**必须留声** ——
+            // 静默兜底正是「权重表里的幽灵 id」能活这么久的原因之一。
+            tracing::warn!(
+                "[evidence_weight] 分析师 '{analyst_id}' 不在 EVIDENCE_ANALYST_IDS 里，按后缀推断角色（新增分析师请同时登记该清单）"
+            );
             if analyst_id.contains("fundamental") || analyst_id.contains("value") {
                 AnalystRole::Fundamental
             } else if analyst_id.contains("macro") || analyst_id.contains("sector") {
@@ -247,72 +283,70 @@ pub struct EvidenceWeightReport {
 /// ⚠ 四档必须**逐档显式**：`mid` 曾靠 `_` 兜底命中，
 /// 新增档位或脏值都会静默套用中线权重（〇-B G4「退化即声明」）。
 fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
+    // ⚠ 键必须是 [`EVIDENCE_ANALYST_IDS`] 里的**节点 id**。历史上这里写的是
+    //   `a-market`/`a-technical`/`capital`/`macro`/`fundamental`/`sentiment` —— 图中无此节点，
+    //   精确查表恒落空 ⇒ 技术面与研报的档间权重从未生效（静默 1.0）。
+    // ⚠ 值为 1.0 的条目是**显式声明「本档不偏置该证据」**，不是「没想过」：
+    //   `a-catalyst`/`a-lockup`/`a-policy`/`a-research` 历史上压根不在表里，
+    //   本次统一 id 时不替它们编造档间差异（要出数值，等 P6/P7 由命中率反推）。
     let mut w = HashMap::new();
     match horizon {
         "ultra_short" => {
             w.insert("a-hot-money", 2.0);
-            w.insert("capital", 2.0);
             w.insert("a-sentiment", 1.5);
-            w.insert("sentiment", 1.5);
             w.insert("a-news", 1.5);
-            w.insert("a-market", 1.3);
-            w.insert("a-technical", 1.3);
+            w.insert("a-market-analyst", 1.3);
             w.insert("research-mgr", 0.5);
-            w.insert("a-fundamentals", 0.3);
-            w.insert("fundamental", 0.3);
-            w.insert("value-investor", 0.3);
-            w.insert("a-macro", 0.3);
-            w.insert("macro", 0.3);
             w.insert("a-sector", 0.5);
+            w.insert("a-fundamentals", 0.3);
+            w.insert("value-investor", 0.3);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
         },
         "short" => {
-            w.insert("a-market", 1.5);
-            w.insert("a-technical", 1.5);
+            w.insert("a-market-analyst", 1.5);
             w.insert("a-hot-money", 1.5);
-            w.insert("capital", 1.5);
             w.insert("a-sentiment", 1.3);
-            w.insert("sentiment", 1.3);
             w.insert("a-news", 1.2);
-            w.insert("value-investor", 0.5);
             w.insert("a-fundamentals", 0.6);
-            w.insert("fundamental", 0.6);
-            w.insert("a-macro", 0.7);
-            w.insert("macro", 0.7);
+            w.insert("value-investor", 0.5);
             w.insert("a-sector", 0.8);
             w.insert("research-mgr", 1.0);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
         },
-        "long" => {
-            w.insert("fundamental", 1.5);
-            w.insert("a-fundamentals", 1.5);
-            w.insert("value-investor", 2.0);
-            w.insert("a-macro", 1.3);
-            w.insert("macro", 1.3);
-            w.insert("a-sector", 1.2);
-            w.insert("research-mgr", 1.5);
-            w.insert("a-news", 0.7);
-            w.insert("sentiment", 0.7);
-            w.insert("a-sentiment", 0.7);
-            w.insert("a-hot-money", 0.5);
-            w.insert("capital", 0.5);
-            w.insert("a-technical", 0.6);
-            w.insert("a-market", 0.6);
-        },
-        // 中线：四档中唯一接近「不加权」的基准档，显式列出不靠 `_` 兜底
+        // 中线：四档中唯一接近「不加权」的基准档，仍逐条显式列出不靠 `_` 兜底
         "mid" => {
             w.insert("a-fundamentals", 1.2);
-            w.insert("fundamental", 1.2);
             w.insert("value-investor", 1.2);
-            w.insert("a-macro", 1.1);
-            w.insert("macro", 1.1);
             w.insert("a-sector", 1.1);
             w.insert("research-mgr", 1.1);
-            w.insert("a-market", 1.0);
-            w.insert("a-technical", 1.0);
+            w.insert("a-market-analyst", 1.0);
             w.insert("a-sentiment", 1.0);
-            w.insert("sentiment", 1.0);
             w.insert("a-news", 1.0);
             w.insert("a-hot-money", 0.9);
-            w.insert("capital", 0.9);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
+        },
+        "long" => {
+            w.insert("value-investor", 2.0);
+            w.insert("a-fundamentals", 1.5);
+            w.insert("research-mgr", 1.5);
+            w.insert("a-sector", 1.2);
+            w.insert("a-market-analyst", 0.6);
+            w.insert("a-news", 0.7);
+            w.insert("a-sentiment", 0.7);
+            w.insert("a-hot-money", 0.5);
+            w.insert("a-catalyst", 1.0);
+            w.insert("a-lockup", 1.0);
+            w.insert("a-policy", 1.0);
+            w.insert("a-research", 1.0);
         },
         // 未知周期：按中线基准，但**必须留可检痕迹**（日志/面板可区分声明与兜底）
         _ => {
@@ -325,57 +359,241 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
 
 /// 决策腿（`portfolio-mgr.rhai` 的 f1~f13）→ 分析师 id 的**唯一桥表**。
 ///
-/// 为什么必须有它（四周期科学化 Phase A）：「同一批证据、逐档重新加权」要求把
-/// 按**分析师 id** 索引的周期权重表，作用到按**因子腿**融合的决策脚本上；两侧没有
-/// 登记的桥就会各写一套倍数 ⇒ 又回到手抄多副本。
+/// **它现在的用途（2026-10-04 R-11 之后）**：登记表，不是投影表。原先它被
+/// `horizon_leg_multipliers()` 用来把「按分析师索引的周期权重」乘到「按因子腿融合的
+/// 决策脚本」上 —— 那张乘数表连同投影一起删除了（「同一批腿 × 四个标量」正是 R-11 判为
+/// 构造性错误的那个形态）。留下来的这份属主映射仍然承重，因为它锁的是两条与算法无关的
+/// 结构不变量：① 每条参与融合的腿必须有**唯一**的证据域属主（否则同一域被计两次方向，
+/// 见下面 f3/f10 两处实证错位）；② 桥到的分析师 ∪ 显式登记「无腿」的分析师 = 权威清单
+/// （`scripts/check-horizon-weight-parity.mjs` 判据 ⑦⑧ + 本文件的同名闭合测试）。
 ///
 /// `None` 的腿**不是分析师证据**（风险分类、数据质量、trader 观点都是元约束），
-/// 逐档乘数恒 1.0 —— 不得为了「看起来四档有差异」硬塞一个分析师进去。
+/// 不得为了「看起来四档有差异」硬塞一个分析师进去。
+///
+/// **归因口径（2026-10-03 逐腿核对 `seed_stock_analysis.rs` 的 portfolio-mgr
+/// `input_mapping` 后订正）**：腿的信号多数由**算法/工具节点**产出（`t-scoring`、
+/// `t-valuation`、`t-lockup-data`、`pace-calc`、`serenity_context`），LLM 分析师并不
+/// 直接产出该变量。因此桥按**证据域唯一属主**归因 —— 该域在 12 个分析师里有且仅有一个
+/// 职责相符的属主时桥到它（否则逐档权重无从作用），无属主 ⇒ `None`。
+/// id 统一后这些归因**会真的改变乘数**：此前两侧 id 对不上 ⇒ 全表恒 1.0、写错也无人察觉，
+/// 所以订正不是洁癖而是行为变更的前提。两处实证错位：
+/// - `f3` 的变量是 `catalyst_level`，路径 `a-catalyst.content.verdict.catalyst_level`
+///   ⇒ 属主 `a-catalyst`（催化剂与叙事完整度），原写 `a-news`（消息面评估，另一节点）。
+/// - `f10` 的变量是 `lockup_bundle`，来自 `t-lockup-data`（解禁 + 增减持 + 大宗 + 股东户数）
+///   ⇒ 属主 `a-lockup`（解禁减持与质押风险排查），原写 `a-hot-money`（那是 `f9` 的
+///   `money_flow` 域）⇒ 旧形态把资金流权重同时套在两条腿上，等于给同一域计了两次方向。
 pub const DECISION_LEG_ANALYST: &[(&str, Option<&str>)] = &[
-    ("f1", Some("a-technical")),    // 技术面 / 趋势
-    ("f2", Some("research-mgr")),   // 分析师共识
-    ("f3", Some("a-news")),         // 催化剂 / 公告
-    ("f4", None),                   // 风险分类（元约束）
-    ("f5", Some("value-investor")), // 估值（DCF / 格雷厄姆腿）
-    ("f6", None),                   // 数据质量（元约束）
-    ("f7", None),                   // trader 观点（不属于四档分析师证据）
-    ("f9", Some("capital")),        // 资金流
-    ("f10", Some("a-hot-money")),   // 筹码面（增减持 / 解禁 / 大宗）
-    ("f11", Some("a-sentiment")),   // PACE 情绪
-    ("f12", Some("a-technical")),   // 动量（技术侧）
-    ("f13", Some("a-sector")),      // 产业链瓶颈
+    ("f1", Some("a-market-analyst")), // 技术面 / 趋势（历史上写 `a-technical`，图里无此节点）
+    ("f2", Some("research-mgr")),     // 共识裁决域属主（变量本身出自 debate-convergence）
+    ("f3", Some("a-catalyst")),       // 催化剂等级（原误写 a-news）
+    ("f4", None),                     // 风险分类（元约束）
+    ("f5", Some("value-investor")),   // 估值（DCF / 格雷厄姆 / PE 分位腿）
+    ("f6", None),                     // 数据质量（元约束）
+    ("f7", None),                     // trader 观点（不属于四档分析师证据）
+    ("f9", Some("a-hot-money")),      // 资金流 `get_stock_money_flow`（历史上写 `capital`）
+    ("f10", Some("a-lockup")),        // 筹码面（原误归 a-hot-money）
+    ("f11", Some("a-sentiment")),     // PACE 情绪
+    ("f12", Some("a-market-analyst")), // 动量（技术侧）
+    ("f13", Some("a-sector")),        // 产业链瓶颈（serenity 合成分，行业/链域唯一属主）
 ];
 
-/// 注入 Rhai 的「逐档 × 逐腿」乘数表：`{ultra_short: {f1: 1.3, …}, …}`。
+/// **当前没有决策腿**的分析师 —— 显式登记，不许由「桥表里查不到」静默表达。
 ///
-/// 数值**全部派生**自 [`get_horizon_base_weights`]，本函数不新增任何一个数字；
-/// 表里查不到该分析师 ⇒ 乘数 1.0（该腿不变）并 `warn`，不静默。
-/// 由 `stock_workflow/hooks.rs` 注入为变量 `horizon_leg_weights_json`，
-/// 脚本侧**禁止**再手抄任何一档的权重倍数（同 `horizon_consts_json` 的纪律）。
-pub fn horizon_leg_multipliers() -> serde_json::Value {
+/// 与 [`DECISION_LEG_ANALYST`] 的并集必须等于 [`EVIDENCE_ANALYST_IDS`]（测试
+/// `bridged_plus_unbridged_covers_every_analyst` 锁闭合）。存在理由：id 统一后逐档权重
+/// 真的会作用到桥上 ⇒「不在桥上」= 该分析师的证据对贝叶斯融合**零影响**，这是结论而不是缺省。
+/// 每一项都写明它的路在何处，或为什么刻意不做：
+/// - `a-fundamentals`（PE/PB/ROE 财务质量）：P4′ 九因子中的 `earningsQuality` 承载
+///   （见 `harness::holding_period::Period::verdict_spec`），本档之后才有腿。
+/// - `a-research`（券商研报观点汇总）：P4′ 的 `expectationRevision`。
+/// - `a-policy`（宏观政策影响）：P4′ 的 `macroRegime`（其数据侧已由 P9-1 五条真序列供上）。
+/// - `a-news`（新闻公告影响评估）：**刻意无腿** —— 公告证据的方向通道已由 `a-catalyst`
+///   的 `f3` 承载（两节点读同一份 `t-catalyst-data`，见 `portfolio-mgr.rhai` 的
+///   f3/f11 协方差衰减注释：同域双桥就是重复计数）。
+pub const UNBRIDGED_ANALYST_IDS: &[&str] = &["a-fundamentals", "a-research", "a-policy", "a-news"];
+
+/// 因子 → 数值来源通道（P4′ 子图的 `input_mapping` 必须满足这张表的声明）。
+///
+/// 三种语义，**不是**「模型想不想给」而是「数字从哪儿拿」：
+/// - `tierScore`：该档**自己的**评分节点（`t-scoring-hour|week|month|quarter`）——
+///   这是 R-11「逐档取该档数据」的正解，跨档共用一份评分正是被退役的形态；
+/// - `sharedTool`：与持有尺度无关的确定性工具输出（涨停池 / 估值带 / 一致预期 / 宏观快照 /
+///   解禁包 / 行业排名），四档共用同一次取数，但**只有该档参与该因子时**才进融合；
+/// - `verdict`：只有 LLM 分析师能给的判断（资金持续性、催化剂等级），由 P3′ 注入的逐档契约
+///   要求该分析师必须输出该字段。
+///
+/// `microstructure`（封单额 / 炸板次数）与 `breadthState`（家数 / 封板率）都指到
+/// `get_limit_up_pool` —— 同一份响应的**两组不同字段**，不是一个因子的两次计数（域属主也不同：
+/// 封单是资金行为、家数是情绪状态）。
+pub const VERDICT_FACTOR_SOURCES: &[(&str, &str, &str)] = &[
+    ("momentumSignal", "tierScore", "macd"),
+    ("trendStrength", "tierScore", "totalScore"),
+    ("microstructure", "sharedTool", "get_limit_up_pool"),
+    ("breadthState", "sharedTool", "get_limit_up_pool"),
+    ("flowPersistence", "verdict", ""),
+    ("eventCatalyst", "verdict", ""),
+    ("valuationBand", "sharedTool", "t-valuation-band"),
+    ("earningsQuality", "sharedTool", "t-valuation"),
+    ("expectationRevision", "sharedTool", "get_consensus_eps"),
+    ("macroRegime", "sharedTool", "macro_data_snapshot"),
+    ("supplyShock", "sharedTool", "t-lockup-data"),
+    ("sectorRotation", "sharedTool", "get_industry_ranking"),
+];
+
+/// 波动带统计窗口（交易日）。**唯一权威在这里**：
+///
+/// 主链 `src/commands/portfolio-mgr.rhai` 里有一份同名的脚本内常量（`let VOL_LOOKBACK_DAYS = 20;`），
+/// 两份数字必须永远相等 —— 由 `seed_consistency_tests::main_chain_vol_lookback_matches_injected_const`
+/// 逐字比对钉住（本仓的教训：两处一致地不同，比一处缺失更难发现）。
+pub const VOL_LOOKBACK_DAYS: i64 = 20;
+
+/// 该档分支的置信推导口径名（P4′-b 的四份决策脚本各自实现其一）。
+///
+/// 四档不同**不是**为了看起来不同：每一档的「怎么算赢」由它的出场口径决定，
+/// 置信与出场必须同族，否则胜率与止损来自两套假设。
+/// - `edge_no_time_scaling`：2 日窗内不做跨期缩放（√h 类变换在持有期短于噪声半衰期时无意义）；
+/// - `dual_confirmation`：趋势与资金持续性**同号**才允许加仓（联合门，不是加权平均）；
+/// - `sigma_band_position`：价格在 k·σ 带内的位置决定置信与出场（波动带法）；
+/// - `margin_of_safety`：估值带 / 安全边际定置信，出场为「到达目标 或 论点被证伪」。
+fn confidence_method(p: Period) -> &'static str {
+    match p {
+        Period::UltraShort => "edge_no_time_scaling",
+        Period::Short => "dual_confirmation",
+        Period::Mid => "sigma_band_position",
+        Period::Long => "margin_of_safety",
+    }
+}
+
+/// 该档的**入场必要条件门**（不是权重，是「不满足就不许出买入」的结构门）。
+fn entry_gate(p: Period) -> &'static str {
+    match p {
+        // 超短：情绪广度（涨停家数 / 封板率）不达标时，个股形态再好也不给出买入。
+        Period::UltraShort => "breadth_required",
+        // 短：趋势与资金同向；中：σ 带内才允许建仓；长：必须有正的安全边际。
+        Period::Short => "trend_and_flow_same_sign",
+        Period::Mid => "inside_sigma_band",
+        Period::Long => "positive_margin_of_safety",
+    }
+}
+
+/// 注入 Rhai 的**逐档分支表**：`{ultra_short: {legs:[…], analysts:[…], …}, …}`。
+///
+/// 与已删除的乘数表（`leg_mult` / 「同一批腿 × 四个标量」）的区别就是 R-11 的区别：
+/// 本表是「每档**自己的腿集合**、每腿自己的角色与来源」。数值仍然全部派生自
+/// [`get_horizon_base_weights`]（腿间配比 = 该档分析师偏置在**本档方向腿**上的归一化），
+/// 本函数不新增任何一个数 —— 手抄第二份权重就是 §二十四 那批缺陷的成因。
+///
+/// 腿的 `role`：`direction`（进方向加权）/ `filter`（只作入场时机过滤）/
+/// `riskNote`（只作风险提示）/ `partial`（有信息但来源不全覆盖，不进方向）。
+/// **非 `direction` 的腿权重恒为 0.0**，并带 `constraint` 说明凭什么打折 —— 否则
+/// 「它参与了」与「它只是被看了看」在面板上长得一样。
+pub fn horizon_branch_specs() -> serde_json::Value {
     let mut tiers = serde_json::Map::new();
     for p in Period::ALL {
-        let weights = get_horizon_base_weights(p.as_str());
-        let mut legs = serde_json::Map::new();
-        for (leg, analyst) in DECISION_LEG_ANALYST {
-            let mult = match analyst {
-                Some(id) => match weights.get(*id) {
-                    Some(v) => *v,
-                    None => {
-                        tracing::warn!(
-                            "[evidence_weight] 周期权重表缺分析师 '{id}'（腿 {leg}，档 {}）⇒ 该腿乘数按 1.0",
-                            p.as_str()
-                        );
-                        1.0
-                    },
-                },
-                None => 1.0,
+        let spec = p.verdict_spec();
+        let bias = get_horizon_base_weights(p.as_str());
+        let constraint_of = |f: &str| -> Option<&'static str> {
+            spec.qualified.iter().find(|(qf, _)| *qf == f).map(|(_, k)| *k)
+        };
+
+        // 本档的腿 = 进方向加权的因子 ∪ 只作过滤/提示/部分来源的条件因子（后者 role 非 direction）
+        let direction = spec.participating.clone();
+        let filtered_only: Vec<&'static str> =
+            spec.qualified.iter().map(|(qf, _)| *qf).filter(|qf| !direction.contains(qf)).collect();
+
+        let mut legs: Vec<serde_json::Value> = Vec::new();
+        for (f, is_direction) in direction
+            .iter()
+            .copied()
+            .map(|f| (f, true))
+            .chain(filtered_only.into_iter().map(|f| (f, false)))
+        {
+            let owner = Period::factor_owner(f);
+            let source = VERDICT_FACTOR_SOURCES.iter().find(|(cf, _, _)| *cf == f);
+            let (Some(owner), Some((_, kind, channel))) = (owner, source) else {
+                tracing::warn!(
+                    "[evidence_weight] 分支表：因子 {f} 缺属主或缺来源登记 ⇒ 该腿不进融合（档 {}）",
+                    p.as_str()
+                );
+                continue;
             };
-            legs.insert((*leg).to_string(), serde_json::Value::from(mult));
+            let b = match bias.get(owner) {
+                Some(v) => *v,
+                None => {
+                    tracing::warn!(
+                        "[evidence_weight] 档 {} 权重表缺分析师 '{owner}'（因子 {f}）⇒ 配比按 1.0",
+                        p.as_str()
+                    );
+                    1.0
+                },
+            };
+            let constraint = constraint_of(f);
+            legs.push(serde_json::json!({
+                "factor": f,
+                "owner": owner,
+                "role": if is_direction {
+                    "direction"
+                } else {
+                    role_of_marker(constraint.unwrap_or(""))
+                },
+                "bias": b,
+                "weight": b,
+                "source": { "kind": kind, "channel": channel },
+                "constraint": constraint,
+            }));
         }
-        tiers.insert(p.as_str().to_string(), serde_json::Value::Object(legs));
+
+        // 腿间配比只归一化**方向腿**；其余腿权重置 0（角色已在 role 里声明）
+        let sum: f64 = legs
+            .iter()
+            .filter(|l| l["role"] == "direction")
+            .filter_map(|l| l["weight"].as_f64())
+            .sum();
+        if sum <= 0.0 {
+            tracing::warn!(
+                "[evidence_weight] 档 {} 方向腿配比合计为 0 ⇒ 该档分支不出结论（不得静默退等权）",
+                p.as_str()
+            );
+        }
+        let direction_sum_ok = sum > 0.0;
+
+        for l in legs.iter_mut() {
+            if l["role"] == "direction" && direction_sum_ok {
+                let w = l["weight"].as_f64().unwrap_or(0.0) / sum;
+                l["weight"] = serde_json::Value::from((w * 1e6).round() / 1e6);
+            } else if l["role"] != "direction" {
+                l["weight"] = serde_json::Value::from(0.0);
+            }
+        }
+
+        tiers.insert(
+            p.as_str().to_string(),
+            serde_json::json!({
+                "tier": p.as_str(),
+                "days": p.default_holding_days(),
+                "volLookbackDays": crate::evidence_weight::VOL_LOOKBACK_DAYS,
+                "positionMultiplier": p.position_multiplier(),
+                "exitRule": spec.exit_rule,
+                "confidenceMethod": confidence_method(p),
+                "entryGate": entry_gate(p),
+                // 方向腿配比合计为 0 时置真：脚本必须据此**不出结论**（点名的退化），
+                // 而不是退成等权 —— 等权就是拿简化填架构缺口。
+                "degraded": !direction_sum_ok,
+                "analysts": p.analyst_subset(),
+                "legs": legs,
+            }),
+        );
     }
     serde_json::Value::Object(tiers)
+}
+
+/// 标记键 → 腿角色（`qualified` 里「只作过滤 / 只作风险提示」与「来源不全」的三分）。
+fn role_of_marker(key: &str) -> &'static str {
+    match key {
+        "trendFilterOnly" => "filter",
+        "supplyAsRiskNoteOnly" => "riskNote",
+        _ => "partial",
+    }
 }
 
 /// 计算市场周期调节系数
@@ -714,11 +932,20 @@ pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeigh
         .analysts
         .iter()
         .map(|analyst| {
-            let domain = classify_role(&analyst.analyst_id);
+            let domain = classify_role(analyst_key(&analyst.analyst_id));
 
-            // 时间维度基础权重
-            let horizon_w =
-                horizon_weights.get(analyst.analyst_id.as_str()).copied().unwrap_or(1.0);
+            // 时间维度基础权重 —— 先剥黑版前缀再查。
+            // `reports` 的键是 `report.{节点 id}`（blackboard.rs 的键规则），而权重表按**裸节点 id**
+            // 索引 ⇒ 不剥就是每个分析师都查不到、全员静默退 1.0（本次实测的主缺陷）。
+            let bare_id = analyst_key(&analyst.analyst_id);
+            let found = horizon_weights.contains_key(bare_id);
+            let horizon_w = horizon_weights.get(bare_id).copied().unwrap_or(1.0);
+            if !found {
+                tracing::warn!(
+                    "[evidence_weight] 分析师 '{bare_id}' 在 {} 权重表里没有条目 ⇒ 按 1.0 计（该档未声明对它的偏置）",
+                    request.time_horizon
+                );
+            }
 
             // 市场周期调节
             let regime_m = regime_modifiers.get(&domain).copied().unwrap_or(1.0);
@@ -859,6 +1086,214 @@ pub fn compute_evidence_weights(request: EvidenceWeightRequest) -> EvidenceWeigh
 
 #[cfg(test)]
 mod tests {
+
+    /// 统一 id 的三条不变量（2026-10-03，A 落地）：
+    /// ① 表键 ⊆ 权威清单（不许再有幽灵 id —— 历史上 `a-technical`/`capital`/`macro`
+    ///    /`fundamental`/`sentiment`/`a-market` 都不在图里，精确查表恒落空却静默 1.0）；
+    /// ② 权威清单每个 id 在**每一档**都有条目（缺条目=该档没声明过偏置，必须显式 1.0）；
+    /// ③ 腿桥表引用的分析师 id 也在权威清单里。
+    #[test]
+    fn horizon_weight_table_is_closed_over_real_analyst_nodes() {
+        for p in ["ultra_short", "short", "mid", "long"] {
+            let w = get_horizon_base_weights(p);
+            for id in w.keys() {
+                assert!(
+                    EVIDENCE_ANALYST_IDS.contains(id),
+                    "{p} 档权重表里有非分析师节点的键 {id}（幽灵 id 会静默退 1.0）"
+                );
+            }
+            for id in EVIDENCE_ANALYST_IDS {
+                assert!(
+                    w.contains_key(*id),
+                    "{p} 档权重表缺 {id} 的显式条目（要嘛给数值，要嘛显式 1.0）"
+                );
+            }
+            assert_eq!(w.len(), EVIDENCE_ANALYST_IDS.len(), "{p} 档键数与权威清单不符");
+        }
+        for (_leg, analyst) in DECISION_LEG_ANALYST {
+            if let Some(id) = analyst {
+                assert!(
+                    EVIDENCE_ANALYST_IDS.contains(id),
+                    "腿 {0:?} 桥到的分析师 '{id}' 不在权威清单里",
+                    _leg
+                );
+            }
+        }
+    }
+
+    /// 闭合不变量：**有腿 ∪ 无腿 = 权威清单**，且两边不重叠、无腿项不重复。
+    ///
+    /// 存在理由：id 统一后「不在桥表里」= 该分析师的证据不进贝叶斯融合，这必须是**声明**
+    /// 而不是查表落空的结果。少了这道闭合，新增分析师时最容易复现的缺陷就是
+    /// 「权重表补了、腿没接」—— 表里看着有档位偏置，实际乘数永远碰不到任何腿。
+    #[test]
+    fn bridged_plus_unbridged_covers_every_analyst() {
+        let mut bridged: Vec<&str> = DECISION_LEG_ANALYST.iter().filter_map(|(_, a)| *a).collect();
+        bridged.sort_unstable();
+        bridged.dedup();
+        for id in UNBRIDGED_ANALYST_IDS {
+            assert!(
+                !bridged.contains(id),
+                "'{id}' 同时出现在桥表与无腿清单 ⇒ 归因有歧义，请二选一并写理由"
+            );
+        }
+        for id in EVIDENCE_ANALYST_IDS {
+            assert!(
+                bridged.contains(id) || UNBRIDGED_ANALYST_IDS.contains(id),
+                "分析师 '{id}' 既无决策腿也未登记为无腿 ⇒ 其逐档权重会静默不影响融合（请补 UNBRIDGED_ANALYST_IDS 并写明理由）"
+            );
+        }
+        // 无腿清单自身不许重复登记（重复会让上面的闭合「看起来更满」）
+        let mut u = UNBRIDGED_ANALYST_IDS.to_vec();
+        u.sort_unstable();
+        let n = u.len();
+        u.dedup();
+        assert_eq!(u.len(), n, "UNBRIDGED_ANALYST_IDS 有重复项");
+    }
+
+    /// 逐档分支表的三条结构不变量：方向腿配比归一为 1、非方向腿权重恒 0 且必须带
+    /// `constraint`、四档的腿集合（因子 + 角色）两两不同。
+    /// 最后一条是 R-11 的机械证明 —— 若有人把分支表又写成「同一批腿乘不同标量」，
+    /// 腿集合会逐字相同，这里当场红。
+    #[test]
+    fn branch_specs_are_derived_and_role_partitioned() {
+        let all = horizon_branch_specs();
+        for p in ["ultra_short", "short", "mid", "long"] {
+            let tier = &all[p];
+            let legs = tier["legs"].as_array().unwrap();
+            assert!(!legs.is_empty(), "{p} 没有任何腿 ⇒ 分支表解析失效");
+            let dir: Vec<&serde_json::Value> =
+                legs.iter().filter(|l| l["role"] == "direction").collect();
+            assert!(!dir.is_empty(), "{p} 没有进方向加权的腿 ⇒ 该档不出结论");
+            let sum: f64 = dir.iter().map(|l| l["weight"].as_f64().unwrap()).sum();
+            assert!((sum - 1.0).abs() < 1e-5, "{p} 方向腿配比合计应为 1，实得 {sum}");
+            for l in legs.iter().filter(|l| l["role"] != "direction") {
+                assert_eq!(
+                    l["weight"].as_f64().unwrap(),
+                    0.0,
+                    "{} 非方向腿 {} 带权重 ⇒ 「被看了看」冒充「参与了」",
+                    p,
+                    l["factor"]
+                );
+                assert!(
+                    l["constraint"].is_string(),
+                    "{} 非方向腿 {} 必须带 constraint 说明凭什么打折",
+                    p,
+                    l["factor"]
+                );
+            }
+            for l in legs {
+                assert!(l["owner"].is_string(), "{p} 有腿无属主: {l}");
+                assert!(l["source"]["kind"].is_string(), "{p} 有腿无来源: {l}");
+            }
+            let expected =
+                Period::ALL.iter().find(|x| x.as_str() == p).expect("档位名非法").analyst_subset();
+            let got: Vec<&str> = tier["analysts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap_or_default())
+                .collect();
+            assert_eq!(got, expected, "{p} 分支表的挂载集合与 harness 推导不一致");
+        }
+
+        let shape = |tier: &str| -> Vec<String> {
+            all[tier]["legs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| format!("{}:{}", l["factor"], l["role"]))
+                .collect()
+        };
+        let shapes: Vec<Vec<String>> =
+            ["ultra_short", "short", "mid", "long"].iter().map(|t| shape(t)).collect();
+        for pair in shapes.windows(2) {
+            assert_ne!(pair[0], pair[1], "相邻两档的腿集合与角色完全相同 ⇒ 分支是假的");
+        }
+
+        // 长档技术腿：必须输出、只作入场过滤、权重恒 0（R-11 明文）
+        let trend = all["long"]["legs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["factor"] == "trendStrength")
+            .expect("长档应有 trendStrength 腿");
+        assert_eq!(trend["role"], "filter");
+        assert_eq!(trend["weight"].as_f64().unwrap(), 0.0);
+        // 超短：广度门 + 时间止损 + 不做跨期缩放，三者必须同族
+        assert_eq!(all["ultra_short"]["entryGate"], "breadth_required");
+        assert_eq!(all["ultra_short"]["exitRule"], "time_stop");
+        assert_eq!(all["ultra_short"]["confidenceMethod"], "edge_no_time_scaling");
+    }
+
+    /// 三张表（因子集 / 属主 / 来源）必须互相覆盖 —— 分处两 crate 的三处清单，
+    /// 漏任一处都是「腿存在但拿不到数」或「数拿到了但没人认领」。
+    #[test]
+    fn factor_sources_cover_every_factor_and_owner() {
+        for f in Period::verdict_factors() {
+            assert!(
+                VERDICT_FACTOR_SOURCES.iter().any(|(cf, _, _)| *cf == *f),
+                "逐档因子 {f} 未登记来源通道 ⇒ 分支表会跳过它"
+            );
+        }
+        // 跨档共用因子（eventCatalyst）同样要有来源
+        assert!(VERDICT_FACTOR_SOURCES.iter().any(|(cf, _, _)| *cf == "eventCatalyst"));
+        for (f, kind, channel) in VERDICT_FACTOR_SOURCES {
+            assert!(
+                matches!(*kind, "verdict" | "tierScore" | "sharedTool"),
+                "因子 {f} 的来源种类非法: {kind}"
+            );
+            if *kind != "verdict" {
+                assert!(!channel.is_empty(), "因子 {f} 是 {kind} 却没写通道名");
+            }
+            assert!(
+                Period::factor_owner(f).is_some(),
+                "来源表里的 {f} 没有属主分析师（因子改名要同步三处）"
+            );
+        }
+    }
+
+    /// 跨 crate 闭合：harness 的**因子属主表**推出来的逐档挂载分析师，必须都在本文件的
+    /// 权威清单里。存在理由：两张表分处两个 crate，编译器不给任何提示 —— 属主表写错一个
+    /// 节点 id，四路子图会挂上一个查不到的分析师（其报告进不了权重表，逐档偏置静默 1.0）。
+    #[test]
+    fn factor_owners_are_all_registered_analysts() {
+        for p in Period::ALL {
+            for a in p.analyst_subset() {
+                assert!(
+                    EVIDENCE_ANALYST_IDS.contains(&a),
+                    "档 {} 挂载的分析师 '{a}'（由因子属主表推导）不在权威清单里 ⇒ 它的逐档权重会静默落空",
+                    p.as_str()
+                );
+            }
+        }
+    }
+
+    /// 黑版键带 `report.` 前缀（blackboard.rs 的键规则），权重表按裸节点 id 索引。
+    /// 曾经不剥前缀 ⇒ **每一个**分析师的逐档权重都查不到、全员静默 1.0。
+    /// 本测试同时喂两种形态，权重必须一致。
+    #[test]
+    fn blackboard_key_prefix_no_longer_voids_horizon_weights() {
+        let regime = make_regime("bull", "normal", 0.7);
+        let one = |id: &str| {
+            let req = EvidenceWeightRequest {
+                market_regime: regime.clone(),
+                time_horizon: "ultra_short".into(),
+                analysts: vec![make_analyst(id, "看多", 0.8)],
+                historical_weights: None,
+            };
+            compute_evidence_weights(req).analyst_weights.remove(0).horizon_weight
+        };
+        let bare = one("a-fundamentals");
+        let prefixed = one("report.a-fundamentals");
+        assert!((bare - prefixed).abs() < 1e-9, "两种键形态权重不同：{bare} vs {prefixed}");
+        // 负控：超短档基本面权重必须是表里的 0.3，不是兜底 1.0
+        //（1.0 正是「前缀未剥 / id 是幽灵」时的落点，这条断言会把它抓出来）
+        assert!(
+            (bare - 0.3).abs() < 1e-9,
+            "基本面在超短档的逐档权重应为 0.3，实得 {bare} —— 等于 1.0 就说明查表又落空了"
+        );
+    }
     use super::*;
 
     fn make_analyst(id: &str, stance: &str, _conf: f64) -> AnalystInput {
@@ -892,13 +1327,14 @@ mod tests {
             market_regime: regime,
             time_horizon: "short".into(),
             analysts: vec![
-                make_analyst("a-technical", "看多", 0.8),
+                make_analyst("a-market-analyst", "看多", 0.8),
                 make_analyst("a-fundamentals", "中性", 0.5),
             ],
             historical_weights: None,
         };
         let report = compute_evidence_weights(request);
-        let tech = report.analyst_weights.iter().find(|a| a.analyst_id == "a-technical").unwrap();
+        let tech =
+            report.analyst_weights.iter().find(|a| a.analyst_id == "a-market-analyst").unwrap();
         let fund =
             report.analyst_weights.iter().find(|a| a.analyst_id == "a-fundamentals").unwrap();
         // 牛市: tech regime_modifier > fund regime_modifier
@@ -917,14 +1353,15 @@ mod tests {
             market_regime: regime,
             time_horizon: "mid".into(),
             analysts: vec![
-                make_analyst("a-technical", "看空", 0.7),
+                make_analyst("a-market-analyst", "看空", 0.7),
                 make_analyst("fundamental", "看多", 0.6),
             ],
             historical_weights: None,
         };
         let report = compute_evidence_weights(request);
         let fund = report.analyst_weights.iter().find(|a| a.analyst_id == "fundamental").unwrap();
-        let tech = report.analyst_weights.iter().find(|a| a.analyst_id == "a-technical").unwrap();
+        let tech =
+            report.analyst_weights.iter().find(|a| a.analyst_id == "a-market-analyst").unwrap();
         // 熊市: fund regime_modifier > tech regime_modifier
         assert!(
             fund.regime_modifier > tech.regime_modifier,
@@ -940,7 +1377,7 @@ mod tests {
         // 所有分析师 neutral
         let analysts = vec![
             AnalystInput {
-                analyst_id: "a-technical".into(),
+                analyst_id: "a-market-analyst".into(),
                 report_text: None,
                 stance: Some("中性".into()),
                 bull_score: None,
@@ -985,7 +1422,7 @@ mod tests {
             market_regime: regime,
             time_horizon: "short".into(),
             analysts: vec![
-                make_analyst("a-technical", "看多", 0.9),
+                make_analyst("a-market-analyst", "看多", 0.9),
                 make_analyst("fundamental", "中性", 0.5),
                 make_analyst("a-sentiment", "中性", 0.4),
             ],
@@ -1008,7 +1445,7 @@ mod tests {
             market_regime: regime,
             time_horizon: "mid".into(),
             analysts: vec![
-                make_analyst("a-technical", "看多", 0.8),
+                make_analyst("a-market-analyst", "看多", 0.8),
                 make_analyst("fundamental", "看空", 0.7),
                 make_analyst("a-sentiment", "看多", 0.6),
             ],
@@ -1028,11 +1465,12 @@ mod tests {
         let request = EvidenceWeightRequest {
             market_regime: regime,
             time_horizon: "short".into(),
-            analysts: vec![make_analyst("a-technical", "看多", 0.8)],
+            analysts: vec![make_analyst("a-market-analyst", "看多", 0.8)],
             historical_weights: None,
         };
         let report = compute_evidence_weights(request);
-        let tech = report.analyst_weights.iter().find(|a| a.analyst_id == "a-technical").unwrap();
+        let tech =
+            report.analyst_weights.iter().find(|a| a.analyst_id == "a-market-analyst").unwrap();
         // 高波动下，regime_modifier 应该低于普通牛市
         assert!(
             tech.regime_modifier < 1.3,
@@ -1045,15 +1483,16 @@ mod tests {
     fn historical_weights_integrate_correctly() {
         let regime = make_regime("bull", "normal", 0.7);
         let mut hist_weights = HashMap::new();
-        hist_weights.insert("a-technical".to_string(), 0.5);
+        hist_weights.insert("a-market-analyst".to_string(), 0.5);
         let request = EvidenceWeightRequest {
             market_regime: regime,
             time_horizon: "short".into(),
-            analysts: vec![make_analyst("a-technical", "看多", 0.8)],
+            analysts: vec![make_analyst("a-market-analyst", "看多", 0.8)],
             historical_weights: Some(hist_weights),
         };
         let report = compute_evidence_weights(request);
-        let tech = report.analyst_weights.iter().find(|a| a.analyst_id == "a-technical").unwrap();
+        let tech =
+            report.analyst_weights.iter().find(|a| a.analyst_id == "a-market-analyst").unwrap();
         // history_modifier 应反映传入的 0.5
         assert!(
             (tech.history_modifier - 0.5).abs() < 0.01,
@@ -1145,72 +1584,52 @@ mod tests {
         assert_eq!((u, s, m, l), (0.6, 0.8, 1.0, 1.2));
     }
 
-    /// 逐档 × 逐腿乘数表必须四档齐、腿数与桥表一致（缺档 ⇒ 脚本侧该档无从取值）。
+    /// 尺度语义锁（**从乘数表测试搬家而来**，2026-10-04）：技术属主随周期变弱、估值属主
+    /// 随周期变强。
+    ///
+    /// 原来这条挂在 `horizon_leg_multipliers()` 上（「f1 随周期衰减 / f5 随周期增长」），
+    /// 乘数表随 R-11 退役后判据没有消失 —— 它锁的是**权威权重表本身**的方向，而分支表的
+    /// 腿间配比正是从这张表派生的（`branch_specs_are_derived_and_role_partitioned` 只查
+    /// 「派生得对不对」，查不出「偏置方向反了」）。删表不搬判据 = 悄悄丢掉一条不变量。
     #[test]
-    fn horizon_leg_multipliers_covers_every_tier_and_leg() {
-        let map = horizon_leg_multipliers();
-        for p in Period::ALL {
-            let row = map.get(p.as_str()).unwrap_or_else(|| panic!("乘数表缺档 {}", p.as_str()));
-            let obj = row.as_object().unwrap_or_else(|| panic!("档 {} 不是对象", p.as_str()));
-            assert_eq!(
-                obj.len(),
-                DECISION_LEG_ANALYST.len(),
-                "档 {} 腿数 {} ≠ 桥表 {}",
-                p.as_str(),
-                obj.len(),
-                DECISION_LEG_ANALYST.len()
+    fn technical_bias_decays_and_valuation_bias_grows_with_horizon() {
+        let w = |tier: &str, analyst: &str| {
+            get_horizon_base_weights(tier)
+                .get(analyst)
+                .copied()
+                .unwrap_or_else(|| panic!("档 {tier} 缺分析师 {analyst} ⇒ 本锁的前提已变，须同步"))
+        };
+        let (u, s, m, l) = ("ultra_short", "short", "mid", "long");
+        assert!(
+            w(l, "a-market-analyst") < w(m, "a-market-analyst")
+                && w(m, "a-market-analyst") < w(s, "a-market-analyst"),
+            "技术属主未随周期变弱: {}/{}/{}",
+            w(u, "a-market-analyst"),
+            w(s, "a-market-analyst"),
+            w(l, "a-market-analyst")
+        );
+        assert!(
+            w(u, "a-market-analyst") > w(l, "a-market-analyst"),
+            "超短档技术权重必须高于长档，实得 {} vs {}",
+            w(u, "a-market-analyst"),
+            w(l, "a-market-analyst")
+        );
+        for analyst in ["value-investor", "a-fundamentals"] {
+            assert!(
+                w(u, analyst) < w(s, analyst)
+                    && w(s, analyst) < w(m, analyst)
+                    && w(m, analyst) < w(l, analyst),
+                "估值属主 {analyst} 未随周期单调变强: {} < {} < {} < {}",
+                w(u, analyst),
+                w(s, analyst),
+                w(m, analyst),
+                w(l, analyst)
             );
         }
-    }
-
-    /// 元约束腿（风险分类 / 数据质量 / trader 观点）**不得随周期变** —— 它们不是分析师证据。
-    #[test]
-    fn meta_legs_are_scale_invariant() {
-        let map = horizon_leg_multipliers();
-        for leg in ["f4", "f6", "f7"] {
-            for p in Period::ALL {
-                let got = map[p.as_str()][leg].as_f64().unwrap_or_else(|| panic!("腿 {leg} 缺值"));
-                assert_eq!(got, 1.0, "元约束腿 {leg} 在档 {} 被改了乘数", p.as_str());
-            }
-        }
-    }
-
-    /// 派生性：表里每个数都必须等于该档分析师权重，**不得有任何新数字**。
-    #[test]
-    fn multipliers_are_derived_from_the_horizon_table() {
-        let map = horizon_leg_multipliers();
-        for p in Period::ALL {
-            let weights = get_horizon_base_weights(p.as_str());
-            for (leg, analyst) in DECISION_LEG_ANALYST {
-                let got = map[p.as_str()][*leg].as_f64().expect("腿应有值");
-                let want = match analyst {
-                    Some(id) => *weights.get(*id).unwrap_or(&1.0),
-                    None => 1.0,
-                };
-                assert!(
-                    (got - want).abs() <= f64::EPSILON,
-                    "档 {} 腿 {leg}：表给 {got}，权重表给 {want} ⇒ 乘数表被另写了数字",
-                    p.as_str()
-                );
-            }
-        }
-    }
-
-    /// 尺度语义锁：技术腿随周期衰减、估值腿随周期增长（防有人把表改平）。
-    #[test]
-    fn technical_leg_decays_and_valuation_leg_grows_with_horizon() {
-        let map = horizon_leg_multipliers();
-        let at = |leg: &str, tier: Period| map[tier.as_str()][leg].as_f64().expect("腿应有值");
-        let (u, s, m, l) = (Period::UltraShort, Period::Short, Period::Mid, Period::Long);
-        assert!(
-            at("f1", l) < at("f1", m) && at("f1", m) < at("f1", s) && at("f1", u) > at("f1", l),
-            "技术腿应随周期变弱: {}",
-            ["ultra_short", "short", "mid", "long"].map(|t| map[t]["f1"].to_string()).join("/")
-        );
-        assert!(
-            at("f5", u) < at("f5", m) && at("f5", m) < at("f5", l),
-            "估值腿应随周期变强: {}",
-            ["ultra_short", "short", "mid", "long"].map(|t| map[t]["f5"].to_string()).join("/")
-        );
+        // 搬家说明：原 `meta_legs_are_scale_invariant`（元约束腿 f4/f6/f7 恒 1.0）的等价内容
+        // 现在由两处共同保证，不在本测试里重复：① 那三条腿在 `DECISION_LEG_ANALYST` 里桥到
+        // `None` ⇒ 无任何逐档权重可作用；② 「桥到的 ∪ 显式无腿的 = 权威清单」由同文件的
+        // `horizon_weight_table_is_closed_over_real_analyst_nodes` 与
+        // `scripts/check-horizon-weight-parity.mjs` 判据 ⑧ 锁住。
     }
 }

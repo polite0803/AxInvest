@@ -222,8 +222,34 @@ if (canRunFrontend) {
   //  漏任一处 `cargo check` 与 `typecheck` 全绿也照样存在，实证见 PLAN §四 需求⑤），
   // 后者自称「审计工具不是门禁」。本轮实测两者当前读数均为 0 命中 ⇒ 直接提为门禁。
   // `--strict` 卡判据①（注入来源缺失）；②③ 本来就会报。
+  //   判据 ⑦⑧（2026-10-03，A 收编三套 id 空间新增）：键集合必须等于权威分析师清单、
+  //   且「有腿 ∪ 登记无腿 = 清单」—— 这两条的正负对照都在 `--selftest` 里，缺自检则
+  //   「本门通过」不具区分力（本文件上方 reco 门同纪律）。与 ci.yml 的对应 step **逐字同源**。
+  step("前后端档位权重门自检（判据①—⑧正负对照）", "node scripts/check-horizon-weight-parity.mjs --selftest");
   step("前后端档位权重逐字段一致（含档名不手抄天数）", "node scripts/check-horizon-weight-parity.mjs");
   step("可调参数注入覆盖（五点对账，strict）", "node scripts/audit-inject-coverage.mjs --strict");
+
+  // ── .rhai 数值判据形态（2026-10-04 补，PLAN-four-horizon-workflow-alignment.md §五十二 ③）──
+  // 为什么需要：JSON 数字进 Rhai 有两条通道 —— 顶层标量落 f64、**嵌层整数落 i64**
+  //   （`code_executor` 先 `as_f64` / `json_value_to_dynamic` 先 `as_i64`）。于是
+  //   `type_of(x) == "f64"` 只在顶层等价于「是个数」，读嵌层值时把整数**静默判成缺席**；
+  //   64-bit 构建下 `type_of` 给 `"i64"`，`== "int"` 那条恒假。两条都是「数字进得来、结果恒 0」，
+  //   `cargo check` / 编译门 / clippy 全绿也照样存在（实证：分支表 days 整数 ⇒ 四档价带恒 0）。
+  //   判据 #0：任何一门扫描面为 0 即按假绿处理；自检复刻修复前形态（负样本），每类都必须真的报红。
+  step("Rhai 数值判据形态自检（正负对照）", "node scripts/check-rhai-numeric-typing.mjs --selftest");
+  step("Rhai 数值判据形态一致（嵌层已桥接 / 无 int 死分支 / 桥唯一）", "node scripts/check-rhai-numeric-typing.mjs");
+
+  // ── #34 HorizonDecision 键集门（2026-10-05）──
+  // 逐档决策的**生产者**（四份 Rhai 分支脚本）、**声明**（TS `HorizonDecision`）与
+  // **装配追加**（主链的两个绝对价）此前没有任何锁 —— `decision.rs:734-738` 自陈「靠人工对齐」。
+  // 键名对不上**不报错**：产端多写 ⇒ 前端静默丢；TS 多声明 ⇒ 读侧永远 undefined（幽灵字段，
+  // 本仓已删过 `confidenceRiskAdjusted` 与读侧的 `conf_lower_bound` 各一次）。
+  step("HorizonDecision 键集自检（四条负控 + 正控）", "node scripts/check-horizon-decision-keys.mjs --selftest");
+  step("HorizonDecision 键集一致（产端↔TS↔装配追加）", "node scripts/check-horizon-decision-keys.mjs");
+  // B2-1 前置：分析师 id 形态门（base 域唯一 / 带档后缀只能由 helper 产出 / 裸匹配只许降）。
+  //   基线 27 是**未修的树**上的首读快照，清零后该规则自动变硬拦。见 scripts/check-analyst-id-shape.mjs 头。
+  step("分析师 id 形态自检（六条负控 + 权威集推导）", "node scripts/check-analyst-id-shape.mjs --selftest");
+  step("分析师 id 形态（base 域 / 带档后缀 / 裸匹配基线）", "node scripts/check-analyst-id-shape.mjs");
 
   // ── 补两条 CI 早已有、本地镜像却缺的门禁（2026-09-14：漂移修复）──
   // 为什么必须补：它们此前**只挂在 CI**，本地跑 `ci-check` 一路绿 ⇒ 本地绿冒充 CI 绿。
@@ -292,6 +318,16 @@ if (canRunRust && !quick) {
   // 拦的是「裸 map_err(|x| x.to_string())」：错误信息退化成自由文本，
   // 前端拿不到错误码（与 check-errorcode-alignment 是同一契约的两端）。
   step("后端裸 map_err 检查（错误码契约）", "node scripts/check-rust-raw-map-err.mjs");
+
+  // ── 每日快照白名单一致性（#20①，2026-10-05）──
+  // 为什么需要：2026-10-05 抓到一条活的断链 —— eastmoney 已把 `get_consensus_eps` 申报
+  //   `NoHistoricalSemantic`（P9-3），但 `SNAPSHOT_METHODS` 白名单里没有它 ⇒
+  //   `try_stock_daily_snapshot` 被 `contains` 挡掉、恒 miss ⇒ as-of 一致预期必然降级，
+  //   而降级文案还写着「等每日归档」——归档从来不会采它。**申报了通道 ≠ 通道接上了**。
+  // 门形：R1 个股级 ⊆ 白名单；R2 每个 vendor 申报 NHS 的方法必须在白名单里（例外逐条带日期，
+  //   每次运行都打印，失效即红）；R3 --selftest 用合成文本证明识别器真读 match 臂。
+  step("每日快照白名单一致性自检（正负对照）", "node scripts/check-snapshot-whitelist.mjs --selftest");
+  step("每日快照白名单一致性（申报 NHS ⇒ 必须归档）", "node scripts/check-snapshot-whitelist.mjs");
 
   step(
     "cargo fmt 格式化检查",

@@ -588,7 +588,6 @@ pub async fn run_stock_workflow_inner(
                 "live".into()
             }),
             as_of_date: Set(Some(current_as_of.clone())),
-            model_version: Set(None),
             // A4：本行是 "running" 占位行（决策尚未产生）⇒ NULL；模板在下方才加载，
             // 真实版本号由 `run_stock_workflow_inner` 的主路径 / 降级分支用 col_expr 写回。
             // 语义与上方 `decision_position_state` 同约：NULL = 采集时点无此信息。
@@ -597,7 +596,6 @@ pub async fn run_stock_workflow_inner(
             // 故**显式写入**而非留 NULL —— NULL 在本列语义是「本列引入前的记录，链路未知」，
             // 留 NULL 会让失败路径下的快速链记录被读取侧误当完整链（原缺陷复现）。
             template_id: Set(Some(template_id.clone())),
-            data_snapshot_id: Set(None),
             outcome: Set(None),
             // Phase 1：周期来源（user=用户选定 / model=模型自报）；建行时尚未决策，留 NULL
             decision_horizon_source: Set(None),
@@ -799,7 +797,7 @@ pub async fn run_stock_workflow_inner(
                         // T-1 P1(2026-09-12): 补节点序号与总数。
                         // 此前该分支只发 4 个字段，而 `StepProgressEvent` 里
                         // total_nodes / completed_nodes / execution_id 本就有值
-                        // （`engine/mod.rs:3144` 构造时已填），白白丢弃 → 面板
+                        // （`engine/mod.rs:3235` 构造时已填 running 与两枚序号），白白丢弃 → 面板
                         // 无法显示「正在执行 第 i/N 个节点」，长节点期间进度静止，
                         // 无法区分「LLM 长调用」与「已卡死」。
                         // 补字段后 `stockAnalysisStore` 可直接由本事件驱动当前节点展示。
@@ -1879,13 +1877,15 @@ pub async fn run_single_stock_analysis(
         config_id: Set(None),
         analysis_kind: Set("live".into()),
         as_of_date: Set(Some(chrono::Utc::now().format("%Y-%m-%d").to_string())),
-        model_version: Set(None),
-        // A4：本行同为 "running" 占位行（决策尚未产生）⇒ NULL；真实版本号由
-        // `run_stock_workflow_inner` 的主路径 / 降级分支写回（同上方 462 行的约定）。
+        // A4：本行同为 "running" 占位行（决策尚未产生）⇒ NULL。
+        // ⚠ 原注释写「真实版本号由 `run_stock_workflow_inner` 的主路径 / 降级分支写回」是**错的**：
+        //   本函数不经 `run_stock_workflow_inner`（自己 `load_and_inject_template` + 直接跑引擎），
+        //   于是那条约定从没兑现过 ⇒ 现网 `template_version IS NULL` 的 live 行就来自这里。
+        //   2026-10-04（§五十一-①）改由本函数末尾的落库 update 写代际；执行失败 / 取消的行
+        //   保持 NULL = 「无结论」，读侧按无代处理，不给它编一个版本号。
         template_version: Set(None),
         // 2026-09-24：模板 id 建行即知，显式写入（语义约定同主入口）。
         template_id: Set(Some(template_id.to_string())),
-        data_snapshot_id: Set(None),
         outcome: Set(None),
         // Phase 1：周期来源（user=用户选定 / model=模型自报）；建行时尚未决策，留 NULL
         decision_horizon_source: Set(None),
@@ -2059,6 +2059,13 @@ pub async fn run_single_stock_analysis(
                 decision_json: Set(decision_json_str),
                 decision_expected_holding_days: Set(effective_holding_days.map(|d| d as i64)),
                 horizon_decisions: Set(horizon_decisions.clone()),
+                // §五十一-① 写侧落代际：本通道的行**会被读侧当决策样本**（每日自动化闭环 /
+                //   单股即时分析产出的 live 行），却从不写版本号 ⇒ 实测现网 44 条 `template_version
+                //   IS NULL` 全是 `analysis_kind=live` 的现役行。读侧按代筛样时它们只能整批排除，
+                //   指标大面积「样本不足」而真因在写侧 —— 所以先补这里，再谈筛样。
+                //   建行处（上方 `run_single_stock_analysis` 的占位行）留 NULL 是对的：
+                //   那时决策尚未产生；代际必须在**结论落地这一刻**写。
+                template_version: Set(Some(loaded.version)),
                 updated_at: Set(chrono::Utc::now().timestamp_millis()),
                 ..Default::default()
             })
@@ -2114,6 +2121,10 @@ pub async fn run_single_stock_analysis(
                     primary_holding_days: effective_holding_days.map(|d| d as i64),
                     min_confidence_threshold: super::reflection::DEFAULT_REFLECTION_MIN_CONFIDENCE,
                     reflection_depth: super::reflection::DEFAULT_REFLECTION_DEPTH,
+                    // §七十一 按版归属：与上方 `template_version: Set(Some(loaded.version))`
+                    // 同一个值 —— 代际的权威是**本次实际跑的那张图**（从 `workflow_templates`
+                    // 载入），不是编译期常量；库里若还停着旧版，盖旧版才是对的。
+                    analysis_template_version: Some(loaded.version),
                     now_ms: chrono::Utc::now().timestamp_millis(),
                 },
             );
@@ -2224,6 +2235,11 @@ pub(crate) async fn fetch_stock_lessons(
     // （NULL = 复盘档未知，按既有行为继续注入并在文本里声明，不冒充某档）；
     // `horizon = None` ⇒ 不过滤（兼容旧调用方，行为与改前逐位一致）。
     horizon: Option<&str>,
+    // §五十一-② 起算代际（常量 `HORIZON_BRANCH_GENERATION_FLOOR`，不读库）：
+    // 早于该代且**代际已知**的反思不进 prompt；代际未知(NULL)的仍进但在文本里声明。
+    // 被筛掉的旧代条数**写进注入文本** —— 空结果可能是「真没教训」，也可能是
+    // 「教训全在起算代之前」，两者对模型含义相反，不许静默合并成「暂无历史反思」。
+    generation_floor: i32,
 ) -> (Option<String>, Vec<String>) {
     use chrono::Utc;
 
@@ -2237,6 +2253,7 @@ pub(crate) async fn fetch_stock_lessons(
             stock_code,
             three_months_ago.timestamp_millis(),
             horizon,
+            generation_floor,
         )
         .await
         .unwrap_or_default()
@@ -2252,6 +2269,7 @@ pub(crate) async fn fetch_stock_lessons(
             db,
             seven_days_ago.timestamp_millis(),
             horizon,
+            generation_floor,
         )
         .await
         .unwrap_or_default()
@@ -2260,15 +2278,58 @@ pub(crate) async fn fetch_stock_lessons(
         .take(2)
         .collect();
 
-    if same_ticker.is_empty() && all_recent.is_empty() {
-        // 仍需查询规则化教训（可能存在）
-        return fetch_rule_lessons(stock_code, db, horizon).await;
-    }
+    // ── §五十一-② 被起算代筛掉了多少（声明侧）──
+    // 计数失败保持 `None` 而**不是**折算成 0 —— 否则「另有 0 条」会把「查不出来」写成
+    // 「确实没有」，正是本仓要避免的那类伪装有结论。
+    let pre_floor_same_ticker =
+        axagent_dao::repo::stock_lesson_queries::count_pre_floor_generation_reflections(
+            db,
+            Some(stock_code),
+            three_months_ago.timestamp_millis(),
+            horizon,
+            generation_floor,
+        )
+        .await
+        .ok();
+    let pre_floor_all_recent =
+        axagent_dao::repo::stock_lesson_queries::count_pre_floor_generation_reflections(
+            db,
+            None,
+            seven_days_ago.timestamp_millis(),
+            horizon,
+            generation_floor,
+        )
+        .await
+        .ok();
+    // 「另有 N 条」的措辞：计数成功且为 0 ⇒ 不写；失败 ⇒ 写「条数未知」
+    // （不写数字也不省略整句 —— 省略就是把「查不出来」伪装成「确实没有」）。
+    let pre_floor_note = |n: Option<u64>| -> String {
+        match n {
+            Some(0) => String::new(),
+            Some(c) => format!("；另有 {c} 条早于起算代（第 {generation_floor} 代），未注入"),
+            None => format!(
+                "；另有若干条早于起算代（第 {generation_floor} 代）的条目未注入（条数查询失败）"
+            ),
+        }
+    };
 
     let mut lines: Vec<String> = Vec::new();
 
+    // 两组都空：这一句把「真没有」与「有但早于起算代」分开写，
+    // 否则调用方会退回「（暂无历史反思）」—— 那是把结构性缺口读成空集。
+    if same_ticker.is_empty() && all_recent.is_empty() {
+        lines.push(format!(
+            "【同股近 90 天 / 全市场近 7 天反思：起算代（第 {generation_floor} 代）及之后 0 条{}】",
+            pre_floor_note(pre_floor_same_ticker.and_then(|a| pre_floor_all_recent.map(|b| a + b)))
+        ));
+    }
+
     if !same_ticker.is_empty() {
-        lines.push(format!("【同股近 90 天反思 {} 条】", same_ticker.len()));
+        lines.push(format!(
+            "【同股近 90 天反思 {} 条{}】",
+            same_ticker.len(),
+            pre_floor_note(pre_floor_same_ticker)
+        ));
         for (i, l) in same_ticker.iter().enumerate() {
             lines.push(format!("#{} ({}, 反思于 {})", i + 1, l.stock_code, l.hindsight_date));
             if let Some(ref ls) = l.lesson_summary {
@@ -2292,7 +2353,11 @@ pub(crate) async fn fetch_stock_lessons(
 
     if !all_recent.is_empty() {
         lines.push(String::new());
-        lines.push(format!("【近期市场级反思 {} 条(跨 ticker 近 7 天)】", all_recent.len()));
+        lines.push(format!(
+            "【近期市场级反思 {} 条(跨 ticker 近 7 天){}】",
+            all_recent.len(),
+            pre_floor_note(pre_floor_all_recent)
+        ));
         for (i, l) in all_recent.iter().enumerate() {
             lines.push(format!("#{} {} ({}):", i + 1, l.stock_code, l.stock_name));
             if let Some(ref ls) = l.lesson_summary {
@@ -2304,7 +2369,8 @@ pub(crate) async fn fetch_stock_lessons(
     }
 
     // 追加规则化教训 + 收集被引用的 lesson_ids
-    let (rule_lines, lesson_ids) = fetch_rule_lessons(stock_code, db, horizon).await;
+    let (rule_lines, lesson_ids) =
+        fetch_rule_lessons(stock_code, db, horizon, generation_floor).await;
     if let Some(rule_text) = rule_lines {
         lines.push(rule_text);
     }
@@ -2329,6 +2395,8 @@ async fn fetch_rule_lessons(
     stock_code: &str,
     db: &sea_orm::DatabaseConnection,
     horizon: Option<&str>,
+    // §五十一-② 起算代际：与 `fetch_stock_lessons` 同一常量，一路透传下来。
+    generation_floor: i32,
 ) -> (Option<String>, Vec<String>) {
     // ── [F1 闭环] 规则化教训：从 reflection_lessons 表查询 ──
     // 修复首轮分析发现的"reflection_lessons 闭环断裂"问题：
@@ -2337,14 +2405,43 @@ async fn fetch_rule_lessons(
     // 现补充查询 reflection_lessons 表的规则化教训（按 confidence 降序取前 5 条）。
     // 查询经 dao 下沉（置信度下限与档过滤见模块文档），调用方只做 take(5)。
     let rule_lessons: Vec<reflection_lessons::Model> =
-        axagent_dao::repo::stock_lesson_queries::fetch_rule_lessons(db, stock_code, 0.3, horizon)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .take(5)
-            .collect();
+        axagent_dao::repo::stock_lesson_queries::fetch_rule_lessons(
+            db,
+            stock_code,
+            0.3,
+            horizon,
+            generation_floor,
+        )
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .take(5)
+        .collect();
+
+    // 被**起算代**筛掉的规则条数（语义与反思组一致：计数失败不折算成 0）。
+    let foreign_rules: Option<u64> =
+        axagent_dao::repo::stock_lesson_queries::count_pre_floor_generation_lessons(
+            db,
+            stock_code,
+            0.3,
+            horizon,
+            generation_floor,
+        )
+        .await
+        .ok();
+    let foreign_suffix = match foreign_rules {
+        Some(0) => String::new(),
+        Some(c) => format!("；另有 {c} 条早于起算代（第 {generation_floor} 代），未注入"),
+        None => format!(
+            "；另有若干条早于起算代（第 {generation_floor} 代）的条目未注入（条数查询失败）"
+        ),
+    };
 
     if rule_lessons.is_empty() {
+        // 按代筛过、规则为空、但确有旧代规则 ⇒ 仍要把这句交给模型（否则会退成「暂无历史反思」）。
+        if !foreign_suffix.is_empty() {
+            return (Some(format!("【规则化教训 0 条{foreign_suffix}】")), Vec::new());
+        }
         return (None, Vec::new());
     }
 
@@ -2353,7 +2450,7 @@ async fn fetch_rule_lessons(
 
     let mut lines: Vec<String> = Vec::new();
     lines.push(String::new());
-    lines.push(format!("【规则化教训 {} 条(按置信度降序)】", rule_lessons.len()));
+    lines.push(format!("【规则化教训 {} 条(按置信度降序){foreign_suffix}】", rule_lessons.len()));
     for (i, l) in rule_lessons.iter().enumerate() {
         lines.push(format!(
             "#{} (confidence={:.2}, 应用{}次/成功{}次): {}",

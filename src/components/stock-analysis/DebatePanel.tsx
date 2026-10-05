@@ -5,6 +5,7 @@ import { ExpandOutlined, ReloadOutlined, WarningOutlined } from "@ant-design/ico
 import { Alert, Button, Card, Empty, Modal, Segmented, Spin, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HorizonScopeNotice } from "./HorizonScopeNotice";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
 
@@ -1161,6 +1162,11 @@ export function DebatePanel() {
 
   return (
     <>
+      {
+        /* 辩论只跑一轮跨视角对抗（在 `a-*` 分析师内部），四档共用同一份记录
+          ⇒ 显式声明，不复制成四份装作按档。见 PLAN §五十三 ⑤ 甲。 */
+      }
+      <HorizonScopeNotice scope="debate" />
       <Card
         size="small"
         title={

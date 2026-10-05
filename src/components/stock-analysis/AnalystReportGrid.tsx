@@ -7,6 +7,7 @@ import type { ColumnsType } from "antd/es/table";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnalystReportCard } from "./AnalystReportCard";
+import { HorizonScopeNotice } from "./HorizonScopeNotice";
 import { cleanToolCallTags } from "./utils";
 
 type Consensus = "bullish" | "bearish" | "neutral" | "divided";
@@ -637,6 +638,11 @@ export function AnalystReportGrid() {
 
   return (
     <div>
+      {
+        /* 分析师是 10 个单份节点（无档位后缀），四档共用同一批报告
+          ⇒ 显式声明「按档的是评分与决策」，不装作按档。见 PLAN §五十三 ⑤ 甲。 */
+      }
+      <HorizonScopeNotice scope="analyst" />
       {/* 舆情摘要 bar — 醒目的共识卡片 + 大号数字 + 百分比 + 色彩条 */}
       {sentiment.total > 0 && (
         <div

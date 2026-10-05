@@ -19,24 +19,14 @@ pub const KELLY_MEDIUM_THRESHOLD: f64 = 0.1;
 ///
 /// 本模块内最大回撤的唯一核心实现；`portfolio_monitor::compute_max_drawdown_pct`
 /// 复用本函数（结果 ×100 得到百分比）。
+///
+/// B1 收口（2026-10-05）：算法本体已上移到 `axagent_harness::indicators::max_drawdown_fraction`
+/// （逐档风险要按窗口循环算回撤，那份实现住在 astock-data 的内联循环里 ⇒ 同一算法两份）。
+/// 本函数保留 `f64` 返回：该处历史语义是「空序列 / 全非正 ⇒ 0.0（无数据即无回撤）」，
+/// 而 harness 返回 `None`（「算不出」不得伪装成 0 回撤）—— 两种语义都有下游，
+/// 映射只发生在这一层，不改任何调用方的数值。
 pub(crate) fn peak_trough_drawdown(prices: &[f64]) -> f64 {
-    if prices.is_empty() || prices.iter().all(|&p| p <= 0.0) {
-        return 0.0;
-    }
-    let mut peak = prices.iter().find(|&&p| p > 0.0).copied().unwrap_or(0.0);
-    let mut max_dd = 0.0;
-    for &p in prices.iter() {
-        if p > peak {
-            peak = p;
-        }
-        if peak > 0.0 {
-            let dd = (peak - p) / peak;
-            if dd > max_dd {
-                max_dd = dd;
-            }
-        }
-    }
-    max_dd
+    axagent_harness::indicators::max_drawdown_fraction(prices).unwrap_or(0.0)
 }
 
 /// 计算峰值到谷底的最大回撤比例 (0.0~1.0)，复用 `peak_trough_drawdown`。

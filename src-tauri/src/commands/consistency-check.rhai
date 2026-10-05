@@ -59,15 +59,14 @@ fn safe_str(obj, key) {
     v.to_string()
 }
 
-// helper: 安全提取浮点字段
+// helper: 安全提取浮点字段（`-1.0` = 「无此读数」哨兵）
+// 走引擎侧 `num_of`（权威源 `crates/harness/src/rhai_engine.rs`）：原写法第二条判据用的
+// 是 `type_of(v) == "int"`，而 64-bit 构建下 `type_of` 对整数给 `"i64"` ⇒ 那条恒假，
+// 嵌层整数（上游脚本输出经注入落 i64）一律被当成「无读数」。
 fn safe_f64(obj, key) {
     if is_unit(obj) { return -1.0; }
     if type_of(obj) != "map" { return -1.0; }
-    let v = obj[key];
-    if is_unit(v) { return -1.0; }
-    if type_of(v) == "f64" { return v; }
-    if type_of(v) == "int" { return v.to_float(); }
-    -1.0
+    num_of(obj[key], -1.0)
 }
 
 // 编码每个趋势槽位的数据

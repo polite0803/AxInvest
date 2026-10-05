@@ -162,7 +162,7 @@ export interface HorizonPriceGroup {
   stopLoss: number | null;
 }
 
-/** 四周期价位映射，键为 `ultra_short` / `short` / `mid` / `long` */
+/** 四周期价位映射，键一律 camelCase（snake 形态的存量行在 `normalizeHorizonPriceMap` 里归一） */
 export interface HorizonPriceMap {
   ultraShort?: HorizonPriceGroup | null;
   short?: HorizonPriceGroup | null;
@@ -170,74 +170,112 @@ export interface HorizonPriceMap {
   long?: HorizonPriceGroup | null;
 }
 
-/** 阶段 2：单个周期的独立决策（`portfolio-mgr.rhai` `horizon_decision()` 产出） */
+/**
+ * 阶段 2：单个周期的独立决策。
+ *
+ * **生产者已换**（R-11，2026-10-04）：本对象 = 四路分支节点各自的输出
+ * （`portfolio-mgr-h-{ultra-short,short,mid,long}.rhai`），主链 `portfolio-mgr.rhai` 只做**装配**
+ * （追加 `targetPrice`/`stopLoss` 两个绝对价）。四档的腿集、门形态、置信与出场口径**互不相同**，
+ * 故以下字段里有若干「仅某档产出」的项 —— 不是可选装饰，是各档算法差异的读数。
+ *
+ * ⚠ 某一路节点失败/未接线 ⇒ 该档**整个键缺席**（不补占位行），并在顶层 `dataGaps` 点名。
+ */
 export interface HorizonDecision {
   action: string;
   verdict: string;
+  /** 该档档位标签（分支脚本自证；装配段用它核对「读到的不是别档输出」） */
+  horizon?: string;
   positionPct: number;
   /**
-   * 该档**上涨胜率**（×100）—— **纯证据口径**：逐档先验 → 逐档证据加权 → 按 √h 折算，
+   * 该档**上涨胜率**（×100）—— **纯证据口径**：逐档先验 → 本档分支表加权融合，
    * **不含** `riskBias`。与荐股链的 `confidence`（`blend_win_rate` /
    * `candidate_score_to_win_rate`）**同一量纲，可直接比较**。
    *
    * 2026-10-02 改：此前本字段是「叠加风险偏置后的**判定值**」⇒ 同一份 JSON 里两个
    * 「置信度」不同口径，并排展示时会把「高风险」误读成「胜率低」，也无法与荐股比较
    * （实测 002812：荐股 78 vs 本字段 39.7，看着像两系统严重对立，实为量纲错配）。
-   * 判定值现单列 `confidenceRiskAdjusted`。
+   *
+   * 2026-10-04 改（R-11）：逐档分支**本就没有**风险偏置这一层（各档的门是自己的形态，
+   * 见 `entryGate`/`gateBasis`），故原并列字段 `confidenceRiskAdjusted` 从本类型删除 ——
+   * 它是主决策（`StockDecision`）的字段，留在逐档类型里就是一个永不到货的幽灵声明。
    */
   confidence: number;
   /**
-   * 该档后验（×100，四舍五入到 0.1）—— Phase C 逐档先验 + 逐档证据加权的结果
-   * （**不含**风险偏置，SNR 折算前）。
+   * 该档后验（×100，四舍五入到 0.1）—— 逐档先验 + 本档证据加权的结果（不含风险偏置）。
    */
   posterior: number;
-  /**
-   * **风险调整后**的置信度（= 本档 `action` 阶梯实际所用值，含风险偏置）。
-   * 与 `confidence` 的差额 = 风险门槛造成的下调，供归因。
-   */
-  confidenceRiskAdjusted?: number;
   stopLossPct: number;
   takeProfitPct: number;
   expectedHoldingDays: number;
   targetPrice: number | null;
   stopLoss: number | null;
-  /** 仅超短线（方案 B 降级路径标注） */
-  confLowerBound?: number;
-  /** 叠加 risk_bias 后的生效后验（SNR 折算前） */
-  posteriorEffective?: number;
-  /** SNR 折算的锚定持有天数（中线 28 交易日 ⇒ 该档不改） */
-  snrAnchorDays?: number;
   /**
-   * 该档技术腿吃的是哪一份评分（Phase F 结构性缺席声明）：
+   * 该档技术腿吃的是哪一份评分（结构性缺席声明）：
    * `tier_native` = 本档专属粒度评分节点出数；
    * `daily_fallback` = 该粒度评分没出数（超短无 60 分钟 / 长线无季度），f1 腿退回主链日线。
    * ⚠ 缺席必须成句，不得压成「评分低」或干脆不显示 —— 见 AGENTS.md 禁区 12 与本轮 §七-F。
+   * 退化时主链装配还会往顶层 `dataGaps` 追加一条（横幅的「数据缺口 N 项」读那里）。
    */
   scoreSource?: string;
-  /** 证据权重来源：table = 逐档乘数表；fallback_unity = 表缺失，全腿按 1.0 退化 */
-  weightsSource?: string;
-  /** 该档先验来源：tier = 本档回测收缩；pooled = 全档合并；shared_regime_prior = 共用先验 */
+  /** 该档先验来源：逐档先验表里的 `source` 列（tier / pooled）；表缺本档那一行 ⇒ `unavailable` */
   priorSource?: string;
   /** 该档先验样本数（配合 κ 判断收缩强度是否够可信） */
   priorSamples?: number;
-  /** 止损口径：vol = k·σ·√h 导出；fallback_pct = σ 不可得，退回固定百分比档 */
+  /** 止损口径：`vol_band` = k·σ_daily·√本档持有天数 导出；`fallback_pct` = σ 不可得，退回固定百分比档 */
   stopSource?: string;
-  /** 仓位口径：risk_budget = min(凯利, 100·R/止损%)；kelly_only / fallback_kelly_x_mult = 降级 */
+  /** 仓位口径：逐档分支恒为 `kelly_x_position_multiplier`（凯利 × 该档仓位乘数） */
   positionSource?: string;
   /**
-   * 该档证据完整度（×100）：分子=本档实际权重和，分母=逐腿基线表按本档乘数缩放。
-   * 与主链 `evidence_pct` 不同口径是有意的（第 5(a) 条）——乘数表缺失时二者相等。
+   * 该档证据完整度（×100）= 本档**在场方向腿**权重和 ÷ 本档分支表**全部方向腿**权重和
+   * （`pm_evidence_scale(tw, dir_total)`）。分母来自注入的逐档分支表，不是主链的合计表 ⇒
+   * 与主链 `evidence_pct` 不同口径是有意的（第 5(a) 条）：它回答的是「这一档自己的腿齐不齐」。
    */
   evidenceScale?: number;
-  /** 该档下注的实际赔率 = 止盈% ÷ 止损%（价带之比，第 5(b) 条） */
+  /** 该档下注的实际赔率 = 止盈% ÷ 止损%（各档自己的出场口径，第 5(b) 条） */
   odds?: number;
-  /** 赔率来源：ladder_ratio = 由本档价带导出；no_stop = 无止损价带（空仓档）⇒ 赔率 0 */
-  oddsSource?: string;
   /**
-   * 与哪些档的 `posterior` **恒等**（Phase F 同源标注）。
-   * 非空不代表算错 —— 它说的是「这两个数字无法互相佐证」，展示层必须注脚化。
+   * 该档的**自证三件套**（分支表注入值原样回写；缺表时为 `missing_branch_table`）。
+   * 装配段靠 `confidenceMethod` 判定「读到的确实是分支输出」，缺即按缺席处理。
    */
-  sharesPosteriorWith?: string[];
+  confidenceMethod?: string;
+  /** 该档出场口径：`time_stop` / `target_and_falsified` 等（权威 = `horizon_branch_specs`） */
+  exitRule?: string;
+  /** 该档入场门形态：`sealed_limit_up` / 带内居中 / DCF 目标未达 等 */
+  entryGate?: string;
+  /** 入场门判定结果（各档门不同，故不能由展示层反推） */
+  entryGatePassed?: boolean;
+  /** 门的判定依据：`judged` / `unjudged`（算不出 ≠ 通过，也不得算成未通过） */
+  gateBasis?: string;
+  /** 短线档：时机过滤是否放行（追高/带外判定） */
+  timingFiltered?: boolean;
+  /** 中线档：价带 z 值（×100，四舍五入到 0.1）；K 线不足 ⇒ null */
+  bandZ?: number | null;
+  /** 长线档：证伪判据命中的条目（`exitRule=target_and_falsified` 的 falsified 侧） */
+  falsifiedBy?: string[];
+  /** 长线档：作为过滤条件参与、不进方向融合的腿 */
+  filterLegs?: string[];
+  /** 长线档：只作背景（role=background / weight 恒 0）的腿 */
+  backgroundLegs?: string[];
+  /** 中线档：role=riskNote 腿的读数（风险提示，不参与方向） */
+  riskNotes?: string[];
+  /** 短线档：在场方向腿数与本档要求的下限（门 ②「证据太薄不出方向」的读数） */
+  liveDirectionLegs?: number;
+  /** 短线档：在场方向腿数下限 */
+  requiredDirectionLegs?: number;
+  /** 长线档：止盈价来源（`dcf_target` / `no_target`）—— 各档出场口径不同，故逐档标注 */
+  takeProfitSource?: string;
+  /** 该档**在场**腿明细（含 role/weight/signal/constraint，面板按此列证据） */
+  legs?: Array<{
+    factor: string;
+    role?: string;
+    weight?: number;
+    signal?: number;
+    constraint?: string | null;
+  }>;
+  /** 该档**缺席**腿（分支表里声明了、但本轮拿不到读数）⇒ 必须成句显示，不得当成 0 分 */
+  absentLegs?: string[];
+  /** 该档分支自己的缺口说明（顶层 `dataGaps` 另有一份跨档汇总） */
+  dataGaps?: string[];
 }
 
 /** 阶段 2：四周期独立决策映射（键 camelCase，对齐 `decisions_by_horizon`） */
@@ -270,15 +308,18 @@ export interface StockDecision {
   targetPrice: number | null;
   stopLoss: number | null;
   /**
-   * 阶段1（PROPOSAL-stock-decision-four-horizon.md）四周期价位映射。
+   * 阶段1 引入、v125 起为 `decisionsByHorizon` 的**投影**（只搬运不计算）。
    *
-   * 后端 `portfolio-mgr.rhai` 产出的 `horizonPriceMap`（嵌套在 `decision_json`），
-   * 经 `stock_analyses.horizon_price_map` 落库、`normalizeDecision` 收敛为 camelCase。
-   * 同一决策保留单一 `action`/仓位语义，但目标价/止损按四周期各给一组绝对价，
-   * 前端按周期 Tab/分组查看。
+   * 后端 `portfolio-mgr.rhai` 产出的 `horizonPriceMap`（嵌套在 `decision_json`），经
+   * `stock_analyses.horizon_price_map` 落库。**键一律 camelCase**：`normalizeHorizonPriceMap`
+   * 会把存量行的 snake 键（`ultra_short`）归一到 camel —— 这一步不是可选的：旧实现只做类型
+   * 断言不转键，四个键里只有 `ultraShort` 两族拼写不同，于是「超短档价位行从来不显示、
+   * 另外三档正常」，而库里四键齐备（000710 现网实证）。
    *
    * ⚠️ `null`/`undefined` 语义 = 该记录产生于 stage1 字段引入之前，**无此信息**；
-   * 消费端**不得**读成空映射，应按顶层 `targetPrice`/`stopLoss`（主档位）回退。
+   *   消费端**不得**读成空映射，应按顶层 `targetPrice`/`stopLoss`（主档位）回退。
+   * ⚠️ **单个档缺席**（那一路分支没产出，口径 A）= 该键不在映射里，而不是值为 null；
+   *   两种缺席都要按「该档无计划」处理，不得读成 0%。
    */
   horizonPriceMap?: HorizonPriceMap | null;
   /**
@@ -295,6 +336,22 @@ export interface StockDecision {
   reasoning: string;
   riskLevel: StockRiskLevelType;
   confidence: number;
+  /**
+   * 主档 action 的**来历**（§五十三 ①，v127）。产出方 `portfolio-mgr.rhai` 的 `action_source`，
+   * 值域见 `stock-analysis-utils.ts` 的 `ACTION_SOURCES`（第三处载体是那条并集门）。
+   *
+   * 存在的理由：主档 action 可能是「所选档分支结论」被后置规则**单向降级**的结果
+   * （000710 实测：超短线分支=买入 → 高风险风控否决 → 主档=持有，同屏三处互斥却只能靠
+   * 解析中文 reasoning 才能解释）。缺席该字段的记录 = 产生于 v127 之前，**无此信息**，
+   * 展示层不得回退成「branch_pick」那种乐观默认。
+   */
+  actionSource?: string;
+  /**
+   * 主档 confidence 的口径（v127 起与所选档同源）。值域 `CONFIDENCE_SOURCES`。
+   * · `branch_row` = 取自被选中的那一档分支输出（再乘档位无关的视角分歧/数据质量约束）
+   * · `main_chain_posterior` = 四路全未产出 ⇒ 退回主链后验口径
+   */
+  confidenceSource?: string;
   /** 决策方向置信度 (0-100) — 无论买卖方向都体现"多确信"。解决看空决策 confidence 偏低被误读为"不确信" */
   decisionConfidence?: number | null;
   /** 信号强度 (0-100) — 偏离中性的程度，0=完全中性，100=极端强信号 */
@@ -311,10 +368,11 @@ export interface StockDecision {
    * portfolio-mgr 消费的上游节点中**缺失数据**的清单（如「资金流向(t-hotmoney-data)」）。
    *
    * ⚠️ 本字段的语义**只有一种**：「本该拿到的数据没拿到」（上游节点缺席 / 字段不可得）。
-   * **设计性降权不属于这里** —— 它是「本档按周期主动下调某腿权重」，零数据缺失，
-   * 走 `weightAdjustments`。2026-10-01 之前两者同挤本字段，后果是**常驻误报**：
-   * 估值腿的 0.3/0.5 是常量 ⇒ 凡带估值数据的分析恒推 2 条 ⇒ 每条决策卡都亮
-   * 「决策可信度受限 / 数据缺口 2 项」，真缺口被淹没。
+   * **设计性口径差异不属于这里** —— 逐档分支「这一档用了哪些腿、缺哪些腿」写在
+   * 该档自己的 `decisionsByHorizon[].legs / absentLegs / dataGaps` 里。
+   * 历史教训（2026-10-01）：设计性降权曾与真缺口同挤本字段 ⇒ **常驻误报**
+   * （估值腿的 0.3/0.5 是常量 ⇒ 凡带估值数据的分析恒推 2 条 ⇒ 每张卡都亮
+   * 「数据缺口 2 项」，真缺口被淹没）。乘数语义随 R-11 退役后，那条通道整体删除。
    *
    * 命名说明：后端 portfolio-mgr 决策 JSON 里该字段是顶层 snake_case 的 `data_gaps`
    * （唯一一个非 camelCase 的顶层键，且 `stock_workflow/decision.rs` V65 的
@@ -322,17 +380,6 @@ export interface StockDecision {
    * 前端 camelCase 的 `dataGaps`，消费处只读 `decision.dataGaps`。
    */
   dataGaps?: string[];
-  /**
-   * **口径调整**（不是数据缺口）：本档按周期主动降权的证据腿。
-   *
-   * 与 `dataGaps` 的分界：`dataGaps` = 「本该拿到的数据没拿到」；本字段 = 「本档按设计下调了
-   * 某腿权重」，一个字节的数据都没缺。后端 `portfolio-mgr.rhai` 输出顶层 camelCase
-   * `weightAdjustments`（结构化，2026-10-01 起），只登记**真被下调**（乘数 < 1）的档。
-   *
-   * 展示层：按档挂在四档决策面板的注脚上；**不得**计入「数据缺口 N 项」，也**不得**据此
-   * 点亮「决策可信度受限」警示条（那正是本字段从 `dataGaps` 拆出来的原因）。
-   */
-  weightAdjustments?: WeightAdjustment[];
   /** 时间维度: "ultra_short" | "short" | "mid" | "long" */
   timeHorizon?: string | null;
   /** 期望持有天数（交易日） */
@@ -349,23 +396,6 @@ export interface StockDecision {
   agreementBreakdown?: AgreementBreakdown;
   /** 跨系统互证：近 14 天趋势智选推荐 vs 本次工作流决策（后端在决策持久化时注入） */
   crossCheck?: RecoCrossCheck;
-}
-
-/**
- * 一条「口径调整」：某档对某条决策腿按周期主动降权。
- *
- * 权威来源是 Rust `analysis-engine::evidence_weight::horizon_leg_multipliers()`
- * （经桥表 `DECISION_LEG_ANALYST` 注入为脚本变量 `horizon_leg_weights_json`）——
- * 脚本侧**只读**该表，不手抄任何倍数。故本结构里的 `multiplier` 不是「面板读数」，
- * 而是**公式实际使用的那个数**，可逐位对账。
- */
-export interface WeightAdjustment {
-  /** 权威档名 snake_case（= `Period::as_str()` = `HORIZON_CAMEL_TO_SNAKE` 的值域） */
-  tier: string;
-  /** 决策腿（`f5` = 估值；腿→分析师桥表见 `DECISION_LEG_ANALYST`） */
-  leg: string;
-  /** 该档对该腿的乘数（< 1 = 降权；后端只输出被下调的档） */
-  multiplier: number;
 }
 
 /** 跨系统互证字段（后端 stock_workflow::hooks::inject_reco_crosscheck 注入，camelCase 对齐） */
@@ -1211,6 +1241,16 @@ export interface HitrateStats {
   signalHalfLifeDays: number | null;
   /** 参与半衰期拟合的档数（有持有期且 IC 有值） */
   usableIcTiers: number;
+  /**
+   * 本次统计采用的**起算代际**下限（`HORIZON_BRANCH_GENERATION_FLOOR`）。
+   * 语义是「这一代及之后才算同一套判据」，**不是**「等于当前代」—— 用等号的话每次换代
+   * 分母都会被清零（见常量注释）。回传它是为了让面板说清「分母为什么变小」。
+   */
+  generationFloor?: number;
+  /** 因「早于起算代」被排除出统计分母的样本数（旧代样本永久不可比） */
+  excludedPreFloorGeneration?: number;
+  /** 因「代际未知」被排除的样本数（会随写侧补章而减少，与上一项处置不同） */
+  excludedUnknownGeneration?: number;
 }
 
 // ── 四周期反思结果（批次 3/4：horizon_results_json 结构化）──

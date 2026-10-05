@@ -119,7 +119,13 @@
     "check:horizon-parity:selftest": "node scripts/check-horizon-weight-parity.mjs --selftest",
     "check:reco-horizon": "node scripts/check-reco-horizon-parity.mjs",
     "check:reco-horizon:selftest": "node scripts/check-reco-horizon-parity.mjs --selftest",
-    "check:valuation-parity:selftest": "node scripts/check-valuation-defaults-parity.mjs --selftest"
+    "check:valuation-parity:selftest": "node scripts/check-valuation-defaults-parity.mjs --selftest",
+    "check:rhai-numeric": "node scripts/check-rhai-numeric-typing.mjs",
+    "check:rhai-numeric:selftest": "node scripts/check-rhai-numeric-typing.mjs --selftest",
+    "check:horizon-keys": "node scripts/check-horizon-decision-keys.mjs",
+    "check:horizon-keys:selftest": "node scripts/check-horizon-decision-keys.mjs --selftest",
+    "check:analyst-id-shape": "node scripts/check-analyst-id-shape.mjs",
+    "check:analyst-id-shape:selftest": "node scripts/check-analyst-id-shape.mjs --selftest"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.1",

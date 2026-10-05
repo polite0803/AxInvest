@@ -2,11 +2,14 @@ import { List } from "@/components/common/AntdList";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import {
+  actionSourceLabelKey,
+  confidenceSourceLabelKey,
   FAST_TEMPLATE_ID,
   getActionTagStyle,
   getActionTKey,
   HORIZON_T_SUFFIX,
   horizonSourceLabelKey,
+  readDecisionProvenance,
   readHorizonActions,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
@@ -585,6 +588,45 @@ export function HistoricalAnalysisPanel({ analysisId = "" }: Props) {
                           return (
                             <div className="text-[10px]" style={{ color: "var(--color-t-tertiary, #888)" }}>
                               {parts.join(" · ")}
+                            </div>
+                          );
+                        })()}
+                        {
+                          /* 主档来历（§五十三 ①，v127）：000710 实测「主档=持有 + 标签=超短线分支选档
+                             + 超短线 chip=买入」三处同屏互斥，唯一解释藏在 reasoning 的中文句子里。
+                             现在成句说明「哪一档选的、分支原结论、被谁改写」。
+                             v127 之前的记录没有这两个字段 ⇒ 整行不渲染（不编造来历）。 */
+                        }
+                        {(() => {
+                          const prov = readDecisionProvenance(r.decisionJson);
+                          if (!prov) { return null; }
+                          const horizonName = prov.horizon && HORIZON_T_SUFFIX[prov.horizon]
+                            ? t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[prov.horizon]}`)
+                            : "";
+                          const srcLabel = actionSourceLabelKey(prov.actionSource);
+                          if (!srcLabel) { return null; }
+                          const actionText = t(getActionTKey(action));
+                          const body = prov.kind === "downgraded"
+                            ? t("stockAnalysis.decisionProvenanceDowngraded", {
+                              horizon: horizonName,
+                              branchAction: t(getActionTKey(prov.branchAction ?? "")),
+                              reason: t(srcLabel),
+                              action: actionText,
+                            })
+                            : prov.kind === "direct"
+                            ? t("stockAnalysis.decisionProvenanceDirect", {
+                              horizon: horizonName,
+                              action: actionText,
+                            })
+                            : t(srcLabel);
+                          // 置信口径只在**不是**所选档时点名（那才是读者会误读的那一格）
+                          const confSrcKey = prov.confidenceSource === "main_chain_posterior"
+                            ? confidenceSourceLabelKey(prov.confidenceSource)
+                            : null;
+                          return (
+                            <div className="text-[10px]" style={{ color: "var(--color-t-tertiary, #888)" }}>
+                              {body}
+                              {confSrcKey ? ` · ${t(confSrcKey)}` : ""}
                             </div>
                           );
                         })()}

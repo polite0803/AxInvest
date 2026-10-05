@@ -30,6 +30,8 @@ pub mod horizon_prior;
 pub mod industry_chain;
 pub mod intent_parser;
 pub mod knowledge_loader;
+/// P4′-b：逐档分支的腿信号单一实现（因子原始量 → `[-1,1]`，缺失=None）
+pub mod leg_signal;
 // Phase 2: fundamentals_report 迁移到 astock-data 层(被 tools crate 依赖),
 // 此处用 pub use 保持向后兼容。
 // re-export conserved for backward compat

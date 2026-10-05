@@ -447,7 +447,12 @@ impl StockVendor for BaiduStockVendor {
                 stock_name: item["stockName"].as_str().unwrap_or("").to_string(),
                 unlock_date: item["unlockDate"].as_str().unwrap_or("").to_string(),
                 unlock_shares: val_to_f64(&item["unlockShares"]).unwrap_or(0.0),
-                unlock_ratio: val_to_f64(&item["unlockRatio"]).unwrap_or(0.0),
+                // 该字段现在只装「股东占当日解禁合计」的日内份额，而百度这个 `unlockRatio`
+                // 的分母**未经证实**（多半是占总股本）⇒ 宁可 `None` 也不把一个不知道是什么的
+                // 数灌进一个已有明确语义的字段（本仓「拿不到」可以，「伪装成正常结果」不行）。
+                // 本路由当前不含 baidu（`lib.rs` 的 `lockup: ["eastmoney"]`），
+                // 若将来接入，必须先核实它的分母再决定往哪个字段映射。
+                intraday_share_pct: None,
                 shareholder: item["shareholder"].as_str().map(|s| s.to_string()),
             })
             .collect())

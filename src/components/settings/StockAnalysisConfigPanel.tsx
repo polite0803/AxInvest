@@ -27,7 +27,13 @@ export function getDefaultVariables(): Variable[] {
   // v48（2026-09-14）：3 → 1，与后端 seed_variables 及 harness 的 serde 缺省值收敛。
   // 多轮在当前引擎中是「假多轮」（第 2+ 轮复用首轮输出 ⇒ 必然假收敛）。
   b("debate_rounds", 1, "stockAnalysis.configDescriptions.debateRounds", "number");
-  b("max_concurrent", 12, "stockAnalysis.configDescriptions.maxConcurrent", "number");
+  // #11（2026-10-05）：12 → 8，与后端工厂缺省收敛。权威源是
+  // `seed_variables.rs` 的 `max_concurrent`（2026-09-08 依 429 重试占槽实证由 3 调到 8），
+  // 此处只是「模板 variables 为空时的初始化值」——而那条路径**会把这批值写回库里**
+  // （见下方 `update_workflow_template` 调用），所以它写的数字必须是工厂缺省而不是随手值。
+  // 现网库里的 10 是用户改过的运行时值，不受影响；引擎侧并发另有按类型分档的兜底
+  // （`rt-workflow/.../engine/mod.rs`，llm/agent=3、tool/file=10），两者不是一回事。
+  b("max_concurrent", 8, "stockAnalysis.configDescriptions.maxConcurrent", "number");
   // 数据源参数
   b("kline_period", "daily", "stockAnalysis.configDescriptions.klinePeriod", "enum");
   // v115（2026-10-01）：120 → 250。权威源是后端 `seed_variables::DEFAULT_ANALYST_KLINE_LIMIT`，
@@ -362,7 +368,9 @@ export function StockAnalysisConfigPanel(_props: Props) {
   // 策略参数分组）。若不标注，TS 会把数组推断成「带该属性 / 不带该属性」的
   // 联合类型，渲染处访问 `g.collapsedByDefault` 直接报错。
   const toolGroups = useMemo<
-    { tool: string; label: string; vars: Variable[]; collapsedByDefault?: boolean }[]
+    // `note` 是分组级说明文案的 **i18n 键**（不是裸文本）：有些组的参数语义会随决策口径换代而变，
+    // 不写明就会被读成「改了没生效」。见 `portfolio_mgr_horizon` 组那条。
+    { tool: string; label: string; vars: Variable[]; collapsedByDefault?: boolean; note?: string }[]
   >(() => {
     const allVars = template?.variables ?? getDefaultVariables();
     const varMap: Record<string, Variable> = {};
@@ -504,6 +512,9 @@ export function StockAnalysisConfigPanel(_props: Props) {
           // 风险预算 R（Phase D-2）：仓位主口径，替代经验周期乘数。
           "risk_budget_pct",
         ]),
+        // 说明放在 vars **之后**：本文件上方的解析器陷阱（注释/属性插在 label 与 vars 之间
+        // 会让整组不被识别）同样适用于 JSX 属性顺序 —— 别把它挪回 label 旁边。
+        note: "stockAnalysis.settings.note.portfolioMgrHorizon",
       },
       {
         tool: "rules",
@@ -1047,6 +1058,13 @@ export function StockAnalysisConfigPanel(_props: Props) {
           >
             {open && (
               <div className="sacp-vars">
+                {g.note
+                  ? (
+                    <div style={{ fontSize: 12, color: token.colorTextSecondary, marginBottom: 8, lineHeight: 1.5 }}>
+                      {t(g.note)}
+                    </div>
+                  )
+                  : null}
                 {g.vars.map((v) => (
                   <div key={v.name} style={rowStyle} className="flex items-center justify-between sacp-row">
                     <span className="sacp-var-label" style={{ fontSize: 13, color: token.colorText }}>

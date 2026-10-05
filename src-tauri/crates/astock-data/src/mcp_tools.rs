@@ -539,7 +539,7 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
         }),
         json!({
             "name": "compute_portfolio_risk",
-            "description": "计算单股风险画像：年化波动率/最大回撤/夏普比率/ROE/毛利率/负债率/营收增速/PE，输出 stockRiskProfile 供下游 portfolio-mgr 决策",
+            "description": "计算单股风险画像：年化波动率/最大回撤/夏普比率/ROE/毛利率/负债率/营收增速/PE（60 日全局口径），另按 2/5/28/90 日窗口输出逐档最大回撤与回撤深度 riskWindows，供下游四档风险分类与 portfolio-mgr 决策",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1866,6 +1866,17 @@ pub async fn execute_mcp_tool(
                     "score": f_score,
                     "level": f_score_level,
                 },
+                // ── 最近实际 EPS（任务 #24：`expectationRevision` 腿的分母）──
+                // 供分支子模板 `input_mapping` 以 `t-valuation.result.content.latestEps.value`
+                // 引用。为什么住在这里而不是新建 `t-financials` 节点：本工具**已经**调
+                // `get_financials`（上方 `let financials`），新节点=同一端点再取一次 + 多一条
+                // DAG 扇出，与本仓「扩字段 > 新建」和吞吐方向都反着走。
+                // ⚠ 耦合要认账：本工具因**行情**取不到而整体失败时，EPS 也一并缺席，
+                //   哪怕财报本身可得 —— 该形态由 `basis` 与「导航失败」两种缺席区分，
+                //   分支脚本据此写不同的 gap 文案，不混成一句「预期没变化」。
+                // 三个键的语义：`value`=年报 eps（无则 null）；`period`=那一期的报告期；
+                // `basis`=有值时 `annual_report`、无值时点名缺的是哪一类（不是空串、不是 0）。
+                "latestEps": latest_eps_payload(&financials),
                 // ── 反向 DCF（2026-09-28）──
                 // 由现价反解「市场隐含的 FCF 复合增速」。锚为正时**恒有值** ⇒ 它是
                 // 「正向 DCF 锚不成立」时的主口径。字段语义见 `valuation.rs::ReverseDcf`。
@@ -1977,60 +1988,62 @@ pub async fn execute_mcp_tool(
                     "compute_portfolio_risk 缺少 stock_codes/stock_code 参数".to_string()
                 })?;
 
-            // 拉取 60 日前复权 K 线计算量化风险指标
+            // 拉取前复权 K 线计算量化风险指标。
+            // B1(2026-10-05) 把 60 根拉长到 **120 根**：长档（90 日）窗口的峰谷回撤需要 91 根
+            // 收盘价。⚠ 下面三个**全局**字段的样本仍截到最后 60 根（`GLOBAL_LOOKBACK`）——
+            // 取数变宽 ≠ 口径变宽，否则同名字段悄悄换成 120 日口径（那是另一次换代）。
             let klines = client
                 .get_klines_with_adj(
                     primary_code,
                     "daily",
-                    60,
+                    120,
                     Some(crate::types::AdjType::Forward),
                 )
                 .await
                 .map_err(|e| e.to_string())?;
 
-            let (ann_vol_pct, max_dd_pct, sharpe) = if klines.len() >= 2 {
-                let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
-                // 日收益率序列
-                let returns: Vec<f64> = closes
-                    .windows(2)
-                    .map(|w| {
-                        if w[0] > 0.0 {
-                            (w[1] - w[0]) / w[0]
-                        } else {
-                            0.0
-                        }
-                    })
-                    .collect();
+            /// 全局波动率 / 回撤 / 夏普的样本锚（交易日数）—— 历史口径，逐位保持不变
+            const GLOBAL_LOOKBACK: usize = 60;
+            let global_bars = klines.len().min(GLOBAL_LOOKBACK);
+            let closes: Vec<f64> =
+                klines[klines.len() - global_bars..].iter().map(|k| k.close).collect();
+            // 日收益率样本标准差（**小数**，不是百分数）：既用于年化波动率，也是逐档回撤
+            // 深度的分母尺度 —— 同一个 σ 两条用途，不另算第二份。
+            let returns: Vec<f64> = closes
+                .windows(2)
+                .map(|w| {
+                    if w[0] > 0.0 {
+                        (w[1] - w[0]) / w[0]
+                    } else {
+                        0.0
+                    }
+                })
+                .collect();
+            let sigma_daily = if returns.len() >= 2 {
+                let mean = returns.iter().sum::<f64>() / returns.len() as f64;
+                axagent_harness::indicators::stddev_sample(&returns, mean)
+            } else {
+                0.0
+            };
+
+            let (ann_vol_pct, max_dd_pct, sharpe) = if !returns.is_empty() {
                 // P3-C8: 夏普比率统一走 harness 实现（样本方差 n-1，A 股 244 天年化）。
                 // 修复历史 bug: 原实现误用总体方差（n 分母），且 252/244 混用导致
                 // 与 stock-analysis/risk.rs 的 Sharpe 结果分叉。
-                // 保留 rf=3% 作为 A 股长期无风险利率近似（10 年期国债中枢）。
                 let rf_daily = 0.03 / axagent_harness::indicators::A_SHARE_TRADING_DAYS_PER_YEAR;
                 let sharpe = axagent_harness::indicators::sharpe_ratio_with_annualization(
                     &returns,
                     rf_daily,
                     axagent_harness::indicators::A_SHARE_TRADING_DAYS_PER_YEAR,
                 );
-                // 年化波动率: 复用 harness stddev_sample 保持算法一致（样本方差 n-1）
-                let mean = returns.iter().sum::<f64>() / returns.len() as f64;
-                let std = axagent_harness::indicators::stddev_sample(&returns, mean);
-                let ann_vol =
-                    std * axagent_harness::indicators::A_SHARE_TRADING_DAYS_PER_YEAR.sqrt() * 100.0;
-                // 最大回撤
-                let mut peak = closes[0];
-                let mut max_dd = 0.0_f64;
-                for &p in &closes {
-                    if p > peak {
-                        peak = p;
-                    }
-                    if peak > 0.0 {
-                        let dd = (peak - p) / peak;
-                        if dd > max_dd {
-                            max_dd = dd;
-                        }
-                    }
-                }
-                let max_dd_pct = max_dd * 100.0;
+                // 年化波动率: σ 已在上方按 harness 样本口径算出，这里只做年化
+                let ann_vol = sigma_daily
+                    * axagent_harness::indicators::A_SHARE_TRADING_DAYS_PER_YEAR.sqrt()
+                    * 100.0;
+                // 最大回撤：算法本体在 harness —— B1 收口，本文件不再自带 peak-trough 循环
+                let max_dd_pct = axagent_harness::indicators::max_drawdown_fraction(&closes)
+                    .unwrap_or(0.0)
+                    * 100.0;
                 (
                     (ann_vol * 10.0).round() / 10.0,
                     (max_dd_pct * 10.0).round() / 10.0,
@@ -2039,6 +2052,61 @@ pub async fn execute_mcp_tool(
             } else {
                 (0.0, 0.0, 0.0)
             };
+
+            // ── B1：逐档回撤窗口（风险按档的数据面）──
+            // 每档两个量：
+            //   · `maxDrawdownPct` —— 本档持有天数窗口内的峰谷最大回撤（%），**按窗口而变**；
+            //   · `drawdownDepth` —— 同一回撤是「本窗口自己的典型位移」`σ_w × √w` 的几倍。
+            // ⚠ 分母必须用**本窗口自己的 σ**，不是 60 日全局 σ。两条都实测过（真库 131 份）：
+            //   用全局 σ 做分母时 depth 的 p90 在 2/5/28/60/90 日为 0.89/0.92/1.30/1.50/1.48
+            //   且 2 日窗口的**历史最大值只有 1.49** ⇒ 任何 ≥1.5 的单条线在超短/短档恒不命中，
+            //   「按档」又变成放松（正是本批要避免的那个错）。用本窗口 σ 后同一线落在 1.62/1.38/
+            //   1.42/1.50/1.49 —— 尾部跨窗口对齐（分级判据用的就是尾部），四档才共用得住一条线。
+            // 为什么不能直接把绝对回撤按档喂给原判据：绝对回撤随窗口**单调**增长
+            // （实测中位 0.9 / 2.7 / 17.3 / 32.9 / 37.7%），而 25/30/45% 三条阈值是按 60 日
+            // 窗口校准的 —— 拿它判 2 日窗口等于要求「两天跌 45%」，恒不命中。
+            // 阈值推导、两条测量 SQL 与 fire-rate 读数见 `PLAN-four-horizon-workflow-alignment.md` §五十四 B1。
+            // 样本不足（次新股 / 窗口内 σ 无定义）⇒ 两个数值一律 null 并留 `windowBars`，
+            // 不拿短窗硬充长窗，也不把「算不出」写成 0（0 深度会被读成「这档很安全」）。
+            let mut risk_windows = serde_json::Map::new();
+            for (tier_key, window_days) in
+                [("ultraShort", 2usize), ("short", 5), ("mid", 28), ("long", 90)]
+            {
+                let need = window_days + 1;
+                let (dd_v, depth_v) = if klines.len() >= need {
+                    let win_closes: Vec<f64> =
+                        klines[klines.len() - need..].iter().map(|k| k.close).collect();
+                    // σ_w：本窗口自己的日收益样本标准差（%，全仓唯一实现 `realized_vol_pct`；
+                    // 样本不足或含非正价格 ⇒ None ⇒ 本格整体缺席，不硬算）
+                    let sigma_w =
+                        axagent_harness::indicators::realized_vol_pct(&win_closes, window_days);
+                    match (axagent_harness::indicators::max_drawdown_fraction(&win_closes), sigma_w)
+                    {
+                        (Some(frac), Some(sigma_w)) if sigma_w > 0.0 => {
+                            let dd_pct = frac * 100.0;
+                            // 本窗口典型位移 = σ_w × √w（与 `indicators::vol_move_pct` 同一组合，
+                            // 差别只在该函数用固定 lookback 的 σ 配任意持有期，这里两者都取本窗口）
+                            let typical = sigma_w * (window_days as f64).sqrt();
+                            (
+                                json!(((dd_pct * 10.0).round() / 10.0)),
+                                json!(((dd_pct / typical * 100.0).round() / 100.0)),
+                            )
+                        },
+                        _ => (serde_json::Value::Null, serde_json::Value::Null),
+                    }
+                } else {
+                    (serde_json::Value::Null, serde_json::Value::Null)
+                };
+                risk_windows.insert(
+                    tier_key.into(),
+                    json!({
+                        "windowDays": window_days,
+                        "windowBars": klines.len().min(need),
+                        "maxDrawdownPct": dd_v,
+                        "drawdownDepth": depth_v,
+                    }),
+                );
+            }
 
             // 拉取财报提取基本面指标(取最新一条)
             let financials =
@@ -2071,8 +2139,11 @@ pub async fn execute_mcp_tool(
                     "debtRatioPct": debt_ratio_pct,
                     "revenueGrowthYoYPct": revenue_growth_yoy_pct,
                     "peTTM": pe_ttm,
+                    // B1：逐档回撤窗口（2/5/28/90 交易日）。上游 `cls-risk-level-{tier}`
+                    // 四个节点各读自己那一格；全局三个量化字段仍是 60 日口径，未动。
+                    "riskWindows": serde_json::Value::Object(risk_windows),
                 },
-                "risk_note": "基于60日前复权K线计算波动率/回撤/夏普, 基本面指标取最新财报",
+                "risk_note": "基于最后 60 根前复权 K 线计算波动率/回撤/夏普(全局口径), 另按 2/5/28/90 日窗口逐档输出最大回撤与回撤深度; 基本面指标取最新财报",
             });
             serde_json::to_string(&result).map_err(|e| e.to_string())
         },
@@ -2267,6 +2338,59 @@ fn compute_f_score(financials: &[FinancialReport]) -> u32 {
     }
 
     score.min(9)
+}
+
+/// 最近一个**已披露年报**的每股收益（`expectationRevision` 腿的分母，任务 #24）。
+///
+/// 只认年报（`report_date` **含** `-12-31`，与本文件既有年报口径同源 —— 见
+/// `normalized_annual_profit` / `normalized_annual_eps` / `latest_annual_fcf` 里的
+/// `contains("-12-31")`：vendor 有 `"2025-12-31"` 与 `"2025-12-31 00:00:00"` 两种形态，
+/// 用 `ends_with` 会**静默**漏掉后者）。一致预期 EPS 是**年度**口径
+/// （`ConsensusEPS.year` 标的就是财年），而季报/半年报的 `eps` 是**年内累计值** ——
+/// 同报告里 `pe` 用的却是年化 EPS，这个混淆本仓已经踩过一次
+/// （`fundamentals_report.rs:97`）。拿累计值当年产值会把修正幅度系统性算歪
+/// （一季报 ≈ 全年四分之一 ⇒ 「预期下调」几乎恒成立）。
+///
+/// **不做年化外推**：那是拿近似数据顶替（用户裁定③明文禁止）。没有已披露年报就返回
+/// `None`，让下游按**缺席**处理，并在 payload 里点名为什么缺。
+///
+/// `eps <= 0`（亏损股）**照样返回** —— 「亏损时比值无经济含义」的判据在
+/// `analysis-engine::leg_signal` 那一层，两处各判一次就会互相掩盖。
+///
+/// as-of：入参已由 `get_financials` 按**披露日**（不是报告期）截断
+/// （`truncate_financials_by_asof`，P1-1 2026-10-03）⇒ 列表里全是截止日前已披露的期，
+/// 本函数不需要也不应该再判一次日期。
+fn latest_annual_eps(financials: &[FinancialReport]) -> Option<(&str, f64)> {
+    financials
+        .iter()
+        // 估值/行业均值 fallback 行不是真实财报（`estimated` 标记），不能当分母
+        .filter(|r| r.estimated != Some(true))
+        .filter_map(|r| {
+            // 报告期键与 `report_period_key` 同源（兼容带时间戳的两种 vendor 形态）
+            let key = report_period_key(&r.report_date)?;
+            let eps = r.eps?;
+            key.ends_with("-12-31").then_some((key, eps))
+        })
+        // 按**归一化后的报告期键**比，不按原始串（原始串可能带 ` 00:00:00` 尾巴）；
+        // 也不依赖 vendor 的行序（`compute_f_score` 取 financials[0] 是另一回事）
+        .max_by(|(a, _), (b, _)| a.cmp(b))
+}
+
+/// `latestEps` 载荷块（键名即 `input_mapping` 的叶子路径，故单独成函数供测试断言）。
+///
+/// 三键语义：`value` = 年报 eps（无则 `null`）；`period` = 那一期的报告期（无则 `null`）；
+/// `basis` = 有值时 `annual_report`、无值时点名缺的是哪一类。
+/// **缺席时不输出 0、不输出空串** —— 那些形态会被下游当成「真实值 0」参与计算。
+fn latest_eps_payload(financials: &[FinancialReport]) -> serde_json::Value {
+    let annual = latest_annual_eps(financials);
+    json!({
+        "value": annual.map(|(_, e)| e),
+        "period": annual.map(|(k, _)| k.to_string()),
+        "basis": match annual {
+            Some(_) => "annual_report",
+            None => "no_annual_report_disclosed",
+        },
+    })
 }
 
 /// 护城河量化评分 (0-100)
@@ -4587,15 +4711,14 @@ async fn compute_attention_score_impl(
     let visits = visits.map_err(|e| e.to_string()).unwrap_or_default();
 
     // 研报覆盖度（最近 90 天）
-    let now = chrono::Utc::now();
-    let cutoff_90d = now - chrono::Duration::days(90);
+    // ⚠ 窗口锚点必须走 as-of（任务 #46，PLAN §五十七/§五十八）：首版用 `Utc::now()`，
+    //   而上游 `get_research_reports` **已按截止日截断** ⇒ 回放时分母仍以「今天」为界，
+    //   cutoff 落在历史之后 ⇒ 一律判「零覆盖」。这是**锚点错**（不泄露未来数据，但读数假）。
+    //   `current_date_or_now()` 在无 as-of 时返回今天 ⇒ live 路径逐位不变，只修正回放。
+    let anchor = attention_window_anchor();
     let recent_reports: Vec<_> = reports
         .iter()
-        .filter(|r| {
-            chrono::DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", r.publish_date))
-                .map(|dt| dt.with_timezone(&chrono::Utc) > cutoff_90d)
-                .unwrap_or(false)
-        })
+        .filter(|r| publish_within_window(&r.publish_date, anchor, ATTENTION_WINDOW_DAYS))
         .collect();
     let research_count = recent_reports.len();
     let coverage_change_3m = if research_count == 0 {
@@ -5087,6 +5210,32 @@ fn optimize_attention_weights_impl(samples: &Vec<serde_json::Value>) -> serde_js
     })
 }
 
+/// 「近 N 天」类窗口的天数（研报覆盖度与机构调研共用同一条口径）。
+const ATTENTION_WINDOW_DAYS: i64 = 90;
+
+/// attention 类窗口的**锚点日期**：有 as-of 用 as-of，没有则北京时区当日。
+///
+/// 缺省分支必须与 `as_of::current_date_or_now()` 同口径（北京时区）——
+/// 自己再取一次 `Utc::now().date_naive()` 就是「一个函数里两份时区口径」，
+/// 而那正是 #46 病灶的形状（窗口边界按 UTC 算、数据日期按北京算）。
+fn attention_window_anchor() -> chrono::NaiveDate {
+    chrono::NaiveDate::parse_from_str(&crate::as_of::current_date_or_now(), "%Y-%m-%d")
+        .unwrap_or_else(|_| (chrono::Utc::now() + chrono::Duration::hours(8)).date_naive())
+}
+
+/// 发布日是否落在「锚点往前 `days` 天」窗口内（严格大于边界，与改造前一致）。
+///
+/// 为什么抽成纯函数（#46）：这条判据的缺陷全在**锚点**，而锚点内联在 impl 里时，
+/// 任何回归都只能靠真实网络取数才能复现「回放恒判零覆盖」——即**写不出门**。
+/// 只比日期、不做时区往返：原实现把发布日拼成 `T00:00:00Z` 再与 `Utc::now()` 比，
+/// 等于把「北京时间的今天」和「UTC 零点」塞进同一个不等式。
+fn publish_within_window(publish_date: &str, anchor: chrono::NaiveDate, days: i64) -> bool {
+    match chrono::NaiveDate::parse_from_str(publish_date, "%Y-%m-%d") {
+        Ok(d) => d > anchor - chrono::Duration::days(days),
+        Err(_) => false,
+    }
+}
+
 #[cfg(test)]
 mod valuation_tests {
     use super::*;
@@ -5117,6 +5266,74 @@ mod valuation_tests {
             estimated: Some(false),
             disclosure_date: None,
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 2026-10-05 · 任务 #24：`expectationRevision` 的分母 = 最近**已披露年报**的 EPS
+    // ═══════════════════════════════════════════════════════════════════════
+
+    fn rows(v: &[(&str, Option<f64>)]) -> Vec<FinancialReport> {
+        v.iter().map(|(d, eps)| report(d, None, *eps)).collect()
+    }
+
+    #[test]
+    fn latest_annual_eps_takes_the_newest_annual_regardless_of_row_order() {
+        let fins = rows(&[
+            ("2026-03-31", Some(0.4)), // 一季报是年内累计值 ⇒ 不参与
+            ("2024-12-31", Some(0.9)),
+            ("2025-12-31", Some(1.2)),
+        ]);
+        let got = latest_annual_eps(&fins).expect("应有已披露年报");
+        assert_eq!(got.0, "2025-12-31");
+        assert_eq!(got.1, 1.2);
+    }
+
+    /// vendor 的 `report_date` 有带时间戳形态（既有年报口径 helper 就是为它写的）；
+    /// 按 `ends_with` 判会**静默**漏掉整批行 ⇒ 用归一化报告期键。
+    #[test]
+    fn latest_annual_eps_accepts_timestamped_report_date() {
+        let fins = rows(&[("2025-12-31 00:00:00", Some(1.2))]);
+        let got = latest_annual_eps(&fins).expect("带时间戳的报告期同样是年报");
+        assert_eq!(got.0, "2025-12-31", "period 输出归一化成 10 位键");
+        assert_eq!(got.1, 1.2);
+    }
+
+    #[test]
+    fn latest_annual_eps_is_absent_when_only_interim_periods_exist() {
+        // 只有季报/半年报 ⇒ 按缺席处理，**不做年化外推**（裁定③禁止用近似数据顶替）
+        let fins = rows(&[("2026-03-31", Some(0.4)), ("2025-06-30", Some(0.7))]);
+        assert!(latest_annual_eps(&fins).is_none());
+    }
+
+    #[test]
+    fn latest_annual_eps_skips_estimated_fallback_rows() {
+        let mut fake = report("2025-12-31", None, Some(5.0));
+        fake.estimated = Some(true);
+        let fins = vec![fake, report("2024-12-31", None, Some(0.9))];
+        let got =
+            latest_annual_eps(&fins).expect("估值/均值 fallback 行不算真实财报，退到上一年报");
+        assert_eq!(got.0, "2024-12-31");
+    }
+
+    #[test]
+    fn latest_annual_eps_keeps_loss_making_eps_for_downstream_to_judge() {
+        // 「亏损时比值无经济含义」由 leg_signal 判 ⇒ 这里不得提前吞掉
+        let fins = rows(&[("2025-12-31", Some(-0.5))]);
+        let got = latest_annual_eps(&fins).expect("亏损年报照样返回");
+        assert_eq!(got.1, -0.5);
+    }
+
+    #[test]
+    fn latest_eps_payload_names_the_absence_instead_of_filling_zero() {
+        let p = latest_eps_payload(&rows(&[("2026-03-31", Some(0.4))]));
+        assert!(p["value"].is_null(), "缺席必须是 null，不能是 0");
+        assert!(p["period"].is_null());
+        assert_eq!(p["basis"], "no_annual_report_disclosed");
+
+        let p2 = latest_eps_payload(&rows(&[("2025-12-31", Some(1.2))]));
+        assert_eq!(p2["value"], 1.2);
+        assert_eq!(p2["period"], "2025-12-31");
+        assert_eq!(p2["basis"], "annual_report");
     }
 
     fn shares_of(shares: f64) -> Option<f64> {
@@ -6955,5 +7172,58 @@ mod consensus_gap_tests {
         assert_eq!(classify_consensus_gap(None, 100.0, 5), "无研报共识", "无目标价");
         assert_eq!(classify_consensus_gap(Some(130.0), 0.0, 5), "无研报共识", "现价无效");
         assert_eq!(classify_consensus_gap(None, 0.0, 0), "无研报共识", "双缺");
+    }
+}
+#[cfg(test)]
+mod attention_window_tests {
+    //! #46：attention 类窗口的**锚点**回归。
+    //!
+    //! 病灶不是取数、是窗口边界：上游 `get_research_reports` 已按 as-of 截断，
+    //! 而窗口锚点原写死 `Utc::now()` ⇒ 回放的 cutoff 落在历史之后 ⇒ 一律「零覆盖」。
+    //! 本模块锁两件事：① 边界随锚点走（同一批发布日，换锚点结论就换）；
+    //! ② 判据不因「今天」而变 —— 也就是回归「两次同 as_of_date 读数必须相同」的纯函数形态。
+
+    use super::{publish_within_window, ATTENTION_WINDOW_DAYS};
+    use chrono::NaiveDate;
+
+    fn d(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").expect("夹具日期格式")
+    }
+
+    /// 一条 2026-01-10 发布的研报：锚点在其后 30 天 ⇒ 在窗口内；
+    /// 锚点在其后 200 天 ⇒ 已出窗。**同一行数据、只换锚点，结论必须不同** ——
+    /// 若实现按墙钟算，这两条断言会同时为「窗口内/外」的同一个值（就是原缺陷）。
+    #[test]
+    fn window_moves_with_the_anchor_not_with_the_wall_clock() {
+        let pub_date = "2026-01-10";
+        assert!(
+            publish_within_window(pub_date, d("2026-02-09"), ATTENTION_WINDOW_DAYS),
+            "锚点距发布 30 天，应判窗口内"
+        );
+        assert!(
+            !publish_within_window(pub_date, d("2026-08-01"), ATTENTION_WINDOW_DAYS),
+            "锚点距发布 203 天，应判窗口外"
+        );
+    }
+
+    /// 边界是**严格大于** cutoff（与改造前逐位一致，不是顺手改成 >=）。
+    #[test]
+    fn boundary_is_strict() {
+        let anchor = d("2026-04-10");
+        let cutoff = anchor - chrono::Duration::days(ATTENTION_WINDOW_DAYS);
+        // 发布日 == cutoff ⇒ 不命中（严格大于才算在窗口内）
+        let on_edge = cutoff.format("%Y-%m-%d").to_string();
+        assert!(!publish_within_window(&on_edge, anchor, ATTENTION_WINDOW_DAYS));
+        // 发布日 == cutoff + 1 天 ⇒ 命中
+        let inside = (cutoff + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        assert!(publish_within_window(&inside, anchor, ATTENTION_WINDOW_DAYS));
+    }
+
+    /// 发布日不可解析 ⇒ 按「不在窗口内」处理（不得当成 0 天、也不得 panic）。
+    #[test]
+    fn unparsable_publish_date_is_excluded() {
+        assert!(!publish_within_window("", d("2026-01-10"), ATTENTION_WINDOW_DAYS));
+        assert!(!publish_within_window("2026/01/10", d("2026-01-10"), ATTENTION_WINDOW_DAYS));
+        assert!(!publish_within_window("近期", d("2026-01-10"), ATTENTION_WINDOW_DAYS));
     }
 }

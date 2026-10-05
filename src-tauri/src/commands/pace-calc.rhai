@@ -154,13 +154,11 @@ if llm_events_str != "" {
         // 检查是否是 a-catalyst 的输出格式（含 catalyst_level 字段）
         if type_of(inner["catalyst_level"]) == "string" {
             let level = inner["catalyst_level"];
-            let confidence_val = if type_of(inner["confidence"]) == "f64" {
-                inner["confidence"] / 100.0
-            } else if type_of(inner["confidence"]) == "int" {
-                inner["confidence"] * 1.0 / 100.0
-            } else {
-                0.5
-            };
+            // 过 `num_of`：`a-catalyst.content` 是**模型手写的 JSON**，置信度写成了整数
+            // （`85` / `1`）是常态，而嵌层整数注入落 i64 ⇒ 原来的 `type_of(..)=="f64"` 判据
+            // 把它判成缺席、落 0.5 兜底，等于用近似值顶替模型真给过的数。
+            let raw_conf = num_of(inner["confidence"]);
+            let confidence_val = if present(raw_conf) { raw_conf / 100.0 } else { 0.5 };
 
             // 从 catalyst_level 提取事件类型
             // L1/L2/L3 = 利好事件, L-1/L-2/L-3 = 利空事件
@@ -232,7 +230,7 @@ if events.len() == 0 && ann_events_str != "" {
                     "event_type": combined_type,
                     "source_type": "official",
                     "confidence_score": 0.9,
-                    "hours_elapsed": if type_of(item["hours_elapsed"]) == "f64" { item["hours_elapsed"] } else { 24.0 },
+                    "hours_elapsed": num_of(item["hours_elapsed"], 24.0),
                     "target_entity": if type_of(item["stock_code"]) == "string" { item["stock_code"] } else { "" },
                 });
             }
@@ -246,9 +244,8 @@ let valid_event_count = 0;
 let discarded_events = [];
 
 for evt in events {
-    let llm_confidence = if type_of(evt["confidence_score"]) == "f64" { evt["confidence_score"] }
-        else if type_of(evt["confidence"]) == "f64" { evt["confidence"] }
-        else { 0.5 };
+    let evt_conf_score = num_of(evt["confidence_score"]);
+    let llm_confidence = if present(evt_conf_score) { evt_conf_score } else { num_of(evt["confidence"], 0.5) };
 
     // C 维度：LLM 自评 <0.4 自动丢弃
     if llm_confidence < 0.4 {
@@ -268,9 +265,8 @@ for evt in events {
         else if type_of(evt["source"]) == "string" { evt["source"] }
         else { "unknown" };
 
-    let hours_elapsed = if type_of(evt["hours_elapsed"]) == "f64" { evt["hours_elapsed"] }
-        else if type_of(evt["age_hours"]) == "f64" { evt["age_hours"] }
-        else { 24.0 };
+    let evt_hours = num_of(evt["hours_elapsed"]);
+    let hours_elapsed = if present(evt_hours) { evt_hours } else { num_of(evt["age_hours"], 24.0) };
 
     let base_score = classify_event(event_type);
     let source_weight = classify_source(source_type);
@@ -287,9 +283,8 @@ for evt in events {
 // 取最近一条事件距今的小时数
 let min_hours = 999.0;
 for evt in events {
-    let h = if type_of(evt["hours_elapsed"]) == "f64" { evt["hours_elapsed"] }
-        else if type_of(evt["age_hours"]) == "f64" { evt["age_hours"] }
-        else { 24.0 };
+    let h_raw = num_of(evt["hours_elapsed"]);
+    let h = if present(h_raw) { h_raw } else { num_of(evt["age_hours"], 24.0) };
     if h < min_hours { min_hours = h; }
 }
 let a_score = if min_hours < 999.0 { time_decay(min_hours) } else { 0.0 };
@@ -300,9 +295,8 @@ let c_score = if valid_event_count > 0 {
     let total_cred = 0.0;
     let cred_count = 0;
     for evt in events {
-        let llm_conf = if type_of(evt["confidence_score"]) == "f64" { evt["confidence_score"] }
-            else if type_of(evt["confidence"]) == "f64" { evt["confidence"] }
-            else { 0.5 };
+        let conf_score_val = num_of(evt["confidence_score"]);
+        let llm_conf = if present(conf_score_val) { conf_score_val } else { num_of(evt["confidence"], 0.5) };
         if llm_conf < 0.4 { continue; }
         let source_type = if type_of(evt["source_type"]) == "string" { evt["source_type"] }
             else if type_of(evt["source"]) == "string" { evt["source"] }
@@ -320,18 +314,18 @@ let e_anomaly = false;
 if present(p_history) && type_of(p_history) == "array" && p_history.len() >= 5 {
     let n = p_history.len();
     let sum = 0.0;
+    // `num_of` 而不是 `type_of(val)=="f64"` / `=="int"`：数组元素的整数按嵌层口径落 i64，
+    //   而 `"int"` 在 64-bit 构建下恒不成立 ⇒ 原写法会把整数项**从求和里悄悄漏掉**（mean/std 随之错）。
     for val in p_history {
-        if type_of(val) == "f64" { sum += val; }
-        else if type_of(val) == "int" { sum += val; }
+        let v = num_of(val);
+        if present(v) { sum += v; }
     }
     let mean = sum / n;
     let sq_sum = 0.0;
     for val in p_history {
-        if type_of(val) == "f64" {
-            let diff = val - mean;
-            sq_sum += diff * diff;
-        } else if type_of(val) == "int" {
-            let diff = val - mean;
+        let v = num_of(val);
+        if present(v) {
+            let diff = v - mean;
             sq_sum += diff * diff;
         }
     }

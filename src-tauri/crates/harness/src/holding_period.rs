@@ -61,6 +61,13 @@ pub struct HorizonVerdictSpec {
     pub not_applicable: Vec<(&'static str, &'static str)>,
     /// 条件字段（只作过滤 / 部分来源）→ 标记键
     pub qualified: Vec<(&'static str, &'static str)>,
+    /// **进方向加权**的因子（= 契约里既参与、又不带「只作过滤 / 只作风险提示」标记的那一批）。
+    ///
+    /// 与 `qualified` 的分工：`fields` 是「模型必须输出什么」，
+    /// `participating` 是「决策融合拿它做什么」—— 长档的 `trendStrength` 在 `fields` 里（必须输出），
+    /// 但不在本清单里（走 `qualified` 的 `trendFilterOnly` ⇒ 只作入场时机过滤）。
+    /// P4′ 的逐档分支表按这一划分定 role。
+    pub participating: Vec<&'static str>,
     /// 该档出场规则口径（`exitRule` 的取值域）
     pub exit_rule: &'static str,
 }
@@ -79,11 +86,14 @@ const VERDICT_COMMON_FIELDS: &[&str] = &[
     "positionSource",
 ];
 
-/// 九个逐档因子（`fields` / `not_applicable` / `qualified` 的划分域）。
-/// 新增因子必须同时登记 [`na_key`]，否则 `verdict_spec` 会当场 panic 而不是静默漏判。
+/// 逐档因子（`fields` / `not_applicable` / `qualified` 的划分域）。
+///
+/// 新增因子必须同时登记 [`na_key`] **与** [`VERDICT_FACTOR_OWNERS`]，否则 `verdict_spec`
+/// 或分析师子集推导会当场 panic 而不是静默漏判。
 const VERDICT_FACTORS: &[&str] = &[
     "momentumSignal",
     "microstructure",
+    "breadthState",
     "flowPersistence",
     "trendStrength",
     "valuationBand",
@@ -91,7 +101,37 @@ const VERDICT_FACTORS: &[&str] = &[
     "expectationRevision",
     "macroRegime",
     "supplyShock",
+    "sectorRotation",
 ];
+
+/// 因子 → **证据属主分析师**的唯一表（节点 id 与 `seed_stock_analysis.rs` 的 `analysts` 数组一致）。
+///
+/// 存在理由（2026-10-03 P4′ 第一步）：四档子工作流「挂哪些分析师」原先是 PLAN §10-4 里
+/// 手抄的四行清单，而**因子集**已由 [`Period::verdict_spec`] 定档 ⇒ 两份清单必然漂移。
+/// 实测漂移后果不是文字问题而是死输入：手抄清单的 中档/长档**都没挂 `value-investor`**，
+/// 而两档的必填因子都含 `valuationBand` ⇒ 该腿在子图里永远拿不到产出方。
+/// ⇒ 挂载集合改为**由本表推导**（`Period::analyst_subset`），§10-4 那张表降为历史注释。
+///
+/// 两个刻意不在本表里的分析师（有节点、无因子）：
+/// - `a-news`：公告方向通道已由 `a-catalyst` 的 `eventCatalyst` 承载，同域双挂=重复计数；
+/// - `research-mgr`：裁决/合成层，不是证据方。
+pub const VERDICT_FACTOR_OWNERS: &[(&str, &str)] = &[
+    ("momentumSignal", "a-market-analyst"),
+    ("trendStrength", "a-market-analyst"),
+    ("microstructure", "a-hot-money"),
+    ("flowPersistence", "a-hot-money"),
+    // 涨停家数 / 触板数 / 封板率 / 炸板率 —— 数据侧由 P9-4 的 `LimitUpBreadth` 供上（可按日回溯）。
+    ("breadthState", "a-sentiment"),
+    ("valuationBand", "value-investor"),
+    ("earningsQuality", "a-fundamentals"),
+    ("expectationRevision", "a-research"),
+    ("macroRegime", "a-policy"),
+    ("supplyShock", "a-lockup"),
+    ("sectorRotation", "a-sector"),
+];
+
+/// 跨档共用因子（在 [`VERDICT_COMMON_FIELDS`] 里，每档都必填）的属主。
+pub const COMMON_FACTOR_OWNERS: &[(&str, &str)] = &[("eventCatalyst", "a-catalyst")];
 
 /// 「按构造不适用」的显式文案键。
 ///
@@ -103,6 +143,7 @@ fn na_key(factor: &'static str) -> &'static str {
     match factor {
         "momentumSignal" => "notApplicableMomentum",
         "microstructure" => "notApplicableMicrostructure",
+        "breadthState" => "notApplicableBreadth",
         "flowPersistence" => "notApplicableFlow",
         "trendStrength" => "notApplicableTrend",
         "valuationBand" => "notApplicableValuation",
@@ -110,6 +151,7 @@ fn na_key(factor: &'static str) -> &'static str {
         "expectationRevision" => "notApplicableExpectation",
         "macroRegime" => "notApplicableMacro",
         "supplyShock" => "notApplicableSupply",
+        "sectorRotation" => "notApplicableSector",
         other => panic!("未登记的逐档因子名（新增因子要同时补 na_key）: {other}"),
     }
 }
@@ -123,6 +165,9 @@ fn na_key(factor: &'static str) -> &'static str {
 /// - `supplyAsRiskNoteOnly`：解禁/减持在中档已被趋势吸收，降为风险提示、不参与方向。
 /// - `trendFilterOnly`：长档技术腿只作入场时机过滤（R-11 明文不得进方向加权）。
 /// - `macroPartialSeriesOnly`：宏观只有五条真序列（P9-1），货币/社融类无供应。
+/// - `sectorRotationAsOfGap`：行业景气/轮动**live 有真源**（`get_industry_ranking`），
+///   但回放不可得 —— BK 板块历史源已普查穷尽（本机对 push2* 族按累积量/速率触发 RST），
+///   属结构性缺口 ⇒ 长档可引用它作入场背景，**不得进方向加权**，回放时必须带标记。
 fn qualified_reason(key: &str) -> &'static str {
     match key {
         "microstructurePartialSource" => "连板/封单/炸板有真字段，逐笔与 L2 撮合明细零通路",
@@ -130,8 +175,29 @@ fn qualified_reason(key: &str) -> &'static str {
         "supplyAsRiskNoteOnly" => "供给冲击在窗口内已被趋势吸收，只作风险提示",
         "trendFilterOnly" => "技术腿只作入场时机过滤，不得进方向加权",
         "macroPartialSeriesOnly" => "宏观仅 CPI/PPI/PMI/非制造业 PMI/GDP 五条真序列",
+        "sectorRotationAsOfGap" => "行业轮动 live 有源、回放结构性不可得，只作背景不进方向",
         other => panic!("未登记的条件字段标记键: {other}"),
     }
+}
+
+/// `stock_analyses.decision_horizon_source` 的**唯一值域** —— 主档「是谁定的档」。
+///
+/// 为什么必须在 harness 立这一份：同一个值有三处载体 —— 产出方 `portfolio-mgr.rhai`
+/// （脚本字面量）、落库方 `stock_workflow::decision::extract_horizon_source`（白名单归一）、
+/// 展示方前端 `horizonSourceLabelKey`（值 → i18n 键）。三处各抄一遍字面量时，任一处漏一个值
+/// 的后果不是报错而是**静默归一成 `model`（= 采信模型自报）** —— 那是把「四档分支选档」说成
+/// 「模型说了算」，与「缺席不得伪装成别的来源」同族。值域在此单点，白名单与门禁都从这里读。
+pub const HORIZON_SOURCES: &[&str] = &[
+    "branch_pick",       // 现网正常路径：主档由四档分支结论选出（Q1=C，PLAN §四十八）
+    "formula_no_branch", // 兜底：四路分支全部未产出 ⇒ 退回后验阈值定档（必须与上一值可区分）
+    "formula",           // 历史值：〇-B v2 ~ R-11 之前的本地公式阈值定档
+    "model",             // 历史值：v2 之前采信 trader 自报
+    "user",              // 历史值：v1 的用户入口锁档（通路已撤除，仅存量行可能带此值）
+];
+
+/// 判定一个 `horizonSource` 字面量是否在值域内（落库白名单与门禁共用）。
+pub fn is_horizon_source(v: &str) -> bool {
+    HORIZON_SOURCES.contains(&v)
 }
 
 impl Period {
@@ -293,13 +359,21 @@ impl Period {
     pub fn verdict_spec(&self) -> HorizonVerdictSpec {
         // (该档直接用到的因子, 只作过滤/部分来源的因子 → 标记键, 出场口径)
         let (plain, qualified, exit_rule): (&[&str], &[(&str, &str)], &str) = match self {
+            // 超短（2 日）：短窗动量 + 涨停板情绪广度（家数/封板率/炸板，P9-4 真字段）。
+            // `microstructure`（封单/连板结构）只到板级、无撮合级 ⇒ 条件字段。
             Period::UltraShort => (
-                &["momentumSignal"],
+                &["momentumSignal", "breadthState"],
                 &[("microstructure", "microstructurePartialSource")],
                 "time_stop",
             ),
             Period::Short => (
-                &["momentumSignal", "flowPersistence", "trendStrength", "supplyShock"],
+                &[
+                    "momentumSignal",
+                    "breadthState",
+                    "flowPersistence",
+                    "trendStrength",
+                    "supplyShock",
+                ],
                 &[],
                 "time_stop+fixed_stop",
             ),
@@ -311,9 +385,14 @@ impl Period {
                 ],
                 "k_sigma_band",
             ),
+            // 长档（90 日）：技术腿只作入场过滤；行业轮动 live 有源但回放不可得 ⇒ 条件字段。
             Period::Long => (
                 &["valuationBand", "earningsQuality", "expectationRevision", "macroRegime"],
-                &[("trendStrength", "trendFilterOnly"), ("macroRegime", "macroPartialSeriesOnly")],
+                &[
+                    ("trendStrength", "trendFilterOnly"),
+                    ("macroRegime", "macroPartialSeriesOnly"),
+                    ("sectorRotation", "sectorRotationAsOfGap"),
+                ],
                 "target_and_falsified",
             ),
         };
@@ -334,7 +413,42 @@ impl Period {
             .map(|f| (f, na_key(f)))
             .collect();
 
-        HorizonVerdictSpec { fields, not_applicable, qualified: qualified.to_vec(), exit_rule }
+        HorizonVerdictSpec {
+            fields,
+            not_applicable,
+            qualified: qualified.to_vec(),
+            participating: plain.to_vec(),
+            exit_rule,
+        }
+    }
+
+    /// 因子 → 证据属主分析师（[`VERDICT_FACTOR_OWNERS`] ∪ [`COMMON_FACTOR_OWNERS`]）。
+    pub fn factor_owner(factor: &str) -> Option<&'static str> {
+        VERDICT_FACTOR_OWNERS
+            .iter()
+            .chain(COMMON_FACTOR_OWNERS.iter())
+            .find(|(f, _)| *f == factor)
+            .map(|(_, a)| *a)
+    }
+
+    /// 该档**子工作流应挂载的分析师** = 该档全部参与因子（必填 ∪ 条件）的属主 ∪ 共用因子属主，
+    /// 去重后按名排序（排序是为了让门与快照可比，不代表优先级）。
+    ///
+    /// 为什么由推导而不是清单：清单里漏挂一个属主 ⇒ 该腿在子图里拿不到产出方（实测
+    /// PLAN §10-4 的中档/长档都漏了 `value-investor`，而两档的 `valuationBand` 都是必填）；
+    /// 多挂一个无因子的分析师 ⇒ 白烧一次 LLM 调用并把「它在场」误读成「它的证据进了融合」。
+    pub fn analyst_subset(&self) -> Vec<&'static str> {
+        let spec = self.verdict_spec();
+        let mut out: Vec<&'static str> = spec
+            .fields
+            .iter()
+            .filter_map(|f| Self::factor_owner(f))
+            .chain(spec.qualified.iter().filter_map(|(f, _)| Self::factor_owner(f)))
+            .chain(COMMON_FACTOR_OWNERS.iter().map(|(_, a)| *a))
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 }
 
@@ -353,6 +467,64 @@ impl std::str::FromStr for Period {
         }
     }
 }
+
+/// 档位后缀的分隔符。
+///
+/// 为什么不是单横线：base id 自身就含单横线（`a-market-analyst`、`a-hot-money`），
+/// 用单横线拼接后「该剥到哪一段」没有唯一解；`--` 不在 base 域里出现 ⇒ `strip` 唯一可逆。
+/// 配套的门反向锁「base 域里禁止出现 `--`」，否则这条前提会在未来某个新分析师身上静默失效。
+pub const ANALYST_TIER_SEP: &str = "--";
+
+/// 某档分析师子集里一个分析师的**实例节点 id**。
+///
+/// 存在理由（B2-1）：四档各跑 [`Period::analyst_subset`] 列出的分析师 ⇒ 同一个 base 需要多份
+/// 节点 id。若把档位后缀写死进字符串字面量，全仓十几处「按完整 id 精确匹配」的读端
+/// （种子里的 `match *id`、data-quality 的映射、`decision.rs` 的 expert_mapping、
+/// `astock-data/quality.rs` 的必采清单等）会**静默失效**：不报错，只是那一格永远是空的。
+/// 读写两端都经由本函数与 [`analyst_base_of`]，消费侧的键名域（短名、i18n key、面板行 key）
+/// 就完全不需要知道「档位后缀」这件事存在。
+///
+/// ```
+/// use axagent_harness::holding_period::analyst_node_id;
+/// assert_eq!(analyst_node_id("a-market-analyst", "mid"), "a-market-analyst--mid");
+/// ```
+pub fn analyst_node_id(base: &str, tier_snake: &str) -> String {
+    debug_assert!(
+        !base.contains(ANALYST_TIER_SEP),
+        "base 域禁止包含分隔符 {ANALYST_TIER_SEP}（会让 analyst_base_of 的剥离不唯一）"
+    );
+    format!("{base}{ANALYST_TIER_SEP}{tier_snake}")
+}
+
+/// 从节点 id 剥回 base；不是「base--已知档」形状时返回 `None`。
+///
+/// `None` 是有意义的两种情形，调用方**不得猜**：① 历史行与快速链里的裸 base id（改造前的
+/// 节点、以及刻意不分档的那些链），② 后缀不是四档之一（接线接错对象，该报不该兜）。
+///
+/// ```
+/// use axagent_harness::holding_period::analyst_base_of;
+/// assert_eq!(analyst_base_of("a-hot-money--ultra_short"), Some("a-hot-money"));
+/// assert_eq!(analyst_base_of("a-hot-money"), None, "裸 base id 不当成某档实例");
+/// assert_eq!(analyst_base_of("a-hot-money--deca"), None, "未知档位后缀不猜 base");
+/// ```
+pub fn analyst_base_of(node_id: &str) -> Option<&str> {
+    let (base, tier) = node_id.split_once(ANALYST_TIER_SEP)?;
+    if base.is_empty() || !Period::ALL.iter().any(|p| p.as_str() == tier) {
+        return None;
+    }
+    Some(base)
+}
+
+/// 统计 / 先验 / 错题本**按代筛样的起算代际**（PLAN four-horizon §五十一-②，2026-10-04 批准）。
+///
+/// 语义是**下限**而不是「等于当前代」：125 起（四档分支机制落地那一代）的样本算法口径可比，
+/// 早于它的样本进统计就是「两代判据的加权平均」。用等号有个致命副作用 —— 每次换代
+/// （本仓 v125→v132 只用了两周）分母都会被清零，指标长期停在「样本不足」，
+/// 而真因是筛法本身，不是数据不够。
+///
+/// 值域与代际同处（`workflow_templates.version` 整数）。读侧只做 `>= floor` 判定，
+/// **不读库**：floor 是判据参数（量纲常量），不是运行时状态。
+pub const HORIZON_BRANCH_GENERATION_FLOOR: i32 = 125;
 
 #[cfg(test)]
 mod tests {
@@ -389,7 +561,7 @@ mod tests {
         assert_eq!(ordered, Period::ALL.to_vec());
     }
 
-    /// 逐档契约的结构性不变量：九因子不重不漏、标记键只修饰参与字段、共用字段齐、
+    /// 逐档契约的结构性不变量：逐档因子不重不漏、标记键只修饰参与字段、共用字段齐、
     /// **四档的因子集必须真的不同**（R-11 的「分叉是真的」机械证明；若有人把一套表抄四遍，
     /// 最后那条立刻红）。
     #[test]
@@ -440,17 +612,22 @@ mod tests {
         let ultra = Period::UltraShort.verdict_spec();
         assert_eq!(
             golden(&ultra),
-            vec!["microstructure".to_string(), "momentumSignal".to_string()],
-            "超短只算短窗动量与微观结构（含连板/封单，仍缺撮合级）"
+            vec![
+                "breadthState".to_string(),
+                "microstructure".to_string(),
+                "momentumSignal".to_string(),
+            ],
+            "超短算短窗动量 + 涨停板情绪广度 + 封单/连板结构（仍缺撮合级）"
         );
         assert_eq!(ultra.exit_rule, "time_stop");
-        assert_eq!(ultra.not_applicable.len(), 7);
+        assert_eq!(ultra.not_applicable.len(), 8);
         assert_eq!(ultra.qualified, vec![("microstructure", "microstructurePartialSource")]);
 
         let short = Period::Short.verdict_spec();
         assert_eq!(
             golden(&short),
             vec![
+                "breadthState".to_string(),
                 "flowPersistence".to_string(),
                 "momentumSignal".to_string(),
                 "supplyShock".to_string(),
@@ -489,6 +666,7 @@ mod tests {
                 "earningsQuality".to_string(),
                 "expectationRevision".to_string(),
                 "macroRegime".to_string(),
+                "sectorRotation".to_string(),
                 "trendStrength".to_string(),
                 "valuationBand".to_string(),
             ]
@@ -496,14 +674,138 @@ mod tests {
         assert_eq!(long.exit_rule, "target_and_falsified");
         assert_eq!(
             long.qualified,
-            vec![("trendStrength", "trendFilterOnly"), ("macroRegime", "macroPartialSeriesOnly"),],
-            "长档：趋势只作入场时机过滤、宏观仅五条真序列"
+            vec![
+                ("trendStrength", "trendFilterOnly"),
+                ("macroRegime", "macroPartialSeriesOnly"),
+                ("sectorRotation", "sectorRotationAsOfGap"),
+            ],
+            "长档：趋势只作入场时机过滤、宏观仅五条真序列、行业轮动回放结构性不可得"
         );
-        // 长档不得参与计算的三个短窗因子，必须走显式不适用而不是省略
+        // 长档不得参与计算的短窗因子，必须走显式不适用而不是省略
         let na_long: Vec<&str> = long.not_applicable.iter().map(|(f, _)| *f).collect();
         assert_eq!(
             na_long,
-            vec!["momentumSignal", "microstructure", "flowPersistence", "supplyShock"]
+            vec![
+                "momentumSignal",
+                "microstructure",
+                "breadthState",
+                "flowPersistence",
+                "supplyShock",
+            ]
+        );
+    }
+
+    /// 因子属主表 + 由它推导的逐档分析师挂载集合（P4′ 第一步的唯一权威）。
+    ///
+    /// 钉死的是**推导结果**，不是某份手抄清单 —— 实测手抄清单 PLAN §10-4 的中档/长档都漏挂
+    /// `value-investor`，而两档的 `valuationBand` 都是必填因子 ⇒ 那条腿会在子图里永远
+    /// 拿不到产出方。这类「清单比表少一行」的缺陷由本测试而不是由注释拦住。
+    #[test]
+    fn analyst_subset_is_derived_from_factor_owners() {
+        // 每个逐档因子都得有属主（新增因子忘了登记 ⇒ 这里红，而不是挂载集合静默少一人）
+        for f in VERDICT_FACTORS {
+            assert!(Period::factor_owner(f).is_some(), "因子 {f} 没有登记证据属主分析师");
+        }
+        for (f, a) in VERDICT_FACTOR_OWNERS {
+            assert!(
+                VERDICT_FACTORS.contains(f),
+                "属主表里的 {f} 不在逐档因子集里（因子改名要同步两处）"
+            );
+            assert!(!a.is_empty(), "属主表里 {f} 的分析师为空");
+        }
+
+        assert_eq!(
+            Period::UltraShort.analyst_subset(),
+            vec!["a-catalyst", "a-hot-money", "a-market-analyst", "a-sentiment"],
+            "超短挂载 = 动量/情绪广度/封单结构 + 共用催化剂"
+        );
+        assert_eq!(
+            Period::Short.analyst_subset(),
+            vec!["a-catalyst", "a-hot-money", "a-lockup", "a-market-analyst", "a-sentiment"],
+            "短档挂载含筹码面（supplyShock）与趋势（trendStrength）"
+        );
+        assert_eq!(
+            Period::Mid.analyst_subset(),
+            vec![
+                "a-catalyst",
+                "a-fundamentals",
+                "a-hot-money",
+                "a-lockup",
+                "a-market-analyst",
+                "a-research",
+                "value-investor"
+            ],
+            "中档必须挂 value-investor（valuationBand 是必填）与 a-fundamentals（earningsQuality 条件参与）"
+        );
+        assert_eq!(
+            Period::Long.analyst_subset(),
+            vec![
+                "a-catalyst",
+                "a-fundamentals",
+                "a-market-analyst",
+                "a-policy",
+                "a-research",
+                "a-sector",
+                "value-investor"
+            ],
+            "长档含 a-sector（sectorRotation 条件参与）与 a-policy（macroRegime）"
+        );
+
+        // 两个「有节点、无因子」的分析师绝不该出现在任何挂载集合里 ——
+        // a-news 与 a-catalyst 同读公告域（双挂=重复计数），research-mgr 是裁决/合成层。
+        for p in Period::ALL {
+            for banned in ["a-news", "research-mgr"] {
+                assert!(
+                    !p.analyst_subset().contains(&banned),
+                    "{p:?} 挂了 {banned}，但它没有任何因子可产出 ⇒ 白烧一次调用并伪装成证据在场"
+                );
+            }
+            // 每一档里出现的属主，都必须在该档真的参与某个因子（反向也成立 ⇒ 无死腿）
+            for a in p.analyst_subset() {
+                let owns_something = p
+                    .verdict_spec()
+                    .fields
+                    .iter()
+                    .chain(p.verdict_spec().qualified.iter().map(|(f, _)| f))
+                    .any(|f| Period::factor_owner(f) == Some(a));
+                assert!(owns_something, "{p:?} 挂载的 {a} 在本档没有任何参与因子");
+            }
+        }
+    }
+
+    /// `participating`（进方向加权）与 `fields`（必须输出）**不是一回事**，本测试锁这条划界：
+    /// 长档 `trendStrength` 要输出但只作入场过滤；中档 `supplyShock` 要输出但只作风险提示。
+    /// 划界破了 ⇒ P4′ 分支表会把「只作过滤」的腿当真凭据加权回去（正是 R-11 要退役的形态）。
+    #[test]
+    fn participating_excludes_filter_and_risk_note_factors() {
+        for p in Period::ALL {
+            let spec = p.verdict_spec();
+            for f in &spec.participating {
+                assert!(spec.fields.contains(f), "{p:?} participating 里的 {f} 不在必填里");
+            }
+            for (f, key) in &spec.qualified {
+                if *key == "trendFilterOnly" || *key == "supplyAsRiskNoteOnly" {
+                    assert!(
+                        !spec.participating.contains(f),
+                        "{p:?} 的 {f} 标记为 {key}，却仍在进方向加权的清单里"
+                    );
+                }
+            }
+        }
+        let long = Period::Long.verdict_spec();
+        assert!(
+            long.fields.contains(&"trendStrength")
+                && !long.participating.contains(&"trendStrength"),
+            "长档技术腿必须是「必填但只作过滤」"
+        );
+        assert!(
+            long.participating.contains(&"macroRegime"),
+            "长档宏观在 §十二 是必填参与项，`macroPartialSeriesOnly` 只限定其来源面 ⇒ 应进方向"
+        );
+        let mid = Period::Mid.verdict_spec();
+        assert!(
+            !mid.participating.contains(&"supplyShock") && mid.fields.contains(&"supplyShock"),
+            "中档解禁应只作风险提示但仍必须输出"
         );
     }
 

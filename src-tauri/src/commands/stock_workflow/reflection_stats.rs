@@ -18,5 +18,7 @@ use crate::AppState;
 /// [`axagent_analysis_engine::reflection_stats::build_hitrate_stats`]。
 #[tauri::command]
 pub async fn reflection_stats(state: State<'_, AppState>) -> Result<HitrateStats, String> {
+    // 按代筛样已是 `build_hitrate_stats` 的内部判据（起算代常量，不读库）⇒ 面板看到的每档
+    // 样本数/命中率与决策链吃到的先验天然同分母，不需要在这里再解析任何代际。
     build_hitrate_stats(state.harness.db()).await
 }

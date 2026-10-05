@@ -160,6 +160,8 @@ pub async fn horizon_prior_from_db(
     db: &sea_orm::DatabaseConnection,
     kappa: f64,
 ) -> Option<serde_json::Value> {
+    // 按代筛样（起算代 = `HORIZON_BRANCH_GENERATION_FLOOR`，§五十一-②）已收在
+    // `build_hitrate_stats` 内部 —— 它是判据常量、不读库，故本层无需任何代际参数。
     let stats = crate::reflection_stats::build_hitrate_stats(db).await.ok()?;
     Some(horizon_prior_map(&stats, kappa))
 }

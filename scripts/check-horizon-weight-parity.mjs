@@ -19,7 +19,7 @@
  *
  * | 第三处 | 位置 | 为什么一起查 |
  * |---|---|---|
- * | 决策腿 → 分析师桥 | `evidence_weight.rs` 的 `DECISION_LEG_ANALYST` | 桥里写错分析师名 ⇒ `horizon_leg_multipliers()` 查不到该键，乘数静默退 1.0（只 warn） |
+ * | 决策腿 → 分析师桥 | `evidence_weight.rs` 的 `DECISION_LEG_ANALYST` | 桥里写错分析师名 ⇒ 该腿的证据域**没有属主**（同一域可能被计两次方向，或整条腿查无此人）。注：2026-10-04 起这张桥不再被投影成「逐档乘数表」（那张表随 R-11 退役），本判据锁的是属主与闭合两件事 |
  *
  * ## 判据
  *
@@ -35,6 +35,18 @@
  *    `byHorizon[].holdingDays`（后端权威表经 DTO 出边界），别再抄一遍。
  *
  * 用法：
+ * ⑦ **三处键集合必须等于权威分析师清单**（后端权重表每档、前端兜底表每档，都严格等于
+ *    `evidence_weight.rs` 的 `EVIDENCE_ANALYST_IDS`），且清单里每个 id 在 seed 里真有一个
+ *    同名 Agent 节点。存在理由（2026-10-03 实测）：表里一度并存 `a-market`/`a-technical`/
+ *    `capital`/`macro`/`fundamental`/`sentiment` 六个图中不存在的名字，而后端按裸节点 id
+ *    精确查表 ⇒ 逐档权重静默退 1.0；判据①②只在「自选名」之间互相印证，抓不到这种漂移。
+ *
+ * ⑧ **闭合**：`DECISION_LEG_ANALYST` 桥到的分析师 ∪ `UNBRIDGED_ANALYST_IDS` = 权威清单，
+ *    且两边不重叠。存在理由：「新增分析师
+ *    只补了权重表、没接腿」在这套体系里不会报错，只会让那个分析师的证据**永远不进任何一档的
+ *    融合** —— 与缺陷 ⑦ 同族但方向相反，
+ *    必须登记成显式的「无腿 + 理由」（Rust 侧另有同名闭合测试，本判据保证不跑 cargo 也红）。
+ *
  *   node scripts/check-horizon-weight-parity.mjs            # 比对
  *   node scripts/check-horizon-weight-parity.mjs --selftest # 正负对照（证明它会红）
  */
@@ -47,9 +59,15 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const BACKEND = "src-tauri/crates/analysis-engine/src/evidence_weight.rs";
 const FRONTEND = "src/lib/stock-analysis-utils.ts";
 const HOLDING = "src-tauri/crates/harness/src/holding_period.rs";
+const SEED = "src-tauri/src/commands/stock_analysis_setup/seed_stock_analysis.rs";
 const LOCALE_DIR = "src/i18n/locales";
 const LABEL_KEYS = ["horizonUltraShort", "horizonShort", "horizonMid", "horizonLong"];
 const TIERS = ["ultra_short", "short", "mid", "long"];
+
+/** 相对仓库根读文件；读不到返回 null ⇒ 判据报「覆盖面失效」，不静默放行。 */
+function readRel(rel) {
+  try { return fs.readFileSync(path.join(ROOT, rel), "utf8"); } catch { return null; }
+}
 
 /** 解析后端 `get_horizon_base_weights`：`"tier" => { w.insert("id", 1.3); … }`。 */
 function parseBackend(src) {
@@ -102,6 +120,88 @@ function parseFrontend(src) {
   return { ok: true, tiers: out };
 }
 
+/** 解析后端权威清单 `pub const EVIDENCE_ANALYST_IDS: &[&str] = &[…]`。 */
+function parseAuthority(src) {
+  const start = src.indexOf("pub const EVIDENCE_ANALYST_IDS");
+  if (start < 0) { return { ok: false, reason: "未见 EVIDENCE_ANALYST_IDS（常量改名？）" }; }
+  const end = src.indexOf("];", start);
+  if (end < 0) { return { ok: false, reason: "权威清单收尾定位失败" }; }
+  const ids = [];
+  const re = /"([a-z0-9-]+)"/g;
+  let m;
+  while ((m = re.exec(src.slice(start, end))) !== null) { ids.push(m[1]); }
+  return { ok: true, ids };
+}
+
+/**
+ * 判据⑦：后端每档 / 前端每档的键集合 **严格等于** 权威清单，
+ * 且清单里每个 id 在 seed 中以 `"id"` 形态出现（防清单自己腐烂成新的幽灵名）。
+ */
+function checkAuthority(backend, frontend, authority, seedSrc) {
+  const errs = [];
+  if (!authority || !authority.ok) {
+    return [`⑦ ${authority ? authority.reason : "权威清单读不到"} ⇒ 判据失效`];
+  }
+  if (!seedSrc) { return [`⑦ 读不到 ${SEED} ⇒ 存在性无法核对`]; }
+  const ids = authority.ids;
+  if (ids.length < 12) { errs.push(`⑦ 权威清单仅 ${ids.length} 项（< 12）⇒ 解析或清单本身失效`); }
+  for (const t of TIERS) {
+    for (const [side, src] of [["后端", backend.tiers[t]], ["前端", frontend.tiers[t]]]) {
+      if (!src) { continue; }
+      const keys = Object.keys(src);
+      const missing = ids.filter((k) => !(k in src));
+      const extra = keys.filter((k) => !ids.includes(k));
+      if (missing.length) { errs.push(`⑦ ${t} ${side}表缺权威清单里的键: ${missing.join(", ")}`); }
+      if (extra.length) {
+        errs.push(`⑦ ${t} ${side}表有权威清单外的键（图中无此分析师 ⇒ 精确查表会静默退 1.0）: ${extra.join(", ")}`);
+      }
+    }
+  }
+  for (const id of ids) {
+    if (!seedSrc.includes(`"${id}"`)) {
+      errs.push(`⑦ 权威清单里的 '${id}' 在 seed 里找不到同名节点 ⇒ 清单已腐烂成幽灵 id，请核对节点是否改名`);
+    }
+  }
+  return errs;
+}
+
+/** 解析后端 `pub const UNBRIDGED_ANALYST_IDS`（刻意无决策腿的分析师登记）。 */
+function parseUnbridged(src) {
+  const start = src.indexOf("pub const UNBRIDGED_ANALYST_IDS");
+  if (start < 0) { return { ok: false, reason: "未见 UNBRIDGED_ANALYST_IDS" }; }
+  const end = src.indexOf("];", start);
+  if (end < 0) { return { ok: false, reason: "无腿清单收尾定位失败" }; }
+  const ids = [];
+  const re = /"([a-z0-9\-]+)"/g;
+  let m;
+  while ((m = re.exec(src.slice(start, end))) !== null) { ids.push(m[1]); }
+  return { ok: true, ids };
+}
+
+/**
+ * 判据⑧：有腿 ∪ 无腿 = 权威清单（闭合）。
+ * Rust 侧同有 `bridged_plus_unbridged_covers_every_analyst`，这里是**不跑 cargo 也能红**的那一层
+ * —— 因为「新增分析师时权重表补了、腿没接」恰好是最容易漏的一种，而它的表现是乘数永不命中。
+ */
+function checkLegClosure(backend, authority, unbridged) {
+  const errs = [];
+  if (!authority || !authority.ok) { return [`⑧ ${authority ? authority.reason : "权威清单读不到"} ⇒ 闭合判据失效`]; }
+  if (!unbridged || !unbridged.ok) { return ["⑧ 未见 UNBRIDGED_ANALYST_IDS ⇒ 「没有决策腿」退化成查表落空，必须显式登记"]; }
+  const bridged = [...new Set((backend.bridge ?? []).filter((r) => r.analyst).map((r) => r.analyst))];
+  for (const id of unbridged.ids) {
+    if (bridged.includes(id)) { errs.push(`⑧ '${id}' 既有腿又被登记为无腿 ⇒ 归因有歧义`); }
+  }
+  for (const id of authority.ids) {
+    if (!bridged.includes(id) && !unbridged.ids.includes(id)) {
+      errs.push(`⑧ '${id}' 未桥到任何腿、也未登记为无腿 ⇒ 其逐档权重静默不影响融合`);
+    }
+  }
+  for (const id of bridged) {
+    if (!authority.ids.includes(id)) { errs.push(`⑧ 桥表引用 '${id}' 不在权威清单 ⇒ 该腿无属主（该域证据进不了融合，或同一域被计两次方向）`); }
+  }
+  return errs;
+}
+
 /** 主比对：返回问题清单（空 = 绿）。 */
 function compare(backend, frontend) {
   const problems = [];
@@ -123,7 +223,7 @@ function compare(backend, frontend) {
     for (const t of TIERS) {
       const row = backend.tiers[t];
       if (row && !(analyst in row)) {
-        problems.push(`桥表腿 ${leg} → 分析师 ${analyst} 在后端 ${t} 档不存在 ⇒ 该腿乘数静默退 1.0`);
+        problems.push(`桥表腿 ${leg} → 分析师 ${analyst} 在后端 ${t} 档不存在 ⇒ 该腿属主在该档无权重（桥表与权威表分叉）`);
       }
     }
   }
@@ -244,7 +344,8 @@ function readHorizonLabels() {
 }
 
 function run() {
-  const be = parseBackend(fs.readFileSync(path.join(ROOT, BACKEND), "utf8"));
+  const beSrc = fs.readFileSync(path.join(ROOT, BACKEND), "utf8");
+  const be = parseBackend(beSrc);
   if (!be.ok) { console.log(`❌ 后端解析失败: ${be.reason}`); return 2; }
   const fe = parseFrontend(fs.readFileSync(path.join(ROOT, FRONTEND), "utf8"));
   if (!fe.ok) { console.log(`❌ 前端解析失败: ${fe.reason}`); return 2; }
@@ -254,15 +355,16 @@ function run() {
     return 2;
   }
   const problems = compare(be, fe);
+  // ⑦ 两侧每档键集合必须严格等于权威清单，且清单每个 id 在 seed 里真有一个同名节点。
+  const authority = parseAuthority(beSrc);
+  problems.push(...checkAuthority(be, fe, authority, readRel(SEED)));
+  problems.push(...checkLegClosure(be, authority, parseUnbridged(beSrc)));
   // ④ 天数唯一来源 = Rust 权威表；标签里出现数字即红
   const auth = parseAuthorityDays(fs.readFileSync(path.join(ROOT, HOLDING), "utf8"));
   if (!auth.ok) {
     console.log(`❌ 权威天数表解析失败: ${auth.reason}`);
     return 2;
   }
-  const readRel = (rel) => {
-    try { return fs.readFileSync(path.join(ROOT, rel), "utf8"); } catch { return null; }
-  };
   const builderErrs = checkPendingBuilderSingleSource(readRel);
   const promptErrs = checkReflectionPromptSingleHorizon(readRel);
   if (builderErrs.length || promptErrs.length) {
@@ -277,10 +379,10 @@ function run() {
   }
   const keys = TIERS.reduce((n, t) => n + Object.keys(be.tiers[t]).length, 0);
   console.log(
-    `比对面：4 档 × 后端合计 ${keys} 键 | 桥表 ${be.bridge.length} 腿 | 档名 ${Object.keys(labels).length} 语言 × ${LABEL_KEYS.length} 键（权威天数 ${auth.days.ultrashort}/${auth.days.short}/${auth.days.mid}/${auth.days.long} 交易日）`,
+    `比对面：4 档 × 后端合计 ${keys} 键 | 桥表 ${be.bridge.length} 腿 | 权威分析师清单 ${(authority.ids ?? []).length} 个 | 无腿登记 ${(parseUnbridged(beSrc).ids ?? []).length} 个 | 档名 ${Object.keys(labels).length} 语言 × ${LABEL_KEYS.length} 键（权威天数 ${auth.days.ultrashort}/${auth.days.short}/${auth.days.mid}/${auth.days.long} 交易日）`,
   );
   if (problems.length === 0 && labelErrs.length === 0) {
-    console.log("✅ 通过：前后端逐字段一致、桥表分析师四档均有权重、且档名标签未手抄天数");
+    console.log("✅ 通过：前后端逐字段一致、桥表分析师四档均有权重、两侧键集合等于权威清单且清单可落地 seed、有腿∪无腿闭合、档名标签未手抄天数");
     return 0;
   }
   problems.forEach((p) => console.log(`✖ ${p}`));
@@ -310,7 +412,7 @@ function selftest() {
   cases.push({ name: "负控 磁盘现状 ⇒ 应无问题", got: compare(be, fe).length, want: 0 });
 
   const dropKey = clone(fe);
-  delete dropKey.tiers.ultra_short["a-technical"];
+  delete dropKey.tiers.ultra_short["a-catalyst"];
   cases.push({ name: "正控① 前端删掉一个键 ⇒ 必须报缺键", got: compare(be, dropKey).length, want: 1 });
 
   const drift = clone(fe);
@@ -320,6 +422,88 @@ function selftest() {
   const badBridge = clone(be);
   badBridge.bridge = [...badBridge.bridge, { leg: "f99", analyst: "a-nonexistent-analyst" }];
   cases.push({ name: "正控③ 桥表引用不存在的分析师 ⇒ 必须报 4 档各一条", got: compare(badBridge, fe).length, want: 4 });
+
+  // ── 判据 ⑦：三处键集合必须等于权威分析师清单，且清单每个 id 在 seed 里真有一个同名节点 ──
+  // 正控全部用「2026-10-03 实测过的真实缺陷形态」在内存里复刻（表里留着图中不存在的名字 /
+  // 节点改名而清单没跟），不改生产码也不改磁盘文件。
+  const beSrcDisk = fs.readFileSync(path.join(ROOT, BACKEND), "utf8");
+  const authority = parseAuthority(beSrcDisk);
+  const seedDisk = readRel(SEED);
+  cases.push({
+    name: "⑦负控 磁盘现状（两侧每档 = 12 id 清单，且清单可落地到 seed）⇒ 应无问题",
+    got: checkAuthority(be, fe, authority, seedDisk).length,
+    want: 0,
+  });
+  const phantom = clone(fe);
+  phantom.tiers.mid["a-technical"] = 1.0;
+  cases.push({
+    name: "⑦正控 前端塞回一个图中不存在的名字 ⇒ 必须报 1 处",
+    got: checkAuthority(be, phantom, authority, seedDisk).length,
+    want: 1,
+  });
+  const thin = clone(be);
+  delete thin.tiers.long["a-hot-money"];
+  cases.push({
+    name: "⑦正控 后端整档少一个权威 id ⇒ 必须报 1 处",
+    got: checkAuthority(thin, fe, authority, seedDisk).length,
+    want: 1,
+  });
+  const seedMissing = String(seedDisk ?? "").replace(/"a-lockup"/g, '"a-lockup-renamed"');
+  cases.push({
+    name: "⑦正控 seed 节点改名、清单没跟 ⇒ 必须报 1 处（清单腐烂成幽灵 id）",
+    got: checkAuthority(be, fe, authority, seedMissing).length,
+    want: 1,
+  });
+  const rottenList = { ok: true, ids: [...authority.ids, "a-phantom"] };
+  cases.push({
+    name: "⑦正控 清单自己掺一个幽灵 id ⇒ 必须报 9 处（两侧 × 4 档缺键 8 + seed 找不到 1）",
+    got: checkAuthority(be, fe, rottenList, seedDisk).length,
+    want: 9,
+  });
+  cases.push({
+    name: "⑦护栏 常量改名 ⇒ 必须报判据失效（不能静默放行）",
+    got: checkAuthority(be, fe, parseAuthority("pub const RENAMED_AWAY: &[&str] = &[];"), seedDisk).length,
+    want: 1,
+  });
+  cases.push({
+    name: "⑦护栏 seed 读不到 ⇒ 必须报存在性无法核对",
+    got: checkAuthority(be, fe, authority, null).length,
+    want: 1,
+  });
+  cases.push({
+    name: "⑦真实清单非空且为 12 个 id（不是空表充当一致）",
+    got: authority.ok && authority.ids.length === 12 ? 1 : 0,
+    want: 1,
+  });
+
+  // ── 判据 ⑧：有腿 ∪ 无腿 = 权威清单 ──
+  const unbridged = parseUnbridged(beSrcDisk);
+  cases.push({
+    name: "⑧负控 磁盘现状（8 个有腿 + 4 个登记无腿 = 12）⇒ 应无问题",
+    got: checkLegClosure(be, authority, unbridged).length,
+    want: 0,
+  });
+  cases.push({
+    name: "⑧正控 无腿清单少登记一个 ⇒ 必须报 1 处（该分析师的逐档权重会静默落空）",
+    got: checkLegClosure(be, authority, { ok: true, ids: unbridged.ids.filter((x) => x !== "a-news") }).length,
+    want: 1,
+  });
+  const doubleBridged = { ...be, bridge: [...be.bridge, { leg: "f98", analyst: "a-news" }] };
+  cases.push({
+    name: "⑧正控 把登记为无腿的分析师又接上腿 ⇒ 必须报重叠 1 处",
+    got: checkLegClosure(doubleBridged, authority, unbridged).length,
+    want: 1,
+  });
+  cases.push({
+    name: "⑧正控 桥表引用清单外的人 ⇒ 必须报 1 处",
+    got: checkLegClosure({ ...be, bridge: [...be.bridge, { leg: "f97", analyst: "a-ghost" }] }, authority, unbridged).length,
+    want: 1,
+  });
+  cases.push({
+    name: "⑧护栏 常量失踪 ⇒ 必须报判据失效",
+    got: checkLegClosure(be, authority, parseUnbridged("pub const RENAMED_AWAY: &[&str] = &[];")).length,
+    want: 1,
+  });
 
   const emptyParse = { tiers: {}, bridge: [] };
   cases.push({ name: "★护栏 解析面为 0 ⇒ surfaceCheck 必须报错", got: surfaceCheck(emptyParse, emptyParse).length > 0 ? 1 : 0, want: 1 });

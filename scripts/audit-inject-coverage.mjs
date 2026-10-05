@@ -329,9 +329,12 @@ export function audit(rhaiText, seedText, opts) {
 
   const selfProvided = referenced.filter((v) => rhai.localVars.has(v)).sort();
   const uncovered = referenced.filter((v) => !effective.has(v) && !rhai.localVars.has(v));
-  // 倒查用「脚本全文是否提过这个名字」，而非只看 present()：有些变量无守卫直接使用。
+  // 倒查用「脚本**代码域**是否提过这个名字」，而非只看 present()：有些变量无守卫直接使用。
+  // ⚠ 必须用剥注释后的文本（2026-10-04 实测假阴性）：`limit_up_count` 只出现在脚本头部的
+  //   入参清单注释里、代码零引用，拿原文倒查就把它读成「有人用」⇒ 悬空映射被注释洗白。
+  //   注释是**意图声明**，不是消费点 —— 白注入的判据只能落在代码域。
   const dangling = [...seed.mappingTargets]
-    .filter((t) => !new RegExp(`\\b${t}\\b`).test(rhaiText))
+    .filter((t) => !new RegExp(`\\b${t}\\b`).test(stripped))
     .sort();
 
   return {
@@ -531,6 +534,30 @@ if present(b) { b }
     [],
     [],
   );
+  // 正控⑧（2026-10-04，倒查洗白缺陷的实形）：变量**只在头部入参注释里**出现 ⇒ 必须报悬空。
+  // 负控同批：注释 + 代码都有 ⇒ 不报。两条一起才证明「代码域」而不是「全文」在决定结果。
+  run(
+    "正控⑧ 仅注释提及的注入 ⇒ 报悬空",
+    `// 入参：a : 有人用；comment_only_var : 只在注释里
+fn present(x) { type_of(x) != "()" }
+if present(a) { a }
+`,
+    fakeSeed(["a", "comment_only_var"]),
+    [],
+    ["comment_only_var"],
+    [],
+  );
+  run(
+    "负控⑧b 注释与代码都提及 ⇒ 不报悬空",
+    `// 入参：code_and_comment : 说明
+fn present(x) { type_of(x) != "()" }
+if present(code_and_comment) { code_and_comment }
+`,
+    fakeSeed(["code_and_comment"]),
+    [],
+    [],
+    [],
+  );
 
   console.log("=== 扫描器自检（正负对照）===");
   let failed = 0;
@@ -564,6 +591,11 @@ function main() {
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--script") opts.script = argv[++i];
     else if (argv[i] === "--seed") opts.seed = argv[++i];
+    // 审计**其它** CodeNode 时必给：默认锚点是 portfolio-mgr 的 `include_str!` 行与
+    // `nodes.push(pm)` 收尾行，换脚本就定位不到区块（定位失败会返回 ok:false，
+    // 而不是静默退化成全文匹配 —— 那正是本脚本开发史第 ② 次自打的形态）。
+    else if (argv[i] === "--include-marker") opts.includeMarker = argv[++i];
+    else if (argv[i] === "--push-marker") opts.pushMarker = argv[++i];
   }
   const result = audit(
     fs.readFileSync(path.join(ROOT, opts.script), "utf8"),

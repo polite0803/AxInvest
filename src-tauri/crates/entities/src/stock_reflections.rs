@@ -64,8 +64,19 @@ pub struct Model {
     pub decision_json: Option<String>,
     /// 工作流完整结果（用于追溯）
     pub blackboard_snapshot: Option<String>,
-    /// 所用 LLM 的版本标识
-    pub model_version: Option<String>,
+    /// 本行所**复盘的那条分析**所属的算法代际（= `stock_analyses.template_version` 的建点副本）。
+    ///
+    /// 为什么是「溯源戳」而不是第二份权威：权威仍是 `stock_analyses.template_version`
+    /// （单一写入口径见 `stock_workflow/core.rs` 的 `template_version: Set(Some(loaded.version))`），
+    /// 这里在建 pending 行那一刻把**被复盘那条**的代际抄下来。抄的理由与 `horizon` 同一条：
+    /// 错题本的读侧（注入与统计）要按代筛样，而反思行与分析行的两跳 join 会把
+    /// 「分析已重跑、代际已变」的中间态算进历史样本 —— 归属必须在事实发生的那刻钉住。
+    ///
+    /// NULL 的两种来源（读侧不得混为一谈，也不得当成「第 0 代」）：
+    /// ① 本列引入前的存量行；② 对话直执行通道 —— 那条链不经过 `workflow_templates`，
+    /// 其分析行的 `template_version` 本身就是显式 NULL（`hooks.rs` 的 A4 注释已裁定）。
+    /// 值域 = `workflow_templates.version` 整数，不得另造口径。
+    pub template_version: Option<i32>,
     pub status: String,
     pub created_at: i64,
     pub updated_at: i64,

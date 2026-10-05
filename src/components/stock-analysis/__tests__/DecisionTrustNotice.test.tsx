@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import type { StockDecision } from "@/types";
+import type { HorizonDecision, StockDecision } from "@/types";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -41,6 +41,26 @@ function mkDecision(over: Partial<StockDecision>): StockDecision {
     reasoning: "",
     riskLevel: "MID",
     confidence: 60,
+    ...over,
+  };
+}
+
+/**
+ * 构造一条逐档分支输出。必填项 = `HorizonDecision` 的契约面（分支脚本末尾那段真的会吐
+ * 这十个键），缺一个 TS 就拦住 ⇒ 假夹具不会悄悄通过。
+ */
+function mkHorizon(over: Partial<HorizonDecision>): HorizonDecision {
+  return {
+    action: "观望",
+    verdict: "决策=观望",
+    positionPct: 0,
+    confidence: 40,
+    posterior: 40,
+    stopLossPct: 0,
+    takeProfitPct: 0,
+    expectedHoldingDays: 5,
+    targetPrice: null,
+    stopLoss: null,
     ...over,
   };
 }
@@ -214,19 +234,20 @@ describe("DecisionTrustNotice", () => {
     expect(screen.queryByText(/被动降级，非看空判断/)).toBeNull();
   });
 
-  // ── 2026-10-01 回归锁定：口径调整（本档主动降权）**不是**数据缺口 ──────────────
-  // 此前「估值腿周期降权」与真缺口同挤 `data_gaps`，而它**恒**有两条（f5 的 0.3/0.5 是
-  // `horizon_leg_multipliers()` 里的常量，凡有估值证据必命中）⇒ 每一条带估值数据的
-  // 分析都恒亮本警示条，「数据缺口 2 项」把 `PE数据(t-risk)` 这类真缺口淹没成噪声。
-  // 现走 `weightAdjustments`，由四档面板按档挂注脚（见 DecisionBanner 的用例）。
-  it("只有口径调整（weightAdjustments）时完全不渲染 —— 设计性降权不是可信度受限", () => {
+  // ── 2026-10-04 R-11：逐档信息不得进顶层警示条的计数 ─────────────────────────
+  // 原两条用例锁的是「口径调整（乘数降权）不算数据缺口」；乘数通道整体退役后，
+  // 同一族的复发方向换成「把某档自己的 absentLegs / dataGaps 数进顶层 N 项」——
+  // 那会把「这一档的腿齐不齐」压成全局的「可信度受限」，正是本组件要避免的形态。
+  it("逐档缺席（absentLegs / 档内 dataGaps）不参与顶层计数，也不由本组件渲染", () => {
     const { container } = render(
       <DecisionTrustNotice
         decision={mkDecision({
-          weightAdjustments: [
-            { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
-            { tier: "short", leg: "f5", multiplier: 0.5 },
-          ],
+          decisionsByHorizon: {
+            long: mkHorizon({
+              absentLegs: ["sectorRotation", "expectationRevision"],
+              dataGaps: ["long 档 expectationRevision 腿本轮不可评估"],
+            }),
+          },
         })}
         variant="banner"
       />,
@@ -235,24 +256,21 @@ describe("DecisionTrustNotice", () => {
     expect(screen.queryByText(/数据缺口/)).toBeNull();
   });
 
-  it("口径调整不参与「数据缺口 N 项」计数（缺口 1 项 + 调整 2 项 ⇒ 仍显示 1 项）", () => {
+  it("顶层缺口 1 项时计数只算顶层（档内注脚不得被并进来）", () => {
     render(
       <DecisionTrustNotice
         decision={mkDecision({
           action: "WAIT",
           positionPct: 8.4,
           dataGaps: ["PE数据(t-risk)"],
-          weightAdjustments: [
-            { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
-            { tier: "short", leg: "f5", multiplier: 0.5 },
-          ],
+          decisionsByHorizon: {
+            short: mkHorizon({ absentLegs: ["supplyShock"] }),
+          },
         })}
         variant="banner"
       />,
     );
     expect(screen.getByText(/数据缺口 1 项/)).toBeTruthy();
-    expect(screen.queryByText(/数据缺口 3 项/)).toBeNull();
-    // 本组件**不**渲染该通道（落点在四档面板）；渲染了就说明又混回了缺口清单
-    expect(screen.queryByText(/×0\.3/)).toBeNull();
+    expect(screen.queryByText(/数据缺口 2 项/)).toBeNull();
   });
 });

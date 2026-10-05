@@ -388,25 +388,24 @@ pub(crate) async fn build_stock_analysis_variables(
             });
         }
     }
-    // ── 逐档 × 逐腿证据乘数表注入（horizon_leg_weights_json）──
-    // 四周期科学化 Phase A：四档要「同一批证据、逐档重新加权」，故把按分析师索引的
-    // 周期权重表（`evidence_weight::get_horizon_base_weights`）经桥表
-    // `DECISION_LEG_ANALYST` 投影到决策脚本的因子腿上，脚本侧禁止再手抄任何倍数。
-    // 恒注入：缺失 ⇒ 脚本按「该档乘数全 1.0」退化并显式标注（证据腿不再逐档不同是可观测的
-    // 降级，不是错档），故不像 horizon_consts_json 那样 throw。
+    // ── 逐档**分支表**注入（horizon_branch_json，P4′-b）──
+    // 这里原本还注入一张「逐档 × 逐腿证据乘数表」（`horizon_leg_weights_json`），
+    // 2026-10-04 随 R-11 一起删除：那张表是「同一批腿 × 四个标量」，四档的腿集、门形态、
+    // 置信与出场口径全相同 ⇒ 被判为构造性错误。分支表是它的替代：每档自己的腿集合 +
+    // 每腿角色/来源 + 门 + 出场与置信口径，喂四份 `portfolio-mgr-h-*.rhai`。
+    // 恒注入且缺失不 throw：脚本自己会在 `type_of(branch_json) == "()"` 时拒绝出结论
+    // （退等权等于拿简化填架构缺口，脚本注释里已写明这条取舍）。
     {
-        let leg_weights = axagent_analysis_engine::evidence_weight::horizon_leg_multipliers();
-        if let Some(existing) =
-            merged_vars.iter_mut().find(|v| v.name == "horizon_leg_weights_json")
-        {
-            existing.value = leg_weights;
+        let branches = axagent_analysis_engine::evidence_weight::horizon_branch_specs();
+        if let Some(existing) = merged_vars.iter_mut().find(|v| v.name == "horizon_branch_json") {
+            existing.value = branches;
         } else {
             merged_vars.push(Variable {
-                name: "horizon_leg_weights_json".into(),
+                name: "horizon_branch_json".into(),
                 var_type: "object".into(),
-                value: leg_weights,
+                value: branches,
                 description: Some(
-                    "逐档×逐腿证据乘数表（派生自 evidence_weight 周期权重表，权威源 DECISION_LEG_ANALYST 桥）"
+                    "逐档决策分支表（腿集合/角色/配比/门/出场与置信口径；权威源 evidence_weight::horizon_branch_specs）"
                         .into(),
                 ),
                 is_secret: false,
@@ -806,8 +805,15 @@ pub(crate) async fn build_stock_analysis_variables(
     // 此刻还不存在 ⇒ 用「该股最近一条已产出主档」作同档代理；取不到则不过滤并 WARN，
     // 不静默冒充某档（缺数 ≠ 默认）。
     let lesson_horizon = latest_known_horizon(stock_code, db).await;
-    let (lessons_str, applied_lesson_ids) =
-        fetch_stock_lessons(stock_code, db, lesson_horizon.as_deref()).await;
+    // §五十一-② 起算代际：与逐档先验用**同一个常量**（`HORIZON_BRANCH_GENERATION_FLOOR`）——
+    // 它是判据常量、不读库，所以两处天然同源，不存在「先验按一代筛、教训按另一代筛」的半代状态。
+    let (lessons_str, applied_lesson_ids) = fetch_stock_lessons(
+        stock_code,
+        db,
+        lesson_horizon.as_deref(),
+        axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR,
+    )
+    .await;
     let default_lessons = "（暂无历史反思）".to_string();
     let lessons_val = lessons_str.unwrap_or_else(|| default_lessons.clone());
     merged_vars.push(Variable {
@@ -1058,7 +1064,6 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             config_id: Set(None),
             analysis_kind: Set("chat".into()),
             as_of_date: Set(Some(chrono::Utc::now().format("%Y-%m-%d").to_string())),
-            model_version: Set(None),
             // A4：chat 通道（cognitive）决策落库 —— 不经过 `workflow_templates`，
             // 故无「公式版本」可言。⚠ 注意本行**是**有 blackboard_snapshot 的（见上），
             // 即「有快照但无版本」是这类记录的正常形态，复算器必须能区分
@@ -1068,7 +1073,6 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
             // ⇒ 显式 NULL（语义 = 链路未知）。读取侧的「排除快速链」过滤会放行它，
             // 这是对的：对话直执行的虽然是完整链，但不该因缺列而被当成快速链排除。
             template_id: Set(None),
-            data_snapshot_id: Set(None),
             outcome: Set(None),
             // Phase 1：周期来源（由 portfolio-mgr.rhai 判定，见 decision.rs 的唯一读入口）
             decision_horizon_source: Set(horizon_source),
@@ -1118,6 +1122,11 @@ impl WorkflowLifecycleHook for StockAnalysisPersistHook {
                     primary_holding_days: expected_holding_days.map(|v| v as i64),
                     min_confidence_threshold: super::reflection::DEFAULT_REFLECTION_MIN_CONFIDENCE,
                     reflection_depth: super::reflection::DEFAULT_REFLECTION_DEPTH,
+                    // §七十一 按版归属：本通道的分析行 `template_version` 就是显式 NULL
+                    // （上方 A4 注释：对话直执行不经过 `workflow_templates`，无「公式版本」可言）
+                    // ⇒ 反思行必须同为 NULL。这里的 NULL 是**有成因的未知**，不是漏接线，
+                    // 读侧按「代际未知」处理（仍注入但显式声明），不得当成第 0 代。
+                    analysis_template_version: None,
                     now_ms,
                 },
             );

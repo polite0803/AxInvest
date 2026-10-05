@@ -9,6 +9,14 @@
 //
 // 节点来源：seed_stock_analysis.rs 中 portfolio-mgr 的 input_mapping + 显式边
 // 共 16 个（raw-data 仅调度边，不消费数据，已排除）
+//
+// ⚠ 覆盖面边界（2026-10-03 核对）：本表**未覆盖 f12 动量 / f13 产业链瓶颈**两条腿 ——
+//   f12 复用 t-scoring 的输出（同一节点的第二条腿，指标 MACD/RSI）；f13 的唯一输入
+//   `serenity_context` 已由 2026-10-01 的去重裁定**刻意不注入**（`stock_workflow/hooks.rs`
+//   明文：再接上等于把同一维度第二次计入后验），故 f13 权重恒为 0，是「隔离起效」而非断链，
+//   按本表的 nodeId 语义套进去只会恒报「缺失」。
+//   所以「16 个」是**节点数**，不等于「决策腿全覆盖」。P4′ 逐档改造时应改由后端注入的腿表
+//   渲染本清单，权重与因子名不再手抄（f7 一度手抄成 0.15，权威 `f7_default` 是 0.10）。
 
 /**
  * 诊断状态：missing=节点输出缺失；low=置信度低；untrusted=LLM 兜底；normal=正常
@@ -63,7 +71,7 @@ const NODE_SPECS: readonly NodeSpec[] = [
   { nodeId: "t-risk", role: "算法风险", factor: "f4 风险", weight: null },
   { nodeId: "t-valuation", role: "估值", factor: "f5 估值", weight: 0.15 },
   { nodeId: "data-quality", role: "数据质量", factor: "f6 数据质量", weight: 0.15 },
-  { nodeId: "trader", role: "交易员", factor: "f7 trader", weight: 0.15 },
+  { nodeId: "trader", role: "交易员", factor: "f7 trader", weight: 0.10 },
   { nodeId: "t-hotmoney-data", role: "资金面", factor: "f9 资金面", weight: 0.08 },
   { nodeId: "t-lockup-data", role: "解禁数据", factor: "f10 筹码面", weight: 0.08 },
   { nodeId: "t-dragon-tiger-data", role: "龙虎榜", factor: "f10 筹码面", weight: null },

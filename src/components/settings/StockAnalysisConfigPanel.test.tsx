@@ -60,16 +60,13 @@ const RUNTIME_INJECTED = new Set([
   // 由 `stock_workflow/hooks.rs` **无条件注入**，不是用户可调的模板变量 ⇒ 不进 seed 变量表。
   // portfolio-mgr.rhai 的 `horizon_const` 缺它会显式 throw（不静默兜底）。
   "horizon_consts_json",
-  // 逐档×逐腿证据乘数表：权威源是
-  // `crates/analysis-engine/src/evidence_weight.rs` 的 `horizon_leg_multipliers()`，
-  // 经 `DECISION_LEG_ANALYST` 桥表投影到决策腿，由 `stock_workflow/hooks.rs` **恒注入**，
-  // 不是用户可调的模板变量 ⇒ 不进 seed 变量表。缺失时脚本按全 1.0 退化并显式标注。
-  "horizon_leg_weights_json",
   // 逐档收缩先验表：权威源 `crates/analysis-engine/src/horizon_prior.rs` 的
   // `horizon_prior_map`（按档方向命中率 + κ 收缩），由 `stock_workflow/hooks.rs` 注入。
   // 不是用户可调的模板变量 ⇒ 不进 seed 变量表。
   // ⚠️ v113（2026-10-01）给 seed 补了它的同名 `input_mapping`（修 Phase C 遗留的
   // `Variable not found`），但**漏了同步本白名单** ⇒ 断言把已接线的变量误报成断链。
+  // 2026-10-04 R-11：消费方从主链闭包 `prior_for` 换成四份分支脚本 ⇒ 映射在 `pm-h-*` 四个
+  // 节点上，主链节点不再映射它（留映射=没人消费的注入）。
   "horizon_prior_json",
 ]);
 
@@ -532,6 +529,32 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
       "权威源登记为「可调」但没有任何面板分组暴露 → 用户无入口调整（只能改 DB），"
         + "「可调」沦为纸面声明。请补 b() 声明 + resolve() 分组，或从权威源移除",
     ).toEqual([]);
+  });
+
+  it("持有周期档位分组带「换代说明」，且 11 种语言都给了本语言资源", () => {
+    // 为什么这条要进门（PLAN §五十）：v125 把主档的止损/止盈/仓位改成取自所选档分支后，
+    // 面板里那八项百分比档位与两个波动率乘数**只在兜底路径与仓位上限里参与**。
+    // 不写明，下一次「改了面板但四档 Tab 不动」就会被当成缺陷从头查起 —— 与「结构性缺口
+    // 不得在呈现层造成歧义」是同一条判据，只不过缺口在这里是**口径换代**而不是数据缺席。
+    const NOTE_KEY = "stockAnalysis.settings.note.portfolioMgrHorizon";
+    expect(readPanelSource(), "分组说明未挂上 i18n 键（或被挪回 label 与 vars 之间）")
+      .toContain(`note: "${NOTE_KEY}"`);
+    const langs = ["ar", "de", "en-US", "es", "fr", "hi", "ja", "ko", "ru", "zh-CN", "zh-TW"];
+    const missing: string[] = [];
+    const placeholderish: string[] = [];
+    for (const lang of langs) {
+      const file = `${process.cwd()}/src/i18n/locales/${lang}.json`;
+      const json = JSON.parse(readFileSync(file, "utf8")) as Record<string, any>;
+      const text = json.stockAnalysis?.settings?.note?.portfolioMgrHorizon;
+      if (typeof text !== "string" || text.length === 0) {
+        missing.push(lang);
+        continue;
+      }
+      // 「本语言资源而不是占位符」的可检形态：非拉丁语系里不得整句仍是英文单词。
+      if (lang !== "en-US" && /^(Since|The eight|From v)/.test(text)) { placeholderish.push(lang); }
+    }
+    expect(missing, `缺译的语言：${missing.join(", ")}`).toEqual([]);
+    expect(placeholderish, `疑似英文占位符（未真正本地化）：${placeholderish.join(", ")}`).toEqual([]);
   });
 
   it("生效快照 effective_params 的字段集合与权威源一致（反思/演进观测面完整性）", () => {

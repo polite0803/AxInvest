@@ -37,10 +37,9 @@ const storeState = {
     decisionsByHorizon?:
       | Record<
         string,
-        { action: string; positionPct?: number; confidence?: number }
+        Partial<import("@/types").HorizonDecision> & { action: string }
       >
       | null;
-    weightAdjustments?: Array<{ tier: string; leg: string; multiplier: number }>;
   } | null,
   stockCode: "600519" as string | null,
   stockName: "茅台",
@@ -119,11 +118,12 @@ describe("DecisionBanner", () => {
     expect(container.textContent).toContain("10%");
   });
 
-  // ── 2026-10-01：口径调整（本档主动降权）从 data_gaps 拆出后的**落点** ──────────
-  // 断言必须定位到「挂在哪一档」：只断言文案出现，无法区分它被挂在 ultra_short 还是
-  // short 上（两档都有降权条目，混挂/全挂都能让「出现过」成立）—— 那正是本仓反复
-  // 点名的「拿读数当结论」。故这里选中第一档（ultraShort）后，断言 ×0.3 在、×0.5 不在。
-  it("口径调整挂在该档自己的脚注上（ultraShort 显示 ×0.3，不显示 short 的 ×0.5）", () => {
+  // ── 2026-10-04 R-11：逐档面板的两条呈现判据（口径 A 的展示侧）──────────────
+  // 原两条用例锁的是「乘数降权注脚挂在哪一档」；乘数表已退役 ⇒ 注脚连主语都没了。
+  // 换成本片真实改变的两件事：
+  //   ① 该档技术腿退化必须**成句**（不得退化成「评分低」或干脆不显示）；
+  //   ② 某路分支没产出 ⇒ 该档整个 Tab 消失，且不得冒出任何「该档结论」占位文案。
+  it("该档技术腿按日线退化 ⇒ 注脚必须成句出现", () => {
     storeState.decision = {
       action: "BUY",
       positionPct: 10.0,
@@ -132,12 +132,9 @@ describe("DecisionBanner", () => {
       confidence: 0.8,
       decisionsByHorizon: {
         ultraShort: { action: "BUY", positionPct: 10, confidence: 60 },
-        mid: { action: "HOLD", positionPct: 5, confidence: 55 },
+        // 中线档的逐档粒度评分没出数 ⇒ f1 腿退回日线（结构性缺席，不是低分）
+        mid: { action: "HOLD", positionPct: 5, confidence: 55, scoreSource: "daily_fallback" },
       },
-      weightAdjustments: [
-        { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
-        { tier: "short", leg: "f5", multiplier: 0.5 },
-      ],
     };
     storeState.stockCode = "600519";
     render(
@@ -145,18 +142,119 @@ describe("DecisionBanner", () => {
         <DecisionBanner />
       </MemoryRouter>,
     );
-    expect(screen.getByText("stockAnalysis.horizonLegDownweight|mult=0.3")).toBeTruthy();
-    expect(screen.queryByText("stockAnalysis.horizonLegDownweight|mult=0.5")).toBeNull();
+    // 默认选中第一档（ultraShort）⇒ 退化注脚不该出现在这里
+    expect(screen.queryByText("stockAnalysis.horizonScoreFallbackHint")).toBeNull();
+    // 点到中线档才出现：注脚是**逐档**的，不是全局横幅
+    fireEvent.click(screen.getByText("stockAnalysis.timeHorizonMid"));
+    expect(screen.getByText("stockAnalysis.horizonScoreFallbackHint")).toBeTruthy();
   });
 
-  it("无口径调整时不挂该脚注（不得对每档都铺一句「已降权」）", () => {
+  it("某路分支未产出 ⇒ 该档 Tab 整个消失（显式缺席，不补占位行）", () => {
     storeState.decision = {
       action: "BUY",
       positionPct: 10.0,
       reasoning: "技术面突破",
       riskLevel: "中",
       confidence: 0.8,
-      decisionsByHorizon: { ultraShort: { action: "BUY", positionPct: 10, confidence: 60 } },
+      // 四路只有中线一路有结论（其余三路节点失败/未接线）
+      decisionsByHorizon: { mid: { action: "HOLD", positionPct: 5, confidence: 55 } },
+    };
+    storeState.stockCode = "600519";
+    const { container } = render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("stockAnalysis.timeHorizonMid")).toBeTruthy();
+    // 缺席档在**任何**呈现面上都不出现：Tab 是独立文本节点，而概览条把标签和动作拼进
+    // 同一个节点（`中线: 观望`）⇒ 只按精确文本 queryByText 会漏掉概览条那一族（假绿方向
+    // 正是「缺档被补了一行」），故这里按整棵子树的 textContent 判。
+    const text = container.textContent ?? "";
+    for (const gone of ["UltraShort", "Short", "Long"]) {
+      expect(text.includes(`stockAnalysis.timeHorizon${gone}`)).toBe(false);
+    }
+    // Tab + 概览条两处 = 2 次；多一次就说明某处又给缺档补了行
+    expect((text.match(/stockAnalysis\.timeHorizonMid/g) ?? []).length).toBe(2);
+  });
+
+  // ── 阶段1（PLAN §四十八 Q3-A）：逐档证据必须上屏 ─────────────────────────────
+  // 四档结论不同是**腿集与算法**不同（R-11）造成的；只给四个 action 就等于把「为什么不同」
+  // 留在后端，读者只能把差异读成噪声。这里锁的是「分支自证字段每一项都有落点」。
+  it("逐档证据上屏：腿/缺腿/门与判定依据/出场与置信口径/先验来源与样本数", () => {
+    storeState.decision = {
+      action: "BUY",
+      positionPct: 10.0,
+      reasoning: "技术面突破",
+      riskLevel: "中",
+      confidence: 0.8,
+      decisionsByHorizon: {
+        mid: {
+          action: "持有",
+          positionPct: 0,
+          confidence: 56.8,
+          odds: 0,
+          entryGate: "inside_sigma_band",
+          entryGatePassed: false,
+          gateBasis: "unjudged",
+          exitRule: "k_sigma_band",
+          confidenceMethod: "sigma_band_position",
+          priorSource: "pooled",
+          priorSamples: 0,
+          evidenceScale: 20,
+          legs: [
+            { factor: "momentumSignal", role: "direction", weight: 0.4, signal: 0.7 },
+            { factor: "supplyShock", role: "riskNote", weight: 0, signal: 0.2 },
+          ],
+          absentLegs: ["expectationRevision", "sectorRotation"],
+          dataGaps: ["mid 档 expectationRevision 腿本轮不可评估"],
+        },
+      },
+    };
+    storeState.stockCode = "600519";
+    const { container } = render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    const text = container.textContent ?? "";
+    for (
+      const must of [
+        "stockAnalysis.horizonEntryGateLabel",
+        "inside_sigma_band",
+        // 门「算不出」必须与「未通过」分列（把未判定读成未通过 = 另一种伪装成结论）
+        "stockAnalysis.horizonGateUnjudged",
+        "stockAnalysis.horizonExitRuleLabel",
+        "k_sigma_band",
+        "stockAnalysis.horizonConfidenceMethodLabel",
+        "sigma_band_position",
+        "stockAnalysis.horizonOddsLabel",
+        "stockAnalysis.horizonEvidenceScaleLabel",
+        "stockAnalysis.horizonLegsLabel|count=2",
+        "momentumSignal",
+        "stockAnalysis.horizonAbsentLegsLabel|count=2",
+        "expectationRevision",
+        "stockAnalysis.horizonTierGapsLabel|count=1",
+        // 先验样本为 0 ⇒ 必须成句说明「借自全档合并基准」
+        "stockAnalysis.horizonPriorNoSamples",
+      ]
+    ) {
+      expect(text, `逐档面板缺呈现项: ${must}`).toContain(must);
+    }
+    expect(text).toContain("stockAnalysis.horizonPriorLabel|source=pooled,n=0");
+  });
+
+  // ── 阶段1（PLAN §四十八 Q2-B）：方向成立但无可执行计划 ⇒ 保留方向 + 并列成句 ──
+  it("方向族 + 仓位 0 + 赔率 0 ⇒ 必须并列声明「无可执行计划」；观望档不声明（0 仓位是它的常态）", () => {
+    storeState.decision = {
+      action: "BUY",
+      positionPct: 10.0,
+      reasoning: "技术面突破",
+      riskLevel: "中",
+      confidence: 0.8,
+      decisionsByHorizon: {
+        ultraShort: { action: "买入", positionPct: 0, confidence: 87.8, odds: 0 },
+        short: { action: "观望", positionPct: 0, confidence: 40, odds: 0 },
+      },
     };
     storeState.stockCode = "600519";
     render(
@@ -164,7 +262,11 @@ describe("DecisionBanner", () => {
         <DecisionBanner />
       </MemoryRouter>,
     );
-    expect(screen.queryByText(/stockAnalysis\.horizonLegDownweight/)).toBeNull();
+    // 默认选中第一档（ultraShort，买入 + 0 仓位）⇒ 声明必须在
+    expect(screen.getByText("stockAnalysis.horizonNoExecutablePlan")).toBeTruthy();
+    // 切到观望档 ⇒ 同一声明不得出现（0 仓位对观望是正常态，声明它就是把常态说成缺陷）
+    fireEvent.click(screen.getByText("stockAnalysis.timeHorizonShort"));
+    expect(screen.queryByText("stockAnalysis.horizonNoExecutablePlan")).toBeNull();
   });
 });
 
@@ -291,5 +393,75 @@ describe("DecisionBanner 数据质量表格的「报告质量」列（2026-09-21
   it("旧快照缺 report_quality ⇒ 显示「—」（既不能当 0，也不能是空字符串）", () => {
     renderWithDq(buildDqSummary([{ key: "mk", name: "技术面" }]));
     expect(rqCellsOf()).toEqual(["—"]);
+  });
+});
+
+/**
+ * 主档来历行（v127，PLAN §五十三 ①）。
+ *
+ * 被测的不是「有没有一段文字」，而是两条互斥义务：
+ *   ① 有 `actionSource` 且属于降级格 ⇒ 必须成句说出「哪一档、分支原结论、被谁改写、现在是什么」
+ *      （000710 的形态：超短线分支=买入 → 高风险风控否决 → 主档=持有）；
+ *   ② 没有该字段（v127 之前的存量行）⇒ **整行不渲染**，
+ *      不得回退成「分支选档」—— 那是给旧记录编一个它没有的来历。
+ */
+describe("DecisionBanner 主档来历行", () => {
+  const renderBanner = () => {
+    const { container } = render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    return container.textContent ?? "";
+  };
+
+  it("降级格：成句必须带分支原结论与改写者", () => {
+    storeState.decision = {
+      action: "HOLD",
+      positionPct: 20.3,
+      reasoning: "决策=持有",
+      riskLevel: "高",
+      confidence: 61,
+      actionSource: "risk_veto_downgrade",
+      confidenceSource: "branch_row",
+      timeHorizon: "ultra_short",
+      decisionsByHorizon: { ultraShort: { action: "买入" }, short: { action: "持有" } },
+    } as typeof storeState.decision;
+    const text = renderBanner();
+    expect(text).toContain("stockAnalysis.decisionProvenanceDowngraded");
+    expect(text).toContain("reason=stockAnalysis.actionSourceRiskVeto");
+    expect(text).toContain("branchAction=");
+    // 置信口径是 branch_row ⇒ 不该再多说一句（只有退回主链时才需要点名）
+    expect(text).not.toContain("stockAnalysis.confidenceSourceMainChain");
+  });
+
+  it("四路全缺席那代：置信口径退回主链时必须点名", () => {
+    storeState.decision = {
+      action: "HOLD",
+      positionPct: 8,
+      reasoning: "决策=持有",
+      riskLevel: "中",
+      confidence: 44,
+      actionSource: "main_chain",
+      confidenceSource: "main_chain_posterior",
+      timeHorizon: "short",
+    } as typeof storeState.decision;
+    const text = renderBanner();
+    expect(text).toContain("stockAnalysis.actionSourceMainChain");
+    expect(text).toContain("stockAnalysis.confidenceSourceMainChain");
+    expect(text).not.toContain("decisionProvenanceDowngraded");
+  });
+
+  it("v127 之前的存量行：来历整行不渲染（缺席不编造）", () => {
+    storeState.decision = {
+      action: "BUY",
+      positionPct: 10,
+      reasoning: "技术面突破",
+      riskLevel: "中",
+      confidence: 0.8,
+    } as typeof storeState.decision;
+    const text = renderBanner();
+    expect(text).not.toContain("decisionProvenance");
+    expect(text).not.toContain("actionSource");
   });
 });

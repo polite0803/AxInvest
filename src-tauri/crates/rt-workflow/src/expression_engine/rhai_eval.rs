@@ -18,7 +18,19 @@ pub enum RhaiEvalError {
 }
 
 /// 将 serde_json::Value 转换为 Rhai Dynamic
-fn value_to_dynamic(value: &Value) -> Dynamic {
+///
+/// 2026-10-03 提为 `pub`：主 crate 的分支脚本运行门（`seed_consistency_tests`）要用**与生产
+/// 同一条**注入路径把 `horizon_branch_specs()` 的 JSON 变成 Rhai map。提公开而不是在测试里
+/// 再写一份转换器 —— 数值口径正是那类「两份实现迟早漂移」的形态，而它直接决定脚本里
+/// `pm_*(…, i64 形参)` 的调用是否解析得到。
+///
+/// ⚠ 口径与生产逐字一致，且**不是**「JSON 数字一律 f64」：整数保 i64（`as_i64` 优先），
+///   只有真小数才落 f64。顶层标量另有其人 —— `code_executor` 的 `Value::Number` 分支
+///   先 `as_f64`，所以**顶层**数字是 f64、**嵌在 map/array 里**的数字是 i64。
+///   脚本里 `type_of(x) == "f64"` 因而对两类注入的成立性不同：拿它当「是不是数」的判据
+///   会把整数键静默判成缺席（2026-10-04 实证：分支表 `days`/`volLookbackDays` 是整数 ⇒
+///   四档价带恒 0）。要判「是不是数」得同时收 `"i64"`。
+pub fn value_to_dynamic(value: &Value) -> Dynamic {
     match value {
         Value::Null => Dynamic::UNIT,
         Value::Bool(b) => Dynamic::from_bool(*b),

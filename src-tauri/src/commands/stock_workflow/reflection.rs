@@ -165,6 +165,8 @@ pub async fn run_reflection_workflow(
     let now_ms = chrono::Utc::now().timestamp_millis();
 
     // ── [B2 借鉴] 幂等守卫: 如果 reflection_id 已 completed,直接返回 cached ──
+    // §七十一 按版归属：顺手把 pending 行的**建点盖章**带出来（`extract_lesson_to_rule` 用它）。
+    let mut pending_generation: Option<i32> = None;
     if let Some(ref rid) = reflection_id {
         if let Some(existing) =
             stock_reflections::Entity::find_by_id(rid.clone()).one(db).await.map_err(|e| {
@@ -172,6 +174,10 @@ pub async fn run_reflection_workflow(
                     .with_detail(format!("B2 查询已存在反思失败: {e}"))
             })?
         {
+            // 这一行的 `template_version` 是「被复盘那笔决策当时属于哪一代」的唯一残留：
+            // 分析行此后若被重跑，它的 `template_version` 会跟着变新一代，而本行复盘的仍是
+            // 老一代的结论 ⇒ 归属必须跟着建点盖章走，不能跟着分析行的现在时。
+            pending_generation = existing.template_version;
             if existing.status == "completed" {
                 tracing::info!(
                     "[B2 idempotency] reflection_id={rid} 已 completed,跳过重跑,直接返回 cached"
@@ -227,7 +233,13 @@ pub async fn run_reflection_workflow(
             horizon_results_json: Set(None),
             decision_json: Set(None),
             blackboard_snapshot: Set(None),
-            model_version: Set(None),
+            // §七十一 按版归属：本 INSERT 分支只有**手动反思**会走到，而那条路径
+            // `original_analysis_id` 恒为空串（「手动触发时无原始决策」，见 `stock_analysis.rs`
+            // 的 `run_reflection_now` 传参）⇒ 代际是**按构造天然未知**，与 chat 通道
+            // 「有分析但链路不经过 workflow_templates」的 NULL 是两种成因，不可混记；
+            // 两者都不得被读侧当成「第 0 代」。业务反思的代际由建 pending 行时盖
+            // （`build_pending_reflection_rows_for`），UPDATE 路径不改写它。
+            template_version: Set(None),
             status: Set("running".to_string()),
             created_at: Set(now_ms),
             updated_at: Set(now_ms),
@@ -280,6 +292,16 @@ pub async fn run_reflection_workflow(
     } else {
         stock_analyses::Entity::find_by_id(original_analysis_id).one(db).await.ok().flatten()
     };
+
+    // §七十一 按版归属：本代 = **被复盘那条决策**所属的算法代际。
+    //   权威是 `stock_analyses.template_version`（单一写入口径不变），这里取一次、供
+    //   规则化 lesson 建点盖章。`None` = 代际未知，两种成因都要如实保留：手动反思
+    //   （`original_analysis_id` 空 ⇒ 连被复盘的决策都没有）与 chat 通道（分析行本身 NULL，
+    //   A4 裁定）。**不得**退回编译期 `TEMPLATE_VERSION` 冒充 —— 那会把「反思发生在哪一代」
+    //   误记成「被复盘的决策属于哪一代」，而反思跑在旧代分析上恰恰是重放场景的常态。
+    //   ⚠ 优先级：pending 行的建点盖章 > 分析行的现在值（后者可能被重跑改写过，见上方 B2 段）。
+    let reflected_generation: Option<i32> =
+        pending_generation.or(original_analysis.as_ref().and_then(|a| a.template_version));
 
     let original_ctx: Option<(String, i64)> = original_analysis.as_ref().and_then(|a| {
         let t = a.decision_time_horizon.clone()?;
@@ -423,10 +445,17 @@ pub async fn run_reflection_workflow(
             var_type: "string".into(),
             value: serde_json::Value::String(
                 // 〇-B v2 第 4 条：反思自身也只喂**本次复盘档**的教训
-                fetch_stock_lessons(stock_code, db, Some(primary_horizon))
-                    .await
-                    .0
-                    .unwrap_or_else(|| "（暂无历史反思）".to_string()),
+                // §五十一-②：代际维度同理只喂**起算代及之后**（+ 代际未知但会被声明）的教训 ——
+                // 用旧代算法总结出的规则去评判新代决策，判据就不是同一条了。
+                fetch_stock_lessons(
+                    stock_code,
+                    db,
+                    Some(primary_horizon),
+                    axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR,
+                )
+                .await
+                .0
+                .unwrap_or_else(|| "（暂无历史反思）".to_string()),
             ),
             description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
             is_secret: false,
@@ -999,6 +1028,8 @@ pub async fn run_reflection_workflow(
                         &ls,
                         verdict_for_rule.as_deref(),
                         primary_horizon,
+                        // §七十一：代际来自被复盘的分析行，不是 LLM 输出、也不是当前代码版本
+                        reflected_generation,
                     )
                     .await;
                 }
@@ -1335,6 +1366,9 @@ async fn extract_lesson_to_rule(
     // 本次反思复盘的档位（〇-B v2 第 4 条：一次反思 = 一个周期）。
     // 由调用点传入 `primary_horizon`，**不是** LLM 自由填写的字段。
     horizon: &str,
+    // 被复盘那条决策的代际（§七十一 按版归属）。同样**不是** LLM 字段，由调用点从
+    // `stock_analyses.template_version` 取；`None` = 代际未知，按原样落 NULL。
+    analysis_template_version: Option<i32>,
 ) -> Result<(), String> {
     use axagent_entities::reflection_lessons;
     use sea_orm::ActiveModelTrait;
@@ -1368,6 +1402,9 @@ async fn extract_lesson_to_rule(
 
     if let Some(existing_model) = existing {
         // 已存在相同规则，更新 source_reflection_id 和 updated_at，保留应用统计
+        // ⚠ `template_version` **不在**这里改写（§七十一）：同一句教训在新代再次出现，
+        //   记录的是「它最早由哪一代产出」，改写会把它悄悄变成「最近被引用」，
+        //   统计按代筛样要的前者就没了。要问「哪些代重申过」应由引用计数层回答，不是这列。
         let mut active: reflection_lessons::ActiveModel = existing_model.into();
         active.source_reflection_id = Set(Some(source_reflection_id.to_string()));
         active.updated_at = Set(chrono::Utc::now().timestamp_millis());
@@ -1397,6 +1434,8 @@ async fn extract_lesson_to_rule(
         stock_code: Set(Some(stock_code.to_string())),
         // 周期章：由本次复盘档位盖章（值域 = Period::as_str），读侧据此同档过滤
         horizon: Set(Some(horizon.to_string())),
+        // §七十一 按版归属：建行即盖章，此后不改（见实体注释里「最早由哪一代产出」的语义）。
+        template_version: Set(analysis_template_version),
         applicable_scenarios: Set(None),
         times_applied: Set(0),
         success_count: Set(0),
@@ -1761,6 +1800,16 @@ pub struct PendingReflectionSeed<'a> {
     pub primary_holding_days: Option<i64>,
     pub min_confidence_threshold: u8,
     pub reflection_depth: &'a str,
+    /// 被复盘那条分析的算法代际（`stock_analyses.template_version` 原值，**不做兜底**）。
+    ///
+    /// §七十一 按版归属：代际必须在建 pending 行这一刻抄下来，因为分析行之后可能被重跑、
+    /// 换代、甚至清空 ⇒ 事后靠 join 回查会拿到「今天的代际」而不是「当时那笔决策的代际」。
+    ///
+    /// `None` 的三种真实成因（读侧必须当「代际未知」，不得当第 0 代）：
+    /// ① 对话直执行通道（链路不经 `workflow_templates`，A4 已裁定其分析行恒 NULL）；
+    /// ② 建行时 `template_version` 还没写（占位行阶段，见 `core.rs` 的写入顺序）；
+    /// ③ 本列引入前的存量分析行。
+    pub analysis_template_version: Option<i32>,
     pub now_ms: i64,
 }
 
@@ -1901,7 +1950,9 @@ pub fn build_pending_reflection_rows_for(
                 horizon_results_json: Set(None),
                 decision_json: Set(None),
                 blackboard_snapshot: Set(None),
-                model_version: Set(None),
+                // §七十一 按版归属：三个建点（单股 / 对话 / 回放补建）共用的唯一盖章处。
+                // 逐档各行**同一代际** —— 它们复盘的是同一笔决策。
+                template_version: Set(seed.analysis_template_version),
                 status: Set("pending".to_string()),
                 created_at: Set(seed.now_ms),
                 updated_at: Set(seed.now_ms),
@@ -3437,12 +3488,10 @@ mod market_snapshot_tests {
             decision_time_horizon: Some("mid".to_string()),
             decision_horizon_source: None,
             decision_expected_holding_days: Some(28),
-            model_version: None,
             // A4：NULL = 采集时点无版本信息（A4 之前的存量行、chat 通道写入均为此形态）
             template_version: None,
             // 模板 id：本测试用例不关心链路归属，按「未知」置 NULL（语义同上方）
             template_id: None,
-            data_snapshot_id: None,
             outcome: None,
             llm_decision_json: None,
             parent_analysis_id: None,
@@ -3589,6 +3638,8 @@ mod deterministic_was_correct_tests {
             source_reflection_id: Set(Some("r-1".to_string())),
             stock_code: Set(Some(code.to_string())),
             horizon: Set(h.map(str::to_string)),
+            // §七十一：本夹具只验档隔离，代际留 NULL（= 代际未知，随同代一起注入）
+            template_version: ActiveValue::NotSet,
             applicable_scenarios: ActiveValue::NotSet,
             times_applied: Set(0),
             success_count: Set(0),
@@ -3601,7 +3652,13 @@ mod deterministic_was_correct_tests {
             mk(id, h).insert(&db).await.expect("插入 lesson 应成功");
         }
 
-        let (text, ids) = super::super::core::fetch_stock_lessons(code, &db, Some("long")).await;
+        let (text, ids) = super::super::core::fetch_stock_lessons(
+            code,
+            &db,
+            Some("long"),
+            axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR,
+        )
+        .await;
         let text = text.unwrap_or_default();
         assert!(text.contains("教训文本 l-same"), "同档教训应被注入: {text}");
         assert!(text.contains("教训文本 l-any"), "通用（NULL 档）教训应被注入: {text}");
@@ -3627,6 +3684,7 @@ mod deterministic_was_correct_tests {
             source_reflection_id: Set(Some("r-2".to_string())),
             stock_code: Set(Some(code.to_string())),
             horizon: Set(Some(h.to_string())),
+            template_version: ActiveValue::NotSet,
             applicable_scenarios: ActiveValue::NotSet,
             times_applied: Set(0),
             success_count: Set(0),
@@ -3639,6 +3697,103 @@ mod deterministic_was_correct_tests {
         dup("d-short", "short").insert(&db).await.expect("插入 short 档重复教训");
         assert_eq!(cnt(&db, "long").await, 1, "long 档应恰有一行");
         assert_eq!(cnt(&db, "short").await, 1, "short 档应恰有一行（未被 long 档去重吞掉）");
+    }
+
+    /// §五十一-② 起算代际 / §七十一 按版归属：错题本（`reflection_lessons` + `stock_reflections`）
+    /// 按**算法代际下限**隔离。
+    ///
+    /// 与上一条按档隔离同族，但风险高一档：换代后旧代的教训**看起来仍是「同股同档」**，
+    /// 按档门对它完全无感。这里按数值/文本断四件事：
+    ///   ① 两个新列由「实体声明 + schema 自愈」自动建出（**没有**手写 migration ——
+    ///      插得进带 `template_version` 的行就是它的直接证据）；
+    ///   ② 起算代及之后 + 代际未知(NULL)的行进 prompt，**早于起算代的行被排除**（两张表都要）；
+    ///   ③ 被排除的条数**出现在注入文本里**（否则「0 条」会被模型读成「这只票没教训」，
+    ///      而真因是「教训全在起算代之前」—— 两种缺席含义相反，不许静默合并）；
+    ///   ④ 负控：把起算代降到旧代之下 ⇒ 旧代行**必须在**，且不得声称筛过。
+    ///      没有这半条，②只要数据没插进去也能"绿"。
+    #[tokio::test]
+    async fn lessons_are_isolated_per_generation() {
+        use axagent_entities::{reflection_lessons, stock_reflections};
+        use sea_orm::{ActiveValue, Set};
+
+        let db = axagent_dao::db::create_test_pool().await.expect("测试库应可创建").conn;
+        let code = "600276";
+        // ⚠ 反思行的 `created_at` 必须是**墙钟近期**：`fetch_same_ticker_completed` 带
+        // 「近 90 天」窗，而规则化教训那侧没有窗 —— 夹具不贴窗，反思行会被整体滤掉。
+        let now = chrono::Utc::now().timestamp_millis();
+        const FLOOR: i32 = 125;
+        const OLD: i32 = 121; // < FLOOR ⇒ 起算代之前
+
+        // ── 规则化教训：起算代之后 / 之前 / 代际未知（档一律给 long，排除档维度干扰）──
+        let mk_lesson = |id: &str, g: Option<i32>| reflection_lessons::ActiveModel {
+            id: Set(id.to_string()),
+            lesson_summary: Set(format!("代际教训文本 {id}，长度足够通过门槛")),
+            rule_pattern: ActiveValue::NotSet,
+            source_reflection_id: Set(Some("r-gen".to_string())),
+            stock_code: Set(Some(code.to_string())),
+            horizon: Set(Some("long".to_string())),
+            template_version: Set(g),
+            applicable_scenarios: ActiveValue::NotSet,
+            times_applied: Set(0),
+            success_count: Set(0),
+            confidence: Set(0.9),
+            status: Set("active".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        for (id, g) in [("g-new", Some(FLOOR + 4)), ("g-old", Some(OLD)), ("g-unknown", None)] {
+            mk_lesson(id, g).insert(&db).await.expect("插入 lesson 应成功（含新列）");
+        }
+
+        // ── 反思行：起算代之后 / 之前（status 必须 completed 才会被注入）──
+        let mk_row = |id: &str, g: Option<i32>| stock_reflections::ActiveModel {
+            id: Set(id.to_string()),
+            stock_code: Set(code.to_string()),
+            stock_name: Set("恒瑞医药".to_string()),
+            original_analysis_id: Set(format!("a-{id}")),
+            as_of_date: Set("2026-09-01".to_string()),
+            hindsight_date: Set("2026-09-29".to_string()),
+            min_confidence_threshold: Set(0),
+            reflection_depth: Set("light".to_string()),
+            horizon: Set(Some("long".to_string())),
+            actual_outcome: Set("上涨".to_string()),
+            lesson_summary: Set(Some(format!("反思教训 {id}，长度足够可注入"))),
+            template_version: Set(g),
+            status: Set("completed".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        };
+        for (id, g) in [("r-new", Some(FLOOR + 1)), ("r-old", Some(OLD))] {
+            mk_row(id, g).insert(&db).await.expect("插入反思行应成功（含新列）");
+        }
+
+        // ── ① 按起算代筛样 ──
+        let (text, _ids) =
+            super::super::core::fetch_stock_lessons(code, &db, Some("long"), FLOOR).await;
+        let text = text.expect("起算代筛样下仍应有内容（新代行与未知代行都在）");
+        assert!(text.contains("代际教训文本 g-new"), "起算代之后的规则应被注入: {text}");
+        assert!(text.contains("代际教训文本 g-unknown"), "代际未知(NULL)规则应被注入: {text}");
+        assert!(text.contains("反思教训 r-new"), "起算代之后的反思应被注入: {text}");
+        assert!(!text.contains("g-old"), "早于起算代的规则不得进 prompt: {text}");
+        assert!(!text.contains("r-old"), "早于起算代的反思不得进 prompt: {text}");
+        // 两张表各有 1 条旧代 ⇒ 两个组各声明一次（条数必须写出来，否则「为什么没有」不可见）
+        assert_eq!(
+            text.matches("另有 1 条早于起算代（第 125 代），未注入").count(),
+            2,
+            "规则组与反思组都要声明被筛掉的条数: {text}"
+        );
+
+        // ── ② 负控：把起算代降到旧代之下 ⇒ 旧代行必须在，且不得声称筛过 ──
+        // 这一段锁的是「上面那些『不含』确实是筛出来的」，而不是夹具没插进去。
+        let (all_text, _) =
+            super::super::core::fetch_stock_lessons(code, &db, Some("long"), OLD - 10).await;
+        let all_text = all_text.expect("起算代很低时应有内容");
+        assert!(
+            all_text.contains("g-old") && all_text.contains("r-old"),
+            "起算代降到旧代之下后，旧代行必须重新出现（否则上面的「不含」可能只是数据没插进去）:              {all_text}"
+        );
+        assert!(!all_text.contains("早于起算代"), "没有条目被筛掉时不得声称筛过: {all_text}");
     }
 }
 
@@ -3665,6 +3820,7 @@ mod pending_rows_per_horizon_tests {
             primary_holding_days: days,
             min_confidence_threshold: DEFAULT_REFLECTION_MIN_CONFIDENCE,
             reflection_depth: DEFAULT_REFLECTION_DEPTH,
+            analysis_template_version: None,
             now_ms: 1_754_200_000_000,
         }
     }
@@ -3746,5 +3902,38 @@ mod pending_rows_per_horizon_tests {
         );
         assert_eq!(rows.len(), 1, "_for 必须只建传入的档集，不得自行重算四档");
         assert_eq!(horizon_of(&rows[0]).as_deref(), Some("long"));
+    }
+
+    /// §七十一 按版归属：pending 行的代际由建点即盖，且**逐档各行同代**。
+    ///
+    /// 为什么单独一条：`template_version` 与 `horizon` 是两条正交的归属轴，档对而代错
+    /// （或反之）都会让错题本沉淀出跨代样本，而按档那组门对此完全无感。
+    /// 负控（`None` 那半）锁的是「不许把未知冒充成某一代」—— 这是 chat 通道与手动反思的
+    /// 真实形态（成因不同但结论相同：NULL 就写 NULL）。
+    #[test]
+    fn pending_rows_carry_the_reflected_analyses_generation() {
+        let hd = r#"{"ultra_short":{"action":"买入"},"short":{"action":"增持"},
+                     "mid":{"action":"减持"},"long":{"action":"卖出"}}"#;
+        let generation_of = |am: &Am| match &am.template_version {
+            ActiveValue::Set(v) => *v,
+            _ => panic!("template_version 必须在建点即 Set，不得留 NotSet 等收尾盖章"),
+        };
+
+        let mut s = seed(Some(hd), Some("mid"), Some(28));
+        s.analysis_template_version = Some(129);
+        let rows = build_pending_reflection_rows(&s);
+        assert_eq!(rows.len(), 4, "夹具四档都有方向");
+        for r in &rows {
+            assert_eq!(
+                generation_of(r),
+                Some(129),
+                "同一笔决策的四档反思必须同代（复盘的是同一条分析）"
+            );
+        }
+
+        s.analysis_template_version = None;
+        for r in &build_pending_reflection_rows(&s) {
+            assert_eq!(generation_of(r), None, "代际未知必须如实落 NULL");
+        }
     }
 }

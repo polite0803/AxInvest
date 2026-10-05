@@ -48,7 +48,16 @@ pub const SNAPSHOT_METHODS: &[&str] = &[
     // PledgeData 连日期字段都没有），回放里的唯一历史通道就是每日快照。
     "get_social_sentiment",
     "get_pledge_data",
-    // get_market_dragon_tiger / get_board_fund_flow 等全市场快照可后续补充
+    // #20①（2026-10-05）：一致预期补进白名单。它的 as-of 通道**只有**这一个 ——
+    // eastmoney 已申报 `NoHistoricalSemantic`（P9-3，弃用了「板块常数估算」代理），
+    // 而当日值只有采集侧入库、读取侧才可能命中；此前白名单漏了它 ⇒
+    // `try_stock_daily_snapshot` 被 `contains` 挡掉、恒 miss ⇒ as-of 一致预期必然降级。
+    // 补这一条与下面 `PER_STOCK_METHODS` 的登记必须**同批**，只补一边等于没接。
+    "get_consensus_eps",
+    // 仍未纳入（各自有独立理由，别顺手加）：
+    //   · get_market_dragon_tiger / get_dragon_tiger：龙虎榜条目自带日期 ⇒ 走
+    //     「vendor 全量 + lib.rs 按截止日截断」，不是 NoHistoricalSemantic ⇒ 归档对它无用；
+    //   · get_board_fund_flow：全市场快照，待定语义后再说。
 ];
 
 /// 需要遍历个股的 per-stock 快照方法（相对于全市场方法）
@@ -58,6 +67,9 @@ pub const PER_STOCK_METHODS: &[&str] = &[
     "get_margin_data",
     "get_social_sentiment",
     "get_pledge_data",
+    // #20①：一致预期是逐股取数（`get_consensus_eps(stock_code)`）⇒ 必须登记在这里，
+    // 否则采集侧会把它当全市场方法、进不了遍历自选股那条臂。
+    "get_consensus_eps",
 ];
 
 /// 每日快照缓存

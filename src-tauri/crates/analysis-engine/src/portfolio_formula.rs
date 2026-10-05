@@ -216,6 +216,43 @@ pub fn compute_kelly_position(posterior: f64, odds: f64, cost_pct: f64, risk_lev
     apply_risk_cap(position, risk_level)
 }
 
+/// 该档的**每日对数资本增长率**（Kelly 增长率按持有期归一），只服务跨档仲裁「资金投向哪档」。
+///
+/// 为什么必须按时间归一：四档的 `positionPct` 与赔率**不可直接比** —— 超短 8% 仓锁 2 天、
+/// 长线 30% 仓锁 90 天，可比的对象是「单位时间内资本的对数增长期望」，不是「哪档仓更大」。
+/// 口径：`g = [p·ln(1+f·b) + (1−p)·ln(1−f)] / days`，其中 `f = position_pct/100`
+/// （Kelly 1956 的资本增长率；除以持有天数即"每日期望对数增长"，与凯利原式同一目标函数）。
+///
+/// 返回 `None` = 该档**不参与仲裁**（概率越界 / 赔率非正 / 无仓位 / 持有 0 天 / 结果非有限）。
+/// ⚠ 「不参与」与「增长率为负」是两件事：调用方 arbiter 把 `None` 当**退出比较**而不是当 0 ——
+/// 把缺席读成 0 就是「缺席 = 看空」，正是 PLAN §十一 11-5 要防的形态。
+/// 放在 Rust 而不是 Rhai：共享引擎没有 `ln`（见 `pm_vol_move_pct` 的同款理由），
+/// 且这条公式要有单测。
+pub fn kelly_growth_rate(
+    posterior: f64,
+    odds: f64,
+    position_pct: f64,
+    holding_days: u32,
+) -> Option<f64> {
+    if holding_days == 0 || !posterior.is_finite() || !odds.is_finite() || !position_pct.is_finite()
+    {
+        return None;
+    }
+    if !(0.0..=1.0).contains(&posterior) || odds <= 0.0 || position_pct <= 0.0 {
+        return None;
+    }
+    let f = position_pct / 100.0;
+    if f >= 1.0 {
+        return None;
+    }
+    let g = (posterior * (1.0 + f * odds).ln() + (1.0 - posterior) * (1.0 - f).ln())
+        / f64::from(holding_days);
+    if !g.is_finite() {
+        return None;
+    }
+    Some(g)
+}
+
 /// 根据风险等级施加仓位上限
 fn apply_risk_cap(position: f64, risk_level: &str) -> f64 {
     match risk_level {
@@ -1902,5 +1939,37 @@ mod tests {
         .expect("应解析成功");
         assert!((p.prior_bear - 0.42).abs() < 1e-9);
         assert!((p.buy_threshold - 0.60).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod kelly_growth_tests {
+    use super::*;
+
+    /// 时间归一是本函数的**存在理由**：仓位小但持有短的档，完全可能比仓位大但锁 90 天的档
+    /// 增长率更高 —— 若只比 `position_pct`，仲裁永远偏向长线。
+    #[test]
+    fn growth_rate_normalises_by_holding_period() {
+        let short = kelly_growth_rate(0.66, 1.0, 8.0, 2).expect("超短应有增长率");
+        let long = kelly_growth_rate(0.66, 1.0, 30.0, 90).expect("长线应有增长率");
+        assert!(short > long, "同样胜率赔率下，2 日 8% 仓的每日对数增长应高于 90 日 30% 仓");
+        // 同一天数下仓位单调（f 与 f·b 都增，ln 项净增）
+        let a = kelly_growth_rate(0.70, 2.0, 10.0, 28).unwrap();
+        let b = kelly_growth_rate(0.70, 2.0, 25.0, 28).unwrap();
+        assert!(b > a, "持有期相同时，更大 Kelly 仓应有更高增长率");
+    }
+
+    /// `None` 的全部来源，以及「负增长率仍要返回 Some」的边界：
+    /// 负值是**该档在算出来不划算**，与「拿不到数」性质不同，混在一起会让缺席冒充看空。
+    #[test]
+    fn absence_is_none_and_negative_edge_stays_some() {
+        assert_eq!(kelly_growth_rate(0.6, 1.0, 10.0, 0), None, "持有 0 天无定义");
+        assert_eq!(kelly_growth_rate(1.2, 1.0, 10.0, 2), None, "概率越界");
+        assert_eq!(kelly_growth_rate(0.6, 0.0, 10.0, 2), None, "赔率非正");
+        assert_eq!(kelly_growth_rate(0.6, 1.0, 0.0, 2), None, "无仓位");
+        assert_eq!(kelly_growth_rate(f64::NAN, 1.0, 10.0, 2), None, "NaN 输入");
+        assert_eq!(kelly_growth_rate(0.6, 1.0, 100.0, 2), None, "f=1 ⇒ ln(0) 无定义");
+        let neg = kelly_growth_rate(0.40, 0.5, 10.0, 28).expect("负期望仍是可比的数值");
+        assert!(neg < 0.0, "胜率 0.40 + 赔率 0.5 应为负增长率，实得 {neg}");
     }
 }

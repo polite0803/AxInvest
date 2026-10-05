@@ -66,6 +66,8 @@ describe("agentOutput decision parsing", () => {
     positionPct: 20,
     targetPrice: null,
     stopLoss: null,
+    // null = 输入里**没有这个字段**（stage1 之前的记录）。注意与「字段在但映射为空」区分：
+    // 后者自 v125 起是 `{}`（四路分支全缺席 ⇒ 一个键都不出，口径 A），不是 null。
     horizonPriceMap: null,
     decisionsByHorizon: null,
     reasoning: "Test decision",
@@ -338,41 +340,28 @@ describe("normalizeDecision 决策前提字段透传（防回归）", () => {
     ).toEqual(["a"]);
   });
 
-  // ── 2026-10-01：口径调整（本档主动降权）与数据缺口分列 ──────────────────────
-  // 分列的理由见 `@/types` 的 `weightAdjustments` 文档：设计性降权曾与真缺口同挤
-  // data_gaps，而它恒有两条（f5 的 0.3/0.5 是常量）⇒ 每张带估值数据的卡都恒亮
-  // 「决策可信度受限 / 数据缺口 2 项」。故这两条断言必须成对：新字段在、旧字段不被污染。
-  it("保留 weightAdjustments 口径调整，且不写进 dataGaps（通道不得混）", () => {
-    const adjustments = [
-      { tier: "ultra_short", leg: "f5", multiplier: 0.3 },
-      { tier: "short", leg: "f5", multiplier: 0.5 },
-    ];
-    const d = normalizeDecision({ action: "观望", confidence: 45, weightAdjustments: adjustments });
-    expect(d?.weightAdjustments).toEqual(adjustments);
+  // ── 2026-10-04 R-11：逐档信息整体透传（顶层乘数通道已删）──────────────────
+  // 原两条用例锁的是「weightAdjustments 与 data_gaps 分列」；乘数表退役后那条通道
+  // 连字段一起删除 ⇒ 同一族的判据换成「分支行自带的 legs/absentLegs/dataGaps 必须
+  // 原样到达展示层」——被 normalizeDecision 的白名单构造丢掉，四档面板就又只剩标签。
+  it("decisionsByHorizon 的逐档腿清单原样透传（不得被白名单构造丢掉）", () => {
+    const dbh = {
+      short: {
+        action: "观望",
+        confidence: 41,
+        legs: [{ factor: "momentumSignal", role: "direction", weight: 0.4, signal: 0.7 }],
+        absentLegs: ["supplyShock"],
+        dataGaps: ["short 档 supplyShock 腿本轮不可评估"],
+        confidenceMethod: "trend_gate_and_seal",
+      },
+    };
+    const d = normalizeDecision({ action: "观望", confidence: 45, decisionsByHorizon: dbh });
+    expect(d?.decisionsByHorizon?.short?.absentLegs).toEqual(["supplyShock"]);
+    expect(d?.decisionsByHorizon?.short?.dataGaps).toEqual(["short 档 supplyShock 腿本轮不可评估"]);
+    expect(d?.decisionsByHorizon?.short?.legs?.[0].factor).toBe("momentumSignal");
+    // 顶层缺口通道与逐档清单互不污染：没有 data_gaps 就不该凭空造出条目
     expect(d?.dataGaps).toBeUndefined();
   });
-
-  it("weightAdjustments 兼容 snake_case，且残缺条目丢弃（不补默认值）", () => {
-    expect(
-      normalizeDecision({ action: "观望", confidence: 45, weightAdjustments: [] })?.weightAdjustments,
-    ).toBeUndefined();
-    const dirty = normalizeDecision({
-      action: "观望",
-      confidence: 45,
-      weight_adjustments: [
-        { tier: "short", leg: "f5", multiplier: 0.5 },
-        { tier: "short", leg: "f5" }, // 缺 multiplier ⇒ 补默认值会挂出「×1.0 却说降权」的假注脚
-        { leg: "f5", multiplier: 0.5 }, // 缺 tier
-        { tier: "", leg: "f5", multiplier: 0.5 }, // 空 tier
-        { tier: "short", leg: "f5", multiplier: "0.5" }, // 字符串乘数
-        null,
-        1,
-        "x",
-      ],
-    });
-    expect(dirty?.weightAdjustments).toEqual([{ tier: "short", leg: "f5", multiplier: 0.5 }]);
-  });
-
   it("保留 crossCheck 跨系统互证字段（hooks.rs 注入）", () => {
     const crossCheck = { recoConfidence: 70, divergent: true };
     const d = normalizeDecision({ action: "观望", confidence: 45, crossCheck });
@@ -389,7 +378,6 @@ describe("normalizeDecision 决策前提字段透传（防回归）", () => {
     expect(d?.weightsCollapsed).toBe(false);
     expect(d?.collapseReason).toBeUndefined();
     expect(d?.dataGaps).toBeUndefined();
-    expect(d?.weightAdjustments).toBeUndefined();
     expect(d?.crossCheck).toBeUndefined();
     expect(d?.isContradictory).toBe(false);
   });

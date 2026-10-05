@@ -75,11 +75,8 @@ fn has(x) {
     t == "f64" || t == "i64" || t == "int"
 }
 
-fn num_of(x, dflt) {
-    if type_of(x) == "f64" { return x; }
-    if type_of(x) == "i64" || type_of(x) == "int" { return x.to_float(); }
-    dflt
-}
+// `num_of(x, dflt)` 由引擎侧注册（权威源 `crates/harness/src/rhai_engine.rs`），
+// 与 `risk-level.rhai` 共用同一数值口径；本文件原先自带一份同语义实现，2026-10-04 收编。
 
 fn clampf(x, lo, hi) {
     if x < lo { return lo; }

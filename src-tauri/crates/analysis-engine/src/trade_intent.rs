@@ -236,7 +236,6 @@ impl TradeIntentService {
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
             decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
-            model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
             // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
             // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
@@ -244,7 +243,6 @@ impl TradeIntentService {
             // 2026-09-24：同理，本表记录不由工作流模板产出 ⇒ 模板 id 显式 NULL
             // （语义 = 链路未知，读取侧的「排除快速链」过滤会放行，符合预期）。
             template_id: Set(None),
-            data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
             parent_analysis_id: Set(None),
@@ -514,10 +512,8 @@ mod tests {
                 decision_time_horizon TEXT,
                 decision_horizon_source TEXT,
                 decision_expected_holding_days INTEGER,
-                model_version TEXT,
                 template_version INTEGER,
                 template_id TEXT,
-                data_snapshot_id TEXT,
                 outcome TEXT,
                 llm_decision_json TEXT,
                 parent_analysis_id TEXT,
@@ -592,7 +588,6 @@ mod tests {
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
             decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
-            model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
             // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
             // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
@@ -600,7 +595,6 @@ mod tests {
             // 2026-09-24：同理，本表记录不由工作流模板产出 ⇒ 模板 id 显式 NULL
             // （语义 = 链路未知，读取侧的「排除快速链」过滤会放行，符合预期）。
             template_id: Set(None),
-            data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
             parent_analysis_id: Set(None),
@@ -665,7 +659,6 @@ mod tests {
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
             decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
-            model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
             // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
             // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
@@ -673,7 +666,6 @@ mod tests {
             // 2026-09-24：同理，本表记录不由工作流模板产出 ⇒ 模板 id 显式 NULL
             // （语义 = 链路未知，读取侧的「排除快速链」过滤会放行，符合预期）。
             template_id: Set(None),
-            data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
             parent_analysis_id: Set(None),
@@ -735,7 +727,6 @@ mod tests {
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
             decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
-            model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
             // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
             // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
@@ -743,7 +734,6 @@ mod tests {
             // 2026-09-24：同理，本表记录不由工作流模板产出 ⇒ 模板 id 显式 NULL
             // （语义 = 链路未知，读取侧的「排除快速链」过滤会放行，符合预期）。
             template_id: Set(None),
-            data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
             parent_analysis_id: Set(None),
@@ -820,7 +810,6 @@ mod tests {
             // Phase 1：条件单派生记录不经决策链，周期来源未知 ⇒ 与列的 NULL 语义一致
             decision_horizon_source: Set(None),
             decision_expected_holding_days: Set(None),
-            model_version: Set(None),
             // A4：非**工作流模板**产出（条件单触发的补记 / 测试数据）——「哪版公式产出的」
             // 对这类记录不适用 ⇒ 显式 NULL。复算器见到 NULL 必须声明「公式版本未知」，
             // 不得拿当前模板版本兜底（那会把人工补记误判成可复算产物）。
@@ -828,7 +817,6 @@ mod tests {
             // 2026-09-24：同理，本表记录不由工作流模板产出 ⇒ 模板 id 显式 NULL
             // （语义 = 链路未知，读取侧的「排除快速链」过滤会放行，符合预期）。
             template_id: Set(None),
-            data_snapshot_id: Set(None),
             outcome: Set(None),
             llm_decision_json: Set(None),
             parent_analysis_id: Set(None),

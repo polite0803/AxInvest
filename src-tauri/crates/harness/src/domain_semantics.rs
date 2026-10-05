@@ -353,7 +353,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 1.0,
         meaning: "证据引用与分析师报告的匹配度",
-        evidence: "src-tauri/crates/analysis-engine/src/evidence_citation.rs:176 | src-tauri/crates/analysis-engine/src/evidence_citation.rs:207",
+        evidence: "src-tauri/crates/analysis-engine/src/evidence_citation.rs:58 | src-tauri/crates/analysis-engine/src/evidence_citation.rs:260",
     },
     ConceptDecl {
         id: "axagent.calibration.score",

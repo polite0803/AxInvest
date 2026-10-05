@@ -341,6 +341,34 @@ pub fn vol_move_pct(closes: &[f64], lookback: usize, holding_days: usize) -> Opt
     realized_vol_pct(closes, lookback).map(|sigma| sigma * (holding_days as f64).sqrt())
 }
 
+/// 价格在均线波动带内的**标准化位置**（Bollinger 式 z 值）：`(末价 − SMA) / σ_价`。
+///
+/// 用途（P4′-b 的逐档分支）：中档的入场门 `inside_sigma_band` 与长档的「带内/带外」判断
+/// 都要读这个量。**在 Rhai 里现算均值与标准差**就是给 `realized_vol_pct` 造第二份实现
+/// （禁区 12：本仓已为「同一算法两处实现迟早漂移」付过多次代价），所以口径只留这一份。
+///
+/// `σ_价` 用的是**价格本身**的样本标准差（带宽定义如此），与 [`realized_vol_pct`] 的
+/// 「收益率标准差」是两个不同量 —— 前者给「离均线几个带」，后者给「一天动百分之几」。
+///
+/// 返回 `None`（调用方必须显式降级，**不得当成 z=0**）：
+/// 样本不足 `lookback`、窗口含非正/非有限价格、`σ_价 ≈ 0`（停盘或一字板：带宽为 0 时
+/// 「位置」无定义，把它读成「正居中」会把不可得伪装成中性）。
+pub fn band_z(closes: &[f64], lookback: usize) -> Option<f64> {
+    if lookback < 2 || closes.len() < lookback {
+        return None;
+    }
+    let window = &closes[closes.len() - lookback..];
+    if window.iter().any(|c| !c.is_finite() || *c <= 0.0) {
+        return None;
+    }
+    let mean = window.iter().sum::<f64>() / lookback as f64;
+    let sd = stddev_sample(window, mean);
+    if !sd.is_finite() || sd <= f64::EPSILON {
+        return None;
+    }
+    Some((window[window.len() - 1] - mean) / sd)
+}
+
 /// SNR 时间折算的**放大上限**（倍数）。
 ///
 /// 为什么需要（2026-10-01 实证）：`√(h/anchor)` 的推导前提是「日边缘在整个持有期内
@@ -387,6 +415,38 @@ pub fn snr_confidence(p: f64, holding_days: usize, anchor_days: usize) -> f64 {
     let scale = ((holding_days as f64) / (anchor_days as f64)).sqrt().min(SNR_SCALE_CAP);
     let scaled = 0.5 + (p - 0.5) * scale;
     scaled.clamp(0.0, 1.0)
+}
+
+/// 区间内**峰值到谷底**的最大回撤比例（0.0~1.0，恒非负）。
+///
+/// 为什么要新增这一份（B1 风险按档，2026-10-05）：逐档风险要算 2/5/28/90 四个窗口各自的
+/// 回撤，而本仓此前已有四份 peak-trough 实现
+/// （`astock-data/mcp_tools.rs` 的内联循环、`analysis-engine/risk.rs::peak_trough_drawdown`、
+/// `analysis-engine/serenity_hit_rate_backtest.rs::compute_max_drawdown_from_series`、
+/// `quant/metrics.rs::max_drawdown`）。若按窗口循环再写一份就是第五份 ⇒ 前两份现委托本函数
+/// （后两份入参形态不同：`EquityPoint` 序列 / 回测专用，登记为余项未并）。
+///
+/// 语义（逐条由测试锁定，且与所替换的两份既有实现**等价**）：
+/// - 峰值取**时间序上到当前为止**的最高价，回撤只统计峰值之后 ⇒ 无前视；
+/// - 非正 / 非有限价格跳过：既不作峰值种子，也不参与回撤（停牌、缺数据）；
+/// - 空序列或全非正 ⇒ `None`。调用方**不得当成 0 回撤** —— 把「算不出」读成「没回撤」
+///   会把缺席伪装成最低风险（与 [`realized_vol_pct`] 的「不得当成 0 波动」同一条纪律）。
+pub fn max_drawdown_fraction(prices: &[f64]) -> Option<f64> {
+    let mut peak = prices.iter().filter(|&&p| p.is_finite() && p > 0.0).copied().next()?;
+    let mut max_dd = 0.0_f64;
+    for &p in prices {
+        if !p.is_finite() || p <= 0.0 {
+            continue;
+        }
+        if p > peak {
+            peak = p;
+        }
+        let dd = (peak - p) / peak;
+        if dd > max_dd {
+            max_dd = dd;
+        }
+    }
+    Some(max_dd)
 }
 
 /// 平均秩（mid-rank）：并列值取其占据秩区间的均值，1-indexed。
@@ -824,5 +884,41 @@ mod tests {
         // 无定义 ⇒ None（不是 0）
         assert_eq!(spearman_rank_ic(&[(0.5, 1.0), (0.5, 2.0), (0.5, 3.0)]), None);
         assert_eq!(spearman_rank_ic(&[(0.5, f64::NAN)]), None);
+    }
+
+    #[test]
+    fn band_z_is_a_standardised_position_and_refuses_degenerate_windows() {
+        // [1,2,3,4,5]：mean=3、样本 σ=√2.5 ⇒ 末价 z = 2/√2.5 = 1.2649111
+        let up = [1.0, 2.0, 3.0, 4.0, 5.0];
+        assert!((band_z(&up, 5).unwrap() - 1.264_911_1).abs() < 1e-6);
+        // 带内对称：mean=3、**末价=3**（首版样本末价是 2，那是「低于均值」不是居中 ⇒ 假红）
+        // ⇒ 0（真居中，与「算不出」是两回事）
+        assert!((band_z(&[2.0, 4.0, 3.0, 1.0, 5.0, 3.0], 6).unwrap() - 0.0).abs() < 1e-12);
+        // 停盘 / 一字板：σ_价 = 0 ⇒ 位置无定义，返回 None 而不是 z=0
+        assert_eq!(band_z(&[10.0; 20], 20), None);
+        // 样本不足 / 含非正价格 / 含 NaN ⇒ 一律 None（调用方必须显式降级）
+        assert_eq!(band_z(&[1.0, 2.0], 5), None);
+        assert_eq!(band_z(&[1.0, 2.0, -3.0, 4.0], 4), None);
+        assert_eq!(band_z(&[1.0, 2.0, f64::NAN, 4.0], 4), None);
+        assert_eq!(band_z(&[1.0, 2.0, 3.0], 1), None, "lookback<2 时带宽无定义");
+    }
+
+    #[test]
+    fn max_drawdown_fraction_is_peak_to_trough_without_lookahead() {
+        // 10 → 8 → 12 → 9：两段候选回撤 2/10=0.20 与 3/12=0.25 ⇒ 取 0.25。
+        // 首版若把「窗口末价 vs 窗口首价」当回撤会算出 0.1 —— 那是另一个量（净涨跌）。
+        let got = max_drawdown_fraction(&[10.0, 8.0, 12.0, 9.0]).expect("应可计算");
+        assert!((got - 0.25).abs() < 1e-12, "实得 {got}");
+        // 单调上涨 ⇒ 0.0（真没回撤，与「算不出」是两回事）
+        assert_eq!(max_drawdown_fraction(&[1.0, 2.0, 3.0]).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn max_drawdown_fraction_refuses_empty_and_non_positive_samples() {
+        assert_eq!(max_drawdown_fraction(&[]), None);
+        assert_eq!(max_drawdown_fraction(&[0.0, -1.0]), None, "全非正 ⇒ 无定义，不得当成 0 回撤");
+        // 序列中间的非正价格跳过：不作峰值种子，也不参与回撤
+        assert!((max_drawdown_fraction(&[10.0, 0.0, 8.0]).unwrap() - 0.2).abs() < 1e-12);
+        assert!((max_drawdown_fraction(&[10.0, f64::NAN, 5.0]).unwrap() - 0.5).abs() < 1e-12);
     }
 }

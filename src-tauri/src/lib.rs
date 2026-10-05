@@ -85,6 +85,10 @@ pub use commands::stock_workflow::core::run_stock_workflow_inner;
 // 是因为它**尚未**被提到父层；而「在 mod.rs 里新加一条 `pub use core::X;`」
 // 会触碰 build.rs 的子模块 re-export 解析面（详见上一行的 ⚠ 注释）。
 pub use commands::stock_workflow::run_batch_reflection_inner;
+// 模板代际号：`axagent-batch-rerun` 的「版本联查完整性」必须读**同一个**数字，
+// 不能在 bin 里另抄一份（抄了就永远对不上）。`commands` 本身是私有模块，
+// 这里的 `pub use` 只做再导出，不改 `commands/mod.rs` 的解析面（见上方两条 ⚠ 注释）。
+pub use commands::stock_analysis_setup::seed_stock_analysis::TEMPLATE_VERSION;
 // 「一行 pending = 一个复盘档」的建点共享构造器（PLAN-reflection-per-horizon-row §2.4）。
 // bin `axagent-batch-rerun` 的补建路径必须与 `core.rs` / `hooks.rs` 两个应用内建点走同一
 // 构造器，否则三处默认值/档口径再度分叉（该函数注释里记载的「手抄常量」缺陷即由此而来）。

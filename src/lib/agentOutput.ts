@@ -11,12 +11,42 @@ interface AgentResult {
 
 import {
   alignReasoningDecisionLabel,
+  HORIZON_CAMEL_TO_SNAKE,
   parseAction,
   parsePositionState,
   parseRiskLevel,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
-import type { StockDecision, WeightAdjustment } from "@/types/stock-analysis";
+import type { StockDecision } from "@/types/stock-analysis";
+
+/**
+ * 四周期价位映射的键归一（v125，PLAN §五十）。
+ *
+ * 为什么必须转键而不是断言类型：`DecisionBanner` 的 `HORIZON_KEYS` 按 camelCase 读，而后端
+ * 自阶段1 起一直出 snake_case（`ultra_short`）。原先这里只做 `as` 断言 ⇒ 四个键里**只有**
+ * `ultraShort` 一族拼写错开（`short`/`mid`/`long` 两族同名），于是「超短档的价位行从来不显示，
+ * 另外三档一切正常」—— 库里数据是齐的（实证：000710 现网行的映射键 = mid / long / short /
+ * ultra_short）。v125 把产出端也改成 camel，但**存量行仍是 snake** ⇒ 读侧两种拼写都要收。
+ *
+ * 三种缺席严格分列，不得并成一个值：
+ *   · 字段不存在 / 非对象 → `null` = 「该记录产生于 stage1 之前，**无此信息**」；
+ *   · 字段在但映射为空 → `{}` = 「本轮四路分支全缺席」（口径 A）；
+ *   · 单档缺席 → 该键**不在结果里**（不是值为 null，也不是 0%）。
+ * 表外键一律丢弃：档位集合封闭（四档），未知键混进决策对象会让下游把脏数据当档位。
+ */
+export function normalizeHorizonPriceMap(raw: unknown): StockDecision["horizonPriceMap"] {
+  if (raw == null || typeof raw !== "object") { return null; }
+  const src = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  // 键表来自 `HORIZON_CAMEL_TO_SNAKE`（单点），不在此重复一份档位表。
+  for (const [camel, snake] of Object.entries(HORIZON_CAMEL_TO_SNAKE)) {
+    // ⚠ 用 `!== undefined` 而不是 `??`：显式写了 camel 键（哪怕是 null = 该档缺席）时，
+    //   `??` 会掉回去读 snake 的那一份，等于让**旧拼写覆盖新拼写的缺席声明**。
+    const row = src[camel] !== undefined ? src[camel] : src[snake];
+    if (row != null && typeof row === "object") { out[camel] = row; }
+  }
+  return out as StockDecision["horizonPriceMap"];
+}
 
 /** 清理 LLM 原始输出中的工具调用标签、think 标签和乱码 */
 export function cleanToolCallTags(text: string): string {
@@ -198,20 +228,6 @@ export function extractContent(value: unknown): string {
 }
 
 /**
- * 形状校验：一条「口径调整」必须三字段齐备且乘数为有限数。
- *
- * 残缺条目**丢弃**而不是补默认值 —— 补出来的 `multiplier: 1.0`（= 没降权）或空 `tier`
- * 会让展示层挂出一条自相矛盾的注脚（「×1.0」却说被降权）。宁可少显示一条。
- */
-export function isWeightAdjustment(v: unknown): v is WeightAdjustment {
-  if (v === null || typeof v !== "object") { return false; }
-  const o = v as Record<string, unknown>;
-  return typeof o.tier === "string" && o.tier !== ""
-    && typeof o.leg === "string" && o.leg !== ""
-    && typeof o.multiplier === "number" && Number.isFinite(o.multiplier);
-}
-
-/**
  * 规范化 decision 对象：兼容 snake_case/camelCase、置信度 0-100、空值保护
  *
  * 返回 null 表示"空壳决策"：raw 完全没有可解析的有意义字段
@@ -372,15 +388,11 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
   const dataGaps = Array.isArray(dataGapsRaw)
     ? dataGapsRaw.filter((g): g is string => typeof g === "string")
     : undefined;
-  // ── 口径调整（**不是**数据缺口）：本档按周期主动降权的证据腿 ──
-  // 与 `data_gaps` 分列的理由见 `@/types` 的 `weightAdjustments` 文档，简言之：
-  // 设计性降权曾与真缺口同挤 data_gaps，而它**恒**有两条（f5 的 0.3/0.5 是常量）⇒
-  // 每张带估值数据的决策卡恒亮「决策可信度受限 / 数据缺口 2 项」。
-  // 后端 2026-10-01 起产出 camelCase `weightAdjustments`；兼容 snake_case 以便将来统一不破。
-  const weightAdjustmentsRaw = source.weightAdjustments ?? source.weight_adjustments;
-  const weightAdjustments = Array.isArray(weightAdjustmentsRaw)
-    ? weightAdjustmentsRaw.filter(isWeightAdjustment)
-    : undefined;
+  // ── 口径调整通道已随 R-11 退役（2026-10-04）──
+  // 原 `weightAdjustments`（结构化 tier/leg/multiplier）记的是「逐档乘数表把哪条腿乘了多少」，
+  // 而乘数表本身已被判为「一个算法 + 四套参数」并退役 ⇒ 这里解析的输入永远不会再到货。
+  // 逐档的证据差异现在写在各自的分支输出里（`decisionsByHorizon[].legs/absentLegs/dataGaps`），
+  // 由 `DecisionBanner` 按档展示，不需要顶层再维护一份「调整清单」。
   const isContradictoryRaw = source.isContradictory ?? source.is_contradictory;
   const crossCheckRaw = source.crossCheck ?? source.cross_check;
   // P1-2(2026-09-14): 持仓状态 —— 与 action 正交的第二轴，portfolio-mgr.rhai 输出 camelCase
@@ -390,13 +402,10 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
   //   仅作为独立的「本次建议持仓状态」供 UI 展示。
   const positionStateRaw = source.positionState ?? source.position_state;
   const positionState = parsePositionState(positionStateRaw);
-  // 阶段1：四周期价位映射透传 —— camel/snake 双兼容（`horizonPriceMap` / `horizon_price_map`）。
-  // 与 targetPrice/stopLoss 一致：null/undefined = stage1 字段引入前的记录，**无此信息**，
-  // 消费端按主档位回退，不得读成空映射。
+  // 阶段1：四周期价位映射。字段名 camel/snake 双兼容（`horizonPriceMap` / `horizon_price_map`），
+  // **档名键**另由 `normalizeHorizonPriceMap` 归一（两族拼写不是同一件事，见该函数注释）。
   const horizonPriceMapRaw = source.horizonPriceMap ?? source.horizon_price_map;
-  const horizonPriceMap = horizonPriceMapRaw != null && typeof horizonPriceMapRaw === "object"
-    ? (horizonPriceMapRaw as unknown as StockDecision["horizonPriceMap"])
-    : null;
+  const horizonPriceMap = normalizeHorizonPriceMap(horizonPriceMapRaw);
 
   // 阶段2：四周期独立决策透传 —— camel/snake 双兼容。
   const decisionsByHorizonRaw = source.decisionsByHorizon ?? source.decisions_by_horizon;
@@ -424,6 +433,12 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     reasoning: alignReasoningDecisionLabel(reasoning, resolveDisplayAction(action)),
     riskLevel,
     confidence,
+    // ── 主档来历（v127，PLAN §五十三 ①）──
+    // 本函数是**白名单式重建**：不在这里显式带上，产端发的字段就会在归一化时被丢掉，
+    //   面板永远读不到（同 2026-09-11 那次 `weightsCollapsed` 「字段一直发、界面从未显示」）。
+    //   两族键名都收（现网 camelCase，旧快照 snake_case）。
+    actionSource: nonEmptyString(source.actionSource) ?? nonEmptyString(source.action_source) ?? undefined,
+    confidenceSource: nonEmptyString(source.confidenceSource) ?? nonEmptyString(source.confidence_source) ?? undefined,
     decisionConfidence,
     signalStrength,
     timeHorizon: timeHorizon || null,
@@ -441,7 +456,6 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     // ── 数据缺口（portfolio-mgr 消费的上游节点缺失清单）──
     dataGaps: dataGaps && dataGaps.length > 0 ? dataGaps : undefined,
     // ── 口径调整（本档主动降权的腿；与缺口分列，**不**参与可信度警示的触发）──
-    weightAdjustments: weightAdjustments && weightAdjustments.length > 0 ? weightAdjustments : undefined,
     // ── 跨系统 / 自洽性标记 ──
     isContradictory: isContradictoryRaw === true,
     crossCheck: crossCheckRaw != null && typeof crossCheckRaw === "object"

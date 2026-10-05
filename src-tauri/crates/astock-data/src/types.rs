@@ -123,7 +123,17 @@ pub struct LockupSchedule {
     pub stock_name: String,
     pub unlock_date: String,
     pub unlock_shares: f64,
-    pub unlock_ratio: f64,
+    /// **该股东占「当日解禁合计」的份额**（百分数，0–100）—— 名字里带 `intraday` 就是为了
+    /// 拦住下游再把它当「占总股本 / 占流通市值比」用（任务 #23 的病根即此）。
+    ///
+    /// 三条硬边界：
+    /// - 它**不是** `supplyShock` 腿要的占比。那个量是「窗内解禁市值 ÷ 流通市值」，
+    ///   由 `get_lockup_bundle` 的 `supply_shock` 块给出（小数口径、按该档交易日窗归约）。
+    /// - 当日合计不可得（`LIFT_SHARES_ALL` 缺失/为 0）⇒ `None`，**不填 0**：
+    ///   0 会被读成「这个股东没分量」，而事实是「我们不知道」。
+    /// - 历史名 `unlock_ratio` 已退役（含 ×100 的多余缩放）；前端 `EventCalendarPanel`
+    ///   同批改读 `intradaySharePct`，不留双名兼容。
+    pub intraday_share_pct: Option<f64>,
     pub shareholder: Option<String>,
 }
 

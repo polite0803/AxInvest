@@ -614,7 +614,7 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
           missing.push(`${lang} ${where}`);
           continue;
         }
-        if (nonLatin.has(lang) && !/[^\x00-\x7F]/.test(text)) { asciiish.push(`${lang} ${where}`); }
+        if (nonLatin.has(lang) && !/[^\p{ASCII}]/u.test(text)) { asciiish.push(`${lang} ${where}`); }
       }
       // 旧键不得留在纸面：留着就是「面板已经不渲染、翻译表还在维护」的第二份权威。
       if (g && "indicators" in g) { stale.push(lang); }

@@ -2311,15 +2311,18 @@ mod tests {
     pub(crate) fn extract_analyst_reports_unwraps_tool_node_content_wrapper() {
         use std::collections::HashMap;
         let mut snapshot = HashMap::new();
+        // v133（B2-2）：夹具原用 `a-news`（已随节点摘除）——改用 `a-fundamentals`
+        // （本测试只验证「ToolNode 包装解包取 report」，与分析域语义无关）。
         snapshot.insert(
-            "a-news".to_string(),
+            "a-fundamentals".to_string(),
             json!({
                 "content": "{\"report\": \"公司发布业绩预增公告，属利好催化\"}",
                 "tool_name": "agent_executor",
             }),
         );
         let reports = extract_analyst_reports_from_snapshot(&snapshot);
-        let text = reports.get("news-analyst").expect("必须提取到 news-analyst 报告");
+        let text =
+            reports.get("fundamentals-analyst").expect("必须提取到 fundamentals-analyst 报告");
         assert_eq!(text, "公司发布业绩预增公告，属利好催化");
     }
 
@@ -3379,7 +3382,7 @@ pub(crate) fn extract_analyst_reports_from_snapshot(
     let expert_mapping: &[(&str, &str)] = &[
         ("a-market-analyst", "market-analyst"),
         ("a-sentiment", "sentiment-analyst"),
-        ("a-news", "news-analyst"),
+        // v133（B2-2）：`a-news` 已随节点摘除（公告通道由 a-catalyst 承载）——原行删除。
         ("a-fundamentals", "fundamentals-analyst"),
         ("a-policy", "policy-analyst"),
         ("a-hot-money", "hot-money-tracker"),
@@ -3389,7 +3392,16 @@ pub(crate) fn extract_analyst_reports_from_snapshot(
     for (node_id, target_id) in expert_mapping {
         // 尝试两种 key 格式：report.{node_id} 和 {node_id}
         let report_key = format!("report.{node_id}");
-        let value = snapshot.get(&report_key).or_else(|| snapshot.get(*node_id));
+        let value = snapshot.get(&report_key).or_else(|| snapshot.get(*node_id)).or_else(|| {
+            // B2-2（§五十六 落地顺序第 2 步）：带档节点 id 形如 `a-fundamentals--mid` ⇒
+            // 上面两次精确 key 都命中不了，**按 base 回找**（找不到则该专家的仪表盘栏空着）。
+            // 对裸 id 逐位不变：那时精确 key 已经命中，这里的回找根本不会触发。
+            snapshot.iter().find_map(|(k, v)| {
+                let node = k.strip_prefix("report.").unwrap_or(k.as_str());
+                (axagent_harness::holding_period::analyst_base_of(node) == Some(*node_id))
+                    .then_some(v)
+            })
+        });
         if let Some(val) = value {
             // 深度穿透 ToolNode/AgentNode 包装（content/result/字符串二次编码），
             // 与 extract_score_json 同源；否则实时路径拿到 `{"report":"..."}` 双重编码

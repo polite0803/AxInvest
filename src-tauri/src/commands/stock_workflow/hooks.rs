@@ -449,6 +449,58 @@ pub(crate) async fn build_stock_analysis_variables(
             });
         }
     }
+    // ── #8 P5 数据质量熔断状态注入（2026-10-06）──
+    // 「连续多少轮拿不到 A 级」是**跨样本**事实，只有持久观测能回答，故从
+    // `data_quality_observations` 读；判据（什么算异常、几轮熔断）单源在
+    // `dao::repo::data_quality_fuse`，本处只把**已判定结果**推进变量池 ——
+    // Rhai 与 SwitchNode 都不再自己比阈值，否则阈值就有了第二份载体。
+    // 三个数分开注入是刻意的：`observations == 0`（无观测）与 `streak == 0`（最近一轮是 A 级）
+    // 是两件事，合成一个数就会让「从没跑过」冒充「证据面健康」。
+    // 取数失败 ⇒ 注入 0/0/0 且 fused=0（**不熔断**）并点名：熔断是收紧动作，
+    // 拿一次查询故障当触发条件会把整条链按最坏处理，那是把基础设施抖动转嫁给用户决策。
+    {
+        let fuse = match axagent_dao::repo::data_quality_fuse::load_recent_streak(db).await {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "[stock_workflow] 数据质量熔断计数取数失败 ⇒ 本轮按「未熔断」处理并留痕: {e}"
+                );
+                axagent_dao::repo::data_quality_fuse::DqiStreak::EMPTY
+            },
+        };
+        let injected: [(&str, f64, &str); 3] = [
+            (
+                "dqi_streak",
+                fuse.consecutive_abnormal as f64,
+                "最近连续异常（没拿到 A 级）的轮数（含本轮）",
+            ),
+            (
+                "dqi_fuse_flag",
+                if fuse.fused() { 1.0 } else { 0.0 },
+                "是否已触发数据质量熔断（阈值单源：dao 的 DQI_FUSE_STREAK）",
+            ),
+            (
+                "dqi_observations",
+                fuse.observations as f64,
+                "参与该计数的观测条数；0 = 无观测，不等于「质量一直好」",
+            ),
+        ];
+        for (name, value, desc) in injected {
+            let v = serde_json::Value::from(value);
+            if let Some(existing) = merged_vars.iter_mut().find(|x| x.name == name) {
+                existing.value = v;
+            } else {
+                merged_vars.push(Variable {
+                    name: name.into(),
+                    var_type: "number".into(),
+                    value: v,
+                    description: Some(desc.into()),
+                    is_secret: false,
+                });
+            }
+        }
+    }
+
     if let Some(d) = as_of_date {
         merged_vars.push(Variable {
             name: "as_of_date".into(),
@@ -805,15 +857,10 @@ pub(crate) async fn build_stock_analysis_variables(
     // 此刻还不存在 ⇒ 用「该股最近一条已产出主档」作同档代理；取不到则不过滤并 WARN，
     // 不静默冒充某档（缺数 ≠ 默认）。
     let lesson_horizon = latest_known_horizon(stock_code, db).await;
-    // §五十一-② 起算代际：与逐档先验用**同一个常量**（`HORIZON_BRANCH_GENERATION_FLOOR`）——
-    // 它是判据常量、不读库，所以两处天然同源，不存在「先验按一代筛、教训按另一代筛」的半代状态。
-    let (lessons_str, applied_lesson_ids) = fetch_stock_lessons(
-        stock_code,
-        db,
-        lesson_horizon.as_deref(),
-        axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR,
-    )
-    .await;
+    // §五十一-② 起算代际：教训注入侧在 `fetch_stock_lessons` **内部**解析同一个常量 ——
+    // 与逐档先验同源（都是判据常量、不读库），不存在「先验按一代筛、教训按另一代筛」的半代状态。
+    let (lessons_str, applied_lesson_ids) =
+        fetch_stock_lessons(stock_code, db, lesson_horizon.as_deref()).await;
     let default_lessons = "（暂无历史反思）".to_string();
     let lessons_val = lessons_str.unwrap_or_else(|| default_lessons.clone());
     merged_vars.push(Variable {

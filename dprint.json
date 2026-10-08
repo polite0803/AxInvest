@@ -8,6 +8,8 @@
   ],
   "excludes": [
     ".trae/**/*",
+    ".qoder/**/*",
+    ".worktrees/**/*",
     "node_modules/**/*",
     "dist/**/*",
     "target/**/*",

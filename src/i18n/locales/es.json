@@ -9343,7 +9343,6 @@
       "arrayVar": "Variable de arreglo",
       "assertion": "Aserciones",
       "assertions": "Aserciones",
-      "asyncExecution": "Ejecución asíncrona",
       "atomicSkill": "Habilidad atómica",
       "authNone": "Sin autenticación",
       "authType": "Tipo de autenticación",
@@ -10352,6 +10351,8 @@
     "status": "Estado",
     "duration": "Duración",
     "subWorkflow": "Subflujo de trabajo",
+    "subFlowLive": "Progreso en vivo de la subejecución ({{count}})",
+    "subFlowPending": "Aún no llegan eventos de la subejecución",
     "executionId": "ID de ejecución",
     "workflowId": "ID de flujo de trabajo",
     "parentExecution": "ID de ejecución padre"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "Análisis de valor"
       },
       "analystComplete": "Análisis completado",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "Síntesis de investigación",
         "trader": "Plan de trading",
         "portfolio-mgr": "Decisión final",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "Análisis de valor"
       },
       "analystReports": "Analyst Reports",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "Umbral de clasificación de riesgo (portfolio-mgr)",
         "simulation": "Simulación Monte Carlo",
         "refCodes": "Referencia del sector",
-        "valuationModel": "Parámetros del modelo de valoración (DCF/Graham)"
+        "valuationModel": "Parámetros del modelo de valoración (DCF/Graham)",
+        "indicatorsDailyWindows": "Ventanas de indicadores (solo cadena diaria)",
+        "indicatorsThresholds": "Umbrales de indicadores (todas las cadenas)"
       },
       "note": {
-        "portfolioMgrHorizon": "Desde v125, los valores de stop-loss / take-profit / posición del nivel principal se toman de la rama de horizonte seleccionada. Los ocho niveles porcentuales y los dos multiplicadores de volatilidad de este grupo solo intervienen en la ruta de respaldo (base de volatilidad no disponible para ese nivel, o las cuatro ramas sin salida) y como límite de posición; la intensidad de contracción previa κ y el presupuesto de riesgo R siguen aplicándose en la ruta principal."
+        "portfolioMgrHorizon": "Desde v125, los valores de stop-loss / take-profit / posición del nivel principal se toman de la rama de horizonte seleccionada. Los ocho niveles porcentuales y los dos multiplicadores de volatilidad de este grupo solo intervienen en la ruta de respaldo (base de volatilidad no disponible para ese nivel, o las cuatro ramas sin salida) y como límite de posición; la intensidad de contracción previa κ y el presupuesto de riesgo R siguen aplicándose en la ruta principal.",
+        "indicatorsDailyWindows": "Conectados al nodo de puntuación diaria desde v137. Las ventanas de los cuatro horizontes de tenencia (ultracorto/corto/medio/largo) se derivan del periodo de tenencia y no cambian aquí; conectar los valores del panel a los horizontes volvería a unir las cuatro ventanas, y la herramienta lo rechaza de forma explícita.",
+        "indicatorsThresholds": "El múltiplo de desviación estándar de Bollinger y los ratios de volumen alto/bajo no escalan con el periodo de velas; la cadena diaria y los cuatro horizontes los usan. El ratio alto debe superar al bajo, o la herramienta falla de forma explícita en vez de emitir una señal invertida."
       },
       "valuation": {
         "perpetualGrowth": "Tasa de crecimiento perpetuo",
@@ -15959,6 +15965,7 @@
       "tagLabel": "Fiabilidad limitada",
       "passiveWatch": "Esta «Espera» es una degradación pasiva por falta de datos, no un juicio bajista",
       "gapsNotDegraded": "Existen lagunas de datos, pero no se activó ninguna degradación: la dirección no se ve afectada",
+      "dqiFuse": "La calidad de datos lleva {{streak}} ciclos seguidos sin alcanzar la nota A y se activó el fusible: el límite de confianza se ajustó al nivel más conservador",
       "collapseLabel": "Colapso de pesos de factores",
       "gapReason": "{{count}} laguna(s) de datos",
       "showGaps": "Ver lagunas",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "Ámbito de pesos: desde la gen. {{floor}} (excluidas {{preFloor}} anteriores y {{unknown}} desconocidas)"
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "Según el nivel principal",
       "horizonUnknown": "Horizonte desconocido",
       "colHorizon": "Horizonte revisado",
+      "colMover": "Especulativo (este horizonte)",
+      "moverYes": "Valor especulativo",
+      "moverNo": "No cumple el criterio",
+      "moverWindowIncomplete": "Ventana aún no completa",
+      "moverNoMarketData": "Sin datos de mercado",
+      "moverRuleUnavailable": "Criterio no disponible",
+      "moverNotReflected": "Sin revisar",
       "horizonReviewTag": "Revisado aquí",
       "horizonNoNarration": "Solo veredicto objetivo, sin narración",
       "horizonStatusLabel": "Estado: ",
@@ -17694,7 +17709,8 @@
     "unitBillion": " MM",
     "unitMillion": " M",
     "unitCrore": " crore",
-    "unitLakh": " lakh"
+    "unitLakh": " lakh",
+    "horizonScoringWindows": "Ventanas de indicadores de este horizonte: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volumen {{vol}}"
   },
   "pipeline": {
     "title": "Pipeline de Acciones",

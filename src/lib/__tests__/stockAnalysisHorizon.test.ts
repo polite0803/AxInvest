@@ -12,6 +12,7 @@ import {
   horizonIcAbsenceKey,
   horizonSourceLabelKey,
   horizonSuffix,
+  moverLabelPresentation,
   readDecisionProvenance,
   readHorizonActions,
 } from "../stock-analysis-utils";
@@ -367,5 +368,97 @@ describe("readDecisionProvenance", () => {
     }));
     expect(p?.kind).toBe("label");
     expect(p?.branchAction).toBeUndefined();
+  });
+});
+/**
+ * 妖股标签的呈现分层（#10 P7，2026-10-06）。
+ *
+ * 权威在产端 `mover_recall::mover_label_for`（四态 + NULL），第二载体是本文件的
+ * `moverLabelPresentation`，第三载体是 11 语言文案。三处任漏一处，`tsc` 与 `cargo check`
+ * 全绿也照样存在 —— 表现是「那一格的文案没了」或「未满被显示成未达标」。
+ * 用户裁定的边界：**只显示标签列，不加过滤**，所以这里不测过滤，只测分层与逐句。
+ */
+const MOVER_RS_PATH = path.resolve(
+  __dirname,
+  "../../../src-tauri/crates/analysis-engine/src/mover_recall.rs",
+);
+
+describe("moverLabelPresentation（妖股标签四分句）", () => {
+  it("达标 / 未达标 / 三种无从判定各自成句", () => {
+    expect(moverLabelPresentation("mover")).toEqual({
+      kind: "yes",
+      i18nKey: "stockAnalysis.reflection.moverYes",
+    });
+    expect(moverLabelPresentation("normal")).toEqual({
+      kind: "no",
+      i18nKey: "stockAnalysis.reflection.moverNo",
+    });
+    const absence: [string, string][] = [
+      ["window_incomplete", "stockAnalysis.reflection.moverWindowIncomplete"],
+      ["no_market_data", "stockAnalysis.reflection.moverNoMarketData"],
+      ["rule_unavailable", "stockAnalysis.reflection.moverRuleUnavailable"],
+    ];
+    for (const [label, key] of absence) {
+      expect(moverLabelPresentation(label)).toEqual({ kind: "absence", i18nKey: key });
+    }
+  });
+
+  it("负控：三种「无从判定」都不得映射成「未达标」", () => {
+    for (const label of ["window_incomplete", "no_market_data", "rule_unavailable"]) {
+      expect(moverLabelPresentation(label).kind).not.toBe("no");
+      expect(moverLabelPresentation(label).i18nKey).not.toBe("stockAnalysis.reflection.moverNo");
+    }
+  });
+
+  it("NULL / 空串 = 未复盘，与「算过且未达标」不同句", () => {
+    for (const v of [null, undefined, ""]) {
+      expect(moverLabelPresentation(v).kind).toBe("notReflected");
+      expect(moverLabelPresentation(v).i18nKey).toBe("stockAnalysis.reflection.moverNotReflected");
+    }
+  });
+
+  it("未登记的标签值 ⇒ unknown 且不回退成任何一句现成文案", () => {
+    expect(moverLabelPresentation("mover_v2")).toEqual({ kind: "unknown", i18nKey: null });
+  });
+
+  it("反手抄：后端 mover_label_for 发出的每个字面量都必须在 TS 里有分层", () => {
+    const rs = readFileSync(MOVER_RS_PATH, "utf8");
+    const start = rs.indexOf("pub fn mover_label_for");
+    expect(start, "mover_recall.rs 里找不到 mover_label_for ⇒ 值域权威搬家了，须同步本门").toBeGreaterThan(-1);
+    const body = rs.slice(start);
+    const close = body.indexOf(String.fromCharCode(10) + "}");
+    expect(close, "mover_label_for 的收尾形态变了").toBeGreaterThan(-1);
+    const emitted = [
+      ...new Set(
+        [...body.slice(0, close).matchAll(/Some\("([a-z_]+)"\)/g)].map((m) => m[1]),
+      ),
+    ];
+    expect(emitted.length, "产端一个字面量也没解析到 ⇒ 判据失效").toBeGreaterThan(0);
+    for (const label of emitted) {
+      expect(moverLabelPresentation(label).kind, `TS 侧没登记 ${label}`).not.toBe("unknown");
+    }
+  });
+
+  it("11 语言全部真译（非空、不等于键名、非中文不抄 zh-CN）", () => {
+    const keys = [
+      "colMover",
+      "moverYes",
+      "moverNo",
+      "moverWindowIncomplete",
+      "moverNoMarketData",
+      "moverRuleUnavailable",
+      "moverNotReflected",
+    ];
+    const zh = JSON.parse(readFileSync(path.join(LOCALE_DIR, "zh-CN.json"), "utf8")).stockAnalysis.reflection;
+    for (const lang of LANGS) {
+      const refl = JSON.parse(readFileSync(path.join(LOCALE_DIR, lang + ".json"), "utf8")).stockAnalysis.reflection;
+      for (const k of keys) {
+        expect(refl[k], lang + " 缺 key " + k).toBeTruthy();
+        expect(refl[k], lang + " 的 " + k + " 是占位符").not.toBe(k);
+        if (lang !== "zh-CN" && lang !== "zh-TW") {
+          expect(refl[k], lang + " 的 " + k + " 抄了中文").not.toBe(zh[k]);
+        }
+      }
+    }
   });
 });

@@ -41,6 +41,22 @@ pub struct Model {
     pub alpha_return: Option<f64>,
     /// 实际持有天数。None=未到反思点(pending row)。
     pub holding_days: Option<i32>,
+    /// #10 P7 妖股标签（**按档**挂在逐档反思行上，与 `horizon` 同一行同一窗口）。
+    ///
+    /// 口径 = **分析价 → 反思价的原始涨跌幅**（`MarketSnapshot::price_change_pct`：入场=分析日之后
+    /// 首个交易日开盘价，退出=反思时点最新收盘价）。两条**不是**本判据：档内逐日收盘累计
+    /// （`mover_recall::window_cum_gain_pct`）量的不是「从分析到反思」；`net_return_pct` 扣了双边
+    /// 成本，而阈值是给涨幅定的（超短 10%/短 20%/中 30%/长 40%，唯一权威 = 面板变量
+    /// `mover_gain_*`，见 `mover_recall::DEFAULT_GAIN_THRESHOLDS`）。
+    ///
+    /// 取值（**NULL 不复用**，每种缺席各占一句，避免「拿不到」冒充「算过且没达标」）：
+    /// - `"mover"` / `"normal"` = 窗口已满且判据可用，达标 / 未达标；
+    /// - `"window_incomplete"` = 持有期未满 ⇒ **不判定**（面板留空并注明未满，不拿当前价冒充到期价）；
+    /// - `"no_market_data"` = 到反思点了但该档行情快照不可得；
+    /// - `"rule_unavailable"` = 该档阈值判据不可用（变量缺失/非正，或变量表读取失败 —— 两者都由
+    ///   日志分述，列上都是「无从判定」，都不得写成 `normal`）；
+    /// - `NULL` = 本列引入前的存量行，或该行还没走到反思收尾（pending/running/failed）。
+    pub mover_label: Option<String>,
     /// 基准名称,如"沪深300"/"中证500"。None=未指定。
     pub benchmark_name: Option<String>,
     // 3 个 C2 借鉴短文本输出。

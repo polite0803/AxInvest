@@ -138,11 +138,16 @@ pub fn get_required_items(expert_id: &str) -> Vec<Vec<&'static str>> {
     // 原匹配按无前缀角色名（market-analyst），LLM 经 run_quality_gate 传节点 ID 时
     // 全部落 `_` 分支 → total==0 → check_report_quality 无条件返回 B（放水）。
     // 现归一化：去 a- 前缀 + 别名映射（a-hot-money → hot-money-tracker 等）。
-    let id = expert_id.strip_prefix("a-").unwrap_or(expert_id);
+    // B2-2（§五十六 落地顺序第 2 步）：**先剥档位后缀**再走既有归一 ——
+    // 带档节点 id 形如 `a-fundamentals--mid`，只 `strip_prefix("a-")` 会得到
+    // `fundamentals--mid` ⇒ 落 `_` 分支 ⇒ total==0 ⇒ check_report_quality 无条件放水到 B。
+    // 对裸 id 逐位不变（`analyst_base_of` 返回 None ⇒ 原样）。
+    let base = axagent_harness::holding_period::analyst_base_of(expert_id).unwrap_or(expert_id);
+    let id = base.strip_prefix("a-").unwrap_or(base);
     let id = match id {
         "hot-money" => "hot-money-tracker",
         "sentiment" => "sentiment-analyst",
-        "news" => "news-analyst",
+        // v133（B2-2）：`"news" => "news-analyst"` 别名已随 a-news 退役删除。
         "fundamentals" => "fundamentals-analyst",
         "policy" => "policy-analyst",
         "lockup" => "lockup-watcher",
@@ -172,6 +177,16 @@ pub fn get_required_items(expert_id: &str) -> Vec<Vec<&'static str>> {
             vec!["行业", "产业", "板块"],
             vec!["宏观", "经济", "GDP"],
             vec!["影响", "冲击", "效应"],
+        ],
+        // v133（B2-2）：value-investor 此前无臂 ⇒ total==0 ⇒ 该报告被**无条件放水到 B**
+        //   （与本函数头注释记载的同一形态）。补臂：按 `value-investor.md` 的方法论维度
+        //   （护城河 / 财务健康 / 管理层 / 安全边际 / 估值锚）给必采关键词组。
+        "value-investor" => vec![
+            vec!["估值", "内在价值", "DCF"],
+            vec!["护城河", "壁垒", "定价权", "竞争优势"],
+            vec!["安全边际", "折价", "低估", "上行空间"],
+            vec!["财务", "ROE", "负债", "现金流"],
+            vec!["管理层", "治理", "资本配置", "回购"],
         ],
         "fundamentals-analyst" => vec![
             vec!["盈利", "利润", "收益"],

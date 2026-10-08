@@ -9,7 +9,9 @@ use super::decision::{
 use crate::AppState;
 use crate::commands::error::{ErrorCategory, ErrorResponse};
 use crate::commands::error_code::stock_workflow as wf_err;
-use crate::commands::stock_analysis_setup::seed_stock_analysis::SOURCE_TEMPLATE_ID;
+use crate::commands::stock_analysis_setup::seed_stock_analysis::{
+    FAST_TEMPLATE_ID, SOURCE_TEMPLATE_ID,
+};
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::blackboard::build_blackboard_snapshot;
 use axagent_analysis_engine::stock_reflection::{AnalysisStepResult, StockAnalysisOutcome};
@@ -26,6 +28,55 @@ use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, QueryOrde
 use serde_json::json;
 use std::sync::Arc;
 use tauri::{Emitter, State};
+
+/// #8 P5：把**一轮已完成分析**的数据质量判级落成一行观测（判据、幂等、阈值全在 dao 侧）。
+///
+/// 只在跑完的路径上调（失败轮不落行）⇒ streak 的分母是「跑完的轮数」；一条观测都没有时
+/// 读侧报 `observations = 0`，与「最近一轮是 A 级」是两句话，不冒充证据面健康。
+///
+/// 快照解析失败也不记行，但要打日志：静默跳过会让「熔断永远不触发」看起来像「质量一直好」。
+///
+/// ⚠ **快速链不落观测行**（`template_id` 判，不是猜链型）：快速链的 `data-quality` 用的是**同一份
+/// `data-quality.rhai`**，而它 35%+35% 的权重来自「分析师报告质量 / 工具可信度」，本链按既定设计
+/// **不建那 10 个 Agent 节点** ⇒ `score ≈ factor_completeness × 30 ≈ 23` ⇒ **恒判 grade F**。
+/// 这正是派生器自己摘掉 `portfolio-mgr` 的 `dqi_score`/`dqi_grade` 并把 `quality-gate` 判据换成
+/// `factor_completeness_pct` 的原因（见 `seed_stock_analysis.rs` 的 ③ 文档）。
+/// ⇒ 把这种**结构性恒等值**记进全局观测表，就等于把「本链没有分析师报告」冒充成
+/// 「数据质量连续异常」，3 轮之后整条链永久熔断（且理由是假的）。快速链运行时读到的
+/// 仍是完整链积累的观测 ⇒ 熔断线只由「本来能测出质量」的那条链驱动。
+async fn record_dqi_observation(
+    db: &DatabaseConnection,
+    analysis_id: &str,
+    template_id: &str,
+    bb_snapshot: &str,
+) {
+    if template_id == FAST_TEMPLATE_ID {
+        return;
+    }
+    let snap: std::collections::HashMap<String, serde_json::Value> = match serde_json::from_str(
+        bb_snapshot,
+    ) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "[stock_workflow] 数据质量观测跳过：blackboard_snapshot 不是合法 JSON（analysis_id={analysis_id}）: {e}"
+            );
+            return;
+        },
+    };
+    let grade = axagent_analysis_engine::blackboard::data_quality_grade(&snap);
+    if let Err(e) = axagent_dao::repo::data_quality_fuse::record_observation(
+        db,
+        analysis_id,
+        grade.as_deref(),
+        chrono::Utc::now().timestamp_millis(),
+    )
+    .await
+    {
+        // 观测是旁路事实：落不进就不记，不能因此把已完成的分析判成失败
+        tracing::warn!("[stock_workflow] 数据质量观测落库失败（不影响本次分析结论）: {e}");
+    }
+}
 
 // ────────────────────────────────────────────────────────────────
 // 失败事件的对外契约（`workflow-error` / `workflow-step-error`）
@@ -1112,6 +1163,7 @@ pub async fn run_stock_workflow_inner(
                             &degradation_report,
                         ))
                         .unwrap_or_else(|_| "{}".to_string());
+                        record_dqi_observation(&db, &aid, &template_id, &bb_snapshot).await;
                         if let Err(e) = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
                             .col_expr(stock_analyses::Column::DecisionAction, Expr::value(action))
@@ -1450,6 +1502,7 @@ pub async fn run_stock_workflow_inner(
                             &degradation_report,
                         ))
                         .unwrap_or_else(|_| "{}".to_string());
+                        record_dqi_observation(&db, &aid, &template_id, &bb_snapshot).await;
                         let llm_dj = extract_llm_decision_json(&result);
                         if let Err(e) = stock_analyses::Entity::update_many()
                             .col_expr(stock_analyses::Column::Status, Expr::value("completed"))
@@ -2174,17 +2227,37 @@ pub(crate) async fn fetch_similar_cases(
     stock_code: &str,
     db: &sea_orm::DatabaseConnection,
 ) -> Option<String> {
-    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+    use sea_orm::{ColumnTrait, Condition, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder};
     let three_months_ago =
         (chrono::Utc::now() - chrono::Duration::days(90)).format("%Y-%m-%d").to_string();
-    let all = stock_analyses::Entity::find()
-        .filter(stock_analyses::Column::StockCode.eq(stock_code))
-        .filter(stock_analyses::Column::Outcome.eq("loss"))
-        .filter(stock_analyses::Column::AnalysisDate.gte(&three_months_ago))
-        .order_by(stock_analyses::Column::AnalysisDate, sea_orm::Order::Desc)
+    let floor = axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
+    // #31（PLAN §七十六：**注入语料**类）：早于起算代的**失败案例**不进 prompt —— 拿旧代判据的
+    // 错例指导新代决策，正是「跨代污染」的同型。代际未知(NULL)的仍喂（来路不明的错例对模型
+    // 仍有参考价值），但会被下面的声明点名。
+    // ⚠ 与统计侧的差别是**有意的**：那边 NULL 进不了分母，这边保留但声明。
+    let in_scope = || {
+        stock_analyses::Entity::find()
+            .filter(stock_analyses::Column::StockCode.eq(stock_code))
+            .filter(stock_analyses::Column::Outcome.eq("loss"))
+            .filter(stock_analyses::Column::AnalysisDate.gte(&three_months_ago))
+    };
+    let all = in_scope()
+        .filter(
+            Condition::any()
+                .add(stock_analyses::Column::TemplateVersion.gte(floor))
+                .add(stock_analyses::Column::TemplateVersion.is_null()),
+        )
+        .order_by_desc(stock_analyses::Column::AnalysisDate)
         .all(db)
         .await
         .unwrap_or_default();
+    // 被筛掉的旧代条数（计数失败不折算成 0 —— 那是把「查不出来」写成「确实没有」）
+    let pre_floor = in_scope()
+        .filter(stock_analyses::Column::TemplateVersion.is_not_null())
+        .filter(stock_analyses::Column::TemplateVersion.lt(floor))
+        .count(db)
+        .await
+        .ok();
     let similar: Vec<_> = all.into_iter().take(5).collect();
     if similar.is_empty() {
         return None;
@@ -2209,6 +2282,15 @@ pub(crate) async fn fetch_similar_cases(
             "- 日期:{} 决策:{} 置信度:{} → 失败。要点:{}",
             s.analysis_date, action, conf, abbr
         ));
+    }
+    match pre_floor {
+        Some(0) => {},
+        Some(n) => {
+            lines.push(format!("（另有 {n} 条早于起算代（第 {floor} 代）的同股失败案例，未纳入）"))
+        },
+        None => lines.push(format!(
+            "（另有若干条早于起算代（第 {floor} 代）的同股失败案例未纳入；条数查询失败）"
+        )),
     }
     Some(lines.join("\n"))
 }
@@ -2235,13 +2317,13 @@ pub(crate) async fn fetch_stock_lessons(
     // （NULL = 复盘档未知，按既有行为继续注入并在文本里声明，不冒充某档）；
     // `horizon = None` ⇒ 不过滤（兼容旧调用方，行为与改前逐位一致）。
     horizon: Option<&str>,
-    // §五十一-② 起算代际（常量 `HORIZON_BRANCH_GENERATION_FLOOR`，不读库）：
-    // 早于该代且**代际已知**的反思不进 prompt；代际未知(NULL)的仍进但在文本里声明。
-    // 被筛掉的旧代条数**写进注入文本** —— 空结果可能是「真没教训」，也可能是
-    // 「教训全在起算代之前」，两者对模型含义相反，不许静默合并成「暂无历史反思」。
-    generation_floor: i32,
 ) -> (Option<String>, Vec<String>) {
     use chrono::Utc;
+    // §五十一-② 起算代际：**在本函数内部解析**（不读库、不由调用方传）——
+    // 与统计侧同形。理由有二：① 它是判据常量不是运行时状态；② 由调用方传时，函数体里
+    // 看不到这个常量，登记门（`check-generation-scope-registry.mjs`）就无从断言「本入口
+    // 真的按代筛了」（首跑正是这么抓到的）。手抄/透传都会让判据与调用点脱钩。
+    let generation_floor = axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
 
     // ── same_ticker: 3 条同 ticker 近 90 天已完成反思 ──
     // 查询经 dao 下沉（`axagent_dao::repo::stock_lesson_queries`），命令层不得直连
@@ -2369,8 +2451,7 @@ pub(crate) async fn fetch_stock_lessons(
     }
 
     // 追加规则化教训 + 收集被引用的 lesson_ids
-    let (rule_lines, lesson_ids) =
-        fetch_rule_lessons(stock_code, db, horizon, generation_floor).await;
+    let (rule_lines, lesson_ids) = fetch_rule_lessons(stock_code, db, horizon).await;
     if let Some(rule_text) = rule_lines {
         lines.push(rule_text);
     }
@@ -2395,9 +2476,10 @@ async fn fetch_rule_lessons(
     stock_code: &str,
     db: &sea_orm::DatabaseConnection,
     horizon: Option<&str>,
-    // §五十一-② 起算代际：与 `fetch_stock_lessons` 同一常量，一路透传下来。
-    generation_floor: i32,
+    // §五十一-② 起算代际：与 `fetch_stock_lessons` 同一常量 —— 同样在**函数内部**解析
+    // （理由见上：函数体里看不见常量 ⇒ 登记门断言不了）。
 ) -> (Option<String>, Vec<String>) {
+    let generation_floor = axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
     // ── [F1 闭环] 规则化教训：从 reflection_lessons 表查询 ──
     // 修复首轮分析发现的"reflection_lessons 闭环断裂"问题：
     // extract_lesson_to_rule 会把高质量 lesson_summary 写入 reflection_lessons,
@@ -2830,5 +2912,53 @@ pub(crate) async fn trigger_adaptive_cycle(
                 config.lookback_days
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 观测行的写入闸：**快速链不落观测行，完整链落**。
+    ///
+    /// 为什么这条值得单独测：快速链的 `data-quality` 用的是同一份脚本，但本链按设计不建那 10 个
+    /// 分析师 Agent ⇒ `score ≈ factor_completeness × 30 ≈ 23` ⇒ **恒 grade F**（派生器因此摘掉了
+    /// `portfolio-mgr` 的 `dqi_*` 映射）。这种结构性恒等值一旦进全局观测表，就会把
+    /// 「本链没有分析师报告」冒充成「数据质量连续异常」，跑满 3 轮后整条链永久熔断，
+    /// 且界面上给出的理由是假的。
+    #[tokio::test]
+    async fn dqi_observations_are_written_only_by_the_full_chain() {
+        let handle = axagent_dao::db::create_test_pool().await.expect("建临时测试库失败");
+        let db = &handle.conn;
+        let snap = r#"{"result.data-quality":{"grade":"B"}}"#;
+
+        record_dqi_observation(db, "an-fast", FAST_TEMPLATE_ID, snap).await;
+        let s = axagent_dao::repo::data_quality_fuse::load_recent_streak(db)
+            .await
+            .expect("读 streak 应成功");
+        assert_eq!(s.observations, 0, "快速链一行都不该落（它的 grade 测不到报告质量）");
+        assert_eq!(s.consecutive_abnormal, 0);
+
+        record_dqi_observation(db, "an-full", SOURCE_TEMPLATE_ID, snap).await;
+        let s = axagent_dao::repo::data_quality_fuse::load_recent_streak(db)
+            .await
+            .expect("读 streak 应成功");
+        assert_eq!(s.observations, 1, "完整链要落一行");
+        assert_eq!(s.consecutive_abnormal, 1, "B 级算异常（判据在 dao，本处不重定义）");
+
+        // 快照里没有 data-quality 输出 ⇒ 记一行 NULL grade（「节点没跑成」是异常，不是缺席免计）
+        record_dqi_observation(db, "an-missing", SOURCE_TEMPLATE_ID, "{}").await;
+        let s = axagent_dao::repo::data_quality_fuse::load_recent_streak(db)
+            .await
+            .expect("读 streak 应成功");
+        assert_eq!(s.observations, 2);
+        assert_eq!(s.consecutive_abnormal, 2, "NULL grade 同样计入连续异常");
+
+        // 快照不是合法 JSON ⇒ 不记行（旁路事实宁可不记，也不要把解析故障写成"质量异常"）
+        record_dqi_observation(db, "an-broken", SOURCE_TEMPLATE_ID, "{ 不是 JSON").await;
+        let s = axagent_dao::repo::data_quality_fuse::load_recent_streak(db)
+            .await
+            .expect("读 streak 应成功");
+        assert_eq!(s.observations, 2, "坏快照不该产出一行观测");
     }
 }

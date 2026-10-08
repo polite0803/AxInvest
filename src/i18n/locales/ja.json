@@ -9343,7 +9343,6 @@
       "arrayVar": "配列変数",
       "assertion": "アサーション",
       "assertions": "アサーション",
-      "asyncExecution": "非同期実行",
       "atomicSkill": "アトミックスキル",
       "authNone": "認証なし",
       "authType": "認証タイプ",
@@ -10352,6 +10351,8 @@
     "status": "ステータス",
     "duration": "期間",
     "subWorkflow": "サブワークフロー",
+    "subFlowLive": "サブ実行のライブ進捗（{{count}} 件）",
+    "subFlowPending": "サブ実行イベントはまだ届いていません",
     "executionId": "実行ID",
     "workflowId": "ワークフローID",
     "parentExecution": "親実行ID"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "価値評価"
       },
       "analystComplete": "分析完畢，请在分析页查看详细报告",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "研究经理综合",
         "trader": "交易方案制定",
         "portfolio-mgr": "最終决策生成",
-        "rule-check": "规则检查"
+        "rule-check": "规则检查",
+        "value-investor": "価値評価"
       },
       "analystReports": "分析师报告",
       "bullBearDebate": "多空辩论",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "风险分类阈值（portfolio-mgr）",
         "simulation": "蒙特卡洛仿真",
         "refCodes": "行业参考标的",
-        "valuationModel": "估值モデルパラメータ（DCF/グラハム）"
+        "valuationModel": "估值モデルパラメータ（DCF/グラハム）",
+        "indicatorsDailyWindows": "テクニカル指標ウィンドウ（日足チェーンのみ）",
+        "indicatorsThresholds": "テクニカル指標しきい値（全チェーン有効）"
       },
       "note": {
-        "portfolioMgrHorizon": "v125 より、主期間の損切り／利確／ポジションの値は選択された期間のブランチから採用されます。本グループの 8 項目の割合設定と 2 つの変動率乗数は、フォールバック経路（その期間の変動率基準が取得できない、または 4 ブランチすべてが未出力）とポジション上限の計算にのみ関与します。事前収縮強度 κ とリスク予算 R は従来どおり主経路で有効です。"
+        "portfolioMgrHorizon": "v125 より、主期間の損切り／利確／ポジションの値は選択された期間のブランチから採用されます。本グループの 8 項目の割合設定と 2 つの変動率乗数は、フォールバック経路（その期間の変動率基準が取得できない、または 4 ブランチすべてが未出力）とポジション上限の計算にのみ関与します。事前収縮強度 κ とリスク予算 R は従来どおり主経路で有効です。",
+        "indicatorsDailyWindows": "v137 から日足スコアリングノードに実際に接続されます。4つの保有区分（極短期/短期/中期/長期）のウィンドウは保有日数から導出されるためここでは変わりません。パネル値を保有区分へ接続すると4区分が再び同一のウィンドウになるため、ツールは明示的にエラーとします。",
+        "indicatorsThresholds": "ボリンジャー標準偏差倍数と出来高増加/減少の比率は足周期に依存せず、日足と4つの保有区分のすべてがこの値を使います。増加比率は減少比率より大きくなければならず、条件を満たさなければツールは逆方向のシグナルを出さず明示的にエラーとします。"
       },
       "valuation": {
         "perpetualGrowth": "永久成長率",
@@ -15959,6 +15965,7 @@
       "tagLabel": "信頼性制限",
       "passiveWatch": "今回の「様子見」はデータ不足による受動的な格下げであり、弱気判断ではありません",
       "gapsNotDegraded": "データ欠損はありますが降級は発生していません：結論の方向性は影響を受けません",
+      "dqiFuse": "データ品質が {{streak}} 回連続で A 級に達せずサーキットブレーカーが作動：今回の信頼度上限は最も保守的な段階に締め付けられました",
       "collapseLabel": "ファクターウェイトの崩壊",
       "gapReason": "データ欠損 {{count}} 件",
       "showGaps": "欠損を表示",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "重み口径：第 {{floor}} 世代以降（それ以前 {{preFloor}} 件・世代不明 {{unknown}} 件を除外）"
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "主档に従う",
       "horizonUnknown": "不明な期間",
       "colHorizon": "復盤期間",
+      "colMover": "急騰株（当該期間）",
+      "moverYes": "急騰株",
+      "moverNo": "基準未達",
+      "moverWindowIncomplete": "保有期間未達",
+      "moverNoMarketData": "相場データなし",
+      "moverRuleUnavailable": "基準未設定",
+      "moverNotReflected": "未レビュー",
       "horizonReviewTag": "今回の復盤対象",
       "horizonNoNarration": "客観判定のみ、復盤の記述なし",
       "horizonStatusLabel": "ステータス：",
@@ -17694,7 +17709,8 @@
     "unitBillion": "10億",
     "unitMillion": "百万",
     "unitCrore": "1000万",
-    "unitLakh": "10万"
+    "unitLakh": "10万",
+    "horizonScoringWindows": "この保有区分の指標ウィンドウ：{{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · ボリンジャー {{boll}} · 出来高 {{vol}}"
   },
   "pipeline": {
     "title": "株式パイプライン",

@@ -43,6 +43,9 @@ pub struct EvolutionDriftDashboard {
     pub recent_changes: Vec<RecentChangeRow>,
     /// 各策略汇总视图（按 strategy_id 聚合）
     pub strategy_summary: Vec<StrategySummaryRow>,
+    /// #31：本次权重口径的**起算代际**（= `HORIZON_BRANCH_GENERATION_FLOOR`）。
+    /// 回传它而不是让前端手抄一个 125 —— 常量只有一处权威，面板只负责显示。
+    pub generation_floor: i32,
     /// #31：窗口内因「早于起算代」被排除的样本数（旧代样本永久不可比）
     pub excluded_pre_floor_generation: usize,
     /// #31：窗口内因「代际未知」被排除的样本数（会随写侧补章而减少）
@@ -397,6 +400,7 @@ pub async fn get_dashboard(
         stats,
         recent_changes,
         strategy_summary,
+        generation_floor: axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR,
         excluded_pre_floor_generation,
         excluded_unknown_generation,
     })
@@ -500,6 +504,7 @@ mod tests {
             stats: vec![],
             recent_changes: vec![],
             strategy_summary: vec![],
+            generation_floor: 125,
             excluded_pre_floor_generation: 3,
             excluded_unknown_generation: 5,
         };

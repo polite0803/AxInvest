@@ -9343,7 +9343,6 @@
       "arrayVar": "ऐरे चर",
       "assertion": "अभिकथन",
       "assertions": "अभिकथन",
-      "asyncExecution": "अतुल्यकालिक निष्पादन",
       "atomicSkill": "परमाणु कौशल",
       "authNone": "प्रमाणीकरण नहीं",
       "authType": "प्रमाणीकरण प्रकार",
@@ -10352,6 +10351,8 @@
     "status": "स्थिति",
     "duration": "अवधि",
     "subWorkflow": "उप-वर्कफ़्लो",
+    "subFlowLive": "सब-एग्जीक़्यूशन का लाइव प्रगति ({{count}})",
+    "subFlowPending": "सब-एग्जीक़्यूशन घटनाएँ अभी नहीं पहुँचीं",
     "executionId": "निष्पादन आईडी",
     "workflowId": "वर्कफ़्लो आईडी",
     "parentExecution": "मूल निष्पादन आईडी"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "मूल्य मूल्यांकन"
       },
       "analystComplete": "विश्लेषण पूर्ण",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "शोध संश्लेषण",
         "trader": "ट्रेडिंग योजना",
         "portfolio-mgr": "अंतिम निर्णय",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "मूल्य मूल्यांकन"
       },
       "analystReports": "Analyst Reports",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "जोखिम वर्गीकरण सीमा (portfolio-mgr)",
         "simulation": "मोंटे कार्लो सिमुलेशन",
         "refCodes": "उद्योग संदर्भ बेंचमार्क",
-        "valuationModel": "मूल्यांकन मॉडल पैरामीटर (DCF/ग्राहम)"
+        "valuationModel": "मूल्यांकन मॉडल पैरामीटर (DCF/ग्राहम)",
+        "indicatorsDailyWindows": "संकेटक विंडो (दैनिक श्रृंखला ही)",
+        "indicatorsThresholds": "संकेटक सीमा (सभी श्रृंखला)"
       },
       "note": {
-        "portfolioMgrHorizon": "v125 से मुख्य क्षितिज की स्टॉप-लॉस / टिक-प्रॉफिट / स्थिति मान चुने गए क्षितिज ब्रांच से लिए जाते हैं। इस समूह की आठ प्रतिशत सीढ़ियाँ और दो अस्थिरता गुणक केवल फ़ॉलबैक पथ (उस क्षितिज का अस्थिरता आधार अनुपलब्ध, या चारों ब्रांच निर्गतहीन) और स्थिति की ऊपरी सीमा में भाग लेते हैं; पूर्वाग्रह संकुचन बल κ और जोखिम बजट R मुख्य पथ पर यथावत् लागू रहते हैं।"
+        "portfolioMgrHorizon": "v125 से मुख्य क्षितिज की स्टॉप-लॉस / टिक-प्रॉफिट / स्थिति मान चुने गए क्षितिज ब्रांच से लिए जाते हैं। इस समूह की आठ प्रतिशत सीढ़ियाँ और दो अस्थिरता गुणक केवल फ़ॉलबैक पथ (उस क्षितिज का अस्थिरता आधार अनुपलब्ध, या चारों ब्रांच निर्गतहीन) और स्थिति की ऊपरी सीमा में भाग लेते हैं; पूर्वाग्रह संकुचन बल κ और जोखिम बजट R मुख्य पथ पर यथावत् लागू रहते हैं।",
+        "indicatorsDailyWindows": "v137 से ये दैनिक स्कोरिंग नोड से वास्तविक रूप से जुड़ते हैं। चार धारण-अवधियों (अति-लघु/लघु/मध्यम/दीर्घ) की विंडो धारण-काल से व्युत्पन्न होती हैं और यहाँ नहीं बदलतीं; पैनल मान इन अवधियों से जोड़ें तो चारों विंडो फिर एक हो जाएँगी, इसलिए उपकरण स्पष्ट त्रुटि देता है।",
+        "indicatorsThresholds": "बोलिंजर मानक विचलन गुणक तथा वॉल्यूम वृद्धि/क्षय अनुपात बार-अवधि के साथ स्केल नहीं होते; दैनिक श्रृंखला और चारों अवधियाँ ये मान उपयोग करती हैं। वृद्धि अनुपात क्षय अनुपात से बड़ा होना चाहिए, अन्यथा उपकरण उलटा संकेत देने के बजाय स्पष्ट त्रुटि देता है।"
       },
       "valuation": {
         "perpetualGrowth": "शाश्वत वृद्धि दर",
@@ -15959,6 +15965,7 @@
       "tagLabel": "विश्वसनीयता सीमित",
       "passiveWatch": "यह “प्रतीक्षा” अपर्याप्त डेटा के कारण निष्क्रिय अवनति है, मंदी का निर्णय नहीं",
       "gapsNotDegraded": "डेटा अंतराल मौजूद हैं, लेकिन कोई अवनयन ट्रिगर नहीं हुआ: दिशा अप्रभावित है",
+      "dqiFuse": "डेटा गुणवत्ता लगातार {{streak}} चक्र तक A श्रेणी तक नहीं पहुँची और फ्यूज ट्रिप हो गया: विश्वास की सीमा सबसे रूढ़िवादी स्तर तक सिकोड़ दी गई है",
       "collapseLabel": "कारक भार पतन",
       "gapReason": "{{count}} डेटा अंतराल",
       "showGaps": "अंतराल देखें",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "वज़न दायरा: जनरेशन {{floor}} से (पुराने {{preFloor}} और अज्ञात {{unknown}} हटाए गए)"
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "मुख्य स्तर अनुसार",
       "horizonUnknown": "अज्ञात अवधि",
       "colHorizon": "समीक्षा क्षितिज",
+      "colMover": "सट्टा (इस क्षितिज)",
+      "moverYes": "सट्टा प्रतिभूति",
+      "moverNo": "मानदंड पूरा नहीं",
+      "moverWindowIncomplete": "विंडो पूरी नहीं हुई",
+      "moverNoMarketData": "बाज़ार डेटा नहीं",
+      "moverRuleUnavailable": "मानदंड उपलब्ध नहीं",
+      "moverNotReflected": "समीक्षा नहीं हुई",
       "horizonReviewTag": "यहाँ समीक्षित",
       "horizonNoNarration": "केवल वस्तुनिष्ठ निर्णय, विवरण नहीं",
       "horizonStatusLabel": "स्थिति: ",
@@ -17694,7 +17709,8 @@
     "unitBillion": " अरब",
     "unitMillion": " मिलियन",
     "unitCrore": " करोड़",
-    "unitLakh": " लाख"
+    "unitLakh": " लाख",
+    "horizonScoringWindows": "इस अवधि के संकेटक विंडो: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · बोलिंजर {{boll}} · वॉल्यूम {{vol}}"
   },
   "pipeline": {
     "title": "स्टॉक पाइपलाइन",

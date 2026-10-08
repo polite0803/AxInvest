@@ -1205,6 +1205,7 @@ async fn cognitive_query_inner(
     let system_capability_cb: Option<SubWorkflowCallback> = Some(Arc::new(
         move |capability_id: String,
               _parent_execution_id: String,
+              _parent_node_id: String,
               cap_input: HashMap<String, serde_json::Value>| {
             let cognitive_router = cognitive_router.clone();
             // System capability 为同步回调（无 spawn_blocking / thread-local runtime

@@ -19,6 +19,22 @@ pub mod ic;
 /// 为什么由代码常量而不是模板变量承载：荐股链没有「重种」语义，变量可被面板随手改，
 /// 而版本必须是样本的**不可变归属**，否则同代筛样本身就是可伪造的。
 pub const RECO_ALGORITHM_VERSION: i32 = 1;
+
+/// 荐股链样本的**起算代际** —— 读侧筛样分母的下限（#49 / #12 共用这一条判据）。
+///
+/// 与 [`RECO_ALGORITHM_VERSION`] 的分工：后者是「这条样本属于哪一代」（写侧盖章），
+/// 本常量是「从哪一代起样本彼此可比」（读侧分母）。两者**刻意不是一个值**：
+/// 升 `RECO_ALGORITHM_VERSION` 不自动抬这里 —— 抬了等于每次换代把整个窗口清零，
+/// 与 `harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR` 同一条规则：
+/// **下限，不是等号**（PLAN §五十一-② / §七十一）。
+///
+/// 现取 1：荐股链自本列引入起就是当前算法形态，第 1 代即第一个可归属的代。
+///
+/// `reco_version IS NULL` 的存量行 = 归属未知 ⇒ **不进分母**。这与错题本注入语料的
+/// 「NULL 保留」处置相反（那条见 `dao::repo::stock_lesson_queries::generation_floor_or_null`，
+/// 教训本身跨代仍有价值；命中率/IC 分母则跨代不可比）。
+pub const RECO_GENERATION_FLOOR: i32 = 1;
+
 pub mod indicators;
 pub mod notify;
 pub mod pool;

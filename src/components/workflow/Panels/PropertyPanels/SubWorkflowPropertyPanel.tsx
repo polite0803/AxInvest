@@ -2,7 +2,7 @@
 
 import { message } from "@/lib/toast";
 import { useWorkflowEditorStore } from "@/stores";
-import { Button, Divider, Input, Select, Switch, theme } from "antd";
+import { Button, Divider, Input, Select, theme } from "antd";
 import React, { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AIAssistButton, useNodeAIAssist } from "../../Hooks";
@@ -25,7 +25,6 @@ export const SubWorkflowPropertyPanel: React.FC<
     subWorkflowId: "",
     inputMapping: {},
     outputVar: "",
-    isAsync: false,
   };
 
   const { templates, loadTemplates, currentTemplate, expandedSubWorkflows } = useWorkflowEditorStore();
@@ -148,23 +147,6 @@ export const SubWorkflowPropertyPanel: React.FC<
           showSearch
           optionFilterProp="label"
           options={workflowOptions}
-        />
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-        }}
-      >
-        <label style={{ color: token.colorTextTertiary, fontSize: 12 }}>
-          {t("workflow.props.asyncExecution")}
-        </label>
-        <Switch
-          size="small"
-          checked={config.isAsync ?? false}
-          onChange={(checked) => handleConfigChange("isAsync", checked)}
         />
       </div>
 

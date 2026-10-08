@@ -9352,7 +9352,6 @@
       "arrayVar": "数组变量",
       "assertion": "断言",
       "assertions": "断言",
-      "asyncExecution": "异步执行",
       "atomicSkill": "原子技能",
       "authNone": "无认证",
       "authType": "认证类型",
@@ -10352,6 +10351,8 @@
     "status": "状态",
     "duration": "耗时",
     "subWorkflow": "子工作流",
+    "subFlowLive": "子执行实时进度（{{count}} 个）",
+    "subFlowPending": "子执行事件尚未到达",
     "executionId": "执行 ID",
     "workflowId": "工作流 ID",
     "parentExecution": "父执行 ID"
@@ -15665,7 +15666,8 @@
         "a-market-analyst": "技术面分析师",
         "a-sector": "行业分析师",
         "a-lockup": "解禁观察员",
-        "a-policy": "政策面分析师"
+        "a-policy": "政策面分析师",
+        "value-investor": "价值评估"
       },
       "analystComplete": "分析完畢，请在分析页查看详细报告",
       "bearAnalyst": "Bear",
@@ -15734,7 +15736,8 @@
         "research-mgr": "研究经理综合",
         "trader": "交易方案制定",
         "portfolio-mgr": "最終决策生成",
-        "rule-check": "规则检查"
+        "rule-check": "规则检查",
+        "value-investor": "价值评估"
       },
       "analystReports": "分析师报告",
       "bullBearDebate": "多空辩论",
@@ -15869,7 +15872,6 @@
         "signals": "信号检测",
         "keylevels": "关键价位",
         "recommender": "推荐器",
-        "indicators": "技术指标",
         "strategyParams": "策略参数",
         "strategyGates": "策略门槛与过滤条件",
         "strategyConfidence": "置信度分量与权重",
@@ -15885,10 +15887,14 @@
         "portfolioMgrRisk": "风险分类阈值（portfolio-mgr）",
         "simulation": "蒙特卡洛仿真",
         "refCodes": "行业参考标的",
-        "valuationModel": "估值模型参数（DCF/格雷厄姆）"
+        "valuationModel": "估值模型参数（DCF/格雷厄姆）",
+        "indicatorsDailyWindows": "技术指标窗口（仅日线链）",
+        "indicatorsThresholds": "技术指标阈值（全链生效）"
       },
       "note": {
-        "portfolioMgrHorizon": "换代说明：自 v125 起，主档的止损/止盈/仓位数值取自被选中的那一档分支。本组的八项百分比档位与两个波动率乘数只在兜底路径（该档波动率口径不可得，或四路分支全未产出）以及仓位上限里参与；先验收缩强度 κ 与风险预算 R 仍按主口径生效。"
+        "portfolioMgrHorizon": "换代说明：自 v125 起，主档的止损/止盈/仓位数值取自被选中的那一档分支。本组的八项百分比档位与两个波动率乘数只在兜底路径（该档波动率口径不可得，或四路分支全未产出）以及仓位上限里参与；先验收缩强度 κ 与风险预算 R 仍按主口径生效。",
+        "indicatorsDailyWindows": "v137 起这五项真正接入日线评分节点。四个持有档（超短/短/中/长）的指标窗口由各自持有期推导，不受这里影响；把面板值接到档侧会让四档窗口重新变成同一份，工具侧对这种接线直接报错。",
+        "indicatorsThresholds": "布林标准差倍数与量能放量/缩量比值不随周期缩放，日线与四个持有档都取这里的值。放量倍数必须大于缩量倍数，否则工具显式报错而不是给出反向信号。"
       },
       "valuation": {
         "perpetualGrowth": "永续增长率",
@@ -16156,6 +16162,7 @@
       "tagLabel": "可信度受限",
       "passiveWatch": "本次「观望」为数据不足导致的被动降级，非看空判断",
       "gapsNotDegraded": "存在数据缺口，但未触发降级：结论方向不受影响",
+      "dqiFuse": "数据质量已连续 {{streak}} 轮未达 A 级并触发熔断：本轮置信度上限按最保守档收紧",
       "collapseLabel": "因子权重坍缩",
       "gapReason": "数据缺口 {{count}} 项",
       "showGaps": "查看缺口",
@@ -16552,7 +16559,8 @@
         "missing_risk_assessment": "检测到风控缺失，补充风控步骤",
         "high_error_rate": "错误模式 {{count}} 个，减少错误",
         "manual_trigger": "手动触发：{{reason}}"
-      }
+      },
+      "generationScope": "权重口径：起算第 {{floor}} 代（已排除更早代的 {{preFloor}} 条、代际未知的 {{unknown}} 条）"
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",
@@ -17012,6 +17020,13 @@
       "horizonAuto": "按主档",
       "horizonUnknown": "未知周期",
       "colHorizon": "复盘档",
+      "colMover": "妖股标签（本档）",
+      "moverYes": "妖股",
+      "moverNo": "未达标",
+      "moverWindowIncomplete": "窗口未满",
+      "moverNoMarketData": "无行情数据",
+      "moverRuleUnavailable": "判据不成立",
+      "moverNotReflected": "未复盘",
       "horizonReviewTag": "本次复盘档",
       "horizonNoNarration": "该档仅有客观判定，未做反思叙述",
       "horizonStatusLabel": "状态：",
@@ -17914,7 +17929,8 @@
     "unitBillion": "十亿",
     "unitMillion": "百万",
     "unitCrore": "千万",
-    "unitLakh": "十万"
+    "unitLakh": "十万",
+    "horizonScoringWindows": "本档技术腿窗口：{{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · 布林 {{boll}} · 量能 {{vol}}"
   },
   "pipeline": {
     "title": "股票管道",

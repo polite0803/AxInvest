@@ -9352,7 +9352,6 @@
       "arrayVar": "Array Variable",
       "assertion": "Assertions",
       "assertions": "Assertions",
-      "asyncExecution": "Async Execution",
       "atomicSkill": "Atomic Skill",
       "authNone": "No Auth",
       "authType": "Auth Type",
@@ -10352,6 +10351,8 @@
     "status": "Status",
     "duration": "Duration",
     "subWorkflow": "Sub-workflow",
+    "subFlowLive": "Live sub-execution progress ({{count}})",
+    "subFlowPending": "No sub-execution events yet",
     "executionId": "Execution ID",
     "workflowId": "Workflow ID",
     "parentExecution": "Parent execution ID"
@@ -15671,7 +15672,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "Value Assessment"
       },
       "analystComplete": "Analysis complete. View the detailed report on the analysis page.",
       "bearAnalyst": "Bear",
@@ -15747,7 +15749,8 @@
         "t-sentiment-data": "Fetch Sentiment Data",
         "t-valuation": "Valuation Algorithm",
         "trader": "Trade Plan",
-        "trigger": "Start Workflow"
+        "trigger": "Start Workflow",
+        "value-investor": "Value Assessment"
       },
       "riskAssessment": "Risk Assessment",
       "running": "Running",
@@ -15803,7 +15806,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15819,10 +15821,14 @@
         "portfolioMgrRisk": "Risk Classification Thresholds (portfolio-mgr)",
         "simulation": "Monte Carlo Simulation",
         "refCodes": "Industry Reference Codes",
-        "valuationModel": "Valuation Model Parameters (DCF/Graham)"
+        "valuationModel": "Valuation Model Parameters (DCF/Graham)",
+        "indicatorsDailyWindows": "Indicator windows (daily chain only)",
+        "indicatorsThresholds": "Indicator thresholds (all chains)"
       },
       "note": {
-        "portfolioMgrHorizon": "Since v125 the primary tier's stop-loss / take-profit / position values are taken from the branch that was selected. The eight percentage tiers and the two volatility multipliers in this group only apply on the fallback path (that tier's volatility basis is unavailable, or all four branches produced nothing) and as a position cap; the prior shrinkage strength κ and the risk budget R still apply on the main path."
+        "portfolioMgrHorizon": "Since v125 the primary tier's stop-loss / take-profit / position values are taken from the branch that was selected. The eight percentage tiers and the two volatility multipliers in this group only apply on the fallback path (that tier's volatility basis is unavailable, or all four branches produced nothing) and as a position cap; the prior shrinkage strength κ and the risk budget R still apply on the main path.",
+        "indicatorsDailyWindows": "Wired into the daily scoring node since v137. The four holding tiers derive their own windows from the holding period and ignore these; applying panel values to tiers would weld all four back into one window set, which the tool rejects outright.",
+        "indicatorsThresholds": "Bollinger standard-deviation multiple and volume surge/shrink ratios do not scale with the bar period, so the daily chain and all four tiers use these. Surge must exceed shrink, otherwise the tool fails loudly instead of emitting an inverted signal."
       },
       "valuation": {
         "perpetualGrowth": "Perpetual Growth Rate",
@@ -16177,6 +16183,7 @@
       "tagLabel": "Low confidence",
       "passiveWatch": "This “Wait” is a passive downgrade due to insufficient data, not a bearish call",
       "gapsNotDegraded": "Data gaps exist, but no downgrade was triggered: the direction is unaffected",
+      "dqiFuse": "Data quality has missed grade A for {{streak}} consecutive runs and the fuse tripped: the confidence cap of this run is tightened to the most conservative tier",
       "collapseLabel": "Factor weights collapsed",
       "gapReason": "{{count}} data gap(s)",
       "showGaps": "Show gaps",
@@ -16502,7 +16509,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "Weight scope: from generation {{floor}} (excluded {{preFloor}} earlier and {{unknown}} unknown-generation samples)"
     },
     "experimentTrail": {
       "acceptOrSkip": "Accept or Skip",
@@ -16779,6 +16787,13 @@
       "horizonAuto": "By primary tier",
       "horizonUnknown": "Unknown horizon",
       "colHorizon": "Review horizon",
+      "colMover": "Mover (this horizon)",
+      "moverYes": "Mover",
+      "moverNo": "Not qualifying",
+      "moverWindowIncomplete": "Window not yet filled",
+      "moverNoMarketData": "No market data",
+      "moverRuleUnavailable": "Criteria not established",
+      "moverNotReflected": "Not reviewed",
       "horizonReviewTag": "Reviewed here",
       "horizonNoNarration": "Objective verdict only — no reflection narrative",
       "horizonStatusLabel": "Status: ",
@@ -17912,7 +17927,8 @@
     "unitBillion": "B",
     "unitMillion": "M",
     "unitCrore": " crore",
-    "unitLakh": " lakh"
+    "unitLakh": " lakh",
+    "horizonScoringWindows": "This tier's indicator windows: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volume {{vol}}"
   },
   "pipeline": {
     "title": "Stock Pipeline",

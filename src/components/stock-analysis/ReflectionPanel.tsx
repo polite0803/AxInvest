@@ -1,7 +1,7 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
 import type { AiChatAction } from "@/components/workflow/types/workflow.types";
 import { invoke, listen } from "@/lib/invoke";
-import { horizonIcAbsenceKey } from "@/lib/stock-analysis-utils";
+import { horizonIcAbsenceKey, moverLabelPresentation } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import type { HitrateGroup, HitrateStats, HorizonResultsMap, ReflectionFeedbackResult } from "@/types";
 import {
@@ -56,6 +56,13 @@ interface ReflectionRow {
   decisionJson?: string;
   blackboardSnapshot?: string;
   alphaReturn?: number | null;
+  /**
+   * #10 P7 妖股标签（后端 `stock_reflections.mover_label`，按档挂在本行这一档上）。
+   * 五值：`mover` / `normal` / `window_incomplete` / `no_market_data` / `rule_unavailable`，
+   * `null` = 该行尚未走到反思收尾（或本列引入前的存量行）。
+   * 后四种都必须与「未达标」在界面上分得开 —— 判据不可用不是「算过且没达标」。
+   */
+  moverLabel?: string | null;
   horizonResults?: HorizonResultsMap | null;
 }
 
@@ -144,6 +151,24 @@ export function ReflectionPanel() {
       unknown: t("stockAnalysis.reflection.horizonUnknown"),
     };
     return map[key] ?? key;
+  };
+  /**
+   * #10 P7 妖股标签单元格。分层判据在 `moverLabelPresentation`（与 IC 缺席四分句同族）：
+   * 四种「无从判定」一律留破折号 + 点名原因，不写成「不是妖股」；后端新增而未登记的态
+   * 原样显示，不静默吞掉。
+   */
+  const moverLabelCell = (v: string | null | undefined) => {
+    const { kind, i18nKey } = moverLabelPresentation(v);
+    if (kind === "yes") {
+      return <Tag color="volcano">{t("stockAnalysis.reflection.moverYes")}</Tag>;
+    }
+    if (kind === "no") {
+      return <Text>{t("stockAnalysis.reflection.moverNo")}</Text>;
+    }
+    if (kind === "unknown") {
+      return <Text type="warning">{v}</Text>;
+    }
+    return <Text type="secondary">— {i18nKey === null ? v : t(i18nKey)}</Text>;
   };
   const hitrateGroupColumns = (title: string): ColumnsType<HitrateGroup> => [
     { title, dataIndex: "key", key: "key", width: 140 },
@@ -451,6 +476,10 @@ export function ReflectionPanel() {
         "stockCode",
         "stockName",
         "asOfDate",
+        // 妖股标签（#10 P7）是**按档**的结论 ⇒ 导出必须同时带 `horizon`，
+        // 否则一行标签离开它的档就没法解释（顺带补上此前导出就缺的 horizon 列）。
+        "horizon",
+        "moverLabel",
         "actualOutcome",
         "status",
         "depth",
@@ -463,6 +492,8 @@ export function ReflectionPanel() {
           r.stockCode,
           `"${(r.stockName || "").replace(/"/g, '""')}"`,
           r.asOfDate,
+          r.horizon || "",
+          r.moverLabel || "",
           `"${(r.actualOutcome || "").replace(/"/g, '""')}"`,
           r.status,
           r.reflectionDepth || "",
@@ -857,6 +888,14 @@ export function ReflectionPanel() {
                   width={90}
                   // 一行 = 一只股票 × 一条分析 × 一个复盘档；缺列老记录显式「未知周期」不回填
                   render={(v: string | null) => horizonKeyLabel(v ?? "unknown")}
+                />
+                <Table.Column
+                  title={t("stockAnalysis.reflection.colMover")}
+                  dataIndex="moverLabel"
+                  width={130}
+                  // #10 P7：妖股标签 = 本行这一档「分析价 → 反思价」原始涨跌幅 vs 面板阈值
+                  // （`mover_gain_*` 单源），持有期未满一律留空并注明未满
+                  render={(v: string | null) => moverLabelCell(v)}
                 />
                 <Table.Column
                   title={t("stockAnalysis.reflection.colResult")}

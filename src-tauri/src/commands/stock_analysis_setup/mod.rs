@@ -19,6 +19,10 @@ pub mod seed_serenity_fast;
 pub mod seed_stock_analysis;
 pub mod seed_variables;
 
+// 四张档子模板的节点/边定义 + 播种（B-2b 步骤 2/2.5，PLAN §九十一 / §九十二 / §一○○）。
+// v135 起生产可见：主图的四个 `pm-h-<档>` SubWorkflow 扇出按 `horizon_tier_template_id` 指向它们。
+pub(crate) mod horizon_tier_template;
+
 // 仅测试构建：seed 工具声明 ↔ 运行时解析空间 一致性校验
 #[cfg(test)]
 mod seed_consistency_tests;
@@ -847,6 +851,14 @@ pub async fn ensure_stock_analysis_experts_seeded(
         tracing::error!("[stock_analysis_setup] 快速链模板种子失败 (非致命): {e}");
     }
 
+    // 四张档子模板（B-2b #36 = v135）：主图那四个 `pm-h-<档>` 扇出节点在**运行期**按
+    // `sub_workflow_id` 从 workflow_templates 取它们 ⇒ 这四行缺一条，那一档就是
+    // `Template <id> not found` 的显式子执行失败（不是「该档算不出来」的静默缺席）。
+    // 失败仍按非致命处理（与主图同口径），但要打得响 —— 四档分支不能少一条还看不出来。
+    if let Err(e) = horizon_tier_template::seed_horizon_tier_templates(db).await {
+        tracing::error!("[stock_analysis_setup] 四张档子模板种子失败 (非致命): {e}");
+    }
+
     if let Err(e) = seed_reflection_workflow_template(db).await {
         tracing::error!("[stock_analysis_setup] 反思工作流模板种子失败 (非致命): {e}");
     }
@@ -1255,24 +1267,40 @@ pub(crate) fn role_id_to_display(id: &str) -> String {
     }
 }
 
-/// 构建分析师 input_mapping：为每个分析师注入 bull_score/bear_score/consensus_score
-/// 例如 a-market-analyst → 【market_bull_score】:75 【market_bear_score】:25
+/// 构建分析师 input_mapping：为**每个逐档实例**注入 bull_score/bear_score
+/// 例如 a-market-analyst--mid → 【a-market-analyst--mid_bull_score】:75
 ///
-/// 路径规则（V29 修复）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
-/// resolve_var_path 遇到 Value::String 会自动 from_str 解析后再继续下钻，
-/// 因此必须用 `.content.field` 路径访问 AgentNode 业务字段。
+/// 路径规则（V29 + v133 订正）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
+/// resolve_var_path 遇到 Value::String 会自动 from_str 解析后再继续下钻 —— **但 V62 起
+/// content 统一为 `{report, verdict: {...}}` 嵌套**，业务字段都在 `verdict` 层 ⇒ 原写法
+/// `{id}.content.bull_score` 自 V62 起恒解析为 None（30 键全部静默失效、prompt 里
+/// 一行【…】都注不出来）。v133 随按档重写一并订正为 `{id}.content.verdict.bull_score`。
+/// 同时删除 `_consensus` 键：verdict 里**没有** consensus_score 字段（共识= bull−bear 由
+/// 下游自算），该键从来无来源 —— Null 键与缺失键在 4g 注入上等价（None 一律跳过），
+/// 留着只会让人以为有一路在供数。
+///
+/// v133（B2-2）：参数从「10 个 base id」改为**逐档实例清单**（`tiered`，23 条）——
+/// 消费方（debate-convergence / 三个风险偏好节点）是全局面板/裁决层，需要同时看到
+/// **全部档位实例**的评分（各档独立结论才是四档分支的输入；只给一个档会退化）。
+/// 键前缀带上档位后缀（`a-market-analyst--mid`，与节点 id 同形 ⇒ LLM 看到的行
+/// 与图里节点名可逐字对上）。
+/// `value-investor` 的产出被 `value-verify` **原地覆写**（output_var 同名，v91 起的机制）
+/// ⇒ 其权威形态是 CodeNode 的 `{status, result: {report, verdict, ...}}`（`.result` 段），
+/// 与其他分析师的 `.content` 段不同 —— 路径按 base 分流（写错就是整段静默 Null）。
 pub(crate) fn build_analyst_input_mapping(
-    a_ids: &[&str],
+    tiered: &[(&str, axagent_harness::holding_period::Period, &str, &str)],
 ) -> std::collections::HashMap<String, String> {
     use std::collections::HashMap;
     let mut map = HashMap::new();
-    for aid in a_ids {
-        // a-market-analyst → market, a-sentiment → sentiment, etc.
-        let prefix = aid.strip_prefix("a-").unwrap_or(aid);
-        map.insert(format!("{prefix}_bull_score"), format!("{aid}.content.bull_score"));
-        map.insert(format!("{prefix}_bear_score"), format!("{aid}.content.bear_score"));
-        // consensus_score = bull - bear（聚合分数）
-        map.insert(format!("{prefix}_consensus"), format!("{aid}.content.consensus_score"));
+    for (base, p, ..) in tiered {
+        let node_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        let root = if *base == "value-investor" {
+            format!("{node_id}.result")
+        } else {
+            format!("{node_id}.content")
+        };
+        map.insert(format!("{node_id}_bull_score"), format!("{root}.verdict.bull_score"));
+        map.insert(format!("{node_id}_bear_score"), format!("{root}.verdict.bear_score"));
     }
     // 为所有辩论/风险节点注入历史反思教训
     map.insert("stock_lessons".into(), "stock_lessons".into());
@@ -2712,7 +2740,8 @@ mod version_gate_tests {
     ///   ② 每个节点的**按档两键**指向自己那一格（`riskWindows.<camelTier>.…`）——
     ///      「复制四遍得到四份相同结论」那种伪装，只有这一格检得出来（数节点数量检不出）；
     ///   ③ 七条全局键仍指全局（本版没按档的轴，声明必须与事实一致）；
-    ///   ④ 四路分支 `pm-h-{snake}` 的 `overall_risk` 读**本档**节点；
+    ///   ④ 四路扇出 `pm-h-{kebab}`（v135 起是 SubWorkflowNode）必须把**本档**风险节点的产出
+    ///      以恒等键传进子快照（子模板里「读本档那一格」由 `horizon_tier_template.rs` 锁）；
     ///   ⑤ 主链 `portfolio-mgr` 四个 `overall_risk_{snake}` 键齐备（脚本内按所选档 switch）；
     ///   ⑥ 供给边：`t-risk → 本档节点`、`本档节点 → 对应分支`、`本档节点 → 主链`；
     ///   ⑦ 全局节点仍在**且不注入**按档两键（注入了它就跟着加严 ⇒ 等于偷偷把 60 日整票
@@ -2784,10 +2813,24 @@ mod version_gate_tests {
             let branch_id = format!("pm-h-{suffix}");
             let branch = find(&branch_id).ok_or_else(|| format!("缺分支节点 {branch_id}"))?;
             let want_cat = format!("{node_id}.result.category");
-            if mapping(branch, "overall_risk") != want_cat {
+            // v135（B-2b #36）：`pm-h-<档>` 已由 CodeNode 换成 SubWorkflow 扇出 ⇒ 「分支读本档
+            // 那一格」这条判据随映射一起搬进 `horizon_tier_template.rs`（那里的
+            // `tier_branch_reads_own_risk_cell` 逐档断言 `overall_risk` = 本档节点的
+            // `.result.category`，负控是「改成读全局格必须红」—— 判据没有退役，只是跟着换载体）。
+            // 父图这一侧改检**传键**：子模板要读本档风险节点，而 `map_inputs`
+            // （`subworkflow_executor.rs:97-105`）是严格的 ⇒ 少这个键就是整档子执行硬错，
+            // 不是「该腿缺席」。键必须是恒等映射（子快照里的变量名 = 父池里的名字）。
+            if branch["type"].as_str() != Some("subWorkflow") {
                 return Err(format!(
-                    "{branch_id} 的 overall_risk = {}，应为 {want_cat}（本档必须读本档那一格）",
-                    mapping(branch, "overall_risk")
+                    "{branch_id} 应是 SubWorkflow 扇出节点，实为 {:?}",
+                    branch["type"]
+                ));
+            }
+            if mapping(branch, &node_id) != node_id {
+                return Err(format!(
+                    "{branch_id} 的 input_mapping 里 {node_id} = {}，应为恒等映射 {node_id:?} \
+                     —— 本档风险节点的产出没进子快照 ⇒ 该档子执行运行期硬错",
+                    mapping(branch, &node_id)
                 ));
             }
             if !has_edge("t-risk", &node_id) {
@@ -2849,17 +2892,23 @@ mod version_gate_tests {
             "mid 节点改成读 long 那一格后判据仍通过 ⇒ 它检不出「四份复制」这一原始缺陷"
         );
 
-        // 负控 ②：短线分支改回读全局格 ⇒ 必须红（按档接线本身被锁，不只是节点存在）。
+        // 负控 ②：短线扇出改成「传全局风险节点、不传本档那一个」⇒ 必须红。
+        // （v135 起 `pm-h-<档>` 是 SubWorkflow 扇出：它自己不算风险，只负责把本档风险节点的
+        // 产出传进子快照。原负控锁的是「分支节点改回读全局格」，那条判据现由
+        // `horizon_tier_template.rs` 的 `tier_branch_reads_own_risk_cell` 逐档锁。）
         let mut reverted = nodes.clone();
         let br = reverted
             .iter_mut()
             .find(|n| n["id"].as_str() == Some("pm-h-short"))
             .expect("夹具：pm-h-short 应存在");
-        br["config"]["input_mapping"]["overall_risk"] =
-            serde_json::json!("cls-risk-level.result.category");
+        br["config"]["input_mapping"]["cls-risk-level"] = serde_json::json!("cls-risk-level");
+        br["config"]["input_mapping"]
+            .as_object_mut()
+            .expect("夹具：扇出应有 input_mapping 对象")
+            .remove("cls-risk-level-short");
         assert!(
             check_horizon_scoped_risk(&reverted, &edges).is_err(),
-            "分支改回读全局格后仍绿 ⇒ 「按档接线」没被锁住"
+            "短线扇出改回只传全局风险节点后仍绿 ⇒ 「按档接线」没被锁住"
         );
 
         // 负控 ③：删掉一条供给边 ⇒ 必须红（时序竞态是独立失效面）。
@@ -2927,6 +2976,431 @@ mod version_gate_tests {
             left.is_empty(),
             "v54 未落库：portfolio-mgr 的 input_mapping 仍含悬空键 {left:?}\
              （这些键在脚本全文零引用，属纯白注入）"
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// B-2b #36（v135）：主图四个 `pm-h-<档>` 扇出 ↔ 四张档子模板 的**键齐备性**守门
+//
+// ## 为什么必须在改图的同一批里建（PLAN §九十 / §九十一(3) 步骤 3）
+//
+// 子执行只拿到父扇出 `input_mapping` **target 键**那一份变量快照，而
+// `subworkflow_executor::map_inputs`（`crates/rt-workflow/src/work_engine/executors/subworkflow_executor.rs:97-105`）
+// 是**严格**的：路径取不到就 `Variable 'x' not found` ⇒ 整个扇出节点硬错。
+// 也就是说「漏传一个键」的报错点天然在**运行期**，而本仓的四档分支恰好大量引用
+// 运行期才存在的名字（`horizon_branch_json` 由 hooks 注入、`a-hot-money--<档>` 由
+// 播种按档生成）。判据必须由代码现算 needs，不能靠人抄清单 —— 抄漏的形态见 §八十 的 A1。
+//
+// ## 它守什么
+//
+// - ① **零缺口**：每张模板现算的 needs ⊆ 对应扇出传入的键；
+// - ② **双向一致**：`fanouts`（图里真实存在的扇出目标）与 `registered`（本门登记了数据源的
+//   模板）必须相等 —— 新增扇出要登记数据源，撤扇出要撤登记（否则判据对它没有数据源，
+//   「没有缺口」是假的）；
+// - ③ **无盲区**：`node_var_io` 必须认得档模板用到的每种节点类型（盲区让 needs **少报**，
+//   于是本门绿而运行期红）；
+// - ④ **扇出指向本档模板**：`pm-h-<档>` 的 `sub_workflow_id` 必须等于 `stock-horizon-<档>`
+//   （名字由 `horizon_tier_template_id` 现推，不手抄）；
+// - ⑤ **四行真落库**且版本 = `HORIZON_TIER_TEMPLATE_VERSION`（版本号对 ≠ 内容对，同 v55 那条理由）。
+//
+// 同批并到本模块的第二条判据（⑥）：**ToolNode 的参数必须有源**
+// （`tool_node_argument_sources_exist` + 两侧负控）。它与扇出无关，但共用同一份
+// 「本图产出 / 外部传入」集合与同一个 `workflow_fanout_audit`，且它要拦的正是
+// §九十二(4) 那条让四档评分恒等于日线的死参数 —— v135 把 `period` 接成活变量之后，
+// 没有这条门，下一次写错变量名照样全绿。
+//
+// 负控一条：从某个扇出里抽掉一个**子模板真要用**的键 ⇒ 必须由**同一个** `audit_fanouts`
+// 报出缺口（另写一份比较公式的负控证不到真判据）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod horizon_tier_fanout_tests {
+    use super::horizon_tier_template::{
+        HORIZON_TIER_TEMPLATE_VERSION, horizon_tier_template_id, horizon_tier_template_nodes,
+        seed_horizon_tier_templates,
+    };
+    use super::seed_stock_analysis::{
+        SOURCE_TEMPLATE_ID, TEMPLATE_VERSION, seed_stock_analysis_workflow_template,
+    };
+    use crate::workflow_fanout_audit::{
+        audit_fanouts, external_reads, external_reads_for_kind, graphs_to_audit,
+    };
+    use axagent_harness::holding_period::Period;
+    use axagent_harness::workflow_types::WorkflowNode;
+    use axagent_rt_workflow::work_engine::node_type_of;
+    use sea_orm::{DatabaseConnection, EntityTrait};
+
+    async fn fresh_db() -> axagent_dao::db::DbHandle {
+        axagent_dao::db::create_test_pool().await.expect("建临时测试库失败")
+    }
+
+    async fn row_nodes(db: &DatabaseConnection, id: &str) -> Vec<WorkflowNode> {
+        let model = axagent_entities::workflow_template::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .unwrap_or_else(|| panic!("模板 `{id}` 应已存在"));
+        serde_json::from_str(&model.nodes).expect("nodes 应是 JSON 数组")
+    }
+
+    async fn row_version(db: &DatabaseConnection, id: &str) -> i32 {
+        axagent_entities::workflow_template::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .unwrap_or_else(|| panic!("模板 `{id}` 应已存在"))
+            .version
+    }
+
+    /// 把四张档模板从库里读回来（**读 DB 而不是直接调 builder**）：
+    /// 判据要证的是「落库那四行」与主图扇出对得上，不是「代码里两份定义互相对得上」。
+    async fn seeded_tier_templates(db: &DatabaseConnection) -> Vec<(String, Vec<WorkflowNode>)> {
+        let mut out = Vec::new();
+        for period in Period::ALL {
+            let id = horizon_tier_template_id(period);
+            let nodes = row_nodes(db, &id).await;
+            out.push((id, nodes));
+        }
+        out
+    }
+
+    /// 正对照 ①②③④⑤。
+    #[tokio::test]
+    async fn tier_fanout_inputs_are_complete() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_stock_analysis_workflow_template(db).await.expect("主图种子应成功");
+        seed_horizon_tier_templates(db).await.expect("四张档子模板种子应成功");
+
+        // ⑤ 四行落库 + 版本与主图同代。本代是**编译期**保证
+        //   （`HORIZON_TIER_TEMPLATE_VERSION` 直接绑 `seed_stock_analysis::TEMPLATE_VERSION`），
+        //   这里验的是「运行期真的把那个版本写进了 DB 四行」—— 版本号对 ≠ 内容对（v55 那条理由），
+        //   所以两条各管一格：不在此处再写死 135（那只会让下一次升版多一处必填项）。
+        for period in Period::ALL {
+            let id = horizon_tier_template_id(period);
+            assert_eq!(
+                row_version(db, &id).await,
+                HORIZON_TIER_TEMPLATE_VERSION,
+                "档模板 {id} 落库版本应为 {HORIZON_TIER_TEMPLATE_VERSION}"
+            );
+            assert_eq!(
+                HORIZON_TIER_TEMPLATE_VERSION, TEMPLATE_VERSION,
+                "档模板与主图必须同代 —— 扇出的键集是按档模板内容算的"
+            );
+        }
+
+        let main = row_nodes(db, SOURCE_TEMPLATE_ID).await;
+        let rows = seeded_tier_templates(db).await;
+        let templates: std::collections::BTreeMap<&str, Vec<WorkflowNode>> =
+            rows.iter().map(|(id, nodes)| (id.as_str(), nodes.clone())).collect();
+        let graphs = graphs_to_audit(SOURCE_TEMPLATE_ID, &main, &templates);
+        let audit = audit_fanouts(&graphs, &templates);
+
+        // ① 零缺口
+        assert!(audit.gaps.is_empty(), "扇出键不齐备（子模板要读而父没传）：{:?}", audit.gaps);
+        // ② 双向一致
+        assert!(
+            audit.unregistered.is_empty(),
+            "这些扇出指向未登记的子模板，判据对它们没有数据源：{:?}",
+            audit.unregistered
+        );
+        assert_eq!(
+            audit.fanouts.len(),
+            4,
+            "主图的图内扇出应恰为四个（{:?}）—— 多出来的是新增扇出，少了的是扇出被撤却没同步撤登记",
+            audit.fanouts
+        );
+        assert_eq!(
+            audit.fanouts, audit.registered,
+            "登记的子模板集合与实际扇出集合必须**双向**一致"
+        );
+        // ③ 无盲区
+        assert!(
+            audit.blind_kinds.is_empty(),
+            "node_var_io 未覆盖这些节点类型 {:?} ⇒ needs 会漏键",
+            audit.blind_kinds
+        );
+        // ④ 每个扇出指向**本档**模板
+        for period in Period::ALL {
+            let want = horizon_tier_template_id(period);
+            let node_id = format!("pm-h-{}", period.as_str().replace('_', "-"));
+            let got = main
+                .iter()
+                .find_map(|n| match n {
+                    WorkflowNode::SubWorkflow(s) if s.base.id == node_id => {
+                        Some(s.config.sub_workflow_id.clone())
+                    },
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("主图缺扇出节点 {node_id}"));
+            assert_eq!(got, want, "{node_id} 应指向本档模板");
+        }
+        println!(
+            "审计 {} 张图；图内扇出 {} 个（{}）；system_* 排除 {} 个",
+            graphs.len(),
+            audit.fanouts.len(),
+            audit.fanouts.iter().cloned().collect::<Vec<_>>().join(","),
+            audit.excluded_system.len()
+        );
+    }
+
+    /// 负控：从某个扇出里抽掉一个子模板**真要用**的键 ⇒ 同一个 `audit_fanouts` 必须报缺口。
+    ///
+    /// 抽的键挑 `t-lockup-data`（中档模板的 `lockup_float_ratio` 腿读它）—— 它是
+    /// 「缺席分两种」那条设计里的可选上游，父侧不传它就等于整档硬错，正是本门存在的理由。
+    #[tokio::test]
+    async fn tier_fanout_missing_key_is_caught() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_stock_analysis_workflow_template(db).await.expect("主图种子应成功");
+        seed_horizon_tier_templates(db).await.expect("档模板种子应成功");
+
+        let mut main = row_nodes(db, SOURCE_TEMPLATE_ID).await;
+        let rows = seeded_tier_templates(db).await;
+        let templates: std::collections::BTreeMap<&str, Vec<WorkflowNode>> =
+            rows.iter().map(|(id, nodes)| (id.as_str(), nodes.clone())).collect();
+
+        let mut removed_from: Option<String> = None;
+        for node in &mut main {
+            if let WorkflowNode::SubWorkflow(s) = node
+                && s.config.input_mapping.remove("t-lockup-data").is_some()
+            {
+                removed_from = Some(s.base.id.clone());
+                break;
+            }
+        }
+        let removed_from =
+            removed_from.expect("主图扇出里没有可拆的 t-lockup-data 键 ⇒ 本负控失去前提");
+        let graphs = graphs_to_audit(SOURCE_TEMPLATE_ID, &main, &templates);
+        let audit = audit_fanouts(&graphs, &templates);
+        assert!(
+            audit.gaps.iter().any(|(_, _, parent, missing)| parent == &removed_from
+                && missing.contains("t-lockup-data")),
+            "抽掉 {removed_from} 的 t-lockup-data 后仍报「无缺口」⇒ 齐备性判据没电（抽取面或比较面失效）"
+        );
+    }
+
+    /// 形状锁：每张档模板必须恰好是「常量 → 本档评分 → 本档分支 → 终值」四个节点。
+    ///
+    /// 为什么要单独一条：`audit_fanouts` 检的是**键**齐不齐，检不出**节点**被删/被换 ——
+    /// 例如有人把评分节点从模板里摘掉、改成父侧再传一份，键面照样绿，而四档重新变成
+    /// 同一份输入（§九十一(1) 的共享上游理由）。评分节点 id 取权威 `Period::scoring_node_id`
+    /// （不手抄），所以档↔尺度↔节点一旦串了，这条与 `check-tier-purity` 的 R5 各红一次。
+    #[test]
+    fn tier_template_shape_is_the_declared_four_nodes() {
+        for period in Period::ALL {
+            let (nodes, _) = horizon_tier_template_nodes(period);
+            let ids: Vec<String> = nodes.iter().map(|n| n.base_id().to_string()).collect();
+            assert_eq!(
+                ids,
+                vec![
+                    "const-scoring-period".to_string(),
+                    period.scoring_node_id().to_string(),
+                    format!("pm-h-{}", period.as_str().replace('_', "-")),
+                    "end".to_string(),
+                ],
+                "档模板 {ids:?} 的形状与本批声明的四节点形状不符 ⇒ 播种行与扇出键集要一起重算"
+            );
+        }
+    }
+
+    /// 运行期注入的变量名 —— **从注入点现场推导**，不在这里手抄第二份清单。
+    ///
+    /// 为什么必须算进「有源」：`stock_code` 这类名字**不在**模板变量表里（面板没有它、
+    /// DB 的 `variables` 列也没有它），它们由 `stock_workflow/hooks.rs` / `core.rs` 在每次
+    /// run 前 push 进 `merged_vars`。在这里手写一份白名单，就会与
+    /// `src/components/settings/StockAnalysisConfigPanel.test.tsx` 的 `RUNTIME_INJECTED`
+    /// 成了两份各自漂移的副本（本仓「清单由单一权威渲染 + 注入」的纪律）；真正的权威就是
+    /// 那两处 `Variable { name: … }` / `("<名>", json!(…))` 的**构造点** ⇒ 直接扫它。
+    /// 漂移方向也顺带被封住：hooks 摘掉某个注入 ⇒ 该名字自动离开集合 ⇒ 仍拿它当工具参数的图
+    /// 立刻红，而不是继续绿着走工具缺省值。
+    fn runtime_injected_names() -> std::collections::BTreeSet<String> {
+        use regex::Regex;
+        let mut out = std::collections::BTreeSet::new();
+        for src in
+            [include_str!("../stock_workflow/hooks.rs"), include_str!("../stock_workflow/core.rs")]
+        {
+            for re in [
+                r#"name:\s*"([a-z_][a-z0-9_]*)"\.into\(\)"#,
+                r#"\(\s*"([a-z_][a-z0-9_]*)"\s*,\s*json!\("#,
+            ] {
+                for cap in Regex::new(re).expect("正则应合法").captures_iter(src) {
+                    out.insert(cap[1].to_string());
+                }
+            }
+        }
+        // 扫描面自证：推导失效时判据会「全红」（易被误读成图坏了），不会静默放行。
+        assert!(
+            out.len() > 10 && out.contains("stock_code"),
+            "运行期注入名只推到 {} 个（含 stock_code? {}）⇒ 推导姿势已失效，本门不可信",
+            out.len(),
+            out.contains("stock_code")
+        );
+        out
+    }
+
+    /// 判据本体：**ToolNode 参数指向的变量必须「有源」**，返回问题清单（空 = 绿）。
+    ///
+    /// 「有源」= 本图自己产出（节点 id 或 `output_var`）**或** 在 `allowed_external` 里
+    /// （主图 = 种子变量表的变量名；档模板 = 父扇出传进来的键）**或** 运行期注入
+    /// （[`runtime_injected_names`] 现推）；引擎每个 run 自动注入的四个工作流级变量另算
+    /// （名单直接取引擎侧常量，不在这里抄）。
+    ///
+    /// 为什么单列一条而不是复用 `audit_fanouts` 的 needs：工具**参数名**不是工作流变量，
+    /// 它不会出现在「子模板要读什么、父得传什么」那张面上 ⇒ 死参数要从**声明读取**这一侧
+    /// 按节点种类切开看（PLAN §九十二(4) 的实锤：`("period","hourly")` 让四档评分恒等于日线，
+    /// 而 `cargo check` / `clippy` / 既有全套门**全绿**）。
+    /// 公式与 needs 同源（`workflow_fanout_audit::produced_names`），不抄第二份。
+    fn tool_arg_problems(
+        label: &str,
+        nodes: &[WorkflowNode],
+        allowed_external: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
+        let mut blind = std::collections::BTreeSet::new();
+        let needs = external_reads_for_kind(nodes, "tool", &mut blind);
+        // 本条判据的**载体**必须被 `node_var_io` 认得，否则 needs 会少报而门绿着空转。
+        assert!(
+            !blind.contains("tool"),
+            "{label} 的 ToolNode 未被 node_var_io 覆盖 ⇒ 本门对它没有数据源"
+        );
+        // 其余未覆盖种类如实打印而不是判红：本门只按 `tool` 切读取面，别的种类覆盖与否
+        // 不改变结论；而 `produced_names` 对它们是盲区 ⇒ 影响方向是**多报**
+        // （某个 Switch/Parallel 写出的变量没进自产集 ⇒ 被当成无源），不是漏报。
+        let disclosed: Vec<&str> = blind.iter().copied().filter(|k| *k != "tool").collect();
+        if !disclosed.is_empty() {
+            println!(
+                "[tool 参数有源] {label}：node_var_io 未覆盖这些种类 {disclosed:?}（不影响本门，误差方向是多报）"
+            );
+        }
+        let injected = runtime_injected_names();
+        needs
+            .iter()
+            .filter(|n| {
+                !allowed_external.contains(*n)
+                    && !injected.contains(*n)
+                    && !crate::workflow_fanout_audit::engine_injected_names().contains(&n.as_str())
+            })
+            .map(|n| {
+                format!(
+                    "{label}：ToolNode 的参数指向无源的变量 {n:?} \
+                     ⇒ 工具会静默走自己的缺省值（不报错），这就是 §九十二(4) 那条死参数族"
+                )
+            })
+            .collect()
+    }
+
+    /// 主图那一行的种子变量名（判据的「有源」集合之一）。
+    async fn seeded_variable_names(
+        db: &DatabaseConnection,
+        id: &str,
+    ) -> std::collections::BTreeSet<String> {
+        let model = axagent_entities::workflow_template::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .expect("查模板失败")
+            .unwrap_or_else(|| panic!("模板 `{id}` 应已存在"));
+        let raw = model.variables.unwrap_or_default();
+        let arr: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("variables 应是 JSON 数组");
+        let names: std::collections::BTreeSet<String> =
+            arr.iter().filter_map(|v| v["name"].as_str().map(str::to_string)).collect();
+        // 扫描面自证：变量表空 ⇒ `allowed_external` 空 ⇒ 判据会「全红」而不是「全绿」，
+        // 但**解析姿势错**同样表现为空 —— 那时长红会被误读成「图坏了」。所以给下限。
+        assert!(names.len() > 20, "种子变量表只解析到 {} 个名字 ⇒ 判据的读面不可信", names.len());
+        names
+    }
+
+    /// 正对照：主图 + 四张档模板的 ToolNode 参数全部有源。
+    #[tokio::test]
+    async fn tool_node_argument_sources_exist() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_stock_analysis_workflow_template(db).await.expect("主图种子应成功");
+        seed_horizon_tier_templates(db).await.expect("档模板种子应成功");
+
+        let main = row_nodes(db, SOURCE_TEMPLATE_ID).await;
+        let vars = seeded_variable_names(db, SOURCE_TEMPLATE_ID).await;
+        let tool_nodes = main.iter().filter(|n| node_type_of(n) == "tool").count();
+        assert!(tool_nodes >= 10, "主图只数到 {tool_nodes} 个 ToolNode ⇒ 扫描面塌了，本门失去对象");
+        let mut problems = tool_arg_problems(SOURCE_TEMPLATE_ID, &main, &vars);
+
+        // 每张档模板的「外部可源集」= 父扇出传进来的键（恒等键 ⇒ 与 needs 同集合）。
+        for period in Period::ALL {
+            let id = horizon_tier_template_id(period);
+            let provided: std::collections::BTreeSet<String> = main
+                .iter()
+                .find_map(|n| match n {
+                    WorkflowNode::SubWorkflow(s) if s.config.sub_workflow_id == id => {
+                        Some(s.config.input_mapping.keys().cloned().collect())
+                    },
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("主图没有指向 {id} 的扇出节点"));
+            let nodes = row_nodes(db, &id).await;
+            problems.extend(tool_arg_problems(&id, &nodes, &provided));
+        }
+
+        assert!(problems.is_empty(), "ToolNode 参数无源：\n{}", problems.join("\n"));
+        println!("ToolNode 参数有源核对：主图 {tool_nodes} 个工具节点 + 4 张档模板，全绿");
+    }
+
+    /// 负控 A：把档模板评分节点的 `period` 指回一个**不存在**的变量 ⇒ 必须报出它。
+    ///
+    /// 这条锁的正是 v135 修掉的那个原始缺陷的形状（§九十二(4)：`("period","hourly")` 里
+    /// `hourly` 从来不是变量）。没有它，正对照可能只是在「needs 恰好为空」的假象上绿。
+    #[tokio::test]
+    async fn dead_tool_argument_is_caught_in_tier_template() {
+        let (mut nodes, _) = horizon_tier_template_nodes(Period::Mid);
+        let provided: std::collections::BTreeSet<String> =
+            external_reads(&nodes, &mut std::collections::BTreeSet::new());
+        // 前提：未改动前本档全绿（`scoring_period` 由模板内的常量节点自产）。
+        assert!(tool_arg_problems("stock-horizon-mid", &nodes, &provided).is_empty());
+        let mut patched = false;
+        for node in &mut nodes {
+            if let WorkflowNode::Tool(t) = node {
+                // 写成一个「看起来像变量名、但本图没人产出、父也没传」的串
+                t.config.input_mapping.insert("period".into(), "monthlyx".into());
+                patched = true;
+            }
+        }
+        assert!(patched, "档模板里没有 ToolNode ⇒ 本负控失去前提");
+        let problems = tool_arg_problems("stock-horizon-mid", &nodes, &provided);
+        assert!(
+            problems.iter().any(|p| p.contains("monthlyx")),
+            "把 period 指向不存在的变量后仍不报 ⇒ 死参数判据没电：{problems:?}"
+        );
+    }
+
+    /// 负控 B：主图同理 —— 把 `t-market-data` 的 `limit` 参数改指一个不存在的变量 ⇒ 必须红。
+    ///
+    /// 两侧各一条的理由（判据层 4az：命中判据要负控两头各一条）：主图的允许集是**种子变量表**，
+    /// 档模板的允许集是**父扇出键** —— 两套输入，任一为空都会让另一侧的负控证不到自己那条。
+    #[tokio::test]
+    async fn dead_tool_argument_is_caught_in_main_graph() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_stock_analysis_workflow_template(db).await.expect("主图种子应成功");
+        let mut main = row_nodes(db, SOURCE_TEMPLATE_ID).await;
+        let vars = seeded_variable_names(db, SOURCE_TEMPLATE_ID).await;
+        assert!(
+            tool_arg_problems(SOURCE_TEMPLATE_ID, &main, &vars).is_empty(),
+            "前提被破坏：现网图已有无源参数"
+        );
+        let mut patched = false;
+        for node in &mut main {
+            if let WorkflowNode::Tool(t) = node
+                && t.base.id == "t-market-data"
+            {
+                t.config.input_mapping.insert("limit".into(), "kline_limitt".into());
+                patched = true;
+            }
+        }
+        assert!(patched, "主图没有 t-market-data 的 ToolNode ⇒ 本负控失去前提");
+        let problems = tool_arg_problems(SOURCE_TEMPLATE_ID, &main, &vars);
+        assert!(
+            problems.iter().any(|p| p.contains("kline_limitt")),
+            "把 kline_limit 改成一个不存在的变量名后仍不报 ⇒ 主图侧判据没电：{problems:?}"
         );
     }
 }

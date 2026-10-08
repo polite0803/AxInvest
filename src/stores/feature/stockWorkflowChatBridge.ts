@@ -12,7 +12,7 @@ const activeBridges = new Map<string, UnlistenFn[]>();
 const ANALYST_NODE_TO_NAME: Record<string, string> = {
   "a-market-analyst": "market-analyst",
   "a-sentiment": "sentiment",
-  "a-news": "news",
+  // v133（B2-2）：`a-news` 已随节点摘除；`value-investor` 无 `a-` 前缀，单独登记。
   "a-fundamentals": "fundamentals",
   "a-policy": "policy",
   "a-hot-money": "hot-money",
@@ -20,7 +20,14 @@ const ANALYST_NODE_TO_NAME: Record<string, string> = {
   "a-research": "research",
   "a-sector": "sector",
   "a-catalyst": "catalyst",
+  "value-investor": "value-investor",
 };
+
+/** v133（B2-2）：逐档实例节点 id（`a-market-analyst--mid`）归一回 base（映射表键域）。 */
+function analystClusterKey(nodeId: string): string {
+  const i = nodeId.indexOf("--");
+  return i > 0 ? nodeId.slice(0, i) : nodeId;
+}
 
 /**
  * 工具节点 ID → i18n key（**未求值**，供调用方用 `t()` 动态解析）。
@@ -406,8 +413,11 @@ export async function startStockWorkflowChatBridge(conversationId: string): Prom
     }
 
     // ── Agent 节点 (a- 前缀)：分析师报告 ──
-    if (analystsMap.has(nodeId)) {
-      const analyst = analystsMap.get(nodeId)!;
+    // v133（B2-2）：节点按逐档实例化（`a-market-analyst--mid`）——聚合卡按 **base 归组**
+    // 更新（23 个实例的状态折叠到 10 个 base 条目；report 取最近一个到达的实例文本）。
+    const analystKey = analystClusterKey(nodeId);
+    if (analystsMap.has(analystKey)) {
+      const analyst = analystsMap.get(analystKey)!;
       if (status === "running") {
         analyst.status = "running";
       } else if (status === "streaming") {

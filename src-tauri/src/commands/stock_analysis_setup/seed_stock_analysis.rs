@@ -987,11 +987,138 @@ type AlgoToolRow = (
 ///   换代点：v131 及以前该臂是常数 ⇒ 跨代比较 f10 / short 档 ws 必须按代筛样（#31/#12）。
 ///   编号说明：§六十五 把 v132 记给本项，B2-2（23 个带档分析师节点）**顺延 v133**。
 /// **必须升版**：主链脚本、short/mid 两档脚本正文与两个节点的 `input_mapping`/边都在 DB 里。
+/// **v133(2026-10-05, 2026-10-06 落地)**：**B2-2/B3 原子批** —— 分析师按持有期**逐档实例化**
+///   （PLAN §七十八 的 12 步 + 门同批）。一次换代把「图 / 消费者 / 前端 / 门」四层捆绑换齐：
+///   ① **图**：`analysts` 基表摘 `a-news`（+ `t-news-data`；公告方向通道由 `a-catalyst`
+///      `eventCatalyst` 承载）；由 `Period::analyst_subset()` 推导逐档清单 `tiered`
+///      （9 个 a-* × 各自参与的档 + `value-investor` 中/长 = **23 实例**），节点 id 经
+///      `analyst_node_id`（`a-market-analyst--mid`），每实例 `system_prompt` 追加
+///      档位契约段（`Period::verdict_contract_prompt()`，与 prompt/Rhai/CI 门同源）。
+///      取值层 ToolNode 仍只一份（R-11：取数共享一次），出边/Branch 按档扇出。
+///      `value-investor` 与 `value-verify` 各按档两份（output_var 同名覆写链按档）。
+///   ② **消费者**：`analyst-brief` input_mapping 改分档键（`{短名}__{tier}`）+ 脚本 23 条
+///      显式读取；`data-quality` 的 40 键（10 槽 × 4 类）按「代表实例」（mid 优先）生成，
+///      **键名域不变**（§五十六）、news 槽退役换 val 槽（value-investor）；`portfolio-mgr`
+///      的 `catalyst_level` / `untrusted_catalyst` 四键注入 + 脚本按所选档 switch（v128 同形），
+///      `pace-calc` 的 `llm_events` 四键取首实例；`pm-h-short/mid` 的 `flow_persistence`
+///      指向本档 `a-hot-money--{tier}` 并新增 `branch_json["analysts"]` 交叉校验
+///      （串档值留痕不采信）；`debate-convergence` 与三个风险偏好节点的分析师评分表
+///      改为 23 实例注入（并订正 `content.verdict` 层路径 —— V62 后旧路径恒 Null）；
+///      `blackboard` 的 value.assessment 键按档（`value.assessment--{tier}`）。
+///   ③ **快速链**：源图摘 `t-news-data` 后本链**自建**同 id 取数节点（j-news 仍需新闻数据）；
+///      `FAST_DQ_DIMENSIONS` 删 news 行（源图无 news_* 键）；val 槽不重指向（本链无
+///      value-investor ⇒ 如实 missing）。
+///   ④ **前端**：分析师 store 键自动带档（`market-analyst--mid`）；报告网格/诊断表按实例展开、
+///      显示名经 `analystBaseOf` 归一再查 i18n（11 语言补 `value-investor` 的 2 个 key）。
+///   ⚠ **会改决策数值**：各档分析师结论的来源从「共享一份」变为「本档实例」⇒ f1..f13 与
+///     各分析师 confidence、数据质量 grade、辩论收敛输入的构成全变。跨代比较分析命中率等
+///     统计须按代筛样（#31/#12 的 floor=125 已覆盖）。
+///   编号说明：v130/v131/v132 三次顺延后，B2-2 在本版落地，取 **v133**（连续单调）。
+/// **必须升版**：图结构、4 份 .rhai、种子内嵌 Rhai、多个节点的 mapping/边——
+///   全部是播种进 DB 的 include_str!/种子内容。
+///
+/// **v134(2026-10-06)**：**#8 P5 数据质量跨轮熔断**（`PLAN-four-horizon-workflow-alignment.md` §八十三）——
+///   判据是**跨样本**事实（「近若干轮一直拿不到 A 级」），单轮 grade 表达不了，故新增持久观测
+///   （实体 `data_quality_observations` + dao `repo::data_quality_fuse`，不走 migration，
+///   表结构正门=实体列属性 + `entities/src/lib.rs` 注册）。本版只动**模板内容**四处：
+///   ① `portfolio-mgr` 的 `input_mapping` 新增 3 条同名映射（`dqi_streak` / `dqi_fuse_flag` /
+///      `dqi_observations`）—— 注入的是**已判定结果**，阈值权威在 dao，脚本与 Switch 都不比阈值；
+///   ② `portfolio-mgr.rhai` 的置信度上限加一层熔断封顶（压到 grade 阶梯已有的最低一级，
+///      **不新增常数**），并输出三态 `dqiFuseState`（`fused` / `ok` / `unobserved`）+ 两个佐证数
+///      + 实际生效上限，reasoning 三态各成一句；
+///   ③ 新增 SwitchNode **`dqi-fuse-gate`**（判据变量 `dqi_fuse_flag`），插在 `quality-gate` 的
+///      acceptable 出口与 `decision-explainer` 之间：`fused` → 复用既有 `quality-fallback`
+///      （其 prompt 同步改写，覆盖"本轮 D/F"与"跨轮熔断"两种进入原因，不再只说前者）；
+///   ④ 快速链 `FAST_REQUIRED_NODE_IDS` 增该节点（两条链共用同一 hooks 注入点）。
+///   ⚠ **会改决策数值**：熔断态下主档置信度上限收紧，且 acceptable 路径改走保守决策
+///     （`pick_chain_tail_decision` 优先级 0 = `quality-fallback` ⇒ 落库结论被替代）。
+///     观测表为空时**一切按未熔断**（`unobserved`），即现网首启后行为逐位不变 —— 本版不会
+///     立刻改变任何存量结论，要等第一批观测行落库。
+///   同批的第三生效面（闭环权重历史降权）落在 `recommender::reco_loop`（纯函数 + dao 时间线），
+///     **不属模板内容** ⇒ 不占版本号；它与本版共用同一份判据。
+///
+/// **v135(2026-10-07)**：**B-2b 本体（#36）四档分支 SubWorkflow 化**（PLAN §九十一 / §九十二 / §一○○）——
+///   ① 主图删四个 `t-scoring-{hour,week,month,quarter}` 节点 + 它们的错峰边与「→ portfolio-mgr」
+///      那四条**无人消费**的供给边（`portfolio-mgr` 的 `totalScore_*` 四条映射早已退役，见下方注释）；
+///   ② 四个 `pm-h-<档>` 由 CodeNode 换成 **SubWorkflowNode**（节点 id 与 `output_var` 都不变 ⇒
+///      `portfolio-mgr` 的四条 `pm-h-<档>.result` 与 `pm-arbiter` 的四条 `r_<档>` 一个字都不用改）；
+///   ③ 每档的「尺度常量 + 评分 + 分支决策」逐字定义在 `horizon_tier_template.rs`，播种成四张
+///      档模板 `stock-horizon-<档>`（版本门常量 `HORIZON_TIER_TEMPLATE_VERSION` 与本版同步）；
+///   ④ **本档风险节点 `cls-risk-level-<档>` 仍留在父图**（偏离 §九十一(0) 的三节点形状，理由写在该
+///      文件头部：`portfolio-mgr` 有四个父侧读面，而子执行只写回扇出节点的双键）；
+///   ⑤ 每张档模板头部新增 `const-scoring-period`（DataTransformer，产出 `scoring_period`）——
+///      旧 `("period","hourly")` 是**死参数**（父池没有名为 hourly/weekly/monthly/quarterly 的变量，
+///      `tool_executor.rs:75-80` 无字面量兜底 ⇒ `compute_scoring` 恒走 daily，PLAN §九十二(4)）。
+///      本版起四档评分**真按各自尺度取数**（裁定「丙：接通 + 同步改出分口径」）；
+///   ⑥ 快速链不跟着扇出（§九十一(5) 决策点 1）：`FAST_REQUIRED_NODE_IDS` 摘掉那四个评分节点，
+///      `FAST_BRIEF_INPUTS` 的 `algo_scoring_{hour,week,month,quarter}` 四路**重指向日线 `t-scoring`**
+///      —— 它们本来拿的就是日线（⑤的根因），故快速链出参逐位不变。
+/// ⚠ **会改决策数值**（两条，都与实机核对同批）：
+///   · 中/长档评分改吃月线/季线，`scale.rs` 的 `min_bars=60` 在月线=5 年、季线=15 年
+///     （§九十二(5)）⇒ 样本不足的票该档评分节点**显式失败**，该档结论缺席（分支 `continue_on_fail=true`
+///     ⇒ 主链不塌）；出分口径的正式改造（`ScaleWindowPlan` + `score_scale_aware`）在 #41。
+///   · 扇出 `map_inputs` 是**严格**的（`subworkflow_executor.rs:97-105`，取不到即节点失败）⇒
+///     缺席形态从「该腿注入 unit、脚本按缺席处理」变成「整档子执行失败」。分支脚本 `dataGaps` 里
+///     「该节点整段没跑成」那一类文案在新形状下不再可达，需按 #41 之后重新核对。
+///
+/// **v136(2026-10-08)**：**#41 片 A + 片 B —— 按档尺度真接管取数、出分与逐档动量腿**
+///   （PLAN §一○二(4)，两条不可分：只做片 A 会让四档脚本继续按 `rsi_14` 这个名字读一个
+///   停在初值 50.0 的假读数 ⇒ 界面与调制项都撒谎）：
+///   ① **片 A（Rust 侧，不改图）**：`compute_scoring` 在尺度属于某一档时改走该档的
+///      `ScaleWindowPlan` —— 取数根数（季线取聚合**前**的月线根数 `parent_fetch_limit`）、
+///      出分下限 `min_bars`、指标窗口（`IndicatorConfig::from(&plan)`）三件事一起接管，
+///      出分函数换成 `score_scale_aware`（五个走命名槽的分量改读中性槽）。
+///      尺度→档 的反查是 `Period::from_scale_key`（与 `scale_key` 同一张表，不写第二份）。
+///      **日线链逐位不变**：`from_scale_key("daily") == None` ⇒ 主链 `t-scoring` 仍吃既有
+///      常数与命名槽（零回归锚 = `plan_derived_config_reproduces_daily_numbers`）。
+///   ② **片 B（脚本 + 映射）**：四张档子模板的 `("rsi_14", "…indicators.rsi14")` 换成
+///      `("rsi_value", "…indicators.scaleMomentum.value")`；四份 `portfolio-mgr-h-*.rhai` 的
+///      动量腿 payload 键 `rsi14` → 中立名 `rsi`；`leg_signal::momentumSignal` 跟着读 `rsi`；
+///      主链 `portfolio-mgr.rhai` 只改 payload 键名（它的值仍来自日线命名槽，名副其实）。
+///   ③ **图内容变（②那四条映射）⇒ 必须换代**；档子模板版本常量绑在主图常量上，自动跟到 136。
+/// ⚠ **会改决策数值**（片 A 的预期效果，不是副作用）：四档评分不再是「日线评分的四份复制」，
+///   中/长档的 `min_bars` 从 60 期（=5 年 / 15 年历史）收到该档窗口计划的 6 期
+///   ⇒ §九十二(5) 那条「多数票上恒不穿越 ⇒ trendScore 退化成常数」与「次新股整档失败」
+///   两头同时消失；动量调制项 `momentumSignal` 不再对中/长档恒 +0.2。
+///   实机核对（四档数值、面板 scoreSource）仍与 #12/#30/#48 同批。
+///
+/// **v137(2026-10-08)**：**裁定 2「先加设施再接线」—— 面板「技术指标」8 个变量从空接线变成真生效**
+///   （PLAN §一○五；这 8 个变量此前**只有声明 + 面板能改**，`input_mapping` 零命中 ⇒ 改值对评分零影响，
+///   属本仓登记的「配置项空接线」族）：
+///   ① **设施**（`astock-data::mcp_tools::effective_indicator_config`）：`compute_scoring` 收 8 个
+///      `ind_*` 参数并分**两域** —— 阈值域 3 条（`boll_stddev` / `volume_surge_ratio` /
+///      `volume_shrink_ratio`）**全链接受**（§九十六(2) 已裁「阈值不随尺度缩」）；窗口域 5 条
+///      （MACD 快/慢/信号、布林周期、量能回看）**只作用日线链**，档侧收到即**显式失败**
+///      （静默忽略等于让「调了没生效」换形态复发）。坏值（非整数 / <2 / NaN / 字符串 / 慢线≤快线 /
+///      放量比≤缩量比）一律报错，**不回落默认值**。
+///   ② **接线**：主图 `t-scoring` 接全部 8 条；四张档子模板的评分节点只接阈值 3 条；
+///      四条父扇出各补三条同名身份映射（档内工具节点读的是**子池**里的这三个键 —— 少一条不是
+///      「那条不生效」而是**整档子执行失败**，严格 `map_inputs`）。
+///   ③ 参数名与变量名**刻意不同名**（`ind_` 前缀），同上面 C2 路径 Z 的理由。
+/// ⚠ **默认态零数值变化**：面板 8 个默认值与 `IndicatorConfig::default()` 逐字相等，
+///   这条由 `mcp_tools::panel_indicator_config_tests::empty_args_reproduce_the_pre_wiring_configs_bit_identically`
+///   与 `scripts/check-indicator-config-scope.mjs` P1 两侧同时锁（一边锁代码、一边锁「面板手抄的那份」）。
+///   图内容变（映射面 8 + 3×4 + 3×4 条）⇒ 必须换代；档子模板版本常量绑在本版上，自动跟到 137。
+///
+/// **v138(2026-10-08)**：**裁定 3「让用户看出各档实际几根」**（PLAN §一○六）——
+///   四张档子模板的分支节点各加两条**读子图内本档评分节点**的映射
+///   （`scoring_windows` ← `t-scoring-<周期>.result.content.indicators.windows`、
+///   `scoring_scale` ← `…result.content.period`），四份 `portfolio-mgr-h-*.rhai` 把它们原样回写进
+///   逐档决策行（`scoringWindows` / `scoringScale`）。
+///   存在理由：v136 之后四档各自按尺度取数、按该档窗口计划出指标，但界面**只有分数没有几根 bar** ⇒
+///   「这一档算得粗」与「这一档观点不同」在界面上同形；而短/中/长三档的根数按公式**本就是同一组**
+///   （差别在 bar 的日历跨度：2 周 / 2 月 / 2 季），不把根数与尺度并列出来就没法读。
+///   ⚠ 产端是**回显**（`IndicatorWindows::from_cfg` = 实际吃进去的那组），不是「想要的配置」。
+///   缺席语义 = 「该行产自早于 v138 的代」⇒ 面板只在有值时成句，不补 0、不渲染空表
+///   （`HorizonDecision.scoringWindows` 的 TS 注释同口径）。
+///   父扇出**不加键**（读的是子图自己的节点产出）；反思读侧
+///   `analysis-engine::reflection_stats::HorizonDecision` 无 `deny_unknown_fields` ⇒ 两个新键被忽略，
+///   不需要同批改 Rust 结构。图内容变 ⇒ 换代 138。
 ///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 132;
+pub const TEMPLATE_VERSION: i32 = 138;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -1057,9 +1184,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         EndNodeConfig, ErrorConfig, JsonSchema, JsonSchemaProperty, MergeStrategy,
         NotificationNode, NotificationNodeConfig, OnFailureAction, OutputMode, ParallelNode,
         ParallelNodeConfig, Position, RetryConfig, StorageNode, StorageNodeConfig, SubGraph,
-        SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef, ToolNode, ToolNodeConfig, TriggerConfig,
-        TriggerNode, TriggerType, ValidationAssertion, ValidationNode, ValidationNodeConfig,
-        Variable, WorkflowEdge, WorkflowNode, WorkflowNodeBase, WorkflowRetryPolicy,
+        SubWorkflowNode, SubWorkflowNodeConfig, SwitchCase, SwitchNode, SwitchNodeConfig, ToolDef,
+        ToolNode, ToolNodeConfig, TriggerConfig, TriggerNode, TriggerType, ValidationAssertion,
+        ValidationNode, ValidationNodeConfig, Variable, WorkflowEdge, WorkflowNode,
+        WorkflowNodeBase, WorkflowRetryPolicy,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, Set};
 
@@ -2716,11 +2844,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         },
     }));
 
-    // 9 个分析师 + catalyst-analyst
+    // 9 个分析师（v133 起：`a-news` 摘除 —— B2-2 裁定「公告方向通道已由 `a-catalyst`
+    //   的 `eventCatalyst` 承载，同域双挂=重复计数」，`a-news` 在任何档位的
+    //   `analyst_subset()` 里都不出现；保留它只会得到一个「跑了没人读」的实例）
     let analysts = [
         ("a-market-analyst", "技术面分析：K线形态、MACD/RSI、支撑阻力位", "market-analyst"),
         ("a-sentiment", "市场情绪分析：资金流向、散户/机构态度", "sentiment-analyst"),
-        ("a-news", "新闻公告影响评估", "news-analyst"),
         ("a-fundamentals", "基本面估值分析：PE/PB/ROE等", "fundamentals-analyst"),
         ("a-policy", "宏观政策与行业政策影响分析", "policy-analyst"),
         ("a-hot-money", "游资动向与主力资金追踪", "hot-money-tracker"),
@@ -2731,6 +2860,71 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     ];
     let a_ids: Vec<&str> = analysts.iter().map(|(id, _, _)| *id).collect();
 
+    // ── v133（B2-2）：逐档分析师实例清单 `tiered` ──
+    // 由权威矩阵 `Period::analyst_subset()`（harness）推导，**不得在此手抄第二份**
+    // （holding_period.rs 明写：手抄清单必然漂移，历史事故是中/长档漏挂 value-investor）。
+    // 节点 id 一律经 `analyst_node_id(base, tier)` 生成（`{base}--{tier}`），
+    // 消费端用 `analyst_base_of` 剥回 base —— 全仓唯一的两条装配函数。
+    //
+    // `value-investor` 特判：它不是 9 个 `a-*` 之一（独立的价值评估 agent），
+    // 其「标题/专家」单列；中/长两档子集均含它（valuationBand 是必填因子）。
+    const VALUE_INVESTOR_ID: &str = "value-investor";
+    const VALUE_INVESTOR_TITLE: &str = "以巴菲特-芒格价值投资理念评估该标的，分析护城河、财务健康度、管理层、安全边际，输出结构化估值框架";
+    let mut tiered: Vec<(&str, axagent_harness::holding_period::Period, &str, &str)> = Vec::new();
+    for (id, title, expert) in analysts.iter() {
+        for p in axagent_harness::holding_period::Period::ALL {
+            if p.analyst_subset().contains(id) {
+                tiered.push((id, p, title, expert));
+            }
+        }
+    }
+    for p in axagent_harness::holding_period::Period::ALL {
+        if p.analyst_subset().contains(&VALUE_INVESTOR_ID) {
+            tiered.push((VALUE_INVESTOR_ID, p, VALUE_INVESTOR_TITLE, VALUE_INVESTOR_ID));
+        }
+    }
+    // 自证（每次播种都跑）：tiered 的 base 集 == `analyst_subset()` 的并集，
+    // 且基表每个分析师至少属于一个档位 —— 前者防「基表漏了子集里的 base」（该腿永远拿不到产出方），
+    // 后者防「基表条目不属于任何档」（白烧一次 LLM 调用并伪装成证据在场，即 a-news 被摘除的形态）。
+    {
+        use axagent_harness::holding_period::Period;
+        let mut want: Vec<&str> = Period::ALL.iter().flat_map(|p| p.analyst_subset()).collect();
+        want.sort_unstable();
+        want.dedup();
+        let mut got: Vec<&str> = tiered.iter().map(|(b, ..)| *b).collect();
+        got.sort_unstable();
+        got.dedup();
+        assert_eq!(
+            got, want,
+            "tiered 的 base 集必须与 analyst_subset() 的并集逐字一致（B2-2 自证）"
+        );
+        assert_eq!(tiered.len(), 23, "逐档实例数应由权威矩阵推导为 23（四档全跑裁定）");
+        for (id, ..) in analysts.iter() {
+            assert!(
+                got.contains(id),
+                "基表分析师 `{id}` 不属于任何档位子集 —— 节点生成为 0 将是静默死条目"
+            );
+        }
+    }
+
+    // tiered 的**按 base 索引**（扇出过滤的单点）。
+    // 后续所有「取某 base 的各档实例」一律走本表 —— 不再散落 `*b == "a-xxx"` 常量比较
+    // （check-analyst-id-shape 的 R3 棘轮把「拿整串 id 比较」计为待修面；索引化后比较点
+    // 只有构建这一处、且比较主语是数据面已归一的 tiered 元素，语义上也更直）。
+    let by_base: std::collections::HashMap<
+        &str,
+        Vec<(&str, axagent_harness::holding_period::Period)>,
+    > = {
+        let mut m: std::collections::HashMap<
+            &str,
+            Vec<(&str, axagent_harness::holding_period::Period)>,
+        > = std::collections::HashMap::new();
+        for (base, p, ..) in tiered.iter() {
+            m.entry(*base).or_default().push((*base, *p));
+        }
+        m
+    };
+
     // 为每个分析师插入对应的数据获取 Tool 节点
     // 注：节点工具决定了下游 analyst 拿到的"前置数据"。LLM agent 自身仍可调用
     // PROFILE_TOOLS 中的工具，但首屏/冷启动数据由这些 tool 节点预拉。
@@ -2738,15 +2932,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // F-8 修复: 顺序必须与上面的 `analysts` 数组完全一致：
     //   [0] a-market-analyst   ↔ t-market-data
     //   [1] a-sentiment        ↔ t-sentiment-data
-    //   [2] a-news             ↔ t-news-data
-    //   [3] a-fundamentals     ↔ t-fundamentals-data
-    //   [4] a-policy           ↔ t-policy-data
-    //   [5] a-hot-money        ↔ t-hotmoney-data   (原: t-research-data 错位)
-    //   [6] a-lockup           ↔ t-lockup-data     (原: t-hotmoney-data 错位)
-    //   [7] a-research         ↔ t-research-data   (原: t-lockup-data 错位)
-    //   [8] a-sector           ↔ t-sector-data
+    //   [2] a-fundamentals     ↔ t-fundamentals-data
+    //   [3] a-policy           ↔ t-policy-data
+    //   [4] a-hot-money        ↔ t-hotmoney-data   (原: t-research-data 错位)
+    //   [5] a-lockup           ↔ t-lockup-data     (原: t-hotmoney-data 错位)
+    //   [6] a-research         ↔ t-research-data   (原: t-lockup-data 错位)
+    //   [7] a-sector           ↔ t-sector-data
+    //   [8] a-catalyst         ↔ t-catalyst-data
+    // （v133：`a-news`/`t-news-data` 一并摘除，上表编号已随基表收缩重排）
     // 错位会导致 hot-money analyst 拿到研报数据、research analyst 拿到解禁数据，
-    // 9 个分析师产出的报告与各自的角色语义不符。
+    // 分析师产出的报告与各自的角色语义不符。
     // ── v72(2026-09-21)：a-lockup 的第二个前置数据源（股权质押）──
     // 单点声明节点 id，供下面三处复用：① 本文件新增 ToolNode；② `a-lockup` 的
     //   `context_sources`；③ 两条边（trigger→节点、节点→a-lockup）。
@@ -2773,19 +2968,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     let tool_assignments: &[(&str, &str, &str, &str)] = &[
         ("t-market-data", "获取K线+行情", "get_stock_kline", "stock_code"),
         // 修复(2026-07-21): t-sentiment-data 改为 get_social_sentiment。
-        // 原调用 get_stock_news 与 t-policy-data/t-news-data 重复,且 news API
+        // 原调用 get_stock_news 与 t-policy-data 重复,且 news API
         // 失败时 sentiment-analyst 拿不到任何前置数据。改为 get_social_sentiment:
         //   1) 真正对齐前端 "舆情" label —— 股吧帖子数/情感倾向/看多看空比例
         //   2) 与 t-hotmoney-data (get_stock_money_flow) 解耦,避免重复
         //   3) PROFILE_TOOLS 中仍保留 get_stock_news/get_stock_money_flow,
         //      LLM 可按需调用补充新闻和资金流数据
         ("t-sentiment-data", "获取股吧社交舆情", "get_social_sentiment", "stock_code"),
-        // 修复(2026-07-21): t-news-data 改回 get_stock_news。
-        // 2026-07-11 改为 get_stock_announcements 是因为 a-news 拿不到新闻,但
-        // 导致前端 label "新闻" 与实际数据源 "公告" 错位,且与 t-catalyst-data
-        // 重复调用同一工具。改回 get_stock_news 让 "新闻" label 真对应新闻,
-        // a-news 仍可通过 PROFILE_TOOLS 调用 get_stock_announcements 补充公告。
-        ("t-news-data", "获取近期新闻", "get_stock_news", "stock_code"),
+        // v133（B2-2）：`t-news-data` 随 `a-news` 一并摘除（公告方向通道由 `a-catalyst`
+        //   的 `eventCatalyst` 承载）。原「t-news-data ↔ a-news」配对注释见 git 历史。
         // 修复 P1: 基本面分析师前置数据改用 get_stock_financials（财报）而非
         // get_consensus_eps（一致预期），让 a-fundamentals 启动时就能拿到
         // 营收/利润/资产负债等核心财务数据。
@@ -2840,9 +3031,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     let row_y_base = 100.0;
     // FIX: agent 节点高度 160px, 之前 row_dy=120 导致连续行重叠 40px
     let row_dy = 180.0;
-    let mut analyst_branches: Vec<Branch> = Vec::with_capacity(tool_assignments.len());
+    let mut analyst_branches: Vec<Branch> = Vec::with_capacity(tiered.len());
     for (i, (tool_id, tool_title, tool_name, arg_key)) in tool_assignments.iter().enumerate() {
-        let analyst_id = a_ids[i];
+        let base_id = a_ids[i];
         let col = i % 3;
         let row = i / 3;
         let x_tool = col_x[col];
@@ -2878,14 +3069,25 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             y,
         ));
         edges.push(edge(&format!("e-trigger-{tool_id}"), "trigger", tool_id));
-        edges.push(edge(&format!("e-{tool_id}-{analyst_id}"), tool_id, analyst_id));
-        analyst_branches.push(Branch {
-            id: format!("branch-{analyst_id}"),
-            title: tool_title.to_string(),
-            steps: vec![tool_id.to_string(), analyst_id.to_string()],
-            branch_timeout_ms: None,
-            degrade_strategy: Default::default(),
-        });
+        // v133（B2-2）：出边与 Branch 对该 base 的**每一档**各一条（tool 节点仍只一份，
+        //   取数层共享一次 —— R-11）。带档 id 一律经 `analyst_node_id` 生成。
+        let mut fanout = 0usize;
+        for (base, p, ..) in tiered.iter().filter(|(b, ..)| b == &base_id) {
+            let tiered_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+            edges.push(edge(&format!("e-{tool_id}-{tiered_id}"), tool_id, tiered_id.as_str()));
+            analyst_branches.push(Branch {
+                id: format!("branch-{tiered_id}"),
+                title: tool_title.to_string(),
+                steps: vec![tool_id.to_string(), tiered_id],
+                branch_timeout_ms: None,
+                degrade_strategy: Default::default(),
+            });
+            fanout += 1;
+        }
+        assert!(
+            fanout > 0,
+            "tool `{tool_id}` 的属主 `{base_id}` 不在任何档位子集里 —— 该 tool 成为死取数"
+        );
     }
 
     // ── v72(2026-09-21)：a-lockup 的第二个前置 ToolNode —— 股权质押 ──
@@ -2917,11 +3119,18 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-trigger-t-pledge-data", "trigger", PLEDGE_TOOL_ID));
     // 出边：质押数据 → a-lockup。这条边是**供给**，`context_sources` 是**消费声明**，
     //   两者必须同时存在（只写一边 ⇒ 变量仍不进 `context.variables`）。
-    edges.push(edge("e-t-pledge-data-a-lockup", PLEDGE_TOOL_ID, "a-lockup"));
+    // v133（B2-2）：供给边按**该 base 的每一档实例**各一条（消费声明在节点循环里逐档生成）。
+    for (base, p, ..) in by_base.get("a-lockup").into_iter().flatten() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{PLEDGE_TOOL_ID}-{tid}"), PLEDGE_TOOL_ID, tid.as_str()));
+    }
     // v116(2026-10-01)：同一份质押数据 → a-fundamentals（理由见下方 context_sources 处）。
     //   ⚠ 供给边与消费声明**成对**：只加 `context_sources` 而不加边，节点不会等
     //     `t-pledge-data` 完成 ⇒ 取到的是「还没跑完」的空变量（时序竞态，比恒缺更隐蔽）。
-    edges.push(edge("e-t-pledge-data-a-fundamentals", PLEDGE_TOOL_ID, "a-fundamentals"));
+    for (base, p, ..) in by_base.get("a-fundamentals").into_iter().flatten() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{PLEDGE_TOOL_ID}-{tid}"), PLEDGE_TOOL_ID, tid.as_str()));
+    }
 
     // ── P9-1 / P9-4：宏观快照与涨停池进入分析师前置取数（PLAN §二十六 26-6 的第一片）──
     // 与 `t-pledge-data` 同形：节点是**供给**、`context_sources` 是**消费声明**，
@@ -2951,9 +3160,20 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // 出边按 §二十五 的因子属主表：宏观 → a-policy（`macroRegime`）；
     //   涨停池 → a-sentiment（`breadthState` 家数/封板率）与 a-hot-money
     //   （`microstructure` 封单/连板）。同一个池给两人**不是重复计数**：取的是响应里两组字段。
-    edges.push(edge("e-t-macro-data-a-policy", MACRO_TOOL_ID, "a-policy"));
-    edges.push(edge("e-t-limitup-pool-a-sentiment", LIMITUP_TOOL_ID, "a-sentiment"));
-    edges.push(edge("e-t-limitup-pool-a-hot-money", LIMITUP_TOOL_ID, "a-hot-money"));
+    // v133（B2-2）：三条供给边均按各属主 base 的每一档实例展开。
+    for (base, p, ..) in by_base.get("a-policy").into_iter().flatten() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{MACRO_TOOL_ID}-{tid}"), MACRO_TOOL_ID, tid.as_str()));
+    }
+    for (base, p, ..) in by_base
+        .get("a-sentiment")
+        .into_iter()
+        .flatten()
+        .chain(by_base.get("a-hot-money").into_iter().flatten())
+    {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{LIMITUP_TOOL_ID}-{tid}"), LIMITUP_TOOL_ID, tid.as_str()));
+    }
 
     // P9-3 补漏：一致预期取数节点。工具与授权都在（`td_consensus` + `get_stock_consensus_eps`
     // 已在 `PROFILE_TOOLS` 授给 fundamentals-analyst），**唯独没有节点** ⇒ 该维度只能等
@@ -2972,18 +3192,42 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         row_y_base + 4.0 * row_dy,
     ));
     edges.push(edge("e-trigger-t-consensus-data", "trigger", CONSENSUS_TOOL_ID));
-    edges.push(edge("e-t-consensus-data-a-research", CONSENSUS_TOOL_ID, "a-research"));
+    // v133（B2-2）：一致预期供给边按 a-research 的每一档实例展开。
+    for (base, p, ..) in by_base.get("a-research").into_iter().flatten() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{CONSENSUS_TOOL_ID}-{tid}"), CONSENSUS_TOOL_ID, tid.as_str()));
+    }
 
-    // 工具由模板节点 config.tools 统一管理
-    // 第 10 个 a-catalyst 放置在 3×3 网格下方（col 0, row 3），作为额外独立行
-    for (i, (id, title, _expert)) in analysts.iter().enumerate() {
-        let tool_id = tool_assignments[i].0;
-        let _fixed_tool_name = tool_assignments[i].2;
-        let col = i % 3;
-        let row = i / 3;
-        let x_agent = col_x[col] + 240.0;
-        let row_y = row_y_base + row as f64 * row_dy;
-        let mut an = agent(id, title, _expert, Some("p-analysts"), x_agent, row_y);
+    // 工具由模板节点 config.tools 统一管理。
+    // v133（B2-2）：节点循环改为遍历 `tiered`（逐档实例；`value-investor` 由下方
+    //   独立块按档生成 —— 它有专属的 context_sources / 覆写链，不适用本循环的 a-* 配置）。
+    // 布局（v133 重排）：4 档各占一列（超短 → 短线 → 中线 → 长线），列内按实例序逐行排；
+    //   放在 tool 网格（3 列，y ≤ 980）下方，避免压住 p-analysts 容器与既有节点。
+    let tier_col_x = [40.0_f64, 400.0, 760.0, 1120.0];
+    let agent_y_base = 1100.0;
+    let mut tier_rows = [0usize; 4];
+    // `.copied()`：让解构出的字段是**值层**（&str 而非 &&str）——后续 `*b == base` 等比较
+    // 与 `analyst_node_id` 调用无需再手动 deref（clippy explicit_auto_deref 也由此消失）。
+    for (base, p, title, expert) in tiered.iter().copied().filter(|(b, ..)| *b != VALUE_INVESTOR_ID)
+    {
+        let node_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        // tool 仍按 `analysts[i] ↔ tool_assignments[i]` 的下标对应查表（1.1 并行摘除保持了一一对应）
+        let base_pos = analysts
+            .iter()
+            .position(|(b, ..)| *b == base)
+            .expect("tiered 的 base 必在 analysts 基表里（1.2 自证已断言）");
+        let tool_id = tool_assignments[base_pos].0;
+        let col = match p {
+            axagent_harness::holding_period::Period::UltraShort => 0,
+            axagent_harness::holding_period::Period::Short => 1,
+            axagent_harness::holding_period::Period::Mid => 2,
+            axagent_harness::holding_period::Period::Long => 3,
+        };
+        let row = tier_rows[col];
+        tier_rows[col] += 1;
+        let x_agent = tier_col_x[col];
+        let row_y = agent_y_base + row as f64 * row_dy;
+        let mut an = agent(&node_id, title, expert, Some("p-analysts"), x_agent, row_y);
         if let WorkflowNode::Agent(ref mut a) = an {
             // v72: a-lockup 有**两个**前置 ToolNode —— 解禁三方 bundle（`t-lockup-data`）
             //   + 股权质押（`t-pledge-data`）。`context_sources` 少列一个 ⇒ 该节点的输出
@@ -3004,10 +3248,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // 「额外前置供给」表：v116 的质押 + P9-1/P9-4 的宏观与涨停池。
             // 新增分析师要别的域的数据时只改这一处 —— 不再往 if 链上叠条件
             // （那条链已经长到读不出「谁拿什么」，而「供给到达」这件事必须一眼可核）。
-            // B2-1 接线：按**剥掉档位后缀的 base** 查表。今天没有带档 id ⇒ 逐字等价；
-            // 等分析师按档展开（`a-lockup--mid`）之后，这里不会静默落到 `_ => &[]`
-            // （「供给存在但没到达该分析师」是最难查的那类缺陷 —— 它只是少一段 prompt）。
-            let base_id = axagent_harness::holding_period::analyst_base_of(id).unwrap_or(*id);
+            // v133（B2-2）：查表键就是遍历变量 `base`（tiered 已把带档 id 与 base 分开），
+            //   供给边（tool 循环与额外供给段）已按同一 base 的每一档实例展开 ⇒ 成对。
+            let base_id: &str = base;
             let extra_supplies: &[&str] = match base_id {
                 "a-lockup" | "a-fundamentals" => &[PLEDGE_TOOL_ID],
                 "a-policy" => &[MACRO_TOOL_ID],
@@ -3031,11 +3274,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             } else {
                 Some(2)
             };
-            let tool_names = PROFILE_TOOLS
-                .iter()
-                .find(|(k, _)| **k == **_expert)
-                .map(|(_, v)| *v)
-                .unwrap_or(&[]);
+            let tool_names =
+                PROFILE_TOOLS.iter().find(|(k, _)| *k == expert).map(|(_, v)| *v).unwrap_or(&[]);
             a.config.tools =
                 tool_names.iter().filter_map(|&tn| tool_def_map.get(tn).cloned()).collect();
             a.config.exposed_tools = vec![];
@@ -3049,6 +3289,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // （portfolio-mgr 与 pace-calc 的映射路径不变）。
             a.config.system_prompt =
                 format!("{}{}", a.config.system_prompt, tool_prompt(&a.config.tools));
+            // v133（B2-1 规格）：档位段追加 —— 档名 + 该档 VERDICT 契约 + 持有天数。
+            // 契约文本由 `Period::verdict_contract_prompt()` 按权威表渲染（prompt / Rhai
+            // 校验 / CI 门三方的唯一源），不手抄进各专家 md；模型据此逐档输出字段。
+            a.config.system_prompt =
+                format!("{}{}", a.config.system_prompt, p.verdict_contract_prompt());
             // 环 A: 注入历史反思教训，让分析师看到该股之前的错因和改进建议
             a.config.input_mapping =
                 std::collections::HashMap::from([("stock_lessons".into(), "stock_lessons".into())]);
@@ -3056,9 +3301,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         nodes.push(an);
     }
 
-    // 分析师节点 → c-need-debate 的出边（编辑器可视化 + 运行时依赖）
-    for aid in &a_ids {
-        edges.push(edge(&format!("e-{aid}-debate"), aid, "debate-bull-bear"));
+    // 分析师节点 → debate-bull-bear 的出边（编辑器可视化 + 运行时依赖）。
+    // v133（B2-2）：按逐档实例展开（23 条）；逐档辩论拆分为后续批次，
+    //   本批保持「单辩论」结构（analyst-brief → 单个 debate-bull-bear）。
+    for (base, p, ..) in tiered.iter() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{tid}-debate"), tid.as_str(), "debate-bull-bear"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3081,8 +3329,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     nodes.push(WorkflowNode::Parallel(ParallelNode {
         base: WorkflowNodeBase {
             id: "p-analysts".into(),
-            title: "10 维度分析师分组".into(),
-            description: Some("行情/情绪/新闻/基本面/政策/游资/解禁/研报/行业/催化剂".into()),
+            title: "逐档分析师分组".into(),
+            description: Some(
+                "按四档持有期展开的分析师实例（9 个 a-* 基表 + value-investor，共 23 个节点）"
+                    .into(),
+            ),
             // F-1 修复: 原 (300, 200) 恰好压在 a-fundamentals (240, 200) 上。
             //   3×3 网格范围 x∈[40, 1400] y∈[100, 460],容器左上放 (20, 80),
             //   让前端能正确按 bbox 渲染分组框。
@@ -3120,52 +3371,39 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //       2) deps_results 包含 10 个分析师节点的输出，input_mapping 路径解析正确。
     // 前端验证要求容器节点有至少一条入边/出边，入边 e-trigger-p-analysts 已满足。
 
-    // ── analyst-brief（分析师摘要）：CodeNode 聚合10份VERDICT评分+关键论据 ──
-    // 替代原「辨手直接加载10份全量报告」方案，大幅降低辩论阶段上下文体积。
-    // 输出 analyst-brief 字符串，经 input_mapping 接收10个分析师的 .content。
+    // ── analyst-brief（分析师摘要）：CodeNode 聚合逐档 VERDICT 评分+关键论据 ──
+    // 替代原「辨手直接加载全量报告」方案，大幅降低辩论阶段上下文体积。
+    // 输出 analyst-brief 字符串，经 input_mapping 接收逐档实例的 .content.verdict。
+    // v133（B2-2）：保持「单 brief + 单条 analyst-brief → debate-bull-bear 边」
+    //   （逐档辩论属后续批次）；摘要文本改为**按档分组**（脚本侧 23 条显式列出）。
     //
     // 时序：p-analysts 全部完成后运行 → debate-bull-bear 依赖此摘要。
     {
         let ab_code = include_str!("../analyst-brief.rhai").to_string();
-        let ab_input: std::collections::HashMap<String, String> = a_ids
+        // v133：input_mapping 键 = `{短名}__{tier}`（Rhai 合法标识符；`--` 是 id 域的分隔符，
+        //   不能出现在变量名里），值 = `{带档节点 id}.content.verdict`。全部由 `tiered` 生成；
+        //   脚本侧 `analyst-brief.rhai` 的 23 条显式读取与本表**同集**（由
+        //   `seed_consistency_tests.rs::analyst_brief_keys_match_tiered_instances` 机械锁住）。
+        // 短名（`a_market_raw` 这类**词根**）仍按 base 查表 —— 消费者侧键名域零变化（B2-1 设计）。
+        let ab_input: std::collections::HashMap<String, String> = tiered
             .iter()
-            .map(|id| {
-                // B2-1 接线：短名桥也先剥后缀（`a_market_raw` 这类键是**分析师级**而非档位级，
-                // 带档 id 直接落 `_ => id` 会让摘要里那一格查不到 ⇒ 静默少一位分析师的结论）。
-                let base_id = axagent_harness::holding_period::analyst_base_of(id).unwrap_or(*id);
-                let short = match base_id {
-                    "a-market-analyst" => "a_market_raw",
-                    "a-sentiment" => "a_sentiment_raw",
-                    "a-news" => "a_news_raw",
-                    "a-fundamentals" => "a_fundamentals_raw",
-                    "a-policy" => "a_policy_raw",
-                    "a-hot-money" => "a_hot_money_raw",
-                    "a-lockup" => "a_lockup_raw",
-                    "a-research" => "a_research_raw",
-                    "a-sector" => "a_sector_raw",
-                    "a-catalyst" => "a_catalyst_raw",
-                    _ => base_id,
-                };
+            .map(|(base, p, ..)| {
+                let short = analyst_short_key(base);
+                let key = format!("{short}__{}", p.as_str());
+                let node_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
                 // V58 修复(2026-07-23): 直接下钻到 .content.verdict，
                 // resolve_var_path 会自动解析 content JSON 字符串并提取 verdict map。
-                // 避免 Rhai 脚本中 json_parse 字符串解析的不可靠性。
-                //
-                // V68 修复(2026-09-10): 删除 a-catalyst 的 `.content` 特例（V60 引入）。
-                // V60 时代 a-catalyst 是扁平 JSON（verdict 为字符串）；V62 通用 VERDICT
-                // 重构后所有分析师 content 统一为 {"report", "verdict":{...}} 嵌套，
-                // `.content` 终值不 auto-parse → rhai 收到 JSON 字符串 → format_analyst
-                // 判"数据不可用"，辩论阶段催化剂维度恒缺失（002837 实证）。
-                // 统一走 .content.verdict（中途穿透 parse），与 data-quality 的
-                // cat_verdict 同批修复。
-                (short.to_string(), format!("{id}.content.verdict"))
+                // V68 修复(2026-09-10): 统一走 .content.verdict（中途穿透 parse），
+                // 不用 `.content` 特例（终值不 auto-parse ⇒ rhai 收到字符串 ⇒ 判数据不可用）。
+                (key, format!("{node_id}.content.verdict"))
             })
             .collect();
         nodes.push(WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
                 id: "analyst-brief".into(),
-                title: "分析师摘要（VERDICT评分+关键论据）".into(),
+                title: "分析师摘要（逐档 VERDICT 评分+关键论据）".into(),
                 description: Some(
-                    "将10位分析师的VERDICT评分和bull_points/bear_points压缩为摘要，供辩论阶段使用"
+                    "将各档分析师的VERDICT评分和bull_points/bear_points按档归组压缩为摘要，供辩论阶段使用"
                         .into(),
                 ),
                 position: Position { x: 50.0, y: 1150.0 },
@@ -3186,12 +3424,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             },
         }));
     }
-    // V58 修复: 添加 10 条从分析师节点直连 analyst-brief 的 edges，
-    // 确保 deps_results 包含所有分析师输出，且等所有分析师完成后才执行 analyst-brief。
-    for aid in a_ids.iter() {
+    // V58 修复 + v133（B2-2）: 添加 23 条从逐档分析师实例直连 analyst-brief 的 edges，
+    // 确保 deps_results 包含所有实例输出，且等所有实例完成后才执行 analyst-brief。
+    for (base, p, ..) in tiered.iter() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
         edges.push(WorkflowEdge {
-            id: format!("e-{aid}-brief"),
-            source: (*aid).into(),
+            id: format!("e-{tid}-brief"),
+            source: tid,
             source_handle: None,
             target: "analyst-brief".into(),
             target_handle: None,
@@ -3477,7 +3716,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // 纯决策节点：tools 默认为空（agent 闭包），无需工具调用轮次
             a.config.max_tool_rounds = Some(0);
             a.config.output_mode = OutputMode::Json; // 输出结构化 JSON，确保 consensus_score / aggregate_prediction 被 input_mapping 解析
-            a.config.input_mapping = build_analyst_input_mapping(&a_ids);
+            a.config.input_mapping = build_analyst_input_mapping(&tiered);
             // #1 修复(2026-07-22): debate-convergence 上下文极大
             // (6 轮辩手 + 30 个 input_mapping 结构化字段, ~15k-20k input tokens),
             // LLM 处理大上下文 TTFB 偶发 >120s 触发 stream chunk timeout。
@@ -3499,37 +3738,32 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // ── value-investor（巴菲特框架）：在辩论之后、与风险评估并行运行 ──
     // 入边从 bear-r{debate_max_rounds} 出发，确保等真辩论收敛后再启动
     // （debate-bull-bear 是 DebateNode 容器，立即 Completed，返回的是配置而非辩论结果）
-    {
-        let vi_id = "value-investor";
-        let vi_title = "以巴菲特-芒格价值投资理念评估该标的，分析护城河、财务健康度、管理层、安全边际，输出结构化估值框架";
+    // v133（B2-2）：按档生成 —— 中/长两档子集均含 value-investor（`valuationBand` 属主）。
+    //   每档一个实例（id 经 `analyst_node_id`）；context_sources 里的 a-* 证据依赖取
+    //   **本档**实例（`a-sector` 只长档有 —— 谓词直接查 `analyst_subset()`，不手抄）。
+    for (base, p, title, _expert) in tiered.iter().filter(|(b, ..)| *b == VALUE_INVESTOR_ID) {
+        let vi_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        let vi_title = format!("{title}（{}）", p.label_zh());
         let vi_y = 1540.0;
+        let vi_x = if matches!(p, axagent_harness::holding_period::Period::Mid) {
+            20.0
+        } else {
+            280.0
+        };
         let last_debate_node = format!("bear-r{debate_max_rounds}");
-        let mut vi = agent(vi_id, vi_title, "value-investor", None, 20.0, vi_y);
+        let mut vi = agent(&vi_id, &vi_title, VALUE_INVESTOR_ID, None, vi_x, vi_y);
         if let WorkflowNode::Agent(ref mut a) = vi {
-            a.config.context_sources = vec![
-                "a-fundamentals".into(),
-                "a-research".into(),
-                "a-sector".into(),
-                // 改为辩论最后一轮空方的输出（真辩论结论），而非 DebateNode 容器
-                last_debate_node.clone(),
-                "debate-convergence".into(),
-                // V60 修复(2026-07-23): 接入 t-valuation 客观估值数据
-                // 原问题：context_sources 只含 LLM 叙述(a-fundamentals/a-research/a-sector)，
-                // 没有结构化财务数据。LLM 拿不到 PE/ROE/FCF/增速等原始数字，
-                // 无法计算 PEG 或相对估值，只能凭叙述"猜"内在价值，出于保守本能
-                // 必然给出低于现价的估值（"目标价值很低"问题的根因）。
-                // t-valuation 提供 result.dcf.{low,mid,high,upsidePct}、
-                // result.graham.upsidePct、result.fScore.score、result.moat.label 等
-                // 客观算法估值，作为 LLM 估值的锚点。
-                "t-valuation".into(),
-                // V73(2026-09-10): 接入 t-risk 结构化基本面硬数据。
-                // value-investor 的护城河(35%)/财务健康(25%)两维度依赖 ROE/负债率/
-                // 毛利率阈值判断，此前只能靠 a-fundamentals 的 LLM 叙述转述，
-                // 幻觉直接污染 60% 权重的评分。t-risk(compute_portfolio_risk)
-                // 的 stockRiskProfile.{roeTTMPct,debtRatioPct,grossMarginPct,
-                // revenueGrowthYoYPct} 来自真实财报提取，使三维度全部硬数据锚定。
-                "t-risk".into(),
-            ];
+            let mut cs: Vec<String> = Vec::new();
+            for dep in ["a-fundamentals", "a-research", "a-sector"] {
+                if p.analyst_subset().contains(&dep) {
+                    cs.push(axagent_harness::holding_period::analyst_node_id(dep, p.as_str()));
+                }
+            }
+            cs.push(last_debate_node.clone());
+            cs.push("debate-convergence".into());
+            cs.push("t-valuation".into());
+            cs.push("t-risk".into());
+            a.config.context_sources = cs;
             // P0 修复(2026-07-22): 移除所有工具，改为纯决策节点。
             // 原问题：tools 含 get_stock_financials/compute_valuation 等需要 stock_code
             // 的工具，但 input_mapping 未注入 stock_code，LLM 会传空值。
@@ -3679,18 +3913,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 std::collections::HashMap::from([("stock_lessons".into(), "stock_lessons".into())]);
         }
         nodes.push(vi);
-        edges.push(edge("e-debate-value-investor", &last_debate_node, vi_id));
+        // v133：边名与目标均带档（每个实例各自等到辩论收敛 / t-valuation / t-risk 完成）。
+        edges.push(edge(&format!("e-debate-{vi_id}"), &last_debate_node, &vi_id));
         // value-investor 的 context_sources 中 debate-convergence 需要显式边，
-        // 否则只在 bear-r3 完成后就调度，debate-convergence 还没跑完
-        edges.push(edge("e-convergence-value-investor", "debate-convergence", vi_id));
-        // V60 修复: t-valuation 加入 context_sources，需要显式边等待其完成，
-        // 否则 t-valuation 的输出不会进入 value-investor 的变量池。
-        // 拓扑链：bear-r3 → t-scoring → t-valuation → value-investor
-        edges.push(edge("e-valuation-value-investor", "t-valuation", vi_id));
-        // V73: t-risk 同理——context_sources 里的节点必须显式边等待，
-        // 否则 compute_portfolio_risk 的输出不进变量池。
-        // 拓扑链：t-valuation → t-risk → value-investor（无回环，t-risk 仅依赖 t-valuation）
-        edges.push(edge("e-t-risk-value-investor", "t-risk", vi_id));
+        // 否则只在 bear-r{debate_max_rounds} 完成后就调度，debate-convergence 还没跑完
+        edges.push(edge(&format!("e-convergence-{vi_id}"), "debate-convergence", &vi_id));
+        // V60/V73: t-valuation / t-risk 加入 context_sources 后需显式边等待，
+        // 否则其输出不会进入 value-investor 的变量池（拓扑链 bear-r3 → t-scoring →
+        // t-valuation → t-risk → value-investor，无回环）。
+        edges.push(edge(&format!("e-valuation-{vi_id}"), "t-valuation", &vi_id));
+        edges.push(edge(&format!("e-t-risk-{vi_id}"), "t-risk", &vi_id));
     }
 
     // ── v91(2026-09-28)：value-verify —— 估值字段的确定性校验 + **原地覆写** ──
@@ -3710,18 +3942,26 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   故 `value.assessment` 仍是**纯 JSON 字符串**，与 AgentNode 时代的消费契约一致。
     //
     // 契约（只覆写数值字段，`verdict`/`report` 等定性字段不碰）见 `value-verify.rhai` 头注释。
-    {
-        let vv_id = "value-verify";
+    // v133（B2-2）：按档展开（中/长各一份），覆写目标 = 本档 value-investor 实例
+    //   （`output_var` 与实例同名 —— 这是「原地覆写」的实现方式，带上档位后缀）。
+    for (base, p, ..) in tiered.iter().filter(|(b, ..)| *b == VALUE_INVESTOR_ID) {
+        let vi_id = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        let vv_id = format!("value-verify--{}", p.as_str());
+        let vv_x = if matches!(p, axagent_harness::holding_period::Period::Mid) {
+            20.0
+        } else {
+            280.0
+        };
         let vv_code = include_str!("../value-verify.rhai").to_string();
         nodes.push(WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
-                id: vv_id.into(),
-                title: "估值字段确定性校验（算法值覆写）".into(),
+                id: vv_id.clone(),
+                title: format!("估值字段确定性校验（算法值覆写·{}）", p.label_zh()),
                 description: Some(
                     "逐字段比对 value-investor 的数值字段与 t-valuation 算法输出，违规原地覆写并留审计标记"
                         .into(),
                 ),
-                position: Position { x: 20.0, y: 1660.0 },
+                position: Position { x: vv_x, y: 1660.0 },
                 retry: RetryConfig::default(),
                 timeout: Some(10),
                 enabled: true,
@@ -3733,54 +3973,62 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             config: CodeNodeConfig {
                 language: "rhai".into(),
                 code: vv_code,
-                // ⚠ 与 value-investor 同名 —— 这是「原地覆写」的实现方式，不要改成 vv_id。
-                output_var: "value-investor".into(),
+                // ⚠ 与本档 value-investor 实例同名 —— 「原地覆写」的实现方式，不要改成 vv_id。
+                output_var: vi_id.clone(),
                 tool_name: None,
                 execute_directly: true,
                 input_mapping: [
-                    ("vi_content", "value-investor.content"),
+                    ("vi_content".to_string(), format!("{vi_id}.content")),
                     // 路径形态与 data-quality / portfolio-mgr 对 t-valuation 的取法一致：
                     // ToolNode 输出为 `{node_id, result: {content: <JSON 字符串>, tool_name}}`，
                     // `resolve_var_path` 对中间段 `content` 自动 parse。
-                    ("dcf_low", "t-valuation.result.content.dcf.low"),
-                    ("dcf_high", "t-valuation.result.content.dcf.high"),
-                    ("dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
-                    ("dcf_ideal", "t-valuation.result.content.dcf.idealBuyPrice"),
-                    ("dcf_available", "t-valuation.result.content.dcf.available"),
-                    ("dcf_applicable", "t-valuation.result.content.dcf.assumptions.applicable"),
+                    ("dcf_low".to_string(), "t-valuation.result.content.dcf.low".to_string()),
+                    ("dcf_high".to_string(), "t-valuation.result.content.dcf.high".to_string()),
+                    ("dcf_upside".to_string(), "t-valuation.result.content.dcf.upsidePct".to_string()),
+                    ("dcf_ideal".to_string(), "t-valuation.result.content.dcf.idealBuyPrice".to_string()),
+                    ("dcf_available".to_string(), "t-valuation.result.content.dcf.available".to_string()),
+                    (
+                        "dcf_applicable".to_string(),
+                        "t-valuation.result.content.dcf.assumptions.applicable".to_string(),
+                    ),
                     // ── 2026-09-28：算法结论（无条件注入，见 value-verify.rhai 入口段）──
                     // 用户裁决「推翻现有估值架构」的直接落点：结论不再依赖 LLM 是否照抄。
                     (
-                        "valuation_conclusion_action",
-                        "t-valuation.result.content.conclusion.action",
+                        "valuation_conclusion_action".to_string(),
+                        "t-valuation.result.content.conclusion.action".to_string(),
                     ),
                     (
-                        "valuation_conclusion_headline",
-                        "t-valuation.result.content.conclusion.headline",
+                        "valuation_conclusion_headline".to_string(),
+                        "t-valuation.result.content.conclusion.headline".to_string(),
                     ),
                     (
-                        "valuation_conclusion_primary_method",
-                        "t-valuation.result.content.conclusion.primaryMethod",
+                        "valuation_conclusion_primary_method".to_string(),
+                        "t-valuation.result.content.conclusion.primaryMethod".to_string(),
                     ),
-                    ("valuation_relative_verdict", "t-valuation.result.content.relative.verdict"),
-                    ("valuation_relative_primary", "t-valuation.result.content.relative.primary"),
                     (
-                        "valuation_reverse_feasibility",
-                        "t-valuation.result.content.reverseDcf.feasibility",
+                        "valuation_relative_verdict".to_string(),
+                        "t-valuation.result.content.relative.verdict".to_string(),
+                    ),
+                    (
+                        "valuation_relative_primary".to_string(),
+                        "t-valuation.result.content.relative.primary".to_string(),
+                    ),
+                    (
+                        "valuation_reverse_feasibility".to_string(),
+                        "t-valuation.result.content.reverseDcf.feasibility".to_string(),
                     ),
                 ]
                 .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             },
         }));
-        edges.push(edge("e-value-investor-value-verify", "value-investor", vv_id));
+        edges.push(edge(&format!("e-{vi_id}-{vv_id}"), &vi_id, &vv_id));
         // 显式依赖原则：input_mapping 引用了 t-valuation 的 dcf 字段 ⇒ 必须有显式边。
-        edges.push(edge("e-valuation-value-verify", "t-valuation", vv_id));
-        // ⚠️ research-mgr 的 context_sources 含 value-investor，而它的数值必须是**覆写后**的。
-        //   仅保留 `e-value-investor-research-mgr` 会让两者竞态（value-verify 与 research-mgr
+        edges.push(edge(&format!("e-valuation-{vv_id}"), "t-valuation", &vv_id));
+        // ⚠️ research-mgr 的 context_sources 含本档实例，而它的数值必须是**覆写后**的。
+        //   仅保留 `e-{vi_id}-research-mgr` 会让两者竞态（value-verify 与 research-mgr
         //   同为 value-investor 的下游，可并行调度）⇒ research-mgr 可能读到未覆写的 LLM 原值。
-        edges.push(edge("e-value-verify-research-mgr", vv_id, "research-mgr"));
+        edges.push(edge(&format!("e-{vv_id}-research-mgr"), &vv_id, "research-mgr"));
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -3943,25 +4191,38 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             );
             // 修复：风险评估 Agent 需要读到上游分析师报告 + 辩论结果 + 技术指标，
             // 否则 LLM 没有分析素材，不会主动调用工具。
-            a.config.context_sources = vec![
-                "a-market-analyst".into(),
-                "a-sentiment".into(),
-                "a-news".into(),
-                "a-fundamentals".into(),
-                "a-policy".into(),
-                "a-hot-money".into(),
-                "a-lockup".into(),
-                "a-research".into(),
-                "a-sector".into(),
-                "a-catalyst".into(),
-                format!("bull-r{debate_max_rounds}"),
-                format!("bear-r{debate_max_rounds}"),
-                "debate-convergence".into(),
-                "t-scoring".into(),
-                "t-valuation".into(),
-            ];
+            // v133（B2-2）：`a-*` 已逐档实例化 ⇒ 按「代表实例」（mid 优先、否则首个，
+            // 与 data-quality 同规则）取每 base 一份 —— 风险评估是全局面板层，
+            // 逐档 23 份会淹没 prompt（与分析师的「四档各自结论」场景不同）。
+            // 这里**不含 value-investor**：它是有独立消费链的估值 agent（保持原面）。
+            a.config.context_sources = {
+                let mut cs: Vec<String> = analysts
+                    .iter()
+                    .map(|(id, ..)| {
+                        by_base
+                            .get(*id)
+                            .and_then(|v| {
+                                v.iter()
+                                    .find(|(_, p)| {
+                                        matches!(p, axagent_harness::holding_period::Period::Mid)
+                                    })
+                                    .or_else(|| v.first())
+                            })
+                            .map(|(b, p)| {
+                                axagent_harness::holding_period::analyst_node_id(b, p.as_str())
+                            })
+                            .unwrap_or_else(|| (*id).to_string())
+                    })
+                    .collect();
+                cs.push(format!("bull-r{debate_max_rounds}"));
+                cs.push(format!("bear-r{debate_max_rounds}"));
+                cs.push("debate-convergence".into());
+                cs.push("t-scoring".into());
+                cs.push("t-valuation".into());
+                cs
+            };
             a.config.input_mapping = {
-                let mut m = build_analyst_input_mapping(&a_ids);
+                let mut m = build_analyst_input_mapping(&tiered);
                 // 注入辩论收敛的 consensus_score 供 Kelly 公式使用
                 // 路径规则（V29 修复）：AgentNode 输出包裹在 {role, content: <json_string>, ...} 中，
                 // resolve_var_path 遇到 Value::String 会自动 from_str 解析后再继续下钻，
@@ -4045,8 +4306,35 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         ("dcf_perpetual_rate", "value_dcf_perpetual_rate"),
         ("dcf_discount_rate", "value_dcf_discount_rate"),
     ];
+    // ── v137（裁定 2「先加设施再接线」，PLAN §一○五）：面板「技术指标」8 个变量接入 ──
+    // 这 8 个变量此前**只有声明 + 面板能改**，全仓零消费者 ⇒ 改值对评分零影响（「配置项空接线」族）。
+    // 设施在 `astock-data::mcp_tools::effective_indicator_config`，它把 8 个参数分成**两域**：
+    //   · 窗口域 5 个（几根 bar）＝**只作用日线链** —— 档侧的窗口由 `ScaleWindowPlan` 决定，
+    //     接到档上就是「四档窗口重新焊成同一份」，即 #41 片 A 刚拆掉的缺陷；工具侧对这种接线
+    //     **显式失败**（不是静默忽略），本仓侧另有 `check-indicator-config-scope.mjs` P2 双向锁。
+    //   · 阈值域 3 个（布林标准差倍数 / 放量比 / 缩量比）＝**全链接入**（日线 + 四档），
+    //     依据是 §九十六(2) 已裁「阈值不随尺度缩」。档侧的三条见 `horizon_tier_template.rs`。
+    // 参数名与变量名**刻意不同名**（`ind_` 前缀），同上面 C2 路径 Z 的理由。
+    const INDICATOR_DAILY_FLAT_ARGS: [(&str, &str); 8] = [
+        ("ind_macd_fast", "macd_fast"),
+        ("ind_macd_slow", "macd_slow"),
+        ("ind_macd_signal", "macd_signal"),
+        ("ind_boll_period", "boll_period"),
+        ("ind_volume_lookback", "volume_lookback"),
+        ("ind_boll_stddev", "boll_stddev"),
+        ("ind_volume_surge_ratio", "volume_surge_ratio"),
+        ("ind_volume_shrink_ratio", "volume_shrink_ratio"),
+    ];
     let algo_tools: &[AlgoToolRow] = &[
-        ("t-scoring", "技术评分", "compute_scoring", "stock_code", &[], 300.0, 2700.0),
+        (
+            "t-scoring",
+            "技术评分",
+            "compute_scoring",
+            "stock_code",
+            &INDICATOR_DAILY_FLAT_ARGS[..],
+            300.0,
+            2700.0,
+        ),
         (
             "t-valuation",
             "估值计算",
@@ -4146,71 +4434,23 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   作为入度 0 的启动节点（与其他 t-* 数据工具一致），它天然先于 a-hot-money 完成，
     //   数据依赖（a-hot-money 的 context_sources 消费 dragon_tiger 变量）由出边保证。
 
-    // ── 阶段2（PROPOSAL-stock-decision-four-horizon.md）：多周期评分节点 ──
-    // 给 portfolio-mgr 的短/中/长档注入**各自周期**的技术评分，供 decisionsByHorizon 用 f1
-    //   独立重融合（rhai 侧读取 totalScore_short / totalScore_mid / totalScore_long）。
-    // 复用老 t-scoring 同一工具 `compute_scoring`，仅以静态参数 `period` 区分数据周期
-    //   （2.1 已在 astock-data/mcp_tools.rs 为 compute_scoring 增加 period 支持）。
-    // 入边链 t-scoring → t-scoring-week → t-scoring-month：既是评分周期的先后（周→月），
-    //   也让新节点有来源边、避免被 validate_workflow 判为 orphan（同 t-valuation-band 先例）。
-    // ⚠️ 不并入 `algo_tools` / `raw_input_sources`：raw-data 聚合的「16 个工具节点」计数与
-    //   description 是写死的，且这两档评分只供 portfolio-mgr 消费，无需进 raw 聚合。
-    nodes.push(tool_node(
-        "t-scoring-hour",
-        "技术评分（60 分钟）",
-        "compute_scoring",
-        "t-scoring-hour",
-        "stock_code",
-        &[("period", "hourly")],
-        None,
-        1020.0,
-        2700.0,
-    ));
-    nodes.push(tool_node(
-        "t-scoring-week",
-        "技术评分（周线）",
-        "compute_scoring",
-        "t-scoring-week",
-        "stock_code",
-        &[("period", "weekly")],
-        None,
-        1140.0,
-        2700.0,
-    ));
-    nodes.push(tool_node(
-        "t-scoring-month",
-        "技术评分（月线）",
-        "compute_scoring",
-        "t-scoring-month",
-        "stock_code",
-        &[("period", "monthly")],
-        None,
-        1260.0,
-        2700.0,
-    ));
-    nodes.push(tool_node(
-        "t-scoring-quarter",
-        "技术评分（季度）",
-        "compute_scoring",
-        "t-scoring-quarter",
-        "stock_code",
-        &[("period", "quarterly")],
-        None,
-        1380.0,
-        2700.0,
-    ));
-    edges.push(edge("e-t-scoring-t-scoring-hour", "t-scoring", "t-scoring-hour"));
-    edges.push(edge("e-t-scoring-t-scoring-week", "t-scoring", "t-scoring-week"));
-    edges.push(edge("e-t-scoring-week-t-scoring-month", "t-scoring-week", "t-scoring-month"));
-    // 四周期科学化 Phase B：长档不再复用月线评分 —— 季线由月线在 `compute_scoring` 内
-    // 按自然季度聚合而来（vendor 无稳定季度 klt，故本地聚合，见 `astock-data/src/scale.rs`）。
-    // 旧注释「月线已是最长期权周期，不新增季度节点」是**按取数便利**而非**按 90 交易日口径**
-    // 做的决定，后果是 mid/long 两档的评分输入恒等 ⇒ 两档方向永远一样。
-    edges.push(edge("e-t-scoring-month-t-scoring-quarter", "t-scoring-month", "t-scoring-quarter"));
-    edges.push(edge("e-t-scoring-hour-portfolio-mgr", "t-scoring-hour", "portfolio-mgr"));
-    edges.push(edge("e-t-scoring-week-portfolio-mgr", "t-scoring-week", "portfolio-mgr"));
-    edges.push(edge("e-t-scoring-month-portfolio-mgr", "t-scoring-month", "portfolio-mgr"));
-    edges.push(edge("e-t-scoring-quarter-portfolio-mgr", "t-scoring-quarter", "portfolio-mgr"));
+    // ── 阶段2 的多周期评分节点：v135（B-2b #36）起**移出主图** ──
+    // 原形态：`t-scoring-{hour,week,month,quarter}` 四个 ToolNode + 一条错峰链
+    //   （`t-scoring → hour/week`、`week → month`、`month → quarter`）+ 四条「→ portfolio-mgr」供给边。
+    // 现形态（PLAN §九十一 / §九十二 / §一○○）：每档的评分节点逐字定义在**该档子模板**里
+    //   （`horizon_tier_template.rs`），主图只留一个 `pm-h-<档>` 的 SubWorkflow 扇出节点。
+    // ⇒ 错峰链在主图上**物理断开**、四档真并行（§九十一(5) 决策点 3 自行拍定：接受断开，
+    //   「父侧传入月线」留作运行时长读数之后的优化分支）。跨档取评分仍有两处守着：
+    //   ① `horizon_tier_template.rs` 的 `sibling_id_hits`（本档模板的 needs 里不得出现兄弟档节点 id，
+    //     兄弟档 id 由 `horizon_tier_template_nodes(其他档)` 现算）；
+    //   ② `scripts/check-tier-purity.mjs` 的 R1/R5（四档评分来源互不相同 + 逐档对齐权威
+    //     `Period::scoring_node_id`）。R3 那条「错峰边逐条登记」随本批改判为「主图不得再有档间评分边」。
+    // 原四条「→ portfolio-mgr」的供给边是**无人消费**的：`portfolio-mgr` 的
+    //   `totalScore_{ultra_short,short,mid,long}` 四条映射早在 R-11 换心脏时退役（见本文件那段注释），
+    //   主链现在只读 `pm-h-<档>.result` ⇒ 随本批一并删，不给主图留悬空边。
+    // 季线由月线在 `compute_scoring` 内按自然季度聚合（vendor 无稳定季度 klt，见
+    //   `astock-data/src/scale.rs`）；「长档复用月线评分」的旧做法会让 mid/long 两档输入恒等
+    //   ⇒ 两档方向永远一样，该口径保留在档模板里（每档自己的 `const-scoring-period` 产出尺度名）。
 
     // ── P0-H L3（2026-09-12）: 报告导出所需的 2 个数据节点 ──
     // 背景：`generate_stock_report` 的「机构调研」与「大盘指数」两个板块此前恒空。
@@ -4705,78 +4945,74 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 output_var: dq_id.into(),
                 tool_name: None,
                 execute_directly: true,
-                input_mapping: [
-                    // P1 修复(2026-07-23): resolve_var_path("{id}.content.verdict.confidence") 全员 null，
-                    // 改为 {id}.content.verdict 接收整份 verdict map，在 data-quality.rhai 内提取 confidence。
-                    ("mk_verdict", "a-market-analyst.content.verdict"),
-                    ("sent_verdict", "a-sentiment.content.verdict"),
-                    ("news_verdict", "a-news.content.verdict"),
-                    ("fund_verdict", "a-fundamentals.content.verdict"),
-                    ("pol_verdict", "a-policy.content.verdict"),
-                    ("hm_verdict", "a-hot-money.content.verdict"),
-                    ("lk_verdict", "a-lockup.content.verdict"),
-                    ("res_verdict", "a-research.content.verdict"),
-                    ("sec_verdict", "a-sector.content.verdict"),
-                    // V68 修复(2026-09-10): cat_verdict 映射从 .content 改为 .content.verdict。
-                    // 原映射是 P2 修复(2026-07-23)按「OutputMode::Json 扁平 schema + 终值
-                    // auto-parse」的现实写的；但 agent_executor 后来加了 V62 通用 VERDICT
-                    // 标签重构，a-catalyst 的 content 现为 {"report", "verdict":{...}} 嵌套
-                    // JSON **字符串**（resolve_var_path 终值不 auto-parse）。rhai 收到的是
-                    // string，extract_conf(type_of != "map") 恒返回 -1.0 → 催化剂分析师被
-                    // data-quality 恒判 missing（2026-09-08 002837 实证）。改映射到
-                    // .content.verdict 后中途穿透 parse，rhai 收到 map，与其他 9 个分析师一致。
-                    // V70(2026-09-10): a-catalyst 已改回 Text 模式，此映射与其他 9 个完全同构。
-                    ("cat_verdict", "a-catalyst.content.verdict"),
-                    // P1-B3 新增(2026-07-24): 拿 10 个分析师的报告正文，算法化 report_quality_score。
-                    // AgentExecutor OutputMode::Text 把 LLM 输出包装为 {report, verdict} JSON，
-                    // 因此 .content.report 直接是字符串正文（含自然语言分析，不含 VERDICT 标签）。
-                    ("mk_report", "a-market-analyst.content.report"),
-                    ("sent_report", "a-sentiment.content.report"),
-                    ("news_report", "a-news.content.report"),
-                    ("fund_report", "a-fundamentals.content.report"),
-                    ("pol_report", "a-policy.content.report"),
-                    ("hm_report", "a-hot-money.content.report"),
-                    ("lk_report", "a-lockup.content.report"),
-                    ("res_report", "a-research.content.report"),
-                    ("sec_report", "a-sector.content.report"),
-                    ("cat_report", "a-catalyst.content.report"),
-                    // ── V67 修复(2026-07-29): 映射分析师 __untrusted 标记 ──
-                    // agent_executor 在 strict_mode 降级时于 NodeOutput 顶层注入 __untrusted=true。
-                    // data-quality.rhai 需读取此标记,将不可信分析师排除出 good_count,
-                    // 避免中性兜底 confidence=50 被当成有效信号推高 tool_credibility_score。
-                    ("mk_untrusted", "a-market-analyst.__untrusted"),
-                    ("sent_untrusted", "a-sentiment.__untrusted"),
-                    ("news_untrusted", "a-news.__untrusted"),
-                    ("fund_untrusted", "a-fundamentals.__untrusted"),
-                    ("pol_untrusted", "a-policy.__untrusted"),
-                    ("hm_untrusted", "a-hot-money.__untrusted"),
-                    ("lk_untrusted", "a-lockup.__untrusted"),
-                    ("res_untrusted", "a-research.__untrusted"),
-                    ("sec_untrusted", "a-sector.__untrusted"),
-                    ("cat_untrusted", "a-catalyst.__untrusted"),
-                    // ── P2-1(2026-09-21): 每个分析师的**真实工具调用记录** ──
-                    // 供 `data-quality.rhai::attribution_note()` 交叉核对「报告所说的
-                    // 工具被拒绝」是否成立。实证（`AUDIT-pledge-attribution-2026-09-21.md`）：
-                    //   a-lockup 报告写「质押数据获取失败（工具调用被拒绝）」，而本轮
-                    //   **没有任何质押工具调用**，唯一 `is_error` 的是
-                    //   `get_stock_margin_data` 且原因是**限流**（并行节点撞 200ms 间隔）
-                    //   ⇒ 使用者被引向「权限问题」，真因完全在别处。
-                    //
-                    // 路径形态 `{node_id}.tool_calls_made` —— AgentNode 输出的顶层字段，
-                    // 与 `seed_serenity.rs` 的 `a-candidate-mapper.tool_calls_made` 同源。
-                    // ⚠ 解析不到时注入 Null（`code_executor` 语义）⇒ rhai 侧
-                    //   `attribution_note` 的守卫①按「无可核对数据」放行，**不**误判编造。
-                    //   （这也是为什么该守卫不可删：删了会把「测不出」判成「有问题」。）
-                    ("mk_tool_calls", "a-market-analyst.tool_calls_made"),
-                    ("sent_tool_calls", "a-sentiment.tool_calls_made"),
-                    ("news_tool_calls", "a-news.tool_calls_made"),
-                    ("fund_tool_calls", "a-fundamentals.tool_calls_made"),
-                    ("pol_tool_calls", "a-policy.tool_calls_made"),
-                    ("hm_tool_calls", "a-hot-money.tool_calls_made"),
-                    ("lk_tool_calls", "a-lockup.tool_calls_made"),
-                    ("res_tool_calls", "a-research.tool_calls_made"),
-                    ("sec_tool_calls", "a-sector.tool_calls_made"),
-                    ("cat_tool_calls", "a-catalyst.tool_calls_made"),
+                input_mapping: {
+                    // ── v133（B2-2）：分析师侧 40 键按「代表实例」生成 ──
+                    // 键名域保持（§五十六：「data-quality 的 40 键不新增条目」）；base 集 =
+                    // 9 个 a-*（a-news 已摘）+ value-investor。source 取该 base 的**代表实例**：
+                    // mid 优先（跨档中位代表），无 mid 时按逐档清单序取首个。
+                    // ⚠ 代表规则是**评估口径**的选择（data-quality 是全局质量门、阈值按 10 维校准，
+                    //   不是逐档结论）；将来若改四档各自的质量分，把本规则换成逐实例消费即可。
+                    // ⚠ value-investor 的产出被 value-verify **原地覆写** ⇒ 权威形态是 CodeNode 的
+                    //   `{status, result: {report, verdict}}`（穿透 `.result`）；其余分析师走
+                    //   AgentNode 的 `.content`（V58/V68：content 为 {report, verdict} 嵌套，
+                    //   resolve_var_path 中途穿透 parse 后 rhai 收到 verdict map / 正文串）。
+                    // ⚠ 路径自 V62（content 统一 {report, verdict} 嵌套）起就是**必须**带 `.verdict`
+                    //   的（旧 `.content.bull_score` 形态在 V62 后恒 Null —— 本批的 30 键路径订正同源）。
+                    {
+                        use axagent_harness::holding_period::Period as P;
+                        let mut dq_input: Vec<(String, String)> = Vec::new();
+                        for (abbr, base) in [
+                            ("mk", "a-market-analyst"),
+                            ("sent", "a-sentiment"),
+                            ("fund", "a-fundamentals"),
+                            ("pol", "a-policy"),
+                            ("hm", "a-hot-money"),
+                            ("lk", "a-lockup"),
+                            ("res", "a-research"),
+                            ("sec", "a-sector"),
+                            ("cat", "a-catalyst"),
+                            ("val", "value-investor"),
+                        ] {
+                            let rep = tiered
+                                .iter()
+                                .find(|(b, p, ..)| *b == base && matches!(p, P::Mid))
+                                .or_else(|| tiered.iter().find(|(b, ..)| *b == base))
+                                .unwrap_or_else(|| {
+                                    panic!("data-quality 代表实例缺失：{base}（tiered 自证已保证每 base 至少一档）")
+                                });
+                            let (b, pr, ..) = rep;
+                            let node_id =
+                                axagent_harness::holding_period::analyst_node_id(b, pr.as_str());
+                            let root = if *b == "value-investor" {
+                                format!("{node_id}.result")
+                            } else {
+                                format!("{node_id}.content")
+                            };
+                            dq_input.push((format!("{abbr}_verdict"), format!("{root}.verdict")));
+                            dq_input.push((format!("{abbr}_report"), format!("{root}.report")));
+                            dq_input
+                                .push((format!("{abbr}_untrusted"), format!("{node_id}.__untrusted")));
+                            dq_input.push((
+                                format!("{abbr}_tool_calls"),
+                                format!("{node_id}.tool_calls_made"),
+                            ));
+                        }
+                        // catalyst_level（f3 因子输入）同规则取代表（mid 优先、否则首个）。
+                        let cat_rep = by_base
+                            .get("a-catalyst")
+                            .and_then(|v| {
+                                v.iter().find(|(_, p)| matches!(p, P::Mid)).or_else(|| v.first())
+                            })
+                            .expect("a-catalyst 必在四档子集（analyst_subset 保证）");
+                        let cat_id =
+                            axagent_harness::holding_period::analyst_node_id(cat_rep.0, cat_rep.1.as_str());
+                        dq_input.push((
+                            "catalyst_level".to_string(),
+                            format!("{cat_id}.content.verdict.catalyst_level"),
+                        ));
+                    // ④ 非分析师侧静态键（原静态数组改为 extend 追加；键集与 v133 前逐字一致）
+                    dq_input.extend(
+                        [
                     // ── 因子数据完整度评估（供 pm_compute_factor_completeness 使用）──
                     // 2026-09-09 包装对齐修复：ToolNode 输出结构为
                     //   {node_id, result: {content: <json_string>, tool_name}}
@@ -4785,9 +5021,6 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // 后按原契约 json_parse/safe_parse 解析。
                     ("total_score", "t-scoring.result.content.totalScore"),
                     ("consensus_score", "debate-convergence.content.consensus_score"),
-                    // a-catalyst 是 AgentNode，content parse 后为 {report, verdict}，
-                    // catalyst_level 在 verdict 层（实测值 "L1普通消息"）
-                    ("catalyst_level", "a-catalyst.content.verdict.catalyst_level"),
                     (
                         "risk_volatility",
                         "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
@@ -4836,12 +5069,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("money_flow", "t-hotmoney-data.result.content"),
                     ("lockup_bundle", "t-lockup-data.result.content"),
                     ("announcements", "t-catalyst-data.result.content"),
+                    // v132 起 f11 的 pace 输入（结构性字段同名，非分析师）。
                     ("pace_signal", "pace-calc.result.pace_signal"),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
+                        ]
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), v.to_string())),
+                    );
+                    dq_input.into_iter().collect()
+                }
             },
+        }
         }));
         edges.push(edge("e-v-validate-data-quality", "v-validate", dq_id));
         // P1 修复(2026-07-24): data-quality 需要读到10个分析师的 verdict 输出，
@@ -4882,23 +5119,34 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         // input_mapping 的 consensus_score 缺失降级为空。cof=false 时 debate-convergence
         // 等 LLM 节点失败会让 research-mgr 卡 Pending，进而锁死 trader/portfolio-mgr。
         a.base.continue_on_fail = true;
-        a.config.context_sources = vec![
-            "value-investor".into(),
-            "t-scoring".into(),
-            "t-valuation".into(),
-            "t-risk".into(),
-            // V29 修复: 改为引用三档风险评估的原始 AgentNode，而非聚合后的数组
-            // AggregatorNode strategy="all" 的 result 是数组，无法用对象字段路径导航，
-            // 因此 research-mgr 直接消费三个原始风险辩手的输出。
-            // V67 修复: 移除 "risk-aggregated"——V29 注释明确说不引用聚合数组，
-            // 但该字段遗留未删，导致 research-mgr 报 "context_sources 变量未找到" ERROR。
-            "risk-agg".into(),
-            "risk-con".into(),
-            "risk-neu".into(),
-            "risk-level".into(),
-            // V29 修复: input_mapping 引用 debate-convergence，需在 context_sources 中声明
-            "debate-convergence".into(),
-        ];
+        // v133（B2-2）：value-investor 的两个逐档实例（中/长）都列入 context_sources。
+        //   实例名由 `tiered` + `analyst_node_id` 生成，不手抄（新增档位时自动跟随）。
+        let mut rm_ctx: Vec<String> = tiered
+            .iter()
+            .filter(|(b, ..)| *b == VALUE_INVESTOR_ID)
+            .map(|(b, p, ..)| axagent_harness::holding_period::analyst_node_id(b, p.as_str()))
+            .collect();
+        rm_ctx.extend(
+            [
+                "t-scoring",
+                "t-valuation",
+                "t-risk",
+                // V29 修复: 改为引用三档风险评估的原始 AgentNode，而非聚合后的数组
+                // AggregatorNode strategy="all" 的 result 是数组，无法用对象字段路径导航，
+                // 因此 research-mgr 直接消费三个原始风险辩手的输出。
+                // V67 修复: 移除 "risk-aggregated"——V29 注释明确说不引用聚合数组，
+                // 但该字段遗留未删，导致 research-mgr 报 "context_sources 变量未找到" ERROR。
+                "risk-agg",
+                "risk-con",
+                "risk-neu",
+                "risk-level",
+                // V29 修复: input_mapping 引用 debate-convergence，需在 context_sources 中声明
+                "debate-convergence",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+        a.config.context_sources = rm_ctx;
         // ── 结构化参数注入（结构化参数方案 Phase 2）──
         // 注入风险的结构化评分，使 research-mgr 可在 system_prompt 中
         // 直接使用 risk_level 等值，无需从文本中重新提取。
@@ -4945,7 +5193,11 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         a.config.exposed_tools = vec![];
     }
     nodes.push(rm);
-    edges.push(edge("e-value-investor-research-mgr", "value-investor", "research-mgr"));
+    // v133（B2-2）：按档实例各一条边（两档实例都必须在 research-mgr 前完成）。
+    for (base, p, ..) in tiered.iter().filter(|(b, ..)| *b == VALUE_INVESTOR_ID) {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{tid}-research-mgr"), &tid, "research-mgr"));
+    }
     edges.push(edge("e-v-validate-research-mgr", "v-validate", "research-mgr"));
 
     // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
@@ -5110,6 +5362,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     //   现改为消费 grade，阈值全项目只保留 data-quality.rhai 这一份。
                     //   dqi_score 保留传递：Rhai 公式仍需其连续值算 f6_signal 与提示文本。
                     ("dqi_grade", "data-quality.result.grade"),
+                    // #8 P5（2026-10-06）：数据质量**跨轮**熔断态。三条都是 hooks.rs 从
+                    //   `data_quality_observations` 读出来、**在 Rust 侧判完**再注入的结果数，
+                    //   脚本只做 `>= 1` 这种存在性判定，不再自己比阈值 —— 阈值（几轮算熔断、
+                    //   什么等级算异常）权威只有一份，在 `dao::repo::data_quality_fuse`。
+                    //   为什么是三条而不是一条：`streak = 0`（最近一轮正常）与
+                    //   `observations = 0`（表里一条观测都没有）是两件事，合并就会让
+                    //   「这套设施从没跑过」冒充「证据面一直健康」。
+                    //   与上一行 `dqi_grade` 的分工：grade 是**本轮**判级，这三条是**近 N 轮**序列。
+                    ("dqi_streak", "dqi_streak"),
+                    ("dqi_fuse_flag", "dqi_fuse_flag"),
+                    ("dqi_observations", "dqi_observations"),
                     // P1/P2: 因子回测数据（compute_scoring 工具附加输出）
                     ("factor_weights", "t-scoring.result.content.factor_backtest.factors"),
                     // P1-1: 市场状态权重调节（regime-weights.rhai）替代纯回测权重
@@ -5143,7 +5406,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     ("overall_risk_long", "cls-risk-level-long.result.category"),
                     // AgentNode(Json mode) 输出包裹在 {role, content: <json_string>, ...} 中
                     // 2026-09-09: content parse 后为 {report, verdict}，catalyst_level 在 verdict 层
-                    ("catalyst_level", "a-catalyst.content.verdict.catalyst_level"),
+                    // v133（B2-2）：按档生成 —— `a-catalyst` 有四个逐档实例（四档子集均含它），
+                    //   四键注入 + 脚本按所选档 switch（与 v128 的 overall_risk_* 同形，
+                    //   理由见 portfolio-mgr.rhai 的 switch 处注释）。
+                    (
+                        "catalyst_level_ultra_short",
+                        "a-catalyst--ultra_short.content.verdict.catalyst_level",
+                    ),
+                    ("catalyst_level_short", "a-catalyst--short.content.verdict.catalyst_level"),
+                    ("catalyst_level_mid", "a-catalyst--mid.content.verdict.catalyst_level"),
+                    ("catalyst_level_long", "a-catalyst--long.content.verdict.catalyst_level"),
                     ("consensusScore", "debate-convergence.content.consensus_score"),
                     // V65: trader 输出完整 6 维度字段（与 portfolio-mgr 同维度对齐用于双视角对比）
                     // 旧字段保留: trader_direction/trader_target_price/trader_stop_loss 供 f7 兼容路径
@@ -5397,9 +5669,14 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // portfolio-mgr.rhai 累加这些哨兵，任意一个为 true 即触发 weights_collapsed
                     // 兜底（强制观望+空仓+confidence 对半），避免 LLM 失败的 50/50 兜底
                     // 被当成有效信号继续融合。
+                    // v133（B2-2）：`a-catalyst` 按档实例化 ⇒ 哨兵四键注入 + 脚本按所选档取
+                    //   （其余 5 个哨兵是全局单节点，键名不变）。
                     ("untrusted_trader", "trader.__untrusted"),
                     ("untrusted_research_mgr", "research-mgr.__untrusted"),
-                    ("untrusted_catalyst", "a-catalyst.__untrusted"),
+                    ("untrusted_catalyst_ultra_short", "a-catalyst--ultra_short.__untrusted"),
+                    ("untrusted_catalyst_short", "a-catalyst--short.__untrusted"),
+                    ("untrusted_catalyst_mid", "a-catalyst--mid.__untrusted"),
+                    ("untrusted_catalyst_long", "a-catalyst--long.__untrusted"),
                     ("untrusted_debate_conv", "debate-convergence.__untrusted"),
                     ("untrusted_data_quality", "data-quality.__untrusted"),
                     ("untrusted_risk_conv", "risk-convergence.__untrusted"),
@@ -5543,321 +5820,248 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-debate-convergence-research-mgr", "debate-convergence", "research-mgr"));
     edges.push(edge("e-debate-convergence-trader", "debate-convergence", "trader"));
 
-    // ── P4′-c 探针：先接**一个**逐档分支节点，验形状；其余三档与 arbiter 同批补齐 ──
+    // ── v135（B-2b #36）：四档分支由 CodeNode 换成 SubWorkflow 扇出 ──
     //
-    // 下面每条源路径都是**从本文件现有映射逐字读出来的**，不是 PLAN §31-2 草稿里的写法
-    // （抄那份草稿会连错两处：指标在 `.content.indicators.*` 下；`overall_risk` 根本没有
-    // 这个可注入变量 —— 主链是自己算的，这里改用 `cls-risk-level.result.category` 的同词表串）。
+    // 搬进子模板的是「本档尺度常量 + 本档评分 + 本档分支决策」三段，逐字定义在
+    // `horizon_tier_template.rs`（四份逐字而不是循环，理由写在该文件头部）。
+    // 本档风险节点 `cls-risk-level-<档>` **留在父图** —— 它有四个父侧消费者
+    //   （下面 `portfolio-mgr` 的 `overall_risk_{ultra_short,short,mid,long}` 四条映射，
+    //   消费点是 `portfolio-mgr.rhai` 的 `tier_risk_raise`），而子执行只把父扇出节点的
+    //   `node_id` 与 `output_var` **双键**写回父池（`work_engine/engine/mod.rs:1772-1775`）
+    //   ⇒ 风险节点一旦进子模板，那四条映射就指向不存在的路径 ⇒ `present()` 恒假 ⇒
+    //   v128 B1 的按档风险收紧整条静默退役（本仓登记的「配置项空接线」族）。
     //
-    // 刻意**没写**的映射（宁缺不猜，PLAN §三十 纪律 1）：`pool_in_pool`（要判断本代码是否在
-    // `entries` 数组里，点号路径表达不了「包含」）、`flow_persistence`（要先有逐档契约才会被
-    // 吐出来）、宏观内层形状 ⇒ 这些腿在脚本里进 `absentLegs` 并在 `dataGaps` 留痕，
-    // 是「未接线」的可观测状态，不是「算出低分」。
+    // ⚠ 三个不变量，动这四个节点之前先看：
+    //   ① 节点 id 必须继续叫 `pm-h-<档>`、`output_var` 继续叫 `h_<档>` ——
+    //      `portfolio-mgr` 读 `pm-h-<档>.result`、`pm-arbiter` 读同一路径（上面四条 + 下面四条
+    //      `r_<档>`），改名即四档全塌（§九十一(0) 的双键写回理由）。
+    //   ② `input_mapping` 的**键**就是子快照里的变量名 ⇒ 必须与该档模板现算的 needs
+    //      **逐条相等**（`workflow_fanout_audit::external_reads`）。门：
+    //      `stock_analysis_setup` 的 `tier_fanout_inputs_are_complete` + 负控
+    //      `tier_fanout_missing_key_is_caught`。少传一个键不是「降级」而是**整节点硬错**
+    //      （`subworkflow_executor.rs:97-105` 的 `map_inputs` 是严格的：取不到就
+    //      `Variable 'x' not found`），运行期才浮出来 ⇒ 必须由 CI 拦住。
+    //      四份映射都是**恒等键**（父池里的名字原样进子快照），所以逐字写死、不用循环生成。
+    //   ③ 供给边必须覆盖映射里出现的**每一个父图节点**；工作流变量（`stock_code` /
+    //      `horizon_branch_json` / `horizon_prior_json` / `stop_vol_mult` /
+    //      `take_profit_vol_mult`）由 hooks 与面板注入，**不需要**边。
+    //      带档分析师实例的 id 经 `analyst_node_id()` 产出后 insert —— `base--tier` 字面量
+    //      不得手抄（`scripts/check-analyst-id-shape.mjs` 的 R2）。
     //
-    // `kline_bars` 取**日线** `t-scoring` 而非本档尺度节点：这不是妥协 —— 本档要的量是
-    // `σ_daily`（`pm_vol_move_pct` 的口径就是日收益标准差 × √持有天数），日线才是它的正解；
-    // 按档换 K 线粒度会算出一个不是"日波动"的量。
-    nodes.push(WorkflowNode::Code(CodeNode {
+    // 超时口径：旧 `pm-h-*` 是纯 Rhai 节点 ⇒ `timeout: Some(10)`；扇出里面含一次真实取数
+    //   （`compute_scoring` 按本档尺度拉 K 线）⇒ 这里留 `None` = 继承本链 `step_timeout`，
+    //   子执行的累计上限另由 `SubWorkflowExecutorConfig::timeout_secs`（300s）兜。
+    //
+    // 分支脚本「刻意没接的入参」及其原因（催化剂 / 解禁 / 年报 EPS / 行业排名四问）随映射一起
+    //   搬进 `horizon_tier_template.rs`，那里的注释与字面量同处。
+    nodes.push(WorkflowNode::SubWorkflow(SubWorkflowNode {
         base: WorkflowNodeBase {
             id: "pm-h-ultra-short".into(),
-            title: "超短分支决策".into(),
+            title: "超短分支决策（子工作流）".into(),
             description: Some(
-                "只吃本档证据的决策分支（R-11）；输出供后续 arbiter 读，不改主链结论".into(),
+                "本档评分 + 分支决策整段在 `stock-horizon-ultra-short` 里跑（B-2b #36）；\
+                 输出形状与逐档节点一致，主链与仲裁的读端零改"
+                    .into(),
             ),
             position: Position { x: 1300.0, y: 4200.0 },
             retry: RetryConfig::default(),
-            timeout: Some(10),
+            timeout: None,
             enabled: true,
             parent_id: None,
             compensation: None,
-            // 探针期：本节点失败不得拖垮主链（现网结论仍由 portfolio-mgr 出）
+            // 本档失败不得拖垮主链（四档各自 continue_on_fail，与逐档节点同口径）
             continue_on_fail: true,
         },
-        config: CodeNodeConfig {
-            language: "rhai".into(),
-            code: include_str!("../portfolio-mgr-h-ultra-short.rhai").to_string(),
-            output_var: "h_ultra_short".into(),
-            tool_name: None,
-            execute_directly: true,
+        config: SubWorkflowNodeConfig {
+            sub_workflow_id: super::horizon_tier_template::horizon_tier_template_id(
+                axagent_harness::holding_period::Period::UltraShort,
+            ),
             input_mapping: [
-                ("branch_json", "horizon_branch_json.ultra_short"),
+                ("stock_code", "stock_code"),
+                ("t-scoring", "t-scoring"),
+                ("cls-risk-level-ultra-short", "cls-risk-level-ultra-short"),
+                ("t-limitup-pool", "t-limitup-pool"),
+                ("horizon_branch_json", "horizon_branch_json"),
                 ("horizon_prior_json", "horizon_prior_json"),
-                ("tier_score", "t-scoring-hour.result.content.totalScore"),
-                ("macd_dif", "t-scoring-hour.result.content.indicators.macdDif"),
-                ("macd_dea", "t-scoring-hour.result.content.indicators.macdDea"),
-                ("rsi_14", "t-scoring-hour.result.content.indicators.rsi14"),
-                // v128（B1）：本档风险档 ← **本档**的 cls-risk-level-ultra-short 节点（四条轴仍同全局，按档的是回撤深度）
-                ("overall_risk", "cls-risk-level-ultra-short.result.category"),
-                ("kline_bars", "t-scoring.result.content.kline_json"),
-                // 面板乘数**必须恒等映射**：脚本里 `else { 1.2 }` 的默认值若顶替了面板值，
-                // 面板调到 1.5 时本分支仍按 1.2 算 —— 这不是「缺席」（缺席要点名留痕），
-                // 是拿默认值冒充面板值。变量定义见 `seed_variables.rs`，登记清单见本文件 :91-92。
                 ("stop_vol_mult", "stop_vol_mult"),
-                // 涨停池广度（本档 entryGate 的必要条件 + breadthState 腿的原料）。
-                // 键名从 `astock-data::types::LimitUpBreadth`（`#[serde(rename_all="camelCase")]`）
-                // 逐字读出，不是猜的；`breadth` 为 `None` 时该路径导航失败 ⇒ 注入自动补 unit
-                // ⇒ 脚本走「缺席」分支并留痕，不会把「没接到」读成「封板率 0」。
-                ("seal_rate", "t-limitup-pool.result.content.breadth.sealRate"),
-                ("pool_break_count", "t-limitup-pool.result.content.breadth.breakCount"),
+                // v137（裁定 2「先加设施再接线」，PLAN §一○五）：档内评分节点要读**阈值域**三条
+                // ⇒ 父扇出必须逐条带上这三个变量。少一条不是「那条不生效」，而是**整档子执行失败**
+                // （`subworkflow_executor.rs:97-105` 的严格 `map_inputs`）；`audit_fanouts` 与
+                // `tool_node_argument_sources_exist` 会先在 CI 上红。**窗口域五条不在这里也不得出现在这里**
+                // （档侧窗口由 `ScaleWindowPlan` 决定，`check-indicator-config-scope.mjs` P2 双向锁）。
+                ("boll_stddev", "boll_stddev"),
+                ("volume_surge_ratio", "volume_surge_ratio"),
+                ("volume_shrink_ratio", "volume_shrink_ratio"),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
+            output_var: "h_ultra_short".into(),
+            sub_graph: None,
         },
     }));
-    // 供给边：每个被映射引用的上游都要有一条（`input_mapping` 只声明读谁，
-    // 不保证它已跑完 —— 缺边就是「变量还没到账就被读」的时序竞态，见本文件多处同类订正）。
-    //
-    // ⚠ **没有 `a-catalyst`**（2026-10-04 接线时测出的权威表漂移，PLAN §三十四）：
-    //   PLAN §十一 的超短分支表写「动量 / 情绪广度 / 催化剂」三腿，但
-    //   `Period::UltraShort` 的 `participating` 只有 `momentumSignal`/`breadthState`
-    //   （`harness::holding_period:344-348`），`VERDICT_FACTORS` 11 项里也没有 `eventCatalyst`
-    //   ⇒ 分支表不会产生催化剂腿，映射 `catalyst_level` 就是**惰性接线**（值到账了但没有腿消费）。
-    //   而 `evidence_weight::get_horizon_base_weights("ultra_short")` 又给 `a-catalyst` 记了权重
-    //   ⇒ 「分析师被计权、却没有腿」。正解是把 `eventCatalyst` 正式纳入超短契约（牵动
-    //   因子全集 / 属主表 / 来源表 / 逐档字段计数测试 / 契约 prompt 渲染），届时把这条映射与
-    //   边一起接回；本片先不留惰性接线。
-    for src in ["t-scoring-hour", "t-scoring", "cls-risk-level-ultra-short", LIMITUP_TOOL_ID] {
+    for src in ["t-scoring", "cls-risk-level-ultra-short", LIMITUP_TOOL_ID] {
         edges.push(edge(&format!("e-{src}-pm-h-ultra-short"), src, "pm-h-ultra-short"));
     }
 
-    // ── P4′-c 第二片：另三档分支节点 + 仲裁节点入图（PLAN §三十七 的矩阵，逐条实测路径）──
-    //
-    // 与探针片同一条硬规则：**脚本读到的每个名字都必须在下面这张映射里出现**。
-    // `code_executor.rs:184` 只把 `input_mapping` 的 key 推进 Rhai scope ⇒
-    // 「映射了但路径取不到」= `Dynamic::UNIT` = 诚实缺席；「没映射」= `Variable not found`
-    // = **整节点失败**。这条由门 `branch_node_scope_is_exactly_the_seed_mapping` 逐档验
-    // （scope 直接从本区块 `input_mapping: [` 的字面量解析，另带「剥掉一个真读的名字必须红」的负控）。
-    //
-    // ⚠ **为什么写成三块而不是一个循环**：循环里源路径只能 `format!` 拼装，而
-    //   ① 上面那道门要按字面量读出每档的键集合，② 源侧检法（路径形状/可解析性）要看得见路径 ——
-    //   拼装会让两条**静默失效**（与本仓「工具名必须写字面量，位置参数门才查得到」是同一条理由）。
-    //   这里重复的是**节点声明**（种子内本来就有上百个），不是类型或函数定义，不触禁区 12。
-    //
-    // 刻意**没接**的入参（脚本已同步删掉读取，改在 `dataGaps` 里点名原因）：
-    //   · `catalyst_level` —— 四档腿集里都没有 `eventCatalyst`（PLAN §十一 与权威表的分歧，任务 #22）；
-    //   · `lockup_float_ratio` —— **v132 起 short/mid 已接**（取数层按权威交易日窗归约的**小数**
-    //     占比，`supply_shock.windows.<档>.ratio`，见 PLAN §六十六）；超短/长档的腿集里没有
-    //     `supplyShock` ⇒ 本档不注入（注入了也没人读 = 悬空映射，`audit-inject-coverage` 会报）；
-    //   · `latest_eps` —— **v131 起中/长档已接**（`t-valuation.result.content.latestEps.value`，年报口径）；本档腿集里没有 `expectationRevision` ⇒ 仍不注入（#24 的适用面止于中/长）；
-    //   · `industry_rank_percentile` —— 行业排名的 as-of 通道有结构性缺口，不用个股涨幅近似（裁定③）。
-    //
-    // 同批补上的两处探针期缺口：`consensus_estimated` 与 `consensus_eps` **必须成对注入**
-    // （脚本据此把「板块常数估算的一致预期」判成缺席 —— `astock-data/src/types.rs:310` 明文禁止
-    // 下游拿估算值做超预期判定）；面板乘数按恒等映射注入（不注入就是拿脚本默认值冒充面板值）。
-    nodes.push(WorkflowNode::Code(CodeNode {
-        base: WorkflowNodeBase {
-            id: "pm-h-short".into(),
-            title: "短线分支决策".into(),
-            description: Some(
-                "只吃本档证据的决策分支（R-11）；输出供 pm-arbiter 读，不改主链结论".into(),
-            ),
-            position: Position { x: 1300.0, y: 4320.0 },
-            retry: RetryConfig::default(),
-            timeout: Some(10),
-            enabled: true,
-            parent_id: None,
-            compensation: None,
-            continue_on_fail: true,
-        },
-        config: CodeNodeConfig {
-            language: "rhai".into(),
-            code: include_str!("../portfolio-mgr-h-short.rhai").to_string(),
-            output_var: "h_short".into(),
-            tool_name: None,
-            execute_directly: true,
-            input_mapping: [
-                ("branch_json", "horizon_branch_json.short"),
-                ("horizon_prior_json", "horizon_prior_json"),
-                // 本档尺度节点 = 周线（阶段 2 拍板：短=周线 / 中=月线 / 长=季线）
-                ("tier_score", "t-scoring-week.result.content.totalScore"),
-                ("macd_dif", "t-scoring-week.result.content.indicators.macdDif"),
-                ("macd_dea", "t-scoring-week.result.content.indicators.macdDea"),
-                ("rsi_14", "t-scoring-week.result.content.indicators.rsi14"),
-                // #23（v132）：本档解禁供给占比 —— 由取数层按**权威交易日窗**归约后的**小数**占比
-                // （`Σ解禁市值 ÷ 流通市值`，锚点 = as-of 截止日）。腿锚要的正是这个量纲；
-                // 旧路径把逐条 `unlockRatio`（= 单股东 ÷ 当日合计 ×10000）全数组求和喂进去，
-                // 现网因此 152/154 次恒满负 —— 见 PLAN §六十六。
-                (
-                    "lockup_float_ratio",
-                    "t-lockup-data.result.content.supply_shock.windows.short.ratio",
+    {
+        let mut fanout = SubWorkflowNode {
+            base: WorkflowNodeBase {
+                id: "pm-h-short".into(),
+                title: "短线分支决策（子工作流）".into(),
+                description: Some(
+                    "本档评分 + 分支决策整段在 `stock-horizon-short` 里跑（B-2b #36）".into(),
                 ),
-                // 缺席分两种，文案必须不同（与 #24 同一条理由）：`unavailableReason` 在 ⇒
-                // 取数层拿不到分母（行情失败 / 无流通市值）；两者都不在 ⇒ 该节点整段没跑成。
-                (
-                    "lockup_supply_reason",
-                    "t-lockup-data.result.content.supply_shock.unavailableReason",
+                position: Position { x: 1300.0, y: 4320.0 },
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: true,
+            },
+            config: SubWorkflowNodeConfig {
+                sub_workflow_id: super::horizon_tier_template::horizon_tier_template_id(
+                    axagent_harness::holding_period::Period::Short,
                 ),
-                ("seal_rate", "t-limitup-pool.result.content.breadth.sealRate"),
-                // 今日恒 unit ⇒ 该腿缺席留痕；逐档契约补上这个 verdict 字段即自动激活
-                ("flow_persistence", "a-hot-money.content.verdict.flowPersistence"),
-                // v128（B1）：本档风险档 ← **本档**的 cls-risk-level-short 节点（四条轴仍同全局，按档的是回撤深度）
-                ("overall_risk", "cls-risk-level-short.result.category"),
-                ("kline_bars", "t-scoring.result.content.kline_json"),
-                ("stop_vol_mult", "stop_vol_mult"),
-                ("take_profit_vol_mult", "take_profit_vol_mult"),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
-        },
-    }));
-    // 供给边：每个被映射引用的**上游节点**一条（工作流变量不需要边）。
-    for src in [
-        "t-scoring-week",
-        "t-scoring",
-        "cls-risk-level-short",
-        LIMITUP_TOOL_ID,
-        "a-hot-money",
-        "t-lockup-data",
-    ] {
+                input_mapping: [
+                    ("stock_code", "stock_code"),
+                    ("t-scoring", "t-scoring"),
+                    ("cls-risk-level-short", "cls-risk-level-short"),
+                    ("t-limitup-pool", "t-limitup-pool"),
+                    ("t-lockup-data", "t-lockup-data"),
+                    ("horizon_branch_json", "horizon_branch_json"),
+                    ("horizon_prior_json", "horizon_prior_json"),
+                    ("stop_vol_mult", "stop_vol_mult"),
+                    ("take_profit_vol_mult", "take_profit_vol_mult"),
+                    // v137 阈值域三条（同超短扇出那段注释）
+                    ("boll_stddev", "boll_stddev"),
+                    ("volume_surge_ratio", "volume_surge_ratio"),
+                    ("volume_shrink_ratio", "volume_shrink_ratio"),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+                output_var: "h_short".into(),
+                sub_graph: None,
+            },
+        };
+        // v133（B2-2）：本档游资实例的 verdict 是该档 `flowPersistence` 腿的唯一来源。
+        let hm_short = axagent_harness::holding_period::analyst_node_id("a-hot-money", "short");
+        fanout.config.input_mapping.insert(hm_short.clone(), hm_short.clone());
+        edges.push(edge(&format!("e-{hm_short}-pm-h-short"), &hm_short, "pm-h-short"));
+        nodes.push(WorkflowNode::SubWorkflow(fanout));
+    }
+    for src in ["t-scoring", "cls-risk-level-short", LIMITUP_TOOL_ID, "t-lockup-data"] {
         edges.push(edge(&format!("e-{src}-pm-h-short"), src, "pm-h-short"));
     }
 
-    nodes.push(WorkflowNode::Code(CodeNode {
-        base: WorkflowNodeBase {
-            id: "pm-h-mid".into(),
-            title: "中线分支决策".into(),
-            description: Some(
-                "只吃本档证据的决策分支（R-11）；输出供 pm-arbiter 读，不改主链结论".into(),
-            ),
-            position: Position { x: 1300.0, y: 4440.0 },
-            retry: RetryConfig::default(),
-            timeout: Some(10),
-            enabled: true,
-            parent_id: None,
-            compensation: None,
-            continue_on_fail: true,
-        },
-        config: CodeNodeConfig {
-            language: "rhai".into(),
-            code: include_str!("../portfolio-mgr-h-mid.rhai").to_string(),
-            output_var: "h_mid".into(),
-            tool_name: None,
-            execute_directly: true,
-            input_mapping: [
-                ("branch_json", "horizon_branch_json.mid"),
-                ("horizon_prior_json", "horizon_prior_json"),
-                ("tier_score", "t-scoring-month.result.content.totalScore"),
-                ("macd_dif", "t-scoring-month.result.content.indicators.macdDif"),
-                ("macd_dea", "t-scoring-month.result.content.indicators.macdDea"),
-                ("rsi_14", "t-scoring-month.result.content.indicators.rsi14"),
-                // #23（v132）：本档解禁供给占比。mid 的 `supplyShock` 是 **riskNote**（权重恒 0、
-                // 不进方向），但「有数可报」与「无数可报」是两件事 —— 接通后 riskNotes 才真能给出
-                // 该档窗口内的解禁占比；分母不可得时该腿缺席，脚本各写各的原因。
-                (
-                    "lockup_float_ratio",
-                    "t-lockup-data.result.content.supply_shock.windows.mid.ratio",
+    {
+        let mut fanout = SubWorkflowNode {
+            base: WorkflowNodeBase {
+                id: "pm-h-mid".into(),
+                title: "中线分支决策（子工作流）".into(),
+                description: Some(
+                    "本档评分 + 分支决策整段在 `stock-horizon-mid` 里跑（B-2b #36）".into(),
                 ),
-                // 缺席原因（与 #24 的 `basis` 同一条理由）：「该窗没有解禁」与「分母取不到」
-                // 是两种缺席，合成一句就分不出标的属性与接线状态。
-                (
-                    "lockup_supply_reason",
-                    "t-lockup-data.result.content.supply_shock.unavailableReason",
+                position: Position { x: 1300.0, y: 4440.0 },
+                retry: RetryConfig::default(),
+                timeout: None,
+                enabled: true,
+                parent_id: None,
+                compensation: None,
+                continue_on_fail: true,
+            },
+            config: SubWorkflowNodeConfig {
+                sub_workflow_id: super::horizon_tier_template::horizon_tier_template_id(
+                    axagent_harness::holding_period::Period::Mid,
                 ),
-                // PE 历史分位（valuationBand 腿）：`ValuationBand.metricPe.currentPercentile`；
-                // 样本不足时该字段是 null ⇒ 导航失败 ⇒ unit ⇒ 诚实缺席（不拿现价 PE 近似）
-                ("pe_percentile", "t-valuation-band.result.content.metricPe.currentPercentile"),
-                ("f_score", "t-valuation.result.content.fScore.score"),
-                ("consensus_eps", "t-consensus-data.result.content.consensusEps"),
-                ("consensus_estimated", "t-consensus-data.result.content.isEstimated"),
-                // #24（v131）：`expectationRevision` 的**分母** —— 最近一个已披露年报的 EPS
-                // （年度口径，与上面的 `consensus_eps` 同族；季报是年内累计值，不可当年度值用，
-                // 也**不做年化外推**）。它住在 `t-valuation` 的 payload 里：该节点已经调过
-                // `get_financials` ⇒ 扩字段优先于新建节点（新建 = 同一端点再打一遍 + 多一条扇出）。
-                // 两个键分开是因为**缺席有两种**：`basis=no_annual_report_disclosed` 是
-                // 「截止日前没有已披露年报」，而 `latest_eps` 导航失败是「估值节点整体没跑成」
-                // （它还要行情数据）—— 前者是标的属性，后者是接线状态，文案必须不同。
-                ("latest_eps", "t-valuation.result.content.latestEps.value"),
-                ("latest_eps_basis", "t-valuation.result.content.latestEps.basis"),
-                ("flow_persistence", "a-hot-money.content.verdict.flowPersistence"),
-                // v128（B1）：本档风险档 ← **本档**的 cls-risk-level-mid 节点（四条轴仍同全局，按档的是回撤深度）
-                ("overall_risk", "cls-risk-level-mid.result.category"),
-                ("kline_bars", "t-scoring.result.content.kline_json"),
-                ("stop_vol_mult", "stop_vol_mult"),
-                ("take_profit_vol_mult", "take_profit_vol_mult"),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect(),
-        },
-    }));
+                input_mapping: [
+                    ("stock_code", "stock_code"),
+                    ("t-scoring", "t-scoring"),
+                    ("cls-risk-level-mid", "cls-risk-level-mid"),
+                    ("t-lockup-data", "t-lockup-data"),
+                    ("t-valuation", "t-valuation"),
+                    ("t-valuation-band", "t-valuation-band"),
+                    ("t-consensus-data", "t-consensus-data"),
+                    ("horizon_branch_json", "horizon_branch_json"),
+                    ("horizon_prior_json", "horizon_prior_json"),
+                    ("stop_vol_mult", "stop_vol_mult"),
+                    ("take_profit_vol_mult", "take_profit_vol_mult"),
+                    // v137 阈值域三条（同超短扇出那段注释）
+                    ("boll_stddev", "boll_stddev"),
+                    ("volume_surge_ratio", "volume_surge_ratio"),
+                    ("volume_shrink_ratio", "volume_shrink_ratio"),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+                output_var: "h_mid".into(),
+                sub_graph: None,
+            },
+        };
+        // v133（B2-2）：本档游资实例（`a-hot-money--mid`）供 `flowPersistence` 腿。
+        let hm_mid = axagent_harness::holding_period::analyst_node_id("a-hot-money", "mid");
+        fanout.config.input_mapping.insert(hm_mid.clone(), hm_mid.clone());
+        edges.push(edge(&format!("e-{hm_mid}-pm-h-mid"), &hm_mid, "pm-h-mid"));
+        nodes.push(WorkflowNode::SubWorkflow(fanout));
+    }
     for src in [
-        "t-scoring-month",
         "t-scoring",
         "cls-risk-level-mid",
         "t-valuation-band",
         "t-valuation",
         CONSENSUS_TOOL_ID,
-        "a-hot-money",
         "t-lockup-data",
     ] {
         edges.push(edge(&format!("e-{src}-pm-h-mid"), src, "pm-h-mid"));
     }
 
-    nodes.push(WorkflowNode::Code(CodeNode {
+    nodes.push(WorkflowNode::SubWorkflow(SubWorkflowNode {
         base: WorkflowNodeBase {
             id: "pm-h-long".into(),
-            title: "长线分支决策".into(),
+            title: "长线分支决策（子工作流）".into(),
             description: Some(
-                "只吃本档证据的决策分支（R-11）；输出供 pm-arbiter 读，不改主链结论".into(),
+                "本档评分 + 分支决策整段在 `stock-horizon-long` 里跑（B-2b #36）".into(),
             ),
             position: Position { x: 1300.0, y: 4560.0 },
             retry: RetryConfig::default(),
-            timeout: Some(10),
+            timeout: None,
             enabled: true,
             parent_id: None,
             compensation: None,
             continue_on_fail: true,
         },
-        config: CodeNodeConfig {
-            language: "rhai".into(),
-            code: include_str!("../portfolio-mgr-h-long.rhai").to_string(),
-            output_var: "h_long".into(),
-            tool_name: None,
-            execute_directly: true,
+        config: SubWorkflowNodeConfig {
+            sub_workflow_id: super::horizon_tier_template::horizon_tier_template_id(
+                axagent_harness::holding_period::Period::Long,
+            ),
             input_mapping: [
-                ("branch_json", "horizon_branch_json.long"),
+                ("stock_code", "stock_code"),
+                ("t-scoring", "t-scoring"),
+                ("cls-risk-level-long", "cls-risk-level-long"),
+                ("t-valuation", "t-valuation"),
+                ("t-valuation-band", "t-valuation-band"),
+                ("t-consensus-data", "t-consensus-data"),
+                ("t-macro-data", "t-macro-data"),
+                ("horizon_branch_json", "horizon_branch_json"),
                 ("horizon_prior_json", "horizon_prior_json"),
-                ("tier_score", "t-scoring-quarter.result.content.totalScore"),
-                ("macd_dif", "t-scoring-quarter.result.content.indicators.macdDif"),
-                ("macd_dea", "t-scoring-quarter.result.content.indicators.macdDea"),
-                ("rsi_14", "t-scoring-quarter.result.content.indicators.rsi14"),
-                ("pe_percentile", "t-valuation-band.result.content.metricPe.currentPercentile"),
-                ("f_score", "t-valuation.result.content.fScore.score"),
-                ("consensus_eps", "t-consensus-data.result.content.consensusEps"),
-                ("consensus_estimated", "t-consensus-data.result.content.isEstimated"),
-                // #24（v131）：`expectationRevision` 的**分母** —— 最近一个已披露年报的 EPS
-                // （年度口径，与上面的 `consensus_eps` 同族；季报是年内累计值，不可当年度值用，
-                // 也**不做年化外推**）。它住在 `t-valuation` 的 payload 里：该节点已经调过
-                // `get_financials` ⇒ 扩字段优先于新建节点（新建 = 同一端点再打一遍 + 多一条扇出）。
-                // 两个键分开是因为**缺席有两种**：`basis=no_annual_report_disclosed` 是
-                // 「截止日前没有已披露年报」，而 `latest_eps` 导航失败是「估值节点整体没跑成」
-                // （它还要行情数据）—— 前者是标的属性，后者是接线状态，文案必须不同。
-                ("latest_eps", "t-valuation.result.content.latestEps.value"),
-                ("latest_eps_basis", "t-valuation.result.content.latestEps.basis"),
-                // 目标价**只**来自估值结论；`applicable=false` ⇒ 按裁定③不做 PE 分位代理，
-                // 赔率无定义 ⇒ 本档不出仓位（脚本里点名 `takeProfitSource="no_target"`）
-                ("valuation_dcf_upside", "t-valuation.result.content.dcf.upsidePct"),
-                (
-                    "valuation_dcf_applicable",
-                    "t-valuation.result.content.dcf.assumptions.applicable",
-                ),
-                // 宏观只取 PMI（本仓五条真序列里唯一自带荣枯线的量）
-                ("pmi", "t-macro-data.result.content.pmiManufacturing.value"),
-                // v128（B1）：本档风险档 ← **本档**的 cls-risk-level-long 节点（四条轴仍同全局，按档的是回撤深度）
-                ("overall_risk", "cls-risk-level-long.result.category"),
-                ("kline_bars", "t-scoring.result.content.kline_json"),
-                // 本档出场口径 = 目标价止盈 + 论点证伪止损，没有「止盈倍数」这一说 ⇒ 不接
                 ("stop_vol_mult", "stop_vol_mult"),
+                // v137 阈值域三条（同超短扇出那段注释）
+                ("boll_stddev", "boll_stddev"),
+                ("volume_surge_ratio", "volume_surge_ratio"),
+                ("volume_shrink_ratio", "volume_shrink_ratio"),
             ]
             .into_iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
+            output_var: "h_long".into(),
+            sub_graph: None,
         },
     }));
+    // 本档不接 `take_profit_vol_mult`：长档出场口径 = 目标价止盈 + 论点证伪止损，
+    //   没有「止盈倍数」这一说（该判断随分支脚本一起搬进 `stock-horizon-long`）。
     for src in [
-        "t-scoring-quarter",
         "t-scoring",
         "cls-risk-level-long",
         "t-valuation-band",
@@ -5952,7 +6156,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // action=观望、positionPct=0、confidence=0 的全零空壳。
     // 与下方 p-risk-assess 补 e-scoring-p-risk-assess 边的修复同源（见行 1421 注释）。
     edges.push(edge("e-t-scoring-portfolio-mgr", "t-scoring", "portfolio-mgr"));
-    edges.push(edge("e-a-catalyst-portfolio-mgr", "a-catalyst", "portfolio-mgr"));
+    // v133（B2-2）：catalyst_level / untrusted_catalyst 四键的供给边 —— 四个逐档实例
+    //   都要在 portfolio-mgr 前完成（只写映射不写边 = 「变量没到账就被读」）。
+    //   边名与目标 id 由 `analyst_node_id` 生成（R2 门：`base--tier` 字面量不得手抄）。
+    for (base, p, ..) in by_base.get("a-catalyst").into_iter().flatten() {
+        let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+        edges.push(edge(&format!("e-{tid}-portfolio-mgr"), &tid, "portfolio-mgr"));
+    }
     edges.push(edge("e-t-valuation-portfolio-mgr", "t-valuation", "portfolio-mgr"));
     // V79(2026-09-21): 新增的 `t-valuation-band` 同样必须在此补边 —— 它被
     //   portfolio-mgr 的 `input_mapping.valuation_pe_percentile` 引用，缺边则变量不进入
@@ -6025,7 +6235,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // 从 catalyst_level 中提取事件类型。
                     // V58 修复: a-catalyst 是 AgentNode（输出 {role, content, ...}），
                     // 不是 ToolNode/CodeNode，路径应为 .content 而非 .result
-                    ("llm_events", "a-catalyst.content"),
+                    // v133（B2-2）：逐档实例化 ⇒ 四键注入，pace-calc.rhai 内按「第一个有值的实例」
+                    //   归一为 `llm_events`（本节点在选档之前运行，无主档上下文；事件是公告级
+                    //   事实、各档近似，缺席仍按缺席处理）。
+                    ("llm_events_ultra_short", "a-catalyst--ultra_short.content"),
+                    ("llm_events_short", "a-catalyst--short.content"),
+                    ("llm_events_mid", "a-catalyst--mid.content"),
+                    ("llm_events_long", "a-catalyst--long.content"),
                 ]
                 .into_iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -6037,7 +6253,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         edges.push(edge("e-t-hotmoney-data-pace-calc", "t-hotmoney-data", pace_id));
         // P0 修复(2026-07-22): 添加 pace-calc → a-catalyst 依赖边
         // 原缺失此边导致 pace-calc 在 a-catalyst 完成前就执行，llm_events 恒为 null
-        edges.push(edge("e-a-catalyst-pace-calc", "a-catalyst", pace_id));
+        // v133（B2-2）：按档实例化 ⇒ 四个实例各一条边（脚本取第一个有值者，供给必须齐）。
+        //   边名与目标 id 由 `analyst_node_id` 生成（R2 门：`base--tier` 字面量不得手抄）。
+        for (base, p, ..) in by_base.get("a-catalyst").into_iter().flatten() {
+            let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
+            edges.push(edge(&format!("e-{tid}-pace-calc"), &tid, pace_id));
+        }
         // pace-calc → portfolio-mgr（pace_signal 作为 f11 输入）**已在上面「修复 portfolio-mgr
         // 因子输入全空」段接线，此处不得再 push 一次**：v111(2026-10-01) 之前这里正是同形的
         // 第二条，源图因此自带重边（快速链派生器每轮都要合并 + 告警，源链则把重边直接带进
@@ -6138,6 +6359,55 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         },
     }));
 
+    // ── SwitchNode: 数据质量跨轮熔断门（#8 P5，2026-10-06）──
+    // 与上一个 `quality-gate` 的分工：quality-gate 看**本轮** grade（一次分析的取数完整度），
+    //   本节点看**近 N 轮序列**是否已连续异常到熔断线 —— 后者是跨样本事实，本轮 grade="B"
+    //   也可能处于熔断态（前几轮一直拿不到数据、本轮刚好凑齐）。两者不能合并成一个判断，
+    //   否则「本轮数据齐」就会掩盖「近期证据面一直坏」。
+    // 判据不在这里：`dqi_fuse_flag` 由 hooks.rs 从 `data_quality_observations` 读出来后
+    //   **在 Rust 侧判完**再注入（阈值权威 = `dao::repo::data_quality_fuse::DQI_FUSE_STREAK`），
+    //   本处只做 `>= 1` 的存在性判定。
+    // ⚠ 两条出边**必须都带 `source_handle` 且本节点必须声明 `default_case`**：
+    //   `dag_store.rs:117-121` 对「无 default_case 的 switch + 无 handle 的边」恒放行，
+    //   那会让 fused/ok 两支并行执行（同一轮两套真相）。这条约束不是风格问题。
+    // 降级方向：变量缺失或求值失败 ⇒ `SwitchExecutor` 回落 `default_case`（"ok"），即
+    //   **不熔断**。刻意如此：熔断是收紧动作，把一次查询故障当成触发条件会把整条链按最坏
+    //   处理，那是把基础设施抖动转嫁给用户决策。真正的不确定性由 ② 的 `dqiFuseState`
+    //   ="unobserved" 在界面上单独成句，不靠路由假装。
+    nodes.push(WorkflowNode::Switch(SwitchNode {
+        base: WorkflowNodeBase {
+            id: "dqi-fuse-gate".into(),
+            title: "数据质量熔断门（跨轮）".into(),
+            description: Some(
+                "连续多轮拿不到 A 级数据且已触发熔断线时，走保守降级路径；判据在 dao 侧，本节点只读结果"
+                    .into(),
+            ),
+            position: Position { x: 950.0, y: 4500.0 },
+            retry: RetryConfig::default(),
+            timeout: Some(10),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            // 与 quality-gate / decision-explainer 的 cof 配对同理（v10 注释）：本节点的
+            //   判据变量由 hooks 在链首注入，几乎不会失败；cof=true 保证万一失败也不把
+            //   整条链卡死在 Pending。
+            continue_on_fail: true,
+        },
+        config: SwitchNodeConfig {
+            input_var: "dqi_fuse_flag".into(),
+            cases: vec![SwitchCase {
+                value: "value >= 1".into(),
+                label: "fused".into(),
+            }],
+            default_case: Some("ok".into()),
+            match_mode: "expression".into(),
+            use_llm: None,
+            llm_prompt: None,
+            llm_model: None,
+            output_var: "dqi-fuse-gate-result".into(),
+        },
+    }));
+
     // ── Agent: 降级处理路径（数据质量不足时生成保守决策）──
     {
         let fq_id = "quality-fallback";
@@ -6162,12 +6432,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // LLM 重新获取数据会传入空 stock_code，触发无效重试。
             a.config.tools = vec![];
             a.config.system_prompt =
-                "数据质量评估为 D 或 F，上游分析数据不可靠。你需要在数据不足的情况下做出最保守的投资决策。\
+                "本节点有两条进入原因，两种都属数据证据不足：① 本轮数据质量评级为 D 或 F；\
+                 ② 本轮评级尚可，但**近若干轮**数据质量持续未达 A 级、已触发跨轮熔断。\
+                 无论哪种，上游分析数据都不可靠，你需要在数据不足的情况下做出最保守的投资决策。\
                  所有需要的数据已通过输入上下文注入（t-scoring 的 currentPrice/indicators/totalScore、\
                  t-valuation 的估值、t-risk 的风险评分），禁止调用任何工具重新获取数据。\
                  输出JSON格式（严格模式）：{\"action\":\"持有/减持/卖出\",\"positionPct\":0-20,\"confidence\":20-40,\"riskLevel\":\"高风险\",\"reasoning\":\"保守决策理由\"}\
                  规则：action 只能是'持有'/'减持'/'卖出'（禁止买入/增持）；positionPct 0-20（保守低仓位）；\
                  confidence 20-40（数据不足时置信度低，D级给30-40，F级给20-30）；riskLevel 固定为'高风险'。\
+                 reasoning 里要说明依据的是**本轮评级**还是**跨轮熔断**（两者都在输入上下文里），不得把熔断说成本轮 D/F。\
                  只输出上述JSON对象，前后不要有任何其他文字"
                     .to_string();
             a.config.exposed_tools = vec![];
@@ -6287,10 +6560,32 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         id: "e-quality-gate-explainer".into(),
         source: "quality-gate".into(),
         source_handle: Some("acceptable".into()),
+        target: "dqi-fuse-gate".into(),
+        target_handle: None,
+        edge_type: EdgeType::Direct,
+        label: Some("通过 ✓→熔断门".into()),
+    });
+    // ── #8 P5：熔断门的两个出口（两条都必须带 source_handle，见节点处 ⚠ 注释）──
+    //   ok   → decision-explainer（原 acceptable 路径的落点，逐字不变）
+    //   fused→ quality-fallback（复用既有的保守决策节点，不新建 Agent —— 它的输出契约
+    //          已经接好了 decision-explainer 与落库侧，再造一个节点就会出现两份保守路径）
+    edges.push(WorkflowEdge {
+        id: "e-dqi-fuse-gate-explainer".into(),
+        source: "dqi-fuse-gate".into(),
+        source_handle: Some("ok".into()),
         target: "decision-explainer".into(),
         target_handle: None,
         edge_type: EdgeType::Direct,
-        label: Some("通过 ✓→解释".into()),
+        label: Some("未熔断 →解释".into()),
+    });
+    edges.push(WorkflowEdge {
+        id: "e-dqi-fuse-gate-fallback".into(),
+        source: "dqi-fuse-gate".into(),
+        source_handle: Some("fused".into()),
+        target: "quality-fallback".into(),
+        target_handle: None,
+        edge_type: EdgeType::Direct,
+        label: Some("熔断 →保守决策".into()),
     });
     // 替换步骤 2: 删除旧边 e-quality-gate-notify（遍历时过滤掉）
     edges.retain(|e| e.id != "e-quality-gate-notify");
@@ -6698,11 +6993,14 @@ let w_sent = ctx.variables.weight_sentiment ?? 20.0;
 let w_flow = ctx.variables.weight_money_flow ?? 15.0;
 let w_pol = ctx.variables.weight_policy ?? 10.0;
 
-let tech = ctx.results["a-market-analyst"] ?? 50.0;
-let fund = ctx.results["a-fundamentals"] ?? 50.0;
-let sent = ctx.results["a-sentiment"] ?? 50.0;
-let flow = ctx.results["a-hot-money"] ?? 50.0;
-let pol = ctx.results["a-policy"] ?? 50.0;
+// v133（B2-2）：分析师按档实例化后，ctx.results 的键形如 `a-market-analyst--mid` ——
+// 每个维度按「子集中最接近中线的实例」多级兜底（本工具无档位上下文；同 base 各档结论
+// 近似，取一个代表即可，缺席仍退 50.0 中性分 —— 工具侧既有语义，本次不动）。
+let tech = ctx.results["@MK_MID@"] ?? ctx.results["@MK_SHORT@"] ?? 50.0;
+let fund = ctx.results["@FUND_MID@"] ?? ctx.results["@FUND_LONG@"] ?? 50.0;
+let sent = ctx.results["@SENT_SHORT@"] ?? ctx.results["@SENT_ULTRA@"] ?? 50.0;
+let flow = ctx.results["@HM_MID@"] ?? ctx.results["@HM_SHORT@"] ?? 50.0;
+let pol = ctx.results["@POL_LONG@"] ?? 50.0;
 
 let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol * w_pol) / 100.0;
 #{
@@ -6713,10 +7011,49 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
            else { "回避" }
 }
 "##;
+    // v133（B2-2）：占位符 → 权威 id（helper 生成；「带档 id 只能由 helper 产出」——
+    // check-analyst-id-shape 的 R2 把脚本正文里的 `base--tier` 字面量计为待修面）。
+    let stock_score_rhai = stock_score_rhai
+        .replace(
+            "@MK_MID@",
+            &axagent_harness::holding_period::analyst_node_id("a-market-analyst", "mid"),
+        )
+        .replace(
+            "@MK_SHORT@",
+            &axagent_harness::holding_period::analyst_node_id("a-market-analyst", "short"),
+        )
+        .replace(
+            "@FUND_MID@",
+            &axagent_harness::holding_period::analyst_node_id("a-fundamentals", "mid"),
+        )
+        .replace(
+            "@FUND_LONG@",
+            &axagent_harness::holding_period::analyst_node_id("a-fundamentals", "long"),
+        )
+        .replace(
+            "@SENT_SHORT@",
+            &axagent_harness::holding_period::analyst_node_id("a-sentiment", "short"),
+        )
+        .replace(
+            "@SENT_ULTRA@",
+            &axagent_harness::holding_period::analyst_node_id("a-sentiment", "ultra_short"),
+        )
+        .replace(
+            "@HM_MID@",
+            &axagent_harness::holding_period::analyst_node_id("a-hot-money", "mid"),
+        )
+        .replace(
+            "@HM_SHORT@",
+            &axagent_harness::holding_period::analyst_node_id("a-hot-money", "short"),
+        )
+        .replace(
+            "@POL_LONG@",
+            &axagent_harness::holding_period::analyst_node_id("a-policy", "long"),
+        );
     let rhai_tool_defs: Vec<RhaiToolDef> = vec![RhaiToolDef {
         tool_name: "compute_stock_score".into(),
         description: Some("综合技术面/基本面/情绪面/资金面/政策面计算 0-100 评分".into()),
-        code: stock_score_rhai.into(),
+        code: stock_score_rhai,
     }];
     let tool_defs_val = serde_json::to_string(&rhai_tool_defs).map_err(|e| {
         ErrorResponse::new(stock_setup::INTERNAL)
@@ -7130,7 +7467,6 @@ const FAST_REQUIRED_NODE_IDS: &[&str] = &[
     // 段 A · 数据源：10 个维度数据 + 质押 + 指数行情 + 机构调研 + 龙虎榜
     "t-market-data",
     "t-sentiment-data",
-    "t-news-data",
     "t-fundamentals-data",
     "t-policy-data",
     "t-hotmoney-data",
@@ -7142,15 +7478,21 @@ const FAST_REQUIRED_NODE_IDS: &[&str] = &[
     "t-index-quotes",
     "t-institutional-visits",
     "t-dragon-tiger-data",
-    // 段 A · 算法腿（含依赖顺序：scoring → valuation → band / risk / week → month）
+    // 段 A · 算法腿（含依赖顺序：scoring → valuation → band / risk）
+    // v135（B-2b #36）：`t-scoring-{hour,week,month,quarter}` 四个逐档评分节点**已从源图摘除**
+    //   （搬进四张档子模板）。本链不跟着扇出（§九十一(5) 决策点 1 自行拍定：不跟），理由两条：
+    //   ① 本链不建那 10 个分析师节点 ⇒ 子模板的输入键（逐档分析师实例等）在本链恒缺席，
+    //     而 `map_inputs` 是严格的 ⇒ 扇出去只得到「输入残缺的子执行」；
+    //   ② 「结构性缺口不得在 UI 造成歧义」：那等于把「本链没有这些证据」伪装成「这一档算不出来」。
+    //   ⇒ 本链没有逐档分支（改图前后都一样：`cls-risk-level-*` 与 `pm-h-*` 从来不在保留集里），
+    //   `FAST_BRIEF_INPUTS` 那四路 `algo_scoring_*` 现改指**日线 `t-scoring`** ——
+    //   它们本来拿的就是日线（旧 `("period","hourly")` 是死参数，见 §九十二(4)）⇒ 出参逐位不变。
+    //   键名里的 `_week` / `_month` 是历史遗留：本链无按档评分可给，改名属 #41（要连
+    //   `raw-digest.rhai` 的段名一起动），本批不动脚本 ⇒ 如实记录而不留假名实值。
     "t-scoring",
     "t-valuation",
     "t-valuation-band",
     "t-risk",
-    "t-scoring-hour",
-    "t-scoring-week",
-    "t-scoring-month",
-    "t-scoring-quarter",
     // 段 A · 聚合与简报
     "raw-data",
     "analyst-brief",
@@ -7160,6 +7502,9 @@ const FAST_REQUIRED_NODE_IDS: &[&str] = &[
     "portfolio-risk-gate",
     "rule-check",
     "quality-gate",
+    // #8 P5 跨轮熔断门：夹在 quality-gate 的 acceptable 出口与 decision-explainer 之间，
+    //   快速链同样要经过它（`dqi_fuse_flag` 由 hooks 注入，两条链共用同一注入点）。
+    "dqi-fuse-gate",
     "quality-fallback",
     FAST_EXPLAINER_NODE_ID,
     "notify-result",
@@ -7206,6 +7551,13 @@ const FAST_QUALITY_GATE_CASE_EXPR: &str = "value >= 60.0";
 /// 与段 F 的引用都写 `analyst-brief.result.*`，换 id 会让这些引用一起漂移。
 const FAST_BRIEF_NODE_ID: &str = "analyst-brief";
 
+/// 快速链自建的新闻取数节点 id（v133，B2-2 连带）。
+///
+/// 源图 v133 起摘除 `t-news-data`（随 `a-news` 退役），而本链 `j-news` 维度仍需
+/// 新闻原文 ⇒ 由 [`fast_news_tool_node`] 在派生时自建；`derive_fast_workflow_graph`
+/// 的保留集与补边都以本常量为单点。
+const FAST_NEWS_SELF_BUILT_ID: &str = "t-news-data";
+
 /// 段 F 的解释节点 id（沿用源图同名节点，快速链只改它的 `context_sources`）。
 ///
 /// 单点定义的理由：它同时出现在保留集 [`FAST_REQUIRED_NODE_IDS`] 与 ⑥ 步的查找里，
@@ -7236,10 +7588,15 @@ const FAST_BRIEF_INPUTS: [(&str, &str); 22] = [
     ("algo_valuation", "t-valuation.result.content"),
     ("algo_valuation_band", "t-valuation-band.result.content"),
     ("algo_risk", "t-risk.result.content"),
-    ("algo_scoring_hour", "t-scoring-hour.result.content"),
-    ("algo_scoring_week", "t-scoring-week.result.content"),
-    ("algo_scoring_month", "t-scoring-month.result.content"),
-    ("algo_scoring_quarter", "t-scoring-quarter.result.content"),
+    // v135（B-2b #36）：下面四路原来指向 `t-scoring-{hour,week,month,quarter}` 四个逐档节点，
+    // 那四个节点现在在四张**档子模板**里，本链不扇出（判据与理由见
+    // [`FAST_REQUIRED_NODE_IDS`] 的 v135 条）⇒ 四路统一改指日线 `t-scoring`。
+    // ⚠ 这不是「换数据源」而是**如实**：旧路径拿到的本来就是日线（`("period","hourly")`
+    // 是死参数，`compute_scoring` 恒走 daily，PLAN §九十二(4)）⇒ 本链简报出参逐位不变。
+    ("algo_scoring_hour", "t-scoring.result.content"),
+    ("algo_scoring_week", "t-scoring.result.content"),
+    ("algo_scoring_month", "t-scoring.result.content"),
+    ("algo_scoring_quarter", "t-scoring.result.content"),
 ];
 
 /// 快速链下 `data-quality` 的**逐维度输入重指向**表：`(诊断缩写, Jev 判定节点 id, 简报段键)`。
@@ -7275,10 +7632,16 @@ const FAST_BRIEF_INPUTS: [(&str, &str); 22] = [
 ///
 /// ⚠ `catalyst_level` 的处置见 [`apply_fast_chain_overrides`] ⑦ —— 它必须指向**字符串**
 ///   （`missing_factors` 里有 `catalyst_level == ""` 的字符串比较，map 参与比较会抛错）。
-const FAST_DQ_DIMENSIONS: [(&str, &str, &str); 10] = [
+///
+/// ⚠ v133（B2-2）：**news 行已删**（10 → 9）—— 源图 `data-quality` 的分析师槽位已按
+///   新基线生成（9 个 a-* + value-investor，a-news 退役），`news_*` 键不复存在 ⇒
+///   `get_mut` 会响亮报错，故必须同批移除。快速链 `j-news` 判定**仍在**（其消费面是
+///   `raw-digest` 段与后续聚合），只是不再映射进 `data-quality`（源图无对应槽位）。
+///   `val` 槽（value-investor 代表实例）在快速链**不重指向** ⇒ 恒 Null ⇒ 该维如实
+///   记 missing（本链无价值评估节点，不伪造）。
+const FAST_DQ_DIMENSIONS: [(&str, &str, &str); 9] = [
     ("mk", "j-market", "market"),
     ("sent", "j-sentiment", "sentiment"),
-    ("news", "j-news", "news"),
     ("fund", "j-fundamentals", "fundamentals"),
     ("pol", "j-policy", "policy"),
     ("hm", "j-hotmoney", "hotmoney"),
@@ -7485,6 +7848,32 @@ struct JevNodeSpec {
 /// 类别词表由 `categories` **派生**而非另写一遍 ⇒ 改类别时 prompt 自动跟随，
 /// 不会出现「prompt 让模型输出 A、`categories` 里只有 B」的错配 —— 那种错配不报错，
 /// 只会让执行器的 `matched` 落到「原样文本」回退分支，把自由文本塞进 `category`。
+/// 分析师 base → **Rhai 变量短名词根**（`a-market-analyst → a_market_raw`）。
+///
+/// 存在理由（B2-2）：逐档实例的 `analyst-brief` input_mapping 键 = `{短名}__{tier}`，
+/// 键名域（短名词根）在此单点声明 —— 与 `analyst_node_id`（id 域）分工明确：
+/// id 用 `--` 分隔（`a-market-analyst--mid`，仓内既有唯一解），Rhai 变量名用 `__`
+/// （标识符不允许 `-`，`--` 只属 id 域）。
+///
+/// `value-investor` 也在表内（它不是 `a-` 前缀，但同为子集成员，中/长档各一实例）。
+/// 未登记的 base 原样返回 —— 与旧实现的 `_ => base_id` 同策略（保留可读性，
+/// 且 seed 的 1.2 自证已保证 base 集与 `analyst_subset()` 同集）。
+pub(super) fn analyst_short_key(base: &str) -> &str {
+    match base {
+        "a-market-analyst" => "a_market_raw",
+        "a-sentiment" => "a_sentiment_raw",
+        "a-fundamentals" => "a_fundamentals_raw",
+        "a-policy" => "a_policy_raw",
+        "a-hot-money" => "a_hot_money_raw",
+        "a-lockup" => "a_lockup_raw",
+        "a-research" => "a_research_raw",
+        "a-sector" => "a_sector_raw",
+        "a-catalyst" => "a_catalyst_raw",
+        "value-investor" => "value_investor_raw",
+        o => o,
+    }
+}
+
 fn dimension_prompt(dimension: &str, criteria: &str, categories: &[&str]) -> String {
     format!(
         "你是 A 股判定器，**只**判定「{dimension}」这一个维度，不要综合其它维度、\
@@ -7500,6 +7889,42 @@ fn dimension_prompt(dimension: &str, criteria: &str, categories: &[&str]) -> Str
 /// 节点 id 一律取自上面那几个 `const` 数组（不在本函数里另写字面量）：
 /// 聚合器的 `input_sources`、`trader-proxy` 的补边清单都按同一份 const 生成
 /// ⇒ 「节点少了 / id 拼错」会在构造期直接对不上，而不是静默少一条依赖。
+/// 快速链自建的新闻取数节点（v133，B2-2 连带；id 与源图 v132 前逐字一致）。
+///
+/// 为什么自建：源图 v133 起摘除 `t-news-data`（随 `a-news` 退役 —— 公告方向通道由
+/// `a-catalyst` 承载），而快速链的 `j-news` 维度仍以「新闻原文」为输入
+/// （`FAST_BRIEF_INPUTS` 的 `news_data` 段）⇒ 本链自建同 id、同工具、同参数契约的
+/// 取数节点，行为与源图 v132 前逐字一致。挂在 `trigger` 下、供给 `analyst-brief`
+/// （两条边由 `derive_fast_workflow_graph` 显式补——源图已无对应边）。
+fn fast_news_tool_node() -> axagent_harness::workflow_types::WorkflowNode {
+    use axagent_harness::workflow_types::{
+        Position, RetryConfig, ToolNode, ToolNodeConfig, WorkflowNode, WorkflowNodeBase,
+    };
+    use std::collections::HashMap;
+    let mut input_mapping = HashMap::new();
+    input_mapping.insert("stock_code".to_string(), "stock_code".to_string());
+    WorkflowNode::Tool(ToolNode {
+        base: WorkflowNodeBase {
+            id: "t-news-data".into(),
+            title: "获取近期新闻".into(),
+            description: Some("获取数据: get_stock_news".into()),
+            // 派生图画布坐标：放在主体左上外侧，不与 j-* 区重叠（仅影响编辑器观感）。
+            position: Position { x: -320.0, y: 0.0 },
+            retry: RetryConfig { enabled: true, max_retries: 2, ..Default::default() },
+            timeout: None,
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: false,
+        },
+        config: ToolNodeConfig {
+            tool_name: "get_stock_news".into(),
+            input_mapping,
+            output_var: "t-news-data".into(),
+        },
+    })
+}
+
 fn fast_jev_nodes() -> Vec<JevNodeSpec> {
     let mut specs: Vec<JevNodeSpec> = Vec::new();
 
@@ -8006,7 +8431,7 @@ fn node_declared_sources(node: &axagent_harness::workflow_types::WorkflowNode) -
 }
 
 /// 构造一条 `Direct` 边（与源种子内 `edge(...)` 闭包同形）。
-fn direct_edge(
+pub(crate) fn direct_edge(
     id: &str,
     source: &str,
     target: &str,
@@ -8619,10 +9044,17 @@ fn derive_fast_workflow_graph(
             keep.insert(*id);
         }
     }
+    // v133（B2-2）：`t-news-data` 随 a-news 从源图摘除，但本链的 `j-news` 维度仍需
+    //   新闻数据（`FAST_BRIEF_INPUTS.news_data`）⇒ 本链**自建**（`fast_news_tool_node`）。
+    //   不进 `FAST_REQUIRED_NODE_IDS`（那份清单语义是「源图必须具备」），
+    //   但进 keep 以便 ④ 步可见、并在 ④ 后显式补两条边。
+    keep.insert(FAST_NEWS_SELF_BUILT_ID);
 
     // ② 节点（保持源图顺序，便于人工比对派生结果与源图）
     let mut nodes: Vec<axagent_harness::workflow_types::WorkflowNode> =
         source_nodes.iter().filter(|n| keep.contains(n.base_id())).cloned().collect();
+    // v133：注入自建的新闻取数节点（源图已无该节点 ⇒ 不在上面的筛选结果里）。
+    nodes.push(fast_news_tool_node());
 
     // ③ 容器归属：父节点未保留 ⇒ 清空，避免指向不存在的父级
     for node in nodes.iter_mut() {
@@ -8685,6 +9117,18 @@ fn derive_fast_workflow_graph(
         seen.insert(e.id.as_str(), e);
         edges.push(e.clone());
     }
+
+    // v133：自建新闻节点的**入边**（源图无对应边可裁留 ⇒ 在派生里显式补）。
+    //   挂 trigger 与其余取数节点同形，不入孤儿修复的口。
+    //
+    // ⚠ **出边不许在这里手工补**（本行曾同时 push `e-t-news-data-analyst-brief`，是缺陷）：
+    //   `analyst-brief` 在派生图里的 22 路上游**全部**靠 ⑥ 的孤儿修复按 `input_mapping` 接线
+    //   （④ 已把它的映射换成 `FAST_BRIEF_INPUTS`）。手工补上其中任意一条，brief 的入度就从 0
+    //   变 1 ⇒ 孤儿修复整个跳过它 ⇒ 其余 21 路「映射里有、边上没有」。后果不是报错而是
+    //   「跑得很快、全是空」（`repair_orphan_nodes` 文档点名的同一失败形态）：brief 只等到新闻，
+    //   其它维度按声明读取却没有边保证就绪 ⇒ 快速链简报静默残缺。
+    //   `news_data` 这路本来就写在 `FAST_BRIEF_INPUTS` 里 ⇒ 由修复步骤补出同一条边、同一个 id。
+    edges.push(direct_edge("e-trigger-t-news-data", "trigger", FAST_NEWS_SELF_BUILT_ID));
 
     // ⑤ 快速链专属的**配置层**改造（追加 `trader-proxy`、改写 `trader` 前缀、
     //    换掉 `quality-gate` 判据）—— 必须排在孤儿修复之前：新节点自带入边，
@@ -9507,6 +9951,22 @@ mod fast_workflow_derivation_tests {
                 "`data-quality` 的映射 `{key}` 仍指向已被裁掉的分析师节点: {value}"
             );
             let root = value.split('.').next().unwrap_or(value);
+            // `val_*` 是**第二类**刻意保留的原路径：源图 v133 起该槽位指向 `value-investor`
+            // 的代表实例，而本链没有价值评估/覆写链 ⇒ 恒 Null ⇒ 该维度如实记 missing
+            // （`FAST_DQ_DIMENSIONS` 文档尾段那条裁定）。显式点名，两头的错都要能红：
+            //   · 让它撞通用红 ⇒ 把已决边界冒充成真缺陷；
+            //   · 无条件 continue ⇒ 将来任何 val 路径漂移（包括真的补了价值节点）都无人知。
+            if key.starts_with("val_") {
+                assert!(
+                    root.starts_with("value-investor"),
+                    "`{key}` 以 val_ 前缀豁免，但上游根不是 value-investor 系: {value}"
+                );
+                assert!(
+                    !ids.contains(root),
+                    "派生图里出现了 `{root}` ⇒ 「本链无价值评估节点」这条豁免前提已失效，                     必须回到 ⑦ 把它重指向，而不是留着恒 Null"
+                );
+                continue;
+            }
             assert!(ids.contains(root), "`{key}` 的上游根 `{root}` 不在派生图内 ⇒ 恒 Null");
         }
     }
@@ -9859,20 +10319,173 @@ mod fast_workflow_derivation_tests {
                 })
                 .unwrap_or_else(|| panic!("源图应含分析师节点 `{id}`"))
         };
-        for id in ["a-fundamentals", "a-lockup"] {
+        // v133 起分析师是**逐档实例**（`a-fundamentals--mid` 等），裸 base id 已不存在。
+        // 期望集由图现算：按 `analyst_base_of` 归组 —— 既不手抄档名集合，也不允许「某个档漏挂」。
+        let all_agent_ids: Vec<String> = nodes
+            .iter()
+            .filter(|n| matches!(n, WorkflowNode::Agent(_)))
+            .map(|n| n.base_id().to_string())
+            .collect();
+        let instances_of = |base: &str| -> Vec<String> {
+            let mut v: Vec<String> = all_agent_ids
+                .iter()
+                .filter(|id| {
+                    axagent_harness::holding_period::analyst_base_of(id).is_some_and(|b| b == base)
+                })
+                .cloned()
+                .collect();
+            v.sort();
+            v
+        };
+        for base in ["a-fundamentals", "a-lockup"] {
+            let instances = instances_of(base);
+            assert!(!instances.is_empty(), "源图里一个 `{base}` 的逐档实例都没有 ⇒ 测试前提失效");
+            for id in &instances {
+                assert!(
+                    sources(id).iter().any(|s| s == "t-pledge-data"),
+                    "`{id}` 的 `context_sources` 必须含 `t-pledge-data`（否则质押取到了也进不了 prompt）"
+                );
+            }
+            for id in &instances {
+                assert!(
+                    edges
+                        .iter()
+                        .any(|e| e.source.as_str() == "t-pledge-data" && e.target.as_str() == id),
+                    "缺「t-pledge-data → {id}」供给边：只写 `context_sources` 不写边 ⇒ 该节点不等工具完成，取到的是空变量（时序竞态）"
+                );
+            }
+        }
+    }
+
+    /// #8 P5 熔断门的接线形态（两条链都要过）。
+    ///
+    /// 锁的不是「节点存在」这种弱断言，而是**决定调度语义的四件事**：
+    /// ① 判据变量 = `dqi_fuse_flag`（注入的是已判定结果，脚本与门都不比阈值）；
+    /// ② 必须声明 `default_case`，且**两条出边都带 `source_handle`** ——
+    ///    `dag_store.rs:117-121`：无 default_case 的 switch 对无 handle 的边**恒放行**，
+    ///    那会让 fused/ok 两支并行执行，同一轮出两套真相（这条测试的全部价值就在这儿）；
+    /// ③ `quality-gate` 的 acceptable 出口现在指向本门，**不再**直指 decision-explainer；
+    /// ④ `quality-fallback` 因此成为「互斥分支汇聚点」，入度必须恰为 2 ——
+    ///    引擎靠「未选中的控制边不计入依赖」放行（`dag_store.rs:288-301`），
+    ///    多一条无 handle 的入边就会让它无条件执行。
+    #[tokio::test]
+    async fn dqi_fuse_gate_is_wired_on_both_chains() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+
+        for template_id in [SOURCE_TEMPLATE_ID, FAST_TEMPLATE_ID] {
+            let model = row(db, template_id).await;
+            let nodes = parse_nodes(&model);
+            let edges = parse_edges(&model);
+
+            let sw = nodes
+                .iter()
+                .find(|n| n.base_id() == "dqi-fuse-gate")
+                .unwrap_or_else(|| panic!("模板 `{template_id}` 缺 `dqi-fuse-gate` 节点"));
+            let WorkflowNode::Switch(gate) = sw else {
+                panic!("`dqi-fuse-gate` 必须是 Switch 节点，实际变体不符");
+            };
+            assert_eq!(gate.config.input_var, "dqi_fuse_flag", "判据必须是注入的结果数");
+            assert_eq!(
+                gate.config.default_case.as_deref(),
+                Some("ok"),
+                "缺 default_case ⇒ 两支并行"
+            );
+            assert_eq!(gate.config.cases.len(), 1, "只登记一个 fused 条件支");
+            assert_eq!(gate.config.cases[0].label, "fused");
+            // cof 配对：本门失败不得把链卡在 Pending（同 quality-gate / decision-explainer 的 v10 规矩）
+            assert!(gate.base.continue_on_fail, "`dqi-fuse-gate` 必须 continue_on_fail=true");
+
+            let out: Vec<&WorkflowEdge> =
+                edges.iter().filter(|e| e.source.as_str() == "dqi-fuse-gate").collect();
+            assert_eq!(out.len(), 2, "本门必须恰有两条出边");
+            for e in &out {
+                assert!(
+                    e.source_handle.is_some(),
+                    "switch 出边缺 source_handle ⇒ 未选中支也会放行"
+                );
+            }
+            let target_of = |handle_name: &str| -> Option<String> {
+                out.iter()
+                    .find(|e| e.source_handle.as_deref() == Some(handle_name))
+                    .map(|e| e.target.to_string())
+            };
+            assert_eq!(
+                target_of("ok").as_deref(),
+                Some("decision-explainer"),
+                "未熔断必须回到原 acceptable 落点"
+            );
+            assert_eq!(
+                target_of("fused").as_deref(),
+                Some("quality-fallback"),
+                "熔断必须落到既有保守决策节点（复用，不另建第二份保守路径）"
+            );
+
+            // ③ quality-gate 的 acceptable 支改指本门；直连 explainer 的旧边不得残留
+            let acceptable: Vec<&WorkflowEdge> = edges
+                .iter()
+                .filter(|e| {
+                    e.source.as_str() == "quality-gate"
+                        && e.source_handle.as_deref() == Some("acceptable")
+                })
+                .collect();
+            assert_eq!(acceptable.len(), 1, "acceptable 支应恰有一条");
+            assert_eq!(
+                acceptable[0].target,
+                "dqi-fuse-gate".to_string(),
+                "acceptable 支要接进熔断门"
+            );
+
+            // ④ 汇聚点入度恰为 2
+            let into_fallback: Vec<&WorkflowEdge> =
+                edges.iter().filter(|e| e.target.as_str() == "quality-fallback").collect();
+            assert_eq!(
+                into_fallback.len(),
+                2,
+                "quality-fallback 的入边必须恰为「quality-gate 默认支 + 熔断门 fused 支」"
+            );
             assert!(
-                sources(id).iter().any(|s| s == "t-pledge-data"),
-                "`{id}` 的 `context_sources` 必须含 `t-pledge-data` \
-                 （否则质押数据取到了也进不了它的 prompt ⇒ 报告只能写「质押信息缺失」）"
+                into_fallback
+                    .iter()
+                    .any(|e| e.source.as_str() == "quality-gate" && e.source_handle.is_none()),
+                "quality-gate 的降级支（default，无 handle）必须还在"
             );
         }
+
+        // 快速链的必备清单要显式含它 —— 源图以后删了这个节点，派生要报错而不是静默少一块
         assert!(
-            edges
-                .iter()
-                .any(|e| e.source.as_str() == "t-pledge-data"
-                    && e.target.as_str() == "a-fundamentals"),
-            "缺「t-pledge-data → a-fundamentals」供给边：只写 `context_sources` 不写边 ⇒ \
-             该节点不等工具完成，取到的是空变量（时序竞态）"
+            FAST_REQUIRED_NODE_IDS.contains(&"dqi-fuse-gate"),
+            "`dqi-fuse-gate` 必须进 FAST_REQUIRED_NODE_IDS"
         );
+    }
+
+    /// 第三生效面的产端契约：`portfolio-mgr` 的三个同名映射必须在节点级 `input_mapping` 里，
+    /// 且**快速链不许把它们摘掉** —— 摘掉就是「脚本读不到 ⇒ 静默按未注入处理」，
+    /// 界面上与「没熔断」完全同形（同 `dqi_score`/`dqi_grade` 那次判废的理由反方向）。
+    #[tokio::test]
+    async fn portfolio_mgr_receives_dqi_fuse_inputs_on_both_chains() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed_both(db).await;
+
+        for template_id in [SOURCE_TEMPLATE_ID, FAST_TEMPLATE_ID] {
+            let model = row(db, template_id).await;
+            let nodes = parse_nodes(&model);
+            let pm = nodes
+                .iter()
+                .find(|n| n.base_id() == "portfolio-mgr")
+                .unwrap_or_else(|| panic!("模板 `{template_id}` 缺 `portfolio-mgr`"));
+            let WorkflowNode::Code(code) = pm else {
+                panic!("`portfolio-mgr` 必须是 Code 节点");
+            };
+            for key in ["dqi_streak", "dqi_fuse_flag", "dqi_observations"] {
+                assert_eq!(
+                    code.config.input_mapping.get(key).map(String::as_str),
+                    Some(key),
+                    "模板 `{template_id}` 的 portfolio-mgr 缺同名映射 `{key}` ⇒ Rhai 里恒为缺失"
+                );
+            }
+        }
     }
 }

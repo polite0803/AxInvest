@@ -228,6 +228,10 @@ jobs:
           node scripts/check-horizon-weight-parity.mjs --selftest
           node scripts/check-horizon-weight-parity.mjs
           node scripts/audit-inject-coverage.mjs --strict
+          # v135（B-2b #36）：四个 `pm-h-<档>` 分支节点已从主图种子搬进档子模板 builder
+          # ⇒ 审计面跟着搬（不搬就四处同时失去读取面而照样绿，PLAN §九十一(2.5)）。
+          # 与 scripts/ci-check.mjs 的对应 step **逐字同源**。
+          node scripts/audit-inject-coverage.mjs --tier all --strict
 
       # JSON 数字进 Rhai 有两条通道：顶层标量落 f64、**嵌层整数落 i64**（code_executor 先
       # as_f64 / json_value_to_dynamic 先 as_i64）⇒ `type_of(x)=="f64"` 读嵌层值时把整数
@@ -255,11 +259,35 @@ jobs:
         run: |
           node scripts/check-snapshot-whitelist.mjs --selftest
           node scripts/check-snapshot-whitelist.mjs
+
+      # #31（2026-10-05）：跨行聚合入口的按代筛样登记 —— 四类分列（统计/注入该筛、
+      # 呈现/单条**不该筛**、pending 源表无列）。与 scripts/ci-check.mjs 对应两条 step 逐字同源。
+      - name: Check generation-scope registry
+        run: |
+          node scripts/check-generation-scope-registry.mjs --selftest
+          node scripts/check-generation-scope-registry.mjs
       # B2-1 前置：分析师 id 形态门（base 域唯一 / 带档后缀只能由 helper 产出 / 裸匹配基线只许降）
       - name: Analyst id shape gate
         run: |
           node scripts/check-analyst-id-shape.mjs --selftest
           node scripts/check-analyst-id-shape.mjs
+
+      # #7 ②④（2026-10-06）：逐档分支的档内纯度门 —— 四个 `pm-h-<档>` 种子块 + 四份
+      # `portfolio-mgr-h-<档>.rhai` 只读本档，且四档 tier_score 来源互不相同。
+      # 与 scripts/ci-check.mjs 对应两条 step 逐字同源。
+      - name: Check tier purity
+        run: |
+          node scripts/check-tier-purity.mjs --selftest
+          node scripts/check-tier-purity.mjs
+
+      # v137（裁定 2「先加设施再接线」，PLAN §一○五）：面板「技术指标」8 个变量从空接线变成真生效
+      # 之后，新增的失效形态是**接错域**（窗口域五条接到四档 ⇒ 四档窗口重新焊成同一份）与
+      # **默认值手抄漂移**（面板那份是 TS 手抄副本，抄错就把「接线」变成「改现网数值」）。
+      # 与 scripts/ci-check.mjs 的对应 step 逐字同源。
+      - name: Check indicator-config scope (panel defaults + two domains)
+        run: |
+          node scripts/check-indicator-config-scope.mjs --selftest
+          node scripts/check-indicator-config-scope.mjs
 
       - name: Check frontend formatting (dprint)
         run: npm run format:check

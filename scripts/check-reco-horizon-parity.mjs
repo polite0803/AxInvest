@@ -405,6 +405,8 @@ const SERENITY_CARD = "src/components/stock-analysis/SerenityCandidateCard.tsx";
 const MOVER_ENGINE = "src-tauri/crates/analysis-engine/src/mover_recall.rs";
 const MOVER_CMD = "src-tauri/src/commands/mover_recall.rs";
 const MOVER_PANEL = "src/components/stock-analysis/MoverRecallPanel.tsx";
+// #10 P7：妖股标签的消费端（逐档反思行）—— 同归入口径边界与「判据单源」两条门。
+const REFLECTION_CMD = "src-tauri/src/commands/stock_workflow/reflection.rs";
 const SEED_VARS = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
 const MOVER_TIERS = ["ultra_short", "short", "mid", "long"];
 
@@ -486,6 +488,51 @@ function moverVarDescriptions(seedSrc) {
     if (m) { out.push([tier, m[1]]); }
   }
   return out;
+}
+
+/**
+ * 门 m：妖股标签的**消费端单源**（#10 P7，2026-10-06）。
+ *
+ * 反思链判妖股只能经由 `mover_recall::mover_label_for` —— 阈值、窗口未满、两种「拿不到」的归属
+ * 都收在那一个纯函数里。消费端一旦自己写比较（如 `gain >= 20.0`），面板调 `mover_gain_*` 就只影响
+ * 达标核查、不影响标签 ⇒ 同一个名目两套判据，而且**毫无症状**。
+ *
+ * 只看剥注释后的代码（注释里谈口径是允许的，与「l 正控」同型）。数字按**边界**匹配而不是子串：
+ * `120.0` 里含 `20.0`，子串判据会把别处的价格报成阈值 —— 那是一条会自己造红的门。
+ */
+function checkMoverLabelConsumer(reflectionSrc) {
+  const violations = [];
+  let scanned = 0;
+  const code = stripCommentLines(reflectionSrc);
+  for (const needle of ["mover_label_for", "tier_rules_from_vars", "price_change_pct"]) {
+    scanned += 1;
+    if (!code.includes(needle)) {
+      violations.push(REFLECTION_CMD + ": 代码里没有 " + needle + " ⇒ 标签的判据/阈值/口径漂到了第二处");
+    }
+  }
+  const digits = "0123456789.";
+  for (const line of code.split(String.fromCharCode(10))) {
+    if (line.indexOf("gain") < 0 && line.indexOf("mover") < 0) {
+      continue;
+    }
+    for (const lit of ["10.0", "20.0", "30.0", "40.0"]) {
+      let at = line.indexOf(lit);
+      while (at >= 0) {
+        const before = at === 0 ? "" : line[at - 1];
+        const afterAt = at + lit.length;
+        const after = afterAt < line.length ? line[afterAt] : "";
+        if (digits.indexOf(before) < 0 && digits.indexOf(after) < 0) {
+          violations.push(
+            REFLECTION_CMD + ": 行内拿出厂阈值 " + lit + " 直接比较 ⇒ 第二份判据：" + line.trim().slice(0, 72),
+          );
+          break;
+        }
+        at = line.indexOf(lit, afterAt);
+      }
+    }
+    scanned += 1;
+  }
+  return { violations, scanned };
 }
 
 /**
@@ -828,10 +875,27 @@ function selftest() {
         seedFixture(),
       ).violations.length
         + checkNoPriceLimitWording(
-          [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL].map((f) => ({ name: f, src: read(f) })),
+          [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL, REFLECTION_CMD].map((f) => ({ name: f, src: read(f) })),
           read(SEED_VARS),
         ).violations.length,
       want: 0,
+    },
+    {
+      name: "m 正控（真实消费端走 mover_label_for / 单源阈值 / 原始涨幅口径）应绿",
+      got: checkMoverLabelConsumer(read(REFLECTION_CMD)).violations.length,
+      want: 0,
+    },
+    {
+      name: "m 负控（消费端自己比出厂阈值 20.0）必须红且点名阈值",
+      got: checkMoverLabelConsumer("      let label = if gain_pct >= 20.0 { mover } else { normal };").violations
+        .filter((v) => v.includes("第二份判据")).length,
+      want: 1,
+    },
+    {
+      name: "m 负控（标签拿扣费净收益冒充原始涨幅）必须红",
+      got: checkMoverLabelConsumer("  mover_label_for(&tier_rules_from_vars(v), Some(net_return_pct), true);")
+        .violations.filter((v) => v.includes("price_change_pct")).length,
+      want: 1,
     },
   ];
   let bad = 0;
@@ -931,12 +995,18 @@ function main() {
     ],
     [
       "l 口径边界（用户可见文案不得出现「涨停」）",
-      [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL, SEED_VARS].every((f) => fs.existsSync(path.join(ROOT, f)))
+      [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL, REFLECTION_CMD, SEED_VARS].every((f) => fs.existsSync(path.join(ROOT, f)))
         ? checkNoPriceLimitWording(
-            [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL].map((f) => ({ name: f, src: read(f) })),
+            [MOVER_ENGINE, MOVER_CMD, MOVER_PANEL, REFLECTION_CMD].map((f) => ({ name: f, src: read(f) })),
             read(SEED_VARS),
           )
         : { violations: ["mover 链文件缺失 ⇒ 口径边界无从核对"], scanned: 0 },
+    ],
+    [
+      "m 妖股标签消费端单源（#10 P7）",
+      fs.existsSync(path.join(ROOT, REFLECTION_CMD))
+        ? checkMoverLabelConsumer(read(REFLECTION_CMD))
+        : { violations: [REFLECTION_CMD + " 不存在 ⇒ 无从核对标签判据单源"], scanned: 0 },
     ],
   ];
 

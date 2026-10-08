@@ -104,6 +104,36 @@ pub fn window_cum_gain_pct(rows: &[f64]) -> Option<f64> {
     Some((product - 1.0) * 100.0)
 }
 
+/// #10 P7 妖股标签的**唯一判据**（逐档反思行用；反思侧见
+/// `stock_workflow/reflection.rs` 的 `compute_mover_label`）。
+///
+/// 与达标核查（[`window_cum_gain_pct`]）刻意不是同一个量：那条量的是「窗口内逐日收盘累计」，
+/// 而标签要回答「从**分析时价格**到**反思时价格**涨了多少」⇒ 入参 `gross_gain_pct` 必须由调用方
+/// 传行情快照的 `price_change_pct`（原始涨跌幅，**不扣成本** —— 阈值是给涨幅定的，扣费会把
+/// 39.8% 判成非妖股，属口径错位）。
+///
+/// 返回 `None` = **不判定**（该档阈值判据不可用）。调用方不得把它写成 `"normal"`：
+/// 「没配判据」与「算过且没达标」是两件事，混成一个值就是伪装成有结论。
+/// 其余四态的语义与 NULL 的边界写在 `entities/src/stock_reflections.rs` 的列文档里。
+pub fn mover_label_for(
+    threshold_pct: Option<f64>,
+    gross_gain_pct: Option<f64>,
+    window_complete: bool,
+) -> Option<&'static str> {
+    // 判据不可用优先于一切：阈值缺失/非正/非有限 ⇒ `None`（调用方记 rule_unavailable）。
+    // `tier_rules_from_vars` 本来就会丢掉非正的档，这里再兜一次是为了让本函数**独立可证**。
+    let threshold = threshold_pct.filter(|t| t.is_finite() && *t > 0.0)?;
+    // 拿不到涨幅 ⇒ 无从判定（不得冒充「算过且未达标」）；非有限值同样归到这里
+    let Some(gain) = gross_gain_pct.filter(|g| g.is_finite()) else {
+        return Some("no_market_data");
+    };
+    // 持有期未满 ⇒ 不判定：面板留空并注明未满，不拿当前价冒充到期价
+    if !window_complete {
+        return Some("window_incomplete");
+    }
+    Some(if gain >= threshold { "mover" } else { "normal" })
+}
+
 /// 一条达标事件。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -828,5 +858,51 @@ mod tests {
         assert!(matrix_active("trend", Period::Short));
         // 矩阵里没有的名目 ⇒ 判不成立（实现漏格不能被当成按设计不做）
         assert!(!matrix_active("no_such_style", Period::Mid));
+    }
+
+    /// #10 P7：妖股标签四态必须各归其位，**两种「拿不到」都不许冒充 `normal`**。
+    /// 阈值取 20.0（短线档出厂值）只作夹具，不代表本函数读表 —— 读表由调用方负责。
+    #[test]
+    fn mover_label_splits_states_and_never_invents_normal() {
+        assert_eq!(
+            mover_label_for(Some(20.0), Some(20.0), true),
+            Some("mover"),
+            "恰等于阈值算达标（下限含等号）"
+        );
+        assert_eq!(mover_label_for(Some(20.0), Some(19.99), true), Some("normal"));
+        // 窗口未满：涨得再多也不判定 —— 否则就是拿「当前价」冒充「到期价」
+        assert_eq!(mover_label_for(Some(20.0), Some(80.0), false), Some("window_incomplete"));
+        // 快照不可得优先于未满（连量都没有，谈不上窗口）
+        assert_eq!(mover_label_for(Some(20.0), None, false), Some("no_market_data"));
+        // 判据不可用 ⇒ None（调用方写 rule_unavailable；写 normal 就是伪装成算过）
+        assert_eq!(mover_label_for(None, Some(80.0), true), None);
+        // 脏阈值/脏涨幅都不进比较（`NaN >= x` 恒 false 会被判成「未达标」）
+        assert_eq!(mover_label_for(Some(f64::NAN), Some(80.0), true), None);
+        assert_eq!(mover_label_for(Some(-1.0), Some(80.0), true), None);
+        assert_eq!(mover_label_for(Some(20.0), Some(f64::NAN), true), Some("no_market_data"));
+    }
+
+    /// #10 P7：出厂阈值表**防漂移锁**。
+    ///
+    /// 唯一权威仍是 [`DEFAULT_GAIN_THRESHOLDS`]（达标核查、面板缺省、妖股标签三处都读它）；
+    /// 本测试逐字钉住用户裁定的四档值（超短 10 / 短 20 / 中 30 / 长 40），作用是「改动必须显式改这里」，
+    /// 不是另开一份判据。键名域同时锁成 `mover_gain_{档}` —— 面板变量名改了这里会红。
+    #[test]
+    fn mover_threshold_single_source_is_the_exported_table() {
+        let defaults: Vec<(&str, f64)> =
+            DEFAULT_GAIN_THRESHOLDS.iter().map(|(k, v)| (*k, *v)).collect();
+        assert_eq!(
+            defaults,
+            vec![
+                ("mover_gain_ultra_short", 10.0),
+                ("mover_gain_short", 20.0),
+                ("mover_gain_mid", 30.0),
+                ("mover_gain_long", 40.0),
+            ]
+        );
+        let keys: Vec<&str> = defaults.iter().map(|(k, _)| *k).collect();
+        let want: Vec<String> =
+            Period::ALL.iter().map(|p| format!("mover_gain_{}", p.as_str())).collect();
+        assert_eq!(keys, want, "四档各一条、键名必须是 mover_gain_ + 档位 snake 名");
     }
 }

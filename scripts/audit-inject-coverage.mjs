@@ -44,6 +44,8 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 
+import { periodSnakesFrom } from "./check-tier-purity.mjs";
+
 const ROOT = path.resolve(import.meta.dirname, "..");
 
 const DEFAULTS = {
@@ -54,6 +56,45 @@ const DEFAULTS = {
   includeMarker: 'include_str!("../portfolio-mgr.rhai")',
   pushMarker: "nodes.push(pm)",
 };
+
+// ── v135（B-2b #36）：四档分支的审计面随节点搬到**档子模板 builder** ──
+//
+// 原来这四个 `pm-h-<档>` 块住在主图种子里；搬图那天若不把扫描面一起挪走，本审计就
+// 失去读取面而**照样绿**（§九十一(2.5)：门跟着搬，而不是把定义留两份）。
+//
+// 为什么做成 `--tier` 而不是把 marker 文本从命令行传进来：CI 在 Windows 上经 cmd.exe
+// 执行 `execSync`，而 include 锚里含 `"` —— 那对引号会被 cmd 当成引用边界吃掉，
+// 于是 `scanSeed` 定位失败。本脚本的失败模式恰恰是「定位失败不许静默退化成全文匹配」
+// （开发史第 ② 次自打就是这个），所以宁可在脚本内部拼锚，也不让 shell 参与引号。
+const TIER_BUILDER_SEED = "src-tauri/src/commands/stock_analysis_setup/horizon_tier_template.rs";
+const HARNESS_REL = "src-tauri/crates/harness/src/holding_period.rs";
+
+/** 读仓内相对路径（审计与自证共用同一种取法，避免两处拼 ROOT 漂移）。 */
+const readRel = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+
+/** 档名由权威现场推导（`Period::as_str` 的四臂），不在本文件手抄第二份。 */
+export function tierSnakes() {
+  const snakes = periodSnakesFrom(fs.readFileSync(path.join(ROOT, HARNESS_REL), "utf8"));
+  if (snakes === null || snakes.size !== 4) {
+    throw new Error("取不到 `Period::as_str` 的四档名 ⇒ 扫描面不可信，判红而不是当没有");
+  }
+  return [...snakes.keys()];
+}
+
+/** 某一档分支的审计配置（脚本 / 种子 / 两个定位锚）。 */
+export function tierProfile(tier) {
+  const basename = `portfolio-mgr-h-${tier.split("_").join("-")}.rhai`;
+  return {
+    script: `src-tauri/src/commands/${basename}`,
+    seed: TIER_BUILDER_SEED,
+    // 档分支没有「由常量派生的同名映射」⇒ 解析不到，`audit()` 只按字面 target 判
+    constName: "PORTFOLIO_MGR_TUNABLE_PARAMS",
+    includeMarker: `include_str!("../${basename}")`,
+    // 该档模板的块尾 = 模板 builder 里的终值节点那一行（`nodes.push(` 在这种
+    // 一个 `vec![…]` 里连排四档的形状下会一路滑到文件末尾）
+    pushMarker: "tier_end_node(",
+  };
+}
 
 /** 剥 Rust 行注释 / 块注释（字符串内容保留，故元组路径串不受影响）。 */
 function stripRustComments(src) {
@@ -579,6 +620,31 @@ if present(code_and_comment) { code_and_comment }
       `  ✅ ★护栏 真实扫描面非零（${real.rhai.referenced.length} 引用 / ${real.seed.mappingTargets.size} 手写 target）`,
     );
   }
+  // ★ 护栏（v135 / B-2b #36）：四档分支在**档子模板 builder** 里的扫描面也必须非零。
+  // 搬图只改生产、不改这两个锚的话，档分支审计会退化成「定位失败 ⇒ ok:false」或（更坏）
+  // 拿到空 target 集合后报「无悬空」—— 所以这里对四个 profile 逐个验锚与条数，
+  // 并且验**逐档互不相同**（四份定义若被循环生成，锚定位到的会是同一段 ⇒ 假覆盖）。
+  let tierSurfaces = [];
+  try {
+    tierSurfaces = tierSnakes().map((t) => [t, audit(readRel(tierProfile(t).script), readRel(TIER_BUILDER_SEED), tierProfile(t))]);
+  } catch (e) {
+    console.log(`  ❌ ★护栏 档名权威取不到：${e.message}`);
+    failed++;
+  }
+  for (const [t, r] of tierSurfaces) {
+    const sizes = r.ok ? [r.rhai.referenced.length, r.seed.mappingTargets.size] : [0, 0];
+    if (!r.ok || sizes[0] === 0 || sizes[1] === 0) {
+      console.log(`  ❌ ★护栏 档分支 ${t} 的扫描面为 0（锚已失效）：${r.ok ? sizes.join("/") : r.reason}`);
+      failed++;
+    }
+  }
+  const targetSets = new Set(tierSurfaces.map(([, r]) => (r.ok ? [...r.seed.mappingTargets].sort().join(",") : "")));
+  if (tierSurfaces.length !== 4 || targetSets.size !== 4) {
+    console.log(`  ❌ ★护栏 四档分支的 target 面应两两不同（实得 ${targetSets.size} 种 / ${tierSurfaces.length} 档）`);
+    failed++;
+  } else {
+    console.log(`  ✅ ★护栏 四档分支扫描面非零且 target 面互不相同（${tierSurfaces.length} 档）`);
+  }
   console.log(failed === 0 ? "\nSELFTEST PASS" : `\nSELFTEST FAIL (${failed})`);
   return failed === 0 ? 0 : 1;
 }
@@ -587,33 +653,53 @@ function main() {
   const argv = process.argv.slice(2);
   if (argv.includes("--selftest")) process.exit(selftest());
   const strict = argv.includes("--strict");
-  const opts = { ...DEFAULTS };
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--script") opts.script = argv[++i];
-    else if (argv[i] === "--seed") opts.seed = argv[++i];
-    // 审计**其它** CodeNode 时必给：默认锚点是 portfolio-mgr 的 `include_str!` 行与
-    // `nodes.push(pm)` 收尾行，换脚本就定位不到区块（定位失败会返回 ok:false，
-    // 而不是静默退化成全文匹配 —— 那正是本脚本开发史第 ② 次自打的形态）。
-    else if (argv[i] === "--include-marker") opts.includeMarker = argv[++i];
-    else if (argv[i] === "--push-marker") opts.pushMarker = argv[++i];
+  const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+
+  const runOne = (opts) => {
+    const result = audit(read(opts.script), read(opts.seed), opts);
+    if (!result.ok) {
+      // 定位失败必须**响**，不能退化成全文匹配（本脚本开发史第 ② 次自打的形态）
+      console.log(`❌ 审计无法进行（${opts.script}）: ${result.reason}`);
+      return 2;
+    }
+    const { uncovered, paramUnwired } = report(result, opts);
+    if (strict && (uncovered.length > 0 || paramUnwired.length > 0)) {
+      console.log(
+        `STRICT FAIL: ① ${uncovered.length} 个被引用变量无注入来源 | ③ ${paramUnwired.length} 个守卫形参实参无来源`,
+      );
+      return 1;
+    }
+    return 0;
+  };
+
+  // `--tier`：四档分支的审计面在档子模板 builder（v135 起）。`all` 由权威档名展开，
+  // 所以将来加第五档时这里**不会**静默少扫一档（`tierSnakes()` 取不到四个就抛）。
+  const tierAt = argv.indexOf("--tier");
+  let targets;
+  if (tierAt >= 0) {
+    const arg = argv[tierAt + 1];
+    if (!arg) {
+      console.log("❌ --tier 需要一个档名（ultra_short|short|mid|long|all）");
+      process.exit(2);
+    }
+    targets = arg === "all" ? tierSnakes().map(tierProfile) : [tierProfile(arg)];
+  } else {
+    const opts = { ...DEFAULTS };
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === "--script") opts.script = argv[++i];
+      else if (argv[i] === "--seed") opts.seed = argv[++i];
+      // 审计**其它** CodeNode 时必给：默认锚点是 portfolio-mgr 的 `include_str!` 行与
+      // `nodes.push(pm)` 收尾行，换脚本就定位不到区块。
+      else if (argv[i] === "--include-marker") opts.includeMarker = argv[++i];
+      else if (argv[i] === "--push-marker") opts.pushMarker = argv[++i];
+    }
+    targets = [opts];
   }
-  const result = audit(
-    fs.readFileSync(path.join(ROOT, opts.script), "utf8"),
-    fs.readFileSync(path.join(ROOT, opts.seed), "utf8"),
-    opts,
-  );
-  if (!result.ok) {
-    console.log(`❌ 审计无法进行: ${result.reason}`);
-    process.exit(2);
-  }
-  const { uncovered, paramUnwired } = report(result, opts);
-  if (strict && (uncovered.length > 0 || paramUnwired.length > 0)) {
-    console.log(
-      `STRICT FAIL: ① ${uncovered.length} 个被引用变量无注入来源 | ③ ${paramUnwired.length} 个守卫形参实参无来源`,
-    );
-    process.exit(1);
-  }
-  console.log("\n（默认非门禁模式：退出码 0。要卡 ① 请加 --strict）");
+
+  let worst = 0;
+  for (const t of targets) worst = Math.max(worst, runOne(t));
+  if (worst > 0) process.exit(worst);
+  if (!strict) console.log("\n（默认非门禁模式：退出码 0。要卡 ① 请加 --strict）");
 }
 
 if (process.argv[1] && process.argv[1].endsWith("audit-inject-coverage.mjs")) main();

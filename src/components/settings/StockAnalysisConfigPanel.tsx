@@ -579,18 +579,34 @@ export function StockAnalysisConfigPanel(_props: Props) {
         ]),
       },
       {
-        tool: "technical_indicators",
-        label: t("stockAnalysis.settings.group.indicators"),
+        // v137（裁定 2「先加设施再接线」，PLAN §一○五）：这一组 8 个变量此前**只有声明 + 面板能改**，
+        // 全仓零消费者 ⇒ 改值对评分零影响。接入后按**两域**拆成两组，作用范围写在 note 里：
+        //   · 窗口域（几根 bar）＝**只作用日线链** `t-scoring`；四档的窗口由各自持有期推导
+        //     （`ScaleWindowPlan`），接进档侧会把四档焊成同一份 ⇒ 工具侧对这种接线直接报错。
+        //   · 阈值域（比值/倍数）＝**全链生效**（§九十六(2)：阈值与 bar 的日历跨度无关）。
+        // ⚠ 注释必须在 `tool:` 之前（本文件的分组解析器按「label 行的下一行就是 vars」匹配）。
+        tool: "technical_indicators_daily",
+        label: t("stockAnalysis.settings.group.indicatorsDailyWindows"),
         vars: resolve([
           "macd_fast",
           "macd_slow",
           "macd_signal",
           "boll_period",
-          "boll_stddev",
           "volume_lookback",
+        ]),
+        // 说明必须放 vars **之后**（同上面 portfolio_mgr_horizon 那条陷阱：label 与 vars 之间
+        // 插任何东西都会让整组不被分组解析器识别 ⇒ 表现为「登记了但面板没有分组暴露」）。
+        note: "stockAnalysis.settings.note.indicatorsDailyWindows",
+      },
+      {
+        tool: "technical_indicators_shared",
+        label: t("stockAnalysis.settings.group.indicatorsThresholds"),
+        vars: resolve([
+          "boll_stddev",
           "volume_surge_ratio",
           "volume_shrink_ratio",
         ]),
+        note: "stockAnalysis.settings.note.indicatorsThresholds",
       },
       {
         tool: "recommender_strategies",

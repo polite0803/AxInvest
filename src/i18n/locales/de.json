@@ -9343,7 +9343,6 @@
       "arrayVar": "Array-Variable",
       "assertion": "Assertionen",
       "assertions": "Zusicherungen",
-      "asyncExecution": "Asynchrone Ausführung",
       "atomicSkill": "Atomare Fähigkeit",
       "authNone": "Keine Authentifizierung",
       "authType": "Authentifizierungstyp",
@@ -10352,6 +10351,8 @@
     "status": "Status",
     "duration": "Dauer",
     "subWorkflow": "Sub-Workflow",
+    "subFlowLive": "Live-Fortschritt der Unterausführung ({{count}})",
+    "subFlowPending": "Noch keine Ereignisse der Unterausführung",
     "executionId": "Ausführungs-ID",
     "workflowId": "Workflow-ID",
     "parentExecution": "Übergeordnete Ausführungs-ID"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "Wertanalyse"
       },
       "analystComplete": "Analyse abgeschlossen",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "Research-Synthese",
         "trader": "Handelsplan",
         "portfolio-mgr": "Endgültige Entscheidung",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "Wertanalyse"
       },
       "analystReports": "Analyst Reports",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "Schwellenwert für Risikoklassifizierung (portfolio-mgr)",
         "simulation": "Monte-Carlo-Simulation",
         "refCodes": "Branchen-Referenzwert",
-        "valuationModel": "Bewertungsmodelle-Parameter (DCF/Graham)"
+        "valuationModel": "Bewertungsmodelle-Parameter (DCF/Graham)",
+        "indicatorsDailyWindows": "Indikatorfenster (nur Tageskerzenkette)",
+        "indicatorsThresholds": "Indicatorschwellen (alle Ketten)"
       },
       "note": {
-        "portfolioMgrHorizon": "Seit v125 werden die Werte für Stop-Loss / Take-Profit / Position der Hauptstufe aus dem ausgewählten Zeithorizont-Zweig übernommen. Die acht Prozentstufen und die zwei Volatilitätsmultiplikatoren dieser Gruppe wirken nur auf dem Fallback-Pfad (Volatilitätsbasis dieser Stufe nicht verfügbar oder alle vier Zweige ohne Ergebnis) und als Positions-Obergrenze; die Schrumpfungsfestigkeit κ des Vorabwerts und das Risikobudget R gelten weiterhin im Hauptpfad."
+        "portfolioMgrHorizon": "Seit v125 werden die Werte für Stop-Loss / Take-Profit / Position der Hauptstufe aus dem ausgewählten Zeithorizont-Zweig übernommen. Die acht Prozentstufen und die zwei Volatilitätsmultiplikatoren dieser Gruppe wirken nur auf dem Fallback-Pfad (Volatilitätsbasis dieser Stufe nicht verfügbar oder alle vier Zweige ohne Ergebnis) und als Positions-Obergrenze; die Schrumpfungsfestigkeit κ des Vorabwerts und das Risikobudget R gelten weiterhin im Hauptpfad.",
+        "indicatorsDailyWindows": "Seit v137 an den Scoring-Knoten der Tageskerzenkette angebunden. Die Fenster der vier Halteperioden (ultrakurz/kurz/mittel/lang) werden aus der Haltedauer abgeleitet und bleiben hier unberührt; würden Panelwerte an die Perioden verbunden, wären alle vier wieder identisch - das Werkzeug bricht dann sichtbar ab.",
+        "indicatorsThresholds": "Bollinger-Standardabweichungs-Faktor und Volumen-Zu-/Abnahmefaktor skalieren nicht mit der Kerzenperiode; Tageskette und alle vier Halteperioden nutzen diese Werte. Der Zunahmefaktor muss größer sein als der Abnahmefaktor, sonst bricht das Werkzeug sichtbar ab, statt ein invertiertes Signal zu liefern."
       },
       "valuation": {
         "perpetualGrowth": "Ewige Wachstumsrate",
@@ -15959,6 +15965,7 @@
       "tagLabel": "Zuverlässigkeit eingeschränkt",
       "passiveWatch": "Dieses „Abwarten“ ist eine passive Herabstufung wegen unzureichender Daten, kein bärisches Urteil",
       "gapsNotDegraded": "Datenlücken vorhanden, aber keine Herabstufung ausgelöst: die Richtung bleibt unberührt",
+      "dqiFuse": "Die Datenqualität hat {{streak}} Mal in Folge die Note A verfehlt, die Sicherung hat ausgelöst: die Vertrauens-Obergrenze wurde auf die konservativste Stufe gesenkt",
       "collapseLabel": "Faktor-Gewichte kollabiert",
       "gapReason": "{{count}} Datenlücke(n)",
       "showGaps": "Lücken anzeigen",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "Gewichtungsumfang: ab Generation {{floor}} ({{preFloor}} frühere und {{unknown}} unbekannte Generationen ausgeschlossen)"
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "Nach Hauptstufe",
       "horizonUnknown": "Unbekannter Horizont",
       "colHorizon": "Review-Horizont",
+      "colMover": "Spekulativ (dieser Horizont)",
+      "moverYes": "Spekulationswert",
+      "moverNo": "Kriterium nicht erreicht",
+      "moverWindowIncomplete": "Fenster noch nicht gefüllt",
+      "moverNoMarketData": "Keine Marktdaten",
+      "moverRuleUnavailable": "Kriterium nicht verfügbar",
+      "moverNotReflected": "Noch nicht geprüft",
       "horizonReviewTag": "Hier reviewed",
       "horizonNoNarration": "Nur objektive Bewertung – kein Reflexionstext",
       "horizonStatusLabel": "Status: ",
@@ -17694,7 +17709,8 @@
     "unitBillion": " Mrd.",
     "unitMillion": " Mio.",
     "unitCrore": " Crore",
-    "unitLakh": " Lakh"
+    "unitLakh": " Lakh",
+    "horizonScoringWindows": "Indikatorfenster dieser Halteperiode: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volumen {{vol}}"
   },
   "pipeline": {
     "title": "Aktien-Pipeline",

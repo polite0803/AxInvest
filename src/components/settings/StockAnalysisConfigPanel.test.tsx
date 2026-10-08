@@ -68,6 +68,23 @@ const RUNTIME_INJECTED = new Set([
   // 2026-10-04 R-11：消费方从主链闭包 `prior_for` 换成四份分支脚本 ⇒ 映射在 `pm-h-*` 四个
   // 节点上，主链节点不再映射它（留映射=没人消费的注入）。
   "horizon_prior_json",
+  // 逐档分支表（四档各自的腿集 / 配比 / 出场口径）：权威源
+  // `crates/analysis-engine/src/evidence_weight.rs` 的 `horizon_branch_specs`，
+  // 由 `stock_workflow/hooks.rs:391-404` **运行时注入**（`src-tauri/src/commands/stock_workflow/hooks.rs`），
+  // 不是用户可调的模板变量 ⇒ 不进 seed 变量表。
+  // ⚠️ v135（B-2b #36）前它只以 `<变量>.<档>` 的**子路径**形态出现在四个 `pm-h-*` 节点上，
+  // 本名不出现在同名映射的抽取面里；v135 起四个 `pm-h-<档>` 变成 SubWorkflow 扇出，
+  // 必须把整张表按恒等键传进子快照 ⇒ `("horizon_branch_json","horizon_branch_json")` 首次成为
+  // 同名映射 ⇒ 与 `horizon_prior_json` 同源同步本白名单（漏同步=把已接线的变量误报成断链）。
+  "horizon_branch_json",
+  // #8 P5 数据质量跨轮熔断的**已判定结果**三数（v134）：权威源
+  // `crates/dao/src/repo/data_quality_fuse.rs`（`DQI_FUSE_STREAK` / `grade_is_abnormal`），
+  // 由 `stock_workflow/hooks.rs` 从 `data_quality_observations` 算出后注入。
+  // 它们是**测量结果**而不是可调参数 ⇒ 既不进 seed 变量表，也不进参数面板；
+  // 若将来改成面板可调，要按五点对账补齐并**删掉 dao 里那份常量**，不留两份载体。
+  "dqi_streak",
+  "dqi_fuse_flag",
+  "dqi_observations",
 ]);
 
 /**
@@ -555,6 +572,56 @@ describe("StockAnalysisConfigPanel 默认变量与后端模板 v19 同步", () =
     }
     expect(missing, `缺译的语言：${missing.join(", ")}`).toEqual([]);
     expect(placeholderish, `疑似英文占位符（未真正本地化）：${placeholderish.join(", ")}`).toEqual([]);
+  });
+
+  it("技术指标两组按**两域**分组、说明齐备且 11 语言都有本语言资源（v137，PLAN §一○五）", () => {
+    // 为什么这条要进门：面板这 8 个变量此前「能改但零生效」（配置项空接线族）。接线时新增的不是
+    // 「有没有组」而是「组的作用范围」—— 窗口域五条若被接进四档，四档的指标窗口会重新焊成同一份
+    // （#41 片 A 刚拆掉的缺陷）。所以判据要同时锁：组的成员、说明键挂上、11 语言有资源、旧键不留纸面。
+    const groups = extractPanelToolGroups();
+    const daily = groups.get("technical_indicators_daily");
+    const shared = groups.get("technical_indicators_shared");
+    expect(daily, "未找到日线窗口分组 ⇒ 分组解析器陷阱（note 挪到 label 与 vars 之间）或改名").toBeTruthy();
+    expect(shared, "未找到阈值分组 ⇒ 同上").toBeTruthy();
+    expect([...daily!].sort()).toEqual(
+      ["boll_period", "macd_fast", "macd_signal", "macd_slow", "volume_lookback"].sort(),
+    );
+    expect([...shared!].sort()).toEqual(["boll_stddev", "volume_shrink_ratio", "volume_surge_ratio"].sort());
+    const src = readPanelSource();
+    for (const key of ["indicatorsDailyWindows", "indicatorsThresholds"]) {
+      expect(src, `分组说明没挂上 i18n 键 note.${key}`).toContain(`"stockAnalysis.settings.note.${key}"`);
+    }
+    const langs = ["ar", "de", "en-US", "es", "fr", "hi", "ja", "ko", "ru", "zh-CN", "zh-TW"];
+    // 非拉丁语系：整句仍是 ASCII 就是「没真正本地化」的占位形态（de/es/fr 允许拉丁文本，不列）。
+    const nonLatin = new Set(["ar", "hi", "ja", "ko", "ru", "zh-CN", "zh-TW"]);
+    const missing: string[] = [];
+    const asciiish: string[] = [];
+    const stale: string[] = [];
+    for (const lang of langs) {
+      const raw = readFileSync(`${process.cwd()}/src/i18n/locales/${lang}.json`, "utf8");
+      const json = JSON.parse(raw) as Record<string, any>;
+      const g = json.stockAnalysis?.settings?.group;
+      const n = json.stockAnalysis?.settings?.note;
+      for (
+        const [where, text] of [
+          ["group.", g?.indicatorsDailyWindows],
+          ["group.", g?.indicatorsThresholds],
+          ["note.", n?.indicatorsDailyWindows],
+          ["note.", n?.indicatorsThresholds],
+        ] as [string, unknown][]
+      ) {
+        if (typeof text !== "string" || text.length < 6) {
+          missing.push(`${lang} ${where}`);
+          continue;
+        }
+        if (nonLatin.has(lang) && !/[^\x00-\x7F]/.test(text)) { asciiish.push(`${lang} ${where}`); }
+      }
+      // 旧键不得留在纸面：留着就是「面板已经不渲染、翻译表还在维护」的第二份权威。
+      if (g && "indicators" in g) { stale.push(lang); }
+    }
+    expect(missing, `缺译/过短：${missing.join(", ")}`).toEqual([]);
+    expect(asciiish, `非拉丁语系整句仍是 ASCII：${asciiish.join(", ")}`).toEqual([]);
+    expect(stale, `旧键 stockAnalysis.settings.group.indicators 未清理：${stale.join(", ")}`).toEqual([]);
   });
 
   it("生效快照 effective_params 的字段集合与权威源一致（反思/演进观测面完整性）", () => {

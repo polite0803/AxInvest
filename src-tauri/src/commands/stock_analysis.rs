@@ -1968,8 +1968,14 @@ pub async fn backtest_all_history(
 ) -> Result<BacktestStats, String> {
     let scope = scope.unwrap_or_else(|| "all".to_string());
 
-    let mut query =
-        stock_analyses::Entity::find().filter(stock_analyses::Column::Status.eq("completed"));
+    let mut query = stock_analyses::Entity::find()
+        .filter(stock_analyses::Column::Status.eq("completed"))
+        // #31（PLAN §七十六：统计类入口）：批量回测的命中率/收益是**统计量** ⇒ 按起算代筛样
+        // （与闭环统计同一条下限规则）。与 `backtest.rs::optimize_weights` 同一判据、同一常量。
+        .filter(
+            stock_analyses::Column::TemplateVersion
+                .gte(axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR),
+        );
     query = match scope.as_str() {
         "live" => query.filter(stock_analyses::Column::AnalysisKind.eq("live")),
         "replay" => query.filter(stock_analyses::Column::AnalysisKind.eq("replay")),
@@ -2465,7 +2471,15 @@ pub async fn generate_stock_report(
 
     // value-investor 输出。P0-H：原为 `bb_str("value.assessment")`，因形态②恒为 `""`，
     // 导致报告里「巴菲特判定 / 安全边际 / F-Score·护城河」三张卡恒为 `-` / `0.0%` / `0/9 · 0/100`。
-    let value_assessment_json = bb_json("value.assessment");
+    // v133（B2-2）：value-investor 按档产出（快照键 `value.assessment--{mid|long}`）——
+    //   展示层取**中线实例**优先（估值结论与持有期弱相关，mid 为中位代表），
+    //   再退长线、最后回落裸键（兼容历史快照）。这是呈现层的次序选择，不是决策口径。
+    let value_assessment_json =
+        ["value.assessment--mid", "value.assessment--long", "value.assessment"]
+            .iter()
+            .map(|k| bb_json(k))
+            .find(|s| !s.is_empty())
+            .unwrap_or_default();
 
     // 数据质量摘要 + 质量门禁。P0-H：原调用点**硬编码传 `""`**（见下方实参列表），
     // 但这两份数据一直在 bb 里（`result.data-quality.summary`、`quality-gate-result`）。
@@ -5508,6 +5522,10 @@ pub async fn list_reflections(
                 "status": r.status,
                 "createdAt": r.created_at,
                 "alphaReturn": r.alpha_return,
+                // #10 P7 妖股标签（按档挂在逐档反思行上）。四态语义见
+                // `entities/src/stock_reflections.rs` 的列文档：达标/未达标/窗口未满/判据不可用，
+                // NULL=未复盘或本列引入前的存量行 ⇒ 面板必须分得开「没达标」与「没判定」。
+                "moverLabel": r.mover_label,
                 "horizonResults": horizon_results,
             })
         })

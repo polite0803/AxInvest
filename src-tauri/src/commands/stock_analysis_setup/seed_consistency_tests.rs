@@ -1415,10 +1415,15 @@ fn dcf_availability_signal_layers_agree() {
     let seed_path = manifest.join("src/commands/stock_analysis_setup/seed_stock_analysis.rs");
     let seed_src = std::fs::read_to_string(&seed_path)
         .unwrap_or_else(|e| panic!("读不到 {}: {e}", seed_path.display()));
-    let vi_start = seed_src.find("let vi_id = \"value-investor\"").expect(
-        "在 seed_stock_analysis.rs 里找不到 `let vi_id = \"value-investor\"` —— \
-         该锚点是本测试的切片起点，节点构造写法变了须同步改",
-    );
+    // v133（B2-2）：value-investor 改为逐档循环生成 ⇒ 起点锚改为**循环头**
+    // （原 `let vi_id = …` 已进入循环体、不再唯一；循环头与切片语义一致：
+    //   层② = 该节点的任务指令正文）。
+    let vi_start = seed_src
+        .find("for (base, p, title, _expert) in tiered.iter().filter(|(b, ..)| *b == VALUE_INVESTOR_ID)")
+        .expect(
+            "在 seed_stock_analysis.rs 里找不到 value-investor 的逐档生成循环头 —— \
+             该锚点是本测试的切片起点，节点构造写法变了须同步改",
+        );
     let vi_end = seed_src[vi_start..]
         .find("nodes.push(vi);")
         .map(|i| vi_start + i)
@@ -2204,16 +2209,45 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
         .find("input_mapping")
         .map(|p| dq_at + p)
         .expect("找不到 data-quality 节点的 `input_mapping`");
-    let map_end = seed[map_at..].find("\n                ]").map_or(seed.len(), |p| map_at + p);
+    // v133（B2-2）：DQ 的 input_mapping 改为块表达式（生成式 + extend）⇒ 原 `\n                ]`
+    // 收尾锚失效（会兜到文件尾、把 7000 行都算进声明集）。新收尾 = 生成块的最后一句。
+    let map_end =
+        seed[map_at..].find("dq_input.into_iter().collect()").map_or(seed.len(), |p| map_at + p);
     let map_block = &seed[map_at..map_end];
     // 不做「键/路径」配对解析（映射表有多行写法），只取块内**全部字符串字面量**作
     // 「声明过的名字」超集 —— 足以抓出拼写错误这类目标缺陷。
-    let declared: std::collections::HashSet<String> = map_block
+    let mut declared: std::collections::HashSet<String> = map_block
         .lines()
         .flat_map(|l| {
             l.split('"').enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, v)| v.to_string())
         })
         .collect();
+    // v133（B2-2）：分析师侧 40 键改为生成式（`{abbr}_{kind}`）——字面量只剩 abbr 表
+    // （`("mk", "a-market-analyst")` 行的第一段）与四类后缀，补全笛卡尔积。
+    // abbr 表从块内抽取（不另抄第二份）；下限自证防抽取面失效。
+    let abbrs: std::collections::HashSet<String> = map_block
+        .lines()
+        .filter_map(|l| {
+            let strs: Vec<&str> =
+                l.split('"').enumerate().filter(|(i, _)| i % 2 == 1).map(|(_, v)| v).collect();
+            // v133：abbr 表含 `("val", "value-investor")`（无 `a-` 前缀）⇒ 两种形态都收。
+            if strs.len() == 2 && (strs[1].starts_with("a-") || strs[1] == "value-investor") {
+                Some(strs[0].to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        abbrs.len(),
+        10,
+        "abbr 表抽取面失效（应为 10 槽：9 a-* + value-investor）: {abbrs:?}"
+    );
+    for kind in ["verdict", "report", "untrusted", "tool_calls"] {
+        for abbr in &abbrs {
+            declared.insert(format!("{abbr}_{kind}"));
+        }
+    }
     // 正控②：抽取面自证 —— 必须看到 P2-1 新增的键
     assert!(
         declared.contains("lk_report") && declared.contains("lk_tool_calls"),
@@ -3108,6 +3142,11 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
     use rhai::{Dynamic, Map, Scope};
 
     let seed = include_str!("seed_stock_analysis.rs");
+    // v135（B-2b #36）：四个 `pm-h-<档>` 分支节点已从主图搬进档子模板 builder ⇒ 本门抽映射的
+    // **载体**换成那个文件（判据本体没变：Rhai scope 必须恰好等于节点 `input_mapping` 的键集）。
+    // 搬的是节点声明，不是这条判据 —— 若还按主图找，`include_str!` 锚定位会直接 panic，
+    // 也就是「门找不到对象」而不是「门放行」（§九十一(3) 步骤 3 要求门与本批同批改）。
+    let tier_builder = include_str!("horizon_tier_template.rs");
 
     /// 从种子里抽出某节点 `input_mapping: [ … ]` 区块的 **target 键名**。
     /// 做法：定位该节点 `include_str!` 行 ⇒ **先剥注释** ⇒ 取到 `input_mapping: [` ⇒
@@ -3224,7 +3263,7 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
             "portfolio-mgr-h-long.rhai" => include_str!("../portfolio-mgr-h-long.rhai"),
             other => panic!("分支脚本 {other} 未在本门登记源，无法按节点 scope 运行"),
         };
-        let keys = mapping_keys(seed, basename, "branch_json", 8);
+        let keys = mapping_keys(tier_builder, basename, "branch_json", 8);
 
         // 「齐备态」的值表：每个键都要有真值样本。新接一个键却没在这里登记 ⇒ 红，
         // 否则「齐备态」会悄悄变成「那个键其实是 unit」，测的已经不是齐备输入。
@@ -3233,7 +3272,7 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                 "tier_score" => serde_json::json!(62.0),
                 "macd_dif" => serde_json::json!(0.12),
                 "macd_dea" => serde_json::json!(0.04),
-                "rsi_14" => serde_json::json!(58.0),
+                "rsi_value" => serde_json::json!(58.0),
                 "seal_rate" => serde_json::json!(0.72),
                 "pool_break_count" => serde_json::json!(0.0),
                 "stop_vol_mult" => serde_json::json!(1.2),
@@ -3257,6 +3296,21 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                 "pmi" => serde_json::json!(51.0),
                 "valuation_dcf_upside" => serde_json::json!(38.0),
                 "valuation_dcf_applicable" => serde_json::json!(true),
+                // v138（裁定 3「让用户看出各档实际几根」）：本档评分节点的**窗口回显**与尺度。
+                // 齐备态必须给真实形态（字段名 = `indicators::IndicatorWindows` 的 serde camelCase 输出），
+                // 否则脚本里那条 `present(scoring_windows)` 分支从未被求值过 —— 与本门登记
+                // `lockup_supply_reason` 同一条理由：正因为它在齐备态里不参与任何分支，才更要登记。
+                "scoring_windows" => serde_json::json!({
+                    "maPeriods": [2, 6],
+                    "macdFast": 2,
+                    "macdSlow": 3,
+                    "macdSignal": 2,
+                    "rsiPeriods": [2],
+                    "bollPeriod": 2,
+                    "volumeLookback": 2,
+                }),
+                // `scoring_scale` **不在这里登记**：它由 `run_with` 按档给本权威尺度（见那里）。
+                // 留一个固定串在这里就是一份「看着像数据源其实永远不会被读到」的第二副本。
                 _ => return None,
             })
         }
@@ -3274,6 +3328,23 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                         &empty_prior_table
                     }),
                     "overall_risk" => Dynamic::from("中风险"),
+                    // v138 裁定 3：尺度给**本档权威的那一个**（`Period::scale_key`），不是固定串。
+                    // 脚本若把尺度硬编码成某档的值，另外三档的断言当场就红 —— 这条是逐档 passthrough 的锁。
+                    "scoring_scale" => {
+                        if full {
+                            Dynamic::from(
+                                axagent_harness::holding_period::Period::ALL
+                                    .into_iter()
+                                    .find(|p| p.as_str() == tier)
+                                    .map(|p| p.scale_key())
+                                    .unwrap_or_else(|| panic!("档 {tier} 不在 Period 权威表里")),
+                            )
+                        } else {
+                            // ⚠ 退化态必须给 UNIT：齐备与退化共用一份料 = 本门的「退化留痕」覆盖面
+                            //   被这条夹具悄悄放宽，什么都没测到。
+                            Dynamic::UNIT
+                        }
+                    },
                     "kline_bars" => value_to_dynamic(&bars),
                     other => match (full, value_for(other)) {
                         (true, Some(v)) => value_to_dynamic(&v),
@@ -3343,6 +3414,35 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
             });
             assert!(has_ss, "档 {tier} 齐备态没有 supplyShock 腿 ⇒ supply_shock 块没产出入，");
         }
+        // ①‴ v138 裁定 3「让用户看出各档实际几根」：齐备态必须把**本档自己的**窗口回显与尺度
+        //     原样带进决策行。锁两件事：
+        //     ① 尺度逐档不同 —— 夹具给的是本档权威 `Period::scale_key()`，脚本若硬编码某档的值，
+        //        另外三档当场红（这一条同时证明「注入 → 回写」这条链真的通）；
+        //     ② 窗口对象真的穿过脚本 —— Rhai 不能枚举 scope/map 的键，键名写错就是**静默缺席**
+        //        （§四十九 那条限制），所以必须按形状断言而不是只看它跑不跑。
+        let scale_out = out
+            .get("scoringScale")
+            .and_then(|v| v.clone().try_cast::<String>())
+            .unwrap_or_default();
+        let want_scale = axagent_harness::holding_period::Period::ALL
+            .into_iter()
+            .find(|p| p.as_str() == tier)
+            .map(|p| p.scale_key())
+            .unwrap_or_default();
+        assert_eq!(
+            scale_out.as_str(),
+            want_scale,
+            "档 {tier} 回写的尺度不是本档权威尺度（产端应是回显，不是常量）"
+        );
+        let win =
+            out.get("scoringWindows").and_then(|v| v.clone().try_cast::<Map>()).unwrap_or_else(
+                || panic!("档 {tier} 齐备态没带出 scoringWindows 对象 ⇒ 键名或透传断了"),
+            );
+        let ma = win.get("maPeriods").and_then(|v| v.clone().try_cast::<rhai::Array>());
+        assert!(
+            ma.map(|a| !a.is_empty()).unwrap_or(false),
+            "档 {tier} 的 scoringWindows.maPeriods 为空 ⇒ 窗口根数读不出来，面板那一行无从成句"
+        );
         // 以下四条从被删除的「手抄 scope 运行门」迁移过来（那条门的 scope 比生产宽，是假绿来源；
         // 独有覆盖不能跟着删 ⇒ 见 4f 的「删 + 交代」规矩）：置信值域 / 缺席点名 / 退化留痕 / 点名先验。
         let conf = out.get("confidence").and_then(|v| v.clone().try_cast::<f64>()).unwrap_or(-1.0);
@@ -3454,4 +3554,60 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
     let arbiter_err = run_arbiter(&peeled).err();
     assert!(arbiter_err.is_some(), "剥掉 `r_mid` 后仲裁仍跑通 ⇒ 本门对仲裁节点是空的");
     assert!(arbiter_err.unwrap_or_default().contains("r_mid"), "仲裁负控没点名被剥的那一路");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v133（B2-2）：analyst-brief 的键集锁 —— 脚本 23 条显式读取 == seed 生成的映射键集。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `analyst-brief.rhai` 的 23 条 `present(<var>)` 读取（变量名 = input_mapping 的键）
+/// 必须与 seed 侧 `ab_input` 生成的键集**同集**。
+///
+/// 为什么需要这条锁：Rhai 不能枚举 scope 变量 ⇒ 脚本侧「显式列 23 条」与 Rust 侧
+/// 「由 `tiered` 生成」是**两份**必须同步的清单；任一侧增删实例而另一侧没跟，
+/// 后果是静默少一段摘要（脚本读注入不存在的变量走 present=false 跳过；Rust 多生成的键
+/// 则白注入）——正是本仓「清单比表少一行」的老形态。该锁让不同步当场红。
+#[test]
+fn analyst_brief_keys_match_tiered_instances() {
+    use axagent_harness::holding_period::Period;
+
+    // ① 脚本侧：抽 `present(<ident>)` 的实参（跳过函数形参 `x`）。
+    let script = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/analyst-brief.rhai"),
+    )
+    .expect("读取 analyst-brief.rhai 失败");
+    let mut script_vars: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut rest = script.as_str();
+    while let Some(i) = rest.find("present(") {
+        let after = &rest[i + "present(".len()..];
+        let Some(j) = after.find(')') else { break };
+        let name = after[..j].trim();
+        if !name.is_empty()
+            && name != "x"
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            script_vars.insert(name.to_string());
+        }
+        rest = &after[j..];
+    }
+    // 正控：抽取面必须看见足量变量（避免解析失效后与空集比绿）。
+    assert!(script_vars.len() >= 23, "脚本 present() 抽取面失效: {script_vars:?}");
+
+    // ② Rust 侧：重算期望键集（与 seed 的 ab_input 同一公式：子集 × analyst_short_key）。
+    let mut want: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for p in Period::ALL {
+        for base in p.analyst_subset() {
+            want.insert(format!(
+                "{}__{}",
+                super::seed_stock_analysis::analyst_short_key(base),
+                p.as_str()
+            ));
+        }
+    }
+    assert_eq!(want.len(), 23, "期望键集应为 23（四档全跑裁定）: {want:?}");
+
+    assert_eq!(
+        script_vars, want,
+        "analyst-brief.rhai 的 present() 变量集与 seed 生成的 input_mapping 键集不同步"
+    );
 }

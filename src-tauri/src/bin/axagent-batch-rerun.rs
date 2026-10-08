@@ -176,7 +176,7 @@ impl Args {
 /// ## 为什么必须清
 ///
 /// `strategy_performance` 的行是**反思结论的量化投影**：`was_correct` 由
-/// `deterministic_was_correct(决策方向, 行情快照)` 产出（`reflection.rs:620`），
+/// `deterministic_was_correct(决策方向, 行情快照)` 产出（`reflection.rs:826`），
 /// 决策被覆盖后旧行即失去依据。
 ///
 /// 消费端 `compute_adjusted_weights` 按 **(strategy_id, period)** 聚合
@@ -416,7 +416,7 @@ async fn ensure_pending_reflection(
         // 决策方向变了，同一段行情的收益不会变。
         //
         // 且反思重跑成功后会按最新行情**回写覆盖**这 4 列
-        // （`reflection.rs:598-600` 的 `col_expr(Column::RawReturn, ...)` 等，即 D10 修复点）。
+        // （`reflection.rs:802-806` 的 `col_expr(Column::RawReturn, ...)` 等，即 D10 修复点）。
         // ⇒ 保留既可读（重置期间不至于把客观事实抹成 NULL），也不会残留错误值。
         //
         // （本条曾被我按「与决策绑定」误判为应清空，已纠正。判据：
@@ -834,7 +834,7 @@ async fn run() -> Result<(), String> {
 
             // 为什么要**循环**而不是跑一轮：
             //   ① `run_batch_reflection_inner` 单轮只处理 `max_count` 条
-            //      （默认 20，见 `reflection.rs:1754` 的 `.take(max_count)`），
+            //      （默认 20 = `reflection.rs:1171`，截断发生在 `:1196` 的 `.take(max_count)`），
             //      而本次重跑已为**每条成功分析**补建一行 pending
             //      （见本文件 `ensure_pending_reflection`）
             //      ⇒ 47 条需要至少 3 轮才消化完；

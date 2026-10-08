@@ -125,11 +125,19 @@ let events = [];
 // 注意: now_timestamp 未从 DAG 注入（无节点提供 Unix 时间戳），
 // 各事件使用自身的 hours_elapsed 字段做时间衰减，无需全局 now。
 
-// 解析输入事件（来自 LLM a-catalyst / a-news 节点）
+// 解析输入事件（来自 LLM a-catalyst 节点）
 // P0 修复(2026-07-22): 支持 a-catalyst 的输出格式（含 catalyst_level/confidence/verdict）
 // a-catalyst 输出不是事件数组，而是综合评估 JSON，需要从中提取事件信息
 // V69 防御(2026-09-10): input_mapping 在部分执行里产出 {content:"..."} 包装对象而非
 // 纯字符串（301302 实证 pace_degraded=true, reason="无有效事件输入"）。统一解包。
+// v133（B2-2）：逐档实例化后 llm_events 按档注入（四键）——本节点在选档之前运行，
+// 无主档上下文 ⇒ 取**第一个有值的实例**（事件是公告级事实、各档近似；全缺 ⇒ ()，
+// 走下方缺席分支，不伪造事件）。
+let llm_events = if present(llm_events_ultra_short) { llm_events_ultra_short }
+    else if present(llm_events_short) { llm_events_short }
+    else if present(llm_events_mid) { llm_events_mid }
+    else if present(llm_events_long) { llm_events_long }
+    else { () };
 let llm_events_str = if present(llm_events) && type_of(llm_events) == "map" && type_of(llm_events["content"]) == "string" {
     llm_events["content"]
 } else if present(llm_events) && type_of(llm_events) == "string" {
@@ -437,5 +445,5 @@ let p_normalized = if valid_event_count > 0 {
     "pace_factor": (pace_factor * 100.0).round() / 100.0,
     "pace_signal": (p_normalized * pace_factor * 100.0).round() / 100.0,
     "pace_degraded": valid_event_count == 0,
-    "degraded_reason": if valid_event_count == 0 { "无有效事件输入(a-catalyst/a-news 输出为空或解析失败)" } else { "" },
+    "degraded_reason": if valid_event_count == 0 { "无有效事件输入(a-catalyst 四档实例输出为空或解析失败)" } else { "" },
 }

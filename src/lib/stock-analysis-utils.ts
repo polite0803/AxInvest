@@ -1133,7 +1133,6 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
     "value-investor": 1.2,
     "a-research": 1.0,
     "research-mgr": 1.1,
-    "a-news": 1.0,
     "a-catalyst": 1.0,
     "a-sentiment": 1.0,
     "a-hot-money": 0.9,
@@ -1149,7 +1148,6 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
     "value-investor": 2.0,
     "a-research": 1.0,
     "research-mgr": 1.5,
-    "a-news": 0.7,
     "a-catalyst": 1.0,
     "a-sentiment": 0.7,
     "a-hot-money": 0.5,
@@ -1165,7 +1163,6 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
     "value-investor": 0.5,
     "a-research": 1.0,
     "research-mgr": 1.0,
-    "a-news": 1.2,
     "a-catalyst": 1.0,
     "a-sentiment": 1.3,
     "a-hot-money": 1.5,
@@ -1181,7 +1178,6 @@ const ANALYST_TIME_HORIZON_WEIGHT: Record<string, Record<string, number>> = {
     "value-investor": 0.3,
     "a-research": 1.0,
     "research-mgr": 0.5,
-    "a-news": 1.5,
     "a-catalyst": 1.0,
     "a-sentiment": 1.5,
     "a-hot-money": 2.0,
@@ -1402,6 +1398,47 @@ export function horizonIcAbsenceKey(status?: string | null): string | null {
     pre_snr_regime: "stockAnalysis.reflection.hitrateIcPreRegime",
   };
   return status ? (map[status] ?? null) : null;
+}
+
+/** 妖股标签的呈现分层（与 `horizonIcAbsenceKey` 同族：缺席必须分句）。 */
+export type MoverLabelKind = "yes" | "no" | "absence" | "notReflected" | "unknown";
+
+/**
+ * 后端 `stock_reflections.mover_label` → 呈现分层（#10 P7）。
+ *
+ * 值域权威在 `crates/analysis-engine/src/mover_recall.rs::mover_label_for`。四种「无从判定」
+ * 与「未达标」必须各占一句 —— 并成一句「不是妖股」等于把**没判定**说成**判定过**，
+ * 用户会以为系统看过这只票：
+ * · `window_incomplete` = 持有期未满（该档妖股位留空并注明未满，不拿当前价冒充到期价）
+ * · `no_market_data` = 该档行情快照不可得
+ * · `rule_unavailable` = 阈值判据不可用（变量缺失/非正，或变量表读取失败）
+ * · `null` = 该行还没走到反思收尾（pending/running/failed）或本列引入前的存量行
+ *
+ * 未登记的标签值返回 `unknown` + `i18nKey=null`，由渲染方**原样显示**（不猜翻译、不静默吞掉）。
+ */
+export function moverLabelPresentation(label?: string | null): {
+  kind: MoverLabelKind;
+  i18nKey: string | null;
+} {
+  if (label == null || label === "") {
+    return { kind: "notReflected", i18nKey: "stockAnalysis.reflection.moverNotReflected" };
+  }
+  if (label === "mover") {
+    return { kind: "yes", i18nKey: "stockAnalysis.reflection.moverYes" };
+  }
+  if (label === "normal") {
+    return { kind: "no", i18nKey: "stockAnalysis.reflection.moverNo" };
+  }
+  const absenceKey: Record<string, string> = {
+    window_incomplete: "stockAnalysis.reflection.moverWindowIncomplete",
+    no_market_data: "stockAnalysis.reflection.moverNoMarketData",
+    rule_unavailable: "stockAnalysis.reflection.moverRuleUnavailable",
+  };
+  const key = absenceKey[label];
+  if (key !== undefined) {
+    return { kind: "absence", i18nKey: key };
+  }
+  return { kind: "unknown", i18nKey: null };
 }
 
 /**

@@ -2937,12 +2937,16 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                 let result = match r {
                     Ok(resp) => {
                         let summary = format!(
-                            "written={} skipped={} data_source={} hit_rate_report={}",
+                            "written={} skipped={} data_source={} hit_rate_report={} \
+                             代际筛样[floor={} 早于起算代={} 代际未知={}]",
                             resp.written_count,
                             resp.skipped_count,
                             resp.data_source,
                             serde_json::to_string(&resp.report)
-                                .unwrap_or_else(|_| "<序列化失败>".to_string())
+                                .unwrap_or_else(|_| "<序列化失败>".to_string()),
+                            resp.generation_floor,
+                            resp.excluded_pre_floor_generation,
+                            resp.excluded_unknown_generation
                         );
                         tracing::info!(
                             "[CronScheduler] 决策回测任务 '{}' 完成: {}",

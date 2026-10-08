@@ -2,7 +2,14 @@
 
 import { create } from "zustand";
 import { invoke, listen } from "../../lib/invoke";
-import type { ExecutionStatus, ExecutionStatusResponse, ExecutionSummary, NodeExecutionRecord } from "../../types";
+import type {
+  ExecutionStatus,
+  ExecutionStatusResponse,
+  ExecutionSummary,
+  NodeExecutionRecord,
+  SubWorkflowOrigin,
+  SubWorkflowProgress,
+} from "../../types";
 
 export interface PausedExecutionInfo {
   executionId: string;
@@ -10,10 +17,88 @@ export interface PausedExecutionInfo {
   snapshot: Record<string, unknown>;
 }
 
+/** 一个 step / 状态事件的归属判定结果。 */
+export type EventAttribution =
+  | { scope: "self" }
+  | { scope: "child"; origin: SubWorkflowOrigin; childExecutionId: string }
+  | null;
+
+/**
+ * 判定一条来自引擎的事件该归谁 —— **纯函数**，两条监听器共用（分开写会得到
+ * 「进度条动了但子节点列表没动」这类半生效形态）。
+ *
+ * 语义与改动前逐字一致的部分：`execution_id` 与本执行 id 都齐全且不等 ⇒ 原来直接丢；
+ * 这里新增的唯一分支是「它是我某个子执行的事件」⇒ 归到那个子执行桶。
+ * 判不出归属就返回 `null`（丢），**不得**回退成「归第一个子执行」——那是把猜测伪装成事实。
+ */
+export function attributeWorkflowEvent(
+  payload: { execution_id?: string | null; sub_workflow_origin?: SubWorkflowOrigin | null },
+  currentExecutionId: string | null,
+): EventAttribution {
+  const eid = payload.execution_id;
+  if (!currentExecutionId || !eid || eid === currentExecutionId) {
+    return { scope: "self" };
+  }
+  const origin = payload.sub_workflow_origin;
+  if (origin && origin.parentExecutionId === currentExecutionId) {
+    return { scope: "child", origin, childExecutionId: eid };
+  }
+  return null;
+}
+
+/** 子执行桶的 key = 子执行 execution_id（重试 ⇒ 同一父节点多个桶，互不覆盖）。 */
+export function subFlowKey(childExecutionId: string): string {
+  return childExecutionId;
+}
+
+/** 增量落一条子节点状态。 */
+export function mergeSubFlowStatus(
+  buckets: Record<string, SubWorkflowProgress>,
+  origin: SubWorkflowOrigin,
+  childExecutionId: string,
+  nodeId: string,
+  status: string,
+): Record<string, SubWorkflowProgress> {
+  const key = subFlowKey(childExecutionId);
+  const prev = buckets[key];
+  return {
+    ...buckets,
+    [key]: {
+      parentNodeId: prev?.parentNodeId ?? origin.parentNodeId,
+      childExecutionId,
+      nodeStatuses: { ...prev?.nodeStatuses, [nodeId]: status },
+    },
+  };
+}
+
+/** 全量对齐子执行节点状态（来自 `workflow:state-changed`，权威覆盖增量）。 */
+export function replaceSubFlowStatuses(
+  buckets: Record<string, SubWorkflowProgress>,
+  origin: SubWorkflowOrigin,
+  childExecutionId: string,
+  records: Array<{ node_id: string; status: string }>,
+): Record<string, SubWorkflowProgress> {
+  const key = subFlowKey(childExecutionId);
+  const nodeStatuses: Record<string, string> = {};
+  for (const r of records) {
+    nodeStatuses[r.node_id] = r.status;
+  }
+  return {
+    ...buckets,
+    [key]: {
+      parentNodeId: buckets[key]?.parentNodeId ?? origin.parentNodeId,
+      childExecutionId,
+      nodeStatuses,
+    },
+  };
+}
+
 interface WorkEngineState {
   executionId: string | null;
   status: ExecutionStatusResponse | null;
   nodeStatuses: Record<string, string>;
+  /** 子执行实时进度（B-2a），key = 子执行 execution_id */
+  subFlow: Record<string, SubWorkflowProgress>;
   nodeRecords: NodeExecutionRecord[];
   variables: Record<string, unknown>;
   executionHistory: ExecutionSummary[];
@@ -58,6 +143,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
   executionId: null,
   status: null,
   nodeStatuses: {},
+  subFlow: {},
   nodeRecords: [],
   variables: {},
   executionHistory: [],
@@ -288,6 +374,7 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
       executionId: null,
       status: null,
       nodeStatuses: {},
+      subFlow: {},
       nodeRecords: [],
       variables: {},
       isDebugRunning: false,
@@ -305,9 +392,25 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
           total_nodes: number;
           completed_nodes: number;
           execution_id?: string;
+          sub_workflow_origin?: SubWorkflowOrigin | null;
         };
         const { executionId } = get();
-        if (payload.execution_id && executionId && payload.execution_id !== executionId) {
+        const verdict = attributeWorkflowEvent(payload, executionId);
+        if (!verdict) {
+          return;
+        }
+        if (verdict.scope === "child") {
+          // 子执行的节点事件：归到发起它的父节点桶里，**不**动父图的 nodeStatuses
+          // （父子模板节点 id 可以同名，混进同一张表会互相覆盖）。
+          set((state) => ({
+            subFlow: mergeSubFlowStatus(
+              state.subFlow,
+              verdict.origin,
+              verdict.childExecutionId,
+              payload.node_id,
+              payload.status,
+            ),
+          }));
           return;
         }
         set((state) => ({
@@ -373,9 +476,23 @@ export const useWorkEngineStore = create<WorkEngineState>((set, get) => ({
             sub_workflow_id?: string;
           }>;
           variables?: Record<string, unknown>;
+          sub_workflow_origin?: SubWorkflowOrigin | null;
         };
         const { executionId } = get();
-        if (payload.execution_id && executionId && payload.execution_id !== executionId) {
+        const verdict = attributeWorkflowEvent(payload, executionId);
+        if (!verdict) {
+          return;
+        }
+        if (verdict.scope === "child") {
+          // 子执行的全量快照只覆盖它自己那个桶；父执行的 status / variables 一律不动。
+          set((state) => ({
+            subFlow: replaceSubFlowStatuses(
+              state.subFlow,
+              verdict.origin,
+              verdict.childExecutionId,
+              payload.node_records ?? [],
+            ),
+          }));
           return;
         }
 

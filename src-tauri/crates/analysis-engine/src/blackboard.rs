@@ -32,13 +32,21 @@ pub fn build_blackboard_snapshot(
 ) -> HashMap<String, Value> {
     let mut bb: HashMap<String, Value> = HashMap::new();
     for (node_id, raw_output) in results {
+        // v133（B2-2）：value-investor 按档产出（`value-investor--mid|long`）——
+        // 键按档区分（`value.assessment--{tier}`），两个实例不会互相覆盖；
+        // 裸 base（历史快照）仍映射到 `value.assessment`（向后兼容）。
+        let node_base =
+            axagent_harness::holding_period::analyst_base_of(node_id).unwrap_or(node_id);
         let key = match node_id.as_str() {
-            // 9 个分析师 + value-investor：归到 report.* 前缀
+            // 9 个分析师（含逐档实例 `a-*--{tier}`）+ value-investor：归到 report.* 前缀
             id if id.starts_with("a-") => format!("report.{id}"),
             // 交易员：归到 report.investment-plan
             "trader" => "report.investment-plan".to_string(),
-            // 价值投资评估
-            "value-investor" => "value.assessment".to_string(),
+            // 价值投资评估（带档实例经 node_base 判定）
+            _ if node_base == "value-investor" => match node_id.strip_prefix("value-investor--") {
+                Some(tier) => format!("value.assessment--{tier}"),
+                None => "value.assessment".to_string(),
+            },
             // 规则检查
             "rule-check" => "rule_check.summary".to_string(),
             // 数据质量
@@ -60,7 +68,7 @@ pub fn build_blackboard_snapshot(
             || *node_id == "agg-risk"
             || *node_id == "debate-bull-bear"
             || *node_id == "debate-convergence"
-            || *node_id == "value-investor"
+            || node_base == "value-investor"
             || *node_id == "research-mgr"
             || *node_id == "portfolio-mgr"
             // V40 修复: data-quality(JSON模式含grade/score字段)、
@@ -253,6 +261,37 @@ fn extract_node_text(v: &Value) -> String {
     v.to_string()
 }
 
+/// `data-quality` 节点在快照里的键（与 [`build_blackboard_snapshot`] 的 `result.{node_id}` 同族）。
+const DATA_QUALITY_RESULT_KEY: &str = "result.data-quality";
+
+/// 从 blackboard 快照里取本轮 `data-quality` 的**字母等级**（#8 P5 观测落库的唯一读法）。
+///
+/// 放在本模块而不是 dao/命令层，是为了让「快照的键形状」只有一个知情人 —— 写入形状在这里，
+/// 读法若散到调用侧，改键名就会出现「写侧改了、读侧静默拿 None」。
+///
+/// 容忍**两种形态**：CodeNode 的 `.result` 通常是对象；走 `extract_node_text` 那条形变时是
+/// 一段被再次编码的 JSON 字符串。只认一种就会把「有 grade、形态不同」读成「没跑成」⇒
+/// 观测被静默丢掉，而 dao 侧 `grade_is_abnormal(None)` 按异常处理 —— 那会变成误熔断。
+///
+/// 返回 `None` 的三种成因（节点没跑成 / 快照无该键 / 没有 grade 字段）在本函数里**不区分**，
+/// 因为调用侧的处置相同（记一行异常）。要区分的人应先改这里，而不是在调用侧猜。
+pub fn data_quality_grade(snapshot: &HashMap<String, Value>) -> Option<String> {
+    let raw = snapshot.get(DATA_QUALITY_RESULT_KEY)?;
+    let borrowed;
+    let obj = match raw {
+        Value::Object(_) => raw.as_object(),
+        Value::String(s) => {
+            borrowed = serde_json::from_str::<Value>(s).unwrap_or(Value::Null);
+            borrowed.as_object()
+        },
+        _ => None,
+    };
+    obj?.get("grade")
+        .and_then(|g| g.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,5 +430,29 @@ mod tests {
         let text = bb["report.a-sector"].as_str().expect("a-sector 应为文本");
         assert!(text.starts_with("行业景气度回升，龙头份额集中。"), "{text}");
         assert!(!text.contains("__verdict_only"), "{text}");
+    }
+
+    /// #8 P5：快照里 grade 的两种形态都必须读得到 —— 读不到会被当「没跑成」记异常 ⇒ 误熔断。
+    #[test]
+    fn data_quality_grade_reads_object_and_double_encoded_string() {
+        let mut snap: HashMap<String, Value> = HashMap::new();
+        snap.insert("result.data-quality".to_string(), json!({ "grade": "B", "score": 71.5 }));
+        assert_eq!(data_quality_grade(&snap).as_deref(), Some("B"), "对象形态");
+
+        snap.insert(
+            "result.data-quality".to_string(),
+            json!("{\"grade\": \"A\", \"score\": 88.0}"),
+        );
+        assert_eq!(data_quality_grade(&snap).as_deref(), Some("A"), "再次编码成字符串的形态");
+
+        // 读不到就返回 None（不猜等级、不把坏 JSON 折成 "A"）
+        snap.insert("result.data-quality".to_string(), json!("{坏 JSON"));
+        assert_eq!(data_quality_grade(&snap), None);
+        snap.insert("result.data-quality".to_string(), json!({ "score": 1.0 }));
+        assert_eq!(data_quality_grade(&snap), None, "缺 grade 字段");
+        snap.insert("result.data-quality".to_string(), json!({ "grade": "  " }));
+        assert_eq!(data_quality_grade(&snap), None, "空白等级不算 A 也不算某个字母");
+        let empty: HashMap<String, Value> = HashMap::new();
+        assert_eq!(data_quality_grade(&empty), None);
     }
 }

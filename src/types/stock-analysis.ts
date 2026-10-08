@@ -276,6 +276,34 @@ export interface HorizonDecision {
   absentLegs?: string[];
   /** 该档分支自己的缺口说明（顶层 `dataGaps` 另有一份跨档汇总） */
   dataGaps?: string[];
+  /**
+   * 该档技术腿**实际用的指标窗口**（评分节点回显的 `indicators.windows`，不是「想要的配置」）。
+   *
+   * 存在理由（PLAN §一○六，裁定 3「让用户看出各档实际几根」）：v136 之后四档各自按尺度取数、
+   * 按该档窗口计划出指标，但界面上只有分数没有「几根 bar」⇒ 读者无法区分「这一档算得粗」与
+   * 「这一档观点不同」。短/中/长三档的**根数按公式就是同一组**（差别在 bar 的日历跨度：
+   * 2 周 / 2 月 / 2 季），这一事实只有把根数与尺度并列出来才可读，否则会被读成三档同一份输入。
+   *
+   * ⚠ 缺席语义：本字段缺失 = **该行产自 v138 之前的模板代**（旧行不回写），
+   * 不是「该档没有窗口」。因此展示侧只在有值时成句，缺席不渲染任何一行 —— 不得压成 0 或空数组。
+   */
+  scoringWindows?: HorizonScoringWindows | null;
+  /** 本档评分所在尺度（`hourly` / `weekly` / `monthly` / `quarterly`），与 `scoringWindows` 同批出现 */
+  scoringScale?: string;
+}
+
+/**
+ * 指标窗口回显（权威产端 = `astock-data::indicators::IndicatorWindows`，serde camelCase）。
+ * 与 `HorizonDecision.scoringWindows` 同一条来源链，字段名不得手抄成第二套。
+ */
+export interface HorizonScoringWindows {
+  maPeriods: number[];
+  macdFast: number;
+  macdSlow: number;
+  macdSignal: number;
+  rsiPeriods: number[];
+  bollPeriod: number;
+  volumeLookback: number;
 }
 
 /** 阶段 2：四周期独立决策映射（键 camelCase，对齐 `decisions_by_horizon`） */
@@ -364,6 +392,20 @@ export interface StockDecision {
   weightRatio?: number;
   /** V66: 不可信上游节点数量 */
   untrustedCount?: number;
+  /**
+   * #8 P5 跨轮数据质量熔断态（portfolio-mgr 输出，三态）。
+   * · `fused`      = 连续多轮未达 A 级并已触发熔断线 ⇒ 置信度上限已被压到最保守一级
+   * · `ok`         = 有观测且未跨阈
+   * · `unobserved` = **观测表为空** ⇒ 熔断判据未参与本轮（既不是熔断也不是"证据面健康"）
+   * 判据（几轮算熔断、什么等级算异常）唯一在 `dao::repo::data_quality_fuse`，本字段是**已判定结果**。
+   */
+  dqiFuseState?: string;
+  /** #8 P5 最近连续未达 A 级的轮数（含本轮）；`dqiFuseState` 的佐证数字 */
+  dqiStreak?: number;
+  /** #8 P5 参与该计数的观测条数；0 = 无观测（不得当成"质量一直好"） */
+  dqiObservations?: number;
+  /** #8 P5 本轮**实际生效**的置信度上限（grade 阶梯 + 熔断封顶取小值），用于反解置信度是被谁压的 */
+  confidenceQualityCap?: number;
   /**
    * portfolio-mgr 消费的上游节点中**缺失数据**的清单（如「资金流向(t-hotmoney-data)」）。
    *

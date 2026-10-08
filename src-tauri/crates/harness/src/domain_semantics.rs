@@ -241,7 +241,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "荐股条目的推荐置信度",
-        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:1005",
+        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:1043",
     },
     // 0–1 组（各自独立的若干概念）
     ConceptDecl {
@@ -384,7 +384,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "荐股条目给出的建议仓位百分比",
-        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:1006",
+        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:1008",
     },
     ConceptDecl {
         id: "axinvest.risk.final_position_pct",
@@ -404,7 +404,7 @@ pub const CONCEPTS: &[ConceptDecl] = &[
         min: 0.0,
         max: 100.0,
         meaning: "荐股筛选的最小置信阈值（对比对象是 0–100 的 RecommenderPick.confidence）",
-        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:313 | src-tauri/crates/analysis-engine/src/recommender/mod.rs:722",
+        evidence: "src-tauri/crates/analysis-engine/src/recommender/mod.rs:346 | src-tauri/crates/analysis-engine/src/recommender/mod.rs:280",
     },
     ConceptDecl {
         id: "axinvest.opc.min_confidence",

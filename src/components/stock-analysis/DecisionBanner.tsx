@@ -1562,6 +1562,29 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         </div>
                       )}
                       {
+                        /* 裁定 3（PLAN §一○六，v138）：把本档**实际用的指标窗口**与尺度并列出来。
+                          v136 起四档各自按尺度取数、按该档窗口计划出指标，但界面只有分数 ⇒
+                          「这一档算得粗」与「这一档观点不同」在界面上同形。短/中/长三档的根数
+                          按公式本就是同一组（差别在 2 周 / 2 月 / 2 季），只有把根数与尺度一起
+                          印出来才可读。缺席 = 该行产自 v138 之前的代 ⇒ **不渲染**（不得压成 0 或空表）。 */
+                      }
+                      {d.scoringWindows && (
+                        <div
+                          className="text-xs"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          {t("stockAnalysis.horizonScoringWindows", {
+                            scale: d.scoringScale ?? "-",
+                            ma: d.scoringWindows.maPeriods?.join("/") ?? "-",
+                            rsi: d.scoringWindows.rsiPeriods?.join("/") ?? "-",
+                            macd:
+                              `${d.scoringWindows.macdFast}/${d.scoringWindows.macdSlow}/${d.scoringWindows.macdSignal}`,
+                            boll: d.scoringWindows.bollPeriod,
+                            vol: d.scoringWindows.volumeLookback,
+                          })}
+                        </div>
+                      )}
+                      {
                         /* 阶段1（PLAN §四十八 Q2-B，2026-10-04 拍板）：方向成立但**无可执行计划**。
                           本档 action 是方向族（买/卖族）而仓位为 0 或赔率为 0（σ 带 / 止盈止损不可得）时，
                           「买入」只是一个方向标签，不是一注可执行的交易。裁定是**保留方向**

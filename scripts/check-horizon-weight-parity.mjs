@@ -144,7 +144,8 @@ function checkAuthority(backend, frontend, authority, seedSrc) {
   }
   if (!seedSrc) { return [`⑦ 读不到 ${SEED} ⇒ 存在性无法核对`]; }
   const ids = authority.ids;
-  if (ids.length < 12) { errs.push(`⑦ 权威清单仅 ${ids.length} 项（< 12）⇒ 解析或清单本身失效`); }
+  // v133（B2-2）：`a-news` 退役后权威清单 = 11（9 a-* + value-investor + research-mgr）。
+  if (ids.length < 11) { errs.push(`⑦ 权威清单仅 ${ids.length} 项（< 11）⇒ 解析或清单本身失效`); }
   for (const t of TIERS) {
     for (const [side, src] of [["后端", backend.tiers[t]], ["前端", frontend.tiers[t]]]) {
       if (!src) { continue; }
@@ -430,7 +431,7 @@ function selftest() {
   const authority = parseAuthority(beSrcDisk);
   const seedDisk = readRel(SEED);
   cases.push({
-    name: "⑦负控 磁盘现状（两侧每档 = 12 id 清单，且清单可落地到 seed）⇒ 应无问题",
+    name: "⑦负控 磁盘现状（两侧每档 = 11 id 清单，且清单可落地到 seed）⇒ 应无问题",
     got: checkAuthority(be, fe, authority, seedDisk).length,
     want: 0,
   });
@@ -471,24 +472,24 @@ function selftest() {
     want: 1,
   });
   cases.push({
-    name: "⑦真实清单非空且为 12 个 id（不是空表充当一致）",
-    got: authority.ok && authority.ids.length === 12 ? 1 : 0,
+    name: "⑦真实清单非空且为 11 个 id（不是空表充当一致）",
+    got: authority.ok && authority.ids.length === 11 ? 1 : 0,
     want: 1,
   });
 
   // ── 判据 ⑧：有腿 ∪ 无腿 = 权威清单 ──
   const unbridged = parseUnbridged(beSrcDisk);
   cases.push({
-    name: "⑧负控 磁盘现状（8 个有腿 + 4 个登记无腿 = 12）⇒ 应无问题",
+    name: "⑧负控 磁盘现状（8 个有腿 + 3 个登记无腿 = 11）⇒ 应无问题",
     got: checkLegClosure(be, authority, unbridged).length,
     want: 0,
   });
   cases.push({
     name: "⑧正控 无腿清单少登记一个 ⇒ 必须报 1 处（该分析师的逐档权重会静默落空）",
-    got: checkLegClosure(be, authority, { ok: true, ids: unbridged.ids.filter((x) => x !== "a-news") }).length,
+    got: checkLegClosure(be, authority, { ok: true, ids: unbridged.ids.filter((x) => x !== "a-fundamentals") }).length,
     want: 1,
   });
-  const doubleBridged = { ...be, bridge: [...be.bridge, { leg: "f98", analyst: "a-news" }] };
+  const doubleBridged = { ...be, bridge: [...be.bridge, { leg: "f98", analyst: "a-policy" }] };
   cases.push({
     name: "⑧正控 把登记为无腿的分析师又接上腿 ⇒ 必须报重叠 1 处",
     got: checkLegClosure(doubleBridged, authority, unbridged).length,

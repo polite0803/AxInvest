@@ -36,7 +36,7 @@ const SCRIPT: &str = include_str!("../../../src/commands/data-quality.rhai");
 const EXTERNAL_VARS: &[&str] = &[
     "mk_verdict",
     "sent_verdict",
-    "news_verdict",
+    "val_verdict",
     "fund_verdict",
     "pol_verdict",
     "hm_verdict",
@@ -46,7 +46,7 @@ const EXTERNAL_VARS: &[&str] = &[
     "cat_verdict",
     "mk_report",
     "sent_report",
-    "news_report",
+    "val_report",
     "fund_report",
     "pol_report",
     "hm_report",
@@ -64,7 +64,7 @@ const EXTERNAL_VARS: &[&str] = &[
     //   ⇒ 下方行为断言不受影响，这 10 项纯粹是为了让清单与映射保持等式。
     "mk_tool_calls",
     "sent_tool_calls",
-    "news_tool_calls",
+    "val_tool_calls",
     "fund_tool_calls",
     "pol_tool_calls",
     "hm_tool_calls",
@@ -74,7 +74,7 @@ const EXTERNAL_VARS: &[&str] = &[
     "cat_tool_calls",
     "mk_untrusted",
     "sent_untrusted",
-    "news_untrusted",
+    "val_untrusted",
     "fund_untrusted",
     "pol_untrusted",
     "hm_untrusted",
@@ -355,9 +355,9 @@ fn historical_false_positive_samples_are_clean() {
             "sent",
             "期权隐含情绪指标返回空（视为该维度暂无数据/无期权覆盖），对情绪极值判断贡献有限。",
         ),
-        ("news", "期权PCR数据返回null（该维度暂无数据，对消息面分析影响低）。"),
+        ("val", "期权PCR数据返回null（该维度暂无数据，对消息面分析影响低）。"),
         (
-            "news",
+            "val",
             "未检索到立案调查、监管函类记录（数据缺口：无监管函类记录，暂判定为「无监管事件」，非「无数据源」）。",
         ),
     ];
@@ -396,7 +396,7 @@ fn genuine_gaps_still_detected() {
             "数据缺失",
         ),
         // `占位` 被折叠规则去掉（长词 `占位报告` 命中 ⇒ 不再计其子串），故为 1 不是 2
-        ("news", "报告为占位报告，请勿采信。", 1, "占位报告（占位 被折叠）"),
+        ("val", "报告为占位报告，请勿采信。", 1, "占位报告（占位 被折叠）"),
     ];
     for (abbr, text, expected, why) in cases {
         let r = run_quality(&[(abbr, text)], &[(abbr, 60.0)]);
@@ -441,27 +441,48 @@ fn declared_input_mapping_keys() -> Vec<String> {
     let seed = include_str!("../../../src/commands/stock_analysis_setup/seed_stock_analysis.rs");
     let start = seed.find(r#"let dq_id = "data-quality";"#).expect("未找到 data-quality 节点区段");
     let region = &seed[start..];
-    let open = region.find("input_mapping: [").expect("未找到 input_mapping");
+    let open = region.find("input_mapping: {").expect("未找到 input_mapping");
     let region = &region[open..];
-    let close = region.find(".into_iter()").expect("未找到 input_mapping 收尾锚 .into_iter()");
+    let close = region.find("dq_input.into_iter().collect()").expect("未找到 input_mapping 收尾锚");
     let region: String = region[..close]
         .lines()
         .filter(|l| !l.trim_start().starts_with("//"))
         .collect::<Vec<_>>()
         .join("\n");
 
-    region
-        .split('(')
-        .filter_map(|chunk| {
-            // 一块里必须有**两个**字符串字面量（键 + 路径）才成对；
-            // 只有 1 个引号的残块直接丢弃（与下方自检用的等价实现逐字同源）。
-            let parts: Vec<&str> = chunk.split('"').collect();
-            if parts.len() < 3 {
-                return None;
-            }
-            Some(parts[1].to_string())
-        })
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    let mut abbrs: Vec<String> = Vec::new();
+    for chunk in region.split('(') {
+        // 一块里必须有**两个**字符串字面量（键 + 路径）才成对；
+        // 只有 1 个引号的残块直接丢弃（与下方自检用的等价实现逐字同源）。
+        let parts: Vec<&str> = chunk.split('"').collect();
+        // v133：DQ 的映射块改为生成式后，块内出现大量**非键字符串**（模板串 `{abbr}_verdict`、
+        // expect/panic 文案、by_base 查询字面量）——它们都只有 1 对引号。
+        // 「键+路径」对（静态键行 / abbr 表行 / catalyst_level 行）恒为 ≥2 对引号 ⇒ 阈值收紧到 5。
+        if parts.len() < 5 {
+            continue;
+        }
+        let k = parts[1].to_string();
+        // v133：abbr 表行（`("mk", "a-market-analyst")` / `("val", "value-investor")`）——
+        // 恰 2 个字面量且第二段是分析师节点 id ⇒ 归 abbrs，不进键集；其余为静态键。
+        if parts.len() == 5 && (parts[3].starts_with("a-") || parts[3] == "value-investor") {
+            abbrs.push(k);
+            continue;
+        }
+        out.push(k);
+    }
+    for kind in ["verdict", "report", "untrusted", "tool_calls"] {
+        for a in &abbrs {
+            out.push(format!("{a}_{kind}"));
+        }
+    }
+    // v133：`catalyst_level` 的键是 `String` 构造（`("catalyst_level".to_string(), format!(…)`），
+    // `format!(` 的括号把该行切成两个「单引号 chunk」⇒ 上面的成对抽取天然抽不到它。
+    // 本测试的 declared 是**超集**语义（多抽无害、漏抽致命）⇒ 按「源文本是否声明过该名字」直接补。
+    if region.contains("\"catalyst_level\"") {
+        out.push("catalyst_level".to_string());
+    }
+    out
 }
 
 /// `EXTERNAL_VARS` 必须与节点 `input_mapping` 的键集**双向相等**。
@@ -532,7 +553,7 @@ fn diagnostics_expose_per_node_report_quality() {
                 行业景气度回升，板块轮动至成长风格，催化剂为新品放量与国产替代加速。";
     let r = run_quality(&[("hm", long)], &[("hm", 80.0)]);
 
-    const ALL: [&str; 10] = ["mk", "sent", "news", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+    const ALL: [&str; 10] = ["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
 
     // ① 穷举：10 个节点都必须带该字段（漏改任一调用点即红）
     for abbr in ALL {
@@ -800,7 +821,7 @@ fn direction_conflict_no_longer_penalizes_tool_credibility() {
         &[
             ("mk", long),
             ("sent", long),
-            ("news", short),
+            ("val", short),
             ("fund", short),
             ("pol", neutral),
             ("hm", neutral),
@@ -812,7 +833,7 @@ fn direction_conflict_no_longer_penalizes_tool_credibility() {
         &[
             ("mk", 60.0, "看多"),
             ("sent", 60.0, "看多"),
-            ("news", 60.0, "看空"),
+            ("val", 60.0, "看空"),
             ("fund", 60.0, "看空"),
             ("pol", 60.0, "中性"),
             ("hm", 60.0, "中性"),
@@ -927,8 +948,8 @@ fn g1_absence_context_applies_to_every_soft_marker() {
     //    （不对称缺陷的形态就是「按词各配一份，新加的那一份漏了某个词」）。
     let soft_cases: &[(&str, &str)] = &[
         ("sent", "北向净流入数据不可用（设计性缺席），无法评估外资方向。"),
-        ("news", "该维度无数据（设计性缺席），不影响主结论。"),
-        ("news", "公告接口返回空（设计性缺席），按无记录处理。"),
+        ("val", "该维度无数据（设计性缺席），不影响主结论。"),
+        ("val", "公告接口返回空（设计性缺席），按无记录处理。"),
         ("pol", "字段为空值（设计性缺席），按缺省口径处理。"),
         ("pol", "机构评级字段均为空（设计性缺席），仅看政策面。"),
         ("res", "参数未注入（设计性缺席），取脚本默认值。"),
@@ -981,7 +1002,7 @@ fn d1_long_reports_fit_production_max_operations() {
         long.push_str(unit);
     }
     long.push_str("唯一缺口：商誉数据缺失，无法完成减值测试。");
-    let nodes = ["mk", "sent", "news", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+    let nodes = ["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
     let reports: Vec<(&str, &str)> = nodes.iter().map(|n| (*n, long.as_str())).collect();
     let confs: Vec<(&str, f64)> = nodes.iter().map(|n| (*n, 60.0)).collect();
     let r = run_quality(&reports, &confs);
@@ -1037,7 +1058,7 @@ fn g2_market_level_absence_suppresses_hard_marker_but_stock_level_does_not() {
         long.push_str(unit);
     }
     long.push_str("北向净流入自 2024 年 8 月起监管停披，未能获取单股净买入。");
-    let nodes = ["mk", "sent", "news", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+    let nodes = ["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
     let reports: Vec<(&str, &str)> = nodes.iter().map(|n| (*n, long.as_str())).collect();
     let confs: Vec<(&str, f64)> = nodes.iter().map(|n| (*n, 60.0)).collect();
     let r = run_quality(&reports, &confs);
@@ -1262,14 +1283,14 @@ fn n1_n3_prescribed_wordings_are_clean_while_forbidden_wordings_still_count() {
     assert_eq!(hits(&r, "cat"), 1, "被禁止的「PDF关键数据缺失」必须照计（尺子未放宽）");
 
     // ──  新闻面：指定「本系统无监管文书数据源（结构性）」，禁止「该维度按"无数据"处理」──
-    let news_ok = "## 风险与数据缺口\n本系统无监管文书数据源（结构性），\
+    let val_ok = "## 风险与数据缺口\n本系统无监管文书数据源（结构性），\
                    问询函/立案只能从公告标题间接识别；若存在未披露问询则可能推高空头。";
-    let r = run_quality(&[("news", news_ok)], &[("news", 60.0)]);
-    assert_eq!(hits(&r, "news"), 0, "新闻面指定措辞不得计失败标记：{news_ok}");
+    let r = run_quality(&[("val", val_ok)], &[("val", 60.0)]);
+    assert_eq!(hits(&r, "val"), 0, "新闻面指定措辞不得计失败标记：{val_ok}");
 
-    let news_bad = "未获取到监管函/问询函/立案等A股特色风险源数据，该维度按\"无数据\"处理。";
-    let r = run_quality(&[("news", news_bad)], &[("news", 60.0)]);
-    assert_eq!(hits(&r, "news"), 1, "被禁止的「按\"无数据\"处理」必须照计");
+    let val_bad = "未获取到监管函/问询函/立案等A股特色风险源数据，该维度按\"无数据\"处理。";
+    let r = run_quality(&[("val", val_bad)], &[("val", 60.0)]);
+    assert_eq!(hits(&r, "val"), 1, "被禁止的「按\"无数据\"处理」必须照计");
 
     // ──  资金面：逐维度各写各的原因（北向带「停披」），禁止合并成「数据缺失维度（北向/两融）」──
     let hm_ok = "**风险提示：**\n北向个股净买入自 2024-08 起监管停披，仅有沪深股通成交额；\

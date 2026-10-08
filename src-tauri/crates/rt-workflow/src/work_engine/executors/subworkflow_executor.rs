@@ -42,21 +42,28 @@ pub struct SubWorkflowLaunch {
     pub cancel: Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
 }
 
-/// 子工作流引擎回调 — 接收 (sub_workflow_id, parent_execution_id, input)，
+/// 子工作流引擎回调 — 接收 (sub_workflow_id, parent_execution_id, parent_node_id, input)，
 /// 返回启动句柄（含子执行 ID 与取消能力）。内部由 WorkEngine.run_workflow 实现。
+///
+/// 第 3 个参数 `parent_node_id` = 父图里发起本次子执行的那个 SubWorkflow 节点 id
+/// （由本执行器从 `sub_node.base.id` 传入 —— **只有这里知道**，回调内部无从获得）。
+/// 存在理由：子执行的事件要能归到父节点的**那一行**，而父子模板的节点 id 可以同名
+/// （同一张子模板跑多次 ⇒ `trigger`/`end` 全撞），所以归组键必须是
+/// 「父执行 id + 本父节点 id」两项（见 `SubWorkflowOrigin`）。
 pub type SubWorkflowCallback =
-    Arc<dyn Fn(String, String, HashMap<String, Value>) -> SubWorkflowLaunch + Send + Sync>;
+    Arc<dyn Fn(String, String, String, HashMap<String, Value>) -> SubWorkflowLaunch + Send + Sync>;
 
 #[derive(Debug, Clone)]
 pub struct SubWorkflowExecutorConfig {
     pub timeout_secs: u64,
     pub max_retries: u32,
-    pub cache_enabled: bool,
-    pub cache_ttl_secs: u64,
+    // `cache_enabled` / `cache_ttl_secs` 于 2026-10-06 退役（B-2b 前置 1，同一普查）：
+    // 只在 `Default` 里赋值、全仓零读取 ⇒ 是死配置而不是"尚未接线的功能"。
+    // 真要加子执行输出缓存时按新语义重建（键、失效、与重试的相互作用都得先定）。
 }
 impl Default for SubWorkflowExecutorConfig {
     fn default() -> Self {
-        Self { timeout_secs: 300, max_retries: 3, cache_enabled: true, cache_ttl_secs: 300 }
+        Self { timeout_secs: 300, max_retries: 3 }
     }
 }
 
@@ -65,11 +72,13 @@ pub struct SubWorkflowExecutor {
     config: SubWorkflowExecutorConfig,
 }
 
-/// [`SubWorkflowExecutor::execute_with_retry`] 的运行参数（收敛 8 个散参，clippy `too_many_arguments`）
+/// [`SubWorkflowExecutor::execute_with_retry`] 的运行参数（收敛 9 个散参，clippy `too_many_arguments`）
 struct RetryParams<'a> {
     cb: &'a SubWorkflowCallback,
     sub_workflow_id: String,
     parent_execution_id: String,
+    /// 父图里本 SubWorkflow 节点的 id，随回调第 3 参透传（见 [`SubWorkflowCallback`]）
+    parent_node_id: String,
     input: HashMap<String, Value>,
     max_retries: u32,
     cancel_token: Option<&'a tokio_util::sync::CancellationToken>,
@@ -108,6 +117,7 @@ impl SubWorkflowExecutor {
             cb,
             sub_workflow_id,
             parent_execution_id,
+            parent_node_id,
             input,
             max_retries,
             cancel_token,
@@ -121,7 +131,12 @@ impl SubWorkflowExecutor {
         for attempt in 1..=max_retries + 1 {
             // 同步从回调拿到启动句柄（含子执行 ID 与取消能力），
             // 使超时路径仍能主动取消孤儿子执行，而非 drop future 后无人回收。
-            let launch = cb(sub_workflow_id.clone(), parent_execution_id.clone(), input.clone());
+            let launch = cb(
+                sub_workflow_id.clone(),
+                parent_execution_id.clone(),
+                parent_node_id.clone(),
+                input.clone(),
+            );
             let child_eid = launch.child_execution_id;
             // 登记到共享跟踪器：若本节点级超时导致整个 dispatch future 被丢弃，
             // 引擎仍能通过跟踪器定位并 cancel 该孤儿子执行（真正的回收兜底）。
@@ -294,6 +309,8 @@ impl NodeExecutorTrait for SubWorkflowExecutor {
             cb: &cb,
             sub_workflow_id: sub_node.config.sub_workflow_id.clone(),
             parent_execution_id: context.execution_id.clone(),
+            // 归组键的另一半：本 SubWorkflow 节点在父图里的 id。
+            parent_node_id: sub_node.base.id.clone(),
             input: mapped_input,
             max_retries: self.config.max_retries,
             cancel_token: context.cancel_token.as_ref(),
@@ -383,4 +400,141 @@ fn resolve_var_path(path: &str, context: &ExecutionState) -> Option<serde_json::
         return Some(current);
     }
     context.variables.get(path).cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::work_engine::execution_state::ExecutionContextCallbacks;
+    use axagent_harness::workflow_types::{
+        Position, RetryConfig, SubWorkflowNodeConfig, WorkflowNodeBase,
+    };
+
+    fn base(id: &str) -> WorkflowNodeBase {
+        WorkflowNodeBase {
+            id: id.to_string(),
+            title: "子流程".to_string(),
+            description: None,
+            position: Position::default(),
+            retry: RetryConfig::default(),
+            timeout: Some(30),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: false,
+        }
+    }
+
+    fn sub_workflow_node(id: &str) -> WorkflowNode {
+        WorkflowNode::SubWorkflow(SubWorkflowNode {
+            base: base(id),
+            config: SubWorkflowNodeConfig {
+                sub_workflow_id: "child-template".to_string(),
+                input_mapping: HashMap::new(),
+                output_var: "child_out".to_string(),
+                sub_graph: None,
+            },
+        })
+    }
+
+    /// 回调把收到的三个参数原样塞进「子执行输出」⇒ 断言面就是执行器**实际传了什么**，
+    /// 不需要 `std::sync::Mutex` 记录调用（那会踩 `clippy::disallowed_types`，
+    /// 且记录式替身查不出「传了但传错」以外的形态）。
+    fn echoing_callback() -> SubWorkflowCallback {
+        Arc::new(
+            |sub_workflow_id: String,
+             parent_execution_id: String,
+             parent_node_id: String,
+             _input| {
+                SubWorkflowLaunch {
+                    child_execution_id: "child-exec-1".to_string(),
+                    output: Box::pin(async move {
+                        Ok((
+                            "child-exec-1".to_string(),
+                            serde_json::json!({
+                                "sub_workflow_id": sub_workflow_id,
+                                "parent_execution_id": parent_execution_id,
+                                "parent_node_id": parent_node_id,
+                            }),
+                        ))
+                    }),
+                    cancel: Box::pin(async {}),
+                }
+            },
+        )
+    }
+
+    fn ctx_with_callbacks(cb: SubWorkflowCallback) -> ExecutionState {
+        let mut ctx = ExecutionState::new(
+            "parent-exec".to_string(),
+            "parent-wf".to_string(),
+            serde_json::json!({}),
+        );
+        ctx.callbacks = Some(ExecutionContextCallbacks {
+            trigger_manager: None,
+            tool_handlers: HashMap::new(),
+            tool_fallback: None,
+            subworkflow: Some(cb),
+            system_capability: None,
+            loop_body_dispatch: None,
+            loop_checkpoint: None,
+            debate_body_dispatch: None,
+            stream_progress: None,
+        });
+        ctx
+    }
+
+    /// B-2a 的**唯一**可行归组键来源：父图里 SubWorkflow 节点的 id 只有执行器知道
+    /// （回调内部拿不到）。同一张子模板跑四次（四档子工作流）时，少了这一项就会四档串一档。
+    #[tokio::test]
+    async fn callback_receives_id_of_launching_node_and_parent_execution() {
+        let ctx = ctx_with_callbacks(echoing_callback());
+        let out = SubWorkflowExecutor::new()
+            .execute(&sub_workflow_node("sw-tier-mid"), &ctx)
+            .await
+            .expect("子执行应成功返回");
+
+        assert_eq!(
+            out.output.get("parent_node_id").and_then(|v| v.as_str()),
+            Some("sw-tier-mid"),
+            "parent_node_id 必须取自发起它的 SubWorkflow 节点，而不是子模板里的节点"
+        );
+        assert_eq!(
+            out.output.get("parent_execution_id").and_then(|v| v.as_str()),
+            Some("parent-exec"),
+            "回调第 2 参取自 context.execution_id —— 与引擎 per-node ctx 的同名语义一致"
+        );
+        assert_eq!(
+            out.output.get("sub_workflow_id").and_then(|v| v.as_str()),
+            Some("child-template")
+        );
+        assert_eq!(
+            out.output.get("_child_execution_id").and_then(|v| v.as_str()),
+            Some("child-exec-1"),
+            "事后归并依赖节点输出里的子执行 id，这条边不能断"
+        );
+    }
+
+    /// 负控：两个不同 SubWorkflow 节点跑**同一张**子模板 ⇒ 各自拿到自己的父节点 id。
+    /// 若实现把 id 写死或从子模板取，这里会两档同值（＝四档串一档的最小复现）。
+    #[tokio::test]
+    async fn two_sub_workflow_nodes_on_same_template_get_distinct_parent_node_ids() {
+        let ctx = ctx_with_callbacks(echoing_callback());
+        let a = SubWorkflowExecutor::new()
+            .execute(&sub_workflow_node("sw-a"), &ctx)
+            .await
+            .expect("a 应成功");
+        let b = SubWorkflowExecutor::new()
+            .execute(&sub_workflow_node("sw-b"), &ctx)
+            .await
+            .expect("b 应成功");
+        assert_eq!(
+            a.output["sub_workflow_id"], b.output["sub_workflow_id"],
+            "同一张子模板（前提本身要成立）"
+        );
+        assert_ne!(
+            a.output["parent_node_id"], b.output["parent_node_id"],
+            "同模板不同实例 ⇒ 归组键必须不同，否则前端两档互相覆盖"
+        );
+    }
 }

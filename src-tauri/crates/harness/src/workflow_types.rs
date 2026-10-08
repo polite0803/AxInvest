@@ -745,7 +745,9 @@ pub struct SubWorkflowNodeConfig {
     pub sub_workflow_id: String,
     pub input_mapping: std::collections::HashMap<String, String>,
     pub output_var: String,
-    pub is_async: bool,
+    // `is_async` 于 2026-10-06 退役（B-2b 前置 1，用户裁定）：Rust 侧**零读取**，
+    // 而前端属性面板真的渲染了这个开关 ⇒ 用户勾了没电。库里带 `"isAsync"` 的旧模板
+    // 由 serde 忽略未知字段，读取不受影响。
     /// 子图定义（可选）。与 expandedSubWorkflows 配合，编辑器可在容器内部渲染子工作流节点。
     #[serde(default, skip_serializing_if = "Option::is_none", rename = "subGraph")]
     pub sub_graph: Option<SubGraph>,
@@ -1987,6 +1989,33 @@ pub struct PartialResultEvent {
     pub emitted_at_ms: i64,
 }
 
+/// 子执行的**归属** —— 随该子执行的每一条进度事件携带，而不是只挂在某一条「子执行已启动」事件上。
+///
+/// 存在理由（B-2a，2026-10-06）：SubWorkflow 节点启动子执行时，引擎把**父的** progress 回调
+/// 原样传下去 ⇒ 子图每个节点的事件本就到达前端，但被前端「`execution_id` 必须等于本执行」的
+/// 守卫丢弃（父 id ≠ 子 id）⇒ 父面板里整段子执行不可见。
+///
+/// 为什么归组键要**两项**：子执行 id 全局唯一，但父子模板的节点 id 可以同名（同一张子模板
+/// 跑多次 ⇒ `trigger`/`end` 全撞）⇒ 只带节点 id 会把四档串成一档，只带子执行 id 又不知道
+/// 挂在父图哪一行。两项都在，前端才能「按父节点归组、按子执行分桶」。
+///
+/// ⚠ 刻意**不复用** `ExecutionState::parent_execution_id`：该字段在「真实执行状态」与
+/// 「每节点 `exec_ctx`」两种实例里是两个意思（后者被引擎赋成本执行 id，供容器执行器查
+/// `execution_workflows`），拿它合成归属会把子执行自己的 id 说成父 id。
+///
+/// **线上拼写** = camelCase（禁区 13）。注意宿主 `StepProgressEvent` 整体**没有** `rename_all`
+/// ⇒ 它的兄弟键是 snake_case；于是本对象是「snake 载荷里嵌一个 camel 对象」。这个不对称
+/// 是既有事实（改 `StepProgressEvent` 会连带打断所有现存消费端），两侧键名由
+/// `src/stores/feature/__tests__/workEngineStore.subFlow.test.ts` 的反手抄锁住，不靠记忆。
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SubWorkflowOrigin {
+    /// 父执行的 `execution_id`
+    pub parent_execution_id: String,
+    /// 父图里发起本子执行的那个 SubWorkflow 节点 id
+    pub parent_node_id: String,
+}
+
 /// 步骤进度事件。
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct StepProgressEvent {
@@ -2018,6 +2047,12 @@ pub struct StepProgressEvent {
     /// 无法实现"一边进行一边填充"（AxInvest 分析师 tab 实时性修复）。
     /// running/failed/timeout 状态为 None（向后兼容）。
     pub output: Option<serde_json::Value>,
+    /// 子执行归属：仅当事件来自某个 SubWorkflow 启动的**子执行**时为 `Some`，
+    /// 顶层执行恒 `None`（⇒ `skip_serializing_if`，旧消费端零影响）。
+    /// 见 [`SubWorkflowOrigin`]：前端据此把子节点归到发起它的父节点行下，
+    /// 而不是按 `execution_id` 相等守卫把整段子执行丢掉。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub_workflow_origin: Option<SubWorkflowOrigin>,
 }
 
 /// 节点执行心跳事件 —— 用于长时间执行期间的周期性反馈。

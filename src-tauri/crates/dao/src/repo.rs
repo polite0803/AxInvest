@@ -17,6 +17,7 @@ pub mod conversation_branch;
 pub mod conversation_category;
 pub mod credential_repo;
 pub mod cron_job_persistence;
+pub mod data_quality_fuse;
 pub mod evolution_execution_stats;
 pub mod feedback_data_lake;
 pub mod gateway;

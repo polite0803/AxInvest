@@ -9343,7 +9343,6 @@
       "arrayVar": "Переменная массива",
       "assertion": "Утверждения",
       "assertions": "Утверждения",
-      "asyncExecution": "Асинхронное выполнение",
       "atomicSkill": "Атомарный навык",
       "authNone": "Без аутентификации",
       "authType": "Тип аутентификации",
@@ -10352,6 +10351,8 @@
     "status": "Статус",
     "duration": "Длительность",
     "subWorkflow": "Под-workflow",
+    "subFlowLive": "Текущий прогресс подвыполнения ({{count}})",
+    "subFlowPending": "События подвыполнения ещё не поступали",
     "executionId": "Execution ID",
     "workflowId": "ID рабочего процесса",
     "parentExecution": "ID родительского выполнения"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "Оценка стоимости"
       },
       "analystComplete": "Анализ завершен",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "Синтез исследований",
         "trader": "Торговый план",
         "portfolio-mgr": "Итоговое решение",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "Оценка стоимости"
       },
       "analystReports": "Analyst Reports",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "Порог классификации рисков (portfolio-mgr)",
         "simulation": "Симуляция Монте-Карло",
         "refCodes": "Отраслевой эталонный инструмент",
-        "valuationModel": "Параметры модели оценки (DCF/Грэхем)"
+        "valuationModel": "Параметры модели оценки (DCF/Грэхем)",
+        "indicatorsDailyWindows": "Окна индикаторов (только дневная цепочка)",
+        "indicatorsThresholds": "Пороги индикаторов (все цепочки)"
       },
       "note": {
-        "portfolioMgrHorizon": "С v125 значения стоп-лосса / тейк-профита / позиции основного горизонта берутся из выбранной горизонтной ветви. Восемь процентных уровней и два множителя волатильности в этой группе участвуют только на резервном пути (база волатильности для этого горизонта недоступна либо все четыре ветви ничего не выдали) и как ограничение позиции; сила сжатия априорного значения κ и бюджет риска R по-прежнему действуют на основном пути."
+        "portfolioMgrHorizon": "С v125 значения стоп-лосса / тейк-профита / позиции основного горизонта берутся из выбранной горизонтной ветви. Восемь процентных уровней и два множителя волатильности в этой группе участвуют только на резервном пути (база волатильности для этого горизонта недоступна либо все четыре ветви ничего не выдали) и как ограничение позиции; сила сжатия априорного значения κ и бюджет риска R по-прежнему действуют на основном пути.",
+        "indicatorsDailyWindows": "С v137 реально подключены к узлу дневного скоринга. Окна четырёх горизонтов удержания (сверхкороткий/короткий/средний/длительный) выводятся из срока удержания и здесь не меняются; подключение значений из панели к горизонтам снова соединит четыре окна в одни, и инструмент явно сообщит об ошибке.",
+        "indicatorsThresholds": "Множитель стандартного отклонения Боллинджера и коэффициенты роста/падения объёма не масштабируются периодом свечи; дневная цепочка и все четыре горизонта используют эти значения. Коэффициент роста должен превышать коэффициент падения, иначе инструмент явно сообщит об ошибке вместо перевёрнутого сигнала."
       },
       "valuation": {
         "perpetualGrowth": "Бессрочная ставка роста",
@@ -15959,6 +15965,7 @@
       "tagLabel": "Достоверность ограничена",
       "passiveWatch": "Это «Ожидание» — пассивное понижение из-за нехватки данных, а не медвежий вывод",
       "gapsNotDegraded": "Есть пробелы в данных, но понижение не запущено: направление не затронуто",
+      "dqiFuse": "Качество данных {{streak}} циклов подряд не дотягивает до оценки A, сработал предохранитель: потолок уверенности ужат до самой консервативной ступени",
       "collapseLabel": "Коллапс весов факторов",
       "gapReason": "Пробелов в данных: {{count}}",
       "showGaps": "Показать пробелы",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "Охват весов: с поколения {{floor}} (исключено {{preFloor}} более ранних и {{unknown}} неизвестных)"
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "По основной ступени",
       "horizonUnknown": "Неизвестный горизонт",
       "colHorizon": "Горизонт разбора",
+      "colMover": "Спекулятив (этот горизонт)",
+      "moverYes": "Спекулятивная бумага",
+      "moverNo": "Критерий не выполнен",
+      "moverWindowIncomplete": "Окно ещё не заполнено",
+      "moverNoMarketData": "Нет рыночных данных",
+      "moverRuleUnavailable": "Критерий недоступен",
+      "moverNotReflected": "Не рассмотрено",
       "horizonReviewTag": "Разобран здесь",
       "horizonNoNarration": "Только объективная оценка, без текста разбора",
       "horizonStatusLabel": "Статус: ",
@@ -17694,7 +17709,8 @@
     "unitBillion": " млрд",
     "unitMillion": " млн",
     "unitCrore": " крор",
-    "unitLakh": " лакх"
+    "unitLakh": " лакх",
+    "horizonScoringWindows": "Окна индикаторов этого горизонта: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Боллинджер {{boll}} · Объём {{vol}}"
   },
   "pipeline": {
     "title": "Конвейер акций",

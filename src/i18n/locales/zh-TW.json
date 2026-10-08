@@ -9343,7 +9343,6 @@
       "arrayVar": "數組變量",
       "assertion": "斷言",
       "assertions": "斷言",
-      "asyncExecution": "異步執行",
       "atomicSkill": "原子技能",
       "authNone": "無認證",
       "authType": "認證類型",
@@ -10352,6 +10351,8 @@
     "status": "狀態",
     "duration": "耗時",
     "subWorkflow": "子工作流程",
+    "subFlowLive": "子執行即時進度（{{count}} 個）",
+    "subFlowPending": "子執行事件尚未抵達",
     "executionId": "執行 ID",
     "workflowId": "工作流程 ID",
     "parentExecution": "父執行 ID"
@@ -15569,7 +15570,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "價值評估"
       },
       "analystComplete": "分析完毕，请在分析頁查看详细報告",
       "bearAnalyst": "Bear",
@@ -15638,7 +15640,8 @@
         "research-mgr": "研究經理綜合",
         "trader": "交易方案制定",
         "portfolio-mgr": "最終決策生成",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "價值評估"
       },
       "analystReports": "分析师报告",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15773,7 +15776,6 @@
         "signals": "信号检测",
         "keylevels": "关键价位",
         "recommender": "推荐器",
-        "indicators": "技术指标",
         "strategyParams": "策略参数",
         "strategyGates": "策略门槛与过滤条件",
         "strategyConfidence": "置信度分量与权重",
@@ -15789,10 +15791,14 @@
         "portfolioMgrRisk": "风险分类阈值（portfolio-mgr）",
         "simulation": "蒙特卡洛仿真",
         "refCodes": "行业参考标的",
-        "valuationModel": "估值模型參數（DCF/格雷厄姆）"
+        "valuationModel": "估值模型參數（DCF/格雷厄姆）",
+        "indicatorsDailyWindows": "技術指標窗口（僅日線鏈）",
+        "indicatorsThresholds": "技術指標閾值（全鏈生效）"
       },
       "note": {
-        "portfolioMgrHorizon": "换代說明：自 v125 起，主檔的止損/止盈/倉位數值取自被選中的那一檔分支。本組的八項百分比檔位與兩個波動率乘數只在兜底路徑（該檔波動率口徑不可得，或四路分支全未產出）以及倉位上限裡參與；先驗收縮強度 κ 與風險預算 R 仍按主口徑生效。"
+        "portfolioMgrHorizon": "换代說明：自 v125 起，主檔的止損/止盈/倉位數值取自被選中的那一檔分支。本組的八項百分比檔位與兩個波動率乘數只在兜底路徑（該檔波動率口徑不可得，或四路分支全未產出）以及倉位上限裡參與；先驗收縮強度 κ 與風險預算 R 仍按主口徑生效。",
+        "indicatorsDailyWindows": "自 v137 起這五項真正接入日線評分節點。四個持有檔（極短/短/中/長）的指標窗口由各自持有期推導，不受這裡影響；把面板值接到檔側會讓四檔窗口重新變成同一份，工具側對這種接線直接報錯。",
+        "indicatorsThresholds": "布林標準差倍數與量能放量/縮量比值不隨週期縮放，日線與四個持有檔都取這裡的值。放量倍數必須大於縮量倍數，否則工具顯式報錯而不是給出反向訊號。"
       },
       "valuation": {
         "perpetualGrowth": "永續增長率",
@@ -16183,6 +16189,7 @@
       "tagLabel": "可信度受限",
       "passiveWatch": "本次「觀望」為資料不足導致的被動降級，非看空判斷",
       "gapsNotDegraded": "存在資料缺口，但未觸發降級：結論方向不受影響",
+      "dqiFuse": "資料品質已連續 {{streak}} 輪未達 A 級並觸發熔斷：本輪置信度上限按最保守檔收緊",
       "collapseLabel": "因子權重坍縮",
       "gapReason": "資料缺口 {{count}} 項",
       "showGaps": "檢視缺口",
@@ -16483,7 +16490,8 @@
         "missing_risk_assessment": "偵測到風控缺失，補充風控步驟",
         "high_error_rate": "錯誤模式 {{count}} 個，減少錯誤",
         "manual_trigger": "手動觸發：{{reason}}"
-      }
+      },
+      "generationScope": "權重口徑：起算第 {{floor}} 代（已排除更早代的 {{preFloor}} 條、代際未知的 {{unknown}} 條）"
     },
     "toolLabel": {
       "get_stock_quote": "实时行情",
@@ -16890,6 +16898,13 @@
       "horizonAuto": "按主檔",
       "horizonUnknown": "未知週期",
       "colHorizon": "復盤檔",
+      "colMover": "妖股標籤（本檔）",
+      "moverYes": "妖股",
+      "moverNo": "未達標",
+      "moverWindowIncomplete": "窗口未滿",
+      "moverNoMarketData": "無行情資料",
+      "moverRuleUnavailable": "判據不成立",
+      "moverNotReflected": "未復盤",
       "horizonReviewTag": "本次復盤檔",
       "horizonNoNarration": "該檔僅有客觀判定，未做反思敘述",
       "horizonStatusLabel": "狀態：",
@@ -17918,7 +17933,8 @@
     "unitBillion": "十億",
     "unitMillion": "百萬",
     "unitCrore": "千萬",
-    "unitLakh": "十萬"
+    "unitLakh": "十萬",
+    "horizonScoringWindows": "本檔技術腿窗口：{{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · 布林 {{boll}} · 量能 {{vol}}"
   },
   "pipeline": {
     "title": "股票管道",

@@ -1,3 +1,4 @@
+import { analystNodeId } from "@/lib/stock-analysis-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invokeMock, listenMock, unlistenMock } = vi.hoisted(() => ({
@@ -59,7 +60,8 @@ describe("stockAnalysisStore - feature coverage", () => {
     it("a-* 分析师节点 → 阶段 1", () => {
       expect(inferStage("a-market-analyst")).toBe(1);
       expect(inferStage("a-sentiment")).toBe(1);
-      expect(inferStage("a-news")).toBe(1);
+      // v133：逐档实例 id 仍应归阶段 1（a-news 已退役，改为锁带档形态）。
+      expect(inferStage(analystNodeId("a-fundamentals", "mid"))).toBe(1);
       expect(inferStage("a-fundamentals")).toBe(1);
       expect(inferStage("a-policy")).toBe(1);
       expect(inferStage("a-hot-money")).toBe(1);
@@ -145,7 +147,7 @@ describe("stockAnalysisStore - feature coverage", () => {
       const allNodeIds = [
         "a-market-analyst",
         "a-sentiment",
-        "a-news",
+        analystNodeId("a-market-analyst", "mid"),
         "a-fundamentals",
         "a-policy",
         "a-hot-money",

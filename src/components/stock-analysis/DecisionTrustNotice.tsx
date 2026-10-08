@@ -61,6 +61,10 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
 
   const collapsed = decision.weightsCollapsed === true;
   const gaps = decision.dataGaps ?? [];
+  // #8 P5：跨轮数据质量熔断。与 `collapsed`（本轮因子权重坍缩）是**两件事**：
+  //   本轮 grade 可以是 B、因子权重也没坍缩、缺口清单为空，但近若干轮一直拿不到 A 级。
+  //   这种"证据面一直坏"必须能单独把本警示条点亮，否则它只出现在 reasoning 长文里。
+  const fused = decision.dqiFuseState === "fused";
 
   /** 权重坍缩原因文案（与 DecisionBanner 原有口径一致，避免两处各写一套映射） */
   const collapseText = useMemo(() => {
@@ -80,7 +84,10 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
   }, [collapsed, decision.collapseReason, decision.untrustedCount, decision.weightRatio, t]);
 
   // 无任何可信度问题时不渲染 —— 避免每张决策卡都挂一条无信息量的提示
-  if (!collapsed && gaps.length === 0) { return null; }
+  // ⚠ `dqiFuseState === "unobserved"`（观测表为空）**不在**这里点亮：那条事实说的是
+  //   "这套设施还没跑过"，不是"本次决策可信度受限"，每张卡都亮就成噪声。
+  //   它在 reasoning 里单独成句（portfolio-mgr 的「熔断判定未参与」），不在卡上占位。
+  if (!collapsed && gaps.length === 0 && !fused) { return null; }
 
   // 「被动降级」判定：结论是「不操作」，且存在可信度限制。
   // 此时的不操作不代表看空，而是系统在证据不足时的保守选择 —— 必须说清楚。
@@ -124,6 +131,7 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
             <div className="font-medium">{t("stockAnalysis.trustNotice.title")}</div>
             {isPassiveDowngrade && <div>{t("stockAnalysis.trustNotice.passiveWatch")}</div>}
             {isGapsOnly && <div>{t("stockAnalysis.trustNotice.gapsNotDegraded")}</div>}
+            {fused && <div>{t("stockAnalysis.trustNotice.dqiFuse", { streak: decision.dqiStreak ?? "?" })}</div>}
             {collapsed && <div>{collapseText}</div>}
             {gaps.length > 0 && (
               <div>
@@ -164,6 +172,11 @@ export function DecisionTrustNotice({ decision, variant = "banner", showConseque
         {isGapsOnly && (
           <span style={{ color: "var(--muted)" }}>
             {t("stockAnalysis.trustNotice.gapsNotDegraded")}
+          </span>
+        )}
+        {fused && (
+          <span style={{ color: "var(--sa-amber)" }}>
+            {t("stockAnalysis.trustNotice.dqiFuse", { streak: decision.dqiStreak ?? "?" })}
           </span>
         )}
         {collapsed && (

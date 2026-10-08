@@ -110,6 +110,12 @@ impl KeyLevelTracker {
         let analyses = stock_analyses::Entity::find()
             .filter(stock_analyses::Column::Status.eq("completed"))
             .filter(stock_analyses::Column::BlackboardSnapshot.is_not_null())
+            // #31（PLAN §七十六：统计类入口）：关键位命中率的分母是「快照数」⇒ 按起算代筛样。
+            // 与统计侧同一条下限规则，NULL（代际未知）不进分母。
+            .filter(
+                stock_analyses::Column::TemplateVersion
+                    .gte(axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR),
+            )
             .order_by_desc(stock_analyses::Column::CreatedAt)
             .limit(Some(cfg.query_limit))
             .all(self.db.as_ref())

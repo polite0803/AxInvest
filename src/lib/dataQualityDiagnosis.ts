@@ -12,19 +12,22 @@
 //   现前端不再自算，改为直接消费 data-quality.rhai 的权威输出（grade/score/diagnostics），
 //   全项目只保留一套数据质量判定。
 
+import { analystBaseOf } from "@/lib/stock-analysis-utils";
 import type { DataQualityDiagItem, DataQualityReport } from "@/types";
 
 /**
  * 分析师节点 ID → data-quality.rhai 的 `diagnostics` 键名（缩写）。
  *
- * 权威来源：`data-quality.rhai` 头部注释的「分析师缩写对照（当前 DAG 10 个分析师）」。
+ * 权威来源：`data-quality.rhai` 头部注释的「分析师缩写对照（10 个槽位）」。
  * ⚠ DAG 增删分析师时，须同步三处：data-quality.rhai 头部对照表、
  *   其 input_mapping 的 `{abbr}_verdict` 变量、以及本表。
+ * v133（B2-2）：a-news 退役（公告通道由 a-catalyst 承载）；value-investor 上线（槽位 `val`）。
+ * 键域是**裸节点 id**——调用方若是逐档实例（`a-market-analyst--mid`），
+ * `resolveAnalystDiagnosis` 会先归一再查。
  */
 export const EXPERT_ID_TO_DQ_ABBR: Readonly<Record<string, string>> = {
   "a-market-analyst": "mk",
   "a-sentiment": "sent",
-  "a-news": "news",
   "a-fundamentals": "fund",
   "a-policy": "pol",
   "a-hot-money": "hm",
@@ -32,6 +35,7 @@ export const EXPERT_ID_TO_DQ_ABBR: Readonly<Record<string, string>> = {
   "a-research": "res",
   "a-sector": "sec",
   "a-catalyst": "cat",
+  "value-investor": "val",
 };
 
 /** 后端诊断状态 → 面板展示用的严重度 */
@@ -124,7 +128,9 @@ export function resolveAnalystDiagnosis(
   const diags = report?.diagnostics;
   if (!diags) { return null; }
 
-  const abbr = EXPERT_ID_TO_DQ_ABBR[expertId];
+  // v133（B2-2）：调用方可能传逐档实例 id（`a-market-analyst--mid`）——先归一再查表。
+  const base = analystBaseOf(expertId) ?? expertId;
+  const abbr = EXPERT_ID_TO_DQ_ABBR[base];
   if (abbr && diags[abbr]) { return diags[abbr]; }
 
   if (expertName) {

@@ -524,7 +524,7 @@ function checkEventSymmetry() {
  *   false = 未找到该任务或持久化失败 ⇒ 一次性 cron 任务仍留 Active ⇒ 下次到点重复跑。
  *   274 − 11 = 263，与 11 处一一对应（复跑实测：`共 263 处，已排除 47 处豁免调用`）。回滚 = 改回 274。
  */
-const SILENT_RESULT_BASELINE = 263;
+const SILENT_RESULT_BASELINE = 262;
 
 /** 已知的合理丢弃（按被调方名），计数时排除，避免基线被噪声撑大。 */
 const SILENT_RESULT_EXEMPT_CALLEES = new Set([

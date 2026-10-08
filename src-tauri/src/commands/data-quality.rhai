@@ -6,7 +6,7 @@
 // 分析师缩写对照（当前 DAG 10 个分析师）:
 //   mk   → a-market-analyst (market-analyst)
 //   sent → a-sentiment (sentiment-analyst)
-//   news → a-news (news-analyst)
+//   val  → value-investor（价值评估；产出经 value-verify 原地覆写）
 //   fund → a-fundamentals (fundamentals-analyst)
 //   pol  → a-policy (policy-analyst)
 //   hm   → a-hot-money (hot-money-tracker)
@@ -655,7 +655,7 @@ fn tool_credibility(avg_conf, gap_count) {
 // ── 分析师 confidence 解析 ──
 let mk_c = extract_conf(mk_verdict);
 let sent_c = extract_conf(sent_verdict);
-let news_c = extract_conf(news_verdict);
+let val_c = extract_conf(val_verdict);
 let fund_c = extract_conf(fund_verdict);
 let pol_c = extract_conf(pol_verdict);
 let hm_c = extract_conf(hm_verdict);
@@ -667,7 +667,7 @@ let cat_c = extract_conf(cat_verdict);
 // ── P1-B3: 分析师报告正文解析（用于算法化 report_quality_score）──
 let mk_r = extract_report(mk_report);
 let sent_r = extract_report(sent_report);
-let news_r = extract_report(news_report);
+let val_r = extract_report(val_report);
 let fund_r = extract_report(fund_report);
 let pol_r = extract_report(pol_report);
 let hm_r = extract_report(hm_report);
@@ -686,7 +686,7 @@ let cat_r = extract_report(cat_report);
 //（此前两口径各自全量重算 ⇒ KB 级报告 ×10 节点烧穿生产操作预算）。
 let mk_mc = marker_counts(mk_r);
 let sent_mc = marker_counts(sent_r);
-let news_mc = marker_counts(news_r);
+let val_mc = marker_counts(val_r);
 let fund_mc = marker_counts(fund_r);
 let pol_mc = marker_counts(pol_r);
 let hm_mc = marker_counts(hm_r);
@@ -696,7 +696,7 @@ let sec_mc = marker_counts(sec_r);
 let cat_mc = marker_counts(cat_r);
 let mk_ph = hits_from_counts(mk_mc);
 let sent_ph = hits_from_counts(sent_mc);
-let news_ph = hits_from_counts(news_mc);
+let val_ph = hits_from_counts(val_mc);
 let fund_ph = hits_from_counts(fund_mc);
 let pol_ph = hits_from_counts(pol_mc);
 let hm_ph = hits_from_counts(hm_mc);
@@ -707,7 +707,7 @@ let cat_ph = hits_from_counts(cat_mc);
 // 2026-09-21: 与 *_ph 同源的实际出现次数（*_ph 是词种数）—— 供面板并列展示
 let mk_po = occurrences_from_counts(mk_mc);
 let sent_po = occurrences_from_counts(sent_mc);
-let news_po = occurrences_from_counts(news_mc);
+let val_po = occurrences_from_counts(val_mc);
 let fund_po = occurrences_from_counts(fund_mc);
 let pol_po = occurrences_from_counts(pol_mc);
 let hm_po = occurrences_from_counts(hm_mc);
@@ -730,8 +730,7 @@ let cat_po = occurrences_from_counts(cat_mc);
 //   新增降级方法时若不同步此表，该维度只是**不豁免**（保守方向，不会错扣）。
 fn asof_method_dims() {
     #{
-        "get_news": ["news"],
-        "search_news": ["news", "pol", "res", "sec", "cat"],
+        "search_news": ["pol", "res", "sec", "cat"],
         "get_policy_news": ["pol"],
         "get_research_reports": ["res"],
         "get_consensus_eps": ["res", "fund"],
@@ -770,7 +769,7 @@ for i in 0..asof_methods.len() {
 }
 let asof_sup_mk = asof_design["mk"] == true;
 let asof_sup_sent = asof_design["sent"] == true;
-let asof_sup_news = asof_design["news"] == true;
+let asof_sup_val = asof_design["val"] == true;
 let asof_sup_fund = asof_design["fund"] == true;
 let asof_sup_pol = asof_design["pol"] == true;
 let asof_sup_hm = asof_design["hm"] == true;
@@ -872,7 +871,7 @@ fn merge_two_notes(a, b) {
 // R2 追加第二类豁免条件 `*_word_sup`（措辞性缺席），与 as-of 设计性降级**并列**、互不遮蔽。
 let mk_word_sup = is_wording_only_absence(mk_ph, mk_tool_calls);
 let sent_word_sup = is_wording_only_absence(sent_ph, sent_tool_calls);
-let news_word_sup = is_wording_only_absence(news_ph, news_tool_calls);
+let val_word_sup = is_wording_only_absence(val_ph, val_tool_calls);
 let fund_word_sup = is_wording_only_absence(fund_ph, fund_tool_calls);
 let pol_word_sup = is_wording_only_absence(pol_ph, pol_tool_calls);
 let hm_word_sup = is_wording_only_absence(hm_ph, hm_tool_calls);
@@ -882,7 +881,7 @@ let sec_word_sup = is_wording_only_absence(sec_ph, sec_tool_calls);
 let cat_word_sup = is_wording_only_absence(cat_ph, cat_tool_calls);
 let mk_word_note = wording_absence_note(mk_ph, mk_tool_calls);
 let sent_word_note = wording_absence_note(sent_ph, sent_tool_calls);
-let news_word_note = wording_absence_note(news_ph, news_tool_calls);
+let val_word_note = wording_absence_note(val_ph, val_tool_calls);
 let fund_word_note = wording_absence_note(fund_ph, fund_tool_calls);
 let pol_word_note = wording_absence_note(pol_ph, pol_tool_calls);
 let hm_word_note = wording_absence_note(hm_ph, hm_tool_calls);
@@ -893,7 +892,7 @@ let cat_word_note = wording_absence_note(cat_ph, cat_tool_calls);
 
 let mk_ph_e = if asof_sup_mk || mk_word_sup { [] } else { mk_ph };
 let sent_ph_e = if asof_sup_sent || sent_word_sup { [] } else { sent_ph };
-let news_ph_e = if asof_sup_news || news_word_sup { [] } else { news_ph };
+let val_ph_e = if asof_sup_val || val_word_sup { [] } else { val_ph };
 let fund_ph_e = if asof_sup_fund || fund_word_sup { [] } else { fund_ph };
 let pol_ph_e = if asof_sup_pol || pol_word_sup { [] } else { pol_ph };
 let hm_ph_e = if asof_sup_hm || hm_word_sup { [] } else { hm_ph };
@@ -903,7 +902,7 @@ let sec_ph_e = if asof_sup_sec || sec_word_sup { [] } else { sec_ph };
 let cat_ph_e = if asof_sup_cat || cat_word_sup { [] } else { cat_ph };
 let mk_po_e = if asof_sup_mk || mk_word_sup { 0 } else { mk_po };
 let sent_po_e = if asof_sup_sent || sent_word_sup { 0 } else { sent_po };
-let news_po_e = if asof_sup_news || news_word_sup { 0 } else { news_po };
+let val_po_e = if asof_sup_val || val_word_sup { 0 } else { val_po };
 let fund_po_e = if asof_sup_fund || fund_word_sup { 0 } else { fund_po };
 let pol_po_e = if asof_sup_pol || pol_word_sup { 0 } else { pol_po };
 let hm_po_e = if asof_sup_hm || hm_word_sup { 0 } else { hm_po };
@@ -912,17 +911,17 @@ let res_po_e = if asof_sup_res || res_word_sup { 0 } else { res_po };
 let sec_po_e = if asof_sup_sec || sec_word_sup { 0 } else { sec_po };
 let cat_po_e = if asof_sup_cat || cat_word_sup { 0 } else { cat_po };
 
-let placeholder_total_hits = mk_ph_e.len() + sent_ph_e.len() + news_ph_e.len() + fund_ph_e.len()
+let placeholder_total_hits = mk_ph_e.len() + sent_ph_e.len() + val_ph_e.len() + fund_ph_e.len()
     + pol_ph_e.len() + hm_ph_e.len() + lk_ph_e.len() + res_ph_e.len() + sec_ph_e.len() + cat_ph_e.len();
 // 2026-09-21: 与 placeholder_total_hits 同判定集的**实际出现次数**合计（词种数 vs 出现次数）
-let placeholder_total_occurrences = mk_po_e + sent_po_e + news_po_e + fund_po_e + pol_po_e
+let placeholder_total_occurrences = mk_po_e + sent_po_e + val_po_e + fund_po_e + pol_po_e
     + hm_po_e + lk_po_e + res_po_e + sec_po_e + cat_po_e;
 
 // 单个分析师报告质量分（缺失报告 → 0 分）
 // v87：第 4 参传上方已算好的 *_mc，杜绝 has_placeholder 再全量重算 marker_counts。
 let mk_q = report_quality(mk_r, mk_c, asof_sup_mk, mk_mc);
 let sent_q = report_quality(sent_r, sent_c, asof_sup_sent, sent_mc);
-let news_q = report_quality(news_r, news_c, asof_sup_news, news_mc);
+let val_q = report_quality(val_r, val_c, asof_sup_val, val_mc);
 let fund_q = report_quality(fund_r, fund_c, asof_sup_fund, fund_mc);
 let pol_q = report_quality(pol_r, pol_c, asof_sup_pol, pol_mc);
 let hm_q = report_quality(hm_r, hm_c, asof_sup_hm, hm_mc);
@@ -934,7 +933,7 @@ let cat_q = report_quality(cat_r, cat_c, asof_sup_cat, cat_mc);
 // gap 推断：confidence < 0（字段缺失/节点失败）才算真正的数据缺口
 let mk_g = mk_c < 0.0;
 let sent_g = sent_c < 0.0;
-let news_g = news_c < 0.0;
+let val_g = val_c < 0.0;
 let fund_g = fund_c < 0.0;
 let pol_g = pol_c < 0.0;
 let hm_g = hm_c < 0.0;
@@ -953,7 +952,7 @@ let cat_g = cat_c < 0.0;
 //   2. 在 tool_credibility 中增加 untrusted 惩罚
 let mk_u = is_untrusted(mk_verdict) || (present(mk_untrusted) && mk_untrusted == true);
 let sent_u = is_untrusted(sent_verdict) || (present(sent_untrusted) && sent_untrusted == true);
-let news_u = is_untrusted(news_verdict) || (present(news_untrusted) && news_untrusted == true);
+let val_u = is_untrusted(val_verdict) || (present(val_untrusted) && val_untrusted == true);
 let fund_u = is_untrusted(fund_verdict) || (present(fund_untrusted) && fund_untrusted == true);
 let pol_u = is_untrusted(pol_verdict) || (present(pol_untrusted) && pol_untrusted == true);
 let hm_u = is_untrusted(hm_verdict) || (present(hm_untrusted) && hm_untrusted == true);
@@ -964,7 +963,7 @@ let cat_u = is_untrusted(cat_verdict) || (present(cat_untrusted) && cat_untruste
 let untrusted_analyst_count = 0;
 if mk_u { untrusted_analyst_count += 1; }
 if sent_u { untrusted_analyst_count += 1; }
-if news_u { untrusted_analyst_count += 1; }
+if val_u { untrusted_analyst_count += 1; }
 if fund_u { untrusted_analyst_count += 1; }
 if pol_u { untrusted_analyst_count += 1; }
 if hm_u { untrusted_analyst_count += 1; }
@@ -977,7 +976,7 @@ if cat_u { untrusted_analyst_count += 1; }
 // report_quality_avg 分母、good_count<n/2 阈值、low_count 全部失真）。
 // 改为从 verdict 输入动态推导（非 () 即视为该分析师有输出），自动适配 DAG 实际分析师数。
 fn count_present(v) { if type_of(v) != "()" { 1 } else { 0 } }
-let n_int = count_present(mk_verdict) + count_present(sent_verdict) + count_present(news_verdict)
+let n_int = count_present(mk_verdict) + count_present(sent_verdict) + count_present(val_verdict)
     + count_present(fund_verdict) + count_present(pol_verdict) + count_present(hm_verdict)
     + count_present(lk_verdict) + count_present(res_verdict) + count_present(sec_verdict)
     + count_present(cat_verdict);
@@ -997,7 +996,7 @@ let total_conf = 0.0;     // 累加有效 confidence（排除 untrusted）
 //   不再计入 good。degraded 归入 low 语义（low_count = n_int - good - gap 天然包含）。
 if mk_u || mk_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += mk_c; if mk_c >= 50.0 { if mk_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
 if sent_u || sent_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += sent_c; if sent_c >= 50.0 { if sent_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
-if news_u || news_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += news_c; if news_c >= 50.0 { if news_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
+if val_u || val_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += val_c; if val_c >= 50.0 { if val_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
 if fund_u || fund_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += fund_c; if fund_c >= 50.0 { if fund_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
 if pol_u || pol_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += pol_c; if pol_c >= 50.0 { if pol_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
 if hm_u || hm_c < 0.0 { gap_count += 1; } else { valid_count += 1; total_conf += hm_c; if hm_c >= 50.0 { if hm_ph_e.len() > 0 { degraded_count += 1; } else { good_count += 1; } } }
@@ -1012,7 +1011,7 @@ let avg_conf = if valid_count > 0 { total_conf / valid_count.to_float() } else {
 // report_quality_score: 10 个分析师报告质量均值（缺失报告按 0 分拉低均值）
 // tool_credibility_score: 基于已有 avg_conf + gap_count 指标算法化
 // score = report × 0.6 + tool × 0.4（替代旧版 valid/good_count 占比 + 阶梯惩罚）
-let report_quality_sum = mk_q + sent_q + news_q + fund_q + pol_q + hm_q + lk_q + res_q + sec_q + cat_q;
+let report_quality_sum = mk_q + sent_q + val_q + fund_q + pol_q + hm_q + lk_q + res_q + sec_q + cat_q;
 // P2-3 修复(2026-08-09): n 动态化后需防除零（全部 verdict 缺失时 n==0）
 let report_quality_avg = if n > 0.0 { report_quality_sum / n } else { 0.0 };
 let tool_credibility_score = tool_credibility(avg_conf, gap_count);
@@ -1029,7 +1028,7 @@ let tool_credibility_score = tool_credibility(avg_conf, gap_count);
 // 只有当两边都有显著的高置信度观点时，才判定为严重冲突。
 let mk_dir = if mk_u { 0 } else { extract_dir(mk_verdict) };
 let sent_dir = if sent_u { 0 } else { extract_dir(sent_verdict) };
-let news_dir = if news_u { 0 } else { extract_dir(news_verdict) };
+let val_dir = if val_u { 0 } else { extract_dir(val_verdict) };
 let fund_dir = if fund_u { 0 } else { extract_dir(fund_verdict) };
 let pol_dir = if pol_u { 0 } else { extract_dir(pol_verdict) };
 let hm_dir = if hm_u { 0 } else { extract_dir(hm_verdict) };
@@ -1043,7 +1042,7 @@ let bull_dir_count = 0;
 let bear_dir_count = 0;
 if mk_dir > 0 { bull_dir_count += 1; } else if mk_dir < 0 { bear_dir_count += 1; }
 if sent_dir > 0 { bull_dir_count += 1; } else if sent_dir < 0 { bear_dir_count += 1; }
-if news_dir > 0 { bull_dir_count += 1; } else if news_dir < 0 { bear_dir_count += 1; }
+if val_dir > 0 { bull_dir_count += 1; } else if val_dir < 0 { bear_dir_count += 1; }
 if fund_dir > 0 { bull_dir_count += 1; } else if fund_dir < 0 { bear_dir_count += 1; }
 if pol_dir > 0 { bull_dir_count += 1; } else if pol_dir < 0 { bear_dir_count += 1; }
 if hm_dir > 0 { bull_dir_count += 1; } else if hm_dir < 0 { bear_dir_count += 1; }
@@ -1065,10 +1064,10 @@ if !sent_u && sent_c > 0.0 {
     if sent_dir > 0 { weighted_bull_score += sent_c; }
     else if sent_dir < 0 { weighted_bear_score += sent_c; }
 }
-// news
-if !news_u && news_c > 0.0 {
-    if news_dir > 0 { weighted_bull_score += news_c; }
-    else if news_dir < 0 { weighted_bear_score += news_c; }
+// val
+if !val_u && val_c > 0.0 {
+    if val_dir > 0 { weighted_bull_score += val_c; }
+    else if val_dir < 0 { weighted_bear_score += val_c; }
 }
 // fund
 if !fund_u && fund_c > 0.0 {
@@ -1141,9 +1140,9 @@ if !sent_u {
     for i in 0..sent_issues.len() { field_validation_issues.push(sent_issues[i]); }
 }
 // 新闻面
-if !news_u {
-    let news_issues = validate_verdict_schema(news_verdict, "新闻面");
-    for i in 0..news_issues.len() { field_validation_issues.push(news_issues[i]); }
+if !val_u {
+    let val_issues = validate_verdict_schema(val_verdict, "价值评估");
+    for i in 0..val_issues.len() { field_validation_issues.push(val_issues[i]); }
 }
 // 基本面
 if !fund_u {
@@ -1606,8 +1605,8 @@ let diagnostics = #{
     //   t-dragon-tiger-data（龙虎榜营业部明细，独立于 t-sentiment-data 的节点）。
     "sent": diag_for(sent_c, "情绪面分析师", "市场情绪、散户/机构态度（t-sentiment-data）；龙虎榜席位明细（t-dragon-tiger-data）", sent_u, sent_ph_e.len(), sent_po_e, sent_q,
         merge_two_notes(attribution_note(sent_report, sent_tool_calls), sent_word_note), asof_sup_sent, sent_ph.len(), sent_word_sup),
-    "news": diag_for(news_c, "新闻面分析师", "新闻公告影响评估（t-news-data: get_stock_news）", news_u, news_ph_e.len(), news_po_e, news_q,
-        merge_two_notes(attribution_note(news_report, news_tool_calls), news_word_note), asof_sup_news, news_ph.len(), news_word_sup),
+    "val": diag_for(val_c, "价值评估官", "内在价值评估（value-investor；数值经 value-verify 覆写链校准）", val_u, val_ph_e.len(), val_po_e, val_q,
+        merge_two_notes(attribution_note(val_report, val_tool_calls), val_word_note), asof_sup_val, val_ph.len(), val_word_sup),
     // 基本面/催化剂/行业的「同侪 PE/PB 全为 null」同源于 t-fundamentals-data 的
     // get_stock_peers（2026-09-21 已补 PE_TTM/PB_MRQ/市值/涨跌幅；ROE 仍未接入）。
     "fund": diag_for(fund_c, "基本面分析师", "PE/PB/ROE、营收利润、资产负债（t-fundamentals-data）；同侪估值（t-fundamentals-data: get_stock_peers）", fund_u, fund_ph_e.len(), fund_po_e, fund_q,
@@ -1658,7 +1657,7 @@ let low_confidence_analysts = [];
 //   low     = c < 50 || 报告含失败标记（原实现只看 confidence）
 if mk_u || mk_c < 0.0 { missing_analysts.push("技术面"); } else if mk_c < 50.0 || mk_ph_e.len() > 0 { low_confidence_analysts.push("技术面"); }
 if sent_u || sent_c < 0.0 { missing_analysts.push("情绪面"); } else if sent_c < 50.0 || sent_ph_e.len() > 0 { low_confidence_analysts.push("情绪面"); }
-if news_u || news_c < 0.0 { missing_analysts.push("新闻面"); } else if news_c < 50.0 || news_ph_e.len() > 0 { low_confidence_analysts.push("新闻面"); }
+if val_u || val_c < 0.0 { missing_analysts.push("价值评估"); } else if val_c < 50.0 || val_ph_e.len() > 0 { low_confidence_analysts.push("价值评估"); }
 if fund_u || fund_c < 0.0 { missing_analysts.push("基本面"); } else if fund_c < 50.0 || fund_ph_e.len() > 0 { low_confidence_analysts.push("基本面"); }
 if pol_u || pol_c < 0.0 { missing_analysts.push("政策面"); } else if pol_c < 50.0 || pol_ph_e.len() > 0 { low_confidence_analysts.push("政策面"); }
 if hm_u || hm_c < 0.0 { missing_analysts.push("资金面"); } else if hm_c < 50.0 || hm_ph_e.len() > 0 { low_confidence_analysts.push("资金面"); }
@@ -1673,7 +1672,7 @@ let placeholder_nodes = [];      // 中文名，供 UI 展示
 let placeholder_node_ids = [];   // 节点缩写（mk/sent/...），供定位 agent 节点
 if mk_ph_e.len() > 0 { placeholder_nodes.push("技术面"); placeholder_node_ids.push("mk"); }
 if sent_ph_e.len() > 0 { placeholder_nodes.push("情绪面"); placeholder_node_ids.push("sent"); }
-if news_ph_e.len() > 0 { placeholder_nodes.push("新闻面"); placeholder_node_ids.push("news"); }
+if val_ph_e.len() > 0 { placeholder_nodes.push("价值评估"); placeholder_node_ids.push("val"); }
 if fund_ph_e.len() > 0 { placeholder_nodes.push("基本面"); placeholder_node_ids.push("fund"); }
 if pol_ph_e.len() > 0 { placeholder_nodes.push("政策面"); placeholder_node_ids.push("pol"); }
 if hm_ph_e.len() > 0 { placeholder_nodes.push("资金面"); placeholder_node_ids.push("hm"); }
@@ -1714,7 +1713,7 @@ if field_validation_issues.len() > 0 {
 // 字数过低的报告（< 200 字符）
 if mk_r != "" && count_chars(mk_r) < 200 { warnings.push("技术面报告字数不足 200"); }
 if sent_r != "" && count_chars(sent_r) < 200 { warnings.push("情绪面报告字数不足 200"); }
-if news_r != "" && count_chars(news_r) < 200 { warnings.push("新闻面报告字数不足 200"); }
+if val_r != "" && count_chars(val_r) < 200 { warnings.push("价值评估报告字数不足 200"); }
 if fund_r != "" && count_chars(fund_r) < 200 { warnings.push("基本面报告字数不足 200"); }
 if pol_r != "" && count_chars(pol_r) < 200 { warnings.push("政策面报告字数不足 200"); }
 if hm_r != "" && count_chars(hm_r) < 200 { warnings.push("资金面报告字数不足 200"); }
@@ -1733,7 +1732,7 @@ if placeholder_nodes.len() > 0 {
 let asof_designed_dims_cn = [];
 if asof_design["mk"] == true { asof_designed_dims_cn.push("技术面"); }
 if asof_design["sent"] == true { asof_designed_dims_cn.push("情绪面"); }
-if asof_design["news"] == true { asof_designed_dims_cn.push("新闻面"); }
+if asof_design["val"] == true { asof_designed_dims_cn.push("价值评估"); }
 if asof_design["fund"] == true { asof_designed_dims_cn.push("基本面"); }
 if asof_design["pol"] == true { asof_designed_dims_cn.push("政策面"); }
 if asof_design["hm"] == true { asof_designed_dims_cn.push("资金面"); }

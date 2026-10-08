@@ -38,7 +38,6 @@ interface AgentNodeRow {
 const FIXED_TOOL_MAP: Record<string, string[]> = {
   "a-market-analyst": ["get_stock_kline"],
   "a-sentiment": ["get_hot_stocks"],
-  "a-news": ["get_announcements"],
   "a-fundamentals": ["get_consensus_eps"],
   "a-policy": ["get_announcements"],
   "a-hot-money": ["get_stock_money_flow"],
@@ -130,7 +129,6 @@ export function AgentProfileList() {
       const profileToNode: Record<string, string> = {
         "stock-market-analyst": "a-market-analyst",
         "stock-sentiment-analyst": "a-sentiment",
-        "stock-news-analyst": "a-news",
         "stock-fundamentals-analyst": "a-fundamentals",
         "stock-policy-analyst": "a-policy",
         "stock-hot-money-tracker": "a-hot-money",
@@ -228,7 +226,6 @@ export function AgentProfileList() {
         const profileToNode: Record<string, string> = {
           "stock-market-analyst": "a-market-analyst",
           "stock-sentiment-analyst": "a-sentiment",
-          "stock-news-analyst": "a-news",
           "stock-fundamentals-analyst": "a-fundamentals",
           "stock-policy-analyst": "a-policy",
           "stock-hot-money-tracker": "a-hot-money",

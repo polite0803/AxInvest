@@ -58,6 +58,11 @@ mod windows_utils;
 mod app_state;
 mod config_validator;
 
+/// 子工作流**扇出键齐备性**审计（§九十 / §九十一(3)）—— 只服务测试，故 `cfg(test)`。
+/// 两个使用方共用：`init::cognitive_router_init`、`commands::stock_analysis_setup`。
+#[cfg(test)]
+mod workflow_fanout_audit;
+
 #[allow(unused_imports)]
 use axagent_harness::IpcEventName;
 use tauri::{Emitter, Manager};

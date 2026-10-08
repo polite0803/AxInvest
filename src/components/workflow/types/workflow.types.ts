@@ -320,7 +320,6 @@ export interface SubWorkflowNodeConfig {
   subWorkflowId: string;
   inputMapping: Record<string, string>;
   outputVar: string;
-  isAsync: boolean;
   /** 子图定义（可选）。与 expandedSubWorkflows 配合，编辑器可在容器内部渲染子工作流节点。 */
   subGraph?: SubGraph;
 }

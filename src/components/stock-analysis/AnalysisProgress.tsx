@@ -1,4 +1,5 @@
 import { invoke } from "@/lib/invoke";
+import { analystBaseOf } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { TOOL_NODE_I18N_KEY } from "@/stores/feature/stockWorkflowChatBridge";
 import { Button, message, Progress, Steps, Tag } from "antd";
@@ -14,19 +15,10 @@ const STAGES = [
   "stage.decision",
 ];
 
-// 已知的分析师节点 ID（与 workflowChatBridge ANALYST_NODE_TO_NAME 同步）
-const ANALYST_NODE_IDS = [
-  "a-market-analyst",
-  "a-sentiment",
-  "a-news",
-  "a-fundamentals",
-  "a-policy",
-  "a-hot-money",
-  "a-lockup",
-  "a-research",
-  "a-sector",
-  "a-catalyst",
-];
+// 已知的分析师 **base** 数（v133：9 个 a-* + value-investor）。
+// store `analystReports` 的键是逐档实例（`market-analyst--mid`）或裸 base（历史快照）——
+// 进度按 base 去档归一后计数（见 subProgress）。
+const ANALYST_BASE_COUNT = 10;
 // 最大辩论轮数（bull/bear 配对数），与 workflow template 中的 maxDebateRounds 同步
 const TOTAL_DEBATE_ROUNDS = 3;
 
@@ -82,16 +74,17 @@ export function AnalysisProgress() {
   // Hooks 必须在 early return 之前 — 保持顺序稳定
   const subProgress = useMemo(() => {
     if (status === "idle") { return null; }
-    // 动态计算分析师总数：已知 analyst node ID 中正在被使用的个数
-    const analystKeys = Object.keys(analystReports).filter((k) =>
-      k !== "investment-plan" && k !== "bull-researcher" && k !== "bear-researcher"
+    // v133（B2-2）：键现在是逐档实例（`market-analyst--mid`）——进度按 **base（去档基名）**
+    // 计数（该 base 的任一实例完成 ⇒ 该 base 计完成），分母 = 已知 base 数。
+    const finishedBases = new Set(
+      Object.keys(analystReports)
+        .filter((k) => k !== "investment-plan" && k !== "bull-researcher" && k !== "bear-researcher")
+        .map((k) => analystBaseOf(k) ?? k),
     );
-    const activeAnalysts = ANALYST_NODE_IDS.filter((id) => analystKeys.includes(id));
-    const totalAnalysts = Math.max(activeAnalysts.length, ANALYST_NODE_IDS.length);
     switch (currentStage) {
       case 1:
-        return analystKeys.length > 0
-          ? t("stockAnalysis.analystCount", { current: analystKeys.length, total: totalAnalysts })
+        return finishedBases.size > 0
+          ? t("stockAnalysis.analystCount", { current: finishedBases.size, total: ANALYST_BASE_COUNT })
           : null;
       case 2:
         return debateRounds.length > 0

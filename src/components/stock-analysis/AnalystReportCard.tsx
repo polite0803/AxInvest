@@ -49,6 +49,8 @@ registerCustomParagraph();
 interface Props {
   expertId: string;
   report: string;
+  /** v133：逐档实例的档位标签（如「中线」）；裸 base 卡不传。 */
+  tierLabel?: string;
 }
 
 /** 宽松解析：支持多种后端 JSON 格式 */
@@ -315,7 +317,7 @@ function isEmptyAnalysis(parsed: ParsedReport): boolean {
   return !hasContent;
 }
 
-export function AnalystReportCard({ expertId, report }: Props) {
+export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
   const { t } = useTranslation();
   const themeMode = useSettingsStore((s) => s.settings.themeMode);
   const isDark = themeMode === "dark"
@@ -428,6 +430,7 @@ export function AnalystReportCard({ expertId, report }: Props) {
           title={
             <span className="flex items-center gap-2 flex-wrap">
               {name}
+              {tierLabel && <Tag style={{ marginLeft: 8 }}>{tierLabel}</Tag>}
               {parsed.type && <Tag style={{ marginLeft: 8 }}>{parsed.type}</Tag>}
               {empty && <Tag color="orange">{t("quant.common.empty")}</Tag>}
             </span>

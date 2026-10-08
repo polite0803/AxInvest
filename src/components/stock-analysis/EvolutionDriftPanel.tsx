@@ -338,6 +338,19 @@ export function EvolutionDriftPanel() {
               {t("stockAnalysis.evolutionDrift.replayMode", { date: asOfDate })}
             </Tag>
           )}
+          {
+            /* #31：权重分母按**起算代际**筛样 ⇒ 必须说清「为什么样本变少」——
+              「早于起算代」与「代际未知」的处置不同（前者等新样本，后者去补盖章）。 */
+          }
+          {dashboard != null && (
+            <div style={{ marginTop: 4 }}>
+              {t("stockAnalysis.evolutionDrift.generationScope", {
+                floor: dashboard.generationFloor ?? 0,
+                preFloor: dashboard.excludedPreFloorGeneration ?? 0,
+                unknown: dashboard.excludedUnknownGeneration ?? 0,
+              })}
+            </div>
+          )}
         </div>
 
         <div style={{ marginBottom: 24 }}>

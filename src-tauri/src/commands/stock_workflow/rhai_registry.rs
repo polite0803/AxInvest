@@ -1531,7 +1531,13 @@ mod tests {
             "money_flow_history",
             "sector_etf_direction",
             "p_history",
-            "llm_events",
+            // v133（B2-2）：`llm_events` 逐档化成四键（脚本内按「第一个有值的实例」归一，
+            //   见 `pace-calc.rhai:133-140`）。本清单跟着改名 —— 这条锁的本意就是
+            //   「seed 改了注入面，测试必须同步，否则注入面与脚本两侧各说各话」。
+            "llm_events_ultra_short",
+            "llm_events_short",
+            "llm_events_mid",
+            "llm_events_long",
         ] {
             assert!(
                 seed.contains(&format!("(\"{key}\",")),
@@ -1550,8 +1556,11 @@ mod tests {
                 scope.push_constant(name.as_str(), rhai::Dynamic::UNIT);
             }
             // 生产形态：input_mapping 给的是 {role, content} 包装对象（V69 实证过的那条）。
+            // v133 后脚本自己从四键里取**第一个有值的实例**（`pace-calc.rhai:136-140`），
+            //   所以夹具要注到第一顺位的 `llm_events_ultra_short`，而不是注到脚本内部
+            //   那个归一后的局部变量名 `llm_events`（注在那里会被脚本的 `let` 覆盖 ⇒ 恒空）。
             scope.push_constant(
-                "llm_events",
+                "llm_events_ultra_short",
                 axagent_harness::json_value_to_dynamic(&serde_json::json!({
                     "role": "a-catalyst",
                     "content": content,

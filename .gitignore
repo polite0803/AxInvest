@@ -62,6 +62,8 @@ test-results/
 
 # Local git worktrees
 .worktrees/
+# Qoder 工具目录（含 worktrees 副本，勿跟踪）
+.qoder/
 
 # Website (VitePress)
 website/node_modules/

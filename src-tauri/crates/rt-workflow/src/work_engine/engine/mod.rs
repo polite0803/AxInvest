@@ -59,7 +59,7 @@ use super::dispatcher::NodeDispatcher;
 use super::error_handling::ErrorContext;
 use super::execution_state::{
     ExecutionContextCallbacks, ExecutionState, ExecutionStateSnapshot, ExecutionStatus,
-    NodeExecutionRecord, PauseReason,
+    NodeExecutionRecord, PauseReason, SubWorkflowOrigin,
 };
 use super::executors::{
     AgentExecutor, ConditionExecutor, LlmClassifierExecutor, LlmExecutor, PlanCallbacks,
@@ -172,6 +172,12 @@ pub struct RunOptions {
     /// 由命令侧（认知编排器 cognitive_query）注入，走系统能力而非查 workflow_templates 表。
     pub system_capability_callback: Option<SubWorkflowCallback>,
     pub parent_execution_id: Option<String>,
+    /// 本子执行的**归属**（父执行 id + 父图里发起它的 SubWorkflow 节点 id）。
+    /// 由引擎在两处子执行启动点填入（`SubWorkflowCallback` 的第 4 个参数给出父节点 id）。
+    /// 顶层执行恒 `None`。与 `parent_execution_id` 的分工：后者只用于持久化关联与
+    /// `is_sub_workflow` 判定，本字段是**随每条进度事件外发**的归组键
+    /// （见 `axagent_harness::workflow_types::SubWorkflowOrigin`）。
+    pub sub_workflow_origin: Option<SubWorkflowOrigin>,
     pub execution_id: Option<String>,
     pub parent_cancel_token: Option<CancellationToken>,
     /// G12: 任务契约（可选）。设置后 run_workflow 会在开始时 mark_started、
@@ -270,6 +276,7 @@ impl Default for RunOptions {
             plan_callbacks: None,
             system_capability_callback: None,
             parent_execution_id: None,
+            sub_workflow_origin: None,
             execution_id: None,
             parent_cancel_token: None,
             task_contract: None,
@@ -375,6 +382,53 @@ struct ErrorBranchParams {
 ///
 /// 接缝由 wiring 层注册（内置）；外部插件可经 `register_plugin_capability` 声明；
 /// None = 未注册，不做任何规则检查（与"无规则"语义等价）。
+/// 子工作流的返回值只有在**终态为 `Completed`** 时才算可用（#7① 的前置片，2026-10-06）。
+///
+/// 缺陷形态（两处调用点同形，读实现实证）：`run_workflow` 在失败路径上返回的是
+/// `Ok(Workflow { status: Failed, .. })`（见本文件 `run_workflow` 末尾的
+/// `result.unwrap_or_else(...)` 兜底构造），而子工作流回调过去只做 `.map_err`，
+/// **从不看 status**，于是 `output.unwrap_or(json!({}))` 把一次整段失败的子执行
+/// 当成「空对象成功」交回父图 ⇒ 父节点的 `continue_on_fail`、下游取数、界面呈现
+/// 全都不知道子图失败了。股票链要把四档分支改成 SubWorkflow×4（用户 2026-10-06 裁定），
+/// 在这个缺口上改图的结果就是「这一档没算出来」与「该档按设计无结论」在界面上**无法区分**
+/// —— 那正是本仓禁止的「结构性缺口伪装成正常结果」。
+///
+/// 两个刻意从严的判定点：
+/// - `PartiallyCompleted` 也判失败：该状态的含义是**有节点停在 Pending**（死锁兜底路径），
+///   子图声明的输出键可能压根没写，不做「部分可用」的乐观假设；
+/// - `Completed` 但 `output = None` 同样判失败：连终值都没有，返回 `{}` 就是第二次伪装。
+///
+/// 影响面（如实声明）：现役的认知编排器图里 3 个真 SubWorkflow 节点
+/// （`axagent-harness`/`cognitive_router_init.rs` 的 `call_l1` 等）同样受此约束 ——
+/// 此前它们享受的是「静默空对象」，现在会得到一次显式的节点失败。
+/// 这是**行为变更**而不是纯加固，但它消除的是"错了看不出来"，不是"能跑的东西坏了"。
+fn sub_workflow_output_or_fail(
+    child: Workflow,
+    sub_workflow_id: &str,
+    child_execution_id: &str,
+) -> Result<serde_json::Value, String> {
+    if child.status != WorkflowStatus::Completed {
+        return Err(format!(
+            "子工作流 `{sub_workflow_id}` 未成功完成（终态 {}/{child_execution_id}）\
+             ⇒ 其输出不可用，按失败上抛而不是回空对象",
+            match child.status {
+                WorkflowStatus::Failed => "Failed",
+                WorkflowStatus::PartiallyCompleted => "PartiallyCompleted",
+                WorkflowStatus::Cancelled => "Cancelled",
+                WorkflowStatus::Running => "Running",
+                WorkflowStatus::Created => "Created",
+                WorkflowStatus::Completed => "Completed",
+            },
+        ));
+    }
+    child.output.ok_or_else(|| {
+        format!(
+            "子工作流 `{sub_workflow_id}` 终态 Completed 但没有产出终值（子执行 {child_execution_id}）\
+             ⇒ 按失败上抛，不回空对象"
+        )
+    })
+}
+
 fn seam_business_rule() -> Option<Arc<dyn axagent_harness::BusinessRuleEvaluator>> {
     axagent_harness::get_capability_registry().get_business_rule()
 }
@@ -2087,9 +2141,9 @@ impl WorkEngine {
             return Err(WorkflowError::InputValidationFailed { errors });
         }
 
-        // 一次性 lock executions 完成 5 项元信息写入（model_id / provider_id /
-        // template variables / plan_callbacks / parent_execution_id），避免
-        // 5 次独立 lock-then-release 的抖动。
+        // 一次性 lock executions 完成 6 项元信息写入（model_id / provider_id /
+        // template variables / plan_callbacks / parent_execution_id / sub_workflow_origin），避免
+        // 6 次独立 lock-then-release 的抖动。
         {
             let mut executions = self.executions.lock().await;
             if let Some(state) = executions.get_mut(&execution_id) {
@@ -2132,6 +2186,12 @@ impl WorkEngine {
                 }
                 if options.parent_execution_id.is_some() {
                     state.parent_execution_id = options.parent_execution_id.clone();
+                }
+                // 子执行归属（B-2a）：与上一行分开存，**不**复用 parent_execution_id ——
+                // 后者在每节点 exec_ctx 上被重载成「本执行 id」，混用会把子执行的每条事件
+                // 归到不存在的父。见 ExecutionState::sub_workflow_origin 的注释。
+                if options.sub_workflow_origin.is_some() {
+                    state.sub_workflow_origin = options.sub_workflow_origin.clone();
                 }
             }
         }
@@ -2304,6 +2364,14 @@ impl WorkEngine {
         let current_parent_execution_id = {
             let executions = self.executions.lock().await;
             executions.get(&execution_id).and_then(|s| s.parent_execution_id.clone())
+        };
+        // 子执行归属（B-2a）：本执行若由某个 SubWorkflow 节点启动，则这里非 None，
+        // 随后**随每一条** StepProgressEvent 外发（不是只发一条「子执行已启动」事件 —— 那样
+        // 会与子执行自己的头几条节点事件乱序）。取 state 而不是取 options：`get_status` /
+        // 容器 dispatch 都以 state 为权威，两处读同一份才不会半新半旧。
+        let sub_workflow_origin = {
+            let executions = self.executions.lock().await;
+            executions.get(&execution_id).and_then(|s| s.sub_workflow_origin.clone())
         };
 
         // 清空 Agent executor 缓存（每次执行使用最新数据）
@@ -2607,6 +2675,11 @@ impl WorkEngine {
         let sub_step_timeout = options.step_timeout;
         let sub_cancel_token = cancel_token.clone();
         let sub_progress_cb = progress_cb.clone();
+        // 子执行归属的一半：父执行的**真实** execution_id。刻意取本函数的局部
+        // `execution_id` 而不是回调参数 `parent_execution_id` —— 后者由
+        // `subworkflow_executor` 从 per-node `exec_ctx.execution_id` 传入，那是
+        // `node_{uuid}` 而不是执行 id（同一处注释见 exec_ctx.parent_execution_id）。
+        let sub_origin_parent_eid = execution_id.clone();
         let sub_dry_run = options.dry_run;
         let sub_system_capability_cb = options.system_capability_callback.clone();
         let sub_tool_permissions = options.tool_permissions.clone();
@@ -2614,6 +2687,7 @@ impl WorkEngine {
         let sub_cb: SubWorkflowCallback = Arc::new(
             move |sub_workflow_id: String,
                   parent_execution_id: String,
+                  parent_node_id: String,
                   input_vars: std::collections::HashMap<String, serde_json::Value>| {
                 let engine = engine_clone.clone();
                 let model_id = sub_model_id.clone();
@@ -2630,6 +2704,9 @@ impl WorkEngine {
                 let cancel_engine = engine_clone.clone();
                 let cancel_cid = child_execution_id.clone();
                 let sub_launch_child_id = child_execution_id.clone();
+                // 每次调用（含重试）各自克隆一份父执行 id 带进 blocking 线程 ——
+                // 直接 move 会让外层 `Fn` 闭包退化成 `FnOnce`。
+                let origin_parent_eid = sub_origin_parent_eid.clone();
 
                 let (tx, rx) = tokio::sync::oneshot::channel();
                 tokio::task::spawn_blocking(move || {
@@ -2687,6 +2764,10 @@ impl WorkEngine {
                                     ),
                                     dry_run,
                                     parent_execution_id: Some(parent_execution_id),
+                                    sub_workflow_origin: Some(SubWorkflowOrigin {
+                                        parent_execution_id: origin_parent_eid.clone(),
+                                        parent_node_id,
+                                    }),
                                     model_id,
                                     provider_id,
                                     step_timeout: sub_step_timeout,
@@ -2705,7 +2786,11 @@ impl WorkEngine {
                                     .await
                                     .map_err(|e| e.to_string())?;
 
-                                let output = result.output.unwrap_or_else(|| serde_json::json!({}));
+                                let output = sub_workflow_output_or_fail(
+                                    result,
+                                    &sub_workflow_id,
+                                    &child_eid_for_result,
+                                )?;
 
                                 Ok((child_eid_for_result, output))
                             }
@@ -3238,6 +3323,7 @@ impl WorkEngine {
                         total_nodes,
                         completed_nodes: completed,
                         execution_id: Some(execution_id.clone()),
+                        sub_workflow_origin: sub_workflow_origin.clone(),
                         error: None,
                         error_code: None,
                         output: None,
@@ -3330,6 +3416,10 @@ impl WorkEngine {
                 // per-node exec_ctx.execution_id 是随机 UUID（format!("node_{uuid})），
                 // 不是真实的工作流 execution_id。
                 exec_ctx.parent_execution_id = Some(execution_id.clone());
+                // 子执行归属（B-2a）：容器执行器（loop / debate 体内节点）的进度事件从
+                // `ctx` 读它，故 per-node ctx 也必须带 —— 只在首批节点路径带会做出
+                // 「顶层子节点可见、容器内子节点不可见」的半生效形态。
+                exec_ctx.sub_workflow_origin = sub_workflow_origin.clone();
 
                 let exec_pause_signal = {
                     let mut executions = self.executions.lock().await;
@@ -3383,6 +3473,8 @@ impl WorkEngine {
                     let sub_step_timeout = options.step_timeout;
                     let sub_cancel_token = cancel_token.clone();
                     let sub_progress_cb = progress_cb.clone();
+                    // 同上：父执行真实 id 取本层局部 `execution_id`（首批路径的注释见彼处）。
+                    let sub_origin_parent_eid = execution_id.clone();
                     let sub_dry_run = options.dry_run;
                     let sub_tool_permissions = options.tool_permissions.clone();
                     // h3-r4-2：透传系统能力回调到子工作流 RunOptions，
@@ -3393,6 +3485,7 @@ impl WorkEngine {
                         Arc::new(
                             move |sub_workflow_id: String,
                                   parent_execution_id: String,
+                                  parent_node_id: String,
                                   input_vars: std::collections::HashMap<
                                 String,
                                 serde_json::Value,
@@ -3412,6 +3505,9 @@ impl WorkEngine {
                                 let cancel_engine = engine_clone.clone();
                                 let cancel_cid = child_execution_id.clone();
                                 let sub_launch_child_id = child_execution_id.clone();
+                                // 每次调用（含重试）各自克隆一份父执行 id 带进 blocking 线程 ——
+                                // 直接 move 会让外层 `Fn` 闭包退化成 `FnOnce`。
+                                let origin_parent_eid = sub_origin_parent_eid.clone();
 
                                 // run_workflow() 返回 non-Send future（包含 Rc 等），
                                 // 因此无法用 tokio::spawn。改用 spawn_blocking +
@@ -3490,6 +3586,11 @@ impl WorkEngine {
                                                     ),
                                                     dry_run,
                                                     parent_execution_id: Some(parent_execution_id),
+                                                    sub_workflow_origin: Some(SubWorkflowOrigin {
+                                                        parent_execution_id: origin_parent_eid
+                                                            .clone(),
+                                                        parent_node_id,
+                                                    }),
                                                     model_id,
                                                     provider_id,
                                                     step_timeout: sub_step_timeout,
@@ -3509,9 +3610,11 @@ impl WorkEngine {
                                                     .await
                                                     .map_err(|e| e.to_string())?;
 
-                                                let output = result
-                                                    .output
-                                                    .unwrap_or_else(|| serde_json::json!({}));
+                                                let output = sub_workflow_output_or_fail(
+                                                    result,
+                                                    &sub_workflow_id,
+                                                    &child_eid_for_result,
+                                                )?;
 
                                                 Ok((child_eid_for_result, output))
                                             }
@@ -3849,6 +3952,7 @@ impl WorkEngine {
                                 total_nodes,
                                 completed_nodes: completed_count,
                                 execution_id: Some(execution_id.clone()),
+                                sub_workflow_origin: sub_workflow_origin.clone(),
                                 error: None,
                                 error_code: None,
                                 output: Some(output.output.clone()),
@@ -4211,6 +4315,7 @@ impl WorkEngine {
                                 total_nodes,
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
+                                sub_workflow_origin: sub_workflow_origin.clone(),
                                 error: Some(err_msg.clone()),
                                 // 结构化码直接取自 `NodeError::code()` —— 与 `err_msg`
                                 // 同源同一次失败，不存在两处口径分叉的可能。
@@ -4433,6 +4538,7 @@ impl WorkEngine {
                                 total_nodes,
                                 completed_nodes: completed,
                                 execution_id: Some(execution_id.clone()),
+                                sub_workflow_origin: sub_workflow_origin.clone(),
                                 error: Some(err_msg.clone()),
                                 // 本分支是 JoinError（超时/panic），已无 `NodeError` 可取码 ⇒
                                 // 显式标为 TIMEOUT（与 `error` 的自由文本一致）。
@@ -4580,6 +4686,8 @@ impl WorkEngine {
                         exec_ctx.cancel_token = Some(cancel_token.clone());
                         exec_ctx.dry_run = options.dry_run;
                         exec_ctx.business_rule_engine = seam_business_rule();
+                        // 子执行归属（B-2a）：与首批节点路径一致，见彼处注释。
+                        exec_ctx.sub_workflow_origin = sub_workflow_origin.clone();
                         // 与首批节点路径一致：透传调用方注入的工具权限（strict_mode 等）
                         exec_ctx.tool_permissions = options.tool_permissions.clone();
                         {
@@ -6469,6 +6577,7 @@ pub fn build_debate_body_dispatch(
                     total_nodes: 0,
                     completed_nodes: 0,
                     execution_id: Some(execution_id.clone()),
+                    sub_workflow_origin: ctx.sub_workflow_origin.clone(),
                     error: None,
                     error_code: None,
                     output: None,
@@ -6551,6 +6660,7 @@ pub fn build_debate_body_dispatch(
                             total_nodes: 0,
                             completed_nodes: 0,
                             execution_id: Some(execution_id.clone()),
+                            sub_workflow_origin: ctx.sub_workflow_origin.clone(),
                             error: None,
                             error_code: None,
                             output: Some(output.output.clone()),
@@ -6614,6 +6724,7 @@ pub fn build_debate_body_dispatch(
                             total_nodes: 0,
                             completed_nodes: 0,
                             execution_id: Some(execution_id.clone()),
+                            sub_workflow_origin: ctx.sub_workflow_origin.clone(),
                             error: Some(e.to_string()),
                             error_code: Some(e.code().to_string()),
                             output: None,
@@ -6722,7 +6833,9 @@ mod tests {
 
     // ── V71: 容器体步骤顺序 sanitizer ──
 
-    use super::{Workflow, sanitize_container_step_orders, topo_sort_step_list};
+    use super::{
+        Workflow, sanitize_container_step_orders, sub_workflow_output_or_fail, topo_sort_step_list,
+    };
     use axagent_harness::workflow_types::{
         DebateNode, DebateNodeConfig, EdgeType, Position, RetryConfig, WorkflowEdge, WorkflowNode,
         WorkflowNodeBase, WorkflowStatus,
@@ -6845,5 +6958,76 @@ mod tests {
             })
             .unwrap();
         assert_eq!(dn.config.debater_steps, correct);
+    }
+
+    // ── 子工作流结果可用性（#7① 前置片）──
+
+    fn child(status: WorkflowStatus, output: Option<serde_json::Value>) -> Workflow {
+        Workflow {
+            id: "child-wf".to_string(),
+            name: String::new(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            status,
+            created_at: 0,
+            completed_at: None,
+            // `Default::default()` 而非 `HashMap::new()`：本测试模块的导入在文件后段，
+            //   不为一处构造再拉一个 `std::collections::HashMap` 进来。
+            results: Default::default(),
+            node_states: Default::default(),
+            output,
+            error_config: None,
+            error_workflow_id: None,
+            hooks_config: None,
+        }
+    }
+
+    /// 四种终态 × 有无终值 ⇒ 只有 `Completed + Some` 算可用。
+    ///
+    /// 关键负控是第一条：`run_workflow` 在失败路径上返回的正是 `Ok(Workflow{status: Failed})`，
+    /// 旧调用点只看 `Result` 不看 `status` ⇒ 整段失败的子执行被当成空对象成功交回父图。
+    #[test]
+    fn sub_workflow_result_is_usable_only_when_completed_with_output() {
+        let ok = sub_workflow_output_or_fail(
+            child(WorkflowStatus::Completed, Some(serde_json::json!({"a": 1}))),
+            "tpl-x",
+            "exec-1",
+        )
+        .expect("Completed 且有终值必须可用");
+        assert_eq!(ok["a"], 1);
+
+        for status in [
+            WorkflowStatus::Failed,
+            WorkflowStatus::PartiallyCompleted,
+            WorkflowStatus::Cancelled,
+            WorkflowStatus::Running,
+            WorkflowStatus::Created,
+        ] {
+            let err = sub_workflow_output_or_fail(
+                child(status, Some(serde_json::json!({"a": 1}))),
+                "tpl-x",
+                "exec-1",
+            )
+            .expect_err("非 Completed 的终态不得返回 Ok");
+            assert!(err.contains("tpl-x"), "错误文本要点名子模板: {err}");
+            assert!(err.contains("exec-1"), "错误文本要点名子执行 id: {err}");
+        }
+
+        // Completed 但没有终值：回 `{}` 就是第二次伪装，必须同样失败
+        let no_output =
+            sub_workflow_output_or_fail(child(WorkflowStatus::Completed, None), "tpl-x", "exec-1")
+                .expect_err("Completed 且无终值也算失败");
+        assert!(no_output.contains("没有产出终值"), "{no_output}");
+    }
+
+    /// 反向锁：`Failed` 即便带着 output 也不得放行 —— 防有人把判据写成「有 output 就算成功」。
+    #[test]
+    fn failed_sub_workflow_output_is_not_accepted_even_when_present() {
+        let e = sub_workflow_output_or_fail(
+            child(WorkflowStatus::Failed, Some(serde_json::json!({"partial": true}))),
+            "tpl-y",
+            "exec-2",
+        );
+        assert!(e.is_err(), "失败终态带 output 也不能算成功");
     }
 }

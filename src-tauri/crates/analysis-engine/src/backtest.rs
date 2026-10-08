@@ -414,11 +414,25 @@ pub async fn optimize_weights(
     use axagent_entities::stock_analyses;
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 
-    let completed = stock_analyses::Entity::find()
-        .filter(stock_analyses::Column::Status.eq("completed"))
-        .count(db)
-        .await
-        .map_err(|e| e.to_string())?;
+    // #31（PLAN §七十六/§七十七）：评分权重的分母也是**决策样本** ⇒ 按起算代筛样。
+    // ⚠ 计数与取数必须用**同一条件**：只筛取数不筛计数，会出现「count 说够 10 条、
+    //   实际只剩 3 条」的假足量（本仓「同一条判据两处各写一遍」的老坑）。
+    let in_scope = || {
+        use sea_orm::{ColumnTrait, Condition};
+        stock_analyses::Entity::find()
+            .filter(stock_analyses::Column::Status.eq("completed"))
+            .filter(
+                Condition::any()
+                    .add(
+                        stock_analyses::Column::TemplateVersion
+                            .gte(axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR),
+                    )
+                    .add(stock_analyses::Column::TemplateVersion.is_null()),
+            )
+    };
+    // 取数侧按 >= floor 筛；计数这里刻意**同条件**（含 NULL）—— NULL 进 prompt 口径的
+    // 呈现与统计不同，但评分权重是统计量 ⇒ 下面对 NULL 单独排除前先数同一个集合。
+    let completed = in_scope().count(db).await.map_err(|e| e.to_string())?;
 
     if completed < 10 {
         return Ok(ScoringWeights::default()); // 样本不足

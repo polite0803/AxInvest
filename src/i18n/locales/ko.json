@@ -9343,7 +9343,6 @@
       "arrayVar": "배열 변수",
       "assertion": "단언",
       "assertions": "어설션",
-      "asyncExecution": "비동기 실행",
       "atomicSkill": "원자 스킬",
       "authNone": "인증 없음",
       "authType": "인증 유형",
@@ -10352,6 +10351,8 @@
     "status": "상태",
     "duration": "소요 시간",
     "subWorkflow": "서브 워크플로우",
+    "subFlowLive": "서브 실행 실시간 진행({{count}}개)",
+    "subFlowPending": "서브 실행 이벤트가 아직 도착하지 않았습니다",
     "executionId": "실행 ID",
     "workflowId": "워크플로우 ID",
     "parentExecution": "부모 실행 ID"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "가치 평가"
       },
       "analystComplete": "분석 완료, 분석 페이지에서 확인",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "리서치 종합",
         "trader": "거래 계획",
         "portfolio-mgr": "최종 의사 결정",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "가치 평가"
       },
       "analystReports": "Analyst Reports",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "리스크 분류 임계값(portfolio-mgr)",
         "simulation": "몬테카를로 시뮬레이션",
         "refCodes": "업종 참고 종목",
-        "valuationModel": "가치평가 모델 매개변수 (DCF/그레이엄)"
+        "valuationModel": "가치평가 모델 매개변수 (DCF/그레이엄)",
+        "indicatorsDailyWindows": "기술적 지표 윈도우(일봉 체인만)",
+        "indicatorsThresholds": "기술적 지표 임계값(전체 체인)"
       },
       "note": {
-        "portfolioMgrHorizon": "v125부터 주요 구간의 손절/익절/포지션 값은 선택된 구간 브랜치에서 가져옵니다. 이 그룹의 8개 비율 단계와 2개의 변동성 승수는 대체 경로(해당 구간의 변동성 기준을 구할 수 없거나 4개 브랜치가 모두 출력 없음)와 포지션 상한에만 관여하며, 사전 추정 수축 강도 κ와 위험 예산 R은 여전히 주 경로에서 적용됩니다."
+        "portfolioMgrHorizon": "v125부터 주요 구간의 손절/익절/포지션 값은 선택된 구간 브랜치에서 가져옵니다. 이 그룹의 8개 비율 단계와 2개의 변동성 승수는 대체 경로(해당 구간의 변동성 기준을 구할 수 없거나 4개 브랜치가 모두 출력 없음)와 포지션 상한에만 관여하며, 사전 추정 수축 강도 κ와 위험 예산 R은 여전히 주 경로에서 적용됩니다.",
+        "indicatorsDailyWindows": "v137부터 일봉 점수 노드에 실제로 연결됩니다. 4개 보유 구간(초단기/단기/중기/장기)의 윈도우는 보유 일수에서 유도되므로 여기서 바뀌지 않습니다. 패널 값을 구간에 연결하면 4개 구간이 다시 동일한 윈도우가 되므로 도구가 명시적으로 오류를 냅니다.",
+        "indicatorsThresholds": "볼린저 표준편차 배율과 거래량 증가/축소 배율은 봉 주기에 따라 변하지 않으므로 일봉 체인과 4개 보유 구간이 모두 이 값을 사용합니다. 증가 배율은 축소 배율보다 커야 하며, 조건을 만족하지 않으면 도구가 명시적으로 오류를 내고 반대 신호를 만들지 않습니다."
       },
       "valuation": {
         "perpetualGrowth": "영구 성장률",
@@ -15959,6 +15965,7 @@
       "tagLabel": "신뢰도 제한",
       "passiveWatch": "이번 “관망”은 데이터 부족으로 인한 수동적 하향이며 약세 판단이 아닙니다",
       "gapsNotDegraded": "데이터 결손이 있으나 강등은 발생하지 않았습니다: 결론 방향은 영향받지 않습니다",
+      "dqiFuse": "데이터 품질이 {{streak}}회 연속 A급에 미달하여 서킷 브레이커가 발동되었습니다: 이번 신뢰도 상한은 가장 보수적인 단계로 조여졌습니다",
       "collapseLabel": "팩터 가중치 붕괴",
       "gapReason": "데이터 결손 {{count}}건",
       "showGaps": "결손 보기",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "가중치 기준: {{floor}}세대 기산 (이전 {{preFloor}}건, 세대 미상 {{unknown}}건 제외)"
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "주 단계 기준",
       "horizonUnknown": "알 수 없는 주기",
       "colHorizon": "복기 구간",
+      "colMover": "급등주(해당 구간)",
+      "moverYes": "급등주",
+      "moverNo": "기준 미달",
+      "moverWindowIncomplete": "보유 기간 미달",
+      "moverNoMarketData": "시세 데이터 없음",
+      "moverRuleUnavailable": "기준 미설정",
+      "moverNotReflected": "미검토",
       "horizonReviewTag": "이번 복기 대상",
       "horizonNoNarration": "객관 판정만 있고 복기 서술은 없음",
       "horizonStatusLabel": "상태: ",
@@ -17694,7 +17709,8 @@
     "unitBillion": "10억",
     "unitMillion": "백만",
     "unitCrore": "1천만",
-    "unitLakh": "10만"
+    "unitLakh": "10만",
+    "horizonScoringWindows": "이 보유 구간의 지표 윈도우: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · 볼린저 {{boll}} · 거래량 {{vol}}"
   },
   "pipeline": {
     "title": "주식 파이프라인",

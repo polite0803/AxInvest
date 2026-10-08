@@ -183,6 +183,7 @@ pub mod opc_work_items;
 // === 股票业务 / 量化分析 / 投资组合实体（上游合并时丢失，cf923b07^ 恢复）===
 pub mod analyst_feedback;
 pub mod business_roles;
+pub mod data_quality_observations;
 pub mod decision_validations;
 pub mod earnings_events;
 pub mod financial_snapshots;

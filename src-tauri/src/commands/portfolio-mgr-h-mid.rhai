@@ -21,10 +21,10 @@ fn present(x) { type_of(x) != "()" }
 let h = "mid";
 let gaps = [];
 // ── 输入面（与节点 `input_mapping` 一一对应；读了没映射的名字 = 运行期 Variable not found）──
-// 已接：branch_json / horizon_prior_json / tier_score / macd_dif / macd_dea / rsi_14 /
+// 已接：branch_json / horizon_prior_json / tier_score / macd_dif / macd_dea / rsi_value /
 //       pe_percentile / f_score / consensus_eps / consensus_estimated / lockup_float_ratio / lockup_supply_reason
 //       latest_eps / latest_eps_basis / flow_persistence /
-//       kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult
+//       kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult / scoring_windows / scoring_scale
 // 刻意不读（有名字但没有数据面 ⇒ 读它只会打死节点）：
 //   · 催化剂（本档腿集无 `eventCatalyst`，任务 #22）
 //   · 解禁占比（窗口归约 + 百分数→小数换算未闭合，任务 #23；本档它本来也只是风险提示）
@@ -47,6 +47,20 @@ if spec_ok && branch_json["tier"] != h {
     gaps.push(`分支表档位是 ${branch_json["tier"]} 而本脚本是 ${h} ⇒ 子模板接线错配`);
 }
 let legs = if spec_ok { branch_json["legs"] } else { [] };
+// ── v133（B2-2）：本档分析师子集（权威来源 `branch_json["analysts"]`，Rust 侧由
+//    `Period::analyst_subset()` 推导）──
+// 用途：verdict 类输入（本档 `flow_persistence` ← `a-hot-money--mid`）与「本档子集」
+// 应互为必要条件 —— **子集里没有属主却有值**只可能是接线串档（读了他档实例），
+// 必须留痕且不采信（「缺席不伪装」的反面：不该来的值也不能默默地来）。
+let tier_analysts = if spec_ok && type_of(branch_json["analysts"]) == "array" {
+    branch_json["analysts"]
+} else {
+    []
+};
+let hm_owner_ok = !spec_ok || ("a-hot-money" in tier_analysts);
+if present(flow_persistence) && !hm_owner_ok {
+    gaps.push("flow_persistence 有值但 a-hot-money 不在本档子集 ⇒ 接线串档（应指向本档实例），该值不予采信");
+}
 // 价带两个入参只能来自分支表；缺键或类型不对 ⇒ 一律按「不可得」（band_* = 0 ⇒ 不宿主调用），
 // 绝不对 unit 调 to_int() —— 那是运行时 Function not found，崩得比缺席难看。
 // ⚠ 数值判据必须**同时**收 i64 与 f64。两个载体口径不同（实证于 2026-10-04，000710 四档
@@ -84,8 +98,8 @@ let raw = #{
     totalScore: if present(tier_score) { tier_score } else { () },
     macdDif: if present(macd_dif) { macd_dif } else { () },
     macdDea: if present(macd_dea) { macd_dea } else { () },
-    rsi14: if present(rsi_14) { rsi_14 } else { () },
-    flowPersistence: if present(flow_persistence) { flow_persistence } else { () },
+    rsi: if present(rsi_value) { rsi_value } else { () },
+    flowPersistence: if present(flow_persistence) && hm_owner_ok { flow_persistence } else { () },
     pePercentile: if present(pe_percentile) { pe_percentile } else { () },
     fScore: if present(f_score) { f_score } else { () },
     // #23（v132）：本档解禁供给占比（小数）。mid 里这条腿是 **riskNote**（权重恒 0、不进方向），
@@ -226,6 +240,9 @@ if tw <= 0.0 || !prior_ok {
     odds: (odds*100.0).round()/100.0,
     evidenceScale: (escale*1000.0).round()/10.0,
     scoreSource: if present(tier_score) { "tier_native" } else { "daily_fallback" },
+    // v138 裁定 3：本档实际用的指标窗口与尺度（产端 = 评分节点回显；缺席 = 早于 v138 的代 ⇒ 面板不渲染）
+    scoringWindows: if present(scoring_windows) { scoring_windows } else { () },
+    scoringScale: if present(scoring_scale) { scoring_scale } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
     stopSource: if exit_move > 0.0 { "sigma_band" } else { "fallback_pct" },

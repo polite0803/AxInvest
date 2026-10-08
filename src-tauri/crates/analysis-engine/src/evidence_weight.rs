@@ -54,13 +54,16 @@ pub const CONSENSUS_CONFIDENCE_DIVIDED_MAX: f64 = 60.0;
 ///
 /// ⚠ **不含 `a-macro`** —— 图里没有宏观分析师节点（宏观进决策流 = PLAN 的 P9-2，未做）。
 /// 留着一个「有权重、无证据来源」的键，正是本清单要消灭的形态。
+/// ⚠ v133（B2-2）：**`a-news` 已摘除**（公告方向通道由 `a-catalyst` 承载，同域双挂=重复计数，
+/// 见 harness `holding_period.rs` 的 `VERDICT_FACTOR_OWNERS` 注释）—— 它不再是「产出证据的
+/// 分析师节点」，故从本清单与权重表同步删除；旧快照回放遇到 `a-news` 会走 classify_role 的
+/// 保留臂与查表 warn（1.0），属历史数据的如实降级。
 pub const EVIDENCE_ANALYST_IDS: &[&str] = &[
     "a-market-analyst",
     "a-fundamentals",
     "value-investor",
     "a-research",
     "research-mgr",
-    "a-news",
     "a-catalyst",
     "a-sentiment",
     "a-hot-money",
@@ -78,8 +81,16 @@ pub const ANALYST_IDS: &[&str] = EVIDENCE_ANALYST_IDS;
 /// （见 `crates/analysis-engine/src/blackboard.rs` 的 `report.{id}` 规则）。
 /// 归一放在查表入口这一处，而不是让每个消费端各自 `replace`（历史上
 /// `HistoricalAnalysisPanel` 就是自己 replace 了一次，别处全忘）。
+///
+/// v133（B2-2）：节点 id 现在可能是**逐档实例**（`report.a-market-analyst--mid`）——
+/// 权重表 / 腿桥表按 **base** 索引 ⇒ 这里统一剥档位后缀（`analyst_base_of`）。
+/// 不剥的后果是每实例精确查表 miss ⇒ 静默退 1.0（本文件 `EVIDENCE_ANALYST_IDS`
+/// 头注释记载的同一缺陷形态：幽灵 id 让权重差从不生效）。
+/// **各档实例共用同一份 base 权重**：权重表按「决策档」（`time_horizon`）逐档给不同值，
+/// 实例自身的档位后缀只用于「本档决策消费本档实例」的选取（上游按档构造 analysts 列表）。
 fn analyst_key(id: &str) -> &str {
-    id.strip_prefix("report.").unwrap_or(id)
+    let id = id.strip_prefix("report.").unwrap_or(id);
+    axagent_harness::holding_period::analyst_base_of(id).unwrap_or(id)
 }
 
 /// 分析师**角色**分类（**不是**能力域 `CapabilityDomain`）——基本面/宏观/技术面/情绪/裁决，
@@ -109,9 +120,9 @@ fn classify_role(analyst_id: &str) -> AnalystRole {
         "a-fundamentals" | "value-investor" => AnalystRole::Fundamental,
         "a-sector" | "a-policy" => AnalystRole::Macro,
         "a-market-analyst" => AnalystRole::Technical,
-        "a-sentiment" | "a-news" | "a-hot-money" | "a-lockup" | "a-catalyst" => {
-            AnalystRole::Sentiment
-        },
+        // v133（B2-2）：`a-news` 已摘除（公告通道由 a-catalyst 承载）——原臂删除；
+        // 旧快照回放遇到它会走下方 `_` 臂（后缀推断 + warn），属历史数据的如实降级。
+        "a-sentiment" | "a-hot-money" | "a-lockup" | "a-catalyst" => AnalystRole::Sentiment,
         "research-mgr" | "a-research" => AnalystRole::Research,
         _ => {
             // 未登记名：仍按关键词后缀推断（保持既有分类结果），但**必须留声** ——
@@ -294,7 +305,6 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
         "ultra_short" => {
             w.insert("a-hot-money", 2.0);
             w.insert("a-sentiment", 1.5);
-            w.insert("a-news", 1.5);
             w.insert("a-market-analyst", 1.3);
             w.insert("research-mgr", 0.5);
             w.insert("a-sector", 0.5);
@@ -309,7 +319,6 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("a-market-analyst", 1.5);
             w.insert("a-hot-money", 1.5);
             w.insert("a-sentiment", 1.3);
-            w.insert("a-news", 1.2);
             w.insert("a-fundamentals", 0.6);
             w.insert("value-investor", 0.5);
             w.insert("a-sector", 0.8);
@@ -327,7 +336,6 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("research-mgr", 1.1);
             w.insert("a-market-analyst", 1.0);
             w.insert("a-sentiment", 1.0);
-            w.insert("a-news", 1.0);
             w.insert("a-hot-money", 0.9);
             w.insert("a-catalyst", 1.0);
             w.insert("a-lockup", 1.0);
@@ -340,7 +348,6 @@ fn get_horizon_base_weights(horizon: &str) -> HashMap<&'static str, f64> {
             w.insert("research-mgr", 1.5);
             w.insert("a-sector", 1.2);
             w.insert("a-market-analyst", 0.6);
-            w.insert("a-news", 0.7);
             w.insert("a-sentiment", 0.7);
             w.insert("a-hot-money", 0.5);
             w.insert("a-catalyst", 1.0);
@@ -407,10 +414,11 @@ pub const DECISION_LEG_ANALYST: &[(&str, Option<&str>)] = &[
 ///   （见 `harness::holding_period::Period::verdict_spec`），本档之后才有腿。
 /// - `a-research`（券商研报观点汇总）：P4′ 的 `expectationRevision`。
 /// - `a-policy`（宏观政策影响）：P4′ 的 `macroRegime`（其数据侧已由 P9-1 五条真序列供上）。
-/// - `a-news`（新闻公告影响评估）：**刻意无腿** —— 公告证据的方向通道已由 `a-catalyst`
-///   的 `f3` 承载（两节点读同一份 `t-catalyst-data`，见 `portfolio-mgr.rhai` 的
-///   f3/f11 协方差衰减注释：同域双桥就是重复计数）。
-pub const UNBRIDGED_ANALYST_IDS: &[&str] = &["a-fundamentals", "a-research", "a-policy", "a-news"];
+///
+/// v133（B2-2）：原第 4 项 `a-news` 已随节点摘除而移出本清单（公告方向通道由 `a-catalyst`
+/// 的 `f3` 承载，同域双挂=重复计数）—— 「无腿」的诚实登记以「节点存在」为前提，
+/// 节点不在了就不再是登记对象。
+pub const UNBRIDGED_ANALYST_IDS: &[&str] = &["a-fundamentals", "a-research", "a-policy"];
 
 /// 因子 → 数值来源通道（P4′ 子图的 `input_mapping` 必须满足这张表的声明）。
 ///

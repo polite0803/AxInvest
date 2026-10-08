@@ -1747,6 +1747,27 @@ export interface ExecutionStatusResponse {
   parentExecutionId: string | null;
 }
 
+/**
+ * 子执行归属（后端 `SubWorkflowOrigin`，camelCase 线上拼写）。
+ * 只有由 SubWorkflow 节点启动的**子执行**发出的事件才带；顶层执行的事件为 null/缺席。
+ */
+export interface SubWorkflowOrigin {
+  parentExecutionId: string;
+  parentNodeId: string;
+}
+
+/**
+ * 一次子执行的实时进度（B-2a）。key = 子执行的 execution_id —— 刻意不用父节点 id 当 key：
+ * 重试会就同一父节点启动多个子执行，按子执行 id 分桶才能把每次尝试如实分开，
+ * 而不是后一次静默覆盖前一次。
+ */
+export interface SubWorkflowProgress {
+  parentNodeId: string;
+  childExecutionId: string;
+  /** 子图内节点 id → 状态（running / completed / failed / timeout …） */
+  nodeStatuses: Record<string, string>;
+}
+
 export interface ExecutionSummary {
   id: string;
   workflowId: string;

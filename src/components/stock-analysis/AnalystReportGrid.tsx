@@ -1,6 +1,6 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
 import type { JevJudgment } from "@/lib/agentOutput";
-import { classifyDirectionText, classifySentiment } from "@/lib/stock-analysis-utils";
+import { analystBaseOf, classifyDirectionText, classifySentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -12,31 +12,66 @@ import { cleanToolCallTags } from "./utils";
 
 type Consensus = "bullish" | "bearish" | "neutral" | "divided";
 
-// ── 10 个分析师 AgentNode ID（与 stockWorkflowChatBridge 的 ANALYST_NODE_TO_NAME 一致） ──
-// 顺序按工作流惯常执行顺序：技术面 → 情绪面 → 消息面 → 基本面 → 政策面 → 资金面 → 解禁 → 研报 → 板块 → 催化剂
-const ANALYST_NODE_IDS = [
-  "a-market-analyst",
-  "a-sentiment",
-  "a-news",
-  "a-fundamentals",
-  "a-policy",
-  "a-hot-money",
-  "a-lockup",
-  "a-research",
-  "a-sector",
-  "a-catalyst",
+// ── 分析师 **base** 清单（store `analystReports` 的键域，去 `a-` 前缀） ──
+// v133（B2-2）：a-news 已摘除（公告通道由 a-catalyst 承载）；value-investor 上线。
+// 逐档实例化后 store 键形如 `market-analyst--mid`（带档）或裸 `market-analyst`
+// （历史快照）——显示名一律经 `analystBaseOf`（`@/lib/stock-analysis-utils`）归一再查 i18n，
+// 档位标签另取 `stockAnalysis.period.*`。
+// 顺序按工作流惯常执行顺序（与技术面→…→催化剂一致），value-investor 殿后。
+const ANALYST_BASE_IDS = [
+  "market-analyst",
+  "sentiment-analyst",
+  "fundamentals-analyst",
+  "policy-analyst",
+  "hot-money",
+  "lockup",
+  "research",
+  "sector",
+  "catalyst",
+  "value-investor",
 ] as const;
 
+/** base → 其节点 id（`a-` 前缀还原；value-investor 无前缀）。 */
+function baseNodeId(base: string): string {
+  return base === "value-investor" ? base : `a-${base}`;
+}
+
+/** store 键（可带档）→ 图里的节点 id（`a-market-analyst--mid` / `value-investor--mid`）。 */
+function keyNodeId(key: string): string {
+  const base = analystBaseOf(key) ?? key;
+  return base === "value-investor" ? key : `a-${key}`;
+}
+
+/** store 键 → 档位（snake，如 `mid`）；裸 base 键返回 null（历史快照无档）。 */
+function keyTier(key: string): string | null {
+  return analystBaseOf(key) === null ? null : key.slice(key.indexOf("--") + 2);
+}
+
+/** 档位展示序（与 `Period::ALL` 一致：短 → 长）；裸 id 排最前（`orderOf` 返回 -1）。 */
+const TIER_ORDER = ["ultra_short", "short", "mid", "long"];
+
+/** 图节点 id → store `analystReports` 键（`a-` 前缀剥除；value-investor 原样）。keyNodeId 的逆。 */
+function storeKeyOf(nodeId: string): string {
+  return nodeId.startsWith("a-") ? nodeId.slice(2) : nodeId;
+}
+
+/** 实例排序键：档序（超短→长）；无档（裸 id）最前。 */
+function tierOrderOf(nodeId: string): number {
+  const tier = nodeId.includes("--") ? nodeId.slice(nodeId.indexOf("--") + 2) : "";
+  const i = TIER_ORDER.indexOf(tier);
+  return i === -1 ? -1 : i;
+}
+
 type AnalystEntry =
-  | { nodeId: string; expertId: string; status: "done"; report: string }
-  | { nodeId: string; expertId: string; status: "pending" }
-  | { nodeId: string; expertId: string; status: "streaming"; preview: string }
-  | { nodeId: string; expertId: string; status: "failed"; error?: string };
+  | { key: string; base: string; tier: string | null; nodeId: string; status: "done"; report: string }
+  | { key: string; base: string; tier: string | null; nodeId: string; status: "pending" }
+  | { key: string; base: string; tier: string | null; nodeId: string; status: "streaming"; preview: string }
+  | { key: string; base: string; tier: string | null; nodeId: string; status: "failed"; error?: string };
 
 // ── 快速链（stock-analysis-fast）的 10 个 Jev 维度判定节点 id ──
-// **按索引与 ANALYST_NODE_IDS 一一对应**（同为「市场量价 → 情绪 → 消息 → 基本面 → 政策 →
-// 资金 → 解禁 → 研报 → 板块 → 催化剂」）。两处都写成数组而非 Map：对应关系靠 index 表达，
-// 加/删维度时两行必须同步改 —— 与后端 `FAST_JEV_DIMENSIONS` 的书写顺序同源。
+// ⚠ v133 起**不再**与 ANALYST_BASE_IDS 按索引对应：原链已无 news 维度（a-news 退役、
+//   value-investor 上线），而快速链仍保留 j-news（其数据面由自建的 t-news-data 供给）。
+//   两链的维度清单各自独立维护；Jev 卡的显示名走下面的 JEV_EXPERT_IDS。
 const JEV_DIMENSION_NODE_IDS = [
   "j-market",
   "j-sentiment",
@@ -48,6 +83,21 @@ const JEV_DIMENSION_NODE_IDS = [
   "j-research",
   "j-sector",
   "j-catalyst",
+] as const;
+
+// Jev 维度 → 展示名用的 expertId（i18n `stockAnalysis.workflow.analyst.*` 的键域，
+// 与 JEV_DIMENSION_NODE_IDS **逐位对应**）。快速链含 news（原链没有）⇒ 单独一张表。
+const JEV_EXPERT_IDS = [
+  "market-analyst",
+  "sentiment-analyst",
+  "news",
+  "fundamentals-analyst",
+  "policy-analyst",
+  "hot-money",
+  "lockup",
+  "research",
+  "sector",
+  "catalyst",
 ] as const;
 
 /**
@@ -125,11 +175,14 @@ function AnalystPlaceholderCard({
   status,
   error,
   preview,
+  tierLabel,
 }: {
   expertId: string;
   status: "pending" | "streaming" | "failed";
   error?: string;
   preview?: string;
+  /** v133：逐档实例的档位标签（如「中线」）；裸 base 卡不传。 */
+  tierLabel?: string;
 }) {
   const { t } = useTranslation();
   const name = t(`stockAnalysis.workflow.analyst.${expertId}`, expertId);
@@ -167,6 +220,7 @@ function AnalystPlaceholderCard({
       <div className="flex items-center gap-2 mb-2">
         <span className="text-base leading-none">{config.icon}</span>
         <span className="font-medium text-sm" style={{ color: "var(--color-text-base)" }}>{name}</span>
+        {tierLabel && <Tag style={{ marginInlineStart: 0 }}>{tierLabel}</Tag>}
       </div>
       <Tag color={config.tagColor}>{config.label}</Tag>
       {status === "streaming" && preview && (
@@ -324,53 +378,100 @@ export function AnalystReportGrid() {
     [sentiment],
   );
 
-  // ── 统一构造显示列表：done / pending / failed ──
-  // done:    analystReports 已有内容（且清理后非空）→ 渲染完整 AnalystReportCard
-  // failed:  failedNodes 包含该 nodeId → 渲染失败占位卡片（带错误信息）
-  // pending: 工作流运行中且节点未完成未失败 → 渲染等待占位卡片
-  // 工作流完成后既无 report 也未 failed 的节点 → 显示失败（无数据兜底，避免一直"等待中"）
+  // ── 统一构造显示列表：done / pending / failed（v133：按逐档实例展开） ──
+  // store `analystReports` 的键现在是**逐档实例**（`market-analyst--mid`）或裸 base
+  // （历史快照）。构造规则：
+  //   ① 对每个 base，收集它**已出现**的实例键（裸 + 带档），逐实例出一条（订单 = 键序，
+  //      即 ultra_short → short → mid → long）；
+  //   ② base 一个实例都没出现时，退回旧的「单节点占位」逻辑（failed/running/pending/
+  //      无数据失败）——用 base 的 `a-` nodeId 查 failedNodes / streamingPreviews。
   const entries = useMemo<AnalystEntry[]>(() => {
-    // 快速链：新图里**没有** `a-*` 节点 ⇒ 照常构造会得到 10 张「无数据」失败卡。
-    // 那 10 个维度由 Jev 判定卡承担（不显示文本、但显示结论）。
+    // 快速链：新图里**没有** `a-*` 节点 ⇒ 照常构造会得到「无数据」失败卡。
+    // 那些维度由 Jev 判定卡承担（不显示文本、但显示结论）。
     if (isJevMode) { return []; }
     const result: AnalystEntry[] = [];
     const seen = new Set<string>();
 
-    for (const nodeId of ANALYST_NODE_IDS) {
-      const expertId = nodeId.slice(2);
-      seen.add(expertId);
-      const reportRaw = analystReports[expertId];
-      // 双重检查：即使 reportRaw 存在，也要确保清理工具标签后确实有实际内容
-      const hasContent = typeof reportRaw === "string"
-        && reportRaw.length > 0
-        && cleanToolCallTags(reportRaw).trim().length > 0;
-
-      if (hasContent) {
-        result.push({ nodeId, expertId, status: "done", report: reportRaw });
-      } else if (failedNodes.includes(nodeId)) {
-        result.push({ nodeId, expertId, status: "failed", error: failedNodeErrors[nodeId] });
-      } else if (isRunning && streamingPreviews[nodeId]) {
-        // 流式预览（2026-09-08 修复）：节点生成中且后端已推送增量文本，
-        // 占位卡片升级为"生成中"实时预览（completed 后由 done 分支接管）
-        const preview = streamingPreviews[nodeId];
-        result.push({ nodeId, expertId, status: "streaming", preview });
-      } else if (isRunning) {
-        result.push({ nodeId, expertId, status: "pending" });
-      } else {
-        // Bug #P0 修复: 工作流已完成但节点无有效数据也未标记失败，
-        // 显示失败状态（无数据），避免卡片消失或永远卡在"等待中"
-        result.push({ nodeId, expertId, status: "failed", error: t("stockAnalysis.analystReport.nodeNoData") });
+    // v133：实例集合 = analystReports ∪ failedNodes ∪ streamingPreviews 中属于本 base 的
+    // 节点 id（三源都要看：实例**失败**时 store 里没有键，只在 failedNodes 里）——
+    // 只查 analystReports 会把「失败的实例」误显示成 pending。
+    for (const base of ANALYST_BASE_IDS) {
+      const mine = Array.from(
+        new Set<string>([
+          ...Object.keys(analystReports).map(keyNodeId),
+          ...failedNodes,
+          ...Object.keys(streamingPreviews),
+        ]),
+      )
+        .filter((n) => (analystBaseOf(n) ?? n) === baseNodeId(base))
+        .sort((a, b) => tierOrderOf(a) - tierOrderOf(b) || a.localeCompare(b));
+      if (mine.length === 0) {
+        // base 级占位（无任何实例产出/失败/流式）
+        seen.add(base);
+        const nodeId = baseNodeId(base);
+        if (isRunning) {
+          result.push({ key: base, base, tier: null, nodeId, status: "pending" });
+        } else {
+          result.push({
+            key: base,
+            base,
+            tier: null,
+            nodeId,
+            status: "failed",
+            error: t("stockAnalysis.analystReport.nodeNoData"),
+          });
+        }
+        continue;
+      }
+      for (const nodeId of mine) {
+        const key = storeKeyOf(nodeId);
+        seen.add(key);
+        const tier = keyTier(key);
+        const reportRaw = analystReports[key];
+        // 双重检查：即使 reportRaw 存在，也要确保清理工具标签后确实有实际内容
+        const hasContent = typeof reportRaw === "string"
+          && reportRaw.length > 0
+          && cleanToolCallTags(reportRaw).trim().length > 0;
+        if (hasContent) {
+          result.push({ key, base, tier, nodeId, status: "done", report: reportRaw });
+        } else if (failedNodes.includes(nodeId)) {
+          result.push({ key, base, tier, nodeId, status: "failed", error: failedNodeErrors[nodeId] });
+        } else if (isRunning && streamingPreviews[nodeId]) {
+          // 流式预览（2026-09-08 修复）：节点生成中且后端已推送增量文本，
+          // 占位卡片升级为"生成中"实时预览（completed 后由 done 分支接管）
+          result.push({ key, base, tier, nodeId, status: "streaming", preview: streamingPreviews[nodeId] });
+        } else if (isRunning) {
+          result.push({ key, base, tier, nodeId, status: "pending" });
+        } else {
+          // Bug #P0 修复: 工作流已完成但节点无有效数据也未标记失败，
+          // 显示失败状态（无数据），避免卡片消失或永远卡在"等待中"
+          result.push({
+            key,
+            base,
+            tier,
+            nodeId,
+            status: "failed",
+            error: t("stockAnalysis.analystReport.nodeNoData"),
+          });
+        }
       }
     }
 
     // 追加 analystReports 中存在但不在预定义列表里的 key（如 trader 的 "investment-plan"）
-    for (const [expertId, report] of Object.entries(analystReports)) {
-      if (seen.has(expertId)) { continue; }
+    for (const [key, report] of Object.entries(analystReports)) {
+      if (seen.has(key)) { continue; }
       const hasContent = typeof report === "string"
         && report.length > 0
         && cleanToolCallTags(report).trim().length > 0;
       if (hasContent) {
-        result.push({ nodeId: expertId, expertId, status: "done", report });
+        result.push({
+          key,
+          base: analystBaseOf(key) ?? key,
+          tier: keyTier(key),
+          nodeId: key,
+          status: "done",
+          report,
+        });
       }
     }
 
@@ -430,13 +531,21 @@ export function AnalystReportGrid() {
   }
 
   const analystVerdicts = useMemo<AnalystVerdictRow[]>(() => {
-    return ANALYST_NODE_IDS.map((nodeId) => {
-      const expertId = nodeId.slice(2);
-      const name = t(`stockAnalysis.workflow.analyst.${expertId}`, expertId);
-      const report = analystReports[expertId];
+    // v133：行 = 逐档实例（与上方 entries 同集、同序）；name 带档位（如 `技术面·中线`）。
+    return entries.map((entry) => {
+      const baseName = t(`stockAnalysis.workflow.analyst.${entry.base}`, entry.base);
+      const name = entry.tier
+        ? `${baseName}·${
+          t(
+            `stockAnalysis.period.${entry.tier === "ultra_short" ? "ultraShort" : entry.tier}`,
+            entry.tier,
+          )
+        }`
+        : baseName;
+      const report = entry.status === "done" ? entry.report : undefined;
       if (!report) {
         return {
-          key: expertId,
+          key: entry.key,
           name,
           available: false,
           verdict: null,
@@ -509,7 +618,7 @@ export function AnalystReportGrid() {
       }
       const fallbackAvailable = verdict !== null || bull !== null || bear !== null || !!verdictStr;
       return {
-        key: expertId,
+        key: entry.key,
         name,
         available: fallbackAvailable,
         verdict: verdictStr,
@@ -522,7 +631,7 @@ export function AnalystReportGrid() {
         hasBearPoints: Array.isArray(v.bear_points) && (v.bear_points as unknown[]).length > 0,
       };
     });
-  }, [analystReports, t]);
+  }, [entries, t]);
 
   const briefColumns: ColumnsType<AnalystVerdictRow> = [
     { title: t("stockAnalysis.tab.analysts"), dataIndex: "name", key: "name", width: 110, fixed: "left" },
@@ -795,7 +904,7 @@ export function AnalystReportGrid() {
       >
         {isJevMode
           ? JEV_DIMENSION_NODE_IDS.map((nodeId, i) => {
-            const expertId = ANALYST_NODE_IDS[i].slice(2);
+            const expertId = JEV_EXPERT_IDS[i];
             const judgment = jevJudgments[nodeId];
             if (judgment) {
               return <JevJudgmentCard key={nodeId} expertId={expertId} judgment={judgment} />;
@@ -825,11 +934,18 @@ export function AnalystReportGrid() {
               );
           })
           : entries.map((entry) => {
+            const tierLabel = entry.tier
+              ? t(
+                `stockAnalysis.period.${entry.tier === "ultra_short" ? "ultraShort" : entry.tier}`,
+                entry.tier,
+              )
+              : undefined;
             if (entry.status === "done") {
               return (
                 <AnalystReportCard
-                  key={entry.expertId}
-                  expertId={entry.expertId}
+                  key={entry.key}
+                  expertId={entry.base}
+                  tierLabel={tierLabel}
                   report={entry.report}
                 />
               );
@@ -837,8 +953,9 @@ export function AnalystReportGrid() {
             const isFailed = entry.status === "failed";
             return (
               <AnalystPlaceholderCard
-                key={entry.expertId}
-                expertId={entry.expertId}
+                key={entry.key}
+                expertId={entry.base}
+                tierLabel={tierLabel}
                 status={entry.status}
                 error={isFailed ? entry.error : undefined}
                 preview={entry.status === "streaming"

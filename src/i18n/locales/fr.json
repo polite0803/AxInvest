@@ -9343,7 +9343,6 @@
       "arrayVar": "Variable de tableau",
       "assertion": "Assertion",
       "assertions": "Assertions",
-      "asyncExecution": "Exécution asynchrone",
       "atomicSkill": "Compétence atomique",
       "authNone": "Sans authentification",
       "authType": "Type d'authentification",
@@ -10352,6 +10351,8 @@
     "status": "Statut",
     "duration": "Durée",
     "subWorkflow": "Sous-workflow",
+    "subFlowLive": "Progression en direct de la sous-exécution ({{count}})",
+    "subFlowPending": "Aucun événement de sous-exécution reçu",
     "executionId": "ID d'exécution",
     "workflowId": "ID du workflow",
     "parentExecution": "ID d'exécution parent"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "Analyse de valeur"
       },
       "analystComplete": "Analyse terminée, voir la page d'analyse",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "Synthèse de recherche",
         "trader": "Plan de trading",
         "portfolio-mgr": "Décision finale",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "Analyse de valeur"
       },
       "analystReports": "Analyst Reports",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "Seuil de classification des risques (portfolio-mgr)",
         "simulation": "Simulation Monte-Carlo",
         "refCodes": "Titre de référence du secteur",
-        "valuationModel": "Paramètres du modèle d'évaluation (DCF/Graham)"
+        "valuationModel": "Paramètres du modèle d'évaluation (DCF/Graham)",
+        "indicatorsDailyWindows": "Fenêtres d'indicateurs (chaîne journalière uniquement)",
+        "indicatorsThresholds": "Seuils d'indicateurs (toutes les chaînes)"
       },
       "note": {
-        "portfolioMgrHorizon": "Depuis la v125, les valeurs stop-loss / take-profit / position du palier principal proviennent de la branche de cycle sélectionnée. Les huit paliers en pourcentage et les deux multiplicateurs de volatilité de ce groupe n'interviennent que sur le chemin de repli (base de volatilité indisponible pour ce palier, ou les quatre branches sans résultat) et comme plafond de position ; l'intensité de contraction a priori κ et le budget de risque R restent appliqués sur le chemin principal."
+        "portfolioMgrHorizon": "Depuis la v125, les valeurs stop-loss / take-profit / position du palier principal proviennent de la branche de cycle sélectionnée. Les huit paliers en pourcentage et les deux multiplicateurs de volatilité de ce groupe n'interviennent que sur le chemin de repli (base de volatilité indisponible pour ce palier, ou les quatre branches sans résultat) et comme plafond de position ; l'intensité de contraction a priori κ et le budget de risque R restent appliqués sur le chemin principal.",
+        "indicatorsDailyWindows": "Câblés au nœud de score journalier depuis la v137. Les fenêtres des quatre horizons de détention (ultra-court/court/moyen/long) sont dérivées de la durée de détention et ne changent pas ici ; les câbler aux horizons redonnerait quatre fenêtres identiques, et l'outil le refuse explicitement.",
+        "indicatorsThresholds": "Le multiple d'écart-type de Bollinger et les ratios de volume fort/faible ne se scalent pas avec la période de bougie ; la chaîne journalière et les quatre horizons les utilisent. Le ratio fort doit dépasser le ratio faible, sinon l'outil échoue explicitement au lieu d'émettre un signal inversé."
       },
       "valuation": {
         "perpetualGrowth": "Taux de croissance perpétuel",
@@ -15959,6 +15965,7 @@
       "tagLabel": "Fiabilité limitée",
       "passiveWatch": "Cette « Attente » est une dégradation passive due à un manque de données, non un jugement baissier",
       "gapsNotDegraded": "Des lacunes de données existent, mais aucune dégradation n'a été déclenchée : la direction n'est pas affectée",
+      "dqiFuse": "La qualité des données n'atteint pas la note A depuis {{streak}} cycles consécutifs et le disjoncteur s'est déclenché : le plafond de confiance est serré au niveau le plus conservateur",
       "collapseLabel": "Effondrement des pondérations de facteurs",
       "gapReason": "{{count}} lacune(s) de données",
       "showGaps": "Voir les lacunes",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "Portée des poids : à partir de la gén. {{floor}} ({{preFloor}} antérieures et {{unknown}} inconnues exclues)"
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "Selon le palier principal",
       "horizonUnknown": "Horizon inconnu",
       "colHorizon": "Horizon analysé",
+      "colMover": "Spéculatif (cet horizon)",
+      "moverYes": "Valeur spéculative",
+      "moverNo": "Critère non atteint",
+      "moverWindowIncomplete": "Fenêtre non encore remplie",
+      "moverNoMarketData": "Absence de données de marché",
+      "moverRuleUnavailable": "Critère indisponible",
+      "moverNotReflected": "Non examiné",
       "horizonReviewTag": "Analysé ici",
       "horizonNoNarration": "Verdict objectif seul, sans récit de revue",
       "horizonStatusLabel": "Statut : ",
@@ -17694,7 +17709,8 @@
     "unitBillion": " Md",
     "unitMillion": " M",
     "unitCrore": " crore",
-    "unitLakh": " lakh"
+    "unitLakh": " lakh",
+    "horizonScoringWindows": "Fenêtres d'indicateurs de cet horizon : {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · Bollinger {{boll}} · Volume {{vol}}"
   },
   "pipeline": {
     "title": "Pipeline d'Actions",

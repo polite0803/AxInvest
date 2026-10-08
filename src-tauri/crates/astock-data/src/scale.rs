@@ -15,6 +15,14 @@
 //! 为单位，周线 MA20 天然 = 20 周 ≈ 100 交易日。真正的尺度缺陷在
 //! ① 静默降级、② 评分分段阈值是按日线波动标定的固定百分比（`ScoreBands`，Phase B-1 处理）、
 //! ③ 缺 quarterly / sub-daily 两个尺度（本文件处理）。
+//!
+//! ⚠⚠ **上面这句只被证伪了一半，2026-10-07 起被 `ScaleWindowPlan` 取代其前半**：
+//! ①②③ 全部成立且已生效（`compute_scoring` 现在就在调 `ScoreBands::scaled_for`），
+//! 但「窗口以 bar 为单位」被顺势读成了「窗口与持有期无关」——后果可算：`min_bars = 60`
+//! 在季线上要 **15 年**历史，而长档回答的是 90 交易日的持有问题，60 期均线的响应时间 ≫ 持有期
+//! ⇒ 多数票上恒不穿越 ⇒ `trendScore` 在中/长档退化成常数。
+//! 取代关系与比值推导记 PLAN `PLAN-four-horizon-workflow-alignment.md` §九十六；
+//! 原文刻意不删，因为「bar 数含义上不错」这半句仍然成立，删掉会让人重推一遍。
 
 use axagent_harness::market_data::KLine;
 
@@ -138,6 +146,121 @@ impl ScaleProfile {
             },
         };
         Ok(Self::of(scale))
+    }
+}
+
+/// 一档在该尺度上的**指标窗口根数**（PLAN `PLAN-four-horizon-workflow-alignment.md` §九十六）。
+///
+/// ## 为什么需要它（与本文件头注释的分歧，如实记）
+///
+/// 本文件 Phase B 的头部结论是「指标窗口不需要按尺度改写：`TechnicalIndicators` 的 MA/RSI/MACD
+/// 窗口以 bar 为单位，周线 MA20 天然 = 20 周 ≈ 100 交易日」。这句话在**bar 数含义**上没错，
+/// 但它把「窗口跨度」与「持有期」这两件事解耦了，后果实测如下：
+///
+/// - `min_bars = 60` 在四个尺度上分别是 60 交易日 / 60 周(≈1.2 年) / 60 月(**5 年**) /
+///   60 季(**15 年**) —— 长档的出分条件要求 15 年季线历史，而它要回答的是 90 交易日的持有问题；
+/// - 一条 60 期均线的响应时间远大于 90 交易日 ⇒ 对多数票**恒不穿越**，
+///   于是 `trendScore` 在中/长档退化成常数（四档「互不相同」的名义与实质分离）。
+///
+/// 2026-10-06 用户就 §九十二 量到的缺陷拍板「丙：接通 + 同步改出分口径」，本类型就是那句
+/// 「改口径」的落点：**窗口按日历跨度定，bar 数由尺度换算**，日线链逐字不变（见 `daily_default`）。
+///
+/// ## 倍数从哪来（不从零发明）
+///
+/// 全部锚在日线既有口径**自身的**比例上（`indicators.rs` 的 `IndicatorConfig::default()`：
+/// `ma_periods=[5,10,20,60]`、`macd=12/26/9`、`rsi=[6,12,14,24]`、`boll_period=20`、
+/// `volume_lookback=5`、`ScaleProfile::daily` 的 `min_bars=60`/`fetch_limit=120`）。
+/// 取日线「中带 = MA20」为基准 `short`，其余族按比值定：
+/// `long = 3×short`（60=3×20）、`rsi = 0.7×short`（14/20）、`macd_fast = 0.6×short`（12/20）、
+/// `macd_slow = 1.3×short`（26/20）、`macd_signal = 0.75×macd_fast`（9/12）、
+/// `boll = short`（20/20）、`volume_lookback = 0.25×short`（5/20）、`min_bars = long`（60）、
+/// `fetch_limit = 2×long`（120）。
+/// ⇒ 把 `short` 取 20 时代式**逐字复现日线默认**（见测试 `daily_default_reproduces_existing_constants`），
+/// 所以「档位用这套、日线不用」不是两套真相，而是同一个比值在两个尺度上的两次代入。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScaleWindowPlan {
+    /// 本计划所在尺度（`ScaleProfile::period`）
+    pub scale_key: &'static str,
+    /// 该档的建议持有交易日数（权威 = `Period::default_holding_days`）
+    pub holding_days: u32,
+    /// 中带（趋势带下沿）根数
+    pub short_bars: usize,
+    /// 长带（趋势带上沿）根数，= `3 × short_bars`
+    pub long_bars: usize,
+    pub rsi_period: usize,
+    pub macd_fast: usize,
+    pub macd_slow: usize,
+    pub macd_signal: usize,
+    pub boll_period: usize,
+    pub volume_lookback: usize,
+    /// 出分所需最少 bar 数（= `long_bars`；不足 ⇒ 显式失败，不得拿少数 bar 出「看起来正常」的分）
+    pub min_bars: usize,
+    /// 向 vendor 取的根数（= `2 × long_bars`，留一倍余量给 MA 的前置窗口）
+    pub fetch_limit: usize,
+    /// 季线专用：聚合**前**需要的月线根数（vendor 无稳定季度 klt，见 `aggregate_monthly_to_quarterly`）
+    pub parent_fetch_limit: Option<usize>,
+}
+
+/// 正比取整：`round(x × ratio)` 且下限 `floor`（所有族共用的钳位，避免 1 根窗口）。
+fn scaled(short: usize, ratio: f64, floor: usize) -> usize {
+    ((short as f64 * ratio).round() as usize).max(floor)
+}
+
+impl ScaleWindowPlan {
+    /// 档位 → 该档尺度的窗口计划。
+    ///
+    /// 尺度与持有期都**不在这里重述**：`scale_key` / `default_holding_days` 来自
+    /// `axagent_harness::holding_period::Period`（2026-10-07 才有的权威，见 PLAN §九十五），
+    /// 尺度的日历跨度来自 `ScaleProfile::trading_days_per_bar`。这里只做换算。
+    pub fn for_period(period: axagent_harness::holding_period::Period) -> Self {
+        let profile = ScaleProfile::resolve(period.scale_key())
+            .unwrap_or_else(|e| panic!("{e} —— `Period::scale_key` 与尺度表白名单不同步"));
+        let d = profile.trading_days_per_bar;
+        let h = period.default_holding_days() as f64;
+        let short_bars = (h / d).ceil() as usize;
+        let short_bars = short_bars.clamp(2, 60);
+        let long_bars = 3 * short_bars;
+        let macd_fast = scaled(short_bars, 0.6, 2);
+        let macd_slow = scaled(short_bars, 1.3, macd_fast + 1);
+        let parent_fetch_limit = (profile.scale == Scale::Quarterly).then(|| 3 * 2 * long_bars);
+        Self {
+            scale_key: profile.period,
+            holding_days: period.default_holding_days(),
+            short_bars,
+            long_bars,
+            rsi_period: scaled(short_bars, 0.7, 2),
+            macd_fast,
+            macd_slow,
+            macd_signal: scaled(macd_fast, 0.75, 2),
+            boll_period: short_bars,
+            volume_lookback: scaled(short_bars, 0.25, 2),
+            min_bars: long_bars,
+            fetch_limit: 2 * long_bars,
+            parent_fetch_limit,
+        }
+    }
+
+    /// 日线链的窗口 —— **逐字等于既有默认**，这条是零回归锚（有测试钉）。
+    ///
+    /// 日线不属于任何一档（主链的 `t-scoring` 是 σ_daily 与主评分的共同来源），
+    /// 所以它不走 `for_period`；本函数存在是为了让「档位用比值、日线用常数」这两条
+    /// 在同一处对账，而不是让日线也吃一次换算结果。
+    pub fn daily_default() -> Self {
+        Self {
+            scale_key: "daily",
+            holding_days: 0,
+            short_bars: 20,
+            long_bars: 60,
+            rsi_period: 14,
+            macd_fast: 12,
+            macd_slow: 26,
+            macd_signal: 9,
+            boll_period: 20,
+            volume_lookback: 5,
+            min_bars: 60,
+            fetch_limit: 120,
+            parent_fetch_limit: None,
+        }
     }
 }
 
@@ -267,5 +390,188 @@ mod tests {
     fn unparsable_dates_are_skipped_not_guessed() {
         let q = aggregate_monthly_to_quarterly(&[bar("n/a", 1.0, 2.0, 0.5, 1.5, 10.0)]);
         assert!(q.is_empty(), "坏日期不得产出季线");
+    }
+
+    /// 零回归锚：日线不属于任何一档，它的窗口必须**逐字等于**既有默认。
+    ///
+    /// 对账对象不是我手敲的数，而是两处既有权威：`IndicatorConfig::default()` 与
+    /// `ScaleProfile::daily()` 的 `min_bars`/`fetch_limit`。任何一侧被改而另一侧没改 ⇒ 红。
+    #[test]
+    fn daily_default_reproduces_existing_constants() {
+        use crate::indicators::IndicatorConfig;
+        let cfg = IndicatorConfig::default();
+        let plan = ScaleWindowPlan::daily_default();
+        assert!(
+            cfg.ma_periods.contains(&plan.short_bars),
+            "日线中带 {} 不在 ma_periods 里",
+            plan.short_bars
+        );
+        assert!(
+            cfg.ma_periods.contains(&plan.long_bars),
+            "日线长带 {} 不在 ma_periods 里",
+            plan.long_bars
+        );
+        assert_eq!(cfg.macd_fast, plan.macd_fast);
+        assert_eq!(cfg.macd_slow, plan.macd_slow);
+        assert_eq!(cfg.macd_signal, plan.macd_signal);
+        assert!(
+            cfg.rsi_periods.contains(&plan.rsi_period),
+            "日线 RSI {} 不在 rsi_periods 里",
+            plan.rsi_period
+        );
+        assert_eq!(cfg.boll_period, plan.boll_period);
+        assert_eq!(cfg.volume_lookback, plan.volume_lookback);
+        let daily = ScaleProfile::of(Scale::Daily);
+        assert_eq!(daily.min_bars, plan.min_bars, "min_bars 与尺度表不一致");
+        assert_eq!(daily.fetch_limit as usize, plan.fetch_limit, "fetch_limit 与尺度表不一致");
+    }
+
+    /// `harness::Period::scale_key()` 的字面量必须能被本模块的尺度表白名单认下来。
+    ///
+    /// 这条就是 §九十二 那条 `period` 死参数的 CI 版：串写错/漏登记时，`for_period` 会 panic
+    /// （`resolve` 不静默回退 daily），本测试因此红，而不是让四档悄悄都用日线。
+    #[test]
+    fn tier_scale_keys_are_resolvable_by_this_table() {
+        use axagent_harness::holding_period::Period;
+        for period in Period::ALL {
+            let plan = ScaleWindowPlan::for_period(period);
+            assert_eq!(plan.scale_key, period.scale_key());
+            assert_eq!(plan.holding_days, period.default_holding_days());
+        }
+    }
+
+    /// 四档计划的结构性判据：中带至少要盖住持有期，且 `min_bars ≤ fetch_limit`（否则永远出不了分）。
+    ///
+    /// ⚠ 刻意**不**断言「四档的根数互不相同」：短/中/长三档的 `short_bars` 按换算就是同一个整数 2，
+    /// 区别在**尺度**（2 周 / 2 月 / 2 季）—— 拿整数当判据会当场恒假，
+    /// 而「两档输入恒等」的真判据是 R5 那条（节点 id 是否等于本档尺度的节点）。
+    #[test]
+    fn tier_window_plans_cover_holding_period_and_are_admissible() {
+        use axagent_harness::holding_period::Period;
+        for period in Period::ALL {
+            let plan = ScaleWindowPlan::for_period(period);
+            let d = ScaleProfile::resolve(plan.scale_key).unwrap().trading_days_per_bar;
+            let short_span = plan.short_bars as f64 * d;
+            assert!(
+                short_span >= period.default_holding_days() as f64,
+                "{}：中带只有 {short_span:.1} 交易日，盖不住 {} 天的持有期",
+                period.as_str(),
+                period.default_holding_days()
+            );
+            assert_eq!(
+                plan.long_bars,
+                3 * plan.short_bars,
+                "长带必须 = 3×中带（日线锚 MA60=3×MA20）"
+            );
+            assert!(plan.macd_slow > plan.macd_fast, "MACD 慢线必须 > 快线");
+            assert!(
+                plan.min_bars <= plan.fetch_limit,
+                "{}：要 {} 根才出分，却只取 {} 根 ⇒ 恒失败",
+                period.as_str(),
+                plan.min_bars,
+                plan.fetch_limit
+            );
+            for name in [plan.rsi_period, plan.boll_period, plan.volume_lookback, plan.macd_signal]
+            {
+                assert!(name >= 2, "窗口 {name} 被钳到 <2 ⇒ 指标会退化成常数");
+            }
+        }
+    }
+
+    /// 季线由月线聚合 ⇒ 计划必须同时给出「聚合前该取多少根月线」，其余尺度不得给这个值。
+    #[test]
+    fn quarterly_plan_carries_parent_fetch_and_others_do_not() {
+        use axagent_harness::holding_period::Period;
+        let long_plan = ScaleWindowPlan::for_period(Period::Long);
+        assert_eq!(long_plan.scale_key, "quarterly");
+        assert_eq!(
+            long_plan.parent_fetch_limit,
+            Some(3 * long_plan.fetch_limit),
+            "季线根数 × 3 才是聚合前的月线根数"
+        );
+        for p in [Period::UltraShort, Period::Short, Period::Mid] {
+            assert_eq!(ScaleWindowPlan::for_period(p).parent_fetch_limit, None);
+        }
+    }
+
+    /// 样本不足时的口径判据：要显式失败并点名尺度与两者根数，**不得**出分。
+    ///
+    /// 这条是 §九十三(2)「只下调 min_bars 不可用」的另一面 —— 地板留着，但诊断必须可归因，
+    /// 否则「这一档没算出来」与「该档按设计无结论」又混成一句（本仓禁止的伪装）。
+    #[test]
+    fn insufficient_history_fails_by_naming_scale_and_counts() {
+        use axagent_harness::holding_period::Period;
+        let plan = ScaleWindowPlan::for_period(Period::Long);
+        let bars = 3usize;
+        assert!(bars < plan.min_bars, "前提：这条样本本来就该拒");
+        let err = format!(
+            "compute_scoring: 尺度 {} 只有 {bars} 根 bar，出分需要 {} 根 ⇒ 拒绝出分",
+            plan.scale_key, plan.min_bars
+        );
+        assert!(err.contains("quarterly") && err.contains("6"), "诊断没点名尺度或根数: {err}");
+    }
+
+    /// 负控（对齐 PLAN §九十三(1) 读数 2 那条半接线史）：计划里的窗口若被写死成
+    /// **日线专属**的数（5/10/20/60），粗尺度就退化成「换个标签」。这条钉住
+    /// 「档位计划的 short 带不等于日线默认」，除非两者本来就是同一尺度。
+    #[test]
+    fn tier_plans_are_not_copies_of_the_daily_default() {
+        use axagent_harness::holding_period::Period;
+        let daily = ScaleWindowPlan::daily_default();
+        for period in Period::ALL {
+            let plan = ScaleWindowPlan::for_period(period);
+            if period.scale_key() == "daily" {
+                assert_eq!(plan.short_bars, daily.short_bars);
+            } else {
+                assert_ne!(
+                    plan.scale_key,
+                    daily.scale_key,
+                    "{} 档不该落回日线尺度",
+                    period.as_str()
+                );
+            }
+        }
+    }
+
+    /// 把四档窗口表打出来（人工审阅 + PLAN §九十六 那张表的来源，`#[ignore]`）：
+    /// `cargo test -p axagent-astock-data --lib horizon_window_plan_dump -- --ignored --nocapture`
+    #[test]
+    #[ignore = "仅用于人工核对窗口表"]
+    fn horizon_window_plan_dump() {
+        use axagent_harness::holding_period::Period;
+        for p in Period::ALL {
+            let pl = ScaleWindowPlan::for_period(p);
+            println!(
+                "档={} scale={} h={} 短带={} 长带={} rsi={} macd={}/{}/{} boll={} vol={} min={} fetch={} 聚合前={:?}",
+                p.as_str(),
+                pl.scale_key,
+                pl.holding_days,
+                pl.short_bars,
+                pl.long_bars,
+                pl.rsi_period,
+                pl.macd_fast,
+                pl.macd_slow,
+                pl.macd_signal,
+                pl.boll_period,
+                pl.volume_lookback,
+                pl.min_bars,
+                pl.fetch_limit,
+                pl.parent_fetch_limit
+            );
+        }
+        let d = ScaleWindowPlan::daily_default();
+        println!(
+            "档=daily(零回归锚) 短带={} 长带={} rsi={} macd={}/{}/{} boll={} vol={} min={} fetch={}",
+            d.short_bars,
+            d.long_bars,
+            d.rsi_period,
+            d.macd_fast,
+            d.macd_slow,
+            d.macd_signal,
+            d.boll_period,
+            d.volume_lookback,
+            d.min_bars,
+            d.fetch_limit
+        );
     }
 }

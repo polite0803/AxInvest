@@ -160,7 +160,7 @@ let COST_PCT = if present(cost_pct) { cost_pct } else { 0.003 };
 let untrusted_count = 0;
 if present(untrusted_trader) && untrusted_trader == true { untrusted_count += 1; }
 if present(untrusted_research_mgr) && untrusted_research_mgr == true { untrusted_count += 1; }
-if present(untrusted_catalyst) && untrusted_catalyst == true { untrusted_count += 1; }
+// v133：催化剂哨兵改按所选档（见下方选档段之后）——原单键已随逐档实例化退役。
 if present(untrusted_debate_conv) && untrusted_debate_conv == true { untrusted_count += 1; }
 if present(untrusted_data_quality) && untrusted_data_quality == true { untrusted_count += 1; }
 if present(untrusted_risk_conv) && untrusted_risk_conv == true { untrusted_count += 1; }
@@ -358,6 +358,73 @@ let announcement_modifier = if present(announcements) && type_of(announcements) 
 // 将公告修改器应用到 f3 催化剂信号（仅当公告信号不为零时）
 let f3_has_announcement_signal = announcement_modifier != 0.0;
 
+
+	// ── 主档改由四档分支结论选出（Q1=C，PLAN §四十八 阶段2；2026-10-04 拍板）──────
+	// 语义换代：主档不再是「主链后验阈值落的那一档」，而是「本轮四档里最该看的那一档」——
+	//   定档与主 action 都取自该档分支，主链日线口径退为归因/证据列（posterior / evidence
+	//   那几项照旧输出）。退役的是「effective_posterior 阈值定档」这一条（〇-B v2 立的）。
+	// 判据（写死在此，并被 `rhai_registry` 整脚本门锁住）：
+	//   ① 先筛**可执行档**（`positionPct > 0`），在可执行档里取 `confidence` 最大；
+	//   ② 四档全部不可执行 ⇒ 仍取 `confidence` 最大档 —— 方向成立但无可执行计划由呈现层
+	//      成句声明（§四十八 Q2-B），不在这里把方向悄悄降级成观望；
+	//   ③ 一路都没产出 ⇒ 退回旧的阈值定档，来源标成 `formula_no_branch`（缺席本身由下方
+//      装配段逐档写进 data_gaps，这里不重复报，也不在此处引用尚未声明的 data_gaps）。
+	//      留这条兜底是因为**未重播种的存量库**四路必然全缺席；若直接判「数据缺失」，
+	//      全部历史记录会一次性失效 —— 兜底可以，但必须显式声明自己是兜底。
+	// ⚠ 「这一行是不是分支的有效输出」只此一份判定（`branch_row_ok`），下方装配段复用
+	//   同一闭包 —— 两处各写一遍就会漂移成「选档认为有效、装配认为无效」的同屏矛盾。
+	//   自证字段两条：`confidenceMethod`（这条结论用哪种置信算法算的）与 `stopSource`
+	//   （这个止损是哪种口径给的）。后者自 2026-10-04 起是**必需**的 —— 主档出场数值改为
+	//   直接取所选档行之后，「主档止损的来历」必须由那一行自己说，主链再猜就是冒充。
+	let branch_row_ok = |r| type_of(r) == "map" && !r.is_empty() && present(r["confidenceMethod"]) && present(r["stopSource"]);
+	// 顺序 = 展示顺序；camel 给前端键，snake 与仲裁/反思/权威周期表对齐。
+	let branch_tiers = [
+	    #{ camel: "ultraShort", snake: "ultra_short", row: h_ultra_short },
+	    #{ camel: "short", snake: "short", row: h_short },
+	    #{ camel: "mid", snake: "mid", row: h_mid },
+	    #{ camel: "long", snake: "long", row: h_long },
+	];
+	let picked_row = ();
+	let picked_tier = "";
+	let best_conf = -1.0;
+	let exec_row = ();
+	let exec_tier = "";
+	let best_exec_conf = -1.0;
+	for t in branch_tiers {
+	    if branch_row_ok.call(t.row) == false { continue; }
+	    let c = if present(t.row["confidence"]) { t.row["confidence"] } else { 0.0 };
+	    let p = if present(t.row["positionPct"]) { t.row["positionPct"] } else { 0.0 };
+	    if c > best_conf { best_conf = c; picked_row = t.row; picked_tier = t.snake; }
+	    if p > 0.0 && c > best_exec_conf {
+	        best_exec_conf = c; exec_row = t.row; exec_tier = t.snake;
+	    }
+	}
+	// 可执行优先；全不可执行时保留「方向最强但无可执行计划」那一档。
+	if exec_tier != "" { picked_row = exec_row; picked_tier = exec_tier; }
+	let branch_picked = picked_tier != "";
+
+// ── v133（B2-2）：催化剂等级 / 催化剂哨兵按**所选档**归一 ──
+// 逐档实例化后 `a-catalyst` 有四个实例（四档子集均含它）⇒ 主链的 f3 取所选档那一格，
+// 与 v128 的 `overall_risk_*` 同一取舍（静态映射只能四键注入，选档后 switch）。
+// 四路全缺席（branch_picked=false，未重播种的存量库）⇒ catalyst_level 退 ()，
+// f3 走「无催化剂」分支（present 守卫），不伪造档位。
+let catalyst_level = switch picked_tier {
+    "ultra_short" => catalyst_level_ultra_short,
+    "short" => catalyst_level_short,
+    "mid" => catalyst_level_mid,
+    "long" => catalyst_level_long,
+    _ => (),
+};
+// 催化剂哨兵同样按所选档（其余 5 个哨兵是全局节点，保持原样，见上方 untrusted_count 段）。
+let untrusted_catalyst_picked = switch picked_tier {
+    "ultra_short" => untrusted_catalyst_ultra_short,
+    "short" => untrusted_catalyst_short,
+    "mid" => untrusted_catalyst_mid,
+    "long" => untrusted_catalyst_long,
+    _ => (),
+};
+if present(untrusted_catalyst_picked) && untrusted_catalyst_picked == true { untrusted_count += 1; }
+
 // ── 因子 3: 催化剂 ──
 // V37 修复: 催化剂信号来自 LLM（a-catalyst.content.catalyst_level），与技术面回测因子
 // （volume=成交量）语义无关，不调用 get_weight 避免权重被无关回测数据绑架。
@@ -407,50 +474,6 @@ let f3_signal = if f3_weight > 0.0 {
     // 无 LLM 催化剂但有公告信号 → 直接用公告信号（权重减半避免过度影响）
     announcement_modifier * 0.5
 } else { 0.0 };
-
-	// ── 主档改由四档分支结论选出（Q1=C，PLAN §四十八 阶段2；2026-10-04 拍板）──────
-	// 语义换代：主档不再是「主链后验阈值落的那一档」，而是「本轮四档里最该看的那一档」——
-	//   定档与主 action 都取自该档分支，主链日线口径退为归因/证据列（posterior / evidence
-	//   那几项照旧输出）。退役的是「effective_posterior 阈值定档」这一条（〇-B v2 立的）。
-	// 判据（写死在此，并被 `rhai_registry` 整脚本门锁住）：
-	//   ① 先筛**可执行档**（`positionPct > 0`），在可执行档里取 `confidence` 最大；
-	//   ② 四档全部不可执行 ⇒ 仍取 `confidence` 最大档 —— 方向成立但无可执行计划由呈现层
-	//      成句声明（§四十八 Q2-B），不在这里把方向悄悄降级成观望；
-	//   ③ 一路都没产出 ⇒ 退回旧的阈值定档，来源标成 `formula_no_branch`（缺席本身由下方
-//      装配段逐档写进 data_gaps，这里不重复报，也不在此处引用尚未声明的 data_gaps）。
-	//      留这条兜底是因为**未重播种的存量库**四路必然全缺席；若直接判「数据缺失」，
-	//      全部历史记录会一次性失效 —— 兜底可以，但必须显式声明自己是兜底。
-	// ⚠ 「这一行是不是分支的有效输出」只此一份判定（`branch_row_ok`），下方装配段复用
-	//   同一闭包 —— 两处各写一遍就会漂移成「选档认为有效、装配认为无效」的同屏矛盾。
-	//   自证字段两条：`confidenceMethod`（这条结论用哪种置信算法算的）与 `stopSource`
-	//   （这个止损是哪种口径给的）。后者自 2026-10-04 起是**必需**的 —— 主档出场数值改为
-	//   直接取所选档行之后，「主档止损的来历」必须由那一行自己说，主链再猜就是冒充。
-	let branch_row_ok = |r| type_of(r) == "map" && !r.is_empty() && present(r["confidenceMethod"]) && present(r["stopSource"]);
-	// 顺序 = 展示顺序；camel 给前端键，snake 与仲裁/反思/权威周期表对齐。
-	let branch_tiers = [
-	    #{ camel: "ultraShort", snake: "ultra_short", row: h_ultra_short },
-	    #{ camel: "short", snake: "short", row: h_short },
-	    #{ camel: "mid", snake: "mid", row: h_mid },
-	    #{ camel: "long", snake: "long", row: h_long },
-	];
-	let picked_row = ();
-	let picked_tier = "";
-	let best_conf = -1.0;
-	let exec_row = ();
-	let exec_tier = "";
-	let best_exec_conf = -1.0;
-	for t in branch_tiers {
-	    if branch_row_ok.call(t.row) == false { continue; }
-	    let c = if present(t.row["confidence"]) { t.row["confidence"] } else { 0.0 };
-	    let p = if present(t.row["positionPct"]) { t.row["positionPct"] } else { 0.0 };
-	    if c > best_conf { best_conf = c; picked_row = t.row; picked_tier = t.snake; }
-	    if p > 0.0 && c > best_exec_conf {
-	        best_exec_conf = c; exec_row = t.row; exec_tier = t.snake;
-	    }
-	}
-	// 可执行优先；全不可执行时保留「方向最强但无可执行计划」那一档。
-	if exec_tier != "" { picked_row = exec_row; picked_tier = exec_tier; }
-	let branch_picked = picked_tier != "";
 
 // ── P1-7 修复: 确定性风险分类（优先算法，另一个口径仅作 fallback）──
 // 基于 t-risk.stockRiskProfile 的量化指标做规则分类，结果覆盖 overall_risk，
@@ -1492,7 +1515,7 @@ let f12_raw = pm_leg_signal(
     #{
         macdDif: if present(macd_dif) && type_of(macd_dif) == "f64" { macd_dif } else { () },
         macdDea: if present(macd_dea) && type_of(macd_dea) == "f64" { macd_dea } else { () },
-        rsi14: if present(rsi_14) && type_of(rsi_14) == "f64" { rsi_14 } else { () },
+        rsi: if present(rsi_14) && type_of(rsi_14) == "f64" { rsi_14 } else { () },
     }
 );
 let f12_signal = if type_of(f12_raw) == "()" { 0.0 } else { f12_raw };
@@ -2271,14 +2294,55 @@ let disagreement_mod = if present(risk_disagreement) {
 	// 「该档上涨胜率」同量纲。风险只体现在 action 阶梯、仓位上限与
 	// `confidenceRiskAdjusted`，不再把「高风险」伪装成「胜率更低」。
 	let bayes_confidence_pure = pm_compute_bayes_confidence(prior, posterior);
-	let confidence_quality_cap = if dqi_grade_str == "A" {
+	// 阶梯底级**先定义再被两处引用**（grade 的兜底档 + 熔断的封顶值），
+	//   这样"最保守的一档"在脚本里只有一个字面量。
+	let cap_floor = 60.0;
+	let confidence_quality_cap_by_grade = if dqi_grade_str == "A" {
 	    99.9
 	} else if dqi_grade_str == "B" {
 	    85.0
 	} else if dqi_grade_str == "C" {
 	    75.0
 	} else {
-	    60.0
+	    cap_floor
+	};
+	// ── #8 P5：跨轮数据质量熔断对置信度上限的收紧（2026-10-06）──
+	// 上面那套阶梯只看**本轮** grade；本段的输入是**近 N 轮序列**的判定结果，两者独立生效。
+	// `dqi_fuse_flag` 是已判定结果 —— 「连续几轮算异常、什么等级算异常」的权威在
+	//   `dao::repo::data_quality_fuse`（Rust 常量），脚本侧不再比阈值，否则阈值就有第二份载体
+	//   （同一文件里 grade 阈值曾经有四份，是历史缺陷，见上方 dqi_grade 的来历注释）。
+	// 熔断时把上限压到**本表已有的最低一级**（`cap_floor`）：不新增常数 —— "最保守的上限"
+	//   这个语义已经由阶梯底级承载，再加一个数就变成两套口径。
+	// 三条注入分开读是刻意的：`observations == 0`（观测表为空）**既不是熔断也不是健康**，
+	//   此时按未熔断处理并把状态如实标成 `unobserved`，让"这套设施还没跑过"在面板上单独成句。
+	// `num_of` 而不是裸数值：注入的是 JSON 数字，顶层标量落 f64、嵌套层落 i64，
+	//   而 Rhai 不会把 i64 升格进 f64 形参 —— 裸 `clamp` 遇到整数会让整脚本降级（v126 实测）。
+	let dqi_observed_count = if present(dqi_observations) { num_of(dqi_observations) } else { 0.0 };
+	let dqi_abnormal_streak = if present(dqi_streak) { num_of(dqi_streak) } else { 0.0 };
+	let dqi_fuse_input = if present(dqi_fuse_flag) { num_of(dqi_fuse_flag) } else { 0.0 };
+	let dqi_fuse_state = if dqi_observed_count <= 0.0 {
+	    "unobserved"
+	} else if dqi_fuse_input >= 1.0 {
+	    "fused"
+	} else {
+	    "ok"
+	};
+	// 只收紧不放宽：取两者较小值，使熔断永远只把上限往下压（阶梯底级若被后人改动也不会反向放宽）。
+	let confidence_quality_cap = if dqi_fuse_state == "fused" && confidence_quality_cap_by_grade > cap_floor {
+	    cap_floor
+	} else {
+	    confidence_quality_cap_by_grade
+	};
+	// 本段只**陈述**上面那条封顶，不再判一次：判据在 `dqi_fuse_state` 里已定，
+	//   文案里再比一次阈值就会出现两份载体。三种状态各占一句，缺席不得留空成"没问题"。
+	let dqi_fuse_note = if dqi_fuse_state == "fused" {
+	    ` | ⚠️数据质量熔断(连续${dqi_abnormal_streak}轮未达A级),置信度上限压至${cap_floor}`
+	} else if dqi_fuse_state == "unobserved" {
+	    " | 数据质量跨轮观测缺失(观测表 0 条),熔断判定未参与"
+	} else if dqi_abnormal_streak > 0.0 {
+	    ` | 数据质量已连续${dqi_abnormal_streak}轮未达A级(未达熔断线)`
+	} else {
+	    ""
 	};
 	// decision_confidence(方向确信度)保留供参考,但不是"置信度"
 	let decision_confidence_raw = if effective_posterior >= 0.5 {
@@ -3121,6 +3185,16 @@ let gap_note = if data_gaps.len() > 0 {
     //   不得回去解析 reasoning 的中文句子。值域见 `src/types/stock-analysis.ts` 与
     //   `rhai_registry` 整脚本门 ⑦ 的枚举断言（三载体必须同集合）。
     "confidenceSource": confidence_source,
+    // ── #8 P5 数据质量跨轮熔断态（2026-10-06）──
+    // 结构化输出而不是只写进 reasoning：展示层与反思统计不得回去解析中文句子
+    //   （同 `confidenceSource`/`actionSource` 的既有纪律）。
+    // 三态分开：`unobserved`（观测表为空）既不是"熔断"也不是"健康"，合并就会让
+    //   设施没跑过冒充证据面正常。`confidenceQualityCap` 是**本轮实际生效**的上限，
+    //   用它配合 `confidence` 可直接反解"是被封顶压的还是本来就低"。
+    "dqiFuseState": dqi_fuse_state,
+    "dqiStreak": dqi_abnormal_streak,
+    "dqiObservations": dqi_observed_count,
+    "confidenceQualityCap": confidence_quality_cap,
     "actionSource": action_source,
     // 风险调整后的置信度（= action 阶梯实际所用值），保留以支持归因。
     "confidenceRiskAdjusted": (final_confidence * 10.0).round() / 10.0,
@@ -3186,7 +3260,7 @@ let gap_note = if data_gaps.len() > 0 {
     //   沿用本文件既有写法 `${(x*10.0).round()/10.0}`（见 bearish_downgrade_note 的 to_int 惯例）。
     // 2026-09-22: 结论名回归 `final_action`（方向档）—— 展示档派生已移除，
     //   见上方说明：结论名必须由确定性后验阶梯唯一决定，不得掺入仓位/LLM 措辞。
-    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}`,
+    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}${dqi_fuse_note}`,
     "data_gaps": data_gaps,
     "timeHorizon": time_horizon,
     // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source

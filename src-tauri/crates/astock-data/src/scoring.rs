@@ -202,6 +202,89 @@ impl ScoringEngine {
         }
     }
 
+    /// **档位尺度**的评分路径（PLAN §九十八(3) 的乙，2026-10-06 用户拍板）。
+    ///
+    /// 与 [`Self::score_with_bands`] 的差别只在**取值来源**：§九十八(2) 实测七个分量里有五个
+    /// 走命名槽（`ma_alignment` / `bias_ma5` / `rsi6` / `support_levels` / `map_signal` 的形态标签），
+    /// 而命名槽是按**周期数值**认领的 ⇒ 档尺度传 `[8,24]` 时它们全部静默退回初值。
+    /// 本路径那五项改读 `scaleTrend` / `scaleMomentum` / 两带本身：
+    /// - trend：`diff_pct` 对 `±deviation_band_1`（已按 `√d` 缩放）与快带斜率定档，
+    ///   分档值沿用既有的 30 / 20 / 12 / 0，**不新增常数**；
+    /// - deviation：收盘价对**快带**的偏离（日线口径里那是「对 MA5」，同族量的粗尺度对应物）；
+    /// - rsi：`scaleMomentum.value`（缺失 ⇒ 按中性 50 走既有分档，不是伪造读数）；
+    /// - support：两条带本身（慢带 + 布林中轨）当支撑，沿用 `score_support` 的容差；
+    /// - macd / volume / boll：这三项本来就是按 `cfg` 周期直接算的，不受命名槽影响 ⇒ 照旧。
+    ///
+    /// ⚠ `scaleTrend` 缺席这一支在**生产上不可达**：`compute_scoring` 先用 `min_bars` 拦样本不足
+    /// （不足 ⇒ 显式失败，不出分），所以到这里必有两带。留着 `None` 分支只为「万一有人绕过入口」
+    /// 时退回命名槽口径，而不是给一个空分 —— 退回比空分更接近「拿不到时按日线口径算，并在
+    /// `windows` 里如实标出」。
+    pub fn score_scale_aware(
+        indicators: &TechnicalIndicators,
+        latest_price: f64,
+        weights: Option<&ScoringWeights>,
+        profile: &crate::scale::ScaleProfile,
+    ) -> ObjectiveScore {
+        let Some(trend_facts) = indicators.scale_trend else {
+            return Self::score_with_bands(
+                indicators,
+                latest_price,
+                weights,
+                &ScoreBands::scaled_for(profile),
+            );
+        };
+        let default_weights = ScoringWeights::default();
+        let w = weights.unwrap_or(&default_weights);
+        let bands = ScoreBands::scaled_for(profile);
+        let band = bands.deviation_band_1;
+        let rising = trend_facts.fast_slope.unwrap_or(0.0) >= 0.0;
+        let (trend_raw, alignment): (u32, &str) = match trend_facts.diff_pct {
+            None => (12, "缠绕/交叉"),
+            Some(d) if d >= band && rising => (30, "多头排列"),
+            Some(d) if d >= band => (20, "弱多头"),
+            Some(d) if d <= -band && !rising => (0, "空头排列"),
+            // 空头但在收敛：既有阶梯里没有这一档，落在「缠绕」而不是新造一个分值
+            Some(_) => (12, "缠绕/交叉"),
+        };
+        let deviation_input = if trend_facts.fast > 0.0 {
+            (latest_price - trend_facts.fast) / trend_facts.fast * 100.0
+        } else {
+            0.0
+        };
+        let trend = (trend_raw as f64 * w.trend / 30.0) as u32;
+        let deviation =
+            (Self::score_deviation(deviation_input, &bands) as f64 * w.deviation / 20.0) as u32;
+        let macd = (Self::score_macd(&indicators.macd_signal, indicators.macd_dif) as f64 * w.macd
+            / 15.0) as u32;
+        let volume =
+            (Self::score_volume(&indicators.volume_signal) as f64 * w.volume / 15.0) as u32;
+        let momentum = indicators.scale_momentum.map(|m| m.value).unwrap_or(50.0);
+        let rsi = (Self::score_rsi(momentum, &bands) as f64 * w.rsi / 10.0) as u32;
+        let levels = [trend_facts.slow, indicators.boll_mid];
+        let support =
+            (Self::score_support(latest_price, &levels, &bands) as f64 * w.support / 5.0) as u32;
+        let boll =
+            (Self::score_boll(&indicators.boll_position, &bands) as f64 * w.boll / 5.0) as u32;
+        let total = (trend + deviation + macd + volume + rsi + support + boll).min(100);
+        let (signal, signal_code) = Self::map_signal(total, alignment);
+
+        ObjectiveScore {
+            total,
+            trend_score: trend,
+            deviation_score: deviation,
+            macd_score: macd,
+            volume_score: volume,
+            rsi_score: rsi,
+            support_score: support,
+            boll_score: boll,
+            fundamental_adjustment: 0,
+            industry_adjustment: 0,
+            total_adjustment: 0,
+            signal: signal.to_string(),
+            signal_code: signal_code.to_string(),
+        }
+    }
+
     /// 基本面调整：根据 PE / PB / ROE 对客观评分做增量调整
     ///
     /// 入参三态（2026-09-21 明确）：`pe` / `pb` 由调用方以 `unwrap_or(0.0)` 传入，
@@ -428,6 +511,66 @@ mod tests {
             resistance_levels: vec![200.0],
             ..Default::default()
         }
+    }
+
+    /// 中性槽类型（测试夹具要直接构造两带事实）
+    use crate::indicators::{ScaleTrend, ScaleValue};
+
+    /// 档位评分路径：命名槽被丢弃时**不再恒 12 分**，而按 `scaleTrend` 的两带定档。
+    ///
+    /// 夹具是「档尺度算出来的样子」：四个命名槽全是初值（`ma5..ma60 = 0.0` ⇒ `ma_alignment`
+    /// 「无数据」），只有中性槽有值 —— 这正是 §九十八(2) 实测的退化输入。
+    #[test]
+    fn score_scale_aware_uses_neutral_slots_not_named_slots() {
+        let profile = crate::scale::ScaleProfile::resolve("quarterly").unwrap();
+        let base = |trend: Option<ScaleTrend>, mom: Option<ScaleValue>| TechnicalIndicators {
+            scale_trend: trend,
+            scale_momentum: mom,
+            volume_signal: "正常".into(),
+            macd_signal: "缠绕".into(),
+            boll_position: "中轨附近".into(),
+            boll_mid: 100.0,
+            ..Default::default()
+        };
+        let t = |diff: f64, slope: f64| ScaleTrend {
+            fast_bars: 8,
+            slow_bars: 24,
+            fast: 100.0,
+            slow: 100.0,
+            diff_pct: Some(diff),
+            fast_slope: Some(slope),
+        };
+        // √60 ≈ 7.75 ⇒ 张开阈值 = 1% × 7.75；取 9% 明显越过、-9% 同理
+        let bull =
+            ScoringEngine::score_scale_aware(&base(Some(t(9.0, 0.5)), None), 100.0, None, &profile);
+        let bear = ScoringEngine::score_scale_aware(
+            &base(Some(t(-9.0, -0.5)), None),
+            100.0,
+            None,
+            &profile,
+        );
+        let flat =
+            ScoringEngine::score_scale_aware(&base(Some(t(0.2, 0.0)), None), 100.0, None, &profile);
+        assert!(bull.trend_score > flat.trend_score, "多头张开应高于缠绕: {bull:?}");
+        assert!(flat.trend_score > bear.trend_score, "空头张开应低于缠绕: {bear:?}");
+        assert_eq!(bear.signal_code, ScoringEngine::map_signal(bear.total, "空头排列").1);
+        // 命名槽口径在同样输入下会恒判缠绕（退化）—— 这条把「乙确实修掉了退化」钉住
+        let legacy = ScoringEngine::score(&base(Some(t(9.0, 0.5)), None), 100.0, None);
+        assert_eq!(legacy.trend_score, flat.trend_score, "命名槽全空时 legacy 路径认不出张开");
+        assert_ne!(bull.trend_score, legacy.trend_score);
+        // 动量缺席 ⇒ 按中性 50 走既有分档，不给伪造的高/低分
+        let with_mom = ScoringEngine::score_scale_aware(
+            &base(Some(t(0.2, 0.0)), Some(ScaleValue { period: 8, value: 20.0 })),
+            100.0,
+            None,
+            &profile,
+        );
+        let without =
+            ScoringEngine::score_scale_aware(&base(Some(t(0.2, 0.0)), None), 100.0, None, &profile);
+        assert!(
+            with_mom.rsi_score > without.rsi_score,
+            "超卖读数应低于中性: {with_mom:?} {without:?}"
+        );
     }
 
     #[test]

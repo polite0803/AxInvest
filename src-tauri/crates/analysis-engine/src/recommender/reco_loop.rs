@@ -43,6 +43,8 @@ pub struct RecoLoopSample {
     pub period: Period,
     /// 验证时刻（ms）——按档 lookback 的过滤轴
     pub exit_at_ms: i64,
+    /// 该荐股**产出**时刻（ms）——熔断降权线的归因轴（不是验证时刻）
+    pub predicted_at_ms: i64,
     /// 胜负（hit/partial ⇒ true）
     pub win: bool,
     /// 预测时的置信度 0-100（IC 的 x 轴）
@@ -51,6 +53,13 @@ pub struct RecoLoopSample {
     pub realized_return_pct: f64,
     /// 实际使用的验证窗口（天），半衰期拟合横轴
     pub holding_days: u32,
+    /// 该样本**产出时刻**（`generated_at`）数据质量是否处于跨轮熔断态。
+    ///
+    /// 三态（`None` / `Some(false)` / `Some(true)`）而不是布尔：`None` 说的是
+    /// 「观测面还没给出过熔断证据」（表为空，或这条样本比**首个熔断段**还早），
+    /// 压成 `false` 就等于让「设施没跑过」给策略发一张清白证明。
+    /// 由 [`load_reco_loop_samples`] 用 dao 的熔断时间线标注；纯函数入口默认 `None`。
+    pub dqi_fused_at_prediction: Option<bool>,
 }
 
 /// 逐格闭环态（Phase B 计算、Phase D 呈现共用）。
@@ -112,6 +121,9 @@ pub fn samples_from_validation_rows(rows: Vec<decision_validations::Model>) -> V
             continue;
         };
         let t_plus_n = r.t_plus_n.max(0) as u32;
+        // 产出时刻：荐股**生成**那一刻（不是验证时刻）—— 熔断降权问的是
+        // 「这条样本出生时证据面好不好」，用 exit 时刻会把「持有期内才坏」算到它头上。
+        let predicted_at_ms = parse_ms(&r.generated_at).unwrap_or(exit_at_ms);
         let sample = RecoLoopSample {
             style_key,
             period,
@@ -120,6 +132,9 @@ pub fn samples_from_validation_rows(rows: Vec<decision_validations::Model>) -> V
             confidence: r.confidence as f64,
             realized_return_pct: (after / r.entry_price - 1.0) * 100.0,
             holding_days: t_plus_n,
+            predicted_at_ms,
+            // 标注在 `load_reco_loop_samples` 里按时间线做（本纯函数不碰库）
+            dqi_fused_at_prediction: None,
         };
         let dist = (t_plus_n as i64 - period.default_holding_days() as i64).abs();
         match best.get(&r.pick_id) {
@@ -173,7 +188,22 @@ pub async fn load_reco_loop_samples(
         .all(db)
         .await
         .map_err(|e| format!("读取 decision_validations 失败: {e}"))?;
-    Ok(samples_from_validation_rows(rows))
+    let mut samples = samples_from_validation_rows(rows);
+    // #8 P5 第三生效面：把每条样本按**产出时刻**标成「当时是否处于熔断态」。
+    // 判据（什么算异常、几轮熔断、去重口径）全在 dao，本处只取时间线做归因。
+    // 取数失败 ⇒ 时间线为空 ⇒ 全部 `None` ⇒ 降权线不参与（不是参与并按正常处理）。
+    let intervals = match axagent_dao::repo::data_quality_fuse::load_fused_intervals(db).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("[reco_loop] 熔断时间线取数失败 ⇒ 本轮回闭不做数据质量降权: {e}");
+            Vec::new()
+        },
+    };
+    for s in samples.iter_mut() {
+        s.dqi_fused_at_prediction =
+            axagent_dao::repo::data_quality_fuse::fused_at(&intervals, s.predicted_at_ms);
+    }
+    Ok(samples)
 }
 
 // ── Phase B：胜率 × IC 合成逐格权重（PLAN-reco-reflection-closure）──
@@ -211,6 +241,10 @@ pub struct LoopCellResult {
     /// 只降不升：取值域 `(WEIGHT_FLOOR, 1]`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mover_penalty: Option<f64>,
+    /// 数据质量熔断线（#8 P5）的降权乘数（`None` = 本格窗口内可判定样本不足，未参与合成）。
+    /// 与 `mover_penalty` 同一条纪律：只降不升、永不提权，取值域 `(WEIGHT_FLOOR, 1]`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dqi_penalty: Option<f64>,
     /// 该格在核查窗口内「算出了它却被 top-N 淘汰」的事件数（留痕缺失时恒 0）
     pub scored_out: usize,
 }
@@ -247,8 +281,37 @@ impl MoverCellSignal {
     }
 }
 
+/// 熔断降权线（#8 P5）参与合成所需的最少「可判定」样本数。
+///
+/// 取 3 的出处就是 `MOVER_MIN_EVIDENCE` 那条同一纪律：少于三次观测就动手，等于用一次
+/// 抖动给整格定调。两线各自独立成常量而不是共用 —— 它们判的是不同的证据源，
+/// 将来其中一条要改门槛，不应连带改到另一条。
+pub const DQI_MIN_SAMPLES: usize = 3;
+
+/// 逐格熔断降权乘数（纯函数，输入是已经过 lookback 过滤的本格样本）。
+///
+/// 分母只数**可判定**样本（`Some(_)`）：`None` 既不进分子也不进分母 ——
+/// 观测面覆盖不到的样本不能白送一个「清白」，也不能算成「有罪」。
+/// 推导与 mover 线同一条（Laplace 平滑转化率）：`(可判定且未熔断 + 1) / (可判定 + 1)`，
+/// 全清白 ⇒ 1.0（不降）；全在熔断期产出 ⇒ 1/(n+1)（越多样本越确定该降）。
+fn dqi_penalty_of(cell: &[&RecoLoopSample]) -> Option<f64> {
+    let mut fused = 0usize;
+    let mut clear = 0usize;
+    for s in cell {
+        match s.dqi_fused_at_prediction {
+            Some(true) => fused += 1,
+            Some(false) => clear += 1,
+            None => {},
+        }
+    }
+    if fused + clear < DQI_MIN_SAMPLES {
+        return None;
+    }
+    Some((((clear + 1) as f64) / ((clear + fused + 1) as f64)).clamp(WEIGHT_FLOOR, 1.0))
+}
+
 /// 逐格合成（纯函数）：胜率线（`weight_decay` 基元）× 力度线（`ic` 基元）
-/// × mover 线（`reco_scan_audit` 截断留痕，Phase 4）。
+/// × mover 线（`reco_scan_audit` 截断留痕，Phase 4）× 熔断线（`data_quality_observations`，#8 P5）。
 ///
 /// 规则（对齐已批方案 Q1/P2/Q5）：
 /// - 矩阵不成立格 ⇒ `NotInMatrix`，不产权重；
@@ -258,6 +321,9 @@ impl MoverCellSignal {
 /// - IC < 0 ⇒ 胜率权重再乘 `NEGATIVE_IC_PENALTY`，下限 `WEIGHT_FLOOR`；
 /// - 最后（无论 IC 线是否校准）叠乘 `mover` 线：只降不升，且**永不提权**
 ///   （`PLAN-mover-recall-attribution.md` §Phase 4 明文禁止用 mover 数据提权）。
+/// - 再叠乘 `熔断` 线（#8 P5）：本格窗口里「出生时数据质量已熔断」的样本占比 ⇒ 同一条只降不升。
+///   它问的是**证据的可信度**而不是策略的预测力：胜率 80% 却全部产自坏数据期，
+///   这个 80% 本身不可用；不动它就等于让"取数一直在坏"这件事对权重零成本。
 pub fn compute_loop_cell_weights(
     samples: &[RecoLoopSample],
     current: &HashMap<(String, String), f64>,
@@ -285,6 +351,8 @@ pub fn compute_loop_cell_weights(
                     new_weight: BASELINE_WEIGHT,
                     // 按设计不出票的格不适用 mover 线（也就不该出现在降权清单里）
                     mover_penalty: None,
+                    // 同理不适用熔断线
+                    dqi_penalty: None,
                     scored_out: 0,
                 });
                 continue;
@@ -299,6 +367,11 @@ pub fn compute_loop_cell_weights(
                 .collect();
             let key = (style_key.to_string(), period.as_str().to_string());
             let old_weight = current.get(&key).copied().unwrap_or(BASELINE_WEIGHT);
+            // 两条只降不升的外乘线合成一个乘数（都缺席 ⇒ 1.0 = 不动）。
+            //   刻意不在这里比较阈值：判据分别是 `MOVER_MIN_EVIDENCE` 与 `DQI_MIN_SAMPLES`，
+            //   各自的 `None` 已经表达「证据不足」。
+            let dqi_penalty = dqi_penalty_of(&cell);
+            let outer_penalty = mover_penalty.unwrap_or(1.0) * dqi_penalty.unwrap_or(1.0);
 
             if cell.len() < crate::reflection_stats::IC_MIN_SAMPLE {
                 out.push(LoopCellResult {
@@ -309,10 +382,10 @@ pub fn compute_loop_cell_weights(
                     samples: cell.len(),
                     win_rate: None,
                     old_weight,
-                    new_weight: mover_penalty.map_or(BASELINE_WEIGHT, |p| {
-                        (BASELINE_WEIGHT * p).clamp(WEIGHT_FLOOR, BASELINE_WEIGHT)
-                    }),
+                    new_weight: (BASELINE_WEIGHT * outer_penalty)
+                        .clamp(WEIGHT_FLOOR, BASELINE_WEIGHT),
                     mover_penalty,
+                    dqi_penalty,
                     scored_out,
                 });
                 continue;
@@ -359,11 +432,8 @@ pub fn compute_loop_cell_weights(
             } else {
                 (LoopCellStatus::IcNonNegative, win_w.unwrap_or(BASELINE_WEIGHT))
             };
-            // mover 线在 IC/胜率线之后叠乘：只降不升，样本不足时不动
-            let blended = match mover_penalty {
-                Some(p) => new_weight * p,
-                None => new_weight,
-            };
+            // mover 线与熔断线都在 IC/胜率线之后叠乘：只降不升，任一条样本不足时不动它自己那一份
+            let blended = new_weight * outer_penalty;
             out.push(LoopCellResult {
                 style: style_key,
                 period: period.as_str(),
@@ -374,6 +444,7 @@ pub fn compute_loop_cell_weights(
                 old_weight,
                 new_weight: blended.clamp(WEIGHT_FLOOR, BASELINE_WEIGHT),
                 mover_penalty,
+                dqi_penalty,
                 scored_out,
             });
         }
@@ -462,6 +533,21 @@ pub async fn recalc_and_persist_reco_loop(
                 r.samples,
                 r.new_weight
             ),
+        };
+        // 留痕必须能反解：胜率/IC 之外还有两条外乘线（mover 漏检线、数据质量熔断线），
+        //   不进句子的话「窗口样本一样、权重却更低」在审计时无从归因。缺席的线不写，
+        //   写了的就代表它真的参与了本轮合成。
+        let mut outer_lines: Vec<String> = Vec::new();
+        if let Some(p) = r.mover_penalty {
+            outer_lines.push(format!("漏检线×{p:.2}"));
+        }
+        if let Some(p) = r.dqi_penalty {
+            outer_lines.push(format!("熔断线×{p:.2}"));
+        }
+        let rationale = if outer_lines.is_empty() {
+            rationale
+        } else {
+            format!("{rationale}; {}", outer_lines.join("; "))
         };
         let am = strategy_weight_history::ActiveModel {
             id: Set(uuid::Uuid::new_v4().to_string()),
@@ -556,6 +642,7 @@ pub async fn load_reco_served_vars_db(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reflection_stats::IC_MIN_SAMPLE;
 
     fn dv_row(
         pick_id: &str,
@@ -708,7 +795,25 @@ mod tests {
             confidence: conf,
             realized_return_pct: ret,
             holding_days: period.default_holding_days(),
+            // 夹具默认「产出即验证前一刻」：lookback 过滤用 exit_at_ms，本字段只喂熔断线
+            predicted_at_ms: exit_at_ms - 86_400_000,
+            dqi_fused_at_prediction: None,
         }
+    }
+
+    /// 只改熔断标注，其余沿用 `mk` —— 熔断线的测试要能分别造出三态样本。
+    fn mk_dqi(
+        style: &'static str,
+        period: Period,
+        conf: f64,
+        ret: f64,
+        win: bool,
+        exit_at_ms: i64,
+        fused: Option<bool>,
+    ) -> RecoLoopSample {
+        let mut s = mk(style, period, conf, ret, win, exit_at_ms);
+        s.dqi_fused_at_prediction = fused;
+        s
     }
 
     fn cell<'a>(res: &'a [LoopCellResult], style: &str, period: &str) -> &'a LoopCellResult {
@@ -898,5 +1003,186 @@ mod tests {
         assert_eq!(c.status, LoopCellStatus::NotInMatrix);
         assert_eq!(c.mover_penalty, None);
         assert_eq!(c.scored_out, 0);
+    }
+
+    // ── #8 P5：数据质量熔断降权线 ──
+
+    /// 造一批同格样本，前 `fused_n` 条标成「出生于熔断态」，其余标成清白。
+    fn dqi_batch(fused_n: usize, clear_n: usize) -> Vec<RecoLoopSample> {
+        let now = 1_700_000_000_000i64;
+        (0..fused_n)
+            .map(|i| mk_dqi("trend", Period::Short, 20.0 + i as f64, -1.0, true, now, Some(true)))
+            .chain((0..clear_n).map(|i| {
+                mk_dqi("trend", Period::Short, 20.0 + i as f64, -1.0, true, now, Some(false))
+            }))
+            .collect()
+    }
+
+    /// 分母只数可判定样本：全清白 ⇒ 乘数 1.0（不降）；全熔断 ⇒ 1/(n+1)（Laplace 转化率）。
+    #[test]
+    fn dqi_line_is_laplace_ratio_of_clear_among_judgeable() {
+        let now = 1_700_000_000_000i64;
+
+        let all_clear = compute_loop_cell_weights(
+            &dqi_batch(0, IC_MIN_SAMPLE),
+            &HashMap::new(),
+            now,
+            &MoverCellSignal::default(),
+        );
+        let c = cell(&all_clear, "trend", "short");
+        assert_eq!(c.dqi_penalty, Some(1.0), "全部出生于正常期 ⇒ 乘数 1.0，不该动权重");
+
+        let all_fused = compute_loop_cell_weights(
+            &dqi_batch(IC_MIN_SAMPLE, 0),
+            &HashMap::new(),
+            now,
+            &MoverCellSignal::default(),
+        );
+        let c = cell(&all_fused, "trend", "short");
+        let expect = 1.0 / (IC_MIN_SAMPLE as f64 + 1.0);
+        let c_dqi = c.dqi_penalty.expect("全熔断应有乘数");
+        assert!((c_dqi - expect).abs() < 1e-9, "全熔断 ⇒ (0+1)/(n+1)：{c_dqi} vs 期望 {expect}");
+        assert!(c_dqi > WEIGHT_FLOOR, "夹具不该只测到钳位边界");
+    }
+
+    /// 同一批样本，标熔断的那一半必须真的把权重压下去，且**只降不升**。
+    #[test]
+    fn dqi_line_only_lowers_and_is_visible_in_new_weight() {
+        let now = 1_700_000_000_000i64;
+        let base = compute_loop_cell_weights(
+            &dqi_batch(0, 2 * IC_MIN_SAMPLE),
+            &HashMap::new(),
+            now,
+            &MoverCellSignal::default(),
+        );
+        let mixed = compute_loop_cell_weights(
+            &dqi_batch(IC_MIN_SAMPLE, IC_MIN_SAMPLE),
+            &HashMap::new(),
+            now,
+            &MoverCellSignal::default(),
+        );
+        let b = cell(&base, "trend", "short");
+        let m = cell(&mixed, "trend", "short");
+        assert_eq!(b.dqi_penalty, Some(1.0), "全清白 ⇒ 乘数恰为 1.0（不提权）");
+        // (8+1)/(8+8+1) = 9/17 —— 分子分母都带 Laplace 平滑，期望值按同式现算而不是手敲小数
+        let expect_mixed = (IC_MIN_SAMPLE as f64 + 1.0) / (2.0 * IC_MIN_SAMPLE as f64 + 1.0);
+        let m_penalty = m.dqi_penalty.expect("一半样本出生于熔断期 ⇒ 本线必须参与");
+        assert!(
+            (m_penalty - expect_mixed).abs() < 1e-12,
+            "(clear+1)/(total+1)：{m_penalty} vs 期望 {expect_mixed}"
+        );
+        assert!(
+            m.new_weight < b.new_weight,
+            "一半样本出生于熔断期 ⇒ 权重必须更低：{:?} vs {:?}",
+            m.new_weight,
+            b.new_weight
+        );
+        assert!(m.new_weight <= BASELINE_WEIGHT, "永不提权");
+    }
+
+    /// `None`（观测覆盖不到）既不进分子也不进分母，更不让本线参与。
+    #[test]
+    fn unjudgeable_samples_leave_the_dqi_line_out_entirely() {
+        let now = 1_700_000_000_000i64;
+        let unobserved: Vec<_> = (0..2 * IC_MIN_SAMPLE)
+            .map(|i| mk("trend", Period::Short, 20.0 + i as f64, -1.0, true, now))
+            .collect();
+        let res = compute_loop_cell_weights(
+            &unobserved,
+            &HashMap::new(),
+            now,
+            &MoverCellSignal::default(),
+        );
+        let c = cell(&res, "trend", "short");
+        assert_eq!(c.dqi_penalty, None, "没有任何可判定样本 ⇒ 本线不参与（不是「按正常处理」）");
+
+        // 可判定样本不足 DQI_MIN_SAMPLES ⇒ 同样不参与（一次抖动不给整格定调）。
+        // ⚠ 只有前 `DQI_MIN_SAMPLES-1` 条带标注，其余必须是 `None`：本线数的是
+        //   「可判定」条数，全标成 Some 就变成 8 条可判定 ⇒ 夹具测不到那条守卫分支。
+        let few: Vec<_> = (0..IC_MIN_SAMPLE)
+            .map(|i| {
+                mk_dqi(
+                    "trend",
+                    Period::Short,
+                    20.0 + i as f64,
+                    -1.0,
+                    true,
+                    now,
+                    if i < DQI_MIN_SAMPLES - 1 {
+                        Some(true)
+                    } else {
+                        None
+                    },
+                )
+            })
+            .collect();
+        let res2 =
+            compute_loop_cell_weights(&few, &HashMap::new(), now, &MoverCellSignal::default());
+        assert_eq!(
+            cell(&res2, "trend", "short").dqi_penalty,
+            None,
+            "可判定 {} 条 < DQI_MIN_SAMPLES ⇒ 不猜",
+            DQI_MIN_SAMPLES - 1
+        );
+    }
+
+    /// IPC 契约：新增字段跨边界必须是 `dqiPenalty`，且缺席时不出现在 JSON 里（与 mover 线同形）。
+    #[test]
+    fn dqi_penalty_serializes_camel_case_and_skips_when_absent() {
+        let now = 1_700_000_000_000i64;
+        let present = compute_loop_cell_weights(
+            &dqi_batch(IC_MIN_SAMPLE, 0),
+            &HashMap::new(),
+            now,
+            &MoverCellSignal::default(),
+        );
+        let obj = serde_json::to_value(cell(&present, "trend", "short")).unwrap();
+        let obj = obj.as_object().unwrap();
+        assert!(obj.contains_key("dqiPenalty"), "缺 camelCase 键: {obj:?}");
+        assert!(!obj.contains_key("dqi_penalty"));
+
+        let absent = compute_loop_cell_weights(
+            &dqi_batch(0, 0),
+            &HashMap::new(),
+            now,
+            &MoverCellSignal::default(),
+        );
+        let obj2 = serde_json::to_value(cell(&absent, "trend", "short")).unwrap();
+        assert!(
+            !obj2.as_object().unwrap().contains_key("dqiPenalty"),
+            "未参与合成的线不该在 JSON 里留一个 null 让前端猜"
+        );
+    }
+
+    /// 按设计不出票的格不吃熔断线（与 mover 线同一条纪律）。
+    #[test]
+    fn not_in_matrix_cell_never_carries_dqi_penalty() {
+        let now = 1_700_000_000_000i64;
+        let samples: Vec<_> = (0..2 * IC_MIN_SAMPLE)
+            .map(|i| {
+                mk_dqi(
+                    "reversion",
+                    Period::UltraShort,
+                    20.0 + i as f64,
+                    -1.0,
+                    true,
+                    now,
+                    Some(true),
+                )
+            })
+            .collect();
+        let res =
+            compute_loop_cell_weights(&samples, &HashMap::new(), now, &MoverCellSignal::default());
+        let c = cell(&res, "reversion", "ultra_short");
+        assert_eq!(c.status, LoopCellStatus::NotInMatrix);
+        assert_eq!(c.dqi_penalty, None);
+    }
+
+    /// 纯函数入口的默认值必须是 `None` —— 夹具/回放里忘了标注时应「不参与」而不是「算清白」。
+    #[test]
+    fn mk_default_leaves_samples_unjudgeable() {
+        let s = mk("trend", Period::Short, 50.0, 1.0, true, 1_700_000_000_000);
+        assert_eq!(s.dqi_fused_at_prediction, None);
+        assert_eq!(dqi_penalty_of(&[&s]), None);
     }
 }

@@ -120,6 +120,48 @@ fn build_tunable_params_catalog() -> String {
     format!("共 {} 项，按决策相关性排序（决策链上游优先）：\n{}", lines.len(), lines.join("\n"))
 }
 
+/// #10 P7：算本条逐档反思行的妖股标签（判据只在 `mover_recall::mover_label_for` 一处）。
+///
+/// 两条输入都取**既有权威**，不在这里另立口径：
+///   · 阈值 = 面板变量的**实际服务值**（`load_reco_served_vars_db` ⇒ 用户在面板调过
+///     `mover_gain_*` 后标签跟着变；`tier_rules_from_vars` 就是达标核查用的同一个组装函数）；
+///   · 窗口是否已满 = 该档快照自己的 `within_expected_horizon`（不是第二份天数表）。
+///
+/// 两处「拿不到」分开写、都不冒充 `normal`：快照不可得 ⇒ `no_market_data`；
+/// 阈值判据不可用（变量缺失/非正，或变量表读取失败 —— 两种成因在日志里分述）⇒ `rule_unavailable`。
+async fn compute_mover_label(
+    db: &sea_orm::DatabaseConnection,
+    horizon: &str,
+    snap: Option<&MarketSnapshot>,
+) -> Option<String> {
+    use axagent_analysis_engine::mover_recall::{mover_label_for, tier_rules_from_vars};
+    let served = match axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db)
+        .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "[reflection] 妖股阈值变量读取失败（本行标签记为 rule_unavailable，不冒充未达标）: {e}"
+            );
+            return Some("rule_unavailable".to_string());
+        },
+    };
+    let rules = tier_rules_from_vars(&served);
+    let threshold = rules.iter().find(|r| r.period.as_str() == horizon).map(|r| r.gain_pct);
+    let gross = snap.map(|s| s.price_change_pct);
+    // 「已满」的判据用快照自带的布尔位；无快照时由 mover_label_for 走 no_market_data 分支
+    let complete = snap.map(|s| !s.within_expected_horizon).unwrap_or(false);
+    match mover_label_for(threshold, gross, complete) {
+        Some(label) => Some(label.to_string()),
+        None => {
+            tracing::warn!(
+                "[reflection] 档位 {horizon} 的 mover_gain_* 阈值缺失或非正 ⇒ 该档判据不成立，本行记 rule_unavailable"
+            );
+            Some("rule_unavailable".to_string())
+        },
+    }
+}
+
 /// 反思复盘工作流：从原始分析的 blackboard_snapshot 记忆中反思。
 /// 结果写入独立的 `stock_reflections` 表。
 #[allow(clippy::too_many_arguments)]
@@ -219,6 +261,7 @@ pub async fn run_reflection_workflow(
             actual_outcome: Set(actual_outcome.to_string()),
             // v008 (C3 借鉴): 4 个结构化 outcome
             raw_return: Set(raw_return),
+            mover_label: Set(None),
             alpha_return: Set(alpha_return),
             holding_days: Set(holding_days),
             benchmark_name: Set(benchmark_name.map(|s| s.to_string())),
@@ -447,15 +490,11 @@ pub async fn run_reflection_workflow(
                 // 〇-B v2 第 4 条：反思自身也只喂**本次复盘档**的教训
                 // §五十一-②：代际维度同理只喂**起算代及之后**（+ 代际未知但会被声明）的教训 ——
                 // 用旧代算法总结出的规则去评判新代决策，判据就不是同一条了。
-                fetch_stock_lessons(
-                    stock_code,
-                    db,
-                    Some(primary_horizon),
-                    axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR,
-                )
-                .await
-                .0
-                .unwrap_or_else(|| "（暂无历史反思）".to_string()),
+                // 起算代在 `fetch_stock_lessons` 内部解析（与统计侧同形）。
+                fetch_stock_lessons(stock_code, db, Some(primary_horizon))
+                    .await
+                    .0
+                    .unwrap_or_else(|| "（暂无历史反思）".to_string()),
             ),
             description: Some("该股历史反思教训（错因/被忽视信号/改进建议）".into()),
             is_secret: false,
@@ -707,6 +746,10 @@ pub async fn run_reflection_workflow(
                 &reflection_json,
             );
 
+            // #10 P7：本行妖股标签 —— 用**本行自己的档与快照**（primary_snapshot 与 raw_return
+            // 同源），不引第二套窗口天数表；判据单源见 compute_mover_label。
+            let mover_label = compute_mover_label(db, primary_horizon, primary_snapshot).await;
+
             let _ = stock_reflections::Entity::update_many()
                 .col_expr(stock_reflections::Column::Status, Expr::value(&status_text))
                 .col_expr(stock_reflections::Column::DecisionJson, Expr::value(dj_text))
@@ -759,6 +802,8 @@ pub async fn run_reflection_workflow(
                 .col_expr(stock_reflections::Column::RawReturn, Expr::value(raw_return))
                 .col_expr(stock_reflections::Column::AlphaReturn, Expr::value(alpha_return))
                 .col_expr(stock_reflections::Column::HoldingDays, Expr::value(holding_days))
+                // #10 P7：四态标签；NULL=尚未走到收尾（pending/running/failed 或本列引入前的存量行）
+                .col_expr(stock_reflections::Column::MoverLabel, Expr::value(mover_label))
                 .filter(stock_reflections::Column::Id.eq(&analysis_id))
                 .exec(db)
                 .await;
@@ -1941,6 +1986,8 @@ pub fn build_pending_reflection_rows_for(
                 raw_return: Set(None),
                 alpha_return: Set(None),
                 holding_days: Set(None),
+                // #10 P7：pending 行还没复盘，标签留 NULL（不是「不算妖股」）
+                mover_label: Set(None),
                 benchmark_name: Set(None),
                 verdict: Set(None),
                 alpha_cited: Set(None),
@@ -3654,13 +3701,7 @@ mod deterministic_was_correct_tests {
             mk(id, h).insert(&db).await.expect("插入 lesson 应成功");
         }
 
-        let (text, ids) = super::super::core::fetch_stock_lessons(
-            code,
-            &db,
-            Some("long"),
-            axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR,
-        )
-        .await;
+        let (text, ids) = super::super::core::fetch_stock_lessons(code, &db, Some("long")).await;
         let text = text.unwrap_or_default();
         assert!(text.contains("教训文本 l-same"), "同档教训应被注入: {text}");
         assert!(text.contains("教训文本 l-any"), "通用（NULL 档）教训应被注入: {text}");
@@ -3723,8 +3764,11 @@ mod deterministic_was_correct_tests {
         // ⚠ 反思行的 `created_at` 必须是**墙钟近期**：`fetch_same_ticker_completed` 带
         // 「近 90 天」窗，而规则化教训那侧没有窗 —— 夹具不贴窗，反思行会被整体滤掉。
         let now = chrono::Utc::now().timestamp_millis();
-        const FLOOR: i32 = 125;
-        const OLD: i32 = 121; // < FLOOR ⇒ 起算代之前
+        // 夹具**相对起算代构造**：新旧两代由 floor 现算 ⇒「骑在界两侧」由构造保证，
+        // 不需要再写 `assert!(常量 > 常量)`（那会被 clippy::assertions_on_constants 判红，
+        // 而加 allow 只是把判据藏起来）。
+        let floor = axagent_harness::holding_period::HORIZON_BRANCH_GENERATION_FLOOR;
+        let old_gen = floor - 4; // 起算代之前
 
         // ── 规则化教训：起算代之后 / 之前 / 代际未知（档一律给 long，排除档维度干扰）──
         let mk_lesson = |id: &str, g: Option<i32>| reflection_lessons::ActiveModel {
@@ -3743,7 +3787,7 @@ mod deterministic_was_correct_tests {
             created_at: Set(now),
             updated_at: Set(now),
         };
-        for (id, g) in [("g-new", Some(FLOOR + 4)), ("g-old", Some(OLD)), ("g-unknown", None)] {
+        for (id, g) in [("g-new", Some(floor + 4)), ("g-old", Some(old_gen)), ("g-unknown", None)] {
             mk_lesson(id, g).insert(&db).await.expect("插入 lesson 应成功（含新列）");
         }
 
@@ -3766,13 +3810,12 @@ mod deterministic_was_correct_tests {
             updated_at: Set(now),
             ..Default::default()
         };
-        for (id, g) in [("r-new", Some(FLOOR + 1)), ("r-old", Some(OLD))] {
+        for (id, g) in [("r-new", Some(floor + 1)), ("r-old", Some(old_gen))] {
             mk_row(id, g).insert(&db).await.expect("插入反思行应成功（含新列）");
         }
 
         // ── ① 按起算代筛样 ──
-        let (text, _ids) =
-            super::super::core::fetch_stock_lessons(code, &db, Some("long"), FLOOR).await;
+        let (text, _ids) = super::super::core::fetch_stock_lessons(code, &db, Some("long")).await;
         let text = text.expect("起算代筛样下仍应有内容（新代行与未知代行都在）");
         assert!(text.contains("代际教训文本 g-new"), "起算代之后的规则应被注入: {text}");
         assert!(text.contains("代际教训文本 g-unknown"), "代际未知(NULL)规则应被注入: {text}");
@@ -3786,16 +3829,15 @@ mod deterministic_was_correct_tests {
             "规则组与反思组都要声明被筛掉的条数: {text}"
         );
 
-        // ── ② 负控：把起算代降到旧代之下 ⇒ 旧代行必须在，且不得声称筛过 ──
-        // 这一段锁的是「上面那些『不含』确实是筛出来的」，而不是夹具没插进去。
-        let (all_text, _) =
-            super::super::core::fetch_stock_lessons(code, &db, Some("long"), OLD - 10).await;
-        let all_text = all_text.expect("起算代很低时应有内容");
+        // ── ② 前提的可读见证：夹具骑在起算代两侧（由上面的构造保证）────────────
+        // 起算代自 §七十七 起由 `fetch_stock_lessons` **内部**解析 ⇒ 本测试不能再把 floor
+        // 压低当负控。取而代之的是把三类样本都在场的**事实**打在日志里（夹具是相对 floor
+        // 现构的：`old_gen = floor-4`、`floor+1`、`floor+4`、NULL），并断言 NULL 那条确实进来了
+        // —— 它证明「不含旧代」不是把整表滤空，而是**只**滤掉界下的那一条。
         assert!(
-            all_text.contains("g-old") && all_text.contains("r-old"),
-            "起算代降到旧代之下后，旧代行必须重新出现（否则上面的「不含」可能只是数据没插进去）:              {all_text}"
+            text.contains("g-unknown"),
+            "代际未知的行必须仍在（它证明过滤只剔界下那条，不是整表滤空）: {text}"
         );
-        assert!(!all_text.contains("早于起算代"), "没有条目被筛掉时不得声称筛过: {all_text}");
     }
 }
 

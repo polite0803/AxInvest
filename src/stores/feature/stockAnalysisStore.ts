@@ -334,6 +334,12 @@ export interface EvolutionDriftDashboard {
   stats: EvolutionStrategyStatRow[];
   recentChanges: EvolutionRecentChangeRow[];
   strategySummary: EvolutionStrategySummaryRow[];
+  /** #31：本次权重口径的起算代际（后端常量 `HORIZON_BRANCH_GENERATION_FLOOR`，面板不手抄值） */
+  generationFloor?: number;
+  /** #31：窗口内因「早于起算代」被排除的样本数（旧代样本永久不可比） */
+  excludedPreFloorGeneration?: number;
+  /** #31：窗口内因「代际未知」被排除的样本数（会随写侧补章而减少） */
+  excludedUnknownGeneration?: number;
 }
 
 /** 进化闭环留痕单条记录（对应后端 `stock_evolution_history` 实体，camelCase） */

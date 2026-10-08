@@ -7,7 +7,7 @@
 
 pub use axagent_harness::workflow_types::{
     ExecutionStatus, NodeExecutionRecord, NodeHeartbeatEvent, NodeTimeoutWarningEvent,
-    PartialResultEvent,
+    PartialResultEvent, SubWorkflowOrigin,
 };
 // 错误上下文:重命名后的 harness 类型,rt-workflow 内部保留 ErrorContext 别名以兼容
 use axagent_harness::workflow_types::WorkflowErrorContext;
@@ -282,7 +282,19 @@ pub struct ExecutionState {
     pub variables: std::collections::HashMap<String, serde_json::Value>,
     pub node_records: Vec<NodeExecutionRecord>,
     pub current_node_id: Option<String>,
+    /// ⚠ **同名字段两种含义（B-2a 普查实测，2026-10-06）**：真实执行状态里本字段 = 父执行 id
+    /// （`engine/mod.rs` 从 `RunOptions` 拷入）；但**每节点**的 `exec_ctx` 实例里它被引擎赋成
+    /// **本执行自己的 id**（供容器执行器查 `execution_workflows`，因为 per-node 的 `execution_id`
+    /// 是 `node_{uuid}` 不可用）。⇒ 需要「父执行」语义的地方**不得**读本字段，改读
+    /// 下面的 [`ExecutionState::sub_workflow_origin`]。
     pub parent_execution_id: Option<String>,
+    /// 本子执行的归属（父执行 id + 父图里发起它的 SubWorkflow 节点 id）。顶层执行恒 `None`。
+    /// 由 `run_workflow` 从 `RunOptions::sub_workflow_origin` 拷入，供所有 `StepProgressEvent`
+    /// 构造点读取 —— 归属**随每条事件走**，不用「补发一条子执行已启动事件」：子执行 id 在回调
+    /// 内部才生成、而 `spawn_blocking` 立即启动 ⇒ 启动事件可能排在子执行头几条节点事件之后，
+    /// 乱序不可消除（详见 PLAN `PLAN-four-horizon-workflow-alignment.md` §八十六(5)）。
+    #[serde(default)]
+    pub sub_workflow_origin: Option<SubWorkflowOrigin>,
     /// 按节点名称索引的历史输出，供表达式引擎 $node["NodeName"] 引用
     #[serde(skip, default)]
     pub node_outputs: std::collections::HashMap<String, serde_json::Value>,
@@ -309,6 +321,7 @@ impl ExecutionState {
             node_records: Vec::new(),
             current_node_id: None,
             parent_execution_id: None,
+            sub_workflow_origin: None,
             callbacks: None,
             compiled_prompts: None,
             cancel_token: None,
@@ -349,6 +362,7 @@ impl ExecutionState {
             node_records: snapshot.node_records,
             current_node_id: snapshot.current_node_id,
             parent_execution_id: snapshot.parent_execution_id,
+            sub_workflow_origin: snapshot.sub_workflow_origin,
             callbacks: None,
             compiled_prompts: None,
             cancel_token: None,
@@ -475,6 +489,9 @@ pub struct ExecutionStateSnapshot {
     pub node_outputs: HashMap<String, serde_json::Value>,
     pub current_node_id: Option<String>,
     pub parent_execution_id: Option<String>,
+    /// 子执行归属（B-2a 新增）。`default` = 兼容本字段引入前已持久化的快照 JSON。
+    #[serde(default)]
+    pub sub_workflow_origin: Option<SubWorkflowOrigin>,
     pub total_time_ms: u64,
     pub created_at: i64,
     pub updated_at: i64,
@@ -494,6 +511,7 @@ impl From<&ExecutionState> for ExecutionStateSnapshot {
             node_outputs: state.node_outputs.clone(),
             current_node_id: state.current_node_id.clone(),
             parent_execution_id: state.parent_execution_id.clone(),
+            sub_workflow_origin: state.sub_workflow_origin.clone(),
             total_time_ms: state.total_time_ms,
             created_at: state.created_at,
             updated_at: state.updated_at,
@@ -637,5 +655,35 @@ mod tests {
         assert_eq!(restored.node_records.len(), 1);
         assert_eq!(restored.node_records[0].node_id, "node-1");
         assert_eq!(restored.node_records[0].status, "completed");
+    }
+
+    /// B-2a：子执行归属必须**穿过快照往返**存活。恢复执行（resume / recover）走的是
+    /// `from_snapshot`，丢了它会让恢复后的子执行事件重新变成「无父可归」——
+    /// 界面形态是「暂停再恢复后，子节点又消失了」。
+    #[test]
+    fn sub_workflow_origin_survives_snapshot_round_trip() {
+        let mut state = make_test_state();
+        assert!(
+            state.sub_workflow_origin.is_none(),
+            "new() 不得自带归属：顶层执行必须是 None，否则普通节点会被当成子执行事件"
+        );
+        state.sub_workflow_origin = Some(SubWorkflowOrigin {
+            parent_execution_id: "p-1".to_string(),
+            parent_node_id: "sw-tier-mid".to_string(),
+        });
+
+        let restored = ExecutionState::from_snapshot(ExecutionStateSnapshot::from(&state));
+        let origin = restored.sub_workflow_origin.expect("from_snapshot 必须带回归属");
+        assert_eq!(origin.parent_execution_id, "p-1");
+        assert_eq!(origin.parent_node_id, "sw-tier-mid");
+
+        // 本字段引入前落盘的快照没有这个键 ⇒ 必须解析成 None，而不是整份快照读失败。
+        let mut legacy = serde_json::to_value(ExecutionStateSnapshot::from(&make_test_state()))
+            .expect("快照可序列化");
+        legacy.as_object_mut().expect("快照是对象").remove("sub_workflow_origin");
+        let json = serde_json::to_string(&legacy).expect("旧快照可序列化");
+        let old = ExecutionStateSnapshot::from_json(&json)
+            .expect("旧快照缺 sub_workflow_origin 键时仍应解析成功");
+        assert!(old.sub_workflow_origin.is_none());
     }
 }

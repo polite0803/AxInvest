@@ -9343,7 +9343,6 @@
       "arrayVar": "متغير مصفوفة",
       "assertion": "تأكيدات",
       "assertions": "تأكيدات",
-      "asyncExecution": "تنفيذ غير متزامن",
       "atomicSkill": "مهارة ذرية",
       "authNone": "بدون مصادقة",
       "authType": "نوع المصادقة",
@@ -10352,6 +10351,8 @@
     "status": "الحالة",
     "duration": "المدة",
     "subWorkflow": "سير العمل الفرعي",
+    "subFlowLive": "تقدّم التنفيذ الفرعي المباشر ({{count}})",
+    "subFlowPending": "لم تصل أحداث التنفيذ الفرعي بعد",
     "executionId": "معرف التنفيذ",
     "workflowId": "معرف سير العمل",
     "parentExecution": "معرف التنفيذ الأصلي"
@@ -15452,7 +15453,8 @@
         "a-market-analyst": "Technical Analyst",
         "a-sector": "Sector Analyst",
         "a-lockup": "Lockup Monitor",
-        "a-policy": "Policy Analyst"
+        "a-policy": "Policy Analyst",
+        "value-investor": "تقييم القيمة"
       },
       "analystComplete": "اكتمل التحليل",
       "bearAnalyst": "Bear",
@@ -15521,7 +15523,8 @@
         "research-mgr": "توليف البحث",
         "trader": "خطة التداول",
         "portfolio-mgr": "القرار النهائي",
-        "rule-check": "Rule Check"
+        "rule-check": "Rule Check",
+        "value-investor": "تقييم القيمة"
       },
       "analystReports": "Analyst Reports",
       "bullBearDebate": "Bull-Bear Debate",
@@ -15656,7 +15659,6 @@
         "signals": "Signals",
         "keylevels": "Key Levels",
         "recommender": "Recommender",
-        "indicators": "Indicators",
         "strategyParams": "Strategy Params",
         "strategyGates": "Strategy Gates & Filters",
         "strategyConfidence": "Confidence Components",
@@ -15672,10 +15674,14 @@
         "portfolioMgrRisk": "حدود تصنيف المخاطر (portfolio-mgr)",
         "simulation": "محاكاة مونت كارلو",
         "refCodes": "الأوراق المرجعية القطاعية",
-        "valuationModel": "معلمات نموذج التقييم (DCF/جراهام)"
+        "valuationModel": "معلمات نموذج التقييم (DCF/جراهام)",
+        "indicatorsDailyWindows": "نوافذ المؤشرات (السلسلة اليومية فقط)",
+        "indicatorsThresholds": "عتبات المؤشرات (كل السلاسل)"
       },
       "note": {
-        "portfolioMgrHorizon": "ابتداءً من v125، تُؤخذ قيم وقف الخسارة/jني الأرباح/المركز للأفق الرئيسي من فرع الأفق المختار. لا تشارك المستويات النسبية الثمانية ومعامِلا التقلب في هذه المجموعة إلا في مسار التراجع (أساس التقلب غير متاح لهذا المستوى، أو الفروع الأربعة كلها بلا ناتج) وكسقف للمركز؛ بينما يبقى كلٌ من قوة انكماش القيمة القبلية κ وميزانية المخاطر R ساريين في المسار الرئيسي."
+        "portfolioMgrHorizon": "ابتداءً من v125، تُؤخذ قيم وقف الخسارة/jني الأرباح/المركز للأفق الرئيسي من فرع الأفق المختار. لا تشارك المستويات النسبية الثمانية ومعامِلا التقلب في هذه المجموعة إلا في مسار التراجع (أساس التقلب غير متاح لهذا المستوى، أو الفروع الأربعة كلها بلا ناتج) وكسقف للمركز؛ بينما يبقى كلٌ من قوة انكماش القيمة القبلية κ وميزانية المخاطر R ساريين في المسار الرئيسي.",
+        "indicatorsDailyWindows": "منذ v137 تُوصَل فعليًا بعقدة التقييم اليومي. نوافذ آفاق الاحتفاظ الأربعة (فائق القصر/قصير/متوسط/طويل) تُشتق من مدة الاحتفاظ ولا تتأثر هنا؛ ربط قيم اللوحة بالآفاق يعيد صهر النوافذ الأربع في نافذة واحدة، لذا ترفضها الأداة بصريح الخطأ.",
+        "indicatorsThresholds": "معامل الانحراف المعياري لبولنغر ونسبتا زيادة/نقصان التداول لا تتغيران مع فترة الشمعة؛ فالسلسلة اليومية والآفاق الأربعة كلها تستخدم هذه القيم. يجب أن تكون نسبة الزيادة أكبر من نسبة النقصان، وإلا تتوقف الأداة بصريح الخطأ بدل إشارة مقلوبة."
       },
       "valuation": {
         "perpetualGrowth": "معدل النمو الدائم",
@@ -15959,6 +15965,7 @@
       "tagLabel": "الموثوقية محدودة",
       "passiveWatch": "هذا «الانتظار» تخفيض سلبي بسبب نقص البيانات، وليس حكماً هبوطياً",
       "gapsNotDegraded": "توجد فجوات في البيانات لكن لم يتم تفعيل التخفيض: الاتجاه غير متأثر",
+      "dqiFuse": "لم تبلغ جودة البيانات الفئة A على مدى {{streak}} دورة متتالية وتم تفعيل القاطع: شُدِّد سقف الثقة إلى أكثر المستويات تحفظًا",
       "collapseLabel": "انهيار أوزان العوامل",
       "gapReason": "{{count}} فجوة بيانات",
       "showGaps": "عرض الفجوات",
@@ -16259,7 +16266,8 @@
         "missing_risk_assessment": "Risk assessment missing, add risk control steps",
         "high_error_rate": "{{count}} error patterns detected, reduce errors",
         "manual_trigger": "Manual trigger: {{reason}}"
-      }
+      },
+      "generationScope": "نطاق الأوزان: من الجيل {{floor}} (تم استبعاد {{preFloor}} من أجيال أقدم و{{unknown}} مجهولة)"
     },
     "toolLabel": {
       "get_stock_quote": "Stock Quote",
@@ -16666,6 +16674,13 @@
       "horizonAuto": "حسب الفئة الرئيسية",
       "horizonUnknown": "أفق غير معروف",
       "colHorizon": "أفق المراجعة",
+      "colMover": "مضارب (هذا الأفق)",
+      "moverYes": "ورقة مضاربية",
+      "moverNo": "لم يتحقق المعيار",
+      "moverWindowIncomplete": "لم تكتمل الفترة",
+      "moverNoMarketData": "لا توجد بيانات سوق",
+      "moverRuleUnavailable": "المعيار غير متاح",
+      "moverNotReflected": "لم تُراجع",
       "horizonReviewTag": "أفق هذه المراجعة",
       "horizonNoNarration": "حكم موضوعي فقط دون سرد مراجعة لهذا الأفق",
       "horizonStatusLabel": "الحالة: ",
@@ -17694,7 +17709,8 @@
     "unitBillion": " مليار",
     "unitMillion": " مليون",
     "unitCrore": " كرور",
-    "unitLakh": " لاخ"
+    "unitLakh": " لاخ",
+    "horizonScoringWindows": "نوافذ مؤشرات هذا الأفق: {{scale}} · MA {{ma}} · RSI {{rsi}} · MACD {{macd}} · بولنغر {{boll}} · التداول {{vol}}"
   },
   "pipeline": {
     "title": "خط أنابيب الأسهم",

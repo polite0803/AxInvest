@@ -334,8 +334,7 @@ subWorkflow
   config: {
     "sub_workflow_id": "string (子工作流 ID，必填)",
     "input_mapping": { "input_name": "var_path" },
-    "output_var": "string",
-    "is_async": true | false
+    "output_var": "string"
   }
 
 documentParser
@@ -977,7 +976,6 @@ fn convert_llm_response(
                     sub_workflow_id: "".to_string(),
                     input_mapping: std::collections::HashMap::new(),
                     output_var: "result".to_string(),
-                    is_async: false,
                     sub_graph: None,
                 });
                 WorkflowNode::SubWorkflow(SubWorkflowNode { base, config: sub_config })

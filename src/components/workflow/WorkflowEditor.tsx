@@ -2317,7 +2317,6 @@ function getDefaultNodeConfig(nodeType: string): Record<string, unknown> {
         subWorkflowId: "",
         inputMapping: {},
         outputVar: "",
-        isAsync: false,
       };
     case "workflowRef":
       return {
@@ -2465,7 +2464,6 @@ function createWorkflowNode(
           subWorkflowId: "",
           inputMapping: {},
           outputVar: "",
-          isAsync: false,
         },
       };
     case "workflowRef":

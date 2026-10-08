@@ -67,7 +67,7 @@ const SCOPE = [
 const KNOWN_FINDINGS = [
   {
     file: "src-tauri/crates/analysis-engine/src/evidence_citation.rs",
-    ids: ["a-technical", "a-macro"],
+    ids: ["a-technical", "a-macro", "a-news"],
     // 本门首读实测（2026-10-05）：这两个 id **不在**种子权威 base 表（10 个）里，
     // 表里对应名目是 `a-market-analyst` / `a-policy`；它们与专家短名写在同一个 match 的或侧
     // （`"a-technical" | "market-analyst" =>`）= 两套拼法共存。
@@ -77,7 +77,10 @@ const KNOWN_FINDINGS = [
     // 五个【表内现役】 id 一个都没登记、门却全绿 ⇒ 那种「看不见表内缺口」的形态已被测试接管。
     // 剩下的豁免理由只有一条：删这两臂要先普查「谁往 citation.analystId 写值」
     // （`backtest_feedback.rs` 的测试夹具也用 `a-technical`，那是另一条链的 id 空间）。
-    owner: "citation analystId 名目收编（普查写值方后删旧臂）；与 B2-2 建点批无关",
+    // 2026-10-06（v133）追加 `a-news`：它随 B2-2 从权威表退役（公告通道由 a-catalyst 承载），
+    // 但**旧快照回放**（≤v132 的 citation.analystId 写的是节点 id `a-news`）仍需要它的
+    // 显示名映射 —— 与 a-technical/a-macro 同族：历史 id 的显示名兼容，不是待修的新缺口。
+    owner: "citation analystId 名目收编（普查写值方后删旧臂）；a-news 项为 v133 历史回放显示名兼容",
   },
 ];
 
@@ -208,7 +211,10 @@ function selftest() {
     console.log(`${cond ? "PASS" : "FAIL"} ${name}${cond ? "" : ` ⇒ ${JSON.stringify(got)}`}`);
     if (!cond) fails += 1;
   };
-  chk("权威 base 集非空（推导成功）", bases.size >= 10, [...bases]);
+  // v133（B2-2）：`a-news` 已从基表摘除（公告通道由 a-catalyst 承载）⇒ 权威 base 集 = 9 个
+  // `a-*`（value-investor 不在基表、无 `a-` 前缀，不进本集；其带档实例由 R3 的登记面判据覆盖）。
+  // 下限仍是「防抽取面被打空」的形态哨，不是精确值 —— 表再加成员不判红（那是 Rust 侧自证的事）。
+  chk("权威 base 集非空（推导成功）", bases.size >= 9, [...bases]);
   const badBase = 'let x = "a-not-an-analyst";';
   chk("R1 抓到不在权威集的 base", scan(badBase, bases).r1.includes("a-not-an-analyst"), scan(badBase, bases).r1);
   const badSuffix = 'let y = "a-sentiment--mid";';
@@ -274,7 +280,8 @@ function main() {
   const argv = process.argv.slice(2);
   if (argv.includes("--selftest")) return selftest();
   const bases = authoritativeBases();
-  if (bases.size < 10) {
+  // v133：a-news 摘除后基表 9 个 —— 下限判据同 selftest（防抽取面被打空的形态哨）。
+  if (bases.size < 9) {
     console.error(`推导失败：权威 base 集只拿到 ${bases.size} 个（种子分析师表形态变了？）`);
     process.exit(1);
   }

@@ -560,6 +560,21 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
   const [detailRecord, setDetailRecord] = useState<NodeExecutionRecord | null>(null);
   const [subExecutionDetail, setSubExecutionDetail] = useState<ExecutionStatusResponse | null>(null);
   const [subExecutionLoading, setSubExecutionLoading] = useState(false);
+  /** 打开某个子执行的详情抽屉。子执行 id 有两个来源：live 期来自 `subFlow` 桶，
+   *  事后来自节点输出里的 `_child_execution_id`（两条路共用本函数，避免拼写分叉）。 */
+  const openSubExecution = async (childId: string) => {
+    setSubExecutionLoading(true);
+    try {
+      const result = await invoke<ExecutionStatusResponse>("get_workflow_execution_status", {
+        executionId: childId,
+      });
+      setSubExecutionDetail(result);
+    } catch {
+      setSubExecutionDetail(null);
+    } finally {
+      setSubExecutionLoading(false);
+    }
+  };
   // ── Trace 快照状态 ──
   const [traceExpanded] = useState(false);
   const recentTraces = useTracerStore((s) => s.traces);
@@ -661,6 +676,7 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
   const stepBreakpoint = useWorkEngineStore((s) => s.stepBreakpoint);
   const getStatus = useWorkEngineStore((s) => s.getStatus);
   const viewExecution = useWorkEngineStore((s) => s.viewExecution);
+  const subFlow = useWorkEngineStore((s) => s.subFlow);
   const loadHistory = useWorkEngineStore((s) => s.loadHistory);
   const pauseRun = useWorkEngineStore((s) => s.pause);
   const resumeRun = useWorkEngineStore((s) => s.resume);
@@ -1777,27 +1793,61 @@ export function DebugPanel({ workflowId }: DebugPanelProps) {
                         size="small"
                         icon={<EyeOutlined />}
                         loading={subExecutionLoading}
-                        onClick={async () => {
+                        onClick={() => {
                           const childId = (detailRecord.output as Record<string, unknown>)._child_execution_id;
                           if (!childId || typeof childId !== "string") { return; }
-                          setSubExecutionLoading(true);
-                          try {
-                            const result = await invoke<ExecutionStatusResponse>(
-                              "get_workflow_execution_status",
-                              { executionId: childId },
-                            );
-                            setSubExecutionDetail(result);
-                          } catch {
-                            setSubExecutionDetail(null);
-                          } finally {
-                            setSubExecutionLoading(false);
-                          }
+                          void openSubExecution(childId);
                         }}
                       >
                         {t("workflow.debug.viewSubExecution")}
                       </Button>
                     )}
                   </Space>
+                  {
+                    /* 子执行实时进度（B-2a）。缺这段之前，子执行跑的整段时间里父面板只知道
+                      「这个节点在忙」，里面每个节点的状态全被前端按 execution_id 丢掉。 */
+                  }
+                  {(() => {
+                    const buckets = Object.values(subFlow).filter(
+                      (b) => b.parentNodeId === detailRecord.nodeId,
+                    );
+                    if (buckets.length === 0) {
+                      return detailRecord.status === "running"
+                        ? (
+                          <Text style={{ fontSize: 11 }} type="secondary">
+                            {t("debugPanel.subFlowPending")}
+                          </Text>
+                        )
+                        : null;
+                    }
+                    return (
+                      <div style={{ marginTop: 4 }}>
+                        <Text style={{ fontSize: 11 }} type="secondary">
+                          {t("debugPanel.subFlowLive", { count: buckets.length })}
+                        </Text>
+                        {buckets.map((b) => (
+                          <div key={b.childExecutionId} style={{ marginTop: 2 }}>
+                            <Space size={4} wrap>
+                              <Button
+                                type="link"
+                                size="small"
+                                icon={<EyeOutlined />}
+                                loading={subExecutionLoading}
+                                onClick={() => void openSubExecution(b.childExecutionId)}
+                              >
+                                {b.childExecutionId.slice(0, 8)}
+                              </Button>
+                              {Object.entries(b.nodeStatuses).map(([nid, st]) => (
+                                <Tag key={nid} color={statusColor(st)}>
+                                  {nid}
+                                </Tag>
+                              ))}
+                            </Space>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </Descriptions.Item>
               )}
             </Descriptions>

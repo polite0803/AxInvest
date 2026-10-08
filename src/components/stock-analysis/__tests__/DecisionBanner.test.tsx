@@ -149,6 +149,55 @@ describe("DecisionBanner", () => {
     expect(screen.getByText("stockAnalysis.horizonScoreFallbackHint")).toBeTruthy();
   });
 
+  it("逐档「本档实际几根」成句上屏：有回显就印尺度+窗口，没有回显就不渲染该行（v138 裁定 3）", () => {
+    // 为什么这条要进门：v136 起四档各自按尺度取数、按该档窗口计划出指标，但界面只有分数 ⇒
+    // 「这一档算得粗」与「这一档观点不同」同形。短/中/长三档的根数按公式本就是同一组
+    // （差别在 2 周 / 2 月 / 2 季）⇒ 只有把**根数与尺度并列**才读得出来。
+    // 断言面分两层：① 传进去的必须是该档自己的回显值（不是日线那组、不是常量）；
+    //                ② 旧代行（无回显）不得被渲染成 0 或空表 —— 那是把「没有这一项」伪装成「值为 0」。
+    storeState.decision = {
+      action: "BUY",
+      positionPct: 10.0,
+      reasoning: "技术面突破",
+      riskLevel: "中",
+      confidence: 0.8,
+      decisionsByHorizon: {
+        // 超短档：早于 v138 的存量行 —— 没有窗口回显
+        ultraShort: { action: "BUY", positionPct: 10, confidence: 60 },
+        // 中线档：按月线 + 该档窗口计划算出来的那组（产端 = IndicatorWindows 回显）
+        mid: {
+          action: "HOLD",
+          positionPct: 5,
+          confidence: 55,
+          scoringScale: "monthly",
+          scoringWindows: {
+            maPeriods: [2, 6],
+            macdFast: 2,
+            macdSlow: 3,
+            macdSignal: 2,
+            rsiPeriods: [2],
+            bollPeriod: 2,
+            volumeLookback: 2,
+          },
+        },
+      },
+    };
+    storeState.stockCode = "600519";
+    render(
+      <MemoryRouter>
+        <DecisionBanner />
+      </MemoryRouter>,
+    );
+    // 默认档（超短）是旧代行 ⇒ 整行不渲染，且不得出现「MA 0」「0/0」这类补零形态
+    expect(screen.queryByText(/stockAnalysis\.horizonScoringWindows/)).toBeNull();
+    fireEvent.click(screen.getByText("stockAnalysis.timeHorizonMid"));
+    expect(
+      screen.getByText(
+        "stockAnalysis.horizonScoringWindows|scale=monthly,ma=2/6,rsi=2,macd=2/3/2,boll=2,vol=2",
+      ),
+    ).toBeTruthy();
+  });
+
   it("某路分支未产出 ⇒ 该档 Tab 整个消失（显式缺席，不补占位行）", () => {
     storeState.decision = {
       action: "BUY",

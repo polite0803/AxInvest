@@ -1400,6 +1400,7 @@ impl NodeExecutorTrait for AgentExecutor {
                         total_nodes: 0,
                         completed_nodes: 0,
                         execution_id: Some(context.execution_id.clone()),
+                        sub_workflow_origin: context.sub_workflow_origin.clone(),
                         error: None,
                         error_code: None,
                         output: Some(serde_json::json!(stream_content)),

@@ -63,7 +63,13 @@ pub fn leg_signal(factor: &str, in_: &Value) -> Option<f64> {
             } else {
                 -0.7
             };
-            let modulated = match num(in_, "rsi14") {
+            // RSI 键名 #41（片 B）从 `rsi14` 改成中立的 `rsi`：v136 起按档尺度的评分节点
+            // 喂进来的不再是「14 周期」那个命名槽，而是 `scaleMomentum.value`
+            // （周期 = 该档窗口计划算出来的那一个）。旧键名在月线/季节点上是**假读数**：
+            // 命名槽按数值认领，档位周期不落进 {6,12,14,24} 时它停在初值 50.0，
+            // 而 50.0 恰好命中下面的「健康 +0.2」区间 ⇒ 每一档都被无谓地抬高 0.2。
+            // 调制区间本身**不随尺度缩**（RSI 是 0-100 有界统计量，§九十六(2) 同一裁定）。
+            let modulated = match num(in_, "rsi") {
                 Some(rsi) if (50.0..=75.0).contains(&rsi) => base + 0.2,
                 Some(rsi) if rsi > 75.0 => base - 0.2,
                 _ => base,
@@ -193,7 +199,7 @@ mod tests {
                 name,
                 leg_signal(
                     "momentumSignal",
-                    &json!({ "macdDif": dif, "macdDea": dea, "rsi14": rsi }),
+                    &json!({ "macdDif": dif, "macdDea": dea, "rsi": rsi }),
                 ),
                 want,
             );
@@ -205,7 +211,7 @@ mod tests {
             0.7,
         );
         // 缺 MACD ⇒ 缺席而不是 0
-        assert_eq!(leg_signal("momentumSignal", &json!({ "rsi14": 60.0 })), None);
+        assert_eq!(leg_signal("momentumSignal", &json!({ "rsi": 60.0 })), None);
     }
 
     #[test]
@@ -308,7 +314,7 @@ mod tests {
                 "本模块实现了 {f} 但来源表没有"
             );
             let inputs = json!({
-                "macdDif": 1.0, "macdDea": 0.5, "rsi14": 60.0, "totalScore": 60.0,
+                "macdDif": 1.0, "macdDea": 0.5, "rsi": 60.0, "totalScore": 60.0,
                 "catalystLevel": "L2业绩拐点级", "pePercentile": 20.0, "fScore": 7.0,
                 "consensusEps": 3.0, "latestEps": 2.0, "pmi": 51.0,
                 "lockupFloatRatio": 0.02, "industryRankPercentile": 70.0, "sealRate": 0.7,

@@ -30,11 +30,12 @@
 use axagent_analysis_engine::hit_rate_backtest::{
     HitRateReport, PickValidation, build_pick_validation, compute_hit_rate_report,
 };
+use axagent_analysis_engine::recommender::RECO_GENERATION_FLOOR;
 use axagent_analysis_engine::recommender::types::RecoPick;
 use axagent_entities::decision_validations;
 use axagent_entities::reco_picks;
 use chrono::Utc;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect, Set};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::State;
@@ -83,6 +84,44 @@ pub struct RunDecisionBacktestResponse {
     pub skipped_count: usize,
     /// 数据源（"eastmoney" | "sina" | "xueqiu" | "fallback_seed"）
     pub data_source: String,
+    /// #49：本次报告分母的**起算代际**（= `RECO_GENERATION_FLOOR`）
+    pub generation_floor: i32,
+    /// #49：因「早于起算代」被排除出分母的验证记录数（旧代样本，永久不可比）
+    pub excluded_pre_floor_generation: usize,
+    /// #49：因「代际未知」被排除出分母的验证记录数（pick 无 `reco_version`，会随写侧补章而减少）
+    pub excluded_unknown_generation: usize,
+}
+
+/// #49 读侧筛样的**唯一判据**：按荐股代际把样本分成「进分母」与两类排除。
+///
+/// 入参是每条验证记录所 join 到的 `reco_picks.reco_version`（`None` = 归属未知，
+/// 含「pick 行已不存在」的孤儿），返回 `(进分母的下标, 早于起算代, 代际未知)`。
+///
+/// 两类排除**分开计数**是刻意的：合成一个数就看不出处置差异 —— 前者永久不可比，
+/// 后者会随写侧补章而减少（口径同 §七十五 的权重窗口）。
+///
+/// 筛的是**下限** [`RECO_GENERATION_FLOOR`]，不是「等于当前版」：等号会让每次换代把
+/// 整个窗口清零（§五十一-② 已裁过一次，规则原文见 `holding_period.rs`）。
+fn screen_by_reco_generation(
+    versions: &[Option<i32>],
+    generation_floor: i32,
+) -> (Vec<usize>, usize, usize) {
+    let mut kept = Vec::new();
+    let mut pre_floor = 0usize;
+    let mut unknown = 0usize;
+    for (idx, version) in versions.iter().enumerate() {
+        match version {
+            Some(v) if *v >= generation_floor => kept.push(idx),
+            Some(_) => pre_floor += 1,
+            None => unknown += 1,
+        }
+    }
+    debug_assert_eq!(
+        kept.len() + pre_floor + unknown,
+        versions.len(),
+        "三类必须构成全集（漏一类 = 静默丢样本）"
+    );
+    (kept, pre_floor, unknown)
 }
 
 /// 跑决策回测 —— 历史回放回测
@@ -148,6 +187,9 @@ pub(crate) async fn run_decision_backtest_inner(
             written_count: 0,
             skipped_count: 0,
             data_source: "none".to_string(),
+            generation_floor: RECO_GENERATION_FLOOR,
+            excluded_pre_floor_generation: 0,
+            excluded_unknown_generation: 0,
         });
     }
 
@@ -156,6 +198,9 @@ pub(crate) async fn run_decision_backtest_inner(
 
     // ── 2-3. 拉 K 线 + 构建 PickValidation ──
     let mut validations: Vec<PickValidation> = Vec::new();
+    // #49：与 `validations` **按下标对齐**的荐股代际（`reco_picks.reco_version`）。
+    // 只在下面 `Ok(...)` 分支里与 validations 同处 push ⇒ 两者长度恒等。
+    let mut versions: Vec<Option<i32>> = Vec::new();
     let mut skipped = 0usize;
     let mut data_source = "unknown".to_string();
 
@@ -193,6 +238,7 @@ pub(crate) async fn run_decision_backtest_inner(
                     if data_source == "unknown" {
                         data_source = src;
                     }
+                    versions.push(pick_model.reco_version);
                     validations.push(validation);
                 },
                 Err(e) => {
@@ -210,6 +256,9 @@ pub(crate) async fn run_decision_backtest_inner(
     }
 
     // ── 4. 写库（dry_run=false 时）──
+    // 写侧**不按代际筛**：旧代/代际未知的 pick 照样要落 T+N 结果（原始事实与统计分母
+    // 是两回事，筛这里会让 `stock_analyses.outcome` 回写链断在存量数据上）。
+    // 筛样只发生在读侧聚合（步骤 5 与 `compute_validation_report`）。
     let written_count = if dry_run || validations.is_empty() {
         0
     } else {
@@ -236,14 +285,35 @@ pub(crate) async fn run_decision_backtest_inner(
         }
     }
 
-    // ── 5. 聚合报告 ──
-    let report = if validations.is_empty() {
+    // ── 5. 聚合报告（#49：按荐股代际筛样后才进分母；写侧不筛，见步骤 4 的说明）──
+    let (kept, excluded_pre_floor_generation, excluded_unknown_generation) =
+        screen_by_reco_generation(&versions, RECO_GENERATION_FLOOR);
+    let screened: Vec<PickValidation> = kept.iter().map(|&i| validations[i].clone()).collect();
+    if screened.is_empty() && !validations.is_empty() {
+        tracing::warn!(
+            "[backtest] 本轮 {} 条验证记录**全部**被代际筛样排除（起算代 {}：早于起算代 {} 条 / 代际未知 {} 条）\
+             —— 命中率报告分母为 0 的含义是「没有可比代际的样本」，不是「没有验证数据」",
+            validations.len(),
+            RECO_GENERATION_FLOOR,
+            excluded_pre_floor_generation,
+            excluded_unknown_generation
+        );
+    }
+    let report = if screened.is_empty() {
         empty_report()
     } else {
-        compute_hit_rate_report(&validations)
+        compute_hit_rate_report(&screened)
     };
 
-    Ok(RunDecisionBacktestResponse { report, written_count, skipped_count: skipped, data_source })
+    Ok(RunDecisionBacktestResponse {
+        report,
+        written_count,
+        skipped_count: skipped,
+        data_source,
+        generation_floor: RECO_GENERATION_FLOOR,
+        excluded_pre_floor_generation,
+        excluded_unknown_generation,
+    })
 }
 
 /// 拉取 T+N 窗口日 K 线并构建 PickValidation
@@ -459,29 +529,80 @@ pub async fn list_decision_validations(
         .collect())
 }
 
+/// 验证报告响应 —— 报告本体之外还带**代际筛样的账**（#49）。
+///
+/// 为什么三个数一起给：只回 `report.total` 的话，看到 0 无法区分「没有验证数据」与
+/// 「有数据但全部不可比 / 归属未知」—— 后者是结构性缺口，伪装成前者的正常空结果即是
+/// 歧义（AGENTS.md「结构性缺口不得在 UI 造成歧义」；形态同 §七十五 权重窗口的排除计数）。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ValidationReportResponse {
+    pub report: HitRateReport,
+    /// 本次分母的起算代际（= `RECO_GENERATION_FLOOR`）
+    pub generation_floor: i32,
+    /// 因「早于起算代」被排除的记录数（旧代样本，永久不可比）
+    pub excluded_pre_floor_generation: usize,
+    /// 因「代际未知」被排除的记录数（pick 无 `reco_version`，或 pick 行已不存在）
+    pub excluded_unknown_generation: usize,
+    /// 本次读到的 `decision_validations` 总行数 = 进分母 + 两类排除（自证分母没漏）
+    pub total_rows: usize,
+}
+
 /// 聚合报告 —— 基于已写入的 decision_validations 重新计算
+///
+/// ## #49 代际筛样（读侧，PLAN 七十九 A2）
+/// 本表自己**没有**版本列，代际在它 join 的 `reco_picks.reco_version` 上。口径是**荐股域**的
+/// [`RECO_GENERATION_FLOOR`]，不是工作流域的 `HORIZON_BRANCH_GENERATION_FLOOR` —— 荐股链不跑
+/// 工作流模板（见 `recommender::RECO_ALGORITHM_VERSION` 的注释），拿错域的整数比大小会让
+/// 筛样恒真或恒假。写侧盖章由 `seed_consistency_tests` 的「每个 `reco_picks::ActiveModel`
+/// 必带 `reco_version`」门守着；`NULL`（含 pick 行已不存在）记为代际未知并**排除**。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "计算验证报告")]
 #[tauri::command]
 pub async fn compute_validation_report(
     state: State<'_, AppState>,
-) -> Result<HitRateReport, String> {
+) -> Result<ValidationReportResponse, String> {
     let db = state.harness.db();
     let all = decision_validations::Entity::find().all(db).await.map_err(|e| {
         ErrorResponse::new(wf_err::INTERNAL)
             .with_detail(format!("读取 decision_validations 失败: {e}"))
     })?;
+    let total_rows = all.len();
+
+    // 代际来源：整张 reco_picks 只取 (id, reco_version) 两列 —— 不为筛样把 pick_data /
+    // seed_pool_json 搬进内存，也不按 pick_id 拼 IN 列表（存量行数会顶到 SQLite 参数上限）
+    let pick_versions: HashMap<String, Option<i32>> = reco_picks::Entity::find()
+        .select_only()
+        .column(reco_picks::Column::Id)
+        .column(reco_picks::Column::RecoVersion)
+        .into_tuple()
+        .all(db)
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("读取 reco_picks 代际失败: {e}"))
+        })?
+        .into_iter()
+        .collect();
 
     if all.is_empty() {
-        return Ok(empty_report());
+        return Ok(ValidationReportResponse {
+            report: empty_report(),
+            generation_floor: RECO_GENERATION_FLOOR,
+            excluded_pre_floor_generation: 0,
+            excluded_unknown_generation: 0,
+            total_rows,
+        });
     }
 
-    // DB 行 → PickValidation
-    let validations: Vec<PickValidation> = all
+    // DB 行 → (荐股代际, PickValidation)。`get(..).copied().flatten()` 把「pick 行已不存在」
+    // 与「pick 有行但没盖章」并成同一个 None —— 两者都是归属未知，处置一致。
+    let rows: Vec<(Option<i32>, PickValidation)> = all
         .into_iter()
         .map(|m| {
+            let version = pick_versions.get(&m.pick_id).copied().flatten();
             let factor_snapshot: Option<HashMap<String, f64>> =
                 m.factor_snapshot.as_ref().and_then(|s| serde_json::from_str(s).ok());
-            PickValidation {
+            let validation = PickValidation {
                 pick_id: m.pick_id,
                 stock_code: m.stock_code,
                 stock_name: m.stock_name,
@@ -506,11 +627,43 @@ pub async fn compute_validation_report(
                 hit_outcome: m.hit_outcome,
                 factor_snapshot,
                 data_source: m.data_source,
-            }
+            };
+            (version, validation)
         })
         .collect();
 
-    Ok(compute_hit_rate_report(&validations))
+    // 筛样（判据与 run 侧共用 `screen_by_reco_generation`，避免一个名目两套分母）
+    let versions: Vec<Option<i32>> = rows.iter().map(|(v, _)| *v).collect();
+    let (kept, excluded_pre_floor_generation, excluded_unknown_generation) =
+        screen_by_reco_generation(&versions, RECO_GENERATION_FLOOR);
+    let validations: Vec<PickValidation> = kept.iter().map(|&i| rows[i].1.clone()).collect();
+
+    if validations.is_empty() {
+        tracing::warn!(
+            "[validation_report] decision_validations {} 条**全部**被代际筛样排除\
+             （起算代 {}：早于起算代 {} 条 / \
+             代际未知 {} 条）\
+             —— 报告分母为 0 的含义是「没有可比代际的样本」，不是「没有验证数据」",
+            total_rows,
+            RECO_GENERATION_FLOOR,
+            excluded_pre_floor_generation,
+            excluded_unknown_generation
+        );
+    }
+
+    let report = if validations.is_empty() {
+        empty_report()
+    } else {
+        compute_hit_rate_report(&validations)
+    };
+
+    Ok(ValidationReportResponse {
+        report,
+        generation_floor: RECO_GENERATION_FLOOR,
+        excluded_pre_floor_generation,
+        excluded_unknown_generation,
+        total_rows,
+    })
 }
 
 /// 空报告（无 pick 时返回，避免前端拿 None 报错）
@@ -809,5 +962,29 @@ mod tests {
         assert!(r.by_style.is_empty());
         assert!(r.by_t_plus_n.is_empty());
         assert!(r.factor_ic.is_empty());
+    }
+
+    /// #49：筛样三类必须构成全集，且**下限不是等号**（>= floor 全进，含更晚的代）
+    #[test]
+    fn test_screen_by_reco_generation_partitions_into_three() {
+        let versions = [Some(0), Some(1), Some(2), None];
+        let (kept, pre, unknown) = screen_by_reco_generation(&versions, 1);
+        assert_eq!(kept, vec![1, 2], "起算代及其之后都进分母；等号口径会让每次换代清零窗口");
+        assert_eq!((pre, unknown), (1, 1), "早于起算代与代际未知必须分开计数");
+        assert_eq!(kept.len() + pre + unknown, versions.len());
+    }
+
+    /// #49 负控：代际未知**不得**被当成本代（现网存量全是 NULL ⇒ 这条分支决定报告是
+    /// 「空分母 + 说明」还是「假装样本都属于当前代」）
+    #[test]
+    fn test_screen_by_reco_generation_never_counts_unknown_as_current() {
+        let versions = [None, None, None];
+        let (kept, pre, unknown) = screen_by_reco_generation(&versions, 1);
+        assert!(kept.is_empty(), "NULL 不进分母");
+        assert_eq!(
+            (pre, unknown),
+            (0, 3),
+            "三个 NULL 只能记成「代际未知」，不得混进「早于起算代」"
+        );
     }
 }

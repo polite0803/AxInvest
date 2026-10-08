@@ -453,6 +453,13 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     untrustedCount: untrustedCountRaw != null && !isNaN(Number(untrustedCountRaw))
       ? Number(untrustedCountRaw)
       : undefined,
+    // ── #8 P5 跨轮数据质量熔断态 ──
+    // 同样必须在这里显式带上：本函数是白名单式重建，漏一行就等于"产端发了、界面从未显示"
+    //   （2026-09-11 `weightsCollapsed` 那次复发的原样）。
+    dqiFuseState: nonEmptyString(source.dqiFuseState) ?? nonEmptyString(source.dqi_fuse_state) ?? undefined,
+    dqiStreak: numberField(source, "dqiStreak", "dqi_streak"),
+    dqiObservations: numberField(source, "dqiObservations", "dqi_observations"),
+    confidenceQualityCap: numberField(source, "confidenceQualityCap", "confidence_quality_cap"),
     // ── 数据缺口（portfolio-mgr 消费的上游节点缺失清单）──
     dataGaps: dataGaps && dataGaps.length > 0 ? dataGaps : undefined,
     // ── 口径调整（本档主动降权的腿；与缺口分列，**不**参与可信度警示的触发）──
@@ -773,6 +780,16 @@ function unwrapNodeOutput(raw: unknown): Record<string, unknown> | null {
 
 function nonEmptyString(v: unknown): string | null {
   return typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+}
+
+/**
+ * 两族键名都收的数值取法（现网 camelCase / 旧快照 snake_case，与 `nonEmptyString` 同规矩）。
+ * 拿不到或不是数 ⇒ `undefined`（不是 0）：`dqiObservations` 的 0 有独立语义「无观测」，
+ * 让缺字段塌成 0 就会把「产端没发这个字段」显示成「观测表为空」。
+ */
+function numberField(source: Record<string, unknown>, camel: string, snake: string): number | undefined {
+  const raw = source[camel] ?? source[snake];
+  return raw != null && !isNaN(Number(raw)) ? Number(raw) : undefined;
 }
 
 /**

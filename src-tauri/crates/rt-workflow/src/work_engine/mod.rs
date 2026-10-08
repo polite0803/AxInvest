@@ -20,7 +20,7 @@ pub use engine::{
 pub use error_handling::ErrorContext;
 pub use execution_state::{
     ExecutionContextCallbacks, ExecutionState, ExecutionStatus, NodeExecutionRecord,
-    PartialResultEvent,
+    PartialResultEvent, SubWorkflowOrigin,
 };
 pub use executors::{
     AgentExecutor, PlanApprovalCallback, PlanApprovalRequest, PlanCallbacks, PlanPhaseSummary,

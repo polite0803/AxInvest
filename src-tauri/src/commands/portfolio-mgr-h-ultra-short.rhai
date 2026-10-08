@@ -26,7 +26,15 @@
 // branch_json        : 已接 —— `horizon_branch_json.ultra_short`（权威源 evidence_weight::horizon_branch_specs）
 //                      档位标签不在入参里：本脚本硬编码 `h`，与 `branch_json["tier"]` 对拍 ⇒ 接线错配即点名
 // tier_score         : 已接 —— t-scoring-hour(60 分钟) 的 totalScore
-// macd_dif/macd_dea/rsi_14 : 已接 —— 本档尺度指标（momentumSignal 的原料）
+// macd_dif/macd_dea : 已接 —— 本档尺度指标（momentumSignal 的原料）
+// rsi_value        : v136 起接本档尺度算出的那个周期的 RSI（scaleMomentum.value）。
+//                      旧键 rsi_14 指的是日线命名槽 rsi14：月/季档的周期不落进 {6,12,14,24} 时
+//                      它停在初值 50.0，恰好命中调制区间 = 给每一档凭空 +0.2（PLAN §一○二）。
+// scoring_windows    : v138 起接 —— 本档评分节点**实际用过**的指标窗口回显（`indicators.windows`，
+//                      裁定 3「让用户看出各档实际几根」，PLAN §一○六）。产端是回显不是「想要的配置」，
+//                      所以面板印出来的那组就是这一档算过的那组。
+// scoring_scale      : v138 起接 —— 本档尺度名（hourly/weekly/monthly/quarterly），与窗口并列成句；
+//                      短/中/长三档的根数按公式本就是同一组，差别只在这里才可读
 // seal_rate          : 已接 —— 涨停池 breadth.sealRate（breadthState 腿 + breadth_required 门的必要条件）
 // pool_break_count   : 已接 —— 涨停池 breadth.breakCount（microstructure 条件腿）
 // pool_in_pool       : 未接且本脚本**不读** —— 语义是「本代码 ∈ entries[]」，点号路径表达不了
@@ -93,7 +101,7 @@ let raw = #{
     totalScore: if present(tier_score) { tier_score } else { () },
     macdDif: if present(macd_dif) { macd_dif } else { () },
     macdDea: if present(macd_dea) { macd_dea } else { () },
-    rsi14: if present(rsi_14) { rsi_14 } else { () },
+    rsi: if present(rsi_value) { rsi_value } else { () },
     sealRate: if present(seal_rate) { seal_rate } else { () },
     breakCount: if present(pool_break_count) { pool_break_count } else { () },
 };
@@ -223,6 +231,11 @@ if tw <= 0.0 || !prior_ok {
     odds: (odds*100.0).round()/100.0,
     evidenceScale: (escale*1000.0).round()/10.0,
     scoreSource: if present(tier_score) { "tier_native" } else { "daily_fallback" },
+    // v138（裁定 3「让用户看出各档实际几根」）：本档**实际用的**指标窗口与所在尺度。
+    // 产端是评分节点回显（`indicators.windows`），不是「想要的配置」⇒ 面板印出来的就是算过的那组。
+    // 缺席语义：这两个键没有 = 该行产自早于 v138 的模板代 ⇒ 面板不渲染该行，不得补 0 或空表。
+    scoringWindows: if present(scoring_windows) { scoring_windows } else { () },
+    scoringScale: if present(scoring_scale) { scoring_scale } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
     stopSource: if exit_move > 0.0 { "vol_band" } else { "fallback_pct" },

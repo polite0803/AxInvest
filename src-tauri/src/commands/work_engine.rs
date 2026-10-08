@@ -506,6 +506,7 @@ pub async fn debug_run_workflow(
             let completed = evt.completed_nodes;
             let wf_id = wid_for_progress.clone();
             let exec_id = evt.execution_id.clone().unwrap_or_else(|| eid_for_progress.clone());
+            let origin = evt.sub_workflow_origin.clone();
             let eng = engine_for_progress.clone();
             Box::pin(async move {
                 // ── 轻量级节点状态事件（实时）──
@@ -518,6 +519,11 @@ pub async fn debug_run_workflow(
                         "status": status,
                         "total_nodes": total,
                         "completed_nodes": completed,
+                        // 子执行归属（B-2a）：事件来自子执行时非 null。前端原来只按
+                        // `execution_id === 本执行` 判定 ⇒ 子执行的每条事件都被丢弃，
+                        // 父面板里 SubWorkflow 节点内部整段不可见。顶层执行该键为 null，
+                        // 旧消费端读不到也不受影响。
+                        "sub_workflow_origin": origin,
                     }),
                 );
 
@@ -554,6 +560,10 @@ pub async fn debug_run_workflow(
                             "node_count": node_records.len(),
                             "node_records": node_records,
                             "variables": serde_json::to_value(&full_state.variables).unwrap_or(serde_json::json!({})),
+                            // 子执行归属（B-2a）：取自**真实**执行状态而非 per-node ctx ——
+                            // 后者同名字段被引擎重载成「本执行 id」，见
+                            // `ExecutionState::parent_execution_id` 的注释。
+                            "sub_workflow_origin": full_state.sub_workflow_origin,
                         }),
                     );
                 }

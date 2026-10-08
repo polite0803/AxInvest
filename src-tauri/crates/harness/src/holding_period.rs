@@ -233,6 +233,55 @@ impl Period {
         }
     }
 
+    /// 本档的**技术面尺度**（取值 = `astock-data::scale::ScaleProfile::resolve` 认的那些键）。
+    ///
+    /// 存在理由：「超短=小时线 / 短=周线 / 中=月线 / 长=季线」是阶段 2 的拍板，但此前**只写在**
+    /// 种子注释（`seed_stock_analysis.rs` 的「本档尺度节点 = 周线」）和「哪档读哪个 `t-scoring-*`」
+    /// 的字面量里，代码里没有权威 ⇒ 于是 PLAN §九十二 量到的那条 `period` 死参数（四档实际取的都是
+    /// 同一份日线）**没有任何门能发现**：字面量之间互相印证，没人对得上「这一档该用哪个尺度」。
+    ///
+    /// 分工（分层依赖方向）：本函数只定「哪档配哪个尺度」；尺度自身的日历跨度
+    /// （`trading_days_per_bar`）与窗口根数换算住在 `astock-data::scale`，那里才是有 `d_s` 的地方
+    /// —— 把换算放 harness 会让 `0.25/1/5/20/60` 这张表出现第二份（禁区 12）。
+    pub fn scale_key(&self) -> &'static str {
+        match self {
+            Period::UltraShort => "hourly",
+            Period::Short => "weekly",
+            Period::Mid => "monthly",
+            Period::Long => "quarterly",
+        }
+    }
+
+    /// 本档的评分节点 id —— 与 [`Self::scale_key`] 是**同一个决定的两种拼写**，必须同臂改。
+    ///
+    /// 放在 harness 而不是让种子自己拼字符串：`scripts/check-tier-purity.mjs` 的 R5 要拿权威
+    /// 反查种子（「这一档的 `tier_score` 来源节点 ≡ 本档尺度对应的节点」），
+    /// 拼接的话门就只能猜后缀（`hour` vs `hourly` 的差别正是曾经出错的地方）。
+    pub fn scoring_node_id(&self) -> &'static str {
+        match self {
+            Period::UltraShort => "t-scoring-hour",
+            Period::Short => "t-scoring-week",
+            Period::Mid => "t-scoring-month",
+            Period::Long => "t-scoring-quarter",
+        }
+    }
+
+    /// [`Self::scale_key`] 的**反查**：尺度名 → 该尺度唯一对应的那一档。
+    ///
+    /// 存在理由（PLAN §一○二(4) 片 A 的待决形状，已按「反查」拍定）：
+    /// `compute_scoring` 拿得到的只有 `period` 串（尺度名），而窗口计划
+    /// `ScaleWindowPlan::for_period` 要的是 `Period`。另一条路是给每张档子模板再加一个
+    /// `const-scoring-horizon` 常量节点、多传一个工具参数 —— 那会让图再变、再换代，
+    /// 而「哪档配哪尺度」这张表的权威本来就在本文件，反查不需要第二处事实。
+    ///
+    /// 实现刻意**不写第二份映射**：遍历 [`Self::ALL`] 比 `scale_key()` ⇒ 加第五档时
+    /// 只有 `as_str` / `scale_key` / `scoring_node_id` 三处必须一起长（编译器 + R5 门），
+    /// 本函数自动跟着变。`daily` 与未登记的尺度名返回 `None`（日线不属于任何一档，
+    /// 它是主链 σ_daily 与主评分的共同来源 ⇒ 不走按档窗口）。
+    pub fn from_scale_key(scale: &str) -> Option<Period> {
+        Period::ALL.into_iter().find(|p| p.scale_key() == scale)
+    }
+
     /// 把任意持有天数归到最近的档位。
     ///
     /// 用途：`stock_analyses.decision_expected_holding_days` 是 LLM 给的自由数字
@@ -875,6 +924,65 @@ mod tests {
         for p in Period::ALL {
             println!("{}", "-".repeat(30));
             print!("{}", p.verdict_contract_prompt());
+        }
+    }
+
+    /// 档位 ↔ 尺度 ↔ 评分节点 这三张臂必须**同向**，且由短到长严格变粗。
+    ///
+    /// 期望表写死在这里是有意的：§九十二 的缺陷正是「四档尺度实际相同（都是日线）」而各处
+    /// 字面量互相印证、没有权威可对。本条把那件事变成改一臂就红。
+    #[test]
+    fn scale_key_and_scoring_node_are_one_table_per_tier() {
+        let expected = [
+            (Period::UltraShort, "hourly", "t-scoring-hour", 2),
+            (Period::Short, "weekly", "t-scoring-week", 5),
+            (Period::Mid, "monthly", "t-scoring-month", 28),
+            (Period::Long, "quarterly", "t-scoring-quarter", 90),
+        ];
+        let mut scale_keys: Vec<&str> = Vec::new();
+        let mut node_ids: Vec<&str> = Vec::new();
+        for (period, want_scale, want_node, want_days) in expected {
+            assert_eq!(
+                period.scale_key(),
+                want_scale,
+                "{period:?} 的尺度被改 —— 要与种子的评分节点、窗口推导同批改"
+            );
+            assert_eq!(period.scoring_node_id(), want_node, "{period:?} 的评分节点被改");
+            assert_eq!(
+                period.default_holding_days(),
+                want_days,
+                "{period:?} 的持有期与尺度表不再同臂"
+            );
+            scale_keys.push(period.scale_key());
+            node_ids.push(period.scoring_node_id());
+        }
+        // 四档尺度/节点互不相同：两档共用一个尺度 ⇒ 两档评分输入恒等（就是历史缺陷的形状）
+        assert_eq!(scale_keys.iter().collect::<std::collections::HashSet<_>>().len(), 4);
+        assert_eq!(node_ids.iter().collect::<std::collections::HashSet<_>>().len(), 4);
+        // 节点 id 的命名约定（种子与 R5 门都按这个前缀定位）
+        for id in node_ids {
+            assert!(id.starts_with("t-scoring-"), "评分节点 id {id} 不符合 `t-scoring-*` 约定");
+        }
+        // 反查（`from_scale_key`）必须与正查同臂，且**一一**而非就近：
+        // `compute_scoring` 只拿得到尺度串，按档窗口计划靠这张反表拿到档 ⇒ 反查错一档
+        // 就是「四档里有一档悄悄换成别的尺度的窗口」，而图与脚本都不会报错。
+        for (period, want_scale, _, _) in expected {
+            assert_eq!(
+                Period::from_scale_key(want_scale),
+                Some(period),
+                "尺度 {want_scale:?} 反查不到 {period:?} ⇒ 正反两张臂分了家"
+            );
+        }
+        // `daily` 不属于任何一档（主链 σ_daily 与主评分的共同来源）；未登记/拼错的尺度名
+        // 一律 `None`，**不得**就近归到某档（负控向：`weekl` 若被归成 short，就等于把
+        // §九十二 那条「静默降级」在反方向上重做一遍）。
+        assert_eq!(Period::from_scale_key("daily"), None, "日线不该被算成某一档");
+        for bad in ["", "weekl", "Monthly", "quarter"] {
+            assert_eq!(
+                Period::from_scale_key(bad),
+                None,
+                "未登记的尺度名 {bad:?} 被反查吞掉了 ⇒ 必须返回 None 让调用方显式处理"
+            );
         }
     }
 }

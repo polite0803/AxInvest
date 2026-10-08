@@ -457,7 +457,18 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
                 "properties": {
                     "stock_code": { "type": "string", "description": "6位股票代码" },
                     "kline_json": { "type": "string", "description": "上游K线节点输出的JSON" },
-                    "period": { "type": "string", "description": "评分尺度：hourly/daily/weekly/monthly/quarterly（季线由月线本地按自然季度聚合）。**未知值直接报错，不静默回退 daily**；阈值按 √(每 bar 交易日数) 缩放", "default": "daily" }
+                    "period": { "type": "string", "description": "评分尺度：hourly/daily/weekly/monthly/quarterly（季线由月线本地按自然季度聚合）。**未知值直接报错，不静默回退 daily**；阈值按 √(每 bar 交易日数) 缩放", "default": "daily" },
+                    // 面板「技术指标」两组可调值（PLAN §一○五）。⚠ **两域**：ind_* 窗口五个只在
+                    // period=daily 时被接受，接进按档尺度会**显式失败**（档侧窗口由 ScaleWindowPlan 决定）；
+                    // 三个阈值全链接受（§九十六(2)：阈值不随尺度缩）。
+                    "ind_macd_fast": { "type": "number", "description": "MACD 快线周期（仅日线链；档侧传入即报错）" },
+                    "ind_macd_slow": { "type": "number", "description": "MACD 慢线周期（仅日线链；必须 > ind_macd_fast）" },
+                    "ind_macd_signal": { "type": "number", "description": "MACD 信号线周期（仅日线链）" },
+                    "ind_boll_period": { "type": "number", "description": "布林带周期（仅日线链）" },
+                    "ind_volume_lookback": { "type": "number", "description": "量能回看根数（仅日线链）" },
+                    "ind_boll_stddev": { "type": "number", "description": "布林带标准差倍数（全链：日线与四档都生效）" },
+                    "ind_volume_surge_ratio": { "type": "number", "description": "放量判定倍数（全链；必须 > ind_volume_shrink_ratio）" },
+                    "ind_volume_shrink_ratio": { "type": "number", "description": "缩量判定倍数（全链）" }
                 },
                 "required": ["stock_code"]
             }
@@ -1279,6 +1290,23 @@ pub async fn execute_mcp_tool(
             let period_arg = arguments["period"].as_str().unwrap_or("daily");
             let profile =
                 crate::scale::ScaleProfile::resolve(period_arg).map_err(|e| e.to_string())?;
+            // ── #41 片 A（PLAN §一○二(4)）：尺度若属于某一档 ⇒ 该档的**窗口计划**接管 ──
+            //
+            // 接管三件事：① 向 vendor 取的根数（`fetch_limit`；季线取的是**聚合前**的月线根数
+            // `parent_fetch_limit`）、② 出分下限 `min_bars`、③ 指标窗口（`IndicatorConfig`）。
+            // 反查权威是 `Period::from_scale_key`（与 `scale_key` 同一张表，不另写第二份）。
+            //
+            // ⚠ **日线不在接管之列**（`from_scale_key("daily") == None`）：主链的 `t-scoring`
+            // 是 σ_daily 与主评分的共同来源，它要继续吃既有常数与命名槽 ⇒ **日线链零回归**。
+            // 按档尺度改的是「拿多少根、按几根算」，而 §九十二(5) 那条「月线=5 年才出分」的
+            // 失败面正是被这里收敛掉的：长档回答 90 交易日的问题，就不该要 15 年历史。
+            let plan = axagent_harness::holding_period::Period::from_scale_key(period_arg)
+                .map(crate::scale::ScaleWindowPlan::for_period);
+            let fetch_limit = plan
+                .map(|p| p.parent_fetch_limit.unwrap_or(p.fetch_limit) as u32)
+                .unwrap_or(profile.fetch_limit);
+            let min_bars = plan.map(|p| p.min_bars).unwrap_or(profile.min_bars);
+            let ind_config = effective_indicator_config(arguments, plan.as_ref(), period_arg)?;
             let mut klines = if let Some(kj) = arguments["kline_json"].as_str() {
                 // ⚠ 传入的 kline_json 必须与 `profile.vendor_period` 同口径
                 //   （季线尺度传的是**月线**，本函数会就地聚合）。
@@ -1286,7 +1314,7 @@ pub async fn execute_mcp_tool(
                     .map_err(|e| format!("kline_json 解析失败: {e}"))?
             } else {
                 client
-                    .get_klines(code, profile.vendor_period, profile.fetch_limit)
+                    .get_klines(code, profile.vendor_period, fetch_limit)
                     .await
                     .map_err(|e| e.to_string())?
             };
@@ -1295,20 +1323,29 @@ pub async fn execute_mcp_tool(
             }
             // 样本不足 ⇒ 拒绝出分。用 3 根 bar 算 MA60 会产出一个「看起来正常」的假分数，
             // 正是本项目最反对的形态（拿不到可以，伪装不行）。
-            if klines.len() < profile.min_bars {
+            // 下限按上面解析出的 `min_bars`（档位走窗口计划，日线走既有 60）。
+            if klines.len() < min_bars {
                 return Err(format!(
                     "compute_scoring: 尺度 {} 仅 {} 根 bar，少于出分所需的 {} 根 ⇒ 拒绝出分",
                     profile.period,
                     klines.len(),
-                    profile.min_bars
+                    min_bars
                 ));
             }
-            let ind = crate::indicators::compute_indicators(code, &klines);
+            let ind =
+                crate::indicators::compute_indicators_with_config(code, &klines, Some(&ind_config));
             let latest_price = klines.last().map(|k| k.close).unwrap_or(0.0);
             // 阈值随尺度缩放（日线 f=1.0 ⇒ 与历史逐分一致，零回归）
             let bands = crate::scoring::ScoreBands::scaled_for(&profile);
-            let score =
-                crate::scoring::ScoringEngine::score_with_bands(&ind, latest_price, None, &bands);
+            // 按档尺度 ⇒ 走 `score_scale_aware`：五个走命名槽的分量改读中性槽
+            // （`scaleTrend` / `scaleMomentum`）与两带，否则月/季档上 `rsi6`、`ma5..ma60`
+            // 全是停在初值的假读数（§九十七 实测「七个分量里五个走命名槽」）。
+            // 日线（`plan == None`）继续走 `score_with_bands`，逐位不变。
+            let score = if plan.is_some() {
+                crate::scoring::ScoringEngine::score_scale_aware(&ind, latest_price, None, &profile)
+            } else {
+                crate::scoring::ScoringEngine::score_with_bands(&ind, latest_price, None, &bands)
+            };
             // #7 修复(2026-07-22): 原实现只返回 ObjectiveScore 评分结构,
             // 缺少 totalScore/currentPrice/indicators/factor_backtest 字段,
             // 导致下游 input_mapping 引用(t-scoring.result.indicators.rsi14 等)全部为 null,
@@ -3051,6 +3088,142 @@ impl ValuationConfig {
             bond_yield: None,
         })
     }
+}
+
+// ── 裁定 2「先加设施再接线」：面板「技术指标」8 个可调变量的落地面（PLAN §一○五）──────
+//
+// 这 8 个变量此前**只有声明**（`seed_variables.rs` 的 8 行）＋ 一个能改它们的面板分组
+// （`StockAnalysisConfigPanel.tsx` 的 indicators 组），**全仓零消费者** ⇒ 面板改值对评分零影响，
+// 属本仓登记的「配置项空接线」族。本批先把设施加上（工具收参数 + 校验 + 两域边界），
+// 下一段种子再把变量接进节点。
+//
+// **拆两域**不是偏好，是既有裁定的推论：
+//   · §九十六(2) 已裁「**阈值类不随尺度缩**」（RSI 越界线、布林标准差倍数、量能放量/缩量比值
+//     都是与 bar 日历跨度无关的有界量或比值）⇒ 这 3 个**全链共用**（日线与四档都吃面板值）。
+//   · 窗口类（「几根 bar」）由该档的 `ScaleWindowPlan` 决定 ⇒ 这 5 个**只作用日线链**。
+//     把 5 个窗口值同时喂给四档，等于把四档的指标窗口重新焊成同一份 —— 正是 #41 片 A 刚拆掉的缺陷。
+//
+// 参数名统一 `ind_` 前缀、**不等于**变量名：与 `VALUATION_FLAT_ARGS` 同一条理由
+//   （「参数名 == 变量名」的巧合会掩盖映射写错，见 `seed_stock_analysis.rs` 的 C2 路径 Z 注释）。
+
+/// 窗口域参数的形状：`(工具参数名, 上界, 落点)`。
+type IndicatorBarArg = (&'static str, usize, fn(&mut crate::indicators::IndicatorConfig, usize));
+
+/// 阈值域参数的形状：`(工具参数名, 下界, 上界, 落点)`。
+type IndicatorRatioArg = (&'static str, f64, f64, fn(&mut crate::indicators::IndicatorConfig, f64));
+
+/// 窗口域参数（**只作用日线链**）：`(工具参数名, 上界, 落点)`。
+///
+/// ⚠ 「落点」放进同一张表而不是在别处再 match 一遍键名：键表与赋值分一旦各写各的就会**漂移**
+/// （加了第六个键而忘了加分支 ⇒ 那个参数被静默忽略 ⇒ 又是一次「面板调了没生效」）。
+/// 这里用 `fn` 指针使「表里有」与「落得了地」成为同一件事，且不需要生产路径上的 `unreachable!`。
+const INDICATOR_BAR_ARGS: [IndicatorBarArg; 5] = [
+    ("ind_macd_fast", 500, |c, v| c.macd_fast = v),
+    ("ind_macd_slow", 500, |c, v| c.macd_slow = v),
+    ("ind_macd_signal", 500, |c, v| c.macd_signal = v),
+    ("ind_boll_period", 500, |c, v| c.boll_period = v),
+    ("ind_volume_lookback", 500, |c, v| c.volume_lookback = v),
+];
+
+/// 阈值域参数（**全链共用**）：`(工具参数名, 下界, 上界, 落点)`。
+const INDICATOR_RATIO_ARGS: [IndicatorRatioArg; 3] = [
+    ("ind_boll_stddev", 0.0, 10.0, |c, v| c.boll_stddev = v),
+    ("ind_volume_surge_ratio", 0.0, 20.0, |c, v| c.volume_surge_ratio = v),
+    ("ind_volume_shrink_ratio", 0.0, 20.0, |c, v| c.volume_shrink_ratio = v),
+];
+
+/// 一个「几根 bar」参数：缺失 ⇒ `None`（沿用基准配置）；给了但不有限 / 非整数 / 越界 ⇒ **显式失败**。
+///
+/// ⚠ 不静默回落默认值 —— 「面板调了没反应」正是这批变量当初的缺陷形态，
+/// 设施这一层必须把它变成报错，而不是继续装作成功。
+fn panel_bar_arg(
+    arguments: &serde_json::Value,
+    key: &str,
+    hi: usize,
+) -> Result<Option<usize>, String> {
+    let Some(raw) = arguments.get(key) else {
+        return Ok(None);
+    };
+    let Some(v) = raw.as_f64() else {
+        return Err(format!("compute_scoring: 参数 {key} 不是数值（{raw}）⇒ 拒绝按默认值继续"));
+    };
+    if !v.is_finite() || v.fract() != 0.0 || v < 2.0 || v > hi as f64 {
+        return Err(format!(
+            "compute_scoring: 参数 {key} = {v} 不在 2..={hi} 的整数区间 ⇒ 拒绝出分（窗口根数非整数或过小会产出假指标）"
+        ));
+    }
+    Ok(Some(v as usize))
+}
+
+/// 一个比值/倍数参数（阈值域）。范围外或非有限 ⇒ 显式失败。
+fn panel_ratio_arg(
+    arguments: &serde_json::Value,
+    key: &str,
+    lo: f64,
+    hi: f64,
+) -> Result<Option<f64>, String> {
+    let Some(raw) = arguments.get(key) else {
+        return Ok(None);
+    };
+    let Some(v) = raw.as_f64() else {
+        return Err(format!("compute_scoring: 参数 {key} 不是数值（{raw}）⇒ 拒绝按默认值继续"));
+    };
+    if !v.is_finite() || v <= lo || v > hi {
+        return Err(format!("compute_scoring: 参数 {key} = {v} 不在 ({lo}, {hi}] 内 ⇒ 拒绝出分"));
+    }
+    Ok(Some(v))
+}
+
+/// 本次评分真正使用的指标配置：基准（日线 `default()` / 按档 `from(plan)`）＋ 面板覆盖。
+///
+/// ⚠ 档侧**收到窗口域参数就显式失败**，不是静默忽略：静默忽略等于让「接线了但不生效」
+/// 换个形态复发，而这条边界若只写在注释里，没有任何东西能发现它被违反。
+fn effective_indicator_config(
+    arguments: &serde_json::Value,
+    plan: Option<&crate::scale::ScaleWindowPlan>,
+    period: &str,
+) -> Result<crate::indicators::IndicatorConfig, String> {
+    let mut cfg = match plan {
+        Some(p) => crate::indicators::IndicatorConfig::from(p),
+        None => crate::indicators::IndicatorConfig::default(),
+    };
+    if let Some(p) = plan {
+        if let Some((key, _, _)) =
+            INDICATOR_BAR_ARGS.iter().find(|(k, _, _)| arguments.get(*k).is_some())
+        {
+            return Err(format!(
+                "compute_scoring: 尺度 {period}（档 {}）的指标窗口由 `ScaleWindowPlan` 决定 \
+                 ⇒ 参数 {key} 不得接进本档评分节点；两权威并存时必须先定序（PLAN §一○五）",
+                p.scale_key
+            ));
+        }
+    } else {
+        for (key, hi, set) in INDICATOR_BAR_ARGS {
+            if let Some(v) = panel_bar_arg(arguments, key, hi)? {
+                set(&mut cfg, v);
+            }
+        }
+    }
+    for (key, lo, hi, set) in INDICATOR_RATIO_ARGS {
+        if let Some(v) = panel_ratio_arg(arguments, key, lo, hi)? {
+            set(&mut cfg, v);
+        }
+    }
+    // 两条结构性判据（不是审美）：MACD 慢线 ≤ 快线 ⇒ 金叉/死叉倒置；放量比 ≤ 缩量比 ⇒
+    // 两个量能信号互相吞掉对方的区间。二者都「看起来正常」但语义反了 ⇒ 显式失败。
+    if cfg.macd_slow <= cfg.macd_fast {
+        return Err(format!(
+            "compute_scoring: macd_slow={} 必须 > macd_fast={} ⇒ 否则 MACD 金叉/死叉倒置",
+            cfg.macd_slow, cfg.macd_fast
+        ));
+    }
+    if cfg.volume_surge_ratio <= cfg.volume_shrink_ratio {
+        return Err(format!(
+            "compute_scoring: volume_surge_ratio={} 必须 > volume_shrink_ratio={} ⇒ 否则放量/缩量两个信号区间互吞",
+            cfg.volume_surge_ratio, cfg.volume_shrink_ratio
+        ));
+    }
+    Ok(cfg)
 }
 
 /// 近 N 个年报（report_date 含 "-12-31"，兼容 "2025-12-31" 与 "2025-12-31 00:00:00" 两种格式）
@@ -7225,5 +7398,113 @@ mod attention_window_tests {
         assert!(!publish_within_window("", d("2026-01-10"), ATTENTION_WINDOW_DAYS));
         assert!(!publish_within_window("2026/01/10", d("2026-01-10"), ATTENTION_WINDOW_DAYS));
         assert!(!publish_within_window("近期", d("2026-01-10"), ATTENTION_WINDOW_DAYS));
+    }
+}
+
+#[cfg(test)]
+mod panel_indicator_config_tests {
+    use super::*;
+    use axagent_harness::holding_period::Period;
+
+    fn cfg_for(
+        period: Option<Period>,
+        args: serde_json::Value,
+    ) -> Result<crate::indicators::IndicatorConfig, String> {
+        let plan = period.map(crate::scale::ScaleWindowPlan::for_period);
+        let key = period.map(|p| p.scale_key()).unwrap_or("daily");
+        effective_indicator_config(&args, plan.as_ref(), key)
+    }
+
+    /// 零回归锚：**面板停在默认值时，两域的指标配置必须与接线前逐字相同**。
+    ///
+    /// 这条不是形式测试 —— 它把「接线 = 换权威」和「接线 = 通管道」分开：前者会改现网数值，
+    /// 后者不会。本批要求不会（默认值对账另由 `scripts/check-indicator-config-scope.mjs` P1 锁）。
+    #[test]
+    fn empty_args_reproduce_the_pre_wiring_configs_bit_identically() {
+        let daily = cfg_for(None, serde_json::json!({})).expect("空参数必须成功");
+        assert_eq!(
+            format!("{daily:?}"),
+            format!("{:?}", crate::indicators::IndicatorConfig::default()),
+            "日线链在面板默认值下不再逐字等于接线前 ⇒ 本批悄悄改了现网数值"
+        );
+        for p in Period::ALL {
+            let plan = crate::scale::ScaleWindowPlan::for_period(p);
+            let got = cfg_for(Some(p), serde_json::json!({})).expect("档侧空参数必须成功");
+            assert_eq!(
+                format!("{got:?}"),
+                format!("{:?}", crate::indicators::IndicatorConfig::from(&plan)),
+                "{p:?} 档在面板默认值下不再等于纯计划派生 ⇒ 设施悄悄覆盖了窗口"
+            );
+        }
+    }
+
+    /// 两域边界：窗口域只作用日线；**档侧收到窗口参数是显式失败，不是静默忽略**。
+    #[test]
+    fn window_domain_applies_to_daily_only_and_fails_loudly_on_tiers() {
+        let args = serde_json::json!({ "ind_macd_fast": 8.0, "ind_macd_slow": 21.0 });
+        let daily = cfg_for(None, args.clone()).expect("日线接受窗口参数");
+        assert_eq!((daily.macd_fast, daily.macd_slow), (8, 21));
+        for p in Period::ALL {
+            let err = cfg_for(Some(p), args.clone())
+                .expect_err("档侧必须拒绝窗口参数（否则四档窗口又被焊成一份）");
+            assert!(
+                err.contains("ScaleWindowPlan") && err.contains("ind_macd_fast"),
+                "{p:?} 的拒绝没点名参数或权威：{err}"
+            );
+        }
+    }
+
+    /// 阈值域全链接受（§九十六(2)：阈值与 bar 的日历跨度无关）。
+    #[test]
+    fn threshold_domain_applies_to_daily_and_every_tier() {
+        let args = serde_json::json!({ "ind_boll_stddev": 2.5 });
+        let daily = cfg_for(None, args.clone()).expect("日线阈值参数必须生效");
+        assert_eq!(daily.boll_stddev, 2.5);
+        for p in Period::ALL {
+            let got = cfg_for(Some(p), args.clone())
+                .unwrap_or_else(|e| panic!("{p:?} 档不该拒阈值参数：{e}"));
+            assert_eq!(got.boll_stddev, 2.5, "{p:?} 档的阈值没有生效 ⇒ 面板对档侧仍是空接线");
+            // 窗口仍归该档计划（阈值不得顺手把窗口也带成日线的）
+            assert_eq!(
+                got.boll_period,
+                crate::scale::ScaleWindowPlan::for_period(p).short_bars,
+                "{p:?} 档的 boll 窗口不再等于本档计划"
+            );
+        }
+    }
+
+    /// 坏值一律显式失败，**不得**回落默认值（回落就是「面板调了没反应」换形态复发）。
+    #[test]
+    fn bad_panel_values_fail_instead_of_falling_back() {
+        for bad in [
+            serde_json::json!({ "ind_macd_fast": 0.0 }),
+            serde_json::json!({ "ind_macd_fast": 1.0 }),
+            serde_json::json!({ "ind_macd_fast": 12.5 }),
+            serde_json::json!({ "ind_macd_fast": "12" }),
+            serde_json::json!({ "ind_macd_fast": null }),
+            serde_json::json!({ "ind_boll_stddev": 0.0 }),
+        ] {
+            let key = bad.as_object().and_then(|m| m.keys().next().cloned()).unwrap_or_default();
+            let r = cfg_for(None, bad.clone());
+            match r {
+                Err(e) => assert!(e.contains(&key), "{key} 的报错没点名参数：{e}"),
+                // `null` 走 `get(key)==Some(Null)` ⇒ as_f64 失败即报错；数值型坏值同理。
+                Ok(_) => panic!("坏参数 {bad:?} 被静默接受 ⇒ 设施会把「调了没生效」藏回默认值"),
+            }
+        }
+    }
+
+    /// 结构倒置（慢线≤快线、放量≤缩量）必须红：两者都「能算出数」，但信号语义是反的。
+    #[test]
+    fn inverted_structure_fails() {
+        let e = cfg_for(None, serde_json::json!({ "ind_macd_fast": 26.0, "ind_macd_slow": 12.0 }))
+            .expect_err("MACD 慢线小于快线必须失败");
+        assert!(e.contains("macd_slow"), "{e}");
+        let e = cfg_for(
+            None,
+            serde_json::json!({ "ind_volume_surge_ratio": 0.7, "ind_volume_shrink_ratio": 1.5 }),
+        )
+        .expect_err("放量比小于缩量比必须失败");
+        assert!(e.contains("volume_surge_ratio"), "{e}");
     }
 }

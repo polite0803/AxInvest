@@ -313,7 +313,6 @@ fn sub_workflow_node(
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             output_var: output_var.to_string(),
-            is_async: false,
             sub_graph: None,
         },
     })
@@ -1112,4 +1111,88 @@ fn build_l3_router_edges() -> Vec<WorkflowEdge> {
         direct_edge("e9", "graph_router", "normalize_l3"),
         direct_edge("e10", "normalize_l3", "l3_success"),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow_fanout_audit::{audit_fanouts, graphs_to_audit};
+    use std::collections::BTreeMap;
+
+    /// 主图里**真正**是图内扇出的那些子模板的数据源登记（`system_*` 走系统能力回调，
+    /// 不查 workflow_templates 表 ⇒ 不在这里登记，由审计侧按前缀排除并如实打印）。
+    fn seeded_child_templates() -> BTreeMap<&'static str, Vec<WorkflowNode>> {
+        let mut m = BTreeMap::new();
+        m.insert(COGNITIVE_L1_DOMAIN_ROUTER_ID, build_l1_router_nodes());
+        m.insert(COGNITIVE_L2_CLUSTER_ROUTER_ID, build_l2_router_nodes());
+        m.insert(COGNITIVE_L3_CAPABILITY_ROUTER_ID, build_l3_router_nodes());
+        m
+    }
+
+    /// 正对照：存量三扇出必须无缺口、无未登记、无盲区，且扇出面非空。
+    #[test]
+    fn sub_workflow_fanout_inputs_are_complete() {
+        let templates = seeded_child_templates();
+        let main = build_main_router_nodes();
+        let graphs = graphs_to_audit(COGNITIVE_ROUTER_MAIN_ID, &main, &templates);
+        let audit = audit_fanouts(&graphs, &templates);
+
+        assert!(audit.gaps.is_empty(), "扇出键不齐备（子图要读而父没传）：{:?}", audit.gaps);
+        assert!(
+            audit.unregistered.is_empty(),
+            "这些扇出指向未登记的子模板，判据对它们没有数据源：{:?}",
+            audit.unregistered
+        );
+        assert!(
+            !audit.fanouts.is_empty(),
+            "扇出面为空 ⇒ 本门失去意义（主图扇出全没了，或抽取器不再认得 sub_workflow_node）"
+        );
+        assert_eq!(
+            audit.fanouts, audit.registered,
+            "登记的子模板集合与实际扇出集合必须**双向**一致：新增扇出要登记数据源，撤扇出要同步撤表"
+        );
+        assert!(
+            audit.blind_kinds.is_empty(),
+            "node_var_io 未覆盖这些节点类型 {:?} ⇒ 它们读写的键名对本门是盲区；补 match 臂，别放绿",
+            audit.blind_kinds
+        );
+        println!(
+            "审计 {} 张图；图内扇出 {} 个（{}）；system_* 能力回调排除 {} 个（{:?}）",
+            graphs.len(),
+            audit.fanouts.len(),
+            audit.fanouts.iter().cloned().collect::<Vec<_>>().join(","),
+            audit.excluded_system.len(),
+            audit.excluded_system
+        );
+    }
+
+    /// 负控：抽掉一个扇出父映射里**子图真正要用**的 target 键 ⇒ 必须经由**同一个**
+    /// `audit_fanouts` 报出缺口（另写一遍比较公式的那种负控证不到真判据）。
+    #[test]
+    fn fanout_missing_target_key_is_caught() {
+        let templates = seeded_child_templates();
+        let mut mains = build_main_router_nodes();
+        let mut removed = None;
+        for node in &mut mains {
+            if let WorkflowNode::SubWorkflow(s) = node
+                && !s.config.sub_workflow_id.starts_with("system_")
+                && s.config.input_mapping.contains_key("user_input")
+            {
+                s.config.input_mapping.remove("user_input");
+                removed = Some(s.base.id.clone());
+                break;
+            }
+        }
+        let removed = removed.expect("主图里没有可拆的图内扇出 ⇒ 本负控失去前提");
+        let graphs = graphs_to_audit(COGNITIVE_ROUTER_MAIN_ID, &mains, &templates);
+        let audit = audit_fanouts(&graphs, &templates);
+        assert!(
+            audit
+                .gaps
+                .iter()
+                .any(|(_, _, parent, missing)| parent == &removed && missing.contains("user_input")),
+            "抽掉 {} 的 user_input 之后仍报「无缺口」⇒ 齐备性判据没电（抽取面或比较面失效）",
+            removed
+        );
+    }
 }

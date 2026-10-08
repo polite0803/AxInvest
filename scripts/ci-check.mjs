@@ -228,6 +228,15 @@ if (canRunFrontend) {
   step("前后端档位权重门自检（判据①—⑧正负对照）", "node scripts/check-horizon-weight-parity.mjs --selftest");
   step("前后端档位权重逐字段一致（含档名不手抄天数）", "node scripts/check-horizon-weight-parity.mjs");
   step("可调参数注入覆盖（五点对账，strict）", "node scripts/audit-inject-coverage.mjs --strict");
+  // v135（B-2b #36）：四个 `pm-h-<档>` 分支节点已从主图种子搬进**档子模板 builder** ⇒ 审计面
+  // 必须跟着搬。不搬的话这四处会同时失去读取面而**照样绿**（§九十一(2.5)：门跟着搬，
+  // 而不是把定义留两份 / 把字面量收进循环）。档名由权威 `Period::as_str` 现推，`all` 在
+  // 脚本内部展开 —— 命令行不参与引号拼接（Windows 的 cmd.exe 会吃掉 include 锚里的 `"`）。
+  // 与 ci.yml 的对应 step **逐字同源**。
+  step(
+    "四档分支注入覆盖（档模板映射面 ↔ 分支脚本 present()，strict）",
+    "node scripts/audit-inject-coverage.mjs --tier all --strict",
+  );
 
   // ── .rhai 数值判据形态（2026-10-04 补，PLAN-four-horizon-workflow-alignment.md §五十二 ③）──
   // 为什么需要：JSON 数字进 Rhai 有两条通道 —— 顶层标量落 f64、**嵌层整数落 i64**
@@ -328,6 +337,31 @@ if (canRunRust && !quick) {
   //   每次运行都打印，失效即红）；R3 --selftest 用合成文本证明识别器真读 match 臂。
   step("每日快照白名单一致性自检（正负对照）", "node scripts/check-snapshot-whitelist.mjs --selftest");
   step("每日快照白名单一致性（申报 NHS ⇒ 必须归档）", "node scripts/check-snapshot-whitelist.mjs");
+
+  // ── 跨行聚合入口的按代筛样登记门（#31，2026-10-05）──
+  // 四类分列：统计/注入该筛（断言引用起算代常量）、呈现/单条**不该筛**（断言不引用）、
+  // pending 源表无代际列（断言未假装筛过 + 每次打印）。PLAN §五十一-③ 原写的「都调同一个
+  // helper」是错的：统一套下限会让呈现/单条类无端丢行（9 个入口普查后确认）。
+  step("跨行聚合按代筛样登记自检（两方向负控）", "node scripts/check-generation-scope-registry.mjs --selftest");
+  step("跨行聚合按代筛样登记（四类分列）", "node scripts/check-generation-scope-registry.mjs");
+
+  // ── 逐档分支的档内纯度门（#7 的 ②与④，2026-10-06）──
+  // 扫描面按域限定：四个 `pm-h-<档>` 种子块 + 四份 `portfolio-mgr-h-<档>.rhai`。
+  // 断言两件事：本档不点名他档（评分/风险/解禁窗/逐档分支 JSON/分析师逐档实例 id 五形），
+  // 以及四档的 tier_score 来源互不相同（历史真实缺陷 = 长档复用月线评分 ⇒ mid/long 方向恒等）。
+  // 跨档消费者（pm-arbiter / portfolio-mgr）不在扫描面内 ⇒ 不需要豁免表。
+  // 档名与 `t-scoring-*` 节点 id 全部现场推导（as_str 按 `=>` 切臂取右值），不手抄。
+  step("逐档分支档内纯度自检（最长命中/剥注释/判据不存在三类负控）", "node scripts/check-tier-purity.mjs --selftest");
+  step("逐档分支档内纯度（他档 token / 四档评分来源互不相同）", "node scripts/check-tier-purity.mjs");
+
+  // v137（裁定 2「先加设施再接线」，PLAN §一○五）：面板「技术指标」8 个变量从空接线变成真生效之后，
+  // 新增的失效形态是**接错域**（把窗口域五条接到四档 ⇒ 四档窗口重新焊成同一份）与**默认值手抄漂移**
+  // （面板那份是 TS 里的手抄副本，抄错就把「接线」变成「改现网数值」）。与 ci.yml 的对应 step 逐字同源。
+  step(
+    "面板技术指标两域归属与默认值对账自检（五条负控）",
+    "node scripts/check-indicator-config-scope.mjs --selftest",
+  );
+  step("面板技术指标两域归属与默认值对账", "node scripts/check-indicator-config-scope.mjs");
 
   step(
     "cargo fmt 格式化检查",

@@ -304,7 +304,7 @@ jobs:
       # 没调用（等于没接）③ 落点旁边又抄回一份字面量（第二权威复活，本批真出现过两处：回放链 PE
       # 20/40 与 `verify_catalysts` 写死的 50 条新闻）。判据 P1–P5 见脚本头。
       # 与 scripts/ci-check.mjs 的对应 step 逐字同源。
-      - name: Check panel variable landing (A-batch wiring: defaults + consumers + single authority)
+      - name: "Check panel variable landing (A-batch wiring: defaults + consumers + single authority)"
         run: |
           node scripts/check-panel-var-landing.mjs --selftest
           node scripts/check-panel-var-landing.mjs

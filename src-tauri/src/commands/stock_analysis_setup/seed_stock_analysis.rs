@@ -1157,7 +1157,7 @@ type AlgoToolRow = (
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 141;
+pub const TEMPLATE_VERSION: i32 = 142;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -4930,7 +4930,14 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         // 但它的依赖链仅含 v-validate → cls-risk-level，这两者都不依赖分析师，
         // 导致 data-quality 在分析师之前就跑完了。
         // 添加从每个分析师的边确保 data-quality 等待所有分析师完成。
-        for aid in &a_ids {
+        // ⚠ 只给**图里真存在的**分析师补边：B-2b（v135）把逐档分析师分支搬进档子模板后，
+        //   主图里已经没有 `a_*` 节点，无条件按 `a_ids` 补边会造出指向不存在节点的边
+        //   ⇒ `dag_store` 建图校验直接拒绝（现网症状：发起分析报
+        //   「Node 'data-quality' depends on non-existent 'a-market-analyst'」）。
+        //   「data-quality 要等分析师」这条语义现在由子工作流节点自身的入边表达。
+        let dq_present: Vec<&str> =
+            nodes.iter().map(|n| n.base_id()).filter(|bid| a_ids.contains(bid)).collect();
+        for aid in &dq_present {
             edges.push(edge(&format!("e-{aid}-data-quality"), aid, dq_id));
         }
         // 因子数据完整度评估：data-quality 需要等待 ToolNode 完成以获取因子数据

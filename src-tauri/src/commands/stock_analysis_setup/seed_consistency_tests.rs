@@ -3315,6 +3315,13 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
             })
         }
 
+        // v139：逐档**可区分**的夹具索引 —— 两带/动量的数值随档变，脚本若硬编码或串档
+        // （读成别档那一格），另外三档的断言当场就红。声明在闭包**外**：
+        // 齐备态断言也要用它，写在 `run_with` 里面就只是夹具的局部变量。
+        let tier_idx = axagent_harness::holding_period::Period::ALL
+            .into_iter()
+            .position(|p| p.as_str() == tier)
+            .expect("档名必须落进 Period::ALL");
         let run_with = |names: &[String], full: bool| -> Result<Map, String> {
             let mut scope = Scope::new();
             let mut unhandled: Vec<&str> = Vec::new();
@@ -3346,6 +3353,31 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
                         }
                     },
                     "kline_bars" => value_to_dynamic(&bars),
+                    // v139 呈现层补齐：两带与动量对象按档给**不同数值**（退化态同样给 UNIT）。
+                    "scale_trend" => {
+                        if !full {
+                            Dynamic::UNIT
+                        } else {
+                            value_to_dynamic(&serde_json::json!({
+                                "fastBars": 2 + tier_idx,
+                                "slowBars": 6 + 3 * tier_idx,
+                                "fast": 11.5 + tier_idx as f64,
+                                "slow": 10.25 + tier_idx as f64,
+                                "diffPct": 12.5 + tier_idx as f64,
+                                "fastSlope": 0.5 + tier_idx as f64,
+                            }))
+                        }
+                    },
+                    "scale_momentum" => {
+                        if !full {
+                            Dynamic::UNIT
+                        } else {
+                            value_to_dynamic(&serde_json::json!({
+                                "period": 2 + tier_idx,
+                                "value": 44.0 + tier_idx as f64,
+                            }))
+                        }
+                    },
                     other => match (full, value_for(other)) {
                         (true, Some(v)) => value_to_dynamic(&v),
                         (false, _) => Dynamic::UNIT,
@@ -3442,6 +3474,36 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
         assert!(
             ma.map(|a| !a.is_empty()).unwrap_or(false),
             "档 {tier} 的 scoringWindows.maPeriods 为空 ⇒ 窗口根数读不出来，面板那一行无从成句"
+        );
+        // v139 呈现层补齐：两带与动量的**数值**必须逐档原样带出（夹具随档变 ⇒ 硬编码/串档都红）。
+        // 取值器两个数值型都收（产端 `usize` ⇒ JSON 整数 ⇒ Rhai i64；`f64` ⇒ f64），
+        // 本条锁的是「逐档透传」而不是数值类型 —— 类型口径由 `check-rhai-numeric-typing.mjs`
+        // 与上面那条 windows 断言各自覆盖，这里放宽不会掩盖它们。
+        let dyn_num = |v: &rhai::Dynamic| -> Option<f64> {
+            v.clone().try_cast::<f64>().or_else(|| v.clone().try_cast::<i64>().map(|i| i as f64))
+        };
+        let row_map = |k: &str| out.get(k).and_then(|v| v.clone().try_cast::<Map>());
+        let want_slow_bars = 6.0 + 3.0 * tier_idx as f64;
+        let want_diff_pct = 12.5 + tier_idx as f64;
+        let want_mom_value = 44.0 + tier_idx as f64;
+        let trend = row_map("scoringTrend")
+            .unwrap_or_else(|| panic!("档 {tier} 齐备态没带出 scoringTrend 对象 ⇒ 键名或透传断了"));
+        assert_eq!(
+            trend.get("slowBars").and_then(dyn_num),
+            Some(want_slow_bars),
+            "档 {tier} 的慢带根数不是本档那份（夹具随档变 ⇒ 红即串档/硬编码）"
+        );
+        assert_eq!(
+            trend.get("diffPct").and_then(dyn_num),
+            Some(want_diff_pct),
+            "档 {tier} 的两带差不等于本档夹具值 ⇒ 数值被改写或漏传"
+        );
+        let mom = row_map("scoringMomentum")
+            .unwrap_or_else(|| panic!("档 {tier} 齐备态没带出 scoringMomentum 对象"));
+        assert_eq!(
+            mom.get("value").and_then(dyn_num),
+            Some(want_mom_value),
+            "档 {tier} 的动量值不是本档夹具值 ⇒ 与 rsi_value 那条不再是同一个数"
         );
         // 以下四条从被删除的「手抄 scope 运行门」迁移过来（那条门的 scope 比生产宽，是假绿来源；
         // 独有覆盖不能跟着删 ⇒ 见 4f 的「删 + 交代」规矩）：置信值域 / 缺席点名 / 退化留痕 / 点名先验。
@@ -3610,4 +3672,50 @@ fn analyst_brief_keys_match_tiered_instances() {
         script_vars, want,
         "analyst-brief.rhai 的 present() 变量集与 seed 生成的 input_mapping 键集不同步"
     );
+}
+
+// ── 面板变量默认值的**种子侧 ↔ 落点侧**对账（2026-10-08 A 批接线）──────────────────
+//
+// 这一条锁的是「两侧各自自洽、合起来不成立」那族（同 `kline_limit_is_wired_to_market_data_node`
+// 的思路，但方向相反）：落点（`astock-data` 评分 / `analysis-engine` 仓位）的回落默认与
+// 设置面板 `b()` 的默认可以各自都写对，只要**种子表里那条变量的默认值**是另一个数，
+// 那么升版播种后落点读到的就是那个数 —— 于是「接线不改现网」变成空话。
+//
+// 判据：把 `build_template_variables()` 的默认值当成变量表喂给三个落点的**纯构造函数**，
+// 结果必须与该落点的 `Default` 逐字段相等 ⇒ 这句话在这里被真的算一遍，而不是写在注释里。
+// 用纯函数而不是进程内快照：后者要动全局态，会和同二进制里的其它测试互相踩。
+#[test]
+fn seed_defaults_land_on_unchanged_rust_defaults() {
+    use axagent_analysis_engine::position_limits::PositionLimits;
+    use axagent_astock_data::scoring::{PeBands, ScoreBands};
+    use std::collections::HashMap;
+
+    let vars: HashMap<String, serde_json::Value> =
+        super::seed_variables::build_template_variables()
+            .into_iter()
+            .map(|v| (v.name, v.value))
+            .collect();
+
+    // ① RSI 内带（面板/种子 30 与 70 == `ScoreBands::default()` 的 `rsi_oversold` / `_overbought`）
+    let bands = ScoreBands::default().with_panel_overlay(&vars);
+    assert_eq!(
+        (bands.rsi_oversold, bands.rsi_overbought),
+        (30.0, 70.0),
+        "signal_rsi_oversold/overbought 的种子默认必须把带落回 30/70，否则接线本身在改评分"
+    );
+    assert_eq!(bands.rsi_oversold, ScoreBands::default().rsi_oversold);
+    assert_eq!(bands.rsi_overbought, ScoreBands::default().rsi_overbought);
+
+    // ② 仓位三条（20 / 10 / 40）
+    assert_eq!(
+        PositionLimits::from_panel_vars(&vars),
+        PositionLimits::default(),
+        "pos_max_single_pct / pos_max_total / pos_max_sector_pct 的种子默认必须逐条落回今天的 20/10/40"
+    );
+
+    // ③ PE 两档（15 / 50）
+    let pe = PeBands::default().with_panel_overlay(&vars);
+    assert_eq!(pe, PeBands::default(), "val_pe_low / val_pe_high 的种子默认必须落回 15/50");
+    assert_eq!(pe.low, 15.0);
+    assert_eq!(pe.high, 50.0);
 }

@@ -580,7 +580,7 @@ fn match_like_operator(rest: &[u8]) -> Option<(&'static str, usize)> {
 ///
 /// | 侧 | `idx_index_jobs_status` 的列 |
 /// |---|---|
-/// | L2 声明（`extras.rs:903-904`） | `["status", "priority DESC", "created_at"]` |
+/// | L2 声明（`extras.rs:920-921`） | `["status", "priority DESC", "created_at"]` |
 /// | 实况（存量库由已删的 `v100` 合并基线建出） | `(status, priority DESC, created_at ASC)` |
 ///
 /// 传导链：`plan::same_index` 判「不等」⇒ 同一条索引在 plan 里被拆成**同名**两条

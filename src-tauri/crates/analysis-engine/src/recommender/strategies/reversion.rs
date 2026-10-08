@@ -54,8 +54,12 @@ impl ReversionStrategy {
 
         // ── 新增：底背离检测 + 看涨 K 线形态检测 ──
         // 背离回看窗：日历 14 日 → 当前尺度的 bar 数（下限 5 根，否则粗尺度上变成「拿 1 根比高低」）
+        // ⚠ 这里的两个键名原先带 `_days` 后缀（`rev_divergence_lookback_days` / `rev_rsi_period_days`），
+        //   而 `seed_variables.rs` 声明的是 `rev_divergence_lookback`(14) / `rev_rsi_period`(6) ⇒
+        //   读取侧恒不命中、永远走兜底，面板上那两格改了没有任何东西读（兜底值恰好等于默认值，所以从不现形）。
+        //   判据落在 `scripts/check-variable-consumer-registry.mjs`：声明名与读取名必须逐字一致。
         let lookback = (crate::recommender::scale::bars_for_daily_span(
-            read_f64(vars, "rev_divergence_lookback_days", 14.0) as usize,
+            read_f64(vars, "rev_divergence_lookback", 14.0) as usize,
             &profile,
         ))
         .max(5);
@@ -86,7 +90,7 @@ impl ReversionStrategy {
         // ── 新增结束 ──
 
         let rsi_period = (crate::recommender::scale::bars_for_daily_span(
-            read_f64(vars, "rev_rsi_period_days", 6.0) as usize,
+            read_f64(vars, "rev_rsi_period", 6.0) as usize,
             &profile,
         ))
         .max(5);

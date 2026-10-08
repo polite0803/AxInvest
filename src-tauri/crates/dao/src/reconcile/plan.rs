@@ -1264,7 +1264,7 @@ impl Differ<'_> {
 ///
 /// | 侧 | `idx_index_jobs_status` 的列 |
 /// |---|---|
-/// | L2 声明（`extras.rs:903-904`） | `["status", "priority DESC", "created_at"]` |
+/// | L2 声明（`extras.rs:920-921`） | `["status", "priority DESC", "created_at"]` |
 /// | 实况（存量库由已删的 `v100` 合并基线建出） | `(status, priority DESC, created_at ASC)` |
 ///
 /// `ASC` 是默认方向 ⇒ 两侧等价，但裸比较判「不等」⇒ **同名**索引被拆成
@@ -2199,7 +2199,7 @@ mod tests {
         };
 
         // ── 主题：复刻第一现场的两侧原文 ──
-        //   声明（`extras.rs:903-904`）：["status", "priority DESC", "created_at"]
+        //   声明（`extras.rs:920-921`）：["status", "priority DESC", "created_at"]
         //   实况（`v100:1114` 建的）：(status, priority DESC, created_at ASC)
         let expected = mk(vec!["id", "priority DESC", "created_at"]);
         let actual = mk(vec!["id", "priority DESC", "created_at ASC"]);

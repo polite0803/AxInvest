@@ -223,6 +223,14 @@ export interface HorizonDecision {
   priorSamples?: number;
   /** 止损口径：`vol_band` = k·σ_daily·√本档持有天数 导出；`fallback_pct` = σ 不可得，退回固定百分比档 */
   stopSource?: string;
+  /**
+   * 本档**按档风险档**（v140 起由分支行带回；产端 = 子模板内的 `cls-risk-level-<档>` 节点）。
+   *
+   * 为什么它是分支的一个输出而不是主链的旁路读取：风险节点从父图搬进各档子模板后，
+   * 子执行只把扇出节点的双键写回父池 ⇒ 主链再按 `cls-risk-level-<档>` 取就是取一个不存在的
+   * 路径（`present()` 恒假 ⇒ 按档风险收紧整条静默退役）。带回这一行才是可检的接线。
+   */
+  riskCategory?: string;
   /** 仓位口径：逐档分支恒为 `kelly_x_position_multiplier`（凯利 × 该档仓位乘数） */
   positionSource?: string;
   /**
@@ -290,6 +298,30 @@ export interface HorizonDecision {
   scoringWindows?: HorizonScoringWindows | null;
   /** 本档评分所在尺度（`hourly` / `weekly` / `monthly` / `quarterly`），与 `scoringWindows` 同批出现 */
   scoringScale?: string;
+  /**
+   * 本档**两带趋势事实**（产端 = `indicators.scaleTrend`，v139）。
+   * `diffPct` / `fastSlope` 的缺席形态是 **`null`**（产端 `Option<f64>` 不跳过序列化）⇒
+   * 面板必须印「—」而不是 0：慢带非正/上一根不可算是「算不出」，不是「差 0%」。
+   */
+  scoringTrend?: HorizonScaleTrend | null;
+  /** 本档动量的「周期 + 值」对（产端 = `indicators.scaleMomentum`，与 `scoringScale` 同一份口径自证） */
+  scoringMomentum?: HorizonScaleMomentum | null;
+}
+
+/** 两带趋势回显（权威产端 = `astock-data::indicators::ScaleTrend`，serde camelCase） */
+export interface HorizonScaleTrend {
+  fastBars: number;
+  slowBars: number;
+  fast: number;
+  slow: number;
+  diffPct: number | null;
+  fastSlope: number | null;
+}
+
+/** 动量「带周期的值」对（权威产端 = `astock-data::indicators::ScaleValue`） */
+export interface HorizonScaleMomentum {
+  period: number;
+  value: number;
 }
 
 /**

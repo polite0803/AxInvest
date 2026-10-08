@@ -227,7 +227,8 @@ impl TradingEngine {
 
         // 仓位上限检查（买入时）
         if direction == "buy" {
-            let limits = crate::position_limits::PositionLimits::default();
+            // 仓位三条走面板（`pos_max_*`，回落 20/10/40 == 接线前的 `Default`）。
+            let limits = crate::position_limits::PositionLimits::panel_effective();
             let positions = self.get_positions().await.unwrap_or_default();
             let current_count = positions.len();
             let total_mv: f64 = positions.iter().map(|p| p.market_value.unwrap_or(0.0)).sum();

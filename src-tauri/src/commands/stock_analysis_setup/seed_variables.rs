@@ -135,13 +135,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
         },
         // ── 数据源参数 ──
         Variable {
-            name: "kline_period".into(),
-            var_type: "enum".into(),
-            value: serde_json::json!("daily"),
-            description: Some("K线周期: daily / weekly / monthly".into()),
-            is_secret: false,
-        },
-        Variable {
             name: "kline_limit".into(),
             var_type: "number".into(),
             // ⚠ 「值」与「有消费方」是两件事：本变量长期只是**声明**（默认 120、面板可调、
@@ -160,55 +153,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         // ── 行业参照参数（股票分析中 t-baseline-* 节点使用）──
-        Variable {
-            name: "ref_semi_code".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("002371"),
-            description: Some("半导体行业参照股票代码".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "ref_battery_code".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("300750"),
-            description: Some("电池行业参照股票代码".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "ref_chem_code".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("600309"),
-            description: Some("化工行业参照股票代码".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "ref_med_code".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("688981"),
-            description: Some("医疗行业参照股票代码".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "ref_aero_code".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("600760"),
-            description: Some("航空军工行业参照股票代码".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "ref_consumer_elec_code".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("002475"),
-            description: Some("消费电子行业参照股票代码".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "ref_auto_code".into(),
-            var_type: "string".into(),
-            value: serde_json::json!("600104"),
-            description: Some("汽车行业参照股票代码".into()),
-            is_secret: false,
-        },
         // ── Agent 节点 LLM 参数 ──
         Variable {
             name: "agent_temperature".into(),
@@ -308,48 +252,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         // ── 规则引擎阈值 ──
-        Variable {
-            name: "rule_rsi_overbought".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(80.0),
-            description: Some("RSI 超买阈值".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "rule_rsi_oversold".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(20.0),
-            description: Some("RSI 超卖阈值".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "rule_bias_limit_pct".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(5.0),
-            description: Some("均线偏离极限 (%)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "rule_volume_signal_block".into(),
-            var_type: "boolean".into(),
-            value: serde_json::json!(true),
-            description: Some("成交量异常时是否阻塞信号".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "rule_bear_low_score".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(30),
-            description: Some("空方低分阈值 (低于此分数触发警告)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "rule_auto_stop_loss_pct".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(5.0),
-            description: Some("自动止损线 (%)".into()),
-            is_secret: false,
-        },
         // ── 仓位限制 ──
         Variable {
             name: "pos_max_single_pct".into(),
@@ -421,20 +323,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(30),
             description: Some("监控轮询间隔秒数".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "monitor_change_pct".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(5.0),
-            description: Some("价格异动提醒阈值 (%)".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "monitor_turnover".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(10.0),
-            description: Some("换手率异动提醒阈值 (%)".into()),
             is_secret: false,
         },
         // ── 置信度参数 ──
@@ -2236,24 +2124,10 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             is_secret: false,
         },
         Variable {
-            name: "val_long_kline_limit".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(70),
-            description: Some("价值策略：K 线读取上限（条）｜长线".into()),
-            is_secret: false,
-        },
-        Variable {
             name: "val_long_ma_period".into(),
             var_type: "number".into(),
             value: serde_json::json!(60),
             description: Some("价值策略：均线计算周期｜长线".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "val_short_kline_limit".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(30),
-            description: Some("价值策略：K 线读取上限（条）｜短线".into()),
             is_secret: false,
         },
         Variable {
@@ -2268,13 +2142,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(20),
             description: Some("价值策略：K 线最少条数（不足则跳过该股）｜短线".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "val_ultra_short_kline_limit".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(10),
-            description: Some("价值策略：K 线读取上限（条）｜超短线".into()),
             is_secret: false,
         },
         Variable {
@@ -2326,27 +2193,6 @@ pub(crate) fn build_template_variables() -> Vec<Variable> {
             var_type: "number".into(),
             value: serde_json::json!(0.25),
             description: Some("组合 HHI 高度集中阈值".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "risk_hhi_medium".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(0.15),
-            description: Some("组合 HHI 中度集中阈值".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "risk_divers_high".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(8.0),
-            description: Some("组合有效股票数充分分散阈值".into()),
-            is_secret: false,
-        },
-        Variable {
-            name: "risk_divers_medium".into(),
-            var_type: "number".into(),
-            value: serde_json::json!(4.0),
-            description: Some("组合有效股票数适度分散阈值".into()),
             is_secret: false,
         },
         Variable {

@@ -14,16 +14,20 @@
 //! 同文件 `:4604-4607` 也记着同一条史）。
 //! 这里重复的是**节点声明**，不是类型或函数定义，不触 AGENTS.md 禁区 12。
 //!
-//! ⚠ 步骤 2 的**一处偏离**（本档风险节点 `cls-risk-level-<档>` 留在父图，不进子模板）：
+//! ⚠ 步骤 2 当年**留的一处偏离**，已在 v140 补齐（保留原因，因为它是「为什么曾经不是三节点」的史）：
 //! §九十一(0) 的可搬运边界把三节点都算进子模板，但普查后 `portfolio-mgr` 有**四个父侧读面**
 //! （`seed_stock_analysis.rs` 的 `overall_risk_{ultra_short,short,mid,long}` 四条映射 + 四条供给边，
 //! 消费点是 `portfolio-mgr.rhai` 的 `tier_risk_raise`）。子执行只把父扇出节点的
 //! `node_id`/`output_var` 双键写回父池（`work_engine/engine/mod.rs:1772-1775`），
 //! 于是风险节点一旦进子模板，这四条映射就变成「指向不存在的路径」⇒ `present()` 恒假 ⇒
 //! **v128 B1 的按档风险收紧整条静默退役**（正是本仓登记的「配置项空接线」族）。
-//! 让子模板把风险档带回 `h_<档>` 需要改四份分支脚本 + 主链读端（PLAN 明写「脚本内容不变」），
-//! 故本批只搬**评分 + 决策**两节点，风险节点仍逐档展开在父图；子模板经扇出拿到
-//! `cls-risk-level-<档>` 这一个键（恒等映射），`pm-h-<档>` 的 `overall_risk` 源路径逐字不变。
+//!
+//! v140 的补齐形态（同一批四处一起改，缺一处就是那次静默退役的复现）：
+//!   ① 子模板**多一个节点**（[`tier_risk_node`]，九条映射与父图旧形态逐字相同 ⇒ 数值零变化）；
+//!   ② 父扇出的身份键从 `cls-risk-level-<档>` 换成 **`t-risk`**（风险节点吃的仍是父侧 `t-risk` 的产出）；
+//!   ③ 分支脚本把读到的本档风险档**回写进决策行**（`riskCategory`）⇒ 双键写回把它带回父池；
+//!   ④ 主链四条读面改指 `pm-h-<档>.result.riskCategory`，并**删掉** `cls-risk-level-<档> → portfolio-mgr`
+//!      四条父侧边（节点已不在父图；时序由既有的 `pm-h-<档> → portfolio-mgr` 供给边传递覆盖）。
 
 use axagent_harness::holding_period::Period;
 use axagent_harness::workflow_types::{
@@ -161,6 +165,55 @@ fn tier_scoring_tool_node(id: &str, title: &str, x: f64, y: f64) -> WorkflowNode
     })
 }
 
+/// 本档**按档风险节点**（v140 从父图搬进来，补齐 §九十一(0) 的三节点形状）。
+///
+/// 输入面 = 7 条全局轴 + 2 条本档轴（`riskWindows.<camel档>`），与父图旧形态**逐字一致** ⇒
+/// 数值零变化。`t-risk` 由父扇出以恒等键传进子快照（它不是子节点，所以子图里**不给它建边**：
+/// 子图的根仍只有 `const-scoring-period`，风险节点无入边 = 与评分节点并行起跑，
+/// 而它要的 `t-risk` 在扇出开工前就已到账 —— 父侧的 `t-risk → pm-h-<档>` 供给边保证这点）。
+///
+/// ⚠ 九个映射的**字面量在四个调用点各写一遍**（含七条全局轴），不在这个 helper 里用 `format!` 拼、
+/// 也不从别处的常量合：拼起来就没有任何字面量可让文本门读
+/// （`check-tier-purity.mjs` 的 R2 与 Rust 侧的 `tier_branch_reads_own_risk_cell` 都靠字面量
+/// 判「读本档那一格」）—— 同 §九十一(2.5) 拒绝 `format!` 拼装评分脚本路径是同一条理由。
+///
+/// `continue_on_fail = false`（父图旧形态是 `true`）：**这是刻意的**，为了让失败面与搬动前逐位相同。
+/// 搬动前父节点失败 ⇒ 它的产出不进父池 ⇒ 扇出的严格 `map_inputs` 取不到该键 ⇒ **整档子执行失败**；
+/// 若在子图里留 `true`，风险节点失败就只剩「分支读不到 overall_risk」这种软降级 ⇒
+/// 等于趁搬图偷偷把「该档失败」放宽成「该档少一腿」。要改这个语义，得单独裁定并点名消费者。
+fn tier_risk_node(
+    id: &str,
+    title: &str,
+    description: &str,
+    args: [(&str, &str); 9],
+    x: f64,
+    y: f64,
+) -> WorkflowNode {
+    WorkflowNode::Code(CodeNode {
+        base: WorkflowNodeBase {
+            id: id.into(),
+            title: title.into(),
+            description: Some(description.into()),
+            position: Position { x, y },
+            retry: RetryConfig::default(),
+            timeout: Some(10),
+            enabled: true,
+            parent_id: None,
+            compensation: None,
+            continue_on_fail: false,
+        },
+        config: CodeNodeConfig {
+            language: "rhai".into(),
+            code: include_str!("../risk-level.rhai").to_string(),
+            // output_var 与节点 id 不同名（父图旧形态就是这样；下游读的是 `{id}.result.category`）
+            output_var: format!("risk-level-{}", id.replace("cls-risk-level-", "")),
+            tool_name: None,
+            execute_directly: true,
+            input_mapping: args.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        },
+    })
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // 超短档
 // ══════════════════════════════════════════════════════════════════════════
@@ -169,6 +222,37 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
         tier_scoring_period_const_node("hourly", 2700.0),
         tier_scoring_tool_node("t-scoring-hour", "技术评分（60 分钟）", 1020.0, 2700.0),
+        // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
+        tier_risk_node(
+            "cls-risk-level-ultra-short",
+            "超短线风险等级分类",
+            "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（2 日）回撤深度判据",
+            [
+                (
+                    "risk_volatility",
+                    "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
+                ),
+                ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
+                ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
+                ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
+                ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
+                ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
+                (
+                    "risk_revenue_growth",
+                    "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
+                ),
+                (
+                    "risk_drawdown_depth",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.ultraShort.drawdownDepth",
+                ),
+                (
+                    "risk_window_days",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.ultraShort.windowDays",
+                ),
+            ],
+            1020.0,
+            2950.0,
+        ),
         WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
                 id: "pm-h-ultra-short".into(),
@@ -203,6 +287,10 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // `windows` 是节点回显而非「想要的配置」（产端 = `indicators::IndicatorWindows`）。
                     ("scoring_windows", "t-scoring-hour.result.content.indicators.windows"),
                     ("scoring_scale", "t-scoring-hour.result.content.period"),
+                    // v139（呈现层补齐，PLAN §一○八）：两带与动量的**数值**也上屏，
+                    // 不只窗口根数 —— 读者要能看出「这一档的两带差是多少」。
+                    ("scale_trend", "t-scoring-hour.result.content.indicators.scaleTrend"),
+                    ("scale_momentum", "t-scoring-hour.result.content.indicators.scaleMomentum"),
                     // v128（B1）：本档风险档 ← **本档**的 cls-risk-level-ultra-short 节点
                     ("overall_risk", "cls-risk-level-ultra-short.result.category"),
                     // `kline_bars` 取**日线** `t-scoring` 而非本档尺度节点：本档要的量是 `σ_daily`
@@ -233,6 +321,13 @@ fn ultra_short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
             "t-scoring-hour",
         ),
         direct_edge("e-t-scoring-hour-pm-h-ultra-short", "t-scoring-hour", "pm-h-ultra-short"),
+        // v140：风险节点无入边（它只读扇出传进来的 `t-risk`）⇒ 与评分节点并行起跑；
+        // 分支必须等它 ⇒ 这条边是「本档风险档在分支之前算出来」的唯一时序保证。
+        direct_edge(
+            "e-cls-risk-level-ultra-short-pm-h-ultra-short",
+            "cls-risk-level-ultra-short",
+            "pm-h-ultra-short",
+        ),
         direct_edge("e-pm-h-ultra-short-end", "pm-h-ultra-short", "end"),
     ];
     (nodes, edges)
@@ -246,6 +341,37 @@ fn short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
         tier_scoring_period_const_node("weekly", 2700.0),
         tier_scoring_tool_node("t-scoring-week", "技术评分（周线）", 1140.0, 2700.0),
+        // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
+        tier_risk_node(
+            "cls-risk-level-short",
+            "短线风险等级分类",
+            "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（5 日）回撤深度判据",
+            [
+                (
+                    "risk_volatility",
+                    "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
+                ),
+                ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
+                ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
+                ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
+                ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
+                ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
+                (
+                    "risk_revenue_growth",
+                    "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
+                ),
+                (
+                    "risk_drawdown_depth",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.short.drawdownDepth",
+                ),
+                (
+                    "risk_window_days",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.short.windowDays",
+                ),
+            ],
+            1140.0,
+            2950.0,
+        ),
         WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
                 id: "pm-h-short".into(),
@@ -278,6 +404,9 @@ fn short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // v138 裁定 3：本档窗口回显 + 尺度（详注见超短模板那一处）
                     ("scoring_windows", "t-scoring-week.result.content.indicators.windows"),
                     ("scoring_scale", "t-scoring-week.result.content.period"),
+                    // v139 呈现层补齐（详注见超短模板那一处）
+                    ("scale_trend", "t-scoring-week.result.content.indicators.scaleTrend"),
+                    ("scale_momentum", "t-scoring-week.result.content.indicators.scaleMomentum"),
                     // #23（v132）：本档解禁供给占比 —— 取数层按**权威交易日窗**归约后的**小数**占比
                     // （`Σ解禁市值 ÷ 流通市值`，锚点 = as-of 截止日）。
                     (
@@ -313,6 +442,8 @@ fn short_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
             "t-scoring-week",
         ),
         direct_edge("e-t-scoring-week-pm-h-short", "t-scoring-week", "pm-h-short"),
+        // v140：风险节点 → 本档分支（同超短那一处注释）
+        direct_edge("e-cls-risk-level-short-pm-h-short", "cls-risk-level-short", "pm-h-short"),
         direct_edge("e-pm-h-short-end", "pm-h-short", "end"),
     ];
     (nodes, edges)
@@ -326,6 +457,37 @@ fn mid_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
         tier_scoring_period_const_node("monthly", 2700.0),
         tier_scoring_tool_node("t-scoring-month", "技术评分（月线）", 1260.0, 2700.0),
+        // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
+        tier_risk_node(
+            "cls-risk-level-mid",
+            "中线风险等级分类",
+            "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（28 日）回撤深度判据",
+            [
+                (
+                    "risk_volatility",
+                    "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
+                ),
+                ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
+                ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
+                ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
+                ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
+                ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
+                (
+                    "risk_revenue_growth",
+                    "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
+                ),
+                (
+                    "risk_drawdown_depth",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.mid.drawdownDepth",
+                ),
+                (
+                    "risk_window_days",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.mid.windowDays",
+                ),
+            ],
+            1260.0,
+            2950.0,
+        ),
         WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
                 id: "pm-h-mid".into(),
@@ -357,6 +519,9 @@ fn mid_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // v138 裁定 3：本档窗口回显（详注见超短模板那一处）
                     ("scoring_windows", "t-scoring-month.result.content.indicators.windows"),
                     ("scoring_scale", "t-scoring-month.result.content.period"),
+                    // v139 呈现层补齐（详注见超短模板那一处）
+                    ("scale_trend", "t-scoring-month.result.content.indicators.scaleTrend"),
+                    ("scale_momentum", "t-scoring-month.result.content.indicators.scaleMomentum"),
                     // #23（v132）：mid 的 `supplyShock` 是 riskNote（权重恒 0、不进方向），
                     // 但「有数可报」与「无数可报」是两件事 —— 接通后 riskNotes 才真能给出该档窗口内的解禁占比。
                     (
@@ -402,6 +567,8 @@ fn mid_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
             "t-scoring-month",
         ),
         direct_edge("e-t-scoring-month-pm-h-mid", "t-scoring-month", "pm-h-mid"),
+        // v140：风险节点 → 本档分支（同超短那一处注释）
+        direct_edge("e-cls-risk-level-mid-pm-h-mid", "cls-risk-level-mid", "pm-h-mid"),
         direct_edge("e-pm-h-mid-end", "pm-h-mid", "end"),
     ];
     (nodes, edges)
@@ -415,6 +582,38 @@ fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
     let nodes = vec![
         tier_scoring_period_const_node("quarterly", 2700.0),
         tier_scoring_tool_node("t-scoring-quarter", "技术评分（季度）", 1380.0, 2700.0),
+        // v140：本档按档风险节点（父图搬入，见 `tier_risk_node` 的文档）。
+        // 季线的 `riskWindows.long` 由 `windows_for_horizon` 按 3 根季线 = 60 交易日口径给出。
+        tier_risk_node(
+            "cls-risk-level-long",
+            "长线风险等级分类",
+            "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（90 日）回撤深度判据",
+            [
+                (
+                    "risk_volatility",
+                    "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
+                ),
+                ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
+                ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
+                ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
+                ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
+                ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
+                (
+                    "risk_revenue_growth",
+                    "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
+                ),
+                (
+                    "risk_drawdown_depth",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.long.drawdownDepth",
+                ),
+                (
+                    "risk_window_days",
+                    "t-risk.result.content.stockRiskProfile.riskWindows.long.windowDays",
+                ),
+            ],
+            1380.0,
+            2950.0,
+        ),
         WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
                 id: "pm-h-long".into(),
@@ -449,6 +648,9 @@ fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
                     // v138 裁定 3：本档窗口回显 + 尺度（详注见超短模板那一处）
                     ("scoring_windows", "t-scoring-quarter.result.content.indicators.windows"),
                     ("scoring_scale", "t-scoring-quarter.result.content.period"),
+                    // v139 呈现层补齐（详注见超短模板那一处）
+                    ("scale_trend", "t-scoring-quarter.result.content.indicators.scaleTrend"),
+                    ("scale_momentum", "t-scoring-quarter.result.content.indicators.scaleMomentum"),
                     ("pe_percentile", "t-valuation-band.result.content.metricPe.currentPercentile"),
                     ("f_score", "t-valuation.result.content.fScore.score"),
                     ("consensus_eps", "t-consensus-data.result.content.consensusEps"),
@@ -486,6 +688,8 @@ fn long_tier_template() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
             "t-scoring-quarter",
         ),
         direct_edge("e-t-scoring-quarter-pm-h-long", "t-scoring-quarter", "pm-h-long"),
+        // v140：风险节点 → 本档分支（同超短那一处注释）
+        direct_edge("e-cls-risk-level-long-pm-h-long", "cls-risk-level-long", "pm-h-long"),
         direct_edge("e-pm-h-long-end", "pm-h-long", "end"),
     ];
     (nodes, edges)

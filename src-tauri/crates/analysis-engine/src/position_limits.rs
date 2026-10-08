@@ -95,7 +95,10 @@ impl RiskTier {
 }
 
 /// 全局仓位限制配置
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+///
+/// `PartialEq` 是给 `panel_landing_tests` 用的：面板三条的「回落」与「拒绝覆盖」都要和
+/// `Default` 整体比对（逐字段比太容易漏掉一条，漏掉的那条正好是「接线没落地」的形态）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PositionLimits {
     pub max_single_stock_pct: f64,
@@ -103,6 +106,11 @@ pub struct PositionLimits {
     pub max_sector_exposure_pct: f64,
 }
 
+/// 仓位三条的**权威默认值**（20% / 10 只 / 40%）。
+///
+/// ⚠ 这里同时是「面板取不到值时的回落值」：`from_panel_vars` 从本 `Default` 出发再覆盖，
+///   所以「接线」不改现网任何一个数 —— 面板 `pos_max_*` 三条的默认值与这里逐字相等，
+///   对账由 `scripts/check-panel-var-landing.mjs` 的 P1 负责（两侧任一处改数即红）。
 impl Default for PositionLimits {
     fn default() -> Self {
         Self { max_single_stock_pct: 20.0, max_total_positions: 10, max_sector_exposure_pct: 40.0 }
@@ -112,7 +120,74 @@ impl Default for PositionLimits {
 /// 空头预测阈值：targetPrice < current × 0.85 视为强烈看空，应强制卖出
 pub const BEARISH_TARGET_PRICE_RATIO: f64 = 0.85;
 
+/// 面板仓位三条：`(变量名, 可用判据, 落点)` **同表**。
+///
+/// 为什么键、判据、落点必须在一张表里（照 `astock-data::mcp_tools::INDICATOR_BAR_ARGS` 的形）：
+/// 加第四条却忘了写落点 ⇒ 那个参数被静默忽略 ⇒ 又是一次「面板改了没反应」。`fn` 指针
+/// 让「表里有」与「落得了地」成为同一件事，生产路径不需要 `unreachable!`。
+///
+/// 判据不是装饰：`max_total_positions` 会被 `as u32` 截断，非整数（`10.5`）会把 10 只
+/// 变成 10 只却**报出 10.5**；`*_pct` 越过 (0, 100] 就不是「占比」。这类值一律**拒绝覆盖 +
+/// warn**（同 v137 那批的「显式失败而不是静默按默认继续」；这里没有 `Result` 通道，
+/// 于是失败表达成「不覆盖 + 留痕」）。
+type PositionLimitVar = (&'static str, fn(f64) -> bool, fn(&mut PositionLimits, f64));
+
+const POSITION_LIMIT_VARS: [PositionLimitVar; 3] = [
+    (
+        "pos_max_single_pct",
+        |v| v.is_finite() && v > 0.0 && v <= 100.0,
+        |l, v| l.max_single_stock_pct = v,
+    ),
+    (
+        "pos_max_total",
+        // 闭区间用 `contains`（`clippy::manual_range_contains` 在 CI 的 `-D warnings` 下必红）。
+        // 浮点套用这条建议**不是纯等价改写** —— `RangeInclusive::contains` 对 NaN 恒 `false`，
+        // 所以必须单独验：本式对 NaN / ±INF 先被 `is_finite()` 短路成 `false`（拒绝覆盖 ⇒ 回落默认），
+        // 与改写前的 `v >= 1.0 && v <= 1_000.0`（NaN 两个不等号都不命中 ⇒ 同样 `false`）逐情形一致。
+        // 锁住它的测试是 `invalid_panel_position_values_are_refused`（10.5 / 0 两例）。
+        |v| v.is_finite() && v.fract() == 0.0 && (1.0..=1_000.0).contains(&v),
+        |l, v| l.max_total_positions = u32::try_from(v as i64).unwrap_or(10),
+    ),
+    (
+        "pos_max_sector_pct",
+        |v| v.is_finite() && v > 0.0 && v <= 100.0,
+        |l, v| l.max_sector_exposure_pct = v,
+    ),
+];
+
 impl PositionLimits {
+    /// 按**变量表**构造（纯函数版，落地面）。
+    ///
+    /// 起点是 `Self::default()`，只有「面板给了可用值」才覆盖 ⇒ 缺失/非法一律回落到与今天
+    /// 逐字相同的那组数。**刻意不做**「取不到就返回 0 / 报错」：仓位上限变 0 等于禁止一切
+    /// 建仓，报错则让风控门整段 fail-safe 退回原始决策 —— 两者都是改现网数值。
+    pub fn from_panel_vars(vars: &std::collections::HashMap<String, serde_json::Value>) -> Self {
+        let mut limits = Self::default();
+        for (key, valid, set) in POSITION_LIMIT_VARS {
+            let Some(value) = axagent_harness::panel_variables::numeric_in(vars, key) else {
+                continue;
+            };
+            if !valid(value) {
+                tracing::warn!(
+                    "[position_limits] 面板 {key} = {value} 不是可用的仓位限制（占比需落在 (0,100]、只数需为正整数）⇒ 拒绝覆盖，按默认值继续"
+                );
+                continue;
+            }
+            set(&mut limits, value);
+        }
+        limits
+    }
+
+    /// 生产路径的仓位限制 = `Default` + 面板 `pos_max_*` 覆盖（读进程内变量表快照）。
+    ///
+    /// ⚠ 与 `RiskTier::max_single_stock_pct` 的次序：**档位表只能收紧**。实际单股上限是
+    ///   `min(面板 pos_max_single_pct, tier_cap)`（见 `portfolio_risk_gate`），而 tier_cap 表
+    ///   最高就是 20 ⇒ 把面板值调到 20 以上**不会放宽**仓位（那 20 是档位表的天花板，
+    ///   不是本类型的手误）。往小调（如 15）则真实生效。
+    pub fn panel_effective() -> Self {
+        Self::from_panel_vars(&axagent_harness::panel_variables::panel_variables())
+    }
+
     /// 检查新增仓位是否合规
     ///
     /// 修复 P2-9: 当 `total_portfolio_value == 0` 时原代码把 new_pct 置为 0，
@@ -223,6 +298,126 @@ impl PositionLimits {
                 }
             },
             _ => Ok(false),
+        }
+    }
+}
+
+/// 面板 `pos_max_*` 三条落地的行为锁（2026-10-08 A 批）。
+///
+/// 三条各锁一种复发形态：① 默认值对账（接线本身零数值变化）② 变量缺失 ⇒ 回落同一组默认
+/// （**不许**变成 0 或报错，那等于禁止建仓 / 让风控门整段 fail-safe）③ 变量被改 ⇒ 新值真进到
+/// `check_new_position` 的三条判据里。数值断言按被测判据现算，不手敲结论。
+#[cfg(test)]
+mod panel_landing_tests {
+    use super::*;
+    use axagent_harness::panel_variables::variables_map;
+    use std::collections::HashMap;
+
+    /// 与 wiring 装入快照时逐字同形（`[{name, value}]`），避免测试自己造出第二种表形态。
+    fn vars(pairs: &[(&str, serde_json::Value)]) -> HashMap<String, serde_json::Value> {
+        let entries: Vec<serde_json::Value> = pairs
+            .iter()
+            .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+            .collect();
+        variables_map(&serde_json::Value::Array(entries))
+    }
+
+    /// 面板三条的默认值 == `Default` 的那组数 ⇒ 「接线」不改现网任何一条风控判据。
+    ///
+    /// 左边三个数字手抄自设置面板 `b("pos_max_single_pct", 20, …)` 等与
+    /// `seed_variables.rs` 的 `json!(20.0)` / `json!(10)` / `json!(40.0)`；
+    /// 门 `check-panel-var-landing.mjs` 的 P1 也按同样的两侧字面量对账。
+    #[test]
+    fn panel_default_position_limits_equal_todays_constants() {
+        let d = PositionLimits::default();
+        assert_eq!(d.max_single_stock_pct, 20.0, "面板 pos_max_single_pct 默认 20");
+        assert_eq!(d.max_total_positions, 10, "面板 pos_max_total 默认 10");
+        assert_eq!(d.max_sector_exposure_pct, 40.0, "面板 pos_max_sector_pct 默认 40");
+        let overlaid = PositionLimits::from_panel_vars(&vars(&[
+            ("pos_max_single_pct", serde_json::json!(20.0)),
+            ("pos_max_total", serde_json::json!(10)),
+            ("pos_max_sector_pct", serde_json::json!(40.0)),
+        ]));
+        assert_eq!(overlaid.max_single_stock_pct, d.max_single_stock_pct);
+        assert_eq!(overlaid.max_total_positions, d.max_total_positions);
+        assert_eq!(overlaid.max_sector_exposure_pct, d.max_sector_exposure_pct);
+    }
+
+    /// 变量缺失 ⇒ 回落今天的默认，并且风控判据仍按那组数走（不是 0、不是报错）。
+    #[test]
+    fn missing_panel_vars_fall_back_to_todays_limits() {
+        let limits = PositionLimits::from_panel_vars(&vars(&[("unrelated", serde_json::json!(7))]));
+        assert_eq!(limits, PositionLimits::default(), "缺失不得把上限改成 0 或留空");
+        // 按判据现算：25% 的单股建仓 > 20 ⇒ 拒绝；15% ⇒ 通过。
+        let total = 1000.0;
+        assert!(
+            limits.check_new_position(250.0, total, 0, None, &[]).is_err(),
+            "默认 20% 上限下 25% 建仓必须被拒（这是今天的现网行为）"
+        );
+        assert!(limits.check_new_position(150.0, total, 0, None, &[]).is_ok());
+    }
+
+    /// 面板改值 ⇒ 三条判据各自真的跟着动（逐条点名，防「表里有键、落点没接」）。
+    #[test]
+    fn panel_values_reach_each_position_check() {
+        let total = 1000.0;
+        // ① 单股上限 20 ⇒ 10：15% 建仓原本通过，收紧后必须拒绝。
+        let tightened = PositionLimits::from_panel_vars(&vars(&[(
+            "pos_max_single_pct",
+            serde_json::json!(10.0),
+        )]));
+        assert!(
+            tightened.check_new_position(150.0, total, 0, None, &[]).is_err(),
+            "面板 10% 下 15% 应拒"
+        );
+        assert!(PositionLimits::default().check_new_position(150.0, total, 0, None, &[]).is_ok());
+
+        // ② 只数上限 10 ⇒ 3：`current_positions >= max` ⇒ 第 4 只（index 3）被拒。
+        let few =
+            PositionLimits::from_panel_vars(&vars(&[("pos_max_total", serde_json::json!(3))]));
+        assert_eq!(few.max_total_positions, 3);
+        assert!(
+            few.check_new_position(10.0, total, 3, None, &[]).is_err(),
+            "3 只上限下第 4 只应拒"
+        );
+        assert!(few.check_new_position(10.0, total, 2, None, &[]).is_ok());
+
+        // ③ 行业上限 40 ⇒ 20：现有暴露 25% + 新 5% = 30%，默认通过、收紧后拒绝。
+        let exposures = vec![("白酒".to_string(), 25.0)];
+        let sector = PositionLimits::from_panel_vars(&vars(&[(
+            "pos_max_sector_pct",
+            serde_json::json!(20.0),
+        )]));
+        assert!(
+            sector.check_new_position(50.0, total, 0, Some("白酒"), &exposures).is_err(),
+            "面板 20% 行业上限下 25%+5% 应拒"
+        );
+        assert!(
+            PositionLimits::default()
+                .check_new_position(50.0, total, 0, Some("白酒"), &exposures)
+                .is_ok(),
+            "默认 40% 下同一笔应通过"
+        );
+    }
+
+    /// 非法面板值 ⇒ 拒绝覆盖而不是把风控上限变成 0 / 把只数截断。
+    #[test]
+    fn invalid_panel_position_values_are_refused() {
+        for (key, bad) in [
+            ("pos_max_single_pct", serde_json::json!(0.0)),
+            ("pos_max_single_pct", serde_json::json!(-5.0)),
+            ("pos_max_single_pct", serde_json::json!(120.0)),
+            ("pos_max_single_pct", serde_json::json!("两成")),
+            ("pos_max_total", serde_json::json!(10.5)),
+            ("pos_max_total", serde_json::json!(0)),
+            ("pos_max_sector_pct", serde_json::json!(null)),
+        ] {
+            let got = PositionLimits::from_panel_vars(&vars(&[(key, bad.clone())]));
+            assert_eq!(
+                got,
+                PositionLimits::default(),
+                "{key}={bad} 不是可用限制 ⇒ 必须整条回落默认"
+            );
         }
     }
 }

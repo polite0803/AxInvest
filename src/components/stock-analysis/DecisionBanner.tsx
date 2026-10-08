@@ -1585,6 +1585,44 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                         </div>
                       )}
                       {
+                        /* v139（PLAN §一○八）：两带与动量的**数值**也成句 —— 只有根数还不够，
+                          读者要能看出这一档两带差多少。`diffPct` / `fastSlope` 的缺席形态是 `null`
+                          （产端 `Option<f64>` 不跳过序列化）⇒ 印「—」而不是 0：慢带非正是「算不出」，
+                          不是「差 0%」，压成 0 就是本仓禁止的伪装。 */
+                      }
+                      {d.scoringTrend && (
+                        <div
+                          className="text-xs"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          {t("stockAnalysis.horizonScaleTrend", {
+                            fastBars: d.scoringTrend.fastBars,
+                            slowBars: d.scoringTrend.slowBars,
+                            fast: typeof d.scoringTrend.fast === "number" ? d.scoringTrend.fast.toFixed(2) : "-",
+                            slow: typeof d.scoringTrend.slow === "number" ? d.scoringTrend.slow.toFixed(2) : "-",
+                            diffPct: typeof d.scoringTrend.diffPct === "number"
+                              ? d.scoringTrend.diffPct.toFixed(2)
+                              : "—",
+                            fastSlope: typeof d.scoringTrend.fastSlope === "number"
+                              ? d.scoringTrend.fastSlope.toFixed(2)
+                              : "—",
+                          })}
+                        </div>
+                      )}
+                      {d.scoringMomentum && (
+                        <div
+                          className="text-xs"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          {t("stockAnalysis.horizonScaleMomentum", {
+                            period: d.scoringMomentum.period,
+                            value: typeof d.scoringMomentum.value === "number"
+                              ? d.scoringMomentum.value.toFixed(1)
+                              : "-",
+                          })}
+                        </div>
+                      )}
+                      {
                         /* 阶段1（PLAN §四十八 Q2-B，2026-10-04 拍板）：方向成立但**无可执行计划**。
                           本档 action 是方向族（买/卖族）而仓位为 0 或赔率为 0（σ 带 / 止盈止损不可得）时，
                           「买入」只是一个方向标签，不是一注可执行的交易。裁定是**保留方向**

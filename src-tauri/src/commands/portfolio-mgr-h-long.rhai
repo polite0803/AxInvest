@@ -28,7 +28,7 @@ let gaps = [];
 // 已接：branch_json / horizon_prior_json / tier_score / macd_dif / macd_dea / rsi_value /
 //       pe_percentile / f_score / consensus_eps / consensus_estimated /
 //       latest_eps / latest_eps_basis / pmi /
-//       valuation_dcf_upside / valuation_dcf_applicable / kline_bars / overall_risk / stop_vol_mult / scoring_windows / scoring_scale
+//       valuation_dcf_upside / valuation_dcf_applicable / kline_bars / overall_risk / stop_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum
 // 刻意不读（有名字但没有数据面）：
 //   · 催化剂（本档腿集无 `eventCatalyst`，任务 #22）
 //   · 行业分位：行业排名的 as-of 通道仍有结构性缺口 ⇒ 不用个股涨幅近似（用户裁定③）
@@ -252,6 +252,12 @@ if tw <= 0.0 || !prior_ok {
     // v138 裁定 3：本档实际用的指标窗口与尺度（产端 = 评分节点回显；缺席 = 早于 v138 的代 ⇒ 面板不渲染）
     scoringWindows: if present(scoring_windows) { scoring_windows } else { () },
     scoringScale: if present(scoring_scale) { scoring_scale } else { () },
+    scoringTrend: if present(scale_trend) { scale_trend } else { () },
+    scoringMomentum: if present(scale_momentum) { scale_momentum } else { () },
+    // v140：本档风险档随分支行一起带回父池 —— 风险节点搬进子模板后，主链 `overall_risk_<档>`
+    //   读的就是这里（`pm-h-<档>.result.riskCategory`）。漏这一行 = 按档风险收紧整条静默退役。
+    //   缺席只有一种可能：本档风险节点自己失败 ⇒ 整档子执行已经失败 ⇒ 这行不会单独缺。
+    riskCategory: if present(overall_risk) { overall_risk } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
     stopSource: if exit_move > 0.0 { "thesis_falsified_half_band" } else { "fallback_pct" },

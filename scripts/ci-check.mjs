@@ -363,6 +363,25 @@ if (canRunRust && !quick) {
   );
   step("面板技术指标两域归属与默认值对账", "node scripts/check-indicator-config-scope.mjs");
 
+  // §一○七 待拍板 1 的裁定（2026-10-08）：全域反向门**要建**，形状＝登记制。
+  // 普查读数：374 个声明变量里 36 个零引用面，其中 34 个仍被面板渲染成控件 ⇒「用户改了没人读」
+  // 是成族缺陷而不是个例，定向门（上面那条）只能守住它自己那 8 个名字。
+  // 与 ci.yml 的对应 step 逐字同源。
+  step("声明变量引用面对账自检（七类负控 + 剥注释器/别名表两判据）", "node scripts/check-variable-consumer-registry.mjs --selftest");
+  step("声明变量引用面对账（新空接线不许进，登记项接线后必须摘掉）", "node scripts/check-variable-consumer-registry.mjs");
+
+  // A 批接线（2026-10-08）的**定向门**：上面那道面积门只说「零引用面从 13 降到 4」，说不出这 9 条
+  // 是怎么个接法、接错了它不知道。这 9 条接的是「下层 crate 读进程内变量表快照」
+  // （端口 `harness::panel_variables`，装入口 `init/panel_variables.rs`），于是新增三类
+  // 编译门一条都查不出的失效：① 默认值手抄漂移（接线当场改现网数值）② 落点函数写了但生产路径
+  // 没调用（等于没接）③ 落点旁边又抄回一份字面量（第二权威复活，本批真出现过两处：回放链 PE
+  // 20/40 与 `verify_catalysts` 写死的 50 条新闻）。判据 P1–P5 见脚本头。与 ci.yml 逐字同源。
+  step(
+    "面板 9 条变量落地定向自检（三面默认值/消费者存在/单一权威/没电三类负控）",
+    "node scripts/check-panel-var-landing.mjs --selftest",
+  );
+  step("面板 9 条变量落地（A 批接线：默认值对账 + 生产调用处数 + 单一权威）", "node scripts/check-panel-var-landing.mjs");
+
   step(
     "cargo fmt 格式化检查",
     "cargo fmt --check --all",

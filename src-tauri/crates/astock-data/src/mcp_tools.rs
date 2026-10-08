@@ -873,6 +873,48 @@ pub fn stock_mcp_tools() -> Vec<serde_json::Value> {
     ]
 }
 
+/// 新闻条数的**回落值**与**上界** —— 两者都是接线前四处各自的写死值，一字未动。
+///
+/// ⚠ 上界 100 来自今天 `get_stock_news` / `get_stock_policy_news` 的 `.min(100)`；
+///   回落 30 来自同一处 `unwrap_or(30)`（也是 `:4877` / `:5004` 两处的写死值）。
+///   与面板 `b("news_limit", 30, …)`、`seed_variables.rs` 的 `json!(30)` 逐字相等，
+///   对账由 `scripts/check-panel-var-landing.mjs` 的 P1 负责（两侧任一处改数即红）。
+const DEFAULT_NEWS_LIMIT: u32 = 30;
+const MAX_NEWS_LIMIT: u32 = 100;
+
+/// 新闻取数条数的**唯一落点**：面板变量 `news_limit`（`seed_variables.rs` 声明、设置面板可调）。
+///
+/// ## 为什么必须有它（A 批，2026-10-08）
+/// 这条变量此前只有「声明 + 面板控件」两面，全仓零消费者 ⇒ 用户改了条数没有任何东西读它。
+/// 而真正的条数散在四处各自写死：`get_stock_news` 工具缺省 `unwrap_or(30)`、
+/// `compute_attention_score_impl` 与 `check_exit_signals_impl` 写死 `30`、
+/// `verify_catalysts_impl` 写死 `50`。四处收成本函数**一个来源**。
+///
+/// ## 回落值就是今天的那些数（不是 0、不是报错）
+/// `news_limit` 缺失 / 非数值 / 不是整数 ⇒ 回 [`DEFAULT_NEWS_LIMIT`]，与接线前的四处逐字相同
+/// ⇒ 「接线」这件事本身不改现网取数条数（上界也沿用今天 `min(100)` 的口径）。
+///
+/// ## 与工具参数的次序
+/// 节点/LLM 显式传了 `limit` 时**仍以参数为先**（今天的形态），本函数只补「没人给」的那一档 ——
+/// 反过来会改变已有节点的取数行为，而图不能在本批动（动图要 bump `TEMPLATE_VERSION`）。
+pub(crate) fn panel_news_limit() -> u32 {
+    match axagent_harness::panel_variables::integer("news_limit") {
+        Some(v) => u32::try_from(v).unwrap_or(DEFAULT_NEWS_LIMIT).clamp(1, MAX_NEWS_LIMIT),
+        None => DEFAULT_NEWS_LIMIT,
+    }
+}
+
+/// 工具参数优先、缺省走面板（见 [`panel_news_limit`] 的「次序」段）。
+///
+/// 显式给了 `limit` 时保持今天**只做上夹**的语义（下界不夹，避免把节点传的 0 变成 1
+/// 那种「顺手改了另一处」的行为漂移）。
+fn news_limit_from_arguments(arguments: &serde_json::Value) -> u32 {
+    match arguments["limit"].as_u64() {
+        Some(v) => v.min(MAX_NEWS_LIMIT as u64) as u32,
+        None => panel_news_limit(),
+    }
+}
+
 pub async fn execute_mcp_tool(
     client: &crate::AStockClient,
     tool_name: &str,
@@ -1091,14 +1133,16 @@ pub async fn execute_mcp_tool(
         "get_stock_news" => {
             let code = parse_code(arguments);
             let code = code.as_str();
-            let limit = arguments["limit"].as_u64().unwrap_or(30).min(100) as u32;
+            // 条数：节点/LLM 显式给了 `limit` 就用它，否则走面板 `news_limit`（缺省 30，与今天同）。
+            let limit = news_limit_from_arguments(arguments);
             let news = client.get_news(code, limit).await.map_err(|e| e.to_string())?;
             serde_json::to_string(&news).map_err(|e| e.to_string())
         },
         "get_stock_policy_news" => {
             let code = parse_code(arguments);
             let code = code.as_str();
-            let limit = arguments["limit"].as_u64().unwrap_or(30).min(100) as u32;
+            // 同一条新闻条数（政策新闻也是「新闻获取条数」，不另开一份默认值）。
+            let limit = news_limit_from_arguments(arguments);
             let news = client.get_policy_news(code, limit).await.map_err(|e| e.to_string())?;
             serde_json::to_string(&news).map_err(|e| e.to_string())
         },
@@ -1335,8 +1379,9 @@ pub async fn execute_mcp_tool(
             let ind =
                 crate::indicators::compute_indicators_with_config(code, &klines, Some(&ind_config));
             let latest_price = klines.last().map(|k| k.close).unwrap_or(0.0);
-            // 阈值随尺度缩放（日线 f=1.0 ⇒ 与历史逐分一致，零回归）
-            let bands = crate::scoring::ScoreBands::scaled_for(&profile);
+            // 阈值随尺度缩放（日线 f=1.0 ⇒ 与历史逐分一致，零回归），并叠上面板 RSI 内带
+            // （`signal_rsi_*`，默认 30/70 与 `ScoreBands::default()` 逐字相等 ⇒ 不动现网分数）。
+            let bands = crate::scoring::ScoreBands::scaled_for_panel(&profile);
             // 按档尺度 ⇒ 走 `score_scale_aware`：五个走命名槽的分量改读中性槽
             // （`scaleTrend` / `scaleMomentum`）与两带，否则月/季档上 `rsi6`、`ma5..ma60`
             // 全是停在初值的假读数（§九十七 实测「七个分量里五个走命名槽」）。
@@ -4872,9 +4917,10 @@ async fn compute_attention_score_impl(
     stock_code: &str,
 ) -> Result<serde_json::Value, String> {
     // 并行拉取 4 类数据
+    // 新闻条数走 `panel_news_limit()`（面板 `news_limit`，回落 30 == 接线前这里的写死值）。
     let (reports, news, quote, visits) = tokio::join!(
         client.get_research_reports(stock_code),
-        client.get_news(stock_code, 30),
+        client.get_news(stock_code, panel_news_limit()),
         client.get_quote(stock_code),
         client.get_institutional_visits(stock_code),
     );
@@ -4999,9 +5045,10 @@ async fn check_exit_signals_impl(
     entry_price: Option<f64>,
     stop_loss_price: Option<f64>,
 ) -> Result<serde_json::Value, String> {
+    // 新闻条数走 `panel_news_limit()`（面板 `news_limit`，回落 30 == 接线前这里的写死值）。
     let (financials, news, quote) = tokio::join!(
         client.get_financials(stock_code),
-        client.get_news(stock_code, 30),
+        client.get_news(stock_code, panel_news_limit()),
         client.get_quote(stock_code),
     );
     let financials = financials.map_err(|e| e.to_string()).unwrap_or_default();
@@ -5147,7 +5194,11 @@ async fn verify_catalysts_impl(
     stock_code: &str,
     catalysts: &[String],
 ) -> Result<serde_json::Value, String> {
-    let news = client.get_news(stock_code, 50).await.map_err(|e| e.to_string())?;
+    // ⚠ 接线前这里是**写死的 50**，与另三处的 30 不同 ⇒ 收成一个来源（面板 `news_limit`，
+    //   默认 30）后本处的取数条数**确实变了 50 ⇒ 30**，是 A 批里唯一两处现网数值变化之一
+    //   （另一处是回放链的 PE 阈值）。判据：`news_limit` 的声明口径就是「新闻获取条数」，
+    //   四处只留一个来源；把它接回 50 等于再造第二权威。要按 50 跑，面板改 `news_limit`=50。
+    let news = client.get_news(stock_code, panel_news_limit()).await.map_err(|e| e.to_string())?;
 
     let verified: Vec<serde_json::Value> = catalysts
         .iter()
@@ -7506,5 +7557,59 @@ mod panel_indicator_config_tests {
         )
         .expect_err("放量比小于缩量比必须失败");
         assert!(e.contains("volume_surge_ratio"), "{e}");
+    }
+}
+
+/// `news_limit` 接地的行为锁（2026-10-08 A 批）。
+///
+/// 三件事各锁一种复发形态：默认值与接线前的四处写死值逐字相同 / 变量缺失 ⇒ 回落同一组默认 /
+/// 变量被改 ⇒ 新值真进到取数条数里。**本模块是全仓唯一动进程内快照的 astock-data 测试**，
+/// 顺序是「先断默认 ⇒ 再装 ⇒ 再断 ⇒ 清空」，中间不依赖别的测试，也不给 RSI / PE 留键
+/// （那两个落点读的是同一份快照，留了就会把 scoring.rs 的默认值断言带偏）。
+#[cfg(test)]
+mod news_limit_landing_tests {
+    use super::*;
+
+    fn install_table(pairs: &[(&str, serde_json::Value)]) {
+        let entries: Vec<serde_json::Value> = pairs
+            .iter()
+            .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+            .collect();
+        axagent_harness::panel_variables::install_panel_variables(
+            axagent_harness::panel_variables::variables_map(&serde_json::Value::Array(entries)),
+        );
+    }
+
+    /// 回落值 == 接线前四处写死的数字（30），上界 == 今天的 `min(100)`。
+    #[test]
+    fn default_matches_the_hardcoded_values_before_wiring() {
+        install_table(&[]);
+        assert_eq!(DEFAULT_NEWS_LIMIT, 30, "面板 news_limit 默认值 == 接线前四处写死的 30");
+        assert_eq!(MAX_NEWS_LIMIT, 100, "上界沿用今天 get_stock_news 的 min(100)");
+        assert_eq!(panel_news_limit(), 30, "变量缺失 ⇒ 回落 30，不是 0、不是报错");
+        // 工具参数缺省 ⇒ 同一条回落；给了参数 ⇒ 按今天形态优先且不夹下界。
+        assert_eq!(news_limit_from_arguments(&serde_json::json!({})), 30);
+        assert_eq!(news_limit_from_arguments(&serde_json::json!({ "limit": 5 })), 5);
+        assert_eq!(news_limit_from_arguments(&serde_json::json!({ "limit": 0 })), 0);
+        assert_eq!(news_limit_from_arguments(&serde_json::json!({ "limit": 500 })), 100);
+    }
+
+    /// 面板改值 ⇒ 四处共用的高低都跟着动（一个来源，四处同步）。
+    #[test]
+    fn panel_value_reaches_every_news_fetch_site() {
+        install_table(&[("news_limit", serde_json::json!(50))]);
+        assert_eq!(panel_news_limit(), 50, "面板 50 ⇒ 取数条数 50");
+        // 工具参数仍优先（不改已有节点的行为）。
+        assert_eq!(news_limit_from_arguments(&serde_json::json!({ "limit": 12 })), 12);
+        assert_eq!(news_limit_from_arguments(&serde_json::json!({})), 50);
+        // 越界 ⇒ 上夹到 100 / 下夹到 1（面板描述口径「1-100」）。
+        install_table(&[("news_limit", serde_json::json!(500))]);
+        assert_eq!(panel_news_limit(), 100);
+        install_table(&[("news_limit", serde_json::json!(0))]);
+        assert_eq!(panel_news_limit(), 1, "0 条新闻没有意义 ⇒ 下夹 1");
+        // 非数值 ⇒ 回落默认，而不是把取数条数变成 0。
+        install_table(&[("news_limit", serde_json::json!("三十"))]);
+        assert_eq!(panel_news_limit(), 30);
+        install_table(&[]);
     }
 }

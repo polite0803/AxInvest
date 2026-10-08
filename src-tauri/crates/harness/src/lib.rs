@@ -66,6 +66,14 @@ pub use usage_pricing::{
 // 会污染命名空间，调用方一律走 `dependency_metrics::` 全路径。
 pub mod dependency_metrics;
 
+// ── 设置面板变量表的进程内快照（wiring 装入 / 下层按名读）──
+// 落点在下层 crate（astock-data 评分与取数、analysis-engine 仓位限制）的参数拿不到 DB，
+// 也接不到节点 `input_mapping`（接图要 bump `TEMPLATE_VERSION`）⇒ 由本模块承接变量表。
+// 必须留在 harness：`astock-data` 与 `analysis-engine` 都只认这里的契约（禁区 2）。
+// 不在此 re-export：`numeric` / `integer` 这类名字过于通用，放 crate 根会污染命名空间，
+// 调用方一律走 `panel_variables::` 全路径。
+pub mod panel_variables;
+
 pub mod core_error;
 pub mod error_codes;
 pub mod orchestration_dispatch;

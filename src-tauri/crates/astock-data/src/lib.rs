@@ -397,9 +397,12 @@ pub struct AStockClient {
     /// 缺陷 D 修复:可选 L2 磁盘缓存(spec §3.2)。
     /// 启动时注入,None 表示走纯 L1 内存模式(向后兼容)。
     l2: Option<Arc<disk_cache::DiskCache>>,
-    /// P5:可选每日快照缓存(NoHistoricalSemantic 数据后台 sweep)
-    /// 需要先配置 l2,再通过 with_daily_snapshot_cache() 启用,默认关闭。
-    daily_snapshot: Option<daily_snapshot::DailySnapshotCache>,
+    /// P5:可选每日快照归档(NoHistoricalSemantic 数据后台 sweep)
+    /// 通过 `with_daily_snapshot_store()` 注入,默认关闭(None)。
+    /// #20②（2026-10-08）将承载从 DiskCache 单文件换成 SQL 历史表 ⇒ 这里只持有**端口**
+    /// `dyn DailySnapshotStore`，实现在 wiring 层（`src-tauri/src/init/daily_snapshot_store.rs`），
+    /// 理由见 `daily_snapshot.rs` 文件头「分层」一节与 `NewsArchiveSink` 的同构先例。
+    daily_snapshot_store: Option<Arc<dyn daily_snapshot::DailySnapshotStore>>,
     pub iwencai_key: RwLock<String>,
     /// 雪球 token 共享引用（前端设置页写入，vendor 自动读取）
     pub xq_token: Option<Arc<RwLock<String>>>,
@@ -675,7 +678,7 @@ impl AStockClient {
                         VendorHealthConfig::default(),
                     )),
                     l2: None,
-                    daily_snapshot: None,
+                    daily_snapshot_store: None,
                     iwencai_key: RwLock::new(String::new()),
                     xq_token: None,
                     neodata_token: None,
@@ -808,8 +811,8 @@ impl AStockClient {
                 .time_to_idle(Duration::from_secs(3600))
                 .build(),
             health_tracker: Arc::new(VendorHealthTracker::new(VendorHealthConfig::default())),
-            l2: None,             // 默认不开启 L2,调用方通过 with_l2_cache 注入
-            daily_snapshot: None, // P5:默认不开启,调用方通过 with_daily_snapshot_cache 注入
+            l2: None,                   // 默认不开启 L2,调用方通过 with_l2_cache 注入
+            daily_snapshot_store: None, // P5:默认不开启,调用方通过 with_daily_snapshot_store 注入
             iwencai_key: RwLock::new(String::new()),
             xq_token: None,
             neodata_token: None,
@@ -888,24 +891,23 @@ impl AStockClient {
         (self, l2)
     }
 
-    /// P5:启用每日快照缓存 —— **独立 DiskCache 实例 + 独立文件**，不复用 L2。
+    /// P5:注入每日快照归档 —— 端口 `DailySnapshotStore`，实现由调用方（wiring 层）提供。
     ///
-    /// 为什么必须独立（2026-09-26 修）：`daily_snapshot.rs` 的模块注释一直声称
-    /// 「L2 是方法级短暂缓存 / 每日快照是日粒度持久缓存」的隔离，但实现只是把
-    /// `with_l2_cache` 的 `Arc<DiskCache>` 复用一遍 —— 同一实例、同一 10_000 条容量、
-    /// 同一个文件。实测后果：K 线缓存单条约 70 KB（`fetch_limit = max(limit,500)`，
-    /// 且缓存存全量、读时才切），几条就能把最旧的每日快照按 LRU 挤掉
-    /// ⇒ 回放兜底"哪天有、哪天没"，而现场看不出原因。
+    /// 为什么不再返回 DiskCache 句柄（#20②，2026-10-08 升格）：旧形态是
+    /// `with_daily_snapshot_cache(path)` 内部 `DiskCache::load_or_default` +
+    /// `DailySnapshotCache::from_disk`，调用方还得为它起 `spawn_flush_loop`，
+    /// 否则当日快照只停在内存里、进程退出即丢。换成 SQL 表后**即写即落库**，
+    /// 句柄与 flush 任务两样都不需要了 —— 少一个「忘了起 flush 于是归档永远为空」的
+    /// 失效形态（那正是 2026-09-25 接线恢复抓到的断链族）。
     ///
-    /// 返回 `(client, snapshot_disk_handle)`：快照只写内存 + 标脏，句柄必须交给调用方
-    /// 起后台 flush 任务，否则进程退出时当日快照丢失。
-    pub fn with_daily_snapshot_cache(
+    /// 为什么不用 DiskCache 承载归档（LRU 吃掉历史 / 无 prefix-scan 取不出跨日聚合 /
+    /// 全量重写单文件）：见 `daily_snapshot.rs` 文件头。
+    pub fn with_daily_snapshot_store(
         mut self,
-        path: PathBuf,
-    ) -> (Self, Arc<disk_cache::DiskCache>) {
-        let disk = disk_cache::DiskCache::load_or_default(path);
-        self.daily_snapshot = Some(daily_snapshot::DailySnapshotCache::from_disk(disk.clone()));
-        (self, disk)
+        store: Arc<dyn daily_snapshot::DailySnapshotStore>,
+    ) -> Self {
+        self.daily_snapshot_store = Some(store);
+        self
     }
 
     /// P6:注入本地新闻语料库 sink。
@@ -1873,7 +1875,7 @@ impl AStockClient {
                 // 先查每日快照缓存（如已配置）
                 if let Some(ctx) = crate::as_of::current_as_of() {
                     let date = ctx.as_string();
-                    if let Some(cached) = self.try_daily_snapshot(method_name, &date) {
+                    if let Some(cached) = self.try_daily_snapshot(method_name, &date).await {
                         match serde_json::from_str::<T>(&cached) {
                             Ok(v) => return Some(v),
                             Err(e) => tracing::warn!(
@@ -1903,14 +1905,21 @@ impl AStockClient {
         crate::as_of::is_asof_active()
     }
 
-    /// P5:尝试验证每日快照缓存(NoHistoricalSemantic 数据兜底)
-    /// 启用条件:self.daily_snapshot 不为 None 且 method 在 SNAPSHOT_METHODS 中
-    /// 返回 Some(json_str) 表示缓存命中;None 表示未命中或未启用
-    fn try_daily_snapshot(&self, method: &str, date: &str) -> Option<String> {
+    /// P5:尝试验证每日快照归档(NoHistoricalSemantic 数据兜底)
+    /// 启用条件:`daily_snapshot_store` 不为 None 且 method 在 SNAPSHOT_METHODS 中
+    /// 返回 Some(json_str) 表示归档命中;None 表示未命中或未启用
+    ///
+    /// #20② 起它是 async：归档承载从 DiskCache（同步点查）换成 SQL 表（端口是
+    /// `DailySnapshotStore`，实现走 sea-orm 异步查询）。本方法及其下面全部快照 helper
+    /// 的**全部**调用点都在 `pub async fn` 内，故只加 `.await`，不产生同步改异步的涟漪。
+    async fn try_daily_snapshot(&self, method: &str, date: &str) -> Option<String> {
         if !daily_snapshot::SNAPSHOT_METHODS.contains(&method) {
             return None;
         }
-        self.daily_snapshot.as_ref().and_then(|c| c.get(method, date))
+        match self.daily_snapshot_store.as_ref() {
+            Some(s) => s.get(method, date).await,
+            None => None,
+        }
     }
 
     /// 快照兜底为什么没接住 —— 与 `AsofProbe::reason` 并列的**第二种缺席**（H4，2026-09-27）。
@@ -1921,27 +1930,80 @@ impl AStockClient {
     ///   ① 用户对着结构性缺口去找"采集开关"；
     ///   ② 反过来以为攒够快照就能解掉一个压根没有通道的维度。
     /// 与 F 轮「设计上没有」的语义分层同口径：能解的和不能解的，不许共用一句话。
-    fn snapshot_absence_clause(&self, method: &str, date: &str) -> &'static str {
-        match self.daily_snapshot.as_ref() {
-            None => "本地每日快照未启用（装配缺失，与数据源无关）",
-            Some(cache) => {
-                if cache.get(method, date).is_some() {
-                    // 走到这里说明快照命中、但反序列化后是空集合（读侧 usable() 已滤掉
-                    // 字面 "[]"，剩下的只有"形状对、内容为空"这一种）
-                    "该截止日快照存在但内容为空"
-                } else {
-                    "该截止日无本地快照（当日未运行采集）；此类榜单只有当日通道，历史日期不可回补，只有自今日起累积才可解"
-                }
-            },
+    ///
+    /// ## 类②：跨日聚合分句（#20②，本批验收硬条件）
+    ///
+    /// H4 只分出了「未启用 / 该日缺 / 该日有但内容空」三档，其中「该日缺」这一档
+    /// **把两种完全不同的病说成同一句话**：
+    ///   · 单日漏采 —— 采集侧整体健康，只是那天没跑成（重跑即可解）；
+    ///   · 整段断供 —— 后台 sweep 没起 / 装配缺失 / 全源失败，窗口内一天都没采到
+    ///     （重跑那一天也解不了，病根在采集侧）。
+    /// 旧存储在 DiskCache 里**取不出这个数**（没有 prefix-scan API ⇒ 无法按 method
+    /// 跨日聚合），所以那句话只能含糊着写。现在 `count_by_date_range` 是一条
+    /// SQL `COUNT(DISTINCT snapshot_date)`，走 `(method, snapshot_date)` 多列索引。
+    ///
+    /// ⚠ 本函数只改**呈现/诊断侧**文案，不动任何决策数值：不进工作流图、
+    ///   不改 `TEMPLATE_VERSION`、不发版。
+    ///
+    /// ## 第四档：聚合本身不可得（2026-10-08 修「把查询故障说成采集断供」）
+    ///
+    /// 三档全靠 `count_by_date_range` 那个数，所以**它查失败时三档都不可信**。
+    /// 适配器曾把 SQL 报错 `unwrap_or_default()` 成 0 ⇒ 走档一，输出「0/20 ⇒ 采集侧
+    /// 整段断供」，而真相是「我这句查询失败了」（表没被声明式对账建出来；本仓启动期是
+    /// `additive_only`，建表失败只 warn 进启动日志）。端口签名因此改成 `Option<usize>`，
+    /// 这里 `None` ⇒ **省略整个聚合分句**：只留那句保守原文，并明说聚合本次不可得，
+    /// 不说断供、不报覆盖率数字（说了就是没有依据的话）。与 `trading_window_start`
+    /// 返回 `None` 时的处理形态一致 —— 同一个函数里就有先例。
+    async fn snapshot_absence_clause(&self, method: &str, date: &str) -> String {
+        let Some(store) = self.daily_snapshot_store.as_ref() else {
+            return "本地每日快照未启用（装配缺失，与数据源无关）".to_string();
+        };
+        if store.get(method, date).await.is_some() {
+            // 走到这里说明快照命中、但反序列化后是空集合（读侧 usable() 已滤掉
+            // 字面 "[]"，剩下的只有"形状对、内容为空"这一种）
+            return "该截止日快照存在但内容为空".to_string();
         }
+        // 「该日缺」的两种病根，用窗口覆盖率分开（窗口宽度见 SNAPSHOT_DIAGNOSTIC_WINDOW）
+        let single_miss = "该截止日无本地快照（当日未运行采集）；此类榜单只有当日通道，\
+                           历史日期不可回补，只有自今日起累积才可解";
+        let n = daily_snapshot::SNAPSHOT_DIAGNOSTIC_WINDOW;
+        let Some(from) = daily_snapshot::trading_window_start(date, n) else {
+            // 锚点不是可解析的日期 ⇒ 聚合一律说不出口，宁可只给那句保守的旧文案
+            return single_miss.to_string();
+        };
+        let Some(hit) = store.count_by_date_range(method, &from, date).await else {
+            // 聚合查询本身失败/不可得 ⇒ 三档都没有依据。绝不写成「0/N ⇒ 整段断供」，
+            // 那会把「本函数这句查询失败了」伪装成「后台采集断了」。
+            return format!(
+                "{single_miss}；该窗口内的快照聚合本次不可得（诊断查询失败，原因见后端日志），\
+                 故此处不对采集侧下任何结论"
+            );
+        };
+        if hit == 0 {
+            return format!(
+                "该截止日无本地快照，且截至该日的最近 {n} 个交易日里一天都没采到（0/{n}）\
+                 ⇒ 采集侧整段断供（后台 sweep 未运行 / 归档未装配 / 每轮全源失败），\
+                 不是单日漏采，重跑那一天也解不了"
+            );
+        }
+        if hit * 2 < n {
+            return format!(
+                "该截止日无本地快照；最近 {n} 个交易日里只有 {hit} 天采到（{hit}/{n}）\
+                 ⇒ 采集侧近期不稳定，请先查后台快照定时任务与 vendor 可用性"
+            );
+        }
+        format!(
+            "{single_miss}；最近 {n} 个交易日已有 {hit}/{n} 天快照，本条属单日漏采，\
+             重跑当日采集即可解"
+        )
     }
 
-    /// P5:尝试读取**个股级**每日快照（key 含股票代码）
+    /// P5:尝试读取**个股级**每日快照（主键含股票代码）
     ///
     /// `sweep_daily_snapshots` 对 `PER_STOCK_METHODS`（两融/资金流/北向）以及概念板块、
-    /// 行业分类、公告都是逐只个股写入 `daily:{method}:{code}:{date}`；
+    /// 行业分类、公告都是逐只个股写入 `{method}@{code}@{date}`；
     /// 此前读取侧只有不带 code 的 `try_daily_snapshot` ⇒ 这类快照**只写无读**。
-    fn try_stock_daily_snapshot(
+    async fn try_stock_daily_snapshot(
         &self,
         method: &str,
         stock_code: &str,
@@ -1950,25 +2012,32 @@ impl AStockClient {
         if !daily_snapshot::SNAPSHOT_METHODS.contains(&method) {
             return None;
         }
-        self.daily_snapshot.as_ref().and_then(|c| c.get_stock(method, stock_code, date))
+        match self.daily_snapshot_store.as_ref() {
+            Some(s) => s.get_stock(method, stock_code, date).await,
+            None => None,
+        }
     }
 
     /// 指定日期是否已有某方法的全市场快照（供后台 sweep 判重，避免同一天重复打 vendor）
-    pub fn has_daily_snapshot(&self, method: &str, date: &str) -> bool {
-        self.daily_snapshot.as_ref().is_some_and(|c| c.has(method, date))
+    pub async fn has_daily_snapshot(&self, method: &str, date: &str) -> bool {
+        match self.daily_snapshot_store.as_ref() {
+            Some(s) => s.contains(method, None, date).await,
+            None => false,
+        }
     }
 
-    /// 每日快照缓存是否已启用
+    /// 每日快照归档是否已启用
     ///
     /// 未启用时 `set_*_daily_snapshot` 是静默 no-op ⇒ 采集只剩打 vendor，
     /// 后台任务据此直接不启动（否则每小时空转一遍全市场请求）。
+    /// 仍是同步方法：只判 `Option` 是否在，不碰存储。
     pub fn daily_snapshot_enabled(&self) -> bool {
-        self.daily_snapshot.is_some()
+        self.daily_snapshot_store.is_some()
     }
 
     /// C5.3 修复：带 keyword 维度的每日快照查询（用于 search_stock 等方法）
-    /// 与 try_daily_snapshot 的区别：cache_key 含 keyword，避免不同 keyword 互相覆盖
-    fn try_daily_keyword_snapshot(
+    /// 与 try_daily_snapshot 的区别：主键含 keyword 作用域，避免不同 keyword 互相覆盖
+    async fn try_daily_keyword_snapshot(
         &self,
         method: &str,
         keyword: &str,
@@ -1977,28 +2046,43 @@ impl AStockClient {
         if !daily_snapshot::SNAPSHOT_METHODS.contains(&method) {
             return None;
         }
-        self.daily_snapshot.as_ref().and_then(|c| c.get_keyword(method, keyword, date))
-    }
-
-    /// 设置每日快照（全市场方法），供 Tauri command 写入
-    pub fn set_daily_snapshot(&self, method: &str, date: &str, json: &str) {
-        if let Some(ref snap) = self.daily_snapshot {
-            snap.set_snapshot(method, date, json);
+        match self.daily_snapshot_store.as_ref() {
+            Some(s) => s.get_keyword(method, keyword, date).await,
+            None => None,
         }
     }
 
-    /// 设置个股级每日快照，供 Tauri command 写入
-    pub fn set_stock_daily_snapshot(&self, method: &str, stock_code: &str, date: &str, json: &str) {
-        if let Some(ref snap) = self.daily_snapshot {
-            snap.set_stock_snapshot(method, stock_code, date, json);
+    /// 存入每日快照（全市场方法），供 Tauri command 与回放合成回写调用
+    pub async fn set_daily_snapshot(&self, method: &str, date: &str, json: &str) {
+        if let Some(ref s) = self.daily_snapshot_store {
+            s.put(method, None, date, json).await;
         }
     }
 
-    /// C5.3 修复：设置带 keyword 的每日快照（用于 search_stock 等方法）
+    /// 存入个股级每日快照，供 Tauri command 写入
+    pub async fn set_stock_daily_snapshot(
+        &self,
+        method: &str,
+        stock_code: &str,
+        date: &str,
+        json: &str,
+    ) {
+        if let Some(ref s) = self.daily_snapshot_store {
+            s.put(method, Some(stock_code), date, json).await;
+        }
+    }
+
+    /// C5.3 修复：存入带 keyword 的每日快照（用于 search_stock 等方法）
     /// 供 Tauri command sweep_daily_snapshots 写入预抓结果
-    pub fn set_daily_keyword_snapshot(&self, method: &str, keyword: &str, date: &str, json: &str) {
-        if let Some(ref snap) = self.daily_snapshot {
-            snap.set_keyword_snapshot(method, keyword, date, json);
+    pub async fn set_daily_keyword_snapshot(
+        &self,
+        method: &str,
+        keyword: &str,
+        date: &str,
+        json: &str,
+    ) {
+        if let Some(ref s) = self.daily_snapshot_store {
+            s.put(method, Some(keyword), date, json).await;
         }
     }
 
@@ -2577,7 +2661,7 @@ impl AStockClient {
         if crate::as_of::is_asof_active() {
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
-                self.try_stock_daily_snapshot("get_social_sentiment", stock_code, &date)
+                self.try_stock_daily_snapshot("get_social_sentiment", stock_code, &date).await
             {
                 if let Ok(v) = serde_json::from_str::<Vec<crate::types::SocialSentiment>>(&cached) {
                     if !v.is_empty() {
@@ -3103,7 +3187,8 @@ impl AStockClient {
         if crate::as_of::is_asof_active() {
             // ① 个股级每日快照（`run_daily_snapshot_sweep` 当日采过则直接回放）
             let date = crate::as_of::current_date_or_now();
-            if let Some(cached) = self.try_stock_daily_snapshot("get_money_flow", stock_code, &date)
+            if let Some(cached) =
+                self.try_stock_daily_snapshot("get_money_flow", stock_code, &date).await
             {
                 if let Ok(Some(r)) = serde_json::from_str::<Option<MoneyFlow>>(&cached) {
                     return Ok(Some(r));
@@ -3357,7 +3442,7 @@ impl AStockClient {
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) =
-                    self.try_daily_keyword_snapshot("search_stock", trimmed, &date)
+                    self.try_daily_keyword_snapshot("search_stock", trimmed, &date).await
                 {
                     if let Ok(r) = serde_json::from_str::<Vec<StockSearchResult>>(&cached) {
                         if !r.is_empty() {
@@ -3606,7 +3691,7 @@ impl AStockClient {
             // ① 每日快照（个股级，key 含 code）
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
-                self.try_stock_daily_snapshot("get_margin_data", stock_code, &date)
+                self.try_stock_daily_snapshot("get_margin_data", stock_code, &date).await
             {
                 if let Ok(Some(r)) = serde_json::from_str::<Option<MarginData>>(&cached) {
                     return Ok(Some(r));
@@ -3776,7 +3861,7 @@ impl AStockClient {
             // 就报「该维度无历史语义」，于是回放里质押恒缺。顺序：快照 → vendor 回溯 → 汇总。
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
-                self.try_stock_daily_snapshot("get_pledge_data", stock_code, &date)
+                self.try_stock_daily_snapshot("get_pledge_data", stock_code, &date).await
             {
                 if let Ok(Some(r)) = serde_json::from_str::<Option<PledgeData>>(&cached) {
                     return Ok(Some(r));
@@ -3890,7 +3975,7 @@ impl AStockClient {
             // ① 个股级每日快照（`run_daily_snapshot_sweep` 当日采过则直接回放）
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
-                self.try_stock_daily_snapshot("get_north_bound_holding", stock_code, &date)
+                self.try_stock_daily_snapshot("get_north_bound_holding", stock_code, &date).await
             {
                 if let Ok(Some(r)) = serde_json::from_str::<Option<NorthBoundHolding>>(&cached) {
                     return Ok(Some(r));
@@ -3982,7 +4067,7 @@ impl AStockClient {
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) =
-                    self.try_stock_daily_snapshot("get_sector_info", stock_code, &date)
+                    self.try_stock_daily_snapshot("get_sector_info", stock_code, &date).await
                 {
                     if let Ok(r) = serde_json::from_str::<Option<SectorInfo>>(&cached) {
                         if r.is_some() {
@@ -4213,7 +4298,7 @@ impl AStockClient {
             // 与资金流/两融同形：快照是这类「当日值」在回放里的**唯一**历史通道。
             let date = crate::as_of::current_date_or_now();
             if let Some(cached) =
-                self.try_stock_daily_snapshot("get_consensus_eps", stock_code, &date)
+                self.try_stock_daily_snapshot("get_consensus_eps", stock_code, &date).await
             {
                 if let Ok(Some(r)) = serde_json::from_str::<Option<ConsensusEPS>>(&cached) {
                     return Ok(Some(r));
@@ -4319,7 +4404,7 @@ impl AStockClient {
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                 if let Some(cached) =
-                    self.try_stock_daily_snapshot("get_concept_blocks", stock_code, &date)
+                    self.try_stock_daily_snapshot("get_concept_blocks", stock_code, &date).await
                 {
                     // 概念板块按个股有差异,快照按 code 维度存取
                     if let Ok(r) = serde_json::from_str::<Option<ConceptBlocks>>(&cached) {
@@ -4595,7 +4680,7 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_hot_stocks", &date) {
+                if let Some(cached) = self.try_daily_snapshot("get_hot_stocks", &date).await {
                     if let Ok(r) = serde_json::from_str::<Vec<HotStock>>(&cached) {
                         if !r.is_empty() {
                             return Ok(r);
@@ -4645,7 +4730,7 @@ impl AStockClient {
                 &format!(
                     "{}；本地快照兜底：{}",
                     probe.reason("as-of 热门股榜单"),
-                    self.snapshot_absence_clause("get_hot_stocks", &snap_date)
+                    self.snapshot_absence_clause("get_hot_stocks", &snap_date).await
                 ),
                 probe.kind(),
             );
@@ -4760,7 +4845,7 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_industry_ranking", &date) {
+                if let Some(cached) = self.try_daily_snapshot("get_industry_ranking", &date).await {
                     if let Ok(r) = serde_json::from_str::<Vec<IndustryRank>>(&cached) {
                         if !r.is_empty() {
                             return Ok(r);
@@ -4791,10 +4876,12 @@ impl AStockClient {
                 .await;
             if let Some(r) = hit {
                 // 一次回放的合成结果写回每日快照 ⇒ 同一截止日的第二次回放不再打 31 次请求
-                if let (Some(cache), Some(ctx)) = (self.daily_snapshot.as_ref(), as_of.as_ref()) {
+                // #20②：改走 `set_daily_snapshot`（唯一写入口，内含 usable 闸门 + 交易日归一），
+                // 不再直接持有归档句柄 —— 旧形态在这里绕过封装摸 `daily_snapshot` 字段写盘。
+                if let Some(ctx) = as_of.as_ref() {
                     let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
                     if let Ok(json) = serde_json::to_string(&r) {
-                        cache.set_snapshot("get_industry_ranking", &date, &json);
+                        self.set_daily_snapshot("get_industry_ranking", &date, &json).await;
                     }
                 }
                 return Ok(r);
@@ -4809,7 +4896,7 @@ impl AStockClient {
                 &format!(
                     "{}；本地快照兜底：{}",
                     probe.reason("as-of 行业排名"),
-                    self.snapshot_absence_clause("get_industry_ranking", &snap_date)
+                    self.snapshot_absence_clause("get_industry_ranking", &snap_date).await
                 ),
                 probe.kind(),
             );
@@ -4965,7 +5052,7 @@ impl AStockClient {
             let as_of = crate::as_of::current_as_of();
             if let Some(ref ctx) = as_of {
                 let date = ctx.as_of_date.format("%Y-%m-%d").to_string();
-                if let Some(cached) = self.try_daily_snapshot("get_cls_flash", &date) {
+                if let Some(cached) = self.try_daily_snapshot("get_cls_flash", &date).await {
                     if let Ok(r) = serde_json::from_str::<Vec<ClsFlashItem>>(&cached) {
                         if !r.is_empty() {
                             return Ok(r);
@@ -5004,7 +5091,7 @@ impl AStockClient {
                 &format!(
                     "{}；本地快照兜底：{}",
                     probe.reason("as-of 7×24 快讯"),
-                    self.snapshot_absence_clause("get_cls_flash", &snap_date)
+                    self.snapshot_absence_clause("get_cls_flash", &snap_date).await
                 ),
                 probe.kind(),
             );
@@ -5405,7 +5492,7 @@ impl AStockClient {
             }
             // ① 每日快照：live 模式当日收盘后采集过，回放即可直接复用
             let date = crate::as_of::current_date_or_now();
-            if let Some(cached) = self.try_daily_snapshot("get_index_quotes", &date) {
+            if let Some(cached) = self.try_daily_snapshot("get_index_quotes", &date).await {
                 match serde_json::from_str::<Vec<IndexQuote>>(&cached) {
                     Ok(v) if !v.is_empty() => return Ok(v),
                     Err(e) => tracing::warn!(
@@ -6687,8 +6774,8 @@ mod asof_realtime_degrade_tests {
         );
     }
 
-    /// H4：装好了快照缓存、但该截止日没有条目 ⇒ 文案必须是「可回填/可累积」那一档，
-    /// 与上一条（缓存未启用、以及无历史通道）**逐字不同**。
+    /// H4：装好了快照归档、但该截止日没有条目 ⇒ 文案必须是「可回填/可累积」那一档，
+    /// 与上一条（归档未启用、以及无历史通道）**逐字不同**。
     ///
     /// 这条区分对用户是有后果的：热股榜只有当日通道，历史日期不可回补，只能自今日起累积；
     /// 而「未启用」是装配缺失，改配置即可。两者混说，用户要么白等，要么去找不存在的数据源。
@@ -6697,12 +6784,11 @@ mod asof_realtime_degrade_tests {
     async fn hot_stocks_asof_reason_distinguishes_missing_snapshot_from_no_channel() {
         use crate::as_of::{peek_global_degradation_report, AS_OF};
         crate::as_of::reset_global_degradation_log();
-        // 本用例只读不写快照 ⇒ 不需要 flush 任务，返回的 DiskCache 句柄挂着即可。
-        // 路径就地构造：`tmp_cache_path` 属 `asof_snapshot_first_tests` 模块，本模块不可见。
-        let snap_dir = std::env::temp_dir().join("astock_h4_snap_absent");
-        let _ = std::fs::create_dir_all(&snap_dir);
-        let (client, _snap_disk) =
-            AStockClient::new().with_daily_snapshot_cache(snap_dir.join("snapshot.json"));
+        // 归档走内存替身（#20② 起端口是 `DailySnapshotStore`，替身见
+        // `daily_snapshot::test_store`）⇒ 本用例只读不写，零临时文件、零 flush 任务。
+        let client = AStockClient::new().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
         let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
         let r = AS_OF.scope(Some(ctx), async { client.get_hot_stocks().await }).await;
@@ -6887,19 +6973,14 @@ mod asof_snapshot_first_tests {
     use chrono::NaiveDate;
     use serial_test::serial;
 
-    /// 建一个「每日快照缓存已启用」的客户端（快照现在是独立 DiskCache，不再挂在 L2 上）。
-    /// 每次用独立临时文件，避免测试间互相读到人家的快照。
-    fn client_with_snapshots(tag: &str) -> AStockClient {
-        let (client, _snap_disk) =
-            AStockClient::new().with_daily_snapshot_cache(tmp_cache_path(tag));
-        client
-    }
-
-    fn tmp_cache_path(tag: &str) -> PathBuf {
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("astock_snapshot_{}_{}.json", tag, std::process::id()));
-        let _ = std::fs::remove_file(&dir);
-        dir
+    /// 建一个「每日快照归档已启用」的客户端（#20②：归档是 SQL 表，单测里用内存替身）。
+    ///
+    /// 旧形态每次用独立临时文件避免测试间互读；内存替身每个 client 新建一个实例，
+    /// 天然隔离 ⇒ 不再需要 tag，也不再需要 DiskCache 的 flush 任务。
+    fn client_with_snapshots() -> AStockClient {
+        AStockClient::new().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ))
     }
 
     fn replay(date_str: &str) -> AsOfContext {
@@ -6915,7 +6996,7 @@ mod asof_snapshot_first_tests {
     #[serial(asof)]
     async fn index_quotes_hit_daily_snapshot_before_vendor() {
         let date = "2026-06-01";
-        let client = client_with_snapshots("idx");
+        let client = client_with_snapshots();
         let payload = serde_json::to_string(&vec![IndexQuote {
             code: "000001".into(),
             name: "上证指数".into(),
@@ -6926,7 +7007,7 @@ mod asof_snapshot_first_tests {
             amount: 2.0,
         }])
         .unwrap();
-        client.set_daily_snapshot("get_index_quotes", date, &payload);
+        client.set_daily_snapshot("get_index_quotes", date, &payload).await;
         crate::as_of::reset_global_degradation_log();
 
         let got = AS_OF
@@ -6951,7 +7032,7 @@ mod asof_snapshot_first_tests {
     #[tokio::test]
     #[serial(asof)]
     async fn industry_ranking_weekend_anchor_hits_prev_trading_day_snapshot() {
-        let client = client_with_snapshots("ind_rank_backfill");
+        let client = client_with_snapshots();
         let payload = serde_json::to_string(&vec![IndustryRank {
             industry_name: "半导体".into(),
             change_pct: 2.5,
@@ -6962,7 +7043,7 @@ mod asof_snapshot_first_tests {
             leader_change_pct: Some(3.1),
         }])
         .unwrap();
-        client.set_daily_snapshot("get_industry_ranking", "2026-09-24", &payload);
+        client.set_daily_snapshot("get_industry_ranking", "2026-09-24", &payload).await;
         crate::as_of::reset_global_degradation_log();
 
         let got = AS_OF
@@ -6987,7 +7068,7 @@ mod asof_snapshot_first_tests {
     #[serial(asof)]
     async fn margin_data_hit_stock_scoped_snapshot() {
         let date = "2026-06-01";
-        let client = client_with_snapshots("margin");
+        let client = client_with_snapshots();
         let margin = MarginData {
             stock_code: "600519".into(),
             date: date.into(),
@@ -6996,12 +7077,14 @@ mod asof_snapshot_first_tests {
             short_sell_volume: 3.0,
             short_balance: 4.0,
         };
-        client.set_stock_daily_snapshot(
-            "get_margin_data",
-            "600519",
-            date,
-            &serde_json::to_string(&margin).unwrap(),
-        );
+        client
+            .set_stock_daily_snapshot(
+                "get_margin_data",
+                "600519",
+                date,
+                &serde_json::to_string(&margin).unwrap(),
+            )
+            .await;
 
         let got = AS_OF
             .scope(Some(replay(date)), async { client.get_margin_data("600519").await })
@@ -7021,7 +7104,7 @@ mod asof_snapshot_first_tests {
     #[serial(asof)]
     async fn margin_data_degradation_is_aggregated_not_per_vendor() {
         let date = "2020-01-03";
-        let client = client_with_snapshots("margin_miss");
+        let client = client_with_snapshots();
         crate::as_of::reset_global_degradation_log();
 
         let r =
@@ -7037,37 +7120,169 @@ mod asof_snapshot_first_tests {
         );
     }
 
-    /// 回归（2026-09-26）：每日快照与 vendor L2 必须是**两个独立实例 + 两个文件**。
+    /// 回归（2026-09-26 立，2026-10-08 #20② 换承载后仍锁同一条不变量）：
+    /// **vendor L2 的淘汰不得吃掉每日快照归档**。
     ///
-    /// 缺陷形态：`with_daily_snapshot_cache()` 只是把 `with_l2_cache()` 的
+    /// 原缺陷形态：`with_daily_snapshot_cache()` 只是把 `with_l2_cache()` 的
     /// `Arc<DiskCache>` 复用一遍 —— 同一实例、同一 10_000 条容量、同一文件。
     /// K 线缓存单条约 70 KB（`fetch_limit = max(limit,500)` 且存全量），几条就能把
     /// 最旧的每日快照按 `last_access` LRU 挤掉 ⇒ 回放兜底"哪天有、哪天没"，
     /// 而现场只会看到"没数据"，看不出是被缓存淘汰吃掉的。
     ///
-    /// 判据：把 L2 灌到触发淘汰，快照仍必须读得回来。
-    #[test]
+    /// #20② 把归档换成 SQL 历史表后，这条不变量的**成因**已经消失（两套存储物理隔离，
+    /// 不再有共享预算可挤），但**判据必须留着** —— 它挡的是「日后有人图省事把归档
+    /// 塞回 DiskCache/L1」这种回流。故本用例照旧灌满 L2，再验快照仍读得回来。
+    #[tokio::test]
     #[serial(asof)]
-    fn snapshot_cache_is_independent_from_l2() {
-        let (base, l2) = AStockClient::new().with_l2_cache(tmp_cache_path("iso_l2"));
-        let (client, _snap_disk) = base.with_daily_snapshot_cache(tmp_cache_path("iso_snap"));
+    async fn snapshot_archive_survives_l2_eviction_flood() {
+        let mut path = std::env::temp_dir();
+        path.push(format!("astock_iso_l2_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        // L2 仍是 DiskCache（vendor 结果的方法级缓存），归档走内存替身 —— 两者必须无耦合
+        let (base, l2) = AStockClient::new().with_l2_cache(path);
+        let client = base.with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
         client.set_daily_snapshot(
             "get_index_quotes",
             "2026-06-01",
             r#"[{"code":"000001","name":"上证指数","price":3100.0,"preClose":3080.0,"changePct":0.65,"volume":1.0,"amount":2.0}]"#,
-        );
+        )
+        .await;
 
         // 灌满 L2：容量 10_000，满则按 last_access 淘汰最旧 10%
         for i in 0..12_000 {
             l2.set(format!("klines:{i:05}:daily::live"), "[]".to_string(), 300);
         }
 
-        let hit = client.try_daily_snapshot("get_index_quotes", "2026-06-01");
+        let hit = client.try_daily_snapshot("get_index_quotes", "2026-06-01").await;
         assert!(
             hit.is_some(),
-            "L2 洪峰不得挤掉每日快照 —— 两者必须分实例分文件（见 with_daily_snapshot_cache 注释）"
+            "L2 洪峰不得挤掉每日快照 —— 归档与缓存是两套存储（见 daily_snapshot.rs 文件头）"
         );
-        assert!(hit.unwrap().contains("上证指数"), "读回的必须是被淘汰前写入的那条快照");
+        assert!(hit.unwrap().contains("上证指数"), "读回的必须是淘汰前写入的那条快照");
+    }
+
+    /// 类②（#20② 的验收硬条件）：跨日聚合真的**被消费**了 —— 缺席文案要能分辨
+    /// 「单日漏采」与「整段窗口都没采到（=采集侧断了）」这两种缺席。
+    ///
+    /// 这条数在旧 DiskCache 存储里结构上取不出来（没有 prefix-scan API），
+    /// 所以本用例同时是「升格产出了真实跨日聚合」的证据：同一个 method、
+    /// 锚点前 N 个交易日的窗口、按 `snapshot_date` 去重计数。
+    ///
+    /// 三档逐字不同（对用户是有后果的：档不同 ⇒ 该做的事不同）：
+    ///   · 0 天  ⇒ 采集侧整段断供（重跑那一天也解不了）；
+    ///   · < 半  ⇒ 采集侧近期不稳定（先查定时任务与 vendor）；
+    ///   · ≥ 半  ⇒ 单日漏采（重跑当日采集即可解）。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn snapshot_absence_clause_reports_cross_day_coverage() {
+        let anchor = "2026-09-24"; // 周四，最后交易日（09-25 中秋休市）
+        let n = daily_snapshot::SNAPSHOT_DIAGNOSTIC_WINDOW;
+
+        // ── 档一：窗口内一天都没有 ⇒ 说「整段断供」 ──
+        let client = AStockClient::new().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
+        let clause = client.snapshot_absence_clause("get_hot_stocks", anchor).await;
+        assert!(clause.contains("该截止日无本地快照"), "仍要说清该日缺: {clause}");
+        assert!(clause.contains("整段断供"), "窗口 0 天要升级成采集侧断供: {clause}");
+        assert!(clause.contains(&format!("0/{n}")), "要报出真实读数: {clause}");
+
+        // ── 档二：窗口内只有 3 天 ⇒ 说「近期不稳定」 ──
+        let client = AStockClient::new().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
+        for d in ["2026-09-21", "2026-09-22", "2026-09-23"] {
+            client.set_daily_snapshot("get_hot_stocks", d, "[{\"stock_code\":\"000001\"}]").await;
+        }
+        let clause = client.snapshot_absence_clause("get_hot_stocks", anchor).await;
+        assert!(clause.contains("近期不稳定"), "3/{n} 是采集侧不稳定: {clause}");
+        assert!(!clause.contains("整段断供"), "有快照就不许说成整段断供: {clause}");
+        assert!(
+            !clause.contains("单日漏采"),
+            "档二不得冒充单日漏采（那种病重跑当天就能解）: {clause}"
+        );
+
+        // ── 档三：窗口内每个交易日都有 ⇒ 说「单日漏采，重跑即可解」 ──
+        let client = AStockClient::new().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
+        let from = daily_snapshot::trading_window_start(anchor, n).expect("锚点可解析");
+        let from_d = NaiveDate::parse_from_str(&from, "%Y-%m-%d").unwrap();
+        let to_d = NaiveDate::parse_from_str(anchor, "%Y-%m-%d").unwrap();
+        // 逐自然日写（**不含锚点自己** —— 锚点必须仍是缺的那一天）：`key_date` 把周末/假日
+        // 归到前一交易日 ⇒ 去重后正好 = 窗口内除锚点外的全部交易日，覆盖率 ≥ 一半 ⇒ 档三
+        let mut cur = from_d;
+        while cur < to_d {
+            client
+                .set_daily_snapshot(
+                    "get_hot_stocks",
+                    &cur.format("%Y-%m-%d").to_string(),
+                    "[{\"stock_code\":\"000001\"}]",
+                )
+                .await;
+            cur += chrono::Duration::days(1);
+        }
+        let clause = client.snapshot_absence_clause("get_hot_stocks", anchor).await;
+        assert!(clause.contains(&format!("/{n}")), "要报出窗口分母: {clause}");
+        assert!(clause.contains("单日漏采"), "满覆盖下缺一天 = 单日漏采: {clause}");
+        assert!(!clause.contains("整段断供"), "档一的话术不得串进档三: {clause}");
+        assert!(!clause.contains("近期不稳定"), "档二的话术不得串进档三: {clause}");
+        assert!(clause.contains("不可回补"), "仍要保留原那句「只能自今日起累积」的指引: {clause}");
+
+        // ── 负控：窗口聚合是按 method 的，别的 method 不得串数 ──
+        let clause_other = client.snapshot_absence_clause("get_cls_flash", anchor).await;
+        assert!(clause_other.contains("整段断供"), "未写过的方法仍是 0 天: {clause_other}");
+    }
+
+    /// 负控（2026-10-08）：**聚合查询失败 ⇒ 不许说成「采集侧整段断供」**。
+    ///
+    /// 缺陷形态（真实现场链条）：`init/daily_snapshot_store.rs` 把 SQL 报错
+    /// `unwrap_or_default()` 成 0 ⇒ 这里落档一，面板输出「0/20 ⇒ 采集侧整段断供，
+    /// 重跑那一天也解不了」—— 把「我这句查询失败了」说成「后台采集断了」。
+    /// 而本仓建表走声明式对账、启动期 `additive_only` ⇒ `astock_daily_snapshot`
+    /// 没建出来时只 warn 进启动日志、进程照常起来，于是这条误报是**默认形态**。
+    /// 用户按面板去查后台 sweep，永远查不到病根（病根在存储层）。
+    ///
+    /// 断言三件事：① 不说断供；② 不报任何覆盖率分母（没有依据的话就不说）；
+    /// ③ 明说聚合本次不可得。保守原文那句仍要留着 —— 用户至少要知道那一天确实没快照。
+    #[tokio::test]
+    #[serial(asof)]
+    async fn snapshot_absence_clause_does_not_claim_outage_when_aggregate_fails() {
+        // 只在测试内把端口 trait 引进来（要直接对替身调 `put` / `count_by_date_range`，
+        // 生产侧全部经由 `Arc<dyn ...>` 限定路径调用，不必在 lib.rs 顶层 unshadow 它）
+        use crate::daily_snapshot::DailySnapshotStore as _;
+        let anchor = "2026-09-24"; // 周四，最后交易日（09-25 中秋休市）
+        let n = daily_snapshot::SNAPSHOT_DIAGNOSTIC_WINDOW;
+
+        let store = daily_snapshot::test_store::MemorySnapshotStore::new();
+        // 窗口里其实有数据：正因如此，一旦「不可得」被当成 0，误报就完全无从察觉
+        for d in ["2026-09-21", "2026-09-22", "2026-09-23"] {
+            store.put("get_hot_stocks", None, d, "[{\"stock_code\":\"000001\"}]").await;
+        }
+        store.fail_aggregate();
+        // 前置：替身的聚合确实是 None（否则这条负控什么都没测到）
+        let from = daily_snapshot::trading_window_start(anchor, n).expect("锚点可解析");
+        assert_eq!(
+            store.count_by_date_range("get_hot_stocks", &from, anchor).await,
+            None,
+            "替身的 fail_aggregate 必须让聚合报「不可得」"
+        );
+        let client = AStockClient::new().with_daily_snapshot_store(Arc::new(store));
+
+        let clause = client.snapshot_absence_clause("get_hot_stocks", anchor).await;
+        assert!(!clause.contains("整段断供"), "查询失败不得冒充采集断供: {clause}");
+        assert!(!clause.contains("断供"), "同一族话术整块都不许出现: {clause}");
+        assert!(!clause.contains("近期不稳定"), "同样没有依据，不许猜另一档: {clause}");
+        assert!(!clause.contains("单日漏采"), "同样没有依据，不许猜另一档: {clause}");
+        assert!(
+            !clause.contains(&format!("/{n}")) && !clause.contains(&format!("{n} 个交易日")),
+            "聚合不可得时不许报任何窗口分母: {clause}"
+        );
+        assert!(clause.contains("聚合本次不可得"), "要说清是本次统计不出来: {clause}");
+        assert!(clause.contains("该截止日无本地快照"), "仍要说清该日缺: {clause}");
+        assert!(clause.contains("不可回补"), "仍要保留「只能自今日起累积」的指引: {clause}");
     }
 }
 
@@ -7369,13 +7584,6 @@ mod asof_boundary_tests {
         items.iter().map(date_of).filter(|d| *d > CUTOFF).map(|d| d.to_string()).collect()
     }
 
-    fn l2_path(tag: &str) -> std::path::PathBuf {
-        let mut p = std::env::temp_dir();
-        p.push(format!("astock_boundary_{}_{}.json", tag, std::process::id()));
-        let _ = std::fs::remove_file(&p);
-        p
-    }
-
     /// D1 估值历史：越过截止日的样本不得进入回放（它直接决定分位与「当前值」）
     #[tokio::test]
     #[serial(asof)]
@@ -7539,31 +7747,36 @@ mod asof_boundary_tests {
             assert!(report.iter().any(|e| e.method == m), "{m} 应留降级痕迹: {report:?}");
         }
 
-        // ② 命中个股级快照 ⇒ 回放快照值（快照是独立 DiskCache，与 L2 无耦合）
-        let (snap_client, _snap_disk) =
-            stub_client().with_daily_snapshot_cache(l2_path("snapshot"));
-        snap_client.set_stock_daily_snapshot(
-            "get_social_sentiment",
-            "600519",
-            CUTOFF,
-            &serde_json::to_string(&[SocialSentiment {
-                stock_code: "600519".into(),
-                stock_name: "贵州茅台".into(),
-                platform: "guba".into(),
-                post_count: 7,
-                hot_rank: Some(9),
-                sentiment_score: Some(-0.25),
-                bull_ratio: Some(0.3),
-                fetched_at: 2,
-            }])
-            .unwrap(),
-        );
-        snap_client.set_stock_daily_snapshot(
-            "get_pledge_data",
-            "600519",
-            CUTOFF,
-            &serde_json::to_string(&pledge()).unwrap(),
-        );
+        // ② 命中个股级快照 ⇒ 回放快照值（归档是 `DailySnapshotStore` 的替身，与 L2 无耦合）
+        let snap_client = stub_client().with_daily_snapshot_store(Arc::new(
+            daily_snapshot::test_store::MemorySnapshotStore::new(),
+        ));
+        snap_client
+            .set_stock_daily_snapshot(
+                "get_social_sentiment",
+                "600519",
+                CUTOFF,
+                &serde_json::to_string(&[SocialSentiment {
+                    stock_code: "600519".into(),
+                    stock_name: "贵州茅台".into(),
+                    platform: "guba".into(),
+                    post_count: 7,
+                    hot_rank: Some(9),
+                    sentiment_score: Some(-0.25),
+                    bull_ratio: Some(0.3),
+                    fetched_at: 2,
+                }])
+                .unwrap(),
+            )
+            .await;
+        snap_client
+            .set_stock_daily_snapshot(
+                "get_pledge_data",
+                "600519",
+                CUTOFF,
+                &serde_json::to_string(&pledge()).unwrap(),
+            )
+            .await;
         let s = AS_OF
             .scope(Some(cutoff_ctx()), async { snap_client.get_social_sentiment("600519").await })
             .await

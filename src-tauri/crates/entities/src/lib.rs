@@ -182,6 +182,11 @@ pub mod opc_work_items;
 
 // === 股票业务 / 量化分析 / 投资组合实体（上游合并时丢失，cf923b07^ 恢复）===
 pub mod analyst_feedback;
+// 每日快照归档表（#20②，2026-10-08 从 DiskCache 单文件升格而来；建表理由与
+// 「为什么不用 DiskCache」写在模块文件头，此处只需一行登记 —— `dao/build.rs`
+// 扫本行自动生成实体清单，无需手工表名数组，也无需写 migration：本仓表结构走
+// `crates/dao/src/reconcile/extras.rs` 声明式对账）。
+pub mod astock_daily_snapshot;
 pub mod business_roles;
 pub mod data_quality_observations;
 pub mod decision_validations;

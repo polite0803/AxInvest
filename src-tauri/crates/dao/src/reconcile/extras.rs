@@ -512,7 +512,7 @@ pub const ORPHAN_EXEMPT: &[OrphanExemptDecl] = &[
 //
 // ## 这条声明修的是什么（2026-09-16 生产库实测事故）
 //
-// `crates/entities/src/lib.rs:254-279` 有 8 个**真 `pub mod`** 的侧车库实体：
+// `crates/entities/src/lib.rs:286-293` 有 8 个**真 `pub mod`** 的侧车库实体：
 // `ast_*`(5) + `file_index` + `l2_index_snapshots` + `l2_search_results`。该文件自己
 // 在注释里写着「⚠ 它们**不在主库**……在此声明的是 schema，与连接指向哪个库无关」。
 //
@@ -598,7 +598,7 @@ pub const NON_MAIN_DB: &[NonMainDbDecl] = &[
             "file_index",
         ],
         reason: "owner = src/indexing_triggers.rs:86 `INDEX_DB_FILENAME`（`index.db`，一个独立 \
-                 SQLite 文件）。这些实体只描述**那个文件**的 schema（见 entities/src/lib.rs:254-279）",
+                 SQLite 文件）。这些实体只描述**那个文件**的 schema（见 entities/src/lib.rs:286-293）",
         // 2026-09-17：原为 `Some(Dialect::Postgres)`。那是以「主库恒为 PG」为前提写的
         // 代理；主库方言由用户可配后它只在一条路径上成立。理由见上方「为什么双方言都排除」。
         dialect: None,
@@ -829,6 +829,22 @@ const MULTI_COL_INDEXES: &[IndexDecl] = &[
         method: None,
         where_clause: None,
         dialect: None, // ← v100_consolidated.rs
+    },
+    // `astock_daily_snapshot` 的跨日聚合索引（#20②，2026-10-08 声明式新增，无迁移出处）。
+    // 为什么必须是**多列**：这条需求的全部意义就是「某 method 跨多日的聚合」
+    // （读取侧 `snapshot_absence_clause` 要算「锚点前 N 个交易日里有快照的天数/N」）。
+    // 实体侧 `#[sea_orm(indexed)]` 只能给 `method`、`snapshot_date` 各建一条单列索引，
+    // 单列版会让跨日查询回表扫全 method ⇒ 复合索引是这条 SQL 的唯一正门。
+    // ⚠ 与上面两条单列索引**同名不冲突**（本名带 `_method_date` 后缀，单列名是
+    //   `idx-astock_daily_snapshot-{列}` 形态，见 `expected.rs` 的索引命名口径）。
+    IndexDecl {
+        table: "astock_daily_snapshot",
+        name: "idx_astock_daily_snapshot_method_date",
+        cols: &["method", "snapshot_date"],
+        unique: false,
+        method: None,
+        where_clause: None,
+        dialect: None, // ← 声明式新增（本仓表结构正门就是声明式对账，不走 migration）
     },
     // ⚠ `idx_chat_run_events_run_id`（v207）曾在此 —— **P3 删除**，理由见 `counts`
     //    模块的 `indexes_on_entity_less_tables_are_not_declared`：`chat_run_events`
@@ -1230,7 +1246,7 @@ const PARTIAL_INDEXES: &[IndexDecl] = &[
     },
 ];
 
-// 静态条目数自证：GIN 6 / MULTI 35 / PARTIAL 6
+// 静态条目数自证：GIN 6 / MULTI 36 / PARTIAL 6
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 汇总视图 —— 引擎（P3+）消费入口
@@ -1281,7 +1297,7 @@ mod counts {
     ///
     /// `2` = ① `index.db` 族（`ast_*` + `file_index`）② `l2_cache.db` 族（`l2_*`）。
     const EXPECT_NON_MAIN_DB_RULES: usize = 2;
-    /// `NON_MAIN_DB` 覆盖的表数（细则见 `crates/entities/src/lib.rs:254-279`）。
+    /// `NON_MAIN_DB` 覆盖的表数（细则见 `crates/entities/src/lib.rs:286-293`）。
     const EXPECT_NON_MAIN_DB_TABLES: usize = 8;
     /// 表达式默认值声明 —— 不计入 `total_declarations`（它是**既有列的一个属性**，
     /// 不新增任何对象）。
@@ -1291,7 +1307,7 @@ mod counts {
     const EXPECT_FUNCTIONS: usize = 1;
     const EXPECT_CHECKS: usize = 3;
     const EXPECT_GIN: usize = 6;
-    const EXPECT_MULTI: usize = 35;
+    const EXPECT_MULTI: usize = 36;
     /// partial 索引条目数。
     ///
     /// ⚠ 6 条里**前 5 条全部有迁移出处**（v100 / v111 / v112 / v117）；第 6 条
@@ -1337,7 +1353,7 @@ mod counts {
     }
 
     #[test]
-    fn l2_total_is_sixty_nine() {
+    fn l2_total_is_seventy() {
         let expect = EXPECT_VIRTUAL_TABLES
             + EXPECT_TRIGGERS
             + EXPECT_GENERATED_COLUMNS
@@ -1347,7 +1363,7 @@ mod counts {
             + EXPECT_GIN
             + EXPECT_MULTI
             + EXPECT_PARTIAL;
-        assert_eq!(expect, 69, "冻结总数常量自相矛盾");
+        assert_eq!(expect, 70, "冻结总数常量自相矛盾");
         assert_eq!(total_declarations(), expect, "total_declarations() 与各类求和不符");
     }
 

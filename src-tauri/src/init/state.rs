@@ -1583,13 +1583,19 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
     // 进 `news_archive` 表（表内仅剩早期手工数据，最后一条约 2026-08-10）；
     // ② 回放/as-of 模式下新闻、政策两条链路恒 `Ok(vec![])` ⇒ 分析师集体写「无法获取」
     // ⇒ 数据质量被拉到 D 级。此处按 `init/news_archive_sink.rs` 头部注释的原始约定接线。
-    // [2026-09-25 接线恢复] astock L2 磁盘缓存 + 每日快照缓存。
-    // `with_l2_cache` / `with_daily_snapshot_cache` 此前全仓零调用点 ⇒
+    // [2026-09-25 接线恢复] astock L2 磁盘缓存 + 每日快照归档。
+    // `with_l2_cache` / 快照注入此前全仓零调用点 ⇒
     // ① vendor 结果只在进程内 moka L1 存活，重启即冷启动全量打 vendor；
-    // ② `daily_snapshot` 恒为 None ⇒ 回放模式的「每日快照」兜底整条不可用，
+    // ② 快照归档恒为 None ⇒ 回放模式的「每日快照」兜底整条不可用，
     //   `sweep_daily_snapshots` 采回来的数据全部写进 no-op（与 09-24 news sink 同一族断链）。
+    // [2026-10-08 #20②] 快照归档从 DiskCache 单文件升格成 SQL 历史表：
+    // `with_daily_snapshot_cache(path)` + `DailySnapshotCache` 整条退役（禁止双写、禁止留旧臂
+    // —— 两套权威正是本仓反复登记的缺陷族）。换成 `with_daily_snapshot_store(Arc<dyn ...>)`，
+    // 实现是本目录的 `daily_snapshot_store.rs`（端口声明在 astock-data，适配器在 wiring 层，
+    // 与 `news_archive_sink.rs` 同构）。升格的硬理由：DiskCache 的 LRU 会吃掉历史快照，
+    // 且它没有 prefix-scan API ⇒ 跨日聚合结构上取不出来（详见该文件头）。
     // 「关键路径完成（首帧可渲染）」那条日志之后仍有 100+ 行接线（L2 磁盘缓存整文件
-    // 载入、快照缓存、browser fetcher、KPI 钩子注册），此前全程无计时 ⇒ 首屏慢无法归因。
+    // 载入、快照归档、browser fetcher、KPI 钩子注册），此前全程无计时 ⇒ 首屏慢无法归因。
     let t_wiring = std::time::Instant::now();
     let astock_client = {
         let news_archive_sink = Arc::new(crate::init::news_archive_sink::NewsArchiveSinkImpl::new(
@@ -1610,21 +1616,21 @@ pub async fn create_app_state(db_result: DatabaseInitResult) -> Result<AppState,
         #[cfg(mobile)]
         let client =
             client.with_browser_fetcher(Arc::new(crate::init::browser_fetcher::NoopBrowserFetcher));
-        // 每日快照用**独立文件 + 独立实例**：与 vendor L2 共用 10_000 条容量时，
-        // K 线缓存（单条约 70 KB）会把最旧快照按 LRU 挤掉，回放兜底变成"哪天有哪天没"。
+        // 每日快照归档注入 SQL 适配器：不再有「独立文件 + 独立实例 + 后台 flush」三件套。
+        // 归档即写即落库 ⇒ 少一个「忘起 flush 于是当日快照只停在内存里」的失效形态。
+        // 旧 DiskCache 文件的存量回填在 `run_deferred_init`（首帧之后），不占这条计时。
         let t_snap = std::time::Instant::now();
-        let (client, snapshot_disk) =
-            client.with_daily_snapshot_cache(app_dir.join("astock_daily_snapshot.json"));
-        crate::startup_timing::record("daily_snapshot_cache_load", t_snap.elapsed().as_millis());
+        let client = client
+            .with_daily_snapshot_store(crate::init::daily_snapshot_store::arc_store(harness.db()));
+        crate::startup_timing::record("daily_snapshot_store_inject", t_snap.elapsed().as_millis());
         let client = client.with_news_archive_sink(news_archive_sink);
-        // 两个 DiskCache 都是「写内存 + 30s 脏检查落盘」，必须各有 flush 任务持有；
-        // 随 shutdown_token 一起优雅退出，退出前各做最后一次 flush。
+        // vendor L2 仍是 DiskCache（「写内存 + 30s 脏检查落盘」），必须有人持有它的 flush；
+        // 随 shutdown_token 一起优雅退出，退出前做最后一次 flush。
         let flush_l2 = axagent_astock_data::disk_cache::spawn_flush_loop(l2);
-        let flush_snap = axagent_astock_data::disk_cache::spawn_flush_loop(snapshot_disk);
         let l2_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
             l2_shutdown.cancelled().await;
-            tokio::join!(flush_l2.shutdown_and_join(), flush_snap.shutdown_and_join());
+            flush_l2.shutdown_and_join().await;
         });
         Arc::new(client)
     };
@@ -2722,6 +2728,20 @@ pub async fn run_deferred_init(app_state: &crate::app_state::AppState) {
         Ok(_) => {},
         Err(e) => tracing::warn!("[startup] 占位会话清理失败（不阻塞）: {e}"),
     }
+
+    // ── 0b. 每日快照归档的存量回填（#20②，DiskCache 单文件 → SQL 历史表）──
+    // 不回填的话，升格当天回放覆盖率从「有」直接跳「空」——旧文件里那几个月的快照
+    // 读不到、而新表是空的，这是一次能力倒退。形状是**装配期一次性自动迁移**：
+    // 幂等（先查表内该键）、搬完把旧文件改名 `.migrated-<日期>` 保留不删、
+    // 任何失败只 warn 且绝不阻断启动。刻意**不**做成需要前端调用的命令
+    // （本仓对「helper 进树无人调用」判为不闭环，做成命令而无人调更糟）。
+    // 放在 deferred 而不是 create_app_state 的关键路径：整份 JSON 载入 + N 次 upsert
+    // 是 IO 密集的，而首帧不该为一次性的迁移动作买单。
+    crate::init::daily_snapshot_store::backfill_legacy_snapshot_at_startup(
+        &app_state.app_data_dir,
+        app_state.harness.db(),
+    )
+    .await;
 
     // ── 1. MemoryService FTS5 初始化 ──
     match app_state.memory_service.write().await.initialize().await {

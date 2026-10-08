@@ -844,6 +844,11 @@ pub async fn ensure_stock_analysis_experts_seeded(
     if let Err(e) = seed_stock_analysis_workflow_template(db).await {
         tracing::error!("[stock_analysis_setup] 股票分析工作流模板种子失败 (非致命): {e}");
     }
+    // 种子化会改 `stock-analysis` 的变量表（`merge_variable_values` 保旧值、
+    // `force_variable_value` 覆写、一次性迁移门如 `kline_limit`），而落点读的是
+    // `init::panel_variables` 的进程内快照 ⇒ 重建后必须重读那一行，
+    // 否则「升版后第一次跑」用的还是上一版的参数（快照是启动时装的）。
+    crate::init::panel_variables::refresh_from_db(db).await;
     tracing::info!("[stock_analysis_setup] === 股票分析工作流模板种子完成 ===");
 
     // 快速链模板必须紧随原链种子（它从 stock-analysis 行派生，源行不存在则直接失败）
@@ -1334,7 +1339,6 @@ pub(crate) fn merge_variable_values(
         ("analysis_maxDebateRounds", "debate_rounds"),
         ("analysis_maxConcurrent", "max_concurrent"),
         // 数据源
-        ("analysis_klinePeriod", "kline_period"),
         ("analysis_klineLimit", "kline_limit"),
         ("analysis_newsLimit", "news_limit"),
         // Agent / Tool
@@ -1344,12 +1348,6 @@ pub(crate) fn merge_variable_values(
         ("tool_timeoutSecs", "tool_timeout_secs"),
         ("tool_retryMax", "tool_retry_max"),
         // 规则
-        ("rule_rsiOverbought", "rule_rsi_overbought"),
-        ("rule_rsiOversold", "rule_rsi_oversold"),
-        ("rule_biasLimit", "rule_bias_limit_pct"),
-        ("rule_volumeSignalBlock", "rule_volume_signal_block"),
-        ("rule_bearLowScore", "rule_bear_low_score"),
-        ("rule_autoStopLossPct", "rule_auto_stop_loss_pct"),
         // 仓位
         ("pos_maxSingleStockPct", "pos_max_single_pct"),
         ("pos_maxTotalPositions", "pos_max_total"),
@@ -1363,8 +1361,6 @@ pub(crate) fn merge_variable_values(
         ("value_safetyMarginMin", "value_safety_margin"),
         // 监控
         ("monitor_pollIntervalSecs", "monitor_poll_interval_secs"),
-        ("monitor_changePctThreshold", "monitor_change_pct"),
-        ("monitor_turnoverThreshold", "monitor_turnover"),
         ("monitor_alertCooldownSecs", "monitor_alert_cooldown_secs"),
         // 跨股票聚合器（P2 配置入口）
         ("aggregator_windowSecs", "aggregator_window_secs"),
@@ -2553,7 +2549,11 @@ mod force_variable_value_tests {
 #[cfg(test)]
 mod version_gate_tests {
     use super::seed_stock_analysis::{TEMPLATE_VERSION, seed_stock_analysis_workflow_template};
+    // v140：按档风险节点已进档子模板 ⇒ 本模块的判据要能读**子模板的 typed 节点**
+    // （`check_horizon_scoped_risk` 用它），不能只看父图 JSON。
     use axagent_entities::workflow_template;
+    use axagent_harness::holding_period::Period;
+    use axagent_harness::workflow_types::{WorkflowEdge, WorkflowNode};
     use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
 
     /// 被测模板 id（与 `seed_stock_analysis.rs` 内的 `TEMPLATE_ID` 同值；
@@ -2736,19 +2736,28 @@ mod version_gate_tests {
     /// 按档风险图的**谓词**（写成纯函数是为了能被**变异样本**调用 —— 见下面两条负控）。
     ///
     /// 判据面（缺任一格都能假绿）：
-    ///   ① 四个 `cls-risk-level-{tier}` 齐备且是 CodeNode，其 code 含按档深度判据；
+    ///   ① 四张档子模板各有本档 `cls-risk-level-{kebab}` CodeNode，其 code 含按档深度判据，
+    ///      且子图内有「本档节点 → 本档分支」这条边（v140 起风险节点在**子模板**里）；
     ///   ② 每个节点的**按档两键**指向自己那一格（`riskWindows.<camelTier>.…`）——
     ///      「复制四遍得到四份相同结论」那种伪装，只有这一格检得出来（数节点数量检不出）；
     ///   ③ 七条全局键仍指全局（本版没按档的轴，声明必须与事实一致）；
-    ///   ④ 四路扇出 `pm-h-{kebab}`（v135 起是 SubWorkflowNode）必须把**本档**风险节点的产出
-    ///      以恒等键传进子快照（子模板里「读本档那一格」由 `horizon_tier_template.rs` 锁）；
-    ///   ⑤ 主链 `portfolio-mgr` 四个 `overall_risk_{snake}` 键齐备（脚本内按所选档 switch）；
-    ///   ⑥ 供给边：`t-risk → 本档节点`、`本档节点 → 对应分支`、`本档节点 → 主链`；
+    ///   ④ 四路扇出 `pm-h-{kebab}` 必须以恒等键把 **`t-risk`** 传进子快照（风险节点在子图里
+    ///      读的就是它）—— `map_inputs` 严格 ⇒ 少这个键就是整档子执行硬错；
+    ///   ⑤ 主链 `portfolio-mgr` 四个 `overall_risk_{snake}` 必须指 `pm-h-{kebab}.result.riskCategory`
+    ///      （分支行带回的那一格，见 `portfolio-mgr-h-*.rhai`）；
+    ///   ⑥ 父图**不得再有** `cls-risk-level-<档>` 节点，也不得以它为端点的边（搬干净了的正面
+    ///      断言 —— 留着就是两份权威，父图那份照样跑出一个没人读的风险档）；父侧供给边
+    ///      `t-risk → pm-h-<档>` 必须在；
     ///   ⑦ 全局节点仍在**且不注入**按档两键（注入了它就跟着加严 ⇒ 等于偷偷把 60 日整票
     ///      口径换成按档口径，research-mgr 与 `LLM回退` 两条消费面会跟着漂）。
+    ///
+    /// `child_of` 是**注入**而不是内部直调 builder：负控要能递一份「把 mid 的按档键改成读 long
+    /// 那一格」的变异子模板进来 —— 判据面搬到子模板之后，再靠改父图 JSON 变异就打不到它了
+    /// （打不到的负控＝另一种假绿）。
     fn check_horizon_scoped_risk(
         nodes: &[serde_json::Value],
         edges: &[serde_json::Value],
+        child_of: impl Fn(Period) -> (Vec<WorkflowNode>, Vec<WorkflowEdge>),
     ) -> Result<(), String> {
         let find = |id: &str| nodes.iter().find(|n| n["id"].as_str() == Some(id));
         let has_edge = |src: &str, dst: &str| {
@@ -2766,20 +2775,41 @@ mod version_gate_tests {
         let pm = find("portfolio-mgr").ok_or_else(|| "缺 portfolio-mgr 节点".to_string())?;
         for (suffix, camel, snake) in B1_TIER_KEYS {
             let node_id = format!("cls-risk-level-{suffix}");
-            let n = find(&node_id)
-                .ok_or_else(|| format!("缺按档风险节点 {node_id}（B1 的四节点没落库）"))?;
-            if n["type"].as_str() != Some("code") {
-                return Err(format!("{node_id} 必须是 CodeNode"));
-            }
-            let code = n["config"]["code"].as_str().unwrap_or_default();
-            if !code.contains("DEEP_DISPLACEMENT_RATIO") {
+            // v140：风险节点在**档子模板**里 ⇒ 判据面随之换成 typed 子节点（父图 JSON 里查不到它，
+            // 而且「父图查不到」本身也是这条门要断言的事之一，见下面的 absence 检查）。
+            let period = Period::ALL
+                .into_iter()
+                .find(|p| p.as_str() == snake)
+                .ok_or_else(|| format!("B1_TIER_KEYS 的 {snake} 不在 Period 权威表里"))?;
+            let (child_nodes, child_edges) = child_of(period);
+            let n = child_nodes
+                .iter()
+                .find_map(|node| match node {
+                    WorkflowNode::Code(c) if c.base.id == node_id => Some(c),
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    format!("档子模板 {snake} 里缺按档风险节点 {node_id} ⇒ v140 的搬动没落地")
+                })?;
+            let rmap = |key: &str| n.config.input_mapping.get(key).cloned().unwrap_or_default();
+            if !n.config.code.contains("DEEP_DISPLACEMENT_RATIO") {
                 return Err(format!(
                     "{node_id} 的 code 不含按档深度判据 —— include_str! 拿到的是旧版 risk-level.rhai？"
                 ));
             }
+            // 子图内的时序：风险节点 → 本档分支（它自己无入边 = 与评分节点并行，只读扇出传入的 t-risk）
+            let want_child_edge = format!("{node_id} -> pm-h-{suffix}");
+            if !child_edges
+                .iter()
+                .any(|e| e.source == node_id && e.target == format!("pm-h-{suffix}"))
+            {
+                return Err(format!(
+                    "档子模板 {snake} 缺边 {want_child_edge} ⇒ 分支会在风险档算出来之前起跑"
+                ));
+            }
             let want_depth =
                 format!("t-risk.result.content.stockRiskProfile.riskWindows.{camel}.drawdownDepth");
-            let got_depth = mapping(n, "risk_drawdown_depth");
+            let got_depth = rmap("risk_drawdown_depth");
             if got_depth != want_depth {
                 return Err(format!(
                     "{node_id} 的 risk_drawdown_depth = {got_depth}，应为 {want_depth} \
@@ -2788,14 +2818,14 @@ mod version_gate_tests {
             }
             let want_days =
                 format!("t-risk.result.content.stockRiskProfile.riskWindows.{camel}.windowDays");
-            let got_days = mapping(n, "risk_window_days");
+            let got_days = rmap("risk_window_days");
             if got_days != want_days {
                 return Err(format!(
                     "{node_id} 的 risk_window_days = {got_days}，应为 {want_days}"
                 ));
             }
             for key in B1_GLOBAL_KEYS {
-                let p = mapping(n, key);
+                let p = rmap(key);
                 if p.is_empty() {
                     return Err(format!("{node_id} 缺全局键 {key}（七条轴必须齐）"));
                 }
@@ -2812,42 +2842,49 @@ mod version_gate_tests {
             //   （实测首版按 snake 拼 `pm-h-ultra_short` ⇒ 当场红，属门的 bug 不是图的 bug）。
             let branch_id = format!("pm-h-{suffix}");
             let branch = find(&branch_id).ok_or_else(|| format!("缺分支节点 {branch_id}"))?;
-            let want_cat = format!("{node_id}.result.category");
-            // v135（B-2b #36）：`pm-h-<档>` 已由 CodeNode 换成 SubWorkflow 扇出 ⇒ 「分支读本档
-            // 那一格」这条判据随映射一起搬进 `horizon_tier_template.rs`（那里的
-            // `tier_branch_reads_own_risk_cell` 逐档断言 `overall_risk` = 本档节点的
-            // `.result.category`，负控是「改成读全局格必须红」—— 判据没有退役，只是跟着换载体）。
-            // 父图这一侧改检**传键**：子模板要读本档风险节点，而 `map_inputs`
-            // （`subworkflow_executor.rs:97-105`）是严格的 ⇒ 少这个键就是整档子执行硬错，
-            // 不是「该腿缺席」。键必须是恒等映射（子快照里的变量名 = 父池里的名字）。
+            // v140 的出口键：主链读的不再是节点，而是**分支行带回的那一格**。
+            let want_cat = format!("{branch_id}.result.riskCategory");
             if branch["type"].as_str() != Some("subWorkflow") {
                 return Err(format!(
                     "{branch_id} 应是 SubWorkflow 扇出节点，实为 {:?}",
                     branch["type"]
                 ));
             }
-            if mapping(branch, &node_id) != node_id {
+            // 扇出必须把 `t-risk` 以恒等键传进子快照（风险节点在子图里读的就是它）。
+            // `map_inputs` 是严格的（`subworkflow_executor.rs:97-105`）⇒ 少这个键 = 整档子执行硬错。
+            if mapping(branch, "t-risk") != "t-risk" {
                 return Err(format!(
-                    "{branch_id} 的 input_mapping 里 {node_id} = {}，应为恒等映射 {node_id:?} \
-                     —— 本档风险节点的产出没进子快照 ⇒ 该档子执行运行期硬错",
-                    mapping(branch, &node_id)
+                    "{branch_id} 的 input_mapping 里 t-risk = {:?}，应为恒等映射 \"t-risk\" \
+                     —— 子模板里的按档风险节点取不到输入",
+                    mapping(branch, "t-risk")
                 ));
             }
-            if !has_edge("t-risk", &node_id) {
-                return Err(format!("缺供给边 t-risk → {node_id}"));
+            if !has_edge("t-risk", &branch_id) {
+                return Err(format!("缺供给边 t-risk → {branch_id}（子图内的风险节点靠它供数）"));
             }
-            if !has_edge(&node_id, &branch_id) {
-                return Err(format!("缺供给边 {node_id} → {branch_id}"));
+            // 搬干净了的正面断言：父图**不应**再有任何 `cls-risk-level-<档>` 节点或以它为端点的边。
+            // 留着就是「两份权威」—— 父图那份照样会跑出一个没人读的风险档（v140 之前的形态）。
+            if find(&node_id).is_some() {
+                return Err(format!(
+                    "父图仍有 {node_id} 节点 ⇒ v140 只搬了一半（子模板里也有一份）"
+                ));
+            }
+            for (src, dst) in [
+                ("t-risk", node_id.as_str()),
+                (node_id.as_str(), branch_id.as_str()),
+                (node_id.as_str(), "portfolio-mgr"),
+            ] {
+                if has_edge(src, dst) {
+                    return Err(format!("父图仍有以 {node_id} 为端点的边 {src} → {dst}"));
+                }
             }
             let pm_key = format!("overall_risk_{snake}");
             if mapping(pm, &pm_key) != want_cat {
                 return Err(format!(
-                    "portfolio-mgr 的 {pm_key} = {}，应为 {want_cat}（主链按所选档 switch 的四格之一没接）",
+                    "portfolio-mgr 的 {pm_key} = {}，应为 {want_cat}（主链按所选档 switch 的四格之一没接 \
+                     ⇒ 按档风险收紧整条静默退役）",
                     mapping(pm, &pm_key)
                 ));
-            }
-            if !has_edge(&node_id, "portfolio-mgr") {
-                return Err(format!("缺供给边 {node_id} → portfolio-mgr"));
             }
         }
 
@@ -2873,29 +2910,49 @@ mod version_gate_tests {
 
         let nodes = nodes_of(db).await;
         let edges = edges_of(db).await;
-        if let Err(e) = check_horizon_scoped_risk(&nodes, &edges) {
+        let clean_children = |p| super::horizon_tier_template::horizon_tier_template_nodes(p);
+        if let Err(e) = check_horizon_scoped_risk(&nodes, &edges, clean_children) {
             panic!("v128 按档风险图不完整: {e}");
         }
 
-        // 负控 ①：把 mid 节点的深度改指 long 那一格（形状合法、档错位）⇒ 必须红。
+        // 负控 ①：把 mid 子模板里风险节点的深度键改指 long 那一格（形状合法、档错位）⇒ 必须红。
         // 没有这一条，上面那句「读自己那一格」就是恒真断言（四份复制恰好长那样）。
-        let mut swapped = nodes.clone();
-        let mid = swapped
-            .iter_mut()
-            .find(|n| n["id"].as_str() == Some("cls-risk-level-mid"))
-            .expect("夹具：mid 节点应存在");
-        mid["config"]["input_mapping"]["risk_drawdown_depth"] = serde_json::json!(
-            "t-risk.result.content.stockRiskProfile.riskWindows.long.drawdownDepth"
-        );
+        // v140 起这条**只能**通过子模板变异来打 —— 判据面已经不在父图 JSON 上了。
+        let swapped_mid = |p: Period| {
+            let (mut ns, es) = super::horizon_tier_template::horizon_tier_template_nodes(p);
+            if p == Period::Mid {
+                for n in ns.iter_mut() {
+                    if let WorkflowNode::Code(c) = n {
+                        if c.base.id == "cls-risk-level-mid" {
+                            c.config.input_mapping.insert(
+                                "risk_drawdown_depth".to_string(),
+                                "t-risk.result.content.stockRiskProfile.riskWindows.long.drawdownDepth"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+            (ns, es)
+        };
         assert!(
-            check_horizon_scoped_risk(&swapped, &edges).is_err(),
-            "mid 节点改成读 long 那一格后判据仍通过 ⇒ 它检不出「四份复制」这一原始缺陷"
+            check_horizon_scoped_risk(&nodes, &edges, swapped_mid).is_err(),
+            "mid 的风险节点改成读 long 那一格后判据仍通过 ⇒ 它检不出「四份复制」这一原始缺陷"
         );
 
-        // 负控 ②：短线扇出改成「传全局风险节点、不传本档那一个」⇒ 必须红。
-        // （v135 起 `pm-h-<档>` 是 SubWorkflow 扇出：它自己不算风险，只负责把本档风险节点的
-        // 产出传进子快照。原负控锁的是「分支节点改回读全局格」，那条判据现由
-        // `horizon_tier_template.rs` 的 `tier_branch_reads_own_risk_cell` 逐档锁。）
+        // 负控 ①′：抽掉子图内「风险节点 → 分支」这条边 ⇒ 必须红（分支会在风险档算出来前起跑）。
+        let edgeless_child = |p: Period| {
+            let (ns, mut es) = super::horizon_tier_template::horizon_tier_template_nodes(p);
+            es.retain(|e| !(p == Period::Mid && e.source == "cls-risk-level-mid"));
+            (ns, es)
+        };
+        assert!(
+            check_horizon_scoped_risk(&nodes, &edges, edgeless_child).is_err(),
+            "抽掉子图内 mid 的「风险节点 → 分支」边后仍绿 ⇒ 子图时序面不在判据面上"
+        );
+
+        // 负控 ②：短线扇出不再传 `t-risk`（改成只传全局风险节点）⇒ 必须红。
+        // 键面是 v140 的新失效面：子模板里的风险节点取不到输入 ⇒ 整档子执行硬错。
         let mut reverted = nodes.clone();
         let br = reverted
             .iter_mut()
@@ -2905,21 +2962,34 @@ mod version_gate_tests {
         br["config"]["input_mapping"]
             .as_object_mut()
             .expect("夹具：扇出应有 input_mapping 对象")
-            .remove("cls-risk-level-short");
+            .remove("t-risk");
         assert!(
-            check_horizon_scoped_risk(&reverted, &edges).is_err(),
-            "短线扇出改回只传全局风险节点后仍绿 ⇒ 「按档接线」没被锁住"
+            check_horizon_scoped_risk(&reverted, &edges, clean_children).is_err(),
+            "短线扇出撤掉 t-risk 后仍绿 ⇒ 「子模板按档接线」没被锁住"
         );
 
-        // 负控 ③：删掉一条供给边 ⇒ 必须红（时序竞态是独立失效面）。
+        // 负控 ③：删掉父侧供给边 `t-risk → pm-h-mid` ⇒ 必须红（时序竞态是独立失效面）。
         let mut edgeless = edges.clone();
         edgeless.retain(|e| {
-            !(e["source"].as_str() == Some("cls-risk-level-mid")
-                && e["target"].as_str() == Some("portfolio-mgr"))
+            !(e["source"].as_str() == Some("t-risk") && e["target"].as_str() == Some("pm-h-mid"))
         });
         assert!(
-            check_horizon_scoped_risk(&nodes, &edgeless).is_err(),
-            "撤掉 mid → portfolio-mgr 的边后仍绿 ⇒ 边面不在判据面上"
+            check_horizon_scoped_risk(&nodes, &edgeless, clean_children).is_err(),
+            "撤掉 t-risk → pm-h-mid 的边后仍绿 ⇒ 边面不在判据面上"
+        );
+
+        // 负控 ④：把主链某一格的出口键改回旧的 `cls-risk-level-<档>.result.category`
+        // （父图已无该节点 ⇒ 变量永不到货）⇒ 必须红。
+        let mut stale_pm = nodes.clone();
+        let pm = stale_pm
+            .iter_mut()
+            .find(|n| n["id"].as_str() == Some("portfolio-mgr"))
+            .expect("夹具：portfolio-mgr 应存在");
+        pm["config"]["input_mapping"]["overall_risk_mid"] =
+            serde_json::json!("cls-risk-level-mid.result.category");
+        assert!(
+            check_horizon_scoped_risk(&stale_pm, &edges, clean_children).is_err(),
+            "主链读端留在旧路径仍判通过 ⇒ 这就是「按档风险静默退役」的复现，门必须拦住"
         );
     }
 
@@ -3181,14 +3251,16 @@ mod horizon_tier_fanout_tests {
         );
     }
 
-    /// 形状锁：每张档模板必须恰好是「常量 → 本档评分 → 本档分支 → 终值」四个节点。
+    /// 形状锁：每张档模板必须恰好是「常量 → 本档评分 → **本档按档风险** → 本档分支 → 终值」
+    /// 五个节点（v140 起；搬动前是四节点 + 风险节点留父图）。
     ///
     /// 为什么要单独一条：`audit_fanouts` 检的是**键**齐不齐，检不出**节点**被删/被换 ——
     /// 例如有人把评分节点从模板里摘掉、改成父侧再传一份，键面照样绿，而四档重新变成
     /// 同一份输入（§九十一(1) 的共享上游理由）。评分节点 id 取权威 `Period::scoring_node_id`
     /// （不手抄），所以档↔尺度↔节点一旦串了，这条与 `check-tier-purity` 的 R5 各红一次。
+    /// 风险节点 id 同样**不手抄**：由 `Period::as_str()` 现推 kebab ⇒ 档位拼写只有一个来源。
     #[test]
-    fn tier_template_shape_is_the_declared_four_nodes() {
+    fn tier_template_shape_is_the_declared_five_nodes() {
         for period in Period::ALL {
             let (nodes, _) = horizon_tier_template_nodes(period);
             let ids: Vec<String> = nodes.iter().map(|n| n.base_id().to_string()).collect();
@@ -3197,10 +3269,11 @@ mod horizon_tier_fanout_tests {
                 vec![
                     "const-scoring-period".to_string(),
                     period.scoring_node_id().to_string(),
+                    format!("cls-risk-level-{}", period.as_str().replace('_', "-")),
                     format!("pm-h-{}", period.as_str().replace('_', "-")),
                     "end".to_string(),
                 ],
-                "档模板 {ids:?} 的形状与本批声明的四节点形状不符 ⇒ 播种行与扇出键集要一起重算"
+                "档模板 {ids:?} 的形状与本批声明的五节点形状不符 ⇒ 播种行与扇出键集要一起重算"
             );
         }
     }

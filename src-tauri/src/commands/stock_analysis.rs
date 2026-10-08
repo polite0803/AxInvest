@@ -650,15 +650,25 @@ pub async fn replay_tool_chain(
     // `pePercentile = 20` ⇒ `valuation = "undervalued"`（亏损被读成低估）。
     // 此前 vendor 把 PE ≤ 0 过滤成 None，故恒走 `unwrap_or(50.0)` 中性档、
     // 缺陷不可见；放开负值后必须显式守卫 ⇒ 无正 PE 时保持中性 50。
+    //
+    // ⚠ PE 分档阈值不再是这里的字面量：它与 `astock-data::scoring` 的基本面修正
+    //   **同一个来源**（面板 `val_pe_low` / `val_pe_high`，默认 15 / 50）。改动前本行是
+    //   独立手抄的第二权威（20 / 40，连同上面那句「简化版」注释），只改 scoring.rs
+    //   会留下「同一个量两处、值不同」。
+    //   收口**确实改现网数值**（A 批里两处之一，另一处是 `news_limit` 的 50→30）：
+    //     · PE ∈ [15,20) ⇒ 原「低估 pePercentile=20」变「中性 50」
+    //     · PE ∈ (40,50] ⇒ 原「高估 pePercentile=80」变「中性 50」
+    //   下游 `valuation` 的 `undervalued` / `overvalued` 文案随 pePercentile 变 `fair`。
+    let pe_bands = axagent_analysis_engine::scoring::PeBands::panel_effective();
     let pe_pct = quote
         .pe
         .as_ref()
         .filter(|pe| **pe > 0.0)
         .map(|pe| {
-            // 简化版：PE<20 视为低估，PE>40 视为高估
-            if *pe < 20.0 {
+            // 低估界 = `val_pe_low`（默认 15）、高估界 = `val_pe_high`（默认 50）
+            if *pe < pe_bands.low {
                 20.0
-            } else if *pe > 40.0 {
+            } else if *pe > pe_bands.high {
                 80.0
             } else {
                 50.0
@@ -3325,7 +3335,8 @@ pub async fn refresh_portfolio_metrics(
     let (id, count) = portfolio_monitor::refresh_metrics(
         state.harness.db(),
         &positions,
-        &PositionLimits::default(),
+        // 仓位三条走面板（回落 20/10/40 == 接线前的 `Default`），与风控门同一来源。
+        &PositionLimits::panel_effective(),
         &betas,
         None,
         None,
@@ -3399,7 +3410,9 @@ pub async fn check_position_limits(
     let (top, sector_exposures, _max_sec) = portfolio_monitor::compute_concentration(&positions);
     let _ = top;
     let sector_pairs: Vec<(String, f64)> = sector_exposures.into_iter().collect();
-    let limits = PositionLimits::default();
+    // 面板 `pos_max_*` 生效（回落 20/10/40 == 接线前的 `Default`）：本命令把三个上限原样回给
+    // 前端展示，若这里仍读 `Default` 就会出现「风控门按面板判、展示条报默认」的两套数。
+    let limits = PositionLimits::panel_effective();
     let new_position_value = proposed_shares as f64 * proposed_price;
     let res = limits.check_new_position(
         new_position_value,
@@ -3430,10 +3443,13 @@ pub async fn check_position_limits(
 // ── Position Limits ──
 
 /// 获取全局仓位限制配置
+///
+/// 走 `PositionLimits::panel_effective()`（面板 `pos_max_*`，回落 20/10/40）：
+/// 前端展示与风控门必须是同一组数，否则「面板改了、展示条不动」又是一套两处权威。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateOnly, description = "获取全局仓位限制配置")]
 #[tauri::command]
 pub async fn get_position_limits() -> Result<PositionLimits, String> {
-    Ok(PositionLimits::default())
+    Ok(PositionLimits::panel_effective())
 }
 
 // ── 新增数据源命令 ──
@@ -4225,7 +4241,10 @@ pub async fn save_eastmoney_proxy(
     Ok(())
 }
 
-/// 执行每日快照采集：遍历 SNAPSHOT_METHODS，将全市场/个股数据存入 DiskCache
+/// 执行每日快照采集：遍历 SNAPSHOT_METHODS，将全市场/个股数据存入 SQL 归档表
+///
+/// #20②（2026-10-08）：落点从 DiskCache 单文件换成 `astock_daily_snapshot` 表
+/// （端口 `DailySnapshotStore` 在 astock-data，适配器在 `src-tauri/src/init/daily_snapshot_store.rs`）。
 ///
 /// 调用一次即可采集当日快照；as-of 模式下的 NoHistoricalSemantic 方法会优先查快照缓存。
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "采集每日快照")]
@@ -4263,9 +4282,12 @@ pub async fn run_daily_snapshot_sweep(
     // 采集**必须在 live 语义下跑**：快照的定义就是「那一天收盘时的真实世界」。
     // 后台 tick 的任务没有 task-local 作用域，`current_as_of()` 会回落读进程级全局栈 ⇒
     // 回放分析在跑时触发采集，各方法就走 as-of 分支（探测失败 → 空列表）并被写进快照。
-    // 实测（09-24）：同一轮里 `daily:get_industry_ranking` 与 `daily:get_hot_stocks`
-    // 都落成了字面 `"[]"`。这里压一层 `None` 显式声明 live（RAII，退出即移除自己那层，
-    // 不影响并发中别的回放作用域）；空值本身另在 `daily_snapshot::usable` 处兜底过滤。
+    // 实测（09-24）：同一轮里 `get_industry_ranking` 与 `get_hot_stocks` 的 09-24 归档
+    // 都落成了字面 `"[]"`（旧 DiskCache 的 key 形如 `daily:get_hot_stocks:2026-09-24`；
+    // #20② 起同一条目是表主键 `get_hot_stocks@-@2026-09-24`）。
+    // 这里压一层 `None` 显式声明 live（RAII，退出即移除自己那层，
+    // 不影响并发中别的回放作用域）；空值本身另由归档出口 `daily_snapshot::usable` 兜底 ——
+    // **写侧直接不落表**（升格前是「写进去、读时滤」，于是判重闸门被中毒条目锁死）。
     let _live_scope = axagent_astock_data::as_of::enter_global_asof(None);
     let mut market_count = 0u32;
     let mut stock_count = 0u32;
@@ -4319,7 +4341,7 @@ pub async fn run_daily_snapshot_sweep(
                     },
                     _ => continue,
                 };
-                client.set_stock_daily_snapshot(method, code, &date, &json);
+                client.set_stock_daily_snapshot(method, code, &date, &json).await;
                 stock_count += 1;
             }
         } else {
@@ -4346,7 +4368,7 @@ pub async fn run_daily_snapshot_sweep(
                         match client.get_concept_blocks(code).await {
                             Ok(Some(r)) => {
                                 let json = serde_json::to_string(&r).unwrap_or_default();
-                                client.set_stock_daily_snapshot(method, code, &date, &json);
+                                client.set_stock_daily_snapshot(method, code, &date, &json).await;
                                 stock_count += 1;
                             },
                             _ => continue,
@@ -4364,7 +4386,7 @@ pub async fn run_daily_snapshot_sweep(
                         match client.get_sector_info(code).await {
                             Ok(Some(r)) => {
                                 let json = serde_json::to_string(&r).unwrap_or_default();
-                                client.set_stock_daily_snapshot(method, code, &date, &json);
+                                client.set_stock_daily_snapshot(method, code, &date, &json).await;
                                 stock_count += 1;
                             },
                             _ => continue,
@@ -4378,7 +4400,7 @@ pub async fn run_daily_snapshot_sweep(
                         match client.get_announcements(code).await {
                             Ok(r) if !r.is_empty() => {
                                 let json = serde_json::to_string(&r).unwrap_or_default();
-                                client.set_stock_daily_snapshot(method, code, &date, &json);
+                                client.set_stock_daily_snapshot(method, code, &date, &json).await;
                                 stock_count += 1;
                             },
                             _ => continue,
@@ -4393,7 +4415,7 @@ pub async fn run_daily_snapshot_sweep(
                 _ => continue,
             };
             if !json.is_empty() {
-                client.set_daily_snapshot(method, &date, &json);
+                client.set_daily_snapshot(method, &date, &json).await;
                 market_count += 1;
             }
         }

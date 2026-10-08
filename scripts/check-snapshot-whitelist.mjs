@@ -17,6 +17,10 @@
 // R3 自证：`--selftest` 用合成文本证明检测器不空转（真从 match 臂读出来，不是恒空集）。
 //
 // 扫描面：`crates/astock-data/src/vendors/*.rs`（申报面）+ 同 crate 的 `daily_snapshot.rs`（白名单面）。
+// ⚠ 白名单的语义载体在 2026-10-08（#20②）换过一次：SNAPSHOT_METHODS 的每一项现在直接构成
+//   SQL 归档表 `astock_daily_snapshot` 的**表主键域**（主键 `{method}@{scope或'-'}@{date}`，
+//   method 段就是白名单里的名字），不再是旧 DiskCache 的 `daily:{method}:{date}` 那种 key。
+//   两张清单（申报面 / 白名单面）与本门的规则一条都没变 ⇒ 扫描面无需重指。
 // ⚠ 别用 `grep -B6` 邻域法抽方法名：相邻 match 臂的名字会串进来（本门第一版就是这么错的，
 //    把 `get_market_dragon_tiger` / `get_quote` 混成了 NHS）。正解是按 `=>` 切臂，
 //    只有 **右值** 里出现 `AsOfCapability::NoHistoricalSemantic` 的臂才算。

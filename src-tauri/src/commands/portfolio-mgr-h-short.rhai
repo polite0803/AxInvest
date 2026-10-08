@@ -21,7 +21,7 @@ let gaps = [];
 // ── 输入面（与节点 `input_mapping` 一一对应；读了没映射的名字 = 运行期 Variable not found，
 //    不是缺席。判据与来历见 PLAN §三十五）──
 // 已接：branch_json / horizon_prior_json / tier_score / macd_dif / macd_dea / rsi_value /
-//       lockup_float_ratio / lockup_supply_reason /     seal_rate / flow_persistence / kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult / scoring_windows / scoring_scale
+//       lockup_float_ratio / lockup_supply_reason /     seal_rate / flow_persistence / kline_bars / overall_risk / stop_vol_mult / take_profit_vol_mult / scoring_windows / scoring_scale / scale_trend / scale_momentum
 // 刻意不读（读了也没数据源 ⇒ 越界读取会打死节点）：
 //   · 催化剂 —— 本档腿集里没有 `eventCatalyst`（PLAN §十一 与权威表的分歧，任务 #22 收编）
 //   · 解禁供给 —— **v132 已接**（取数层按本档交易日窗归约的小数占比），缺席走下面条件式
@@ -213,6 +213,12 @@ if tw <= 0.0 || !prior_ok {
     // v138 裁定 3：本档实际用的指标窗口与尺度（产端 = 评分节点回显；缺席 = 早于 v138 的代 ⇒ 面板不渲染）
     scoringWindows: if present(scoring_windows) { scoring_windows } else { () },
     scoringScale: if present(scoring_scale) { scoring_scale } else { () },
+    scoringTrend: if present(scale_trend) { scale_trend } else { () },
+    scoringMomentum: if present(scale_momentum) { scale_momentum } else { () },
+    // v140：本档风险档随分支行一起带回父池 —— 风险节点搬进子模板后，主链 `overall_risk_<档>`
+    //   读的就是这里（`pm-h-<档>.result.riskCategory`）。漏这一行 = 按档风险收紧整条静默退役。
+    //   缺席只有一种可能：本档风险节点自己失败 ⇒ 整档子执行已经失败 ⇒ 这行不会单独缺。
+    riskCategory: if present(overall_risk) { overall_risk } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
     stopSource: if exit_move > 0.0 { "vol_band" } else { "fallback_pct" },

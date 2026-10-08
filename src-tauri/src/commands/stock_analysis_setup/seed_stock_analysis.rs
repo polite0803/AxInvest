@@ -1115,10 +1115,36 @@ type AlgoToolRow = (
 ///   `analysis-engine::reflection_stats::HorizonDecision` 无 `deny_unknown_fields` ⇒ 两个新键被忽略，
 ///   不需要同批改 Rust 结构。图内容变 ⇒ 换代 138。
 ///
+/// **v139(2026-10-08)**：**呈现层补齐（PLAN §一○八）** —— 逐档行除窗口根数外，再把
+///   `indicators.scaleTrend`（快/慢带 bar 数与数值、`diffPct`、`fastSlope`）与
+///   `indicators.scaleMomentum`（`period` + `value`）原样带出为 `scoringTrend` / `scoringMomentum`：
+///   四张档模板各加两条映射（读子图内本档评分节点 ⇒ 父扇出仍不加键），四份分支脚本各回写两键，
+///   `seed_consistency_tests` 的齐备态夹具**按档给不同数值**并断言逐档透传（硬编码或串档 ⇒ 另三档红）。
+///   存在理由：§一○二(4) 原文要的是「windows / scaleTrend / scaleMomentum 三者都上屏」，
+///   v138 只做到了第一支 ⇒ 补齐后读者才不止看到「按几根算」，还能看到「这一档两带差是多少」。
+///   ⚠ `diffPct` / `fastSlope` 产端是 `Option<f64>` 且**不 skip 序列化** ⇒ 缺席落成 JSON `null`，
+///   面板对 `null` 印「—」而不是 0（两个「拿不到」不得伪装成「值为零」）。图内容变 ⇒ 换代 139。
+///
+/// **v140(2026-10-08)**：**§九十一(0) 的三节点形状收口（PLAN §一○九）** —— 四个
+///   `cls-risk-level-{ultra-short,short,mid,long}` CodeNode 从父图**搬进各自的档子模板**，
+///   并新增一条出口键把结果带回主链：
+///   ① 子模板形状 4→**5 节点**、3→**4 边**（风险节点无入边 ⇒ 与评分节点并行；它 → 分支）；
+///   ② 四条父扇出的身份键 `cls-risk-level-<档>` 换成 **`t-risk`**（风险节点吃的仍是父侧 `t-risk`
+///      产出），供给边同步成 `t-risk → pm-h-<档>`；
+///   ③ 四份分支脚本回写 **`riskCategory`**（= 它读到的本档 `.result.category`）；
+///   ④ 主链 `portfolio-mgr` 四条 `overall_risk_<档>` 源路径改指 `pm-h-<档>.result.riskCategory`，
+///      并删掉四条 `cls-risk-level-<档> → portfolio-mgr` 父侧边（节点已不在父图；时序由既有的
+///      `pm-h-<档> → portfolio-mgr` 边传递覆盖）；全局 `cls-risk-level` 节点与其边**不动**。
+///   ⚠ **数值零变化**：九条输入映射与父图旧形态逐字相同，跑的仍是同一份 `risk-level.rhai`。
+///   失败面也逐位相同 —— 子模板里风险节点 `continue_on_fail = false`（父图旧形态是 `true`，
+///   但它失败时扇出取不到键、严格 `map_inputs` 同样判**整档子执行失败**）⇒ 这次搬动没有把
+///   「该档失败」放宽成「该档少一腿」；要放宽须另立裁定并点名 `tier_risk_raise` 消费者。
+///   图内容变 ⇒ 换代 140。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 138;
+pub const TEMPLATE_VERSION: i32 = 140;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -4573,7 +4599,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // ⚠ v128（B1）起该脚本新增**一条**按档判据（本档回撤深度），但它只加在「高风险-A」的
     //   或侧、不改任何既有条件；**本节点不注入那两个按档输入** ⇒ 它的结论与 v127 逐位相同
     //   （它要的是「整只票的 60 日风险档」，供 research-mgr 上下文与 portfolio-mgr 的回退分支）。
-    //   四个 `cls-risk-level-{tier}` 节点见紧随其后的 B1 区块。
+    //   四个 `cls-risk-level-{tier}` 节点 v140 起在**四张档子模板**里（`horizon_tier_template.rs`），
+    //   父图不再逐档展开；本全局节点仍在此处，且仍**不注入**那两个按档输入（见上一条与
+    //   `check_horizon_scoped_risk` 的第 ⑦ 条）。
     {
         nodes.push(WorkflowNode::Code(CodeNode {
             base: WorkflowNodeBase {
@@ -4658,221 +4686,14 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // ⚠ 全局节点 `cls-risk-level` **保留**且不改判据：它的下游是 research-mgr 的
     //   `context_sources`（output_var "risk-level"）与 portfolio-mgr 的 `LLM回退` 分支，
     //   两者要的都是「整只票的 60 日风险档」，不是某一档的。
-    {
-        nodes.push(WorkflowNode::Code(CodeNode {
-            base: WorkflowNodeBase {
-                id: "cls-risk-level-ultra-short".into(),
-                title: "超短线风险等级分类".into(),
-                description: Some(
-                    "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（2 日）回撤深度判据".into(),
-                ),
-                position: Position { x: 470.0, y: 3000.0 },
-                retry: RetryConfig::default(),
-                timeout: Some(10),
-                enabled: true,
-                parent_id: None,
-                compensation: None,
-                continue_on_fail: true,
-            },
-            config: CodeNodeConfig {
-                language: "rhai".into(),
-                code: include_str!("../risk-level.rhai").to_string(),
-                output_var: "risk-level-ultra-short".into(),
-                tool_name: None,
-                execute_directly: true,
-                input_mapping: [
-                    (
-                        "risk_volatility",
-                        "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
-                    ),
-                    ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
-                    ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
-                    ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
-                    ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
-                    ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
-                    (
-                        "risk_revenue_growth",
-                        "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
-                    ),
-                    // ↓ 本批唯一的两条按档输入（本档那一格，键名 camelCase `ultraShort`）
-                    (
-                        "risk_drawdown_depth",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.ultraShort.drawdownDepth",
-                    ),
-                    (
-                        "risk_window_days",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.ultraShort.windowDays",
-                    ),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-            },
-        }));
-    }
-    edges.push(edge("e-t-risk-cls-risk-ultra-short", "t-risk", "cls-risk-level-ultra-short"));
 
-    {
-        nodes.push(WorkflowNode::Code(CodeNode {
-            base: WorkflowNodeBase {
-                id: "cls-risk-level-short".into(),
-                title: "短线风险等级分类".into(),
-                description: Some(
-                    "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（5 日）回撤深度判据"
-                        .into(),
-                ),
-                position: Position { x: 470.0, y: 3090.0 },
-                retry: RetryConfig::default(),
-                timeout: Some(10),
-                enabled: true,
-                parent_id: None,
-                compensation: None,
-                continue_on_fail: true,
-            },
-            config: CodeNodeConfig {
-                language: "rhai".into(),
-                code: include_str!("../risk-level.rhai").to_string(),
-                output_var: "risk-level-short".into(),
-                tool_name: None,
-                execute_directly: true,
-                input_mapping: [
-                    (
-                        "risk_volatility",
-                        "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
-                    ),
-                    ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
-                    ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
-                    ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
-                    ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
-                    ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
-                    (
-                        "risk_revenue_growth",
-                        "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
-                    ),
-                    (
-                        "risk_drawdown_depth",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.short.drawdownDepth",
-                    ),
-                    (
-                        "risk_window_days",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.short.windowDays",
-                    ),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-            },
-        }));
-    }
-    edges.push(edge("e-t-risk-cls-risk-short", "t-risk", "cls-risk-level-short"));
-
-    {
-        nodes.push(WorkflowNode::Code(CodeNode {
-            base: WorkflowNodeBase {
-                id: "cls-risk-level-mid".into(),
-                title: "中线风险等级分类".into(),
-                description: Some(
-                    "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（28 日）回撤深度判据"
-                        .into(),
-                ),
-                position: Position { x: 470.0, y: 3180.0 },
-                retry: RetryConfig::default(),
-                timeout: Some(10),
-                enabled: true,
-                parent_id: None,
-                compensation: None,
-                continue_on_fail: true,
-            },
-            config: CodeNodeConfig {
-                language: "rhai".into(),
-                code: include_str!("../risk-level.rhai").to_string(),
-                output_var: "risk-level-mid".into(),
-                tool_name: None,
-                execute_directly: true,
-                input_mapping: [
-                    (
-                        "risk_volatility",
-                        "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
-                    ),
-                    ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
-                    ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
-                    ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
-                    ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
-                    ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
-                    (
-                        "risk_revenue_growth",
-                        "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
-                    ),
-                    (
-                        "risk_drawdown_depth",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.mid.drawdownDepth",
-                    ),
-                    (
-                        "risk_window_days",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.mid.windowDays",
-                    ),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-            },
-        }));
-    }
-    edges.push(edge("e-t-risk-cls-risk-mid", "t-risk", "cls-risk-level-mid"));
-
-    {
-        nodes.push(WorkflowNode::Code(CodeNode {
-            base: WorkflowNodeBase {
-                id: "cls-risk-level-long".into(),
-                title: "长线风险等级分类".into(),
-                description: Some(
-                    "按档风险分类（v128 B1）：阈值与全局节点一致，另加本档（90 日）回撤深度判据"
-                        .into(),
-                ),
-                position: Position { x: 470.0, y: 3270.0 },
-                retry: RetryConfig::default(),
-                timeout: Some(10),
-                enabled: true,
-                parent_id: None,
-                compensation: None,
-                continue_on_fail: true,
-            },
-            config: CodeNodeConfig {
-                language: "rhai".into(),
-                code: include_str!("../risk-level.rhai").to_string(),
-                output_var: "risk-level-long".into(),
-                tool_name: None,
-                execute_directly: true,
-                input_mapping: [
-                    (
-                        "risk_volatility",
-                        "t-risk.result.content.stockRiskProfile.annualizedVolatilityPct",
-                    ),
-                    ("risk_drawdown", "t-risk.result.content.stockRiskProfile.maxDrawdownPct"),
-                    ("risk_sharpe", "t-risk.result.content.stockRiskProfile.sharpeRatio"),
-                    ("risk_roe", "t-risk.result.content.stockRiskProfile.roeTTMPct"),
-                    ("risk_gross_margin", "t-risk.result.content.stockRiskProfile.grossMarginPct"),
-                    ("risk_debt_ratio", "t-risk.result.content.stockRiskProfile.debtRatioPct"),
-                    (
-                        "risk_revenue_growth",
-                        "t-risk.result.content.stockRiskProfile.revenueGrowthYoYPct",
-                    ),
-                    (
-                        "risk_drawdown_depth",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.long.drawdownDepth",
-                    ),
-                    (
-                        "risk_window_days",
-                        "t-risk.result.content.stockRiskProfile.riskWindows.long.windowDays",
-                    ),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect(),
-            },
-        }));
-    }
-    edges.push(edge("e-t-risk-cls-risk-long", "t-risk", "cls-risk-level-long"));
+    // ── v140（PLAN §一○九）：四个 `cls-risk-level-{档}` CodeNode 已从父图搬进四张档子模板 ──
+    //   搬动原因与补齐形态写在 `horizon_tier_template.rs` 的文件头（同一批四处：子模板加节点、
+    //   扇出身份键换成 t-risk、分支回写 riskCategory、主链四条读面改指 pm-h-{档}.result.riskCategory）。
+    //   九条输入映射与父图旧形态**逐字相同** ⇒ 按档风险档数值零变化；失败面也逐位相同
+    //   （子模板里风险节点 continue_on_fail=false ⇒ 它失败就是整档子执行失败，不软降级）。
+    //   全局节点 `cls-risk-level` **保留不动**：research-mgr 的 context_sources 与主链 LLM回退
+    //   要的是 60 日整票档，注入按档键等于偷偷换口径（门：check_horizon_scoped_risk 的第 ⑦ 条）。
 
     // ── Validation: 结果完整性校验 ──
     nodes.push(WorkflowNode::Validation(ValidationNode {
@@ -5400,10 +5221,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                     // 消费面：`portfolio-mgr.rhai` 的 `tier_risk_raise`（**只升不降**地收紧
                     // `pm_risk_veto` 的入参）。四个键名都进 present() 守卫，缺一个就是
                     // `Variable not found` ⇒ 整节点失败（不是降级）。
-                    ("overall_risk_ultra_short", "cls-risk-level-ultra-short.result.category"),
-                    ("overall_risk_short", "cls-risk-level-short.result.category"),
-                    ("overall_risk_mid", "cls-risk-level-mid.result.category"),
-                    ("overall_risk_long", "cls-risk-level-long.result.category"),
+                    // v140：风险节点搬进各档子模板后，这个值由**分支行自己带回**（`riskCategory`，
+                    // 见 `horizon_tier_template.rs` 头部第 ③ 条）⇒ 源路径改指扇出节点的双键产出。
+                    // 少改一条就是「按档风险收紧整条静默退役」（本仓登记的配置项空接线族）。
+                    ("overall_risk_ultra_short", "pm-h-ultra-short.result.riskCategory"),
+                    ("overall_risk_short", "pm-h-short.result.riskCategory"),
+                    ("overall_risk_mid", "pm-h-mid.result.riskCategory"),
+                    ("overall_risk_long", "pm-h-long.result.riskCategory"),
                     // AgentNode(Json mode) 输出包裹在 {role, content: <json_string>, ...} 中
                     // 2026-09-09: content parse 后为 {report, verdict}，catalyst_level 在 verdict 层
                     // v133（B2-2）：按档生成 —— `a-catalyst` 有四个逐档实例（四档子集均含它），
@@ -5822,14 +5646,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
 
     // ── v135（B-2b #36）：四档分支由 CodeNode 换成 SubWorkflow 扇出 ──
     //
-    // 搬进子模板的是「本档尺度常量 + 本档评分 + 本档分支决策」三段，逐字定义在
-    // `horizon_tier_template.rs`（四份逐字而不是循环，理由写在该文件头部）。
-    // 本档风险节点 `cls-risk-level-<档>` **留在父图** —— 它有四个父侧消费者
+    // 搬进子模板的是「本档尺度常量 + 本档评分 + **本档按档风险** + 本档分支决策」四段，
+    // 逐字定义在 `horizon_tier_template.rs`（四份逐字而不是循环，理由写在该文件头部）。
+    // v140 前本档风险节点 `cls-risk-level-<档>` 曾**留在父图**，理由是它有四个父侧消费者
     //   （下面 `portfolio-mgr` 的 `overall_risk_{ultra_short,short,mid,long}` 四条映射，
     //   消费点是 `portfolio-mgr.rhai` 的 `tier_risk_raise`），而子执行只把父扇出节点的
     //   `node_id` 与 `output_var` **双键**写回父池（`work_engine/engine/mod.rs:1772-1775`）
-    //   ⇒ 风险节点一旦进子模板，那四条映射就指向不存在的路径 ⇒ `present()` 恒假 ⇒
-    //   v128 B1 的按档风险收紧整条静默退役（本仓登记的「配置项空接线」族）。
+    //   ⇒ 直接搬走会让那四条映射指向不存在的路径 ⇒ 按档风险收紧整条静默退役。
+    //   v140 的解法：分支脚本把读到的风险档**回写进决策行**（`riskCategory`），主链读端随之
+    //   改指 `pm-h-<档>.result.riskCategory` ⇒ 双键写回把它带回父池，偏离收口（详见该文件头部）。
     //
     // ⚠ 三个不变量，动这四个节点之前先看：
     //   ① 节点 id 必须继续叫 `pm-h-<档>`、`output_var` 继续叫 `h_<档>` ——
@@ -5879,7 +5704,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             input_mapping: [
                 ("stock_code", "stock_code"),
                 ("t-scoring", "t-scoring"),
-                ("cls-risk-level-ultra-short", "cls-risk-level-ultra-short"),
+                // v140：风险节点已进子模板 ⇒ 子图要读的是父侧 t-risk 的产出（恒等键）
+                ("t-risk", "t-risk"),
                 ("t-limitup-pool", "t-limitup-pool"),
                 ("horizon_branch_json", "horizon_branch_json"),
                 ("horizon_prior_json", "horizon_prior_json"),
@@ -5900,7 +5726,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             sub_graph: None,
         },
     }));
-    for src in ["t-scoring", "cls-risk-level-ultra-short", LIMITUP_TOOL_ID] {
+    for src in ["t-scoring", "t-risk", LIMITUP_TOOL_ID] {
         edges.push(edge(&format!("e-{src}-pm-h-ultra-short"), src, "pm-h-ultra-short"));
     }
 
@@ -5927,7 +5753,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 input_mapping: [
                     ("stock_code", "stock_code"),
                     ("t-scoring", "t-scoring"),
-                    ("cls-risk-level-short", "cls-risk-level-short"),
+                    // v140：风险节点已进子模板 ⇒ 子图要读的是父侧 t-risk 的产出（恒等键）
+                    ("t-risk", "t-risk"),
                     ("t-limitup-pool", "t-limitup-pool"),
                     ("t-lockup-data", "t-lockup-data"),
                     ("horizon_branch_json", "horizon_branch_json"),
@@ -5952,7 +5779,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         edges.push(edge(&format!("e-{hm_short}-pm-h-short"), &hm_short, "pm-h-short"));
         nodes.push(WorkflowNode::SubWorkflow(fanout));
     }
-    for src in ["t-scoring", "cls-risk-level-short", LIMITUP_TOOL_ID, "t-lockup-data"] {
+    for src in ["t-scoring", "t-risk", LIMITUP_TOOL_ID, "t-lockup-data"] {
         edges.push(edge(&format!("e-{src}-pm-h-short"), src, "pm-h-short"));
     }
 
@@ -5979,7 +5806,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                 input_mapping: [
                     ("stock_code", "stock_code"),
                     ("t-scoring", "t-scoring"),
-                    ("cls-risk-level-mid", "cls-risk-level-mid"),
+                    // v140：风险节点已进子模板 ⇒ 子图要读的是父侧 t-risk 的产出（恒等键）
+                    ("t-risk", "t-risk"),
                     ("t-lockup-data", "t-lockup-data"),
                     ("t-valuation", "t-valuation"),
                     ("t-valuation-band", "t-valuation-band"),
@@ -6008,7 +5836,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     }
     for src in [
         "t-scoring",
-        "cls-risk-level-mid",
+        "t-risk",
         "t-valuation-band",
         "t-valuation",
         CONSENSUS_TOOL_ID,
@@ -6039,7 +5867,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             input_mapping: [
                 ("stock_code", "stock_code"),
                 ("t-scoring", "t-scoring"),
-                ("cls-risk-level-long", "cls-risk-level-long"),
+                // v140：风险节点已进子模板 ⇒ 子图要读的是父侧 t-risk 的产出（恒等键）
+                ("t-risk", "t-risk"),
                 ("t-valuation", "t-valuation"),
                 ("t-valuation-band", "t-valuation-band"),
                 ("t-consensus-data", "t-consensus-data"),
@@ -6061,14 +5890,9 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     }));
     // 本档不接 `take_profit_vol_mult`：长档出场口径 = 目标价止盈 + 论点证伪止损，
     //   没有「止盈倍数」这一说（该判断随分支脚本一起搬进 `stock-horizon-long`）。
-    for src in [
-        "t-scoring",
-        "cls-risk-level-long",
-        "t-valuation-band",
-        "t-valuation",
-        CONSENSUS_TOOL_ID,
-        MACRO_TOOL_ID,
-    ] {
+    for src in
+        ["t-scoring", "t-risk", "t-valuation-band", "t-valuation", CONSENSUS_TOOL_ID, MACRO_TOOL_ID]
+    {
         edges.push(edge(&format!("e-{src}-pm-h-long"), src, "pm-h-long"));
     }
 
@@ -6171,16 +5995,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-t-valuation-band-portfolio-mgr", "t-valuation-band", "portfolio-mgr"));
     edges.push(edge("e-pace-calc-portfolio-mgr", "pace-calc", "portfolio-mgr"));
     edges.push(edge("e-cls-risk-level-portfolio-mgr", "cls-risk-level", "portfolio-mgr"));
-    // v128（B1）：四个逐档风险节点同样是 portfolio-mgr 的**供给**边 ——
-    // 只写 input_mapping 不写边 = 「变量还没到账就被读」（本文件反复踩过的那条时序竞态）。
-    for src in [
-        "cls-risk-level-ultra-short",
-        "cls-risk-level-short",
-        "cls-risk-level-mid",
-        "cls-risk-level-long",
-    ] {
-        edges.push(edge(&format!("e-{src}-portfolio-mgr"), src, "portfolio-mgr"));
-    }
+    // v140：四个逐档风险节点已搬进子模板 ⇒ 它们**不再是父图节点**，这里的四条供给边随之删除。
+    // 主链读它们产出的路径现在是 `pm-h-<档>.result.riskCategory`，而
+    // `pm-h-<档> → portfolio-mgr` 四条边上面已经推过（同一段上方的 R-11 供给边），
+    // ⇒ 时序仍由既有的边传递覆盖，不需要新边。
 
     // ── PACE 情绪因子（f11）: pace-calc.rhai — 基于公告的四维情绪向量计算 ──
     // pace-calc.rhai 已实现完整的 PACE 计算逻辑（Polarity/Actuality/Credibility/Expectation），

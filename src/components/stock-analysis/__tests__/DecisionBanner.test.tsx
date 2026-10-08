@@ -179,6 +179,28 @@ describe("DecisionBanner", () => {
             bollPeriod: 2,
             volumeLookback: 2,
           },
+          // v139：两带数值 + **diffPct / fastSlope 给 null**（= 慢带非正、上一根不可算），
+          // 检验呈现层不把「算不出」压成 0。
+          scoringTrend: { fastBars: 2, slowBars: 6, fast: 11.5, slow: 10.25, diffPct: null, fastSlope: null },
+          scoringMomentum: { period: 2, value: 44 },
+        },
+        // 短线档：两带数值齐全且与中线那份夹具**不同** ⇒ 锁的是「逐档各自的数」而不是同一份常量。
+        short: {
+          action: "BUY",
+          positionPct: 4,
+          confidence: 61,
+          scoringScale: "weekly",
+          scoringWindows: {
+            maPeriods: [2, 6],
+            macdFast: 2,
+            macdSlow: 3,
+            macdSignal: 2,
+            rsiPeriods: [2],
+            bollPeriod: 2,
+            volumeLookback: 2,
+          },
+          scoringTrend: { fastBars: 2, slowBars: 6, fast: 9.75, slow: 9.5, diffPct: 2.63, fastSlope: 0.11 },
+          scoringMomentum: { period: 2, value: 51.5 },
         },
       },
     };
@@ -196,6 +218,21 @@ describe("DecisionBanner", () => {
         "stockAnalysis.horizonScoringWindows|scale=monthly,ma=2/6,rsi=2,macd=2/3/2,boll=2,vol=2",
       ),
     ).toBeTruthy();
+    // v139 两带数值成句，且 null 必须是「—」而不是 0
+    expect(
+      screen.getByText(
+        "stockAnalysis.horizonScaleTrend|fastBars=2,slowBars=6,fast=11.50,slow=10.25,diffPct=—,fastSlope=—",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("stockAnalysis.horizonScaleMomentum|period=2,value=44.0")).toBeTruthy();
+    // 换档 ⇒ 数值跟着换（若组件读的是同一份常量，这条会红）
+    fireEvent.click(screen.getByText("stockAnalysis.timeHorizonShort"));
+    expect(
+      screen.getByText(
+        "stockAnalysis.horizonScaleTrend|fastBars=2,slowBars=6,fast=9.75,slow=9.50,diffPct=2.63,fastSlope=0.11",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("stockAnalysis.horizonScaleMomentum|period=2,value=51.5")).toBeTruthy();
   });
 
   it("某路分支未产出 ⇒ 该档 Tab 整个消失（显式缺席，不补占位行）", () => {

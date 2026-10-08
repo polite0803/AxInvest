@@ -640,7 +640,8 @@ pub fn portfolio_risk_gate(
                 }
 
                 // 单股仓位上限（即使空仓也检查，避免首笔建仓超限）
-                let limits = PositionLimits::default();
+                // 仓位三条走面板（`pos_max_*`，回落 20/10/40 == 接线前的 `Default`）。
+                let limits = PositionLimits::panel_effective();
                 let tier_cap = risk_tier.max_single_stock_pct();
                 let effective_cap = limits.max_single_stock_pct.min(tier_cap);
                 if final_pct > effective_cap {
@@ -723,7 +724,8 @@ pub fn portfolio_risk_gate(
             let sector_exposures: Vec<(String, f64)> =
                 sector_map.iter().map(|(k, v)| (k.clone(), *v)).collect();
 
-            let limits = PositionLimits::default();
+            // 仓位三条走面板（`pos_max_*`，回落 20/10/40 == 接线前的 `Default`）。
+            let limits = PositionLimits::panel_effective();
             match limits.check_new_position_with_risk(
                 new_position_value,
                 portfolio_total_value,

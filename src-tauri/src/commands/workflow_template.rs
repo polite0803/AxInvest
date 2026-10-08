@@ -369,6 +369,14 @@ pub async fn update_workflow_template(
         sync_template_passport(&state, &db_repo::template_model_to_data(&model)).await;
     }
 
+    // 面板变量表快照刷新（A 批接线，2026-10-08）：设置面板写的就是 `stock-analysis` 这一行的
+    // `variables`，而落点（`astock-data` 评分分段与新闻条数、`analysis-engine` 仓位限制、
+    // 监控轮询间隔）读的是进程内快照 ⇒ 不刷就成了「保存成功但参数没动、重启才生效」。
+    // 只认那一行：别的模板没有落点在读它的变量表，多查一次 DB 没有收益。
+    if id == "stock-analysis" {
+        crate::init::panel_variables::refresh_from_db(db).await;
+    }
+
     Ok(updated)
 }
 

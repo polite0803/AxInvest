@@ -90,6 +90,11 @@ pub async fn start_background_services(
     //   - start_demand_discovery_cron：OPC 需求发现定时扫描（run_demand_discovery_cron）
     //   - start_daily_snapshot_sweep：每日快照采集（run_daily_snapshot_sweep，回放兜底）
     //   - spawn_opc_workflows_seeding：OPC 域包/领域工作流模板种子化（ensure_opc_workflows_seeded）
+    // 面板变量表快照装入口（A 批接线，2026-10-08）。**必须 await 在这里**、早于
+    // `start_realtime_monitor`：监控的轮询间隔就在它自己 spawn 的装配段读快照，
+    // 装晚了这一轮就按默认起（不报错、不阻断 —— 正是「面板改了没人读」的静默形态）。
+    // 其余两个装卸点见 `init/panel_variables.rs` 文件头（模板保存后、种子化后）。
+    crate::init::panel_variables::refresh_from_db(state.harness.db()).await;
     start_realtime_monitor(app);
     start_realtime_quote_watcher(app, state);
     start_batch_reflection(state);
@@ -3496,8 +3501,31 @@ fn start_realtime_monitor(app: &tauri::AppHandle) {
                 tracing::warn!("[startup] stock_monitor 已初始化，跳过重复注入");
                 return;
             }
-            // 启动轮询（内部永久循环，进程退出即结束）
-            monitor_arc.start().await;
+            // 启动轮询（内部永久循环，进程退出即结束）。
+            //
+            // 轮询间隔走面板变量 `monitor_poll_interval_secs`（A 批接线，2026-10-08）：
+            // 正门一直是 `start_with_config`，但它**全仓零调用者** ⇒ 现役 30 秒其实来自
+            // `RealtimeMonitor::new` 里的字段初值，面板那格改了没有任何东西读。
+            //
+            // 回落值不另写一份字面量：`poll_interval_secs()` 读到的就是 `new()` 装的那个数
+            // （今天 = 30），装配点原样回读 ⇒ 「默认值」只有一处权威。越界值（<1 秒会把循环
+            // 打成忙等、>3600 秒等于关掉提醒）拒绝覆盖并 warn，理由同 v137 那批。
+            let default_poll = monitor_arc.poll_interval_secs().await;
+            let raw_panel = axagent_harness::panel_variables::integer("monitor_poll_interval_secs");
+            let panel_poll = raw_panel.filter(|v| (1..=3600).contains(v));
+            if raw_panel.is_some() && panel_poll.is_none() {
+                tracing::warn!(
+                    "[startup] 面板 monitor_poll_interval_secs 不在 1..=3600 秒内 ⇒ 按监控自身的 {default_poll}s 启动"
+                );
+            }
+            let poll = panel_poll.unwrap_or(default_poll as i64) as u64;
+            // 告警冷却本批**刻意不接**（不在 A 批那 9 条里）：原样回读 `new()` 的值再传回去，
+            // 数值一字不变；`start_with_config` 是唯一的正门，所以必须显式带上这一参。
+            let cooldown = monitor_arc.alert_cooldown_secs().await;
+            tracing::info!(
+                "[startup] 价格监控装配：轮询 {poll}s（面板 monitor_poll_interval_secs，回落 {default_poll}s）、冷却 {cooldown}s"
+            );
+            monitor_arc.start_with_config(poll, cooldown).await;
         });
     }
 }
@@ -3620,10 +3648,10 @@ fn start_daily_snapshot_sweep(state: &AppState) {
     let client = state.astock_client.clone();
     let shutdown = state.shutdown_token.clone();
 
-    // 快照缓存未启用时，采集只剩「打一遍 vendor 然后写进 no-op」⇒ 每小时空转一轮网络。
-    // 启用点在 `init/state.rs`（with_daily_snapshot_cache），装配缺失就该在这里显式失败可见。
+    // 快照归档未启用时，采集只剩「打一遍 vendor 然后写进 no-op」⇒ 每小时空转一轮网络。
+    // 启用点在 `init/state.rs`（with_daily_snapshot_store），装配缺失就该在这里显式失败可见。
     if !client.daily_snapshot_enabled() {
-        tracing::warn!("[startup] 每日快照缓存未启用，跳过定时采集（as-of 兜底通道将始终为空）");
+        tracing::warn!("[startup] 每日快照归档未启用，跳过定时采集（as-of 兜底通道将始终为空）");
         return;
     }
 
@@ -3648,7 +3676,7 @@ fn start_daily_snapshot_sweep(state: &AppState) {
                 continue;
             };
             let date = target.format("%Y-%m-%d").to_string();
-            if client.has_daily_snapshot("get_index_quotes", &date) {
+            if client.has_daily_snapshot("get_index_quotes", &date).await {
                 continue;
             }
             match crate::commands::stock_analysis::run_daily_snapshot_sweep(&client, &db, &date)

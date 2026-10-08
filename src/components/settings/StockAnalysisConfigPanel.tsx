@@ -35,7 +35,6 @@ export function getDefaultVariables(): Variable[] {
   // （`rt-workflow/.../engine/mod.rs`，llm/agent=3、tool/file=10），两者不是一回事。
   b("max_concurrent", 8, "stockAnalysis.configDescriptions.maxConcurrent", "number");
   // 数据源参数
-  b("kline_period", "daily", "stockAnalysis.configDescriptions.klinePeriod", "enum");
   // v115（2026-10-01）：120 → 250。权威源是后端 `seed_variables::DEFAULT_ANALYST_KLINE_LIMIT`，
   // 此处只是「后端变量表取不到时的兜底」——但两者不同步会让人误判参数没生效
   // （`numberBounds.inferNumberBounds` 还会按本值推滑杆量程：120→上限 180，
@@ -59,12 +58,6 @@ export function getDefaultVariables(): Variable[] {
   b("scoring_support", 10, "stockAnalysis.configDescriptions.scoringSupport", "number");
   b("scoring_boll", 5, "stockAnalysis.configDescriptions.scoringBoll", "number");
   // 规则阈值
-  b("rule_rsi_overbought", 80, "stockAnalysis.configDescriptions.ruleRsiOverbought", "number");
-  b("rule_rsi_oversold", 20, "stockAnalysis.configDescriptions.ruleRsiOversold", "number");
-  b("rule_bias_limit_pct", 5, "stockAnalysis.configDescriptions.ruleBiasLimitPct", "number");
-  b("rule_volume_signal_block", true, "stockAnalysis.configDescriptions.ruleVolumeSignalBlock", "boolean");
-  b("rule_bear_low_score", 30, "stockAnalysis.configDescriptions.ruleBearLowScore", "number");
-  b("rule_auto_stop_loss_pct", 5, "stockAnalysis.configDescriptions.ruleAutoStopLossPct", "number");
   // 仓位限制
   b("pos_max_single_pct", 20, "stockAnalysis.configDescriptions.posMaxSinglePct", "number");
   b("pos_max_total", 10, "stockAnalysis.configDescriptions.posMaxTotal", "number");
@@ -91,8 +84,6 @@ export function getDefaultVariables(): Variable[] {
   //   ③ 消费点从硬编码改为读取该变量。
   // 监控
   b("monitor_poll_interval_secs", 30, "stockAnalysis.configDescriptions.monitorPollIntervalSecs", "number");
-  b("monitor_change_pct", 5, "stockAnalysis.configDescriptions.monitorChangePct", "number");
-  b("monitor_turnover", 10, "stockAnalysis.configDescriptions.monitorTurnover", "number");
   b("monitor_alert_cooldown_secs", 300, "stockAnalysis.configDescriptions.monitorAlertCooldownSecs", "number");
   b("monitor_min_severity", "info", "stockAnalysis.configDescriptions.monitorMinSeverity", "enum");
   b("monitor_channels", "in_app", "stockAnalysis.configDescriptions.monitorChannels", "string");
@@ -151,13 +142,6 @@ export function getDefaultVariables(): Variable[] {
   b("risk_max_daily_loss_pct", 3, "stockAnalysis.configDescriptions.riskMaxDailyLossPct", "number");
   b("risk_correlation_lookback_days", 60, "stockAnalysis.configDescriptions.riskCorrelationLookbackDays", "number");
   // 行业财务基线参考股票代码（stock_analysis_setup 中 t-baseline-* 节点使用）
-  b("ref_semi_code", "002371", "stockAnalysis.configDescriptions.refSemiCode", "string");
-  b("ref_battery_code", "300750", "stockAnalysis.configDescriptions.refBatteryCode", "string");
-  b("ref_chem_code", "600309", "stockAnalysis.configDescriptions.refChemCode", "string");
-  b("ref_med_code", "688981", "stockAnalysis.configDescriptions.refMedCode", "string");
-  b("ref_aero_code", "600760", "stockAnalysis.configDescriptions.refAeroCode", "string");
-  b("ref_consumer_elec_code", "002475", "stockAnalysis.configDescriptions.refConsumerElecCode", "string");
-  b("ref_auto_code", "600104", "stockAnalysis.configDescriptions.refAutoCode", "string");
   // 信号检测（signals.rs detect_ma_cross / detect_breakout）
   b("signal_ma_fast", 5, "stockAnalysis.configDescriptions.signalMaFast", "number");
   b("signal_ma_slow", 20, "stockAnalysis.configDescriptions.signalMaSlow", "number");
@@ -205,9 +189,6 @@ export function getDefaultVariables(): Variable[] {
   b("val_pb_low", 1.0, "stockAnalysis.configDescriptions.valPbLow", "number");
   b("val_pb_high", 6.0, "stockAnalysis.configDescriptions.valPbHigh", "number");
   b("risk_hhi_concentrated", 0.25, "stockAnalysis.configDescriptions.riskHhiConcentrated", "number");
-  b("risk_hhi_medium", 0.15, "stockAnalysis.configDescriptions.riskHhiMedium", "number");
-  b("risk_divers_high", 8, "stockAnalysis.configDescriptions.riskDiversHigh", "number");
-  b("risk_divers_medium", 4, "stockAnalysis.configDescriptions.riskDiversMedium", "number");
   // 凯利公式默认值
   b("kelly_default_win_rate", 0.5, "stockAnalysis.configDescriptions.kellyDefaultWinRate", "number");
   b("kelly_default_avg_win", 0.05, "stockAnalysis.configDescriptions.kellyDefaultAvgWin", "number");
@@ -517,31 +498,6 @@ export function StockAnalysisConfigPanel(_props: Props) {
         note: "stockAnalysis.settings.note.portfolioMgrHorizon",
       },
       {
-        tool: "rules",
-        label: t("stockAnalysis.settings.group.rule"),
-        vars: resolve([
-          "rule_rsi_overbought",
-          "rule_rsi_oversold",
-          "rule_bias_limit_pct",
-          "rule_volume_signal_block",
-          "rule_bear_low_score",
-          "rule_auto_stop_loss_pct",
-        ]),
-      },
-      {
-        tool: "refCodes",
-        label: t("stockAnalysis.settings.group.refCodes"),
-        vars: resolve([
-          "ref_semi_code",
-          "ref_battery_code",
-          "ref_chem_code",
-          "ref_med_code",
-          "ref_aero_code",
-          "ref_consumer_elec_code",
-          "ref_auto_code",
-        ]),
-      },
-      {
         tool: "signals",
         label: t("stockAnalysis.settings.group.signals"),
         vars: resolve([
@@ -834,12 +790,9 @@ export function StockAnalysisConfigPanel(_props: Props) {
           "rev_divergence_lookback",
           "rev_kline_limit",
           "rev_min_kline_len",
-          "val_long_kline_limit",
           "val_long_ma_period",
-          "val_short_kline_limit",
           "val_short_ma_period",
           "val_short_min_kline_len",
-          "val_ultra_short_kline_limit",
           "val_ultra_short_ma_period",
           "val_ultra_short_min_kline_len",
         ]),
@@ -869,7 +822,6 @@ export function StockAnalysisConfigPanel(_props: Props) {
         vars: resolve([
           "tool_timeout_secs",
           "tool_retry_max",
-          "kline_period",
           "kline_limit",
           "news_limit",
         ]),
@@ -877,7 +829,7 @@ export function StockAnalysisConfigPanel(_props: Props) {
       {
         tool: "monitor",
         label: t("stockAnalysis.settings.group.monitor"),
-        vars: resolve(["monitor_poll_interval_secs", "monitor_change_pct", "monitor_turnover"]),
+        vars: resolve(["monitor_poll_interval_secs"]),
       },
       {
         tool: "workflow",

@@ -35,6 +35,9 @@
 //                      所以面板印出来的那组就是这一档算过的那组。
 // scoring_scale      : v138 起接 —— 本档尺度名（hourly/weekly/monthly/quarterly），与窗口并列成句；
 //                      短/中/长三档的根数按公式本就是同一组，差别只在这里才可读
+// scale_trend        : v139 起接 —— 本档两带趋势事实（快/慢带 bar 数与数值、diffPct、fastSlope）；
+//                      产端是 `indicators.scaleTrend`，`diffPct`/`fastSlope` 可为 null ⇒ 面板印「—」不印 0
+// scale_momentum     : v139 起接 —— 本档动量的「周期 + 值」对（与 `rsi_value` 同一个数，成对给出才自证口径）
 // seal_rate          : 已接 —— 涨停池 breadth.sealRate（breadthState 腿 + breadth_required 门的必要条件）
 // pool_break_count   : 已接 —— 涨停池 breadth.breakCount（microstructure 条件腿）
 // pool_in_pool       : 未接且本脚本**不读** —— 语义是「本代码 ∈ entries[]」，点号路径表达不了
@@ -236,6 +239,12 @@ if tw <= 0.0 || !prior_ok {
     // 缺席语义：这两个键没有 = 该行产自早于 v138 的模板代 ⇒ 面板不渲染该行，不得补 0 或空表。
     scoringWindows: if present(scoring_windows) { scoring_windows } else { () },
     scoringScale: if present(scoring_scale) { scoring_scale } else { () },
+    scoringTrend: if present(scale_trend) { scale_trend } else { () },
+    scoringMomentum: if present(scale_momentum) { scale_momentum } else { () },
+    // v140：本档风险档随分支行一起带回父池 —— 风险节点搬进子模板后，主链 `overall_risk_<档>`
+    //   读的就是这里（`pm-h-<档>.result.riskCategory`）。漏这一行 = 按档风险收紧整条静默退役。
+    //   缺席只有一种可能：本档风险节点自己失败 ⇒ 整档子执行已经失败 ⇒ 这行不会单独缺。
+    riskCategory: if present(overall_risk) { overall_risk } else { () },
     priorSource: prior_src,
     priorSamples: prior_samples,
     stopSource: if exit_move > 0.0 { "vol_band" } else { "fallback_pct" },

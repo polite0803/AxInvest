@@ -1141,10 +1141,23 @@ type AlgoToolRow = (
 ///   「该档失败」放宽成「该档少一腿」；要放宽须另立裁定并点名 `tier_risk_raise` 消费者。
 ///   图内容变 ⇒ 换代 140。
 ///
+/// **v141(2026-10-09)**：**B 批面板变量接线（PLAN §一一六(3) / §一一七）** —— 四格里唯一
+///   动到脚本的一格：`portfolio-mgr-h-long.rhai` 的 `positive_margin_of_safety` 门限
+///   从写死的 `30.0` 改为宿主函数 `pm_required_margin_pct()`（该函数原样转发
+///   `astock-data::mcp_tools::required_margin_of_safety_pct`，与 Rust 侧算 `idealBuyPrice`
+///   **同一个来源**；读面板 `value_safety_margin`，默认 20%、缺失/越界回落 30%）。
+///   存在理由：接线前 Rust 的 `0.30` 与 Rhai 的 `30.0` 是同一把尺子的**两处抄写**，
+///   而面板那格从来没人读；不同批收掉就会留下「Rust 用 20%、Rhai 用 30%」两套真相。
+///   ⚠ **本批确实改现网数值**（这是 B 批与 A 批「逐位不变」的入场券唯一的差别）：
+///   面板默认 ⇒ 长线档加仓门从「上行 ≥ 30%」放宽到「≥ 20%」，理想买入价从 `mid×0.70`
+///   变 `mid×0.80`。另三格（`val_pb_*` / `value_moat_threshold`）落点全在 Rust 常量侧，
+///   不动图内容 ⇒ 不因它们升版；它们的三面默认值对账由定向门
+///   `check-panel-var-landing.mjs` 钉住。脚本内容属于节点 `code` 字段 ⇒ 图内容变 ⇒ 换代 141。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 140;
+pub const TEMPLATE_VERSION: i32 = 141;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -1410,6 +1423,17 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //   `value_safety_margin` 对应 `decision::ValueConfig` 的分级判据，而 astock-data
     //   的分级逻辑（`f_score_level` 7/5/3、`mos_level` 30/15、`compute_moat_score` 70/40）
     //   用的是**不同口径**的硬编码阈值，强行接线会改变分级语义 → 本次**不接**，另行评估。
+    //   ⚠ 2026-10-09 B 批更新（v141，本段的「不接」已被部分推翻，历史记录保留）：
+    //     · `value_safety_margin` **已接** —— 落点是 `mcp_tools::required_margin_of_safety_pct`
+    //       （回落 30% ⇒ 与今天一致；面板默认 20 ⇒ 理想买入价 `mid×0.80`），
+    //       长线档 Rhai 门限同批收掉（两个载体读同一个函数）；
+    //     · `value_moat_threshold` **已接**，形为「面板那道阈值当**中线**、宽阔/狭窄两道门
+    //       对称地各挂 ±15 分（半宽从 `MoatTiers::default()` 现取，即接线前的 70−40）」
+    //       ⇒ 面板默认 60 派生出 **75 / 45**（接线前 70 / 40），分档变严；
+    //     · `value_fscore_buy` 与 `mos_level` 的 30/15 **仍不接** —— 前者的 7 已由
+    //       `stock_analysis.rs` 的 `tv("value_fscore_buy", 7.0)` 读走（回放链），
+    //       后者的两档与面板无任何对应变量，接它等于新造一个调参面。
+    //   三面默认值对账（种子 ≡ 面板 ≡? 落点回落）由定向门 `check-panel-var-landing.mjs` 逐格钉住。
     //   注：变量值仍由 merge_variable_values 按 name 保留用户自定义。
     // v33(2026-09-12): 移除 data-quality 的 f7「交易方向」**死因子**。
     //   背景：data-quality 节点是 trader 的**上游**（trader 的 dqi_score 由本节点提供），

@@ -1672,9 +1672,16 @@ fn read_ws_file(rel: &str) -> String {
 #[test]
 fn moat_level_vocabulary_matches_rhai_consumer() {
     // ── ① 生产端档位 == 本地权威声明 ──
+    // 2026-10-09 B 批：门限从写死的 `if score >= 70` 改成 [`MoatTiers`]（面板
+    // `value_moat_threshold` 派生），**词表三个值一字未动** ⇒ 本切片改锚在纯函数
+    // `moat_level_of` 上（它是词表的唯一产地），不再依赖某个具体门限的数字形态。
     let mcp = read_ws_file("crates/astock-data/src/mcp_tools.rs");
-    let producer_slice =
-        slice_between("mcp_tools.rs", &mcp, "let level = if score >= 70", "(score, level)");
+    let producer_slice = slice_between(
+        "mcp_tools.rs",
+        &mcp,
+        "fn moat_level_of(score: u32, tiers: &MoatTiers)",
+        "/// 护城河量化评分",
+    );
     let producer = quoted_strings(producer_slice);
     assert_eq!(
         producer,
@@ -1682,6 +1689,13 @@ fn moat_level_vocabulary_matches_rhai_consumer() {
         "生产端 `compute_moat_score` 的档位与本地声明的权威取值域不一致。\n\
          若这是有意的改档 ⇒ 请**同时**更新三处：本常量、Rhai 比对值、生产端源码；\n\
          只改生产端会让 Rhai 静默走 else 分支（乘子退化为 1.0，无任何报错）。"
+    );
+    // 词表与门限**分离**的结构锁：档位判据必须读 `MoatTiers`，不许把数字抄回 `if` 里
+    // （抄回去就又变成「面板一道、判据一道」两处权威，接线静默失效）。
+    assert!(
+        producer_slice.contains("tiers.wide") && producer_slice.contains("tiers.narrow"),
+        "mcp_tools.rs: `moat_level_of` 不再读 `MoatTiers` 的两道门 ⇒ 门限被写回了字面量，\n\
+         面板 `value_moat_threshold` 又变成空接线（定向门 check-panel-var-landing.mjs 同批会红）。"
     );
 
     // ── ② 消费端比对值 == 生产端档位的前缀 ──

@@ -5,8 +5,11 @@
 //    技术腿 `trendStrength` 在本档 **role=filter** —— 只作入场时机过滤，不进方向加权
 //    （R-11 明文；权重恒 0 由分支表保证，不靠这里自觉）。行业轮动是 `partial`
 //    （live 有源、回放结构性不可得 ⇒ 只作背景）。
-// 2. 门：`positive_margin_of_safety` —— 没有安全边际就不出加仓动作。锚取**外部标准**：
-//    DCF 上行空间 ≥ 30%（Graham 的 conventional margin of safety，不是本仓调出来的阈值）。
+// 2. 门：`positive_margin_of_safety` —— 没有安全边际就不出加仓动作。锚取**面板参数**：
+//    DCF 上行空间 ≥ `pm_required_margin_pct()`（面板 `value_safety_margin`，默认 20%，
+//    变量缺失 / 越界 ⇒ 回落接线前的 30%）。2026-10-09 B 批之前这里是写死的 `30.0`
+//    （「Graham 的 conventional margin of safety，不是本仓调出来的阈值」），与 Rust 侧
+//    算理想买入价用的 0.30 是同一把尺子的**两处抄写**、面板那格从来没人读 ⇒ 改为同源。
 //    DCF 对本标的**不适用**（`applicable=false`：银行/保险/券商/地产/重资产周期，
 //    由 `compute_dcf` 按数据形态判）时，换用**第二条显式口径**：PE 落在自身 5 年
 //    下四分位（≤25 分位）。两条都拿不到 ⇒ 门「未判定」，按不通过处理。
@@ -141,13 +144,18 @@ let posterior = if prior_ok { clamp(prior_val + avg * escale, 0.0, 1.0) } else {
 let confidence = posterior;
 
 // ── ④ 安全边际门（两条显式口径，各自点名）──
+// 门限来自宿主函数 `pm_required_margin_pct()` —— 它与 Rust 侧算 `dcf.idealBuyPrice`
+// 用的是**同一个函数**（面板 `value_safety_margin`，默认 20%，缺失/越界回落接线前的 30%）。
+// 2026-10-09 之前这里写死 `30.0`，与 Rust 那份 0.30 是同一把尺子的两处抄写 ⇒ 面板改了
+// 谁也不读；现在两个载体读同一个来源，换算（% ↔ 小数）只发生在 Rust 侧一处。
 let dcf_ok = present(valuation_dcf_upside) && present(valuation_dcf_applicable) && valuation_dcf_applicable == true;
 let moS_pct = if dcf_ok { valuation_dcf_upside } else { () };
+let margin_min_pct = pm_required_margin_pct();
 let gate_pass = false;
 let gate_basis = "unjudged";
-if type_of(moS_pct) != "()" && moS_pct >= 30.0 {
+if type_of(moS_pct) != "()" && moS_pct >= margin_min_pct {
     gate_pass = true;
-    gate_basis = "dcf_margin_30pct";
+    gate_basis = `dcf_margin_${margin_min_pct}pct`;
 } else if present(pe_percentile) && pe_percentile <= 25.0 {
     gate_pass = true;
     gate_basis = "pe_bottom_quartile";
@@ -158,7 +166,7 @@ if (gate_basis == "unjudged" || gate_basis == "both_bells_failed") && posterior 
     gaps.push(if gate_basis == "unjudged" {
         "positive_margin_of_safety 未判定：DCF 不适用且 PE 分位缺失 ⇒ 不给出加仓动作（缺席 ≠ 通过）"
     } else {
-        "安全边际两条口径都不满足（DCF 上行 < 30% 且 PE 不在下四分位）⇒ 本档不出买入"
+        `安全边际两条口径都不满足（DCF 上行 < ${margin_min_pct}% 且 PE 不在下四分位）⇒ 本档不出买入`
     });
 }
 

@@ -13,6 +13,10 @@
 // G3 登记项若已不在声明面 ⇒ 红（变量删了、豁免还留着＝假账）。
 // G4 每条登记必须有 status ∈ {intentional, pending}；intentional 必须给 cite（书面裁定出处）。
 // G5 解析面自检：声明数 / 扫描文件数低于下限 ⇒ 红（「判据没电」不等于「全绿」）。
+// W1 （2026-10-09 补）已摘除豁免的 13 条（`RETIRED`）必须**仍然**有引用面、不得回到 `EXEMPT`、
+//    必须仍在声明面；`RETIRED` 本身被删空 ⇒ 红。`EXEMPT` 清空后，本门对「已接线」那 13 条的
+//    全部发言权就是这张复检清单 —— 没有它，「把落点删掉」只会让 G1 报一条新空接线，
+//    而「把落点与声明面各改一半」在两面门之间可以互相顶掉（面积门说有人读、定向门说没电）。
 //
 // ⚠ 「有引用面」只证明这个名字在非声明面被**写出来过**，不证明它真被读进执行路径。
 //   所以本门是**面积上限**判据：拦「新增空接线」，不保证「已登记的都活着」——
@@ -45,21 +49,36 @@ const MIN_SCANNED_FILES = 1500;
  * 零引用面登记（2026-10-08 首跑读数 36 条）。
  * status：`intentional` = 有书面裁定的「刻意不接」（必须给 cite）；`pending` = 待裁定接还是删。
  *
- * ⚠ 2026-10-08 A 批接线**摘掉 9 条**（`signal_rsi_oversold` / `signal_rsi_overbought`、
- *   `pos_max_single_pct` / `pos_max_total` / `pos_max_sector_pct`、`val_pe_low` / `val_pe_high`、
- *   `monitor_poll_interval_secs`、`news_limit`）：它们现在各有真实落点。落点位置与
- *   「面板默认 == Rust 回落默认」的逐字对账锁在定向门 `check-panel-var-landing.mjs` ——
- *   本门只保证「这个名字在非声明面被写出来过」（面积判据），逐字对账不归它管。
- *   剩下的 4 条是 B 批：接上会改决策数值（PB 两档、护城河、安全边际），需单独拍板换代。
+ * ⚠ **本表现为空**（2026-10-09 收口）：首跑的 36 条里，
+ *   · 9 条由 A 批接线摘掉（`signal_rsi_oversold` / `signal_rsi_overbought`、
+ *     `pos_max_single_pct` / `pos_max_total` / `pos_max_sector_pct`、`val_pe_low` / `val_pe_high`、
+ *     `monitor_poll_interval_secs`、`news_limit`）；
+ *   · 4 条由 B 批接线摘掉（`val_pb_low` / `val_pb_high` / `value_moat_threshold` /
+ *     `value_safety_margin`）—— 这四格**接上会改现网决策数值**（面板默认 ≠ 接线前现值），
+ *     逐格改前→改后与被钉住的两侧数字都在定向门 `check-panel-var-landing.mjs` 里
+ *     （见其 `LANDED` 的 `batch: "B"` 四条与 `legacy` 字段）；
+ *   · 其余 23 条本就带非声明面引用面（首跑即通过 G1），从未进过本表。
+ *
+ * ⇒ 于是 `EXEMPT` 的长度本身就是「待修面」读数：**加一条就是新造一条空接线**，
+ *   删一条必须同批在落点里真读走它（G2 会把「接线了还留着豁免」判红，门因此当计数器用）。
+ *   已经摘掉的 13 条改由下面 `RETIRED` 持续复检（摘了不等于永远成立）。
  */
-export const EXEMPT = [
-  // 估值 / 价值策略（B 批）：面板默认与 Rust 现常量**不等** ⇒ 接线即改现网数值。
-  // `val_pb_low` 1.5→1.0、`val_pb_high` 5.0→6.0、`value_moat_threshold` 70/40 双档→60、
-  // `value_safety_margin` 30%→20%（现值出处见 `PLAN-four-horizon-workflow-alignment.md` §一一六(3)）。
-  { name: "val_pb_low", status: "pending" },
-  { name: "val_pb_high", status: "pending" },
-  { name: "value_moat_threshold", status: "pending" },
-  { name: "value_safety_margin", status: "pending" },
+export const EXEMPT = [];
+
+/**
+ * 已摘除豁免的登记（**复检清单**，不是历史 footnote）。
+ *
+ * 为什么要有它：`EXEMPT` 一清空，本门对那 13 条就**再无话说** —— 若有人删掉落点里那一行
+ * `numeric_in(vars, "val_pb_low")`，名字重新变成零引用面、又不在登记里 ⇒ G1 会红，
+ * 但如果他只是把键**改名**（落点与声明面各改一半），G1 看到的是「声明面里这条没人读」⇒ 也红。
+ * 真正的失效形态是**定向门自己没电**（落点文件搬迁、`LANDED` 清单被删条目），
+ * 所以这里独立再查一遍「有引用面」，并把逐条读数打出来 —— 只报总数就是「一道会说谎的绿」。
+ */
+export const RETIRED = [
+  ...["signal_rsi_oversold", "signal_rsi_overbought", "pos_max_single_pct", "pos_max_total", "pos_max_sector_pct", "val_pe_low", "val_pe_high", "monitor_poll_interval_secs", "news_limit"].map(
+    (name) => ({ name, batch: "A" })
+  ),
+  ...["val_pb_low", "val_pb_high", "value_moat_threshold", "value_safety_margin"].map((name) => ({ name, batch: "B" })),
 ];
 
 /** 剥 Rust/Rhai 注释：注释里的名字不算引用面（否则「写一行注释」就能骗过门）。 */
@@ -171,6 +190,7 @@ export function checkAll(
   exempt = EXEMPT,
   readBaseline = READ_KEYS,
   observed = collectReadKeys(READER_REL),
+  retired = RETIRED,
 ) {
   if (names.length < MIN_DECLARED) {
     return [`G5 声明面只解析到 ${names.length} 个变量（下限 ${MIN_DECLARED}）⇒ 抽取器失效，不当「无违规」`];
@@ -181,10 +201,33 @@ export function checkAll(
   const problems = [];
   const registered = new Set(exempt.map((e) => e.name));
   const declared = new Set(names);
+  // W1 的判据本身也要有电：清单空 ⇒ 「摘掉的豁免」再也无人复核（`EXEMPT` 清空之后，
+  // 本门对那 13 条的全部发言权就来自这张复检清单，它一旦被删空，「接线被删掉」就静默通过）。
+  if (retired.length === 0) {
+    problems.push("W1 复检清单为空 ⇒ 已摘除的豁免不再被逐条复核（要退役一条登记项，同步在 RETIRED 加一条复检）");
+  }
   for (const n of names) {
     if (hasConsumer(n, surf) || registered.has(n)) continue;
     const ui = panelExposes(panelSrc, n) ? "，且面板仍渲染控件" : "";
     problems.push(`G1 新增空接线：变量 ${n} 在非声明面零引用${ui} ⇒ 接线，或在 EXEMPT 登记 status`);
+  }
+  // W1 摘除面复检：已摘豁免的 13 条必须**仍然**有引用面，且不许重新出现在登记里
+  // （回来了＝接线被删掉却想用豁免蒙过去；或有人把两条面各改一半）。
+  for (const r of retired) {
+    if (!declared.has(r.name)) {
+      problems.push(`W1 已摘豁免的 ${r.name}（${r.batch} 批）已不在声明面 ⇒ 从 RETIRED 摘掉，别留复检不到的名字`);
+      continue;
+    }
+    if (registered.has(r.name)) {
+      problems.push(`W1 ${r.name}（${r.batch} 批）已摘豁免却又回到 EXEMPT ⇒ 登记与复检两处并存，先讲清落点还在不在`);
+      continue;
+    }
+    if (!hasConsumer(r.name, surf)) {
+      problems.push(
+        `W1 已摘豁免的 ${r.name}（${r.batch} 批）现在又零引用面 ⇒ 落点被删/被改名（定向门 ` +
+          `check-panel-var-landing.mjs 的 LANDED 里那一条也必然同时红）`
+      );
+    }
   }
   for (const e of exempt) {
     if (!declared.has(e.name)) {
@@ -237,7 +280,19 @@ function printArea(names, surf, panelSrc) {
   );
   console.log(`反向 R6：读取面键 ${observed.length} 个，其中不在声明表 ${undeclared.length} 个（全部已登记：${undeclared.every((o) => READ_KEYS.some((e) => e.key === o.key)) ? "是" : "否"}）`);
   console.log(`登记分列：intentional ${EXEMPT.length - pending} 条、pending ${pending} 条`);
-  console.log("⚠ 门绿 ≠ 待修面已清：pending 项仍是「用户改了没人读」的面板控件。");
+  // 已摘豁免的 13 条**逐条点名**（只报总数就是把「登记项被摘掉」这件事实重新藏成一个数字）。
+  const still = RETIRED.filter((r) => !hasConsumer(r.name, surf)).map((r) => r.name);
+  console.log(`已摘豁免复检 ${RETIRED.length} 条（A 批 9 + B 批 4）：${still.length === 0 ? "逐条仍各有非声明面引用面 ✅" : `失守 ${still.length} 条 → ${still.join(", ")}`}`);
+  if (process.argv[2] === "--dump" || process.env.PANEL_REGISTRY_VERBOSE === "1") {
+    for (const r of RETIRED) {
+      console.log(`   [${r.batch}] ${r.name.padEnd(26)} 引用面:${hasConsumer(r.name, surf) ? "有" : "无（红）"}`);
+    }
+  }
+  console.log(
+    dead.length === 0 && pending === 0
+      ? "⚠ 待修面读数已清零（零引用面 0、pending 0）；但「门绿」仍只证明名字被写出来过，逐字对账与可达性归定向门。"
+      : "⚠ 门绿 ≠ 待修面已清：pending 项仍是「用户改了没人读」的面板控件。"
+  );
   return dead;
 }
 
@@ -284,14 +339,20 @@ function selftest() {
     return 1;
   }
   const withExtra = (snippet) => ({ ...surf, corpus: surf.corpus + "\n" + snippet });
+  // ⚠ 2026-10-09 B 批收口后 `EXEMPT` 是**空表** ⇒ 借「现役登记项」造负控的三条会恒不命中
+  //   （＝假绿，同 §一一七(3) 的教训）。登记类判据的样本一律改成**自带夹具**：
+  //   判据要验的是「给它一条登记项它能不能红」，不是「今天恰好有登记项」。
+  const fixtureRegistered = (name, status = "pending") => [{ name, status }];
   const cases = [
     ["G1 新声明一个零引用变量 ⇒ 点名它", checkAll([...names, "brand_new_dead_var"], surf, panelSrc), "G1 新增空接线：变量 brand_new_dead_var"],
-    // ⚠ 负控的**前提样本**必须取「现在仍在登记里」的键（A 批摘掉 9 条后，原先借
-    //   `news_limit` / `pos_max_total` 造的三条负控会**恒不命中**＝假绿，同 §一一七(3) 的教训）。
-    ["G2 登记项接线了却没摘豁免 ⇒ 红", checkAll(names, withExtra('x.get("val_pb_low");'), panelSrc), "G2 登记项 val_pb_low"],
+    [
+      "G2 登记项接线了却没摘豁免 ⇒ 红",
+      checkAll(names, withExtra('x.get("val_pb_low");'), panelSrc, fixtureRegistered("val_pb_low")),
+      "G2 登记项 val_pb_low",
+    ],
     [
       "G3 变量删了、豁免还留着 ⇒ 红",
-      checkAll(names.filter((n) => n !== "val_pb_high"), surf, panelSrc, EXEMPT),
+      checkAll(names.filter((n) => n !== "val_pb_high"), surf, panelSrc, fixtureRegistered("val_pb_high")),
       "G3 登记项 val_pb_high",
     ],
     [
@@ -301,11 +362,21 @@ function selftest() {
     ],
     [
       "G4 非法 status ⇒ 红",
-      checkAll(names, surf, panelSrc, EXEMPT.map((e) => (e.name === "val_pb_low" ? { name: e.name, status: "wired-later" } : e))),
+      checkAll(names, surf, panelSrc, fixtureRegistered("val_pb_low", "wired-later")),
       "G4 val_pb_low",
     ],
     ["G5 声明面抽取塌陷 ⇒ 红而不是绿", checkAll(["only_one"], surf, panelSrc), "G5 声明面"],
     ["G5 扫描面塌陷 ⇒ 红而不是绿", checkAll(names, { ...surf, fileCount: 10 }, panelSrc), "G5 扫描面"],
+    [
+      "W1 已摘豁免的键又回到 EXEMPT ⇒ 红（登记与复检两处并存）",
+      checkAll(names, surf, panelSrc, fixtureRegistered("value_safety_margin")),
+      "W1 value_safety_margin",
+    ],
+    [
+      "W1 复检清单被悄悄删空 ⇒ 红（否则「摘掉的豁免」这件事本身再也无人复核）",
+      checkAll(names, surf, panelSrc, EXEMPT, READ_KEYS, collectReadKeys(READER_REL), []),
+      "W1 复检清单为空",
+    ],
     [
       "R6 读取侧点一个没人声明的名 ⇒ 点名该键与文件",
       checkAll(names, surf, panelSrc, EXEMPT, READ_KEYS, [{ key: "totally_undeclared_key", rel: "crates/x.rs" }]),

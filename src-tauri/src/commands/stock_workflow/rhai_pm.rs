@@ -194,6 +194,27 @@ pub fn register_pm_functions(engine: &mut Engine) {
         serde_json::to_string(&methods).unwrap_or_else(|_| "[]".to_string())
     });
 
+    // B 批 2026-10-09：长线档 `positive_margin_of_safety` 加仓门的安全边际（**百分数**口径）。
+    //
+    // 为什么必须是宿主函数而不是节点 `input_mapping`：接线前脚本里写死 `30.0`，
+    // 与 Rust 侧 `ideal_buy_price` 用的 0.30 是**同一把尺子的两份抄写**，而面板变量
+    // `value_safety_margin`（默认 20）谁也不读。两条候选路线里：
+    //   · `input_mapping` 要把键接进两处图（主模板 + 档子模板）并给「变量缺席」补一条
+    //     `Variable not found` 的运行时风险，而换算（% ↔ 小数）会再多一个落点；
+    //   · 宿主函数**原样转发** `mcp_tools::required_margin_of_safety_pct` ⇒ 两个载体
+    //     读同一个函数、同一份快照，回落侧与量程判据只有一份。
+    // 选后者。跨载体对账由 `check-panel-var-landing.mjs` 的 P3 钉住（Rust 侧有定义、
+    // `.rhai` 侧有调用、且 `.rhai` 里不许再出现 `>= 30.0`）。
+    //
+    // ⚠ 命名带 `pm_` 前缀不是好看：`rhai_registry` 末尾的「脚本调用 ↔ 注册面」覆盖判据
+    //   按 `pm_*` / `bottleneck_*` / `sim_*` 前缀识别宿主函数（无前缀的名字会被当成
+    //   Rhai 内建而跳过检查，`band_for_score` 正是这样漏了半年）。带前缀 ⇒ 「漏注册」
+    //   在 CI 就红，而不是运行期 `Function not found` 被脚本的 try/catch 吞成静默兜底。
+    engine.register_fn(
+        "pm_required_margin_pct",
+        axagent_astock_data::mcp_tools::required_margin_of_safety_pct,
+    );
+
     // ── 仿真验证（工作流 `sim-verify` 节点）─────────────────────────────────
     // 供 `sim-verify.rhai` 调用：在**决策之后**自动跑蒙特卡洛压力测试。
     //

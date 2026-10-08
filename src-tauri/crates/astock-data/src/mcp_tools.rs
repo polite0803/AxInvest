@@ -2475,6 +2475,105 @@ fn latest_eps_payload(financials: &[FinancialReport]) -> serde_json::Value {
     })
 }
 
+/// 护城河评分的**分档带**（宽阔 / 狭窄 两道门限）—— B 批 2026-10-09 接线。
+///
+/// ## 为什么必须抽成类型
+///
+/// 面板变量 `value_moat_threshold`（描述「护城河评分阈值 (0-100)」）**只有一个数**，
+/// 而这里的判据是**两道门**（接线前 70 / 40，见 [`MoatTiers::default`]）。
+/// 字面量留在判据里 ⇒ 「写死的两道门」与「面板那道阈值」两处权威并存，
+/// 正是本仓「同一个量两处、值不同」那族缺陷。抽成类型后，面板值通过
+/// [`MoatTiers::with_panel_overlay`] 一次性决定**两道门**，来源只有一个。
+///
+/// ## 单值 → 双档的派生式（用户 2026-10-09 批准的形）
+///
+/// 面板那道阈值当**中线**，两道门对称地挂在它两侧，**带宽沿用接线前的 30 分**
+/// （半宽 `half = (default.wide − default.narrow) / 2 = 15`，**从 `Default` 现取**，
+/// 不另抄一份 15/30 ⇒ 那两个数哪天改了，派生式跟着改，不会出现「改了默认档、带宽还是旧的」）。
+///
+/// | `value_moat_threshold` | 宽阔门 | 狭窄门 | 说明 |
+/// |---|---|---|---|
+/// | 缺失（回落） | **70** | **40** | 接线前的现值，逐字不变 |
+/// | 55 | 70 | 40 | 中线取接线前中点 ⇒ 与今天完全一致 |
+/// | **60（面板默认）** | **75** | **45** | 两道门各抬 5 分 ⇒ 分档**变严** |
+///
+/// ⚠ 这是一次**决策数值变更**，不是纯接线：单变量压不进两档，任何 1→2 的映射都是新判据。
+///   选「中线 ± 半宽」而不是「变量直接当宽阔门」的理由：前者对称地动两道门、
+///   偏移量最小（各 +5），且保留 30 分带宽这一既有事实；后者会把狭窄门一起拉到 30，
+///   改动量是后者的三倍。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoatTiers {
+    /// 宽阔门（`score >= wide` ⇒ 「宽阔」）。
+    pub wide: f64,
+    /// 狭窄门（`score >= narrow` ⇒ 「狭窄」，否则「无」）。
+    pub narrow: f64,
+}
+
+impl Default for MoatTiers {
+    fn default() -> Self {
+        // 接线前的两道现值。面板默认（60）派生出来的是 75/45 ⇒ 与本值**不等**，
+        // 这个不等是 B 批的既定内容，被 `check-panel-var-landing.mjs` 两侧同时钉住。
+        Self { wide: 70.0, narrow: 40.0 }
+    }
+}
+
+impl MoatTiers {
+    /// 面板那道阈值到两道门的半宽（**从 `Default` 现取**，见类型文档）。
+    fn half_band() -> f64 {
+        (Self::default().wide - Self::default().narrow) / 2.0
+    }
+
+    /// 默认档 + 面板覆盖（纯函数版，判据与 `scoring::PeBands::with_panel_overlay` 同形）。
+    ///
+    /// 不可用（缺失 / 非数值 / NaN / ±INF）或**派生后越出 0-100 评分域** ⇒ 整对回落 `Default`，
+    /// 并 warn 一条留痕：静默回落就是「面板改了没反应」换个形态复发。
+    /// 越界判据取「两道门都留在 [0, 100] 内」：中线靠边会让某道门变成恒真或恒假
+    /// （例如中线 98 ⇒ 宽阔门 113 ⇒ 「宽阔」档永久不可达），那与「面板没生效」不可分。
+    pub fn with_panel_overlay(
+        self,
+        vars: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Self {
+        let Some(mid) = axagent_harness::panel_variables::numeric_in(vars, "value_moat_threshold")
+        else {
+            return self;
+        };
+        let half = Self::half_band();
+        let next = Self { wide: mid + half, narrow: mid - half };
+        if next.narrow <= 0.0 || next.wide > 100.0 {
+            tracing::warn!(
+                "[mcp_tools] 面板 value_moat_threshold = {mid} 派生出的两道门（{} / {}）越出评分域 ⇒ 整对回落默认 {} / {}",
+                next.wide,
+                next.narrow,
+                Self::default().wide,
+                Self::default().narrow
+            );
+            return self;
+        }
+        next
+    }
+
+    /// 生产路径的分档带 = `Default`（接线前现值）+ 面板覆盖（快照版）。
+    pub fn panel_effective() -> Self {
+        Self::default().with_panel_overlay(&axagent_harness::panel_variables::panel_variables())
+    }
+}
+
+/// 护城河分档（纯函数版，供测试按副带逐情形断言）。
+///
+/// 词表三个值（「宽阔 / 狭窄 / 无」）是**跨载体契约**：消费侧 `portfolio-mgr.rhai` 按字面
+/// 比较算 `moat_mult`，由 `seed_consistency_tests::moat_level_vocabulary_matches_rhai_consumer`
+/// 钉住。本函数只换**门限**，不换词表。
+fn moat_level_of(score: u32, tiers: &MoatTiers) -> &'static str {
+    let s = score as f64;
+    if s >= tiers.wide {
+        "宽阔"
+    } else if s >= tiers.narrow {
+        "狭窄"
+    } else {
+        "无"
+    }
+}
+
 /// 护城河量化评分 (0-100)
 fn compute_moat_score(
     financials: &[FinancialReport],
@@ -2557,13 +2656,9 @@ fn compute_moat_score(
         }
     }
 
-    let level = if score >= 70 {
-        "宽阔"
-    } else if score >= 40 {
-        "狭窄"
-    } else {
-        "无"
-    };
+    // 分档门限来自 [`MoatTiers::panel_effective`]（= 接线前现值 70/40 + 面板
+    // `value_moat_threshold` 的中线派生）。面板默认 60 ⇒ 75/45 ⇒ **本批会改现网分档**。
+    let level = moat_level_of(score, &MoatTiers::panel_effective());
     (score, level)
 }
 
@@ -3013,12 +3108,61 @@ const FCF_TO_NP_MIN_FOR_ANCHOR: f64 = 0.6;
 /// 且与 fallback 锚同口径，保证「当期 FCF 偏低」与「当期 FCF ≤ 0」两条路径可比。
 const OWNER_EARNINGS_CONVERSION: f64 = 0.90;
 
-/// 理想买入价要求的安全边际（小数）：
-/// `ideal_buy_price = DCF 中性档内在价值 × (1 − 本值)`。
+/// 理想买入价 / 长线加仓门要求的**安全边际**（接线前的现值，**百分数**口径 = 30%）。
+///
+/// 与面板变量 `value_safety_margin`（描述「安全边际最低折扣 (%)」，默认 20）**同量纲**，
+/// 所以回落侧也写成百分数而不是小数 `0.30` —— 原常量 `REQUIRED_MARGIN_OF_SAFETY = 0.30`
+/// 与本仓唯一的「% ↔ 小数」换算点分居两个量纲，正是「同一个量两处」的形态；
+/// B 批（2026-10-09）把两侧统一到百分数，换算只在 [`required_margin_of_safety_pct`] 的
+/// 消费方做一次（见 [`ideal_buy_price`]）。
 ///
 /// 取 30% 是价值投资最通用的经验值，且与 `mos_level` 的「充足（> 30%）」档
 /// **同一把尺子** —— 理想买入价即「按中性档估值也给到充足安全边际的价格」。
-const REQUIRED_MARGIN_OF_SAFETY: f64 = 0.30;
+/// 另有一处**同值判据**在 Rhai 决策脚本 `portfolio-mgr-h-long.rhai` 的安全边际门里，
+/// 它现在调 [`required_margin_of_safety_pct`]（同一个函数）而不是再抄一份 30.0 ——
+/// 由 `check-panel-var-landing.mjs` 的跨载体判据 P3 钉住。
+const LEGACY_REQUIRED_MARGIN_OF_SAFETY_PCT: f64 = 30.0;
+
+/// 变量表版（纯函数）：`value_safety_margin` 可用 ⇒ 用它，否则回落 [`LEGACY_...`]。
+///
+/// 判据与 `scoring::PeBands::with_panel_overlay` 同一口径：**不做上夹、不 clamp 到 100**，
+/// 越界与非数值都算「不可用」⇒ 回落并 warn 留痕。可用的定义域取 `0 < v <= 100`：
+/// `v = 0` 意味着「买点 = 中性档全额」，那是把安全边际关掉、与「本档不出买点」的设计相反；
+/// `v > 100` 会让买点变成**负价格**（`mid × (1 − v/100)`），是纯粹的坏数据。
+fn required_margin_of_safety_pct_in(
+    vars: &std::collections::HashMap<String, serde_json::Value>,
+) -> f64 {
+    match axagent_harness::panel_variables::numeric_in(vars, "value_safety_margin") {
+        Some(v) if v > 0.0 && v <= 100.0 => v,
+        Some(v) => {
+            tracing::warn!(
+                "[mcp_tools] 面板 value_safety_margin = {v} 不在 (0, 100] 内 ⇒ 回落接线前现值 {LEGACY_REQUIRED_MARGIN_OF_SAFETY_PCT}%"
+            );
+            LEGACY_REQUIRED_MARGIN_OF_SAFETY_PCT
+        },
+        // 缺失 / 非数值 ⇒ 静默回落（`numeric_in` 已对「非数值」warn 过，缺失本身是常态）。
+        None => LEGACY_REQUIRED_MARGIN_OF_SAFETY_PCT,
+    }
+}
+
+/// 生产路径的安全边际要求（**百分数**口径）= 面板 `value_safety_margin` + 回落现值 30。
+///
+/// ## 量纲（本批唯一的换算点，别再在别处乘 / 除 100）
+///
+/// - 本函数与面板变量、Rhai 决策脚本里的 `dcf.upsidePct` / `margin_of_safety.pct`
+///   都是**百分数**（20 表示 20%）；
+/// - [`ideal_buy_price`] 需要的是**比例**，故在那里做**唯一一次** `÷ 100`。
+///
+/// ## 消费方（两处、一个来源）
+///
+/// 1. Rust 侧 [`ideal_buy_price`]（`dcf.idealBuyPrice` 字段，进估值报告与 LLM 提示词）；
+/// 2. Rhai 侧 `portfolio-mgr-h-long.rhai` 的 `positive_margin_of_safety` 加仓门
+///    （宿主函数 `required_margin_of_safety_pct` 原样转发本函数，见
+///    `stock_workflow/rhai_registry.rs`）—— 接线前它写死 30.0，与 Rust 侧各抄一份，
+///    不同批收掉就会留下「Rust 用 20%、Rhai 用 30%」两套真相。
+pub fn required_margin_of_safety_pct() -> f64 {
+    required_margin_of_safety_pct_in(&axagent_harness::panel_variables::panel_variables())
+}
 
 /// DCF 三档的**定价适用性警示**（2026-09-28 新增）。
 ///
@@ -4595,14 +4739,22 @@ fn margin_of_safety_pct(base: Option<f64>, current_price: f64) -> Option<f64> {
     }
 }
 
-/// 理想买入价 = **中性档内在价值 × (1 − `REQUIRED_MARGIN_OF_SAFETY`)**（即打七折）。
+/// 理想买入价 = **中性档内在价值 × (1 − 安全边际)**（打几折由安全边际决定）。
 ///
 /// 与 `mos_pct`（防御性口径，取保守档 `low`）刻意不同：买点是**行动阈值**，
 /// 应挂在「中性假设的价值」上，再要求一个明确的安全边际；
 /// 而 `low` 本身已是「悲观假设下的价值」，再拿它当买点等于**重复悲观两次**
 /// （旧规则正是如此 ⇒ 300285 现价 70 元 / 理想买入价 5.29 元）。
+///
+/// `margin_pct` 是**百分数**（见 [`required_margin_of_safety_pct`] 的量纲段）；
+/// 这里的 `÷ 100` 是全仓**唯一**一次 % ↔ 比例换算，Rhai 侧那处直接用百分数、不再换算。
+fn ideal_buy_price_with_margin(mid: Option<f64>, margin_pct: f64) -> Option<f64> {
+    mid.map(|m| m * (1.0 - margin_pct / 100.0))
+}
+
+/// [`ideal_buy_price_with_margin`] 的生产入口（安全边际取面板值）。
 fn ideal_buy_price(mid: Option<f64>) -> Option<f64> {
-    mid.map(|m| m * (1.0 - REQUIRED_MARGIN_OF_SAFETY))
+    ideal_buy_price_with_margin(mid, required_margin_of_safety_pct())
 }
 
 /// 算法综合估值档位（`value_signal`）—— 由安全边际 / F-Score / 护城河 / 所有者收益率合成。
@@ -7611,5 +7763,130 @@ mod news_limit_landing_tests {
         install_table(&[("news_limit", serde_json::json!("三十"))]);
         assert_eq!(panel_news_limit(), 30);
         install_table(&[]);
+    }
+}
+
+/// B 批 2026-10-09：护城河分档（`value_moat_threshold`）与安全边际（`value_safety_margin`）
+/// 接地的行为锁。
+///
+/// 三条各锁一种复发形态：① 回落侧 == 接线前的现值（70/40、30%）；
+/// ② 面板默认 ⇒ **新值真进到判据里**（这两格是 B 批唯一改现网数值的地方，
+/// 断言的是「变到哪去」，不是「没变」）；③ 缺失 / 非数值 / 越界 ⇒ 整对回落而不是把
+/// 判据压塌。全部走**纯函数**版，不动进程内快照 ⇒ 与 `news_limit_landing_tests`
+/// 那条「唯一装快照的测试」的约定不冲突（并行测试互不干扰）。
+#[cfg(test)]
+mod value_tier_landing_tests {
+    use super::*;
+    use axagent_harness::panel_variables::variables_map;
+    use std::collections::HashMap;
+
+    /// 用「变量表 JSON」构造 map，形态与 wiring 装入快照时读到的逐字一致。
+    fn vars(pairs: &[(&str, serde_json::Value)]) -> HashMap<String, serde_json::Value> {
+        let entries: Vec<serde_json::Value> = pairs
+            .iter()
+            .map(|(name, value)| serde_json::json!({ "name": name, "value": value }))
+            .collect();
+        variables_map(&serde_json::Value::Array(entries))
+    }
+
+    /// 中线 ± 半宽的派生式：面板默认 60 ⇒ 75/45；中线取接线前的中点 55 ⇒ 逐字回到 70/40。
+    #[test]
+    fn moat_panel_default_tightens_both_tiers() {
+        let legacy = MoatTiers::default();
+        assert_eq!((legacy.wide, legacy.narrow), (70.0, 40.0), "回落侧 == 接线前的两道门");
+        let from_panel = MoatTiers::default()
+            .with_panel_overlay(&vars(&[("value_moat_threshold", serde_json::json!(60))]));
+        assert_eq!(
+            (from_panel.wide, from_panel.narrow),
+            (75.0, 45.0),
+            "面板默认 60 ⇒ 两道门各抬 5"
+        );
+        // 派生式在中线 = (70+40)/2 处必须是恒等的（证明「带宽」真的沿用接线前的 30 分）
+        let neutral = MoatTiers::default()
+            .with_panel_overlay(&vars(&[("value_moat_threshold", serde_json::json!(55))]));
+        assert_eq!(neutral, legacy, "中线取接线前中点 ⇒ 与今天逐字一致");
+        // 分档读数按被测函数现算：70~75 与 40~45 两段是这次改动唯一会移动的判据区间。
+        assert_eq!(moat_level_of(72, &legacy), "宽阔");
+        assert_eq!(moat_level_of(72, &from_panel), "狭窄", "上行样本 72 从宽阔降为狭窄");
+        assert_eq!(moat_level_of(42, &legacy), "狭窄");
+        assert_eq!(
+            moat_level_of(42, &from_panel),
+            "无",
+            "42 从狭窄降为无（现网 72 份样本里这一档有 11 份）"
+        );
+        // 词表三个值（宽阔 / 狭窄 / 无）是跨载体契约，消费侧 `portfolio-mgr.rhai` 按字面比较。
+        assert_eq!(moat_level_of(100, &from_panel), "宽阔");
+        assert_eq!(moat_level_of(0, &from_panel), "无");
+    }
+
+    /// 缺失 ⇒ 回落 70/40；越界（派生后门跑出 0-100 评分域）与非数值 ⇒ 整对回落并留 warn。
+    #[test]
+    fn moat_tiers_fall_back_when_missing_or_out_of_domain() {
+        let absent = MoatTiers::default()
+            .with_panel_overlay(&vars(&[("news_limit", serde_json::json!(30))]));
+        assert_eq!(absent, MoatTiers::default(), "缺失 ⇒ 回落接线前的两道门，不是 0、不是报错");
+        // 中线 98 ⇒ 宽阔门 113 ⇒ 「宽阔」永久不可达，与「面板没生效」不可分 ⇒ 拒绝。
+        let too_high = MoatTiers::default()
+            .with_panel_overlay(&vars(&[("value_moat_threshold", serde_json::json!(98))]));
+        assert_eq!(too_high, MoatTiers::default(), "派生门越出 100 ⇒ 整对回落");
+        let too_low = MoatTiers::default()
+            .with_panel_overlay(&vars(&[("value_moat_threshold", serde_json::json!(10))]));
+        assert_eq!(too_low, MoatTiers::default(), "派生门越出 0 ⇒ 整对回落");
+        let text = MoatTiers::default()
+            .with_panel_overlay(&vars(&[("value_moat_threshold", serde_json::json!("六十"))]));
+        assert_eq!(text, MoatTiers::default(), "非数值按缺失处理");
+    }
+
+    /// 安全边际：回落侧 == 接线前的 30%，面板默认 20 ⇒ 理想买入价 `mid×0.80`（原 `×0.70`）。
+    #[test]
+    fn safety_margin_panel_default_moves_ideal_buy_price() {
+        assert_eq!(LEGACY_REQUIRED_MARGIN_OF_SAFETY_PCT, 30.0, "回落侧 == 接线前的 30%");
+        assert_eq!(
+            required_margin_of_safety_pct_in(&vars(&[])),
+            30.0,
+            "变量缺失 ⇒ 回落 30，而不是 0（0 ⇒ 买点 == 中性档，等于关掉安全边际）"
+        );
+        let from_panel = required_margin_of_safety_pct_in(&vars(&[(
+            "value_safety_margin",
+            serde_json::json!(20.0),
+        )]));
+        assert_eq!(from_panel, 20.0, "面板默认 20 ⇒ 20%（量纲与面板变量一致，不做二次换算）");
+        // 期望值按被测公式现算：mid = 100 ⇒ 接线前 70.00，面板默认 80.00。
+        let legacy_buy =
+            ideal_buy_price_with_margin(Some(100.0), required_margin_of_safety_pct_in(&vars(&[])));
+        let panel_buy = ideal_buy_price_with_margin(Some(100.0), from_panel);
+        assert!((legacy_buy.unwrap() - 70.0).abs() < 1e-9, "接线前 mid×(1−30/100) = 70");
+        assert!(
+            (panel_buy.unwrap() - 80.0).abs() < 1e-9,
+            "接线后 mid×(1−20/100) = 80（抬高 14.3%）"
+        );
+        // 腿不可用 ⇒ null（不得冒充 0 元）。
+        assert_eq!(ideal_buy_price_with_margin(None, from_panel), None);
+        // 与 `mos_level` 的「充足（> 30%）」档**不再同一把尺子**是既定内容：面板默认就是 20。
+        // 这里锁的是「两个载体读同一个来源」⇒ Rhai 侧的门限与本函数返回同一个数。
+        assert_eq!(required_margin_of_safety_pct_in(&vars(&[])), 30.0);
+    }
+
+    /// 越界 / 非数值 ⇒ 回落 30，而不是把买点折成负数或原样送出。
+    #[test]
+    fn safety_margin_invalid_values_fall_back_to_legacy() {
+        for (label, value) in [
+            ("0（等于关掉安全边际）", serde_json::json!(0.0)),
+            ("负数", serde_json::json!(-15.0)),
+            ("> 100 ⇒ 买点为负价", serde_json::json!(150.0)),
+            ("文本", serde_json::json!("两成")),
+            ("null", serde_json::Value::Null),
+        ] {
+            let got = required_margin_of_safety_pct_in(&vars(&[("value_safety_margin", value)]));
+            assert_eq!(got, 30.0, "{label} 必须按不可用处理 ⇒ 回落接线前的 30%");
+        }
+        // 100% 本身可用（买点 = 0，语义是「只在免费时买」），不额外夹掉。
+        assert_eq!(
+            required_margin_of_safety_pct_in(&vars(&[(
+                "value_safety_margin",
+                serde_json::json!(100.0)
+            )])),
+            100.0
+        );
     }
 }

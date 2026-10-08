@@ -1,37 +1,50 @@
-// 面板 9 条变量「Rust 内部读变量表」落地的**定向门**（2026-10-08 A 批接线）
+// 面板 13 条变量「Rust 内部读变量表」落地的**定向门**（2026-10-08 A 批 9 条 + 2026-10-09 B 批 4 条）
 //
 // ── 为什么必须有这道门（面积门 `check-variable-consumer-registry.mjs` 查不出这些）──
-// 那 9 条的接法不是 v137 那种「工具参数」，而是「下层 crate 读进程内变量表快照」
+// 这 13 条的接法不是 v137 那种「工具参数」，而是「下层 crate 读进程内变量表快照」
 // （端口 `harness::panel_variables`，装入口 `init/panel_variables.rs`）。于是新增三类
 // **只有定向门能发现、编译门一条都查不出**的失效：
 //   ① **默认值漂移**：种子/面板那格是手抄的。落点的回落值（`ScoreBands::default()` 的 30/70、
 //      `PositionLimits::default()` 的 20/10/40、`PeBands::default()` 的 15/50、
 //      `monitor.rs` 的 `RwLock::new(30)`、`DEFAULT_NEWS_LIMIT=30`）与它不等 ⇒ 接线当场改
-//      现网数值，而 A 批的入场券正是「逐位不变」。
+//      现网数值。A 批的入场券正是「逐位不变」，所以 ① 在 A 批里就是违规；
+//      **B 批（`batch: "B"` 那四条）入场券相反**——面板默认 ≠ 接线前现值，接上必然改数值，
+//      于是 ① 换成两条并列锁：回落侧必须**逐字等于登记的 `legacy`**（= 接线前的现值），
+//      而种子 ≡ 面板 ≡ **不等于** legacy。谁把回落侧改成面板值（＝把这次换代悄悄抹平），
+//      或只改一侧（＝造出第二权威），当场红。
 //   ② **函数没接上**：变量名在表里、`with_panel_overlay` 也写了，但生产路径没人调用那个
 //      构造函数 ⇒ 一切看起来都对，面板仍是空接线（`start_with_config` 此前就是零调用者的正门）。
 //   ③ **第二权威复活**：落点旁边又写回一份字面量。本批真出现过两处 —— 回放链
 //      `stock_analysis.rs` 的 PE 20/40 与 `verify_catalysts_impl` 写死的 50 条新闻。
 //      只改一处必留另一处 ⇒ 这条判据是**双向**的（不许再出现字面量，且必须引用落点）。
+//      ⚠ B 批的 `value_safety_margin` 是**跨载体**的同一族：30% 既写在 Rust
+//      （原 `REQUIRED_MARGIN_OF_SAFETY = 0.30`）又写在 Rhai 决策脚本
+//      （`portfolio-mgr-h-long.rhai` 的 `moS_pct >= 30.0`）。只收 Rust 一侧就会留下
+//      「Rust 用 20%、Rhai 用 30%」两套真相 ⇒ P3 同时查 `.rs` 与 `.rhai` 两个载体。
 //
 // ── 五条判据 ──
-//   P1 三面默认值对账：`seed_variables.rs` 声明值 ≡ 落点回落值；面板有本地 `b()` 兜底时还必须 ≡ 它
+//   P1 三面默认值对账：A 批 = `seed_variables.rs` 声明值 ≡ 落点回落值（≡ 面板本地 `b()` 兜底）；
+//      B 批 = 落点回落值 ≡ 登记的 `legacy`（接线前现值）且 种子 ≡ 面板 ≢ `legacy`。
 //      （三面而不两面：`signal_rsi_*` 两条**面板没有控件**，只比两侧会把「面板改过、种子没改」漏掉）
 //   P2 消费者存在：每条的落点文件里有引号形态的键，且落点构造函数在**生产调用形态**上被引用 ≥ 规定处数
 //      （数的是 `client.get_news(stock_code, panel_news_limit())` 这种整条调用，不是函数名出现次数 ——
 //       后者会被注释与测试满足，起不到「真的被调用」的作用。`.rs` 面统一先剥注释、再剥
 //       `#[cfg(test)] mod`：A 批给每条落点配的行为锁测试**就在同一个文件里**手抄了键名与调用形态，
 //       不剥就是「测试替自己作证」—— 生产表被删、测试里还剩五处 ⇒ 门照样绿。实测这条就是把
-//       负控「键被改名」逼成失败的那条（补剥离前 9/10，补后 13/13）。）
-//   P3 单一权威：回放链 PE 与新闻条数不许再出现手抄字面量，且必须引用落点
-//   P4 面积自证：落地清单恰 9 条（=A 批全量），且每条都仍在声明面（退役一条要同步摘这里）
+//       负控「键被改名」逼成失败的那条（补剥离前 9/10，补后 13/13）。`.rhai` 面同样剥注释。）
+//   P3 单一权威：这些手抄字面量不许再出现，且必须引用落点；跨载体的那格两侧都在清单里
+//   P4 面积自证：落地清单恰 13 条（=A 批 9 + B 批 4），且每条都仍在声明面（退役一条要同步摘这里）
 //   P5 解析面自证：任一侧一条都取不到 ⇒ 判**红**（「判据没电」不等于「全绿」）
 //
 // ── 本门**看不见**的三件事（读数别过度解读，2026-10-08 验收时记下的实测盲区）──
 //   ① 「调用存在」≠「调用可达」：P2 数的是落点函数在**生产文本**里的出现处数。若某个消费者
 //      本身没有活调用方（例：`trading.rs` 的 `validate_trade_with_config` 全仓零调用者），
-//      门仍绿而面板仍是死的。本批九条的可达性是靠人工沿 `rhai 脚本 → register_fn → 落点`
-//      这条链逐条核过的（见 A 批验收记录），不是门给的保证。
+//      门仍绿而面板仍是死的。A 批九条的可达性是靠人工沿 `rhai 脚本 → register_fn → 落点`
+//      这条链逐条核过的（见 A 批验收记录），不是门给的保证。B 批四条同样按这条链核：
+//      `val_pb_*` → `generate_stock_report`（**HTML 报告导出**，主链 `compute_scoring` 工具
+//      不调基本面修正 ⇒ 工作流分数不受这两格支配）、`value_moat_threshold` →
+//      `compute_valuation` 工具 → `t-valuation.result.content.moat.label` → `portfolio-mgr.rhai`
+//      的 `moat_mult`、`value_safety_margin` → `idealBuyPrice` + 长线档 Rhai 加仓门。
 //   ② 装配时机：`monitor_poll_interval_secs` 只在**启动装配**时读一次快照
 //      （`services.rs` 的 `start_with_config`），而 `set_poll_interval_secs` 至今零调用者
 //      ⇒ 面板改了要**重启才生效**。门只要求「至少装配一次」，看不出这个窗口。
@@ -63,13 +76,23 @@ const TRADING_REL = "src-tauri/crates/analysis-engine/src/trading.rs";
 const SERVICES_REL = "src-tauri/src/init/services.rs";
 const REPLAY_REL = "src-tauri/src/commands/stock_analysis.rs";
 const SEED_REL = "src-tauri/src/commands/stock_analysis_setup/seed_variables.rs";
+// B 批 `value_safety_margin` 的两个**载体**（跨载体单一权威判据用）：
+// 决策脚本本体 + 宿主函数的注册点。`.rhai` 由 `include_str!` 进主 crate 二进制 ⇒
+// 改脚本属于**图内容**，换代见 `seed_stock_analysis.rs::TEMPLATE_VERSION`（v141）。
+const RHAI_REL = "src-tauri/src/commands/portfolio-mgr-h-long.rhai";
+const RHAI_PM_REL = "src-tauri/src/commands/stock_workflow/rhai_pm.rs";
 
 /**
- * 落地面（本批的**唯一清单**，9 条 = A 批全量）。
- * 三侧的期望值一律**从源码现取**，门里不写死数字（写死了就变成第四份手抄）。
- * - `rust`：落点回落默认值的现取处（文件 + 锚定正则，第 1 组就是那个数）
+ * 落地面（本批的**唯一清单**，13 条 = A 批 9 + B 批 4）。
+ * 三侧的期望值一律**从源码现取**，门里不写死「当前权威是几」（写死了就变成第四份手抄）。
+ * - `rust`：落点回落默认值的现取处（文件 + 锚定正则，捕获组按 `legacy` 的顺序给）
  * - `key` ：变量名必须以 `"名"` 形态出现的落点文件
  * - `calls`：生产调用形态的最少处数
+ * - `batch`：`"A"`（默认值必须三面逐字相等 ⇒ 接线零数值变化）/
+ *            `"B"`（`legacy` 是**接线前现值**的登记，落点必须 ≡ 它，而 种子 ≡ 面板 ≢ 它）
+ * - `legacy`：仅 B 批 —— 接线那一刻的现值。这一格**是**手抄，但它抄的是**裁定**
+ *            （「改动前是什么」是不可再生的历史事实），不是当前权威；
+ *            有人把回落侧改成面板值 ⇒ 本次换代被悄悄抹平、面板读数与实跑分叉 ⇒ 红。
  */
 export const LANDED = [
   {
@@ -146,6 +169,62 @@ export const LANDED = [
       { rel: MCP_REL, needle: "news_limit_from_arguments(arguments)", min: 2 },
     ],
   },
+  // ── B 批 2026-10-09（接上**会**改现网数值：面板默认 ≠ 接线前现值）──
+  // `legacy` = 接线前那一刻的 Rust 现值（裁定快照，见 PLAN §一一六(3)）。
+  {
+    name: "val_pb_low",
+    batch: "B",
+    legacy: [1.5],
+    rust: { rel: SCORING_REL, re: /impl Default for PbBands[\s\S]*?low:\s*(-?[0-9.]+)/ },
+    key: { rel: SCORING_REL, table: "PB_BAND_VARS" },
+    calls: [
+      // PB 低估界的唯一生产入口：基本面修正的快照版（回放链 `stock_analysis.rs` 调的是
+      // `ScoringEngine::apply_fundamental_adjustment`，那里头一句就是这个）。
+      { rel: SCORING_REL, needle: "&PbBands::panel_effective()", min: 1 },
+    ],
+  },
+  {
+    // 与低估界共用同一次构造调用 ⇒ 只查键与回落值。
+    name: "val_pb_high",
+    batch: "B",
+    legacy: [5.0],
+    rust: { rel: SCORING_REL, re: /impl Default for PbBands[\s\S]*?high:\s*(-?[0-9.]+)/ },
+    key: { rel: SCORING_REL, table: "PB_BAND_VARS" },
+    calls: [],
+  },
+  {
+    // 单变量 ⇒ 双档：面板那道阈值是**中线**，宽阔 / 狭窄各挂 ±半宽（半宽从 `Default` 现取）。
+    // 回落侧因此登记**两个**数（接线前的 70 / 40），派生后的 75 / 45 由 Rust 测试锁。
+    name: "value_moat_threshold",
+    batch: "B",
+    legacy: [70, 40],
+    rust: {
+      rel: MCP_REL,
+      re: /impl Default for MoatTiers[\s\S]*?wide:\s*(-?[0-9.]+)\s*,\s*narrow:\s*(-?[0-9.]+)/,
+    },
+    key: { rel: MCP_REL, table: "MoatTiers::with_panel_overlay" },
+    calls: [
+      { rel: MCP_REL, needle: "&MoatTiers::panel_effective()", min: 1 },
+    ],
+  },
+  {
+    name: "value_safety_margin",
+    batch: "B",
+    legacy: [30],
+    rust: {
+      rel: MCP_REL,
+      re: /const LEGACY_REQUIRED_MARGIN_OF_SAFETY_PCT:\s*f64\s*=\s*(-?[0-9.]+)/,
+    },
+    key: { rel: MCP_REL, table: "required_margin_of_safety_pct_in" },
+    calls: [
+      // Rust 侧生产入口（算 `idealBuyPrice`）。min=2 = 「定义那一处 + 真有一处调用」，
+      // 只有定义 ⇒ 面板仍是空接线（P2 的老失效形态）。
+      { rel: MCP_REL, needle: "required_margin_of_safety_pct()", min: 2 },
+      // ……与 Rhai 侧的**跨载体**两环：宿主注册 + 脚本调用。少一环就是「两套真相」。
+      { rel: RHAI_PM_REL, needle: 'register_fn( "pm_required_margin_pct"', min: 1 },
+      { rel: RHAI_REL, needle: "pm_required_margin_pct()", min: 1 },
+    ],
+  },
 ];
 
 /**
@@ -168,6 +247,32 @@ export const SINGLE_AUTHORITY = [
       'arguments["limit"].as_u64().unwrap_or(30)',
     ],
     present: ["client.get_news(stock_code, panel_news_limit())"],
+  },
+  // ── B 批三条（含那条**跨载体**的）──
+  {
+    why: "PB 两档只允许 `PbBands` 一个来源，不许再把 1.5 / 5.0 写回判据",
+    rel: SCORING_REL,
+    absent: ["pb < 1.5", "0.0..=5.0).contains(&pb)"],
+    present: ["&PbBands::panel_effective()"],
+  },
+  {
+    why: "护城河两道门只允许 `MoatTiers` 一个来源，不许再把 70 / 40 写回判据",
+    rel: MCP_REL,
+    absent: ["score >= 70", "score >= 40"],
+    present: ["&MoatTiers::panel_effective()"],
+  },
+  {
+    why:
+      "安全边际 30% 的第二载体（Rhai 长线加仓门）必须读同一个来源；写回字面量就是「Rust 20% / Rhai 30%」两套真相",
+    rel: RHAI_REL,
+    absent: ["moS_pct >= 30.0"],
+    present: ["pm_required_margin_pct()"],
+  },
+  {
+    why: "Rhai 侧那个名字必须由宿主函数注册表提供，否则运行期 Function not found 会被 try/catch 吞成静默兜底",
+    rel: RHAI_PM_REL,
+    absent: [],
+    present: ['register_fn( "pm_required_margin_pct"'],
   },
 ];
 
@@ -256,12 +361,16 @@ export function stripTestModules(src) {
 }
 
 /**
- * 声明面 / 落点面的统一取源口径：`.rs` 先剥注释再剥 test 模块，其余原样。
+ * 声明面 / 落点面的统一取源口径：`.rs` 与 `.rhai` 先剥注释（`.rs` 再剥 test 模块），其余原样。
  *
  * `.tsx` 刻意不剥（与 `check-variable-consumer-registry.mjs` 同一口径）：TS 里的 `//`
  * 会出现在 JSX 文本与正则字面量里，误剥的代价比漏剥大；而面板面只有 `b("名", 数字,` 一种形态要抽。
+ * `.rhai` 的注释语法与 `.rs` 一致（行注释 `//` 与块注释），B 批那条跨载体判据数的是脚本里的
+ * `moS_pct >= 30.0` 与 `pm_required_margin_pct()` —— 脚本头上那段历史说明正好写着 30%，
+ * 不剥就会常红（而注释里的名字不算引用面这条判据，见面积门头上的同一句理由）。
  */
 function stripForLint(rel, raw) {
+  if (rel.endsWith(".rhai")) return stripComments(raw);
   if (!rel.endsWith(".rs")) return raw;
   return stripTestModules(stripComments(raw));
 }
@@ -288,12 +397,19 @@ export function seedDefaults(src) {
   return Object.keys(out).length > 0 ? out : null;
 }
 
-/** 落点的回落默认值（现取，不写在门里）；取不到 ⇒ undefined。 */
-function rustDefault(entry, srcOf) {
+/** 落点的回落默认值（现取，不写在门里）；取不到 ⇒ undefined。捕获组全部按顺序返回。 */
+function rustDefaults(entry, srcOf) {
   const src = srcOf(entry.rust.rel);
   if (src === undefined) return undefined; // 文件读不到 ⇒ 交给 P5 报「判据没电」
   const m = entry.rust.re.exec(src);
-  return m ? Number(m[1]) : undefined;
+  if (!m) return undefined;
+  return m.slice(1).map((x) => Number(x));
+}
+
+/** 一条落地项的「回落侧应该等于什么」：A 批 = 种子声明值；B 批 = 登记的接线前现值。 */
+function expectedFallback(entry, seed) {
+  if (entry.batch === "B") return entry.legacy;
+  return seed && entry.name in seed ? [seed[entry.name]] : undefined;
 }
 
 /**
@@ -306,9 +422,9 @@ export function checkAll(panelSrc, srcOf, seedSrc, landed = LANDED, authority = 
   const seed = seedDefaults(seedSrc);
   if (!panel) problems.push('P5 判据没电：面板 b("<名>", <数字>, …) 一条都没取到');
   if (!seed) problems.push("P5 判据没电：seed_variables.rs 的 name+value 一条都没取到");
-  // P4 面积自证：本门只管 A 批那 9 条，多一条少一条都要当场说清（悄悄删条目＝门失去读数）。
-  if (landed.length !== 9) {
-    problems.push(`P4 落地清单是 ${landed.length} 条（应为 9 条=A 批全量）⇒ 改判据前先讲清为什么`);
+  // P4 面积自证：本门只管 A 批 9 条 + B 批 4 条，多一条少一条都要当场说清（悄悄删条目＝门失去读数）。
+  if (landed.length !== 13) {
+    problems.push(`P4 落地清单是 ${landed.length} 条（应为 13 条=A 批 9+B 批 4）⇒ 改判据前先讲清为什么`);
   }
 
   for (const e of landed) {
@@ -316,19 +432,41 @@ export function checkAll(panelSrc, srcOf, seedSrc, landed = LANDED, authority = 
       problems.push(`P4 ${e.name} 已不在声明面（或声明侧抽取失效）⇒ 从本门清单摘掉，别留指向不存在的键`);
     }
     // ── P1 三面默认值对账 ──
-    const rust = rustDefault(e, srcOf);
+    const rust = rustDefaults(e, srcOf);
     if (rust === undefined) {
       problems.push(`P5 判据没电：${e.rust.rel} 里取不到 ${e.name} 的回落默认（锚定正则失效或被改名）`);
     }
-    if (seed && rust !== undefined && e.name in seed && seed[e.name] !== rust) {
-      problems.push(
-        `P1 ${e.name}：种子声明 ${seed[e.name]} ≠ 落点回落 ${rust} ⇒ 接线当场会改现网数值（A 批的入场券是逐位不变）`
-      );
+    const expect = expectedFallback(e, seed);
+    if (expect === undefined && e.batch !== "B") {
+      // A 批的回落侧就是种子值；种子取不到时上面已报 P4/P5，这里不再叠一条。
+      continue;
+    }
+    if (rust !== undefined && expect !== undefined) {
+      const drifted = rust.some((x, i) => x !== expect[i]);
+      if (drifted && e.batch === "B") {
+        problems.push(
+          `P1 ${e.name}（B 批）：落点回落 ${rust.join(" / ")} ≠ 登记的接线前现值 ${expect.join(" / ")} ⇒ ` +
+            `要么有人悄悄把回落侧改成面板值（这次换代被抹平），要么落点被改；两者都要先在裁定里说清`
+        );
+      } else if (drifted) {
+        problems.push(
+          `P1 ${e.name}：种子声明 ${expect[0]} ≠ 落点回落 ${rust[0]} ⇒ 接线当场会改现网数值（A 批的入场券是逐位不变）`
+        );
+      }
     }
     // 面板有本地兜底时才比（`signal_rsi_*` 两条**面板没有控件**，不是漏接）。
     if (panel && seed && e.name in panel && e.name in seed && panel[e.name] !== seed[e.name]) {
       problems.push(
         `P1 ${e.name}：面板本地兜底 ${panel[e.name]} ≠ 种子声明 ${seed[e.name]} ⇒ 模板变量表为空时面板会把种子值顶掉`
+      );
+    }
+    // B 批的**换代自证**：种子/面板那格必须确实与回落侧不同，否则这条「接线」是空转
+    // （面板改了没反应＝当初要消灭的缺陷，把它做成清单里的一条更坏 —— 门会替它作证）。
+    if (e.batch === "B" && rust !== undefined && seed && e.name in seed && seed[e.name] === rust[0]) {
+      problems.push(
+        `P1 ${e.name}（B 批）：种子 ${seed[e.name]} == 落点回落 ${rust[0]} ⇒ 这格已退化成「接了但数值不会变」，` +
+          `要么裁定改成「不换代」（那就从清单与注册表一起摘掉），要么 ` +
+          `legacy 该重写为新的现值`
       );
     }
     // ── P2 消费者存在 ──
@@ -399,9 +537,12 @@ function report(problems, srcOf) {
     const seed = seedDefaults(srcOf(SEED_REL));
     const panel = panelDefaults(srcOf(PANEL_REL));
     const rows = LANDED.map(
-      (e) => `${e.name} 种子${seed[e.name]}/落点${rustDefault(e, srcOf)}${e.name in panel ? `/面板${panel[e.name]}` : "/面板无控件"}`
+      (e) =>
+        `${e.name} 回落${rustDefaults(e, srcOf).join("/")}·种子${seed[e.name]}${
+          e.name in panel ? `/面板${panel[e.name]}` : "/面板无控件"
+        }${e.batch === "B" ? "（B 批：接上即改数值）" : ""}`
     );
-    console.log("✅ 面板 9 条变量落地：三面默认值对账 + 消费者存在 + 单一权威 + 面积自证 全部通过");
+    console.log("✅ 面板 13 条变量落地：三面默认值对账 + 消费者存在 + 单一权威 + 面积自证 全部通过");
     console.log(`   逐字读数：${rows.join("  ")}`);
     // 面积读数**逐条点名到文件**（只给总数就退回「一道会说谎的绿」）：每条的落点文件 + 生产调用处数。
     for (const e of LANDED) {
@@ -409,8 +550,12 @@ function report(problems, srcOf) {
       const calls = e.calls.length === 0
         ? "（与同表兄弟共用一次覆盖调用）"
         : e.calls.map((c) => `≥${c.min}@${c.rel.replace(/^src-tauri\//, "")}`).join(" ");
-      console.log(`   ${e.name.padEnd(26)} 键在 ${at}  ${calls}`);
+      console.log(`   ${e.batch === "B" ? "[B]" : "[A]"} ${e.name.padEnd(26)} 键在 ${at}  ${calls}`);
     }
+    console.log(
+      "   ⚠ [B] 四条的落点回落侧 = **接线前的现值**，而种子/面板那格是新的决策值 ⇒ 发布后现网数值必变；" +
+        "逐格改前→改后见 PLAN §一一六(3) 与本轮验收记录。"
+    );
     return 0;
   }
   for (const p of problems) console.log("❌ " + p);
@@ -428,7 +573,7 @@ function dump(srcOf) {
     const keys = srcOf(e.key.rel) ?? "";
     const calls = e.calls.map((c) => `${c.needle}@${count(srcOf(c.rel) ?? "", c.needle)}/${c.min}`).join(", ");
     console.log(
-      `  ${e.name.padEnd(26)} 种子:${seed?.[e.name]}  落点:${rustDefault(e, srcOf)}  面板:${e.name in (panel || {}) ? panel[e.name] : "无控件"}  键在 ${e.key.rel}:${keys.includes(`"${e.name}"`) ? "有" : "无"}  ${calls}`
+      `  ${e.batch === "B" ? "[B]" : "[A]"} ${e.name.padEnd(26)} 回落:${rustDefaults(e, srcOf)}  种子:${seed?.[e.name]}  面板:${e.name in (panel || {}) ? panel[e.name] : "无控件"}  键在 ${e.key.rel}:${keys.includes(`"${e.name}"`) ? "有" : "无"}  ${calls}`
     );
   }
   for (const a of SINGLE_AUTHORITY) {
@@ -557,8 +702,41 @@ function selftest() {
       })(),
     ],
     [
-      "P4 落地清单被悄悄删成 8 条 ⇒ 红",
-      checkAll(panelSrc, srcOf, seedSrc, LANDED.slice(1)).some((p) => p.startsWith("P4 落地清单是 8 条")),
+      "P4 落地清单被悄悄删成 12 条 ⇒ 红",
+      checkAll(panelSrc, srcOf, seedSrc, LANDED.slice(1)).some((p) => p.startsWith("P4 落地清单是 12 条")),
+    ],
+    // ── B 批三条（2026-10-09）：这三条查的是「数值会变」这件事本身能不能被悄悄抹掉 ──
+    [
+      "P1(B) 落点回落侧被改成面板值 ⇒ 点名这次换代被抹平",
+      checkAll(
+        panelSrc,
+        withPatch(SCORING_REL, (s) => patchText(s, "low: 1.5, high: 5.0", "low: 1.0, high: 6.0")),
+        seedSrc
+      ).some((p) => p.startsWith("P1 val_pb_low（B 批）") && p.includes("这次换代被抹平")),
+    ],
+    [
+      "P3 跨载体：Rhai 长线加仓门重新写死 30.0 ⇒ 红（留下「Rust 20% / Rhai 30%」两套真相）",
+      checkAll(
+        panelSrc,
+        withPatch(RHAI_REL, (s) => patchText(s, "moS_pct >= margin_min_pct", "moS_pct >= 30.0")),
+        seedSrc
+      ).some((p) => p.startsWith("P3") && p.includes("moS_pct >= 30.0")),
+    ],
+    [
+      "P2 跨载体：宿主注册被摘掉 ⇒ 红（脚本调用会在运行期 Function not found 被吞成静默兜底）",
+      checkAll(
+        panelSrc,
+        withPatch(RHAI_PM_REL, (s) => patchText(s, '"pm_required_margin_pct"', '"pm_required_margin_pct_removed"')),
+        seedSrc
+      ).some((p) => p.includes("pm_required_margin_pct") && p.includes("rhai_pm.rs")),
+    ],
+    [
+      "P1(B) 护城河回落侧两道门被单独改一道 ⇒ 点名（登记的是接线前那一对）",
+      checkAll(
+        panelSrc,
+        withPatch(MCP_REL, (s) => patchText(s, "Self { wide: 70.0, narrow: 40.0 }", "Self { wide: 70.0, narrow: 35.0 }")),
+        seedSrc
+      ).some((p) => p.startsWith("P1 value_moat_threshold（B 批）")),
     ],
   ];
   let pass = 0;

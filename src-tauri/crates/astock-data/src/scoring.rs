@@ -226,7 +226,7 @@ const RSI_BAND_VARS: [RsiBandVar; 2] = [
 ///
 /// ⚠ `high` 参与的是 `!(0.0..=high).contains(&pe)`。该写法对 **NaN 恒 `true`**
 ///   （`RangeInclusive::contains` 对 NaN 返回 `false`），所以判据必须继续带 `!pe.is_nan()`，
-///   见 `apply_fundamental_adjustment_with_pe` 的注释与 `test_fundamental_adjustment_nan_and_inf`。
+///   见 `apply_fundamental_adjustment_with_bands` 的注释与 `test_fundamental_adjustment_nan_and_inf`。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PeBands {
     /// PE 低估界（`0 < pe < low` ⇒ +5）。
@@ -288,6 +288,80 @@ impl PeBands {
     }
 
     /// 生产路径的 PE 阈值 = `Default` + 面板覆盖（快照版）。
+    pub fn panel_effective() -> Self {
+        Self::default().with_panel_overlay(&axagent_harness::panel_variables::panel_variables())
+    }
+}
+
+/// 基本面修正的 PB 两档阈值 —— **B 批 2026-10-09**（与 PE 两档同形，但回落值不同，见下）。
+///
+/// ⚠ 与 [`PeBands`] 的唯一差别是**这批会改现网数值**：`Default` 保持的是**接线前的现值
+/// 1.5 / 5.0**，而面板与种子早已写着 1.0 / 6.0（现网库 `stock-analysis.variables` 实测
+/// `val_pb_low=1`、`val_pb_high=6`）。⇒ 变量在表里时判据按 **1.0 / 6.0** 走，
+/// 变量缺失 / 非数值 / 反序时退回 **1.5 / 5.0**。两侧数字都被定向门
+/// `check-panel-var-landing.mjs` 钉住（种子/面板 ≡ 1.0/6.0、落点回落 ≡ 1.5/5.0），
+/// 谁单独改哪一侧都会红 —— 这正是「数值会变」这件事必须留痕的地方。
+///
+/// 抽成类型的理由与 PE 相同：字面量留在判据里就会同时存在「写死的数」与「面板的数」
+/// 两处权威。`low` / `high` 的 NaN 陷阱也一字不差地搬过来（见
+/// [`ScoringEngine::apply_fundamental_adjustment_with_bands`]）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PbBands {
+    /// PB 低估界（`0 < pb < low` ⇒ +3）。
+    pub low: f64,
+    /// PB 高估界（`pb > high` 或 `pb < 0` ⇒ −3）。
+    pub high: f64,
+}
+
+impl Default for PbBands {
+    fn default() -> Self {
+        // 接线前的两个现值。**不是**面板默认（1.0 / 6.0）—— 见 [`PbBands`] 的文档。
+        Self { low: 1.5, high: 5.0 }
+    }
+}
+
+/// 面板 PB 两档：`(变量名, 落点)` 同表（理由同 [`RSI_BAND_VARS`] / [`PE_BAND_VARS`]）。
+type PbBandVar = (&'static str, fn(&mut PbBands, f64));
+
+const PB_BAND_VARS: [PbBandVar; 2] =
+    [("val_pb_low", |b, v| b.low = v), ("val_pb_high", |b, v| b.high = v)];
+
+impl PbBands {
+    /// 默认档 + 面板覆盖，形与语义逐条对齐 [`PeBands::with_panel_overlay`]。
+    ///
+    /// **两档成对生效**：任一无效（缺失 / 非数值 / 非正）或覆盖后 `low ≥ high`
+    /// ⇒ 整对回落 `Default`。只覆盖一档会把「低估界」与「高估界」拆成两套来源，
+    /// 而反序的带会让同一支票既 +3 又 −3。
+    pub fn with_panel_overlay(self, vars: &HashMap<String, serde_json::Value>) -> Self {
+        let mut patched = self;
+        let mut hit = 0usize;
+        for (key, set) in PB_BAND_VARS {
+            if let Some(value) = axagent_harness::panel_variables::numeric_in(vars, key) {
+                if value <= 0.0 {
+                    tracing::warn!("[scoring] 面板 {key} = {value} 不是正数 ⇒ 整对回落默认阈值");
+                    continue;
+                }
+                set(&mut patched, value);
+                hit += 1;
+            }
+        }
+        if hit == 0 {
+            return self;
+        }
+        if patched.low >= patched.high {
+            tracing::warn!(
+                "[scoring] 面板 PB 阈值反序（low={} ≥ high={}）⇒ 整对回落默认 {} / {}",
+                patched.low,
+                patched.high,
+                Self::default().low,
+                Self::default().high
+            );
+            return self;
+        }
+        patched
+    }
+
+    /// 生产路径的 PB 阈值 = `Default`（接线前现值）+ 面板覆盖（快照版）。
     pub fn panel_effective() -> Self {
         Self::default().with_panel_overlay(&axagent_harness::panel_variables::panel_variables())
     }
@@ -435,18 +509,27 @@ impl ScoringEngine {
 
     /// 基本面调整：根据 PE / PB / ROE 对客观评分做增量调整
     ///
-    /// PE 两档阈值取自 [`PeBands::panel_effective`]（= `Default` 15/50 + 面板 `val_pe_*` 覆盖）。
-    /// 需要显式指定阈值（测试 / 回放链）时走 [`Self::apply_fundamental_adjustment_with_pe`]。
+    /// PE 两档阈值取自 [`PeBands::panel_effective`]（= `Default` 15/50 + 面板 `val_pe_*` 覆盖），
+    /// PB 两档取自 [`PbBands::panel_effective`]（= 接线前现值 1.5/5.0 + 面板 `val_pb_*` 覆盖，
+    /// 面板默认 1.0/6.0 ⇒ **B 批起会改现网数值**，见 [`PbBands`] 的文档）。
+    /// 需要显式指定阈值（测试 / 回放链）时走 [`Self::apply_fundamental_adjustment_with_bands`]。
     pub fn apply_fundamental_adjustment(
         score: &mut ObjectiveScore,
         pe: f64,
         pb: f64,
         roe: Option<f64>,
     ) {
-        Self::apply_fundamental_adjustment_with_pe(score, pe, pb, roe, &PeBands::panel_effective());
+        Self::apply_fundamental_adjustment_with_bands(
+            score,
+            pe,
+            pb,
+            roe,
+            &PeBands::panel_effective(),
+            &PbBands::panel_effective(),
+        );
     }
 
-    /// [`Self::apply_fundamental_adjustment`] 的纯函数版：PE 阈值由入参给定。
+    /// [`Self::apply_fundamental_adjustment`] 的纯函数版：PE / PB 阈值由入参给定。
     ///
     /// 为什么留一个纯版：接的是「面板变量」，但判据必须能在**不依赖进程内快照**的情况下
     /// 逐情形测（默认值 ⇒ 与今天逐位相同 / 变量缺失 ⇒ 回落 / 变量被改 ⇒ 新值真进到这条判据）。
@@ -454,12 +537,13 @@ impl ScoringEngine {
     /// 入参三态（2026-09-21 明确）：`pe` / `pb` 由调用方以 `unwrap_or(0.0)` 传入，
     /// 故 **`0.0` 表示「上游未取到」**（不调整）；**负值表示企业亏损 / 净资产为负**
     /// （显式扣分）。两者语义不同，不可合并成一个「<= 0」判据。
-    pub fn apply_fundamental_adjustment_with_pe(
+    pub fn apply_fundamental_adjustment_with_bands(
         score: &mut ObjectiveScore,
         pe: f64,
         pb: f64,
         roe: Option<f64>,
         pe_bands: &PeBands,
+        pb_bands: &PbBands,
     ) {
         let mut adj: i32 = 0;
         // ⚠ 两个来源**语义不同、后果同档**，故合并进一个判据：
@@ -485,11 +569,13 @@ impl ScoringEngine {
         } else if !(0.0..=pe_bands.high).contains(&pe) && !pe.is_nan() {
             adj -= 5;
         }
-        // 同上：`pb > 5.0` 估值过高；`pb < 0.0` 净资产为负（资不抵债，2026-09-21 新增）。
-        // `pb == 0.0` 仍表「上游未取到」，不调整；`!pb.is_nan()` 的理由见上方写法说明。
-        if pb > 0.0 && pb < 1.5 {
+        // 同上，且两档阈值同样来自变量（[`PbBands`]）：`pb > high` 估值过高；
+        // `pb < 0.0` 净资产为负（资不抵债，2026-09-21 新增）。
+        // `pb == 0.0` 仍表「上游未取到」，不调整；`!pb.is_nan()` 的理由见上方写法说明
+        // —— 阈值换成变量后这条**一字未动**，NaN 仍不调整、±INF 仍扣分。
+        if pb > 0.0 && pb < pb_bands.low {
             adj += 3;
-        } else if !(0.0..=5.0).contains(&pb) && !pb.is_nan() {
+        } else if !(0.0..=pb_bands.high).contains(&pb) && !pb.is_nan() {
             adj -= 3;
         }
         if let Some(r) = roe {
@@ -780,12 +866,24 @@ mod tests {
     }
 
     /// 2026-09-21 新增：净资产为负（`pb < 0`）扣分；`pb = 0.0` 仍表缺失、不调整。
+    ///
+    /// 2026-10-09 B 批：阈值改成变量之后，本测试**显式给接线前的 `PbBands::default()`（1.5/5.0）**
+    /// 而不是走快照 —— 快照里此刻有没有 `val_pb_*` 取决于同进程其它测试，
+    /// 而「净资产为负扣 3 分」这条判据与带值无关，正该在**确定的带**上测。
+    /// 面板默认（1.0/6.0）下的生效断言在 `panel_landing_tests::pb_panel_default_...`。
     #[test]
     fn test_fundamental_adjustment_negative_pb() {
         let ind = make_indicators("多头排列", 0.5, "金叉", 0.5, "放量上涨", 55.0, "中轨附近");
         let adj = |pb: f64| {
             let mut s = ScoringEngine::score(&ind, 150.0, None);
-            ScoringEngine::apply_fundamental_adjustment(&mut s, 0.0, pb, None);
+            ScoringEngine::apply_fundamental_adjustment_with_bands(
+                &mut s,
+                0.0,
+                pb,
+                None,
+                &PeBands::default(),
+                &PbBands::default(),
+            );
             s.fundamental_adjustment
         };
         assert_eq!(adj(0.0), 0, "pb=0.0 表示上游未取到，不得产生调整");
@@ -805,9 +903,18 @@ mod tests {
     #[test]
     fn test_fundamental_adjustment_nan_and_inf() {
         let ind = make_indicators("多头排列", 0.5, "金叉", 0.5, "放量上涨", 55.0, "中轨附近");
+        // 显式给**接线前的带**（PE 15/50、PB 1.5/5.0）：本测试锁的是 NaN/±INF 的逐情形语义，
+        // 与带值无关 ⇒ 必须在确定的带上测，不能被同进程其它测试装进快照的面板值带偏。
         let adj = |pe: f64, pb: f64| {
             let mut s = ScoringEngine::score(&ind, 150.0, None);
-            ScoringEngine::apply_fundamental_adjustment(&mut s, pe, pb, None);
+            ScoringEngine::apply_fundamental_adjustment_with_bands(
+                &mut s,
+                pe,
+                pb,
+                None,
+                &PeBands::default(),
+                &PbBands::default(),
+            );
             s.fundamental_adjustment
         };
         // NaN = 脏数据：既非「估值过高」亦非「亏损」⇒ 不调整
@@ -816,9 +923,13 @@ mod tests {
         // ±INF = 上面两个 0 的构造性对照，证明不是「所有异常值都不调整」
         assert_eq!(adj(f64::INFINITY, 0.0), -5, "+INF 属估值过高 ⇒ −5");
         assert_eq!(adj(f64::NEG_INFINITY, 0.0), -5, "−INF 属亏损 ⇒ −5");
+        assert_eq!(adj(0.0, f64::INFINITY), -3, "PB +INF 属估值过高 ⇒ −3");
+        assert_eq!(adj(0.0, f64::NEG_INFINITY), -3, "PB −INF 属净资产为负 ⇒ −3");
         // 区间端点必须不影响「占位」语义：0.0 仍落在 [0,50] 内 ⇒ 不调整
         assert_eq!(adj(50.0, 0.0), 0, "PE=50 恰在端点内 ⇒ 不调整");
         assert_eq!(adj(15.0, 0.0), 0, "PE=15 属不调整带 ⇒ 不调整");
+        assert_eq!(adj(0.0, 5.0), 0, "PB=5 恰在端点内 ⇒ 不调整");
+        assert_eq!(adj(0.0, 1.5), 0, "PB=1.5 属不调整带 ⇒ 不调整");
     }
 
     /// 2026-09-21 新增（拆字段）：三个调整字段必须**各归其位** ——
@@ -830,7 +941,17 @@ mod tests {
         let mut s = ScoringEngine::score(&ind, 150.0, None);
 
         // 只打基本面：PE=12 ⇒ +5（`0 < pe < 15`）；PB=1.0 ⇒ +3（`0 < pb < 1.5`）。
-        ScoringEngine::apply_fundamental_adjustment(&mut s, 12.0, 1.0, None);
+        // 显式给**接线前的带**：本测试锁的是「三个分量各归其位」这条归因，
+        // 不是带值（B 批起面板默认会把 PB 低估界挪到 1.0 ⇒ 同一入参只 +5，见
+        // `panel_landing_tests` 里的 PB 生效断言）。
+        ScoringEngine::apply_fundamental_adjustment_with_bands(
+            &mut s,
+            12.0,
+            1.0,
+            None,
+            &PeBands::default(),
+            &PbBands::default(),
+        );
         assert_eq!(s.fundamental_adjustment, 8, "PE=12 应 +5、PB=1.0 应 +3");
         assert_eq!(s.industry_adjustment, 0, "未调用行业调整 ⇒ 该分量必须保持 0");
         assert_eq!(s.total_adjustment, 8, "合计 = 基本面 + 行业");
@@ -917,6 +1038,10 @@ mod scale_band_tests {
 /// ① 默认值对账（面板的 30/70、15/50 与 Rust 权威逐字相等 ⇒ 接线本身零数值变化）；
 /// ② 变量缺失 ⇒ 回落同一组默认（不是 0、不是报错）；
 /// ③ 变量被改 ⇒ 新值真进到 `score_rsi` / PE 判据里。
+///
+/// ⚠ 2026-10-09 B 批的 PB 两档**不适用 ①**：那两格的入场券是「面板默认 1.0/6.0 ≠
+/// 现 Rust 常量 1.5/5.0」⇒ 接线即改现网分数，于是 ① 换成「回落侧 == 接线前现值」+
+/// 「面板默认 ⇒ 新带生效」两条并列断言（见下面 `pb_panel_default_moves_the_live_bands`）。
 #[cfg(test)]
 mod panel_landing_tests {
     use super::*;
@@ -1020,7 +1145,14 @@ mod panel_landing_tests {
         // 默认档下 PE=12 ⇒ +5、PE=55 ⇒ −5、PE=0（未取到占位）⇒ 0
         let adj = |pe: f64, bands: &PeBands| {
             let mut s = ScoringEngine::score(&ind_with_rsi(55.0), 10.0, None);
-            ScoringEngine::apply_fundamental_adjustment_with_pe(&mut s, pe, 0.0, None, bands);
+            ScoringEngine::apply_fundamental_adjustment_with_bands(
+                &mut s,
+                pe,
+                0.0,
+                None,
+                bands,
+                &PbBands::default(),
+            );
             s.fundamental_adjustment
         };
         assert_eq!(adj(12.0, &PeBands::default()), 5);
@@ -1033,7 +1165,14 @@ mod panel_landing_tests {
     fn panel_pe_value_reaches_the_adjustment_and_missing_falls_back() {
         let adj = |pe: f64, bands: &PeBands| {
             let mut s = ScoringEngine::score(&ind_with_rsi(55.0), 10.0, None);
-            ScoringEngine::apply_fundamental_adjustment_with_pe(&mut s, pe, 0.0, None, bands);
+            ScoringEngine::apply_fundamental_adjustment_with_bands(
+                &mut s,
+                pe,
+                0.0,
+                None,
+                bands,
+                &PbBands::default(),
+            );
             s.fundamental_adjustment
         };
         // 低估界 15 → 10：PE=12 由「+5」变成「不调整」。
@@ -1071,7 +1210,14 @@ mod panel_landing_tests {
     fn pe_overlay_keeps_nan_and_inf_semantics() {
         let adj = |pe: f64, bands: &PeBands| {
             let mut s = ScoringEngine::score(&ind_with_rsi(55.0), 10.0, None);
-            ScoringEngine::apply_fundamental_adjustment_with_pe(&mut s, pe, 0.0, None, bands);
+            ScoringEngine::apply_fundamental_adjustment_with_bands(
+                &mut s,
+                pe,
+                0.0,
+                None,
+                bands,
+                &PbBands::default(),
+            );
             s.fundamental_adjustment
         };
         for bands in [PeBands::default(), PeBands { low: 10.0, high: 60.0 }] {
@@ -1080,6 +1226,94 @@ mod panel_landing_tests {
             assert_eq!(adj(f64::NEG_INFINITY, &bands), -5, "负 PE 属亏损");
             assert_eq!(adj(0.0, &bands), 0, "0.0 是「上游未取到」占位");
             assert_eq!(adj(bands.high, &bands), 0, "恰在高估界端点内 ⇒ 不调整");
+        }
+    }
+
+    // ── B 批（2026-10-09）PB 两档：接线**会**改现网数值，故两侧数字都要有显式锁 ──
+
+    /// 面板默认（1.0 / 6.0）覆盖到接线前的带（1.5 / 5.0）上 ⇒ 判据随之前移/放宽。
+    ///
+    /// ⚠ 与 A 批那 9 条不同：**这里不断言「覆盖后一字不变」**，因为这两格入场券就是
+    /// 「面板默认 ≠ 现 Rust 常量」，接线必然改变现网分数。本测试断言的是**新值真的生效**，
+    /// 期望分数按被测公式现算（不手敲）。
+    #[test]
+    fn pb_panel_default_moves_the_live_bands() {
+        let legacy = PbBands::default();
+        assert_eq!((legacy.low, legacy.high), (1.5, 5.0), "回落侧 == 接线前的两个现值");
+        let from_panel = PbBands::default().with_panel_overlay(&vars(&[
+            ("val_pb_low", serde_json::json!(1.0)),
+            ("val_pb_high", serde_json::json!(6.0)),
+        ]));
+        assert_eq!((from_panel.low, from_panel.high), (1.0, 6.0), "面板默认 ⇒ 新带");
+
+        let adj = |pb: f64, bands: &PbBands| {
+            let mut s = ScoringEngine::score(&ind_with_rsi(55.0), 10.0, None);
+            ScoringEngine::apply_fundamental_adjustment_with_bands(
+                &mut s,
+                0.0,
+                pb,
+                None,
+                &PeBands::default(),
+                bands,
+            );
+            s.fundamental_adjustment
+        };
+        // pb ∈ [1.0, 1.5) ⇒ 旧带 +3（低估）、新带 0（不再算低估）
+        assert_eq!(adj(1.2, &legacy), 3);
+        assert_eq!(adj(1.2, &from_panel), 0, "现网 pb∈[1.0,1.5) 的那批由此失去 +3");
+        // pb ∈ (5.0, 6.0] ⇒ 旧带 −3（过高）、新带 0（不再算过高）
+        assert_eq!(adj(5.5, &legacy), -3);
+        assert_eq!(adj(5.5, &from_panel), 0, "现网 pb∈(5.0,6.0] 的那批由此不再被扣 −3");
+        // 两侧都仍在带内的读数不受影响（改动只在两条边界移动的带里可见）。
+        assert_eq!(adj(0.8, &legacy), 3);
+        assert_eq!(adj(0.8, &from_panel), 3);
+        assert_eq!(adj(9.0, &legacy), -3);
+        assert_eq!(adj(9.0, &from_panel), -3);
+    }
+
+    /// 变量缺失 ⇒ 回落**接线前的现值** 1.5 / 5.0（不是 0、不是报错、不是面板默认）。
+    #[test]
+    fn missing_pb_panel_vars_fall_back_to_pre_wiring_values() {
+        let absent =
+            PbBands::default().with_panel_overlay(&vars(&[("news_limit", serde_json::json!(30))]));
+        assert_eq!(absent, PbBands::default(), "缺失 ⇒ 整对保持 1.5 / 5.0");
+        // 反序 / 非正 ⇒ 同样整对回落（不留「低估界高于高估界」的带，理由同 PE）。
+        let inverted = PbBands::default().with_panel_overlay(&vars(&[
+            ("val_pb_low", serde_json::json!(8.0)),
+            ("val_pb_high", serde_json::json!(6.0)),
+        ]));
+        assert_eq!(inverted, PbBands::default(), "low ≥ high ⇒ 整对回落");
+        let negative = PbBands::default()
+            .with_panel_overlay(&vars(&[("val_pb_low", serde_json::json!(-1.0))]));
+        assert_eq!(negative, PbBands::default(), "非正数按无效处理");
+    }
+
+    /// PB 阈值来自变量表之后，NaN / ±INF 语义必须仍与 2026-09-21 那条锁逐情形等价。
+    ///
+    /// 与 [`pe_overlay_keeps_nan_and_inf_semantics`] 同形：两副带（接线前的 1.5/5.0 与
+    /// 面板默认的 1.0/6.0）× 五个异常读数，逐个点名期望值。`!pb.is_nan()` 若被当成
+    /// 冗余删掉，`(0.0..=high).contains(&NaN)` 恒 `false` 会把 NaN 判成「过高」扣 3 分 ⇒ 本测试红。
+    #[test]
+    fn pb_overlay_keeps_nan_and_inf_semantics() {
+        let adj = |pb: f64, bands: &PbBands| {
+            let mut s = ScoringEngine::score(&ind_with_rsi(55.0), 10.0, None);
+            ScoringEngine::apply_fundamental_adjustment_with_bands(
+                &mut s,
+                0.0,
+                pb,
+                None,
+                &PeBands::default(),
+                bands,
+            );
+            s.fundamental_adjustment
+        };
+        for bands in [PbBands::default(), PbBands { low: 1.0, high: 6.0 }] {
+            assert_eq!(adj(f64::NAN, &bands), 0, "NaN 不得被当成净资产为负/过高扣分");
+            assert_eq!(adj(f64::INFINITY, &bands), -3, "+INF 属估值过高");
+            assert_eq!(adj(f64::NEG_INFINITY, &bands), -3, "−INF 属净资产为负");
+            assert_eq!(adj(0.0, &bands), 0, "0.0 是「上游未取到」占位");
+            assert_eq!(adj(bands.high, &bands), 0, "恰在高估界端点内 ⇒ 不调整");
+            assert_eq!(adj(bands.low, &bands), 0, "恰在低估界上 ⇒ 严格不等号不命中");
         }
     }
 }

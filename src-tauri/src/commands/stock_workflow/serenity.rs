@@ -1372,6 +1372,13 @@ pub async fn run_serenity_screening(
             // ① 非中文界面看到中文；② 「哪只 + 为什么」揉进一个串，无法只本地化主文案而保留技术详情。
             let mut persistence_stock_code = String::new();
             let mut persistence_detail = String::new();
+            // ── 逐档展开的对外候选（选项 B）──
+            // completed payload 直接按 (候选 × 档) 展开，逐档带上 period 与风控字段，
+            // 使面板**运行后立即**呈现 mid/long 两张卡。此前只发原始 LLM 候选（无 period），
+            // 卡片只能出「未知周期」，档位要等重挂载读 `reco_picks` 才出现 —— 同一次运行
+            // 的实时候选与恢复候选口径分叉。展开形态与前端 `restoreCandidate`
+            // （`seed_pool_json` + `pick_data`）的解出结果同形，两路呈现一致。
+            let mut live_candidates: Vec<serde_json::Value> = Vec::new();
             // best-effort：失败只记日志，不影响返回结果
             {
                 let db = state.harness.db();
@@ -1622,6 +1629,25 @@ pub async fn run_serenity_screening(
                             "priorSource": prior_source,
                             "synthetic": false,
                         });
+                        // 逐档展开的实时候选：克隆原始候选 + 覆盖逐档字段，与前端
+                        // `restoreCandidate`（`seed_pool_json` 铺底 + `pick_data` 覆盖）
+                        // 解出同形。confidence 刻意不覆盖 —— 恢复路径取的是原始候选评分
+                        // （`c` 的 confidence），此处保持同源，免得两路呈现又分叉。
+                        let mut live_candidate = (*c).clone();
+                        if let Some(obj) = live_candidate.as_object_mut() {
+                            obj.insert("period".to_string(), serde_json::json!(tier_period));
+                            obj.insert("holdingDays".to_string(), serde_json::json!(holding_days));
+                            obj.insert("price".to_string(), serde_json::json!(price));
+                            obj.insert("stopLoss".to_string(), serde_json::json!(stop_loss));
+                            obj.insert("targetPrice".to_string(), serde_json::json!(target_price));
+                            obj.insert("entryLow".to_string(), serde_json::json!(entry_low));
+                            obj.insert("entryHigh".to_string(), serde_json::json!(entry_high));
+                            obj.insert("positionPct".to_string(), serde_json::json!(position_pct));
+                            obj.insert("stopSource".to_string(), serde_json::json!(stop_src));
+                            obj.insert("entrySource".to_string(), serde_json::json!(entry_src));
+                            obj.insert("generatedAt".to_string(), serde_json::json!(now_str));
+                        }
+                        live_candidates.push(live_candidate);
                         // 持久化到 reco_picks。style 统一为 "serenity" 便于历史过滤；
                         // 策略子类型（bottleneck/policy/earnings…）仍在 pick_data.strategy_type 里。
                         // id 带档位后缀：一次运行每票产 mid/long 两行，无后缀会主键相撞（后者静默丢）
@@ -1689,6 +1715,14 @@ pub async fn run_serenity_screening(
                 }
             }
 
+            // 逐档展开后的对外候选：展开为空（无候选 / 无有效行）时退回原始数组，
+            // 不让「落库 best-effort」的异常连带把候选呈现清空。
+            let live_candidate_array = if live_candidates.is_empty() {
+                candidate_array.clone()
+            } else {
+                serde_json::Value::Array(live_candidates)
+            };
+
             // 持久化完成后 emit completed 事件
             let persistence_status = if persistence_success {
                 "completed"
@@ -1714,8 +1748,10 @@ pub async fn run_serenity_screening(
                     "workflowId": wf_id_ret,
                     "runId": event_run_id.clone(),
                     "status": persistence_status,
-                    "result": candidates,
-                    "candidates": candidate_array,
+                    // 逐档展开（选项 B）：前端 `p.candidates` 直接就是含 period 的逐档候选，
+                    // `result` 同步为其数组形态，避免回退分支又拿到无档位的原始候选。
+                    "result": live_candidate_array,
+                    "candidates": live_candidate_array,
                     "trends": trends_list,
                     "emptyReason": empty_reason,
                     "source": source,
@@ -1737,17 +1773,11 @@ pub async fn run_serenity_screening(
                 }),
             );
 
-            // wrap array candidates for frontend
-            let result_val = if candidates.is_array() {
-                serde_json::json!({
-                    "candidates": candidates,
-                })
-            } else {
-                candidates
-            };
             Ok(serde_json::json!({
                 "status": "completed",
-                "candidates": result_val["candidates"].clone(),
+                // invoke 返回值与事件 payload 同源（逐档展开），否则非 Tauri 环境
+                // 或事件未到达时，`r.candidates` 又会退回无档位的原始候选。
+                "candidates": live_candidate_array,
                 "trends": trends_list,
                 "emptyReason": empty_reason,
                 "source": source,

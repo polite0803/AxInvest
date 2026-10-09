@@ -2170,7 +2170,11 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
     // ── ② 每个调用点的顶层实参个数必须与形参一致 ──
     let needle = "diag_for(";
     let mut from = 0usize;
-    let mut sites: Vec<(String, usize, String)> = Vec::new();
+    // 四元组末位 `line_prefix` = 调用点所在行在 `diag_for(` 之前的文本（已 trim）。
+    //   用途：把「`diagnostics` map 里的分析师行」与「map 之外的调用点」分开 —— v148 给
+    //   `diagnostics_by_tier` 加了一个循环内的通用调用点，两类混在一个数字里数会把
+    //   「多一个调用点」误判成「多一个分析师」（2026-10-09 CI 实测：11 vs 10，红的是判据）。
+    let mut sites: Vec<(String, usize, String, String)> = Vec::new();
     while let Some(rel) = src[from..].find(needle) {
         let at = from + rel;
         from = at + needle.len();
@@ -2188,24 +2192,49 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
         // S6/R9b 在 attr_note 之后追加了第 9 实参 `asof_ex`、第 10 实参 `raw_ph_n`
         // ⇒ attribution_note 不再是末位实参，改按**第 8 位固定**取（形参 `attr_note` 即第 8 个）。
         let attr = args.get(7).cloned().unwrap_or_else(|| "<第 8 实参缺失>".to_string());
-        sites.push((key, args.len(), attr));
+        let line_prefix = src[line_start..at].trim().to_string();
+        sites.push((key, args.len(), attr, line_prefix));
     }
 
-    // 正控①：调用点个数。10 = `diagnostics` map 的 10 个分析师。
-    //   少于 10 ⇒ 抽取器失配（本断言红）；多于 10 ⇒ 新增了分析师，须同步此数。
+    // 正控①：调用点**分两类**，各自钉住。
+    //   · map 行（行首形如 `"mk": diag_for(`）= `diagnostics` 的 10 个分析师，
+    //     逐条 abbr 另存下来，③ 里与 seed 的 abbr 表**逐槽对账**（真正的增减判据）。
+    //   · map 之外的调用点 = `diagnostics_by_tier` 循环内那一个通用行（v148 起），
+    //     它随分析师增减而增删 ⇒ 它的个数**不是**分析师数，不能与上面那个数字混算。
+    let map_abbrs: Vec<String> = sites
+        .iter()
+        .filter_map(|(_, _, _, prefix)| {
+            let rest = prefix.strip_prefix('"')?;
+            rest.find('"').map(|end| rest[..end].to_string())
+        })
+        .collect();
+    let outside: Vec<&str> = sites
+        .iter()
+        .filter(|(_, _, _, prefix)| !prefix.starts_with('"'))
+        .map(|(_, _, _, prefix)| prefix.as_str())
+        .collect();
     assert_eq!(
-        sites.len(),
+        map_abbrs.len(),
         10,
-        "`diag_for` 调用点应为 10 个（= 10 个分析师），实际 {} 个。\
+        "`diagnostics` map 里的 `diag_for` 行应为 10 个（= 10 个分析师），实际 {} 个：{map_abbrs:?}。\
          若新增/删除分析师请同步本数字；否则先查抽取器。",
-        sites.len()
+        map_abbrs.len()
+    );
+    assert_eq!(
+        outside.len(),
+        1,
+        "`diagnostics` map 之外的 `diag_for` 调用点应为 1 个（`diagnostics_by_tier` 循环内的通用行），\
+         实际 {} 个：{outside:?}。\
+         ⚠ 这不是分析师数 —— 新增分析师**不会**让这个数变化（逐档行是循环摊出来的）；\
+         变了说明有人在 map 之外手写调用点，请确认是否也该并入 `diagnostics_by_tier`。",
+        outside.len()
     );
 
     // 主断言：实参个数一致
     let mismatched: Vec<String> = sites
         .iter()
-        .filter(|(_, n, _)| *n != params.len())
-        .map(|(k, n, _)| format!("调用点 {k} → 实参 {n} 个（形参 {} 个）", params.len()))
+        .filter(|(_, n, _, _)| *n != params.len())
+        .map(|(k, n, _, _)| format!("调用点 {k} → 实参 {n} 个（形参 {} 个）", params.len()))
         .collect();
     assert!(
         mismatched.is_empty(),
@@ -2217,6 +2246,15 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
 
     // ── ③ 第 8 实参必须是 `attribution_note(<报告>, <调用记录>)`，且两变量已在
     //        `input_mapping` 声明（Rhai 引用未声明变量不报错，只得到 unit ⇒ 静默失效）──
+    //    ⚠ 本段三条判据的对象是 `diagnostics` map 的**逐分析师手写行**（第 8 实参写的是
+    //      `merge_two_notes(attribution_note(mk_report, mk_tool_calls), mk_word_note)`）。
+    //      v148 起 map 之外还有一个**逐档通用行**（`diagnostics_by_tier` 循环内），它的实参是
+    //      循环局部变量（`attribution_note(rp, tc)` / `wording_absence_note(ph, tc)`）——
+    //      三条判据（落在 `input_mapping` 键名里 / 两变量同属一个分析师 / 第二实参是
+    //      `<前缀>_word_note`）逐条不适用（2026-10-09 实测：套用会让本测试恒红）。
+    //      它改由紧随其后的 ③b 守同一条动机（只是声明面换成脚本自身的 `let`）。
+    let map_sites: Vec<&(String, usize, String, String)> =
+        sites.iter().filter(|(_, _, _, p)| p.starts_with('"')).collect();
     let seed = read_seed_source_file("seed_stock_analysis.rs");
     let dq_at = seed.find("let dq_id = \"data-quality\";").expect("定位 data-quality 的锚点失效");
     let map_at = seed[dq_at..]
@@ -2257,6 +2295,17 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
         10,
         "abbr 表抽取面失效（应为 10 槽：9 a-* + value-investor）: {abbrs:?}"
     );
+    // 逐槽对账：rhai `diagnostics` map 的 abbr 集合 ⇔ seed `input_mapping` 的 abbr 表。
+    //   这一条才是「新增/删除分析师」的判据（② 里那两个数字只是各自抽取面的自证下限，
+    //   它们会一起漂移 ⇒ 单看数字抓不到「map 与 seed 说的不是同一批分析师」）。
+    let mut rhai_abbrs_sorted: Vec<&str> = map_abbrs.iter().map(String::as_str).collect();
+    rhai_abbrs_sorted.sort_unstable();
+    let mut seed_abbrs_sorted: Vec<&str> = abbrs.iter().map(String::as_str).collect();
+    seed_abbrs_sorted.sort_unstable();
+    assert_eq!(
+        rhai_abbrs_sorted, seed_abbrs_sorted,
+        "rhai `diagnostics` map 与 seed abbr 表不是同一批分析师。"
+    );
     for kind in ["verdict", "report", "untrusted", "tool_calls"] {
         for abbr in &abbrs {
             declared.insert(format!("{abbr}_{kind}"));
@@ -2271,7 +2320,8 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
 
     let mut bad_vars: Vec<String> = Vec::new();
     let mut bad_prefix: Vec<String> = Vec::new();
-    for (key, _, last) in &sites {
+    // 只遍历 `diagnostics` map 的逐分析师行（见 ③ 头注释：逐档通用行改由 ③b 守）。
+    for (key, _, last, _) in map_sites {
         // R2(2026-10-02)：第 8 实参允许被 `merge_two_notes(...)` 包一层 —— 措辞性缺席的说明串
         //   与归因核对结论**共用既有的 `attr_note` 通道**（不为此新增输出字段 + 前端行 + 11 语言 key）。
         //   解包后本段原有三项检查**一条不减**：内层仍是 `attribution_note(x, y)`、
@@ -2326,6 +2376,41 @@ fn data_quality_rhai_diag_for_arity_matches_all_call_sites() {
             } else if !src.contains(&format!("let {want} =")) {
                 bad_vars.push(format!(
                     "`{want}` 在脚本里没有 `let` 定义 ⇒ Rhai 静默得到 unit、措辞性缺席的说明串永远为空"
+                ));
+            }
+        }
+    }
+    // ── ③b 逐档通用行（v148 起，`diagnostics_by_tier` 循环内那一个）──
+    //   ③ 的判据对象是逐分析师**手写行**（实参落在 `input_mapping` 的键名里）；通用行取的是
+    //   **循环局部变量**（`attribution_note(rp, tc)`）⇒ 三条判据全不适用。但动机一字不变：
+    //   Rhai 引用未声明变量不报错、只静默给 unit ⇒ 声明面换成**脚本自身的 `let`**。
+    for (key, _, last, _) in sites.iter().filter(|(_, _, _, p)| !p.starts_with('"')) {
+        let Some(inner) = last.strip_prefix("merge_two_notes(").and_then(|r| r.strip_suffix(')'))
+        else {
+            bad_vars.push(format!("逐档通用行 {key} 的第 8 实参不是 merge_two_notes(…)：{last}"));
+            continue;
+        };
+        let parts = split_top_level_commas(inner);
+        if parts.len() != 2 {
+            bad_vars.push(format!(
+                "逐档通用行 {key} 的 merge_two_notes 有 {} 个实参（应为 2）：{inner}",
+                parts.len()
+            ));
+            continue;
+        }
+        let Some(args) =
+            parts[0].strip_prefix("attribution_note(").and_then(|r| r.strip_suffix(')'))
+        else {
+            bad_vars.push(format!(
+                "逐档通用行 {key} 的内层实参形态非 attribution_note(x, y)：{}",
+                parts[0]
+            ));
+            continue;
+        };
+        for v in split_top_level_commas(args) {
+            if !src.contains(&format!("let {v} =")) {
+                bad_vars.push(format!(
+                    "逐档通用行 {key} 引用了脚本里没有 `let` 定义的 `{v}` ⇒ Rhai 静默得到 unit、不报错"
                 ));
             }
         }

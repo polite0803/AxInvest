@@ -1,9 +1,10 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import { invoke } from "@/lib/invoke";
+import { analystBaseOf, horizonSuffix } from "@/lib/stock-analysis-utils";
 import { useSettingsStore, useStockAnalysisStore } from "@/stores";
 import { ExpandOutlined, LineChartOutlined } from "@ant-design/icons";
 import { Alert, Button, Card, Collapse, Empty, Modal, Spin, Tag } from "antd";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
@@ -644,8 +645,73 @@ function ValueReportRenderer({
  * 显示 value-investor 节点（巴菲特框架）的输出。
  *
  * 数据来源:
- * - valueAssessments["value-investor"]: 巴菲特框架评估（工作流产出）
+ * - valueAssessments["value-investor--<tier>"]: 各档巴菲特框架评估（v133+ 工作流产出）
+ * - valueAssessments["value-investor"]: ≤v132 历史快照的单槽形态
  */
+
+/** 逐档 value 槽位（v133 起 value-investor / value-verify 按持有期实例化）。 */
+interface ValueEntry {
+  /** store 键：`value-investor--<tier>`（带档）或 `value-investor`（≤v132 历史快照）。 */
+  key: string;
+  /** 档位（snake）；裸键为 null。 */
+  tier: string | null;
+  /** 归一为字符串的报告原文。 */
+  report: string;
+}
+
+/** 档位展示序（与 `Period::ALL` 一致：短 → 长）；裸键排最前。 */
+const VALUE_TIER_ORDER = ["ultra_short", "short", "mid", "long"] as const;
+
+function toReportText(value: unknown): string {
+  return typeof value === "string"
+    ? value
+    : value != null
+    ? JSON.stringify(value, null, 2)
+    : "";
+}
+
+/**
+ * 从 `valueAssessments` 收集「巴菲特估值」各档产物。
+ *
+ * ⚠ 四周期下 value 链按档产出（`value-investor--mid|long`），而本面板此前**只读裸键
+ * `valueAssessments["value-investor"]`** ⇒ 带档产物全部取不到、`hasValue === false`，
+ * 「巴菲特估值」主卡恒不渲染（DB 实证 `a3eba895`：该链只产 `value.assessment--mid|long`，
+ * 无裸 `value.assessment`）。此处按 base 归一收集，兼顾 ≤v132 的裸键形态。
+ *
+ * 快照回放会同时写入 `assessment--<tier>`（别名）与 `value-investor--<tier>`，靠 base 过滤去重。
+ */
+function collectValueEntries(all: Record<string, unknown>): ValueEntry[] {
+  const out: ValueEntry[] = [];
+  for (const [key, value] of Object.entries(all)) {
+    const base = analystBaseOf(key);
+    if (base === null) {
+      if (key === "value-investor") {
+        const report = toReportText(value);
+        if (report.trim().length > 0) { out.push({ key, tier: null, report }); }
+      }
+      continue;
+    }
+    if (base !== "value-investor") { continue; }
+    const report = toReportText(value);
+    if (report.trim().length === 0) { continue; }
+    out.push({ key, tier: key.slice(key.indexOf("--") + 2), report });
+  }
+  out.sort((a, b) => tierOrder(a.tier) - tierOrder(b.tier));
+  return out;
+}
+
+function tierOrder(tier: string | null): number {
+  if (tier === null) { return -1; }
+  const i = VALUE_TIER_ORDER.indexOf(tier as (typeof VALUE_TIER_ORDER)[number]);
+  return i === -1 ? VALUE_TIER_ORDER.length : i;
+}
+
+/** 档位切换标签 —— 复用 `DecisionBanner` 的同一批键（`stockAnalysis.timeHorizon*`）。 */
+function valueEntryLabel(tier: string | null, t: (key: string) => string): string {
+  const suffix = tier ? horizonSuffix(tier) : null;
+  return suffix ? t(`stockAnalysis.timeHorizon${suffix}`) : t("stockAnalysis.valueAssessment.title");
+}
+
 export function ValueAssessmentPanel() {
   const { t } = useTranslation();
   const themeMode = useSettingsStore((s) => s.settings.themeMode);
@@ -664,6 +730,10 @@ export function ValueAssessmentPanel() {
   //   「近 5 年正净利均值 ×0.90」的历史代理锚当成内在价值
   //   （300308 实证：面板显示 80.63–156.77 元，现价 926.43 元）。
   const valuationApplicability = useStockAnalysisStore((s) => s.valuationApplicability);
+  // 四周期下 value 链按档产出 ⇒ 收集各档产物并给出档位切换（单档/裸键时不显示切换条）。
+  const valueEntries = useMemo(() => collectValueEntries(valueAssessments), [valueAssessments]);
+  const [activeValueKey, setActiveValueKey] = useState<string | null>(null);
+  const activeValueEntry = valueEntries.find((e) => e.key === activeValueKey) ?? valueEntries[0] ?? null;
   const [expanded, setExpanded] = useState(false);
 
   // R3-C: 估值带
@@ -698,13 +768,9 @@ export function ValueAssessmentPanel() {
     };
   }, [storeStockCode, rawData]);
 
-  // 类型保护：确保 valueReport 始终是字符串
-  const rawValue = valueAssessments["value-investor"];
-  const valueReport: string = typeof rawValue === "string"
-    ? rawValue
-    : rawValue != null
-    ? JSON.stringify(rawValue, null, 2)
-    : "";
+  // 类型保护：确保 valueReport 始终是字符串（值已由 collectValueEntries 归一）
+  const rawValue = activeValueEntry?.report;
+  const valueReport: string = rawValue ?? "";
   const hasValue = valueReport.trim().length > 0;
   const hasRuleCheck = Object.keys(ruleCheckResults).length > 0;
   const hasDataQuality = dataQualitySummary.trim().length > 0;
@@ -954,6 +1020,35 @@ export function ValueAssessmentPanel() {
         />
       )}
 
+      {
+        /* 四周期档位切换：仅多档时出现（单档/裸键无切换条，卡片标题里带档标签） */
+      }
+      {valueEntries.length > 1 && (
+        <div
+          data-testid="value-tier-switch"
+          className="flex items-center gap-1 flex-wrap"
+        >
+          {valueEntries.map((e) => {
+            const isActive = e.key === (activeValueEntry?.key ?? "");
+            return (
+              <button
+                key={e.key}
+                onClick={() => setActiveValueKey(e.key)}
+                className="text-sm px-2 py-0.5 rounded font-medium transition-colors"
+                style={{
+                  background: isActive ? "rgba(250,173,20,0.18)" : "var(--surface)",
+                  color: isActive ? "#d48806" : "var(--muted)",
+                  border: isActive ? "1px solid rgba(250,173,20,0.45)" : "1px solid var(--border)",
+                  cursor: "pointer",
+                }}
+              >
+                {valueEntryLabel(e.tier, t)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {hasValue && (
         <Card
           size="small"
@@ -962,6 +1057,7 @@ export function ValueAssessmentPanel() {
               <Tag color="gold">{t("stockAnalysis.valueAssessment.buffettLabel")}</Tag>
               <span className="text-sm">{t("stockAnalysis.valueAssessment.title")}</span>
               {parsed?.type && <Tag>{parsed.type}</Tag>}
+              {activeValueEntry?.tier && <Tag>{valueEntryLabel(activeValueEntry.tier, t)}</Tag>}
             </div>
           }
           extra={

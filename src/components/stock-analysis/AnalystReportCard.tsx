@@ -96,6 +96,11 @@ interface ParsedReport {
   narrative_missing?: string[];
   institutional_trace?: string;
   concept_risk?: string;
+  /** VERDICT 标签里的多空论据（无正文时的唯一可见内容，必须渲染）。 */
+  bull_points?: string[];
+  bear_points?: string[];
+  /** 逐档契约的「该档不适用」说明。 */
+  notApplicable?: string[];
   key_events?: Array<{ event?: string; source?: string; stance?: string; weight?: number }>;
   // 通用分析
   analysis?: string;
@@ -288,6 +293,18 @@ function extractKeyPoints(parsed: ParsedReport): string[] {
       .filter((e) => e && typeof e.event === "string")
       .map((e) => `${e.event}${e.source ? ` (${e.source})` : ""}`);
   }
+  // VERDICT 标签可以只带多空论据（`bull_points` / `bear_points`）而无正文 ——
+  // 分析师 prompt 明确要求「必须有正文」，但实测存在只输出标签的违规形态
+  // （见 `agency_experts/stock-analysis/market-analyst.md` 关键规则 1/2）。
+  // 此前这两组论据被整段丢弃 ⇒ 卡片只剩头部 + chips、正文为空。
+  const bullPoints = Array.isArray(parsed.bull_points) ? parsed.bull_points : [];
+  const bearPoints = Array.isArray(parsed.bear_points) ? parsed.bear_points : [];
+  const stancePoints = [...bullPoints, ...bearPoints].filter((p): p is string => typeof p === "string");
+  if (stancePoints.length > 0) { return stancePoints; }
+  // 逐档契约的 `notApplicable`：该档不适用时的显式说明，同样不能丢。
+  if (Array.isArray(parsed.notApplicable) && parsed.notApplicable.length > 0) {
+    return parsed.notApplicable.filter((p): p is string => typeof p === "string");
+  }
   return [];
 }
 
@@ -297,6 +314,91 @@ function extractRiskFlags(parsed: ParsedReport): string[] {
     return parsed.risk_flags;
   }
   return [];
+}
+
+/** 已在卡片其他位置消费过的键（兜底平铺时排除，避免重复展示）。 */
+const CONSUMED_KEYS = new Set<string>([
+  // extractSummary
+  "summary",
+  "argument",
+  "analysis",
+  "assessment",
+  "buffett_verdict",
+  "verdict",
+  "reasoning",
+  "business_model",
+  "moat_reasoning",
+  "financial_health",
+  "margin_of_safety",
+  "catalyst_detail",
+  "report",
+  // extractTags
+  "signals",
+  "stance",
+  "action",
+  "main_flow_state",
+  "dragon_tiger_signal",
+  "moat_rating",
+  "catalyst_level",
+  "narrative_completeness",
+  "institutional_trace",
+  "concept_risk",
+  "bull_score",
+  "bear_score",
+  // extractKeyPoints
+  "key_points",
+  "core_arguments",
+  "resonance_points",
+  "evidence",
+  "data_gaps",
+  "narrative_missing",
+  "key_events",
+  "bull_points",
+  "bear_points",
+  "notApplicable",
+  // 头部 / 其他
+  "type",
+  "confidence",
+  "positionPct",
+  "risk_flags",
+  // 非内容元数据
+  "expert",
+  "node_id",
+  "nodeId",
+  "raw",
+  "_raw",
+  "params",
+  "input_params",
+  "language",
+  "status",
+]);
+
+/**
+ * 解析成功、但正文与要点都提不出来时，把其余可读字段平铺出来。
+ *
+ * 背景：LLM 违规或被截断时会产出「形状未知」的 JSON —— 此前既有分支对它只显示
+ * 「分析完成，但未返回结构化内容」，用户完全看不到当次分析到底返回了什么。
+ * 此处把未消费的标量 / 字符串数组 / 嵌套对象平铺（最多 8 条），属降级展示。
+ */
+function extractMiscFields(parsed: ParsedReport): Array<{ k: string; v: string }> {
+  const out: Array<{ k: string; v: string }> = [];
+  for (const [k, v] of Object.entries(parsed)) {
+    if (CONSUMED_KEYS.has(k) || k.startsWith("__") || v == null) { continue; }
+    let text = "";
+    if (typeof v === "string") {
+      text = v.trim();
+    } else if (typeof v === "number" || typeof v === "boolean") {
+      text = String(v);
+    } else if (Array.isArray(v)) {
+      text = v.filter((x) => typeof x === "string" || typeof x === "number").join("；");
+    } else if (typeof v === "object") {
+      text = JSON.stringify(v);
+    }
+    if (text.length === 0 || text === "{}" || text === "[]") { continue; }
+    out.push({ k, v: text.length > 300 ? `${text.slice(0, 300)}…` : text });
+    if (out.length >= 8) { break; }
+  }
+  return out;
 }
 
 /** 判断是否为"空分析"（全是 data_gaps 或空字段） */
@@ -401,6 +503,8 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
     const points = extractKeyPoints(parsed);
     const riskFlags = extractRiskFlags(parsed);
     const empty = isEmptyAnalysis(parsed);
+    // 正文与要点都提不出来时，退而平铺其余可读字段（形状未知的输出至少能看见内容）
+    const miscFields = summary || points.length > 0 ? [] : extractMiscFields(parsed);
     const confidence = typeof parsed.confidence === "number"
       ? (parsed.confidence > 1 ? parsed.confidence : parsed.confidence * 100)
       : (typeof parsed.positionPct === "number" ? parsed.positionPct : null);
@@ -502,7 +606,17 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
               {riskFlags.map((r, i) => <Tag key={i} color="orange">{r}</Tag>)}
             </div>
           )}
-          {!parsed.verdict && bullScore == null && bearScore == null && !summary && points.length === 0 && (
+          {miscFields.length > 0 && (
+            <ul className="text-xs list-disc pl-4 mb-1 mt-2" style={{ color: "var(--muted)" }}>
+              {miscFields.map((f, i) => (
+                <li key={i}>
+                  <span style={{ fontWeight: 600 }}>{f.k}</span> {f.v}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!parsed.verdict && bullScore == null && bearScore == null && !summary && points.length === 0
+            && miscFields.length === 0 && (
             <div className="text-xs" style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.analystReport.completedNoStructure")}
             </div>

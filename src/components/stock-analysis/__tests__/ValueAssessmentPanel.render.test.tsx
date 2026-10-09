@@ -1,6 +1,6 @@
 // 估值评估 tab「页面错误」复现 + 回归测试：
 // 用 DB 实际 value-investor 输出渲染 ValueAssessmentPanel，并锁定 ReportMarkdown 的 content 收敛契约
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import fs from "node:fs";
 import path from "node:path";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -378,5 +378,53 @@ describe("K3：三档增速全负时区间必须改口", () => {
     expect(
       screen.queryByText("stockAnalysis.valuationApplicability.growthBandAllNegative"),
     ).toBeNull();
+  });
+});
+
+// 四周期回归：value 链按档实例化（`value-investor--mid|long`），面板此前只读裸键
+// `valueAssessments["value-investor"]` ⇒ 带档产物取不到、「巴菲特估值」主卡恒不渲染
+// （DB 实证 a3eba895：该链只产 value.assessment--mid|long）。锁死归一收集行为。
+describe("ValueAssessmentPanel 逐档 value 槽位（四周期回归）", () => {
+  const TIERED = { "value-investor--mid": REPORT_600089, "value-investor--long": REPORT_300620 };
+
+  function seedTiered(report: Record<string, string>) {
+    useStockAnalysisStore.setState({
+      valueAssessments: report,
+      ruleCheckResults: {},
+      dataQualitySummary: "",
+      rawData: {},
+      stockCode: "600089",
+      valuationApplicability: null,
+    });
+    const settingsState = useSettingsStore.getState() as { settings?: { themeMode?: string } };
+    if (!settingsState.settings) {
+      (useSettingsStore.setState as (s: unknown) => void)({ settings: { themeMode: "dark" } });
+    }
+  }
+
+  it("只写带档键 ⇒ 主卡仍渲染（裸键回退不再必要）", () => {
+    seedTiered({ "value-investor--mid": REPORT_600089 });
+    render(<ValueAssessmentPanel />);
+    // 主卡标题（buffettLabel 与 title 两个 i18n 键都在）
+    expect(screen.getByText("stockAnalysis.valueAssessment.buffettLabel")).toBeTruthy();
+    expect(screen.getByText("stockAnalysis.valueAssessment.title")).toBeTruthy();
+  });
+
+  it("多档 ⇒ 出现档位切换条（中线 / 长线各一个）", () => {
+    seedTiered(TIERED);
+    render(<ValueAssessmentPanel />);
+    // 切换条内每档一个 chip；用 testid 限定作用域 —— 当前档的标签同时出现在卡片标题的 Tag 里，
+    // 全局 getByText 会命中两个（2026-10-09 首次实测即踩）
+    const bar = screen.getByTestId("value-tier-switch");
+    expect(within(bar).getByText("stockAnalysis.timeHorizonMid")).toBeTruthy();
+    expect(within(bar).getByText("stockAnalysis.timeHorizonLong")).toBeTruthy();
+    expect(within(bar).getAllByRole("button")).toHaveLength(2);
+  });
+
+  it("裸键形态（≤v132 历史快照）⇒ 单卡、无切换条", () => {
+    seedTiered({ "value-investor": REPORT_600089 });
+    render(<ValueAssessmentPanel />);
+    expect(screen.getByText("stockAnalysis.valueAssessment.buffettLabel")).toBeTruthy();
+    expect(screen.queryByText("stockAnalysis.timeHorizonMid")).toBeNull();
   });
 });

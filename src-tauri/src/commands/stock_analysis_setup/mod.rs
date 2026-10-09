@@ -3048,6 +3048,180 @@ mod version_gate_tests {
              （这些键在脚本全文零引用，属纯白注入）"
         );
     }
+
+    /// v143：**种子落库的主图必须零悬空边**（整图口径，不是逐条定点）。
+    ///
+    /// 现网实测先后撞到两条，症状都是用户点「开始分析」报
+    /// `创建工作流失败: Node 'X' depends on non-existent 'a-…'`（`dag_store` 建图校验整图拒绝）：
+    /// `data-quality ← a-market-analyst`（v142 只做了这一处的定点剔除）、
+    /// `t-dragon-tiger-data ← a-hot-money`（库里 v142 的 `edges` 至今仍在）。
+    /// 定点修法的失效面正是「下一处还按 base id 盲补边」，故这里按**每一条边**断言。
+    #[tokio::test]
+    async fn seeded_main_graph_has_no_dangling_edges() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功（兜底对非分析师类悬空边会拒绝播种）");
+
+        let node_ids: std::collections::HashSet<String> = nodes_of(db)
+            .await
+            .iter()
+            .filter_map(|n| n.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        assert!(!node_ids.is_empty(), "前置：nodes 应能解析出 id");
+
+        let mut dangling: Vec<String> = Vec::new();
+        for e in edges_of(db).await {
+            let id = e.get("id").and_then(|v| v.as_str()).unwrap_or("?");
+            let src = e.get("source").and_then(|v| v.as_str()).unwrap_or("");
+            let tgt = e.get("target").and_then(|v| v.as_str()).unwrap_or("");
+            if !node_ids.contains(src) || !node_ids.contains(tgt) {
+                dangling.push(format!("{id}（{src}→{tgt}）"));
+            }
+        }
+        assert!(dangling.is_empty(), "主图存在悬空边 ⇒ create_workflow 整图拒绝：{dangling:?}");
+
+        // 前提样本：库里的主图**确有**指向分析师的边被剔除过，否则本测试是在空集上恒真。
+        // 判据取现场读数：`a-hot-money` 既不在节点集、也不该以任何形态出现在边里。
+        assert!(
+            !node_ids.contains("a-hot-money"),
+            "前置：B-2b 后主图不应再有 `a-hot-money` 节点（本测试的剔除对象）"
+        );
+    }
+
+    /// v144：**种子落库的主图必须无环**（引擎 `create_workflow` 的第三条校验，前两条已各有一道门）。
+    ///
+    /// 为什么单独一条：`dag_store`/`WorkEngine::create_workflow_inner` 的校验顺序是
+    /// 重复 id → 悬空边 → **Kahn 环检测**，所以悬空边报错会**盖住**环 —— v143 修掉悬空边后，
+    /// 用户端立刻换成 `创建工作流失败: Cycle detected in workflow`（现网实测：库里那份 v143 有
+    /// 45 个节点成环，两条环都经过 `value-investor--档`）。同一条链上的三道校验必须三道门，
+    /// 少一道就是「修一条露一条」。
+    #[tokio::test]
+    async fn seeded_main_graph_is_acyclic() {
+        let handle = fresh_db().await;
+        let db = &handle.conn;
+        seed(db).await.expect("种子化应成功");
+
+        let node_ids: Vec<String> = nodes_of(db)
+            .await
+            .iter()
+            .filter_map(|n| n.get("id").and_then(|v| v.as_str()).map(str::to_string))
+            .collect();
+        let index: std::collections::HashMap<String, usize> =
+            node_ids.iter().enumerate().map(|(i, id)| (id.clone(), i)).collect();
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); node_ids.len()];
+        let mut indeg: Vec<usize> = vec![0; node_ids.len()];
+        for e in edges_of(db).await {
+            let (Some(s), Some(t)) = (
+                e.get("source").and_then(|v| v.as_str()),
+                e.get("target").and_then(|v| v.as_str()),
+            ) else {
+                continue;
+            };
+            // 悬空边由上一条门负责；这里跳过，免得两道门互相顶掉读数
+            let (Some(&si), Some(&ti)) = (index.get(s), index.get(t)) else { continue };
+            adj[si].push(ti);
+            indeg[ti] += 1;
+        }
+        // Kahn：出队数 == 节点数 ⇒ 无环
+        let mut queue: Vec<usize> = (0..node_ids.len()).filter(|i| indeg[*i] == 0).collect();
+        let mut popped = 0usize;
+        let mut head = 0;
+        while head < queue.len() {
+            let u = queue[head];
+            head += 1;
+            popped += 1;
+            for &v in &adj[u] {
+                indeg[v] -= 1;
+                if indeg[v] == 0 {
+                    queue.push(v);
+                }
+            }
+        }
+        assert_eq!(
+            popped,
+            node_ids.len(),
+            "主图存在环：{} 个节点未被 Kahn 消解（引擎会报 Cycle detected in workflow），\
+             残留集 = {:?}",
+            node_ids.len() - popped,
+            (0..node_ids.len())
+                .filter(|i| indeg[*i] > 0)
+                .map(|i| node_ids[i].as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// 兜底函数**两条分支**都要直接打得到，且带「看着像分析师但不该放行」的负控。
+    /// 拆成 `prune_dangling_analyst_edges` 就是为了这一条：`Err` 那一支若留在种子函数体内，
+    /// 要触发得构造一整张坏图，实际等于没有测试。
+    #[test]
+    fn dangling_edge_guard_prunes_analysts_and_rejects_others() {
+        use axagent_harness::workflow_types::EdgeType;
+
+        fn edge(id: &str, src: &str, tgt: &str) -> axagent_harness::workflow_types::WorkflowEdge {
+            axagent_harness::workflow_types::WorkflowEdge {
+                id: id.into(),
+                source: src.into(),
+                source_handle: None,
+                target: tgt.into(),
+                target_handle: None,
+                edge_type: EdgeType::Direct,
+                label: None,
+            }
+        }
+
+        let present: std::collections::HashSet<&str> =
+            ["trigger", "t-dragon-tiger-data", "data-quality"].into_iter().collect();
+        let migrated = ["a-hot-money", "a-market-analyst"];
+
+        // ① 正断言：端点是「迁进档子模板的分析师 base id」⇒ 剔除并回报清单，不报错
+        let mut edges = vec![
+            edge("e-ok", "trigger", "data-quality"),
+            edge("e-dt", "t-dragon-tiger-data", "a-hot-money"),
+            edge("e-dq", "data-quality", "a-market-analyst"),
+        ];
+        let pruned = super::seed_stock_analysis::prune_dangling_analyst_edges(
+            &present, &mut edges, &migrated,
+        )
+        .expect("分析师类悬空边应被剔除而不是报错");
+        assert_eq!(pruned.len(), 2, "两条分析师悬空边都应进剔除清单：{pruned:?}");
+        assert_eq!(edges.len(), 1, "只应留下两端齐备的那条边");
+        assert_eq!(edges[0].id, "e-ok");
+
+        // ② 负控 A：悬空的另一端**不在**分析师清单里 ⇒ 必须 Err（否则新写错的边被静默吃掉）
+        let mut edges2 = vec![edge("e-bad", "data-quality", "t-nonexistent")];
+        let err = super::seed_stock_analysis::prune_dangling_analyst_edges(
+            &present,
+            &mut edges2,
+            &migrated,
+        )
+        .expect_err("非分析师类悬空边必须拒绝播种");
+        assert!(err.contains("e-bad"), "报错应点名那条边：{err}");
+
+        // ③ 负控 B：形态像分析师（前缀 `a-`）但不在清单里 ⇒ 同样必须 Err。
+        //    这一条锁住「判据是白名单而不是前缀匹配」—— 用前缀判的话 v135 之后任何
+        //    `a-*` 拼错都会被兜底当成「迁走的分析师」静默吞掉。
+        let mut edges3 = vec![edge("e-lookalike", "t-dragon-tiger-data", "a-hot-mony")];
+        assert!(
+            super::seed_stock_analysis::prune_dangling_analyst_edges(
+                &present,
+                &mut edges3,
+                &migrated
+            )
+            .is_err(),
+            "`a-hot-mony` 只与分析师名一字之差，不在清单里就必须报错"
+        );
+
+        // ④ 悬空在 **source** 侧同样要判（`present.contains(source)` 那一半分支）
+        let mut edges4 = vec![edge("e-src", "a-hot-money", "data-quality")];
+        let pruned4 = super::seed_stock_analysis::prune_dangling_analyst_edges(
+            &present,
+            &mut edges4,
+            &migrated,
+        )
+        .expect("source 侧的分析师悬空边也应被剔除");
+        assert_eq!(pruned4.len(), 1, "{pruned4:?}");
+        assert!(edges4.is_empty());
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

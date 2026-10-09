@@ -21,6 +21,9 @@ import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import {
   alignReasoningDecisionLabel,
+  ANALYST_TIER_SEP,
+  analystBaseOf,
+  analystNodeId,
   computeStockConsensus,
   deriveActionFromLlmDecision,
   parseAction,
@@ -120,6 +123,28 @@ function isRetryableWorkflowError(
 const LLM_DEGRADED_CODES: ReadonlySet<string> = new Set<string>();
 
 /**
+ * 价值评估链的 store 槽位键：把该链上任意形态的名字归一成 Grid 用的键。
+ *
+ * v133 起 value-investor 与 value-verify 都**按档实例化**（`value-investor--mid|long`），
+ * 而三处写入点此前一律用**精确相等**判 `value-investor` / `value-verify` ⇒ 带档 id
+ * 双双落空、产物被**静默丢弃**（不报错），Grid 的价值评估卡恒落占位符（运行中「等待中」、
+ * 结束后「节点无数据」），而产物其实存在（PG `blackboard_snapshot` 已反证）。
+ *
+ * 入参可以是（都要认，否则各路径仍会漏）：
+ *   · 图节点 id：`value-investor--mid` / `value-verify--mid`（live 事件与 workflow.results 的键）
+ *   · 快照键：`value.assessment--mid`（`build_blackboard_snapshot` 的 `value.*` 前缀映射）
+ *   · 裸 base：`value-investor` / `value-verify`（≤v132 历史快照回放）
+ *
+ * 裸 base ⇒ 返回 `value-investor`（单槽，兼容 `ValueAssessmentPanel` 的既有读法）；
+ * 带档 ⇒ 返回 `analystNodeId("value-investor", tier)`（逐档键，供 Grid 逐档卡）。
+ * `value-verify` 的覆写目标 = **本档** value-investor 实例（`output_var` 同名，见种子注释）。
+ */
+function valueSlotKeyOf(name: string): string {
+  if (analystBaseOf(name) === null) { return "value-investor"; }
+  return analystNodeId("value-investor", name.slice(name.indexOf(ANALYST_TIER_SEP) + ANALYST_TIER_SEP.length));
+}
+
+/**
  * parseWorkflowResults 同款策略:从后端 blackboard snapshot 还原各分类字段。
  * snapshot 里 debate/risk/value 节点是 AgentResult 包装({content, model, role, ...}),
  * 真正的 LLM 输出在 content 字段。loadAnalysis 用 extractContent 解包,
@@ -216,7 +241,7 @@ function parseWorkflowResults(results: Record<string, unknown>) {
           decision = fallbackParsed;
         }
       }
-    } else if (stepId === "value-investor") {
+    } else if ((analystBaseOf(stepId) ?? stepId) === "value-investor") {
       // 巴菲特框架评估（与 risk-evaluator 并行，在辩论之后运行）
       //
       // v91 修复：value-investor 的产物会被下游 `value-verify`（CodeNode + Rhai）
@@ -228,6 +253,11 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       //   不拆包时 extractContent 会 JSON.stringify 整个包装 ⇒ ValueAssessmentPanel
       //   的 tryParseValueReport 找不到顶层 `report` / `verdict` ⇒ **面板空白**。
       //   `.result` 缺失（v91 之前的旧快照 / 校验节点未跑）时回落到原行为。
+      //
+      // v145 修复：判据由**精确相等**改为按 base 归一（`value-investor--mid|long`）——
+      //   带档 id 此前完全不匹配 ⇒ 内容落空、Grid 卡恒占位符。
+      //   归一后的键（逐档 `value-investor--<tier>`）**同时**落 `analystReports`
+      //   （Grid 的价值评估卡按 base 归一取键，见 AnalystReportGrid 的 keyNodeId 域）。
       let content = output;
       if (raw && typeof raw === "object") {
         const r = raw as Record<string, unknown>;
@@ -235,7 +265,9 @@ function parseWorkflowResults(results: Record<string, unknown>) {
           content = typeof r.result === "string" ? r.result : JSON.stringify(r.result);
         }
       }
-      valueAssessments[stepId] = content;
+      const viKey = valueSlotKeyOf(stepId);
+      valueAssessments[viKey] = content;
+      analystReports[viKey] = content;
     } else if (stepId === "rule-check") {
       ruleCheckResults[stepId] = output;
     } else if (stepId === "data-quality") {
@@ -1327,7 +1359,21 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       analysisId: record.id,
       stockCode: record.stockCode,
       stockName: resolvedName,
-      status: "completed",
+      // v145 修复：**不再无条件声明 `completed`**。
+      //
+      // `stock_analyses` 行在**运行期**就已存在（建行即 `status="running"` 且
+      // `decision_action = NULL`，见 core.rs 的建行分支）⇒ 重开一条**尚未定稿**的记录
+      // （仍在跑 / 中断 / 取消）时，此前一律走 completed 布局，于是同一屏出现两句自相矛盾的话：
+      //   · 分析师卡：`isRunning` 为假 ⇒ 每个 base 落「失败·节点无数据」；
+      //   · 决策区：`EvidenceCitationPanel` 照常挂载，后端 `extract_evidence_citations`
+      //     读到的还是建行时的 NULL ⇒ 兜底成 `ACTION_UNAVAILABLE` 哨兵
+      //     ⇒ 面板显示「证据引用审计不适用（本轮决策未产出）」。
+      // 换句话说，**把「没跑完」当成「已完成」**才是那组矛盾文案的来源，而非真实的缺失。
+      //
+      // 只有后端落定 `completed` 才按完成态渲染；其余一律按 running 呈现
+      // （显示进度条 + 停止按钮，卡片回「等待中」），让「未定稿」与「已定稿但无决策」
+      // 在 UI 上可区分。
+      status: record.status === "completed" ? "completed" : "running",
       // 仪表盘报告由后端加载历史时从 snapshot 重建（V60：修复重开历史仪表盘永远空态）
       dashboardReport: record.dashboardReport ?? null,
       dashboardMd: record.dashboardMd ?? null,
@@ -1508,12 +1554,19 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             // value.assessment 同理：AgentResult 包装,真正的价值评估 JSON 在 content 字段里。
             // extractContent 取 content 后,ValueAssessmentPanel.tryParseValueReport 才能正确解析。
             // key 去掉 "value." 前缀,直接作为 values 的键(测试期望 values["assessment"] 存在)。
-            // 同时存 "value-investor" 别名以兼容 live 模式 parseWorkflowResults 的 stepId 命名。
+            //
+            // v145：v133 起 `build_blackboard_snapshot` 按档产出 `value.assessment--<tier>`
+            //   （裸 `value.assessment` 只存在于 ≤v132 历史快照）⇒ 原先 `vk === "assessment"`
+            //   的精确相等判据带档时恒假、别名不写；且 value 链**从不**落 analystReports
+            //   ⇒ 回放 v133+ 记录时 Grid 的价值评估卡恒占位符。
+            //   归一后同时写：逐档/裸槽位（ValueAssessmentPanel）与 analystReports（Grid 卡）。
             const vk = key.slice(6);
             const valueContent = extractContent(value);
             values[vk] = valueContent;
-            if (vk === "assessment") {
-              values["value-investor"] = valueContent;
+            if (vk === "assessment" || vk.startsWith(`assessment${ANALYST_TIER_SEP}`)) {
+              const viKey = valueSlotKeyOf(vk);
+              values[viKey] = valueContent;
+              reports[viKey] = valueContent;
             }
           } else if (key.startsWith("rule_check.")) {
             ruleChecks[key.slice("rule_check.".length)] = String(value);
@@ -2266,21 +2319,37 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         //   与 decision 的差异：决策有 workflow-completed 的三层回退，
         //   而适用性只是个标注（无回退层）—— 能提就提，提不到置 null。
         set({ valuationApplicability: extractValuationApplicability(rawOutput ?? text) });
-      } else if (nodeId === "value-investor") {
-        set({ valueAssessments: { ...s.valueAssessments, [nodeId]: text } });
-      } else if (nodeId === "value-verify") {
+      } else if ((analystBaseOf(nodeId) ?? nodeId) === "value-investor") {
+        // v145 修复：判据由精确相等改为按 base 归一（`value-investor--mid|long`）。
+        //   带档 id 此前既不满足这里的相等、也不满足 `handleAnalystReport` 的 `a-` 前缀
+        //   ⇒ 产物被**静默丢弃**（不报错），Grid 的价值评估卡恒占位符。
+        //   逐档键同时落 analystReports（Grid 卡）与 valueAssessments（估值面板 tab）；
+        //   裸 base（历史回放）两者都落 `value-investor`，与原行为一致。
+        const viKey = valueSlotKeyOf(nodeId);
+        set({
+          analystReports: { ...s.analystReports, [viKey]: text },
+          valueAssessments: { ...s.valueAssessments, [viKey]: text },
+        });
+      } else if ((analystBaseOf(nodeId) ?? nodeId) === "value-verify") {
         // v91: 估值字段**校验/覆写**节点（CodeNode + Rhai）。真实 nodeId 是
         //   `value-verify`，但它的 `output_var` 与 value-investor **同名** ⇒
         //   结果必须写回同一槽位 —— 否则上方 `value-investor` 分支写入的 LLM
         //   原值会一直显示，覆写形同不存在（面板仍展示幻觉数字）。
         //   包装形态与 data-quality 同款，真正内容在 `.result`。
+        // v145：覆写目标按档归一（`value-verify--mid` ⇒ `value-investor--mid`），
+        //   否则带档实例的 LLM 原值不会被校验值覆盖（v91 的老问题按档复发）。
         let content = text;
         const raw = (rawOutput ?? null) as Record<string, unknown> | null;
         if (raw && typeof raw === "object" && raw.result != null) {
           const r = raw.result;
           content = typeof r === "string" ? r : JSON.stringify(r);
         }
-        set({ valueAssessments: { ...s.valueAssessments, "value-investor": content } });
+        const viKey = valueSlotKeyOf(nodeId);
+        set({
+          valueAssessments: { ...s.valueAssessments, [viKey]: content },
+          // Grid 卡读的是 analystReports ⇒ 校验后的值必须同步覆盖，否则卡上仍是 LLM 原值
+          analystReports: { ...s.analystReports, [viKey]: content },
+        });
       } else if (nodeId === "data-quality") {
         // V41 修复: data-quality 是 CodeNode + Rhai，原始 output 形如
         //   {status, language, result: {grade, score, diagnostics, ...}, input_params, node_id, params}

@@ -14819,6 +14819,13 @@
     "finalStrength": "最終強度",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "高速分析",
+    "templateVersion": {
+      "matched": "グラフバージョン：DB v{{db}} はコード v{{code}} と一致",
+      "behind": "グラフバージョン：DB v{{db}} はコード v{{code}} より {{gap}} 世代遅延（次回の実行時に自動で再シードされます）",
+      "ahead": "グラフバージョン：DB v{{db}} はコード v{{code}} より {{gap}} 世代先行——バージョンゲートが再シードをスキップし、コード側のグラフ変更は反映されません",
+      "notSeeded": "グラフバージョン：DB にこのグラフまだシードされていません（コードは v{{code}}）",
+      "unknown": "バージョン不明"
+    },
     "fastAnalysisHint": "Jev 判定の高速チェーン：叙述テキストを出力せず、構造化された判断結論のみ（保存時に高速チェーンとして表示され、完全分析の結論を置き換えない）",
     "reportLanguageHint": "レポート出力言語：中国語または英語",
     "startAnalysis": "Start Analysis",

@@ -1154,10 +1154,38 @@ type AlgoToolRow = (
 ///   不动图内容 ⇒ 不因它们升版；它们的三面默认值对账由定向门
 ///   `check-panel-var-landing.mjs` 钉住。脚本内容属于节点 `code` 字段 ⇒ 图内容变 ⇒ 换代 141。
 ///
+/// **v142 → v143（2026-10-09）**：主图**中央悬空边兜底**上线（`prune_dangling_analyst_edges`）。
+/// 现网实测库里 v142 的 `edges` 仍含 `e-t-dragon-tiger-data-hot-money`（端点 `a-hot-money` 在
+/// 主图 `nodes` 里零命中），而 `create_workflow` 的建图校验整图拒绝 ⇒ 用户点「开始分析」必失败。
+/// ⚠ **这一代的存在理由就是「不升版则修复不生效」**：v142 那次只改了代码，版本门
+/// `existing.version >= TEMPLATE_VERSION ⇒ return Ok(())`（本函数开头那个版本门分支，刻意不写行号）让存量库跳过
+/// 重建 ⇒ 兜底块一次都没跑，用户端症状一字未变。改图必须换代，本文件 :237 早已写明，
+/// 这一次是它自己的注释被违反了第二次。
+///
+/// **v143 → v144（2026-10-09）**：删掉两条**回边** —— `value-investor--<档> → debate-bull-bear`
+/// 与 `value-investor--<档> → analyst-brief`（两处 `tiered.iter()` 循环各加 `!= VALUE_INVESTOR_ID` 过滤）。
+/// 现网读数：v143 落库后用户再跑，悬空边报错消失，取而代之的是
+/// `创建工作流失败: Cycle detected in workflow`；按库里那份 v143 的 `edges` 跑 Kahn，
+/// **45 个节点**留在强连通分量里，实测两条环：
+/// `debate-bull-bear → bull-r1 → … → bear-r3 → debate-convergence → value-investor--mid → debate-bull-bear`、
+/// `analyst-brief → debate-bull-bear → … → debate-convergence → value-investor--mid → analyst-brief`。
+/// 根因不是 v143 引入的：`value-investor` 在权威档位子集里（中/长档 `valuationBand` 属主），
+/// v133 把「喂辩论/喂 brief」两个循环从 10 个 base id 换成 23 个带档实例时把它一起卷了进去，
+/// 而它在**本图**是辩论**下游**节点 —— 悬空边报错一直排在环检测前面，把它盖住了三天。
+///
+/// **v144 → v145（2026-10-09）**：清掉 `analyst-brief` 对 `value-investor` 的**死注入** ——
+/// ① `ab_input` 的键集加同一个 `!= VALUE_INVESTOR_ID` 排除（23 → 21 把键）；
+/// ② `analyst-brief.rhai` 删掉 `value_investor_raw__mid` / `__long` 两条 `present()` 读取。
+/// 存在理由：v144 只断了**边**，那两把**映射键**还留着 ⇒ brief 声明要读一个在图上永远
+/// 还没跑完的变量（`value-investor` 是辩论下游节点），Rhai 侧恒走 `present() == false` ⇒
+/// 「摘要里没有价值评估那一段」完全静默。脚本内容属于节点 `code` 字段 ⇒ 图内容变 ⇒ 换代；
+/// 两侧同集由 `analyst_brief_keys_match_tiered_instances` 重新钉住（期望值 21，
+/// 且排除走模块级 `VALUE_INVESTOR_ID` 这个同一权威，不允许测试里另抄字面量）。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 142;
+pub const TEMPLATE_VERSION: i32 = 145;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -1211,6 +1239,52 @@ const _: () = assert!(
 // 并进 `TEMPLATE_VERSION` 或 `DCF_MIGRATION_VERSION` 任一者的文档都是**语义错位**；
 // 而普通 `//` 注释不参与文档归属 ⇒ 不会触发 clippy `empty_line_after_doc_comments`
 // （`-D warnings` 下该 lint 直接让构建失败）。
+
+/// 剔除**缺的那一端确为「已迁出本图的分析师 base id」**的悬空依赖边；其余悬空边一律拒绝播种。
+///
+/// 存在理由（v143）：B-2b（v135）把逐档分析师分支搬进四张 `stock-horizon-<档>` 子模板后，主图
+/// `nodes` 里不再有 `a_*` 节点，而历史上按分析师 base id 盲补的边仍留在 `edges` 里。现网实测先后
+/// 撞到两条：`data-quality ← a-market-analyst`（v142 只做了定点剔除）、`t-dragon-tiger-data ←
+/// a-hot-money`（库里 v142 的 `edges` 至今仍在，位置 34608）。这类边的后果不是「那条依赖不生效」，
+/// 而是 `dag_store` 建图校验**整图拒绝** ⇒ 用户点「开始分析」直接报
+/// 「创建工作流失败: Node 'X' depends on non-existent 'a-…'」。
+///
+/// 为什么不是「所有悬空边都静默剔除」：那样将来任何一条写错的边都会被兜底吃掉，比现在更难查。
+/// 故只有分析师那一类放行剔除（并 `warn` 出清单），其余返回 `Err` 让播种显式失败。
+///
+/// 拆成独立函数（而不是留在种子函数体内联）只为一条：`Err` 那一支否则要构造一整张坏图才打得到。
+/// 两条分支由 `seed_consistency_tests::dangling_edge_guard_prunes_analysts_and_rejects_others` 锁，
+/// 整图层面的「零悬空边」由 `seeded_main_graph_has_no_dangling_edges` 锁。
+pub(crate) fn prune_dangling_analyst_edges(
+    present: &std::collections::HashSet<&str>,
+    edges: &mut Vec<axagent_harness::workflow_types::WorkflowEdge>,
+    migrated_analyst_ids: &[&str],
+) -> Result<Vec<String>, String> {
+    let mut pruned: Vec<String> = Vec::new();
+    let mut broken: Vec<String> = Vec::new();
+    edges.retain(|e| {
+        let source_present = present.contains(e.source.as_str());
+        let target_present = present.contains(e.target.as_str());
+        if source_present && target_present {
+            return true;
+        }
+        let missing = if source_present { &e.target } else { &e.source };
+        let note = format!("{}（{}→{}，缺 {}）", e.id, e.source, e.target, missing);
+        if migrated_analyst_ids.contains(&missing.as_str()) {
+            pruned.push(note);
+        } else {
+            broken.push(note);
+        }
+        false
+    });
+    if !broken.is_empty() {
+        return Err(format!(
+            "种子图存在非分析师类的悬空依赖边，拒绝播种（端点既不在节点集、也不是 B-2b 迁进档子模板的 \
+             分析师 base id ⇒ 这是新写错的边，不能被兜底吃掉）：{broken:?}"
+        ));
+    }
+    Ok(pruned)
+}
 
 pub(crate) async fn seed_stock_analysis_workflow_template(
     db: &sea_orm::DatabaseConnection,
@@ -2918,7 +2992,8 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     //
     // `value-investor` 特判：它不是 9 个 `a-*` 之一（独立的价值评估 agent），
     // 其「标题/专家」单列；中/长两档子集均含它（valuationBand 是必填因子）。
-    const VALUE_INVESTOR_ID: &str = "value-investor";
+    // id 常量已提到模块级 `VALUE_INVESTOR_ID`（v145：`seed_consistency_tests` 的 brief 键集锁
+    // 要用同一个权威做排除，不能再抄第二份字面量）。
     const VALUE_INVESTOR_TITLE: &str = "以巴菲特-芒格价值投资理念评估该标的，分析护城河、财务健康度、管理层、安全边际，输出结构化估值框架";
     let mut tiered: Vec<(&str, axagent_harness::holding_period::Period, &str, &str)> = Vec::new();
     for (id, title, expert) in analysts.iter() {
@@ -3354,7 +3429,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // 分析师节点 → debate-bull-bear 的出边（编辑器可视化 + 运行时依赖）。
     // v133（B2-2）：按逐档实例展开（23 条）；逐档辩论拆分为后续批次，
     //   本批保持「单辩论」结构（analyst-brief → 单个 debate-bull-bear）。
-    for (base, p, ..) in tiered.iter() {
+    // v144：**必须排除 `value-investor`** —— 它在权威档位子集里（中/长档的 `valuationBand`
+    //   属主），但它在**本图**是辩论**下游**节点（下方 `e-debate-{vi_id}` /
+    //   `e-convergence-{vi_id}` 入边）。留着这条出边即成环：
+    //   `debate-bull-bear → bull-r1 → … → bear-r3 → debate-convergence → value-investor--档
+    //    → debate-bull-bear`，引擎 `create_workflow` 的 Kahn 校验整图拒绝，
+    //   用户侧 = 「创建工作流失败: Cycle detected in workflow」（现网实测 v143 就是这个）。
+    for (base, p, ..) in tiered.iter().filter(|(b, ..)| *b != VALUE_INVESTOR_ID) {
         let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
         edges.push(edge(&format!("e-{tid}-debate"), tid.as_str(), "debate-bull-bear"));
     }
@@ -3432,11 +3513,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         let ab_code = include_str!("../analyst-brief.rhai").to_string();
         // v133：input_mapping 键 = `{短名}__{tier}`（Rhai 合法标识符；`--` 是 id 域的分隔符，
         //   不能出现在变量名里），值 = `{带档节点 id}.content.verdict`。全部由 `tiered` 生成；
-        //   脚本侧 `analyst-brief.rhai` 的 23 条显式读取与本表**同集**（由
+        //   脚本侧 `analyst-brief.rhai` 的 21 条显式读取与本表**同集**（由
         //   `seed_consistency_tests.rs::analyst_brief_keys_match_tiered_instances` 机械锁住）。
         // 短名（`a_market_raw` 这类**词根**）仍按 base 查表 —— 消费者侧键名域零变化（B2-1 设计）。
+        // v145：排除 `value-investor` —— 它在主图是辩论**下游**节点（`e-debate-{vi}` /
+        //   `e-convergence-{vi}` 入边），brief 执行时它**必然还没跑** ⇒ 这两把键是恒缺席的死注入
+        //   （Rhai 侧 `present()` 走假分支，摘要里永远没有「价值评估」那一段，而没人报错）。
+        //   与上方两处 `!= VALUE_INVESTOR_ID` 的边循环同一个判据、同一个常量。
         let ab_input: std::collections::HashMap<String, String> = tiered
             .iter()
+            .filter(|(b, ..)| *b != VALUE_INVESTOR_ID)
             .map(|(base, p, ..)| {
                 let short = analyst_short_key(base);
                 let key = format!("{short}__{}", p.as_str());
@@ -3474,9 +3560,12 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             },
         }));
     }
-    // V58 修复 + v133（B2-2）: 添加 23 条从逐档分析师实例直连 analyst-brief 的 edges，
+    // V58 修复 + v133（B2-2）: 添加 21 条从逐档分析师实例直连 analyst-brief 的 edges，
     // 确保 deps_results 包含所有实例输出，且等所有实例完成后才执行 analyst-brief。
-    for (base, p, ..) in tiered.iter() {
+    // v144：同样排除 `value-investor`（理由见上方 `e-{tid}-debate` 那段）—— 它在辩论**之后**才跑，
+    //   让它喂 brief 就是 `analyst-brief → debate → … → debate-convergence → value-investor--档
+    //   → analyst-brief` 的第二条环。
+    for (base, p, ..) in tiered.iter().filter(|(b, ..)| *b != VALUE_INVESTOR_ID) {
         let tid = axagent_harness::holding_period::analyst_node_id(base, p.as_str());
         edges.push(WorkflowEdge {
             id: format!("e-{tid}-brief"),
@@ -7158,6 +7247,21 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
         }
     }
     // 写入 DB
+    // ── v143：中央悬空边兜底（判据与两条分支见 `prune_dangling_analyst_edges`）──
+    let present: std::collections::HashSet<&str> = nodes.iter().map(|n| n.base_id()).collect();
+    let pruned_analyst_edges =
+        prune_dangling_analyst_edges(&present, &mut edges, &a_ids).map_err(|detail| {
+            ErrorResponse::new(stock_setup::INTERNAL).with_detail(detail).to_string()
+        })?;
+    if !pruned_analyst_edges.is_empty() {
+        tracing::warn!(
+            template_id = TEMPLATE_ID,
+            count = pruned_analyst_edges.len(),
+            "已剔除指向档子模板分析师节点的悬空依赖边: {:?}",
+            pruned_analyst_edges
+        );
+    }
+
     let nodes_json = serde_json::to_string(&nodes).map_err(|e| {
         ErrorResponse::new(stock_setup::INTERNAL).with_detail(format!("序列化节点失败: {e}"))
     })?;
@@ -7295,6 +7399,12 @@ let score = (tech * w_tech + fund * w_fund + sent * w_sent + flow * w_flow + pol
 /// 单一事实来源：`seed_stock_analysis_workflow_template` 内的 `TEMPLATE_ID` 也引用本常量
 /// （两处字面量「stock-analysis」曾各写一份，改一处忘一处会直接让派生读错源）。
 pub(crate) const SOURCE_TEMPLATE_ID: &str = "stock-analysis";
+
+/// 价值评估 agent 的 base id —— **模块级**（v145），因为两处以上要同一个权威：
+/// 主图里它有三处「不参与辩论上游接线」的排除（喂辩论边 / 喂 brief 边 / brief 的 input_mapping），
+/// 而 `seed_consistency_tests::analyst_brief_keys_match_tiered_instances` 重算期望键集时
+/// 必须用**同一个**判据 —— 抄第二份字面量就会在两处不同步时静默造出「恒缺席的死注入」。
+pub(crate) const VALUE_INVESTOR_ID: &str = "value-investor";
 
 /// 快速链模板 id（前端 `src/components/stock-analysis/StockSearchBar.tsx` 的
 /// `FAST_TEMPLATE_ID` 与此同值；两处都是模板的入口契约）。

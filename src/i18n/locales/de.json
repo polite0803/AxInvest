@@ -14819,6 +14819,13 @@
     "finalStrength": "Endgültige Stärke",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Schnellanalyse",
+    "templateVersion": {
+      "matched": "Graphversion: DB v{{db}} entspricht Code v{{code}}",
+      "behind": "Graphversion: DB v{{db}} ist {{gap}} Generation(en) hinter Code v{{code}} - beim nächsten Analyselauf wird automatisch neu geseedet",
+      "ahead": "Graphversion: DB v{{db}} ist {{gap}} Generation(en) vor Code v{{code}} - das Versionsgate überspringt das Neuseeden, Code-Änderungen am Graph greifen nicht",
+      "notSeeded": "Graphversion: dieser Graph ist in der DB noch nicht geseedet (Code ist v{{code}})",
+      "unknown": "Version unbekannt"
+    },
     "fastAnalysisHint": "Jev-Entscheidungs-Schnellkette: nur strukturiertes Urteil, kein Fließtext (wird als Schnellkette gespeichert und gekennzeichnet, ersetzt kein Vollanalyse-Urteil)",
     "reportLanguageHint": "Berichtssprache: Chinesisch oder Englisch",
     "startAnalysis": "Start Analysis",

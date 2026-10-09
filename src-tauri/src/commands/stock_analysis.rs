@@ -5,7 +5,11 @@
 use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
-use crate::commands::stock_analysis_setup::seed_stock_analysis::FAST_TEMPLATE_ID;
+// `SOURCE_TEMPLATE_ID` / `TEMPLATE_VERSION`：图版本代际对照命令取用（权威定义在种子文件，
+// 本处只引用，**绝不**复制第二份数字 —— 复制必然与 `axagent-batch-rerun` 读的口径分叉）。
+use crate::commands::stock_analysis_setup::seed_stock_analysis::{
+    FAST_TEMPLATE_ID, SOURCE_TEMPLATE_ID, TEMPLATE_VERSION,
+};
 use axagent_agent::self_improvement_executor::{SelfImprovementConfig, SelfImprovementExecutor};
 use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::backtest::{
@@ -1218,8 +1222,67 @@ pub struct StockAnalysisListItem {
     /// `"user"` = v1 的用户锁档（通路已撤除，无生产数据）。
     /// `None` = 本列引入前的记录。
     pub decision_horizon_source: Option<String>,
+    /// 生成该记录时**实际使用的工作流图代**（= 建点当时 `workflow_templates.version` 的快照）。
+    ///
+    /// 2026-10-09 新增：本仓 `TEMPLATE_VERSION` 近期从 129 一路推到 143，六代从未重播种的
+    /// 落差全靠人肉查库才发现。列表里没有这一列时，每条分析记录看不出它是**哪一代图**跑出来的，
+    /// 「这条结论是旧公式还是新公式给的」在界面上完全不可判。
+    ///
+    /// ⚠ 本列是**小整数**，加进 SELECT 不违反「排除 `blackboard_snapshot` 等大字段」的初衷。
+    ///
+    /// `None` = 该记录产生于本列引入前（或非模板产出）⇒ 采集时点没有这个信息，
+    /// 前端按「版本未知」显示，**不得**回退成 0 或当前代（单一写入口径见
+    /// `stock_workflow/core.rs` 的 `template_version: Set(Some(loaded.version))`，
+    /// 由 `tests/stock_workflow_write_side.rs` 锁住）。
+    pub template_version: Option<i32>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// `list_stock_analyses` 的查询实现（与命令体拆开，只为让**返回体形状**能被单测直接验）。
+///
+/// 命令需要 `State<'_, AppState>`，测试构造不出 `AppState`；把「查哪几列」这段收进本函数后，
+/// `tests` 只要一个 `&DatabaseConnection` 就能断言 `template_version` 真的进了 SELECT
+/// —— 否则这条列写了没人查，漂移成「界面上一直显示『版本未知』」也不报错（本仓 D 组教训）。
+pub(crate) async fn query_stock_analysis_items(
+    db: &axagent_harness::DatabaseConnection,
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<StockAnalysisListItem>, String> {
+    // 精简字段查询：仅 SELECT 列表渲染必要列，排除 blackboard_snapshot 等大字段
+    use sea_orm::QuerySelect;
+    let rows: Vec<StockAnalysisListItem> = stock_analyses::Entity::find()
+        .select_only()
+        .column(stock_analyses::Column::Id)
+        .column(stock_analyses::Column::StockCode)
+        .column(stock_analyses::Column::StockName)
+        .column(stock_analyses::Column::AnalysisDate)
+        .column(stock_analyses::Column::Status)
+        .column(stock_analyses::Column::DecisionAction)
+        .column(stock_analyses::Column::DecisionPositionState)
+        .column(stock_analyses::Column::DecisionPositionPct)
+        .column(stock_analyses::Column::DecisionJson)
+        .column(stock_analyses::Column::AnalysisKind)
+        .column(stock_analyses::Column::AsOfDate)
+        .column(stock_analyses::Column::ParentAnalysisId)
+        .column(stock_analyses::Column::TemplateId)
+        .column(stock_analyses::Column::TemplateVersion)
+        .column(stock_analyses::Column::DecisionTimeHorizon)
+        .column(stock_analyses::Column::DecisionHorizonSource)
+        .column(stock_analyses::Column::CreatedAt)
+        .column(stock_analyses::Column::UpdatedAt)
+        .order_by_desc(stock_analyses::Column::CreatedAt)
+        .limit(Some(limit as u64))
+        .offset(Some(offset as u64))
+        .into_model::<StockAnalysisListItem>()
+        .all(db)
+        .await
+        .map_err(|e| {
+            ErrorResponse::new(wf_err::INTERNAL)
+                .with_detail(format!("查询历史分析列表失败: {e}"))
+                .to_string()
+        })?;
+    Ok(rows)
 }
 
 /// 历史分析列表
@@ -1238,39 +1301,60 @@ pub async fn list_stock_analyses(
     } else {
         limit
     };
-    // 精简字段查询：仅 SELECT 列表渲染必要列，排除 blackboard_snapshot 等大字段
-    use sea_orm::QuerySelect;
-    let rows: Vec<StockAnalysisListItem> = stock_analyses::Entity::find()
-        .select_only()
-        .column(stock_analyses::Column::Id)
-        .column(stock_analyses::Column::StockCode)
-        .column(stock_analyses::Column::StockName)
-        .column(stock_analyses::Column::AnalysisDate)
-        .column(stock_analyses::Column::Status)
-        .column(stock_analyses::Column::DecisionAction)
-        .column(stock_analyses::Column::DecisionPositionState)
-        .column(stock_analyses::Column::DecisionPositionPct)
-        .column(stock_analyses::Column::DecisionJson)
-        .column(stock_analyses::Column::AnalysisKind)
-        .column(stock_analyses::Column::AsOfDate)
-        .column(stock_analyses::Column::ParentAnalysisId)
-        .column(stock_analyses::Column::TemplateId)
-        .column(stock_analyses::Column::DecisionTimeHorizon)
-        .column(stock_analyses::Column::DecisionHorizonSource)
-        .column(stock_analyses::Column::CreatedAt)
-        .column(stock_analyses::Column::UpdatedAt)
-        .order_by_desc(stock_analyses::Column::CreatedAt)
-        .limit(Some(limit as u64))
-        .offset(Some(offset as u64))
-        .into_model::<StockAnalysisListItem>()
-        .all(state.harness.db())
+    query_stock_analysis_items(state.harness.db(), limit, offset).await
+}
+
+/// 股票分析图的**代际对照**：代码里的权威版本 vs 库里已播种的版本。
+///
+/// 为什么需要它（2026-10-09，用户报「历史列表看不出分析记录是哪代图跑的」的另一半）：
+/// 版本门是 `existing.version >= TEMPLATE_VERSION ⇒ 跳过重播种`，于是代码升到 142 而库里
+/// 停在 129 时，**运行时完全静默** —— 现网实测这段落差持续了六代，只靠 `axagent-batch-rerun`
+/// 这个 bin 的 stdout 才看得见（而它只在批量重跑时打印，平时没人跑）。
+/// 界面上没有这一行时，「同一版本号却不同判据」一类假象无从排除。
+///
+/// 本命令只做**只读投影**，不写库、不触发重播种 —— 重播种仍只在应用启动的种子流程里发生。
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockTemplateVersionStatus {
+    /// 代码权威版本：下次播种会写入的代。取自 `seed_stock_analysis::TEMPLATE_VERSION`
+    /// （**唯一权威**，与 `axagent-batch-rerun` 读的是同一个数字，本处不得复制常量）。
+    pub code_version: i32,
+    /// 库里已播种到的代（`workflow_templates.version`，id = `"stock-analysis"`）。
+    ///
+    /// `None` = 库里**没有这一行**（尚未种子化）⇒ 无从比对，前端必须显式说「库里未播种」，
+    /// **不得**按 0 参与差值计算（那会把「没播种」渲染成「落后 N 代」这种假结论）。
+    pub db_version: Option<i32>,
+}
+
+/// 图版本代际对照
+#[agent_command(
+    domain = "finance",
+    safety = Safe,
+    call_mode = StateOnly,
+    description = "获取股票分析图的代码版本与库内已播种版本对照"
+)]
+#[tauri::command]
+pub async fn get_stock_template_version_status(
+    state: State<'_, AppState>,
+) -> Result<StockTemplateVersionStatus, String> {
+    let db_version = query_db_template_version(state.harness.db())
         .await
-        .map_err(|e| {
-            ErrorResponse::new(wf_err::INTERNAL)
-                .with_detail(format!("查询历史分析列表失败: {e}"))
-                .to_string()
-        })?;
-    Ok(rows)
+        .map_err(|e| ErrorResponse::new(wf_err::INTERNAL).with_detail(e).to_string())?;
+    Ok(StockTemplateVersionStatus { code_version: TEMPLATE_VERSION, db_version })
+}
+
+/// `get_stock_template_version_status` 的库里那一半（与命令体拆开同样是为了可单测：
+/// 「无该行 ⇒ `None`」这条分支只有直接查库才能验，藏在 `State` 后面就没人验过）。
+pub(crate) async fn query_db_template_version(
+    db: &axagent_harness::DatabaseConnection,
+) -> Result<Option<i32>, String> {
+    use axagent_entities::workflow_template;
+    use sea_orm::EntityTrait;
+    workflow_template::Entity::find_by_id(SOURCE_TEMPLATE_ID)
+        .one(db)
+        .await
+        .map(|row| row.map(|t| t.version))
+        .map_err(|e| format!("查询 workflow_templates 失败: {e}"))
 }
 
 /// 获取单个分析详情

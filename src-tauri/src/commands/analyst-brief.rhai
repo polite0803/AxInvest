@@ -9,7 +9,7 @@
 // 不再需要在 Rhai 中做字符串解析。
 //
 // ⚠ v133（B2-2）：Rhai **不能枚举 scope 变量**（脚本内无法遍历「注入了哪些变量」），
-//   所以下面 23 条读取**必须显式列出**；变量名集合与 Rust 侧 `tiered` 生成的
+//   所以下面 21 条读取**必须显式列出**；变量名集合与 Rust 侧 `tiered` 生成的
 //   `analyst-brief` input_mapping 键集**同集**，由
 //   `seed_consistency_tests.rs::analyst_brief_keys_match_tiered_instances` 机械锁住
 //   （任一侧增删实例而另一侧没跟 ⇒ 该测试红，不会静默少一段摘要）。
@@ -83,22 +83,24 @@ if present(a_hot_money_raw__short) { brief += format_analyst("游资动向（短
 if present(a_lockup_raw__short) { brief += format_analyst("解禁减持（短线）", a_lockup_raw__short); }
 if present(a_catalyst_raw__short) { brief += format_analyst("催化剂与叙事（短线）", a_catalyst_raw__short); }
 
-// ══ 中线（3-8 周）：景气/估值/预期 + 趋势 + 价值 ══
+// ══ 中线（3-8 周）：景气/估值/预期 + 趋势 ══
+// v145：本段不再有「价值评估（中线）」——`value-investor--mid` 在图上是**辩论之后**的节点
+// （入边 `e-debate-value-investor--mid` / `e-convergence-value-investor--mid`），
+// brief 执行时它必然还没跑 ⇒ 原来那行 `present()` 恒假，是一段没人报错的死读取。
 if present(a_market_raw__mid) { brief += format_analyst("行情技术面（中线）", a_market_raw__mid); }
 if present(a_hot_money_raw__mid) { brief += format_analyst("游资动向（中线）", a_hot_money_raw__mid); }
 if present(a_lockup_raw__mid) { brief += format_analyst("解禁减持（中线）", a_lockup_raw__mid); }
 if present(a_fundamentals_raw__mid) { brief += format_analyst("基本面估值（中线）", a_fundamentals_raw__mid); }
 if present(a_research_raw__mid) { brief += format_analyst("券商研报（中线）", a_research_raw__mid); }
-if present(value_investor_raw__mid) { brief += format_analyst("价值评估（中线）", value_investor_raw__mid); }
 if present(a_catalyst_raw__mid) { brief += format_analyst("催化剂与叙事（中线）", a_catalyst_raw__mid); }
 
-// ══ 长线（3 个月+）：基本面/政策/行业 + 价值 + 趋势 ══
+// ══ 长线（3 个月+）：基本面/政策/行业 + 趋势 ══
+// v145：同上，「价值评估（长线）」那行一并删除（理由见中线段注释）。
 if present(a_market_raw__long) { brief += format_analyst("行情技术面（长线）", a_market_raw__long); }
 if present(a_fundamentals_raw__long) { brief += format_analyst("基本面估值（长线）", a_fundamentals_raw__long); }
 if present(a_research_raw__long) { brief += format_analyst("券商研报（长线）", a_research_raw__long); }
 if present(a_policy_raw__long) { brief += format_analyst("宏观政策（长线）", a_policy_raw__long); }
 if present(a_sector_raw__long) { brief += format_analyst("行业景气度（长线）", a_sector_raw__long); }
-if present(value_investor_raw__long) { brief += format_analyst("价值评估（长线）", value_investor_raw__long); }
 if present(a_catalyst_raw__long) { brief += format_analyst("催化剂与叙事（长线）", a_catalyst_raw__long); }
 
 brief

@@ -15040,6 +15040,13 @@
     "searchPlaceholder": "输入股票代码或名称",
     "parsedAs": "识别为",
     "fastAnalysis": "快速分析",
+    "templateVersion": {
+      "matched": "图版本：库内 v{{db}} 与代码 v{{code}} 一致",
+      "behind": "图版本：库内 v{{db}} 落后代码 v{{code}}（差 {{gap}} 代，下一次分析运行时会自动重播种）",
+      "ahead": "图版本：库内 v{{db}} 高于代码 v{{code}}（差 {{gap}} 代）——版本门会跳过重播种，代码里的图改动不生效",
+      "notSeeded": "图版本：库里尚未播种这张图（代码为 v{{code}}）",
+      "unknown": "版本未知"
+    },
     "fastAnalysisHint": "Jev 判定快速链：不产出叙述文本，只给结构化决策结论（落库后标注为快速链，不顶替完整分析的结论）",
     "reportLanguageHint": "报告输出语言：中文或英文",
     "startAnalysis": "开始分析",

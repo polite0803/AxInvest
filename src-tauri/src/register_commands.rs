@@ -1249,6 +1249,7 @@ macro_rules! register_all_commands {
             commands::stock_analysis::get_stock_peers,
             commands::stock_analysis::get_stock_quote,
             commands::stock_analysis::get_stock_research_reports,
+            commands::stock_analysis::get_stock_template_version_status,
             commands::stock_analysis::get_t0_config,
             commands::stock_analysis::get_trade_positions,
             commands::stock_analysis::get_valuation_params,

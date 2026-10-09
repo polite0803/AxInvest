@@ -31,8 +31,31 @@ const ANALYST_BASE_IDS = [
   "value-investor",
 ] as const;
 
-/** base → 其节点 id（`a-` 前缀还原；value-investor 无前缀）。 */
+/**
+ * i18n 专家 id → 图节点 base 的显式映射。
+ *
+ * 这三家的「展示名键」与「图节点 id」**不同形**：i18n 用 `*-analyst`（`sentiment-analyst`），
+ * 而图节点是 `a-sentiment`。若直接按 i18n 键拼 `a-${base}`，会得到 `a-sentiment-analyst`，
+ * 与 store 键域（`a-sentiment--<tier>` 去前缀后为 `sentiment--<tier>`）**恒失配**
+ * ⇒ 这三张卡永远落占位符（运行中「等待中」、结束后「节点无数据」），产物其实存在
+ * （PG `blackboard_snapshot` 已反证）。
+ *
+ * `ANALYST_BASE_IDS` 保留 `-analyst` 形态是**有意的**：它同时是 i18n 查询键
+ * （`stockAnalysis.workflow.analyst.*`，11 种语言均有该变体），故只在此处补节点 id 映射，
+ * 不改键本身。value-investor 无 `a-` 前缀，不在此表。
+ */
+const BASE_NODE_ID_OVERRIDE: Record<string, string> = {
+  "sentiment-analyst": "a-sentiment",
+  "fundamentals-analyst": "a-fundamentals",
+  "policy-analyst": "a-policy",
+};
+
+/** base → 其节点 id（`a-` 前缀还原；value-investor 无前缀；同形差异见 `BASE_NODE_ID_OVERRIDE`）。 */
 function baseNodeId(base: string): string {
+  const override = BASE_NODE_ID_OVERRIDE[base];
+  if (override) {
+    return override;
+  }
   return base === "value-investor" ? base : `a-${base}`;
 }
 

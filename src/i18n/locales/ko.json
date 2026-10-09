@@ -14819,6 +14819,13 @@
     "finalStrength": "최종 강도",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "빠른 분석",
+    "templateVersion": {
+      "matched": "그래프 버전: DB v{{db}} = 코드 v{{code}}",
+      "behind": "그래프 버전: DB v{{db}}가 코드 v{{code}}보다 {{gap}} 세대 뒤침 - 다음 분석 실행 시 자동으로 다시 시드됩니다",
+      "ahead": "그래프 버전: DB v{{db}}가 코드 v{{code}}보다 {{gap}} 세대 앞침 - 버전 게이트가 다시 시드를 건너뛰어 코드의 그래프 변경이 반영되지 않습니다",
+      "notSeeded": "그래프 버전: DB에 이 그래프가 아직 시드되지 않음 (코드는 v{{code}})",
+      "unknown": "버전 미상"
+    },
     "fastAnalysisHint": "Jev 판정 고속 체인: 서술 텍스트 없이 구조화된 판단 결론만 제공 (저장 시 고속 체인으로 표시되며 전체 분석 결론을 대체하지 않음)",
     "reportLanguageHint": "보고서 출력 언어: 중국어 또는 영어",
     "startAnalysis": "Start Analysis",

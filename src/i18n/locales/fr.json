@@ -14819,6 +14819,13 @@
     "finalStrength": "Force finale",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Analyse rapide",
+    "templateVersion": {
+      "matched": "Version du graphe : DB v{{db}} identique au code v{{code}}",
+      "behind": "Version du graphe : DB v{{db}} en retard de {{gap}} génération(s) sur le code v{{code}} - re-seeding automatique au prochain lancement d'analyse",
+      "ahead": "Version du graphe : DB v{{db}} en avance de {{gap}} génération(s) sur le code v{{code}} - la porte de version saute le re-seeding, les modifications du code ne s'appliquent pas",
+      "notSeeded": "Version du graphe : ce graphe n'est pas encore seedé en base (code = v{{code}})",
+      "unknown": "Version inconnue"
+    },
     "fastAnalysisHint": "Chaîne rapide de décision Jev : verdict structuré uniquement, sans texte narratif (enregistrée et étiquetée comme chaîne rapide, sans remplacer le verdict d'une analyse complète)",
     "reportLanguageHint": "Langue de sortie du rapport : chinois ou anglais",
     "startAnalysis": "Start Analysis",

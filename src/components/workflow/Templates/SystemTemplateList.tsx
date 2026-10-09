@@ -130,6 +130,8 @@ export const SystemTemplateList: React.FC<SystemTemplateListProps> = ({
                   >
                     {template.name}
                   </span>
+                  {/* 与业务模板页同形：列表里必须看得见库里已播种到的代 */}
+                  <Tag style={{ margin: 0, fontSize: 12 }}>{`v${template.version}`}</Tag>
                   <Tag color="purple" style={{ marginLeft: 4, fontSize: 12 }}>
                     {t("workflow.systemTemplateList.systemTag")}
                   </Tag>

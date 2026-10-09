@@ -969,7 +969,7 @@ pub async fn validate_workflow_template(
     // ── C1（2026-09-14）：端口公理 —— `source_handle` ↔ 分支的对齐 ──
     //
     // 现状：`source_handle` 是自由字符串，它与 `Switch` 的 case label / `Condition` 的
-    // true|false 分支的对应关系**只写在注释里**（例：src/commands/stock_analysis_setup/seed_stock_analysis.rs:3655），
+    // true|false 分支的对应关系**只写在注释里**（例：src/commands/stock_analysis_setup/seed_stock_analysis.rs:6389），
     // 而引擎按「有 handle 用它、没 handle 用 edge_type 兜底」两套规则解析
     // （dag_store.rs:100-121 与另外四处）。二者不一致 ⇒ 同一条边在不同调度路径下两个答案；
     // handle 打错 ⇒ 该边永不激活（死边）。

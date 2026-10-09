@@ -15043,6 +15043,13 @@
     "finalStrength": "最終強度",
     "searchPlaceholder": "输入股票代碼或名稱",
     "fastAnalysis": "快速分析",
+    "templateVersion": {
+      "matched": "圖版本：庫內 v{{db}} 與程式碼 v{{code}} 一致",
+      "behind": "圖版本：庫內 v{{db}} 落後程式碼 v{{code}}（差 {{gap}} 代，下一次分析執行時會自動重播種）",
+      "ahead": "圖版本：庫內 v{{db}} 高於程式碼 v{{code}}（差 {{gap}} 代）——版本門會跳過重播種，程式碼裡的圖改動不生效",
+      "notSeeded": "圖版本：庫裡尚未播種這張圖（程式碼為 v{{code}}）",
+      "unknown": "版本未知"
+    },
     "fastAnalysisHint": "Jev 判定快速鏈：不產出敘述文本，只給結構化決策結論（落庫後標註為快速鏈，不頂替完整分析的結論）",
     "reportLanguageHint": "報告輸出語言：中文或英文",
     "startAnalysis": "開始分析",

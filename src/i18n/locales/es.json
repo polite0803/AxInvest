@@ -14819,6 +14819,13 @@
     "finalStrength": "Fuerza final",
     "searchPlaceholder": "Enter stock code or name",
     "fastAnalysis": "Análisis rápido",
+    "templateVersion": {
+      "matched": "Versión del grafo: BD v{{db}} igual al código v{{code}}",
+      "behind": "Versión del grafo: BD v{{db}} va {{gap}} generación(es) por detrás del código v{{code}} - se volverá a sembrar automáticamente en el próximo análisis",
+      "ahead": "Versión del grafo: BD v{{db}} va {{gap}} generación(es) por delante del código v{{code}} - la puerta de versión omite la resiembra, los cambios del código no se aplican",
+      "notSeeded": "Versión del grafo: este grafo aún no está sembrado en la BD (código = v{{code}})",
+      "unknown": "Versión desconocida"
+    },
     "fastAnalysisHint": "Cadena rápida de decisión Jev: solo veredicto estructurado, sin texto narrativo (se guarda y etiqueta como cadena rápida, sin sustituir el veredicto de un análisis completo)",
     "reportLanguageHint": "Idioma de salida del informe: chino o inglés",
     "startAnalysis": "Start Analysis",

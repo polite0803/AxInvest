@@ -49,7 +49,43 @@ interface AnalysisRecord {
   decisionTimeHorizon?: string | null;
   /** 档位来源：`formula` = 本地公式定档；`model` = 采信模型自报；null = 未知。 */
   decisionHorizonSource?: string | null;
+  /**
+   * 该记录由**哪一代工作流图**跑出来的快照（写侧在建点当时取 `workflow_templates.version`）。
+   * `null` / `undefined` = 本列引入前的记录或非模板产出 ⇒ 显示「版本未知」，
+   * **不得**回退成 0 或当代（那会把「不知道」伪装成「就是最新判据」）。
+   */
+  templateVersion?: number | null;
 }
+
+/** `get_stock_template_version_status` 的返回形状（后端 `StockTemplateVersionStatus`，camelCase）。 */
+interface TemplateVersionStatus {
+  /** 代码里的权威代（下次播种会写入的值）。 */
+  codeVersion: number;
+  /** 库里已播种到的代；`null` = 库里没有这张图的行（尚未播种）。 */
+  dbVersion: number | null;
+}
+
+// 代际对照的四种状态各占一个文案键 —— 刻意不合并成「一致 / 不一致」两态：
+// 「库里高于代码」正是本仓真实事故（版本门 `existing >= TEMPLATE_VERSION ⇒ 跳过`，
+// 三批改动一字不落库），把它和「落后」并成一句就看不出方向了。
+export function versionStatusKey(v: TemplateVersionStatus): string {
+  if (v.dbVersion === null) { return "stockAnalysis.templateVersion.notSeeded"; }
+  if (v.dbVersion === v.codeVersion) { return "stockAnalysis.templateVersion.matched"; }
+  return v.dbVersion < v.codeVersion
+    ? "stockAnalysis.templateVersion.behind"
+    : "stockAnalysis.templateVersion.ahead";
+}
+
+// 与「快速链」「档位」两枚标签同尺寸的紧凑形态（新标签复用，不再抄第四份内联样式）。
+const COMPACT_TAG_STYLE = {
+  margin: 0,
+  fontSize: 10,
+  lineHeight: "16px",
+  padding: "0 4px",
+  border: "1px solid var(--muted, #888)",
+  color: "var(--muted, #888)",
+  background: "transparent",
+} as const;
 
 /** 个股分析页搜索框下方的历史分析快捷按钮 */
 export function AnalysisHistoryButton() {
@@ -58,6 +94,9 @@ export function AnalysisHistoryButton() {
   const navigate = useNavigate();
   const [records, setRecords] = useState<AnalysisRecord[]>([]);
   const [open, setOpen] = useState(false);
+  // 代码版本 vs 库里已播种版本的对照（弹窗顶部一行）。`null` = 还没取到 / 取失败 ⇒ 不显示该行，
+  // 但**不得**显示「一致」—— 没取到就是没取到（结构性缺口不得在 UI 造成歧义）。
+  const [versionStatus, setVersionStatus] = useState<TemplateVersionStatus | null>(null);
   // editingId !== null 表示正在重命名该记录
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -70,6 +109,13 @@ export function AnalysisHistoryButton() {
       if (cancelled || !Array.isArray(list)) { return; }
       setRecords(list);
     }).catch(() => {});
+    invoke<TemplateVersionStatus>("get_stock_template_version_status")
+      .then((v) => {
+        if (!cancelled) { setVersionStatus(v); }
+      })
+      .catch(() => {
+        if (!cancelled) { setVersionStatus(null); }
+      });
     return () => {
       cancelled = true;
     };
@@ -213,6 +259,24 @@ export function AnalysisHistoryButton() {
             padding: 4,
           }}
         >
+          {versionStatus && (
+            <div
+              style={{
+                padding: "4px 10px",
+                fontSize: 10,
+                color: "var(--muted, #888)",
+                borderBottom: "1px solid var(--color-border, #333)",
+              }}
+            >
+              {t(versionStatusKey(versionStatus), {
+                code: versionStatus.codeVersion,
+                db: versionStatus.dbVersion ?? "-",
+                gap: versionStatus.dbVersion === null
+                  ? 0
+                  : Math.abs(versionStatus.codeVersion - versionStatus.dbVersion),
+              })}
+            </div>
+          )}
           {records.length === 0
             ? (
               <div style={{ padding: "12px 8px", color: "var(--muted, #888)", textAlign: "center", fontSize: 12 }}>
@@ -334,6 +398,20 @@ export function AnalysisHistoryButton() {
                                 }}
                               >
                                 {t("stockAnalysis.fastAnalysis")}
+                              </Tag>
+                            )}
+                            {
+                              /* 图代标识：这条结论由哪一代工作流图跑出（本仓版本门频繁换代，
+                              同一判据的两代可能给出不同结论；无该列的记录显式标「版本未知」。
+                              ⚠ 快速链**不打**这一枚：它的 `template_version` 是另一套计数
+                              （`FAST_TEMPLATE_VERSION` 恒 1 = 「派生资产第 1 版」，不是图代），
+                              与主图的 v143 并排显示会伪造可比性；是哪条链由上面「快速分析」标签说。 */
+                            }
+                            {r.templateId !== FAST_TEMPLATE_ID && (
+                              <Tag style={COMPACT_TAG_STYLE}>
+                                {r.templateVersion == null
+                                  ? t("stockAnalysis.templateVersion.unknown")
+                                  : `v${r.templateVersion}`}
                               </Tag>
                             )}
                             {/* 决策结论 Tag */}

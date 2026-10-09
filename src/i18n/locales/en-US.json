@@ -15221,6 +15221,13 @@
     "sentimentNeutral": "Neutral",
     "sharesUnit": "shares",
     "fastAnalysis": "Fast Analysis",
+    "templateVersion": {
+      "matched": "Graph version: DB v{{db}} matches code v{{code}}",
+      "behind": "Graph version: DB v{{db}} is {{gap}} generation(s) behind code v{{code}} - it is reseeded automatically when the next analysis run starts",
+      "ahead": "Graph version: DB v{{db}} is {{gap}} generation(s) ahead of code v{{code}} - the version gate skips reseeding, so graph changes in code will not take effect",
+      "notSeeded": "Graph version: this graph is not seeded in the DB (code is v{{code}})",
+      "unknown": "Version unknown"
+    },
     "fastAnalysisHint": "Jev decision fast chain: structured verdict only, no narrative text (saved and labeled as a fast chain, never substituting for a full analysis verdict)",
     "reportLanguageHint": "Report output language: Chinese or English",
     "startAnalysis": "Start Analysis",

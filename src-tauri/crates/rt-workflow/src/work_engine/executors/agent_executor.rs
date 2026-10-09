@@ -2509,6 +2509,17 @@ impl NodeExecutorTrait for AgentExecutor {
                          ⇒ 落降级 JSON（report 保留半截正文 + 中性 verdict + __untrusted）"
                     );
                     final_content = build_truncation_degraded_output(&trimmed);
+                } else if let Some(repaired) = repair_malformed_json_output(&trimmed) {
+                    // ── 分支 A3（2026-10-09）：形似 JSON 但语法非法 → 就地修复 ──
+                    // 典型是长文本字段（report）含未转义的 ASCII 引号。修复后整份
+                    // 结构化数据重新可达，下游 `content.<field>` 下钻恢复正常
+                    // （否则表现为 `present(x)` 恒 false，例如「辩论共识分数」缺口）。
+                    tracing::warn!(
+                        node_id = %node.base_id(),
+                        content_len = trimmed.len(),
+                        "通用后处理: LLM 输出形似 JSON 但语法非法（如字段内含未转义引号），已就地修复为合法 JSON"
+                    );
+                    final_content = repaired;
                 } else {
                     tracing::warn!(
                         node_id = %node.base_id(),
@@ -3929,6 +3940,41 @@ fn repair_json(s: &str) -> String {
     result = repair_unescaped_quotes(&result);
     // 字符串值缺开引号: `"key"(` 或 `"key" "text` 但缺冒号的情况已由 insert_missing_colon 处理
     result
+}
+
+/// 抢救「形似 JSON 但语法非法」的 LLM 输出（**不依赖 strict_mode**）。
+///
+/// 背景（2026-10-09 实证）：`OutputMode::Json` 节点在 strict_mode 关闭时，LLM
+/// 输出的非法 JSON 会被**原样**存进 `content`。典型故障是长文本字段（`report`
+/// 等）含未转义的 ASCII 引号 —— 模型把中文引号写成 `"`，使
+/// `serde_json::from_str` 整体失败。受害者不是那一处文本，而是**整份结构化数据
+/// 不可达**：下游 `resolve_var_path`（`executors/mod.rs`）穿透 `content` 字符串时
+/// `from_str` 报错即终止导航。实测：`debate-convergence` 输出里明明有
+/// `consensus_score: 35`，却因同层的 `report` 引号未转义而被判「辩论共识分数」
+/// 缺失，portfolio-mgr 的 f2 因子归零并推入 `data_gaps`，前端渲染成
+/// 「决策可信度受限 · 数据缺口」横幅。
+///
+/// 仅当文本**形似 JSON**（以 `{`/`[` 开头）才尝试修复，且修复结果必须同时满足：
+/// ① 能重新解析为合法 JSON；② 对象里至少有一个 ≥50 字符的字符串字段（正文未丢
+/// 的完整性证据）。判据与 strict_mode 分支（见上方 `OutputMode::Json` 过滤）
+/// 一致，避免把「半截修复」当成成功、让前端只剩分数标签而无正文。
+fn repair_malformed_json_output(s: &str) -> Option<String> {
+    let trimmed = s.trim();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return None;
+    }
+    let repaired = repair_json(trimmed);
+    if repaired == trimmed {
+        return None;
+    }
+    let parsed = serde_json::from_str::<serde_json::Value>(&repaired).ok()?;
+    let has_long_text = parsed
+        .as_object()
+        .is_some_and(|o| o.values().any(|v| v.as_str().is_some_and(|t| t.chars().count() >= 50)));
+    if !has_long_text {
+        return None;
+    }
+    Some(repaired)
 }
 
 /// 修复 JSON 字符串值中未转义的引号。
@@ -5516,5 +5562,45 @@ mod verdict_spec_note_tests {
             verdict_spec_note(Some(axagent_harness::Period::UltraShort)),
             verdict_spec_note(Some(axagent_harness::Period::Long)),
         );
+    }
+}
+
+#[cfg(test)]
+mod repair_malformed_json_output_tests {
+    use super::*;
+
+    /// 实证形态：`report` 值里有未转义的 ASCII 引号（模型把中文引号写成 `"`）。
+    /// 修复后必须能解析，且 `consensus_score` 保持可下钻 —— 这正是
+    /// `debate-convergence.content.consensus_score` 取不到、导致决策层误判
+    /// 「辩论共识分数」缺失的那个坑。
+    #[test]
+    fn repairs_unescaped_quotes_inside_text_field() {
+        let raw = r#"{
+  "report": "许继电气多空辩论呈现"政策长线"与"基本面短线"的结构性对冲。空方优势显著：盈利质量恶化（净利-34.4%、现金流转负）与机构信心断裂是实证利空。",
+  "consensus_score": 35,
+  "aggregate_prediction": { "direction": "bearish", "confidence": 55 }
+}"#;
+        assert!(
+            serde_json::from_str::<serde_json::Value>(raw).is_err(),
+            "样本本身必须是非法 JSON，否则测不到修复分支"
+        );
+        let fixed = repair_malformed_json_output(raw).expect("形似 JSON 的非法输出应当被修复");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&fixed).expect("修复结果必须是合法 JSON");
+        assert_eq!(parsed["consensus_score"], serde_json::json!(35));
+    }
+
+    /// 纯文本（不形似 JSON）必须原样放过，避免把 prose 误当 JSON 处理。
+    #[test]
+    fn leaves_plain_text_alone() {
+        assert!(repair_malformed_json_output("这是一段普通分析文本，没有 JSON 结构。").is_none());
+    }
+
+    /// 修复后若没有任何 ≥50 字符的长文本字段（正文已丢），必须拒绝 ——
+    /// 与 strict_mode 分支同判据，避免「只剩分数标签」的半截输出被当成功。
+    #[test]
+    fn rejects_repair_without_long_text() {
+        let raw = r#"{ "a": 1, }"#;
+        assert!(repair_malformed_json_output(raw).is_none());
     }
 }

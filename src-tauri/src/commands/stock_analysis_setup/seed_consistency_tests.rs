@@ -3633,13 +3633,14 @@ fn branch_node_scope_is_exactly_the_seed_mapping() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// v133（B2-2）：analyst-brief 的键集锁 —— 脚本 23 条显式读取 == seed 生成的映射键集。
+// v133（B2-2）：analyst-brief 的键集锁 —— 脚本 21 条显式读取 == seed 生成的映射键集。
+// v145：21 = 23 − 2（`value-investor--mid` / `--long` 不参与，理由见下方 want 的 filter）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// `analyst-brief.rhai` 的 23 条 `present(<var>)` 读取（变量名 = input_mapping 的键）
+/// `analyst-brief.rhai` 的 21 条 `present(<var>)` 读取（变量名 = input_mapping 的键）
 /// 必须与 seed 侧 `ab_input` 生成的键集**同集**。
 ///
-/// 为什么需要这条锁：Rhai 不能枚举 scope 变量 ⇒ 脚本侧「显式列 23 条」与 Rust 侧
+/// 为什么需要这条锁：Rhai 不能枚举 scope 变量 ⇒ 脚本侧「显式列 21 条」与 Rust 侧
 /// 「由 `tiered` 生成」是**两份**必须同步的清单；任一侧增删实例而另一侧没跟，
 /// 后果是静默少一段摘要（脚本读注入不存在的变量走 present=false 跳过；Rust 多生成的键
 /// 则白注入）——正是本仓「清单比表少一行」的老形态。该锁让不同步当场红。
@@ -3667,12 +3668,18 @@ fn analyst_brief_keys_match_tiered_instances() {
         rest = &after[j..];
     }
     // 正控：抽取面必须看见足量变量（避免解析失效后与空集比绿）。
-    assert!(script_vars.len() >= 23, "脚本 present() 抽取面失效: {script_vars:?}");
+    assert!(script_vars.len() >= 21, "脚本 present() 抽取面失效: {script_vars:?}");
 
-    // ② Rust 侧：重算期望键集（与 seed 的 ab_input 同一公式：子集 × analyst_short_key）。
+    // ② Rust 侧：重算期望键集（与 seed 的 ab_input **同一公式、同一排除**：
+    //    子集 × analyst_short_key，再剔掉辩论下游的 `value-investor`）。
+    //    排除必须走 `VALUE_INVESTOR_ID` 这个模块级权威 —— 在本测试里另抄一遍
+    //    "value-investor" 字面量，就等于允许「seed 改了、锁没改」继续绿。
     let mut want: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     for p in Period::ALL {
         for base in p.analyst_subset() {
+            if base == super::seed_stock_analysis::VALUE_INVESTOR_ID {
+                continue;
+            }
             want.insert(format!(
                 "{}__{}",
                 super::seed_stock_analysis::analyst_short_key(base),
@@ -3680,7 +3687,7 @@ fn analyst_brief_keys_match_tiered_instances() {
             ));
         }
     }
-    assert_eq!(want.len(), 23, "期望键集应为 23（四档全跑裁定）: {want:?}");
+    assert_eq!(want.len(), 21, "期望键集应为 21（四档全跑 23 减 value-investor 两档）: {want:?}");
 
     assert_eq!(
         script_vars, want,

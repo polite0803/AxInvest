@@ -367,6 +367,12 @@ export const TemplateList: React.FC<TemplateListProps> = ({
                   return presetI18n ? t(presetI18n.name) : template.name;
                 })()}
               </span>
+              {
+                /* 模板代（库里已播种/保存到的 `workflow_templates.version`）。
+                本仓种子模板按代频繁更新（实测一路 129 → 143，六代未重播种全靠人肉查库），
+                列表里不显示时，同一张图的两代在界面上完全不可分。 */
+              }
+              <Tag style={{ fontSize: 12, margin: 0 }}>{`v${template.version}`}</Tag>
               {template.isPreset && (
                 <Tag color="gold" style={{ marginLeft: 4, fontSize: 12 }}>
                   {t("workflow.templateList.preset")}

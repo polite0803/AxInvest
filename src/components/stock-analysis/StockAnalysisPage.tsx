@@ -65,6 +65,8 @@ function DecisionComparisonTabContent() {
       ?? null,
     decisionAgreementScore: store.decisionAgreementScore,
     agreementBreakdown: store.decision?.agreementBreakdown ?? null,
+    // 阶段2：四周期独立决策 —— 决策 Tab 按档并列展示（`DecisionComparisonPanel` 渲染）
+    decisionsByHorizon: store.decision?.decisionsByHorizon ?? null,
   };
   return <DualViewRenderer id="decision-comparison" data={dualViewData} defaultMode="panel" />;
 }

@@ -5,6 +5,7 @@ import { Button, Card, Modal, Spin, Tag } from "antd";
 import * as echarts from "echarts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HorizonDecisionStrip } from "./HorizonDecisionStrip";
 import { HorizonScopeNotice } from "./HorizonScopeNotice";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { extractReadableFromRiskReport, parseVerdictField } from "./utils";
@@ -191,6 +192,9 @@ export function RiskMatrix() {
   const workflowStatus = useStockAnalysisStore((s) => s.status);
   const stockCode = useStockAnalysisStore((s) => s.stockCode);
   const stockName = useStockAnalysisStore((s) => s.stockName);
+  // v140 起「按档风险档」随逐档决策行带回（`decisionsByHorizon[].riskCategory`）
+  // ⇒ 风险卡片要显示四周期，读的是决策对象，不是 riskAssessments（后者只有全局三视角）。
+  const decision = useStockAnalysisStore((s) => s.decision);
   const [chartReady] = useState(false);
   const chartRef = useRef<HTMLDivElement>(null);
   const instanceRef = useRef<echarts.ECharts | null>(null);
@@ -377,45 +381,65 @@ export function RiskMatrix() {
     );
   }, [streamingPreviews, riskAssessments, isWorkflowRunning]);
 
+  // 四周期条及其「哪根轴按档」声明**与风险评估数据无关**（strip 数据源 = 各档决策行带回的
+  // `decisionsByHorizon[].riskCategory`，不是 riskAssessments）。⇒ 必须在
+  // `riskAssessments` 为空的早退分支里一并渲染，否则风险输出缺失时会把四周期信息整体吞掉
+  // （此时四档数据其实已在 store）。无数据时 `HorizonDecisionStrip` 依缺席规矩自渲染 null。
+  const horizonHeader = (
+    <>
+      <HorizonScopeNotice scope="risk" />
+      <HorizonDecisionStrip
+        decisions={decision?.decisionsByHorizon}
+        mode="risk"
+        testId="risk-horizon-strip"
+      />
+    </>
+  );
+
   if (Object.keys(riskAssessments).length === 0) {
     if (isWorkflowRunning) {
       return (
-        <Card
-          size="small"
-          title={t("stockAnalysis.riskAssessment")}
-          styles={{ body: { padding: 24 } }}
-        >
-          <div className="flex flex-col items-center justify-center gap-3 py-8">
-            <Spin size="large" />
-            <div className="text-sm" style={{ color: "var(--muted)" }}>
-              {t("stockAnalysis.riskMatrix.loading")}
-            </div>
-            {/* 流式实时预览：显示正在生成的风险评估师输出的最新片段 */}
-            {runningRiskPreviews.map(([nodeId, text]) => {
-              const color = RISK_COLORS[nodeId] ?? "oklch(55% 0.16 250)";
-              const label = RISK_LABEL_KEYS[nodeId] ? t(RISK_LABEL_KEYS[nodeId]) : nodeId;
-              return (
-                <div key={`streaming-${nodeId}`} className="w-full px-2">
-                  <div className="flex items-center gap-1">
-                    <Tag color={color}>{label}</Tag>
-                    <Tag color="processing" style={{ fontSize: 10 }}>
-                      {t("stockAnalysis.workflow.running")}
-                    </Tag>
-                  </div>
-                  <pre
-                    className="text-xs leading-relaxed whitespace-pre-wrap mt-1 px-2 py-1 rounded"
-                    style={{ maxHeight: 160, overflow: "auto", color: "var(--muted)", margin: 0 }}
-                  >
+        <>
+          {horizonHeader}
+          <Card
+            size="small"
+            title={t("stockAnalysis.riskAssessment")}
+            styles={{ body: { padding: 24 } }}
+          >
+            <div className="flex flex-col items-center justify-center gap-3 py-8">
+              <Spin size="large" />
+              <div className="text-sm" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.riskMatrix.loading")}
+              </div>
+              {/* 流式实时预览：显示正在生成的风险评估师输出的最新片段 */}
+              {runningRiskPreviews.map(([nodeId, text]) => {
+                const color = RISK_COLORS[nodeId] ?? "oklch(55% 0.16 250)";
+                const label = RISK_LABEL_KEYS[nodeId] ? t(RISK_LABEL_KEYS[nodeId]) : nodeId;
+                return (
+                  <div key={`streaming-${nodeId}`} className="w-full px-2">
+                    <div className="flex items-center gap-1">
+                      <Tag color={color}>{label}</Tag>
+                      <Tag color="processing" style={{ fontSize: 10 }}>
+                        {t("stockAnalysis.workflow.running")}
+                      </Tag>
+                    </div>
+                    <pre
+                      className="text-xs leading-relaxed whitespace-pre-wrap mt-1 px-2 py-1 rounded"
+                      style={{ maxHeight: 160, overflow: "auto", color: "var(--muted)", margin: 0 }}
+                    >
                     {text.length > 600 ? text.slice(-600) : text}
-                  </pre>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
+                    </pre>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        </>
       );
     }
-    return null;
+    // 非运行态且无风险数据：四周期条仍应显示（它是「按档风险档」，非 riskAssessments 产物），
+    // 仅在确有 `decisionsByHorizon` 时带出；否则维持原「本卡片不渲染」。
+    return decision?.decisionsByHorizon ? horizonHeader : null;
   }
 
   const entries = Object.entries(riskAssessments)
@@ -432,7 +456,8 @@ export function RiskMatrix() {
           `HorizonScopeNotice.test.tsx` 的三条负控锁（含「声明落后数据层一版」那一类）。
           见 PLAN §五十四 B1 执行记录与 §五十九 后一条。 */
       }
-      <HorizonScopeNotice scope="risk" />
+      {/* 「哪根轴按档」声明 + 四周期逐档风险档（`riskCategory`）—— 声明说方向，这条摆实际取值 */}
+      {horizonHeader}
       <Card
         size="small"
         title={t("stockAnalysis.riskAssessment")}

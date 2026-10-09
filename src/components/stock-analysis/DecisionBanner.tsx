@@ -2637,84 +2637,110 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                           </tr>
                         </thead>
                         <tbody>
-                          {Object.entries(dataQualityReport.diagnostics).map(([key, diag]) => {
-                            // 2026-09-12: "untrusted"（strict_mode 降级）此前落入 else 分支，
-                            // 被渲染成「✅ 正常」——与后端语义相反。i18n key dqStatusUntrusted
-                            // 早已存在于全部 11 种语言，但从未被消费。
-                            const statusColor = diag.status === "missing"
-                              ? "#ef4444"
-                              : diag.status === "low" || diag.status === "untrusted"
-                              ? "#f59e0b"
-                              : "#10b981";
-                            const statusLabel = diag.status === "missing"
-                              ? t("stockAnalysis.dqStatusMissing")
-                              : diag.status === "low"
-                              ? t("stockAnalysis.dqStatusLowConfidence")
-                              : diag.status === "untrusted"
-                              ? t("stockAnalysis.dqStatusUntrusted")
-                              : t("stockAnalysis.dqStatusNormal");
-                            const confText = diag.confidence < 0
-                              ? "—"
-                              : `${diag.confidence.toFixed(0)}`;
-                            // 2026-09-12: 报告文本失败标记数（客观证据，独立于自评 confidence）
-                            const phHits = diag.placeholder_hits ?? 0;
-                            // 2026-09-21: 本节点**自己的**报告质量分（0-100）。
-                            //   与 `AnalystDataQualityModal` 的「本节点报告质量」同源同口径
-                            //   （`data-quality.rhai::diag_for` 的 `report_quality`）；本表每节点一行
-                            //   ⇒ 各行值互不相同，正好与顶部那个**全局聚合**值区分开。
-                            //   undefined = 旧版快照缺该字段 ⇒ 显示 "—" 并给 tooltip，**不能当 0**
-                            //   （0 是合法取值：该节点未注入报告）。
-                            //   档位来自 `reportQualitySeverity` 单一来源，勿在此重写阈值。
-                            const rq = diag.report_quality;
-                            const rqSeverity = reportQualitySeverity(rq);
-                            const rqColor = rqSeverity === null
-                              ? "var(--muted)"
-                              : rqSeverity === "good"
-                              ? "#10b981"
-                              : rqSeverity === "warning"
-                              ? "#f59e0b"
-                              : "#ef4444";
-                            return (
-                              <tr
-                                key={key}
-                                style={{ borderBottom: "1px solid var(--border)" }}
-                              >
-                                <td className="py-1.5 px-2 font-medium">{diag.name}</td>
-                                <td className="py-1.5 px-2" style={{ color: "var(--color-text-secondary)" }}>
-                                  {diag.expected_data}
-                                </td>
-                                <td
-                                  className="py-1.5 px-2 text-right font-mono"
-                                  style={{ color: diag.confidence < 0 ? "var(--muted)" : statusColor }}
+                          {Object.entries(dataQualityReport.diagnostics).flatMap(([key, diag]) => {
+                            // v148（2026-10-09）：逐档摊行。
+                            //   后端 `diagnostics_by_tier[abbr]` 给出该分析师的**各档**诊断
+                            //   （键为 snake 档名，值同 `diagnostics` 单行结构 + `tier`）。有它 ⇒
+                            //   每档一行、分析师列并显档位标签；否则回落单行旧视图（旧快照/快速链
+                            //   无逐档键时该 abbr 整体缺席）。
+                            //   ⚠ 档位顺序与显示名都走 `HORIZON_T_SUFFIX`（全仓唯一一套档位标签），
+                            //     不在此处另抄档名/i18n 键。
+                            const tierMap = dataQualityReport.diagnostics_by_tier?.[key];
+                            const tierKeys = tierMap
+                              ? Object.keys(HORIZON_T_SUFFIX).filter((tk) => Boolean(tierMap[tk]))
+                              : [];
+                            const rows = tierMap && tierKeys.length > 0
+                              ? tierKeys.map((tk) => ({ tier: tk, item: tierMap[tk] }))
+                              : [{ tier: "", item: diag }];
+                            return rows.map(({ tier, item: d }) => {
+                              // 2026-09-12: "untrusted"（strict_mode 降级）此前落入 else 分支，
+                              // 被渲染成「✅ 正常」——与后端语义相反。i18n key dqStatusUntrusted
+                              // 早已存在于全部 11 种语言，但从未被消费。
+                              const statusColor = d.status === "missing"
+                                ? "#ef4444"
+                                : d.status === "low" || d.status === "untrusted"
+                                ? "#f59e0b"
+                                : "#10b981";
+                              const statusLabel = d.status === "missing"
+                                ? t("stockAnalysis.dqStatusMissing")
+                                : d.status === "low"
+                                ? t("stockAnalysis.dqStatusLowConfidence")
+                                : d.status === "untrusted"
+                                ? t("stockAnalysis.dqStatusUntrusted")
+                                : t("stockAnalysis.dqStatusNormal");
+                              const confText = d.confidence < 0
+                                ? "—"
+                                : `${d.confidence.toFixed(0)}`;
+                              // 2026-09-12: 报告文本失败标记数（客观证据，独立于自评 confidence）
+                              const phHits = d.placeholder_hits ?? 0;
+                              // 2026-09-21: 本节点**自己的**报告质量分（0-100）。
+                              //   与 `AnalystDataQualityModal` 的「本节点报告质量」同源同口径
+                              //   （`data-quality.rhai::diag_for` 的 `report_quality`）；本表每节点一行
+                              //   ⇒ 各行值互不相同，正好与顶部那个**全局聚合**值区分开。
+                              //   undefined = 旧版快照缺该字段 ⇒ 显示 "—" 并给 tooltip，**不能当 0**
+                              //   （0 是合法取值：该节点未注入报告）。
+                              //   档位来自 `reportQualitySeverity` 单一来源，勿在此重写阈值。
+                              const rq = d.report_quality;
+                              const rqSeverity = reportQualitySeverity(rq);
+                              const rqColor = rqSeverity === null
+                                ? "var(--muted)"
+                                : rqSeverity === "good"
+                                ? "#10b981"
+                                : rqSeverity === "warning"
+                                ? "#f59e0b"
+                                : "#ef4444";
+                              return (
+                                <tr
+                                  key={tier ? `${key}-${tier}` : key}
+                                  style={{ borderBottom: "1px solid var(--border)" }}
                                 >
-                                  {confText}
-                                </td>
-                                <td
-                                  className="py-1.5 px-2 text-right font-mono"
-                                  style={{ color: phHits > 0 ? "#f59e0b" : "var(--muted)" }}
-                                  title={phHits > 0
-                                    ? t("stockAnalysis.dqPlaceholderTooltip", { count: phHits })
-                                    : undefined}
-                                >
-                                  {phHits > 0 ? `${phHits}` : "—"}
-                                </td>
-                                <td
-                                  className="py-1.5 px-2 text-right font-mono"
-                                  style={{ color: rqColor }}
-                                  title={rq === undefined
-                                    ? t("stockAnalysis.analystReport.dqNodeReportQualityUnavailable")
-                                    : undefined}
-                                >
-                                  {rq === undefined ? "—" : rq.toFixed(0)}
-                                </td>
-                                <td className="py-1.5 px-2" style={{ color: statusColor }}>
-                                  {statusLabel}
-                                </td>
-                                <td className="py-1.5 px-2" style={{ color: "var(--color-text-secondary)" }}>
-                                  {diag.gap_reason || "—"}
-                                </td>
-                              </tr>
-                            );
+                                  <td className="py-1.5 px-2 font-medium">
+                                    {d.name}
+                                    {tier && (
+                                      <span
+                                        className="ml-1 px-1 py-px rounded text-xs"
+                                        style={{ background: "var(--surface)", color: "var(--muted)" }}
+                                      >
+                                        {t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[tier]}`)}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 px-2" style={{ color: "var(--color-text-secondary)" }}>
+                                    {d.expected_data}
+                                  </td>
+                                  <td
+                                    className="py-1.5 px-2 text-right font-mono"
+                                    style={{ color: d.confidence < 0 ? "var(--muted)" : statusColor }}
+                                  >
+                                    {confText}
+                                  </td>
+                                  <td
+                                    className="py-1.5 px-2 text-right font-mono"
+                                    style={{ color: phHits > 0 ? "#f59e0b" : "var(--muted)" }}
+                                    title={phHits > 0
+                                      ? t("stockAnalysis.dqPlaceholderTooltip", { count: phHits })
+                                      : undefined}
+                                  >
+                                    {phHits > 0 ? `${phHits}` : "—"}
+                                  </td>
+                                  <td
+                                    className="py-1.5 px-2 text-right font-mono"
+                                    style={{ color: rqColor }}
+                                    title={rq === undefined
+                                      ? t("stockAnalysis.analystReport.dqNodeReportQualityUnavailable")
+                                      : undefined}
+                                  >
+                                    {rq === undefined ? "—" : rq.toFixed(0)}
+                                  </td>
+                                  <td className="py-1.5 px-2" style={{ color: statusColor }}>
+                                    {statusLabel}
+                                  </td>
+                                  <td className="py-1.5 px-2" style={{ color: "var(--color-text-secondary)" }}>
+                                    {d.gap_reason || "—"}
+                                  </td>
+                                </tr>
+                              );
+                            });
                           })}
                         </tbody>
                       </table>

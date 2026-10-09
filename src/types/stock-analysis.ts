@@ -823,6 +823,16 @@ export interface DataQualityReport {
   total_analysts: number;
   /** 各分析师详细诊断，键为缩写（mk/sent/news/...） */
   diagnostics: Record<string, DataQualityDiagItem>;
+  /**
+   * 2026-10-09（v148）新增：**逐档**诊断，面板「分析师数据缺口详情」据此把每个分析师摊成四行。
+   *
+   * 形态：`{ abbr: { 档名(snake): DataQualityDiagItem & { tier } } }`。
+   *   · 与 `diagnostics` 的关系：`diagnostics` 仍是**代表实例**（各 base 的 mid 优先那一档，
+   *     10 维），是 grade/score/quality-gate 的**唯一**依据；本字段只喂面板、不进任何评分。
+   *   · 某分析师的逐档键**全部未注入**时该 abbr **整体缺席** ⇒ 前端回落 `diagnostics` 单行旧视图。
+   *   · 旧快照无此字段 ⇒ 可选；面板须能降级展示（不显示逐档行）。
+   */
+  diagnostics_by_tier?: Record<string, Record<string, DataQualityDiagItem & { tier?: string }>>;
   /** 缺失分析师中文名列表 */
   missing_analysts: string[];
   /** 低置信度分析师中文名列表 */

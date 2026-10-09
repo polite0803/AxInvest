@@ -19,8 +19,10 @@ import {
   parseAction,
   resolveDisplayAction,
 } from "@/lib/stock-analysis-utils";
+import type { DecisionsByHorizon } from "@/types";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { HorizonDecisionStrip } from "../HorizonDecisionStrip";
 
 /** 与 AnalysisSummary / LatestAnalysisSummary 的 LLM 字段子集对齐 */
 export interface CompactDecisionShape {
@@ -69,6 +71,11 @@ export interface CompactDecisionShape {
     evidenceCount?: number;
     conflictType: string;
   } | null;
+  /**
+   * 阶段2：四周期独立决策（真实数据，不伪造）。决策 Tab 与 chat 气泡都按档并列展示；
+   * 缺席（本字段引入前的记录）时为 null/undefined ⇒ `HorizonDecisionStrip` 整条不渲染。
+   */
+  decisionsByHorizon?: DecisionsByHorizon | null;
 }
 
 interface CompactDecisionComparisonProps {
@@ -206,6 +213,12 @@ export function CompactDecisionComparison({ data }: CompactDecisionComparisonPro
             <span className="text-sm">{t("dualView.decision.llmUnavailable")}</span>
           </div>
         )}
+      {/* 阶段2：四周期逐档决策（有数据才渲染，缺席不补格） */}
+      <HorizonDecisionStrip
+        decisions={view.decisionsByHorizon}
+        mode="decision"
+        testId="compact-decision-horizon-strip"
+      />
       {/* V50: 分歧诊断摘要（仅低一致时显示） */}
       {agreement !== null && agreement < 60 && view.agreementBreakdown && (
         <div className="text-sm" style={{ color: "#ef4444", opacity: 0.85 }}>

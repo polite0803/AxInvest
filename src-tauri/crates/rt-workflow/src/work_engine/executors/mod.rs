@@ -59,6 +59,7 @@ pub use code_executor::CodeExecutor;
 //   * 句柄让测试/诊断能断言「宿主函数真的进了 Engine」
 //     （只做 compile 的门禁看不见「函数未注册」这一类缺陷）。
 // 逐条 pub use（不写 `{A, B}` 形式），避免与 build.rs 的 re-export 解析规则混淆。
+pub use code_executor::RHAI_MAX_OPERATIONS;
 pub use code_executor::RegisterInitializerError;
 pub use code_executor::register_shared_engine_initializer;
 pub use code_executor::shared_rhai_engine;

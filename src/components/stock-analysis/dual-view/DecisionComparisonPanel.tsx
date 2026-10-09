@@ -18,6 +18,7 @@ import {
 import { Empty, Tag, Tooltip } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HorizonDecisionStrip } from "../HorizonDecisionStrip";
 import type { CompactDecisionShape } from "./CompactDecisionComparison";
 
 interface DecisionComparisonPanelProps {
@@ -137,6 +138,12 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
             <NumValue value={view.confidence} />
           </span>
         </div>
+        {/* 阶段2：四周期逐档决策（有数据才渲染，缺席不补格） */}
+        <HorizonDecisionStrip
+          decisions={view.decisionsByHorizon}
+          mode="decision"
+          testId="decision-horizon-strip"
+        />
       </div>
     );
   }
@@ -332,6 +339,13 @@ export function DecisionComparisonPanel({ data }: DecisionComparisonPanelProps) 
           )}
         </div>
       </div>
+
+      {/* 阶段2：四周期逐档决策 —— 双视角上方是「主档怎么定」，此条补「各档各自怎么定」 */}
+      <HorizonDecisionStrip
+        decisions={view.decisionsByHorizon}
+        mode="decision"
+        testId="decision-horizon-strip"
+      />
 
       {/* LLM 缺失提示 */}
       {!hasLlm && agreement !== null && (

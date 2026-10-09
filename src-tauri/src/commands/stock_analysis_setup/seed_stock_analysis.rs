@@ -1182,10 +1182,48 @@ type AlgoToolRow = (
 /// 两侧同集由 `analyst_brief_keys_match_tiered_instances` 重新钉住（期望值 21，
 /// 且排除走模块级 `VALUE_INVESTOR_ID` 这个同一权威，不允许测试里另抄字面量）。
 ///
+/// **v145 → v146（2026-10-09）**：补 `value-verify--<代表档> → data-quality` **显式边**，
+///   修复数据质量面板「价值评估官」行**恒报**「节点未输出 VERDICT / confidence 字段缺失」。
+///   根因：`data-quality` 的 `val` 槽 source 是 `value-investor--<代表档>.result.verdict`
+///   （`.result` 是 value-verify **原地覆写**后的 CodeNode 形态），但此前**没有任何边**保证
+///   data-quality 等到 value-verify 写完 —— 二者同为 `debate-convergence` 的直接下游
+///   （`e-debate-convergence-data-quality` / `e-convergence-{vi_id}`）⇒ 同时解锁；
+///   data-quality 是 Rhai（毫秒级）、value-investor 是 LLM（分钟级）、value-verify 更在其后
+///   ⇒ data-quality **恒定**先跑完，`.result` 尚不存在 ⇒ `extract_conf` 得 `-1.0`
+///   ⇒ `status="missing"`。v144/v145 断掉 value-investor → debate 的环后，它明确落在辩论
+///   **下游**，这条竞态才稳定可见（其余 9 个分析师都在 debate 上游，由 `e-debate-convergence-*`
+///   兜住等待，故只有本行缺席）。环安全：value-verify 的后代只有 `research-mgr → trader →
+///   portfolio-mgr`，不在 data-quality 的祖先集；`edges` 属播种进 DB 的图内容 ⇒ **必须升版**
+///   （否则存量库被版本门 `existing.version >= TEMPLATE_VERSION ⇒ skip` 挡住，修复不生效）。
+///
+/// **v146 → v147（2026-10-09）**：`data-quality.rhai` 的 `diag_for` **去掉措辞性缺席的重复文案**。
+///   该支（`else if word_ex`）此前自己写了一遍缺席说明，而 `attr_note` 里**也**含
+///   `wording_absence_note(...)`（10 个调用点的 `merge_two_notes(attribution_note(..), {abbr}_word_note)`
+///   第 2 参，谓词与 `word_ex` **同一判据**）⇒ `reason_final` 拼成 `{本支} ｜ {word_note}`，
+///   面板「缺口原因」格出现**两段结论相同**的「措辞性缺席：…不计数据缺口」
+///   （实证：催化剂 55 / 政策面 62 两行，各出现两遍）。现该支只终止 else-if 链
+///   （守住「不许落到『非数据缺口：报告无失败标记』这句假话」），文案统一由 `attr_note` 承载。
+///   ⚠ **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段（同 v73/v82 判据），
+///   只改脚本不升版 ⇒ 存量库被版本门挡住，面板文案一字不变。
+///
+/// **v147 → v148（2026-10-09）**：data-quality 面板「分析师数据缺口详情」**逐档摊成四行**。
+///   此前 10 行取自各 base 的**代表实例**（seed 的 `input_mapping` 里 mid 优先），四周期下
+///   只能看到 mid 那一档 ⇒ 其余三档的缺口不可见。现 seed 对每个 base 的**每个档位实例**
+///   并列绑定 `{abbr}_{kind}__{tier}`（verdict/report/untrusted/tool_calls，共 +160 键），
+///   `data-quality.rhai` 据此产出 `diagnostics_by_tier` 供面板摊行。
+///   口径：`diagnostics`（10 维代表实例）仍是 grade/score/quality-gate 的**唯一**依据，
+///   逐档块只喂面板、不进任何计数/均值/阈值（`n_int`/`good_count` 的分母按 10 维校准）。
+///   ⚠ **操作预算**：逐档摊行使单次执行的报告数 10 → 33（10 代表 + 23 逐档，见
+///   `Period::analyst_subset()` 4+5+7+7），生产 CodeNode 引擎的操作数上限随之由 200k
+///   上调至 **1M**（`code_executor.rs` 的 `RHAI_MAX_OPERATIONS`；实测成本曲线即定量依据，
+///   见 `d2_four_tier_fanout_fits_production_max_operations`）。
+///   ⚠ **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入 `code`（同 v73/v82 判据），
+///   且 `input_mapping` 的 160 个逐档键属图内容 ⇒ 不升版存量库被版本门挡住，摊行不生效。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 145;
+pub const TEMPLATE_VERSION: i32 = 148;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -4930,6 +4968,47 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
                                 format!("{abbr}_tool_calls"),
                                 format!("{node_id}.tool_calls_made"),
                             ));
+                            // ── v148（2026-10-09）：**逐档**实例并列绑定 ──
+                            // 需求：面板「分析师数据缺口详情」此前每分析师只有**一行**，且取自
+                            //   上面的代表实例（mid 优先）⇒ 四周期下看不出各档各自的缺口。
+                            //   现把每个 base 的**每个档位**都按同 4 类绑定，键名
+                            //   `{abbr}_{kind}__{tier}`，供脚本产出 `diagnostics_by_tier`。
+                            // ⚠ 档位遍历用 `P::ALL`**全四档**、而非 `tiered` 里该 base 的现存实例 ——
+                            //   各档分析师子集不同（如 `a-fundamentals--ultra_short` 不存在）。
+                            //   Rhai 顶层 `tier_src` 字面量**无条件引用**全部 160 个变量 ⇒ 若这里
+                            //   只声明现存档，未声明的变量在 Rhai 里是 `ErrorVariableNotFound`
+                            //   （不是 Null！），脚本首跑即抛、data-quality 节点整体失败。
+                            //   声明全档后，**不存在的实例其 path 解析为 Null**（`resolve_var_path`
+                            //   对未知 node id 返回 None ⇒ 注入 Null，见 `resolve_var_path_missing_node_id_returns_none`），
+                            //   脚本侧 `present()` 守卫据此跳过该档（不产行）。
+                            // ⚠ 与代表实例键**并列、互不覆盖**：grade/score 仍按代表实例的 10 维校准
+                            //   （阈值是按 10 维定的，见上方注释），逐档键**不得**进评分口径。
+                            // ⚠ 键名由 `format!` 生成 ⇒ 不在 `input_mapping` 的**字面量**集合内；
+                            //   `data_quality_placeholder_gate` 的 `EXTERNAL_VARS` 双向锁按同样模式
+                            //   补全集（否则脚本引用未注入变量 ⇒ 该文件所有用例首跑即
+                            //   `ErrorVariableNotFound` 全红）。
+                            for p2 in P::ALL {
+                                let nid =
+                                    axagent_harness::holding_period::analyst_node_id(base, p2.as_str());
+                                let root2 = if *b == "value-investor" {
+                                    format!("{nid}.result")
+                                } else {
+                                    format!("{nid}.content")
+                                };
+                                let t = p2.as_str();
+                                dq_input
+                                    .push((format!("{abbr}_verdict__{t}"), format!("{root2}.verdict")));
+                                dq_input
+                                    .push((format!("{abbr}_report__{t}"), format!("{root2}.report")));
+                                dq_input.push((
+                                    format!("{abbr}_untrusted__{t}"),
+                                    format!("{nid}.__untrusted"),
+                                ));
+                                dq_input.push((
+                                    format!("{abbr}_tool_calls__{t}"),
+                                    format!("{nid}.tool_calls_made"),
+                                ));
+                            }
                         }
                         // catalyst_level（f3 因子输入）同规则取代表（mid 优先、否则首个）。
                         let cat_rep = by_base
@@ -5038,6 +5117,32 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         edges.push(edge("e-t-catalyst-data-quality", "t-catalyst-data", dq_id));
         edges.push(edge("e-pace-calc-data-quality", "pace-calc", dq_id));
         edges.push(edge("e-debate-convergence-data-quality", "debate-convergence", dq_id));
+        // v146(2026-10-09): 补 `value-verify--<代表档> → data-quality` 显式边 —— 修复
+        //   「价值评估官」行**恒报**「节点未输出 VERDICT / confidence 缺失」。
+        //   根因：`val` 槽的 source 是 `value-investor--<代表档>.result.verdict`（见上方
+        //   input_mapping 的 `.result` 分支）—— `.result` 是 value-verify **原地覆写**后的
+        //   CodeNode 形态，只有该节点跑完才存在。但此前**没有任何边**保证 data-quality 等到它：
+        //   二者同为 `debate-convergence` 的直接下游（`e-debate-convergence-data-quality` /
+        //   `e-convergence-{vi_id}`）⇒ 同时解锁；data-quality 是 Rhai（毫秒级）、
+        //   value-investor 是 LLM（分钟级）、value-verify 更在其后 ⇒ data-quality **恒定**先跑完，
+        //   此时 `.result` 尚未写出 ⇒ `extract_conf` 得 `-1.0` ⇒ `status="missing"`。
+        //   v144/v145 断掉 value-investor → debate 的环后，它明确落在辩论**下游**，这条竞态才
+        //   稳定可见；其余 9 个分析师都在 debate 上游，由 `e-debate-convergence-*` 兜住等待，
+        //   故只有本行缺席。
+        //   环安全：value-verify 的后代只有 `research-mgr → trader → portfolio-mgr`，不在
+        //   data-quality 的祖先集；每次播种由 `mod.rs` 的 Kahn 环检测门复核。
+        //   代表实例口径与上方 input_mapping 同源（mid 优先，无 mid 取逐档序首个）。
+        {
+            use axagent_harness::holding_period::Period as P;
+            if let Some(rep) = tiered
+                .iter()
+                .find(|(b, p, ..)| *b == VALUE_INVESTOR_ID && matches!(p, P::Mid))
+                .or_else(|| tiered.iter().find(|(b, ..)| *b == VALUE_INVESTOR_ID))
+            {
+                let vv_id = format!("value-verify--{}", rep.1.as_str());
+                edges.push(edge(&format!("e-{vv_id}-data-quality"), &vv_id, dq_id));
+            }
+        }
         // 修复循环依赖: 移除 trader → data-quality 边
         // 原循环: data-quality → trader → data-quality 导致 CycleDetected 错误
         // 2026-09-12: 该边缺失的后果已一并处理 —— 边不存在意味着 data-quality 永远读不到
@@ -9898,6 +10003,30 @@ mod fast_workflow_derivation_tests {
         //    **数值**共识产物（`j-divergence` 给的是类别串，改指它会在 `<= 0.0` 的数值比较处抛错）
         //    ⇒ 保留原路径、恒 Null，把「共识评分」诚实记为缺失因子。
         for (key, value) in &dq.config.input_mapping {
+            // ★ v148：**逐档键（`{abbr}_{kind}__{tier}`，10 abbr × 4 类 × 4 档 = 160）整体豁免**。
+            //   本链只造单个 `analyst-brief`、没有四档实例 ⇒ 这些键的根（`a-*--{tier}` 与
+            //   `value-investor--{tier}`）全都**不在派生图内** ⇒ 解析为 Null ⇒
+            //   `data-quality.rhai` 的逐档块被 `present()` 守卫 skip ⇒ 不产行、
+            //   `diagnostics_by_tier` 为空 ⇒ 面板回落 10 行单行视图（正是本链应然形态）。
+            //   ⚠ **这些键只能留、不能删**：脚本顶层 `tier_src` 字面量**直接引用**它们，而
+            //     `code_executor` 的 V57 自动补 unit 只扫 `present(x)` 实参（`v`/`rp` 等局部名，
+            //     见 `extract_present_vars`）⇒ 删键即 `ErrorVariableNotFound`、节点整体失败。
+            //     「键在、根不在 ⇒ 注入 UNIT ⇒ present() 假 ⇒ 跳过」才是本链的正确形态。
+            //   ⚠ 必须判在通用 `a-` 断言与 `val_` 分支**之前** —— `val_*__{tier}` 同时带 `val_`
+            //     前缀，若先落 val 分支，其「root 必须 starts_with(\"value-investor\")」虽仍成立，
+            //     但会与逐档语义（40 键一律豁免）分叉成两套判据。
+            if axagent_harness::holding_period::Period::ALL
+                .iter()
+                .any(|p| key.ends_with(&format!("__{}", p.as_str())))
+            {
+                let root = value.split('.').next().unwrap_or(value);
+                assert!(
+                    !ids.contains(root),
+                    "派生图里出现了逐档根 `{root}`（映射 `{key}`）⇒ 「快速链无四档实例」\
+                     前提已失效，须回到 ⑦ 重新裁定逐档键的去留，而不是让它恒 Null"
+                );
+                continue;
+            }
             if key == "consensus_score" {
                 assert!(
                     value.starts_with("debate-convergence"),

@@ -5,6 +5,7 @@ import { ExpandOutlined, ReloadOutlined, WarningOutlined } from "@ant-design/ico
 import { Alert, Button, Card, Empty, Modal, Segmented, Spin, Tag, Typography } from "antd";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { HorizonDecisionStrip } from "./HorizonDecisionStrip";
 import { HorizonScopeNotice } from "./HorizonScopeNotice";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { cleanToolCallTags, tryBeautifyJson } from "./utils";
@@ -1033,6 +1034,10 @@ export function DebatePanel() {
   const debateRounds = useStockAnalysisStore((s) => s.debateRounds);
   const streamingPreviews = useStockAnalysisStore((s) => s.streamingPreviews);
   const workflowStatus = useStockAnalysisStore((s) => s.status);
+  // 辩论本身**不分档**（`bull-rN`/`bear-rN` 无档后缀，v133 起四档共用同一份记录）
+  // ⇒ 卡片上的四周期信息只能取「各档最终决策」（`decisionsByHorizon`），且必须与
+  //   旁边的 `HorizonScopeNotice scope="debate"` 同屏，避免把决策读成辩论产物。
+  const decision = useStockAnalysisStore((s) => s.decision);
   // 阶段 6: 重跑辩论:在 early-return 之前声明 hook,保持 hooks 调用顺序一致
   const startAnalysis = useStockAnalysisStore((s) => s.startAnalysis);
   const [expanded, setExpanded] = useState(false);
@@ -1114,44 +1119,65 @@ export function DebatePanel() {
   // 辩论单次 LLM 调用 1-5 分钟期间 UI 不再是纯 Spin 空转。
   const streamingEntries = Object.entries(streamingPreviews);
 
+  // 四周期条及其「本环节不按档」声明**与辩论数据无关**（strip 数据源 = 各档最终决策
+  // `decisionsByHorizon`，不是辩论产物，见下方 R-11 边界声明）。
+  // ⇒ 该头部必须在 `debateRounds` 为空的早退分支里一并渲染，否则辩论输出缺失/未解析成
+  //   `bull-rN`/`bear-rN` 时会把四周期信息整体吞掉（此时四档数据其实已在 store）。
+  // 无数据时 `HorizonDecisionStrip` 依缺席规矩自渲染 null。
+  const horizonHeader = (
+    <>
+      <HorizonScopeNotice scope="debate" />
+      <HorizonDecisionStrip
+        decisions={decision?.decisionsByHorizon}
+        mode="decision"
+        testId="debate-horizon-strip"
+      />
+    </>
+  );
+
   if (debateRounds.length === 0) {
     if (isWorkflowRunning) {
       return (
-        <Card
-          size="small"
-          title={t("stockAnalysis.debate.title")}
-          styles={{ body: { padding: 24 } }}
-        >
-          <div className="flex flex-col items-center justify-center gap-3 py-8">
-            <Spin size="large" />
-            <div className="text-sm" style={{ color: "var(--muted)" }}>
-              {t("stockAnalysis.debate.loading")}
-            </div>
-            {/* 流式实时预览：显示正在生成的辩手/收敛输出的最新片段 */}
-            {streamingEntries.map(([nodeId, text]) => (
-              <div key={nodeId} className="w-full px-2">
-                <Tag color={nodeId.startsWith("bear") ? "green" : "red"}>
-                  {t("stockAnalysis.progress.stepRunning", { name: nodeId })}
-                </Tag>
-                <pre
-                  className="text-xs leading-relaxed whitespace-pre-wrap mt-1 px-2 py-1 rounded"
-                  style={{
-                    color: "var(--text-primary)",
-                    fontFamily: "inherit",
-                    maxHeight: 160,
-                    overflow: "hidden",
-                    background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
-                  }}
-                >
-                  {text.slice(-400)}
-                </pre>
+        <>
+          {horizonHeader}
+          <Card
+            size="small"
+            title={t("stockAnalysis.debate.title")}
+            styles={{ body: { padding: 24 } }}
+          >
+            <div className="flex flex-col items-center justify-center gap-3 py-8">
+              <Spin size="large" />
+              <div className="text-sm" style={{ color: "var(--muted)" }}>
+                {t("stockAnalysis.debate.loading")}
               </div>
-            ))}
-          </div>
-        </Card>
+              {/* 流式实时预览：显示正在生成的辩手/收敛输出的最新片段 */}
+              {streamingEntries.map(([nodeId, text]) => (
+                <div key={nodeId} className="w-full px-2">
+                  <Tag color={nodeId.startsWith("bear") ? "green" : "red"}>
+                    {t("stockAnalysis.progress.stepRunning", { name: nodeId })}
+                  </Tag>
+                  <pre
+                    className="text-xs leading-relaxed whitespace-pre-wrap mt-1 px-2 py-1 rounded"
+                    style={{
+                      color: "var(--text-primary)",
+                      fontFamily: "inherit",
+                      maxHeight: 160,
+                      overflow: "hidden",
+                      background: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)",
+                    }}
+                  >
+                  {text.slice(-400)}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </>
       );
     }
-    return null;
+    // 非运行态且无辩论数据：四周期条仍应显示（它是「非辩论产物」），仅在确有
+    // `decisionsByHorizon` 时带出；否则维持原「本卡片不渲染」。
+    return decision?.decisionsByHorizon ? horizonHeader : null;
   }
 
   // Round 标签
@@ -1162,11 +1188,8 @@ export function DebatePanel() {
 
   return (
     <>
-      {
-        /* 辩论只跑一轮跨视角对抗（在 `a-*` 分析师内部），四档共用同一份记录
-          ⇒ 显式声明，不复制成四份装作按档。见 PLAN §五十三 ⑤ 甲。 */
-      }
-      <HorizonScopeNotice scope="debate" />
+      {/* 四周期条 + 「本环节不按档」声明（四档共用同一份辩论记录，见 PLAN §五十三 ⑤ 甲） */}
+      {horizonHeader}
       <Card
         size="small"
         title={

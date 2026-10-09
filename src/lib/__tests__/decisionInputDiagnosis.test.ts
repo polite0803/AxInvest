@@ -126,3 +126,64 @@ describe("cls-risk-level 降级信号可见性（v55 Rhai 下沉）", () => {
     expect(sum.untrusted).toBe(0);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-09：逐档分析师实例（v133 `a-catalyst--{tier}`）的键解析。
+//
+// 用户实证：面板把「跑了且有输出」的催化剂分析师报成「节点输出缺失」（f3 行，权重 20%）。
+// 根因是 `NODE_SPECS` 写 base id（`a-catalyst`）而黑板键是**按档实例**
+// （`a-catalyst--mid`，`seed_stock_analysis.rs` 经 `analyst_node_id` 生成）
+// ⇒ `results[baseId]` 恒 `undefined`。代表实例口径与 seed 的 `data-quality` 输入一致（先 mid）。
+// 同时锁住「兜底标记必须按同一个命中键查」，否则会出现「值取到了、降级判成正常」。
+// ─────────────────────────────────────────────────────────────────────────────
+describe("逐档分析师实例的键解析（a-catalyst--{tier}）", () => {
+  const catalyst = (level: string, confidence: number) => ({
+    content: JSON.stringify({ verdict: { catalyst_level: level, confidence } }),
+  });
+  const item = (report: ReturnType<typeof buildDecisionInputsReport>) => report.find((r) => r.nodeId === "a-catalyst")!;
+
+  it("黑板只有 base id 时照旧解析（历史快照 / 快速链）", () => {
+    const report = buildDecisionInputsReport({ "a-catalyst": catalyst("L2", 55) }, null);
+    expect(item(report).status).toBe("normal");
+    expect(item(report).confidence).toBe(55);
+    expect(item(report).stance).toBe("L2");
+  });
+
+  it("黑板只有按档实例时不再误报缺失，且优先取 mid 档", () => {
+    const report = buildDecisionInputsReport({
+      "a-catalyst--ultra_short": catalyst("L1", 40),
+      "a-catalyst--short": catalyst("L2", 50),
+      "a-catalyst--mid": catalyst("L3", 60),
+      "a-catalyst--long": catalyst("L4", 70),
+    }, null);
+    expect(item(report).status).toBe("normal");
+    expect(item(report).confidence).toBe(60);
+    expect(item(report).stance).toBe("L3");
+  });
+
+  it("mid 档缺席时退任一可用档（只换代表实例，不猜数值）", () => {
+    const report = buildDecisionInputsReport({ "a-catalyst--long": catalyst("L4", 70) }, null);
+    expect(item(report).status).toBe("normal");
+    expect(item(report).confidence).toBe(70);
+  });
+
+  it("四档全缺时仍报 missing（回退不得把真缺失洗白）", () => {
+    const report = buildDecisionInputsReport({}, null);
+    expect(item(report).status).toBe("missing");
+    expect(item(report).note).toBe("节点输出缺失");
+  });
+
+  it("兜底标记按同一个命中键查：mid 档 __untrusted ⇒ status=untrusted", () => {
+    const report = buildDecisionInputsReport(
+      { "a-catalyst--mid": catalyst("L3", 60) },
+      { "a-catalyst--mid": true },
+    );
+    expect(item(report).status).toBe("untrusted");
+    expect(item(report).note).toContain("strict_mode 兜底");
+  });
+
+  it("负控：后缀不在四档域内不得被当成命中（回退只在四档域内发生）", () => {
+    const report = buildDecisionInputsReport({ "a-catalyst--deca": catalyst("L9", 99) }, null);
+    expect(item(report).status).toBe("missing");
+  });
+});

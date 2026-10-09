@@ -38,8 +38,8 @@
 //
 // ## 实现要点
 //   仿真循环在 Rust 宿主函数 `sim_run_mc` 内完成（注册于
-//   `stock_workflow/rhai_pm.rs::register_pm_functions`）：共享 Rhai 引擎设了
-//   `set_max_operations(200_000)`，把「场景 × 路径 × 事件」三级循环写在脚本里
+//   `stock_workflow/rhai_pm.rs::register_pm_functions`）：共享 Rhai 引擎设了单次
+//   执行的操作数上限（`code_executor.rs` 的 `RHAI_MAX_OPERATIONS`），把「场景 × 路径 × 事件」三级循环写在脚本里
 //   必然超限。宿主函数内部是 Rust 循环，对 Rhai 只计 1 次操作。
 
 // V57 兼容：`present(x)` 是 code_executor 会扫描的**约定函数名**。

@@ -42,6 +42,25 @@ impl Default for CodeExecutor {
     }
 }
 
+/// 共享 Rhai Engine 的**单次执行**操作数上限（防死循环 / DoS）。
+///
+/// ⚠ 这是 **Engine 级**设置，不是 per-node：`shared_rhai_engine()` 是全局单例，
+///   所有 CodeNode 共用一份，改它等于改变**全仓** Rhai 脚本的资源策略。
+///
+/// 2026-10-09（v148）由 200_000 上调至 1_000_000。原因：`data-quality` 节点改为
+/// **逐档消费**后，单次执行要处理 10 个代表实例 + 23 个逐档实例 = **33 份**分析师
+/// 报告（`Period::analyst_subset()` 之和 4+5+7+7），而 `marker_counts` /
+/// `report_quality` 都是 **Rhai 脚本函数 ⇒ 逐句扫描的操作数全部计入本预算**。
+///
+/// 实测成本曲线（3.5KB 级长报告，见 `data_quality_placeholder_gate` 的
+/// `d2_four_tier_fanout_fits_production_max_operations` 及其测量记录）：
+/// `ops ≈ 6.5k + 12.9k × 报告数` ⇒ 33 份 ≈ 430k，**必然**超出旧的 200k
+/// （旧值下 10 代表 + 5 逐档即打满）。新值对测试里最坏的 50 份仍有约 1.5 倍余量。
+///
+/// 安全权衡：1M 次解释器操作 ≈ 亚秒级，仍远非无界；用户自写脚本的 DoS 护栏
+/// 由「约 0.2s」放宽到「约 1s」，不属于可利用面。
+pub const RHAI_MAX_OPERATIONS: u64 = 1_000_000;
+
 /// 共享 Rhai Engine 单例（池化 + 复用），避免每次执行重复分配与初始化。
 ///
 /// 首次创建时按**注册顺序**应用全部的额外初始化回调（见
@@ -53,8 +72,8 @@ pub fn shared_rhai_engine() -> &'static Engine {
     static ENGINE: OnceLock<Engine> = OnceLock::new();
     ENGINE.get_or_init(|| {
         let mut engine = Engine::new();
-        // SECURITY (C4): Rhai 沙箱限制 — 防 DoS
-        engine.set_max_operations(200_000);
+        // SECURITY (C4): Rhai 沙箱限制 — 防 DoS（预算口径见 `RHAI_MAX_OPERATIONS`）
+        engine.set_max_operations(RHAI_MAX_OPERATIONS);
         engine.set_max_call_levels(32);
         engine.set_max_modules(0);
         engine.set_max_string_size(2_000_000);

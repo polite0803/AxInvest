@@ -337,9 +337,9 @@ fn market_level_absence_phrases() {
 }
 
 // split_sentences: 以 。！？；与换行断句（D1 句级抑制的作用域）。
-// ⚠ 必须用**链式 split** 实现：生产 CodeNode 引擎 `set_max_operations(200_000)`
-//   （`code_executor.rs:57`），逐字符 `sub_string`+拼接的循环在 10 份 KB 级报告下
-//   实测烧穿限额 ⇒ data-quality 节点整体失败（2026-09-27 16:54 运行 2bb5bb9d 实锤，
+// ⚠ 必须用**链式 split** 实现：生产 CodeNode 引擎设了单次执行的**操作数预算**
+//   （`code_executor.rs` 的 `RHAI_MAX_OPERATIONS`），逐字符 `sub_string`+拼接的循环
+//   在 10 份 KB 级报告下实测烧穿限额 ⇒ data-quality 节点整体失败（2026-09-27 16:54 运行 2bb5bb9d 实锤，
 //   "Too many operations (line 575)"）。split 是 C++ 侧一次调用，不计逐字符操作。
 fn split_by_delim(parts, delim) {
     let out = [];
@@ -391,8 +391,9 @@ fn marker_counts(text) {
         let phrases = suppression[m];
         let has_phrases = type_of(phrases) == "array";
         // ⚠ 预算捷径（v87）：无抑制短语组的硬标记不做句级判定 ⇒ 整篇 split 直接计数。
-        //   逐句循环是烧穿生产 `set_max_operations(200_000)` 的热区（16:54 运行 2bb5bb9d
-        //   实锤），而硬标记的命中数与切句后逐句求和**恒等**（marker 不含句读分隔符）。
+        //   逐句循环是烧穿生产操作数预算（`code_executor.rs` 的 `RHAI_MAX_OPERATIONS`）
+        //   的热区（16:54 运行 2bb5bb9d 实锤），而硬标记的命中数与切句后逐句求和**恒等**
+        //   （marker 不含句读分隔符）。
         // G2(2026-10-01)：该捷径加一道**例外** —— 正文含市场级停披措辞时才切句，
         //   因为「监管停披 + 动词」必须被豁免（见 `market_level_absence_phrases` 的两层判据）。
         //   ⚠ 例外**不**扩到个股级缺席组：那会破坏「硬标记零抑制」（G1 负控⑤锁着）。
@@ -431,7 +432,7 @@ fn marker_counts(text) {
 
 // hits/occurrences 是同一份 counts 的两个投影 —— 派生函数以 map 为入参，
 // 调用方对同一报告**只算一次** marker_counts（v87 预算：两份 KB 级报告重复
-// 全量统计会烧穿生产 `set_max_operations(200_000)`）。
+// 全量统计会烧穿生产操作数预算（`RHAI_MAX_OPERATIONS`））。
 fn hits_from_counts(counts) {
     let markers = placeholder_markers();
     let hits = [];
@@ -1459,7 +1460,16 @@ fn diag_for(c, name, expected, untrusted, ph_n, po_n, rq, attr_note, asof_ex, ra
         // 若不加这一支，会落到下面「非数据缺口：报告无失败标记」——那是**假话**
         // （报告里确实写了缺席措辞，只是被事实判据豁免），与并入本格的豁免说明自相矛盾。
         // 与 as-of 豁免同一处置纪律：见上方 S6 的「豁免生效必须说出来」。
-        `措辞性缺席：报告写了 ${raw_ph_n} 处缺席措辞，但本轮工具调用无一失败 ⇒ 按「该维度没有记录」处理，不计数据缺口、不因此降置信`
+        // 2026-10-09 修复「同一事实说两遍」：本支此前**自己**写了一遍缺席说明，而
+        //   `attr_note` 里**也**含 `wording_absence_note(...)` —— 10 个调用点的
+        //   `merge_two_notes(attribution_note(..), {abbr}_word_note)` 第 2 参，其谓词
+        //   `is_wording_only_absence(...)` 与本支的 `word_ex` 是**同一判据** ⇒ 二者要么
+        //   同时非空、要么同时为空。于是 `reason_final` 拼成 `{本支} ｜ {word_note}`，
+        //   面板「缺口原因」格出现**两段结论相同**的「措辞性缺席：…不计数据缺口」
+        //   （实证：催化剂 55 / 政策面 62 两行，各出现两遍）。
+        //   现本支只承担**终止 else-if 链**这一个职责（守住「不许落到假话分支」），
+        //   文案统一由 `attr_note` 承载，不再自写一遍。
+        ""
     } else if has_ph && c < 50.0 {
         `确定归因：上游工具数据不完整 —— 报告含 ${ph_n} 处失败标记，且置信度自评仅 ${c}`
     } else if has_ph {
@@ -1630,6 +1640,112 @@ let diagnostics = #{
     "cat": diag_for(cat_c, "催化剂分析师", "催化剂与叙事完整度、公告关键词（t-catalyst-data）；同侪估值锚（t-fundamentals-data: get_stock_peers）", cat_u, cat_ph_e.len(), cat_po_e, cat_q,
         merge_two_notes(attribution_note(cat_report, cat_tool_calls), cat_word_note), asof_sup_cat, cat_ph.len(), cat_word_sup)
 };
+
+// ── 2026-10-09(v148)：逐档诊断 —— 把面板「代表实例」那一行摊成四档 ──
+// 背景：上面 `diagnostics` 的 10 行取自各 base 的**代表实例**（mid 优先，见 seed 的
+//   `input_mapping`）。四周期工作流下分析师**按档实例化**，各档的置信/失败标记可以不同，
+//   面板此前只显示 mid 那一行 ⇒ 看不到其余三档的缺口。
+// 口径：**不动评分**。`diagnostics`（10 维代表实例）仍是 grade/score/quality-gate 的唯一
+//   依据；本块只喂 `diagnostics_by_tier`（面板摊行），不进任何计数/均值/阈值。
+//   ⚠ 不得把逐档行并进 `diagnostics` —— `n_int`/`good_count`/`report_quality_avg` 的分母
+//     是按 10 维校准的，混入 40 行会让 grade/score 整体失真。
+// 输入：seed 同批并列绑定的 `{abbr}_{kind}__{tier}`（verdict/report/untrusted/tool_calls）。
+//   **该档未注入 ⇒ `continue`：不产行、也不算**（旧快照 / 快速链 / 测试注入 ()）——
+//   这条守卫同时是生产操作预算的护栏：存量 10 份报告的口径一个操作都不多花。
+// ⚠ 逐档重算让 `marker_counts`/`report_quality` 的调用数 ×4（10 → 40 份报告）——
+//   生产操作数预算（`code_executor.rs` 的 `RHAI_MAX_OPERATIONS`）已在 v148 由 200k 上调至 1M
+//   以容纳该摊行（实测成本曲线见 `d2_four_tier_fanout_fits_production_max_operations`）；
+//   改动本块后必须复跑 `d2_` / `d1_` 两个压测确认未烧穿。
+let tier_src = #{
+    "mk": [
+        ["ultra_short", mk_verdict__ultra_short, mk_report__ultra_short, mk_untrusted__ultra_short, mk_tool_calls__ultra_short],
+        ["short", mk_verdict__short, mk_report__short, mk_untrusted__short, mk_tool_calls__short],
+        ["mid", mk_verdict__mid, mk_report__mid, mk_untrusted__mid, mk_tool_calls__mid],
+        ["long", mk_verdict__long, mk_report__long, mk_untrusted__long, mk_tool_calls__long]
+    ],
+    "sent": [
+        ["ultra_short", sent_verdict__ultra_short, sent_report__ultra_short, sent_untrusted__ultra_short, sent_tool_calls__ultra_short],
+        ["short", sent_verdict__short, sent_report__short, sent_untrusted__short, sent_tool_calls__short],
+        ["mid", sent_verdict__mid, sent_report__mid, sent_untrusted__mid, sent_tool_calls__mid],
+        ["long", sent_verdict__long, sent_report__long, sent_untrusted__long, sent_tool_calls__long]
+    ],
+    "val": [
+        ["ultra_short", val_verdict__ultra_short, val_report__ultra_short, val_untrusted__ultra_short, val_tool_calls__ultra_short],
+        ["short", val_verdict__short, val_report__short, val_untrusted__short, val_tool_calls__short],
+        ["mid", val_verdict__mid, val_report__mid, val_untrusted__mid, val_tool_calls__mid],
+        ["long", val_verdict__long, val_report__long, val_untrusted__long, val_tool_calls__long]
+    ],
+    "fund": [
+        ["ultra_short", fund_verdict__ultra_short, fund_report__ultra_short, fund_untrusted__ultra_short, fund_tool_calls__ultra_short],
+        ["short", fund_verdict__short, fund_report__short, fund_untrusted__short, fund_tool_calls__short],
+        ["mid", fund_verdict__mid, fund_report__mid, fund_untrusted__mid, fund_tool_calls__mid],
+        ["long", fund_verdict__long, fund_report__long, fund_untrusted__long, fund_tool_calls__long]
+    ],
+    "pol": [
+        ["ultra_short", pol_verdict__ultra_short, pol_report__ultra_short, pol_untrusted__ultra_short, pol_tool_calls__ultra_short],
+        ["short", pol_verdict__short, pol_report__short, pol_untrusted__short, pol_tool_calls__short],
+        ["mid", pol_verdict__mid, pol_report__mid, pol_untrusted__mid, pol_tool_calls__mid],
+        ["long", pol_verdict__long, pol_report__long, pol_untrusted__long, pol_tool_calls__long]
+    ],
+    "hm": [
+        ["ultra_short", hm_verdict__ultra_short, hm_report__ultra_short, hm_untrusted__ultra_short, hm_tool_calls__ultra_short],
+        ["short", hm_verdict__short, hm_report__short, hm_untrusted__short, hm_tool_calls__short],
+        ["mid", hm_verdict__mid, hm_report__mid, hm_untrusted__mid, hm_tool_calls__mid],
+        ["long", hm_verdict__long, hm_report__long, hm_untrusted__long, hm_tool_calls__long]
+    ],
+    "lk": [
+        ["ultra_short", lk_verdict__ultra_short, lk_report__ultra_short, lk_untrusted__ultra_short, lk_tool_calls__ultra_short],
+        ["short", lk_verdict__short, lk_report__short, lk_untrusted__short, lk_tool_calls__short],
+        ["mid", lk_verdict__mid, lk_report__mid, lk_untrusted__mid, lk_tool_calls__mid],
+        ["long", lk_verdict__long, lk_report__long, lk_untrusted__long, lk_tool_calls__long]
+    ],
+    "res": [
+        ["ultra_short", res_verdict__ultra_short, res_report__ultra_short, res_untrusted__ultra_short, res_tool_calls__ultra_short],
+        ["short", res_verdict__short, res_report__short, res_untrusted__short, res_tool_calls__short],
+        ["mid", res_verdict__mid, res_report__mid, res_untrusted__mid, res_tool_calls__mid],
+        ["long", res_verdict__long, res_report__long, res_untrusted__long, res_tool_calls__long]
+    ],
+    "sec": [
+        ["ultra_short", sec_verdict__ultra_short, sec_report__ultra_short, sec_untrusted__ultra_short, sec_tool_calls__ultra_short],
+        ["short", sec_verdict__short, sec_report__short, sec_untrusted__short, sec_tool_calls__short],
+        ["mid", sec_verdict__mid, sec_report__mid, sec_untrusted__mid, sec_tool_calls__mid],
+        ["long", sec_verdict__long, sec_report__long, sec_untrusted__long, sec_tool_calls__long]
+    ],
+    "cat": [
+        ["ultra_short", cat_verdict__ultra_short, cat_report__ultra_short, cat_untrusted__ultra_short, cat_tool_calls__ultra_short],
+        ["short", cat_verdict__short, cat_report__short, cat_untrusted__short, cat_tool_calls__short],
+        ["mid", cat_verdict__mid, cat_report__mid, cat_untrusted__mid, cat_tool_calls__mid],
+        ["long", cat_verdict__long, cat_report__long, cat_untrusted__long, cat_tool_calls__long]
+    ]
+};
+let diagnostics_by_tier = #{};
+for abbr in tier_src.keys() {
+    let rows = #{};
+    for row in tier_src[abbr] {
+        let t = row[0];
+        let v = row[1];
+        let rp = row[2];
+        let un = row[3];
+        let tc = row[4];
+        // 该档未注入（旧快照 / 快速链 / 测试）⇒ 不产行、不算 —— 也是操作预算护栏。
+        if !present(v) && !present(rp) { continue; }
+        let c = extract_conf(v);
+        let rr = extract_report(rp);
+        let mc = marker_counts(rr);
+        let ph = hits_from_counts(mc);
+        let po = occurrences_from_counts(mc);
+        let ws = is_wording_only_absence(ph, tc);
+        let asof = asof_design[abbr] == true;
+        let u = is_untrusted(v) || (present(un) && un == true);
+        let ph_e_n = if asof || ws { 0 } else { ph.len() };
+        let po_e = if asof || ws { 0 } else { po };
+        let q = report_quality(rr, c, asof, mc);
+        let d = diag_for(c, diagnostics[abbr]["name"], diagnostics[abbr]["expected_data"], u, ph_e_n, po_e, q, merge_two_notes(attribution_note(rp, tc), wording_absence_note(ph, tc)), asof, ph.len(), ws);
+        d["tier"] = t;
+        rows[t] = d;
+    }
+    if rows.len() > 0 { diagnostics_by_tier[abbr] = rows; }
+}
 
 // ── 2026-10-02: 状态三分类计数 —— 逐项数 `diagnostics.status`，与逐节点表同源 ──
 // 见输出 map 处 `status_normal_count` 的长注释（为什么不能用 good/degraded/gap 三者当分类）。
@@ -1823,6 +1939,10 @@ let summary_text = if grade == "F" || grade == "D" {
     "field_validation_issue_count": field_validation_issues.len(),
     "field_validation_penalty": (validation_penalty * 10.0).round() / 10.0,
     "diagnostics": diagnostics,
+    // 2026-10-09(v148)：逐档诊断（面板把每个分析师摊成四行用）。
+    //   形态：`{ abbr: { tier: <diag 同 `diagnostics` 单行结构> + "tier": tier } }`。
+    //   某 abbr 的逐档键全部未注入时**整个 abbr 缺席** ⇒ 前端回落 10 行旧视图。
+    "diagnostics_by_tier": diagnostics_by_tier,
     "missing_analysts": missing_analysts,
     "low_confidence_analysts": low_confidence_analysts,
     "warnings": warnings,

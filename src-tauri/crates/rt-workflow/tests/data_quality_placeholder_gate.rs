@@ -20,6 +20,11 @@
 //!   若未来有人给 rhai 打开 `no_string`/`no_index` feature 或改用 `Engine::new_raw()`，
 //!   见 `rhai_string_package_available` 会先红。
 
+// 操作数预算取自**生产常量**，勿在本文件另写字面量。
+// 历史教训：本文件曾把它放宽到 `2_000_000` ⇒ 逐字符断句实现烧穿生产限额、
+// `data-quality` 节点整体失败（2026-09-27 16:54 运行 2bb5bb9d），而门禁全绿。
+// 改为直接引用生产常量后，两侧不可能再漂移。
+use axagent_rt_workflow::work_engine::executors::RHAI_MAX_OPERATIONS;
 use rhai::{Dynamic, Engine, Map, Scope};
 
 const SCRIPT: &str = include_str!("../../../src/commands/data-quality.rhai");
@@ -109,6 +114,40 @@ const EXTERNAL_VARS: &[&str] = &[
     "pace_signal",
 ];
 
+/// v148（2026-10-09）：逐档键（`{abbr}_{kind}__{tier}`）的槽位与档位。
+///
+/// 它们在 seed 里由 `format!` 生成（不落字面量）⇒ `declared_input_mapping_keys()` 的
+/// **字面量抽取**天然看不见它们。因此注入侧（`all_external_vars`）与提取侧
+/// （`declared_input_mapping_keys`）**两侧都按同一模式补全**，双向锁仍成立。
+///
+/// ⚠ 漏注入的后果与上面 `valuation_dcf_fcf_data_missing` 那次同形且更彻底：
+///   `data-quality.rhai` 顶层的 `tier_src` 字面量会引用 `mk_verdict__ultra_short` 等
+///   160 个变量，未注入 ⇒ 首跑即 `ErrorVariableNotFound` ⇒ 本文件所有用例全红。
+const DQ_TIER_ABBRS: &[&str] =
+    &["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+const DQ_TIERS: &[&str] = &["ultra_short", "short", "mid", "long"];
+const DQ_TIER_KINDS: &[&str] = &["verdict", "report", "untrusted", "tool_calls"];
+
+/// 逐档键全集（与 seed 的 `format!("{abbr}_{kind}__{t}")` 同序同形）。
+fn tier_keys() -> Vec<String> {
+    let mut v = Vec::new();
+    for abbr in DQ_TIER_ABBRS {
+        for kind in DQ_TIER_KINDS {
+            for tier in DQ_TIERS {
+                v.push(format!("{abbr}_{kind}__{tier}"));
+            }
+        }
+    }
+    v
+}
+
+/// 注入 scope 用的全集 = 手抄清单 `EXTERNAL_VARS` + 逐档键。
+fn all_external_vars() -> Vec<String> {
+    let mut v: Vec<String> = EXTERNAL_VARS.iter().map(|s| s.to_string()).collect();
+    v.extend(tier_keys());
+    v
+}
+
 /// 构造与运行时一致的 Engine（harness::register_common_functions +
 /// rhai_pm::register_pm_functions 的等价子集；`pm_compute_factor_completeness` 用常量替身）。
 fn build_engine() -> Engine {
@@ -122,11 +161,10 @@ fn build_engine() -> Engine {
 fn build_engine_with_asof_methods(methods_json: &'static str) -> Engine {
     let mut engine = Engine::new();
     engine.set_max_expr_depths(1024, 1024);
-    // ⚠ 与生产 CodeNode 引擎**逐项对齐**（`code_executor.rs:57` `set_max_operations(200_000)`）。
-    //   此处曾放宽到 2_000_000 ⇒ D1 逐字符断句实现烧穿生产限额、data-quality 节点
-    //   整体失败（2026-09-27 16:54 运行 2bb5bb9d），而门禁全绿 —— 测试引擎的
-    //   资源上限本身就是被测契约的一部分，不得比生产宽松。
-    engine.set_max_operations(200_000);
+    // ⚠ 与生产 CodeNode 引擎**逐项对齐**（直接引用 `code_executor::RHAI_MAX_OPERATIONS`，
+    //   见文件头 import 注释）。测试引擎的资源上限本身就是被测契约的一部分，
+    //   不得比生产宽松 —— 拉宽会让「脚本已烧穿生产限额」这类缺陷变假绿。
+    engine.set_max_operations(RHAI_MAX_OPERATIONS);
     engine.register_fn("clamp", |v: f64, min: f64, max: f64| -> f64 { v.clamp(min, max) });
     engine.register_fn("join", |arr: rhai::Array, sep: &str| -> String {
         arr.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(sep)
@@ -200,8 +238,9 @@ fn run_quality_dirs(reports: &[(&str, &str)], dirs: &[(&str, f64, &str)]) -> Map
     let engine = build_engine();
     let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
     let mut scope = Scope::new();
-    for v in EXTERNAL_VARS {
-        scope.push_dynamic(*v, Dynamic::UNIT);
+    // v148：`all_external_vars()` = 手抄清单 + 逐档键（`tier_src` 字面量引用了它们）。
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
     }
     for (abbr, c, d) in dirs {
         let mut m = Map::new();
@@ -223,8 +262,9 @@ fn run_quality_impl(
 ) -> Map {
     let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
     let mut scope = Scope::new();
-    for v in EXTERNAL_VARS {
-        scope.push_dynamic(*v, Dynamic::UNIT);
+    // v148：`all_external_vars()` = 手抄清单 + 逐档键（`tier_src` 字面量引用了它们）。
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
     }
     for (abbr, c) in confs {
         let mut m = Map::new();
@@ -476,6 +516,15 @@ fn declared_input_mapping_keys() -> Vec<String> {
             out.push(format!("{a}_{kind}"));
         }
     }
+    // v148（2026-10-09）：**逐档**键 `{a}_{kind}__{tier}` —— seed 里同样由 `format!` 生成
+    //   （不落字面量）⇒ 与注入侧 `tier_keys()` 按同一常量同序补全，双向锁仍成立。
+    for kind in DQ_TIER_KINDS {
+        for a in &abbrs {
+            for t in DQ_TIERS {
+                out.push(format!("{a}_{kind}__{t}"));
+            }
+        }
+    }
     // v133：`catalyst_level` 的键是 `String` 构造（`("catalyst_level".to_string(), format!(…)`），
     // `format!(` 的括号把该行切成两个「单引号 chunk」⇒ 上面的成对抽取天然抽不到它。
     // 本测试的 declared 是**超集**语义（多抽无害、漏抽致命）⇒ 按「源文本是否声明过该名字」直接补。
@@ -506,13 +555,22 @@ fn external_vars_match_node_input_mapping() {
         declared.len()
     );
     // ② 正负对照：确认确实读到了各类已知成员，而不是碰巧凑数
-    for probe in ["money_flow", "hm_report", "cat_untrusted", "pace_signal", "risk_volatility"] {
+    for probe in [
+        "money_flow",
+        "hm_report",
+        "cat_untrusted",
+        "pace_signal",
+        "risk_volatility",
+        // v148：逐档键（`format!` 生成，靠 abbrs × kind × tier 三重循环补全）
+        "mk_verdict__ultra_short",
+        "hm_report__long",
+        "cat_tool_calls__mid",
+    ] {
         assert!(declared.iter().any(|k| k == probe), "提取器漏了已知键 {probe}：{declared:?}");
     }
 
     // ③ 双向差集
-    let mine: std::collections::BTreeSet<String> =
-        EXTERNAL_VARS.iter().map(|s| s.to_string()).collect();
+    let mine: std::collections::BTreeSet<String> = all_external_vars().into_iter().collect();
     let theirs: std::collections::BTreeSet<String> = declared.into_iter().collect();
     let missing: Vec<_> = theirs.difference(&mine).cloned().collect();
     let extra: Vec<_> = mine.difference(&theirs).cloned().collect();
@@ -988,7 +1046,7 @@ fn g1_absence_context_applies_to_every_soft_marker() {
     assert!(hits(&r, "hm") > 0, "硬标记「无法获取」不得被缺席语境抑制");
 }
 
-/// D1 后续（2026-09-27）：生产引擎 `max_operations=200_000` 压测。
+/// D1 后续（2026-09-27）：生产引擎操作数预算（`RHAI_MAX_OPERATIONS`）压测。
 /// 16:54 运行 2bb5bb9d 实锤：逐字符断句实现把 data-quality 节点整体打挂
 /// （"Too many operations"），面板逐节点诊断全空。本测试用 10 份 KB 级报告
 /// 复现生产规模 —— 若断句/计数实现再退化为逐字符循环，这里必须变红
@@ -1010,6 +1068,114 @@ fn d1_long_reports_fit_production_max_operations() {
     for n in nodes {
         assert_eq!(hits(&r, n), 1, "节点 {n}：长报告应恰好命中 1 次裸「数据缺失」（无同句语境）");
     }
+}
+
+/// **v148 生产预算压测**：`diagnostics_by_tier` 会把每个 (abbr × tier) 各算一遍
+/// `marker_counts` / `report_quality`（两者都是 **Rhai 脚本函数 ⇒ 操作数被计入
+/// `RHAI_MAX_OPERATIONS` 预算**）。
+/// 生产四周期实际实例数 = `Period::analyst_subset()` 之和 = 4+5+7+7 = **23**；本测试按
+/// **最坏情形 40**（10 abbr × 4 档全注）+ 10 代表 = **50 份**压，且每份都是 KB 级长报告 ——
+/// 50 份能过，真实 33 份必然安全。
+///
+/// 📏 **实测成本曲线**（2026-10-09，本用例同款 3.5KB 报告，二分求「10 代表 + k 逐档」的最大可过 k）：
+/// 预算 200k → max_k=5（合计 15 份）；400k → 20（30 份）；600k → 36（46 份）。
+/// 线性拟合 `ops ≈ 6.5k + 12.9k × 报告数` ⇒ 生产 33 份 ≈ **430k**（旧值 200k 必然爆），
+/// 本用例 50 份 ≈ **650k**（新值 1M 约 1.5 倍余量）。**该曲线是 v148 上调预算的定量依据**。
+///
+/// ⚠ 为什么既有 `d1_long_reports_fit_production_max_operations` 覆盖不到：那一族用例把逐档键
+///   注入为 `()`（`all_external_vars()` 的 UNIT）⇒ 逐档块被 `present()` 守卫整体 skip、一个操作
+///   都不多花 ⇒ **绿灯但零覆盖**。本用例是全表**唯一**真正注入逐档数据的预算压测。
+///
+/// 双锚：① 能跑到断言即证明未烧穿 `RHAI_MAX_OPERATIONS`（与 `d1_` 同法）；
+///   ② `diagnostics_by_tier` 逐 abbr 恰 4 档 —— **正控**，证明摊行真的产出，而不是被守卫
+///      整体吞掉后「不报错即通过」的假绿。
+#[test]
+fn d2_four_tier_fanout_fits_production_max_operations() {
+    let unit =
+        "本季度营收同比增长 12%，毛利率 35%，PE 处于历史中位，成交量温和放大，均线多头排列。";
+    let mut long = String::new();
+    for _ in 0..80 {
+        long.push_str(unit);
+    }
+    long.push_str("唯一缺口：商誉数据缺失，无法完成减值测试。");
+
+    let engine = build_engine();
+    let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
+    let mut scope = Scope::new();
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
+    }
+    let verdict = || {
+        let mut m = Map::new();
+        m.insert("confidence".into(), Dynamic::from(60.0_f64));
+        Dynamic::from(m)
+    };
+    for a in DQ_TIER_ABBRS {
+        // 代表实例（10 维口径）
+        scope.push_dynamic(format!("{a}_verdict"), verdict());
+        scope.push_dynamic(format!("{a}_report"), Dynamic::from(long.clone()));
+        // 逐档实例（最坏 40）
+        for t in DQ_TIERS {
+            scope.push_dynamic(format!("{a}_verdict__{t}"), verdict());
+            scope.push_dynamic(format!("{a}_report__{t}"), Dynamic::from(long.clone()));
+        }
+    }
+    let r = engine
+        .eval_ast_with_scope::<Map>(&mut scope, &ast)
+        .expect("四档摊行烧穿操作数上限（或脚本运行期报错）");
+
+    let by_tier =
+        r["diagnostics_by_tier"].clone().try_cast::<Map>().expect("`diagnostics_by_tier` 不是 map");
+    assert_eq!(by_tier.len(), DQ_TIER_ABBRS.len(), "10 个 abbr 都应有逐档表");
+    for a in DQ_TIER_ABBRS {
+        let rows = by_tier[*a].clone().try_cast::<Map>().expect("逐档表不是 map（摊行未产出）");
+        assert_eq!(rows.len(), DQ_TIERS.len(), "{a} 应有 4 档行");
+    }
+}
+
+/// **v148 逐档行的行级正控 + 缺席守卫负控**（与 `d2_` 的「全档压力」互补）：
+///
+/// `d2_` 只证明「全注入 ⇒ 全产行」；本用例锁**逐行粒度**，防止两种跑偏：
+///   ① **正控**：只注入 `mk` 的 `short` 档 ⇒ `diagnostics_by_tier` 恰含 `mk` 一项、
+///      恰 1 行、`tier == "short"`，且该行带自己的 `report_quality`（摊行不是空壳）。
+///   ② **负控（缺席守卫）**：其余 3 档与其余 9 个 abbr **未注入** ⇒ 一律不产行
+///      （若守卫写成「无条件产 4 行」会立刻红）。这正是「旧快照 / 快速链 / 测试注入 ()」
+///      的真实形态 —— 那三类场景下 `diagnostics_by_tier` 必须为空，面板才回落单行视图。
+#[test]
+fn d3_tier_rows_are_emitted_per_injected_tier_only() {
+    let engine = build_engine();
+    let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
+    let mut scope = Scope::new();
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
+    }
+    // 代表实例：只给 mk 一份（面板单行视图的基线）
+    let mut m = Map::new();
+    m.insert("confidence".into(), Dynamic::from(60.0_f64));
+    scope.push_dynamic("mk_verdict".to_string(), Dynamic::from(m.clone()));
+    scope.push_dynamic("mk_report".to_string(), Dynamic::from("正文完整，无缺口。".to_string()));
+    // 逐档实例：只注入 mk 的 short 一档（其余三档缺席）
+    scope.push_dynamic("mk_verdict__short".to_string(), Dynamic::from(m));
+    scope.push_dynamic(
+        "mk_report__short".to_string(),
+        Dynamic::from("正文完整，无缺口。".to_string()),
+    );
+
+    let r = engine.eval_ast_with_scope::<Map>(&mut scope, &ast).expect("脚本执行失败");
+
+    let by_tier =
+        r["diagnostics_by_tier"].clone().try_cast::<Map>().expect("`diagnostics_by_tier` 不是 map");
+    assert_eq!(by_tier.len(), 1, "只注入了 `mk--short` ⇒ 逐档表只应有 `mk` 一项");
+    assert!(!by_tier.contains_key("sent"), "未注入的 abbr 不得产行（缺席守卫）");
+    let rows = by_tier["mk"].clone().try_cast::<Map>().expect("`mk` 逐档表不是 map");
+    assert_eq!(rows.len(), 1, "只注入了 short 一档 ⇒ `mk` 只应产 1 行（其余三档缺席）");
+    let row = rows["short"].clone().try_cast::<Map>().expect("short 行不是 map");
+    assert_eq!(row["tier"].clone().into_string().unwrap_or_default(), "short");
+    // 摊行必须是**真诊断行**（有自己的 report_quality），不是只填了 tier 的空壳。
+    assert!(
+        row["report_quality"].clone().try_cast::<f64>().is_some(),
+        "逐档行应含自己的 `report_quality`（证明走了完整 diag_for，不是空壳占位）"
+    );
 }
 
 /// G2（2026-10-01，600887 运行 `f474ec9b`）：**市场级口径停披**豁免动词类硬标记。
@@ -1087,8 +1253,9 @@ fn run_quality_with_verdicts(reports: &[(&str, &str)], verdicts: &[(&str, Map)])
     let engine = build_engine();
     let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
     let mut scope = Scope::new();
-    for v in EXTERNAL_VARS {
-        scope.push_dynamic(*v, Dynamic::UNIT);
+    // v148：`all_external_vars()` = 手抄清单 + 逐档键（`tier_src` 字面量引用了它们）。
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
     }
     for (abbr, text) in reports {
         scope.push_dynamic(format!("{abbr}_report"), Dynamic::from(text.to_string()));
@@ -1393,8 +1560,9 @@ fn run_quality_with_scalars(reports: &[(&str, &str)], scalars: &[(&str, Dynamic)
     let engine = build_engine();
     let ast = engine.compile(SCRIPT).expect("data-quality.rhai 编译失败");
     let mut scope = Scope::new();
-    for v in EXTERNAL_VARS {
-        scope.push_dynamic(*v, Dynamic::UNIT);
+    // v148：`all_external_vars()` = 手抄清单 + 逐档键（`tier_src` 字面量引用了它们）。
+    for v in all_external_vars() {
+        scope.push_dynamic(v, Dynamic::UNIT);
     }
     for (abbr, text) in reports {
         scope.push_dynamic(format!("{abbr}_report"), Dynamic::from(text.to_string()));
@@ -1631,4 +1799,32 @@ fn r2_clears_the_four_real_reports_from_run_80a41e56() {
         );
         assert_eq!(status(&r, abbr), "normal", "节点 {abbr} 应回到正常");
     }
+}
+
+/// 2026-10-09：措辞性缺席的说明**只说一遍**。
+///
+/// 缺陷实证（面板「缺口原因」格）：催化剂 55 / 政策面 62 两行各出现**两段**
+/// 「措辞性缺席：…不计数据缺口」。根因：`diag_for` 的 `word_ex` 支自写一遍，
+/// 而 `attr_note` 里**也**含 `wording_absence_note(...)`（10 个调用点的
+/// `merge_two_notes(attribution_note(..), {abbr}_word_note)` 第 2 参，谓词与 `word_ex`
+/// 是同一判据），二者经 `reason_final = "{reason} ｜ {attr_note}"` 拼接 ⇒ 同一事实说两遍。
+#[test]
+fn r2_wording_absence_note_is_emitted_once() {
+    let ok_calls = vec![tc("get_stock_institutional_visits", false)];
+    let r = run_quality_with_tool_calls(
+        &[("cat", R2_HONEST_ABSENCE)],
+        &[("cat", 55.0)],
+        &[("cat", ok_calls)],
+    );
+    let g = gap_reason(&r, "cat");
+    assert_eq!(status(&r, "cat"), "normal", "豁免后应回到正常，实得: {g}");
+    assert_eq!(
+        g.matches("措辞性缺席").count(),
+        1,
+        "同一事实只许说一遍（此前 word_ex 支与 attr_note 各写一段 ⇒ 面板出现两遍）。实得: {g}"
+    );
+    assert!(
+        !g.contains("报告写了"),
+        "已删除的 `word_ex` 支文案不得重现（它与 attr_note 的缺席说明是同一事实）。实得: {g}"
+    );
 }

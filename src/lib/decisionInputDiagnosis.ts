@@ -18,6 +18,8 @@
 //   所以「16 个」是**节点数**，不等于「决策腿全覆盖」。P4′ 逐档改造时应改由后端注入的腿表
 //   渲染本清单，权重与因子名不再手抄（f7 一度手抄成 0.15，权威 `f7_default` 是 0.10）。
 
+import { analystBaseOf, analystNodeId } from "@/lib/stock-analysis-utils";
+
 /**
  * 诊断状态：missing=节点输出缺失；low=置信度低；untrusted=LLM 兜底；normal=正常
  */
@@ -82,6 +84,29 @@ const NODE_SPECS: readonly NodeSpec[] = [
 ] as const;
 
 // ── 内部辅助：从节点输出对象中提取字段 ──
+
+/**
+ * 解析某节点本轮实际输出所用的**键**（**唯一入口**，勿在别处直接 `results[nodeId]`）。
+ *
+ * v133（B2-2）起分析师节点**按档实例化**（`a-catalyst--mid`），而本清单仍写 base id
+ * （`a-catalyst`）⇒ 直接 `results["a-catalyst"]` 恒为 `undefined`，于是「跑了且有输出」的
+ * 分析师被报成「节点输出缺失」（用户实证：f3 催化剂行，权重 20%）。同理，
+ * `untrustedNodes` 的键也是黑板键（`stores/feature/stockAnalysisStore.ts` 直接以
+ * `stepId` 归档）⇒ 兜底标记必须按**同一个键**查，否则会出现「取到了值却把降级判成正常」。
+ *
+ * 代表实例口径与 seed 一致：`data-quality` 的输入取 `Period::Mid` 实例、缺失才退任一档
+ * （`seed_stock_analysis.rs` 的 `tiered.iter().find(|(b, p, ..)| *b == base && matches!(p, P::Mid))`）
+ * ⇒ 此处同口径，不在前端另立一套档位选择规则。无命中返回 `null`。
+ */
+function resolveNodeKey(results: Record<string, unknown>, nodeId: string): string | null {
+  if (results[nodeId] != null) { return nodeId; }
+  const mid = analystNodeId(nodeId, "mid");
+  if (results[mid] != null) { return mid; }
+  for (const [key, value] of Object.entries(results)) {
+    if (value != null && analystBaseOf(key) === nodeId) { return key; }
+  }
+  return null;
+}
 
 /** 安全取对象字段，支持点路径（如 "result.totalScore"） */
 function getPath(obj: unknown, path: string): unknown {
@@ -338,8 +363,11 @@ export function buildDecisionInputsReport(
   const report: DecisionInputDiagItem[] = [];
 
   for (const spec of NODE_SPECS) {
-    const raw = results[spec.nodeId];
-    const isUntrusted = untrustedNodes?.[spec.nodeId] === true;
+    // 命中键可能不是 `spec.nodeId`（分析师为 `{base}--{tier}` 实例）⇒ 值与
+    // 兜底标记都按**同一个键**取，避免「值取到了、降级标记没取到」的错配。
+    const key = resolveNodeKey(results, spec.nodeId);
+    const raw = key == null ? undefined : results[key];
+    const isUntrusted = key != null && untrustedNodes?.[key] === true;
     const diag = diagnoseNode(spec.nodeId, raw);
 
     let status: DiagnosisStatus;

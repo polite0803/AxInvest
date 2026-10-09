@@ -218,8 +218,8 @@ pub fn register_pm_functions(engine: &mut Engine) {
     // ── 仿真验证（工作流 `sim-verify` 节点）─────────────────────────────────
     // 供 `sim-verify.rhai` 调用：在**决策之后**自动跑蒙特卡洛压力测试。
     //
-    // 为什么必须走宿主函数、不能在脚本里算：共享 Rhai 引擎设了
-    // `set_max_operations(200_000)`（`rt-workflow/.../code_executor.rs`），
+    // 为什么必须走宿主函数、不能在脚本里算：共享 Rhai 引擎设了单次执行的
+    // 操作数上限（`code_executor.rs` 的 `RHAI_MAX_OPERATIONS`），
     // 而仿真要遍历「场景 × 路径 × 事件」，写成脚本必然超限。宿主函数内部是
     // Rust 循环，对 Rhai 只计 1 次操作。
     //

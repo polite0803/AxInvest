@@ -20,16 +20,11 @@ import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
 import type { UnlistenFn } from "@/lib/invoke";
 import {
-  alignReasoningDecisionLabel,
   ANALYST_TIER_SEP,
   analystBaseOf,
   analystNodeId,
   computeStockConsensus,
   deriveActionFromLlmDecision,
-  parseAction,
-  parsePositionState,
-  parseRiskLevel,
-  resolveDisplayAction,
   StockAction,
 } from "@/lib/stock-analysis-utils";
 import { detectFutureReferencesForNode } from "@/lib/timeTravel/futureReferenceDetector";
@@ -1761,53 +1756,24 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         "rerun_decision",
         { analysisId },
       );
-      // 从返回的 decision 中提取关键字段
       const d = result.decision;
-      // 必须走 parseAction/parseRiskLevel 映射（后端 Rhai 输出中文"增持"/"中风险"）
-      // 直接 String() + as 断言会绕过中文→英文枚举映射，导致 UI 显示"不确定"
-      const action = parseAction(d.action);
-      const riskLevel = parseRiskLevel(d.riskLevel);
-      // 2026-09-21: 与 `normalizeDecision` 同口径。
-      //   ① 持仓状态（P1-2 独立轴）此前在重跑路径**漏解析** ⇒ 挂角 Tag 的派生
-      //      只能退回 positionPct 判据（后端 positionState 就是按 position_pct 推的，
-      //      值通常相同，但「采集时点无此信息」与「确知空仓」的语义差别被抹掉）。
-      //   ② reasoning 的 `决策=X` 必须对齐**最终方向档**，否则重跑后的卡片仍会
-      //      挂角「观望」而结论文本写「持有」（同 normalizeDecision 的修复）。
-      //      ⚠️ 2026-09-22: 展示档已改为「方向档恒等」，不再按仓位派生 ——
-      //        `positionState` 只作展示，不再参与档名判定。
-      const rerunPositionPct = Number(d.positionPct ?? 0);
-      const rerunPositionState = parsePositionState(d.positionState ?? d.position_state);
-      const decision: StockDecision = {
-        action,
-        positionPct: rerunPositionPct,
-        positionState: rerunPositionState,
-        confidence: Number(d.confidence ?? 0),
-        decisionConfidence: d.decisionConfidence != null ? Number(d.decisionConfidence) : null,
-        signalStrength: d.signalStrength != null ? Number(d.signalStrength) : null,
-        riskLevel,
-        stopLoss: Number(d.stopLossPct ?? 0),
-        targetPrice: null,
-        reasoning: alignReasoningDecisionLabel(String(d.reasoning ?? ""), resolveDisplayAction(action)),
-        timeHorizon: String(d.timeHorizon ?? "mid"),
-        expectedHoldingDays: Number(d.expectedHoldingDays ?? 0),
-        targetTimeframe: String(d.targetTimeframe ?? "1m"),
-        // 决策可信度与数据缺口：此前这里漏了，导致重跑决策后 collapse 标记与
-        // 数据缺口提示整体消失（口径与 lib/agentOutput.ts::normalizeDecision 对齐）。
-        weightsCollapsed: d.weightsCollapsed === true,
-        collapseReason: typeof d.collapseReason === "string" ? d.collapseReason : undefined,
-        weightRatio: d.weightRatio != null ? Number(d.weightRatio) : undefined,
-        untrustedCount: d.untrustedCount != null ? Number(d.untrustedCount) : undefined,
-        dataGaps: Array.isArray(d.data_gaps)
-          ? (d.data_gaps as unknown[]).filter((g): g is string => typeof g === "string")
-          : undefined,
-        isContradictory: d.isContradictory === true,
-        // 跨系统互证（趋势智选 vs 工作流 分歧报告 + 归因）：后端 `rerun_decision` 已回注
-        // （decision.rs 的 inject_reco_crosscheck），此处漏拷贝 ⇒ 重跑后报告整体消失，
-        // 直到刷新页面才回来。与 `agentOutput::normalizeDecision` 同口径整体透传。
-        crossCheck: d.crossCheck != null && typeof d.crossCheck === "object"
-          ? (d.crossCheck as unknown as StockDecision["crossCheck"])
-          : undefined,
-      };
+      // 重跑路径此前是「白名单式手工重建」StockDecision：后端每加一个字段都要在这里补一行，
+      // 漏补即被静默丢弃（2026-09-21 漏 dataGaps/weightAdjustments 是同一类复发）。本轮
+      // 四周期字段（阶段1 `horizonPriceMap` / 阶段2 `decisionsByHorizon`）同样未透传 ⇒
+      // 重跑后辩论/风险 tab 的四周期条整体消失，直到刷新页面才回来。
+      // 现改为直接委托 `normalizeDecision`（decision 字段的唯一真相源），与 loadAnalysis /
+      // workflow-completed 路径同口径 —— 不再维护第二份会腐烂的字段清单。
+      // 顺带修正两处既有口径偏差：
+      //   ① `stopLoss` 此前取自 `stopLossPct`（百分比）却塞进**价位**字段
+      //      （DecisionBanner 按 `¥{stopLoss}` 展示 ⇒ 显示成 "¥3" 这类假价位）；
+      //   ② `targetPrice` 被硬置 null（真实目标价被丢弃）。
+      //   二者 `normalizeDecision` 均按 `stopLoss`/`targetPrice` 价位正确读取。
+      const decision = normalizeDecision(d);
+      if (!decision) {
+        // 全零空壳（后端复算未产出任何有意义字段）：与 loadAnalysis 同口径写 null，
+        // 让 UI 走「决策缺失」占位，而不是把全零假决策塞进 store 后静默不渲染。
+        console.warn("[StockAnalysis] rerunDecision: normalizeDecision 返回空壳，写入 null");
+      }
       // 恢复 LLM 决策（trader 原始输出，rerun 不重跑 LLM 节点，从 DB 读回旧值）
       const llmDecisionJson = result.llm_decision_json ?? null;
       // 重算公式 vs LLM 一致性分数（新公式决策 vs 旧 LLM 决策）

@@ -21,11 +21,9 @@ use axagent_agent_macro::agent_command;
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self, AsOfContext, AsOfSource};
 use axagent_astock_data::calendar;
-use axagent_entities::stock_reflections;
-use axagent_harness::holding_period::Period;
+use axagent_harness::{DatabaseConnection, holding_period::Period};
 use axagent_search::vector_store::VectorStore;
 use axagent_trajectory::TrajectoryStorage;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -510,14 +508,14 @@ async fn summarize_horizons(
     analysis_ids: &[String],
     today: chrono::NaiveDate,
 ) -> Result<Vec<HorizonSummary>, String> {
-    let rows = stock_reflections::Entity::find()
-        .filter(stock_reflections::Column::OriginalAnalysisId.is_in(analysis_ids.to_vec()))
-        .all(db)
-        .await
-        .map_err(|e| format!("查询批次反思行失败: {e}"))?;
+    // 反思行查询下沉 dao（分层护栏：命令层不得直连 sea_orm / entities）
+    let rows =
+        axagent_dao::repo::stock_lesson_queries::fetch_by_original_analysis_ids(db, analysis_ids)
+            .await
+            .map_err(|e| format!("查询批次反思行失败: {e}"))?;
 
     // horizon 字符串 → 行集合（本批 pending 行建点即写 horizon，None 老行不计入四档汇总）
-    let mut groups: BTreeMap<String, Vec<&stock_reflections::Model>> = BTreeMap::new();
+    let mut groups: BTreeMap<String, Vec<_>> = BTreeMap::new();
     for r in &rows {
         if let Some(h) = r.horizon.as_deref() {
             groups.entry(h.to_string()).or_default().push(r);

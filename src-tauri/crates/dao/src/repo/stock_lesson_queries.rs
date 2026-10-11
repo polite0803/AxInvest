@@ -235,3 +235,21 @@ pub async fn count_pre_floor_generation_lessons(
         .add(reflection_lessons::Column::TemplateVersion.lt(generation_floor));
     q.filter(foreign).count(db).await
 }
+
+/// 按 `original_analysis_id` 批量取回反思行（时间旅行批次四档汇总用）。
+///
+/// 与教训注入的三个 `fetch_*` 刻意不同：这里**不做**档/代/状态过滤 —— 分档与
+/// pending/completed/failed 计数是批次复盘命令层的呈现策略，repo 只做原样取数。
+/// 空 id 列表短路返回空 Vec，避免 `is_in([])` 的方言兼容问题。
+pub async fn fetch_by_original_analysis_ids(
+    db: &DatabaseConnection,
+    analysis_ids: &[String],
+) -> Result<Vec<stock_reflections::Model>, sea_orm::DbErr> {
+    if analysis_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::OriginalAnalysisId.is_in(analysis_ids.to_vec()))
+        .all(db)
+        .await
+}

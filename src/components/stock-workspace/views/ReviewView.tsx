@@ -31,7 +31,7 @@ export function ReviewView() {
           className="flex items-center gap-1 px-3 py-1 rounded text-sm transition-colors"
           style={{
             background: subTab === "reflection" ? "var(--accent)" : "transparent",
-            color: subTab === "reflection" ? "white" : "var(--muted)",
+            color: subTab === "reflection" ? "var(--accent-fg)" : "var(--muted)",
           }}
         >
           <RotateCcw size={14} />
@@ -43,7 +43,7 @@ export function ReviewView() {
           className="flex items-center gap-1 px-3 py-1 rounded text-sm transition-colors"
           style={{
             background: subTab === "evolution" ? "var(--accent)" : "transparent",
-            color: subTab === "evolution" ? "white" : "var(--muted)",
+            color: subTab === "evolution" ? "var(--accent-fg)" : "var(--muted)",
           }}
         >
           <Sparkles size={14} />

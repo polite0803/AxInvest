@@ -18,6 +18,7 @@ use std::collections::HashMap;
 
 /// 节点进化状态（通用版）
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NodeEvolutionStatus {
     pub node_type: String,
     pub node_id: String,

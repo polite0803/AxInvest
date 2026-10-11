@@ -31,7 +31,7 @@ export function MonitorView() {
           className="flex items-center gap-1 px-3 py-1 rounded text-sm transition-colors"
           style={{
             background: subTab === "watchlist" ? "var(--accent)" : "transparent",
-            color: subTab === "watchlist" ? "white" : "var(--muted)",
+            color: subTab === "watchlist" ? "var(--accent-fg)" : "var(--muted)",
           }}
         >
           <Star size={14} />
@@ -43,7 +43,7 @@ export function MonitorView() {
           className="flex items-center gap-1 px-3 py-1 rounded text-sm transition-colors"
           style={{
             background: subTab === "portfolio" ? "var(--accent)" : "transparent",
-            color: subTab === "portfolio" ? "white" : "var(--muted)",
+            color: subTab === "portfolio" ? "var(--accent-fg)" : "var(--muted)",
           }}
         >
           <Briefcase size={14} />

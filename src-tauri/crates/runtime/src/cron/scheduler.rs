@@ -95,6 +95,19 @@ impl CronScheduler {
     pub async fn is_running(&self) -> bool {
         *self.running.read().await
     }
+
+    /// 手动触发：绕过 cron 时刻判定，直接走与定时触发完全相同的 executor handler
+    /// （交易日闸门、各内置 task_type 分支、工作流兜底）。
+    ///
+    /// 供 `execute_scheduled_task` 命令复用 —— 该命令此前对无 workflow 的内置任务
+    /// （vldec / pool-scan / stock-recommendation 等）只记一条「已手动触发」的假成功，
+    /// 真正的 handler 链从未被调用。
+    ///
+    /// 注意：handler 内各分支自行 `tokio::spawn` 并 `record_run`，本方法在入队后
+    /// 即返回，不等执行完成（长任务可达数分钟）。
+    pub async fn trigger_now(&self, job: super::job_store::CronJob) {
+        self.executor.execute(job).await;
+    }
 }
 
 /// 本地时区的「年内日 + 本地分钟」键，用于同分钟去重。

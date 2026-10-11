@@ -1109,12 +1109,44 @@ pub async fn run_serenity_screening(
         dry_run: false,
         // 接线激活 strict_mode：VERDICT 缺失兜底重试 / strict JSON 校验与降级
         tool_permissions: Some(super::strict_tool_permissions()),
+        // 与 `core.rs` 的主分析链同一接线（P1-8，2026-10-03）：引擎为**每个节点单独
+        // spawn**，而 `task_local` 不跨 spawn ⇒ 下方裸 `AS_OF.scope` 罩不住节点内取数，
+        // 回放时 tool/agent 节点会全部读成 live。必须把本轮截止日带进每个节点任务。
+        node_task_scope: Some(axagent_rt_workflow::work_engine::engine::node_task_scope_hook(
+            move |fut| as_of::with_optional_asof(as_of_ctx, fut),
+        )),
         ..Default::default()
     };
 
-    let exec = async { engine.run_workflow(&wf_id, opts).await };
+    // 本轮降级留痕绑定到**这次运行**（与荐股链 `recommend_stocks` 的 H3 同一形态）：
+    // `with_degradation_log` 给本任务提供容器；进出各取一次水位 ⇒ 切片只含本轮新增，
+    // 挡掉同截止日上一轮的残留（R5 基线陷阱同族）。
+    let deg_watermark = as_of::global_degradation_seq_watermark();
 
-    let result = as_of::AS_OF.scope(as_of_ctx, exec).await;
+    // 切片必须在容器**内**取：退出 `with_degradation_log` 后父任务那一层条目已随作用域结束，
+    // 只剩全局环形缓冲，且 `take_asof_degradation_report` 会多打一条「访问失败」warn。
+    let (result, asof_degradations) = as_of::AS_OF
+        .scope(
+            as_of_ctx,
+            as_of::with_degradation_log(async {
+                let wf = engine.run_workflow(&wf_id, opts).await;
+                let degradations: Vec<
+                    axagent_analysis_engine::recommender::types::RecoDegradation,
+                > = if as_of::current_as_of().is_some() {
+                    as_of::take_global_degradations_since(deg_watermark)
+                        .into_iter()
+                        .map(Into::into)
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                (wf, degradations)
+            }),
+        )
+        .await;
+    // 把**本轮实际使用的截止日**回灌进 payload 与返回值：渲染层因此不必去读全局时间锚点
+    // （锚点在运行后被改动就会把实盘显示成回放，或反之 —— T11 同族）。live ⇒ None。
+    let run_as_of_date = as_of_ctx.map(|c| c.as_string());
 
     match result {
         Ok(wf_result) => {
@@ -1480,7 +1512,9 @@ pub async fn run_serenity_screening(
                     // 按 SerenityStrategy::scan_one 的默认参数（entry ±5% / stop 0.80 /
                     // target 1.30）计算，行情失败时保持 0 并告警。
                     let client = &state.astock_client;
-                    let quote = client.get_quote(code).await.ok();
+                    // 上方的 `AS_OF.scope` 只罩住 `run_workflow`，执行到这里已退出作用域 ⇒ 裸调用
+                    // 会拿**今日**行情给回放票算入场/止损。逐点重挂本轮截止日，与节点侧同口径。
+                    let quote = as_of::AS_OF.scope(as_of_ctx, client.get_quote(code)).await.ok();
                     let price = quote.as_ref().map(|q| q.price).unwrap_or(0.0);
                     // ── 止损/目标/仓位/建仓带：与荐股策略链**同一实现**（Phase R-D + Q1/Q2）──
                     // 旧形态：本链按 `price * serenity_stop_mult` 出固定百分比止损，且恒 mid 一档 ⇒
@@ -1489,9 +1523,12 @@ pub async fn run_serenity_screening(
                     // 止损/目标 = k·σ_daily·√h，仓位 = min(候选上限, 风险预算) × 成本拖累，
                     // 建仓带 = 该档止损距离的一半（Q1 裁定 B）。
                     // σ 不可得 ⇒ 显式退回固定乘数并标来源，不伪装成波动率口径。
-                    let closes =
-                        axagent_analysis_engine::recommender::risk::daily_closes(client, code)
-                            .await;
+                    let closes = as_of::AS_OF
+                        .scope(
+                            as_of_ctx,
+                            axagent_analysis_engine::recommender::risk::daily_closes(client, code),
+                        )
+                        .await;
                     // 候选的 positionPct **已是**最终建议权重（不是策略 base），故不再乘置信 ——
                     // 乘了就是把「策略链 base×置信」的公式套到已经乘过置信的数上，二次折扣。
                     let cap_position = c.get("positionPct").and_then(|v| v.as_f64()).unwrap_or(5.0);
@@ -1674,7 +1711,14 @@ pub async fn run_serenity_screening(
                             // 分版就会造出「同一批 pick 两种归属」。
                             created_at: Set(now_str.clone()),
                         };
-                        if let Err(e) = pick.insert(db).await {
+                        // 回放不落库（与 `recommend_stocks` 的 `as_of_date.is_none()` 守卫同口径）：
+                        // 历史口径的候选按 `generated_at=now`、`synthetic=0` 写进 reco_picks，
+                        // 就会与实盘票混进同一张「趋势智选历史」，面板分不出哪一行是回放产物。
+                        if as_of_ctx.is_some() {
+                            tracing::debug!(
+                                "[serenity] 回放模式跳过 reco_picks 落库 ({code} {tier_period})"
+                            );
+                        } else if let Err(e) = pick.insert(db).await {
                             tracing::warn!(
                                 "[serenity] 写入 reco_picks 失败 ({code} {tier_period}): {e}"
                             );
@@ -1707,7 +1751,9 @@ pub async fn run_serenity_screening(
                     serenity_seed.push((code.to_string(), name.to_string(), None));
                 }
                 // 同步到全局种子 + 全量数据缓存
-                if !serenity_seed.is_empty() {
+                // 全局 serenity 种子会被**智能荐股的 live 扫描**消费（`recommender` 的
+                // `get_serenity_seed`）⇒ 回放写入会把历史候选带进下一次实盘池，只在 live 同步。
+                if !serenity_seed.is_empty() && as_of_ctx.is_none() {
                     axagent_analysis_engine::recommender::set_serenity_seed(serenity_seed);
                     axagent_analysis_engine::recommender::set_serenity_candidate_cache(
                         detail_cache,
@@ -1752,6 +1798,9 @@ pub async fn run_serenity_screening(
                     // `result` 同步为其数组形态，避免回退分支又拿到无档位的原始候选。
                     "result": live_candidate_array,
                     "candidates": live_candidate_array,
+                    // 本轮 as-of 降级归因（live 恒空数组），与荐股面板同一字段名、同一形态
+                    "asofDegradations": asof_degradations,
+                    "asOfDate": run_as_of_date,
                     "trends": trends_list,
                     "emptyReason": empty_reason,
                     "source": source,
@@ -1778,6 +1827,8 @@ pub async fn run_serenity_screening(
                 // invoke 返回值与事件 payload 同源（逐档展开），否则非 Tauri 环境
                 // 或事件未到达时，`r.candidates` 又会退回无档位的原始候选。
                 "candidates": live_candidate_array,
+                "asofDegradations": asof_degradations,
+                "asOfDate": run_as_of_date,
                 "trends": trends_list,
                 "emptyReason": empty_reason,
                 "source": source,

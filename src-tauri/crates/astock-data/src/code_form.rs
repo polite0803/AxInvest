@@ -69,6 +69,42 @@ fn exchange_from_tag(tag: &str) -> Option<Exchange> {
     }
 }
 
+/// 国际指数别名（**不是**美股个股）：取数通道与个股不同，不可当个股处理。
+///
+/// 与 `vendors/tencent.rs` 的 `TC_INTL_INDEX` / `vendors/international.rs` 的
+/// `EM_INTL_INDEX` 是同一批别名的不同落点映射；此处只回答「是不是指数」这一个问题。
+const INTL_INDEX_ALIASES: [&str; 7] = ["SPX", "INX", "IXIC", "NDX", "DJI", "DJIA", "HSI"];
+
+/// 美股**个股**代码归一：`AAPL` / `AAPL.US` / `105.AAPL` → `Some("AAPL")`。
+///
+/// 返回 `None` 覆盖：空串、外汇对（含 `/`）、非纯字母的裸码（A 股/港股数字码）、
+/// 超过 5 位、以及国际指数别名。
+///
+/// 存在的理由：跨市场 K 线兜底需要把「美股个股」与「指数 / 港股」分流到不同源 ——
+/// 腾讯 `kline/kline` 对美股个股只回 2 根日线（实测 usAAPL/usTSLA/usMSFT 均为
+/// 「2011-06-02 + 最新一日」），只能由新浪美股日线承接。分流判据放这里，
+/// 避免 lib 与 sina 各写一份（共 3 张表会把别名集合撕裂）。
+pub(crate) fn us_stock_symbol(code: &str) -> Option<String> {
+    let t = code.trim();
+    if t.is_empty() || t.contains('/') {
+        return None;
+    }
+    // 东财 secid 的美股市场位（105=纳斯达克 / 106=纽交所 / 107=美交所）
+    let bare = match t.split_once('.') {
+        Some(("105" | "106" | "107", rest)) => rest,
+        _ => t,
+    };
+    let bare = bare.strip_suffix(".US").or_else(|| bare.strip_suffix(".us")).unwrap_or(bare);
+    if bare.is_empty() || bare.len() > 5 || !bare.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let upper = bare.to_ascii_uppercase();
+    if INTL_INDEX_ALIASES.contains(&upper.as_str()) {
+        return None;
+    }
+    Some(upper)
+}
+
 /// 拆出「裸代码 + 显式市场」。识别 `<裸码>.<SH|SZ|BJ>` 后缀与 `<sh|sz|bj><裸码>` 前缀，
 /// 大小写均不敏感。
 ///
@@ -127,5 +163,30 @@ mod tests {
         assert_eq!(Exchange::Beijing.em_market(), "0");
         assert_eq!(Exchange::Shanghai.tdx_market(), 1);
         assert_eq!(Exchange::Beijing.tdx_market(), 2);
+    }
+
+    #[test]
+    fn us_stock_symbol_normalizes_the_three_forms() {
+        assert_eq!(us_stock_symbol("AAPL"), Some("AAPL".to_string()));
+        assert_eq!(us_stock_symbol("AAPL.US"), Some("AAPL".to_string()));
+        assert_eq!(us_stock_symbol("aapl.us"), Some("AAPL".to_string()));
+        assert_eq!(us_stock_symbol("105.AAPL"), Some("AAPL".to_string()));
+        assert_eq!(us_stock_symbol("106.BABA"), Some("BABA".to_string()));
+    }
+
+    #[test]
+    fn us_stock_symbol_rejects_indices_and_non_us_forms() {
+        // 指数不是个股（通道不同：指数走腾讯 `usINX` 一族）
+        assert_eq!(us_stock_symbol("SPX"), None);
+        assert_eq!(us_stock_symbol("100.SPX"), None);
+        assert_eq!(us_stock_symbol("HSI"), None);
+        assert_eq!(us_stock_symbol("DJIA"), None);
+        // A 股 / 港股 / 外汇 / 超长
+        assert_eq!(us_stock_symbol("600519"), None);
+        assert_eq!(us_stock_symbol("000001.SH"), None);
+        assert_eq!(us_stock_symbol("00700.HK"), None);
+        assert_eq!(us_stock_symbol("usr/CNY"), None);
+        assert_eq!(us_stock_symbol("TOOLONG"), None);
+        assert_eq!(us_stock_symbol(""), None);
     }
 }

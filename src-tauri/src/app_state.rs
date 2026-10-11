@@ -322,6 +322,10 @@ pub struct AppState {
         Arc<tokio::sync::RwLock<axagent_trajectory::ParallelExecutionService>>,
     pub cron_job_store: Arc<axagent_runtime_core::CronJobStore>,
     pub cron_scheduler: Arc<tokio::sync::RwLock<Option<Arc<axagent_runtime::cron::CronScheduler>>>>,
+    /// 时间旅行批次复盘全局互斥锁：同一时刻只允许一个批次在跑。
+    /// as_of 栈是**进程级**的，两个批次并发会互相串扰；批次还要避开 live 流水线时间窗
+    /// （23:50-02:10 / 17:50-18:10），锁在整个后台批次生命周期内持有，结束即释放。
+    pub time_travel_batch_lock: Arc<tokio::sync::Mutex<()>>,
     pub platform_manager: Arc<axagent_runtime::message_gateway::platform_manager::PlatformManager>,
     pub platform_bridge: Arc<axagent_runtime::message_gateway::platform_bridge::PlatformBridge>,
     pub user_profile: Arc<TokioRwLock<axagent_trajectory::UserProfile>>,

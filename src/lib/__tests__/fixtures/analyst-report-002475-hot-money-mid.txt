@@ -1,0 +1,26 @@
+## 立讯精密（002475）资金面追踪分析
+
+**一、主力资金流向（2026-10-10）**
+主力（超大单+大单）净流向拆解：
+- 超大单净流入 +6,057 万元，显示机构/大户仍有承接意愿；
+- 大单净流出 -1.597 亿元，主力整体净流出约 -0.991 亿元。
+结构上呈"超大单进、大单出"的分化，超大单（≥100万单）为正但大单（20-100万）大幅流出，属典型的**高位机构对倒、大户派发**形态，而非单边流入。单日信号，需结合连续性判断。
+
+**二、龙虎榜（事件型，非持续）**
+窗口内可追溯的最近上榜记录为 2026-04-20 与 2026-03-25（日涨幅偏离达7%）：
+- 2026-04-20：三家"机构专用"合计净买入约 1.34 亿元，同时深股通专用、国泰海通上海分公司大额买入，机构+北向共振介入；
+- 2026-03-25：深股通专用净卖出约 3.06 亿元，国泰海通多个散户营业部大额买入。
+该窗口**无游资席位连续接力记录**，且上榜距今已逾5个月，对本档（28日中线）的即时指示有限，主要作为"机构历史参与度"佐证。无游资涨停接力特征。
+
+**三、融资融券（2026-10-08）**
+融资买入 1.35 亿元，融资余额 55.49 亿元，融券余额仅 0.41 亿元（做空极弱）。融资余额处高位，杠杆资金参与度大——既是上行助燃剂，也是回调时的平仓风险源，双向放大波动。
+
+**四、北向资金**
+北向个股净买入自 2024-08-16 起监管停披，仅有沪深股通成交额口径（10-09 合计约 29.67 亿元，环比走高）。该维度**无法判断个股净买卖方向**，属市场级口径缺席，不纳入多空加权。
+
+**五、持续性判断**
+超大单进+大单出的分化叠加融资高余额，指向资金行为为**短期博弈脉冲**而非机构持续建仓；龙虎榜为历史事件、非游资接力。中线看，资金面偏中性略偏空，需警惕高位派发与杠杆平仓。
+
+**数据缺口说明**：北向个股净买为停披（市场级，已豁免）；主力资金流仅有单日切片，缺3-5日连续趋势；融资缺多日余额变动。上述缺口使持续性判断置信度受限。
+
+<!-- VERDICT: {"verdict": "偏空", "bull_score": 38, "bear_score": 62, "bull_points": ["超大单净流入承接", "融券做空极弱"], "bear_points": ["大单净流出1.6亿", "主力整体净流出", "融资高余额杠杆风险", "无游资接力"], "confidence": 55, "direction": "bear", "exitRule": "k_sigma_band", "notApplicable": ["notApplicableMomentum", "notApplicableMicrostructure", "notApplicableBreadth", "notApplicableMacro", "notApplicableSector"], "qualified": {"earningsQuality": "qualityRealizationBeyondHorizon", "supplyShock": "supplyAsRiskNoteOnly"}, "eventCatalyst": "机构对倒与高位派发", "stopSource": "k_sigma_lower_band", "priorSource": "lhb_event_2026Q1", "positionSource": "margin_balance_high", "flowPersistence": "short_term_pulse", "trendStrength": "weak", "valuationBand": "mid_high", "expectationRevision": "slightly_negative", "earningsQuality": "partially_reflected", "supplyShock": "absorbed_in_trend"}} -->

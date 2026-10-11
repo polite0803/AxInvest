@@ -32,6 +32,15 @@ interface PresetColors {
   textSecondary: string;
   textFg2: string;
   primaryColor: string;
+  /**
+   * 压在 `primaryColor` 上的文字色（喂给 antd 的 `colorTextLightSolid`）。
+   * 省略即 antd 默认的 `#fff`。
+   *
+   * ⚠ **主色本身偏浅的档位必须显式声明**，否则主按钮 / Tag / Badge 全部白底白字
+   *   （21th-dark 的 `#ffffff`、cyberpunk-dark 的 `#00f0ff`、paperclip-dark 的
+   *   `#a1a1aa` 三档此前就是这么炸的）。取值口径：该档自己的 `bgBase`。
+   */
+  primaryTextColor?: string;
   successColor: string;
   errorColor: string;
   warningColor: string;
@@ -182,6 +191,7 @@ const PRESETS: Record<ThemePreset, PresetColors> = {
     textSecondary: "rgba(161,161,170,0.85)",
     textFg2: "rgba(200,200,200,0.9)",
     primaryColor: "#a1a1aa",
+    primaryTextColor: "#18181b",
     successColor: "#4ade80",
     errorColor: "#f87171",
     warningColor: "#fbbf24",
@@ -214,6 +224,7 @@ const PRESETS: Record<ThemePreset, PresetColors> = {
     textSecondary: "rgba(160,160,210,0.7)",
     textFg2: "rgba(190,190,230,0.82)",
     primaryColor: "#00f0ff",
+    primaryTextColor: "#0a0a12",
     successColor: "#00ff88",
     errorColor: "#ff4466",
     warningColor: "#ffaa00",
@@ -247,6 +258,7 @@ const PRESETS: Record<ThemePreset, PresetColors> = {
     textSecondary: "rgba(170,170,170,1)",
     textFg2: "rgba(200,200,200,1)",
     primaryColor: "#ffffff",
+    primaryTextColor: "#0a0a0a",
     successColor: "#34d399",
     errorColor: "#ef4444",
     warningColor: "#fbbf24",
@@ -379,6 +391,9 @@ export function useShadcnTheme(
       token: {
         // ── 品牌色 ──
         colorPrimary: effectivePrimary,
+        // 主色上的文字。用户经 DisplaySettings 覆盖主色时，本值仍取档位声明值 ⇒
+        // 自定义一个浅色主色会重新出现白底白字，届时需按主色亮度推导（当前无此入口）。
+        colorTextLightSolid: preset?.primaryTextColor ?? "#ffffff",
         colorLink: effectivePrimary,
         colorSuccess: preset?.successColor ?? "#49aa19",
         colorError: preset?.errorColor ?? "#dc4446",

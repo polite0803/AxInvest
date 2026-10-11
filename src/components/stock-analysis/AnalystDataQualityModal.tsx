@@ -250,9 +250,10 @@ export function AnalystDataQualityModal({
     setEvolutionSuggestions([]);
     try {
       const status = await invoke<{
-        node_type: string;
-        node_id: string;
-        total_feedbacks: number;
+        nodeType: string;
+        nodeId: string;
+        totalFeedbacks: number;
+        issueRate: number;
         status: string;
         suggestions: string[];
       }>("evolve_node_command", {

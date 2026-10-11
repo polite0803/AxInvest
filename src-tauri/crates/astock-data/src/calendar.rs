@@ -179,6 +179,67 @@ pub fn next_trading_day(date: NaiveDate) -> NaiveDate {
     date
 }
 
+/// 从 `date` 起偏移 `n` 个交易日（时间旅行批次的 T+N / T-N 锚点算术）。
+///
+/// 语义：
+/// - `n == 0`：原样返回 `date`（**不要求** `date` 本身是交易日，调用方需自行保证）；
+/// - `n > 0`：`date` 之后第 `n` 个交易日（不含 `date`；若 `date` 非交易日则从次日方向起算，
+///   即与「先归一到最近交易日再偏移」等价的直觉形态）；
+/// - `n < 0`：`date` 之前第 `|n|` 个交易日（不含 `date`）。
+///
+/// 例：`nth_trading_day(2026-09-24(周四), 1)` = 2026-09-28（09-25 中秋休市 + 周末）。
+///
+/// ⚠ 遍历设 800 自然天上限（90 交易日 ≈ 126 自然日，留足春节连休余量）；
+/// 触限返回最后扫描到的日期 —— 仅在日历数据极端缺失时发生，属兜底而非正常路径。
+pub fn nth_trading_day(date: NaiveDate, n: i32) -> NaiveDate {
+    if n == 0 {
+        return date;
+    }
+    let mut candidate = date;
+    let mut remaining = n.unsigned_abs();
+    let step = if n > 0 {
+        Duration::days(1)
+    } else {
+        Duration::days(-1)
+    };
+    for _ in 0..800 {
+        candidate += step;
+        if is_trading_day(&candidate) {
+            remaining -= 1;
+            if remaining == 0 {
+                return candidate;
+            }
+        }
+    }
+    candidate
+}
+
+/// 半开区间 `[start, end)` 内的交易日数量；`end < start` 时按反向区间返回负值。
+///
+/// 用于批次预检（如判断 long 档 hindsight 是否已到期）与 UI 展示。跨度上限 800 自然天，
+/// 超出部分不再计数（当前业务最大区间 90 交易日 ≈ 126 自然日，不触限）。
+pub fn trading_days_between(start: NaiveDate, end: NaiveDate) -> i32 {
+    if start == end {
+        return 0;
+    }
+    let (mut cursor, target, sign) = if end > start {
+        (start, end, 1i32)
+    } else {
+        (end, start, -1i32)
+    };
+    let mut count = 0;
+    for _ in 0..800 {
+        if cursor >= target {
+            break;
+        }
+        if is_trading_day(&cursor) {
+            count += 1;
+        }
+        cursor += Duration::days(1);
+    }
+    sign * count
+}
+
 /// 获取当前北京时间（UTC+8），正确处理日期跨夜。
 ///
 /// 返回 (hour, minute, beijing_date)：
@@ -528,5 +589,49 @@ mod tests {
         assert_eq!(n, 0, "该序列无缺失工作日（06-17 是周日）⇒ 无新增休市日");
         assert!(is_trading_day(&sat), "K 线里存在的日期必须被自证为交易日（推翻周末/表内误标）");
         clear_remote_holidays_for_test();
+    }
+
+    /// 交易日偏移算术：中秋 2026-09-25（周五休市）+ 周末形成 3 天非交易日缺口。
+    #[test]
+    fn nth_trading_day_skips_holiday_and_weekend() {
+        let thu = NaiveDate::from_ymd_opt(2026, 9, 24).unwrap();
+        assert_eq!(nth_trading_day(thu, 0), thu, "n=0 原样返回");
+        // T+1：跳过 09-25 休市与 09-26/27 周末，落到 09-28（周一）
+        assert_eq!(nth_trading_day(thu, 1), NaiveDate::from_ymd_opt(2026, 9, 28).unwrap());
+        // T+2 = 09-29，T+3 = 09-30（实机自证开市）
+        assert_eq!(nth_trading_day(thu, 2), NaiveDate::from_ymd_opt(2026, 9, 29).unwrap());
+        assert_eq!(nth_trading_day(thu, 3), NaiveDate::from_ymd_opt(2026, 9, 30).unwrap());
+        // T-1 = 09-23（周三）
+        assert_eq!(nth_trading_day(thu, -1), NaiveDate::from_ymd_opt(2026, 9, 23).unwrap());
+        // 反向可逆：T+3 再 T-3 回到起点
+        assert_eq!(nth_trading_day(NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(), -3), thu);
+    }
+
+    /// 锚点本身是非交易日（如用户选了周日）：偏移从相邻方向起算，不停留在锚点。
+    #[test]
+    fn nth_trading_day_from_non_trading_anchor() {
+        let sun = NaiveDate::from_ymd_opt(2026, 9, 27).unwrap();
+        assert_eq!(sun.weekday(), Weekday::Sun);
+        // 向前：周日→周六→中秋→09-24（第 1 个交易日）；第 2 个 = 09-23
+        assert_eq!(nth_trading_day(sun, -1), NaiveDate::from_ymd_opt(2026, 9, 24).unwrap());
+        assert_eq!(nth_trading_day(sun, -2), NaiveDate::from_ymd_opt(2026, 9, 23).unwrap());
+        // 向后：09-28
+        assert_eq!(nth_trading_day(sun, 1), NaiveDate::from_ymd_opt(2026, 9, 28).unwrap());
+        // n=0 不归一（调用方责任）
+        assert_eq!(nth_trading_day(sun, 0), sun);
+    }
+
+    #[test]
+    fn trading_days_between_counts_half_open_interval() {
+        let thu = NaiveDate::from_ymd_opt(2026, 9, 24).unwrap();
+        let mon = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        // [周四, 周一)：周四 1 个（周五休市、周末不计）
+        assert_eq!(trading_days_between(thu, mon), 1);
+        // 反向为负值
+        assert_eq!(trading_days_between(mon, thu), -1);
+        // 同点为 0
+        assert_eq!(trading_days_between(thu, thu), 0);
+        // [09-24, 10-01)：09-24/28/29/30 共 4 个（端点 10-01 国庆休市且为半开排除端）
+        assert_eq!(trading_days_between(thu, NaiveDate::from_ymd_opt(2026, 10, 1).unwrap()), 4);
     }
 }

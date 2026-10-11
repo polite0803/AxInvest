@@ -2,6 +2,7 @@ import { PageHeader } from "@/components/stock-analysis/_shared/PageHeader";
 import { AsOfDatePicker } from "@/components/time-travel/AsOfDatePicker";
 import { ReplayBadge, ReplayWatermark } from "@/components/time-travel/ReplayBadge";
 import { ReplaySweep } from "@/components/time-travel/ReplaySweep";
+import { TimeTravelBatchCard } from "@/components/time-travel/TimeTravelBatchCard";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Alert, Button, Card, Empty, Space, Typography } from "antd";
 import { RotateCcw, Zap } from "lucide-react";
@@ -144,6 +145,8 @@ export function ReplayWorkbench() {
           title={t("replayWorkbench.notice")}
           style={{ marginBottom: 16 }}
         />
+
+        <TimeTravelBatchCard />
 
         <ReplaySweep />
 

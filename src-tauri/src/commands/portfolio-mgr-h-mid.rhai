@@ -228,9 +228,32 @@ if tw <= 0.0 || !prior_ok {
     gaps.push("本档无在场方向腿或先验不可得 ⇒ 动作退为观望，不产出仓位");
 }
 
+// ── ⑤′ 档内风控否决（2026-10-10 B 裁定）──
+// 否决必须落在**本档结论**上，否则呈现层会出现「主档观望 / 本档 tag 买入」的同屏分裂
+//   （实证兆易创新 603986：中期档 tag 买入、主档被主链否决为观望，看着像两套结论）。
+// 本档 `overall_risk` 来自本档风险节点（`cls-risk-level-<档>`），与主档拿的风险档同源。
+// `original_action` 保留否决前的方向值：下游冲突判定（`decision.rs`）与呈现层「何以降级」
+//   都读它 —— 否决是政策叠加，不是方向改判，方向信息不许被政策吞掉。
+// 幂等：主链仍会对被选档再否决一次（算法档可能比本档更严 ⇒ 仍要收紧），而
+//   `pm_risk_veto` 对已否决值不变（极高→观望 / 高→持有 再否决仍是自身）⇒ 主链那次天然 no-op。
+let original_action = action;
+let tier_vetoed = false;
+if present(overall_risk) && type_of(overall_risk) == "string" {
+    action = pm_risk_veto(action, overall_risk);
+    tier_vetoed = original_action != action;
+}
+let tier_veto_note = "";
+if tier_vetoed {
+    gaps.push(`本档风控否决:${original_action}→${action}(本档风险档=${overall_risk})`);
+    tier_veto_note = ` 风控=档内否决(${original_action}→${action})`;
+}
+
 #{
     action: action,
-    verdict: `决策=${action} 置信=${(confidence*1000.0).round()/10.0}% 档=${h} 出场=k_sigma_band 带位=${gate_state}`,
+    // 档内否决前的方向值：读侧「何以降级」与冲突判定读它，不得从 verdict 文案反解。
+    originalAction: original_action,
+    tierVetoed: tier_vetoed,
+    verdict: `决策=${action} 置信=${(confidence*1000.0).round()/10.0}% 档=${h} 出场=k_sigma_band 带位=${gate_state}${tier_veto_note}`,
     positionPct: (position*10.0).round()/10.0,
     confidence: (confidence*1000.0).round()/10.0,
     posterior: (posterior*100.0).round()/10.0,

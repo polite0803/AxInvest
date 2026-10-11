@@ -1,6 +1,15 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
 import type { JevJudgment } from "@/lib/agentOutput";
-import { analystBaseOf, classifyDirectionText, classifySentiment } from "@/lib/stock-analysis-utils";
+import {
+  analystBaseOf,
+  classifyDirectionText,
+  classifySentiment,
+  type Consensus,
+  deriveAnalystConsensus,
+  extractBullBearScores,
+  normalizeVerdictScore,
+  tallyAnalystSentiment,
+} from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore } from "@/stores";
 import { Button, Card, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
@@ -9,8 +18,6 @@ import { useTranslation } from "react-i18next";
 import { AnalystReportCard } from "./AnalystReportCard";
 import { HorizonScopeNotice } from "./HorizonScopeNotice";
 import { cleanToolCallTags } from "./utils";
-
-type Consensus = "bullish" | "bearish" | "neutral" | "divided";
 
 // ── 分析师 **base** 清单（store `analystReports` 的键域，去 `a-` 前缀） ──
 // v133（B2-2）：a-news 已摘除（公告通道由 a-catalyst 承载）；value-investor 上线。
@@ -273,73 +280,11 @@ function AnalystPlaceholderCard({
 }
 
 /**
- * 从报告中提取结构化多空分数（与 AnalystReportCard 同源）
- * 优先解析 <!-- VERDICT: {bull_score, bear_score} --> 格式
- * 回退到 classifySentiment 关键词匹配
+ * 多空计票 / 结构化分数解析 / 共识推导的单一真相源在
+ * `@/lib/stock-analysis-utils`（`tallyAnalystSentiment` / `extractBullBearScores` /
+ * `deriveAnalystConsensus`）。本组件与页面顶部共识条、chat 紧凑摘要共用同一份口径，
+ * 禁止在此再复制解析逻辑（2026-10-10：三处副本漂移曾导致顶部 10/10、下方 9/11）。
  */
-function extractBullBearScores(report: string): { bull: number; bear: number } | null {
-  // 1) 尝试 VERDICT JSON 格式（与 AnalystReportCard.tryParseVerdictFormat 一致）
-  const verdictIdx = report.indexOf("<!-- VERDICT:");
-  if (verdictIdx !== -1) {
-    try {
-      const jsonStr = report.slice(verdictIdx + "<!-- VERDICT:".length);
-      const jsonEnd = jsonStr.indexOf("-->");
-      if (jsonEnd !== -1) {
-        const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
-        const bull = meta.bull_score ?? meta.strength_score ?? null;
-        const bear = meta.bear_score ?? null;
-        if (typeof bull === "number" || typeof bear === "number") {
-          return {
-            bull: typeof bull === "number" ? (bull > 1 ? bull : bull * 100) : 0,
-            bear: typeof bear === "number" ? (bear > 1 ? bear : bear * 100) : 0,
-          };
-        }
-        // 有 stance/verdict 字段但没有分数 → 用 stance 判断
-        // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
-        //   原为内联正则 `/看多|买入|增持|做多|看涨|bull/`，与同文件表格「判断」列的
-        //   `/看多|bull|偏多|买入|增持|正面/` 值域不同 ⇒ 同一 verdict 两处结论可能相反。
-        const dir = classifyDirectionText(meta.verdict ?? meta.stance);
-        if (dir === "bull") { return { bull: 60, bear: 0 }; }
-        if (dir === "bear") { return { bull: 0, bear: 60 }; }
-      }
-    } catch { /* ignore */ }
-  }
-
-  // 2) 尝试直接从文本正则匹配 bull_score/bear_score
-  try {
-    const bullMatch = report.match(/"bull_score"\s*:\s*(\d+(?:\.\d+)?)/);
-    const bearMatch = report.match(/"bear_score"\s*:\s*(\d+(?:\.\d+)?)/);
-    if (bullMatch || bearMatch) {
-      return {
-        bull: bullMatch ? parseFloat(bullMatch[1]) : 0,
-        bear: bearMatch ? parseFloat(bearMatch[1]) : 0,
-      };
-    }
-  } catch { /* ignore */ }
-
-  // 3) 无结构化数据 → 返回 null，调用方用 classifySentiment fallback
-  return null;
-}
-
-/** 根据多空比例推共识：
- *  - 一方 > 65% → 共识看多 / 共识看空
- *  - 双方都有且 35-65% → 分歧
- *  - 全部中性 / 单边极小 → 中性
- */
-function deriveConsensus(
-  bullish: number,
-  bearish: number,
-  neutral: number,
-): Consensus {
-  const total = bullish + bearish + neutral;
-  if (total === 0) { return "neutral"; }
-  const bullRatio = bullish / total;
-  const bearRatio = bearish / total;
-  if (bullRatio > 0.65) { return "bullish"; }
-  if (bearRatio > 0.65) { return "bearish"; }
-  if (bullRatio > 0 && bearRatio > 0) { return "divided"; }
-  return "neutral";
-}
 
 export function AnalystReportGrid() {
   const { t } = useTranslation();
@@ -356,16 +301,18 @@ export function AnalystReportGrid() {
   const isJevMode = Object.keys(jevJudgments).length > 0;
   const isRunning = workflowStatus === "running" || workflowStatus === "loading";
 
-  // Aggregate sentiment from reports — 优先用结构化 bull_score/bear_score（与单个分析师卡片一致）
+  // Aggregate sentiment from reports — 计票口径走 `tallyAnalystSentiment` 单一真相源
+  // （结构化 bull_score/bear_score 1.2 倍阈值 → 关键词兜底），与页面顶部共识条、chat
+  // 紧凑摘要完全同源。
   const sentiment = useMemo(() => {
-    let bullish = 0;
-    let bearish = 0;
-    let neutral = 0;
     if (isJevMode) {
       // 快速链：维度判定档位直接映射多空（与 `JEV_BULL/BEAR_CATEGORIES` 同一份词表）。
       // 口径与原链一致（都是「每个维度记一票」）⇒ 共识条与色彩条无需任何改动。
       // 未产出判定的维度**不计票**（既不算多也不算空）—— 否则失败的维度会被记成中性，
       // 让「10 项里 7 项没跑出来」看起来像「10 项都判了中性」。
+      let bullish = 0;
+      let bearish = 0;
+      let neutral = 0;
       for (const nodeId of JEV_DIMENSION_NODE_IDS) {
         const category = jevJudgments[nodeId]?.category;
         if (category === undefined) { continue; }
@@ -373,33 +320,13 @@ export function AnalystReportGrid() {
         else if (JEV_BEAR_CATEGORIES.has(category)) { bearish++; }
         else { neutral++; }
       }
-    } else {
-      for (const rawReport of Object.values(analystReports)) {
-        const report = cleanToolCallTags(rawReport);
-        // 先尝试提取结构化分数（与 AnalystReportCard 同源）
-        const scores = extractBullBearScores(report);
-        if (scores) {
-          // 有结构化分数：用多空对比判断方向
-          if (scores.bull > scores.bear * 1.2) { bullish++; }
-          else if (scores.bear > scores.bull * 1.2) { bearish++; }
-          else { neutral++; } // 接近 → 中性/分歧
-        } else {
-          // 无结构化数据：回退到关键词匹配
-          const s = classifySentiment(report);
-          if (s === "bullish") { bullish++; }
-          else if (s === "bearish") { bearish++; }
-          else { neutral++; }
-        }
-      }
+      return { bullish, bearish, neutral, total: bullish + bearish + neutral };
     }
-    const total = bullish + bearish + neutral;
-    return { bullish, bearish, neutral, total };
+    const cleanedReports = Object.values(analystReports).map((raw) => cleanToolCallTags(raw));
+    return tallyAnalystSentiment(cleanedReports);
   }, [analystReports, jevJudgments, isJevMode]);
 
-  const consensus = useMemo(
-    () => deriveConsensus(sentiment.bullish, sentiment.bearish, sentiment.neutral),
-    [sentiment],
-  );
+  const consensus = useMemo(() => deriveAnalystConsensus(sentiment), [sentiment]);
 
   // ── 统一构造显示列表：done / pending / failed（v133：按逐档实例展开） ──
   // store `analystReports` 的键现在是**逐档实例**（`market-analyst--mid`）或裸 base
@@ -607,9 +534,9 @@ export function AnalystReportGrid() {
           ? (rawVerdict as Record<string, unknown>).verdict as string
           : null)
         : rawVerdict as string | null;
-      let bull = typeof v.bull_score === "number" ? (v.bull_score > 1 ? v.bull_score : v.bull_score * 10) : null;
-      let bear = typeof v.bear_score === "number" ? (v.bear_score > 1 ? v.bear_score : v.bear_score * 10) : null;
-      const conf = typeof v.confidence === "number" ? (v.confidence > 1 ? v.confidence : v.confidence * 10) : null;
+      let bull = typeof v.bull_score === "number" ? normalizeVerdictScore(v.bull_score) : null;
+      let bear = typeof v.bear_score === "number" ? normalizeVerdictScore(v.bear_score) : null;
+      const conf = typeof v.confidence === "number" ? normalizeVerdictScore(v.confidence) : null;
 
       // V62 fix: 不论 VERDICT/JSON 解析成功与否，都用 extractBullBearScores 补充。
       // 解决 LLM 输出 JSON 能解析但缺 bull_score/bear_score 字段时，全部列空的问题。

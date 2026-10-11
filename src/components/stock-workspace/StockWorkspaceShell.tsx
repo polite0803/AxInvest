@@ -186,7 +186,7 @@ export function StockWorkspaceShell() {
             className="flex items-center gap-1.5 px-3 py-1 rounded text-sm transition-colors"
             style={{
               background: isActive ? "var(--accent)" : "transparent",
-              color: isActive ? "white" : "var(--muted)",
+              color: isActive ? "var(--accent-fg)" : "var(--muted)",
             }}
           >
             {tab.icon}

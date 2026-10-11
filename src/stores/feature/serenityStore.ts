@@ -1,3 +1,4 @@
+import type { AsOfDegradationEntry } from "@/types";
 import { create } from "zustand";
 
 // ── 类型 ──
@@ -154,6 +155,18 @@ interface SerenityState {
    * 一个无解释的 Empty 占位。
    */
   emptyReason: string | null;
+  /**
+   * **本轮回放运行**的 as-of 取数降级归因（后端按运行边界水位切片，live 恒空数组）。
+   * 与荐股侧 `RecoResponse.asofDegradations` 同形、同一 wire（只少 `as_of`，
+   * 同值日期由下方 `lastRunAsOfDate` 承载）。没有它，回放候选与实盘候选在 UI 上不可分辨。
+   */
+  asofDegradations: Array<Omit<AsOfDegradationEntry, "as_of">>;
+  /**
+   * **本轮运行**实际使用的数据截止日（由后端 payload 回灌，live 为 null）。
+   * ⚠ 刻意不读全局时间锚点：T11 同族缺陷就是「按 as-of 取数却显示实时分析」——
+   * 锚点在运行后被改动时，渲染层会跟着改后的值走，说的就不是本轮口径。
+   */
+  lastRunAsOfDate: string | null;
 
   setRunning: (v: boolean) => void;
   setRunningChain: (c: SerenityChainId | null) => void;
@@ -166,6 +179,8 @@ interface SerenityState {
   addStep: (log: StepLog) => void;
   setCurrentNode: (id: string | null) => void;
   setEmptyReason: (r: string | null) => void;
+  setAsofDegradations: (v: Array<Omit<AsOfDegradationEntry, "as_of">>) => void;
+  setLastRunAsOfDate: (v: string | null) => void;
   clearSteps: () => void;
   reset: () => void;
 }
@@ -183,6 +198,8 @@ const initialState = {
   steps: [] as StepLog[],
   currentNodeId: null as string | null,
   emptyReason: null as string | null,
+  asofDegradations: [] as Array<Omit<AsOfDegradationEntry, "as_of">>,
+  lastRunAsOfDate: null as string | null,
 };
 
 export const useSerenityStore = create<SerenityState>((set) => ({
@@ -211,6 +228,8 @@ export const useSerenityStore = create<SerenityState>((set) => ({
     }),
   setCurrentNode: (id) => set({ currentNodeId: id }),
   setEmptyReason: (r) => set({ emptyReason: r }),
+  setAsofDegradations: (v) => set({ asofDegradations: v }),
+  setLastRunAsOfDate: (v) => set({ lastRunAsOfDate: v }),
   clearSteps: () => set({ steps: [], currentNodeId: null }),
   reset: () => set(initialState),
 }));

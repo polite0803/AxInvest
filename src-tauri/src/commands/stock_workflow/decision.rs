@@ -1059,24 +1059,45 @@ pub(crate) fn extract_decision_json(wf: &Workflow) -> Option<String> {
             // 错误码资源键转可读文案：reasoning 内联可读错误，不再让用户翻
             // JSON 子字段；原始错误串（含资源键码）保留在 diagnostics.errorCode。
             let humanized = humanize_node_error(&error_msg);
-            let hint = if state.status == NodeStatus::Skipped {
-                "portfolio-mgr 被 Skipped：检查其上游依赖节点（trader/research-mgr/a-catalyst/t-risk 等）是否失败或超时，错误在对应 node_states[上游].error。"
+            // 上下文先采集：`hint` 要消费 `root_failure` 才能给出**与状态相符**的归因。
+            let ctx = PlaceholderContext::collect(wf, Some("portfolio-mgr"));
+            let status_label = format!("{:?}", state.status);
+            // ⚠️ 2026-10-10 订正：旧实现把「非 Completed 且非 Skipped」一律当节点**自身**
+            // 运行失败（`else` ⇒「Rhai 运行失败：检查 present()/除零」），而 Pending/Ready
+            // 的真实语义是**该节点从未被调度**（上游依赖没放行）—— 与 Rhai 毫无关系。
+            // 实证（002049 / 2026-10-10）：nodeStatus=Pending、rootFailureNode=t-limitup-pool
+            // （辅助取数超时），hint 却让用户去查 `present()`/除零 —— 同一份 JSON 里
+            // `reasoning` / `rootFailure*` 讲根因、`hint` 讲 Rhai，两套归因自相矛盾。
+            let hint: String = if state.status == NodeStatus::Skipped {
+                "portfolio-mgr 被 Skipped：检查其上游依赖节点（trader/research-mgr/a-catalyst/t-risk 等）是否失败或超时，错误在对应 node_states[上游].error。".to_string()
             } else if state.status == NodeStatus::Completed {
                 // V71: 节点跑成功但结果形状不含 action —— 检查上游 input_mapping 是否解析到空值
-                "portfolio-mgr 已执行但结果无可辨识 action：优先检查该节点 input_mapping（data 键是否解析为 null）与 Rhai 是否为每一条 return 路径都输出含 action 的对象。"
-            } else {
+                "portfolio-mgr 已执行但结果无可辨识 action：优先检查该节点 input_mapping（data 键是否解析为 null）与 Rhai 是否为每一条 return 路径都输出含 action 的对象。".to_string()
+            } else if state.status == NodeStatus::Failed {
                 "portfolio-mgr Rhai 运行失败：检查未走 present() 直接引用的变量、除零或类型错误。"
+                    .to_string()
+            } else if let Some((nid, err)) = &ctx.root_failure {
+                format!(
+                    "portfolio-mgr 从未执行（状态 {status_label}）：上游节点 `{nid}` 已失败 —— {err}。\
+                     引擎对 Failed 上游的依赖边**默认阻塞**（须在该边下游节点上设 `continue_on_fail=true` 才放行），\
+                     故 `portfolio-mgr` 一直等不到就绪条件。先修 `{nid}`，或按设计给它下游放开容错。"
+                )
+            } else {
+                format!(
+                    "portfolio-mgr 从未执行（状态 {status_label}）：其依赖未全部就绪，但回溯不到 Failed 节点。\
+                     检查是否有节点长期停在 Pending/Ready（调度未推进），或本轮被整体超时中止。"
+                )
             };
             // P0-5(2026-09-14): 收敛到单一构造点。
             // 原先此处与 `conservative_placeholder` 是两份结构相同的手写占位
             // （仅此处多一个 errorCode），属「同一能力 N 份实现」——
             // 且两份都把「节点没产出决策」写成 action="观望"。
             return serde_json::to_string(&conservative_placeholder(
-                &format!("{:?}", state.status),
+                &status_label,
                 &humanized,
-                hint,
+                &hint,
                 Some(error_msg.as_str()),
-                &PlaceholderContext::collect(wf, Some("portfolio-mgr")),
+                &ctx,
             ))
             .ok();
         }
@@ -1254,11 +1275,32 @@ fn conservative_placeholder(
     fallback.insert("riskLevel".to_string(), json!("未知"));
     fallback.insert("timeHorizon".to_string(), json!("短期"));
     // 用户可读的 reasoning：优先讲**根因**，其次才是本节点自己的状态。
-    let reasoning = match (&ctx.root_failure, ctx.skipped_nodes.len()) {
-        (Some((nid, err)), n) if n > 0 => format!(
-            "组合管理节点未产出有效决策（数据缺失，非观望结论）。根因：上游节点 `{nid}` 执行失败 —— {err}。\
-             该失败已被引擎判定为不可继续，{n} 个下游节点随即被级联跳过（含 portfolio-mgr），因此本次没有决策。"
-        ),
+    //
+    // ⚠️ 2026-10-10 订正：「N 个节点被级联跳过」只计**故障传播导致**的跳过
+    // （`upstream_failed` / `upstream_skipped`）。旧实现把 `skipped_nodes` 全量计入，
+    // 而该清单同时含 `disabled` / `branch_not_taken`（配置意图，与本次失败无关）⇒
+    // 分支持续宣称「（含 portfolio-mgr）」。实证 002049 / 2026-10-10：n=1 而唯一被
+    // 跳过的正是**未启用**的 `sim-verify`，`portfolio-mgr` 当时是 Pending —— 文案凭空
+    // 把「从未调度的节点」算成「被级联跳过」，与同一对象的 `diagnostics.nodeStatus` 打架。
+    // 「故障传播型跳过」判据：`upstream_failed`（真故障第一跳）/ `upstream_skipped`（第二跳起）。
+    fn is_cascade_skip(s: &SkippedNode) -> bool {
+        s.reason == "upstream_failed" || s.reason == "upstream_skipped"
+    }
+    let n_cascade = ctx.skipped_nodes.iter().filter(|s| is_cascade_skip(s)).count();
+    let pm_was_cascade_skipped =
+        ctx.skipped_nodes.iter().any(|s| is_cascade_skip(s) && s.node_id == "portfolio-mgr");
+    let reasoning = match (&ctx.root_failure, n_cascade) {
+        (Some((nid, err)), n) if n > 0 => {
+            let pm_note = if pm_was_cascade_skipped {
+                "（含 portfolio-mgr）"
+            } else {
+                ""
+            };
+            format!(
+                "组合管理节点未产出有效决策（数据缺失，非观望结论）。根因：上游节点 `{nid}` 执行失败 —— {err}。\
+                 该失败未被容错放行，{n} 个下游节点随即被级联跳过{pm_note}，因此本次没有决策。"
+            )
+        },
         (Some((nid, err)), _) => format!(
             "组合管理节点未产出有效决策（数据缺失，非观望结论）。根因：上游节点 `{nid}` 执行失败 —— {err}。"
         ),
@@ -1267,7 +1309,7 @@ fn conservative_placeholder(
         },
         (None, n) => format!(
             "组合管理节点未产出有效决策（数据缺失，非观望结论）。原因：{node_error}；\
-             另有 {n} 个节点被跳过（未发现 Failed 节点，疑为分支未选中或上游越界）。"
+             另有 {n} 个节点因上游失败被跳过，但未能回溯到具体的 Failed 节点（其上游可能不在本次图中）。"
         ),
     };
     fallback.insert("reasoning".to_string(), json!(reasoning));
@@ -1538,12 +1580,42 @@ pub(crate) fn compute_decision_agreement(
     // 归一化操作字符串
     let norm = |s: &str| s.trim().to_lowercase().replace([' ', '/', '_', '\u{3000}'], "");
 
-    // ── 公式字段 ──
-    let f_action = fj.get("action").and_then(|v| v.as_str().map(norm));
-    let f_pos = fj.get("positionPct").and_then(|v| v.as_f64());
-    let f_conf = fj.get("confidence").and_then(|v| v.as_f64());
+    // ── 3a（2026-10-10，用户批准选项 (i)）：用 LLM 自报期限把公式侧对齐到**同档** ──
+    //   顶层公式决策 = 主档（四路分支选出的那一档），而 LLM 自报 `timeHorizon` 可能是**另一档**
+    //   ⇒ 直接比两侧「动作」是在比两道不同的题。实证 002241/2026-10-10：公式主档
+    //   `ultra_short`/2 天判买入，LLM 自报 `mid`/28 天判观望 ⇒ 被判「反向」。
+    //   此处把公式侧换成 `decisionsByHorizon[LLM 档]` 那一行（同档才可比）。
+    //   降级：LLM 未报档 / 公式缺该档行（该路分支未产出，已批口径 A）⇒ 退回顶层（现行为）。
+    let llm_period = lj
+        .get("timeHorizon")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.trim().parse::<axagent_harness::holding_period::Period>().ok());
+    let f_src = llm_period
+        .map(|p| p.camel_key())
+        .and_then(|k| fj.get("decisionsByHorizon").and_then(|d| d.get(k)))
+        .filter(|row| row.get("action").is_some())
+        .unwrap_or(&fj);
+
+    // ── 公式字段（取自 f_src：同档行优先，缺席退回顶层）──
+    // ⚠ 2026-10-10（B 裁定）：逐档行的 `action` 现在是**档内风控否决后**的终值，而 LLM 侧的
+    //   `action` 天然是**未叠加风控政策**的原始方向判断 ⇒ 直接比会把「本方风控政策」记成
+    //   「两视角方向不一致」。本维度要度量的是两侧**方向判断**是否同向，故逐档行优先取
+    //   `originalAction`（否决前的方向值），缺席才退回 `action`（主链顶层本就没有该键，
+    //   其 `action` 已是主档终值 ⇒ 退回即现状，与 llm_period 对齐同档那条 3a 口径一致）。
+    let f_action = f_src
+        .get("originalAction")
+        .or_else(|| f_src.get("action"))
+        .and_then(|v| v.as_str().map(norm));
+    let f_pos = f_src.get("positionPct").and_then(|v| v.as_f64());
+    let f_conf = f_src.get("confidence").and_then(|v| v.as_f64());
     // V65: 公式 riskLevel（data_gaps 解析已于 2026-09-21 随该维度一并移除）
-    let f_risk = fj.get("riskLevel").and_then(|v| v.as_str()).map(norm).unwrap_or_default();
+    //   ⚠ 逐档行里的风险键是 `riskCategory`（分支脚本产出），顶层才是 `riskLevel` ⇒ 两者都收。
+    let f_risk = f_src
+        .get("riskLevel")
+        .or_else(|| f_src.get("riskCategory"))
+        .and_then(|v| v.as_str())
+        .map(norm)
+        .unwrap_or_default();
 
     // ── LLM 字段（V65: trader 现在输出完整字段）──
     let l_action = lj.get("action").and_then(|v| v.as_str().map(norm));
@@ -1557,8 +1629,13 @@ pub(crate) fn compute_decision_agreement(
         .map(|arr| arr.len() as i32)
         .unwrap_or(0);
 
-    // V50: 保存原始 action 值用于诊断展示
-    let f_action_raw = fj.get("action").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+    // V50: 保存原始 action 值用于诊断展示（同档对齐后取 f_src 的原始串）
+    let f_action_raw = f_src
+        .get("originalAction")
+        .or_else(|| f_src.get("action"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
     let l_action_raw = lj.get("action").and_then(|v| v.as_str()).unwrap_or("?").to_string();
     // 预计算维度差值
     let pos_gap: Option<f64> = match (f_pos, l_pos) {
@@ -1596,6 +1673,16 @@ pub(crate) fn compute_decision_agreement(
         // 中性但不同义: 持有 vs 观望 = 10
         (Some(ActionKind::Hold), Some(ActionKind::Wait))
         | (Some(ActionKind::Wait), Some(ActionKind::Hold)) => 10.0,
+        // 2026-10-10：倾向 vs 观望（偏多/偏空 ↔ 观望）= 6。
+        //   原实现让这一对直接落进下面的「对立方向 0」兜底 ⇒ 「增持 vs 观望」与
+        //   「买入 vs 卖出」同分同标签（conflictType=opposite_direction、
+        //   actionNote=opposite），前端据此显示「反向 / 建议复核」。
+        //   但「倾向 vs 观望」是**立场轻重的分歧**，不是多空对立 —— 只有买方对卖方
+        //   （bull × bear）才算对立。实证 002241/2026-10-10：公式增持 vs LLM 观望 被判「反向」。
+        (Some(ActionKind::Buy | ActionKind::Increase), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Buy | ActionKind::Increase)) => 6.0,
+        (Some(ActionKind::Sell | ActionKind::Reduce), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Sell | ActionKind::Reduce)) => 6.0,
         // 观望 vs 不确定 = 6（观望与「说不好」比持有更接近）
         (Some(ActionKind::Wait), Some(ActionKind::Uncertain))
         | (Some(ActionKind::Uncertain), Some(ActionKind::Wait)) => 6.0,
@@ -1609,6 +1696,17 @@ pub(crate) fn compute_decision_agreement(
         // 单侧缺失 / 未识别值域
         _ => 15.0,
     };
+    // 2026-10-10：倾向 vs 观望 —— 「立场轻重」的分歧，不是多空对立。
+    //   仅上方第 1646-1649 行那四对算「轻分歧」：不进 `opposite_direction`（那是买方对
+    //   卖方的专属标签），也不把 `action_ok` 打到「矛盾」。用于 002241/2026-10-10
+    //   「公式增持 vs LLM 观望」被误判为「反向 / 建议复核」的根因修复。
+    let lean_vs_wait = matches!(
+        (f_kind, l_kind),
+        (Some(ActionKind::Buy | ActionKind::Increase), Some(ActionKind::Wait))
+            | (Some(ActionKind::Wait), Some(ActionKind::Buy | ActionKind::Increase))
+            | (Some(ActionKind::Sell | ActionKind::Reduce), Some(ActionKind::Wait))
+            | (Some(ActionKind::Wait), Some(ActionKind::Sell | ActionKind::Reduce))
+    );
 
     // ── V65: positionPct 评分（满分 20，原满分 30 的 2/3）──
     let pos_score: f64 = match (f_pos, l_pos) {
@@ -1663,7 +1761,12 @@ pub(crate) fn compute_decision_agreement(
         1 => 8.0,  // 相邻
         _ => 0.0,  // 跨级
     };
-    let f_risk_raw = fj.get("riskLevel").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+    let f_risk_raw = f_src
+        .get("riskLevel")
+        .or_else(|| f_src.get("riskCategory"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("?")
+        .to_string();
     let l_risk_raw = lj.get("riskLevel").and_then(|v| v.as_str()).unwrap_or("?").to_string();
 
     // ── 2026-09-21 移除 data_gaps 评分段 ──
@@ -1732,6 +1835,11 @@ pub(crate) fn compute_decision_agreement(
         (Some(a), Some(b)) if is_bear_k(a) && is_bear_k(b) => Some(20.0),
         (Some(ActionKind::Hold), Some(ActionKind::Wait))
         | (Some(ActionKind::Wait), Some(ActionKind::Hold)) => Some(10.0),
+        // 2026-10-10：与主 `action_score` 同尺度镜像 —— 偏多/偏空 ↔ 观望 = 6（非对立）
+        (Some(ActionKind::Buy | ActionKind::Increase), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Buy | ActionKind::Increase)) => Some(6.0),
+        (Some(ActionKind::Sell | ActionKind::Reduce), Some(ActionKind::Wait))
+        | (Some(ActionKind::Wait), Some(ActionKind::Sell | ActionKind::Reduce)) => Some(6.0),
         (Some(ActionKind::Wait), Some(ActionKind::Uncertain))
         | (Some(ActionKind::Uncertain), Some(ActionKind::Wait)) => Some(6.0),
         (Some(ActionKind::Hold), Some(ActionKind::Uncertain))
@@ -1757,7 +1865,11 @@ pub(crate) fn compute_decision_agreement(
         "all_agree"
     } else if action_score == 0.0 {
         "opposite_direction"
-    } else if action_score <= 5.0 {
+    } else if lean_vs_wait || action_score <= 5.0 {
+        // 2026-10-10：倾向 vs 观望（得 6）既不是「对立」也不该被下面的 confidence_gap 兜底
+        //   —— 归入 action_divergence。**复用既有冲突类型，不新增值**：前端
+        //   `CompactDecisionComparison` 对未知 conflictType 会原样渲染裸串。
+        //   只有 action_score == 0（买方对卖方）才记 opposite_direction。
         "action_divergence"
     } else if pos_score == 0.0 && f_pos.is_some() && l_pos.is_some() {
         "position_gap"
@@ -1767,7 +1879,12 @@ pub(crate) fn compute_decision_agreement(
         "confidence_gap"
     };
     // action_note 分类
-    let action_note: &str = if action_score >= 30.0 {
+    let action_note: &str = if lean_vs_wait {
+        // 2026-10-10：倾向 vs 观望 = 「分歧」而非「反向」。新值 —— 前端
+        //   `DecisionComparisonPanel` 对非 opposite/same_direction 的 actionNote 一律兜底
+        //   `t("stockAnalysis.decision.disagreement")`，无需新增 i18n。
+        "lean_vs_wait"
+    } else if action_score >= 30.0 {
         "exact_match"
     } else if action_score >= 20.0 {
         "same_direction"
@@ -1786,7 +1903,7 @@ pub(crate) fn compute_decision_agreement(
     Some(AgreementBreakdown {
         total,
         action_score,
-        action_ok: action_score >= 20.0,
+        action_ok: action_score >= 20.0 || lean_vs_wait,
         action_note: action_note.to_string(),
         formula_action: f_action_raw,
         llm_action: l_action_raw,
@@ -2800,6 +2917,211 @@ mod tests {
         assert!(reasoning.contains("bear-r3"), "reasoning 缺根因节点: {reasoning}");
         assert!(reasoning.contains("504"), "reasoning 缺根因错误: {reasoning}");
         assert!(reasoning.contains("2 个下游节点"), "reasoning 缺影响面: {reasoning}");
+    }
+
+    /// 2026-10-10 订正：`portfolio-mgr` **从未被调度**（Pending）时，归因不得跑到
+    /// 「Rhai 运行失败」上去。
+    ///
+    /// 场景取自 002049 / 2026-10-10 实测（run `3a2e73a7`）：辅助取数节点
+    /// `t-limitup-pool` 三次重试均超时 Failed，其下游分析师未开 `continue_on_fail`
+    /// ⇒ 依赖边一直阻塞 ⇒ `portfolio-mgr` 停在 Pending（**从未执行**）。
+    /// 旧实现把「非 Completed 且非 Skipped」一律当节点自身运行失败，落库的 `hint`
+    /// 让用户去查 Rhai 的 `present()`/除零 —— 与同一 JSON 里的 `reasoning` /
+    /// `rootFailureNode` 形成两套归因，同屏自相矛盾。
+    ///
+    /// 同时守护 reasoning 的计数口径：`disabled`（配置意图）不得计入「级联跳过」，
+    /// 更不得据此宣称 `portfolio-mgr` 在跳过清单里（它当时是 Pending）。
+    #[test]
+    pub(crate) fn extract_decision_json_pending_pm_blames_upstream_not_rhai() {
+        use axagent_harness::workflow_types::EdgeType;
+        use std::collections::HashMap;
+        let results = HashMap::new();
+        let mut node_states = HashMap::new();
+        node_states.insert(
+            "t-limitup-pool".to_string(),
+            NodeRuntimeState {
+                status: NodeStatus::Failed,
+                attempts: 3,
+                error: Some("Node execution timeout".to_string()),
+                started_at: None,
+                completed_at: None,
+                skip_reason: None,
+            },
+        );
+        // 唯一的「跳过」是**配置性关闭**（与本次失败无关）⇒ 不得计入「级联跳过」。
+        node_states.insert(
+            "sim-verify".to_string(),
+            NodeRuntimeState {
+                status: NodeStatus::Skipped,
+                attempts: 0,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                skip_reason: Some("disabled".to_string()),
+            },
+        );
+        node_states.insert(
+            "portfolio-mgr".to_string(),
+            NodeRuntimeState {
+                status: NodeStatus::Pending,
+                attempts: 0,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                skip_reason: None,
+            },
+        );
+        let mk_edge = |s: &str, t: &str| WorkflowEdge {
+            id: format!("e-{s}-{t}"),
+            source: s.to_string(),
+            source_handle: None,
+            target: t.to_string(),
+            target_handle: None,
+            edge_type: EdgeType::Direct,
+            label: None,
+        };
+        let wf = Workflow {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![],
+            edges: vec![
+                mk_edge("t-limitup-pool", "a-sentiment--short"),
+                mk_edge("a-sentiment--short", "portfolio-mgr"),
+            ],
+            status: axagent_rt_workflow::WorkflowStatus::PartiallyCompleted,
+            created_at: 0,
+            completed_at: None,
+            results,
+            node_states,
+            output: None,
+            hooks_config: None,
+            error_config: None,
+            error_workflow_id: None,
+        };
+        let dj = extract_decision_json(&wf).expect("Pending 节点也必须返回占位决策");
+        let parsed: serde_json::Value = serde_json::from_str(&dj).expect("必须可解析");
+        assert_eq!(parsed["diagnostics"]["nodeStatus"], "Pending");
+        assert_eq!(parsed["diagnostics"]["rootFailureNode"], "t-limitup-pool");
+        // 诊断清单仍保留**全量**跳过项（含配置性关闭）—— 过滤只作用于文案计数
+        assert_eq!(parsed["diagnostics"]["skippedNodeCount"], 1);
+        let hint = parsed["diagnostics"]["hint"].as_str().unwrap_or_default();
+        assert!(!hint.contains("Rhai"), "Pending 不是「Rhai 运行失败」，hint 不得误归因: {hint}");
+        assert!(hint.contains("t-limitup-pool"), "hint 必须点名真正的根因节点: {hint}");
+        let reasoning = parsed["reasoning"].as_str().unwrap_or_default();
+        assert!(reasoning.contains("t-limitup-pool"), "reasoning 缺根因节点: {reasoning}");
+        assert!(
+            !reasoning.contains("（含 portfolio-mgr）"),
+            "portfolio-mgr 为 Pending（从未调度），不得说它被级联跳过: {reasoning}"
+        );
+        assert!(
+            !reasoning.contains("级联跳过"),
+            "本轮无故障传播型跳过（唯一的跳过是 disabled），不得声称存在级联跳过: {reasoning}"
+        );
+    }
+
+    /// 2026-10-10 回归：**「倾向 vs 观望」不得再被当成「对立方向」**。
+    ///
+    /// 根因（002241/2026-10-10 实证）：`action_score` 的「对立方向 0」兜底把
+    /// 「增持 vs 观望」与「买入 vs 卖出」判成同分同标签 ⇒ `action_note=opposite`、
+    /// `conflict_type=opposite_direction`，前端（`DecisionBanner` / `DecisionHeroBar`）
+    /// 据此显示「反向 / 建议复核」，而公式与 LLM 其实只是**立场轻重**的分歧。
+    /// 本测试锁定：该对落 `lean_vs_wait`（action_score=6、conflict_type=action_divergence、
+    /// action_ok=true），而真正的多空对立仍保持 opposite。
+    #[test]
+    fn compute_decision_agreement_lean_vs_wait_is_not_opposite() {
+        let llm_wait = json!({
+            "action": "观望", "positionPct": 0.0, "confidence": 54.5, "riskLevel": "中"
+        })
+        .to_string();
+        // 偏多 vs 观望（本案形态：公式增持 / LLM 观望）
+        let formula_bull = json!({
+            "action": "增持", "positionPct": 15.3, "confidence": 66.5, "riskLevel": "中"
+        })
+        .to_string();
+        let ab = compute_decision_agreement(Some(&formula_bull), Some(&llm_wait))
+            .expect("必须产出 breakdown");
+        assert_eq!(ab.action_score, 6.0, "倾向 vs 观望 = 6（非对立）");
+        assert_eq!(ab.action_note, "lean_vs_wait");
+        assert_eq!(ab.conflict_type, "action_divergence");
+        assert!(ab.action_ok, "轻分歧不得触发「矛盾」徽标");
+        assert_ne!(ab.conflict_type, "opposite_direction");
+
+        // 偏空 vs 观望 对称成立
+        let formula_bear = json!({
+            "action": "减持", "positionPct": 5.0, "confidence": 44.0, "riskLevel": "中"
+        })
+        .to_string();
+        let ab2 = compute_decision_agreement(Some(&formula_bear), Some(&llm_wait))
+            .expect("必须产出 breakdown");
+        assert_eq!(ab2.action_score, 6.0);
+        assert_eq!(ab2.action_note, "lean_vs_wait");
+        assert!(ab2.action_ok);
+
+        // 真正的多空对立（多 vs 空）必须**保持** opposite —— 不得被本次修改吞掉
+        let llm_sell = json!({
+            "action": "卖出", "positionPct": 0.0, "confidence": 54.5, "riskLevel": "中"
+        })
+        .to_string();
+        let ab3 = compute_decision_agreement(Some(&formula_bull), Some(&llm_sell))
+            .expect("必须产出 breakdown");
+        assert_eq!(ab3.action_score, 0.0, "买方向 vs 卖方向才是真对立");
+        assert_eq!(ab3.action_note, "opposite");
+        assert_eq!(ab3.conflict_type, "opposite_direction");
+        assert!(!ab3.action_ok, "真对立必须触发复核");
+    }
+
+    /// 2026-10-10 回归（3a，用户批准选项 (i)）：公式侧必须按 **LLM 自报期限**
+    /// （`timeHorizon`）对齐到 `decisionsByHorizon` 的**同档**那一行，而不是拿主档
+    /// （可能是另一档）去比 —— 实证 002241：主档 ultra_short/2 天 vs LLM mid/28 天。
+    /// 降级路径（LLM 未报档 / 公式缺该行）必须退回顶层，保持现行为不变。
+    #[test]
+    fn compute_decision_agreement_aligns_formula_side_to_llm_horizon() {
+        // 顶层 = 主档 ultra_short（买入 / 15.3 / 77.8）；decisionsByHorizon.mid = 观望 / 0 / 54.5
+        let formula = json!({
+            "action": "买入", "positionPct": 15.3, "confidence": 77.8, "riskLevel": "中风险",
+            "decisionsByHorizon": {
+                "ultraShort": {
+                    "action": "买入", "positionPct": 15.3, "confidence": 77.8,
+                    "riskCategory": "中风险"
+                },
+                "mid": {
+                    "action": "观望", "positionPct": 0.0, "confidence": 54.5,
+                    "riskCategory": "中风险"
+                }
+            }
+        })
+        .to_string();
+        let llm_mid = json!({
+            "action": "观望", "positionPct": 0.0, "confidence": 54.5, "riskLevel": "中风险",
+            "timeHorizon": "mid"
+        })
+        .to_string();
+        let ab = compute_decision_agreement(Some(&formula), Some(&llm_mid)).expect("必须产出");
+        // 对齐到 mid 档后，公式侧也是「观望」⇒ 精确匹配 30，不再「反向」
+        assert_eq!(ab.formula_action, "观望", "公式侧必须取 decisionsByHorizon.mid");
+        assert_eq!(ab.action_score, 30.0, "同档对齐后应精确匹配");
+        assert!(ab.action_ok, "同档对齐后不得再报矛盾");
+        assert_ne!(ab.conflict_type, "opposite_direction");
+
+        // LLM 未报档 ⇒ 退回顶层主档（现行为不变）
+        let llm_no_horizon = json!({
+            "action": "观望", "positionPct": 0.0, "confidence": 54.5, "riskLevel": "中风险"
+        })
+        .to_string();
+        let ab2 =
+            compute_decision_agreement(Some(&formula), Some(&llm_no_horizon)).expect("必须产出");
+        assert_eq!(ab2.formula_action, "买入", "LLM 未报档 ⇒ 退回顶层主档");
+        assert_eq!(ab2.action_score, 6.0, "买入 vs 观望 = 倾向 vs 观望 = 6");
+
+        // LLM 报了档，但公式 decisionsByHorizon 缺该行 ⇒ 退回顶层
+        let llm_long = json!({
+            "action": "观望", "positionPct": 0.0, "confidence": 54.5, "riskLevel": "中风险",
+            "timeHorizon": "long"
+        })
+        .to_string();
+        let ab3 = compute_decision_agreement(Some(&formula), Some(&llm_long)).expect("必须产出");
+        assert_eq!(ab3.formula_action, "买入", "公式缺该档行 ⇒ 退回顶层");
+        assert_eq!(ab3.action_score, 6.0);
     }
 }
 

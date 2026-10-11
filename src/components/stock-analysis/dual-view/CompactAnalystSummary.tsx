@@ -3,7 +3,12 @@
  * 输入:分析师报告 { expertId: report }
  * 输出:共识标签 + 多空条 + Top 3 报告摘要
  */
-import { classifySentiment } from "@/lib/stock-analysis-utils";
+import {
+  classifyAnalystReport,
+  type Consensus,
+  deriveAnalystConsensus,
+  type Sentiment,
+} from "@/lib/stock-analysis-utils";
 import { Tooltip } from "antd";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,24 +16,6 @@ import { cleanToolCallTags } from "../utils";
 
 interface CompactAnalystSummaryProps {
   data: Record<string, string> | unknown;
-}
-
-type Consensus = "bullish" | "bearish" | "neutral" | "divided";
-
-/** 根据多空比例推共识（与 AnalystReportGrid 保持一致） */
-function deriveConsensus(
-  bullish: number,
-  bearish: number,
-  neutral: number,
-): Consensus {
-  const total = bullish + bearish + neutral;
-  if (total === 0) { return "neutral"; }
-  const bullRatio = bullish / total;
-  const bearRatio = bearish / total;
-  if (bullRatio > 0.65) { return "bullish"; }
-  if (bearRatio > 0.65) { return "bearish"; }
-  if (bullRatio > 0 && bearRatio > 0) { return "divided"; }
-  return "neutral";
 }
 
 function normalizeMap(data: CompactAnalystSummaryProps["data"]): Record<string, string> {
@@ -62,12 +49,15 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
     let bullish = 0;
     let bearish = 0;
     let neutral = 0;
-    const details: Array<{ id: string; name: string; sentiment: "bullish" | "bearish" | "neutral"; snippet: string }> =
-      [];
+    const details: Array<{ id: string; name: string; sentiment: Sentiment; snippet: string }> = [];
     for (const [id, rawReport] of entries) {
-      // 先剥掉 tool_call 标签，再让统一 classifySentiment 解析（支持 JSON + 计分回退）
+      // 先剥掉 tool_call 标签，再走统一的分析师报告三分类（结构化分数优先 → 关键词兜底）。
+      // 口径与页面顶部共识条、分析师 tab 分歧卡完全同源（tallyAnalystSentiment 单点）。
       const cleaned = cleanToolCallTags(rawReport);
-      const sentiment = classifySentiment(cleaned);
+      const sentiment = classifyAnalystReport(cleaned);
+      // null = 该分析师本轮没有产出 ⇒ 既不计票、也不列进摘要（列进去会让「没跑出来」
+      // 显示成一条中性意见，与顶部共识条、分歧卡的 total 再次分叉）。
+      if (sentiment === null) { continue; }
       if (sentiment === "bullish") { bullish++; }
       else if (sentiment === "bearish") { bearish++; }
       else { neutral++; }
@@ -90,7 +80,7 @@ export function CompactAnalystSummary({ data }: CompactAnalystSummaryProps) {
     );
   }
 
-  const consensus = deriveConsensus(summary.bullish, summary.bearish, summary.neutral);
+  const consensus = deriveAnalystConsensus(summary);
   const consensusConfig: Record<Consensus, { color: string; bg: string; labelKey: string; icon: string }> = {
     bullish: {
       color: "var(--sa-red, #dc2626)",

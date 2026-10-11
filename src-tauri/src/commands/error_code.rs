@@ -348,6 +348,20 @@ pub mod stock_sim {
     pub const CANCELLED: &str = "STOCK_SIM_CANCELLED";
 }
 
+/// 时间旅行批次复盘相关错误码
+pub mod time_travel {
+    /// 请求参数非法（日期格式 / 日期与回看数同时缺失或冲突 / 周期档名无法识别等）
+    pub const INVALID_PARAMS: &str = "TIME_TRAVEL_BATCH_INVALID_PARAMS";
+    /// as_of 日期不是交易日，或晚于今天
+    pub const ASOF_INVALID: &str = "TIME_TRAVEL_BATCH_ASOF_INVALID";
+    /// 已有一个批次在运行（批次全局互斥）
+    pub const ALREADY_RUNNING: &str = "TIME_TRAVEL_BATCH_ALREADY_RUNNING";
+    /// 当前处于 live 流水线时间窗（23:50-02:10 / 17:50-18:10），禁止启动批次
+    pub const LIVE_WINDOW: &str = "TIME_TRAVEL_BATCH_LIVE_WINDOW";
+    /// 批次执行失败（荐股 / 逐只分析 / 反思阶段的基础设施错误）
+    pub const EXEC_FAILED: &str = "TIME_TRAVEL_BATCH_EXEC_FAILED";
+}
+
 /// OPC 需求发现工作流种子数据相关错误码
 pub mod opc_setup {
     /// 内部错误

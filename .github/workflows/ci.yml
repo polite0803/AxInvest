@@ -260,6 +260,17 @@ jobs:
           node scripts/check-snapshot-whitelist.mjs --selftest
           node scripts/check-snapshot-whitelist.mjs
 
+      # 2026-10-11：as-of（回放）接线一致门 —— 抓到过的活断链：趋势智选解析了 as_of_date
+      # 却只用裸 AS_OF.scope 包住 run_workflow，引擎 per-node spawn 后节点读不到截止日
+      # ⇒ 回放静默跑 live。R1 节点钩子+回灌键 / R2 落库守卫 / R3 面板绑本轮 payload。
+      # 与 scripts/ci-check.mjs 对应两条 step **命令行逐字同源**。
+      - name: Check as-of wiring consistency
+        run: |
+          node scripts/check-asof-node-scope.mjs --selftest
+          node scripts/check-asof-node-scope.mjs
+          node scripts/check-builtin-vars-keys.mjs --selftest
+          node scripts/check-builtin-vars-keys.mjs
+
       # #31（2026-10-05）：跨行聚合入口的按代筛样登记 —— 四类分列（统计/注入该筛、
       # 呈现/单条**不该筛**、pending 源表无列）。与 scripts/ci-check.mjs 对应两条 step 逐字同源。
       - name: Check generation-scope registry

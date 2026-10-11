@@ -7,7 +7,6 @@ import type { TaskReport } from "@/types";
 import {
   App,
   Button,
-  Checkbox,
   Divider,
   Form,
   Input,
@@ -18,18 +17,30 @@ import {
   Switch,
   Tag,
   theme,
-  TimePicker,
   Typography,
 } from "antd";
-import dayjs from "dayjs";
 import { Calendar, Clock, Edit2, History, Pause, Play, Plus, RefreshCw, Rocket, Trash2, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CronScheduleBuilder, parseCronFields, validateCronSyntax } from "./CronScheduleBuilder";
+import type { FieldState } from "./CronScheduleBuilder";
 import { SettingsGroup } from "./SettingsGroup";
 
 const { Text } = Typography;
 
 const rowStyle: React.CSSProperties = { padding: "4px 0" };
+
+/**
+ * 系统托管任务类型 —— 由专用命令/其他功能模块创建和管理，不属于用户自建任务，
+ * 不应出现在「自定义任务」列表中（备份/清理在页面开关区管理，知识库抓取在知识库管理）。
+ * 其余类型（custom / general / 旧版计划任务页写入的自由 platform 值等）均视为用户任务。
+ */
+const SYSTEM_TASK_TYPES = new Set([
+  "backup",
+  "cleanup",
+  "daily_summary",
+  "knowledge_source_fetch_all",
+]);
 
 type Weekday =
   | "monday"
@@ -39,69 +50,66 @@ type Weekday =
   | "friday"
   | "saturday"
   | "sunday";
-type ScheduleType = "interval" | "daily" | "weekly" | "monthly" | "advanced";
 
-interface TimeRange {
-  start_hour: number;
-  start_minute: number;
-  end_hour: number;
-  end_minute: number;
-}
+/** cron 星期数字（0=周日）→ i18n 键后缀 */
+const CRON_DOW_KEYS: Weekday[] = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+];
 
-interface ScheduleConfig {
-  schedule_type: ScheduleType;
-  weekdays: Weekday[];
-  time_ranges: TimeRange[];
-  interval_seconds: number | null;
-  exclude_holidays: boolean;
-  exclude_custom_dates: string[];
-  month_day: number | null;
-}
-
+/**
+ * 后端 ScheduledTaskDto.config（TaskConfigDto，rename_all = camelCase）。
+ * 字段拼写必须保持 camelCase，否则更新任务时 serde 反序列化直接失败。
+ */
 interface TaskConfig {
-  timeout_seconds: number;
-  retry_on_failure: boolean;
-  max_retries: number;
-  retry_delay_seconds: number;
-  notification_enabled: boolean;
-  run_on_startup: boolean;
+  timeoutSeconds: number;
+  retryOnFailure: boolean;
+  maxRetries: number;
+  retryDelaySeconds: number;
+  notificationEnabled: boolean;
+  runOnStartup: boolean;
 }
 
+/**
+ * 后端 ScheduledTaskDto（#[serde(rename_all = "camelCase")]）的前端镜像。
+ * 后端只持久化 cronExpression，不存在 schedule_config（可视化配置仅在表单态存在）。
+ */
 interface ScheduledTask {
   id: string;
   name: string;
   description: string;
-  task_type: "custom";
-  cron_expression: string | null;
-  interval_seconds: number | null;
-  next_run_at: string;
-  last_run_at: string | null;
-  last_result: {
+  taskType: string;
+  cronExpression: string | null;
+  intervalSeconds: number | null;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastResult: {
     success: boolean;
-    output: string;
+    output: string | null;
     error: string | null;
-    duration_ms: number;
+    durationMs: number;
+    /** 被前置闸门跳过（非交易日等），未真正执行业务（旧记录缺省为 false） */
+    skipped?: boolean;
   } | null;
   status: "active" | "paused" | "disabled";
   config: TaskConfig;
-  schedule_config: ScheduleConfig;
-  created_at: string;
-  updated_at: string;
+  createdAt: string;
+  updatedAt: string;
   workflowId?: string | null;
 }
 
+/** 任务表单：调度配置统一由 CronScheduleBuilder 产出 cron 字符串（与后端持久化口径一致） */
 interface TaskFormData {
   name: string;
   description: string;
   template_type?: string;
   workflow_id?: string | null;
-  schedule_type: ScheduleType;
-  interval_hours: number;
-  weekdays: Weekday[];
-  time_ranges: { start: dayjs.Dayjs; end: dayjs.Dayjs }[];
-  exclude_holidays: boolean;
-  exclude_custom_dates: string[];
-  month_day: number | null;
+  cron_expression: string;
 }
 
 interface TaskTemplate {
@@ -109,7 +117,6 @@ interface TaskTemplate {
   template_type: string;
   name: string;
   description: string;
-  schedule_config?: ScheduleConfig;
   workflow_id: string | null;
   default_schedule?: string;
 }
@@ -166,7 +173,11 @@ export function SchedulerSettings() {
   const loadCustomTasks = useCallback(async () => {
     try {
       const tasks = await invoke<ScheduledTask[]>("list_scheduled_tasks");
-      setCustomTasks(Array.isArray(tasks) ? tasks.filter((t) => t.task_type === "custom") : []);
+      // 排除系统托管任务；旧版「计划任务」页创建的任务 taskType 为 general 或自由 platform 值，
+      // 同样是用户自建任务，必须一并展示（历史上此处白名单 === "custom" 导致这些任务不可见）
+      setCustomTasks(
+        Array.isArray(tasks) ? tasks.filter((t) => !SYSTEM_TASK_TYPES.has(t.taskType)) : [],
+      );
     } catch (e) {
       logIpcError("Failed to load scheduled tasks")(e);
     }
@@ -273,43 +284,14 @@ export function SchedulerSettings() {
     { value: 60, label: t("settings.scheduler.hour") },
   ];
 
-  const weekdayOptions = [
-    { value: "monday" as Weekday, label: t("settings.scheduler.monday") },
-    { value: "tuesday" as Weekday, label: t("settings.scheduler.tuesday") },
-    { value: "wednesday" as Weekday, label: t("settings.scheduler.wednesday") },
-    { value: "thursday" as Weekday, label: t("settings.scheduler.thursday") },
-    { value: "friday" as Weekday, label: t("settings.scheduler.friday") },
-    { value: "saturday" as Weekday, label: t("settings.scheduler.saturday") },
-    { value: "sunday" as Weekday, label: t("settings.scheduler.sunday") },
-  ];
-
-  const scheduleTypeOptions = [
-    {
-      value: "interval" as ScheduleType,
-      label: t("settings.scheduler.scheduleInterval"),
+  // antd Form 校验器：cron 表达式必须通过与后端一致的语法/频率校验
+  const cronValidator = useCallback(
+    (_rule: unknown, value: string) => {
+      const errorKey = validateCronSyntax(value ?? "");
+      return errorKey ? Promise.reject(new Error(t(errorKey))) : Promise.resolve();
     },
-    {
-      value: "daily" as ScheduleType,
-      label: t("settings.scheduler.scheduleDaily"),
-    },
-    {
-      value: "weekly" as ScheduleType,
-      label: t("settings.scheduler.scheduleWeekly"),
-    },
-    {
-      value: "monthly" as ScheduleType,
-      label: t("settings.scheduler.scheduleMonthly"),
-    },
-    {
-      value: "advanced" as ScheduleType,
-      label: t("settings.scheduler.scheduleAdvanced"),
-    },
-  ];
-
-  const monthDayOptions = Array.from({ length: 31 }, (_, i) => ({
-    value: i + 1,
-    label: t("settings.scheduler.dayOfMonth", { day: i + 1 }),
-  }));
+    [t],
+  );
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -337,161 +319,106 @@ export function SchedulerSettings() {
     }
   };
 
-  const formatNextRun = (dateStr: string) => {
+  const formatNextRun = (dateStr: string | null | undefined) => {
+    if (!dateStr) {
+      return "-";
+    }
     try {
       const date = new Date(dateStr);
+      if (Number.isNaN(date.getTime())) {
+        return "-";
+      }
+      // 启动后下次时刻尚未重算时，后端把 next_run_at 置为 epoch 0（原显示 1970/1/1）
+      if (date.getTime() <= 0) {
+        return t("settings.scheduler.nextRunPending");
+      }
       return date.toLocaleString();
     } catch {
       return dateStr;
     }
   };
 
-  const parseScheduleConfig = (task: ScheduledTask): Partial<TaskFormData> => {
-    const config = task.schedule_config || {
-      schedule_type: "interval",
-      weekdays: [],
-      time_ranges: [],
-      interval_seconds: null,
-      exclude_holidays: false,
-      exclude_custom_dates: [],
-      month_day: null,
-    };
-    const timeRanges = config.time_ranges?.map((tr: TimeRange) => ({
-      start: dayjs().hour(tr.start_hour).minute(tr.start_minute),
-      end: dayjs().hour(tr.end_hour).minute(tr.end_minute),
-    })) || [
-      { start: dayjs().hour(9).minute(0), end: dayjs().hour(17).minute(0) },
-    ];
-
-    return {
-      schedule_type: config.schedule_type || "interval",
-      weekdays: config.weekdays || [],
-      time_ranges: timeRanges,
-      exclude_holidays: config.exclude_holidays || false,
-      exclude_custom_dates: config.exclude_custom_dates || [],
-      month_day: config.month_day || null,
-      interval_hours: config.interval_seconds
-        ? config.interval_seconds / 3600
-        : 24,
-    };
-  };
-
-  const serializeScheduleConfig = (values: TaskFormData): ScheduleConfig => {
-    return {
-      schedule_type: values.schedule_type,
-      weekdays: values.weekdays || [],
-      time_ranges: values.time_ranges?.map((tr) => ({
-        start_hour: tr.start.hour(),
-        start_minute: tr.start.minute(),
-        end_hour: tr.end.hour(),
-        end_minute: tr.end.minute(),
-      })) || [],
-      interval_seconds: values.schedule_type === "interval"
-        ? values.interval_hours * 3600
-        : null,
-      exclude_holidays: values.exclude_holidays || false,
-      exclude_custom_dates: values.exclude_custom_dates || [],
-      month_day: values.month_day || null,
-    };
-  };
-
-  const scheduleConfigToCron = (config: ScheduleConfig): string => {
-    const tr = config.time_ranges?.[0];
-    const hour = tr?.start_hour ?? 9;
-    const min = tr?.start_minute ?? 0;
-    switch (config.schedule_type) {
-      case "interval":
-        if (config.interval_seconds) {
-          const hours = config.interval_seconds / 3600;
-          if (hours >= 1 && hours <= 24 && Number.isInteger(hours)) {
-            return `0 */${hours} * * *`;
-          }
-        }
-        return "0 */24 * * *";
-      case "daily":
-        return `${min} ${hour} * * *`;
-      case "weekly": {
-        const days = (config.weekdays || []).map((w) => {
-          const map: Record<string, string> = {
-            sunday: "0",
-            monday: "1",
-            tuesday: "2",
-            wednesday: "3",
-            thursday: "4",
-            friday: "5",
-            saturday: "6",
-          };
-          return map[w] || "*";
-        }).join(",") || "*";
-        return `${min} ${hour} * * ${days}`;
-      }
-      case "monthly":
-        return `${min} ${hour} ${config.month_day || 1} * *`;
-      case "advanced":
-        return "0 9 * * *";
-      default:
-        return "0 9 * * *";
-    }
-  };
-
+  /**
+   * 列表「调度」列：可识别的可视化形态给本地化描述，其余原样展示 cron。
+   */
   const formatScheduleDescription = (task: ScheduledTask): string => {
-    const config = task.schedule_config;
-    if (!config) {
+    const cron = task.cronExpression;
+    if (!cron) {
       return "-";
     }
-
-    switch (config.schedule_type) {
-      case "interval":
-        return t("settings.scheduler.intervalDesc", {
-          hours: (config.interval_seconds || 86400) / 3600,
-        });
-      case "daily":
-        return t("settings.scheduler.dailyDesc");
-      case "weekly": {
-        const dayNames = (config.weekdays || [])
-          .filter((w): w is Weekday => !!w)
-          .map((w) => t(`settings.scheduler.${w}`))
-          .join(", ");
-        return t("settings.scheduler.weeklyDesc", { days: dayNames || "-" });
-      }
-      case "monthly":
-        return t("settings.scheduler.monthlyDesc", {
-          day: config.month_day || "-",
-        });
-      case "advanced":
-        return t("settings.scheduler.advancedDesc");
-      default:
-        return "-";
+    const f = parseCronFields(cron);
+    if (!f) {
+      return cron;
     }
+    const isAny = (fld: FieldState) => fld.mode === "any";
+    /** list 模式且只选了一个值时取出该值（如每天 09:00 的分/时字段） */
+    const single = (fld: FieldState): number | null =>
+      fld.mode === "list" && fld.selected.length === 1 ? fld.selected[0] : null;
+    const mm = single(f.minute);
+    const hh = single(f.hour);
+    const hhmm = mm !== null && hh !== null
+      ? `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`
+      : null;
+
+    // 每 N 分钟：*/N * * * *（起始必须为 0，覆盖全天）
+    if (
+      f.minute.mode === "step"
+      && f.minute.start === 0
+      && isAny(f.hour)
+      && isAny(f.dom)
+      && isAny(f.month)
+      && isAny(f.dow)
+    ) {
+      return t("settings.scheduler.minutes", { count: f.minute.interval });
+    }
+    // 每 N 小时：m */N * * *
+    if (
+      f.hour.mode === "step"
+      && mm !== null
+      && isAny(f.dom)
+      && isAny(f.month)
+      && isAny(f.dow)
+    ) {
+      return t("settings.scheduler.intervalDesc", { hours: f.hour.interval });
+    }
+    if (hhmm && isAny(f.dom) && isAny(f.month) && isAny(f.dow)) {
+      return `${t("settings.scheduler.dailyDesc")} ${hhmm}`;
+    }
+    if (hhmm && f.dow.mode === "list" && isAny(f.dom) && isAny(f.month)) {
+      // 周网格按周一开头、周日收尾排列（0=周日排到最后）
+      const dayNames = f.dow.selected
+        .slice()
+        .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b))
+        .map((d) => t(`settings.scheduler.${CRON_DOW_KEYS[d]}`))
+        .join(", ");
+      return `${t("settings.scheduler.weeklyDesc", { days: dayNames || "-" })} ${hhmm}`;
+    }
+    if (hhmm && f.dom.mode === "list" && isAny(f.month) && isAny(f.dow)) {
+      const days = f.dom.selected
+        .slice()
+        .sort((a, b) => a - b)
+        .join(",");
+      return `${t("settings.scheduler.monthlyDesc", { day: days })} ${hhmm}`;
+    }
+    return cron;
   };
 
   const openCreateModal = () => {
     setEditingTask(null);
     setSelectedTemplate(null);
     form.resetFields();
-    form.setFieldsValue({
-      schedule_type: "interval",
-      interval_hours: 24,
-      weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday"],
-      time_ranges: [
-        { start: dayjs().hour(9).minute(0), end: dayjs().hour(17).minute(0) },
-      ],
-      exclude_holidays: false,
-      exclude_custom_dates: [],
-      month_day: 1,
-    });
+    form.setFieldsValue({ cron_expression: "0 9 * * *" });
     setTaskModalOpen(true);
   };
 
   const openEditModal = (task: ScheduledTask) => {
     setEditingTask(task);
     setSelectedTemplate(null);
-    const parsedConfig = parseScheduleConfig(task);
     form.setFieldsValue({
       name: task.name,
       description: task.description,
       workflow_id: task.workflowId,
-      ...parsedConfig,
+      cron_expression: task.cronExpression ?? "0 9 * * *",
     });
     setTaskModalOpen(true);
   };
@@ -502,28 +429,12 @@ export function SchedulerSettings() {
     );
     if (template) {
       setSelectedTemplate(templateType);
-      const config = template.schedule_config;
-      const timeRanges = config?.time_ranges?.map((tr: TimeRange) => ({
-        start: dayjs().hour(tr.start_hour).minute(tr.start_minute),
-        end: dayjs().hour(tr.end_hour).minute(tr.end_minute),
-      })) || [
-        { start: dayjs().hour(9).minute(0), end: dayjs().hour(17).minute(0) },
-      ];
-
       form.setFieldsValue({
         name: template.name,
         description: template.description,
         template_type: template.template_type,
         workflow_id: template.workflow_id,
-        schedule_type: config?.schedule_type || "daily",
-        weekdays: config?.weekdays || [],
-        time_ranges: timeRanges,
-        interval_hours: config?.interval_seconds
-          ? config.interval_seconds / 3600
-          : 24,
-        exclude_holidays: config?.exclude_holidays ?? false,
-        exclude_custom_dates: config?.exclude_custom_dates || [],
-        month_day: config?.month_day ?? null,
+        cron_expression: template.default_schedule || "0 9 * * *",
       });
     }
   };
@@ -533,17 +444,18 @@ export function SchedulerSettings() {
       const values = await form.validateFields();
       setLoading(true);
 
-      const scheduleConfig = serializeScheduleConfig(values);
-      const cronExpression = scheduleConfigToCron(scheduleConfig);
+      // 调度配置的唯一真源是 builder 产出的 cron 字符串，与后端持久化口径一致
+      const cronExpression = values.cron_expression.trim();
 
       if (editingTask) {
+        // 后端 update_scheduled_task 的 task 参数按完整 ScheduledTaskDto（camelCase）
+        // 反序列化：taskType/status/config/createdAt/updatedAt 均为必填，缺字段会直接
+        // 400。因此以原任务为底，只覆盖名称/描述/cron，其余字段原样回传。
         const updatedTask: ScheduledTask = {
           ...editingTask,
           name: values.name,
           description: values.description,
-          cron_expression: cronExpression,
-          interval_seconds: scheduleConfig.interval_seconds,
-          schedule_config: scheduleConfig,
+          cronExpression: cronExpression,
         };
         await invoke("update_scheduled_task", {
           taskId: editingTask.id,
@@ -610,6 +522,9 @@ export function SchedulerSettings() {
       setExecuting((prev) => ({ ...prev, [taskId]: true }));
       await invoke("execute_scheduled_task", { taskId });
       message.success(t("settings.scheduler.executed") + " - OK");
+      // 内置任务（荐股/扫描/反思等）的结果由调度 handler 异步 spawn 落库，
+      // 立即刷新可能读到旧态；延迟一小段再拉列表
+      await new Promise((resolve) => setTimeout(resolve, 800));
       await loadCustomTasks();
     } catch (e) {
       showBackendError(message, e);
@@ -950,14 +865,21 @@ export function SchedulerSettings() {
                     <Tag color={getStatusColor(task.status)}>
                       {getStatusText(task.status)}
                     </Tag>
-                    {task.last_result && (
-                      <Tag
-                        color={task.last_result.success ? "green" : "red"}
-                        style={{ fontSize: 10 }}
-                      >
-                        {task.last_result.success ? "✓" : "✗"} {task.last_result.duration_ms}ms
-                      </Tag>
-                    )}
+                    {task.lastResult
+                      && (task.lastResult.skipped
+                        ? (
+                          <Tag color="default" style={{ fontSize: 10 }}>
+                            {t("settings.scheduler.skipped")}
+                          </Tag>
+                        )
+                        : (
+                          <Tag
+                            color={task.lastResult.success ? "green" : "red"}
+                            style={{ fontSize: 10 }}
+                          >
+                            {task.lastResult.success ? "✓" : "✗"} {task.lastResult.durationMs}ms
+                          </Tag>
+                        ))}
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Button
@@ -1043,7 +965,7 @@ export function SchedulerSettings() {
                     {t("settings.scheduler.schedule")}: {formatScheduleDescription(task)}
                   </span>
                   <span style={{ marginLeft: 16 }}>
-                    {t("settings.scheduler.nextRunAt")}: {formatNextRun(task.next_run_at)}
+                    {t("settings.scheduler.nextRunAt")}: {formatNextRun(task.nextRunAt)}
                   </span>
                 </div>
 
@@ -1069,55 +991,68 @@ export function SchedulerSettings() {
                             marginTop: 4,
                           }}
                         >
-                          {(historyMap[task.id] || []).slice(0, 20).map((rec) => (
-                            <div
-                              key={rec.id}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                padding: "3px 6px",
-                                fontSize: 12,
-                                borderBottom: "1px solid var(--color-border)",
-                                backgroundColor: rec.success
-                                  ? undefined
-                                  : token.colorErrorBg,
-                              }}
-                            >
-                              <Tag
-                                color={rec.success ? "green" : "red"}
-                                style={{ fontSize: 10, margin: 0 }}
-                              >
-                                {rec.success
-                                  ? t("scheduler.success")
-                                  : t("scheduler.failed")}
-                              </Tag>
-                              <span
+                          {(historyMap[task.id] || []).slice(0, 20).map((rec) => {
+                            // 历史表无 skipped 结构列：闸门跳过记录 success=true 且
+                            // output 为「…本轮跳过」，按文案识别（与 services.rs 闸门文案对应）
+                            const isSkipped = rec.success && !!rec.output?.includes("跳过");
+                            return (
+                              <div
+                                key={rec.id}
                                 style={{
-                                  flex: 1,
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  whiteSpace: "nowrap",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                  padding: "3px 6px",
+                                  fontSize: 12,
+                                  borderBottom: "1px solid var(--color-border)",
+                                  backgroundColor: rec.success
+                                    ? undefined
+                                    : token.colorErrorBg,
                                 }}
                               >
-                                {rec.output || rec.error || "-"}
-                              </span>
-                              <span style={{ color: token.colorTextTertiary, whiteSpace: "nowrap" }}>
-                                {rec.duration_ms}ms
-                              </span>
-                              <span
-                                style={{
-                                  color: token.colorTextQuaternary,
-                                  whiteSpace: "nowrap",
-                                  fontSize: 10,
-                                }}
-                              >
-                                {rec.started_at
-                                  ? new Date(rec.started_at).toLocaleString()
-                                  : "-"}
-                              </span>
-                            </div>
-                          ))}
+                                <Tag
+                                  color={isSkipped
+                                    ? "default"
+                                    : rec.success
+                                    ? "green"
+                                    : "red"}
+                                  style={{ fontSize: 10, margin: 0 }}
+                                >
+                                  {isSkipped
+                                    ? t("settings.scheduler.skipped")
+                                    : rec.success
+                                    ? t("scheduler.success")
+                                    : t("scheduler.failed")}
+                                </Tag>
+                                <span
+                                  style={{
+                                    flex: 1,
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {rec.output || rec.error || "-"}
+                                </span>
+                                {!isSkipped && (
+                                  <span style={{ color: token.colorTextTertiary, whiteSpace: "nowrap" }}>
+                                    {rec.duration_ms}ms
+                                  </span>
+                                )}
+                                <span
+                                  style={{
+                                    color: token.colorTextQuaternary,
+                                    whiteSpace: "nowrap",
+                                    fontSize: 10,
+                                  }}
+                                >
+                                  {rec.started_at
+                                    ? new Date(rec.started_at).toLocaleString()
+                                    : "-"}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                   </div>
@@ -1296,9 +1231,9 @@ export function SchedulerSettings() {
                               color: "var(--color-text)",
                             }}
                           >
-                            {t(
-                              `settings.scheduler.${template.template_type}`,
-                            ) || template.name}
+                            {t(`settings.scheduler.${template.template_type}`, {
+                              defaultValue: template.name,
+                            })}
                           </div>
                           <div
                             style={{
@@ -1306,9 +1241,9 @@ export function SchedulerSettings() {
                               color: "var(--color-text-secondary)",
                             }}
                           >
-                            {(template.template_type
-                              ? t(`settings.scheduler.${template.template_type}Desc`)
-                              : null) || template.description}
+                            {t(`settings.scheduler.${template.template_type}Desc`, {
+                              defaultValue: template.description,
+                            })}
                           </div>
                         </div>,
                       ]
@@ -1368,9 +1303,9 @@ export function SchedulerSettings() {
                               color: "var(--color-text)",
                             }}
                           >
-                            {t(
-                              `settings.scheduler.${template.template_type}`,
-                            ) || template.name}
+                            {t(`settings.scheduler.${template.template_type}`, {
+                              defaultValue: template.name,
+                            })}
                           </div>
                           <div
                             style={{
@@ -1378,9 +1313,9 @@ export function SchedulerSettings() {
                               color: "var(--color-text-secondary)",
                             }}
                           >
-                            {(template.template_type
-                              ? t(`settings.scheduler.${template.template_type}Desc`)
-                              : null) || template.description}
+                            {t(`settings.scheduler.${template.template_type}Desc`, {
+                              defaultValue: template.description,
+                            })}
                           </div>
                         </div>,
                       ]
@@ -1412,174 +1347,11 @@ export function SchedulerSettings() {
           </Form.Item>
           <Divider>{t("settings.scheduler.scheduleSettings")}</Divider>
           <Form.Item
-            name="schedule_type"
+            name="cron_expression"
             label={t("settings.scheduler.scheduleType")}
-            rules={[{ required: true }]}
+            rules={[{ validator: cronValidator }]}
           >
-            <Select
-              options={scheduleTypeOptions}
-              placeholder={t("settings.scheduler.selectScheduleType")}
-            />
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(_, values) => values.schedule_type === "interval"}
-          >
-            {({ getFieldValue }) =>
-              getFieldValue("schedule_type") === "interval" && (
-                <Form.Item
-                  name="interval_hours"
-                  label={t("settings.scheduler.intervalHours")}
-                  rules={[
-                    { required: true, message: "Please select interval" },
-                  ]}
-                >
-                  <Select
-                    options={[
-                      { value: 1, label: t("settings.scheduler.hour") },
-                      {
-                        value: 6,
-                        label: t("settings.scheduler.hours", { count: 6 }),
-                      },
-                      {
-                        value: 12,
-                        label: t("settings.scheduler.hours", { count: 12 }),
-                      },
-                      { value: 24, label: t("settings.scheduler.daily") },
-                      { value: 168, label: t("settings.scheduler.weekly") },
-                      { value: 720, label: t("settings.scheduler.monthly") },
-                    ]}
-                  />
-                </Form.Item>
-              )}
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(_, values) => ["weekly", "advanced"].includes(values.schedule_type)}
-          >
-            {({ getFieldValue }) =>
-              ["weekly", "advanced"].includes(
-                getFieldValue("schedule_type"),
-              ) && (
-                <Form.Item
-                  name="weekdays"
-                  label={t("settings.scheduler.weekdays")}
-                  rules={[
-                    { required: true, message: "Please select weekdays" },
-                  ]}
-                >
-                  <Checkbox.Group options={weekdayOptions} />
-                </Form.Item>
-              )}
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(_, values) =>
-              ["daily", "weekly", "monthly", "advanced"].includes(
-                values.schedule_type,
-              )}
-          >
-            {({ getFieldValue }) =>
-              ["daily", "weekly", "monthly", "advanced"].includes(
-                getFieldValue("schedule_type"),
-              ) && (
-                <Form.Item
-                  name="time_ranges"
-                  label={t("settings.scheduler.timeRanges")}
-                  rules={[{ required: true, message: "Please add time range" }]}
-                >
-                  <Form.List name="time_ranges">
-                    {(fields, { add, remove }) => (
-                      <>
-                        {fields.map(({ key, ...restField }, index) => (
-                          <div
-                            key={key}
-                            style={{
-                              display: "flex",
-                              gap: 8,
-                              alignItems: "center",
-                              marginBottom: 8,
-                            }}
-                          >
-                            <TimePicker
-                              format="HH:mm"
-                              placeholder={t("settings.scheduler.startTime")}
-                              {...(restField as Omit<typeof restField, "name">)}
-                              style={{ flex: 1 }}
-                            />
-                            <span>-</span>
-                            <TimePicker
-                              format="HH:mm"
-                              placeholder={t("settings.scheduler.endTime")}
-                              {...(restField as Omit<typeof restField, "name">)}
-                              style={{ flex: 1 }}
-                            />
-                            {index > 0 && (
-                              <Button
-                                type="text"
-                                danger
-                                onClick={() => remove(index)}
-                              >
-                                -
-                              </Button>
-                            )}
-                          </div>
-                        ))}
-                        <Button
-                          type="dashed"
-                          onClick={() =>
-                            add({
-                              start: dayjs().hour(9).minute(0),
-                              end: dayjs().hour(17).minute(0),
-                            })}
-                          block
-                        >
-                          + {t("settings.scheduler.addTimeRange")}
-                        </Button>
-                      </>
-                    )}
-                  </Form.List>
-                </Form.Item>
-              )}
-          </Form.Item>
-
-          <Form.Item
-            noStyle
-            shouldUpdate={(_, values) => values.schedule_type === "monthly"}
-          >
-            {({ getFieldValue }) =>
-              getFieldValue("schedule_type") === "monthly" && (
-                <Form.Item
-                  name="month_day"
-                  label={t("settings.scheduler.monthDay")}
-                  rules={[
-                    { required: true, message: "Please select day of month" },
-                  ]}
-                >
-                  <Select
-                    options={monthDayOptions}
-                    placeholder={t("settings.scheduler.selectDayOfMonth")}
-                  />
-                </Form.Item>
-              )}
-          </Form.Item>
-
-          <Form.Item name="exclude_holidays" valuePropName="checked">
-            <Checkbox>{t("settings.scheduler.excludeHolidays")}</Checkbox>
-          </Form.Item>
-
-          <Form.Item
-            name="exclude_custom_dates"
-            label={t("settings.scheduler.excludeCustomDates")}
-          >
-            <Select
-              mode="tags"
-              placeholder={t("settings.scheduler.enterExcludeDates")}
-              tokenSeparators={[","]}
-            />
+            <CronScheduleBuilder />
           </Form.Item>
         </Form>
       </Modal>

@@ -28,13 +28,92 @@ impl TencentVendor {
     }
 }
 
+/// 国际指数别名 → 腾讯代码。
+///
+/// 实测依据（2026-10-09，`web.ifzq.gtimg.cn/appstock/app/kline/kline` 日线全绿）：
+/// 腾讯**没有**标普 500 的 `usSPX`（该码返回空），真码是 `usINX`；纳指综合（`usIXIC`）
+/// 与纳指 100（`usNDX`）是两个不同的码，不可互相顶替。
+const TC_INTL_INDEX: &[(&str, &str)] = &[
+    ("SPX", "usINX"),
+    ("SP500", "usINX"),
+    ("S&P500", "usINX"),
+    ("INX", "usINX"),
+    ("IXIC", "usIXIC"),
+    ("NDX", "usNDX"),
+    ("NDX100", "usNDX"),
+    ("DJI", "usDJI"),
+    ("DJIA", "usDJI"),
+    ("HSI", "hkHSI"),
+    ("HSCEI", "hkHSCEI"),
+];
+
+/// 国际/港股代码 → 腾讯代码；不属于国际码时返回 `None`（交回 A 股既有分支）。
+///
+/// 覆盖四种输入形态：已带腾讯前缀（`hkHSI` / `usAAPL`）、东财 secid
+/// （`100.SPX` / `116.00700` / `105.AAPL`）、`.HK` / `.US` 后缀（`00700.HK` /
+/// `AAPL.US`）、以及裸指数别名（`SPX` / `HSI` / `IXIC`）。
+fn intl_to_tencent(code: &str) -> Option<String> {
+    let t = code.trim();
+    if t.is_empty() {
+        return None;
+    }
+    // 1) 已带腾讯前缀直通（保留原始大小写，腾讯对指数大小写不敏感）
+    let lower = t.to_ascii_lowercase();
+    for prefix in ["hk", "us"] {
+        if let Some(rest) = lower.strip_prefix(prefix) {
+            if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Some(format!("{prefix}{}", &t[2..]));
+            }
+        }
+    }
+    // 2) 东财 secid（市场位 100/103=国际指数、116=港股、105/106/107=美股）
+    if let Some((market, bare)) = t.split_once('.') {
+        if !bare.is_empty() && bare.chars().all(|c| c.is_ascii_alphanumeric()) {
+            let mapped = match market {
+                "100" | "103" => TC_INTL_INDEX
+                    .iter()
+                    .find(|(alias, _)| alias.eq_ignore_ascii_case(bare))
+                    .map(|(_, tc)| (*tc).to_string()),
+                "116" => Some(format!("hk{bare}")),
+                "105" | "106" | "107" => Some(format!("us{}", bare.to_ascii_uppercase())),
+                _ => None,
+            };
+            if mapped.is_some() {
+                return mapped;
+            }
+        }
+    }
+    // 3) `.HK` / `.US` 后缀（`00700.HK` / `AAPL.US`）
+    if let Some((bare, tag)) = t.rsplit_once('.') {
+        if !bare.is_empty() {
+            if tag.eq_ignore_ascii_case("HK") {
+                return Some(format!("hk{bare}"));
+            }
+            if tag.eq_ignore_ascii_case("US") {
+                return Some(format!("us{}", bare.to_ascii_uppercase()));
+            }
+        }
+    }
+    // 4) 裸指数别名（`SPX` / `HSI` / `IXIC` …）
+    TC_INTL_INDEX
+        .iter()
+        .find(|(alias, _)| alias.eq_ignore_ascii_case(t))
+        .map(|(_, tc)| (*tc).to_string())
+}
+
 /// 将 AxInvest 股票代码转为腾讯财经格式
 /// 600519 → sh600519, 000001 → sz000001, 300750 → sz300750
 ///
 /// 已带市场标记的输入（`sh000001` 前缀、`000001.SH` 后缀）**按标记取市场**：上证综指与
 /// 平安银行同为 `000001`，靠首位数字重判必错（`sh000001` → `szsh000001`，`000001.SH` →
 /// `sz000001.SH` ⇒ 接口回 `param error`、日志表现为「K线数据中未找到股票代码键」）。
+///
+/// 国际码（`SPX` / `00700.HK` / `100.SPX`）先交给 `intl_to_tencent`；它是跨市场面板
+/// 在东财 push2his kline 路径被按路径 RST 时的兜底源。
 fn to_tencent_code(stock_code: &str) -> String {
+    if let Some(tc) = intl_to_tencent(stock_code) {
+        return tc;
+    }
     if let Some((bare, ex)) = crate::code_form::split_explicit_market(stock_code) {
         return format!("{}{bare}", ex.tencent_prefix());
     }
@@ -230,7 +309,12 @@ fn parse_quote(raw: &str) -> Result<StockQuote, DataError> {
 ///   分钟K:          https://web.ifzq.gtimg.cn/appstock/app/kline/mkline?param=sz000001,m5,,320
 /// 注意：日/周/月K线返回6字段[date,open,close,high,low,volume(手)]，无amount字段
 ///       复权K线返回key格式为 {prefix}{period}，如 qfqday/hfqweek
-fn parse_klines(raw: &str, period_key: &str, fq_prefix: &str) -> Result<Vec<KLine>, DataError> {
+fn parse_klines(
+    raw: &str,
+    code_hint: &str,
+    period_key: &str,
+    fq_prefix: &str,
+) -> Result<Vec<KLine>, DataError> {
     let json: serde_json::Value = serde_json::from_str(raw)
         .map_err(|e| DataError::ParseError(format!("K线JSON解析失败: {e}")))?;
     // 检查返回码
@@ -243,10 +327,20 @@ fn parse_klines(raw: &str, period_key: &str, fq_prefix: &str) -> Result<Vec<KLin
     if data.is_string() || data.is_null() {
         return Err(DataError::ParseError("腾讯K线返回data为空".into()));
     }
+    // 键名定位：先按传入的腾讯码精确匹配（A 股 `sz000001` / 港股 `hk00700`）；
+    // 再去掉点号后匹配 —— 腾讯对美股指数把键写成 `us.INX` / `us.DJI` / `us.IXIC`
+    // （去掉 `.` 后与传入码 `usINX` / `usDJI` / `usIXIC` 一致），只按字面比会漏。
+    // 最后回退到 A 股前缀键（历史行为，保证既有调用点不变）。
     let code_key = data
         .as_object()
         .and_then(|obj| {
-            obj.keys().find(|k| k.starts_with("sz") || k.starts_with("sh") || k.starts_with("bj"))
+            obj.keys()
+                .find(|k| k.eq_ignore_ascii_case(code_hint))
+                .or_else(|| obj.keys().find(|k| k.replace('.', "").eq_ignore_ascii_case(code_hint)))
+                .or_else(|| {
+                    obj.keys()
+                        .find(|k| k.starts_with("sz") || k.starts_with("sh") || k.starts_with("bj"))
+                })
         })
         .cloned()
         .unwrap_or_default();
@@ -398,20 +492,24 @@ impl StockVendor for TencentVendor {
             Ok(r) => {
                 crate::check_response_429(&r, "tencent")?;
                 let body = r.text().await?;
-                parse_klines(&body, period_key, fq_prefix)
+                parse_klines(&body, &tc_code, period_key, fq_prefix)
             },
             Err(e) => Err(DataError::from(e)),
         };
 
-        // 上证指数代码（000xxx）可能被误映射为 sz 前缀，解析结果为空时用 sh 前缀重试
-        if klines.as_ref().is_ok_and(|v| v.is_empty()) && stock_code.starts_with("00") {
+        // 上证指数代码（000xxx）可能被误映射为 sz 前缀，解析结果为空时用 sh 前缀重试。
+        // 国际码（`00700.HK` 也以 `00` 开头）不走这条 —— 它们的市场由 `intl_to_tencent` 决定。
+        if klines.as_ref().is_ok_and(|v| v.is_empty())
+            && stock_code.starts_with("00")
+            && intl_to_tencent(stock_code).is_none()
+        {
             let sh_code = format!("sh{stock_code}");
             let sh_url = format!(
                 "https://{host}/appstock/app/{api_endpoint}?param={sh_code},{period_key}{param_suffix}"
             );
             if let Ok(r) = self.http.get(&sh_url).send().await {
                 if let Ok(body) = r.text().await {
-                    if let Ok(sh_klines) = parse_klines(&body, period_key, fq_prefix) {
+                    if let Ok(sh_klines) = parse_klines(&body, &sh_code, period_key, fq_prefix) {
                         if !sh_klines.is_empty() {
                             klines = Ok(sh_klines);
                         }

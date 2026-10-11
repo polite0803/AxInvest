@@ -510,6 +510,18 @@ pub fn is_benchmark_code(code: &str) -> bool {
     )
 }
 
+/// 跨市场 K 线兜底的**源选择**（单一出处，避免判据在 lib 与 vendor 间漂移）：
+///
+/// 外汇对 → `sina`（`NewForexService`）；美股个股 → `sina`（`US_MinKService`，腾讯对美股
+/// 个股只回 2 根日线）；其余（指数 / 港股）→ `tencent`。
+fn cross_market_fallback_source(code: &str) -> &'static str {
+    if code.contains('/') || crate::code_form::us_stock_symbol(code).is_some() {
+        "sina"
+    } else {
+        "tencent"
+    }
+}
+
 /// 判断是否为外汇对代码（USD/CNY、HKD/CNY 等）
 pub fn is_forex_pair(code: &str) -> bool {
     let trimmed = code.trim().to_uppercase();
@@ -2335,6 +2347,67 @@ impl AStockClient {
         Ok(result)
     }
 
+    /// 跨市场 K 线的备用源：按标的分流到**实测可达**的通道。
+    ///
+    /// 为什么必须有：东财 `push2his.eastmoney.com/.../stock/kline/get` 在本机被
+    /// WAF/JA3 **按路径** RST（`default_routing` 的 klines 注释，2026-08-01 同源记载），
+    /// 而 `get_international_klines` / `get_benchmark_klines`（国际分支）/ `get_forex_klines`
+    /// 直接调 `international` vendor、**绕过了路由表** ⇒ 这三个入口零兜底，跨市场面板整片报错。
+    ///
+    /// 分流依据（2026-10-09 实测 200）：
+    /// - 外汇对（含 `/`）→ 新浪 `NewForexService.getDayKLine`（腾讯无外汇）
+    /// - 美股个股 → 新浪 `US_MinKService.getDailyK`（腾讯 `kline/kline` 对美股个股
+    ///   只回 2 根日线，见 `code_form::us_stock_symbol` 的注释）
+    /// - 指数 / 港股 → 腾讯 `kline/kline`（`SPX`→`usINX` 等映射见 tencent vendor）
+    async fn cross_market_kline_fallback(
+        &self,
+        code: &str,
+        period: &str,
+        limit: u32,
+        adj: Option<crate::types::AdjType>,
+    ) -> Result<Vec<KLine>, DataError> {
+        let name = cross_market_fallback_source(code);
+        let vendor = self.find_vendor(name).ok_or_else(|| DataError::VendorError {
+            vendor: name.into(),
+            message: format!("{name} vendor 未注册或未启用，无法兜底 {code}"),
+        })?;
+        vendor.get_klines(code, period, limit, adj).await
+    }
+
+    /// 主源（东财 international）结果 + 兜底：主源失败或返空时改用 `cross_market_kline_fallback`。
+    ///
+    /// 语义：主源「成功但空」代表该标的确实没有数据（非故障）——兜底也为空时保持空结果，
+    /// 由上层按 Empty 呈现；主源报错时兜底也失败，则同时保留两侧原因便于定位。
+    async fn with_cross_market_fallback(
+        &self,
+        code: &str,
+        period: &str,
+        limit: u32,
+        adj: Option<crate::types::AdjType>,
+        primary: Result<Vec<KLine>, DataError>,
+    ) -> Result<Vec<KLine>, DataError> {
+        match primary {
+            Ok(v) if !v.is_empty() => Ok(v),
+            Ok(empty) => match self.cross_market_kline_fallback(code, period, limit, adj).await {
+                Ok(v) if !v.is_empty() => Ok(v),
+                _ => Ok(empty),
+            },
+            Err(primary_err) => {
+                match self.cross_market_kline_fallback(code, period, limit, adj).await {
+                    Ok(v) if !v.is_empty() => Ok(v),
+                    Ok(_) => Err(primary_err),
+                    Err(fb_err) => Err(DataError::VendorError {
+                        vendor: "international".into(),
+                        message: format!(
+                            "{primary_err}；兜底源({})亦失败: {fb_err}",
+                            cross_market_fallback_source(code)
+                        ),
+                    }),
+                }
+            },
+        }
+    }
+
     /// G1 跨市场数据接入：国际股票 K 线
     pub async fn get_international_klines(
         &self,
@@ -2361,9 +2434,16 @@ impl AStockClient {
             vendor: "international".into(),
             message: "国际股票 vendor 未注册".into(),
         })?;
-        let result = Self::truncate_klines_by_asof(
-            vendor.get_klines(stock_code, period, limit, adj_type).await?,
-        );
+        let result = self
+            .with_cross_market_fallback(
+                stock_code,
+                period,
+                limit,
+                adj_type,
+                vendor.get_klines(stock_code, period, limit, adj_type).await,
+            )
+            .await?;
+        let result = Self::truncate_klines_by_asof(result);
         self.cache_set_serialized(cache_key, &result, 300).await;
         Ok(result)
     }
@@ -2392,28 +2472,29 @@ impl AStockClient {
         let result = if is_international_code(benchmark_code)
             || matches!(
                 benchmark_code.trim().to_uppercase().as_str(),
-                "SPX" | "SP500" | "S&P500" | "IXIC" | "NDX" | "DJI" | "HSI" | "HSCEI"
+                "SPX" | "SP500" | "S&P500" | "IXIC" | "NDX" | "DJI" | "DJIA" | "HSI" | "HSCEI"
             ) {
             let vendor =
                 self.find_vendor("international").ok_or_else(|| DataError::VendorError {
                     vendor: "international".into(),
                     message: "international vendor 未注册".into(),
                 })?;
-            // 国际指数通过 eastmoney 接口获取，使用国际代码格式
-            let intl_code = match benchmark_code.trim().to_uppercase().as_str() {
-                "SPX" | "SP500" | "S&P500" => "US_SPX".to_string(),
-                "IXIC" => "US_IXIC".to_string(),
-                "NDX" => "US_NDX".to_string(),
-                "DJI" => "US_DJI".to_string(),
-                "HSI" => "hkHSI".to_string(),
-                "HSCEI" => "hkHSCEI".to_string(),
-                other => other.to_string(),
-            };
-            vendor.get_klines(&intl_code, period, limit, None).await?
+            // 指数别名（SPX / HSI / DJIA …）与 secid 归一出 vendor 的 `resolve_secid` 负责 ——
+            // 此前在 lib 层改写成 `US_SPX` / `hkHSI`，再被 vendor 拼成 `0.US_SPX`（深市市场位），
+            // 东财一律判为不存在的标的（`rc:100` / `data:null`）⇒ 面板整片加载失败。
+            self.with_cross_market_fallback(
+                benchmark_code.trim(),
+                period,
+                limit,
+                None,
+                vendor.get_klines(benchmark_code.trim(), period, limit, None).await,
+            )
+            .await?
         } else {
-            // A 股指数：剥离后缀，直接走默认 K 线 routing
-            let clean_code = benchmark_code.trim().trim_end_matches(".SH").trim_end_matches(".SZ");
-            self.get_klines(clean_code, period, limit).await?
+            // A 股指数：**保留显式市场标记**。`000001.SH` 与平安银行同为 000001，
+            // 在此剥离后缀会按首位数字推断成深市，静默取回平安银行的 K 线
+            // （见 `code_form` 模块头）。市场位由调用链的 `code_form` 统一解析。
+            self.get_klines(benchmark_code.trim(), period, limit).await?
         };
         // 统一在此截断（国际分支绕过 A 股主路径的截断；A 股分支重复截断是幂等的、不会二次丢数据）
         let result = Self::truncate_klines_by_asof(result);
@@ -2443,11 +2524,18 @@ impl AStockClient {
             vendor: "international".into(),
             message: "international vendor 未注册".into(),
         })?;
-        // 外汇代码转换：USD/CNY → forex.usdcny
-        let forex_code = pair.trim().to_uppercase().replace('/', "");
-        let result = Self::truncate_klines_by_asof(
-            vendor.get_klines(&format!("forex.{forex_code}"), period, limit, None).await?,
-        );
+        // 外汇对直接交给 vendor 归一（`USD/CNY` → 东财 `120.USDCNYC`）。此前在这里拼成
+        // `forex.USDCNY`，`resolve_secid` 无法识别该形态 ⇒ 外汇区恒失败。
+        let result = self
+            .with_cross_market_fallback(
+                pair.trim(),
+                period,
+                limit,
+                None,
+                vendor.get_klines(pair.trim(), period, limit, None).await,
+            )
+            .await?;
+        let result = Self::truncate_klines_by_asof(result);
         self.cache_set_serialized(cache_key, &result, 300).await;
         Ok(result)
     }
@@ -8162,6 +8250,48 @@ mod asof_boundary_tests {
         for k in ["lockup_schedule", "shareholder_trades", "block_trades", "holder_count"] {
             assert!(b.get(k).is_some(), "bundle 缺段 `{k}`");
         }
+    }
+
+    /// 2026-10-09：**跨市场面板 live 端到端**（`#[ignore]`，需外网，手动跑）。
+    ///
+    /// 三个入口此前在面板上恒报「加载失败」：① 东财 secid 的市场位被拼成深市（`0.SPX`），
+    /// 东财一律判为不存在的标的；② 东财 `push2his` 的 kline 路径在本机被按路径 RST，
+    /// 而这三条路径直接调 international vendor、绕过了路由表 ⇒ 零兜底。
+    /// 上面两条都是**零网络**判据证明不了的，必须真打一次接口。
+    /// 跑法：`cargo test -p axagent-astock-data --lib cross_market_live -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "需外网：手动运行以核对跨市场三条 K 线端到端"]
+    async fn cross_market_live_smoke() {
+        let client = AStockClient::new();
+        for (code, label) in [("SPX", "标普500"), ("IXIC", "纳指"), ("HSI", "恒生")] {
+            let ks = client
+                .get_benchmark_klines(code, "daily", 20)
+                .await
+                .unwrap_or_else(|e| panic!("基准指数 {label}（{code}）取数失败: {e}"));
+            let last = ks.last().expect("K 线不得为空");
+            println!("{label}（{code}）: {} 根，最新 {}= {}", ks.len(), last.date, last.close);
+            assert!(ks.len() >= 10, "{code} 应有 >=10 根日线，实得 {}", ks.len());
+            assert!(last.close > 0.0, "{code} 收盘价应 > 0");
+        }
+        // 港股 / 美股个股
+        for (code, label) in [("00700.HK", "腾讯控股"), ("AAPL.US", "苹果")] {
+            let ks = client
+                .get_international_klines(code, "daily", 20, None)
+                .await
+                .unwrap_or_else(|e| panic!("国际个股 {label}（{code}）取数失败: {e}"));
+            println!("{label}（{code}）: {} 根", ks.len());
+            // >=10 而非「非空」：腾讯美股个股只回 2 根，用它当兜底会「有数据但图是空的」
+            assert!(ks.len() >= 10, "{code} 应有 >=10 根日线，实得 {}", ks.len());
+        }
+        // 外汇
+        let fx = client.get_forex_klines("USD/CNY", "daily", 20).await.expect("外汇 K 线应返回 Ok");
+        let last = fx.last().expect("外汇 K 线不得为空");
+        println!("USD/CNY: {} 根，最新 {}= {}", fx.len(), last.date, last.close);
+        assert!(
+            (5.0..10.0).contains(&last.close),
+            "USD/CNY 收盘应在 5~10 区间（量级自证），实得 {}",
+            last.close
+        );
     }
 }
 

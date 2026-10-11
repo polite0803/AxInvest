@@ -928,6 +928,7 @@ mod tests_conversation {
             )),
             cron_job_store: Arc::new(axagent_runtime_core::CronJobStore::new_ephemeral()),
             cron_scheduler: Arc::new(tokio::sync::RwLock::new(None)),
+            time_travel_batch_lock: Arc::new(tokio::sync::Mutex::new(())),
             platform_manager: Arc::new(
                 axagent_runtime::message_gateway::platform_manager::PlatformManager::new(),
             ),

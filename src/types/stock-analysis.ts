@@ -346,6 +346,30 @@ export interface DecisionsByHorizon {
   long?: HorizonDecision | null;
 }
 
+/**
+ * v149(L2/L3)：主档 action 与算法估值结论的**对账结果**（产出方 `portfolio-mgr.rhai`
+ * 的 `valuation_reconciliation`）。存在的理由：一次分析里主档说「买入/持有」、长线价值
+ * 视角却说「高估」，两者同屏而不说明谁管谁 —— 兑现产端注释「这类矛盾必须一眼可见」。
+ */
+export interface ValuationReconciliation {
+  /**
+   * 冲突种类；空串 = 无冲突（正常态）。
+   * · `rich_vs_nonbearish` = 算法估值偏空（高估/偏高）而决策方向非空头（买入/增持/持有）
+   * · `cheap_vs_bearish`   = 算法估值偏多（低估/合理偏低）而决策方向为空头（减持/卖出）
+   */
+  conflictKind?: string;
+  /** 估值侧的结论原文（`高估` / `偏高` / `低估` / `合理偏低` …） */
+  valuationAction?: string;
+  /** 冲突发生时、**封顶之前**主档的方向（即与估值相反的那一侧） */
+  decisionAction?: string;
+  /** 封顶**之后**的最终动作（未封顶时与 `decisionAction` 同值） */
+  finalAction?: string;
+  /** 是否因「算法估值=高估 ⇒ 禁止加仓档」把 买入/增持 封顶为 持有 */
+  capped?: boolean;
+  /** 冲突发生时所选档（snake_case）；主链定档那代可能为空 */
+  horizon?: string;
+}
+
 export interface StockDecision {
   action: StockActionType;
   positionPct: number;
@@ -412,6 +436,23 @@ export interface StockDecision {
    * · `main_chain_posterior` = 四路全未产出 ⇒ 退回主链后验口径
    */
   confidenceSource?: string;
+  /**
+   * v149(L1)：主档 action 的**判定口径**置信度（0-100），与对外展示的 `confidence` 可能不同源。
+   *
+   * 存在的理由：动作由该口径判出（如所选档未调制后验 ≥0.72 才买入），而展示用的 `confidence`
+   * 已被视角分歧系数 × 数据质量上限压低 ⇒ 只看 54.5% 会误读成「这么低为何买入」。
+   */
+  actionConfidenceBasis?: number | null;
+  /**
+   * v149(L1)：`actionConfidenceBasis` 的口径来源。
+   * 值域 `{branch_row, main_chain_effective_posterior}`（展示用 `CONFIDENCE_SOURCES` 是它的子集）。
+   */
+  actionConfidenceBasisSource?: string | null;
+  /**
+   * v149(L2/L3)：主档 action 与算法估值结论的对账结果。`conflictKind` 非空即方向相反，
+   * 展示层须显式提示；`capped=true` 表示已把 买入/增持 封顶为 持有（actionSource=valuation_cap）。
+   */
+  valuationReconciliation?: ValuationReconciliation | null;
   /** 决策方向置信度 (0-100) — 无论买卖方向都体现"多确信"。解决看空决策 confidence 偏低被误读为"不确信" */
   decisionConfidence?: number | null;
   /** 信号强度 (0-100) — 偏离中性的程度，0=完全中性，100=极端强信号 */
@@ -426,13 +467,14 @@ export interface StockDecision {
   untrustedCount?: number;
   /**
    * #8 P5 跨轮数据质量熔断态（portfolio-mgr 输出，三态）。
-   * · `fused`      = 连续多轮未达 A 级并已触发熔断线 ⇒ 置信度上限已被压到最保守一级
+   * · `fused`      = 连续多轮**降档**（C 级及以下 / 缺失）并已触发熔断线 ⇒ 置信度上限已被压到最保守一级
    * · `ok`         = 有观测且未跨阈
    * · `unobserved` = **观测表为空** ⇒ 熔断判据未参与本轮（既不是熔断也不是"证据面健康"）
    * 判据（几轮算熔断、什么等级算异常）唯一在 `dao::repo::data_quality_fuse`，本字段是**已判定结果**。
+   * ⚠ 2026-10-10 起 `A` / `B` 都算正常档（原判据 `grade != "A"` 会把「良好」的 B 也当异常）。
    */
   dqiFuseState?: string;
-  /** #8 P5 最近连续未达 A 级的轮数（含本轮）；`dqiFuseState` 的佐证数字 */
+  /** #8 P5 最近连续**降档**（C 级及以下 / 缺失）的轮数（含本轮）；`dqiFuseState` 的佐证数字 */
   dqiStreak?: number;
   /** #8 P5 参与该计数的观测条数；0 = 无观测（不得当成"质量一直好"） */
   dqiObservations?: number;

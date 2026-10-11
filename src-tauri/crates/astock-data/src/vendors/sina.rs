@@ -185,6 +185,141 @@ impl SinaVendor {
             })
             .collect())
     }
+
+    /// 新浪美股日线（`US_MinKService.getDailyK`）。
+    ///
+    /// 为什么需要：腾讯 `kline/kline` 对美股**个股**只回 2 根日线（2026-10-09 实测
+    /// usAAPL/usTSLA/usMSFT 均为「2011-06-02 + 最新一日」、`week` 只回 1 根）⇒ 拿它当兜底
+    /// 会让 K 线图几乎空。本接口实测返回 1984 年至今的完整日线，字段 `{d,o,h,l,c,v,a}`。
+    ///
+    /// 只支持日线（接口无周/月/分钟参数），其余周期返空交上层。
+    async fn get_us_klines_from_sina(
+        &self,
+        symbol: &str,
+        period: &str,
+        limit: u32,
+    ) -> Result<Vec<KLine>, DataError> {
+        if !matches!(period, "daily" | "101" | "Daily") {
+            return Ok(vec![]);
+        }
+        let url = format!(
+            "https://stock.finance.sina.com.cn/usstock/api/jsonp.php/var%20_=/\
+            US_MinKService.getDailyK?symbol={symbol}"
+        );
+        let resp = self.sina_get(&url).await?;
+        let body = resp.text().await?;
+        // 响应形态：`/*<script>…</script>*/\nvar _=([{...},{...}]);`
+        let start = body
+            .find('[')
+            .ok_or_else(|| DataError::ParseError("新浪美股日线: 响应无数组起始".into()))?;
+        let end = body
+            .rfind(']')
+            .filter(|e| *e > start)
+            .ok_or_else(|| DataError::ParseError("新浪美股日线: 响应无数组结束".into()))?;
+        let json: serde_json::Value = serde_json::from_str(&body[start..=end])
+            .map_err(|e| DataError::ParseError(format!("新浪美股日线 JSON 解析失败: {e}")))?;
+        let items = json.as_array().ok_or_else(|| DataError::VendorError {
+            vendor: "sina".into(),
+            message: "新浪美股日线返回非数组（接口形态变更或风控拦截）".into(),
+        })?;
+
+        let mut klines: Vec<KLine> = items
+            .iter()
+            .filter_map(|it| {
+                let date = it["d"].as_str()?;
+                if date.is_empty() {
+                    return None;
+                }
+                let f = |k: &str| it[k].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                Some(KLine {
+                    date: date.to_string(),
+                    open: f("o"),
+                    high: f("h"),
+                    low: f("l"),
+                    close: f("c"),
+                    volume: f("v"),
+                    amount: f("a"),
+                    turnover_rate: None,
+                    adj_factor: None,
+                })
+            })
+            .collect();
+        if klines.len() > limit as usize {
+            klines.drain(..klines.len() - limit as usize);
+        }
+        Ok(klines)
+    }
+
+    /// 新浪外汇日线（`NewForexService.getDayKLine`，`USD/CNY` → `fx_susdcny`）。
+    ///
+    /// 为什么需要：东财 `push2his` 的 kline 路径在本机被 WAF/JA3 **按路径** RST
+    /// （见 `lib.rs` 的 `default_routing` klines 注释），而跨市场「外汇」区此前只有东财
+    /// 一条通道 ⇒ 整区报错。本接口 2026-10-09 实测 200，返回自 1994 年起的完整日线。
+    ///
+    /// 字段实测口径是 `date,开,低,高,收`（**不是**常见的 OHLC —— 第 2 列是最低、第 3 列
+    /// 是最高）。依据：2026-10-09 USD/CNY 实测 `6.6995,6.6966,6.7013,6.6970`，
+    /// 其中 6.6966 是当周最低、6.7013 是最高，若按 OHLC 读则 high < open，不可能。
+    /// 接口不返回成交量/额 ⇒ `volume` / `amount` 一律 0（不编造）。
+    async fn get_forex_klines_from_sina(
+        &self,
+        pair: &str,
+        period: &str,
+        limit: u32,
+    ) -> Result<Vec<KLine>, DataError> {
+        // 该接口只有日线一种粒度，无周/月/分钟参数
+        if !matches!(period, "daily" | "101" | "Daily") {
+            return Ok(vec![]);
+        }
+        let (base, quote) = pair.split_once('/').ok_or_else(|| DataError::VendorError {
+            vendor: "sina".into(),
+            message: format!("新浪外汇需要 BASE/QUOTE 形态，收到 {pair:?}"),
+        })?;
+        let symbol = format!(
+            "fx_s{}{}",
+            base.trim().to_ascii_lowercase(),
+            quote.trim().to_ascii_lowercase()
+        );
+        let url = format!(
+            "https://vip.stock.finance.sina.com.cn/forex/api/jsonp.php/var%20_=/NewForexService.getDayKLine?symbol={symbol}"
+        );
+        let resp = self.sina_get(&url).await?;
+        let body = resp.text().await?;
+        // 响应形态：`var _=("1994-08-30,8.5616,...|...")`
+        let start = body
+            .find('"')
+            .ok_or_else(|| DataError::ParseError("新浪外汇: 响应无起始引号".into()))?;
+        let end = body
+            .rfind('"')
+            .filter(|e| *e > start)
+            .ok_or_else(|| DataError::ParseError("新浪外汇: 响应无结束引号".into()))?;
+        let data = &body[start + 1..end];
+
+        let mut klines: Vec<KLine> = data
+            .split('|')
+            .filter_map(|row| {
+                let f: Vec<&str> = row.split(',').filter(|s| !s.is_empty()).collect();
+                if f.len() < 5 {
+                    return None;
+                }
+                let num = |i: usize| f.get(i).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+                Some(KLine {
+                    date: f[0].to_string(),
+                    open: num(1),
+                    low: num(2),
+                    high: num(3),
+                    close: num(4),
+                    volume: 0.0,
+                    amount: 0.0,
+                    turnover_rate: None,
+                    adj_factor: None,
+                })
+            })
+            .collect();
+        if klines.len() > limit as usize {
+            klines.drain(..klines.len() - limit as usize);
+        }
+        Ok(klines)
+    }
 }
 
 /// `sh600519` / `sz000001` —— live 与 as-of 共用，避免两份前缀实现漂移。
@@ -328,11 +463,22 @@ impl StockVendor for SinaVendor {
             )));
         }
         let f = |i: usize| -> f64 { fields.get(i).and_then(|s| s.parse().ok()).unwrap_or(0.0) };
+        let price = f(3);
+        let pre_close = f(2);
+        // ⚠️ 不得外泄非有限值：`pre_close` 为 0（新股 / 停牌 / 字段缺失）时除法得 ±Inf / NaN，
+        //    而 Rust `f64` 的 NaN / ±Inf 经 serde_json 序列化为 JSON `null` ⇒ 前端 `.toFixed` 抛错。
+        //    对齐 `lib.rs` / `international.rs` / `vendors/mod.rs` / `mootdx.rs` 的既有保护写法；
+        //    NaN 也走 `else`（`NaN > 0.0` 为 false），不会漏网。
+        let change_pct = if pre_close > 0.0 {
+            (price - pre_close) / pre_close * 100.0
+        } else {
+            0.0
+        };
         Ok(StockQuote {
             code: stock_code.to_string(),
             name: fields.first().copied().unwrap_or("").to_string(),
-            price: f(3),
-            pre_close: f(2),
+            price,
+            pre_close,
             open: f(1),
             high: f(4),
             low: f(5),
@@ -343,7 +489,7 @@ impl StockVendor for SinaVendor {
             //   会污染 quote 缓存与下游指标，故回退直取。
             volume: f(8),
             amount: f(9),
-            change_pct: (f(3) - f(2)) / f(2) * 100.0,
+            change_pct,
             turnover_rate: 0.0,
             pe: None,
             pb: None,
@@ -373,6 +519,14 @@ impl StockVendor for SinaVendor {
         // 与分钟级同源，故不再维护两个通道 —— 网易那段实现连同其 code 与字段口径一并
         // 移除（需要恢复时见 git 历史：code=市场位(0沪/1深)+代码，字段顺序
         // date,TCLOSE,HIGH,LOW,TOPEN,LCLOSE,VOTURNOVER(手),VATURNOVER(元)）。
+        // 外汇对（`USD/CNY`）与美股个股（`AAPL` / `AAPL.US`）走各自的专用接口；
+        // A 股/指数仍走 `get_klines_from_sina`（其余形态由 `us_stock_symbol` 排除）。
+        if stock_code.contains('/') {
+            return self.get_forex_klines_from_sina(stock_code, period, limit).await;
+        }
+        if let Some(symbol) = crate::code_form::us_stock_symbol(stock_code) {
+            return self.get_us_klines_from_sina(&symbol, period, limit).await;
+        }
         self.get_klines_from_sina(stock_code, period, limit).await
     }
 

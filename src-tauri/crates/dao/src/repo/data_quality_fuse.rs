@@ -12,10 +12,26 @@
 //!
 //! ## 「异常」的边界（唯一一处定义，别在 Rhai / 面板里各写一份）
 //!
-//! `abnormal` = **该轮没拿到 A 级**，含两种情形：
-//!   · grade 是 `B` / `C` / `D` / `F` ⇒ 异常（#8 的原话就是「B 级跨样本熔断」，B 含在内）；
+//! `abnormal` = **该轮数据质量确实降档**，含两种情形：
+//!   · grade 是 `C` / `D` / `F` ⇒ 异常（`C` 起才是「一般 / 较差」档）；
 //!   · grade 为 `NULL` ⇒ **也算异常**。`data-quality` 节点自身 `continue_on_fail = true`，
 //!     它整段没跑成时最容易被读成「没有质量问题记录」= 正常；那正是把「拿不到」冒充「没问题」。
+//!
+//! ⚠ 2026-10-10 语义调整：原判据是 `grade != "A"`（即 **B 也算异常**），按 #8 的
+//!   「B 级跨样本熔断」原话实现。实测后果（生产库 4 轮健在观测全为 B）：
+//!   `B` 是脚本里明确定义的「良好」档（A≥85 / B≥65），把它并入「异常」等于**把常态档
+//!   当作故障**——只要连续 3 轮没拿到近乎满分的 A（而 A 需 gap_count == 0，
+//!   见 `data-quality.rhai` 的量程注释），就弹「决策可信度受限 / 本轮置信度上限按最保守档
+//!   收紧」，用最保守档压掉本来可信的决策。用户侧据此判定为**误报**（2026-10-10 反馈）。
+//!   现收窄为「C/D/F/缺失才异常」：熔断恢复判别力（只在真的降档时触发），A 与 B 都是
+//!   可接受档。**这不是放宽证据面**——C/D/F 与「节点没跑成」仍照旧熔断。
+//!   ⚠ 判据改后**已回填历史行**（2026-10-10 当日：6 行 grade ∈ {A,B} 且 `abnormal=1` → 0）。
+//!   起初的结论是「不回填」——但那理由只覆盖了 `load_recent_streak`（数**从最新一轮往回的前缀**，
+//!   下一轮按新判据落库即可打断前缀 ⇒ 读数自愈）。同模块的 `load_fused_intervals` 读的是**全量**
+//!   观测并导出熔断时间线（闭环权重历史降权），旧 B 行的 `abnormal=1` 会合成一段**假熔断段**，
+//!   把本就合格的历史轮次误降权，且这段假段**不会**随新行自愈 ⇒ 存量观测必须迁移。
+//!   回填只改 `abnormal` 列、不动 `grade`，可逆（原值全为 1）：判据仍在写侧判一次，
+//!   只是把新判据**回放**到历史行——读侧依旧只数布尔，不重算 grade。
 //!
 //! 边界只在写侧判一次并落成 `abnormal` 列，读侧只数布尔 —— 反过来（读侧重算 grade 集合）
 //! 会让「异常」的定义一改就把历史行的归属跟着改，跨样本计数就变成会漂移的东西。
@@ -29,9 +45,10 @@
 //! 注入给工作流的是**已判定结果**（`dqi_streak` / `dqi_fused`），Rhai 与 Switch 都不再
 //! 自己比较阈值 ⇒ 判据不会漂到第二处。
 
-use axagent_entities::data_quality_observations;
+use axagent_entities::{data_quality_observations, stock_analyses};
 use sea_orm::entity::prelude::*;
-use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, Set};
+use sea_orm::sea_query::SelectStatement;
+use sea_orm::{ColumnTrait, QueryFilter, QueryOrder, QuerySelect, QueryTrait, Set};
 
 /// 观测作用域的现阶段唯一值：一轮分析一条，不区分票、不区分档。
 pub const DQI_SCOPE_GLOBAL: &str = "global";
@@ -47,11 +64,14 @@ pub const DQI_FUSE_STREAK: usize = 3;
 pub const DQI_STREAK_LOOKBACK: usize = 12;
 
 /// 该轮是否算异常。入参是 `data-quality` 输出的字母等级原值（`None` = 节点没跑成）。
+///
+/// `A`（优秀）/ `B`（良好）都算正常档；`C` / `D` / `F` 才算降档。
+/// 未识别的字母按异常处理（宁可保守，不静默放行）；`NULL` / 空串同「没跑成」。
 pub fn grade_is_abnormal(grade: Option<&str>) -> bool {
     match grade.map(str::trim).filter(|g| !g.is_empty()) {
         // NULL / 空串 = 无从判级 ⇒ 按最坏处理（见模块头「异常的边界」第二条）
         None => true,
-        Some(g) => g != "A",
+        Some(g) => !matches!(g, "A" | "B"),
     }
 }
 
@@ -118,10 +138,28 @@ impl DqiStreak {
     }
 }
 
+/// 观测行必须仍对应一条现存分析 —— 否则是「孤儿行」，读侧一律不参与聚合。
+///
+/// ## 为什么读侧过滤而不是删除时级联
+///
+/// ① **存量即刻失效**：加过滤当轮就排除历史孤儿行，免迁移；删除命令级联只对**将来**的删除生效。
+/// ② **覆盖所有删除路径**（含未来新增的删除入口），级联只能钉住已知两条命令
+///    （`commands/stock_analysis.rs` 的 `delete_stock_analysis` / `batch_delete_stock_analyses`）。
+/// ③ **只改「行是否参与」**，不重算 `abnormal` 归属 —— 与模块头「边界只在写侧判一次」的纪律一致。
+///
+/// ## 为什么不会漏掉真实轮次
+///
+/// 观测行在 `data-quality` 节点**跑完才落库** ⇒ 「未落库的轮」本就不存在；能被删掉分析的轮，
+/// 其观测行已不代表任何现存结论，剔除它不会把某条真实轮次算少。
+fn alive_analysis_ids() -> SelectStatement {
+    stock_analyses::Entity::find().select_only().column(stock_analyses::Column::Id).into_query()
+}
+
 /// 取最近 `DQI_STREAK_LOOKBACK` 条观测（同一条分析只算一次）并数前缀连续异常。
 pub async fn load_recent_streak(db: &DatabaseConnection) -> Result<DqiStreak, DbErr> {
     let rows = data_quality_observations::Entity::find()
         .filter(data_quality_observations::Column::Scope.eq(DQI_SCOPE_GLOBAL))
+        .filter(data_quality_observations::Column::AnalysisId.in_subquery(alive_analysis_ids()))
         .order_by_desc(data_quality_observations::Column::ObservedAt)
         .all(db)
         .await?;
@@ -213,10 +251,12 @@ pub fn fused_at(intervals: &[FusedInterval], t_ms: i64) -> Option<bool> {
     Some(intervals.iter().any(|iv| iv.covers(t_ms)))
 }
 
-/// 读全量观测并导出熔断时间线（同一 analysis_id 只认最近一行，与 [`load_recent_streak`] 同口径）。
+/// 读全量观测并导出熔断时间线（同一 analysis_id 只认最近一行，与 [`load_recent_streak`] 同口径；
+/// 孤儿观测行同样由 [`alive_analysis_ids`] 剔除）。
 pub async fn load_fused_intervals(db: &DatabaseConnection) -> Result<Vec<FusedInterval>, DbErr> {
     let rows = data_quality_observations::Entity::find()
         .filter(data_quality_observations::Column::Scope.eq(DQI_SCOPE_GLOBAL))
+        .filter(data_quality_observations::Column::AnalysisId.in_subquery(alive_analysis_ids()))
         .order_by_asc(data_quality_observations::Column::ObservedAt)
         .all(db)
         .await?;
@@ -236,16 +276,43 @@ mod tests {
     use super::*;
     use crate::db::create_test_pool;
 
+    /// 直插一条最简 `stock_analyses` 行（只为让观测行不成为孤儿）。
+    ///
+    /// 读侧自 [`alive_analysis_ids`] 起对观测行做存在性过滤 ⇒ 夹具必须先造出对应分析，
+    /// 否则观测行会被整批剔除、断言恒为 0（这正是「孤儿行不参与」的判据本身）。
+    async fn insert_analysis(db: &DatabaseConnection, id: &str) {
+        let now = chrono::Utc::now().timestamp_millis();
+        let active = stock_analyses::ActiveModel {
+            id: Set(id.to_string()),
+            stock_code: Set("000001".to_string()),
+            stock_name: Set("测试票".to_string()),
+            analysis_date: Set("2026-10-09".to_string()),
+            provider_id: Set("test".to_string()),
+            conversation_id: Set("test-conv".to_string()),
+            status: Set("completed".to_string()),
+            created_at: Set(now),
+            updated_at: Set(now),
+            ..Default::default()
+        };
+        stock_analyses::Entity::insert(active).exec(db).await.expect("插入分析行应成功");
+    }
+
     #[test]
     fn abnormal_predicate_treats_missing_grade_as_worst_case() {
-        assert!(!grade_is_abnormal(Some("A")), "A 级是唯一正常档");
-        for g in ["B", "C", "D", "F"] {
-            assert!(grade_is_abnormal(Some(g)), "{g} 级必须算异常（#8 的『B 级及以下』含 B）");
+        for g in ["A", "B"] {
+            assert!(!grade_is_abnormal(Some(g)), "{g} 级是可接受档（2026-10-10 起 B 不再算异常）");
+        }
+        for g in ["C", "D", "F"] {
+            assert!(grade_is_abnormal(Some(g)), "{g} 级必须算异常（C 起才是降档）");
         }
         // 「拿不到」不得冒充「没问题」
         assert!(grade_is_abnormal(None));
         assert!(grade_is_abnormal(Some("")), "空串等价于没跑成");
-        assert!(grade_is_abnormal(Some("   ")), "空白不参与 A 比较");
+        assert!(grade_is_abnormal(Some("   ")), "空白不参与 A/B 比较");
+        assert!(
+            grade_is_abnormal(Some(" b ")),
+            "未 trim 的大小写/空白不静默放行（原判据同款严格）"
+        );
         // 未知字母按异常处理（宁可保守，不静默放行）
         assert!(grade_is_abnormal(Some("Z")));
     }
@@ -265,12 +332,15 @@ mod tests {
         let handle = create_test_pool().await.expect("测试库应可创建");
         let db = &handle.conn;
 
-        // 期望的**最近→最旧**顺序：F, B, A, B ⇒ 前缀连续异常 = 2（遇 A 就断，后面的 B 不参与）。
+        // 期望的**最近→最旧**顺序：F, D, B, C ⇒ 前缀连续异常 = 2（F/D 异常，遇 B 就断）。
         // ⚠ 时间戳必须与这个顺序同向（数组首元素 = 最新一轮）：第一版照数组顺序递增秒数，
         //   于是库里最新一轮是 `B`、前缀只有 1 —— 代码对、夹具反了，红得有价值但报错了对象。
-        let grades = ["F", "B", "A", "B"];
+        // ⚠ 2026-10-10 起 `B` 是**正常档** ⇒ 断链那一轮改用 `B`（原夹具用 `A`；用 B 才能同时
+        //   锁住「B 不再算异常」这条新语义，否则本用例在旧定义下也会绿）。
+        let grades = ["F", "D", "B", "C"];
         for (i, g) in grades.iter().enumerate() {
             let at = 1_700_000_000_000 + (grades.len() - i) as i64;
+            insert_analysis(db, &format!("an-{i}")).await;
             let inserted = record_observation(db, &format!("an-{i}"), Some(g), at)
                 .await
                 .expect("落观测行应成功");
@@ -278,12 +348,13 @@ mod tests {
         }
 
         let s = load_recent_streak(db).await.expect("读 streak 应成功");
-        assert_eq!(s.consecutive_abnormal, 2, "前缀连续异常 = 2，遇 A 断链");
+        assert_eq!(s.consecutive_abnormal, 2, "前缀连续异常 = 2，遇正常档 B 断链");
         assert_eq!(s.observations, 4);
         assert_eq!(s.deduped, 0);
         assert!(!s.fused(), "2 < {DQI_FUSE_STREAK} ⇒ 不该熔断");
 
         // 再来一轮异常 ⇒ 3 轮，跨阈 ⇒ 熔断
+        insert_analysis(db, "an-newest").await;
         record_observation(db, "an-newest", Some("D"), 1_800_000_000_000)
             .await
             .expect("追加观测应成功");
@@ -297,7 +368,8 @@ mod tests {
         let handle = create_test_pool().await.expect("测试库应可创建");
         let db = &handle.conn;
 
-        record_observation(db, "same-analysis", Some("B"), 1_700_000_000_000)
+        insert_analysis(db, "same-analysis").await;
+        record_observation(db, "same-analysis", Some("C"), 1_700_000_000_000)
             .await
             .expect("首条应落库");
         let again = record_observation(db, "same-analysis", Some("F"), 1_800_000_000_000)
@@ -318,7 +390,8 @@ mod tests {
         // 写侧有 analysis_id 幂等守卫 ⇒ 同 id 两行只可能来自守卫之前的存量/回补行。
         // 读侧必须「每个 analysis_id 只认最近一行」，否则一条分析被算成两轮 ⇒ 熔断提前。
         // 这里绕过写入口直插，就是在测那条读侧分支（不测它，这行代码永远没被走过）。
-        for (at, grade) in [(1_700_000_000_000_i64, "A"), (1_800_000_000_000_i64, "B")] {
+        insert_analysis(db, "legacy-dup").await;
+        for (at, grade) in [(1_700_000_000_000_i64, "A"), (1_800_000_000_000_i64, "D")] {
             let active = data_quality_observations::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
                 scope: Set(DQI_SCOPE_GLOBAL.to_string()),
@@ -338,7 +411,7 @@ mod tests {
         let s = load_recent_streak(db).await.expect("读 streak 应成功");
         assert_eq!(s.deduped, 1, "同一条分析的旧行必须被识别为重复");
         assert_eq!(s.observations, 1, "一条分析只算一轮");
-        assert_eq!(s.consecutive_abnormal, 1, "认最近那行（B ⇒ 异常 1），而不是 A+B 两行");
+        assert_eq!(s.consecutive_abnormal, 1, "认最近那行（D ⇒ 异常 1），而不是 A+D 两行");
     }
 
     #[tokio::test]
@@ -346,13 +419,14 @@ mod tests {
         let handle = create_test_pool().await.expect("测试库可创建");
         let db = &handle.conn;
         for i in 0..DQI_FUSE_STREAK {
+            insert_analysis(db, &format!("null-grade-{i}")).await;
             record_observation(db, &format!("null-grade-{i}"), None, 1_700_000_000_000 + i as i64)
                 .await
                 .expect("NULL grade 也应落行");
         }
         let s = load_recent_streak(db).await.expect("读 streak 应成功");
         assert_eq!(s.consecutive_abnormal, DQI_FUSE_STREAK);
-        assert!(s.fused(), "节点反复没跑成 ⇒ 与「一直 B 级」同等对待，不静默放行");
+        assert!(s.fused(), "节点反复没跑成 ⇒ 照旧并入异常（不因 B 已归正常档而放行）");
     }
 
     /// 夹具相对权威常量构造（不写死 3）：前 N-1 轮异常不该开段，第 N 轮才开。
@@ -411,5 +485,57 @@ mod tests {
             "解除后 = 已知正常（这一刻在时间线覆盖之内）"
         );
         assert_eq!(fused_at(&ivs, base + DQI_FUSE_STREAK as i64 * 10 + 1), Some(false));
+    }
+
+    /// 孤儿观测行（`analysis_id` 不在 `stock_analyses`）必须在**两个读口**都被剔除。
+    ///
+    /// 实证来源：生产库 `data_quality_observations` 全表 4 行中有 2 行对应分析已删除，
+    /// 却仍计入连续轮数 —— 界面显示「连续 3 轮」而实际健在的只有 2 行。
+    #[tokio::test]
+    async fn orphan_observation_is_ignored_by_streak_and_timeline() {
+        let handle = create_test_pool().await.expect("测试库应可创建");
+        let db = &handle.conn;
+
+        // 健在轮次：1 正常 + 3 异常（跨阈）。异常档用 `D`（2026-10-10 起 `B` 已是正常档，
+        // 用它造异常轮会让本用例的 `consecutive_abnormal` 断言恒为 0）。
+        insert_analysis(db, "alive-ok").await;
+        record_observation(db, "alive-ok", Some("A"), 1_000).await.expect("落行应成功");
+        for (i, id) in ["alive-b1", "alive-b2", "alive-b3"].iter().enumerate() {
+            insert_analysis(db, id).await;
+            record_observation(db, id, Some("D"), 3_000 + i as i64 * 1_000)
+                .await
+                .expect("落行应成功");
+        }
+        // 孤儿行：直插（绕过写入口，模拟「分析已删除但观测行残留」）——刻意插在**更早**，
+        // 若不剔除，它会把熔断段起点从 alive-b3 提前到 alive-b1/b2。
+        for (at, id) in [(2_000_i64, "orphan-b1"), (2_500_i64, "orphan-b2")] {
+            let active = data_quality_observations::ActiveModel {
+                id: Set(uuid::Uuid::new_v4().to_string()),
+                scope: Set(DQI_SCOPE_GLOBAL.to_string()),
+                horizon: Set(None),
+                grade: Set(Some("B".to_string())),
+                abnormal: Set(1),
+                analysis_id: Set(id.to_string()),
+                observed_at: Set(at),
+                created_at: Set(at),
+            };
+            data_quality_observations::Entity::insert(active)
+                .exec(db)
+                .await
+                .expect("直插孤儿行应成功");
+        }
+
+        let s = load_recent_streak(db).await.expect("读 streak 应成功");
+        assert_eq!(s.observations, 4, "孤儿行不得计入观测数（实际健在 4 轮）");
+        assert_eq!(s.consecutive_abnormal, 3, "孤儿异常行不得虚增连续轮数");
+        assert!(s.fused());
+        assert_eq!(s.deduped, 0, "孤儿行不算「同一条分析重复」");
+
+        let ivs = load_fused_intervals(db).await.expect("读时间线应成功");
+        assert_eq!(ivs.len(), 1, "只跨阈一次 ⇒ 一段");
+        assert_eq!(
+            ivs[0].from_ms, 5_000,
+            "熔断段起点必须是健在轮 alive-b3；孤儿行若被算进会提前到 3_000"
+        );
     }
 }

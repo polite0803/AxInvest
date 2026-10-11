@@ -1966,11 +1966,22 @@ pub fn build_pending_reflection_rows_for(
             chrono::Local::now().date_naive()
         });
 
+    // 时间旅行批次（2026-10-11）：as_of 激活时，四档 hindsight 必须按**交易日**外推
+    // （T+2/T+5/T+28/T+90 交易日，权威值 `Period::default_holding_days`），而不是自然日 ——
+    // 否则跨周末/长假会系统性提前到期。live（无 as_of）行为逐字不变（自然日）。
+    // 未来交易日历缺口由 is_trading_day「工作日默认开市」兜底，名义到期日误差仅限未公告假期，
+    // 实际反思取数另有「≤ hindsight 最后一根真实 K 线」自证。
+    let asof_active = axagent_astock_data::as_of::current_as_of().is_some();
+
     horizons
         .into_iter()
         .map(|(horizon, days)| {
-            let hindsight_date =
-                (analysis_nd + chrono::Duration::days(days)).format("%Y-%m-%d").to_string();
+            let hindsight_nd = if asof_active {
+                axagent_astock_data::calendar::nth_trading_day(analysis_nd, days as i32)
+            } else {
+                analysis_nd + chrono::Duration::days(days)
+            };
+            let hindsight_date = hindsight_nd.format("%Y-%m-%d").to_string();
             stock_reflections::ActiveModel {
                 id: Set(uuid::Uuid::new_v4().to_string()),
                 stock_code: Set(seed.stock_code.to_string()),
@@ -2222,6 +2233,9 @@ pub async fn run_batch_reflection_inner(
     max_count: Option<u32>,
     trajectory_storage: Option<&std::sync::Arc<axagent_trajectory::TrajectoryStorage>>,
     filter: Option<&ReflectionFilter>,
+    // 时间旅行批次限定：只处理这批 `stock_analyses.id` 对应的 pending 行；
+    // None = 全表（live cron / batch-rerun 既有行为）。
+    analysis_ids: Option<&[String]>,
 ) -> Result<serde_json::Value, String> {
     use crate::commands::error::ErrorResponse;
     use axagent_entities::stock_analyses;
@@ -2267,6 +2281,17 @@ pub async fn run_batch_reflection_inner(
                 stock_reflections::Column::Horizon,
                 p.as_str(),
             ));
+    }
+    if let Some(ids) = analysis_ids {
+        // 时间旅行批次：把反思范围严格收口到本批 replay 分析，绝不误反思其它 pending
+        // （全表 inner 无此参数前会串到 live/历史积压行）。空集直接给一个永假谓词。
+        if ids.is_empty() {
+            pending_query =
+                pending_query.filter(stock_reflections::Column::OriginalAnalysisId.eq("__none__"));
+        } else {
+            pending_query =
+                pending_query.filter(stock_reflections::Column::OriginalAnalysisId.is_in(ids));
+        }
     }
     let pendings: Vec<stock_reflections::Model> =
         pending_query.order_by_asc(stock_reflections::Column::CreatedAt).all(db).await.map_err(

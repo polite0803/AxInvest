@@ -3,12 +3,12 @@
 //! ## 设计
 //!
 //! 当前实现为 eastmoney 国际行情接口的封装。
-//! eastmoney 支持通过特殊代码前缀获取港美股数据：
-//! - 港股: `hk00700`（腾讯控股）
-//! - 美股: `US_TSLA`（特斯拉）
-//! - 中概: `US_BABA`（阿里巴巴）
-//! - 国际指数: `US_SPX`（标普 500）/ `US_IXIC`（纳指）/ `hkHSI`（恒生）
-//! - 外汇: `forex.USDCNY`（美元人民币）
+//! 调用方传入**业务代码**（`AAPL` / `00700.HK` / `SPX` / `USD/CNY` / 已是东财 secid 的
+//! `1.000001` 等），由 `resolve_secid` 归一为东财 `secid`：
+//! - 港股: `116.00700`
+//! - 美股: `105.AAPL`（市场位随上市交易所变，查东财码表解析）
+//! - 国际指数: `100.SPX` / `100.NDX` / `100.DJIA` / `100.HSI`
+//! - 外汇: `120.USDCNYC`（人民币中间价）
 //!
 //! ## 使用
 //!
@@ -188,48 +188,91 @@ impl Default for InternationalVendor {
     }
 }
 
-/// eastmoney secid 市场前缀
+/// 东财 secid 的市场位取值（`<市场位>.<代码>`）。
 ///
-/// - 0.<code>  — 港股/美股/外汇/国际指数
-/// - 1.<code>  — 上交所
-/// - 0.51xxxx  — 上证 ETF
-fn to_em_secid(intl_code: &str) -> String {
-    // eastmoney 国际行情统一走 secid=0.<intl_code>
-    // （与 eastmoney.rs A 股 secid=1.<6位数字> 不同）
-    format!("0.{intl_code}")
+/// 实测依据：东财 suggest 码表（`searchadapter.eastmoney.com/api/suggest/get?type=14`）
+/// 返回的 `QuoteID` 字段。此前本 vendor 对所有代码统一拼 `0.<code>`（如 `0.US_SPX`），
+/// 而 `0` 是**深市**市场位 ⇒ 每个国际代码都被东财判为不存在的标的
+/// （接口回 `rc:100` / `data:null`，面板整片「加载失败」）。
+fn is_em_secid(code: &str) -> bool {
+    let Some((market, bare)) = code.split_once('.') else {
+        return false;
+    };
+    if bare.is_empty() {
+        return false;
+    }
+    // `00700.HK` / `AAPL.US` 这类是**业务代码**而非 secid（右侧是交易所标记，不是代码本体）
+    if matches!(bare.to_ascii_uppercase().as_str(), "HK" | "US" | "SH" | "SZ" | "BJ") {
+        return false;
+    }
+    matches!(
+        market,
+        "0" | "1"
+            | "90"
+            | "100"
+            | "103"
+            | "105"
+            | "106"
+            | "107"
+            | "116"
+            | "120"
+            | "124"
+            | "131"
+            | "133"
+            | "153"
+            | "155"
+    )
 }
 
-/// 将国际股票代码转为 eastmoney API 兼容格式
+/// 国际指数别名 → 东财 secid。
 ///
-/// 规则:
-/// - "00700" / "00700.HK" → "hk00700"
-/// - "TSLA" / "TSLA.US" → "US_TSLA"
-/// - "BABA" / "BABA.US" → "US_BABA"
-/// - "US_SPX" / "hkHSI" / "forex.USDCNY" → 原样保留（已编码）
-/// - 其他保留原样（由 API 自行处理）
-fn to_international_code(stock_code: &str) -> String {
-    // 已编码格式直接返回
-    if stock_code.starts_with("US_")
-        || stock_code.starts_with("hk")
-        || stock_code.starts_with("forex.")
-    {
-        return stock_code.to_string();
-    }
-    let (code, suffix) = if let Some((before, after)) = stock_code.split_once('.') {
-        (before, after.to_uppercase())
-    } else {
-        // 未带后缀：数字=港股，字母=美股
-        if stock_code.chars().all(|c| c.is_ascii_digit()) {
-            (stock_code, "HK".to_string())
-        } else {
-            (stock_code, "US".to_string())
-        }
-    };
+/// 依据东财码表实测：SPX→`100.SPX`、HSI→`100.HSI`、DJIA→`100.DJIA`、NDX→`100.NDX`。
+/// 东财没有纳斯达克**综合**指数（IXIC），用同族的纳斯达克100（`100.NDX`）承接。
+const EM_INTL_INDEX: &[(&str, &str)] = &[
+    ("SPX", "100.SPX"),
+    ("SP500", "100.SPX"),
+    ("S&P500", "100.SPX"),
+    ("INX", "100.SPX"),
+    ("IXIC", "100.NDX"),
+    ("NDX", "100.NDX"),
+    ("NDX100", "100.NDX100"),
+    ("DJI", "100.DJIA"),
+    ("DJIA", "100.DJIA"),
+    ("HSI", "100.HSI"),
+    ("HSCEI", "100.HSCEI"),
+];
 
-    match suffix.as_str() {
-        "HK" => format!("hk{code}"),
-        "US" => format!("US_{code}"),
-        _ => stock_code.to_string(),
+/// 外汇对 → 东财 secid。
+///
+/// 东财没有在岸 `USD/CNY` 现货，只有 `120.<BASE>CNYC`（人民币中间价，与「USD/CNY」
+/// 同口径）与 `133.USDCNH`（离岸）。码表实测：`USDCNY`→`120.USDCNYC`、
+/// `HKDCNY`→`120.HKDCNYC`。其余币对不做猜测 ⇒ 返回 `None` 走显式失败。
+fn forex_secid(pair: &str) -> Option<String> {
+    let (base, quote) = pair.split_once('/')?;
+    let base = base.trim().to_ascii_uppercase();
+    let quote = quote.trim().to_ascii_uppercase();
+    if base.is_empty() {
+        return None;
+    }
+    match quote.as_str() {
+        "CNY" => Some(format!("120.{base}CNYC")),
+        "CNH" => Some(format!("133.{base}CNH")),
+        _ => None,
+    }
+}
+
+/// 港股代码 → 东财 secid（`00700` / `00700.HK` → `116.00700`）
+fn hk_secid(code: &str) -> Option<String> {
+    let bare = code
+        .split_once('.')
+        .filter(|(_, tag)| tag.eq_ignore_ascii_case("HK"))
+        .map(|(bare, _)| bare)
+        .unwrap_or(code)
+        .trim();
+    if !bare.is_empty() && bare.len() <= 5 && bare.chars().all(|c| c.is_ascii_digit()) {
+        Some(format!("116.{bare}"))
+    } else {
+        None
     }
 }
 
@@ -237,10 +280,9 @@ fn to_international_code(stock_code: &str) -> String {
 impl StockVendor for InternationalVendor {
     /// 获取港股/美股/国际指数/外汇行情
     async fn get_quote(&self, stock_code: &str) -> Result<StockQuote, DataError> {
-        let intl_code = to_international_code(stock_code);
-        let secid = to_em_secid(&intl_code);
+        let secid = self.resolve_secid(stock_code).await?;
         let url = format!(
-            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f57,f58,f60,f116,f117,f162,f168,f170"
+            "https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f50,f51,f52,f57,f58,f60,f116,f117,f162,f167,f168,f170"
         );
 
         let text = self.http_get_with_hooks(&url, "data_source").await?;
@@ -255,8 +297,7 @@ impl StockVendor for InternationalVendor {
         limit: u32,
         adj: Option<AdjType>,
     ) -> Result<Vec<KLine>, DataError> {
-        let intl_code = to_international_code(stock_code);
-        let secid = to_em_secid(&intl_code);
+        let secid = self.resolve_secid(stock_code).await?;
         let period_code = match period {
             "daily" => "101",
             "weekly" => "102",
@@ -351,6 +392,84 @@ impl StockVendor for InternationalVendor {
 }
 
 impl InternationalVendor {
+    /// 把业务代码归一为东财 `secid`。
+    ///
+    /// 归一顺序（前者优先）：
+    /// 1. 已是东财 secid（`1.000001` / `100.SPX`）→ 原样透传
+    /// 2. 显式 A 股交易所标记（`000001.SH` / `sh000001`）→ 按标记取市场位
+    /// 3. 国际指数别名（`SPX` / `HSI` …）
+    /// 4. 外汇对（`USD/CNY`）
+    /// 5. 港股（`00700` / `00700.HK`）
+    /// 6. 美股（`AAPL` / `AAPL.US`）→ 查东财码表
+    async fn resolve_secid(&self, code: &str) -> Result<String, DataError> {
+        let trimmed = code.trim();
+        if trimmed.is_empty() {
+            return Err(DataError::NotFound("国际代码为空".into()));
+        }
+        if is_em_secid(trimmed) {
+            return Ok(trimmed.to_string());
+        }
+        if let Some((bare, ex)) = crate::code_form::split_explicit_market(trimmed) {
+            return Ok(format!("{}.{bare}", ex.em_market()));
+        }
+        let upper = trimmed.to_ascii_uppercase();
+        if let Some((_, secid)) = EM_INTL_INDEX.iter().find(|(alias, _)| *alias == upper) {
+            return Ok((*secid).to_string());
+        }
+        if trimmed.contains('/') {
+            return forex_secid(trimmed).ok_or_else(|| {
+                DataError::NotFound(format!(
+                    "暂不支持的外汇对 {trimmed}（当前支持 BASE/CNY 与 BASE/CNH）"
+                ))
+            });
+        }
+        if let Some(secid) = hk_secid(trimmed) {
+            return Ok(secid);
+        }
+        self.resolve_us_secid(&upper).await
+    }
+
+    /// 美股代码 → 东财 secid。
+    ///
+    /// 美股 secid 的市场位随**上市交易所**变（105=纳斯达克 / 106=纽交所 / 107=美交所），
+    /// 仅凭代码无法推断（`AAPL`=105 而 `BABA`=106）⇒ 必须查东财码表取 `QuoteID`。
+    /// 码表命中但市场位不是美股三大交易所时视为未命中（避免同名基金/港股顶替）。
+    async fn resolve_us_secid(&self, symbol: &str) -> Result<String, DataError> {
+        let bare = symbol
+            .split_once('.')
+            .filter(|(_, tag)| tag.eq_ignore_ascii_case("US"))
+            .map(|(bare, _)| bare)
+            .unwrap_or(symbol)
+            .trim()
+            .to_ascii_uppercase();
+        if bare.is_empty() || !bare.chars().all(|c| c.is_ascii_alphanumeric()) {
+            return Err(DataError::NotFound(format!("无法识别为国际代码: {symbol}")));
+        }
+        let url = format!(
+            "https://searchadapter.eastmoney.com/api/suggest/get?input={}&type=14&token=ANY&count=10",
+            urlencoding(&bare)
+        );
+        let text = self.http_get_with_hooks(&url, "data_source").await?;
+        let json: Value = serde_json::from_str(&text)
+            .map_err(|e| DataError::ParseError(format!("美股代码解析失败: {e}")))?;
+
+        json["QuotationCodeTable"]["Data"]
+            .as_array()
+            .and_then(|items| {
+                items.iter().find_map(|item| {
+                    if !item["Code"].as_str()?.eq_ignore_ascii_case(&bare) {
+                        return None;
+                    }
+                    let quote_id = item["QuoteID"].as_str()?;
+                    match quote_id.split_once('.').map(|(market, _)| market) {
+                        Some("105" | "106" | "107") => Some(quote_id.to_string()),
+                        _ => None,
+                    }
+                })
+            })
+            .ok_or_else(|| DataError::NotFound(format!("东财码表中没有美股 {bare}")))
+    }
+
     fn parse_quote_json(text: &str, stock_code: &str) -> Result<StockQuote, DataError> {
         let json: Value = serde_json::from_str(text)
             .map_err(|e| DataError::ParseError(format!("国际行情 JSON 解析失败: {e}")))?;

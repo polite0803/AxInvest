@@ -1902,6 +1902,19 @@ pub async fn run_single_stock_analysis(
 ) -> Result<String, String> {
     // 1. 创建 stock_analyses 记录
     let now_ms = chrono::Utc::now().timestamp_millis();
+    // 时间旅行批次支持（2026-10-11）：本函数历史上是 live-only 通道（锚点恒为今天、
+    // analysis_kind 恒 live）。批次编排会把整个阶段 1-3 包在 `as_of::with_optional_asof`
+    // guard 内，于是这里可通过 `current_as_of()` 感知回放：
+    // - 激活 ⇒ replay 行，analysis_date / as_of_date 锚定历史日，pending 反思行同锚点，
+    //   与对话回放通道（run_stock_workflow_inner）口径一致；
+    // - 未激活 ⇒ 与改造前逐字相同（UTC 今日 + live）。
+    // 注意：只读不改 as_of 栈；guard 的进入/退出由批次编排负责。
+    let asof_ctx = axagent_astock_data::as_of::current_as_of();
+    let analysis_kind = if asof_ctx.is_some() { "replay" } else { "live" };
+    let anchor_date = match &asof_ctx {
+        Some(ctx) => ctx.as_string(),
+        None => chrono::Utc::now().format("%Y-%m-%d").to_string(),
+    };
     let analysis_id = uuid::Uuid::new_v4().to_string();
     // 模板 id 解析：与主入口同约定，缺省完整分析链。在本函数开头解析一次供建行与
     // 模板加载复用（2026-09-24：`template_id` 列必须在建行时就落定，理由见主入口注释）。
@@ -1911,7 +1924,7 @@ pub async fn run_single_stock_analysis(
         id: Set(analysis_id.clone()),
         stock_code: Set(stock_code.to_string()),
         stock_name: Set(stock_name.to_string()),
-        analysis_date: Set(chrono::Utc::now().format("%Y-%m-%d").to_string()),
+        analysis_date: Set(anchor_date.clone()),
         provider_id: Set("workflow".into()),
         conversation_id: Set(uuid::Uuid::new_v4().to_string()),
         status: Set("running".into()),
@@ -1928,8 +1941,8 @@ pub async fn run_single_stock_analysis(
         llm_decision_json: Set(None),
         blackboard_snapshot: Set(None),
         config_id: Set(None),
-        analysis_kind: Set("live".into()),
-        as_of_date: Set(Some(chrono::Utc::now().format("%Y-%m-%d").to_string())),
+        analysis_kind: Set(analysis_kind.into()),
+        as_of_date: Set(Some(anchor_date.clone())),
         // A4：本行同为 "running" 占位行（决策尚未产生）⇒ NULL。
         // ⚠ 原注释写「真实版本号由 `run_stock_workflow_inner` 的主路径 / 降级分支写回」是**错的**：
         //   本函数不经 `run_stock_workflow_inner`（自己 `load_and_inject_template` + 直接跑引擎），
@@ -2159,7 +2172,13 @@ pub async fn run_single_stock_analysis(
             // 记账（2026-09-23）：我曾把本处改成 `as_of::current_as_of()` 锚点，
             // 编译报 E0425 `cannot find value current_as_of` —— 本函数内根本没有该上下文。
             // 那是一次**把 live-only 通道误判为 replay 通道**的误改，已回退。
-            let today_str = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            //
+            // 再记账（2026-10-11，时间旅行批次）：本函数已在开头显式读取
+            // `as_of::current_as_of()` 并算出 `anchor_date` —— 此时上下文真实存在
+            // （批次编排用 guard 包住整个阶段 1-3）。pending 行锚点与分析行**同源**
+            // 用 `anchor_date`：live 下它就是 UTC 今日（与旧行为逐字一致），
+            // replay 下它是 as_of 历史日 ⇒ hindsight 自然外推到历史日之后，
+            // guard 外的批次反思才能 resolve。
             // 〇-B v2 第 4 条 / `PLAN-reflection-per-horizon-row`：**一行 pending = 一个复盘档**。
             //   建点统一走 `build_pending_reflection_rows`（三处通道共用），不再各抄一份默认值。
             let pending_rows = super::reflection::build_pending_reflection_rows(
@@ -2167,7 +2186,7 @@ pub async fn run_single_stock_analysis(
                     analysis_id: &analysis_id,
                     stock_code,
                     stock_name,
-                    analysis_date: &today_str,
+                    analysis_date: &anchor_date,
                     horizon_decisions: horizon_decisions.as_deref(),
                     // 本通道不写 `decision_time_horizon` ⇒ 主档由期望天数最近邻派生
                     primary_horizon: None,
@@ -2918,6 +2937,28 @@ pub(crate) async fn trigger_adaptive_cycle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axagent_entities::stock_analyses;
+    use sea_orm::{EntityTrait, Set};
+
+    /// 直插一条最简 `stock_analyses` 行，让观测行不成孤儿。
+    ///
+    /// `load_recent_streak` 读侧按「分析是否仍存在」过滤观测行（见 dao 的 `alive_analysis_ids`）
+    /// ⇒ 本测试若只落观测行不落分析行，观测行会被整批剔除、`observations` 恒为 0。
+    async fn insert_analysis(db: &sea_orm::DatabaseConnection, id: &str) {
+        let active = stock_analyses::ActiveModel {
+            id: Set(id.to_string()),
+            stock_code: Set("000001".to_string()),
+            stock_name: Set("测试票".to_string()),
+            analysis_date: Set("2026-10-09".to_string()),
+            provider_id: Set("test".to_string()),
+            conversation_id: Set("test-conv".to_string()),
+            status: Set("completed".to_string()),
+            created_at: Set(0),
+            updated_at: Set(0),
+            ..Default::default()
+        };
+        stock_analyses::Entity::insert(active).exec(db).await.expect("插入分析行应成功");
+    }
 
     /// 观测行的写入闸：**快速链不落观测行，完整链落**。
     ///
@@ -2940,19 +2981,24 @@ mod tests {
         assert_eq!(s.consecutive_abnormal, 0);
 
         record_dqi_observation(db, "an-full", SOURCE_TEMPLATE_ID, snap).await;
+        insert_analysis(db, "an-full").await;
         let s = axagent_dao::repo::data_quality_fuse::load_recent_streak(db)
             .await
             .expect("读 streak 应成功");
         assert_eq!(s.observations, 1, "完整链要落一行");
-        assert_eq!(s.consecutive_abnormal, 1, "B 级算异常（判据在 dao，本处不重定义）");
+        assert_eq!(
+            s.consecutive_abnormal, 0,
+            "B 级是正常档（判据在 dao，本处不重定义；2026-10-10 起非 A 不再等于异常）"
+        );
 
         // 快照里没有 data-quality 输出 ⇒ 记一行 NULL grade（「节点没跑成」是异常，不是缺席免计）
         record_dqi_observation(db, "an-missing", SOURCE_TEMPLATE_ID, "{}").await;
+        insert_analysis(db, "an-missing").await;
         let s = axagent_dao::repo::data_quality_fuse::load_recent_streak(db)
             .await
             .expect("读 streak 应成功");
         assert_eq!(s.observations, 2);
-        assert_eq!(s.consecutive_abnormal, 2, "NULL grade 同样计入连续异常");
+        assert_eq!(s.consecutive_abnormal, 1, "NULL grade 计入连续异常；它前面那轮 B 正常、不累加");
 
         // 快照不是合法 JSON ⇒ 不记行（旁路事实宁可不记，也不要把解析故障写成"质量异常"）
         record_dqi_observation(db, "an-broken", SOURCE_TEMPLATE_ID, "{ 不是 JSON").await;

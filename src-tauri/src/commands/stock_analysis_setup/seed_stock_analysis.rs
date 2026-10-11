@@ -1220,10 +1220,101 @@ type AlgoToolRow = (
 ///   ⚠ **必须升版**：`data-quality.rhai` 经 `include_str!` 嵌入 `code`（同 v73/v82 判据），
 ///   且 `input_mapping` 的 160 个逐档键属图内容 ⇒ 不升版存量库被版本门挡住，摊行不生效。
 ///
+/// **v148 → v149（2026-10-09）**：修「一次分析结论处处矛盾」（用户实证：央企新材料 ——
+///   决策=买入/15.3% 仓位，而同屏算法估值结论=高估、内在价值区间 18.01–34.08 元远低于
+///   现价 51.80）。`portfolio-mgr.rhai` 一处节点脚本改三件事，**两件不改数值、一件改**：
+///   ① **L1（不改数值）**：`action` 阶梯读的是所选档**未调制**后验（该档阶梯 0.72/0.62/…），
+///      而对外报的 `confidence` 还要再乘 `disagreement_mod` × 数据质量上限 ⇒ 同屏「动作=买入」
+///      配「置信=54.5%」（动作那边其实是 72.7%）。新增 `actionConfidenceBasis` /
+///      `actionConfidenceBasisSource` 两字段把**动作口径**的置信度并列输出，reasoning 前段
+///      增 `置信口径=展示X 动作Y` 一行（仅在两值差 ≥1pt 时占位）。
+///   ② **L2（不改数值）**：`portfolio-mgr.rhai` 的 `valuation_conclusion` 输出段（见其
+///      「估值**结论层**」注释）2026-09-28 就写明「结论说高估、f5 σ 却是正这类矛盾必须
+///      一眼可见」，但当时只做**透出**、没做**对账** ⇒ 决策侧照常喊买入。新增结构化
+///      `valuationReconciliation`（`conflictKind` / `valuationAction` / `decisionAction` /
+///      `capped` / `horizon`）+ reasoning 前段对账话术（排在 `缺口` 之前，防决策卡 120 字截断吃掉）。
+///   ③ **L3（会改决策数值，用户已拍板）**：算法估值结论 = **高估** ⇒ 禁止加仓档
+///      （买入/增持 → 持有），新增 `decision_trail` 编号 **R-212**，`actionSource` 新增
+///      第八值 `valuation_cap`（「最后改写者优先」，估值封顶在执行顺序上晚于模拟盘 S-501）。
+///      ⚠ 「偏高」**不在**封顶之列 —— 那是程度判断，不是同一句结论（对账仍会提示）。
+///      取值只认 `value-verify.rhai` 无条件注入的**算法**结论 `valuation_conclusion_action`，
+///      与 LLM `value-investor.verdict` 无关（后者只进 data-quality 的 val 槽、不进决策）。
+///   三载体同步：`rhai_registry` 整脚本门 ⑦ 的 `ACTION_SOURCES`（7→8）、
+///   `src/lib/stock-analysis-utils.ts` 的 `ACTION_SOURCES` / `DOWNGRADE_ACTION_SOURCES` 与
+///   标签函数，另加 11 语言 `stockAnalysis.actionSourceValuationCap` 及两条对账文案。
+///   ⚠ **必须升版**：`portfolio-mgr.rhai` 经 `include_str!` 嵌入本模板节点 `code` 字段
+///   （同 v127 判据）⇒ 不升版存量库被版本门挡住，三条修复一条都不生效。
+///
+/// **v149 → v150（2026-10-10）**：分析师容错打开 —— **辅助取数超时不再阻断决策链**。
+///   `a-sentiment` / `a-hot-money` / `a-fundamentals` / `a-lockup` / `a-policy` /
+///   `a-research` 六个 base 的**全部逐档实例**设 `continue_on_fail = true`。
+///   ⚠ 判据在**引擎侧**：容错写在**下游节点**上 —— `compute_ready_nodes` 的
+///   `continue_on_fail_map` 按 **target** 查表（`dag_store.rs`：上游 Failed 且 target
+///   为 true 才不计该依赖边）⇒ 把同名字段写在取数节点**自身**是**空操作**，
+///   必须落在消费者这一侧。
+///   实证（002049 / 2026-10-10 / run `3a2e73a7`）：三个**辅助**取数源
+///   `t-limitup-pool`（→a-sentiment / a-hot-money）、`t-pledge-data`（→a-lockup /
+///   a-fundamentals）、`t-consensus-data`（→a-research）同时超时 Failed，
+///   这 6 个 base 的分析师因 `continue_on_fail=false` **永不就绪** ⇒
+///   `debate-bull-bear` → … → `portfolio-mgr` 全链停摆 ⇒ 整轮 `decision_action='数据缺失'`。
+///   而链尾的 `debate-bull-bear`（v7）/ `research-mgr` / `trader` / `portfolio-mgr`
+///   **早就是** `true` 且自带降级话术（辩手缺基本面时标注「数据不可用」）——
+///   容错链唯独在分析师这一跳断开。
+///   ⚠ 代价如实标注：node 级开关同时覆盖各分析师的**主**取数工具（t-sentiment-data 等）。
+///   这是有意的放宽 —— 分析师 prompt 第 2/4 条本就要求「诚实标记缺失并评估影响」，
+///   出降级报告远好于整轮无决策。
+///   ⚠ **必须升版**：`continue_on_fail` 是图内容（随模板快照落库），不升版存量库不生效。
+///
+/// **v150 → v151（2026-10-10）**：修「历史行四档 Tag 与主档结论同屏互斥」—— 风控否决**下到四档分支**。
+///   用户实证（兆易创新 603986 / 2026-10-10）：历史记录主档结论「观望」（中期·分支选档，
+///   reasoning 写明「主档取自中期分支『买入』，被风控否决降级降为『观望』」），
+///   而同屏四档 Tag 却是「超短线:增持 / 短线:减持 / 中期:买入 / 长期:买入」——
+///   中期 Tag 说「买入」、主档说「观望」，同屏互斥且无人能解释谁改写了谁。
+///   根因：四档**做了**风险分析，但只把**仓位**按风险档压低，**行动档（action）未否决**；
+///   否决只在主链发生一次 ⇒ 四档 Tag 是分支 pre-veto 的原始方向，主档是 post-veto 的最终结论。
+///   修法（用户裁定 B「要最符合客观需求，不以改动量/难度取折中」，已否决「仅呈现层标注」的 C）：
+///   ① 四份 `portfolio-mgr-h-{ultra-short,short,mid,long}.rhai` 在各自动作阶梯之后加
+///      「档内风控否决」：`action = pm_risk_veto(action, overall_risk)`（`overall_risk` 取本档
+///      `cls-risk-level-<档>`），否决后的值即**该档结论** ⇒ 四档 Tag 与主档天然一致；
+///   ② 新增 `originalAction` / `tierVetoed` 两字段：保住否决前的方向信息（下游反思/对账要读方向），
+///      并让「何以降级」可反解（不成句退化成「…『观望』被风控降为『观望』」）；
+///   ③ 主链否决**保留为兜底+加严**（`pm_risk_veto` 幂等 ⇒ 档内已否决时天然 no-op；
+///      仅当主链算法风险档比本档更严时才额外收紧），新增 `actionSource` 第九值 `tier_risk_veto`
+///      （「最后改写者优先」，档内否决排在主链 `risk_veto_downgrade` 之下的分支结论位）。
+///   三载体同步：`rhai_registry` 整脚本门 ⑦ 的 `ACTION_SOURCES`（8→9）、
+///   `src/lib/stock-analysis-utils.ts` 的 `ACTION_SOURCES`/`DOWNGRADE_ACTION_SOURCES` 与标签函数，
+///   另加 11 语言 `stockAnalysis.actionSourceTierRiskVeto`。冲突判定（`decision.rs`）与
+///   来历读取（`readDecisionProvenance`）改读 `originalAction`（LLM 侧 action 天然 pre-veto，
+///   比原始方向才公平）。
+///   ⚠ **必须升版**：四份 `h-*.rhai` 与 `portfolio-mgr.rhai` 均经 `include_str!` 嵌入本模板节点
+///   `code` 字段（同 v127/v149 判据）⇒ 不升版存量库被版本门挡住，四档 Tag 一字不变。
+///
+/// **v151 → v152（2026-10-11）**：修「公式买入 / LLM 中性」中 LLM 侧的两个实证偏差
+///   （紫金矿业 601899 / 2026-10-11 跑批；同一份 t-scoring 数据两次跑出买入与观望）。
+///   ① **risk-con 惩罚越权**：保守派在四步公式之外自创「数据缺口 50% 惩罚系数」
+///      （13.3%×0.6×0.5→4%），把「Q3 预增公告 PDF 未解析 / 北向资金 2024-08 起停披」
+///      这类**采集层缺口**当成基本面证伪砍仓，经 risk-convergence 中位数规则放大后使
+///      trader 收到的收敛仓位 5% 撞上 15% 买入门槛 ⇒ 机械翻观望。修在专家提示词
+///      `conservative-debator.md` §2.6：区分 `pipeline_gap`（只进 tail_risks，
+///      confidence 至多 -10，禁止下调 safety_filter/自创乘法系数）与
+///      `fundamental_disproof`（已证实坏事实才允许降档）。专家 md 走启动 UPSERT，
+///      不靠本版本门，但一并登记。
+///   ② **trader 结构化输入缺腿**：trader 只收研究/风险文本叙事，公式高权重多头证据
+///      估值(f5=0.881,w0.21)/催化剂(f3=0.605,w0.2)/资金(f9=0.83) 没有结构化落点；
+///      已注入的 `factor_weights` 实际为空对象（factor_backtest 引擎未实现）。
+///      修法：trader 删 factor_weights 空注入，新增 t-valuation（valuation_action /
+///      valuation_signal / margin_of_safety_pct / valuation_summary）、
+///      a-catalyst--mid（catalyst_level/direction/bull_score）、
+///      a-hot-money--mid（money_flow_direction/persistence/bull_score）共 10 个键，
+///      同批补 context_sources 与三条显式边；trader.md 新增「结构化量化信号证据权重」
+///      （冲突逐字段数值裁决、偏多信号需已证实风险才能翻盘、采集缺口不作方向性反证）。
+///   ⚠ **必须升版**：trader 节点的 input_mapping / context_sources / edges 是图内容，
+///   不升版存量库不生效。
+///
 /// `pub` 而非 `pub(crate)`：`axagent-batch-rerun` 的「版本联查完整性」要读这**同一个**数字
 /// （bin 是独立 crate，`pub(crate)` 读不到）。它不能被抄第二份 —— 本条的用处正是
 /// 对比「代码会用的图版本」与「库里已播种到的版本」，两份数字一旦各写各的就永远对不上。
-pub const TEMPLATE_VERSION: i32 = 148;
+pub const TEMPLATE_VERSION: i32 = 152;
 
 /// `kline_limit` **一次性**迁移门的水位线。
 ///
@@ -3424,6 +3515,26 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             a.config.context_sources = std::iter::once(tool_id.to_string())
                 .chain(extra_supplies.iter().map(|s| s.to_string()))
                 .collect();
+            // v150(2026-10-10)：**辅助取数超时不得阻断决策链**。
+            // ⚠ 容错判据在**下游节点**上 —— 引擎 `compute_ready_nodes` 用
+            //   `continue_on_fail_map` 按 **target** 查表（`dag_store.rs`：上游 Failed
+            //   且 target 为 true 才不计该依赖）。所以「让 t-limitup-pool 超时别卡住下游」
+            //   必须写在消费者这一侧；写在取数节点**自身**是空操作。
+            // 实证（002049 / 2026-10-10 / run 3a2e73a7）：三个**辅助**取数源
+            //   `t-limitup-pool`（→a-sentiment/a-hot-money）、`t-pledge-data`
+            //   （→a-lockup/a-fundamentals）、`t-consensus-data`（→a-research）同时超时
+            //   Failed，这 6 个 base 的分析师因 `continue_on_fail=false` **永不就绪**
+            //   ⇒ `debate-bull-bear` → … → `portfolio-mgr` 全链停摆 ⇒ 整轮无决策
+            //   （落库 `decision_action='数据缺失'`）。
+            //   而链尾的 `debate-bull-bear`（v7）/`research-mgr`/`trader`/`portfolio-mgr`
+            //   **早就是** true，且自带降级话术（辩手缺基本面时标注「数据不可用」）——
+            //   容错链唯独在分析师这一跳断开。
+            // ⚠ 代价如实标注：node 级开关同时覆盖该分析师的**主**取数工具
+            //   （t-sentiment-data 等），这是有意的放宽 —— 分析师 prompt 第 2/4 条本就
+            //   要求「诚实标记缺失并评估影响」，出降级报告远好于整轮无决策。
+            if !extra_supplies.is_empty() {
+                a.base.continue_on_fail = true;
+            }
             // fundamentals-analyst prompt 引用了 {{market_regime}}，
             // 从工作流变量 market_regime.regime 注入（bull/bear/sideways 状态字符串）
             if base_id == "a-fundamentals" {
@@ -5247,6 +5358,15 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-v-validate-research-mgr", "v-validate", "research-mgr"));
 
     // trader: 执行方案 — 实时行情 + 技术指标 + 凯利仓位
+    // v152: 补「与公式同源的结构化量化信号」——t-valuation / a-catalyst--mid /
+    // a-hot-money--mid。实证（紫金矿业 2026-10-11 跑批）：trader 此前只能看到
+    // research-mgr 的风险叙事文本，估值(f5)/催化剂(f3)/资金(f9) 三个公式高权重多头
+    // 证据在 trader 输入里没有结构化落点；而注入的 factor_weights 实际为空对象
+    // （factor_backtest 引擎未实现）。同一份数据 LLM 两次跑出买入/观望翻转，根因之一
+    // 即文本叙事权重单边压制量化信号。修复：三节点 mid 代表实例以标量字段注入 +
+    // context_sources + 显式边（与 e-t-scoring-trader-p2 同形态）。
+    let trader_cat_mid = axagent_harness::holding_period::analyst_node_id("a-catalyst", "mid");
+    let trader_hm_mid = axagent_harness::holding_period::analyst_node_id("a-hot-money", "mid");
     let mut trader = agent(
         "trader",
         "制定A股交易方案：入场价、目标价、止损价、仓位比例。遵守T+1和涨跌停规则",
@@ -5263,12 +5383,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         a.base.continue_on_fail = true;
         // P2 修复: 扩展 context_sources 覆盖所有 input_mapping 引用的上游节点
         // （显式依赖原则：input_mapping 引用的上游节点必须有关联边或 context_sources）
-        // t-scoring: factor_weights 因子权重 | risk-convergence: risk_disagreement 风险分歧度
-        // data-quality: dqi_score 数据质量
+        // v152: t-valuation 估值信号 | a-catalyst--mid 催化剂 | a-hot-money--mid 资金面
+        // risk-convergence: risk_disagreement 风险分歧度 | data-quality: dqi_score 数据质量
         a.config.context_sources = vec![
             "research-mgr".into(),
             "debate-convergence".into(),
             "t-scoring".into(),
+            // v152: 估值/催化剂/资金面三源 —— input_mapping 新增键的显式依赖
+            "t-valuation".into(),
+            trader_cat_mid.clone(),
+            trader_hm_mid.clone(),
             "risk-convergence".into(),
             "data-quality".into(),
         ];
@@ -5289,9 +5413,16 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
              - 当前价: 参考【reference_price】\n\
              - 技术指标: 参考【technical_indicators】(含 ma5/ma20/macd_dif/rsi14/boll_upper/boll_lower 等)\n\
              - 综合评分: 参考【total_score】\n\
+             - 估值结论: 参考【valuation_action】/【valuation_signal】；DCF 安全边际【margin_of_safety_pct】；摘要【valuation_summary】\n\
+             - 催化剂: 等级【catalyst_level】，方向【catalyst_direction】，多头分【catalyst_bull_score】\n\
+             - 主力资金: 方向【money_flow_direction】，持续性【money_flow_persistence】，多头分【money_flow_bull_score】\n\
              - 共识评分: 参考【consensus_score】\n\
              - 风险分歧: 参考【risk_disagreement】(>50 时保守)\n\
              - 数据质量: 参考【dqi_score】(<50 时保守)\n\
+             估值/催化剂/资金面/技术指标四组字段是工具节点的确定性产出，与 portfolio-mgr 公式同源；\
+             与研究或风险报告的叙事冲突时，必须在 reasoning 中引用上述字段的具体数值逐点裁决，\
+             禁止只用文本叙事覆盖量化信号。公告 PDF 未解析、监管停披、字段缺失等采集层缺口\
+             只能进 data_gaps（confidence 至多下调 10 分），不得作为方向性反证使买入翻转为观望。\n\
              基于上述数据直接制定交易方案，输出仓位比例、止损价与持有周期（目标价是否输出见下方方向语义）。\n\
              \n--- 价位字段方向语义（必须遵守）---\n\
              - targetPrice 是**方向性目标**，只有方向明确时才输出：看多(买入/增持)取 > reference_price 的上涨目标；\n\
@@ -5307,7 +5438,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             a.config.system_prompt
         );
         a.config.max_tool_rounds = Some(0); // 禁用工具调用轮次
-        a.config.input_mapping = [
+        let mut trader_input_mapping: std::collections::HashMap<String, String> = [
             ("consensus_score", "debate-convergence.content.consensus_score"),
             ("stock_lessons", "stock_lessons"),
             // P1 修复: 注入标准参考价，确保 trader 与 portfolio-mgr 使用相同的 currentPrice
@@ -5315,9 +5446,13 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             // 不一致导致的系统性分歧。
             // 2026-09-09: ToolNode result 为 {content: <json_string>, tool_name}，穿透 .content
             ("reference_price", "t-scoring.result.content.currentPrice"),
-            // P2 修复: 注入因子权重，使 trader 知道哪些因子在公式中权重更高
-            // factor_weights 是 JSON 对象 {trend:{weight}, macd:{weight}, ...}
-            ("factor_weights", "t-scoring.result.content.factor_backtest.factors"),
+            // v152: 估值量化信号（与 portfolio-mgr 的 f5 估值因子同源，均取自 t-valuation）。
+            // 实证（2026-10-11 紫金矿业）：PE 8.5% 历史分位 / DCF 安全边际 +25.6% 只存在于
+            // research-mgr 文本里，trader 无结构化落点 ⇒ 被风险叙事稀释。
+            ("valuation_action", "t-valuation.result.content.conclusion.action"),
+            ("valuation_signal", "t-valuation.result.content.value_signal"),
+            ("margin_of_safety_pct", "t-valuation.result.content.margin_of_safety.pct"),
+            ("valuation_summary", "t-valuation.result.content.summary"),
             // P2 修复: 注入风险分歧度，使 trader 知道三位风险评估师的分歧程度
             // 分歧高(>50)时 trader 应避免过度自信
             // 2026-09-09: risk-convergence content parse 后为 {report, verdict}，分歧度在 verdict 层
@@ -5335,6 +5470,34 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
         .into_iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
+        // v152: 催化剂（f3 同源）/ 资金面（f9 同源）——mid 代表实例，路径形态与
+        // portfolio-mgr 段的 catalyst_level_mid（.content.verdict.catalyst_level）及
+        // horizon_tier_template.rs 的 a-hot-money--mid.content.verdict.flowPersistence 一致。
+        trader_input_mapping.insert(
+            "catalyst_level".into(),
+            format!("{trader_cat_mid}.content.verdict.catalyst_level"),
+        );
+        trader_input_mapping.insert(
+            "catalyst_direction".into(),
+            format!("{trader_cat_mid}.content.verdict.direction"),
+        );
+        trader_input_mapping.insert(
+            "catalyst_bull_score".into(),
+            format!("{trader_cat_mid}.content.verdict.bull_score"),
+        );
+        trader_input_mapping.insert(
+            "money_flow_direction".into(),
+            format!("{trader_hm_mid}.content.verdict.direction"),
+        );
+        trader_input_mapping.insert(
+            "money_flow_persistence".into(),
+            format!("{trader_hm_mid}.content.verdict.flowPersistence"),
+        );
+        trader_input_mapping.insert(
+            "money_flow_bull_score".into(),
+            format!("{trader_hm_mid}.content.verdict.bull_score"),
+        );
+        a.config.input_mapping = trader_input_mapping;
     }
     nodes.push(trader);
     edges.push(edge("e-research-mgr-trader", "research-mgr", "trader"));
@@ -5345,6 +5508,10 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     edges.push(edge("e-risk-convergence-trader-p2", "risk-convergence", "trader"));
     // data-quality → trader: 数据质量评分
     edges.push(edge("e-data-quality-trader-p2", "data-quality", "trader"));
+    // v152: 估值/催化剂/资金面 → trader（与 input_mapping/context_sources 三处同批）
+    edges.push(edge("e-t-valuation-trader-v152", "t-valuation", "trader"));
+    edges.push(edge("e-a-catalyst-mid-trader-v152", &trader_cat_mid, "trader"));
+    edges.push(edge("e-a-hot-money-mid-trader-v152", &trader_hm_mid, "trader"));
 
     // portfolio-mgr: 最终决策 — 确定性计算（CodeNode + Rhai）
     // ── 结构化参数方案 Phase 3 ──
@@ -6476,7 +6643,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             a.config.tools = vec![];
             a.config.system_prompt =
                 "本节点有两条进入原因，两种都属数据证据不足：① 本轮数据质量评级为 D 或 F；\
-                 ② 本轮评级尚可，但**近若干轮**数据质量持续未达 A 级、已触发跨轮熔断。\
+                 ② 本轮评级尚可，但**近若干轮**数据质量持续降档（C 级及以下）、已触发跨轮熔断。\
                  无论哪种，上游分析数据都不可靠，你需要在数据不足的情况下做出最保守的投资决策。\
                  所有需要的数据已通过输入上下文注入（t-scoring 的 currentPrice/indicators/totalScore、\
                  t-valuation 的估值、t-risk 的风险评分），禁止调用任何工具重新获取数据。\

@@ -55,6 +55,14 @@
   --z-notification: 1200;
 }
 
+/* ═══ 压在 --accent 上的前景色 ═══
+   必须在 :root 兜底：漏声明时 `color: var(--accent-fg)` 会**静默**退回继承色，
+   而写死 `white` 在 `--accent` 本身是浅色的档位（21th-dark 的 --accent 即纯白）
+   会直接白底白字 —— 两类失效都没有报错。 */
+:root {
+  --accent-fg: #fff;
+}
+
 /* ═══ THEME: 深色暮色 (默认 dark) ═══ */
 :root,
 [data-theme-preset="deep-dusk"],
@@ -175,6 +183,8 @@
   --accent-soft: oklch(100% 0 0 / 0.12);
   --accent-bg: oklch(100% 0 0 / 0.08);
   --accent-dim: oklch(100% 0 0 / 0.04);
+  /* 本档 --accent 是纯白 ⇒ 压在它上面的文字必须是纯黑（沿用本档硬黑阴影的口径） */
+  --accent-fg: oklch(0% 0 0);
   --green: oklch(77.29% 0.1535 163.2231);
   --green-bg: oklch(77.29% 0.1535 163.2231 / 0.12);
   --red: oklch(63.68% 0.2078 25.3313);
@@ -505,6 +515,8 @@
 [data-theme-preset*="cyber"],
 [data-theme-preset*="neon"] {
   --accent: oklch(70% 0.18 195);
+  /* 本覆盖对 cyberpunk-dark / -light 同时生效，accent 是亮青 ⇒ 白字对比度 1.9:1，取深色 */
+  --accent-fg: #0a0a12;
   --accent-soft: oklch(62% 0.16 195 / 0.18);
   --accent-bg: oklch(62% 0.16 195 / 0.10);
   --accent-dim: oklch(62% 0.16 195 / 0.06);

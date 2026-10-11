@@ -25,7 +25,7 @@ export function UserModeToggle() {
           className="px-2 py-0.5 text-sm transition-colors"
           style={{
             background: userMode === "simple" ? "var(--accent)" : "transparent",
-            color: userMode === "simple" ? "white" : "var(--muted)",
+            color: userMode === "simple" ? "var(--accent-fg)" : "var(--muted)",
           }}
         >
           {t("workspace.mode.simple")}
@@ -36,7 +36,7 @@ export function UserModeToggle() {
           className="px-2 py-0.5 text-sm transition-colors"
           style={{
             background: userMode === "professional" ? "var(--accent)" : "transparent",
-            color: userMode === "professional" ? "white" : "var(--muted)",
+            color: userMode === "professional" ? "var(--accent-fg)" : "var(--muted)",
           }}
         >
           {t("workspace.mode.professional")}

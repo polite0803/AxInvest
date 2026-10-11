@@ -164,10 +164,11 @@ export function VendorHealthDashboard() {
     setError(null);
     try {
       const result = await invoke<VendorHealthItem[]>("get_vendor_health_all");
-      // 后端可能返回 JSON null（无健康记录时序列化 Option::None），
-      // 而 TS 类型断言不会拦下它 —— 直接 setData(null) 会让下面的 data.filter
-      // 抛 TypeError 并把整个分析页推入 PageErrorBoundary。
-      setData(result ?? []);
+      // 后端可能返回 JSON null（无健康记录时序列化 Option::None），而 TS 类型断言不会拦下它
+      // —— 直接 setData(null) 会让下面的 data.filter 抛 TypeError 并把整个分析页推入
+      // PageErrorBoundary。用 Array.isArray 而非 `?? []`：后者只挡 null/undefined，
+      // 挡不住「命令返回了对象/字符串」这一形（浏览器 mock 的未实现分支就是这么回的）。
+      setData(Array.isArray(result) ? result : []);
     } catch (e: unknown) {
       setError(
         typeof e === "string"

@@ -161,6 +161,9 @@ fn na_key(factor: &'static str) -> &'static str {
 /// 每条都能指到本仓的实测缺口，不是理念措辞：
 /// - `microstructurePartialSource`：连板/封单/炸板有真字段（P9-4 同花顺涨停池，可按日回溯），
 ///   但逐笔/L2 撮合明细零通路（P9-6 未证实）⇒ 只能写「部分来源」。
+/// - `breadthGateOnly`：情绪广度是**市场级量**，只作背景过滤 / 入场必要条件
+///   （超短的 `breadth_required` 门；短档亦只过滤），不得进方向加权 —— 一旦计权，
+///   同一天的全部个股会共享同一个方向信号。
 /// - `qualityRealizationBeyondHorizon`：盈利质量的兑现周期跨季，28 日窗口内只能部分反映。
 /// - `supplyAsRiskNoteOnly`：解禁/减持在中档已被趋势吸收，降为风险提示、不参与方向。
 /// - `trendFilterOnly`：长档技术腿只作入场时机过滤（R-11 明文不得进方向加权）。
@@ -171,6 +174,7 @@ fn na_key(factor: &'static str) -> &'static str {
 fn qualified_reason(key: &str) -> &'static str {
     match key {
         "microstructurePartialSource" => "连板/封单/炸板有真字段，逐笔与 L2 撮合明细零通路",
+        "breadthGateOnly" => "情绪广度是市场级量，只作入场必要条件 / 背景过滤，不进方向加权",
         "qualityRealizationBeyondHorizon" => "盈利质量兑现跨季，本窗口只能部分反映",
         "supplyAsRiskNoteOnly" => "供给冲击在窗口内已被趋势吸收，只作风险提示",
         "trendFilterOnly" => "技术腿只作入场时机过滤，不得进方向加权",
@@ -207,6 +211,21 @@ impl Period {
     pub fn as_str(&self) -> &'static str {
         match self {
             Period::UltraShort => "ultra_short",
+            Period::Short => "short",
+            Period::Mid => "mid",
+            Period::Long => "long",
+        }
+    }
+
+    /// 该档在 `decisionsByHorizon` / `horizonPriceMap` 里的 **camelCase 键**。
+    ///
+    /// 与 [`Self::as_str`]（snake，用于落库列 / 仲裁 / 反思）是**同一个档的两种拼写**：
+    /// 展示层（`HORIZON_KEYS`）与装配段（`decisions_by_horizon[b.camel]`）都按 camel 读，
+    /// 而 Rust 侧此前没有权威 ⇒ `decision::compute_decision_agreement` 想按 LLM 自报档
+    /// 取对齐行时只能自己再编一份键映射（禁区 12 的第二份真相）。此处单点。
+    pub fn camel_key(&self) -> &'static str {
+        match self {
+            Period::UltraShort => "ultraShort",
             Period::Short => "short",
             Period::Mid => "mid",
             Period::Long => "long",
@@ -408,22 +427,31 @@ impl Period {
     pub fn verdict_spec(&self) -> HorizonVerdictSpec {
         // (该档直接用到的因子, 只作过滤/部分来源的因子 → 标记键, 出场口径)
         let (plain, qualified, exit_rule): (&[&str], &[(&str, &str)], &str) = match self {
-            // 超短（2 日）：短窗动量 + 涨停板情绪广度（家数/封板率/炸板，P9-4 真字段）。
+            // 超短（2 日）：方向腿**只有短窗动量**。
+            // 涨停板情绪广度（家数/封板率/炸板，P9-4 真字段）是**市场级量** —— 按本档
+            // `entryGate`（`breadth_required`）只作入场必要条件，**不进方向加权**
+            // （见 `portfolio-mgr-h-ultra-short.rhai` 头部第 1 条专属判据）。
+            // 把它当加权腿会连出两种错：① 允许「广度很差但个股很强」合成出买入；
+            // ② 同一天不同个股拿到**同一个**方向信号（封板率与个股无关）。
             // `microstructure`（封单/连板结构）只到板级、无撮合级 ⇒ 条件字段。
             Period::UltraShort => (
-                &["momentumSignal", "breadthState"],
-                &[("microstructure", "microstructurePartialSource")],
+                &["momentumSignal"],
+                &[
+                    ("microstructure", "microstructurePartialSource"),
+                    ("breadthState", "breadthGateOnly"),
+                ],
                 "time_stop",
             ),
             Period::Short => (
-                &[
-                    "momentumSignal",
-                    "breadthState",
-                    "flowPersistence",
-                    "trendStrength",
-                    "supplyShock",
-                ],
-                &[],
+                // 短线（5 日）：方向腿 = 动量 / 资金持续性 / 趋势 / 供给冲击。
+                // 涨停板情绪广度（`sealRate` → `breadthState`）与超短同源，是**市场级量**
+                // ⇒ 2026-10-10 起只作背景过滤（`qualified`），**不进方向加权**：
+                // 一旦计权，同一天全部个股会共享同一个方向信号（实证 002241/2026-10-10：
+                // 广度 = 封板率 0.683，与个股无关，却把短档后验抬高）。
+                // ⚠ 本档的门仍是 `trend_and_flow_same_sign`（趋势 × 资金同号），**不是**广度门
+                //   —— `breadthGateOnly` 在这里只借「市场级量、只作过滤、权重恒 0」这层语义。
+                &["momentumSignal", "flowPersistence", "trendStrength", "supplyShock"],
+                &[("breadthState", "breadthGateOnly")],
                 "time_stop+fixed_stop",
             ),
             Period::Mid => (
@@ -670,7 +698,14 @@ mod tests {
         );
         assert_eq!(ultra.exit_rule, "time_stop");
         assert_eq!(ultra.not_applicable.len(), 8);
-        assert_eq!(ultra.qualified, vec![("microstructure", "microstructurePartialSource")]);
+        assert_eq!(
+            ultra.qualified,
+            vec![
+                ("microstructure", "microstructurePartialSource"),
+                ("breadthState", "breadthGateOnly"),
+            ],
+            "超短：情绪广度是市场级量 ⇒ 只作入场必要条件（门），不得进方向加权"
+        );
 
         let short = Period::Short.verdict_spec();
         assert_eq!(
@@ -684,7 +719,11 @@ mod tests {
             ]
         );
         assert_eq!(short.exit_rule, "time_stop+fixed_stop");
-        assert!(short.qualified.is_empty(), "短档没有「只作过滤」的因子");
+        assert_eq!(
+            short.qualified,
+            vec![("breadthState", "breadthGateOnly")],
+            "短档：情绪广度与超短同源（市场级量）⇒ 只作背景过滤，不得进方向加权"
+        );
 
         let mid = Period::Mid.verdict_spec();
         assert_eq!(
@@ -833,7 +872,10 @@ mod tests {
                 assert!(spec.fields.contains(f), "{p:?} participating 里的 {f} 不在必填里");
             }
             for (f, key) in &spec.qualified {
-                if *key == "trendFilterOnly" || *key == "supplyAsRiskNoteOnly" {
+                if *key == "trendFilterOnly"
+                    || *key == "supplyAsRiskNoteOnly"
+                    || *key == "breadthGateOnly"
+                {
                     assert!(
                         !spec.participating.contains(f),
                         "{p:?} 的 {f} 标记为 {key}，却仍在进方向加权的清单里"
@@ -841,6 +883,18 @@ mod tests {
                 }
             }
         }
+        let ultra = Period::UltraShort.verdict_spec();
+        assert!(
+            !ultra.participating.contains(&"breadthState")
+                && ultra.fields.contains(&"breadthState"),
+            "超短情绪广度是市场级量：必须输出（门要用）但不得进方向加权"
+        );
+        let short = Period::Short.verdict_spec();
+        assert!(
+            !short.participating.contains(&"breadthState")
+                && short.fields.contains(&"breadthState"),
+            "短档情绪广度与超短同源（市场级量）：必须输出但不得进方向加权"
+        );
         let long = Period::Long.verdict_spec();
         assert!(
             long.fields.contains(&"trendStrength")

@@ -4,8 +4,6 @@ import { SettingsSidebar } from "@/components/settings";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SkillPageRenderer } from "@/components/skill/SkillPageRenderer";
 import { useAgentContext } from "@/hooks/useAgentContext";
-import { invoke } from "@/lib/invoke";
-import { message } from "@/lib/toast";
 import { useSkillExtensionStore, useUIStore } from "@/stores";
 import type { SettingsSection } from "@/types";
 import { Button, Result, Spin, theme } from "antd";
@@ -102,8 +100,8 @@ const LazyThemeManager = lazy(() =>
 const LazyAnimationSettings = lazy(() =>
   import("@/components/settings/AnimationSettings").then((m) => ({ default: m.AnimationSettings }))
 );
-const LazyCronManager = lazy(() =>
-  import("@/components/settings/CronManager").then((m) => ({ default: m.CronManager }))
+const LazySchedulerSettings = lazy(() =>
+  import("@/components/settings/SchedulerSettings").then((m) => ({ default: m.SchedulerSettings }))
 );
 const LazyDynamicPagesSettings = lazy(() =>
   import("@/components/settings/DynamicPagesSettings").then((m) => ({ default: m.DynamicPagesSettings }))
@@ -297,8 +295,15 @@ const SECTION_COMPONENTS: Record<SettingsSection, () => React.ReactNode> = {
     </Suspense>
   ),
   cron: () => (
+    // 兼容别名：旧版本侧栏「计划任务」(cron) 与「定时任务」(scheduler) 操作同一套后端任务，
+    // 旧入口已下线；此处保留映射以兼容 localStorage 中持久化的 settingsSection=cron
     <Suspense fallback={<SectionFallback />}>
-      <CronManagerWrapper />
+      <LazySchedulerSettings />
+    </Suspense>
+  ),
+  scheduler: () => (
+    <Suspense fallback={<SectionFallback />}>
+      <LazySchedulerSettings />
     </Suspense>
   ),
   dynamicPages: () => (
@@ -347,125 +352,6 @@ const SECTION_COMPONENTS: Record<SettingsSection, () => React.ReactNode> = {
     </Suspense>
   ),
 };
-
-/** CronManager 包装组件 — 通过 invoke 桥接后端定时任务 API */
-function CronManagerWrapper() {
-  const { t } = useTranslation();
-  const [jobs, setJobs] = useState<
-    Array<{
-      id: string;
-      name: string;
-      schedule: string;
-      prompt: string;
-      platform: string | null;
-      enabled_toolsets: string[] | null;
-      enabled: boolean;
-      last_run_at: number | null;
-      next_run_at: number | null;
-    }>
-  >([]);
-
-  const loadJobs = useCallback(async () => {
-    try {
-      const tasks = await invoke<
-        Array<{
-          id: string;
-          name: string;
-          cron_expression?: string;
-          description: string;
-          task_type?: string;
-          status: string;
-          last_run_at?: string;
-          next_run_at?: string;
-        }>
-      >("list_scheduled_tasks");
-      setJobs(
-        tasks.map((task) => ({
-          id: task.id,
-          name: task.name,
-          schedule: task.cron_expression ?? "",
-          prompt: task.description,
-          platform: task.task_type ?? null,
-          enabled_toolsets: null,
-          enabled: task.status === "active",
-          last_run_at: task.last_run_at ? Date.parse(task.last_run_at) : null,
-          next_run_at: task.next_run_at ? Date.parse(task.next_run_at) : null,
-        })),
-      );
-    } catch {
-      message.error(t("error.loadFailed"));
-    }
-  }, [t]);
-
-  useEffect(() => {
-    setTimeout(() => loadJobs(), 0);
-  }, [loadJobs]);
-
-  const handleAdd = useCallback(
-    async (job: {
-      name: string;
-      schedule: string;
-      prompt: string;
-      platform?: string;
-    }) => {
-      try {
-        await invoke("create_scheduled_task", {
-          input: {
-            name: job.name,
-            description: job.prompt,
-            cronExpression: job.schedule,
-            taskType: job.platform ?? "general",
-          },
-        });
-        message.success(t("common.success"));
-        loadJobs();
-      } catch {
-        message.error(t("error.saveFailed"));
-      }
-    },
-    [t, loadJobs],
-  );
-
-  const handleDelete = useCallback(
-    async (id: string) => {
-      try {
-        await invoke("delete_scheduled_task", { taskId: id });
-        message.success(t("common.success"));
-        loadJobs();
-      } catch {
-        message.error(t("error.deleteFailed"));
-      }
-    },
-    [t, loadJobs],
-  );
-
-  const handleToggle = useCallback(
-    async (id: string, enabled: boolean) => {
-      try {
-        if (enabled) {
-          await invoke("resume_scheduled_task", { taskId: id });
-        } else {
-          await invoke("pause_scheduled_task", { taskId: id });
-        }
-        loadJobs();
-      } catch {
-        message.error(t("error.saveFailed"));
-      }
-    },
-    [t, loadJobs],
-  );
-
-  return (
-    <Suspense fallback={<SectionFallback />}>
-      <LazyCronManager
-        jobs={jobs}
-        onAdd={handleAdd}
-        onDelete={handleDelete}
-        onToggle={handleToggle}
-      />
-    </Suspense>
-  );
-}
 
 /** 单个设置 section 的错误边界，防止一个 section 崩溃导致整页白屏 */
 function SectionErrorBoundary({

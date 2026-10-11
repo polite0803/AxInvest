@@ -1,9 +1,9 @@
 import { StockAnalysisSettings } from "@/components/settings/StockAnalysisSettings";
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
-import { extractLlmField } from "@/lib/agentOutput";
+import { cleanToolCallTags, extractLlmField } from "@/lib/agentOutput";
 import { invoke } from "@/lib/invoke";
-import { classifySentiment } from "@/lib/stock-analysis-utils";
+import { tallyAnalystSentiment } from "@/lib/stock-analysis-utils";
 import { useStockAnalysisStore, useUIStore } from "@/stores";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import { Button, Collapse, Dropdown } from "antd";
@@ -856,48 +856,20 @@ export function StockAnalysisPage({ embeddedInWorkspace }: { embeddedInWorkspace
   );
 }
 
-/** 分析师共识条 — 在 Decision Hero 下方显示 10 位分析师的 bull/bear/neutral 投票分布 */
+/** 分析师共识条 — 在 Decision Hero 下方显示分析师的 bull/bear/neutral 投票分布 */
 function AnalystConsensusBar() {
   const { t } = useTranslation();
   const analystReports = useStockAnalysisStore((s) => s.analystReports);
-  const reports = Object.values(analystReports).filter(Boolean) as string[];
-  const total = reports.length;
-  if (total === 0) { return null; }
 
-  // 与 AnalystReportGrid 一致：优先用结构化 bull_score/bear_score
-  let bull = 0;
-  let bear = 0;
-  let neutral = 0;
-  for (const rawReport of reports) {
-    const report = rawReport.replace(/<\/?tool_call[^>]*>/g, "");
-    // 尝试 VERDICT JSON
-    const vIdx = report.indexOf("<!-- VERDICT:");
-    let scores: { bull: number; bear: number } | null = null;
-    if (vIdx !== -1) {
-      try {
-        const js = report.slice(vIdx + "<!-- VERDICT:".length);
-        const je = js.indexOf("-->");
-        if (je !== -1) {
-          const m = JSON.parse(js.slice(0, je).trim());
-          const b = m.bull_score ?? m.strength_score ?? null;
-          const br = m.bear_score ?? null;
-          if (typeof b === "number" || typeof br === "number") {
-            scores = { bull: b ?? 0, bear: br ?? 0 };
-          }
-        }
-      } catch { /* ignore */ }
-    }
-    if (scores) {
-      if (scores.bull > scores.bear * 1.2) { bull++; }
-      else if (scores.bear > scores.bull * 1.2) { bear++; }
-      else { neutral++; }
-    } else {
-      const s = classifySentiment(report);
-      if (s === "bullish") { bull++; }
-      else if (s === "bearish") { bear++; }
-      else { neutral++; }
-    }
-  }
+  // 计票口径与分析师 tab 分歧卡、chat 紧凑摘要共用 `tallyAnalystSentiment` 单一真相源
+  // （2026-10-10 修复：此处旧副本缺 VERDICT 分数归一化 / stance-only 回退 / 裸分数正则，
+  // 且只剥 tool_call 标签不删内容，曾与分歧卡算出 10/10 vs 9/11 两套结果）。
+  // 取数形态与分歧卡逐字一致 —— 空产出不计票的裁定住在 `tallyAnalystSentiment` 单点，
+  // 此处不再各自 filter（两边各自处理过一次票就还会分叉）。
+  const { bullish: bull, bearish: bear, neutral, total } = tallyAnalystSentiment(
+    Object.values(analystReports).map((raw) => cleanToolCallTags(raw)),
+  );
+  if (total === 0) { return null; }
 
   return (
     <div

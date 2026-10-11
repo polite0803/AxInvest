@@ -599,6 +599,8 @@ pub fn horizon_branch_specs() -> serde_json::Value {
 fn role_of_marker(key: &str) -> &'static str {
     match key {
         "trendFilterOnly" => "filter",
+        // 情绪广度（超短 / 短档）：市场级量，只作入场必要条件 / 背景过滤，不进方向加权。
+        "breadthGateOnly" => "filter",
         "supplyAsRiskNoteOnly" => "riskNote",
         _ => "partial",
     }
@@ -1228,10 +1230,45 @@ mod tests {
             .expect("长档应有 trendStrength 腿");
         assert_eq!(trend["role"], "filter");
         assert_eq!(trend["weight"].as_f64().unwrap(), 0.0);
+        // 超短：情绪广度是**市场级量** ⇒ 必须输出（门要用）但只作入场必要条件，
+        // 不得进方向加权 —— 一旦计权，同一天的全部个股会共享同一个方向信号。
+        let ultra_legs = all["ultra_short"]["legs"].as_array().unwrap();
+        let breadth = ultra_legs
+            .iter()
+            .find(|l| l["factor"] == "breadthState")
+            .expect("超短应有 breadthState 腿（门要用）");
+        assert_eq!(breadth["role"], "filter");
+        assert_eq!(breadth["weight"].as_f64().unwrap(), 0.0);
+        let us_dir: Vec<&str> = ultra_legs
+            .iter()
+            .filter(|l| l["role"] == "direction")
+            .map(|l| l["factor"].as_str().unwrap())
+            .collect();
+        assert_eq!(us_dir, vec!["momentumSignal"], "超短方向腿只能是短窗动量");
         // 超短：广度门 + 时间止损 + 不做跨期缩放，三者必须同族
         assert_eq!(all["ultra_short"]["entryGate"], "breadth_required");
         assert_eq!(all["ultra_short"]["exitRule"], "time_stop");
         assert_eq!(all["ultra_short"]["confidenceMethod"], "edge_no_time_scaling");
+
+        // 短档：情绪广度与超短同源（市场级量 = 封板率），2026-10-10 起只作背景过滤，
+        //   不得进方向加权（否则同日全部个股共享同一方向信号）。
+        let short_legs = all["short"]["legs"].as_array().unwrap();
+        let short_breadth = short_legs
+            .iter()
+            .find(|l| l["factor"] == "breadthState")
+            .expect("短档应有 breadthState 腿（必须输出）");
+        assert_eq!(short_breadth["role"], "filter");
+        assert_eq!(short_breadth["weight"].as_f64().unwrap(), 0.0);
+        let short_dir: Vec<&str> = short_legs
+            .iter()
+            .filter(|l| l["role"] == "direction")
+            .map(|l| l["factor"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            short_dir,
+            vec!["momentumSignal", "flowPersistence", "trendStrength", "supplyShock"],
+            "短档方向腿不得含 breadthState"
+        );
     }
 
     /// 三张表（因子集 / 属主 / 来源）必须互相覆盖 —— 分处两 crate 的三处清单，

@@ -169,7 +169,7 @@ export function StockSwitcherFloating() {
       type="button"
       onClick={toggle}
       className="fixed left-2 top-20 z-50 p-2 rounded-full shadow-lg"
-      style={{ background: "var(--accent)", color: "white" }}
+      style={{ background: "var(--accent)", color: "var(--accent-fg)" }}
       title={t("workspace.stockSwitcher.expand")}
     >
       <X size={16} className="rotate-45" />

@@ -177,9 +177,23 @@ export function DailyReviewPanel() {
                         >
                           <Tag className="m-0 text-[10px]">{w.stockCode}</Tag>
                           <span className="font-medium truncate">{w.stockName}</span>
-                          <span style={{ color: w.changePct >= 0 ? "var(--sa-red)" : "var(--sa-green)" }}>
-                            {w.changePct >= 0 ? "+" : ""}
-                            {w.changePct.toFixed(2)}%
+                          {
+                            /* 后端 `f64` 的非有限值（NaN / ±Inf）经 serde_json 序列化为 JSON `null`，
+                              直接 `.toFixed(2)` 会抛 TypeError，被外层 PageErrorBoundary 兜成整页「页面错误」。
+                              故与 `SerenityCandidateCard` / `TradingRoomMiniBar` 同约定：非有限值显示「—」。 */
+                          }
+                          <span
+                            style={{
+                              color: !Number.isFinite(w.changePct)
+                                ? "var(--muted)"
+                                : w.changePct >= 0
+                                ? "var(--sa-red)"
+                                : "var(--sa-green)",
+                            }}
+                          >
+                            {Number.isFinite(w.changePct)
+                              ? `${w.changePct >= 0 ? "+" : ""}${w.changePct.toFixed(2)}%`
+                              : "—"}
                           </span>
                           {w.lastDecision && <DecisionBadge decision={w.lastDecision} />}
                         </div>

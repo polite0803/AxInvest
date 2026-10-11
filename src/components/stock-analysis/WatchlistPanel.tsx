@@ -1,7 +1,8 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
 import { List } from "@/components/common/AntdList";
 import { useStockJump } from "@/hooks/useStockJump";
-import { invoke } from "@/lib/invoke";
+import { invoke, listen } from "@/lib/invoke";
+import type { UnlistenFn } from "@/lib/invoke";
 import { useStockAnalysisStore } from "@/stores";
 import { DeleteOutlined, PlusOutlined } from "@ant-design/icons";
 import { App, Button, Card, Dropdown, Empty, Input, Popconfirm, Select, Space, Spin, Tag } from "antd";
@@ -22,6 +23,22 @@ interface QuoteSnapshot {
   changePct: number;
   pe?: number;
   timestamp: string;
+}
+
+/**
+ * 后端 `stock-quote-update` 的 payload —— 即 `QuoteChangeEvent` 的 serde 投影
+ * （`src-tauri/crates/astock-data/src/realtime_quote.rs`，`rename_all = "camelCase"`）。
+ * 只声明消费端读到的字段；`f64` 的非有限值经 serde_json 序列化为 JSON `null`，故标 `| null`。
+ */
+interface StockQuoteUpdatePayload {
+  stockCode: string;
+  trigger: string;
+  current: {
+    price: number | null;
+    changePct: number | null;
+    pe: number | null;
+    timestamp: string;
+  };
 }
 
 const DEFAULT_GROUP = "__default__";
@@ -192,36 +209,28 @@ export function WatchlistPanel() {
     }).catch((e) => console.warn("[WatchlistPanel] watch_stock_quotes 失败:", e));
 
     // 3) 监听 stock-quote-update 事件，增量更新 quotes 状态
-    let unlisten: (() => void) | null = null;
+    let unlisten: UnlistenFn | null = null;
     let cancelled = false;
-    (async () => {
-      try {
-        const { listen } = await import("@tauri-apps/api/event");
-        unlisten = await listen<{
-          stockCode: string;
-          current: { price: number; changePct: number; pe?: number; timestamp: string };
-          changePct: number;
-          trigger: string;
-        }>("stock-quote-update", (event) => {
-          const { stockCode, current } = event.payload;
-          setQuotes((prev) => ({
-            ...prev,
-            [stockCode]: {
-              price: current.price ?? 0,
-              changePct: current.changePct ?? 0,
-              pe: current.pe,
-              timestamp: current.timestamp ?? "",
-            },
-          }));
-        });
+    listen<StockQuoteUpdatePayload>("stock-quote-update", (event) => {
+      const { stockCode, current } = event.payload;
+      setQuotes((prev) => ({
+        ...prev,
+        [stockCode]: {
+          price: current.price ?? 0,
+          changePct: current.changePct ?? 0,
+          pe: current.pe ?? undefined,
+          timestamp: current.timestamp,
+        },
+      }));
+    })
+      .then((fn) => {
         if (cancelled) {
-          unlisten?.();
-          unlisten = null;
+          fn();
+          return;
         }
-      } catch (e) {
-        console.error("[WatchlistPanel] listen stock-quote-update 失败:", e);
-      }
-    })();
+        unlisten = fn;
+      })
+      .catch((e) => console.error("[WatchlistPanel] listen stock-quote-update 失败:", e));
 
     return () => {
       cancelled = true;

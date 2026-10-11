@@ -2372,6 +2372,25 @@ let disagreement_mod = if present(risk_disagreement) {
 	};
 	let confidence_source = if present(branch_conf) { "branch_row" } else { "main_chain_posterior" };
 
+	// ── L1（2026-10-09）：**动作口径**的置信度必须与展示口径并列可见 ──
+	// 矛盾实证：主档 action 由所选档分支的**未调制**后验判出（该档阶梯 0.72/0.62/… 直接比
+	//   `picked_row["confidence"]`），而对外报的 `confidence` 还要再乘两个档位无关约束
+	//   （`disagreement_mod` × 数据质量上限）⇒ 同一次输出里「动作 = 买入」配「置信 = 54.5%」
+	//   两个数各自都对，却让用户以为这个买入是 54.5% 的胜率判出来的（实际是 72.7%）。
+	// 处理（**不改任何决策数值**）：把 action 阶梯实际消费的那个后验也输出，两个口径同屏可反解。
+	//   分支口径 = 所选档行自报的 `confidence`（% 刻度，与主档 `confidence` 同量纲）；
+	//   主链口径 = `effective_posterior`（action 阶梯读的就是它，见下方 V42 段）。
+	// ⚠ 这不是给 `confidence` 找补：`disagreement_mod` / `confidence_quality_cap` 是数据质量与
+	//   视角一致性的约束，压在展示值上是对的；缺的是「动作那边是几分」这一格。
+	let action_conf_basis = if branch_picked { num_of(picked_row["confidence"]) } else { effective_posterior * 100.0 };
+	let action_confidence_basis_source =
+	    if branch_picked { "branch_row" } else { "main_chain_effective_posterior" };
+	// 两个口径**不同才占一行**（相同时再写一句就是噪声）：只陈述差在哪，不解释成对错。
+	let conf_basis_note = if action_conf_basis - main_confidence >= 1.0
+	    || main_confidence - action_conf_basis >= 1.0 {
+	    ` | 置信口径=展示${(main_confidence*10.0).round()/10.0}%(含视角分歧/数据质量约束) 动作口径${(action_conf_basis*10.0).round()/10.0}%(${action_confidence_basis_source})`
+	} else { "" };
+
 	// ── M2 修复：LLM 失败级联兜底 ──
 	// V55 扩展: 上游 AgentNode 走 strict_mode 兜底时（LLM 输出无法解析为合法 JSON），
 	//   agent_executor 会注入 __untrusted=true 标记。下游若读到任一上游不可信，
@@ -2627,16 +2646,32 @@ let weights_collapsed = !dqi_a_level && (
 	//   于是 f4 惩罚强度、f4_signal 的 prompt 口径、`risk_bias`、仓位 cap 与 veto **同源同档**，
 	//   「一个算法 + 一套全局参数」的残留形态在这里收口（R-11）。
 	//   四路全缺席时 `risk_tier_applied` 为假 ⇒ `overall_risk` 仍是 60 日算法档，与 v128 逐位相同。
+	// ── 2026-10-10（B 裁定）：否决已下到四档分支**各自**的 action ──
+	//   四份 `portfolio-mgr-h-*.rhai` 在各自动作阶梯之后按**本档**风险节点否决一次，
+	//   `picked_row["action"]` 因此已是本档口径下的终值（`originalAction` 留否决前方向）。
+	//   本处主链否决**保留**，角色变为「兜底 + 加严」：主链 `overall_risk` 可能比被选档更严
+	//   （算法 60 日档高于本档节点档时，`risk_tier_applied` 为假 ⇒ 沿用算法档），此时必须继续收紧。
+	//   而 `pm_risk_veto` 对已否决值是**幂等**的（极高→观望 / 高→持有，再否决不变）⇒
+	//   档内已否决时这里天然 no-op，不会二次改档、也不会与档内结论打架。
 	let original_action = final_action;
 	final_action = pm_risk_veto(final_action, overall_risk);
 	// 检测是否触发了风控降级，供 decision_trail 和 reasoning 使用
 	let risk_downgraded = original_action != final_action;
+	// ── 档内否决的来历（B 裁定）：`tierVetoed` / `originalAction` 由被选档分支自报 ──
+	//   分开读它，才能把 reasoning / actionSource 的「本档否决」与「主链否决」区分开 ——
+	//   否则同屏只写「风控否决」，读者无从判断否决发生在哪一层、用的是哪一档的风险。
+	let tier_vetoed = branch_picked && present(picked_row["tierVetoed"]) && picked_row["tierVetoed"] == true;
+	let tier_veto_from = if tier_vetoed && present(picked_row["originalAction"]) { picked_row["originalAction"] } else { "" };
 	let risk_downgrade_note = if risk_downgraded {
 	    if overall_risk == "极高风险" || overall_risk == "极高" {
 	        ` | ⚠️极高风险风控否决:${original_action}→${final_action}(极高风险不应继续持仓)`
 	    } else if overall_risk == "高风险" || overall_risk == "高" {
 	        ` | ⚠️高风险风控否决:${original_action}→${final_action}(高风险禁止加仓)`
 	    } else { "" }
+	} else if tier_vetoed {
+	    // 档内已按本档风险否决、主链这一次未再改档 ⇒ 如实点名「档内否决」，
+	    //   既不重复成句、也不把否决说成主链做的（B 裁定前正是主链越俎代庖那一步）。
+	    ` | ⚠️本档风控否决(${picked_tier}):${tier_veto_from}→${final_action}(本档风险档=${risk_tier})`
 	} else { "" };
 	// 按档加严只在**真的改了风险档**时留痕（没改就不占一行 —— 面板噪声）。
 	// 留痕写的是「哪一档、从什么档收到什么档、影响到哪些下游」——因为自 v131 起这一行
@@ -2651,8 +2686,9 @@ let weights_collapsed = !dqi_a_level && (
 	}
 
 	// P0-1 修复: R-200 移至 risk_downgraded 定义之后（原位置前向引用为死代码）
-	// 记录风险否决
-	if risk_downgraded {
+	// 记录风险否决 —— 主链改档与**档内**否决都必须留痕（B 裁定后两者是不同层的事件，
+	//   档内那一路若不记，`decision_trail` 里就只剩「什么都没发生」，与事实不符）。
+	if risk_downgraded || tier_vetoed {
 	    decision_trail.push(#{
 	        "rule_id": "R-200",
 	        "status": "DOWNGRADED",
@@ -2839,18 +2875,82 @@ if present(sim_stability) && type_of(sim_stability) == "f64"
     }
 }
 
+// ── L2/L3（2026-10-09）：算法估值结论与决策方向的**对账**与**封顶** ──
+// 用户实证（央企新材料，玻纤/风电叶片/锂电隔膜）：同一次分析给「买入 / 15.3% 仓位」，
+//   而同一份输出里的算法估值结论是「高估」（内在价值区间 18.01–34.08 元，远低于现价 51.80），
+//   两条结论方向相反且并列出现，**没有任何一句话解释为什么**。本文件的 `valuation_conclusion`
+//   输出段（见其「估值**结论层**」注释）早在 2026-09-28 就写明「结论说高估、f5 σ 却是正这类
+//   矛盾必须一眼可见」，但当时只做了**透出**（面板读得到），没做**对账**（决策侧照常喊买入）
+//   ⇒ 本段补上对账与封顶，把那句注释兑现。
+// 取值口径：`valuation_conclusion_action` 是 `value-verify.rhai` 无条件注入的**算法**结论
+//   （低估/合理偏低/合理/偏高/高估/数据不足），不是 LLM 措辞 ⇒ 可做确定性判据。
+//   ⚠ 与 LLM `value-investor` 的 `verdict` 无关（那条只进 data-quality 的 val 槽、不进决策），
+//   故不存在「拿 LLM 结论去改确定性决策」的越界。
+// 两件事分开、互不冒充：
+//   L2 对账（**不改数值**）：方向相反 —— 看多/持有 vs 高估/偏高，或看空 vs 低估/合理偏低
+//     ⇒ 显式留话。判据取**封顶前**的方向，使「买入被封成持有」这条链仍留下原方向可对账。
+//   L3 封顶（**会改数值**，用户已拍板）：只认最明确的一档 —— 算法结论 = **高估**
+//     ⇒ 禁止加仓档（买入/增持 → 持有）。「偏高」不在其列：那是程度判断，不是同一句结论。
+//     只降不升，与全部既有风控门同族。
+let val_conclusion =
+    if present(valuation_conclusion_action) && type_of(valuation_conclusion_action) == "string" {
+    valuation_conclusion_action
+} else {
+    ""
+};
+let pre_val_action = final_action;
+let val_direction_nonbearish = final_action == "买入" || final_action == "增持" || final_action == "持有";
+let val_verdict_rich = val_conclusion == "高估" || val_conclusion == "偏高";
+let val_verdict_cheap = val_conclusion == "低估" || val_conclusion == "合理偏低";
+let valuation_conflict_kind = if val_direction_nonbearish && val_verdict_rich {
+    "rich_vs_nonbearish"
+} else if (final_action == "减持" || final_action == "卖出") && val_verdict_cheap {
+    "cheap_vs_bearish"
+} else {
+    ""
+};
+let valuation_capped = val_conclusion == "高估" && (final_action == "买入" || final_action == "增持");
+if valuation_capped { final_action = "持有"; }
+// 对账话术指向「口径不同」而不是「谁错了」——短档判方向、长线判价值，两套尺子各有其职。
+// ⚠ 它会被排进 `reasoning` **前段**：决策卡按 120 字截断展示，尾注会被吃掉
+//   （reasoning 各段长度的既有处置见下方「P0-I(2026-09-12)」注）。
+let valuation_conflict_note = if valuation_conflict_kind != "" {
+    if valuation_capped {
+        ` | ⚠️估值口径分歧:算法估值结论=高估,本结论方向为${pre_val_action}(已封顶为持有)`
+    } else {
+        ` | ⚠️估值口径分歧:算法估值结论=${val_conclusion},本结论方向为${final_action}`
+    }
+} else {
+    ""
+};
+if valuation_capped {
+    decision_trail.push(#{
+        "rule_id": "R-212",
+        "status": "DOWNGRADED",
+        "detail": `算法估值结论=高估(长线价值视角偏空),禁止加仓档:${pre_val_action}→持有`,
+        "timestamp": 0.0,
+    });
+}
+
 // ── 主档 action 的**来历**必须可反解（§五十三 ①，2026-10-04 批准）──
 // 为什么不能只靠 reasoning 文本：000710 实测「主档=持有 + 标签=超短线分支选档 + 超短线 chip=买入」
 //   三处同屏互斥，唯一能说明它的是自由文本里那句「高风险风控否决:买入→持有」——
 //   展示层要成句、反思要按档统计，都不能靠解析中文句子（同 `positionSource` 立四值的理由）。
-// 判据是**最后改写者优先**（与主链实际执行顺序反着问）：模拟盘 S-501 → 空头预测否决 →
-//   风控否决 → 数据异常/单点低置信封顶 → 分支结论 → 主链日线阶梯。
+// 判据是**最后改写者优先**（与主链实际执行顺序反着问）：估值封顶（L3）→ 模拟盘 S-501 →
+//   空头预测否决 → 风控否决（主链）→ 数据异常/单点低置信封顶 → 档内风控否决 → 分支结论 → 主链日线阶梯。
+//   （2026-10-10 B 裁定：档内否决发生在四档分支**内部**，故列在「分支结论」之前一格。）
 // ⚠ `partial_low_confidence_cap` 那条的触发条件读的是**主链后验口径**的置信度，而本版对外报的
 //   `confidence` 已改为所选档口径 ⇒ 「高置信却被降级」在这一格仍可能出现，标签把它点名而不是隐藏；
 //   把该闸门也改读分支置信度是另一件事（会同时改多处数值），已登记为后续项，不在本版偷偷做。
-let action_source = if sim_vetoed && sim_veto_rule == "S-501" { "sim_veto_downgrade" }
+let action_source = if valuation_capped { "valuation_cap" }
+	else if sim_vetoed && sim_veto_rule == "S-501" { "sim_veto_downgrade" }
 	else if bearish_downgraded { "bearish_veto_downgrade" }
 	else if risk_downgraded { "risk_veto_downgrade" }
+	// ── B 裁定（2026-10-10）：档内风控否决是**分支自己**改的档，排名上早于所有主链规则
+	//   （「最后改写者优先」⇒ 它落在 branch_pick 之前一格）。若不单列这一格，
+	//   档内否决会被标成 branch_pick，呈现层就成句成「主档取自中期分支「买入」」而无「降级」，
+	//   与它实际是被否决过的终值（观望）自相矛盾。
+	else if tier_vetoed { "tier_risk_veto" }
 	else if !trader_data_valid && (base_action == "买入" || base_action == "增持") { "sanity_cap_downgrade" }
 	else if partial_low_confidence && (base_action == "买入" || base_action == "增持") { "partial_low_confidence_cap" }
 	else if branch_picked { "branch_pick" }
@@ -3185,6 +3285,11 @@ let gap_note = if data_gaps.len() > 0 {
     //   不得回去解析 reasoning 的中文句子。值域见 `src/types/stock-analysis.ts` 与
     //   `rhai_registry` 整脚本门 ⑦ 的枚举断言（三载体必须同集合）。
     "confidenceSource": confidence_source,
+    // ── L1（2026-10-09）：**动作口径**的置信度（= action 阶梯实际消费的那个后验，%）──
+    // 与 `confidence` 并列，使「买入配 54.5%」这类同屏可反解（动作那边其实是 72.7%）。
+    // 来源两值见 `action_confidence_basis_source`；不改任何决策数值。
+    "actionConfidenceBasis": (action_conf_basis * 10.0).round() / 10.0,
+    "actionConfidenceBasisSource": action_confidence_basis_source,
     // ── #8 P5 数据质量跨轮熔断态（2026-10-06）──
     // 结构化输出而不是只写进 reasoning：展示层与反思统计不得回去解析中文句子
     //   （同 `confidenceSource`/`actionSource` 的既有纪律）。
@@ -3260,7 +3365,7 @@ let gap_note = if data_gaps.len() > 0 {
     //   沿用本文件既有写法 `${(x*10.0).round()/10.0}`（见 bearish_downgrade_note 的 to_int 惯例）。
     // 2026-09-22: 结论名回归 `final_action`（方向档）—— 展示档派生已移除，
     //   见上方说明：结论名必须由确定性后验阶梯唯一决定，不得掺入仓位/LLM 措辞。
-    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${gap_note}${bayes_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}${dqi_fuse_note}`,
+    "reasoning": `决策=${final_action} 置信=${(main_confidence*10.0).round()/10.0}(${confidence_source}) 仓位=${(position_pct*10.0).round()/10.0}%${valuation_conflict_note}${gap_note}${bayes_note}${conf_basis_note}${kelly_note}${valuation_note}${disagreement_note}${contradiction_note}${risk_downgrade_note}${bearish_downgrade_note}${risk_note}${collapse_note}${dqi_fuse_note}`,
     "data_gaps": data_gaps,
     "timeHorizon": time_horizon,
     // Phase 1：「谁定的档」出口（唯一判定见上方锁档段），落 decision_horizon_source
@@ -3387,6 +3492,21 @@ let gap_note = if data_gaps.len() > 0 {
         "bandMetric": if type_of(rel) == "map" { rel_primary } else { "" },
         "bandPercentile": if present(band_pct) { (band_pct*10.0).round()/10.0 } else { () },
         "bandLegUsed": band_leg_usable,
+    },
+    // ── L2/L3（2026-10-09）：算法估值结论 × 决策方向的**对账出口**（结构化）──
+    // 上面的 `valuation_conclusion` 只回答「估值是什么结论」，本块回答「它与本次决策方向
+    //   是否冲突、是否因此被封顶」—— 展示层据此成句，**不得**回去解析 reasoning 的中文句子
+    //   （同 `actionSource` / `confidenceSource` 的既有纪律）。判据见上方 L2/L3 段。
+    // `decisionAction` 是**封顶前**的方向（真正的对账对象）；`capped` 单独成格，
+    //   使「本来想买、被估值封成持有」这条链在数据上可反解。
+    "valuationReconciliation": #{
+        "conflictKind": valuation_conflict_kind,
+        "valuationAction": val_conclusion,
+        "decisionAction": pre_val_action,
+        "finalAction": final_action,
+        "capped": valuation_capped,
+        // 决策口径所在档（snake_case）；主链定档那代无分支行 ⇒ 空串。
+        "horizon": picked_tier,
     },
     "decision_trail": decision_trail,
     "pre_sim_action": pre_sim_action,

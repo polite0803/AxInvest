@@ -4,6 +4,9 @@
 export * from "./opc";
 export * from "./paired";
 
+// === Time Travel（时间旅行批次复盘） ===
+export * from "./timeTravel";
+
 // === Model Selection System ===
 export * from "./modelSelection";
 

@@ -135,6 +135,8 @@ pub mod task {
     pub const UPDATE_FAILED: &str = "TASK_UPDATE_FAILED";
     pub const START_FAILED: &str = "TASK_START_FAILED";
     pub const OUTPUT_APPEND_FAILED: &str = "TASK_OUTPUT_APPEND_FAILED";
+    /// 手动执行一个既无关联工作流、也无内置执行器的定时任务（custom/general 空壳）
+    pub const MANUAL_RUN_NOT_SUPPORTED: &str = "TASK_MANUAL_RUN_NOT_SUPPORTED";
 }
 
 /// 提供商相关错误码

@@ -47,7 +47,14 @@ impl WatchPriority {
 }
 
 /// 行情变更事件
-#[derive(Debug, Clone)]
+///
+/// `Serialize` 是**本事件的线上契约本体**：wiring 层（`src-tauri/src/init/services.rs`）
+/// 此前手写 `json!` 拼 payload，把 `current` 摊平成了顶层 `price` / `name` / …，
+/// 与前端消费端按 `current.*` 的取值漂移 ⇒ `current` 恒 undefined，抛在
+/// `setQuotes` 的 updater 里被 ErrorBoundary 兜成整页「页面错误」，且刷新必现。
+/// 改为直接序列化本结构后，字段增删改名会同时反映到两端，不再有第二份手工副本。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct QuoteChangeEvent {
     pub stock_code: String,
     pub previous: Option<StockQuote>,

@@ -8,7 +8,7 @@ import { SerenityCandidateCard } from "../SerenityCandidateCard";
 import { SerenityScreeningPanel } from "../SerenityScreeningPanel";
 
 /**
- * 趋势智选**候选卡片**的档位与风控呈现（用户裁定 A：同票逐档两张卡）。
+ * 趋势智选**候选卡片**的档位与风控呈现（**一票一卡**：卡内分行列多档，最多四档 超短/短/中/长）。
  *
  * 反控形态（修复前必红，逐条对应）：
  *  - 卡片只有一行时间基线，**没有任何档位维度** ⇒ Q2 把产出层改成逐档两行后，
@@ -128,14 +128,24 @@ describe("逐档风控与口径来源（A）", () => {
   });
 });
 
-describe("面板计数单位（A）", () => {
+describe("面板一票一卡（逐档折叠，最多四档）", () => {
   beforeEach(() => {
     act(() => {
       useSerenityStore.setState({ candidates: [], running: false, steps: [] });
     });
   });
 
-  it("同票两档 ⇒ 两张卡 + 「1 只 · 逐档各一行」注记，计数不被读成票数", () => {
+  function renderPanel() {
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18n}>
+          <SerenityScreeningPanel />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it("同票两档 ⇒ 折叠成一张卡、卡内两行档位（中期/长期），标题按票计数", () => {
     act(() => {
       useSerenityStore.setState({
         candidates: [
@@ -144,17 +154,49 @@ describe("面板计数单位（A）", () => {
         ],
       });
     });
-    render(
-      <MemoryRouter>
-        <I18nextProvider i18n={i18n}>
-          <SerenityScreeningPanel />
-        </I18nextProvider>
-      </MemoryRouter>,
-    );
+    renderPanel();
     expect(screen.getAllByTestId("serenity-tier").map((el) => el.textContent)).toEqual([
       "中期",
       "长期",
     ]);
-    expect(screen.getByText(/1 只 · 逐档各一行/)).toBeTruthy();
+    // 一票一卡 ⇒ 卡头（代表候选）只渲染一次；第二档的名字不出现在卡头
+    expect(screen.getAllByText("落库中期")).toHaveLength(1);
+    expect(screen.queryByText("落库长期")).toBeNull();
+    expect(screen.getByText(/候选标的\s*\(1\s*只\)/)).toBeTruthy();
+  });
+
+  it("四档同票 ⇒ 一张卡内四行，按 超短→短→中→长 排列", () => {
+    act(() => {
+      useSerenityStore.setState({
+        candidates: [
+          { ...MID_ROW, period: "mid", holding_days: 28 },
+          { ...MID_ROW, period: "long", holding_days: 90 },
+          { ...MID_ROW, period: "ultra_short", holding_days: 5 },
+          { ...MID_ROW, period: "short", holding_days: 10 },
+        ],
+      });
+    });
+    renderPanel();
+    expect(screen.getAllByTestId("serenity-tier").map((el) => el.textContent)).toEqual([
+      "超短线",
+      "短线",
+      "中期",
+      "长期",
+    ]);
+    expect(screen.getByText(/候选标的\s*\(1\s*只\)/)).toBeTruthy();
+  });
+
+  it("两票 ⇒ 两张卡，标题按票数计 2 只", () => {
+    act(() => {
+      useSerenityStore.setState({
+        candidates: [
+          MID_ROW,
+          { ...MID_ROW, stock_code: "300750", stock_name: "另一只", period: "mid" },
+        ],
+      });
+    });
+    renderPanel();
+    expect(screen.getAllByTestId("serenity-tier")).toHaveLength(2);
+    expect(screen.getByText(/候选标的\s*\(2\s*只\)/)).toBeTruthy();
   });
 });

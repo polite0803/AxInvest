@@ -33,6 +33,16 @@ import { DecisionTrustNotice } from "./DecisionTrustNotice";
 import { ReportMarkdown } from "./ReportMarkdown";
 import { cleanToolCallTags } from "./utils";
 
+// 四周期固定键列表（PROPOSAL-stock-decision-four-horizon.md 阶段 1/2）：
+// 价位映射 / 独立决策面板 / 标签页多处共用，必须是模块级常量 ——
+// 若在组件体内重建，useMemo 闭包每次拿到的都是新数组引用。
+const HORIZON_KEYS: ReadonlyArray<{ key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string }> = [
+  { key: "ultraShort", tSuffix: "UltraShort" },
+  { key: "short", tSuffix: "Short" },
+  { key: "mid", tSuffix: "Mid" },
+  { key: "long", tSuffix: "Long" },
+];
+
 export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWorkspace?: boolean }) {
   const { message } = App.useApp();
   const { t } = useTranslation();
@@ -459,6 +469,45 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     });
   }, [decision, stockCode, stockName, decisionContext, navigate, t, message]);
 
+  // ── 四周期独立决策面板（PROPOSAL-stock-decision-four-horizon.md 阶段 2）──
+  // ⚠️ 这四个 hooks 必须在下方 `if (!decision) return` 之前调用：
+  // 从历史记录点开时首次渲染 decision 为 null（详情异步加载中），加载完成后
+  // 第二次渲染才走到这里 —— hooks 若放在 early return 之后，两次渲染的 hooks
+  // 数量不一致，React 直接崩 "Rendered more hooks than during the previous render"
+  // （2026-10-10 历史回放打开立讯精密记录实测）。
+  const horizonDecisionEntries = useMemo(() => {
+    const dbh = decision?.decisionsByHorizon;
+    if (!dbh) { return []; }
+    const entries: Array<
+      { key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string; d: import("@/types").HorizonDecision }
+    > = [];
+    for (const { key, tSuffix } of HORIZON_KEYS) {
+      const d = dbh[key];
+      if (d && d.action) {
+        entries.push({ key, tSuffix, d });
+      }
+    }
+    return entries;
+  }, [decision?.decisionsByHorizon]);
+
+  // 矛盾检测：四周期中同时存在 BUY 族与 SELL 族，或者两两方向冲突。
+  const horizonHasConflict = useMemo(() => {
+    if (horizonDecisionEntries.length < 2) { return false; }
+    const dirs = horizonDecisionEntries.map((e) => actionToDirection(e.d.action));
+    const hasBuy = dirs.some((d) => d === "buy");
+    const hasSell = dirs.some((d) => d === "sell");
+    return hasBuy && hasSell;
+  }, [horizonDecisionEntries]);
+
+  // 四周期标签页状态（默认选中第一个有数据的周期）
+  const [activeHorizonTab, setActiveHorizonTab] = useState<string | null>(null);
+  // 当数据变化时重置标签页选中
+  useEffect(() => {
+    if (horizonDecisionEntries.length > 0 && !horizonDecisionEntries.some((e) => e.key === activeHorizonTab)) {
+      setActiveHorizonTab(horizonDecisionEntries[0].key);
+    }
+  }, [horizonDecisionEntries, activeHorizonTab]);
+
   // ── 决策缺失占位 ──
   // normalizeDecision 入口已保证非空对象，所以这里的 !decision 意味着：
   //   1) LLM 输出无法解析出 decision（portfolio-mgr 节点结果残缺/被截断）
@@ -702,62 +751,55 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
     const confSrcKey = prov.confidenceSource === "main_chain_posterior"
       ? confidenceSourceLabelKey(prov.confidenceSource)
       : null;
+    // v149(L1)：动作**判定口径**与展示口径不同源时点名 —— 否则「54.5% 为何买入」无从解释
+    //   （买入由档内未调制后验判出，展示值被视角分歧 × 数据质量上限压低）。
+    const basis = decision.actionConfidenceBasis;
+    const basisDiff = typeof basis === "number" && Math.abs(basis - confidencePct) >= 1;
     return (
       <span className="text-xs" style={{ color: "var(--muted)" }}>
         {body}
         {confSrcKey ? ` · ${t(confSrcKey)}` : ""}
+        {basisDiff ? ` · ${t("stockAnalysis.actionConfidenceBasisLabel")} ${Math.round(basis * 10) / 10}%` : ""}
+      </span>
+    );
+  })();
+
+  // ── v149(L2)：主档方向与算法估值结论相反时**显式对账**（产端注释：这类矛盾必须一眼可见）──
+  // 不改数值，只把「短线判方向、长线判价值」两套尺子摆到同一屏；`capped` 的那一半
+  // 由 provenanceLine（actionSource=valuation_cap ⇒「被估值封顶降级降为持有」）另述，不重复。
+  const valuationReconLine = (() => {
+    const rec = decision.valuationReconciliation;
+    const kind = rec?.conflictKind;
+    const key = kind === "rich_vs_nonbearish"
+      ? "stockAnalysis.valuationConflictRichNonbearish"
+      : kind === "cheap_vs_bearish"
+      ? "stockAnalysis.valuationConflictCheapBearish"
+      : null;
+    if (!key) { return null; }
+    const horizonName = rec?.horizon && HORIZON_T_SUFFIX[rec.horizon]
+      ? t(`stockAnalysis.timeHorizon${HORIZON_T_SUFFIX[rec.horizon]}`)
+      : timeHorizonLabel ?? "";
+    return (
+      <span className="text-xs" style={{ color: "var(--sa-amber, #f59e0b)" }}>
+        {t(key, {
+          valuationAction: rec?.valuationAction ?? "",
+          horizon: horizonName,
+          decisionAction: t(getActionTKey(rec?.decisionAction || decision.action)),
+        })}
       </span>
     );
   })();
 
   // 阶段1（PROPOSAL-stock-decision-four-horizon.md）：四周期价位映射展示。
   // 遍历固定的四个键 → i18n 标签，仅在有值（stopLossPct > 0，即该周期有交易计划）时渲染。
-  const HORIZON_KEYS: ReadonlyArray<{ key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string }> = [
-    { key: "ultraShort", tSuffix: "UltraShort" },
-    { key: "short", tSuffix: "Short" },
-    { key: "mid", tSuffix: "Mid" },
-    { key: "long", tSuffix: "Long" },
-  ];
+  // 这里是普通派生计算（非 hooks），留在 early return 之后无妨 —— 此处 decision 已收窄为非空。
+  // 相关 hooks（horizonDecisionEntries / horizonHasConflict / activeHorizonTab）在 early return 之前。
   const horizonEntries = HORIZON_KEYS
     .map((h) => ({ h, group: decision.horizonPriceMap?.[h.key] ?? null }))
     .filter((e): e is { h: typeof e.h; group: HorizonPriceGroup } => Boolean(e.group && e.group.stopLossPct > 0));
 
-  // 阶段2（PROPOSAL-stock-decision-four-horizon.md）：四周期独立决策面板。
-  // 从 decisionsByHorizon 提取四组独立决策；仅在有数据（action 非空）的周期渲染。
-  const horizonDecisionEntries = useMemo(() => {
-    const dbh = decision.decisionsByHorizon;
-    if (!dbh) { return []; }
-    const entries: Array<
-      { key: "ultraShort" | "short" | "mid" | "long"; tSuffix: string; d: import("@/types").HorizonDecision }
-    > = [];
-    for (const { key, tSuffix } of HORIZON_KEYS) {
-      const d = dbh[key];
-      if (d && d.action) {
-        entries.push({ key, tSuffix, d });
-      }
-    }
-    return entries;
-  }, [decision.decisionsByHorizon]);
-
-  // 矛盾检测：四周期中同时存在 BUY 族与 SELL 族，或者两两方向冲突。
-  const horizonHasConflict = useMemo(() => {
-    if (horizonDecisionEntries.length < 2) { return false; }
-    const dirs = horizonDecisionEntries.map((e) => actionToDirection(e.d.action));
-    const hasBuy = dirs.some((d) => d === "buy");
-    const hasSell = dirs.some((d) => d === "sell");
-    return hasBuy && hasSell;
-  }, [horizonDecisionEntries]);
-
-  // 四周期标签页状态（默认选中第一个有数据的周期）
-  const [activeHorizonTab, setActiveHorizonTab] = useState<string | null>(null);
   const defaultHorizonTab = horizonDecisionEntries.length > 0 ? horizonDecisionEntries[0].key : null;
   const currentHorizonTab = activeHorizonTab ?? defaultHorizonTab;
-  // 当数据变化时重置标签页选中
-  useEffect(() => {
-    if (horizonDecisionEntries.length > 0 && !horizonDecisionEntries.some((e) => e.key === activeHorizonTab)) {
-      setActiveHorizonTab(horizonDecisionEntries[0].key);
-    }
-  }, [horizonDecisionEntries, activeHorizonTab]);
 
   return (
     <>
@@ -785,6 +827,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
               </Tag>
             )}
             {provenanceLine}
+            {valuationReconLine}
             {
               /* 决策可信度受限（权重坍缩 + 数据缺口）：由共享组件统一渲染。
                 原实现只覆盖 weightsCollapsed，且该字段被 normalizeDecision 的
@@ -960,6 +1003,7 @@ export function DecisionBanner({ embeddedInWorkspace = false }: { embeddedInWork
                     </Tag>
                   )}
                   {provenanceLine}
+                  {valuationReconLine}
                   {/* 决策可信度受限：标题行用紧凑标签，完整警示条在下方正文区 */}
                   <DecisionTrustNotice decision={decision} variant="tag" />
                 </div>

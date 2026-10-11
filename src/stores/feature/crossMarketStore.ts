@@ -13,10 +13,27 @@
  * - get_forex_kline
  */
 
-import { translateBackendError } from "@/lib/errorI18n";
+import { parseBackendError, translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
 import type { KLine, StockQuote } from "@/types";
 import { create } from "zustand";
+
+/**
+ * 区级失败文案 = 码的译文 + 后端 `detail`（技术详情）。
+ *
+ * 为什么不直接用 `translateBackendError`：这三个命令恒用 `STOCK_WORKFLOW_INTERNAL` 报错，
+ * 而该码命中 locale 后 `translateBackendError` **只返回通用译文、丢弃 detail** ——
+ * 于是「东财 kline 路径被 RST」这类真实原因在 UI 上被抹成「股票分析工作流内部错误」，
+ * 排查时只能翻日志。此处把 detail 附上，让面板自己说明失败原因。
+ */
+function sectionError(e: unknown): string {
+  const translated = translateBackendError(e);
+  const detail = parseBackendError(e).detail?.trim();
+  if (!detail || translated.includes(detail)) {
+    return translated;
+  }
+  return `${translated}：${detail}`;
+}
 
 /** 取数区 —— 每个区的失败必须独立记，一区失败不得覆盖另一区 */
 export type CrossMarketSection = "quote" | "kline" | "benchmark" | "forex";
@@ -91,7 +108,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return quote;
     } catch (e) {
-      set((s) => ({ loadingQuote: false, errors: { ...s.errors, quote: translateBackendError(e) } }));
+      set((s) => ({ loadingQuote: false, errors: { ...s.errors, quote: sectionError(e) } }));
       return null;
     }
   },
@@ -114,7 +131,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return klines;
     } catch (e) {
-      set((s) => ({ loadingKline: false, errors: { ...s.errors, kline: translateBackendError(e) } }));
+      set((s) => ({ loadingKline: false, errors: { ...s.errors, kline: sectionError(e) } }));
       return null;
     }
   },
@@ -137,7 +154,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return klines;
     } catch (e) {
-      set((s) => ({ loadingBenchmark: false, errors: { ...s.errors, benchmark: translateBackendError(e) } }));
+      set((s) => ({ loadingBenchmark: false, errors: { ...s.errors, benchmark: sectionError(e) } }));
       return null;
     }
   },
@@ -160,7 +177,7 @@ export const useCrossMarketStore = create<CrossMarketState>((set, get) => ({
       }));
       return klines;
     } catch (e) {
-      set((s) => ({ loadingForex: false, errors: { ...s.errors, forex: translateBackendError(e) } }));
+      set((s) => ({ loadingForex: false, errors: { ...s.errors, forex: sectionError(e) } }));
       return null;
     }
   },

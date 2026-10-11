@@ -945,9 +945,20 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
   // 1) 尝试从 JSON 结构化字段提取
   const json = tryParseJson(report);
   if (json) {
+    // strict_mode 下方向与分数嵌在 `verdict` 对象里（`{"report":…,"verdict":{"verdict":"观望","bull_score":…}}`）。
+    // 不提升时 `String(json["verdict"])` 得到 `"[object Object]"` ⇒ 结构化通道整体失效，
+    // 退化成对整篇 JSON 做关键词扫描，显式 verdict 被正文措辞覆盖。
+    // 提升形态与 `AnalystReportCard.tryParseVerdictFormat` / `readRiskReportText` 一致。
+    const inner = json["verdict"];
+    const meta: Record<string, unknown> = inner && typeof inner === "object" && !Array.isArray(inner)
+      ? { ...json, ...(inner as Record<string, unknown>) }
+      : json;
     // 1a) stance 字段 — 中文方向词，覆盖各 agent 不同的命名空间
-    const stanceRaw = json["stance"] ?? json["view"] ?? json["sentiment"] ?? json["verdict"];
-    const stance = String(stanceRaw ?? "").trim();
+    const stanceRaw = meta["stance"] ?? meta["view"] ?? meta["sentiment"] ?? meta["verdict"];
+    // 只接受标量：`{}` 这类空对象 stringify 成 "[object Object]" 会被下游当成文本参与判定。
+    const stance = typeof stanceRaw === "string" || typeof stanceRaw === "number"
+      ? String(stanceRaw).trim()
+      : "";
     if (stance) {
       // 2026-09-21: 收敛到 `directionTextToSentiment`（原先此处自写一份方向词表，
       //   与 VERDICT 分支的表在 `多头/利好/超配/扫货` 等词上分歧，且两份都缺
@@ -958,7 +969,7 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
       if (NEUTRAL_SENTIMENT_PATTERN.test(stance)) { return "neutral"; }
     }
     // 1b) action 字段（BUY/INCREASE/SELL/REDUCE/HOLD 或中文 买入/增持/...）
-    const action = String(json["action"] ?? "").trim();
+    const action = String(meta["action"] ?? "").trim();
     if (action) {
       const a = action.toUpperCase();
       if (a === "BUY" || a === "INCREASE") { return "bullish"; }
@@ -969,8 +980,8 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
       if (action.includes("持有") || action.includes("观望")) { return "neutral"; }
     }
     // 1c) bull_score / bear_score 数字打分（0-10，分开打分）
-    const bullScoreRaw = json["bull_score"] ?? json["bullScore"];
-    const bearScoreRaw = json["bear_score"] ?? json["bearScore"];
+    const bullScoreRaw = meta["bull_score"] ?? meta["bullScore"];
+    const bearScoreRaw = meta["bear_score"] ?? meta["bearScore"];
     if (bullScoreRaw != null || bearScoreRaw != null) {
       const bullScore = Number(bullScoreRaw ?? 0);
       const bearScore = Number(bearScoreRaw ?? 0);
@@ -981,7 +992,7 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
       }
     }
     // 1d) positionPct 仓位 — trader / debator 输出，0-100
-    const posPctRaw = json["positionPct"] ?? json["position_pct"];
+    const posPctRaw = meta["positionPct"] ?? meta["position_pct"];
     if (posPctRaw != null) {
       const posPct = Number(posPctRaw);
       if (Number.isFinite(posPct)) {
@@ -991,7 +1002,7 @@ export function classifySentiment(report: string): "bullish" | "bearish" | "neut
       }
     }
     // 1e) recommendation / rating 字段
-    const rec = String(json["recommendation"] ?? json["rating"] ?? "").trim().toLowerCase();
+    const rec = String(meta["recommendation"] ?? meta["rating"] ?? "").trim().toLowerCase();
     if (rec) {
       if (rec.includes("buy") || rec.includes("买入") || rec.includes("增持") || rec.includes("看涨")) {
         return "bullish";
@@ -1468,11 +1479,16 @@ export function horizonSourceLabelKey(
  */
 export const ACTION_SOURCES: readonly string[] = [
   "branch_pick",
+  // 2026-10-10（B 裁定）：四档分支各自按本档风险节点否决自身 action —— 主档取自该档时，
+  // 这一格就是它的来历（排名在 branch_pick 之前，因否决发生在分支内部）。
+  "tier_risk_veto",
   "risk_veto_downgrade",
   "bearish_veto_downgrade",
   "sim_veto_downgrade",
   "sanity_cap_downgrade",
   "partial_low_confidence_cap",
+  // v149(L2/L3)：算法估值结论=高估 ⇒ 买入/增持 封顶为 持有（`valuation_capped` 在产端链首）。
+  "valuation_cap",
   "main_chain",
 ];
 
@@ -1489,6 +1505,8 @@ export function actionSourceLabelKey(source?: string | null): string | null {
       return "stockAnalysis.actionSourceBranchPick";
     case "risk_veto_downgrade":
       return "stockAnalysis.actionSourceRiskVeto";
+    case "tier_risk_veto":
+      return "stockAnalysis.actionSourceTierRiskVeto";
     case "bearish_veto_downgrade":
       return "stockAnalysis.actionSourceBearishVeto";
     case "sim_veto_downgrade":
@@ -1497,6 +1515,8 @@ export function actionSourceLabelKey(source?: string | null): string | null {
       return "stockAnalysis.actionSourceSanityCap";
     case "partial_low_confidence_cap":
       return "stockAnalysis.actionSourcePartialLowConf";
+    case "valuation_cap":
+      return "stockAnalysis.actionSourceValuationCap";
     case "main_chain":
       return "stockAnalysis.actionSourceMainChain";
     default:
@@ -1546,11 +1566,17 @@ export function readHorizonActions(decisionJson?: string | null): Array<{ key: s
 
 /** 主档 action 被**后置规则改写**的那几类来源（`branch_pick` / `main_chain` 之外的降级格）。 */
 const DOWNGRADE_ACTION_SOURCES: readonly string[] = [
+  // 档内风控否决（2026-10-10 B 裁定）：四档分支各自按**本档**风险节点否决自身 action。
+  // 位置最靠前（发生在分支内部），但它同样是「主档被后置规则降级」格的一员 ——
+  // 主档 action 已是否决后的终值，成句要说的「分支原名」取自 `originalAction`。
+  "tier_risk_veto",
   "risk_veto_downgrade",
   "bearish_veto_downgrade",
   "sim_veto_downgrade",
   "sanity_cap_downgrade",
   "partial_low_confidence_cap",
+  // v149(L3)：算法估值结论=高估 ⇒ 买入/增持 封顶为 持有（分支行仍留着原 action ⇒ 成句用得上）。
+  "valuation_cap",
 ];
 
 /** 主档来历（`stockAnalysis.decisionProvenance*` 两条模板的入参）。 */
@@ -1603,9 +1629,18 @@ export function readDecisionProvenance(
       horizon = snake;
       const raw = parsed.decisionsByHorizon ?? parsed.decisions_by_horizon;
       const row = raw && typeof raw === "object"
-        ? (raw as Record<string, { action?: unknown }>)[camel] ?? (raw as Record<string, { action?: unknown }>)[snake]
+        ? (raw as Record<string, { action?: unknown; originalAction?: unknown }>)[camel]
+          ?? (raw as Record<string, { action?: unknown; originalAction?: unknown }>)[snake]
         : undefined;
-      if (row && typeof row.action === "string" && row.action) { branchAction = row.action; }
+      // 2026-10-10（B 裁定）：逐档行的 `action` 已是**档内风控否决后**的终值，与主档一致 ⇒
+      //   成句「主档取自中期分支「X」，被…降为「Y」」里的 X 必须取 `originalAction`（否决前
+      //   的方向值）。否则 X 会等于 Y，成句退化成「…「观望」，被风控降为「观望」」。
+      //   缺席 `originalAction`（早于本版的记录 / 未否决）⇒ 退回 `action`（现状口径）。
+      if (row && typeof row.originalAction === "string" && row.originalAction) {
+        branchAction = row.originalAction;
+      } else if (row && typeof row.action === "string" && row.action) {
+        branchAction = row.action;
+      }
       break;
     }
   }
@@ -1618,4 +1653,146 @@ export function readDecisionProvenance(
     return { kind: "direct", actionSource, confidenceSource, horizon, branchAction };
   }
   return { kind: "label", actionSource, confidenceSource, horizon };
+}
+
+// ── 分析师报告多空计票（单一真相源） ──
+//
+// 2026-10-10 修复：同一份「逐报告 → 看多/看空/中性」计票逻辑此前在三处各写一份副本
+// （页面顶部 AnalystConsensusBar、分析师 tab 的 AnalystReportGrid、chat 紧凑版
+// CompactAnalystSummary），且副本已经漂移 —— 顶部条缺 VERDICT 分数 0-1 标度归一化、
+// 缺 stance-only 回退、缺裸 bull_score/bear_score 正则，连 tool_call 清洗都只剥标签
+// 不删内容 ⇒ 同一屏顶部「10 看多 10 看空」、下方「9 看多 11 看空」。
+// 此后三处一律走本模块，禁止再复制解析/计票/共识推导逻辑（AGENTS.md 禁区 12）。
+//
+// 三值/共识类型复用本文件既有的 `Sentiment` / `Consensus`（见「共识聚合」段），不另造。
+
+/** 多空计票结果（`StockConsensus` 去掉时间戳的计票子集）。 */
+export type AnalystSentimentTally = Pick<StockConsensus, "bullish" | "bearish" | "neutral" | "total">;
+
+/**
+ * 判决分数归一到百分制 —— 全站唯一的标度还原口径。
+ *
+ * 权威标度是提示词逐字声明的 `bull_score / bear_score / confidence: 0-100`
+ * （`agent_executor.rs` 四处 VERDICT 提醒语）。实测最近 400 条分析共 2846 个分数，
+ * 2835 个落在 >10 档 ⇒ 0-100 是真实形态；只有 ≤1 的小数（模型把 0-100 写成 0-1）需还原。
+ *
+ * ⚠ **不做**「≤10 就 ×10」那一族猜测：那会把声明值 7（=7%）编成 70%，并与
+ * `classifyAnalystReport` 的计票口径分叉（计票按声明值比 1.2 倍阈值）。
+ * 此前 `AnalystReportGrid` 表格列与 `AnalystReportCard` 的标签各有一份 ×10，
+ * 同一条报告在卡片上显示 70、在共识计票里按 7 算。
+ */
+export function normalizeVerdictScore(value: number): number {
+  return value > 1 ? value : value * 100;
+}
+
+/**
+ * 从报告中提取结构化多空分数（与 AnalystReportCard.tryParseVerdictFormat 同源）。
+ * 优先解析 `<!-- VERDICT: {bull_score, bear_score} -->` 格式；其次匹配正文裸 JSON 字段。
+ * 无任何结构化分数时返回 `null`，调用方应回退到 `classifySentiment`。
+ */
+export function extractBullBearScores(report: string): { bull: number; bear: number } | null {
+  // 1) 尝试 VERDICT JSON 格式（与 AnalystReportCard.tryParseVerdictFormat 一致）
+  const verdictIdx = report.indexOf("<!-- VERDICT:");
+  if (verdictIdx !== -1) {
+    try {
+      const jsonStr = report.slice(verdictIdx + "<!-- VERDICT:".length);
+      const jsonEnd = jsonStr.indexOf("-->");
+      if (jsonEnd !== -1) {
+        const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
+        const bull = meta.bull_score ?? meta.strength_score ?? null;
+        const bear = meta.bear_score ?? null;
+        if (typeof bull === "number" || typeof bear === "number") {
+          return {
+            bull: typeof bull === "number" ? normalizeVerdictScore(bull) : 0,
+            bear: typeof bear === "number" ? normalizeVerdictScore(bear) : 0,
+          };
+        }
+        // 有 stance/verdict 字段但没有分数 → 用 stance 判断
+        // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
+        //   原为内联正则 `/看多|买入|增持|做多|看涨|bull/`，与同文件表格「判断」列的
+        //   `/看多|bull|偏多|买入|增持|正面/` 值域不同 ⇒ 同一 verdict 两处结论可能相反。
+        const dir = classifyDirectionText(meta.verdict ?? meta.stance);
+        if (dir === "bull") { return { bull: 60, bear: 0 }; }
+        if (dir === "bear") { return { bull: 0, bear: 60 }; }
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 2) 尝试直接从文本正则匹配 bull_score/bear_score
+  try {
+    const bullMatch = report.match(/"bull_score"\s*:\s*(\d+(?:\.\d+)?)/);
+    const bearMatch = report.match(/"bear_score"\s*:\s*(\d+(?:\.\d+)?)/);
+    if (bullMatch || bearMatch) {
+      return {
+        bull: bullMatch ? parseFloat(bullMatch[1]) : 0,
+        bear: bearMatch ? parseFloat(bearMatch[1]) : 0,
+      };
+    }
+  } catch { /* ignore */ }
+
+  // 3) 无结构化数据 → 返回 null，调用方用 classifySentiment fallback
+  return null;
+}
+
+/**
+ * 单份**已清洗**分析师报告 → 多空三分类。
+ *
+ * 口径：结构化分数优先且需领先 20%（1.2 倍阈值，接近即中性）；无结构化分数时回退
+ * `classifySentiment`（VERDICT/JSON stance → 自由文本关键词）。
+ *
+ * 注意：传入前必须经 `cleanToolCallTags`（`@/lib/agentOutput`）清洗。本模块不能反向
+ * 依赖 agentOutput（它已依赖本模块），故清洗由调用侧统一完成。
+ */
+export function classifyAnalystReport(cleanedReport: string): Sentiment | null {
+  // 空产出（空串 / 纯空白）＝ 这个分析师没产出，**不是**「它投了中性」。返回 null 让
+  // 调用方跳过这一票 —— 记成中性会把「24 个槽位里 5 个没跑出来」显示成「24 份报告、
+  // 5 份中性」，与快速链 JEV 分支同一条裁定（未产出判定的维度不计票）。
+  if (cleanedReport.trim() === "") { return null; }
+  const scores = extractBullBearScores(cleanedReport);
+  if (scores) {
+    if (scores.bull > scores.bear * 1.2) { return "bullish"; }
+    if (scores.bear > scores.bull * 1.2) { return "bearish"; }
+    return "neutral"; // 分数接近 → 中性/分歧
+  }
+  return classifySentiment(cleanedReport);
+}
+
+/**
+ * 对多份**已清洗**分析师报告计票。
+ * 输入顺序不影响票型；调用侧负责 `Object.values(...).map(cleanToolCallTags)`。
+ *
+ * **空产出（空串 / 纯空白）不计票**：那是「这个分析师没产出」，不是「它投了中性」。
+ * 记成中性会让「24 个槽位里 5 个没跑出来」显示成「24 份报告、5 份中性」——
+ * 与快速链 JEV 分支同一条裁定。判据住在 `classifyAnalystReport` 的 null 契约里，
+ * 调用侧无需各自 filter（此前顶部条剔空、分歧卡不剔，两边 total 可以不等）。
+ */
+export function tallyAnalystSentiment(reports: Iterable<string>): AnalystSentimentTally {
+  let bullish = 0;
+  let bearish = 0;
+  let neutral = 0;
+  for (const cleanedReport of reports) {
+    const s = classifyAnalystReport(cleanedReport);
+    if (s === null) { continue; }
+    if (s === "bullish") { bullish++; }
+    else if (s === "bearish") { bearish++; }
+    else { neutral++; }
+  }
+  return { bullish, bearish, neutral, total: bullish + bearish + neutral };
+}
+
+/**
+ * 票型 → 共识标签：
+ *  - 一方占比 > 65% → 共识看多 / 共识看空
+ *  - 多空双方都有票且均未过半到 65% → 分歧
+ *  - 全部中性 / 单边极小 / 无票 → 中性
+ */
+export function deriveAnalystConsensus(tally: AnalystSentimentTally): Consensus {
+  const { bullish, bearish, total } = tally;
+  if (total === 0) { return "neutral"; }
+  const bullRatio = bullish / total;
+  const bearRatio = bearish / total;
+  if (bullRatio > 0.65) { return "bullish"; }
+  if (bearRatio > 0.65) { return "bearish"; }
+  if (bullRatio > 0 && bearRatio > 0) { return "divided"; }
+  return "neutral";
 }

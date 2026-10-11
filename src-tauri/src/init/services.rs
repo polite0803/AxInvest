@@ -2074,6 +2074,28 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
         state.work_engine.set_rag_callback(rag_callback).await;
     }
 
+    // 注入内建变量提供器（运行时 as-of 状态 → 工作流 agent 节点 prompt 的 `{{key}}` 变量）。
+    //
+    // 此前这条链**两端都是断的**：`AgentExecutor` / `prompt_template` 的文档写着「主 crate 在
+    // as-of 模式下通过 WorkEngine.set_builtin_vars_provider 注入」，但 `WorkEngine` 没有这个方法、
+    // 主 crate 也没有调用点，`as_of::data_freshness_description()` 同样零生产调用方 ⇒ 分析师
+    // 提示词里根本不知道自己处于回放。本次补齐引擎转发 + 本处注入。
+    //
+    // 提供器在**被调用时**读调用方的 task-local ⇒ 每个节点拿到的都是**本轮**截止日；这依赖各链
+    // 在 `RunOptions.node_task_scope` 上接线（主分析链、趋势智选链均已接；未接的链这里读到 live）。
+    //
+    // ⚠ 键清单以 `BUILTIN_VAR_KEYS` 为唯一权威（门锁 实现=清单、禁止手抄第二份、注册调用点存在）。
+    //   消费面现状：`{{as_of_date}}` 被两个事件触发的种子模板引用（仓位规划助手 / 自动止损复查，
+    //   见 `stock_analysis_setup/mod.rs`）⇒ 注册后这两个槽在 live 与回放都有兜底值；
+    //   `data_freshness` / `is_replay` / `data_scope` 当前**零模板引用** ⇒ 门逐条打印，避免
+    //   「线接上了」被读成「效果生效了」。往提示词里加占位符属提示词裁定，不在本批顺手做。
+    //   注入形态是 **fallback**（`agent_executor.rs`：调用方已给同名键时不覆盖）⇒ 不改现网口径。
+    {
+        let provider: axagent_rt_workflow::work_engine::BuiltinVarsProvider =
+            Box::new(asof_builtin_vars);
+        state.work_engine.set_builtin_vars_provider(provider).await;
+    }
+
     // 注入实体图谱提供者（Graph RAG 阶段 4）。
     //
     // 该能力此前**永不执行**：`rag.rs` 调用 `RAGPipeline::new` 时第 4 参恒为 `None`，
@@ -2103,6 +2125,28 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
     // 任务可通过 CronDeliveryConfig 把执行结果推送到 webhook / 文件 / 通知渠道。
     let delivery_sink: std::sync::Arc<dyn axagent_harness::cron_delivery::CronDeliverySink> =
         create_cron_delivery_sink(state);
+    /// 定时任务必须**显式声明自己的模式**，且只能用 **task_local**、不能用进程级压栈。
+    ///
+    /// 这些分支从不接 `as_of_date`，而 `current_as_of()` 在 task_local 不可见时回落进程级
+    /// 全局作用域栈 ⇒ 若恰逢别的会话在跑回放，到点的定时任务会静默按**那个截止日**取数，
+    /// 并把截断后的产物落进实盘表（2026-09-23 事故的镜像形态）。
+    ///
+    /// ⚠ 为什么不能改用 `enter_global_asof(None)`：全局栈是「最后压入者赢」，定时任务一压
+    ///   `None`，同窗口里的时间旅行批次（`time_travel_batch.rs` 明写「as_of 栈是进程级的」，
+    ///   其深层取数靠该栈兜底）就会反过来读成 live —— 那是用一种污染换另一种污染。
+    ///   task_local 的显式 `None` 只对本任务生效：既屏蔽全局残留，也不影响并发中的别人。
+    fn cron_live<F>(fut: F) -> impl std::future::Future<Output = F::Output> + Send
+    where
+        F: std::future::Future + Send,
+    {
+        // 边界说明（写成普通行注释，不占 doc 面）：这只钉住**本任务**。任务内部再
+        // `tokio::spawn` / `JoinSet::spawn` 出去的子任务读不到 task_local，仍会回落全局栈 ——
+        // 那条路得靠调用方给 `RunOptions.node_task_scope` 把模式带进节点任务（主分析链与
+        // 趋势智选链已接，见 `check-asof-node-scope.mjs` R1）。本包裹保证的是「捕获点落在本任务内」
+        // 的那批调用一定拿到 live，不是整棵任务树免疫。
+        axagent_astock_data::as_of::AS_OF.scope(None, fut)
+    }
+
     let mut executor = CronExecutor::new();
     executor.set_handler(move |job| {
         // 知识源定时刷新：task_type = knowledge_source_fetch_all
@@ -2129,6 +2173,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     error: (errors > 0).then(|| format!("{errors} 个知识源抓取失败")).or(None),
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
+                    skipped: false,
                 };
                 tracing::info!(
                     "[CronScheduler] 知识源刷新任务 '{}' 完成: {:?}",
@@ -2191,6 +2236,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         error: None,
                         duration_ms: 0,
                         executed_at: started,
+                        skipped: true,
                     };
                     tokio::spawn(async move {
                         store.record_run(&job_id, result).await;
@@ -2235,6 +2281,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                         - started)
                                         as u64,
                                     executed_at: started,
+                                    skipped: false,
                                 },
                                 has_hits,
                             )
@@ -2253,6 +2300,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                         - started)
                                         as u64,
                                     executed_at: started,
+                                    skipped: false,
                                 },
                                 true,
                             )
@@ -2300,7 +2348,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             let job_name = job.name.clone();
             let recurring = job.recurring;
             let prompt = job.prompt.clone();
-            tokio::task::spawn(async move {
+            tokio::task::spawn(cron_live(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let elapsed =
                     || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
@@ -2324,6 +2372,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             error: Some(e),
                             duration_ms: elapsed(),
                             executed_at: started,
+                            skipped: false,
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
@@ -2465,6 +2514,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     error: None,
                     duration_ms: elapsed(),
                     executed_at: started,
+                    skipped: false,
                 };
                 // 无 pick → 不投递（success 但静默），避免定时轰炸通知渠道
                 let sink_ref = if picks.is_empty() { None } else { Some(sink.as_ref()) };
@@ -2482,7 +2532,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         );
                     }
                 }
-            });
+            }));
             return;
         }
         // 自选股定时扫描：task_type = watchlist-scan（前端 ScheduledAnalysisTab 创建/管理）。
@@ -2497,7 +2547,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             let job_id = job.id.clone();
             let job_name = job.name.clone();
             let recurring = job.recurring;
-            tokio::task::spawn(async move {
+            tokio::task::spawn(cron_live(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 use sea_orm::EntityTrait;
                 let items = axagent_entities::watchlist_items::Entity::find()
@@ -2513,6 +2563,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
                             as u64,
                         executed_at: started,
+                        skipped: false,
                     };
                     store.record_run(&job_id, result).await;
                     if !recurring {
@@ -2576,6 +2627,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     error: first_err,
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
+                    skipped: false,
                 };
                 store.record_run(&job_id, result).await;
                 if !recurring {
@@ -2592,7 +2644,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         );
                     }
                 }
-            });
+            }));
             return;
         }
         // 候选池逐只分析：task_type = pool-scan
@@ -2613,7 +2665,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             let job_name = job.name.clone();
             let recurring = job.recurring;
             let prompt = job.prompt.clone();
-            tokio::task::spawn(async move {
+            tokio::task::spawn(cron_live(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
 
@@ -2632,6 +2684,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             error: Some(e),
                             duration_ms: elapsed(),
                             executed_at: started,
+                            skipped: false,
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
@@ -2674,6 +2727,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 error: outcome.first_error.clone(),
                                 duration_ms: elapsed(),
                                 executed_at: started,
+                                skipped: false,
                             }
                         },
                         Err(e) => {
@@ -2684,6 +2738,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 error: Some(e),
                                 duration_ms: elapsed(),
                                 executed_at: started,
+                                skipped: false,
                             }
                         },
                     };
@@ -2702,7 +2757,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         );
                     }
                 }
-            });
+            }));
             return;
         }
         // 反思：task_type = batch-reflection | validate-decisions
@@ -2736,7 +2791,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             let recurring = job.recurring;
             let task_type = job.task_type.clone().unwrap_or_default();
             let prompt = job.prompt.clone();
-            tokio::task::spawn(async move {
+            tokio::task::spawn(cron_live(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
 
@@ -2767,6 +2822,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             error: Some(e),
                             duration_ms: elapsed(),
                             executed_at: started,
+                            skipped: false,
                         };
                         store.record_run(&job_id, result).await;
                         if !recurring {
@@ -2799,6 +2855,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                     max_count,
                     Some(&trajectory_storage),
                     Some(&filter),
+                    None,
                 )
                 .await;
 
@@ -2814,6 +2871,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             error: None,
                             duration_ms: elapsed(),
                             executed_at: started,
+                            skipped: false,
                         }
                     },
                     Err(e) => {
@@ -2827,6 +2885,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             error: Some(e),
                             duration_ms: elapsed(),
                             executed_at: started,
+                            skipped: false,
                         }
                     },
                 };
@@ -2845,7 +2904,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         );
                     }
                 }
-            });
+            }));
             return;
         }
         // 决策回测（B3 自动触发）：task_type = decision-backtest
@@ -2876,7 +2935,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             let job_name = job.name.clone();
             let recurring = job.recurring;
             let prompt = job.prompt.clone();
-            tokio::task::spawn(async move {
+            tokio::task::spawn(cron_live(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let elapsed = || (axagent_runtime_core::cron_job::now_millis() - started) as u64;
 
@@ -2897,6 +2956,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                                 error: Some(e),
                                 duration_ms: elapsed(),
                                 executed_at: started,
+                                skipped: false,
                             };
                             store.record_run(&job_id, result).await;
                             if !recurring {
@@ -2969,6 +3029,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             error: None,
                             duration_ms: elapsed(),
                             executed_at: started,
+                            skipped: false,
                         }
                     },
                     Err(e) => {
@@ -2982,6 +3043,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             error: Some(e),
                             duration_ms: elapsed(),
                             executed_at: started,
+                            skipped: false,
                         }
                     },
                 };
@@ -3001,7 +3063,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         );
                     }
                 }
-            });
+            }));
             return;
         }
         if let Some(ref wf_id) = job.workflow_id {
@@ -3011,7 +3073,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
             let job_id = job.id.clone();
             let job_name = job.name.clone();
             let recurring = job.recurring;
-            tokio::task::spawn(async move {
+            tokio::task::spawn(cron_live(async move {
                 let started = axagent_runtime_core::cron_job::now_millis();
                 let opts = axagent_runtime::work_engine::RunOptions::default();
                 let result = match engine.run_workflow(&wf_id, opts).await {
@@ -3028,6 +3090,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
                                 as u64,
                             executed_at: started,
+                            skipped: false,
                         }
                     },
                     Err(e) => {
@@ -3043,6 +3106,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                             duration_ms: (axagent_runtime_core::cron_job::now_millis() - started)
                                 as u64,
                             executed_at: started,
+                            skipped: false,
                         }
                     },
                 };
@@ -3061,7 +3125,7 @@ async fn start_cron_scheduler(app: &tauri::AppHandle, state: &AppState) {
                         );
                     }
                 }
-            });
+            }));
         } else {
             tracing::info!(
                 "[CronScheduler] 触发任务 '{}': {}",
@@ -3538,19 +3602,10 @@ fn start_realtime_quote_watcher(app: &tauri::AppHandle, state: &AppState) {
         let app = app.clone();
         std::sync::Arc::new(move |event: axagent_astock_data::realtime_quote::QuoteChangeEvent| {
             let app = app.clone();
-            // QuoteChangeEvent 未实现 Serialize，手动构造 camelCase payload
-            let payload = serde_json::json!({
-                "stockCode": event.stock_code,
-                "changePct": event.change_pct,
-                "trigger": event.trigger,
-                "price": event.current.price,
-                "name": event.current.name,
-                "volume": event.current.volume,
-                "turnoverRate": event.current.turnover_rate,
-                "timestamp": event.current.timestamp,
-            });
+            // payload 即 `QuoteChangeEvent` 自身（`rename_all = "camelCase"`）——
+            // 这里不再手写 `json!` 摊平字段，那份副本与前端消费端的漂移是整页崩的根因。
             Box::pin(async move {
-                let _ = app.emit(IpcEventName::StockQuoteUpdate.as_str(), payload);
+                let _ = app.emit(IpcEventName::StockQuoteUpdate.as_str(), &event);
             })
         })
     };
@@ -3591,6 +3646,7 @@ fn start_batch_reflection(state: &AppState) {
                 Some(&trajectory_storage),
                 // 兜底服务不限定周期档位：处理全部 pending。
                 // 「按 4 周期分档」由 cron 的 batch-reflection 任务各自指定 filter。
+                None,
                 None,
             )
             .await
@@ -3815,4 +3871,86 @@ fn start_market_close_sweep(state: &AppState) {
         }
     });
     tracing::info!("[startup] 全市场收盘快照采集已启动（交易日 15:00 后，每小时幂等 tick）");
+}
+
+/// 内建变量的**唯一权威清单**。
+///
+/// 为什么要一个常量而不是各处手写：`AgentExecutor` 与 `prompt_template` 的文档曾各自抄了一份
+/// 「注入 data_freshness / as_of_date / is_replay / data_scope」，而**没有任何一处真的注入过** ⇒
+/// 三份手抄一起说谎。现在文档只指回本常量，`scripts/check-builtin-vars-keys.mjs` 锁
+/// ① 实现里 `vars.insert("…")` 的键集 == 本清单，② 除本文件外全仓不得再手抄第二份清单。
+// Rust 侧不直接读取本常量：它是上述门禁脚本的唯一契约锚点（脚本按文本解析），
+// 故对编译器而言是「死代码」，显式 allow 并保留单一事实源。
+#[allow(dead_code)]
+pub(crate) const BUILTIN_VAR_KEYS: [&str; 4] =
+    ["data_freshness", "as_of_date", "is_replay", "data_scope"];
+
+/// 工作流 agent 节点的内建变量：运行时 as-of 状态 → prompt 的 `{{key}}` 占位符。
+///
+/// 键集以 [`BUILTIN_VAR_KEYS`] 为准（门锁实现与清单一致）。
+///
+/// 取值判据是**调用时刻**的 `current_as_of()`，不是注入时的快照 ⇒ 每个节点拿到本轮截止日
+/// （前提是那条链挂了 `RunOptions.node_task_scope`；没挂的链这里读到 live）。
+/// live 时 `as_of_date` 给**空串**而不是今天 —— 把「没有锚点」伪装成「锚在当天」正是
+/// 回放/实盘读不出差别的那类缺陷。
+pub(crate) fn asof_builtin_vars() -> std::collections::HashMap<String, String> {
+    use axagent_astock_data::as_of::{self, AsOfDataScope};
+    let ctx = as_of::current_as_of();
+    let mut vars = std::collections::HashMap::new();
+    vars.insert("data_freshness".to_string(), as_of::data_freshness_description());
+    vars.insert("as_of_date".to_string(), ctx.map(|c| c.as_string()).unwrap_or_default());
+    vars.insert("is_replay".to_string(), if ctx.is_some() { "true" } else { "false" }.to_string());
+    vars.insert(
+        "data_scope".to_string(),
+        match ctx {
+            None => "live",
+            Some(c) => match c.data_scope {
+                AsOfDataScope::All => "all",
+                AsOfDataScope::Structured => "structured",
+            },
+        }
+        .to_string(),
+    );
+    vars
+}
+
+#[cfg(test)]
+mod tests {
+    use super::asof_builtin_vars;
+    use axagent_astock_data::as_of::{AS_OF, AsOfContext, AsOfDataScope, AsOfSource};
+    use chrono::NaiveDate;
+
+    /// 三种模式各取一次读数。
+    ///
+    /// 全程用 `AS_OF.scope(...)` 而**不需要** serial 化：task_local 一旦可见就以它为准
+    /// （`Ok(None)` = 显式 live，会屏蔽进程级全局回退），因此并行跑的主 crate 测试里
+    /// 别人留在全局栈上的作用域进不了这些断言。
+    #[tokio::test]
+    async fn builtin_vars_cover_three_modes() {
+        let date = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
+
+        let live = AS_OF.scope(None, async { asof_builtin_vars() }).await;
+        assert_eq!(live.get("is_replay").map(String::as_str), Some("false"));
+        assert_eq!(live.get("as_of_date"), Some(&String::new()), "live 不得把日期填成今天");
+        assert_eq!(live.get("data_scope").map(String::as_str), Some("live"));
+        assert!(live.get("data_freshness").unwrap().contains("实时"), "{live:?}");
+
+        let ctx = AsOfContext::new(date, AsOfSource::UserReplay).unwrap();
+        let all = AS_OF.scope(Some(ctx), async { asof_builtin_vars() }).await;
+        assert_eq!(all.get("is_replay").map(String::as_str), Some("true"));
+        assert_eq!(all.get("as_of_date").map(String::as_str), Some("2026-06-01"));
+        assert_eq!(all.get("data_scope").map(String::as_str), Some("all"));
+
+        let structured = AS_OF
+            .scope(Some(ctx.with_data_scope(AsOfDataScope::Structured)), async {
+                asof_builtin_vars()
+            })
+            .await;
+        assert_eq!(structured.get("data_scope").map(String::as_str), Some("structured"));
+        // 四个键缺一不可（文档声明的就是这四个）
+        for k in ["data_freshness", "as_of_date", "is_replay", "data_scope"] {
+            assert!(all.contains_key(k), "缺键 {k}：{all:?}");
+            assert!(live.contains_key(k), "live 缺键 {k}：{live:?}");
+        }
+    }
 }

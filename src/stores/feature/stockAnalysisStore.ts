@@ -262,7 +262,12 @@ function parseWorkflowResults(results: Record<string, unknown>) {
       }
       const viKey = valueSlotKeyOf(stepId);
       valueAssessments[viKey] = content;
-      analystReports[viKey] = content;
+      // 落 analystReports 前补重构：value-investor 在 strict_mode 下产出的是
+      // `{"report":…,"verdict":{…}}` 裸 JSON，不重构 ⇒ Grid 卡与共识计票都没有
+      // `<!-- VERDICT:` 机读通道，只能靠正文关键词兜底（2026-10-10：002475 长线估值
+      // 那条 verdict 写「观望」却被计成看多票）。估值面板走 valueAssessments 的原始
+      // JSON 结构，故**只**重构 analystReports 这一份。
+      analystReports[viKey] = reconstructVerdictTag(content);
     } else if (stepId === "rule-check") {
       ruleCheckResults[stepId] = output;
     } else if (stepId === "data-quality") {
@@ -1387,6 +1392,39 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
       mode: useTimeAnchorStore.getState().mode,
       asOfDate: useTimeAnchorStore.getState().asOfDate,
     });
+    // ── LLM 决策兜底（单点）──
+    // 公式侧（portfolio-mgr）产出缺失时，用 llm_decision_json 填充 decision。
+    // 三个入口共用这一份实现：① decisionJson 解析成空壳；② decisionJson 解析抛异常；
+    // ③ decisionJson 整列为 NULL/空串（旧记录常见，公式侧从未落库）。
+    // 原实现只把兜底挂在 ① 上 ⇒ ②③ 明明有可用 LLM 决策也不采用，UI 无谓显示「决策信息缺失」。
+    const fillDecisionFromLlm = () => {
+      if (!record.llmDecisionJson) { return; }
+      const llmRaw = parseJsonLoose(record.llmDecisionJson);
+      const llmDecision = llmRaw ? normalizeDecision(llmRaw) : null;
+      if (!llmDecision || !llmRaw) { return; }
+      // 二次兜底：trader 节点按设计只输出价格目标（trader.md 明确定义 schema
+      // 仅含 currentPrice/targetPrice/stopLoss/timeHorizon/expectedHoldingDays/
+      // confidence/reasoning），不含 action/positionPct。公式侧 portfolio-mgr
+      // 又返回空壳时，action 会被 normalizeDecision 退化为默认 UNCERTAIN，
+      // 导致看空股被误显为"不确定"。trader.md 第 114 行保证输出 verdict
+      // （看多|看空|中性），第 101 行保证 reasoning 以 `方向:…` 开头，
+      // 这里按「结构化 verdict → reasoning 显式方向标记」推导 action。
+      // ⚠️ 只用显式标记推导（`parseDirectionFromText`），不做全文关键词扫描 ——
+      // 全文扫描会被句中的风险词/否定词反转方向（如「风险点：大股东减持」）。
+      // positionPct 仍由公式侧计算，此处无数据则保持 0（未知）。
+      if (llmDecision.action === StockAction.UNCERTAIN || !llmDecision.action) {
+        const derived = deriveActionFromLlmDecision(llmRaw);
+        if (derived) {
+          llmDecision.action = derived;
+        }
+      }
+      console.warn(
+        "[StockAnalysis] loadAnalysis 公式侧决策缺失，回退使用 llmDecisionJson 填充 decision",
+        { analysisId: record.id, derivedAction: llmDecision.action },
+      );
+      set({ decision: llmDecision });
+    };
+
     if (record.decisionJson) {
       try {
         // 宽松解析：decisionJson 也可能被 ```json 代码块包裹（与 llmDecisionJson 同源）。
@@ -1420,40 +1458,17 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             "[StockAnalysis] loadAnalysis decisionJson 全零空壳，跳过 set:",
             { analysisId: record.id, keys: Object.keys(raw) },
           );
-          // 兜底：formula 决策为空壳，但 llmDecisionJson 有真实决策时，
-          // 用 LLM 决策填充 store，避免 UI 永久显示"决策缺失"（方案 D 双向并存，
-          // 公式侧缺失时以 LLM 侧为准渲染）。
-          if (record.llmDecisionJson) {
-            const llmRaw = parseJsonLoose(record.llmDecisionJson);
-            const llmDecision = llmRaw ? normalizeDecision(llmRaw) : null;
-            if (llmDecision && llmRaw) {
-              // 二次兜底：trader 节点按设计只输出价格目标（trader.md 明确定义 schema
-              // 仅含 currentPrice/targetPrice/stopLoss/timeHorizon/expectedHoldingDays/
-              // confidence/reasoning），不含 action/positionPct。公式侧 portfolio-mgr
-              // 又返回空壳时，action 会被 normalizeDecision 退化为默认 UNCERTAIN，
-              // 导致看空股被误显为"不确定"。trader.md 第 114 行保证输出 verdict
-              // （看多|看空|中性），第 101 行保证 reasoning 以 `方向:…` 开头，
-              // 这里按「结构化 verdict → reasoning 显式方向标记」推导 action。
-              // ⚠️ 只用显式标记推导（`parseDirectionFromText`），不做全文关键词扫描 ——
-              // 全文扫描会被句中的风险词/否定词反转方向（如「风险点：大股东减持」）。
-              // positionPct 仍由公式侧计算，此处无数据则保持 0（未知）。
-              if (llmDecision.action === StockAction.UNCERTAIN || !llmDecision.action) {
-                const derived = deriveActionFromLlmDecision(llmRaw);
-                if (derived) {
-                  llmDecision.action = derived;
-                }
-              }
-              console.warn(
-                "[StockAnalysis] loadAnalysis decisionJson 空壳，回退使用 llmDecisionJson 填充 decision",
-                { analysisId: record.id, derivedAction: llmDecision.action },
-              );
-              set({ decision: llmDecision });
-            }
-          }
+          fillDecisionFromLlm();
         }
       } catch (e) {
         console.error("[StockAnalysis] Failed to parse decision JSON:", e);
+        // decisionJson 解析抛异常（如截断的 JSON）同样要走兜底，而不是停在「决策缺失」。
+        fillDecisionFromLlm();
       }
+    } else {
+      // decisionJson 整列为 NULL/空串：旧记录公式侧从未落库（建行时该列即空），
+      // 但 llm_decision_json 里可能存着完整决策 ⇒ 必须同样走兜底。
+      fillDecisionFromLlm();
     }
     // 方案 D 双向并存: 解析 LLM 决策 JSON 并计算一致性分数
     let llmDecisionJson: string | null = null;
@@ -1561,7 +1576,9 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
             if (vk === "assessment" || vk.startsWith(`assessment${ANALYST_TIER_SEP}`)) {
               const viKey = valueSlotKeyOf(vk);
               values[viKey] = valueContent;
-              reports[viKey] = valueContent;
+              // 与 parseWorkflowResults 的 value 分支同策：只有落 analystReports 的那份
+              // 补重构（Grid 卡与共识计票读它），估值面板仍读原始 JSON。
+              reports[viKey] = reconstructVerdictTag(valueContent);
             }
           } else if (key.startsWith("rule_check.")) {
             ruleChecks[key.slice("rule_check.".length)] = String(value);
@@ -2293,7 +2310,8 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         //   裸 base（历史回放）两者都落 `value-investor`，与原行为一致。
         const viKey = valueSlotKeyOf(nodeId);
         set({
-          analystReports: { ...s.analystReports, [viKey]: text },
+          // 实时路径与 parseWorkflowResults / loadAnalysis 同策：Grid 那份补重构，面板那份留原始 JSON。
+          analystReports: { ...s.analystReports, [viKey]: reconstructVerdictTag(text) },
           valueAssessments: { ...s.valueAssessments, [viKey]: text },
         });
       } else if ((analystBaseOf(nodeId) ?? nodeId) === "value-verify") {
@@ -2314,7 +2332,7 @@ export const useStockAnalysisStore = create<StockAnalysisState>((set, get) => ({
         set({
           valueAssessments: { ...s.valueAssessments, [viKey]: content },
           // Grid 卡读的是 analystReports ⇒ 校验后的值必须同步覆盖，否则卡上仍是 LLM 原值
-          analystReports: { ...s.analystReports, [viKey]: content },
+          analystReports: { ...s.analystReports, [viKey]: reconstructVerdictTag(content) },
         });
       } else if (nodeId === "data-quality") {
         // V41 修复: data-quality 是 CodeNode + Rhai，原始 output 形如

@@ -867,6 +867,7 @@ async fn run() -> Result<(), String> {
                     // filter = None ⇒ 全周期档位、且不要求 hindsight 已到期。
                     // 重跑场景下 hindsight 本就已过期，缩不缩口径结果一致，故不必缩小。
                     None,
+                    None,
                 )
                 .await
                 {

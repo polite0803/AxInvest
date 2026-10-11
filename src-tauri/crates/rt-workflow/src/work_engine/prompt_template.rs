@@ -11,8 +11,8 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 /// 内建变量提供器：返回运行时可注入的 `{{key}}` 模板变量。
-/// 主 crate 在 as-of 模式下通过 `WorkEngine.set_builtin_vars_provider` 注入
-/// `data_freshness` / `as_of_date` / `is_replay` / `data_scope` 等跨领域通用状态。
+/// 由主 crate 启动时经 `WorkEngine::set_builtin_vars_provider` 注册一次；
+/// 键清单以主 crate `init/services.rs::BUILTIN_VAR_KEYS` 为唯一权威（本处不抄清单）。
 pub type BuiltinVarsProvider = Box<dyn Fn() -> HashMap<String, String> + Send + Sync>;
 
 /// 模板中的一段：要么是静态文本，要么是需要填充的变量占位符。

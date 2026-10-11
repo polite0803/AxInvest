@@ -281,6 +281,15 @@ if (canRunFrontend) {
   step("SQL 方言守卫（SQLite 专有语法）自检", "node scripts/check-sql-dialect.mjs --selftest");
   step("SQL 方言守卫（SQLite 专有语法）", "node scripts/check-sql-dialect.mjs");
 
+  // ── 主题前景 token 门（2026-10-09 补）──
+  // 为什么需要：`21th-dark` 档的 `--accent` / antd `colorPrimary` 都是**纯白**，而写代码的
+  //   人一律把「压在 accent 上的文字」写成 `white` ⇒ 白底白字，且**不报任何错**（用户侧表现
+  //   为两个空白块 + 一颗看不见字的按钮）。这类缺陷没有运行期症状，只有形态可查。
+  // 自检锁三件：三元分支与折行形态都要抓到（rustfmt/dprint 折行会让按行判据失效）、
+  //   注释里的示例不得算违规、`color: var(--accent)`（accent 当文字色）不得算违规。
+  step("主题前景 token（--accent 上禁写死白）自检", "node scripts/check-accent-foreground.mjs --selftest");
+  step("主题前景 token（--accent 上禁写死白）", "node scripts/check-accent-foreground.mjs");
+
   // ── i18n 三道互补门禁（2026-09-14 补：此前本地镜像**一条都没有**）──
   // 为什么必须三道都在：它们查的是**互不重叠**的东西，缺一条就有一种逃逸路径 ——
   //   ① 硬编码文案：代码里直接写死中文字面量（值层查不到，因为压根没进 locale）
@@ -337,6 +346,19 @@ if (canRunRust && !quick) {
   //   每次运行都打印，失效即红）；R3 --selftest 用合成文本证明识别器真读 match 臂。
   step("每日快照白名单一致性自检（正负对照）", "node scripts/check-snapshot-whitelist.mjs --selftest");
   step("每日快照白名单一致性（申报 NHS ⇒ 必须归档）", "node scripts/check-snapshot-whitelist.mjs");
+
+  // ── as-of（回放）接线一致门（2026-10-11）──
+  // 抓到过的活断链：趋势智选命令收下并解析了 `as_of_date`，却只用裸 `AS_OF.scope` 包住
+  //   `run_workflow`；引擎为每个节点单独 spawn，task_local 不跨 spawn ⇒ 节点内读不到截止日，
+  //   **回放静默跑 live**，而 UI 上看不出来。主分析链 2026-10-03（P1-8）已挂
+  //   `RunOptions.node_task_scope`，智选链没跟上收编 —— 同型断裂会在下一条链复发。
+  // 门形：R1 带 as-of 进引擎的段必须有 node_task_scope + 回灌 "asOfDate"；
+  //   R2 写进实盘状态（reco_picks 落库 / 全局 serenity 种子）的调用点必须有 as-of 守卫；
+  //   R3 前端面板绑本轮 payload 而非全局时间锚点（T11 反形态）；--selftest 六条负控 + 命中面下限。
+  step("as-of 接线一致自检（正负对照）", "node scripts/check-asof-node-scope.mjs --selftest");
+  step("as-of 接线一致（节点作用域钩子 / 落库守卫 / 面板本轮口径）", "node scripts/check-asof-node-scope.mjs");
+  step("内建变量清单一致自检（正负对照）", "node scripts/check-builtin-vars-keys.mjs --selftest");
+  step("内建变量清单一致（清单=实现、无手抄、注册点在位）", "node scripts/check-builtin-vars-keys.mjs");
 
   // ── 跨行聚合入口的按代筛样登记门（#31，2026-10-05）──
   // 四类分列：统计/注入该筛（断言引用起算代常量）、呈现/单条**不该筛**（断言不引用）、

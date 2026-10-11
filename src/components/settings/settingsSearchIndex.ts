@@ -1053,18 +1053,6 @@ export const SETTINGS_SEARCH_INDEX: SettingsSearchEntry[] = [
     ],
   },
   {
-    section: "cron",
-    group: "data",
-    keywords: [
-      "cron",
-      i18n.t("settingsSearch.cron.schedule"),
-      i18n.t("settingsSearch.cron.expression"),
-      "expression",
-      i18n.t("settingsSearch.cron.periodicTask"),
-      i18n.t("settingsSearch.cron.scheduledTask"),
-    ],
-  },
-  {
     section: "notificationCenter",
     group: "data",
     keywords: [

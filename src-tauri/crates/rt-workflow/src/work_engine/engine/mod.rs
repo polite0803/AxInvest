@@ -67,7 +67,9 @@ use super::executors::{
     SwitchExecutor, ToolCallback,
 };
 use super::node_executor_trait::{NodeError, NodeExecutorTrait, NodeOutput, node_type_name};
-use super::prompt_template::{CompiledPrompt, DomainConstraintsFn, compile_prompt};
+use super::prompt_template::{
+    BuiltinVarsProvider, CompiledPrompt, DomainConstraintsFn, compile_prompt,
+};
 
 thread_local! {
     /// 子工作流执行用 thread_local runtime 池（每个 tokio blocking 线程一个实例）。
@@ -886,6 +888,24 @@ impl WorkEngine {
     /// 设置 RAG 知识源检索回调（供 Agent 节点从知识库/记忆/Wiki 检索上下文）
     pub async fn set_rag_callback(&self, cb: RagCallback) {
         *self.rag_callback.lock().await = Some(cb);
+    }
+
+    /// 注册内建变量提供器（运行时状态 → agent 节点 prompt 的 `{{key}}` 变量）。
+    ///
+    /// 与 `set_rag_callback` / `set_domain_constraints` 的差别：那两个槽要在每次
+    /// `run_workflow` 边界重新转发（它们支持运行期热更新与清除），而本提供器**一次注入
+    /// 长期有效** —— `agent_executor` 是引擎持有的稳定单例（见字段注释「禁止再在外部通过
+    /// dispatcher.register 重新注册」），且提供器自身是在**被调用时**读调用方的 task-local，
+    /// 因此每个节点拿到的都是**本轮**的值，不存在快照失效的问题。
+    ///
+    /// ⚠ 「本轮」成立的前提是调用方挂了 [`RunOptions::node_task_scope`]：引擎为每个节点单独
+    /// `JoinSet::spawn`，而 `tokio::task_local` 不跨 spawn —— 没挂钩子的链里，节点读到的是
+    /// live（2026-10-11 趋势智选链就是这么把回放取数跑成实时的，见
+    /// `tests/node_task_scope_asof_propagation.rs`）。
+    ///
+    /// [`RunOptions::node_task_scope`]: crate::work_engine::RunOptions::node_task_scope
+    pub async fn set_builtin_vars_provider(&self, provider: BuiltinVarsProvider) {
+        self.agent_executor.set_builtin_vars_provider(provider);
     }
 
     /// 注册领域约束注入回调。

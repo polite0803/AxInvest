@@ -1,4 +1,5 @@
 import { analystNodeId } from "@/lib/stock-analysis-utils";
+import { StockAction } from "@/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { invokeMock, listenMock, unlistenMock } = vi.hoisted(() => ({
@@ -288,6 +289,61 @@ describe("stockAnalysisStore - feature coverage", () => {
       setupLoadAnalysisMock({ action: "HOLD" });
       await useStockAnalysisStore.getState().loadAnalysis("an-1");
       expect(useStockAnalysisStore.getState().decision?.action).toBe("HOLD");
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // 2b. LLM 侧决策兜底
+  //     旧记录（如 600036 / 2026-07-25）公式侧从未落库（decision_json = NULL），
+  //     但 llm_decision_json 里有完整决策。原实现只把兜底挂在「decisionJson 非空
+  //     但解析成空壳」这一支 ⇒ 这类记录即使 LLM 侧可用也显示「决策信息缺失」。
+  // ────────────────────────────────────────────────────────────
+  describe("LLM 决策兜底 - decisionJson 缺失/解析异常时也应回退 llmDecisionJson", () => {
+    // 真实形态（取自 llm_decision_json）：trader 只输出价格目标 + verdict，
+    // 不含 action ⇒ 需靠 verdict 二次推导。
+    const LLM_DECISION = JSON.stringify({
+      verdict: "看空",
+      currentPrice: 25.03,
+      targetPrice: 23.5,
+      stopLoss: 26.1,
+      timeHorizon: "short",
+      expectedHoldingDays: 5,
+      confidence: 75,
+      reasoning: "方向:看空，技术面破位。",
+    });
+
+    const mockRecord = (decisionJson: string | null, llmDecisionJson: string | null) => {
+      invokeMock.mockResolvedValueOnce({
+        id: "an-1",
+        stockCode: "601698",
+        stockName: "中国卫通",
+        decisionJson,
+        llmDecisionJson,
+        blackboardSnapshot: null,
+      });
+    };
+
+    it("decisionJson 为 NULL（公式侧未落库）→ 用 llmDecisionJson 填充 decision", async () => {
+      mockRecord(null, LLM_DECISION);
+      await useStockAnalysisStore.getState().loadAnalysis("an-1");
+      const d = useStockAnalysisStore.getState().decision;
+      expect(d).not.toBeNull();
+      expect(d?.confidence).toBe(75);
+      expect(d?.targetPrice).toBe(23.5);
+      // verdict「看空」经二次兜底降维为 SELL，而不是停在 UNCERTAIN
+      expect(d?.action).toBe(StockAction.SELL);
+    });
+
+    it("decisionJson 解析抛异常（截断 JSON）→ 同样回退 llmDecisionJson", async () => {
+      mockRecord('{"node_id":"end-output","output":', LLM_DECISION);
+      await useStockAnalysisStore.getState().loadAnalysis("an-1");
+      expect(useStockAnalysisStore.getState().decision?.confidence).toBe(75);
+    });
+
+    it("负控：两侧都没有 → decision 保持 null（占位卡仍应出现）", async () => {
+      mockRecord(null, null);
+      await useStockAnalysisStore.getState().loadAnalysis("an-1");
+      expect(useStockAnalysisStore.getState().decision).toBeNull();
     });
   });
 

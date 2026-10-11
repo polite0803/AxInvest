@@ -869,7 +869,9 @@ fn asof_exempted_dim_without_markers_says_replay_not_false_gap() {
 #[test]
 fn direction_conflict_no_longer_penalizes_tool_credibility() {
     // R9a(2026-09-26)：severe 冲突（两边各 2 个 conf60 ⇒ 加权和 120≥100）是
-    // 辩论架构的设计常态，只提示不扣分。判据：tc == avg_conf == 60。
+    // 辩论架构的设计常态，只提示不扣分。判据：tc 与轮次工具证据一致 —— 本轮 10 维
+    // 全有输出、报告无失败标记、未注入工具调用记录 ⇒ v150 口径 tc == 100
+    // （旧口径 tc == avg_conf == 60；若冲突仍扣分则会是 40）。
     let long = "该维度支持看多方向，依据为既有行情与财务数据，趋势信号一致。";
     let short = "该维度支持看空方向，依据为既有行情与财务数据，风险信号明显。";
     // 10 个 verdict 全注入（其余 6 个中性）—— 否则缺失维度按 gap 罚 −40，
@@ -907,8 +909,8 @@ fn direction_conflict_no_longer_penalizes_tool_credibility() {
     );
     let tc = r["tool_credibility_score"].as_float().unwrap_or(0.0);
     assert!(
-        (tc - 60.0).abs() < 1e-6,
-        "R9a 后 severe 冲突不得扣分（tc 应等于 avg_conf 60，旧口径会是 40）：tc={tc}"
+        (tc - 100.0).abs() < 1e-6,
+        "R9a 后 severe 冲突不得扣分（v150：本轮三个证据源全干净 ⇒ tc=100；旧口径是 avg_conf 60）：tc={tc}"
     );
     let warns = names(&r, "warnings");
     assert!(
@@ -1827,4 +1829,256 @@ fn r2_wording_absence_note_is_emitted_once() {
         !g.contains("报告写了"),
         "已删除的 `word_ex` 支文案不得重现（它与 attr_note 的缺席说明是同一事实）。实得: {g}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2026-10-09(v150)：工具可信度由**工具调用证据**派生（不再吃分析师自评）
+//
+// 背景：v149 只收窄了 `avg_conf` 分母，**量程没变** —— 生产库 54 轮回放里 tc 上限
+//   仍是 69.0、grade A **0 条** ⇒ 0.35×75.6 + 0.35×69 + 0.30×100 = 80.4 < 85，
+//   A 级（≥85）结构不可达；而熔断判据是「连续 3 轮非 A」⇒ 熔断恒触发、失去判别力。
+// v150 换量：`tc = 100 − gap 阶梯 − tool_gap 维度数×12 − 失败工具调用占比×50`，
+//   三个证据源全部可核对，且与「分析师对自身结论的把握」无关。
+// 下列断言钉死新口径，**含负控**（确有取数问题必须被扣分）与**A 可达性**（核心议题）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DQ_ALL_ABBR: [&str; 10] =
+    ["mk", "sent", "val", "fund", "pol", "hm", "lk", "res", "sec", "cat"];
+
+/// 无任何失败标记的中性报告（`hits == 0`）——用于构造「正常」节点。
+const CLEAN_REPORT: &str = "该维度数据完整，指标正常，方向信号不显著，维持原有判断。";
+
+/// 10 节点报告全用 `CLEAN_REPORT`。
+fn clean_reports() -> Vec<(&'static str, &'static str)> {
+    DQ_ALL_ABBR.iter().map(|a| (*a, CLEAN_REPORT)).collect()
+}
+
+/// 10 节点自评：`abbr` 取 `conf`，其余取 60。
+fn confs_with(abbr: &'static str, conf: f64) -> Vec<(&'static str, f64)> {
+    DQ_ALL_ABBR.iter().map(|a| (*a, if *a == abbr { conf } else { 60.0 })).collect()
+}
+
+/// 10 节点报告：`abbr` 换成 `text`，其余保持干净。
+fn reports_with(abbr: &'static str, text: &'static str) -> Vec<(&'static str, &'static str)> {
+    clean_reports().into_iter().map(|(a, t)| if a == abbr { (a, text) } else { (a, t) }).collect()
+}
+
+/// 10 节点报告全用同一份文本。
+fn same_report(text: &str) -> Vec<(&str, &str)> {
+    DQ_ALL_ABBR.iter().map(|a| (*a, text)).collect()
+}
+
+/// 10 节点自评全取同一值。
+fn same_confs(conf: f64) -> Vec<(&'static str, f64)> {
+    DQ_ALL_ABBR.iter().map(|a| (*a, conf)).collect()
+}
+
+fn tc_of(r: &Map) -> f64 {
+    r["tool_credibility_score"].as_float().unwrap_or(0.0)
+}
+
+/// 长而干净的满分报告（≥500 字符、覆盖 5 组关键词、无失败标记）——
+/// 配合 `conf >= 70` 可把 `report_quality` 打满（50 字数 + 40 关键词 + 10 一致性）。
+fn long_clean_report() -> String {
+    "本维度数据完整，指标正常。趋势上均线多头排列，MACD 金叉，支撑与阻力位清晰。\
+     估值上 PE 处于中枢下沿，PB 与 ROE 匹配，市值与 EPS 一致预期稳定。\
+     风险上下行有限，回撤可控，波动率低，止损位明确，无明显利空。\
+     操作上建议持有并择机增持，仓位维持中性偏高。"
+        .repeat(4)
+}
+
+/// **核心议题**：证据干净 + 报告质量高 ⇒ A 级**可达**（v149 及以前结构不可达）。
+///
+/// 判据链：tc == 100（三维证据全干净）+ `report_quality == 100`（长报告满量程）+
+/// factor 0.9（测试替身常量）⇒ score = 35 + 35 + 27 = 97 ≥ 85 ⇒ A。
+/// ⚠ 这条同时也是「A 不是近乎必达」的反面锁：下方负控里证据有问题的轮次不得为 A。
+#[test]
+fn clean_round_can_reach_grade_a() {
+    let long = long_clean_report();
+    let r = run_quality(&same_report(&long), &same_confs(80.0));
+    assert!(
+        (tc_of(&r) - 100.0).abs() < 1e-6,
+        "三维证据全干净 ⇒ tc 必须为 100（换量的目的就是让干净轮次够得着 A）：tc={}",
+        tc_of(&r)
+    );
+    assert_eq!(
+        r["grade"].clone().try_cast::<String>().unwrap_or_default(),
+        "A",
+        "证据干净 + 报告满量程 ⇒ grade 必须可达 A（旧口径结构不可达）。score={}",
+        r["score"]
+    );
+}
+
+/// 低自评（无失败证据）**不再压** tc —— v150 起该函数不吃分析师自评。
+#[test]
+fn low_conf_without_evidence_does_not_move_tc() {
+    let r = run_quality(&clean_reports(), &confs_with("hm", 40.0));
+    assert!(
+        (tc_of(&r) - 100.0).abs() < 1e-6,
+        "无取数证据的低自评不得压工具可信度（旧口径 avg_conf=58 ⇒ tc=58）：tc={}",
+        tc_of(&r)
+    );
+    let g = gap_reason(&r, "hm");
+    assert!(g.contains("非数据缺口"), "归因仍应落「非数据缺口」：{g}");
+    assert!(g.contains("未计入工具可信度"), "剔除必须留痕到归因文案：{g}");
+    let warns = names(&r, "warnings");
+    assert!(
+        warns.iter().any(|w| w.contains("未计入分母") && w.contains("资金面")),
+        "被剔节点必须在 warnings 显式留痕（剔了谁、为什么）：{warns:?}"
+    );
+}
+
+/// **负控**：确有取数问题的轮次必须被扣分（新口径不是「只看干净就满分」）。
+#[test]
+fn negative_controls_still_penalize_tool_credibility() {
+    // (a) 单维报告含真故障标记 ⇒ tool_gap_count=1 ⇒ tc = 100 − 12 = 88
+    let real =
+        "get_stock_pledge_data 调用因系统频率限制返回权限错误，质押数据缺失，无法评估平仓线距离。";
+    let r = run_quality(&reports_with("hm", real), &confs_with("hm", 60.0));
+    assert!(hits(&r, "hm") > 0, "用例前提：必须确实命中真故障标记");
+    assert!(
+        (tc_of(&r) - 88.0).abs() < 1e-6,
+        "含有效失败标记的维度必须扣分（每维 −12）：tc={}",
+        tc_of(&r)
+    );
+
+    // (b) 注入失败工具调用（is_error=true）⇒ 证据源③ 生效，tc 必须低于 100
+    let failed = vec![tc("get_stock_pledge_data", true), tc("get_stock_margin_data", false)];
+    let r = run_quality_with_tool_calls(&clean_reports(), &same_confs(60.0), &[("hm", failed)]);
+    assert!(tc_of(&r) < 100.0, "确有失败工具调用时必须按占比扣分：tc={}", tc_of(&r));
+
+    // (c) 3 个维度无 verdict（无输出）⇒ gap 阶梯 −30 ⇒ tc = 70
+    let present: Vec<(&str, f64)> = DQ_ALL_ABBR
+        .iter()
+        .filter(|a| !matches!(**a, "mk" | "sent" | "val"))
+        .map(|a| (*a, 60.0))
+        .collect();
+    let r = run_quality(&clean_reports(), &present);
+    assert!(
+        (tc_of(&r) - 70.0).abs() < 1e-6,
+        "3 个维度无输出必须按 gap 阶梯扣 30：tc={}",
+        tc_of(&r)
+    );
+}
+
+/// as-of 设计性降级 与 R2 措辞性缺席 **不计入** tool_gap（其失败标记已豁免）。
+#[test]
+fn asof_and_word_exempt_are_not_tool_gap_nodes() {
+    // (a) as-of 回放：pol 维度按设计降级且报告确有失败标记 ⇒ asof_exempt（不入 tool_gap）
+    let pol = "宏观政策与行业政策搜索返回空，无法获取政策原文，无法评估政策影响。";
+    let r = run_quality_asof(
+        &reports_with("pol", pol),
+        &confs_with("pol", 30.0),
+        r#"["get_policy_news"]"#,
+    );
+    assert!(
+        (tc_of(&r) - 100.0).abs() < 1e-6,
+        "as-of 豁免的维度不得进 tool_gap 扣分（本轮其余维度全干净 ⇒ 100）：tc={}",
+        tc_of(&r)
+    );
+    assert!(
+        gap_reason(&r, "pol").starts_with("as-of 回放"),
+        "豁免维度归因应落回放：{}",
+        gap_reason(&r, "pol")
+    );
+
+    // (b) R2 措辞性缺席：本轮工具调用零失败 ⇒ 低自评属措辞性缺席，非取数故障 ⇒ wording_exempt
+    let ok_calls = vec![tc("get_stock_institutional_visits", false)];
+    let r = run_quality_with_tool_calls(
+        &reports_with("cat", R2_HONEST_ABSENCE),
+        &confs_with("cat", 40.0),
+        &[("cat", ok_calls)],
+    );
+    assert!(
+        (tc_of(&r) - 100.0).abs() < 1e-6,
+        "措辞性缺席的维度不得进 tool_gap 扣分：tc={}",
+        tc_of(&r)
+    );
+}
+
+/// 字段校验问题（bull+bear=90）**不再扣分**，但必须仍以 warnings 呈现。
+#[test]
+fn validation_penalty_no_longer_scored() {
+    let mut bad = verdict_with(60.0, &[]);
+    bad.insert("bull_score".into(), Dynamic::from(40_i64));
+    bad.insert("bear_score".into(), Dynamic::from(50_i64));
+    let verdicts: Vec<(&str, Map)> = DQ_ALL_ABBR
+        .iter()
+        .map(|a| {
+            (
+                *a,
+                if *a == "mk" {
+                    bad.clone()
+                } else {
+                    verdict_with(60.0, &[])
+                },
+            )
+        })
+        .collect();
+    let r = run_quality_with_verdicts(&clean_reports(), &verdicts);
+    assert!(
+        r["field_validation_issue_count"].as_int().unwrap_or(0) >= 1,
+        "用例前提：bull+bear=90 必须构造出字段校验问题"
+    );
+    assert!(
+        (tc_of(&r) - 100.0).abs() < 1e-6,
+        "字段校验问题不得扣工具可信度（v150：三维证据全干净 ⇒ 100；旧口径 60−3=57）：tc={}",
+        tc_of(&r)
+    );
+    let warns = names(&r, "warnings");
+    assert!(
+        warns.iter().any(|w| w.contains("深度字段校验") && w.contains("不再扣分")),
+        "字段校验必须仍以 warnings 呈现（只去扣分、不去信号）：{warns:?}"
+    );
+}
+
+/// 2026-10-09（截图病灶）：缺失节点的「缺口原因」按 presence 给**确定归因**。
+///
+/// 实证：面板「缺口原因」列显示
+/// 「节点未输出 VERDICT 或 confidence 字段缺失（可能原因：LLM 超时/截断/解析失败…）」——
+/// 一句「或」把两种**运行期可判定**的情形混在一起，用户无法判断是节点没跑还是输出被截断。
+/// 现两条分支各自点名（形参 `v_present` = 该节点本轮 scope 里是否有输出）。
+#[test]
+fn missing_gap_reason_is_definite_about_presence() {
+    // ① 该节点本轮**无任何输出**（scope 里是 `()`）
+    let no_output = run_quality_with_verdicts(&[("mk", CLEAN_REPORT)], &[]);
+    assert_eq!(status(&no_output, "mk"), "missing", "无输出应判 missing");
+    let r1 = gap_reason(&no_output, "mk");
+    assert!(r1.contains("无任何输出"), "无输出须点名「无任何输出」：{r1}");
+    assert!(!r1.contains("或 confidence"), "不得再回落到含糊的「或」句：{r1}");
+
+    // ② 该节点**有输出**但缺 confidence 字段（present=true，`extract_conf` 仍得 <0）
+    let mut no_conf = Map::new();
+    no_conf.insert("verdict".into(), Dynamic::from("看多".to_string()));
+    let with_output = run_quality_with_verdicts(&[("mk", CLEAN_REPORT)], &[("mk", no_conf)]);
+    assert_eq!(status(&with_output, "mk"), "missing", "有输出但无 confidence 应判 missing");
+    let r2 = gap_reason(&with_output, "mk");
+    assert!(r2.contains("有输出"), "有输出须点名「有输出」：{r2}");
+    assert!(!r2.contains("无任何输出"), "有输出不得被判成「无任何输出」：{r2}");
+}
+
+/// 2026-10-09（截图病灶）：催化剂因子的**中性取值**（分析师判定「无」）须自我说明。
+///
+/// 判据（是否计入缺失因子）**不变** —— 列表长度仍与 `pm_compute_factor_completeness`
+/// 的分母口径对齐（Rust 对 `None` 与 `Some("无")` 一样不计数）；只让「无」这一档在 UI 上
+/// 写明「非取数故障」，与「真缺字段」区分开（后者可能真是产出/取数故障）。
+#[test]
+fn neutral_catalyst_factor_self_describes_while_true_absence_stays_plain() {
+    // ① 真缺字段/未注入 ⇒ 保持原样「催化剂等级」（与既有断言、分母口径一致）
+    let absent = run_quality_with_scalars(&[("mk", CLEAN_REPORT)], &[]);
+    let mf_absent = names(&absent, "missing_factors");
+    assert!(
+        mf_absent.contains(&"催化剂等级".to_string()),
+        "真缺字段仍须是「催化剂等级」：{mf_absent:?}"
+    );
+
+    // ② 分析师明确判定「无」⇒ 同一项、同一数量，但带自我说明
+    let neutral = run_quality_with_scalars(
+        &[("mk", CLEAN_REPORT)],
+        &[("catalyst_level", Dynamic::from("无".to_string()))],
+    );
+    let mf = names(&neutral, "missing_factors");
+    let cat: Vec<&String> = mf.iter().filter(|s| s.starts_with("催化剂等级")).collect();
+    assert_eq!(cat.len(), 1, "催化剂等级仍须恰好计 1 项（长度与分母对齐）：{mf:?}");
+    assert!(cat[0].contains("非取数故障"), "中性取值须自我说明「非取数故障」：{}", cat[0]);
 }

@@ -1375,6 +1375,8 @@ macro_rules! register_all_commands {
             commands::theme::list_themes,
             commands::theme::load_user_themes,
             commands::theme::save_theme,
+            commands::time_travel_batch::get_time_travel_batch,
+            commands::time_travel_batch::run_time_travel_batch,
             commands::tool_recommender::analyze_task,
             commands::tool_recommender::get_available_tools,
             commands::tool_recommender::get_tool_recommendations,

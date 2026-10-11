@@ -42,7 +42,16 @@ color: orange
 1. 阅读研究经理的投资计划和全部分析报告（context 中的 research-mgr / debate-convergence / risk-convergence / data-quality 全文）
 2. 读取 input_mapping 注入的结构化字段：
    - `reference_price`：portfolio-mgr 使用的标准参考价，作为 currentPrice 基础
-   - `factor_weights`：公式中各因子的回测权重，权重高的因子方向你应与之对齐
+   - `valuation_action`：t-valuation 估值结论（如"低估"/"合理偏低"/"合理"/"高估"）
+   - `valuation_signal`：估值信号（"低估"/"中性"/"高估"）
+   - `margin_of_safety_pct`：DCF（保守档）安全边际百分比，正值=内在价值高于现价
+   - `valuation_summary`：估值一行摘要（内在价值/格雷厄姆值/PE 分位/F-Score/护城河）
+   - `catalyst_level`：催化剂等级（"L3估值体系级"/"L2业绩拐点级"/"L1主题情绪级"/"无"）
+   - `catalyst_direction`：催化剂方向（long/short/neutral）
+   - `catalyst_bull_score`：催化剂多空打分中的多头分 0-100
+   - `money_flow_direction`：主力资金方向（如"偏多"/"偏空"）
+   - `money_flow_persistence`：资金流入持续性（stable / not_confirmed_pending_3_5_days 等）
+   - `money_flow_bull_score`：资金面多空打分中的多头分 0-100
    - `consensus_score`：辩论共识分数 0-100
    - `risk_disagreement`：三位风险评估师分歧度 0-100，>50 表示风险判断不可靠
    - `dqi_score`：数据质量评分 0-100，<40 时应保守操作，<20 时应避免方向性交易
@@ -55,6 +64,28 @@ color: orange
 6. 计算 stopLossPct / takeProfitPct（百分比，与 portfolio-mgr 单位对齐）
 7. 给出 riskLevel（4 档）和 data_gaps（你识别到的数据缺口）
 8. 输出结构化 JSON 决策
+
+## 结构化量化信号的证据权重（必须遵守）
+
+`valuation_*` / `catalyst_*` / `money_flow_*` / `total_score` / `technical_indicators`
+由工具节点**确定性计算**产出，与 portfolio-mgr 公式消费的是同一批上游节点
+（t-valuation / a-catalyst / a-hot-money / t-scoring），其证据等级**高于**研究报告中的自由叙事：
+
+1. **冲突必须逐字段点名裁决**：当研究/风险报告的文本叙事与量化信号方向冲突时，
+   必须在 `reasoning` / `decision_trail` 中引用具体字段与数值（如
+   "估值结论 valuation_action=合理偏低、安全边际 margin_of_safety_pct=25.6、
+   catalyst_level=L2，但报告称……"），说明你为何采信或否决该量化信号。
+   **禁止**只用文本风险叙事覆盖量化信号而不引用任何数值。
+2. **偏多信号需已证实风险才能翻盘**：估值为低估/合理偏低、催化剂为 L2/L3、
+   资金面偏多这三类信号同时存在时，输出"观望/卖出"必须以**已证实的基本面风险**
+   （财报落地不及预期、违约、立案、实测高质押等）为依据；仅凭"待验证事项"不构成翻盘理由。
+3. **采集缺口不是方向性反证**：公告 PDF 未解析、监管停披（如北向个股数据 2024-08 起停披）、
+   工具超时缺字段，属于**信息可得性**问题（pipeline_gap），不是公司变坏：
+   只能进 `data_gaps` 并使 confidence 至多下调 10 分，**不得**使 action 从买入档翻转为观望。
+4. **信号缺失按剩余信号决策**：某注入字段为 null 时，在 `data_gaps` 记录"XX 信号缺失"，
+   依据其余信号决策；禁止臆造数值，也禁止因单个字段缺失直接转为中性。
+5. 你仍是独立决策者：量化信号用于校准事实底座，action/仓位由你结合
+   consensus / risk_disagreement / dqi_score 独立给出，不要复述公式。
 
 ## 输出格式
 
@@ -208,7 +239,7 @@ color: orange
 
 ### 11. data_gaps 必须真实反映输入缺失
 
-检查 input_mapping 注入的字段是否完整。如 `dqi_score` 缺失 → data_gaps 应含"数据质量评分缺失"；`factor_weights` 缺失 → data_gaps 应含"因子回测权重缺失"。
+检查 input_mapping 注入的字段是否完整。如 `dqi_score` 缺失 → data_gaps 应含"数据质量评分缺失"；`valuation_signal` 缺失 → data_gaps 应含"估值信号缺失"；`catalyst_level` / `money_flow_direction` 缺失同理。注意区分"信号缺失"（字段为 null）与"采集缺口"（公告未解析/数据停披），二者都进 data_gaps 但都不得作为方向性反证。
 
 ## 双视角对比说明（让你的输出可被审计）
 

@@ -1,5 +1,5 @@
 // i18n-exempt: 业务逻辑判断字符串，非 UI 展示文本
-import { classifyDirectionText, getSignalColor } from "@/lib/stock-analysis-utils";
+import { classifyDirectionText, getSignalColor, normalizeVerdictScore } from "@/lib/stock-analysis-utils";
 import { useSettingsStore } from "@/stores";
 import { ExpandOutlined, SafetyCertificateOutlined } from "@ant-design/icons";
 import { Button, Card, Collapse, Empty, Modal, Tag } from "antd";
@@ -108,9 +108,48 @@ interface ParsedReport {
   verdict?: string;
   reasoning?: string;
   stance?: string;
+  /**
+   * 逐档 VERDICT 契约的方向字段（harness `holding_period.rs::VERDICT_COMMON_FIELDS`），
+   * 与 `verdict` 同义。LLM 直接产出裸因子对象（无 report 正文）时只有 `direction`，
+   * 不提升为 `verdict` 会导致结论徽章与置信度整段不渲染。
+   */
+  direction?: string;
   positionPct?: number;
   action?: string;
   [key: string]: unknown;
+}
+
+/**
+ * VERDICT 标签 JSON 容错解析。
+ *
+ * 严格 parse 失败时，唯一允许的修复是**剥离尾随多余 `}`**：2026-10-10 002475 快照实证
+ * （a-hot-money--mid / a-research--long）LLM 在完整对象后多吐了 1 个闭合括号
+ * （`..."absorbed_in_trend"}}`），后端 agent_executor 的 strip_stray_closers 只对
+ * **新跑**的分析生效，历史快照里标签已损坏。逐次剥 1 个尾随 `}` 重试（至多 3 次）——
+ * 合法 JSON 在首次严格 parse 即通过，不受影响；损坏串剥掉多余括号后是完整 JSON。
+ * 不修缺括号 / 引号类损坏（无法在不臆造内容的前提下安全补全）。
+ */
+function parseVerdictMetaLenient(seg: string): Record<string, unknown> | null {
+  const tryParse = (s: string) => {
+    try {
+      const obj = JSON.parse(s);
+      return obj && typeof obj === "object" && !Array.isArray(obj)
+        ? obj as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  const strict = tryParse(seg);
+  if (strict) { return strict; }
+  let s = seg.trim();
+  for (let i = 0; i < 3; i++) {
+    if (!s.endsWith("}")) { break; }
+    s = s.slice(0, -1).trim();
+    const repaired = tryParse(s);
+    if (repaired) { return repaired; }
+  }
+  return null;
 }
 
 /** 解析 `<!-- VERDICT: {...} -->` 格式（分析师自由文本 + 末尾 verdict 标签）*/
@@ -118,47 +157,55 @@ function tryParseVerdictFormat(report: string): ParsedReport | null {
   const trimmed = report.trim();
   const verdictIdx = trimmed.indexOf("<!-- VERDICT:");
   if (verdictIdx === -1) { return null; }
-  try {
-    const jsonStr = trimmed.slice(verdictIdx + "<!-- VERDICT:".length);
-    const jsonEnd = jsonStr.indexOf("-->");
-    if (jsonEnd === -1) { return null; }
-    const meta = JSON.parse(jsonStr.slice(0, jsonEnd).trim());
-    const summary = trimmed.slice(0, verdictIdx).trim();
-    // 兼容两种字段命名：
-    //   分析师节点: verdict / bull_score / bear_score / confidence
-    //   辩论节点:   stance / strength_score / confidence（无 bear_score）
-    const bull = meta.bull_score ?? meta.strength_score ?? undefined;
-    const bear = meta.bear_score ?? undefined;
-    // 辩论节点的 stance 映射到 verdict
-    let verdict = meta.verdict ?? undefined;
-    if (!verdict && meta.stance) {
-      // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
-      //   原为内联 `bull|看多` / `bear|看空`，值域比 Grid 窄 ⇒ 同一份
-      //   `stance: "买入"` 的研报此处判不出方向、Grid 判为看多。
-      const dir = classifyDirectionText(meta.stance);
-      const s = String(meta.stance).toLowerCase();
-      if (dir === "bull") { verdict = "看多"; }
-      else if (dir === "bear") { verdict = "看空"; }
-      else if (s.includes("neutral") || s.includes("中性")) { verdict = "中性"; }
-      else { verdict = meta.stance; }
-    }
-    return {
-      ...meta,
-      verdict,
-      bull_score: bull,
-      bear_score: bear,
-      confidence: meta.confidence ?? undefined,
-      summary: summary.length > 0 ? summary : undefined,
-      analysis: summary.length > 0 ? summary : undefined,
-    } as ParsedReport;
-  } catch {
-    // JSON 解析失败也尝试提取正文
-    const summary = trimmed.slice(0, verdictIdx).trim();
+  const jsonStr = trimmed.slice(verdictIdx + "<!-- VERDICT:".length);
+  const jsonEnd = jsonStr.indexOf("-->");
+  if (jsonEnd === -1) {
+    // 无闭合标签：不猜测 JSON 边界，只保留正文。
+    const bodyOnly = trimmed.slice(0, verdictIdx).trim();
+    return bodyOnly.length > 20 ? { summary: bodyOnly, analysis: bodyOnly } as ParsedReport : null;
+  }
+  const meta = parseVerdictMetaLenient(jsonStr.slice(0, jsonEnd));
+  const summary = trimmed.slice(0, verdictIdx).trim();
+  if (!meta) {
+    // 标签 JSON 无法修复：正文仍然渲染（旧实现行为），但结构化字段不可用。
     if (summary.length > 20) {
       return { summary, analysis: summary } as ParsedReport;
     }
     return null;
   }
+  // 兼容三种字段命名：
+  //   分析师节点: verdict / bull_score / bear_score / confidence
+  //   辩论节点:   stance / strength_score / confidence（无 bear_score）
+  //   逐档契约:   direction（harness VERDICT_COMMON_FIELDS 的方向字段，与 verdict 同义）
+  const bull = meta.bull_score ?? meta.strength_score ?? undefined;
+  const bear = meta.bear_score ?? undefined;
+  // 辩论节点的 stance 映射到 verdict
+  let verdict = meta.verdict ?? undefined;
+  if (!verdict && typeof meta.stance === "string") {
+    // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
+    //   原为内联 `bull|看多` / `bear|看空`，值域比 Grid 窄 ⇒ 同一份
+    //   `stance: "买入"` 的研报此处判不出方向、Grid 判为看多。
+    const dir = classifyDirectionText(meta.stance);
+    const s = String(meta.stance).toLowerCase();
+    if (dir === "bull") { verdict = "看多"; }
+    else if (dir === "bear") { verdict = "看空"; }
+    else if (s.includes("neutral") || s.includes("中性")) { verdict = "中性"; }
+    else { verdict = meta.stance; }
+  }
+  // 标签里只给 direction（"偏多"/"bear"/"中性"）时同样作为结论；徽章层负责本地化/配色，
+  // 无法归类的自定义结论如实显示原文。
+  if (!verdict && typeof meta.direction === "string" && meta.direction.trim().length > 0) {
+    verdict = meta.direction;
+  }
+  return {
+    ...meta,
+    verdict,
+    bull_score: bull,
+    bear_score: bear,
+    confidence: meta.confidence ?? undefined,
+    summary: summary.length > 0 ? summary : undefined,
+    analysis: summary.length > 0 ? summary : undefined,
+  } as ParsedReport;
 }
 
 function tryParse(report: string): ParsedReport | null {
@@ -197,7 +244,36 @@ function tryParse(report: string): ParsedReport | null {
   return null;
 }
 
-/** 从任意 ParsedReport 中提取可读的摘要文本 */
+/**
+ * 剥除正文开头 LLM 写的「文档式大标题」（如 `# 国泰海通（601211）基本面估值分析`）。
+ *
+ * 背景（2026-10-10 用户要求）：卡片头部已显示「分析师名 + 档位」，LLM 又在正文首行
+ * 用 H1/H2 重复「股票名（代码）+ 分析类型」，每张卡都顶着同一个大标题 ⇒ 全部去掉。
+ * 仅剥**开头窗口内**（前 5 个非空行，允许一行短引导语，如「已收到——工具数据已足够…」）
+ * 第一个满足文档标题特征的 ATX 标题：
+ *   ① 含 6 位 A 股代码（`\d{6}`，如 601211 / 002475）；
+ *   ② 或以 报告 / 分析 / 评估 / 研判 / 追踪 / 点评 / 研报 结尾。
+ * 章节标题（`## 数据概览`、`### 1. 趋势状态判定`）不命中 ⇒ 原样保留，不伤正文结构。
+ */
+function stripReportTitle(markdown: string): string {
+  const lines = markdown.split("\n");
+  let nonEmpty = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().length === 0) { continue; }
+    nonEmpty++;
+    if (nonEmpty > 5) { break; }
+    const m = /^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(lines[i]);
+    if (!m) { continue; } // 窗口内允许先出现一句引导语
+    const title = m[1].trim();
+    const isDocTitle = /\d{6}/.test(title)
+      || /(报告|分析|评估|研判|追踪|点评|研报)$/.test(title);
+    if (!isDocTitle) { break; } // 第一个标题是章节标题 ⇒ 不存在文档标题，停止
+    lines.splice(i, 1);
+    return lines.join("\n").replace(/^(?:[ \t]*\n)+/, "");
+  }
+  return markdown;
+}
+
 function extractSummary(parsed: ParsedReport): string {
   // candidate 顺序：先 prose 字段（reasoning / summary / analysis ...），再 report 兜底。
   // P2 修复(2026-07-24): trader 节点的 `report` 字段是内层 JSON 字符串而非 markdown，
@@ -222,7 +298,7 @@ function extractSummary(parsed: ParsedReport): string {
       // 跳过看起来像 JSON 的字符串（trader / 包装对象的 inner JSON）
       const trimmed = c.trimStart();
       if (trimmed.startsWith("{") || trimmed.startsWith("[")) { continue; }
-      return c;
+      return stripReportTitle(c);
     }
   }
   return "";
@@ -255,15 +331,27 @@ function extractTags(parsed: ParsedReport, t: (key: string) => string): string[]
   if (parsed.concept_risk) {
     tags.push(`${t("stockAnalysis.analystReport.conceptRisk")}:${parsed.concept_risk}`);
   }
-  if (typeof parsed.bull_score === "number" && parsed.bull_score > 0) {
-    const normalized = parsed.bull_score <= 10 ? parsed.bull_score * 10 : parsed.bull_score;
-    tags.push(`${t("stockAnalysis.sentimentBullish")}:${Math.round(normalized)}`);
-  }
-  if (typeof parsed.bear_score === "number" && parsed.bear_score > 0) {
-    const normalized = parsed.bear_score <= 10 ? parsed.bear_score * 10 : parsed.bear_score;
-    tags.push(`${t("stockAnalysis.sentimentBearish")}:${Math.round(normalized)}`);
-  }
+  // 注：bull_score / bear_score 不再进 tags —— 徽章区已用进度条同时呈现多空分数，
+  // 标签里再放一遍「看涨:62」属于同值重复（2026-10-10 格式统一时移除）。
   return tags;
+}
+
+/** 标签里的多空论据（仅接受字符串元素）；红绿分区渲染用。 */
+function extractStancePoints(parsed: ParsedReport): { bull: string[]; bear: string[] } {
+  const pick = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((p): p is string => typeof p === "string" && p.trim().length > 0) : [];
+  return { bull: pick(parsed.bull_points), bear: pick(parsed.bear_points) };
+}
+
+/**
+ * 判断因子值是否为「纯机器枚举」（如 `k_sigma_band` / `not_assessed` / `downward`）：
+ * 仅 ASCII 标识符（可含 _ 与少量分隔的同类 token）、不含中文 ⇒ 等宽字体呈现，
+ * 与自然语言中文叙述区分开（机器口径与人工叙述的视觉分界，项目既有惯例）。
+ */
+function isMachineEnumValue(value: string): boolean {
+  const stripped = value.trim();
+  if (/[一-鿿]/.test(stripped)) { return false; }
+  return /^[a-zA-Z][a-zA-Z0-9]*(?:[_\s,/、-]*[a-zA-Z0-9]+)*$/.test(stripped);
 }
 
 /** 从 ParsedReport 中提取要点列表 */
@@ -293,18 +381,11 @@ function extractKeyPoints(parsed: ParsedReport): string[] {
       .filter((e) => e && typeof e.event === "string")
       .map((e) => `${e.event}${e.source ? ` (${e.source})` : ""}`);
   }
-  // VERDICT 标签可以只带多空论据（`bull_points` / `bear_points`）而无正文 ——
-  // 分析师 prompt 明确要求「必须有正文」，但实测存在只输出标签的违规形态
-  // （见 `agency_experts/stock-analysis/market-analyst.md` 关键规则 1/2）。
-  // 此前这两组论据被整段丢弃 ⇒ 卡片只剩头部 + chips、正文为空。
-  const bullPoints = Array.isArray(parsed.bull_points) ? parsed.bull_points : [];
-  const bearPoints = Array.isArray(parsed.bear_points) ? parsed.bear_points : [];
-  const stancePoints = [...bullPoints, ...bearPoints].filter((p): p is string => typeof p === "string");
-  if (stancePoints.length > 0) { return stancePoints; }
-  // 逐档契约的 `notApplicable`：该档不适用时的显式说明，同样不能丢。
-  if (Array.isArray(parsed.notApplicable) && parsed.notApplicable.length > 0) {
-    return parsed.notApplicable.filter((p): p is string => typeof p === "string");
-  }
+  // 注：
+  // ① `bull_points` / `bear_points` 不再并入要点 —— 组件内有独立的红绿分区
+  //   （extractStancePoints），合并成一个混合 ul 会丢掉多空归属；
+  // ② 逐档契约的 `notApplicable`（因子名数组）不进要点 —— 元素是 camelCase 因子键，
+  //   混进要点会露出英文契约名，由 notApplicable / qualified 专门区块中文化呈现。
   return [];
 }
 
@@ -314,6 +395,73 @@ function extractRiskFlags(parsed: ParsedReport): string[] {
     return parsed.risk_flags;
   }
   return [];
+}
+
+/**
+ * 展示层措辞判据：`classifyDirectionText` 对「非多空」一律返回 null，但 null 里混着两类
+ * 语义 —— 「中性/观望」应译作本地化中性，而「低估/高估」这类估值结论必须如实显示原文，
+ * 不能统一染灰标成「中性」（value-investor 的 `valuation_conclusion.action` 即是此形态）。
+ */
+const NEUTRAL_VERDICT_PATTERN = /中性|中立|震荡|横盘|观望|持平|不确定|neutral|range[- ]?bound|hold/i;
+
+/**
+ * 逐档 VERDICT 契约因子键 —— 值域严格对齐后端唯一权威
+ * `src-tauri/crates/harness/src/holding_period.rs` 的 `VERDICT_COMMON_FIELDS`
+ * （去掉 direction/confidence 两个结论字段）+ `VERDICT_FACTORS`（11 个逐档因子）。
+ *
+ * 此处只做「契约键 → 展示标签」映射，**不新造因子定义**（禁区 12）；后端调整因子集时
+ * 需同步本表。LLM 直接产出裸因子对象（无 report 正文）时，这些字段是卡片唯一可见内容。
+ * 必须声明在 `CONSUMED_KEYS` 之前（后者初始化时展开本表，受 TDZ 约束）。
+ */
+const VERDICT_FACTOR_KEYS = [
+  // VERDICT_COMMON_FIELDS
+  "eventCatalyst",
+  "exitRule",
+  "stopSource",
+  "priorSource",
+  "positionSource",
+  // VERDICT_FACTORS
+  "momentumSignal",
+  "microstructure",
+  "breadthState",
+  "flowPersistence",
+  "trendStrength",
+  "valuationBand",
+  "earningsQuality",
+  "expectationRevision",
+  "macroRegime",
+  "supplyShock",
+  "sectorRotation",
+] as const;
+
+/**
+ * 后端「缺席文案键」（harness `holding_period.rs::na_key`）→ 因子键的反查表。
+ *
+ * 契约要求 `notApplicable` 数组放**因子名**，但实测 LLM 会误放 na_key
+ * （如 `["notApplicableMomentum",…]`，2026-10-10 a-hot-money--mid 实证）⇒ 不反查
+ * 就会在卡片上裸显英文 camelCase。值域严格对齐后端 `na_key` match 全表（11 项）。
+ */
+const NA_KEY_TO_FACTOR: Record<string, string> = {
+  notApplicableMomentum: "momentumSignal",
+  notApplicableMicrostructure: "microstructure",
+  notApplicableBreadth: "breadthState",
+  notApplicableFlow: "flowPersistence",
+  notApplicableTrend: "trendStrength",
+  notApplicableValuation: "valuationBand",
+  notApplicableQuality: "earningsQuality",
+  notApplicableExpectation: "expectationRevision",
+  notApplicableMacro: "macroRegime",
+  notApplicableSupply: "supplyShock",
+  notApplicableSector: "sectorRotation",
+};
+
+/** 因子键（或其 na_key 文案键）→ 中文展示标签；无法识别时返回 null（调用方保留原文）。 */
+function factorLabelOf(key: string, t: (key: string) => string): string | null {
+  const factor = VERDICT_FACTOR_KEYS.includes(key as (typeof VERDICT_FACTOR_KEYS)[number])
+    ? key
+    : NA_KEY_TO_FACTOR[key];
+  if (!factor) { return null; }
+  return t(`stockAnalysis.analystReport.factors.${factor}`);
 }
 
 /** 已在卡片其他位置消费过的键（兜底平铺时排除，避免重复展示）。 */
@@ -361,6 +509,12 @@ const CONSUMED_KEYS = new Set<string>([
   "confidence",
   "positionPct",
   "risk_flags",
+  // 逐档 VERDICT 契约因子（extractFactorFields / 专门区块消费，禁止裸 camelCase 平铺）
+  "direction",
+  "qualified",
+  "valuation_conclusion",
+  "valuationAudit",
+  ...VERDICT_FACTOR_KEYS,
   // 非内容元数据
   "expert",
   "node_id",
@@ -372,6 +526,78 @@ const CONSUMED_KEYS = new Set<string>([
   "language",
   "status",
 ]);
+
+/**
+ * 提取逐档契约因子为「中文标签 + 值」的结构化行。
+ *
+ * 值常带「标记键：中文说明」前缀（如 `qualityRealizationBeyondHorizon：营收高增…`，
+ * marker 表示该因子为何只作过滤 / 打折），marker 本身是 camelCase 噪音，仅在紧贴冒号时剥离。
+ */
+function extractFactorFields(
+  parsed: ParsedReport,
+  t: (key: string) => string,
+): Array<{ key: string; label: string; value: string }> {
+  const out: Array<{ key: string; label: string; value: string }> = [];
+  for (const key of VERDICT_FACTOR_KEYS) {
+    const raw = parsed[key];
+    if (raw == null) { continue; }
+    let value = "";
+    if (typeof raw === "string") { value = raw.trim(); }
+    else if (typeof raw === "number" || typeof raw === "boolean") { value = String(raw); }
+    else { continue; } // 复杂结构不走因子行
+    if (value.length === 0) { continue; }
+    value = value.replace(/^[a-z][A-Za-z]*\s*[：:]\s*/, "");
+    if (value.length === 0) { continue; }
+    out.push({ key, label: t(`stockAnalysis.analystReport.factors.${key}`), value });
+  }
+  return out;
+}
+
+/**
+ * `notApplicable` 数组 → 去重后的中文标签列表。
+ * 元素两种真实形态都吃：因子键（`momentumSignal`）或后端 na_key（`notApplicableMomentum`）。
+ */
+function extractNotApplicableLabels(
+  parsed: ParsedReport,
+  t: (key: string) => string,
+): string[] {
+  if (!Array.isArray(parsed.notApplicable)) { return []; }
+  const labels: string[] = [];
+  for (const item of parsed.notApplicable) {
+    if (typeof item !== "string" || item.length === 0) { continue; }
+    const label = factorLabelOf(item, t) ?? item;
+    if (!labels.includes(label)) { labels.push(label); }
+  }
+  return labels;
+}
+
+/**
+ * `qualified`（条件采用声明）→ 去重后的因子中文标签列表。
+ *
+ * 实测两种写法：`qualified: {momentumSignal:"...说明"}`（对象，因子键 → 说明 marker）
+ * 与 `qualified: ["momentumSignal"]`（数组，002475 快照为对象）。键无法识别时保留原文。
+ * 与 notApplicable 对称：这两个区块是同一套因子集的「缺席 / 条件采用」两种状态，
+ * 此前 qualified 被 CONSUMED_KEYS 静默吞掉，用户看不到该信息。
+ */
+function extractQualifiedLabels(
+  parsed: ParsedReport,
+  t: (key: string) => string,
+): string[] {
+  const q = parsed.qualified;
+  if (q == null) { return []; }
+  const keys: string[] = Array.isArray(q)
+    ? q.filter((x): x is string => typeof x === "string")
+    : typeof q === "object"
+    ? Object.keys(q)
+    : [];
+  const labels: string[] = [];
+  for (const key of keys) {
+    if (key.length === 0) { continue; }
+    const label = factorLabelOf(key, t) ?? key;
+    if (!labels.includes(label)) { labels.push(label); }
+  }
+  return labels;
+}
 
 /**
  * 解析成功、但正文与要点都提不出来时，把其余可读字段平铺出来。
@@ -417,6 +643,40 @@ function isEmptyAnalysis(parsed: ParsedReport): boolean {
     return v != null;
   });
   return !hasContent;
+}
+
+/**
+ * 多空论据红绿分区（卡片与展开 Modal 共用，保证两处结构一致）。
+ * A 股配色：看涨红、看跌绿，与结论徽章 / 分数同色。
+ */
+function StancePointsBlock(
+  { bull, bear, t, modal = false }: {
+    bull: string[];
+    bear: string[];
+    t: (key: string) => string;
+    modal?: boolean;
+  },
+) {
+  if (bull.length === 0 && bear.length === 0) { return null; }
+  const ulCls = modal
+    ? "list-disc pl-6 my-1 text-sm"
+    : "list-disc pl-4 mb-1 text-xs";
+  const renderSide = (points: string[], label: string, color: string) => (
+    <div className="mt-2">
+      <div className={modal ? "text-sm mb-1" : "text-xs mb-1"} style={{ color, fontWeight: 600 }}>
+        {label}
+      </div>
+      <ul className={ulCls} style={{ color: "var(--muted)" }}>
+        {points.map((p, i) => <li key={i}>{p}</li>)}
+      </ul>
+    </div>
+  );
+  return (
+    <>
+      {bull.length > 0 && renderSide(bull, t("stockAnalysis.analystReport.bullArgument"), "#f5222d")}
+      {bear.length > 0 && renderSide(bear, t("stockAnalysis.analystReport.bearArgument"), "#52c41a")}
+    </>
+  );
 }
 
 export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
@@ -498,23 +758,51 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
       if (parsed.analysis == null && typeof v.analysis === "string") { parsed.analysis = v.analysis; }
       if (parsed.summary == null && typeof v.summary === "string") { parsed.summary = v.summary; }
     }
+    // 顶层方向兜底（2026-10-10 002475 实测的两种「结论徽章消失」形态）：
+    // ① 裸因子对象 `{direction:"偏多", confidence:72, 因子…}`：无 verdict 字段、无 report
+    //    正文（a-fundamentals--mid / a-lockup--mid 等 4 个节点）—— `direction` 是契约里
+    //    与 verdict 同义的方向字段（harness VERDICT_COMMON_FIELDS）。
+    // ② value-investor 校验外壳：verdict 为空对象 `{}`，结论落在
+    //    `valuation_conclusion.action`（如「低估」）。
+    // 不兜底则「看多/看空 + 置信度」整段不渲染（徽章区只认字符串 verdict / bull / bear）。
+    if (typeof parsed.verdict !== "string") {
+      if (typeof parsed.direction === "string" && parsed.direction.trim().length > 0) {
+        parsed.verdict = parsed.direction;
+      } else {
+        const vc = parsed.valuation_conclusion;
+        if (vc && typeof vc === "object" && !Array.isArray(vc)) {
+          const action = (vc as Record<string, unknown>).action;
+          if (typeof action === "string" && action.trim().length > 0) {
+            parsed.verdict = action;
+          }
+        }
+      }
+    }
     const summary = extractSummary(parsed);
     const tags = extractTags(parsed, t);
     const points = extractKeyPoints(parsed);
+    const stancePoints = extractStancePoints(parsed);
+    const stanceCount = stancePoints.bull.length + stancePoints.bear.length;
     const riskFlags = extractRiskFlags(parsed);
+    const factorFields = extractFactorFields(parsed, t);
+    const notApplicableLabels = extractNotApplicableLabels(parsed, t);
+    const qualifiedLabels = extractQualifiedLabels(parsed, t);
     const empty = isEmptyAnalysis(parsed);
-    // 正文与要点都提不出来时，退而平铺其余可读字段（形状未知的输出至少能看见内容）
-    const miscFields = summary || points.length > 0 ? [] : extractMiscFields(parsed);
+    // 正文与要点都提不出来时，退而平铺其余可读字段（形状未知的输出至少能看见内容）。
+    // 逐档契约因子已在 factorFields 消费，不会再裸平铺。
+    const miscFields = summary || points.length > 0 || factorFields.length > 0 || stanceCount > 0
+      ? []
+      : extractMiscFields(parsed);
     const confidence = typeof parsed.confidence === "number"
-      ? (parsed.confidence > 1 ? parsed.confidence : parsed.confidence * 100)
+      ? normalizeVerdictScore(parsed.confidence)
       : (typeof parsed.positionPct === "number" ? parsed.positionPct : null);
 
     // 计算看多/看空/中性显眼展示
     const bullScore = typeof parsed.bull_score === "number"
-      ? (parsed.bull_score > 1 ? parsed.bull_score : parsed.bull_score * 100)
+      ? normalizeVerdictScore(parsed.bull_score)
       : null;
     const bearScore = typeof parsed.bear_score === "number"
-      ? (parsed.bear_score > 1 ? parsed.bear_score : parsed.bear_score * 100)
+      ? normalizeVerdictScore(parsed.bear_score)
       : null;
     // 2026-09-21: 方向判据收敛到 `classifyDirectionText`（单一真相源）。
     //   本函数内此前有**两份**判据（配色与下方 i18n key 各一份，相隔仅 4 行），
@@ -526,6 +814,15 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
       : verdictDir === "bear"
       ? "green" // A股绿=跌
       : "default";
+    // 徽章文案：明确多空走本地化「看多/看空」；中性词走本地化「中性」；
+    // 其余自定义结论（低估 / 高估 / 观望 …）如实显示后端原文，不臆造成中性。
+    const verdictLabel = verdictDir === "bull"
+      ? t("stockAnalysis.analystVerdict.bullish")
+      : verdictDir === "bear"
+      ? t("stockAnalysis.analystVerdict.bearish")
+      : typeof parsed.verdict === "string" && NEUTRAL_VERDICT_PATTERN.test(parsed.verdict)
+      ? t("stockAnalysis.analystVerdict.neutral")
+      : (typeof parsed.verdict === "string" ? parsed.verdict : "");
     return (
       <>
         <Card
@@ -545,13 +842,9 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
           {/* 看多/看空/置信度 显眼展示 */}
           {(bullScore != null || bearScore != null || (typeof parsed.verdict === "string")) && (
             <div className="flex items-center gap-3 mb-2 flex-wrap">
-              {typeof parsed.verdict === "string" && (
+              {verdictLabel && (
                 <Tag color={verdictColor} style={{ fontSize: 13, padding: "2px 10px", fontWeight: 600 }}>
-                  {t(
-                    `stockAnalysis.analystVerdict.${
-                      verdictDir === "bull" ? "bullish" : verdictDir === "bear" ? "bearish" : "neutral"
-                    }`,
-                  )}
+                  {verdictLabel}
                 </Tag>
               )}
               {bullScore != null && (
@@ -592,6 +885,40 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
               {points.map((p, i) => <li key={i}>{p}</li>)}
             </ul>
           )}
+          <StancePointsBlock bull={stancePoints.bull} bear={stancePoints.bear} t={t} />
+          {
+            /* 逐档契约因子：裸因子 JSON（无 report 正文）时这是卡片唯一的证据内容；
+               即使有正文，也把因子按「中文标签：值」结构化呈现，避免 camelCase 裸键平铺。
+               纯机器枚举（k_sigma_band / not_assessed 等，无中文）走等宽字体。 */
+          }
+          {factorFields.length > 0 && (
+            <dl className="text-xs mt-2 flex flex-col gap-1 sa-factor-list" style={{ color: "var(--muted)" }}>
+              {factorFields.map((f) => (
+                <div key={f.key} className="flex gap-1.5">
+                  <dt style={{ fontWeight: 600, flexShrink: 0 }}>{f.label}</dt>
+                  <dd className={`m-0 min-w-0${isMachineEnumValue(f.value) ? " font-mono" : ""}`}>{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {notApplicableLabels.length > 0 && (
+            <div className="text-xs mt-2 sa-factor-na" style={{ color: "var(--muted)" }}>
+              <span style={{ fontWeight: 600 }}>
+                {t("stockAnalysis.analystReport.factorNotApplicable")}
+                ：
+              </span>
+              {notApplicableLabels.join("、")}
+            </div>
+          )}
+          {qualifiedLabels.length > 0 && (
+            <div className="text-xs mt-2 sa-factor-qualified" style={{ color: "var(--muted)" }}>
+              <span style={{ fontWeight: 600 }}>
+                {t("stockAnalysis.analystReport.factorQualified")}
+                ：
+              </span>
+              {qualifiedLabels.join("、")}
+            </div>
+          )}
           {tags.length > 0 && (
             <div className="flex gap-1 flex-wrap mt-2">
               {tags.map((s, i) => (
@@ -616,6 +943,8 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
             </ul>
           )}
           {!parsed.verdict && bullScore == null && bearScore == null && !summary && points.length === 0
+            && stanceCount === 0 && factorFields.length === 0
+            && notApplicableLabels.length === 0 && qualifiedLabels.length === 0
             && miscFields.length === 0 && (
             <div className="text-xs" style={{ color: "var(--muted)" }}>
               {t("stockAnalysis.analystReport.completedNoStructure")}
@@ -637,6 +966,35 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
               <ul className="list-disc pl-6 my-2">
                 {points.map((p, i) => <li key={i}>{p}</li>)}
               </ul>
+            )}
+            <StancePointsBlock bull={stancePoints.bull} bear={stancePoints.bear} t={t} modal />
+            {factorFields.length > 0 && (
+              <dl className="flex flex-col gap-1 my-2 text-sm">
+                {factorFields.map((f) => (
+                  <div key={f.key} className="flex gap-2">
+                    <dt style={{ fontWeight: 600, flexShrink: 0 }}>{f.label}</dt>
+                    <dd className={`m-0 min-w-0${isMachineEnumValue(f.value) ? " font-mono" : ""}`}>{f.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            {notApplicableLabels.length > 0 && (
+              <div className="text-xs my-2" style={{ color: "var(--muted)" }}>
+                <span style={{ fontWeight: 600 }}>
+                  {t("stockAnalysis.analystReport.factorNotApplicable")}
+                  ：
+                </span>
+                {notApplicableLabels.join("、")}
+              </div>
+            )}
+            {qualifiedLabels.length > 0 && (
+              <div className="text-xs my-2" style={{ color: "var(--muted)" }}>
+                <span style={{ fontWeight: 600 }}>
+                  {t("stockAnalysis.analystReport.factorQualified")}
+                  ：
+                </span>
+                {qualifiedLabels.join("、")}
+              </div>
             )}
             <Collapse
               defaultActiveKey={[]}
@@ -740,12 +1098,12 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
     const bearMatch = text.match(/"bear_score"\s*:\s*(\d+)/);
     if (bullMatch) {
       const raw = parseInt(bullMatch[1], 10);
-      const normalized = raw <= 10 ? raw * 10 : raw;
+      const normalized = normalizeVerdictScore(raw);
       tags.push(`${t("stockAnalysis.sentimentBullish")}:${Math.round(normalized)}`);
     }
     if (bearMatch) {
       const raw = parseInt(bearMatch[1], 10);
-      const normalized = raw <= 10 ? raw * 10 : raw;
+      const normalized = normalizeVerdictScore(raw);
       tags.push(`${t("stockAnalysis.sentimentBearish")}:${Math.round(normalized)}`);
     }
 
@@ -773,7 +1131,9 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
 
     // 纯文本 fallback：内容不像 JSON 但有实质文字，提取前 200 字作为摘要
     if (!summary && points.length === 0 && tags.length === 0) {
-      const cleaned = text
+      // 压缩空白前先按多行形态剥掉文档式大标题（剥成单行后标题会与正文粘在一起无法分辨）
+      const detitled = stripReportTitle(text);
+      const cleaned = detitled
         .replace(/由于上游工具调用返回了.*?的错误[，。]/g, "")
         .replace(/根据系统指令.*?[，。]/g, "")
         .replace(/我的职责是.*?[，。]/g, "")
@@ -792,13 +1152,14 @@ export function AnalystReportCard({ expertId, report, tierLabel }: Props) {
         .trim();
       if (cleaned.length > 30) {
         summary = cleaned.slice(0, 200) + (cleaned.length > 200 ? "..." : "");
-      } else if (!text.trim().startsWith("{") && !text.trim().startsWith("[") && text.length > 30) {
-        summary = text.slice(0, 200) + "...";
+      } else if (!detitled.trim().startsWith("{") && !detitled.trim().startsWith("[") && detitled.length > 30) {
+        summary = detitled.slice(0, 200) + "...";
       }
     }
 
     const empty = points.length === 0 && !summary && tags.length === 0;
-    return { points, tags, summary, empty };
+    // JSON 字段路径抠出的 summary 也统一剥文档标题
+    return { points, tags, summary: summary ? stripReportTitle(summary) : "", empty };
   })();
 
   return (

@@ -125,7 +125,9 @@
     "check:horizon-keys": "node scripts/check-horizon-decision-keys.mjs",
     "check:horizon-keys:selftest": "node scripts/check-horizon-decision-keys.mjs --selftest",
     "check:analyst-id-shape": "node scripts/check-analyst-id-shape.mjs",
-    "check:analyst-id-shape:selftest": "node scripts/check-analyst-id-shape.mjs --selftest"
+    "check:analyst-id-shape:selftest": "node scripts/check-analyst-id-shape.mjs --selftest",
+    "check:accent-fg": "node scripts/check-accent-foreground.mjs",
+    "check:accent-fg:selftest": "node scripts/check-accent-foreground.mjs --selftest"
   },
   "dependencies": {
     "@ant-design/icons": "^6.1.1",

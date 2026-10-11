@@ -171,7 +171,13 @@ pub async fn load_pool_selection(
         // 窗口起点必须与 `reco_picks.generated_at` 的写入时区一致 ——
         // 落库用的是 `chrono::Local::now()`（本机时区），这里若用 `Utc::now()`
         // 会平白多出 8 小时窗口（把更早的候选也算进来）。
-        let since = (chrono::Local::now() - chrono::Duration::days(config.lookback_days as i64))
+        //
+        // as-of 感知（2026-10-11）：时间旅行批次内「当前日」= as_of 历史日（当日 00:00），
+        // live 下 `current_date_or_now()` 即北京今日，与旧口径一致。
+        let anchor_str = axagent_astock_data::as_of::current_date_or_now();
+        let anchor = chrono::NaiveDate::parse_from_str(&anchor_str, "%Y-%m-%d")
+            .expect("current_date_or_now 恒为 YYYY-MM-DD");
+        let since = (anchor - chrono::Duration::days(config.lookback_days as i64))
             .format("%Y-%m-%dT%H:%M:%S%.3f")
             .to_string();
         query = query.filter(reco_picks::Column::GeneratedAt.gte(&since));
@@ -193,9 +199,15 @@ pub async fn load_pool_selection(
     // 「当日已分析」判据走 `stock_analyses.created_at`（epoch 毫秒，建行即写）。
     // ⚠ 不能用 `analysis_date` 判「今天」——批量路径（`run_single_stock_analysis`，
     // core.rs 建行处）写的是 **UTC 日**，本地 02:00 时 UTC 还是昨天，与本地日边界错配。
+    //
+    // as-of 感知（2026-10-11）：「当日」取 as_of 上下文日（live = 北京今日）。
+    // 时间旅行批次走显式候选入口 `run_analysis_for_candidates`，不读本集合，
+    // 此处改动仅保证 load_pool_selection 在回放世界里语义自洽。
     let day_start_ms = {
-        chrono::Local::now()
-            .date_naive()
+        let anchor_str = axagent_astock_data::as_of::current_date_or_now();
+        let anchor = chrono::NaiveDate::parse_from_str(&anchor_str, "%Y-%m-%d")
+            .expect("current_date_or_now 恒为 YYYY-MM-DD");
+        anchor
             .and_hms_opt(0, 0, 0)
             .expect("00:00 恒存在")
             .and_local_timezone(chrono::Local)
@@ -255,6 +267,24 @@ pub struct PoolScanOutcome {
     pub first_error: Option<String>,
     /// 每只一行的人类可读明细（写入 TaskRunResult.output）
     pub details: Vec<String>,
+    /// 逐只的结构化执行结果（时间旅行批次据此精确定位本批 analysis_id 集合；
+    /// live cron 仅消费 details / 计数字段）
+    pub results: Vec<PoolCandidateResult>,
+}
+
+/// 候选队列中单只标的的结构化执行结果。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolCandidateResult {
+    pub stock_code: String,
+    pub stock_name: String,
+    /// 周期档名（`Period::as_str`：ultra_short / short / mid / long）
+    pub period: String,
+    pub confidence: i32,
+    /// 成功时的 stock_analyses 行 id
+    pub analysis_id: Option<String>,
+    /// 失败原因（成功时为 None）
+    pub error: Option<String>,
 }
 
 impl PoolScanOutcome {
@@ -293,13 +323,46 @@ pub async fn run_pool_scan(
     config: &PoolScanConfig,
 ) -> Result<PoolScanOutcome, String> {
     let selection = load_pool_selection(db, config).await?;
-    let candidates = selection.candidates;
-    let skipped_codes = selection.skipped_analyzed_today;
-    let truncated = selection.truncated;
+    Ok(analyze_candidate_queue(
+        db,
+        client,
+        engine,
+        selection.candidates,
+        selection.skipped_analyzed_today,
+        selection.truncated,
+    )
+    .await)
+}
+
+/// 对**显式给定**的候选队列逐只执行完整分析（时间旅行批次专用）。
+///
+/// 与 `run_pool_scan` 的唯一差别：**完全不读 `reco_picks` 主表** ——
+/// 批次在 as-of 封闭世界里内存荐股得到 picks，直接映射成本队列传入，
+/// 满足「回放荐股不落主表」铁律（B2）；也不做「当日已分析」去重
+/// （回放世界的一批本来就是新建 replay 行，与 live 互不命中）。
+pub async fn run_analysis_for_candidates(
+    db: &sea_orm::DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    engine: &std::sync::Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    candidates: Vec<PoolCandidate>,
+) -> PoolScanOutcome {
+    analyze_candidate_queue(db, client, engine, candidates, Vec::new(), false).await
+}
+
+/// 候选队列逐只分析的唯一执行体（live 扫描与时间旅行批次共用，保证逐只口径一致）。
+async fn analyze_candidate_queue(
+    db: &sea_orm::DatabaseConnection,
+    client: &axagent_astock_data::AStockClient,
+    engine: &std::sync::Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    candidates: Vec<PoolCandidate>,
+    skipped_codes: Vec<String>,
+    truncated: bool,
+) -> PoolScanOutcome {
     let mut ok = 0usize;
     let mut fail = 0usize;
     let mut first_error: Option<String> = None;
-    let mut details: Vec<String> = Vec::with_capacity(candidates.len());
+    let mut details: Vec<String> = Vec::with_capacity(candidates.len() + skipped_codes.len());
+    let mut results: Vec<PoolCandidateResult> = Vec::with_capacity(candidates.len());
 
     for c in &skipped_codes {
         details.push(format!("{c} （当日已分析，跳过）"));
@@ -332,6 +395,14 @@ pub async fn run_pool_scan(
                     c.confidence,
                     analysis_id
                 ));
+                results.push(PoolCandidateResult {
+                    stock_code: c.stock_code.clone(),
+                    stock_name: c.stock_name.clone(),
+                    period: c.period.as_str().to_string(),
+                    confidence: c.confidence,
+                    analysis_id: Some(analysis_id),
+                    error: None,
+                });
             },
             Err(e) => {
                 fail += 1;
@@ -342,11 +413,19 @@ pub async fn run_pool_scan(
                     "{} {} [置信{}] ✗ {e}",
                     c.stock_code, c.stock_name, c.confidence
                 ));
+                results.push(PoolCandidateResult {
+                    stock_code: c.stock_code.clone(),
+                    stock_name: c.stock_name.clone(),
+                    period: c.period.as_str().to_string(),
+                    confidence: c.confidence,
+                    analysis_id: None,
+                    error: Some(e),
+                });
             },
         }
     }
 
-    Ok(PoolScanOutcome {
+    PoolScanOutcome {
         candidates: candidates.len(),
         ok,
         fail,
@@ -354,7 +433,8 @@ pub async fn run_pool_scan(
         truncated,
         first_error,
         details,
-    })
+        results,
+    }
 }
 
 // ── Tauri 命令：候选池扫描 cron CRUD ──
@@ -556,6 +636,7 @@ mod tests {
             truncated: false,
             first_error: None,
             details: vec![],
+            results: vec![],
         };
         assert!(empty.render().contains("候选池为空"));
         let all_skipped = PoolScanOutcome {
@@ -566,6 +647,7 @@ mod tests {
             truncated: false,
             first_error: None,
             details: vec![],
+            results: vec![],
         };
         let text = all_skipped.render();
         assert!(text.contains("当日已分析过"), "text = {text}");

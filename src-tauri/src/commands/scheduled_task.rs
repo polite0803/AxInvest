@@ -87,6 +87,9 @@ pub struct ScheduledTaskDto {
     pub updated_at: String,
     #[serde(rename = "workflowId")]
     pub workflow_id: Option<String>,
+    /// 结构化业务参数（参数化任务使用，如时间旅行批次的 asOf/档位勾选）
+    #[serde(default)]
+    pub params: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,7 +99,27 @@ pub struct TaskRunResultDto {
     pub output: Option<String>,
     pub error: Option<String>,
     pub duration_ms: u64,
+    /// 本轮被闸门跳过（非交易日等），未真正执行业务
+    #[serde(default)]
+    pub skipped: bool,
 }
+
+/// 拥有内置执行 handler、但**没有**关联工作流的 task_type 集合。
+///
+/// 与 `init/services.rs` 中 cron executor handler 的分支一一对应 ——
+/// 新增内置任务类型时两处必须同步，否则「立即执行」会误报「不支持手动执行」。
+/// （带 `workflow_id` 的任务，如 trend-screening / opc-demand-discovery，
+/// 走工作流执行分支，不在此集合。）
+const BUILTIN_TASK_TYPES: &[&str] = &[
+    "knowledge_source_fetch_all",
+    "stock-recommendation",
+    "watchlist-scan",
+    crate::commands::pool_scan::POOL_SCAN_TASK_TYPE,
+    "batch-reflection",
+    "validate-decisions",
+    crate::commands::opc_demand_subscription::SCAN_JOB_TASK_TYPE,
+    crate::commands::backtest_validation::DECISION_BACKTEST_TASK_TYPE,
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,6 +168,7 @@ pub(crate) fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
             output: r.output.clone(),
             error: r.error.clone(),
             duration_ms: r.duration_ms,
+            skipped: r.skipped,
         }),
         status: status.to_string(),
         config: TaskConfigDto {
@@ -162,6 +186,7 @@ pub(crate) fn cron_to_dto(job: &CronJob) -> ScheduledTaskDto {
             .map(|dt| dt.to_rfc3339())
             .unwrap_or_default(),
         workflow_id: job.workflow_id.clone(),
+        params: job.params.clone(),
     }
 }
 
@@ -177,6 +202,8 @@ pub struct CreateTaskInput {
     pub workflow_id: Option<String>,
     pub enabled: Option<bool>,
     pub config: Option<TaskConfigDto>,
+    /// 结构化业务参数
+    pub params: Option<serde_json::Value>,
 }
 
 #[agent_command(domain = scheduled_task, safety = Safe, call_mode = StateOnly, description = "列出定时任务")]
@@ -220,6 +247,9 @@ pub async fn create_scheduled_task(
     if let Some(ref wf_id) = input.workflow_id {
         job.workflow_id = Some(wf_id.clone());
     }
+    if input.params.is_some() {
+        job.params = input.params.clone();
+    }
     if let Some(ref cfg) = input.config {
         job.config = TaskConfig {
             timeout_seconds: cfg.timeout_seconds,
@@ -258,6 +288,7 @@ pub async fn update_scheduled_task(
             }
             job.task_type = Some(task.task_type.clone());
             job.workflow_id = task.workflow_id.clone();
+            job.params = task.params.clone();
             job.config = TaskConfig {
                 timeout_seconds: task.config.timeout_seconds,
                 retry_on_failure: task.config.retry_on_failure,
@@ -322,10 +353,10 @@ pub async fn execute_scheduled_task(
 
     let started = axagent_runtime_core::cron_job::now_millis();
 
-    // 如果关联了工作流，真正执行工作流
-    let result = if let Some(ref wf_id) = job.workflow_id {
+    // 分支 1：关联了工作流 → 真正执行工作流并等待完成
+    if let Some(ref wf_id) = job.workflow_id {
         let opts = axagent_runtime::work_engine::RunOptions::default();
-        match state.work_engine.run_workflow(wf_id, opts).await {
+        let result = match state.work_engine.run_workflow(wf_id, opts).await {
             Ok(workflow) => {
                 tracing::info!(
                     "[execute_scheduled_task] 工作流任务 '{}' 手动执行完成: {:?}",
@@ -338,6 +369,7 @@ pub async fn execute_scheduled_task(
                     error: None,
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
+                    skipped: false,
                 }
             },
             Err(e) => {
@@ -352,27 +384,60 @@ pub async fn execute_scheduled_task(
                     error: Some(err_msg),
                     duration_ms: (axagent_runtime_core::cron_job::now_millis() - started) as u64,
                     executed_at: started,
+                    skipped: false,
                 }
             },
-        }
-    } else {
-        // 无工作流关联的任务，记录为简单执行
-        axagent_runtime_core::TaskRunResult {
-            success: true,
-            output: Some(format!("任务 '{}' 已手动触发（无关联工作流）", job.name)),
-            error: None,
-            duration_ms: 0,
-            executed_at: started,
-        }
-    };
+        };
 
-    state.cron_job_store.record_run(&task_id, result.clone()).await;
-    Ok(TaskRunResultDto {
-        success: result.success,
-        output: result.output,
-        error: result.error,
-        duration_ms: result.duration_ms,
-    })
+        state.cron_job_store.record_run(&task_id, result.clone()).await;
+        return Ok(TaskRunResultDto {
+            success: result.success,
+            output: result.output,
+            error: result.error,
+            duration_ms: result.duration_ms,
+            skipped: false,
+        });
+    }
+
+    // 分支 2：无工作流、但 task_type 有内置 handler（荐股 / 扫描 / 反思 / 回测等）
+    // → 复用定时调度的 executor 链（含交易日闸门），由 handler 内部自行 record_run。
+    // 此前这里直接记一条「已手动触发（无关联工作流）」的假成功，真实逻辑从未执行。
+    if let Some(task_type) = job.task_type.as_deref()
+        && BUILTIN_TASK_TYPES.contains(&task_type)
+    {
+        if let Some(scheduler) = state.cron_scheduler.read().await.as_ref() {
+            scheduler.trigger_now(job.clone()).await;
+            tracing::info!(
+                "[execute_scheduled_task] 内置任务 '{}' ({}) 已手动触发",
+                job.name,
+                task_type
+            );
+            // 结果由 handler 异步落库（长任务可达数分钟），这里只确认已触发
+            return Ok(TaskRunResultDto {
+                success: true,
+                output: Some(format!("任务 '{}' 已触发，请稍后刷新查看执行结果", job.name)),
+                error: None,
+                duration_ms: 0,
+                skipped: false,
+            });
+        }
+        // 调度器未启动（启动流程异常）：无法安全执行内置 handler
+        return Err(ErrorResponse::err_with_detail(
+            task_err::MANUAL_RUN_NOT_SUPPORTED,
+            format!("内置任务 '{}' 的调度器尚未启动，无法手动执行；请重启应用后重试", job.name),
+        ));
+    }
+
+    // 分支 3：既无关联工作流、也无内置 handler（custom/general 空壳任务）
+    // → 明确报错，不再记假成功、不污染执行历史
+    Err(ErrorResponse::err_with_detail(
+        task_err::MANUAL_RUN_NOT_SUPPORTED,
+        format!(
+            "任务 '{}' 没有关联工作流，也没有内置执行器，无法手动执行；\
+             请先为其关联工作流或选择一种内置任务类型",
+            job.name
+        ),
+    ))
 }
 
 #[agent_command(domain = scheduled_task, safety = Safe, call_mode = StateOnly, description = "获取定时任务模板")]

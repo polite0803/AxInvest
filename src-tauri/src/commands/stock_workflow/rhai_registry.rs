@@ -1262,13 +1262,19 @@ mod tests {
         //   000710 实测的形态：档是超短线选的、分支给的是「买入」，主档却是「持有」，
         //   唯一解释在 reasoning 的中文句子里 ⇒ 展示层要成句、反思要按档统计都不能靠解析文本。
         //   本段把「标签与实际路径必须自洽」钉住：标签说直取，action 就必须等于该档 action。
-        const ACTION_SOURCES: [&str; 7] = [
+        const ACTION_SOURCES: [&str; 9] = [
             "branch_pick",
             "risk_veto_downgrade",
+            // v151：风控否决**下到四档分支**后，「最后改写者」是档内那一跳而非主链；
+            // 主链只在「档内算法档比本档更严」时额外收紧（tierVetoed 缺席 ⇒ 走主线名）。
+            "tier_risk_veto",
             "bearish_veto_downgrade",
             "sim_veto_downgrade",
             "sanity_cap_downgrade",
             "partial_low_confidence_cap",
+            // v149(L1/L2/L3)：算法估值结论=高估 ⇒ 禁止加仓档（买入/增持 → 持有）。
+            // 执行顺序上晚于模拟盘 S-501 ⇒ 按「最后改写者优先」它是链首。
+            "valuation_cap",
             "main_chain",
         ];
         let asrc = out["actionSource"].as_str().unwrap_or_default();

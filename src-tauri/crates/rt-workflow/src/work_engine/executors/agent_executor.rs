@@ -156,10 +156,11 @@ pub struct AgentExecutor {
     domain_constraints: Arc<parking_lot::Mutex<Option<DomainConstraintsFn>>>,
     /// 内建变量提供器（可选，None 时不注入任何内建变量，行为与现状完全一致）。
     ///
-    /// 返回的 HashMap 中每个 key 对应 `{{key}}` 模板占位符。主 crate 在
-    /// `as_of` 模式时通过 WorkEngine.set_builtin_vars_provider 注入
-    /// `data_freshness` / `as_of_date` / `is_replay` / `data_scope` 等
-    /// 跨领域通用状态。
+    /// 返回的 HashMap 中每个 key 对应 `{{key}}` 模板占位符。主 crate 在启动时通过
+    /// `WorkEngine::set_builtin_vars_provider` 注入一次（键清单的权威定义在
+    /// 主 crate `init/services.rs::BUILTIN_VAR_KEYS`，此处刻意不再抄一份 ——
+    /// 2026-10-11 之前这三处手抄都在说「会注入」，而实际**没有任何调用点**）。
+    /// 提供器在被调用时读运行上下文的 as-of，因此每个节点拿到的是**本轮**值。
     builtin_vars_provider: Arc<parking_lot::Mutex<Option<BuiltinVarsProvider>>>,
 }
 
@@ -186,8 +187,9 @@ impl AgentExecutor {
 
     /// 设置内建变量提供器（线程安全，可重复设置）。
     ///
-    /// 主 crate 在 as-of 模式下调用此方法，传入从 `axagent_astock_data::as_of`
-    /// 拉取 `data_freshness` 等跨领域通用状态的闭包。
+    /// 由主 crate 在 `init/services.rs` 启动阶段调用一次（引擎侧的转发入口是
+    /// `WorkEngine::set_builtin_vars_provider`）。传入的闭包在**每次 agent 节点执行时**
+    /// 被调用，读的是那一刻调用方任务里的 as-of 上下文。
     pub fn set_builtin_vars_provider(&self, provider: BuiltinVarsProvider) {
         let mut slot = self.builtin_vars_provider.lock();
         *slot = Some(provider);
@@ -922,15 +924,18 @@ impl NodeExecutorTrait for AgentExecutor {
 
         let compiled = CompiledPrompt { segments: all_segments, variable_refs: Vec::new() };
 
-        // 拉取内建变量(可选)。由主 crate 在 as-of 模式下注入 data_freshness / as_of_date 等
-        // 跨领域通用状态;None 时行为与历史完全一致。
+        // 拉取内建变量(可选)。提供器由主 crate 启动时注册，键清单的权威定义在主 crate
+        // `init/services.rs::BUILTIN_VAR_KEYS`（此处刻意不抄第二份）；None 时行为与历史完全一致。
         let builtin_vars: Option<std::collections::HashMap<String, String>> =
             self.builtin_vars_provider.lock().as_ref().map(|provider| provider());
-        // 内建变量注入 variables（若有），确保模板渲染时 `{{data_freshness}}` 等占位符可解析
+        // 内建变量注入 variables（若有），确保模板渲染时 `{{data_freshness}}` 等占位符可解析。
+        // **fallback 语义**：调用方（`RunOptions.input` / `variables`）已给过同名键时不覆盖 ——
+        // 内建变量的定位是「链没给时的兜底读数」，不是权威值；改成覆盖会把现网 prompt 里的口径
+        // 换成另一套（2026-10-11 注册提供器时就差点造成这种未经裁定的行为变化）。
         let mut enriched_variables = context.variables.clone();
         if let Some(ref vars) = builtin_vars {
             for (k, v) in vars {
-                enriched_variables.insert(k.clone(), Value::String(v.clone()));
+                enriched_variables.entry(k.clone()).or_insert_with(|| Value::String(v.clone()));
             }
         }
         let system_prompt = render_prompt(&compiled, &enriched_variables).map_err(|e| {
@@ -4631,6 +4636,123 @@ fn verdict_spec_note(horizon: Option<axagent_harness::Period>) -> String {
     note
 }
 
+/// 判断 `start` 处（跳过空白）是否形如 `, "key" :` —— 用于识别「多余的提前闭合 `}`」。
+fn is_premature_close(s: &str, start: usize) -> bool {
+    let b = s.as_bytes();
+    let mut p = start;
+    let skip = |p: &mut usize| {
+        while *p < b.len() && matches!(b[*p], b' ' | b'\t' | b'\n' | b'\r') {
+            *p += 1;
+        }
+    };
+    skip(&mut p);
+    if p >= b.len() || b[p] != b',' {
+        return false;
+    }
+    p += 1;
+    skip(&mut p);
+    if p >= b.len() || b[p] != b'"' {
+        return false;
+    }
+    p += 1;
+    while p < b.len() && b[p] != b'"' {
+        p += 1;
+    }
+    if p >= b.len() {
+        return false;
+    }
+    p += 1;
+    skip(&mut p);
+    p < b.len() && b[p] == b':'
+}
+
+/// 删除标签 JSON 中「对象提前闭合、随后又追加顶层字段」的多余 `}`。
+///
+/// 背景（2026-10-10 实证）：`a-catalyst--mid` 的 VERDICT 标签里，模型在扁平判决对象
+/// 写到一半就补了 `}`，之后又继续写 `"notApplicable":[…]` / `"qualified":{…}}`：
+///
+/// ```text
+/// {"verdict":"偏多",…,"supplyShock":"…"}, "notApplicable":[…], "qualified":{…}}
+///                                        ^ 这个 `}` 是多写的
+/// ```
+///
+/// 整串因此非法 ⇒ `extract_verdict_tag` 返回 None ⇒ content 保持纯文本、
+/// `params.<node>` 不写入 ⇒ 下游 `content.verdict.catalyst_level` 解析失败
+/// （表现为「缺失因子：催化剂等级」，把数据质量卡在 B 级）。
+///
+/// 判据（字符串感知 + 括号深度）：仅当 `}` 处于**最外层对象深度**（`depth == 1`），
+/// 且其后紧跟 `, "key":` 形态时，才判为多余闭合并删除。合法 JSON 在最外层不可能
+/// 出现 `}, "key":`，故不会误删；对象数组（`[{…},{…}]`）里的 `}` 深度为 2，天然不命中。
+fn drop_premature_close_braces(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_str = false;
+    let mut esc = false;
+    let mut depth: i32 = 0;
+    for (i, ch) in s.char_indices() {
+        if in_str {
+            out.push(ch);
+            if esc {
+                esc = false;
+            } else if ch == '\\' {
+                esc = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => {
+                in_str = true;
+                out.push(ch);
+            },
+            '{' | '[' => {
+                depth += 1;
+                out.push(ch);
+            },
+            '}' | ']' => {
+                if ch == '}' && depth == 1 && is_premature_close(s, i + 1) {
+                    // 多余的提前闭合：丢弃（不改变 depth，后续字段仍属同一对象）
+                    continue;
+                }
+                depth -= 1;
+                out.push(ch);
+            },
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// 容错解析标签内的判决 JSON（标准解析失败后的兜底）。
+///
+/// 依次尝试：① 原文；② 删除「提前闭合」的多余 `}` 后；③ 剥掉**边界多余闭合括号**
+/// （`strip_stray_closers`，治「对象写完又在末尾多补一个 `}`」那一族，与 ② 互不覆盖：
+/// ② 的多余 `}` 后面还跟着顶层字段，本族的后面什么都没有）；④ ⑤ ⑥ 对以上三种形态
+/// 再做 `repair_json`（尾逗号 / 缺逗号 / 未转义引号等）。任一候选能解析为 **object** 即返回。
+fn repair_verdict_json(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let merged = drop_premature_close_braces(t);
+    let stray = strip_stray_closers(t);
+    for cand in [
+        t.to_string(),
+        merged.clone(),
+        stray.clone(),
+        repair_json(t),
+        repair_json(&merged),
+        repair_json(&stray),
+    ] {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&cand)
+            && v.is_object()
+        {
+            return Some(cand);
+        }
+    }
+    None
+}
+
 fn extract_verdict_tag(text: &str) -> Option<String> {
     // 查找最后一个 <!-- VERDICT: 出现位置（取最后一个，因为正文中可能也有 HTML 注释）
     // 安全做法：直接在全文本上 rfind，不手动做字节切片
@@ -4651,6 +4773,13 @@ fn extract_verdict_tag(text: &str) -> Option<String> {
                 {
                     return Some(parsed.to_string());
                 }
+            }
+            // 2026-10-10：畸形判决 JSON 兜底 —— LLM 高频「对象提前闭合再追加顶层字段」
+            // （实证 a-catalyst--mid），以及尾逗号 / 未转义引号等畸变，标准解析与
+            // 首尾花括号截取均失败。此处做一次容错修复，否则 content 保持纯文本、
+            // `params.<node>` 不写入、下游 `content.verdict.<field>` 全断。
+            if let Some(fixed) = repair_verdict_json(trimmed) {
+                return Some(fixed);
             }
         }
     }
@@ -5292,6 +5421,65 @@ mod verdict_extract_tests {
     fn test_extract_verdict_tag_miss() {
         assert_eq!(extract_verdict_tag("完全没有标签的正文"), None);
         assert_eq!(extract_verdict_tag("<!-- VERDICT: 非json -->"), None);
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_premature_close_then_appended_fields() {
+        // 2026-10-10 实证（a-catalyst--mid）：模型在扁平判决对象写到一半就补 `}`，
+        // 随后又追加 `"notApplicable":[…]` / `"qualified":{…}`，整串非法 ⇒
+        // 修复前 extract_verdict_tag 返回 None，content 保持纯文本、params 不写入，
+        // 下游 `content.verdict.catalyst_level` 解析失败（卡 B 级）。
+        let text = concat!(
+            "催化剂分析正文……\n\n",
+            r#"<!-- VERDICT: {"verdict":"偏多","bull_score":62,"catalyst_level":"L2业绩拐点级"},"#,
+            r#" "notApplicable":["notApplicableMacro"],"qualified":{"earningsQuality":"realize"}} -->"#,
+        );
+        let got = extract_verdict_tag(text).expect("提前闭合 + 追加字段应可修复");
+        let v: serde_json::Value = serde_json::from_str(&got).expect("修复结果应为合法 JSON");
+        assert_eq!(v["catalyst_level"], "L2业绩拐点级");
+        // 追加字段不得丢失（契约要求 notApplicable / qualified）
+        assert!(v["notApplicable"].is_array());
+        assert!(v["qualified"].is_object());
+    }
+
+    #[test]
+    fn test_drop_premature_close_braces_keeps_valid_nesting() {
+        // 回归保护：合法对象数组（内部 `}` 深度=2）与字符串值里出现的 `}, "x":`
+        // 都不得被「提前闭合」判据误删。
+        let arr = r#"[{"a":1},{"b":2}]"#;
+        assert_eq!(drop_premature_close_braces(arr), arr);
+        let quoted = r#"{"report":"见 {\"k\":1}, \"x\":2 处"}"#;
+        assert_eq!(drop_premature_close_braces(quoted), quoted);
+    }
+
+    #[test]
+    fn test_extract_verdict_tag_trailing_stray_closer() {
+        // 2026-10-10 实证（002475 的 `a-hot-money--mid`，快照里逐字如此）：判决对象
+        // **末尾**多打一个 `}`。它不属于「提前闭合再追加字段」那一族 —— 其后什么都没有，
+        // `is_premature_close` 不命中 ⇒ 修复前 `extract_verdict_tag` 返回 None，
+        // 产物在快照里保持畸形文本，前端只能靠正文裸分数正则抢救才计对票。
+        let text = concat!(
+            "资金面分析正文……\n\n",
+            r#"<!-- VERDICT: {"verdict":"偏空","bull_score":38,"bear_score":62,"confidence":55,"qualified":{"earningsQuality":"qualityRealizationBeyondHorizon","supplyShock":"absorbed_in_trend"}}} -->"#,
+        );
+        let got = extract_verdict_tag(text).expect("末尾多余闭合括号应被剥掉");
+        let v: serde_json::Value = serde_json::from_str(&got).expect("修复结果应为合法 JSON");
+        assert_eq!(v["bull_score"], 38);
+        assert_eq!(v["bear_score"], 62);
+        // 嵌套对象不得被连带截断（剥的是**多余**那个，不是最后一个）
+        assert!(v["qualified"].is_object());
+    }
+
+    #[test]
+    fn test_repair_verdict_json_negative_controls() {
+        // 负控 ①：合法嵌套不得被「剥多余闭合括号」伤到（栈配对，末尾无多余 `}`）。
+        let valid = r#"{"verdict":"偏空","qualified":{"a":"b"}}"#;
+        assert_eq!(strip_stray_closers(valid), valid);
+        assert_eq!(repair_verdict_json(valid).as_deref(), Some(valid));
+        // 负控 ②：正文里提到 `}` 的散文不得被"修"成结构化结论。
+        assert_eq!(repair_verdict_json("今天市场不错 }"), None);
+        // 负控 ③：空串 / 纯空白不认。
+        assert_eq!(repair_verdict_json("   "), None);
     }
 
     #[test]

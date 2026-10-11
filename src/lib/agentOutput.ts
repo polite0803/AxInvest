@@ -439,6 +439,14 @@ export function normalizeDecision(raw: Record<string, unknown>): StockDecision |
     //   两族键名都收（现网 camelCase，旧快照 snake_case）。
     actionSource: nonEmptyString(source.actionSource) ?? nonEmptyString(source.action_source) ?? undefined,
     confidenceSource: nonEmptyString(source.confidenceSource) ?? nonEmptyString(source.confidence_source) ?? undefined,
+    // ── v149(L1/L2/L3)：动作判定口径（与展示 confidence 可能不同源）+ 估值对账 ──
+    // 同属白名单重建：不在此显式带上，产端发的字段就会被静默丢弃（同上一行注释的教训）。
+    actionConfidenceBasis: numberField(source, "actionConfidenceBasis", "action_confidence_basis"),
+    actionConfidenceBasisSource: nonEmptyString(source.actionConfidenceBasisSource)
+      ?? nonEmptyString(source.action_confidence_basis_source) ?? undefined,
+    valuationReconciliation: normalizeValuationReconciliation(
+      source.valuationReconciliation ?? source.valuation_reconciliation,
+    ),
     decisionConfidence,
     signalStrength,
     timeHorizon: timeHorizon || null,
@@ -790,6 +798,29 @@ function nonEmptyString(v: unknown): string | null {
 function numberField(source: Record<string, unknown>, camel: string, snake: string): number | undefined {
   const raw = source[camel] ?? source[snake];
   return raw != null && !isNaN(Number(raw)) ? Number(raw) : undefined;
+}
+
+/**
+ * v149(L2/L3)：归一出估值对账块（`portfolio-mgr.rhai` 的 `valuation_reconciliation`）。
+ *
+ * 全字段缺失 ⇒ `undefined`（不是空对象）：缺席说的是「该记录没有对账信息」（v149 之前的
+ * 记录），与「本轮无冲突」（对象在场但 `conflictKind` 为空串）是两件事，不可混。
+ * 两族键名都收（现网 camelCase / 旧快照 snake_case，与 `nonEmptyString` 同规矩）。
+ */
+function normalizeValuationReconciliation(raw: unknown): StockDecision["valuationReconciliation"] {
+  if (raw == null || typeof raw !== "object") { return undefined; }
+  const o = raw as Record<string, unknown>;
+  const s = (camel: string, snake: string): string | undefined =>
+    nonEmptyString(o[camel]) ?? nonEmptyString(o[snake]) ?? undefined;
+  const out: NonNullable<StockDecision["valuationReconciliation"]> = {
+    conflictKind: s("conflictKind", "conflict_kind"),
+    valuationAction: s("valuationAction", "valuation_action"),
+    decisionAction: s("decisionAction", "decision_action"),
+    finalAction: s("finalAction", "final_action"),
+    capped: typeof o.capped === "boolean" ? o.capped : undefined,
+    horizon: s("horizon", "horizon"),
+  };
+  return Object.values(out).every((v) => v === undefined) ? undefined : out;
 }
 
 /**

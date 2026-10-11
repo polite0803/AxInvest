@@ -2,6 +2,7 @@ import { useStockJump } from "@/hooks/useStockJump";
 import i18n from "@/i18n";
 import { showBackendError, translateFailureText } from "@/lib/errorI18n";
 import { invoke, listen, TimeoutError as InvokeTimeoutError } from "@/lib/invoke";
+import { horizonSuffix } from "@/lib/stock-analysis-utils";
 import {
   type SerenityCandidate,
   type SerenityChainId,
@@ -10,6 +11,7 @@ import {
   useSerenityStore,
 } from "@/stores/feature/serenityStore";
 import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
+import { type AsOfDegradationEntry } from "@/types";
 import {
   AlertOutlined,
   CheckCircleOutlined,
@@ -42,7 +44,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SerenityCandidateCard } from "./SerenityCandidateCard";
 
@@ -59,6 +61,13 @@ interface SerenityResult {
    * 字段说明原因；前端在 candidates 为空时把它展示给用户。
    */
   emptyReason?: string | null;
+  /**
+   * 本轮运行**实际使用**的截止日（live 为 null）。由后端 payload 回灌，不读全局时间锚点 ——
+   * 锚点在运行后被改动时，读它会把「按 as-of 取的那一轮」显示成实时（T11 同族）。
+   */
+  asOfDate?: string | null;
+  /** 本轮 as-of 取数降级归因（live 恒空数组）；文案用后端 reason 原文，前端不重写。 */
+  asofDegradations?: Array<Omit<AsOfDegradationEntry, "as_of">>;
 }
 
 /// get_reco_detail 返回的单条候选记录（serde camelCase）
@@ -140,6 +149,40 @@ function restoreCandidate(item: RecoDetailItem): SerenityCandidate | null {
     stockName: item.stockName,
     confidence: item.confidence,
   });
+}
+
+/// 档位顺序：由近到远（超短→短→中→长）。全仓唯一一份，避免面板内出现第二份同名常量。
+const TIER_ORDER = ["ultra_short", "short", "mid", "long"];
+
+/** 档位排序权重：认不出/未标档（实时候选）排在落库档之后，绝不冒充某一档。 */
+function tierRank(c: SerenityCandidate): number {
+  const i = c.period ? TIER_ORDER.indexOf(c.period) : -1;
+  return i >= 0 ? i : TIER_ORDER.length;
+}
+
+/**
+ * **一票一卡**：把逐档候选行按股票代码折叠成「每票一组」，组内按档由近到远。
+ * 一次运行产出 mid/long 多行（Q2）时，同一只票只出一张卡，档位在卡内**分行**呈现
+ * ——此前同票逐档各一张卡，用户读成「重复显示」。
+ * 组顺序 = 首次出现顺序（不依赖输入是否已排序）。
+ */
+function groupCandidatesByStock(rows: SerenityCandidate[]) {
+  const order: string[] = [];
+  const buckets = new Map<string, SerenityCandidate[]>();
+  for (const row of rows) {
+    const code = row.stock_code ?? row.stockCode ?? "";
+    const bucket = buckets.get(code);
+    if (bucket) {
+      bucket.push(row);
+    } else {
+      order.push(code);
+      buckets.set(code, [row]);
+    }
+  }
+  return order.map((code) => ({
+    code,
+    tiers: (buckets.get(code) ?? []).slice().sort((a, b) => tierRank(a) - tierRank(b)),
+  }));
 }
 
 /// 从多种可能的 candidates 结构中提取候选数组。
@@ -433,6 +476,10 @@ function ensureSerenityListeners(): Promise<void> {
            * 映射 `WorkflowError` 全部 10 个变体）。`undefined` = 旧载荷（无码）⇒ 展示回退 `error` 原文。
            */
           code?: string | null;
+          /** 本轮实际使用的截止日（与 invoke 返回值同源，live 为 null）。 */
+          asOfDate?: string | null;
+          /** 本轮 as-of 取数降级归因切片（live 恒空数组）。 */
+          asofDegradations?: Array<Omit<AsOfDegradationEntry, "as_of">>;
           emptyReason?: string | null;
           /**
            * 落库部分失败（`partial_failure`）的**结构化码**：`stock_workflow::PERSIST_FAILED`
@@ -495,6 +542,9 @@ function ensureSerenityListeners(): Promise<void> {
             if (Array.isArray(p.trends)) {
               store.setTrends(p.trends);
             }
+            // 本轮口径与归因**随 payload 走**（不读全局锚点）：缺字段按 live 处理，不猜日期。
+            store.setLastRunAsOfDate(typeof p.asOfDate === "string" ? p.asOfDate : null);
+            store.setAsofDegradations(Array.isArray(p.asofDegradations) ? p.asofDegradations : []);
             if (typeof p.emptyReason === "string" && p.emptyReason.trim().length > 0) {
               store.setEmptyReason(p.emptyReason.trim());
             }
@@ -767,12 +817,20 @@ export function SerenityScreeningPanel() {
     clearSteps,
     emptyReason,
     setEmptyReason,
+    asofDegradations,
+    setAsofDegradations,
+    lastRunAsOfDate,
+    setLastRunAsOfDate,
     runningChain,
     setRunningChain,
   } = useSerenityStore();
   const { t } = useTranslation();
   // 跳转统一走 useStockJump（与智能荐股 / 筛选结果同一条链，避免参数名分叉）
   const jumpToStock = useStockJump();
+
+  // 一票一卡：逐档候选行按票折叠（组内按档由近到远）。渲染与计数共用这一份分组，
+  // 避免「票数」与「行数」两处各算一遍（此前计数用 Set 另算，口径分叉）。
+  const candidateGroups = useMemo(() => groupCandidatesByStock(candidates), [candidates]);
 
   // 事件监听已上移到模块级（ensureSerenityListeners）：跨 tab 切换存活，
   // 不再使用组件内 ref 保存 unlisten，也不再随 unmount 解绑。
@@ -828,6 +886,8 @@ export function SerenityScreeningPanel() {
     Array<{
       stockCode: string;
       stockName: string;
+      /** 档位（`mid` / `long`）。Q2 逐档落库后同票有多行，必须带档位才认得出重复。 */
+      period: string;
       confidence: number;
       generatedAt: string;
     }>
@@ -937,17 +997,10 @@ export function SerenityScreeningPanel() {
         const restoredRaw = (detail ?? [])
           .map(restoreCandidate)
           .filter((c): c is SerenityCandidate => c != null);
-        // Q2 之后一次运行**逐档各一行**（mid、long）。这里不折叠成一行：
-        // 用户裁定 A = 同票逐档两张卡，档位是这张卡的口径维度之一；折叠会把产出层的变化
-        // 挡在呈现层之外（我上一版就是那么做的，已改裁撤掉）。
-        // 只做排序：同票相邻、档由近到远，避免两张卡被彼此隔开。
+        // Q2 之后一次运行**逐档各一行**（mid、long）。这里不做折叠 —— 折叠发生在渲染层
+        // （`groupCandidatesByStock`，一票一卡、卡内分行列多档），产出层的变化不被呈现层吞掉。
+        // 这里只按「票 + 档」排序，保证组顺序稳定、组内档由近到远。
         const codeOf = (c: SerenityCandidate): string => c.stock_code ?? c.stockCode ?? "";
-        const TIER_ORDER = ["ultra_short", "short", "mid", "long"];
-        const tierRank = (c: SerenityCandidate): number => {
-          const i = c.period ? TIER_ORDER.indexOf(c.period) : -1;
-          // 实时候选不带档 ⇒ 排在落库行之后，而不是冒充某一档
-          return i >= 0 ? i : TIER_ORDER.length;
-        };
         const restored = restoredRaw.slice().sort((a, b) => {
           const byCode = codeOf(a).localeCompare(codeOf(b));
           return byCode !== 0 ? byCode : tierRank(a) - tierRank(b);
@@ -986,6 +1039,9 @@ export function SerenityScreeningPanel() {
     setTrends([]);
     setError(null);
     setEmptyReason(null);
+    // 本轮口径与归因必须逐轮清：否则上一轮回放的「数据截至 X」会挂在这一轮的实盘结果上。
+    setAsofDegradations([]);
+    setLastRunAsOfDate(null);
     setStage("loading");
     setCompletedNodes(0);
     setTotalNodes(0);
@@ -1037,6 +1093,9 @@ export function SerenityScreeningPanel() {
         if (typeof r?.emptyReason === "string" && r.emptyReason.trim().length > 0) {
           setEmptyReason(r.emptyReason.trim());
         }
+        // invoke 兜底路径与事件路径同源：口径与归因都取**本轮**返回值，缺字段按 live 处理，不猜。
+        setLastRunAsOfDate(typeof r?.asOfDate === "string" ? r.asOfDate : null);
+        setAsofDegradations(Array.isArray(r?.asofDegradations) ? r.asofDegradations : []);
         setStage("done");
       }
     } catch (err: unknown) {
@@ -1092,7 +1151,7 @@ export function SerenityScreeningPanel() {
         // 若该轮候选来自智能荐股（bottleneck）则详情恒空，显示"无候选股票数据"。
         const styleFilter = row.styles || "serenity";
         const items = await invoke<
-          Array<{ stockCode: string; stockName: string; confidence: number; generatedAt: string }>
+          Array<{ stockCode: string; stockName: string; period: string; confidence: number; generatedAt: string }>
         >("get_reco_detail", {
           generatedAt: row.generatedAt,
           styleFilter,
@@ -1652,28 +1711,40 @@ export function SerenityScreeningPanel() {
         </Card>
       )}
 
+      {
+        /* 本轮取数口径：回放的候选按截止日取数、且刻意不进「趋势智选历史」。
+          三件事分开说 —— 口径、落库缺席、降级归因各占一行，不揉成一段（同一屏
+          不得让回放结果看起来与实盘无异）。日期与归因都取**本轮 payload**，不读全局锚点。 */
+      }
+      {lastRunAsOfDate !== null && (
+        <Alert
+          type="warning"
+          showIcon
+          className="w-full"
+          title={
+            <span className="text-xs">
+              {t("serenityPanel.bannerAsOf", { date: lastRunAsOfDate })}
+            </span>
+          }
+          description={
+            <div className="flex flex-col gap-1 text-[10px]">
+              <span>{t("serenityPanel.replayNotPersisted")}</span>
+              {asofDegradations.map((e, i) => <span key={`${e.vendor}-${e.method}-${i}`}>{e.reason}</span>)}
+            </div>
+          }
+        />
+      )}
+
       {/* 候选股列表 */}
       {candidates.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <Title level={5} className="m-0">
               {
-                /* Q2 后计数单位是「逐档候选行数」而非票数（同票 mid/long 各一张卡）⇒
-                  两者不等时必须并列给出，否则「15 条」会被读成「15 只」 */
+                /* 计数单位是**票数**（一票一卡）：逐档行数在卡内分行呈现，
+                  不再出现「15 条 / 15 只」两义并存的读法 */
               }
-              {t("serenityPanel.candidateTitle")} ({candidates.length})
-              {(() => {
-                const stocks = new Set(
-                  candidates.map((c) => c.stock_code ?? c.stockCode ?? ""),
-                ).size;
-                return stocks !== candidates.length
-                  ? (
-                    <Text type="secondary" className="text-xs font-normal ml-2">
-                      {t("serenityPanel.candidateTierRowsNote", { stocks })}
-                    </Text>
-                  )
-                  : null;
-              })()}
+              {t("serenityPanel.candidateTitle")} ({candidateGroups.length} {t("serenityPanel.filterSuffixCount")})
             </Title>
             <Button
               size="small"
@@ -1715,15 +1786,13 @@ export function SerenityScreeningPanel() {
               {t("serenityPanel.refreshExitButton")}
             </Button>
           </div>
-          {candidates.map((c, i) => {
-            const code = c.stock_code ?? c.stockCode ?? "";
-            return (
-              <SerenityCandidateCard
-                key={`${code}-${i}`}
-                candidate={c}
-              />
-            );
-          })}
+          {candidateGroups.map((group, i) => (
+            <SerenityCandidateCard
+              key={`${group.code}-${i}`}
+              candidate={group.tiers[0]}
+              tierRows={group.tiers}
+            />
+          ))}
         </div>
       )}
 
@@ -2023,31 +2092,42 @@ export function SerenityScreeningPanel() {
                 {t("serenityPanel.serenityHistory.candidateCount")}: {serenityDetailItems.length}
                 {t("serenityPanel.filterSuffixCount")}
               </div>
-              {serenityDetailItems.map((item, i) => (
-                <Card
-                  key={`${item.stockCode}-${i}`}
-                  size="small"
-                  hoverable
-                  className="w-full"
-                  onClick={() => {
-                    setSerenityDetailOpen(false);
-                    jumpToStock({ code: item.stockCode, name: item.stockName });
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Text strong className="text-sm">{item.stockName}</Text>
-                      <Text type="secondary" className="text-xs font-mono">{item.stockCode}</Text>
+              {serenityDetailItems.map((item, i) => {
+                // 档位标签：Q2 逐档落库后同票有 mid/long 多行，缺了它两行完全同形 ⇒ 看着像重复。
+                // 显示名走全仓唯一一套键（`stockAnalysis.timeHorizon*`，经 `horizonSuffix`），
+                // 认不出的档名原样显示，不猜档。
+                const periodSuffix = item.period ? horizonSuffix(item.period) : null;
+                return (
+                  <Card
+                    key={`${item.stockCode}-${item.period}-${i}`}
+                    size="small"
+                    hoverable
+                    className="w-full"
+                    onClick={() => {
+                      setSerenityDetailOpen(false);
+                      jumpToStock({ code: item.stockCode, name: item.stockName });
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Text strong className="text-sm">{item.stockName}</Text>
+                        <Text type="secondary" className="text-xs font-mono">{item.stockCode}</Text>
+                        <Tag className="text-[10px] m-0" color="blue">
+                          {periodSuffix
+                            ? t(`stockAnalysis.timeHorizon${periodSuffix}`)
+                            : item.period || t("stockAnalysis.reflection.horizonUnknown")}
+                        </Tag>
+                      </div>
+                      <Tag color="purple" className="text-xs font-bold">
+                        {t("serenityPanel.confidencePrefix")} {item.confidence}
+                      </Tag>
                     </div>
-                    <Tag color="purple" className="text-xs font-bold">
-                      {t("serenityPanel.confidencePrefix")} {item.confidence}
-                    </Tag>
-                  </div>
-                  <div className="mt-1 text-[10px] text-gray-500">
-                    {new Date(item.generatedAt).toLocaleString()}
-                  </div>
-                </Card>
-              ))}
+                    <div className="mt-1 text-[10px] text-gray-500">
+                      {new Date(item.generatedAt).toLocaleString()}
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
           )}
       </Modal>

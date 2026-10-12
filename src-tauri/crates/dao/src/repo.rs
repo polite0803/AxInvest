@@ -67,6 +67,7 @@ pub mod sync_device;
 pub mod sync_history;
 pub mod sync_permission;
 pub mod sync_policy;
+pub mod time_travel_batch_runs;
 pub mod tool_execution;
 pub mod vec_collection;
 pub mod workflow_approval;

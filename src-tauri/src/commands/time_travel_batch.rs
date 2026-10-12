@@ -3,7 +3,8 @@
 //! 状态存储：
 //! - **运行态**：进程内 `BATCH_RUNS`（轮询低延迟，互斥语义见下）；
 //! - **历史态**：每次状态变更同步 upsert 到 `time_travel_batch_runs` 表
-//!   （实体 `axagent_entities::time_travel_batch_runs`，声明式建表），重启后
+//!   （实体声明见 `axagent_entities::time_travel_batch_runs`，读写统一收口在
+//!   `axagent_dao::repo::time_travel_batch_runs`），重启后
 //!   `get_time_travel_batch` 从库中还原历史；`list_time_travel_batches` 给任务中心
 //!   提供倒序历史。进程异常退出遗留的 `running` 行在新进程首次访问时收敛为
 //!   `interrupted`——as_of 封闭世界栈是进程级的，不支持跨进程续跑。
@@ -34,12 +35,9 @@ use axagent_agent_macro::agent_command;
 use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self, AsOfContext, AsOfSource};
 use axagent_astock_data::calendar;
-use axagent_entities::time_travel_batch_runs;
 use axagent_harness::{DatabaseConnection, holding_period::Period};
 use axagent_search::vector_store::VectorStore;
 use axagent_trajectory::TrajectoryStorage;
-use sea_orm::sea_query::{Expr, OnConflict};
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::sync::{Mutex, OwnedMutexGuard};
@@ -191,81 +189,48 @@ impl BatchRunState {
     }
 }
 
+/// 运行状态 → 历史表 upsert 载体。
+///
+/// `request` / analyses / horizons 的 JSON 序列化失败按 None 落库（与原实现同口径：
+/// 落库失败/缺明细不阻断批次流水线，内存态仍是权威）。
+fn batch_record_from_state(
+    s: &BatchRunState,
+) -> axagent_dao::repo::time_travel_batch_runs::BatchRunRecord {
+    axagent_dao::repo::time_travel_batch_runs::BatchRunRecord {
+        id: s.batch_id.clone(),
+        as_date: s.as_of.clone(),
+        trading_days_ago: s.trading_days_ago,
+        status: s.status.clone(),
+        phase: s.phase.clone(),
+        message: s.message.clone(),
+        total: s.total as i32,
+        ok: s.ok as i32,
+        fail: s.fail as i32,
+        reco_picks: s.reco_picks as i32,
+        serenity_picks: s.serenity_picks as i32,
+        serenity_error: s.serenity_error.clone(),
+        request_json: s.request.as_ref().and_then(|r| serde_json::to_string(r).ok()),
+        analyses_json: serde_json::to_string(&s.analyses).ok(),
+        horizons_json: serde_json::to_string(&s.horizons).ok(),
+        reflection_summary: s.reflection_summary.clone(),
+        error_code: s.error_code.clone(),
+        error_detail: s.error_detail.clone(),
+        created_at_ms: s.created_at_ms,
+        updated_at_ms: s.updated_at_ms,
+        finished_at_ms: s.finished_at_ms,
+    }
+}
+
 /// 更新内存态并尽力同步落库（落库失败只告警，不阻断批次流水线；
 /// 内存态是运行轮询的权威，库是重启后的历史权威）。
 async fn save_state(db: &DatabaseConnection, mut s: BatchRunState) {
     s.updated_at_ms = now_ms();
-    if let Err(e) = upsert_batch_run(db, &s).await {
+    // 落库逻辑下沉 dao（分层护栏：命令层不得直连 sea_orm / entities）
+    let record = batch_record_from_state(&s);
+    if let Err(e) = axagent_dao::repo::time_travel_batch_runs::upsert_batch_run(db, &record).await {
         tracing::warn!("[time-travel-batch] 批次 {} 状态落库失败（不影响运行）: {e}", s.batch_id);
     }
     BATCH_RUNS.lock().await.insert(s.batch_id.clone(), s);
-}
-
-/// 全量 upsert 一行批次历史（与 save_state 调用同阶：创建 / 分析完成 /
-/// 反思阶段切换 / 反思汇总 / 终态，不做逐只分析的高频写）。
-async fn upsert_batch_run(
-    db: &DatabaseConnection,
-    s: &BatchRunState,
-) -> Result<(), sea_orm::DbErr> {
-    let request_json = s.request.as_ref().and_then(|r| serde_json::to_string(r).ok());
-    let analyses_json = serde_json::to_string(&s.analyses).ok();
-    let horizons_json = serde_json::to_string(&s.horizons).ok();
-
-    let am = time_travel_batch_runs::ActiveModel {
-        id: Set(s.batch_id.clone()),
-        as_date: Set(s.as_of.clone()),
-        trading_days_ago: Set(s.trading_days_ago),
-        status: Set(s.status.clone()),
-        phase: Set(s.phase.clone()),
-        message: Set(s.message.clone()),
-        total: Set(s.total as i32),
-        ok: Set(s.ok as i32),
-        fail: Set(s.fail as i32),
-        reco_picks: Set(s.reco_picks as i32),
-        serenity_picks: Set(s.serenity_picks as i32),
-        serenity_error: Set(s.serenity_error.clone()),
-        request_json: Set(request_json),
-        analyses_json: Set(analyses_json),
-        horizons_json: Set(horizons_json),
-        reflection_summary: Set(s.reflection_summary.clone()),
-        error_code: Set(s.error_code.clone()),
-        error_detail: Set(s.error_detail.clone()),
-        created_at_ms: Set(s.created_at_ms),
-        updated_at_ms: Set(s.updated_at_ms),
-        finished_at_ms: Set(s.finished_at_ms),
-    };
-
-    time_travel_batch_runs::Entity::insert(am)
-        .on_conflict(
-            // 主键冲突（同批次后续状态更新）时覆盖除 id / 创建时间 / 原始请求外的列。
-            // request_json 首插后永不更新：execute_batch 中途若从库还原（request 为
-            // #[serde(skip)] 的 None）再 upsert，不能让 None 覆盖原始请求。
-            OnConflict::column(time_travel_batch_runs::Column::Id)
-                .update_columns([
-                    time_travel_batch_runs::Column::AsDate,
-                    time_travel_batch_runs::Column::TradingDaysAgo,
-                    time_travel_batch_runs::Column::Status,
-                    time_travel_batch_runs::Column::Phase,
-                    time_travel_batch_runs::Column::Message,
-                    time_travel_batch_runs::Column::Total,
-                    time_travel_batch_runs::Column::Ok,
-                    time_travel_batch_runs::Column::Fail,
-                    time_travel_batch_runs::Column::RecoPicks,
-                    time_travel_batch_runs::Column::SerenityPicks,
-                    time_travel_batch_runs::Column::SerenityError,
-                    time_travel_batch_runs::Column::AnalysesJson,
-                    time_travel_batch_runs::Column::HorizonsJson,
-                    time_travel_batch_runs::Column::ReflectionSummary,
-                    time_travel_batch_runs::Column::ErrorCode,
-                    time_travel_batch_runs::Column::ErrorDetail,
-                    time_travel_batch_runs::Column::UpdatedAtMs,
-                    time_travel_batch_runs::Column::FinishedAtMs,
-                ])
-                .to_owned(),
-        )
-        .exec(db)
-        .await?;
-    Ok(())
 }
 
 /// 进程首次访问时收敛上次进程遗留的 running 批次。
@@ -280,7 +245,17 @@ async fn ensure_stale_reaped(db: &DatabaseConnection) {
     if STALE_REAP_DONE.swap(true, Ordering::SeqCst) {
         return;
     }
-    match mark_stale_interrupted(db).await {
+    // 收敛 SQL 下沉 dao（分层护栏：命令层不得直连 sea_orm / entity）；
+    // 状态值与中断说明仍由命令层给（状态语义属于流水线，不属于 repo）。
+    let result = axagent_dao::repo::time_travel_batch_runs::mark_stale_batches(
+        db,
+        now_ms(),
+        STATUS_RUNNING,
+        STATUS_INTERRUPTED,
+        "应用重启：批次运行中进程退出，as-of 封闭世界无法跨进程续跑",
+    )
+    .await;
+    match result {
         Ok(0) => {},
         Ok(n) => tracing::info!(
             "[time-travel-batch] 启动收敛：{n} 个遗留 running 批次标记为 interrupted"
@@ -289,26 +264,12 @@ async fn ensure_stale_reaped(db: &DatabaseConnection) {
     }
 }
 
-/// 把库内所有 running 批次标记为 interrupted，返回受影响行数。
-async fn mark_stale_interrupted(db: &DatabaseConnection) -> Result<u64, sea_orm::DbErr> {
-    let now = now_ms();
-    let r = time_travel_batch_runs::Entity::update_many()
-        .col_expr(time_travel_batch_runs::Column::Status, Expr::value(STATUS_INTERRUPTED))
-        .col_expr(
-            time_travel_batch_runs::Column::Message,
-            Expr::value("应用重启：批次运行中进程退出，as-of 封闭世界无法跨进程续跑"),
-        )
-        .col_expr(time_travel_batch_runs::Column::UpdatedAtMs, Expr::value(now))
-        .col_expr(time_travel_batch_runs::Column::FinishedAtMs, Expr::value(now))
-        .filter(time_travel_batch_runs::Column::Status.eq(STATUS_RUNNING))
-        .exec(db)
-        .await?;
-    Ok(r.rows_affected)
-}
-
 /// 历史表行还原为运行状态。`summary_only=true` 时不反序列化大 JSON 明细
 /// （列表场景；analyses/horizons/reflection_summary 留空，计数列仍完整）。
-fn state_from_model(m: time_travel_batch_runs::Model, summary_only: bool) -> BatchRunState {
+fn state_from_model(
+    m: axagent_dao::repo::time_travel_batch_runs::BatchRunModel,
+    summary_only: bool,
+) -> BatchRunState {
     let (analyses, horizons, reflection_summary) = if summary_only {
         (Vec::new(), Vec::new(), None)
     } else {
@@ -523,9 +484,9 @@ pub async fn get_time_travel_batch(
     }
 
     let model =
-        time_travel_batch_runs::Entity::find_by_id(&batch_id).one(db).await.map_err(|e| {
-            ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("查询批次历史失败: {e}"))
-        })?;
+        axagent_dao::repo::time_travel_batch_runs::fetch_batch_by_id(db, &batch_id).await.map_err(
+            |e| ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("查询批次历史失败: {e}")),
+        )?;
     Ok(model.map(|m| state_from_model(m, false)))
 }
 
@@ -542,15 +503,15 @@ pub async fn list_time_travel_batches(
     let db = state.harness.db();
     ensure_stale_reaped(db).await;
 
-    let mut query = time_travel_batch_runs::Entity::find()
-        .order_by_desc(time_travel_batch_runs::Column::CreatedAtMs);
-    if let Some(status) = status_filter.filter(|s| !s.is_empty()) {
-        query = query.filter(time_travel_batch_runs::Column::Status.eq(status));
-    }
-    if let Some(as_of) = as_of.filter(|s| !s.is_empty()) {
-        query = query.filter(time_travel_batch_runs::Column::AsDate.eq(as_of));
-    }
-    let rows = query.limit(limit.unwrap_or(50).min(200)).all(db).await.map_err(|e| {
+    // 查询下沉 dao（分层护栏：命令层不得直连 sea_orm / entity）
+    let rows = axagent_dao::repo::time_travel_batch_runs::list_recent_batch_runs(
+        db,
+        limit.unwrap_or(50).min(200),
+        status_filter.as_deref(),
+        as_of.as_deref(),
+    )
+    .await
+    .map_err(|e| {
         ErrorResponse::err_with_detail(ec::QUERY_FAILED, format!("查询批次历史失败: {e}"))
     })?;
 
@@ -913,6 +874,7 @@ async fn summarize_horizons(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axagent_dao::repo::time_travel_batch_runs as repo;
 
     /// serenity inner 返回 JSON 的键名是混合形态（候选本体 snake_case +
     /// 逐档覆盖 camelCase）；置信度必须优先取 winRate（折算胜率，与 reco_picks
@@ -1022,19 +984,20 @@ mod tests {
     async fn persist_then_restore_roundtrip_and_upsert_updates() {
         let db = test_db().await;
         let mut s = make_persist_state("b1", "2026-05-01", STATUS_COMPLETED, 1_000);
-        upsert_batch_run(&db, &s).await.expect("首次 insert 应成功");
+        repo::upsert_batch_run(&db, &batch_record_from_state(&s))
+            .await
+            .expect("首次 insert 应成功");
 
         // 同批次状态推进（completed 计数变化）→ upsert 更新
         s.ok = 2;
         s.fail = 0;
         s.updated_at_ms = 2_000;
-        upsert_batch_run(&db, &s).await.expect("冲突 upsert 应成功");
-
-        let m = time_travel_batch_runs::Entity::find_by_id("b1")
-            .one(&db)
+        repo::upsert_batch_run(&db, &batch_record_from_state(&s))
             .await
-            .expect("查询应成功")
-            .expect("批次行应存在");
+            .expect("冲突 upsert 应成功");
+
+        let m =
+            repo::fetch_batch_by_id(&db, "b1").await.expect("查询应成功").expect("批次行应存在");
         assert_eq!(m.ok, 2, "upsert 应覆盖计数列");
         assert_eq!(m.created_at_ms, 1_000, "创建时间不被更新覆盖");
 
@@ -1050,7 +1013,7 @@ mod tests {
         assert_eq!(restored.horizons[0].completed, 1);
 
         // 全表仍只有一行（upsert 未产生重复）
-        let count = time_travel_batch_runs::Entity::find().all(&db).await.unwrap().len();
+        let count = repo::list_recent_batch_runs(&db, 100, None, None).await.unwrap().len();
         assert_eq!(count, 1);
     }
 
@@ -1060,24 +1023,31 @@ mod tests {
     async fn list_returns_desc_summary_with_filters() {
         let db = test_db().await;
         // 三条：两条 completed（不同日期）、一条 running
-        upsert_batch_run(&db, &make_persist_state("old", "2026-04-01", STATUS_COMPLETED, 1_000))
+        for (id, date, ts) in [
+            ("old", "2026-04-01", 1_000_i64),
+            ("new", "2026-05-01", 3_000),
+            ("run", "2026-05-01", 2_000),
+        ] {
+            let status = if id == "run" {
+                STATUS_RUNNING
+            } else {
+                STATUS_COMPLETED
+            };
+            repo::upsert_batch_run(
+                &db,
+                &batch_record_from_state(&make_persist_state(id, date, status, ts)),
+            )
             .await
             .unwrap();
-        upsert_batch_run(&db, &make_persist_state("new", "2026-05-01", STATUS_COMPLETED, 3_000))
-            .await
-            .unwrap();
-        upsert_batch_run(&db, &make_persist_state("run", "2026-05-01", STATUS_RUNNING, 2_000))
-            .await
-            .unwrap();
+        }
 
-        // 直接复用命令的查询逻辑（与 list_time_travel_batches 同构）
-        let all: Vec<_> = time_travel_batch_runs::Entity::find()
-            .order_by_desc(time_travel_batch_runs::Column::CreatedAtMs)
-            .limit(50)
-            .all(&db)
+        // 走命令层同一查询（list_time_travel_batches 调的就是它）
+        let all: Vec<_> = repo::list_recent_batch_runs(&db, 50, None, None)
             .await
-            .unwrap();
-        let all: Vec<_> = all.into_iter().map(|m| state_from_model(m, true)).collect();
+            .unwrap()
+            .into_iter()
+            .map(|m| state_from_model(m, true))
+            .collect();
         assert_eq!(all.len(), 3);
         assert_eq!(all[0].batch_id, "new", "倒序：最新创建在前");
         assert_eq!(all[1].batch_id, "run");
@@ -1087,19 +1057,12 @@ mod tests {
         assert_eq!(all[0].total, 2, "但标量计数仍完整");
 
         // status 过滤
-        let completed: Vec<_> = time_travel_batch_runs::Entity::find()
-            .filter(time_travel_batch_runs::Column::Status.eq(STATUS_COMPLETED))
-            .all(&db)
-            .await
-            .unwrap();
+        let completed =
+            repo::list_recent_batch_runs(&db, 50, Some(STATUS_COMPLETED), None).await.unwrap();
         assert_eq!(completed.len(), 2);
 
         // as_of 过滤
-        let on_day: Vec<_> = time_travel_batch_runs::Entity::find()
-            .filter(time_travel_batch_runs::Column::AsDate.eq("2026-05-01"))
-            .all(&db)
-            .await
-            .unwrap();
+        let on_day = repo::list_recent_batch_runs(&db, 50, None, Some("2026-05-01")).await.unwrap();
         assert_eq!(on_day.len(), 2);
     }
 
@@ -1108,27 +1071,52 @@ mod tests {
     #[tokio::test]
     async fn stale_running_rows_are_interrupted() {
         let db = test_db().await;
-        upsert_batch_run(&db, &make_persist_state("zombie", "2026-05-01", STATUS_RUNNING, 1_000))
-            .await
-            .unwrap();
-        upsert_batch_run(&db, &make_persist_state("done", "2026-05-02", STATUS_COMPLETED, 2_000))
-            .await
-            .unwrap();
+        repo::upsert_batch_run(
+            &db,
+            &batch_record_from_state(&make_persist_state(
+                "zombie",
+                "2026-05-01",
+                STATUS_RUNNING,
+                1_000,
+            )),
+        )
+        .await
+        .unwrap();
+        repo::upsert_batch_run(
+            &db,
+            &batch_record_from_state(&make_persist_state(
+                "done",
+                "2026-05-02",
+                STATUS_COMPLETED,
+                2_000,
+            )),
+        )
+        .await
+        .unwrap();
 
-        let affected = mark_stale_interrupted(&db).await.unwrap();
-        assert_eq!(affected, 1, "仅 running 行被收敛");
+        // 与 ensure_stale_reaped 同一调用形态（状态/文案由命令层给）
+        let reap = || async {
+            repo::mark_stale_batches(
+                &db,
+                now_ms(),
+                STATUS_RUNNING,
+                STATUS_INTERRUPTED,
+                "应用重启：批次运行中进程退出，as-of 封闭世界无法跨进程续跑",
+            )
+            .await
+            .unwrap()
+        };
+        assert_eq!(reap().await, 1, "仅 running 行被收敛");
 
-        let zombie =
-            time_travel_batch_runs::Entity::find_by_id("zombie").one(&db).await.unwrap().unwrap();
+        let zombie = repo::fetch_batch_by_id(&db, "zombie").await.unwrap().unwrap();
         assert_eq!(zombie.status, STATUS_INTERRUPTED);
         assert!(zombie.finished_at_ms.is_some(), "interrupted 也写完成时刻");
         assert!(zombie.message.unwrap().contains("重启"));
 
-        let done =
-            time_travel_batch_runs::Entity::find_by_id("done").one(&db).await.unwrap().unwrap();
+        let done = repo::fetch_batch_by_id(&db, "done").await.unwrap().unwrap();
         assert_eq!(done.status, STATUS_COMPLETED, "终态行不受收敛影响");
 
         // 再执行一次：无遗留 running，幂等返回 0
-        assert_eq!(mark_stale_interrupted(&db).await.unwrap(), 0);
+        assert_eq!(reap().await, 0);
     }
 }

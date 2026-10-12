@@ -182,6 +182,16 @@ export interface HorizonPriceMap {
  */
 export interface HorizonDecision {
   action: string;
+  /**
+   * 档内风控否决**前**的原始方向（2026-10-10 B 裁定）：四档 `action` 现在是
+   * 档内风控否决后的终值，而 LLM 侧 action 天然未叠加风控政策 ⇒ 两侧方向一致性维度
+   * （Rust `decision.rs`）与前端「被降为」成句（`stock-analysis-utils.ts`）
+   * 要比较/引用否决前方向时必须读本键；缺席（旧批次记录 / 未否决）退回 `action`。
+   * 产端 = 四份 `portfolio-mgr-h-*.rhai`。
+   */
+  originalAction?: string;
+  /** 本档动作是否被档内风控否决（true 时 `action` 已被改写，`originalAction` 保留原值） */
+  tierVetoed?: boolean;
   verdict: string;
   /** 该档档位标签（分支脚本自证；装配段用它核对「读到的不是别档输出」） */
   horizon?: string;

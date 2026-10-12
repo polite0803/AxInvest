@@ -176,7 +176,7 @@ impl Args {
 /// ## 为什么必须清
 ///
 /// `strategy_performance` 的行是**反思结论的量化投影**：`was_correct` 由
-/// `deterministic_was_correct(决策方向, 行情快照)` 产出（`reflection.rs:826`），
+/// `deterministic_was_correct(决策方向, 行情快照)` 产出（`stock_workflow/reflection.rs:826`），
 /// 决策被覆盖后旧行即失去依据。
 ///
 /// 消费端 `compute_adjusted_weights` 按 **(strategy_id, period)** 聚合
@@ -211,8 +211,8 @@ async fn delete_stale_reflection_perf(db: &sea_orm::DatabaseConnection, stock_co
 /// ## 为什么必须等（这是本 bin 最容易被漏掉的一环）
 ///
 /// 业务封装路径 `run_stock_workflow_inner` **不等待 DAG**：它把工作流
-/// `tokio::spawn` 到后台后**立即返回**（`core.rs:826-837` 的 `tokio::spawn`
-/// \+ `:885` 的 `engine.run_workflow`）。这是**为前端设计**的 fire-and-forget 形态：
+/// `tokio::spawn` 到后台后**立即返回**（`stock_workflow/core.rs:967` 的 `tokio::spawn`
+/// \+ `:1027` 的 `engine.run_workflow`）。这是**为前端设计**的 fire-and-forget 形态：
 /// 前端拿到 `analysisId` 后自己轮询 `status`。
 ///
 /// 但在**离线 bin** 里，`run()` 一返回、`main` 一结束，tokio runtime 就被 drop，
@@ -262,9 +262,9 @@ async fn wait_until_settled(
 ///
 /// 业务封装路径（`run_stock_workflow_inner`）**不产生**反思 pending 行：
 /// `hooks.rs` 的 `stock-analysis-persist` 有守卫
-/// `if input_has_analysis_id(&ctx.input) { return Ok(()) }`（`hooks.rs:779-784`），
+/// `if input_has_analysis_id(&ctx.input) { return Ok(()) }`（`stock_workflow/hooks.rs:1058-1060`），
 /// 而业务封装路径的 input 恒带 `analysis_id` ⇒ 该 hook 被跳过；它只服务
-/// **对话直执行通道**（`analysis_kind = "chat"`，见 `hooks.rs:18-20` 模块注释）。
+/// **对话直执行通道**（`analysis_kind = "chat"`，见 `stock_workflow/hooks.rs:18-20` 模块注释）。
 ///
 /// DB 证据（2026-09-23）：现存 11 条 completed 反思**全部**来自
 /// `workflow / live`（单股即时分析通道 `run_single_stock_analysis`），
@@ -272,7 +272,7 @@ async fn wait_until_settled(
 ///
 /// 本 bin 作为**一次性数据修复工具**补上这一环。产品侧的持续缺口（所有业务封装
 /// 路径都不产反思样本）另行登记，**不**在本 bin 内顺手改产品核心函数 ——
-/// `run_stock_workflow_inner` 有 1300 行、多个成功分支（`core.rs:1053`/`:1368`
+/// `run_stock_workflow_inner` 有 1300 行、多个成功分支（`stock_workflow/core.rs:1214`/`:1554`
 /// 各写一次 template_version），改动面与回归风险都过大。
 ///
 /// ## 幂等与「重置」语义
@@ -315,11 +315,11 @@ async fn ensure_pending_reflection(
     //
     // `run_stock_workflow_inner` 在 DAG 失败时**不返回 Err** —— 它把
     // `stock_analyses.status` 置为 `failed: {e}` 后照常返回 `Ok(json)`
-    // （见 `core.rs:1645-1660`）。⇒ 若只看返回值，失败分析会被当成成功，
+    // （见 `stock_workflow/core.rs:1838-1849`）。⇒ 若只看返回值，失败分析会被当成成功，
     // 于是为一条**根本没产出决策**的分析创建 pending 反思 ⇒ 污染样本集。
     //
-    // 成功态字面值实测：`completed`（`core.rs:1020` / `:1335`）。
-    // 其余值域：`running` / `failed: {e}` / `timeout`（`:925`）/ `cancelled`（`:956`）。
+    // 成功态字面值实测：`completed`（`stock_workflow/core.rs:1168` / `:1508`）。
+    // 其余值域：`running` / `failed: {e}` / `timeout`（`:1067`）/ `cancelled`（`:1098`）。
     if rec.status != "completed" {
         return Ok((false, format!("跳过反思补建（分析状态 {}）", rec.status)));
     }
@@ -416,7 +416,7 @@ async fn ensure_pending_reflection(
         // 决策方向变了，同一段行情的收益不会变。
         //
         // 且反思重跑成功后会按最新行情**回写覆盖**这 4 列
-        // （`reflection.rs:802-806` 的 `col_expr(Column::RawReturn, ...)` 等，即 D10 修复点）。
+        // （`stock_workflow/reflection.rs:802-806` 的 `col_expr(Column::RawReturn, ...)` 等，即 D10 修复点）。
         // ⇒ 保留既可读（重置期间不至于把客观事实抹成 NULL），也不会残留错误值。
         //
         // （本条曾被我按「与决策绑定」误判为应清空，已纠正。判据：
@@ -657,7 +657,7 @@ async fn run() -> Result<(), String> {
     as_of::reset_global_degradation_log();
     let mut ok = 0usize;
     // 重跑**动作**成功、但**分析状态非 completed**（DAG 失败/超时/取消）的条数。
-    // 必须单列：`run_stock_workflow_inner` 失败时也返回 Ok（`core.rs:1645-1660`），
+    // 必须单列：`run_stock_workflow_inner` 失败时也返回 Ok（`stock_workflow/core.rs:1838-1849`），
     // 若与 `ok` 混在一起，报告的成功数会虚高，掩盖"重跑没有真产出决策"这一事实。
     let mut not_completed = 0usize;
     let mut not_completed_list: Vec<(String, String, String)> = Vec::new();
@@ -834,7 +834,7 @@ async fn run() -> Result<(), String> {
 
             // 为什么要**循环**而不是跑一轮：
             //   ① `run_batch_reflection_inner` 单轮只处理 `max_count` 条
-            //      （默认 20 = `reflection.rs:1171`，截断发生在 `:1196` 的 `.take(max_count)`），
+            //      （默认 20 = `stock_workflow/reflection.rs:1171`，截断发生在 `:1196` 的 `.take(max_count)`），
             //      而本次重跑已为**每条成功分析**补建一行 pending
             //      （见本文件 `ensure_pending_reflection`）
             //      ⇒ 47 条需要至少 3 轮才消化完；

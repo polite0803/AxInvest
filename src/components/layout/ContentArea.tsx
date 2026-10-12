@@ -44,6 +44,9 @@ const LazyInvestPage = lazy(() => import("@/pages/InvestPage").then((m) => ({ de
 const LazyReplayWorkbenchPage = lazy(() =>
   import("@/pages/ReplayWorkbenchPage").then((m) => ({ default: m.ReplayWorkbenchPage }))
 );
+const LazyTasksCenterPage = lazy(() =>
+  import("@/pages/TasksCenterPage/TasksCenterPage").then((m) => ({ default: m.TasksCenterPage }))
+);
 const LazyOpcPage = lazy(() => import("@/pages/OpcPage").then((m) => ({ default: m.OpcPage })));
 // ── 能力包页（OPC 能力包，2026-09-06 按能力域恢复接线；2026-09-15 「行业」→「域」概念统一） ──
 const LazyFinanceInvestDomainPage = lazy(() =>
@@ -287,6 +290,14 @@ export const ContentArea = memo(function ContentArea() {
             element={
               <PageContextProvider page="replay-workbench">
                 <SafeLazyPage Page={LazyReplayWorkbenchPage} />
+              </PageContextProvider>
+            }
+          />
+          <Route
+            path={BUILTIN_PAGE_PATH["tasks-center"]}
+            element={
+              <PageContextProvider page="tasks-center">
+                <SafeLazyPage Page={LazyTasksCenterPage} />
               </PageContextProvider>
             }
           />

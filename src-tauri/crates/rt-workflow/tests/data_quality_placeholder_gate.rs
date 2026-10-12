@@ -331,7 +331,7 @@ fn rhai_string_package_available() {
     let first: String =
         engine.eval(r#"let p = "正文<!-- VERDICTx".split("<!-- VERDICT"); p[0]"#).unwrap();
     assert_eq!(first, "正文", "Rhai split 不可用或行为改变");
-    // `replace`：脚本当前**不使用**它（`data-quality.rhai:134` 的历史注释称
+    // `replace`：脚本当前**不使用**它（`data-quality.rhai:165` 的历史注释称
     // 「原实现 text.replace(…) 链式调用 100% 报 Function not found」，与实况不符 ——
     // 实测可执行）。这里只在**能力**层钉住，不做任何依赖。
     //

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// 统一通知工具 — NotificationCenter 和 NotificationBell 共享的通知基础设施
+// 统一通知工具 — 通知中心数据的读写入口，写入受通知偏好闸门控制
+
+// 只 import 具体模块、不走 `@/stores` barrel：barrel 会拉起 agentStore，
+// 而 agentStore 反向 import 本文件（pushNotification），构成循环依赖。
+import { useSettingsStore } from "@/stores/feature/settingsStore";
 
 const STORAGE_KEY = "axagent-notifications";
 const MAX_NOTIFICATIONS = 50;
@@ -13,6 +17,8 @@ export interface Notification {
   timestamp: number;
   read: boolean;
   persistent?: boolean;
+  /** 按业务类别分流到对应的偏好开关；命中类别的开关优先于 type 判据 */
+  category?: "import";
   action?: {
     label: string;
     onClick: () => void;
@@ -38,10 +44,27 @@ function saveNotifications(list: Notification[]): void {
   }
 }
 
-/** 添加一条新通知，同时写入 localStorage 并派发 CustomEvent */
+/** 通知偏好闸门：总闸关闭、或该条命中的分类开关关闭时整条写入路径静默。字段默认 true，故仅显式 false 才拦。 */
+function isSuppressedByPreference(input: Pick<Notification, "type" | "category">): boolean {
+  const settings = useSettingsStore.getState().settings;
+  if (settings.notificationsEnabled === false) {
+    return true;
+  }
+  // 分类开关优先：导入类只看 notifyImport，不叠加 notifyErrors 判据
+  if (input.category === "import") {
+    return settings.notifyImport === false;
+  }
+  return input.type === "error" && settings.notifyErrors === false;
+}
+
+/** 添加一条新通知，同时写入 localStorage 并派发 CustomEvent；被偏好闸门拦下时返回 null */
 export function addNotification(
   notification: Omit<Notification, "id" | "timestamp" | "read">,
-): Notification {
+): Notification | null {
+  if (isSuppressedByPreference(notification)) {
+    return null;
+  }
+
   const newNotification: Notification = {
     ...notification,
     id: `notif-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,

@@ -6,7 +6,7 @@
 //! （`astock-data` 只依赖 harness + redb + moka + parking_lot，没有 entities/dao/sea-orm，
 //! 给它加数据库依赖会把 implementor 层拧成环 —— AGENTS.md 禁区 1）。本文件是它在
 //! wiring 层的实现：这里同时看得见 `axagent_dao` / `axagent_entities` / `sea-orm`。
-//! 一模一样的先例：`init/news_archive_sink.rs`（实现 `lib.rs:85` 的 `NewsArchiveSink`），
+//! 一模一样的先例：`init/news_archive_sink.rs`（实现 `crates/astock-data/src/lib.rs:85` 的 `NewsArchiveSink`），
 //! 注入点 `AStockClient::with_daily_snapshot_store`（装配在 `init/state.rs`）。
 //!
 //! ## 为什么把归档从 DiskCache 换成 SQL 表（不是性能优化，是能力缺口）

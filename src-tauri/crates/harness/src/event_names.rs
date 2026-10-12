@@ -100,6 +100,8 @@ pub enum IpcEventName {
     GatewayStatusChanged,
     // ── 任务 / 终端 / 行情 / 系统 ──
     AppCloseRequested,
+    AutoBackupCompleted,
+    WebdavSyncCompleted,
     BackgroundTaskCreated,
     BackgroundTaskUpdated,
     FilePermissionRequest,
@@ -193,6 +195,8 @@ impl IpcEventName {
             IpcEventName::GatewayStatusChanged => "gateway-status-changed",
             // ── 任务 / 终端 / 行情 / 系统 ──
             IpcEventName::AppCloseRequested => "app-close-requested",
+            IpcEventName::AutoBackupCompleted => "auto-backup-completed",
+            IpcEventName::WebdavSyncCompleted => "webdav-sync-completed",
             IpcEventName::BackgroundTaskCreated => "background-task:created",
             IpcEventName::BackgroundTaskUpdated => "background-task:updated",
             IpcEventName::FilePermissionRequest => "file-permission-request",
@@ -279,6 +283,8 @@ impl IpcEventName {
         IpcEventName::SkillFileChanged,
         IpcEventName::GatewayStatusChanged,
         IpcEventName::AppCloseRequested,
+        IpcEventName::AutoBackupCompleted,
+        IpcEventName::WebdavSyncCompleted,
         IpcEventName::BackgroundTaskCreated,
         IpcEventName::BackgroundTaskUpdated,
         IpcEventName::FilePermissionRequest,

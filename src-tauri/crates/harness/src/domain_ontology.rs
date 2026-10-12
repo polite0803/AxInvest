@@ -45,8 +45,8 @@
 //! |---|---|---|
 //! | 1 | `src-tauri/src/commands/bottleneck-calc.rhai:114` | 顶层权重 fallback `0.35/0.35/0.30` |
 //! | 2 | `src-tauri/src/commands/bottleneck-calc.rhai:121` | `composite = Σ wᵢ·fᵢ`（**加权**，经 Rust 权威函数 bottleneck_node_score） |
-//! | 3 | `src-tauri/src/commands/strategy-scorer.rhai:212-214` | 顶层权重 fallback（**第二份脚本，独立一份**） |
-//! | 4 | `src-tauri/src/commands/strategy-scorer.rhai:237` | `composite = Σ wᵢ·fᵢ` |
+//! | 3 | `src-tauri/src/commands/strategy-scorer.rhai:184-186` | 顶层权重 fallback（**第二份脚本，独立一份**） |
+//! | 4 | `src-tauri/src/commands/strategy-scorer.rhai:187` | `composite = Σ wᵢ·fᵢ` |
 //! | 5 | `src-tauri/src/commands/stock_analysis_setup/seed_serenity.rs:1344-1364` | 模板变量默认值 + 描述文本 |
 //! | 6 | `src-tauri/agency_experts/stock-analysis/chokepoint-identifier.md:101` | `composite = 三力 / 3`（**等权**）← **与 2/4 矛盾** |
 //! | 7 | `src-tauri/agency_experts/stock-analysis/chokepoint-identifier.md:102` | 分档 `80 / 60` ← **与 `bottleneck-calc.rhai:148` 的 `band_for_score` 分档逻辑矛盾** |

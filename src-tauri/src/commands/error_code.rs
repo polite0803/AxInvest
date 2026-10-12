@@ -360,6 +360,8 @@ pub mod time_travel {
     pub const LIVE_WINDOW: &str = "TIME_TRAVEL_BATCH_LIVE_WINDOW";
     /// 批次执行失败（荐股 / 逐只分析 / 反思阶段的基础设施错误）
     pub const EXEC_FAILED: &str = "TIME_TRAVEL_BATCH_EXEC_FAILED";
+    /// 批次历史查询 / 状态落库失败（数据库层错误）
+    pub const QUERY_FAILED: &str = "TIME_TRAVEL_BATCH_QUERY_FAILED";
 }
 
 /// OPC 需求发现工作流种子数据相关错误码

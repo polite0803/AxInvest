@@ -2968,7 +2968,8 @@
     "TIME_TRAVEL_BATCH_ASOF_INVALID": "Ungültiges Stichtagsdatum: es muss ein A-Aktien-Handelstag höchstens heute sein.",
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "Es läuft bereits eine Zeitreise-Stapelprüfung; bitte warten.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "Das Live-Pipeline-Fenster ist aktiv (23:50–02:10 / 17:50–18:10). Bitte später versuchen.",
-    "TIME_TRAVEL_BATCH_EXEC_FAILED": "Der Stapel ist fehlgeschlagen; Details siehe Stapelprotokoll."
+    "TIME_TRAVEL_BATCH_EXEC_FAILED": "Der Stapel ist fehlgeschlagen; Details siehe Stapelprotokoll.",
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Abfrage des Time-Travel-Batch-Verlaufs fehlgeschlagen. Bitte später erneut versuchen."
   },
   "errorBoundary": {
     "copied": "Kopiert",
@@ -3815,6 +3816,7 @@
     "memory": "Gedächtnis",
     "multiAgent": "Multi-Agenten",
     "settings": "Einstellungen",
+    "tasksCenter": "Aufgaben-Center",
     "terminal": "Terminal",
     "wiki": "Wiki",
     "workbench": "Workbench",
@@ -3866,14 +3868,21 @@
     "communicationMessage": "Nachrichten",
     "opc": "Ein-Personen-Unternehmen"
   },
+  "backupNotify": {
+    "autoDone": "Autosicherung abgeschlossen",
+    "autoFailed": "Autosicherung fehlgeschlagen: {{error}}",
+    "webdavDone": "WebDAV-Sync abgeschlossen: {{name}}",
+    "webdavFailed": "WebDAV-Sync fehlgeschlagen: {{error}}"
+  },
+  "importNotify": {
+    "done": "Import abgeschlossen: {{count}} importiert, {{skipped}} übersprungen, {{failed}} fehlgeschlagen",
+    "failed": "Import fehlgeschlagen: {{error}}",
+    "synced": "Verzeichnissynchronisation abgeschlossen: {{added}} hinzugefügt, {{updated}} aktualisiert, {{deleted}} gelöscht"
+  },
   "notification": {
     "clear": "Löschen",
     "empty": "Keine Benachrichtigungen",
-    "hoursAgo": "Vor {{count}} Std.",
-    "justNow": "Gerade eben",
-    "markAllRead": "Alle als gelesen markieren",
-    "minutesAgo": "Vor {{count}} Min.",
-    "title": "Benachrichtigungen"
+    "markAllRead": "Alle als gelesen markieren"
   },
   "nudge": {
     "acceptanceRate": "Akzeptanzrate",
@@ -5901,7 +5910,11 @@
       "backupInterval": "Sicherungsintervall",
       "budgetPlaceholder": "Unbegrenzt",
       "budgetSaved": "Budget gespeichert",
+      "backup": "Datensicherung",
+      "backupDesc": "App-Daten jede Nacht automatisch sichern",
       "budgetTripped": "Ausgelöst",
+      "cleanup": "Datenbereinigung",
+      "cleanupDesc": "Jede Woche abgelaufene Cache- und temporäre Daten regelmäßig bereinigen",
       "closedLoop": "Closed-Loop-Nudge",
       "conversation_stats": "Konversationsstatistiken",
       "conversation_statsDesc": "Konversationsmuster und Statistiken analysieren",
@@ -6407,6 +6420,14 @@
     "proactiveBehavior": "Proaktiv",
     "proactiveNudge": "Proaktive Vorschläge",
     "proactiveNudgeDesc": "Basierend auf dem Gesprächskontext proaktiv Hinweise, Vorschläge oder nächste Schritte anbieten",
+    "notificationsEnabled": "Benachrichtigungen aktivieren",
+    "notificationsEnabledDesc": "Bei Aus werden keine Einträge im Benachrichtigungscenter angelegt und keine System-Benachrichtigungen versendet (einschließlich geplanter Aktienempfehlungen und Bedarfserkennung).",
+    "notifyErrors": "Fehlerhinweise",
+    "notifyErrorsDesc": "Wenn der Hauptschalter aktiv ist, Fehlermeldungen wie fehlgeschlagene Ausführungen im Benachrichtigungscenter ablegen und Fehler-Toasts anzeigen.",
+    "notifyImport": "Import-Benachrichtigungen",
+    "notifyImportDesc": "Bei aktivem Hauptschalter werden die Ergebnisse von Verzeichnis-Imports und inkrementellen Synchronisationen aus Wissens- und Notendatenbanken im Benachrichtigungscenter abgelegt (je ein Eintrag für Erfolg, Teilerfolg und Fehler).",
+    "notifyBackup": "Sicherungs- und Sync-Hinweise",
+    "notifyBackupDesc": "Bei aktivem Hauptschalter wird beim Abschluss von Autosicherung und WebDAV-Sync jeweils ein Eintrag angelegt; das Backend nutzt diesen Schalter, um das Senden des Ereignisses zu steuern.",
     "closedLoopEnabled": "Geschlossener Regelkreis",
     "closedLoopEnabledDesc": "Erlaubt dem Agenten, geschlossene Aufgaben nach Freigabe automatisch auszuführen",
     "closedLoopInterval": "Intervall (Regelkreis)",
@@ -7319,6 +7340,240 @@
     "timelineLoadFail": "Statusverlauf konnte nicht geladen werden",
     "title": "Hintergrundaufgaben",
     "bash": "bash"
+  },
+  "tasksCenter": {
+    "title": "Aufgaben-Center",
+    "description": "Verwalten Sie geplante Aufgaben und manuelle Jobs zentral: Investitionsautomatisierung, OPC-Bedarfsentdeckung, Systemwartung sowie Ausführungsverlauf für Investitionspipeline, Stapel-Reflexion und Replay-Sweeps.",
+    "tab": {
+      "scheduled": "Geplante Aufgaben",
+      "manual": "Manuelle Jobs",
+      "overview": "Übersicht",
+      "runs": "Ausführungen",
+      "schedules": "Zeitpläne"
+    },
+    "group": {
+      "all": "Alle",
+      "invest": "Investition",
+      "opc": "OPC",
+      "system": "System",
+      "custom": "Benutzerdefiniert"
+    },
+    "column": {
+      "name": "Name",
+      "group": "Gruppe",
+      "schedule": "Zeitplan",
+      "status": "Status",
+      "nextRun": "Nächste Ausführung",
+      "lastRun": "Letzte Ausführung",
+      "actions": "Aktionen",
+      "state": "Status",
+      "source": "Quelle",
+      "trigger": "Auslöser",
+      "progress": "Fortschritt",
+      "started": "Begonnen",
+      "duration": "Dauer",
+      "attempts": "Versuche"
+    },
+    "lastRun": {
+      "none": "Nie ausgeführt",
+      "skipped": "Übersprungen",
+      "success": "Erfolg",
+      "failed": "Fehlgeschlagen"
+    },
+    "scheduled": {
+      "autoRefresh": "Automatische Aktualisierung alle 15 Sekunden",
+      "refresh": "Aktualisieren",
+      "empty": "Keine geplanten Aufgaben. Klicken Sie oben rechts auf „Neue Aufgabe“, um eine zu erstellen.",
+      "executedOk": "Ausführung gestartet: {{name}}",
+      "deletedOk": "Aufgabe gelöscht: {{name}}"
+    },
+    "execute": {
+      "unsupported": "Diese Aufgabe hat keine Workflow-Verknüpfung und keinen integrierten Executor; manuelle Ausführung wird nicht unterstützt."
+    },
+    "action": {
+      "execute": "Jetzt ausführen",
+      "history": "Ausführungsverlauf",
+      "edit": "Bearbeiten",
+      "delete": "Löschen",
+      "editInOpc": "In OPC-Bedarfsentdeckung bearbeiten",
+      "opcDelivery": "OPC-Zustellungseinstellungen",
+      "detail": "Details",
+      "retry": "Erneut versuchen",
+      "retryStarted": "Wiederholung gestartet"
+    },
+    "delete": {
+      "confirmTitle": "Aufgabe „{{name}}“ löschen?",
+      "builtinWarning": "Dies ist eine eingebaute Systemaufgabe. Sie wird nach dem Löschen nicht automatisch neu erstellt. Bitte mit Vorsicht vorgehen.",
+      "ok": "Löschen",
+      "cancel": "Abbrechen"
+    },
+    "history": {
+      "title": "Ausführungsverlauf – {{name}}",
+      "started": "Startzeit",
+      "duration": "Dauer",
+      "result": "Ergebnis",
+      "detail": "Details",
+      "empty": "Kein Ausführungsverlauf"
+    },
+    "create": {
+      "button": "Neue Aufgabe",
+      "title": "Neue geplante Aufgabe",
+      "editTitle": "Geplante Aufgabe bearbeiten",
+      "category": {
+        "invest": "Investitionsaufgabe",
+        "custom": "Benutzerdefinierte Aufgabe",
+        "system": "Systemaufgabe"
+      },
+      "selectKind": "Aufgabentyp auswählen",
+      "advanced": "Erweitert",
+      "systemHint": "Systemaufgabenvorlagen werden einheitlich von Systemdiensten ausgeführt. Nach der Erstellung können Sie sie in der Liste aktivieren/deaktivieren und den Verlauf einsehen.",
+      "createdOk": "Aufgabe erstellt",
+      "updatedOk": "Aufgabe aktualisiert",
+      "kind": {
+        "stockAnalysis": "Geplante Einzelaktienanalyse",
+        "stockAnalysisDesc": "Führt jeden Handelstag die vollständige Multi-Agenten-Analyse für eine ausgewählte Aktie aus",
+        "watchlistScan": "Watchlist-Scan",
+        "watchlistScanDesc": "Scannt regelmäßig die Watchlist und fasst Änderungen und Signale zusammen",
+        "poolScan": "Aktienpool-Scan",
+        "poolScanDesc": "Scannt regelmäßig den gesamtmarktweiten Aktienpool anhand von Lookback-Tagen und Konfidenzschwelle",
+        "trendScreening": "Serenity-Trend-Screening",
+        "trendScreeningDesc": "Führt regelmäßig das Serenity-Branchenketten-Trend-Screening aus (Standard- oder Schnellkette)",
+        "batchReflection": "Stapel-Reflexion",
+        "batchReflectionDesc": "Führt regelmäßig die Vier-Horizont-Reflexion für fällige historische Analysestapel aus",
+        "decisionBacktest": "Entscheidungs-Replay",
+        "decisionBacktestDesc": "Validiert historische Entscheidungen regelmäßig in kurzen/mittleren/langen Fenstern per Replay",
+        "recommendation": "Geplante Aktienempfehlungen",
+        "recommendationDesc": "Erzeugt regelmäßig intelligente Aktienempfehlungen nach Perioden und Konfidenzschwelle"
+      },
+      "field": {
+        "lookbackDays": "Lookback-Tage",
+        "maxStocks": "Max. Aktien",
+        "minConfidence": "Min. Konfidenz",
+        "optional": "Optional",
+        "chain": "Screening-Kette",
+        "period": "Zeitraum",
+        "windows": "Replay-Fenster (Handelstage)"
+      },
+      "menuScheduled": "Neue geplante Aufgabe",
+      "menuPipeline": "Aktienanalyse-Pipeline ausführen",
+      "menuBatch": "Neues Zeitreise-Batch",
+      "menuReplay": "Replay-Sweep ausführen"
+    },
+    "config": {
+      "timeoutSeconds": "Zeitlimit (Sek.)",
+      "retryDelaySeconds": "Wiederholungsverzögerung (Sek.)",
+      "maxRetries": "Max. Wiederholungen",
+      "retryOnFailure": "Bei Fehlschlag wiederholen",
+      "notificationEnabled": "Benachrichtigungen aktivieren",
+      "runOnStartup": "Beim Start ausführen"
+    },
+    "jobs": {
+      "pipelineDesc": "Aktienanalyse-Pipeline: Kandidaten → Analyse → Reflexion, automatischer Fortschritt nach Plan",
+      "lastRunAt": "Letzte Ausführung",
+      "noRuns": "Noch keine Ausführungen"
+    },
+    "manual": {
+      "historyTitle": "Ausführungsverlauf",
+      "historyPipeline": "Investitionspipeline",
+      "historyBatches": "Stapel-Reflexionen",
+      "batchesEmpty": "Keine Stapel-Reflexionsaufzeichnungen"
+    },
+    "batchDetail": {
+      "title": "Stapeldetails",
+      "notFound": "Stapeldatensatz nicht gefunden",
+      "phase": "Phase",
+      "finishedAt": "Abgeschlossen um",
+      "progress": "Fortschritt",
+      "picks": "Auswahl",
+      "message": "Stapelmeldung",
+      "serenityError": "Serenity-Fehler",
+      "errorDetail": "Fehlerdetails",
+      "reflection": "Reflexionszusammenfassung",
+      "horizons": "Horizont-Ergebnisse"
+    },
+    "pipelineDetail": {
+      "title": "Pipeline-Ausführungsdetails",
+      "asOfDate": "Stichtag",
+      "completedAt": "Abgeschlossen um",
+      "action": "Empfohlene Aktion",
+      "newAnalyzed": "Neu analysiert",
+      "reassessed": "Neubewertet",
+      "decisions": "Entscheidungen",
+      "note": "Notiz",
+      "newAnalysesList": "Neu analysierte Werte ({{n}})",
+      "reassessedList": "Neubewertete Werte ({{n}})",
+      "detailError": "Details konnten nicht geladen werden"
+    },
+    "source": {
+      "scheduledCron": "Geplante Aufgaben",
+      "stockPipeline": "Aktienanalyse-Pipeline",
+      "timeTravelBatch": "Zeitreise-Batch"
+    },
+    "state": {
+      "queued": "In Wartestellung",
+      "running": "Läuft",
+      "waiting": "Wartet",
+      "paused": "Pausiert",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "canceled": "Abgebrochen"
+    },
+    "badge": {
+      "partial": "Teilweise erfolgreich",
+      "retrying": "Wird wiederholt",
+      "interrupted": "Unterbrochen",
+      "stale": "Verblockt",
+      "skipped": "Übersprungen",
+      "partialTip": "Einige Schritte sind fehlgeschlagen",
+      "retryingTip": "Automatische Wiederholung läuft",
+      "interruptedTip": "Ausführung unterbrochen",
+      "staleTip": "Lange kein Fortschritt, möglicherweise blockiert",
+      "skippedTip": "Dieser Lauf wurde übersprungen (z. B. kein Handelstag)"
+    },
+    "trigger": {
+      "schedule": "Geplant",
+      "manual": "Manuell",
+      "system": "System",
+      "external": "Extern"
+    },
+    "health": {
+      "running": "Läuft",
+      "queued": "In Warteschlange",
+      "failed": "Fehlgeschlagen",
+      "waiting": "Wartend"
+    },
+    "attention": {
+      "title": "Erfordert Aufmerksamkeit",
+      "empty": "Alles in Ordnung",
+      "viewAll": "Alle anzeigen"
+    },
+    "live": {
+      "title": "In Bearbeitung",
+      "empty": "Keine laufenden Aufgaben"
+    },
+    "summary": {
+      "title": "Letzte 24 Stunden",
+      "succeeded": "Erfolgreich",
+      "failed": "Fehlgeschlagen",
+      "canceled": "Abgebrochen",
+      "total": "Gesamt"
+    },
+    "runs": {
+      "refresh": "Aktualisieren",
+      "autoRefresh": "Auto-Aktualisierung alle 2 s bei Aktivität",
+      "someSourcesFailed": "Einige Quellen konnten nicht geladen werden",
+      "empty": "Keine Ausführungen",
+      "detailUnavailable": "Details für diese Quelle noch nicht verfügbar"
+    },
+    "filters": {
+      "search": "Name, ID oder Fehler durchsuchen",
+      "sources": "Quelle",
+      "states": "Status",
+      "triggers": "Auslöser",
+      "range24h": "Letzte 24 Std.",
+      "range7d": "Letzte 7 Tage",
+      "rangeAll": "Alle"
+    }
   },
   "teammatePanel": {
     "createTeam": "Team erstellen",
@@ -11353,8 +11608,7 @@
       "workspace": "Arbeitsbereich",
       "screenshotDiagnosis": "Screenshot-Diagnose",
       "paperPortfolio": "Paper Portfolio",
-      "quant": "Quant",
-      "pipeline": "Pipeline"
+      "quant": "Quant"
     }
   },
   "paperPortfolio": {
@@ -14501,7 +14755,7 @@
     },
     "batch": {
       "title": "Zeitreise-Stapelprüfung",
-      "description": "Wählen Sie einen historischen Handelstag, um Screening und Einzelanalysen in einer as-of-Welt zu wiederholen, dann Prüfung in vier Horizonten. Noch nicht fällige Horizonte ergänzt der geplante Job automatisch.",
+      "description": "Wählen Sie einen historischen Handelstag, um Smart Recommendation und das Serenity-Trend-Screening in einem as-of-Durchlauf gemeinsam zu wiederholen. Die Kandidaten beider Ketten werden zusammengeführt, dedupliziert und einzeln analysiert, dann in vier Horizonten geprüft. Noch nicht fällige Horizonte ergänzt der geplante Job automatisch.",
       "modeAgo": "Handelstage zurück",
       "modeFixed": "Konkretes Datum",
       "tradingDays": "Handelstage zurück",
@@ -14519,11 +14773,14 @@
         "running": "Läuft",
         "completed": "Abgeschlossen",
         "partial": "Teilweise",
-        "failed": "Fehlgeschlagen"
+        "failed": "Fehlgeschlagen",
+        "interrupted": "Unterbrochen"
       },
       "phaseAnalysis": "Screening & Analyse",
       "phaseReflection": "Horizontprüfung",
       "asOfLabel": "Stichtag",
+      "recoCount": "Empfehlungskandidaten {{n}}",
+      "serenityCount": "Serenity-Kandidaten {{n}}",
       "okCount": "{{n}} ok",
       "failCount": "{{n}} fehlgeschlagen",
       "totalCount": "{{n}} gesamt",

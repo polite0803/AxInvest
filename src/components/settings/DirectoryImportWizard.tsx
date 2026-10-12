@@ -8,6 +8,7 @@ import { EmbeddingModelSelect } from "@/components/shared/EmbeddingModelSelect";
 import { useEmbeddingProviderLabel } from "@/components/shared/ModelSelect";
 import { showBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { addNotification } from "@/lib/notification";
 import { useLlmWikiStore, useSourceStore } from "@/stores";
 import type { UnifiedSource } from "@/stores/feature/sourceStore";
 import type {
@@ -274,6 +275,15 @@ function DirectoryImportWizard({
           messageApi.info(t("sourceManager.importNoEmbedding"));
         }
         setImportResult(result);
+        addNotification({
+          type: result.errorCount > 0 ? "warning" : "success",
+          category: "import",
+          title: t("importNotify.done", {
+            count: result.importedCount,
+            skipped: result.skippedCount,
+            failed: result.errorCount,
+          }),
+        });
       } else {
         const result = await invoke<SyncDirectoryResult>(
           "sync_project_knowledge_sources",
@@ -285,11 +295,21 @@ function DirectoryImportWizard({
           },
         );
         setImportResult(result);
+        addNotification({
+          type: result.errorCount > 0 ? "warning" : "success",
+          category: "import",
+          title: t("importNotify.synced", {
+            added: result.addedCount,
+            updated: result.updatedCount,
+            deleted: result.deletedCount,
+          }),
+        });
       }
       await fetchSources();
       setStep(2);
     } catch (e) {
-      showBackendError(messageApi, e);
+      const reason = showBackendError(messageApi, e);
+      addNotification({ type: "error", category: "import", title: t("importNotify.failed", { error: reason }) });
     } finally {
       setImporting(false);
     }

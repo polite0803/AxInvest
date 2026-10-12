@@ -678,6 +678,12 @@ const SKIP_DIRS = new Set([
   //   · 指向**已删除迁移文件**的 provenance 注释（`v100_consolidated.rs`）—— 副本只在
   //     output/backup 里，去掉后变 BROKEN。这两类都不是「引用写错了」，见下方分类处置。
   "output",
+  // ⚠ 2026-10-11 加入：`.qoder/worktrees/` 是子执行体的隔离检出副本（实测 2014 个 `.rs`），
+  //   与上面 `.worktrees` 同一种失效模式 —— `getBasenameIndex()` 走整个 ROOT ⇒ 几乎每个
+  //   basename 撑成「同名 2 份」⇒ 本该 LOCATED 的引用整批退化成 NONLOC（= 从未检查）。
+  //   实测（同一棵树，只改这一行）：LOCATED 208 → 496，NONLOC 317 → 29，BROKEN 恒 0。
+  //   副本本身**不删**（它是另一条分支的工作产物，删除属破坏性操作）。
+  ".qoder",
 ]);
 let basenameIndex = null;
 function getBasenameIndex() {

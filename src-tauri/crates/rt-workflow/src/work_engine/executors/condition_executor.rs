@@ -489,7 +489,7 @@ mod resolve_var_path_tests {
     }
 
     /// 对照形态：`content` 为**对象**（而非 JSON 字符串）。
-    /// 该形态在生产中不出现（`agent_executor.rs:2620` 是 `"content": final_content`，
+    /// 该形态在生产中不出现（`agent_executor.rs:2836` 是 `"content": final_content`，
     /// `final_content: String`），此处仅用于补齐「若 content 是对象会怎样」的对照，
     /// 以便与 team-lead 原始指定的 fixture 形态对齐。
     fn ctx_with_object_content() -> ExecutionState {

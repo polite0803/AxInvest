@@ -142,7 +142,7 @@ fn produced_names(
     let mut produced: BTreeSet<String> = BTreeSet::new();
     for c in children {
         // 引擎把节点结果**同时**写在 `node_id` 与 `output_var` 两个键上
-        // （`work_engine/engine/mod.rs:1772-1775`）⇒ 下游用 node_id 形态引用上游是合法的，
+        // （`work_engine/engine/mod.rs:1791-1796`）⇒ 下游用 node_id 形态引用上游是合法的，
         // 自产集必须含节点 id，否则会把合法引用误报成缺键。
         produced.insert(c.base_id().to_string());
         let (_, writes, blind) = node_var_io(c);

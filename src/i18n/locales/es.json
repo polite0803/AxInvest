@@ -2968,7 +2968,8 @@
     "TIME_TRAVEL_BATCH_ASOF_INVALID": "Fecha ancla no válida: debe ser un día de cotización de acciones A no posterior a hoy.",
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "Ya hay un lote de viaje en el tiempo en ejecución; espere a que termine.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "La ventana de la canalización en vivo está activa (23:50–02:10 / 17:50–18:10). Inténtelo más tarde.",
-    "TIME_TRAVEL_BATCH_EXEC_FAILED": "El lote ha fallado; consulte los detalles del lote."
+    "TIME_TRAVEL_BATCH_EXEC_FAILED": "El lote ha fallado; consulte los detalles del lote.",
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Error al consultar el historial de lotes de viaje en el tiempo. Inténtelo de nuevo más tarde."
   },
   "errorBoundary": {
     "copied": "Copiado",
@@ -3815,6 +3816,7 @@
     "memory": "Memoria",
     "multiAgent": "Multiagente",
     "settings": "Configuración",
+    "tasksCenter": "Centro de tareas",
     "terminal": "Terminal",
     "wiki": "Wiki",
     "workbench": "Espacio de trabajo",
@@ -3866,14 +3868,21 @@
     "communicationMessage": "Mensajería",
     "opc": "Empresa Unipersonal"
   },
+  "backupNotify": {
+    "autoDone": "Copia automática completada",
+    "autoFailed": "Error en la copia automática: {{error}}",
+    "webdavDone": "Sincronización WebDAV completada: {{name}}",
+    "webdavFailed": "Error en la sincronización WebDAV: {{error}}"
+  },
+  "importNotify": {
+    "done": "Importación completada: {{count}} importados, {{skipped}} omitidos, {{failed}} con fallo",
+    "failed": "Error al importar: {{error}}",
+    "synced": "Sincronización de directorio completada: {{added}} añadidos, {{updated}} actualizados, {{deleted}} eliminados"
+  },
   "notification": {
     "clear": "Limpiar",
     "empty": "Sin notificaciones",
-    "hoursAgo": "Hace {{count}}h",
-    "justNow": "Justo ahora",
-    "markAllRead": "Marcar todo como leído",
-    "minutesAgo": "Hace {{count}}m",
-    "title": "Notificaciones"
+    "markAllRead": "Marcar todo como leído"
   },
   "nudge": {
     "acceptanceRate": "Tasa de aceptación",
@@ -5901,7 +5910,11 @@
       "backupInterval": "Intervalo de Copia",
       "budgetPlaceholder": "Ilimitado",
       "budgetSaved": "Presupuesto guardado",
+      "backup": "Copia de seguridad de datos",
+      "backupDesc": "Hacer copia de seguridad automática de los datos de la aplicación cada noche",
       "budgetTripped": "Disparado",
+      "cleanup": "Limpieza de datos",
+      "cleanupDesc": "Limpiar periódicamente cada semana la caché caducada y los datos temporales",
       "closedLoop": "Nudge de Bucle Cerrado",
       "conversation_stats": "Estadísticas de conversación",
       "conversation_statsDesc": "Analizar patrones y estadísticas de conversación",
@@ -6407,6 +6420,14 @@
     "proactiveBehavior": "Proactivo",
     "proactiveNudge": "Sugerencias proactivas",
     "proactiveNudgeDesc": "Ofrece proactivamente sugerencias o siguientes pasos según el contexto de la conversación",
+    "notificationsEnabled": "Activar notificaciones",
+    "notificationsEnabledDesc": "Si está desactivado, no se escribe nada en el centro de notificaciones de la app y no se envían notificaciones del sistema (incluidas las recomendaciones programadas y el descubrimiento de demandas).",
+    "notifyErrors": "Avisos de error",
+    "notifyErrorsDesc": "Con el interruptor principal activado, registra los fallos de ejecución y otros errores en el centro de notificaciones y muestra avisos emergentes.",
+    "notifyImport": "Avisos de importación",
+    "notifyImportDesc": "Con el interruptor principal activado, registra en el centro de notificaciones el resultado de las importaciones de directorios y sincronizaciones incrementales (una entrada para éxito, éxito parcial y fallo).",
+    "notifyBackup": "Avisos de copia y sincronización",
+    "notifyBackupDesc": "Con el interruptor principal activado, se registra una entrada al terminar la copia automática y la sincronización WebDAV; el backend usa este interruptor para decidir si emite el evento.",
     "closedLoopEnabled": "Ejecución en bucle cerrado",
     "closedLoopEnabledDesc": "Permite al agente ejecutar tareas en bucle cerrado automáticamente tras la autorización",
     "closedLoopInterval": "Intervalo de bucle cerrado",
@@ -7319,6 +7340,240 @@
     "timelineLoadFail": "Error al cargar la cronología",
     "title": "Tareas en segundo plano",
     "bash": "bash"
+  },
+  "tasksCenter": {
+    "title": "Centro de tareas",
+    "description": "Gestione centralizadamente las tareas programadas y los trabajos manuales: automatización de inversiones, descubrimiento de demanda OPC, tareas de mantenimiento del sistema, además del historial del pipeline de inversión, reflexiones por lotes y barridos de reproducción.",
+    "tab": {
+      "scheduled": "Tareas programadas",
+      "manual": "Trabajos manuales",
+      "overview": "Resumen",
+      "runs": "Ejecuciones",
+      "schedules": "Programaciones"
+    },
+    "group": {
+      "all": "Todas",
+      "invest": "Inversión",
+      "opc": "OPC",
+      "system": "Sistema",
+      "custom": "Personalizado"
+    },
+    "column": {
+      "name": "Nombre",
+      "group": "Grupo",
+      "schedule": "Programación",
+      "status": "Estado",
+      "nextRun": "Próxima ejecución",
+      "lastRun": "Última ejecución",
+      "actions": "Acciones",
+      "state": "Estado",
+      "source": "Fuente",
+      "trigger": "Disparador",
+      "progress": "Progreso",
+      "started": "Iniciado",
+      "duration": "Duración",
+      "attempts": "Intentos"
+    },
+    "lastRun": {
+      "none": "Nunca ejecutado",
+      "skipped": "Omitido",
+      "success": "Correcto",
+      "failed": "Fallido"
+    },
+    "scheduled": {
+      "autoRefresh": "Actualización automática cada 15 segundos",
+      "refresh": "Actualizar",
+      "empty": "No hay tareas programadas. Haga clic en «Nueva tarea» arriba a la derecha para crear una.",
+      "executedOk": "Ejecución activada: {{name}}",
+      "deletedOk": "Tarea eliminada: {{name}}"
+    },
+    "execute": {
+      "unsupported": "Esta tarea no tiene un flujo vinculado ni un ejecutor integrado; no se admite la ejecución manual."
+    },
+    "action": {
+      "execute": "Ejecutar ahora",
+      "history": "Historial de ejecución",
+      "edit": "Editar",
+      "delete": "Eliminar",
+      "editInOpc": "Editar en Descubrimiento de demanda OPC",
+      "opcDelivery": "Configuración de entrega OPC",
+      "detail": "Detalles",
+      "retry": "Reintentar",
+      "retryStarted": "Reintento iniciado"
+    },
+    "delete": {
+      "confirmTitle": "¿Eliminar la tarea «{{name}}»?",
+      "builtinWarning": "Es una tarea integrada del sistema. No se recreará automáticamente tras eliminarla. Proceda con precaución.",
+      "ok": "Eliminar",
+      "cancel": "Cancelar"
+    },
+    "history": {
+      "title": "Historial de ejecución - {{name}}",
+      "started": "Hora de inicio",
+      "duration": "Duración",
+      "result": "Resultado",
+      "detail": "Detalles",
+      "empty": "Sin historial de ejecución"
+    },
+    "create": {
+      "button": "Nueva tarea",
+      "title": "Nueva tarea programada",
+      "editTitle": "Editar tarea programada",
+      "category": {
+        "invest": "Tarea de inversión",
+        "custom": "Tarea personalizada",
+        "system": "Tarea del sistema"
+      },
+      "selectKind": "Seleccionar tipo de tarea",
+      "advanced": "Avanzado",
+      "systemHint": "Las plantillas de tareas del sistema las ejecutan los servicios del sistema. Tras crearlas puede activarlas/desactivarlas y ver el historial en la lista.",
+      "createdOk": "Tarea creada",
+      "updatedOk": "Tarea actualizada",
+      "kind": {
+        "stockAnalysis": "Análisis programado de una acción",
+        "stockAnalysisDesc": "Ejecuta cada día bursátil el análisis multiagente completo para una acción especificada",
+        "watchlistScan": "Escaneo de lista de seguimiento",
+        "watchlistScanDesc": "Escanea periódicamente la lista y resume cambios y señales",
+        "poolScan": "Escaneo del pool de acciones",
+        "poolScanDesc": "Escanea periódicamente todo el pool del mercado según días de retrospectiva y umbral de confianza",
+        "trendScreening": "Cribado de tendencias Serenity",
+        "trendScreeningDesc": "Ejecuta periódicamente el cribado de tendencias de cadenas industriales Serenity (cadena estándar o rápida)",
+        "batchReflection": "Reflexión por lotes",
+        "batchReflectionDesc": "Ejecuta periódicamente la reflexión de cuatro horizontes sobre lotes de análisis históricos vencidos",
+        "decisionBacktest": "Reproducción de validación de decisiones",
+        "decisionBacktestDesc": "Reproduce periódicamente decisiones históricas en ventanas corta/media/larga",
+        "recommendation": "Recomendaciones de acciones programadas",
+        "recommendationDesc": "Genera periódicamente clasificaciones de recomendaciones por periodos y umbral de confianza"
+      },
+      "field": {
+        "lookbackDays": "Días de retrospectiva",
+        "maxStocks": "N.º máx. de acciones",
+        "minConfidence": "Confianza mín.",
+        "optional": "Opcional",
+        "chain": "Cadena de cribado",
+        "period": "Periodo",
+        "windows": "Ventanas de reproducción (días bursátiles)"
+      },
+      "menuScheduled": "Nueva tarea programada",
+      "menuPipeline": "Ejecutar pipeline de análisis",
+      "menuBatch": "Nuevo lote de viaje en el tiempo",
+      "menuReplay": "Ejecutar barrido de repetición"
+    },
+    "config": {
+      "timeoutSeconds": "Tiempo de espera (s)",
+      "retryDelaySeconds": "Intervalo de reintento (s)",
+      "maxRetries": "N.º máx. de reintentos",
+      "retryOnFailure": "Reintentar si falla",
+      "notificationEnabled": "Activar notificaciones",
+      "runOnStartup": "Ejecutar al iniciar"
+    },
+    "jobs": {
+      "pipelineDesc": "Pipeline de análisis de acciones: candidatos → análisis → reflexión, avance automático según lo programado",
+      "lastRunAt": "Última ejecución",
+      "noRuns": "Sin ejecuciones todavía"
+    },
+    "manual": {
+      "historyTitle": "Historial de ejecución",
+      "historyPipeline": "Pipeline de inversión",
+      "historyBatches": "Reflexiones por lotes",
+      "batchesEmpty": "Sin registros de reflexión por lotes"
+    },
+    "batchDetail": {
+      "title": "Detalles del lote",
+      "notFound": "Registro de lote no encontrado",
+      "phase": "Fase",
+      "finishedAt": "Finalizado el",
+      "progress": "Progreso",
+      "picks": "Selecciones",
+      "message": "Mensaje del lote",
+      "serenityError": "Error de Serenity",
+      "errorDetail": "Detalles del error",
+      "reflection": "Resumen de reflexión",
+      "horizons": "Resultados por horizonte"
+    },
+    "pipelineDetail": {
+      "title": "Detalles de ejecución del pipeline",
+      "asOfDate": "Fecha de referencia",
+      "completedAt": "Finalizado el",
+      "action": "Acción recomendada",
+      "newAnalyzed": "Nuevos analizados",
+      "reassessed": "Reevaluados",
+      "decisions": "Decisiones",
+      "note": "Nota",
+      "newAnalysesList": "Símbolos nuevos analizados ({{n}})",
+      "reassessedList": "Símbolos reevaluados ({{n}})",
+      "detailError": "Error al cargar los detalles"
+    },
+    "source": {
+      "scheduledCron": "Tareas programadas",
+      "stockPipeline": "Pipeline de análisis de acciones",
+      "timeTravelBatch": "Lote de viaje en el tiempo"
+    },
+    "state": {
+      "queued": "En cola",
+      "running": "En ejecución",
+      "waiting": "En espera",
+      "paused": "Pausado",
+      "succeeded": "Exitoso",
+      "failed": "Fallido",
+      "canceled": "Cancelado"
+    },
+    "badge": {
+      "partial": "Parcial",
+      "retrying": "Reintentando",
+      "interrupted": "Interrumpido",
+      "stale": "Atascado",
+      "skipped": "Omitido",
+      "partialTip": "Algunos pasos fallaron",
+      "retryingTip": "Reintento automático en curso",
+      "interruptedTip": "Ejecución interrumpida",
+      "staleTip": "Sin progreso durante mucho tiempo, posiblemente atascada",
+      "skippedTip": "Ejecución omitida (p. ej. día no bursátil)"
+    },
+    "trigger": {
+      "schedule": "Programado",
+      "manual": "Manual",
+      "system": "Sistema",
+      "external": "Externo"
+    },
+    "health": {
+      "running": "En ejecución",
+      "queued": "En cola",
+      "failed": "Fallido",
+      "waiting": "En espera"
+    },
+    "attention": {
+      "title": "Requiere atención",
+      "empty": "Todo correcto",
+      "viewAll": "Ver todo"
+    },
+    "live": {
+      "title": "En curso",
+      "empty": "No hay tareas en ejecución"
+    },
+    "summary": {
+      "title": "Resumen de últimas 24 h",
+      "succeeded": "Exitoso",
+      "failed": "Fallido",
+      "canceled": "Cancelado",
+      "total": "Total"
+    },
+    "runs": {
+      "refresh": "Actualizar",
+      "autoRefresh": "Actualización automática cada 2 s si hay actividad",
+      "someSourcesFailed": "Algunas fuentes no se cargaron",
+      "empty": "Sin ejecuciones",
+      "detailUnavailable": "Detalles de esta fuente aún no disponibles"
+    },
+    "filters": {
+      "search": "Buscar nombre, ID o error",
+      "sources": "Fuente",
+      "states": "Estado",
+      "triggers": "Disparador",
+      "range24h": "Últimas 24 h",
+      "range7d": "Últimos 7 días",
+      "rangeAll": "Todo"
+    }
   },
   "teammatePanel": {
     "createTeam": "Crear equipo",
@@ -11353,8 +11608,7 @@
       "workspace": "Espacio de Trabajo",
       "screenshotDiagnosis": "Diagnóstico de Captura",
       "paperPortfolio": "Portafolio Papel",
-      "quant": "Quant",
-      "pipeline": "Pipeline"
+      "quant": "Quant"
     }
   },
   "paperPortfolio": {
@@ -14501,7 +14755,7 @@
     },
     "batch": {
       "title": "Revisión por lotes de viaje en el tiempo",
-      "description": "Elija un día de cotización histórico para repetir la selección y el análisis por acción en un mundo as-of, y luego revisar en cuatro horizontes. Los horizontes no vencidos los completa automáticamente la tarea programada.",
+      "description": "Elija un día de cotización histórico para repetir en una sola pasada as-of la recomendación inteligente y la selección de tendencias Serenity. Los candidatos de ambas cadenas se combinan, deduplican y analizan uno por uno, y luego se revisan en cuatro horizontes. Los horizontes no vencidos los completa automáticamente la tarea programada.",
       "modeAgo": "Días bursátiles atrás",
       "modeFixed": "Fecha concreta",
       "tradingDays": "días bursátiles atrás",
@@ -14519,11 +14773,14 @@
         "running": "En curso",
         "completed": "Completado",
         "partial": "Parcial",
-        "failed": "Error"
+        "failed": "Error",
+        "interrupted": "Interrumpido"
       },
       "phaseAnalysis": "Selección y análisis",
       "phaseReflection": "Revisión por horizontes",
       "asOfLabel": "Fecha as-of",
+      "recoCount": "Candidatos de recomendación {{n}}",
+      "serenityCount": "Candidatos Serenity {{n}}",
       "okCount": "{{n}} correctas",
       "failCount": "{{n}} fallidas",
       "totalCount": "{{n}} en total",

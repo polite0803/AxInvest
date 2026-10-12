@@ -1,5 +1,4 @@
 import { PageErrorBoundary } from "@/components/shared/ErrorBoundary";
-import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { Collapse, Grid, Tabs } from "antd";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -15,8 +14,12 @@ const { useBreakpoint } = Grid;
 /**
  * ScreenerPage — 选股中心
  *
- * 顶部单卡 + Tabs:
+ * 顶部单卡 + Tabs（三者顶层平级）:
  *   - 智能荐股:多周期 × 多风格的策略驱动推荐(原 RecommendationPanel)
+ *   - 趋势智选:serenity 工作流运行/管理面板(SerenityScreeningPanel)。
+ *     与智能荐股平级:当日版每日闭环里 00:00 荐股 / 01:00 趋势智选是
+ *     两个独立环节(历史 as-of 批次复盘不放在本页:它是历史验证逻辑,
+ *     归属「时间旅行回放工作台」/replay-workbench,与当日生产不同时不同逻辑)
  *   - 我的筛选:多因子条件筛选(原 StockScreenerPanel screen 模式)
  *
  * 底部折叠:HotStocks / LimitUp / DragonTiger — 默认收起的折叠面板
@@ -25,9 +28,8 @@ const { useBreakpoint } = Grid;
  * "今日荐股 / 全市场发现" 这种重复暴露。
  *
  * 头部说明:本页只作为 InvestHub 的 "选股" tab 渲染(/screener 独立路由已
- * 重定向到 /invest?tab=screener),页内不再渲染 PageHeader 的返回按钮 +
- * 标题(与 InvestHub 的 "投资中心" 标题 + tab 名重复且挤压换行),
- * 仅保留右对齐的 PageTimeAnchor(实时分析 / 历史回放切换)。
+ * 重定向到 /invest?tab=screener),页内不渲染任何页头 —— live/as-of 世界观
+ * 切换由投资中心标题栏(顶层模式栏)唯一承载,本页不再放 PageTimeAnchor。
  */
 export function ScreenerPage() {
   const { t } = useTranslation();
@@ -39,10 +41,6 @@ export function ScreenerPage() {
   return (
     <PageErrorBoundary title={t("stockAnalysis.page.screener")}>
       <div className="flex h-full flex-col">
-        {/* 精简头部:只保留时间锚点,右对齐,单行不换行 */}
-        <div className="flex flex-shrink-0 items-center justify-end gap-2 px-4 pt-2">
-          <PageTimeAnchor />
-        </div>
         <div className={["flex-1 overflow-auto space-y-4", isMobile ? "p-2" : "p-4"].join(" ")}>
           {/* 顶部:统一入口的"智能荐股 / 我的筛选"切换 */}
           <div>
@@ -100,6 +98,7 @@ export function ScreenerPage() {
             size={isMobile ? "small" : "middle"}
             activeKey={activeKeys}
             onChange={(keys) => setActiveKeys(keys as string[])}
+            data-testid="screener-market-atmosphere"
             items={[
               {
                 key: "hot",

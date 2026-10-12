@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import i18n from "@/i18n";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke, listen } from "@/lib/invoke";
+import { addNotification } from "@/lib/notification";
 import type {
   CreateKnowledgeBaseInput,
   FileCategory,
@@ -289,9 +291,20 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
         vaultId,
       });
       await get().loadDocuments(baseId);
+      addNotification({
+        type: result.errorCount > 0 ? "warning" : "success",
+        category: "import",
+        title: i18n.t("importNotify.done", {
+          count: result.importedCount,
+          skipped: result.skippedCount,
+          failed: result.errorCount,
+        }),
+      });
       return result;
     } catch (e) {
-      set({ error: translateBackendError(e) });
+      const reason = translateBackendError(e);
+      set({ error: reason });
+      addNotification({ type: "error", category: "import", title: i18n.t("importNotify.failed", { error: reason }) });
       throw e;
     }
   },

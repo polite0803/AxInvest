@@ -556,6 +556,13 @@ export function logIpcError(
 
     if (options?.notify) {
       (async () => {
+        // 与 lib/notification.ts 的写入闸门同判据。settingsStore 静态 import 本文件，
+        // 反向静态 import 即成环，故沿用本函数既有的动态 import 形态。
+        const { useSettingsStore } = await import("@/stores/feature/settingsStore");
+        const settings = useSettingsStore.getState().settings;
+        if (settings.notificationsEnabled === false || settings.notifyErrors === false) {
+          return;
+        }
         const { useErrorNotificationStore } = await import("@/stores/shared/errorNotificationStore");
         useErrorNotificationStore.getState().pushError({
           message,

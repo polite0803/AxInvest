@@ -58,6 +58,23 @@ describe("ReplayWorkbench", () => {
     expect(screen.queryByTestId("goto-stock-analysis")).toBeNull();
   });
 
+  it("hosts the time-travel batch replay card (historical verification, not live screening)", () => {
+    renderWithProviders();
+    // 批次复盘归属历史验证域，常驻本工作台，与 ReplaySweep 并列；
+    // 不依赖上方锚点是否已选（卡片自带「N 个交易日前 / 指定日期」）
+    expect(screen.getByTestId("ttb-start-btn")).toBeInTheDocument();
+  });
+
+  it("defaults the batch card to fixed-date mode seeded with a picked anchor", () => {
+    useTimeAnchorStore.setState({ asOfDate: "2026-05-01", mode: "replay" });
+    renderWithProviders();
+    const pickerHost = document.querySelector('[data-testid="ttb-fixed-date"]');
+    const pickerInput = pickerHost?.matches("input")
+      ? pickerHost
+      : pickerHost?.querySelector("input");
+    expect(pickerInput?.getAttribute("value")).toBe("2026-05-01");
+  });
+
   it("renders an exit panel with Switch-to-Live button when mode is replay", () => {
     useTimeAnchorStore.setState({ asOfDate: "2026-05-01", mode: "replay" });
     renderWithProviders();

@@ -60,6 +60,7 @@ export const BUILTIN_PAGE_PATH: Record<string, string> = {
   "demand-discovery": "/demand-discovery",
   link: "/link",
   settings: "/settings",
+  "tasks-center": "/tasks",
   workflow: "/workflow",
   "dynamic-ui": "/dynamic-ui",
   marketplace: "/marketplace",

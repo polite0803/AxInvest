@@ -95,7 +95,7 @@ fn code_hash(code: &str) -> String {
 ///
 /// getter 可用性：`max_expr_depth()`/`max_function_expr_depth()` 由 rhai 的 `api::limits` 模块提供，
 /// `optimization_level()` 由 `api::optimize` 提供；本仓 rhai feature 组合为
-/// `sync` + `serde`（`Cargo.toml:72`，无 `unchecked`/`no_function`/`no_optimize`），
+/// `sync` + `serde`（`src-tauri/Cargo.toml:76`，无 `unchecked`/`no_function`/`no_optimize`），
 /// 三者均可用。若将来启用 `no_optimize`，`optimization_level()` 会消失 ⇒
 /// **编译期报错**（响亮失败，非静默），届时改指纹实现即可。
 fn parse_config_fingerprint(engine: &rhai::Engine) -> String {

@@ -338,8 +338,9 @@ function findCandidatesDeep(obj: Record<string, unknown>, depth = 0): SerenityCa
 //   - `serenity-screening-fast` ：快速链（确定性简报 + 单 Agent，见 seed_serenity_fast.rs）
 // 类型本身定义在 `serenityStore`（`runningChain` 是 store 状态，两处各写一份会分叉）。
 
-// 链名显示：复用两个运行按钮的文案，不另建 i18n key —— 与 `ScheduledAnalysisTab.tsx`
-// 的 `TREND_CHAINS` 同一约定（同一概念同一文案），避免两处链名分叉。
+// 链名显示：复用两个运行按钮的文案，不另建 i18n key —— 任务中心新建任务表单
+// （`pages/TasksCenterPage/forms/investTaskDefs.ts` 的 trend-screening 载荷）
+// 同一约定（同一概念同一文案），避免两处链名分叉。
 const CHAIN_LABEL_KEY: Record<SerenityChainId, string> = {
   "serenity-screening": "serenityPanel.run",
   "serenity-screening-fast": "serenityPanel.fastRun",

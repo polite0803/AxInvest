@@ -50,7 +50,7 @@ fn single_stock_window(core_src: &str) -> &str {
 }
 
 /// 代际写入语句的字面量。**带尾逗号**不是随手写的：本函数里有一条注释
-/// （`core.rs:2177`）逐字抄了同一个表达式但没有逗号 ⇒ 少了逗号判据就会被注释喂成「已写代际」，
+/// （`stock_workflow/core.rs:2196`）逐字抄了同一个表达式但没有逗号 ⇒ 少了逗号判据就会被注释喂成「已写代际」，
 /// 负控也就失效（正是本仓登记的「注释里抄一遍常量名原本算已筛」那一族伪装）。
 const PERSIST_WRITE: &str = "template_version: Set(Some(loaded.version)),";
 

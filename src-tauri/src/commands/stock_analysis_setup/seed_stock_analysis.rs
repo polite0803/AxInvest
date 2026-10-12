@@ -934,7 +934,7 @@ type AlgoToolRow = (
 ///   与本仓「结构性缺口不得在呈现层造成歧义」那条裁定相反（**注释级作废不算作废**）。
 ///   ⚠ 本版**没有**随之扩腿集：把 `eventCatalyst` 加进超短 participating 会改该档数值，
 ///   那是 #22 的另一半；「被计权 ⟺ 有该档的腿」这条反惰性门**也仍未立**
-///   （`a-catalyst` 现在仍逐档计权，见 `evidence_weight.rs:303/317/332/346`）
+///   （`a-catalyst` 现在仍逐档计权，见 `evidence_weight.rs:313/326/340/353`）
 ///   ⇒ 本版只买到「缺席可解释」，没买到「一致性被检查」，别把 #22 当闭环。
 ///   编号说明：§五十七/§五十八 把 v130 记给 B2-1/B2-2，但用户定序 3→2→1 后 #45 先落 v129、
 ///   本项又先于 B2-2 落地 ⇒ 按「连续单调」取 v130，B2-2（建 23 个带档分析师节点）顺延 **v131**。
@@ -6043,7 +6043,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
     // v140 前本档风险节点 `cls-risk-level-<档>` 曾**留在父图**，理由是它有四个父侧消费者
     //   （下面 `portfolio-mgr` 的 `overall_risk_{ultra_short,short,mid,long}` 四条映射，
     //   消费点是 `portfolio-mgr.rhai` 的 `tier_risk_raise`），而子执行只把父扇出节点的
-    //   `node_id` 与 `output_var` **双键**写回父池（`work_engine/engine/mod.rs:1772-1775`）
+    //   `node_id` 与 `output_var` **双键**写回父池（`work_engine/engine/mod.rs:1791-1796`）
     //   ⇒ 直接搬走会让那四条映射指向不存在的路径 ⇒ 按档风险收紧整条静默退役。
     //   v140 的解法：分支脚本把读到的风险档**回写进决策行**（`riskCategory`），主链读端随之
     //   改指 `pm-h-<档>.result.riskCategory` ⇒ 双键写回把它带回父池，偏离收口（详见该文件头部）。
@@ -6314,7 +6314,7 @@ pub(crate) async fn seed_stock_analysis_workflow_template(
             tool_name: None,
             execute_directly: true,
             // CodeNode 的输出按 `<节点 id>.result` 读，与 `("pm_result", "portfolio-mgr.result")` 同形
-            //（引擎同时按 node_id 与 output_var 写键，见 `rt-workflow/.../engine/mod.rs:1307-1309`）。
+            //（引擎同时按 node_id 与 output_var 写键，见 `crates/rt-workflow/src/work_engine/engine/mod.rs:1791-1796`）。
             input_mapping: [
                 ("r_ultra_short", "pm-h-ultra-short.result"),
                 ("r_short", "pm-h-short.result"),
@@ -9244,7 +9244,7 @@ fn apply_fast_chain_overrides(
 ///      （`dag_store.rs:312`），`enabled=false` 的节点永不执行 ⇒ 它既不写 `trader`，
 ///      也就完全不能缓解「下游读不到值」——占位只保留了一个**画布上的空盒子**；
 ///   2. **它会污染终态**：死锁处理里「禁用节点」只有在**直接上游全部 Failed/Skipped** 时
-///      才被判 `SKIPPED_DISABLED`（`engine/mod.rs:2879-2892`）；而上游是 Completed 时该分支
+///      才被判 `SKIPPED_DISABLED`（`engine/mod.rs:3016-3045`）；而上游是 Completed 时该分支
 ///      `return None` ⇒ 节点永远停在 Pending，整个 run 被降级为 `PartiallyCompleted`。
 ///
 /// ⇒ 结论：真正的组装由下游任务的 `trader-proxy` 节点（Code，`output_var = "trader"`）

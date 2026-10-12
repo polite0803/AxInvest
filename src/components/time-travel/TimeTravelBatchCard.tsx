@@ -1,10 +1,11 @@
+import { JobCard } from "@/components/tasks/JobCard";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { useTimeAnchorStore } from "@/stores/feature/timeAnchorStore";
 import type { TimeTravelBatchAnalysis, TimeTravelBatchState, TimeTravelPeriod } from "@/types";
 import {
   Alert,
   Button,
-  Card,
   Checkbox,
   Collapse,
   DatePicker,
@@ -22,26 +23,47 @@ import dayjs, { type Dayjs } from "dayjs";
 import { FlaskConical, Play } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { BatchStatusTag } from "./BatchStatusTag";
+import { useBatchAnalysisColumns, useBatchHorizonColumns } from "./batchTables";
 
 const { Text } = Typography;
 
 const ALL_PERIODS: TimeTravelPeriod[] = ["ultra_short", "short", "mid", "long"];
 const QUICK_AGO = [5, 20, 60, 90];
 const POLL_INTERVAL_MS = 2000;
-const TERMINAL: ReadonlyArray<TimeTravelBatchState["status"]> = ["completed", "partial", "failed"];
+const TERMINAL: ReadonlyArray<TimeTravelBatchState["status"]> = [
+  "completed",
+  "partial",
+  "failed",
+  "interrupted",
+];
 
 type DateMode = "ago" | "fixed";
 
 /**
- * 时间旅行批次复盘卡片：选定历史交易日 → as-of 封闭世界内存荐股 + 逐只 replay 分析
+ * 时间旅行批次复盘卡片：选定历史交易日 → as-of 封闭世界一轮统一回放
+ * 「智能荐股 + 趋势智选」两条平级选股链 → 两链候选合并去重后逐只 replay 分析
  * → 退出 guard 后按 2/5/28/90 交易日四档反思（未到期留 pending 由 18:00 cron 补做）。
+ *
+ * 挂载位置（同一组件，两处渲染，无第二套实现）：
+ *   1. 投资中心标题栏「批次复盘」按钮打开的右侧 Drawer —— 主入口，live/as-of
+ *      两种世界观下都可发起，与模式切换同属投资中心顶层模式层（业务 tab 不托管）；
+ *   2. 时间旅行回放工作台（/replay-workbench）历史验证区，与 ReplaySweep 并列。
+ * 批次复盘是历史验证逻辑，不属于选股页的当日生产。卡片自带历史交易日选择
+ * （N 交易日前 / 指定日期），后端自开 as_of guard，与全局锚点正交。
  */
 export function TimeTravelBatchCard() {
   const { t } = useTranslation();
 
-  const [dateMode, setDateMode] = useState<DateMode>("ago");
+  // 工作台选了锚点日时默认 fixed 模式带入该日；未选锚点（asOfDate=null）时
+  // 默认「N 个交易日前」模式。仅初始化读一次（getState，不订阅）：
+  // 用户在卡片内改日期后不应被外部 store 变化覆盖。
+  const initialAnchor = useTimeAnchorStore.getState().asOfDate;
+  const [dateMode, setDateMode] = useState<DateMode>(initialAnchor ? "fixed" : "ago");
   const [tradingDaysAgo, setTradingDaysAgo] = useState<number>(90);
-  const [fixedDate, setFixedDate] = useState<Dayjs | null>(null);
+  const [fixedDate, setFixedDate] = useState<Dayjs | null>(
+    initialAnchor ? dayjs(initialAnchor) : null,
+  );
   const [periods, setPeriods] = useState<TimeTravelPeriod[]>(ALL_PERIODS);
   const [minConfidence, setMinConfidence] = useState<number>(50);
   const [topN, setTopN] = useState<number>(20);
@@ -110,8 +132,6 @@ export function TimeTravelBatchCard() {
       periods,
       minConfidence,
       topN,
-      runReco: true,
-      runSerenity: false,
       reflect,
     };
 
@@ -131,65 +151,16 @@ export function TimeTravelBatchCard() {
   const finishedCount = batch ? batch.ok + batch.fail : 0;
   const percent = batch && batch.total > 0 ? Math.round((finishedCount / batch.total) * 100) : 0;
 
-  const analysisColumns: ColumnsType<TimeTravelBatchAnalysis> = [
-    {
-      title: t("replayWorkbench.batch.col.stock"),
-      dataIndex: "stockCode",
-      key: "stock",
-      render: (_, r) => (
-        <span>
-          <Text strong>{r.stockCode}</Text> <Text type="secondary">{r.stockName}</Text>
-        </span>
-      ),
-    },
-    {
-      title: t("replayWorkbench.batch.col.period"),
-      dataIndex: "period",
-      key: "period",
-      width: 96,
-      render: (p: string) => <Tag>{t(`replayWorkbench.batch.period.${p}`, { defaultValue: p })}</Tag>,
-    },
-    {
-      title: t("replayWorkbench.batch.col.confidence"),
-      dataIndex: "confidence",
-      key: "confidence",
-      width: 90,
-    },
-    {
-      title: t("replayWorkbench.batch.col.status"),
-      key: "status",
-      width: 110,
-      render: (_, r) =>
-        r.analysisId
-          ? <Tag color="success">{t("replayWorkbench.batch.analysisOk")}</Tag>
-          : <Tag color="error">{t("replayWorkbench.batch.analysisFail")}</Tag>,
-    },
-    {
-      title: t("replayWorkbench.batch.col.detail"),
-      key: "detail",
-      ellipsis: true,
-      render: (_, r) =>
-        r.error
-          ? <Text type="danger">{r.error}</Text>
-          : <Text type="secondary">{r.analysisId?.slice(0, 8)}</Text>,
-    },
-  ];
+  const analysisColumns = useBatchAnalysisColumns();
 
   return (
-    <Card
-      size="small"
-      style={{ marginBottom: 16 }}
-      title={
-        <span>
-          <span style={{ marginRight: 8 }}>3️⃣</span>
-          {t("replayWorkbench.batch.title")}
-        </span>
-      }
-      extra={<FlaskConical size={14} />}
+    <JobCard
+      testId="ttb-card"
+      icon={<FlaskConical size={16} />}
+      title={t("replayWorkbench.batch.title")}
+      description={t("replayWorkbench.batch.description")}
     >
-      <Space direction="vertical" size={12} style={{ width: "100%" }}>
-        <Text type="secondary">{t("replayWorkbench.batch.description")}</Text>
-
+      <Space orientation="vertical" size={12} style={{ width: "100%" }}>
         <Space wrap size="middle">
           <Segmented
             value={dateMode}
@@ -305,7 +276,7 @@ export function TimeTravelBatchCard() {
 
         {batch && <BatchProgress batch={batch} percent={percent} analysisColumns={analysisColumns} />}
       </Space>
-    </Card>
+    </JobCard>
   );
 }
 
@@ -319,24 +290,12 @@ function BatchProgress({
   analysisColumns: ColumnsType<TimeTravelBatchAnalysis>;
 }) {
   const { t } = useTranslation();
-
-  const statusTag = () => {
-    switch (batch.status) {
-      case "completed":
-        return <Tag color="success">{t("replayWorkbench.batch.status.completed")}</Tag>;
-      case "partial":
-        return <Tag color="warning">{t("replayWorkbench.batch.status.partial")}</Tag>;
-      case "failed":
-        return <Tag color="error">{t("replayWorkbench.batch.status.failed")}</Tag>;
-      default:
-        return <Tag color="processing">{t("replayWorkbench.batch.status.running")}</Tag>;
-    }
-  };
+  const horizonColumns = useBatchHorizonColumns();
 
   return (
-    <Space direction="vertical" size={12} style={{ width: "100%" }} data-testid="ttb-progress">
+    <Space orientation="vertical" size={12} style={{ width: "100%" }} data-testid="ttb-progress">
       <Space wrap>
-        {statusTag()}
+        <BatchStatusTag status={batch.status} />
         <Tag>
           {batch.phase === "reflection"
             ? t("replayWorkbench.batch.phaseReflection")
@@ -352,6 +311,8 @@ function BatchProgress({
       )}
 
       <Space wrap>
+        <Tag color="geekblue">{t("replayWorkbench.batch.recoCount", { n: batch.recoPicks ?? 0 })}</Tag>
+        <Tag color="purple">{t("replayWorkbench.batch.serenityCount", { n: batch.serenityPicks ?? 0 })}</Tag>
         <Tag color="success">{t("replayWorkbench.batch.okCount", { n: batch.ok })}</Tag>
         <Tag color="error">{t("replayWorkbench.batch.failCount", { n: batch.fail })}</Tag>
         <Tag>{t("replayWorkbench.batch.totalCount", { n: batch.total })}</Tag>
@@ -366,47 +327,7 @@ function BatchProgress({
           pagination={false}
           rowKey="period"
           dataSource={batch.horizons}
-          columns={[
-            {
-              title: t("replayWorkbench.batch.col.period"),
-              dataIndex: "period",
-              key: "period",
-              render: (p: string) => <Tag>{t(`replayWorkbench.batch.period.${p}`, { defaultValue: p })}</Tag>,
-            },
-            {
-              title: t("replayWorkbench.batch.col.holdingDays"),
-              dataIndex: "holdingDays",
-              key: "holdingDays",
-              width: 80,
-            },
-            {
-              title: t("replayWorkbench.batch.col.hindsight"),
-              dataIndex: "hindsightDate",
-              key: "hindsightDate",
-              width: 120,
-            },
-            {
-              title: t("replayWorkbench.batch.col.due"),
-              dataIndex: "due",
-              key: "due",
-              width: 90,
-              render: (due: boolean) =>
-                due
-                  ? <Tag color="blue">{t("replayWorkbench.batch.dueYes")}</Tag>
-                  : <Tag>{t("replayWorkbench.batch.dueNo")}</Tag>,
-            },
-            {
-              title: t("replayWorkbench.batch.col.reflection"),
-              key: "reflection",
-              render: (_, h) => (
-                <Space size={4}>
-                  <Tag color="success">{h.completed}</Tag>
-                  <Tag>{h.pending}</Tag>
-                  {h.failed > 0 && <Tag color="error">{h.failed}</Tag>}
-                </Space>
-              ),
-            },
-          ]}
+          columns={horizonColumns}
         />
       )}
 

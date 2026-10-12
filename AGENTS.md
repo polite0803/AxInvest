@@ -362,13 +362,13 @@ Conventional Commits + 中文描述。类型映射：
 
 | 写法 | 例 | 门禁结果 | 结论 |
 |---|---|---|---|
-| 完整仓库相对路径 | `src-tauri/src/commands/opc_domain_pack_actions.rs:2067` | 可定位 | ✔ 永远可用（**最稳**；只有目录搬迁会失效） |
-| 唯一后缀（去掉前缀目录，**但从 `/` 边界起截断**） | `commands/opc_domain_pack_actions.rs:2067` | 可定位（`locate()` ③ 后缀消歧） | ✔ **允许**，比全路径更抗目录搬迁 |
+| 完整仓库相对路径 | `src-tauri/src/commands/opc_capability_pack_actions.rs:2052` | 可定位 | ✔ 永远可用（**最稳**；只有目录搬迁会失效） |
+| 唯一后缀（去掉前缀目录，**但从 `/` 边界起截断**） | `commands/opc_capability_pack_actions.rs:2052` | 可定位（`locate()` ③ 后缀消歧） | ✔ **允许**，比全路径更抗目录搬迁 |
 | 裸 basename 且仓内唯一 | `cache_snapshot.rs` | 可定位 | ⚠ 允许但**脆**：仓内出现同名第二份即**静默**退化为「未检查」⇒ 建议写上一档 |
-| **段内截断 / 改词**（砍中间段、换同义词） | `actions.rs` 代 `opc_domain_pack_actions.rs`；`domain_pack_bridge.rs` 代 `opc_domain_pack_bridge.rs` | **BROKEN**（仓内零同名）⇒ 落「真待查」桶 | ✖ **禁止** |
+| **段内截断 / 改词**（砍中间段、换同义词） | `actions.rs` 代 `opc_capability_pack_actions.rs`；`domain_pack_bridge.rs` 代 `opc_capability_pack_bridge.rs` | **BROKEN**（仓内零同名）⇒ 落「真待查」桶 | ✖ **禁止** |
 
 **唯一判据（机械）**：截断必须落在 **`/` 边界**上；从**文件名中间**截断、或换一个同义词，一律不许。
-实测反例：`"opc_domain_pack_actions.rs".endsWith("actions.rs")` 为 `true`，但 `locate()` 要求的是 `/actions.rs` ⇒ 永不命中。
+实测反例：`"opc_capability_pack_actions.rs".endsWith("actions.rs")` 为 `true`，但 `locate()` 要求的是 `/actions.rs` ⇒ 永不命中。
 代价实证（2026-09-18）：`docs/plans/PLAN-industry-to-domain-migration.md` 的 `actions.rs` 一族 **12 条**，占当时 `BROKEN（真待查）` 桶的 **12/12（100%）** —— 那个桶因此**指向不了任何真实风险**。
 门禁现已把这类单独成 `ABBREV` 桶，并在 `--dump-doc-refs` 里**逐条点出它缩写的真实文件**（自证，不是自陈）。
 

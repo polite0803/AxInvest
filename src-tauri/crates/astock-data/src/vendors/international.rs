@@ -480,7 +480,7 @@ impl InternationalVendor {
         let parse_f64 =
             |key: &str| -> f64 { data.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0) };
 
-        // 字段映射参考 browser_eastmoney.rs:184-195 的正确映射
+        // 字段映射参考 browser_eastmoney.rs:194-205 的正确映射
         // f43=最新价 f60=昨收 f46=开盘 f44=最高 f45=最低 f47=成交量(手) f48=成交额(元)
         let price = parse_f64("f43");
         let pre_close = parse_f64("f60");

@@ -1707,6 +1707,9 @@ const SNAKE_CASE_RESPONSE_COMMANDS = new Set<string>([
   "repair_schema",
   "get_db_config",
   "list_reflections",
+  // ReplaySweepResult 内层键（stock_code / as_of_date / return_rate 等）按
+  // snake_case 契约消费（见 ReplaySweep.tsx 接口定义），不可被出口 camel 转换。
+  "run_replay_backtest",
 ]);
 
 /**
@@ -6423,6 +6426,67 @@ async function executeCommand<T>(
       return null as unknown as T;
     case "run_stock_pipeline":
       return null as unknown as T;
+    // 暂停 / 恢复仅需成功 resolve（无返回体）。
+    case "workflow_pause":
+    case "workflow_resume":
+      return undefined as unknown as T;
+
+    // ── 时间旅行批次复盘（任务中心手动作业）────────────────────────────
+    // 浏览器模式没有真实批次：发起返回固定 mock id，get 回一个 completed 空批次，
+    // 让批次卡轮询一轮即终态停止（否则 get_ 兜底 `{}` 被当成 running 批次，
+    // 访问 batch.horizons.length 直接 TypeError 白屏）。
+    // 列表仍由 `list_time_travel_batches` 显式返回 []（见下方调度任务段）。
+    case "run_time_travel_batch":
+      return "mock-time-travel-batch" as unknown as T;
+    case "get_time_travel_batch": {
+      const now = Date.now();
+      return {
+        batchId: "mock-time-travel-batch",
+        asOf: "2026-06-01",
+        tradingDaysAgo: null,
+        status: "completed",
+        phase: "reflection",
+        message: null,
+        total: 0,
+        ok: 0,
+        fail: 0,
+        recoPicks: 0,
+        serenityPicks: 0,
+        serenityError: null,
+        analyses: [],
+        horizons: [],
+        reflectionSummary: null,
+        errorCode: null,
+        errorDetail: null,
+        createdAtMs: now - 60_000,
+        updatedAtMs: now,
+        finishedAtMs: now,
+      } as unknown as T;
+    }
+
+    // ── 回放扫描（ReplaySweep）─────────────────────────────────────────
+    // 空结果 fixture（结构完整，组件直接解构 stats / results 不崩）。
+    // ⚠ 内层 snake_case，命令已登记 SNAKE_CASE_RESPONSE_COMMANDS 豁免出口转换。
+    case "run_replay_backtest":
+      return {
+        total: 0,
+        valid: 0,
+        invalid: 0,
+        results: [],
+        invalid_details: [],
+        stats: {
+          total: 0,
+          correct: 0,
+          wrong: 0,
+          accuracy: 0,
+          avg_return: 0,
+          alpha: 0,
+          avg_confidence: 0,
+          total_pnl: 0,
+          sharpe: 0,
+          max_drawdown: 0,
+        },
+      } as unknown as T;
 
     // 2026-09-19（D1）：`list_stock_analyses` 显式声明，理由有二 ——
     //   ① **消除误导性告警**：不声明会落到 default 并打出
@@ -6533,6 +6597,114 @@ async function executeCommand<T>(
       const updated = mockCapabilityDomainRegistry().find((r) => r.id === domain);
       return updated as unknown as T;
     }
+
+    // ── 任务中心（定时任务 / 批次复盘历史）──────────────────────────────
+    // mock 模式必须有应答：任务中心表格直接消费数组，undefined 会让 .map 崩。
+    // 示例覆盖四个分组：投资（内置 handler + workflow）/ OPC / 系统 / 自定义。
+    case "list_scheduled_tasks": {
+      const nowIso = new Date().toISOString();
+      const defaultConfig = {
+        timeoutSeconds: 300,
+        retryOnFailure: false,
+        maxRetries: 0,
+        retryDelaySeconds: 30,
+        notificationEnabled: true,
+        runOnStartup: false,
+      };
+      const mkTask = (
+        id: string,
+        name: string,
+        taskType: string,
+        cronExpression: string | null,
+        workflowId: string | null,
+        status: "active" | "paused" | "disabled",
+      ) => ({
+        id,
+        name,
+        description: "",
+        taskType,
+        cronExpression,
+        intervalSeconds: null,
+        nextRunAt: nowIso,
+        lastRunAt: nowIso,
+        lastResult: {
+          success: true,
+          output: null,
+          error: null,
+          durationMs: 1200,
+          skipped: false,
+        },
+        status,
+        config: { ...defaultConfig },
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        workflowId,
+      });
+      return [
+        mkTask("trend-screening-daily", "趋势智选日报", "trend-screening", "3 1 * * *", "trend-screening", "active"),
+        mkTask("stock-recommendation-daily", "智能荐股", "stock-recommendation", "20 17 * * 1-5", null, "paused"),
+        mkTask("pool-scan-daily", "股票池扫描", "pool-scan", "0 18 * * 1-5", null, "active"),
+        mkTask(
+          "opc-demand-discovery-daily",
+          "OPC 需求发现日报",
+          "opc-demand-discovery",
+          "0 8 * * *",
+          "opc-demand-discovery",
+          "active",
+        ),
+        mkTask(
+          "opc-demand-discovery-weekly",
+          "OPC 需求发现周报",
+          "opc-demand-discovery",
+          "0 9 * * 1",
+          "opc-demand-discovery",
+          "active",
+        ),
+        mkTask("backup-daily", "数据备份", "backup", "0 3 * * *", null, "active"),
+        mkTask("daily-summary-nightly", "每日摘要", "daily_summary", "30 23 * * *", null, "active"),
+        mkTask("custom-weekly-report", "我的自定义任务", "custom", "0 10 * * 1", null, "active"),
+      ] as unknown as T;
+    }
+    case "get_task_execution_history":
+    case "list_time_travel_batches":
+      return [] as unknown as T;
+    // 任务模板：结构与后端 get_scheduled_task_templates 对齐（snake_case 原样）
+    case "get_scheduled_task_templates":
+      return [
+        {
+          templateType: "custom",
+          name: "自定义任务",
+          description: "自定义 cron 定时任务",
+          template_type: "custom",
+          default_schedule: "0 9 * * *",
+        },
+        {
+          templateType: "weekly-summary",
+          name: "周报工作流",
+          description: "汇总一周市场与持仓表现",
+          template_type: "workflow",
+          workflow_id: "weekly-summary",
+          default_schedule: "0 9 * * 1",
+        },
+      ] as unknown as T;
+    // 创建 / 更新类：前端不消费返回值，undefined 即可
+    case "create_scheduled_task":
+    case "update_scheduled_task":
+    case "create_backup_task":
+    case "create_cleanup_task":
+    case "create_daily_summary_task":
+    case "create_stock_cron":
+    case "create_watchlist_scan_cron":
+    case "create_pool_scan_cron":
+    case "create_trend_screening_cron":
+    case "create_batch_reflection_cron":
+    case "create_decision_backtest_cron":
+    case "create_recommendation_cron":
+    case "pause_scheduled_task":
+    case "resume_scheduled_task":
+    case "delete_scheduled_task":
+    case "execute_scheduled_task":
+      return undefined as unknown as T;
 
     default: {
       console.warn(`[BrowserMock] Unhandled command: ${cmd}`, args);

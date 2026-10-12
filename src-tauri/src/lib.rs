@@ -74,7 +74,7 @@ pub use commands::opc_workflows::ensure_opc_config_synced;
 //
 // ⚠ 为什么走 `stock_workflow::core::` 完整路径，而**不**在 `stock_workflow/mod.rs`
 // 里加一行 `pub use core::run_stock_workflow_inner;`：
-// `mod.rs:60-64` 的 ⚠ 注释记载，build.rs 的 `parse_submodule_mod_rs` 会把
+// `commands/stock_workflow/mod.rs:62-66` 的 ⚠ 注释记载，build.rs 的 `parse_submodule_mod_rs` 会把
 // 「子模块已被 re-export 到 stock_workflow 层」当作「该子模块的全部 #[tauri::command]
 // 都已提升到父模块」⇒ 于是用父模块路径注册子模块的命令，编译期报
 // `cannot find __cmd__xxx in stock_workflow`，错误信息完全指不到真因。

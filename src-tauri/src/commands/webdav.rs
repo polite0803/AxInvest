@@ -7,6 +7,7 @@ use crate::commands::spawn_guard::panic_message;
 use axagent_agent_macro::agent_command;
 use axagent_crypto::{decrypt_key, encrypt_key};
 use axagent_dao::repo::{backup, settings as settings_repo};
+use axagent_harness::IpcEventName;
 use axagent_storage::webdav::{self, WebDavClient, WebDavConfig, WebDavFileInfo};
 use futures::FutureExt;
 use sea_orm::{ConnectionTrait, DatabaseConnection, Statement};
@@ -730,7 +731,7 @@ pub(crate) fn spawn_webdav_sync_task(
                             Ok(name) => {
                                 tracing::info!("WebDAV auto-sync completed: {}", name);
                                 if notify {
-                                    let _ = app_for_emit.emit("webdav-sync-completed", serde_json::json!({
+                                    let _ = app_for_emit.emit(IpcEventName::WebdavSyncCompleted.as_str(), serde_json::json!({
                                         "success": true,
                                         "name": name,
                                     }));
@@ -739,7 +740,7 @@ pub(crate) fn spawn_webdav_sync_task(
                             Err(e) => {
                                 tracing::warn!("WebDAV auto-sync failed: {}", e);
                                 if notify {
-                                    let _ = app_for_emit.emit("webdav-sync-completed", serde_json::json!({
+                                    let _ = app_for_emit.emit(IpcEventName::WebdavSyncCompleted.as_str(), serde_json::json!({
                                         "success": false,
                                         "error": e.to_string(),
                                     }));
@@ -755,7 +756,7 @@ pub(crate) fn spawn_webdav_sync_task(
                             "[webdav_sync] PANIC 在一次周期同步执行中: {}",
                             panic_message(&p)
                         );
-                        let _ = app_for_emit.emit("webdav-sync-completed", serde_json::json!({
+                        let _ = app_for_emit.emit(IpcEventName::WebdavSyncCompleted.as_str(), serde_json::json!({
                             "success": false,
                             "error": "Internal panic during WebDAV sync",
                         }));

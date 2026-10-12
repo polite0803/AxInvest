@@ -44,6 +44,7 @@ import { useResponsive } from "@/hooks/useResponsive";
 import { useUpdateChecker } from "@/hooks/useUpdateChecker";
 import { setDefaultNavigate } from "@/lib/actionRouter";
 import { invoke, isTauri, listen } from "@/lib/invoke";
+import { addNotification } from "@/lib/notification";
 import { message, setMessageInstance } from "@/lib/toast";
 import {
   initAnimationPreference,
@@ -265,6 +266,39 @@ function AppInner() {
       unlisten.then((fn) => fn());
     };
   }, [navigate, t]);
+
+  // 自动备份 / WebDAV 同步的完成事件 → 通知中心。后端是否广播该事件由 notify_backup 决定，
+  // 前端是否落库由 addNotification 的偏好闸门决定；payload 里的英文 message 不外露，文案走 t()。
+  useEffect(() => {
+    const unlistenBackup = listen<{ success: boolean; error?: string }>(
+      "auto-backup-completed",
+      (event) => {
+        const { success, error } = event.payload;
+        addNotification({
+          type: success ? "success" : "error",
+          title: success
+            ? t("backupNotify.autoDone")
+            : t("backupNotify.autoFailed", { error: error ?? "" }),
+        });
+      },
+    );
+    const unlistenWebdav = listen<{ success: boolean; name?: string; error?: string }>(
+      "webdav-sync-completed",
+      (event) => {
+        const { success, name, error } = event.payload;
+        addNotification({
+          type: success ? "success" : "error",
+          title: success
+            ? t("backupNotify.webdavDone", { name: name ?? "" })
+            : t("backupNotify.webdavFailed", { error: error ?? "" }),
+        });
+      },
+    );
+    return () => {
+      unlistenBackup.then((fn) => fn());
+      unlistenWebdav.then((fn) => fn());
+    };
+  }, [t]);
 
   useEffect(() => {
     const root = document.documentElement;

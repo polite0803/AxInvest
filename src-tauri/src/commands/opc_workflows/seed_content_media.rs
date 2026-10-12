@@ -58,9 +58,9 @@ const LEGACY_TEMPLATE_VERSION: i32 = 3;
 /// 逐章循环会变成「N 轮全推第 1 章」，**比修前（恒 1 轮）更糟**。
 ///
 /// R6 已落地（loop-body-reuse-verifier，2026-09-15，本人已逐行复核）：
-///   · loop 工厂（engine/mod.rs:5737 起）内的 Completed 复用短路**已净删除**；
-///   · 现在统一在 `Some(s) if s.is_terminal()`（`:5858-5873`）把 body 节点复位为 Ready
-///     并**本轮真执行**（日志 `:5871`：「不复用上一轮输出」）；
+///   · loop 工厂（engine/mod.rs:5937 起）内的 Completed 复用短路**已净删除**；
+///   · 现在统一在 `Some(s) if s.is_terminal()`（`:6058-6073`）把 body 节点复位为 Ready
+///     并**本轮真执行**（日志 `:6071`：「不复用上一轮输出」）；
 ///   · 全仓仅剩的复用分支在 Debate/Swarm 工厂 `:6326-6342`（刻意保留；其 `output_var: None`
 ///     对 debate/swarm 是**惰性**的 —— `debate_executor.rs:152` / `swarm_executor.rs:129`
 ///     都是 `round_results.insert(step_id, output.output)`，只按 step_id 取 `output.output`，
@@ -858,7 +858,7 @@ fn build_ip_building() -> (Vec<WorkflowNode>, Vec<WorkflowEdge>, String, String,
 /// 为什么按 `lc-assemble.content` 而不用节点 id：两条互斥创作路径
 /// （novel 的 `lc-assemble` / 非 novel 的 `lc-assemble-single`）**故意共用同一个
 /// output_var 名 `lc-assemble`**（见 lc-assemble-single 处的注释），
-/// engine/mod.rs:1670-1673 把结果同时写进 node_id 与 output_var 两个 key，
+/// engine/mod.rs:1791-1796 把结果同时写进 node_id 与 output_var 两个 key，
 /// 故按 output_var 名读天然覆盖两条路径。
 ///
 /// 失败语义：**显式 throw**，绝不回退成整段 JSON 或空字符串。

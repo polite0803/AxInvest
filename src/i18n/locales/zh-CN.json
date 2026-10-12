@@ -2968,7 +2968,8 @@
     "TIME_TRAVEL_BATCH_ASOF_INVALID": "锚点日期无效：必须是不晚于今天的 A 股交易日。",
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "已有一个时间旅行批次在运行，请等它结束。",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "当前处于实时流水线时间窗（23:50–02:10 / 17:50–18:10），请避开后再发起。",
-    "TIME_TRAVEL_BATCH_EXEC_FAILED": "时间旅行批次执行失败，请查看批次明细。"
+    "TIME_TRAVEL_BATCH_EXEC_FAILED": "时间旅行批次执行失败，请查看批次明细。",
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "查询时间旅行批次历史失败，请稍后重试。"
   },
   "errorBoundary": {
     "copied": "已复制",
@@ -3815,6 +3816,7 @@
     "memory": "记忆",
     "multiAgent": "多智能体协作",
     "settings": "设置",
+    "tasksCenter": "任务中心",
     "terminal": "终端",
     "wiki": "知识库",
     "workbench": "工作台",
@@ -3866,14 +3868,21 @@
     "communicationMessage": "消息通讯",
     "opc": "一人公司"
   },
+  "backupNotify": {
+    "autoDone": "自动备份已完成",
+    "autoFailed": "自动备份失败：{{error}}",
+    "webdavDone": "WebDAV 同步已完成：{{name}}",
+    "webdavFailed": "WebDAV 同步失败：{{error}}"
+  },
+  "importNotify": {
+    "done": "导入完成：入库 {{count}} 篇，跳过 {{skipped}}，失败 {{failed}}",
+    "failed": "导入失败：{{error}}",
+    "synced": "目录同步完成：新增 {{added}}，更新 {{updated}}，删除 {{deleted}}"
+  },
   "notification": {
     "clear": "清除",
     "empty": "暂无通知",
-    "hoursAgo": "{{count}} 小时前",
-    "justNow": "刚刚",
-    "markAllRead": "全部标记已读",
-    "minutesAgo": "{{count}} 分钟前",
-    "title": "通知"
+    "markAllRead": "全部标记已读"
   },
   "nudge": {
     "acceptanceRate": "接受率",
@@ -5901,7 +5910,11 @@
       "backupInterval": "备份间隔",
       "budgetPlaceholder": "不限",
       "budgetSaved": "预算已保存",
+      "backup": "数据备份",
+      "backupDesc": "每天凌晨自动备份应用数据",
       "budgetTripped": "已熔断",
+      "cleanup": "数据清理",
+      "cleanupDesc": "每周定时清理过期缓存与临时数据",
       "closedLoop": "闭环学习提示",
       "conversation_stats": "对话统计",
       "conversation_statsDesc": "分析对话模式和统计",
@@ -6407,6 +6420,14 @@
     "proactiveBehavior": "主动能力",
     "proactiveNudge": "主动建议",
     "proactiveNudgeDesc": "根据对话上下文主动给出提示、建议或下一步操作",
+    "notificationsEnabled": "启用通知",
+    "notificationsEnabledDesc": "关闭后不再写入应用内通知中心，也不再发送系统桌面通知（含定时荐股、需求发现提醒）",
+    "notifyErrors": "错误提醒",
+    "notifyErrorsDesc": "总闸开启时，是否把执行失败等错误类消息写入通知中心并弹出错误提醒",
+    "notifyImport": "导入提醒",
+    "notifyImportDesc": "总闸开启时，知识库与笔记库的目录导入与增量同步结束后把结果写入通知（成功、部分失败、失败各记一条）",
+    "notifyBackup": "备份与同步提醒",
+    "notifyBackupDesc": "总闸开启时，自动备份与 WebDAV 同步结束后各记一条通知；后端按本开关决定是否发出该事件",
     "closedLoopEnabled": "闭环执行",
     "closedLoopEnabledDesc": "允许 Agent 在获得授权后自动执行闭环任务",
     "closedLoopInterval": "闭环轮询间隔",
@@ -7319,6 +7340,240 @@
     "timelineLoadFail": "加载状态时间线失败",
     "title": "后台任务",
     "bash": "bash"
+  },
+  "tasksCenter": {
+    "title": "任务中心",
+    "description": "统一管理定时任务与手动作业：投资自动化、OPC 需求发现、系统维护任务，以及投资管道、批次复盘与回放扫描的运行历史。",
+    "tab": {
+      "scheduled": "定时任务",
+      "manual": "手动作业",
+      "overview": "概览",
+      "runs": "全部运行",
+      "schedules": "计划任务"
+    },
+    "group": {
+      "all": "全部",
+      "invest": "投资",
+      "opc": "OPC",
+      "system": "系统",
+      "custom": "自定义"
+    },
+    "column": {
+      "name": "名称",
+      "group": "分组",
+      "schedule": "调度计划",
+      "status": "状态",
+      "nextRun": "下次运行",
+      "lastRun": "上次运行",
+      "actions": "操作",
+      "state": "状态",
+      "source": "任务源",
+      "trigger": "触发方式",
+      "progress": "进度",
+      "started": "开始时间",
+      "duration": "耗时",
+      "attempts": "尝试次数"
+    },
+    "lastRun": {
+      "none": "尚未运行",
+      "skipped": "已跳过",
+      "success": "成功",
+      "failed": "失败"
+    },
+    "scheduled": {
+      "autoRefresh": "每 15 秒自动刷新",
+      "refresh": "刷新",
+      "empty": "暂无定时任务，点击右上角「新建任务」创建",
+      "executedOk": "已触发执行：{{name}}",
+      "deletedOk": "已删除任务：{{name}}"
+    },
+    "execute": {
+      "unsupported": "该任务未绑定工作流且无内置执行器，不支持手动执行"
+    },
+    "action": {
+      "execute": "立即执行",
+      "history": "运行历史",
+      "edit": "编辑",
+      "delete": "删除",
+      "editInOpc": "在 OPC 需求发现中编辑",
+      "opcDelivery": "OPC 投递配置",
+      "detail": "详情",
+      "retry": "重试",
+      "retryStarted": "已触发重试"
+    },
+    "delete": {
+      "confirmTitle": "确认删除任务「{{name}}」？",
+      "builtinWarning": "这是系统内置任务，删除后不会自动重建，请谨慎操作。",
+      "ok": "删除",
+      "cancel": "取消"
+    },
+    "history": {
+      "title": "运行历史 - {{name}}",
+      "started": "开始时间",
+      "duration": "耗时",
+      "result": "结果",
+      "detail": "详情",
+      "empty": "暂无运行记录"
+    },
+    "create": {
+      "button": "新建任务",
+      "title": "新建定时任务",
+      "editTitle": "编辑定时任务",
+      "category": {
+        "invest": "投资任务",
+        "custom": "自定义任务",
+        "system": "系统任务"
+      },
+      "selectKind": "选择任务类型",
+      "advanced": "高级设置",
+      "systemHint": "系统任务模板由系统服务统一执行，创建后可在列表中启停与查看运行历史。",
+      "createdOk": "任务已创建",
+      "updatedOk": "任务已更新",
+      "kind": {
+        "stockAnalysis": "单股定时分析",
+        "stockAnalysisDesc": "每个交易日定时对指定股票运行完整多智能体分析",
+        "watchlistScan": "自选股扫描",
+        "watchlistScanDesc": "定时扫描自选股列表，汇总变化与信号",
+        "poolScan": "股票池扫描",
+        "poolScanDesc": "按回看天数与置信度阈值定时扫描全市场股票池",
+        "trendScreening": "趋势智选筛选",
+        "trendScreeningDesc": "定时运行 Serenity 产业链趋势筛选（标准链或快速链）",
+        "batchReflection": "批次反思",
+        "batchReflectionDesc": "对到期的历史分析批次定时执行四档反思",
+        "decisionBacktest": "决策回放验证",
+        "decisionBacktestDesc": "按短、中、长窗口定时回放验证历史决策表现",
+        "recommendation": "定时智能荐股",
+        "recommendationDesc": "按周期与置信度阈值定时生成智能荐股榜单"
+      },
+      "field": {
+        "lookbackDays": "回看天数",
+        "maxStocks": "最大股票数",
+        "minConfidence": "最低置信度",
+        "optional": "可选",
+        "chain": "筛选链",
+        "period": "周期",
+        "windows": "回放窗口（交易日）"
+      },
+      "menuScheduled": "新建定时任务",
+      "menuPipeline": "运行股票分析管道",
+      "menuBatch": "新建时间旅行批次",
+      "menuReplay": "运行回放扫盘"
+    },
+    "config": {
+      "timeoutSeconds": "超时时间（秒）",
+      "retryDelaySeconds": "重试间隔（秒）",
+      "maxRetries": "最大重试次数",
+      "retryOnFailure": "失败后重试",
+      "notificationEnabled": "启用通知",
+      "runOnStartup": "启动时运行"
+    },
+    "jobs": {
+      "pipelineDesc": "股票分析流水线：候选 → 分析 → 反思，按计划自动推进",
+      "lastRunAt": "最近运行",
+      "noRuns": "暂无运行记录"
+    },
+    "manual": {
+      "historyTitle": "运行历史",
+      "historyPipeline": "投资管道",
+      "historyBatches": "批次复盘",
+      "batchesEmpty": "暂无批次复盘记录"
+    },
+    "batchDetail": {
+      "title": "批次详情",
+      "notFound": "未找到该批次记录",
+      "phase": "阶段",
+      "finishedAt": "完成时间",
+      "progress": "进度",
+      "picks": "候选",
+      "message": "批次消息",
+      "serenityError": "趋势智选错误",
+      "errorDetail": "错误详情",
+      "reflection": "反思摘要",
+      "horizons": "分档复盘结果"
+    },
+    "pipelineDetail": {
+      "title": "管道运行详情",
+      "asOfDate": "锚点日",
+      "completedAt": "完成时间",
+      "action": "操作建议",
+      "newAnalyzed": "新分析数",
+      "reassessed": "重估数",
+      "decisions": "决策数",
+      "note": "备注",
+      "newAnalysesList": "新分析标的（{{n}}）",
+      "reassessedList": "重估标的（{{n}}）",
+      "detailError": "详情加载失败"
+    },
+    "source": {
+      "scheduledCron": "定时任务",
+      "stockPipeline": "股票分析管道",
+      "timeTravelBatch": "时间旅行批次"
+    },
+    "state": {
+      "queued": "排队中",
+      "running": "运行中",
+      "waiting": "等待中",
+      "paused": "已暂停",
+      "succeeded": "成功",
+      "failed": "失败",
+      "canceled": "已取消"
+    },
+    "badge": {
+      "partial": "部分成功",
+      "retrying": "重试中",
+      "interrupted": "已中断",
+      "stale": "僵死",
+      "skipped": "已跳过",
+      "partialTip": "部分步骤失败",
+      "retryingTip": "正在自动重试",
+      "staleTip": "长时间无进度，可能已僵死",
+      "skippedTip": "本次被跳过（如非交易日）",
+      "interruptedTip": "执行被中断"
+    },
+    "trigger": {
+      "schedule": "定时",
+      "manual": "手动",
+      "system": "系统",
+      "external": "外部"
+    },
+    "health": {
+      "running": "运行中",
+      "queued": "排队中",
+      "failed": "失败",
+      "waiting": "等待处理"
+    },
+    "attention": {
+      "title": "需关注",
+      "empty": "一切正常，无需关注",
+      "viewAll": "查看全部"
+    },
+    "live": {
+      "title": "进行中",
+      "empty": "当前没有运行中的任务"
+    },
+    "summary": {
+      "title": "近 24 小时汇总",
+      "succeeded": "成功",
+      "failed": "失败",
+      "canceled": "已取消",
+      "total": "总计"
+    },
+    "runs": {
+      "refresh": "刷新",
+      "autoRefresh": "活跃任务每 2 秒自动刷新",
+      "someSourcesFailed": "部分任务源加载失败",
+      "empty": "暂无运行记录",
+      "detailUnavailable": "该任务源的详情暂未接入"
+    },
+    "filters": {
+      "search": "搜索名称、ID 或错误",
+      "sources": "任务源",
+      "states": "状态",
+      "triggers": "触发方式",
+      "range24h": "近 24 小时",
+      "range7d": "近 7 天",
+      "rangeAll": "全部"
+    }
   },
   "teammatePanel": {
     "createTeam": "创建团队",
@@ -11349,8 +11604,7 @@
       "workspace": "工作区",
       "screenshotDiagnosis": "截图诊断",
       "paperPortfolio": "模拟观察",
-      "quant": "量化",
-      "pipeline": "管道"
+      "quant": "量化"
     }
   },
   "paperPortfolio": {
@@ -14666,7 +14920,7 @@
     },
     "batch": {
       "title": "时间旅行批次复盘",
-      "description": "选定历史交易日，在当日的封闭世界中重跑荐股与逐只分析，再按超短/短/中/长四档到期日复盘。未到期档位会在到期后由定时任务自动补做。",
+      "description": "选定历史交易日，在当日的封闭世界中一轮同时重跑智能荐股与趋势智选，两链候选合并去重后逐只分析，再按超短/短/中/长四档到期日复盘。未到期档位会在到期后由定时任务自动补做。",
       "modeAgo": "按交易日回看",
       "modeFixed": "指定日期",
       "tradingDays": "个交易日前",
@@ -14684,11 +14938,14 @@
         "running": "运行中",
         "completed": "已完成",
         "partial": "部分完成",
-        "failed": "失败"
+        "failed": "失败",
+        "interrupted": "已中断"
       },
       "phaseAnalysis": "荐股分析阶段",
       "phaseReflection": "四档反思阶段",
       "asOfLabel": "锚点日",
+      "recoCount": "荐股候选 {{n}}",
+      "serenityCount": "趋势智选候选 {{n}}",
       "okCount": "成功 {{n}}",
       "failCount": "失败 {{n}}",
       "totalCount": "总计 {{n}}",

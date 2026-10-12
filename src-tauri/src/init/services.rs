@@ -623,21 +623,38 @@ fn start_auto_backup(app: &tauri::AppHandle, state: &AppState, app_dir: std::pat
                                     backup_dir_setting.as_deref(),
                                     &app_dir2,
                                 );
+                                // 与 commands/backup.rs 的 restart_auto_backup 同口径读 notify_backup：
+                                // 存量库若从未打开过备份设置，跑的就是这条启动期 loop，
+                                // 不在这里读设置，设置页的「备份与同步提醒」对它无效。
+                                let notify = axagent_dao::repo::settings::get_settings(&db2)
+                                    .await
+                                    .map(|s| s.notify_backup)
+                                    .unwrap_or(true);
                                 if let Err(e) =
                                     axagent_dao::repo::backup::create_backup(&db2, "sqlite", &backup_dir, &axagent_storage::DefaultPathEncoder)
                                         .await
                                 {
                                     tracing::warn!("Auto-backup failed: {}", e);
-                                    let _ = app_for_backup.emit("auto-backup-completed", serde_json::json!({
-                                        "success": false,
-                                        "error": e.to_string(),
-                                    }));
+                                    if notify {
+                                        let _ = app_for_backup.emit(
+                                            IpcEventName::AutoBackupCompleted.as_str(),
+                                            serde_json::json!({
+                                                "success": false,
+                                                "error": e.to_string(),
+                                            }),
+                                        );
+                                    }
                                 } else {
                                     tracing::info!("Auto-backup created");
-                                    let _ = app_for_backup.emit("auto-backup-completed", serde_json::json!({
-                                        "success": true,
-                                        "message": "Auto-backup created successfully",
-                                    }));
+                                    if notify {
+                                        let _ = app_for_backup.emit(
+                                            IpcEventName::AutoBackupCompleted.as_str(),
+                                            serde_json::json!({
+                                                "success": true,
+                                                "message": "Auto-backup created successfully",
+                                            }),
+                                        );
+                                    }
                                     let _ =
                                         axagent_dao::repo::backup::cleanup_old_backups(&db2, max_count, &axagent_storage::DefaultPathEncoder)
                                             .await;
@@ -1936,7 +1953,7 @@ fn start_text_grad_analysis(state: &AppState) {
 /// 向 `WorkEngine` 注入工具解析器 —— 让工作流里引用的工具名按需解析成可执行回调。
 ///
 /// ⚠ **这是工作流能真正跑起来的必要条件**。`run_workflow` 的注册段
-/// （`engine/mod.rs:2287-2332`）依次尝试：① 本函数注入的 resolver、
+/// （`engine/mod.rs:2421-2528`）依次尝试：① 本函数注入的 resolver、
 /// ② `tool_registry`（`set_tool_registry`，**生产路径从未注入**，仅测试在用）、
 /// ③ Rhai 脚本缓存。三者皆空时 `tool_executor.rs:177` 报「工具 '{}' 未注册」并判该节点失败。
 ///

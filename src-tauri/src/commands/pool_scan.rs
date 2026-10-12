@@ -36,7 +36,7 @@ use axagent_agent_macro::agent_command;
 use axagent_analysis_engine::recommender::Period;
 use axagent_runtime_core::{CronJob, CronJobStatus};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::AppState;
@@ -111,36 +111,62 @@ fn select_candidates(
     analyzed_today: &std::collections::HashSet<String>,
     max_stocks: usize,
 ) -> PoolSelection {
-    let mut best: std::collections::HashMap<String, (String, Period, i32)> =
-        std::collections::HashMap::new();
-    for (code, name, period, confidence) in rows {
-        match best.get(&code) {
-            Some((_, _, c)) if *c >= confidence => {},
-            _ => {
-                best.insert(code, (name, period, confidence));
-            },
-        }
-    }
+    // 去重/排序下沉为公共纯函数：时间旅行批次合并「内存荐股 + 趋势智选」
+    // 候选时走同一口径（见 dedup_explicit_candidates），两处不许各写一份。
+    let merged = rows
+        .into_iter()
+        .map(|(stock_code, stock_name, period, confidence)| PoolCandidate {
+            stock_code,
+            stock_name,
+            period,
+            confidence,
+        })
+        .collect();
+    let deduped = dedup_explicit_candidates(merged);
 
     let mut skipped: Vec<String> = Vec::new();
     let mut queue: Vec<PoolCandidate> = Vec::new();
-    for (code, (name, period, confidence)) in best {
-        if analyzed_today.contains(&code) {
-            skipped.push(code);
+    for c in deduped {
+        if analyzed_today.contains(&c.stock_code) {
+            skipped.push(c.stock_code);
             continue;
         }
-        queue.push(PoolCandidate { stock_code: code, stock_name: name, period, confidence });
+        queue.push(c);
     }
-    // confidence 降序稳定排队（同置信按 code，消除 HashMap 乱序带来的批次抖动）
-    queue.sort_by(|a, b| {
-        b.confidence.cmp(&a.confidence).then_with(|| a.stock_code.cmp(&b.stock_code))
-    });
+    // 去重函数已按 confidence 降序排好；「当日已分析」排除只删行不改相对顺序。
 
     let truncated = max_stocks > 0 && queue.len() > max_stocks;
     if max_stocks > 0 {
         queue.truncate(max_stocks);
     }
     PoolSelection { candidates: queue, skipped_analyzed_today: skipped, truncated }
+}
+
+/// 显式候选合并去重（时间旅行批次专用；[`select_candidates`] 的去重/排序段
+/// 也复用本函数，保证 live 池扫描与 as-of 批次同一口径）。
+///
+/// 同一 `stock_code` 多条候选（四档各一排、智能荐股与趋势智选撞车）只保留
+/// confidence 最高的一条并带上它的 `period`（confidence 持平保留先到的一条，
+/// 与历史池扫描行为一致）；结果按 confidence 降序、同置信按 code 升序稳定排列。
+/// **不做**「当日已分析」排除与 max-N 截断 —— 回放世界里每只都是新建 replay
+/// 分析行，批次把两条链的候选当一轮统一回放，配额由调用方另行决定。
+pub fn dedup_explicit_candidates(candidates: Vec<PoolCandidate>) -> Vec<PoolCandidate> {
+    let mut best: std::collections::HashMap<String, PoolCandidate> =
+        std::collections::HashMap::new();
+    for c in candidates {
+        match best.get(&c.stock_code) {
+            Some(keep) if keep.confidence >= c.confidence => {},
+            _ => {
+                best.insert(c.stock_code.clone(), c);
+            },
+        }
+    }
+    let mut queue: Vec<PoolCandidate> = best.into_values().collect();
+    // confidence 降序稳定排队（同置信按 code，消除 HashMap 乱序带来的批次抖动）
+    queue.sort_by(|a, b| {
+        b.confidence.cmp(&a.confidence).then_with(|| a.stock_code.cmp(&b.stock_code))
+    });
+    queue
 }
 
 /// 从 `reco_picks` 读取候选池并应用「当日未分析」判据（cron 与手动入口共用）。
@@ -273,7 +299,7 @@ pub struct PoolScanOutcome {
 }
 
 /// 候选队列中单只标的的结构化执行结果。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PoolCandidateResult {
     pub stock_code: String,
@@ -652,5 +678,45 @@ mod tests {
         let text = all_skipped.render();
         assert!(text.contains("当日已分析过"), "text = {text}");
         assert!(!text.contains("候选池为空"), "全跳过不得报成空池: {text}");
+    }
+
+    fn pc(code: &str, period: Period, confidence: i32) -> PoolCandidate {
+        PoolCandidate {
+            stock_code: code.to_string(),
+            stock_name: format!("{code}-name"),
+            period,
+            confidence,
+        }
+    }
+
+    /// 时间旅行批次两链合并：荐股与趋势智选撞同一 code → 留胜率高的一条并带其档位；
+    /// 输出置信降序；不做当日排除/截断（回放世界每只都要新建 replay 分析行）。
+    #[test]
+    fn dedup_explicit_merges_two_chains_keeping_higher_win_rate() {
+        let reco = vec![pc("600001", Period::Short, 60), pc("600009", Period::Mid, 55)];
+        let serenity = vec![
+            // 撞车：serenity 该档胜率更高 → 保留它，period 也换成 long
+            pc("600001", Period::Long, 81),
+            pc("600002", Period::Mid, 70),
+        ];
+        let mut merged = reco;
+        merged.extend(serenity);
+        let queue = dedup_explicit_candidates(merged);
+        assert_eq!(
+            queue.iter().map(|c| c.stock_code.clone()).collect::<Vec<_>>(),
+            vec!["600001", "600002", "600009"]
+        );
+        let hit = queue.iter().find(|c| c.stock_code == "600001").unwrap();
+        assert_eq!(hit.confidence, 81);
+        assert_eq!(hit.period, Period::Long);
+    }
+
+    /// 置信持平保留先到的一条（与历史池扫描 select_candidates 同行为）
+    #[test]
+    fn dedup_explicit_tie_keeps_first_arrival() {
+        let merged = vec![pc("600001", Period::Mid, 70), pc("600001", Period::Long, 70)];
+        let queue = dedup_explicit_candidates(merged);
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].period, Period::Mid);
     }
 }

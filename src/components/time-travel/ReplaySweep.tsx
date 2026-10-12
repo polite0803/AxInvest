@@ -1,10 +1,10 @@
 // i18n-exempt: 业务逻辑/API 描述/日志字符串，非 UI 展示文本
+import { JobCard } from "@/components/tasks/JobCard";
 import { invoke } from "@/lib/invoke";
 import { buildAsOfDateRange, type WorkdayRange } from "@/lib/replay/workdays";
 import {
   Alert,
   Button,
-  Card,
   Collapse,
   DatePicker,
   Form,
@@ -224,23 +224,12 @@ export function ReplaySweep() {
   }, [result]);
 
   return (
-    <Card
-      title={
-        <span>
-          <CalendarRange size={14} style={{ marginRight: 6, verticalAlign: -2 }} />
-          {t("replayWorkbench.sweep.title")}
-        </span>
-      }
-      size="small"
-      style={{ marginBottom: 16 }}
+    <JobCard
+      testId="replay-sweep-card"
+      icon={<CalendarRange size={16} />}
+      title={t("replayWorkbench.sweep.title")}
+      description={t("replayWorkbench.sweep.intro")}
     >
-      <Alert
-        type="info"
-        showIcon
-        title={t("replayWorkbench.sweep.intro")}
-        style={{ marginBottom: 12 }}
-      />
-
       <Form<ReplaySweepFormValues>
         layout="vertical"
         size="small"
@@ -437,6 +426,6 @@ export function ReplaySweep() {
           />
         </div>
       )}
-    </Card>
+    </JobCard>
   );
 }

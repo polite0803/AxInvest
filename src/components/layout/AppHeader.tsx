@@ -24,6 +24,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/terminal": "nav.terminal",
   "/invest": "nav.financeInvestment",
   "/opc": "nav.automationOperations",
+  "/tasks": "tasksCenter.title",
   // 能力包页（/opc/domain/:id）— 顶栏标签与页面大标题（CapabilityPackHub domainTitle）保持一致
   "/opc/domain/finance-invest": "opc.domains.finance_invest",
   "/opc/domain/accounting": "opc.domains.accounting",
@@ -68,8 +69,8 @@ function resolvePageLabel(pathname: string): string | null {
   if (
     pathname.startsWith("/stock-analysis") || pathname.startsWith("/screener") || pathname.startsWith("/watchlist")
     || pathname.startsWith("/portfolio") || pathname.startsWith("/backtest") || pathname.startsWith("/compare")
-    || pathname.startsWith("/trade") || pathname.startsWith("/scheduled-analysis") || pathname.startsWith("/quant")
-    || pathname.startsWith("/replay-workbench") || pathname.startsWith("/pipeline")
+    || pathname.startsWith("/trade") || pathname.startsWith("/quant")
+    || pathname.startsWith("/replay-workbench")
   ) {
     return null;
   }

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+import i18n from "@/i18n";
 import { translateBackendError } from "@/lib/errorI18n";
 import { invoke } from "@/lib/invoke";
+import { addNotification } from "@/lib/notification";
 import type {
   BacklinkInfo,
   CreateNoteInput,
@@ -332,11 +334,22 @@ export const useWikiStore = create<WikiState>((set, get) => ({
         vaultPath,
       });
       set({ error: null });
+      addNotification({
+        type: stats.failed > 0 ? "warning" : "success",
+        category: "import",
+        title: i18n.t("importNotify.done", {
+          count: stats.imported,
+          skipped: stats.skipped,
+          failed: stats.failed,
+        }),
+      });
       // F7：导入写入后端后刷新当前视图的笔记列表
       await get().refreshNotes(wikiId);
       return stats;
     } catch (e) {
-      set({ error: translateBackendError(e) });
+      const reason = translateBackendError(e);
+      set({ error: reason });
+      addNotification({ type: "error", category: "import", title: i18n.t("importNotify.failed", { error: reason }) });
       return null;
     }
   },

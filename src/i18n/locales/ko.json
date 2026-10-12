@@ -2968,7 +2968,8 @@
     "TIME_TRAVEL_BATCH_ASOF_INVALID": "기준일이 잘못되었습니다. 오늘 이전의 A주 거래일이어야 합니다.",
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "이미 실행 중인 타임트래블 배치가 있습니다. 종료될 때까지 기다려 주세요.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "라이브 파이프라인 시간대(23:50–02:10 / 17:50–18:10)입니다. 나중에 다시 시도해 주세요.",
-    "TIME_TRAVEL_BATCH_EXEC_FAILED": "배치 실행에 실패했습니다. 배치 상세를 확인하세요."
+    "TIME_TRAVEL_BATCH_EXEC_FAILED": "배치 실행에 실패했습니다. 배치 상세를 확인하세요.",
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "타임 트래블 배치 기록 조회에 실패했습니다. 나중에 다시 시도해 주세요."
   },
   "errorBoundary": {
     "copied": "복사됨",
@@ -3815,6 +3816,7 @@
     "memory": "메모리",
     "multiAgent": "멀티 에이전트",
     "settings": "설정",
+    "tasksCenter": "작업 센터",
     "terminal": "터미널",
     "wiki": "위키",
     "workbench": "워크벤치",
@@ -3866,14 +3868,21 @@
     "communicationMessage": "메시지",
     "opc": "원맨 컴퍼니"
   },
+  "backupNotify": {
+    "autoDone": "자동 백업 완료",
+    "autoFailed": "자동 백업 실패: {{error}}",
+    "webdavDone": "WebDAV 동기화 완료: {{name}}",
+    "webdavFailed": "WebDAV 동기화 실패: {{error}}"
+  },
+  "importNotify": {
+    "done": "가져오기 완료: {{count}}건 등록, 건너뜀 {{skipped}}, 실패 {{failed}}",
+    "failed": "가져오기 실패: {{error}}",
+    "synced": "디렉터리 동기화 완료: 추가 {{added}}, 업데이트 {{updated}}, 삭제 {{deleted}}"
+  },
   "notification": {
     "clear": "지우기",
     "empty": "알림이 없습니다",
-    "hoursAgo": "{{count}}시간 전",
-    "justNow": "방금",
-    "markAllRead": "모두 읽음 표시",
-    "minutesAgo": "{{count}}분 전",
-    "title": "알림"
+    "markAllRead": "모두 읽음 표시"
   },
   "nudge": {
     "acceptanceRate": "수락률",
@@ -5901,7 +5910,11 @@
       "backupInterval": "백업 간격",
       "budgetPlaceholder": "무제한",
       "budgetSaved": "예산이 저장되었습니다",
+      "backup": "데이터 백업",
+      "backupDesc": "매일 새벽 앱 데이터를 자동 백업",
       "budgetTripped": "차단됨",
+      "cleanup": "데이터 정리",
+      "cleanupDesc": "매주 만료된 캐시와 임시 데이터를 정기적으로 정리",
       "closedLoop": "폐쇄 루프 알림",
       "conversation_stats": "대화 통계",
       "conversation_statsDesc": "대화 패턴 및 통계 분석",
@@ -6407,6 +6420,14 @@
     "proactiveBehavior": "능동 기능",
     "proactiveNudge": "능동 제안",
     "proactiveNudgeDesc": "대화 맥락에 따라 힌트·제안·다음 단계를 능동적으로 제공합니다",
+    "notificationsEnabled": "알림 사용",
+    "notificationsEnabledDesc": "끄면 앱 내 알림 센터에 기록되지 않고 시스템 데스크톱 알림(정기 종목 추천, 수요 발견 알림 포함)도 발송하지 않습니다.",
+    "notifyErrors": "오류 알림",
+    "notifyErrorsDesc": "마스터 스위치가 켜진 상태에서 실행 오류 등 메시지를 알림 센터에 기록하고 오류 토스트를 표시합니다.",
+    "notifyImport": "가져오기 알림",
+    "notifyImportDesc": "마스터 스위치가 켜진 상태에서 지식 베이스와 노트 볼트 디렉터리 가져오기 및 증분 동기화 결과를 알림 센터에 기록합니다(성공, 일부 실패, 실패 각각 1건).",
+    "notifyBackup": "백업 및 동기화 알림",
+    "notifyBackupDesc": "마스터 스위치가 켜진 상태에서 자동 백업과 WebDAV 동기화가 끝나면 각각 1건을 기록합니다. 백엔드가 이 스위치로 이벤트 발송 여부를 판단합니다.",
     "closedLoopEnabled": "폐루프 실행",
     "closedLoopEnabledDesc": "승인 후 에이전트가 폐루프 작업을 자동 실행하도록 허용",
     "closedLoopInterval": "폐루프 간격",
@@ -7319,6 +7340,240 @@
     "timelineLoadFail": "상태 타임라인을 불러오지 못했습니다",
     "title": "백그라운드 작업",
     "bash": "bash"
+  },
+  "tasksCenter": {
+    "title": "작업 센터",
+    "description": "예약 작업과 수동 작업을 한곳에서 관리: 투자 자동화, OPC 디맨드 발견, 시스템 유지보수 작업, 그리고 투자 파이프라인·배치 회고·리플레이 스윕의 실행 이력.",
+    "tab": {
+      "scheduled": "예약 작업",
+      "manual": "수동 작업",
+      "overview": "개요",
+      "runs": "실행",
+      "schedules": "예약"
+    },
+    "group": {
+      "all": "전체",
+      "invest": "투자",
+      "opc": "OPC",
+      "system": "시스템",
+      "custom": "사용자 정의"
+    },
+    "column": {
+      "name": "이름",
+      "group": "그룹",
+      "schedule": "일정",
+      "status": "상태",
+      "nextRun": "다음 실행",
+      "lastRun": "마지막 실행",
+      "actions": "작업",
+      "state": "상태",
+      "source": "소스",
+      "trigger": "트리거",
+      "progress": "진행",
+      "started": "시작 시간",
+      "duration": "소요 시간",
+      "attempts": "시도 횟수"
+    },
+    "lastRun": {
+      "none": "미실행",
+      "skipped": "건너뜀",
+      "success": "성공",
+      "failed": "실패"
+    },
+    "scheduled": {
+      "autoRefresh": "15초마다 자동 새로고침",
+      "refresh": "새로고침",
+      "empty": "예약된 작업이 없습니다. 오른쪽 위의 '작업 만들기'로 만드세요.",
+      "executedOk": "실행이 트리거되었습니다: {{name}}",
+      "deletedOk": "작업이 삭제되었습니다: {{name}}"
+    },
+    "execute": {
+      "unsupported": "이 작업에는 워크플로 연결과 내장 실행기가 없어 수동 실행을 지원하지 않습니다."
+    },
+    "action": {
+      "execute": "지금 실행",
+      "history": "실행 이력",
+      "edit": "편집",
+      "delete": "삭제",
+      "editInOpc": "OPC 디맨드 발견에서 편집",
+      "opcDelivery": "OPC 전달 설정",
+      "detail": "상세",
+      "retry": "재시도",
+      "retryStarted": "재시도 시작됨"
+    },
+    "delete": {
+      "confirmTitle": "작업 '{{name}}'을(를) 삭제하시겠습니까?",
+      "builtinWarning": "시스템 내장 작업입니다. 삭제 후 자동으로 다시 생성되지 않으니 신중하게 진행하세요.",
+      "ok": "삭제",
+      "cancel": "취소"
+    },
+    "history": {
+      "title": "실행 이력 - {{name}}",
+      "started": "시작 시간",
+      "duration": "소요 시간",
+      "result": "결과",
+      "detail": "상세",
+      "empty": "실행 이력 없음"
+    },
+    "create": {
+      "button": "작업 만들기",
+      "title": "예약 작업 만들기",
+      "editTitle": "예약 작업 편집",
+      "category": {
+        "invest": "투자 작업",
+        "custom": "사용자 정의 작업",
+        "system": "시스템 작업"
+      },
+      "selectKind": "작업 유형 선택",
+      "advanced": "고급 설정",
+      "systemHint": "시스템 작업 템플릿은 시스템 서비스가 통합 실행합니다. 생성 후 목록에서 켜고 끄며 실행 이력을 볼 수 있습니다.",
+      "createdOk": "작업이 생성되었습니다",
+      "updatedOk": "작업이 업데이트되었습니다",
+      "kind": {
+        "stockAnalysis": "개별 종목 예약 분석",
+        "stockAnalysisDesc": "매 영업일 지정 종목에 대해 전체 멀티에이전트 분석을 예약 실행",
+        "watchlistScan": "관심종목 스캔",
+        "watchlistScanDesc": "관심종목 목록을 주기적으로 스캔하여 변화와 신호 요약",
+        "poolScan": "종목 풀 스캔",
+        "poolScanDesc": "소급 일수와 신뢰도 임계값으로 전 시장 종목 풀을 주기적으로 스캔",
+        "trendScreening": "트렌드 지선 스크리닝",
+        "trendScreeningDesc": "Serenity 산업 사슬 트렌드 스크리닝을 예약 실행(표준 체인 또는 고속 체인)",
+        "batchReflection": "배치 회고",
+        "batchReflectionDesc": "만기된 과거 분석 배치에 대해 4구간 회고를 예약 실행",
+        "decisionBacktest": "의사결정 리플레이 검증",
+        "decisionBacktestDesc": "단기·중기·장기 윈도우로 과거 의사결정을 예약 리플레이 검증",
+        "recommendation": "예약 스마트 종목 추천",
+        "recommendationDesc": "주기와 신뢰도 임계값에 따라 스마트 종목 추천 순위를 주기적으로 생성"
+      },
+      "field": {
+        "lookbackDays": "소급 일수",
+        "maxStocks": "최대 종목 수",
+        "minConfidence": "최소 신뢰도",
+        "optional": "선택 사항",
+        "chain": "스크리닝 체인",
+        "period": "주기",
+        "windows": "리플레이 윈도우(거래일)"
+      },
+      "menuScheduled": "새 예약 작업",
+      "menuPipeline": "주식 분석 파이프라인 실행",
+      "menuBatch": "새 타임트래블 배치",
+      "menuReplay": "리플레이 스윕 실행"
+    },
+    "config": {
+      "timeoutSeconds": "제한 시간(초)",
+      "retryDelaySeconds": "재시도 간격(초)",
+      "maxRetries": "최대 재시도 횟수",
+      "retryOnFailure": "실패 시 재시도",
+      "notificationEnabled": "알림 활성화",
+      "runOnStartup": "시작 시 실행"
+    },
+    "jobs": {
+      "pipelineDesc": "종목 분석 파이프라인: 후보 → 분석 → 회고, 일정에 따라 자동 진행",
+      "lastRunAt": "마지막 실행",
+      "noRuns": "실행 이력 없음"
+    },
+    "manual": {
+      "historyTitle": "실행 이력",
+      "historyPipeline": "투자 파이프라인",
+      "historyBatches": "배치 회고",
+      "batchesEmpty": "배치 회고 기록 없음"
+    },
+    "batchDetail": {
+      "title": "배치 상세",
+      "notFound": "배치 기록을 찾을 수 없습니다",
+      "phase": "단계",
+      "finishedAt": "완료 시간",
+      "progress": "진행률",
+      "picks": "후보",
+      "message": "배치 메시지",
+      "serenityError": "트렌드 지선 오류",
+      "errorDetail": "오류 상세",
+      "reflection": "회고 요약",
+      "horizons": "구간별 회고 결과"
+    },
+    "pipelineDetail": {
+      "title": "파이프라인 실행 상세",
+      "asOfDate": "기준일",
+      "completedAt": "완료 시간",
+      "action": "권장 조치",
+      "newAnalyzed": "신규 분석 수",
+      "reassessed": "재평가 수",
+      "decisions": "의사결정 수",
+      "note": "메모",
+      "newAnalysesList": "신규 분석 종목({{n}})",
+      "reassessedList": "재평가 종목({{n}})",
+      "detailError": "상세 불러오기 실패"
+    },
+    "source": {
+      "scheduledCron": "예약 작업",
+      "stockPipeline": "주식 분석 파이프라인",
+      "timeTravelBatch": "타임트래블 배치"
+    },
+    "state": {
+      "queued": "대기 중",
+      "running": "실행 중",
+      "waiting": "대기 중",
+      "paused": "일시정지",
+      "succeeded": "성공",
+      "failed": "실패",
+      "canceled": "취소됨"
+    },
+    "badge": {
+      "partial": "부분 성공",
+      "retrying": "재시도 중",
+      "interrupted": "중단됨",
+      "stale": "정체됨",
+      "skipped": "건너뜀",
+      "partialTip": "일부 단계 실패",
+      "retryingTip": "자동 재시도 중",
+      "interruptedTip": "실행이 중단됨",
+      "staleTip": "오랫동안 진척이 없어 정체되었을 수 있습니다",
+      "skippedTip": "이번 실행은 건너뜀 (영업일 아님 등)"
+    },
+    "trigger": {
+      "schedule": "예약",
+      "manual": "수동",
+      "system": "시스템",
+      "external": "외부"
+    },
+    "health": {
+      "running": "실행 중",
+      "queued": "대기 중",
+      "failed": "실패",
+      "waiting": "대기 중"
+    },
+    "attention": {
+      "title": "주의 필요",
+      "empty": "모두 정상입니다",
+      "viewAll": "전체 보기"
+    },
+    "live": {
+      "title": "진행 중",
+      "empty": "실행 중인 작업 없음"
+    },
+    "summary": {
+      "title": "최근 24시간 요약",
+      "succeeded": "성공",
+      "failed": "실패",
+      "canceled": "취소",
+      "total": "합계"
+    },
+    "runs": {
+      "refresh": "새로고침",
+      "autoRefresh": "활성 작업 2초 간격 자동 새로고침",
+      "someSourcesFailed": "일부 소스를 불러오지 못했습니다",
+      "empty": "실행 기록 없음",
+      "detailUnavailable": "이 소스의 상세는 아직 지원되지 않습니다"
+    },
+    "filters": {
+      "search": "이름, ID 또는 오류 검색",
+      "sources": "소스",
+      "states": "상태",
+      "triggers": "트리거",
+      "range24h": "최근 24시간",
+      "range7d": "최근 7일",
+      "rangeAll": "전체"
+    }
   },
   "teammatePanel": {
     "createTeam": "팀 만들기",
@@ -11353,8 +11608,7 @@
       "workspace": "워크스페이스",
       "screenshotDiagnosis": "스크린샷 진단",
       "paperPortfolio": "모의 포트폴리오",
-      "quant": "퀀트",
-      "pipeline": "파이프라인"
+      "quant": "퀀트"
     }
   },
   "paperPortfolio": {
@@ -14501,7 +14755,7 @@
     },
     "batch": {
       "title": "타임트래블 배치 복기",
-      "description": "과거 거래일을 선택해 해당 일자의 as-of 세계에서 종목 추천과 개별 분석을 재실행하고 초단기/단기/중기/장기 4구간으로 복기합니다. 도래하지 않은 구간은 스케줄 작업이 자동으로 보완합니다.",
+      "description": "과거 거래일을 선택해 해당 일자의 as-of 세계에서 스마트 종목 추천과 Serenity 트렌드 선별을 한 라운드로 함께 재실행합니다. 두 체인의 후보를 병합·중복 제거한 뒤 종목별로 분석하고 초단기/단기/중기/장기 4구간으로 복기합니다. 도래하지 않은 구간은 스케줄 작업이 자동으로 보완합니다.",
       "modeAgo": "거래일 이전",
       "modeFixed": "날짜 지정",
       "tradingDays": "거래일 전",
@@ -14519,11 +14773,14 @@
         "running": "실행 중",
         "completed": "완료",
         "partial": "부분 완료",
-        "failed": "실패"
+        "failed": "실패",
+        "interrupted": "중단됨"
       },
       "phaseAnalysis": "추천·분석 단계",
       "phaseReflection": "구간 복기 단계",
       "asOfLabel": "기준일",
+      "recoCount": "추천 후보 {{n}}",
+      "serenityCount": "트렌드 선별 후보 {{n}}",
       "okCount": "성공 {{n}}",
       "failCount": "실패 {{n}}",
       "totalCount": "합계 {{n}}",

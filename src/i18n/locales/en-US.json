@@ -2968,7 +2968,8 @@
     "TIME_TRAVEL_BATCH_ASOF_INVALID": "Invalid anchor date: it must be an A-share trading day no later than today.",
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "A time-travel batch is already running; wait for it to finish.",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "The live pipeline window is active (23:50-02:10 / 17:50-18:10). Please try later.",
-    "TIME_TRAVEL_BATCH_EXEC_FAILED": "The time-travel batch failed; see batch details."
+    "TIME_TRAVEL_BATCH_EXEC_FAILED": "The time-travel batch failed; see batch details.",
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "Failed to query time-travel batch history. Please try again later."
   },
   "errorBoundary": {
     "copied": "Copied",
@@ -3815,6 +3816,7 @@
     "memory": "Memory",
     "multiAgent": "Multi-Agent",
     "settings": "Settings",
+    "tasksCenter": "Task Center",
     "terminal": "Terminal",
     "wiki": "Wiki",
     "workbench": "Workspace",
@@ -3866,14 +3868,21 @@
     "communicationMessage": "Messaging",
     "opc": "One-Person Company"
   },
+  "backupNotify": {
+    "autoDone": "Auto-backup completed",
+    "autoFailed": "Auto-backup failed: {{error}}",
+    "webdavDone": "WebDAV sync completed: {{name}}",
+    "webdavFailed": "WebDAV sync failed: {{error}}"
+  },
+  "importNotify": {
+    "done": "Import finished: {{count}} imported, {{skipped}} skipped, {{failed}} failed",
+    "failed": "Import failed: {{error}}",
+    "synced": "Directory sync finished: {{added}} added, {{updated}} updated, {{deleted}} deleted"
+  },
   "notification": {
     "clear": "Clear",
     "empty": "No notifications",
-    "hoursAgo": "{{count}}h ago",
-    "justNow": "Just now",
-    "markAllRead": "Mark all read",
-    "minutesAgo": "{{count}}m ago",
-    "title": "Notifications"
+    "markAllRead": "Mark all read"
   },
   "nudge": {
     "acceptanceRate": "Acceptance rate",
@@ -5901,7 +5910,11 @@
       "backupInterval": "Backup Interval",
       "budgetPlaceholder": "Unlimited",
       "budgetSaved": "Budget saved",
+      "backup": "Data Backup",
+      "backupDesc": "Automatically back up app data every night",
       "budgetTripped": "Tripped",
+      "cleanup": "Data Cleanup",
+      "cleanupDesc": "Periodically purge expired cache and temporary data every week",
       "closedLoop": "Closed-Loop Nudge",
       "conversation_stats": "Conversation Statistics",
       "conversation_statsDesc": "Analyze conversation patterns and statistics",
@@ -6407,6 +6420,14 @@
     "proactiveBehavior": "Proactive",
     "proactiveNudge": "Proactive Suggestions",
     "proactiveNudgeDesc": "Proactively offer hints, suggestions, or next steps based on conversation context",
+    "notificationsEnabled": "Enable notifications",
+    "notificationsEnabledDesc": "When off, nothing is written to the in-app notification center and no system desktop notifications are sent (including scheduled stock picks and demand discovery alerts).",
+    "notifyErrors": "Error alerts",
+    "notifyErrorsDesc": "With the master switch on, record execution failures and other error messages in the notification center and show error toasts.",
+    "notifyImport": "Import alerts",
+    "notifyImportDesc": "With the master switch on, write the outcome of knowledge-base and note-vault directory imports and incremental syncs to the notification center (one entry each for success, partial failure, and failure).",
+    "notifyBackup": "Backup & sync alerts",
+    "notifyBackupDesc": "With the master switch on, record one entry when auto-backup and WebDAV sync finish; the backend uses this switch to decide whether to broadcast the event.",
     "closedLoopEnabled": "Closed-Loop Execution",
     "closedLoopEnabledDesc": "Allow the agent to run closed-loop tasks automatically once authorized",
     "closedLoopInterval": "Closed-Loop Interval",
@@ -7319,6 +7340,240 @@
     "timelineLoadFail": "Failed to load status timeline",
     "title": "Background Tasks",
     "bash": "bash"
+  },
+  "tasksCenter": {
+    "title": "Task Center",
+    "description": "Centrally manage scheduled tasks and manual jobs: investment automation, OPC demand discovery, system maintenance tasks, plus run history for the investment pipeline, batch reflections and replay sweeps.",
+    "tab": {
+      "scheduled": "Scheduled Tasks",
+      "manual": "Manual Jobs",
+      "overview": "Overview",
+      "runs": "Runs",
+      "schedules": "Schedules"
+    },
+    "group": {
+      "all": "All",
+      "invest": "Investing",
+      "opc": "OPC",
+      "system": "System",
+      "custom": "Custom"
+    },
+    "column": {
+      "name": "Name",
+      "group": "Group",
+      "schedule": "Schedule",
+      "status": "Status",
+      "nextRun": "Next Run",
+      "lastRun": "Last Run",
+      "actions": "Actions",
+      "state": "State",
+      "source": "Source",
+      "trigger": "Trigger",
+      "progress": "Progress",
+      "started": "Started",
+      "duration": "Duration",
+      "attempts": "Attempts"
+    },
+    "lastRun": {
+      "none": "Never run",
+      "skipped": "Skipped",
+      "success": "Success",
+      "failed": "Failed"
+    },
+    "scheduled": {
+      "autoRefresh": "Auto-refreshes every 15 seconds",
+      "refresh": "Refresh",
+      "empty": "No scheduled tasks yet. Click \"New Task\" in the top right to create one.",
+      "executedOk": "Execution triggered: {{name}}",
+      "deletedOk": "Task deleted: {{name}}"
+    },
+    "execute": {
+      "unsupported": "This task has no workflow binding and no built-in executor; manual execution is not supported."
+    },
+    "action": {
+      "execute": "Run Now",
+      "history": "Run History",
+      "edit": "Edit",
+      "delete": "Delete",
+      "editInOpc": "Edit in OPC Demand Discovery",
+      "opcDelivery": "OPC delivery settings",
+      "detail": "Details",
+      "retry": "Retry",
+      "retryStarted": "Retry triggered"
+    },
+    "delete": {
+      "confirmTitle": "Delete task \"{{name}}\"?",
+      "builtinWarning": "This is a built-in system task. It will not be recreated automatically after deletion. Proceed with caution.",
+      "ok": "Delete",
+      "cancel": "Cancel"
+    },
+    "history": {
+      "title": "Run History - {{name}}",
+      "started": "Started",
+      "duration": "Duration",
+      "result": "Result",
+      "detail": "Details",
+      "empty": "No run history"
+    },
+    "create": {
+      "button": "New Task",
+      "title": "New Scheduled Task",
+      "editTitle": "Edit Scheduled Task",
+      "category": {
+        "invest": "Investment Task",
+        "custom": "Custom Task",
+        "system": "System Task"
+      },
+      "selectKind": "Select task type",
+      "advanced": "Advanced",
+      "systemHint": "System task templates are executed by system services. After creation you can toggle them and view run history in the list.",
+      "createdOk": "Task created",
+      "updatedOk": "Task updated",
+      "kind": {
+        "stockAnalysis": "Scheduled Single-Stock Analysis",
+        "stockAnalysisDesc": "Run the full multi-agent analysis for a specified stock on every trading day",
+        "watchlistScan": "Watchlist Scan",
+        "watchlistScanDesc": "Periodically scan the watchlist and summarize changes and signals",
+        "poolScan": "Stock Pool Scan",
+        "poolScanDesc": "Periodically scan the full-market stock pool using lookback days and a confidence threshold",
+        "trendScreening": "Serenity Trend Screening",
+        "trendScreeningDesc": "Run the Serenity industry-chain trend screening on a schedule (standard or fast chain)",
+        "batchReflection": "Batch Reflection",
+        "batchReflectionDesc": "Run the four-horizon reflection on due historical analysis batches on schedule",
+        "decisionBacktest": "Decision Backtest",
+        "decisionBacktestDesc": "Replay and validate historical decisions on short/medium/long windows",
+        "recommendation": "Scheduled Stock Recommendations",
+        "recommendationDesc": "Periodically generate stock recommendation rankings by periods and confidence"
+      },
+      "field": {
+        "lookbackDays": "Lookback days",
+        "maxStocks": "Max stocks",
+        "minConfidence": "Min confidence",
+        "optional": "Optional",
+        "chain": "Screening chain",
+        "period": "Period",
+        "windows": "Replay windows (trading days)"
+      },
+      "menuScheduled": "New scheduled job",
+      "menuPipeline": "Run stock analysis pipeline",
+      "menuBatch": "New time-travel batch",
+      "menuReplay": "Run replay sweep"
+    },
+    "config": {
+      "timeoutSeconds": "Timeout (seconds)",
+      "retryDelaySeconds": "Retry delay (seconds)",
+      "maxRetries": "Max retries",
+      "retryOnFailure": "Retry on failure",
+      "notificationEnabled": "Enable notifications",
+      "runOnStartup": "Run on startup"
+    },
+    "jobs": {
+      "pipelineDesc": "Stock analysis pipeline: candidates → analysis → reflection, advanced automatically on schedule",
+      "lastRunAt": "Last run",
+      "noRuns": "No runs yet"
+    },
+    "manual": {
+      "historyTitle": "Run History",
+      "historyPipeline": "Investment Pipeline",
+      "historyBatches": "Batch Reflections",
+      "batchesEmpty": "No batch reflection records"
+    },
+    "batchDetail": {
+      "title": "Batch Details",
+      "notFound": "Batch record not found",
+      "phase": "Phase",
+      "finishedAt": "Finished at",
+      "progress": "Progress",
+      "picks": "Picks",
+      "message": "Batch message",
+      "serenityError": "Serenity error",
+      "errorDetail": "Error details",
+      "reflection": "Reflection summary",
+      "horizons": "Horizon results"
+    },
+    "pipelineDetail": {
+      "title": "Pipeline Run Details",
+      "asOfDate": "As-of date",
+      "completedAt": "Completed at",
+      "action": "Recommended action",
+      "newAnalyzed": "Newly analyzed",
+      "reassessed": "Reassessed",
+      "decisions": "Decisions",
+      "note": "Note",
+      "newAnalysesList": "Newly analyzed symbols ({{n}})",
+      "reassessedList": "Reassessed symbols ({{n}})",
+      "detailError": "Failed to load details"
+    },
+    "source": {
+      "scheduledCron": "Scheduled Jobs",
+      "stockPipeline": "Stock Analysis Pipeline",
+      "timeTravelBatch": "Time-Travel Batch"
+    },
+    "state": {
+      "queued": "Queued",
+      "running": "Running",
+      "waiting": "Waiting",
+      "paused": "Paused",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "canceled": "Canceled"
+    },
+    "badge": {
+      "partial": "Partial",
+      "retrying": "Retrying",
+      "interrupted": "Interrupted",
+      "stale": "Stale",
+      "skipped": "Skipped",
+      "partialTip": "Some steps failed",
+      "retryingTip": "Automatic retry in progress",
+      "interruptedTip": "Execution interrupted",
+      "staleTip": "No progress for a long time, possibly stale",
+      "skippedTip": "Skipped this run (e.g. non-trading day)"
+    },
+    "trigger": {
+      "schedule": "Scheduled",
+      "manual": "Manual",
+      "system": "System",
+      "external": "External"
+    },
+    "health": {
+      "running": "Running",
+      "queued": "Queued",
+      "failed": "Failed",
+      "waiting": "Waiting"
+    },
+    "attention": {
+      "title": "Needs attention",
+      "empty": "All healthy",
+      "viewAll": "View all"
+    },
+    "live": {
+      "title": "In progress",
+      "empty": "No running tasks"
+    },
+    "summary": {
+      "title": "Last 24h summary",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "canceled": "Canceled",
+      "total": "Total"
+    },
+    "runs": {
+      "refresh": "Refresh",
+      "autoRefresh": "Auto-refresh every 2s while active",
+      "someSourcesFailed": "Some sources failed to load",
+      "empty": "No runs",
+      "detailUnavailable": "Details for this source are not available yet"
+    },
+    "filters": {
+      "search": "Search name, ID or error",
+      "sources": "Source",
+      "states": "State",
+      "triggers": "Trigger",
+      "range24h": "Last 24h",
+      "range7d": "Last 7 days",
+      "rangeAll": "All"
+    }
   },
   "teammatePanel": {
     "createTeam": "Create Team",
@@ -11347,8 +11602,7 @@
       "workspace": "Workspace",
       "screenshotDiagnosis": "Screenshot Diagnosis",
       "paperPortfolio": "Paper Portfolio",
-      "quant": "Quant",
-      "pipeline": "Pipeline"
+      "quant": "Quant"
     }
   },
   "paperPortfolio": {
@@ -14668,7 +14922,7 @@
     "exitHint": "You are still in replay mode...",
     "batch": {
       "title": "Time-Travel Batch Review",
-      "description": "Pick a historical trading day to rerun screening and per-stock analysis in an as-of closed world, then review across ultra-short/short/mid/long horizons. Horizons not yet due are completed automatically by the scheduled job.",
+      "description": "Pick a historical trading day to rerun both Smart Recommendation and Serenity trend screening in one as-of closed-world pass; candidates from both chains are merged, deduplicated and analyzed stock by stock, then reviewed across ultra-short/short/mid/long horizons. Horizons not yet due are completed automatically by the scheduled job.",
       "modeAgo": "Trading days back",
       "modeFixed": "Specific date",
       "tradingDays": "trading days ago",
@@ -14686,11 +14940,14 @@
         "running": "Running",
         "completed": "Completed",
         "partial": "Partial",
-        "failed": "Failed"
+        "failed": "Failed",
+        "interrupted": "Interrupted"
       },
       "phaseAnalysis": "Screening & analysis",
       "phaseReflection": "Horizon reflection",
       "asOfLabel": "As-of",
+      "recoCount": "Reco candidates {{n}}",
+      "serenityCount": "Serenity candidates {{n}}",
       "okCount": "{{n}} ok",
       "failCount": "{{n}} failed",
       "totalCount": "{{n}} total",

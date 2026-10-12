@@ -65,6 +65,8 @@ export const IPC_EVENT_NAMES = [
   "skill:file-changed",
   "gateway-status-changed",
   "app-close-requested",
+  "auto-backup-completed",
+  "webdav-sync-completed",
   "background-task:created",
   "background-task:updated",
   "file-permission-request",

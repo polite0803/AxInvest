@@ -2968,7 +2968,8 @@
     "TIME_TRAVEL_BATCH_ASOF_INVALID": "基準日が無効です。今日以前のA株取引日を指定してください。",
     "TIME_TRAVEL_BATCH_ALREADY_RUNNING": "別のタイムトラベル・バッチが実行中です。終了をお待ちください。",
     "TIME_TRAVEL_BATCH_LIVE_WINDOW": "ライブ処理の時間帯（23:50–02:10 / 17:50–18:10）です。時間をずらしてお試しください。",
-    "TIME_TRAVEL_BATCH_EXEC_FAILED": "バッチ実行に失敗しました。バッチ詳細をご確認ください。"
+    "TIME_TRAVEL_BATCH_EXEC_FAILED": "バッチ実行に失敗しました。バッチ詳細をご確認ください。",
+    "TIME_TRAVEL_BATCH_QUERY_FAILED": "タイムトラベル・バッチ履歴の取得に失敗しました。後でもう一度お試しください。"
   },
   "errorBoundary": {
     "copied": "コピーしました",
@@ -3815,6 +3816,7 @@
     "memory": "メモリ",
     "multiAgent": "マルチエージェント",
     "settings": "設定",
+    "tasksCenter": "タスクセンター",
     "terminal": "ターミナル",
     "wiki": "Wiki",
     "workbench": "ワークスペース",
@@ -3866,14 +3868,21 @@
     "communicationMessage": "メッセージ",
     "opc": "一人会社"
   },
+  "backupNotify": {
+    "autoDone": "自動バックアップが完了しました",
+    "autoFailed": "自動バックアップが失敗しました：{{error}}",
+    "webdavDone": "WebDAV 同期が完了しました：{{name}}",
+    "webdavFailed": "WebDAV 同期が失敗しました：{{error}}"
+  },
+  "importNotify": {
+    "done": "インポート完了：{{count}} 件登録、スキップ {{skipped}}、失敗 {{failed}}",
+    "failed": "インポート失敗：{{error}}",
+    "synced": "ディレクトリ同期完了：追加 {{added}}、更新 {{updated}}、削除 {{deleted}}"
+  },
   "notification": {
     "clear": "クリア",
     "empty": "通知なし",
-    "hoursAgo": "{{count}} 時間前",
-    "justNow": "たった今",
-    "markAllRead": "全て既読にする",
-    "minutesAgo": "{{count}} 分前",
-    "title": "通知"
+    "markAllRead": "全て既読にする"
   },
   "nudge": {
     "acceptanceRate": "受容率",
@@ -5901,7 +5910,11 @@
       "backupInterval": "バックアップ間隔",
       "budgetPlaceholder": "無制限",
       "budgetSaved": "予算を保存しました",
+      "backup": "データバックアップ",
+      "backupDesc": "毎晩アプリデータを自動バックアップ",
       "budgetTripped": "トリップ済み",
+      "cleanup": "データクリーンアップ",
+      "cleanupDesc": "毎週、期限切れキャッシュと一時データを定時クリーンアップ",
       "closedLoop": "クローズドループナッジ",
       "conversation_stats": "会話統計",
       "conversation_statsDesc": "会話パターンと統計を分析",
@@ -6407,6 +6420,14 @@
     "proactiveBehavior": "プロアクティブ",
     "proactiveNudge": "プロアクティブ提案",
     "proactiveNudgeDesc": "会話の文脈に基づいて、ヒント・提案・次のステップを能動的に提示します",
+    "notificationsEnabled": "通知を有効にする",
+    "notificationsEnabledDesc": "オフにするとアプリ内通知センターへの書き込みもシステム桌面通知（定時銘柄選択・ニーズ発見のアラートを含む）も停止します。",
+    "notifyErrors": "エラー通知",
+    "notifyErrorsDesc": "親スイッチがオンの場合、実行失敗などのエラーを通知センターに記録しエラーのトーストを表示します。",
+    "notifyImport": "インポート通知",
+    "notifyImportDesc": "親スイッチがオンの場合、ナレッジベースとノートボックスのディレクトリインポートと増分同期の終了結果を通知センターに記録します（成功・一部失敗・失敗それぞれに1件）。",
+    "notifyBackup": "バックアップと同期の通知",
+    "notifyBackupDesc": "親スイッチがオンの場合、自動バックアップと WebDAV 同期の終了時にそれぞれ1件記録します。バックエンドはこのスイッチでイベント送信を判断します。",
     "closedLoopEnabled": "クローズドループ実行",
     "closedLoopEnabledDesc": "許可後にエージェントがクローズドループタスクを自動実行できるようにします",
     "closedLoopInterval": "クローズドループ間隔",
@@ -7319,6 +7340,240 @@
     "timelineLoadFail": "ステータス履歴の読み込みに失敗しました",
     "title": "バックグラウンドタスク",
     "bash": "bash"
+  },
+  "tasksCenter": {
+    "title": "タスクセンター",
+    "description": "定時タスクと手動ジョブを一元管理：投資自動化、OPC デマンド探索、システム保守タスク、および投資パイプライン・バッチ振り返り・リプレイスイープの実行履歴。",
+    "tab": {
+      "scheduled": "定時タスク",
+      "manual": "手動ジョブ",
+      "overview": "概要",
+      "runs": "実行",
+      "schedules": "スケジュール"
+    },
+    "group": {
+      "all": "すべて",
+      "invest": "投資",
+      "opc": "OPC",
+      "system": "システム",
+      "custom": "カスタム"
+    },
+    "column": {
+      "name": "名前",
+      "group": "グループ",
+      "schedule": "スケジュール",
+      "status": "ステータス",
+      "nextRun": "次回実行",
+      "lastRun": "前回実行",
+      "actions": "操作",
+      "state": "状態",
+      "source": "ソース",
+      "trigger": "トリガー",
+      "progress": "進捗",
+      "started": "開始時刻",
+      "duration": "所要時間",
+      "attempts": "試行回数"
+    },
+    "lastRun": {
+      "none": "未実行",
+      "skipped": "スキップ済み",
+      "success": "成功",
+      "failed": "失敗"
+    },
+    "scheduled": {
+      "autoRefresh": "15秒ごとに自動更新",
+      "refresh": "更新",
+      "empty": "定時タスクがありません。右上の「新規タスク」で作成してください。",
+      "executedOk": "実行をトリガーしました：{{name}}",
+      "deletedOk": "タスクを削除しました：{{name}}"
+    },
+    "execute": {
+      "unsupported": "このタスクにはワークフローの紐付けと内蔵エグゼキューターがなく、手動実行に対応していません。"
+    },
+    "action": {
+      "execute": "今すぐ実行",
+      "history": "実行履歴",
+      "edit": "編集",
+      "delete": "削除",
+      "editInOpc": "OPCデマンド探索で編集",
+      "opcDelivery": "OPC配信設定",
+      "detail": "詳細",
+      "retry": "再試行",
+      "retryStarted": "再試行を開始しました"
+    },
+    "delete": {
+      "confirmTitle": "タスク「{{name}}」を削除しますか？",
+      "builtinWarning": "これはシステム内蔵タスクです。削除後に自動で再作成されません。慎重に操作してください。",
+      "ok": "削除",
+      "cancel": "キャンセル"
+    },
+    "history": {
+      "title": "実行履歴 - {{name}}",
+      "started": "開始時刻",
+      "duration": "所要時間",
+      "result": "結果",
+      "detail": "詳細",
+      "empty": "実行履歴はありません"
+    },
+    "create": {
+      "button": "新規タスク",
+      "title": "定時タスクを新規作成",
+      "editTitle": "定時タスクを編集",
+      "category": {
+        "invest": "投資タスク",
+        "custom": "カスタムタスク",
+        "system": "システムタスク"
+      },
+      "selectKind": "タスクタイプを選択",
+      "advanced": "詳細設定",
+      "systemHint": "システムタスクテンプレートはシステムサービスが統一実行します。作成後は一覧で有効化/無効化と実行履歴の確認ができます。",
+      "createdOk": "タスクを作成しました",
+      "updatedOk": "タスクを更新しました",
+      "kind": {
+        "stockAnalysis": "個股定時分析",
+        "stockAnalysisDesc": "毎営業日、指定銘柄に対して完全なマルチエージェント分析を定時実行",
+        "watchlistScan": "ウォッチリストスキャン",
+        "watchlistScanDesc": "ウォッチリストを定時スキャンし、変化とシグナルを集約",
+        "poolScan": "銘柄プールスキャン",
+        "poolScanDesc": "振り返り日数と信頼度しきい値で全市場の銘柄プールを定時スキャン",
+        "trendScreening": "トレンド智選スクリーニング",
+        "trendScreeningDesc": "Serenity 産業チェーンのトレンドスクリーニングを定時実行（標準チェーンまたは高速チェーン）",
+        "batchReflection": "バッチ振り返り",
+        "batchReflectionDesc": "期限を迎えた過去の分析バッチに対し四区分の振り返りを定時実行",
+        "decisionBacktest": "意思決定リプレイ検証",
+        "decisionBacktestDesc": "短・中・長期ウィンドウで過去の意思決定を定時リプレイ検証",
+        "recommendation": "定時スマート銘柄推奨",
+        "recommendationDesc": "期間と信頼度しきい値に基づきスマート銘柄推奨ランキングを定時生成"
+      },
+      "field": {
+        "lookbackDays": "振り返り日数",
+        "maxStocks": "最大銘柄数",
+        "minConfidence": "最低信頼度",
+        "optional": "任意",
+        "chain": "スクリーニングチェーン",
+        "period": "期間",
+        "windows": "リプレイウィンドウ（取引日）"
+      },
+      "menuScheduled": "新規定期タスク",
+      "menuPipeline": "株式分析パイプラインを実行",
+      "menuBatch": "新規タイムトラベルバッチ",
+      "menuReplay": "リプレイスイープを実行"
+    },
+    "config": {
+      "timeoutSeconds": "タイムアウト（秒）",
+      "retryDelaySeconds": "再試行間隔（秒）",
+      "maxRetries": "最大再試行回数",
+      "retryOnFailure": "失敗時に再試行",
+      "notificationEnabled": "通知を有効化",
+      "runOnStartup": "起動時に実行"
+    },
+    "jobs": {
+      "pipelineDesc": "銘柄分析パイプライン：候補 → 分析 → 振り返り、スケジュールに従い自動進行",
+      "lastRunAt": "前回実行",
+      "noRuns": "実行履歴なし"
+    },
+    "manual": {
+      "historyTitle": "実行履歴",
+      "historyPipeline": "投資パイプライン",
+      "historyBatches": "バッチ振り返り",
+      "batchesEmpty": "バッチ振り返りの記録がありません"
+    },
+    "batchDetail": {
+      "title": "バッチ詳細",
+      "notFound": "バッチ記録が見つかりません",
+      "phase": "フェーズ",
+      "finishedAt": "完了時刻",
+      "progress": "進捗",
+      "picks": "候補",
+      "message": "バッチメッセージ",
+      "serenityError": "Serenityエラー",
+      "errorDetail": "エラー詳細",
+      "reflection": "振り返りサマリー",
+      "horizons": "期間別振り返り結果"
+    },
+    "pipelineDetail": {
+      "title": "パイプライン実行詳細",
+      "asOfDate": "基点日",
+      "completedAt": "完了時刻",
+      "action": "推奨アクション",
+      "newAnalyzed": "新規分析数",
+      "reassessed": "再評価数",
+      "decisions": "意思決定数",
+      "note": "メモ",
+      "newAnalysesList": "新規分析銘柄（{{n}}）",
+      "reassessedList": "再評価銘柄（{{n}}）",
+      "detailError": "詳細の読み込みに失敗しました"
+    },
+    "source": {
+      "scheduledCron": "定期タスク",
+      "stockPipeline": "株式分析パイプライン",
+      "timeTravelBatch": "タイムトラベルバッチ"
+    },
+    "state": {
+      "queued": "待機中",
+      "running": "実行中",
+      "waiting": "待機中",
+      "paused": "一時停止",
+      "succeeded": "成功",
+      "failed": "失敗",
+      "canceled": "キャンセル済み"
+    },
+    "badge": {
+      "partial": "部分成功",
+      "retrying": "再試行中",
+      "interrupted": "中断",
+      "stale": "停滞",
+      "skipped": "スキップ",
+      "partialTip": "一部のステップが失敗しました",
+      "retryingTip": "自動再試行中です",
+      "interruptedTip": "実行が中断されました",
+      "staleTip": "長時間進捗がなく、停滞している可能性があります",
+      "skippedTip": "今回はスキップされました（非営業日など）"
+    },
+    "trigger": {
+      "schedule": "定期",
+      "manual": "手動",
+      "system": "システム",
+      "external": "外部"
+    },
+    "health": {
+      "running": "実行中",
+      "queued": "待機中",
+      "failed": "失敗",
+      "waiting": "対応待ち"
+    },
+    "attention": {
+      "title": "要対応",
+      "empty": "問題ありません",
+      "viewAll": "すべて表示"
+    },
+    "live": {
+      "title": "実行中",
+      "empty": "実行中のタスクはありません"
+    },
+    "summary": {
+      "title": "過去24時間のサマリー",
+      "succeeded": "成功",
+      "failed": "失敗",
+      "canceled": "キャンセル",
+      "total": "合計"
+    },
+    "runs": {
+      "refresh": "更新",
+      "autoRefresh": "実行中は2秒ごとに自動更新",
+      "someSourcesFailed": "一部のソースの読み込みに失敗しました",
+      "empty": "実行記録がありません",
+      "detailUnavailable": "このソースの詳細はまだ利用できません"
+    },
+    "filters": {
+      "search": "名前・ID・エラーを検索",
+      "sources": "ソース",
+      "states": "状態",
+      "triggers": "トリガー",
+      "range24h": "過去24時間",
+      "range7d": "過去7日間",
+      "rangeAll": "すべて"
+    }
   },
   "teammatePanel": {
     "createTeam": "チームを作成",
@@ -11353,8 +11608,7 @@
       "workspace": "ワークスペース",
       "screenshotDiagnosis": "スクリーンショット診断",
       "paperPortfolio": "ペーパーポートフォリオ",
-      "quant": "クオンツ",
-      "pipeline": "パイプライン"
+      "quant": "クオンツ"
     }
   },
   "paperPortfolio": {
@@ -14501,7 +14755,7 @@
     },
     "batch": {
       "title": "タイムトラベル・バッチ検証",
-      "description": "過去の取引日を選び、その日のas-of世界で銘柄スクリーニングと個別分析を再実行し、超短期/短期/中期/長期の4区間で検証します。期日未到来の区間は定期ジョブが後日自動で補完します。",
+      "description": "過去の取引日を選び、その日のas-of世界で銘柄レコメンドとトレンド智選（Serenity）を1ラウンドで同時に再実行します。両チェーンの候補を統合・重複排除して1銘柄ずつ分析し、超短期/短期/中期/長期の4区間で検証します。期日未到来の区間は定期ジョブが後日自動で補完します。",
       "modeAgo": "取引日前へ",
       "modeFixed": "日付指定",
       "tradingDays": "取引日前",
@@ -14519,11 +14773,14 @@
         "running": "実行中",
         "completed": "完了",
         "partial": "部分完了",
-        "failed": "失敗"
+        "failed": "失敗",
+        "interrupted": "中断済み"
       },
       "phaseAnalysis": "スクリーニング・分析",
       "phaseReflection": "区間検証",
       "asOfLabel": "基準日",
+      "recoCount": "レコメンド候補 {{n}}",
+      "serenityCount": "トレンド智選候補 {{n}}",
       "okCount": "成功 {{n}}",
       "failCount": "失敗 {{n}}",
       "totalCount": "合計 {{n}}",

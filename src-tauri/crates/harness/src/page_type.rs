@@ -41,7 +41,7 @@
 //! | `Doc` | `src/init/opc_knowledge.rs:254`；DB 实测 `notes.page_type='doc'` **15 行** |
 //! | `Daily` | `src/commands/wiki.rs:1830` |
 //! | `Knowledge` | `src/commands/wiki.rs:2076`、`src/commands/knowledge_source.rs:237` |
-//! | `KnowledgeDocument` | `src/init/services.rs:410` |
+//! | `KnowledgeDocument` | `src/init/services.rs:438` |
 //! | `Synced` | `src/commands/wiki.rs:1576` |
 //! | `Log` | `crates/agent/src/wiki_compiler.rs:671`（白名单允许）、`:782`（`page_type_dir` 的 `"log" => ""` 分支） |
 //!
@@ -70,7 +70,7 @@ pub enum PageType {
     Daily,
     /// 知识条目（`src/commands/wiki.rs:2076`、`src/commands/knowledge_source.rs:237`）
     Knowledge,
-    /// 知识库文档（`src/init/services.rs:410`）
+    /// 知识库文档（`src/init/services.rs:438`）
     KnowledgeDocument,
     /// 已同步文档（`src/commands/wiki.rs:1576`）
     Synced,
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn test_observed_write_values_are_in_vocabulary() {
         // 写入点：src/commands/wiki.rs:1830 / src/commands/wiki.rs:2076 / knowledge_source.rs:237 /
-        //        opc_knowledge.rs:254 / src/init/services.rs:410 / src/commands/wiki.rs:1576 / wiki_compiler.rs:671
+        //        opc_knowledge.rs:254 / src/init/services.rs:438 / src/commands/wiki.rs:1576 / wiki_compiler.rs:671
         for raw in ["doc", "daily", "knowledge", "knowledge_document", "synced", "log", "note"] {
             assert!(
                 PageType::parse_strict(raw).is_some(),

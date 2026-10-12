@@ -84,7 +84,7 @@
 //!
 //! 1. 上述**信封形态**均已**读源码核实**（CodeNode `code_executor.rs:520-532`；
 //!    AgentNode `agent_executor.rs:2618-2634`；LoopNode `loop_executor.rs:535-549`；
-//!    双键写入 `engine/mod.rs:1669-1674`），且两个 CodeNode「会落哪个分支」的不确定性
+//!    双键写入 `engine/mod.rs:1791-1796`），且两个 CodeNode「会落哪个分支」的不确定性
 //!    也已关掉（`make_code_node` 把 `execute_directly + rhai` 硬编码，见常量 doc）。
 //!    但**未用真实一次执行结果核对**过实际 `results` 快照。
 //! 2. `lc-draft-loop`（Loop 容器）聚合产物的确切片形态**已定论**（静态源码级，双源同判）：
@@ -135,7 +135,7 @@ use std::sync::Arc;
 /// 不是 ToolNode/Agent 节点，信封形态不同：
 /// - `rt-workflow .../executors/code_executor.rs:520-532`（`execute_directly` 分支）返回
 ///   `{status, language, result: <Rhai map>, input_params, node_id, params: <同一 map>}`；
-/// - `engine/mod.rs:1669-1674` 把该值**同时**写进 `results[node_id]` 与 `results[output_var]`。
+/// - `engine/mod.rs:1791-1796` 把该值**同时**写进 `results[node_id]` 与 `results[output_var]`。
 ///
 /// ⇒ 运行时取值路径 = `results["lc-extract-fulltext"].result.char_count`
 /// （`.params.char_count` 等价）。seed 自身的消费写法也印证同一层：

@@ -212,7 +212,7 @@ pub fn since_date_from_years(years: u32) -> String {
 ///    **`current` 取 `historical.last()`**（"最后一条 = 最新一条"），
 ///    而两个来源的顺序**原本相反** —— vendor 接口按 `TRADE_DATE` **降序**返回，
 ///    且 `AStockClient::get_valuation_history` **原样返回不重排**
-///    （`vendors/eastmoney.rs:757`、`lib.rs:2428`）；命令层读表则是
+///    （`crates/astock-data/src/vendors/eastmoney.rs:2230-2235` 降序、`crates/astock-data/src/lib.rs:2913-2920` 原样透传）；命令层读表则是
 ///    `.order_by_asc(SnapshotDate)` ⇒ **升序**（`commands/stock_analysis.rs`）。
 ///    ⇒ 不归一的话，**同一条腿在两条路径上会拿不同的 `current`**：
 ///    工具路径会把窗口内**最旧**那天的 PE 当"当前 PE"去算分位（数字离谱且无报错）。

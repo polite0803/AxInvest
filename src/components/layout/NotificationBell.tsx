@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // 通知铃铛 — 显示 Agent 生命周期通知和未读计数
-// 使用统一的 notification 工具库，与 NotificationCenter 共享数据
+// 数据读写统一走 lib/notification（写入受通知偏好闸门控制）
 
 /* eslint-disable react-refresh/only-export-components */
 import { DropdownMenu } from "@/components/layout/DropdownMenu";

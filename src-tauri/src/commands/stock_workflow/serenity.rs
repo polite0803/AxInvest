@@ -3,8 +3,10 @@ use crate::AppState;
 use crate::commands::error::ErrorResponse;
 use crate::commands::error_code::stock_workflow as wf_err;
 use axagent_agent_macro::agent_command;
+use axagent_astock_data::AStockClient;
 use axagent_astock_data::as_of::{self};
 use axagent_entities::reco_picks;
+use axagent_harness::DatabaseConnection;
 use axagent_harness::IpcEventName;
 use axagent_harness::response_normalizer::ResponseNormalizer;
 use axagent_harness::types::{ChatResponse, ContentBlock};
@@ -17,7 +19,10 @@ use tauri::{Emitter, State};
 /// 趋势智选两链的模板 id 白名单（第 0 项为默认 = 原链）。
 /// 与种子侧对应：`serenity-screening`（`seed_serenity.rs`）/
 /// `serenity-screening-fast`（`seed_serenity_fast.rs`）。
-const SERENITY_TEMPLATE_IDS: [&str; 2] = ["serenity-screening", "serenity-screening-fast"];
+///
+/// `pub(crate)`：时间旅行批次复用默认原链（与每日 trend-screening cron 同模板）。
+pub(crate) const SERENITY_TEMPLATE_IDS: [&str; 2] =
+    ["serenity-screening", "serenity-screening-fast"];
 
 /// 从 Agent 节点输出中提取结构化 JSON。
 ///
@@ -934,9 +939,8 @@ pub async fn run_serenity_screening(
     run_id: Option<String>,
     template_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let engine = Arc::clone(&state.work_engine);
-
-    // 模板 id 白名单校验（默认原链，保持对旧调用方可用）
+    // 模板 id 白名单校验（默认原链，保持对旧调用方可用）—— 留在命令层，
+    // inner 信任调用方传入的 id（批次恒用 SERENITY_TEMPLATE_IDS[0]）。
     let template_id = template_id.unwrap_or_else(|| SERENITY_TEMPLATE_IDS[0].to_string());
     if !SERENITY_TEMPLATE_IDS.contains(&template_id.as_str()) {
         return Err(format!(
@@ -948,20 +952,61 @@ pub async fn run_serenity_screening(
     // 解析 as_of_date（支持回放模式）
     let as_of_ctx = parse_asof_param(as_of_date.clone())?;
 
+    run_serenity_screening_inner(SerenityScreeningArgs {
+        db: state.harness.db(),
+        client: &state.astock_client,
+        engine: Arc::clone(&state.work_engine),
+        app: Some(app),
+        as_of_ctx,
+        themes,
+        run_id,
+        template_id,
+    })
+    .await
+}
+
+/// 趋势智选执行参数 —— Tauri 命令与时间旅行批次共用同一份执行体。
+///
+/// 两条入口的唯一分叉：
+/// - `app = None`（批次）：静默运行，不 emit step/completed/failed 前端事件；
+/// - `as_of_ctx = Some(_)`（回放）：尾部天然跳过 `reco_picks` 落库与全局种子同步，
+///   满足「回放不污染 live 候选池」铁律（与命令路径逐字同一段守卫）。
+pub(crate) struct SerenityScreeningArgs<'a> {
+    pub db: &'a DatabaseConnection,
+    pub client: &'a AStockClient,
+    pub engine: Arc<axagent_rt_workflow::work_engine::WorkEngine>,
+    /// None = 时间旅行批次静默模式
+    pub app: Option<tauri::AppHandle>,
+    pub as_of_ctx: Option<as_of::AsOfContext>,
+    pub themes: Option<Vec<String>>,
+    pub run_id: Option<String>,
+    /// 已过白名单校验的模板 id（`serenity-screening` / `-fast`）
+    pub template_id: String,
+}
+
+/// 趋势智选工作流执行体（[`run_serenity_screening`] 命令与时间旅行批次共用，
+/// 保证手动运行 / 每日 cron 同模板 / as-of 批次三条入口口径一致）。
+pub(crate) async fn run_serenity_screening_inner(
+    args: SerenityScreeningArgs<'_>,
+) -> Result<serde_json::Value, String> {
+    let SerenityScreeningArgs { db, client, engine, app, as_of_ctx, themes, run_id, template_id } =
+        args;
+
     // 运行前确保模板为最新版（幂等：版本已是最新则跳过）。
     // 历史上启动阶段 seed 在 fire-and-forget 异步任务中执行，失败仅 log 不阻塞，
     // 若数据库停留在旧版本（如 v2 缺少 baseline_* input_mapping），
     // Rhai 脚本会报 "Variable not found: baseline_semi"。此处兜底重新 seed。
-    crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(state.harness.db())
+    // 批次入口同样需要：as-of 回放必须跑在当前模板版本上。
+    crate::commands::stock_analysis_setup::ensure_stock_analysis_experts_seeded(db)
         .await
         .map_err(|e| format!("重新种子化失败: {e}"))?;
 
     // 1. 加载趋势智选模板（原链 / 快速链，由 template_id 决定）
-    let loaded = load_and_inject_template(state.harness.db(), "", "", template_id.as_str()).await?;
+    let loaded = load_and_inject_template(db, "", "", template_id.as_str()).await?;
     tracing::info!("[serenity] 运行模板: {template_id}");
 
     // 注入 vendor 启用状态过滤器（与 stock-analysis 主工作流一致）
-    super::decision::inject_vendor_state(&state.astock_client, loaded.variables.as_ref());
+    super::decision::inject_vendor_state(client, loaded.variables.as_ref());
 
     // v47: 注入用户主题到 variables（对话式主题荐股）
     let mut variables = loaded.variables;
@@ -1086,7 +1131,10 @@ pub async fn run_serenity_screening(
                 "errorCode": super::core::node_error_code(event.error_code.as_deref())
                     .map(|(c, _)| c),
             });
-            let _ = app.emit(IpcEventName::SerenityScreeningStep.as_str(), payload);
+            // 批次静默模式（app=None）跳过事件发射；命令路径行为不变。
+            if let Some(app) = app {
+                let _ = app.emit(IpcEventName::SerenityScreeningStep.as_str(), payload);
+            }
         })
     });
 
@@ -1413,7 +1461,7 @@ pub async fn run_serenity_screening(
             let mut live_candidates: Vec<serde_json::Value> = Vec::new();
             // best-effort：失败只记日志，不影响返回结果
             {
-                let db = state.harness.db();
+                // db 复用 inner 入参（命令 / 批次两条入口同一连接）
                 // 统一 generated_at 格式：与 recommend_stocks 一致(ISO 8601 带毫秒)
                 let now_str = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f").to_string();
                 let ts_ms = chrono::Utc::now().timestamp_millis();
@@ -1459,26 +1507,22 @@ pub async fn run_serenity_screening(
                 // `commands::stock_analysis` —— 后者会撞分层护栏 `commands-no-sibling-call`
                 //（`src/commands/**` 不得跨模块互调）。这也是那两个函数被下沉到 engine 的原因。
                 let served_vars =
-                    axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(
-                        state.harness.db(),
-                    )
-                    .await
-                    .unwrap_or_else(|e| {
-                        tracing::warn!(
-                            "[serenity] served vars 取数失败 ⇒ 逐档先验缺失，置信度退回纯候选评分: {e}"
-                        );
-                        Vec::new()
-                    });
+                    axagent_analysis_engine::recommender::reco_loop::load_reco_served_vars_db(db)
+                        .await
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(
+                                "[serenity] served vars 取数失败 ⇒ 逐档先验缺失，置信度退回纯候选评分: {e}"
+                            );
+                            Vec::new()
+                        });
                 let prior_kappa = served_vars
                     .iter()
                     .find(|(k, _)| k == "horizon_prior_kappa")
                     .and_then(|(_, v)| v.as_f64())
                     .unwrap_or(axagent_analysis_engine::horizon_prior::DEFAULT_KAPPA);
-                let horizon_prior = axagent_analysis_engine::horizon_prior::horizon_prior_from_db(
-                    state.harness.db(),
-                    prior_kappa,
-                )
-                .await;
+                let horizon_prior =
+                    axagent_analysis_engine::horizon_prior::horizon_prior_from_db(db, prior_kappa)
+                        .await;
                 if horizon_prior.is_none() {
                     tracing::warn!(
                         "[serenity] 逐档先验取不到 ⇒ confidence 退回纯候选评分并标 absent（不假装合成过）"
@@ -1511,7 +1555,7 @@ pub async fn run_serenity_screening(
                     // （LLM 不产价格，此前一律填 0，前端展示残缺）。落库前抓实时行情，
                     // 按 SerenityStrategy::scan_one 的默认参数（entry ±5% / stop 0.80 /
                     // target 1.30）计算，行情失败时保持 0 并告警。
-                    let client = &state.astock_client;
+                    // client 复用 inner 入参（&AStockClient）。
                     // 上方的 `AS_OF.scope` 只罩住 `run_workflow`，执行到这里已退出作用域 ⇒ 裸调用
                     // 会拿**今日**行情给回放票算入场/止损。逐点重挂本轮截止日，与节点侧同口径。
                     let quote = as_of::AS_OF.scope(as_of_ctx, client.get_quote(code)).await.ok();
@@ -1670,6 +1714,9 @@ pub async fn run_serenity_screening(
                         // `restoreCandidate`（`seed_pool_json` 铺底 + `pick_data` 覆盖）
                         // 解出同形。confidence 刻意不覆盖 —— 恢复路径取的是原始候选评分
                         // （`c` 的 confidence），此处保持同源，免得两路呈现又分叉。
+                        // winRate 单独携带该档折算胜率（= reco_picks.confidence 口径）：
+                        // 时间旅行批次合并荐股/趋势智选候选去重时，必须与 live 池扫描读到
+                        // 的落库胜率同量纲，不能拿原始评分跟胜率比大小。
                         let mut live_candidate = (*c).clone();
                         if let Some(obj) = live_candidate.as_object_mut() {
                             obj.insert("period".to_string(), serde_json::json!(tier_period));
@@ -1682,6 +1729,7 @@ pub async fn run_serenity_screening(
                             obj.insert("positionPct".to_string(), serde_json::json!(position_pct));
                             obj.insert("stopSource".to_string(), serde_json::json!(stop_src));
                             obj.insert("entrySource".to_string(), serde_json::json!(entry_src));
+                            obj.insert("winRate".to_string(), serde_json::json!(conf));
                             obj.insert("generatedAt".to_string(), serde_json::json!(now_str));
                         }
                         live_candidates.push(live_candidate);
@@ -1788,39 +1836,42 @@ pub async fn run_serenity_screening(
             } else {
                 "auto"
             };
-            let _ = app_h.emit(
-                IpcEventName::SerenityScreeningCompleted.as_str(),
-                serde_json::json!({
-                    "workflowId": wf_id_ret,
-                    "runId": event_run_id.clone(),
-                    "status": persistence_status,
-                    // 逐档展开（选项 B）：前端 `p.candidates` 直接就是含 period 的逐档候选，
-                    // `result` 同步为其数组形态，避免回退分支又拿到无档位的原始候选。
-                    "result": live_candidate_array,
-                    "candidates": live_candidate_array,
-                    // 本轮 as-of 降级归因（live 恒空数组），与荐股面板同一字段名、同一形态
-                    "asofDegradations": asof_degradations,
-                    "asOfDate": run_as_of_date,
-                    "trends": trends_list,
-                    "emptyReason": empty_reason,
-                    "source": source,
-                    "persistenceCode": if persistence_success {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(wf_err::PERSIST_FAILED)
-                    },
-                    "persistenceStockCode": if persistence_success {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(persistence_stock_code)
-                    },
-                    "persistenceError": if persistence_success {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(persistence_detail)
-                    },
-                }),
-            );
+            // 批次静默模式（app=None）不发 completed 事件；invoke 返回值仍是批次取数来源。
+            if let Some(app_h) = &app_h {
+                let _ = app_h.emit(
+                    IpcEventName::SerenityScreeningCompleted.as_str(),
+                    serde_json::json!({
+                        "workflowId": wf_id_ret,
+                        "runId": event_run_id.clone(),
+                        "status": persistence_status,
+                        // 逐档展开（选项 B）：前端 `p.candidates` 直接就是含 period 的逐档候选，
+                        // `result` 同步为其数组形态，避免回退分支又拿到无档位的原始候选。
+                        "result": live_candidate_array,
+                        "candidates": live_candidate_array,
+                        // 本轮 as-of 降级归因（live 恒空数组），与荐股面板同一字段名、同一形态
+                        "asofDegradations": asof_degradations,
+                        "asOfDate": run_as_of_date,
+                        "trends": trends_list,
+                        "emptyReason": empty_reason,
+                        "source": source,
+                        "persistenceCode": if persistence_success {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::json!(wf_err::PERSIST_FAILED)
+                        },
+                        "persistenceStockCode": if persistence_success {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::json!(persistence_stock_code)
+                        },
+                        "persistenceError": if persistence_success {
+                            serde_json::Value::Null
+                        } else {
+                            serde_json::json!(persistence_detail)
+                        },
+                    }),
+                );
+            }
 
             Ok(serde_json::json!({
                 "status": "completed",
@@ -1840,16 +1891,19 @@ pub async fn run_serenity_screening(
             // 后者是 `WorkflowError::Display` 原文中文化后的整句，非中文界面不该只看到它。
             let (code, _category) = super::core::workflow_error_code(&e);
             let err_msg = format!("Serenity 筛选工作流失败: {e}");
-            let _ = app_h.emit(
-                IpcEventName::SerenityScreeningCompleted.as_str(),
-                serde_json::json!({
-                    "workflowId": wf_id_ret,
-                    "runId": event_run_id.clone(),
-                    "status": "failed",
-                    "error": err_msg,
-                    "code": code,
-                }),
-            );
+            // 批次静默模式（app=None）不发 failed 事件；错误照常通过 Err 返回给批次。
+            if let Some(app_h) = &app_h {
+                let _ = app_h.emit(
+                    IpcEventName::SerenityScreeningCompleted.as_str(),
+                    serde_json::json!({
+                        "workflowId": wf_id_ret,
+                        "runId": event_run_id.clone(),
+                        "status": "failed",
+                        "error": err_msg,
+                        "code": code,
+                    }),
+                );
+            }
             Err(err_msg)
         },
     }

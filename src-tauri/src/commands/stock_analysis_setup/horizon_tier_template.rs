@@ -18,7 +18,7 @@
 //! §九十一(0) 的可搬运边界把三节点都算进子模板，但普查后 `portfolio-mgr` 有**四个父侧读面**
 //! （`seed_stock_analysis.rs` 的 `overall_risk_{ultra_short,short,mid,long}` 四条映射 + 四条供给边，
 //! 消费点是 `portfolio-mgr.rhai` 的 `tier_risk_raise`）。子执行只把父扇出节点的
-//! `node_id`/`output_var` 双键写回父池（`work_engine/engine/mod.rs:1772-1775`），
+//! `node_id`/`output_var` 双键写回父池（`work_engine/engine/mod.rs:1791-1796`），
 //! 于是风险节点一旦进子模板，这四条映射就变成「指向不存在的路径」⇒ `present()` 恒假 ⇒
 //! **v128 B1 的按档风险收紧整条静默退役**（正是本仓登记的「配置项空接线」族）。
 //!
@@ -947,7 +947,7 @@ mod tests {
     ///
     /// 为什么要钉这一条：四份常量是**逐字写**的（`check-tier-purity` 与本文件的 R2 要有
     /// 字面量读取面，所以不 `format!` 生成），写错一档不会有任何运行期报错 ——
-    /// 串档时四档评分恒等，拼错时 `ScaleProfile::resolve` 显式失败（`mcp_tools.rs:1281`）。
+    /// 串档时四档评分恒等，拼错时 `ScaleProfile::resolve` 显式失败（`crates/astock-data/src/mcp_tools.rs:1336`）。
     #[test]
     fn scoring_period_constant_matches_scale_key_authority() {
         for period in Period::ALL {

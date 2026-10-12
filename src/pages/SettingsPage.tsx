@@ -12,8 +12,8 @@ import { useTranslation } from "react-i18next";
 
 /* Lazy-load settings sections on demand to avoid blocking first paint with 30+ eager imports. */
 const LazySkillsPage = lazy(() => import("@/pages/SkillsPage").then((m) => ({ default: m.SkillsPage })));
-const LazyNotificationCenter = lazy(() =>
-  import("@/components/notification/NotificationCenter").then((m) => ({ default: m.NotificationCenter }))
+const LazyNotificationSettings = lazy(() =>
+  import("@/components/settings/NotificationSettings").then((m) => ({ default: m.NotificationSettings }))
 );
 const LazyProviderSettings = lazy(() =>
   import("@/components/settings/ProviderSettings").then((m) => ({ default: m.ProviderSettings }))
@@ -246,7 +246,7 @@ const SECTION_COMPONENTS: Record<SettingsSection, () => React.ReactNode> = {
   ),
   notificationCenter: () => (
     <Suspense fallback={<SectionFallback />}>
-      <LazyNotificationCenter trigger={<span />} />
+      <LazyNotificationSettings />
     </Suspense>
   ),
   webhooks: () => (

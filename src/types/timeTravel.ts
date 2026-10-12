@@ -18,10 +18,6 @@ export interface TimeTravelBatchRequest {
   periods: TimeTravelPeriod[];
   minConfidence: number;
   topN: number;
-  /** MVP 恒 true */
-  runReco: boolean;
-  /** MVP 不支持，必须 false */
-  runSerenity: boolean;
   /** 是否在 guard 外立即反思已到期档 */
   reflect: boolean;
 }
@@ -49,19 +45,41 @@ export interface TimeTravelHorizonSummary {
   failed: number;
 }
 
+/**
+ * 批次状态：
+ * - running 运行中
+ * - completed 全部成功
+ * - partial 部分失败 / best-effort 链降级
+ * - failed 批次级失败
+ * - interrupted 进程异常退出后重启收敛（as-of 封闭世界无法跨进程续跑）
+ */
+export type TimeTravelBatchStatus =
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed"
+  | "interrupted";
+
+/** 批次运行阶段 */
+export type TimeTravelBatchPhase = "analysis" | "reflection";
+
 /** 批次运行状态（轮询 get_time_travel_batch 返回） */
 export interface TimeTravelBatchState {
   batchId: string;
   asOf: string;
   tradingDaysAgo: number | null;
-  /** running / completed / partial / failed */
-  status: "running" | "completed" | "partial" | "failed";
-  /** analysis / reflection */
-  phase: "analysis" | "reflection";
+  status: TimeTravelBatchStatus;
+  phase: TimeTravelBatchPhase;
   message: string | null;
   total: number;
   ok: number;
   fail: number;
+  /** 智能荐股链候选行数（合并去重前，四档展开） */
+  recoPicks: number;
+  /** 趋势智选链候选行数（合并去重前，mid/long 两档展开） */
+  serenityPicks: number;
+  /** 趋势智选工作流失败原因（best-effort 降级：荐股链正常时批次仍继续，终态 partial） */
+  serenityError: string | null;
   analyses: TimeTravelBatchAnalysis[];
   horizons: TimeTravelHorizonSummary[];
   reflectionSummary: string | null;
@@ -71,3 +89,13 @@ export interface TimeTravelBatchState {
   updatedAtMs: number;
   finishedAtMs: number | null;
 }
+
+/**
+ * 批次历史摘要（list_time_travel_batches 返回，summary_only=true）：
+ * 标量计数完整，不含 analyses / horizons / reflectionSummary 明细；
+ * 明细走 get_time_travel_batch 单取。
+ */
+export type TimeTravelBatchSummary = Omit<
+  TimeTravelBatchState,
+  "analyses" | "horizons" | "reflectionSummary"
+>;

@@ -2279,14 +2279,14 @@ pub async fn opc_execute_analysis(
 ///
 /// **解析失败只 `warn` 后按「无钩子」处理，绝不上抛**：钩子是可选旁路
 /// （`post_exec` 语义 = 结果已产生、不可回滚），一个 JSON 拼写错误不该让
-/// 整条工作流执行失败。与 `src/commands/stock_workflow/core.rs:644-647`、`src/commands/stock_workflow/decision.rs:289-293`
-/// 语义一致；与其唯一差异是**保留 warn 留痕**（那两处用 `.ok()` 静默吞错）。
+/// 整条工作流执行失败。与 `src/commands/stock_workflow/decision.rs:565-575` 同形态（**同样 warn 留痕**）；
+/// 与 `src/commands/stock_pipeline/core.rs:318` 的唯一差异才是**保留 warn 留痕**（那处用 `.ok()` 静默吞错）。
 ///
 /// 独立成函数的三个理由：
 /// 1. **调用点短到不触及 rustfmt 链式断行**：原内联写法
 ///    `let hooks_config: Option<...> = template.hooks_config.as_ref().and_then(...)`
 ///    在 `src-tauri/rustfmt.toml`（`edition = "2024"`）下 `rustfmt --check` 报 diff。
-///    合规形态见 `stock_pipeline/core.rs:290-291`（`=` 后断行、链保持一行、indent 8）；
+///    合规形态见 `stock_pipeline/core.rs:317-318`（`=` 后断行、链保持一行、indent 8）；
 /// 2. **纯函数可单测**（不需要 DB / 引擎），直接钉住「解析失败 ⇒ None，不 panic、不上抛」；
 /// 3. `run_template_via_engine` 里「钩子来自模板声明」这一意图一行可见。
 fn parse_hooks_config(
@@ -2355,10 +2355,10 @@ pub(crate) async fn run_template_via_engine(
 
     // 创建工作流
     let wf_name = format!("opc-{domain_pack_id_normalized}-{template_id}");
-    // 必须用 with_hooks 变体携带模板 hooks_config（形态同 src/commands/stock_workflow/core.rs:644-647）：
+    // 必须用 with_hooks 变体携带模板 hooks_config（形态同 src/commands/stock_workflow/core.rs:819-822）：
     // `create_workflow` 内部转调 `create_workflow_with_hooks(..., None)`，
     // 模板声明的 post_exec 会被静默丢弃 —— 引擎只在内存 Workflow 对象上读声明
-    // （rt-workflow engine/mod.rs:942），为 None 时直接 return，连日志都不打。
+    // （rt-workflow engine/mod.rs:1064-1069），为 None 时直接 return，连日志都不打。
     // 后果实证（2026-09-15）：`workflow-cm-literary-creation` 的
     // `post_exec: ["content-media-kpi-persist"]` 永不执行 ⇒ opc_kpi_records 永不落库
     // ⇒ 仪表盘创作类 KPI 恒为「暂无数据」。
@@ -2420,9 +2420,9 @@ pub(crate) async fn run_template_via_engine(
     //
     // 为什么这条通道可行（三处都已核实，无一处需要改 harness/引擎）：
     // - 引擎把 `options.input` 透传进 `HookExecContext.input`
-    //   （post_exec 见 `rt-workflow engine/mod.rs:985`，pre_exec 见 `:2197-2202`）；
+    //   （post_exec 见 `rt-workflow engine/mod.rs:1104-1107`，pre_exec 见 `:2325-2330`）；
     // - 该模板没有 `input_schema`（RunOptions 用 `..Default::default()`，命令层也不传），
-    //   故引擎 `:2014` 的 input_schema 校验分支不执行，多一个键不会被拒；
+    //   故引擎 `:2135-2139` 的 input_schema 校验分支不执行，多一个键不会被拒；
     // - 生产先例：股票管线用同一机制传业务键（`src/commands/stock_workflow/core.rs:799-814`
     //   的 `input: Some(json!({"stock_code": …}))`），实测已落进
     //   `workflow_executions.input_params`。

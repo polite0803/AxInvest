@@ -26,6 +26,9 @@ const { Paragraph } = Typography;
  *   - 选定后展示 3 个动作：分析单股 / 看荐股 / 看回测
  *   - "切回 Live" 按钮 → 调用 enterLive(requireConfirm=false)
  *     （PageHeader 的 ModeSwitch 仍会弹二次确认 Modal）
+ *
+ * 入口：工作区 → 回测视图右上角时钟按钮（BacktestView）跳转 /replay-workbench；
+ * 投资中心标题栏另有「批次复盘」快捷入口（Drawer），两者复用同一 TimeTravelBatchCard。
  */
 export function ReplayWorkbench() {
   const { t } = useTranslation();
@@ -146,8 +149,19 @@ export function ReplayWorkbench() {
           style={{ marginBottom: 16 }}
         />
 
+        {
+          /*
+          历史验证区（与当日生产严格分开，故不放在选股页）：
+          1. 时间旅行批次复盘 —— 选定单个历史交易日，as-of 封闭世界一轮统一
+             回放「智能荐股 + 趋势智选」两条平级选股链，合并去重后逐只 replay
+             分析，并按 2/5/28/90 交易日反思；
+          2. ReplaySweep —— 跨多日的策略回测批量扫描。
+          两者都是「用过去的数据做事后验证」，与当日 00:00/01:00 的荐股生产
+          不同时、不同逻辑。投资中心标题栏另有批次复盘快捷入口（Drawer），
+          与本页渲染同一个卡片组件，无第二套实现。
+        */
+        }
         <TimeTravelBatchCard />
-
         <ReplaySweep />
 
         {isLocked && (

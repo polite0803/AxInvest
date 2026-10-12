@@ -106,4 +106,6 @@ export { usePipelineStore } from "./feature/pipelineStore";
 export { useBacktestStore, useStrategyStore } from "./feature/quant";
 export { useStockAnalysisStore } from "./feature/stockAnalysisStore";
 export type { PortfolioStressResult, SimulationScenarioRow, SimulationSnapshot } from "./feature/stockAnalysisStore";
+export { useTaskCenterStore } from "./feature/taskCenterStore";
+export type { RunFilters, RunTimeRange } from "./feature/taskCenterStore";
 export { useWorkspaceStore, type WorkspaceView } from "./feature/workspaceStore";

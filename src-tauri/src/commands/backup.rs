@@ -8,6 +8,7 @@ use crate::commands::spawn_guard::panic_message;
 use axagent_agent_macro::agent_command;
 use axagent_dao::repo::backup;
 use axagent_dao::repo::settings::get_settings;
+use axagent_harness::IpcEventName;
 use axagent_harness::types::*;
 use axagent_storage::DefaultPathEncoder;
 use futures::FutureExt;
@@ -290,7 +291,7 @@ async fn restart_auto_backup(
                         tracing::info!("Auto-backup created successfully");
                         if notify {
                             let _ = app_for_emit.emit(
-                                "auto-backup-completed",
+                                IpcEventName::AutoBackupCompleted.as_str(),
                                 serde_json::json!({
                                     "success": true,
                                     "message": "Auto-backup created successfully",
@@ -307,7 +308,7 @@ async fn restart_auto_backup(
                         tracing::warn!("Auto-backup failed: {}", e);
                         if notify {
                             let _ = app_for_emit.emit(
-                                "auto-backup-completed",
+                                IpcEventName::AutoBackupCompleted.as_str(),
                                 serde_json::json!({
                                     "success": false,
                                     "error": e.to_string(),
@@ -323,7 +324,7 @@ async fn restart_auto_backup(
             if let Err(p) = result {
                 tracing::error!("[auto_backup] PANIC 在一次周期备份执行中: {}", panic_message(&p));
                 let _ = app_for_emit.emit(
-                    "auto-backup-completed",
+                    IpcEventName::AutoBackupCompleted.as_str(),
                     serde_json::json!({
                         "success": false,
                         "error": "Internal panic during auto-backup",

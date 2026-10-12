@@ -187,4 +187,41 @@ describe("InvestHub — 智能荐股候选点击 → 工作区预填", () => {
     expect(useWorkspaceStore.getState().currentStockCode).toBe("000001");
     expect(useWorkspaceStore.getState().currentStockName).toBe("平安银行");
   }, 30000);
+
+  it("标题栏仅承载世界观切换：业务 tab 回归 6 个，无时间旅行/管道 tab 与批次入口", async () => {
+    renderHub("/invest?tab=screener");
+
+    // 业务 tab 回归 6 个，且没有「时间旅行」「管道」业务 tab
+    // （批次复盘/管道/扫描已统一收口到系统级任务中心 /tasks）
+    await screen.findByText("超短线", { selector: "div" }, { timeout: 20000 });
+    // 仅取投资中心主 Tabs 的直接 nav（排除选股页内部 reco/serenity/screen 与周期子 tab）
+    const tabLabels = Array.from(
+      document.querySelectorAll(".invest-hub-tabs > .ant-tabs-nav .ant-tabs-tab"),
+    ).map((el) => el.textContent);
+    expect(tabLabels).not.toContain("时间旅行");
+    expect(tabLabels).not.toContain("管道");
+    expect(tabLabels.length).toBe(6);
+
+    // 顶层模式栏：世界观切换胶囊在标题栏（且全页唯一）
+    expect(document.querySelectorAll('[data-testid="page-time-anchor"]').length).toBe(1);
+
+    // 批次复盘按钮/Drawer 已移除（卡片只在任务中心手动作业与回放工作台挂载）
+    expect(screen.queryByTestId("invest-batch-replay-btn")).toBeNull();
+    expect(document.querySelectorAll('[data-testid="ttb-start-btn"]').length).toBe(0);
+  }, 30000);
+
+  it.each([
+    ["replay"],
+    ["pipeline"],
+  ])("旧链接 ?tab=%s 非法：静默回退到选股 tab，不渲染已收口页面", async (tab) => {
+    renderHub(`/invest?tab=${tab}`);
+    // 回退到选股 tab 的标志性内容
+    await screen.findByText("超短线", { selector: "div" }, { timeout: 20000 });
+    expect(document.querySelectorAll('[data-testid="ttb-start-btn"]').length).toBe(0);
+    // 主 Tabs 高亮的是选股 tab（数量仍为 6）
+    const tabLabels = Array.from(
+      document.querySelectorAll(".invest-hub-tabs > .ant-tabs-nav .ant-tabs-tab"),
+    ).map((el) => el.textContent);
+    expect(tabLabels.length).toBe(6);
+  }, 30000);
 });

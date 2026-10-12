@@ -1173,7 +1173,7 @@ pub async fn execute_mcp_tool(
                 // 标的」的空数据原先序列化成裸 `null`，分析师看不到原因、如实写「融资余额
                 // 数据缺失」⇒ data-quality 按词表判工具故障是正确执行，错在语义在 handler
                 // 这层丢了。现给出结构化声明（与 as-of 路径 NoData 三档语义同构，
-                // `lib.rs:3498` 先例；北向停披把说明写进 payload 同一手法）。
+                // `crates/astock-data/src/lib.rs:3832-3852` 先例；北向 payload 手法见 `:4091-4098`）。
                 Ok(None) => serde_json::to_string(&serde_json::json!({
                     "available": false,
                     "reason": "该证券非融资融券标的（或该日无两融披露），设计上无此数据，属设计性缺席而非取数通道问题"
@@ -7465,7 +7465,7 @@ mod margin_contract_tests {
     #[tokio::test]
     async fn margin_handler_reports_designified_absence_not_bare_null() {
         let mut client = crate::AStockClient::new();
-        // 清空 vendor ⇒ live 路由循环必然落到 `return Ok(None)`（lib.rs:3608），零网络
+        // 清空 vendor ⇒ live 路由循环必然落到 `return Ok(None)`（crates/astock-data/src/lib.rs:3936），零网络
         client.vendors.clear();
         let out = execute_mcp_tool(
             &client,

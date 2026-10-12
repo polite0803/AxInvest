@@ -58,7 +58,7 @@ pub async fn seed_stock_automation_crons(
 
 /// 构造四条内置任务（时刻均为**本地时区**口径，与调度器的 Local 匹配对齐）
 ///
-/// ⚠ `CronJob::new` 的首参是 **name**，`id` 由 uuid 现生成（cron_job.rs:187）⇒
+/// ⚠ `CronJob::new` 的首参是 **name**，`id` 由 uuid 现生成（crates/runtime-core/src/cron_job.rs:196-199）⇒
 /// 幂等键必须显式赋 `job.id`（同 `seed_opc_cron.rs` 的形态），否则每次启动长出新的任务。
 fn build_builtin_jobs() -> Result<Vec<CronJob>, String> {
     let mut jobs = Vec::new();

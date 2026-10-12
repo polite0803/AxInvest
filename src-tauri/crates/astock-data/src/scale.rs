@@ -5,7 +5,7 @@
 //! `compute_scoring` 此前把 `period` 白名单写死成 daily/weekly/monthly，且
 //! **未知值静默归 daily**（`mcp_tools.rs` 的 `if period == "weekly" || ... else "daily"`）
 //! —— 调用方以为拿到月线评分，实得日线评分，且没有任何信号。同时缺两个尺度：
-//! 长线复用月线（`seed_stock_analysis.rs:4202`）、超短复用日线。
+//! 长线复用月线（`seed_stock_analysis.rs:4740`）、超短复用日线。
 //!
 //! 本模块把「尺度」升成一等概念：每个尺度自带
 //! ① 向 vendor 取数用的 period 与根数、② 出分所需的最少 bar 数、

@@ -12,7 +12,6 @@ import { CompareView } from "@/components/stock-workspace/views/CompareView";
 import { MonitorView } from "@/components/stock-workspace/views/MonitorView";
 import { ReviewView } from "@/components/stock-workspace/views/ReviewView";
 import { TradeView } from "@/components/stock-workspace/views/TradeView";
-import { PageTimeAnchor } from "@/components/time-travel/PageTimeAnchor";
 import { useUIStore, useWorkspaceStore } from "@/stores";
 import type { WorkspaceView } from "@/stores";
 import { ArrowLeft, BarChart3, Briefcase, Coins, FlaskConical, GitCompare, RotateCcw } from "lucide-react";
@@ -216,7 +215,6 @@ export function StockWorkspaceShell() {
           <span className="text-sm font-semibold flex-1 truncate">
             {hasDistinctName ? currentStockName : (currentStockCode ?? t("workspace.title"))}
           </span>
-          <PageTimeAnchor />
         </div>
 
         {/* DecisionHeroBar */}
@@ -262,7 +260,6 @@ export function StockWorkspaceShell() {
             </span>
           )}
         </h2>
-        <PageTimeAnchor />
         <UserModeToggle />
       </div>
 

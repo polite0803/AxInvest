@@ -394,7 +394,7 @@ pub async fn run_reflection_workflow(
             ),
             is_secret: false,
         },
-        // 内联 system_prompt (src/commands/stock_analysis_setup/mod.rs:1525) 引用了
+        // 内联 system_prompt (src/commands/stock_analysis_setup/mod.rs:1702) 引用了
         // {{stock_code}} / {{stock_name}} —— 必须在 variables 顶层,
         // input_mapping 的 source="trigger" 不会把它们提到顶层 (只会追加到
         // system_prompt 尾部的 "--- 输入上下文 ---" 块)。

@@ -221,6 +221,7 @@ pub mod stock_reflections;
 pub mod strategy_performance;
 pub mod strategy_weight_history;
 pub mod task_events;
+pub mod time_travel_batch_runs;
 pub mod trades;
 pub mod watchlist_items;
 

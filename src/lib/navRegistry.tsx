@@ -27,6 +27,7 @@ import {
   RiseOutlined,
   RobotFilled,
   SafetyCertificateFilled,
+  ScheduleOutlined,
   ShoppingFilled,
   TeamOutlined,
   VideoCameraFilled,
@@ -55,6 +56,14 @@ export const builtinNavItems: NavItem[] = [
     icon: navIcon(MessageFilled),
     labelKey: "nav.workbench",
     path: BUILTIN_PAGE_PATH.chat,
+    isPlugin: false,
+  },
+  // ── 通用域（general）：系统级任务中心（定时任务 / 手动作业统一入口） ──
+  {
+    key: "tasks-center",
+    icon: navIcon(ScheduleOutlined),
+    labelKey: "nav.tasksCenter",
+    path: BUILTIN_PAGE_PATH["tasks-center"],
     isPlugin: false,
   },
   // ── 金融域（finance）：AxInvest 投资总览 ──

@@ -2980,13 +2980,16 @@ mod tests {
             edge_type: EdgeType::Direct,
             label: None,
         };
+        // 带档节点 id 走 harness helper 拼（键集门 R2：不得手抄 `<base>--<tier>`）
+        let sentiment_short =
+            axagent_harness::holding_period::analyst_node_id("a-sentiment", "short");
         let wf = Workflow {
             id: "test".to_string(),
             name: "test".to_string(),
             nodes: vec![],
             edges: vec![
-                mk_edge("t-limitup-pool", "a-sentiment--short"),
-                mk_edge("a-sentiment--short", "portfolio-mgr"),
+                mk_edge("t-limitup-pool", &sentiment_short),
+                mk_edge(&sentiment_short, "portfolio-mgr"),
             ],
             status: axagent_rt_workflow::WorkflowStatus::PartiallyCompleted,
             created_at: 0,

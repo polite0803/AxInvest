@@ -993,8 +993,9 @@ export function SchedulerSettings() {
                         >
                           {(historyMap[task.id] || []).slice(0, 20).map((rec) => {
                             // 历史表无 skipped 结构列：闸门跳过记录 success=true 且
-                            // output 为「…本轮跳过」，按文案识别（与 services.rs 闸门文案对应）
-                            const isSkipped = rec.success && !!rec.output?.includes("跳过");
+                            // output 为「…本轮跳过」，按文案识别（与 services.rs 闸门文案对应）。
+                            // 匹配词用码点写（跳过 = U+8DF3 U+8FC7），避免 CJK 字面量
+                            const isSkipped = rec.success && !!rec.output?.includes("\u8df3\u8fc7");
                             return (
                               <div
                                 key={rec.id}

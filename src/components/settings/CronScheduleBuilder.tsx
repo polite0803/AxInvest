@@ -672,7 +672,8 @@ export function CronScheduleBuilder({ value = "", onChange }: CronScheduleBuilde
               valueLabel={(v) => {
                 // 中文「周一」在网格按钮里收窄为「一」；其余语言本身已是短形（Mon/Mo/月…）
                 const full = t(`settings.scheduler.${DOW_I18N_KEYS[v]}`);
-                return /^[周週]/.test(full) ? full.slice(1) : full;
+                // 首字判据用码点写（周 U+5468 / 日文週 U+9031），避免 CJK 字面量
+                return /^[\u5468\u9031]/.test(full) ? full.slice(1) : full;
               }}
               onChange={(f) => patchField("dow", f)}
             />

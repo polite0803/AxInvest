@@ -5502,53 +5502,6 @@ pub async fn delete_batch_reflection_cron(
     Ok(())
 }
 
-/// 反思行 → 前端 JSON 投影（单一来源）。
-///
-/// `list_reflections` 与 P3 妖股漏检回放的 `get_mover_recall_event_review`
-/// （mover_recall.rs）共用这一份投影：字段增改只许动这里，禁止在第二处再抄一遍
-/// （AGENTS 禁区 12：同一 DTO 两个投影面必然漂移）。
-pub(crate) fn reflection_review_json(
-    r: &axagent_entities::stock_reflections::Model,
-) -> serde_json::Value {
-    let horizon_results = r
-        .horizon_results_json
-        .as_deref()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
-    serde_json::json!({
-        "id": r.id,
-        "stockCode": r.stock_code,
-        "stockName": r.stock_name,
-        "originalAnalysisId": r.original_analysis_id,
-        "asOfDate": r.as_of_date,
-        "hindsightDate": r.hindsight_date,
-        "minConfidenceThreshold": r.min_confidence_threshold,
-        "reflectionDepth": r.reflection_depth,
-        // 〇-B v2 第 4 条：本次反思**复盘的档位**（NULL = 本列引入前，档未知）
-        "horizon": r.horizon,
-        "actualOutcome": r.actual_outcome,
-        "whatWentWrong": r.what_went_wrong,
-        "missedSignals": r.missed_signals,
-        "fixForFuture": r.fix_for_future,
-        // P3：漏检回放面板展开用 —— 裁决/教训摘要/原始收益/来源桶/权威归因层。
-        // source 读侧口径：`mover_recall` 一桶，其余（含老库空串）皆常规 due。
-        "verdict": r.verdict,
-        "lessonSummary": r.lesson_summary,
-        "rawReturn": r.raw_return,
-        "source": r.source,
-        "missLayer": r.miss_layer,
-        "decisionJson": r.decision_json,
-        "blackboardSnapshot": r.blackboard_snapshot,
-        "status": r.status,
-        "createdAt": r.created_at,
-        "alphaReturn": r.alpha_return,
-        // #10 P7 妖股标签（按档挂在逐档反思行上）。四态语义见
-        // `entities/src/stock_reflections.rs` 的列文档：达标/未达标/窗口未满/判据不可用，
-        // NULL=未复盘或本列引入前的存量行 ⇒ 面板必须分得开「没达标」与「没判定」。
-        "moverLabel": r.mover_label,
-        "horizonResults": horizon_results,
-    })
-}
-
 /// 查询反思复盘记录列表
 #[agent_command(domain = "finance", safety = Safe, call_mode = StateInput, description = "查询反思复盘记录列表")]
 #[tauri::command]
@@ -5559,6 +5512,7 @@ pub async fn list_reflections(
     // P3：妖股漏检回放面板按补分析行 id 拉逐档反思（不传则保持原全量/按票口径）。
     original_analysis_id: Option<String>,
 ) -> Result<Vec<serde_json::Value>, String> {
+    use axagent_dao::repo::stock_lesson_queries;
     use axagent_entities::stock_reflections;
     use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
@@ -5575,9 +5529,13 @@ pub async fn list_reflections(
         ErrorResponse::new(wf_err::INTERNAL).with_detail(format!("查询反思记录失败: {e}"))
     })?;
     let limit = limit.unwrap_or(50) as usize;
-    // 投影走单一来源 `reflection_review_json`（P3 review 命令共用，勿在此内联第二份）。
-    let result: Vec<serde_json::Value> =
-        items.into_iter().take(limit).map(|r| reflection_review_json(&r)).collect();
+    // 投影走单一来源 dao::stock_lesson_queries::reflection_review_json
+    // （P3 review 命令共用，勿在此内联第二份）。
+    let result: Vec<serde_json::Value> = items
+        .into_iter()
+        .take(limit)
+        .map(|r| stock_lesson_queries::reflection_review_json(&r))
+        .collect();
     Ok(result)
 }
 

@@ -102,6 +102,15 @@ pub struct Model {
     ///
     /// 读侧分桶口径：`source == "mover_recall"` 一个桶，**其余一切值（含本列引入前
     /// 存量行 bootstrap 加列后的空串 `""`）一律归 due 桶**，不依赖存量数据回填。
+    ///
+    /// ⚠ `default_value = "due"` **不是可选的语义装饰，是 SQLite 存量库补列的硬约束**：
+    /// 声明式收敛引擎对旧库执行 `ALTER TABLE … ADD COLUMN` 时，SQLite 规定 NOT NULL 列
+    /// **必须带非 NULL 默认值**，否则 DDL 直接被拒；而该条失败会让引擎 fail-stop 掉
+    /// 其后全部变更（同族 `miss_layer` 及排序靠后的其它表补列全部连坐，2026-10-14
+    /// 生产实证：到期反思 cron 扫 pending row 报「字段 source 不存在」）。新库建表
+    /// 同带此默认值，未显式赋值的行天然落 due 桶。先例：`stock_analyses.source`
+    /// 的 `#[sea_orm(default_value = "live")]`。
+    #[sea_orm(default_value = "due")]
     pub source: String,
     /// 漏检权威归因层（仅 `source == "mover_recall"` 行非空）。
     ///

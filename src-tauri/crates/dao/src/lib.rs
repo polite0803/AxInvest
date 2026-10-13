@@ -8,6 +8,8 @@
 
 // Re-export SeaORM entities for crates that go through the DAO layer
 pub use axagent_entities;
+// 命令层 inner 函数的 db 参数经此合规出口命名（分层护栏规则 1：命令层不得出现 `sea_orm::` 字面量）
+pub use sea_orm::DatabaseConnection;
 
 pub mod agent_repositories;
 pub mod background_task_repository;

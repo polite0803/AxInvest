@@ -128,7 +128,7 @@ fn build_tunable_params_catalog() -> String {
 /// 纯函数（事件字段都是标量）便于单测锁住措辞要点；三问口径与 plan P3 第 1 条逐字对齐：
 /// 启动前可见信号 / 卡在哪一层（与权威层对照）/ 未来判据如何修（可执行）。
 fn mover_recall_context_text(
-    event: Option<&axagent_entities::mover_recall_events::Model>,
+    event: Option<&axagent_dao::repo::mover_recall_events::EventModel>,
 ) -> String {
     let Some(ev) = event else {
         return "（本次为常规到期反思，无妖股漏检事件背景：忽略漏检专项三问，按常规单档复盘即可。）"
@@ -410,15 +410,12 @@ pub async fn run_reflection_workflow(
     // ── P3 妖股漏检回放：取权威归因事件 ──
     // 仅被复盘分析行是 mover_recall 补分析时查（anchor_event_id 在 P2 补分析落行时盖章）。
     // 查不到只 warn 不阻断：反思仍按常规流程跑，只是漏检专项上下文退化为占位句。
-    let mover_event: Option<axagent_entities::mover_recall_events::Model> = match (
+    let mover_event: Option<axagent_dao::repo::mover_recall_events::EventModel> = match (
         original_analysis.as_ref(),
         original_analysis.as_ref().and_then(|a| a.anchor_event_id.as_deref()),
     ) {
         (Some(a), Some(eid)) if a.source == REFLECTION_SOURCE_MOVER_RECALL => {
-            match axagent_entities::mover_recall_events::Entity::find_by_id(eid.to_string())
-                .one(db)
-                .await
-            {
+            match axagent_dao::repo::mover_recall_events::fetch_by_id(db, eid).await {
                 Ok(ev) => {
                     if ev.is_none() {
                         tracing::warn!(
@@ -1194,17 +1191,17 @@ pub async fn run_reflection_workflow(
             // 「已被更早完成的档盖章」，这是正常幂等不是冲突。reflection_id 记盖章档的行 id。
             if status_text == "completed" {
                 if let Some(ev) = mover_event.as_ref() {
-                    use axagent_entities::mover_recall_events as mre;
-                    match mre::Entity::update_many()
-                        .col_expr(mre::Column::Status, Expr::value("reflected"))
-                        .col_expr(mre::Column::ReflectionId, Expr::value(Some(analysis_id.clone())))
-                        .col_expr(mre::Column::UpdatedAtMs, Expr::value(now_ms))
-                        .filter(mre::Column::Id.eq(ev.id.clone()))
-                        .filter(mre::Column::Status.ne("reflected"))
-                        .exec(db)
-                        .await
+                    // UPDATE 守卫 `status != 'reflected'` 在 dao::stamp_reflected 内：
+                    // rows=0 即「已被更早完成的档盖章」，正常幂等不是冲突。
+                    match axagent_dao::repo::mover_recall_events::stamp_reflected(
+                        db,
+                        &ev.id,
+                        Some(&analysis_id),
+                        now_ms,
+                    )
+                    .await
                     {
-                        Ok(r) if r.rows_affected > 0 => tracing::info!(
+                        Ok(rows) if rows > 0 => tracing::info!(
                             "[reflection] 漏检事件 {} 已由本档（{}）反思完成，盖章 reflected",
                             ev.id,
                             primary_horizon

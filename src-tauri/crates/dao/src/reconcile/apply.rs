@@ -589,12 +589,20 @@ pub async fn run(
             // ⚠ 这一支**必须**按错误类型分流，绝不能靠 `e.to_string()` 里有没有某个词来猜
             // （判据 K 组「自由文本猜结构」：文案一改，判据静默失效）。
             //
-            // `UnsupportedDialect` = **方言能力边界**（不是缺陷）⇒ 记 `skip`，不参与整批拒绝。
+            // `UnsupportedDialect` / `NotNullWithoutDefault` = **方言能力边界**（不是缺陷）
+            // ⇒ 记 `skip`，不参与整批拒绝。后者是 SQLite ADD COLUMN 对「NOT NULL 无
+            // DEFAULT」的硬限制（修法在实体 default_value，见 render 的错误文案），
+            // 归此类而非执行期失败：否则一条非法 DDL 会 AbortedAfterError 连坐其后
+            // 全部变更（2026-10-14 stock_reflections.source 实证）。
             // 其余（`Unrenderable` / `PayloadMismatch`）= 渲染器缺陷或 payload 与 kind 不匹配
             // ⇒ 仍是 `it.error`，仍走整批拒绝。两类混在一起的后果见 `SkipReason::UnsupportedDialect`
             // 的文档：SQLite 存量库会因此**整批**被拒 ⇒ 启动中止。
             Err(e) => {
-                if matches!(e, RenderError::UnsupportedDialect { .. }) {
+                if matches!(
+                    e,
+                    RenderError::UnsupportedDialect { .. }
+                        | RenderError::NotNullWithoutDefault { .. }
+                ) {
                     // 原文进 `notes` 而不是 `error`：`error.is_some()` 正是「整批拒绝」的输入，
                     // 而这里恰恰**不能**触发整批拒绝。原文不能丢 —— 审计要能答「为什么没跑」。
                     it.notes.push(e.to_string());
@@ -1003,6 +1011,20 @@ mod tests {
     fn fake_render_dialect_gap(c: &Change, _d: Dialect) -> Result<Rendered, RenderError> {
         if c.object == "no_native_ddl" {
             return Err(RenderError::UnsupportedDialect { dialect: Dialect::Sqlite, kind: c.kind });
+        }
+        fake_render(c, Dialect::Sqlite)
+    }
+
+    /// `object == "not_null_gap"` 的那条报「SQLite ADD COLUMN NOT NULL 无 DEFAULT」，
+    /// 其余按真可执行渲染。与 [`fake_render_dialect_gap`] 同族：用来钉死
+    /// `NotNullWithoutDefault` 也走**单条跳过**而非执行期 abort 连坐。
+    fn fake_render_not_null_gap(c: &Change, _d: Dialect) -> Result<Rendered, RenderError> {
+        if c.object == "not_null_gap" {
+            return Err(RenderError::NotNullWithoutDefault {
+                dialect: Dialect::Sqlite,
+                kind: c.kind,
+                object: c.object.clone(),
+            });
         }
         fake_render(c, Dialect::Sqlite)
     }
@@ -1467,6 +1489,45 @@ mod tests {
         assert_eq!(out.unsupported().len(), 1);
         assert!(out.report("gap").contains("方无原生DDL"), "报告必须让这个缺口可见");
         assert!(!out.fully_applied(), "这一条确实没被应用掉 —— 粉饰它就会掩盖「该库永不收敛」");
+    }
+
+    /// `NotNullWithoutDefault`（SQLite ADD COLUMN 加 NOT NULL 无默认值列）同样
+    /// **只跳过本条、其后条目照跑** —— 2026-10-14 实证：修复前这种非法 DDL 被
+    /// 渲染出来送到执行期，SQLite 报错后 `AbortedAfterError` 连坐其后**全部**
+    /// 变更（同表 miss_layer 及其后各表补列全没补上）。
+    #[tokio::test]
+    async fn not_null_without_default_is_skipped_without_aborting_rest() {
+        let db = mem().await;
+        // 顺序即判决：非法补列在前，合法建表在后 —— 后者必须照样执行。
+        let p = plan_of(vec![
+            change(ChangeKind::AddColumn, "not_null_gap"),
+            change(ChangeKind::CreateTable, "created_after_gap"),
+        ]);
+        let opts = ApplyOptions {
+            config: cfg_exec(),
+            renderer: fake_render_not_null_gap,
+            ..ApplyOptions::default()
+        };
+        let out = run(&db, &p, 2, Dialect::Sqlite, &opts).await.unwrap();
+
+        assert_eq!(out.refusal, None, "方言能力边界不该整批拒绝：{:?}", out.refusal);
+        assert_eq!(out.aborted, None, "绝不能因这一条 abort 整轮：{out:?}");
+        assert!(
+            out.items.iter().all(|i| i.skip != Some(SkipReason::AbortedAfterError)),
+            "不该有任何条目被连坐跳过：{:?}",
+            out.items
+        );
+        assert!(table_exists(&db, "created_after_gap").await, "其后的合法变更必须照跑");
+
+        let gap = out.items.iter().find(|i| i.object == "not_null_gap").unwrap();
+        assert_eq!(gap.skip, Some(SkipReason::UnsupportedDialect));
+        assert!(gap.error.is_none(), "置了 error 就会凑成整批拒绝");
+        assert!(
+            gap.notes.iter().any(|n| n.contains("NOT NULL") && n.contains("DEFAULT")),
+            "note 必须说清修法（实体补 default_value）：{:?}",
+            gap.notes
+        );
+        assert_eq!(out.unsupported().len(), 1);
     }
 
     /// dry-run 下缺口**保留自己的理由**，不被改写成 `DryRun`。
@@ -1990,5 +2051,72 @@ mod tests {
             "第二次 bootstrap 应幂等无变更（实际执行了 {} 条）",
             second.executed
         );
+    }
+
+    // ── 2026-10-14 生产事故回归：stock_reflections.source 漏 default_value ──
+
+    /// 旧库（P3 前 schema）缺 `source` / `miss_layer` 两列时，bootstrap 必须一轮补回：
+    ///
+    /// - `source` 是 NOT NULL TEXT ⇒ ADD COLUMN 必须带 `DEFAULT 'due'`，否则 SQLite
+    ///   拒绝该条 DDL；修复前引擎在执行期 abort，连坐其后全部补列（含 `miss_layer`），
+    ///   到期反思 cron 扫描 pending row 报「字段 source 不存在」。
+    /// - 修复后实体带 `default_value = "due"`，DDL 合法且存量行语义正确（归 due 桶）。
+    #[tokio::test]
+    async fn bootstrap_adds_source_and_miss_layer_to_legacy_stock_reflections() {
+        use sea_orm::{ColumnTrait, EntityTrait, QueryFilter};
+
+        let db = mem().await;
+        bootstrap_schema(&db).await.expect("首次 bootstrap 应成功");
+
+        // 模拟 P3 之前的旧库：两列都不存在（SQLite ≥ 3.35 支持 DROP COLUMN）。
+        db.execute_unprepared("ALTER TABLE stock_reflections DROP COLUMN source")
+            .await
+            .expect("DROP source 应成功");
+        db.execute_unprepared("ALTER TABLE stock_reflections DROP COLUMN miss_layer")
+            .await
+            .expect("DROP miss_layer 应成功");
+
+        let out = bootstrap_schema(&db).await.expect("旧库 bootstrap 不应拒绝/中止");
+        assert_eq!(out.aborted, None, "合法 DDL 不应触发 abort：{out:?}");
+
+        let schema = introspect::read(&db).await.expect("introspect 应成功");
+        let table = schema.table("stock_reflections").expect("stock_reflections 表应存在");
+
+        let source = table.column("source").expect("source 列必须自动补回");
+        assert!(!source.nullable, "source 仍须 NOT NULL");
+        assert!(
+            source.default.as_deref().is_some_and(|d| d.contains("due")),
+            "source 补列必须带 DEFAULT 'due'（SQLite 对 NOT NULL ADD COLUMN 的硬要求），实际：{:?}",
+            source.default
+        );
+
+        let miss = table
+            .column("miss_layer")
+            .expect("miss_layer 也必须补回 —— 修复前它被 source 的 abort 连坐漏掉");
+        assert!(miss.nullable, "miss_layer 应为 nullable 列");
+
+        // 存量/新行省略 source 时靠列默认值落 'due'（INSERT 不被 NOT NULL 拒）。
+        db.execute_unprepared(
+            "INSERT INTO stock_reflections \
+             (id, stock_code, stock_name, original_analysis_id, as_of_date, hindsight_date, \
+              min_confidence_threshold, reflection_depth, actual_outcome, status, created_at, \
+              updated_at) VALUES \
+             ('r-src-default', '000001', '测试股', 'a1', '2026-10-01', '2026-10-14', 60, \
+              'light', 'outcome', 'pending', 1, 2)",
+        )
+        .await
+        .expect("省略 source 的 INSERT 应靠 DEFAULT 'due' 成功");
+        // 经实体读回（sea-orm SelectEntity 会按列名解码，验证默认值真实落库）。
+        let row = axagent_entities::stock_reflections::Entity::find()
+            .filter(axagent_entities::stock_reflections::Column::Id.eq("r-src-default"))
+            .one(&db)
+            .await
+            .expect("查询应成功")
+            .expect("刚插入的行应存在");
+        assert_eq!(row.source, "due", "存量行 source 默认值必须是 due（读侧归常规到期反思桶）");
+
+        // 幂等：再来一轮不应再有变更。
+        let again = bootstrap_schema(&db).await.expect("第三次 bootstrap 应成功");
+        assert_eq!(again.executed, 0, "补列后应幂等，实际又执行 {} 条", again.executed);
     }
 }

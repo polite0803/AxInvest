@@ -30,18 +30,15 @@ use axagent_analysis_engine::StockReflectionReport;
 use axagent_analysis_engine::stock_self_evolution::{
     EvolutionTrigger, EvolutionType, StockSelfEvolutionEngine,
 };
-use axagent_entities::decision_validations;
-use axagent_entities::mover_recall_runs;
-use axagent_entities::stock_evolution_history;
-use axagent_entities::stock_reflections;
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set};
+use axagent_dao::DatabaseConnection;
+use axagent_dao::repo::decision_validations::{self, ValidationModel};
+use axagent_dao::repo::mover_recall_runs;
+use axagent_dao::repo::stock_evolution_history::{self, PendingProposalRecord};
+use axagent_dao::repo::stock_lesson_queries::{self, ReflectionModel};
 use serde::{Deserialize, Serialize};
 
 /// 定时任务 task_type（与前端任务中心白名单、services.rs 执行分支逐字对齐）。
-pub const EVOLUTION_PROPOSAL_TASK_TYPE: &str = "evolution-proposal";
-
-/// 进化历史中「待审批」状态值（P4 审批命令消费同一字面量）。
-pub const STATUS_PENDING_APPROVAL: &str = "pending_approval";
+pub use crate::commands::constants::EVOLUTION_PROPOSAL_TASK_TYPE;
 
 /// 默认样本窗口（小时）。
 const DEFAULT_WINDOW_HOURS: i64 = 24;
@@ -140,14 +137,14 @@ const MOVER_POOL_DEGRADED: &str = "pool_degraded";
 /// - `mover_label = no_market_data`：到反思点行情快照不可得；
 /// - `mover_label = rule_unavailable`：阈值判据不可用（变量缺失/读取失败）；
 /// - `blackboard_snapshot` 含 `__untrusted` 标记：工作流自证该结论基于不可信/降级数据。
-fn reflection_data_blocked(r: &stock_reflections::Model) -> bool {
+fn reflection_data_blocked(r: &ReflectionModel) -> bool {
     matches!(r.mover_label.as_deref(), Some("no_market_data") | Some("rule_unavailable"))
         || r.blackboard_snapshot.as_deref().is_some_and(|s| s.contains("__untrusted"))
 }
 
 /// 决策验证行是否属于数据可达性失败：T+N 价格或最终收益算不出来
 /// （行情缺失），该行没有可用于评价业务质量的结论。
-fn validation_data_blocked(v: &decision_validations::Model) -> bool {
+fn validation_data_blocked(v: &ValidationModel) -> bool {
     v.t_plus_n_price.is_none() || v.final_return_pct.is_none()
 }
 
@@ -219,12 +216,7 @@ pub async fn run_evolution_proposal_inner(
         .to_string();
 
     // 1. 三类样本拉行分类（数据可达性失败单独分桶，不驱动进化）
-    let reflection_rows = stock_reflections::Entity::find()
-        // 反思状态机：pending → running → completed / failed: …；只有 completed 形成业务结论。
-        // （P1 曾误写 "resolved"——那是 demand_discovery 表的状态值，本查询永远为 0。）
-        .filter(stock_reflections::Column::Status.eq("completed"))
-        .filter(stock_reflections::Column::CreatedAt.gte(since_ms))
-        .all(db)
+    let reflection_rows = stock_lesson_queries::fetch_completed_reflections_since(db, since_ms)
         .await
         .map_err(|e| format!("读取到期反思失败: {e}"))?;
 
@@ -238,9 +230,7 @@ pub async fn run_evolution_proposal_inner(
         }
     }
 
-    let validation_rows = decision_validations::Entity::find()
-        .filter(decision_validations::Column::ValidatedAt.gte(since_date))
-        .all(db)
+    let validation_rows = decision_validations::list_validated_since_date(db, &since_date)
         .await
         .map_err(|e| format!("读取决策验证失败: {e}"))?;
 
@@ -254,9 +244,7 @@ pub async fn run_evolution_proposal_inner(
         }
     }
 
-    let mover_runs = mover_recall_runs::Entity::find()
-        .filter(mover_recall_runs::Column::CreatedAtMs.gte(since_ms))
-        .all(db)
+    let mover_runs = mover_recall_runs::list_runs_since(db, since_ms)
         .await
         .map_err(|e| format!("读取漏检核查记录失败: {e}"))?;
 
@@ -300,10 +288,7 @@ pub async fn run_evolution_proposal_inner(
     }
 
     // 3. 窗口内已有待审批计划 ⇒ skip（审批未处理不重复堆计划）
-    let pending_count = stock_evolution_history::Entity::find()
-        .filter(stock_evolution_history::Column::Status.eq(STATUS_PENDING_APPROVAL))
-        .filter(stock_evolution_history::Column::CreatedAt.gte(since_ms))
-        .count(db)
+    let pending_count = stock_evolution_history::count_pending_since(db, since_ms)
         .await
         .map_err(|e| format!("统计待审批计划失败: {e}"))?;
     if pending_count > 0 {
@@ -362,25 +347,15 @@ pub async fn run_evolution_proposal_inner(
     // 6. 以待审批状态落库（无参数/流程结果——计划尚未执行）。
     //    摘要用 reason 原文：create_plan 对 ManualTrigger 统一拼"手动触发："前缀，
     //    本行实为定时聚合产生，用原文避免在历史列表里误导审批人。
-    let row = stock_evolution_history::ActiveModel {
-        id: Set(format!("evo-{}", plan.plan_id)),
-        plan_id: Set(plan.plan_id.clone()),
-        trigger: Set(serde_json::to_string(&plan.trigger).unwrap_or_default()),
-        evolution_type: Set("parameter".to_string()),
-        quality_before: Set(0),
-        parameter_result_json: Set(None),
-        workflow_result_json: Set(None),
-        status: Set(STATUS_PENDING_APPROVAL.to_string()),
-        improvement_summary: Set(reason),
-        trigger_sample_json: Set(Some(trigger_sample_json)),
-        reviewer: Set(None),
-        reviewed_at: Set(None),
-        reject_reason: Set(None),
-        rollback_ref: Set(None),
-        created_at: Set(now_ms),
+    let record = PendingProposalRecord {
+        id: format!("evo-{}", plan.plan_id),
+        plan_id: plan.plan_id.clone(),
+        trigger_json: serde_json::to_string(&plan.trigger).unwrap_or_default(),
+        improvement_summary: reason,
+        trigger_sample_json,
+        created_at_ms: now_ms,
     };
-    stock_evolution_history::Entity::insert(row)
-        .exec(db)
+    stock_evolution_history::insert_pending_proposal(db, &record)
         .await
         .map_err(|e| format!("待审批进化计划落库失败: {e}"))?;
 
@@ -397,6 +372,8 @@ mod tests {
     //! 配置解析/分流纯函数测试放文件末尾（clippy::items_after_test_module 口径）。
 
     use super::*;
+    // 测试直接构造实体行（分层门禁不扫 test 块）；生产代码走 dao re-export 的类型别名。
+    use axagent_dao::axagent_entities::{decision_validations, stock_reflections};
 
     fn reflection_with(
         mover_label: Option<&str>,

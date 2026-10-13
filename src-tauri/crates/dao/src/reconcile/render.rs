@@ -143,6 +143,21 @@ pub enum RenderError {
     /// 当前唯一来源是 SQLite，且只覆盖 [`sqlite_supports_natively`] 那 6 类之外的类别 ——
     /// 它们在 SQLite 上必须走「重建表」12 步流程（尚未实现）。PG 走全量，不会产生它。
     UnsupportedDialect { dialect: Dialect, kind: ChangeKind },
+    /// 方言**有**这类变更的原生 DDL，但**该形态**在此方言上非法 —— 特指 SQLite
+    /// `ALTER TABLE … ADD COLUMN` 加「NOT NULL 且无默认值」列（非空表直接被拒；
+    /// 语义上也给不出存量行的值）。
+    ///
+    /// 与 [`RenderError::UnsupportedDialect`] 同属**方言能力边界**而非渲染器缺陷
+    /// （apply 侧同样分流为单条 `skip`，不触发整批拒绝、也不 fail-stop 连坐其后
+    /// 变更），单独成变体是为了让审计 notes 能说清「为什么没跑、该怎么修」：
+    /// 正解是在实体列上补 `#[sea_orm(default_value = …)]`（先例：
+    /// `stock_analyses.source` / `synthetic`）。注意本引擎**不做**静默补默认值
+    /// —— 补什么值是业务语义，渲染器无权编造。
+    ///
+    /// 实证：`stock_reflections.source`（NOT NULL TEXT）漏写 `default_value`，
+    /// 2026-10-14 生产库启动期该条 ADD COLUMN 被 SQLite 拒绝，其后全部补列被
+    /// AbortedAfterError 连坐，到期反思 cron 扫描报「字段 source 不存在」。
+    NotNullWithoutDefault { dialect: Dialect, kind: ChangeKind, object: String },
     /// `Change.payload` 的变体与 `Change.kind` 不匹配（构造侧缺陷）。
     PayloadMismatch {
         kind: ChangeKind,
@@ -170,6 +185,14 @@ impl fmt::Display for RenderError {
                 "render: `{}` 在 {dialect:?} 上没有原生 DDL —— SQLite 的 ALTER TABLE 只有 \
                  RENAME TO / RENAME COLUMN TO / ADD COLUMN / DROP COLUMN，这类变更必须走\
                  「建新表 + 复制 + 改名 + 重建索引」的 12 步流程（PLAN §3.1，尚未实现）",
+                kind.as_str()
+            ),
+            Self::NotNullWithoutDefault { dialect, kind, object } => write!(
+                f,
+                "render: `{object}`（{}）在 {dialect:?} 上是非法的 ADD COLUMN 形态：NOT NULL 列\
+                 必须带非 NULL DEFAULT（SQLite 对存量表 ADD COLUMN 的硬限制）。修法：在对应实体\
+                 列上加 `#[sea_orm(default_value = …)]` 给出业务合法的存量行取值，不要指望渲染器\
+                 编造默认值",
                 kind.as_str()
             ),
             Self::PayloadMismatch { kind, object, want, got } => write!(
@@ -345,6 +368,25 @@ pub fn render(change: &Change, dialect: Dialect) -> Result<Rendered, RenderError
         AddColumn => {
             let (table, col) = col_of(change)?;
             require(table, change, "table")?;
+            // SQLite 能力边界（CREATE TABLE 不受此限，仅 ADD COLUMN 存量表场景）：
+            // NOT NULL 列必须带非 NULL DEFAULT，否则无论表空不空 SQLite 都拒绝
+            // （实测错误："Cannot add a NOT NULL column with default value NULL"）。
+            // 若照发，这条 DDL 在执行期才炸，apply 会 AbortedAfterError 连坐其后
+            // **全部**变更；在渲染期按方言能力边界拦下，只跳过本条、note 说明修法。
+            // 自增列自带隐式默认（rowid 别名），生成列的列定义走另一条分支（其值
+            // 由表达式产生，不依赖 DEFAULT），二者均不在此限。
+            if dialect == Dialect::Sqlite
+                && !col.nullable
+                && col.default.is_none()
+                && !col.auto_increment
+                && col.generated.is_none()
+            {
+                return Err(RenderError::NotNullWithoutDefault {
+                    dialect,
+                    kind: change.kind,
+                    object: change.object.clone(),
+                });
+            }
             Ok(Rendered::one(format!(
                 "ALTER TABLE {} ADD COLUMN {}",
                 quote_ident(table),
@@ -1530,6 +1572,66 @@ mod tests {
             let r = render(&ch(kind, "t", payload), Dialect::Sqlite);
             assert!(r.is_ok(), "`{}` 在 SQLite 上应可渲染，实际：{:?}", kind.as_str(), r.err());
         }
+    }
+
+    /// SQLite ADD COLUMN 的 NOT NULL 硬限制（2026-10-14 stock_reflections.source 实证）：
+    /// NOT NULL 且无 DEFAULT 的列在存量表上非法，必须在**渲染期**报
+    /// `NotNullWithoutDefault`（apply 据此单条跳过），而不是产出必炸 DDL 让执行期
+    /// AbortedAfterError 连坐其后全部变更。
+    #[test]
+    fn sqlite_add_column_not_null_without_default_is_refused() {
+        let mut nn = col("source", "text");
+        nn.nullable = false;
+        assert!(nn.default.is_none());
+        let change = ch(
+            ChangeKind::AddColumn,
+            "stock_reflections.source",
+            col_payload("stock_reflections", nn),
+        );
+
+        let e = render(&change, Dialect::Sqlite)
+            .expect_err("SQLite 应拒绝 NOT NULL 无 DEFAULT 的 ADD COLUMN");
+        assert!(
+            matches!(e, RenderError::NotNullWithoutDefault { kind: ChangeKind::AddColumn, .. }),
+            "应报 NotNullWithoutDefault（方言能力边界，apply 单条跳过），实际：{e:?}"
+        );
+
+        // PG 无此限制：同样的列照常渲染（PG 11+ 仅持有行锁/全表扫描，语法合法）。
+        let pg = render(&change, Dialect::Postgres).expect("PG 不应受此限制");
+        assert_eq!(
+            pg.statements,
+            vec!["ALTER TABLE \"stock_reflections\" ADD COLUMN \"source\" text NOT NULL"]
+        );
+    }
+
+    /// 带 DEFAULT 的 NOT NULL 列在 SQLite 上合法（实体补 `default_value` 即为修法）；
+    /// 自增主键（隐式 rowid 默认）同样豁免。
+    #[test]
+    fn sqlite_add_column_not_null_with_default_or_autoincrement_renders() {
+        let mut with_default = col("source", "text");
+        with_default.nullable = false;
+        with_default.default = Some("'due'".into());
+        let r = render(
+            &ch(
+                ChangeKind::AddColumn,
+                "stock_reflections.source",
+                col_payload("stock_reflections", with_default),
+            ),
+            Dialect::Sqlite,
+        )
+        .expect("NOT NULL 带 DEFAULT 应可渲染");
+        assert_eq!(
+            r.statements,
+            vec![
+                "ALTER TABLE \"stock_reflections\" ADD COLUMN \"source\" text DEFAULT 'due' NOT NULL"
+            ]
+        );
+
+        let mut ai = ColumnModel::new("id", "integer", false);
+        ai.auto_increment = true;
+        let r = render(&ch(ChangeKind::AddColumn, "t.id", col_payload("t", ai)), Dialect::Sqlite)
+            .expect("自增列不应被 NOT NULL 无 DEFAULT 规则拦截");
+        assert_eq!(r.statements, vec!["ALTER TABLE \"t\" ADD COLUMN \"id\" INTEGER NOT NULL"]);
     }
 
     /// 想**保留**的行为：SQLite 不支持的类别必须**报错**，而且错误信息要说清

@@ -41,6 +41,10 @@
 //! 两者对模型的含义相反，静默合并就是伪造（本仓「结构性缺口不得造成歧义」口径）。
 
 use axagent_entities::{reflection_lessons, stock_analyses, stock_reflections};
+
+/// 反思行类型重导出（命令层投影 / 分类函数签名走 dao 合规出口）。
+pub use stock_reflections::Model as ReflectionModel;
+
 // `count(db)` 由 `PaginatorTrait` 提供（sea-orm 2.x 把它从 QuerySelect 挪走了）⇒ 少这一个
 // import 就退化成 `Iterator::count`，编译器报的是「not an iterator」，看着完全不像缺 import。
 use sea_orm::{
@@ -311,4 +315,82 @@ pub async fn retire_orphan_pending_reflections(
         retired += 1;
     }
     Ok(retired)
+}
+
+/// 取某时间戳之后新增的全部 completed 反思行（进化计划聚合的样本来源）。
+///
+/// 与 [`fetch_recent_completed`] 刻意不同：这里不做档/代过滤，也不按票过滤 ——
+/// 聚合分母是「窗口内所有已到期反思」，数据可达性分桶由命令层按行字段判定。
+///
+/// 状态串必须是 `"completed"`：反思状态机 pending → running → completed / failed。
+/// （历史坑：P1 曾误写 `"resolved"` —— 那是 demand_discovery 表的状态值，
+/// 此查询永远为 0；不要改成同义串。）
+pub async fn fetch_completed_reflections_since(
+    db: &DatabaseConnection,
+    since_ms: i64,
+) -> Result<Vec<stock_reflections::Model>, sea_orm::DbErr> {
+    stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::Status.eq("completed"))
+        .filter(stock_reflections::Column::CreatedAt.gte(since_ms))
+        .all(db)
+        .await
+}
+
+/// 按补分析行 id 取逐档反思行，按 `horizon` 升序（漏检事件复盘展开行）。
+///
+/// 不做状态过滤 —— pending/failed 行也要照实投影，前端按行状态分态展示。
+pub async fn fetch_by_analysis_id(
+    db: &DatabaseConnection,
+    analysis_id: &str,
+) -> Result<Vec<stock_reflections::Model>, sea_orm::DbErr> {
+    stock_reflections::Entity::find()
+        .filter(stock_reflections::Column::OriginalAnalysisId.eq(analysis_id.to_owned()))
+        .order_by_asc(stock_reflections::Column::Horizon)
+        .all(db)
+        .await
+}
+
+/// 反思行 → 前端 JSON 投影（单一来源）。
+///
+/// `list_reflections` 与 P3 妖股漏检回放的 `get_mover_recall_event_review`
+/// 共用这一份投影：字段增改只许动这里，禁止在第二处再抄一遍
+/// （AGENTS 禁区 12：同一 DTO 两个投影面必然漂移）。
+pub fn reflection_review_json(r: &stock_reflections::Model) -> serde_json::Value {
+    let horizon_results = r
+        .horizon_results_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+    serde_json::json!({
+        "id": r.id,
+        "stockCode": r.stock_code,
+        "stockName": r.stock_name,
+        "originalAnalysisId": r.original_analysis_id,
+        "asOfDate": r.as_of_date,
+        "hindsightDate": r.hindsight_date,
+        "minConfidenceThreshold": r.min_confidence_threshold,
+        "reflectionDepth": r.reflection_depth,
+        // 〇-B v2 第 4 条：本次反思**复盘的档位**（NULL = 本列引入前，档未知）
+        "horizon": r.horizon,
+        "actualOutcome": r.actual_outcome,
+        "whatWentWrong": r.what_went_wrong,
+        "missedSignals": r.missed_signals,
+        "fixForFuture": r.fix_for_future,
+        // P3：漏检回放面板展开用 —— 裁决/教训摘要/原始收益/来源桶/权威归因层。
+        // source 读侧口径：`mover_recall` 一桶，其余（含老库空串）皆常规 due。
+        "verdict": r.verdict,
+        "lessonSummary": r.lesson_summary,
+        "rawReturn": r.raw_return,
+        "source": r.source,
+        "missLayer": r.miss_layer,
+        "decisionJson": r.decision_json,
+        "blackboardSnapshot": r.blackboard_snapshot,
+        "status": r.status,
+        "createdAt": r.created_at,
+        "alphaReturn": r.alpha_return,
+        // #10 P7 妖股标签（按档挂在逐档反思行上）。四态语义见
+        // `entities/src/stock_reflections.rs` 的列文档：达标/未达标/窗口未满/判据不可用，
+        // NULL=未复盘或本列引入前的存量行 ⇒ 面板必须分得开「没达标」与「没判定」。
+        "moverLabel": r.mover_label,
+        "horizonResults": horizon_results,
+    })
 }

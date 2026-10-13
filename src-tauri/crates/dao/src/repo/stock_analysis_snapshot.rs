@@ -29,6 +29,17 @@ use axagent_entities::stock_analyses;
 use sea_orm::sea_query::Expr;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 
+/// 按主键取整行分析记录（漏检事件复盘懒加载补分析行用）。
+///
+/// 与 [`read_blackboard_snapshot`] 不同：这里返回**整行**，由调用方自行投影，
+/// 不取快照、不做 JSON 解析。
+pub async fn fetch_analysis_by_id(
+    db: &DatabaseConnection,
+    analysis_id: &str,
+) -> Result<Option<stock_analyses::Model>, sea_orm::DbErr> {
+    stock_analyses::Entity::find_by_id(analysis_id.to_string()).one(db).await
+}
+
 /// 读 `blackboard_snapshot` 并解析为 JSON 对象。语义见模块文档的三态表。
 pub async fn read_blackboard_snapshot(
     db: &DatabaseConnection,

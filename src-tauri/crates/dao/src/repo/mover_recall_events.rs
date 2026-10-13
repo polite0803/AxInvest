@@ -118,6 +118,51 @@ pub async fn release_running_events(
     Ok(result.rows_affected)
 }
 
+/// 按主键取单个事件（反思工作流按补分析行盖章的 `anchor_event_id` 反查用）。
+pub async fn fetch_by_id(
+    db: &DatabaseConnection,
+    event_id: &str,
+) -> Result<Option<mover_recall_events::Model>, DbErr> {
+    Entity::find_by_id(event_id.to_owned()).one(db).await
+}
+
+/// 三键（stock_code + anchor_date + period）定位事件，同三键跨多轮核查时
+/// 取最新一轮（created_at_ms DESC）；查无返回 `Ok(None)`。
+pub async fn find_latest_by_key(
+    db: &DatabaseConnection,
+    stock_code: &str,
+    anchor_date: &str,
+    period: &str,
+) -> Result<Option<mover_recall_events::Model>, DbErr> {
+    Entity::find()
+        .filter(Column::StockCode.eq(stock_code.to_owned()))
+        .filter(Column::AnchorDate.eq(anchor_date.to_owned()))
+        .filter(Column::Period.eq(period.to_owned()))
+        .order_by_desc(Column::CreatedAtMs)
+        .one(db)
+        .await
+}
+
+/// 漏检事件闭环盖章：置 reflected 并记 reflection_id。带 `status != 'reflected'`
+/// 行级守卫 —— 一个事件多档反思时只让首个 completed 的档生效，返回 0 表示
+/// 已被更早的档盖章（幂等，不是冲突）。
+pub async fn stamp_reflected(
+    db: &DatabaseConnection,
+    event_id: &str,
+    reflection_id: Option<&str>,
+    now_ms: i64,
+) -> Result<u64, DbErr> {
+    let result = Entity::update_many()
+        .col_expr(Column::Status, Expr::value("reflected"))
+        .col_expr(Column::ReflectionId, Expr::value(reflection_id.map(str::to_owned)))
+        .col_expr(Column::UpdatedAtMs, Expr::value(now_ms))
+        .filter(Column::Id.eq(event_id.to_owned()))
+        .filter(Column::Status.ne("reflected"))
+        .exec(db)
+        .await?;
+    Ok(result.rows_affected)
+}
+
 /// 反查某批次的逐票明细（明细抽屉）：累计涨幅降序。
 pub async fn list_by_batch(
     db: &DatabaseConnection,

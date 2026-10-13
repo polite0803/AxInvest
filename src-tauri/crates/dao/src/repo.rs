@@ -19,6 +19,7 @@ pub mod conversation_category;
 pub mod credential_repo;
 pub mod cron_job_persistence;
 pub mod data_quality_fuse;
+pub mod decision_validations;
 pub mod evolution_execution_stats;
 pub mod feedback_data_lake;
 pub mod gateway;
@@ -39,6 +40,7 @@ pub mod memory;
 pub mod message;
 pub mod mover_recall_analysis_batches;
 pub mod mover_recall_events;
+pub mod mover_recall_runs;
 pub mod narrative;
 // [2026-09-03] `narrative_structure` repo 暂缓接线（勿删文件）：依赖 entities::narrative_structure
 // （单数，arcs/confluences/foreshadows 三字段旧 schema）。现行链是 narrative.rs +
@@ -63,6 +65,7 @@ pub mod session_state;
 pub mod settings;
 pub mod skill;
 pub mod stock_analysis_snapshot;
+pub mod stock_evolution_history;
 pub mod stock_lesson_queries;
 pub mod stored_file;
 pub mod sync_audit_log;
